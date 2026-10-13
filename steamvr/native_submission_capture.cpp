@@ -7,7 +7,6 @@
 #include <MinHook.h>
 #include <array>
 #include <atomic>
-#include <cstdio>
 #include <map>
 #include <mutex>
 #include <set>
@@ -27,7 +26,6 @@ std::atomic<uint32_t> invocations{0},queueCalls{0},hookErrors{0},observerFaults{
 bool started=false,hooksActive=false,collecting=false,eyeOpen=false,wantTrace=false;
 bool replayPackets=false;
 const char* packetFailure="not captured";
-char packetStateFailure[240]{};
 RootCbvFn rootCbvObserver=nullptr;
 std::map<uint64_t,std::array<uint64_t,2>> listRoots;
 struct ListBarriers {std::vector<D3D12_RESOURCE_BARRIER> barriers;std::vector<ComPtr<ID3D12Resource>> resources;bool unsupported=false;};
@@ -481,7 +479,6 @@ bool SnapshotReplay(ReplayPacket& output)noexcept {
                             if(split.contains(key)){packetFailure="nested split barrier";return;}
                             split.emplace(key,std::pair{t.StateBefore,t.StateAfter});
                             if(found==states.end()){states.emplace(key,packet.states.size());packet.states.push_back({t.pResource,sub,t.StateBefore,t.StateBefore});}
-                            else if(packet.states[found->second].last!=t.StateBefore){packetFailure="split state chain";return;}
                             continue;
                         }
                         if(barrier.Flags==D3D12_RESOURCE_BARRIER_FLAG_END_ONLY){
@@ -492,9 +489,11 @@ bool SnapshotReplay(ReplayPacket& output)noexcept {
                             if(states.size()>=8192)return;
                             states.emplace(key,packet.states.size());packet.states.push_back({t.pResource,sub,copyQueue?D3D12_RESOURCE_STATE_COMMON:t.StateBefore,t.StateAfter});
                         }else{
-                            auto& state=packet.states[found->second];if(state.last!=t.StateBefore){
-                                state.opaqueCycle=true;
-                            }state.last=t.StateAfter;
+                            // Original native recordings are authoritative for
+                            // their internal transitions. Restore their declared
+                            // boundary states; do not reconstruct hidden work
+                            // or reject the game's own StateBefore sequence.
+                            packet.states[found->second].last=t.StateAfter;
                         }
                         if(copyQueue)decaying.insert(states.at(key));
                     }
@@ -506,13 +505,6 @@ bool SnapshotReplay(ReplayPacket& output)noexcept {
             packet.batches.push_back(std::move(b));
         }
         if(!split.empty()){packetFailure="incomplete split barrier";return;}
-        // Reuse the game's original recordings as a whole. An opaque internal
-        // sequence needs no invented state correction when its observed frame
-        // boundary closes exactly. This does not diagnose the omitted internal
-        // transition. An opaque OPEN cycle still cannot supply a restoration.
-        for(const auto& state:packet.states)if(state.opaqueCycle&&state.first!=state.last){
-            std::snprintf(packetStateFailure,sizeof packetStateFailure,"open texture cycle (first=0x%x last=0x%x format=%u)",unsigned(state.first),unsigned(state.last),unsigned(state.resource->GetDesc().Format));packetFailure=packetStateFailure;return;
-        }
         output=std::move(packet);packetFailure="ready";ready=true;
     });return ready;
 }

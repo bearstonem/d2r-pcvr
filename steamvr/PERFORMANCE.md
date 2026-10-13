@@ -73,13 +73,21 @@ single-pass improvement.
 
 Replay then stopped on a direct-queue RGBA16F render-target texture: the journal
 tracked NON_PIXEL_SHADER_RESOURCE while a later recorded barrier declared
-RENDER_TARGET. The omission's source remains unconfirmed. The next candidate
-preserves original internal recordings and permits an opaque texture cycle
-only when its observed first and last states are identical, requiring no
-invented boundary transition for that cycle. Opaque open cycles and invalid
-split barriers remain rejected. Actual replay, a matched candidate FPS result
-and headset correctness remain pending; fixture results alone do not establish
-a performance gain.
+RENDER_TARGET. The omission's source remains unconfirmed. A closed-cycle-only
+follow-up still stopped before replay: one texture's observed boundary states
+were 0x80 / 0x4. Its Standard capture measured 22.414 ms / 44.62 FPS.
+
+The current candidate treats the game's original native recordings as
+authoritative for internal operations, and restores declared end-to-start
+texture states before replay. It does not require those states to be identical
+or try to reconstruct an omitted internal transition from a later StateBefore
+declaration. Native recording generations, batch dependency ordering, matched
+split barriers, resource retention, descriptor/mutation exclusion and GPU
+completion remain checked. Original game command lists are not rewritten.
+Private GPU fixtures cover restoring differing frame boundary states and
+replaying them twice. Actual game replay, a matched candidate FPS result and
+headset correctness remain pending; fixture results alone do not establish a
+performance gain.
 
 ## Phase 2 baseline, October 12 evening
 
