@@ -1,0 +1,1081 @@
+{
+  "implementation_commit": "bbe3e98fb5b09b4789970b693480a56f1d67f170",
+  "plugin_sha256": "374a88e684b661bfe8dc7d977482f8c292308cdf00d2a014c9bfc0f4c01509ea",
+  "status": "installed; automated tests and synthetic copy benchmark only; no new game FPS result",
+  "changes": [
+    "Copy coalesced complete cached camera-record spans and previously observed physical overlaps.",
+    "Retain each command list use, scope recent-binding cache to list identity and reset epochs.",
+    "Compare previously observed camera bytes before filtering malformed views or empty record sets.",
+    "Standalone owned-constant-buffer GPU fixture; no production CBV substitution enabled."
+  ],
+  "validation": {
+    "native_checks_passed": 54,
+    "native_check_seconds": 8.57,
+    "staged_dll_isolated_load_unload_passed": true,
+    "independent_production_integration_review_passed": true,
+    "hardware_and_warp_owned_constant_tests_passed": true,
+    "gpu_fixture_checks": [
+      "Same closed draw list renders distinct exact eye pixels across three frames.",
+      "GPU-ordered constant copies require one final CPU completion per pair.",
+      "Original upload bytes remain unchanged; slot reuse follows fence completion.",
+      "Failure cleanup completes pending GPU work before reuse."
+    ],
+    "d3d12_debug_layer_available": false,
+    "new_build_headset_tested": false,
+    "new_build_game_fps": null
+  },
+  "synthetic_copy_benchmark": {
+    "game_access": false,
+    "adapter": "NVIDIA GeForce RTX 5090",
+    "cpu": "Ryzen 9 5950X",
+    "mapping_protect": 1028,
+    "mapping_allocation_protect": 1028,
+    "mapping_write_combine": true,
+    "heap_cpu_page_property": 2,
+    "method": "Nine alternating rounds per case. Full vector plus 4KiB memcpy versus production CaptureCameraRecords, including planning, sorting, allocations, zero-fill, copies and destruction; common endpoint consumption included. Full retained-record byte comparisons/checksums passed outside the timer. Rotating cases draw accesses from 256 windows; UPLOAD cases use 64 accesses per round.",
+    "units": "nanoseconds per copied snapshot",
+    "excluded_work": "Other capture callbacks, physical-overlap planning/validation, synchronization and rendering.",
+    "cases": [
+      {
+        "memory": "upload",
+        "windows": 1,
+        "records": 1,
+        "iterations_per_round": 64,
+        "old_copy_bytes": 4096,
+        "new_copy_bytes": 448,
+        "old_copy_calls": 1,
+        "new_copy_calls": 1,
+        "old_ns": {
+          "median": 103031.25,
+          "p10": 101800,
+          "p90": 103112.5,
+          "min": 101800,
+          "max": 103240.625,
+          "rounds": [
+            103240.625,
+            101800,
+            103031.25,
+            103095.313,
+            103082.813,
+            102543.75,
+            102906.25,
+            103112.5,
+            102834.375
+          ]
+        },
+        "new_ns": {
+          "median": 13281.2501,
+          "p10": 13017.1875,
+          "p90": 13307.8125,
+          "min": 13017.1875,
+          "max": 13340.6251,
+          "rounds": [
+            13204.6875,
+            13029.6875,
+            13017.1875,
+            13131.2499,
+            13307.8125,
+            13287.5,
+            13340.6251,
+            13289.0624,
+            13281.2501
+          ]
+        },
+        "new_over_old": {
+          "median": 0.128879257,
+          "p10": 0.126342129,
+          "p90": 0.129578838,
+          "min": 0.126342129,
+          "max": 0.129638628,
+          "rounds": [
+            0.12790205,
+            0.127993001,
+            0.126342129,
+            0.12737,
+            0.129098268,
+            0.129578838,
+            0.129638628,
+            0.128879257,
+            0.129151853
+          ]
+        }
+      },
+      {
+        "memory": "upload",
+        "windows": 1,
+        "records": 2,
+        "iterations_per_round": 64,
+        "old_copy_bytes": 4096,
+        "new_copy_bytes": 896,
+        "old_copy_calls": 1,
+        "new_copy_calls": 2,
+        "old_ns": {
+          "median": 103134.375,
+          "p10": 102264.062,
+          "p90": 132000,
+          "min": 102264.062,
+          "max": 133578.125,
+          "rounds": [
+            103075,
+            103134.375,
+            103048.437,
+            102567.187,
+            102264.062,
+            132000,
+            131920.312,
+            131556.25,
+            133578.125
+          ]
+        },
+        "new_ns": {
+          "median": 26187.5,
+          "p10": 26120.3124,
+          "p90": 30114.0625,
+          "min": 26120.3124,
+          "max": 30731.25,
+          "rounds": [
+            26120.3124,
+            26185.9375,
+            26132.8125,
+            26187.5,
+            26157.8125,
+            28876.5625,
+            30731.25,
+            30114.0625,
+            30100
+          ]
+        },
+        "new_over_old": {
+          "median": 0.253410744,
+          "p10": 0.218761837,
+          "p90": 0.255320445,
+          "min": 0.218761837,
+          "max": 0.255786949,
+          "rounds": [
+            0.253410744,
+            0.25390116,
+            0.253597368,
+            0.255320445,
+            0.255786949,
+            0.218761837,
+            0.232953133,
+            0.228906361,
+            0.225336297
+          ]
+        }
+      },
+      {
+        "memory": "upload",
+        "windows": 1,
+        "records": 5,
+        "iterations_per_round": 64,
+        "old_copy_bytes": 4096,
+        "new_copy_bytes": 2240,
+        "old_copy_calls": 1,
+        "new_copy_calls": 5,
+        "old_ns": {
+          "median": 127523.437,
+          "p10": 125378.125,
+          "p90": 131276.563,
+          "min": 125378.125,
+          "max": 131978.125,
+          "rounds": [
+            125378.125,
+            130354.687,
+            127484.375,
+            131276.563,
+            126257.812,
+            130375,
+            131978.125,
+            127523.437,
+            127131.25
+          ]
+        },
+        "new_ns": {
+          "median": 71142.1875,
+          "p10": 68220.3124,
+          "p90": 72256.2501,
+          "min": 68220.3124,
+          "max": 73445.3125,
+          "rounds": [
+            70521.875,
+            72256.2501,
+            71142.1875,
+            68220.3124,
+            69596.8751,
+            73445.3125,
+            71342.1875,
+            71878.125,
+            70535.9375
+          ]
+        },
+        "new_over_old": {
+          "median": 0.554827688,
+          "p10": 0.519668638,
+          "p90": 0.563338926,
+          "min": 0.519668638,
+          "max": 0.563646389,
+          "rounds": [
+            0.562473518,
+            0.554304962,
+            0.558046329,
+            0.519668638,
+            0.551228266,
+            0.563338926,
+            0.540560699,
+            0.563646389,
+            0.554827688
+          ]
+        }
+      },
+      {
+        "memory": "upload",
+        "windows": 1,
+        "records": 9,
+        "iterations_per_round": 64,
+        "old_copy_bytes": 4096,
+        "new_copy_bytes": 4032,
+        "old_copy_calls": 1,
+        "new_copy_calls": 1,
+        "old_ns": {
+          "median": 128865.625,
+          "p10": 125821.875,
+          "p90": 131181.25,
+          "min": 125821.875,
+          "max": 132168.75,
+          "rounds": [
+            128359.375,
+            126415.625,
+            128865.625,
+            130707.812,
+            125821.875,
+            131181.25,
+            126621.875,
+            131100,
+            132168.75
+          ]
+        },
+        "new_ns": {
+          "median": 128846.875,
+          "p10": 124659.375,
+          "p90": 131134.375,
+          "min": 124659.375,
+          "max": 131412.5,
+          "rounds": [
+            129062.5,
+            131134.375,
+            128846.875,
+            125562.5,
+            127562.5,
+            124659.375,
+            131412.5,
+            126373.438,
+            130356.25
+          ]
+        },
+        "new_over_old": {
+          "median": 0.999854499,
+          "p10": 0.950283481,
+          "p90": 1.03732727,
+          "min": 0.950283481,
+          "max": 1.0378341,
+          "rounds": [
+            1.00547778,
+            1.03732727,
+            0.999854499,
+            0.960635004,
+            1.01383404,
+            0.950283481,
+            1.0378341,
+            0.963946892,
+            0.986286471
+          ]
+        }
+      },
+      {
+        "memory": "upload",
+        "windows": 256,
+        "records": 1,
+        "iterations_per_round": 64,
+        "old_copy_bytes": 4096,
+        "new_copy_bytes": 448,
+        "old_copy_calls": 1,
+        "new_copy_calls": 1,
+        "old_ns": {
+          "median": 131532.812,
+          "p10": 126884.375,
+          "p90": 138282.812,
+          "min": 126884.375,
+          "max": 140809.375,
+          "rounds": [
+            131532.812,
+            127554.688,
+            131790.625,
+            127262.5,
+            140809.375,
+            138282.812,
+            126884.375,
+            130317.188,
+            132300
+          ]
+        },
+        "new_ns": {
+          "median": 15468.75,
+          "p10": 14834.375,
+          "p90": 15684.3751,
+          "min": 14834.375,
+          "max": 16831.2499,
+          "rounds": [
+            14834.375,
+            15160.9374,
+            15593.75,
+            15684.3751,
+            16831.2499,
+            15657.8125,
+            15300,
+            15007.8125,
+            15468.75
+          ]
+        },
+        "new_over_old": {
+          "median": 0.11832215,
+          "p10": 0.112780793,
+          "p90": 0.120582223,
+          "min": 0.112780793,
+          "max": 0.123244279,
+          "rounds": [
+            0.112780793,
+            0.118858332,
+            0.11832215,
+            0.123244279,
+            0.119532168,
+            0.113230359,
+            0.120582223,
+            0.115163723,
+            0.116921769
+          ]
+        }
+      },
+      {
+        "memory": "upload",
+        "windows": 256,
+        "records": 2,
+        "iterations_per_round": 64,
+        "old_copy_bytes": 4096,
+        "new_copy_bytes": 896,
+        "old_copy_calls": 1,
+        "new_copy_calls": 2,
+        "old_ns": {
+          "median": 132259.375,
+          "p10": 127454.687,
+          "p90": 141054.687,
+          "min": 127454.687,
+          "max": 141875,
+          "rounds": [
+            141054.687,
+            127454.687,
+            130987.5,
+            132287.5,
+            137365.625,
+            141875,
+            132259.375,
+            129881.25,
+            132126.562
+          ]
+        },
+        "new_ns": {
+          "median": 30021.875,
+          "p10": 29689.0624,
+          "p90": 31324.9999,
+          "min": 29689.0624,
+          "max": 32490.625,
+          "rounds": [
+            31078.1251,
+            30006.2501,
+            29689.0624,
+            30334.3751,
+            31324.9999,
+            32490.625,
+            29914.0626,
+            30021.875,
+            29962.5
+          ]
+        },
+        "new_over_old": {
+          "median": 0.228041039,
+          "p10": 0.22032678,
+          "p90": 0.231148645,
+          "min": 0.22032678,
+          "max": 0.235426807,
+          "rounds": [
+            0.22032678,
+            0.235426807,
+            0.226655692,
+            0.229306436,
+            0.228041039,
+            0.229008811,
+            0.226177256,
+            0.231148645,
+            0.226771207
+          ]
+        }
+      },
+      {
+        "memory": "upload",
+        "windows": 256,
+        "records": 5,
+        "iterations_per_round": 64,
+        "old_copy_bytes": 4096,
+        "new_copy_bytes": 2240,
+        "old_copy_calls": 1,
+        "new_copy_calls": 5,
+        "old_ns": {
+          "median": 131751.563,
+          "p10": 126798.437,
+          "p90": 136185.938,
+          "min": 126798.437,
+          "max": 139865.625,
+          "rounds": [
+            133509.375,
+            129496.875,
+            126798.437,
+            129009.375,
+            136185.938,
+            131751.563,
+            139865.625,
+            133900,
+            131725
+          ]
+        },
+        "new_ns": {
+          "median": 72254.6874,
+          "p10": 70248.4375,
+          "p90": 73067.1875,
+          "min": 70248.4375,
+          "max": 73809.375,
+          "rounds": [
+            70248.4375,
+            72071.8749,
+            72898.4375,
+            73067.1875,
+            73809.375,
+            72254.6874,
+            71468.75,
+            70573.4375,
+            72312.5
+          ]
+        },
+        "new_over_old": {
+          "median": 0.548416171,
+          "p10": 0.510981522,
+          "p90": 0.566371146,
+          "min": 0.510981522,
+          "max": 0.574915897,
+          "rounds": [
+            0.526168575,
+            0.556553005,
+            0.574915897,
+            0.566371146,
+            0.541975011,
+            0.548416171,
+            0.510981522,
+            0.527060773,
+            0.548965649
+          ]
+        }
+      },
+      {
+        "memory": "upload",
+        "windows": 256,
+        "records": 9,
+        "iterations_per_round": 64,
+        "old_copy_bytes": 4096,
+        "new_copy_bytes": 4032,
+        "old_copy_calls": 1,
+        "new_copy_calls": 1,
+        "old_ns": {
+          "median": 132209.375,
+          "p10": 128200,
+          "p90": 133856.25,
+          "min": 128200,
+          "max": 144371.875,
+          "rounds": [
+            128200,
+            132226.563,
+            132209.375,
+            133645.313,
+            144371.875,
+            128534.375,
+            133856.25,
+            128304.687,
+            128865.625
+          ]
+        },
+        "new_ns": {
+          "median": 127098.437,
+          "p10": 124073.438,
+          "p90": 130621.875,
+          "min": 124073.438,
+          "max": 131901.562,
+          "rounds": [
+            125990.625,
+            127725,
+            124073.438,
+            131901.562,
+            125187.5,
+            124218.75,
+            127370.312,
+            127098.437,
+            130621.875
+          ]
+        },
+        "new_over_old": {
+          "median": 0.966424351,
+          "p10": 0.867118337,
+          "p90": 0.990598551,
+          "min": 0.867118337,
+          "max": 1.01362854,
+          "rounds": [
+            0.982766187,
+            0.965955686,
+            0.93846172,
+            0.986952404,
+            0.867118337,
+            0.966424351,
+            0.951545501,
+            0.990598551,
+            1.01362854
+          ]
+        }
+      },
+      {
+        "memory": "cached_ram",
+        "windows": 1,
+        "records": 1,
+        "iterations_per_round": 20000,
+        "old_copy_bytes": 4096,
+        "new_copy_bytes": 448,
+        "old_copy_calls": 1,
+        "new_copy_calls": 1,
+        "old_ns": {
+          "median": 67.18,
+          "p10": 66.98,
+          "p90": 67.2599999,
+          "min": 66.98,
+          "max": 67.265,
+          "rounds": [
+            67.18,
+            67.18,
+            67.1000002,
+            67.1900001,
+            67.2599999,
+            67.2350001,
+            67.265,
+            66.98,
+            67.025
+          ]
+        },
+        "new_ns": {
+          "median": 201.625,
+          "p10": 200.99,
+          "p90": 202.275,
+          "min": 200.99,
+          "max": 202.44,
+          "rounds": [
+            201.11,
+            202.275,
+            201.43,
+            201.6,
+            200.99,
+            201.625,
+            202.44,
+            202.065,
+            202.105
+          ]
+        },
+        "new_over_old": {
+          "median": 3.00193739,
+          "p10": 2.98825454,
+          "p90": 3.0153674,
+          "min": 2.98825454,
+          "max": 3.01679606,
+          "rounds": [
+            2.99359929,
+            3.01094076,
+            3.00193739,
+            3.00044649,
+            2.98825454,
+            2.99881014,
+            3.00958894,
+            3.01679606,
+            3.0153674
+          ]
+        }
+      },
+      {
+        "memory": "cached_ram",
+        "windows": 1,
+        "records": 2,
+        "iterations_per_round": 20000,
+        "old_copy_bytes": 4096,
+        "new_copy_bytes": 896,
+        "old_copy_calls": 1,
+        "new_copy_calls": 2,
+        "old_ns": {
+          "median": 66.8100001,
+          "p10": 66.6150001,
+          "p90": 66.9600002,
+          "min": 66.6150001,
+          "max": 67.035,
+          "rounds": [
+            66.8649998,
+            66.745,
+            67.035,
+            66.6699998,
+            66.8100001,
+            66.7199998,
+            66.6150001,
+            66.8649998,
+            66.9600002
+          ]
+        },
+        "new_ns": {
+          "median": 289.8,
+          "p10": 289.06,
+          "p90": 290.37,
+          "min": 289.06,
+          "max": 292.105,
+          "rounds": [
+            292.105,
+            289.06,
+            290.3,
+            289.425,
+            290.37,
+            289.1,
+            289.8,
+            290.195,
+            289.385
+          ]
+        },
+        "new_over_old": {
+          "median": 4.34001347,
+          "p10": 4.32175925,
+          "p90": 4.35037153,
+          "min": 4.32175925,
+          "max": 4.36857849,
+          "rounds": [
+            4.36857849,
+            4.3308113,
+            4.33057358,
+            4.34115795,
+            4.34620565,
+            4.33303359,
+            4.35037153,
+            4.34001347,
+            4.32175925
+          ]
+        }
+      },
+      {
+        "memory": "cached_ram",
+        "windows": 1,
+        "records": 5,
+        "iterations_per_round": 20000,
+        "old_copy_bytes": 4096,
+        "new_copy_bytes": 2240,
+        "old_copy_calls": 1,
+        "new_copy_calls": 5,
+        "old_ns": {
+          "median": 68.2350001,
+          "p10": 67.9100001,
+          "p90": 68.3499999,
+          "min": 67.9100001,
+          "max": 68.5049999,
+          "rounds": [
+            67.9100001,
+            68.3499999,
+            68.1199999,
+            68.3449998,
+            68.225,
+            68.3400001,
+            68.2350001,
+            68.5049999,
+            67.9799999
+          ]
+        },
+        "new_ns": {
+          "median": 497.345,
+          "p10": 495.34,
+          "p90": 497.43,
+          "min": 495.34,
+          "max": 498.105,
+          "rounds": [
+            495.34,
+            497.2,
+            497.025,
+            497.365,
+            498.105,
+            497.345,
+            496.72,
+            497.43,
+            497.415
+          ]
+        },
+        "new_over_old": {
+          "median": 7.27954861,
+          "p10": 7.26122181,
+          "p90": 7.30091609,
+          "min": 7.26122181,
+          "max": 7.31707856,
+          "rounds": [
+            7.29406566,
+            7.27432335,
+            7.29631533,
+            7.27726975,
+            7.30091609,
+            7.27750949,
+            7.27954861,
+            7.26122181,
+            7.31707856
+          ]
+        }
+      },
+      {
+        "memory": "cached_ram",
+        "windows": 1,
+        "records": 9,
+        "iterations_per_round": 20000,
+        "old_copy_bytes": 4096,
+        "new_copy_bytes": 4032,
+        "old_copy_calls": 1,
+        "new_copy_calls": 1,
+        "old_ns": {
+          "median": 69.6300001,
+          "p10": 69.4099999,
+          "p90": 69.7800002,
+          "min": 69.4099999,
+          "max": 69.8600001,
+          "rounds": [
+            69.6300001,
+            69.655,
+            69.6449999,
+            69.52,
+            69.4099999,
+            69.8600001,
+            69.7800002,
+            69.5350001,
+            69.4449998
+          ]
+        },
+        "new_ns": {
+          "median": 453.91,
+          "p10": 453.3,
+          "p90": 455.065,
+          "min": 453.3,
+          "max": 455.855,
+          "rounds": [
+            455.855,
+            453.91,
+            455.065,
+            453.38,
+            454.495,
+            453.3,
+            453.665,
+            453.925,
+            453.33
+          ]
+        },
+        "new_over_old": {
+          "median": 6.5278998,
+          "p10": 6.48869166,
+          "p90": 6.54681889,
+          "min": 6.48869166,
+          "max": 6.5479758,
+          "rounds": [
+            6.54681889,
+            6.51654584,
+            6.53406563,
+            6.52157652,
+            6.5479758,
+            6.48869166,
+            6.5013614,
+            6.52800746,
+            6.5278998
+          ]
+        }
+      },
+      {
+        "memory": "cached_ram",
+        "windows": 256,
+        "records": 1,
+        "iterations_per_round": 20000,
+        "old_copy_bytes": 4096,
+        "new_copy_bytes": 448,
+        "old_copy_calls": 1,
+        "new_copy_calls": 1,
+        "old_ns": {
+          "median": 93.5700002,
+          "p10": 93.3449999,
+          "p90": 93.7050001,
+          "min": 93.3449999,
+          "max": 94.5649997,
+          "rounds": [
+            94.5649997,
+            93.59,
+            93.5399999,
+            93.7050001,
+            93.3750001,
+            93.5700002,
+            93.36,
+            93.5700002,
+            93.3449999
+          ]
+        },
+        "new_ns": {
+          "median": 204.39,
+          "p10": 203.265,
+          "p90": 205.085,
+          "min": 203.265,
+          "max": 205.125,
+          "rounds": [
+            203.265,
+            204.085,
+            205.125,
+            204.315,
+            205.085,
+            204.445,
+            204.325,
+            204.505,
+            204.39
+          ]
+        },
+        "new_over_old": {
+          "median": 2.18558298,
+          "p10": 2.14947391,
+          "p90": 2.19291213,
+          "min": 2.14947391,
+          "max": 2.19635876,
+          "rounds": [
+            2.14947391,
+            2.18062828,
+            2.19291213,
+            2.18040659,
+            2.19635876,
+            2.18494175,
+            2.18857112,
+            2.18558298,
+            2.18961916
+          ]
+        }
+      },
+      {
+        "memory": "cached_ram",
+        "windows": 256,
+        "records": 2,
+        "iterations_per_round": 20000,
+        "old_copy_bytes": 4096,
+        "new_copy_bytes": 896,
+        "old_copy_calls": 1,
+        "new_copy_calls": 2,
+        "old_ns": {
+          "median": 93.6500001,
+          "p10": 93.4799999,
+          "p90": 94.26,
+          "min": 93.4799999,
+          "max": 94.4800002,
+          "rounds": [
+            93.6500001,
+            93.695,
+            93.4799999,
+            93.7650002,
+            93.505,
+            94.4800002,
+            93.4899999,
+            94.26,
+            93.5049997
+          ]
+        },
+        "new_ns": {
+          "median": 295.76,
+          "p10": 295.12,
+          "p90": 296.695,
+          "min": 295.12,
+          "max": 298.38,
+          "rounds": [
+            298.38,
+            295.12,
+            295.76,
+            295.135,
+            296.56,
+            295.915,
+            295.265,
+            295.275,
+            296.695
+          ]
+        },
+        "new_over_old": {
+          "median": 3.15825222,
+          "p10": 3.13203852,
+          "p90": 3.17303889,
+          "min": 3.13203852,
+          "max": 3.18611853,
+          "rounds": [
+            3.18611853,
+            3.14979455,
+            3.16388533,
+            3.14760304,
+            3.1715951,
+            3.13203852,
+            3.15825222,
+            3.13255888,
+            3.17303889
+          ]
+        }
+      },
+      {
+        "memory": "cached_ram",
+        "windows": 256,
+        "records": 5,
+        "iterations_per_round": 20000,
+        "old_copy_bytes": 4096,
+        "new_copy_bytes": 2240,
+        "old_copy_calls": 1,
+        "new_copy_calls": 5,
+        "old_ns": {
+          "median": 97.27,
+          "p10": 94.9000001,
+          "p90": 97.3849998,
+          "min": 94.9000001,
+          "max": 97.61,
+          "rounds": [
+            94.9000001,
+            97.3849998,
+            97.365,
+            97.3099999,
+            97.2350001,
+            97.27,
+            97.61,
+            97.2149999,
+            97.1449997
+          ]
+        },
+        "new_ns": {
+          "median": 517.005,
+          "p10": 515.405,
+          "p90": 517.345,
+          "min": 515.405,
+          "max": 517.465,
+          "rounds": [
+            515.405,
+            516.64,
+            517.005,
+            517.345,
+            516.78,
+            517.055,
+            517.465,
+            517.245,
+            516.92
+          ]
+        },
+        "new_over_old": {
+          "median": 5.31566773,
+          "p10": 5.30135232,
+          "p90": 5.32111793,
+          "min": 5.30135232,
+          "max": 5.43103266,
+          "rounds": [
+            5.43103266,
+            5.30512914,
+            5.30996765,
+            5.31646286,
+            5.31475291,
+            5.31566773,
+            5.30135232,
+            5.32062954,
+            5.32111793
+          ]
+        }
+      },
+      {
+        "memory": "cached_ram",
+        "windows": 256,
+        "records": 9,
+        "iterations_per_round": 20000,
+        "old_copy_bytes": 4096,
+        "new_copy_bytes": 4032,
+        "old_copy_calls": 1,
+        "new_copy_calls": 1,
+        "old_ns": {
+          "median": 99.3599999,
+          "p10": 99.3000001,
+          "p90": 99.7100004,
+          "min": 99.3000001,
+          "max": 99.9099997,
+          "rounds": [
+            99.3199999,
+            99.47,
+            99.4800001,
+            99.3400001,
+            99.3000001,
+            99.3599999,
+            99.3400001,
+            99.7100004,
+            99.9099997
+          ]
+        },
+        "new_ns": {
+          "median": 482.325,
+          "p10": 481.59,
+          "p90": 483.07,
+          "min": 481.59,
+          "max": 483.115,
+          "rounds": [
+            483.115,
+            483.07,
+            482.525,
+            482.325,
+            481.59,
+            482.135,
+            482.23,
+            482.355,
+            481.8
+          ]
+        },
+        "new_over_old": {
+          "median": 4.8524054,
+          "p10": 4.82234012,
+          "p90": 4.85643913,
+          "min": 4.82234012,
+          "max": 4.86422674,
+          "rounds": [
+            4.86422674,
+            4.85643913,
+            4.85047245,
+            4.85529494,
+            4.84984894,
+            4.8524054,
+            4.85433863,
+            4.83757896,
+            4.82234012
+          ]
+        }
+      }
+    ]
+  },
+  "deployment": {
+    "game_closed_before_dll_replacement": true,
+    "saved_game_and_video_files_preserved": 115,
+    "controls_restored": true,
+    "manual_single_pass_selection_preserved": true,
+    "launched_for_unattended_gameplay": false
+  },
+  "limits": [
+    "No application FPS gain is established; previous matched build remains slower than Standard.",
+    "Synthetic write-combined-copy savings do not establish game caller attribution or end-to-end renderer improvement.",
+    "Cached-RAM controls are slower with sparse planning; dense mapped records are roughly neutral.",
+    "Per-list correctness fixes inspect additional uses, so reduced bytes per snapshot cannot predict total capture cost.",
+    "Water reflection correctness remains unresolved and the installed follow-up has no headset validation.",
+    "Discovery remains bounded to known roles and observed submissions, not arbitrary unobserved writes.",
+    "Owned constants require record-time substitution, complete shader-readable ranges, alias coverage and original-render/fallback lifetime protection before game integration."
+  ]
+}

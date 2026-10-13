@@ -381,7 +381,11 @@ Closed lists cannot have their recorded GPU addresses changed at Present.
 Other borrowed resources still require final completion and lifetime guards.
 The installed synchronous architecture is not made asynchronous by this test.
 No headset image, water-reflection fix or new game FPS result is claimed for
-this follow-up.
+this follow-up. Candidate `bbe3e98` is installed for the next manual session;
+the game remains closed. All 115 saved-game/video files and non-managed INI
+settings match the deployment backup, and temporary controls were restored,
+including the user's saved manual Single pass selection.
+[Sanitized headless checks and synthetic copy measurements](evidence/2026-10-13-phase2-camera-sparse-headless.json).
 
 ## Phase 2 baseline, October 12 evening
 
