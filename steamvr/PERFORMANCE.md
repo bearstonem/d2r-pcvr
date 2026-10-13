@@ -1,5 +1,61 @@
 # VR performance investigations
 
+## Phase 2 baseline, October 12 evening
+
+Phase 2 is tracked in [#23](https://github.com/bearstonem/d2r-pcvr/issues/23).
+The installed phase 1 release, `v0.3.10-windows-preview`, was measured with an
+offline Paladin on a Ryzen 9 5950X / RTX 5090, Steam Frame over Steam Link,
+SteamVR OpenXR at 90 Hz, 100% scene scale, two terrain rings, object radius
+300, fixed foveation and symmetric projection. The owner's local
+`defer_gpu_wait=1` preference remained enabled; DLSS was off.
+
+A stationary 360-pair capture measured **22.316 ms per pair / 44.81 application
+FPS**. The left/right engine draws averaged **8.319 / 7.854 ms**: 16.174 ms
+combined, already exceeding the full 90 Hz budget of 11.111 ms. Coarse
+per-thread accounting averaged 15.148 ms CPU across those draws. XR begin/end
+averaged 3.453 / 1.458 ms, including 3.104 ms waiting for the next XR frame
+and 1.422 ms submitting it. GPU fence waiting was zero. A separate NVIDIA
+spot sample reported 39% utilization on the active RTX 5090, at 2925 MHz/P0;
+it is not an average or a measurement of GPU execution time.
+
+An 18-second external render-thread sample collected 4,500 wall-clock samples,
+4,499 with unwound callers. The thread used 79.1% of one core. Leaf samples
+landed primarily in game, driver and synchronization code; 43 samples (0.96%)
+landed directly in the VR plugin. That does not measure the total cost caused
+by VR: the plugin asks the game to draw twice. The sampler briefly suspended
+the thread for a mean 31 microseconds per sample, copied its stack into memory,
+resumed it, and unwound the copy. No stack bytes or game code were saved.
+
+A later background sample found 1,544/4,500 samples through a renderer job
+completion path. Inspection shows repeated shared-queue polling, execution of
+available jobs and checking worker completion. This is evidence of engine job
+work and synchronization inside rendering; its inclusive time includes useful
+jobs and must not all be called wasted waiting. Private game symbols are
+unavailable, so the semantic attribution remains an inference from the caller
+paths and loop behavior. Headset activity was no longer controlled for this
+follow-up; its lower CPU percentage is not a performance gain.
+
+A background affinity check found no useful improvement from using one of
+the CPU's two L3 domains: combined draw means were 12.59 ms before, 12.77 ms
+on one domain and 12.65 ms after restoring all cores. These headset-inactive
+routine windows are separate from the stationary headset capture. The process
+and existing thread affinities were restored. Profiling INI controls were
+restored byte-identically, including after a later request timed out with the
+headset inactive. The installed DLL remains unchanged.
+
+The measurements support targeting the duplicated engine render/job work in
+phase 2. They do not establish that a replay port is safe or that #20 is fixed.
+Replay still requires correct per-eye constants and temporal histories, queue
+dependencies, resource states and lifetimes, right-eye depth/effects, VRS and
+spatial UI. The GPU span reported by SteamVR must not be interpreted as active
+GPU time: the [OpenVR timing definitions](https://github.com/ValveSoftware/openvr/wiki/Compositor_FrameTiming)
+describe elapsed submission/render intervals, which can include scheduling and
+queue gaps. No replay code or measured replay gain is part of this baseline.
+
+Sanitized aggregates and limitations:
+[`evidence/2026-10-13-performance-phase2-baseline.json`](evidence/2026-10-13-performance-phase2-baseline.json).
+Raw local diagnostic reports remain in ignored `build-frame/phase2/`.
+
 ## Issue 20 investigation, October 12
 
 [#20](https://github.com/bearstonem/d2r-pcvr/issues/20) reports roughly 60 FPS

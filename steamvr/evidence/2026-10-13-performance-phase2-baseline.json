@@ -1,0 +1,109 @@
+{
+  "issue": 23,
+  "related_issue": 20,
+  "purpose": "Account for the phase 1 renderer's CPU cost before implementing stereo command replay.",
+  "release": "v0.3.10-windows-preview",
+  "plugin_source_commit": "918bd5ef5895f258d23acd789f0eafae44278e1c",
+  "plugin_sha256": "48300b4d1ba5e43c56cd7204d5f653014012685790b0e6071f20862dc2ceb366",
+  "environment": {
+    "cpu": "AMD Ryzen 9 5950X",
+    "active_gpu": "NVIDIA GeForce RTX 5090",
+    "game": "Steam D2R 3.3.93787",
+    "character": "Offline local Paladin",
+    "headset": "Steam Frame",
+    "connection": "Steam Link",
+    "runtime": "SteamVR OpenXR",
+    "panel_refresh_hz": 90,
+    "resolution_scale_percent": 100,
+    "terrain_rings": 2,
+    "object_radius": 300,
+    "fixed_foveation": true,
+    "symmetric_projection": true,
+    "defer_gpu_wait": true,
+    "dlss": false
+  },
+  "stationary_baseline": {
+    "sequence": 1791858035,
+    "pairs": 360,
+    "gpu_queries": false,
+    "all_thread_hook_counters": false,
+    "mean_cycle_ms": 22.31591388888889,
+    "application_pair_fps": 44.81107092360222,
+    "p95_cycle_ms": 24.264,
+    "maximum_cycle_ms": 32.552,
+    "mean_ms": {
+      "game_gap": 1.231913888888889,
+      "xr_begin": 3.452716666666667,
+      "left_draw": 8.319422222222222,
+      "right_draw": 7.854322222222223,
+      "xr_end": 1.457538888888889,
+      "cpu_left_draw": 7.682291666666667,
+      "cpu_right_draw": 7.465277777777778,
+      "xr_wait_frame": 3.103511111111111,
+      "gpu_fence_wait": 0.0,
+      "xr_submit": 1.4222222222222223
+    }
+  },
+  "gpu_spot_sample": {
+    "utilization_percent": 39,
+    "graphics_clock_mhz": 2925,
+    "pstate": "P0",
+    "method": "nvidia-smi; one sample, not an average or GPU execution-time measurement"
+  },
+  "external_render_thread_sample": {
+    "duration_seconds": 18.0004289,
+    "samples": 4500,
+    "samples_with_unwound_callers": 4499,
+    "render_cpu_ms": 14234.375,
+    "render_cpu_percent_of_one_core": 79.07797686,
+    "mean_thread_suspension_us": 31.37124443,
+    "maximum_thread_suspension_us": 261.7999999,
+    "leaf_samples": {
+      "game_engine": 2176,
+      "nvidia_user_mode_driver": 468,
+      "ntdll": 1360,
+      "win32u": 165,
+      "vr_plugin": 43,
+      "reshade": 101,
+      "steamvr_client": 50,
+      "other": 137
+    },
+    "method": "250 Hz wall-clock samples of the render thread; brief suspension to copy the stack, followed by off-thread unwinding. Stack bytes stayed in memory. These are not CPU-only samples."
+  },
+  "background_call_path_followup": {
+    "duration_seconds": 18.0005017,
+    "samples": 4500,
+    "samples_with_unwound_callers": 4499,
+    "render_cpu_percent_of_one_core": 61.71702981,
+    "renderer_job_completion_path_inclusive_samples": 1544,
+    "mean_thread_suspension_us": 30.58137777,
+    "maximum_thread_suspension_us": 302.5000042,
+    "interpretation": "The renderer repeatedly polls the shared job queue, executes available jobs and checks worker completion. Inclusive time includes useful jobs and synchronization; it is not all wasted waiting.",
+    "conditions": "After the stationary capture; headset activity and view were not controlled. Not a matched performance comparison."
+  },
+  "background_cpu_affinity_trial": {
+    "method": "Routine ten-second engine timing windows; 22 seconds per condition, discarding the first mixed window. Headset inactive; not comparable with the stationary headset baseline.",
+    "all_cores_before_draw_ms": 12.59,
+    "one_l3_domain_draw_ms": 12.77,
+    "all_cores_after_draw_ms": 12.65,
+    "original_process_affinity_restored": true,
+    "original_thread_affinity_restore_failures": 0,
+    "interpretation": "No useful improvement observed from restricting the process to one CPU chiplet."
+  },
+  "cleanup": {
+    "profiling_ini_controls_restored_byte_identically": true,
+    "process_and_thread_affinity_restored": true,
+    "runtime_binary_unchanged": true
+  },
+  "limits": [
+    "Local CPU/GPU/runtime only; no RTX 5080 reporter validation or confirmed fix for issue 20.",
+    "Application stereo-pair throughput is not headset delivery or compositor reprojection rate.",
+    "Per-eye GetThreadTimes has coarse accounting ticks; averages over the capture are useful, per-frame attribution is not precise.",
+    "Private game symbols are unavailable; job-path attribution is inferred from call paths and inspected loop behavior.",
+    "Wall-clock stack samples include blocked and running states, and inclusive paths overlap.",
+    "SteamVR's roughly 20 ms GPU timing span is not evidence of 20 ms active GPU execution; it can include queue starvation and scheduling gaps.",
+    "Elevated Windows CPU tracing was unavailable; a bounded user-process sampler was used instead.",
+    "A later in-headset profile request timed out while the headset was inactive; its controls were restored, and it supplied no benchmark data.",
+    "No replay implementation, new runtime installation or performance gain is established by these measurements."
+  ]
+}
