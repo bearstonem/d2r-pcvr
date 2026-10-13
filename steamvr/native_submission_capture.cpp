@@ -493,7 +493,7 @@ bool SnapshotReplay(ReplayPacket& output)noexcept {
                             states.emplace(key,packet.states.size());packet.states.push_back({t.pResource,sub,copyQueue?D3D12_RESOURCE_STATE_COMMON:t.StateBefore,t.StateAfter});
                         }else{
                             auto& state=packet.states[found->second];if(state.last!=t.StateBefore){
-                                std::snprintf(packetStateFailure,sizeof packetStateFailure,"texture state chain (batch=%u queue=%u sub=%u tracked=0x%x before=0x%x flags=0x%x format=%u)",unsigned(index),unsigned(b.queue->GetDesc().Type),sub,unsigned(state.last),unsigned(t.StateBefore),unsigned(desc.Flags),unsigned(desc.Format));packetFailure=packetStateFailure;return;
+                                state.opaqueCycle=true;
                             }state.last=t.StateAfter;
                         }
                         if(copyQueue)decaying.insert(states.at(key));
@@ -506,6 +506,13 @@ bool SnapshotReplay(ReplayPacket& output)noexcept {
             packet.batches.push_back(std::move(b));
         }
         if(!split.empty()){packetFailure="incomplete split barrier";return;}
+        // Reuse the game's original recordings as a whole. An opaque internal
+        // sequence needs no invented state correction when its observed frame
+        // boundary closes exactly. This does not diagnose the omitted internal
+        // transition. An opaque OPEN cycle still cannot supply a restoration.
+        for(const auto& state:packet.states)if(state.opaqueCycle&&state.first!=state.last){
+            std::snprintf(packetStateFailure,sizeof packetStateFailure,"open texture cycle (first=0x%x last=0x%x format=%u)",unsigned(state.first),unsigned(state.last),unsigned(state.resource->GetDesc().Format));packetFailure=packetStateFailure;return;
+        }
         output=std::move(packet);packetFailure="ready";ready=true;
     });return ready;
 }

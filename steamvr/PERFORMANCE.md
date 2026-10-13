@@ -65,8 +65,21 @@ that callback entirely and models copy-queue texture decay at native batch
 boundaries. The private GPU fixture now verifies that decay followed by a
 direct-queue transition, including byte-identical replay. Its root-CBV fixture
 checks graphics/compute capture and no capture in Standard. Both corrections
-pass the 50 native checks. A matched live comparison and headset verification
-remain pending; fixture results do not establish a performance gain.
+pass the 50 native checks. With the descriptor callback removed, a fresh
+360-pair Standard capture recovered **22.354 ms / 44.73 FPS** (15.321 ms coarse
+CPU), consistent with the original phase 1 baseline. This supports callback
+overhead as the source of the prototype's slower Standard path; it is not a
+single-pass improvement.
+
+Replay then stopped on a direct-queue RGBA16F render-target texture: the journal
+tracked NON_PIXEL_SHADER_RESOURCE while a later recorded barrier declared
+RENDER_TARGET. The omission's source remains unconfirmed. The next candidate
+preserves original internal recordings and permits an opaque texture cycle
+only when its observed first and last states are identical, requiring no
+invented boundary transition for that cycle. Opaque open cycles and invalid
+split barriers remain rejected. Actual replay, a matched candidate FPS result
+and headset correctness remain pending; fixture results alone do not establish
+a performance gain.
 
 ## Phase 2 baseline, October 12 evening
 

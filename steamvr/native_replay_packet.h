@@ -13,6 +13,7 @@ struct ReplayState {
     Microsoft::WRL::ComPtr<ID3D12Resource> resource;
     UINT subresource;
     D3D12_RESOURCE_STATES first,last;
+    bool opaqueCycle=false;
 };
 struct ReplayPacket {
     std::vector<ReplayBatch> batches;

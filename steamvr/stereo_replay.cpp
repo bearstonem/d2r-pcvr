@@ -221,7 +221,8 @@ void Present(command_queue* q,swapchain* swap,const rect*,const rect*,uint32_t,c
     Effects(q,true);
     if(!synchronousgpu::Complete()||!framevr::CaptureReplay(q,swap,1)||!synchronousgpu::Complete()){inReplay=false;Fallback("right copy failed");return;}
     framevr::FinishReplayCapture();done=true;inReplay=false;++replays;status="Single pass";
-    if(replays==1){char line[200];std::snprintf(line,sizeof line,"Stereo replay: first actual pair; %u batches, %u camera ranges, %u records; second engine draw skipped",unsigned(packet.batches.size()),unsigned(probes.size()),records);logging::Write(line);}
+    if(replays==1){char line[240];unsigned cycles=0;for(const auto& state:packet.states)cycles+=state.opaqueCycle;
+        std::snprintf(line,sizeof line,"Stereo replay: first actual pair; %u batches, %u camera ranges, %u records, %u original closed texture cycles; second engine draw skipped",unsigned(packet.batches.size()),unsigned(probes.size()),records,cycles);logging::Write(line);}
 }
 }
 void Register(bool enabled,EyeFn eye,EffectsFn effects){
