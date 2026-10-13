@@ -18,7 +18,8 @@ constexpr size_t HookSlots=8,AllocatorLimit=4096,FenceLimit=128,QueueLimit=16;
 NativeMutex stateMutex,hookMutex;
 std::atomic<bool> tracking{false},installAllowed{false};
 std::atomic<uint32_t> invocations{0},queueCalls{0},hookErrors{0},observerFaults{0},capacityFailures{0};
-bool started=false,collecting=false,eyeOpen=false;
+bool started=false,collecting=false,eyeOpen=false,wantTrace=false;
+thread_local uint32_t queueDepth=0;
 uint32_t ownerThread=0;
 Recordings recordings;
 Capture capture;
@@ -33,18 +34,19 @@ template<class Fn> void Guard(Fn&& fn)noexcept {
     try{fn();}catch(...){observerFaults.fetch_add(1);}
 }
 struct Invocation {
-    bool queue;
+    bool queue,topLevel=true;
     explicit Invocation(bool isQueue=false):queue(isQueue) {
         invocations.fetch_add(1);
         if(queue) {
-            const auto before=queueCalls.fetch_add(1);
+            topLevel=queueDepth++==0;
+            const auto before=topLevel?queueCalls.fetch_add(1):0;
             if(tracking.load())Guard([&]{std::lock_guard lock(stateMutex);if(collecting){
-                if(before)++report.queueOverlap;
-                if(GetCurrentThreadId()!=ownerThread)++report.foreignCalls;
+                if(!topLevel)++report.queueReentries;
+                else {if(before)++report.queueOverlap;if(GetCurrentThreadId()!=ownerThread)++report.foreignCalls;}
             }});
         }
     }
-    ~Invocation(){if(queue)queueCalls.fetch_sub(1);invocations.fetch_sub(1);}
+    ~Invocation(){if(queue){--queueDepth;if(topLevel)queueCalls.fetch_sub(1);}invocations.fetch_sub(1);}
 };
 using ExecuteFn=void(STDMETHODCALLTYPE*)(ID3D12CommandQueue*,UINT,ID3D12CommandList*const*);
 using QueueFenceFn=HRESULT(STDMETHODCALLTYPE*)(ID3D12CommandQueue*,ID3D12Fence*,UINT64);
@@ -70,7 +72,7 @@ bool KnownQueue(ID3D12CommandQueue* queue) {
 }
 template<size_t S> void STDMETHODCALLTYPE HookExecute(ID3D12CommandQueue* queue,UINT count,ID3D12CommandList*const* lists)noexcept {
     Invocation call(true);
-    if(tracking.load())Guard([&]{
+    if(tracking.load()&&call.topLevel)Guard([&]{
         if(!KnownQueue(queue))ObserveQueue(queue);
         std::lock_guard lock(stateMutex);if(!collecting||!queues.contains(Id(queue)))return;
         ++report.batches;report.lists+=count;
@@ -88,17 +90,17 @@ template<size_t S> void STDMETHODCALLTYPE HookExecute(ID3D12CommandQueue* queue,
 }
 template<size_t S,bool Signal> HRESULT STDMETHODCALLTYPE HookQueueFence(ID3D12CommandQueue* queue,ID3D12Fence* fence,UINT64 value)noexcept {
     Invocation call(true);
-    if(tracking.load())Guard([&]{
+    if(tracking.load()&&call.topLevel)Guard([&]{
         if(!KnownQueue(queue))ObserveQueue(queue);ObserveFence(fence);
         std::lock_guard lock(stateMutex);if(!collecting||!queues.contains(Id(queue)))return;
         if constexpr(Signal){++report.signals;capture.Signal(Id(queue),Id(fence),value);}
         else {++report.waits;capture.Wait(Id(queue),Id(fence),value);}
     });
-    const HRESULT hr=(Signal?signalHooks.originals[S]:waitHooks.originals[S])(queue,fence,value);Failed(hr);return hr;
+    const HRESULT hr=(Signal?signalHooks.originals[S]:waitHooks.originals[S])(queue,fence,value);if(call.topLevel)Failed(hr);return hr;
 }
 template<size_t S> HRESULT STDMETHODCALLTYPE HookCpuSignal(ID3D12Fence* fence,UINT64 value)noexcept {
     Invocation call;
-    if(tracking.load())Guard([&]{ObserveFence(fence);std::lock_guard lock(stateMutex);if(eyeOpen&&fences.contains(Id(fence)))++report.cpuSignals;});
+    if(tracking.load()&&!queueDepth)Guard([&]{ObserveFence(fence);std::lock_guard lock(stateMutex);if(eyeOpen&&fences.contains(Id(fence)))++report.cpuSignals;});
     const HRESULT hr=cpuSignalHooks.originals[S](fence,value);Failed(hr);return hr;
 }
 template<size_t S> HRESULT STDMETHODCALLTYPE HookListReset(ID3D12GraphicsCommandList* list,ID3D12CommandAllocator* allocator,ID3D12PipelineState* pipeline)noexcept {
@@ -251,10 +253,10 @@ void ForgetList(uint64_t nativeList)noexcept {
 void ForgetQueue(uint64_t nativeQueue)noexcept {
     if(tracking.load())Guard([&]{std::lock_guard lock(stateMutex);queues.erase(nativeQueue);});
 }
-void BeginEye(uint32_t owningThread)noexcept {
+void BeginEye(uint32_t owningThread,bool diagnosticTrace)noexcept {
     if(!tracking.load())return;
     Guard([&]{std::lock_guard lock(stateMutex);if(!tracking.load())return;
-        collecting=false;capture=Capture{};report={};ownerThread=owningThread;eyeOpen=true;
+        collecting=false;capture=Capture{};report={};ownerThread=owningThread;eyeOpen=true;wantTrace=diagnosticTrace;
         if(invocations.load())++report.boundaryCalls;
         for(const auto& [id,fence]:fences)capture.FenceAtStart(id,fence->GetCompletedValue());
         collecting=true;
@@ -274,6 +276,8 @@ Report EndEye()noexcept {
         collecting=false;if(invocations.load())++report.boundaryCalls;
         const auto plan=capture.Plan(recordings);report.atEnd=plan.status;
         report.internalWaits=plan.internalWaits;report.externalWaits=plan.externalWaits;
+        report.multiSignalFences=plan.multiSignalFences;report.rewoundFences=plan.rewoundFences;report.belowStartFences=plan.belowStartFences;
+        if(wantTrace)report.trace=capture.DiagnosticTrace();
         ReadGlobals();result=report;eyeOpen=false;
     });return result;
 }

@@ -1,0 +1,67 @@
+{
+  "implementation_commit": "d7ecc69c340d0689ecaeec4806a4e5dbaa00743e",
+  "plugin_sha256": "236bc7552330b6b0149715882e736fcc7aef4bb5d4cc929419fffb0567af2351",
+  "status": "complete",
+  "game": "Steam D2R 3.3.93787; offline local Paladin",
+  "hardware_runtime": "Ryzen 9 5950X / RTX 5090; Steam Frame via Steam Link; SteamVR OpenXR at 90 Hz",
+  "pairs": 8,
+  "eyes": 16,
+  "native_per_eye": {
+    "batches": 5,
+    "lists": 35,
+    "signals": 12,
+    "waits": 12,
+    "cpu_signals": 0,
+    "unknown_lists": 0,
+    "queue_overlap": 1,
+    "boundary_calls": 0,
+    "foreign_calls": 0,
+    "api_failures": 0,
+    "hook_errors": 0,
+    "observer_faults": 0,
+    "capacity_failures": 0,
+    "new_fences": 0,
+    "list_resets_through_draw_return": 39,
+    "allocator_resets_through_draw_return": 39,
+    "retained_fences": 26,
+    "retained_allocators_min": 150,
+    "retained_allocators_max": 151,
+    "plan_at_present": "ambiguous_fence",
+    "plan_at_draw_return": "ambiguous_fence",
+    "complete_dependency_metadata": false
+  },
+  "public_callback_per_eye": {
+    "lists": 35,
+    "queues": 3,
+    "direct": 19,
+    "compute": 1,
+    "copy": 15,
+    "invalidated_recordings_at_present": 0,
+    "invalidated_recordings_at_draw_return": 0,
+    "state_chain_mismatches": 2,
+    "missing_or_overflowed_metadata": 0,
+    "retired_resources": 0
+  },
+  "camera": {
+    "complete_detections_per_eye_min": 12,
+    "complete_detections_per_eye_max": 15,
+    "reads_per_eye": 32,
+    "unknown_size_reads_per_eye": 32,
+    "unreadable_or_discarded_or_pending_reads": 0
+  },
+  "cleanup": {
+    "audit_ini_control_restored": true,
+    "ini_byte_identical_to_before": true,
+    "saved_games_and_video_settings_preserved_at_deployment": true
+  },
+  "launch": {"first_attempt": "Reached game and completed audit"},
+  "limits": [
+    "Diagnostic overhead: not a performance comparison or an FPS gain.",
+    "All plans were rejected; no game command list was replayed.",
+    "queue_overlap=1 with foreign_calls=0 suggests same-thread native reentry, which this capture does not distinguish from concurrent calls.",
+    "The aggregate ambiguous_fence status does not identify which fence rule rejected the plan; structural event diagnostics are required.",
+    "Retaining native allocators/fences stabilizes diagnostic identities and does not certify original resource/descriptors or replay lifetime safety.",
+    "Camera probes reached their quota and had unknown root CBV extents; detection counts can overlap and do not establish complete coverage.",
+    "Full resource states, temporal history, right-eye effects/depth, VRS/spatial UI and RTX 5080 reporter behavior are not validated."
+  ]
+}

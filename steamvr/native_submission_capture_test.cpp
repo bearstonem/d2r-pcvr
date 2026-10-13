@@ -4,6 +4,7 @@
 #include <d3d12.h>
 #include <wrl/client.h>
 #include <array>
+#include <atomic>
 #include <cassert>
 #include <cstdio>
 #include <cstring>
@@ -23,9 +24,54 @@ struct Queue {
     ComPtr<ID3D12CommandAllocator> allocator;
     ComPtr<ID3D12GraphicsCommandList> list;
 };
+// An API wrapper that forwards to another intercepted native implementation.
+// Its original calls must execute, while its internal calls must not become
+// duplicate application submissions/dependencies in the journal.
+class QueueAlias final:public ID3D12CommandQueue {
+    std::atomic<ULONG> references{1};
+    ComPtr<ID3D12CommandQueue> target;
+public:
+    explicit QueueAlias(ID3D12CommandQueue* q):target(q){}
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid,void** out)override {
+        if(!out)return E_POINTER;*out=nullptr;
+        if(iid==__uuidof(IUnknown)||iid==__uuidof(ID3D12Object)||iid==__uuidof(ID3D12DeviceChild)||
+           iid==__uuidof(ID3D12Pageable)||iid==__uuidof(ID3D12CommandQueue)){*out=this;AddRef();return S_OK;}
+        return E_NOINTERFACE;
+    }
+    ULONG STDMETHODCALLTYPE AddRef()override{return ++references;}
+    ULONG STDMETHODCALLTYPE Release()override {const auto n=--references;if(!n)delete this;return n;}
+    HRESULT STDMETHODCALLTYPE GetPrivateData(REFGUID key,UINT* size,void* data)override{return target->GetPrivateData(key,size,data);}
+    HRESULT STDMETHODCALLTYPE SetPrivateData(REFGUID key,UINT size,const void* data)override{return target->SetPrivateData(key,size,data);}
+    HRESULT STDMETHODCALLTYPE SetPrivateDataInterface(REFGUID key,const IUnknown* data)override{return target->SetPrivateDataInterface(key,data);}
+    HRESULT STDMETHODCALLTYPE SetName(LPCWSTR name)override{return target->SetName(name);}
+    HRESULT STDMETHODCALLTYPE GetDevice(REFIID iid,void** out)override{return target->GetDevice(iid,out);}
+    void STDMETHODCALLTYPE UpdateTileMappings(ID3D12Resource* resource,UINT n,const D3D12_TILED_RESOURCE_COORDINATE* starts,
+        const D3D12_TILE_REGION_SIZE* sizes,ID3D12Heap* heap,UINT ranges,const D3D12_TILE_RANGE_FLAGS* flags,
+        const UINT* offsets,const UINT* counts,D3D12_TILE_MAPPING_FLAGS mapping)override {
+        target->UpdateTileMappings(resource,n,starts,sizes,heap,ranges,flags,offsets,counts,mapping);
+    }
+    void STDMETHODCALLTYPE CopyTileMappings(ID3D12Resource* dst,const D3D12_TILED_RESOURCE_COORDINATE* dstStart,
+        ID3D12Resource* src,const D3D12_TILED_RESOURCE_COORDINATE* srcStart,const D3D12_TILE_REGION_SIZE* size,D3D12_TILE_MAPPING_FLAGS flags)override {
+        target->CopyTileMappings(dst,dstStart,src,srcStart,size,flags);
+    }
+    __declspec(noinline) void STDMETHODCALLTYPE ExecuteCommandLists(UINT count,ID3D12CommandList*const* lists)override {target->ExecuteCommandLists(count,lists);}
+    void STDMETHODCALLTYPE SetMarker(UINT metadata,const void* data,UINT size)override {target->SetMarker(metadata,data,size);}
+    void STDMETHODCALLTYPE BeginEvent(UINT metadata,const void* data,UINT size)override {target->BeginEvent(metadata,data,size);}
+    void STDMETHODCALLTYPE EndEvent()override {target->EndEvent();}
+    __declspec(noinline) HRESULT STDMETHODCALLTYPE Signal(ID3D12Fence* fence,UINT64 value)override{return target->Signal(fence,value);}
+    __declspec(noinline) HRESULT STDMETHODCALLTYPE Wait(ID3D12Fence* fence,UINT64 value)override{return target->Wait(fence,value);}
+    HRESULT STDMETHODCALLTYPE GetTimestampFrequency(UINT64* frequency)override{return target->GetTimestampFrequency(frequency);}
+    HRESULT STDMETHODCALLTYPE GetClockCalibration(UINT64* gpu,UINT64* cpu)override{return target->GetClockCalibration(gpu,cpu);}
+#ifdef WIDL_EXPLICIT_AGGREGATE_RETURNS
+    D3D12_COMMAND_QUEUE_DESC* STDMETHODCALLTYPE GetDesc(D3D12_COMMAND_QUEUE_DESC* out)override {*out=target->GetDesc();return out;}
+#else
+    D3D12_COMMAND_QUEUE_DESC STDMETHODCALLTYPE GetDesc()override{return target->GetDesc();}
+#endif
+};
 struct Fixture {
     ComPtr<ID3D12Device> device;
     std::array<Queue,3> queues;
+    ComPtr<ID3D12CommandQueue> aliasedCopy;
     ComPtr<ID3D12GraphicsCommandList> extraCopy,preexisting;
     ComPtr<ID3D12CommandAllocator> preexistingAllocator;
     ComPtr<ID3D12Fence> cpuFence;
@@ -67,6 +113,7 @@ struct Fixture {
         for(auto& q:queues)Check(q.list->Close(),"close");
         Check(device->CreateCommandList(0,D3D12_COMMAND_LIST_TYPE_COPY,queues[0].allocator.Get(),nullptr,IID_PPV_ARGS(&extraCopy)),"second list in copy batch");
         extraCopy->CopyBufferRegion(a.Get(),4,upload.Get(),4,4);Check(extraCopy->Close(),"close second copy list");
+        aliasedCopy.Attach(new QueueAlias(queues[0].queue.Get()));audit::ObserveQueue(aliasedCopy.Get());
         assert(audit::InstalledHooks()>0);
     }
     ~Fixture(){if(pending){std::fputs("Fixture work did not complete\n",stderr);ExitProcess(2);}audit::Shutdown();}
@@ -77,9 +124,9 @@ struct Fixture {
         ComPtr<ID3D12Resource> result;
         Check(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&desc,state,nullptr,IID_PPV_ARGS(&result)),"buffer");return result;
     }
-    void Submit(size_t index) {
+    void Submit(size_t index,ID3D12CommandQueue* overrideQueue=nullptr) {
         ID3D12CommandList* lists[]={queues[index].list.Get(),extraCopy.Get()};
-        pending=true;queues[index].queue->ExecuteCommandLists(index==0?2:1,lists);
+        pending=true;(overrideQueue?overrideQueue:queues[index].queue.Get())->ExecuteCommandLists(index==0?2:1,lists);
     }
     void Wait(size_t index,uint64_t value) {
         auto* fence=queues[index].fence.Get();Check(fence->SetEventOnCompletion(value,event.h),"completion event");
@@ -91,21 +138,22 @@ struct Fixture {
         void* data=nullptr;D3D12_RANGE range{0,4};Check(readback->Map(0,&range,&data),"readback map");
         uint32_t value;std::memcpy(&value,data,4);D3D12_RANGE empty{};readback->Unmap(0,&empty);return value;
     }
-    audit::Report Chain(uint64_t value) {
-        audit::BeginEye(GetCurrentThreadId());
+    audit::Report Chain(uint64_t value,bool wrapped=false) {
+        audit::BeginEye(GetCurrentThreadId(),wrapped);
         // Actual API calls put a consumer's GPU wait before its producer's CPU
         // submission. The native journal must recover both cross-queue edges.
         Check(queues[1].queue->Wait(queues[0].fence.Get(),value),"compute wait");
         Submit(1);Check(queues[1].queue->Signal(queues[1].fence.Get(),value),"compute signal");
         Check(queues[2].queue->Wait(queues[1].fence.Get(),value),"direct wait");
         Submit(2);Check(queues[2].queue->Signal(queues[2].fence.Get(),value),"direct signal");
-        Submit(0);Check(queues[0].queue->Signal(queues[0].fence.Get(),value),"copy signal");
+        auto* copyQueue=wrapped?aliasedCopy.Get():queues[0].queue.Get();
+        Submit(0,copyQueue);Check(copyQueue->Signal(queues[0].fence.Get(),value),"copy signal");
         audit::SealPresent();Wait(2,value);return audit::EndEye();
     }
 };
 void Print(const audit::Report& r) {
-    std::printf("native: batches=%u lists=%u signals=%u waits=%u unknown=%u overlap=%u boundary=%u foreign=%u hooks=%u faults=%u capacity=%u present=%s end=%s internal=%u external=%u\n",
-        r.batches,r.lists,r.signals,r.waits,r.unknownLists,r.queueOverlap,r.boundaryCalls,r.foreignCalls,r.hookErrors,r.observerFaults,r.capacityFailures,
+    std::printf("native: batches=%u lists=%u signals=%u waits=%u unknown=%u overlap=%u reentries=%u boundary=%u foreign=%u hooks=%u faults=%u capacity=%u present=%s end=%s internal=%u external=%u\n",
+        r.batches,r.lists,r.signals,r.waits,r.unknownLists,r.queueOverlap,r.queueReentries,r.boundaryCalls,r.foreignCalls,r.hookErrors,r.observerFaults,r.capacityFailures,
         audit::StatusName(r.atPresent),audit::StatusName(r.atEnd),r.internalWaits,r.externalWaits);
 }
 }
@@ -128,7 +176,9 @@ int main() {
         f.queues[0].list->CopyBufferRegion(f.a.Get(),0,f.upload.Get(),4,4);Check(f.queues[0].list->Close(),"close changed copy");
         Check(f.extraCopy->Reset(f.queues[0].allocator.Get(),nullptr),"second copy reset");
         f.extraCopy->CopyBufferRegion(f.a.Get(),4,f.upload.Get(),0,4);Check(f.extraCopy->Close(),"close changed second copy");
-        const auto changed=f.Chain(3);Print(changed);assert(changed.DependenciesComplete()&&f.Value()==0x55667788);
+        const auto changed=f.Chain(3,true);Print(changed);assert(changed.DependenciesComplete()&&f.Value()==0x55667788);
+        assert(changed.batches==3&&changed.lists==4&&changed.signals==3&&changed.waits==2&&changed.queueReentries>=2&&!changed.queueOverlap);
+        assert(changed.trace.events.size()==8&&!changed.trace.truncated);
         audit::BeginEye(GetCurrentThreadId());Check(f.cpuFence->Signal(1),"original CPU signal");
         f.Submit(0);Check(f.queues[0].queue->Signal(f.queues[0].fence.Get(),4),"copy signal 4");audit::SealPresent();
         Check(f.cpuFence->Signal(2),"CPU signal after Present boundary");f.Wait(0,4);

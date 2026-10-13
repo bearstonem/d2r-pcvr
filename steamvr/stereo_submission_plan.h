@@ -67,8 +67,17 @@ struct SubmissionPlan {
     PlanStatus status=PlanStatus::Empty;
     std::vector<size_t> order; // Indices into Capture::Submissions(), preserving native batches.
     uint32_t internalWaits=0,externalWaits=0;
+    uint32_t multiSignalFences=0,rewoundFences=0,belowStartFences=0;
     bool Ready()const{return status==PlanStatus::Ready;}
 };
+enum class DependencyKind {Batch,Signal,Wait};
+struct DependencyEvent {
+    DependencyKind kind;
+    uint32_t queue=0,fence=0,lists=0; // Synthetic IDs, never native addresses.
+    uint64_t value=0,start=0;
+    bool startKnown=false;
+};
+struct DependencyTrace {std::vector<DependencyEvent> events;bool truncated=false;};
 class Capture {
     enum class Kind {Batch,Signal,Wait};
     struct Event {Kind kind;uint64_t queue,fence,value;size_t batch=0;};
@@ -118,6 +127,22 @@ public:
         if(EventAllowed(queue,fence))events.push_back({Kind::Wait,queue,fence,value});
     }
     const std::vector<Submission>& Submissions()const{return submissions;}
+    DependencyTrace DiagnosticTrace(size_t limit=64)const {
+        DependencyTrace out;out.truncated=events.size()>limit;
+        std::map<uint64_t,uint32_t> queueIds,fenceIds;
+        for(size_t i=0;i<std::min(limit,events.size());++i) {
+            const auto& event=events[i];
+            const auto queue=queueIds.try_emplace(event.queue,uint32_t(queueIds.size())).first->second;
+            DependencyEvent value{};value.queue=queue;
+            if(event.kind==Kind::Batch){value.kind=DependencyKind::Batch;value.lists=uint32_t(submissions[event.batch].lists.size());}
+            else {
+                value.kind=event.kind==Kind::Signal?DependencyKind::Signal:DependencyKind::Wait;
+                value.fence=fenceIds.try_emplace(event.fence,uint32_t(fenceIds.size())).first->second;value.value=event.value;
+                if(const auto start=fenceStarts.find(event.fence);start!=fenceStarts.end()){value.startKnown=true;value.start=start->second;}
+            }
+            out.events.push_back(value);
+        }return out;
+    }
     SubmissionPlan Plan(const Recordings& recordings)const {
         SubmissionPlan out;
         auto reject=[&](PlanStatus status){out.status=status;out.order.clear();return out;};
@@ -127,17 +152,20 @@ public:
         for(const auto& batch:submissions)for(const auto& list:batch.lists)
             if(!recordings.Current(list))return reject(PlanStatus::StaleRecording);
 
-        struct Timeline {uint64_t queue=0,last=0;std::vector<std::pair<uint64_t,size_t>> signals;};
+        struct Timeline {uint64_t queue=0,last=0;bool multi=false,rewound=false,belowStart=false;std::vector<std::pair<uint64_t,size_t>> signals;};
         std::map<uint64_t,Timeline> timelines;
         for(size_t i=0;i<events.size();++i) {
             const auto& event=events[i];if(event.kind!=Kind::Signal)continue;
             auto& timeline=timelines[event.fence];
             const auto start=fenceStarts.find(event.fence);
-            if((timeline.queue&&timeline.queue!=event.queue)||
-               (!timeline.signals.empty()&&event.value<timeline.last)||
-               (start!=fenceStarts.end()&&event.value<start->second))return reject(PlanStatus::AmbiguousFence);
-            timeline.queue=event.queue;timeline.last=event.value;timeline.signals.emplace_back(event.value,i);
+            if(timeline.queue&&timeline.queue!=event.queue)timeline.multi=true;
+            if(!timeline.signals.empty()&&event.value<timeline.last)timeline.rewound=true;
+            if(start!=fenceStarts.end()&&event.value<start->second)timeline.belowStart=true;
+            if(!timeline.queue)timeline.queue=event.queue;
+            timeline.last=event.value;timeline.signals.emplace_back(event.value,i);
         }
+        for(const auto& [id,timeline]:timelines){out.multiSignalFences+=timeline.multi;out.rewoundFences+=timeline.rewound;out.belowStartFences+=timeline.belowStart;}
+        if(out.multiSignalFences||out.rewoundFences||out.belowStartFences)return reject(PlanStatus::AmbiguousFence);
         std::vector<std::vector<size_t>> edges(events.size());
         std::vector<size_t> incoming(events.size(),0);
         auto edge=[&](size_t before,size_t after){

@@ -133,7 +133,7 @@ void BeginEye(unsigned eye) {
     if(!tracking.load())return;
     std::lock_guard lock(mutex);if(!tracking.load()||!gate.PairOpen())return;
     camera={};probes={};bindings=Bindings{ProbeLimit};currentEye=eye&1;drawThread=GetCurrentThreadId();
-    nativecapture::BeginEye(drawThread.load());
+    nativecapture::BeginEye(drawThread.load(),gate.CompletedPairs()==0&&currentEye==0);
     atPresent={};sealed=false;eyeOpen=true;commands.BeginEye();recording.store(true);
 }
 void View(unsigned eye,const float matrix[16]) {
@@ -157,15 +157,28 @@ void EndEye() {
     logging::Write(line);
     const auto native=nativecapture::EndEye();
     std::snprintf(line,sizeof line,
-        "Replay audit native: pair=%u eye=%u batches=%u lists=%u signals=%u waits=%u cpu_signals=%u unknown_lists=%u queue_overlap=%u boundary_calls=%u foreign_calls=%u api_failures=%u hook_errors=%u observer_faults=%u capacity_failures=%u new_fences=%u",
+        "Replay audit native: pair=%u eye=%u batches=%u lists=%u signals=%u waits=%u cpu_signals=%u unknown_lists=%u queue_overlap=%u queue_reentries=%u boundary_calls=%u foreign_calls=%u api_failures=%u hook_errors=%u observer_faults=%u capacity_failures=%u new_fences=%u",
         gate.CompletedPairs()+1,currentEye,native.batches,native.lists,native.signals,native.waits,native.cpuSignals,native.unknownLists,
-        native.queueOverlap,native.boundaryCalls,native.foreignCalls,native.apiFailures,native.hookErrors,native.observerFaults,native.capacityFailures,native.newFences);
+        native.queueOverlap,native.queueReentries,native.boundaryCalls,native.foreignCalls,native.apiFailures,native.hookErrors,native.observerFaults,native.capacityFailures,native.newFences);
     logging::Write(line);
     std::snprintf(line,sizeof line,
-        "Replay audit dependencies: pair=%u eye=%u sealed=%u complete=%u plan_present=%s plan_end=%s internal_waits=%u external_waits=%u list_resets=%u allocator_resets=%u retained_allocators=%u retained_fences=%u",
+        "Replay audit dependencies: pair=%u eye=%u sealed=%u complete=%u plan_present=%s plan_end=%s internal_waits=%u external_waits=%u list_resets=%u allocator_resets=%u retained_allocators=%u retained_fences=%u multi_signal_fences=%u rewound_fences=%u below_start_fences=%u",
         gate.CompletedPairs()+1,currentEye,unsigned(native.sealed),unsigned(native.DependenciesComplete()),nativecapture::StatusName(native.atPresent),nativecapture::StatusName(native.atEnd),
-        native.internalWaits,native.externalWaits,native.listResets,native.allocatorResets,native.retainedAllocators,native.retainedFences);
+        native.internalWaits,native.externalWaits,native.listResets,native.allocatorResets,native.retainedAllocators,native.retainedFences,native.multiSignalFences,native.rewoundFences,native.belowStartFences);
     logging::Write(line);
+    for(size_t i=0;i<native.trace.events.size();++i) {
+        const auto& event=native.trace.events[i];
+        const char* kind=event.kind==stereoreplay::DependencyKind::Batch?"batch":event.kind==stereoreplay::DependencyKind::Signal?"signal":"wait";
+        std::snprintf(line,sizeof line,
+            "Replay audit event: pair=%u eye=%u index=%u kind=%s queue=%u fence=%u lists=%u value=%llu start_known=%u start=%llu",
+            gate.CompletedPairs()+1,currentEye,unsigned(i),kind,event.queue,event.fence,event.lists,
+            (unsigned long long)event.value,unsigned(event.startKnown),(unsigned long long)event.start);
+        logging::Write(line);
+    }
+    if(!native.trace.events.empty()) {
+        std::snprintf(line,sizeof line,"Replay audit event_summary: pair=%u eye=%u events=%u truncated=%u",
+            gate.CompletedPairs()+1,currentEye,unsigned(native.trace.events.size()),unsigned(native.trace.truncated));logging::Write(line);
+    }
     std::snprintf(line,sizeof line,
         "Replay audit camera: pair=%u eye=%u camera_valid=%u view_updates=%u projection_updates=%u cbv_bindings=%u cbv_reads=%u cbv_unreadable=%u cbv_unknown_size=%u camera_complete=%u camera_partial=%u view_only=%u probe_overflow=%u probe_pending=%u probe_discarded=%u",
         gate.CompletedPairs()+1,currentEye,

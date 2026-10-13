@@ -188,6 +188,22 @@ unload, which disables/removes only this observer's hooks. If a detour cannot
 be disabled/drained safely, the diagnostic module remains loaded until process
 exit. Restart with the control restored to zero before benchmarking.
 
+The follow-up journals only outermost application queue calls. Same-thread
+calls made inside the native implementation pass through and are counted as
+`queue_reentries`, without becoming duplicate application batches or fence
+dependencies. Concurrent outermost calls remain `queue_overlap` and prevent
+complete metadata. A forwarding COM queue fixture exercises two intercepted
+layers and verifies unchanged GPU output, one journal entry per application
+call, distinct reentry counts and zero false overlap.
+
+Fence rejection diagnostics count multiple signalers, rewinds within capture
+and signals below the initial completed value separately. The first captured
+left eye also logs at most 64 structural events: batch sizes, synthetic queue
+and fence IDs, and integer fence progress values/snapshots. No native pointers
+or game buffer contents are logged. This bounded trace allows dependency
+analysis offline; truncation is explicit. Model/native fixtures cover these
+diagnostics, and all **48/48 native checks pass** after the follow-up.
+
 The new native fixture observes real copy/compute/direct calls: four lists in
 three batches, two waits whose signals are submitted later, unchanged synthetic
 GPU results, and an allocator invalidation between Present and draw return.
@@ -195,8 +211,20 @@ Re-recording the same list pointers produces the expected changed GPU data.
 A list created before observation stays unknown until its actual Reset supplies
 the allocator. CPU signals before and after Present are reported as unsupported
 dependencies. Default-off behavior, pass-through after stop and clean removal of
-all owned hooks are verified. The native build and **48/48 CTest checks passed**;
-the candidate's in-game native capture is pending.
+all owned hooks are verified. The native build and **48/48 CTest checks passed**.
+
+The native candidate `d7ecc69` completed eight offline pairs on the local
+hardware/runtime. Every eye contained five native batches / 35 lists, twelve
+signals and twelve waits. Native/public list counts matched exactly; unknown
+lists, API/hook errors, boundary crossings, foreign-thread calls and capacity
+failures were zero. The planner rejected every eye as `ambiguous_fence`.
+One queue-overlap count per eye with no foreign-thread calls suggests native
+same-thread reentry, which this first native observer does not distinguish
+from concurrency. Both that distinction and detailed fence rejection reasons
+need follow-up; no replay was enabled. The build launched successfully on its
+first attempt, preserved saves/settings and restored the temporary audit INI
+control byte-identically. Sanitized aggregates:
+[`native audit`](evidence/2026-10-13-phase2-native-audit.json).
 
 `Replay audit dependencies: complete=1` refers only to the observed dependency
 metadata. It is not permission to replay game commands. Camera coverage,

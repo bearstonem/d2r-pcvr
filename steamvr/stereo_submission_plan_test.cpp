@@ -22,6 +22,10 @@ void Dependencies() {
     Add(c,r,10,1,1);c.Signal(10,1000,7);
     auto plan=c.Plan(r);assert(plan.Ready()&&plan.internalWaits==2&&plan.externalWaits==0);
     assert((plan.order==std::vector<size_t>{2,0,1}));
+    const auto trace=c.DiagnosticTrace();assert(trace.events.size()==7&&!trace.truncated);
+    assert(trace.events[0].kind==DependencyKind::Wait&&trace.events[0].queue==0&&trace.events[0].fence==0&&!trace.events[0].startKnown);
+    assert(trace.events[6].kind==DependencyKind::Signal&&trace.events[6].queue==2&&trace.events[6].fence==0&&trace.events[6].value==7);
+    assert(c.DiagnosticTrace(3).events.size()==3&&c.DiagnosticTrace(3).truncated);
     Capture higher;higher.Wait(20,1000,6);Add(higher,r,20,2,2);
     Add(higher,r,10,1,1);higher.Signal(10,1000,7);
     assert((higher.Plan(r).order==std::vector<size_t>{1,0}));
@@ -55,8 +59,12 @@ void RejectUnsafe() {
     assert(missing.Plan(r).status==PlanStatus::MissingDependency);
     Capture rewind;Add(rewind,r,10,1,1);rewind.Signal(10,1000,5);rewind.Signal(10,1000,4);
     assert(rewind.Plan(r).status==PlanStatus::AmbiguousFence);
+    assert(rewind.Plan(r).rewoundFences==1&&!rewind.Plan(r).multiSignalFences);
     Capture producers;Add(producers,r,10,1,1);producers.Signal(10,1000,5);producers.Signal(20,1000,6);
     assert(producers.Plan(r).status==PlanStatus::AmbiguousFence);
+    assert(producers.Plan(r).multiSignalFences==1&&!producers.Plan(r).rewoundFences);
+    Capture below;below.FenceAtStart(1000,7);Add(below,r,10,1,1);below.Signal(10,1000,6);
+    assert(below.Plan(r).status==PlanStatus::AmbiguousFence&&below.Plan(r).belowStartFences==1);
     Capture removed;removed.FenceAtStart(1000,UINT64_MAX);Add(removed,r,10,1,1);
     assert(removed.Plan(r).status==PlanStatus::InvalidMetadata);
     Capture duplicate;Add(duplicate,r,10,1,1);Add(duplicate,r,20,1,2);
