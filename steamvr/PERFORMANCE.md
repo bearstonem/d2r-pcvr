@@ -136,6 +136,34 @@ Sanitized captures:
 [`initial audit`](evidence/2026-10-13-phase2-initial-audit.json) and
 [`camera follow-up`](evidence/2026-10-13-phase2-camera-followup.json).
 
+### Submission planning, standalone validation
+
+`stereo_submission_plan.h` prepares a bounded order of native submission
+batches from per-queue calls and fence dependencies. It preserves each batch,
+handles waits whose producer signal was submitted later on another queue,
+and rejects missing dependencies, cycles, multiple signalers/rewound fences,
+unknown metadata and changed command-list or allocator generations. External
+fence values must have been sampled before capture starts. A later completed
+value cannot substitute for the missing dependency. This follows Microsoft's
+[multi-engine synchronization model](https://learn.microsoft.com/en-us/windows/win32/direct3d12/user-mode-heap-synchronization).
+
+The standalone D3D12 fixture runs four closed lists in three original batches
+on copy, compute and direct queues. The same lists project a synthetic point
+with different left/right views and asymmetric projections, using private
+camera constants and one private monotonic fence per queue. GPU readback
+matches independent CPU projection calculations. Source input remains
+unchanged. Resetting an allocator after completion makes the saved plan stale;
+the fixture rejects it before issuing any more GPU work. No command list or
+allocator is reset before its completion fence.
+
+The native build and **47/47 CTest checks passed**, including both new planning
+fixtures. This utility is not connected to the game renderer: the installed
+camera-audit DLL remains unchanged. A ready dependency plan still needs native
+capture with complete batch/fence information, protection against concurrent
+reset/destruction through GPU completion, resource-state handling and integration
+with eye effects, depth, temporal histories, VRS and spatial UI. The fixture
+does not validate game-camera coverage, headset stereo or an FPS improvement.
+
 ## Issue 20 investigation, October 12
 
 [#20](https://github.com/bearstonem/d2r-pcvr/issues/20) reports roughly 60 FPS
