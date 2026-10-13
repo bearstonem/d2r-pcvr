@@ -51,7 +51,7 @@ Filename: "{code:SteamExecutable}"; Description: "Open Steam to use your new VR 
 [Code]
 const
   SteamExitHelp = 'Save and exit Diablo II. In Steam, choose Steam > Exit. Closing Steam''s window leaves it running. This temporarily disconnects SteamVR streaming; reopen Steam after setup finishes.';
-  SecurityHelp = 'If a required file is missing or unreadable, check Windows Security > Virus & threat protection > Protection history (or your other antivirus history). Note the detection name and affected filename. Keep protection enabled while the detection is investigated. Browser download warnings are separate; check the browser''s Downloads page with Ctrl+J.';
+  SecurityHelp = 'If a required file is missing or unreadable, check Windows Security > Virus & threat protection > Protection history (or your other antivirus history). Note the detection name and affected filename. Keep protection enabled while the detection is investigated.';
   DeletedBackupHelp = 'Check the Recycle Bin or another backup for the original extracted mod folder. Downloading the ZIP again does not recreate the backups made during installation.'#13#10#13#10 +
     'If the original backups are permanently gone, cancel setup and back up your entire Diablo II Resurrected Saved Games folder. You can prepare a fresh mod installation by moving the old mod components into a separate folder, then rerunning Setup. You do not need to download the game again.'#13#10#13#10 +
     'See "Original backups permanently deleted" in INSTALL-WINDOWS.md for the exact files to move. Keep game data, saves and unrelated mods. Full install alone does not bypass the backup check.';

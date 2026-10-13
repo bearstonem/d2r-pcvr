@@ -39,16 +39,6 @@ The game runs on your PC and streams to the headset.
 4. For the ZIP, extract `d2r-pcvr-preview` to a permanent folder, such as
    `C:\Mods\d2r-pcvr-preview`. Keep this folder after installation.
 
-**Download blocked or left as `Unconfirmed... .crdownload`?** Press **Ctrl+J**
-in your browser and read the exact status beside the download. A browser
-warning, antivirus detection and interrupted transfer need different fixes.
-Browser protection is separate from Windows real-time protection; disabling
-one does not resolve the other. Check the browser message and, if it reports a
-virus or a file disappears, Windows Security **Protection history** or your
-other antivirus history. Include the warning/detection name and filename when
-asking for help. Keep protection enabled while investigating. See
-[Chrome download warnings](https://support.google.com/chrome/answer/6261569?hl=en).
-
 ## Install
 
 ### Graphical Setup EXE
@@ -98,7 +88,7 @@ The error dialog offers **Windows Security**, **Open logs**, **Retry** and
 installation log to a temporary folder; use **Open logs** to find that attempt's
 `setup-last.log` before closing the wizard. Review personal paths before sharing.
 
-If a log says a required download cannot be read, or a browser reports a virus,
+If setup reports that a required component is missing or cannot be read,
 check **Windows Security > Virus & threat protection >
 [Protection history](https://support.microsoft.com/en-us/windows/security/windows-security/protection-history-in-the-windows-security-app)**
 (or your other antivirus application's history). Include the detection name,
