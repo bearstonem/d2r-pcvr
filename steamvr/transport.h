@@ -2,6 +2,7 @@
 #include <cstdint>
 #include "melee_contact.h"
 #include "bow_flight.h"
+namespace reshade::api {struct command_queue;struct swapchain;}
 
 // Called by the existing game-side stereo draw hook and ReShade integration.
 // The OpenXR session uses the game's D3D12 device/queue.
@@ -51,6 +52,10 @@ void Recenter();
 bool TakeWorldRecenter();
 bool Active();
 bool SpatialMenu();
+// Explicit per-eye copy for synchronous stereo replay. The ordinary later
+// callback is suppressed only after BOTH copies were submitted successfully.
+bool CaptureReplay(reshade::api::command_queue*,reshade::api::swapchain*,unsigned eye);
+void FinishReplayCapture();
 bool View(float out[16], const float hero[3], float eyeHeight,
           float userEyeHeight, float bodyHeading, float recenterYaw, int eye);
 bool Projection(float out[16], float nearWorld, int eye);

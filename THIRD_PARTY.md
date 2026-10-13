@@ -19,12 +19,14 @@ attribution remain. BodyWalk and FlatVR are separate upstream products; this
 native OpenXR preview does not distribute them or use them as runtime dependencies.
 The original user reference, `emmericp/D2R-3D`, is a separate checkout.
 
-The read-only phase 2 camera audit in `steamvr/replay_audit_model.h` uses the
+The phase 2 camera audit and experimental folded-camera renderer in
+`steamvr/replay_audit_model.h` and `steamvr/stereo_replay_camera.h` use the
 camera-record structure and matrix-consistency approach investigated in
 upstream `camfix` at
 [`4b6284c0766c089139693a504333b9a19201cdd2`](https://github.com/natpoh/diablo2-vr-port/blob/4b6284c0766c089139693a504333b9a19201cdd2/vr/vrcam.cpp#L5343),
 MIT, copyright 2026 BodyWalkVR, under the retained [license](LICENSE).
-The audit does not include upstream command replay or watchdog/dump code.
+The native submission planner and synchronous executor are new implementations.
+No upstream watchdog or memory-dump code is included.
 
 | Component | Source / version | Notice |
 |---|---|---|

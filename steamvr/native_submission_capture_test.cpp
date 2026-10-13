@@ -1,5 +1,7 @@
 // Native interception fixture with private D3D12 objects and synthetic bytes.
 #include "native_submission_capture.h"
+#include "native_replay_packet.h"
+#include "synchronous_replay_gpu.h"
 #include <windows.h>
 #include <d3d12.h>
 #include <wrl/client.h>
@@ -150,7 +152,16 @@ struct Fixture {
         Submit(2);Check(queues[2].queue->Signal(queues[2].fence.Get(),value),"direct signal");
         auto* copyQueue=wrapped?aliasedCopy.Get():queues[0].queue.Get();
         Submit(0,copyQueue);Check(copyQueue->Signal(queues[0].fence.Get(),value),"copy signal");
-        audit::SealPresent();Wait(2,value);return audit::EndEye();
+        audit::SealPresent();Wait(2,value);
+        if(value==1&&!wrapped){
+            assert(audit::BeginReplayLease());audit::ReplayPacket packet;assert(audit::SnapshotReplay(packet));
+            const auto report=audit::EndEye();
+            assert(packet.batches.size()==3&&packet.batches[0].lists.size()==2&&packet.batches[1].lists.size()==1&&packet.batches[2].lists.size()==1);
+            assert(framevr::synchronousgpu::Initialize(queues[2].queue.Get()));
+            assert(framevr::synchronousgpu::Drain(packet)&&framevr::synchronousgpu::Execute(packet));
+            assert(Value()==0x11223344);audit::EndReplayLease();return report;
+        }
+        return audit::EndEye();
     }
     audit::Report SharedHandoff() {
         audit::BeginEye(GetCurrentThreadId(),true);
@@ -172,6 +183,7 @@ void Print(const audit::Report& r) {
 }
 int main() {
     try {
+        audit::EnableReplayPackets();
         Fixture f;
         const auto first=f.Chain(1);Print(first);
         assert(first.DependenciesComplete()&&first.batches==3&&first.lists==4&&first.signals==3&&first.waits==2&&first.internalWaits==2);
@@ -214,6 +226,7 @@ int main() {
         audit::Stop();audit::BeginEye(GetCurrentThreadId());
         Check(f.queues[0].queue->Signal(f.queues[0].fence.Get(),9),"pass-through signal after stop");f.Wait(0,9);
         assert(audit::EndEye().atEnd==PlanStatus::Empty);
+        framevr::synchronousgpu::Shutdown();
         assert(audit::Shutdown()&&audit::InstalledHooks()==0);
         std::puts("Native capture: original three-queue GPU results/order preserved, allocator/list generations observed, CPU signals flagged, default-off and clean hook removal verified");return 0;
     }catch(const std::exception& e){std::fprintf(stderr,"%s\n",e.what());audit::Shutdown();return 1;}

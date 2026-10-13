@@ -24,6 +24,9 @@
 #include <windows.h>
 #include "../steamvr/profile.h"
 #include "../steamvr/replay_audit.h"
+#ifdef D2RVR_NATIVE_OPENXR
+#include "../steamvr/stereo_replay.h"
+#endif
 #include "../steamvr/resource_descriptions.h"
 #include "../steamvr/vr_settings.h"
 #include <tlhelp32.h>
@@ -775,6 +778,7 @@ void LoadSettings() {
     billboards::ConfigurePortalCenters(IniB(L"debug",L"portal_centers",true));
     framevr::profile::ConfigureGpu(IniB(L"debug",L"profile_gpu",true));
     framevr::profile::ConfigureHooks(IniB(L"debug",L"profile_hooks",true));
+    framevr::stereoreplay::Configure(IniB(L"stereo",L"replay_right",false)&&IniB(L"render",L"symmetric_projection",true)&&!IniB(L"render",L"eye_tracked_foveation",false));
     framevr::ConfigureDeferredWait(IniB(L"render",L"defer_gpu_wait",false));
     framevr::ConfigureSymmetricProjection(IniB(L"render",L"symmetric_projection",true));
     framevr::ConfigureEyeTracking(IniB(L"render",L"eye_tracked_foveation",false));
@@ -2302,6 +2306,7 @@ bool VrView(const d2rcam::WorldView& in, float out[16]) {
         prevscan::Record(out);
 #ifdef D2RVR_NATIVE_OPENXR
         framevr::replayaudit::View(g_eye.load()&1,out);
+        framevr::stereoreplay::View(g_eye.load()&1,out);
 #endif
         memcpy(prevscan::g_lastView, out, sizeof prevscan::g_lastView);
         prevscan::g_lastViewOk = true;
@@ -2493,6 +2498,7 @@ bool VrProj(const d2rcam::WorldView& in, float M[16]) {
     if (ours) {
 #ifdef D2RVR_NATIVE_OPENXR
         framevr::replayaudit::Projection(g_eye.load()&1,M);
+        framevr::stereoreplay::Projection(g_eye.load()&1,M);
 #endif
         memcpy(prevscan::g_lastProj, M, sizeof prevscan::g_lastProj);
         prevscan::g_lastProjOk = true;
@@ -4451,6 +4457,7 @@ uintptr_t HookDrawGameScreen(int a) {
 #ifdef D2RVR_NATIVE_OPENXR
             framevr::profile::SkipPair();
             framevr::replayaudit::SkipPair();
+            framevr::stereoreplay::BeginPair(false);
             sumBegin=sumEnd=sumWait=sumFence=sumSubmit=sumPeriod=0;
             periodPairs=0;
 #endif
@@ -4472,6 +4479,7 @@ uintptr_t HookDrawGameScreen(int a) {
 #ifdef D2RVR_NATIVE_OPENXR
     framevr::BeginPair();
     framevr::replayaudit::BeginPair(framevr::Active());
+    framevr::stereoreplay::BeginPair(framevr::Active()&&!ThirdPerson()&&!Overhead()&&!gamestate::MenuOpen()&&!g_set.afrSwap.load());
     if(framevr::TakeWorldRecenter())Recenter();
 #endif
     // One head for the pair: BodyWalk's block may change between the passes.
@@ -4501,7 +4509,7 @@ uintptr_t HookDrawGameScreen(int a) {
     framevr::replayaudit::BeginEye(0);
 #endif
     d2rcam::Refresh();
-    OrigDrawGameScreen(a);
+    const uintptr_t leftResult=OrigDrawGameScreen(a);
 #ifdef D2RVR_NATIVE_OPENXR
     framevr::replayaudit::EndEye();
 #endif
@@ -4521,15 +4529,20 @@ uintptr_t HookDrawGameScreen(int a) {
     // that skip a frame of no time (butterflies seen in the left eye only, 2026-10-04) draw then.
     const float rightDt = g_set.rightDtMs.load() * 0.001f;
     *dt = rightDt; *rawDt = rightDt;
+    uintptr_t r=leftResult;
+#ifdef D2RVR_NATIVE_OPENXR
+    if(!framevr::stereoreplay::Replayed()) {
+#endif
     SetEye(1);
 #ifdef D2RVR_NATIVE_OPENXR
     framevr::BeginEye(1);
     framevr::replayaudit::BeginEye(1);
 #endif
     d2rcam::Refresh();
-    const uintptr_t r = OrigDrawGameScreen(a);
+    r = OrigDrawGameScreen(a);
 #ifdef D2RVR_NATIVE_OPENXR
     framevr::replayaudit::EndEye();
+    }
 #endif
     *dt = keep; *rawDt = keepRaw;
     const double t2 = pairtime::UsNow();
@@ -6855,6 +6868,9 @@ int __cdecl HookCreate(void* cmdList, int feature, void* params, NgxHandle** out
     return r;
 }
 int __cdecl HookEval(void* cmdList, const NgxHandle* h, const void* params, void* callback) {
+#ifdef D2RVR_NATIVE_OPENXR
+    framevr::stereoreplay::TemporalEvaluation();
+#endif
     if (h && g_set.dlssPerEye.load() && AfrOn()) {
         // the eye this frame draws: a pair per game frame sets it for each pass;
         // by turns, the one after the eye presented last
@@ -7596,7 +7612,10 @@ void TryRegister() {
     hud::Register();       // the interface's own layer: [hud] hide
 #ifdef D2RVR_NATIVE_OPENXR
     framevr::Register(&Log, +[](){return gamestate::MenuOpen()||!g_inWorld.load();}, +[](){return g_inWorld.load();}, &gamestate::ToggleMenus);
-    framevr::replayaudit::Register(IniB(L"debug",L"replay_audit",false));
+    const bool replay=IniB(L"stereo",L"replay_right",false);
+    framevr::stereoreplay::Register(replay,+[](unsigned eye){SetEye(int(eye));framevr::BeginEye(int(eye));return d2rcam::Refresh();},
+        +[](reshade::api::effect_runtime* rt,bool begin){if(begin)OnBeginEffects(rt,nullptr,{},{});else OnFinishEffects(rt,nullptr,{},{});});
+    framevr::replayaudit::Register(!replay&&IniB(L"debug",L"replay_audit",false));
 #endif
     g_registered = true;
     Log("vrcam: joined ReShade - the fog and the sky follow d2r_vr.ini [fog] [sky]");
@@ -8043,6 +8062,7 @@ D2RL_PLUGIN_EXPORT void D2RLoaderUnloadPlugin() noexcept {
     if (fx::g_registered) { reshade::unregister_addon(g_self); fx::g_registered = false; }
 #ifdef D2RVR_NATIVE_OPENXR
     framevr::replayaudit::Shutdown();
+    framevr::stereoreplay::Shutdown();
     pairtime::threadStats.Stop();
 #endif
     if (g_gameWnd && g_gameWndProc) SetWindowLongPtrW(g_gameWnd, GWLP_WNDPROC, (LONG_PTR)g_gameWndProc);

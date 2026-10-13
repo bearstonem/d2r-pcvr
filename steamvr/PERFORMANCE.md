@@ -1,5 +1,45 @@
 # VR performance investigations
 
+## Synchronous stereo renderer candidate: live comparison pending
+
+The experimental `[stereo] replay_right=1` startup mode now has an actual
+rendering path. It captures the left engine draw's native batches, renders and
+copies that eye's effects, executes the validated recordings with the right
+XR camera folded into the projection, copies right-eye depth for its effects,
+and submits both OpenXR images. A successful pair skips the second engine
+draw and keeps the game's single original Present. The ordinary two-pass
+renderer remains the fallback. The setting is off by default and is not added
+to installer defaults.
+
+This first candidate is synchronous. Original GPU work completes before
+temporary camera edits; replay completes before those edits are restored and
+the engine resumes. Camera writes cover only changed, validated matrix words.
+Native list/allocator/queue/barrier and descriptor mutations from other threads
+are excluded during replay. Native batches stay intact, every replay queue has
+its own monotonic completion fence, and texture subresources are restored from
+observed native transitions. Matched texture split barriers are supported;
+aliasing, enhanced barriers and split barriers on decaying resources fall back.
+This is not an asynchronous resource/descriptor lifetime solution.
+
+Qualification requires settled first-person gameplay, symmetric projection,
+fixed foveation, no native menu, known camera/depth state, and no active foreign
+ReShade effects. Existing graphics settings must have DLSS and dynamic
+resolution off, with AA off or FXAA. The renderer reads those settings without
+changing them. Camera root bindings are classified from submitted constants
+and cached for the settled scene; menus/area changes/toggling reset this cache.
+Coverage of every shader layout, CPU-projected world labels, shadows,
+particles, spatial UI and transitions still needs actual headset validation.
+Temporal upscaling/history sharing is not enabled.
+
+The production synchronous executor is exercised by private native GPU
+fixtures: captured copy/compute/direct batches are executed again in dependency
+order; a texture with matched split barriers is replayed twice after restoring
+its original state, with byte-identical pixel readback. Five camera records
+are checked against distinct actual eye transforms/projections, including
+inverse and history consistency. All **50/50 native checks pass**. A matched
+in-game FPS comparison and headset image/controls verification are pending;
+these fixture results do not establish a performance gain.
+
 ## Phase 2 baseline, October 12 evening
 
 Phase 2 is tracked in [#23](https://github.com/bearstonem/d2r-pcvr/issues/23).

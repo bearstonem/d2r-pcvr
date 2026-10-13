@@ -17,8 +17,21 @@ public:
     NativeMutex(const NativeMutex&)=delete;
     NativeMutex& operator=(const NativeMutex&)=delete;
 };
+// For callbacks that release retained COM objects: their final Release may
+// synchronously reenter resource-destruction bookkeeping on this thread.
+class NativeRecursiveMutex {
+    CRITICAL_SECTION value;
+public:
+    NativeRecursiveMutex(){InitializeCriticalSection(&value);}
+    ~NativeRecursiveMutex(){DeleteCriticalSection(&value);}
+    void lock(){EnterCriticalSection(&value);}
+    void unlock(){LeaveCriticalSection(&value);}
+    NativeRecursiveMutex(const NativeRecursiveMutex&)=delete;
+    NativeRecursiveMutex& operator=(const NativeRecursiveMutex&)=delete;
+};
 }
 #else
 #include <shared_mutex>
-namespace framevr {using NativeMutex=std::shared_mutex;}
+#include <mutex>
+namespace framevr {using NativeMutex=std::shared_mutex;using NativeRecursiveMutex=std::recursive_mutex;}
 #endif

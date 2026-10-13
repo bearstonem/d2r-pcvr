@@ -1,0 +1,40 @@
+#include "stereo_replay_camera.h"
+#include "frame_math.h"
+#include <cassert>
+#include <cstdio>
+#include <cstring>
+using namespace framevr;
+using namespace framevr::replayaudit;
+int main(){
+    float lv[16],rv[16],lp[16],rp[16];
+    math::View({123.0f,25,-83},math::Yaw(.37f),lv);
+    math::View({123.064f,25.002f,-82.999f},math::Yaw(.372f),rv);
+    math::Projection(-.9f,.85f,-.8f,.95f,.2f,lp);
+    math::Projection(-.84f,.91f,-.82f,.94f,.2f,rp);
+    Camera left,right;left.View(lv);left.Projection(lp);right.View(rv);right.Projection(rp);
+    std::array<float,1024> words{};words.fill(12345.f);
+    auto put=[&](size_t o,const Matrix& m){for(unsigned i=0;i<16;++i)words[o+i]=float(m[i]);};
+    Matrix iv,ip,ivp;assert(Invert(left.view,iv)&&Invert(left.projection,ip)&&Invert(Multiply(left.view,left.projection),ivp));
+    for(const size_t o:{20u,212u,404u,596u,788u}){
+        put(o,left.view);put(o+16,iv);put(o+32,left.projection);put(o+48,ip);
+        put(o+64,Multiply(left.view,left.projection));put(o+80,ivp);put(o+96,Multiply(left.view,left.projection));
+    }
+    put(980,left.view);const auto original=words;
+    assert(stereoreplay::FoldCamera(words,left,right)==5);
+    const auto expected=Multiply(right.view,right.projection);
+    for(const size_t o:{20u,212u,404u,596u,788u}){
+        assert(!std::memcmp(words.data()+o,original.data()+o,32*4));
+        assert(Near(std::span(words).subspan(o+64),expected,1e-4,.001));
+        const auto actual=Multiply(left.view,MatrixAt(words,o+32));
+        for(unsigned i=0;i<16;++i)assert(std::abs(actual[i]-expected[i])<.002);
+        Matrix invExpected;assert(Invert(expected,invExpected));assert(Near(std::span(words).subspan(o+80),invExpected,1e-4,.02));
+        assert(Near(std::span(words).subspan(o+96),expected,1e-4,.002));
+    }
+    assert(!std::memcmp(words.data()+980,original.data()+980,16*4));
+    auto unsupported=original;Camera missing;
+    assert(stereoreplay::FoldCamera(unsupported,left,missing)==0&&unsupported==original);
+    unsupported=original;unsupported[20+64]+=1;
+    const auto before=unsupported;assert(stereoreplay::FoldCamera(unsupported,left,right)==4);
+    assert(!std::memcmp(unsupported.data()+20,before.data()+20,112*4));
+    std::puts("Synchronous replay camera: five validated records, full XR eye transform/FOV, inverse/history consistency, standalone view preservation and rejection passed");
+}

@@ -90,6 +90,7 @@ std::atomic<bool> deferredWait{false};
 std::atomic<bool> symmetricProjection{true};
 std::atomic<bool> eyeTracking{false};
 std::atomic<bool> motionControls{false};
+bool replayCopiesFinished=false;
 gameplay::Engine motion;
 skills::QuickCast quickCast;
 gameplay::Input motionInput;
@@ -1643,6 +1644,7 @@ void AfterEffects(reshade::api::effect_runtime* rt) {
     // 'reshade_present' event so the sky/fog/HUD edits are included.
     static bool once=false;if(!once){once=true;Say("Frame OpenXR: first effects callback");}
     std::lock_guard lock(mutex);
+    if(replayCopiesFinished)return;
     gameWindow=static_cast<HWND>(rt->get_hwnd());
     if(gameSwapchain&&rt->get_current_back_buffer().handle==gameSwapchain->get_current_back_buffer().handle) {
         if(capturePair&&pairDrawing&&afr&&afr->enabled&&!panelMode) {
@@ -1679,6 +1681,12 @@ void Register(LogFn log,PanelFn panel,PanelFn world,PanelFn toggle) {
 }
 bool SpatialMenu(){return uiSupported.load()&&uiworld::Ready()&&hud::LayerFound()&&inWorld&&inWorld()&&wantsPanel&&wantsPanel();}
 bool Active() {std::lock_guard lock(mutex);return frame&&valid&&render&&!failed&&!panelMode;}
+bool CaptureReplay(reshade::api::command_queue* rq,reshade::api::swapchain* swap,unsigned eye) {
+    std::lock_guard lock(mutex);
+    if(eye>1||!Active()||swap!=gameSwapchain||!pairDrawing)return false;
+    Capture(rq,swap);return !failed&&eyes[eye].copied;
+}
+void FinishReplayCapture(){std::lock_guard lock(mutex);replayCopiesFinished=eyes[0].copied&&eyes[1].copied;}
 void ConfigureDeferredWait(bool on) {
     if(deferredWait.exchange(on)!=on)Say(on?"Frame OpenXR: GPU wait deferred until copy allocator reuse":"Frame OpenXR: conservative GPU wait before image release");
 }
@@ -1726,6 +1734,7 @@ bool TakeWorldRecenter() {
 void RequestStereoCapture(){captureRequested.store(true);}
 void BeginPair() {
     std::lock_guard lock(mutex);
+    replayCopiesFinished=false;
     lastTiming={};
     if(session&&!failed){
         if(frame)EndPair();Begin();pairDrawing=true;
