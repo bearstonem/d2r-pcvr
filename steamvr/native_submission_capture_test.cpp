@@ -192,6 +192,34 @@ void Print(const audit::Report& r) {
         r.batches,r.lists,r.signals,r.waits,r.unknownLists,r.queueOverlap,r.queueReentries,r.boundaryCalls,r.foreignCalls,r.hookErrors,r.observerFaults,r.capacityFailures,
         audit::StatusName(r.atPresent),audit::StatusName(r.atEnd),r.internalWaits,r.externalWaits);
 }
+void QueuedProducerThenReplay(Fixture& f){
+    // Hooks have been removed: the delayed CPU signal below is a synthetic GPU
+    // scheduling gate, not a foreign mutation during a live replay lease.
+    assert(audit::InstalledHooks()==0);
+    auto& copy=f.queues[0];auto& direct=f.queues[2];
+    Check(copy.allocator->Reset(),"ordered-copy allocator reset");Check(copy.list->Reset(copy.allocator.Get(),nullptr),"ordered-copy reset");
+    copy.list->CopyBufferRegion(f.a.Get(),0,f.b.Get(),0,4);Check(copy.list->Close(),"ordered-copy close");
+    Check(direct.allocator->Reset(),"ordered-readback allocator reset");Check(direct.list->Reset(direct.allocator.Get(),nullptr),"ordered-readback reset");
+    direct.list->CopyBufferRegion(f.readback.Get(),0,f.a.Get(),0,4);Check(direct.list->Close(),"ordered-readback close");
+    ComPtr<ID3D12CommandAllocator> producerAllocator;ComPtr<ID3D12GraphicsCommandList> producer;
+    Check(f.device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,IID_PPV_ARGS(&producerAllocator)),"queued-producer allocator");
+    Check(f.device->CreateCommandList(0,D3D12_COMMAND_LIST_TYPE_DIRECT,producerAllocator.Get(),nullptr,IID_PPV_ARGS(&producer)),"queued-producer list");
+    producer->CopyBufferRegion(f.b.Get(),0,f.upload.Get(),0,4);Check(producer->Close(),"queued-producer close");
+    ComPtr<ID3D12Fence> delayed;Check(f.device->CreateFence(0,D3D12_FENCE_FLAG_NONE,IID_PPV_ARGS(&delayed)),"queued-producer gate");
+    audit::ReplayPacket packet;packet.batches.push_back({copy.queue,{copy.list.Get()}});packet.batches.push_back({direct.queue,{direct.list.Get()}});
+    assert(packet.states.empty()&&framevr::synchronousgpu::Initialize(direct.queue.Get()));
+    const std::array<uint32_t,2> values{0x1234abcd,0x5678ef01};
+    for(size_t i=0;i<values.size();++i){
+        void* bytes=nullptr;D3D12_RANGE none{};Check(f.upload->Map(0,&none,&bytes),"queued-producer upload");std::memcpy(bytes,&values[i],4);f.upload->Unmap(0,nullptr);
+        Check(direct.queue->Wait(delayed.Get(),i+1),"delay queued producer");ID3D12CommandList* lists[]{producer.Get()};direct.queue->ExecuteCommandLists(1,lists);f.pending=true;
+        std::atomic<bool> released{false};std::thread unblock([&]{Sleep(20);Check(delayed->Signal(i+1),"release queued producer");released=true;});
+        // No caller-side CPU completion: Execute must order its first COPY
+        // batch after the earlier DIRECT producer even with an empty prelude.
+        const bool completed=framevr::synchronousgpu::Execute(packet);unblock.join();assert(completed&&released.load());f.pending=false;
+        assert(f.Value()==values[i]);
+    }
+    framevr::synchronousgpu::Shutdown();
+}
 }
 int main() {
     try {
@@ -297,6 +325,7 @@ int main() {
         audit::Stop();assert(audit::ActiveHooks()==0);
         framevr::synchronousgpu::Shutdown();
         assert(audit::Shutdown()&&audit::InstalledHooks()==0);
-        std::puts("Native capture: original three-queue GPU results/order preserved, allocator/list generations observed, CPU signals flagged, default-off and clean hook removal verified");return 0;
+        QueuedProducerThenReplay(f);
+        std::puts("Native capture: original three-queue GPU results/order preserved, queued producer/copy/replay ordered without an empty prelude, allocator/list generations observed, CPU signals flagged, default-off and clean hook removal verified");return 0;
     }catch(const std::exception& e){std::fprintf(stderr,"%s\n",e.what());audit::Shutdown();return 1;}
 }

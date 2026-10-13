@@ -45,6 +45,49 @@ inline bool MayContainCachedCameraRecord(std::span<const float> mapped,std::span
     }
     return false;
 }
+struct CameraWindow {
+    uint64_t buffer,offset;
+    std::span<const float> words;
+    std::span<const size_t> records;
+    std::span<const std::pair<uint64_t,uint32_t>> roles{};
+};
+struct CameraOwnership {
+    bool consistent=false;
+    std::vector<std::vector<size_t>> records;
+    std::map<std::pair<uint64_t,uint32_t>,std::vector<size_t>> roles;
+};
+// Upload resources contain several allocations. A validated camera record can
+// therefore appear in more than one submitted CBV window. Assign its physical
+// bytes to the closest complete submitted window, without dropping any unique
+// record or guessing a shader's CBV size. Equal-base aliases retain ownership.
+inline CameraOwnership OwnCameraRecords(std::span<const CameraWindow> windows) {
+    struct Owner {uint64_t base;std::span<const float> snapshot;};
+    std::map<std::pair<uint64_t,uint64_t>,Owner> owners;
+    for(const auto& window:windows)for(const size_t o:window.records){
+        if(o>window.words.size()||window.words.size()-o<112||
+           o>(std::numeric_limits<uint64_t>::max()-window.offset)/sizeof(float))return {};
+        const auto key=std::pair{window.buffer,window.offset+uint64_t(o)*sizeof(float)};
+        const auto snapshot=window.words.subspan(o,112);
+        const auto [found,fresh]=owners.try_emplace(key,Owner{window.offset,snapshot});
+        if(!fresh){
+            if(std::memcmp(found->second.snapshot.data(),snapshot.data(),112*sizeof(float)))return {};
+            found->second.base=std::max(found->second.base,window.offset);
+        }
+    }
+    CameraOwnership result{true,{},{}};result.records.resize(windows.size());
+    for(size_t i=0;i<windows.size();++i){const auto& window=windows[i];
+        for(const size_t o:window.records)if(owners.at({window.buffer,window.offset+uint64_t(o)*sizeof(float)}).base==window.offset)
+            result.records[i].push_back(o);
+        if(!result.records[i].empty())for(const auto& role:window.roles)result.roles.try_emplace(role);
+    }
+    // A retained role can use several layouts, including in another window
+    // wholly owned by a closer alias this pair. Cache every validated layout
+    // for that role in case the alias is absent in the next pair.
+    for(const auto& window:windows)for(const auto& role:window.roles)if(auto retained=result.roles.find(role);retained!=result.roles.end())
+        retained->second.insert(retained->second.end(),window.records.begin(),window.records.end());
+    for(auto& [role,offsets]:result.roles){std::sort(offsets.begin(),offsets.end());offsets.erase(std::unique(offsets.begin(),offsets.end()),offsets.end());}
+    return result;
+}
 inline unsigned FoldCameraAt(std::span<float> words,std::span<const size_t> offsets,const replayaudit::Camera& left,const replayaudit::Camera& right) {
     using namespace replayaudit;
     if(!left.haveView||!left.haveProjection||!right.haveView||!right.haveProjection)return 0;

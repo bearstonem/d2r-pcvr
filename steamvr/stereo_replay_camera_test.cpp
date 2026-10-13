@@ -22,6 +22,84 @@ int main(){
     put(980,left.view);const auto original=words;
     const auto offsets=stereoreplay::FindCameraRecords(words,left);
     assert((offsets==std::vector<size_t>{20,212,404,596,788}));
+    // An object CBV immediately before the camera can see the same complete
+    // records in its 4 KiB tail. Ownership must select the actual closer
+    // window regardless of submission order, without inventing CBV lengths.
+    std::array<float,2048> pool;pool.fill(12345.f);
+    std::copy(original.begin(),original.end(),pool.begin()+64);
+    const auto broadWords=std::span<const float>(pool).first(1024);
+    const auto cameraWords=std::span<const float>(pool).subspan(64,1024);
+    const auto broadRecords=stereoreplay::FindCameraRecords(broadWords,left);
+    const auto cameraRecords=stereoreplay::FindCameraRecords(cameraWords,left);
+    assert(broadRecords.size()==5&&cameraRecords==offsets);
+    using Role=std::pair<uint64_t,uint32_t>;
+    const std::array<Role,1> objectRole{Role{11,0}},cameraRole{Role{22,0}},smallerRole{Role{33,1}};
+    const std::array<stereoreplay::CameraWindow,2> beforeCamera{{{1,0,broadWords,broadRecords,objectRole},{1,256,cameraWords,cameraRecords,cameraRole}}};
+    auto ownership=stereoreplay::OwnCameraRecords(beforeCamera);
+    assert(ownership.consistent&&ownership.records[0].empty()&&ownership.records[1]==offsets);
+    assert(!ownership.roles.contains(objectRole[0])&&ownership.roles.at(cameraRole[0])==offsets);
+    const std::array<stereoreplay::CameraWindow,2> cameraBefore{{beforeCamera[1],beforeCamera[0]}};
+    ownership=stereoreplay::OwnCameraRecords(cameraBefore);
+    assert(ownership.consistent&&ownership.records[0]==offsets&&ownership.records[1].empty());
+    assert(!ownership.roles.contains(objectRole[0])&&ownership.roles.at(cameraRole[0])==offsets);
+    // Equal-base aliases (different root roles) retain all their validated
+    // offsets. An incomplete closer window cannot steal a complete record.
+    const std::array<stereoreplay::CameraWindow,2> aliases{{beforeCamera[1],{1,256,cameraWords,cameraRecords,smallerRole}}};
+    ownership=stereoreplay::OwnCameraRecords(aliases);
+    assert(ownership.consistent&&ownership.records[0]==offsets&&ownership.records[1]==offsets);
+    assert(ownership.roles.at(cameraRole[0])==offsets&&ownership.roles.at(smallerRole[0])==offsets);
+    const auto smallerWords=cameraWords.subspan(192,132);
+    const auto smallerRecords=stereoreplay::FindCameraRecords(smallerWords,left);
+    assert((smallerRecords==std::vector<size_t>{20}));
+    const std::array<stereoreplay::CameraWindow,2> smaller{{beforeCamera[1],{1,256+192*4,smallerWords,smallerRecords,smallerRole}}};
+    ownership=stereoreplay::OwnCameraRecords(smaller);
+    assert(ownership.consistent&&(ownership.records[0]==std::vector<size_t>{20,404,596,788})&&ownership.records[1]==smallerRecords);
+    assert(ownership.roles.at(cameraRole[0])==offsets&&ownership.roles.at(smallerRole[0])==smallerRecords);
+    // If the closer root is absent next pair, the retained broad role must
+    // still recognize its complete validated layout and cover that record.
+    assert(stereoreplay::SelectCameraRecords(cameraWords,ownership.roles.at(cameraRole[0]),left)==offsets);
+    const std::array<stereoreplay::CameraWindow,1> withoutCloser{{beforeCamera[1]}};
+    const auto nextOwnership=stereoreplay::OwnCameraRecords(withoutCloser);
+    assert(nextOwnership.consistent&&nextOwnership.records[0]==offsets);
+    const auto truncatedWords=smallerWords.first(131);
+    const auto truncatedRecords=stereoreplay::FindCameraRecords(truncatedWords,left);
+    const std::array<stereoreplay::CameraWindow,2> incomplete{{beforeCamera[1],{1,256+192*4,truncatedWords,truncatedRecords}}};
+    ownership=stereoreplay::OwnCameraRecords(incomplete);
+    assert(ownership.consistent&&ownership.records[0]==offsets&&ownership.records[1].empty());
+    // Keep a broad window's unique camera record even when other records are
+    // owned elsewhere. Physical record addresses are scoped to each resource.
+    std::copy(original.begin(),original.begin()+132,pool.begin());
+    std::copy(original.begin(),original.end(),pool.begin()+256);
+    const auto uniqueWords=std::span<const float>(pool).first(1024);
+    const auto laterWords=std::span<const float>(pool).subspan(256,1024);
+    const auto uniqueRecords=stereoreplay::FindCameraRecords(uniqueWords,left);
+    const auto laterRecords=stereoreplay::FindCameraRecords(laterWords,left);
+    assert(uniqueRecords.size()==5&&laterRecords==offsets);
+    const std::array<stereoreplay::CameraWindow,2> unique{{{1,0,uniqueWords,uniqueRecords,objectRole},{1,1024,laterWords,laterRecords,cameraRole}}};
+    ownership=stereoreplay::OwnCameraRecords(unique);
+    assert(ownership.consistent&&(ownership.records[0]==std::vector<size_t>{20})&&ownership.records[1]==offsets);
+    assert(ownership.roles.at(objectRole[0])==uniqueRecords&&ownership.roles.at(cameraRole[0])==offsets);
+    // Different submitted windows on one retained root contribute the union
+    // of all their validated offsets, rather than freezing the first layout.
+    const std::array<size_t,1> relative20{20},relative212{212};
+    const std::array<stereoreplay::CameraWindow,2> sharedRole{{{1,0,original,relative20,cameraRole},{2,0,original,relative212,cameraRole}}};
+    ownership=stereoreplay::OwnCameraRecords(sharedRole);
+    assert((ownership.roles.at(cameraRole[0])==std::vector<size_t>{20,212}));
+    // A retained role also keeps a layout from a DIFFERENT window that was
+    // wholly pruned this pair. That closer role may disappear next pair.
+    const auto closeWords=std::span<const float>(original).subspan(192);
+    const std::array<stereoreplay::CameraWindow,3> shadowedLayout{{
+        sharedRole[0],sharedRole[1],{2,192*4,closeWords,relative20,smallerRole}}};
+    ownership=stereoreplay::OwnCameraRecords(shadowedLayout);
+    assert(ownership.consistent&&ownership.records[1].empty());
+    assert((ownership.roles.at(cameraRole[0])==std::vector<size_t>{20,212}));
+    assert(stereoreplay::SelectCameraRecords(original,ownership.roles.at(cameraRole[0]),left)==std::vector<size_t>({20,212}));
+    const std::array<stereoreplay::CameraWindow,2> differentBuffers{{unique[1],{2,1024,laterWords,laterRecords}}};
+    ownership=stereoreplay::OwnCameraRecords(differentBuffers);
+    assert(ownership.consistent&&ownership.records[0]==offsets&&ownership.records[1]==offsets);
+    auto changed=original;changed[20+96]+=1;
+    const std::array<stereoreplay::CameraWindow,2> mutableAlias{{{1,0,original,offsets},{1,0,changed,offsets}}};
+    assert(!stereoreplay::OwnCameraRecords(mutableAlias).consistent);
     // Every accepted cached record must survive the cheap upload prefilter.
     assert(stereoreplay::MayContainCachedCameraRecord(words,offsets,left));
     for(const size_t o:offsets){const std::array<size_t,1> single{o};assert(stereoreplay::MayContainCachedCameraRecord(words,single,left));}

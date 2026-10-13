@@ -1683,9 +1683,13 @@ void Register(LogFn log,PanelFn panel,PanelFn world,PanelFn toggle) {
 }
 bool SpatialMenu(){return uiSupported.load()&&uiworld::Ready()&&hud::LayerFound()&&inWorld&&inWorld()&&wantsPanel&&wantsPanel();}
 bool Active() {std::lock_guard lock(mutex);return frame&&valid&&render&&!failed&&!panelMode;}
+bool ReplayQueueMatches(reshade::api::command_queue* rq,reshade::api::swapchain* swap) {
+    std::lock_guard lock(mutex);
+    return rq&&queue&&swap==gameSwapchain&&reinterpret_cast<ID3D12CommandQueue*>(rq->get_native())==queue.Get();
+}
 bool CaptureReplay(reshade::api::command_queue* rq,reshade::api::swapchain* swap,unsigned eye) {
     std::lock_guard lock(mutex);
-    if(eye>1||!Active()||swap!=gameSwapchain||!pairDrawing)return false;
+    if(eye>1||!ReplayQueueMatches(rq,swap)||!Active()||!pairDrawing)return false;
     Capture(rq,swap);return !failed&&eyes[eye].copied;
 }
 void FinishReplayCapture(){std::lock_guard lock(mutex);replayCopiesFinished=eyes[0].copied&&eyes[1].copied;}

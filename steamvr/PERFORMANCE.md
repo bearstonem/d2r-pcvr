@@ -49,7 +49,7 @@ fixtures: captured copy/compute/direct batches are executed again in dependency
 order; a texture with matched split barriers is replayed twice after restoring
 its original state, with byte-identical pixel readback. Five camera records
 are checked against distinct actual eye transforms/projections, including
-inverse and history consistency. All **50/50 native checks pass**, including
+inverse and history consistency. All **51/51 native checks pass**, including
 live hook suspension/resumption and menu INI persistence. DLL load/unload and
 the seven-row Video panel were also checked outside the game.
 
@@ -231,6 +231,32 @@ instruction-pointer capture occurred after fallback and is excluded from
 Single pass optimization evidence. Non-managed INI settings matched the
 deployment backup; profiling controls and the saved manual selection were
 restored. [Sanitized reader-gate comparison](evidence/2026-10-13-phase2-hook-gate-comparison.json).
+
+The next follow-up removes three CPU synchronization points: effects and each
+eye copy remain ordered on the same explicitly checked native queue, while
+the texture-state prelude is ordered through GPU fences before replay. Empty
+preludes are not submitted. Original GPU work still completes before camera
+edits, replay completes before camera restoration, and per-eye copies complete
+before proceeding. Failure exits retain completion protection. Native GPU
+fixtures cover queued effects/copy/prelude/replay and a delayed direct-queue
+producer followed by a copy-first replay with no prelude.
+
+Camera discovery also resolves overlapping upload windows by physical record
+address. Each discovered record gets one write/restore owner; retained root
+roles preserve their complete validated layouts, including offsets belonging
+to another window this frame. Role aliases are learned only from submitted
+lists. Fixtures cover shuffled submission order, smaller windows, disappearing
+aliases, layouts from wholly shadowed windows of retained roles, and conflicting
+snapshots. Existing discovery, binding, probe and root limits remain in place.
+Discovery runs on activation; ownership checks cover the bounded retained
+records each pair. This preserves discovered records but does not establish
+coverage of future shader roles or fix reflection-specific constants.
+
+Capacity, mapping, retirement and camera-mutation failures now have distinct
+reasons. The first successful replay is logged once per manual activation,
+including existing binding/root counts. All 51 native checks, staged DLL
+load/unload and independent review pass for this follow-up. Its live activation,
+headset and FPS results are pending; water reflections remain unresolved.
 
 ## Phase 2 baseline, October 12 evening
 

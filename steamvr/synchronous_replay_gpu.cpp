@@ -38,9 +38,9 @@ D3D12_RESOURCE_BARRIER Transition(ID3D12Resource* r,UINT sub,D3D12_RESOURCE_STAT
     D3D12_RESOURCE_BARRIER b{};b.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;b.Transition={r,sub,before,after};return b;
 }
 bool Reset(){return SUCCEEDED(allocator->Reset())&&SUCCEEDED(commands->Reset(allocator.Get(),nullptr));}
-bool Submit(){
+bool Submit(bool wait=true){
     if(FAILED(commands->Close()))return false;auto* q=GetQueue(direct);if(!q)return false;
-    ID3D12CommandList* list=commands.Get();direct->ExecuteCommandLists(1,&list);return Signal(*q)&&Wait(*q);
+    ID3D12CommandList* list=commands.Get();direct->ExecuteCommandLists(1,&list);return Signal(*q)&&(!wait||Wait(*q));
 }
 }
 bool Initialize(ID3D12CommandQueue* q){
@@ -59,17 +59,45 @@ bool Drain(const nativecapture::ReplayPacket& packet){
     return true;
 }
 bool Execute(const nativecapture::ReplayPacket& packet){
-    if(!direct||packet.batches.empty()||!Reset())return false;
+    if(!direct||packet.batches.empty())return false;
+    // Prepare every queue and list array before submitting borrowed work. A
+    // later allocation failure must not escape with replay still using the
+    // camera constants that Present is about to restore.
+    struct Batch {Queue* queue;std::vector<ID3D12CommandList*> lists;};
+    std::vector<Batch> batches;batches.reserve(packet.batches.size());
+    for(const auto& batch:packet.batches){
+        if(!batch.queue||batch.lists.empty())return false;
+        auto* q=GetQueue(batch.queue.Get());if(!q)return false;
+        Batch prepared{q,{}};prepared.lists.reserve(batch.lists.size());
+        for(const auto& list:batch.lists){if(!list)return false;prepared.lists.push_back(list.Get());}
+        batches.push_back(std::move(prepared));
+    }
     std::vector<D3D12_RESOURCE_BARRIER> barriers;
     for(const auto& s:packet.states)if(s.first!=s.last)barriers.push_back(Transition(s.resource.Get(),s.subresource,s.last,s.first));
-    if(!barriers.empty())commands->ResourceBarrier(UINT(barriers.size()),barriers.data());
-    if(!Submit())return false;
     Queue* previous=GetQueue(direct);
-    for(const auto& batch:packet.batches){auto* q=GetQueue(batch.queue.Get());if(!q)return false;
+    if(!previous)return false;
+    // Each native batch is ordered after the preceding one by a private GPU
+    // fence. Waiting for the final batch also completes the state prelude, so
+    // a separate CPU wait between prelude and replay only creates a GPU bubble.
+    struct Completion {
+        Queue* last=nullptr;
+        ~Completion(){if(last)Wait(*last);}
+        bool Finish(){const bool done=Wait(*last);last=nullptr;return done;}
+    } completion;
+    if(!barriers.empty()){
+        if(!Reset())return false;
+        commands->ResourceBarrier(UINT(barriers.size()),barriers.data());completion.last=previous;
+        if(!Submit(false))return false;
+    }else if(batches.front().queue!=previous){
+        // There is no prelude to submit, but earlier direct-queue effects/copy
+        // work must still precede replay beginning on a copy/compute queue.
+        completion.last=previous;if(!Signal(*previous))return false;
+    }
+    for(const auto& batch:batches){auto* q=batch.queue;
         if(q!=previous&&FAILED(q->native->Wait(previous->fence.Get(),previous->value))&&!Wait(*previous))return false;
-        std::vector<ID3D12CommandList*> lists;for(const auto& l:batch.lists)lists.push_back(l.Get());
-        q->native->ExecuteCommandLists(UINT(lists.size()),lists.data());if(!Signal(*q))return false;previous=q;
-    }return Wait(*previous);
+        q->native->ExecuteCommandLists(UINT(batch.lists.size()),batch.lists.data());completion.last=q;
+        if(!Signal(*q))return false;previous=q;
+    }return completion.Finish();
 }
 bool CopyDepth(ID3D12Resource* source,ID3D12Resource* destination,D3D12_RESOURCE_STATES from,D3D12_RESOURCE_STATES to){
     if(source==destination)return true;

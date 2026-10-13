@@ -38,6 +38,26 @@ int main(){
         else assert(!std::memcmp(original,pixel,4));
         D3D12_RANGE none{};readback->Unmap(0,&none);};
     check();assert(gpu::Execute(packet));check();assert(gpu::Execute(packet));check();
+    // Model effects followed by an eye copy on the same queue: submit both
+    // without a CPU wait, then immediately replay the original native packet.
+    // Its final completion must cover producer, copy, state prelude and replay.
+    ComPtr<ID3D12Resource> eyeCopy;assert(SUCCEEDED(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&desc,D3D12_RESOURCE_STATE_COPY_DEST,nullptr,IID_PPV_ARGS(&eyeCopy))));
+    ComPtr<ID3D12CommandAllocator> effectAllocator,eyeAllocator;assert(SUCCEEDED(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,IID_PPV_ARGS(&effectAllocator))));
+    assert(SUCCEEDED(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,IID_PPV_ARGS(&eyeAllocator))));
+    ComPtr<ID3D12GraphicsCommandList> effectList,eyeList;
+    assert(SUCCEEDED(device->CreateCommandList(0,D3D12_COMMAND_LIST_TYPE_DIRECT,effectAllocator.Get(),nullptr,IID_PPV_ARGS(&effectList))));
+    assert(SUCCEEDED(device->CreateCommandList(0,D3D12_COMMAND_LIST_TYPE_DIRECT,eyeAllocator.Get(),nullptr,IID_PPV_ARGS(&eyeList))));
+    auto effectBarrier=b;effectBarrier.Flags=D3D12_RESOURCE_BARRIER_FLAG_NONE;
+    effectBarrier.Transition.StateBefore=D3D12_RESOURCE_STATE_COPY_SOURCE;effectBarrier.Transition.StateAfter=D3D12_RESOURCE_STATE_RENDER_TARGET;
+    effectList->ResourceBarrier(1,&effectBarrier);const float effectColor[]{1,0,0,1};effectList->ClearRenderTargetView(rtv,effectColor,0,nullptr);
+    std::swap(effectBarrier.Transition.StateBefore,effectBarrier.Transition.StateAfter);effectList->ResourceBarrier(1,&effectBarrier);
+    auto eyeDestination=to;eyeDestination.pResource=eyeCopy.Get();eyeList->CopyTextureRegion(&eyeDestination,0,0,0,&from,nullptr);
+    assert(SUCCEEDED(effectList->Close())&&SUCCEEDED(eyeList->Close()));
+    ID3D12CommandList* effectLists[]{effectList.Get()},*eyeLists[]{eyeList.Get()};
+    queue->ExecuteCommandLists(1,effectLists);queue->ExecuteCommandLists(1,eyeLists);
+    assert(gpu::Execute(packet));check();
+    void* eyeBytes=nullptr;D3D12_RANGE eyeRange{0,4};assert(SUCCEEDED(eyeCopy->Map(0,&eyeRange,&eyeBytes)));
+    const unsigned char expectedEye[]{255,0,0,255};assert(!std::memcmp(eyeBytes,expectedEye,4));D3D12_RANGE eyeNone{};eyeCopy->Unmap(0,&eyeNone);
     audit::EndReplayLease();
     // A copy batch leaves an explicitly transitioned texture in COMMON through
     // implicit decay. The following direct batch legitimately starts there.
@@ -62,5 +82,5 @@ int main(){
     assert(copied.batches.size()==2&&copied.states.size()==1&&copied.states[0].first==D3D12_RESOURCE_STATE_COMMON&&copied.states[0].last==D3D12_RESOURCE_STATE_COPY_SOURCE);
     assert(gpu::Drain(copied));std::memcpy(original,changed,4);check();assert(gpu::Execute(copied));check();assert(gpu::Execute(copied));check();
     audit::EndReplayLease();gpu::Shutdown();audit::Stop();assert(audit::Shutdown());
-    std::puts("Native texture replay: byte-identical replay, matched split barriers, copy-queue texture decay, direct handoff and exact state restoration passed");
+    std::puts("Native texture replay: byte-identical replay, queued effects/copy/prelude ordering, matched split barriers, copy-queue texture decay, direct handoff and exact state restoration passed");
 }

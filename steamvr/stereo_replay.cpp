@@ -26,17 +26,20 @@ std::atomic<bool> running{false};
 std::atomic<unsigned> configuration{0};
 std::atomic<const char*> status{"Standard"};
 bool registered=false,done=false,invalid=false,temporal=false,inReplay=false;
-bool failed=false,layoutResolved=false;
+bool failed=false,layoutResolved=false,activationLogged=false;
+const char* invalidReason=nullptr;
 unsigned warmup=0,appliedConfiguration=0,lookupCount=0,bindingCount=0;
 uint32_t owner=0,pairs=0,replays=0,fallbacks=0;
 EyeFn eyeFn=nullptr;EffectsFn effectsFn=nullptr;
 effect_runtime* runtime=nullptr;
 replayaudit::Camera cameras[2];
 using CameraKey=std::pair<uint64_t,uint32_t>;
-struct Binding {resource buffer;uint64_t offset,size;CameraKey cameraKey;};
+struct Binding {resource buffer;uint64_t offset,size;CameraKey cameraKey;std::set<CameraKey> discoveryAliases;};
 struct Probe {ComPtr<ID3D12Resource> buffer;uint64_t offset;std::vector<float> original,right;std::vector<size_t> records;replayaudit::Camera left;};
 std::map<uint64_t,std::map<std::pair<uint64_t,uint64_t>,Binding>> bindings;
 std::map<CameraKey,std::vector<size_t>> cameraKeys;
+std::map<std::pair<uint64_t,uint64_t>,std::set<CameraKey>> discoveryRoles;
+std::set<std::pair<uint64_t,uint64_t>> inspectedBindings;
 std::atomic<bool> cameraFilterReady{false};
 std::atomic<unsigned> cameraFilterCount{0};
 std::array<std::atomic<uint64_t>,64> cameraFilterSignatures{};
@@ -58,6 +61,11 @@ resource_view rtv{},rtvSrgb{};resource target{};reshade::api::device* apiDevice=
 void Fallback(const char* reason){
     ++fallbacks;failed=true;status="Unavailable";
     char line[512];std::snprintf(line,sizeof line,"Stereo replay: stopped after pair %u: %s; Standard rendering restored; select Standard then Single pass to retry",pairs,reason);logging::Write(line);
+}
+void Invalidate(const char* reason){invalid=true;if(!invalidReason)invalidReason=reason;}
+void NoteDiscoveryAlias(Binding& binding,const CameraKey& role){
+    if(binding.discoveryAliases.size()>=cameraFilterSignatures.size()&&!binding.discoveryAliases.contains(role))Invalidate("camera root capacity exceeded");
+    else binding.discoveryAliases.insert(role);
 }
 bool D3D12(reshade::api::device* d){return d&&d->get_api()==device_api::d3d12;}
 template<class T> uint64_t Id(T* p){return reinterpret_cast<uint64_t>(p);}
@@ -82,7 +90,7 @@ void DestroyResource(reshade::api::device* d,resource r){
     if(!D3D12(d))return;
     {std::lock_guard lock(uploadMutex);const auto found=uploadAddresses.find(r.handle);if(found!=uploadAddresses.end()){uploads.erase(found->second);uploadAddresses.erase(found);}}
     if(!running.load())return;
-    nativecapture::ForgetResourceState(reinterpret_cast<ID3D12Resource*>(r.handle));if(collecting.load()){std::lock_guard lock(mutex);invalid=true;}
+    nativecapture::ForgetResourceState(reinterpret_cast<ID3D12Resource*>(r.handle));if(collecting.load()){std::lock_guard lock(mutex);Invalidate("resource retired during capture");}
 }
 void Runtime(effect_runtime* rt){std::lock_guard lock(mutex);runtime=rt;}
 void DestroyRuntime(effect_runtime* rt){std::lock_guard lock(mutex);if(runtime==rt){runtime=nullptr;warmup=0;}}
@@ -108,10 +116,16 @@ void Push(uint64_t listId,uint64_t signature,uint32_t parameter,uint64_t address
     // Discovery is bounded once on enable. Established camera roots retain
     // only a bounded set of unique ranges, rather than all draw CBVs.
     const auto key=std::pair{b.buffer.handle,b.offset};
-    if(seenBindings.contains(key)){if(recent)*recent={epoch,address};return;}
-    if(bindingCount>=(layoutResolved?512u:64u)){if(layoutResolved)invalid=true;return;}
+    if(seenBindings.contains(key)){
+        // Discovery must retain every root alias for an already selected
+        // window, even when a different list or role was bound first.
+        if(!layoutResolved){auto [pending,fresh]=bindings[listId].try_emplace(key,Binding{b.buffer,b.offset,b.size,cameraKey,{}});NoteDiscoveryAlias(pending->second,cameraKey);}
+        if(recent)*recent={epoch,address};return;
+    }
+    if(bindingCount>=(layoutResolved?512u:64u)){if(layoutResolved)Invalidate("camera binding capacity exceeded");return;}
     seenBindings.insert(key);++bindingCount;
-    bindings[listId].try_emplace(key,Binding{b.buffer,b.offset,b.size,cameraKey});
+    auto [pending,fresh]=bindings[listId].try_emplace(key,Binding{b.buffer,b.offset,b.size,cameraKey,{}});
+    if(!layoutResolved)NoteDiscoveryAlias(pending->second,cameraKey);
     if(recent)*recent={epoch,address};
 }
 void Execute(command_queue* q,command_list* cl){
@@ -121,14 +135,21 @@ void Execute(command_queue* q,command_list* cl){
         if(!b.buffer.handle)continue;
         const auto known=cameraKeys.find(b.cameraKey);
         if(layoutResolved&&known==cameraKeys.end())continue;
-        if(known==cameraKeys.end()&&lookupCount++>=64)continue;
+        if(!layoutResolved){
+            auto& aliases=discoveryRoles[bindingKey];
+            for(const auto& role:b.discoveryAliases){
+                if(aliases.size()>=cameraFilterSignatures.size()&&!aliases.contains(role))Invalidate("camera root capacity exceeded");
+                else aliases.insert(role);
+            }
+            if(inspectedBindings.insert(bindingKey).second)++lookupCount;
+        }
         const auto desc=q->get_device()->get_resource_desc(b.buffer);
         if(desc.type!=resource_type::buffer||desc.heap!=memory_heap::upload||b.offset>=desc.buffer.size)continue;
         const auto bytes=std::min({uint64_t(4096),desc.buffer.size-b.offset,b.size})&~uint64_t(3);
         if(bytes<448)continue;
         auto* buffer=reinterpret_cast<ID3D12Resource*>(b.buffer.handle);
         void* data=nullptr;D3D12_RANGE read{SIZE_T(b.offset),SIZE_T(b.offset+bytes)};
-        if(FAILED(buffer->Map(0,&read,&data))||!data){invalid=true;continue;}
+        if(FAILED(buffer->Map(0,&read,&data))||!data){Invalidate("camera upload mapping failed");continue;}
         const auto mapped=std::span(static_cast<const float*>(static_cast<const void*>(static_cast<const uint8_t*>(data)+b.offset)),size_t(bytes/4));
         // Some shaders share one root between camera and object constants.
         // Reject unrelated windows with just their cached view locations,
@@ -146,13 +167,39 @@ void Execute(command_queue* q,command_list* cl){
         // cached offsets only where that actual submitted range contains the
         // complete camera record; never borrow another range's layout blindly.
         if(records.empty())continue;
-        if(!layoutResolved)cameraKeys.try_emplace(b.cameraKey,records);
         const auto key=std::pair{b.buffer.handle,b.offset};const auto old=probes.find(key);
         if(old!=probes.end()){
-            for(const size_t o:records)if(o+112>old->second.original.size()||std::memcmp(old->second.original.data()+o,words.data()+o,112*4))invalid=true;
+            for(const size_t o:records){
+                if(o+112>old->second.original.size()||std::memcmp(old->second.original.data()+o,words.data()+o,112*4))Invalidate("camera constants changed between submissions");
+                else if(!CameraRecord(old->second.original,o,old->second.left))Invalidate("camera layout changed between submissions");
+                else old->second.records.push_back(o);
+            }
+            auto& merged=old->second.records;std::sort(merged.begin(),merged.end());merged.erase(std::unique(merged.begin(),merged.end()),merged.end());
         }else if(probes.size()<64)probes.emplace(key,Probe{buffer,b.offset,std::move(words),{},std::move(records),cameras[0]});
-        else invalid=true;
+        else Invalidate("camera range capacity exceeded");
     }
+}
+void ResolveOwnership(bool discover){
+    std::vector<CameraWindow> windows;windows.reserve(probes.size());
+    std::vector<std::vector<CameraKey>> roles;roles.reserve(probes.size());
+    for(const auto& [key,p]:probes){
+        roles.emplace_back();
+        if(discover){const auto aliases=discoveryRoles.find(key);
+            if(aliases==discoveryRoles.end()){Invalidate("camera root metadata missing");return;}
+            roles.back().assign(aliases->second.begin(),aliases->second.end());
+        }
+        windows.push_back({key.first,p.offset,p.original,p.records,roles.back()});
+    }
+    auto owned=OwnCameraRecords(windows);
+    if(!owned.consistent){Invalidate("overlapping camera constants changed");return;}
+    if(discover)cameraKeys=std::move(owned.roles);
+    size_t i=0;
+    for(auto p=probes.begin();p!=probes.end();){
+        p->second.records=owned.records[i++];
+        if(p->second.records.empty()){p=probes.erase(p);continue;}
+        ++p;
+    }
+    if(discover&&cameraKeys.size()>cameraFilterSignatures.size())Invalidate("camera root capacity exceeded");
 }
 void BindDepth(command_list* cl,uint32_t,const resource_view*,resource_view dsv){
     if(!collecting.load()||!dsv.handle||!D3D12(cl->get_device()))return;
@@ -215,19 +262,20 @@ void Present(command_queue* q,swapchain* swap,const rect*,const rect*,uint32_t,c
     // already inside a queue call may itself be finishing a camera callback.
     struct Lease {bool held=nativecapture::BeginReplayLease();~Lease(){if(held)nativecapture::EndReplayLease();}} lease;
     std::lock_guard lock(mutex);nativecapture::SealPresent(true);nativecapture::ReplayPacket packet;
+    ResolveOwnership(!layoutResolved);
     layoutResolved=!cameraKeys.empty();
-    if(layoutResolved&&!cameraFilterReady.load()){
+    if(layoutResolved&&!invalid&&!cameraFilterReady.load()){
         unsigned count=0;for(const auto& [key,offsets]:cameraKeys){if(count==cameraFilterSignatures.size())break;cameraFilterSignatures[count]=key.first;cameraFilterParameters[count++]=key.second;}
         cameraFilterCount=count;cameraFilterReady.store(true,std::memory_order_release);
     }
     if(!lease.held||invalid||temporal||!runtime||probes.empty()||!nativecapture::SnapshotReplay(packet)){
-        Fallback(!lease.held?"GPU lifetime lease unavailable":invalid?"mutable constants/resources":temporal?"temporal upscaling":probes.empty()?"camera buffers missing":!runtime?"effects runtime missing":nativecapture::ReplayPacketFailure());
+        Fallback(!lease.held?"GPU lifetime lease unavailable":invalid?invalidReason:temporal?"temporal upscaling":probes.empty()?"camera buffers missing":!runtime?"effects runtime missing":nativecapture::ReplayPacketFailure());
         const auto r=nativecapture::EndEye(true);char detail[400];
-        std::snprintf(detail,sizeof detail,"Stereo replay stop details: camera_ranges=%u bindings=%u lookup_reads=%u batches=%u lists=%u plan=%s unknown=%u overlap=%u foreign=%u boundary=%u api=%u cpu_signals=%u hooks=%u faults=%u capacity=%u",unsigned(probes.size()),bindingCount,lookupCount,r.batches,r.lists,nativecapture::StatusName(r.atPresent),r.unknownLists,r.queueOverlap,r.foreignCalls,r.boundaryCalls,r.apiFailures,r.cpuSignals,r.hookErrors,r.observerFaults,r.capacityFailures);logging::Write(detail);return;
+        std::snprintf(detail,sizeof detail,"Stereo replay stop details: camera_ranges=%u bindings=%u lookup_windows=%u batches=%u lists=%u plan=%s unknown=%u overlap=%u foreign=%u boundary=%u api=%u cpu_signals=%u hooks=%u faults=%u capacity=%u",unsigned(probes.size()),bindingCount,lookupCount,r.batches,r.lists,nativecapture::StatusName(r.atPresent),r.unknownLists,r.queueOverlap,r.foreignCalls,r.boundaryCalls,r.apiFailures,r.cpuSignals,r.hookErrors,r.observerFaults,r.capacityFailures);logging::Write(detail);return;
     }
     nativecapture::EndEye(true);
     const auto rightTech=runtime->find_technique("D2R_DepthFog.fx","D2R_DepthFog_R");
-    if(!rightTech.handle||!runtime->get_effects_state()||!Setup(q,swap)){Fallback("effects/setup unavailable");return;}
+    if(!rightTech.handle||!runtime->get_effects_state()||!framevr::ReplayQueueMatches(q,swap)||!Setup(q,swap)){Fallback("effects/setup/queue unavailable");return;}
     const auto texture=runtime->find_texture_variable("D2R_DepthFog.fx","FogDepthTex");resource_view depthView{},depthViewSrgb{};
     if(texture.handle)runtime->get_texture_binding(texture,&depthView,&depthViewSrgb);
     if(!depthView.handle){Fallback("depth binding missing");return;}
@@ -246,7 +294,8 @@ void Present(command_queue* q,swapchain* swap,const rect*,const rect*,uint32_t,c
     if(!synchronousgpu::Drain(packet)){Fallback("original GPU completion failed");return;}
     if(!CameraUnchanged()){Fallback("camera constants changed before replay");return;}
     inReplay=true;Effects(q,false);
-    if(!synchronousgpu::Complete()||!framevr::CaptureReplay(q,swap,0)||!synchronousgpu::Complete()){inReplay=false;Fallback("left copy failed");return;}
+    const bool leftCopied=framevr::CaptureReplay(q,swap,0),leftCompleted=synchronousgpu::Complete();
+    if(!leftCopied||!leftCompleted){inReplay=false;Fallback("left copy failed");return;}
     const bool written=WriteProbes(true);
     const bool rendered=written&&synchronousgpu::Execute(packet);
     // Borrowed constants/recordings never escape this synchronous completion.
@@ -255,10 +304,11 @@ void Present(command_queue* q,swapchain* swap,const rect*,const rect*,uint32_t,c
     eyeFn(1);
     if(!UniformDepthState(depthSource.Get(),sourceState)||!UniformDepthState(depthDestination.Get(),destState)||!synchronousgpu::CopyDepth(depthSource.Get(),depthDestination.Get(),sourceState,destState)){inReplay=false;Fallback("right depth copy failed");return;}
     Effects(q,true);
-    if(!synchronousgpu::Complete()||!framevr::CaptureReplay(q,swap,1)||!synchronousgpu::Complete()){inReplay=false;Fallback("right copy failed");return;}
+    const bool rightCopied=framevr::CaptureReplay(q,swap,1),rightCompleted=synchronousgpu::Complete();
+    if(!rightCopied||!rightCompleted){inReplay=false;Fallback("right copy failed");return;}
     framevr::FinishReplayCapture();done=true;inReplay=false;++replays;status="Single pass";
-    if(replays==1){char line[240];unsigned restores=0;for(const auto& state:packet.states)restores+=state.first!=state.last;
-        std::snprintf(line,sizeof line,"Stereo replay: first actual pair; %u batches, %u camera ranges, %u records, %u texture boundary restorations; second engine draw skipped",unsigned(packet.batches.size()),unsigned(probes.size()),records,restores);logging::Write(line);}
+    if(!activationLogged){activationLogged=true;char line[320];unsigned restores=0;for(const auto& state:packet.states)restores+=state.first!=state.last;
+        std::snprintf(line,sizeof line,"Stereo replay: first actual pair; %u batches, %u camera ranges, %u records, %u texture boundary restorations; second engine draw skipped; %u bindings, %u camera roots",unsigned(packet.batches.size()),unsigned(probes.size()),records,restores,bindingCount,unsigned(cameraKeys.size()));logging::Write(line);}
 }
 }
 void Register(bool enabled,EyeFn eye,EffectsFn effects){
@@ -285,12 +335,12 @@ void BeginPair(bool supported){
     done=false;
     if(!registered)return;
     const auto revision=configuration.load();
-    if(appliedConfiguration!=revision){appliedConfiguration=revision;failed=false;cameraFilterReady=false;cameraFilterCount=0;cameraKeys.clear();layoutResolved=false;lookupCount=0;}
+    if(appliedConfiguration!=revision){appliedConfiguration=revision;failed=false;activationLogged=false;cameraFilterReady=false;cameraFilterCount=0;cameraKeys.clear();discoveryRoles.clear();layoutResolved=false;lookupCount=0;}
     const bool enable=requested.load()&&!failed;
     if(!enable){
         if(running.exchange(false)){
             if(collecting.exchange(false))nativecapture::EndEye();nativecapture::Stop();
-            std::lock_guard lock(mutex);probes.clear();depths.clear();bindings.clear();cameraFilterReady=false;cameraFilterCount=0;cameraKeys.clear();
+            std::lock_guard lock(mutex);probes.clear();depths.clear();bindings.clear();discoveryRoles.clear();cameraFilterReady=false;cameraFilterCount=0;cameraKeys.clear();
             logging::Write(nativecapture::ActiveHooks()==0?"Stereo rendering: Standard; native replay hooks disabled and tracking cleared":"Stereo rendering: Standard; replay hooks could not all be disabled");
         }
         if(!requested.load())status="Standard";return;
@@ -306,7 +356,7 @@ void BeginPair(bool supported){
     // A fresh Reset must supply the existing lists' allocator generations after
     // hooks were disabled in Standard. This is setup, not live qualification.
     if(warmup++<2)return;
-    ++pairs;std::lock_guard lock(mutex);owner=GetCurrentThreadId();invalid=temporal=false;cameras[0]={};cameras[1]={};probes.clear();depths.clear();bindings.clear();seenBindings.clear();bindingCount=0;++bindingEpoch;
+    ++pairs;std::lock_guard lock(mutex);owner=GetCurrentThreadId();invalid=temporal=false;invalidReason=nullptr;cameras[0]={};cameras[1]={};probes.clear();depths.clear();bindings.clear();seenBindings.clear();inspectedBindings.clear();bindingCount=0;++bindingEpoch;
     nativecapture::BeginEye(owner);collecting=true;
 }
 bool Replayed(){return done;}

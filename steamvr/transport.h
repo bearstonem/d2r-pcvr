@@ -54,6 +54,7 @@ bool Active();
 bool SpatialMenu();
 // Explicit per-eye copy for synchronous stereo replay. The ordinary later
 // callback is suppressed only after BOTH copies were submitted successfully.
+bool ReplayQueueMatches(reshade::api::command_queue*,reshade::api::swapchain*);
 bool CaptureReplay(reshade::api::command_queue*,reshade::api::swapchain*,unsigned eye);
 void FinishReplayCapture();
 bool View(float out[16], const float hero[3], float eyeHeight,
