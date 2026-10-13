@@ -26,7 +26,7 @@ target_include_directories(minhook PUBLIC ${ROOT}/third_party/minhook/include)
 add_library(d2rcam STATIC ${ROOT}/cleanroom/camera/d2rcam.cpp ${ROOT}/cleanroom/drawdist/drawdist.cpp ${ROOT}/cleanroom/sigscan/sigscan.cpp)
 target_include_directories(d2rcam PUBLIC ${ROOT}/cleanroom/camera ${ROOT}/cleanroom/sigscan ${D2RL_SDK}/include)
 add_library(d2rl-vrcam SHARED ${ROOT}/vr/vrcam.cpp ${ROOT}/vr/dlss_mv.cpp ${ROOT}/vr/skeletons.cpp ${ROOT}/vr/gamestate.cpp ${ROOT}/vr/gamecmd.cpp ${ROOT}/vr/probe.cpp ${ROOT}/vr/uitrace.cpp ${ROOT}/vr/hud.cpp ${ROOT}/vr/memdiff.cpp ${ROOT}/vr/writewatch.cpp ${ROOT}/vr/vrcam.rc)
-target_sources(d2rl-vrcam PRIVATE ${ROOT}/vr/dlss_depth.cpp)
+target_sources(d2rl-vrcam PRIVATE ${ROOT}/vr/dlss_depth.cpp replay_audit.cpp)
 target_sources(d2rl-vrcam PRIVATE ${ROOT}/vr/billboards.cpp)
 target_sources(d2rl-vrcam PRIVATE ${ROOT}/vr/panel_input.cpp)
 target_sources(d2rl-vrcam PRIVATE interaction_assets.rc interaction_icons.cpp ui_blit.cpp ui_world.cpp)
@@ -49,6 +49,9 @@ add_executable(latest-worker-test latest_worker_test.cpp)
 target_link_libraries(latest-worker-test PRIVATE framevr-runtime)
 add_executable(thread-stats-test thread_stats_test.cpp)
 target_link_libraries(thread-stats-test PRIVATE framevr-runtime)
+add_executable(replay-audit-test replay_audit_test.cpp)
+add_executable(replay-audit-gpu-test replay_audit_gpu_test.cpp)
+target_link_libraries(replay-audit-gpu-test PRIVATE d3d12 framevr-runtime)
 add_executable(dlss-depth-test dlss_depth_test.cpp)
 target_link_libraries(dlss-depth-test PRIVATE d3d11 framevr-runtime)
 add_executable(dlss-depth-upload-test dlss_depth_upload_test.cpp)
@@ -115,7 +118,7 @@ target_include_directories(local-player-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 target_link_libraries(local-player-test PRIVATE framevr-runtime)
 target_link_libraries(window-focus-test PRIVATE user32)
 enable_testing()
-foreach(test_target IN ITEMS memory-test hook-metrics-test active-keys-test resource-descriptions-test latest-worker-test thread-stats-test
+foreach(test_target IN ITEMS memory-test hook-metrics-test active-keys-test resource-descriptions-test latest-worker-test thread-stats-test replay-audit-test replay-audit-gpu-test
     gameplay-test weapon-skills-test quick-cast-test spell-aim-test bow-pose-test body-tracking-test body-calibration-test shoulder-swap-test
     portal-billboard-test composition-layers-test projectile-rules-test
     combat-rules-test logging-test melee-contact-test world-coordinates-test bow-flight-test
@@ -130,6 +133,7 @@ foreach(test_target IN ITEMS memory-test hook-metrics-test active-keys-test reso
   add_test(NAME ${test_target} COMMAND ${test_target})
 endforeach()
 set_tests_properties(window-focus-test PROPERTIES TIMEOUT 10)
+set_tests_properties(replay-audit-gpu-test PROPERTIES TIMEOUT 40)
 add_test(NAME ui-blit-typed COMMAND ui-blit-test)
 add_test(NAME ui-blit-typeless COMMAND ui-blit-test --typeless)
 add_test(NAME ui-blit-typeless-black COMMAND ui-blit-test black --typeless)

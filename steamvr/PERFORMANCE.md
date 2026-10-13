@@ -56,6 +56,48 @@ Sanitized aggregates and limitations:
 [`evidence/2026-10-13-performance-phase2-baseline.json`](evidence/2026-10-13-performance-phase2-baseline.json).
 Raw local diagnostic reports remain in ignored `build-frame/phase2/`.
 
+## Phase 2 command and camera audit
+
+The phase 2 branch adds a default-off audit before changing the renderer.
+Set `[debug] replay_audit=1` in the installed `d2r_vr.ini`, restart the game,
+and load an offline local character with the headset active. No fixed stance
+or view is required. After 90 active XR gameplay pairs, it observes eight
+normal stereo pairs and stops. The log announces `Replay audit: complete;
+8/8 pairs; collection stopped`. Leaving gameplay or losing active XR during
+collection cancels it and logs an incomplete result. Restart with the setting
+back at zero before any performance comparison; the diagnostic adds overhead.
+
+With the default zero, none of its ReShade diagnostic callbacks register.
+When enabled, command-list metadata is tracked before collection so recordings
+made earlier can be recognized. Collection reports per-eye submission/queue
+counts, list invalidation at Present and at draw return, queue-local transition
+chains and resource retirement. Camera probes temporarily map at most 32
+distinct upload-buffer ranges per eye, read at most 4 KiB each, and check the
+current view/projection and their inverses/combinations. The probes never write
+buffer contents or save matrix/stack bytes; logs contain counts only. Missing,
+truncated, partial or unreadable metadata is reported explicitly.
+
+This audit cannot certify replay safety. ReShade's public callbacks do not
+expose native ExecuteCommandLists batch boundaries, allocator resets, all
+barrier details or queue fence Signal/Wait dependencies. Queue-local state
+counts use the observed CPU submission order; they do not establish a global
+GPU order. An unknown root CBV extent is capped for reading, not assumed to
+be a 4 KiB constant buffer. The recognizer checks current camera matrices,
+not positions, temporal histories, right-eye effects/depth, VRS or spatial UI.
+No command list is replayed and both eyes retain their normal engine draw.
+
+The lifecycle check follows Microsoft's
+[ExecuteCommandLists contract](https://learn.microsoft.com/en-us/windows/win32/api/d3d12/nf-d3d12-id3d12commandqueue-executecommandlists)
+and [allocator reset requirements](https://learn.microsoft.com/en-us/windows/win32/api/d3d12/nf-d3d12-id3d12commandallocator-reset):
+a command list object can be re-recorded after submission, whereas the allocator
+and referenced GPU work must remain valid until completion. Keeping a COM
+pointer alone does not preserve an old recording. A native D3D12 fixture verifies
+closed-list reuse after completion with changed private data, then demonstrates
+that resetting the same object changes its GPU work and is detected by the audit.
+Model fixtures cover capture completion/cancellation, address reuse/destruction,
+metadata limits, range overflow, matrix consistency and rejection of similar
+shadow cameras and invalid data. Live game audit validation remains pending.
+
 ## Issue 20 investigation, October 12
 
 [#20](https://github.com/bearstonem/d2r-pcvr/issues/20) reports roughly 60 FPS

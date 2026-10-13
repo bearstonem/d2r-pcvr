@@ -23,6 +23,7 @@
 #endif
 #include <windows.h>
 #include "../steamvr/profile.h"
+#include "../steamvr/replay_audit.h"
 #include "../steamvr/resource_descriptions.h"
 #include "../steamvr/vr_settings.h"
 #include <tlhelp32.h>
@@ -2299,6 +2300,9 @@ bool VrView(const d2rcam::WorldView& in, float out[16]) {
     const bool ours = VrViewInner(in, out);
     if (ours) {
         prevscan::Record(out);
+#ifdef D2RVR_NATIVE_OPENXR
+        framevr::replayaudit::View(g_eye.load()&1,out);
+#endif
         memcpy(prevscan::g_lastView, out, sizeof prevscan::g_lastView);
         prevscan::g_lastViewOk = true;
         prevscan::g_lastEye = g_eye.load() & 1;
@@ -2487,6 +2491,9 @@ bool VrProj(const d2rcam::WorldView& in, float M[16]) {
 #endif
     const bool ours = VrProjInner(in, M);
     if (ours) {
+#ifdef D2RVR_NATIVE_OPENXR
+        framevr::replayaudit::Projection(g_eye.load()&1,M);
+#endif
         memcpy(prevscan::g_lastProj, M, sizeof prevscan::g_lastProj);
         prevscan::g_lastProjOk = true;
         if (prevscan::g_lastViewOk) dlssmv::SetPending(prevscan::g_lastView, M, g_eye.load() & 1);
@@ -4443,6 +4450,7 @@ uintptr_t HookDrawGameScreen(int a) {
         if(!depth) {
 #ifdef D2RVR_NATIVE_OPENXR
             framevr::profile::SkipPair();
+            framevr::replayaudit::SkipPair();
             sumBegin=sumEnd=sumWait=sumFence=sumSubmit=sumPeriod=0;
             periodPairs=0;
 #endif
@@ -4463,6 +4471,7 @@ uintptr_t HookDrawGameScreen(int a) {
     if (!toldTry) { toldTry = true; Log("vrcam: pair per game frame - drawing the first pair"); }
 #ifdef D2RVR_NATIVE_OPENXR
     framevr::BeginPair();
+    framevr::replayaudit::BeginPair(framevr::Active());
     if(framevr::TakeWorldRecenter())Recenter();
 #endif
     // One head for the pair: BodyWalk's block may change between the passes.
@@ -4489,9 +4498,13 @@ uintptr_t HookDrawGameScreen(int a) {
     SetEye(0);
 #ifdef D2RVR_NATIVE_OPENXR
     framevr::BeginEye(0);
+    framevr::replayaudit::BeginEye(0);
 #endif
     d2rcam::Refresh();
     OrigDrawGameScreen(a);
+#ifdef D2RVR_NATIVE_OPENXR
+    framevr::replayaudit::EndEye();
+#endif
     const double t1 = pairtime::UsNow();
 #ifdef D2RVR_NATIVE_OPENXR
     const double c1 = measureCpu?pairtime::CpuUs():0;
@@ -4511,9 +4524,13 @@ uintptr_t HookDrawGameScreen(int a) {
     SetEye(1);
 #ifdef D2RVR_NATIVE_OPENXR
     framevr::BeginEye(1);
+    framevr::replayaudit::BeginEye(1);
 #endif
     d2rcam::Refresh();
     const uintptr_t r = OrigDrawGameScreen(a);
+#ifdef D2RVR_NATIVE_OPENXR
+    framevr::replayaudit::EndEye();
+#endif
     *dt = keep; *rawDt = keepRaw;
     const double t2 = pairtime::UsNow();
     sumPass[1] += t2 - t1;
@@ -4524,6 +4541,7 @@ uintptr_t HookDrawGameScreen(int a) {
 
 #ifdef D2RVR_NATIVE_OPENXR
     framevr::EndPair();
+    framevr::replayaudit::EndPair();
 #endif
     const double ended=pairtime::UsNow();
 #ifdef D2RVR_NATIVE_OPENXR
@@ -7578,6 +7596,7 @@ void TryRegister() {
     hud::Register();       // the interface's own layer: [hud] hide
 #ifdef D2RVR_NATIVE_OPENXR
     framevr::Register(&Log, +[](){return gamestate::MenuOpen()||!g_inWorld.load();}, +[](){return g_inWorld.load();}, &gamestate::ToggleMenus);
+    framevr::replayaudit::Register(IniB(L"debug",L"replay_audit",false));
 #endif
     g_registered = true;
     Log("vrcam: joined ReShade - the fog and the sky follow d2r_vr.ini [fog] [sky]");
@@ -8023,6 +8042,7 @@ D2RL_PLUGIN_EXPORT void D2RLoaderUnloadPlugin() noexcept {
 #endif
     if (fx::g_registered) { reshade::unregister_addon(g_self); fx::g_registered = false; }
 #ifdef D2RVR_NATIVE_OPENXR
+    framevr::replayaudit::Shutdown();
     pairtime::threadStats.Stop();
 #endif
     if (g_gameWnd && g_gameWndProc) SetWindowLongPtrW(g_gameWnd, GWLP_WNDPROC, (LONG_PTR)g_gameWndProc);
