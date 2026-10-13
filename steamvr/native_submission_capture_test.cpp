@@ -224,8 +224,23 @@ int main() {
         assert(shared.DependenciesComplete()&&shared.multiSignalFences==1&&!shared.unorderedSignalFences);
         assert(shared.batches==3&&shared.lists==4&&shared.internalWaits==3&&f.Value()==0x55667788);
         audit::Stop();audit::BeginEye(GetCurrentThreadId());
+        assert(audit::ActiveHooks()==0&&audit::InstalledHooks()>0);
         Check(f.queues[0].queue->Signal(f.queues[0].fence.Get(),9),"pass-through signal after stop");f.Wait(0,9);
         assert(audit::EndEye().atEnd==PlanStatus::Empty);
+        // The in-headset switch can resume existing detours without a restart.
+        // Fresh Reset calls supply generations discarded while Standard ran.
+        assert(audit::Start());
+        for(unsigned i=0;i<3;++i)audit::ObserveQueue(f.queues[i].queue.Get());
+        audit::ObserveList(f.queues[0].list.Get());
+        Check(f.queues[0].allocator->Reset(),"allocator reset after manual resume");
+        Check(f.queues[0].list->Reset(f.queues[0].allocator.Get(),nullptr),"list reset after manual resume");
+        Check(f.queues[0].list->Close(),"close resumed recording");
+        audit::BeginEye(GetCurrentThreadId());f.pending=true;
+        ID3D12CommandList* resumed[]={f.queues[0].list.Get()};f.queues[0].queue->ExecuteCommandLists(1,resumed);
+        Check(f.queues[0].queue->Signal(f.queues[0].fence.Get(),10),"signal after manual resume");
+        audit::SealPresent();f.Wait(0,10);
+        assert(audit::ActiveHooks()>0&&audit::EndEye().DependenciesComplete());
+        audit::Stop();assert(audit::ActiveHooks()==0);
         framevr::synchronousgpu::Shutdown();
         assert(audit::Shutdown()&&audit::InstalledHooks()==0);
         std::puts("Native capture: original three-queue GPU results/order preserved, allocator/list generations observed, CPU signals flagged, default-off and clean hook removal verified");return 0;

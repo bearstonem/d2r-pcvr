@@ -1,9 +1,10 @@
 # VR performance investigations
 
-## Synchronous stereo renderer candidate: live comparison pending
+## Manual single-pass renderer candidate: live comparison pending
 
-The experimental `[stereo] replay_right=1` startup mode now has an actual
-rendering path. It captures the left engine draw's native batches, renders and
+VR settings > Video > Stereo rendering selects **Standard** or experimental
+**Single pass** (`[stereo] replay_right=1`), applied live without restarting.
+Standard is the default. Single pass captures the left engine draw's native batches, renders and
 copies that eye's effects, executes the validated recordings with the right
 XR camera folded into the projection, copies right-eye depth for its effects,
 and submits both OpenXR images. A successful pair skips the second engine
@@ -13,7 +14,7 @@ to installer defaults.
 
 This first candidate is synchronous. Original GPU work completes before
 temporary camera edits; replay completes before those edits are restored and
-the engine resumes. Camera writes cover only changed, validated matrix words.
+the engine resumes. Camera writes cover only validated matrix records.
 Native list/allocator/queue/barrier and descriptor mutations from other threads
 are excluded during replay. Native batches stay intact, every replay queue has
 its own monotonic completion fence, and texture subresources are restored from
@@ -21,12 +22,20 @@ observed native transitions. Matched texture split barriers are supported;
 aliasing, enhanced barriers and split barriers on decaying resources fall back.
 This is not an asynchronous resource/descriptor lifetime solution.
 
-Qualification requires settled first-person gameplay, symmetric projection,
-fixed foveation, no native menu, known camera/depth state, and no active foreign
-ReShade effects. Existing graphics settings must have DLSS and dynamic
-resolution off, with AA off or FXAA. The renderer reads those settings without
-changing them. Camera root bindings are classified from submitted constants
-and cached for the settled scene; menus/area changes/toggling reset this cache.
+The mode is selected manually. It does not read graphics JSON, enumerate
+foreign effects, or continuously decide whether to opt in. Test with symmetric
+projection, fixed foveation, AA off or FXAA, DLSS/dynamic resolution off, and no
+extra ReShade effects. Native menus and non-first-person views use Standard.
+Standard disables the owned native detours and clears replay tracking. Public
+callbacks remain registered for safe live switching and return immediately
+while inactive. Enabling primes native recording generations for two frames.
+Camera discovery is bounded to 64 unique bindings once per activation, then
+retains camera root/record offsets. Subsequent frames update those records;
+there is no unrestricted search through thousands of object bindings. Native
+dependency planning runs once per replay; diagnostic traces remain separate.
+An unsafe frame logs its reason once, falls back and suspends replay tracking
+until the user selects Standard and re-enables Single pass. The menu then shows
+Unavailable rather than suggesting that a stopped candidate is still active.
 Coverage of every shader layout, CPU-projected world labels, shadows,
 particles, spatial UI and transitions still needs actual headset validation.
 Temporal upscaling/history sharing is not enabled.
@@ -36,9 +45,17 @@ fixtures: captured copy/compute/direct batches are executed again in dependency
 order; a texture with matched split barriers is replayed twice after restoring
 its original state, with byte-identical pixel readback. Five camera records
 are checked against distinct actual eye transforms/projections, including
-inverse and history consistency. All **50/50 native checks pass**. A matched
-in-game FPS comparison and headset image/controls verification are pending;
-these fixture results do not establish a performance gain.
+inverse and history consistency. All **50/50 native checks pass**, including
+live hook suspension/resumption and menu INI persistence. DLL load/unload and
+the seven-row Video panel were also checked outside the game.
+
+The first prototype's live trial did not activate replay. Its 360-pair
+Standard-mode capture measured 33.480 ms / 29.87 FPS while native replay
+bookkeeping was still running. There is no candidate FPS result from that
+trial, and it cannot establish a regression against a historical scene.
+This prompted the manual-mode and inactive-path corrections above. A matched
+comparison with the revised build, plus headset image/controls verification,
+is still pending; fixture results do not establish a performance gain.
 
 ## Phase 2 baseline, October 12 evening
 

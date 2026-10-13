@@ -9,6 +9,7 @@
 #include <atomic>
 #include <map>
 #include <mutex>
+#include <set>
 #include <vector>
 
 namespace framevr::nativecapture {
@@ -22,7 +23,7 @@ std::atomic<DWORD> leaseOwner{0};
 thread_local unsigned gateDepth=0;
 std::atomic<bool> tracking{false},installAllowed{false};
 std::atomic<uint32_t> invocations{0},queueCalls{0},hookErrors{0},observerFaults{0},capacityFailures{0};
-bool started=false,collecting=false,eyeOpen=false,wantTrace=false;
+bool started=false,hooksActive=false,collecting=false,eyeOpen=false,wantTrace=false;
 bool replayPackets=false;
 const char* packetFailure="not captured";
 struct ListBarriers {std::vector<D3D12_RESOURCE_BARRIER> barriers;std::vector<ComPtr<ID3D12Resource>> resources;bool unsupported=false;};
@@ -37,6 +38,8 @@ Recordings recordings;
 Capture capture;
 Report report;
 ComPtr<ID3D12Device> primaryDevice;
+bool deviceObserved=false;
+std::set<uint64_t> observedLists;
 std::map<uint64_t,ComPtr<ID3D12CommandAllocator>> allocators;
 std::map<uint64_t,ComPtr<ID3D12Fence>> fences;
 std::map<uint64_t,D3D12_COMMAND_LIST_TYPE> queues;
@@ -48,7 +51,7 @@ template<class Fn> void Guard(Fn&& fn)noexcept {
 struct Invocation {
     bool queue,topLevel=true,gateHeld=false;
     explicit Invocation(bool isQueue=false):queue(isQueue) {
-        if(gateDepth++==0&&leaseOwner.load()!=GetCurrentThreadId()){executionGate.lock_shared();gateHeld=true;}
+        if(gateDepth++==0&&tracking.load()&&replayPackets&&leaseOwner.load()!=GetCurrentThreadId()){executionGate.lock_shared();gateHeld=true;}
         invocations.fetch_add(1);
         if(queue) {
             topLevel=queueDepth++==0;
@@ -227,8 +230,8 @@ bool SameDevice(ID3D12DeviceChild* child) {
 void ObserveAllocator(ID3D12CommandAllocator* allocator)noexcept {
     if(!tracking.load()||!allocator)return;
     Guard([&]{
-        if(!SameDevice(allocator))return;
         {std::lock_guard lock(stateMutex);if(allocators.contains(Id(allocator)))return;}
+        if(!SameDevice(allocator))return;
         if(!Install(allocatorResetHooks,Table(allocator)[8],AllocatorDetours(Slots)))return;
         std::lock_guard lock(stateMutex);if(!tracking.load()||allocators.contains(Id(allocator)))return;
         if(allocators.size()>=AllocatorLimit){++capacityFailures;return;}
@@ -240,8 +243,8 @@ void ObserveAllocator(ID3D12CommandAllocator* allocator)noexcept {
 void ObserveFence(ID3D12Fence* fence)noexcept {
     if(!tracking.load()||!fence)return;
     Guard([&]{
-        if(!SameDevice(fence))return;
         {std::lock_guard lock(stateMutex);if(fences.contains(Id(fence)))return;}
+        if(!SameDevice(fence))return;
         if(!Install(cpuSignalHooks,Table(fence)[10],CpuDetours(Slots)))return;
         std::lock_guard lock(stateMutex);if(!tracking.load()||fences.contains(Id(fence)))return;
         if(fences.size()>=FenceLimit){++capacityFailures;return;}
@@ -278,15 +281,20 @@ const char* StatusName(stereoreplay::PlanStatus status)noexcept {
     }return "unknown";
 }
 bool Start()noexcept {
-    bool result=false;Guard([&]{std::lock_guard lock(stateMutex);if(started)return;
-        const auto status=MH_Initialize();if(status!=MH_OK&&status!=MH_ERROR_ALREADY_INITIALIZED){++hookErrors;return;}
-        started=true;installAllowed=true;tracking=true;result=true;
+    bool result=false;Guard([&]{std::lock_guard lock(hookMutex);if(tracking.load()){result=true;return;}
+        if(!started){const auto status=MH_Initialize();if(status!=MH_OK&&status!=MH_ERROR_ALREADY_INITIALIZED){++hookErrors;return;}started=true;}
+        // Patch once at a manual mode transition, outside stateMutex. MinHook
+        // suspends threads while applying patches; holding journal locks here
+        // could suspend a thread that the caller is waiting for.
+        for(void* target:ownedHooks)if(MH_QueueEnableHook(target)!=MH_OK){++hookErrors;return;}
+        if(MH_ApplyQueued()!=MH_OK){++hookErrors;return;}
+        hooksActive=true;installAllowed=true;tracking=true;result=true;
     });return result;
 }
 void ObserveDevice(ID3D12Device* device)noexcept {
     if(!tracking.load()||!device)return;
     Guard([&]{
-        {std::lock_guard lock(stateMutex);if(!tracking.load()||(primaryDevice&&primaryDevice.Get()!=device))return;primaryDevice=device;}
+        {std::lock_guard lock(stateMutex);if(!tracking.load()||(primaryDevice&&primaryDevice.Get()!=device)||deviceObserved)return;primaryDevice=device;deviceObserved=true;}
         Install(createListHooks,Table(device)[12],CreateDetours(Slots));
         if(replayPackets){
             Install(descriptorHooks,Table(device)[23],DescriptorDetours(Slots));Install(simpleDescriptorHooks,Table(device)[24],SimpleDescriptorDetours(Slots));
@@ -320,6 +328,7 @@ void ObserveQueue(ID3D12CommandQueue* queue)noexcept {
 void ObserveList(ID3D12GraphicsCommandList* list,ID3D12CommandAllocator* initialAllocator)noexcept {
     if(!tracking.load()||!list)return;
     Guard([&]{
+        {std::lock_guard lock(stateMutex);if(!initialAllocator&&observedLists.contains(Id(list)))return;}
         ComPtr<ID3D12Device> device;if(FAILED(list->GetDevice(IID_PPV_ARGS(&device))))return;
         ObserveDevice(device.Get());if(!SameDevice(list))return;
         Install(listResetHooks,Table(list)[10],ListDetours(Slots));
@@ -328,12 +337,13 @@ void ObserveList(ID3D12GraphicsCommandList* list,ID3D12CommandAllocator* initial
             ComPtr<ID3D12GraphicsCommandList7> enhanced;
             if(SUCCEEDED(list->QueryInterface(IID_PPV_ARGS(&enhanced))))Install(enhancedBarrierHooks,Table(enhanced.Get())[80],EnhancedDetours(Slots));
         }
+        {std::lock_guard lock(stateMutex);observedLists.insert(Id(list));}
         if(initialAllocator){ObserveAllocator(initialAllocator);std::lock_guard lock(stateMutex);
             if(allocators.contains(Id(initialAllocator))){recordings.ListReset(Id(list),Id(initialAllocator));if(replayPackets)listBarriers[Id(list)]={};}}
     });
 }
 void ForgetList(uint64_t nativeList)noexcept {
-    if(tracking.load())Guard([&]{std::lock_guard lock(stateMutex);recordings.ListDestroyed(nativeList);listBarriers.erase(nativeList);});
+    if(tracking.load())Guard([&]{std::lock_guard lock(stateMutex);recordings.ListDestroyed(nativeList);listBarriers.erase(nativeList);observedLists.erase(nativeList);});
 }
 void ForgetQueue(uint64_t nativeQueue)noexcept {
     if(tracking.load())Guard([&]{std::lock_guard lock(stateMutex);queues.erase(nativeQueue);});
@@ -347,29 +357,37 @@ void BeginEye(uint32_t owningThread,bool diagnosticTrace)noexcept {
         collecting=true;
     });
 }
-void SealPresent()noexcept {
+void SealPresent(bool renderingOnly)noexcept {
     if(!tracking.load())return;
     Guard([&]{std::lock_guard lock(stateMutex);if(!eyeOpen||report.sealed)return;
         collecting=false;if(invocations.load())++report.boundaryCalls;
-        report.atPresent=capture.Plan(recordings).status;report.sealed=true;
+        if(!renderingOnly)report.atPresent=capture.Plan(recordings).status;report.sealed=true;
     });
 }
-Report EndEye()noexcept {
+Report EndEye(bool renderingOnly)noexcept {
     Report result;
     if(!tracking.load())return result;
     Guard([&]{std::lock_guard lock(stateMutex);if(!eyeOpen)return;
         collecting=false;if(invocations.load())++report.boundaryCalls;
-        const auto plan=capture.Plan(recordings);report.atEnd=plan.status;
-        report.internalWaits=plan.internalWaits;report.externalWaits=plan.externalWaits;
-        report.multiSignalFences=plan.multiSignalFences;report.unorderedSignalFences=plan.unorderedSignalFences;report.rewoundFences=plan.rewoundFences;report.belowStartFences=plan.belowStartFences;
-        if(wantTrace)report.trace=capture.DiagnosticTrace();
+        if(!renderingOnly){
+            const auto plan=capture.Plan(recordings);report.atEnd=plan.status;
+            report.internalWaits=plan.internalWaits;report.externalWaits=plan.externalWaits;
+            report.multiSignalFences=plan.multiSignalFences;report.unorderedSignalFences=plan.unorderedSignalFences;report.rewoundFences=plan.rewoundFences;report.belowStartFences=plan.belowStartFences;
+            if(wantTrace)report.trace=capture.DiagnosticTrace();
+        }else report.atEnd=report.atPresent;
         ReadGlobals();result=report;eyeOpen=false;
     });return result;
 }
 void Stop()noexcept {
     tracking=false;installAllowed=false;
+    Guard([&]{std::lock_guard lock(hookMutex);
+        bool disabled=true;
+        for(void* target:ownedHooks)if(MH_QueueDisableHook(target)!=MH_OK)disabled=false;
+        if(MH_ApplyQueued()!=MH_OK)disabled=false;
+        if(disabled)hooksActive=false;else ++hookErrors;
+    });
     Guard([&]{std::lock_guard lock(stateMutex);collecting=eyeOpen=false;capture=Capture{};recordings=Recordings{};
-        fences.clear();allocators.clear();queues.clear();packetLists.clear();packetQueues.clear();listBarriers.clear();resourceStates.clear();primaryDevice.Reset();
+        fences.clear();allocators.clear();queues.clear();packetLists.clear();packetQueues.clear();listBarriers.clear();resourceStates.clear();observedLists.clear();primaryDevice.Reset();deviceObserved=false;
     });
 }
 void EnableReplayPackets()noexcept {Guard([&]{std::lock_guard lock(stateMutex);replayPackets=true;});}
@@ -393,7 +411,7 @@ bool ResourceState(ID3D12Resource* resource,UINT subresource,D3D12_RESOURCE_STAT
 bool SnapshotReplay(ReplayPacket& output)noexcept {
     bool ready=false;
     Guard([&]{std::lock_guard lock(stateMutex);
-        const auto plan=capture.Plan(recordings);ReadGlobals();
+        const auto plan=capture.Plan(recordings);report.atPresent=plan.status;ReadGlobals();
         packetFailure="dependency/lifetime metadata incomplete";
         if(!replayPackets||!report.sealed||!plan.Ready()||report.unknownLists||report.queueOverlap||report.foreignCalls||
            report.boundaryCalls||report.apiFailures||report.cpuSignals||report.hookErrors||report.observerFaults||report.capacityFailures||invocations.load())return;
@@ -451,6 +469,9 @@ bool SnapshotReplay(ReplayPacket& output)noexcept {
 const char* ReplayPacketFailure()noexcept {return packetFailure;}
 uint32_t InstalledHooks()noexcept {
     uint32_t result=0;Guard([&]{std::lock_guard lock(hookMutex);result=uint32_t(ownedHooks.size());});return result;
+}
+uint32_t ActiveHooks()noexcept {
+    uint32_t result=0;Guard([&]{std::lock_guard lock(hookMutex);if(hooksActive)result=uint32_t(ownedHooks.size());});return result;
 }
 bool Shutdown()noexcept {
     Stop();bool removed=true;

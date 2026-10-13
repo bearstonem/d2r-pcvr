@@ -8,6 +8,7 @@ void Register(bool enabled,EyeFn eye,EffectsFn effects);
 void Configure(bool requested);
 void BeginPair(bool supported);
 bool Replayed();
+const char* Status();
 void View(unsigned eye,const float matrix[16]);
 void Projection(unsigned eye,const float matrix[16]);
 void TemporalEvaluation();

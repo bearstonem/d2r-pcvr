@@ -3,7 +3,7 @@
 #include <cstring>
 #include "vr_settings_ui.h"
 namespace framevr::settings {
-std::vector<uint8_t> Paint(const Model& m,Hit hover,const char* runtimeStatus,const calibration::Flow* body){
+std::vector<uint8_t> Paint(const Model& m,Hit hover,const char* runtimeStatus,const calibration::Flow* body,bool rendererUnavailable){
     BITMAPINFO info{};info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);info.bmiHeader.biWidth=Width;
     info.bmiHeader.biHeight=-Height;info.bmiHeader.biPlanes=1;info.bmiHeader.biBitCount=32;
     HDC dc=CreateCompatibleDC(nullptr);void* bits=nullptr;
@@ -81,10 +81,12 @@ std::vector<uint8_t> Paint(const Model& m,Hit hover,const char* runtimeStatus,co
         for(int row=0;row<RowCount(m.page);++row){
             const Key key=RowKey(m.page,row);const auto& d=Definitions[key];const float value=m.Get()[key];const int y=RowY+row*RowStep;
             fill({40,y-4,1200,76},row%2?RGB(19,31,39):RGB(22,36,44));
-            text(d.label,{58,y+1,780,39},true);text(d.detail,{58,y+42,795,30},false,false,quiet);
+            const bool unavailable=key==StereoRender&&value>.5f&&!m.Dirty()&&rendererUnavailable;
+            text(d.label,{58,y+1,780,39},true);text(unavailable?"Select Standard and Apply before retrying Single pass":d.detail,{58,y+42,795,30},false,false,quiet);
             char label[96];
             if(key==Foveation){const char* modes[]={"Off","Fixed","Eye tracked"};std::snprintf(label,sizeof label,"%s",modes[int(value)]);}
             else if(key==Dominant)std::snprintf(label,sizeof label,"%s",value>.5f?"Left":"Right");
+            else if(key==StereoRender)std::snprintf(label,sizeof label,"%s",unavailable?"Unavailable":value>.5f?"Single pass":"Standard");
             else if(d.max==1)std::snprintf(label,sizeof label,"%s",value>.5f?"On":"Off");
             else if(key==Snap&&value==0)std::snprintf(label,sizeof label,"Smooth");
             else if(key==Snap)std::snprintf(label,sizeof label,"Snap %.0f deg",value);
@@ -97,8 +99,7 @@ std::vector<uint8_t> Paint(const Model& m,Hit hover,const char* runtimeStatus,co
             button(ValueBox(row),label,{d.max==1?Kind::Change:Kind::None,key,1},false,enabled);
         }
         if(m.page==Page::Video){
-            text("DLSS, textures and shadows: game Options > Video. Stream resolution: SteamVR.",{40,760,1200,55},false,false,quiet);
-            text("Eye tracking requires runtime permission. Some effects may compile on first use.",{40,816,1200,48},false,false,quiet);
+            text("Game graphics: Options > Video. Stream resolution: SteamVR. Eye tracking requires runtime permission.",{40,816,1200,48},false,false,quiet);
         }
     }
     const char* message=!m.ready?"Configuration unavailable; controls help still works.":m.result==Result::Saving?"Saving...":m.result==Result::Saved?"Saved. Changes take effect live.":m.result==Result::Failed?"Save failed. Your edits are still unsaved.":m.result==Result::Conflict?"Settings changed elsewhere. Current values reloaded.":m.Dirty()?"Unsaved changes. Apply saves; Close discards them.":"World remains live. Right B closes this panel.";

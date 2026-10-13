@@ -6,20 +6,33 @@ namespace framevr::stereoreplay {
 // camfix investigation; see THIRD_PARTY.md. Row vectors, actual XR eye poses.
 // Keep the left view basis used by CPU-built billboards/object constants and
 // fold the complete left-to-right transform into its projection.
-inline unsigned FoldCamera(std::span<float> words,const replayaudit::Camera& left,const replayaudit::Camera& right) {
+inline bool CameraRecord(std::span<const float> words,size_t o,const replayaudit::Camera& left) {
+    using namespace replayaudit;
+    if(o>words.size()||words.size()-o<112||!left.haveView||!left.haveProjection||
+       !Near(words.subspan(o),left.view,1e-5,.025)||!EyeProjection(words.subspan(o+32),left.projection))return false;
+    const auto view=MatrixAt(words,o),projection=MatrixAt(words,o+32);
+    Matrix iv{},ip{},ivp{};
+    return Invert(view,iv)&&Invert(projection,ip)&&Invert(Multiply(view,projection),ivp)&&
+        Near(words.subspan(o+16),iv)&&Near(words.subspan(o+48),ip)&&
+        Near(words.subspan(o+64),Multiply(view,projection))&&Near(words.subspan(o+80),ivp);
+}
+// Resolve record offsets once per shader binding. Rendering uses only these
+// offsets, with no recurring search through object/material constants.
+inline std::vector<size_t> FindCameraRecords(std::span<const float> words,const replayaudit::Camera& left) {
+    std::vector<size_t> offsets;
+    for(size_t o=0;o+112<=words.size();++o)if(CameraRecord(words,o,left)){offsets.push_back(o);o+=111;}
+    return offsets;
+}
+inline unsigned FoldCameraAt(std::span<float> words,std::span<const size_t> offsets,const replayaudit::Camera& left,const replayaudit::Camera& right) {
     using namespace replayaudit;
     if(!left.haveView||!left.haveProjection||!right.haveView||!right.haveProjection)return 0;
     Matrix inverseLeft{};if(!Invert(left.view,inverseLeft))return 0;
     const auto shift=Multiply(inverseLeft,right.view);
     unsigned records=0;
-    for(size_t o=0;o+112<=words.size();++o){
-        if(!Near(words.subspan(o),left.view,1e-5,.025)||!EyeProjection(words.subspan(o+32),left.projection))continue;
+    for(const size_t o:offsets)if(!CameraRecord(words,o,left))return 0;
+    for(const size_t o:offsets){
         const auto view=MatrixAt(words,o),projection=MatrixAt(words,o+32);
-        Matrix iv{},ip{},ivp{};
-        const auto vp=Multiply(view,projection);
-        if(!Invert(view,iv)||!Invert(projection,ip)||!Invert(vp,ivp)||
-           !Near(words.subspan(o+16),iv)||!Near(words.subspan(o+48),ip)||
-           !Near(words.subspan(o+64),vp)||!Near(words.subspan(o+80),ivp))continue;
+        const auto iv=MatrixAt(words,o+16),ip=MatrixAt(words,o+48);
         auto target=right.projection;
         // Preserve the engine's subpixel offset without borrowing left-eye FOV.
         target[8]+=projection[8]-left.projection[8];target[9]+=projection[9]-left.projection[9];
@@ -30,8 +43,11 @@ inline unsigned FoldCamera(std::span<float> words,const replayaudit::Camera& lef
         if(std::any_of(previous.begin(),previous.end(),[](double v){return !std::isfinite(v);}))continue;
         auto put=[&](size_t offset,const Matrix& m){for(unsigned i=0;i<16;++i)words[offset+i]=float(m[i]);};
         put(o+32,folded);put(o+48,inverseFolded);put(o+64,newVp);put(o+80,newInverseVp);put(o+96,previous);
-        ++records;o+=111;
+        ++records;
     }
     return records;
+}
+inline unsigned FoldCamera(std::span<float> words,const replayaudit::Camera& left,const replayaudit::Camera& right) {
+    return FoldCameraAt(words,FindCameraRecords(words,left),left,right);
 }
 }

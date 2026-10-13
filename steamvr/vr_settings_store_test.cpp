@@ -34,6 +34,11 @@ int main(){
     Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"merge unrelated external edit");
     Check(Int(path,L"render",L"fixed_foveation")==0&&Int(path,L"render",L"eye_tracked_foveation")==0,"Off writes both keys");
     Check(Int(path,L"custom",L"later")==42&&Int(backup,L"custom",L"later")==-999,"backup is not overwritten on subsequent saves");
+    model.Open(vrsettings::Read());model.Click({Kind::Change,StereoRender,1});request=model.Click({Kind::Apply});
+    Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"enable single pass in existing running menu transaction");
+    Check(Int(path,L"stereo",L"replay_right")==1&&vrsettings::Read().values[StereoRender]==1,"manual renderer selection persists");
+    model.Open(vrsettings::Read());model.Click({Kind::Change,StereoRender,-1});request=model.Click({Kind::Apply});
+    Check(vrsettings::Submit(request)&&vrsettings::Poll(name)&&Int(path,L"stereo",L"replay_right")==0,"return to Standard without restart");
     model.Open(vrsettings::Read());model.Click({Kind::Change,DrawDistance,-1});request=model.Click({Kind::Apply});
     Check(WritePrivateProfileStringW(L"render",L"rings",L"2",name),"simulate same-key external edit");
     Check(vrsettings::Submit(request)&&!vrsettings::Poll(name),"concurrent same-key write rejected");

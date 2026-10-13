@@ -31,10 +31,11 @@ void ObserveList(ID3D12GraphicsCommandList*,ID3D12CommandAllocator* initialAlloc
 void ForgetList(uint64_t nativeList)noexcept;
 void ForgetQueue(uint64_t nativeQueue)noexcept;
 void BeginEye(uint32_t owningThread,bool diagnosticTrace=false)noexcept;
-void SealPresent()noexcept;
-Report EndEye()noexcept;
-void Stop()noexcept; // Stops collection; installed detours become pass-through.
+void SealPresent(bool renderingOnly=false)noexcept;
+Report EndEye(bool renderingOnly=false)noexcept;
+void Stop()noexcept; // Disables owned detours and clears tracking; Start resumes.
 bool Shutdown()noexcept; // After ReShade unregisters callbacks; removes only owned hooks.
 uint32_t InstalledHooks()noexcept;
+uint32_t ActiveHooks()noexcept;
 const char* StatusName(stereoreplay::PlanStatus)noexcept;
 }

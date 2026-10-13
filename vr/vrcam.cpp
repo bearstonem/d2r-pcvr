@@ -778,7 +778,7 @@ void LoadSettings() {
     billboards::ConfigurePortalCenters(IniB(L"debug",L"portal_centers",true));
     framevr::profile::ConfigureGpu(IniB(L"debug",L"profile_gpu",true));
     framevr::profile::ConfigureHooks(IniB(L"debug",L"profile_hooks",true));
-    framevr::stereoreplay::Configure(IniB(L"stereo",L"replay_right",false)&&IniB(L"render",L"symmetric_projection",true)&&!IniB(L"render",L"eye_tracked_foveation",false));
+    framevr::stereoreplay::Configure(IniB(L"stereo",L"replay_right",false));
     framevr::ConfigureDeferredWait(IniB(L"render",L"defer_gpu_wait",false));
     framevr::ConfigureSymmetricProjection(IniB(L"render",L"symmetric_projection",true));
     framevr::ConfigureEyeTracking(IniB(L"render",L"eye_tracked_foveation",false));
@@ -7612,10 +7612,10 @@ void TryRegister() {
     hud::Register();       // the interface's own layer: [hud] hide
 #ifdef D2RVR_NATIVE_OPENXR
     framevr::Register(&Log, +[](){return gamestate::MenuOpen()||!g_inWorld.load();}, +[](){return g_inWorld.load();}, &gamestate::ToggleMenus);
-    const bool replay=IniB(L"stereo",L"replay_right",false);
-    framevr::stereoreplay::Register(replay,+[](unsigned eye){SetEye(int(eye));framevr::BeginEye(int(eye));return d2rcam::Refresh();},
+    const bool audit=IniB(L"debug",L"replay_audit",false);
+    framevr::stereoreplay::Register(!audit,+[](unsigned eye){SetEye(int(eye));framevr::BeginEye(int(eye));return d2rcam::Refresh();},
         +[](reshade::api::effect_runtime* rt,bool begin){if(begin)OnBeginEffects(rt,nullptr,{},{});else OnFinishEffects(rt,nullptr,{},{});});
-    framevr::replayaudit::Register(!replay&&IniB(L"debug",L"replay_audit",false));
+    framevr::replayaudit::Register(audit);
 #endif
     g_registered = true;
     Log("vrcam: joined ReShade - the fog and the sky follow d2r_vr.ini [fog] [sky]");

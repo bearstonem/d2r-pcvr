@@ -22,6 +22,7 @@
 #include "d2r_vr_shared.h"
 #include "pad_mirror_shared.h"
 #include "transport.h"
+#include "stereo_replay.h"
 #include "../vr/bow.h"
 #include "../vr/melee.h"
 #include "frame_math.h"
@@ -1034,16 +1035,17 @@ void SettingsPointer(const settings::InputGate::Edges& edges) {
     if(!settingsModel.open)return;
     const int hover=int(settingsHover.kind)*100+(settingsHover.index+1)*3+settingsHover.delta;
     const int status=!foveation::Available()?0:!gazeSupported?1:gazeValid?3:2;
+    const int paintStatus=status+(!std::strcmp(stereoreplay::Status(),"Unavailable")?4:0);
     const char* descriptions[]={"Foveated shading unavailable on this GPU/runtime; full-quality rendering.",
         "Foveated shading available. Eye tracking unavailable on this headset/runtime.",
         "Foveated shading available. Gaze inactive or waiting for tracked samples.",
         "Foveated shading available. Eye-tracking samples are active."};
     const auto now=GetTickCount64();
     if(now>=settingsPaintAt&&!settingsAtlasPending&&atlasUploads.size()<3&&
-       (settingsPaintRevision!=settingsModel.revision||settingsPaintHover!=hover||settingsPaintStatus!=status)){
-        auto pixels=settings::Paint(settingsModel,settingsHover,descriptions[status]);
+       (settingsPaintRevision!=settingsModel.revision||settingsPaintHover!=hover||settingsPaintStatus!=paintStatus)){
+        auto pixels=settings::Paint(settingsModel,settingsHover,descriptions[status],nullptr,paintStatus>=4);
         if(!pixels.empty()&&UploadAtlas(settingsChain,atlasFormat,settings::Width,settings::Height,pixels,true,&settingsAtlasPending)){
-            settingsPaintRevision=settingsModel.revision;settingsPaintHover=hover;settingsPaintStatus=status;
+            settingsPaintRevision=settingsModel.revision;settingsPaintHover=hover;settingsPaintStatus=paintStatus;
         }
         settingsPaintAt=now+100;
     }

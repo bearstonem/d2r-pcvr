@@ -7,6 +7,13 @@ static void Check(bool b,const char* label){if(!b){std::fprintf(stderr,"FAIL: %s
 static Hit At(Page p,Rect r){return HitTest(p,(r.x+r.w*.5f)/Width,(r.y+r.h*.5f)/Height);}
 int main(){
     Snapshot s;s.ready=true;
+    Check(s.values[StereoRender]==0,"standard stereo remains the default");
+    {Model renderer;renderer.Open(s);renderer.Click(At(Page::Controls,Tabs[2]));
+        Check(RowKey(Page::Video,6)==StereoRender,"video tab exposes stereo rendering separately from calibration");
+        renderer.Click(At(Page::Video,ValueBox(6)));
+        const auto request=renderer.Click({Kind::Apply});
+        Check(request.changed==(1u<<StereoRender)&&request.values[StereoRender]==1,"manual single-pass selection changes only renderer");
+        Check(ValueBox(6).y+ValueBox(6).h<816,"last video control fits above help and footer");}
     Check(s.values[DrawDistance]==2&&s.values[ObjectDistance]==300,"distance fallbacks match release configuration");
     {Model distance;distance.Open(s);
         for(int i=0;i<3;++i)distance.Click({Kind::Change,ObjectDistance,-1});

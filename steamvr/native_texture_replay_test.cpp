@@ -28,8 +28,8 @@ int main(){
     D3D12_TEXTURE_COPY_LOCATION from{};from.pResource=texture.Get();from.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
     D3D12_TEXTURE_COPY_LOCATION to{};to.pResource=readback.Get();to.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;to.PlacedFootprint.Footprint={DXGI_FORMAT_R8G8B8A8_UNORM,1,1,1,256};list->CopyTextureRegion(&to,0,0,0,&from,nullptr);
     assert(SUCCEEDED(list->Close()));
-    audit::BeginEye(GetCurrentThreadId());ID3D12CommandList* lists[]{list.Get()};queue->ExecuteCommandLists(1,lists);audit::SealPresent();
-    assert(audit::BeginReplayLease());audit::ReplayPacket packet;assert(audit::SnapshotReplay(packet));assert(audit::EndEye().DependenciesComplete());
+    audit::BeginEye(GetCurrentThreadId());ID3D12CommandList* lists[]{list.Get()};queue->ExecuteCommandLists(1,lists);audit::SealPresent(true);
+    assert(audit::BeginReplayLease());audit::ReplayPacket packet;assert(audit::SnapshotReplay(packet));assert(audit::EndEye(true).DependenciesComplete());
     assert(packet.batches.size()==1&&packet.states.size()==1&&packet.states[0].first==D3D12_RESOURCE_STATE_COMMON&&packet.states[0].last==D3D12_RESOURCE_STATE_COPY_SOURCE);
     assert(gpu::Initialize(queue.Get())&&gpu::Drain(packet));
     unsigned char original[4]{};bool first=true;

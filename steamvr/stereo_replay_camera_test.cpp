@@ -20,7 +20,9 @@ int main(){
         put(o+64,Multiply(left.view,left.projection));put(o+80,ivp);put(o+96,Multiply(left.view,left.projection));
     }
     put(980,left.view);const auto original=words;
-    assert(stereoreplay::FoldCamera(words,left,right)==5);
+    const auto offsets=stereoreplay::FindCameraRecords(words,left);
+    assert((offsets==std::vector<size_t>{20,212,404,596,788}));
+    assert(stereoreplay::FoldCameraAt(words,offsets,left,right)==5);
     const auto expected=Multiply(right.view,right.projection);
     for(const size_t o:{20u,212u,404u,596u,788u}){
         assert(!std::memcmp(words.data()+o,original.data()+o,32*4));
@@ -34,6 +36,8 @@ int main(){
     auto unsupported=original;Camera missing;
     assert(stereoreplay::FoldCamera(unsupported,left,missing)==0&&unsupported==original);
     unsupported=original;unsupported[20+64]+=1;
+    const auto malformed=unsupported;
+    assert(stereoreplay::FoldCameraAt(unsupported,offsets,left,right)==0&&unsupported==malformed);
     const auto before=unsupported;assert(stereoreplay::FoldCamera(unsupported,left,right)==4);
     assert(!std::memcmp(unsupported.data()+20,before.data()+20,112*4));
     std::puts("Synchronous replay camera: five validated records, full XR eye transform/FOV, inverse/history consistency, standalone view preservation and rejection passed");
