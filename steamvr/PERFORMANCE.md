@@ -96,7 +96,25 @@ closed-list reuse after completion with changed private data, then demonstrates
 that resetting the same object changes its GPU work and is detected by the audit.
 Model fixtures cover capture completion/cancellation, address reuse/destruction,
 metadata limits, range overflow, matrix consistency and rejection of similar
-shadow cameras and invalid data. Live game audit validation remains pending.
+shadow cameras and invalid data.
+
+The initial audit from `af2d9e5` completed eight offline gameplay pairs on the
+baseline hardware/runtime. Every eye reported 35 submissions (19 direct, one
+compute, 15 copy), three queues, no invalidated lists at either boundary and
+no missing/overflowed command metadata. Queue-local transition chains reported
+two mismatches per eye; the public callbacks cannot distinguish native barrier
+and implicit-state details, so these are diagnostic observations, not proven
+state errors. The camera probe reached its 32-range limit for every eye: zero
+complete records in the left eye and 9-14 in the right. All ranges had unknown
+root CBV sizes, and ranges may overlap; those are detection counts, not unique
+camera layouts. This incomplete camera result cannot justify replay activation.
+
+The follow-up keeps the latest camera callback values instead of the initial
+pre-draw Refresh, and defers bounded buffer reads from root binding to the
+original list's submission. Destroyed resources or reset lists discard pending
+probes without refunding the read budget. This tests the hypothesis that the
+left-eye reference/data were sampled too early; its live validation is pending.
+No additional headset capture is needed while preparing that follow-up.
 
 ## Issue 20 investigation, October 12
 

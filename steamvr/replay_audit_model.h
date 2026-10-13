@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <limits>
 #include <map>
+#include <set>
 #include <span>
 #include <vector>
 
@@ -101,6 +102,36 @@ public:
 };
 
 struct ProbeRange {uint64_t relativeOffset=0;uint32_t bytes=0;};
+struct Binding {uint64_t list,resource,offset,size;};
+class Bindings {
+    size_t limit,accepted=0;
+    uint32_t overflow=0,discarded=0;
+    std::set<std::pair<uint64_t,uint64_t>> seen;
+    std::vector<Binding> pending;
+public:
+    explicit Bindings(size_t count=32):limit(count){}
+    void Add(Binding b) {
+        const auto key=std::pair{b.resource,b.offset};
+        if(seen.contains(key))return;
+        if(accepted>=limit){++overflow;return;}
+        seen.insert(key);pending.push_back(b);++accepted;
+    }
+    std::vector<Binding> Submit(uint64_t list) {
+        std::vector<Binding> out;
+        for(auto i=pending.begin();i!=pending.end();)if(i->list==list){out.push_back(*i);i=pending.erase(i);}else ++i;
+        return out;
+    }
+    void DestroyResource(uint64_t resource) {
+        for(auto i=pending.begin();i!=pending.end();)if(i->resource==resource){++discarded;i=pending.erase(i);}else ++i;
+        for(auto i=seen.begin();i!=seen.end();)if(i->first==resource)i=seen.erase(i);else ++i;
+    }
+    void ResetList(uint64_t list) {
+        for(auto i=pending.begin();i!=pending.end();)if(i->list==list){seen.erase({i->resource,i->offset});++discarded;i=pending.erase(i);}else ++i;
+    }
+    uint32_t Overflow()const{return overflow;}
+    uint32_t Discarded()const{return discarded;}
+    size_t Pending()const{return pending.size();}
+};
 inline ProbeRange ReadableRange(uint64_t bufferSize,uint64_t mappedOffset,uint64_t mappedSize,
                                uint64_t offset,uint64_t size) {
     if(mappedOffset>bufferSize||offset<mappedOffset||offset>=bufferSize)return {};
@@ -110,7 +141,12 @@ inline ProbeRange ReadableRange(uint64_t bufferSize,uint64_t mappedOffset,uint64
     return {relative,uint32_t(bytes)};
 }
 using Matrix=std::array<double,16>;
-struct Camera {Matrix view{},projection{};bool haveView=false,haveProjection=false;};
+struct Camera {
+    Matrix view{},projection{};bool haveView=false,haveProjection=false;
+    uint32_t viewUpdates=0,projectionUpdates=0;
+    void View(const float* m){for(unsigned i=0;i<16;++i)view[i]=m[i];haveView=true;++viewUpdates;}
+    void Projection(const float* m){for(unsigned i=0;i<16;++i)projection[i]=m[i];haveProjection=true;++projectionUpdates;}
+};
 struct CameraLayout {uint32_t completeRecords=0,partialRecords=0,viewOnly=0;};
 inline Matrix Multiply(const Matrix& a,const Matrix& b) {
     Matrix out{};for(int r=0;r<4;++r)for(int c=0;c<4;++c)for(int k=0;k<4;++k)out[r*4+c]+=a[r*4+k]*b[k*4+c];return out;

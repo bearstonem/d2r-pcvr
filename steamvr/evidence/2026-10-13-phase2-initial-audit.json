@@ -1,0 +1,79 @@
+{
+  "implementation_commit": "af2d9e5d62b54c83a93d4b164b1e8f65ff7d85af",
+  "plugin_sha256": "6dc11c293d87dfe873b4e76a0d58a06ae4c2efeb0a373cd3c29ae623810ea0d7",
+  "status": "complete",
+  "game": "Steam D2R 3.3.93787, offline local Paladin",
+  "hardware_runtime": "Ryzen 9 5950X / RTX 5090; Steam Frame via Steam Link, SteamVR OpenXR at 90 Hz",
+  "pairs": 8,
+  "eyes": 16,
+  "submissions_per_eye": 35,
+  "submissions_total": 560,
+  "queue_counts_per_eye": {
+    "direct": 19,
+    "compute": 1,
+    "copy": 15
+  },
+  "invalidated_lists_at_present": 0,
+  "invalidated_lists_at_draw_return": 0,
+  "command_metadata_missing_or_overflowed": 0,
+  "queue_local_state_chain_mismatches_per_eye": 2,
+  "recorded_state_restorations_per_eye": 0,
+  "resource_retirements": 0,
+  "camera_records": {
+    "left": {
+      "complete_record_detections_per_pair": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "reads_per_eye": 32,
+      "unknown_size_reads_per_eye": 32,
+      "bindings_min": 35646,
+      "bindings_max": 44046,
+      "probe_overflow_event_count_min": 29229,
+      "probe_overflow_event_count_max": 41385
+    },
+    "right": {
+      "complete_record_detections_per_pair": [
+        14,
+        9,
+        13,
+        12,
+        12,
+        12,
+        12,
+        13
+      ],
+      "reads_per_eye": 32,
+      "unknown_size_reads_per_eye": 32,
+      "bindings_min": 35645,
+      "bindings_max": 44055,
+      "probe_overflow_event_count_min": 31764,
+      "probe_overflow_event_count_max": 43829
+    }
+  },
+  "cleanup": {
+    "audit_ini_control_restored": true,
+    "ini_byte_identical_to_before": true,
+    "saved_games_and_video_settings_preserved_at_deployment": true
+  },
+  "launch": {
+    "first_attempt_exit": "0xc0000374",
+    "first_attempt_stage": "Before new loader/mod logs; cause unconfirmed",
+    "retry": "Reached game and completed the audit"
+  },
+  "limits": [
+    "Diagnostic overhead: not an FPS comparison or a performance gain.",
+    "Eight local gameplay pairs only; no replay safety certification or reporter RTX 5080 validation.",
+    "Camera probes hit their quota in every eye and are incomplete.",
+    "All probed root CBV sizes were unknown; overlapping reads may count the same camera record more than once.",
+    "State-chain mismatches use public callback metadata and are not proven native GPU state errors.",
+    "Native batch boundaries, allocator resets, fence dependencies, temporal history, per-eye effects/depth, VRS and spatial UI are not validated.",
+    "Follow-up source uses the latest camera reference and reads before original submission; that correction is not part of this installed capture."
+  ]
+}

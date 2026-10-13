@@ -66,6 +66,20 @@ void Limits() {
     assert(ReadableRange(8192,512,32,0,16).bytes==0);
     assert(ReadableRange(8192,0,8192,8190,max).bytes==0);
 }
+void DeferredBindings() {
+    Bindings b(3);
+    b.Add({10,100,256,4096});b.Add({10,100,256,4096});b.Add({20,200,0,128});
+    assert(b.Pending()==2&&b.Submit(99).empty());
+    auto first=b.Submit(10);assert(first.size()==1&&first[0].resource==100&&first[0].offset==256&&first[0].size==4096);
+    assert(b.Submit(10).empty());
+    b.DestroyResource(200);assert(b.Pending()==0&&b.Discarded()==1);
+    b.Add({20,200,0,128});assert(b.Pending()==1); // Address reuse is a new candidate.
+    b.ResetList(20);assert(b.Pending()==0&&b.Discarded()==2);
+    b.Add({20,300,0,128});assert(b.Pending()==0&&b.Overflow()==1); // Dropped work does not refund the read budget.
+    Bindings reset;
+    reset.Add({1,100,0,64});reset.ResetList(1);reset.Add({1,100,0,64});
+    assert(reset.Submit(1).size()==1);
+}
 Camera Reference() {
     Camera c;c.haveView=c.haveProjection=true;
     const double a=.35,co=std::cos(a),si=std::sin(a);
@@ -96,7 +110,17 @@ void Cameras() {
     words=copy;words[20]=std::numeric_limits<float>::infinity();assert(InspectCamera(words,camera).completeRecords==4);
     Matrix singular{},out;out.fill(123);const auto before=out;assert(!Invert(singular,out)&&out==before);
     auto invalid=camera;invalid.projection[0]=std::numeric_limits<double>::quiet_NaN();assert(InspectCamera(copy,invalid).completeRecords==0);
+    // Pre-draw Refresh can be stale; later callbacks must replace the reference.
+    Camera reference=camera;reference.view[12]+=2;
+    Bindings pending;pending.Add({1,100,0,4096});
+    assert(InspectCamera(copy,reference).completeRecords==0);
+    float currentView[16],currentProjection[16];
+    for(unsigned i=0;i<16;++i){currentView[i]=float(camera.view[i]);currentProjection[i]=float(camera.projection[i]);}
+    reference.View(currentView);reference.Projection(currentProjection);
+    assert(reference.viewUpdates==1&&reference.projectionUpdates==1);
+    assert(pending.Submit(1).size()==1&&InspectCamera(copy,reference).completeRecords==5);
+    currentView[12]+=2;reference.View(currentView);assert(reference.viewUpdates==2&&InspectCamera(copy,reference).completeRecords==0);
     std::puts("Replay audit model: list reuse/destruction, queue-local state chains, bounded metadata, mapped ranges, camera/inverse consistency and shadow/invalid-data rejection passed");
 }
 }
-int main(){CaptureBounds();Lifecycle();Transitions();Limits();Cameras();}
+int main(){CaptureBounds();Lifecycle();Transitions();Limits();DeferredBindings();Cameras();}
