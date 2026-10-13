@@ -255,8 +255,75 @@ coverage of future shader roles or fix reflection-specific constants.
 Capacity, mapping, retirement and camera-mutation failures now have distinct
 reasons. The first successful replay is logged once per manual activation,
 including existing binding/root counts. All 51 native checks, staged DLL
-load/unload and independent review pass for this follow-up. Its live activation,
-headset and FPS results are pending; water reflections remain unresolved.
+load/unload and independent review pass for this follow-up. The installed
+build (`bd810a6`) completed another matched stationary comparison:
+
+| Mode | Mean pair ms | Application FPS | Pair p95 ms | Coarse draw-thread CPU ms |
+| --- | ---: | ---: | ---: | ---: |
+| Standard before | 22.420 | 44.60 | 23.918 | 14.887 |
+| Single pass | 33.339 | 29.99 | 34.122 | 14.714 |
+| Standard after | 22.311 | 44.82 | 24.177 | 14.366 |
+
+Each mode contained 360 consecutive frame records; all 360 candidate pairs
+skipped the second engine draw. The first candidate pair used five batches,
+four camera ranges, ten physical camera records and one texture restoration.
+Replay stayed active throughout the 30.016-second quality window. An additional
+eight-second instruction-only capture ran after the candidate FPS profile,
+before the mode switch, with no replay fallback; it did not overlap the timed
+profile. Draw-thread CPU was lower than in the preceding gate run, but
+application throughput remains near 30 FPS and below Standard. No phase 2
+application FPS gain is established.
+
+The tester clarified that water reflections still looked wrong; the rest of
+the image and controls looked normal. The left-camera/shader explanation
+remains a hypothesis. Before the benchmark, startup hit the explicit
+`resource retired during capture` guard. After the comparison restored the
+saved manual selection, a fresh actual replay was logged without an immediate
+fallback in the observed log; that short observation does not establish mode
+switching or gameplay stability. Non-managed INI settings matched the backup,
+and all five managed controls matched their previous values.
+[Sanitized queue-wait/camera-ownership comparison](evidence/2026-10-13-phase2-replay-queue-waits-comparison.json).
+
+### Reference architecture: RealRTCWXR
+
+Read-only source review of Team Beef's RealRTCWXR at
+[`77a6fab`](https://github.com/Team-Beef-Studios/RealRTCWXR/tree/77a6fab77ffa1339bfdad670f5b2afd9d3f8310c)
+provides an architectural comparison, not a measured D2R speedup. No external
+source code was incorporated or executed.
+
+- Its [frame loop](https://github.com/Team-Beef-Studios/RealRTCWXR/blob/77a6fab77ffa1339bfdad670f5b2afd9d3f8310c/code/client/cl_scrn.c#L588-L609)
+  invokes the center-view game renderer once. The main scene's visibility and
+  draw-list construction are shared between eyes. Our replay mode also skips
+  the second engine draw, but adds native capture and replay work to achieve it.
+- Its [shader setup](https://github.com/Team-Beef-Studios/RealRTCWXR/blob/77a6fab77ffa1339bfdad670f5b2afd9d3f8310c/code/rend2/tr_glsl.c#L395-L401)
+  enables two-view `GL_OVR_multiview2`. The
+  [vertex shader](https://github.com/Team-Beef-Studios/RealRTCWXR/blob/77a6fab77ffa1339bfdad670f5b2afd9d3f8310c/code/rend2/glsl/generic_vp.glsl#L303)
+  selects explicit view/projection matrices with `gl_ViewID_OVR`; layered color
+  and depth targets receive the two views. This is shader multiview, whereas
+  D2R's current mode submits captured GPU work again for the second eye.
+- It writes both views into
+  [renderer-owned matrix buffers](https://github.com/Team-Beef-Studios/RealRTCWXR/blob/77a6fab77ffa1339bfdad670f5b2afd9d3f8310c/code/rend2/tr_glsl.c#L190-L248).
+  Our current replay instead reads borrowed mapped uploads, waits for their
+  existing GPU consumers, modifies them, waits for replay, and restores them.
+  Separating immutable per-eye data from shared scene work is therefore a
+  relevant design direction. Simply allocating a new buffer would not change
+  the addresses already recorded in D2R's closed command lists.
+
+[D3D12 view instancing](https://microsoft.github.io/DirectX-Specs/d3d/ViewInstancing.html)
+is the corresponding API mechanism, using view-aware shaders and pipeline
+state. Applying it to D2R would require establishing shader compatibility,
+per-eye constants, render-target/viewport routing and per-eye screen-space
+effects/history. The source review does not establish that feasibility or an
+FPS benefit. Fixing clip-space transforms alone also does not prove reflection
+correctness: RealRTCWXR's own `lightall` shader still has a scalar `u_ViewOrigin`.
+
+This reference is not a feature-equivalent performance benchmark. Its VR path
+[disables MSAA](https://github.com/Team-Beef-Studios/RealRTCWXR/blob/77a6fab77ffa1339bfdad670f5b2afd9d3f8310c/code/rend2/tr_fbo.c#L363-L370)
+and [holds HDR off](https://github.com/Team-Beef-Studios/RealRTCWXR/blob/77a6fab77ffa1339bfdad670f5b2afd9d3f8310c/code/rend2/tr_init.c#L1390-L1391)
+because those single-layer paths are incompatible with its multiview target.
+It still copies eye layers into OpenXR swapchains and performs required XR
+synchronization. Neither eliminating all copies/waits nor halving GPU shading
+work follows from adopting multiview.
 
 ## Phase 2 baseline, October 12 evening
 
