@@ -123,7 +123,33 @@ construction queries resource descriptions and format plane counts once per
 unique resource/format instead of for every barrier. Native GPU completion,
 mutation exclusion and camera restoration remain in place. All 50 native
 checks pass, including root changes across lists, resets, recording workers
-and Standard / Single pass switches. Its live FPS result is pending.
+and Standard / Single pass switches.
+
+That follow-up (`2b41291`) completed another stationary 360-pair-per-mode
+comparison at the same settings:
+
+| Mode | Mean pair ms | Application FPS | Pair p95 ms | Coarse CPU ms |
+| --- | ---: | ---: | ---: | ---: |
+| Standard before | 22.242 | 44.96 | 23.602 | 14.540 |
+| Single pass | 36.143 | 27.67 | 44.282 | 22.222 |
+| Standard after | 22.265 | 44.91 | 23.697 | 14.583 |
+
+All 360 candidate pairs again skipped the second engine draw, and the tester
+reported normal eyes and controls. The replay still used five batches, five
+camera ranges, 14 records and one boundary restoration. Coarse CPU time fell
+from 32.9 to 22.2 ms compared with the preceding candidate, but Single pass
+remains slower than Standard. These separate candidate runs do not isolate
+the individual cache/read changes. Standard and all five temporary INI
+controls were restored after measurement. [Sanitized capture-overhead comparison](evidence/2026-10-13-phase2-capture-overhead-comparison.json).
+
+The next follow-up rejects unrelated upload windows before making a full CPU
+copy. A known camera root can also bind object data: the small prefilter reads
+only cached view locations, uses the same bounds/tolerances as full validation,
+and accepts any matching complete record, including later records in a range.
+A possible match still requires the full projection/inverse/history checks;
+initial layout discovery is unchanged. Camera fixtures cover truncated ranges,
+nearby views, nonfinite values and malformed projections/inverses. All 50
+native checks pass. This follow-up's actual game/FPS result is pending.
 
 ## Phase 2 baseline, October 12 evening
 

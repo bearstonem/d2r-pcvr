@@ -1,0 +1,79 @@
+{
+  "implementation_commit": "2b41291bd10da4ef39787fe2b27670350b537fc0",
+  "plugin_sha256": "07693076ceab1ff219b7ca30b652c1bc11c0e77f685928f69de50717a1f8ca7a",
+  "status": "complete; capture CPU reduced, still slower than Standard",
+  "game": "Steam D2R 3.3.93787, offline local Paladin",
+  "hardware_runtime": "Ryzen 9 5950X / RTX 5090; Steam Frame via Steam Link, SteamVR OpenXR at 90 Hz",
+  "scenario": "Stationary same offline character, spot and view; gameplay active before measurement",
+  "settings": {
+    "scene_scale_percent": 100,
+    "terrain_rings": 2,
+    "object_radius": 300,
+    "symmetric_projection": true,
+    "foveation": "fixed",
+    "dlss": false,
+    "dynamic_resolution": false,
+    "fxaa": true,
+    "deferred_gpu_wait": true
+  },
+  "captures": [
+    {
+      "mode": "Standard before",
+      "sequence": 1791876540,
+      "pairs": 360,
+      "mean_pair_ms": 22.24186111111111,
+      "application_fps": 44.96026636460029,
+      "pair_p95_ms": 23.602,
+      "coarse_cpu_ms": 14.539930555555555,
+      "left_hook_ms": 7.9983,
+      "right_hook_ms": 7.577197222222222,
+      "right_hook_under_0_1_ms_pairs": 0
+    },
+    {
+      "mode": "Single pass",
+      "sequence": 1791876552,
+      "pairs": 360,
+      "mean_pair_ms": 36.14321388888889,
+      "application_fps": 27.667711097142334,
+      "pair_p95_ms": 44.282,
+      "coarse_cpu_ms": 22.22222222222222,
+      "left_hook_including_synchronous_replay_ms": 30.697930555555555,
+      "right_hook_ms": 0.0011444444444444445,
+      "right_hook_under_0_1_ms_pairs": 360
+    },
+    {
+      "mode": "Standard after",
+      "sequence": 1791876567,
+      "pairs": 360,
+      "mean_pair_ms": 22.265025,
+      "application_fps": 44.913491002143495,
+      "pair_p95_ms": 23.697,
+      "coarse_cpu_ms": 14.583333333333334,
+      "left_hook_ms": 8.032627777777778,
+      "right_hook_ms": 7.521808333333333,
+      "right_hook_under_0_1_ms_pairs": 0
+    }
+  ],
+  "first_actual_pair": {
+    "native_batches": 5,
+    "camera_ranges": 5,
+    "camera_records": 14,
+    "texture_boundary_restorations": 1,
+    "second_engine_draw_skipped": true
+  },
+  "headset_feedback": "Tester reported both eyes and controls looked normal while Single pass was active",
+  "cleanup": {
+    "standard_mode_restored": true,
+    "temporary_profile_capture_restored": true,
+    "five_managed_ini_controls_restored": true,
+    "saved_games_and_video_settings_preserved_at_deployment": true
+  },
+  "limits": [
+    "Single pass remains slower than Standard; no phase 2 gain or fix for issue 20.",
+    "Application throughput is 1000 / mean pair duration, not headset display refresh or compositor FPS.",
+    "Coarse CPU process time does not isolate individual callbacks, upload reads or driver work.",
+    "Different candidate runs do not isolate the individual optimization changes.",
+    "Single local stationary scene; no complete gameplay/effects/transitions coverage.",
+    "No Battle.net replay gameplay or RTX 5080 reporter validation."
+  ]
+}

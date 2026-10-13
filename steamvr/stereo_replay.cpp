@@ -129,6 +129,13 @@ void Execute(command_queue* q,command_list* cl){
         auto* buffer=reinterpret_cast<ID3D12Resource*>(b.buffer.handle);
         void* data=nullptr;D3D12_RANGE read{SIZE_T(b.offset),SIZE_T(b.offset+bytes)};
         if(FAILED(buffer->Map(0,&read,&data))||!data){invalid=true;continue;}
+        const auto mapped=std::span(static_cast<const float*>(static_cast<const void*>(static_cast<const uint8_t*>(data)+b.offset)),size_t(bytes/4));
+        // Some shaders share one root between camera and object constants.
+        // Reject unrelated windows with just their cached view locations,
+        // before reading an entire write-combined upload window into the CPU.
+        if(known!=cameraKeys.end()&&!MayContainCachedCameraRecord(mapped,known->second,cameras[0])){
+            D3D12_RANGE none{};buffer->Unmap(0,&none);continue;
+        }
         // Upload mappings may be write-combined. Copy once into cached CPU
         // memory before matrix inspection instead of repeatedly reading the
         // uncached mapping for each element and inverse calculation.

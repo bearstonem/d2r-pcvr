@@ -1,5 +1,6 @@
 #pragma once
 #include "replay_audit_model.h"
+#include <cstring>
 
 namespace framevr::stereoreplay {
 // Copyright (c) 2026 BodyWalkVR. Camera record layout follows the credited
@@ -27,6 +28,22 @@ inline std::vector<size_t> SelectCameraRecords(std::span<const float> words,std:
     std::vector<size_t> records;
     for(const size_t o:cached)if(CameraRecord(words,o,captured))records.push_back(o);
     return records;
+}
+// A mapped upload window may contain object constants on a known camera root.
+// Reject those windows before copying 4 KiB from write-combined memory. This
+// only checks a cached record's view: a match still needs CameraRecord's full
+// projection/inverse validation on the copied snapshot.
+inline bool MayContainCachedCameraRecord(std::span<const float> mapped,std::span<const size_t> cached,const replayaudit::Camera& captured) {
+    if(!captured.haveView||!captured.haveProjection)return false;
+    for(const size_t o:cached){
+        if(o>mapped.size()||mapped.size()-o<112)continue;
+        float first;std::memcpy(&first,mapped.data()+o,sizeof first);
+        const double expected=captured.view[0];
+        if(!std::isfinite(first)||!std::isfinite(expected)||std::abs(double(first)-expected)>.025+1e-5*std::abs(expected))continue;
+        std::array<float,16> view;std::memcpy(view.data(),mapped.data()+o,sizeof view);
+        if(replayaudit::Near(view,captured.view,1e-5,.025))return true;
+    }
+    return false;
 }
 inline unsigned FoldCameraAt(std::span<float> words,std::span<const size_t> offsets,const replayaudit::Camera& left,const replayaudit::Camera& right) {
     using namespace replayaudit;

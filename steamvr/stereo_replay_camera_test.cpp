@@ -22,6 +22,37 @@ int main(){
     put(980,left.view);const auto original=words;
     const auto offsets=stereoreplay::FindCameraRecords(words,left);
     assert((offsets==std::vector<size_t>{20,212,404,596,788}));
+    // Every accepted cached record must survive the cheap upload prefilter.
+    assert(stereoreplay::MayContainCachedCameraRecord(words,offsets,left));
+    for(const size_t o:offsets){const std::array<size_t,1> single{o};assert(stereoreplay::MayContainCachedCameraRecord(words,single,left));}
+    std::array<float,1024> unrelated;unrelated.fill(12345.f);
+    assert(!stereoreplay::MayContainCachedCameraRecord(unrelated,offsets,left));
+    const std::array<size_t,1> onlyFirst{20};
+    auto nonfinite=original;nonfinite[20]=std::numeric_limits<float>::quiet_NaN();
+    assert(!stereoreplay::MayContainCachedCameraRecord(nonfinite,onlyFirst,left));
+    nonfinite=original;nonfinite[20+7]=std::numeric_limits<float>::infinity();
+    assert(!stereoreplay::MayContainCachedCameraRecord(nonfinite,onlyFirst,left));
+    // A plausible prefix still requires all sixteen view values to match.
+    unrelated[20]=original[20];const std::array<size_t,1> unrelatedRecord{20};
+    assert(!stereoreplay::MayContainCachedCameraRecord(unrelated,unrelatedRecord,left));
+    auto nonfiniteView=original;nonfiniteView[20+15]=std::numeric_limits<float>::quiet_NaN();
+    assert(!stereoreplay::MayContainCachedCameraRecord(nonfiniteView,unrelatedRecord,left));
+    // A failed first record must not hide a later valid record on the same root.
+    auto laterRecord=original;laterRecord[20]+=1;
+    assert(!stereoreplay::CameraRecord(laterRecord,20,left));
+    assert(stereoreplay::MayContainCachedCameraRecord(laterRecord,offsets,left));
+    assert((stereoreplay::SelectCameraRecords(laterRecord,offsets,left)==std::vector<size_t>{212,404,596,788}));
+    assert(!stereoreplay::MayContainCachedCameraRecord(std::span(laterRecord).first(323),offsets,left));
+    assert(stereoreplay::MayContainCachedCameraRecord(std::span(laterRecord).first(324),offsets,left));
+    // A matching standalone view is insufficient if its complete record does
+    // not fit. Bounds checks must also tolerate stale or overflowing offsets.
+    const std::array<size_t,1> firstRecord{20},standaloneView{980};
+    assert(!stereoreplay::MayContainCachedCameraRecord(std::span(original).first(131),firstRecord,left));
+    assert(stereoreplay::MayContainCachedCameraRecord(std::span(original).first(132),firstRecord,left));
+    assert(stereoreplay::MayContainCachedCameraRecord(std::span(original).first(510),offsets,left));
+    assert(!stereoreplay::MayContainCachedCameraRecord(original,standaloneView,left));
+    const std::array<size_t,2> outOfRange{original.size(),std::numeric_limits<size_t>::max()};
+    assert(!stereoreplay::MayContainCachedCameraRecord(original,outOfRange,left));
     assert(stereoreplay::FoldCameraAt(words,offsets,left,right)==5);
     const auto expected=Multiply(right.view,right.projection);
     for(const size_t o:{20u,212u,404u,596u,788u}){
@@ -48,16 +79,30 @@ int main(){
     assert(!std::memcmp(submitted.data()+404,original.data()+404,(1024-404)*4));
     // Small differences within discovery tolerance must not survive as a
     // right-eye translation error: fold each record's own inverse view.
-    submitted=original;auto nearby=captured.view;nearby[12]+=.01;
+    submitted=original;auto nearby=captured.view;nearby[12]+=.01;nearby[0]+=.01;
     Matrix nearbyInverse,nearbyVpInverse;assert(Invert(nearby,nearbyInverse)&&Invert(Multiply(nearby,captured.projection),nearbyVpInverse));
     auto setSubmitted=[&](size_t o,const Matrix& m){for(unsigned i=0;i<16;++i)submitted[o+i]=float(m[i]);};
     setSubmitted(20,nearby);setSubmitted(36,nearbyInverse);setSubmitted(84,Multiply(nearby,captured.projection));setSubmitted(100,nearbyVpInverse);
-    const std::array<size_t,1> one{20};assert(stereoreplay::FoldCameraAt(submitted,one,captured,right)==1);
+    const std::array<size_t,1> one{20};
+    assert(stereoreplay::CameraRecord(submitted,20,captured));
+    assert(stereoreplay::MayContainCachedCameraRecord(submitted,one,captured));
+    assert(stereoreplay::FoldCameraAt(submitted,one,captured,right)==1);
     assert(Near(std::span(submitted).subspan(84),expected,1e-4,.001));
     auto unsupported=original;Camera missing;
     assert(stereoreplay::FoldCamera(unsupported,left,missing)==0&&unsupported==original);
     unsupported=original;unsupported[20+64]+=1;
     const auto malformed=unsupported;
+    // The prefilter deliberately cannot approve a projection or inverse. A
+    // plausible view must still fail the existing full checks when malformed.
+    assert(stereoreplay::MayContainCachedCameraRecord(unsupported,one,left));
+    assert(stereoreplay::SelectCameraRecords(unsupported,one,left).empty());
+    auto malformedProjection=original;malformedProjection[20+32]+=1;
+    assert(stereoreplay::MayContainCachedCameraRecord(malformedProjection,one,left));
+    assert(stereoreplay::SelectCameraRecords(malformedProjection,one,left).empty());
+    auto malformedInverse=original;malformedInverse[20+16]+=1;
+    assert(stereoreplay::MayContainCachedCameraRecord(malformedInverse,one,left));
+    assert(stereoreplay::SelectCameraRecords(malformedInverse,one,left).empty());
+    assert(!stereoreplay::MayContainCachedCameraRecord(original,one,missing));
     assert(stereoreplay::FoldCameraAt(unsupported,offsets,left,right)==0&&unsupported==malformed);
     const auto before=unsupported;assert(stereoreplay::FoldCamera(unsupported,left,right)==4);
     assert(!std::memcmp(unsupported.data()+20,before.data()+20,112*4));
