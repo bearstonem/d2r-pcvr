@@ -85,9 +85,16 @@ declaration. Native recording generations, batch dependency ordering, matched
 split barriers, resource retention, descriptor/mutation exclusion and GPU
 completion remain checked. Original game command lists are not rewritten.
 Private GPU fixtures cover restoring differing frame boundary states and
-replaying them twice. Actual game replay, a matched candidate FPS result and
-headset correctness remain pending; fixture results alone do not establish a
-performance gain.
+replaying them twice. The next live trial recovered 44.54 FPS in Standard and
+passed texture setup, then stopped at camera-layout validation before any
+actual replay. Camera snapshots now retain their matching left reference;
+later host-camera refreshes cannot invalidate earlier submitted ranges.
+Cached offsets are filtered to the complete records actually present in each
+range, and each record uses its own inverse view for the right-eye transform.
+The camera fixture covers later refreshes, smaller CBV windows and small
+reference/view differences. Actual game replay, a matched candidate FPS result
+and headset correctness remain pending; fixture results alone do not establish
+a performance gain.
 
 ## Phase 2 baseline, October 12 evening
 

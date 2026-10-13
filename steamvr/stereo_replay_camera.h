@@ -23,16 +23,20 @@ inline std::vector<size_t> FindCameraRecords(std::span<const float> words,const 
     for(size_t o=0;o+112<=words.size();++o)if(CameraRecord(words,o,left)){offsets.push_back(o);o+=111;}
     return offsets;
 }
+inline std::vector<size_t> SelectCameraRecords(std::span<const float> words,std::span<const size_t> cached,const replayaudit::Camera& captured) {
+    std::vector<size_t> records;
+    for(const size_t o:cached)if(CameraRecord(words,o,captured))records.push_back(o);
+    return records;
+}
 inline unsigned FoldCameraAt(std::span<float> words,std::span<const size_t> offsets,const replayaudit::Camera& left,const replayaudit::Camera& right) {
     using namespace replayaudit;
     if(!left.haveView||!left.haveProjection||!right.haveView||!right.haveProjection)return 0;
-    Matrix inverseLeft{};if(!Invert(left.view,inverseLeft))return 0;
-    const auto shift=Multiply(inverseLeft,right.view);
     unsigned records=0;
     for(const size_t o:offsets)if(!CameraRecord(words,o,left))return 0;
     for(const size_t o:offsets){
         const auto view=MatrixAt(words,o),projection=MatrixAt(words,o+32);
         const auto iv=MatrixAt(words,o+16),ip=MatrixAt(words,o+48);
+        const auto shift=Multiply(iv,right.view);
         auto target=right.projection;
         // Preserve the engine's subpixel offset without borrowing left-eye FOV.
         target[8]+=projection[8]-left.projection[8];target[9]+=projection[9]-left.projection[9];

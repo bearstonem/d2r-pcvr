@@ -33,6 +33,27 @@ int main(){
         assert(Near(std::span(words).subspan(o+96),expected,1e-4,.002));
     }
     assert(!std::memcmp(words.data()+980,original.data()+980,16*4));
+    // The host camera can refresh again after a CBV was submitted. The saved
+    // left reference must still transform that range into the actual right eye.
+    const auto captured=left;auto later=left;later.view[12]+=1;
+    auto submitted=original;
+    assert(stereoreplay::FoldCameraAt(submitted,offsets,later,right)==0&&submitted==original);
+    assert(stereoreplay::FoldCameraAt(submitted,offsets,captured,right)==5);
+    assert(Near(std::span(submitted).subspan(20+64),expected,1e-4,.001));
+    // A second CBV on the same root need not cover the entire 4 KiB window.
+    // Cached offsets are filtered without another unbounded layout scan.
+    submitted=original;const auto subset=stereoreplay::SelectCameraRecords(std::span(submitted).first(510),offsets,captured);
+    assert((subset==std::vector<size_t>{20,212}));
+    assert(stereoreplay::FoldCameraAt(std::span(submitted).first(510),subset,captured,right)==2);
+    assert(!std::memcmp(submitted.data()+404,original.data()+404,(1024-404)*4));
+    // Small differences within discovery tolerance must not survive as a
+    // right-eye translation error: fold each record's own inverse view.
+    submitted=original;auto nearby=captured.view;nearby[12]+=.01;
+    Matrix nearbyInverse,nearbyVpInverse;assert(Invert(nearby,nearbyInverse)&&Invert(Multiply(nearby,captured.projection),nearbyVpInverse));
+    auto setSubmitted=[&](size_t o,const Matrix& m){for(unsigned i=0;i<16;++i)submitted[o+i]=float(m[i]);};
+    setSubmitted(20,nearby);setSubmitted(36,nearbyInverse);setSubmitted(84,Multiply(nearby,captured.projection));setSubmitted(100,nearbyVpInverse);
+    const std::array<size_t,1> one{20};assert(stereoreplay::FoldCameraAt(submitted,one,captured,right)==1);
+    assert(Near(std::span(submitted).subspan(84),expected,1e-4,.001));
     auto unsupported=original;Camera missing;
     assert(stereoreplay::FoldCamera(unsupported,left,missing)==0&&unsupported==original);
     unsupported=original;unsupported[20+64]+=1;

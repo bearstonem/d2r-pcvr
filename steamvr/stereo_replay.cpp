@@ -33,7 +33,7 @@ effect_runtime* runtime=nullptr;
 replayaudit::Camera cameras[2];
 using CameraKey=std::pair<uint64_t,uint32_t>;
 struct Binding {resource buffer;uint64_t offset,size;CameraKey cameraKey;};
-struct Probe {ComPtr<ID3D12Resource> buffer;uint64_t offset;std::vector<float> original,right;std::vector<size_t> records;};
+struct Probe {ComPtr<ID3D12Resource> buffer;uint64_t offset;std::vector<float> original,right;std::vector<size_t> records;replayaudit::Camera left;};
 std::map<uint64_t,std::map<std::pair<uint64_t,uint64_t>,Binding>> bindings;
 std::map<CameraKey,std::vector<size_t>> cameraKeys;
 std::set<std::pair<uint64_t,uint64_t>> seenBindings;
@@ -111,15 +111,18 @@ void Execute(command_queue* q,command_list* cl){
         void* data=nullptr;D3D12_RANGE read{SIZE_T(b.offset),SIZE_T(b.offset+bytes)};
         if(FAILED(buffer->Map(0,&read,&data))||!data){invalid=true;continue;}
         const auto wordsIn=std::span(static_cast<const float*>(static_cast<const void*>(static_cast<const uint8_t*>(data)+b.offset)),size_t(bytes/4));
-        std::vector<size_t> records=known==cameraKeys.end()?FindCameraRecords(wordsIn,cameras[0]):known->second;
-        if(records.empty()||!CameraRecord(wordsIn,records.front(),cameras[0])){D3D12_RANGE none{};buffer->Unmap(0,&none);continue;}
+        std::vector<size_t> records=known==cameraKeys.end()?FindCameraRecords(wordsIn,cameras[0]):SelectCameraRecords(wordsIn,known->second,cameras[0]);
+        // A root may bind overlapping windows or a smaller record group. Use
+        // cached offsets only where that actual submitted range contains the
+        // complete camera record; never borrow another range's layout blindly.
+        if(records.empty()){D3D12_RANGE none{};buffer->Unmap(0,&none);continue;}
         std::vector<float> words(wordsIn.begin(),wordsIn.end());
         D3D12_RANGE none{};buffer->Unmap(0,&none);
         cameraKeys.try_emplace(b.cameraKey,records);
         const auto key=std::pair{b.buffer.handle,b.offset};const auto old=probes.find(key);
         if(old!=probes.end()){
             for(const size_t o:records)if(o+112>old->second.original.size()||std::memcmp(old->second.original.data()+o,words.data()+o,112*4))invalid=true;
-        }else if(probes.size()<64)probes.emplace(key,Probe{buffer,b.offset,std::move(words),{},std::move(records)});
+        }else if(probes.size()<64)probes.emplace(key,Probe{buffer,b.offset,std::move(words),{},std::move(records),cameras[0]});
         else invalid=true;
     }
 }
@@ -205,7 +208,8 @@ void Present(command_queue* q,swapchain* swap,const rect*,const rect*,uint32_t,c
     D3D12_RESOURCE_STATES sourceState,destState;
     if(!depthSource||!depthDestination||!UniformDepthState(depthSource.Get(),sourceState)||!UniformDepthState(depthDestination.Get(),destState)){Fallback("depth state incomplete");return;}
     if(!eyeFn(1)){Fallback("right XR camera unavailable");return;}
-    unsigned records=0;for(auto& [key,p]:probes){p.right=p.original;const auto n=FoldCameraAt(p.right,p.records,cameras[0],cameras[1]);if(!n){eyeFn(0);Fallback("camera layout changed");return;}records+=n;}
+    if(!cameras[1].haveView||!cameras[1].haveProjection){eyeFn(0);Fallback("right camera update incomplete");return;}
+    unsigned records=0;for(auto& [key,p]:probes){p.right=p.original;const auto n=FoldCameraAt(p.right,p.records,p.left,cameras[1]);if(!n){eyeFn(0);Fallback("captured camera layout changed");return;}records+=n;}
     eyeFn(0);
     if(!synchronousgpu::Drain(packet)){Fallback("original GPU completion failed");return;}
     if(!CameraUnchanged()){Fallback("camera constants changed before replay");return;}
