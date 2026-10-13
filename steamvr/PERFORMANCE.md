@@ -206,8 +206,31 @@ with separate per-thread reader slots, while retaining exclusive replay
 protection and tracking blocked calls for safe teardown. All **51 native
 checks pass**, including concurrent exclusion, nested/owner reentry, slot
 collisions, blocked teardown and reader progress. Staged DLL load/unload also
-passed. Its actual headset, visual and FPS results are pending. It does not
-establish a fix for water reflections or a phase 2 gain over Standard.
+passed. The installed gate build (`2e42868`) completed a matched stationary
+comparison, again with 360 pairs per mode:
+
+| Mode | Mean pair ms | Application FPS | Pair p95 ms | Coarse draw-thread CPU ms |
+| --- | ---: | ---: | ---: | ---: |
+| Standard before | 22.314 | 44.82 | 23.836 | 15.191 |
+| Single pass | 33.359 | 29.98 | 34.451 | 16.016 |
+| Standard after | 22.222 | 45.00 | 23.830 | 13.108 |
+
+All 360 candidate pairs skipped the second engine draw, and the candidate
+remained active throughout its 30.047-second quality window. The tester
+reported normal image and controls except for the same water-reflection issue.
+Draw-thread CPU was lower than in the preceding prefilter run (16.016 versus
+19.010 ms), but application throughput remained around 30 FPS and below
+Standard's roughly 45 FPS. The separate runs do not isolate the gate's cost
+or establish a meaningful application FPS gain.
+
+After the comparison restored the tester's saved Single pass selection,
+the renderer hit its `mutable constants/resources` guard and fell back to
+Standard with the menu showing Unavailable. An earlier startup attempt hit
+the same guard. Neither was inside the valid candidate capture. A later
+instruction-pointer capture occurred after fallback and is excluded from
+Single pass optimization evidence. Non-managed INI settings matched the
+deployment backup; profiling controls and the saved manual selection were
+restored. [Sanitized reader-gate comparison](evidence/2026-10-13-phase2-hook-gate-comparison.json).
 
 ## Phase 2 baseline, October 12 evening
 

@@ -1,0 +1,108 @@
+{
+  "implementation_commit": "2e42868da5974c13c96b2d74fd0ea560c8962d48",
+  "plugin_sha256": "c7377e008e65badc07775b0a50f4d244948ddc2372e6460e3333fcb5ac3d4fbf",
+  "status": "complete; lower draw-thread CPU than preceding candidate, application rate remains below Standard; reflection artifact and guard fallbacks unresolved",
+  "game": "Steam D2R 3.3.93787, offline local Paladin",
+  "hardware_runtime": "Ryzen 9 5950X / RTX 5090; Steam Frame via Steam Link, SteamVR OpenXR at 90 Hz",
+  "scenario": "Stationary same offline character, spot and view; tester confirmed positioned and ready",
+  "settings": {
+    "scene_scale_percent": 100,
+    "terrain_rings": 2,
+    "object_radius": 300,
+    "symmetric_projection": true,
+    "foveation": "fixed",
+    "dlss": false,
+    "dynamic_resolution": false,
+    "fxaa": true,
+    "deferred_gpu_wait": true
+  },
+  "cpu_measurement": "Mean main drawing-thread kernel plus user time from GetThreadTimes(GetCurrentThread()) across the two draw-hook intervals; coarse accounting, excludes workers and other process threads",
+  "captures": [
+    {
+      "mode": "Standard before",
+      "sequence": 1791879605,
+      "pairs": 360,
+      "mean_pair_ms": 22.313547222222223,
+      "application_fps": 44.81582377023823,
+      "pair_p95_ms": 23.836,
+      "coarse_cpu_ms": 15.190972222222221,
+      "left_hook_ms": 8.160147222222223,
+      "right_hook_ms": 7.749138888888889,
+      "right_hook_under_0_1_ms_pairs": 0
+    },
+    {
+      "mode": "Single pass",
+      "sequence": 1791879616,
+      "pairs": 360,
+      "mean_pair_ms": 33.35933333333333,
+      "application_fps": 29.976618237774538,
+      "pair_p95_ms": 34.451,
+      "coarse_cpu_ms": 16.015625,
+      "left_hook_including_synchronous_replay_ms": 23.78978888888889,
+      "right_hook_ms": 0.0011361111111111112,
+      "right_hook_under_0_1_ms_pairs": 360
+    },
+    {
+      "mode": "Standard after",
+      "sequence": 1791879645,
+      "pairs": 360,
+      "mean_pair_ms": 22.222269444444443,
+      "application_fps": 44.99990437520321,
+      "pair_p95_ms": 23.83,
+      "coarse_cpu_ms": 13.10763888888889,
+      "left_hook_ms": 7.315363888888889,
+      "right_hook_ms": 6.823769444444444,
+      "right_hook_under_0_1_ms_pairs": 0
+    }
+  ],
+  "candidate_quality_window": {
+    "active_seconds": 30.047000000005937,
+    "profiled_pairs": 360,
+    "second_engine_draws_skipped": 360,
+    "replay_fallback_reported_during_window": false,
+    "headset_feedback": "Normal, except water reflections",
+    "water_reflections": "Previously reported artifact remains; cause and matched Standard reflection comparison unconfirmed"
+  },
+  "guard_fallbacks_outside_candidate_window": [
+    {
+      "phase": "Startup before the matched comparison",
+      "after_replay_pair": 2,
+      "reason": "mutable constants/resources"
+    },
+    {
+      "phase": "After the comparison restored the saved Single pass selection",
+      "after_replay_pair": 900,
+      "reason": "mutable constants/resources"
+    }
+  ],
+  "excluded_followup": "A later instruction-pointer capture was taken after renderer fallback; it is not Single pass optimization evidence",
+  "preceding_candidate_context": {
+    "implementation_commit": "aa061d03b7e5594b513ba28d15f3346fe1237647",
+    "single_pass_application_fps": 29.873166005432438,
+    "single_pass_coarse_draw_thread_cpu_ms": 19.010416666666668,
+    "interpretation": "Draw-thread CPU fell in this run, but application throughput remains near 30 FPS. Separate candidate captures do not isolate gate overhead or establish a meaningful FPS gain."
+  },
+  "validation": {
+    "native_checks_passed": 51,
+    "isolated_staged_dll_load_unload_passed": true,
+    "raw_frame_rows_independently_recomputed": 1080,
+    "frames_1_through_360_verified_per_mode": true,
+    "plugin_hash_matches_deployment_receipt": true,
+    "nonmanaged_ini_settings_match_deployment_backup": true
+  },
+  "cleanup": {
+    "saved_manual_single_pass_selection_restored": true,
+    "four_temporary_profiling_controls_restored": true,
+    "renderer_status_after_post_restore_guard": "Standard fallback; Single pass menu status Unavailable",
+    "saved_games_and_video_settings_preserved_at_deployment": true
+  },
+  "limits": [
+    "Single pass remains slower than Standard; no phase 2 FPS gain or fix for issue 20.",
+    "Application throughput is 1000 / mean pair duration, not headset display refresh or compositor FPS.",
+    "Coarse draw-thread CPU averages do not isolate individual callbacks, driver work or worker CPU time.",
+    "The separate prefilter and gate runs do not isolate individual optimization changes.",
+    "Water reflections were again reported incorrect during Single pass; rendering correctness and cause remain unresolved.",
+    "A successful 30-second candidate window does not establish reliable startup or mode switching; guard fallbacks occurred outside it.",
+    "No complete gameplay/effects/transitions coverage, Battle.net replay gameplay or RTX 5080 reporter validation."
+  ]
+}
