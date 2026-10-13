@@ -1,0 +1,48 @@
+{
+  "implementation_commit": "2b017b6771f028ddb4b885e92a3459c6bf38d490",
+  "plugin_sha256": "2415708546b259cbc90f9a1812dd22a03407f1b3dd0076bd64e7537967f70a06",
+  "status": "complete",
+  "game": "Steam D2R 3.3.93787, offline local Paladin",
+  "hardware_runtime": "Ryzen 9 5950X / RTX 5090; Steam Frame via Steam Link, SteamVR OpenXR at 90 Hz",
+  "pairs": 8,
+  "eyes": 16,
+  "submissions_per_eye": 35,
+  "queue_counts_per_eye": {"direct": 19, "compute": 1, "copy": 15},
+  "invalidated_lists_at_present": 0,
+  "invalidated_lists_at_draw_return": 0,
+  "command_metadata_missing_or_overflowed": 0,
+  "queue_local_state_chain_mismatches_per_eye": 2,
+  "recorded_state_restorations_per_eye": 0,
+  "resource_retirements": 0,
+  "camera_records": {
+    "left_complete_record_detections_per_pair": [15, 16, 16, 16, 13, 14, 14, 15],
+    "right_complete_record_detections_per_pair": [19, 15, 28, 16, 16, 13, 15, 24],
+    "view_updates_per_eye": 2,
+    "projection_updates_per_eye": 2,
+    "reads_per_eye": 32,
+    "unknown_size_reads_per_eye": 32,
+    "unreadable_reads": 0,
+    "partial_record_detections": 0,
+    "pending_or_discarded_probes": 0,
+    "bindings_per_eye_min": 38619,
+    "bindings_per_eye_max": 39987,
+    "probe_overflow_event_count_per_eye_min": 34178,
+    "probe_overflow_event_count_per_eye_max": 39673
+  },
+  "cleanup": {
+    "audit_ini_control_restored": true,
+    "ini_byte_identical_to_before": true,
+    "saved_games_and_video_settings_preserved_at_deployment": true
+  },
+  "launch": {"first_attempt": "Reached game and completed audit"},
+  "limits": [
+    "Diagnostic overhead: not an FPS comparison or a performance gain.",
+    "Eight local gameplay pairs only; no replay safety certification or reporter RTX 5080 validation.",
+    "Both latest-camera references and deferred reads changed together; their individual contributions were not isolated.",
+    "Camera probes hit their quota in every eye and do not establish complete coverage.",
+    "All probed root CBV sizes were unknown; overlapping reads may count the same camera record more than once.",
+    "State-chain mismatches use public callback metadata and are not proven native GPU state errors.",
+    "Native batch boundaries, allocator resets, fence dependencies, temporal history, per-eye effects/depth, VRS and spatial UI are not validated.",
+    "No command list was replayed; both eyes used the existing engine renderer."
+  ]
+}

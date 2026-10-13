@@ -113,8 +113,28 @@ The follow-up keeps the latest camera callback values instead of the initial
 pre-draw Refresh, and defers bounded buffer reads from root binding to the
 original list's submission. Destroyed resources or reset lists discard pending
 probes without refunding the read budget. This tests the hypothesis that the
-left-eye reference/data were sampled too early; its live validation is pending.
-No additional headset capture is needed while preparing that follow-up.
+left-eye reference/data were sampled too early. The follow-up from `2b017b6`
+completed eight offline pairs on the same hardware/runtime: every eye recognized
+complete current-camera records (left 13-16, right 13-28). Every eye received two
+view and two projection updates, and all deferred probes were consumed with no
+unreadable or discarded ranges. This supports correcting the sampling time and
+camera reference together; the capture does not isolate which change was
+responsible. Overlapping unknown-size reads and the probe quota still prevent a
+claim of complete camera coverage.
+
+All sixteen eyes again reported 35 submissions across three queues, with no
+list invalidation at Present or draw return and no missing command metadata.
+The two queue-local state-chain mismatches per eye remain unresolved. Native
+batch boundaries, allocator reuse and fence dependencies still need capture
+before a replay implementation can rely on the observed recordings. Both eyes
+used the normal renderer; neither audit measures a performance improvement.
+The follow-up launched successfully on its first attempt. Its temporary audit
+INI control was restored byte-identically after startup arming, and collection
+stopped automatically. No more headset time is needed to analyze this capture.
+
+Sanitized captures:
+[`initial audit`](evidence/2026-10-13-phase2-initial-audit.json) and
+[`camera follow-up`](evidence/2026-10-13-phase2-camera-followup.json).
 
 ## Issue 20 investigation, October 12
 
