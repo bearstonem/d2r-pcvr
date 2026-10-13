@@ -195,7 +195,7 @@ void PinIfUnsafe()noexcept {
 bool Report::DependenciesComplete()const {
     return sealed&&atPresent==stereoreplay::PlanStatus::Ready&&atEnd==stereoreplay::PlanStatus::Ready&&
         !unknownLists&&!queueOverlap&&!boundaryCalls&&!foreignCalls&&!apiFailures&&!cpuSignals&&
-        !hookErrors&&!observerFaults&&!capacityFailures;
+        !hookErrors&&!observerFaults&&!capacityFailures&&!unorderedSignalFences;
 }
 const char* StatusName(stereoreplay::PlanStatus status)noexcept {
     switch(status){
@@ -276,7 +276,7 @@ Report EndEye()noexcept {
         collecting=false;if(invocations.load())++report.boundaryCalls;
         const auto plan=capture.Plan(recordings);report.atEnd=plan.status;
         report.internalWaits=plan.internalWaits;report.externalWaits=plan.externalWaits;
-        report.multiSignalFences=plan.multiSignalFences;report.rewoundFences=plan.rewoundFences;report.belowStartFences=plan.belowStartFences;
+        report.multiSignalFences=plan.multiSignalFences;report.unorderedSignalFences=plan.unorderedSignalFences;report.rewoundFences=plan.rewoundFences;report.belowStartFences=plan.belowStartFences;
         if(wantTrace)report.trace=capture.DiagnosticTrace();
         ReadGlobals();result=report;eyeOpen=false;
     });return result;

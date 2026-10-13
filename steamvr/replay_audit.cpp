@@ -162,9 +162,9 @@ void EndEye() {
         native.queueOverlap,native.queueReentries,native.boundaryCalls,native.foreignCalls,native.apiFailures,native.hookErrors,native.observerFaults,native.capacityFailures,native.newFences);
     logging::Write(line);
     std::snprintf(line,sizeof line,
-        "Replay audit dependencies: pair=%u eye=%u sealed=%u complete=%u plan_present=%s plan_end=%s internal_waits=%u external_waits=%u list_resets=%u allocator_resets=%u retained_allocators=%u retained_fences=%u multi_signal_fences=%u rewound_fences=%u below_start_fences=%u",
+        "Replay audit dependencies: pair=%u eye=%u sealed=%u complete=%u plan_present=%s plan_end=%s internal_waits=%u external_waits=%u list_resets=%u allocator_resets=%u retained_allocators=%u retained_fences=%u multi_signal_fences=%u unordered_signal_fences=%u rewound_fences=%u below_start_fences=%u",
         gate.CompletedPairs()+1,currentEye,unsigned(native.sealed),unsigned(native.DependenciesComplete()),nativecapture::StatusName(native.atPresent),nativecapture::StatusName(native.atEnd),
-        native.internalWaits,native.externalWaits,native.listResets,native.allocatorResets,native.retainedAllocators,native.retainedFences,native.multiSignalFences,native.rewoundFences,native.belowStartFences);
+        native.internalWaits,native.externalWaits,native.listResets,native.allocatorResets,native.retainedAllocators,native.retainedFences,native.multiSignalFences,native.unorderedSignalFences,native.rewoundFences,native.belowStartFences);
     logging::Write(line);
     for(size_t i=0;i<native.trace.events.size();++i) {
         const auto& event=native.trace.events[i];

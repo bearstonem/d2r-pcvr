@@ -13,7 +13,7 @@ struct Report {
     uint32_t hookErrors=0,observerFaults=0,capacityFailures=0,newFences=0;
     uint32_t listResets=0,allocatorResets=0,retainedAllocators=0,retainedFences=0;
     uint32_t internalWaits=0,externalWaits=0;
-    uint32_t multiSignalFences=0,rewoundFences=0,belowStartFences=0;
+    uint32_t multiSignalFences=0,unorderedSignalFences=0,rewoundFences=0,belowStartFences=0;
     stereoreplay::DependencyTrace trace;
     stereoreplay::PlanStatus atPresent=stereoreplay::PlanStatus::Empty,atEnd=stereoreplay::PlanStatus::Empty;
     bool sealed=false;

@@ -143,7 +143,7 @@ Sanitized captures:
 `stereo_submission_plan.h` prepares a bounded order of native submission
 batches from per-queue calls and fence dependencies. It preserves each batch,
 handles waits whose producer signal was submitted later on another queue,
-and rejects missing dependencies, cycles, multiple signalers/rewound fences,
+and rejects missing dependencies, cycles, unordered signalers/rewound fences,
 unknown metadata and changed command-list or allocator generations. External
 fence values must have been sampled before capture starts. A later completed
 value cannot substitute for the missing dependency. This follows Microsoft's
@@ -203,6 +203,27 @@ and fence IDs, and integer fence progress values/snapshots. No native pointers
 or game buffer contents are logged. This bounded trace allows dependency
 analysis offline; truncation is explicit. Model/native fixtures cover these
 diagnostics, and all **48/48 native checks pass** after the follow-up.
+
+The reentry follow-up `f593ab5` completed another eight offline pairs. Every
+eye again had five batches / 35 lists, twelve signals, eleven outermost waits
+and one native reentry. False overlap disappeared; unknown lists, foreign calls,
+boundary crossings, API/hook faults and capacity failures remained zero. Each
+eye reported exactly one fence with two signalers and no rewinds. The installed
+planner still rejected that pattern. A complete 28-event trace from the first
+left eye shows a direct-to-compute-to-direct handoff: the second signaler waits
+for the first signal, then signals a higher value that the first queue waits for.
+
+The offline correction accepts multiple signalers only when dependency paths
+prove their GPU order. A signal behind the waiting operation cannot satisfy
+that wait. Unknown producer choices, unordered signalers, rewinds, cycles and
+stale recordings still fail. Reachability analysis has an explicit work budget.
+The captured trace now yields the original five-batch order (15/3/1/5/11 lists),
+with six internal waits and five already-satisfied external waits. A real private
+three-queue GPU fixture also verifies the shared-fence handoff and resulting
+data. All **48/48 native checks pass**. This correction is staged, not installed
+or verified in game; no additional headset capture was needed to develop it.
+Sanitized trace and limits:
+[`native handoff`](evidence/2026-10-13-phase2-native-handoff.json).
 
 The new native fixture observes real copy/compute/direct calls: four lists in
 three batches, two waits whose signals are submitted later, unchanged synthetic

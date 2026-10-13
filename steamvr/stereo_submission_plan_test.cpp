@@ -63,6 +63,12 @@ void RejectUnsafe() {
     Capture producers;Add(producers,r,10,1,1);producers.Signal(10,1000,5);producers.Signal(20,1000,6);
     assert(producers.Plan(r).status==PlanStatus::AmbiguousFence);
     assert(producers.Plan(r).multiSignalFences==1&&!producers.Plan(r).rewoundFences);
+    assert(producers.Plan(r).unorderedSignalFences==1);
+    Capture handoff;Add(handoff,r,10,1,1);handoff.Signal(10,1000,5);
+    handoff.Wait(20,1000,5);Add(handoff,r,20,2,2);handoff.Signal(20,1000,6);
+    handoff.Wait(10,1000,6);Add(handoff,r,10,3,3);
+    const auto ordered=handoff.Plan(r);assert(ordered.Ready()&&ordered.multiSignalFences==1&&!ordered.unorderedSignalFences);
+    assert((ordered.order==std::vector<size_t>{0,1,2}));
     Capture below;below.FenceAtStart(1000,7);Add(below,r,10,1,1);below.Signal(10,1000,6);
     assert(below.Plan(r).status==PlanStatus::AmbiguousFence&&below.Plan(r).belowStartFences==1);
     Capture removed;removed.FenceAtStart(1000,UINT64_MAX);Add(removed,r,10,1,1);
@@ -83,9 +89,41 @@ void BoundsAndBatches() {
     assert(queues.Plan(r).status==PlanStatus::Overflow);
     Capture fences(10,10,10,10,1);Add(fences,r,10,1,1);fences.Signal(10,1000,1);fences.Signal(10,2000,1);
     assert(fences.Plan(r).status==PlanStatus::Overflow);
+    Capture budget(32,8,8,4,8,0);Add(budget,r,10,1,1);budget.Signal(10,1000,1);budget.Wait(20,1000,1);Add(budget,r,20,2,2);
+    assert(budget.Plan(r).status==PlanStatus::Overflow);
     Recordings bounded(1);bounded.AllocatorCreated(1);bounded.AllocatorCreated(2);bounded.ListReset(1,1);
     assert(!bounded.Snapshot(1));
     Capture empty;assert(empty.Plan(r).status==PlanStatus::Empty&&!empty.Plan(r).Ready());
 }
+void CapturedGameHandoff() {
+    // 28 structural events from f593ab5's first left eye. Native addresses and
+    // original progress counters are removed: every fence starts at zero.
+    enum {Batch,Signal,Wait};
+    struct Event {int kind;uint64_t queue,fence,value;unsigned lists;};
+    const std::array events{
+        Event{Wait,1,1,0,0},Event{Batch,1,0,0,15},Event{Signal,1,2,1,0},Event{Signal,1,3,1,0},
+        Event{Wait,2,3,1,0},Event{Wait,2,1,0,0},Event{Batch,2,0,0,3},Event{Signal,2,4,1,0},
+        Event{Signal,2,5,1,0},Event{Wait,2,5,1,0},Event{Wait,3,5,1,0},Event{Wait,3,1,0,0},
+        Event{Batch,3,0,0,1},Event{Signal,3,6,1,0},Event{Signal,3,5,2,0},Event{Wait,2,1,0,0},
+        Event{Batch,2,0,0,5},Event{Signal,2,4,2,0},Event{Wait,2,5,2,0},Event{Wait,2,5,2,0},
+        Event{Wait,2,1,0,0},Event{Batch,2,0,0,11},Event{Signal,2,4,3,0},Event{Signal,2,7,1,0},
+        Event{Wait,1,7,1,0},Event{Signal,1,8,1,0},Event{Signal,3,9,1,0},Event{Signal,2,10,1,0}
+    };
+    Recordings r;Capture c;
+    for(uint64_t fence=1;fence<=10;++fence)c.FenceAtStart(fence,0);
+    uint64_t listId=0,batchId=0;
+    for(const auto& e:events) {
+        if(e.kind==Signal)c.Signal(e.queue,e.fence,e.value);
+        else if(e.kind==Wait)c.Wait(e.queue,e.fence,e.value);
+        else {
+            std::vector<uint64_t> lists;
+            for(unsigned n=0;n<e.lists;++n){++listId;r.AllocatorCreated(100+listId);r.ListReset(listId,100+listId);lists.push_back(listId);}
+            c.Batch(e.queue,++batchId,lists,r);
+        }
+    }
+    const auto plan=c.Plan(r);assert(plan.Ready()&&plan.multiSignalFences==1&&!plan.unorderedSignalFences);
+    assert(plan.internalWaits==6&&plan.externalWaits==5&&listId==35&&batchId==5);
+    assert((plan.order==std::vector<size_t>{0,1,2,3,4}));
 }
-int main(){Dependencies();Lifecycle();RejectUnsafe();BoundsAndBatches();std::puts("Stereo submission planning: queue/fence dependencies, native batches, recording/allocator invalidation and bounds passed");}
+}
+int main(){Dependencies();Lifecycle();RejectUnsafe();BoundsAndBatches();CapturedGameHandoff();std::puts("Stereo submission planning: queue/fence dependencies, ordered shared-fence handoff, captured game trace, allocator invalidation and bounds passed");}

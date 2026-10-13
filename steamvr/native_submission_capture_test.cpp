@@ -74,7 +74,7 @@ struct Fixture {
     ComPtr<ID3D12CommandQueue> aliasedCopy;
     ComPtr<ID3D12GraphicsCommandList> extraCopy,preexisting;
     ComPtr<ID3D12CommandAllocator> preexistingAllocator;
-    ComPtr<ID3D12Fence> cpuFence;
+    ComPtr<ID3D12Fence> cpuFence,sharedFence;
     ComPtr<ID3D12Resource> upload,a,b,readback;
     Event event;
     bool pending=false;
@@ -99,6 +99,8 @@ struct Fixture {
         }
         Check(device->CreateFence(0,D3D12_FENCE_FLAG_NONE,IID_PPV_ARGS(&cpuFence)),"CPU fence");
         Check(queues[2].queue->Wait(cpuFence.Get(),0),"observe CPU fence before capture");
+        Check(device->CreateFence(0,D3D12_FENCE_FLAG_NONE,IID_PPV_ARGS(&sharedFence)),"shared handoff fence");
+        Check(queues[0].queue->Signal(sharedFence.Get(),0),"observe shared fence before capture");
         if(!event.h)throw std::runtime_error("event");
         upload=Buffer(D3D12_HEAP_TYPE_UPLOAD,D3D12_RESOURCE_STATE_GENERIC_READ);
         a=Buffer(D3D12_HEAP_TYPE_DEFAULT,D3D12_RESOURCE_STATE_COMMON);
@@ -150,6 +152,17 @@ struct Fixture {
         Submit(0,copyQueue);Check(copyQueue->Signal(queues[0].fence.Get(),value),"copy signal");
         audit::SealPresent();Wait(2,value);return audit::EndEye();
     }
+    audit::Report SharedHandoff() {
+        audit::BeginEye(GetCurrentThreadId(),true);
+        Submit(0);Check(queues[0].queue->Signal(queues[0].fence.Get(),8),"handoff copy signal");
+        Check(queues[1].queue->Wait(queues[0].fence.Get(),8),"handoff copy wait");Submit(1);
+        Check(queues[1].queue->Signal(sharedFence.Get(),1),"shared first signal");
+        Check(queues[2].queue->Wait(sharedFence.Get(),1),"shared first wait");Submit(2);
+        Check(queues[2].queue->Signal(sharedFence.Get(),2),"shared return signal");
+        Check(queues[1].queue->Wait(sharedFence.Get(),2),"shared return wait");
+        Check(queues[1].queue->Signal(queues[1].fence.Get(),8),"handoff complete");
+        audit::SealPresent();Wait(1,8);return audit::EndEye();
+    }
 };
 void Print(const audit::Report& r) {
     std::printf("native: batches=%u lists=%u signals=%u waits=%u unknown=%u overlap=%u reentries=%u boundary=%u foreign=%u hooks=%u faults=%u capacity=%u present=%s end=%s internal=%u external=%u\n",
@@ -162,7 +175,7 @@ int main() {
         Fixture f;
         const auto first=f.Chain(1);Print(first);
         assert(first.DependenciesComplete()&&first.batches==3&&first.lists==4&&first.signals==3&&first.waits==2&&first.internalWaits==2);
-        assert(first.retainedAllocators==3&&first.retainedFences==4&&f.Value()==0x11223344);
+        assert(first.retainedAllocators==3&&first.retainedFences==5&&f.Value()==0x11223344);
         // Reset the allocator only after ORIGINAL work completed. The saved
         // recording must become stale between Present and draw return.
         audit::BeginEye(GetCurrentThreadId());f.Submit(0);
@@ -195,8 +208,11 @@ int main() {
         audit::BeginEye(GetCurrentThreadId());f.pending=true;f.queues[0].queue->ExecuteCommandLists(1,old);
         Check(f.queues[0].queue->Signal(f.queues[0].fence.Get(),6),"observed list signal");audit::SealPresent();f.Wait(0,6);
         assert(audit::EndEye().DependenciesComplete());
+        const auto shared=f.SharedHandoff();Print(shared);
+        assert(shared.DependenciesComplete()&&shared.multiSignalFences==1&&!shared.unorderedSignalFences);
+        assert(shared.batches==3&&shared.lists==4&&shared.internalWaits==3&&f.Value()==0x55667788);
         audit::Stop();audit::BeginEye(GetCurrentThreadId());
-        Check(f.queues[0].queue->Signal(f.queues[0].fence.Get(),7),"pass-through signal after stop");f.Wait(0,7);
+        Check(f.queues[0].queue->Signal(f.queues[0].fence.Get(),9),"pass-through signal after stop");f.Wait(0,9);
         assert(audit::EndEye().atEnd==PlanStatus::Empty);
         assert(audit::Shutdown()&&audit::InstalledHooks()==0);
         std::puts("Native capture: original three-queue GPU results/order preserved, allocator/list generations observed, CPU signals flagged, default-off and clean hook removal verified");return 0;

@@ -1,0 +1,78 @@
+{
+  "implementation_commit": "f593ab574be8bbda751f46e997c1de107e955c78",
+  "plugin_sha256": "fe4553d4d4e7902e36e269a7631d959c6281fcae55bdc98a2fc7f7c54100de80",
+  "status": "complete",
+  "game": "Steam D2R 3.3.93787; offline local Paladin",
+  "hardware_runtime": "Ryzen 9 5950X / RTX 5090; Steam Frame via Steam Link; SteamVR OpenXR at 90 Hz",
+  "pairs": 8,
+  "eyes": 16,
+  "native_per_eye": {
+    "batches": 5,
+    "lists": 35,
+    "signals": 12,
+    "waits": 11,
+    "queue_reentries": 1,
+    "queue_overlap": 0,
+    "unknown_lists": 0,
+    "boundary_calls": 0,
+    "foreign_calls": 0,
+    "cpu_signals": 0,
+    "api_or_hook_or_observer_or_capacity_errors": 0,
+    "multi_signal_fences": 1,
+    "rewound_fences": 0,
+    "below_start_fences": 0,
+    "installed_plan_at_present_and_draw_return": "ambiguous_fence",
+    "native_minus_public_list_count": 0,
+    "public_invalidated_lists_at_present_and_draw_return": 0
+  },
+  "camera": {
+    "complete_detections_per_eye_min": 14,
+    "complete_detections_per_eye_max": 17,
+    "reads_per_eye": 32,
+    "unknown_size_reads_per_eye": 32,
+    "unreadable_or_discarded_or_pending_reads": 0
+  },
+  "trace": {
+    "pair": 1,
+    "eye": 0,
+    "truncated": false,
+    "queue_ids": {"0": "copy", "1": "direct", "2": "compute"},
+    "normalization": "Queue/fence IDs are synthetic; each fence's initial completed value is subtracted from all of its values. All ten fence baselines are zero.",
+    "event_columns": ["kind", "queue", "fence", "value", "list_count"],
+    "events": [
+      ["wait",0,0,0,0], ["batch",0,0,0,15], ["signal",0,1,1,0], ["signal",0,2,1,0],
+      ["wait",1,2,1,0], ["wait",1,0,0,0], ["batch",1,0,0,3], ["signal",1,3,1,0],
+      ["signal",1,4,1,0], ["wait",1,4,1,0], ["wait",2,4,1,0], ["wait",2,0,0,0],
+      ["batch",2,0,0,1], ["signal",2,5,1,0], ["signal",2,4,2,0], ["wait",1,0,0,0],
+      ["batch",1,0,0,5], ["signal",1,3,2,0], ["wait",1,4,2,0], ["wait",1,4,2,0],
+      ["wait",1,0,0,0], ["batch",1,0,0,11], ["signal",1,3,3,0], ["signal",1,6,1,0],
+      ["wait",0,6,1,0], ["signal",0,7,1,0], ["signal",2,8,1,0], ["signal",1,9,1,0]
+    ]
+  },
+  "offline_followup": {
+    "captured_trace_plan": "ready",
+    "batch_list_counts": [15,3,1,5,11],
+    "batch_order": [0,1,2,3,4],
+    "internal_waits": 6,
+    "external_waits": 5,
+    "multi_signal_fences": 1,
+    "unordered_signal_fences": 0,
+    "native_tests_passed": 48,
+    "actual_private_gpu_handoff_fixture": "passed",
+    "correction_installed_or_headset_verified": false
+  },
+  "cleanup": {
+    "audit_ini_control_restored": true,
+    "ini_byte_identical_to_before": true,
+    "saved_games_and_video_settings_preserved_at_deployment": true
+  },
+  "launch": {"first_attempt": "Reached game and completed audit"},
+  "limits": [
+    "Diagnostic overhead: not an FPS comparison or a performance gain.",
+    "The installed planner rejected every eye. The correction was validated offline with the first left-eye trace and a private GPU fixture, not live game replay.",
+    "Only the first left eye has a structural trace; all sixteen eyes have aggregate counts.",
+    "No game command list was replayed. Resource/descriptor lifetimes, full states, per-eye camera/history/effects/depth, VRS and spatial UI remain unvalidated for replay.",
+    "Camera probes reached their quota and had unknown root CBV extents; overlapping detection counts do not establish complete coverage.",
+    "No RTX 5080 reporter or Battle.net gameplay validation."
+  ]
+}

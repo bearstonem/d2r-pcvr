@@ -67,7 +67,7 @@ struct SubmissionPlan {
     PlanStatus status=PlanStatus::Empty;
     std::vector<size_t> order; // Indices into Capture::Submissions(), preserving native batches.
     uint32_t internalWaits=0,externalWaits=0;
-    uint32_t multiSignalFences=0,rewoundFences=0,belowStartFences=0;
+    uint32_t multiSignalFences=0,unorderedSignalFences=0,rewoundFences=0,belowStartFences=0;
     bool Ready()const{return status==PlanStatus::Ready;}
 };
 enum class DependencyKind {Batch,Signal,Wait};
@@ -85,7 +85,7 @@ class Capture {
     std::vector<Submission> submissions;
     std::map<uint64_t,uint64_t> fenceStarts;
     std::set<uint64_t> queues,batchIds,fences;
-    size_t eventLimit,batchLimit,listLimit,queueLimit,fenceLimit;
+    size_t eventLimit,batchLimit,listLimit,queueLimit,fenceLimit,analysisLimit;
     bool overflow=false,invalid=false;
     bool EventAllowed(uint64_t queue,uint64_t fence=0) {
         if(!queue){invalid=true;return false;}
@@ -95,8 +95,8 @@ class Capture {
     }
 public:
     explicit Capture(size_t maxEvents=2048,size_t maxBatches=256,size_t maxListsPerBatch=64,
-                     size_t maxQueues=16,size_t maxFences=128):
-        eventLimit(maxEvents),batchLimit(maxBatches),listLimit(maxListsPerBatch),queueLimit(maxQueues),fenceLimit(maxFences){}
+                     size_t maxQueues=16,size_t maxFences=128,size_t maxAnalysisSteps=500000):
+        eventLimit(maxEvents),batchLimit(maxBatches),listLimit(maxListsPerBatch),queueLimit(maxQueues),fenceLimit(maxFences),analysisLimit(maxAnalysisSteps){}
     // Must be sampled BEFORE this eye's submissions, never inferred from a later
     // completed value. UINT64_MAX means a removed D3D12 device, not completed work.
     void FenceAtStart(uint64_t fence,uint64_t completed) {
@@ -165,7 +165,7 @@ public:
             timeline.last=event.value;timeline.signals.emplace_back(event.value,i);
         }
         for(const auto& [id,timeline]:timelines){out.multiSignalFences+=timeline.multi;out.rewoundFences+=timeline.rewound;out.belowStartFences+=timeline.belowStart;}
-        if(out.multiSignalFences||out.rewoundFences||out.belowStartFences)return reject(PlanStatus::AmbiguousFence);
+        if(out.rewoundFences||out.belowStartFences)return reject(PlanStatus::AmbiguousFence);
         std::vector<std::vector<size_t>> edges(events.size());
         std::vector<size_t> incoming(events.size(),0);
         auto edge=[&](size_t before,size_t after){
@@ -173,6 +173,7 @@ public:
             if(std::find(next.begin(),next.end(),after)==next.end()){next.push_back(after);++incoming[after];}
         };
         std::map<uint64_t,size_t> previous;
+        std::vector<size_t> pending;
         for(size_t i=0;i<events.size();++i) {
             const auto& event=events[i];
             if(const auto p=previous.find(event.queue);p!=previous.end())edge(p->second,i);
@@ -180,13 +181,52 @@ public:
             if(event.kind!=Kind::Wait)continue;
             const auto start=fenceStarts.find(event.fence);
             if(!event.value||(start!=fenceStarts.end()&&start->second>=event.value)){++out.externalWaits;continue;}
-            const auto timeline=timelines.find(event.fence);
-            if(timeline==timelines.end())return reject(PlanStatus::MissingDependency);
-            const auto& signals=timeline->second.signals;
-            const auto signal=std::lower_bound(signals.begin(),signals.end(),event.value,
-                [](const auto& p,uint64_t value){return p.first<value;});
-            if(signal==signals.end())return reject(PlanStatus::MissingDependency);
-            edge(signal->second,i);++out.internalWaits;
+            pending.push_back(i);
+        }
+        size_t analysisSteps=0;bool limited=false;
+        std::vector<size_t> stack;stack.reserve(events.size());
+        std::vector<uint32_t> marks(events.size(),0);uint32_t epoch=0;
+        auto reaches=[&](size_t from,size_t to){
+            if(from==to)return true;
+            if(++epoch==0){std::fill(marks.begin(),marks.end(),0);++epoch;}
+            stack.clear();stack.push_back(from);marks[from]=epoch;
+            while(!stack.empty()) {
+                if(analysisSteps++>=analysisLimit){limited=true;return false;}
+                const auto current=stack.back();stack.pop_back();
+                for(const auto next:edges[current]) {
+                    if(analysisSteps++>=analysisLimit){limited=true;return false;}
+                    if(next==to)return true;
+                    if(marks[next]!=epoch){marks[next]=epoch;stack.push_back(next);}
+                }
+            }return false;
+        };
+        while(!pending.empty()) {
+            bool progress=false;
+            for(auto wait=pending.begin();wait!=pending.end();) {
+                const size_t index=*wait;const auto& event=events[index];
+                const auto timeline=timelines.find(event.fence);
+                if(timeline==timelines.end())return reject(PlanStatus::MissingDependency);
+                std::vector<size_t> candidates;bool foundValue=false;
+                for(const auto& [value,signal]:timeline->second.signals)if(value>=event.value) {
+                    foundValue=true;
+                    // A signal behind this wait cannot be its producer. This
+                    // removes the later handoff signal on the waiting queue.
+                    if(!reaches(index,signal))candidates.push_back(signal);
+                }
+                if(limited)return reject(PlanStatus::Overflow);
+                if(candidates.empty())return reject(foundValue?PlanStatus::CyclicDependency:PlanStatus::MissingDependency);
+                size_t producer=events.size();
+                for(const auto candidate:candidates)if(reaches(candidate,index)){producer=candidate;break;}
+                if(producer==events.size())for(const auto candidate:candidates) {
+                    bool earliest=true;
+                    for(const auto other:candidates)if(other!=candidate&&!reaches(candidate,other)){earliest=false;break;}
+                    if(earliest){producer=candidate;break;}
+                }
+                if(limited)return reject(PlanStatus::Overflow);
+                if(producer==events.size()){++wait;continue;}
+                edge(producer,index);++out.internalWaits;wait=pending.erase(wait);progress=true;
+            }
+            if(!progress)return reject(PlanStatus::AmbiguousFence);
         }
         // Stable topological order also handles a CPU Wait call preceding its
         // producer's Signal on another queue. Replaying CPU call order alone
@@ -200,6 +240,14 @@ public:
             for(const size_t after:edges[i])if(!--incoming[after])ready.push(after);
         }
         if(visited!=events.size())return reject(PlanStatus::CyclicDependency);
+        for(const auto& [id,timeline]:timelines)if(timeline.multi) {
+            bool ordered=true;
+            for(size_t i=1;i<timeline.signals.size();++i)
+                if(!reaches(timeline.signals[i-1].second,timeline.signals[i].second)){ordered=false;break;}
+            if(limited)return reject(PlanStatus::Overflow);
+            if(!ordered)++out.unorderedSignalFences;
+        }
+        if(out.unorderedSignalFences)return reject(PlanStatus::AmbiguousFence);
         out.status=PlanStatus::Ready;return out;
     }
 };
