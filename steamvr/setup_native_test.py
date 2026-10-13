@@ -1,5 +1,7 @@
 """Graphical setup fixtures; never touch a real game, Steam profile or registry."""
 import contextlib
+import configparser
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -355,6 +357,176 @@ class NativeSetupTests(unittest.TestCase):
                 self.assertEqual(len(chain), 2 if receipt else 1)
                 self.assertTrue(all(path.is_relative_to(app) for path, _ in chain))
                 self.assertEqual(uninstall.restore_plan(game, chain)[game / uninstall.PLUGIN], None)
+
+
+    def test_selected_extracted_folder_finds_only_valid_original_backups_without_writes(self):
+        for layout in ('setup-backups/game', 'build-frame/backups'):
+            with self.subTest(layout=layout), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                app, game, client, saves, profile, values = self.fixture(root)
+                old = self.snapshot(root / 'moved ZIP' / layout / '20260101', game, saves)
+                self.put(game / uninstall.PLUGIN, b'old mod')
+                install.write_record(game, {'game': str(game), 'snapshots': [str(root / 'deleted ZIP' / layout / old.name)]})
+                values['backups'] = str(root / 'moved ZIP')
+                before = {str(path): path.read_bytes() for path in root.rglob('*') if path.is_file()}
+                self.assertEqual(native.validate_backups(values, app)[0][0], old)
+                after = {str(path): path.read_bytes() for path in root.rglob('*') if path.is_file()}
+                self.assertEqual(before, after)
+                with patch.object(setup, 'require_closed'):
+                    native.adopt_backups(game, app, root / 'moved ZIP')
+                self.assertTrue(Path(install.read_record(game)['snapshots'][0]).is_relative_to(app))
+
+    def test_empty_wrong_game_and_deleted_backup_folders_are_rejected_before_install(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            app, game, client, saves, profile, values = self.fixture(root)
+            self.put(game / uninstall.PLUGIN, b'old mod without a receipt')
+            empty = root / 'empty'
+            empty.mkdir()
+            wrong = self.snapshot(root / 'other mod/setup-backups/game/20260101', root / 'other game', saves)
+            for folder, message in [(empty, 'original pre-mod backup'), (wrong.parents[2], 'original pre-mod backup'),
+                                    (root / 'deleted', 'Recycle Bin')]:
+                with self.subTest(folder=folder), self.assertRaisesRegex(ValueError, message):
+                    native.validate_backups({**values, 'backups': str(folder)}, app)
+            self.assertEqual(list(app.iterdir()), [])
+            self.assertEqual((game / uninstall.PLUGIN).read_bytes(), b'old mod without a receipt')
+            self.assertEqual((saves / 'Character.d2s').read_bytes(), b'current character')
+
+    def test_probe_reports_missing_backup_path_and_reason_for_wizard(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            app, game, client, saves, profile, values = self.fixture(root)
+            missing = root / 'deleted ZIP/setup-backups/game/20260101'
+            install.write_record(game, {'game': str(game), 'snapshots': [str(missing)]})
+            report = root / 'detected.ini'
+            with patch.object(setup, 'verify_release', return_value={'sha256': {}}), \
+                    patch.object(setup, 'saved_games', return_value=saves), patch.object(setup, 'battlenet_location', return_value=None):
+                native.write_probe(report, app, client, game, app)
+            data = configparser.ConfigParser(interpolation=None)
+            data.read(report, encoding='utf-16')
+            self.assertEqual(data['detected']['backup_required'], '1')
+            self.assertEqual(data['detected']['backup_path'], str(missing))
+            self.assertIn(str(missing), data['detected']['backup_message'])
+            self.assertEqual(list(app.iterdir()), [])
+
+    def test_readiness_reports_live_processes_runtime_and_invalid_selections_without_mutation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            app, game, client, saves, profile, values = self.fixture(root)
+            before = {str(path): path.read_bytes() for path in root.rglob('*') if path.is_file()}
+            with patch.object(setup, 'verify_release', return_value={'sha256': {}}), \
+                    patch.object(setup, 'running_apps', return_value={'steam.exe', 'd2rloader.exe'}) as processes:
+                report = native.readiness(values, app)
+                self.assertEqual(report['ready'], '0')
+                self.assertIn('Steam > Exit', report['steam'])
+                self.assertIn('Save & Exit', report['game'])
+                processes.return_value = set()
+                self.assertEqual(native.readiness(values, app)['ready'], '1')
+                report = native.readiness({**values, 'steamvr': str(root / 'missing runtime'), 'profile': 'wrong'}, app)
+                self.assertEqual(report['ready'], '0')
+                self.assertIn('cannot read', report['runtime'])
+                self.assertIn('Steam account', report['selections'])
+                processes.side_effect = OSError('tasklist unavailable')
+                report = native.readiness(values, app)
+                self.assertEqual(report['ready'], '0')
+                self.assertIn('tasklist unavailable', report['steam'])
+            after = {str(path): path.read_bytes() for path in root.rglob('*') if path.is_file()}
+            self.assertEqual(before, after)
+
+    def test_installation_check_detects_missing_changed_files_and_stale_shortcuts_for_both_editions(self):
+        for store in ('steam', 'battlenet'):
+            with self.subTest(store=store), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                app, game, client, saves, profile, values = self.fixture(root, store)
+                values.update(headset='Quest 3', connections='steamvr,vdxr')
+                for name in ('D2RLoader.exe', 'D2RCore.dll', 'D2RLoader.mpq', 'ReShade64.dll', 'openxr_loader.dll',
+                             str(uninstall.PLUGIN), 'd2rloader/plugins/d2r_vr.ini'):
+                    self.put(game / name)
+                runtime = client / 'steamapps/common/SteamVR/steamxr_win64.json'
+                routing = {} if store == 'steam' else dict(store=store, python=app / '.runtime/python/python.exe',
+                    wrapper=app / 'steamvr/launch_windows.py', runtime=runtime)
+                self.put(profile / 'config/shortcuts.vdf', steam.update_shortcuts(None, client, game, ['steamvr', 'vdxr'], **routing))
+                if store == 'steam':
+                    options = setup.launch_options(app / '.runtime/python/python.exe', app / 'steamvr/launch_windows.py', runtime)
+                    self.put(profile / 'config/localconfig.vdf', steam.set_launch_options(LOCAL, options).encode())
+                manifest = {'sha256': {'bin/d2rl-vrcam.dll': hashlib.sha256(b'fixture').hexdigest(),
+                                       'bin/openxr_loader.dll': hashlib.sha256(b'fixture').hexdigest()}}
+                with patch.object(setup, 'verify_release', return_value=manifest), \
+                        patch('launch_windows.vdxr_manifest', return_value=runtime):
+                    report = native.inspect_installation(values, app)
+                    self.assertEqual(report['ready'], '1', report)
+                    self.assertIn('Virtual Desktop', report['launch'])
+                    self.assertEqual('(Battle.net)' in report['launch'], store == 'battlenet')
+                    (game / 'openxr_loader.dll').unlink()
+                    self.put(game / uninstall.PLUGIN, b'corrupt DLL')
+                    entries = steam.decode_binary((profile / 'config/shortcuts.vdf').read_bytes())
+                    entries['shortcuts']['0']['LaunchOptions'] = 'deleted ZIP wrapper'
+                    self.put(profile / 'config/shortcuts.vdf', steam.encode_binary(entries))
+                    before = {str(path): path.read_bytes() for path in root.rglob('*') if path.is_file()}
+                    report = native.inspect_installation(values, app)
+                    self.assertEqual(report['ready'], '0')
+                    self.assertIn('openxr_loader.dll', report['files'])
+                    self.assertIn('Checksum mismatch', report['files'])
+                    self.assertIn('outdated', report['shortcuts'])
+                    self.assertEqual(before, {str(path): path.read_bytes() for path in root.rglob('*') if path.is_file()})
+
+    def test_report_preserves_unicode_percent_and_flattens_multiline_errors_for_inno(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'checks.ini'
+            native.write_report(path, 'checks', dict(files='C:\\Games\\日本語 100%\\file.dll\nPermission denied'))
+            parser = configparser.ConfigParser(interpolation=None)
+            parser.read(path, encoding='utf-16')
+            self.assertEqual(parser['checks']['files'], 'C:\\Games\\日本語 100%\\file.dll Permission denied')
+
+    def test_readiness_cli_writes_report_and_still_blocks_changed_process_state_at_install(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            app, game, client, saves, profile, values = self.fixture(root)
+            choices, report = root / 'choices.ini', root / 'checks.ini'
+            parser = configparser.ConfigParser(interpolation=None)
+            parser['setup'] = values
+            with choices.open('w', encoding='utf-16') as output:
+                parser.write(output)
+            with patch.object(native, 'ROOT', app), patch.object(setup, 'verify_release', return_value={'sha256': {}}), \
+                    patch.object(setup, 'running_apps', return_value=set()) as processes, \
+                    patch.object(native.sys, 'argv', ['setup_native.py', '--readiness', str(choices), '--report', str(report)]), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                native.main()
+                result = configparser.ConfigParser(interpolation=None)
+                result.read(report, encoding='utf-16')
+                self.assertEqual(result['checks']['ready'], '1')
+                processes.return_value = {'steam.exe'}  # Steam reopened after the readiness check.
+                with patch.object(native.sys, 'argv', ['setup_native.py', '--install', str(choices)]), \
+                        self.assertRaisesRegex(ValueError, 'Steam > Exit'):
+                    native.main()
+            self.assertEqual(list(app.iterdir()), [])
+            self.assertEqual((saves / 'Character.d2s').read_bytes(), b'current character')
+
+    def test_archiving_old_mod_allows_fresh_selection_without_lost_backups_or_save_changes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            app, game, client, saves, profile, values = self.fixture(root, 'battlenet')
+            self.put(game / uninstall.PLUGIN, b'old mod')
+            self.put(game / 'D2RLoader.exe', b'old loader')
+            self.put(game / 'Data/untouched-game-data', b'original game data')
+            self.put(game / 'mods/unrelated-mod', b'other mod')
+            install.write_record(game, {'game': str(game), 'snapshots': [str(root / 'permanently deleted backup')]})
+            with patch.object(setup, 'verify_release', return_value={'sha256': {'bin/CascLib.dll': 'fixture'}}):
+                with self.assertRaisesRegex(ValueError, 'backup is missing'):
+                    native.validate_choices(values, app)
+                archive = root / 'archived mod'
+                archive.mkdir()
+                for name in ('d2rloader', 'D2RLoader.exe'):
+                    source, target = (game / name).resolve(), (archive / name).resolve()
+                    self.assertTrue(source.is_relative_to(root.resolve()))
+                    self.assertTrue(target.is_relative_to(root.resolve()))
+                    shutil.move(source, target)
+                self.assertEqual(native.validate_choices(values, app)['mode'], 1)
+            self.assertEqual(install.read_record(game), {})
+            self.assertEqual((game / 'Data/untouched-game-data').read_bytes(), b'original game data')
+            self.assertEqual((game / 'mods/unrelated-mod').read_bytes(), b'other mod')
+            self.assertEqual((saves / 'Character.d2s').read_bytes(), b'current character')
+            self.assertTrue((archive / 'd2rloader' / install.RECORD.relative_to('d2rloader')).is_file())
 
 
 if __name__ == '__main__':

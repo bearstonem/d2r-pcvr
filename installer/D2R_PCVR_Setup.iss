@@ -49,11 +49,20 @@ Name: "{group}\Uninstall D2R PCVR"; Filename: "{uninstallexe}"
 Filename: "{code:SteamExecutable}"; Description: "Open Steam to use your new VR shortcuts"; Flags: nowait postinstall skipifsilent; Check: SetupSucceeded
 
 [Code]
+const
+  SteamExitHelp = 'Save and exit Diablo II. In Steam, choose Steam > Exit. Closing Steam''s window leaves it running. This temporarily disconnects SteamVR streaming; reopen Steam after setup finishes.';
+  SecurityHelp = 'If a required file is missing or unreadable, check Windows Security > Virus & threat protection > Protection history (or your other antivirus history). Note the detection name and affected filename. Keep protection enabled while the detection is investigated. Browser download warnings are separate; check the browser''s Downloads page with Ctrl+J.';
+  DeletedBackupHelp = 'Check the Recycle Bin or another backup for the original extracted mod folder. Downloading the ZIP again does not recreate the backups made during installation.'#13#10#13#10 +
+    'If the original backups are permanently gone, cancel setup and back up your entire Diablo II Resurrected Saved Games folder. You can prepare a fresh mod installation by moving the old mod components into a separate folder, then rerunning Setup. You do not need to download the game again.'#13#10#13#10 +
+    'See "Original backups permanently deleted" in INSTALL-WINDOWS.md for the exact files to move. Keep game data, saves and unrelated mods. Full install alone does not bypass the backup check.';
 var
   EditionPage, HeadsetPage, ConnectionPage, AccountPage, ModePage: TInputOptionWizardPage;
   PathsPage, RuntimePage, BackupPage: TInputDirWizardPage;
+  ReadinessPage: TWizardPage;
+  BackupDetails, ReadinessDetails: TNewMemo;
+  FinishedCheck, FinishedSetupLogs, FinishedGameLogs, FinishedSecurity: TNewButton;
   ProfileIDs: TStringList;
-  PayloadRoot, ProbeFile, ChoicesFile, LastOutput, PreviousEdition: String;
+  PayloadRoot, ProbeFile, ChoicesFile, CheckFile, LastOutput, PreviousEdition, BackendLogRoot: String;
   SetupFailed, BackendBusy: Boolean;
 
 function Q(const Value: String): String;
@@ -65,10 +74,10 @@ procedure BackendOutput(const S: String; const Error, FirstLine: Boolean);
 begin
   Log(S);
   if Trim(S) <> '' then LastOutput := S;
+  if BackendLogRoot <> '' then SaveStringToFile(BackendLogRoot + '\setup-last.log', S + #13#10, True);
   if BackendBusy then begin
     WizardForm.StatusLabel.Caption := Copy(S, 1, 180);
     WizardForm.StatusLabel.Update;
-    SaveStringToFile(ExpandConstant('{app}\setup-last.log'), S + #13#10, True);
   end;
 end;
 
@@ -77,13 +86,14 @@ var
   ExitCode: Integer;
 begin
   LastOutput := '';
+  BackendLogRoot := Root;
   ExitCode := -1;
   Result := ExecAndLogOutput(Root + '\.runtime\python\python.exe',
-    '-u ' + Q(Root + '\steamvr\setup_native.py') + ' ' + Arguments,
+    '-X utf8 -u ' + Q(Root + '\steamvr\setup_native.py') + ' ' + Arguments,
     Root, SW_SHOWNORMAL, ewWaitUntilTerminated, ExitCode, @BackendOutput);
   Result := Result and (ExitCode = 0);
   if not Result and (LastOutput = '') then
-    LastOutput := 'Could not start the setup helper. Check Windows Security Protection History and keep your installation backups.';
+    LastOutput := 'Could not start the setup helper: ' + Root + '\.runtime\python\python.exe. Check Windows Security Protection History and keep your installation backups.';
 end;
 
 function InitializeSetup: Boolean;
@@ -128,16 +138,173 @@ begin
   if Result then LoadProfiles;
 end;
 
+procedure WriteChoices;
+var
+  Headsets, Connections, Modes, Lines: TArrayOfString;
+  Connection: String;
+begin
+  Headsets := ['Steam Frame', 'Quest 3', 'Quest 2', 'Other SteamVR headset'];
+  Connections := ['steamvr', 'vdxr', 'steamvr,vdxr'];
+  Modes := ['repair', 'full', 'shortcuts'];
+  Connection := 'steamvr';
+  if not (HeadsetPage.SelectedValueIndex in [0, 3]) then Connection := Connections[ConnectionPage.SelectedValueIndex];
+  Lines := ['[setup]', 'store=' + PreviousEdition,
+    'headset=' + Headsets[HeadsetPage.SelectedValueIndex], 'connections=' + Connection,
+    'steam=' + PathsPage.Values[0], 'game=' + PathsPage.Values[1], 'saves=' + PathsPage.Values[2],
+    'steamvr=' + RuntimePage.Values[0], 'profile=' + ProfileIDs[AccountPage.SelectedValueIndex],
+    'mode=' + Modes[ModePage.SelectedValueIndex], 'backups=' + BackupPage.Values[0]];
+  if not SaveStringsToUTF8File(ChoicesFile, Lines, False) then RaiseException('Could not save the setup choices.');
+end;
+
+procedure OpenLocation(const Location: String);
+var
+  ErrorCode: Integer;
+begin
+  if not ShellExec('open', Location, '', '', SW_SHOWNORMAL, ewNoWait, ErrorCode) then
+    MsgBox('Could not open ' + Location + '. Windows error: ' + IntToStr(ErrorCode), mbError, MB_OK);
+end;
+
+procedure SecurityClick(Sender: TObject);
+begin
+  MsgBox(SecurityHelp, mbInformation, MB_OK);
+  OpenLocation('ms-settings:windowsdefender');
+end;
+
+procedure SetupLogsClick(Sender: TObject);
+begin
+  if DirExists(BackendLogRoot) then OpenLocation(BackendLogRoot)
+  else if DirExists(WizardDirValue) then OpenLocation(WizardDirValue)
+  else OpenLocation(PayloadRoot);
+end;
+
+procedure GameLogsClick(Sender: TObject);
+var
+  Folder: String;
+begin
+  Folder := GetIniString('checks', 'game_logs', PathsPage.Values[1] + '\d2rloader\logs', CheckFile);
+  if DirExists(Folder) then OpenLocation(Folder)
+  else MsgBox('No game startup logs exist yet. After trying the VR shortcut, check ' + Folder + '. Setup logs are available with Open setup logs.', mbInformation, MB_OK);
+end;
+
+procedure DeletedBackupClick(Sender: TObject);
+var
+  ErrorCode: Integer;
+begin
+  MsgBox(DeletedBackupHelp, mbInformation, MB_OK);
+  if not ShellExec('open', ExpandConstant('{sys}\notepad.exe'), Q(PayloadRoot + '\INSTALL-WINDOWS.md'), '', SW_SHOWNORMAL, ewNoWait, ErrorCode) then
+    MsgBox('Read Original backups permanently deleted in ' + PayloadRoot + '\INSTALL-WINDOWS.md', mbInformation, MB_OK);
+end;
+
+function AddButton(Parent: TWinControl; const Caption: String; Left, Top, Width: Integer; Click: TNotifyEvent): TNewButton;
+begin
+  Result := TNewButton.Create(Parent);
+  Result.Parent := Parent;
+  Result.Caption := Caption;
+  Result.SetBounds(Left, Top, Width, ScaleY(25));
+  Result.OnClick := Click;
+end;
+
+function RefreshReadiness: Boolean;
+begin
+  WriteChoices;
+  Result := RunBackend(PayloadRoot, '--readiness ' + Q(ChoicesFile) + ' --report ' + Q(CheckFile) + ' --managed-root ' + Q(WizardDirValue));
+  if Result then begin
+    ReadinessDetails.Text := 'Diablo II / D2RLoader: ' + GetIniString('checks', 'game', 'Unknown', CheckFile) + #13#10#13#10 +
+      'Steam: ' + GetIniString('checks', 'steam', 'Unknown', CheckFile) + #13#10#13#10 +
+      'VR runtime: ' + GetIniString('checks', 'runtime', 'Unknown', CheckFile) + #13#10#13#10 +
+      'Setup choices and backups: ' + GetIniString('checks', 'selections', 'Unknown', CheckFile);
+    Result := GetIniInt('checks', 'ready', 0, 0, 1, CheckFile) = 1;
+  end else ReadinessDetails.Text := LastOutput + #13#10#13#10 + SecurityHelp;
+end;
+
+procedure CheckAgainClick(Sender: TObject);
+begin
+  RefreshReadiness;
+end;
+
+function CheckInstalled(const ShowResult: Boolean): Boolean;
+var
+  Detail: String;
+begin
+  Result := RunBackend(ExpandConstant('{app}'), '--inspect ' + Q(ChoicesFile) + ' --report ' + Q(CheckFile));
+  if Result then begin
+    Detail := 'Mod files: ' + GetIniString('checks', 'files', 'Unknown', CheckFile) + #13#10#13#10 +
+      'VR runtime: ' + GetIniString('checks', 'runtime', 'Unknown', CheckFile) + #13#10#13#10 +
+      'Steam shortcuts: ' + GetIniString('checks', 'shortcuts', 'Unknown', CheckFile);
+    Result := GetIniInt('checks', 'ready', 0, 0, 1, CheckFile) = 1;
+  end else Detail := LastOutput;
+  FinishedSecurity.Visible := not Result;
+  if ShowResult then begin
+    if Result then MsgBox(Detail + #13#10#13#10 + 'These file checks do not test a headset launch.', mbInformation, MB_OK)
+    else MsgBox(Detail + #13#10#13#10 + SecurityHelp + #13#10#13#10 + 'Use Open setup logs and Open game logs to collect diagnostics. Run Setup again and choose Update / repair after resolving the error.', mbError, MB_OK);
+  end;
+end;
+
+procedure CheckInstalledClick(Sender: TObject);
+begin
+  CheckInstalled(True);
+end;
+
+procedure LayoutFinishedPage;
+var
+  ButtonTop: Integer;
+begin
+  WizardForm.AdjustLabelHeight(WizardForm.FinishedLabel);
+  ButtonTop := WizardForm.FinishedLabel.Top + WizardForm.FinishedLabel.Height + ScaleY(6);
+  FinishedCheck.Top := ButtonTop;
+  FinishedSetupLogs.Top := ButtonTop;
+  FinishedGameLogs.Top := ButtonTop + ScaleY(33);
+  FinishedSecurity.Top := ButtonTop + ScaleY(33);
+  WizardForm.RunList.Top := ButtonTop + ScaleY(69);
+  WizardForm.RunList.Height := WizardForm.FinishedPage.ClientHeight - WizardForm.RunList.Top - ScaleY(8);
+end;
+
+function RetryInstallation: Boolean;
+var
+  Form: TSetupForm;
+  Details: TNewMemo;
+  RetryButton, StopButton: TNewButton;
+begin
+  Result := False;
+  if WizardSilent then Exit;
+  Form := CreateCustomForm(520, 270, False, False);
+  try
+    Form.Caption := 'D2R PCVR setup needs attention';
+    Details := TNewMemo.Create(Form);
+    Details.Parent := Form;
+    Details.SetBounds(ScaleX(12), ScaleY(12), Form.ClientWidth - ScaleX(24), Form.ClientHeight - ScaleY(60));
+    Details.ReadOnly := True;
+    Details.ScrollBars := ssVertical;
+    Details.Text := LastOutput + #13#10#13#10 + SecurityHelp + #13#10#13#10 +
+      'Your helper files and backups have been kept. Resolve the reported error, then choose Retry to run setup again. ' + SteamExitHelp;
+    AddButton(Form, 'Windows Security', ScaleX(12), Form.ClientHeight - ScaleY(37), ScaleX(130), @SecurityClick);
+    AddButton(Form, 'Open logs', ScaleX(150), Form.ClientHeight - ScaleY(37), ScaleX(100), @SetupLogsClick);
+    RetryButton := AddButton(Form, 'Retry', Form.ClientWidth - ScaleX(206), Form.ClientHeight - ScaleY(37), ScaleX(90), nil);
+    RetryButton.ModalResult := mrRetry;
+    RetryButton.Default := True;
+    StopButton := AddButton(Form, 'Stop setup', Form.ClientWidth - ScaleX(108), Form.ClientHeight - ScaleY(37), ScaleX(96), nil);
+    StopButton.ModalResult := mrCancel;
+    StopButton.Cancel := True;
+    Result := Form.ShowModal = mrRetry;
+  finally
+    Form.Free;
+  end;
+end;
+
 procedure InitializeWizard;
+var
+  HelpLabel: TNewStaticText;
+  ButtonWidth, ButtonTop: Integer;
 begin
   WizardForm.WelcomeLabel2.Caption :=
     'Play your own Diablo II: Resurrected in first-person VR with motion controls.'#13#10#13#10 +
     'Supports SteamVR and Virtual Desktop on Windows. Steam Frame uses SteamVR.'#13#10#13#10 +
     'You must purchase and install the original game. No Blizzard game assets are included. Use an OFFLINE local character with this preview.'#13#10#13#10 +
-    'Launch the original game once and complete its account prompts before installing. Save and exit D2R, then fully exit Steam before clicking Install.';
+    'Launch the original game once and complete its account prompts. Save and exit D2R, then choose Steam > Exit before installing. Closing Steam''s window leaves it running.';
   PayloadRoot := ExpandConstant('{tmp}\') + '{app}';
   ProbeFile := ExpandConstant('{tmp}\detected.ini');
   ChoicesFile := ExpandConstant('{tmp}\choices.ini');
+  CheckFile := ExpandConstant('{tmp}\checks.ini');
   ExtractTemporaryFiles('{app}\*');
   if ExpandConstant('{param:PAYLOADCHECK|}') <> '' then begin
     if not RunBackend(PayloadRoot, '--check') then RaiseException(LastOutput);
@@ -179,8 +346,43 @@ begin
   ModePage.SelectedValueIndex := 1;
   BackupPage := CreateInputDirPage(ModePage.ID, 'Locate an older installation backup',
     'Keep the original files available for removal',
-    'This older mod installation needs its original pre-mod backup. Browse to its snapshot folder or the folder containing snapshots (usually setup-backups\game or build-frame\backups in the old mod folder). Setup will copy and verify these backups. If you cannot find them, cancel and keep the current installation.', False, '');
+    'Select the folder where you originally extracted the mod ZIP, or its setup-backups\game or build-frame\backups folder. Setup needs these original backups to preserve removal and will copy and verify them before updating.', False, '');
   BackupPage.Add('Original installation backup folder:');
+  BackupPage.SubCaptionLabel.Height := ScaleY(54);
+  BackupPage.PromptLabels[0].Top := ScaleY(62);
+  BackupPage.Edits[0].Top := ScaleY(80);
+  BackupPage.Buttons[0].Top := ScaleY(80);
+  BackupDetails := TNewMemo.Create(WizardForm);
+  BackupDetails.Parent := BackupPage.Surface;
+  BackupDetails.SetBounds(0, ScaleY(117), BackupPage.SurfaceWidth, BackupPage.SurfaceHeight - ScaleY(155));
+  BackupDetails.ReadOnly := True;
+  BackupDetails.ScrollBars := ssVertical;
+  AddButton(BackupPage.Surface, 'Deleted the old folder?', 0, BackupPage.SurfaceHeight - ScaleY(30), ScaleX(175), @DeletedBackupClick);
+  ReadinessPage := CreateCustomPage(BackupPage.ID, 'Check before installing', 'Close the game and Steam, then check again');
+  HelpLabel := TNewStaticText.Create(WizardForm);
+  HelpLabel.Parent := ReadinessPage.Surface;
+  HelpLabel.SetBounds(0, 0, ReadinessPage.SurfaceWidth, ScaleY(72));
+  HelpLabel.WordWrap := True;
+  HelpLabel.Caption := SteamExitHelp;
+  ReadinessDetails := TNewMemo.Create(WizardForm);
+  ReadinessDetails.Parent := ReadinessPage.Surface;
+  ReadinessDetails.SetBounds(0, ScaleY(82), ReadinessPage.SurfaceWidth, ReadinessPage.SurfaceHeight - ScaleY(122));
+  ReadinessDetails.ReadOnly := True;
+  ReadinessDetails.ScrollBars := ssVertical;
+  AddButton(ReadinessPage.Surface, 'Check again', 0, ReadinessPage.SurfaceHeight - ScaleY(30), ScaleX(110), @CheckAgainClick);
+  AddButton(ReadinessPage.Surface, 'Windows Security', ScaleX(118), ReadinessPage.SurfaceHeight - ScaleY(30), ScaleX(140), @SecurityClick);
+  AddButton(ReadinessPage.Surface, 'Open logs', ScaleX(266), ReadinessPage.SurfaceHeight - ScaleY(30), ScaleX(110), @SetupLogsClick);
+  WizardForm.FinishedLabel.AutoSize := False;
+  WizardForm.FinishedLabel.Height := ScaleY(132);
+  ButtonWidth := (WizardForm.FinishedLabel.Width - ScaleX(8)) div 2;
+  ButtonTop := WizardForm.FinishedLabel.Top + WizardForm.FinishedLabel.Height + ScaleY(6);
+  FinishedCheck := AddButton(WizardForm.FinishedPage, 'Check installation', WizardForm.FinishedLabel.Left, ButtonTop, ButtonWidth, @CheckInstalledClick);
+  FinishedSetupLogs := AddButton(WizardForm.FinishedPage, 'Open setup logs', WizardForm.FinishedLabel.Left + ButtonWidth + ScaleX(8), ButtonTop, ButtonWidth, @SetupLogsClick);
+  FinishedGameLogs := AddButton(WizardForm.FinishedPage, 'Open game logs', WizardForm.FinishedLabel.Left, ButtonTop + ScaleY(33), ButtonWidth, @GameLogsClick);
+  FinishedSecurity := AddButton(WizardForm.FinishedPage, 'Windows Security', WizardForm.FinishedLabel.Left + ButtonWidth + ScaleX(8), ButtonTop + ScaleY(33), ButtonWidth, @SecurityClick);
+  FinishedSecurity.Visible := False;
+  WizardForm.RunList.Top := ButtonTop + ScaleY(69);
+  WizardForm.RunList.Height := WizardForm.FinishedPage.ClientHeight - WizardForm.RunList.Top - ScaleY(8);
   if not RefreshProbe('') then RaiseException(LastOutput);
   if GetIniInt('detected', 'battlenet_available', 0, 0, 1, ProbeFile) = 1 then
     EditionPage.Add('Battle.net (experimental)');
@@ -200,7 +402,7 @@ end;
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   if ExpandConstant('{param:CONFIG|}') <> '' then begin
-    Result := (PageID >= EditionPage.ID) and (PageID <= BackupPage.ID);
+    Result := (PageID >= EditionPage.ID) and (PageID <= ReadinessPage.ID);
     Exit;
   end;
   Result := ((PageID = ConnectionPage.ID) and (HeadsetPage.SelectedValueIndex in [0, 3])) or
@@ -236,6 +438,10 @@ begin
         Result := False;
       end;
       if RuntimePage.Values[0] = '' then RuntimePage.Values[0] := GetIniString('detected', 'steamvr', '', ProbeFile);
+      BackupPage.Values[0] := '';
+      BackupDetails.Text := 'Last recorded backup: ' + GetIniString('detected', 'backup_path', '', ProbeFile) + #13#10#13#10 +
+        GetIniString('detected', 'backup_message', '', ProbeFile) + #13#10#13#10 +
+        'If you deleted the original folder, use Deleted the old folder? for recovery steps. Do not select an empty replacement folder.';
       if FileExists(PathsPage.Values[1] + '\d2rloader\plugins\d2rl-vrcam.dll') then ModePage.SelectedValueIndex := 0
       else ModePage.SelectedValueIndex := 1;
     end;
@@ -247,26 +453,16 @@ begin
     if not DirExists(BackupPage.Values[0]) then begin
       MsgBox('Select the existing original installation backup folder, or cancel to keep the current mod.', mbError, MB_OK);
       Result := False;
+    end else begin
+      WriteChoices;
+      Result := RunBackend(PayloadRoot, '--validate-backups ' + Q(ChoicesFile) + ' --managed-root ' + Q(WizardDirValue));
+      if not Result then MsgBox(LastOutput + #13#10#13#10 + 'Select the original extracted mod folder or its backups. If the folder was deleted, use Deleted the old folder? for help.', mbError, MB_OK);
     end;
   end;
-end;
-
-procedure WriteChoices;
-var
-  Headsets, Connections, Modes, Lines: TArrayOfString;
-  Connection: String;
-begin
-  Headsets := ['Steam Frame', 'Quest 3', 'Quest 2', 'Other SteamVR headset'];
-  Connections := ['steamvr', 'vdxr', 'steamvr,vdxr'];
-  Modes := ['repair', 'full', 'shortcuts'];
-  Connection := 'steamvr';
-  if not (HeadsetPage.SelectedValueIndex in [0, 3]) then Connection := Connections[ConnectionPage.SelectedValueIndex];
-  Lines := ['[setup]', 'store=' + PreviousEdition,
-    'headset=' + Headsets[HeadsetPage.SelectedValueIndex], 'connections=' + Connection,
-    'steam=' + PathsPage.Values[0], 'game=' + PathsPage.Values[1], 'saves=' + PathsPage.Values[2],
-    'steamvr=' + RuntimePage.Values[0], 'profile=' + ProfileIDs[AccountPage.SelectedValueIndex],
-    'mode=' + Modes[ModePage.SelectedValueIndex], 'backups=' + BackupPage.Values[0]];
-  if not SaveStringsToUTF8File(ChoicesFile, Lines, False) then RaiseException('Could not save the setup choices.');
+  if CurPageID = ReadinessPage.ID then begin
+    Result := RefreshReadiness;
+    if not Result then MsgBox('Setup is not ready. Resolve the items shown, then click Check again. No game or Steam files were changed.', mbInformation, MB_OK);
+  end;
 end;
 
 function UpdateReadyMemo(Space, NewLine, MemoUserInfoInfo, MemoDirInfo,
@@ -290,7 +486,7 @@ begin
     'Steam: ' + PathsPage.Values[0] + NewLine +
     'Steam account: ' + AccountPage.CheckListBox.Items[AccountPage.SelectedValueIndex] + NewLine +
     'Helpers and backups: ' + WizardDirValue + NewLine + NewLine +
-    'Save and exit D2R, then fully exit Steam before installing. Use an offline character in VR.';
+    SteamExitHelp + NewLine + 'Use an offline character in VR.';
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
@@ -307,26 +503,37 @@ begin
   if CurStep = ssPostInstall then begin
     BackendBusy := True;
     try
-      SetupFailed := not RunBackend(ExpandConstant('{app}'), '--install ' + Q(ChoicesFile));
+      repeat
+        SetupFailed := not RunBackend(ExpandConstant('{app}'), '--install ' + Q(ChoicesFile));
+        if not SetupFailed then Break;
+        if not RetryInstallation then Break;
+      until False;
     finally
       BackendBusy := False;
     end;
     if SetupFailed then begin
       Log('Game configuration did not complete. Helper files and backups are retained for repair.');
-      MsgBox(LastOutput + #13#10#13#10 + 'Setup did not complete. Your helper files and backups have been kept. See setup-last.log in ' + ExpandConstant('{app}') + ', then rerun Setup to repair.', mbError, MB_OK);
     end;
   end;
 end;
 
 procedure CurPageChanged(CurPageID: Integer);
 begin
+  if CurPageID = ReadinessPage.ID then RefreshReadiness;
   if CurPageID = wpFinished then begin
     if SetupFailed then begin
       WizardForm.FinishedHeadingLabel.Caption := 'D2R PCVR setup needs attention';
       WizardForm.FinishedLabel.Caption := 'Game configuration did not complete. Your backups and helper files were kept. Check setup-last.log in ' + ExpandConstant('{app}') + ' and rerun Setup to repair.';
-    end else WizardForm.FinishedLabel.Caption :=
-      'Your VR shortcuts are ready in Steam. Connect your headset and use the matching SteamVR or Virtual Desktop shortcut with an OFFLINE character.'#13#10#13#10 +
-      'Normal Steam / Battle.net Play stays stock. First VR load asks for body calibration. Help and controller mappings are in the D2R PCVR Start menu folder.';
+      FinishedSecurity.Visible := True;
+    end else begin
+      if not CheckInstalled(False) then
+        WizardForm.FinishedHeadingLabel.Caption := 'D2R PCVR installation check needs attention';
+      WizardForm.FinishedLabel.Caption :=
+        'In Steam, launch: ' + GetIniString('checks', 'launch', 'the matching D2R VR shortcut', CheckFile) + #13#10#13#10 +
+        'Connect your headset and use an OFFLINE character. Keep SteamVR closed for Virtual Desktop / VDXR. First VR load asks for body calibration.'#13#10#13#10 +
+        'For a launch problem, use Check installation and the log buttons below. Complete any Battle.net account prompts through normal Play before trying VR. Normal desktop Play stays stock.';
+    end;
+    LayoutFinishedPage;
   end;
 end;
 

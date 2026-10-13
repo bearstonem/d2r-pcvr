@@ -20,6 +20,15 @@ LOCAL = '"UserLocalConfigStore"\r\n{\r\n// untouched comment\r\n"friends" { "Per
 
 
 class SteamSetupTests(unittest.TestCase):
+    def test_process_readiness_and_install_guard_share_case_insensitive_tasklist(self):
+        output = '"Steam.EXE","123","Console","1","1 K"\r\n"D2RLoader.exe","456","Console","1","1 K"\r\n'
+        with patch.object(setup.subprocess, 'check_output', return_value=output):
+            self.assertEqual(setup.running_apps(), {'steam.exe', 'd2rloader.exe'})
+            with self.assertRaisesRegex(ValueError, 'Steam > Exit'):
+                setup.require_closed()
+        with patch.object(setup.subprocess, 'check_output', return_value='"steamservice.exe","789"\r\n'):
+            setup.require_closed()
+
     def test_release_integrity_rejects_changed_file_and_escaping_path(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

@@ -115,10 +115,14 @@ def saved_games():
     return Path.home() / 'Saved Games/Diablo II Resurrected'
 
 
-def require_closed():
+def running_apps():
     rows = csv.reader(subprocess.check_output(['tasklist', '/FO', 'CSV', '/NH'], text=True,
         creationflags=0x08000000 if os.name == 'nt' else 0).splitlines())
-    if any(row and row[0].lower() in ('steam.exe', 'd2r.exe', 'd2rloader.exe') for row in rows):
+    return {row[0].lower() for row in rows if row}
+
+
+def require_closed():
+    if running_apps() & {'steam.exe', 'd2r.exe', 'd2rloader.exe'}:
         raise ValueError('Save & Exit D2R, then choose Steam > Exit on the PC. Do not just close its window.')
 
 

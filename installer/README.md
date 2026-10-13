@@ -56,7 +56,26 @@ From the repository root:
 `steamvr/session_test.py` targets Linux `/proc` and is not a Windows check.
 The graphical backend tests use temporary fixture folders, never the player's
 Steam profile or game. They cover both editions, connection choices, repeated
-repair, missing backups, Unicode INI paths, rollback, and multi-copy removal.
+repair, missing/moved backups, extracted-folder discovery, read-only readiness
+and startup diagnostics, Unicode INI paths, rollback, and multi-copy removal.
+
+The wizard's **Check before installing** page reads process state and validates
+the selected runtime, paths and backups. It does not close Steam or D2R. Backup
+selection is validated on Next; lookup accepts a snapshot, its parent, or the
+original extracted ZIP folder and only checks the known backup subdirectories.
+The recorded missing path and lookup error appear on the backup page.
+
+On failure, the recovery dialog offers Windows Security settings, logs and an
+explicit Retry. Silent failures do not prompt or retry. After setup, the read-only
+**Check installation** action verifies required mod files, packaged plugin/OpenXR
+DLL hashes, selected runtime manifests and Steam shortcut/launch configuration.
+It does not establish that a headset or game launch works. These actions write
+only their temporary report/log files and do not alter game/Steam/security state.
+
+The backend accepts `--readiness choices.ini --report checks.ini`,
+`--inspect choices.ini --report checks.ini` and
+`--validate-backups choices.ini --managed-root PATH` for the corresponding
+read-only checks. Reports are UTF-16 INI files consumed by Win32 profile APIs.
 
 Run the compiled installer lifecycle check separately:
 
@@ -65,9 +84,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File installer/smoke_native_insta
 ```
 
 This compiles the same wizard with a distinct fixture app ID and a stub backend.
-It installs only into a fresh `build-frame/installer-qa-...` folder, checks the
+It first exercises readiness before Inno initializes its installation constants,
+without writing permanent helpers or registering an app. It then installs only
+into a fresh `build-frame/installer-qa-...` folder, checks the
 Windows Apps entry, forces a removal failure to verify helper retention, then
-removes the fixture successfully. It never calls the real installation backend
+removes the fixture successfully. It also checks that a silent backend failure
+returns a failure code after one attempt, keeps helpers, and can be removed.
+It never calls the real installation backend
 or changes a game/Steam profile. Keep its logs with the validation record;
 it verifies Inno's lifecycle, not a real game install or headset launch.
 
@@ -108,8 +131,8 @@ backups=
 Choices accept UTF-8 (with or without BOM) and UTF-16. `store` is `steam` or
 `battlenet`; `mode` is `full`, `repair` or `shortcuts`. Use real detected paths
 and the local Steam profile directory ID. `backups` is optional: set it to the
-original snapshot folder or its parent when upgrading an older mod without a
-complete receipt. Do not share player/account config.
+original extracted ZIP folder, snapshot folder or its parent when upgrading an
+older mod without a complete receipt. Do not share player/account config.
 
 ## Recovery and removal
 

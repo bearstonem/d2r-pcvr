@@ -106,11 +106,22 @@ reporter's detailed installation log.
 
 ## Download, install and play
 
+**Download blocked or stuck as `Unconfirmed... .crdownload`?** Press **Ctrl+J**
+in your browser and check the exact download message. Browser download protection
+is separate from Windows real-time protection. If a file is reported as a virus
+or disappears, check **Windows Security > Virus & threat protection >
+[Protection history](https://support.microsoft.com/en-us/windows/security/windows-security/protection-history-in-the-windows-security-app)**
+or your other antivirus history. Keep protection enabled while investigating,
+and share the warning/detection name and affected filename when asking for help.
+An unfamiliar-download warning does not establish whether a file is safe; see
+[Chrome's download guidance](https://support.google.com/chrome/answer/6261569?hl=en).
+
 First launch your purchased game normally through its store, finish the account
 prompts, load an offline character, then use **Save & Exit** and fully close D2R.
 
 For graphical setup, download **D2R-PCVR-Setup-0.3.10.exe**, run it and follow the
-wizard. Fully exit Steam when asked. Reopen Steam, connect your headset and use
+wizard. Choose **Steam > Exit** when asked; closing its window leaves Steam
+running. Reopen Steam, connect your headset and use
 the matching VR shortcut with an offline character.
 
 For portable setup:

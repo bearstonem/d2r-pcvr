@@ -39,6 +39,16 @@ The game runs on your PC and streams to the headset.
 4. For the ZIP, extract `d2r-pcvr-preview` to a permanent folder, such as
    `C:\Mods\d2r-pcvr-preview`. Keep this folder after installation.
 
+**Download blocked or left as `Unconfirmed... .crdownload`?** Press **Ctrl+J**
+in your browser and read the exact status beside the download. A browser
+warning, antivirus detection and interrupted transfer need different fixes.
+Browser protection is separate from Windows real-time protection; disabling
+one does not resolve the other. Check the browser message and, if it reports a
+virus or a file disappears, Windows Security **Protection history** or your
+other antivirus history. Include the warning/detection name and filename when
+asking for help. Keep protection enabled while investigating. See
+[Chrome download warnings](https://support.google.com/chrome/answer/6261569?hl=en).
+
 ## Install
 
 ### Graphical Setup EXE
@@ -52,8 +62,12 @@ On a first install, choose **Full install with recommended settings**. For an
 existing mod, choose **Update / repair and keep calibration and video settings**.
 Choose **Only configure Steam shortcuts** to repair library entries without
 replacing the installed mod. Review the choices, fully exit D2R and use
-**Steam > Exit**, then click **Install**. Setup lets you retry if Steam is still open.
-Exiting Steam temporarily disconnects headset streaming.
+**Steam > Exit**. Closing Steam's window leaves it running. On **Check before
+installing**, setup shows the detected game/Steam process status, selected VR
+runtime and any selections or backups needing attention. Resolve the reported
+items and click **Check again**, then proceed to **Install**. Setup checks again
+before making changes. Exiting Steam temporarily disconnects headset streaming;
+you can reopen Steam after setup finishes.
 
 The EXE includes its own verified Python runtime; no separate Python install
 is needed. Internet access is still required to download D2RLoader and ReShade.
@@ -67,11 +81,22 @@ uses **SteamVR**. Quest offers **Steam Link / SteamVR**, **Virtual Desktop / VDX
 or **Both**, which creates two shortcuts. Virtual Desktop needs its Quest app
 and Windows Streamer; keep SteamVR closed when launching with VDXR.
 
+The finish screen names the exact Steam shortcut(s) to launch. **Check
+installation** reads the required mod files, packaged DLL hashes, runtime
+manifest(s) and Steam shortcut configuration; it does not launch the game or
+verify headset operation. **Open setup logs** and **Open game logs** help collect
+diagnostics if the game closes at startup. For Battle.net account prompts, use
+normal Battle.net Play, finish the prompt and exit before trying VR again.
+
 If setup fails, keep `setup-backups`. The helper folder contains
 `setup-last.log` with the wizard output and `setup-install.log` with the mod
 installer's full output. Share the error at the end of those logs when reporting
 a problem; review them for personal paths before posting. Older installers may
 only report an exit code in `setup-last.log` and do not create `setup-install.log`.
+The error dialog offers **Windows Security**, **Open logs**, **Retry** and
+**Stop setup**. Resolve the reported error before retrying. Errors before helper
+installation log to a temporary folder; use **Open logs** to find that attempt's
+`setup-last.log` before closing the wizard. Review personal paths before sharing.
 
 If a log says a required download cannot be read, or a browser reports a virus,
 check **Windows Security > Virus & threat protection >
@@ -89,10 +114,14 @@ When upgrading a recorded ZIP installation, it copies and verifies its reference
 game backups into the permanent helper folder before updating the mod. Do not
 delete the old extracted folder until Setup succeeds. If an older mod has an
 incomplete installation record, the wizard asks you to locate its original
-backup folder. Choose the snapshot folder or the folder containing snapshots
-inside the old mod folder (`setup-backups\game` or `build-frame\backups`).
-Setup also checks alongside recorded backups for older snapshots. If the
-original backup is unavailable, cancel and keep the current installation.
+backup folder. The page shows the last recorded location and why the backup
+lookup failed. Choose the original extracted mod folder, an individual snapshot,
+or the folder containing snapshots (`setup-backups\game` or `build-frame\backups`).
+Setup validates your selection on **Next** and also checks alongside recorded
+backups for older snapshots. **Deleted the old folder?** opens recovery help.
+If the original backup is unavailable, cancel; see
+[Original backups permanently deleted](#original-backups-permanently-deleted)
+to prepare a fresh mod installation without downloading the game again.
 
 Setup does not change Windows security settings or the system OpenXR runtime.
 Normal Steam / Battle.net **Play** launches the stock desktop game.
@@ -380,6 +409,60 @@ binding also remains available.
   and exit before launching VR again.
 - **Body height or reach feels wrong:** repeat body calibration while standing
   straight with your arms out, and check the headset's floor setup.
+
+### Original backups permanently deleted
+
+The original backup is needed to restore the exact pre-mod installation.
+Downloading the mod ZIP again does not recreate a backup made by an earlier
+setup, and **Full install** alone does not bypass a missing backup. First check
+the Recycle Bin or another backup for the original extracted mod folder.
+
+If it is permanently gone and you want a **fresh mod installation**, you can
+archive the existing mod components and install again without downloading the
+game data. This resets mod calibration; it cannot reconstruct your lost
+pre-mod settings or the exact previous installation.
+
+1. Cancel setup and Save & Exit D2R. **Steam edition only:** remove the old D2R
+   PCVR launch wrapper from the original game's **Properties > General > Launch
+   Options**, preserving unrelated custom arguments. Ask for help if you cannot
+   identify those options; a fresh receipt cannot recover the launch options
+   from before the lost installation. Then choose **Steam > Exit**.
+2. Copy the **entire Diablo II Resurrected Saved Games folder** to a separate
+   backup location. Its default location is
+   `%USERPROFILE%\Saved Games\Diablo II Resurrected`; use your actual folder if
+   Saved Games is redirected. Keep the original save folder in place too.
+   This includes your offline characters, shared stash and settings.
+3. Open the game folder containing `D2R.exe`: **Battle.net > D2R > Show in
+   Explorer**, or **Steam > Properties > Installed Files > Browse**.
+4. Create a separate archive folder **outside** the game folder, such as
+   `Desktop\D2R-old-mod`. Move these exact items into it **if present**:
+
+   ```text
+   d2rloader
+   reshade-shaders
+   D2R_Sky_ours
+   D2RLoader.exe
+   D2RCore.dll
+   d2rloader.mpq
+   ReShade64.dll
+   openxr_loader.dll
+   ReShade.ini
+   D2R_Frame_ReShade.ini
+   ```
+
+   These loader/ReShade folders may also contain other custom mod components;
+   keep the archive. Leave `D2R.exe`, `Data`, `mods`, Saved Games and all other
+   game files in place. Do not just delete the installation receipt or invent
+   a replacement backup. Moving the full set removes the old active mod and
+   its receipt together while retaining a copy for reference.
+5. Rerun the latest Setup EXE, choose the same edition and game folder, and
+   select **Full install with recommended settings**. The old mod is no longer
+   active, so setup can create a new original backup for this fresh install.
+6. Confirm the new VR shortcut works with an offline character. Keep the
+   archive, your separate save copy and the new setup backups until verified.
+
+This procedure only prepares a fresh mod installation. If normal desktop Play
+also fails, use your store's game-file repair and resolve that failure first.
 
 ## Upgrade or remove
 

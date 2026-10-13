@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 
 import install
@@ -50,6 +51,15 @@ def read_choices(path):
     return dict(parser['setup'])
 
 
+def write_report(path, section, values):
+    parser = configparser.ConfigParser(interpolation=None)
+    # Win32 profile APIs used by Inno Setup read UTF-16, single-line values.
+    parser[section] = {key: str(value).replace('\r', ' ').replace('\n', ' ') for key, value in values.items()}
+    output = io.StringIO()
+    parser.write(output)
+    path.write_text(output.getvalue(), encoding='utf-16')
+
+
 def write_probe(path, root, steam=None, game=None, managed_root=None):
     steam = steam or setup.steam_location()
     libraries = setup.libraries(steam) if steam else []
@@ -61,22 +71,23 @@ def write_probe(path, root, steam=None, game=None, managed_root=None):
         'steamvr': str(setup.app_folder(libraries, '250820') or ''), 'saves': str(setup.saved_games()),
         'battlenet_available': str(int('bin/CascLib.dll' in manifest['sha256'])),
         'profiles': str(len(accounts)),
-        'backup_required': '0', 'backup_message': '',
+        'backup_required': '0', 'backup_message': '', 'backup_path': '',
     }
     if game is not None:
         try:
             check_backups(game.resolve(), Path(managed_root or root))
         except (OSError, ValueError, KeyError) as error:
             values.update(backup_required='1', backup_message=str(error))
+            try:
+                recorded = install.read_record(game).get('snapshots', [])
+                if recorded:
+                    values['backup_path'] = recorded[0]
+            except (OSError, ValueError, KeyError):
+                pass  # Keep the original diagnostic if the receipt is unreadable.
     for index, (profile, name) in enumerate(accounts):
         values[f'profile_{index}'] = profile.name
         values[f'profile_name_{index}'] = name
-    parser = configparser.ConfigParser(interpolation=None)
-    parser['detected'] = values
-    output = io.StringIO()
-    parser.write(output)
-    # Win32 profile APIs used by Inno Setup read UTF-16 INI files reliably.
-    path.write_text(output.getvalue(), encoding='utf-16')
+    write_report(path, 'detected', values)
 
 
 def validate_choices(values, root, managed_root=None):
@@ -145,11 +156,117 @@ def check_backups(game, root, legacy=None):
     if record.get('snapshots') or (game / uninstall.PLUGIN).is_file():
         roots = [root / 'setup-backups/game'] + [Path(name).parent for name in record.get('snapshots', [])]
         if legacy is not None:
-            roots.append(legacy)
+            # Accept the old extracted ZIP folder as well as a snapshot/parent.
+            # Lookup stays bounded; manifests must still match this game.
+            roots.extend([legacy, legacy / 'setup-backups/game', legacy / 'build-frame/backups', legacy / 'game'])
         chain = uninstall.snapshots(game, record, roots)
         uninstall.restore_plan(game, chain)
         return chain
     return []
+
+
+def validate_backups(values, root):
+    if not values.get('game') or not values.get('backups'):
+        raise ValueError('Select the original extracted mod folder or its backup folder.')
+    legacy = Path(values['backups']).expanduser().resolve()
+    if not legacy.is_dir():
+        raise ValueError('The selected backup folder does not exist. Check the Recycle Bin if it was deleted.')
+    return check_backups(Path(values['game']).expanduser().resolve(), root, legacy)
+
+
+def runtime_check(values):
+    from launch_windows import vdxr_manifest
+    connections = values.get('connections', '').split(',')
+    if not connections or any(name not in ('steamvr', 'vdxr') for name in connections):
+        return False, 'Choose SteamVR or Virtual Desktop / VDXR.'
+    messages, ready = [], True
+    for connection in connections:
+        path = (Path(values.get('steamvr', '')) / 'steamxr_win64.json'
+                if connection == 'steamvr' else vdxr_manifest())
+        name = 'SteamVR' if connection == 'steamvr' else 'Virtual Desktop / VDXR'
+        try:
+            with path.open('rb') as source:
+                source.read(1)
+            messages.append(f'{name}: available')
+        except OSError as error:
+            ready = False
+            messages.append(f'{name}: cannot read {path} ({error})')
+    return ready, ' | '.join(messages)
+
+
+def readiness(values, root, managed_root=None):
+    result, closed = {}, False
+    try:
+        running = setup.running_apps()
+        result['steam'] = 'Running - choose Steam > Exit; closing its window leaves it running.' if 'steam.exe' in running else 'Closed'
+        result['game'] = 'Running - Save & Exit D2R and close the game.' if running & {'d2r.exe', 'd2rloader.exe'} else 'Closed'
+        closed = not running & {'steam.exe', 'd2r.exe', 'd2rloader.exe'}
+    except (OSError, subprocess.SubprocessError) as error:
+        result['steam'] = result['game'] = f'Could not check running applications: {error}'
+    runtime_ready, result['runtime'] = runtime_check(values)
+    selected = False
+    try:
+        validate_choices(values, root, managed_root)
+        result['selections'] = 'Verified'
+        selected = True
+    except (OSError, ValueError, KeyError) as error:
+        result['selections'] = str(error)
+    result['ready'] = str(int(closed and runtime_ready and selected))
+    return result
+
+
+def selected_shortcuts(values, root):
+    client, game = Path(values['steam']), Path(values['game'])
+    routing = {} if values['store'] == 'steam' else dict(store='battlenet',
+        python=root / '.runtime/python/python.exe', wrapper=root / 'steamvr/launch_windows.py',
+        runtime=Path(values['steamvr']) / 'steamxr_win64.json' if 'steamvr' in values['connections'].split(',') else None)
+    specs = steam_config.shortcut_specs(client, game, **routing)
+    return [specs[name] for name in values['connections'].split(',')]
+
+
+def inspect_installation(values, root):
+    """Read-only startup diagnostics; never launch a game or edit Steam/security."""
+    game = Path(values['game'])
+    manifest = setup.verify_release(root)
+    problems = []
+    hashes = {'d2rloader/plugins/d2rl-vrcam.dll': 'bin/d2rl-vrcam.dll', 'openxr_loader.dll': 'bin/openxr_loader.dll'}
+    for name in ('D2RLoader.exe', 'D2RCore.dll', 'D2RLoader.mpq', 'ReShade64.dll', 'openxr_loader.dll',
+                 'd2rloader/plugins/d2rl-vrcam.dll', 'd2rloader/plugins/d2r_vr.ini'):
+        path = game / name
+        try:
+            with path.open('rb') as source:
+                expected = manifest['sha256'].get(hashes.get(name))
+                if expected and hashlib.file_digest(source, 'sha256').hexdigest() != expected:
+                    problems.append(f'Checksum mismatch: {path}')
+                elif not expected:
+                    source.read(1)
+        except OSError as error:
+            problems.append(f'Cannot read {path} ({error})')
+    runtime_ready, runtime = runtime_check(values)
+    specs = selected_shortcuts(values, root)
+    names = [spec[0] for spec in specs]
+    shortcut_problems = []
+    profile = Path(values['steam']) / 'userdata' / values['profile']
+    try:
+        entries = steam_config.decode_binary((profile / 'config/shortcuts.vdf').read_bytes())['shortcuts']
+        for name, options, openvr, executable, directory in specs:
+            matching = [item for item in entries.values() if item.get('appname', item.get('AppName')) == name]
+            expected = dict(Exe='"' + str(executable) + '"', StartDir='"' + str(directory) + '"',
+                            LaunchOptions=options, OpenVR=openvr)
+            if len(matching) != 1 or any(matching[0].get(key) != value for key, value in expected.items()):
+                shortcut_problems.append(f'Missing, duplicated or outdated: {name}')
+        if values['store'] == 'steam':
+            local = steam_config.parse_text((profile / 'config/localconfig.vdf').read_text(encoding='utf-8-sig'))
+            options = steam_config.text_value(local, 'UserLocalConfigStore', 'Software', 'Valve', 'Steam', 'apps', steam_config.APP_ID, 'LaunchOptions')
+            runtime_path = Path(values['steamvr']) / 'steamxr_win64.json' if 'steamvr' in values['connections'].split(',') else None
+            if options != setup.launch_options(root / '.runtime/python/python.exe', root / 'steamvr/launch_windows.py', runtime_path):
+                shortcut_problems.append('Steam game launch options are outdated; run Update / repair.')
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+        shortcut_problems.append(f'Cannot check Steam shortcuts: {error}')
+    return dict(ready=str(int(not problems and not shortcut_problems and runtime_ready)),
+                files=' | '.join(problems) if problems else 'Required mod files are readable; packaged DLL hashes match.',
+                runtime=runtime, shortcuts=' | '.join(shortcut_problems) if shortcut_problems else 'Verified',
+                launch=' | '.join(names), game_logs=str(game / 'd2rloader/logs'))
 
 
 def adopt_backups(game, root, legacy=None):
@@ -300,11 +417,15 @@ def main():
     action = parser.add_mutually_exclusive_group(required=True)
     action.add_argument('--probe', type=Path)
     action.add_argument('--validate', type=Path)
+    action.add_argument('--validate-backups', type=Path)
+    action.add_argument('--readiness', type=Path)
+    action.add_argument('--inspect', type=Path)
     action.add_argument('--install', type=Path)
     action.add_argument('--uninstall', action='store_true')
     action.add_argument('--uninstall-check', action='store_true')
     action.add_argument('--check', action='store_true')
     parser.add_argument('--managed-root', type=Path)
+    parser.add_argument('--report', type=Path, help='Read-only check results for the graphical wizard')
     parser.add_argument('--steam', type=Path, help='Steam folder selected in the graphical wizard (discovery only)')
     parser.add_argument('--game', type=Path, help='Selected game for read-only backup discovery')
     args = parser.parse_args()
@@ -320,6 +441,18 @@ def main():
         validate_choices(read_choices(args.validate), ROOT, args.managed_root)
         setup.require_closed()
         print('Selections verified. Ready to install.')
+    elif args.validate_backups:
+        validate_backups(read_choices(args.validate_backups), args.managed_root or ROOT)
+        print('Original installation backups verified. No game or Steam files were changed.')
+    elif args.readiness or args.inspect:
+        if args.report is None:
+            parser.error('--report is required for readiness and installation checks')
+        values = read_choices(args.readiness or args.inspect)
+        result = readiness(values, ROOT, args.managed_root) if args.readiness else inspect_installation(values, ROOT)
+        write_report(args.report, 'checks', result)
+        for key, value in result.items():
+            print(f'{key}: {value}', flush=True)
+        print('Read-only check complete. No game or Steam files were changed.')
     elif args.install:
         install_selected(read_choices(args.install), ROOT)
     elif args.uninstall_check:
