@@ -70,7 +70,7 @@
   "limits": [
     "Performance regression, not an FPS gain or a fix for issue 20.",
     "Application throughput is 1000 / mean pair duration, not headset display refresh or compositor FPS.",
-    "Coarse CPU process time does not isolate individual capture callbacks or driver work.",
+    "Coarse CPU is the main drawing thread's kernel plus user time from GetThreadTimes(GetCurrentThread()) across the two draw-hook intervals; it excludes workers and does not isolate individual callbacks or driver work.",
     "Single local stationary scene; no full shader, effects, transition, particle, label or spatial-UI coverage.",
     "No Battle.net replay gameplay or RTX 5080 reporter validation.",
     "Later CPU-overhead changes are not included in this measurement."

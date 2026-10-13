@@ -1,6 +1,6 @@
 # VR performance investigations
 
-## Manual single-pass renderer candidate: working replay, performance regression
+## Manual single-pass renderer candidate: performance regression and reported water-reflection artifact
 
 VR settings > Video > Stereo rendering selects **Standard** or experimental
 **Single pass** (`[stereo] replay_right=1`), applied live without restarting.
@@ -96,7 +96,7 @@ reference/view differences. That correction activated actual game replay on
 commit `d6734cf251fb4750930f1666d07185c45d9cce26`. A matched stationary
 Standard / Single pass / Standard comparison captured 360 pairs per mode:
 
-| Mode | Mean pair ms | Application FPS | Pair p95 ms | Coarse CPU ms |
+| Mode | Mean pair ms | Application FPS | Pair p95 ms | Coarse draw-thread CPU ms |
 | --- | ---: | ---: | ---: | ---: |
 | Standard before | 22.427 | 44.59 | 23.850 | 14.931 |
 | Single pass | 47.714 | 20.96 | 55.307 | 32.899 |
@@ -125,10 +125,16 @@ mutation exclusion and camera restoration remain in place. All 50 native
 checks pass, including root changes across lists, resets, recording workers
 and Standard / Single pass switches.
 
+The coarse CPU column in these comparisons is the main drawing thread's
+kernel plus user time from `GetThreadTimes(GetCurrentThread())`, measured
+across the two draw-hook intervals. It excludes rendering workers and other
+process threads. Accounting ticks are coarse, so capture means are useful;
+individual frames and individual callbacks cannot be attributed precisely.
+
 That follow-up (`2b41291`) completed another stationary 360-pair-per-mode
 comparison at the same settings:
 
-| Mode | Mean pair ms | Application FPS | Pair p95 ms | Coarse CPU ms |
+| Mode | Mean pair ms | Application FPS | Pair p95 ms | Coarse draw-thread CPU ms |
 | --- | ---: | ---: | ---: | ---: |
 | Standard before | 22.242 | 44.96 | 23.602 | 14.540 |
 | Single pass | 36.143 | 27.67 | 44.282 | 22.222 |
@@ -149,7 +155,59 @@ and accepts any matching complete record, including later records in a range.
 A possible match still requires the full projection/inverse/history checks;
 initial layout discovery is unchanged. Camera fixtures cover truncated ranges,
 nearby views, nonfinite values and malformed projections/inverses. All 50
-native checks pass. This follow-up's actual game/FPS result is pending.
+native checks pass. The installed prefilter build (`aa061d0`) completed a
+stationary 360-pair-per-mode comparison at the same settings:
+
+| Mode | Mean pair ms | Application FPS | Pair p95 ms | Coarse draw-thread CPU ms |
+| --- | ---: | ---: | ---: | ---: |
+| Standard before | 22.315 | 44.81 | 23.439 | 14.149 |
+| Single pass | 33.475 | 29.87 | 34.976 | 19.010 |
+| Standard after | 22.240 | 44.96 | 23.471 | 12.066 |
+
+All 360 candidate pairs skipped the second engine draw. Replay again used
+five batches, five camera ranges, 14 records and one texture boundary
+restoration. This improves on the preceding candidate's measured throughput,
+but remains substantially slower than Standard. Separate candidate runs do
+not isolate individual optimization changes.
+
+A later manual Single pass quality trial allowed viewing and movement. Its
+360 measured pairs averaged 33.998 ms / 29.41 FPS, with all 360 second engine
+draws skipped. This was not another matched stationary comparison. The tester
+reported normal eyes and controls, then identified a new visual issue:
+**water reflections looked wrong**. The cause remains unconfirmed; successful
+stereo alignment does not establish correctness of reflection rendering.
+A matched reflection comparison with Standard has not yet established whether
+this artifact is specific to Single pass.
+Standard was restored after the matched comparison. The tester's later manual
+Single pass selection was preserved, and the four temporary profiling controls
+were restored. Saves and video settings were preserved at deployment.
+[Sanitized prefilter comparison and quality evidence](evidence/2026-10-13-phase2-camera-prefilter-comparison.json).
+
+An eight-second instruction-pointer-only capture during actual Single pass
+collected 8,000 wall-clock samples across eight busy threads. Of 278 plugin
+leaf samples, 152 landed immediately after the shared invocation counter's
+locked decrement and 53 after its locked increment. Another 223 samples
+landed in the system's shared-SRW acquire/release routines, with further
+samples in their CAS retry and PAUSE backoff paths. Disassembly also shows
+the counter, replay gate and frequently read tracking/owner state sharing
+one cache line. These findings support cache-coherence contention in the
+per-binding bookkeeping as the next optimization target.
+
+The dominant worker samples were blocked thread-alert waits; workers already
+spent most samples in that wait in the earlier, shorter Standard capture.
+Without callers, these waits cannot be assigned to the replay gate rather
+than the game's job system, nor can the main thread's single-object waits be
+assigned to GPU completion or frame pacing. Wall-clock leaf counts are not
+CPU-time percentages. No target-memory or stack reads were used in this
+instruction-only capture; private addresses and module logs are not published.
+
+The next follow-up replaces the shared per-binding counter/reader-lock path
+with separate per-thread reader slots, while retaining exclusive replay
+protection and tracking blocked calls for safe teardown. All **51 native
+checks pass**, including concurrent exclusion, nested/owner reentry, slot
+collisions, blocked teardown and reader progress. Staged DLL load/unload also
+passed. Its actual headset, visual and FPS results are pending. It does not
+establish a fix for water reflections or a phase 2 gain over Standard.
 
 ## Phase 2 baseline, October 12 evening
 

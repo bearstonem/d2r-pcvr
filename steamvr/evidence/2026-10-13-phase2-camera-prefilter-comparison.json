@@ -1,0 +1,128 @@
+{
+  "implementation_commit": "aa061d03b7e5594b513ba28d15f3346fe1237647",
+  "plugin_sha256": "048f20c52a32019134668b0dbbf215c87978474e059f7d8f8d12262198fe3575",
+  "status": "complete; faster than preceding candidate, still slower than Standard; reported water-reflection artifact",
+  "game": "Steam D2R 3.3.93787, offline local Paladin",
+  "hardware_runtime": "Ryzen 9 5950X / RTX 5090; Steam Frame via Steam Link, SteamVR OpenXR at 90 Hz",
+  "scenario": "Stationary same offline character, spot and view; tester confirmed ready",
+  "settings": {
+    "scene_scale_percent": 100,
+    "terrain_rings": 2,
+    "object_radius": 300,
+    "symmetric_projection": true,
+    "foveation": "fixed",
+    "dlss": false,
+    "dynamic_resolution": false,
+    "fxaa": true,
+    "deferred_gpu_wait": true
+  },
+  "cpu_measurement": "Mean main drawing-thread kernel plus user time from GetThreadTimes(GetCurrentThread()) across the two draw-hook intervals; coarse accounting, excludes workers and other process threads",
+  "captures": [
+    {
+      "mode": "Standard before",
+      "sequence": 1791878032,
+      "pairs": 360,
+      "mean_pair_ms": 22.314911111111112,
+      "application_fps": 44.81308462403316,
+      "pair_p95_ms": 23.439,
+      "coarse_cpu_ms": 14.149305555555555,
+      "left_hook_ms": 7.691238888888889,
+      "right_hook_ms": 7.386419444444445,
+      "right_hook_under_0_1_ms_pairs": 0
+    },
+    {
+      "mode": "Single pass",
+      "sequence": 1791878044,
+      "pairs": 360,
+      "mean_pair_ms": 33.47485833333333,
+      "application_fps": 29.873166005432438,
+      "pair_p95_ms": 34.976,
+      "coarse_cpu_ms": 19.010416666666668,
+      "left_hook_including_synchronous_replay_ms": 26.32839166666667,
+      "right_hook_ms": 0.001213888888888889,
+      "right_hook_under_0_1_ms_pairs": 360
+    },
+    {
+      "mode": "Standard after",
+      "sequence": 1791878058,
+      "pairs": 360,
+      "mean_pair_ms": 22.24045277777778,
+      "application_fps": 44.963113385856076,
+      "pair_p95_ms": 23.471,
+      "coarse_cpu_ms": 12.065972222222221,
+      "left_hook_ms": 6.575972222222222,
+      "right_hook_ms": 6.245091666666666,
+      "right_hook_under_0_1_ms_pairs": 0
+    }
+  ],
+  "first_actual_pair": {
+    "native_batches": 5,
+    "camera_ranges": 5,
+    "camera_records": 14,
+    "texture_boundary_restorations": 1,
+    "second_engine_draw_skipped": true
+  },
+  "manual_quality_trial": {
+    "sequence": 1791878275,
+    "observation_seconds": 30.110000000000582,
+    "pairs": 360,
+    "mean_pair_ms": 33.997702777777775,
+    "application_fps": 29.41375205661363,
+    "pair_p95_ms": 42.165,
+    "coarse_cpu_ms": 18.836805555555557,
+    "second_engine_draws_skipped": 360,
+    "completed_without_reported_replay_fallback": true,
+    "scenario": "User-selected Single pass quality trial; viewing and movement allowed, not a matched stationary A/B",
+    "headset_feedback": "Both eyes and controls looked normal; water reflections looked wrong",
+    "water_reflections": {
+      "first_reported": "This longer manual quality trial",
+      "cause": "Unconfirmed",
+      "status": "Unresolved reported visual issue; no matched reflection comparison with Standard yet"
+    }
+  },
+  "instruction_only_followup": {
+    "implementation_commit": "aa061d03b7e5594b513ba28d15f3346fe1237647",
+    "method": "125 Hz wall-clock instruction-pointer samples per selected thread; bounded suspension, context read and unconditional resume; no target-memory reads, stack reads or dumps",
+    "attribution": "Installed plugin COFF symbols and local system-library exported ranges/disassembly",
+    "duration_seconds": 8.00008,
+    "sampled_threads": 8,
+    "samples": 8000,
+    "plugin_leaf_samples": 278,
+    "plugin_leaves_immediately_after_shared_counter_decrement": 152,
+    "plugin_leaves_immediately_after_shared_counter_increment": 53,
+    "system_shared_srw_acquire_leaf_samples": 74,
+    "system_shared_srw_release_leaf_samples": 149,
+    "blocked_thread_alert_wait_leaf_samples": 6138,
+    "blocked_single_object_wait_leaf_samples": 293,
+    "main_draw_thread": {
+      "samples": 1000,
+      "plugin_leaf_samples": 61,
+      "plugin_leaves_immediately_after_shared_counter_decrement": 36,
+      "plugin_leaves_immediately_after_shared_counter_increment": 6,
+      "blocked_single_object_wait_leaf_samples": 291
+    },
+    "interpretation": "Leaf concentrations after locked counter updates and inside shared-SRW CAS/retry/backoff paths support contention in per-binding bookkeeping. The counter, replay gate and frequently read tracking/owner state also share one cache line.",
+    "limits": "Wall-clock leaves include blocked states and are not CPU-time percentages. No callers were captured, so blocked waits cannot be attributed to the replay gate, game jobs, GPU completion or frame pacing. Earlier Standard sampling was shorter and used a different process/build; rough context only."
+  },
+  "validation": {
+    "measured_build_native_checks_passed": 50,
+    "reader_gate_followup_native_checks_passed": 51,
+    "reader_gate_followup_headset_visual_and_fps_results": "Pending; follow-up is not part of these measurements"
+  },
+  "cleanup": {
+    "standard_mode_restored_after_matched_comparison": true,
+    "later_user_owned_single_pass_selection_preserved": true,
+    "four_temporary_profiling_controls_restored": true,
+    "saved_games_and_video_settings_preserved_at_deployment": true
+  },
+  "limits": [
+    "Single pass remains slower than Standard; no phase 2 gain or fix for issue 20.",
+    "Application throughput is 1000 / mean pair duration, not headset display refresh or compositor FPS.",
+    "Coarse draw-thread CPU averages do not isolate individual callbacks, upload reads, driver work or worker CPU time.",
+    "Different candidate runs do not isolate the individual optimization changes.",
+    "Water reflections were reported visually incorrect during Single pass; no matched Standard reflection comparison or cause is confirmed. Normal alignment and controls do not establish full rendering correctness.",
+    "The manual quality trial allowed movement and is not a matched stationary comparison.",
+    "No complete gameplay/effects/transitions coverage, Battle.net replay gameplay or RTX 5080 reporter validation.",
+    "The reader-gate follow-up has automated coverage but no actual headset/FPS result yet."
+  ]
+}

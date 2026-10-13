@@ -71,7 +71,7 @@
   "limits": [
     "Single pass remains slower than Standard; no phase 2 gain or fix for issue 20.",
     "Application throughput is 1000 / mean pair duration, not headset display refresh or compositor FPS.",
-    "Coarse CPU process time does not isolate individual callbacks, upload reads or driver work.",
+    "Coarse CPU is the main drawing thread's kernel plus user time from GetThreadTimes(GetCurrentThread()) across the two draw-hook intervals; it excludes workers and does not isolate individual callbacks, upload reads or driver work.",
     "Different candidate runs do not isolate the individual optimization changes.",
     "Single local stationary scene; no complete gameplay/effects/transitions coverage.",
     "No Battle.net replay gameplay or RTX 5080 reporter validation."
