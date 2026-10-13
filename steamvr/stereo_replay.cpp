@@ -8,6 +8,7 @@
 #include "logging.h"
 #include <reshade.hpp>
 #include <atomic>
+#include <array>
 #include <cstring>
 #include <map>
 #include <mutex>
@@ -36,6 +37,13 @@ struct Binding {resource buffer;uint64_t offset,size;CameraKey cameraKey;};
 struct Probe {ComPtr<ID3D12Resource> buffer;uint64_t offset;std::vector<float> original,right;std::vector<size_t> records;replayaudit::Camera left;};
 std::map<uint64_t,std::map<std::pair<uint64_t,uint64_t>,Binding>> bindings;
 std::map<CameraKey,std::vector<size_t>> cameraKeys;
+std::atomic<bool> cameraFilterReady{false};
+std::atomic<unsigned> cameraFilterCount{0};
+std::array<std::atomic<uint64_t>,64> cameraFilterSignatures{};
+std::array<std::atomic<uint32_t>,64> cameraFilterParameters{};
+std::atomic<uint64_t> bindingEpoch{0};
+struct RecentBinding {uint64_t epoch=0,address=0;};
+thread_local std::array<RecentBinding,64> recentBindings;
 std::set<std::pair<uint64_t,uint64_t>> seenBindings;
 std::map<std::pair<uint64_t,uint64_t>,Probe> probes;
 // Resource creation/destruction only, never per-draw work in Standard. Borrow
@@ -80,6 +88,16 @@ void Runtime(effect_runtime* rt){std::lock_guard lock(mutex);runtime=rt;}
 void DestroyRuntime(effect_runtime* rt){std::lock_guard lock(mutex);if(runtime==rt){runtime=nullptr;warmup=0;}}
 void Push(uint64_t listId,uint64_t signature,uint32_t parameter,uint64_t address){
     if(!collecting.load())return;
+    RecentBinding* recent=nullptr;uint64_t epoch=0;
+    // Immutable roles are published once per manual activation. Most of the
+    // tens of thousands of material/object CBVs never take a callback lock.
+    if(cameraFilterReady.load(std::memory_order_acquire)){
+        bool camera=false;const auto count=cameraFilterCount.load(std::memory_order_relaxed);
+        for(unsigned i=0;i<count;++i)if(cameraFilterSignatures[i].load(std::memory_order_relaxed)==signature&&cameraFilterParameters[i].load(std::memory_order_relaxed)==parameter){camera=true;recent=&recentBindings[i];break;}
+        if(!camera)return;
+        epoch=bindingEpoch.load(std::memory_order_relaxed);
+        if(recent->epoch==epoch&&recent->address==address)return;
+    }
     std::lock_guard lock(mutex);const CameraKey cameraKey{signature,parameter};
     if(layoutResolved&&!cameraKeys.contains(cameraKey))return;
     buffer_range b{};
@@ -90,10 +108,11 @@ void Push(uint64_t listId,uint64_t signature,uint32_t parameter,uint64_t address
     // Discovery is bounded once on enable. Established camera roots retain
     // only a bounded set of unique ranges, rather than all draw CBVs.
     const auto key=std::pair{b.buffer.handle,b.offset};
-    if(seenBindings.contains(key))return;
+    if(seenBindings.contains(key)){if(recent)*recent={epoch,address};return;}
     if(bindingCount>=(layoutResolved?512u:64u)){if(layoutResolved)invalid=true;return;}
     seenBindings.insert(key);++bindingCount;
     bindings[listId].try_emplace(key,Binding{b.buffer,b.offset,b.size,cameraKey});
+    if(recent)*recent={epoch,address};
 }
 void Execute(command_queue* q,command_list* cl){
     if(!running.load())return;InitQueue(q);InitList(cl);if(!collecting.load()||!D3D12(q->get_device()))return;
@@ -110,15 +129,17 @@ void Execute(command_queue* q,command_list* cl){
         auto* buffer=reinterpret_cast<ID3D12Resource*>(b.buffer.handle);
         void* data=nullptr;D3D12_RANGE read{SIZE_T(b.offset),SIZE_T(b.offset+bytes)};
         if(FAILED(buffer->Map(0,&read,&data))||!data){invalid=true;continue;}
-        const auto wordsIn=std::span(static_cast<const float*>(static_cast<const void*>(static_cast<const uint8_t*>(data)+b.offset)),size_t(bytes/4));
+        // Upload mappings may be write-combined. Copy once into cached CPU
+        // memory before matrix inspection instead of repeatedly reading the
+        // uncached mapping for each element and inverse calculation.
+        std::vector<float> words(size_t(bytes/4));std::memcpy(words.data(),static_cast<const uint8_t*>(data)+b.offset,SIZE_T(bytes));
+        D3D12_RANGE none{};buffer->Unmap(0,&none);const auto wordsIn=std::span<const float>(words);
         std::vector<size_t> records=known==cameraKeys.end()?FindCameraRecords(wordsIn,cameras[0]):SelectCameraRecords(wordsIn,known->second,cameras[0]);
         // A root may bind overlapping windows or a smaller record group. Use
         // cached offsets only where that actual submitted range contains the
         // complete camera record; never borrow another range's layout blindly.
-        if(records.empty()){D3D12_RANGE none{};buffer->Unmap(0,&none);continue;}
-        std::vector<float> words(wordsIn.begin(),wordsIn.end());
-        D3D12_RANGE none{};buffer->Unmap(0,&none);
-        cameraKeys.try_emplace(b.cameraKey,records);
+        if(records.empty())continue;
+        if(!layoutResolved)cameraKeys.try_emplace(b.cameraKey,records);
         const auto key=std::pair{b.buffer.handle,b.offset};const auto old=probes.find(key);
         if(old!=probes.end()){
             for(const size_t o:records)if(o+112>old->second.original.size()||std::memcmp(old->second.original.data()+o,words.data()+o,112*4))invalid=true;
@@ -188,6 +209,10 @@ void Present(command_queue* q,swapchain* swap,const rect*,const rect*,uint32_t,c
     struct Lease {bool held=nativecapture::BeginReplayLease();~Lease(){if(held)nativecapture::EndReplayLease();}} lease;
     std::lock_guard lock(mutex);nativecapture::SealPresent(true);nativecapture::ReplayPacket packet;
     layoutResolved=!cameraKeys.empty();
+    if(layoutResolved&&!cameraFilterReady.load()){
+        unsigned count=0;for(const auto& [key,offsets]:cameraKeys){if(count==cameraFilterSignatures.size())break;cameraFilterSignatures[count]=key.first;cameraFilterParameters[count++]=key.second;}
+        cameraFilterCount=count;cameraFilterReady.store(true,std::memory_order_release);
+    }
     if(!lease.held||invalid||temporal||!runtime||probes.empty()||!nativecapture::SnapshotReplay(packet)){
         Fallback(!lease.held?"GPU lifetime lease unavailable":invalid?"mutable constants/resources":temporal?"temporal upscaling":probes.empty()?"camera buffers missing":!runtime?"effects runtime missing":nativecapture::ReplayPacketFailure());
         const auto r=nativecapture::EndEye(true);char detail[400];
@@ -253,12 +278,12 @@ void BeginPair(bool supported){
     done=false;
     if(!registered)return;
     const auto revision=configuration.load();
-    if(appliedConfiguration!=revision){appliedConfiguration=revision;failed=false;cameraKeys.clear();layoutResolved=false;lookupCount=0;}
+    if(appliedConfiguration!=revision){appliedConfiguration=revision;failed=false;cameraFilterReady=false;cameraFilterCount=0;cameraKeys.clear();layoutResolved=false;lookupCount=0;}
     const bool enable=requested.load()&&!failed;
     if(!enable){
         if(running.exchange(false)){
             if(collecting.exchange(false))nativecapture::EndEye();nativecapture::Stop();
-            std::lock_guard lock(mutex);probes.clear();depths.clear();bindings.clear();cameraKeys.clear();
+            std::lock_guard lock(mutex);probes.clear();depths.clear();bindings.clear();cameraFilterReady=false;cameraFilterCount=0;cameraKeys.clear();
             logging::Write(nativecapture::ActiveHooks()==0?"Stereo rendering: Standard; native replay hooks disabled and tracking cleared":"Stereo rendering: Standard; replay hooks could not all be disabled");
         }
         if(!requested.load())status="Standard";return;
@@ -274,7 +299,7 @@ void BeginPair(bool supported){
     // A fresh Reset must supply the existing lists' allocator generations after
     // hooks were disabled in Standard. This is setup, not live qualification.
     if(warmup++<2)return;
-    ++pairs;std::lock_guard lock(mutex);owner=GetCurrentThreadId();invalid=temporal=false;cameras[0]={};cameras[1]={};probes.clear();depths.clear();bindings.clear();seenBindings.clear();bindingCount=0;
+    ++pairs;std::lock_guard lock(mutex);owner=GetCurrentThreadId();invalid=temporal=false;cameras[0]={};cameras[1]={};probes.clear();depths.clear();bindings.clear();seenBindings.clear();bindingCount=0;++bindingEpoch;
     nativecapture::BeginEye(owner);collecting=true;
 }
 bool Replayed(){return done;}

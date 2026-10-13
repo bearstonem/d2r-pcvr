@@ -1,6 +1,6 @@
 # VR performance investigations
 
-## Manual single-pass renderer candidate: live comparison pending
+## Manual single-pass renderer candidate: working replay, performance regression
 
 VR settings > Video > Stereo rendering selects **Standard** or experimental
 **Single pass** (`[stereo] replay_right=1`), applied live without restarting.
@@ -92,9 +92,38 @@ later host-camera refreshes cannot invalidate earlier submitted ranges.
 Cached offsets are filtered to the complete records actually present in each
 range, and each record uses its own inverse view for the right-eye transform.
 The camera fixture covers later refreshes, smaller CBV windows and small
-reference/view differences. Actual game replay, a matched candidate FPS result
-and headset correctness remain pending; fixture results alone do not establish
-a performance gain.
+reference/view differences. That correction activated actual game replay on
+commit `d6734cf251fb4750930f1666d07185c45d9cce26`. A matched stationary
+Standard / Single pass / Standard comparison captured 360 pairs per mode:
+
+| Mode | Mean pair ms | Application FPS | Pair p95 ms | Coarse CPU ms |
+| --- | ---: | ---: | ---: | ---: |
+| Standard before | 22.427 | 44.59 | 23.850 | 14.931 |
+| Single pass | 47.714 | 20.96 | 55.307 | 32.899 |
+| Standard after | 22.409 | 44.63 | 24.820 | 15.061 |
+
+All 360 candidate pairs skipped the second engine draw (mean right-draw hook
+time 0.0014 ms). The first successful pair replayed five native batches with
+five camera ranges, 14 camera records and one texture boundary restoration.
+During the candidate measurement the tester reported that both eyes and
+controls looked normal. This is limited stationary headset verification; it
+does not establish full shader, transition or gameplay coverage.
+
+The synchronous candidate is **slower**, with about 18 ms more coarse CPU time
+per pair. Standard was restored after the capture. This comparison demonstrates
+working replay, not a phase 2 gain or a fix for #20. Sanitized measurements and
+their provenance are in [the renderer comparison evidence](evidence/2026-10-13-phase2-renderer-comparison.json).
+
+The follow-up targets capture CPU overhead. Native root signatures use a
+thread-local cache invalidated by real signature changes, list resets and mode
+changes. Published camera roles reject unrelated bindings before callback
+locks; repeated camera addresses use a per-pair thread-local fast path. Mapped
+upload data is copied to cached CPU memory before matrix validation. Packet
+construction queries resource descriptions and format plane counts once per
+unique resource/format instead of for every barrier. Native GPU completion,
+mutation exclusion and camera restoration remain in place. All 50 native
+checks pass, including root changes across lists, resets, recording workers
+and Standard / Single pass switches. Its live FPS result is pending.
 
 ## Phase 2 baseline, October 12 evening
 

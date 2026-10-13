@@ -23,11 +23,15 @@ std::atomic<DWORD> leaseOwner{0};
 thread_local unsigned gateDepth=0;
 std::atomic<bool> tracking{false},installAllowed{false};
 std::atomic<uint32_t> invocations{0},queueCalls{0},hookErrors{0},observerFaults{0},capacityFailures{0};
-bool started=false,hooksActive=false,collecting=false,eyeOpen=false,wantTrace=false;
+bool started=false,hooksActive=false,eyeOpen=false,wantTrace=false;
+std::atomic<bool> collecting{false};
 bool replayPackets=false;
 const char* packetFailure="not captured";
-RootCbvFn rootCbvObserver=nullptr;
+std::atomic<RootCbvFn> rootCbvObserver{nullptr};
 std::map<uint64_t,std::array<uint64_t,2>> listRoots;
+std::atomic<uint64_t> rootEpoch{1};
+struct RootCache {uint64_t list=0,epoch=0;std::array<uint64_t,2> signatures{};};
+thread_local RootCache rootCache;
 struct ListBarriers {std::vector<D3D12_RESOURCE_BARRIER> barriers;std::vector<ComPtr<ID3D12Resource>> resources;bool unsupported=false;};
 std::map<uint64_t,ListBarriers> listBarriers;
 std::map<uint64_t,ComPtr<ID3D12CommandList>> packetLists;
@@ -154,7 +158,7 @@ template<size_t S> HRESULT STDMETHODCALLTYPE HookListReset(ID3D12GraphicsCommand
     const HRESULT hr=listResetHooks.originals[S](list,allocator,pipeline);Failed(hr);
     if(SUCCEEDED(hr)&&tracking.load())Guard([&]{
         std::lock_guard lock(stateMutex);
-        if(allocators.contains(Id(allocator))){recordings.ListReset(Id(list),Id(allocator));if(replayPackets){listBarriers[Id(list)]={};listRoots.erase(Id(list));}if(eyeOpen)++report.listResets;}
+        if(allocators.contains(Id(allocator))){recordings.ListReset(Id(list),Id(allocator));if(replayPackets){listBarriers[Id(list)]={};listRoots.erase(Id(list));++rootEpoch;}if(eyeOpen)++report.listResets;}
     });return hr;
 }
 template<size_t S> HRESULT STDMETHODCALLTYPE HookAllocatorReset(ID3D12CommandAllocator* allocator)noexcept {
@@ -204,14 +208,26 @@ template<size_t... S> auto BarrierDetours(std::index_sequence<S...>){return std:
 template<size_t... S> auto EnhancedDetours(std::index_sequence<S...>){return std::array<EnhancedBarrierFn,HookSlots>{&HookEnhancedBarrier<S>...};}
 template<size_t S,bool Compute> void STDMETHODCALLTYPE HookRootSignature(ID3D12GraphicsCommandList* list,ID3D12RootSignature* signature)noexcept {
     Invocation call;
-    if(tracking.load())Guard([&]{std::lock_guard lock(stateMutex);listRoots[Id(list)][Compute]=Id(signature);});
+    if(tracking.load())Guard([&]{
+        const auto epoch=rootEpoch.load();
+        if(rootCache.list==Id(list)&&rootCache.epoch==epoch&&rootCache.signatures[Compute]==Id(signature))return;
+        std::lock_guard lock(stateMutex);auto& roots=listRoots[Id(list)];
+        // A list may move between recording threads. Invalidate their cached
+        // signatures when its actual state changes, not on repeated binds.
+        if(roots[Compute]!=Id(signature)){roots[Compute]=Id(signature);++rootEpoch;}
+        rootCache={Id(list),rootEpoch.load(),roots};
+    });
     (Compute?computeRootHooks:graphicsRootHooks).originals[S](list,signature);
 }
 template<size_t S,bool Compute> void STDMETHODCALLTYPE HookRootBuffer(ID3D12GraphicsCommandList* list,UINT parameter,D3D12_GPU_VIRTUAL_ADDRESS address)noexcept {
     Invocation call;
-    if(tracking.load())Guard([&]{
+    if(tracking.load()&&collecting.load())Guard([&]{
         RootCbvFn observer=nullptr;uint64_t signature=0;
-        {std::lock_guard lock(stateMutex);if(collecting){observer=rootCbvObserver;const auto r=listRoots.find(Id(list));if(r!=listRoots.end())signature=r->second[Compute];}}
+        observer=rootCbvObserver.load();const auto epoch=rootEpoch.load();
+        if(rootCache.list!=Id(list)||rootCache.epoch!=epoch){
+            std::lock_guard lock(stateMutex);const auto r=listRoots.find(Id(list));rootCache={Id(list),rootEpoch.load(),r==listRoots.end()?std::array<uint64_t,2>{}:r->second};
+        }
+        signature=rootCache.signatures[Compute];
         if(observer&&signature)observer(Id(list),signature,parameter,address);
     });
     (Compute?computeCbvHooks:graphicsCbvHooks).originals[S](list,parameter,address);
@@ -362,18 +378,18 @@ void ObserveList(ID3D12GraphicsCommandList* list,ID3D12CommandAllocator* initial
             Install(barrierHooks,Table(list)[26],BarrierDetours(Slots));
             ComPtr<ID3D12GraphicsCommandList7> enhanced;
             if(SUCCEEDED(list->QueryInterface(IID_PPV_ARGS(&enhanced))))Install(enhancedBarrierHooks,Table(enhanced.Get())[80],EnhancedDetours(Slots));
-            if(rootCbvObserver){
+            if(rootCbvObserver.load()){
                 Install(computeRootHooks,Table(list)[29],RootDetours<true>(Slots));Install(graphicsRootHooks,Table(list)[30],RootDetours<false>(Slots));
                 Install(computeCbvHooks,Table(list)[37],RootBufferDetours<true>(Slots));Install(graphicsCbvHooks,Table(list)[38],RootBufferDetours<false>(Slots));
             }
         }
         {std::lock_guard lock(stateMutex);observedLists.insert(Id(list));}
         if(initialAllocator){ObserveAllocator(initialAllocator);std::lock_guard lock(stateMutex);
-            if(allocators.contains(Id(initialAllocator))){recordings.ListReset(Id(list),Id(initialAllocator));if(replayPackets)listBarriers[Id(list)]={};}}
+            if(allocators.contains(Id(initialAllocator))){recordings.ListReset(Id(list),Id(initialAllocator));if(replayPackets){listBarriers[Id(list)]={};listRoots.erase(Id(list));++rootEpoch;}}}
     });
 }
 void ForgetList(uint64_t nativeList)noexcept {
-    if(tracking.load())Guard([&]{std::lock_guard lock(stateMutex);recordings.ListDestroyed(nativeList);listBarriers.erase(nativeList);listRoots.erase(nativeList);observedLists.erase(nativeList);});
+    if(tracking.load())Guard([&]{std::lock_guard lock(stateMutex);recordings.ListDestroyed(nativeList);listBarriers.erase(nativeList);listRoots.erase(nativeList);++rootEpoch;observedLists.erase(nativeList);});
 }
 void ForgetQueue(uint64_t nativeQueue)noexcept {
     if(tracking.load())Guard([&]{std::lock_guard lock(stateMutex);queues.erase(nativeQueue);});
@@ -417,7 +433,7 @@ void Stop()noexcept {
         if(disabled)hooksActive=false;else ++hookErrors;
     });
     Guard([&]{std::lock_guard lock(stateMutex);collecting=eyeOpen=false;capture=Capture{};recordings=Recordings{};
-        fences.clear();allocators.clear();queues.clear();packetLists.clear();packetQueues.clear();listBarriers.clear();listRoots.clear();resourceStates.clear();observedLists.clear();primaryDevice.Reset();deviceObserved=false;
+        fences.clear();allocators.clear();queues.clear();packetLists.clear();packetQueues.clear();listBarriers.clear();listRoots.clear();++rootEpoch;resourceStates.clear();observedLists.clear();primaryDevice.Reset();deviceObserved=false;
     });
 }
 void EnableReplayPackets()noexcept {Guard([&]{std::lock_guard lock(stateMutex);replayPackets=true;});}
@@ -447,6 +463,9 @@ bool SnapshotReplay(ReplayPacket& output)noexcept {
         if(!replayPackets||!report.sealed||!plan.Ready()||report.unknownLists||report.queueOverlap||report.foreignCalls||
            report.boundaryCalls||report.apiFailures||report.cpuSignals||report.hookErrors||report.observerFaults||report.capacityFailures||invocations.load())return;
         ReplayPacket packet;
+        struct Metadata {D3D12_RESOURCE_DESC desc;UINT planes=0;};
+        std::map<uint64_t,Metadata> metadata;
+        std::map<DXGI_FORMAT,UINT> formatPlanes;
         std::map<std::pair<uint64_t,UINT>,size_t> states;
         std::map<std::pair<uint64_t,UINT>,std::pair<D3D12_RESOURCE_STATES,D3D12_RESOURCE_STATES>> split;
         for(const auto index:plan.order){const auto& batch=capture.Submissions()[index];
@@ -459,7 +478,9 @@ bool SnapshotReplay(ReplayPacket& output)noexcept {
                 const auto& saved=listBarriers.at(recording.list);if(saved.unsupported){packetFailure="aliasing/enhanced barriers";return;}
                 b.lists.push_back(packetLists.at(recording.list));
                 for(const auto& barrier:saved.barriers){const auto& t=barrier.Transition;if(!t.pResource)return;
-                    const auto desc=t.pResource->GetDesc();
+                    auto [meta,fresh]=metadata.try_emplace(Id(t.pResource));
+                    if(fresh)meta->second.desc=t.pResource->GetDesc();
+                    auto& resource=meta->second;const auto& desc=resource.desc;
                     if(copyQueue&&barrier.Flags!=D3D12_RESOURCE_BARRIER_FLAG_NONE){packetFailure="split barrier on copy queue";return;}
                     // Buffers decay between ExecuteCommandLists calls. Keep
                     // native batches intact; no texture-state prelude for them.
@@ -467,9 +488,15 @@ bool SnapshotReplay(ReplayPacket& output)noexcept {
                         if(barrier.Flags!=D3D12_RESOURCE_BARRIER_FLAG_NONE){packetFailure="split barrier on decaying resource";return;}
                         continue;
                     }
-                    D3D12_FEATURE_DATA_FORMAT_INFO info{desc.Format,0};
-                    if(FAILED(primaryDevice->CheckFeatureSupport(D3D12_FEATURE_FORMAT_INFO,&info,sizeof info))||!info.PlaneCount)return;
-                    const UINT total=UINT(desc.MipLevels)*(desc.Dimension==D3D12_RESOURCE_DIMENSION_TEXTURE3D?1:desc.DepthOrArraySize)*info.PlaneCount;
+                    if(!resource.planes){
+                        auto [plane,freshFormat]=formatPlanes.try_emplace(desc.Format,0);
+                        if(freshFormat){D3D12_FEATURE_DATA_FORMAT_INFO info{desc.Format,0};
+                            if(FAILED(primaryDevice->CheckFeatureSupport(D3D12_FEATURE_FORMAT_INFO,&info,sizeof info))||!info.PlaneCount)return;
+                            plane->second=info.PlaneCount;
+                        }
+                        resource.planes=plane->second;
+                    }
+                    const UINT total=UINT(desc.MipLevels)*(desc.Dimension==D3D12_RESOURCE_DIMENSION_TEXTURE3D?1:desc.DepthOrArraySize)*resource.planes;
                     const UINT first=t.Subresource==D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES?0:t.Subresource;
                     const UINT count=t.Subresource==D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES?total:1;
                     if(!total||total>8192||first>=total)return;

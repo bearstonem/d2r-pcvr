@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
+#include <thread>
 
 using Microsoft::WRL::ComPtr;
 namespace audit=framevr::nativecapture;
@@ -201,7 +202,28 @@ int main() {
         audit::BeginEye(GetCurrentThreadId());
         cbvList->SetGraphicsRootSignature(signature.Get());cbvList->SetGraphicsRootConstantBufferView(0,cbvAddress);
         cbvList->SetComputeRootSignature(signature.Get());cbvList->SetComputeRootConstantBufferView(0,cbvAddress);
-        assert(cbvCalls==2);audit::EndEye();Check(cbvList->Close(),"close CBV list");
+        cbvList->SetGraphicsRootSignature(signature.Get());cbvList->SetGraphicsRootConstantBufferView(0,cbvAddress);
+        assert(cbvCalls==3);Check(cbvList->Close(),"close initial CBV list");
+        rd.Flags=D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+        Check(D3D12SerializeRootSignature(&rd,D3D_ROOT_SIGNATURE_VERSION_1,&blob,nullptr),"serialize second CBV root");
+        ComPtr<ID3D12RootSignature> secondSignature;Check(f.device->CreateRootSignature(0,blob->GetBufferPointer(),blob->GetBufferSize(),IID_PPV_ARGS(&secondSignature)),"second CBV root");
+        assert(secondSignature.Get()!=signature.Get());
+        Check(cbvList->Reset(cbvAllocator.Get(),nullptr),"reset cached CBV list");
+        cbvSignature=reinterpret_cast<uint64_t>(secondSignature.Get());
+        cbvList->SetGraphicsRootSignature(secondSignature.Get());cbvList->SetGraphicsRootConstantBufferView(0,cbvAddress);
+        ComPtr<ID3D12GraphicsCommandList> secondCbvList;Check(f.device->CreateCommandList(0,D3D12_COMMAND_LIST_TYPE_DIRECT,f.queues[2].allocator.Get(),nullptr,IID_PPV_ARGS(&secondCbvList)),"second CBV list");
+        cbvSignature=reinterpret_cast<uint64_t>(signature.Get());
+        secondCbvList->SetGraphicsRootSignature(signature.Get());secondCbvList->SetGraphicsRootConstantBufferView(0,cbvAddress);
+        cbvSignature=reinterpret_cast<uint64_t>(secondSignature.Get());cbvList->SetGraphicsRootConstantBufferView(0,cbvAddress);
+        cbvSignature=reinterpret_cast<uint64_t>(signature.Get());
+        cbvList->SetComputeRootSignature(signature.Get());cbvList->SetComputeRootConstantBufferView(0,cbvAddress);
+        // Sequential recording can move to another worker. Its root change
+        // must invalidate this thread's fast path for the same native list.
+        std::thread worker([&]{cbvList->SetGraphicsRootSignature(signature.Get());});worker.join();
+        cbvList->SetGraphicsRootConstantBufferView(0,cbvAddress);
+        cbvSignature=reinterpret_cast<uint64_t>(secondSignature.Get());
+        cbvList->SetGraphicsRootSignature(secondSignature.Get());cbvList->SetGraphicsRootConstantBufferView(0,cbvAddress);
+        assert(cbvCalls==9);audit::EndEye();Check(cbvList->Close(),"close CBV list");Check(secondCbvList->Close(),"close second CBV list");
         const auto first=f.Chain(1);Print(first);
         assert(first.DependenciesComplete()&&first.batches==3&&first.lists==4&&first.signals==3&&first.waits==2&&first.internalWaits==2);
         assert(first.retainedAllocators==4&&first.retainedFences==5&&f.Value()==0x11223344);
@@ -244,7 +266,7 @@ int main() {
         assert(audit::ActiveHooks()==0&&audit::InstalledHooks()>0);
         Check(cbvList->Reset(cbvAllocator.Get(),nullptr),"CBV reset while Standard");
         cbvList->SetGraphicsRootSignature(signature.Get());cbvList->SetGraphicsRootConstantBufferView(0,cbvAddress);
-        Check(cbvList->Close(),"CBV close while Standard");assert(cbvCalls==2);
+        Check(cbvList->Close(),"CBV close while Standard");assert(cbvCalls==9);
         Check(f.queues[0].queue->Signal(f.queues[0].fence.Get(),9),"pass-through signal after stop");f.Wait(0,9);
         assert(audit::EndEye().atEnd==PlanStatus::Empty);
         // The in-headset switch can resume existing detours without a restart.
@@ -255,7 +277,11 @@ int main() {
         Check(f.queues[0].allocator->Reset(),"allocator reset after manual resume");
         Check(f.queues[0].list->Reset(f.queues[0].allocator.Get(),nullptr),"list reset after manual resume");
         Check(f.queues[0].list->Close(),"close resumed recording");
+        Check(cbvList->Reset(cbvAllocator.Get(),nullptr),"CBV reset after manual resume");
         audit::BeginEye(GetCurrentThreadId());f.pending=true;
+        cbvSignature=reinterpret_cast<uint64_t>(signature.Get());
+        cbvList->SetGraphicsRootSignature(signature.Get());cbvList->SetGraphicsRootConstantBufferView(0,cbvAddress);
+        Check(cbvList->Close(),"CBV close after manual resume");assert(cbvCalls==10);
         ID3D12CommandList* resumed[]={f.queues[0].list.Get()};f.queues[0].queue->ExecuteCommandLists(1,resumed);
         Check(f.queues[0].queue->Signal(f.queues[0].fence.Get(),10),"signal after manual resume");
         audit::SealPresent();f.Wait(0,10);
