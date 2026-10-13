@@ -22,6 +22,70 @@ int main(){
     put(980,left.view);const auto original=words;
     const auto offsets=stereoreplay::FindCameraRecords(words,left);
     assert((offsets==std::vector<size_t>{20,212,404,596,788}));
+    // The known-layout path copies only complete matrix records. Sparse gaps
+    // and standalone views are not read, while all inverse/history bytes are.
+    const auto readPlan=stereoreplay::PlanCameraRecordReads(original.size(),offsets);
+    assert(readPlan.wordCount==1024&&readPlan.offsets==offsets&&readPlan.segments.size()==5&&readPlan.copiedBytes==5*112*4);
+    const std::array<size_t,8> shuffledReads{788,20,212,20,596,404,1024,std::numeric_limits<size_t>::max()};
+    const auto sparse=stereoreplay::CaptureCameraRecords(original,shuffledReads);
+    assert(sparse.offsets==offsets&&sparse.words.size()==1024&&sparse.copiedBytes==2240);
+    assert(sparse.words[0]==0&&sparse.words[980]==0);
+    assert(stereoreplay::SameCameraRecords(original,sparse.words,offsets));
+    auto fullFold=original;auto sparseFold=sparse.words;
+    assert(stereoreplay::FoldCameraAt(fullFold,offsets,left,right)==5);
+    assert(stereoreplay::FoldCameraAt(sparseFold,sparse.offsets,left,right)==5);
+    for(const size_t o:offsets)assert(!std::memcmp(fullFold.data()+o,sparseFold.data()+o,112*sizeof(float)));
+    const std::array<size_t,2> separatedReads{20,788},overlappingReads{36,20},adjacentReads{132,20};
+    const auto separated=stereoreplay::CaptureCameraRecords(original,separatedReads);
+    assert(separated.copiedBytes==896&&stereoreplay::SameCameraRecords(original,separated.words,separatedReads));
+    const auto overlapPlan=stereoreplay::PlanCameraRecordReads(original.size(),overlappingReads);
+    assert(overlapPlan.segments.size()==1&&overlapPlan.segments[0].begin==20&&overlapPlan.segments[0].count==128&&overlapPlan.copiedBytes==512);
+    const auto overlapping=stereoreplay::CaptureCameraRecords(original,overlappingReads);
+    assert(overlapping.copiedBytes==512&&stereoreplay::SameCameraRecords(original,overlapping.words,overlappingReads));
+    const auto adjacentPlan=stereoreplay::PlanCameraRecordReads(original.size(),adjacentReads);
+    assert(adjacentPlan.segments.size()==1&&adjacentPlan.copiedBytes==896);
+    const std::array<size_t,1> read20{20},read212{212};
+    assert(stereoreplay::CaptureCameraRecords(std::span(original).first(131),read20).words.empty());
+    const auto exactRecord=stereoreplay::CaptureCameraRecords(std::span(original).first(132),read20);
+    assert(exactRecord.copiedBytes==448&&stereoreplay::SameCameraRecords(original,exactRecord.words,read20));
+    const auto truncatedSnapshot=stereoreplay::CaptureCameraRecords(std::span(original).first(510),offsets);
+    assert((truncatedSnapshot.offsets==std::vector<size_t>{20,212})&&truncatedSnapshot.copiedBytes==896);
+    assert(!stereoreplay::SameCameraRecords(original,truncatedSnapshot.words,offsets));
+    const auto boundedPlan=stereoreplay::PlanCameraRecordReads(std::numeric_limits<size_t>::max(),shuffledReads);
+    assert(boundedPlan.wordCount==1024&&boundedPlan.offsets==offsets&&boundedPlan.copiedBytes==2240);
+    const std::array<stereoreplay::CameraReadSegment,5> extraReads{{{0,4},{25,8},{1020,100},{1024,3},{std::numeric_limits<size_t>::max(),10}}};
+    const auto extraPlan=stereoreplay::PlanCameraRecordReads(original.size(),read20,extraReads);
+    assert(extraPlan.copiedBytes==(4+112+4)*4&&extraPlan.segments.size()==3);
+    const auto extraSnapshot=stereoreplay::CaptureCameraRecords(original,read20,extraReads);
+    assert(extraSnapshot.copiedBytes==480&&extraSnapshot.offsets==std::vector<size_t>{20});
+    assert(extraSnapshot.words[0]==original[0]&&extraSnapshot.words[4]==0&&extraSnapshot.words[1023]==original[1023]);
+    const std::array<stereoreplay::CameraReadSegment,2> clippedExtra{{{127,std::numeric_limits<size_t>::max()},{132,1}}};
+    const auto clippedSnapshot=stereoreplay::CaptureCameraRecords(std::span(original).first(132),{},clippedExtra);
+    assert(clippedSnapshot.offsets.empty()&&clippedSnapshot.words.size()==132&&clippedSnapshot.copiedBytes==20);
+    assert(clippedSnapshot.segments.size()==1&&clippedSnapshot.segments[0].begin==127&&clippedSnapshot.segments[0].count==5);
+    // A later role's offset must already exist in the baseline read union,
+    // even when the first role only selected another record in that window.
+    const std::array<size_t,2> roleReadUnion{20,212};
+    const auto baseline=stereoreplay::CaptureCameraRecords(original,roleReadUnion);
+    assert(baseline.copiedBytes==896&&stereoreplay::SameCameraRecords(baseline.words,original,read212));
+    auto changedSubmission=original;changedSubmission[212]+=1;
+    const auto changedSnapshot=stereoreplay::CaptureCameraRecords(changedSubmission,roleReadUnion);
+    assert(stereoreplay::SelectCameraRecords(changedSnapshot.words,read212,left).empty());
+    assert(!stereoreplay::SameCameraRecords(baseline.words,changedSnapshot.words,read212));
+    const auto restoredSnapshot=stereoreplay::CaptureCameraRecords(original,roleReadUnion);
+    assert(stereoreplay::SameCameraRecords(baseline.words,restoredSnapshot.words,roleReadUnion));
+    // Checking each A -> B -> A submission still reports B, despite its view
+    // failing the current-camera filter and the final snapshot matching A.
+    bool unchanged=stereoreplay::SameCameraRecords(baseline.words,changedSnapshot.words,roleReadUnion);
+    unchanged=stereoreplay::SameCameraRecords(baseline.words,restoredSnapshot.words,roleReadUnion)&&unchanged;
+    assert(!unchanged);
+    changedSubmission=original;changedSubmission[20+96]+=1;
+    assert(!stereoreplay::SameCameraRecords(baseline.words,stereoreplay::CaptureCameraRecords(changedSubmission,roleReadUnion).words,read20));
+    assert(!stereoreplay::SameCameraRecords(original,std::span(original).first(131),read20));
+    for(size_t component=0;component<112;++component){
+        auto changedWord=original;changedWord[20+component]+=1;
+        assert(!stereoreplay::SameCameraRecords(baseline.words,stereoreplay::CaptureCameraRecords(changedWord,roleReadUnion).words,read20));
+    }
     // An object CBV immediately before the camera can see the same complete
     // records in its 4 KiB tail. Ownership must select the actual closer
     // window regardless of submission order, without inventing CBV lengths.
@@ -35,6 +99,50 @@ int main(){
     using Role=std::pair<uint64_t,uint32_t>;
     const std::array<Role,1> objectRole{Role{11,0}},cameraRole{Role{22,0}},smallerRole{Role{33,1}};
     const std::array<stereoreplay::CameraWindow,2> beforeCamera{{{1,0,broadWords,broadRecords,objectRole},{1,256,cameraWords,cameraRecords,cameraRole}}};
+    const auto broadSnapshot=stereoreplay::CaptureCameraRecords(broadWords,broadRecords);
+    const auto cameraSnapshot=stereoreplay::CaptureCameraRecords(cameraWords,cameraRecords);
+    const std::array<stereoreplay::CameraWindow,2> sparseAliases{{
+        {1,0,broadSnapshot.words,broadSnapshot.offsets,objectRole},{1,256,cameraSnapshot.words,cameraSnapshot.offsets,cameraRole}}};
+    const auto sparseOwnership=stereoreplay::OwnCameraRecords(sparseAliases);
+    assert(sparseOwnership.consistent&&sparseOwnership.records[0].empty()&&sparseOwnership.records[1]==offsets);
+    const std::array<stereoreplay::CameraWindow,1> previousCamera{{beforeCamera[1]}};
+    const auto aliasOverlap=stereoreplay::CameraOverlapReads(1,0,broadWords.size(),previousCamera);
+    const auto aliasOnly=stereoreplay::CaptureCameraRecords(broadWords,{},aliasOverlap);
+    assert(aliasOnly.offsets.empty()&&aliasOnly.copiedBytes==2240&&stereoreplay::SameCameraOverlaps(1,0,aliasOnly.words,previousCamera));
+    const auto duplicateOverlap=stereoreplay::CameraOverlapReads(1,0,broadWords.size(),sparseAliases);
+    assert(stereoreplay::CaptureCameraRecords(broadWords,{},duplicateOverlap).copiedBytes==2240);
+    auto changedAlias=std::vector<float>(broadWords.begin(),broadWords.end());changedAlias[84]+=1;
+    const auto aliasB=stereoreplay::CaptureCameraRecords(changedAlias,{},aliasOverlap);
+    assert(!stereoreplay::SameCameraOverlaps(1,0,aliasB.words,previousCamera));
+    const auto aliasA=stereoreplay::CaptureCameraRecords(broadWords,{},aliasOverlap);
+    assert(stereoreplay::SameCameraOverlaps(1,0,aliasA.words,previousCamera));
+    assert(stereoreplay::CameraOverlapReads(2,0,broadWords.size(),previousCamera).empty());
+    assert(stereoreplay::SameCameraOverlaps(2,0,aliasB.words,previousCamera));
+    // Partial aliases copy/check only their physical intersection, even when
+    // the new range is too small to hold one complete camera record.
+    const std::array<stereoreplay::CameraWindow,1> previousFirst{{{1,0,original,read20}}};
+    const auto partialWords=std::span<const float>(original).subspan(76,20);
+    const auto partialReads=stereoreplay::CameraOverlapReads(1,76*4,partialWords.size(),previousFirst);
+    assert(partialReads.size()==1&&partialReads[0].begin==0&&partialReads[0].count==20);
+    const auto partialSnapshot=stereoreplay::CaptureCameraRecords(partialWords,{},partialReads);
+    assert(partialSnapshot.copiedBytes==80&&stereoreplay::SameCameraOverlaps(1,76*4,partialSnapshot.words,previousFirst));
+    auto partialB=partialSnapshot.words;partialB[14]+=1;
+    assert(!stereoreplay::SameCameraOverlaps(1,76*4,partialB,previousFirst));
+    const auto clippedHead=std::span<const float>(original).first(25);
+    const auto headReads=stereoreplay::CameraOverlapReads(1,0,clippedHead.size(),previousFirst);
+    assert(headReads.size()==1&&headReads[0].begin==20&&headReads[0].count==5);
+    const auto headSnapshot=stereoreplay::CaptureCameraRecords(clippedHead,{},headReads);
+    assert(headSnapshot.copiedBytes==20&&stereoreplay::SameCameraOverlaps(1,0,headSnapshot.words,previousFirst));
+    const auto tailReads=stereoreplay::CameraOverlapReads(1,128*4,16,previousFirst);
+    assert(tailReads.size()==1&&tailReads[0].begin==0&&tailReads[0].count==4);
+    assert(stereoreplay::CameraOverlapReads(1,132*4,16,previousFirst).empty());
+    const std::array<stereoreplay::CameraWindow,1> overflowWindow{{{1,std::numeric_limits<uint64_t>::max()-16,original,read20}}};
+    assert(stereoreplay::CameraOverlapReads(1,0,1024,overflowWindow).empty());
+    assert(!stereoreplay::SameCameraOverlaps(1,0,original,overflowWindow));
+    assert(stereoreplay::CameraOverlapReads(1,std::numeric_limits<uint64_t>::max(),1024,previousFirst).empty());
+    const std::array<stereoreplay::CameraWindow,1> truncatedPrevious{{{1,0,std::span(original).first(131),read20}}};
+    assert(stereoreplay::CameraOverlapReads(1,0,1024,truncatedPrevious).empty());
+    assert(!stereoreplay::SameCameraOverlaps(1,0,original,truncatedPrevious));
     auto ownership=stereoreplay::OwnCameraRecords(beforeCamera);
     assert(ownership.consistent&&ownership.records[0].empty()&&ownership.records[1]==offsets);
     assert(!ownership.roles.contains(objectRole[0])&&ownership.roles.at(cameraRole[0])==offsets);

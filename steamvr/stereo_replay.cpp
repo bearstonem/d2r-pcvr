@@ -1,5 +1,6 @@
 #include "stereo_replay.h"
 #include "stereo_replay_camera.h"
+#include "stereo_camera_bindings.h"
 #include "native_submission_capture.h"
 #include "native_replay_packet.h"
 #include "synchronous_replay_gpu.h"
@@ -28,26 +29,23 @@ std::atomic<const char*> status{"Standard"};
 bool registered=false,done=false,invalid=false,temporal=false,inReplay=false;
 bool failed=false,layoutResolved=false,activationLogged=false;
 const char* invalidReason=nullptr;
-unsigned warmup=0,appliedConfiguration=0,lookupCount=0,bindingCount=0;
+unsigned warmup=0,appliedConfiguration=0,lookupCount=0;
 uint32_t owner=0,pairs=0,replays=0,fallbacks=0;
 EyeFn eyeFn=nullptr;EffectsFn effectsFn=nullptr;
 effect_runtime* runtime=nullptr;
 replayaudit::Camera cameras[2];
 using CameraKey=std::pair<uint64_t,uint32_t>;
-struct Binding {resource buffer;uint64_t offset,size;CameraKey cameraKey;std::set<CameraKey> discoveryAliases;};
 struct Probe {ComPtr<ID3D12Resource> buffer;uint64_t offset;std::vector<float> original,right;std::vector<size_t> records;replayaudit::Camera left;};
-std::map<uint64_t,std::map<std::pair<uint64_t,uint64_t>,Binding>> bindings;
+CameraBindingRegistry bindings;
 std::map<CameraKey,std::vector<size_t>> cameraKeys;
+std::vector<size_t> cameraReadOffsets;
 std::map<std::pair<uint64_t,uint64_t>,std::set<CameraKey>> discoveryRoles;
 std::set<std::pair<uint64_t,uint64_t>> inspectedBindings;
 std::atomic<bool> cameraFilterReady{false};
 std::atomic<unsigned> cameraFilterCount{0};
 std::array<std::atomic<uint64_t>,64> cameraFilterSignatures{};
 std::array<std::atomic<uint32_t>,64> cameraFilterParameters{};
-std::atomic<uint64_t> bindingEpoch{0};
-struct RecentBinding {uint64_t epoch=0,address=0;};
-thread_local std::array<RecentBinding,64> recentBindings;
-std::set<std::pair<uint64_t,uint64_t>> seenBindings;
+thread_local std::array<RecentCameraBinding,64> recentBindings;
 std::map<std::pair<uint64_t,uint64_t>,Probe> probes;
 // Resource creation/destruction only, never per-draw work in Standard. Borrow
 // handles until an active pair retains its camera ranges; do not prolong game
@@ -63,17 +61,13 @@ void Fallback(const char* reason){
     char line[512];std::snprintf(line,sizeof line,"Stereo replay: stopped after pair %u: %s; Standard rendering restored; select Standard then Single pass to retry",pairs,reason);logging::Write(line);
 }
 void Invalidate(const char* reason){invalid=true;if(!invalidReason)invalidReason=reason;}
-void NoteDiscoveryAlias(Binding& binding,const CameraKey& role){
-    if(binding.discoveryAliases.size()>=cameraFilterSignatures.size()&&!binding.discoveryAliases.contains(role))Invalidate("camera root capacity exceeded");
-    else binding.discoveryAliases.insert(role);
-}
 bool D3D12(reshade::api::device* d){return d&&d->get_api()==device_api::d3d12;}
 template<class T> uint64_t Id(T* p){return reinterpret_cast<uint64_t>(p);}
 void InitDevice(reshade::api::device* d){if(!D3D12(d))return;apiDevice=d;if(running.load())nativecapture::ObserveDevice(reinterpret_cast<ID3D12Device*>(d->get_native()));}
 void InitQueue(command_queue* q){if(running.load()&&D3D12(q->get_device()))nativecapture::ObserveQueue(reinterpret_cast<ID3D12CommandQueue*>(q->get_native()));}
 void InitList(command_list* cl){if(running.load()&&D3D12(cl->get_device()))nativecapture::ObserveList(reinterpret_cast<ID3D12GraphicsCommandList*>(cl->get_native()));}
-void DestroyList(command_list* cl){if(!running.load()||!D3D12(cl->get_device()))return;nativecapture::ForgetList(cl->get_native());std::lock_guard lock(mutex);bindings.erase(cl->get_native());}
-void ResetList(command_list* cl){if(!running.load()||!D3D12(cl->get_device()))return;InitList(cl);std::lock_guard lock(mutex);bindings.erase(cl->get_native());}
+void DestroyList(command_list* cl){if(!running.load()||!D3D12(cl->get_device()))return;nativecapture::ForgetList(cl->get_native());std::lock_guard lock(mutex);bindings.ResetList(cl->get_native());}
+void ResetList(command_list* cl){if(!running.load()||!D3D12(cl->get_device()))return;InitList(cl);std::lock_guard lock(mutex);bindings.ResetList(cl->get_native());}
 void InitResource(reshade::api::device* d,const resource_desc& desc,const subresource_data*,resource_usage state,resource r){
     if(!D3D12(d))return;
     if(desc.type==resource_type::buffer&&desc.heap==memory_heap::upload){
@@ -96,45 +90,42 @@ void Runtime(effect_runtime* rt){std::lock_guard lock(mutex);runtime=rt;}
 void DestroyRuntime(effect_runtime* rt){std::lock_guard lock(mutex);if(runtime==rt){runtime=nullptr;warmup=0;}}
 void Push(uint64_t listId,uint64_t signature,uint32_t parameter,uint64_t address){
     if(!collecting.load())return;
-    RecentBinding* recent=nullptr;uint64_t epoch=0;
+    RecentCameraBinding* recent=nullptr;
     // Immutable roles are published once per manual activation. Most of the
     // tens of thousands of material/object CBVs never take a callback lock.
     if(cameraFilterReady.load(std::memory_order_acquire)){
         bool camera=false;const auto count=cameraFilterCount.load(std::memory_order_relaxed);
         for(unsigned i=0;i<count;++i)if(cameraFilterSignatures[i].load(std::memory_order_relaxed)==signature&&cameraFilterParameters[i].load(std::memory_order_relaxed)==parameter){camera=true;recent=&recentBindings[i];break;}
         if(!camera)return;
-        epoch=bindingEpoch.load(std::memory_order_relaxed);
-        if(recent->epoch==epoch&&recent->address==address)return;
+        if(bindings.RecentMatches(*recent,listId,address))return;
     }
     std::lock_guard lock(mutex);const CameraKey cameraKey{signature,parameter};
-    if(layoutResolved&&!cameraKeys.contains(cameraKey))return;
+    const auto known=cameraKeys.find(cameraKey);
+    if(layoutResolved&&known==cameraKeys.end())return;
     buffer_range b{};
     {std::lock_guard uploadLock(uploadMutex);auto found=uploads.upper_bound(address);if(found==uploads.begin())return;--found;
         if(address-found->first>=found->second.size)return;
         b={found->second.buffer,address-found->first,found->second.size-(address-found->first)};
     }
-    // Discovery is bounded once on enable. Established camera roots retain
-    // only a bounded set of unique ranges, rather than all draw CBVs.
-    const auto key=std::pair{b.buffer.handle,b.offset};
-    if(seenBindings.contains(key)){
-        // Discovery must retain every root alias for an already selected
-        // window, even when a different list or role was bound first.
-        if(!layoutResolved){auto [pending,fresh]=bindings[listId].try_emplace(key,Binding{b.buffer,b.offset,b.size,cameraKey,{}});NoteDiscoveryAlias(pending->second,cameraKey);}
-        if(recent)*recent={epoch,address};return;
+    // Deduplicate the window budget, but retain every command list's use.
+    // The same address on a different list or after Reset must be resampled
+    // at its submission, even when a thread just recorded it elsewhere.
+    const auto offsets=known==cameraKeys.end()?std::span<const size_t>{}:std::span<const size_t>(known->second);
+    switch(bindings.Add(listId,b.buffer.handle,b.offset,b.size,cameraKey,offsets)){
+    case CameraBindingResult::Recorded:if(recent)bindings.Remember(*recent,listId,address);break;
+    case CameraBindingResult::WindowCapacity:if(layoutResolved)Invalidate("camera binding capacity exceeded");break;
+    case CameraBindingResult::ReferenceCapacity:Invalidate("camera list reference capacity exceeded");break;
+    case CameraBindingResult::RoleCapacity:Invalidate("camera root capacity exceeded");break;
+    case CameraBindingResult::LayoutCapacity:Invalidate("camera layout capacity exceeded");break;
     }
-    if(bindingCount>=(layoutResolved?512u:64u)){if(layoutResolved)Invalidate("camera binding capacity exceeded");return;}
-    seenBindings.insert(key);++bindingCount;
-    auto [pending,fresh]=bindings[listId].try_emplace(key,Binding{b.buffer,b.offset,b.size,cameraKey,{}});
-    if(!layoutResolved)NoteDiscoveryAlias(pending->second,cameraKey);
-    if(recent)*recent={epoch,address};
 }
 void Execute(command_queue* q,command_list* cl){
     if(!running.load())return;InitQueue(q);InitList(cl);if(!collecting.load()||!D3D12(q->get_device()))return;
-    std::lock_guard lock(mutex);const auto list=bindings.find(cl->get_native());if(list==bindings.end())return;
-    for(const auto& [bindingKey,b]:list->second){
-        if(!b.buffer.handle)continue;
-        const auto known=cameraKeys.find(b.cameraKey);
-        if(layoutResolved&&known==cameraKeys.end())continue;
+    std::lock_guard lock(mutex);const auto* list=bindings.List(cl->get_native());if(!list)return;
+    for(const auto& [bindingKey,b]:*list){
+        if(invalid)break;
+        if(!b.buffer)continue;
+        if(layoutResolved&&b.cachedOffsets.empty())continue;
         if(!layoutResolved){
             auto& aliases=discoveryRoles[bindingKey];
             for(const auto& role:b.discoveryAliases){
@@ -143,31 +134,46 @@ void Execute(command_queue* q,command_list* cl){
             }
             if(inspectedBindings.insert(bindingKey).second)++lookupCount;
         }
-        const auto desc=q->get_device()->get_resource_desc(b.buffer);
+        const auto desc=q->get_device()->get_resource_desc(resource{b.buffer});
         if(desc.type!=resource_type::buffer||desc.heap!=memory_heap::upload||b.offset>=desc.buffer.size)continue;
         const auto bytes=std::min({uint64_t(4096),desc.buffer.size-b.offset,b.size})&~uint64_t(3);
-        if(bytes<448)continue;
-        auto* buffer=reinterpret_cast<ID3D12Resource*>(b.buffer.handle);
+        if(!bytes)continue;
+        // A changed camera can arrive through another alias window and cease
+        // to resemble a camera. Retain its physical overlap before any view
+        // filter can discard this submission, including partial overlaps.
+        std::vector<CameraWindow> previous;
+        for(const auto& [key,p]:probes)if(key.first==b.buffer)
+            previous.push_back({key.first,p.offset,p.original,p.records});
+        const auto overlaps=CameraOverlapReads(b.buffer,b.offset,size_t(bytes/4),previous);
+        auto* buffer=reinterpret_cast<ID3D12Resource*>(b.buffer);
         void* data=nullptr;D3D12_RANGE read{SIZE_T(b.offset),SIZE_T(b.offset+bytes)};
         if(FAILED(buffer->Map(0,&read,&data))||!data){Invalidate("camera upload mapping failed");continue;}
         const auto mapped=std::span(static_cast<const float*>(static_cast<const void*>(static_cast<const uint8_t*>(data)+b.offset)),size_t(bytes/4));
-        // Some shaders share one root between camera and object constants.
-        // Reject unrelated windows with just their cached view locations,
-        // before reading an entire write-combined upload window into the CPU.
-        if(known!=cameraKeys.end()&&!MayContainCachedCameraRecord(mapped,known->second,cameras[0])){
+        const bool candidate=!layoutResolved||MayContainCachedCameraRecord(mapped,b.cachedOffsets,cameras[0]);
+        if(!candidate&&overlaps.empty()){
             D3D12_RANGE none{};buffer->Unmap(0,&none);continue;
         }
-        // Upload mappings may be write-combined. Copy once into cached CPU
-        // memory before matrix inspection instead of repeatedly reading the
-        // uncached mapping for each element and inverse calculation.
-        std::vector<float> words(size_t(bytes/4));std::memcpy(words.data(),static_cast<const uint8_t*>(data)+b.offset,SIZE_T(bytes));
+        std::vector<float> words;
+        if(layoutResolved){
+            // Read the union of established layouts so an alias role used
+            // later still has an original baseline. Gaps stay in CPU memory;
+            // neither matrix validation nor ownership may inspect them.
+            const auto offsets=candidate?std::span<const size_t>(cameraReadOffsets):std::span<const size_t>{};
+            words=CaptureCameraRecords(mapped,offsets,overlaps).words;
+        }else{
+            words.resize(mapped.size());std::memcpy(words.data(),mapped.data(),SIZE_T(bytes));
+        }
         D3D12_RANGE none{};buffer->Unmap(0,&none);const auto wordsIn=std::span<const float>(words);
-        std::vector<size_t> records=known==cameraKeys.end()?FindCameraRecords(wordsIn,cameras[0]):SelectCameraRecords(wordsIn,known->second,cameras[0]);
+        if(!SameCameraOverlaps(b.buffer,b.offset,wordsIn,previous)){
+            Invalidate("camera constants changed between submissions");continue;
+        }
+        if(!candidate)continue;
+        std::vector<size_t> records=layoutResolved?SelectCameraRecords(wordsIn,b.cachedOffsets,cameras[0]):FindCameraRecords(wordsIn,cameras[0]);
         // A root may bind overlapping windows or a smaller record group. Use
         // cached offsets only where that actual submitted range contains the
         // complete camera record; never borrow another range's layout blindly.
         if(records.empty())continue;
-        const auto key=std::pair{b.buffer.handle,b.offset};const auto old=probes.find(key);
+        const auto key=std::pair{b.buffer,b.offset};const auto old=probes.find(key);
         if(old!=probes.end()){
             for(const size_t o:records){
                 if(o+112>old->second.original.size()||std::memcmp(old->second.original.data()+o,words.data()+o,112*4))Invalidate("camera constants changed between submissions");
@@ -192,7 +198,12 @@ void ResolveOwnership(bool discover){
     }
     auto owned=OwnCameraRecords(windows);
     if(!owned.consistent){Invalidate("overlapping camera constants changed");return;}
-    if(discover)cameraKeys=std::move(owned.roles);
+    if(discover){
+        cameraKeys=std::move(owned.roles);cameraReadOffsets.clear();
+        for(const auto& [role,offsets]:cameraKeys)cameraReadOffsets.insert(cameraReadOffsets.end(),offsets.begin(),offsets.end());
+        std::sort(cameraReadOffsets.begin(),cameraReadOffsets.end());
+        cameraReadOffsets.erase(std::unique(cameraReadOffsets.begin(),cameraReadOffsets.end()),cameraReadOffsets.end());
+    }
     size_t i=0;
     for(auto p=probes.begin();p!=probes.end();){
         p->second.records=owned.records[i++];
@@ -271,7 +282,7 @@ void Present(command_queue* q,swapchain* swap,const rect*,const rect*,uint32_t,c
     if(!lease.held||invalid||temporal||!runtime||probes.empty()||!nativecapture::SnapshotReplay(packet)){
         Fallback(!lease.held?"GPU lifetime lease unavailable":invalid?invalidReason:temporal?"temporal upscaling":probes.empty()?"camera buffers missing":!runtime?"effects runtime missing":nativecapture::ReplayPacketFailure());
         const auto r=nativecapture::EndEye(true);char detail[400];
-        std::snprintf(detail,sizeof detail,"Stereo replay stop details: camera_ranges=%u bindings=%u lookup_windows=%u batches=%u lists=%u plan=%s unknown=%u overlap=%u foreign=%u boundary=%u api=%u cpu_signals=%u hooks=%u faults=%u capacity=%u",unsigned(probes.size()),bindingCount,lookupCount,r.batches,r.lists,nativecapture::StatusName(r.atPresent),r.unknownLists,r.queueOverlap,r.foreignCalls,r.boundaryCalls,r.apiFailures,r.cpuSignals,r.hookErrors,r.observerFaults,r.capacityFailures);logging::Write(detail);return;
+        std::snprintf(detail,sizeof detail,"Stereo replay stop details: camera_ranges=%u bindings=%u lookup_windows=%u batches=%u lists=%u plan=%s unknown=%u overlap=%u foreign=%u boundary=%u api=%u cpu_signals=%u hooks=%u faults=%u capacity=%u",unsigned(probes.size()),unsigned(bindings.UniqueWindows()),lookupCount,r.batches,r.lists,nativecapture::StatusName(r.atPresent),r.unknownLists,r.queueOverlap,r.foreignCalls,r.boundaryCalls,r.apiFailures,r.cpuSignals,r.hookErrors,r.observerFaults,r.capacityFailures);logging::Write(detail);return;
     }
     nativecapture::EndEye(true);
     const auto rightTech=runtime->find_technique("D2R_DepthFog.fx","D2R_DepthFog_R");
@@ -308,7 +319,7 @@ void Present(command_queue* q,swapchain* swap,const rect*,const rect*,uint32_t,c
     if(!rightCopied||!rightCompleted){inReplay=false;Fallback("right copy failed");return;}
     framevr::FinishReplayCapture();done=true;inReplay=false;++replays;status="Single pass";
     if(!activationLogged){activationLogged=true;char line[320];unsigned restores=0;for(const auto& state:packet.states)restores+=state.first!=state.last;
-        std::snprintf(line,sizeof line,"Stereo replay: first actual pair; %u batches, %u camera ranges, %u records, %u texture boundary restorations; second engine draw skipped; %u bindings, %u camera roots",unsigned(packet.batches.size()),unsigned(probes.size()),records,restores,bindingCount,unsigned(cameraKeys.size()));logging::Write(line);}
+        std::snprintf(line,sizeof line,"Stereo replay: first actual pair; %u batches, %u camera ranges, %u records, %u texture boundary restorations; second engine draw skipped; %u bindings, %u camera roots",unsigned(packet.batches.size()),unsigned(probes.size()),records,restores,unsigned(bindings.UniqueWindows()),unsigned(cameraKeys.size()));logging::Write(line);}
 }
 }
 void Register(bool enabled,EyeFn eye,EffectsFn effects){
@@ -335,12 +346,12 @@ void BeginPair(bool supported){
     done=false;
     if(!registered)return;
     const auto revision=configuration.load();
-    if(appliedConfiguration!=revision){appliedConfiguration=revision;failed=false;activationLogged=false;cameraFilterReady=false;cameraFilterCount=0;cameraKeys.clear();discoveryRoles.clear();layoutResolved=false;lookupCount=0;}
+    if(appliedConfiguration!=revision){appliedConfiguration=revision;failed=false;activationLogged=false;cameraFilterReady=false;cameraFilterCount=0;cameraKeys.clear();cameraReadOffsets.clear();discoveryRoles.clear();layoutResolved=false;lookupCount=0;}
     const bool enable=requested.load()&&!failed;
     if(!enable){
         if(running.exchange(false)){
             if(collecting.exchange(false))nativecapture::EndEye();nativecapture::Stop();
-            std::lock_guard lock(mutex);probes.clear();depths.clear();bindings.clear();discoveryRoles.clear();cameraFilterReady=false;cameraFilterCount=0;cameraKeys.clear();
+            std::lock_guard lock(mutex);probes.clear();depths.clear();bindings.Clear();discoveryRoles.clear();cameraFilterReady=false;cameraFilterCount=0;cameraKeys.clear();cameraReadOffsets.clear();
             logging::Write(nativecapture::ActiveHooks()==0?"Stereo rendering: Standard; native replay hooks disabled and tracking cleared":"Stereo rendering: Standard; replay hooks could not all be disabled");
         }
         if(!requested.load())status="Standard";return;
@@ -356,7 +367,7 @@ void BeginPair(bool supported){
     // A fresh Reset must supply the existing lists' allocator generations after
     // hooks were disabled in Standard. This is setup, not live qualification.
     if(warmup++<2)return;
-    ++pairs;std::lock_guard lock(mutex);owner=GetCurrentThreadId();invalid=temporal=false;invalidReason=nullptr;cameras[0]={};cameras[1]={};probes.clear();depths.clear();bindings.clear();seenBindings.clear();inspectedBindings.clear();bindingCount=0;++bindingEpoch;
+    ++pairs;std::lock_guard lock(mutex);owner=GetCurrentThreadId();invalid=temporal=false;invalidReason=nullptr;cameras[0]={};cameras[1]={};probes.clear();depths.clear();bindings.BeginPair(layoutResolved);inspectedBindings.clear();
     nativecapture::BeginEye(owner);collecting=true;
 }
 bool Replayed(){return done;}

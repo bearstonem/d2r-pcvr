@@ -49,7 +49,7 @@ fixtures: captured copy/compute/direct batches are executed again in dependency
 order; a texture with matched split barriers is replayed twice after restoring
 its original state, with byte-identical pixel readback. Five camera records
 are checked against distinct actual eye transforms/projections, including
-inverse and history consistency. All **51/51 native checks pass**, including
+inverse and history consistency. All **54/54 native checks pass**, including
 live hook suspension/resumption and menu INI persistence. DLL load/unload and
 the seven-row Video panel were also checked outside the game.
 
@@ -324,6 +324,64 @@ because those single-layer paths are incompatible with its multiview target.
 It still copies eye layers into OpenXR swapchains and performs required XR
 synchronization. Neither eliminating all copies/waits nor halving GPU shading
 work follows from adopting multiview.
+
+### Headset-free follow-up: sparse camera reads and owned-buffer fixture
+
+The next renderer reads coalesced spans of complete known camera records
+instead of copying each accepted 4 KiB upload window. Initial discovery still
+uses the complete window. Each snapshot includes the union of retained role
+layouts, so a later alias retains its original baseline; validation uses only
+the roles actually bound on that command list. Physical overlaps with earlier
+records are also copied and compared before a changed view can be filtered
+out, including partial overlaps smaller than a complete record.
+
+The binding journal now retains uses on every submitting command list. Its
+recent-binding cache includes list identity and invalidates on reset, pair and
+mode changes. This closes the observed-submission A-to-B-to-A gap where another
+list, or an intermediate value that no longer resembled a camera, could evade
+the earlier comparison. The unique-window limits remain 64/512; per-list
+references are separately bounded at 4,096. This does not establish coverage
+of future unknown shader roles or unobserved writes.
+
+A private synthetic benchmark on the local RTX 5090 allocated an owned D3D12
+UPLOAD resource and confirmed `PAGE_WRITECOMBINE` on its mapping. Nine rounds
+alternated the former full-window copy with the production sparse helper,
+including planning, allocation, zero-fill, copying and destruction. Retained
+record bytes matched exactly. Median microseconds per copied snapshot, with
+64 accesses per round drawn from 256 windows:
+
+| Known records | Bytes copied before / after | Full window us | Sparse helper us |
+| --- | ---: | ---: | ---: |
+| 1 | 4096 / 448 | 131.53 | 15.47 |
+| 2 | 4096 / 896 | 132.26 | 30.02 |
+| 5 | 4096 / 2240 | 131.75 | 72.25 |
+| 9 adjacent | 4096 / 4032 | 132.21 | 127.10 |
+
+The cached-RAM control was slower with the sparse helper (roughly 0.20-0.52 us
+versus 0.094-0.099 us). The benefit is specific to reducing expensive mapped
+reads, not a universal faster `memcpy`. The benchmark excludes the remainder
+of capture, overlap validation, synchronization and rendering. It neither
+attributes the earlier game's CRT samples to this caller nor measures a D2R
+FPS gain. More command-list uses are now validated, so these isolated timings
+cannot predict the complete renderer's cost.
+
+The standalone `stereo-owned-constants-gpu-test` also proves a larger scheduling
+option: one closed draw list binds a stable renderer-owned DEFAULT-buffer CBV;
+GPU copies supply left and right data around two executions of that list.
+Hardware and WARP tests verify exact distinct eye pixels over three frames,
+unchanged original upload bytes, fence-protected reuse, one final CPU completion
+per pair and completion before failure cleanup. All 54 native checks and
+isolated staged-DLL load/unload passed; the D3D12 debug layer was unavailable.
+
+Owned constants are a fixture only. Production integration must substitute
+addresses while recording, establish the complete shader-readable CBV span
+(the 4 KiB discovery window is not that contract), patch every redirected
+alias, and preserve original rendering through fallback/reset/mode changes.
+Closed lists cannot have their recorded GPU addresses changed at Present.
+Other borrowed resources still require final completion and lifetime guards.
+The installed synchronous architecture is not made asynchronous by this test.
+No headset image, water-reflection fix or new game FPS result is claimed for
+this follow-up.
 
 ## Phase 2 baseline, October 12 evening
 
