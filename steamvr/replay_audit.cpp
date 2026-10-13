@@ -1,9 +1,11 @@
 #include "replay_audit.h"
 #include "replay_audit_model.h"
+#include "native_submission_capture.h"
 #include "native_lock.h"
 #include "logging.h"
 #include <reshade.hpp>
 #include <atomic>
+#include <d3d12.h>
 #include <cstdio>
 #include <mutex>
 
@@ -28,11 +30,23 @@ uint64_t Id(command_list* cl){return cl->get_native();}
 
 void Finish(const char* reason) {
     recording.store(false);tracking.store(false);
+    nativecapture::Stop();
     char line[180];std::snprintf(line,sizeof line,"Replay audit: %s; %u/%u pairs; collection stopped. No replay was performed; this is not a performance benchmark.",reason,gate.CompletedPairs(),PairLimit);
     logging::Write(line);commands=Commands{};bindings=Bindings{ProbeLimit};eyeOpen=false;
 }
-void InitList(command_list* cl){if(!tracking.load()||!D3D12(cl->get_device()))return;std::lock_guard lock(mutex);if(tracking.load()){commands.Reset(Id(cl));bindings.ResetList(Id(cl));}}
-void DestroyList(command_list* cl){if(!tracking.load()||!D3D12(cl->get_device()))return;std::lock_guard lock(mutex);if(tracking.load()){commands.Destroy(Id(cl));bindings.ResetList(Id(cl));}}
+void InitDevice(device* dev){if(tracking.load()&&D3D12(dev))nativecapture::ObserveDevice(reinterpret_cast<ID3D12Device*>(dev->get_native()));}
+void InitQueue(command_queue* q){if(tracking.load()&&D3D12(q->get_device()))nativecapture::ObserveQueue(reinterpret_cast<ID3D12CommandQueue*>(q->get_native()));}
+void DestroyQueue(command_queue* q){if(tracking.load()&&D3D12(q->get_device()))nativecapture::ForgetQueue(q->get_native());}
+void InitList(command_list* cl){
+    if(!tracking.load()||!D3D12(cl->get_device()))return;
+    nativecapture::ObserveList(reinterpret_cast<ID3D12GraphicsCommandList*>(Id(cl)));
+    std::lock_guard lock(mutex);if(tracking.load()){commands.Reset(Id(cl));bindings.ResetList(Id(cl));}
+}
+void DestroyList(command_list* cl){
+    if(!tracking.load()||!D3D12(cl->get_device()))return;
+    nativecapture::ForgetList(Id(cl));
+    std::lock_guard lock(mutex);if(tracking.load()){commands.Destroy(Id(cl));bindings.ResetList(Id(cl));}
+}
 void DestroyResource(device* dev,resource r){if(!tracking.load()||!D3D12(dev))return;std::lock_guard lock(mutex);if(tracking.load()){commands.RetireResource();bindings.DestroyResource(r.handle);}}
 void DestroyDevice(device* dev){if(!tracking.load()||!D3D12(dev))return;std::lock_guard lock(mutex);if(tracking.load())Finish("device destroyed, incomplete");}
 void OnBarrier(command_list* cl,uint32_t count,const resource* resources,const resource_usage* before,const resource_usage* after) {
@@ -42,6 +56,8 @@ void OnBarrier(command_list* cl,uint32_t count,const resource* resources,const r
 }
 void Probe(device* dev,const Binding& binding);
 void Execute(command_queue* queue,command_list* cl) {
+    // Also discover a queue that predates add-on registration during settling.
+    InitQueue(queue);
     if(!recording.load()||!D3D12(queue->get_device()))return;
     const auto type=queue->get_type();
     const unsigned kind=(type&command_queue_type::graphics)!=0?0:(type&command_queue_type::compute)!=0?1:(type&command_queue_type::copy)!=0?2:3;
@@ -56,6 +72,7 @@ void Present(command_queue* queue,swapchain*,const rect*,const rect*,uint32_t,co
     if(!recording.load()||GetCurrentThreadId()!=drawThread||!D3D12(queue->get_device()))return;
     std::lock_guard lock(mutex);if(!recording.load())return;
     // Stop at the engine's Present boundary, before the eye's effects/copy work.
+    nativecapture::SealPresent();
     recording.store(false);atPresent=commands.EndEye();sealed=true;
 }
 void Push(command_list* cl,shader_stage,pipeline_layout,uint32_t,const descriptor_table_update& update) {
@@ -90,6 +107,10 @@ void Probe(device* dev,const Binding& binding) {
 
 void Register(bool enabled) {
     if(!enabled||tracking.exchange(true))return;
+    if(!nativecapture::Start())logging::Write("Replay audit: native capture initialization failed; dependency metadata will be incomplete.");
+    reshade::register_event<reshade::addon_event::init_device>(&InitDevice);
+    reshade::register_event<reshade::addon_event::init_command_queue>(&InitQueue);
+    reshade::register_event<reshade::addon_event::destroy_command_queue>(&DestroyQueue);
     reshade::register_event<reshade::addon_event::init_command_list>(&InitList);
     reshade::register_event<reshade::addon_event::reset_command_list>(&InitList);
     reshade::register_event<reshade::addon_event::destroy_command_list>(&DestroyList);
@@ -112,6 +133,7 @@ void BeginEye(unsigned eye) {
     if(!tracking.load())return;
     std::lock_guard lock(mutex);if(!tracking.load()||!gate.PairOpen())return;
     camera={};probes={};bindings=Bindings{ProbeLimit};currentEye=eye&1;drawThread=GetCurrentThreadId();
+    nativecapture::BeginEye(drawThread.load());
     atPresent={};sealed=false;eyeOpen=true;commands.BeginEye();recording.store(true);
 }
 void View(unsigned eye,const float matrix[16]) {
@@ -133,6 +155,17 @@ void EndEye() {
         gate.CompletedPairs()+1,currentEye,unsigned(sealed),end.submissions,end.queues,end.queueKinds[0],end.queueKinds[1],end.queueKinds[2],end.queueKinds[3],
         sealed?atPresent.invalidatedLists:end.invalidatedLists,end.invalidatedLists,end.resets,end.stateRestorations,end.stateChainMismatches,end.resourceRetirements,end.unknownBarriers,end.metadataMissing,end.overflows);
     logging::Write(line);
+    const auto native=nativecapture::EndEye();
+    std::snprintf(line,sizeof line,
+        "Replay audit native: pair=%u eye=%u batches=%u lists=%u signals=%u waits=%u cpu_signals=%u unknown_lists=%u queue_overlap=%u boundary_calls=%u foreign_calls=%u api_failures=%u hook_errors=%u observer_faults=%u capacity_failures=%u new_fences=%u",
+        gate.CompletedPairs()+1,currentEye,native.batches,native.lists,native.signals,native.waits,native.cpuSignals,native.unknownLists,
+        native.queueOverlap,native.boundaryCalls,native.foreignCalls,native.apiFailures,native.hookErrors,native.observerFaults,native.capacityFailures,native.newFences);
+    logging::Write(line);
+    std::snprintf(line,sizeof line,
+        "Replay audit dependencies: pair=%u eye=%u sealed=%u complete=%u plan_present=%s plan_end=%s internal_waits=%u external_waits=%u list_resets=%u allocator_resets=%u retained_allocators=%u retained_fences=%u",
+        gate.CompletedPairs()+1,currentEye,unsigned(native.sealed),unsigned(native.DependenciesComplete()),nativecapture::StatusName(native.atPresent),nativecapture::StatusName(native.atEnd),
+        native.internalWaits,native.externalWaits,native.listResets,native.allocatorResets,native.retainedAllocators,native.retainedFences);
+    logging::Write(line);
     std::snprintf(line,sizeof line,
         "Replay audit camera: pair=%u eye=%u camera_valid=%u view_updates=%u projection_updates=%u cbv_bindings=%u cbv_reads=%u cbv_unreadable=%u cbv_unknown_size=%u camera_complete=%u camera_partial=%u view_only=%u probe_overflow=%u probe_pending=%u probe_discarded=%u",
         gate.CompletedPairs()+1,currentEye,
@@ -145,5 +178,9 @@ void EndPair(){
     else if(step==CaptureGate::Step::Incomplete)Finish("missing eye, incomplete");
 }
 void SkipPair(){if(!tracking.load())return;std::lock_guard lock(mutex);if(tracking.load()&&gate.SkipPair())Finish("left gameplay, incomplete");}
-void Shutdown(){recording.store(false);tracking.store(false);std::lock_guard lock(mutex);commands=Commands{};gate=CaptureGate{};bindings=Bindings{ProbeLimit};eyeOpen=false;}
+void Shutdown(){
+    recording.store(false);tracking.store(false);
+    if(!nativecapture::Shutdown())logging::Write("Replay audit: native detour shutdown incomplete; diagnostic module retained until process exit.");
+    std::lock_guard lock(mutex);commands=Commands{};gate=CaptureGate{};bindings=Bindings{ProbeLimit};eyeOpen=false;
+}
 }

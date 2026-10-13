@@ -77,14 +77,16 @@ current view/projection and their inverses/combinations. The probes never write
 buffer contents or save matrix/stack bytes; logs contain counts only. Missing,
 truncated, partial or unreadable metadata is reported explicitly.
 
-This audit cannot certify replay safety. ReShade's public callbacks do not
+This audit cannot certify replay safety. Its ReShade public callbacks do not
 expose native ExecuteCommandLists batch boundaries, allocator resets, all
 barrier details or queue fence Signal/Wait dependencies. Queue-local state
 counts use the observed CPU submission order; they do not establish a global
 GPU order. An unknown root CBV extent is capped for reading, not assumed to
 be a 4 KiB constant buffer. The recognizer checks current camera matrices,
 not positions, temporal histories, right-eye effects/depth, VRS or spatial UI.
-No command list is replayed and both eyes retain their normal engine draw.
+The native observer below adds batch, allocator and fence metadata. It still
+does not freeze game recordings/resources for replay or establish all resource
+states. No command list is replayed and both eyes retain their normal engine draw.
 
 The lifecycle check follows Microsoft's
 [ExecuteCommandLists contract](https://learn.microsoft.com/en-us/windows/win32/api/d3d12/nf-d3d12-id3d12commandqueue-executecommandlists)
@@ -163,6 +165,44 @@ capture with complete batch/fence information, protection against concurrent
 reset/destruction through GPU completion, resource-state handling and integration
 with eye effects, depth, temporal histories, VRS and spatial UI. The fixture
 does not validate game-camera coverage, headset stereo or an FPS improvement.
+
+### Native submission observation
+
+The next audit uses the same startup-only `replay_audit=1` control and eight-pair
+limit. `native_submission_capture.cpp` observes native command-list creation and
+Reset, allocator Reset, complete ExecuteCommandLists batches, queue Signal/Wait
+and CPU fence Signal. It passes every original call and parameter through;
+it adds no GPU commands or synchronization. It prepares the dependency plan at
+Present and checks recording/allocator generations again at draw return.
+Queue-call overlap, native calls crossing capture boundaries, foreign-thread
+submissions, CPU signals, unknown recordings, hook/observer errors and capacity
+limits explicitly prevent complete dependency metadata.
+
+Known fence values are sampled before an eye's submissions. Native references
+retain at most 128 fences and 4096 allocators to prevent metadata pointers from
+being destroyed/reused during observation; this retention does not protect game
+resources or descriptors. Up to sixteen queues on the first observed D3D12
+device and eight implementations per hooked method are supported. References
+are released when collection stops. Native detours then pass through until
+unload, which disables/removes only this observer's hooks. If a detour cannot
+be disabled/drained safely, the diagnostic module remains loaded until process
+exit. Restart with the control restored to zero before benchmarking.
+
+The new native fixture observes real copy/compute/direct calls: four lists in
+three batches, two waits whose signals are submitted later, unchanged synthetic
+GPU results, and an allocator invalidation between Present and draw return.
+Re-recording the same list pointers produces the expected changed GPU data.
+A list created before observation stays unknown until its actual Reset supplies
+the allocator. CPU signals before and after Present are reported as unsupported
+dependencies. Default-off behavior, pass-through after stop and clean removal of
+all owned hooks are verified. The native build and **48/48 CTest checks passed**;
+the candidate's in-game native capture is pending.
+
+`Replay audit dependencies: complete=1` refers only to the observed dependency
+metadata. It is not permission to replay game commands. Camera coverage,
+resource/descriptor lifetimes, full resource states, histories, eye effects/depth,
+VRS and spatial UI integration remain outstanding. No FPS gain is measured by
+this diagnostic.
 
 ## Issue 20 investigation, October 12
 
