@@ -1,0 +1,134 @@
+{
+  "implementation_commit": "bbe3e98fb5b09b4789970b693480a56f1d67f170",
+  "plugin_sha256": "374a88e684b661bfe8dc7d977482f8c292308cdf00d2a014c9bfc0f4c01509ea",
+  "status": "Complete; Single pass remains slower than Standard and water reflections remain incorrect",
+  "game": "Steam D2R 3.3.93787, offline local Paladin",
+  "hardware_runtime": "Ryzen 9 5950X / RTX 5090; Steam Frame via Steam Link, SteamVR OpenXR at 90 Hz",
+  "scenario": "Same offline character, spot and view; tester confirmed positioned and ready",
+  "settings": {
+    "scene_scale_percent": 100,
+    "terrain_rings": 2,
+    "object_radius": 300,
+    "symmetric_projection": true,
+    "foveation": "fixed",
+    "dlss": false,
+    "dynamic_resolution": false,
+    "fxaa": true,
+    "deferred_gpu_wait": true
+  },
+  "cpu_measurement": "Mean main drawing-thread kernel plus user time from GetThreadTimes(GetCurrentThread()) across draw-hook intervals; coarse accounting, excludes workers",
+  "captures": [
+    {
+      "mode": "standard-before",
+      "sequence": 1791883024,
+      "pairs": 360,
+      "mean_pair_ms": 22.32152222222222,
+      "application_fps": 44.79981203989971,
+      "pair_p95_ms": 23.816,
+      "coarse_draw_thread_cpu_ms": 15.364583333333334,
+      "right_hook_under_0_1_ms_pairs": 0,
+      "mean_stages_ms": {
+        "gap": 1.183888888888889,
+        "begin": 3.5127694444444444,
+        "left": 8.351925,
+        "right": 7.977047222222223,
+        "end": 1.2958916666666667,
+        "wait_frame": 3.1650944444444447,
+        "gpu_fence": 0.0,
+        "submit": 1.2600194444444444
+      }
+    },
+    {
+      "mode": "single-pass",
+      "sequence": 1791883034,
+      "pairs": 360,
+      "mean_pair_ms": 32.776177777777775,
+      "application_fps": 30.50996387620277,
+      "pair_p95_ms": 34.415,
+      "coarse_draw_thread_cpu_ms": 15.104166666666666,
+      "right_hook_under_0_1_ms_pairs": 360,
+      "mean_stages_ms": {
+        "gap": 1.2912861111111111,
+        "begin": 7.166480555555555,
+        "left": 22.89197777777778,
+        "right": 0.0011555555555555555,
+        "end": 1.4252777777777779,
+        "wait_frame": 6.735766666666667,
+        "gpu_fence": 0.0,
+        "submit": 1.385422222222222
+      }
+    },
+    {
+      "mode": "standard-after",
+      "sequence": 1791883064,
+      "pairs": 360,
+      "mean_pair_ms": 22.332244444444445,
+      "application_fps": 44.77830262371001,
+      "pair_p95_ms": 24.144,
+      "coarse_draw_thread_cpu_ms": 14.62673611111111,
+      "right_hook_under_0_1_ms_pairs": 0,
+      "mean_stages_ms": {
+        "gap": 1.2240916666666666,
+        "begin": 4.259944444444445,
+        "left": 7.965908333333333,
+        "right": 7.580394444444445,
+        "end": 1.3019055555555556,
+        "wait_frame": 3.829972222222222,
+        "gpu_fence": 0.0,
+        "submit": 1.266613888888889
+      }
+    }
+  ],
+  "first_actual_candidate_pair": {
+    "native_batches": 5,
+    "camera_ranges": 5,
+    "physical_camera_records": 10,
+    "texture_boundary_restorations": 1,
+    "observed_bindings": 64,
+    "camera_roots": 4,
+    "second_engine_draw_skipped": true
+  },
+  "candidate_quality_window": {
+    "active_seconds": 30.04699999999866,
+    "replay_fallback_reported_during_window": false,
+    "headset_feedback": "Normal, except water reflections",
+    "tester_told_immediately_after_measurement_finished": true
+  },
+  "activation_observations_outside_candidate_window": {
+    "startup_guard_after_pair": 3,
+    "startup_guard_reason": "resource retired during capture",
+    "fresh_actual_replay_after_restoring_saved_selection": true,
+    "scope": "Short observation, not general startup or gameplay stability validation"
+  },
+  "preceding_candidate_context": {
+    "implementation_commit": "bd810a6889cdc2461f6817d43256c47ead0711bf",
+    "single_pass_application_fps": 29.994850883931594,
+    "single_pass_coarse_draw_thread_cpu_ms": 14.713541666666666,
+    "interpretation": "Separate runs combining sparse reads and broader per-list validation do not isolate either change or establish a repeatable improvement"
+  },
+  "validation": {
+    "native_checks_passed_before_deployment": 54,
+    "isolated_staged_dll_load_unload_passed": true,
+    "raw_frame_rows_recomputed": 1080,
+    "independent_raw_frame_and_settings_review_passed": true,
+    "frames_1_through_360_verified_per_mode": true,
+    "installed_hash_matches_deployment_receipt": true,
+    "nonmanaged_ini_and_five_managed_controls_match_saved_values": true,
+    "instruction_or_stack_sampling_during_comparison": false
+  },
+  "cleanup": {
+    "saved_manual_selection_restored": "1",
+    "temporary_profiling_controls_restored": true
+  },
+  "limits": [
+    "No phase 2 FPS advantage over Standard or fix for issue 20.",
+    "FPS is 1000 / mean stereo-pair duration, not headset refresh or compositor FPS.",
+    "Coarse draw-thread CPU and stage timings do not isolate callbacks, driver execution, workers or GPU execution.",
+    "The gpu_fence column measures transport waiting, not the synchronous replay executor private waits; GPU timestamp queries were disabled.",
+    "A single comparison does not establish repeatable small differences against the preceding build.",
+    "Water reflections remain incorrect; the left-camera shader hypothesis is unconfirmed.",
+    "Startup retirement fallback remains; no complete gameplay, effects or transition coverage.",
+    "GPU-owned constants remain a standalone fixture, not production integration.",
+    "No Battle.net replay gameplay or RTX 5080 reporter validation."
+  ]
+}

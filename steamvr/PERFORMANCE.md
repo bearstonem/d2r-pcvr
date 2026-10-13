@@ -2,6 +2,11 @@
 
 ## Manual single-pass renderer candidate: performance regression and reported water-reflection artifact
 
+Latest matched headset result (`bbe3e98`): **44.80 / 30.51 / 44.78 application
+FPS** for Standard / Single pass / Standard. All candidate pairs skipped the
+second engine draw; water reflections still looked wrong. See the
+[sparse-read comparison](#sparse-read-renderer-matched-headset-comparison).
+
 VR settings > Video > Stereo rendering selects **Standard** or experimental
 **Single pass** (`[stereo] replay_right=1`), applied live without restarting.
 Standard is the default. Single pass captures the left engine draw's native batches, renders and
@@ -380,12 +385,42 @@ alias, and preserve original rendering through fallback/reset/mode changes.
 Closed lists cannot have their recorded GPU addresses changed at Present.
 Other borrowed resources still require final completion and lifetime guards.
 The installed synchronous architecture is not made asynchronous by this test.
-No headset image, water-reflection fix or new game FPS result is claimed for
-this follow-up. Candidate `bbe3e98` is installed for the next manual session;
-the game remains closed. All 115 saved-game/video files and non-managed INI
-settings match the deployment backup, and temporary controls were restored,
-including the user's saved manual Single pass selection.
+At deployment, all 115 saved-game/video files and non-managed INI settings
+matched the backup, and temporary controls were restored, including the user's
+saved manual Single pass selection. The subsequent headset comparison follows.
 [Sanitized headless checks and synthetic copy measurements](evidence/2026-10-13-phase2-camera-sparse-headless.json).
+
+### Sparse-read renderer: matched headset comparison
+
+Candidate `bbe3e98` was then tested with the same offline character, spot and
+view confirmed by the tester, at 100% scene scale and two terrain rings. The
+installed DLL hash matched the deployment receipt. Each mode contains 360
+stereo pairs; Single pass stayed active for a 30.047-second quality window.
+
+| Mode | Mean pair ms | Application FPS | Pair p95 ms | Coarse draw-thread CPU ms |
+| --- | ---: | ---: | ---: | ---: |
+| Standard before | 22.322 | 44.80 | 23.816 | 15.365 |
+| Single pass | 32.776 | 30.51 | 34.415 | 15.104 |
+| Standard after | 22.332 | 44.78 | 24.144 | 14.627 |
+
+All 360 candidate pairs skipped the second engine draw; neither Standard
+capture did. The tester reported normal eyes, tracking and controls except
+for water reflections. No replay fallback occurred during the candidate
+window. Startup again stopped at pair 3 with `resource retired during capture`,
+before the comparison; restoring the saved manual selection afterward logged
+a fresh actual replay. This short run does not establish activation or gameplay
+stability, and the reflection shader explanation remains unconfirmed.
+
+Single pass remains about 32% slower than Standard. Its preceding result was
+29.99 FPS with 14.714 ms coarse draw-thread CPU, versus 30.51 FPS and 15.104 ms
+here. Separate runs combining sparse reads with broader per-list validation do
+not isolate either change or establish a repeatable gain. The synthetic mapped
+copy savings did not translate into the needed application throughput. No
+instruction or stack sampling overlapped this comparison. Temporary profiling
+controls and the saved Single pass selection were restored; the tester was
+told immediately when measurement ended. The GPU-owned-constant fixture remains
+separate from the installed renderer and has no game performance result.
+[Sanitized sparse-read comparison](evidence/2026-10-13-phase2-camera-sparse-comparison.json).
 
 ## Phase 2 baseline, October 12 evening
 
