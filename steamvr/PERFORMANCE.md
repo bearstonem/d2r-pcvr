@@ -26,9 +26,13 @@ The mode is selected manually. It does not read graphics JSON, enumerate
 foreign effects, or continuously decide whether to opt in. Test with symmetric
 projection, fixed foveation, AA off or FXAA, DLSS/dynamic resolution off, and no
 extra ReShade effects. Native menus and non-first-person views use Standard.
-Standard disables the owned native detours and clears replay tracking. Public
-callbacks remain registered for safe live switching and return immediately
-while inactive. Enabling primes native recording generations for two frames.
+Standard disables the owned native detours and clears frame replay tracking.
+The high-frequency ReShade descriptor callback is not registered: camera CBVs
+are captured by native hooks only when Single pass is selected. Upload-buffer
+address ranges are cataloged at resource creation/destruction for live enabling;
+this performs no per-draw lookup or resource retention in Standard. Other public
+callbacks return immediately while inactive. Enabling primes native recording
+generations for two frames.
 Camera discovery is bounded to 64 unique bindings once per activation, then
 retains camera root/record offsets. Subsequent frames update those records;
 there is no unrestricted search through thousands of object bindings. Native
@@ -53,9 +57,16 @@ The first prototype's live trial did not activate replay. Its 360-pair
 Standard-mode capture measured 33.480 ms / 29.87 FPS while native replay
 bookkeeping was still running. There is no candidate FPS result from that
 trial, and it cannot establish a regression against a historical scene.
-This prompted the manual-mode and inactive-path corrections above. A matched
-comparison with the revised build, plus headset image/controls verification,
-is still pending; fixture results do not establish a performance gain.
+The manual-switch follow-up captured 360 Standard pairs at 33.428 ms / 29.92
+FPS, then stopped before replay with `texture state chain`. Native hooks were
+disabled in Standard, but the registered ReShade descriptor callback still
+caused GPU-address resolution before returning. The next correction removes
+that callback entirely and models copy-queue texture decay at native batch
+boundaries. The private GPU fixture now verifies that decay followed by a
+direct-queue transition, including byte-identical replay. Its root-CBV fixture
+checks graphics/compute capture and no capture in Standard. Both corrections
+pass the 50 native checks. A matched live comparison and headset verification
+remain pending; fixture results do not establish a performance gain.
 
 ## Phase 2 baseline, October 12 evening
 

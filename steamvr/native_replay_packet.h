@@ -22,6 +22,8 @@ struct ReplayPacket {
 // synchronous execution before returning Present prevents next-frame reuse.
 // This does not provide an asynchronous resource/descriptor lifetime lease.
 void EnableReplayPackets()noexcept;
+using RootCbvFn=void(*)(uint64_t list,uint64_t signature,uint32_t parameter,uint64_t gpuAddress);
+void SetRootCbvObserver(RootCbvFn)noexcept;
 bool SnapshotReplay(ReplayPacket&)noexcept;
 const char* ReplayPacketFailure()noexcept;
 // Excludes foreign native queue/list/allocator/barrier mutation until the

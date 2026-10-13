@@ -19,6 +19,7 @@ using namespace reshade::api;
 using Microsoft::WRL::ComPtr;
 // Manual eye/effect setup reenters our camera and resource callbacks.
 NativeRecursiveMutex mutex;
+NativeRecursiveMutex uploadMutex;
 std::atomic<bool> requested{false},collecting{false};
 std::atomic<bool> running{false};
 std::atomic<unsigned> configuration{0};
@@ -37,12 +38,18 @@ std::map<uint64_t,std::map<std::pair<uint64_t,uint64_t>,Binding>> bindings;
 std::map<CameraKey,std::vector<size_t>> cameraKeys;
 std::set<std::pair<uint64_t,uint64_t>> seenBindings;
 std::map<std::pair<uint64_t,uint64_t>,Probe> probes;
+// Resource creation/destruction only, never per-draw work in Standard. Borrow
+// handles until an active pair retains its camera ranges; do not prolong game
+// upload allocations while the experimental mode is off.
+struct Upload {resource buffer;uint64_t size;};
+std::map<uint64_t,Upload> uploads;
+std::map<uint64_t,uint64_t> uploadAddresses;
 struct Depth {ComPtr<ID3D12Resource> resource;unsigned binds=0;};
 std::map<uint64_t,Depth> depths;
 resource_view rtv{},rtvSrgb{};resource target{};reshade::api::device* apiDevice=nullptr;
 void Fallback(const char* reason){
     ++fallbacks;failed=true;status="Unavailable";
-    char line[240];std::snprintf(line,sizeof line,"Stereo replay: stopped after pair %u: %s; Standard rendering restored; select Standard then Single pass to retry",pairs,reason);logging::Write(line);
+    char line[512];std::snprintf(line,sizeof line,"Stereo replay: stopped after pair %u: %s; Standard rendering restored; select Standard then Single pass to retry",pairs,reason);logging::Write(line);
 }
 bool D3D12(reshade::api::device* d){return d&&d->get_api()==device_api::d3d12;}
 template<class T> uint64_t Id(T* p){return reinterpret_cast<uint64_t>(p);}
@@ -51,32 +58,42 @@ void InitQueue(command_queue* q){if(running.load()&&D3D12(q->get_device()))nativ
 void InitList(command_list* cl){if(running.load()&&D3D12(cl->get_device()))nativecapture::ObserveList(reinterpret_cast<ID3D12GraphicsCommandList*>(cl->get_native()));}
 void DestroyList(command_list* cl){if(!running.load()||!D3D12(cl->get_device()))return;nativecapture::ForgetList(cl->get_native());std::lock_guard lock(mutex);bindings.erase(cl->get_native());}
 void ResetList(command_list* cl){if(!running.load()||!D3D12(cl->get_device()))return;InitList(cl);std::lock_guard lock(mutex);bindings.erase(cl->get_native());}
-void InitResource(reshade::api::device* d,const resource_desc&,const subresource_data*,resource_usage state,resource r){
-    if(!running.load()||!D3D12(d))return;
+void InitResource(reshade::api::device* d,const resource_desc& desc,const subresource_data*,resource_usage state,resource r){
+    if(!D3D12(d))return;
+    if(desc.type==resource_type::buffer&&desc.heap==memory_heap::upload){
+        const auto address=reinterpret_cast<ID3D12Resource*>(r.handle)->GetGPUVirtualAddress();
+        std::lock_guard lock(uploadMutex);if(address&&uploads.size()<8192){uploads[address]={r,desc.buffer.size};uploadAddresses[r.handle]=address;}
+    }
+    if(!running.load())return;
     uint32_t native=uint32_t(state);
     if(state==resource_usage::general||state==resource_usage::present)native=D3D12_RESOURCE_STATE_COMMON;
     else if(native&uint32_t(resource_usage::constant_buffer))native=(native&~uint32_t(resource_usage::constant_buffer))|D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
     nativecapture::InitialResourceState(reinterpret_cast<ID3D12Resource*>(r.handle),D3D12_RESOURCE_STATES(native));
 }
-void DestroyResource(reshade::api::device* d,resource r){if(!running.load()||!D3D12(d))return;nativecapture::ForgetResourceState(reinterpret_cast<ID3D12Resource*>(r.handle));if(collecting.load()){std::lock_guard lock(mutex);invalid=true;}}
+void DestroyResource(reshade::api::device* d,resource r){
+    if(!D3D12(d))return;
+    {std::lock_guard lock(uploadMutex);const auto found=uploadAddresses.find(r.handle);if(found!=uploadAddresses.end()){uploads.erase(found->second);uploadAddresses.erase(found);}}
+    if(!running.load())return;
+    nativecapture::ForgetResourceState(reinterpret_cast<ID3D12Resource*>(r.handle));if(collecting.load()){std::lock_guard lock(mutex);invalid=true;}
+}
 void Runtime(effect_runtime* rt){std::lock_guard lock(mutex);runtime=rt;}
 void DestroyRuntime(effect_runtime* rt){std::lock_guard lock(mutex);if(runtime==rt){runtime=nullptr;warmup=0;}}
-void Push(command_list* cl,shader_stage,pipeline_layout layout,uint32_t parameter,const descriptor_table_update& update){
-    if(!collecting.load()||update.type!=descriptor_type::constant_buffer||!D3D12(cl->get_device()))return;
-    std::lock_guard lock(mutex);const auto* ranges=static_cast<const buffer_range*>(update.descriptors);
-    const CameraKey cameraKey{layout.handle,parameter};
+void Push(uint64_t listId,uint64_t signature,uint32_t parameter,uint64_t address){
+    if(!collecting.load())return;
+    std::lock_guard lock(mutex);const CameraKey cameraKey{signature,parameter};
     if(layoutResolved&&!cameraKeys.contains(cameraKey))return;
-    if(!ranges||update.count>64){invalid=true;return;}
-    auto& list=bindings[cl->get_native()];
-    for(unsigned i=0;i<update.count;++i){const auto& b=ranges[i];
-        // Discovery is bounded once on enable. Established camera roots retain
-        // only a bounded set of unique ranges, rather than all draw CBVs.
-        const auto key=std::pair{b.buffer.handle,b.offset};
-        if(seenBindings.contains(key))continue;
-        if(bindingCount>=(layoutResolved?512u:64u)){if(layoutResolved)invalid=true;return;}
-        seenBindings.insert(key);++bindingCount;
-        list.try_emplace(std::pair{b.buffer.handle,b.offset},Binding{b.buffer,b.offset,b.size,cameraKey});
+    buffer_range b{};
+    {std::lock_guard uploadLock(uploadMutex);auto found=uploads.upper_bound(address);if(found==uploads.begin())return;--found;
+        if(address-found->first>=found->second.size)return;
+        b={found->second.buffer,address-found->first,found->second.size-(address-found->first)};
     }
+    // Discovery is bounded once on enable. Established camera roots retain
+    // only a bounded set of unique ranges, rather than all draw CBVs.
+    const auto key=std::pair{b.buffer.handle,b.offset};
+    if(seenBindings.contains(key))return;
+    if(bindingCount>=(layoutResolved?512u:64u)){if(layoutResolved)invalid=true;return;}
+    seenBindings.insert(key);++bindingCount;
+    bindings[listId].try_emplace(key,Binding{b.buffer,b.offset,b.size,cameraKey});
 }
 void Execute(command_queue* q,command_list* cl){
     if(!running.load())return;InitQueue(q);InitList(cl);if(!collecting.load()||!D3D12(q->get_device()))return;
@@ -218,7 +235,7 @@ void Register(bool enabled,EyeFn eye,EffectsFn effects){
     reshade::register_event<reshade::addon_event::destroy_resource>(&DestroyResource);
     reshade::register_event<reshade::addon_event::init_effect_runtime>(&Runtime);
     reshade::register_event<reshade::addon_event::destroy_effect_runtime>(&DestroyRuntime);
-    reshade::register_event<reshade::addon_event::push_descriptors>(&Push);
+    nativecapture::SetRootCbvObserver(&Push);
     reshade::register_event<reshade::addon_event::execute_command_list>(&Execute);
     reshade::register_event<reshade::addon_event::bind_render_targets_and_depth_stencil>(&BindDepth);
     reshade::register_event<reshade::addon_event::present>(&Present);

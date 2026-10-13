@@ -38,6 +38,29 @@ int main(){
         else assert(!std::memcmp(original,pixel,4));
         D3D12_RANGE none{};readback->Unmap(0,&none);};
     check();assert(gpu::Execute(packet));check();assert(gpu::Execute(packet));check();
+    audit::EndReplayLease();
+    // A copy batch leaves an explicitly transitioned texture in COMMON through
+    // implicit decay. The following direct batch legitimately starts there.
+    assert(SUCCEEDED(allocator->Reset())&&SUCCEEDED(list->Reset(allocator.Get(),nullptr)));
+    b.Flags=D3D12_RESOURCE_BARRIER_FLAG_NONE;b.Transition.StateBefore=D3D12_RESOURCE_STATE_COPY_SOURCE;b.Transition.StateAfter=D3D12_RESOURCE_STATE_COMMON;
+    list->ResourceBarrier(1,&b);assert(SUCCEEDED(list->Close()));queue->ExecuteCommandLists(1,lists);assert(gpu::Complete());
+    ComPtr<ID3D12CommandQueue> copyQueue;qd.Type=D3D12_COMMAND_LIST_TYPE_COPY;
+    assert(SUCCEEDED(device->CreateCommandQueue(&qd,IID_PPV_ARGS(&copyQueue))));audit::ObserveQueue(copyQueue.Get());
+    ComPtr<ID3D12CommandAllocator> copyAllocator;assert(SUCCEEDED(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COPY,IID_PPV_ARGS(&copyAllocator))));
+    ComPtr<ID3D12GraphicsCommandList> copyList;assert(SUCCEEDED(device->CreateCommandList(0,D3D12_COMMAND_LIST_TYPE_COPY,copyAllocator.Get(),nullptr,IID_PPV_ARGS(&copyList))));
+    heap.Type=D3D12_HEAP_TYPE_UPLOAD;ComPtr<ID3D12Resource> upload;
+    assert(SUCCEEDED(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&desc,D3D12_RESOURCE_STATE_GENERIC_READ,nullptr,IID_PPV_ARGS(&upload))));
+    void* mapped=nullptr;D3D12_RANGE none{};assert(SUCCEEDED(upload->Map(0,&none,&mapped)));const unsigned char changed[]{10,20,30,255};std::memcpy(mapped,changed,4);upload->Unmap(0,nullptr);
+    b.Transition.StateBefore=D3D12_RESOURCE_STATE_COMMON;b.Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_DEST;copyList->ResourceBarrier(1,&b);
+    auto uploaded=to;uploaded.pResource=upload.Get();copyList->CopyTextureRegion(&from,0,0,0,&uploaded,nullptr);assert(SUCCEEDED(copyList->Close()));
+    assert(SUCCEEDED(allocator->Reset())&&SUCCEEDED(list->Reset(allocator.Get(),nullptr)));
+    b.Transition.StateBefore=D3D12_RESOURCE_STATE_COMMON;b.Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_SOURCE;list->ResourceBarrier(1,&b);list->CopyTextureRegion(&to,0,0,0,&from,nullptr);assert(SUCCEEDED(list->Close()));
+    ComPtr<ID3D12Fence> fence;assert(SUCCEEDED(device->CreateFence(0,D3D12_FENCE_FLAG_NONE,IID_PPV_ARGS(&fence))));
+    audit::BeginEye(GetCurrentThreadId());ID3D12CommandList* copies[]{copyList.Get()};copyQueue->ExecuteCommandLists(1,copies);
+    assert(SUCCEEDED(copyQueue->Signal(fence.Get(),1))&&SUCCEEDED(queue->Wait(fence.Get(),1)));queue->ExecuteCommandLists(1,lists);audit::SealPresent(true);
+    assert(audit::BeginReplayLease());audit::ReplayPacket copied;assert(audit::SnapshotReplay(copied)&&audit::EndEye(true).DependenciesComplete());
+    assert(copied.batches.size()==2&&copied.states.size()==1&&copied.states[0].first==D3D12_RESOURCE_STATE_COMMON&&copied.states[0].last==D3D12_RESOURCE_STATE_COPY_SOURCE);
+    assert(gpu::Drain(copied));std::memcpy(original,changed,4);check();assert(gpu::Execute(copied));check();assert(gpu::Execute(copied));check();
     audit::EndReplayLease();gpu::Shutdown();audit::Stop();assert(audit::Shutdown());
-    std::puts("Native texture replay: original pixels preserved through two production replays, exact texture state restoration, matched split barriers and completion passed");
+    std::puts("Native texture replay: byte-identical replay, matched split barriers, copy-queue texture decay, direct handoff and exact state restoration passed");
 }

@@ -16,6 +16,9 @@ using Microsoft::WRL::ComPtr;
 namespace audit=framevr::nativecapture;
 using framevr::stereoreplay::PlanStatus;
 namespace {
+unsigned cbvCalls=0;
+uint64_t cbvSignature=0,cbvAddress=0;
+void RootCbv(uint64_t list,uint64_t signature,uint32_t parameter,uint64_t address){assert(list&&signature==cbvSignature&&parameter==0&&address==cbvAddress);++cbvCalls;}
 void Check(HRESULT hr,const char* name) {
     if(FAILED(hr)){std::fprintf(stderr,"%s: %08lx\n",name,(unsigned long)hr);throw std::runtime_error(name);}
 }
@@ -184,10 +187,24 @@ void Print(const audit::Report& r) {
 int main() {
     try {
         audit::EnableReplayPackets();
+        audit::SetRootCbvObserver(&RootCbv);
         Fixture f;
+        // Root descriptors are observed directly only while enabled, avoiding
+        // a permanently registered high-frequency ReShade descriptor callback.
+        D3D12_ROOT_PARAMETER rp{};rp.ParameterType=D3D12_ROOT_PARAMETER_TYPE_CBV;
+        D3D12_ROOT_SIGNATURE_DESC rd{1,&rp,0,nullptr,D3D12_ROOT_SIGNATURE_FLAG_NONE};
+        ComPtr<ID3DBlob> blob;Check(D3D12SerializeRootSignature(&rd,D3D_ROOT_SIGNATURE_VERSION_1,&blob,nullptr),"serialize CBV root");
+        ComPtr<ID3D12RootSignature> signature;Check(f.device->CreateRootSignature(0,blob->GetBufferPointer(),blob->GetBufferSize(),IID_PPV_ARGS(&signature)),"CBV root");
+        ComPtr<ID3D12CommandAllocator> cbvAllocator;Check(f.device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,IID_PPV_ARGS(&cbvAllocator)),"CBV allocator");
+        ComPtr<ID3D12GraphicsCommandList> cbvList;Check(f.device->CreateCommandList(0,D3D12_COMMAND_LIST_TYPE_DIRECT,cbvAllocator.Get(),nullptr,IID_PPV_ARGS(&cbvList)),"CBV list");
+        cbvSignature=reinterpret_cast<uint64_t>(signature.Get());cbvAddress=f.upload->GetGPUVirtualAddress();
+        audit::BeginEye(GetCurrentThreadId());
+        cbvList->SetGraphicsRootSignature(signature.Get());cbvList->SetGraphicsRootConstantBufferView(0,cbvAddress);
+        cbvList->SetComputeRootSignature(signature.Get());cbvList->SetComputeRootConstantBufferView(0,cbvAddress);
+        assert(cbvCalls==2);audit::EndEye();Check(cbvList->Close(),"close CBV list");
         const auto first=f.Chain(1);Print(first);
         assert(first.DependenciesComplete()&&first.batches==3&&first.lists==4&&first.signals==3&&first.waits==2&&first.internalWaits==2);
-        assert(first.retainedAllocators==3&&first.retainedFences==5&&f.Value()==0x11223344);
+        assert(first.retainedAllocators==4&&first.retainedFences==5&&f.Value()==0x11223344);
         // Reset the allocator only after ORIGINAL work completed. The saved
         // recording must become stale between Present and draw return.
         audit::BeginEye(GetCurrentThreadId());f.Submit(0);
@@ -225,6 +242,9 @@ int main() {
         assert(shared.batches==3&&shared.lists==4&&shared.internalWaits==3&&f.Value()==0x55667788);
         audit::Stop();audit::BeginEye(GetCurrentThreadId());
         assert(audit::ActiveHooks()==0&&audit::InstalledHooks()>0);
+        Check(cbvList->Reset(cbvAllocator.Get(),nullptr),"CBV reset while Standard");
+        cbvList->SetGraphicsRootSignature(signature.Get());cbvList->SetGraphicsRootConstantBufferView(0,cbvAddress);
+        Check(cbvList->Close(),"CBV close while Standard");assert(cbvCalls==2);
         Check(f.queues[0].queue->Signal(f.queues[0].fence.Get(),9),"pass-through signal after stop");f.Wait(0,9);
         assert(audit::EndEye().atEnd==PlanStatus::Empty);
         // The in-headset switch can resume existing detours without a restart.
