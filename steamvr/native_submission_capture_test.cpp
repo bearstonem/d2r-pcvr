@@ -158,12 +158,20 @@ struct Fixture {
         Submit(0,copyQueue);Check(copyQueue->Signal(queues[0].fence.Get(),value),"copy signal");
         audit::SealPresent();Wait(2,value);
         if(value==1&&!wrapped){
-            assert(audit::BeginReplayLease());audit::ReplayPacket packet;assert(audit::SnapshotReplay(packet));
+            assert(audit::BeginReplayLease());
+            std::atomic<bool> foreignStarted{false},foreignFinished{false};
+            std::thread foreign([&]{foreignStarted=true;Check(cpuFence->Signal(0),"foreign signal behind replay lease");foreignFinished=true;});
+            while(!foreignStarted.load())Sleep(0);
+            Sleep(20);assert(!foreignFinished.load());
+            // A foreign mutation waits outside the capture; it must not make
+            // SnapshotReplay reject an otherwise complete native recording.
+            audit::ReplayPacket packet;assert(audit::SnapshotReplay(packet));
             const auto report=audit::EndEye();
             assert(packet.batches.size()==3&&packet.batches[0].lists.size()==2&&packet.batches[1].lists.size()==1&&packet.batches[2].lists.size()==1);
             assert(framevr::synchronousgpu::Initialize(queues[2].queue.Get()));
             assert(framevr::synchronousgpu::Drain(packet)&&framevr::synchronousgpu::Execute(packet));
-            assert(Value()==0x11223344);audit::EndReplayLease();return report;
+            assert(Value()==0x11223344&&!foreignFinished.load());audit::EndReplayLease();foreign.join();
+            assert(foreignFinished.load());return report;
         }
         return audit::EndEye();
     }

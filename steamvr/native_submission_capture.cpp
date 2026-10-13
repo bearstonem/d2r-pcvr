@@ -1,6 +1,7 @@
 #include "native_submission_capture.h"
 #include "native_replay_packet.h"
 #include "native_lock.h"
+#include "native_hook_gate.h"
 #include <windows.h>
 #include <d3d12.h>
 #include <wrl/client.h>
@@ -18,11 +19,11 @@ using Microsoft::WRL::ComPtr;
 using namespace stereoreplay;
 constexpr size_t HookSlots=8,AllocatorLimit=4096,FenceLimit=128,QueueLimit=16;
 NativeRecursiveMutex stateMutex;
-NativeMutex hookMutex,executionGate;
-std::atomic<DWORD> leaseOwner{0};
+NativeMutex hookMutex;
+NativeHookGate<> executionGate;
 thread_local unsigned gateDepth=0;
 std::atomic<bool> tracking{false},installAllowed{false};
-std::atomic<uint32_t> invocations{0},queueCalls{0},hookErrors{0},observerFaults{0},capacityFailures{0};
+std::atomic<uint32_t> queueCalls{0},hookErrors{0},observerFaults{0},capacityFailures{0};
 bool started=false,hooksActive=false,eyeOpen=false,wantTrace=false;
 std::atomic<bool> collecting{false};
 bool replayPackets=false;
@@ -55,10 +56,9 @@ template<class Fn> void Guard(Fn&& fn)noexcept {
     try{fn();}catch(...){observerFaults.fetch_add(1);}
 }
 struct Invocation {
-    bool queue,topLevel=true,gateHeld=false;
-    explicit Invocation(bool isQueue=false):queue(isQueue) {
-        if(gateDepth++==0&&tracking.load()&&replayPackets&&leaseOwner.load()!=GetCurrentThreadId()){executionGate.lock_shared();gateHeld=true;}
-        invocations.fetch_add(1);
+    NativeHookGate<>::Call gate;
+    bool queue,topLevel=true;
+    explicit Invocation(bool isQueue=false):gate(executionGate,gateDepth++==0),queue(isQueue) {
         if(queue) {
             topLevel=queueDepth++==0;
             const auto before=topLevel?queueCalls.fetch_add(1):0;
@@ -68,7 +68,7 @@ struct Invocation {
             }});
         }
     }
-    ~Invocation(){if(queue){--queueDepth;if(topLevel)queueCalls.fetch_sub(1);}invocations.fetch_sub(1);--gateDepth;if(gateHeld)executionGate.unlock_shared();}
+    ~Invocation(){if(queue){--queueDepth;if(topLevel)queueCalls.fetch_sub(1);}--gateDepth;}
 };
 using ExecuteFn=void(STDMETHODCALLTYPE*)(ID3D12CommandQueue*,UINT,ID3D12CommandList*const*);
 using QueueFenceFn=HRESULT(STDMETHODCALLTYPE*)(ID3D12CommandQueue*,ID3D12Fence*,UINT64);
@@ -398,7 +398,7 @@ void BeginEye(uint32_t owningThread,bool diagnosticTrace)noexcept {
     if(!tracking.load())return;
     Guard([&]{std::lock_guard lock(stateMutex);if(!tracking.load())return;
         collecting=false;capture=Capture{};report={};packetLists.clear();packetQueues.clear();ownerThread=owningThread;eyeOpen=true;wantTrace=diagnosticTrace;
-        if(invocations.load())++report.boundaryCalls;
+        if(executionGate.HasActiveCalls())++report.boundaryCalls;
         for(const auto& [id,fence]:fences)capture.FenceAtStart(id,fence->GetCompletedValue());
         collecting=true;
     });
@@ -406,7 +406,7 @@ void BeginEye(uint32_t owningThread,bool diagnosticTrace)noexcept {
 void SealPresent(bool renderingOnly)noexcept {
     if(!tracking.load())return;
     Guard([&]{std::lock_guard lock(stateMutex);if(!eyeOpen||report.sealed)return;
-        collecting=false;if(invocations.load())++report.boundaryCalls;
+        collecting=false;if(executionGate.HasActiveCalls())++report.boundaryCalls;
         if(!renderingOnly)report.atPresent=capture.Plan(recordings).status;report.sealed=true;
     });
 }
@@ -414,7 +414,7 @@ Report EndEye(bool renderingOnly)noexcept {
     Report result;
     if(!tracking.load())return result;
     Guard([&]{std::lock_guard lock(stateMutex);if(!eyeOpen)return;
-        collecting=false;if(invocations.load())++report.boundaryCalls;
+        collecting=false;if(executionGate.HasActiveCalls())++report.boundaryCalls;
         if(!renderingOnly){
             const auto plan=capture.Plan(recordings);report.atEnd=plan.status;
             report.internalWaits=plan.internalWaits;report.externalWaits=plan.externalWaits;
@@ -439,10 +439,10 @@ void Stop()noexcept {
 void EnableReplayPackets()noexcept {Guard([&]{std::lock_guard lock(stateMutex);replayPackets=true;});}
 void SetRootCbvObserver(RootCbvFn observer)noexcept {Guard([&]{std::lock_guard lock(stateMutex);rootCbvObserver=observer;});}
 bool BeginReplayLease()noexcept {
-    if(gateDepth||leaseOwner.load()==GetCurrentThreadId())return false;
-    executionGate.lock();leaseOwner=GetCurrentThreadId();return true;
+    if(gateDepth)return false;
+    return executionGate.BeginExclusive();
 }
-void EndReplayLease()noexcept {if(leaseOwner.load()==GetCurrentThreadId()){leaseOwner=0;executionGate.unlock();}}
+void EndReplayLease()noexcept {executionGate.EndExclusive();}
 void InitialResourceState(ID3D12Resource* resource,D3D12_RESOURCE_STATES state)noexcept {
     if(tracking.load())Guard([&]{std::lock_guard lock(stateMutex);if(replayPackets&&resourceStates.size()<65536)resourceStates[Id(resource)][D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES]=state;});
 }
@@ -461,7 +461,7 @@ bool SnapshotReplay(ReplayPacket& output)noexcept {
         const auto plan=capture.Plan(recordings);report.atPresent=plan.status;ReadGlobals();
         packetFailure="dependency/lifetime metadata incomplete";
         if(!replayPackets||!report.sealed||!plan.Ready()||report.unknownLists||report.queueOverlap||report.foreignCalls||
-           report.boundaryCalls||report.apiFailures||report.cpuSignals||report.hookErrors||report.observerFaults||report.capacityFailures||invocations.load())return;
+           report.boundaryCalls||report.apiFailures||report.cpuSignals||report.hookErrors||report.observerFaults||report.capacityFailures||executionGate.HasActiveCalls())return;
         ReplayPacket packet;
         struct Metadata {D3D12_RESOURCE_DESC desc;UINT planes=0;};
         std::map<uint64_t,Metadata> metadata;
@@ -548,8 +548,8 @@ bool Shutdown()noexcept {
         std::vector<void*> targets;{std::lock_guard lock(hookMutex);targets=ownedHooks;}
         for(void* target:targets){const auto hr=MH_DisableHook(target);if(hr!=MH_OK&&hr!=MH_ERROR_DISABLED)removed=false;}
         const ULONGLONG deadline=GetTickCount64()+1000;
-        while(invocations.load()&&GetTickCount64()<deadline)Sleep(1);
-        if(invocations.load()||!removed){PinIfUnsafe();return false;}
+        while(executionGate.HasInFlightCalls()&&GetTickCount64()<deadline)Sleep(1);
+        if(executionGate.HasInFlightCalls()||!removed){PinIfUnsafe();return false;}
         std::lock_guard lock(hookMutex);
         for(void* target:targets)if(MH_RemoveHook(target)!=MH_OK)removed=false;
         if(removed)ownedHooks.clear();else PinIfUnsafe();
