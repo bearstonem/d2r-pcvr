@@ -29,7 +29,10 @@ use TCP/IP hosting/joining or online characters for development testing.
    slot editor. This is an overpowered test preset, not a legal progression build.
 6. Make room in the inventory, select **Combat gear**, and equip the items using
    **Inventory**. Item creation is an all-or-nothing SDK transaction: an inventory
-   capacity failure leaves existing items intact. Nothing is automatically removed
+   capacity failure leaves existing items intact. The installed loader requires
+   an exchange input, so the request creates a temporary inventory potion and
+   consumes it in the kit transaction. A failed exchange removes only that
+   generated potion. Nothing from your preexisting inventory is automatically removed
    or unequipped. Repeated grants add another kit if space permits.
 7. Select **Arcane Sanctuary**. Other choices are Rogue Encampment, Lut Gholein,
    River of Flame and Chaos Sanctuary. Travel does not intentionally unlock quests

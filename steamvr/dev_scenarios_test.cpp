@@ -8,8 +8,9 @@ using namespace D2RL;
 using namespace framevr::interaction;
 static Snapshot state;
 static uint64_t local=7;
-static bool menu=false,failItems=false,failCommand=false,failQueue=false;
-static int itemCalls=0;
+static bool menu=false,failItems=false,failCommand=false,failQueue=false,failToken=false,tokenLive=false;
+static int itemCalls=0,tokenCreates=0,tokenRemoves=0;
+static constexpr ItemHandle Token=9001;
 static std::vector<std::string> commands;
 struct Task {Threads::Callback call;void* token;bool game;};
 static std::vector<Task> tasks;
@@ -23,15 +24,29 @@ static Threads::Result Queue(Threads::Callback callback,void* data,bool game) {
 static Threads::Result __cdecl Ui(const PluginContext*,Threads::Callback c,void* d) noexcept {return Queue(c,d,false);}
 static Threads::Result __cdecl Game(const PluginContext*,Threads::Callback c,void* d) noexcept {return Queue(c,d,true);}
 static bool __fastcall Execute(const char* text) noexcept {commands.emplace_back(text);return !failCommand;}
+static Items::Result __cdecl CreateToken(const PluginContext*,PlayerHandle player,const Items::ItemCreateSpec* s,ItemHandle* out) noexcept {
+    ++tokenCreates;assert(!tokenLive&&player==local);
+    assert(s->code==Items::MakeItemCode("hp1")&&s->quality==Items::Quality::Normal);
+    assert(s->destination.container==Items::ItemContainer::Inventory&&s->itemLevel==1);
+    if(failToken)return Items::Result::PolicyRejected;
+    tokenLive=true;*out=Token;return Items::Result::Success;
+}
+static Items::Result __cdecl RemoveToken(const PluginContext*,PlayerHandle player,ItemHandle item,Items::SocketedItemPolicy policy) noexcept {
+    assert(player==local&&item==Token&&tokenLive&&policy==Items::SocketedItemPolicy::RejectIfNotEmpty);
+    ++tokenRemoves;tokenLive=false;return Items::Result::Success;
+}
 static Items::Result __cdecl ItemsCall(const PluginContext*,const Items::Transaction* t,Items::TransactionResult* r) noexcept {
-    ++itemCalls;assert(t->inputCount==0&&t->inputs==nullptr&&t->player==local&&t->outputCount==10);
+    ++itemCalls;assert(t->player==local&&t->outputCount==10);
+    // Match the installed loader: zero-input exchanges are InvalidArgument.
+    if(!t->inputCount||!t->inputs)return Items::Result::InvalidArgument;
+    assert(t->inputCount==1&&t->inputs[0].item==Token&&t->inputs[0].quantity==1&&tokenLive);
     for(unsigned i=0;i<t->outputCount;++i) {
         const auto& s=t->outputs[i];assert(s.quality==Items::Quality::Unique&&s.itemLevel==99);
         assert(s.destination.container==Items::ItemContainer::Inventory);
         assert(s.quantity==Items::DefaultValue&&s.durability==Items::DefaultValue);
     }
     if(failItems)return Items::Result::PolicyRejected;
-    r->outputCount=t->outputCount;return Items::Result::Success;
+    tokenLive=false;r->outputCount=t->outputCount;return Items::Result::Success;
 }
 static framevr::interaction::Request Make(int index,uint64_t sequence=1) {
     state.at=GetTickCount64();return {Action::Developer,sequence,local,state.at,index};
@@ -63,6 +78,7 @@ int main(){
     assert(!ValidChoice(-1)&&!ValidChoice(8)&&ValidChoice(3));
     ThreadService threadService{};threadService.runOnUiThread=Ui;threadService.runOnGameThread=Game;
     ItemService itemService{};itemService.executeTransaction=ItemsCall;
+    itemService.createItem=CreateToken;itemService.destroyItem=RemoveToken;
     devscenarios::threads=&threadService;devscenarios::items=&itemService;
     devscenarios::execute=Execute;
     state.session=local;state.developer=state.devPaladin=state.actionKnown=true;state.actionMode=1;
@@ -73,8 +89,10 @@ int main(){
     assert(devscenarios::Status().result==Result::Dispatched);
     devscenarios::Request(Make(1));assert(tasks.back().game);Run(1);
     assert(itemCalls==1&&devscenarios::Status().result==Result::Applied);
+    assert(tokenCreates==1&&tokenRemoves==0&&!tokenLive); // exchange consumed its input
     failItems=true;devscenarios::Request(Make(2));Run(2);
     assert(itemCalls==2&&devscenarios::Status().result==Result::KitRefused);failItems=false;
+    assert(tokenCreates==2&&tokenRemoves==1&&!tokenLive); // rejected kit left no temporary item
     devscenarios::Request(Make(3));auto old=tasks.size()-1;devscenarios::Cancel();
     devscenarios::Request(Make(4,2));auto next=tasks.size()-1;
     Run(old);assert(commands.size()==1&&devscenarios::Status().result==Result::Pending);
@@ -110,5 +128,9 @@ int main(){
     failQueue=true;devscenarios::Request(Make(1));assert(devscenarios::Status().result==Result::Refused);
     failQueue=false;devscenarios::Request(Make(1));assert(devscenarios::Status().result==Result::Pending);
     devscenarios::Cancel();Run(tasks.size()-1);assert(devscenarios::Status().sequence==0);
+    failToken=true;const auto transactions=itemCalls,removals=tokenRemoves;
+    devscenarios::Request(Make(1));Run(tasks.size()-1);
+    assert(devscenarios::Status().result==Result::KitRefused&&!tokenLive);
+    assert(itemCalls==transactions&&tokenRemoves==removals); // no exchange/deletion when input creation fails
     std::puts("Development backend: isolation, queue routing, cancellation, stale sessions, kit transactions and dispatch results passed");
 }

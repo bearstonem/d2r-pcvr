@@ -267,7 +267,7 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
         SetTextColor(dc,RGB(235,218,181));SelectObject(dc,shortcutFont);
         text(o.result==Result::Pending?"Working...":o.result==Result::Applied?"Kit added to inventory. Equip it using the native inventory screen.":
              o.result==Result::Dispatched?"Commands sent. Check character stats / destination in game.":
-             o.result==Result::KitRefused?"Kit could not be added. Make room in inventory; see the development log.":
+             o.result==Result::KitRefused?"Kit could not be added. Check inventory space and the development log.":
              o.result==Result::Refused?"Action unavailable. Close native menus and retry; see the development log.":
              "Disposable test saves only. Gear grants preserve your existing items.",{38,628,730,677});
         SelectObject(dc,font);

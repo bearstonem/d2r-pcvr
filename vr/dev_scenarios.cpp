@@ -83,14 +83,14 @@ void __cdecl Commands(const PluginContext*,void* token) noexcept {
     }
     Finish(r,accepted?Result::Dispatched:Result::Refused);
 }
-void __cdecl Gear(const PluginContext*,void* token) noexcept {
-    std::lock_guard lock(mutex);if(reinterpret_cast<uintptr_t>(token)!=ticket)return;scheduled=false;
+void __cdecl Gear(const PluginContext*,void* callbackToken) noexcept {
+    std::lock_guard lock(mutex);if(reinterpret_cast<uintptr_t>(callbackToken)!=ticket)return;scheduled=false;
     const auto r=queued;queued={};if(r.action==Action::None)return;
     // r.session is the SDK handle captured on the UI thread by Collect().
     // getLocalPlayer itself is UI-thread-only; the transaction revalidates this
     // captured handle against the authoritative game on this callback thread.
     const PlayerHandle player=r.session;
-    if(!Valid(r)||!items) {
+    if(!Valid(r)||!items||!items->createItem||!items->destroyItem||!items->executeTransaction) {
         Finish(r,Result::Refused);return;
     }
     const auto& codes=r.index==1?framevr::dev::CombatKit:framevr::dev::CasterKit;
@@ -107,15 +107,37 @@ void __cdecl Gear(const PluginContext*,void* token) noexcept {
         spec.destination.container=Items::ItemContainer::Inventory;
         spec.destination.placement=Items::Placement::Automatic;
     }
+    // D2RLoader 1.3.1's exchange API requires at least one input. Use a newly
+    // created inventory potion as that input, never one of the player's items.
+    // Its cell is available to the output-placement transaction. The successful
+    // exchange consumes it; a failed exchange leaves it for us to remove.
+    Items::ItemCreateSpec tokenSpec{};tokenSpec.structSize=sizeof tokenSpec;
+    tokenSpec.code=Items::MakeItemCode("hp1");tokenSpec.quality=Items::Quality::Normal;
+    tokenSpec.qualityRecordId=Items::RandomQualityRecord;tokenSpec.itemLevel=1;
+    tokenSpec.quantity=tokenSpec.durability=Items::DefaultValue;tokenSpec.stateFlags=Items::ItemStateIdentified;
+    tokenSpec.destination.structSize=sizeof tokenSpec.destination;
+    tokenSpec.destination.container=Items::ItemContainer::Inventory;
+    tokenSpec.destination.placement=Items::Placement::Automatic;
+    ItemHandle token=InvalidItemHandle;
+    const auto created=items->createItem(context,player,&tokenSpec,&token);
+    if(created!=Items::Result::Success||!token) {
+        char line[128];std::snprintf(line,sizeof line,"Frame development: gear exchange input creation failed, SDK result=%u",unsigned(created));
+        framevr::logging::Write(line);Finish(r,Result::KitRefused);return;
+    }
+    const Items::TransactionInput input{token,1,Items::SocketedItemPolicy::RejectIfNotEmpty};
     Items::Transaction transaction{};transaction.structSize=sizeof transaction;
-    transaction.player=player;transaction.outputCount=uint32_t(specs.size());transaction.outputs=specs.data();
+    transaction.player=player;transaction.inputCount=1;transaction.inputs=&input;
+    transaction.outputCount=uint32_t(specs.size());transaction.outputs=specs.data();
     transaction.outputItems=handles.data();transaction.outputCapacity=uint32_t(handles.size());
     Items::TransactionResult result{};result.structSize=sizeof result;
     const auto status=items->executeTransaction(context,&transaction,&result);
     // The SDK rolls back the entire kit when validation or placement fails.
     const bool ok=status==Items::Result::Success&&result.outputCount==specs.size();
     if(!ok) {
-        char line[128];std::snprintf(line,sizeof line,"Frame development: gear transaction refused, SDK result=%u; free inventory space and retry",unsigned(status));
+        // Native rollback preserved the temporary input. Remove only the
+        // exact handle we created above; never enumerate/delete player items.
+        const auto cleanup=items->destroyItem(context,player,token,Items::SocketedItemPolicy::RejectIfNotEmpty);
+        char line[160];std::snprintf(line,sizeof line,"Frame development: gear transaction refused, SDK result=%u; temporary input cleanup=%u",unsigned(status),unsigned(cleanup));
         framevr::logging::Write(line);
     }
     Finish(r,ok?Result::Applied:Result::KitRefused);
