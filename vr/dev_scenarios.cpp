@@ -31,7 +31,9 @@ uintptr_t ticket=0;
 bool Metadata(const PluginContext* ctx) {
     if(!ctx||!ctx->activeMod||!ctx->modDirectory)return false;
     try {
-        const auto path=std::filesystem::path(ctx->modDirectory)/L"pcvr-dev.mpq"/L"modinfo.json";
+        // PluginContext::modDirectory is the mounted .mpq data directory, not
+        // its enclosing mods/<name> folder (observed on D2RLoader 1.3.1).
+        const auto path=std::filesystem::path(ctx->modDirectory)/L"modinfo.json";
         std::ifstream input(path,std::ios::binary);
         std::string text(sizeof(framevr::dev::ModInfo),0);
         input.read(text.data(),text.size());text.resize(size_t(input.gcount()));
@@ -104,7 +106,11 @@ void __cdecl Gear(const PluginContext*,void* token) noexcept {
 }
 }
 void Init(const D2RL::PluginContext* ctx) {
-    context=ctx;enabled=Metadata(ctx);if(!enabled)return;
+    context=ctx;enabled=Metadata(ctx);
+    if(!enabled) {
+        framevr::logging::Write("Frame development: DEV hidden; active mod must be pcvr-dev with matching modinfo.json in the loader's mod data directory");
+        return;
+    }
     if(ctx->QueryService(&threads)!=ServiceQueryResult::Success)threads=nullptr;
     if(ctx->QueryService(&items)!=ServiceQueryResult::Success)items=nullptr;
     if(const auto core=GetModuleHandleW(L"D2RCore.dll"))

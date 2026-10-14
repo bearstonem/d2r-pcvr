@@ -41,6 +41,25 @@ int main(){
     using namespace framevr::dev;
     assert(Isolated(Mod,ModInfo));assert(!Isolated("other",ModInfo));
     assert(!Isolated(Mod,"{\"name\":\"pcvr-dev\",\"savepath\":\"\"}\n"));
+    {
+        // Match the real loader context: modDirectory already ends in .mpq.
+        wchar_t temporary[MAX_PATH]{},name[MAX_PATH]{};
+        assert(GetTempPathW(MAX_PATH,temporary)&&GetTempFileNameW(temporary,L"dev",0,name));
+        const std::filesystem::path root=std::wstring(name)+L"-mod";
+        const auto data=root/L"pcvr-dev.mpq";
+        std::filesystem::create_directories(data);
+        const auto directory=data.wstring();
+        PluginContext ctx{};ctx.activeMod=Mod;ctx.modDirectory=directory.c_str();
+        assert(!devscenarios::Metadata(&ctx)); // missing metadata stays disabled
+        {std::ofstream file(data/L"modinfo.json",std::ios::binary);file<<ModInfo;}
+        assert(devscenarios::Metadata(&ctx));
+        ctx.activeMod="other";assert(!devscenarios::Metadata(&ctx));ctx.activeMod=Mod;
+        {std::ofstream file(data/L"modinfo.json",std::ios::binary);file<<"{\"name\":\"pcvr-dev\",\"savepath\":\"\"}";}
+        assert(!devscenarios::Metadata(&ctx)); // wrong save path stays disabled
+        std::filesystem::remove(data/L"modinfo.json");
+        std::filesystem::remove(data);std::filesystem::remove(root);
+        assert(DeleteFileW(name));
+    }
     assert(!ValidChoice(-1)&&!ValidChoice(8)&&ValidChoice(3));
     ThreadService threadService{};threadService.runOnUiThread=Ui;threadService.runOnGameThread=Game;
     ItemService itemService{};itemService.executeTransaction=ItemsCall;
