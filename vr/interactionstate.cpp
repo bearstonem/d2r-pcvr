@@ -7,6 +7,7 @@
 #include "logging.h"
 #include "native_ui.h"
 #include "native_belt.h"
+#include "dev_scenarios.h"
 namespace gamestate {uint32_t WeaponSet();uint64_t LocalPlayer();bool MenuOpen();}
 namespace gamecmd {bool ExecuteUiCommand(uint32_t);}
 namespace interactionstate {
@@ -60,12 +61,13 @@ Snapshot Collect() {
     s.beltKnown=inventory->forEachInventoryItem(context,player,&filter,&BeltItem,&belt)==Inventory::Result::Success&&!belt.invalid;
     for(auto& b:s.belt)b.known=s.beltKnown;
     nativeui::Capture(s);
+    devscenarios::Capture(s);
     return s;
 }
 void Publish(Snapshot s) {
     std::lock_guard lock(mutex);
     s.revision=snapshot.revision;
-    bool changed=s.session!=snapshot.session||s.activeSet!=snapshot.activeSet||s.equipmentKnown!=snapshot.equipmentKnown||
+    bool changed=s.developer!=snapshot.developer||s.devPaladin!=snapshot.devPaladin||s.session!=snapshot.session||s.activeSet!=snapshot.activeSet||s.equipmentKnown!=snapshot.equipmentKnown||
                  s.sets!=snapshot.sets||s.beltKnown!=snapshot.beltKnown||s.skills!=snapshot.skills||
                  s.catalog!=snapshot.catalog||s.skillCount!=snapshot.skillCount||s.bindingBank!=snapshot.bindingBank||s.bindingsEditable!=snapshot.bindingsEditable||
                  s.vitalsKnown!=snapshot.vitalsKnown||int(s.health)!=int(snapshot.health)||int(s.mana)!=int(snapshot.mana)||
@@ -130,13 +132,16 @@ void __cdecl Apply(const PluginContext*,void*) noexcept {
 }
 }
 void Init(const D2RL::PluginContext* ctx) {
+    devscenarios::Init(ctx);
     nativeui::Init(ctx);
     context=ctx;inventory=Service<D2RL::InventoryService>(ctx);items=Service<D2RL::ItemService>(ctx);threads=Service<D2RL::ThreadService>(ctx);
 }
 void Capture(){Publish(Collect());}
 framevr::interaction::Snapshot Read(){std::lock_guard lock(mutex);return snapshot;}
-framevr::interaction::Reply Status(){std::lock_guard lock(mutex);return reply;}
+framevr::interaction::Reply Status(){const auto dev=devscenarios::Status();if(dev.sequence)return dev;std::lock_guard lock(mutex);return reply;}
 void Request(const framevr::interaction::Request& r) {
+    if(r.action==Action::Developer){devscenarios::Request(r);return;}
+    devscenarios::Cancel();
     if(!threads||!threads->runOnUiThread||r.action==Action::None)return;
     {std::lock_guard lock(mutex);
      if(queued.action!=Action::None||waiting.action!=Action::None||scheduled)return;
@@ -150,5 +155,5 @@ void Request(const framevr::interaction::Request& r) {
         std::lock_guard lock(mutex);queued={};scheduled=false;reply={r.sequence,r.session,Result::Refused};
     }
 }
-void Cancel(){std::lock_guard lock(mutex);++cancelEpoch;queued={};waiting={};reply={};}
+void Cancel(){devscenarios::Cancel();std::lock_guard lock(mutex);++cancelEpoch;queued={};waiting={};reply={};}
 }

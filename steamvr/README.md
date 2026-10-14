@@ -10,6 +10,10 @@ melee after the sRGB correction. Physical Quest 2 remains unverified.
 Work continues on `vr/quest-2-3-support`; see
 [QUEST_TESTING.md](QUEST_TESTING.md). WiVRn remains unverified.
 
+For disposable offline Paladin presets and destination shortcuts, see
+[development scenarios](DEVELOPMENT_SCENARIOS.md). This opt-in build adds a DEV
+wheel tab only in the separate `pcvr-dev` save environment; headset testing is pending.
+
 This branch adds a native OpenXR transport to the MIT-licensed
 [D2R VR camera mod](https://github.com/natpoh/diablo2-vr-port). It reuses its
 first-person camera, body, controller aim, and two scene draws per game update.

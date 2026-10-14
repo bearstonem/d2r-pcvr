@@ -18,6 +18,33 @@ struct Sim {
     Output Step(int count=1){while(count--){in.time+=.02;in.at=1000000+uint64_t(in.time*1000);in.snapshot.at=in.at;out=e.Step(in);}return out;}
 };
 int main(){
+    {
+        Sim s;s.in.wheel=true;s.Step(3);s.in.hover=13;s.in.trigger=1;s.Step();
+        Check(!s.out.developer&&s.out.request.action==Action::None,"retail snapshot cannot open developer page");
+        s.in.snapshot.developer=s.in.snapshot.devPaladin=true;
+        s.in.trigger=0;s.Step();s.in.trigger=1;s.Step();
+        Check(s.out.developer&&s.e.Page()==MenuPage::Developer,"developer footer opens page");
+        Check(!MapWanted(s.in,s.out,s.in.at),"developer page does not capture map");
+        s.in.hover=3;s.in.trigger=0;s.Step();s.in.trigger=1;s.Step();
+        const auto r=s.out.request;
+        Check(r.action==Action::Developer&&r.index==3&&s.out.select==-2,"destination requests native dev action, never casts");
+        Check(s.Step(5).request.action==Action::None,"held trigger cannot repeat destination");
+        s.in.reply={r.sequence,r.session,Result::Dispatched};s.in.trigger=0;s.Step();
+        Check(s.out.result==Result::Dispatched,"dispatch remains distinct from applied");
+        s.in.snapshot.devPaladin=false;s.in.trigger=1;s.Step();
+        Check(s.out.request.action==Action::None,"other class cannot request mutations");
+        s.in.trigger=0;s.Step();s.in.hover=9;s.in.trigger=1;s.Step();
+        Check(!s.out.developer&&!s.out.utility&&!s.out.map,"spells footer leaves dev page");
+        s.in.trigger=0;s.Step();s.in.hover=13;s.in.trigger=1;s.Step();
+        s.in.wheel=false;s.Step();Check(!s.out.developer,"closing wheel resets developer page");
+        const auto tab=FooterBounds(4,MenuPage::Spells,true);
+        Check(WheelCell((tab.left+tab.right)/2,.93f,-1,MenuPage::Spells,0,true)==13,"developer footer hit matches paint bounds");
+        Check(WheelCell(.5f,.45f,-1,MenuPage::Developer,0,true)==-1,"no hidden center spell behind developer page");
+        Check(WheelCell(.25f,.27f,-1,MenuPage::Developer,0,true)==0,"developer rows share painter hit boxes");
+        Check(WheelCell(.25f,.27f,-1,MenuPage::Developer,0,false)==-1,"disabled developer page has no actions");
+        Output o;o.developer=true;auto a=Context(s.in.snapshot,o,true);o.developer=false;
+        Check(a!=Context(s.in.snapshot,o,true),"dev page switch invalidates painted atlas");
+    }
     for(int hand:{0,1})for(float yaw:{0.f,1.2f}) {
         Sim s;s.in.head.q=math::Yaw(yaw);s.Step();
         s.in.hand[hand].p=s.out.belt[0].p;s.in.grip[hand]=1;

@@ -51,6 +51,15 @@ int main(int argc,char** argv) {
     }
     if(argc>3){wchar_t path[32768]{};MultiByteToWideChar(CP_UTF8,0,argv[3],-1,path,32768);icons::Directory(path);}
     Snapshot s;s.session=1;s.equipmentKnown=s.beltKnown=s.vitalsKnown=true;s.activeSet=1;
+    if(argc>2&&!std::strcmp(argv[2],"--developer-check")) {
+        s.developer=s.devPaladin=true;Output o;o.wheel=o.developer=true;o.wheelHand=0;
+        const auto ready=Paint(s,o,-1);o.hover=3;const auto hovered=Paint(s,o,-1);
+        if(ready.empty()||ready==hovered)return 70;
+        s.devPaladin=false;const auto unavailable=Paint(s,o,-1);
+        if(unavailable==hovered)return 71;
+        if(!SavePng(argv[1],hovered,1024,1024))return 72;
+        std::puts("Development preview: page, hover and unavailable state passed");return 0;
+    }
     s.health=74;s.maxHealth=100;s.mana=39;s.maxMana=80;
     s.experience={7,99,15450,14175,22680,true};
     const char* names[]={"Fire Bolt","Raise Skeleton","Corpse Explosion","Teleport","Frozen Armor","Bone Spear","Amplify Damage","Unassigned"};
