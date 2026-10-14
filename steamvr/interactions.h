@@ -145,7 +145,7 @@ inline bool Fresh(const Snapshot& s,uint64_t session,uint64_t now) {
     return session&&s.session==session&&now>=s.at&&now-s.at<=650;
 }
 enum class Action { None, Potion, Equip, Quest, Map, Character, Skills, BindSkill, Developer };
-enum class Result { None, Pending, Applied, Refused, Cancelled, Dispatched };
+enum class Result { None, Pending, Applied, Refused, Cancelled, Dispatched, KitRefused };
 struct Request {
     Action action=Action::None;
     uint64_t sequence=0,session=0,at=0;

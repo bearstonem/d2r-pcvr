@@ -42,10 +42,20 @@ bool Metadata(const PluginContext* ctx) {
 }
 bool Valid(const framevr::interaction::Request& r) {
     const auto s=interactionstate::Read();const auto now=GetTickCount64();
-    return enabled&&r.action==Action::Developer&&framevr::dev::ValidChoice(r.index)&&
+    // PlrMode also has separate town-neutral (5) and town-walk (6) states.
+    // Development preparation must work where a new character starts.
+    const bool idle=s.actionMode==1||s.actionMode==2||s.actionMode==3||s.actionMode==5||s.actionMode==6;
+    const bool valid=enabled&&r.action==Action::Developer&&framevr::dev::ValidChoice(r.index)&&
         Fresh(s,r.session,now)&&s.devPaladin&&s.developer&&r.session==gamestate::LocalPlayer()&&
         now>=r.at&&now-r.at<1000&&!gamestate::MenuOpen()&&s.actionKnown&&
-        (s.actionMode==1||s.actionMode==2||s.actionMode==3);
+        idle;
+    if(!valid) {
+        char line[240];std::snprintf(line,sizeof line,"Frame development: action blocked choice=%d enabled=%d paladin=%d fresh=%d same_session=%d menu=%d mode_known=%d mode=%u request_age_ms=%llu",
+            r.index,int(enabled),int(s.devPaladin),int(Fresh(s,r.session,now)),int(r.session==gamestate::LocalPlayer()),
+            int(gamestate::MenuOpen()),int(s.actionKnown),s.actionMode,(unsigned long long)(now>=r.at?now-r.at:0));
+        framevr::logging::Write(line);
+    }
+    return valid;
 }
 void Finish(const framevr::interaction::Request& r,Result result) {
     reply={r.sequence,r.session,result};
@@ -55,11 +65,17 @@ void Finish(const framevr::interaction::Request& r,Result result) {
 void __cdecl Commands(const PluginContext*,void* token) noexcept {
     std::lock_guard lock(mutex);if(reinterpret_cast<uintptr_t>(token)!=ticket)return;scheduled=false;
     const auto r=queued;queued={};if(r.action==Action::None)return;
-    if(!Valid(r)||!execute){Finish(r,Result::Refused);return;}
+    if(!Valid(r)||!execute){
+        if(!execute)framevr::logging::Write("Frame development: console command export unavailable");
+        Finish(r,Result::Refused);return;
+    }
     bool accepted=true;
     if(r.index==0) {
         for(const auto* command:framevr::dev::Preparation) {
-            if(r.session!=gamestate::LocalPlayer()||!execute(command)){accepted=false;break;}
+            if(r.session!=gamestate::LocalPlayer()||!execute(command)){
+                char line[160];std::snprintf(line,sizeof line,"Frame development: preparation dispatch refused at %s",command);
+                framevr::logging::Write(line);accepted=false;break;
+            }
         }
     } else {
         const auto* command=framevr::dev::Choices[r.index].command;
@@ -102,7 +118,7 @@ void __cdecl Gear(const PluginContext*,void* token) noexcept {
         char line[128];std::snprintf(line,sizeof line,"Frame development: gear transaction refused, SDK result=%u; free inventory space and retry",unsigned(status));
         framevr::logging::Write(line);
     }
-    Finish(r,ok?Result::Applied:Result::Refused);
+    Finish(r,ok?Result::Applied:Result::KitRefused);
 }
 }
 void Init(const D2RL::PluginContext* ctx) {

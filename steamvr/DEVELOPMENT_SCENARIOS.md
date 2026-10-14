@@ -48,7 +48,8 @@ it does not change the Zeal/Smite skill preset.
 The backend is compiled only with `D2RVR_DEVELOPER=ON`. Even that DLL enables the
 tab only when the loader reports the exact `pcvr-dev` mod and its metadata matches
 the generated isolated save path. Actions require a fresh local Paladin snapshot,
-an alive/standing/walking/running character, and no open native menu. Pending
+an alive/standing/walking/running character (including standing or walking in town),
+and no open native menu. Pending
 requests are cancelled on focus/tracking/session changes; old callbacks cannot
 consume a later request. This is not a multiplayer-mode detector: use offline
 local Play only, as required for all game testing in this repository.
@@ -58,6 +59,9 @@ documents `ExecuteConsoleCommand` as **dispatch acceptance**, not gameplay succe
 The UI therefore reports “Commands sent” for preparation/travel. Verify stats and
 the area in game. Gear success means the SDK confirmed the complete inventory
 transaction; SDK failures are logged under `Frame development`.
+Preparation and travel refusals show an action-unavailable message. Only a failed
+gear transaction suggests making room in inventory; preparation does not use
+inventory space. Refused requests log their player mode and readiness checks.
 
 Arcane Sanctuary targets **area 74's native arrival point**, not Horazon's Journal.
 The Summoner's platform must still be found in the generated map. Direct arrival

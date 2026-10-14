@@ -74,7 +74,7 @@ int main(){
     devscenarios::Request(Make(1));assert(tasks.back().game);Run(1);
     assert(itemCalls==1&&devscenarios::Status().result==Result::Applied);
     failItems=true;devscenarios::Request(Make(2));Run(2);
-    assert(itemCalls==2&&devscenarios::Status().result==Result::Refused);failItems=false;
+    assert(itemCalls==2&&devscenarios::Status().result==Result::KitRefused);failItems=false;
     devscenarios::Request(Make(3));auto old=tasks.size()-1;devscenarios::Cancel();
     devscenarios::Request(Make(4,2));auto next=tasks.size()-1;
     Run(old);assert(commands.size()==1&&devscenarios::Status().result==Result::Pending);
@@ -91,6 +91,20 @@ int main(){
         devscenarios::Request(r);assert(tasks.size()==count&&devscenarios::Status().result==Result::Refused);
         state.devPaladin=true;menu=false;state.actionMode=1;
     }
+    // Preparation is available in town and never touches the item service.
+    devscenarios::items=nullptr;
+    for(uint32_t mode:{1u,2u,3u,5u,6u}) {
+        state.actionMode=mode;const auto before=commands.size();
+        devscenarios::Request(Make(0));assert(!tasks.back().game);Run(tasks.size()-1);
+        assert(devscenarios::Status().result==Result::Dispatched);
+        assert(commands.size()==before+std::size(Preparation)&&commands[before]=="cheat level 90");
+        assert(itemCalls==2);
+    }
+    for(uint32_t mode:{0u,4u,7u,17u}) {
+        state.actionMode=mode;const auto before=tasks.size();devscenarios::Request(Make(0));
+        assert(tasks.size()==before&&devscenarios::Status().result==Result::Refused);
+    }
+    devscenarios::items=&itemService;state.actionMode=5;
     failCommand=true;devscenarios::Request(Make(0));const auto before=commands.size();Run(tasks.size()-1);
     assert(commands.size()==before+1&&devscenarios::Status().result==Result::Refused);failCommand=false;
     failQueue=true;devscenarios::Request(Make(1));assert(devscenarios::Status().result==Result::Refused);
