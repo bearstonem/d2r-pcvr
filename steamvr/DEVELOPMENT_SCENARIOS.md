@@ -54,7 +54,11 @@ the generated isolated save path. Actions require a fresh local Paladin snapshot
 an alive/standing/walking/running character (including standing or walking in town),
 and no open native menu. Pending
 requests are cancelled on focus/tracking/session changes; old callbacks cannot
-consume a later request. This is not a multiplayer-mode detector: use offline
+consume a later request.
+Native command dispatch and item calls run without holding the developer status
+lock, so rendering/status reads during area travel can continue. Completion from
+a cancelled call cannot replace a newer request's status.
+This is not a multiplayer-mode detector: use offline
 local Play only, as required for all game testing in this repository.
 
 The [pinned SDK](https://github.com/D2RLoader/PluginSDK/tree/717f727a0ec52912d1558764345f8fa3453a2bd6)

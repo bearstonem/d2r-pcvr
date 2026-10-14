@@ -3,12 +3,15 @@
 #include "../vr/dev_scenarios.cpp"
 #include <cassert>
 #include <vector>
+#include <functional>
 
 using namespace D2RL;
 using namespace framevr::interaction;
 static Snapshot state;
 static uint64_t local=7;
 static bool menu=false,failItems=false,failCommand=false,failQueue=false,failToken=false,tokenLive=false;
+static bool inlineQueue=false,cancelAfterToken=false;
+static std::function<void()> onExecute;
 static int itemCalls=0,tokenCreates=0,tokenRemoves=0;
 static constexpr ItemHandle Token=9001;
 static std::vector<std::string> commands;
@@ -18,25 +21,38 @@ namespace gamestate {uint64_t LocalPlayer(){return local;}bool MenuOpen(){return
 namespace interactionstate {Snapshot Read(){return state;}}
 namespace framevr::logging {void Write(const char*){}}
 static Threads::Result Queue(Threads::Callback callback,void* data,bool game) {
+    assert(devscenarios::Status().result==Result::Pending);
     if(failQueue)return Threads::Result::Unavailable;
-    tasks.push_back({callback,data,game});return Threads::Result::Success;
+    tasks.push_back({callback,data,game});
+    if(inlineQueue)callback(nullptr,data);
+    return Threads::Result::Success;
 }
 static Threads::Result __cdecl Ui(const PluginContext*,Threads::Callback c,void* d) noexcept {return Queue(c,d,false);}
 static Threads::Result __cdecl Game(const PluginContext*,Threads::Callback c,void* d) noexcept {return Queue(c,d,true);}
-static bool __fastcall Execute(const char* text) noexcept {commands.emplace_back(text);return !failCommand;}
+static bool __fastcall Execute(const char* text) noexcept {
+    // Native travel can render another frame before dispatch returns. Its
+    // interaction status read must never block on the command callback.
+    assert(devscenarios::Status().result==Result::Pending);
+    commands.emplace_back(text);if(onExecute)onExecute();return !failCommand;
+}
 static Items::Result __cdecl CreateToken(const PluginContext*,PlayerHandle player,const Items::ItemCreateSpec* s,ItemHandle* out) noexcept {
     ++tokenCreates;assert(!tokenLive&&player==local);
+    (void)devscenarios::Status();
     assert(s->code==Items::MakeItemCode("hp1")&&s->quality==Items::Quality::Normal);
     assert(s->destination.container==Items::ItemContainer::Inventory&&s->itemLevel==1);
     if(failToken)return Items::Result::PolicyRejected;
-    tokenLive=true;*out=Token;return Items::Result::Success;
+    tokenLive=true;*out=Token;
+    if(cancelAfterToken)devscenarios::Cancel();
+    return Items::Result::Success;
 }
 static Items::Result __cdecl RemoveToken(const PluginContext*,PlayerHandle player,ItemHandle item,Items::SocketedItemPolicy policy) noexcept {
     assert(player==local&&item==Token&&tokenLive&&policy==Items::SocketedItemPolicy::RejectIfNotEmpty);
+    (void)devscenarios::Status();
     ++tokenRemoves;tokenLive=false;return Items::Result::Success;
 }
 static Items::Result __cdecl ItemsCall(const PluginContext*,const Items::Transaction* t,Items::TransactionResult* r) noexcept {
     ++itemCalls;assert(t->player==local&&t->outputCount==10);
+    (void)devscenarios::Status();
     // Match the installed loader: zero-input exchanges are InvalidArgument.
     if(!t->inputCount||!t->inputs)return Items::Result::InvalidArgument;
     assert(t->inputCount==1&&t->inputs[0].item==Token&&t->inputs[0].quantity==1&&tokenLive);
@@ -132,5 +148,21 @@ int main(){
     devscenarios::Request(Make(1));Run(tasks.size()-1);
     assert(devscenarios::Status().result==Result::KitRefused&&!tokenLive);
     assert(itemCalls==transactions&&tokenRemoves==removals); // no exchange/deletion when input creation fails
+    failToken=false;
+    // Cancellation while a native call pumps the UI stops preparation and
+    // does not allow its old completion to replace a newer request's reply.
+    onExecute=[] {devscenarios::Cancel();};
+    const auto beforeCancel=commands.size();devscenarios::Request(Make(0));Run(tasks.size()-1);
+    assert(commands.size()==beforeCancel+1&&devscenarios::Status().sequence==0);
+    onExecute=[] {devscenarios::Cancel();devscenarios::Request(Make(4,99));};
+    devscenarios::Request(Make(3));const auto travel=tasks.size()-1;Run(travel);
+    assert(devscenarios::Status().sequence==99&&devscenarios::Status().result==Result::Pending);
+    onExecute={};Run(tasks.size()-1);assert(devscenarios::Status().sequence==99&&devscenarios::Status().result==Result::Dispatched);
+    // A cancellation after temporary input creation still removes that input.
+    cancelAfterToken=true;const auto beforeExchange=itemCalls;
+    devscenarios::Request(Make(1));Run(tasks.size()-1);
+    assert(!tokenLive&&itemCalls==beforeExchange&&devscenarios::Status().sequence==0);cancelAfterToken=false;
+    inlineQueue=true;devscenarios::Request(Make(3,100));
+    assert(devscenarios::Status().sequence==100&&devscenarios::Status().result==Result::Dispatched);
     std::puts("Development backend: isolation, queue routing, cancellation, stale sessions, kit transactions and dispatch results passed");
 }

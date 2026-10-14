@@ -172,6 +172,7 @@ foreach(test_target IN ITEMS memory-test hook-metrics-test active-keys-test reso
   add_test(NAME ${test_target} COMMAND ${test_target})
 endforeach()
 set_tests_properties(window-focus-test PROPERTIES TIMEOUT 10)
+set_tests_properties(dev-scenarios-test PROPERTIES TIMEOUT 10)
 add_test(NAME ui-blit-typed COMMAND ui-blit-test)
 add_test(NAME ui-blit-typeless COMMAND ui-blit-test --typeless)
 add_test(NAME ui-blit-typeless-black COMMAND ui-blit-test black --typeless)

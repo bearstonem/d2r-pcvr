@@ -57,21 +57,35 @@ bool Valid(const framevr::interaction::Request& r) {
     }
     return valid;
 }
-void Finish(const framevr::interaction::Request& r,Result result) {
-    reply={r.sequence,r.session,result};
+bool Current(uintptr_t claim) {
+    std::lock_guard lock(mutex);return claim==ticket;
+}
+bool Claim(uintptr_t claim,framevr::interaction::Request& r) {
+    std::lock_guard lock(mutex);
+    if(claim!=ticket||!scheduled||queued.action==Action::None)return false;
+    r=queued;queued={};return true;
+}
+void Finish(const framevr::interaction::Request& r,Result result,uintptr_t claim) {
+    {
+        std::lock_guard lock(mutex);if(claim!=ticket)return;
+        scheduled=false;reply={r.sequence,r.session,result};
+    }
     char line[180];std::snprintf(line,sizeof line,"Frame development: choice=%d result=%d (console dispatch does not confirm gameplay success)",r.index,int(result));
     framevr::logging::Write(line);
 }
 void __cdecl Commands(const PluginContext*,void* token) noexcept {
-    std::lock_guard lock(mutex);if(reinterpret_cast<uintptr_t>(token)!=ticket)return;scheduled=false;
-    const auto r=queued;queued={};if(r.action==Action::None)return;
+    const auto claim=reinterpret_cast<uintptr_t>(token);
+    framevr::interaction::Request r;if(!Claim(claim,r))return;
+    // Native console dispatch can render/pump messages while waiting. Those
+    // frames call Status()/Cancel(), so no developer lock may cross this call.
     if(!Valid(r)||!execute){
         if(!execute)framevr::logging::Write("Frame development: console command export unavailable");
-        Finish(r,Result::Refused);return;
+        Finish(r,Result::Refused,claim);return;
     }
     bool accepted=true;
     if(r.index==0) {
         for(const auto* command:framevr::dev::Preparation) {
+            if(!Current(claim))return;
             if(r.session!=gamestate::LocalPlayer()||!execute(command)){
                 char line[160];std::snprintf(line,sizeof line,"Frame development: preparation dispatch refused at %s",command);
                 framevr::logging::Write(line);accepted=false;break;
@@ -79,19 +93,22 @@ void __cdecl Commands(const PluginContext*,void* token) noexcept {
         }
     } else {
         const auto* command=framevr::dev::Choices[r.index].command;
+        if(!Current(claim))return;
+        char line[128];std::snprintf(line,sizeof line,"Frame development: dispatching destination %s",command?command:"unavailable");
+        framevr::logging::Write(line);
         accepted=command&&execute(command);
     }
-    Finish(r,accepted?Result::Dispatched:Result::Refused);
+    Finish(r,accepted?Result::Dispatched:Result::Refused,claim);
 }
 void __cdecl Gear(const PluginContext*,void* callbackToken) noexcept {
-    std::lock_guard lock(mutex);if(reinterpret_cast<uintptr_t>(callbackToken)!=ticket)return;scheduled=false;
-    const auto r=queued;queued={};if(r.action==Action::None)return;
+    const auto claim=reinterpret_cast<uintptr_t>(callbackToken);
+    framevr::interaction::Request r;if(!Claim(claim,r))return;
     // r.session is the SDK handle captured on the UI thread by Collect().
     // getLocalPlayer itself is UI-thread-only; the transaction revalidates this
     // captured handle against the authoritative game on this callback thread.
     const PlayerHandle player=r.session;
     if(!Valid(r)||!items||!items->createItem||!items->destroyItem||!items->executeTransaction) {
-        Finish(r,Result::Refused);return;
+        Finish(r,Result::Refused,claim);return;
     }
     const auto& codes=r.index==1?framevr::dev::CombatKit:framevr::dev::CasterKit;
     std::array<Items::ItemCreateSpec,10> specs{};
@@ -119,10 +136,15 @@ void __cdecl Gear(const PluginContext*,void* callbackToken) noexcept {
     tokenSpec.destination.container=Items::ItemContainer::Inventory;
     tokenSpec.destination.placement=Items::Placement::Automatic;
     ItemHandle token=InvalidItemHandle;
+    if(!Current(claim))return;
     const auto created=items->createItem(context,player,&tokenSpec,&token);
     if(created!=Items::Result::Success||!token) {
         char line[128];std::snprintf(line,sizeof line,"Frame development: gear exchange input creation failed, SDK result=%u",unsigned(created));
-        framevr::logging::Write(line);Finish(r,Result::KitRefused);return;
+        framevr::logging::Write(line);Finish(r,Result::KitRefused,claim);return;
+    }
+    if(!Current(claim)) {
+        items->destroyItem(context,player,token,Items::SocketedItemPolicy::RejectIfNotEmpty);
+        return;
     }
     const Items::TransactionInput input{token,1,Items::SocketedItemPolicy::RejectIfNotEmpty};
     Items::Transaction transaction{};transaction.structSize=sizeof transaction;
@@ -140,7 +162,7 @@ void __cdecl Gear(const PluginContext*,void* callbackToken) noexcept {
         char line[160];std::snprintf(line,sizeof line,"Frame development: gear transaction refused, SDK result=%u; temporary input cleanup=%u",unsigned(status),unsigned(cleanup));
         framevr::logging::Write(line);
     }
-    Finish(r,ok?Result::Applied:Result::KitRefused);
+    Finish(r,ok?Result::Applied:Result::KitRefused,claim);
 }
 }
 void Init(const D2RL::PluginContext* ctx) {
@@ -157,14 +179,22 @@ void Init(const D2RL::PluginContext* ctx) {
 }
 void Capture(framevr::interaction::Snapshot& s){s.developer=enabled;}
 void Request(const framevr::interaction::Request& r) {
-    std::lock_guard lock(mutex);
-    if(scheduled||queued.action!=Action::None)return;
-    if(!Valid(r)||!threads){Finish(r,Result::Refused);return;}
-    const auto run=framevr::dev::IsKit(r.index)?threads->runOnGameThread:threads->runOnUiThread;
-    if(!run){Finish(r,Result::Refused);return;}
-    queued=r;scheduled=true;reply={r.sequence,r.session,Result::Pending};++ticket;
-    if(run(context,framevr::dev::IsKit(r.index)?Gear:Commands,reinterpret_cast<void*>(ticket))!=D2RL::Threads::Result::Success) {
-        queued={};scheduled=false;Finish(r,Result::Refused);
+    const bool valid=Valid(r);
+    const auto run=threads?(framevr::dev::IsKit(r.index)?threads->runOnGameThread:threads->runOnUiThread):nullptr;
+    uintptr_t claim;
+    {
+        std::lock_guard lock(mutex);if(scheduled||queued.action!=Action::None)return;
+        claim=++ticket;
+        if(valid&&run) {
+            queued=r;scheduled=true;reply={r.sequence,r.session,Result::Pending};
+        }
+    }
+    if(!valid||!run){Finish(r,Result::Refused,claim);return;}
+    // Scheduling is an external call too. Keep status/cancellation readable
+    // even if a loader callback runs or pumps the UI before this returns.
+    if(run(context,framevr::dev::IsKit(r.index)?Gear:Commands,reinterpret_cast<void*>(claim))!=D2RL::Threads::Result::Success) {
+        {std::lock_guard lock(mutex);if(claim==ticket)queued={};}
+        Finish(r,Result::Refused,claim);
     }
 }
 framevr::interaction::Reply Status(){std::lock_guard lock(mutex);return reply;}
