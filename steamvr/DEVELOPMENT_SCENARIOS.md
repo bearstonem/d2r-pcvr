@@ -77,6 +77,11 @@ are not implemented. No game assets or save files are distributed.
 
 Automated checks cover wheel routing, disabled states, the real backend with fake
 SDK services, cancelled/stale requests, inventory failure, and isolated setup.
-Actual game command execution, native unique generation, save-path behavior and
-headset usability still require an offline game test. Do not treat the preview
-or mocked SDK tests as headset validation.
+Live follow-up on Steam D2R 3.3.93787 / SteamVR OpenXR with an offline Paladin:
+logs confirm level-90 preparation, a committed combat kit, and travel from Act I
+to the `act2_arcane` biome with continuing native vitals updates after arrival.
+An earlier travel hang was traced to rendering waiting on the developer status
+lock; native dispatch now runs outside that lock. The headset model was not
+recorded for this follow-up. Headset comfort, visual correctness, other
+destinations and long-session behavior remain unverified. Do not treat the
+preview or mocked SDK tests as headset validation.
