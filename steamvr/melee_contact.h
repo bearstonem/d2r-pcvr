@@ -88,7 +88,10 @@ public:
     }
 };
 struct Sweep {Blade before{},after{};uint64_t stroke=0;float speed=0;};
-struct Diagnostics {unsigned discontinuities=0,recovering=0;};
+struct Diagnostics {
+    unsigned discontinuities=0,recovering=0,invalidPose=0,belowSpeed=0,onsetRejected=0;
+    float peakSpeed=0;
+};
 inline constexpr float WeaponStrokeTravel=.18f;
 inline float WeaponContactSpeed(float value) {
     return std::isfinite(value)?std::max(value,1.5f):12.f;
@@ -138,7 +141,10 @@ public:
         if(!in.active||!gameplay::Valid(in.hand)||!std::isfinite(in.time)||
            !gameplay::Finite(in.blade.base)||!gameplay::Finite(in.blade.tip)||!gameplay::Finite(in.player)||
            !std::isfinite(in.unitsPerMetre)||in.unitsPerMetre<1||in.unitsPerMetre>12||Length(in.blade.base-in.player)>2.8f||Length(in.blade.tip-in.player)>4.5f||
-           !std::isfinite(in.blade.radius)||in.blade.radius<=0||in.blade.radius>.2f) {Reset();return false;}
+           !std::isfinite(in.blade.radius)||in.blade.radius<=0||in.blade.radius>.2f) {
+            if(in.active)++diagnostics.invalidPose;
+            Reset();return false;
+        }
         if(primed&&in.time==previous.time)return false;
         const double dt=in.time-previous.time;
         const float angle=gameplay::RotationDistance(in.hand.q,previous.hand.q);
@@ -162,6 +168,7 @@ public:
         if(in.time<recoverUntil) {++diagnostics.recovering;RestartPath(in);return false;}
         const Vec delta=in.hand.p-was.hand.p;
         const float distance=Length(delta)+SwingAngle(was.hand,was.blade,in)*lever,speed=distance/float(dt);
+        diagnostics.peakSpeed=std::max(diagnostics.peakSpeed,speed);
         if(speed<.45f) {
             if(!quietSince)quietSince=in.time;
             Remember(in,distance);
@@ -186,7 +193,8 @@ public:
             // Judge this stroke's recent motion. Accumulating all jitter and
             // aborted windups since the last pause made its net/travel ratio
             // impossible to satisfy, causing another indefinite lockout.
-            if(speed<(in.shield?1.2f:WeaponContactSpeed(in.minWeaponSpeed))||!Onset(in,lever,startBlade))return false;
+            if(speed<(in.shield?1.2f:WeaponContactSpeed(in.minWeaponSpeed))){++diagnostics.belowSpeed;return false;}
+            if(!Onset(in,lever,startBlade)){++diagnostics.onsetRejected;return false;}
             stroke=++serial;strokeAt=in.time;direction=math::Normalized(delta);angularDirection=angular;
         }
         // No delayed taps from holding the weapon inside an enemy, and no

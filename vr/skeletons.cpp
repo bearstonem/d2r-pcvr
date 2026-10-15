@@ -1775,7 +1775,14 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& in) {
         HeroXform hx;Mat model;
         if(in.havePoseStamp&&HeroTransform(&hx)&&hx.self==self&&(hx.parent&0xFFFFFu)==0xFFFFFu&&
            SafeCopy(model.m,reinterpret_cast<const void*>(hx.comp),sizeof model)) {
-            const Mat world=Mul(w,model);
+            // Contact motion is sampled from the RIGHT controller. Inventory
+            // ownership (axesSide) can instead select the shield's left wrist
+            // while both attachments are visible. Follow the final drawn
+            // right attachment; a free staff already follows that controller
+            // through its authored holding attachment.
+            const int contactSide=freeStaff?staffSide:0;
+            const int contactBone=h.weapon[contactSide];
+            const Mat world=contactBone>=0?Mul(newW[contactBone],model):Mat{};
             const V3 origin=Pos(world),axis=Norm({world.m[4],world.m[5],world.m[6]}),player=Pos(model);
             g.melee={{origin.x,origin.y,origin.z},{axis.x,axis.y,axis.z},{player.x,player.y,player.z},in.poseStamp,in.worldEpoch,HeroGen()};
             g.melee.weaponType=in.weaponType;

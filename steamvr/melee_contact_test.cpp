@@ -38,8 +38,17 @@ int main(){
     {
         Sim s;
         Check(!s.Move({.10f,0,0}),"fast but short ten-centimeter twitch cannot arm a stroke");
+        Check(s.engine.TakeDiagnostics().onsetRejected>0,"diagnostics distinguish short twitches from insufficient speed");
         s.Step(8);
         Check(!s.Move({-.10f,0,0}),"separate small twitches cannot accumulate into a stroke");
+    }
+    {
+        Sim s;s.Move({.02f,0,0});
+        auto d=s.engine.TakeDiagnostics();
+        Check(d.belowSpeed==1&&d.peakSpeed>.99f&&d.peakSpeed<1.01f,"diagnostics report measured motion below the configured threshold");
+        s.sample.blade.base.x=10;s.Step();
+        Check(s.engine.TakeDiagnostics().invalidPose==1,"diagnostics expose invalid attachment geometry");
+        Check(s.engine.TakeDiagnostics().invalidPose==0,"diagnostic report consumes counters");
     }
     for(double dt:{1./36,1./72,1./90,1./120}) {
         Sim s;

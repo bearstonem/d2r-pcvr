@@ -381,11 +381,14 @@ void Report() {
     const auto i=intersections.exchange(0),x=stale.exchange(0),w=walls.exchange(0);
     const auto callbacks=applied.exchange(0),retries=recovered.exchange(0),missing=playerMissing.exchange(0);
     const auto mismatch=positionMismatch.exchange(0),monsters=nearby.exchange(0),bodies=bodyMissing.exchange(0);
-    Diagnostics d;uint64_t age=0;{std::lock_guard lock(queueMutex);for(auto& e:engines){const auto one=e.TakeDiagnostics();d.discontinuities+=one.discontinuities;d.recovering+=one.recovering;}age=callback.Age(GetTickCount64());}
+    Diagnostics d;uint64_t age=0;{std::lock_guard lock(queueMutex);for(auto& e:engines){
+        const auto one=e.TakeDiagnostics();d.discontinuities+=one.discontinuities;d.recovering+=one.recovering;
+        d.invalidPose+=one.invalidPose;d.belowSpeed+=one.belowSpeed;d.onsetRejected+=one.onsetRejected;d.peakSpeed=std::max(d.peakSpeed,one.peakSpeed);
+    }age=callback.Age(GetTickCount64());}
     const auto early=tooSoon.exchange(0),extra=extraTargets.exchange(0);
-    if(!s&&!c&&!g&&!d.discontinuities&&!d.recovering&&!retries&&!early&&!extra)return;
-    char line[680];snprintf(line,sizeof line,"Frame melee: sweep samples=%u physical contacts=%u native accepted=%u rejected=%u missing server=%u intersections=%u stale=%u walls=%u pose resets=%u recovering=%u callbacks=%u abandoned=%u pending_ms=%llu missing_player=%u position_mismatch=%u nearby=%u missing_body=%u attack_speed=%d cycle_ms=%u too_soon=%u extra_targets=%u",s,c,a,r,g,i,x,w,d.discontinuities,d.recovering,callbacks,retries,(unsigned long long)age,missing,mismatch,monsters,bodies,
-        int(attackSpeed.load()),cycleMs.load(),early,extra);
+    if(!s&&!c&&!g&&!d.discontinuities&&!d.recovering&&!d.invalidPose&&!d.belowSpeed&&!d.onsetRejected&&!retries&&!early&&!extra)return;
+    char line[800];snprintf(line,sizeof line,"Frame melee: sweep samples=%u physical contacts=%u native accepted=%u rejected=%u missing server=%u intersections=%u stale=%u walls=%u pose resets=%u recovering=%u callbacks=%u abandoned=%u pending_ms=%llu missing_player=%u position_mismatch=%u nearby=%u missing_body=%u attack_speed=%d cycle_ms=%u too_soon=%u extra_targets=%u invalid_pose=%u below_speed=%u onset_rejected=%u peak_mps=%.2f",s,c,a,r,g,i,x,w,d.discontinuities,d.recovering,callbacks,retries,(unsigned long long)age,missing,mismatch,monsters,bodies,
+        int(attackSpeed.load()),cycleMs.load(),early,extra,d.invalidPose,d.belowSpeed,d.onsetRejected,d.peakSpeed);
     framevr::logging::Write(line);
 }
 }
