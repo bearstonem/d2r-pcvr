@@ -21,7 +21,7 @@ int main(){
     {
         Sim s;s.in.wheel=true;s.Step(3);s.in.hover=13;s.in.trigger=1;s.Step();
         Check(!s.out.developer&&s.out.request.action==Action::None,"retail snapshot cannot open developer page");
-        s.in.snapshot.developer=s.in.snapshot.devPaladin=true;
+        s.in.snapshot.developer=true;s.in.snapshot.devClass=3;
         s.in.trigger=0;s.Step();s.in.trigger=1;s.Step();
         Check(s.out.developer&&s.e.Page()==MenuPage::Developer,"developer footer opens page");
         Check(!MapWanted(s.in,s.out,s.in.at),"developer page does not capture map");
@@ -31,8 +31,8 @@ int main(){
         Check(s.Step(5).request.action==Action::None,"held trigger cannot repeat destination");
         s.in.reply={r.sequence,r.session,Result::Dispatched};s.in.trigger=0;s.Step();
         Check(s.out.result==Result::Dispatched,"dispatch remains distinct from applied");
-        s.in.snapshot.devPaladin=false;s.in.trigger=1;s.Step();
-        Check(s.out.request.action==Action::None,"other class cannot request mutations");
+        s.in.snapshot.devClass=-1;s.in.trigger=1;s.Step();
+        Check(s.out.request.action==Action::None,"unknown/classic class cannot request mutations");
         s.in.trigger=0;s.Step();s.in.hover=9;s.in.trigger=1;s.Step();
         Check(!s.out.developer&&!s.out.utility&&!s.out.map,"spells footer leaves dev page");
         s.in.trigger=0;s.Step();s.in.hover=13;s.in.trigger=1;s.Step();
@@ -44,6 +44,14 @@ int main(){
         Check(WheelCell(.25f,.27f,-1,MenuPage::Developer,0,false)==-1,"disabled developer page has no actions");
         Output o;o.developer=true;auto a=Context(s.in.snapshot,o,true);o.developer=false;
         Check(a!=Context(s.in.snapshot,o,true),"dev page switch invalidates painted atlas");
+        o.developer=true;a=Context(s.in.snapshot,o,true);s.in.snapshot.devClass=0;
+        Check(a!=Context(s.in.snapshot,o,true),"changing class invalidates gear names in the painted atlas");
+    }
+    for(int cls=0;cls<8;++cls) {
+        Sim s;s.in.snapshot.developer=true;s.in.snapshot.devClass=cls;s.in.wheel=true;s.Step(3);
+        s.in.hover=13;s.in.trigger=1;s.Step();s.in.trigger=0;s.Step();
+        s.in.hover=0;s.in.trigger=1;s.Step();
+        Check(s.out.request.action==Action::Developer&&s.out.request.index==0,"each expansion class can request preparation");
     }
     for(int hand:{0,1})for(float yaw:{0.f,1.2f}) {
         Sim s;s.in.head.q=math::Yaw(yaw);s.Step();

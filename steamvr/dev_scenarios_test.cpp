@@ -15,6 +15,7 @@ static std::function<void()> onExecute;
 static int itemCalls=0,tokenCreates=0,tokenRemoves=0;
 static constexpr ItemHandle Token=9001;
 static std::vector<std::string> commands;
+static std::vector<uint32_t> grantedCodes;
 struct Task {Threads::Callback call;void* token;bool game;};
 static std::vector<Task> tasks;
 namespace gamestate {uint64_t LocalPlayer(){return local;}bool MenuOpen(){return menu;}}
@@ -51,15 +52,18 @@ static Items::Result __cdecl RemoveToken(const PluginContext*,PlayerHandle playe
     ++tokenRemoves;tokenLive=false;return Items::Result::Success;
 }
 static Items::Result __cdecl ItemsCall(const PluginContext*,const Items::Transaction* t,Items::TransactionResult* r) noexcept {
-    ++itemCalls;assert(t->player==local&&t->outputCount==10);
+    ++itemCalls;assert(t->player==local&&t->outputCount>=9&&t->outputCount<=10);
     (void)devscenarios::Status();
     // Match the installed loader: zero-input exchanges are InvalidArgument.
     if(!t->inputCount||!t->inputs)return Items::Result::InvalidArgument;
     assert(t->inputCount==1&&t->inputs[0].item==Token&&t->inputs[0].quantity==1&&tokenLive);
+    grantedCodes.clear();
     for(unsigned i=0;i<t->outputCount;++i) {
-        const auto& s=t->outputs[i];assert(s.quality==Items::Quality::Unique&&s.itemLevel==99);
+        const auto& s=t->outputs[i];const bool ammo=s.code==Items::MakeItemCode("aqv");
+        grantedCodes.push_back(s.code);
+        assert(s.quality==(ammo?Items::Quality::Normal:Items::Quality::Unique)&&s.itemLevel==99);
         assert(s.destination.container==Items::ItemContainer::Inventory);
-        assert(s.quantity==Items::DefaultValue&&s.durability==Items::DefaultValue);
+        assert(s.quantity==(ammo?250:Items::DefaultValue)&&s.durability==Items::DefaultValue);
     }
     if(failItems)return Items::Result::PolicyRejected;
     tokenLive=false;r->outputCount=t->outputCount;return Items::Result::Success;
@@ -97,7 +101,7 @@ int main(){
     itemService.createItem=CreateToken;itemService.destroyItem=RemoveToken;
     devscenarios::threads=&threadService;devscenarios::items=&itemService;
     devscenarios::execute=Execute;
-    state.session=local;state.developer=state.devPaladin=state.actionKnown=true;state.actionMode=1;
+    state.session=local;state.developer=state.actionKnown=true;state.devClass=3;state.actionMode=1;
     auto r=Make(3);devscenarios::Request(r);assert(tasks.empty()); // compiled dev, wrong environment
     devscenarios::enabled=true;
     devscenarios::Request(Make(3));assert(tasks.size()==1&&!tasks.back().game);
@@ -117,13 +121,13 @@ int main(){
     assert(devscenarios::Status().result==Result::Refused);--local;
     for(int reason=0;reason<5;++reason) {
         r=Make(3);const auto count=tasks.size();
-        if(reason==0)state.devPaladin=false;
+        if(reason==0)state.devClass=-1;
         if(reason==1)menu=true;
         if(reason==2)r.at=GetTickCount64()-2000;
         if(reason==3)state.actionMode=0;
         if(reason==4)r.index=99;
         devscenarios::Request(r);assert(tasks.size()==count&&devscenarios::Status().result==Result::Refused);
-        state.devPaladin=true;menu=false;state.actionMode=1;
+        state.devClass=3;menu=false;state.actionMode=1;
     }
     // Preparation is available in town and never touches the item service.
     devscenarios::items=nullptr;
@@ -131,7 +135,7 @@ int main(){
         state.actionMode=mode;const auto before=commands.size();
         devscenarios::Request(Make(0));assert(!tasks.back().game);Run(tasks.size()-1);
         assert(devscenarios::Status().result==Result::Dispatched);
-        assert(commands.size()==before+std::size(Preparation)&&commands[before]=="cheat level 90");
+        assert(commands.size()==before+std::size(Preparation)+31&&commands[before]=="cheat level 90");
         assert(itemCalls==2);
     }
     for(uint32_t mode:{0u,4u,7u,17u}) {
@@ -162,6 +166,34 @@ int main(){
     cancelAfterToken=true;const auto beforeExchange=itemCalls;
     devscenarios::Request(Make(1));Run(tasks.size()-1);
     assert(!tokenLive&&itemCalls==beforeExchange&&devscenarios::Status().sequence==0);cancelAfterToken=false;
+    // Every class gets its own 30 exact skill assignments, also on repeated
+    // preparation, and the correct weapon/ammo transaction for both kits.
+    assert(ExpansionClass(0,1)==-1&&ExpansionClass(6,1)==-1&&ExpansionClass(7,2)==7);
+    assert(ExpansionClass(7,3)==7&&ExpansionClass(8,3)==-1);
+    for(int cls=0;cls<8;++cls) {
+        assert(ExpansionClass(cls,3)==cls);state.devClass=cls;
+        for(int repeat=0;repeat<2;++repeat) {
+            const auto start=commands.size();devscenarios::Request(Make(0));Run(tasks.size()-1);
+            assert(devscenarios::Status().result==Result::Dispatched);
+            assert(commands.size()==start+std::size(Preparation)+31&&commands.back()=="heal");
+            for(size_t i=0;i<30;++i) {
+                const std::string expected=std::string("cheat sklvl ")+Presets[cls].skills[i]+",20";
+                assert(commands[start+std::size(Preparation)+i]==expected);
+            }
+        }
+        for(int choice:{1,2}) {
+            devscenarios::Request(Make(choice));assert(tasks.back().game);Run(tasks.size()-1);
+            assert(devscenarios::Status().result==Result::Applied&&!tokenLive);
+            std::vector<uint32_t> expected;
+            for(const char* code:Kit(cls,choice))if(code)expected.push_back(Items::MakeItemCode(code[0],code[1],code[2]));
+            assert(grantedCodes==expected);
+        }
+    }
+    // Skill/weapon requirements across the supplied alternatives.
+    assert(Presets[0].primaryWeapons[1]==std::string_view("aqv"));
+    assert(Presets[2].alternateWeapons[0]==std::string_view("7dg"));
+    assert(Presets[4].alternateWeapons[0]==std::string_view("7ts"));
+    assert(Presets[6].primaryWeapons[0]==std::string_view("9tw")&&Presets[6].primaryWeapons[1]==std::string_view("7wb"));
     inlineQueue=true;devscenarios::Request(Make(3,100));
     assert(devscenarios::Status().sequence==100&&devscenarios::Status().result==Result::Dispatched);
     std::puts("Development backend: isolation, queue routing, cancellation, stale sessions, kit transactions and dispatch results passed");

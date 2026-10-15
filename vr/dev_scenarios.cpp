@@ -46,12 +46,12 @@ bool Valid(const framevr::interaction::Request& r) {
     // Development preparation must work where a new character starts.
     const bool idle=s.actionMode==1||s.actionMode==2||s.actionMode==3||s.actionMode==5||s.actionMode==6;
     const bool valid=enabled&&r.action==Action::Developer&&framevr::dev::ValidChoice(r.index)&&
-        Fresh(s,r.session,now)&&s.devPaladin&&s.developer&&r.session==gamestate::LocalPlayer()&&
+        Fresh(s,r.session,now)&&framevr::dev::ValidClass(s.devClass)&&s.developer&&r.session==gamestate::LocalPlayer()&&
         now>=r.at&&now-r.at<1000&&!gamestate::MenuOpen()&&s.actionKnown&&
         idle;
     if(!valid) {
-        char line[240];std::snprintf(line,sizeof line,"Frame development: action blocked choice=%d enabled=%d paladin=%d fresh=%d same_session=%d menu=%d mode_known=%d mode=%u request_age_ms=%llu",
-            r.index,int(enabled),int(s.devPaladin),int(Fresh(s,r.session,now)),int(r.session==gamestate::LocalPlayer()),
+        char line[240];std::snprintf(line,sizeof line,"Frame development: action blocked choice=%d enabled=%d class=%d fresh=%d same_session=%d menu=%d mode_known=%d mode=%u request_age_ms=%llu",
+            r.index,int(enabled),s.devClass,int(Fresh(s,r.session,now)),int(r.session==gamestate::LocalPlayer()),
             int(gamestate::MenuOpen()),int(s.actionKnown),s.actionMode,(unsigned long long)(now>=r.at?now-r.at:0));
         framevr::logging::Write(line);
     }
@@ -84,13 +84,24 @@ void __cdecl Commands(const PluginContext*,void* token) noexcept {
     }
     bool accepted=true;
     if(r.index==0) {
-        for(const auto* command:framevr::dev::Preparation) {
-            if(!Current(claim))return;
-            if(r.session!=gamestate::LocalPlayer()||!execute(command)){
+        const int cls=interactionstate::Read().devClass;
+        if(!framevr::dev::ValidClass(cls)){Finish(r,Result::Refused,claim);return;}
+        const auto send=[&](const char* command) {
+            if(!Current(claim))return false;
+            if(r.session!=gamestate::LocalPlayer()||!execute(command)) {
                 char line[160];std::snprintf(line,sizeof line,"Frame development: preparation dispatch refused at %s",command);
-                framevr::logging::Write(line);accepted=false;break;
+                framevr::logging::Write(line);return false;
             }
+            return true;
+        };
+        for(const auto* command:framevr::dev::Preparation) {
+            if(!(accepted=send(command)))break;
         }
+        if(accepted)for(const auto* skill:framevr::dev::Presets[cls].skills) {
+            char command[128];std::snprintf(command,sizeof command,"cheat sklvl %s,20",skill);
+            if(!(accepted=send(command)))break;
+        }
+        if(accepted)accepted=send("heal");
     } else {
         const auto* command=framevr::dev::Choices[r.index].command;
         if(!Current(claim))return;
@@ -110,16 +121,22 @@ void __cdecl Gear(const PluginContext*,void* callbackToken) noexcept {
     if(!Valid(r)||!items||!items->createItem||!items->destroyItem||!items->executeTransaction) {
         Finish(r,Result::Refused,claim);return;
     }
-    const auto& codes=r.index==1?framevr::dev::CombatKit:framevr::dev::CasterKit;
+    const int cls=interactionstate::Read().devClass;
+    if(!framevr::dev::ValidClass(cls)){Finish(r,Result::Refused,claim);return;}
+    const auto codes=framevr::dev::Kit(cls,r.index);
     std::array<Items::ItemCreateSpec,10> specs{};
     std::array<ItemHandle,10> handles{};
-    for(size_t i=0;i<specs.size();++i) {
-        auto& spec=specs[i];spec.structSize=sizeof spec;
+    size_t count=0;
+    for(size_t i=0;i<codes.size();++i) {
+        if(!codes[i])continue;
+        const bool ammo=framevr::dev::Ammo(codes[i]);
+        auto& spec=specs[count++];spec.structSize=sizeof spec;
         spec.code=Items::MakeItemCode(codes[i][0],codes[i][1],codes[i][2]);
-        spec.quality=Items::Quality::Unique;spec.qualityRecordId=Items::RandomQualityRecord;
-        spec.flags=Items::ItemCreateFlagBit(Items::ItemCreateFlag::AllowDuplicateUnique);
+        spec.quality=ammo?Items::Quality::Normal:Items::Quality::Unique;spec.qualityRecordId=Items::RandomQualityRecord;
+        spec.flags=ammo?0:Items::ItemCreateFlagBit(Items::ItemCreateFlag::AllowDuplicateUnique);
         spec.itemLevel=99;spec.seedMode=Items::SeedMode::Random;
         spec.quantity=spec.durability=Items::DefaultValue;spec.stateFlags=Items::ItemStateIdentified;
+        if(ammo)spec.quantity=250;
         spec.destination.structSize=sizeof spec.destination;
         spec.destination.container=Items::ItemContainer::Inventory;
         spec.destination.placement=Items::Placement::Automatic;
@@ -149,12 +166,12 @@ void __cdecl Gear(const PluginContext*,void* callbackToken) noexcept {
     const Items::TransactionInput input{token,1,Items::SocketedItemPolicy::RejectIfNotEmpty};
     Items::Transaction transaction{};transaction.structSize=sizeof transaction;
     transaction.player=player;transaction.inputCount=1;transaction.inputs=&input;
-    transaction.outputCount=uint32_t(specs.size());transaction.outputs=specs.data();
+    transaction.outputCount=uint32_t(count);transaction.outputs=specs.data();
     transaction.outputItems=handles.data();transaction.outputCapacity=uint32_t(handles.size());
     Items::TransactionResult result{};result.structSize=sizeof result;
     const auto status=items->executeTransaction(context,&transaction,&result);
     // The SDK rolls back the entire kit when validation or placement fails.
-    const bool ok=status==Items::Result::Success&&result.outputCount==specs.size();
+    const bool ok=status==Items::Result::Success&&result.outputCount==count;
     if(!ok) {
         // Native rollback preserved the temporary input. Remove only the
         // exact handle we created above; never enumerate/delete player items.
@@ -175,7 +192,7 @@ void Init(const D2RL::PluginContext* ctx) {
     if(ctx->QueryService(&items)!=ServiceQueryResult::Success)items=nullptr;
     if(const auto core=GetModuleHandleW(L"D2RCore.dll"))
         execute=reinterpret_cast<CoreExports::ExecuteConsoleCommandFn>(GetProcAddress(core,MAKEINTRESOURCEA(CoreExports::ExecuteConsoleCommandInfo.ordinal)));
-    framevr::logging::Write("Frame development: isolated pcvr-dev environment enabled; use offline local Paladins only");
+    framevr::logging::Write("Frame development: isolated pcvr-dev environment enabled; class presets require disposable offline expansion characters");
 }
 void Capture(framevr::interaction::Snapshot& s){s.developer=enabled;}
 void Request(const framevr::interaction::Request& r) {

@@ -37,7 +37,7 @@ def main():
         parser.exit(1, f'{error}\n')
     print(f'Prepared {root}')
     print('Launch the developer DLL with -mod pcvr-dev; create a NEW offline expansion Paladin.')
-    print('In the wheel: DEV > Prepare Paladin > Combat gear. Equip the kit, then select Arcane Sanctuary.')
+    print('In the wheel: DEV > Prepare your class > choose a class gear kit. Equip it, then select Arcane Sanctuary.')
 
 
 if __name__ == '__main__':

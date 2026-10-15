@@ -5,6 +5,7 @@
 #include "potion_pose.h"
 #include "wrist_hud.h"
 #include "hand_vitals.h"
+#include "dev_scenarios.h"
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -117,7 +118,8 @@ struct Skill {
     bool operator==(const Skill&) const = default;
 };
 struct Snapshot {
-    bool developer=false,devPaladin=false;
+    bool developer=false;
+    int devClass=-1;
     uint64_t session=0,at=0;
     uint32_t revision=0,activeSet=0;
     bool equipmentKnown=false,beltKnown=false;
@@ -381,7 +383,7 @@ public:
                 if(!editor&&in.hover==13&&fresh&&in.snapshot.developer) {
                     developer=!developer;utility=map=false;out.utility=out.map=false;rearm=true;
                 } else if(developer&&in.hover>=0&&in.hover<8) {
-                    if(fresh&&in.snapshot.devPaladin)request(Action::Developer,in.hover);
+                    if(fresh&&dev::ValidClass(in.snapshot.devClass))request(Action::Developer,in.hover);
                     else out.feedback=3;
                     rearm=true;
                 } else if(developer&&in.hover==8) {rearm=true;}
