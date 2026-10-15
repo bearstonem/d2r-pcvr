@@ -12,7 +12,6 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
-#include "transparent_fog_shader.h"
 using Microsoft::WRL::ComPtr;
 static void Check(HRESULT hr,const char* what) {
     if(FAILED(hr)) throw std::runtime_error(what);
@@ -36,11 +35,10 @@ struct Samples {
     std::array<float,4> fog{0,0,0,1}; // RGB, strength
     // Optional exact one-pixel neighbours: right, left, down, up; -1 uses scene depth.
     std::array<float,4> edges{-1,-1,-1,-1};
-    std::array<float,4> accumulated{},coefficients{1,1,1,1},additive{}; // additive.w enables native mask
 };
 struct Case {const char* name; Samples input; std::array<float,3> expected;};
 static const char* Fixture=R"hlsl(
-struct Samples { float4 colour,scene,flags,fog,edges,accumulated,coefficients,additive; };
+struct Samples { float4 colour,scene,flags,fog,edges; };
 StructuredBuffer<Samples> samples : register(t0);
 RWStructuredBuffer<float4> output : register(u0);
 static uint fixture;
@@ -50,8 +48,6 @@ static uint fixture;
 #define UpsideDown (samples[fixture].flags.w != 0)
 #define FogColor samples[fixture].fog.rgb
 #define FogStrength samples[fixture].fog.w
-#define TransparentMaskOn (samples[fixture].additive.w != 0)
-static const float4 TransparentScale=float4(1,1,0,0);
 #define BUFFER_RCP_WIDTH (1.0 / 1024.0)
 #define BUFFER_RCP_HEIGHT (1.0 / 1024.0)
 static const float NearPlane=0.2, FogStart=100, FogEnd=200, FogCurve=1, FogBlur=3;
@@ -63,12 +59,10 @@ static const float3 CamBack0=float3(0,0,1), CamBack1=float3(0,0,1);
 static const float3 CeilEye0=0, CeilEye1=0;
 static const float2 CeilHero0=0, CeilHero1=0;
 static const float CeilScale=10, CeilHeight=20, CeilHalo=1, HudTop=0, SkyTex=0, SkyBrightness=1;
-static const int FogColorSmp=0, VoidFogSmp=1, HudMaskSmp=2, TransparentMaskSmp=3;
+static const int FogColorSmp=0, VoidFogSmp=1, HudMaskSmp=2;
 float4 Sample(int samplerId) {
     if(samplerId==FogColorSmp) return samples[fixture].colour;
     if(samplerId==VoidFogSmp) return samples[fixture].scene.zzzz;
-    if(samplerId==TransparentMaskSmp) return EffectCoverage(samples[fixture].accumulated,
-        samples[fixture].coefficients,samples[fixture].additive.rgb).xxxx;
     return 0;
 }
 #define tex2D(s, uv) Sample(s)
@@ -97,15 +91,7 @@ int main(int argc,char** argv) {try {
     std::ifstream file(argv[1]);
     if(!file) throw std::runtime_error("cannot read production fog shader");
     const std::string source{std::istreambuf_iterator<char>(file),{}};
-    // Compile the actual linked pixel shader too; the compute fixture exercises
-    // its coverage math with synthetic native buffers, then the production fog.
-    ComPtr<ID3DBlob> maskPixel,maskErrors;
-    const auto& maskSource=framevr::transparentfog::Shader;
-    Check(D3DCompile(maskSource,sizeof maskSource-1,"transparent-fog-mask",nullptr,nullptr,"PS","ps_5_0",
-        D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&maskPixel,&maskErrors),"compile native mask pixel shader");
-    std::string shader="#define COVERAGE_TEST\n";
-    shader+=maskSource;
-    shader+=Fixture;
+    std::string shader=Fixture;
     shader+=Function(source,"float FogAt(");
     shader+=Function(source,"float FogAmount(");
     // Optional so running against the pre-fix shader demonstrates the regression.
@@ -172,26 +158,6 @@ int main(int argc,char** argv) {try {
     }
     s={};s.colour={.3f,.7f,1,1};s.scene[0]=s.scene[1]=.01f;
     add("same effect over nearby pillar has matching colour",s,{.3f,.7f,1});
-    for(float depth:{.01f,.2f/150,.0005f}) {
-        s={};s.colour={.3f,.7f,1,1};s.scene[0]=s.scene[1]=depth;
-        s.additive={.01f,.02f,.03f,1};
-        add("additive wing does not inherit opaque pillar fog",s,{.3f,.7f,1});
-        s.additive={0,0,0,1};s.accumulated={.1f,.2f,.3f,1};s.coefficients={1,1,1,.5f};
-        add("weighted transparent wing does not inherit pillar fog",s,{.3f,.7f,1});
-    }
-    s={};s.scene[0]=s.scene[1]=.0005f;s.additive[3]=1;
-    add("empty effect mask keeps distant opaque scenery fogged",s,{0,0,0});
-    s.colour={100,100,100,1};add("bright opaque scene is not mistaken for wings",s,{0,0,0});
-    s.accumulated={1,1,1,0};add("zero accumulated alpha ignores unused RGB",s,{0,0,0});
-    s.accumulated[3]=1;add("fully transmitted weighted input contributes no light",s,{0,0,0});
-    s.coefficients={0,0,0,0};add("black transparent contribution does not unmask scenery",s,{0,0,0});
-    s={};s.scene[0]=s.scene[1]=.0005f;s.additive={1,1,1,0};
-    add("unavailable current-eye mask leaves ordinary fog",s,{0,0,0});
-    s.flags[2]=0;add("fog off remains native colour with no mask",s,{1,1,1});
-    s.flags[2]=1;s.flags[0]=1;s.additive[3]=1;
-    add("native effect mask does not change outdoor fog",s,{0,0,0});
-    s={};s.scene[0]=s.scene[1]=.0005f;s.additive={.000505f,0,0,1};
-    add("almost-empty native fringe blends smoothly",s,{.5f,.5f,.5f});
     ComPtr<ID3DBlob> blob,errors;
     const auto hr=D3DCompile(shader.data(),shader.size(),argv[1],nullptr,nullptr,"main","cs_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&blob,&errors);
     if(FAILED(hr)&&errors) std::fprintf(stderr,"%s\n",static_cast<const char*>(errors->GetBufferPointer()));

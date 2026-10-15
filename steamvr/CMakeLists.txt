@@ -112,8 +112,6 @@ target_link_libraries(show-items-command-test PRIVATE framevr-runtime)
 add_executable(native-hud-test native_hud_test.cpp)
 target_sources(d2rl-vrcam PRIVATE render_resolution.cpp)
 target_sources(d2rl-vrcam PRIVATE scene_depth.cpp)
-target_sources(d2rl-vrcam PRIVATE transparent_fog.cpp)
-add_executable(transparent-fog-state-test transparent_fog_state_test.cpp)
 target_sources(d2rl-vrcam PRIVATE light_bounds.cpp)
 add_executable(light-bounds-test light_bounds_test.cpp)
 target_link_libraries(light-bounds-test PRIVATE d3d11 d3dcompiler framevr-runtime)
@@ -175,7 +173,7 @@ foreach(test_target IN ITEMS memory-test hook-metrics-test active-keys-test reso
     portal-billboard-test composition-layers-test projectile-rules-test
     combat-rules-test logging-test melee-contact-test attack-speed-test world-coordinates-test bow-flight-test spell-cast-test spell-aim-assist-test
     interaction-test dev-scenarios-test native-belt-test wrist-hud-test navigation-info-test dropped-item-labels-test show-items-command-test native-hud-test render-resolution-test render-pointer-test scene-depth-test game-device-only-test controller-bindings-test journal-test native-panels-test
-    vr-settings-test vr-settings-store-test controller-labels-test math-test deferred-draw-test monster-bars-test gaze-test window-focus-test callback-ticket-test local-player-test transparent-fog-state-test)
+    vr-settings-test vr-settings-store-test controller-labels-test math-test deferred-draw-test monster-bars-test gaze-test window-focus-test callback-ticket-test local-player-test)
   # These fixtures use assert for their checks, including in Release builds.
   if(MSVC)
     target_compile_options(${test_target} PRIVATE /UNDEBUG)

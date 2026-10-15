@@ -14,6 +14,20 @@ int main(){
     Check(WritePrivateProfileStringW(L"custom",L"keep",L"12345",name),"write unrelated key");
     Check(WritePrivateProfileStringW(L"render",L"rings",L"6",name),"write existing setting");
     vrsettings::Poll(name);auto before=vrsettings::Read();
+    Check(before.values[IndoorFog]==0,"profiles without an indoor fog preference default off");
+    Check(WritePrivateProfileStringW(L"fog",L"caves",L"1",name),"write existing indoor fog preference");
+    Check(WritePrivateProfileStringW(L"fog",L"enabled",L"1",name),"write outdoor fog preference");
+    vrsettings::Poll(name);
+    Check(vrsettings::Read().values[IndoorFog]==1,"existing explicit indoor fog choice is preserved");
+    for(int choice:{0,1,0}) {
+        const auto current=vrsettings::Read();Model fog;fog.Open(current);
+        fog.Click({Kind::Change,IndoorFog,1});const auto request=fog.Click({Kind::Apply});
+        Check(request.changed==(ChangeMask{1}<<IndoorFog)&&vrsettings::Submit(request)&&vrsettings::Poll(name),"persist independent indoor fog toggle");
+        const auto saved=vrsettings::Read();
+        Check(saved.values[IndoorFog]==choice&&Int(path,L"fog",L"caves")==choice,"indoor fog survives reload in the existing caves key");
+        Check(Changed(saved.values,current.values)==(ChangeMask{1}<<IndoorFog)&&Int(path,L"fog",L"enabled")==1&&Int(path,L"custom",L"keep")==12345,
+            "indoor fog leaves outdoor fog and unrelated settings untouched");
+    }
     Check(before.values[HapticShortMelee]==0,"missing short-melee preference selects the compatible longer pulse");
     for(int choice:{1,0}){
         const auto current=vrsettings::Read();Model h;h.Open(current);h.Click({Kind::Change,HapticShortMelee,1});

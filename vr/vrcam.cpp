@@ -94,7 +94,6 @@ namespace gamestate {bool OpaqueMenuOpen();}
 #include "transport.h"
 #include "render_resolution.h"
 #include "scene_depth.h"
-#include "transparent_fog.h"
 #include "light_bounds.h"
 #include "game_device_only.h"
 #include "menu_controls.h"
@@ -263,7 +262,7 @@ struct Settings {
     std::atomic<float> nightBright{0.25f};  // [sky] night_brightness: the sky and the fog at full night, times their day brightness
     std::atomic<bool>  skyAlways{false};    // whatever the biome (testing): caves get a sky too
     std::atomic<bool>  skyHidePanels{true}; // no sky while a side panel shifts the picture
-    std::atomic<bool>  fogCaves{true};      // [fog] caves: the fog in caves and dungeons too (every area off [sky] outdoor)
+    std::atomic<bool>  fogCaves{false};     // [fog] caves: opt-in added indoor fog; native lighting/effects remain
     std::atomic<bool>  ceilOn{false};       // [ceiling] enabled: a vault over the void in caves (first person only)
     std::atomic<float> ceilHeight{30.0f};   // [ceiling] height: over the hero's floor, world units
     std::atomic<float> ceilScale{10.0f};    // [ceiling] scale: world units per tile (the test grid's cell)
@@ -1034,7 +1033,7 @@ void LoadSettings() {
     g_set.fogCaveStrength.store(std::clamp(IniF(L"fog", L"caves_strength", 1.0f), 0.0f, 1.0f));
     g_set.fogCurve.store(std::clamp(IniF(L"fog", L"curve", 1.6f), 0.3f, 4.0f));
     g_set.fogBlur.store(std::clamp(IniF(L"fog", L"blur", 3.0f), 0.0f, 12.0f));
-    g_set.fogCaves.store(IniB(L"fog", L"caves", true));
+    g_set.fogCaves.store(IniB(L"fog", L"caves", false));
     {
         wchar_t poke[256];
         GetPrivateProfileStringW(L"debug", L"fog_poke", L"", poke, (DWORD)std::size(poke), g_iniPath);
@@ -7432,14 +7431,8 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
             (FogWanted()||g_set.skyOn.load()||CeilWanted()||TableKeyWanted());
         framevr::scenedepth::Bind(rt,cl,ownDepth,s);
         SetBool(rt,"OwnDepth",ownDepth);
-        float transparentScale[4]={1,1,0,0};
-        const bool transparent=framevr::transparentfog::Bind(rt,
-            ownDepth&&FogWanted()&&g_skyPalette.load()<0&&!CeilWanted(),transparentScale);
-        SetBool(rt,"TransparentMaskOn",transparent);
-        SetFloats(rt,"TransparentScale",transparentScale,4);
 #else
         SetBool(rt,"OwnDepth",false);
-        SetBool(rt,"TransparentMaskOn",false);
 #endif
         SetFloats(rt, "DepthScale", s, 2);
     }
@@ -7812,7 +7805,6 @@ void TryRegister() {
     framevr::resources::Register();
 #ifdef D2RVR_NATIVE_OPENXR
     framevr::scenedepth::Register(&Log);
-    framevr::transparentfog::Register(&Log);
     framevr::lightbounds::Register(&Log);
 #endif
 #ifdef D2RVR_NATIVE_OPENXR
@@ -8302,7 +8294,6 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
 D2RL_PLUGIN_EXPORT void D2RLoaderUnloadPlugin() noexcept {
 #ifdef D2RVR_NATIVE_OPENXR
     framevr::scenedepth::Shutdown();
-    framevr::transparentfog::Shutdown();
 #endif
     g_enabled.store(false);
     d2rcam::SetEnabled(false);

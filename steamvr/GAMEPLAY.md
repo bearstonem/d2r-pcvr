@@ -348,10 +348,17 @@ tabs and a **Reset eye height** button:
 |---|---|
 | Controls | Left/right controller reference for movement, menus, melee, bow, spells, potions, holsters and height reset |
 | VR | Controller labels, motion combat, seated belt position, dominant hand, smooth/snap turning, belt height and reach, weapon skill gestures and ordinary mob bars |
-| Video | Foveation Off / Fixed / Eye tracked, actual VR source size, added sky, fog, dungeon ceilings, terrain and object draw distances, VR render resolution |
+| Video | Foveation Off / Fixed / Eye tracked, actual VR source size, added sky, fog, indoor fog, dungeon ceilings, terrain and object draw distances, VR render resolution |
 | HUD | Health/mana location and tilt, optional resource alerts, navigation location, menu distance and tooltip timing |
 | Combat | Melee hit speed |
 | Haptics | Overall strength and separate melee, bow draw, bow/throw release, spell, interaction and resource-alert strengths; tests follow each action's hands |
+
+**VR Settings > Video > Indoor fog** controls added distance fog in caves and
+dungeons. It defaults to **Off** for new profiles and requires **Added fog** to
+be On. Turning Indoor fog Off preserves the game's own lighting and effects,
+including Tyrael's wings, while outdoor fog keeps its existing setting.
+Existing saved `[fog] caves` choices are preserved when updating; use the new
+toggle to change them. **Apply** takes effect live.
 
 **VR Settings > Haptics** tunes vibration for different controllers. Each strength
 ranges from **0% (Off) to 200%**, in **10% steps**, with **100%** as the default.
