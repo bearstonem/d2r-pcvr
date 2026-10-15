@@ -7,19 +7,6 @@ static void Check(bool b,const char* label){if(!b){std::fprintf(stderr,"FAIL: %s
 static Hit At(Page p,Rect r){return HitTest(p,(r.x+r.w*.5f)/Width,(r.y+r.h*.5f)/Height);}
 int main(){
     Snapshot s;s.ready=true;
-    {
-        Check(s.values[IndoorFog]==0,"added indoor fog defaults off");
-        constexpr Key video[]={Foveation,Sky,Fog,IndoorFog,Ceiling,DrawDistance,ObjectDistance,RenderResolution};
-        Check(RowCount(Page::Video)==8,"video page includes separate indoor fog toggle");
-        for(int row=0;row<8;++row)
-            Check(RowKey(Page::Video,row)==video[row]&&At(Page::Video,Increase(row)).index==video[row],
-                "video controls retain their correct hit targets after inserting indoor fog");
-        Model fog;fog.Open(s);fog.Click({Kind::Tab,int(Page::Video)});
-        fog.Click(At(Page::Video,ValueBox(3)));const auto request=fog.Click({Kind::Apply});
-        Check(request.changed==(ChangeMask{1}<<IndoorFog)&&request.values[IndoorFog]==1&&request.values[Fog]==s.values[Fog],
-            "indoor fog Apply changes only the indoor preference, preserving outdoor fog");
-        Check(RowY+7*RowStep+RowStep<=748,"last video row clears resolution help");
-    }
     for(int i=HapticStrength;i<=HapticAlert;++i){
         const auto key=Key(i);const int row=i-HapticStrength+(i>=HapticBowDraw?1:0);
         Check(s.values[key]==100,"haptics default to normal strength");

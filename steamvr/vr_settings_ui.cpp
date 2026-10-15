@@ -131,8 +131,8 @@ std::vector<uint8_t> Paint(const Model& m,Hit hover,const char* runtimeStatus,co
             button(ValueBox(row),label,{d.max==1?Kind::Change:Kind::None,key,1},false,enabled);
         }
         if(m.page==Page::Video){
-            text("Applying resolution changes rebuilds the VR view. Desktop restores the game's window size.",{40,748,1200,58},false,false,quiet);
-            text("Headset uses the runtime recommendation, capped at 4096 per side. DLSS: game Options.",{40,812,1200,48},false,false,quiet);
+            text("Applying resolution changes rebuilds the VR view. Desktop restores the game's window size.",{40,716,1200,65},false,false,quiet);
+            text("Headset uses the runtime recommendation, capped at 4096 per side. DLSS: game Options.",{40,795,1200,65},false,false,quiet);
         }
         if(m.page==Page::HUD){
             text("Palm: raise your left hand, turn the palm upward and hold briefly. Release trigger and grip.",{58,742,1160,40},false,false,quiet);

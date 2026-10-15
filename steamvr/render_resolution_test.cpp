@@ -45,7 +45,7 @@ int main(){
     assert(Normalize(RenderResolution,9)==0&&Normalize(RenderResolution,1.5f)==0);
     Model model;model.Open(s);model.Click({Kind::Tab,int(Page::Video)});
     const int row=RowCount(Page::Video)-1;assert(RowKey(Page::Video,row)==RenderResolution);
-    const auto box=Increase(row);assert(box.y+box.h<748); // Help moved below the new indoor-fog row.
+    const auto box=Increase(row);assert(box.y+box.h<716);
     auto hit=HitTest(Page::Video,(box.x+box.w*.5f)/Width,(box.y+box.h*.5f)/Height);
     assert(hit.index==RenderResolution);model.Click(hit);
     const auto save=model.Click({Kind::Apply});
