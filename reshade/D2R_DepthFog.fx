@@ -1299,16 +1299,20 @@ float3 DepthFogWorld(float4 pos, float2 uv, int eye)
     // ground has single empty pixels (depth 0): each was taken for the void,
     // got the sky, and the sky showed through the fog as dots along the
     // horizon. The void is now only where the pixel AND its neighbours are
-    // empty; the fog takes the farthest of the five (reverse-Z: the smallest),
-    // which also drowns single near pixels the game's dithered transparencies
-    // leave in far ground.
+    // empty; the fog takes the farthest drawn sample (reverse-Z: the smallest
+    // positive depth), which also drowns single near pixels the game's dithered
+    // transparencies leave in far ground. Empty neighbours must not turn a
+    // nearby silhouette into full fog: that cut a black outline through effects
+    // drawn over the pillars behind Tyrael. With no drawn sample, keep zero.
     const float2 px = float2(BUFFER_RCP_WIDTH, BUFFER_RCP_HEIGHT);
     const float d1 = DepthAt(duv + float2(px.x, 0)).x;
     const float d2 = DepthAt(duv - float2(px.x, 0)).x;
     const float d3 = DepthAt(duv + float2(0, px.y)).x;
     const float d4 = DepthAt(duv - float2(0, px.y)).x;
     const float dNear = max(max(d, d1), max(max(d2, d3), d4));
-    const float dFar = min(min(d, d1), min(min(d2, d3), d4));
+    const float dFar = min(min(d > 0.0 ? d : dNear, d1 > 0.0 ? d1 : dNear),
+                           min(min(d2 > 0.0 ? d2 : dNear, d3 > 0.0 ? d3 : dNear),
+                               d4 > 0.0 ? d4 : dNear));
 
     float3 fogColour = FogColor;
     if (SkyOn || CeilOn) {

@@ -33,10 +33,12 @@ struct Samples {
     // Sky, ceiling, fog, upside-down depth.
     std::array<float,4> flags{0,0,1,0};
     std::array<float,4> fog{0,0,0,1}; // RGB, strength
+    // Optional exact one-pixel neighbours: right, left, down, up; -1 uses scene depth.
+    std::array<float,4> edges{-1,-1,-1,-1};
 };
 struct Case {const char* name; Samples input; std::array<float,3> expected;};
 static const char* Fixture=R"hlsl(
-struct Samples { float4 colour,scene,flags,fog; };
+struct Samples { float4 colour,scene,flags,fog,edges; };
 StructuredBuffer<Samples> samples : register(t0);
 RWStructuredBuffer<float4> output : register(u0);
 static uint fixture;
@@ -67,6 +69,12 @@ float4 Sample(int samplerId) {
 #define tex2Dlod(s, uv) Sample(s)
 float DepthWidth() { return samples[fixture].scene.w; }
 float4 DepthAt(float2 uv) {
+    const float2 offset=(uv-float2(0.5,0.25))*1024;
+    const float4 edges=samples[fixture].edges;
+    if(all(abs(offset-float2(1,0))<0.01) && edges.x>=0) return edges.xxxx;
+    if(all(abs(offset-float2(-1,0))<0.01) && edges.y>=0) return edges.yyyy;
+    if(all(abs(offset-float2(0,1))<0.01) && edges.z>=0) return edges.zzzz;
+    if(all(abs(offset-float2(0,-1))<0.01) && edges.w>=0) return edges.wwww;
     const float down=(UpsideDown ? -1 : 1)*(uv.y-0.25)*1024;
     return down>=1.5 ? samples[fixture].scene.yyyy : samples[fixture].scene.xxxx;
 }
@@ -116,6 +124,29 @@ int main(int argc,char** argv) {try {
     s={};s.scene[1]=.01f;s.scene[2]=.6f;add("blurred distant fog retained",s,{.4f,.4f,.4f});
     s={};s.fog[3]=.4f;s.scene[1]=.0005f;add("partial fog strength",s,{.6f,.6f,.6f});
     s={};s.scene[3]=8;add("missing depth leaves colour intact",s,{1,1,1});
+    for(unsigned edge=0;edge<4;++edge) {
+        s={};s.scene[0]=s.scene[1]=.01f;s.edges[edge]=0;
+        add("near geometry beside empty depth has no dark rim",s,{1,1,1});
+        s={};s.edges[edge]=.01f;
+        add("empty pixel beside near geometry has no dark rim",s,{1,1,1});
+        s.scene[0]=s.scene[1]=.0005f;s.edges[edge]=0;
+        add("far geometry beside empty depth still fades",s,{0,0,0});
+        s={};s.edges[edge]=.0005f;
+        add("empty hole in far geometry stays fogged",s,{0,0,0});
+        s={};s.scene[0]=s.scene[1]=.01f;s.edges={0,0,0,0};s.edges[edge]=.0005f;
+        add("far valid neighbour still suppresses dithered near speck",s,{0,0,0});
+    }
+    s={};s.scene[0]=s.scene[1]=.2f/150;s.edges={0,0,0,0};
+    add("partly fogged silhouette retains its distance",s,{.5f,.5f,.5f});
+    for(unsigned backdrop=0;backdrop<2;++backdrop) {
+        s={};s.flags[backdrop]=1;s.scene[0]=s.scene[1]=.01f;s.edges={0,0,0,0};
+        add("sky or ceiling does not reintroduce near silhouette rim",s,{1,1,1});
+        s.scene[0]=s.scene[1]=.0005f;
+        if(backdrop==0) add("outdoor distant silhouette still fades",s,{0,0,0});
+        // At this ray angle the far surface is above the synthetic ceiling.
+        // The existing ceiling-cut path preserves bright effects over its stone.
+        else add("ceiling-cut bright effect preservation unchanged",s,{1.1f,1.1f,1.1f});
+    }
     ComPtr<ID3DBlob> blob,errors;
     const auto hr=D3DCompile(shader.data(),shader.size(),argv[1],nullptr,nullptr,"main","cs_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&blob,&errors);
     if(FAILED(hr)&&errors) std::fprintf(stderr,"%s\n",static_cast<const char*>(errors->GetBufferPointer()));
