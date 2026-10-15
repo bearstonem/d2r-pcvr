@@ -163,7 +163,7 @@ Battle.net edition, headset, controllers, connection/runtime and resolution.
    comparison. Check another item, empty cells, dragging and controller
    navigation. Try Instant, Short and Original; verify purchasing/stack
    shortcuts still honor only the player's actual modifiers.
-   Check the larger dropped-item names against bright/dark terrain and in a
+   Check the original-size dropped-item names with darker backing against bright/dark terrain and in a
    crowded loot pile; verify quality colors, spacing, click targets and pickup.
    Check VR Settings > Controls says to hold Right Grip + Right Trigger for item names.
    Let dropped-item labels time out, then hold Right Grip and squeeze Right

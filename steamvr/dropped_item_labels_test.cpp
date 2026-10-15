@@ -15,12 +15,12 @@ int main() {
     look.Refresh(1,1500,true);assert(!look.ShowAll(1500)); // no retained toggle after expiration
     look.Refresh(1,1600,false);assert(!look.Active(1600)&&!look.ShowAll(1600));
     look.Refresh(1,1650,true,true);assert(look.ShowAll(1650));
-    look.Refresh(1,1651,true);assert(!look.ShowAll(1651)&&look.Active(1651)); // release keeps larger native labels
+    look.Refresh(1,1651,true);assert(!look.ShowAll(1651)&&look.Active(1651)); // release keeps darker native labels
     look.Refresh(2,1700,true);assert(!look.ShowAll(1700)); // new session, no saved choice
     look.Refresh(2,1701,true,true);look.Clear();assert(!look.ShowAll(1701));
     look.Refresh(0,1800,true,true);assert(!look.Active(1800)&&!look.ShowAll(1800));
     look.Refresh(2,1900,false,true);assert(!look.Active(1900)&&!look.ShowAll(1900));
-    assert(TextScale==1.5f&&BackingAlpha(.6f)==.85f&&BackingAlpha(.95f)==.95f);
+    assert(TextScale==1.f&&BackingAlpha(.6f)==.85f&&BackingAlpha(.95f)==.95f);
     assert(BackingAlpha(0)==0&&BackingAlpha(-1)==-1);
     Shortcut combo;uint64_t now=1000,session=1,epoch=1;
     auto step=[&](float trigger,float grip=1,bool allowed=true){now+=20;return combo.Step(session,epoch,now,allowed,trigger,grip);};
@@ -77,7 +77,7 @@ int main() {
     assert(hands.Step(input).wheel==0); // ordinary stick clicks keep their wheel binding after release
     std::array<int32_t,4> box{100,150,120,28};
     const int32_t beforeText[]={100,20},afterText[]={150,30};
-    assert(Resize(box.data(),beforeText,afterText,TextScale));
+    assert(Resize(box.data(),beforeText,afterText,1.5f)); // legacy custom scaling still supported
     assert((box==std::array<int32_t,4>{70,136,180,42})); // stable center/bottom, matching text and padding
     const auto keep=box;
     for(float bad:{NAN,INFINITY,0.f,3.f})assert(!Resize(box.data(),beforeText,afterText,bad)&&box==keep);
@@ -85,9 +85,9 @@ int main() {
     box={INT32_MIN,150,120,28};const auto edge=box;
     assert(!Resize(box.data(),beforeText,afterText,TextScale)&&box==edge);
     float multiplier=0;
-    {TextScaleScope scope(multiplier,TextScale);assert(multiplier==1.5f);
-        {TextScaleScope nested(multiplier,1);assert(multiplier==1);}
-        assert(multiplier==1.5f);}
+    {TextScaleScope scope(multiplier,TextScale);assert(multiplier==1.f);
+        {TextScaleScope nested(multiplier,.75f);assert(multiplier==.75f);}
+        assert(multiplier==1.f);}
     assert(multiplier==0); // other native text retains its original scale
     std::puts("Loot labels: contrast/geometry, Show Items lease, grip/trigger hysteresis, combat consumption and lifecycle guards passed");
 }

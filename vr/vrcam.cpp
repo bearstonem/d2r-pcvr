@@ -4909,7 +4909,7 @@ void InstallLabelHooks() {
     const bool in = drawIn && d2rsig::Hook(RVA_LABEL_LAYOUT, kSigLabelLayout, sizeof kSigLabelLayout, (void*)&HookLabelLayout, (void**)&OrigLabelLayout);
     sizeFailed = !in;
     g_labelSizeIn.store(in);
-    Log(in ? "vrcam: item-label size hooks in - native VR uses 150% text; legacy views retain labels_size"
+    Log(in ? "vrcam: item-label size hooks in - native VR uses original text size; legacy views retain labels_size"
            : "vrcam: item-label size hooks FAILED - labels_size does nothing");
 }
 
