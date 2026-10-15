@@ -70,9 +70,10 @@ struct Preview {
     std::array<float,16> rendered{},previous{};
 };
 Preview preview;
+PreviewRenderPose previewRenderPose;
 std::atomic<bool> previewClient{false};
 std::atomic<uint64_t> previewReadyAt{0};
-uint64_t previewAttemptAt=0;
+PreviewRecovery previewRecovery;
 Gate current{};uintptr_t clientHero=0;
 Once once;
 Once spellOnce[2];
@@ -92,7 +93,7 @@ std::atomic<unsigned> renderCount{0},serverCount{0},clientCount{0},submitted{0},
 std::atomic<unsigned> lastLatency{0},lastSpeedCm{0};
 std::atomic<unsigned> boundMeshes{0},ignoredEntities{0};
 std::atomic<unsigned> positionMismatch{0};
-std::atomic<unsigned> previewCreated{0},previewRefused{0},uiRecovered{0};
+std::atomic<unsigned> previewCreated{0},previewRefused{0},previewRecovered{0},uiRecovered{0};
 std::atomic<unsigned> gameRecovered{0};
 struct Launch {
     Shot shot{};uintptr_t game=0,player=0;int slot=-1;
@@ -393,21 +394,42 @@ void VisualParams(const Shot& shot,float distance,uintptr_t hero,std::array<uint
     Param(params,0x3c,shot.kind==Kind::Spell?shot.skill:0);
     Param(params,0x40,shot.kind==Kind::Spell?shot.level:1);
 }
+// Requires mutex. Invalidate ownership before native destruction so late
+// renderer callbacks cannot revive the old binding or its readiness timestamp.
+void ClearPreviewClient() {
+    preview.client=0;preview.clientId=0;preview.binding.Clear();
+    preview.renderAt=0;preview.rendered={};preview.previous={};previewReadyAt=0;
+}
+void ObservePreview(uint64_t now) {
+    previewRecovery.Observe(enabled.load()&&preview.active&&preview.visible&&Allowed(preview.pose,current,now),previewReadyAt.load(),now);
+}
 void PresentPreview(uintptr_t hero,uint64_t session) {
-    Preview snapshot;
-    {std::lock_guard lock(mutex);snapshot=preview;}
-    if(snapshot.client) {
-        // Keep one silent model through skill/weapon/menu changes. Repeated
-        // allocation can replay TravelSound and race asynchronous mesh loading.
-        if(enabled.load()&&snapshot.pose.session==session)return;
-        uint32_t header[3]{};
-        if(Read(snapshot.client,header)&&header[0]==3&&header[1]==0&&header[2]==snapshot.clientId)
-            originalClientKill(snapshot.client);
+    Preview snapshot;bool recover=false;uint64_t lastRendered=0;
+    {
         std::lock_guard lock(mutex);
-        if(preview.client==snapshot.client){preview.client=0;preview.binding.Clear();previewReadyAt=0;Recount();}
+        const auto now=GetTickCount64();ObservePreview(now);
+        if(enabled.load()) {
+            if(!hero||!session||preview.pose.session!=session||!previewRecovery.Due(preview.client!=0,now))return;
+            recover=preview.client!=0;
+        } else if(!preview.client)return;
+        snapshot=preview;lastRendered=previewReadyAt.load();previewRecovery.Attempt(now);
+        if(snapshot.client){ClearPreviewClient();Recount();}
+    }
+    if(snapshot.client) {
+        uint32_t header[3]{};
+        const bool owned=Read(snapshot.client,header)&&header[0]==3&&header[1]==0&&header[2]==snapshot.clientId;
+        if(owned)originalClientKill(snapshot.client);
+        if(recover) {
+            ++previewRecovered;
+            char line[224];const auto now=GetTickCount64();
+            snprintf(line,sizeof line,"Frame bow preview recovery: client_valid=%d mesh_bound=%d rendered_before=%d last_render_age_ms=%llu",
+                int(owned),int(snapshot.binding.Bound()),int(lastRendered!=0),static_cast<unsigned long long>(lastRendered&&now>=lastRendered?now-lastRendered:0));
+            framevr::logging::Write(line);
+        }
+        // Let native cleanup finish; the next attempt creates at the current
+        // bow pose, rather than retaining the original client's room/location.
         return;
     }
-    if(!snapshot.active||!hero||!session||snapshot.pose.session!=session)return;
     // Client visual only: no server missile, attack, ammo or damage request.
     std::array<uint8_t,0x98> params{};VisualParams(snapshot.pose,0,hero,params);
     const auto saved=previewCreatingSession;previewCreatingSession=session;
@@ -422,7 +444,7 @@ void PresentPreview(uintptr_t hero,uint64_t session) {
             preview.client=client;preview.clientId=header[2];++previewCreated;
         } else {
             orphan=valid;++previewRefused;
-            if(preview.client==client){preview.client=0;preview.binding.Clear();}
+            if(preview.client==client)ClearPreviewClient();
         }
         Recount();
     }
@@ -485,7 +507,7 @@ void ClientTick(uintptr_t unit,float dt) {
         std::lock_guard lock(mutex);
         if(preview.client==unit&&preview.clientId==header[2]) {
             held=true;alive=preview.pose.session==current.session&&enabled.load();
-            if(!alive){preview.client=0;preview.binding.Clear();previewReadyAt=0;Recount();}
+            if(!alive){ClearPreviewClient();Recount();}
         }
         for(size_t i=0;i<usedSlots.load(std::memory_order_relaxed);++i)if(arrows[i].client==unit&&arrows[i].clientId==header[2]) {
             slot=i;alive=arrows[i].flight.alive&&arrows[i].flight.shot.session==current.session&&enabled.load();
@@ -504,7 +526,7 @@ void ClientKill(uintptr_t unit) {
     if(!clientCount.load(std::memory_order_relaxed)&&!previewClient.load(std::memory_order_relaxed)){originalClientKill(unit);return;}
     {
         std::lock_guard lock(mutex);
-        if(preview.client==unit){preview.client=0;preview.binding.Clear();previewReadyAt=0;}
+        if(preview.client==unit)ClearPreviewClient();
         for(auto& a:UsedArrows())if(a.client==unit){a.client=0;a.visualBinding.Clear();}
         Recount();
     }
@@ -513,18 +535,25 @@ void ClientKill(uintptr_t unit) {
 uintptr_t Transform(uintptr_t out,uint32_t entity,uintptr_t component) {
     const auto result=originalTransform(out,entity,component);
     if(!renderCount.load(std::memory_order_relaxed))return result;
-    std::array<float,16> matrix{},previous{};bool found=false,held=false,heldActive=false;
+    std::array<float,16> matrix{},previous{};bool found=false,held=false,heldVisible=false;
+    uint64_t heldSession=0,heldRevision=0;uintptr_t heldClient=0;uint32_t heldId=0;
     const uint64_t at=framevr::BowRenderTime();
     {
         std::lock_guard lock(mutex);
         if(preview.binding.Matches(entity)&&preview.pose.session==current.session) {
-            if(preview.renderAt!=at||preview.rendered[15]!=1) {
+            Shot pose=preview.pose;bool visible=false;
+            const bool active=enabled.load()&&previewRenderPose.Read(current.session,at,GetTickCount64(),pose,visible);
+            if(preview.renderAt!=at) {
                 preview.previous=preview.rendered;
-                PreviewMatrix(preview.pose,preview.active&&preview.visible,preview.rendered.data());
-                if(preview.previous[15]!=1)preview.previous=preview.rendered;
                 preview.renderAt=at;
             }
-            matrix=preview.rendered;previous=preview.previous;found=held=true;heldActive=preview.active;
+            // View can refresh the world anchor again within this pair. Always
+            // use that pose, while keeping previous-frame motion history for
+            // both eyes. The timer-owned pose remains for client lifecycle only.
+            PreviewMatrix(pose,active&&visible,preview.rendered.data());
+            if(preview.previous[15]!=1)preview.previous=preview.rendered;
+            matrix=preview.rendered;previous=preview.previous;found=held=true;heldVisible=active&&visible;
+            heldSession=pose.session;heldClient=preview.client;heldId=preview.clientId;heldRevision=previewRenderPose.revision;
         }
         for(auto& a:UsedArrows())if(!held&&a.visualBinding.Matches(entity)&&a.flight.shot.session==current.session) {
             if(a.renderAt!=at||a.rendered[15]!=1) {
@@ -545,7 +574,12 @@ uintptr_t Transform(uintptr_t out,uint32_t entity,uintptr_t component) {
     const bool written=framevr::WriteMemory(reinterpret_cast<void*>(out),matrix.data(),sizeof matrix)&&
         framevr::WriteMemory(reinterpret_cast<void*>(component+0x40),matrix.data(),sizeof matrix);
     framevr::WriteMemory(reinterpret_cast<void*>(component+0x80),previous.data(),sizeof previous);
-    if(held&&heldActive&&written)previewReadyAt=GetTickCount64();
+    if(held&&heldVisible&&written) {
+        std::lock_guard lock(mutex);
+        if(enabled.load()&&previewRenderPose.revision==heldRevision&&preview.binding.Matches(entity)&&
+           preview.pose.session==heldSession&&current.session==heldSession&&preview.client==heldClient&&preview.clientId==heldId)
+            previewReadyAt=GetTickCount64();
+    }
     return result;
 }
 }
@@ -555,9 +589,13 @@ void Init(const D2RL::PluginContext* ctx) {
        !D2RL::HasThreadServiceField(threads,D2RL::ThreadServiceRequiredSize))threads=nullptr;
 }
 void Configure(bool on){enabled=on;}
+void PublishPreviewPose(const Shot& pose,const Gate& gate,bool visible,uint64_t frame) {
+    std::lock_guard lock(mutex);
+    previewRenderPose.Publish(pose,gate,visible,frame);
+}
 bool PreviewReady() {
     const auto at=previewReadyAt.load();
-    return enabled.load()&&at&&GetTickCount64()-at<150;
+    return enabled.load()&&PreviewRecovery::Rendered(at,GetTickCount64());
 }
 bool SpellReady(){return enabled.load()&&ready.load()&&spellvr::Ready();}
 void Update(const Gate& gate,uintptr_t hero) {
@@ -568,21 +606,22 @@ void Update(const Gate& gate,uintptr_t hero) {
         std::lock_guard lock(mutex);
         if(current.session!=gate.session) {
             for(auto& a:UsedArrows())a={};
-            usedSlots=0;preview={};previewReadyAt=0;previewAttemptAt=0;
+            usedSlots=0;preview={};previewReadyAt=0;previewRecovery={};
             pendingCount=0;gameCallback.Cancel();uiCallback.Cancel();Recount();
         }
         current=gate;clientHero=hero;
         preview.active=held;preview.visible=held&&visible;
-        if(held)preview.pose=pose;else previewReadyAt=0;
+        if(held)preview.pose=pose;
+        if(!held||!visible)previewReadyAt=0;
         const auto now=GetTickCount64();
+        ObservePreview(now);
         if(gameCallback.Expired(now,500)){gameCallback.Cancel();pendingCount=0;++gameRecovered;}
         if(uiCallback.Expired(now,500)){uiCallback.Cancel();++uiRecovered;}
-        const bool needsPreview=(!enabled.load()&&preview.client)||(held&&visible&&!preview.client&&now-previewAttemptAt>=500);
+        const bool needsPreview=(!enabled.load()&&preview.client)||previewRecovery.Due(preview.client!=0,now);
         bool needsVisual=false;
         if(ready.load())for(const auto& a:UsedArrows())if(a.flight.alive&&!a.visualDone){needsVisual=true;break;}
         if(ready.load()&&(needsPreview||needsVisual)) {
             uiToken=uiCallback.Start(now);
-            if(uiToken&&needsPreview)previewAttemptAt=now;
         }
         if(ready.load()&&now-maintenanceAt>=100)
             for(const auto& a:UsedArrows())if(a.flight.alive){gameToken=gameCallback.Start(now);if(gameToken)maintenanceAt=now;break;}
@@ -786,9 +825,9 @@ void Report() {
     const auto c=contacts.exchange(0),w=walls.exchange(0),e=expired.exchange(0);
     const auto b=boundMeshes.exchange(0),i=ignoredEntities.exchange(0);
     const auto p=positionMismatch.exchange(0);
-    const auto pc=previewCreated.exchange(0),pr=previewRefused.exchange(0),ur=uiRecovered.exchange(0),gr=gameRecovered.exchange(0);
-    if(!s&&!n&&!v&&!x&&!r&&!c&&!w&&!e&&!b&&!i&&!pc&&!pr&&!ur&&!gr)return;
-    char line[480];snprintf(line,sizeof line,"Frame physical projectiles: releases=%u native=%u visual=%u stale=%u refused=%u contacts=%u barriers=%u expired=%u meshes=%u ignored entities=%u position_mismatch=%u preview_created=%u preview_refused=%u ui_recovered=%u game_recovered=%u last latency=%ums speed=%.1fm/s",s,n,v,x,r,c,w,e,b,i,p,pc,pr,ur,gr,lastLatency.load(),lastSpeedCm.load()/100.f);
+    const auto pc=previewCreated.exchange(0),pr=previewRefused.exchange(0),rc=previewRecovered.exchange(0),ur=uiRecovered.exchange(0),gr=gameRecovered.exchange(0);
+    if(!s&&!n&&!v&&!x&&!r&&!c&&!w&&!e&&!b&&!i&&!pc&&!pr&&!rc&&!ur&&!gr)return;
+    char line[512];snprintf(line,sizeof line,"Frame physical projectiles: releases=%u native=%u visual=%u stale=%u refused=%u contacts=%u barriers=%u expired=%u meshes=%u ignored entities=%u position_mismatch=%u preview_created=%u preview_refused=%u preview_recovered=%u ui_recovered=%u game_recovered=%u last latency=%ums speed=%.1fm/s",s,n,v,x,r,c,w,e,b,i,p,pc,pr,rc,ur,gr,lastLatency.load(),lastSpeedCm.load()/100.f);
     framevr::logging::Write(line);
 }
 }

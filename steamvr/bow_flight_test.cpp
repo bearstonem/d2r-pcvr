@@ -196,5 +196,101 @@ int main() {
             Check(!binding.Bound()&&!binding.Matches(mesh)&&binding.Bind(recycled,true),"new arrow may bind new generation after cleanup");
         }
     }
-    std::puts("Physical bow: release ownership, cancellation, cave coordinates, swept contacts, walls, speed, visual-axis and mesh-binding tests passed");
+    {
+        // Reproduce #93: the model initially renders, then its mesh stops
+        // updating while the client pointer remains alive. That pointer used
+        // to prevent any retry, even though the fallback was already visible.
+        PreviewRecovery recovery;VisualBinding binding;
+        constexpr uint32_t mesh=0x10003,recycled=mesh+(1u<<20);
+        recovery.Observe(true,0,1000);
+        Check(recovery.Due(false,1000),"visible bow with no client requests a preview");
+        recovery.Attempt(1000);
+        Check(binding.Bind(mesh,true),"first preview binds its native mesh");
+        for(uint64_t now=1050;now<=10000;now+=50) {
+            recovery.Observe(true,now,now);
+            Check(!recovery.Due(true,now),"healthy retained preview never gets recreated");
+        }
+        Check(PreviewRecovery::Rendered(10000,10149)&&!PreviewRecovery::Rendered(10000,10150),
+            "fallback appears when native render readiness expires");
+        recovery.Observe(true,10000,10150);
+        Check(!recovery.Due(true,13149),"brief render gaps have a recovery grace period");
+        Check(recovery.Due(true,13150),"stale mesh recovers even though native client still exists");
+        // A render arriving after scheduling but before the UI callback wins.
+        recovery.Observe(true,13151,13151);
+        Check(!recovery.Due(true,13151),"UI recheck preserves a preview that resumed rendering");
+        recovery.Observe(true,13151,13301);
+        Check(recovery.Due(true,16301),"later sustained render loss can recover again");
+        recovery.Attempt(16301);binding.Clear();
+        recovery.Observe(true,0,16302);
+        Check(!recovery.Due(false,16800)&&recovery.Due(false,16801),"retirement and replacement are rate limited");
+        recovery.Attempt(16801);
+        Check(binding.Bind(recycled,true)&&!binding.Matches(mesh),"replacement owns only its new mesh generation");
+        Check(!recovery.Due(true,19800),"replacement gets time for asynchronous mesh loading");
+        recovery.Observe(true,19800,19800);
+        Check(PreviewRecovery::Rendered(19800,19801)&&!recovery.Due(true,19801),"rendered replacement removes fallback and ends recovery");
+    }
+    {
+        PreviewRecovery recovery;
+        recovery.Observe(true,0,1000);recovery.Attempt(1000);
+        Check(!recovery.Due(false,1499)&&recovery.Due(false,1500),"failed allocations cannot retry every frame or fired arrow");
+        recovery.Attempt(1500);
+        Check(!recovery.Due(true,4499)&&recovery.Due(true,4500),"never-rendered native client can also recover after loading grace");
+        recovery.Observe(false,0,4500);
+        Check(!recovery.Due(true,60000)&&!recovery.Due(false,60000),"menus, holstering and tracking loss suspend recovery and creation");
+        recovery.Observe(true,0,60000);
+        Check(!recovery.Due(true,62999)&&recovery.Due(true,63000),"returning to bow starts a fresh visible grace period");
+        recovery.Observe(false,0,63000);recovery.Observe(true,0,64000);
+        recovery.Observe(true,64001,64001);
+        Check(!recovery.Due(true,70000),"resuming rendering cancels a queued recovery");
+        recovery={};recovery.Observe(true,0,100);
+        Check(recovery.Due(false,100)&&!recovery.Due(true,100),"new session forgets prior attempts and missing-render history");
+        Check(!PreviewRecovery::Rendered(0,100)&&!PreviewRecovery::Rendered(101,100),"missing and future render timestamps cannot hide fallback");
+    }
+    {
+        // A delayed gameplay timer must not pin the nocked arrow to an older
+        // player position. Camera movement and hand draw arrive every render
+        // pair, including a camera refresh within a pair and both eye passes.
+        const auto timerPose=Release();PreviewRenderPose render;
+        Flight fired;fired.shot=timerPose;fired.alive=true;fired.updatedAt=1000;
+        float firedBefore[16]{};ArrowMatrix(fired,1000,firedBefore);
+        for(int step=1;step<=40;++step) {
+            const uint64_t now=1000+step*25;
+            auto live=timerPose;live.at=now;
+            const Vec walk{step*.07f,0,-step*.11f};live.player=live.player+walk;live.origin=live.origin+walk;
+            live.direction={.6f,0,-.8f};
+            const Gate gate{true,live.session,live.epoch,now,live.equipment};
+            render.Publish(live,gate,true,now);
+            for(int eye=0;eye<2;++eye) {
+                Shot pose;bool visible=false;float matrix[16]{};
+                Check(render.Read(live.session,now,now,pose,visible)&&visible,"both eyes consume this pair's held arrow pose");
+                PreviewMatrix(pose,visible,matrix);
+                const auto tail=Point(matrix,{0,0,-.98391676f})*(1/live.unitsPerMetre);
+                Check(Length(tail-live.origin)<.0002f,"nocked arrow follows walking and strafing without waiting for timer");
+                Check(Length(tail-timerPose.origin)>.1f,"negative control distinguishes stale timer pose from moving bow");
+            }
+            const auto revision=render.revision;
+            live.player.x+=.2f;live.origin.x+=.2f;
+            render.Publish(live,gate,true,now);
+            Shot latest;bool visible=false;
+            Check(render.Read(live.session,now,now,latest,visible)&&render.revision!=revision&&
+                Length(latest.origin-live.origin)<.0001f,"later camera refresh in same pair replaces earlier world anchor");
+        }
+        float firedAfter[16]{};ArrowMatrix(fired,1000,firedAfter);
+        for(int i=0;i<16;++i)Check(firedBefore[i]==firedAfter[i],"render preview updates cannot drag a released arrow with the player");
+        auto live=timerPose;live.at=2200;Gate gate{true,live.session,live.epoch,2200,live.equipment};
+        Shot pose;bool visible=false;
+        render.Publish(live,gate,true,2200);
+        Check(!render.Read(live.session,2201,2201,pose,visible),"a missing current camera sample cannot reuse last pair's pose");
+        Check(!render.Read(live.session+1,2200,2200,pose,visible),"preview cannot cross character sessions");
+        Check(!render.Read(live.session,2200,2351,pose,visible),"stale tracking cannot keep a nocked arrow visible");
+        gate.active=false;render.Publish(live,gate,true,2200);
+        Check(!render.Read(live.session,2200,2200,pose,visible),"menus and inactive controls hide preview");
+        gate.active=true;gate.bowActive=false;render.Publish(live,gate,true,2200);
+        Check(!render.Read(live.session,2200,2200,pose,visible),"switching away from bow hides preview");
+        gate.bowActive=true;++gate.epoch;render.Publish(live,gate,true,2200);
+        Check(!render.Read(live.session,2200,2200,pose,visible),"recenter context mismatch rejects old hand pose");
+        --gate.epoch;render.Publish(live,gate,false,2200);
+        Check(render.Read(live.session,2200,2200,pose,visible)&&!visible,"out-of-reach preview remains hidden with valid tracking");
+    }
+    std::puts("Physical bow: release ownership, cancellation, cave coordinates, swept contacts, walls, speed, visual-axis, mesh-binding, preview recovery and render-pose tests passed");
 }

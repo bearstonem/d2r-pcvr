@@ -10,6 +10,8 @@ void Install();
 void Update(const framevr::bowflight::Gate& gate,uintptr_t clientPlayer);
 void Submit(const framevr::bowflight::Shot& shot);
 bool PreviewReady(); // lock-free; native mesh replaced the tracked draw guide
+// Render-side values only; never creates or destroys a native client unit.
+void PublishPreviewPose(const framevr::bowflight::Shot& pose,const framevr::bowflight::Gate& gate,bool visible,uint64_t frame);
 bool SpellReady();
 bool SpellTarget(uintptr_t game,uintptr_t player,int* x,int* y);
 // 0: unrelated request; 1: copied/adjusted; -1: reject before native creation.

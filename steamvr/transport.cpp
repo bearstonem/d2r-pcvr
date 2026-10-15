@@ -1626,10 +1626,10 @@ void Input() {
         static ULONGLONG reportAt=0;
         if(GetTickCount64()>=reportAt) {
             char message[600];std::snprintf(message,sizeof message,
-                "Frame gameplay ready: active=%d head=%d hands=%d%d aim=%d panel=%d atlas=%d selection=%d weapon=%d trigger=%d blocked=%d bow ready=%d reach=%d drawing=%d charged=%d native=%d anchored=%d draw=%.2f melee contact=%d grip=%d skill=%d motion=%d shield equipped=%d hook=%d contact=%d",
+                "Frame gameplay ready: active=%d head=%d hands=%d%d aim=%d panel=%d atlas=%d selection=%d weapon=%d trigger=%d blocked=%d bow ready=%d reach=%d drawing=%d charged=%d native=%d anchored=%d arrow_preview=%d draw=%.2f melee contact=%d grip=%d skill=%d motion=%d shield equipped=%d hook=%d contact=%d",
                 motionInput.active,motionHeadTracked,motionInput.tracked[0],motionInput.tracked[1],motionInput.aimTracked,panelMode,
                 gameplayChain!=XR_NULL_HANDLE,motion.Selection(),int(motionInput.weapon),motionInput.trigger>.55f,motionOutput.block,
-                motionOutput.bowReady,motionOutput.bowInReach,motionOutput.bowDrawing,motionOutput.bowCharged,skel::MotionBowPosed(),skel::MotionBowAnchored(),motionOutput.draw,
+                motionOutput.bowReady,motionOutput.bowInReach,motionOutput.bowDrawing,motionOutput.bowCharged,skel::MotionBowPosed(),skel::MotionBowAnchored(),bowvr::PreviewReady(),motionOutput.draw,
                 motionOutput.meleeContact,motionInput.grip[0]>.6f,motionInput.selectedSkill,motionInput.selectedAvailable,
                 gamestate::LeftShield(),::melee::ShieldReady(),motionOutput.shieldContact);Say(message);
             reportAt=GetTickCount64()+5000;
@@ -2522,6 +2522,9 @@ bool View(float out[16],const float hero[3],float eyeHeight,float userEyeHeight,
     held.draw=motionOutput.draw;held.at=motionAt;held.session=gamestate::LocalPlayer();
     held.epoch=(meleeEpoch<<32)|bowWorldEpoch;held.equipment=motionInput.equipment;held.sequence=1;
     bowPreviewPose=resolveBow(held);bowPreviewVisible=motionOutput.bowDrawing||motionOutput.bowInReach;
+    const bowflight::Gate previewGate{motionControls.load()&&motionInput.active&&!motionOutput.block,
+        held.session,held.epoch,motionAt,motionInput.equipment,motionOutput.bowReady};
+    bowvr::PublishPreviewPose(bowPreviewPose,previewGate,bowPreviewVisible,bowRenderTime.load());
     // Resolve the release once in the SAME stage-to-world frame as this view.
     // Absolute room poses avoid mixing an old weapon bone with a newer head yaw.
     if(bowNeedsWorld) {
