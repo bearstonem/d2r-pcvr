@@ -14,6 +14,15 @@ int main(){
     Check(WritePrivateProfileStringW(L"custom",L"keep",L"12345",name),"write unrelated key");
     Check(WritePrivateProfileStringW(L"render",L"rings",L"6",name),"write existing setting");
     vrsettings::Poll(name);auto before=vrsettings::Read();
+    Check(before.values[ElementalHands]==0,"missing elemental setting defaults off");
+    for(int enabled:{1,0}) {
+        Model effects;effects.Open(vrsettings::Read());effects.Click({Kind::Change,ElementalHands,1});
+        auto request=effects.Click({Kind::Apply});auto malformed=request;malformed.changed|=ChangeMask{1}<<63;
+        Check(!vrsettings::Submit(malformed),"unsupported high change bits rejected");
+        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"elemental setting saves beyond bit 31");
+        Check(vrsettings::Read().values[ElementalHands]==enabled&&Int(path,L"interactions",L"elemental_hands")==enabled&&
+            Int(path,L"custom",L"keep")==12345,"elemental opt-in/out round trips and preserves unrelated keys");
+    }
     Check(before.values[MeleeHitSpeed]==12,"missing melee speed uses twelve m/s default");
     for(float choice:{12.25f,12.f}) {
         Model melee;melee.Open(vrsettings::Read());melee.Click({Kind::Change,MeleeHitSpeed,choice>12?1:-1});

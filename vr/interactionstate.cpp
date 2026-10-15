@@ -65,7 +65,7 @@ Snapshot Collect() {
 void Publish(Snapshot s) {
     std::lock_guard lock(mutex);
     s.revision=snapshot.revision;
-    bool changed=s.session!=snapshot.session||s.activeSet!=snapshot.activeSet||s.equipmentKnown!=snapshot.equipmentKnown||
+    bool changed=s.session!=snapshot.session||s.heroClass!=snapshot.heroClass||s.activeSet!=snapshot.activeSet||s.equipmentKnown!=snapshot.equipmentKnown||
                  s.sets!=snapshot.sets||s.beltKnown!=snapshot.beltKnown||s.skills!=snapshot.skills||
                  s.catalog!=snapshot.catalog||s.skillCount!=snapshot.skillCount||s.bindingBank!=snapshot.bindingBank||s.bindingsEditable!=snapshot.bindingsEditable||
                  s.vitalsKnown!=snapshot.vitalsKnown||int(s.health)!=int(snapshot.health)||int(s.mana)!=int(snapshot.mana)||

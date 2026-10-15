@@ -73,6 +73,7 @@ This is a PCVR mod: the game runs on your Windows PC and streams to the headset.
 ## In the game
 
 - First-person VR with your character's body, hands and equipment.
+- Optional experimental [Sorceress elemental hand effects](docs/elemental_hands.md), enabled under VR Settings > Combat.
 - Free-swing melee, including with a wheel skill selected, aimed spells, bows and physical javelin throws.
 - Belt potions you can grab and drink, plus wrist health, mana, level and experience progress.
 - A **MAP** tab at the bottom of the spell menu, showing explored areas and native markers.

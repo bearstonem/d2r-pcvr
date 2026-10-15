@@ -7,6 +7,16 @@ static void Check(bool b,const char* label){if(!b){std::fprintf(stderr,"FAIL: %s
 static Hit At(Page p,Rect r){return HitTest(p,(r.x+r.w*.5f)/Width,(r.y+r.h*.5f)/Height);}
 int main(){
     Snapshot s;s.ready=true;
+    {Model effects;effects.Open(s);effects.Click({Kind::Tab,int(Page::Combat)});
+        Check(s.values[ElementalHands]==0,"experimental hand effects default off");
+        const auto hit=At(Page::Combat,ValueBox(1));
+        Check(hit.index==ElementalHands&&hit.kind==Kind::Change,"elemental hand toggle hit target");
+        effects.Click(hit);const auto request=effects.Click({Kind::Apply});
+        Check(request.changed==(ChangeMask{1}<<ElementalHands)&&request.values[ElementalHands]==1,"setting beyond bit 31 saves independently");
+        auto external=request.base;external[Motion]=1;
+        Check(!Conflict(external,request.base,request.changed),"high-bit edit tolerates unrelated setting changes");
+        external[ElementalHands]=1;Check(Conflict(external,request.base,request.changed),"high-bit conflicts detected");
+    }
     Check(s.values[MeleeHitSpeed]==12,"melee defaults to twelve m/s");
     {Model melee;melee.Open(s);melee.Click({Kind::Tab,int(Page::Combat)});
         const auto hit=At(Page::Combat,Increase(0));

@@ -109,6 +109,7 @@ void Capture(framevr::interaction::Snapshot& s) {
     if(!combat::ObserveUiPlayer(player,s.session))return;
     if(!combat::LocalPlayerId(id))return;
     reason=5;if(id!=h[2])return;
+    s.heroClass=h[1]<=6?int32_t(h[1]):-1;
     spellvr::Feedback(s.session,player,id,!gamestate::MenuOpen()&&(h[3]==1||h[3]==2||h[3]==3));
     auto stat=reinterpret_cast<int(*)(uintptr_t,int,int)>(d2rsig::Addr(abi::StatRva));
     s.health=stat(player,6,0)/256.f;s.maxHealth=stat(player,7,0)/256.f;

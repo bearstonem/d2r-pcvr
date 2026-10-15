@@ -31,6 +31,7 @@ target_sources(d2rl-vrcam PRIVATE ${ROOT}/vr/billboards.cpp)
 target_sources(d2rl-vrcam PRIVATE ${ROOT}/vr/panel_input.cpp)
 target_sources(d2rl-vrcam PRIVATE interaction_assets.rc interaction_icons.cpp ui_blit.cpp ui_world.cpp)
 target_sources(d2rl-vrcam PRIVATE potion_models.cpp)
+target_sources(d2rl-vrcam PRIVATE elemental_hands_renderer.cpp)
 target_sources(d2rl-vrcam PRIVATE ${ROOT}/vr/settings_menu.cpp ${CMAKE_CURRENT_SOURCE_DIR}/vr_settings_ui.cpp ${ROOT}/vr/native_ui.cpp ${CMAKE_CURRENT_SOURCE_DIR}/interaction_ui.cpp ${ROOT}/vr/interactionstate.cpp ${ROOT}/vr/bow.cpp ${ROOT}/vr/projectiles.cpp ${ROOT}/vr/combat.cpp ${ROOT}/vr/melee.cpp ${CMAKE_CURRENT_SOURCE_DIR}/transport.cpp ${CMAKE_CURRENT_SOURCE_DIR}/foveation.cpp ${CMAKE_CURRENT_SOURCE_DIR}/logging.cpp ${CMAKE_CURRENT_SOURCE_DIR}/profile.cpp)
 target_sources(d2rl-vrcam PRIVATE ${ROOT}/vr/native_belt.cpp)
 target_include_directories(d2rl-vrcam PRIVATE ${ROOT}/shared ${ROOT}/external/flatvr ${ROOT}/external/bodywalk ${ROOT}/external/reshade/include ${CMAKE_CURRENT_SOURCE_DIR} ${OPENXR_SDK}/include)
@@ -61,6 +62,9 @@ add_executable(weapon-skills-test weapon_skills_test.cpp)
 target_link_libraries(weapon-skills-test PRIVATE minhook)
 add_executable(quick-cast-test quick_cast_test.cpp)
 add_executable(hand-controls-test hand_controls_test.cpp)
+add_executable(elemental-hands-test elemental_hands_test.cpp)
+add_executable(elemental-hands-render-test elemental_hands_render_test.cpp elemental_hands_renderer.cpp)
+target_link_libraries(elemental-hands-render-test PRIVATE d3d12 dxgi framevr-runtime)
 add_executable(skill-pad-test skill_pad_test.cpp)
 add_executable(interact-press-test interact_press_test.cpp)
 add_executable(spell-aim-test spell_aim_test.cpp)
@@ -150,7 +154,7 @@ enable_testing()
 add_test(NAME light-bounds-test COMMAND light-bounds-test)
 set_tests_properties(light-bounds-test PROPERTIES TIMEOUT 30)
 foreach(test_target IN ITEMS memory-test hook-metrics-test active-keys-test resource-descriptions-test latest-worker-test haptic-pulse-test thread-stats-test
-    gameplay-test weapon-skills-test quick-cast-test hand-controls-test skill-pad-test interact-press-test spell-aim-test bow-pose-test body-tracking-test body-calibration-test shoulder-swap-test
+    gameplay-test weapon-skills-test quick-cast-test hand-controls-test elemental-hands-test skill-pad-test interact-press-test spell-aim-test bow-pose-test body-tracking-test body-calibration-test shoulder-swap-test
     portal-billboard-test composition-layers-test projectile-rules-test
     combat-rules-test logging-test melee-contact-test attack-speed-test world-coordinates-test bow-flight-test spell-cast-test spell-aim-assist-test
     interaction-test native-belt-test wrist-hud-test native-hud-test render-resolution-test render-pointer-test scene-depth-test game-device-only-test controller-bindings-test journal-test native-panels-test
@@ -164,6 +168,8 @@ foreach(test_target IN ITEMS memory-test hook-metrics-test active-keys-test reso
   add_test(NAME ${test_target} COMMAND ${test_target})
 endforeach()
 set_tests_properties(window-focus-test PROPERTIES TIMEOUT 10)
+add_test(NAME elemental-hands-render-test COMMAND elemental-hands-render-test)
+set_tests_properties(elemental-hands-render-test PROPERTIES TIMEOUT 45)
 add_test(NAME ui-blit-typed COMMAND ui-blit-test)
 add_test(NAME ui-blit-typeless COMMAND ui-blit-test --typeless)
 add_test(NAME ui-blit-typeless-black COMMAND ui-blit-test black --typeless)

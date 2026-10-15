@@ -31,6 +31,7 @@ int TakeShieldTarget(uint32_t& target); // 1 physical target, -1 cancelled cast,
 bool ShieldAim(float& x,float& y);
 void FinishShieldSkill(bool accepted);
 void MeleeImpact(); // thread-safe; haptic delivered by XR input update
+void SpellVisualCast(const bowflight::Shot&); // confirmed hand cast; cosmetic only
 bool TakeBowShot(bowflight::Shot& shot);
 bool TakeSpellShot(int hand,bowflight::Shot& shot);
 bool SpellHeld(const bowflight::Shot& shot);

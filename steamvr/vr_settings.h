@@ -12,8 +12,10 @@ namespace framevr::settings {
 enum class Page { Controls, VR, Video, HUD, Combat };
 enum Key { Motion, Seated, Dominant, Snap, TurnSpeed, Waist, BeltForward,
            Foveation, Sky, Fog, Ceiling, DrawDistance, ObjectDistance,
-           EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, Count };
-static_assert(Count<=32,"settings change mask capacity");
+           EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, ElementalHands, Count };
+using ChangeMask=uint64_t;
+static_assert(Count<=64,"settings change mask capacity");
+constexpr ChangeMask SupportedChanges=~ChangeMask{0}>>(64-Count);
 struct Definition {
     const char* label;
     const char* detail;
@@ -54,6 +56,7 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"Item tooltip timing", "Laser hover: Instant, Short (300 ms), or Original timing", L"hud",L"tooltip_timing",0,0,2,1},
     {"Projectile aim assist", "Hand spells: Light assists launch; Strong adds gentle homing", L"gameplay",L"projectile_aim_assist",2,0,2,1},
     {"Melee hit speed", "Higher requires faster weapon swings; shield bash is unchanged", L"gameplay",L"melee_hit_speed",12,1.5f,std::numeric_limits<float>::max(),.25f},
+    {"Elemental hand effects", "Sorceress: fire, frost and lightning around each hand (experimental)", L"interactions",L"elemental_hands",0,0,1,1},
 }};
 using Values=std::array<float,Count>;
 inline Values Defaults(){Values v{};for(int i=0;i<Count;++i)v[i]=Definitions[i].defaultValue;return v;}
@@ -69,11 +72,11 @@ inline float Normalize(Key key,float value){
 inline bool SmoothTurning(float snap,float smooth){return smooth<0?snap==0:Normalize(SmoothTurn,smooth)>.5f;}
 inline float SnapDegrees(float snap){return snap==0?Definitions[Snap].defaultValue:Normalize(Snap,snap);}
 inline float EffectiveSnapAngle(float snap,float smooth){return SmoothTurning(snap,smooth)?0.f:SnapDegrees(snap);}
-inline uint32_t Changed(const Values& a,const Values& b){uint32_t mask=0;for(int i=0;i<Count;++i)if(std::fabs(a[i]-b[i])>.0001f)mask|=1u<<i;return mask;}
-inline bool Conflict(const Values& current,const Values& base,uint32_t mask){return (Changed(current,base)&mask)!=0;}
+inline ChangeMask Changed(const Values& a,const Values& b){ChangeMask mask=0;for(int i=0;i<Count;++i)if(std::fabs(a[i]-b[i])>.0001f)mask|=ChangeMask{1}<<i;return mask;}
+inline bool Conflict(const Values& current,const Values& base,ChangeMask mask){return (Changed(current,base)&mask)!=0;}
 enum class Result { None, Saving, Saved, Failed, Conflict };
 struct Snapshot {Values values=Defaults();bool ready=false;uint64_t sequence=0,revision=0;Result result=Result::None;};
-struct Request {Values base{},values{};uint32_t changed=0;uint64_t sequence=0;};
+struct Request {Values base{},values{};ChangeMask changed=0;uint64_t sequence=0;};
 struct Rect {
     int x,y,w,h;
     bool Contains(float px,float py)const{return px>=x&&px<x+w&&py>=y&&py<y+h;}
@@ -92,9 +95,9 @@ inline Rect ControllerOption(int option){return {865,233+option*58,375,58};}
 inline Rect Decrease(int row){return {865,RowY+row*RowStep,64,52};}
 inline Rect Increase(int row){return {1176,RowY+row*RowStep,64,52};}
 inline Rect ValueBox(int row){return {942,RowY+row*RowStep,221,52};}
-inline int RowCount(Page page){return page==Page::Combat?1:page==Page::VR?10:page==Page::Video?7:page==Page::HUD?5:0;}
+inline int RowCount(Page page){return page==Page::Combat?2:page==Page::VR?10:page==Page::Video?7:page==Page::HUD?5:0;}
 inline Key RowKey(Page page,int row){
-    if(page==Page::Combat)return MeleeHitSpeed;
+    if(page==Page::Combat)return row==0?MeleeHitSpeed:ElementalHands;
     constexpr Key hud[]={VitalsLocation,CriticalAlerts,NavigationLocation,MenuDistance,TooltipTiming};
     if(page==Page::HUD)return hud[row];
     if(page==Page::Video&&row==6)return RenderResolution;

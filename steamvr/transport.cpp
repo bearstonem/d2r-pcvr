@@ -38,6 +38,7 @@
 #include "haptic_pulse.h"
 #include "interaction_icons.h"
 #include "potion_models.h"
+#include "elemental_hands_renderer.h"
 #include "vr_settings_ui.h"
 #include "../vr/settings_menu.h"
 #include "journal.h"
@@ -244,6 +245,9 @@ UiBlit uiBlit;
 UiBlit mapBlit; // Own descriptors: native menu and map copies may share a frame.
 potions::Models potionModels;
 potions::Scene potionScene;
+elements::Renderer elementalRenderer;
+elements::State elementalState;
+elements::Scene elementalScene;
 panels::MouseGate panelMouse;
 menus::ReleaseGate menuControls;
 menus::Navigation menuNavigation;
@@ -435,6 +439,7 @@ void ClearInput() {
     ++meleeEpoch;motion.Cancel();motionOutput={};motionAt=0;gamecmd::CancelPotion();
     interactions.Reset();interactionOutput={};interactionstate::Cancel();skel::SetInteractionHidden(0);
     potionScene={};
+    elementalState.Reset();elementalScene={};
     journalPlacement.LoseTracking();
     meleePoses.Clear();CancelShieldCast();
     bowNeedsWorld=bowHasShot=false;
@@ -780,6 +785,7 @@ bool Initialize(reshade::api::command_queue* rq,reshade::api::swapchain* swap) {
     atlasFormat=eyeFormat;
     if(!SetupGameplay(eyeFormat))Say("Frame gameplay: palette atlas unavailable; motion controls remain disabled");
     potionModels.Initialize(device.Get(),queue.Get(),eyeFormat,width,height,&Say);
+    elementalRenderer.Initialize(device.Get(),eyeFormat,width,height,&Say);
     if(!tracking.Open(D2RVR_SHARED_NAME)||!pad.Open(BW_PAD_MIRROR_NAME)||!actions.Open(D2RVR_ACTIONS_NAME)) return false;
     tracking.data->version=D2RVR_SHARED_VERSION;pad.data->version=BW_PAD_MIRROR_VERSION;actions.data->version=D2RVR_ACTIONS_VERSION;
     gameSwapchain=swap;
@@ -1421,6 +1427,19 @@ void Input() {
     const uint32_t hidden=interactionOutput.stowed?3u:journalMode?2u:interactionOutput.bottleHand>=0?1u<<interactionOutput.bottleHand:0;
     skel::SetInteractionHidden(hidden);
     potionScene=potions::MakeScene(interactionInput,interactionOutput);
+    elements::Input elementalInput;
+    elementalInput.context={interactionInput.session,(meleeEpoch<<32)|bowWorldEpoch,motionInput.skillContext,motionInput.equipment};
+    elementalInput.at=interactionInput.at;
+    elementalInput.enabled=hudSettings.values[settings::ElementalHands]>.5f;
+    elementalInput.active=motionInput.active&&!interactionOutput.wheel&&!interactionOutput.stowed&&!journalMode;
+    elementalInput.head=interactionInput.head;
+    for(int h=0;h<2;++h) {
+        elementalInput.hands[h]=interactionInput.hand[h];elementalInput.tracked[h]=interactionInput.tracked[h];
+        elementalInput.occupied[h]=interactionOutput.bottleHand==h||interactionOutput.owner[h]!=interaction::Owner::Combat;
+        elementalInput.casting[h]=handOutput.spells[h]>=0?handOutput.spells[h]:handOutput.slot>=0&&handOutput.hand==h?handOutput.slot:-1;
+        elementalInput.activation[h]=handOutput.activation[h];
+    }
+    elementalScene=elementalState.Step(elementalInput,interactionInput.snapshot);
     if(interactionInput.active) {
         const bool snapshotFresh=interaction::Fresh(interactionInput.snapshot,interactionInput.session,interactionInput.at);
         if(snapshotFresh&&(interactionPrefetchSession!=interactionInput.session||interactionPrefetchRevision!=interactionInput.snapshot.revision)) {
@@ -1704,6 +1723,12 @@ bool Copy(ID3D12Resource* src,Eye& e,reshade::api::command_queue* rq) {
         const auto& v=views[eye];
         potionModels.Render(e.commands.Get(),dest,eye,{V(v.pose.position),Q(v.pose.orientation)},
             {v.fov.angleLeft,v.fov.angleRight,v.fov.angleDown,v.fov.angleUp},potionScene);
+    }
+    if(!panelMode&&!spatialMode&&!settingsModel.open&&interactionInput.active&&
+       elements::Current(elementalScene,gamestate::LocalPlayer(),GetTickCount64())) {
+        const auto& v=views[eye];
+        elementalRenderer.Render(e.commands.Get(),dest,eye,{V(v.pose.position),Q(v.pose.orientation)},
+            {v.fov.angleLeft,v.fov.angleRight,v.fov.angleDown,v.fov.angleUp},elementalScene);
     }
     if(gpu){
         e.commands->EndQuery(gpuProfile.heap.Get(),D3D12_QUERY_TYPE_TIMESTAMP,eye*5+4);
@@ -2303,10 +2328,17 @@ void FinishShieldSkill(bool accepted) {
     if(accepted)shieldImpactAt=shieldFeedbackAt;
 }
 void MeleeImpact() {meleeImpactAt=GetTickCount64();}
+void SpellVisualCast(const bowflight::Shot& shot) {
+    if(shot.kind!=bowflight::Kind::Spell)return;
+    std::lock_guard lock(mutex);
+    elementalState.Accepted(shot.hand,{{shot.session,shot.epoch,shot.binding,shot.equipment},
+        GetTickCount64(),shot.activation,shot.slot,shot.skill,shot.owner});
+}
 void SetBowWorldEpoch(uint32_t epoch) {
     std::lock_guard lock(mutex);
     if(bowWorldEpoch==epoch)return;
     bowWorldEpoch=epoch;bowNeedsWorld=bowHasShot=false;CancelShieldCast();
+    elementalState.Reset();elementalScene={};
     if(motionInput.weapon==gameplay::Weapon::Bow||motionInput.weapon==gameplay::Weapon::Javelin){motion.Cancel();motionOutput={};}
 }
 uint64_t BowRenderTime(){return bowRenderTime.load();}
@@ -2412,6 +2444,7 @@ void Shutdown(bool preserveResolution) {
     // when ordinary frame submission uses queue ordering without a CPU wait.
     if(fence&&!WaitGpu())failed=true;
     if(uiEye.chain&&pDestroySwapchain)pDestroySwapchain(uiEye.chain);uiEye={};journalMode=spatialMode=workspacePlaced=false;hud::UiFrame(false,false,0);uiSupported=false;uiBlit={};potionModels.Reset();potionScene={};
+    elementalRenderer.Reset();elementalState.Reset();elementalScene={};
     if(mapEye.chain&&pDestroySwapchain)pDestroySwapchain(mapEye.chain);mapEye={};mapSupported=false;mapBlit={};gamestate::MenuMap(false);hud::MenuMapCapture(false);
     settingsModel.Close();settingsOpen=false;settingsInputGate.Suspend();settingsPaintRevision=~0ull;settingsAtlasPending=settingsImageReady=false;
     bodyCalibration.Cancel();calibrationRelease={};calibrationPrompted=floorSpace=false;calibrationSession=0;calibrationPaintKey=-1;

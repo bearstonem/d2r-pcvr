@@ -118,6 +118,7 @@ struct Skill {
 };
 struct Snapshot {
     uint64_t session=0,at=0;
+    int32_t heroClass=-1; // checked local UI player; unknown during teardown
     uint32_t revision=0,activeSet=0;
     bool equipmentKnown=false,beltKnown=false;
     std::array<std::array<Item,2>,2> sets{};
