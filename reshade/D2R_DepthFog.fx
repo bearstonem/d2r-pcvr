@@ -1267,6 +1267,21 @@ float3 VoidGlowAt(float2 uv)
     return lerp(wide, close, saturate(g8.a * 4.0));
 }
 
+// Transparent effects do not write depth. Estimate their fog from the nearby
+// scenery below them, using the same blurred field indoors and outdoors.
+float ParticleFog(float2 uv, float2 duv)
+{
+    float t = saturate(tex2Dlod(VoidFogSmp, float4(uv, 0, 0)).x);
+    const float down = UpsideDown ? -BUFFER_RCP_HEIGHT : BUFFER_RCP_HEIGHT;
+    float dn = 0.0;
+    [unroll] for (int s = 1; s <= 4; ++s) {
+        const float d = DepthAt(duv + float2(0.0, down * exp2((float)s))).x;
+        dn = dn > 0.0 ? dn : d;
+    }
+    if (dn > 1e-6) t = max(t, FogAmount(dn));
+    return t;
+}
+
 float3 DepthFogWorld(float4 pos, float2 uv, int eye)
 {
     const float3 colour = tex2D(FogColorSmp, uv).rgb;
@@ -1389,16 +1404,7 @@ float3 DepthFogWorld(float4 pos, float2 uv, int eye)
             // the sky's none into the far ground at the horizon, and the foam along the
             // far water's edge stood out of the fog there (2026-10-05).
             float tf = 0.0;
-            if (FogOn && k < 0.999) {
-                tf = saturate(tex2Dlod(VoidFogSmp, float4(uv, 0, 0)).x);
-                const float down = UpsideDown ? -px.y : px.y;
-                float dn = 0.0;
-                [unroll] for (int s2 = 1; s2 <= 4; ++s2) {
-                    const float dd = DepthAt(duv + float2(0.0, down * exp2((float)s2))).x;
-                    dn = dn > 0.0 ? dn : dd;
-                }
-                if (dn > 1e-6) tf = max(tf, FogAmount(dn));
-            }
+            if (FogOn && k < 0.999) tf = ParticleFog(uv, duv);
             // Only what is clearly off black: the near-black spill the game leaves round
             // people and trees over the void, added in full, stood as a pale haze round
             // them (2026-10-05). k fades it in over the same 0.03..0.08 as the void test.
@@ -1419,6 +1425,17 @@ float3 DepthFogWorld(float4 pos, float2 uv, int eye)
         if (SkyOn && !FogFixed) fogColour = (SkyTex > 0.5 ? PaintedSky(fogDir) : SkyGradient(fogDir.y)) * SkyBrightness + dither;
     }
     if (!FogOn) return colour;
+
+    if (!SkyOn && !CeilOn && dNear <= 1e-6) {
+        // In unroofed interiors such as Tal Rasha's Chamber, zero depth belongs
+        // to the background, not to Tyrael's wings drawn over it. Fogging that
+        // whole pixel as infinitely far cut the wings to the pillars' outlines.
+        // Keep the background's original fog, then retain the effect's light
+        // with the same distance estimate used over the outdoor sky.
+        const float t = ParticleFog(uv, duv);
+        if (ShowDistance) return t.xxx;
+        return fogColour * FogAmount(dFar) + colour * (1.0 - t);
+    }
 
     // The depth smeared: the fog of a 3x3 grid FogBlur pixels apart, averaged
     // (the fog, not the depth - an empty pixel is "far", not a zero to average).
