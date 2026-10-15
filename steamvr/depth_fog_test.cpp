@@ -109,8 +109,8 @@ int main(int argc,char** argv) {try {
     add("near light over empty background",s,{1,1,1});
     s.scene[0]=s.scene[1]=.01f; add("near solid scenery",s,{1,1,1});
     s.scene[0]=s.scene[1]=.0005f; add("distant solid scenery still hidden",s,{0,0,0});
-    s={};s.scene[2]=1;add("light over distant ground fades",s,{0,0,0});
-    s.scene[2]=.5f;add("light at partial fog distance",s,{.5f,.5f,.5f});
+    s={};s.scene[2]=1;add("empty indoor background does not borrow distant ground fog",s,{1,1,1});
+    s.scene[2]=.5f;add("empty indoor background does not borrow partial ground fog",s,{1,1,1});
     s={};s.colour={0,0,0,1};s.fog={.2f,.1f,.05f,1};
     add("custom background fog preserved",s,{.2f,.1f,.05f});
     s.fog[3]=.4f;add("partial background fog preserved",s,{.08f,.04f,.02f});
@@ -119,10 +119,11 @@ int main(int argc,char** argv) {try {
     s.scene[2]=1;add("outdoor far effects still fade",s,{.1f,.1f,.1f});
     s={};s.flags[1]=1;add("ceiling light unchanged",s,{1.1f,1.1f,1.1f});
     s.scene[2]=1;add("ceiling far effects still fade",s,{.1f,.1f,.1f});
-    s={};s.scene[1]=.0005f;add("nearby depth overrides blurred estimate",s,{0,0,0});
-    s.flags[3]=1;add("flipped depth uses correct downward direction",s,{0,0,0});
-    s={};s.scene[1]=.01f;s.scene[2]=.6f;add("blurred distant fog retained",s,{.4f,.4f,.4f});
-    s={};s.fog[3]=.4f;s.scene[1]=.0005f;add("partial fog strength",s,{.6f,.6f,.6f});
+    s={};s.flags[0]=1;s.scene[1]=.0005f;add("outdoor nearby depth overrides blurred estimate",s,{.1f,.1f,.1f});
+    // This flipped sample is below the horizon, where the sky takes FogColor.
+    s.flags[3]=1;add("flipped outdoor depth uses correct downward direction",s,{0,0,0});
+    s={};s.flags[0]=1;s.scene[1]=.01f;s.scene[2]=.6f;add("outdoor blurred distant fog retained",s,{.5f,.5f,.5f});
+    s={};s.flags[0]=1;s.fog[3]=.4f;s.scene[1]=.0005f;add("outdoor partial fog strength",s,{.7f,.7f,.7f});
     s={};s.scene[3]=8;add("missing depth leaves colour intact",s,{1,1,1});
     for(unsigned edge=0;edge<4;++edge) {
         s={};s.scene[0]=s.scene[1]=.01f;s.edges[edge]=0;
@@ -147,6 +148,16 @@ int main(int argc,char** argv) {try {
         // The existing ceiling-cut path preserves bright effects over its stone.
         else add("ceiling-cut bright effect preservation unchanged",s,{1.1f,1.1f,1.1f});
     }
+    // A continuous wing crosses columns with unrelated near/far/no ground below.
+    // Its native colour must match the same effect over a nearby pillar, rather
+    // than acquire bands from the screen-space distance guess. Include dim colour
+    // so the fix cannot merely classify saturated white pixels as special lights.
+    for(float below:{0.f,.01f,.0005f})for(float estimate:{0.f,.5f,1.f})for(float flipped:{0.f,1.f}) {
+        s={};s.colour={.3f,.7f,1,1};s.scene[1]=below;s.scene[2]=estimate;s.flags[3]=flipped;
+        add("indoor effect colour independent of scenery in each column",s,{.3f,.7f,1});
+    }
+    s={};s.colour={.3f,.7f,1,1};s.scene[0]=s.scene[1]=.01f;
+    add("same effect over nearby pillar has matching colour",s,{.3f,.7f,1});
     ComPtr<ID3DBlob> blob,errors;
     const auto hr=D3DCompile(shader.data(),shader.size(),argv[1],nullptr,nullptr,"main","cs_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&blob,&errors);
     if(FAILED(hr)&&errors) std::fprintf(stderr,"%s\n",static_cast<const char*>(errors->GetBufferPointer()));

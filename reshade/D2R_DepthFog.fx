@@ -1267,8 +1267,8 @@ float3 VoidGlowAt(float2 uv)
     return lerp(wide, close, saturate(g8.a * 4.0));
 }
 
-// Transparent effects do not write depth. Estimate their fog from the nearby
-// scenery below them, using the same blurred field indoors and outdoors.
+// Sky and added-ceiling composition estimate transparent effects' fog from
+// nearby scenery below them. This is not the effects' own depth.
 float ParticleFog(float2 uv, float2 duv)
 {
     float t = saturate(tex2Dlod(VoidFogSmp, float4(uv, 0, 0)).x);
@@ -1434,11 +1434,13 @@ float3 DepthFogWorld(float4 pos, float2 uv, int eye)
         // In unroofed interiors such as Tal Rasha's Chamber, zero depth belongs
         // to the background, not to Tyrael's wings drawn over it. Fogging that
         // whole pixel as infinitely far cut the wings to the pillars' outlines.
-        // Keep the background's original fog, then retain the effect's light
-        // with the same distance estimate used over the outdoor sky.
-        const float t = ParticleFog(uv, duv);
-        if (ShowDistance) return t.xxx;
-        return fogColour * FogAmount(dFar) + colour * (1.0 - t);
+        // Keep the background's original fog and the effect's native light.
+        // Borrowing distance from the ground below (ParticleFog) shaded columns
+        // of the same wing differently and changed its brightness at pillars.
+        // Without the effect's own depth, leave it at its authored brightness;
+        // actual drawn scenery still uses its distance in the path below.
+        if (ShowDistance) return 0.0;
+        return fogColour * FogAmount(dFar) + colour;
     }
 
     // The depth smeared: the fog of a 3x3 grid FogBlur pixels apart, averaged
