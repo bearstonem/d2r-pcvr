@@ -112,7 +112,7 @@ int main(){
     Check(Normalize(NavigationLocation,99)==0&&Normalize(NavigationLocation,1.5f)==0,"invalid navigation location falls back to Wrist");
     {Model navigation;navigation.Open(s);navigation.Click(At(Page::Controls,Tabs[int(Page::HUD)]));
         const int row=3;
-        Check(RowCount(Page::HUD)==6&&RowKey(Page::HUD,row)==NavigationLocation,"one navigation row replaces separate map/compass switches");
+        Check(RowCount(Page::HUD)==8&&RowKey(Page::HUD,row)==NavigationLocation,"one navigation row replaces separate map/compass switches");
         for(int location=1;location<=3;++location){
             navigation.Click(At(Page::HUD,Increase(row)));
             Check(navigation.Get()[NavigationLocation]==location,"navigation offers Palm, Either and Off");
@@ -129,6 +129,19 @@ int main(){
         Check(request.changed==(1u<<VitalsLocation),"palm placement saves independently");
         hud.Open(s);hud.Click(At(Page::HUD,ValueBox(2)));request=hud.Click({Kind::Apply});
         Check(request.changed==(1u<<CriticalAlerts)&&request.values[CriticalAlerts]==1,"alert opt-in saves independently");}
+    Check(s.values[BloodVisor]==1,"blood on visor defaults on");
+    {Model blood;blood.Open(s);blood.Click({Kind::Tab,int(Page::HUD)});
+        const auto hit=At(Page::HUD,ValueBox(6));
+        Check(RowKey(Page::HUD,6)==BloodVisor&&hit.kind==Kind::Change&&hit.index==BloodVisor,"HUD tab exposes the blood toggle");
+        blood.Click(hit);auto request=blood.Click({Kind::Apply});
+        Check(request.changed==(ChangeMask{1}<<BloodVisor)&&request.values[BloodVisor]==0,"blood toggle saves independently");}
+    Check(s.values[BloodWipe]==1,"face wipe gesture defaults on");
+    {Model wipe;wipe.Open(s);wipe.Click({Kind::Tab,int(Page::HUD)});
+        const auto hit=At(Page::HUD,ValueBox(7));
+        Check(RowKey(Page::HUD,7)==BloodWipe&&hit.kind==Kind::Change&&hit.index==BloodWipe,"face wipe toggle sits under the blood toggle");
+        Check(RowY+7*RowStep+RowStep<=742,"eighth HUD row clears the help text");
+        wipe.Click(hit);auto request=wipe.Click({Kind::Apply});
+        Check(request.changed==(ChangeMask{1}<<BloodWipe)&&request.values[BloodWipe]==0&&request.values[BloodVisor]==1,"wipe toggle saves without touching the blood toggle");}
     Check(s.values[VitalsTilt]==0,"vitals tilt keeps the original angle by default");
     Check(Normalize(VitalsTilt,NAN)==0&&Normalize(VitalsTilt,INFINITY)==0&&
         Normalize(VitalsTilt,-999)==-60&&Normalize(VitalsTilt,999)==60,"tilt rejects nonfinite input and clamps at sixty degrees");

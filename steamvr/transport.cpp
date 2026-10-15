@@ -33,6 +33,7 @@
 #include "gameplay.h"
 #include "hand_controls.h"
 #include "interaction_ui.h"
+#include "blood_screen.h"
 #include "wrist_compass.h"
 #include "interaction_paint.h"
 #include "latest_worker.h"
@@ -114,6 +115,25 @@ gameplay::Output motionOutput;
 interaction::Engine interactions;
 interaction::Input interactionInput;
 interaction::Output interactionOutput;
+// Blood on the visor: state on the frame thread, artwork composed in the
+// background, one head-locked quad directly above the world.
+blood::Engine bloodScreen;
+blood::Output bloodOutput;
+struct BloodJob {uint32_t visible=0;std::array<float,blood::Placements> age{},opacity{};};
+struct BloodImage {std::vector<uint8_t> pixels;uint32_t visible=0;};
+LatestWorker<BloodJob,BloodImage> bloodPainter([](const BloodJob& job) {
+    // Decoded and placed once, on this thread; read-only afterwards.
+    static const auto patches=[]{
+        const auto strip=interaction::BloodArt(blood::StripWidth,blood::StripHeight);
+        return blood::Prepare(strip.empty()?blood::FallbackStrip():strip);
+    }();
+    return BloodImage{blood::Compose(patches,job.visible,job.age,job.opacity),job.visible};
+});
+XrSwapchain bloodChain=XR_NULL_HANDLE;
+uint64_t bloodPaintKey=~0ull,bloodRequestedKey=~0ull,bloodPaintRequest=0;
+uint32_t bloodShown=0; // splats in the uploaded image
+ULONGLONG bloodPaintAt=0;
+bool bloodAtlasPending=false,bloodImageReady=false;
 XrSwapchain interactionChain=XR_NULL_HANDLE;
 XrSwapchain compassChain=XR_NULL_HANDLE;
 compass::Heading wristHeading;
@@ -661,6 +681,7 @@ bool SetupPointer(DXGI_FORMAT eyeFormat) {
 // Native skill icons, names and belt counts require a separate read-only UI adapter.
 bool SetupGameplay(DXGI_FORMAT eyeFormat) {
     if(!interactionPainter.Start())Say("Frame UI: background painter unavailable; interaction artwork cannot refresh");
+    if(!bloodPainter.Start())Say("Frame blood visor: background painter unavailable; blood stays hidden");
     const auto compassPixels=compass::Paint();
     compassAtlasReady=!compassPixels.empty()&&UploadAtlas(compassChain,eyeFormat,compass::Width,compass::Height,compassPixels);
     if(!compassAtlasReady)Say("Frame wrist compass: static atlas unavailable");
@@ -1369,6 +1390,46 @@ void Input() {
     for(int i=0;i<2;++i){interactionInput.tracked[i]=motionInput.tracked[i];interactionInput.grip[i]=motionInput.grip[i];
         interactionInput.hand[i]={motionInput.hand[i].p,motionInput.hand[i].q};}
     interactionOutput=interactions.Step(interactionInput);
+    // Blood on the visor follows life bands; a side-to-side scrub at the face
+    // wipes what healing has uncovered. A scrubbing hand is not a weapon.
+    {
+        blood::Input in;
+        in.time=interactionInput.time;in.session=interactionInput.session;in.epoch=interactionInput.epoch;
+        in.enabled=hudSettings.values[settings::BloodVisor]>.5f;
+        in.wipe=hudSettings.values[settings::BloodWipe]>.5f;
+        in.active=interactionInput.active&&!interactionOutput.wheel&&!interactionOutput.settings;
+        in.fresh=interaction::Fresh(interactionInput.snapshot,interactionInput.session,interactionInput.at);
+        in.vitalsKnown=interactionInput.snapshot.vitalsKnown;
+        in.health=interactionInput.snapshot.health;in.maxHealth=interactionInput.snapshot.maxHealth;
+        in.head=interactionInput.head.p;in.headRotation=interactionInput.head.q;
+        for(int h=0;h<2;++h) {
+            in.hand[h]=interactionInput.hand[h].p;in.tracked[h]=interactionInput.tracked[h];
+            in.busy[h]=interactionOutput.bottleHand==h||handInput.trigger[h]>.3f||(h==0&&motionOutput.bowDrawing);
+        }
+        bloodOutput=bloodScreen.Step(in);
+        for(int h=0;h<2;++h)if(bloodOutput.stroke[h]) {
+            MotionPulse(h,haptics::Category::Interaction,bloodOutput.clean?.45f:.18f,bloodOutput.clean?45000000:20000000);
+            char line[128];std::snprintf(line,sizeof line,"Frame blood visor: wipe hand=%d coverage=%.2f band=%.2f",h,bloodOutput.coverage,bloodOutput.band);Say(line);
+        }
+        if(bloodOutput.healed) {
+            char line[96];std::snprintf(line,sizeof line,"Frame blood visor: healed, fading to band=%.2f",bloodOutput.band);Say(line);
+        }
+        // Repaint only when something visibly changes: 25 Hz while splats land
+        // or fade, otherwise at most 8 Hz for the slow drips.
+        const auto now=GetTickCount64();
+        const auto key=blood::PaintKey(bloodOutput.visible,bloodOutput.age,bloodOutput.opacity);
+        if(bloodOutput.visible&&key!=bloodPaintKey&&now>=bloodPaintAt&&(!bloodPaintRequest||key!=bloodRequestedKey)) {
+            bloodPaintRequest=bloodPainter.Submit({bloodOutput.visible,bloodOutput.age,bloodOutput.opacity});bloodRequestedKey=key;
+            bloodPaintAt=now+(bloodOutput.fading?40:125);
+        }
+        BloodImage painted;
+        if(bloodPaintRequest&&!bloodAtlasPending&&atlasUploads.size()<3&&bloodPainter.Take(bloodPaintRequest,painted)) {
+            if(!painted.pixels.empty()&&UploadAtlas(bloodChain,atlasFormat,blood::Size,blood::Size,painted.pixels,true,&bloodAtlasPending)) {
+                bloodPaintKey=bloodRequestedKey;bloodShown=painted.visible;
+            }
+            bloodPaintRequest=0;
+        }
+    }
     // Bounded diagnostics distinguish gesture misses from native refusal.
     static ULONGLONG potionReportAt=0;
     if(interactionOutput.bottleHand>=0&&GetTickCount64()>=potionReportAt) {
@@ -1389,7 +1450,7 @@ void Input() {
     if(interactionOutput.feedback)MotionPulse(interactionOutput.feedbackHand,interactionOutput.feedback==4?haptics::Category::Alert:haptics::Category::Interaction,
         interactionOutput.feedback==2?.65f:.25f,interactionOutput.feedback>=3?100000000:35000000);
     motionInput.palette=false; // Dedicated interaction owner handles the new wheel/belt.
-    motionInput.active=motionInput.active&&!interactionOutput.block;
+    motionInput.active=motionInput.active&&!interactionOutput.block&&!bloodOutput.block[0]&&!bloodOutput.block[1];
     const auto& quickSnapshot=interactionInput.snapshot;
     const bool quickFresh=interaction::Fresh(quickSnapshot,interactionInput.session,interactionInput.at);
     const auto& rightSkill=quickSnapshot.skills[skills::TriggerSlot(0)];
@@ -2054,6 +2115,10 @@ void EndPair() {
         XrSwapchainImageReleaseInfo release{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
         Check(pReleaseSwapchainImage(interactionChain,&release),"release interaction atlas");interactionAtlasPending=false;
     }
+    if(bloodAtlasPending) {
+        XrSwapchainImageReleaseInfo release{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+        bloodImageReady=Check(pReleaseSwapchainImage(bloodChain,&release),"release blood visor");bloodAtlasPending=false;
+    }
     // Tabbed, trade and waypoint menus use the same black background in both eyes.
     // Submit just their shared opaque quad: no different cached world per eye.
     const bool blackMenu=opaqueMenuMode&&workspacePlaced&&uiEye.copied&&uiCrop[2]>0&&!settingsModel.open&&!bodyCalibration.Active();
@@ -2201,6 +2266,27 @@ void EndPair() {
         // every other optional layer: one bad laser must not hide the menu.
         motionQuad(laser,beamPose,.003f,beamLength,{{0,0},{64,32}},pointerChain);
         if(pointerHit)motionQuad(dot,dotPose,.018f,.018f,{{0,32},{64,64}},pointerChain);
+    }
+    // Head-locked blood: VIEW space, sized from both eyes' field of view, far
+    // enough that the pattern fuses like a screen effect. It goes directly above
+    // the world and below every HUD quad, and only into a spare layer slot.
+    XrCompositionLayerQuad bloodQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    if(bloodImageReady&&bloodShown&&bloodOutput.visible&&layer&&!panelMode&&!blackMenu&&!settingsModel.open&&
+       !bodyCalibration.Active()&&headSpace&&count<contentLimit) {
+        constexpr float distance=4,cap=1.4f; // cap: ~80 degrees per side
+        const auto fov=math::EnclosingSymmetricFov(
+            {views[0].fov.angleLeft,views[0].fov.angleRight,views[0].fov.angleDown,views[0].fov.angleUp},
+            {views[1].fov.angleLeft,views[1].fov.angleRight,views[1].fov.angleDown,views[1].fov.angleUp});
+        const float width=2*distance*std::tan(std::min(fov.right,cap))*1.05f,height=2*distance*std::tan(std::min(fov.up,cap))*1.05f;
+        if(std::isfinite(width)&&std::isfinite(height)&&width>0&&height>0) {
+            bloodQuad.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT|XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
+            bloodQuad.space=headSpace;bloodQuad.eyeVisibility=XR_EYE_VISIBILITY_BOTH;
+            bloodQuad.pose.orientation.w=1;bloodQuad.pose.position.z=-distance;bloodQuad.size={width,height};
+            bloodQuad.subImage.swapchain=bloodChain;bloodQuad.subImage.imageRect={{0,0},{blood::Size,blood::Size}};
+            const uint32_t below=count&&layers[0]==layer?1:0;
+            for(uint32_t i=count;i>below;--i)layers[i]=layers[i-1];
+            layers[below]=reinterpret_cast<const XrCompositionLayerBaseHeader*>(&bloodQuad);++count;
+        }
     }
     XrCompositionLayerQuad winePadding{XR_TYPE_COMPOSITION_LAYER_QUAD};
     if(padQuads&&composition::PrependQuadPadding(layers.data(),count,capacity,winePadding,headSpace,pointerChain)) {
@@ -2463,7 +2549,7 @@ void Shutdown(bool preserveResolution) {
     if(!preserveResolution)hud::NativeSession(false);
     if(!preserveResolution)resolution::Restore();
     windowFocus.Cancel();
-    EndPair();ClearInput();interactionPainter.Stop();interaction::icons::Shutdown();
+    EndPair();ClearInput();interactionPainter.Stop();bloodPainter.Stop();interaction::icons::Shutdown();
     // Completion is mandatory before destroying our commands/resources, even
     // when ordinary frame submission uses queue ordering without a CPU wait.
     if(fence&&!WaitGpu())failed=true;
@@ -2477,6 +2563,8 @@ void Shutdown(bool preserveResolution) {
     if(interactionChain&&pDestroySwapchain)pDestroySwapchain(interactionChain);interactionChain=XR_NULL_HANDLE;
     if(compassChain&&pDestroySwapchain)pDestroySwapchain(compassChain);compassChain=XR_NULL_HANDLE;wristHeading.Reset();compassFrame=compassAtlasReady=false;
     if(gameplayChain&&pDestroySwapchain)pDestroySwapchain(gameplayChain);gameplayChain=XR_NULL_HANDLE;
+    if(bloodChain&&pDestroySwapchain)pDestroySwapchain(bloodChain);bloodChain=XR_NULL_HANDLE;
+    bloodScreen.Reset();bloodOutput={};bloodShown=0;bloodPaintKey=bloodRequestedKey=~0ull;bloodPaintRequest=0;bloodPaintAt=0;bloodAtlasPending=bloodImageReady=false;
     if(pointerChain&&pDestroySwapchain)pDestroySwapchain(pointerChain);pointerChain=XR_NULL_HANDLE;
     if(aimSpace&&pDestroySpace)pDestroySpace(aimSpace);aimSpace=XR_NULL_HANDLE;
     if(leftAimSpace&&pDestroySpace)pDestroySpace(leftAimSpace);leftAimSpace=XR_NULL_HANDLE;

@@ -433,4 +433,7 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
     }
     SelectObject(dc,oldFont);DeleteObject(font);DeleteObject(shortcutFont);DeleteObject(skillFont);SelectObject(dc,old);DeleteObject(bitmap);DeleteDC(dc);return rgba;
 }
+std::vector<uint8_t> BloodArt(int width,int height) {
+    return width>0&&height>0?DecodeArt(L"D2RVR_BLOOD_VISOR",UINT(width),UINT(height)):std::vector<uint8_t>{};
+}
 }

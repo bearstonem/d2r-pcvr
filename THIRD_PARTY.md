@@ -70,6 +70,12 @@ and extracts `c/Redist/D3D/x64/d3dcompiler_47.dll` for mod-local shader compilat
 Neither the SDK package nor its compiler is bundled in this repository or release.
 Microsoft's [Windows SDK license](https://aka.ms/WinSDKLicenseURL) applies.
 
+The visor blood splatters in `steamvr/assets/blood-splatters.png` are eight
+transparent images supplied by contributor ChuckRibbits, who states they are free,
+openly licensed vector splatters; their original download source was not
+recorded. They are packed by `steamvr/prepare_blood.py` and embedded in the
+plugin. See [`steamvr/assets/README.md`](steamvr/assets/README.md#visor-blood).
+
 Diablo II: Resurrected, its executable, archives and save data belong to Blizzard
 Entertainment / their owners and are not distributed in this preview. This
 project is not affiliated with or endorsed by Blizzard Entertainment, Valve,

@@ -69,6 +69,7 @@ add_executable(bow-pose-test bow_pose_test.cpp)
 add_executable(body-tracking-test body_tracking_test.cpp)
 add_executable(body-calibration-test body_calibration_test.cpp)
 add_executable(shoulder-swap-test shoulder_swap_test.cpp)
+add_executable(blood-screen-test blood_screen_test.cpp)
 add_executable(portal-billboard-test portal_billboard_test.cpp)
 target_link_libraries(portal-billboard-test PRIVATE framevr-runtime)
 add_executable(composition-layers-test composition_layers_test.cpp)
@@ -156,7 +157,7 @@ enable_testing()
 add_test(NAME light-bounds-test COMMAND light-bounds-test)
 set_tests_properties(light-bounds-test PROPERTIES TIMEOUT 30)
 foreach(test_target IN ITEMS memory-test hook-metrics-test active-keys-test resource-descriptions-test latest-worker-test haptic-pulse-test thread-stats-test
-    gameplay-test weapon-skills-test quick-cast-test hand-controls-test skill-pad-test interact-press-test spell-aim-test bow-pose-test body-tracking-test body-calibration-test shoulder-swap-test
+    gameplay-test weapon-skills-test quick-cast-test hand-controls-test skill-pad-test interact-press-test spell-aim-test bow-pose-test body-tracking-test body-calibration-test shoulder-swap-test blood-screen-test
     portal-billboard-test composition-layers-test projectile-rules-test
     combat-rules-test logging-test melee-contact-test attack-speed-test world-coordinates-test bow-flight-test spell-cast-test spell-aim-assist-test
     interaction-test native-belt-test wrist-hud-test navigation-info-test dropped-item-labels-test show-items-command-test native-hud-test render-resolution-test render-pointer-test scene-depth-test game-device-only-test controller-bindings-test journal-test native-panels-test

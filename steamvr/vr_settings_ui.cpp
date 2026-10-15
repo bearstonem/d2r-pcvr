@@ -135,9 +135,9 @@ std::vector<uint8_t> Paint(const Model& m,Hit hover,const char* runtimeStatus,co
             text("Headset uses the runtime recommendation, capped at 4096 per side. DLSS: game Options.",{40,795,1200,65},false,false,quiet);
         }
         if(m.page==Page::HUD){
-            text("Palm: raise your left hand, turn the palm upward and hold briefly. Release trigger and grip.",{58,635,1160,60},false,false,quiet);
-            text("Health / mana tilt: -60 to +60 degrees in steps of 5. Apply saves; 0 restores the original angle.",{58,710,1160,60},false,false,quiet);
-            text("Minimap & Compass move together. Their placement is independent of health / mana tilt.",{58,785,1160,60},false,false,quiet);
+            text("Palm: raise your left hand, turn the palm upward and hold briefly. Release trigger and grip.",{58,742,1160,40},false,false,quiet);
+            text("Health / mana tilt: -60 to +60 degrees in steps of 5. Apply saves; 0 restores the original angle.",{58,786,1160,40},false,false,quiet);
+            text("Minimap & Compass move together. Their placement is independent of health / mana tilt.",{58,830,1160,40},false,false,quiet);
         }
         if(m.page==Page::Combat){
             text("Default: 12.00 m/s. Higher requires faster swings. Adjust in 0.25 steps with no upper limit.",{58,340,1160,76},false,false,quiet);
