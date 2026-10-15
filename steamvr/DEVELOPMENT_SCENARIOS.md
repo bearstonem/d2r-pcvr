@@ -8,6 +8,21 @@ Neither build installs or launches the game.
 This feature is for disposable **offline local expansion characters**. Do not
 use TCP/IP hosting/joining or online characters for development testing.
 
+## Development branch
+
+Keep this work on the long-lived `feat/development-scenarios` branch. Per the
+owner's direction, push development changes to that branch without opening a
+pull request for it. Periodically bring in changes from `main` while continuing
+development, using a merge to preserve the branch's history:
+
+```powershell
+git switch feat/development-scenarios
+git fetch origin main
+git merge origin/main
+# Resolve any conflicts and run checks appropriate to the incoming changes.
+git push origin feat/development-scenarios
+```
+
 ## Setup and use
 
 1. Install the developer DLL using the usual VR installation workflow, selecting
