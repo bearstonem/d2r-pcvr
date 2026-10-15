@@ -71,7 +71,7 @@ void Publish(Snapshot s) {
                  s.sets!=snapshot.sets||s.beltKnown!=snapshot.beltKnown||s.skills!=snapshot.skills||
                  s.catalog!=snapshot.catalog||s.skillCount!=snapshot.skillCount||s.bindingBank!=snapshot.bindingBank||s.bindingsEditable!=snapshot.bindingsEditable||
                  s.vitalsKnown!=snapshot.vitalsKnown||int(s.health)!=int(snapshot.health)||int(s.mana)!=int(snapshot.mana)||
-                 s.maxHealth!=snapshot.maxHealth||s.maxMana!=snapshot.maxMana||s.experience!=snapshot.experience||
+                 s.maxHealth!=snapshot.maxHealth||s.maxMana!=snapshot.maxMana||s.experience!=snapshot.experience||s.location!=snapshot.location||
                  s.actionKnown!=snapshot.actionKnown||s.actionMode!=snapshot.actionMode;
     for(int i=0;i<4;++i) {
         auto& b=s.belt[i];const auto& before=snapshot.belt[i];

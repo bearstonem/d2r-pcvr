@@ -179,6 +179,7 @@ not generate melee velocity. The layout currently assumes a right-handed player.
 | Seated weapon selection | Utility wheel → **Weapon I** or **Weapon II** |
 | Stow/draw | Utility wheel → **Stow weapons** / **Draw weapons**; native equipped stats stay unchanged |
 | Health/mana | Check the back of your left wrist, or choose **Palm** in **VR Settings > HUD** and hold your left palm upward in front of you briefly. No button required; automatic alerts are off by default |
+| Show all nearby loot labels (Alt) | Hold **Right Grip + Right Trigger**, grip first, to hold the native Show Items action. Release either to restore normal drop/hover labels; listed in **VR Settings > Controls** |
 | Explored minimap | Hold Left Y ? **MAP** in the bottom tabs; point right laser + trigger. **SPELLS** returns to skills; releasing Left Y closes the menu |
 | Quest journal | Open the native tabbed game menu with Left X / Frame Left A, then select Journal. The duplicate wheel entry is removed |
 | Journal controls | Right laser + trigger uses native page controls/act tabs; Right B follows native back; Left X performs native X |
@@ -186,12 +187,38 @@ not generate melee velocity. The layout currently assumes a right-handed player.
 | Walk / snap turn | Sticks; paused while wheel or journal is open |
 | Inventory menu / height reset | Left grip + left stick click / VR Settings > Reset eye height |
 
+Dropped-item names use **150% text size** and a darker backing in native VR
+gameplay, preserving the game's item-quality colors. The native label bounds
+grow with the text so placement and click targets match. **Right Grip + Right
+Trigger** holds the native **Show Items (Alt)** action, with a short vibration
+when the hold starts. All nearby loot labels stay shown while both buttons are
+held, using the game's native Alt range rather than a VR aiming or pickup radius.
+Release either button to restore normal labels for newly dropped or hovered items. It consumes
+the trigger squeeze without casting or shooting, including if you release grip first.
+Hold grip before squeezing the trigger; adding grip to an existing attack does
+not turn that attack into a loot-label hold. Analog hysteresis tolerates squeeze noise.
+Release the combo before casting or starting a grip interaction again.
+Use it outside menus and wheels, with no potion or holster interaction active.
+Normal right-stick clicks still toggle the wheel; native menu hold-to-sort stays
+available. Menus, tracking/focus loss, leaving VR or changing character release
+the command. Release the trigger before starting a fresh hold after an interruption;
+there is no saved toggle or automatic resume.
+The game's native item/filter rules apply. Inventory tooltips and monster labels
+keep their styling.
+
 The minimap and compass form one navigation display on your left hand.
 **VR Settings > HUD > Minimap / compass location** offers **Wrist** (default),
 **Palm**, **Either**, or **Off**. Click **Apply** to save. Both appear and hide
 together, independently of health/mana. When both displays share a hand face,
 navigation sits above the vitals; otherwise it sits directly at the hand anchor.
 The wheel's **MAP** tab remains available even when navigation is **Off**.
+
+The label above the compass shows your current **act (I-V)** and **area name**,
+including named dungeon floors. It follows the same wrist/palm placement and
+visibility as navigation, and updates when you cross a boundary or use a waypoint
+or portal. Area names use the game's current language. While location data is
+unavailable, the label says **Location unavailable** instead of retaining the
+previous area. The label and compass can still appear while map capture is unavailable.
 
 A slim bronze **compass** sits above the minimap. Its fixed
 center marker shows your facing direction; **N** is the top of the native map,
@@ -211,6 +238,14 @@ the left trigger and grip; casting with that hand hides the display. Lower or
 turn your hand to hide it. Losing left-hand tracking or opening a menu hides it
 and requires a new deliberate hold. Navigation has its own location setting, so
 you can keep health/mana on the wrist and navigation in the palm, or vice versa.
+
+**VR Settings > HUD > Health / mana tilt** adjusts the angle of the hand-mounted
+health, mana and XP display from **-60 to +60 degrees**, in **5-degree steps**.
+Positive values lean its top edge toward you; negative values lean it away.
+Click **Apply** to save and use the angle immediately. **0 degrees** restores
+the original angle and is the default for existing profiles. The panel pivots
+around its center on both Wrist and Palm placements (including Either).
+Navigation keeps its own placement, and low-resource popups continue to face you.
 
 **Low health / mana alerts** is a separate toggle, **Off** by default. Leave it
 off for gesture-only vitals. Opting in adds a brief popup near your view and
@@ -238,7 +273,15 @@ health, mana, level and XP progress with the wrist minimap turned off.
 Native in-game menus share a room-anchored surface in front of you. The full
 tabbed character menu, stash, inventory, cube, trade and waypoint surfaces use one opaque
 black background in both eyes. Dialogue and journal panels retain the world
-backdrop. Inventory/equipment, NPC
+backdrop, including any enabled sky, fog and cave ceiling effects. Opening an
+NPC conversation or continuing its speech keeps those effects visible; entering
+a merchant, stash or waypoint retains the shared black management background.
+NPC choices and story text retain the complete native canvas, using the same
+fitted surface and laser coordinates on all supported controllers. Their
+placement stays fixed when speech ends and choices return. The previous
+widget-based magnified crop was removed because it cut off choices after a
+VR resize; readability and selection still need a headset check.
+Inventory/equipment, NPC
 choices and speech, shops, stash, cube, waypoint, skills and character panels
 retain D2R's original artwork, text, prices, grids and tooltips. Inventory and
 shop panes keep their native relative positions; hovering a comparison tooltip
@@ -299,14 +342,48 @@ pending.
 
 ### In-headset VR settings
 
-The panel opens in front of the headset and stays in room space. It has three
+The panel opens in front of the headset and stays in room space. It has six
 tabs and a **Reset eye height** button:
 
 | Tab | Contents |
 |---|---|
 | Controls | Left/right controller reference for movement, menus, melee, bow, spells, potions, holsters and height reset |
-| VR | Motion combat on/off, seated belt position, dominant hand, smooth/snap turning, smooth turn speed, belt height and forward reach, wrist minimap on/off (default On) |
+| VR | Controller labels, motion combat, seated belt position, dominant hand, smooth/snap turning, belt height and reach, weapon skill gestures and ordinary mob bars |
 | Video | Foveation Off / Fixed / Eye tracked, actual VR source size, added sky, fog, dungeon ceilings, terrain and object draw distances, VR render resolution |
+| HUD | Health/mana location and tilt, optional resource alerts, navigation location, menu distance and tooltip timing |
+| Combat | Melee hit speed |
+| Haptics | Overall strength and separate melee, bow draw, bow/throw release, spell, interaction and resource-alert strengths; tests follow each action's hands |
+
+**VR Settings > Haptics** tunes vibration for different controllers. Each strength
+ranges from **0% (Off) to 200%**, in **10% steps**, with **100%** as the default.
+Overall strength multiplies the category strength: 50% overall and 50% bow draw
+produce 25% of the original draw amplitude. The controller's maximum amplitude
+still limits strong pulses. **Short melee pulses** is **Off by default**: weapon
+impacts use a 90 ms tap to make contact easier to feel during fast swings;
+shield impacts retain their 45 ms tap. Both use the controller's preferred
+frequency. Turn it On for the original 10 ms / 180 Hz tap on either hand.
+The **Weapon** and **Shield** tests use the same choice, including unsaved edits.
+
+Tests use the displayed, unsaved values and follow gameplay hand ownership:
+**Weapon** tests the right hand, **Shield** the left; bow draw tests both hands
+with the normal asymmetric pull pulses. **Bow** release tests both hands and
+**Throw** only the right. Spells and interactions retain **Test L / Test R**
+because either hand can perform them. Resource alerts have one **Test** on the
+left hand. A test is a sample, not a simulated gameplay action.
+**Apply** saves and updates gameplay feedback; **Close** discards unsaved edits.
+Muting a category stops its active vibration; Overall Off stops both controllers.
+Bow draw covers string proximity, nocking, pulling and full draw. Bow/throw release
+covers shooting and throwing. Melee covers weapon and shield impacts. Interactions
+cover loot, potions, holsters and menu feedback. Resource alerts still require
+**HUD > Low health / mana alerts** to be enabled for automatic warnings.
+
+Supported independent hand spells now give one brief pulse on the casting hand
+after a spell successfully creates its projectiles. A volley gives one pulse,
+and a refused cast gives none. Feedback is discarded when stale, inactive or from
+another character session. The **Spell casts** setting controls this pulse.
+Settings are stored under `[haptics]` as `strength`, `melee`, `bow_draw`,
+`bow_release`, `spells`, `interactions` and `alerts`; missing strength keys default
+to 100. `[haptics] short_melee=0` selects the longer tap; `1` selects the short tap.
 
 Click **Apply** to save changed values to `d2rloader/plugins/d2r_vr.ini` and
 reload them live. Closing without Apply discards pending edits. The first Apply
@@ -328,7 +405,7 @@ source size independently of the physical monitor. See [resolution settings
 and testing notes](VR_RESOLUTION.md). There is no control rebinding here.
 
 First headset check: open/close from the shortcut, then from the wheel; visit all
-three tabs and reset height; cancel an edit and confirm it is discarded; Apply
+six tabs and reset height; cancel an edit and confirm it is discarded; Apply
 a turn-mode change and confirm it persists on reopening; disable motion combat
 and reopen with the shortcut; switch foveation off/fixed/eye tracked and check
 clarity and gaze status. Confirm no menu click attacks, drinks or swaps a weapon,
@@ -437,6 +514,7 @@ Optional live configuration (metres below/forward/from the estimated torso):
 seated=0
 navigation_location=0
 vitals_location=0
+vitals_tilt=0
 critical_alerts=0
 waist_below_eyes=0.65
 belt_forward=0.26
@@ -448,6 +526,8 @@ holsters=1
 `3` Off. Older profiles without `navigation_location` start at Wrist if either
 legacy `wrist_map` or `wrist_compass` is enabled, or Off if both are disabled.
 An explicit navigation location takes precedence over those legacy switches.
+`vitals_tilt` is the health/mana/XP panel's tilt offset in degrees, clamped to
+`-60` through `60`; a missing or nonfinite value uses `0`.
 
 Seated mode raises the waist anchors. The belt and hip holsters follow tracked
 position and horizontal facing every frame, including while hands are lowered
@@ -592,12 +672,29 @@ translation/rotation supplies energy, so walking or turning a stationary weapon
 into an enemy does not cause damage. Right trigger remains an explicit native
 button fallback and suppresses simultaneous physical contact attacks.
 
-Confirmed weapon and shield impacts request a single 10 ms haptic tap at 95%
-amplitude and 180 Hz on the next XR input update, replacing the previous 45 ms
-buzz. Events are consumed once rather than held during overlap. A dedicated timer
+Confirmed weapon impacts request a single 90 ms haptic tap; shield impacts keep
+their 45 ms tap. Both use 95% base amplitude and the runtime's preferred
+frequency on the next XR input update.
+**VR Settings > Haptics > Short melee pulses** opts into a 10 ms / 180 Hz tap;
+it is Off by default, and both melee Test and real impacts use the selected pulse.
+Overall and Melee impacts strength scale its amplitude. Events are consumed once
+rather than held during overlap. A dedicated timer
 explicitly stops the vibration at its deadline even if rendering stalls; pulse
 replacement, focus loss and session shutdown cancel pending stops safely.
-This follows owner feedback that the Steam Frame sustained even one short pulse.
+Weaker incidental cues cannot replace a still-active melee pulse. New impacts,
+stronger cues and deliberate settings previews can replace it; mute and explicit
+cancellation still stop it immediately.
+Weapon hits target the right controller; shield bashes target the left. Each
+controller has its own OpenXR vibration action and binding, shared by pulse
+start and stop, to avoid depending on a shared action's hand filtering.
+While motion controls supply focused VR input, the mod suppresses the game's
+XInput pad-0 rumble (including native stop requests) so it cannot compete with
+OpenXR feedback. Those gamepad motor channels represent low/high frequency,
+not VR hand ownership. An existing desktop rumble is cleared once on takeover;
+desktop play, other gamepads and expired VR input pass through normally. The
+game's saved rumble preference is unchanged. Native rumble suppression and
+weapon/shield output requests are logged to distinguish overlapping feedback
+from reversed controller routing. Physical confirmation remains necessary.
 Exact feel and frequency support depend on the controller/runtime and need
 headset validation. Existing saved melee speed choices remain unchanged.
 
@@ -682,7 +779,10 @@ attachment pose, avoiding a newer hand position being applied to an older rig.
 A pull produces light haptic pulses as draw distance changes, plus nock and
 release pulses. Runtime acceptance is logged; that does not prove the user felt
 it. The native arrow is hidden until nocked. Unknown rigs retain their native
-animation plus the crossed-plane arrow and V-string guides.
+string and limb animation; their string does not yet follow the drawing hand.
+The teal V-string overlay is removed for all bow rigs. The nock marker and
+crossed-plane arrow fallback remain available when their native counterparts
+are not driven by the mod.
 
 The palette, neutral bottle and fallback nock/bow guides are lightweight
 OpenXR quads, stereo-positioned but not depth-tested against the game world.

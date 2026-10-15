@@ -51,12 +51,12 @@ Result Save(const wchar_t* path,const Request& r){
         return WritePrivateProfileStringW(section,key,text,temp.c_str())!=FALSE;
     };
     bool ok=true;
-    for(int i=0;i<Count&&ok;++i)if(r.changed&(1u<<i)){
+    for(int i=0;i<Count&&ok;++i)if(r.changed&(ChangeMask{1}<<i)){
         const auto& d=Definitions[i];
         if(i==Foveation)ok=write(L"render",L"fixed_foveation",r.values[i]>0?1:0)&&write(L"render",L"eye_tracked_foveation",r.values[i]==2?1:0);
         // Materialize the mode before replacing legacy snap=0. Changing the
         // stored angle must not implicitly switch a smooth profile to snap.
-        else if(i==Snap)ok=write(d.section,d.key,r.values[i])&&write(L"turn",L"smooth",(r.changed&(1u<<SmoothTurn))?r.values[SmoothTurn]:current[SmoothTurn]);
+        else if(i==Snap)ok=write(d.section,d.key,r.values[i])&&write(L"turn",L"smooth",(r.changed&(ChangeMask{1}<<SmoothTurn))?r.values[SmoothTurn]:current[SmoothTurn]);
         else ok=write(d.section,d.key,r.values[i]);
     }
     WritePrivateProfileStringW(nullptr,nullptr,nullptr,temp.c_str());
@@ -80,7 +80,7 @@ Result Save(const wchar_t* path,const Request& r){
 framevr::settings::Snapshot Read(){std::lock_guard lock(mutex);return published;}
 bool Submit(const framevr::settings::Request& r){
     using namespace framevr::settings;
-    if(!r.sequence||!r.changed||(uint64_t(r.changed)>>Count)||r.changed!=Changed(r.base,r.values))return false;
+    if(!r.sequence||!r.changed||(r.changed&~SupportedChanges)||r.changed!=Changed(r.base,r.values))return false;
     for(int i=0;i<Count;++i)if(!std::isfinite(r.base[i])||!std::isfinite(r.values[i])||Normalize(Key(i),r.values[i])!=r.values[i])return false;
     if(r.values[BodyCalibration]==1&&!framevr::calibration::Stored(r.values))return false;
     std::lock_guard lock(mutex);if(busy)return false;

@@ -26,6 +26,7 @@
 #include "../steamvr/resource_descriptions.h"
 #include "../steamvr/vr_settings.h"
 #include "../steamvr/interact_press.h"
+#include "../steamvr/dropped_item_labels.h"
 #include <tlhelp32.h>
 #include <intrin.h>
 #include <xinput.h>
@@ -82,6 +83,7 @@ namespace gamestate { bool ToggleMenus(); }
 namespace gamestate { uint32_t MenuEpoch(); }
 namespace gamestate { void Init(const D2RL::PluginContext* ctx); void Tick(); uint32_t WeaponClass(); uint32_t WeaponSet(); uint32_t WeaponType(); uint32_t HandsHeld(); uint32_t TwoHanded(); uint32_t WeaponHand(); uint32_t HandsKey(); bool MenuOpen(); int ObjectLight(uint32_t txt, uint32_t mode, float rgb[3]); uint64_t LocalPlayer(); void SetViewMode(uint32_t mode); bool AutoMapOpen(); bool SetAutoMap(bool open); void PollPlate(); bool PlateRect(int32_t out[4]); }
 namespace gamestate {bool LeftShield();}
+namespace gamestate {bool OpaqueMenuOpen();}
 #include "d2r_vr_state.h"
 
 #include "MinHook.h"
@@ -95,6 +97,8 @@ namespace gamestate {bool LeftShield();}
 #include "light_bounds.h"
 #include "game_device_only.h"
 #include "menu_controls.h"
+#include "xinput_rumble.h"
+#include "native_panels.h"
 #include "spell_aim.h"
 #include "skill_pad.h"
 #include "spell_aim_signatures.h"
@@ -1797,6 +1801,9 @@ bool FloorView() { return g_enabled.load() && TableView(); }
 // Flat keeps the game's labels: it has no such tabs.
 void LabelLookNow(float* alpha, float* size) {
     *alpha = 1.0f; *size = 1.0f;
+#ifdef D2RVR_NATIVE_OPENXR
+    if(framevr::lootlabels::display.Active(GetTickCount64())){*size=framevr::lootlabels::TextScale;return;}
+#endif
     if (g_set.platform.load() != 1) return;
     if (FloorView()) { *alpha = g_set.labelsAlphaFloor.load(); *size = g_set.labelsSizeFloor.load(); }
     else if (!g_enabled.load() || TopPersp()) { *alpha = g_set.labelsAlphaTop.load(); *size = g_set.labelsSizeTop.load(); }
@@ -2558,6 +2565,30 @@ XHook g_xhooks[] = {
     {L"xinput1_3.dll",   "XInputGetStateEx", 100, nullptr, false, {0}},
     {L"xinput9_1_0.dll", "XInputGetState",   0,   nullptr, false, {0}},
 };
+#ifdef D2RVR_NATIVE_OPENXR
+using XInputSetStateFn = DWORD (WINAPI*)(DWORD,XINPUT_VIBRATION*);
+struct RumbleHook {const wchar_t* dll;XInputSetStateFn original=nullptr;bool done=false;};
+RumbleHook g_rumbleHooks[]={{L"xinput1_4.dll"},{L"xinput1_3.dll"},{L"xinput9_1_0.dll"}};
+framevr::haptics::GamepadRumble g_gamepadRumble;
+thread_local bool t_rumbleForwarding=false;
+template<int I> DWORD WINAPI RumbleDetour(DWORD index,XINPUT_VIBRATION* vibration) {
+    const auto original=g_rumbleHooks[I].original;
+    if(t_rumbleForwarding)return original(index,vibration); // forwarded XInput DLL exports can call one another
+    const bool owns=framevr::OwnsControllerRumble();
+    if(owns&&index==0&&vibration&&(vibration->wLeftMotorSpeed||vibration->wRightMotorSpeed)) {
+        static std::atomic<ULONGLONG> reportAt{0};const auto now=GetTickCount64();auto last=reportAt.load();
+        if(now-last>=3000&&reportAt.compare_exchange_strong(last,now)) {
+            char line[160];snprintf(line,sizeof line,"Frame haptics: suppress native gamepad rumble low=%u high=%u; OpenXR owns controller feedback",
+                unsigned(vibration->wLeftMotorSpeed),unsigned(vibration->wRightMotorSpeed));Log(line);
+        }
+    }
+    return g_gamepadRumble.Send(owns,index,vibration,[original](DWORD user,XINPUT_VIBRATION* value){
+        struct Forwarding {Forwarding(){t_rumbleForwarding=true;}~Forwarding(){t_rumbleForwarding=false;}} forwarding;
+        return original(user,value);
+    });
+}
+void* const kRumbleDetours[]={(void*)&RumbleDetour<0>,(void*)&RumbleDetour<1>,(void*)&RumbleDetour<2>};
+#endif
 
 // Bow aim: while a skill button is held, the left stick is the bow hand's
 // pointing, so the game aims (and turns the hero) that way instead of where
@@ -3995,6 +4026,15 @@ void* const kXDetours[] = {(void*)&XDetour<0>, (void*)&XDetour<1>, (void*)&XDeto
 
 // XInput DLLs are often loaded late, so this runs until each one is in.
 void HookXInput() {
+#ifdef D2RVR_NATIVE_OPENXR
+    for(size_t i=0;i<std::size(g_rumbleHooks);++i) {
+        auto& h=g_rumbleHooks[i];if(h.done)continue;
+        const auto module=GetModuleHandleW(h.dll);if(!module)continue;h.done=true;
+        void* fn=(void*)GetProcAddress(module,"XInputSetState");if(!fn)continue;
+        const bool ok=MH_CreateHook(fn,kRumbleDetours[i],(void**)&h.original)==MH_OK&&MH_EnableHook(fn)==MH_OK;
+        char line[160];snprintf(line,sizeof line,"vrcam: %ls!XInputSetState rumble isolation %s",h.dll,ok?"hooked":"FAILED");Log(line);
+    }
+#endif
     for (size_t i = 0; i < std::size(g_xhooks); ++i) {
         XHook& h = g_xhooks[i];
         if (h.done) continue;
@@ -4729,7 +4769,7 @@ void InstallBiomeHook() {
     Log(g_h.biome ? "vrcam: biome hook in - the sky knows the area" : "vrcam: biome hook FAILED - the sky stays off unless [sky] always=1");
 }
 
-// -- Item labels on the ground, through the game's own code (F3 floor) --------
+// -- Ground-item labels through the game's own code (VR and legacy views) ----
 // Recon on the D2RLoader-layout snapshot: docs/labels_recon.md. A label is a
 // record of the game's ground-label list: +0x00 its box (x, y, w, h, ints),
 // +0x14 the box's colour (float RGBA, the game's own {0, 0, 0, 0.6}), +0x24
@@ -4747,7 +4787,9 @@ void InstallBiomeHook() {
 // [hud_floor] labels_size: the box made again round the name measured at the
 // other scale, about the same bottom middle, and the name drawn at that
 // scale - inside LabelPaint only (t_labelScale), every other text untouched.
-// Only on the floor; the hooks go in the first time the floor wants them.
+// Native VR uses a short gameplay lease for larger, stronger labels. Showing
+// all items is a native command in gamecmd.cpp, never a label-rendering veto.
+// Legacy views keep their existing profile settings.
 constexpr uint64_t RVA_LABEL_LAYOUT = 0x1FA9F0, RVA_LABEL_PAINT = 0x1FA8E0, RVA_TEXT_DRAW = 0x902E20;
 constexpr uint64_t RVA_TEXT_MEASURE = 0x909560, RVA_UI_SCALE = 0x8460F0, RVA_IS_HD = 0x846210;
 // push rbp, rbx, rsi, r12, r15; mov rbp, rsp; sub rsp, 0x50; mov r12d, r9d; mov byte [rdx], 0; mov rsi, r8
@@ -4777,7 +4819,11 @@ thread_local float t_labelScale = 0.0f;   // inside LabelPaint: the name drawn a
 float LabelSizeNow() {
     float alpha, size;
     LabelLookNow(&alpha, &size);
-    return g_set.labelsNativeFloor.load() && g_labelSizeIn.load() ? size : 1.0f;
+    bool native=false;
+#ifdef D2RVR_NATIVE_OPENXR
+    native=framevr::lootlabels::display.Active(GetTickCount64());
+#endif
+    return (native||g_set.labelsNativeFloor.load()) && g_labelSizeIn.load() ? size : 1.0f;
 }
 
 bool HookLabelLayout(void* unit, char* name, int32_t* box, int32_t minX, int32_t maxX, uint8_t flag) {
@@ -4793,28 +4839,25 @@ bool HookLabelLayout(void* unit, char* name, int32_t* box, int32_t minX, int32_t
     measure(name, name + 0x80, was, s, most);
     measure(name, name + 0x80, now, s * k, most);
     // the padding the game put round the name, scaled with it; anything else is not the box expected
-    const int32_t padW = box[2] - was[0], padH = box[3] - was[1];
-    if (was[0] <= 0 || was[1] <= 0 || now[0] <= 0 || now[1] <= 0 || padW < 0 || padH < 0 || padW > 400 || padH > 200)
-        return shown;
-    const int32_t w = now[0] + (int32_t)std::ceil((float)padW * k), h = now[1] + (int32_t)std::ceil((float)padH * k);
-    const int32_t mid = box[0] + box[2] / 2, bottom = box[1] + box[3];
-    box[0] = mid - w / 2; box[1] = bottom - h; box[2] = w; box[3] = h;
+    framevr::lootlabels::Resize(box,was,now,k);
     return shown;
 }
 
 uintptr_t HookLabelPaint(const int32_t* box, const char* name, const float* colour) {
     float alpha, size;
     LabelLookNow(&alpha, &size);
-    if (!colour || !g_set.labelsNativeFloor.load() || (alpha >= 0.995f && std::abs(size - 1.0f) < 0.005f))
+    bool native=false;
+#ifdef D2RVR_NATIVE_OPENXR
+    native=framevr::lootlabels::display.Active(GetTickCount64());
+#endif
+    if (!colour || (!native&&(!g_set.labelsNativeFloor.load() || (alpha >= 0.995f && std::abs(size - 1.0f) < 0.005f))))
         return OrigLabelPaint(box, name, colour);
     float c[4];
     memcpy(c, colour, sizeof c);
-    if (c[3] > 0.0f) c[3] *= alpha;   // below 0 the game skips the fill: left so
-    const float keep = t_labelScale;
-    t_labelScale = LabelSizeNow();
-    const uintptr_t r = OrigLabelPaint(box, name, c);
-    t_labelScale = keep;
-    return r;
+    if(native)c[3]=framevr::lootlabels::BackingAlpha(c[3]);
+    else if (c[3] > 0.0f) c[3] *= alpha;   // below 0 the game skips the fill: left so
+    const framevr::lootlabels::TextScaleScope scope(t_labelScale,LabelSizeNow());
+    return OrigLabelPaint(box, name, c);
 }
 
 uintptr_t HookTextDraw(const char* text, const int32_t* box, const void* style, float scale) {
@@ -4827,10 +4870,14 @@ uintptr_t HookTextDraw(const char* text, const int32_t* box, const void* style, 
 void InstallLabelHooks() {
     static bool paintFailed = false, sizeFailed = false, drawIn = false;
     static int misses = 0;
-    if (!g_ctx || !g_inWorld.load() || !g_set.labelsNativeFloor.load()) return;
+    bool native=false;
+#ifdef D2RVR_NATIVE_OPENXR
+    native=framevr::lootlabels::display.Active(GetTickCount64());
+#endif
+    if (!g_ctx || !g_inWorld.load() || (!native&&!g_set.labelsNativeFloor.load())) return;
     float alpha, size;
     LabelLookNow(&alpha, &size);   // the view now: the hooks go in the first time any view wants them
-    const bool wantBox = alpha < 0.995f;
+    const bool wantBox = native||alpha < 0.995f;
     const bool wantSize = std::abs(size - 1.0f) > 0.005f;
     if (!wantBox && !wantSize) return;
     if (!g_labelPaintIn.load()) {
@@ -4844,7 +4891,7 @@ void InstallLabelHooks() {
         const bool in = d2rsig::Hook(RVA_LABEL_PAINT, kSigLabelPaint, sizeof kSigLabelPaint, (void*)&HookLabelPaint, (void**)&OrigLabelPaint);
         paintFailed = !in;
         g_labelPaintIn.store(in);
-        Log(in ? "vrcam: item-label hook in - on the floor the labels' box fades by the game's own code ([hud_floor] labels_alpha)"
+    Log(in ? "vrcam: item-label hook in - native label backing available"
                : "vrcam: item-label hook FAILED - [hud_floor] labels_alpha fades them as a picture, labels_size does nothing");
         if (!in) return;
     }
@@ -4862,7 +4909,7 @@ void InstallLabelHooks() {
     const bool in = drawIn && d2rsig::Hook(RVA_LABEL_LAYOUT, kSigLabelLayout, sizeof kSigLabelLayout, (void*)&HookLabelLayout, (void**)&OrigLabelLayout);
     sizeFailed = !in;
     g_labelSizeIn.store(in);
-    Log(in ? "vrcam: item-label size hooks in - on the floor [hud_floor] labels_size sets the labels' size"
+    Log(in ? "vrcam: item-label size hooks in - native VR uses 150% text; legacy views retain labels_size"
            : "vrcam: item-label size hooks FAILED - labels_size does nothing");
 }
 
@@ -6878,6 +6925,14 @@ int Lights(Light* out) {
 }
 }  // namespace worldobj
 
+bool WorldMenuBlocksEffects() {
+#ifdef D2RVR_NATIVE_OPENXR
+    return framevr::panels::BlockWorldEffects(gamestate::MenuOpen(),framevr::SpatialMenu(),gamestate::OpaqueMenuOpen());
+#else
+    return gamestate::MenuOpen();
+#endif
+}
+
 void SkyTick() {
     env::Find();
     solidwalls::Tick();
@@ -6912,7 +6967,7 @@ void SkyTick() {
         if (!g_set.ceilOn.load()) cw = "[ceiling] enabled=0";
         else if (!g_ceilBiome.load()) cw = "not on [ceiling] biomes";
         else if (!g_enabled.load() || ThirdPerson()) cw = "not first person";
-        else if (gamestate::MenuOpen()) cw = "a menu is open";
+        else if (WorldMenuBlocksEffects()) cw = "a menu hides the world backdrop";
         static std::string toldCeil = "?";
         if (std::string(cw ? cw : "") != toldCeil) {
             toldCeil = cw ? cw : "";
@@ -6930,7 +6985,7 @@ void SkyTick() {
     else if (TableView()) why = "the table view (the room round the game)";
     else if (TopPersp()) why = "the view from above";
     else if (palette < 0) why = "not outdoors";
-    else if (gamestate::MenuOpen()) why = "a menu is open";
+    else if (WorldMenuBlocksEffects()) why = "a menu hides the world backdrop";
     g_skyPalette.store(why ? -1 : palette);
     static std::string toldWhy = "?";
     if (std::string(why ? why : "") != toldWhy) {
@@ -7101,7 +7156,7 @@ bool BoneAxesWanted() { return false; }
 bool StampWanted() { return g_enabled.load() && g_afrBlock && g_set.stamps.load() && g_set.stampPixels.load(); }
 
 bool FogWanted() {
-    return g_set.fogOn.load() && g_enabled.load() && !Overhead() && g_inWorld.load() && !gamestate::MenuOpen() &&
+    return g_set.fogOn.load() && g_enabled.load() && !Overhead() && g_inWorld.load() && !WorldMenuBlocksEffects() &&
            (g_set.fogCaves.load() || !g_underground.load());   // [fog] caves=0: none underground
 }
 // The table (F5): the void black, the game lifted off black - D2R_DepthFog.fx TableKey.
@@ -7110,7 +7165,7 @@ bool TableKeyWanted() { return TableView() && g_inWorld.load() && !gamestate::Me
 // never from above, from behind or on the floor (all three run as ThirdPerson).
 bool CeilWanted() {
     return g_set.ceilOn.load() && g_enabled.load() && !ThirdPerson() && g_inWorld.load() && g_ceilBiome.load() &&
-           !gamestate::MenuOpen();
+           !WorldMenuBlocksEffects();
 }
 
 // The pictures of each act as the shader's preprocessor definitions; only what

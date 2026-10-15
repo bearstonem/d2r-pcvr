@@ -49,6 +49,34 @@ int main(int argc,char** argv) {
         if(!SavePng(argv[1],gallery,w,h))return 62;
         std::puts("Compass preview: eight bearings, fixed marker and seamless north wrap passed");return 0;
     }
+    if(argc>2&&!std::strcmp(argv[2],"--navigation-check")) {
+        using namespace framevr;
+        Snapshot s;s.session=1;Output o;
+        const auto baseline=Paint(s,o,-1);
+        constexpr int rows=7,w=navigation::Width,h=navigation::Height;
+        const char* areas[]={"Rogue Encampment","Tower Cellar Level 5","Durance of Hate Level 3",
+            "Worldstone Keep Level 3","A very long test area name with a floor number 12",
+            "\xe5\xb4\x94\xe6\x96\xaf\xe7\x89\xb9", ""};
+        const int acts[]={1,1,3,5,2,4,0};
+        std::vector<uint8_t> gallery(w*rows*h*4);
+        for(int row=0;row<rows;++row) {
+            s.location={};s.location.level=row==rows-1?0:row+1;s.location.act=acts[row];
+            std::snprintf(s.location.name,sizeof s.location.name,"%s",areas[row]);
+            const auto atlas=Paint(s,o,-1);if(atlas.size()!=1024*1024*4)return 70;
+            int changed=0;
+            for(int y=0;y<1024;++y)for(int x=0;x<1024;++x) {
+                const bool inside=x>=navigation::AtlasX&&y>=navigation::AtlasY&&y<navigation::AtlasY+h;
+                const bool different=std::memcmp(&atlas[(y*1024+x)*4],&baseline[(y*1024+x)*4],4)!=0;
+                if(!inside&&different)return 71;
+                if(inside&&different)++changed;
+            }
+            if(row!=rows-1&&changed<100)return 72;
+            for(int y=0;y<h;++y)std::memcpy(&gallery[((row*h+y)*w)*4],
+                &atlas[((navigation::AtlasY+y)*1024+navigation::AtlasX)*4],w*4);
+        }
+        if(!SavePng(argv[1],gallery,w,rows*h))return 73;
+        std::puts("Navigation preview: area/floor names, acts, Unicode, long/unknown labels and atlas isolation passed");return 0;
+    }
     if(argc>3){wchar_t path[32768]{};MultiByteToWideChar(CP_UTF8,0,argv[3],-1,path,32768);icons::Directory(path);}
     Snapshot s;s.session=1;s.equipmentKnown=s.beltKnown=s.vitalsKnown=true;s.activeSet=1;
     if(argc>2&&!std::strcmp(argv[2],"--developer-check")) {

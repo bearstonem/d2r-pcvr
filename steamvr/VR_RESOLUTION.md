@@ -98,20 +98,22 @@ placement and laser-to-pixel mapping. The owner found the first fitted-height
 candidate too small/far away; closer placement and visible-band centering
 await a fresh headset comparison.
 
-NPC choice menus use their live `NpcDialogPanel`/`DialogBorder` bounds to
-display a separate, eye-level region at the same 0.55 m distance. The region
-has four times the previous workspace's pixel pitch, preserving text aspect
-and remapping laser hits into the native dialogue coordinates. The adjustment
-applies only when NPC choices are the sole modal panel; trade, inventory,
-confirmations over shops and scrolling quest speech retain their existing
-surfaces. Missing/stale/invalid bounds retain the full native surface. Automated
-tests cover crop limits, magnification and laser mapping; live layout mapping
-and headset readability still need owner validation.
-The first NPC candidate incorrectly scaled live source-pixel bounds as authored
-HD coordinates, clipping the left side of Charsi's choices at 4096 square.
-The corrected crop uses the live pixels directly, with border padding. A
-regression fixture uses both rectangles captured in the owner's recording;
-the corrected visual result still awaits headset confirmation.
+NPC conversations retain the complete captured native canvas on Frame, Index
+and Touch controllers. The widget-based crop and its separate four-times
+magnification were removed after the owner saw only the right edge of the
+choices at 3072 square. The SDK's parent-local widget bounds cannot safely be
+treated as texture coordinates after a resize; a plausible in-bounds rectangle
+can still sample the wrong pixels. The complete canvas uses the existing
+uniformly fitted workspace and menu-distance setting. Both NPC choices and
+scrolling speech use the same upper-band offset, and changing between them
+keeps the room-space anchor while rearming pointer input.
+
+The laser uses that same fitted surface, offset and full source region.
+Regression coverage exercises both edges and interior choices at 1536, 3072
+and 4096 square, widescreen and portrait sizes, including a 3840x2160 desktop
+with a differently sized VR source. Sky/world visibility and merchant/journal
+policies remain independently controlled. Headset visibility and readability
+of the complete NPC surface still require owner verification.
 
 The native lighting depth reduction also assumes square tiles when calculating
 the row for a linear sample index. Its 32x20 grid has rectangular tiles at
@@ -235,7 +237,7 @@ its upper widescreen-band height correction too, keeping the approved 0.55 m
 distance and existing scale. At 4096 square this lowers the full canvas by
 about 23.4 cm, centering the visible shop and inventory panes at eye height.
 The laser uses the same pose; tooltips and confirmations remain on the complete
-canvas. NPC choice crops and waypoint/journal placement are unchanged. The
+canvas. Waypoint/journal placement is unchanged. The
 October 13 20:22 recording confirms the previously high merchant placement;
 the correction still needs an offline headset check of trading, repairs,
 confirmation buttons and item dragging.

@@ -6,6 +6,7 @@
 #include "wrist_hud.h"
 #include "hand_vitals.h"
 #include "dev_scenarios.h"
+#include "navigation_info.h"
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -43,6 +44,15 @@ inline Pose HandFacePanel(Pose hand,Pose head,Vec normal,Vec offset) {
 }
 inline Pose WristPanel(Pose hand,Pose head) {return HandFacePanel(hand,head,WristNormal(hand),{-.055f,0,.06f});}
 inline Pose PalmPanel(Pose hand,Pose head) {return HandFacePanel(hand,head,PalmNormal(hand),{.055f,0,-.04f});}
+inline Pose VitalsPanel(Pose hand,Pose head,bool palm,float tiltDegrees=0) {
+    auto panel=palm?PalmPanel(hand,head):WristPanel(hand,head);
+    // Pitch about the readable panel's horizontal axis, keeping its center
+    // fixed. Positive tilt brings the top edge toward the viewer. Navigation
+    // retains the original hand-face plane and its existing spacing.
+    const float half=vitals::NormalizeTilt(tiltDegrees)*.00872664626f;
+    panel.q=math::Multiply(panel.q,{std::sin(half),0,0,std::cos(half)});
+    return panel;
+}
 constexpr float PalmWidth=.20f,PalmHeight=.10f;
 constexpr float WristWidth=.24f,WristHeight=.12f,WristMapSize=.24f;
 // Navigation uses one face and one layout for both the map and compass.
@@ -56,6 +66,13 @@ constexpr float WristCompassWidth=.24f,WristCompassHeight=.045f;
 inline Pose NavigationCompassPanel(Pose hand,Pose head,bool palm,bool vitalsOnFace) {
     auto panel=NavigationMapPanel(hand,head,palm,vitalsOnFace);
     panel.p=panel.p+math::Rotate(panel.q,{0,(WristMapSize+WristCompassHeight)*.5f+.01f,0});
+    return panel;
+}
+constexpr float NavigationInfoWidth=WristCompassWidth;
+constexpr float NavigationInfoHeight=NavigationInfoWidth*navigation::Height/navigation::Width;
+inline Pose NavigationInfoPanel(Pose hand,Pose head,bool palm,bool vitalsOnFace) {
+    auto panel=NavigationCompassPanel(hand,head,palm,vitalsOnFace);
+    panel.p=panel.p+math::Rotate(panel.q,{0,(WristCompassHeight+NavigationInfoHeight)*.5f+.006f,0});
     return panel;
 }
 inline bool WristPresented(Pose hand,Pose head) {
@@ -133,6 +150,7 @@ struct Snapshot {
     float health=0,maxHealth=0,mana=0,maxMana=0;
     bool vitalsKnown=false;
     wrist::Experience experience;
+    navigation::Location location;
     bool actionKnown=false;
     uint32_t actionMode=0;
 };
@@ -232,6 +250,7 @@ struct Input {
     bool active=false,tracked[2]{},wheel=false,cancel=false,reservedLeft=false,spell=false,quickCast=false;
     vitals::Location navigationLocation=vitals::Location::Wrist;
     vitals::Location vitalsLocation=vitals::Location::Wrist;
+    float vitalsTilt=0;
     bool criticalAlerts=false,leftCasting=false;
     Pose head{},hand[2]{};
     float trigger=0,leftTrigger=0,grip[2]{};

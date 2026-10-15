@@ -75,6 +75,8 @@ This is a PCVR mod: the game runs on your Windows PC and streams to the headset.
 - First-person VR with your character's body, hands and equipment.
 - Free-swing melee, including with a wheel skill selected, aimed spells, bows and physical javelin throws.
 - Belt potions you can grab and drink, plus wrist health, mana, level and experience progress.
+- A left-hand minimap/compass with current area and act, independent health/mana tilt,
+  and adjustable controller vibration under **VR Settings > Haptics**.
 - A **MAP** tab at the bottom of the spell menu, showing explored areas and native markers.
 - Selected Amazon arrow skills work with bow draw/release; selected Paladin Smite works with left-shield contact.
 - Body calibration for your height and arm span, available on first load
@@ -85,7 +87,8 @@ This is a PCVR mod: the game runs on your Windows PC and streams to the headset.
   **Frame Left A / Quest Left X**.
 
 [Watch the earlier wrist HUD demo (v0.3.6, 12 seconds)](https://github.com/bearstonem/d2r-pcvr/releases/download/v0.3.6-windows-preview/d2r-pcvr-wrist-hud-demo.mp4).
-The current preview keeps vitals and XP on the wrist and moves the map into the spell menu.
+The current preview offers wrist or palm placement for vitals and navigation,
+alongside the larger map in the spell menu.
 
 ## Controller reference
 
@@ -121,6 +124,8 @@ Quest left X/Y correspond to Index left A/B; right A/B labels are the same.
 | VR settings / body calibration | Either wheel → VR SETTINGS |
 | Minimap | Either wheel → MAP; movement remains available |
 | Reset height | VR Settings > Reset eye height |
+| Adjust controller vibration | **VR Settings > Haptics**; preview each action and **Apply** to save |
+| Hold to show nearby loot labels (Alt) | Hold **Right Grip + Right Trigger**, grip first; release either to restore normal drop/hover labels |
 | Interact / pick up / talk | Right A by default; requires an aimed interactable |
 | Free melee swing / thrust | Move the equipped weapon through an enemy |
 | Bow draw | Right trigger near the left-hand bow string; draw and release |

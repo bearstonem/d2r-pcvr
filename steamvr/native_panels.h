@@ -4,11 +4,12 @@
 
 namespace framevr::panels {
 inline constexpr char TabbedMenu[]="UISwitcher";
-// Shops bypass UISwitcher but occupy the same upper widescreen content band.
-// Keep this independent of opacity: waypoint and dialogue layouts differ.
+// Shops and conversations use the upper widescreen content band. Keep this
+// independent of opacity: conversations retain the stereo world behind them.
 inline bool UpperBand(std::string_view name) {
     return name==TabbedMenu||name.starts_with("Vendor")||
-        name.starts_with("Trade")||name.starts_with("Gamble");
+        name.starts_with("Trade")||name.starts_with("Gamble")||
+        name=="NpcDialogPanel"||name=="ScrollSpeechPanel";
 }
 // These management and waypoint canvases share one opaque image against black in XR.
 // VendorPanelLayout also hosts NPC gambling; keep speech/quest panels spatial.
@@ -18,6 +19,12 @@ inline bool OpaqueBackground(std::string_view name) {
         name.starts_with("Bank")||name.starts_with("Stash")||
         name.starts_with("PlayerInventory")||name.starts_with("HoradricCube")||
         name.starts_with("HirelingInventory")||name.starts_with("MercenaryInventory");
+}
+// Spatial conversations/journals retain a live stereo world behind the UI.
+// Keep its sky, fog and cave ceiling; opaque management surfaces and the
+// flat-menu fallback keep their existing suppression of world effects.
+inline bool BlockWorldEffects(bool menuOpen,bool spatialMenuReady,bool opaqueMenuOpen) {
+    return menuOpen&&(!spatialMenuReady||opaqueMenuOpen);
 }
 // Persistent HUD roots are not modal. Speech can outlive NpcDialogPanel.
 inline bool Modal(std::string_view name) {

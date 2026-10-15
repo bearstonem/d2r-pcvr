@@ -154,6 +154,7 @@ void Feedback(uint64_t session,uintptr_t player,uint32_t id,bool active) {
 }
 void Fired(const Shot& shot,uintptr_t game,uintptr_t player) {
     ++casts[shot.hand];
+    framevr::SpellCast(shot.hand,shot.session);
     uint32_t tick=0;if(!Read(game+0x170,tick))return;
     const int fcr=reinterpret_cast<int(*)(uintptr_t,int,int)>(d2rsig::Addr(nativeui::abi::StatRva))(player,105,0);
     cadence.Fired(shot.session,shot.hand,tick,framevr::spellcast::CastFrames(fcr));

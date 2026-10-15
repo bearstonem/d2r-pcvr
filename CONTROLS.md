@@ -56,6 +56,8 @@ Quest left X/Y correspond to Index left A/B; right A/B labels are the same.
 | VR settings / body calibration | Either wheel → VR SETTINGS |
 | Minimap | Either wheel → MAP; movement remains available |
 | Reset height | VR Settings > Reset eye height |
+| Adjust controller vibration | **VR Settings > Haptics**: overall strength plus separate melee, bow draw, bow/throw release, spell, interaction and resource-alert strengths. Tests match each action's hands; **Apply** saves |
+| Hold to show all nearby loot labels (Alt) | Hold **Right Grip + Right Trigger** during gameplay, grip first. Labels stay shown while both are held; release either to restore normal drop/hover labels. Uses the native Alt range, independently of where you aim. No cast or shot accompanies the combo. Also listed in **VR Settings > Controls** |
 | Interact / pick up / talk | Right A by default; requires an aimed interactable. One press acts on one target: press again for each item, including loot a chest just dropped |
 | Free melee swing / thrust | Move the equipped weapon through an enemy |
 | Bow draw | Right trigger near the left-hand bow string; draw and release |
@@ -67,6 +69,7 @@ Quest left X/Y correspond to Index left A/B; right A/B labels are the same.
 | Quick potion | Wheel → EQUIPMENT → potion, using opposite laser + trigger |
 | Grab wheel potion | Wheel → EQUIPMENT → potion, using the pointing hand's grip |
 | Wrist health / mana / XP | Look at the back of the left wrist |
+| Wipe blood off the visor | Scrub either hand side to side in front of your face, trigger released. About six strokes clear a full visor. **HUD > Face wipe gesture** turns this off |
 | Recenter / stereo capture | PC F11 / F8 |
 
 Editing consumes combat inputs but never pauses the game or zeros locomotion.
@@ -83,6 +86,26 @@ On the **VR** settings tab, **Smooth turning** defaults to **Off** (30-degree
 snap turns). Turn it **On**, then **Apply**, for continuous right-stick turning.
 **Snap turn angle** and **Smooth turn speed** keep their values when switching
 modes. Existing smooth-turn profiles retain their selected mode.
+
+The **Haptics** tab offers **Weapon / Shield** tests for melee, a combined bow-draw
+test, **Bow / Throw** release tests, **Test L / Test R** for spells and interactions,
+and one left-hand alert test. Tests use the displayed values before Apply.
+**Short melee pulses** defaults Off: weapon impacts last 90 ms and shield impacts
+45 ms at the controller's preferred frequency. On selects the earlier 10 ms /
+180 Hz pulse. **HUD > Low health / mana alerts** must also be enabled for
+automatic resource warnings.
+
+**HUD > Blood on visor** (default On) splashes blood around the edge of the
+view as life drops below 60%, 40% and 20%; large splats drip slowly, then dry.
+Healing back above a band, from any source, fades that band's blood out over
+about a second. Changing maximum life alone (Battle Orders, Oak Sage, +life gear)
+neither splashes nor fades. With **HUD > Face wipe gesture** On (the default),
+scrubbing a hand side to side in front of the face wipes blood
+at any time: each stroke ticks the controller and smears some splats away. While
+you are still hurt, the visor then stays clean until the next hit splashes it
+again. The centre of the view always stays clear. While a hand is scrubbing it
+does not attack; a held potion, squeezed trigger or bow draw never counts as
+wiping.
 
 ## Hand skill layouts
 

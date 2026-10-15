@@ -18,6 +18,7 @@ void ConfigureGameplay(bool enabled);
 void ConfigureInteractions(bool seated,float waistBelowEyes,float beltForward,int dominantHand);
 // Current motion-combat aim in the existing head-yaw-relative hand frame.
 bool SettingsOpen();
+bool OwnsControllerRumble(); // lock-free; VR input owns feedback instead of gamepad motors
 bool SpellSelected();
 bool LeftHandAiming();
 bool NativeAimOwnership(); // hand casting or wheel: preserve locomotion, suppress legacy aim modes
@@ -31,6 +32,7 @@ int TakeShieldTarget(uint32_t& target); // 1 physical target, -1 cancelled cast,
 bool ShieldAim(float& x,float& y);
 void FinishShieldSkill(bool accepted);
 void MeleeImpact(); // thread-safe; haptic delivered by XR input update
+void SpellCast(int hand,uint64_t session); // one successful hand spell, not each projectile
 bool TakeBowShot(bowflight::Shot& shot);
 bool TakeSpellShot(int hand,bowflight::Shot& shot);
 bool SpellHeld(const bowflight::Shot& shot);

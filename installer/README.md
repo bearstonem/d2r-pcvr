@@ -32,7 +32,7 @@ Use a clean committed topic branch. Build the native plugin as described in
 `CONTRIBUTING.md`, then package its output:
 
 ```powershell
-.\deps\python\python.exe steamvr/package.py --build build-frame/windows-native --openxr-loader build-frame/windows-native/openxr_loader.dll --casclib build-frame/casclib-installer/CascLib.dll --release-tag v0.3.14-windows-preview --output build-frame/releases/v0.3.14-windows-preview/d2r-pcvr-windows.zip
+.\deps\python\python.exe steamvr/package.py --build build-frame/windows-native --openxr-loader build-frame/windows-native/openxr_loader.dll --casclib build-frame/casclib-installer/CascLib.dll --release-tag v0.3.15-windows-preview --output build-frame/releases/v0.3.15-windows-preview/d2r-pcvr-windows.zip
 ```
 
 Use the actual paths from your native and CascLib builds. When reusing an unchanged
@@ -42,7 +42,7 @@ do not claim that it was rebuilt from the installer change.
 Install [Inno Setup 7.1.0 or newer](https://jrsoftware.org/isdl.php), then run:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File installer/build_native_installer.ps1 -PackagePath build-frame/releases/v0.3.14-windows-preview/d2r-pcvr-windows.zip -Version 0.3.14 -ISCCPath 'C:\Program Files (x86)\Inno Setup 7\ISCC.exe'
+powershell -NoProfile -ExecutionPolicy Bypass -File installer/build_native_installer.ps1 -PackagePath build-frame/releases/v0.3.15-windows-preview/d2r-pcvr-windows.zip -Version 0.3.15 -ISCCPath 'C:\Program Files (x86)\Inno Setup 7\ISCC.exe'
 ```
 
 The wrapper verifies the native ZIP manifest and distributable-file allowlist,
@@ -50,7 +50,7 @@ downloads official Python 3.12.10 x64 if needed, verifies its pinned archive has
 and Python Software Foundation signature, then compiles a fresh staging folder.
 It never stages a game installation or generated artwork/model cache. Output:
 
-- `build-frame/installers/D2R-PCVR-Setup-0.3.14.exe`
+- `build-frame/installers/D2R-PCVR-Setup-0.3.15.exe`
 - matching `.exe.sha256` checksum and `.exe.build.json` provenance report
 
 The EXE is unsigned unless a release maintainer separately signs it. Signing
@@ -90,7 +90,7 @@ it verifies Inno's lifecycle, not a real game install or headset launch.
 Check the payload actually embedded in the compiled EXE without installing:
 
 ```powershell
-.\build-frame\installers\D2R-PCVR-Setup-0.3.14.exe /PAYLOADCHECK=1 /VERYSILENT /SUPPRESSMSGBOXES /LOG=payload-check.log
+.\build-frame\installers\D2R-PCVR-Setup-0.3.15.exe /PAYLOADCHECK=1 /VERYSILENT /SUPPRESSMSGBOXES /LOG=payload-check.log
 ```
 
 The setup intentionally aborts after validation, so its exit code is nonzero.

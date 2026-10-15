@@ -7,13 +7,57 @@ static void Check(bool b,const char* label){if(!b){std::fprintf(stderr,"FAIL: %s
 static Hit At(Page p,Rect r){return HitTest(p,(r.x+r.w*.5f)/Width,(r.y+r.h*.5f)/Height);}
 int main(){
     Snapshot s;s.ready=true;
+    for(int i=HapticStrength;i<=HapticAlert;++i){
+        const auto key=Key(i);const int row=i-HapticStrength+(i>=HapticBowDraw?1:0);
+        Check(s.values[key]==100,"haptics default to normal strength");
+        Check(Normalize(key,-1)==0&&Normalize(key,250)==200&&Normalize(key,54)==50&&Normalize(key,NAN)==100,"haptic settings clamp, step and reject nonfinite values");
+        Model h;h.Open(s);h.Click({Kind::Tab,int(Page::Haptics)});
+        Check(RowKey(Page::Haptics,row)==key&&At(Page::Haptics,Increase(row)).index==key,"each haptic row targets its own setting");
+        h.Click(At(Page::Haptics,Decrease(row)));Check(h.Get()[key]==90,"strength moves in ten-percent steps");
+        if(row){
+            const auto category=framevr::haptics::Category(i-HapticMelee);
+            for(int choice=0;choice<framevr::haptics::PreviewCount(category);++choice){
+                const auto box=TestHapticsBox(row,choice,category);
+                const auto test=At(Page::Haptics,box);
+                Check(test.kind==Kind::TestHaptics&&test.index==i-HapticMelee&&test.delta==choice+1&&h.CanTestHaptics(test.index),"category Test selects its action preview with unsaved settings");
+                if(framevr::haptics::PreviewCount(category)==2){
+                    const auto other=TestHapticsBox(row,choice^1,category);
+                    Check(!other.Contains(box.x+box.w*.5f,box.y+box.h*.5f),"action preview buttons do not overlap");
+                }else Check(HitTest(Page::Haptics,620.f/Width,(box.y+box.h*.5f)/Height).kind==Kind::None,"single-preview row has no invisible second test");
+                Check(box.x+box.w<Decrease(row).x,"tests do not overlap strength controls");
+                Check(!h.Click(test).sequence&&h.Dirty()&&h.Get()[key]==90,"Test does not persist draft changes");
+            }
+        }
+        const auto request=h.Click({Kind::Apply});
+        Check(request.changed==(ChangeMask{1}<<key)&&request.values[key]==90&&!h.CanTestHaptics(0),"Apply saves only selected haptic strength and blocks preview while saving");
+        h.Close();h.Open(s);Check(h.Get()[key]==100&&!h.CanTestHaptics(0),"close discards edits and Controls page has no preview");
+    }
+    Check(!Model{}.CanTestHaptics(0),"closed menu cannot preview haptics");
+    {Model h;h.Open(s);h.Click({Kind::Tab,int(Page::Haptics)});
+        const auto toggle=At(Page::Haptics,ValueBox(2));
+        Check(s.values[HapticShortMelee]==0&&toggle.kind==Kind::Change&&toggle.index==HapticShortMelee,"default longer melee pulse has its own toggle");
+        const auto normal=HapticSample(h.Get(),framevr::haptics::Category::Melee);
+        Check(normal.milliseconds==90&&normal.frequency==0&&HapticSample(h.Get(),framevr::haptics::Category::Melee,1).milliseconds==45,"weapon impact lasts longer through a swing while shield keeps its existing tap");
+        for(int choice=0;choice<2;++choice)Check(At(Page::Haptics,TestHapticsBox(2,choice,framevr::haptics::Category::Melee)).kind==Kind::None,"toggle row does not steal a category Test button");
+        h.Click(toggle);const auto sharp=HapticSample(h.Get(),framevr::haptics::Category::Melee);
+        Check(sharp.milliseconds==10&&sharp.frequency==180&&sharp.amplitude==normal.amplitude,"draft test immediately uses short pulse at the same strength");
+        const auto request=h.Click({Kind::Apply});
+        Check(request.changed==(ChangeMask{1}<<HapticShortMelee)&&request.values[HapticMelee]==100,"pulse shape saves without changing strength");
+        h.Close();h.Open(s);Check(HapticSample(h.Get(),framevr::haptics::Category::Melee).milliseconds==90,"closing discards unsaved short-pulse choice");
+    }
+    {auto missing=s;missing.ready=false;Model h;h.Open(missing);h.Click({Kind::Tab,int(Page::Haptics)});
+        Check(!h.CanTestHaptics(0)&&!h.CanTestHaptics(-1)&&!h.CanTestHaptics(framevr::haptics::CategoryCount),"unavailable settings cannot preview");}
+    {auto values=s.values;values[HapticStrength]=50;
+        for(int i=0;i<framevr::haptics::CategoryCount;++i)values[HapticMelee+i]=float(i*10);
+        const auto levels=HapticLevels(values);Check(levels.master==50,"master level reaches runtime configuration");
+        for(int i=0;i<framevr::haptics::CategoryCount;++i)Check(levels.category[i]==i*10,"each saved category maps to its runtime channel");}
     Check(s.values[MeleeHitSpeed]==12,"melee defaults to twelve m/s");
     {Model melee;melee.Open(s);melee.Click({Kind::Tab,int(Page::Combat)});
         const auto hit=At(Page::Combat,Increase(0));
         Check(hit.index==MeleeHitSpeed&&hit.kind==Kind::Change,"combat speed control hit target");
         melee.Click(hit);Check(melee.Get()[MeleeHitSpeed]==12.25f,"melee speed quarter step");
         const auto request=melee.Click({Kind::Apply});
-        Check(request.changed==(1u<<MeleeHitSpeed),"highest mask bit saves only melee speed");
+        Check(request.changed==(1u<<MeleeHitSpeed),"melee mask bit saves only melee speed");
         Check(Normalize(MeleeHitSpeed,NAN)==12&&Normalize(MeleeHitSpeed,0)==1.5f&&Normalize(MeleeHitSpeed,99)==99,"melee speed UI has no upper cap");
         s.values[MeleeHitSpeed]=6;melee.Open(s);melee.Click(hit);
         Check(melee.Get()[MeleeHitSpeed]==6.25f,"plus button goes beyond old cap");
@@ -22,7 +66,7 @@ int main(){
     Check(s.values[MenuDistance]==1&&s.values[TooltipTiming]==0,"comfortable Medium distance and Instant hover defaults");
     for(auto key:{MenuDistance,TooltipTiming}) {
         Check(Normalize(key,1.5f)==Definitions[key].defaultValue&&Normalize(key,9)==Definitions[key].defaultValue,"invalid comfort enums fall back safely");
-        const int row=key==MenuDistance?3:4;
+        const int row=key==MenuDistance?4:5;
         Check(RowKey(Page::HUD,row)==key&&At(Page::HUD,Increase(row)).index==key,"HUD comfort rows hit their own settings");
         Model comfort;comfort.Open(s);comfort.Click(At(Page::HUD,Increase(row)));
         Check(comfort.Click({Kind::Apply}).changed==(1u<<key),"comfort Apply affects only its selected setting");
@@ -67,8 +111,8 @@ int main(){
     Check(s.values[NavigationLocation]==0,"combined navigation defaults to Wrist");
     Check(Normalize(NavigationLocation,99)==0&&Normalize(NavigationLocation,1.5f)==0,"invalid navigation location falls back to Wrist");
     {Model navigation;navigation.Open(s);navigation.Click(At(Page::Controls,Tabs[int(Page::HUD)]));
-        const int row=2;
-        Check(RowCount(Page::HUD)==5&&RowKey(Page::HUD,row)==NavigationLocation,"one navigation row replaces separate map/compass switches");
+        const int row=3;
+        Check(RowCount(Page::HUD)==8&&RowKey(Page::HUD,row)==NavigationLocation,"one navigation row replaces separate map/compass switches");
         for(int location=1;location<=3;++location){
             navigation.Click(At(Page::HUD,Increase(row)));
             Check(navigation.Get()[NavigationLocation]==location,"navigation offers Palm, Either and Off");
@@ -83,8 +127,41 @@ int main(){
         Check(hud.Get()[VitalsLocation]==1&&!hud.Get()[CriticalAlerts],"Palm selection does not enable automatic alerts");
         auto request=hud.Click({Kind::Apply});
         Check(request.changed==(1u<<VitalsLocation),"palm placement saves independently");
-        hud.Open(s);hud.Click(At(Page::HUD,ValueBox(1)));request=hud.Click({Kind::Apply});
+        hud.Open(s);hud.Click(At(Page::HUD,ValueBox(2)));request=hud.Click({Kind::Apply});
         Check(request.changed==(1u<<CriticalAlerts)&&request.values[CriticalAlerts]==1,"alert opt-in saves independently");}
+    Check(s.values[BloodVisor]==1,"blood on visor defaults on");
+    {Model blood;blood.Open(s);blood.Click({Kind::Tab,int(Page::HUD)});
+        const auto hit=At(Page::HUD,ValueBox(6));
+        Check(RowKey(Page::HUD,6)==BloodVisor&&hit.kind==Kind::Change&&hit.index==BloodVisor,"HUD tab exposes the blood toggle");
+        blood.Click(hit);auto request=blood.Click({Kind::Apply});
+        Check(request.changed==(ChangeMask{1}<<BloodVisor)&&request.values[BloodVisor]==0,"blood toggle saves independently");}
+    Check(s.values[BloodWipe]==1,"face wipe gesture defaults on");
+    {Model wipe;wipe.Open(s);wipe.Click({Kind::Tab,int(Page::HUD)});
+        const auto hit=At(Page::HUD,ValueBox(7));
+        Check(RowKey(Page::HUD,7)==BloodWipe&&hit.kind==Kind::Change&&hit.index==BloodWipe,"face wipe toggle sits under the blood toggle");
+        Check(RowY+7*RowStep+RowStep<=742,"eighth HUD row clears the help text");
+        wipe.Click(hit);auto request=wipe.Click({Kind::Apply});
+        Check(request.changed==(ChangeMask{1}<<BloodWipe)&&request.values[BloodWipe]==0&&request.values[BloodVisor]==1,"wipe toggle saves without touching the blood toggle");}
+    Check(s.values[VitalsTilt]==0,"vitals tilt keeps the original angle by default");
+    Check(Normalize(VitalsTilt,NAN)==0&&Normalize(VitalsTilt,INFINITY)==0&&
+        Normalize(VitalsTilt,-999)==-60&&Normalize(VitalsTilt,999)==60,"tilt rejects nonfinite input and clamps at sixty degrees");
+    {Model tilt;tilt.Open(s);tilt.Click({Kind::Tab,int(Page::HUD)});
+        Check(RowKey(Page::HUD,1)==VitalsTilt&&At(Page::HUD,Increase(1)).index==VitalsTilt&&
+            At(Page::HUD,Decrease(1)).index==VitalsTilt,"tilt controls sit next to vitals placement");
+        tilt.Click(At(Page::HUD,Increase(1)));Check(tilt.Get()[VitalsTilt]==5,"plus tilts five degrees");
+        const auto request=tilt.Click({Kind::Apply});
+        Check(request.changed==(ChangeMask{1}<<VitalsTilt)&&request.changed>UINT32_MAX,
+            "Apply preserves the new setting bit above the previous 32-bit mask");
+        Check(request.values[VitalsLocation]==0&&request.values[NavigationLocation]==0&&request.values[CriticalAlerts]==0,
+            "tilt saves independently of placement, navigation and alerts");
+        auto external=s.values;external[VitalsTilt]=-5;Check(Conflict(external,request.base,request.changed),"high-bit tilt conflicts are detected");
+        external=s.values;external[NavigationLocation]=1;Check(!Conflict(external,request.base,request.changed),"navigation edits do not conflict with tilt");
+        tilt.Open(s);tilt.Click(At(Page::HUD,Decrease(1)));Check(tilt.Get()[VitalsTilt]==-5,"minus tilts in the opposite direction");
+        tilt.Close();tilt.Open(s);Check(tilt.Get()[VitalsTilt]==0&&!tilt.Dirty(),"Close discards unapplied tilt");
+        for(int i=0;i<30;++i)tilt.Click(At(Page::HUD,Increase(1)));
+        Check(tilt.Get()[VitalsTilt]==60,"tilt upper limit clamps");
+        for(int i=0;i<60;++i)tilt.Click(At(Page::HUD,Decrease(1)));
+        Check(tilt.Get()[VitalsTilt]==-60,"tilt lower limit clamps");}
     Check(s.values[PlanarSpellAim]==0,"spell aiming defaults to free vertical aim");
     {Model aim;aim.Open(s);const auto hit=At(Page::Controls,PlanarSpellAimBox);
         Check(hit.kind==Kind::Change&&hit.index==PlanarSpellAim,"controls tab exposes planar aiming toggle");

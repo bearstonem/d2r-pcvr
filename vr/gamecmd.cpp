@@ -34,6 +34,9 @@
 
 #include "d2r_vr_shared.h"
 #include "sigscan.h"
+#ifdef D2RVR_NATIVE_OPENXR
+#include "../steamvr/dropped_item_labels.h"
+#endif
 
 using namespace D2RL;
 namespace gamestate {bool MenuOpen();}
@@ -80,7 +83,7 @@ template <class S> const S* Query(const PluginContext* ctx) {
 bool Read(void* d, const void* s, size_t n) noexcept { __try { memcpy(d, s, n); return true; } __except (EXCEPTION_EXECUTE_HANDLER) { return false; } }
 
 // What BodyWalk holds now; nothing while there is no bridge (or another version of the block).
-void CommandsHeld(uint64_t out[2]) {
+void BridgeCommandsHeld(uint64_t out[2]) {
     out[0] = out[1] = 0;
     if (!g_block) {
         static ULONGLONG lastTry = 0;
@@ -95,6 +98,17 @@ void CommandsHeld(uint64_t out[2]) {
     if (g_block->version != D2RVR_COMMANDS_VERSION) return;
     out[0] = g_block->held[0];
     out[1] = g_block->held[1] & ((1ull << (kCommands - 64)) - 1);   // commands 64..0x44
+}
+
+// Both the timer and the queued UI callback sample the live lease. A menu,
+// tracking/focus loss or stopped XR producer releases our Alt-equivalent hold.
+// Merge with BodyWalk's bits so releasing this shortcut cannot release its hold.
+void CommandsHeld(uint64_t out[2]) {
+    BridgeCommandsHeld(out);
+#ifdef D2RVR_NATIVE_OPENXR
+    if(!gamestate::MenuOpen()&&framevr::lootlabels::display.ShowAll(GetTickCount64()))
+        out[0]|=framevr::lootlabels::ShowItemsMask;
+#endif
 }
 
 bool Same(const uint64_t a[2]) { return a[0] == g_applied[0].load() && a[1] == g_applied[1].load(); }
@@ -180,7 +194,9 @@ void __cdecl Apply(const PluginContext*, void*) noexcept {
     if (Same(want)&&!request) return;
     const uint64_t had[2] = {g_applied[0].load(), g_applied[1].load()};
     auto store = [&] { g_applied[0].store(want[0]); g_applied[1].store(want[1]); };
-    if (!Ready()) { store(); return; }
+    // Do not acknowledge a press before the executors exist. An early VR
+    // hold must still reach the game once its key-command code is ready.
+    if (!Ready()) return;
     // Motion drinking requests the same belt command as a normal key. No item
     // edits, no delayed consumption after a menu/loading pause or lost focus.
     if(request&&!gamestate::MenuOpen()&&GetTickCount64()-(request>>8)<200) {

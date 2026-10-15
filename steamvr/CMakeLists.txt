@@ -54,6 +54,7 @@ target_link_libraries(resource-descriptions-test PRIVATE d3d12 framevr-runtime)
 add_executable(latest-worker-test latest_worker_test.cpp)
 target_link_libraries(latest-worker-test PRIVATE framevr-runtime)
 add_executable(haptic-pulse-test haptic_pulse_test.cpp)
+target_include_directories(haptic-pulse-test PRIVATE ${OPENXR_SDK}/include)
 target_link_libraries(haptic-pulse-test PRIVATE framevr-runtime)
 add_executable(thread-stats-test thread_stats_test.cpp)
 target_link_libraries(thread-stats-test PRIVATE framevr-runtime)
@@ -73,6 +74,7 @@ add_executable(bow-pose-test bow_pose_test.cpp)
 add_executable(body-tracking-test body_tracking_test.cpp)
 add_executable(body-calibration-test body_calibration_test.cpp)
 add_executable(shoulder-swap-test shoulder_swap_test.cpp)
+add_executable(blood-screen-test blood_screen_test.cpp)
 add_executable(portal-billboard-test portal_billboard_test.cpp)
 target_link_libraries(portal-billboard-test PRIVATE framevr-runtime)
 add_executable(composition-layers-test composition_layers_test.cpp)
@@ -102,6 +104,11 @@ add_executable(dev-scenarios-test dev_scenarios_test.cpp)
 target_include_directories(dev-scenarios-test PRIVATE ${D2RL_SDK}/include)
 target_link_libraries(dev-scenarios-test PRIVATE framevr-runtime)
 add_executable(wrist-hud-test wrist_hud_test.cpp)
+add_executable(navigation-info-test navigation_info_test.cpp)
+add_executable(dropped-item-labels-test dropped_item_labels_test.cpp)
+add_executable(show-items-command-test show_items_command_test.cpp ${ROOT}/vr/gamecmd.cpp)
+target_include_directories(show-items-command-test PRIVATE ${D2RL_SDK}/include ${ROOT}/shared ${ROOT}/cleanroom/sigscan)
+target_link_libraries(show-items-command-test PRIVATE framevr-runtime)
 add_executable(native-hud-test native_hud_test.cpp)
 target_sources(d2rl-vrcam PRIVATE render_resolution.cpp)
 target_sources(d2rl-vrcam PRIVATE scene_depth.cpp)
@@ -158,10 +165,10 @@ enable_testing()
 add_test(NAME light-bounds-test COMMAND light-bounds-test)
 set_tests_properties(light-bounds-test PROPERTIES TIMEOUT 30)
 foreach(test_target IN ITEMS memory-test hook-metrics-test active-keys-test resource-descriptions-test latest-worker-test haptic-pulse-test thread-stats-test
-    gameplay-test weapon-skills-test quick-cast-test hand-controls-test skill-pad-test interact-press-test spell-aim-test bow-pose-test body-tracking-test body-calibration-test shoulder-swap-test
+    gameplay-test weapon-skills-test quick-cast-test hand-controls-test skill-pad-test interact-press-test spell-aim-test bow-pose-test body-tracking-test body-calibration-test shoulder-swap-test blood-screen-test
     portal-billboard-test composition-layers-test projectile-rules-test
     combat-rules-test logging-test melee-contact-test attack-speed-test world-coordinates-test bow-flight-test spell-cast-test spell-aim-assist-test
-    interaction-test dev-scenarios-test native-belt-test wrist-hud-test native-hud-test render-resolution-test render-pointer-test scene-depth-test game-device-only-test controller-bindings-test journal-test native-panels-test
+    interaction-test dev-scenarios-test native-belt-test wrist-hud-test navigation-info-test dropped-item-labels-test show-items-command-test native-hud-test render-resolution-test render-pointer-test scene-depth-test game-device-only-test controller-bindings-test journal-test native-panels-test
     vr-settings-test vr-settings-store-test controller-labels-test math-test deferred-draw-test monster-bars-test gaze-test window-focus-test callback-ticket-test local-player-test)
   # These fixtures use assert for their checks, including in Release builds.
   if(MSVC)
@@ -186,3 +193,4 @@ add_test(NAME interaction-map-tab-test COMMAND interaction-preview "${CMAKE_CURR
 add_test(NAME interaction-developer-tab-test COMMAND interaction-preview "${CMAKE_CURRENT_BINARY_DIR}/developer-tab-preview.png" --developer-check)
 add_test(NAME interaction-hand-wheels-test COMMAND interaction-preview "${CMAKE_CURRENT_BINARY_DIR}/hand-wheels-preview.png" --hands-check)
 add_test(NAME wrist-compass-art-test COMMAND interaction-preview "${CMAKE_CURRENT_BINARY_DIR}/wrist-compass-preview.png" --compass-check)
+add_test(NAME navigation-info-art-test COMMAND interaction-preview "${CMAKE_CURRENT_BINARY_DIR}/navigation-info-preview.png" --navigation-check)

@@ -322,6 +322,22 @@ int main(){
             const auto palm=PalmPanel(hand,head);
             Check(Valid(palm)&&std::fabs(math::Dot(math::Rotate(palm.q,{0,0,1}),PalmNormal(hand))-1)<1e-5f,
                 "palm surface remains valid through head/wrist rotations");
+            for(bool palmFace:{false,true})for(float tilt:{-60.f,-30.f,0.f,30.f,60.f}) {
+                const auto base=palmFace?palm:p;
+                const auto panel=VitalsPanel(hand,head,palmFace,tilt);
+                const auto offset=panel.p-base.p;
+                const auto right=math::Rotate(panel.q,{1,0,0});
+                const auto top=math::Rotate(math::Conjugate(base.q),math::Rotate(panel.q,{0,1,0}));
+                Check(Valid(panel)&&math::Dot(offset,offset)<1e-10f&&
+                    math::Dot(right,math::Rotate(base.q,{1,0,0}))>.99999f,"vitals tilt pivots around the panel center and horizontal axis");
+                Check(std::fabs(top.x)<1e-5f&&std::fabs(top.y-std::cos(tilt*Pi/180))<1e-5f&&
+                    std::fabs(top.z-std::sin(tilt*Pi/180))<1e-5f,"positive tilt brings the top toward the viewer on both wrist and palm");
+            }
+            for(float invalid:{NAN,INFINITY}) {
+                const auto safe=VitalsPanel(hand,head,false,invalid);
+                Check(Valid(safe)&&math::Dot(math::Rotate(safe.q,{0,0,1}),WristNormal(hand))>.99999f,
+                    "invalid tilt retains the original hand face");
+            }
             for(bool palmFace:{false,true})for(bool withVitals:{false,true}) {
                 const auto base=palmFace?palm:p;
                 const auto map=NavigationMapPanel(hand,head,palmFace,withVitals);
@@ -334,6 +350,11 @@ int main(){
                 Check(Valid(compass)&&std::fabs(delta.x)<1e-5f&&std::fabs(delta.z)<1e-5f&&
                     std::fabs(delta.y-(WristMapSize+WristCompassHeight)*.5f-.01f)<1e-5f,
                     "compass and map remain a single coplanar unit with a one-centimeter gap");
+                const auto info=NavigationInfoPanel(hand,head,palmFace,withVitals);
+                const auto infoDelta=math::Rotate(math::Conjugate(compass.q),info.p-compass.p);
+                Check(Valid(info)&&std::fabs(infoDelta.x)<1e-5f&&std::fabs(infoDelta.z)<1e-5f&&
+                    std::fabs(infoDelta.y-(WristCompassHeight+NavigationInfoHeight)*.5f-.006f)<1e-5f,
+                    "area and act sit above the compass on the same wrist or palm face, clear of map and vitals");
             }
         }
     }

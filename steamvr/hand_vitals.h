@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 
@@ -7,6 +8,8 @@ enum class Location { Wrist, Palm, Either, Off };
 inline constexpr const char* LocationNames[]={"Wrist","Palm","Either","Off"};
 inline bool Wrist(Location where){return where==Location::Wrist||where==Location::Either;}
 inline bool Palm(Location where){return where==Location::Palm||where==Location::Either;}
+constexpr float MinTilt=-60,MaxTilt=60,TiltStep=5;
+inline float NormalizeTilt(float degrees){return std::isfinite(degrees)?std::clamp(degrees,MinTilt,MaxTilt):0.f;}
 
 // Independent of combat ownership: an occluded right hand must not reset a
 // deliberate left-palm presentation. Tracking/menu/world changes do reset it.

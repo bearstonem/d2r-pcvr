@@ -419,6 +419,24 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
     else std::snprintf(xpLabel,sizeof xpLabel,"XP --");
     RECT xpRect{564,985,972,1006};DrawTextA(dc,xpLabel,-1,&xpRect,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX);
     SelectObject(dc,prior);DeleteObject(xpFont);
+    // A dedicated tile follows the hand navigation display, independent of
+    // the scrolling compass atlas and the player's health/XP panel.
+    const int nx=navigation::AtlasX,ny=navigation::AtlasY;
+    fill({nx,ny,nx+navigation::Width,ny+navigation::Height},RGB(17,16,14));
+    fill({nx,ny,nx+navigation::Width,ny+2},RGB(122,94,51));
+    fill({nx,ny+navigation::Height-2,nx+navigation::Width,ny+navigation::Height},RGB(122,94,51));
+    HFONT actFont=CreateFontW(17,0,0,0,FW_SEMIBOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,ANTIALIASED_QUALITY,DEFAULT_PITCH,L"Georgia");
+    HFONT areaFont=CreateFontW(19,0,0,0,FW_SEMIBOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,ANTIALIASED_QUALITY,DEFAULT_PITCH,L"Georgia");
+    const auto beforeLocation=SelectObject(dc,actFont);SetTextColor(dc,RGB(231,202,141));
+    RECT actRect{nx+8,ny+7,nx+navigation::Width-8,ny+29};
+    DrawTextA(dc,navigation::ActLabel(s.location.act),-1,&actRect,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX);
+    SelectObject(dc,areaFont);SetTextColor(dc,RGB(238,231,212));
+    wchar_t area[256]{};MultiByteToWideChar(CP_UTF8,0,navigation::AreaLabel(s.location),-1,area,256);
+    RECT areaRect{nx+8,ny+31,nx+navigation::Width-8,ny+navigation::Height-3};
+    DrawTextW(dc,area,-1,&areaRect,DT_CENTER|DT_WORDBREAK|DT_END_ELLIPSIS|DT_NOPREFIX);
+    SelectObject(dc,beforeLocation);DeleteObject(actFont);DeleteObject(areaFont);
     GdiFlush();std::vector<uint8_t> rgba(size*size*4);const auto* b=static_cast<const uint8_t*>(bits);
     for(int i=0;i<size*size;++i){
         rgba[4*i]=b[4*i+2];rgba[4*i+1]=b[4*i+1];rgba[4*i+2]=b[4*i];
@@ -438,5 +456,8 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
         }
     }
     SelectObject(dc,oldFont);DeleteObject(font);DeleteObject(shortcutFont);DeleteObject(skillFont);SelectObject(dc,old);DeleteObject(bitmap);DeleteDC(dc);return rgba;
+}
+std::vector<uint8_t> BloodArt(int width,int height) {
+    return width>0&&height>0?DecodeArt(L"D2RVR_BLOOD_VISOR",UINT(width),UINT(height)):std::vector<uint8_t>{};
 }
 }

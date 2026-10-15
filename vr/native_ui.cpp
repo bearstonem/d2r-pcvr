@@ -28,6 +28,7 @@ namespace {
 const D2RL::PluginContext* context=nullptr;
 const D2RL::LocalizationService* strings=nullptr;
 const D2RL::DataTableService* tables=nullptr;
+D2RL::Reimplementations::GetLevelIdFromUnitFn getLevelId=nullptr;
 std::map<int,std::string> names;
 bool ready=false;
 bool bindingReady=false;
@@ -80,7 +81,13 @@ std::string Name(int id) {
     std::snprintf(text,sizeof text,"Skill %d",id);return text;
 }
 }
-void Init(const D2RL::PluginContext* c){context=c;c->QueryService(&strings);c->QueryService(&tables);}
+void Init(const D2RL::PluginContext* c){
+    context=c;c->QueryService(&strings);c->QueryService(&tables);
+    const auto core=GetModuleHandleW(L"D2RCore.dll");
+    getLevelId=core?reinterpret_cast<D2RL::Reimplementations::GetLevelIdFromUnitFn>(
+        GetProcAddress(core,MAKEINTRESOURCEA(D2RL::Reimplementations::GetLevelIdFromUnitInfo.ordinal))):nullptr;
+    if(!getLevelId)framevr::logging::Write("Frame navigation: loader level accessor unavailable");
+}
 void Capture(framevr::interaction::Snapshot& s) {
     int reason=1;uintptr_t player=0;uint32_t id=0,clientId=0;
     struct Trace {
@@ -110,6 +117,34 @@ void Capture(framevr::interaction::Snapshot& s) {
     if(!combat::LocalPlayerId(id))return;
     reason=5;if(id!=h[2])return;
     s.devClass=framevr::dev::ExpansionClass(h[1],gamestate::DataBank());
+    // The supported loader accessor reads this live, identity-checked UI player.
+    // Copy its current table row/name on the UI thread every capture so warps,
+    // loading gaps and language changes cannot reuse a previous area's label.
+    {
+        const int level=getLevelId?getLevelId(reinterpret_cast<const void*>(player)):0;
+        D2RL::DataTables::RowView row{};row.structSize=sizeof row;
+        auto result=D2RL::DataTables::Result::Unavailable;
+        if(level>0&&tables&&tables->findRowById)
+            result=tables->findRowById(context,D2RL::DataTables::Bank(gamestate::DataBank()),
+                D2RL::DataTables::TableId::Levels,uint32_t(level),&row);
+        if(result==D2RL::DataTables::Result::Success)
+            s.location=framevr::navigation::ReadLocation(level,reinterpret_cast<uintptr_t>(row.row),row.rowSize,
+                [](uintptr_t p,auto& value){return Read(p,value);},
+                [](const char* key,char* text,uint32_t size){return strings&&strings->getStringByKey&&
+                    strings->getStringByKey(context,key,text,size,nullptr)==D2RL::Localization::Result::Success;});
+        // Trace changes, including unavailable data, so a layout/lookup failure
+        // can be distinguished from a loading gap without a memory dump.
+        static int previousLevel=-1;static uint32_t previousSize=0;static auto previousResult=result;
+        static framevr::navigation::Location previous;
+        if(previousLevel!=level||previousSize!=row.rowSize||previousResult!=result||previous!=s.location) {
+            previousLevel=level;previousSize=row.rowSize;previousResult=result;previous=s.location;
+            char line[420];std::snprintf(line,sizeof line,
+                "Frame navigation: level=%d bank=%u table_result=%u row_size=%u act=%d area=%s",
+                level,gamestate::DataBank(),uint32_t(result),row.rowSize,s.location.act,
+                framevr::navigation::AreaLabel(s.location));
+            framevr::logging::Write(line);
+        }
+    }
     spellvr::Feedback(s.session,player,id,!gamestate::MenuOpen()&&(h[3]==1||h[3]==2||h[3]==3));
     auto stat=reinterpret_cast<int(*)(uintptr_t,int,int)>(d2rsig::Addr(abi::StatRva));
     s.health=stat(player,6,0)/256.f;s.maxHealth=stat(player,7,0)/256.f;

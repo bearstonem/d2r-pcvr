@@ -61,3 +61,15 @@ transparent silhouette. No additional loose files are needed for installation.
 Run `interaction-preview.exe <output.png> --hands-check` to preview both hand
 layouts. Runtime hover masks use the same five-sector `WheelCell` geometry as
 the laser hit testing.
+
+## Visor blood
+
+`blood-splatters.png` packs eight transparent blood-splatter images supplied by
+the contributor (ChuckRibbits) into one 3072 × 384 strip of 384-pixel cells, by
+`prepare_blood.py`. The contributor states they are free, openly licensed vector
+splatters; the original download source was not recorded. Replace them with
+traceable art if that is required for distribution.
+It is embedded by `interaction_assets.rc` and decoded once with WIC on the blood
+painter thread. `blood_screen.h` places the cells around the visor (`Layout`),
+grows drips from each placement's largest blobs and keeps the view's centre
+clear. A missing or wrong-sized strip falls back to generated discs.

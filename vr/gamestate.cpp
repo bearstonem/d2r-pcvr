@@ -677,6 +677,10 @@ SharedEvents::UiMessageAction __cdecl OnUiMessage(const PluginContext* ctx, cons
         g_journalOnly=menus==1&&quest;
         const bool npc=menus==1&&g_panels.count("NpcDialogPanel")!=0;
         if(g_npcChoices.exchange(npc)!=npc){std::lock_guard lock(npcChoicesMutex);npcChoicesAt=0;}
+        if(!strcmp(text,"NpcDialogPanel")||!strcmp(text,"ScrollSpeechPanel")) {
+            char b[200];snprintf(b,sizeof b,"Frame NPC transition: %s %s; choices=%d speech=%d choice_surface=%d modal_roots=%d",
+                command,text,int(g_panels.count("NpcDialogPanel")!=0),int(g_panels.count("ScrollSpeechPanel")!=0),int(npc),menus);Log(b);
+        }
         if(g_journalOnly.load())ReadJournalRect();
         if (menu != before) {
             std::string list;
@@ -843,14 +847,13 @@ bool UpperBandMenuOpen(){return g_upperBandMenu.load();}
 bool NpcChoicesOnly(){return g_npcChoices.load();}
 void ReadNpcChoicesRect() {
     if(!g_npcChoices.load()||!g_widgets||!g_widgets->getWidgetRect||!g_widgets->findPanel)return;
-    Widgets::WidgetHandle panel=0,border=0;Widgets::Rect root{},box{};
+    Widgets::WidgetHandle panel=0,border=0;Widgets::Rect root{},box{},child{};
     if(g_widgets->findPanel(g_ctx,"NpcDialogPanel",&panel)!=Widgets::Result::Success||
        g_widgets->getWidgetRect(g_ctx,panel,&root)!=Widgets::Result::Success)return;
     box=root;
     // DialogBorder includes the title, all available choices and the outline;
     // the panel also contains a full-screen click catcher which is not content.
     if(g_widgets->findWidget&&g_widgets->findWidget(g_ctx,panel,"DialogBorder",&border)==Widgets::Result::Success) {
-        Widgets::Rect child{};
         if(g_widgets->getWidgetRect(g_ctx,border,&child)==Widgets::Result::Success&&child.width>0&&child.height>0)
             box={root.x+child.x,root.y+child.y,child.width,child.height};
     }
@@ -858,7 +861,8 @@ void ReadNpcChoicesRect() {
        box.x<0||box.y<0||box.x>8192||box.y>8192)return;
     std::lock_guard lock(npcChoicesMutex);
     if(!npcChoicesAt||npcChoicesRect[2]!=box.width||npcChoicesRect[3]!=box.height) {
-        char b[180];snprintf(b,sizeof b,"Frame NPC choices: native bounds %d,%d %dx%d",box.x,box.y,box.width,box.height);Log(b);
+        char b[240];snprintf(b,sizeof b,"Frame NPC choices: native bounds %d,%d %dx%d; root %d,%d %dx%d; border %d,%d %dx%d",
+            box.x,box.y,box.width,box.height,root.x,root.y,root.width,root.height,child.x,child.y,child.width,child.height);Log(b);
     }
     npcChoicesRect[0]=box.x;npcChoicesRect[1]=box.y;npcChoicesRect[2]=box.width;npcChoicesRect[3]=box.height;npcChoicesAt=GetTickCount64();
 }

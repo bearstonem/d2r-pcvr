@@ -14,11 +14,58 @@ int main(){
     Check(WritePrivateProfileStringW(L"custom",L"keep",L"12345",name),"write unrelated key");
     Check(WritePrivateProfileStringW(L"render",L"rings",L"6",name),"write existing setting");
     vrsettings::Poll(name);auto before=vrsettings::Read();
+    Check(before.values[HapticShortMelee]==0,"missing short-melee preference selects the compatible longer pulse");
+    for(int choice:{1,0}){
+        const auto current=vrsettings::Read();Model h;h.Open(current);h.Click({Kind::Change,HapticShortMelee,1});
+        const auto request=h.Click({Kind::Apply});
+        Check(request.changed==(ChangeMask{1}<<HapticShortMelee)&&vrsettings::Submit(request)&&vrsettings::Poll(name),"persist short-melee toggle");
+        const auto saved=vrsettings::Read();
+        Check(saved.values[HapticShortMelee]==choice&&Int(path,L"haptics",L"short_melee")==choice,"short-melee toggle survives profile reload");
+        Check(Changed(saved.values,current.values)==(ChangeMask{1}<<HapticShortMelee)&&Int(path,L"custom",L"keep")==12345,"pulse toggle preserves all strengths and unrelated settings");
+    }
+    for(int i=HapticStrength;i<=HapticAlert;++i){
+        const auto key=Key(i);const auto& definition=Definitions[key];
+        Check(before.values[key]==100,"existing profiles keep full haptic strength");
+        for(int choice:{50,0,200,100}){
+            const auto current=vrsettings::Read();Model h;h.Open(current);
+            const int delta=(choice-int(current.values[key]))/10;
+            for(int step=0;step<std::abs(delta);++step)h.Click({Kind::Change,key,delta>0?1:-1});
+            const auto request=h.Click({Kind::Apply});
+            Check(request.changed==(ChangeMask{1}<<key)&&vrsettings::Submit(request)&&vrsettings::Poll(name),"save haptic strength through its high mask bit");
+            const auto saved=vrsettings::Read();
+            Check(saved.values[key]==choice&&Int(path,definition.section,definition.key)==choice,"muted, reduced and boosted strengths survive INI reload");
+            Check(Changed(saved.values,current.values)==(ChangeMask{1}<<key)&&Int(path,L"custom",L"keep")==12345,"haptic edits preserve other categories and unrelated preferences");
+        }
+    }
+    Check(before.values[VitalsTilt]==0,"existing profiles keep their original vitals angle");
+    for(int choice:{5,0,-5,0}) {
+        const auto current=vrsettings::Read();Model tilt;tilt.Open(current);
+        tilt.Click({Kind::Change,VitalsTilt,choice>current.values[VitalsTilt]?1:-1});
+        const auto request=tilt.Click({Kind::Apply});
+        Check(request.changed==(ChangeMask{1}<<VitalsTilt)&&vrsettings::Submit(request)&&vrsettings::Poll(name),"save tilt through a mask above bit 31");
+        const auto saved=vrsettings::Read();
+        Check(saved.values[VitalsTilt]==choice&&Int(path,L"interactions",L"vitals_tilt")==choice,"positive, negative and zero tilt survive INI reload");
+        Check(Changed(saved.values,current.values)==(ChangeMask{1}<<VitalsTilt)&&Int(path,L"custom",L"keep")==12345,
+            "tilt saves preserve every unrelated preference and INI key");
+    }
+    {const auto current=vrsettings::Read();Request request;
+        request.base=request.values=current.values;request.values[VitalsTilt]=15;request.values[Motion]=1;
+        request.changed=Changed(request.base,request.values);request.sequence=current.sequence+1;
+        Check(request.changed==((ChangeMask{1}<<VitalsTilt)|(ChangeMask{1}<<Motion))&&vrsettings::Submit(request)&&vrsettings::Poll(name),
+            "low and high change bits save together");
+        Check(vrsettings::Read().values[VitalsTilt]==15&&vrsettings::Read().values[Motion]==1,"mixed-mask values both reload");
+        const auto saved=vrsettings::Read();request.base=saved.values;request.values=current.values;
+        request.changed=Changed(request.base,request.values);request.sequence=saved.sequence+1;
+        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"restore mixed-mask fixture preferences");
+        request.base=request.values=vrsettings::Read().values;request.values[VitalsTilt]=5;
+        request.changed=(ChangeMask{1}<<VitalsTilt)|(ChangeMask{1}<<63);request.sequence+=1;
+        Check(!vrsettings::Submit(request),"unsupported high change bits are rejected");
+    }
     Check(before.values[MeleeHitSpeed]==12,"missing melee speed uses twelve m/s default");
     for(float choice:{12.25f,12.f}) {
         Model melee;melee.Open(vrsettings::Read());melee.Click({Kind::Change,MeleeHitSpeed,choice>12?1:-1});
         const auto request=melee.Click({Kind::Apply});
-        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"highest mask bit persists melee speed");
+        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"existing melee mask bit persists speed");
         Check(vrsettings::Read().values[MeleeHitSpeed]==choice&&Int(path,L"custom",L"keep")==12345,"fractional melee speed reloads without altering unrelated data");
     }
     for(float choice:{12.25f,24.f,3.f}) {

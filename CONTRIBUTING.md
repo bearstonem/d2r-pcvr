@@ -114,6 +114,11 @@ main-integrity ruleset. Do not disable protection to land a change.
 GitHub's live settings are authoritative. The intended configuration and
 maintenance notes are kept in [`.github/rulesets/`](.github/rulesets/README.md).
 
+Release tags matching `v*` are restricted to the repository owner. Future
+releases use GitHub release immutability: prepare a draft, attach and verify
+all assets, then publish. Published immutable assets require a new release
+version for corrections. Existing releases are not made immutable retroactively.
+
 ## Reporting problems and suggesting features
 
 Use the [issue forms](https://github.com/bearstonem/d2r-pcvr/issues/new/choose).

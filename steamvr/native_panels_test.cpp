@@ -5,6 +5,7 @@
 #include "quick_cast.h"
 #include "journal.h"
 #include "input.h"
+#include "vr_resolution.h"
 #include <cstdio>
 #include <cstdlib>
 using namespace framevr;
@@ -71,9 +72,26 @@ int main(){
         Check(panels::Modal(name)&&panels::OpaqueBackground(name),"management surfaces use the same opaque background in both eyes");
     for(auto name:{"NpcDialogPanel","ScrollSpeechPanel","QuestLogPanelExpansion","GoldTransferPanel","QuantityPanel","HUDPanel","HUDTradeHint","MiniMenuPanel","TooltipsPanel"})
         Check(!panels::OpaqueBackground(name),"dialogue, journal and auxiliary panels do not independently black out the world");
-    for(auto name:{"UISwitcher","VendorPanelLayout","VendorPanelOriginalLayout","TradeLayout","GamblePanel"})
-        Check(panels::UpperBand(name),"tabbed inventory and independent merchant roots center their upper content at eye level");
-    for(auto name:{"WaypointPanel","NpcDialogPanel","ScrollSpeechPanel","QuestLogPanelExpansion","QuantityPanel","ConfirmationPanel","HUDTradeHint","TooltipsPanel"})
+    for(auto name:{"NpcDialogPanel","ScrollSpeechPanel","QuestLogSpeechPanel","QuestLogPanelExpansion","ConfirmationPanel"}) {
+        Check(!panels::BlockWorldEffects(panels::Modal(name),true,panels::OpaqueBackground(name)),
+            "spatial conversations, speech and journals keep sky, fog and cave ceiling behind their transparent UI");
+        Check(panels::BlockWorldEffects(panels::Modal(name),false,panels::OpaqueBackground(name)),
+            "unavailable spatial UI retains flat-menu suppression of world effects");
+    }
+    for(auto name:{"VendorPanelLayout","GamblePanel","WaypointPanel","UISwitcher","BankExpansionLayout"})
+        Check(panels::BlockWorldEffects(panels::Modal(name),true,panels::OpaqueBackground(name)),
+            "opaque management menus keep their black background and suppress world effects");
+    Check(!panels::BlockWorldEffects(false,false,false),"ordinary gameplay retains world effects without spatial UI");
+    Check(!panels::BlockWorldEffects(false,true,true),"a stale opaque flag alone cannot disable gameplay effects");
+    // An NPC conversation may open a merchant without closing all of its
+    // other roots. Any remaining opaque root owns the backdrop until closed.
+    for(bool merchant:{false,true,false})
+        Check(panels::BlockWorldEffects(true,true,panels::OpaqueBackground("NpcDialogPanel")||
+            (merchant&&panels::OpaqueBackground("VendorPanelLayout")))==merchant,
+            "dialogue to merchant to dialogue restores world effects when the opaque root closes");
+    for(auto name:{"UISwitcher","VendorPanelLayout","VendorPanelOriginalLayout","TradeLayout","GamblePanel","NpcDialogPanel","ScrollSpeechPanel"})
+        Check(panels::UpperBand(name),"inventory, merchants and both conversation roots center the same upper content band");
+    for(auto name:{"WaypointPanel","QuestLogPanelExpansion","QuantityPanel","ConfirmationPanel","HUDTradeHint","TooltipsPanel"})
         Check(!panels::UpperBand(name),"unrelated layouts and auxiliary popups cannot independently shift the workspace");
     panels::InputModeLease mode;
     Check(!mode.PreserveController(100,true),"desktop input untouched without VR ownership");
@@ -283,42 +301,31 @@ int main(){
     Check(title.width==1.125f&&title.height==1.125f,"square main menu fits original 2m widescreen envelope");
     const auto missing=panels::Fit(0,0);
     Check(missing.width==wide.width&&missing.height==wide.height,"missing source uses finite widescreen fallback");
-    // The NPC box is a small region of the full UI. Enlarge its pixel pitch,
-    // not its surrounding canvas, and map each displayed choice back to the
-    // original native coordinate after moving the region to eye level.
-    for(auto source:{journal::Rect{0,0,4096,4096},journal::Rect{0,0,1920,1080},journal::Rect{0,0,2160,2400}}) {
-        const auto crop=dialogue::Crop({1740,120,360,240},source.w,source.h);
-        const auto size=dialogue::Size(crop,source.w,source.h);
-        Check(crop.w>0&&crop.h>0,"NPC bounds produce a source region at square, wide and portrait resolutions");
-        Check(std::fabs(size.width/crop.w-4.f*panels::Fit(source.w,source.h).width/source.w)<.00001f,"NPC text has four times the original workspace pixel pitch");
+    // A reported widget box at 2535,498 on a 3072-square source looked valid
+    // but the owner saw only the right edge of the choices. Native widget
+    // coordinates cannot define the sampled region after resize. Exercise the
+    // whole visible surface through the actual ray and source/desktop mapping.
+    for(auto source:{journal::Rect{0,0,1536,1536},journal::Rect{0,0,3072,3072},
+        journal::Rect{0,0,4096,4096},journal::Rect{0,0,3840,2160},journal::Rect{0,0,2160,2400}}) {
+        const auto crop=dialogue::Canvas(source.w,source.h);
+        const auto size=panels::Fit(crop.w,crop.h);
+        Check(std::fabs(size.width/size.height-float(source.w)/source.h)<.00001f,"complete NPC canvas preserves text proportions at each render aspect");
         const auto placed=panels::AtEyeLevel({0,1.65f,0},math::Yaw(.4f),panels::Distance);
-        for(float u:{.02f,.5f,.98f})for(float v:{.02f,.3f,.7f,.98f}) {
-            const auto p=placed.position+math::Rotate(placed.orientation,{(u-.5f)*size.width,(.5f-v)*size.height,0});
+        const auto origin=placed.position+math::Rotate(placed.orientation,{0,panels::UpperBandOffset(size),0});
+        for(float u:{.01f,.2f,.5f,.8f,.99f})for(float v:{.01f,.3f,.7f,.99f}) {
+            const auto p=origin+math::Rotate(placed.orientation,{(u-.5f)*size.width,(.5f-v)*size.height,0});
             const auto front=math::Rotate(placed.orientation,{0,0,1});math::PanelHit hit;math::Vec pixel{};
-            Check(math::IntersectPanel(p+front,front*-1,placed.position,placed.orientation,size.width,size.height,hit),"laser hits the enlarged eye-level NPC surface");
+            Check(math::IntersectPanel(p+front,front*-1,origin,placed.orientation,size.width,size.height,hit),"laser reaches both edges and every part of the complete NPC surface");
             Check(journal::Pixel(crop,hit.u,hit.v,source.w,source.h,pixel)&&
-                std::fabs(pixel.x-(crop.x+u*crop.w)/source.w)<.00001f&&
-                std::fabs(pixel.y-(crop.y+v*crop.h)/source.h)<.00001f,"enlarged NPC choices map back to native dialogue pixels");
+                std::fabs(pixel.x-u)<.00001f&&std::fabs(pixel.y-v)<.00001f,
+                "dialogue rendering and laser use the complete source rather than a shifted widget crop");
+            const int clientX=int(std::round(pixel.x*3839)),clientY=int(std::round(pixel.y*2159));
+            Check(std::abs(resolution::Coordinate(clientX,3840,source.w)-u*(source.w-1))<2&&
+                std::abs(resolution::Coordinate(clientY,2160,source.h)-v*(source.h-1))<2,
+                "NPC laser coordinates survive a desktop-to-VR resolution mismatch without edge truncation");
         }
     }
-    const auto edge=dialogue::Crop({0,0,200,100},3840,2160);
-    Check(edge.x==0&&edge.y==0&&edge.w==208&&edge.h==108,"dialogue border padding clips at source edges");
-    // Captured Charsi bounds at 4096 square. The old design-resolution
-    // conversion began at x=1832, cutting 106 pixels off a box starting at 1726.
-    for(auto native:{journal::Rect{1726,306,300,244},journal::Rect{1698,252,300,244}}) {
-        const auto crop=dialogue::Crop(native,4096,4096);
-        Check(crop.x==native.x-8&&crop.y==native.y-8&&crop.w==316&&crop.h==260,
-            "live Charsi source-pixel rectangle retains the full border and every choice");
-        const auto anotherSource=dialogue::Crop(native,3840,2160);
-        Check(crop.x==anotherSource.x&&crop.y==anotherSource.y&&crop.w==anotherSource.w&&crop.h==anotherSource.h,
-            "source size must not rescale already-resolved native widget coordinates");
-        math::Vec pixel{};
-        Check(journal::Pixel(crop,.5f,.5f,4096,4096,pixel)&&
-            std::fabs(pixel.x-(native.x+native.w*.5f)/4096)<.00001f&&
-            std::fabs(pixel.y-(native.y+native.h*.5f)/4096)<.00001f,
-            "centered NPC laser lands at original dialogue center after crop correction");
-    }
-    Check(!dialogue::Crop({8000,8000,200,100},3840,2160).w&&!dialogue::Crop({0,0,0,100},4096,4096).h,"missing/outside NPC bounds cannot create an invalid XR crop");
+    Check(!dialogue::Canvas(0,3072).w&&!dialogue::Canvas(4096,0).h,"missing NPC source cannot create an invalid XR surface");
     Check(panels::UpperBandOffset(wide)==0,"widescreen tabbed canvas needs no vertical correction");
     Check(std::fabs(panels::UpperBandOffset(square)+.23378906f)<.00001f,"square inventory centers its visible upper band instead of blank lower canvas");
     for(float eyeHeight:{1.15f,1.75f})for(float pitch:{-.6f,0.f,.6f}) {
