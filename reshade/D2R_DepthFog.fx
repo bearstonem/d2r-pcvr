@@ -290,6 +290,12 @@ sampler2D FogColorSmp { Texture = FogColorTex; };
 sampler2D FogDepthSmp { Texture = FogDepthTex; MinFilter = POINT; MagFilter = POINT; };
 sampler2D FogDepthRsSmp { Texture = FogDepthRsTex; MinFilter = POINT; MagFilter = POINT; };
 uniform bool OwnDepth < hidden = true; > = false;
+// Native transparent resolve coverage, captured separately from opaque depth.
+// It is enabled only for a submitted draw from this eye, never a previous frame.
+texture TransparentMask : D2RVR_TRANSPARENT;
+sampler TransparentMaskSmp { Texture = TransparentMask; MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = POINT; AddressU = CLAMP; AddressV = CLAMP; };
+uniform bool TransparentMaskOn < hidden = true; > = false;
+uniform float4 TransparentScale < hidden = true; > = float4(1,1,0,0);
 // The part of the depth buffer the game draws the scene into (vrcam, from the game's
 // viewport): 1 without an upscaler; DLSS draws at 0.5 - 0.67 of the screen into the top
 // left of a screen-size buffer, so every read of the depth goes through DepthAt (2026-10-08).
@@ -1465,6 +1471,14 @@ float3 DepthFogWorld(float4 pos, float2 uv, int eye)
         t = (sum + t0) / (wsum + 1.0);
     }
     if (ShowDistance) return t.xxx;
+    if (!SkyOn && !CeilOn && TransparentMaskOn) {
+        // The pillars' depth describes the scenery, not the wing light already
+        // composited over it. Preserve native effects while ordinary geometry
+        // retains its distance fog. No final-colour brightness classification.
+        const float coverage = saturate(tex2Dlod(TransparentMaskSmp,
+            float4(uv * TransparentScale.xy + TransparentScale.zw, 0, 0)).r);
+        t *= 1.0 - coverage;
+    }
     // In a cave a torch's halo is laid over the far floor too, and the fog took it away with
     // the floor: the floor's edge stood as a black cut-out in the middle of the glow
     // (2026-10-07). The halo is warm - red well over blue - and the cave's rock is not: what

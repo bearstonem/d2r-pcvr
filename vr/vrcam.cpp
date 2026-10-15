@@ -94,6 +94,7 @@ namespace gamestate {bool OpaqueMenuOpen();}
 #include "transport.h"
 #include "render_resolution.h"
 #include "scene_depth.h"
+#include "transparent_fog.h"
 #include "light_bounds.h"
 #include "game_device_only.h"
 #include "menu_controls.h"
@@ -7431,8 +7432,14 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
             (FogWanted()||g_set.skyOn.load()||CeilWanted()||TableKeyWanted());
         framevr::scenedepth::Bind(rt,cl,ownDepth,s);
         SetBool(rt,"OwnDepth",ownDepth);
+        float transparentScale[4]={1,1,0,0};
+        const bool transparent=framevr::transparentfog::Bind(rt,
+            ownDepth&&FogWanted()&&g_skyPalette.load()<0&&!CeilWanted(),transparentScale);
+        SetBool(rt,"TransparentMaskOn",transparent);
+        SetFloats(rt,"TransparentScale",transparentScale,4);
 #else
         SetBool(rt,"OwnDepth",false);
+        SetBool(rt,"TransparentMaskOn",false);
 #endif
         SetFloats(rt, "DepthScale", s, 2);
     }
@@ -7805,6 +7812,7 @@ void TryRegister() {
     framevr::resources::Register();
 #ifdef D2RVR_NATIVE_OPENXR
     framevr::scenedepth::Register(&Log);
+    framevr::transparentfog::Register(&Log);
     framevr::lightbounds::Register(&Log);
 #endif
 #ifdef D2RVR_NATIVE_OPENXR
@@ -8294,6 +8302,7 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
 D2RL_PLUGIN_EXPORT void D2RLoaderUnloadPlugin() noexcept {
 #ifdef D2RVR_NATIVE_OPENXR
     framevr::scenedepth::Shutdown();
+    framevr::transparentfog::Shutdown();
 #endif
     g_enabled.store(false);
     d2rcam::SetEnabled(false);
