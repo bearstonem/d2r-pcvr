@@ -42,10 +42,24 @@ int main(){
         Check(WheelCell(.5f,.45f,-1,MenuPage::Developer,0,true)==-1,"no hidden center spell behind developer page");
         Check(WheelCell(.25f,.27f,-1,MenuPage::Developer,0,true)==0,"developer rows share painter hit boxes");
         Check(WheelCell(.25f,.27f,-1,MenuPage::Developer,0,false)==-1,"disabled developer page has no actions");
+        for(int i=0;i<int(framevr::dev::Choices.size());++i) {
+            const auto b=DeveloperBounds(i);
+            Check(WheelCell((b.left+b.right)/2,(b.top+b.bottom)/2,-1,MenuPage::Developer,0,true)==i,"every dev button has its own click target");
+            Check(b.bottom<FooterBounds(0,MenuPage::Developer,true).top,"dev buttons do not overlap footer");
+        }
         Output o;o.developer=true;auto a=Context(s.in.snapshot,o,true);o.developer=false;
         Check(a!=Context(s.in.snapshot,o,true),"dev page switch invalidates painted atlas");
         o.developer=true;a=Context(s.in.snapshot,o,true);s.in.snapshot.devClass=0;
         Check(a!=Context(s.in.snapshot,o,true),"changing class invalidates gear names in the painted atlas");
+    }
+    {
+        Sim s;s.in.snapshot.developer=true;s.in.snapshot.devClass=3;s.in.wheel=true;s.Step(3);
+        s.in.hover=13;s.in.trigger=1;s.Step();s.in.trigger=0;s.Step();
+        const auto b=DeveloperBounds(framevr::dev::TyraelChoice);
+        s.in.hover=WheelCell((b.left+b.right)/2,(b.top+b.bottom)/2,-1,MenuPage::Developer,0,true);
+        s.in.trigger=1;s.Step();
+        Check(s.out.request.action==Action::Developer&&s.out.request.index==framevr::dev::TyraelChoice&&s.out.select==-2,"Tyrael button requests travel without a center-wheel spell");
+        Check(s.Step(5).request.action==Action::None,"held Tyrael button cannot repeat travel");
     }
     for(int cls=0;cls<8;++cls) {
         Sim s;s.in.snapshot.developer=true;s.in.snapshot.devClass=cls;s.in.wheel=true;s.Step(3);

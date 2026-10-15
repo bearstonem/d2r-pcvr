@@ -205,6 +205,10 @@ struct MenuBounds {
     bool Contains(float u,float v) const {return u>left&&u<right&&v>top&&v<bottom;}
 };
 constexpr MenuBounds MapContent{.14f,.12f,.86f,.84f};
+inline MenuBounds DeveloperBounds(int index) {
+    const float x=.05f+(index%2)*.46f,y=.21f+(index/2)*.12f;
+    return {x,y,index==dev::TyraelChoice?.95f:x+.44f,y+.105f};
+}
 inline bool Editing(MenuPage page) {return page==MenuPage::EditSlots||page==MenuPage::EditSkills;}
 inline int FooterCount(MenuPage page,bool developer=false) {return Editing(page)?3:developer?5:4;}
 inline MenuBounds FooterBounds(int index,MenuPage page,bool developer=false) {
@@ -218,9 +222,13 @@ inline int WheelCell(float u,float v,int previous=-1,MenuPage page=MenuPage::Spe
     if(!std::isfinite(u)||!std::isfinite(v)||u<0||u>1||v<0||v>1)return -1;
     for(int i=0;i<FooterCount(page,developer);++i)if(FooterBounds(i,page,developer).Contains(u,v))return FooterCell(i,page);
     if(page==MenuPage::Map)return -1; // no invisible spells behind the map
-    if(page==MenuPage::EditSkills||page==MenuPage::Developer) {
-        if(page==MenuPage::Developer&&!developer)return -1;
-        if(page==MenuPage::EditSkills&&u>.74f&&u<.95f&&v>.12f&&v<.19f)return 8; // clear selected slot
+    if(page==MenuPage::Developer) {
+        if(developer)for(int i=0;i<int(dev::Choices.size());++i)
+            if(DeveloperBounds(i).Contains(u,v))return i;
+        return -1;
+    }
+    if(page==MenuPage::EditSkills) {
+        if(u>.74f&&u<.95f&&v>.12f&&v<.19f)return 8; // clear selected slot
         for(int i=0;i<8;++i) {
             const float x=.05f+(i%2)*.46f,y=.23f+(i/2)*.145f;
             if(u>x&&u<x+.44f&&v>y&&v<y+.13f)return i;
@@ -401,12 +409,11 @@ public:
             if(!rearm&&triggerEdge&&pending.action==Action::None) {
                 if(!editor&&in.hover==13&&fresh&&in.snapshot.developer) {
                     developer=!developer;utility=map=false;out.utility=out.map=false;rearm=true;
-                } else if(developer&&in.hover>=0&&in.hover<8) {
+                } else if(developer&&dev::ValidChoice(in.hover)) {
                     if(fresh&&dev::ValidClass(in.snapshot.devClass))request(Action::Developer,in.hover);
                     else out.feedback=3;
                     rearm=true;
-                } else if(developer&&in.hover==8) {rearm=true;}
-                else if(editor==2) {
+                } else if(editor==2) {
                     if(in.hover==11){editor=in.wheelHand>=0?0:1;editSlot=-1;}
                     else if(in.hover==9)editPage=std::max(0,editPage-1);
                     else if(in.hover==10)editPage=std::min(std::max(0,(choiceCount-1)/8),editPage+1);

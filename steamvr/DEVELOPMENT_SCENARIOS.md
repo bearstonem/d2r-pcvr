@@ -58,6 +58,12 @@ git push origin feat/development-scenarios
 7. Select **Arcane Sanctuary**. Other choices are Rogue Encampment, Lut Gholein,
    River of Flame and Chaos Sanctuary. Travel does not intentionally unlock quests
    or waypoints. Normal game effects still apply to the disposable character.
+8. For wing rendering inspection, choose **DEV > Tyrael - Act II** on either
+   hand's wheel. This requests level 73 at `(22578,15594)`, near Tyrael on his
+   platform in Tal Rasha's Chamber. The destination comes from the installed
+   3.3.93787 level/preset data; it does not complete the Duriel quest or kill
+   the boss. Verify arrival, walk around Tyrael, and compare his wings before
+   and during dialogue. Arrival and headset appearance still need live testing.
 
 Each kit includes weapons, a helmet, armor, gloves, boots, belt, two rings and an
 amulet. Staff and shapeshift kits omit an off-hand item. Native unique selection

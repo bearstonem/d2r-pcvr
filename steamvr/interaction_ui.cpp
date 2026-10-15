@@ -257,15 +257,16 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
         char title[120];std::snprintf(title,sizeof title,"DEVELOPMENT / %s",available?dev::Presets[s.devClass].name:"OFFLINE EXPANSION");
         text(title,{38,42,730,85});
         SelectObject(dc,shortcutFont);
-        text(available?"Prepare all class skills, choose gear, equip it in Inventory, then travel.":"Create and load an offline expansion character in the pcvr-dev save environment.",{38,90,730,153});
+        text(available?"Prepare all class skills, choose gear, equip it in Inventory, then travel.":"Create and load an offline expansion character in the pcvr-dev save environment.",{38,87,730,153});
         SelectObject(dc,font);
         for(int i=0;i<int(dev::Choices.size());++i) {
-            const int x=int(768*(.05f+(i%2)*.46f)),y=int(768*(.23f+(i/2)*.145f));
+            const auto bounds=DeveloperBounds(i);
+            const int x=int(768*bounds.left),y=int(768*bounds.top),right=int(768*bounds.right),bottom=int(768*bounds.bottom);
             const auto choice=available?dev::ChoiceFor(s.devClass,i):dev::Choices[i];
-            frame({x,y,x+337,y+99},available&&o.hover==i);
+            frame({x,y,right,bottom},available&&o.hover==i);
             SetTextColor(dc,available?RGB(235,218,181):RGB(148,137,117));
-            text(choice.name,{x+8,y+8,x+329,y+49});
-            SelectObject(dc,shortcutFont);text(choice.detail,{x+8,y+50,x+329,y+92});SelectObject(dc,font);
+            text(choice.name,{x+8,y+5,right-8,y+39});
+            SelectObject(dc,shortcutFont);text(choice.detail,{x+8,y+39,right-8,bottom-5});SelectObject(dc,font);
         }
         SetTextColor(dc,RGB(235,218,181));SelectObject(dc,shortcutFont);
         text(o.result==Result::Pending?"Working...":o.result==Result::Applied?"Kit added to inventory. Equip it using the native inventory screen.":
