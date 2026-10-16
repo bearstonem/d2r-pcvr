@@ -205,9 +205,12 @@ struct MenuBounds {
     bool Contains(float u,float v) const {return u>left&&u<right&&v>top&&v<bottom;}
 };
 constexpr MenuBounds MapContent{.14f,.12f,.86f,.84f};
+// Footer cells occupy 9-13. Keep developer actions separate as the list grows.
+constexpr int DeveloperCell(int index) {return 14+index;}
+constexpr int DeveloperChoice(int cell) {return cell-14;}
 inline MenuBounds DeveloperBounds(int index) {
     const float x=.05f+(index%2)*.46f,y=.21f+(index/2)*.12f;
-    return {x,y,index==dev::TyraelChoice?.95f:x+.44f,y+.105f};
+    return {x,y,x+.44f,y+.105f};
 }
 inline bool Editing(MenuPage page) {return page==MenuPage::EditSlots||page==MenuPage::EditSkills;}
 inline int FooterCount(MenuPage page,bool developer=false) {return Editing(page)?3:developer?5:4;}
@@ -224,7 +227,7 @@ inline int WheelCell(float u,float v,int previous=-1,MenuPage page=MenuPage::Spe
     if(page==MenuPage::Map)return -1; // no invisible spells behind the map
     if(page==MenuPage::Developer) {
         if(developer)for(int i=0;i<int(dev::Choices.size());++i)
-            if(DeveloperBounds(i).Contains(u,v))return i;
+            if(DeveloperBounds(i).Contains(u,v))return DeveloperCell(i);
         return -1;
     }
     if(page==MenuPage::EditSkills) {
@@ -409,8 +412,8 @@ public:
             if(!rearm&&triggerEdge&&pending.action==Action::None) {
                 if(!editor&&in.hover==13&&fresh&&in.snapshot.developer) {
                     developer=!developer;utility=map=false;out.utility=out.map=false;rearm=true;
-                } else if(developer&&dev::ValidChoice(in.hover)) {
-                    if(fresh&&dev::ValidClass(in.snapshot.devClass))request(Action::Developer,in.hover);
+                } else if(developer&&dev::ValidChoice(DeveloperChoice(in.hover))) {
+                    if(fresh&&dev::ValidClass(in.snapshot.devClass))request(Action::Developer,DeveloperChoice(in.hover));
                     else out.feedback=3;
                     rearm=true;
                 } else if(editor==2) {

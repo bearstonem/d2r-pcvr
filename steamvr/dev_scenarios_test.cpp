@@ -95,7 +95,7 @@ int main(){
         std::filesystem::remove(data);std::filesystem::remove(root);
         assert(DeleteFileW(name));
     }
-    assert(!ValidChoice(-1)&&!ValidChoice(9)&&ValidChoice(3)&&ValidChoice(TyraelChoice));
+    assert(!ValidChoice(-1)&&!ValidChoice(int(Choices.size()))&&ValidChoice(3)&&ValidChoice(TyraelChoice)&&ValidChoice(DurielChoice));
     ThreadService threadService{};threadService.runOnUiThread=Ui;threadService.runOnGameThread=Game;
     ItemService itemService{};itemService.executeTransaction=ItemsCall;
     itemService.createItem=CreateToken;itemService.destroyItem=RemoveToken;
@@ -194,13 +194,17 @@ int main(){
     assert(Presets[2].alternateWeapons[0]==std::string_view("7dg"));
     assert(Presets[4].alternateWeapons[0]==std::string_view("7ts"));
     assert(Presets[6].primaryWeapons[0]==std::string_view("9tw")&&Presets[6].primaryWeapons[1]==std::string_view("7wb"));
-    // The inspection shortcut reaches the platform, not the lair entrance.
-    // It uses the same UI dispatch and stale-session guard as other travel.
-    devscenarios::Request(Make(TyraelChoice));assert(!tasks.back().game);Run(tasks.size()-1);
-    assert(commands.back()=="goto 73,22578,15594"&&devscenarios::Status().result==Result::Dispatched);
-    devscenarios::Request(Make(TyraelChoice));const auto tyrael=tasks.size()-1;
-    const auto beforeTyrael=commands.size();++local;Run(tyrael);--local;
-    assert(commands.size()==beforeTyrael&&devscenarios::Status().result==Result::Refused);
+    // Tyrael's platform and Duriel's native arrival point are distinct.
+    // Both use the same UI dispatch and stale-session guard as other travel.
+    for(int choice:{TyraelChoice,DurielChoice}) {
+        const auto before=commands.size();
+        devscenarios::Request(Make(choice));assert(!tasks.back().game);Run(tasks.size()-1);
+        assert(commands.size()==before+1&&commands.back()==(choice==TyraelChoice?"goto 73,22578,15594":"goto 73"));
+        assert(devscenarios::Status().result==Result::Dispatched);
+        devscenarios::Request(Make(choice));const auto travelTask=tasks.size()-1;
+        const auto beforeStale=commands.size();++local;Run(travelTask);--local;
+        assert(commands.size()==beforeStale&&devscenarios::Status().result==Result::Refused);
+    }
     inlineQueue=true;devscenarios::Request(Make(3,100));
     assert(devscenarios::Status().sequence==100&&devscenarios::Status().result==Result::Dispatched);
     std::puts("Development backend: isolation, queue routing, cancellation, stale sessions, kit transactions and dispatch results passed");

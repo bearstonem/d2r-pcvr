@@ -8,7 +8,8 @@ inline constexpr char Mod[]="pcvr-dev";
 inline constexpr char ModInfo[]="{\"name\":\"pcvr-dev\",\"savepath\":\"pcvr-dev/\"}\n";
 struct Choice {const char* name;const char* detail;const char* command;};
 inline constexpr int TyraelChoice=8;
-inline constexpr std::array<Choice,9> Choices{{
+inline constexpr int DurielChoice=9;
+inline constexpr std::array<Choice,10> Choices{{
     {"Prepare current class", "Level 90 / all 30 class skills at level 20", nullptr},
     {"Primary gear", "Class-specific unique equipment", nullptr},
     {"Alternate gear", "Equipment for the other class abilities", nullptr},
@@ -20,7 +21,10 @@ inline constexpr std::array<Choice,9> Choices{{
     // D2R 3.3.93787: level 73 starts at tile (4500,3100); duriel.ds1
     // places Tyrael at subtile (78,88). Arrive six subtiles beside him,
     // on his platform, rather than at the boss-room entrance.
-    {"Tyrael - Act II", "Wing inspection / Tal Rasha's Chamber", "goto 73,22578,15594"},
+    {"Tyrael - Act II", "Tyrael's platform / wings", "goto 73,22578,15594"},
+    // Use the level's native arrival point for the boss arena, rather than
+    // the explicit Tyrael platform coordinates above. No quest commands.
+    {"Duriel - Act II", "Boss-room entrance / rendering", "goto 73"},
 }};
 // Native skill identifiers, including internal names that differ from the UI.
 // Set exact levels so repeated preparation cannot keep adding skill points.

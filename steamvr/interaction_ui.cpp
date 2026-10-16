@@ -263,7 +263,7 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
             const auto bounds=DeveloperBounds(i);
             const int x=int(768*bounds.left),y=int(768*bounds.top),right=int(768*bounds.right),bottom=int(768*bounds.bottom);
             const auto choice=available?dev::ChoiceFor(s.devClass,i):dev::Choices[i];
-            frame({x,y,right,bottom},available&&o.hover==i);
+            frame({x,y,right,bottom},available&&o.hover==DeveloperCell(i));
             SetTextColor(dc,available?RGB(235,218,181):RGB(148,137,117));
             text(choice.name,{x+8,y+5,right-8,y+39});
             SelectObject(dc,shortcutFont);text(choice.detail,{x+8,y+39,right-8,bottom-5});SelectObject(dc,font);

@@ -25,7 +25,7 @@ int main(){
         s.in.trigger=0;s.Step();s.in.trigger=1;s.Step();
         Check(s.out.developer&&s.e.Page()==MenuPage::Developer,"developer footer opens page");
         Check(!MapWanted(s.in,s.out,s.in.at),"developer page does not capture map");
-        s.in.hover=3;s.in.trigger=0;s.Step();s.in.trigger=1;s.Step();
+        s.in.hover=DeveloperCell(3);s.in.trigger=0;s.Step();s.in.trigger=1;s.Step();
         const auto r=s.out.request;
         Check(r.action==Action::Developer&&r.index==3&&s.out.select==-2,"destination requests native dev action, never casts");
         Check(s.Step(5).request.action==Action::None,"held trigger cannot repeat destination");
@@ -40,11 +40,11 @@ int main(){
         const auto tab=FooterBounds(4,MenuPage::Spells,true);
         Check(WheelCell((tab.left+tab.right)/2,.93f,-1,MenuPage::Spells,0,true)==13,"developer footer hit matches paint bounds");
         Check(WheelCell(.5f,.45f,-1,MenuPage::Developer,0,true)==-1,"no hidden center spell behind developer page");
-        Check(WheelCell(.25f,.27f,-1,MenuPage::Developer,0,true)==0,"developer rows share painter hit boxes");
+        Check(WheelCell(.25f,.27f,-1,MenuPage::Developer,0,true)==DeveloperCell(0),"developer rows share painter hit boxes");
         Check(WheelCell(.25f,.27f,-1,MenuPage::Developer,0,false)==-1,"disabled developer page has no actions");
         for(int i=0;i<int(framevr::dev::Choices.size());++i) {
             const auto b=DeveloperBounds(i);
-            Check(WheelCell((b.left+b.right)/2,(b.top+b.bottom)/2,-1,MenuPage::Developer,0,true)==i,"every dev button has its own click target");
+            Check(WheelCell((b.left+b.right)/2,(b.top+b.bottom)/2,-1,MenuPage::Developer,0,true)==DeveloperCell(i),"every dev button has its own click target");
             Check(b.bottom<FooterBounds(0,MenuPage::Developer,true).top,"dev buttons do not overlap footer");
         }
         Output o;o.developer=true;auto a=Context(s.in.snapshot,o,true);o.developer=false;
@@ -52,19 +52,27 @@ int main(){
         o.developer=true;a=Context(s.in.snapshot,o,true);s.in.snapshot.devClass=0;
         Check(a!=Context(s.in.snapshot,o,true),"changing class invalidates gear names in the painted atlas");
     }
-    {
+    for(int choice:{framevr::dev::TyraelChoice,framevr::dev::DurielChoice}) {
         Sim s;s.in.snapshot.developer=true;s.in.snapshot.devClass=3;s.in.wheel=true;s.Step(3);
         s.in.hover=13;s.in.trigger=1;s.Step();s.in.trigger=0;s.Step();
-        const auto b=DeveloperBounds(framevr::dev::TyraelChoice);
+        const auto b=DeveloperBounds(choice);
         s.in.hover=WheelCell((b.left+b.right)/2,(b.top+b.bottom)/2,-1,MenuPage::Developer,0,true);
         s.in.trigger=1;s.Step();
-        Check(s.out.request.action==Action::Developer&&s.out.request.index==framevr::dev::TyraelChoice&&s.out.select==-2,"Tyrael button requests travel without a center-wheel spell");
-        Check(s.Step(5).request.action==Action::None,"held Tyrael button cannot repeat travel");
+        Check(s.out.request.action==Action::Developer&&s.out.request.index==choice&&s.out.select==-2,"inspection button requests its destination without a spell or footer action");
+        Check(s.Step(5).request.action==Action::None,"held inspection button cannot repeat travel");
+    }
+    for(int footer=0;footer<5;++footer) {
+        Sim s;s.in.snapshot.developer=true;s.in.snapshot.devClass=3;s.in.wheel=true;s.Step(3);
+        s.in.hover=13;s.in.trigger=1;s.Step();s.in.trigger=0;s.Step();
+        const auto b=FooterBounds(footer,MenuPage::Developer,true);
+        s.in.hover=WheelCell((b.left+b.right)/2,(b.top+b.bottom)/2,-1,MenuPage::Developer,0,true);
+        s.in.trigger=1;s.Step();
+        Check(s.out.request.action==Action::None,"developer footer cannot trigger travel when destinations exceed nine");
     }
     for(int cls=0;cls<8;++cls) {
         Sim s;s.in.snapshot.developer=true;s.in.snapshot.devClass=cls;s.in.wheel=true;s.Step(3);
         s.in.hover=13;s.in.trigger=1;s.Step();s.in.trigger=0;s.Step();
-        s.in.hover=0;s.in.trigger=1;s.Step();
+        s.in.hover=DeveloperCell(0);s.in.trigger=1;s.Step();
         Check(s.out.request.action==Action::Developer&&s.out.request.index==0,"each expansion class can request preparation");
     }
     for(int hand:{0,1})for(float yaw:{0.f,1.2f}) {

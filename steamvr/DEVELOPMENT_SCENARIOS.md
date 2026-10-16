@@ -63,7 +63,15 @@ git push origin feat/development-scenarios
    platform in Tal Rasha's Chamber. The destination comes from the installed
    3.3.93787 level/preset data; it does not complete the Duriel quest or kill
    the boss. Verify arrival, walk around Tyrael, and compare his wings before
-   and during dialogue. Arrival and headset appearance still need live testing.
+   and during dialogue. The owner verified arrival and confirmed that disabling
+   added indoor fog removes the wing silhouettes in this chamber.
+9. For the Duriel arena's reported black room edge, choose **DEV > Duriel - Act II**.
+   This requests level 73's native arrival point (`goto 73`), separately from the
+   Tyrael platform shortcut. Prepare and equip the disposable character first:
+   the command does not kill Duriel or complete his quest. Walk around the arena
+   and inspect the walls with the current indoor-fog-off build. The owner found
+   the room looked normal during inspection; the reported black edge was not
+   reproduced, so its cause and whether the fog change fixes it remain unconfirmed.
 
 Each kit includes weapons, a helmet, armor, gloves, boots, belt, two rings and an
 amulet. Staff and shapeshift kits omit an off-hand item. Native unique selection
