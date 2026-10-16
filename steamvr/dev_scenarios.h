@@ -11,7 +11,9 @@ inline constexpr int TyraelChoice=8;
 inline constexpr int DurielChoice=9;
 inline constexpr int CrossbowChoice=10;
 inline constexpr int BloodMoorChoice=11;
-inline constexpr std::array<Choice,12> Choices{{
+inline constexpr int BowChoice=12;
+inline constexpr int SmallShieldChoice=13;
+inline constexpr std::array<Choice,14> Choices{{
     {"Prepare current class", "Level 90 / all 30 class skills at level 20", nullptr},
     {"Primary gear", "Class-specific unique equipment", nullptr},
     {"Alternate gear", "Equipment for the other class abilities", nullptr},
@@ -29,6 +31,8 @@ inline constexpr std::array<Choice,12> Choices{{
     {"Duriel - Act II", "Boss-room entrance / rendering", "goto 73"},
     {"Crossbow + bolts", "Equip both; assign Attack to Right Trigger", nullptr},
     {"Blood Moor", "Act I combat / crossbow test", "goto 2"},
+    {"Bow + arrows", "Windforce / 250 arrows", nullptr},
+    {"Small shield", "Pelta Lunata buckler / compare shield reach", nullptr},
 }};
 // Native skill identifiers, including internal names that differ from the UI.
 // Set exact levels so repeated preparation cannot keep adding skill points.
@@ -138,6 +142,10 @@ inline std::array<const char*,10> Kit(int cls,int choice){
     // Small, class-independent kit for comparing native trigger assignments.
     // Leave equipped items and bindings alone; the player equips both pieces.
     if(ValidClass(cls)&&choice==CrossbowChoice)return {"lxb","cqv"};
+    if(ValidClass(cls)&&choice==BowChoice)return {"6lw","aqv"};
+    // Keep this separate: the Paladin's full kit already occupies 37 cells.
+    // Adding a 2x2 buckler would exceed the 40-cell inventory even when empty.
+    if(ValidClass(cls)&&choice==SmallShieldChoice)return {"buc"};
     if(!ValidClass(cls)||(choice!=1&&choice!=2))return {};
     const auto& p=Presets[cls];const bool caster=choice==2&&cls!=0&&cls!=4;
     const auto& weapons=choice==1?p.primaryWeapons:p.alternateWeapons;
@@ -148,6 +156,6 @@ inline std::array<const char*,10> Kit(int cls,int choice){
 }
 inline bool Ammo(std::string_view code){return code=="aqv"||code=="cqv";}
 inline bool ValidChoice(int choice){return choice>=0&&choice<int(Choices.size());}
-inline bool IsKit(int choice){return choice==1||choice==2||choice==CrossbowChoice;}
+inline bool IsKit(int choice){return choice==1||choice==2||choice==CrossbowChoice||choice==BowChoice||choice==SmallShieldChoice;}
 inline bool Isolated(std::string_view mod,std::string_view metadata){return mod==Mod&&metadata==ModInfo;}
 }

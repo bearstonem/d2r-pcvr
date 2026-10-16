@@ -209,8 +209,8 @@ constexpr MenuBounds MapContent{.14f,.12f,.86f,.84f};
 constexpr int DeveloperCell(int index) {return 14+index;}
 constexpr int DeveloperChoice(int cell) {return cell-14;}
 inline MenuBounds DeveloperBounds(int index) {
-    const float x=.05f+(index%2)*.46f,y=.21f+(index/2)*.10f;
-    return {x,y,x+.44f,y+.09f};
+    const float x=.05f+(index%2)*.46f,y=.20f+(index/2)*.087f;
+    return {x,y,x+.44f,y+.082f};
 }
 inline bool Editing(MenuPage page) {return page==MenuPage::EditSlots||page==MenuPage::EditSkills;}
 inline int FooterCount(MenuPage page,bool developer=false) {return Editing(page)?3:developer?5:4;}

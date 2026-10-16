@@ -84,12 +84,23 @@ git push origin feat/development-scenarios
     Record the original trigger assignment, whether bolts launch, aim direction
     and whether enemies take damage. The kit preserves bindings so the suspected
     missing/incompatible attack assignment can be checked; it is not a firing fix.
+11. Choose **DEV > Bow + arrows** for Windforce and 250 normal arrows on any
+    class, including Paladin. Equip them in Inventory after preparing the class.
+    The existing **Crossbow + bolts** button remains available separately.
+12. Choose **DEV > Small shield** for a Pelta Lunata buckler. The Paladin's
+    Combat and Caster gear kits still supply the larger Herald of Zakarum, so
+    keep it and swap shields in Inventory to compare reach and wrist rotation.
+    The buckler is a separate grant because adding its four inventory cells to
+    either 37-cell Paladin kit would exceed the inventory's 40-cell capacity.
+    The small-shield button also works on other expansion classes.
 
 Each class kit includes weapons, a helmet, armor, gloves, boots, belt, two rings and an
 amulet. Staff and shapeshift kits omit an off-hand item. Native unique selection
 and stat rolls apply: a Phase Blade can be Lightsabre or Azurewrath, for example,
 and jewelry varies. Amazon bow gear includes 250 normal arrows; the separate
-crossbow test kit grants only its weapon and 250 normal bolts. Kits grant gear
+crossbow test kit grants only its weapon and 250 normal bolts. The standalone
+bow kit grants Windforce and 250 arrows, and the small-shield kit only a buckler.
+These buttons do not change equipped gear or bindings. Kits grant gear
 only; choose one at a time and equip/stash it before granting the alternative.
 
 | Class | Primary gear | Alternate gear |
@@ -137,7 +148,8 @@ at the platform, automatic character creation, and automatic equipment replaceme
 are not implemented. No game assets or save files are distributed.
 
 Automated checks cover wheel routing for all eight classes, class-dependent paint
-invalidation, all 240 exact skill assignments, both gear transactions per class,
+invalidation, all 240 exact skill assignments, class kits and standalone weapon/
+shield transactions for every class,
 cancelled/stale requests, inventory failure, and isolated setup. A local table
 audit checked skill identifiers, unique base availability, level requirements
 and empty-inventory cell capacity. No extracted tables are distributed.

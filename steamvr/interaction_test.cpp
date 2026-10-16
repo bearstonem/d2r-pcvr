@@ -52,7 +52,7 @@ int main(){
         o.developer=true;a=Context(s.in.snapshot,o,true);s.in.snapshot.devClass=0;
         Check(a!=Context(s.in.snapshot,o,true),"changing class invalidates gear names in the painted atlas");
     }
-    for(int choice:{framevr::dev::TyraelChoice,framevr::dev::DurielChoice,framevr::dev::CrossbowChoice,framevr::dev::BloodMoorChoice}) {
+    for(int choice:{framevr::dev::TyraelChoice,framevr::dev::DurielChoice,framevr::dev::CrossbowChoice,framevr::dev::BloodMoorChoice,framevr::dev::BowChoice,framevr::dev::SmallShieldChoice}) {
         Sim s;s.in.snapshot.developer=true;s.in.snapshot.devClass=3;s.in.wheel=true;s.Step(3);
         s.in.hover=13;s.in.trigger=1;s.Step();s.in.trigger=0;s.Step();
         const auto b=DeveloperBounds(choice);

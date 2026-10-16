@@ -52,10 +52,12 @@ static Items::Result __cdecl RemoveToken(const PluginContext*,PlayerHandle playe
     ++tokenRemoves;tokenLive=false;return Items::Result::Success;
 }
 static Items::Result __cdecl ItemsCall(const PluginContext*,const Items::Transaction* t,Items::TransactionResult* r) noexcept {
-    ++itemCalls;assert(t->player==local&&(t->outputCount==2||(t->outputCount>=9&&t->outputCount<=10)));
+    ++itemCalls;assert(t->player==local&&(t->outputCount==1||t->outputCount==2||(t->outputCount>=9&&t->outputCount<=10)));
+    if(t->outputCount==1)assert(t->outputs[0].code==Items::MakeItemCode("buc"));
     if(t->outputCount==2) {
-        assert(t->outputs[0].code==Items::MakeItemCode("lxb"));
-        assert(t->outputs[1].code==Items::MakeItemCode("cqv"));
+        const bool bow=t->outputs[0].code==Items::MakeItemCode("6lw");
+        assert(bow||t->outputs[0].code==Items::MakeItemCode("lxb"));
+        assert(t->outputs[1].code==Items::MakeItemCode(bow?"aqv":"cqv"));
     }
     (void)devscenarios::Status();
     // Match the installed loader: zero-input exchanges are InvalidArgument.
@@ -185,7 +187,7 @@ int main(){
                 assert(commands[start+std::size(Preparation)+i]==expected);
             }
         }
-        for(int choice:{1,2,CrossbowChoice}) {
+        for(int choice:{1,2,CrossbowChoice,BowChoice,SmallShieldChoice}) {
             const auto commandCount=commands.size();
             devscenarios::Request(Make(choice));assert(tasks.back().game);Run(tasks.size()-1);
             assert(devscenarios::Status().result==Result::Applied&&!tokenLive);
@@ -200,10 +202,15 @@ int main(){
     assert(Presets[2].alternateWeapons[0]==std::string_view("7dg"));
     assert(Presets[4].alternateWeapons[0]==std::string_view("7ts"));
     assert(Presets[6].primaryWeapons[0]==std::string_view("9tw")&&Presets[6].primaryWeapons[1]==std::string_view("7wb"));
-    // Crossbow kit failures must clean up only the generated exchange token.
-    failItems=true;const auto beforeCrossbowCleanup=tokenRemoves;
-    devscenarios::Request(Make(CrossbowChoice));Run(tasks.size()-1);
-    assert(devscenarios::Status().result==Result::KitRefused&&!tokenLive&&tokenRemoves==beforeCrossbowCleanup+1);
+    // Extra test weapons never replace the Paladin's large shield.
+    for(int choice:{1,2})assert(Kit(3,choice)[1]==std::string_view("pa9"));
+    // Failed standalone kits clean up only the generated exchange token.
+    failItems=true;
+    for(int choice:{CrossbowChoice,BowChoice,SmallShieldChoice}) {
+        const auto beforeCleanup=tokenRemoves;
+        devscenarios::Request(Make(choice));Run(tasks.size()-1);
+        assert(devscenarios::Status().result==Result::KitRefused&&!tokenLive&&tokenRemoves==beforeCleanup+1);
+    }
     failItems=false;
     // Inspection destinations use native UI dispatch and stale-session guards.
     for(int choice:{TyraelChoice,DurielChoice,BloodMoorChoice}) {
