@@ -208,7 +208,13 @@ constexpr MenuBounds MapContent{.14f,.12f,.86f,.84f};
 // Footer cells occupy 9-13. Keep developer actions separate as the list grows.
 constexpr int DeveloperCell(int index) {return 14+index;}
 constexpr int DeveloperChoice(int cell) {return cell-14;}
+constexpr int DeveloperPageCell(int page) {return 200+page;}
+inline MenuBounds DeveloperPageBounds(int page) {
+    const float x=.05f+page*.46f;
+    return {x,.135f,x+.44f,.185f};
+}
 inline MenuBounds DeveloperBounds(int index) {
+    index%=dev::PageSize;
     const float x=.05f+(index%2)*.46f,y=.20f+(index/2)*.087f;
     return {x,y,x+.44f,y+.082f};
 }
@@ -221,13 +227,17 @@ inline MenuBounds FooterBounds(int index,MenuPage page,bool developer=false) {
 inline int FooterCell(int index,MenuPage page) {
     constexpr int tabs[]={9,12,10,11,13};return Editing(page)?9+index:tabs[index];
 }
-inline int WheelCell(float u,float v,int previous=-1,MenuPage page=MenuPage::Spells,int hand=-1,bool developer=false) {
+inline int WheelCell(float u,float v,int previous=-1,MenuPage page=MenuPage::Spells,int hand=-1,bool developer=false,int devPage=0) {
     if(!std::isfinite(u)||!std::isfinite(v)||u<0||u>1||v<0||v>1)return -1;
     for(int i=0;i<FooterCount(page,developer);++i)if(FooterBounds(i,page,developer).Contains(u,v))return FooterCell(i,page);
     if(page==MenuPage::Map)return -1; // no invisible spells behind the map
     if(page==MenuPage::Developer) {
-        if(developer)for(int i=0;i<int(dev::Choices.size());++i)
-            if(DeveloperBounds(i).Contains(u,v))return DeveloperCell(i);
+        if(developer&&devPage>=0&&devPage<dev::PageCount) {
+            for(int i=0;i<dev::PageCount;++i)
+                if(DeveloperPageBounds(i).Contains(u,v))return DeveloperPageCell(i);
+            for(int i=devPage*dev::PageSize;i<std::min(int(dev::Choices.size()),(devPage+1)*dev::PageSize);++i)
+                if(DeveloperBounds(i).Contains(u,v))return DeveloperCell(i);
+        }
         return -1;
     }
     if(page==MenuPage::EditSkills) {
@@ -271,6 +281,7 @@ struct Input {
 };
 struct Output {
     bool developer=false;
+    int devPage=0;
     SkillCue cue{},leftCue{};
     Owner owner[2]{Owner::Combat,Owner::Combat};
     bool block=false,wheel=false,utility=false,map=false,stowed=false,wrist=false,cancelPending=false,critical=false,settings=false;
@@ -302,6 +313,7 @@ inline bool MapWanted(const Input& in,const Output& out,uint64_t now) {
 }
 class Engine {
     bool developer=false;
+    int devPage=0;
     Config config{};
     uint64_t session=0,epoch=0,sequence=0;
     double lastTime=0,drinkStart=0,pendingAt=0,resultAt=0,criticalUntil=0,criticalAgain=0;
@@ -321,8 +333,9 @@ class Engine {
     void Drop() {bottle=bottleHand=holster=holsterHand=-1;drinkStart=0;spent=consumed=false;held={};owner[0]=owner[1]=Owner::Combat;}
 public:
     void Configure(Config c) {config=c;Reset();}
-    void Reset() {primed=false;rearm=true;wheelLatch=true;Drop();pending={};result=Result::None;criticalUntil=criticalAgain=0;editor=0;map=developer=false;editSlot=-1;shoulderSwap.Reset();}
+    void Reset() {primed=false;rearm=true;wheelLatch=true;Drop();pending={};result=Result::None;criticalUntil=criticalAgain=0;editor=devPage=0;map=developer=false;editSlot=-1;shoulderSwap.Reset();}
     MenuPage Page() const {return developer?MenuPage::Developer:editor==2?MenuPage::EditSkills:editor?MenuPage::EditSlots:map?MenuPage::Map:utility?MenuPage::Equipment:MenuPage::Spells;}
+    int DeveloperPage() const {return devPage;}
     bool WheelVisible(bool heldButton) const {return heldButton&&!wheelLatch;}
     Output Step(const Input& in) {
         Output out;out.wheelHand=in.wheelHand;
@@ -411,9 +424,13 @@ public:
             if(editor&&fresh&&in.snapshot.bindingBank!=editBank){editor=in.wheelHand>=0?0:1;editSlot=-1;editBank=in.snapshot.bindingBank;rearm=true;}
             if(!rearm&&triggerEdge&&pending.action==Action::None) {
                 if(!editor&&in.hover==13&&fresh&&in.snapshot.developer) {
-                    developer=!developer;utility=map=false;out.utility=out.map=false;rearm=true;
+                    developer=!developer;devPage=0;utility=map=false;out.utility=out.map=false;rearm=true;
+                } else if(developer&&in.hover>=DeveloperPageCell(0)&&in.hover<DeveloperPageCell(dev::PageCount)) {
+                    if(fresh)devPage=in.hover-DeveloperPageCell(0);
+                    out.hover=-1;rearm=true;
                 } else if(developer&&dev::ValidChoice(DeveloperChoice(in.hover))) {
-                    if(fresh&&dev::ValidClass(in.snapshot.devClass))request(Action::Developer,DeveloperChoice(in.hover));
+                    if(fresh&&dev::ValidClass(in.snapshot.devClass)&&DeveloperChoice(in.hover)/dev::PageSize==devPage)
+                        request(Action::Developer,DeveloperChoice(in.hover));
                     else out.feedback=3;
                     rearm=true;
                 } else if(editor==2) {
@@ -523,7 +540,7 @@ public:
                 } else drinkStart=0;
             }
         }
-        out.developer=developer;out.stowed=stowed;out.result=result;
+        out.developer=developer;out.devPage=devPage;out.stowed=stowed;out.result=result;
         out.editor=editor;out.editSlot=editSlot;out.editPage=editPage;out.editPages=std::max(1,(choiceCount+7)/8);
         if(editor==2)for(int i=0;i<8&&editPage*8+i<choiceCount;++i){out.editOptions[i]=choices[editPage*8+i];++out.editCount;}
         out.block=out.block||rearm||stowed||pending.action!=Action::None;

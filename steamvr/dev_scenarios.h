@@ -13,7 +13,8 @@ inline constexpr int CrossbowChoice=10;
 inline constexpr int BloodMoorChoice=11;
 inline constexpr int BowChoice=12;
 inline constexpr int SmallShieldChoice=13;
-inline constexpr std::array<Choice,14> Choices{{
+inline constexpr int PageSize=14;
+inline constexpr std::array<Choice,26> Choices{{
     {"Prepare current class", "Level 90 / all 30 class skills at level 20", nullptr},
     {"Primary gear", "Class-specific unique equipment", nullptr},
     {"Alternate gear", "Equipment for the other class abilities", nullptr},
@@ -33,7 +34,22 @@ inline constexpr std::array<Choice,14> Choices{{
     {"Blood Moor", "Act I combat / crossbow test", "goto 2"},
     {"Bow + arrows", "Windforce / 250 arrows", nullptr},
     {"Small shield", "Pelta Lunata buckler / compare shield reach", nullptr},
+    // Scenic filming stops. Native level entrances, not boss/quest commands.
+    // IDs checked against the installed 3.3.93787 levels table.
+    {"Tristram", "Act I / burning village and close combat", "goto 38"},
+    {"Cathedral", "Act I / gothic interior and lighting", "goto 33"},
+    {"Andariel's chamber", "Act I / Catacombs Level 4", "goto 37"},
+    {"Kurast Bazaar", "Act III / ruins, stairs and ranged combat", "goto 80"},
+    {"Travincal", "Act III / temples and Council arena", "goto 83"},
+    {"Mephisto's chamber", "Act III / Durance of Hate Level 3", "goto 102"},
+    {"Harrogath", "Act V town / gear and shield close-ups", "goto 109"},
+    {"Bloody Foothills", "Act V / open-field melee and archery", "goto 110"},
+    {"Crystalline Passage", "Act V / ice cavern and indoor lighting", "goto 113"},
+    {"Arreat Summit", "Act V / mountain panorama", "goto 120"},
+    {"Throne of Destruction", "Act V / Baal's throne room", "goto 131"},
+    {"Worldstone Chamber", "Act V / Worldstone backdrop", "goto 132"},
 }};
+inline constexpr int PageCount=(int(Choices.size())+PageSize-1)/PageSize;
 // Native skill identifiers, including internal names that differ from the UI.
 // Set exact levels so repeated preparation cannot keep adding skill points.
 // Class order is the native unit class ID. A live Warlock already identifies

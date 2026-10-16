@@ -257,9 +257,16 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
         char title[120];std::snprintf(title,sizeof title,"DEVELOPMENT / %s",available?dev::Presets[s.devClass].name:"OFFLINE EXPANSION");
         text(title,{38,42,730,85});
         SelectObject(dc,shortcutFont);
-        text(available?"Prepare all class skills, choose gear, equip it in Inventory, then travel.":"Create and load an offline expansion character in the pcvr-dev save environment.",{38,87,730,143});
+        text(available?"Equip gear in Inventory. Travel uses area entrances; bosses depend on your save.":"Load an offline expansion character in pcvr-dev.",{38,83,730,101});
         SelectObject(dc,font);
-        for(int i=0;i<int(dev::Choices.size());++i) {
+        static_assert(dev::PageCount==2,"Add a developer page label and tab layout when expanding the menu");
+        for(int page=0;page<dev::PageCount;++page) {
+            const auto b=DeveloperPageBounds(page);
+            RECT r{LONG(768*b.left),LONG(768*b.top),LONG(768*b.right),LONG(768*b.bottom)};
+            frame(r,o.devPage==page||o.hover==DeveloperPageCell(page));
+            text(page==0?"GEAR / TESTS":"SCENIC LOCATIONS",r);
+        }
+        for(int i=o.devPage*dev::PageSize;i<std::min(int(dev::Choices.size()),(o.devPage+1)*dev::PageSize);++i) {
             const auto bounds=DeveloperBounds(i);
             const int x=int(768*bounds.left),y=int(768*bounds.top),right=int(768*bounds.right),bottom=int(768*bounds.bottom);
             const auto choice=available?dev::ChoiceFor(s.devClass,i):dev::Choices[i];

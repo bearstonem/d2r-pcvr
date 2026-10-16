@@ -38,7 +38,7 @@ git push origin feat/development-scenarios
    Use the appropriate runtime option if your normal VR shortcut requires it.
 4. Create a **new offline expansion character** in this environment and enter a game.
    Existing normal-play characters should not appear in this separate save list.
-5. Open either hand's wheel and choose **DEV > Prepare <your class>**. The page
+5. Open either hand's wheel and choose **DEV > Gear / Tests > Prepare <your class>**. The page
    adapts to the loaded class: Amazon, Sorceress, Necromancer, Paladin, Barbarian,
    Druid, Assassin or Warlock (requires the game's expansion content).
    Preparation requests level 90, 300 strength/dexterity/energy, 400 vitality,
@@ -117,6 +117,36 @@ only; choose one at a time and equip/stash it before granting the alternative.
 Combat armor uses a unique Sacred Armor, Vampirebone Gloves, War Boots and
 Mithril Coil. Caster armor uses Skin of the Vipermagi, Magefist, Waterwalk and
 Arachnid Mesh. Barbarian and Druid helmets use their class uniques.
+
+## Filming locations
+
+Choose **DEV > Scenic Locations** on either hand's wheel. **Gear / Tests** keeps
+all existing loadouts and inspection destinations, including Tyrael, Duriel,
+Blood Moor, Arcane Sanctuary and Chaos Sanctuary. Reopening DEV starts on that
+first page. Page tabs only navigate the menu; select a destination to travel.
+
+| Destination | Suggested footage |
+| --- | --- |
+| Tristram | Burning village, close combat and loot labels |
+| Cathedral | Gothic interior and indoor lighting |
+| Andariel's chamber | Catacombs Level 4 and boss-room atmosphere |
+| Kurast Bazaar | Ruins, stairs and ranged combat |
+| Travincal | Temple architecture and Council arena |
+| Mephisto's chamber | Durance of Hate Level 3 interior |
+| Harrogath | Town backdrop for gear, shield reach and menu demonstrations |
+| Bloody Foothills | Outdoor melee, bow and crossbow movement |
+| Crystalline Passage | Ice cavern and indoor lighting |
+| Arreat Summit | Mountain panorama and the Ancients' platform |
+| Throne of Destruction | Baal's throne room |
+| Worldstone Chamber | Worldstone backdrop |
+
+These use native level entrances; walk to the desired shot after arrival.
+Level IDs were checked against the installed 3.3.93787 tables. The shortcuts
+do not reset bosses, start encounters, complete quests or respawn enemies;
+what is available depends on the disposable offline character's game state.
+Automated checks cover both menu pages, visible click targets, stale-page
+rejection and native dispatch. Arrival and filming conditions still need
+headset verification.
 
 ## Boundaries and status
 

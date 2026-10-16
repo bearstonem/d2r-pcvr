@@ -44,22 +44,42 @@ int main(){
         Check(WheelCell(.25f,.27f,-1,MenuPage::Developer,0,false)==-1,"disabled developer page has no actions");
         for(int i=0;i<int(framevr::dev::Choices.size());++i) {
             const auto b=DeveloperBounds(i);
-            Check(WheelCell((b.left+b.right)/2,(b.top+b.bottom)/2,-1,MenuPage::Developer,0,true)==DeveloperCell(i),"every dev button has its own click target");
+            Check(WheelCell((b.left+b.right)/2,(b.top+b.bottom)/2,-1,MenuPage::Developer,0,true,i/framevr::dev::PageSize)==DeveloperCell(i),"every dev button has its own click target on its page");
             Check(b.bottom*768<628,"dev buttons do not overlap status text or footer");
         }
         Output o;o.developer=true;auto a=Context(s.in.snapshot,o,true);o.developer=false;
         Check(a!=Context(s.in.snapshot,o,true),"dev page switch invalidates painted atlas");
         o.developer=true;a=Context(s.in.snapshot,o,true);s.in.snapshot.devClass=0;
         Check(a!=Context(s.in.snapshot,o,true),"changing class invalidates gear names in the painted atlas");
+        a=Context(s.in.snapshot,o,true);o.devPage=1;
+        Check(a!=Context(s.in.snapshot,o,true),"scenic page invalidates the previous page's paint and click eligibility");
     }
-    for(int choice:{framevr::dev::TyraelChoice,framevr::dev::DurielChoice,framevr::dev::CrossbowChoice,framevr::dev::BloodMoorChoice,framevr::dev::BowChoice,framevr::dev::SmallShieldChoice}) {
+    for(int choice=0;choice<int(framevr::dev::Choices.size());++choice) {
         Sim s;s.in.snapshot.developer=true;s.in.snapshot.devClass=3;s.in.wheel=true;s.Step(3);
         s.in.hover=13;s.in.trigger=1;s.Step();s.in.trigger=0;s.Step();
+        const int page=choice/framevr::dev::PageSize;
+        const auto tab=DeveloperPageBounds(page);
+        s.in.hover=WheelCell((tab.left+tab.right)/2,(tab.top+tab.bottom)/2,-1,MenuPage::Developer,0,true,s.out.devPage);
+        s.in.trigger=1;s.Step();
+        Check(s.out.devPage==page&&s.out.request.action==Action::None,"developer page tab changes pages without teleporting or granting gear");
+        Check(s.Step(5).request.action==Action::None,"holding a page tab cannot dispatch a command");
+        s.in.trigger=0;s.Step();
         const auto b=DeveloperBounds(choice);
-        s.in.hover=WheelCell((b.left+b.right)/2,(b.top+b.bottom)/2,-1,MenuPage::Developer,0,true);
+        s.in.hover=WheelCell((b.left+b.right)/2,(b.top+b.bottom)/2,-1,MenuPage::Developer,0,true,s.out.devPage);
         s.in.trigger=1;s.Step();
         Check(s.out.request.action==Action::Developer&&s.out.request.index==choice&&s.out.select==-2,"dev button requests its action without a spell or footer action");
         Check(s.Step(5).request.action==Action::None,"held dev button cannot repeat gear or travel");
+    }
+    {
+        Sim s;s.in.snapshot.developer=true;s.in.snapshot.devClass=3;s.in.wheel=true;s.Step(3);
+        s.in.hover=13;s.in.trigger=1;s.Step();s.in.trigger=0;s.Step();
+        s.in.hover=DeveloperPageCell(1);s.in.trigger=1;s.Step();s.in.trigger=0;s.Step();
+        s.in.hover=DeveloperCell(0);s.in.trigger=1;s.Step();
+        Check(s.out.request.action==Action::None,"a stale choice from the previous page cannot grant gear or travel");
+        const auto unused=DeveloperBounds(framevr::dev::PageSize*2-1);
+        Check(WheelCell((unused.left+unused.right)/2,(unused.top+unused.bottom)/2,-1,MenuPage::Developer,0,true,1)==-1,"unused scenic row has no hidden action");
+        s.in.wheel=false;s.in.trigger=0;s.Step();s.in.wheel=true;s.Step();s.in.hover=13;s.in.trigger=1;s.Step();
+        Check(s.out.developer&&s.out.devPage==0,"reopening DEV starts on gear and test controls");
     }
     for(int footer=0;footer<5;++footer) {
         Sim s;s.in.snapshot.developer=true;s.in.snapshot.devClass=3;s.in.wheel=true;s.Step(3);

@@ -83,6 +83,11 @@ int main(int argc,char** argv) {
         s.developer=true;s.devClass=3;Output o;o.wheel=o.developer=true;o.wheelHand=0;
         const auto ready=Paint(s,o,-1);o.hover=DeveloperCell(framevr::dev::CrossbowChoice);const auto hovered=Paint(s,o,-1);
         if(ready.empty()||ready==hovered)return 70;
+        o.devPage=1;o.hover=DeveloperCell(framevr::dev::PageSize);
+        const auto scenic=Paint(s,o,-1);
+        if(scenic.empty()||scenic==hovered)return 74;
+        if(!SavePng((std::string(argv[1])+".scenic.png").c_str(),scenic,1024,1024))return 75;
+        o.devPage=0;o.hover=DeveloperCell(framevr::dev::CrossbowChoice);
         for(int cls=0;cls<8;++cls) {
             s.devClass=cls;const auto other=Paint(s,o,-1);
             if(other.empty()||(cls!=3&&other==hovered))return 73;

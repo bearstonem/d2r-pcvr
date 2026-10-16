@@ -213,10 +213,11 @@ int main(){
     }
     failItems=false;
     // Inspection destinations use native UI dispatch and stale-session guards.
-    for(int choice:{TyraelChoice,DurielChoice,BloodMoorChoice}) {
+    for(int choice=0;choice<int(Choices.size());++choice) {
+        if(!Choices[choice].command)continue;
         const auto before=commands.size();
         devscenarios::Request(Make(choice));assert(!tasks.back().game);Run(tasks.size()-1);
-        const char* expected=choice==TyraelChoice?"goto 73,22578,15594":choice==DurielChoice?"goto 73":"goto 2";
+        const char* expected=Choices[choice].command;
         assert(commands.size()==before+1&&commands.back()==expected);
         assert(devscenarios::Status().result==Result::Dispatched);
         devscenarios::Request(Make(choice));const auto travelTask=tasks.size()-1;
