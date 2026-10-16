@@ -265,8 +265,8 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
             const auto choice=available?dev::ChoiceFor(s.devClass,i):dev::Choices[i];
             frame({x,y,right,bottom},available&&o.hover==DeveloperCell(i));
             SetTextColor(dc,available?RGB(235,218,181):RGB(148,137,117));
-            text(choice.name,{x+8,y+5,right-8,y+39});
-            SelectObject(dc,shortcutFont);text(choice.detail,{x+8,y+39,right-8,bottom-5});SelectObject(dc,font);
+            text(choice.name,{x+8,y+4,right-8,y+32});
+            SelectObject(dc,shortcutFont);text(choice.detail,{x+8,y+32,right-8,bottom-4});SelectObject(dc,font);
         }
         SetTextColor(dc,RGB(235,218,181));SelectObject(dc,shortcutFont);
         text(o.result==Result::Pending?"Working...":o.result==Result::Applied?"Kit added to inventory. Equip it using the native inventory screen.":

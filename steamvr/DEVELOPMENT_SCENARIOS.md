@@ -72,11 +72,24 @@ git push origin feat/development-scenarios
    and inspect the walls with the current indoor-fog-off build. The owner found
    the room looked normal during inspection; the reported black edge was not
    reproduced, so its cause and whether the fog change fixes it remain unconfirmed.
+10. For crossbow firing (#92), choose **DEV > Crossbow + bolts** on any class.
+    This adds a unique Light Crossbow (Leadcrow) and 250 normal bolts, without
+    granting another armor set. Use **Prepare <your class>** first if needed to
+    meet equipment requirements, then equip the crossbow and bolts in Inventory.
+    Choose **Blood Moor** to test outside town. Try Right Trigger with the current
+    assignment, then use the right-hand wheel's slot editor to assign **Attack**
+    to **Right Trigger** and compare. Test separate presses and a held trigger,
+    aiming with the right hand alone and with a left-hand support grip. Release
+    Right Grip while firing: Right Grip + Right Trigger is the loot-label chord.
+    Record the original trigger assignment, whether bolts launch, aim direction
+    and whether enemies take damage. The kit preserves bindings so the suspected
+    missing/incompatible attack assignment can be checked; it is not a firing fix.
 
-Each kit includes weapons, a helmet, armor, gloves, boots, belt, two rings and an
+Each class kit includes weapons, a helmet, armor, gloves, boots, belt, two rings and an
 amulet. Staff and shapeshift kits omit an off-hand item. Native unique selection
 and stat rolls apply: a Phase Blade can be Lightsabre or Azurewrath, for example,
-and jewelry varies. Amazon bow gear includes 250 normal arrows. Kits grant gear
+and jewelry varies. Amazon bow gear includes 250 normal arrows; the separate
+crossbow test kit grants only its weapon and 250 normal bolts. Kits grant gear
 only; choose one at a time and equip/stash it before granting the alternative.
 
 | Class | Primary gear | Alternate gear |

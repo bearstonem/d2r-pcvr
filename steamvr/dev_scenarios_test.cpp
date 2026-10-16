@@ -52,14 +52,18 @@ static Items::Result __cdecl RemoveToken(const PluginContext*,PlayerHandle playe
     ++tokenRemoves;tokenLive=false;return Items::Result::Success;
 }
 static Items::Result __cdecl ItemsCall(const PluginContext*,const Items::Transaction* t,Items::TransactionResult* r) noexcept {
-    ++itemCalls;assert(t->player==local&&t->outputCount>=9&&t->outputCount<=10);
+    ++itemCalls;assert(t->player==local&&(t->outputCount==2||(t->outputCount>=9&&t->outputCount<=10)));
+    if(t->outputCount==2) {
+        assert(t->outputs[0].code==Items::MakeItemCode("lxb"));
+        assert(t->outputs[1].code==Items::MakeItemCode("cqv"));
+    }
     (void)devscenarios::Status();
     // Match the installed loader: zero-input exchanges are InvalidArgument.
     if(!t->inputCount||!t->inputs)return Items::Result::InvalidArgument;
     assert(t->inputCount==1&&t->inputs[0].item==Token&&t->inputs[0].quantity==1&&tokenLive);
     grantedCodes.clear();
     for(unsigned i=0;i<t->outputCount;++i) {
-        const auto& s=t->outputs[i];const bool ammo=s.code==Items::MakeItemCode("aqv");
+        const auto& s=t->outputs[i];const bool ammo=s.code==Items::MakeItemCode("aqv")||s.code==Items::MakeItemCode("cqv");
         grantedCodes.push_back(s.code);
         assert(s.quality==(ammo?Items::Quality::Normal:Items::Quality::Unique)&&s.itemLevel==99);
         assert(s.destination.container==Items::ItemContainer::Inventory);
@@ -181,9 +185,11 @@ int main(){
                 assert(commands[start+std::size(Preparation)+i]==expected);
             }
         }
-        for(int choice:{1,2}) {
+        for(int choice:{1,2,CrossbowChoice}) {
+            const auto commandCount=commands.size();
             devscenarios::Request(Make(choice));assert(tasks.back().game);Run(tasks.size()-1);
             assert(devscenarios::Status().result==Result::Applied&&!tokenLive);
+            assert(commands.size()==commandCount); // gear does not change stats, bindings or destination
             std::vector<uint32_t> expected;
             for(const char* code:Kit(cls,choice))if(code)expected.push_back(Items::MakeItemCode(code[0],code[1],code[2]));
             assert(grantedCodes==expected);
@@ -194,12 +200,17 @@ int main(){
     assert(Presets[2].alternateWeapons[0]==std::string_view("7dg"));
     assert(Presets[4].alternateWeapons[0]==std::string_view("7ts"));
     assert(Presets[6].primaryWeapons[0]==std::string_view("9tw")&&Presets[6].primaryWeapons[1]==std::string_view("7wb"));
-    // Tyrael's platform and Duriel's native arrival point are distinct.
-    // Both use the same UI dispatch and stale-session guard as other travel.
-    for(int choice:{TyraelChoice,DurielChoice}) {
+    // Crossbow kit failures must clean up only the generated exchange token.
+    failItems=true;const auto beforeCrossbowCleanup=tokenRemoves;
+    devscenarios::Request(Make(CrossbowChoice));Run(tasks.size()-1);
+    assert(devscenarios::Status().result==Result::KitRefused&&!tokenLive&&tokenRemoves==beforeCrossbowCleanup+1);
+    failItems=false;
+    // Inspection destinations use native UI dispatch and stale-session guards.
+    for(int choice:{TyraelChoice,DurielChoice,BloodMoorChoice}) {
         const auto before=commands.size();
         devscenarios::Request(Make(choice));assert(!tasks.back().game);Run(tasks.size()-1);
-        assert(commands.size()==before+1&&commands.back()==(choice==TyraelChoice?"goto 73,22578,15594":"goto 73"));
+        const char* expected=choice==TyraelChoice?"goto 73,22578,15594":choice==DurielChoice?"goto 73":"goto 2";
+        assert(commands.size()==before+1&&commands.back()==expected);
         assert(devscenarios::Status().result==Result::Dispatched);
         devscenarios::Request(Make(choice));const auto travelTask=tasks.size()-1;
         const auto beforeStale=commands.size();++local;Run(travelTask);--local;

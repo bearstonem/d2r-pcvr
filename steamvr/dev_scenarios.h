@@ -9,7 +9,9 @@ inline constexpr char ModInfo[]="{\"name\":\"pcvr-dev\",\"savepath\":\"pcvr-dev/
 struct Choice {const char* name;const char* detail;const char* command;};
 inline constexpr int TyraelChoice=8;
 inline constexpr int DurielChoice=9;
-inline constexpr std::array<Choice,10> Choices{{
+inline constexpr int CrossbowChoice=10;
+inline constexpr int BloodMoorChoice=11;
+inline constexpr std::array<Choice,12> Choices{{
     {"Prepare current class", "Level 90 / all 30 class skills at level 20", nullptr},
     {"Primary gear", "Class-specific unique equipment", nullptr},
     {"Alternate gear", "Equipment for the other class abilities", nullptr},
@@ -25,6 +27,8 @@ inline constexpr std::array<Choice,10> Choices{{
     // Use the level's native arrival point for the boss arena, rather than
     // the explicit Tyrael platform coordinates above. No quest commands.
     {"Duriel - Act II", "Boss-room entrance / rendering", "goto 73"},
+    {"Crossbow + bolts", "Equip both; assign Attack to Right Trigger", nullptr},
+    {"Blood Moor", "Act I combat / crossbow test", "goto 2"},
 }};
 // Native skill identifiers, including internal names that differ from the UI.
 // Set exact levels so repeated preparation cannot keep adding skill points.
@@ -131,6 +135,9 @@ inline constexpr const char* Preparation[]={
 // Native unique generation selects eligible unique rows and random stat rolls.
 // nullptr skips an off-hand item for a two-handed staff/maul.
 inline std::array<const char*,10> Kit(int cls,int choice){
+    // Small, class-independent kit for comparing native trigger assignments.
+    // Leave equipped items and bindings alone; the player equips both pieces.
+    if(ValidClass(cls)&&choice==CrossbowChoice)return {"lxb","cqv"};
     if(!ValidClass(cls)||(choice!=1&&choice!=2))return {};
     const auto& p=Presets[cls];const bool caster=choice==2&&cls!=0&&cls!=4;
     const auto& weapons=choice==1?p.primaryWeapons:p.alternateWeapons;
@@ -141,6 +148,6 @@ inline std::array<const char*,10> Kit(int cls,int choice){
 }
 inline bool Ammo(std::string_view code){return code=="aqv"||code=="cqv";}
 inline bool ValidChoice(int choice){return choice>=0&&choice<int(Choices.size());}
-inline bool IsKit(int choice){return choice==1||choice==2;}
+inline bool IsKit(int choice){return choice==1||choice==2||choice==CrossbowChoice;}
 inline bool Isolated(std::string_view mod,std::string_view metadata){return mod==Mod&&metadata==ModInfo;}
 }

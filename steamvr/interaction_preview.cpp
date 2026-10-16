@@ -81,7 +81,7 @@ int main(int argc,char** argv) {
     Snapshot s;s.session=1;s.equipmentKnown=s.beltKnown=s.vitalsKnown=true;s.activeSet=1;
     if(argc>2&&!std::strcmp(argv[2],"--developer-check")) {
         s.developer=true;s.devClass=3;Output o;o.wheel=o.developer=true;o.wheelHand=0;
-        const auto ready=Paint(s,o,-1);o.hover=DeveloperCell(framevr::dev::DurielChoice);const auto hovered=Paint(s,o,-1);
+        const auto ready=Paint(s,o,-1);o.hover=DeveloperCell(framevr::dev::CrossbowChoice);const auto hovered=Paint(s,o,-1);
         if(ready.empty()||ready==hovered)return 70;
         for(int cls=0;cls<8;++cls) {
             s.devClass=cls;const auto other=Paint(s,o,-1);

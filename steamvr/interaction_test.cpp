@@ -45,21 +45,21 @@ int main(){
         for(int i=0;i<int(framevr::dev::Choices.size());++i) {
             const auto b=DeveloperBounds(i);
             Check(WheelCell((b.left+b.right)/2,(b.top+b.bottom)/2,-1,MenuPage::Developer,0,true)==DeveloperCell(i),"every dev button has its own click target");
-            Check(b.bottom<FooterBounds(0,MenuPage::Developer,true).top,"dev buttons do not overlap footer");
+            Check(b.bottom*768<628,"dev buttons do not overlap status text or footer");
         }
         Output o;o.developer=true;auto a=Context(s.in.snapshot,o,true);o.developer=false;
         Check(a!=Context(s.in.snapshot,o,true),"dev page switch invalidates painted atlas");
         o.developer=true;a=Context(s.in.snapshot,o,true);s.in.snapshot.devClass=0;
         Check(a!=Context(s.in.snapshot,o,true),"changing class invalidates gear names in the painted atlas");
     }
-    for(int choice:{framevr::dev::TyraelChoice,framevr::dev::DurielChoice}) {
+    for(int choice:{framevr::dev::TyraelChoice,framevr::dev::DurielChoice,framevr::dev::CrossbowChoice,framevr::dev::BloodMoorChoice}) {
         Sim s;s.in.snapshot.developer=true;s.in.snapshot.devClass=3;s.in.wheel=true;s.Step(3);
         s.in.hover=13;s.in.trigger=1;s.Step();s.in.trigger=0;s.Step();
         const auto b=DeveloperBounds(choice);
         s.in.hover=WheelCell((b.left+b.right)/2,(b.top+b.bottom)/2,-1,MenuPage::Developer,0,true);
         s.in.trigger=1;s.Step();
-        Check(s.out.request.action==Action::Developer&&s.out.request.index==choice&&s.out.select==-2,"inspection button requests its destination without a spell or footer action");
-        Check(s.Step(5).request.action==Action::None,"held inspection button cannot repeat travel");
+        Check(s.out.request.action==Action::Developer&&s.out.request.index==choice&&s.out.select==-2,"dev button requests its action without a spell or footer action");
+        Check(s.Step(5).request.action==Action::None,"held dev button cannot repeat gear or travel");
     }
     for(int footer=0;footer<5;++footer) {
         Sim s;s.in.snapshot.developer=true;s.in.snapshot.devClass=3;s.in.wheel=true;s.Step(3);
