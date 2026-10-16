@@ -64,6 +64,32 @@ int main() {
     assert(SupportLatched(true,true,true,false,true)); // latched until release
     assert(!SupportLatched(false,true,true,true,true));
     assert(!SupportLatched(true,true,false,true,false)); // existing staff press behavior
+    // Shield-set swaps can leave the native palms 1.3-4.48 model units apart
+    // throughout idle. Controller placement must work without first firing
+    // an attack animation to bring those palms together.
+    for(float gap:{.8f,1.3f,4.48f})assert(GripCaptureAllowed(gap,true,.93f));
+    assert(!GripCaptureAllowed(4.48f,false)&&GripCaptureAllowed(.8f,false));
+    assert(!GripCaptureAllowed(4.48f,true,.001f)); // hidden swap attachment: wait, never force two-hand mode
+    assert(!GripCaptureAllowed(NAN,true)&&!GripCaptureAllowed(1,true,INFINITY));
+    SupportGrip supportGrip;
+    for(int frame=0;frame<100;++frame)assert(!supportGrip.Step(42,10,true,1,true)); // shoulder grip carried into the swap
+    assert(!supportGrip.Step(42,10,true,0,true)); // release arms this crossbow
+    assert(!supportGrip.Step(42,10,true,1,false)); // squeeze away from stock
+    assert(supportGrip.Step(42,10,true,1,true)); // approach while held still works
+    assert(supportGrip.Step(42,10,true,.5f,false)); // hysteresis and latched movement
+    assert(!supportGrip.Step(42,10,true,0,false)); // can always free the support hand
+    assert(supportGrip.Step(42,10,true,1,true)); // grab again without swapping
+    assert(!supportGrip.Step(99,11,true,1,true)); // switch equipment while held
+    assert(!supportGrip.Step(42,12,true,1,true)); // return to original crossbow while held
+    assert(!supportGrip.Step(42,12,true,0,true)&&supportGrip.Step(42,12,true,1,true));
+    assert(!supportGrip.Step(42,13,true,1,true)); // rebuilt hero cannot retain a previous latch
+    assert(!supportGrip.Step(42,13,true,0,true)&&supportGrip.Step(42,13,true,1,true));
+    assert(!supportGrip.Step(42,13,false,1,true)); // lost tracking frees the hand
+    assert(!supportGrip.Step(42,13,true,1,true)); // reacquisition requires release
+    assert(!supportGrip.Step(42,13,true,0,true)&&supportGrip.Step(42,13,true,1,true));
+    assert(!supportGrip.Step(42,13,true,-1,true)); // missing grip input is not "always held"
+    assert(!supportGrip.Step(42,13,true,NAN,true));
+    supportGrip.Reset();assert(!supportGrip.Step(42,13,true,1,true)); // inactive/menu interval
     // Includes vertical aim: the former ground-path adapter refused these
     // shots and flattened every other bolt's direction to horizontal.
     for(float scale:{.7f,1.f,1.4f})for(float sign:{-1.f,1.f})

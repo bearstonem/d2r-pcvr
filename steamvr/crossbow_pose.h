@@ -62,6 +62,29 @@ inline bool RenderedGeometry(const Mat& boltInItem,const Mat& itemWorld,const Ma
 inline bool SupportLatched(bool held,bool pressedBefore,bool latched,bool inReach,bool crossbow) {
     return held&&(latched||((crossbow||!pressedBefore)&&inReach));
 }
+// Controller placement overwrites the animated hand-to-hand position. The
+// old close-palm gate could reject every idle pose after a shield-set swap.
+inline bool GripCaptureAllowed(float palmGap,bool controllerPlaced,float mountScale=1.f) {
+    return std::isfinite(palmGap)&&palmGap>=0&&
+        (controllerPlaced?(std::isfinite(mountScale)&&mountScale>=.3f&&mountScale<=3.f):palmGap<=1.f);
+}
+struct SupportGrip {
+    uint32_t weapon=0,generation=0;
+    bool known=false,armed=false,pressed=false,on=false;
+    bool Current(uint32_t key,uint32_t hero)const{return known&&weapon==key&&generation==hero;}
+    void Reset(){*this={};}
+    bool Step(uint32_t key,uint32_t hero,bool tracked,float grip,bool inReach) {
+        if(!tracked||!std::isfinite(grip)||grip<0){Reset();return false;}
+        if(!Current(key,hero)){Reset();known=true;weapon=key;generation=hero;}
+        // A held shoulder-swap grip must not become a support grab. Observe
+        // its release on this weapon/model before allowing the next squeeze.
+        if(grip<.4f){armed=true;pressed=on=false;return false;}
+        if(!armed)return false;
+        const bool held=grip>.6f||pressed;
+        on=SupportLatched(held,pressed,on,inReach,true);pressed=held;
+        return on;
+    }
+};
 // The support palm is under the actual stock, not on a separately rotated
 // controller ray. Project the driving palm onto that line before advancing.
 inline Vec Support(const Line& line,Vec rightPalm,float ahead,float unitsPerMetre) {

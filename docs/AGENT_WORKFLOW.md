@@ -262,6 +262,13 @@ Known diagnostic lessons:
   Check `Frame crossbow free fire` for successful direct shots/cadence. The
   existing class/weapon/IAS cadence table supplies the cycle (skill speed/slow
   modifiers remain unmodeled); unknown or stale data falls back to one second.
+  After shield-to-crossbow swaps, a rejected wide animated palm gap could leave
+  `grip.ok=false`, falling through to the legacy two-hand solver despite
+  `staff_free_left=1`. That solver has no support-grip release. Controller-placed
+  crossbows now accept wide poses with a visible attachment; pending free-grip
+  mode never opts into the legacy solver. Grip caches match the equipment key
+  and hero generation. The crossbow support latch needs a fresh release after
+  a swap/tracking loss; unknown grip input must not mean permanently held.
 - Melee settings are motion speed in m/s, not acceleration. Classic/Unleashed
   are game-rule choices; they do not remove the physical motion threshold.
 - The shield follows the final posed left wrist. Arm IK used to clamp that

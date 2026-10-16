@@ -356,6 +356,7 @@ std::map<std::pair<uintptr_t, uintptr_t>, Hero> g_heroes;   // count == 0: not t
 struct Grip {
     int type = -1;
     bool ok = false;
+    uint32_t generation=0;
     Mat attach[2];       // R/L_weapon_attach relative to its wrist
     Mat inStaff[2];      // each wrist relative to the staff (the attach bone that holds it)
     // Each palm's middle (wrist to middle knuckle, halfway) in the staff's
@@ -941,6 +942,9 @@ struct StaffHold {
     float dir[3] = {};
     float gap = 0.0f;
     ULONGLONG at = 0;
+#ifdef D2RVR_NATIVE_OPENXR
+    framevr::crossbow::SupportGrip crossbow;
+#endif
 };
 SRWLOCK g_staffLock = SRWLOCK_INIT;
 StaffHold g_staff;
@@ -965,16 +969,25 @@ void FromModel(V3 o, float c, float s, float out[3]) {
 // inReach: the left hand is close enough to the staff to take it. A grip pressed
 // far from it takes nothing until pressed again near it. A crossbow's support
 // grip may also engage by entering range while Grip is already held.
-float StaffEase(float grip, bool inReach, bool crossbow=false) {
+float StaffEase(float grip, bool inReach, bool crossbow=false, bool tracked=true, uint32_t weapon=0, uint32_t generation=0) {
     LARGE_INTEGER f, now;
     QueryPerformanceFrequency(&f); QueryPerformanceCounter(&now);
     AcquireSRWLockExclusive(&g_staffLock);
     const float dt = g_staff.last ? std::clamp((float)((double)(now.QuadPart - g_staff.last) / (double)f.QuadPart), 0.0f, kStaffEaseS) : kStaffEaseS;
     g_staff.last = now.QuadPart;
-    const bool pressed = grip < 0.0f || grip > 0.6f ? true : grip < 0.4f ? false : g_staff.pressed;
-    if (grip < 0.0f) g_staff.on = true;   // no grip from the bridge: always on the staff
-    else g_staff.on = framevr::crossbow::SupportLatched(pressed,g_staff.pressed,g_staff.on,inReach,crossbow);
-    g_staff.pressed = pressed;
+#ifdef D2RVR_NATIVE_OPENXR
+    if(crossbow) {
+        if(!g_staff.crossbow.Current(weapon,generation)||!tracked||!std::isfinite(grip)||grip<0)g_staff.t=0;
+        g_staff.on=g_staff.crossbow.Step(weapon,generation,tracked,grip,inReach);
+        g_staff.pressed=g_staff.crossbow.pressed;
+    } else
+#endif
+    {
+        const bool pressed = grip < 0.0f || grip > 0.6f ? true : grip < 0.4f ? false : g_staff.pressed;
+        if (grip < 0.0f) g_staff.on = true;   // legacy bridge without grip input
+        else g_staff.on = framevr::crossbow::SupportLatched(pressed,g_staff.pressed,g_staff.on,inReach,crossbow);
+        g_staff.pressed = pressed;
+    }
     g_staff.t = std::clamp(g_staff.t + (g_staff.on ? dt : -dt) / kStaffEaseS, 0.0f, 1.0f);
     const float t = g_staff.t;
     ReleaseSRWLockExclusive(&g_staffLock);
@@ -1202,6 +1215,16 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& in) {
     // The grip, taken once per weapon while not attacking (see Grip).
     Grip grip;
     AcquireSRWLockShared(&g_gripLock); grip = g_grip; ReleaseSRWLockShared(&g_gripLock);
+#ifdef D2RVR_NATIVE_OPENXR
+    // A previous weapon's valid cache is not a fallback for this one, even
+    // if attacking temporarily prevents learning the new attachment.
+    if(grip.type!=in.weaponType||grip.generation!=HeroGen())grip.ok=false;
+    if(!in.gunStock||!in.staffFreeLeft||in.mode!=2||!(in.handsValid&1u)) {
+        AcquireSRWLockExclusive(&g_staffLock);
+        if(g_staff.crossbow.known){g_staff.crossbow.Reset();g_staff.on=g_staff.pressed=false;g_staff.t=0;g_staff.at=0;}
+        ReleaseSRWLockExclusive(&g_staffLock);
+    }
+#endif
     if ((grip.type != in.weaponType || !grip.ok) && !in.attacking && h.weapon[0] >= 0 && h.weapon[1] >= 0 && h.hand[0] >= 0 && h.hand[1] >= 0) {
         for (int side = 0; side < 2; ++side) {
             grip.attach[side] = Mul(oldW[h.weapon[side]], InvAffine(oldW[h.hand[side]]));
@@ -1219,14 +1242,20 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& in) {
             grip.palm[side][0] = p.x; grip.palm[side][1] = p.y; grip.palm[side][2] = p.z;
         }
         grip.type = in.weaponType;
+        grip.generation=HeroGen();
         grip.ok = true;
-        // A crossbow is placed by where the game's right hand holds it (GunFrame): a grip
-        // taken in a pose with the hands off it (4.48 units apart, not the 0.80 of the
-        // hold) put the model a metre off (2026-10-05). Such a one is not taken; the last
-        // good one stands in for it.
+        // Legacy placement needed a close animated grip. Native controller
+        // placement replaces that position and fixes the stock axis, so the
+        // wide idle/swap pose must not prevent learning its attachment. Hidden
+        // transitional attachments still wait for a visible pose.
         static Grip goodXbow;
-        if (in.gunStock && Len(Sub(pw[0], pw[1])) > 1.0f) {
-            if (goodXbow.ok && goodXbow.type == in.weaponType) grip = goodXbow;
+        bool controllerPlaced=false;
+#ifdef D2RVR_NATIVE_OPENXR
+        controllerPlaced=in.gunFrame&&in.stockAxis!=0&&abs(in.stockAxis)<=3;
+#endif
+        const float mountScale=grip.scale[in.staffHand==0?0:1];
+        if (in.gunStock && !framevr::crossbow::GripCaptureAllowed(Len(Sub(pw[0],pw[1])),controllerPlaced,mountScale)) {
+            if (goodXbow.ok && goodXbow.type == in.weaponType&&goodXbow.generation==HeroGen()) grip = goodXbow;
             else grip.ok = false;
         } else if (in.gunStock) {
             goodXbow = grip;
@@ -1447,7 +1476,8 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& in) {
                                             : std::clamp(Dot(Sub(C, origin), axis), tR - kStaffReach * gap, tR + kStaffReach * gap);
                 inReach = Len(Sub(C, Add(origin, Scale(axis, t)))) <= in.staffGrabM * upm;
             }
-            const float e = (in.handsValid & 2u) ? StaffEase(in.grip[1], inReach, gun) : 1.0f;
+            const float e = gun ? StaffEase(in.grip[1],inReach,true,(in.handsValid&2u)!=0,uint32_t(in.weaponType),HeroGen())
+                               : (in.handsValid & 2u) ? StaffEase(in.grip[1], inReach) : 1.0f;
             leftOnStaff = e >= 0.5f;
             // Held in both hands, the staff is held between them: it runs from
             // the right fist through the left controller, and the right wrist's
@@ -1614,7 +1644,9 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& in) {
                 AcquireSRWLockExclusive(&g_gunBoneLock); g_grabLine = g; ReleaseSRWLockExclusive(&g_gunBoneLock);
             }
         }
-    } else if (in.staff && in.mode == 2 && (in.handsValid & 3u) == 3u) {
+    // Waiting for a grip must not opt a free support hand into the legacy
+    // always-two-handed solver, which has no grip-release path.
+    } else if (in.staff && !in.staffFreeLeft && in.mode == 2 && (in.handsValid & 3u) == 3u) {
         const int hold = in.staffHand == 0 ? 0 : 1, wb = h.weapon[hold], other = h.hand[hold ^ 1];
         if (wb >= 0 && other >= 0) {
             auto apply = [](const Mat& m, V3 v) {   // a point through a row-vector matrix
