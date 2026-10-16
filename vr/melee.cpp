@@ -45,17 +45,17 @@ const D2RL::PluginContext* context=nullptr;const D2RL::ThreadService* threads=nu
 std::atomic<bool> ready{false};bool targetIn=false,lookupIn=false,rangeIn=false,flagsIn=false;
 struct Server {uintptr_t game=0;uint64_t session=0;uint32_t player=0;};
 std::mutex serverMutex;Server server;
-struct Contact {uintptr_t game=0,attacker=0,defender=0;bool accepted=false,smite=false;};
+struct Contact {uintptr_t game=0,attacker=0,defender=0;bool accepted=false,smite=false,resolved=false;};
 thread_local Contact contact;
 std::atomic<unsigned> samples{0},contacts{0},accepted{0},rejected{0},noServer{0},intersections{0},stale{0},walls{0};
 std::atomic<unsigned> applied{0},recovered{0},playerMissing{0},positionMismatch{0},nearby{0},bodyMissing{0};
 std::atomic<unsigned> shieldSweeps{0},shieldRequests{0},shieldAccepted{0},shieldRejected{0};
 // Attack speed: settings/cycle cross threads; the cadence and the strokes that
 // already landed live on the game thread (Apply) only.
-std::atomic<bool> attackSpeed{false},trace{false};
+std::atomic<bool> attackSpeed{false},trace{false},attackRating{true};
 std::atomic<uint64_t> cycleSession{0};std::atomic<uint32_t> cycleMs{0};
-std::atomic<unsigned> tooSoon{0},extraTargets{0};
-framevr::attackspeed::Cadence cadence;HitSet landed;
+std::atomic<unsigned> tooSoon{0},extraTargets{0},missed{0},buttonAttacks{0};
+framevr::attackspeed::Cadence cadence;HitSet landed,felt;
 std::mutex queueMutex;std::array<Engine,2> engines;HitSet hits,shieldHits;
 struct Request {Sweep sweep;Sample sample;uint64_t session=0,at=0;};
 std::array<Request,24> requests;size_t count=0;
@@ -96,7 +96,7 @@ int Range(uintptr_t attacker,uintptr_t defender,int range,void* out) {
 uint16_t Flags(uintptr_t game,uintptr_t attacker,uintptr_t defender,int accuracy,bool force,int offset) {
     const auto result=originalFlags(game,attacker,defender,accuracy,force,offset);
     if(contact.game==game&&contact.attacker==attacker&&contact.defender==defender&&
-       reinterpret_cast<uintptr_t>(_ReturnAddress())==d2rsig::Addr(0x430084))contact.accepted=(result&1)!=0;
+       reinterpret_cast<uintptr_t>(_ReturnAddress())==d2rsig::Addr(0x430084)){contact.resolved=true;contact.accepted=(result&1)!=0;}
     return result;
 }
 bool Position(uintptr_t unit,Vec& out) {
@@ -215,11 +215,16 @@ void TraceRefusal(int kind,const Request& r,uint32_t target) {
         (unsigned long long)cadence.Remaining(r.session,r.at),cycleMs.load());
     framevr::logging::Write(line);
 }
-void TraceHit(const Request& r,uint32_t target,bool accepted,uint64_t since,uint32_t cycle) {
+void TraceHit(const Request& r,uint32_t target,const char* outcome,uint64_t since,uint32_t cycle) {
     if(!trace.load())return;
-    char line[240];snprintf(line,sizeof line,"Frame melee trace: stroke=%llu target=%u %s since_last_landed=%lld ms cycle=%u ms swing=%.1f m/s",
-        (unsigned long long)r.sweep.stroke,target,accepted?"LANDED":"native rejected",since==UINT64_MAX?-1LL:(long long)since,cycle,r.sweep.speed);
+    char line[260];snprintf(line,sizeof line,"Frame melee trace: stroke=%llu target=%u %s since_last_landed=%lld ms cycle=%u ms %s=%.1f m/s",
+        (unsigned long long)r.sweep.stroke,target,outcome,since==UINT64_MAX?-1LL:(long long)since,cycle,r.sweep.thrust?"thrust":"swing",r.sweep.speed);
     framevr::logging::Write(line);
+}
+// Every weapon contact with a hostile creature feels struck: one tap per
+// stroke and creature, whether native then lands, misses or refuses it.
+void Feel(const Request& r,uint32_t target) {
+    if(felt.Insert(r.session,r.sweep.stroke,target))framevr::MeleeImpact();
 }
 void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
     std::array<Request,24> batch;size_t n=0;
@@ -228,6 +233,11 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
      n=count;std::copy_n(requests.begin(),n,batch.begin());count=0;}
     if(!n||!ready.load())return;
     ++applied;
+    // Trigger/button melee shares the attack cycle: its latest native melee
+    // hit check starts the cycle, so alternating it with swings is no faster.
+    if(uint64_t s=0,at=0;attackSpeed.load()&&combat::TakeButtonMelee(s,at)&&s==batch[0].session) {
+        cadence.Landed(s,at,cycleSession.load()==s?cycleMs.load():0);++buttonAttacks;
+    }
     Server local;{std::lock_guard lock(serverMutex);local=server;}
     uint32_t id=0;
     if(!combat::LocalPlayerId(id)||!local.game||local.session!=batch[0].session||local.player!=id) {++noServer;return;}
@@ -278,10 +288,12 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                             }
                             break;
                         }
+                        Feel(r,header[2]);
                         if(hits.Contains(r.session,r.sweep.stroke,header[2]))continue;
                         // Attack speed: a basic attack strikes one creature, and
                         // no sooner than its native attack cycle (IAS, WSM, class)
-                        // after the last landed hit. Misses never start the cycle.
+                        // after the last attack. A rolled miss spends the cycle
+                        // as a native swing would; a geometric whiff never does.
                         uint32_t cycle=0;
                         if(attackSpeed.load()) {
                             if(landed.Contains(r.session,r.sweep.stroke,0)){++extraTargets;TraceRefusal(1,r,header[2]);break;}
@@ -295,12 +307,12 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                         // Native basic attack owns its nontrivial damage object,
                         // proc events, criticals, resistances, leech, XP and item
                         // durability. TLS redirects only THIS invocation's target.
+                        const bool rolls=combat::NativeRolls(attackRating.load());
                         reinterpret_cast<int(*)(uintptr_t,uintptr_t,int,int)>(d2rsig::Addr(AttackRva))(local.game,player,0,1);
-                        if(contact.accepted) {
-                            ++accepted;framevr::MeleeImpact();
-                            if(attackSpeed.load()){cadence.Landed(r.session,r.at,cycle);landed.Insert(r.session,r.sweep.stroke,0);}
-                        } else ++rejected;
-                        TraceHit(r,header[2],contact.accepted,since,cycle);
+                        combat::NativeRolls(rolls);
+                        if(contact.accepted)++accepted;else if(contact.resolved)++missed;else ++rejected;
+                        if(contact.resolved&&attackSpeed.load()){cadence.Landed(r.session,r.at,cycle);landed.Insert(r.session,r.sweep.stroke,0);}
+                        TraceHit(r,header[2],contact.accepted?"LANDED":contact.resolved?"MISSED (roll)":"native rejected",since,cycle);
                         contact=saved;
                         break;
                     }
@@ -349,6 +361,7 @@ void CancelShield() {std::lock_guard lock(queueMutex);current[1].active=false;en
 void CancelWeapon() {std::lock_guard lock(queueMutex);current[0].active=false;engines[0].Reset();}
 bool ShieldReady(){return smiteReady.load();}
 void ConfigureAttackSpeed(bool enabled,bool traceHits){attackSpeed=enabled;trace=traceHits;}
+void ConfigureAttackRating(bool native){attackRating=native;combat::ConfigureMeleeRolls(native);}
 void SetAttackCycle(uint64_t session,uint32_t milliseconds){cycleMs=milliseconds;cycleSession=session;}
 void Submit(const Sample& sample) {
     uintptr_t token=0;
@@ -385,10 +398,10 @@ void Report() {
         const auto one=e.TakeDiagnostics();d.discontinuities+=one.discontinuities;d.recovering+=one.recovering;
         d.invalidPose+=one.invalidPose;d.belowSpeed+=one.belowSpeed;d.onsetRejected+=one.onsetRejected;d.peakSpeed=std::max(d.peakSpeed,one.peakSpeed);
     }age=callback.Age(GetTickCount64());}
-    const auto early=tooSoon.exchange(0),extra=extraTargets.exchange(0);
-    if(!s&&!c&&!g&&!d.discontinuities&&!d.recovering&&!d.invalidPose&&!d.belowSpeed&&!d.onsetRejected&&!retries&&!early&&!extra)return;
-    char line[800];snprintf(line,sizeof line,"Frame melee: sweep samples=%u physical contacts=%u native accepted=%u rejected=%u missing server=%u intersections=%u stale=%u walls=%u pose resets=%u recovering=%u callbacks=%u abandoned=%u pending_ms=%llu missing_player=%u position_mismatch=%u nearby=%u missing_body=%u attack_speed=%d cycle_ms=%u too_soon=%u extra_targets=%u invalid_pose=%u below_speed=%u onset_rejected=%u peak_mps=%.2f",s,c,a,r,g,i,x,w,d.discontinuities,d.recovering,callbacks,retries,(unsigned long long)age,missing,mismatch,monsters,bodies,
-        int(attackSpeed.load()),cycleMs.load(),early,extra,d.invalidPose,d.belowSpeed,d.onsetRejected,d.peakSpeed);
+    const auto early=tooSoon.exchange(0),extra=extraTargets.exchange(0),m=missed.exchange(0),button=buttonAttacks.exchange(0);
+    if(!s&&!c&&!g&&!d.discontinuities&&!d.recovering&&!d.invalidPose&&!d.belowSpeed&&!d.onsetRejected&&!retries&&!early&&!extra&&!m&&!button)return;
+    char line[880];snprintf(line,sizeof line,"Frame melee: sweep samples=%u physical contacts=%u native accepted=%u missed=%u rejected=%u missing server=%u intersections=%u stale=%u walls=%u pose resets=%u recovering=%u callbacks=%u abandoned=%u pending_ms=%llu missing_player=%u position_mismatch=%u nearby=%u missing_body=%u attack_speed=%d cycle_ms=%u too_soon=%u extra_targets=%u button_cycles=%u invalid_pose=%u below_speed=%u onset_rejected=%u peak_mps=%.2f",s,c,a,m,r,g,i,x,w,d.discontinuities,d.recovering,callbacks,retries,(unsigned long long)age,missing,mismatch,monsters,bodies,
+        int(attackSpeed.load()),cycleMs.load(),early,extra,button,d.invalidPose,d.belowSpeed,d.onsetRejected,d.peakSpeed);
     framevr::logging::Write(line);
 }
 }

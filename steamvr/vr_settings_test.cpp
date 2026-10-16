@@ -7,6 +7,18 @@ static void Check(bool b,const char* label){if(!b){std::fprintf(stderr,"FAIL: %s
 static Hit At(Page p,Rect r){return HitTest(p,(r.x+r.w*.5f)/Width,(r.y+r.h*.5f)/Height);}
 int main(){
     Snapshot s;s.ready=true;
+    {
+        Check(s.values[LootLabelSize]==45,"loot labels retain original shipped size by default");
+        Check(Normalize(LootLabelSize,0)==20&&Normalize(LootLabelSize,200)==150&&
+              Normalize(LootLabelSize,NAN)==45&&Normalize(LootLabelSize,47.5f)==47.5f,"loot scale bounds, invalid default and custom values");
+        Model loot;loot.Open(s);loot.Click({Kind::Tab,int(Page::HUD)});
+        Check(RowKey(Page::HUD,8)==LootLabelSize,"HUD exposes loot sizing");
+        loot.Click(At(Page::HUD,Increase(8)));Check(loot.Get()[LootLabelSize]==50,"loot size increases by five percentage points");
+        auto request=loot.Click({Kind::Apply});
+        Check(request.changed==(ChangeMask{1}<<LootLabelSize)&&request.values[LootLabelSize]==50,"loot Apply uses its own high mask bit");
+        loot.Open(s);loot.Click(At(Page::HUD,Decrease(8)));Check(loot.Get()[LootLabelSize]==40,"loot size decreases by five percentage points");
+        loot.Click({Kind::Close});loot.Open(s);Check(loot.Get()[LootLabelSize]==45&&!loot.Dirty(),"Close discards unsaved loot size");
+    }
     for(int i=HapticStrength;i<=HapticAlert;++i){
         const auto key=Key(i);const int row=i-HapticStrength+(i>=HapticBowDraw?1:0);
         Check(s.values[key]==100,"haptics default to normal strength");
@@ -53,7 +65,7 @@ int main(){
         for(int i=0;i<framevr::haptics::CategoryCount;++i)Check(levels.category[i]==i*10,"each saved category maps to its runtime channel");}
     Check(s.values[MeleeHitSpeed]==12,"melee defaults to twelve m/s");
     {Model melee;melee.Open(s);melee.Click({Kind::Tab,int(Page::Combat)});
-        const auto hit=At(Page::Combat,Increase(0));
+        const auto hit=At(Page::Combat,Increase(1));
         Check(hit.index==MeleeHitSpeed&&hit.kind==Kind::Change,"combat speed control hit target");
         melee.Click(hit);Check(melee.Get()[MeleeHitSpeed]==12.25f,"melee speed quarter step");
         const auto request=melee.Click({Kind::Apply});
@@ -62,6 +74,21 @@ int main(){
         s.values[MeleeHitSpeed]=6;melee.Open(s);melee.Click(hit);
         Check(melee.Get()[MeleeHitSpeed]==6.25f,"plus button goes beyond old cap");
         s.values[MeleeHitSpeed]=12;
+    }
+    {Model rules;rules.Open(s);rules.Click({Kind::Tab,int(Page::Combat)});
+        Check(s.values[MeleeRules]==0&&RowKey(Page::Combat,0)==MeleeRules,"melee rules default to Unleashed, first on the Combat page");
+        rules.Click(At(Page::Combat,ValueBox(0)));
+        Check(rules.Get()[MeleeRules]==1,"clicking the value switches to Classic");
+        const auto request=rules.Click({Kind::Apply});
+        Check(request.changed==(ChangeMask{1}<<MeleeRules),"melee rules save only their own setting");
+    }
+    {Model thrust;thrust.Open(s);thrust.Click({Kind::Tab,int(Page::Combat)});
+        const auto hit=At(Page::Combat,Increase(2));
+        Check(s.values[MeleeThrustSpeed]==2&&hit.index==MeleeThrustSpeed&&hit.kind==Kind::Change,"thrust has its own Combat row and two m/s default");
+        thrust.Click(hit);Check(thrust.Get()[MeleeThrustSpeed]==2.25f,"thrust speed adjusts in quarter steps");
+        const auto request=thrust.Click({Kind::Apply});
+        Check(request.changed==(ChangeMask{1}<<MeleeThrustSpeed),"thrust edit does not change swing speed or combat rules");
+        Check(Normalize(MeleeThrustSpeed,NAN)==2&&Normalize(MeleeThrustSpeed,0)==.75f&&Normalize(MeleeThrustSpeed,99)==10,"thrust speed has finite usable bounds");
     }
     Check(s.values[MenuDistance]==1&&s.values[TooltipTiming]==0,"comfortable Medium distance and Instant hover defaults");
     for(auto key:{MenuDistance,TooltipTiming}) {
@@ -112,7 +139,7 @@ int main(){
     Check(Normalize(NavigationLocation,99)==0&&Normalize(NavigationLocation,1.5f)==0,"invalid navigation location falls back to Wrist");
     {Model navigation;navigation.Open(s);navigation.Click(At(Page::Controls,Tabs[int(Page::HUD)]));
         const int row=3;
-        Check(RowCount(Page::HUD)==8&&RowKey(Page::HUD,row)==NavigationLocation,"one navigation row replaces separate map/compass switches");
+        Check(RowCount(Page::HUD)==9&&RowKey(Page::HUD,row)==NavigationLocation,"one navigation row replaces separate map/compass switches");
         for(int location=1;location<=3;++location){
             navigation.Click(At(Page::HUD,Increase(row)));
             Check(navigation.Get()[NavigationLocation]==location,"navigation offers Palm, Either and Off");

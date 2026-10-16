@@ -23,6 +23,7 @@
 #include "pad_mirror_shared.h"
 #include "transport.h"
 #include "../vr/bow.h"
+#include "../vr/crossbow.h"
 #include "../vr/melee.h"
 #include "frame_math.h"
 #include "composition_layers.h"
@@ -197,6 +198,8 @@ uint64_t bowSequence=0;
 bowflight::Shot bowPending{},bowReadyShot{},bowPreviewPose{};
 bool bowPreviewVisible=false;
 bool bowNeedsWorld=false,bowHasShot=false;
+bool crossbowFire=false;
+uint64_t crossbowActivation=0,crossbowTakenAt=0;
 bowflight::Shot spellReadyShot[2]{};
 bool spellHasShot[2]{};
 uint64_t spellResolvedAt[2]{};
@@ -1477,6 +1480,16 @@ void Input() {
     motionOutput.shieldContact=motionInput.active&&!motionOutput.block&&!motionInput.quickCast&&motionInput.trigger<.2f&&
         motionInput.shieldEquipped&&gestureSettings[settings::SkillGestures]>.5f&&quickFresh&&shieldSkill.available&&shieldSkill.motion&&shieldSkill.id==weaponskills::Smite;
     if(motionOutput.skill>=0&&(!quickFresh||!quickSnapshot.skills[motionOutput.skill].available))motionOutput.skill=-1;
+    {
+        crossbow::Pose pose;
+        const bool ready=motionControls.load()&&motionInput.weapon==gameplay::Weapon::Crossbow&&bowvr::MotionReady()&&
+            skel::CrossbowPose(pose)&&crossbow::Fresh(pose,motionAt,gamestate::LocalPlayer(),motionInput.equipment,bowWorldEpoch);
+        const int slot=motionOutput.skill;
+        const bool known=slot>=0&&slot<skills::Count&&quickFresh&&quickSnapshot.skills[slot].known&&quickSnapshot.skills[slot].available;
+        const bool firing=gameplay::RouteCrossbow(motionInput,motionOutput,castHand==0,ready,known,known?quickSnapshot.skills[slot].id:-1);
+        if(firing&&!crossbowFire)++crossbowActivation;
+        crossbowFire=firing;
+    }
     const bool shieldValid=motionInput.active&&!motionOutput.block&&!motionInput.quickCast&&motionInput.trigger<.2f&&gestureSettings[settings::SkillGestures]>.5f&&
         motionInput.shieldEquipped&&shieldSkill.available&&shieldSkill.motion&&shieldSkill.id==weaponskills::Smite&&
         weaponskills::Current(shieldCast.context,LiveShieldContext(),shieldCast.at,motionAt);
@@ -1576,6 +1589,7 @@ void Input() {
         sample.time=motionInput.time;sample.hand=motionInput.hand[0];sample.epoch=meleeEpoch;
         sample.equipment=motionInput.equipment;sample.active=motionInput.active&&motionOutput.meleeContact;
         sample.minWeaponSpeed=gestureSettings[settings::MeleeHitSpeed];
+        sample.minThrustSpeed=gestureSettings[settings::MeleeThrustSpeed];
         meleePoses.Push(s.sampleStamp,sample);
         sample.hand=motionInput.hand[1];sample.shield=true;sample.active=motionInput.active&&motionOutput.shieldContact;
         sample.skillSlot=shieldSlot;sample.skillOwner=shieldSkill.owner;sample.skillContext=motionInput.skillContext;
@@ -2371,6 +2385,16 @@ bool SpellSelected() {
         (motion.Selection()>=0||motionOutput.skill>=0)&&GetTickCount64()-motionAt<150;
 }
 bool LeftHandAiming(){std::lock_guard lock(mutex);return motionControls.load()&&castHand==1&&motionInput.active&&GetTickCount64()-motionAt<150;}
+bool CrossbowAiming() {
+    std::lock_guard lock(mutex);
+    if(!motionControls.load()||!motionInput.active||motionOutput.block||castHand==1||
+       motionInput.weapon!=gameplay::Weapon::Crossbow||GetTickCount64()-motionAt>100)return false;
+    if(crossbowFire)return true;
+    if(motionOutput.attack)return true;
+    const int slot=motionOutput.skill;
+    if(slot<0||slot>=skills::Count||!interaction::Fresh(interactionInput.snapshot,gamestate::LocalPlayer(),GetTickCount64()))return false;
+    const auto& skill=interactionInput.snapshot.skills[slot];return skill.known&&skill.available&&skill.id==0;
+}
 bool NativeSkillCasting() {
     std::lock_guard lock(mutex);
     return motionControls.load()&&gameplay::CastingSkill(motionInput,motionOutput,GetTickCount64()-motionAt);
@@ -2461,6 +2485,23 @@ bool TakeBowShot(bowflight::Shot& shot) {
     std::lock_guard lock(mutex);
     if(!bowHasShot)return false;
     bowHasShot=false;shot=bowReadyShot;return true;
+}
+bool TakeCrossbowShot(bowflight::Shot& shot) {
+    std::lock_guard lock(mutex);const auto now=GetTickCount64();
+    if(!crossbowFire||!motionControls.load()||!motionInput.active||motionOutput.block||settingsOpen.load()||
+       now-motionAt>100||crossbowTakenAt==motionAt)return false;
+    crossbowTakenAt=motionAt;
+    crossbow::Pose pose;crossbow::Launch launch;
+    if(!skel::CrossbowPose(pose)||!crossbow::Fresh(pose,now,gamestate::LocalPlayer(),motionInput.equipment,bowWorldEpoch)||
+       !crossbowvr::MakeShot(pose,(meleeEpoch<<32)|bowWorldEpoch,launch))return false;
+    shot=launch.flight;shot.binding=motionInput.skillContext;shot.activation=crossbowActivation;return true;
+}
+bool CrossbowHeld(const bowflight::Shot& shot) {
+    std::lock_guard lock(mutex);const auto now=GetTickCount64();
+    return shot.kind==bowflight::Kind::Crossbow&&crossbowFire&&motionControls.load()&&motionInput.active&&!motionOutput.block&&
+        !settingsOpen.load()&&now-motionAt<=100&&motionInput.weapon==gameplay::Weapon::Crossbow&&
+        shot.session==gamestate::LocalPlayer()&&shot.equipment==motionInput.equipment&&shot.binding==motionInput.skillContext&&
+        shot.activation==crossbowActivation&&shot.epoch==((meleeEpoch<<32)|bowWorldEpoch);
 }
 bool TakeSpellShot(int hand,bowflight::Shot& shot) {
     std::lock_guard lock(mutex);

@@ -11,6 +11,7 @@
 #include "logging.h"
 #include "combat.h"
 #include "bow.h"
+#include "crossbow.h"
 
 namespace gamestate {uint64_t LocalPlayer();}
 
@@ -89,14 +90,24 @@ void ReportSpell(uintptr_t params,int side,uintptr_t created) {
     framevr::logging::Write(line);
 }
 uintptr_t Client(uintptr_t params,int flags) {
-    Scope scope(params,0);const auto unit=originalClient(params,flags);ReportSpell(params,0,unit);return unit;
+    std::array<uint8_t,0x98> adjusted{};framevr::crossbow::Launch bolt;
+    const bool crossbow=enabled.load()&&crossbowvr::Prepare(params,adjusted,bolt);
+    if(crossbow)params=reinterpret_cast<uintptr_t>(adjusted.data());
+    crossbowvr::BeginClient(crossbow?&bolt:nullptr);
+    Scope scope(params,0);const auto unit=originalClient(params,flags);
+    if(crossbow&&unit)bowvr::CrossbowClient(unit,bolt.flight);
+    crossbowvr::EndClient();ReportSpell(params,0,unit);return unit;
 }
 uintptr_t Server(uintptr_t game,uintptr_t params) {
     std::array<uint8_t,0x98> adjusted{};
     const int spell=bowvr::SpellParams(game,params,adjusted);
     if(spell<0)return 0;
     if(spell>0)params=reinterpret_cast<uintptr_t>(adjusted.data());
+    std::array<uint8_t,0x98> boltParams{};framevr::crossbow::Launch bolt;
+    const bool crossbow=enabled.load()&&!bowvr::DirectCrossbow()&&crossbowvr::Prepare(params,boltParams,bolt,true);
+    if(crossbow)params=reinterpret_cast<uintptr_t>(boltParams.data());
     Scope scope(params,1);const auto unit=originalServer(game,params);
+    if(crossbow)crossbowvr::ServerDone(bolt,unit&&bowvr::AdoptCrossbow(game,unit,bolt.flight));
     ReportSpell(params,1,unit);
     if(unit)bowvr::Created(game,params,unit);
     return unit;
@@ -134,7 +145,7 @@ bool HasComponent(uintptr_t storage,uint32_t entity) {
 void Release(uintptr_t assets,uintptr_t definition,uint32_t entity,uintptr_t unit) {
     uint32_t type=~0u,missile=~0u;
     if(enabled.load()&&Read(unit,type)&&type==3&&Read(unit+4,missile)&&
-       (framevr::bowflight::BasicMissile(missile)||bowvr::OwnsVisual(unit))) {
+       (framevr::bowflight::BasicMissile(missile)||missile==31||bowvr::OwnsVisual(unit))) {
         const auto owner=reinterpret_cast<uintptr_t(*)(uintptr_t)>(d2rsig::Addr(OwnerRva))(unit);
         const auto registry=d2rsig::Addr(RegistryRva);
         if(EntityAlive(registry,entity)) {
@@ -144,7 +155,7 @@ void Release(uintptr_t assets,uintptr_t definition,uint32_t entity,uintptr_t uni
             // Ice Bolt's child has no release component, so absence alone
             // can bind that child and subtract its authored height twice.
             bool root=false;
-            if(!framevr::bowflight::BasicMissile(missile)) {
+            if(!framevr::bowflight::BasicMissile(missile)&&missile!=31) {
                 const auto transforms=reinterpret_cast<uintptr_t(*)(uintptr_t)>(d2rsig::Addr(TransformStorageRva))(registry);
                 root=VisualRoot(definition,transforms,entity,[](uintptr_t p,auto& value){return Read(p,value);});
             }

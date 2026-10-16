@@ -9,6 +9,8 @@
 #include <cstdio>
 #include <cstring>
 #include "bow.h"
+#include "crossbow.h"
+#include "skeletons.h"
 #include "bow_signatures.h"
 #include "spells.h"
 #include "melee.h"
@@ -76,6 +78,10 @@ std::atomic<uint64_t> previewReadyAt{0};
 PreviewRecovery previewRecovery;
 Gate current{};uintptr_t clientHero=0;
 Once once;
+Once crossbowOnce;
+framevr::crossbow::FireRate crossbowRate; // mutex; UI stat reader -> game thread
+framevr::attackspeed::Cadence crossbowCadence; // game thread only
+std::atomic<unsigned> crossbowFired{0},crossbowCycleMs{0};
 Once spellOnce[2];
 framevr::spellcast::CastCue castCue; // UI thread only
 framevr::aimassist::History assistHistory[2]; // game thread only
@@ -129,7 +135,7 @@ bool Live(const Shot& s) {
         s.equipment==(gamestate::HandsKey()^(gamestate::WeaponSet()<<30));
 }
 bool Same(const Arrow& a,const Arrow& b) {
-    return a.flight.shot.session==b.flight.shot.session&&a.flight.shot.sequence==b.flight.shot.sequence&&
+    return a.flight.shot.kind==b.flight.shot.kind&&a.flight.shot.session==b.flight.shot.session&&a.flight.shot.sequence==b.flight.shot.sequence&&
         a.flight.shot.member==b.flight.shot.member;
 }
 void Recount();
@@ -335,6 +341,12 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
     for(size_t i=0;i<n;++i) {
         auto shot=batch[i];
         if(!Live(shot)){++stale;continue;}
+        const bool crossbow=shot.kind==Kind::Crossbow;
+        const auto fireAt=GetTickCount64();uint32_t crossbowCycle=1000;
+        if(crossbow) {
+            if(!framevr::CrossbowHeld(shot)||!crossbowCadence.Ready(shot.session,fireAt))continue;
+            std::lock_guard lock(mutex);crossbowCycle=crossbowRate.Cycle(shot.session,shot.equipment,fireAt);
+        }
         uintptr_t game=0,player=0;Vec p{};uint32_t mode=0;
         if(!melee::LocalServer(game,player)||!Read(player+0xc,mode)||mode==0||mode==17||mode==5||mode==6||
            !Position(player,p)) {++refused;continue;}
@@ -345,7 +357,9 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
         const bool javelin=shot.kind==Kind::Javelin;
         const bool spell=shot.kind==Kind::Spell;
         if(spell&&!spellvr::Prepare(shot,game,player))continue;
-        if(!spell&&(javelin?gamestate::WeaponType()!=D2RVR_TYPE_JAVELIN:
+        if(!spell&&(javelin?gamestate::WeaponType()!=D2RVR_TYPE_JAVELIN:crossbow?
+           (gamestate::WeaponType()!=D2RVR_TYPE_CROSSBOW||
+            reinterpret_cast<int(*)(uintptr_t,int*)>(d2rsig::Addr(MissileTypeRva))(player,&level)!=31):
            (!reinterpret_cast<int(*)(uintptr_t)>(d2rsig::Addr(IsBowRva))(player)||
             reinterpret_cast<int(*)(uintptr_t,int*)>(d2rsig::Addr(MissileTypeRva))(player,&level)!=0))) {++refused;continue;}
         Launch next;next.shot=shot;next.game=game;next.player=player;
@@ -365,13 +379,15 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
         if(next.slot<0){++refused;continue;}
         combat::ObserveLocalPlayer(player);
         const auto saved=launch;launch=next;
-        // Native basic attack -> Shoot checks and consumes arrows once. There
+        // Native basic attack -> Shoot checks and consumes arrows/bolts once. There
         // is deliberately no controller A press or second client-side attack.
         if(spell) {
             spellvr::Cast(shot,game,player);
             if(launch.created)spellvr::Fired(shot,game,player);
         } else reinterpret_cast<int(*)(uintptr_t,uintptr_t,int,int)>(d2rsig::Addr(javelin?ThrowRva:AttackRva))(game,player,javelin?2:0,1);
         if(!launch.created)++refused;
+        if(crossbow)crossbowCadence.Landed(shot.session,fireAt,launch.created?crossbowCycle:100);
+        if(crossbow&&launch.created){++crossbowFired;crossbowCycleMs=crossbowCycle;}
         {
             std::lock_guard lock(mutex);
             for(unsigned j=0;j<next.count;++j) {
@@ -534,6 +550,7 @@ void ClientKill(uintptr_t unit) {
 }
 uintptr_t Transform(uintptr_t out,uint32_t entity,uintptr_t component) {
     const auto result=originalTransform(out,entity,component);
+    skel::CrossbowRendered(entity,component,out);
     if(!renderCount.load(std::memory_order_relaxed))return result;
     std::array<float,16> matrix{},previous{};bool found=false,held=false,heldVisible=false;
     uint64_t heldSession=0,heldRevision=0;uintptr_t heldClient=0;uint32_t heldId=0;
@@ -597,6 +614,11 @@ bool PreviewReady() {
     const auto at=previewReadyAt.load();
     return enabled.load()&&PreviewRecovery::Rendered(at,GetTickCount64());
 }
+bool MotionReady(){return enabled.load()&&ready.load();}
+bool DirectCrossbow(){return launch.slot>=0&&launch.shot.kind==Kind::Crossbow;}
+void SetCrossbowCycle(uint64_t session,uint32_t equipment,uint32_t milliseconds) {
+    std::lock_guard lock(mutex);crossbowRate={session,GetTickCount64(),equipment,milliseconds};
+}
 bool SpellReady(){return enabled.load()&&ready.load()&&spellvr::Ready();}
 void Update(const Gate& gate,uintptr_t hero) {
     bool visible=false;
@@ -638,11 +660,14 @@ void Submit(const Shot& shot) {
     {
         std::lock_guard lock(mutex);
         if(shot.kind==Kind::Spell&&(shot.hand<0||shot.hand>1))return;
-        auto& dedupe=shot.kind==Kind::Spell?spellOnce[shot.hand]:once;
+        auto& dedupe=shot.kind==Kind::Spell?spellOnce[shot.hand]:shot.kind==Kind::Crossbow?crossbowOnce:once;
         if(!ready.load()||!enabled.load()||!dedupe.Take(shot,current,GetTickCount64())){++stale;return;}
         // Held spell input is a latest-pose request, never a backlog of casts.
         if(shot.kind==Kind::Spell)for(size_t i=0;i<pendingCount;++i)
             if(pending[i].kind==Kind::Spell&&pending[i].hand==shot.hand){pending[i]=shot;return;}
+        // A held trigger supplies current aim, not a queue of delayed bolts.
+        if(shot.kind==Kind::Crossbow)for(size_t i=0;i<pendingCount;++i)
+            if(pending[i].kind==Kind::Crossbow){pending[i]=shot;return;}
         if(pendingCount==pending.size()){++refused;return;}
         pending[pendingCount++]=shot;++submitted;
         token=gameCallback.Start(GetTickCount64());
@@ -672,6 +697,33 @@ void Created(uintptr_t game,uintptr_t params,uintptr_t unit) {
     }
     ++launch.created;++spawned;
     lastLatency=unsigned(GetTickCount64()-launch.shot.at);lastSpeedCm=unsigned(a.flight.speed*100);
+}
+bool AdoptCrossbow(uintptr_t game,uintptr_t unit,const Shot& shot) {
+    // The normal trigger attack has already paid its cost and created exactly
+    // one native server bolt. Reuse it; never dispatch a second basic attack.
+    if(shot.kind!=Kind::Crossbow||!Live(shot))return false;
+    uint32_t h[3]{};uintptr_t path=0;int velocity=0;
+    if(!Read(unit,h)||h[0]!=3||h[1]!=31||!Read(unit+0x38,path)||!Read(path+0xa0,velocity))return false;
+    Arrow a;a.game=game;a.server=unit;a.serverId=h[2];a.flight.shot=shot;
+    a.flight.speed=FlightSpeed(shot,velocity);a.flight.alive=true;a.flight.updatedAt=GetTickCount64();
+    a.room=reinterpret_cast<uintptr_t(*)(uintptr_t)>(d2rsig::Addr(RoomRva))(unit);
+    a.visualDone=true; // the native attack supplies the client; Present must not duplicate it
+    if(!a.room||a.flight.speed<=0)return false;
+    std::lock_guard lock(mutex);
+    if(current.session!=shot.session)return false;
+    for(size_t i=0;i<arrows.size();++i)if(!arrows[i].flight.alive&&!arrows[i].client&&!arrows[i].creating&&!arrows[i].reserved) {
+        arrows[i]=a;usedSlots.store(std::max(usedSlots.load(),i+1));Recount();++spawned;
+        lastLatency=unsigned(GetTickCount64()-shot.at);lastSpeedCm=unsigned(a.flight.speed*100);return true;
+    }
+    return false;
+}
+void CrossbowClient(uintptr_t unit,const Shot& shot) {
+    uint32_t h[3]{};if(!Read(unit,h)||h[0]!=3||h[1]!=31||shot.kind!=Kind::Crossbow)return;
+    std::lock_guard lock(mutex);
+    for(auto& a:UsedArrows())if(a.flight.shot.kind==Kind::Crossbow&&a.flight.shot.session==shot.session&&
+       a.flight.shot.sequence==shot.sequence&&current.session==shot.session) {
+        if(!a.client||a.client==unit){a.client=unit;a.clientId=h[2];++visuals;Recount();}return;
+    }
 }
 void AssistSpell(uintptr_t game,uintptr_t player) {
     if(launch.slot<0||launch.game!=game||launch.player!=player||launch.shot.kind!=Kind::Spell)return;
@@ -755,6 +807,7 @@ int SpellParams(uintptr_t game,uintptr_t params,std::array<uint8_t,0x98>& adjust
 bool Visual(uint32_t entity,uintptr_t unit,bool hasReleasePoint,bool isRoot) {
     uint32_t header[3]{};
     if(!Read(unit,header)||header[0]!=3)return false;
+    const auto* crossbow=crossbowvr::Creating();
     std::lock_guard lock(mutex);
     if(header[1]==0&&preview.pose.session==current.session&&((preview.active&&previewCreatingSession&&previewCreatingSession==current.session)||
        (preview.client==unit&&preview.clientId==header[2]))) {
@@ -764,7 +817,8 @@ bool Visual(uint32_t entity,uintptr_t unit,bool hasReleasePoint,bool isRoot) {
     for(size_t i=0;i<usedSlots.load(std::memory_order_relaxed);++i) {
         auto& a=arrows[i];
         if(header[1]==MissileId(a.flight.shot)&&a.flight.shot.sequence&&a.flight.shot.session==current.session&&((a.client==unit&&a.clientId==header[2])||
-            (creatingVisual==int(i)&&a.flight.shot.session==visualSession&&a.flight.shot.sequence==visualSequence))) {
+            (creatingVisual==int(i)&&a.flight.shot.session==visualSession&&a.flight.shot.sequence==visualSequence)||
+            (crossbow&&a.flight.shot.kind==Kind::Crossbow&&a.flight.shot.session==crossbow->session&&a.flight.shot.sequence==crossbow->sequence))) {
             const bool wasBound=a.visualBinding.Bound();
             const bool bound=a.flight.shot.kind==Kind::Spell?a.visualBinding.BindRoot(entity,isRoot):a.visualBinding.Bind(entity,hasReleasePoint);
             // Descendant release components still need removal even though
@@ -809,6 +863,11 @@ void Install() {
         framevr::logging::Write("Frame physical projectiles: tracked native-arrow preview and frozen 6DoF arrow/javelin flight; terrain-correct grid/room queries; mesh-only transforms; native basic attack/throw costs");
 }
 void Report() {
+    crossbowvr::Report();
+    if(const auto count=crossbowFired.exchange(0)) {
+        char line[128];snprintf(line,sizeof line,"Frame crossbow free fire: native shots=%u, last cycle=%u ms",count,crossbowCycleMs.load());
+        framevr::logging::Write(line);
+    }
     spellvr::Report();
     for(int hand=0;hand<2;++hand) {
         auto& a=assistStats[hand];

@@ -25,6 +25,24 @@ struct Sim {
     }
 };
 int main() {
+    {
+        Sim s;s.in.weapon=Weapon::Crossbow;s.Step(2);s.in.trigger=1;s.Step();
+        Check(s.out.attack,"crossbow trigger requests a basic attack");
+        auto native=s.out;
+        Check(!RouteCrossbow(s.in,native,true,false,false,-1)&&native.attack,"unavailable physical path retains native attack");
+        Check(RouteCrossbow(s.in,s.out,true,true,false,-1)&&!s.out.attack&&s.out.skill<0,
+              "physical crossbow consumes native attack and its animation lock");
+        Check(!CastingSkill(s.in,s.out,0)&&s.out.rayValid,"crossbow leaves locomotion free while keeping aim");
+        s.in.trigger=0;s.engine.Select(0);s.Step(2);s.in.trigger=1;s.Step();
+        Check(s.out.skill==0,"assigned primary skill reaches routing");
+        native=s.out;
+        Check(!RouteCrossbow(s.in,native,false,true,true,0)&&native.skill==0,"left-hand assignment is unchanged");
+        Check(!RouteCrossbow(s.in,native,true,true,true,6)&&native.skill==0,"special skills retain native route");
+        Check(!RouteCrossbow(s.in,native,true,true,false,0)&&native.skill==0,"unknown skill is never assumed to be Attack");
+        Check(RouteCrossbow(s.in,s.out,true,true,true,0)&&s.out.skill<0,"assigned basic Attack uses independent fire");
+        s.in.trigger=0;s.Step();Check(!RouteCrossbow(s.in,s.out,true,true,true,0),"trigger release ends physical firing");
+        s.in.trigger=1;s.in.palette=true;s.Step();Check(!RouteCrossbow(s.in,s.out,true,true,true,0),"wheel blocks crossbow firing");
+    }
     for(bool quick:{false,true})for(int slot=0;slot<skills::Count;++slot) {
         Sim s;s.engine.Select(slot);s.Step(2);
         Check(!CastingSkill(s.in,s.out,0),"selection alone does not change locomotion routing");

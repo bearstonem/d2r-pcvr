@@ -1,6 +1,10 @@
 # Repository collaboration
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before changing this repository.
+Then read [the agent workflow guide](docs/AGENT_WORKFLOW.md) for the established
+build, install, launch and debugging procedures. If present, also read the local
+`build-frame/AGENT_LOCAL_STATE.md` handoff before rediscovering machine paths or
+resuming an investigation. Keep these notes current when a workflow is verified.
 
 - Work on a topic branch and submit a pull request against `main`. Outside
   contributors must use a fork; maintainers may use repository branches.

@@ -4,6 +4,9 @@
 #include <cstdint>
 #include <string>
 #include "d2r_vr_build.h"
+#ifdef D2RVR_NATIVE_OPENXR
+#include "../steamvr/crossbow_pose.h"
+#endif
 
 namespace skel {
 
@@ -171,9 +174,13 @@ struct MeleeWeaponPose {
     uint32_t poseStamp=0,worldEpoch=0,heroGeneration=0;
     uint32_t weaponType=0;
     float castingAxis[3]{}; // final visible shaft, including staff's chosen axis/sign
+    float gripAxis[3]{}; // collision blade direction relative to its driving right grip
 };
 bool MeleeWeapon(MeleeWeaponPose& out);
 bool ShieldWeapon(MeleeWeaponPose& out);
+bool CrossbowPose(framevr::crossbow::Pose& out);
+// Called after the game's complete attachment/world transform is evaluated.
+void CrossbowRendered(uint32_t entity,uintptr_t component,uintptr_t matrix);
 #endif
 #endif
 // Where the game's own pose points the hero, in model space (deg, atan2 of each bone's z row):

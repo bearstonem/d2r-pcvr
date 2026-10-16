@@ -21,6 +21,7 @@ bool SettingsOpen();
 bool OwnsControllerRumble(); // lock-free; VR input owns feedback instead of gamepad motors
 bool SpellSelected();
 bool LeftHandAiming();
+bool CrossbowAiming();
 bool NativeAimOwnership(); // hand casting or wheel: preserve locomotion, suppress legacy aim modes
 bool NativeSkillCasting(); // any active trigger/quick cast; retain native locomotion input
 bool DirectedSpellActive(); // fresh native assignment, actually casting (wheel or quick shortcut)
@@ -34,6 +35,8 @@ void FinishShieldSkill(bool accepted);
 void MeleeImpact(); // thread-safe; haptic delivered by XR input update
 void SpellCast(int hand,uint64_t session); // one successful hand spell, not each projectile
 bool TakeBowShot(bowflight::Shot& shot);
+bool TakeCrossbowShot(bowflight::Shot& shot);
+bool CrossbowHeld(const bowflight::Shot& shot);
 bool TakeSpellShot(int hand,bowflight::Shot& shot);
 bool SpellHeld(const bowflight::Shot& shot);
 bool BowPreviewPose(bowflight::Shot& pose,bool& visible);

@@ -51,8 +51,9 @@ inline int Frames(int classId,Weapon weapon,int ias,int wsm,int sias=0) {
     return rate>0?(length+rate-1)/rate-1:0;
 }
 inline uint32_t Milliseconds(int frames) {return frames>0?uint32_t(frames)*1000u/FramesPerSecond:0;}
-// One landed hit per cycle, on the authoritative game thread. Only a native-
-// accepted hit starts the cycle: whiffs and refused contacts never do.
+// One attack per cycle, on the authoritative game thread. A native-resolved
+// attack starts the cycle whether its roll hit or missed, as the native swing
+// animation would; geometric whiffs and refused contacts never do.
 class Cadence {
     uint64_t session=0,readyAt=0,landedAt=0;
 public:

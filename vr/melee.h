@@ -15,6 +15,9 @@ void Report();
 // which never gates. SetAttackCycle comes from the UI thread's stat read.
 void ConfigureAttackSpeed(bool enabled,bool traceHits); // trace: [debug] melee_trace
 void SetAttackCycle(uint64_t session,uint32_t milliseconds);
+// Physical swings and trigger/button melee use the native to-hit/block/level
+// rolls. Off restores the contact_hits policy for them. Missiles unaffected.
+void ConfigureAttackRating(bool native); // [gameplay] melee_rules=1 (Classic)
 // Owning game thread only; shared with physical arrows. Re-resolves the unit
 // from its session/id rather than passing a native pointer across threads.
 bool LocalServer(uintptr_t& game,uintptr_t& player);

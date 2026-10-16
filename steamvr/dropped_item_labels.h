@@ -6,7 +6,7 @@
 #include <cstdint>
 
 namespace framevr::lootlabels {
-constexpr float TextScale=1.f,BackgroundAlpha=.85f;
+constexpr float BackgroundAlpha=.85f;
 constexpr uint64_t LeaseMs=300;
 constexpr uint32_t ShowItemsCommand=0x25; // native "Show items (Alt)"; honors the player's loot filter
 constexpr uint64_t ShowItemsMask=uint64_t{1}<<ShowItemsCommand;

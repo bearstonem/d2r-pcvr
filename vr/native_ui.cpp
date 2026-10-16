@@ -20,8 +20,9 @@
 #include "weapon_skills.h"
 #include "panel_input.h"
 #include "spells.h"
+#include "bow.h"
 #include "../steamvr/attack_speed.h"
-namespace gamestate {uint32_t DataBank();bool MenuOpen();int AttackWeapon();int AttackWsm();}
+namespace gamestate {uint32_t DataBank();bool MenuOpen();int AttackWeapon();int AttackWsm();uint32_t HandsKey();uint32_t WeaponSet();}
 namespace melee {void SetAttackCycle(uint64_t session,uint32_t milliseconds);}
 namespace nativeui {
 namespace {
@@ -177,6 +178,8 @@ void Capture(framevr::interaction::Snapshot& s) {
         const int weapon=gamestate::AttackWeapon(),wsm=gamestate::AttackWsm(),ias=stat(player,93,0);
         const int frames=weapon>=0?framevr::attackspeed::Frames(int(h[1]),framevr::attackspeed::Weapon(weapon),ias,wsm):0;
         melee::SetAttackCycle(s.session,framevr::attackspeed::Milliseconds(frames));
+        bowvr::SetCrossbowCycle(s.session,gamestate::HandsKey()^(gamestate::WeaponSet()<<30),
+            weapon==int(framevr::attackspeed::Weapon::Crossbow)?framevr::attackspeed::Milliseconds(frames):0);
         static int told[5]={-2,-2,-2,-2,-2};
         const int now[5]={int(h[1]),weapon,ias,wsm,frames};
         if(!std::equal(now,now+5,told)) {

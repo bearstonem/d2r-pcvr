@@ -37,12 +37,23 @@ bool hitIn=false,seedIn=false,blockIn=false,dodgeIn=false,rollChecked=false;
 std::atomic<uint64_t> localIdentity{0},localSession{0};
 std::mutex localPlayerMutex;
 struct UiPlayer {uintptr_t unit=0;uint64_t session=0,at=0;uint32_t id=0;} uiPlayer;
-std::atomic<unsigned> meleeChecks{0},missileChecks{0},rolls{0},blocks{0},dodges{0},failed{0};
+std::atomic<unsigned> meleeChecks{0},missileChecks{0},rolls{0},blocks{0},dodges{0},failed{0},nativeMelee{0},nativeGuards{0};
+// Melee attack rating: the local player's non-missile hit checks (physical
+// swings, trigger/button attacks, melee skills) keep the native roll.
+// Missile hit checks keep the contact_hits override.
+std::atomic<bool> meleeRolls{false};
+thread_local bool meleeHit=false; // inside such a native melee hit check
+// Classic: trigger/button melee shares the physical swing's attack cycle. The
+// latest native melee hit check made outside a swing, read by melee.cpp.
+std::atomic<uint64_t> buttonMeleeAt{0},buttonMeleeSession{0};
 template<class T> bool Read(uintptr_t p,T& out) {
     return p>0x10000&&framevr::ReadMemory(&out,reinterpret_cast<const void*>(p),sizeof out);
 }
+// Set only by melee.cpp around ONE physical swing's native basic attack
+// (synchronous, game thread). Missiles and button attacks never set it.
+thread_local bool nativeRolls=false;
 bool Qualifies(uintptr_t attacker,uintptr_t defender) {
-    if(!enabled.load(std::memory_order_relaxed)||!ready.load(std::memory_order_relaxed))return false;
+    if(nativeRolls||!enabled.load(std::memory_order_relaxed)||!ready.load(std::memory_order_relaxed))return false;
     const uint64_t identity=localIdentity.load();
     const auto session=localSession.load();
     if(!identity||!session||session!=gamestate::LocalPlayer()||uint32_t(GetTickCount())-uint32_t(identity>>32)>1500)return false;
@@ -53,14 +64,21 @@ struct RollContext {uintptr_t attacker=0;bool missile=false;};
 thread_local RollContext roll;
 thread_local Seed acceptedRoll;
 int Hit(uintptr_t attacker,uintptr_t defender,int accuracy,int missile) {
-    const auto saved=roll;
+    const auto saved=roll;const bool savedMelee=meleeHit;
     roll={};
-    if(Qualifies(attacker,defender)) {
+    const bool local=Qualifies(attacker,defender);
+    // A Classic swing's own attack runs under NativeRolls, so local is false
+    // there: only trigger/button melee reaches this native melee branch.
+    meleeHit=local&&!missile&&meleeRolls.load(std::memory_order_relaxed);
+    if(meleeHit) {
+        nativeMelee.fetch_add(1,std::memory_order_relaxed);
+        buttonMeleeSession=gamestate::LocalPlayer();buttonMeleeAt=GetTickCount64();
+    } else if(local) {
         roll={attacker,missile!=0};
         (missile?missileChecks:meleeChecks).fetch_add(1,std::memory_order_relaxed);
     }
     const int result=originalHit(attacker,defender,accuracy,missile);
-    roll=saved;
+    roll=saved;meleeHit=savedMelee;
     return result;
 }
 Seed* GetSeed(uintptr_t unit) {
@@ -79,12 +97,16 @@ Seed* GetSeed(uintptr_t unit) {
     acceptedRoll={};++rolls;
     return &acceptedRoll;
 }
+// A block/dodge check made inside a native melee hit check stays native.
+// Outside one (or after it returns) the contact_hits bypass still applies.
 int Block(uintptr_t game,uintptr_t attacker,uintptr_t defender,int avoid,int block) {
-    if(Qualifies(attacker,defender)) {++blocks;return 0;}
+    if(meleeHit)++nativeGuards;
+    else if(Qualifies(attacker,defender)) {++blocks;return 0;}
     return originalBlock(game,attacker,defender,avoid,block);
 }
 int Dodge(uintptr_t attacker,uintptr_t defender,int avoid) {
-    if(Qualifies(attacker,defender)) {++dodges;return 0;}
+    if(meleeHit)++nativeGuards;
+    else if(Qualifies(attacker,defender)) {++dodges;return 0;}
     return originalDodge(attacker,defender,avoid);
 }
 }
@@ -113,6 +135,12 @@ bool LocalPlayerId(uint32_t& id) {
     id=uint32_t(identity);return true;
 }
 void Configure(bool on) {enabled=on;}
+bool NativeRolls(bool on) {const bool was=nativeRolls;nativeRolls=on;return was;}
+void ConfigureMeleeRolls(bool native) {meleeRolls=native;}
+bool TakeButtonMelee(uint64_t& session,uint64_t& at) {
+    at=buttonMeleeAt.exchange(0);session=buttonMeleeSession.load();
+    return at!=0;
+}
 void Install() {
     if(!enabled.load()||ready.load())return;
     if(!rollChecked)rollChecked=d2rsig::Check(0x44bd65,RollSig,sizeof RollSig);
@@ -126,8 +154,9 @@ void Install() {
 }
 void Report() {
     const auto m=meleeChecks.exchange(0),p=missileChecks.exchange(0),r=rolls.exchange(0),b=blocks.exchange(0),d=dodges.exchange(0),f=failed.exchange(0);
-    if(!m&&!p&&!r&&!b&&!d&&!f)return;
-    char line[240];snprintf(line,sizeof line,"Frame combat: melee checks=%u missile checks=%u accepted rolls=%u block bypass=%u dodge bypass=%u failures=%u",m,p,r,b,d,f);
+    const auto n=nativeMelee.exchange(0),g=nativeGuards.exchange(0);
+    if(!m&&!p&&!r&&!b&&!d&&!f&&!n&&!g)return;
+    char line[320];snprintf(line,sizeof line,"Frame combat: melee checks=%u missile checks=%u accepted rolls=%u block bypass=%u dodge bypass=%u failures=%u native melee checks=%u native block/dodge in melee=%u",m,p,r,b,d,f,n,g);
     framevr::logging::Write(line);
 }
 }

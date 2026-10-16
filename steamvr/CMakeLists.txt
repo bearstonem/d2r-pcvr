@@ -31,7 +31,7 @@ target_sources(d2rl-vrcam PRIVATE ${ROOT}/vr/dev_scenarios.cpp)
 if(D2RVR_DEVELOPER)
   target_compile_definitions(d2rl-vrcam PRIVATE D2RVR_DEVELOPER=1)
 endif()
-target_sources(d2rl-vrcam PRIVATE ${ROOT}/vr/dlss_depth.cpp)
+target_sources(d2rl-vrcam PRIVATE ${ROOT}/vr/dlss_depth.cpp ${ROOT}/vr/crossbow.cpp)
 target_sources(d2rl-vrcam PRIVATE ${ROOT}/vr/billboards.cpp)
 target_sources(d2rl-vrcam PRIVATE ${ROOT}/vr/panel_input.cpp)
 target_sources(d2rl-vrcam PRIVATE interaction_assets.rc interaction_icons.cpp ui_blit.cpp ui_world.cpp)
@@ -71,6 +71,9 @@ add_executable(skill-pad-test skill_pad_test.cpp)
 add_executable(interact-press-test interact_press_test.cpp)
 add_executable(spell-aim-test spell_aim_test.cpp)
 add_executable(bow-pose-test bow_pose_test.cpp)
+add_executable(crossbow-pose-test crossbow_pose_test.cpp ${ROOT}/vr/crossbow.cpp)
+target_include_directories(crossbow-pose-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${ROOT}/shared)
+target_link_libraries(crossbow-pose-test PRIVATE framevr-runtime)
 add_executable(body-tracking-test body_tracking_test.cpp)
 add_executable(body-calibration-test body_calibration_test.cpp)
 add_executable(shoulder-swap-test shoulder_swap_test.cpp)
@@ -169,7 +172,7 @@ set_tests_properties(depth-fog-test PROPERTIES TIMEOUT 30)
 add_test(NAME light-bounds-test COMMAND light-bounds-test)
 set_tests_properties(light-bounds-test PROPERTIES TIMEOUT 30)
 foreach(test_target IN ITEMS memory-test hook-metrics-test active-keys-test resource-descriptions-test latest-worker-test haptic-pulse-test thread-stats-test
-    gameplay-test weapon-skills-test quick-cast-test hand-controls-test skill-pad-test interact-press-test spell-aim-test bow-pose-test body-tracking-test body-calibration-test shoulder-swap-test blood-screen-test
+    gameplay-test weapon-skills-test quick-cast-test hand-controls-test skill-pad-test interact-press-test spell-aim-test bow-pose-test crossbow-pose-test body-tracking-test body-calibration-test shoulder-swap-test blood-screen-test
     portal-billboard-test composition-layers-test projectile-rules-test
     combat-rules-test logging-test melee-contact-test attack-speed-test world-coordinates-test bow-flight-test spell-cast-test spell-aim-assist-test
     interaction-test dev-scenarios-test native-belt-test wrist-hud-test navigation-info-test dropped-item-labels-test show-items-command-test native-hud-test render-resolution-test render-pointer-test scene-depth-test game-device-only-test controller-bindings-test journal-test native-panels-test

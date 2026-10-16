@@ -86,6 +86,13 @@ inline uint16_t SkillButtons(int slot) {
     return skills::Buttons(slot);
 }
 inline bool SkillModifier(int slot) { return skills::Alternate(slot); }
+// Only a ready physical basic crossbow shot consumes its native attack button.
+// Leaving that button down enters the native attack animation and stops walking.
+inline bool RouteCrossbow(const Input& in,Output& out,bool rightHand,bool ready,bool skillAvailable,int skillId) {
+    if(!ready||!rightHand||!in.active||in.weapon!=Weapon::Crossbow||out.block||!out.rayValid||
+       !(out.attack||(out.skill>=0&&skillAvailable&&skillId==0)))return false;
+    out.attack=false;out.skill=-1;return true;
+}
 
 class Engine {
     bool primed=false, triggerWas=false, gripWas=false, blockedTrigger=true;

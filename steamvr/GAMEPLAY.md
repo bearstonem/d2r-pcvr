@@ -187,8 +187,11 @@ not generate melee velocity. The layout currently assumes a right-handed player.
 | Walk / snap turn | Sticks; paused while wheel or journal is open |
 | Inventory menu / height reset | Left grip + left stick click / VR Settings > Reset eye height |
 
-Dropped-item names use the **original text size** and a darker backing in native VR
-gameplay, preserving the game's item-quality colors, label spacing and click targets. **Right Grip + Right
+Dropped-item names use **VR Settings > HUD > Loot label size**: **45%** by
+default, adjustable from **20% to 150%** in five-percentage-point steps.
+Apply saves `[hud] labels_size` in `d2r_vr.ini` and updates it live; existing
+saved sizes are preserved. Text, dark backing bounds and click targets scale
+together; item-quality colors are preserved. **Right Grip + Right
 Trigger** holds the native **Show Items (Alt)** action, with a short vibration
 when the hold starts. All nearby loot labels stay shown while both buttons are
 held, using the game's native Alt range rather than a VR aiming or pickup radius.
@@ -350,7 +353,7 @@ tabs and a **Reset eye height** button:
 | VR | Controller labels, motion combat, seated belt position, dominant hand, smooth/snap turning, belt height and reach, weapon skill gestures and ordinary mob bars |
 | Video | Foveation Off / Fixed / Eye tracked, actual VR source size, added sky, fog, dungeon ceilings, terrain and object draw distances, VR render resolution |
 | HUD | Health/mana location and tilt, optional resource alerts, navigation location, menu distance and tooltip timing |
-| Combat | Melee hit speed |
+| Combat | Melee rules, swing hit speed and thrust speed |
 | Haptics | Overall strength and separate melee, bow draw, bow/throw release, spell, interaction and resource-alert strengths; tests follow each action's hands |
 
 Added indoor fog defaults to **Off** for new profiles, preserving the game's
@@ -599,7 +602,14 @@ observed native sequence after a physical release; it does not estimate readines
 
 The equipped left shield now follows its authored bind-pose relationship to the
 tracked wrist, including wrist rotation, instead of an attack/walk animation's
-attachment or the main weapon's adjustment. With **Smite** selected, an energetic
+attachment or the main weapon's adjustment. In native first-person VR, reaching
+beyond the model's normal arm length extends the shield arm to follow the
+controller. The palm, fingers and shield retain their size; bringing the hand
+back restores normal arm proportions. Extension is bounded at twice the arm's
+current length for extreme tracking/calibration errors. Contact uses the same
+final shield pose. The owner verified this adjustment in the combined developer
+build; individual class/shield combinations were not specified.
+With **Smite** selected, an energetic
 left-arm swing or thrust that intersects an eligible creature requests one native
 Smite against that creature. A stationary shield cannot bash; one continuous
 stroke requests at most one bash, and a deliberate reversal/settle rearms it.
@@ -660,19 +670,36 @@ animation delay is involved. A contact can hit each creature once per stroke;
 settling or a deliberate translation/rotation reversal permits another stroke.
 A tracking discontinuity drops that motion and requires 80 ms of fresh coherent
 poses; continued swinging can recover without holding the hand still. Strength
-is judged over recent motion, so small windups cannot lock out later slashes. Weapon
+is judged over recent motion, so small windups cannot lock out later slashes. Swing
 contacts require a coherent 18 cm excursion within 120 ms and at least 12.0 m/s of
 estimated motion at contact, including follow-through. The estimate combines hand
 translation with blade-axis rotation, capped by tracked hand rotation; twisting a
 shaft in place does not power a hit. The sweep follows the rotating blade’s arc
 between the latest poses without replaying earlier unpowered brushes when a
-stroke arms. Shield/Smite gesture thresholds remain unchanged. These weapon
-thresholds are adjustable under **VR Settings > Combat > Melee hit speed**
+stroke arms. Shield/Smite gesture thresholds remain unchanged. Swing speed
+is adjustable under **VR Settings > Combat > Melee hit speed**
 (minimum 1.5 m/s, no upper cap, 0.25 steps, default 12.0). Apply saves
 `[gameplay] melee_hit_speed` and updates the detector live; changing it clears
-the previous stroke. Stroke travel remains 18 cm. The earlier 1.8 m/s candidate
-was too permissive in owner testing; the firmer default still needs headset testing. Physical controller
-translation/rotation supplies energy, so walking or turning a stationary weapon
+the previous stroke. Swing travel remains 18 cm.
+
+**Thrusts** use a separate forward-motion check in both Unleashed and Classic.
+Push toward the posed weapon tip for at least 12 cm within 200 ms, with at least
+85% of the hand's travel along that axis. Default forward speed is 2.0 m/s,
+adjustable under **VR Settings > Combat > Melee thrust speed** from 0.75 to
+10 m/s in 0.25 steps (`[gameplay] melee_thrust_speed`). Apply updates it live
+and cancels the previous stroke without changing the swing-speed preference.
+The axis comes from the final weapon attachment and its matching tracked grip,
+including weapon adjustments and two-hand posing; controller-forward alone is
+not assumed to point along the blade. Contact uses the latest swept capsule,
+without replaying earlier low-speed brushes. Holding or slowly advancing a
+blade inside an enemy does not keep dealing damage. Pulling back at least 8 cm
+rearms a quick jab without counting the withdrawal as another stab. Thrusts
+share the same per-creature stroke deduplication and Classic hit/cadence rules
+as swings. Automated traces cover 36–144 Hz, dagger/sword/spear lengths,
+repeated jabs, pullbacks, jitter, settings changes and invalid axes; physical
+headset testing of the new thrust detector remains pending.
+
+Physical controller translation/rotation supplies energy, so walking or turning a stationary weapon
 into an enemy does not cause damage. Right trigger remains an explicit native
 button fallback and suppresses simultaneous physical contact attacks.
 
@@ -713,22 +740,41 @@ and parries remain future work.
 Only a confirmed physical contact overrides legacy melee grid reach. Native
 line-of-sight, hostile relationship, creature life state, damage, elemental
 resistances/immunities, criticals, leech, procs, durability, death and XP still run.
-The existing `contact_hits=1` policy removes local-player random accuracy/block/
-dodge misses. Contact haptics acknowledge native accepted hit flags, including
-hits whose damage an immunity may prevent.
+**Melee rules** (VR Settings > Combat, `[gameplay] melee_rules`, applied live,
+mid-game) choose between two modes for physical swings and trigger/button melee:
 
-**Attack speed** (`[gameplay] attack_speed=1`, the default) restores the basic
-attack's native pace without its animation. A landed hit starts the character's
-normal-attack cycle; contacts before it ends are refused, and a stroke strikes
-only one creature. The cycle uses D2's own formula (`attack_speed.h`): class and
+- **Unleashed** (`0`, the default): every weapon contact strikes each
+  creature once per stroke. No to-hit, block or dodge roll and no attack-speed
+  gate (the `contact_hits` policy).
+- **Classic** (`1`): native attack rating, monster defense, block and the
+  level penalty decide each attack, and attack speed paces them (below). A rolled
+  miss uses up the attack, as a missed swing animation would.
+
+Missile hit checks (arrows, missile spells) keep `contact_hits` in both modes.
+In Classic, button melee keeps native monster block only where the game checks
+block inside its hit check; `native block/dodge in melee` in `Frame combat:`
+confirms it. Every weapon contact with a hostile creature taps the controller once
+per stroke and creature, whether the attack then lands, misses its roll or is
+refused by attack speed; damage, not the tap, reports the outcome.
+
+**Attack speed** (Classic melee rules) restores the basic
+attack's native pace without its animation. A resolved attack, hit or rolled
+miss, starts the character's normal-attack cycle; contacts before it ends are
+refused, and a stroke attacks only one creature. The cycle uses D2's own formula (`attack_speed.h`): class and
 weapon class (Weapons.txt `wclass`) set the animation length, item IAS reduces
 it with the usual diminishing returns, and the weapon's speed modifier (WSM)
 lengthens or shortens it, so IAS breakpoints apply to swinging as they would to
 clicking. Whiffs, refused contacts and native rejections never start the cycle.
+`missed` in `Frame melee:` counts attacks whose to-hit roll failed.
+Trigger/button melee shares the cycle: each of its native melee hit checks
+starts it (`button_cycles`), so alternating trigger attacks with swings is no
+faster than swinging. A trigger attack started right after a swing is still
+paced only by its own native animation. This needs the combat hooks, which
+`contact_hits=1` (the default) installs.
 Skill speed (Fanaticism, Frenzy, Burst of Speed, werewolf), slows and dual-wield
 attack sequences are not read yet. An unknown class or weapon class (including
 classes outside the original seven) leaves the cycle unknown, which does not
-gate hits. `attack_speed=0` restores unlimited free-swing contacts. The log
+gate hits. Unleashed restores unlimited free-swing contacts. The log
 reports the cycle inputs (`Frame melee attack speed:`) and refused contacts
 (`too_soon`, `extra_targets` in `Frame melee:`). `[debug] melee_trace=1` adds one
 `Frame melee trace:` line per native attack and per refused stroke, with the
@@ -754,8 +800,21 @@ This first physical path supports **ordinary basic arrows**, not elemental,
 explosive, magic or guided missile variants. A bow that converts its basic attack
 to a special missile is currently refused before ammo is spent; use its assigned
 native skill through the palette instead. Selected arrow skills gain the candidate
-draw/release adapter above; their flight remains native. Crossbows and other
-skills/spells keep native controls, costs, timings and ground-based collision.
+draw/release adapter above; their flight remains native. Other skills/spells
+retain their existing controls, costs, timings and collision behavior.
+
+For ordinary **basic crossbow bolts**, the held model's `bolt_helper` supplies
+the barrel line and muzzle. The supporting palm sits below that line, including
+the item's attachment transform and weapon adjustments. Native server/client
+creation uses the same frozen muzzle and full barrel direction. Basic bolts
+use the bow's straight 3D flight, swept creature collision and wall checks,
+including upward/downward aim. Their native missile still supplies damage,
+ammunition, lifetime and trigger attack cadence; no second attack or client
+projectile is created. Both eyes share the corrected current/previous mesh
+transforms. The support palm keeps the controller's wrist angle when gripping
+from underneath or above. Special missile skills and unrecognized/stale rigs
+retain their native release behavior. The physical collision limitations below
+also apply to basic crossbow bolts.
 
 Collision is approximate: creature capsules use native footprint/artwork height,
 and the floor is the launch floor. Walls extend vertically; arrows cannot fly

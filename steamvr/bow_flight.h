@@ -12,7 +12,7 @@ namespace framevr::bowflight {
 using math::Vec;
 inline constexpr float ArrowLength=.75f; // same tail/tip as the tracked draw guide
 inline constexpr float JavelinLength=1.5f,JavelinGrip=.6f;
-enum class Kind : uint32_t { Arrow=0,Javelin=1,Spell=2 };
+enum class Kind : uint32_t { Arrow=0,Javelin=1,Spell=2,Crossbow=31 };
 inline float Length(Vec v) { return std::sqrt(math::Dot(v,v)); }
 inline bool Finite(Vec v) { return std::isfinite(v.x)&&std::isfinite(v.y)&&std::isfinite(v.z); }
 struct Shot {
@@ -26,10 +26,11 @@ struct Shot {
     int castSound=0;
     int aimAssist=0;
     bool planar=true;
+    float boltLength=0; // authored held-bolt size, metres
 };
-inline float ProjectileLength(const Shot& s) {return s.kind==Kind::Spell?0:s.kind==Kind::Javelin?JavelinLength:ArrowLength;}
+inline float ProjectileLength(const Shot& s) {return s.kind==Kind::Spell?0:s.kind==Kind::Crossbow?s.boltLength:s.kind==Kind::Javelin?JavelinLength:ArrowLength;}
 inline uint32_t MissileId(const Shot& s){return s.kind==Kind::Spell?uint32_t(s.missile):uint32_t(s.kind);}
-inline bool BasicMissile(uint32_t id){return id<=1;}
+inline bool BasicMissile(uint32_t id){return id<=1||id==31;}
 // Flight stays in rendered metres. Native paths/rooms use the unsheared grid.
 // Remove only the launch FLOOR's shear, never the arrow's airborne height or
 // the current player's floor after an area transition.
@@ -44,6 +45,7 @@ inline bool Valid(const Shot& s) {
     return kind&&s.session&&s.sequence&&Finite(s.origin)&&Finite(s.direction)&&Finite(s.player)&&
         std::isfinite(s.unitsPerMetre)&&s.unitsPerMetre>=1&&s.unitsPerMetre<=12&&
         std::isfinite(s.draw)&&s.draw>=0&&s.draw<=1&&
+        (s.kind!=Kind::Crossbow||(std::isfinite(s.boltLength)&&s.boltLength>=.05f&&s.boltLength<=2.f))&&
         std::fabs(Length(s.direction)-1)<.01f&&Length(s.origin-s.player)<3.5f;
 }
 struct Gate {
@@ -53,7 +55,7 @@ struct Gate {
     bool bowActive=true;
 };
 inline bool Allowed(const Shot& s,const Gate& g,uint64_t now) {
-    return Valid(s)&&g.active&&(s.kind==Kind::Spell||g.bowActive)&&s.session==g.session&&s.epoch==g.epoch&&s.equipment==g.equipment&&
+    return Valid(s)&&g.active&&(s.kind==Kind::Spell||s.kind==Kind::Crossbow||g.bowActive)&&s.session==g.session&&s.epoch==g.epoch&&s.equipment==g.equipment&&
         now>=s.at&&now-s.at<=150&&now>=g.at&&now-g.at<=150;
 }
 class Once {
@@ -251,8 +253,9 @@ inline void ArrowMatrix(const Flight& f,uint64_t now,float out[16]) {
     const Vec forward=f.shot.direction;
     const Vec guide=std::fabs(forward.y)<.95f?Vec{0,1,0}:Vec{1,0,0};
     const Vec right=math::Normalized(math::Cross(guide,forward)),up=math::Cross(forward,right);
-    const float modelTail=f.shot.kind==Kind::Javelin?-1.f:-.98391676f;
-    const float modelLength=1-modelTail;
+    const bool bolt=f.shot.kind==Kind::Crossbow;
+    const float modelTail=bolt?-.69698172f:f.shot.kind==Kind::Javelin?-1.f:-.98391676f;
+    const float modelLength=(bolt?.69698172f:1.f)-modelTail;
     const float scale=ProjectileLength(f.shot)*f.shot.unitsPerMetre/modelLength;
     const Vec origin=f.TailAt(now)*f.shot.unitsPerMetre-forward*(modelTail*scale);
     out[0]=right.x*scale;out[1]=right.y*scale;out[2]=right.z*scale;out[3]=0;

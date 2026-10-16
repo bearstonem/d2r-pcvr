@@ -57,6 +57,8 @@ struct Sample {
     Vec player{};float unitsPerMetre=1;
     bool shield=false;
     float minWeaponSpeed=12.f;
+    float minThrustSpeed=2.f;
+    Vec thrustAxis{}; // posed base-to-tip axis in absolute tracking space
     int skillSlot=-1,skillOwner=-1;
     uint64_t skillContext=0;
 };
@@ -87,14 +89,29 @@ public:
         return false;
     }
 };
-struct Sweep {Blade before{},after{};uint64_t stroke=0;float speed=0;};
+struct Sweep {Blade before{},after{};uint64_t stroke=0;float speed=0;bool thrust=false;};
 struct Diagnostics {
     unsigned discontinuities=0,recovering=0,invalidPose=0,belowSpeed=0,onsetRejected=0;
     float peakSpeed=0;
 };
 inline constexpr float WeaponStrokeTravel=.18f;
+inline constexpr float ThrustTravel=.12f,ThrustRetreat=.08f;
 inline float WeaponContactSpeed(float value) {
     return std::isfinite(value)?std::max(value,1.5f):12.f;
+}
+inline float ThrustContactSpeed(float value) {
+    return std::isfinite(value)?std::clamp(value,.75f,10.f):2.f;
+}
+// The skeleton supplies the final blade axis relative to the driving grip,
+// including weapon offsets and two-hand posing. Use that pose's tracked grip,
+// never a newer head/camera orientation or a guessed controller-forward axis.
+inline Vec TrackingThrustAxis(Vec gripAxis,math::Quat grip) {
+    return gameplay::Finite(gripAxis)?math::Normalized(math::Rotate(grip,gripAxis)):Vec{};
+}
+inline float ForwardTravel(Vec delta,Vec beforeAxis,Vec afterAxis) {
+    if(!gameplay::Finite(beforeAxis)||!gameplay::Finite(afterAxis)||
+       Length(beforeAxis)<.99f||Length(afterAxis)<.99f||math::Dot(beforeAxis,afterAxis)<.866f)return 0;
+    return std::min(math::Dot(delta,beforeAxis),math::Dot(delta,afterAxis));
 }
 class Engine {
     bool primed=false;
@@ -102,11 +119,12 @@ class Engine {
     double quietSince=0,strokeAt=0,recoverUntil=0;
     Vec direction{},angularDirection{};
     uint64_t serial=0,stroke=0;
+    bool thrustStroke=false;float retreat=0;
     Diagnostics diagnostics{};
-    struct Point {Pose hand;Blade blade;double time=0;float distance=0;};
-    std::array<Point,32> recent{};unsigned next=0,points=0;
+    struct Point {Pose hand;Blade blade;Vec thrustAxis;double time=0;float distance=0;};
+    std::array<Point,64> recent{};unsigned next=0,points=0;
     void Remember(const Sample& s,float distance=0) {
-        recent[next]={s.hand,s.blade,s.time,distance};next=(next+1)%recent.size();
+        recent[next]={s.hand,s.blade,s.thrustAxis,s.time,distance};next=(next+1)%recent.size();
         points=std::min(points+1,unsigned(recent.size()));
     }
     void RestartPath(const Sample& s){next=points=0;Remember(s);}
@@ -133,6 +151,17 @@ class Engine {
         }
         return false;
     }
+    bool ThrustOnset(const Sample& s) const {
+        float travel=0;Vec last=s.hand.p;
+        for(unsigned back=1;back<points;++back) {
+            const auto& p=recent[(next+recent.size()-back-1)%recent.size()];
+            if(s.time-p.time>.20)break;
+            travel+=Length(last-p.hand.p);last=p.hand.p;
+            const float forward=ForwardTravel(s.hand.p-p.hand.p,p.thrustAxis,s.thrustAxis);
+            if(forward>=ThrustTravel&&forward>=travel*.85f)return true;
+        }
+        return false;
+    }
 public:
     void Reset(){const auto s=serial;const auto d=diagnostics;*this=Engine{};serial=s;diagnostics=d;}
     Diagnostics TakeDiagnostics(){const auto d=diagnostics;diagnostics={};return d;}
@@ -152,7 +181,7 @@ public:
         const float handTravel=Length(in.hand.p-previous.hand.p),playerTravel=Length(in.player-previous.player);
         const float bladeTravel=std::max(Length(in.blade.base-previous.blade.base),Length(in.blade.tip-previous.blade.tip));
         if(!primed||dt<=0||dt>.1||in.epoch!=previous.epoch||in.equipment!=previous.equipment||
-           in.shield!=previous.shield||in.minWeaponSpeed!=previous.minWeaponSpeed||in.skillSlot!=previous.skillSlot||in.skillOwner!=previous.skillOwner||in.skillContext!=previous.skillContext||
+           in.shield!=previous.shield||in.minWeaponSpeed!=previous.minWeaponSpeed||in.minThrustSpeed!=previous.minThrustSpeed||in.skillSlot!=previous.skillSlot||in.skillOwner!=previous.skillOwner||in.skillContext!=previous.skillContext||
            handTravel>std::max(.12f,10.f*float(dt))||angle>gameplay::MeleeAngularTrackingLimit*dt||playerTravel>.5f||
            std::fabs(in.unitsPerMetre-previous.unitsPerMetre)>.05f||
            bladeTravel>std::max(1.2f,handTravel+angle*lever+playerTravel+.1f)) {
@@ -172,10 +201,30 @@ public:
         if(speed<.45f) {
             if(!quietSince)quietSince=in.time;
             Remember(in,distance);
-            if(in.time-quietSince>=.08) {stroke=0;RestartPath(in);direction={};angularDirection={};}
+            if(in.time-quietSince>=.08) {stroke=0;thrustStroke=false;retreat=0;RestartPath(in);direction={};angularDirection={};}
             return false;
         }
         quietSince=0;
+        const float forward=in.shield?0:ForwardTravel(delta,was.thrustAxis,in.thrustAxis);
+        // A stab can flow into a separate deliberate slash. Start that path
+        // afresh so its rotations/reversals use the ordinary swing detector.
+        if(thrustStroke&&speed>=WeaponContactSpeed(in.minWeaponSpeed)&&
+           (std::fabs(forward)<Length(delta)*.60f||SwingAngle(was.hand,was.blade,in)*lever>distance*.5f)) {
+            stroke=0;thrustStroke=false;retreat=0;RestartPath(was);direction={};angularDirection={};
+        }
+        // Withdrawal is not another stab. A real pullback rearms immediately,
+        // even for quick jabs shorter than the slash reversal timer. Small
+        // overlap jitter cannot generate fresh stroke identities.
+        if(thrustStroke&&forward<0) {
+            retreat-=forward;
+            if(retreat>=ThrustRetreat) {
+                // Keep the axial mode until the next forward onset or slash:
+                // a long withdrawal must not become a low-threshold swing.
+                stroke=0;retreat=0;RestartPath(in);direction={};angularDirection={};
+            } else Remember(in,distance);
+            return false;
+        }
+        if(forward>0)retreat=0;
         // Translation AND rotation can reverse a stroke. Wrist-led backhands
         // otherwise kept the first stroke id forever while the wrist stayed
         // nearly in place, suppressing later hits against the same creature.
@@ -183,27 +232,33 @@ public:
         const Vec angular=math::Normalized(Vec{dq.x,dq.y,dq.z}*(dq.w<0?-1.f:1.f));
         const bool reversed=(Length(delta)>.008f&&math::Dot(math::Normalized(delta),direction)<-.55f)||
                             (angle>.025f&&math::Dot(angular,angularDirection)<-.55f);
-        if(stroke&&in.time-strokeAt>.18&&reversed) {
+        if(stroke&&!thrustStroke&&in.time-strokeAt>.18&&reversed) {
             stroke=0;RestartPath(was);direction={};angularDirection={};
         }
         Remember(in,distance);
         const bool beginning=!stroke;
+        const float thrustSpeed=forward/float(dt);
+        const bool thrust=!in.shield&&forward>=Length(delta)*.85f&&
+            thrustSpeed>=ThrustContactSpeed(in.minThrustSpeed)&&((stroke&&thrustStroke)||ThrustOnset(in));
         Blade startBlade{};
         if(beginning) {
             // Judge this stroke's recent motion. Accumulating all jitter and
             // aborted windups since the last pause made its net/travel ratio
             // impossible to satisfy, causing another indefinite lockout.
-            if(speed<(in.shield?1.2f:WeaponContactSpeed(in.minWeaponSpeed))){++diagnostics.belowSpeed;return false;}
-            if(!Onset(in,lever,startBlade)){++diagnostics.onsetRejected;return false;}
+            if(!thrust) {
+                if(speed<(in.shield?1.2f:WeaponContactSpeed(in.minWeaponSpeed))){++diagnostics.belowSpeed;return false;}
+                if(!Onset(in,lever,startBlade)){++diagnostics.onsetRejected;return false;}
+            }
             stroke=++serial;strokeAt=in.time;direction=math::Normalized(delta);angularDirection=angular;
         }
+        if(thrust)thrustStroke=true;
         // No delayed taps from holding the weapon inside an enemy, and no
         // slowly walking/turning the camera into one with a stationary hand.
-        if(speed<(in.shield?.8f:WeaponContactSpeed(in.minWeaponSpeed)))return false;
+        if(!thrust&&speed<(in.shield?.8f:WeaponContactSpeed(in.minWeaponSpeed)))return false;
         // Weapon motion history arms a stroke; it must not retroactively
         // damage something brushed during the earlier low-energy approach.
         // Keep the latest swept segment so a fast between-frame hit survives.
-        out={beginning&&in.shield?startBlade:was.blade,in.blade,stroke,speed};return true;
+        out={beginning&&in.shield?startBlade:was.blade,in.blade,stroke,thrust?thrustSpeed:speed,thrust};return true;
     }
 };
 class HitSet {
