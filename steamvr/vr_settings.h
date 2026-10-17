@@ -68,7 +68,7 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"Short melee pulses", "Off: longer taps; On: very short, sharp taps", L"haptics",L"short_melee",0,0,1,1},
     {"Blood on visor", "Low life splashes the view; healing back above a band fades it", L"hud",L"blood_visor",1,0,1,1},
     {"Face wipe gesture", "Scrub side to side in front of your face to wipe blood away", L"hud",L"blood_wipe",1,0,1,1},
-    {"Melee rules", "Unleashed: every contact lands. Classic: attack rating and attack speed apply", L"gameplay",L"melee_rules",0,0,1,1},
+    {"Melee rules", "Unleashed scales damage; Classic rolls for hits", L"gameplay",L"melee_rules",0,0,1,1},
     {"Melee thrust speed", "Forward stabs along the blade; independent of swing speed", L"gameplay",L"melee_thrust_speed",2,.75f,10,.25f},
     {"Loot label size", "Dropped-item names; 45% is the original size", L"hud",L"labels_size",45,20,150,5},
     {"Companions & effects", "Companion counts and current buffs, auras and harmful effects", L"interactions",L"companion_counts",1,0,1,1},
