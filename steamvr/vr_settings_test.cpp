@@ -7,6 +7,21 @@ static void Check(bool b,const char* label){if(!b){std::fprintf(stderr,"FAIL: %s
 static Hit At(Page p,Rect r){return HitTest(p,(r.x+r.w*.5f)/Width,(r.y+r.h*.5f)/Height);}
 int main(){
     {
+        Snapshot state;state.ready=true;Model model;model.Open(state);
+        model.Click({Kind::Tab,int(Page::Developer)});
+        Check(model.page==Page::Controls,"ordinary launch cannot open DEV settings");
+        model.SetDeveloper(true);
+        for(int page=0;page<VisibleTabs(true);++page){
+            const auto box=TabBox(page,true);
+            const auto hit=HitTest(model.page,(box.x+box.w/2.f)/Width,(box.y+box.h/2.f)/Height,false,true);
+            Check(hit.kind==Kind::Tab&&hit.index==page,"developer tabs match visible bounds");model.Click(hit);
+        }
+        Check(model.page==Page::Developer&&!model.Dirty(),"release reference opens without editing settings");
+        Check(HitTest(Page::Developer,.5f,.5f,false,true).kind==Kind::None,"release lines are read-only");
+        model.SetDeveloper(false);
+        Check(model.page==Page::Controls,"losing dev mode clears its page");
+    }
+    {
         HoverHelp help;
         Check(help.Step(MeleeRules,100)==NoHelp&&help.Step(MeleeRules,549)==NoHelp,"passing over a setting does not flash help");
         Check(help.Step(MeleeRules,550)==MeleeRules,"steady hover reveals help after 450 ms");

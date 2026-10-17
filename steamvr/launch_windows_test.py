@@ -14,6 +14,36 @@ import launch_windows as launch
 
 
 class DesktopLaunchTests(unittest.TestCase):
+    def test_dev_flag_selects_isolated_mod_and_is_not_forwarded(self):
+        import prepare_dev_scenarios as dev
+        with tempfile.TemporaryDirectory() as temporary:
+            game = Path(temporary)
+            (game / 'D2RLoader.exe').touch()
+            with patch.object(dev, 'stage') as stage:
+                args = ['--frame-vr', '--frame-dev', str(game / 'D2R.exe')]
+                command, cwd = launch.prepare(args)
+                self.assertEqual(command, [str(game / 'D2RLoader.exe'), '-mod', 'pcvr-dev'])
+                self.assertEqual(cwd, str(game))
+                stage.assert_called_once_with(game)
+                command, _ = launch.prepare(args + ['-mod', 'pcvr-dev'])
+                self.assertEqual(command.count('-mod'), 1)
+                for extra in (['-mod', 'D2R-PCVR'], ['-mod'], ['-savepath=../'], ['-mod=other'], ['-tcp']):
+                    with self.assertRaises(SystemExit):
+                        launch.prepare(args + extra)
+            with self.assertRaises(SystemExit):
+                launch.prepare(['--frame-dev', str(game / 'D2R.exe')])
+
+    def test_dev_battlenet_keeps_offline_experimental_gate(self):
+        import prepare_dev_scenarios as dev
+        with tempfile.TemporaryDirectory() as temporary:
+            game = Path(temporary)
+            (game / 'D2RLoader.exe').touch()
+            with patch('game_install.validate_game') as validate, patch.object(dev, 'stage') as stage:
+                command, _ = launch.prepare(['--frame-vr', '--frame-dev', '--experimental-battlenet', '--battlenet-game=' + str(game)])
+                self.assertEqual(command, [str(game / 'D2RLoader.exe'), '-mod', 'pcvr-dev'])
+                stage.assert_called_once_with(game, experimental_battlenet=True)
+                validate.assert_called_once_with(game, 'battlenet', True)
+
     def test_shortcut_identity_uses_owned_game_without_mutating_parent(self):
         with patch.dict(os.environ, {'SteamAppId': '2752970393',
                 'SteamGameId': '11823917804824821760', 'SteamOverlayGameId': '2752970393'}, clear=True):

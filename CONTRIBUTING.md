@@ -74,6 +74,14 @@ run the relevant Python fixture tests, for example:
 .\deps\python\python.exe -m unittest discover -s steamvr -p mod_identity_test.py
 ```
 
+For isolated gameplay testing, see [developer mode](steamvr/DEVELOPMENT_SCENARIOS.md).
+`--frame-dev` selects a separate offline character list; its DEV tools provide
+level presets, class gear, travel and the last published release reference.
+`build_windows.ps1 -Developer -Test` stages a candidate separately for this mode.
+Run `prepare_dev_scenarios_test.py` and `launch_windows_test.py` after changing
+developer staging or launch flags. Linux `session_test.py` requires `/proc` and
+is not a Windows check.
+
 Report the commands you ran and any failures. Documentation-only changes
 normally need a content and link check, not a full native build. If you cannot
 run a relevant check, say so in the PR instead of claiming it passed.

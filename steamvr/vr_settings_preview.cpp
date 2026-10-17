@@ -1,5 +1,6 @@
 // Synthetic UI preview; does not load the game or its configuration.
 #include "vr_settings_ui.h"
+#include "dev_release_notes.h"
 #include <windows.h>
 #include <cstdio>
 #include <cstdlib>
@@ -8,7 +9,18 @@ int main(int argc,char** argv){
     using namespace framevr::settings;
     Snapshot s;s.ready=true;s.values[Motion]=1;s.values[Snap]=30;s.values[Foveation]=2;
     Model m;m.Open(s);const int page=argc>2?std::atoi(argv[2]):0;
+    m.SetDeveloper(argc>3&&std::strcmp(argv[3],"--developer-check")==0);
     m.Click({Kind::Tab,page});
+    if(m.developer){
+        HDC dc=CreateCompatibleDC(nullptr);
+        HFONT font=CreateFontW(27,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,ANTIALIASED_QUALITY,DEFAULT_PITCH,L"Arial");
+        auto old=SelectObject(dc,font);
+        for(const char* line:framevr::dev::ReleaseLines){
+            SIZE size{};GetTextExtentPoint32A(dc,line,int(std::strlen(line)),&size);
+            if(size.cx>1170||size.cy>35){std::fprintf(stderr,"Release line too long: %s\n",line);return 12;}
+        }
+        SelectObject(dc,old);DeleteObject(font);DeleteDC(dc);
+    }
     if(argc>3&&std::strcmp(argv[3],"--dropdown")==0)m.Click({Kind::ControllerMenu});
     const int help=argc>4&&std::strcmp(argv[3],"--help")==0?std::atoi(argv[4]):NoHelp;
     if(argc>3&&std::strcmp(argv[3],"--help-check")==0){
@@ -43,7 +55,7 @@ int main(int argc,char** argv){
         std::puts("All help text fits; help leaves every control pixel unchanged and unused space transparent");
     }
     framevr::calibration::Flow body;body.Begin();body.phase=framevr::calibration::Phase::Hold;body.hint=framevr::calibration::Hint::Pose;body.progress=.55f;
-    const auto pixels=Paint(m,{},page==int(Page::Video)?"VR source: 2560 x 2560 per eye":"Foveated shading available. Eye-tracking samples are active.",page==TabCount?&body:nullptr,
+    const auto pixels=Paint(m,{},page==int(Page::Video)?"VR source: 2560 x 2560 per eye":"Foveated shading available. Eye-tracking samples are active.",page==TabCount+1?&body:nullptr,
         framevr::controllers::Labels{{framevr::controllers::Layout::Touch,framevr::controllers::Layout::Touch}},help);
     if(pixels.size()!=AtlasWidth*Height*4)return 1;
     FILE* file=std::fopen(argc>1?argv[1]:"vr-settings-preview.ppm","wb");if(!file)return 2;

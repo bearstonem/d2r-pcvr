@@ -1,4 +1,5 @@
 #include <windows.h>
+#include "dev_scenarios.h"
 #include <wincodec.h>
 #include "interaction_ui.h"
 #include "interaction_icons.h"
@@ -151,7 +152,7 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
             auto* p=&wheelArt[(y*768+x)*4];
             const int cell=cells[fiveSectors?1:0][y*768+x];
             const bool active=!o.editor&&!o.utility&&cell==(fiveSectors?0:selection);
-            if(!o.map&&o.editor!=2&&p[3]&&cell>=0&&(!o.utility||cell!=2)&&(cell==o.hover||active)) {
+            if(!o.developer&&!o.map&&o.editor!=2&&p[3]&&cell>=0&&(!o.utility||cell!=2)&&(cell==o.hover||active)) {
                 const float amount=cell==o.hover?.26f:.13f;
                 const int gold[]={185,133,55};
                 for(int c=0;c<3;++c)p[c]=uint8_t(p[c]*(1-amount)+gold[c]*amount);
@@ -189,7 +190,7 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
         } else icon(icons::Get(a.handle?a:b),box);
     };
     const int sectors=handWheel&&!o.utility?5:8;
-    for(int i=0;!o.map&&o.editor!=2&&i<sectors;++i) {
+    for(int i=0;!o.developer&&!o.map&&o.editor!=2&&i<sectors;++i) {
         const int slot=handWheel&&!o.utility?skills::HandSlot(o.wheelHand,i):i;
         if(o.utility&&i==2)continue; // Native tabbed menu retains journal access.
         const float sector=2*Pi/sectors;
@@ -250,7 +251,38 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
         RECT inside{box.left+2,box.top+2,box.right-2,box.bottom-2};fill(inside,RGB(18,16,14));
         inside={box.left+5,box.top+5,box.right-5,box.bottom-5};fill(inside,hot?RGB(65,49,29):RGB(35,29,23));
     };
-    if(o.map) {
+    if(o.developer) {
+        frame({20,28,748,681});
+        const bool available=dev::ValidClass(s.devClass);
+        char title[120];std::snprintf(title,sizeof title,"DEVELOPMENT / %s",available?dev::Presets[s.devClass].name:"OFFLINE EXPANSION");
+        text(title,{38,42,730,85});
+        SelectObject(dc,shortcutFont);
+        text(available?dev::PageHelp[std::clamp(o.devPage,0,dev::PageCount-1)]:"Load an offline expansion character in pcvr-dev.",{38,83,730,101});
+        SelectObject(dc,font);
+        for(int page=0;page<dev::PageCount;++page) {
+            const auto b=DeveloperPageBounds(page);
+            RECT r{LONG(768*b.left),LONG(768*b.top),LONG(768*b.right),LONG(768*b.bottom)};
+            frame(r,o.devPage==page||o.hover==DeveloperPageCell(page));
+            text(dev::PageNames[page],r);
+        }
+        for(int i:dev::Pages[std::clamp(o.devPage,0,dev::PageCount-1)]) {
+            if(i<0)continue;
+            const auto bounds=DeveloperBounds(i);
+            const int x=int(768*bounds.left),y=int(768*bounds.top),right=int(768*bounds.right),bottom=int(768*bounds.bottom);
+            const auto choice=available?dev::ChoiceFor(s.devClass,i):dev::Choices[i];
+            frame({x,y,right,bottom},available&&o.hover==DeveloperCell(i));
+            SetTextColor(dc,available?RGB(235,218,181):RGB(148,137,117));
+            text(choice.name,{x+8,y+4,right-8,y+29});
+            SelectObject(dc,shortcutFont);text(choice.detail,{x+8,y+29,right-8,bottom-4});SelectObject(dc,font);
+        }
+        SetTextColor(dc,RGB(235,218,181));SelectObject(dc,shortcutFont);
+        text(o.result==Result::Pending?"Working...":o.result==Result::Applied?"Kit added to inventory. Equip it using the native inventory screen.":
+             o.result==Result::Dispatched?"Commands sent. Check character stats / destination in game.":
+             o.result==Result::KitRefused?"Kit could not be added. Check inventory space and the development log.":
+             o.result==Result::Refused?"Action unavailable. Close native menus and retry; see the development log.":
+             "Release reference: VR SETTINGS > DEV. Gear grants keep existing items.",{38,628,730,677});
+        SelectObject(dc,font);
+    } else if(o.map) {
         frame({20,18,748,680});
         text("MAP",{38,27,730,78});
         const RECT content{LONG(MapContent.left*768),LONG(MapContent.top*768),LONG(MapContent.right*768),LONG(MapContent.bottom*768)};
@@ -290,18 +322,18 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
             o.result==Result::Pending?"Saving...":o.result==Result::Applied?"Assigned":o.result==Result::Refused?"Changed or unavailable; choose the slot again":handWheel?"Click stick to close":"Hold Left Y while editing");
         fill({29,637,739,680},RGB(22,18,14));text(hint,{35,639,733,678});
     }
-    const char* footer[4]={(o.utility||o.map)?"SPELLS":"EQUIPMENT","MAP","VR SETTINGS",handWheel?"INVENTORY":"EDIT SKILLS"};
+    const char* footer[5]={(o.utility||o.map||o.developer)?"SPELLS":"EQUIPMENT","MAP","VR SETTINGS",handWheel?"INVENTORY":"EDIT SKILLS","DEV"};
     if(o.editor==1){footer[0]="BACK";footer[1]="";footer[2]="DONE";}
     if(o.editor==2){footer[0]="PREVIOUS";footer[1]="NEXT";footer[2]="BACK";}
     fill({20,686,749,745},RGB(18,16,14));
     const auto page=Page(o);
-    for(int i=0;i<FooterCount(page);++i) {
-        const auto bounds=FooterBounds(i,page);const int cell=FooterCell(i,page);
+    for(int i=0;i<FooterCount(page,s.developer);++i) {
+        const auto bounds=FooterBounds(i,page,s.developer);const int cell=FooterCell(i,page);
         const RECT box{LONG(bounds.left*768),LONG(bounds.top*768),LONG(bounds.right*768),LONG(bounds.bottom*768)};
-        frame(box,o.hover==cell||(o.map&&cell==12));
+        frame(box,o.hover==cell||(o.map&&cell==12)||(o.developer&&cell==13));
         text(footer[i],{box.left+5,box.top+5,box.right-5,box.bottom-5});
     }
-    if(!o.editor&&!o.utility&&!o.map) {
+    if(!o.developer&&!o.editor&&!o.utility&&!o.map) {
         char active[120];if(handWheel)std::snprintf(active,sizeof active,"Other hand: point + trigger to assign. Click this stick to close.");
         else std::snprintf(active,sizeof active,"ACTIVE: %s",o.cue.known?o.cue.name:"Unknown skill");
         const auto prior=SelectObject(dc,skillFont);SetTextColor(dc,RGB(232,196,119));

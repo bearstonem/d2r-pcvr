@@ -1130,7 +1130,7 @@ void MotionPointer() {
     const auto mid=ray+direction*(beamLength*.5f);
     beamPose=XrPose({mid,math::BeamOrientation(direction,V(head.position)-mid)});pointerVisible=true;
     if(pointerHit) {
-        motionInput.hover=interaction::WheelCell(hit.u,hit.v,interactionOutput.hover,interactions.Page(),hand);
+        motionInput.hover=interaction::WheelCell(hit.u,hit.v,interactionOutput.hover,interactions.Page(),hand,interactionInput.snapshot.developer,interactions.DeveloperPage());
         dotPose=XrPose({hit.point+math::Rotate(pose.q,{0,0,.003f}),pose.q});
     }
 }
@@ -1230,7 +1230,7 @@ void ResetSettingsInput() {
 }
 void OpenSettings() {
     settingsImageReady=false;settingsPaintRevision=~0ull;settingsPaintAt=0;
-    settingsModel.Open(vrsettings::Read());settingsOpen=true;settingsSession=gamestate::LocalPlayer();
+    settingsModel.Open(vrsettings::Read());settingsModel.SetDeveloper(interactionInput.snapshot.developer);settingsOpen=true;settingsSession=gamestate::LocalPlayer();
     const auto q=math::Yaw(math::Heading(Q(head.orientation)));
     const auto p=V(head.position)+math::Rotate(q,{0,-.06f,-1.05f});
     settingsPose=XrPose({p,q});settingsHover={};ResetSettingsInput();
@@ -1290,7 +1290,7 @@ void CalibrationInput() {
 }
 void SettingsPointer(const settings::InputGate::Edges& edges) {
     if(!settingsModel.open)return;
-    settingsModel.Observe(vrsettings::Read());settingsHover={};pointerVisible=pointerHit=false;
+    settingsModel.SetDeveloper(interactionInput.snapshot.developer);settingsModel.Observe(vrsettings::Read());settingsHover={};pointerVisible=pointerHit=false;
     int helpTarget=settings::NoHelp;
     const auto previousPage=settingsModel.page;
     const bool previousMenu=settingsModel.controllerMenu;
@@ -1302,7 +1302,7 @@ void SettingsPointer(const settings::InputGate::Edges& edges) {
         pointerHit=math::IntersectPanel(ray,direction,V(settingsPose.position),Q(settingsPose.orientation),settingsWidth,settingsHeight,hit);
         beamLength=pointerHit?hit.distance:1.5f;const auto mid=ray+direction*(beamLength*.5f);
         beamPose=XrPose({mid,math::BeamOrientation(direction,V(head.position)-mid)});pointerVisible=true;
-        if(pointerHit){settingsHover=settings::HitTest(settingsModel.page,hit.u,hit.v,settingsModel.controllerMenu);dotPose=settingsPose;
+        if(pointerHit){settingsHover=settings::HitTest(settingsModel.page,hit.u,hit.v,settingsModel.controllerMenu,settingsModel.developer);dotPose=settingsPose;
             helpTarget=settings::HelpAt(settingsModel.page,hit.u,hit.v,settingsModel.controllerMenu);
             const auto p=hit.point+math::Rotate(Q(settingsPose.orientation),{0,0,.004f});dotPose.position={p.x,p.y,p.z};}
     }

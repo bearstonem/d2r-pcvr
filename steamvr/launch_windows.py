@@ -17,6 +17,7 @@ VDXR_OPTION = '--frame-vdxr'
 BATTLENET_OPTION = '--battlenet-game='
 EXPERIMENTAL_OPTION = '--experimental-battlenet'
 DESKTOP_REQUEST = '--frame-desktop-request='
+DEV_OPTION = '--frame-dev'
 
 
 def battlenet_game(arguments):
@@ -28,12 +29,15 @@ def battlenet_game(arguments):
 
 def prepare(arguments):
     vr = '--frame-vr' in arguments
+    developer = DEV_OPTION in arguments
+    if developer and not vr:
+        raise SystemExit('--frame-dev requires --frame-vr and an offline test character.')
     game = battlenet_game(arguments)
     if game is not None:
         from game_install import validate_game
         if not vr:
             raise SystemExit('Battle.net preview shortcuts require --frame-vr')
-        if any(arg not in ('--frame-vr', VDXR_OPTION, EXPERIMENTAL_OPTION)
+        if any(arg not in ('--frame-vr', VDXR_OPTION, EXPERIMENTAL_OPTION, DEV_OPTION)
                and not arg.startswith((BATTLENET_OPTION, RUNTIME_OPTION)) for arg in arguments):
             raise SystemExit('Unexpected argument in Battle.net preview shortcut')
         try:
@@ -44,9 +48,12 @@ def prepare(arguments):
         if not loader.is_file():
             raise SystemExit('D2RLoader is not installed beside the Battle.net D2R.exe')
         # Wrapper-only flags are never passed to Blizzard's executable or loader. D2RLoader runs this mod.
-        return [str(loader), '-mod', MOD_NAME], str(game)
+        if developer:
+            from prepare_dev_scenarios import stage, MOD
+            stage(game, experimental_battlenet=EXPERIMENTAL_OPTION in arguments)
+        return [str(loader), '-mod', MOD if developer else MOD_NAME], str(game)
     command = [arg for arg in arguments
-               if arg not in ('--frame-vr', VDXR_OPTION) and not arg.startswith(RUNTIME_OPTION)]
+               if arg not in ('--frame-vr', VDXR_OPTION, DEV_OPTION) and not arg.startswith(RUNTIME_OPTION)]
     cwd = None
     if not command:
         raise SystemExit('Expected the Steam launch command containing D2R.exe')
@@ -59,9 +66,17 @@ def prepare(arguments):
                 if not Path(loader).is_file():
                     raise SystemExit('D2RLoader is not installed beside D2R.exe')
                 command[index] = loader
+                if developer:
+                    from prepare_dev_scenarios import stage, MOD
+                    mods = [i for i, item in enumerate(command) if item.lower() == '-mod']
+                    if len(mods) > 1 or any(i + 1 >= len(command) or command[i + 1] != MOD for i in mods):
+                        raise SystemExit('--frame-dev cannot be combined with a different -mod selection.')
+                    if any(item.lower() in ('-tcp', '-join', '-server') or item.lower().startswith(('-mod=', '-savepath')) for item in command):
+                        raise SystemExit('--frame-dev uses its own offline mod and save path.')
+                    stage(Path(folder))
                 # D2RLoader runs this mod (mods\D2R-PCVR), unless the launch options already name one.
                 if not any(item.lower() == '-mod' for item in command):
-                    command[index + 1:index + 1] = ['-mod', MOD_NAME]
+                    command[index + 1:index + 1] = ['-mod', MOD if developer else MOD_NAME]
                 cwd = folder
                 found = True
                 break

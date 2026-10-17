@@ -143,7 +143,7 @@ def verify_release(root):
         raise ValueError('This setup needs the native Windows release ZIP.')
     hashes = manifest['sha256']
     required = {'bin/d2rl-pcvr.dll', 'bin/openxr_loader.dll', 'steamvr/install.py', 'steamvr/mod_identity.py',
-                'steamvr/setup_windows.py', 'steamvr/steam_config.py', 'steamvr/launch_windows.py',
+                'steamvr/setup_windows.py', 'steamvr/steam_config.py', 'steamvr/launch_windows.py', 'steamvr/prepare_dev_scenarios.py',
                 'steamvr/game_install.py', 'steamvr/game_assets.py', 'steamvr/casc_assets.py',
                 'Uninstall-Windows.cmd', 'steamvr/uninstall_windows.py'}
     if not required.issubset(hashes):

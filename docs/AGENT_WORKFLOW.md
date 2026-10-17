@@ -1,6 +1,6 @@
 # Agent workflow and session handoff
 
-Last checked: 2026-10-16. This records working procedures, not a claim that the
+Last checked: 2026-10-17. This records working procedures, not a claim that the
 current checkout, installed DLL and latest release are identical. Verify those
 separately. Read [CONTRIBUTING.md](../CONTRIBUTING.md) first.
 
@@ -56,7 +56,7 @@ Developer branches predating the identity change output
 `build-frame/windows-developer/d2rl-vrcam.dll`; inspect the selected branch. Neither
 command installs or launches anything. The developer helpers historically live
 on `feat/development-scenarios`; first inspect the current branch and options.
-The last checked suites had 67 production and 69 developer tests. Counts change;
+Suite counts change as features are added;
 report the actual result, and distinguish automated checks from headset testing.
 
 Use existing pinned tools under `deps/` before downloading them again. When
@@ -175,17 +175,26 @@ On a developer-capable branch, read `steamvr/DEVELOPMENT_SCENARIOS.md` and run:
 .\deps\python\python.exe steamvr/prepare_dev_scenarios.py --game "$gameDir"
 ```
 
-This creates only `mods/pcvr-dev/pcvr-dev.mpq/modinfo.json`, with exact metadata
-`{"name":"pcvr-dev","savepath":"pcvr-dev/"}` followed by a newline. It never
-creates or edits characters. Conflicting metadata is intentionally refused.
-For Steam, append `-mod pcvr-dev` after `D2R.exe` in the wrapper command. Use a
-new offline expansion character in that separate save list.
+This stages missing developer mod files from the working normal installation,
+including settings/calibration, and creates exact metadata
+`{"name":"pcvr-dev","savepath":"pcvr-dev/"}` followed by a newline at
+`mods/pcvr-dev/pcvr-dev.mpq/modinfo.json`. It never creates or edits characters.
+Conflicting metadata is refused. Existing test DLLs/settings stay intact unless
+an explicit `--plugin` update supplies a replacement DLL, which gets a backup.
+Use `--frame-vr --frame-dev` in the wrapper command (the existing `-mod pcvr-dev`
+route also works for a prepared environment). Normal native builds include the
+dormant backend; `-Developer` stages separately and enables developer diagnostics.
+Use a new offline expansion character in that separate save list.
 
-The dev page is a **DEV tab on either hand's wheel**, beside VR Settings. It is
-compiled out of release builds and gated by the exact isolated mod metadata.
+The tools are a **DEV tab on either hand's wheel**, beside VR Settings. Native
+builds include the dormant backend unless `-NoDevTools` is selected; the UI and
+actions require the exact isolated mod metadata. VR Settings has a separate
+DEV tab containing a read-only reference to the last published release.
 The existing owner test character is not permission to alter normal saves.
 
-- Prepare the current class grants test stats/skills; it preserves bindings.
+- Character presets grant level 10/30/60/90 test stats/skills and preserve bindings.
+  Locked skills are reset when choosing a lower preset. These are overpowered
+  test characters, not balanced progression builds; use starter gear at low levels.
 - Gear buttons add items to inventory. The player equips them. Full inventories
   can refuse a kit; existing items must not be deleted to make space.
 - Travel uses native console commands. "Commands sent" means dispatch accepted,

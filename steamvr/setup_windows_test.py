@@ -24,7 +24,7 @@ class SteamSetupTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             names = ('bin/d2rl-pcvr.dll', 'bin/openxr_loader.dll', 'steamvr/install.py', 'steamvr/mod_identity.py',
-                     'steamvr/setup_windows.py', 'steamvr/steam_config.py', 'steamvr/launch_windows.py',
+                     'steamvr/setup_windows.py', 'steamvr/steam_config.py', 'steamvr/launch_windows.py', 'steamvr/prepare_dev_scenarios.py',
                      'steamvr/game_install.py', 'steamvr/game_assets.py', 'steamvr/casc_assets.py',
                      'Uninstall-Windows.cmd', 'steamvr/uninstall_windows.py')
             hashes = {}

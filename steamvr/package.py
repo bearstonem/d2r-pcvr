@@ -33,7 +33,8 @@ def main():
         cwd=ROOT, text=True).strip() if args.variant == 'current-source' else None
     # Explicit allowlist. Never glob an install, backup, build or diagnostic tree.
     paths = ['INSTALL.md', 'INSTALL-WINDOWS.md', 'README.md', 'CONTROLS.md', 'RELEASE_NOTES.md',
-             'Launch-VR-SteamVR.cmd', 'Launch-VR-VDXR.cmd',
+             'Launch-VR-SteamVR.cmd', 'Launch-VR-VDXR.cmd', 'Launch-Dev-SteamVR.cmd',
+             'steamvr/DEVELOPMENT_SCENARIOS.md', 'steamvr/prepare_dev_scenarios.py',
              'Install-Windows.cmd', 'Uninstall-Windows.cmd', 'steamvr/setup_windows.ps1',
              'steamvr/uninstall_windows.py',
              'steamvr/setup_windows.py', 'steamvr/steam_config.py', 'steamvr/hdr_check.py',

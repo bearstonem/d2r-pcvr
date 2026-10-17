@@ -10,7 +10,7 @@
 #include "haptic_strength.h"
 
 namespace framevr::settings {
-enum class Page { Controls, VR, Video, HUD, Combat, Haptics };
+enum class Page { Controls, VR, Video, HUD, Combat, Haptics, Developer };
 enum Key { Motion, Seated, Dominant, Snap, TurnSpeed, Waist, BeltForward,
            Foveation, Sky, Fog, Ceiling, DrawDistance, ObjectDistance,
            EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, VitalsTilt, HapticStrength, HapticMelee, HapticBowDraw, HapticBowRelease, HapticSpell, HapticInteraction, HapticAlert, HapticShortMelee, BloodVisor, BloodWipe, MeleeRules, MeleeThrustSpeed, LootLabelSize, CompanionCounts, ParryWindow, StrainDark, Count };
@@ -112,6 +112,8 @@ struct Rect {
 constexpr int Width=1280,Height=1024;
 constexpr int TabCount=6;
 constexpr Rect Tabs[TabCount]={{40,114,185,60},{243,114,185,60},{446,114,185,60},{649,114,185,60},{852,114,185,60},{1055,114,185,60}};
+inline int VisibleTabs(bool developer){return TabCount+(developer?1:0);}
+inline Rect TabBox(int index,bool developer){return developer?Rect{40+index*173,114,162,60}:Tabs[index];}
 constexpr Rect Apply{965,918,275,68},Close{650,918,275,68},Recenter{40,918,270,68},Calibrate{330,918,300,68};
 constexpr int RowY=242,RowStep=62;
 constexpr Rect ControllerBox{865,181,375,52};
@@ -139,7 +141,7 @@ inline Key RowKey(Page page,int row){
 }
 enum class Kind { None, Tab, Change, Apply, Close, Recenter, Calibrate, ControllerMenu, ControllerChoice, DismissMenu, TestHaptics };
 struct Hit {Kind kind=Kind::None;int index=-1,delta=0;};
-inline Hit HitTest(Page page,float u,float v,bool controllerMenu=false){
+inline Hit HitTest(Page page,float u,float v,bool controllerMenu=false,bool developer=false){
     if(!std::isfinite(u)||!std::isfinite(v)||u<0||u>=1||v<0||v>=1)return {};
     const float x=u*Width,y=v*Height;
     if(page==Page::VR){
@@ -150,7 +152,7 @@ inline Hit HitTest(Page page,float u,float v,bool controllerMenu=false){
             return {Kind::DismissMenu}; // Never click through the dropdown.
         }
     }
-    for(int i=0;i<TabCount;++i)if(Tabs[i].Contains(x,y))return {Kind::Tab,i};
+    for(int i=0;i<VisibleTabs(developer);++i)if(TabBox(i,developer).Contains(x,y))return {Kind::Tab,i};
     if(Apply.Contains(x,y))return {Kind::Apply};
     if(Close.Contains(x,y))return {Kind::Close};
     if(Recenter.Contains(x,y))return {Kind::Recenter};
@@ -175,7 +177,8 @@ class Model {
     Values base=Defaults(),draft=base;
     uint64_t serial=0,pending=0;
 public:
-    bool open=false,ready=false,controllerMenu=false;
+    bool open=false,ready=false,controllerMenu=false,developer=false;
+    void SetDeveloper(bool enabled){if(enabled==developer)return;developer=enabled;if(!developer&&page==Page::Developer)page=Page::Controls;++revision;}
     Page page=Page::Controls;
     Result result=Result::None;
     uint64_t revision=0;
@@ -202,7 +205,7 @@ public:
         if(!open)return {};
         if(hit.kind==Kind::Close){Close();return {};}
         if(hit.kind==Kind::DismissMenu){DismissControllerMenu();return {};}
-        if(hit.kind==Kind::Tab&&hit.index>=0&&hit.index<TabCount){controllerMenu=false;page=Page(hit.index);++revision;return {};}
+        if(hit.kind==Kind::Tab&&hit.index>=0&&hit.index<VisibleTabs(developer)){controllerMenu=false;page=Page(hit.index);++revision;return {};}
         if(!ready||Busy())return {};
         if(hit.kind==Kind::ControllerMenu&&page==Page::VR){controllerMenu=!controllerMenu;++revision;return {};}
         if(hit.kind==Kind::ControllerChoice&&page==Page::VR&&controllerMenu&&hit.index>=0&&hit.index<int(controllers::Choice::Count)){

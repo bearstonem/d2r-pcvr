@@ -3,6 +3,11 @@
 Windows preview for **SteamVR and Virtual Desktop (VDXR)**. These controls
 use two tracked VR controllers; an Xbox controller is not required.
 
+In [developer mode](steamvr/DEVELOPMENT_SCENARIOS.md), the hand-wheel **DEV** tab
+provides Character, Equipment and act-grouped travel tools. **VR Settings > DEV**
+shows one line per feature from the last published release. These tabs are hidden
+in ordinary play; launch with `--frame-vr --frame-dev` for isolated offline tests.
+
 ## Button names
 
 | Hand / button | Quest / Touch | Valve Index | Steam Frame |

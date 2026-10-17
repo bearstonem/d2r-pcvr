@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.28)
 project(d2r_frame LANGUAGES C CXX RC)
+option(D2RVR_DEV_TOOLS "Include opt-in isolated offline developer tools" ON)
+option(D2RVR_DEVELOPER "Enable developer diagnostics" OFF)
 set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 # Linux needs a case adapter for SDK includes of Windows.h. On Windows the
 # adapter would resolve its own windows.h include and hide the real SDK header.
@@ -26,6 +28,13 @@ target_include_directories(minhook PUBLIC ${ROOT}/third_party/minhook/include)
 add_library(d2rcam STATIC ${ROOT}/cleanroom/camera/d2rcam.cpp ${ROOT}/cleanroom/drawdist/drawdist.cpp ${ROOT}/cleanroom/sigscan/sigscan.cpp ${ROOT}/cleanroom/pools/pools.cpp)
 target_include_directories(d2rcam PUBLIC ${ROOT}/cleanroom/camera ${ROOT}/cleanroom/sigscan ${D2RL_SDK}/include)
 add_library(d2rl-pcvr SHARED ${ROOT}/vr/vrcam.cpp ${ROOT}/vr/dlss_mv.cpp ${ROOT}/vr/skeletons.cpp ${ROOT}/vr/gamestate.cpp ${ROOT}/vr/gamecmd.cpp ${ROOT}/vr/probe.cpp ${ROOT}/vr/uitrace.cpp ${ROOT}/vr/hud.cpp ${ROOT}/vr/memdiff.cpp ${ROOT}/vr/writewatch.cpp ${ROOT}/vr/vrcam.rc)
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/dev_scenarios.cpp)
+if(D2RVR_DEV_TOOLS)
+  target_compile_definitions(d2rl-pcvr PRIVATE D2RVR_DEV_TOOLS=1)
+endif()
+if(D2RVR_DEVELOPER)
+  target_compile_definitions(d2rl-pcvr PRIVATE D2RVR_DEVELOPER=1)
+endif()
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/dlss_depth.cpp ${ROOT}/vr/crossbow.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/billboards.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/panel_input.cpp)
@@ -126,6 +135,9 @@ add_executable(spell-cast-test spell_cast_test.cpp)
 add_executable(spell-aim-assist-test spell_aim_assist_test.cpp)
 
 add_executable(interaction-test interaction_test.cpp)
+add_executable(dev-scenarios-test dev_scenarios_test.cpp)
+target_include_directories(dev-scenarios-test PRIVATE ${D2RL_SDK}/include)
+target_link_libraries(dev-scenarios-test PRIVATE framevr-runtime)
 add_executable(wrist-hud-test wrist_hud_test.cpp)
 add_executable(navigation-info-test navigation_info_test.cpp)
 add_executable(dropped-item-labels-test dropped_item_labels_test.cpp)
@@ -218,7 +230,7 @@ foreach(test_target IN ITEMS memory-test hook-metrics-test active-keys-test reso
     gameplay-test weapon-skills-test quick-cast-test hand-controls-test skill-pad-test interact-press-test mod-layout-test spell-aim-test bow-pose-test crossbow-pose-test body-tracking-test body-calibration-test shoulder-swap-test blood-screen-test
     portal-billboard-test composition-layers-test projectile-rules-test environment-cutaway-test stereo-prop-physics-test
     combat-rules-test shield-guard-test guard-strain-test heartbeat-test logging-test melee-contact-test melee-weapon-test attack-speed-test world-coordinates-test bow-flight-test spell-cast-test spell-aim-assist-test
-    interaction-test native-belt-test wrist-hud-test navigation-info-test companions-test active-effects-test dropped-item-labels-test show-items-command-test native-hud-test render-resolution-test render-pointer-test scene-depth-test game-device-only-test controller-bindings-test journal-test native-panels-test
+    interaction-test dev-scenarios-test native-belt-test wrist-hud-test navigation-info-test companions-test active-effects-test dropped-item-labels-test show-items-command-test native-hud-test render-resolution-test render-pointer-test scene-depth-test game-device-only-test controller-bindings-test journal-test native-panels-test
     vr-settings-test vr-settings-store-test controller-labels-test math-test deferred-draw-test monster-bars-test gaze-test window-focus-test callback-ticket-test local-player-test)
   # These fixtures use assert for their checks, including in Release builds.
   if(MSVC)
@@ -229,6 +241,9 @@ foreach(test_target IN ITEMS memory-test hook-metrics-test active-keys-test reso
   add_test(NAME ${test_target} COMMAND ${test_target})
 endforeach()
 set_tests_properties(window-focus-test PROPERTIES TIMEOUT 10)
+set_tests_properties(dev-scenarios-test PROPERTIES TIMEOUT 10)
+add_test(NAME interaction-developer-tab-test COMMAND interaction-preview "${CMAKE_CURRENT_BINARY_DIR}/developer.png" --developer-check)
+add_test(NAME settings-developer-test COMMAND vr-settings-preview "${CMAKE_CURRENT_BINARY_DIR}/release-notes.bmp" 6 --developer-check)
 add_test(NAME ui-blit-typed COMMAND ui-blit-test)
 add_test(NAME ui-blit-typeless COMMAND ui-blit-test --typeless)
 add_test(NAME ui-blit-typeless-black COMMAND ui-blit-test black --typeless)

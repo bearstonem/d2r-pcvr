@@ -1,5 +1,8 @@
 # Native OpenXR PCVR — technical notes
 
+For opt-in offline developer tools and the `--frame-dev` launch flag, see
+[developer mode](DEVELOPMENT_SCENARIOS.md).
+
 For the compiled preview and portable friend setup, start with
 [INSTALL.md](../INSTALL.md). These notes retain the owner machine's build and
 Steam Frame testing details. Native Windows + SteamVR/Steam Frame is now tested

@@ -19,6 +19,82 @@ struct Sim {
     Output Step(int count=1){while(count--){in.time+=.02;in.at=1000000+uint64_t(in.time*1000);in.snapshot.at=in.at;out=e.Step(in);}return out;}
 };
 int main(){
+    {
+        Sim s;s.in.wheel=true;s.Step(3);s.in.hover=13;s.in.trigger=1;s.Step();
+        Check(!s.out.developer&&s.out.request.action==Action::None,"retail snapshot cannot open developer page");
+        s.in.snapshot.developer=true;s.in.snapshot.devClass=3;
+        s.in.trigger=0;s.Step();s.in.trigger=1;s.Step();
+        Check(s.out.developer&&s.e.Page()==MenuPage::Developer,"developer footer opens page");
+        Check(!MapWanted(s.in,s.out,s.in.at),"developer page does not capture map");
+        s.in.hover=DeveloperCell(framevr::dev::Level10Choice);s.in.trigger=0;s.Step();s.in.trigger=1;s.Step();
+        const auto r=s.out.request;
+        Check(r.action==Action::Developer&&r.index==framevr::dev::Level10Choice&&s.out.select==-2,"destination requests native dev action, never casts");
+        Check(s.Step(5).request.action==Action::None,"held trigger cannot repeat destination");
+        s.in.reply={r.sequence,r.session,Result::Dispatched};s.in.trigger=0;s.Step();
+        Check(s.out.result==Result::Dispatched,"dispatch remains distinct from applied");
+        s.in.snapshot.devClass=-1;s.in.trigger=1;s.Step();
+        Check(s.out.request.action==Action::None,"unknown/classic class cannot request mutations");
+        s.in.trigger=0;s.Step();s.in.hover=9;s.in.trigger=1;s.Step();
+        Check(!s.out.developer&&!s.out.utility&&!s.out.map,"spells footer leaves dev page");
+        s.in.trigger=0;s.Step();s.in.hover=13;s.in.trigger=1;s.Step();
+        s.in.wheel=false;s.Step();Check(!s.out.developer,"closing wheel resets developer page");
+        const auto tab=FooterBounds(4,MenuPage::Spells,true);
+        Check(WheelCell((tab.left+tab.right)/2,.93f,-1,MenuPage::Spells,0,true)==13,"developer footer hit matches paint bounds");
+        Check(WheelCell(.5f,.45f,-1,MenuPage::Developer,0,true)==-1,"no hidden center spell behind developer page");
+        Check(WheelCell(.25f,.27f,-1,MenuPage::Developer,0,true)==DeveloperCell(framevr::dev::Level10Choice),"developer rows share painter hit boxes");
+        Check(WheelCell(.25f,.27f,-1,MenuPage::Developer,0,false)==-1,"disabled developer page has no actions");
+        for(int i=0;i<int(framevr::dev::Choices.size());++i) {
+            const auto b=DeveloperBounds(i);
+            Check(WheelCell((b.left+b.right)/2,(b.top+b.bottom)/2,-1,MenuPage::Developer,0,true,framevr::dev::PageFor(i))==DeveloperCell(i),"every dev button has its own click target on its page");
+            Check(b.bottom*768<628,"dev buttons do not overlap status text or footer");
+        }
+        Output o;o.developer=true;auto a=Context(s.in.snapshot,o,true);o.developer=false;
+        Check(a!=Context(s.in.snapshot,o,true),"dev page switch invalidates painted atlas");
+        o.developer=true;a=Context(s.in.snapshot,o,true);s.in.snapshot.devClass=0;
+        Check(a!=Context(s.in.snapshot,o,true),"changing class invalidates gear names in the painted atlas");
+        a=Context(s.in.snapshot,o,true);o.devPage=1;
+        Check(a!=Context(s.in.snapshot,o,true),"scenic page invalidates the previous page's paint and click eligibility");
+    }
+    for(int choice=0;choice<int(framevr::dev::Choices.size());++choice) {
+        Sim s;s.in.snapshot.developer=true;s.in.snapshot.devClass=3;s.in.wheel=true;s.Step(3);
+        s.in.hover=13;s.in.trigger=1;s.Step();s.in.trigger=0;s.Step();
+        const int page=framevr::dev::PageFor(choice);
+        const auto tab=DeveloperPageBounds(page);
+        s.in.hover=WheelCell((tab.left+tab.right)/2,(tab.top+tab.bottom)/2,-1,MenuPage::Developer,0,true,s.out.devPage);
+        s.in.trigger=1;s.Step();
+        Check(s.out.devPage==page&&s.out.request.action==Action::None,"developer page tab changes pages without teleporting or granting gear");
+        Check(s.Step(5).request.action==Action::None,"holding a page tab cannot dispatch a command");
+        s.in.trigger=0;s.Step();
+        const auto b=DeveloperBounds(choice);
+        s.in.hover=WheelCell((b.left+b.right)/2,(b.top+b.bottom)/2,-1,MenuPage::Developer,0,true,s.out.devPage);
+        s.in.trigger=1;s.Step();
+        Check(s.out.request.action==Action::Developer&&s.out.request.index==choice&&s.out.select==-2,"dev button requests its action without a spell or footer action");
+        Check(s.Step(5).request.action==Action::None,"held dev button cannot repeat gear or travel");
+    }
+    {
+        Sim s;s.in.snapshot.developer=true;s.in.snapshot.devClass=3;s.in.wheel=true;s.Step(3);
+        s.in.hover=13;s.in.trigger=1;s.Step();s.in.trigger=0;s.Step();
+        s.in.hover=DeveloperPageCell(1);s.in.trigger=1;s.Step();s.in.trigger=0;s.Step();
+        s.in.hover=DeveloperCell(0);s.in.trigger=1;s.Step();
+        Check(s.out.request.action==Action::None,"a stale choice from the previous page cannot grant gear or travel");
+        Check(WheelCell(.25f,.82f,-1,MenuPage::Developer,0,true,1)==-1,"space below scenic rows has no hidden action");
+        s.in.wheel=false;s.in.trigger=0;s.Step();s.in.wheel=true;s.Step();s.in.hover=13;s.in.trigger=1;s.Step();
+        Check(s.out.developer&&s.out.devPage==0,"reopening DEV starts on gear and test controls");
+    }
+    for(int footer=0;footer<5;++footer) {
+        Sim s;s.in.snapshot.developer=true;s.in.snapshot.devClass=3;s.in.wheel=true;s.Step(3);
+        s.in.hover=13;s.in.trigger=1;s.Step();s.in.trigger=0;s.Step();
+        const auto b=FooterBounds(footer,MenuPage::Developer,true);
+        s.in.hover=WheelCell((b.left+b.right)/2,(b.top+b.bottom)/2,-1,MenuPage::Developer,0,true);
+        s.in.trigger=1;s.Step();
+        Check(s.out.request.action==Action::None,"developer footer cannot trigger travel when destinations exceed nine");
+    }
+    for(int cls=0;cls<8;++cls) {
+        Sim s;s.in.snapshot.developer=true;s.in.snapshot.devClass=cls;s.in.wheel=true;s.Step(3);
+        s.in.hover=13;s.in.trigger=1;s.Step();s.in.trigger=0;s.Step();
+        s.in.hover=DeveloperCell(0);s.in.trigger=1;s.Step();
+        Check(s.out.request.action==Action::Developer&&s.out.request.index==0,"each expansion class can request preparation");
+    }
     for(int hand:{0,1})for(float yaw:{0.f,1.2f}) {
         Sim s;s.in.head.q=math::Yaw(yaw);s.Step();
         s.in.hand[hand].p=s.out.belt[0].p;s.in.grip[hand]=1;

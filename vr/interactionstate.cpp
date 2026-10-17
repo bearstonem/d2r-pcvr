@@ -8,6 +8,7 @@
 #include "logging.h"
 #include "native_ui.h"
 #include "native_belt.h"
+#include "dev_scenarios.h"
 #include "melee.h"
 #include "bow.h"
 #include "companions.h"
@@ -85,6 +86,7 @@ Snapshot Collect() {
     s.beltKnown=inventory->forEachInventoryItem(context,player,&filter,&BeltItem,&belt)==Inventory::Result::Success&&!belt.invalid;
     for(auto& b:s.belt)b.known=s.beltKnown;
     nativeui::Capture(s);
+    devscenarios::Capture(s);
     {std::lock_guard lock(mutex);if(mercSession==s.session&&s.at>=mercAt&&s.at-mercAt<=MercMaxAge){s.merc=merc;s.companions=companions;s.effects=effects;}}
     if(s.companions.known)for(unsigned i=0;i<s.skillCount&&i<s.catalog.size();++i)
         if(s.catalog[i].known&&s.catalog[i].available)
@@ -122,7 +124,7 @@ void __cdecl ClearTint(const PluginContext*,void*) noexcept {
 void Publish(Snapshot s) {
     std::lock_guard lock(mutex);
     s.revision=snapshot.revision;
-    bool changed=s.session!=snapshot.session||s.activeSet!=snapshot.activeSet||s.equipmentKnown!=snapshot.equipmentKnown||
+    bool changed=s.developer!=snapshot.developer||s.devClass!=snapshot.devClass||s.session!=snapshot.session||s.activeSet!=snapshot.activeSet||s.equipmentKnown!=snapshot.equipmentKnown||
                  s.sets!=snapshot.sets||s.beltKnown!=snapshot.beltKnown||s.skills!=snapshot.skills||
                  s.catalog!=snapshot.catalog||s.skillCount!=snapshot.skillCount||s.bindingBank!=snapshot.bindingBank||s.bindingsEditable!=snapshot.bindingsEditable||
                  s.vitalsKnown!=snapshot.vitalsKnown||int(s.health)!=int(snapshot.health)||int(s.mana)!=int(snapshot.mana)||
@@ -225,6 +227,7 @@ void __cdecl AimAtHireling(const PluginContext*,void*) noexcept {
 }
 }
 void Init(const D2RL::PluginContext* ctx) {
+    devscenarios::Init(ctx);
     companionstate::Init(ctx);
     effectstate::Init(ctx);
     nativeui::Init(ctx);
@@ -244,8 +247,10 @@ void Capture(){
         {std::lock_guard lock(mutex);mercAsking=false;}
 }
 framevr::interaction::Snapshot Read(){std::lock_guard lock(mutex);return snapshot;}
-framevr::interaction::Reply Status(){std::lock_guard lock(mutex);return reply;}
+framevr::interaction::Reply Status(){const auto dev=devscenarios::Status();if(dev.sequence)return dev;std::lock_guard lock(mutex);return reply;}
 void Request(const framevr::interaction::Request& r) {
+    if(r.action==Action::Developer){devscenarios::Request(r);return;}
+    devscenarios::Cancel();
     if(!threads||!threads->runOnUiThread||r.action==Action::None)return;
     {std::lock_guard lock(mutex);
      if(queued.action!=Action::None||waiting.action!=Action::None||scheduled)return;
@@ -262,5 +267,5 @@ void Request(const framevr::interaction::Request& r) {
         std::lock_guard lock(mutex);queued={};scheduled=false;reply={r.sequence,r.session,Result::Refused};
     }
 }
-void Cancel(){std::lock_guard lock(mutex);++cancelEpoch;queued={};waiting={};reply={};}
+void Cancel(){devscenarios::Cancel();std::lock_guard lock(mutex);++cancelEpoch;queued={};waiting={};reply={};}
 }
