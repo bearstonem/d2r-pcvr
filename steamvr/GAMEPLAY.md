@@ -776,6 +776,12 @@ support independent left/right physical swings and thrusts; see
 [physical dual wield](../docs/BARBARIAN_DUAL_WIELD.md). Physical shield blocks
 and parries are below; other classes' off-hand weapon strikes remain future work.
 
+Physical weapon contacts also break attackable pots, urns, baskets and barrels
+in either melee mode, including with either Barbarian weapon. The game handles
+loot, traps and explosions; ordinary button interaction/kicking remains
+available. These contacts do not consume creature hit/recovery/cleave state.
+See [physical breakables](../docs/PHYSICAL_BREAKABLES.md) for scope and validation.
+
 Only a confirmed physical contact overrides legacy melee grid reach. Native
 line-of-sight, hostile relationship, creature life state, damage, elemental
 resistances/immunities, criticals, leech, procs, durability, death and XP still run.
