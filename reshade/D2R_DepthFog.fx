@@ -93,6 +93,48 @@ uniform bool ShowCeilingCut <
 // right eye's present wrote it before the GPU had run the left eye's effect,
 // and the left eye drew the right eye's sky.
 uniform bool SkyOn < hidden = true; > = false;
+uniform bool ArcaneSkyOn < hidden = true; > = false;
+
+// These are prepared from the player's game, never distributed. Without a
+// complete cache the original native weather cards remain installed.
+#ifndef D2R_ARCANE_SKY_CACHE
+ #define D2R_ARCANE_SKY_CACHE 0
+#endif
+#if D2R_ARCANE_SKY_CACHE
+texture2D ArcaneStarsTex < source = "PCVR_Arcane/stars.png"; > { Width = 1024; Height = 512; Format = RGBA8; };
+sampler2D ArcaneStarsSmp { Texture = ArcaneStarsTex; AddressU = WRAP; AddressV = WRAP; };
+texture2D ArcaneCloudsTex < source = "PCVR_Arcane/clouds.png"; > { Width = 512; Height = 512; Format = RGBA8; };
+sampler2D ArcaneCloudsSmp { Texture = ArcaneCloudsTex; AddressU = WRAP; AddressV = WRAP; };
+
+// World-direction triplanar sampling covers all six directions, including
+// below the floating platforms. No flat card edge, longitude seam or pole.
+// Only direction matters: head translation cannot make a nearby star screen.
+float3 ArcaneStars(float3 p, float3 weights)
+{
+    return tex2Dlod(ArcaneStarsSmp, float4(p.yz, 0, 0)).rgb * weights.x
+         + tex2Dlod(ArcaneStarsSmp, float4(p.zx, 0, 0)).rgb * weights.y
+         + tex2Dlod(ArcaneStarsSmp, float4(p.xy, 0, 0)).rgb * weights.z;
+}
+float ArcaneClouds(float3 p, float3 weights)
+{
+    return tex2Dlod(ArcaneCloudsSmp, float4(p.yz, 0, 0)).r * weights.x
+         + tex2Dlod(ArcaneCloudsSmp, float4(p.zx, 0, 0)).r * weights.y
+         + tex2Dlod(ArcaneCloudsSmp, float4(p.xy, 0, 0)).r * weights.z;
+}
+float3 ArcaneSky(float3 dir)
+{
+    float3 weights = pow(abs(dir), 8.0);
+    weights /= max(dot(weights, float3(1, 1, 1)), 0.0001);
+    const float3 maps = ArcaneStars(dir * 1.8 + float3(0.13, 0.37, 0.61), weights);
+    const float stars = dot(maps, float3(0.38, 0.55, 0.8));
+    const float broad = ArcaneClouds(dir * 0.7 + float3(0.1, 0.3, 0.7), weights);
+    const float detail = ArcaneClouds(dir * 2.4 + float3(0.6, 0.8, 0.2), weights);
+    const float density = smoothstep(0.18, 0.78, broad) * (0.25 + 0.75 * detail);
+    const float tint = smoothstep(-0.8, 0.8, dot(dir, normalize(float3(0.6, 0.2, -0.7))));
+    const float3 nebula = lerp(float3(0.025, 0.05, 0.17), float3(0.015, 0.14, 0.11), tint);
+    return float3(0.001, 0.002, 0.006) + nebula * density + stars * float3(0.8, 0.9, 1.0);
+}
+#endif
 // The camera's axes in the world (y up); it looks along -CamBack. 0 = left eye, 1 = right.
 uniform float3 CamRight0 < hidden = true; > = float3(1.0, 0.0, 0.0);
 uniform float3 CamUp0 < hidden = true; > = float3(0.0, 1.0, 0.0);
@@ -405,6 +447,9 @@ float3 PaintedSky(float3 dir)
 
 float3 Sky(float3 dir)
 {
+#if D2R_ARCANE_SKY_CACHE
+    if (ArcaneSkyOn) return ArcaneSky(dir);
+#endif
     if (SkyTex > 0.5) return PaintedSky(dir) * SkyBrightness;
     const float h = dir.y;
     float3 c = SkyGradient(h);

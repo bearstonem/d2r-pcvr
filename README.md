@@ -31,8 +31,9 @@ has not yet been confirmed.
 **No Blizzard game assets are included in this repository, installer or release ZIP.**
 The download contains the mod and licensed third-party components, not the
 game, its executable, models, textures or audio. During installation, required
-item/skill icons and potion models are read from your own installed game into
-local caches. Keep those caches local; do not include them when sharing the mod.
+item/skill icons, potion models and Arcane Sanctuary sky artwork are read from
+your own installed game into local caches. Keep those caches local; do not
+include them when sharing the mod.
 
 **[Download the Windows preview](https://github.com/bearstonem/d2r-pcvr/releases)**
 and follow **[Install and play](INSTALL-WINDOWS.md)**.

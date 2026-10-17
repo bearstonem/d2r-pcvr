@@ -585,6 +585,7 @@ SkyAct g_skyAct[7];
 struct CaveFog { float rgb[3]; bool set; };
 CaveFog g_caveFog{};
 std::atomic<uint32_t> g_skyCfgGen{0};   // bumped when a picture name changes
+std::atomic<bool> g_arcaneSkyReady{false}; // locally prepared native star/cloud maps
 
 std::string Utf8(const wchar_t* w) {
     char b[1024];
@@ -706,6 +707,9 @@ void LoadCeilingTextures() {
 }
 
 void LoadSkyActs() {
+    const bool arcane = SkyFileExists(L"PCVR_Arcane/stars.png") && SkyFileExists(L"PCVR_Arcane/clouds.png") &&
+        GetFileAttributesW((ReShadeDir() + L"..\\pcvr-arcane-sky.json").c_str()) != INVALID_FILE_ATTRIBUTES;
+    if (g_arcaneSkyReady.exchange(arcane) != arcane) g_skyCfgGen.fetch_add(1);
     bool changed = false;
     for (int a = 1; a <= 6; ++a) {
         wchar_t key[32], buf[MAX_PATH];
@@ -6251,6 +6255,7 @@ void StartProbe() {
 // outdoor biome, no menu and no side panel. Each change of mind goes to the log
 // with its reason - the biome names of caves and dungeons are learnt from it.
 std::atomic<int> g_skyPalette{-1};   // kPalettes index while the sky shows, else -1
+std::atomic<bool> g_arcaneSky{false}; // native Arcane backdrop replacement, not added outdoor sky
 std::atomic<int> g_fogAct{0};        // the area's act for the fog colour, caves too; 0 = unknown
 std::atomic<bool> g_underground{false};   // in the world, off the outdoor list: the fog takes [fog] color_caves
 std::atomic<bool> g_inWorld{false};  // a game area is loaded: not the main menu (its own "frontend" biome), not before any
@@ -7150,6 +7155,13 @@ void SkyTick() {
     else if (palette < 0) why = "not outdoors";
     else if (WorldMenuBlocksEffects()) why = "a menu hides the world backdrop";
     g_skyPalette.store(why ? -1 : palette);
+    // Arcane's native weather effect is a flat set of cards. Setup replaces
+    // only that effect; its native star maps now use the same world-space ray
+    // in both eyes. Unlike added outdoor sky, this is part of the level itself.
+    const bool arcane = biome == "act2_arcane" && g_arcaneSkyReady.load() &&
+        g_enabled.load() && !Overhead() && !WorldMenuBlocksEffects();
+    if (g_arcaneSky.exchange(arcane) != arcane)
+        LogF("vrcam: Arcane surrounding sky %s", arcane ? "on (local native textures)" : "off");
     static std::string toldWhy = "?";
     if (std::string(why ? why : "") != toldWhy) {
         toldWhy = why ? why : "";
@@ -7319,7 +7331,7 @@ bool BoneAxesWanted() { return false; }
 bool StampWanted() { return g_enabled.load() && g_afrBlock && g_set.stamps.load() && g_set.stampPixels.load(); }
 
 bool FogWanted() {
-    return g_set.fogOn.load() && g_enabled.load() && !Overhead() && g_inWorld.load() && !WorldMenuBlocksEffects() &&
+    return !g_arcaneSky.load() && g_set.fogOn.load() && g_enabled.load() && !Overhead() && g_inWorld.load() && !WorldMenuBlocksEffects() &&
            (g_set.fogCaves.load() || !g_underground.load());   // [fog] caves=0: none underground
 }
 // The table (F5): the void black, the game lifted off black - D2R_DepthFog.fx TableKey.
@@ -7340,6 +7352,14 @@ bool ApplySkyPictures(reshade::api::effect_runtime* rt) {
     if (gen == applied) return false;
     applied = gen;
     bool set = false;
+    {
+        const char* want = g_arcaneSkyReady.load() ? "1" : "0";
+        char have[16] = {}; size_t size = sizeof have;
+        if (!rt->get_preprocessor_definition_for_effect("D2R_DepthFog.fx", "D2R_ARCANE_SKY_CACHE", have, &size) || strcmp(have, want)) {
+            rt->set_preprocessor_definition_for_effect("D2R_DepthFog.fx", "D2R_ARCANE_SKY_CACHE", want);
+            set = true;
+        }
+    }
     for (int a = 1; a <= 6; ++a) {
         AcquireSRWLockShared(&g_skyCfgLock); const SkyAct act = g_skyAct[a]; ReleaseSRWLockShared(&g_skyCfgLock);
         for (int k = 0; k < 4; ++k) {   // the day band and cap, then the night ones
@@ -7396,7 +7416,7 @@ void OnFinishEffects(reshade::api::effect_runtime* rt, reshade::api::command_lis
     if (!g_tech[0].handle) { hud::SetPictureReady(false); return; }
     // Off while a menu is open: the fog lies over the whole picture, the
     // inventory and trade panels included, and darkened them.
-    const bool want = FogWanted() || g_skyPalette.load() >= 0 || CeilWanted() || HudWanted() || StampWanted() || hud::PictureWanted() || TableKeyWanted() || PhantomWanted() || BoneAxesWanted();
+    const bool want = FogWanted() || g_skyPalette.load() >= 0 || g_arcaneSky.load() || CeilWanted() || HudWanted() || StampWanted() || hud::PictureWanted() || TableKeyWanted() || PhantomWanted() || BoneAxesWanted();
     // The toolbar and the map are taken out of the game's picture to be drawn
     // back at their own size only while this effect runs, and is new enough to.
     {
@@ -7591,7 +7611,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
         renderscale::Frame(rt, s);
 #ifdef D2RVR_NATIVE_OPENXR
         const bool ownDepth=g_enabled.load()&&g_inWorld.load()&&framevr::Active()&&
-            (FogWanted()||g_set.skyOn.load()||CeilWanted()||TableKeyWanted());
+            (FogWanted()||g_set.skyOn.load()||g_arcaneSky.load()||CeilWanted()||TableKeyWanted());
         framevr::scenedepth::Bind(rt,cl,ownDepth,s);
         SetBool(rt,"OwnDepth",ownDepth);
 #else
@@ -7707,9 +7727,11 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
     AcquireSRWLockShared(&g_skyLock);
     sv[0] = g_skyView[AfrOn() ? 0 : eye]; sv[1] = g_skyView[AfrOn() ? 1 : eye];
     ReleaseSRWLockShared(&g_skyLock);
-    bool sky = pal >= 0;
+    const bool arcane = g_arcaneSky.load();
+    bool sky = pal >= 0 || arcane;
     for (const SkyView& v : sv) sky = sky && v.proj_ok && v.axes_ok && v.proj[0] != 0.0f && v.proj[1] != 0.0f;
     SetBool(rt, "SkyOn", sky);
+    SetBool(rt, "ArcaneSkyOn", sky && arcane);
     {   // the cave ceiling: a plane CeilHeight over the hero's floor, met by each eye's ray
         bool ceil = !sky && CeilWanted();
         for (const SkyView& v : sv) ceil = ceil && v.proj_ok && v.axes_ok && v.proj[0] != 0.0f && v.proj[1] != 0.0f;
@@ -7935,7 +7957,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
         }
     }
     if (!sky) return;
-    const SkyPalette& p = kPalettes[pal];
+    const SkyPalette& p = kPalettes[pal >= 0 ? pal : kDefaultPalette];
     for (int e = 0; e < 2; ++e) {
         char n[16];
         snprintf(n, sizeof n, "SkyProj%d", e); SetFloats(rt, n, sv[e].proj, 4);
@@ -7943,6 +7965,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
         snprintf(n, sizeof n, "CamUp%d", e); SetFloats(rt, n, sv[e].axes + 3, 3);
         snprintf(n, sizeof n, "CamBack%d", e); SetFloats(rt, n, sv[e].axes + 6, 3);
     }
+    if (arcane) return; // no desert palette, daylight dimming or cloud drift in the void
     SetFloats(rt, "SkyZenith", p.zenith, 3);
     SetFloats(rt, "SkyHorizon", p.horizon, 3);
     const float el = p.sunElevDeg * 0.0174532925f, az = p.sunAzDeg * 0.0174532925f;

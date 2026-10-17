@@ -15,6 +15,7 @@ import urllib.request
 import zipfile
 from prepare_icons import prepare as prepare_icons
 from prepare_potions import prepare as prepare_potions, CODES as POTION_CODES
+import prepare_arcane_sky
 from game_install import validate_game
 import mod_identity
 
@@ -388,6 +389,14 @@ def main():
             for name in [code + '.pvr' for code in POTION_CODES] + ['cache.json']:
                 payload[mod_identity.PLUGIN.parent / 'd2r_vr_potions' / safe_relative(name)] = (Path(temporary) / name).read_bytes()
             print(f"Prepared {result['models']} original 3D potion models from your installed game.")
+    try:
+        arcane = prepare_arcane_sky.prepare(game, casclib=args.casclib)
+        prepare_arcane_sky.check_existing(game / mod_identity.MOD_DIR, arcane)
+    except (OSError, ValueError, KeyError, IndexError) as error:
+        print(f'Arcane sky preparation unavailable; existing background retained: {error}')
+    else:
+        payload.update({mod_identity.MOD_DIR / name: data for name, data in arcane.items()})
+        print('Prepared surrounding Arcane Sanctuary sky from your installed game.')
     require_game_closed()
     snapshot = args.backup_dir / datetime.now().strftime('%Y%m%d-%H%M%S-%f')
     snapshot.mkdir(parents=True)

@@ -211,9 +211,17 @@ If included, **Install-BattleNet-Preview.cmd** opens the same setup wizard;
 it is not required. If setup offers only Steam, download a package that
 explicitly includes Battle.net support before installing on that edition.
 
-Required icons and potion models are read from your own Battle.net archives
+Required icons, potion models and Arcane sky artwork are read from your own Battle.net archives
 and kept locally. No Blizzard game files or generated asset caches are included
 in the mod package. The existing [controller mappings](CONTROLS.md) also apply.
+
+Setup also prepares a surrounding starfield for Arcane Sanctuary. It uses the
+game's star and cloud textures, mapped around the VR view instead of the native
+flat weather cards. These generated textures and Arcane visual definitions stay
+inside this mod's folder and are tracked for repair/removal. Existing custom
+Arcane overrides are preserved. If preparation fails, setup retains the existing
+background and reports the reason. This level backdrop is independent of the
+added outdoor sky setting.
 
 ## Manual installation (Steam edition)
 
