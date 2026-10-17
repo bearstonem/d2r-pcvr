@@ -14,6 +14,7 @@
 #include "native_ui_signatures.h"
 #include "melee.h"
 #include "melee_weapon.h"
+#include "breakables.h"
 #include "../steamvr/melee_hand_state.h"
 #include "bow.h"
 #include "combat.h"
@@ -68,7 +69,7 @@ std::atomic<bool> swingRecovery{false};std::atomic<float> recoveryCurve{2},recov
 std::atomic<float> cleaveStep{0},cleaveFloor{.25f};
 std::array<HandCombat,2> hands;
 std::mutex queueMutex;std::array<Engine,3> engines;HitSet shieldHits;
-struct Request {Sweep sweep;Sample sample;uint64_t session=0,at=0;};
+using Request=breakables::Strike;
 std::array<Request,24> requests;size_t count=0;
 std::array<Sample,3> current;uint64_t inputSession=0;framevr::CallbackTicket callback;
 using SmiteFn=int(*)(uintptr_t,uintptr_t,int,int);
@@ -405,6 +406,7 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
             unit=next;
         }
     }
+    breakables::Apply(local.game,player,{batch.data(),n},&Allowed);
 }
 }
 void Init(const D2RL::PluginContext* ctx) {
@@ -617,6 +619,7 @@ bool HirelingOverlay(uint32_t unitId,int overlay) {
 }
 void Install() {
     meleeweapon::Install();
+    breakables::Install();
     InstallTint();
     if(ready.load()) {
         InstallSmite();
@@ -690,6 +693,7 @@ void Submit(const Sample& sample) {
     }
 }
 void Report() {
+    breakables::Report();
     const auto right=dualLanded[0].exchange(0),left=dualLanded[1].exchange(0),invalid=dualRefused.exchange(0);
     if(right||left||invalid) {
         char line[180];snprintf(line,sizeof line,"Frame dual wield: right landed=%u left landed=%u stale/unavailable weapon=%u",right,left,invalid);
