@@ -62,7 +62,7 @@ std::atomic<uint64_t> buttonMeleeAt{0},buttonMeleeSession{0};
 // Verified in a decrypted 3.3.93847 snapshot; same RVAs as 3.3.93787.
 constexpr uint64_t BlockSeedReturn=0x44b9d1,BlockRollAt=0x44b9c9;
 constexpr uint8_t BlockRollSig[]={0x48,0x8b,0xcf,0xe8,0x0f,0xe8,0xef,0xff,0x8b,0x08,0x48,0x69,0xd9,0xc5,0x90,0xc6,0x6a};
-std::atomic<bool> guardEnabled{false},guardTrace{false};std::atomic<uint32_t> guardParryMs{400};
+std::atomic<bool> guardEnabled{false},guardTrace{false};std::atomic<uint32_t> guardParryMs{750};
 bool guardChecked=false;
 struct GuardShared {framevr::guard::State state;uint64_t session=0,at=0;float upm=1;bool eligible=false;
     framevr::guard::Debug debug{};uint32_t debugMonster=UINT32_MAX;};
@@ -497,7 +497,15 @@ void PublishGuard(uint64_t session,bool eligible,bool posed,const framevr::guard
     {
     std::lock_guard lock(guardMutex);
     if(guard.session!=session||!eligible||guard.state.surface.epoch!=pose.epoch){guard.state={};guard.debug={};}
+    const uint64_t armed=guard.state.snapAt;
     if(eligible)framevr::guard::Update(guard.state,pose,handOk,leftShield,now,posed,t);
+    // Trace: each newly armed parry swing, to time it against the next hit.
+    if(eligible&&guardTrace.load(std::memory_order_relaxed)&&guard.state.snapAt&&guard.state.snapAt!=armed) {
+        const auto& s=guard.state;
+        char line[200];snprintf(line,sizeof line,"Frame guard swing: armed swing=%.2f m swing_cos=%.2f forward=%.2f up=%.2f side=%.2f m",
+            s.swing,s.swingCos,s.forward,s.up,s.side);
+        framevr::logging::Write(line);
+    }
     if(eligible&&framevr::guard::SwingAfterBlock(guard.state,now,t,lateAfter)){late=true;++guardLate;}
     guard.session=session;guard.eligible=eligible;guard.upm=std::max(1.f,guard.state.surface.unitsPerMetre);guard.at=now;
     raised=eligible&&guard.state.raised;

@@ -872,7 +872,7 @@ void LoadSettings() {
 #else
     constexpr bool guardTraceDefault=false;
 #endif
-    combat::ConfigureGuard(!classicMelee,400,IniB(L"debug",L"guard_trace",guardTraceDefault));
+    combat::ConfigureGuard(!classicMelee,750,IniB(L"debug",L"guard_trace",guardTraceDefault));
     // Guard strain light: % of the guard each block strains, lowered reset time,
     // % of the view left clear at full swell, the broken guard's breathing period,
     // the width of the light's inner blend (% of the visor radius), opacity (% peak;

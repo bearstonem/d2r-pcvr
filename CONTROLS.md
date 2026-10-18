@@ -138,8 +138,8 @@ One stroke can hit several monsters, each further one a little weaker.
   Lowering it, holding it away from the attack line or turning it edge-on opens
   the guard.
 - **Parry:** as a melee attack comes in, swing the shield diagonally across
-  your view (lower right to upper left with a left-hand shield) within
-  400 ms of the hit. You can start just before the enemy's wind-up. The swing
+  your view (lower right to upper left with a left-hand shield) up to
+  0.75 seconds before the hit. You can start before the enemy's wind-up. The swing
   only needs to finish with the shield raised on the attacker's side, even if
   it ends edge-on. The attacker staggers.
 - **Riposte:** your next weapon hit on the parried monster within 1.5 s is a

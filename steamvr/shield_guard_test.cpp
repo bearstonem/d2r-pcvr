@@ -151,11 +151,19 @@ int main() {
     // ...or starting up to parryLeadMs before it began (fast attackers land
     // 250-360 ms after starting), but not with a swing from well before it...
     {State g;uint64_t n=42000;Hold(g,swingFrom,true,n,300,t);Move(g,swingFrom,swingTo,true,n,90,t);
-     const uint64_t snap=g.snapAt;assert(snap&&n+120>=snap+t.parryLeadMs+1);
-     assert(Judge(g,ahead,n+120,t,snap+t.parryLeadMs)==Verdict::Parry);
-     assert(Judge(g,ahead,n+120,t,snap+t.parryLeadMs+1)==Verdict::Block);
-     assert(ParryCheck(g,ahead,n+120,t,snap+t.parryLeadMs+1)==ParryMiss::BeforeAttack);
-     assert(Judge(g,ahead,n+120,t,0)==Verdict::Parry);}                    // (attack start unknown: window alone)
+     const uint64_t snap=g.snapAt;Hold(g,swingTo,true,n,t.parryLeadMs+20,t);  // the guard stays up after the swing
+     assert(snap&&g.snapAt==snap&&n>snap+t.parryLeadMs&&n-snap<=t.parryMs);
+     assert(Judge(g,ahead,n,t,snap+t.parryLeadMs)==Verdict::Parry);
+     assert(Judge(g,ahead,n,t,snap+t.parryLeadMs+1)==Verdict::Block);
+     assert(ParryCheck(g,ahead,n,t,snap+t.parryLeadMs+1)==ParryMiss::BeforeAttack);
+     assert(Judge(g,ahead,n,t,0)==Verdict::Parry);}                        // (attack start unknown: window alone)
+    // The owner's habit (log 2026-10-17): a swing ~700 ms before a Fallen hit
+    // whose attack began ~300 ms before it parries; much earlier is a block.
+    {State g;uint64_t n=42500;Hold(g,swingFrom,true,n,300,t);Move(g,swingFrom,swingTo,true,n,90,t);
+     const uint64_t snap=g.snapAt;Hold(g,swingTo,true,n,snap+700-n,t);
+     assert(n==snap+700&&Judge(g,ahead,n,t,n-300)==Verdict::Parry);
+     Hold(g,swingTo,true,n,60,t);
+     assert(Judge(g,ahead,n,t,n-300)==Verdict::Block&&ParryCheck(g,ahead,n,t,n-300)==ParryMiss::Early);}
     // A timed swing parries even after it turned the face edge-on to the
     // attacker (3 of 6 timed swings, log 2026-10-17); the same pose without a
     // live swing is open.

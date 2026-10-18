@@ -60,11 +60,14 @@ struct Tuning {
     float hold=.05f;                       // a raised guard holds this much past every edge
     float coverCos=.5f;                    // within 60 degrees of either face; edge-on does not cover
     float lateral=.45f,behind=.20f;       // forgiving attachment coverage proxy, not mesh-sized collision
-    uint32_t parryMs=400;                  // 0 disables perfect parry; a swing at most this long before the hit
+    // 0 disables perfect parry; a swing at most this long before the hit.
+    // Owner swings landed 400-1300 ms before hits; 400 ms caught almost none
+    // (logs 2026-10-17).
+    uint32_t parryMs=750;
     // A swing may begin this long before the attacker's attack starts. Fast
     // attackers land 250-360 ms after starting (log 2026-10-17), too soon to
     // react to the wind-up alone.
-    uint32_t parryLeadMs=150;
+    uint32_t parryLeadMs=450;
     // Parry: a swing across the view, low on the far side up to high on the
     // shield's own side, 45 degrees (a left shield: lower right -> upper left).
     float swingMetres=.15f;                // along the diagonal, within swingMs
