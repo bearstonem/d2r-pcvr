@@ -61,9 +61,24 @@ var
   EditionPage, HeadsetPage, ConnectionPage, AccountPage, ModePage: TInputOptionWizardPage;
   PathsPage, RuntimePage, BackupPage: TInputDirWizardPage;
   HDRPage: TOutputMsgWizardPage;
+  CloseSteamPage: TWizardPage;
+  CloseSteamText, CloseSteamStatus: TNewStaticText;
+  CloseSteamButton: TNewButton;
   ProfileIDs: TStringList;
   PayloadRoot, ProbeFile, ChoicesFile, LastOutput, PreviousEdition, BackupGame: String;
   SetupFailed, BackendBusy: Boolean;
+
+#include "close_steam.inc"
+
+// A bare command-line switch such as /CLOSESTEAM.
+function SwitchGiven(const Name: String): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+    if CompareText(ParamStr(I), Name) = 0 then Result := True;
+end;
 
 function Q(const Value: String): String;
 begin
@@ -171,13 +186,72 @@ begin
   end;
 end;
 
+// Shown only while Steam or the game is running: Steam rewrites the files Setup edits when it exits.
+procedure RefreshCloseSteamPage;
+var
+  Game, Steam: Boolean;
+begin
+  Game := GameRunning;
+  Steam := SteamRunning;
+  if Game then
+    CloseSteamText.Caption := 'Diablo II: Resurrected (D2R.exe or D2RLoader.exe) is running. Save & Exit the game first: ' +
+      'Setup never closes the game, so your progress is not lost. Then click Next.'
+  else if Steam then
+    CloseSteamText.Caption := 'Steam is running. Setup changes Steam''s VR shortcuts and launch options, and Steam overwrites ' +
+      'them when it exits, so Steam has to be closed first.'#13#10#13#10 +
+      'Click Close Steam: Setup asks Steam to exit the normal way (the same as Steam > Exit; SteamVR closes with it) ' +
+      'and waits for it. Steam is never forced to close. You can also choose Steam > Exit yourself, then click Next.'
+  else
+    CloseSteamText.Caption := 'Steam and the game are closed. Click Next to continue.';
+  CloseSteamButton.Enabled := Steam and not Game;
+  CloseSteamButton.Top := CloseSteamText.Top + CloseSteamText.Height + ScaleY(12);
+  CloseSteamStatus.Top := CloseSteamButton.Top + CloseSteamButton.Height + ScaleY(12);
+end;
+
+procedure CloseSteamButtonClick(Sender: TObject);
+begin
+  CloseSteamButton.Enabled := False;
+  WizardForm.NextButton.Enabled := False;
+  WizardForm.BackButton.Enabled := False;
+  try
+    CloseSteam(PathsPage.Values[0], CloseSteamStatus);
+  finally
+    WizardForm.NextButton.Enabled := True;
+    WizardForm.BackButton.Enabled := True;
+    RefreshCloseSteamPage;
+  end;
+end;
+
+procedure CreateCloseSteamPage;
+begin
+  CloseSteamPage := CreateCustomPage(BackupPage.ID, 'Close Steam',
+    'Steam must be closed while Setup changes its shortcuts');
+  CloseSteamText := TNewStaticText.Create(CloseSteamPage);
+  CloseSteamText.Parent := CloseSteamPage.Surface;
+  CloseSteamText.AutoSize := True;
+  CloseSteamText.WordWrap := True;
+  CloseSteamText.Width := CloseSteamPage.SurfaceWidth;
+  CloseSteamButton := TNewButton.Create(CloseSteamPage);
+  CloseSteamButton.Parent := CloseSteamPage.Surface;
+  CloseSteamButton.Caption := 'Close Steam';
+  CloseSteamButton.Width := ScaleX(120);
+  CloseSteamButton.Height := ScaleY(26);
+  CloseSteamButton.OnClick := @CloseSteamButtonClick;
+  CloseSteamStatus := TNewStaticText.Create(CloseSteamPage);
+  CloseSteamStatus.Parent := CloseSteamPage.Surface;
+  CloseSteamStatus.AutoSize := True;
+  CloseSteamStatus.WordWrap := True;
+  CloseSteamStatus.Width := CloseSteamPage.SurfaceWidth;
+  CloseSteamStatus.Caption := '';
+end;
+
 procedure InitializeWizard;
 begin
   WizardForm.WelcomeLabel2.Caption :=
     'Play your own Diablo II: Resurrected in first-person VR with motion controls.'#13#10#13#10 +
     'Supports SteamVR and Virtual Desktop on Windows. Steam Frame uses SteamVR.'#13#10#13#10 +
     'You must purchase and install the original game. No Blizzard game assets are included. Use an OFFLINE local character with this preview.'#13#10#13#10 +
-    'Launch the original game once and complete its account prompts before installing. Save and exit D2R, then fully exit Steam before clicking Install.';
+    'Launch the original game once and complete its account prompts before installing. Save and exit D2R before clicking Install; Setup can close Steam for you.';
   PayloadRoot := ExpandConstant('{tmp}\') + '{app}';
   ProbeFile := ExpandConstant('{tmp}\detected.ini');
   ChoicesFile := ExpandConstant('{tmp}\choices.ini');
@@ -226,6 +300,7 @@ begin
     'Keep the original files available for removal',
     'Setup fills in a verified backup when it can find one. Otherwise select the original snapshot or its backup folder (usually setup-backups\game or build-frame\backups in the old mod folder). Setup will copy it into the helper folder and remember it for this game. If it is unavailable, cancel and keep the current installation.', False, '');
   BackupPage.Add('Original installation backup folder:');
+  CreateCloseSteamPage;
   if not RefreshProbe('') then RaiseException(LastOutput);
   if GetIniInt('detected', 'battlenet_available', 0, 0, 1, ProbeFile) = 1 then
     EditionPage.Add('Battle.net (experimental)');
@@ -245,7 +320,11 @@ end;
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   if ExpandConstant('{param:CONFIG|}') <> '' then begin
-    Result := (PageID >= EditionPage.ID) and (PageID <= BackupPage.ID);
+    Result := ((PageID >= EditionPage.ID) and (PageID <= BackupPage.ID)) or (PageID = CloseSteamPage.ID);
+    Exit;
+  end;
+  if PageID = CloseSteamPage.ID then begin
+    Result := not SteamRunning and not GameRunning;
     Exit;
   end;
   Result := ((PageID = ConnectionPage.ID) and (HeadsetPage.SelectedValueIndex in [0, 3])) or
@@ -266,6 +345,16 @@ var
 begin
   Result := True;
   if ExpandConstant('{param:CONFIG|}') <> '' then Exit;
+  if CurPageID = CloseSteamPage.ID then begin
+    if GameRunning then begin
+      MsgBox('Save & Exit D2R first (Setup does not close the game), then click Next.', mbError, MB_OK);
+      Result := False;
+    end else if SteamRunning then begin
+      MsgBox('Steam is still running. Click Close Steam, or choose Steam > Exit on the PC (do not just close its window), then click Next.', mbError, MB_OK);
+      Result := False;
+    end;
+    RefreshCloseSteamPage;
+  end;
   if CurPageID = EditionPage.ID then begin
     Edition := 'steam';
     Key := 'steam_game';
@@ -367,6 +456,16 @@ begin
   Result := '';
   if ExpandConstant('{param:CONFIG|}') <> '' then ChoicesFile := ExpandConstant('{param:CONFIG|}')
   else WriteChoices;
+  // Steam started again after the Close Steam page, or a /CONFIG install. The game is never closed here.
+  if SteamRunning and not GameRunning then begin
+    if ExpandConstant('{param:CONFIG|}') = '' then begin
+      Result := 'Steam is running again. Click Back, then Close Steam (or choose Steam > Exit on the PC), and click Next.' + #13#10#13#10 +
+        'No game or Steam files were changed.';
+      Exit;
+    end;
+    // Silent and /CONFIG installs close Steam only when asked to with /CLOSESTEAM.
+    if SwitchGiven('/CLOSESTEAM') then CloseSteam(GetIniString('setup', 'steam', '', ChoicesFile), nil);
+  end;
   if not RunBackend(PayloadRoot, '--validate ' + Q(ChoicesFile) + ' --managed-root ' + Q(ExpandConstant('{app}'))) then begin
     if IsSecurityBlock then Result := SecurityBlockMessage
     else Result := LastOutput + #13#10#13#10 + 'No game or Steam files were changed. Correct the selections, or Save & Exit D2R and fully exit Steam, then retry.';
@@ -394,6 +493,10 @@ procedure CurPageChanged(CurPageID: Integer);
 begin
   if CurPageID = HDRPage.ID then
     HDRPage.MsgLabel.Caption := GetIniString('detected', 'hdr_warning', '', ProbeFile);
+  if CurPageID = CloseSteamPage.ID then begin
+    CloseSteamStatus.Caption := '';
+    RefreshCloseSteamPage;
+  end;
   if CurPageID = wpFinished then begin
     if SetupFailed then begin
       if IsSecurityBlock then begin

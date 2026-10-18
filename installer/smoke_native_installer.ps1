@@ -54,6 +54,8 @@ $script = $script.Replace('AppName=D2R PCVR','AppName=D2R PCVR Installer Fixture
 $script = $script.Replace('UninstallDisplayName=D2R PCVR (Windows VR mod)','UninstallDisplayName=D2R PCVR Installer Fixture')
 $scriptPath = Join-Path $qaRoot 'Fixture.iss'
 [IO.File]::WriteAllText($scriptPath, $script)
+# The script's #include files resolve beside the copied script.
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'close_steam.inc') -Destination $qaRoot
 & $ISCCPath /Qp "/DPayloadDir=$payload" /DModVersion=0.0.1 "/DInstallerOutput=$qaRoot" $scriptPath
 if ($LASTEXITCODE -ne 0) { throw 'Fixture compilation failed' }
 $choices = Join-Path $qaRoot 'choices.ini'

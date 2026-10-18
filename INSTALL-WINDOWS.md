@@ -51,8 +51,11 @@ them. Select a Steam account if more than one is present.
 On a first install, choose **Full install with recommended settings**. For an
 existing mod, choose **Update / repair and keep calibration and video settings**.
 Choose **Only configure Steam shortcuts** to repair library entries without
-replacing the installed mod. Review the choices, fully exit D2R and use
-**Steam > Exit**, then click **Install**. Setup lets you retry if Steam is still open.
+replacing the installed mod. Review the choices and fully exit D2R (Save & Exit).
+If Steam is still running, Setup shows a **Close Steam** step: click **Close Steam**
+and Setup asks Steam to exit the normal way (like **Steam > Exit**; SteamVR closes
+with it) and waits up to 30 seconds. Setup never forces Steam or the game to close;
+if Steam stays open, choose **Steam > Exit** yourself, then click **Next**.
 Exiting Steam temporarily disconnects headset streaming.
 
 The EXE includes its own verified Python runtime; no separate Python install
@@ -431,8 +434,9 @@ current desktop display mode, not per-game Auto HDR or an in-game HDR toggle.
 - **An install file is quarantined:** check Windows Security's Protection
   History for the affected file. Installation cannot finish while a required
   component is quarantined.
-- **Setup cannot update Steam:** choose **Steam > Exit**, then retry. Closing
-  Steam's window leaves it running. Setup does not terminate games or Steam for you.
+- **Setup cannot update Steam:** click **Close Steam** on Setup's Close Steam step,
+  or choose **Steam > Exit**, then retry. Closing Steam's window leaves it running.
+  Setup only asks Steam to exit; it does not terminate games or Steam for you.
 - **Setup reports an unsupported Steam configuration:** the original configuration
   is kept. Steam-edition players can use the manual installation and shortcut
   directions above; those commands do not apply to Battle.net.

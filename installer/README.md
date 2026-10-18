@@ -130,8 +130,23 @@ removal. Confirm cancellation and running Steam/D2R stop before changes, then
 verify the resulting shortcut in a headset with an offline character. Report
 which checks were automated and which were performed on real hardware.
 
+Steam rewrites `localconfig.vdf` and `shortcuts.vdf` when it exits, so it must be
+closed before Setup edits them. When `steam.exe` is running, the wizard shows a
+**Close Steam** page before Ready. Its button runs Steam's own graceful shutdown,
+`<SteamPath>\steam.exe -shutdown` (`SteamPath` from `HKCU\Software\Valve\Steam`,
+else the selected Steam folder), and waits up to 30 s for `steam.exe` to exit.
+Steam is never terminated; if it stays open the player is asked to use
+**Steam > Exit**. While `D2R.exe` or `D2RLoader.exe` runs the button is off and
+Setup keeps asking for Save & Exit. The logic is in `close_steam.inc`;
+`close_steam_test.py` runs it in a fixture installer against a stand-in process
+(it needs ISCC: `deps/inno-7.1.0`, `PATH`, `%ISCC%` or Inno Setup 6, and skips
+without one).
+
 For unattended QA, `/CONFIG="absolute path to choices.ini"` supplies the same
-selections as the UI. Silent installation without a config is rejected. Example:
+selections as the UI. Silent installation without a config is rejected. A
+`/CONFIG` install leaves a running Steam alone (the backend then stops with its
+usual message) unless `/CLOSESTEAM` is also given, which closes Steam as the
+button does. Example:
 
 ```ini
 [setup]
