@@ -38,6 +38,12 @@ bool QueueParry(uint32_t monster,int durability=-2);
 // When this monster's current attack began (GetTickCount64), from the native
 // mode setter on the server; 0 when not seen in the last 3 s. Thread-safe.
 uint64_t AttackStart(uint32_t monster);
+// This monster's current attack reached its to-hit roll (hit or miss): too
+// late to stagger it before the hit. Game thread.
+void NoteAttackRolled(uint32_t monster);
+// A new parry swing: on a later game update, stagger the first monster whose
+// melee attack is under way and not yet rolled (combat::EarlyParry). Thread-safe.
+void QueueParrySwing();
 // The block sound at the hero ([gameplay] block_sound). Thread-safe.
 void QueueBlockSound();
 // [gameplay] block_sound: sounds.txt row played at the hero on every physical

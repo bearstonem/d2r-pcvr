@@ -883,7 +883,14 @@ instead of a random one. Classic keeps the native roll.
   a timed swing still parries it at that roll (the native miss is unchanged, and
   there is no shield wear to restore). Low-level monsters miss most attacks
   against a stronger hero, which made correct swings look ignored (2026-10-18:
-  two Zombies, 7 hits from dozens of attacks). One parry per swing. The attacker is
+  two Zombies, 7 hits from dozens of attacks). One parry per swing.
+  The parry resolves as soon as the swing and the attacker's melee attack have
+  both begun, on the next game update: at the attack start for a swing made up
+  to 450 ms before it, or at the swing during the wind-up. The attacker is
+  staggered before its hit frame, so the hit never lands. Hit-frame parries
+  had come a median 516 ms after the swing (2026-10-18). An attack whose to-hit
+  roll has already run is never staggered early; otherwise the to-hit roll or
+  block check above still resolves the parry. The attacker is
   put into native hit recovery (445E60) on a later game update, any shield wear
   the game applied for that hit is restored (`shield_wear_refunded` in `Frame
   guard:` counts it; not every block wears a shield, and none has been observed
@@ -944,8 +951,9 @@ position, cover angle, swing and attack timing. Its `parry=` field names why a
 raised guard did not parry: `no_swing`, `spent`, `early` (more than 750 ms before
 the hit), `before_attack`, `range` or `side`; `ok` on a parry. `Frame guard swing: armed` marks each new parry swing,
 `Frame guard miss:` each monster melee attack that missed its to-hit roll (and
-whether a swing parried it), and `Frame guard:` adds `incoming_hits`,
-`incoming_misses` and `miss_parries`. Hard swings (a riposte straight
+whether a swing parried it), `Frame guard early parry:` each parry made before
+the hit (`trigger=attack_start` or `swing`), and `Frame guard:` adds
+`incoming_hits`, `incoming_misses`, `miss_parries` and `early_parries`. Hard swings (a riposte straight
 after a parry) are tracked up to 20 m/s and 100 rad/s; `Frame melee resets:` and
 `Frame melee stale:` report any swing the tracker discarded, and
 `Frame riposte: window expired unused` any parry whose riposte never landed.

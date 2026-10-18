@@ -7,7 +7,7 @@ namespace fixture {
 uintptr_t imageBase=0x140000000;
 uint64_t relocation=0;
 uint64_t session=1;
-unsigned nativeCalls=0,impacts=0,parries=0;int parryDurability=0;
+unsigned nativeCalls=0,impacts=0,parries=0,rolled=0,swingScans=0;int parryDurability=0;
 bool serve=true;
 std::string log;
 struct Unit {
@@ -36,7 +36,8 @@ bool Hook(uint64_t,const void*,uint32_t,void*,void**){return false;}
 }
 namespace framevr::logging {void Write(const char* line){fixture::log+=line;fixture::log+='\n';}}
 namespace framevr {void ShieldGuardImpact(bool){++fixture::impacts;}void ShieldGuardState(bool,bool){}}
-namespace melee {bool QueueParry(uint32_t,int durability){++fixture::parries;fixture::parryDurability=durability;return true;}uint64_t AttackStart(uint32_t){return 0;}void QueueBlockSound(){}}
+namespace melee {bool QueueParry(uint32_t,int durability){++fixture::parries;fixture::parryDurability=durability;return true;}uint64_t AttackStart(uint32_t){return 0;}void QueueBlockSound(){}
+void NoteAttackRolled(uint32_t){++fixture::rolled;}void QueueParrySwing(){++fixture::swingScans;}}
 
 int main() {
     using namespace combat;
@@ -125,6 +126,39 @@ int main() {
      player.Put(8,43u);IncomingRoll(monster.Address(),player.Address(),false);player.Put(8,42u);
      ConfigureGuard(false,750);IncomingRoll(monster.Address(),player.Address(),false);ConfigureGuard(true,750,true);
      assert(incomingMisses==before&&fixture::parries==queued+1&&!guard.state.snapUsed);}
+    // Every monster to-hit roll marks its attack as too late to stagger early.
+    {const auto marked=fixture::rolled;IncomingRoll(monster.Address(),player.Address(),false);assert(fixture::rolled==marked+1);}
+    // A parry resolves as soon as the swing and the monster's attack have both
+    // begun (2026-10-18: hit-frame parries came a median 516 ms after the
+    // swing). Judging spends nothing; ConfirmParry, after the stagger, spends
+    // the swing once. A swing that began too long before the attack does not.
+    ConfigureGuard(true,750,true);prime();
+    {assert(!ParryArmed());
+     const auto now=GetTickCount64();guard.state.snapAt=now;guard.state.snapUsed=false;
+     assert(ParryArmed());
+     assert(!EarlyParry(monster.Address(),player.Address(),now+GuardTuning().parryLeadMs+1,"attack_start"));
+     const uint64_t swing=EarlyParry(monster.Address(),player.Address(),now,"attack_start");
+     assert(swing==now&&!guard.state.snapUsed);
+     assert(fixture::log.find("Frame guard early parry: monster=9 class=0 trigger=attack_start")!=std::string::npos);
+     const auto taps=fixture::impacts;const unsigned early=earlyParries,total=guardParries;
+     ConfirmParry(swing);
+     assert(guard.state.snapUsed&&fixture::impacts==taps+1&&earlyParries==early+1&&guardParries==total+1&&!ParryArmed());
+     assert(!EarlyParry(monster.Address(),player.Address(),now,"swing"));
+     // Classic, or a lowered guard, never parries early.
+     guard.state.snapUsed=false;ConfigureGuard(false,750);
+     assert(!ParryArmed()&&!EarlyParry(monster.Address(),player.Address(),now,"swing"));
+     ConfigureGuard(true,750,true);guard.state.raised=false;
+     assert(!EarlyParry(monster.Address(),player.Address(),now,"swing"));}
+    // A newly armed swing asks the game thread to look for an attack under way.
+    {prime();const auto scans=fixture::swingScans;
+     framevr::guard::Pose from{{.18f,1.22f,-.30f},{0,0,-1},{0,1.7f,0},{.18f,-.48f,-.30f},2,GetTickCount64(),1};
+     for(int i=0;i<3;++i){from.at=GetTickCount64();PublishGuard(fixture::session,true,true,from,true,true);}
+     const auto start=GetTickCount64();
+     while(GetTickCount64()-start<40){}                                     // a real swing: 0.4 m in ~40 ms
+     framevr::guard::Pose to{{-.20f,1.64f,-.32f},{0,0,-1},{0,1.7f,0},{-.20f,-.06f,-.32f},2,GetTickCount64(),1};
+     PublishGuard(fixture::session,true,true,to,true,true);
+     assert(guard.state.snapAt&&fixture::swingScans==scans+1);
+     PublishGuard(fixture::session,true,true,to,true,true);assert(fixture::swingScans==scans+1);}
     // A snap turn invalidates the previous world frame until a new pose lands.
     prime();auto changed=guard.state.surface;changed.epoch++;
     PublishGuard(fixture::session,true,false,changed,true,true);assert(block()==0);

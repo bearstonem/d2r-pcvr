@@ -17,7 +17,7 @@ bool Hook(uint64_t,const void*,uint32_t,void*,void**){return false;}
 namespace framevr::logging {void Write(const char*){}}
 // Physical guard outputs (transport haptics, melee parry queue): not reached here.
 namespace framevr {void ShieldGuardImpact(bool){}void ShieldGuardState(bool,bool){}}
-namespace melee {bool QueueParry(uint32_t,int){return false;}uint64_t AttackStart(uint32_t){return 0;}void QueueBlockSound(){}}
+namespace melee {bool QueueParry(uint32_t,int){return false;}uint64_t AttackStart(uint32_t){return 0;}void QueueBlockSound(){}void NoteAttackRolled(uint32_t){}void QueueParrySwing(){}}
 namespace gamestate {int32_t LeftDurability(){return -1;}}
 int main() {
     uint32_t outdoors[]={0,3,0},cave[]={0,3,0},monster[]={1,3,0};

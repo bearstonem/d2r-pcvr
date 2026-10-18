@@ -94,7 +94,7 @@ using SetModeFn=int(*)(uintptr_t,int);
 SetModeFn originalSetMode=nullptr;bool setModeIn=false;
 // Monster attacks as they begin (server units), for the parry: a swing while
 // the attack is incoming. MonMode A1 4, A2 5, S1-S4 8-11.
-struct AttackSeen {uint32_t id=0;uint64_t at=0;};
+struct AttackSeen {uint32_t id=0;uint64_t at=0,rolled=0;};   // rolled: its to-hit roll (hit or miss)
 std::mutex attackMutex;std::array<AttackSeen,64> attacks{};std::atomic<unsigned> attackStarts{0};
 bool AttackMode(int mode){return mode==4||mode==5||(mode>=8&&mode<=11);}
 template<class T> bool Read(uintptr_t p,T& out) {
@@ -413,15 +413,20 @@ void Init(const D2RL::PluginContext* ctx) {
     context=ctx;
     if(ctx->QueryService(&threads)!=D2RL::ServiceQueryResult::Success)threads=nullptr;
 }
+void QueueAttackParry(uint32_t monster);
 int SetMode(uintptr_t unit,int mode) {
     if(AttackMode(mode)) {
         uint32_t header[3]{};uintptr_t back=0;
         if(Read(unit,header)&&header[0]==1&&Read(unit+0xd8,back)&&back>0x10000) { // a server monster starting an attack
             const auto now=GetTickCount64();
+            {
             std::lock_guard lock(attackMutex);
             AttackSeen* slot=&attacks[0];
             for(auto& a:attacks){if(a.id==header[2]){slot=&a;break;}if(a.at<slot->at)slot=&a;}
-            slot->id=header[2];slot->at=now;++attackStarts;
+            slot->id=header[2];slot->at=now;slot->rolled=0;++attackStarts;
+            }
+            // A parry swing already made: stagger it as its attack begins.
+            if(combat::ParryArmed())QueueAttackParry(header[2]);
         }
     }
     return originalSetMode(unit,mode);
@@ -450,6 +455,46 @@ void __cdecl Parry(const D2RL::PluginContext*,void* token) noexcept {
 }
 void QueueBlockSound() {
     if(blockSound.load()>0&&context&&threads&&threads->runOnUiThread)threads->runOnUiThread(context,&BlockSound,nullptr);
+}
+// Game thread: a parry before the hit frame, as soon as the swing and this
+// monster's attack have both begun. Never once its to-hit roll has run.
+bool EarlyStagger(uintptr_t game,uintptr_t player,const AttackSeen& seen,const char* trigger) {
+    if(!seen.at||seen.rolled>=seen.at)return false;
+    const auto unit=originalLookup(game,1,seen.id);uint32_t mode=0;
+    if(!unit||!Read(unit+0xc,mode)||!AttackMode(int(mode)))return false;   // its attack already ended
+    const uint64_t swing=combat::EarlyParry(unit,player,seen.at,trigger);
+    if(!swing)return false;
+    const uintptr_t event[2]{0,unit};
+    if(!reinterpret_cast<HitRecoveryFn>(d2rsig::Addr(HitRecoveryRva))(game,event)){++parryRefused;return false;}
+    ++parried;combat::ConfirmParry(swing);QueueParrySound();combat::NoteRiposte(seen.id);
+    return true;
+}
+void __cdecl AttackParry(const D2RL::PluginContext*,void* token) noexcept {
+    const auto monster=uint32_t(reinterpret_cast<uintptr_t>(token));
+    uintptr_t game=0,player=0;
+    if(!parryReady.load()||!LocalServer(game,player))return;
+    AttackSeen seen{};
+    {std::lock_guard lock(attackMutex);for(const auto& a:attacks)if(a.id==monster){seen=a;break;}}
+    EarlyStagger(game,player,seen,"attack_start");
+}
+void __cdecl SwingParry(const D2RL::PluginContext*,void*) noexcept {
+    uintptr_t game=0,player=0;
+    if(!parryReady.load()||!LocalServer(game,player))return;
+    std::array<AttackSeen,64> seen;{std::lock_guard lock(attackMutex);seen=attacks;}
+    const auto now=GetTickCount64();
+    for(const auto& a:seen)
+        if(a.at&&now>=a.at&&now-a.at<=3000&&EarlyStagger(game,player,a,"swing"))break;   // one parry per swing
+}
+void QueueAttackParry(uint32_t monster) {
+    if(parryReady.load()&&context&&threads&&threads->runOnGameThread)threads->runOnGameThread(context,&AttackParry,reinterpret_cast<void*>(uintptr_t(monster)));
+}
+void QueueParrySwing() {
+    if(parryReady.load()&&context&&threads&&threads->runOnGameThread)threads->runOnGameThread(context,&SwingParry,nullptr);
+}
+void NoteAttackRolled(uint32_t monster) {
+    const auto now=GetTickCount64();
+    std::lock_guard lock(attackMutex);
+    for(auto& a:attacks)if(a.id==monster){a.rolled=now;break;}
 }
 uint64_t AttackStart(uint32_t monster) {
     const auto now=GetTickCount64();

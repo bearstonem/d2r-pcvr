@@ -35,6 +35,14 @@ float SwingRecovery(float factor);
 void ConfigureArDamage(bool on,float floor);
 // Game thread: a parry flinched this monster; its next physical hit within the window is a riposte.
 void NoteRiposte(uint32_t monster);
+// A parry resolves as soon as the swing and the monster's attack have both
+// begun, not at its hit frame. ParryArmed: an unspent recent swing (cheap gate,
+// thread-safe). Game thread: EarlyParry judges this attacking monster unit
+// against the local player unit and returns the swing to spend (0 = none);
+// after staggering it, ConfirmParry spends that swing once.
+bool ParryArmed();
+uint64_t EarlyParry(uintptr_t monster,uintptr_t player,uint64_t attackAt,const char* trigger);
+void ConfirmParry(uint64_t swing);
 // A riposte is a clean hit: no attack-rating or recovery penalty.
 // [gameplay] riposte_bonus (% extra damage on top, default 0), riposte_ms, riposte_sound_file (empty:
 // the built-in sound; else a WAV, next to the ini unless a full path).
