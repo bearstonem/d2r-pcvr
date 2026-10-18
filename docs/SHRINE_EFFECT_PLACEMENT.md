@@ -1,6 +1,6 @@
 # Shrine effect placement investigation
 
-Status: diagnostic candidate; no shrine placement correction yet.
+Status: developer-only horizontal-placement experiment; headset verification pending.
 
 The owner reports floating mana/buff symbols beside shrines in native first
 person VR, including an Act I rock-spire shrine. The symbols stay to the same
@@ -42,6 +42,47 @@ The portal's independently measured `(0,4,0)` anchor and radius-three offset
 shell are not evidence for shrine coordinates. Portal correction gates remain
 unchanged, including exclusion of every shrine symbol.
 
+## Second capture and placement candidate
+
+The revised capture on 2026-10-17 contains 198 samples. It identifies 57
+view-direction samples from stationary mana-regeneration symbols (two instance
+lifetimes at the same origin), ten from a separate moving mana symbol after
+activation, and three stamina-symbol samples. All 70 native cameras match the
+shared VR head. The remaining 128 records are environmental effects. A stamina
+initialization sample has a zero origin; do not use it as a placement anchor.
+No symbol mask-19 local-position records were observed.
+
+The owner clarified that the symbols are already at the correct height and only
+displaced sideways. The mana shrine's origin is constant while native view
+direction varies. The moving mana instance has a changing origin and orientation,
+consistent with character attachment. These records establish the relevant
+scripts and camera inputs; they do not capture the scripts' final rendered
+positions or prove which consumer produces the offset.
+
+The developer-only candidate tests whether the horizontal view-direction
+contribution causes that displacement. For the two captured exact mana/stamina
+assets, it replaces native `(x,y,z)` direction with `(0,y,0)` after the original
+callback and trace. Y is copied exactly, without normalization or a new height.
+For an additive camera-direction displacement this removes lateral motion while
+preserving height. A headset test must verify that interpretation and check
+symbol shape/orientation: other consumers of this direction could behave
+differently. Do not describe this as a verified fix or promote it to regular
+builds until that check is complete.
+
+The experiment uses the existing signature-checked hook, active first-person
+world/menu gate, fresh shared head, matching native camera, per-lane instance
+resolution and bounded exact asset lookup. Each lane reads its own native
+direction, validates it as finite and unit length, and retains its own Y.
+Nothing writes effect origins or transforms. Unknown symbols (including the
+other eight traced families), environment effects and portals are excluded.
+Both stationary and character-attached instances of the two selected symbol
+assets are affected; the code does not infer attachment from the asset path.
+All new correction code is behind developer + native OpenXR build guards.
+
+Native input traces still run before this experiment. The one-time
+`Frame shrine candidate` log confirms a successful candidate write. It does not
+confirm final visual position. Regular builds retain their original behavior.
+
 ## Developer capture
 
 Build with `steamvr/build_windows.ps1 -Developer -Test`. Only developer native
@@ -65,8 +106,10 @@ Search the active developer game's `d2rloader/logs/d2r-vr-frame.log` for:
 - `Frame shrine transform`: effect origin and full orientation/scale basis.
 
 Inputs and transform are copied before the native helper and output afterward.
-No shrine VM input, output, transform or asset is modified. Sample IDs correlate
-lines even when workers interleave them. Camera mismatches are retained.
+The capture itself is read-only. The developer experiment runs afterward on
+direction output for its two exact assets; origins/transforms/assets are never
+modified. Sample IDs correlate lines even when workers interleave them. Camera
+mismatches are retained.
 
 Each callback examines at most eight lanes. A try-lock protects a 64-entry
 sampling table; contention drops samples. Each effect/stream/operation/lane
@@ -81,19 +124,17 @@ has not been measured in a headset.
 
 ## Next offline test
 
-The owner launches the developer build. Revisit a shrine with a floating mana
-or buff symbol before activating it. Stand still and turn the head, then walk
-around it. If convenient, activate it and move away to distinguish a
-player-attached effect from a stationary shrine instance. Save and exit.
+The owner launches the developer build. Revisit the same mana-regeneration
+shrine and, if convenient, a stamina shrine before activation. Turn and walk
+around it: the symbol should remain centered horizontally, retain its previous
+height, and retain its normal appearance. Activate it and check the effect while
+moving away if practical. Save and exit. Check the candidate-active log as well
+as the native-input samples. If the symbol changes height/shape or still sits to
+the side, the placement hypothesis needs revisiting; do not widen the asset gate.
 
-First verify that `layer=symbol` records exist. Compare origins, native view
-results, head movement and any local inputs for the same instance. Establish
-which operation causes the displacement and the correct anchor before adding a
-narrowly scoped correction. Do not move the environmental flame/drip samples
-merely because their local offsets are nonzero. Keep this PR draft until the
-fix and owner headset verification exist.
-
-Automated fixtures cover both diagnostic layers, exact symbol paths, unrelated
-overlay exclusions, mixed instances, constant/strided streams, camera mismatch,
-transform/path rejection, read-only snapshots and both capture limits. They do
-not establish interception or symbol placement in a headset.
+Automated fixtures cover both diagnostic layers, exact symbol/candidate paths,
+unrelated overlay exclusions, mixed diagnostic instances, constant/strided
+streams, camera mismatch, transform/path rejection, read-only snapshots and
+capture budgets. Placement fixtures use the captured native direction values
+and verify unchanged Y, invalid-input rejection and the additive-displacement
+contract. They do not establish the script's final positions or visual outcome.

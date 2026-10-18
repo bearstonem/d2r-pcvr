@@ -8,6 +8,7 @@
 #include <cstring>
 #if defined(D2RVR_DEVELOPER) && defined(D2RVR_NATIVE_OPENXR)
 #include "shrine_trace.h"
+#include "shrine_placement.h"
 #include <cstdio>
 #endif
 #ifdef D2RVR_NATIVE_OPENXR
@@ -67,6 +68,18 @@ bool PortalDefinition(uint64_t definition,bool offsets=false) {
 SRWLOCK shrineLock=SRWLOCK_INIT;
 shrine::Budget shrineBudget;
 std::atomic<bool> shrineExhausted{false};
+std::atomic<bool> shrineCandidateReported{false};
+bool ShrineCandidateDefinition(uint64_t definition) {
+    struct Entry {uint64_t definition=0;ULONGLONG at=0;bool candidate=false;};
+    thread_local Entry cache[32];
+    auto& e=cache[(definition>>6)%32];const auto now=GetTickCount64();
+    if(e.definition!=definition||now-e.at>1000) {
+        char path[160]{};
+        e={definition,now,portal::DefinitionPath(ReadAt,definition,gameBase,path)&&
+            shrine_placement::CandidateAsset(path)};
+    }
+    return e.candidate;
+}
 struct ShrineBatch {shrine::Sample samples[shrine::MaxLanes];uint32_t count=0;};
 void PrepareShrineTrace(ShrineBatch& batch,void* output,const void* input,
         const void* context,shrine::Kind kind) {
@@ -167,6 +180,9 @@ void CorrectScriptView(void* output,const void* input,const void* context,bool d
     if(!in.stride&&!ReadAt(&constantView,in.data,4))return;
     int32_t lastView=-1;bool cameraMatches=false;
     int32_t lastInstance=-1;portal::Instance instance{};portal::Vec value{};bool valid=false;
+#if defined(D2RVR_DEVELOPER) && defined(D2RVR_NATIVE_OPENXR)
+    bool shrineCandidate=false;
+#endif
     for(uint32_t i=0;i<out.count;++i) {
         int32_t view=constantView,id=c.instance;
         if((in.stride&&!ReadAt(&view,in.data+uint64_t(i)*in.stride,4))||view<0||uint32_t(view)>=views.count)continue;
@@ -183,19 +199,44 @@ void CorrectScriptView(void* output,const void* input,const void* context,bool d
         if(id<0)continue;
         if(id!=lastInstance) {
             lastInstance=id;valid=false;
+#if defined(D2RVR_DEVELOPER) && defined(D2RVR_NATIVE_OPENXR)
+            shrineCandidate=false;
+#endif
             portal::Vec origin{};
-            if(portal::Resolve(ReadAt,c,i,gameBase,instance)&&PortalDefinition(instance.definition)&&
+            const bool resolved=portal::Resolve(ReadAt,c,i,gameBase,instance);
+            if(resolved&&PortalDefinition(instance.definition)&&
                portal::Origin(ReadAt,instance,origin)&&portal::Direction(head,origin,value)) {
                 if(!direction)value=head;
                 valid=true;
             }
+#if defined(D2RVR_DEVELOPER) && defined(D2RVR_NATIVE_OPENXR)
+            else if(resolved&&direction&&ShrineCandidateDefinition(instance.definition)) {
+                shrineCandidate=true;valid=true;
+            }
+#endif
         }
         if(!valid)continue;
+#if defined(D2RVR_DEVELOPER) && defined(D2RVR_NATIVE_OPENXR)
+        // Read each lane's actual native output. Mixed views/instances must not
+        // inherit another lane's vertical component or a portal's replacement.
+        if(shrineCandidate) {
+            portal::Vec native{};
+            if(!ReadAt(&native,out.data+12ull*i,sizeof native)||
+               !shrine_placement::HorizontalDirection(native,value))continue;
+        }
+#endif
 #ifdef D2RVR_NATIVE_OPENXR
         if(!framevr::WriteMemory(reinterpret_cast<void*>(out.data+12ull*i),&value,sizeof value))continue;
 #else
         __try {std::memcpy(reinterpret_cast<void*>(out.data+12ull*i),&value,sizeof value);}
         __except(EXCEPTION_EXECUTE_HANDLER) {continue;}
+#endif
+#if defined(D2RVR_DEVELOPER) && defined(D2RVR_NATIVE_OPENXR)
+        if(shrineCandidate) {
+            if(!shrineCandidateReported.exchange(true)&&logger)
+                logger("Frame shrine candidate: mana/stamina horizontal direction removed; native vertical component retained; developer experiment pending visual verification");
+            continue;
+        }
 #endif
         if(direction&&!portalReported.exchange(true)&&logger)
             logger("VR portals: native mesh scripts now use shared head position and upright portal-origin facing");
@@ -276,7 +317,7 @@ void Install(void (*log)(const char*),bool (*active)()) {
        d2rsig::Hook(LocalPositionRva,LocalPositionSig,sizeof LocalPositionSig,reinterpret_cast<void*>(&TracedLocalPosition),reinterpret_cast<void**>(&originalLocalPosition))) {
         if(logger)logger("VR portals: verified native center-position hook installed; NewStuff center offsets only");
 #if defined(D2RVR_DEVELOPER) && defined(D2RVR_NATIVE_OPENXR)
-        if(logger)logger("Frame shrine trace: read-only developer capture enabled; floating symbols and environment, view queries and mask19; max1024 samples (128 environment), 8 lanes per callback; shrine placement unchanged");
+        if(logger)logger("Frame shrine trace: read-only native-input capture enabled; floating symbols and environment, view queries and mask19; max1024 samples (128 environment), 8 lanes per callback; developer mana/stamina candidate runs AFTER direction capture");
 #endif
     }
     if(installed)return;
