@@ -1,12 +1,10 @@
 #pragma once
 #include "portal_billboard.h"
 
-// Developer experiment, not a general view-direction replacement. The second
-// live capture identifies these two symbol scripts; it does not yet establish
-// whether every consumer of their view.direction is positional. Keep this
-// candidate out of regular builds until visual placement/orientation is checked.
+// Scoped to the two shrine-symbol assets used by this correction. Other shrine
+// symbols and environmental effects keep their native view-direction inputs.
 namespace billboards::shrine_placement {
-inline bool CandidateAsset(std::string_view path) {
+inline bool Asset(std::string_view path) {
     constexpr std::string_view paths[]={
         "data/hd/vfx/particles/overlays/common/shrine_mana_regen/vfx_shrine_mana_regen.particles",
         "data/hd/vfx/particles/overlays/common/shrine_stamina/vfx_shrine_stamina_looping.particles"};
@@ -24,7 +22,7 @@ inline bool CandidateAsset(std::string_view path) {
 // Removing the X/Z contribution to a scripted displacement keeps its native Y.
 // Do not normalize afterward: that would change the height the owner says is
 // already correct. This leaves effect origins, authored transforms and the
-// normal quad-facing path alone. A headset test must confirm script consumers.
+// normal quad-facing path alone. Other symbols need separate verification.
 inline bool HorizontalDirection(portal::Vec native,portal::Vec& result) {
     if(!portal::Finite(native))return false;
     const float length2=native.x*native.x+native.y*native.y+native.z*native.z;

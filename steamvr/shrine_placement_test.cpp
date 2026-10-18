@@ -7,8 +7,8 @@ using namespace billboards;
 void Check(bool ok,const char* why){if(!ok){std::fprintf(stderr,"FAIL: %s\n",why);std::exit(1);}}
 int main() {
     using namespace shrine_placement;
-    Check(CandidateAsset("data/hd/vfx/particles/overlays/common/shrine_mana_regen/vfx_shrine_mana_regen.particles"),"captured mana symbol");
-    Check(CandidateAsset("DATA\\HD\\VFX\\PARTICLES\\OVERLAYS\\COMMON\\SHRINE_STAMINA\\VFX_SHRINE_STAMINA_LOOPING.PARTICLES"),"captured stamina symbol with native case/separators");
+    Check(Asset("data/hd/vfx/particles/overlays/common/shrine_mana_regen/vfx_shrine_mana_regen.particles"),"captured mana symbol");
+    Check(Asset("DATA\\HD\\VFX\\PARTICLES\\OVERLAYS\\COMMON\\SHRINE_STAMINA\\VFX_SHRINE_STAMINA_LOOPING.PARTICLES"),"captured stamina symbol with native case/separators");
     for(auto p:{"data/hd/vfx/particles/objects/env_stone/forest_altar/vfx_forest_altar.particles",
         "data/hd/vfx/particles/objects/shrines_other/deer_shrine/vfx_deer_shrine.particles",
         "data/hd/vfx/particles/overlays/common/shrine_armor/vfx_shrine_armor_looping.particles",
@@ -16,7 +16,7 @@ int main() {
         "data/hd/vfx/particles/overlays/common/shrine_mana_regen/vfx_shrine_mana_regen.particles.extra",
         "data/hd/vfx/particles/objects/vfx_only/town_portal/vfx_town_portal_newstuff.particles",
         "data/hd/vfx/particles/overlays/common/shrine_mana_regen/../vfx_shrine_mana_regen.particles"})
-        Check(!CandidateAsset(p),"environment, portals and uncaptured symbol families unchanged");
+        Check(!Asset(p),"environment, portals and uncaptured symbol families unchanged");
     // Actual view-direction outputs from the second owner capture: stationary
     // shrine mana, stamina, and the moving player-attached mana instance.
     const std::array<portal::Vec,6> samples{{
@@ -30,14 +30,14 @@ int main() {
         portal::Vec corrected;
         Check(HorizontalDirection(native,corrected),"captured unit direction accepted");
         Check(corrected.x==0&&corrected.z==0&&corrected.y==native.y,"vertical input preserved exactly per lane");
-        // This proves the candidate's contract for an additive displacement,
+        // This proves the correction's contract for an additive displacement,
         // not that every script consumer uses this formula (headset check).
         for(float multiplier:{-20.f,-3.f,0.f,1.f,15.f}) {
             const portal::Vec anchor{10614.1f,12.6039f,12434.1f};
             Check(anchor.y+multiplier*corrected.y==anchor.y+multiplier*native.y,
                 "additive placement keeps height for positive and negative factors");
             Check(anchor.x+multiplier*corrected.x==anchor.x&&anchor.z+multiplier*corrected.z==anchor.z,
-                "candidate removes only horizontal camera contribution");
+                "correction removes only horizontal camera contribution");
         }
     }
     portal::Vec result{8,9,10};
@@ -51,5 +51,5 @@ int main() {
     Check(HorizontalDirection({1,0,0},result)&&result.x==0&&result.y==0&&result.z==0,
         "horizontal view does not invent a vertical displacement or normalize zero");
     Check(HorizontalDirection({0,-1,0},result)&&result.y==-1,"vertical view height unchanged");
-    std::puts("Shrine placement candidate: captured directions, exact scope, preserved vertical inputs and rejection guards passed");
+    std::puts("Shrine placement: captured directions, exact scope, preserved vertical inputs and rejection guards passed");
 }

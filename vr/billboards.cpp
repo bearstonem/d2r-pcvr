@@ -8,11 +8,11 @@
 #include <cstring>
 #if defined(D2RVR_DEVELOPER) && defined(D2RVR_NATIVE_OPENXR)
 #include "shrine_trace.h"
-#include "shrine_placement.h"
 #include <cstdio>
 #endif
 #ifdef D2RVR_NATIVE_OPENXR
 #include "memory.h"
+#include "shrine_placement.h"
 #endif
 
 namespace billboards {
@@ -64,22 +64,24 @@ bool PortalDefinition(uint64_t definition,bool offsets=false) {
     }
     return offsets?e.offsets:e.portal;
 }
-#if defined(D2RVR_DEVELOPER) && defined(D2RVR_NATIVE_OPENXR)
-SRWLOCK shrineLock=SRWLOCK_INIT;
-shrine::Budget shrineBudget;
-std::atomic<bool> shrineExhausted{false};
-std::atomic<bool> shrineCandidateReported{false};
-bool ShrineCandidateDefinition(uint64_t definition) {
-    struct Entry {uint64_t definition=0;ULONGLONG at=0;bool candidate=false;};
+#ifdef D2RVR_NATIVE_OPENXR
+std::atomic<bool> shrineReported{false};
+bool ShrineDefinition(uint64_t definition) {
+    struct Entry {uint64_t definition=0;ULONGLONG at=0;bool shrine=false;};
     thread_local Entry cache[32];
     auto& e=cache[(definition>>6)%32];const auto now=GetTickCount64();
     if(e.definition!=definition||now-e.at>1000) {
         char path[160]{};
         e={definition,now,portal::DefinitionPath(ReadAt,definition,gameBase,path)&&
-            shrine_placement::CandidateAsset(path)};
+            shrine_placement::Asset(path)};
     }
-    return e.candidate;
+    return e.shrine;
 }
+#endif
+#if defined(D2RVR_DEVELOPER) && defined(D2RVR_NATIVE_OPENXR)
+SRWLOCK shrineLock=SRWLOCK_INIT;
+shrine::Budget shrineBudget;
+std::atomic<bool> shrineExhausted{false};
 struct ShrineBatch {shrine::Sample samples[shrine::MaxLanes];uint32_t count=0;};
 void PrepareShrineTrace(ShrineBatch& batch,void* output,const void* input,
         const void* context,shrine::Kind kind) {
@@ -180,8 +182,8 @@ void CorrectScriptView(void* output,const void* input,const void* context,bool d
     if(!in.stride&&!ReadAt(&constantView,in.data,4))return;
     int32_t lastView=-1;bool cameraMatches=false;
     int32_t lastInstance=-1;portal::Instance instance{};portal::Vec value{};bool valid=false;
-#if defined(D2RVR_DEVELOPER) && defined(D2RVR_NATIVE_OPENXR)
-    bool shrineCandidate=false;
+#ifdef D2RVR_NATIVE_OPENXR
+    bool shrineCorrection=false;
 #endif
     for(uint32_t i=0;i<out.count;++i) {
         int32_t view=constantView,id=c.instance;
@@ -199,8 +201,8 @@ void CorrectScriptView(void* output,const void* input,const void* context,bool d
         if(id<0)continue;
         if(id!=lastInstance) {
             lastInstance=id;valid=false;
-#if defined(D2RVR_DEVELOPER) && defined(D2RVR_NATIVE_OPENXR)
-            shrineCandidate=false;
+#ifdef D2RVR_NATIVE_OPENXR
+            shrineCorrection=false;
 #endif
             portal::Vec origin{};
             const bool resolved=portal::Resolve(ReadAt,c,i,gameBase,instance);
@@ -209,17 +211,17 @@ void CorrectScriptView(void* output,const void* input,const void* context,bool d
                 if(!direction)value=head;
                 valid=true;
             }
-#if defined(D2RVR_DEVELOPER) && defined(D2RVR_NATIVE_OPENXR)
-            else if(resolved&&direction&&ShrineCandidateDefinition(instance.definition)) {
-                shrineCandidate=true;valid=true;
+#ifdef D2RVR_NATIVE_OPENXR
+            else if(resolved&&direction&&ShrineDefinition(instance.definition)) {
+                shrineCorrection=true;valid=true;
             }
 #endif
         }
         if(!valid)continue;
-#if defined(D2RVR_DEVELOPER) && defined(D2RVR_NATIVE_OPENXR)
+#ifdef D2RVR_NATIVE_OPENXR
         // Read each lane's actual native output. Mixed views/instances must not
         // inherit another lane's vertical component or a portal's replacement.
-        if(shrineCandidate) {
+        if(shrineCorrection) {
             portal::Vec native{};
             if(!ReadAt(&native,out.data+12ull*i,sizeof native)||
                !shrine_placement::HorizontalDirection(native,value))continue;
@@ -231,10 +233,10 @@ void CorrectScriptView(void* output,const void* input,const void* context,bool d
         __try {std::memcpy(reinterpret_cast<void*>(out.data+12ull*i),&value,sizeof value);}
         __except(EXCEPTION_EXECUTE_HANDLER) {continue;}
 #endif
-#if defined(D2RVR_DEVELOPER) && defined(D2RVR_NATIVE_OPENXR)
-        if(shrineCandidate) {
-            if(!shrineCandidateReported.exchange(true)&&logger)
-                logger("Frame shrine candidate: mana/stamina horizontal direction removed; native vertical component retained; developer experiment pending visual verification");
+#ifdef D2RVR_NATIVE_OPENXR
+        if(shrineCorrection) {
+            if(!shrineReported.exchange(true)&&logger)
+                logger("VR shrines: mana/stamina horizontal direction removed; native vertical component retained");
             continue;
         }
 #endif
@@ -317,7 +319,7 @@ void Install(void (*log)(const char*),bool (*active)()) {
        d2rsig::Hook(LocalPositionRva,LocalPositionSig,sizeof LocalPositionSig,reinterpret_cast<void*>(&TracedLocalPosition),reinterpret_cast<void**>(&originalLocalPosition))) {
         if(logger)logger("VR portals: verified native center-position hook installed; NewStuff center offsets only");
 #if defined(D2RVR_DEVELOPER) && defined(D2RVR_NATIVE_OPENXR)
-        if(logger)logger("Frame shrine trace: read-only native-input capture enabled; floating symbols and environment, view queries and mask19; max1024 samples (128 environment), 8 lanes per callback; developer mana/stamina candidate runs AFTER direction capture");
+        if(logger)logger("Frame shrine trace: read-only native-input capture enabled; floating symbols and environment, view queries and mask19; max1024 samples (128 environment), 8 lanes per callback; mana/stamina correction runs AFTER direction capture");
 #endif
     }
     if(installed)return;
