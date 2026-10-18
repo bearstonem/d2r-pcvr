@@ -74,6 +74,9 @@ struct Tuning {
     uint32_t swingMs=120;
     float swingCos=.82f;                   // ~35 degrees either side of the diagonal
     float parryRange=3.f;                  // metres; ranged attackers are blocked, not parried
+    // A big swing can finish with the shield beside the head, just behind the
+    // eyes along the attack line (~10 cm, log 2026-10-18); behind you is not.
+    float parryBehind=.10f;
     uint32_t staleMs=150;                  // pose older than this cannot block
 };
 enum class Rejection { None, Untracked, InvalidHand, InvalidSurface, TooLow, TooHigh, TooFar, StalePose, OutsideCoverage, OutsidePlacement, Count };
@@ -233,12 +236,14 @@ inline const char* ParryMissName(ParryMiss miss) {
 }
 // A parry deflects rather than covers: the diagonal swing itself turns the face
 // edge-on (3 of 6 timed swings on 2026-10-17). It needs only the shield out on
-// the attacker's side of the eyes, never behind or across the body from them.
-inline bool ParrySide(const Pose& p,Vec toAttacker) {
+// the attacker's side of the eyes (within `behind` metres), never behind or
+// across the body from them.
+inline bool ParrySide(const Pose& p,Vec toAttacker,float behind) {
     if(!Valid(p)||!Finite(toAttacker))return false;
     const Vec fromBody{toAttacker.x-p.eye.x,0,toAttacker.z-p.eye.z};
+    const float distance=std::hypot(fromBody.x,fromBody.z);
     const Vec offset{p.center.x-p.eye.x,0,p.center.z-p.eye.z};
-    return math::Dot(offset,fromBody)>0;
+    return distance>.05f&&math::Dot(offset,fromBody)>-behind*distance;
 }
 // A parry is a swing while the attack is incoming: at most parryMs before the
 // hit, and no more than parryLeadMs before the attack began (0 = unknown).
@@ -249,7 +254,7 @@ inline ParryMiss ParryCheck(const State& s,Vec toAttacker,uint64_t now,const Tun
     if(now-s.snapAt>t.parryMs)return ParryMiss::Early;
     if(attackAt&&s.snapAt+t.parryLeadMs<attackAt)return ParryMiss::BeforeAttack;
     if(std::hypot(toAttacker.x,toAttacker.z)>t.parryRange)return ParryMiss::Range;
-    if(!ParrySide(s.surface,toAttacker))return ParryMiss::Side;
+    if(!ParrySide(s.surface,toAttacker,t.parryBehind))return ParryMiss::Side;
     return ParryMiss::None;
 }
 

@@ -877,7 +877,13 @@ instead of a random one. Classic keeps the native roll.
   the lead allows an anticipated swing; owner swings landed 400-1300 ms before
   hits, and the earlier 400 ms window caught almost none. A timed swing is judged before face
   coverage: the swing itself turns the face edge-on, so it needs only the raised
-  shield out on the attacker's side of the eyes. One parry per swing. The attacker is
+  shield out on the attacker's side of the eyes (it may finish up to 10 cm behind
+  them along the attack line, e.g. beside the head after a big swing). A monster
+  melee attack that misses its native to-hit roll never reaches the block check;
+  a timed swing still parries it at that roll (the native miss is unchanged, and
+  there is no shield wear to restore). Low-level monsters miss most attacks
+  against a stronger hero, which made correct swings look ignored (2026-10-18:
+  two Zombies, 7 hits from dozens of attacks). One parry per swing. The attacker is
   put into native hit recovery (445E60) on a later game update, any shield wear
   the game applied for that hit is restored (`shield_wear_refunded` in `Frame
   guard:` counts it; not every block wears a shield, and none has been observed
@@ -936,7 +942,10 @@ in Unleashed only; Classic always uses the native monster chance to hit.
 `[debug] guard_trace=1` logs every judged hit (`Frame guard trace:`) with the hand
 position, cover angle, swing and attack timing. Its `parry=` field names why a
 raised guard did not parry: `no_swing`, `spent`, `early` (more than 750 ms before
-the hit), `before_attack`, `range` or `side`; `ok` on a parry. `Frame guard swing: armed` marks each new parry swing. Hard swings (a riposte straight
+the hit), `before_attack`, `range` or `side`; `ok` on a parry. `Frame guard swing: armed` marks each new parry swing,
+`Frame guard miss:` each monster melee attack that missed its to-hit roll (and
+whether a swing parried it), and `Frame guard:` adds `incoming_hits`,
+`incoming_misses` and `miss_parries`. Hard swings (a riposte straight
 after a parry) are tracked up to 20 m/s and 100 rad/s; `Frame melee resets:` and
 `Frame melee stale:` report any swing the tracker discarded, and
 `Frame riposte: window expired unused` any parry whose riposte never landed.

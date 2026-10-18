@@ -141,7 +141,8 @@ One stroke can hit several monsters, each further one a little weaker.
   your view (lower right to upper left with a left-hand shield) up to
   0.75 seconds before the hit. You can start before the enemy's wind-up. The swing
   only needs to finish with the shield raised on the attacker's side, even if
-  it ends edge-on. The attacker staggers.
+  it ends edge-on. It also works on attacks that would have missed you. The
+  attacker staggers.
 - **Riposte:** your next weapon hit on the parried monster within 1.5 s is a
   clean hit: full damage, whatever your attack rating or timing.
 - **Guard strain:** every block (not a parry) strains your guard. A pale light

@@ -72,6 +72,9 @@ enum class Guard:uint8_t {Native,Open,Block,Parry};
 thread_local Forced forced=Forced::None;thread_local bool forcedServed=false;thread_local Seed forcedRoll;
 std::atomic<unsigned> guardBlocks{0},guardOpen{0},guardParries{0},guardUnserved{0},guardFallback{0},guardLate{0};
 std::atomic<unsigned> guardAttackKnown{0};
+// Monster melee to-hit results against the local player; a miss never reaches
+// the block check, so missParries counts parries made on missed attacks.
+std::atomic<unsigned> incomingHits{0},incomingMisses{0},missParries{0};
 std::array<std::atomic<unsigned>,size_t(framevr::guard::Rejection::Count)> guardRejections{};
 // Unit stats Get/Set (D2Common GetUnitStat / SetUnitStat) are jump stubs
 // through the game's own table; Set is a set, not an add (native fills life
@@ -241,6 +244,7 @@ bool Qualifies(uintptr_t attacker,uintptr_t defender) {
 struct RollContext {uintptr_t attacker=0;bool missile=false;};
 thread_local RollContext roll;
 thread_local Seed acceptedRoll;
+void IncomingRoll(uintptr_t attacker,uintptr_t defender,bool hit);
 int Hit(uintptr_t attacker,uintptr_t defender,int accuracy,int missile) {
     const auto saved=roll;const bool savedMelee=meleeHit;
     roll={};
@@ -262,6 +266,7 @@ int Hit(uintptr_t attacker,uintptr_t defender,int accuracy,int missile) {
     }
     const int result=originalHit(attacker,defender,accuracy,missile);
     roll=saved;meleeHit=savedMelee;
+    if(!local&&!missile)IncomingRoll(attacker,defender,result!=0);
     return result;
 }
 Seed* GetSeed(uintptr_t unit) {
@@ -394,6 +399,36 @@ int GuardedBlock(uintptr_t game,uintptr_t attacker,uintptr_t defender,int avoid,
         }
     }
     return result;
+}
+// A monster's melee to-hit result against the local player. A miss never
+// reaches the block check, yet the player saw the attack and answered it: a
+// timed parry swing still staggers the attacker. Native hit/miss is unchanged.
+void IncomingRoll(uintptr_t attacker,uintptr_t defender,bool hit) {
+    if(!guardChecked||!guardEnabled.load(std::memory_order_relaxed)||!enabled.load(std::memory_order_relaxed)||!ready.load(std::memory_order_relaxed))return;
+    uint32_t id=0,a[3]{},d[3]{};
+    if(!LocalPlayerId(id)||!Read(attacker,a)||!Read(defender,d)||!IncomingContact(id,a[0],d[0],d[2]))return;
+    if(hit){++incomingHits;return;}   // a hit is judged at the block check
+    ++incomingMisses;
+    GuardShared g;{std::lock_guard lock(guardMutex);g=guard;}
+    const auto now=GetTickCount64();
+    if(!g.eligible||g.session!=gamestate::LocalPlayer()||now-g.at>250)return;
+    float ax=0,az=0,px=0,pz=0;
+    if(!GridPosition(attacker,ax,az)||!GridPosition(defender,px,pz))return;
+    const framevr::math::Vec to{(ax-px)/g.upm,0,(az-pz)/g.upm};
+    const uint64_t attackAt=melee::AttackStart(a[2]);const auto t=GuardTuning();
+    const auto v=framevr::guard::Judge(g.state,to,now,t,attackAt);
+    if(guardTrace.load(std::memory_order_relaxed)) {
+        const auto& s=g.state;
+        char line[300];snprintf(line,sizeof line,
+            "Frame guard miss: monster=%u class=%u verdict=%s parry=%s raised=%d attacker=%.2f m snap_age=%lld ms snap_spent=%d attack_age=%lld ms",
+            a[2],a[1],v==framevr::guard::Verdict::Parry?"PARRY":"MISSED",framevr::guard::ParryMissName(framevr::guard::ParryCheck(s,to,now,t,attackAt)),
+            int(s.raised),std::hypot(to.x,to.z),s.snapAt&&now>=s.snapAt?(long long)(now-s.snapAt):-1LL,int(s.snapUsed),
+            attackAt&&now>=attackAt?(long long)(now-attackAt):-1LL);
+        framevr::logging::Write(line);
+    }
+    if(v!=framevr::guard::Verdict::Parry)return;
+    {std::lock_guard lock(guardMutex);framevr::guard::SpendParry(guard.state,g.state.snapAt);}
+    if(melee::QueueParry(a[2],-1)){++guardParries;++missParries;framevr::ShieldGuardImpact(true);}   // -1: no shield wear to refund
 }
 // A block/dodge check made inside a native melee hit check stays native.
 // Outside one (or after it returns) the contact_hits bypass still applies.
@@ -588,8 +623,9 @@ void Report() {
         char line[160];snprintf(line,sizeof line,"Frame riposte: landed=%u",rl);
         framevr::logging::Write(line);
     }
-    if(gb||go||gp||gu||gf||fh||gl) {
-        char guardLine[260];snprintf(guardLine,sizeof guardLine,"Frame guard: blocked=%u open=%u parries=%u swings_too_late=%u attack_start_known=%u no_block_roll=%u position_fallback=%u enemy_forced_hits=%u",gb,go,gp,gl,ga,gu,gf,fh);
+    const auto ih=incomingHits.exchange(0),im=incomingMisses.exchange(0),mp=missParries.exchange(0);
+    if(gb||go||gp||gu||gf||fh||gl||ih||im) {
+        char guardLine[360];snprintf(guardLine,sizeof guardLine,"Frame guard: blocked=%u open=%u parries=%u swings_too_late=%u attack_start_known=%u no_block_roll=%u position_fallback=%u enemy_forced_hits=%u incoming_hits=%u incoming_misses=%u miss_parries=%u",gb,go,gp,gl,ga,gu,gf,fh,ih,im,mp);
         framevr::logging::Write(guardLine);
     }
     const auto m=meleeChecks.exchange(0),p=missileChecks.exchange(0),r=rolls.exchange(0),b=blocks.exchange(0),d=dodges.exchange(0),f=failed.exchange(0);

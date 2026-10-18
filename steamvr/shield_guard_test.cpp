@@ -179,6 +179,13 @@ int main() {
          assert(Judge(g,from,n,t)==Verdict::Open&&ParryCheck(g,from,n,t)==ParryMiss::Side);
      }
      assert(Judge(g,{-1.5f,0,-.2f},n,t)==Verdict::Parry);}                // the shield's own side
+    // A big swing may finish with the shield beside the head, slightly behind
+    // the eyes along the attack line (log 2026-10-18: ~10 cm), not further.
+    {State g;uint64_t n=43600;Hold(g,swingFrom,true,n,300,t);Move(g,swingFrom,swingTo,true,n,90,t);
+     Pose p=Surface(swingTo,view,++n);p.center={-.50f,1.75f,.08f};framevr::guard::Update(g,p,true,true,n,true,t);
+     assert(Judge(g,ahead,n,t)==Verdict::Parry);
+     p.center.z=.15f;p.at=++n;framevr::guard::Update(g,p,true,true,n,true,t);
+     assert(Judge(g,ahead,n,t)==Verdict::Open&&ParryCheck(g,ahead,n,t)==ParryMiss::Side);}
     // Diagnostics name why a raised guard did not parry.
     {State g;uint64_t n=43800;Hold(g,chest,true,n,300,t);
      assert(ParryCheck(g,ahead,n,t)==ParryMiss::NoSwing);

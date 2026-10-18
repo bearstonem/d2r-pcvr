@@ -7,7 +7,7 @@ namespace fixture {
 uintptr_t imageBase=0x140000000;
 uint64_t relocation=0;
 uint64_t session=1;
-unsigned nativeCalls=0,impacts=0;
+unsigned nativeCalls=0,impacts=0,parries=0;int parryDurability=0;
 bool serve=true;
 std::string log;
 struct Unit {
@@ -36,7 +36,7 @@ bool Hook(uint64_t,const void*,uint32_t,void*,void**){return false;}
 }
 namespace framevr::logging {void Write(const char* line){fixture::log+=line;fixture::log+='\n';}}
 namespace framevr {void ShieldGuardImpact(bool){++fixture::impacts;}void ShieldGuardState(bool,bool){}}
-namespace melee {bool QueueParry(uint32_t,int){return false;}uint64_t AttackStart(uint32_t){return 0;}void QueueBlockSound(){}}
+namespace melee {bool QueueParry(uint32_t,int durability){++fixture::parries;fixture::parryDurability=durability;return true;}uint64_t AttackStart(uint32_t){return 0;}void QueueBlockSound(){}}
 
 int main() {
     using namespace combat;
@@ -101,6 +101,30 @@ int main() {
     assert(Block(123,monster.Address(),player.Address(),7,0)==9&&!guard.state.snapUsed);
     fixture::serve=false;assert(block()==9&&!guard.state.snapUsed);
     fixture::serve=true;assert(block()==1&&guard.state.snapUsed);
+    // A melee attack that misses its native to-hit roll never reaches the block
+    // check. A timed parry swing still staggers it, once, with no shield wear
+    // to refund; without a live swing a miss stays silent. Hits wait for the
+    // block check, and native hit/miss is never changed.
+    ConfigureGuard(true,750,true);prime();
+    {const auto queued=fixture::parries,taps=fixture::impacts;
+     const unsigned misses=incomingMisses,hits=incomingHits,missed=missParries;
+     IncomingRoll(monster.Address(),player.Address(),false);
+     assert(fixture::parries==queued&&fixture::impacts==taps&&incomingMisses==misses+1);
+     assert(fixture::log.find("Frame guard miss: monster=9 class=0 verdict=MISSED parry=no_swing")!=std::string::npos);
+     guard.state.snapAt=guard.at;guard.state.snapUsed=false;
+     IncomingRoll(monster.Address(),player.Address(),true);
+     assert(fixture::parries==queued&&!guard.state.snapUsed&&incomingHits==hits+1);
+     IncomingRoll(monster.Address(),player.Address(),false);
+     assert(fixture::parries==queued+1&&fixture::parryDurability==-1&&guard.state.snapUsed&&missParries==missed+1&&fixture::impacts==taps+1);
+     assert(fixture::log.find("Frame guard miss: monster=9 class=0 verdict=PARRY parry=ok")!=std::string::npos);
+     IncomingRoll(monster.Address(),player.Address(),false);
+     assert(fixture::parries==queued+1);                                     // one parry per swing
+     // Attacks on another player, and Classic, are not counted or parried.
+     prime();guard.state.snapAt=guard.at;guard.state.snapUsed=false;
+     const unsigned before=incomingMisses;
+     player.Put(8,43u);IncomingRoll(monster.Address(),player.Address(),false);player.Put(8,42u);
+     ConfigureGuard(false,750);IncomingRoll(monster.Address(),player.Address(),false);ConfigureGuard(true,750,true);
+     assert(incomingMisses==before&&fixture::parries==queued+1&&!guard.state.snapUsed);}
     // A snap turn invalidates the previous world frame until a new pose lands.
     prime();auto changed=guard.state.surface;changed.epoch++;
     PublishGuard(fixture::session,true,false,changed,true,true);assert(block()==0);
