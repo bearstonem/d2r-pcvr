@@ -44,6 +44,24 @@ class StagingTests(unittest.TestCase):
             for name, digest in manifest['sha256'].items():
                 self.assertEqual(hashlib.sha256((root / 'staged' / name).read_bytes()).hexdigest(), digest)
 
+    def test_stages_opt_in_developer_helpers_without_generated_content(self):
+        helpers = {'Launch-Dev-SteamVR.cmd': b'launch fixture',
+                   'steamvr/DEVELOPMENT_SCENARIOS.md': b'instructions fixture',
+                   'steamvr/prepare_dev_scenarios.py': b'prepare fixture'}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = self.stage(root, helpers)
+            for name, data in helpers.items():
+                self.assertEqual((root / 'staged' / name).read_bytes(), data)
+                self.assertEqual(manifest['sha256'][name], hashlib.sha256(data).hexdigest())
+        for name in ('mods/pcvr-dev/pcvr-dev.mpq/data/global/excel/levels.txt',
+                     'steamvr/prepare_private_experiment.py', 'Launch-Private-Experiment.cmd'):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                with self.assertRaisesRegex(ValueError, 'allowlist'):
+                    self.stage(root, {**helpers, name: b'not distributable'})
+                self.assertFalse((root / 'staged').exists())
+
     def test_rejects_game_assets_saves_logs_and_path_traversal(self):
         for name in ('D2R.exe', 'Character.d2s', 'game.log', 'steamvr/d2r_vr_icons/cache.json',
                      '../outside.txt', 'bin/C:escape.dll', 'bin\\escape.dll'):

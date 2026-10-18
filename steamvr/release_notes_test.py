@@ -80,8 +80,8 @@ PCVR_IN_HEADSET_NOTES -->
         with self.assertRaisesRegex(ValueError, 'placeholders'):
             self.read()
         template = template.replace('{Release contributors}', 'Community contributors')
-        template = template.replace('{One short line per player-facing game change; 1-14 lines total.}', 'Improved physical combat.')
-        template = template.replace('{Include a useful control or setting path where it fits.}', 'Added a combat setting.')
+        template = template.replace('{One short line per major feature, meaningful change or major fix; 1-14 lines total.}', 'Improved physical combat.')
+        template = template.replace('{Group related follow-up fixes; include a useful control or setting path where it fits.}', 'Added a combat setting.')
         self.document.write_text(template, encoding='utf-8')
         self.assertEqual(self.read()['lines'], ['Improved physical combat.', 'Added a combat setting.'])
 

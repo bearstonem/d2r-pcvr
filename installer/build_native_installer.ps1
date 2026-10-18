@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory=$true)][string]$PackagePath,
-    [string]$Version = '0.3.17',
+    [string]$Version = '0.3.18',
     [string]$ISCCPath,
     [string]$PythonArchive,
     [string]$OutputDirectory

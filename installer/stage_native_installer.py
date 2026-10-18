@@ -9,7 +9,8 @@ import zipfile
 PYTHON_SHA256 = '4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3'
 ROOT_FILES = {
     'INSTALL.md', 'INSTALL-WINDOWS.md', 'README.md', 'CONTROLS.md', 'RELEASE_NOTES.md',
-    'Launch-VR-SteamVR.cmd', 'Launch-VR-VDXR.cmd', 'Install-Windows.cmd',
+    'Launch-VR-SteamVR.cmd', 'Launch-VR-VDXR.cmd', 'Launch-Dev-SteamVR.cmd', 'Install-Windows.cmd',
+    'steamvr/DEVELOPMENT_SCENARIOS.md',
     'Install-BattleNet-Preview.cmd', 'Uninstall-Windows.cmd', 'THIRD_PARTY.md', 'LICENSE', 'd2r_pcvr.ini',
     'reshade/D2R_DepthFog.fx', 'third_party/minhook/LICENSE.txt', 'external/reshade/LICENSE.md',
     'bin/d2rl-pcvr.dll', 'bin/openxr_loader.dll', 'bin/CascLib.dll', 'steamvr/vendor/bitknit.py',
@@ -17,7 +18,7 @@ ROOT_FILES = {
 SCRIPTS = {'setup_windows.ps1', 'setup_windows.py', 'setup_native.py', 'uninstall_windows.py', 'hdr_check.py',
            'steam_config.py', 'install.py', 'mod_identity.py', 'launch_windows.py', 'prepare_icons.py',
            'steam_assets.py', 'game_assets.py', 'game_install.py', 'casc_assets.py',
-           'prepare_potions.py', 'potion_assets.py', 'prepare_arcane_sky.py'}
+           'prepare_potions.py', 'potion_assets.py', 'prepare_arcane_sky.py', 'prepare_dev_scenarios.py'}
 
 
 def safe_name(name):
