@@ -148,6 +148,22 @@ int main(){
     Check(before.values[DrawDistance]==2&&before.values[ObjectDistance]==300,"missing draw distances do not silently select 4 rings and radius 1000");
     Check(WritePrivateProfileStringW(L"render",L"rings",L"6",name),"restore explicit terrain distance");
     vrsettings::Poll(name);before=vrsettings::Read();
+    // NTFS stamps writes with the system clock tick (FAT: two seconds). A quick
+    // same-size edit can keep the cached write time; it must still reload.
+    {
+        Check(WritePrivateProfileStringW(L"hud",L"ordinary_mob_bars",L"0",name),"write hidden ordinary bars");
+        vrsettings::Poll(name);
+        WIN32_FILE_ATTRIBUTE_DATA cached{};
+        Check(GetFileAttributesExW(name,GetFileExInfoStandard,&cached)&&vrsettings::Read().values[OrdinaryMobBars]==0,"hidden ordinary bars loaded");
+        Check(WritePrivateProfileStringW(L"hud",L"ordinary_mob_bars",L"1",name),"same-size external edit");
+        const HANDLE file=CreateFileW(name,FILE_WRITE_ATTRIBUTES,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,0,nullptr);
+        Check(file!=INVALID_HANDLE_VALUE&&SetFileTime(file,nullptr,nullptr,&cached.ftLastWriteTime),"simulate an edit within one file clock tick");
+        CloseHandle(file);
+        vrsettings::Poll(name);
+        Check(vrsettings::Read().values[OrdinaryMobBars]==1,"same-size edit with an unchanged write time reloads");
+        Check(WritePrivateProfileStringW(L"hud",L"ordinary_mob_bars",nullptr,name),"restore missing ordinary bars");
+        vrsettings::Poll(name);
+    }
     // Old separate switches migrate only until an explicit combined choice exists.
     for(int map:{0,1})for(int compass:{0,1}) {
         Check(WritePrivateProfileStringW(L"interactions",L"wrist_map",map?L"1":L"0",name),"write legacy map preference");

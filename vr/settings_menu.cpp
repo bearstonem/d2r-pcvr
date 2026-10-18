@@ -39,6 +39,13 @@ Values Load(const wchar_t* path){
 bool SameFile(const WIN32_FILE_ATTRIBUTE_DATA& a,const WIN32_FILE_ATTRIBUTE_DATA& b){
     return CompareFileTime(&a.ftLastWriteTime,&b.ftLastWriteTime)==0&&a.nFileSizeLow==b.nFileSizeLow&&a.nFileSizeHigh==b.nFileSizeHigh;
 }
+// NTFS stamps writes with the system clock tick (FAT: two seconds), so a quick
+// same-size edit can keep the cached time and size. Trust the cache only once
+// its write time predates the load by more than that resolution.
+bool Settled(const FILETIME& written,const FILETIME& loaded){
+    const auto ticks=[](const FILETIME& t){return (ULONGLONG(t.dwHighDateTime)<<32)|t.dwLowDateTime;};
+    return ticks(written)+20000000ull<ticks(loaded);
+}
 Result Save(const wchar_t* path,const Request& r){
     WIN32_FILE_ATTRIBUTE_DATA before{},after{};
     if(!GetFileAttributesExW(path,GetFileExInfoStandard,&before))return Result::Failed;
@@ -98,12 +105,16 @@ bool Poll(const wchar_t* path){
     static std::wstring cachedPath;
     static WIN32_FILE_ATTRIBUTE_DATA cachedAttributes{};
     static bool cached=false;
+    static FILETIME loadedAt{};
     WIN32_FILE_ATTRIBUTE_DATA attributes{};
     const bool exists=GetFileAttributesExW(path,GetFileExInfoStandard,&attributes)&&!(attributes.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY);
-    if(!request.sequence&&cached&&exists&&cachedPath==path&&SameFile(cachedAttributes,attributes))return false;
+    if(!request.sequence&&cached&&exists&&cachedPath==path&&SameFile(cachedAttributes,attributes)&&
+        Settled(cachedAttributes.ftLastWriteTime,loadedAt))return false;
+    FILETIME now{};GetSystemTimeAsFileTime(&now);
     const auto result=request.sequence?Save(path,request):Result::None;
     const auto values=Load(path);
     cached=GetFileAttributesExW(path,GetFileExInfoStandard,&cachedAttributes)&&!(cachedAttributes.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY);
+    loadedAt=now;
     cachedPath=path;const bool ready=cached;
     std::lock_guard lock(mutex);
     if(Changed(published.values,values)||published.ready!=ready||request.sequence)++published.revision;
