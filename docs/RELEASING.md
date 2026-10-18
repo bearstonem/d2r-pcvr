@@ -8,6 +8,14 @@ describe player-facing game changes, with contributor credits beside the work.
 Do not add template maintenance, release tooling or test infrastructure as
 release features. Verification belongs in its separate section.
 
+Select the main features, meaningful gameplay changes and major bug fixes;
+release notes are not a list of every merged PR. Group related implementation
+steps and follow-up corrections into the feature's finished player experience.
+Leave out tiny fixes and revisions to unreleased attempts unless they have a
+significant separate impact. Use the same broad selection for the in-headset
+feature summary and announcement drafts; the source comparison provides the
+complete change history.
+
 ## Prepare the content and version
 
 1. Choose the next version and review the changes merged since the previous tag.

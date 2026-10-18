@@ -650,6 +650,14 @@ With **Smite** selected, an energetic
 left-arm swing or thrust that intersects an eligible creature requests one native
 Smite against that creature. A stationary shield cannot bash; one continuous
 stroke requests at most one bash, and a deliberate reversal/settle rearms it.
+**VR Settings > Combat > Shield bash speed** controls this gesture in both melee
+modes (default 2 m/s; 0.75-10 m/s in 0.25 steps; `[gameplay] shield_bash_speed`).
+A bash needs 12 cm of net tracked hand travel within 200 ms and must meet the
+selected speed at contact. Wrist rotation alone cannot arm, power or rearm a bash;
+shield size therefore cannot amplify wrist twisting into an attack. The contact
+sweep covers only the current fast interval, not earlier slow approaches.
+Applying a new bash speed invalidates old queued/posed contacts. Native skill
+selection, mana costs, trigger casts, blocking and parries are unchanged.
 Native reach, walls, resources, animation/cadence, damage, stun and knockback
 remain authoritative. Left-hand haptics acknowledge native acceptance, not proof
 of positive damage. Physical blocking and parrying are described under melee rules below.
@@ -713,7 +721,7 @@ estimated motion at contact, including follow-through. The estimate combines han
 translation with blade-axis rotation, capped by tracked hand rotation; twisting a
 shaft in place does not power a hit. The sweep follows the rotating blade’s arc
 between the latest poses without replaying earlier unpowered brushes when a
-stroke arms. Shield/Smite gesture thresholds remain unchanged. Swing speed
+stroke arms. Shield/Smite uses its separate hand-travel threshold below. Swing speed
 is adjustable under **VR Settings > Combat > Melee hit speed**
 (minimum 1.5 m/s, no upper cap, 0.25 steps, default 12.0). Apply saves
 `[gameplay] melee_hit_speed` and updates the detector live; changing it clears
@@ -851,16 +859,20 @@ shield is held, not by the block-chance roll. A monster still has to pass its
 native to-hit roll; then its native block roll (44B930) takes the physical verdict
 instead of a random one. Classic keeps the native roll.
 
-- **Block**: the shield hand up in front of the chest (measured from the head in its
-  turn: forward -0.20 to 0.85 m, up -0.62 to 0.30 m, out to 0.65 m on the shield's
-  side or 0.50 m across; held guards get 5 cm more), facing the attacker within
-  60 degrees of where the headset looks. Walking or running (PlrMode WL/RN/TW)
-  drops the guard. Every block plays `[gameplay] block_sound` (default 398,
-  block_weapon_1) and taps the left controller.
+- **Block**: raise the shield's broad face between the attacker and your torso.
+  Walking/running and looking away do not cancel a valid guard. Recognized held
+  meshes use their current rendered bone bounds and native item transform, so
+  wrist rotation and shield size change coverage. The projected face width has
+  a 12 cm torso allowance; nearly edge-on faces are rejected. Height uses the
+  visible face, allowing a lower grip on a tall shield. Unsupported meshes use
+  the posed-attachment fallback. This approximates a native 2D incoming hit,
+  not per-triangle projectile collision; see [shield blocking](../docs/SHIELD_BLOCKING.md).
+  Every block plays `[gameplay] block_sound` (default 398, block_weapon_1) and
+  taps the left controller. Native unblockable damage remains unblockable.
 - **Parry**: a diagonal shield swing across the view, lower right to upper left for
   a left-hand shield (at least 15 cm within 120 ms, within ~35 degrees of the
   diagonal), after the attacker's attack began (its mode change, 34E5F0) and at
-  most `[gameplay] parry_ms` (VR Settings > Combat, default 400 ms, 0 = off) before
+  most 400 ms (fixed) before
   the hit, from a melee attacker within 3 m. One parry per swing. The attacker is
   put into native hit recovery (445E60) on a later game update, any shield wear
   the game applied for that hit is restored (`shield_wear_refunded` in `Frame
@@ -875,9 +887,15 @@ instead of a random one. Classic keeps the native roll.
   sliders (re-read from Settings.json when the game saves it), times
   `riposte_volume` (100).
 - **Guard strain light**: every blocked hit (not a parry) strains the guard by
-  `guard_strain_per_block` % (10). Strain shows as a soft vignette at the rim of the
-  view (a pale white light by default; VR Settings > Combat > **Guard strain
-  color** switches it to a black shadow, `guard_strain_dark`, and
+  `guard_strain_per_block` % (10). **VR Settings > Combat > Guard strain buildup**
+  selects Slow / Medium / Fast (`guard_strain_speed` 0 / 1 / 2, default Medium).
+  Slow halves strain per block; Fast doubles it. With default tuning, full
+  strain takes about 20 / 10 / 5 blocks without lowering the shield. The
+  vignette size, lowering/reset time and blocking rules stay the same. Existing
+  custom `guard_strain_per_block` tuning is multiplied, not overwritten. Strain shows as a soft vignette at the
+  rim of the view (a pale white light by default; VR Settings > Combat > **Guard strain
+  color** switches it to a black shadow, `guard_strain_dark`, drawn denser by
+  `guard_strain_dark_density` (2.5) so it hides as much as the light, and
   `guard_strain_color` takes any RRGGBB hex, default FFF7EA), beneath the blood on
   the visor, creeping inward as it builds;
   each block sends one smooth pulse in from the edge. At full strain the guard

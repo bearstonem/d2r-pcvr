@@ -190,10 +190,10 @@ int main() {
         sample.player={0,0,0};sample.hand.p={0,1,0};sample.blade={{0,.8f,0},{0,1.2f,0},.15f};
         for(int i=0;i<20;++i){sample.time+=.02;assert(!e.Step(sample,sweep));}
         framevr::melee::HitSet hits;int bashes=0;
-        for(int i=0;i<25;++i){sample.time+=.02;sample.hand.p.z-=.04f;sample.blade.base.z-=.04f;sample.blade.tip.z-=.04f;
+        for(int i=0;i<25;++i){sample.time+=.02;sample.hand.p.z-=.05f;sample.blade.base.z-=.05f;sample.blade.tip.z-=.05f;
             if(e.Step(sample,sweep)&&hits.Insert(1,sweep.stroke,UINT32_MAX))++bashes;}
         assert(bashes==1); // keep observing during wind-up: no second bash from this swing
-        for(int i=0;i<10;++i){sample.time+=.02;sample.hand.p.z+=.04f;sample.blade.base.z+=.04f;sample.blade.tip.z+=.04f;
+        for(int i=0;i<10;++i){sample.time+=.02;sample.hand.p.z+=.05f;sample.blade.base.z+=.05f;sample.blade.tip.z+=.05f;
             if(e.Step(sample,sweep)&&hits.Insert(1,sweep.stroke,UINT32_MAX))++bashes;}
         assert(bashes==2);++sample.skillContext;sample.time+=.02;assert(!e.Step(sample,sweep));
         sample.active=false;sample.time+=.02;assert(!e.Step(sample,sweep));

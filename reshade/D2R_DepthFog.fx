@@ -1700,6 +1700,18 @@ uniform float3 BoneZ < hidden = true; > = float3(0.0, 0.0, 1.0);
 uniform float3 PhantomEye0 < hidden = true; > = float3(0.0, 0.0, 0.0);
 uniform float3 PhantomEye1 < hidden = true; > = float3(0.0, 0.0, 0.0);
 
+// Developer shield guard inspection. The CPU supplies the exact guard pose;
+// amber denotes a fallback reference plane, cyan a measured item face.
+uniform bool ShieldDebugOn < hidden = true; > = false;
+uniform bool ShieldDebugHit < hidden = true; > = false;
+uniform float3 ShieldDebugCenter < hidden = true; > = float3(0,0,0);
+uniform float3 ShieldDebugRight < hidden = true; > = float3(0,0,0);
+uniform float3 ShieldDebugUp < hidden = true; > = float3(0,0,0);
+uniform float3 ShieldDebugNormal < hidden = true; > = float3(0,0,0);
+uniform float3 ShieldDebugColor < hidden = true; > = float3(0,1,1);
+uniform float3 ShieldDebugHitFrom < hidden = true; > = float3(0,0,0);
+uniform float3 ShieldDebugHitTo < hidden = true; > = float3(0,0,0);
+
 // A point relative to the eye -> its pixel; z < 0 behind the eye.
 float3 PhantomPixel(float3 v, int eye)
 {
@@ -1732,6 +1744,25 @@ float3 Segment(float3 c, float2 p, float3 a3, float3 b3, int eye, float3 col)
     const float d = length(p - (a.xy + ab * t));
     return lerp(c, col, 1.0 - smoothstep(1.0, 2.5, d));
 }
+float3 ShieldDebug(float3 c, float2 pixel, int eye)
+{
+    if (!ShieldDebugOn) return c;
+    const float3 o = ShieldDebugCenter, r = ShieldDebugRight, u = ShieldDebugUp;
+    const float3 n = ShieldDebugNormal, colour = ShieldDebugColor;
+    c = Segment(c, pixel, o-r-u, o+r-u, eye, colour);
+    c = Segment(c, pixel, o+r-u, o+r+u, eye, colour);
+    c = Segment(c, pixel, o+r+u, o-r+u, eye, colour);
+    c = Segment(c, pixel, o-r+u, o-r-u, eye, colour);
+    c = Segment(c, pixel, o-r*0.15, o+r*0.15, eye, colour);
+    c = Segment(c, pixel, o-u*0.15, o+u*0.15, eye, colour);
+    // Both face directions participate in coverage, so show both normals.
+    c = Segment(c, pixel, o-n, o+n, eye, colour);
+    c = Segment(c, pixel, o+n, o+n*0.75+r*0.15, eye, colour);
+    c = Segment(c, pixel, o+n, o+n*0.75-r*0.15, eye, colour);
+    // Native combat gives a horizontal attacker direction, not an impact point.
+    if (ShieldDebugHit) c = Segment(c, pixel, ShieldDebugHitFrom, ShieldDebugHitTo, eye, colour);
+    return c;
+}
 float3 Phantom(float4 pos, float2 uv, int eye)
 {
     float3 c = tex2D(FogColorSmp, uv).rgb;
@@ -1741,7 +1772,7 @@ float3 Phantom(float4 pos, float2 uv, int eye)
         c = Segment(c, pos.xy, BoneO, BoneY, eye, float3(0.2, 0.4, 1.0));
         c = Segment(c, pos.xy, BoneO, BoneZ, eye, float3(1.0, 0.9, 0.1));
     }
-    return c;
+    return ShieldDebug(c, pos.xy, eye);
 }
 float3 PS_Phantom(float4 pos : SV_Position, float2 uv : TEXCOORD) : SV_Target { return Phantom(pos, uv, 0); }
 float3 PS_PhantomR(float4 pos : SV_Position, float2 uv : TEXCOORD) : SV_Target { return Phantom(pos, uv, 1); }

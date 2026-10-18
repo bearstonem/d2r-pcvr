@@ -39,6 +39,7 @@
 #include "interaction_ui.h"
 #include "blood_screen.h"
 #include "guard_strain.h"
+#include "guard_strain_paint.h"
 #include "heartbeat.h"
 #include "wrist_compass.h"
 #include "interaction_paint.h"
@@ -151,10 +152,9 @@ strain::Output strainOutput;
 std::mutex strainTuningMutex;strain::Tuning strainTuning;
 std::atomic<unsigned> guardBlockEvents{0},guardParryEvents{0};
 std::atomic<ULONGLONG> guardStateAt{0};std::atomic<bool> guardEligible{false},guardRaised{false};
-struct StrainJob {float edge=1,alpha=0,feather=strain::Feather;uint32_t color=0;};
-LatestWorker<StrainJob,std::vector<uint8_t>> strainPainter([](const StrainJob& job){return strain::Compose(job.edge,job.alpha,job.feather,job.color);});
+strain::Painter strainPainter;
 XrSwapchain strainChain=XR_NULL_HANDLE;
-uint64_t strainPaintKey=~0ull,strainRequestedKey=~0ull,strainPaintRequest=0;
+uint64_t strainPaintKey=~0ull,strainPaintSession=0;
 ULONGLONG strainPaintAt=0;
 bool strainAtlasPending=false,strainImageReady=false,strainSlotReported=false;
 // Guard strain heartbeat: its own waveOut stream, since PlaySound plays one sound
@@ -1608,6 +1608,7 @@ void Input() {
         strain::Tuning tuning;{std::lock_guard lock(strainTuningMutex);tuning=strainTuning;}
         const float lightOn=tuning.brightness;   // [gameplay] guard_strain_light
         tuning.brightness=1;   // strain itself runs regardless of the light; only the drawing is scaled
+        tuning.speed=strain::BuildSpeed(int(hudSettings.values[settings::StrainSpeed]));
         strain::Input in;
         in.time=interactionInput.time;in.session=interactionInput.session;
         in.enabled=hudSettings.values[settings::MeleeRules]<.5f&&motionControls.load();
@@ -1621,16 +1622,21 @@ void Input() {
             Say("Frame guard strain: guard broken; lower the shield to clear the light");
         }
         if(strainOutput.clearedNow)Say("Frame guard strain: cleared");
-        // Repaint only on a visible change, at most 25 Hz (a small smooth image).
-        if(!strainOutput.visible&&!strainPaintRequest)strainPaintKey=~0ull; // never reshow a stale light
-        const auto key=strain::PaintKey(strainOutput.edge,strainOutput.alpha,tuning.feather,tuning.color);
-        if(strainOutput.visible&&key!=strainPaintKey&&now>=strainPaintAt&&(!strainPaintRequest||key!=strainRequestedKey)) {
-            strainPaintRequest=strainPainter.Submit({strainOutput.edge,strainOutput.alpha,tuning.feather,tuning.color});strainRequestedKey=key;strainPaintAt=now+40;
+        // Consume completed images before scheduling more work. Never replace an
+        // in-flight request: at <=25 FPS that discarded every animated result.
+        if(in.session!=strainPaintSession||!strainOutput.visible) {
+            strainPainter.Discard();strainPaintKey=~0ull;strainImageReady=false;
+            strainPaintAt=0;strainPaintSession=in.session;
         }
-        std::vector<uint8_t> painted;
-        if(strainPaintRequest&&!strainAtlasPending&&atlasUploads.size()<3&&strainPainter.Take(strainPaintRequest,painted)) {
-            if(!painted.empty()&&UploadAtlas(strainChain,atlasFormat,strain::Size,strain::Size,painted,true,&strainAtlasPending))strainPaintKey=strainRequestedKey;
-            strainPaintRequest=0;
+        if(strainOutput.visible) {
+            strain::PaintImage painted;
+            if(!strainAtlasPending&&atlasUploads.size()<3&&strainPainter.Take(painted)) {
+                if(!painted.pixels.empty()&&UploadAtlas(strainChain,atlasFormat,strain::Size,strain::Size,painted.pixels,true,&strainAtlasPending))
+                    strainPaintKey=painted.key;
+            }
+            const auto key=strain::PaintKey(strainOutput.edge,strainOutput.alpha,tuning.feather,tuning.color,tuning.density);
+            if(key!=strainPaintKey&&now>=strainPaintAt&&!strainPainter.Busy()&&
+               strainPainter.Submit({strainOutput.edge,strainOutput.alpha,tuning.feather,tuning.color,tuning.density}))strainPaintAt=now+40;
         }
         // Heartbeat: queue the next beat ~80 ms before the current one ends, at the
         // strain's loudness and tempo now. No strain: the last beat finishes, then silence.
@@ -1867,6 +1873,7 @@ void Input() {
         sample.equipment=motionInput.equipment;sample.active=motionInput.active&&motionOutput.meleeContact;
         sample.minWeaponSpeed=gestureSettings[settings::MeleeHitSpeed];
         sample.minThrustSpeed=gestureSettings[settings::MeleeThrustSpeed];
+        sample.minShieldBashSpeed=gestureSettings[settings::ShieldBashSpeed];
         const auto weapons=gamestate::MeleeEquipment();
         const bool dual=dualwield::Eligible(skel::HeroClass(),weapons);
         if(dual)sample.weapons=weapons;
@@ -2815,7 +2822,7 @@ void FinishShieldSkill(bool accepted) {
 void MeleeImpact(int hand) {if(hand>=0&&hand<2)meleeImpactAt[hand]=GetTickCount64();}
 void ShieldGuardImpact(bool parry) {shieldImpactAt=GetTickCount64();(parry?guardParryEvents:guardBlockEvents).fetch_add(1);}
 void ShieldGuardState(bool eligible,bool raised) {guardStateAt=GetTickCount64();guardEligible=eligible;guardRaised=raised;}
-void ConfigureGuardStrain(float perBlock,float resetSeconds,float clear,float breatheSeconds,float softness,float brightness,uint32_t color) {
+void ConfigureGuardStrain(float perBlock,float resetSeconds,float clear,float breatheSeconds,float softness,float brightness,uint32_t color,float density) {
     strain::Tuning t;
     t.perBlock=std::isfinite(perBlock)?std::clamp(perBlock,0.f,1.f):t.perBlock;
     t.resetSeconds=std::isfinite(resetSeconds)?std::clamp(resetSeconds,0.f,10.f):t.resetSeconds;
@@ -2824,6 +2831,7 @@ void ConfigureGuardStrain(float perBlock,float resetSeconds,float clear,float br
     t.feather=std::isfinite(softness)?std::clamp(softness,.05f,1.f):t.feather;
     t.brightness=std::isfinite(brightness)?std::clamp(brightness,0.f,1.f):t.brightness;
     t.color=color&0xFFFFFFu;
+    t.density=std::isfinite(density)?std::clamp(density,1.f,6.f):1.f;
     std::lock_guard lock(strainTuningMutex);strainTuning=t;
 }
 void ConfigureHeartbeat(float volume,float bpmMin,float bpmMax,float fadeSeconds,const wchar_t* file) {
@@ -3013,7 +3021,7 @@ void Shutdown(bool preserveResolution) {
     bloodScreen.Reset();bloodOutput={};bloodShown=0;bloodPaintKey=bloodRequestedKey=~0ull;bloodPaintRequest=0;bloodPaintAt=0;bloodAtlasPending=bloodImageReady=false;
     if(strainChain&&pDestroySwapchain)pDestroySwapchain(strainChain);strainChain=XR_NULL_HANDLE;
     heartStream.Stop();heartPlaying=false;heartLevel.Reset();heartAt=0;
-    guardStrain.Reset();strainOutput={};strainPaintKey=strainRequestedKey=~0ull;strainPaintRequest=0;strainPaintAt=0;strainAtlasPending=strainImageReady=strainSlotReported=false;
+    guardStrain.Reset();strainOutput={};strainPaintKey=~0ull;strainPaintSession=0;strainPaintAt=0;strainAtlasPending=strainImageReady=strainSlotReported=false;
     if(pointerChain&&pDestroySwapchain)pDestroySwapchain(pointerChain);pointerChain=XR_NULL_HANDLE;
     if(aimSpace&&pDestroySpace)pDestroySpace(aimSpace);aimSpace=XR_NULL_HANDLE;
     if(leftAimSpace&&pDestroySpace)pDestroySpace(leftAimSpace);leftAimSpace=XR_NULL_HANDLE;

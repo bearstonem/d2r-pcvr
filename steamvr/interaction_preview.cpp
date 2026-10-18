@@ -202,6 +202,9 @@ int main(int argc,char** argv) {
         o.devPage=1;s.devClass=-1;const auto unavailable=Paint(s,o,-1);
         if(unavailable==hovered)return 71;
         if(!SavePng(argv[1],hovered,1024,1024))return 72;
+        s.devClass=3;s.devDebugDraws=true;o.devPage=1;o.hover=DeveloperCell(framevr::dev::DebugDrawsChoice);o.result=Result::DebugUpdated;
+        const auto debug=Paint(s,o,-1);s.devDebugDraws=false;
+        if(debug==Paint(s,o,-1)||!SavePng((std::string(argv[1])+".debug-on.png").c_str(),debug,1024,1024))return 78;
         std::puts("Development preview: page, hover and unavailable state passed");return 0;
     }
     s.health=74;s.maxHealth=100;s.mana=39;s.maxMana=80;

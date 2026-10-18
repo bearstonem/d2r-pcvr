@@ -241,6 +241,22 @@ int main(){
         const auto beforeStale=commands.size();++local;Run(travelTask);--local;
         assert(commands.size()==beforeStale&&devscenarios::Status().result==Result::Refused);
     }
+    // Debug draws are a session toggle, with no console/item operations. A
+    // cancelled or stale queued action cannot unexpectedly enable the overlay.
+    const auto debugCommands=commands.size();const auto debugItems=itemCalls;
+    assert(!devscenarios::DebugDraws());
+    devscenarios::execute=nullptr;
+    for(bool expected:{true,false}) {
+        devscenarios::Request(Make(DebugDrawsChoice));assert(!tasks.back().game);Run(tasks.size()-1);
+        assert(devscenarios::Status().result==Result::DebugUpdated&&devscenarios::DebugDraws()==expected);
+        Snapshot snapshot;devscenarios::Capture(snapshot);assert(snapshot.devDebugDraws==expected);
+    }
+    devscenarios::Request(Make(DebugDrawsChoice));devscenarios::Cancel();Run(tasks.size()-1);
+    assert(!devscenarios::DebugDraws());
+    devscenarios::Request(Make(DebugDrawsChoice));++local;Run(tasks.size()-1);--local;
+    assert(!devscenarios::DebugDraws()&&devscenarios::Status().result==Result::Refused);
+    assert(commands.size()==debugCommands&&itemCalls==debugItems);
+    devscenarios::execute=Execute;
     inlineQueue=true;devscenarios::Request(Make(3,100));
     assert(devscenarios::Status().sequence==100&&devscenarios::Status().result==Result::Dispatched);
     std::puts("Development backend: isolation, queue routing, cancellation, stale sessions, kit transactions and dispatch results passed");

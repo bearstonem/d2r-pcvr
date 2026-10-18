@@ -197,10 +197,42 @@ int main(){
     }
     {
         Sim s;s.sample.shield=true;s.Step(8);
-        bool bash=false;for(int i=0;i<8;++i)bash|=s.Move({.028f,0,0});
-        Check(bash,"shield retains its existing 1.2 m/s onset threshold");
-        Check(s.Move({.02f,0,0}),"shield retains its existing follow-through threshold");
+        for(int i=0;i<8;++i)Check(!s.Move({.028f,0,0}),"slowly repositioning a guard never bashes");
+        bool bash=false;for(int i=0;i<5;++i)bash|=s.Move({.05f,0,0});
+        Check(bash,"deliberate hand travel powers shield bash at the default two m/s");
+        const auto stroke=s.sweep.stroke;
+        Check(!s.Move({.02f,0,0}),"bash must still meet its threshold at contact");
+        Check(s.Move({.05f,0,0})&&s.sweep.stroke==stroke,"same forward stroke cannot bash twice after slowing");
+        s.sample.minShieldBashSpeed=4;s.Step(8);
+        for(int i=0;i<5;++i)Check(!s.Move({.06f,0,0}),"higher shield threshold takes effect independently of weapon speed");
+        bool strong=false;for(int i=0;i<4;++i)strong|=s.Move({.09f,0,0});
+        Check(strong,"a faster bash meets the adjusted threshold");
     }
+    for(float length:{.25f,1.2f}) {
+        Sim s;s.sample.shield=true;s.Step(8);
+        for(int i=0;i<32;++i) {
+            s.sample.hand.q=math::Yaw(i*.2f);
+            s.sample.blade.tip=s.sample.blade.base+math::Rotate(s.sample.hand.q,{0,0,-length});
+            Check(!s.Step(),"wrist rotation alone cannot bash with either shield size");
+        }
+        for(int i=0;i<24;++i)Check(!s.Move({i%2?.045f:-.045f,0,0}),"fast short guard jitter does not accumulate into a bash");
+    }
+    {
+        Sim s;s.sample.shield=true;s.Step(8);
+        // An earlier low-speed approach arms no retroactive contact sweep.
+        for(int i=0;i<6;++i)s.Move({.015f,0,0});
+        const auto before=s.sample.blade;
+        Check(s.Move({.06f,0,0})&&Length(s.sweep.before.base-before.base)<1e-5f,"bash tests only the current fast contact interval");
+        PoseHistory h;Sample matched;h.Push(1,s.sample);
+        s.sample.minShieldBashSpeed=3;s.sample.time+=.02;h.Push(2,s.sample);
+        Check(!h.Find(1,s.sample.time,matched),"a live bash speed change invalidates old shield geometry");
+    }
+    {
+        Sim s;s.sample.shield=true;s.sample.minShieldBashSpeed=.75f;s.Step(8);
+        bool easy=false;for(int i=0;i<9;++i)easy|=s.Move({.016f,0,0});
+        Check(easy,"lower accessibility threshold still accepts deliberate twelve cm travel");
+    }
+    Check(ShieldBashSpeed(NAN)==2&&ShieldBashSpeed(0)==.75f&&ShieldBashSpeed(99)==10,"shield bash threshold rejects nonfinite and out-of-range values");
     const Body body{{0,.3f,0},{0,1.5f,0},.25f};
     Check(Touches({{-.6f,.8f,-.3f},{-.6f,.8f,.3f},.04f},{{.6f,.8f,-.3f},{.6f,.8f,.3f},.04f},body),"fast blade crossing between endpoints hits");
     Check(!Touches({{-.6f,2.1f,-.3f},{-.6f,2.1f,.3f},.04f},{{.6f,2.1f,-.3f},{.6f,2.1f,.3f},.04f},body),"swing above head misses");

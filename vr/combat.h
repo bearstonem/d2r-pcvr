@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+namespace framevr::guard {struct Pose;struct Debug;}
 
 namespace combat {
 void Configure(bool enabled);
@@ -39,12 +40,11 @@ void NoteRiposte(uint32_t monster);
 // the built-in sound; else a WAV, next to the ini unless a full path).
 // riposte_volume: % on top of the game's own Master x Combat volume (Settings.json).
 void ConfigureRiposte(float bonus,uint32_t windowMs,float volume,const wchar_t* soundFile);
-// UI thread, every tick: where the headset looks on the ground (render X/Z, the way
-// the guard faces); the shield hand from the head in the view's turn (metres, x right,
-// y up, z back) decides raised and the parry swing. leftShield: the shield's hand.
-// posed: the shield is posed on the tracked hand this frame.
-void PublishGuard(uint64_t session,bool eligible,bool posed,const float view[3],float unitsPerMetre,
-                  const float hand[3],bool handOk,bool leftShield);
+// UI thread: one completed shield pose, including its calibrated scale and
+// timestamp. Latest tracking can invalidate it; coverage never follows gaze.
+void PublishGuard(uint64_t session,bool eligible,bool posed,const framevr::guard::Pose& pose,
+                  bool handOk,bool leftShield);
+bool ReadGuardDebug(framevr::guard::Debug& out);
 void Install();
 void Report();
 // The UI-thread local-player accessor is authoritative across area changes;

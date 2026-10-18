@@ -2,7 +2,13 @@
 
 <!-- Maintainers: copy this into RELEASE_NOTES.md when preparing a release.
 Replace every {...} placeholder. Use the same heading order each time; omit
-empty change categories. Keep feature entries about player-facing game changes.
+empty change categories. Curate the broad player-facing improvements, not a
+bullet for every PR. Prioritize new features, meaningful changes to how the
+game plays, and major bug fixes. Combine implementation steps and follow-up
+fixes to the same feature into one entry describing the finished experience.
+Omit tiny fixes, tuning iterations and fixes to unreleased attempts unless they
+have a significant separate effect for players. The source comparison retains
+the complete change history. Apply this same selection to the in-headset summary.
 Do not list work on this template, release automation, tests or internal tools
 as release features. Describe what players can now do and where to find it.
 Keep verification in its own section and credit contributions next to features.
@@ -60,6 +66,6 @@ by **Sergious / BodyWalkVR**, with contributions from the community.
 <!-- PCVR_IN_HEADSET_NOTES
 release: v{VERSION}-windows-preview
 credits: {Release contributors}; Sergious / BodyWalkVR.
-- {One short line per player-facing game change; 1-14 lines total.}
-- {Include a useful control or setting path where it fits.}
+- {One short line per major feature, meaningful change or major fix; 1-14 lines total.}
+- {Group related follow-up fixes; include a useful control or setting path where it fits.}
 PCVR_IN_HEADSET_NOTES -->

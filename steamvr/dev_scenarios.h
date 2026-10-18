@@ -16,8 +16,9 @@ inline constexpr int BowChoice=12;
 inline constexpr int SmallShieldChoice=13;
 inline constexpr int Level10Choice=28,Level30Choice=29,Level60Choice=30,HealChoice=31;
 inline constexpr int StarterPrimaryChoice=32,StarterAlternateChoice=33;
+inline constexpr int DebugDrawsChoice=34;
 inline constexpr int PageSize=14;
-inline constexpr std::array<Choice,34> Choices{{
+inline constexpr std::array<Choice,35> Choices{{
     {"Level 90", "All class skills rank 20 / test attributes", nullptr},
     {"Primary gear", "Class-specific unique equipment", nullptr},
     {"Alternate gear", "Equipment for the other class abilities", nullptr},
@@ -59,6 +60,7 @@ inline constexpr std::array<Choice,34> Choices{{
     {"Heal", "Restore life and mana", "heal"},
     {"Starter primary gear", "Normal base gear / suitable for level 10", nullptr},
     {"Starter alternate gear", "Alternate weapon type / suitable for level 10", nullptr},
+    {"Render debug draws", "Toggle shield block outline and hit feedback", nullptr},
 }};
 // Stable action IDs are independent of their presentation order.
 inline constexpr int PageCount=4;
@@ -71,7 +73,7 @@ inline constexpr const char* PageHelp[]={
 };
 inline constexpr std::array<std::array<int,PageSize>,PageCount> Pages{{
     {{Level10Choice,Level30Choice,Level60Choice,0,HealChoice,-1,-1,-1,-1,-1,-1,-1,-1,-1}},
-    {{StarterPrimaryChoice,StarterAlternateChoice,1,2,CrossbowChoice,BowChoice,SmallShieldChoice,-1,-1,-1,-1,-1,-1,-1}},
+    {{StarterPrimaryChoice,StarterAlternateChoice,1,2,CrossbowChoice,BowChoice,SmallShieldChoice,DebugDrawsChoice,-1,-1,-1,-1,-1,-1}},
     {{4,11,14,15,16,5,3,8,9,17,18,19,26,27}},
     {{6,7,20,21,22,23,24,25,-1,-1,-1,-1,-1,-1}}
 }};

@@ -46,6 +46,8 @@
 #include "hero_selection.h"
 #include "bow_pose.h"
 #include "shield_pose.h"
+#include "dev_scenarios.h"
+#include "../steamvr/shield_surface.h"
 namespace gamestate {framevr::dualwield::Equipment MeleeEquipment();uint64_t LocalPlayer();uint32_t HandsKey();uint32_t WeaponSet();}
 #endif
 
@@ -329,6 +331,24 @@ SRWLOCK g_gunBoneLock = SRWLOCK_INIT;
 GunBoneOut g_gunBone{};
 #ifdef D2RVR_NATIVE_OPENXR
 MeleeWeaponPose g_shieldPose{},g_offhandPose{};ULONGLONG g_shieldAt=0,g_offhandAt=0;
+framevr::guard::Pose g_shieldGuardPose{};
+struct ShieldContext {
+    framevr::guard::Pose pose{};V3 player{};uintptr_t hero=0;
+    uint32_t generation=0,equipment=0;uint64_t session=0;
+};
+ShieldContext g_shieldContext{},g_renderedShieldContext{};
+struct ShieldBound {int bone=-1;framevr::math::Vec low{},high{};};
+struct ShieldRenderSource {
+    uintptr_t self=0,model=0,skeleton=0,bones=0,hero=0;
+    uint32_t entity=UINT32_MAX,parent=0,generation=0,equipment=0;
+    uint64_t session=0;int count=0,boundCount=0;
+    std::array<ShieldBound,16> bounds{};
+};
+ShieldRenderSource g_shieldRenderSource;
+std::atomic<uint32_t> g_shieldEntity{UINT32_MAX};
+// Cumulative milestones collected while the developer overlay is enabled.
+std::atomic<unsigned> g_shieldStages{0};
+void ShieldStage(unsigned bit){if(devscenarios::DebugDraws())g_shieldStages.fetch_or(bit,std::memory_order_relaxed);}
 struct CrossbowGeometry {Mat boltToAttach{};uintptr_t hero=0;uint32_t generation=0,key=0;ULONGLONG at=0;};
 CrossbowGeometry g_crossbowGeometry;
 framevr::crossbow::Pose g_crossbowPose;
@@ -1989,7 +2009,7 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& in) {
             }
         }
         AcquireSRWLockExclusive(&g_gunBoneLock);g_offhandPose=offhand;g_offhandAt=offAt;ReleaseSRWLockExclusive(&g_gunBoneLock);
-        MeleeWeaponPose shieldPose{};ULONGLONG at=0;HeroXform hx;Mat model;
+        MeleeWeaponPose shieldPose{};framevr::guard::Pose guardPose{};ULONGLONG at=0;HeroXform hx;Mat model;
         const int shieldBone=h.shieldAttach>=0?h.shieldAttach:h.weapon[1];
         if(shieldFollowed&&in.havePoseStamp&&shieldBone>=0&&
            HeroTransform(&hx)&&hx.self==self&&(hx.parent&0xFFFFFu)==0xFFFFFu&&
@@ -2000,9 +2020,17 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& in) {
                std::isfinite(origin.x+origin.y+origin.z+axis.x+axis.y+axis.z+player.x+player.y+player.z)) {
                 shieldPose={{origin.x,origin.y,origin.z},{axis.x,axis.y,axis.z},{player.x,player.y,player.z},in.poseStamp,in.worldEpoch,HeroGen()};
                 at=GetTickCount64();
+                if(in.haveEye) {
+                    const float modelUpm=framevr::body::UnitsPerMetre(h.eyeY>0?h.eyeY:in.eyeModel[1],in.userHeadM,in.scale);
+                    framevr::guard::FromAttachment(world.m,model.m,
+                        {in.eyeModel[0],in.eyeModel[1],in.eyeModel[2]},
+                        {in.hand[1][0],in.hand[1][1],in.hand[1][2]},modelUpm,at,in.worldEpoch,guardPose);
+                }
             }
         }
-        AcquireSRWLockExclusive(&g_gunBoneLock);g_shieldPose=shieldPose;g_shieldAt=at;ReleaseSRWLockExclusive(&g_gunBoneLock);
+        AcquireSRWLockExclusive(&g_gunBoneLock);g_shieldPose=shieldPose;g_shieldAt=at;g_shieldGuardPose=guardPose;
+        g_shieldContext={guardPose,{shieldPose.player[0],shieldPose.player[1],shieldPose.player[2]},self,HeroGen(),gamestate::HandsKey(),gamestate::LocalPlayer()};
+        ReleaseSRWLockExclusive(&g_gunBoneLock);
     }
 #endif
     // [hands] fist: free hands close and open with the controllers' grips.
@@ -2203,6 +2231,101 @@ std::map<std::pair<uintptr_t,uintptr_t>,MotionBowRig> g_bowRigs;
 struct CrossbowRig {uintptr_t bones=0;int cog=-1;Mat relative{};uint32_t entity=0;bool entityKnown=false;ULONGLONG lookupAt=0;};
 SRWLOCK g_crossbowRigLock=SRWLOCK_INIT;
 std::map<std::pair<uintptr_t,uintptr_t>,CrossbowRig> g_crossbowRigs;
+
+// The packed Granny model layout is shared with the skeleton reader above:
+// model MeshBindings +0x54 (count/pointer), mesh BoneBindings +0x30,
+// binding stride 0x2c: name +0, OBBMin +8, OBBMax +0x14. Read only bounded
+// metadata belonging to the exact local hero; no asset extraction is needed.
+bool CaptureShield(uintptr_t self,const ShieldContext& context,const HeroXform& hero) {
+    ShieldStage(8);
+    ShieldRenderSource source;source.self=self;source.hero=context.hero;
+    source.parent=hero.entity;source.generation=context.generation;source.equipment=context.equipment;source.session=context.session;
+    if(!Get(self+8,&source.model)||!Get(source.model+8,&source.skeleton)||
+       !Get(source.skeleton+8,&source.count)||source.count<1||source.count>64||
+       !Get(source.skeleton+0xC,&source.bones)||!source.bones)return false;
+    ShieldStage(16);
+    int meshes=0;uintptr_t bindings=0;
+    if(!Get(source.model+0x54,&meshes)||meshes<1||meshes>16||!Get(source.model+0x58,&bindings)||!bindings)return false;
+    ShieldStage(32);
+    uintptr_t nameObject=0,pathPointer=0;Get(self,&nameObject);Get(nameObject+8,&pathPointer);
+    const auto path=Str(pathPointer);
+    const bool shieldPath=path.find("/items/armor/shield/")!=std::string::npos;
+    std::array<std::string,64> names;
+    for(int i=0;i<source.count;++i) {
+        uintptr_t name=0;if(!Get(source.bones+uintptr_t(i)*0xA4,&name))return false;
+        names[i]=Str(name);
+    }
+    for(int m=0;m<meshes;++m) {
+        uintptr_t mesh=0,name=0,bounds=0;int count=0;
+        if(!Get(bindings+uintptr_t(m)*8,&mesh)||!Get(mesh,&name)||(!shieldPath&&!framevr::guard::ShieldMesh(Str(name))))continue;
+        ShieldStage(64);
+        if(!Get(mesh+0x30,&count)||count<1||count>16||!Get(mesh+0x34,&bounds)||!bounds)return false;
+        for(int b=0;b<count;++b) {
+            const auto at=bounds+uintptr_t(b)*0x2C;ShieldBound bound;uintptr_t boneName=0;
+            if(!Get(at,&boneName)||!Get(at+8,&bound.low)||!Get(at+0x14,&bound.high))return false;
+            const auto label=Str(boneName);
+            for(int i=0;i<source.count;++i)if(names[i]==label){bound.bone=i;break;}
+            if(bound.bone<0||!framevr::guard::Finite(bound.low)||!framevr::guard::Finite(bound.high))return false;
+            if(source.boundCount==int(source.bounds.size()))return false;
+            source.bounds[source.boundCount++]=bound;
+        }
+    }
+    if(!source.boundCount)return false;
+    ShieldStage(128);
+    {
+        AcquireSRWLockExclusive(&ecs::g_lock);
+        struct Unlock {~Unlock(){ReleaseSRWLockExclusive(&ecs::g_lock);}} unlock;
+        uint32_t index=0,parent=0;uintptr_t components=0;
+        if(!ecs::EntityOf(self,&source.entity)||!ecs::Dense(ecs::g_xs,source.entity,&index)||
+           !Get(ecs::g_xs+0x38,&components)||!components||
+           !Get(components+uintptr_t(index)*kTransformSize+0xC0,&parent)||parent!=hero.entity)return false;
+    }
+    ShieldStage(256);
+    AcquireSRWLockExclusive(&g_gunBoneLock);
+    const bool current=g_shieldContext.pose.at==context.pose.at&&g_shieldContext.hero==context.hero&&
+        g_shieldContext.generation==context.generation&&g_shieldContext.equipment==context.equipment&&g_shieldContext.session==context.session;
+    if(current){g_shieldRenderSource=source;g_shieldEntity=source.entity;ShieldStage(512);}
+    ReleaseSRWLockExclusive(&g_gunBoneLock);
+    return current;
+}
+void RefreshShield(uintptr_t self) {
+    if(self!=g_heroSelf.load())return;
+    ShieldStage(1);
+    ShieldContext context;ShieldRenderSource source;
+    AcquireSRWLockShared(&g_gunBoneLock);context=g_shieldContext;source=g_shieldRenderSource;ReleaseSRWLockShared(&g_gunBoneLock);
+    if(!context.pose.at||context.hero!=self)return;
+    ShieldStage(2);
+    if(source.hero==self&&source.generation==context.generation&&source.equipment==context.equipment&&source.session==context.session) {
+        uintptr_t model=0,skeleton=0,bones=0;int count=0;
+        if(Get(source.self+8,&model)&&model==source.model&&Get(model+8,&skeleton)&&skeleton==source.skeleton&&
+           Get(skeleton+8,&count)&&count==source.count&&Get(skeleton+0xC,&bones)&&bones==source.bones) {
+            AcquireSRWLockExclusive(&ecs::g_lock);
+            uintptr_t existing=0,components=0;uint32_t index=0,parent=0;
+            const bool owned=ecs::SkeletonOf(source.entity,&existing)&&existing==source.self&&
+                ecs::Dense(ecs::g_xs,source.entity,&index)&&Get(ecs::g_xs+0x38,&components)&&components&&
+                Get(components+uintptr_t(index)*kTransformSize+0xC0,&parent)&&parent==source.parent;
+            ReleaseSRWLockExclusive(&ecs::g_lock);if(owned)return;
+        }
+    }
+    // Static shields may not get another pose callback after equipping. Scan
+    // validated skeleton storage only while discovery is pending, once/second.
+    static std::atomic<uint64_t> nextLook{0};auto next=nextLook.load();const auto now=GetTickCount64();
+    if(now<next||!nextLook.compare_exchange_strong(next,now+1000))return;
+    HeroXform hero;if(!HeroTransform(&hero)||hero.self!=self)return;
+    std::vector<uint64_t> components;
+    {
+        AcquireSRWLockExclusive(&ecs::g_lock);
+        struct Unlock {~Unlock(){ReleaseSRWLockExclusive(&ecs::g_lock);}} unlock;
+        uintptr_t begin=0,end=0,data=0;
+        if(!ecs::IsStorage(ecs::g_ss,ecs::g_vtS)||!Get(ecs::g_ss+0x20,&begin)||!Get(ecs::g_ss+0x28,&end)||
+           end<begin||(end-begin)/4>32768||!Get(ecs::g_ss+0x38,&data)||!data)return;
+        components.resize((end-begin)/4*(kSkeletonCompSize/8));
+        if(!SafeCopy(components.data(),reinterpret_cast<void*>(data),components.size()*8))return;
+    }
+    ShieldStage(4);
+    for(size_t i=0;i<components.size();i+=kSkeletonCompSize/8)
+        if(CaptureShield(uintptr_t(components[i]),context,hero))return;
+}
 
 // Read the held crossbow's authored bolt helper through its actual item/root
 // transform. Never apply another player's, inventory preview's or dropped rig.
@@ -2592,6 +2715,53 @@ void CrossbowRendered(uint32_t entity,uintptr_t component,uintptr_t matrix) {
             correction,angle,line.scale,attach.heroGeneration);framevr::logging::Write(message);
     }
 }
+void ShieldRendered(uint32_t entity,uintptr_t component,uintptr_t matrix) {
+    if(entity==UINT32_MAX||entity!=g_shieldEntity.load(std::memory_order_relaxed))return;
+    ShieldStage(1024);
+    ShieldContext context;ShieldRenderSource source;
+    AcquireSRWLockShared(&g_gunBoneLock);context=g_shieldContext;source=g_shieldRenderSource;ReleaseSRWLockShared(&g_gunBoneLock);
+    const auto now=GetTickCount64();uint32_t parent=0;
+    if(!context.pose.at||now<context.pose.at||now-context.pose.at>100||source.entity!=entity||source.hero!=context.hero||
+       source.generation!=context.generation||source.generation!=HeroGen()||source.equipment!=context.equipment||source.session!=context.session||
+       !Get(component+0xC0,&parent)||parent!=source.parent)return;
+    {
+        AcquireSRWLockExclusive(&ecs::g_lock);uintptr_t existing=0;
+        const bool owned=ecs::SkeletonOf(entity,&existing)&&existing==source.self;
+        ReleaseSRWLockExclusive(&ecs::g_lock);if(!owned)return;
+    }
+    uintptr_t model=0,world=0,matrices=0;int count=0;Mat itemWorld;
+    if(!Get(source.self+8,&model)||model!=source.model||!Get(source.self+0x20,&world)||
+       !Get(world,&count)||count!=source.count||!Get(world+4,&matrices)||!matrices||
+       !SafeCopy(&itemWorld,reinterpret_cast<void*>(matrix),sizeof itemWorld))return;
+    ShieldStage(2048);
+    framevr::guard::Pose best;float largest=0;
+    for(int i=0;i<source.boundCount;++i) {
+        const auto& bound=source.bounds[i];Mat bone;
+        if(bound.bone<0||bound.bone>=count||!SafeCopy(&bone,reinterpret_cast<void*>(matrices+uintptr_t(bound.bone)*sizeof(Mat)),sizeof bone))continue;
+        const Mat final=Mul(bone,itemWorld);framevr::guard::Pose pose;
+        if(!framevr::guard::FromBounds(final.m,bound.low,bound.high,
+            {context.player.x,context.player.y,context.player.z},context.pose,pose))continue;
+        const auto area=framevr::math::Cross(pose.halfRight,pose.halfUp);
+        const float size=framevr::math::Dot(area,area);
+        if(size>largest){best=pose;largest=size;}
+    }
+    if(!largest)return; // hidden/unsupported mesh keeps the attachment fallback
+    ShieldStage(4096);
+    AcquireSRWLockExclusive(&g_gunBoneLock);
+    const bool current=g_shieldContext.pose.at==context.pose.at&&g_shieldContext.generation==context.generation&&
+        g_shieldContext.equipment==context.equipment&&g_shieldEntity.load()==entity;
+    if(current){g_renderedShieldContext=context;g_renderedShieldContext.pose=best;ShieldStage(8192);}
+    ReleaseSRWLockExclusive(&g_gunBoneLock);
+    static std::atomic<uint32_t> reported{UINT32_MAX};
+    if(current&&reported.exchange(context.generation)!=context.generation) {
+        const auto delta=best.center-context.pose.center;
+        char line[220];std::snprintf(line,sizeof line,
+            "Frame shield surface: rendered mesh captured; %.3f x %.3f m, attachment offset %.3f m, angle %.1f deg, generation %u",
+            2*std::sqrt(framevr::math::Dot(best.halfRight,best.halfRight)),2*std::sqrt(framevr::math::Dot(best.halfUp,best.halfUp)),
+            std::sqrt(framevr::math::Dot(delta,delta)),acosf(std::clamp(std::fabs(framevr::math::Dot(best.normal,context.pose.normal)),0.f,1.f))*57.2958f,context.generation);
+        framevr::logging::Write(line);
+    }
+}
 bool CrossbowPose(framevr::crossbow::Pose& out) {
     AcquireSRWLockShared(&g_gunBoneLock);const auto pose=g_crossbowPose;ReleaseSRWLockShared(&g_gunBoneLock);
     if(!pose.at||GetTickCount64()-pose.at>100||pose.heroGeneration!=HeroGen()) {
@@ -2607,6 +2777,25 @@ bool CrossbowPose(framevr::crossbow::Pose& out) {
 bool ShieldWeapon(MeleeWeaponPose& out) {
     AcquireSRWLockShared(&g_gunBoneLock);const auto pose=g_shieldPose;const auto at=g_shieldAt;ReleaseSRWLockShared(&g_gunBoneLock);
     if(!at||GetTickCount64()-at>100||pose.heroGeneration!=HeroGen())return false;
+    out=pose;return true;
+}
+bool ShieldGuardPose(framevr::guard::Pose& out) {
+    AcquireSRWLockShared(&g_gunBoneLock);auto pose=g_shieldGuardPose;const auto generation=g_shieldPose.heroGeneration;
+    const auto context=g_shieldContext,rendered=g_renderedShieldContext;
+    ReleaseSRWLockShared(&g_gunBoneLock);
+    const auto now=GetTickCount64();
+    if(!pose.at||now<pose.at||now-pose.at>100||generation!=HeroGen())return false;
+    if(rendered.hero==context.hero&&rendered.generation==context.generation&&rendered.equipment==context.equipment&&rendered.session==context.session&&
+       rendered.pose.epoch==pose.epoch&&rendered.pose.at&&now>=rendered.pose.at&&now-rendered.pose.at<=100)pose=rendered.pose;
+    if(devscenarios::DebugDraws()) {
+        static std::atomic<uint64_t> nextReport{0};auto next=nextReport.load();
+        if(now>=next&&nextReport.compare_exchange_strong(next,now+2000)) {
+            char line[200];std::snprintf(line,sizeof line,
+                "Frame shield debug: mesh=%d cumulative_stages=0x%X generation=%u equipment=%u",
+                int(framevr::guard::Measured(pose)),g_shieldStages.load(),generation,context.equipment);
+            framevr::logging::Write(line);
+        }
+    }
     out=pose;return true;
 }
 #endif
@@ -2669,6 +2858,7 @@ void __cdecl Hook(uintptr_t self, float a, float b, bool c) {
 #ifdef D2RVR_NATIVE_OPENXR
     CaptureCrossbow(self);
     RefreshCrossbow(self);
+    RefreshShield(self);
     PoseMotionBow(self);
 #endif
     if (GetTickCount64() < g_dumpUntil.load()) {

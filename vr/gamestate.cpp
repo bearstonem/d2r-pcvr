@@ -569,7 +569,10 @@ void __cdecl ReadItems(const PluginContext* ctx, void* token) noexcept {
     // sits in the left with the quiver in the right); a hand holding no weapon
     // kind we know (a shield) is skipped. Unknown kinds fall back to the class.
     if (g_typeOffset == -2) CalibrateTypes();
-    g_leftShield=IsShield(code[1]);
+    // Native inventory body locations do not identify the drawn VR wrist.
+    // The tracked shield is on the left wrist even when the SDK reports it
+    // in body location 4 (observed with the development Paladin).
+    g_leftShield=IsShield(code[0])||IsShield(code[1]);
     const uint32_t handTypes[2]={KindOf(code[0]),KindOf(code[1])};
     {std::lock_guard lock(g_meleeEquipmentMutex);
         if(g_meleeEquipment.id[0]!=id[0]||g_meleeEquipment.id[1]!=id[1])g_meleeEquipment={};

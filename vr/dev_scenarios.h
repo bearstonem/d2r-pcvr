@@ -7,4 +7,5 @@ void Capture(framevr::interaction::Snapshot&);
 void Request(const framevr::interaction::Request&);
 framevr::interaction::Reply Status();
 void Cancel();
+bool DebugDraws(); // isolated developer session only; starts Off
 }

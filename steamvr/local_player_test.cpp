@@ -9,6 +9,7 @@ namespace gamestate {uint64_t LocalPlayer(){return session.load();}}
 // The fixture exercises the real combat identity readers without installing
 // hooks or opening a game. Native accessors are represented by owned unit data.
 namespace d2rsig {
+uint64_t Rva(uint64_t rva){return rva;}
 uintptr_t Addr(uint64_t){return 0;}
 bool Check(uint64_t,const void*,uint32_t){return false;}
 bool Hook(uint64_t,const void*,uint32_t,void*,void**){return false;}

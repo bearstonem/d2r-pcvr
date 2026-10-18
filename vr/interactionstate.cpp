@@ -126,7 +126,7 @@ void __cdecl ClearTint(const PluginContext*,void*) noexcept {
 void Publish(Snapshot s) {
     std::lock_guard lock(mutex);
     s.revision=snapshot.revision;
-    bool changed=s.developer!=snapshot.developer||s.devClass!=snapshot.devClass||s.skillClass!=snapshot.skillClass||s.session!=snapshot.session||s.activeSet!=snapshot.activeSet||s.equipmentKnown!=snapshot.equipmentKnown||
+    bool changed=s.developer!=snapshot.developer||s.devDebugDraws!=snapshot.devDebugDraws||s.devClass!=snapshot.devClass||s.skillClass!=snapshot.skillClass||s.session!=snapshot.session||s.activeSet!=snapshot.activeSet||s.equipmentKnown!=snapshot.equipmentKnown||
                  s.sets!=snapshot.sets||s.beltKnown!=snapshot.beltKnown||s.skills!=snapshot.skills||
                  s.catalog!=snapshot.catalog||s.skillCount!=snapshot.skillCount||s.bindingBank!=snapshot.bindingBank||s.bindingsEditable!=snapshot.bindingsEditable||
                  s.vitalsKnown!=snapshot.vitalsKnown||int(s.health)!=int(snapshot.health)||int(s.mana)!=int(snapshot.mana)||

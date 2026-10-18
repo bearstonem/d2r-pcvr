@@ -6,6 +6,7 @@
 #include "d2r_vr_build.h"
 #ifdef D2RVR_NATIVE_OPENXR
 #include "../steamvr/crossbow_pose.h"
+#include "../steamvr/shield_guard.h"
 #endif
 
 namespace skel {
@@ -178,9 +179,11 @@ struct MeleeWeaponPose {
 };
 bool MeleeWeapon(MeleeWeaponPose& out,int hand=0);
 bool ShieldWeapon(MeleeWeaponPose& out);
+bool ShieldGuardPose(framevr::guard::Pose& out);
 bool CrossbowPose(framevr::crossbow::Pose& out);
 // Called after the game's complete attachment/world transform is evaluated.
 void CrossbowRendered(uint32_t entity,uintptr_t component,uintptr_t matrix);
+void ShieldRendered(uint32_t entity,uintptr_t component,uintptr_t matrix);
 #endif
 #endif
 // Where the game's own pose points the hero, in model space (deg, atan2 of each bone's z row):

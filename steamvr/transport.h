@@ -39,8 +39,9 @@ void ShieldGuardImpact(bool parry=false); // thread-safe; a physical block taps 
 void ShieldGuardState(bool eligible,bool raised);
 // [gameplay] guard_strain_*: strain per block (1 = broken), lowered reset time,
 // clear radius at full swell (1 = visor edge), broken breathing period, inner softness,
-// opacity (0 = none; strain and the heartbeat still run) and colour (0xRRGGBB).
-void ConfigureGuardStrain(float perBlock,float resetSeconds,float clear,float breatheSeconds,float softness,float brightness,uint32_t color);
+// opacity (0 = none; strain and the heartbeat still run), colour (0xRRGGBB) and
+// density (1 = as drawn; higher thickens the partly clear band, for the black rim).
+void ConfigureGuardStrain(float perBlock,float resetSeconds,float clear,float breatheSeconds,float softness,float brightness,uint32_t color,float density=1);
 // [gameplay] guard_strain_heartbeat (x the game's Master x Combat volume, 0 = off),
 // tempo at first strain and when broken, wind-down time from full, and an optional
 // one-beat 16-bit PCM WAV (empty: the built-in beat). Reloads the WAV only when the path changes.

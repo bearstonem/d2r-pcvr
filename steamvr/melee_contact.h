@@ -61,6 +61,7 @@ struct Sample {
     dualwield::Equipment weapons{}; // populated only for physical dual wield
     float minWeaponSpeed=12.f;
     float minThrustSpeed=2.f;
+    float minShieldBashSpeed=2.f;
     Vec thrustAxis{}; // posed base-to-tip axis in absolute tracking space
     int skillSlot=-1,skillOwner=-1;
     uint64_t skillContext=0;
@@ -89,6 +90,7 @@ public:
                e.sample.shield!=current.shield||e.sample.handIndex!=current.handIndex||
                e.sample.weapons.id[0]!=current.weapons.id[0]||e.sample.weapons.id[1]!=current.weapons.id[1]||
                e.sample.weapons.displayed[0]!=current.weapons.displayed[0]||e.sample.weapons.displayed[1]!=current.weapons.displayed[1]||
+               e.sample.minShieldBashSpeed!=current.minShieldBashSpeed||
                e.sample.skillSlot!=current.skillSlot||e.sample.skillOwner!=current.skillOwner||e.sample.skillContext!=current.skillContext||
                now<e.sample.time||now-e.sample.time>.1)return false;
             out=e.sample;return true;
@@ -104,10 +106,14 @@ enum ResetReason {ResetState,ResetTiming,ResetHandTravel,ResetHandTurn,ResetPlay
 struct Diagnostics {unsigned discontinuities=0,recovering=0,reasons[ResetReasons]{};float fastestHand=0,fastestTurn=0;};
 inline constexpr float WeaponStrokeTravel=.18f;
 inline constexpr float ThrustTravel=.12f,ThrustRetreat=.08f;
+inline constexpr float ShieldBashTravel=.12f;
 inline float WeaponContactSpeed(float value) {
     return std::isfinite(value)?std::max(value,1.5f):12.f;
 }
 inline float ThrustContactSpeed(float value) {
+    return std::isfinite(value)?std::clamp(value,.75f,10.f):2.f;
+}
+inline float ShieldBashSpeed(float value) {
     return std::isfinite(value)?std::clamp(value,.75f,10.f):2.f;
 }
 // The skeleton supplies the final blade axis relative to the driving grip,
@@ -138,7 +144,9 @@ class Engine {
     void RestartPath(const Sample& s){next=points=0;Remember(s);}
     static float SwingAngle(const Pose& before,const Blade& beforeBlade,const Sample& after) {
         const float handAngle=gameplay::RotationDistance(before.q,after.hand.q);
-        if(after.shield)return handAngle; // preserve the tested shield gesture
+        // Reorienting a guard must not power a bash. Count tracked hand travel,
+        // independently of shield size and of the posed wrist's rotation.
+        if(after.shield)return 0;
         const Vec a=beforeBlade.tip-beforeBlade.base,b=after.blade.tip-after.blade.base;
         const float lengths=Length(a)*Length(b);
         if(lengths<1e-8f)return 0;
@@ -148,14 +156,14 @@ class Engine {
         const float bladeAngle=std::acos(std::clamp(math::Dot(a,b)/lengths,-1.f,1.f));
         return std::min(handAngle,bladeAngle);
     }
-    bool Onset(const Sample& s,float lever,Blade& from) const {
+    bool Onset(const Sample& s,float lever) const {
         float travel=0;
         for(unsigned back=1;back<points;++back) {
             travel+=recent[(next+recent.size()-back)%recent.size()].distance;
             const auto& p=recent[(next+recent.size()-back-1)%recent.size()];
-            if(s.time-p.time>.12)break;
+            if(s.time-p.time>(s.shield?.20:.12))break;
             const float excursion=Length(s.hand.p-p.hand.p)+lever*SwingAngle(p.hand,p.blade,s);
-            if(excursion>=(s.shield?.08f:WeaponStrokeTravel)&&excursion>=travel*.60f){from=p.blade;return true;}
+            if(excursion>=(s.shield?ShieldBashTravel:WeaponStrokeTravel)&&excursion>=travel*.60f)return true;
         }
         return false;
     }
@@ -188,7 +196,7 @@ public:
         const bool stateChanged=in.epoch!=previous.epoch||in.equipment!=previous.equipment||
            in.shield!=previous.shield||in.handIndex!=previous.handIndex||in.weapons.id[0]!=previous.weapons.id[0]||in.weapons.id[1]!=previous.weapons.id[1]||
            in.weapons.displayed[0]!=previous.weapons.displayed[0]||in.weapons.displayed[1]!=previous.weapons.displayed[1]||
-           in.minWeaponSpeed!=previous.minWeaponSpeed||in.minThrustSpeed!=previous.minThrustSpeed||in.skillSlot!=previous.skillSlot||in.skillOwner!=previous.skillOwner||in.skillContext!=previous.skillContext||
+           in.minWeaponSpeed!=previous.minWeaponSpeed||in.minThrustSpeed!=previous.minThrustSpeed||in.minShieldBashSpeed!=previous.minShieldBashSpeed||in.skillSlot!=previous.skillSlot||in.skillOwner!=previous.skillOwner||in.skillContext!=previous.skillContext||
            std::fabs(in.unitsPerMetre-previous.unitsPerMetre)>.05f;
         const bool badTiming=dt<=0||dt>.1,fastHand=handTravel>std::max(.12f,gameplay::MeleeHandTrackingLimit*float(dt)),fastTurn=angle>gameplay::MeleeAngularTrackingLimit*dt;
         const bool jumped=playerTravel>.5f,bladeJump=bladeTravel>std::max(1.2f,handTravel+angle*lever+playerTravel+.1f);
@@ -242,7 +250,7 @@ public:
         const auto dq=math::Multiply(in.hand.q,math::Conjugate(was.hand.q));
         const Vec angular=math::Normalized(Vec{dq.x,dq.y,dq.z}*(dq.w<0?-1.f:1.f));
         const bool reversed=(Length(delta)>.008f&&math::Dot(math::Normalized(delta),direction)<-.55f)||
-                            (angle>.025f&&math::Dot(angular,angularDirection)<-.55f);
+                            (!in.shield&&angle>.025f&&math::Dot(angular,angularDirection)<-.55f);
         if(stroke&&!thrustStroke&&in.time-strokeAt>.18&&reversed) {
             stroke=0;RestartPath(was);direction={};angularDirection={};
         }
@@ -251,22 +259,21 @@ public:
         const float thrustSpeed=forward/float(dt);
         const bool thrust=!in.shield&&forward>=Length(delta)*.85f&&
             thrustSpeed>=ThrustContactSpeed(in.minThrustSpeed)&&((stroke&&thrustStroke)||ThrustOnset(in));
-        Blade startBlade{};
         if(beginning) {
             // Judge this stroke's recent motion. Accumulating all jitter and
             // aborted windups since the last pause made its net/travel ratio
             // impossible to satisfy, causing another indefinite lockout.
-            if(!thrust&&(speed<(in.shield?1.2f:WeaponContactSpeed(in.minWeaponSpeed))||!Onset(in,lever,startBlade)))return false;
+            if(!thrust&&(speed<(in.shield?ShieldBashSpeed(in.minShieldBashSpeed):WeaponContactSpeed(in.minWeaponSpeed))||!Onset(in,lever)))return false;
             stroke=++serial;strokeAt=in.time;direction=math::Normalized(delta);angularDirection=angular;
         }
         if(thrust)thrustStroke=true;
         // No delayed taps from holding the weapon inside an enemy, and no
         // slowly walking/turning the camera into one with a stationary hand.
-        if(!thrust&&speed<(in.shield?.8f:WeaponContactSpeed(in.minWeaponSpeed)))return false;
-        // Weapon motion history arms a stroke; it must not retroactively
+        if(!thrust&&speed<(in.shield?ShieldBashSpeed(in.minShieldBashSpeed):WeaponContactSpeed(in.minWeaponSpeed)))return false;
+        // Motion history arms a stroke; it must not retroactively
         // damage something brushed during the earlier low-energy approach.
         // Keep the latest swept segment so a fast between-frame hit survives.
-        out={beginning&&in.shield?startBlade:was.blade,in.blade,stroke,thrust?thrustSpeed:speed,thrust};return true;
+        out={was.blade,in.blade,stroke,thrust?thrustSpeed:speed,thrust};return true;
     }
 };
 class HitSet {

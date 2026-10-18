@@ -149,7 +149,7 @@ bool Allowed(const Request& r) {
     int why=-1;
     if(!now.active||r.session!=inputSession||r.session!=gamestate::LocalPlayer())why=StaleInactive;
     else if(r.sample.epoch!=now.epoch)why=StaleEpoch;
-    else if(r.sample.equipment!=now.equipment||r.sample.minWeaponSpeed!=now.minWeaponSpeed||r.sample.weapons.id[0]!=now.weapons.id[0]||r.sample.weapons.id[1]!=now.weapons.id[1])why=StaleEquipment;
+    else if(r.sample.equipment!=now.equipment||r.sample.minWeaponSpeed!=now.minWeaponSpeed||r.sample.minShieldBashSpeed!=now.minShieldBashSpeed||r.sample.weapons.id[0]!=now.weapons.id[0]||r.sample.weapons.id[1]!=now.weapons.id[1])why=StaleEquipment;
     else if(r.sample.skillSlot!=now.skillSlot||r.sample.skillOwner!=now.skillOwner||r.sample.skillContext!=now.skillContext)why=StaleSkill;
     else if(age>150)why=StaleAge;
     else if(gamestate::MenuOpen())why=StaleMenu;

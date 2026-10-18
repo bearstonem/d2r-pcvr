@@ -8,6 +8,7 @@
 #include <fstream>
 #include <mutex>
 #include <cstdio>
+#include <atomic>
 #include "interactionstate.h"
 #include "../steamvr/dev_scenarios.h"
 #include "../steamvr/logging.h"
@@ -22,6 +23,7 @@ const ThreadService* threads=nullptr;
 const ItemService* items=nullptr;
 CoreExports::ExecuteConsoleCommandFn execute=nullptr;
 bool enabled=false;
+std::atomic<bool> debugDraws{false};
 std::mutex mutex;
 framevr::interaction::Request queued;
 Reply reply;
@@ -78,8 +80,17 @@ void __cdecl Commands(const PluginContext*,void* token) noexcept {
     framevr::interaction::Request r;if(!Claim(claim,r))return;
     // Native console dispatch can render/pump messages while waiting. Those
     // frames call Status()/Cancel(), so no developer lock may cross this call.
-    if(!Valid(r)||!execute){
-        if(!execute)framevr::logging::Write("Frame development: console command export unavailable");
+    if(!Valid(r)){Finish(r,Result::Refused,claim);return;}
+    if(r.index==framevr::dev::DebugDrawsChoice) {
+        {
+            std::lock_guard lock(mutex);if(claim!=ticket)return;
+            debugDraws=!debugDraws.load();
+        }
+        framevr::logging::Write(debugDraws?"Frame development: debug draws ON (cyan measured shield, amber fallback; green blocked, red rejected, magenta native skip)":"Frame development: debug draws OFF");
+        Finish(r,Result::DebugUpdated,claim);return;
+    }
+    if(!execute){
+        framevr::logging::Write("Frame development: console command export unavailable");
         Finish(r,Result::Refused,claim);return;
     }
     bool accepted=true;
@@ -191,7 +202,7 @@ void __cdecl Gear(const PluginContext*,void* callbackToken) noexcept {
 }
 }
 void Init(const D2RL::PluginContext* ctx) {
-    context=ctx;enabled=Metadata(ctx);
+    context=ctx;enabled=Metadata(ctx);debugDraws=false;
     if(!enabled) {
         framevr::logging::Write("Frame development: DEV hidden; active mod must be pcvr-dev with matching modinfo.json in the loader's mod data directory");
         return;
@@ -202,7 +213,8 @@ void Init(const D2RL::PluginContext* ctx) {
         execute=reinterpret_cast<CoreExports::ExecuteConsoleCommandFn>(GetProcAddress(core,MAKEINTRESOURCEA(CoreExports::ExecuteConsoleCommandInfo.ordinal)));
     framevr::logging::Write("Frame development: isolated pcvr-dev environment enabled; class presets require disposable offline expansion characters");
 }
-void Capture(framevr::interaction::Snapshot& s){s.developer=enabled;}
+bool DebugDraws(){return enabled&&debugDraws.load();}
+void Capture(framevr::interaction::Snapshot& s){s.developer=enabled;s.devDebugDraws=DebugDraws();}
 void Request(const framevr::interaction::Request& r) {
     const bool valid=Valid(r);
     const auto run=threads?(framevr::dev::IsKit(r.index)?threads->runOnGameThread:threads->runOnUiThread):nullptr;
@@ -232,5 +244,6 @@ void Capture(framevr::interaction::Snapshot&){}
 void Request(const framevr::interaction::Request&){}
 framevr::interaction::Reply Status(){return {};}
 void Cancel(){}
+bool DebugDraws(){return false;}
 }
 #endif

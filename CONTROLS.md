@@ -129,13 +129,17 @@ One stroke can hit several monsters, each further one a little weaker.
 
 ### Shield: block, parry and strain (Unleashed)
 
-- **Block:** hold the shield up in front of your chest, facing the attacker,
-  and stand still. A melee hit that reaches you is blocked by where the shield
-  is, not by your block chance. Walking or running drops the guard.
+- **Block:** raise the shield and put its broad face between you and the
+  attacker. You can look elsewhere while holding that position, including
+  while walking or running. A valid guard replaces the random block-chance
+  roll; the game's other block eligibility checks still apply. Coverage uses
+  the rendered shield's orientation and size with a small allowance around the
+  incoming attack line. Unsupported meshes use an attachment-based fallback.
+  Lowering it, holding it away from the attack line or turning it edge-on opens
+  the guard.
 - **Parry:** as a melee attack comes in, swing the shield diagonally across
   your view (lower right to upper left with a left-hand shield) within
-  **Combat > Perfect parry window** (400 ms by default) of the hit. The
-  attacker staggers.
+  400 ms of the hit. The attacker staggers.
 - **Riposte:** your next weapon hit on the parried monster within 1.5 s is a
   clean hit: full damage, whatever your attack rating or timing.
 - **Guard strain:** every block (not a parry) strains your guard. A pale light
@@ -143,6 +147,9 @@ One stroke can hit several monsters, each further one a little weaker.
   the guard breaks and the light swells over most of your view. The shield
   keeps blocking; the cost is sight. Lower the shield to let it fade.
   **Combat > Guard strain color** switches the light to a black shadow.
+  **Guard strain buildup** selects Slow / Medium / Fast: about 20 / 10 / 5
+  blocks to full strain with default tuning. Medium keeps the original rate.
+  This changes how quickly it builds, not how much of your view it covers.
 
 **HUD > Loot label size** adjusts dropped-item text and its darker backing from
 20% to 150% in five-point steps. The original size is 45%; Apply saves the choice
@@ -253,6 +260,12 @@ indicators, open **VR Settings > Controls > Weapon skill indicators**, turn it
 **On**, and press **Apply**. This changes both hands' visual indicators only;
 assigned spells and weapon skill gestures keep working. The saved preference
 is `[interactions] weapon_skill_indicators=0` (hidden) or `1` (shown).
+
+**VR Settings > Combat > Shield bash speed** adjusts physical bash/Smite
+independently of weapon swings: default 2 m/s, range 0.75-10 m/s in 0.25 m/s
+steps. Move the hand at least 12 cm in a deliberate stroke. Wrist rotation alone
+does not attack, and contact still requires the selected speed. Blocking, parries
+and button-triggered attacks use their existing rules.
 
 The trigger skill is the persistent gesture skill for its hand. Optional
 hand-side icons show the assignments. Left-trigger Smite supports physical shield swings

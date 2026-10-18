@@ -11,8 +11,13 @@ monsters, change their levels, or switch Normal/Nightmare/Hell.
 Higher counts make monsters tougher and increase experience and loot rewards.
 Monster health and experience at Players 8 are 4.5 times their Players 1 values;
 loot uses the game's native drop rules, not a blanket eightfold multiplier.
-Scaling applies when the game creates monsters, so existing monsters are not
-rebuilt. Start a fresh game after changing it for a consistent comparison.
+Apply changes the input for subsequent native calculations in the current
+session. Monster stats are set when the game creates them: enemies already
+spawned keep their existing stats, including those created before you reach
+them. For all monsters to use the new value, choose **Save and Exit**, then
+start a new game with the same character. There is no need to close the game
+application or restart VR. The Combat page and hover help explain this limit;
+the save confirmation does not promise immediate rescaling of existing enemies.
 
 This works with every class and either melee rules mode. It is independent of
 swing/thrust thresholds, hit calculations, shields, bows and spell controls.

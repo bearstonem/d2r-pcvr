@@ -272,11 +272,12 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
             const auto choice=available?dev::ChoiceFor(s.devClass,i):dev::Choices[i];
             frame({x,y,right,bottom},available&&o.hover==DeveloperCell(i));
             SetTextColor(dc,available?RGB(235,218,181):RGB(148,137,117));
-            text(choice.name,{x+8,y+4,right-8,y+29});
+            const char* title=i==dev::DebugDrawsChoice?(s.devDebugDraws?"Render debug draws: ON":"Render debug draws: OFF"):choice.name;
+            text(title,{x+8,y+4,right-8,y+29});
             SelectObject(dc,shortcutFont);text(choice.detail,{x+8,y+29,right-8,bottom-4});SelectObject(dc,font);
         }
         SetTextColor(dc,RGB(235,218,181));SelectObject(dc,shortcutFont);
-        text(o.result==Result::Pending?"Working...":o.result==Result::Applied?"Kit added to inventory. Equip it using the native inventory screen.":
+        text(o.result==Result::Pending?"Working...":o.result==Result::DebugUpdated?(s.devDebugDraws?"Cyan: measured / Amber: fallback. Hit flash: green block, red rejected, pink native skip.":"Debug draws OFF. Blocking behavior is unchanged."):o.result==Result::Applied?"Kit added to inventory. Equip it using the native inventory screen.":
              o.result==Result::Dispatched?"Commands sent. Check character stats / destination in game.":
              o.result==Result::KitRefused?"Kit could not be added. Check inventory space and the development log.":
              o.result==Result::Refused?"Action unavailable. Close native menus and retry; see the development log.":

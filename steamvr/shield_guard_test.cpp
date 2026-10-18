@@ -1,4 +1,6 @@
 #include "shield_guard.h"
+#include "shield_surface.h"
+#include "shield_debug.h"
 #undef NDEBUG
 #include <cassert>
 #include <cmath>
@@ -7,8 +9,17 @@
 using namespace framevr::guard;
 using framevr::math::Vec;
 
-// The view looks ahead (-Z); the guard faces where the view looks.
+// Default fixture: shield faces ahead (-Z). The production path has no view
+// argument: these helpers rotate both the held shield and hand for old gestures.
 static const Vec view{0,0,-1},ahead{0,0,-1.5f};
+static Pose Surface(Vec hand,Vec facing,uint64_t at) {
+    const Vec right=framevr::math::Cross(facing,{0,1,0});
+    const Vec eye{0,1.7f,0};
+    return {eye+right*hand.x+Vec{0,hand.y,0}+facing*(-hand.z),facing,eye,hand,4,at,1};
+}
+static void Update(State& s,Vec hand,bool handOk,bool left,Vec facing,uint64_t now,bool posed,const Tuning& t) {
+    framevr::guard::Update(s,Surface(hand,facing,now),handOk,left,now,posed,t);
+}
 
 // Feed the hand (head frame) along a straight path from a to b over ms, one
 // pose per 11 ms frame but sampled every 1 ms tick, as vrcam's timer does.
@@ -48,20 +59,50 @@ int main() {
         State g;uint64_t n=2000;Hold(g,hanging,true,n,40,t);Move(g,hanging,p,true,n,700,t);
         assert(g.raised&&Judge(g,ahead,n,t)==Verdict::Block);
     }
-    // Down at the belt or out wide: open.
-    for(Vec p:{low,wide}) {State g;uint64_t n=3000;Hold(g,p,true,n,40,t);assert(!g.raised);}
+    // Down at the belt or held off the incoming line: open.
+    for(Vec p:{low,wide}) {State g;uint64_t n=3000;Hold(g,p,true,n,40,t);assert(Judge(g,ahead,n,t)==Verdict::Open);}
     // A raised guard holds a few cm past the edge (no flicker at the line).
     {State g;uint64_t n=4000;Hold(g,chest,true,n,40,t);Hold(g,Vec{-.12f,-.66f,-.25f},true,n,40,t);assert(g.raised);
      Hold(g,Vec{-.12f,-.70f,-.25f},true,n,40,t);assert(!g.raised);}
-    // Directional, about the view: inside 60 degrees blocks, side and rear do not...
+    // Directional surface: ahead blocks, attackers beside/behind this shield do not.
     Move(s,hanging,chest,true,now,700,t);
     assert(Judge(s,{.8f,0,-1.f},now,t)==Verdict::Block);
     assert(Judge(s,{1.5f,0,0},now,t)==Verdict::Open);
     assert(Judge(s,{0,0,1.5f},now,t)==Verdict::Open);
-    // ...and looking away turns the guard with the view.
+    // Moving and rotating the actual shield changes its covered direction.
     {State g;uint64_t n=5000;for(int i=0;i<40;++i)Update(g,chest,true,true,Vec{1,0,0},++n,true,t);
      assert(Judge(g,{1.5f,0,0},n,t)==Verdict::Block&&Judge(g,ahead,n,t)==Verdict::Open);}
     assert(std::fabs(s.forward-.25f)<1e-4f&&std::fabs(s.up+.35f)<1e-4f&&std::fabs(s.side-.12f)<1e-4f); // trace inputs
+
+    // Facing describes the incoming attack corridor, not a ray redirected
+    // toward an offset shield grip. Pulling a tilted guard against the torso
+    // must not change its angle; translation still has placement limits.
+    for(float yaw:{0.f,1.5707963f,3.1415926f})for(float face:{-1.f,1.f})for(float depth:{-.4f,-.14f,0.f,.14f}) {
+        const auto q=framevr::math::Yaw(yaw);
+        Pose p=Surface(chest,view,6000);p.eye=framevr::math::Rotate(q,{.2f,1.63f,-.09f});
+        p.center=p.eye+framevr::math::Rotate(q,{-.2f,-.45f,depth});
+        p.hand={-.2f,-.45f,depth};p.normal=framevr::math::Rotate(q,Vec{-.8f,0,-.6f}*face);
+        const Vec attack=Vec{p.eye.x,0,p.eye.z}+framevr::math::Rotate(q,{0,0,-1.2f});
+        State g;Update(g,p,true,true,p.at,true,t);Rejection why;
+        assert(Judge(g,attack,p.at,t,0,&why)==Verdict::Block&&why==Rejection::None);
+        p.center=p.eye+framevr::math::Rotate(q,{-.6f,-.45f,depth});
+        Update(g,p,true,true,p.at,true,t);
+        assert(Judge(g,attack,p.at,t,0,&why)==Verdict::Open&&why==Rejection::OutsidePlacement);
+    }
+    {
+        // Rounded pose from the owner's 21:21:53.403 trace. It passed placement
+        // but the grip-directed ray rejected an otherwise valid facing angle.
+        Pose p=Surface(chest,view,6100);
+        p.normal=framevr::math::Normalized(Vec{-.67f,-.20f,-.72f});
+        p.eye={-.11f,1.57f,-.02f};p.center={-.26f,1.1f,-.13f};p.hand={-.15f,-.54f,-.18f};
+        const Vec attack{.17f,0,-1.12f};State g;Update(g,p,true,true,p.at,true,t);
+        assert(Judge(g,attack,p.at,t)==Verdict::Block);
+        // Conversely, pointing at the grip cannot rescue a face edge-on to the
+        // actual incoming corridor, even with a nearby enemy.
+        p.normal=framevr::math::Normalized(Vec{.98f,0,-.2f});
+        p.eye={0,1.7f,0};p.center={-.3f,1.25f,-.1f};Update(g,p,true,true,p.at,true,t);
+        Rejection why;assert(Judge(g,{0,0,-.5f},p.at,t,0,&why)==Verdict::Open&&why==Rejection::OutsideCoverage);
+    }
 
     // The diagonal: lower right to upper left in 90 ms parries...
     Hold(s,swingFrom,true,now,200,t);
@@ -129,5 +170,139 @@ int main() {
     assert(s.raised&&Judge(s,ahead,now+50,t)!=Verdict::Open);
     assert(Judge(s,ahead,now+t.staleMs+1,t)==Verdict::Open);
 
-    std::puts("Shield guard: chest zone (incl. flat on the chest), view-facing cover, hold margin, coverage cone, diagonal parry while the attack is incoming (attack start, direction, speed, length, one per swing, expiry, mirror), tracking and stale pose tests passed");
+    // Report the actual rejection without changing the guard thresholds.
+    {const struct {Vec hand;Rejection why;} cases[]={
+        {hanging,Rejection::TooLow},{{-.1f,.4f,-.2f},Rejection::TooHigh},
+        {{-.1f,-.3f,-1.3f},Rejection::TooFar},
+        {wide,Rejection::OutsidePlacement},{{.6f,-.3f,-.2f},Rejection::OutsidePlacement},
+        {{NAN,0,0},Rejection::InvalidHand}};
+     for(const auto& c:cases){State g;Update(g,c.hand,true,true,view,1000,true,t);Rejection why;
+         assert(Judge(g,ahead,1000,t,0,&why)==Verdict::Open&&why==c.why);}
+     State g;Update(g,chest,true,true,view,1000,true,t);Rejection why;
+     assert(Judge(g,ahead,1000,t,0,&why)==Verdict::Block&&why==Rejection::None);
+     assert(Judge(g,{0,0,1},1000,t,0,&why)==Verdict::Open&&why==Rejection::OutsidePlacement);
+     assert(Judge(g,ahead,1151,t,0,&why)==Verdict::Open&&why==Rejection::StalePose);
+     Update(g,chest,false,true,view,1001,true,t);
+     assert(Judge(g,ahead,1001,t,0,&why)==Verdict::Open&&why==Rejection::Untracked);}
+
+    // Head yaw alone changes the head-relative hand, never the physical shield.
+    {State g;Pose p=Surface(chest,view,50000);Update(g,p,true,true,p.at,true,t);
+     assert(Judge(g,ahead,p.at,t)==Verdict::Block);
+     for(float angle:{1.5707963f,3.1415926f,-1.5707963f}) {
+         p.hand=framevr::math::Rotate(framevr::math::Yaw(angle),chest);p.at++;
+         Update(g,p,true,true,p.at,true,t);assert(Judge(g,ahead,p.at,t)==Verdict::Block);
+     }
+     p.normal={1,0,0};p.at++;Update(g,p,true,true,p.at,true,t);
+     Rejection why;assert(Judge(g,ahead,p.at,t,0,&why)==Verdict::Open&&why==Rejection::OutsideCoverage);
+     p.normal={0,1,0};p.at++;Update(g,p,true,true,p.at,true,t);assert(Judge(g,ahead,p.at,t)==Verdict::Open);
+     p.normal={0,0,1};p.at++;Update(g,p,true,true,p.at,true,t);assert(Judge(g,ahead,p.at,t)==Verdict::Block); // either face
+     p.center.x=-.8f;p.at++;Update(g,p,true,true,p.at,true,t);
+     assert(Judge(g,ahead,p.at,t,0,&why)==Verdict::Open&&why==Rejection::OutsidePlacement);
+    }
+    // Same sample must age even if the UI polls it repeatedly. Tracking loss
+    // opens immediately even when no new rendered pose arrives.
+    {State g;const Pose p=Surface(chest,view,60000);Update(g,p,true,true,p.at,true,t);
+     Update(g,p,true,true,p.at+t.staleMs+1,true,t);assert(Judge(g,ahead,p.at+t.staleMs+1,t)==Verdict::Open);
+     Update(g,p,true,true,p.at,true,t);Update(g,p,false,true,p.at+1,false,t);assert(!g.raised);
+     auto invalid=p;invalid.normal={NAN,0,0};Update(g,invalid,true,true,p.at,true,t);assert(!g.raised);
+     invalid=p;invalid.at++;Update(g,invalid,true,true,p.at,true,t);assert(!g.raised);
+    }
+    // Attachment conversion: large world offsets, calibration scale, mirrored
+    // axes and character yaw preserve the same physical coverage in metres.
+    for(float units:{2.f,4.f,8.f})for(float yaw:{0.f,1.5707963f,3.1415926f})for(float mirror:{-1.f,1.f}) {
+        const auto q=framevr::math::Yaw(yaw);
+        const Vec r=framevr::math::Rotate(q,{1,0,0}),u{0,1,0},b=framevr::math::Rotate(q,{0,0,1});
+        constexpr float scale=.93f;
+        float model[16]={r.x*scale,r.y*scale,r.z*scale,0,u.x*scale,u.y*scale,u.z*scale,0,b.x*scale,b.y*scale,b.z*scale,0,23000,50,-18000,1};
+        const Vec eye{.1f,1.7f,-.05f}; // include calibrated camera/body offset
+        const Vec center=eye+chest;
+        const Vec w=framevr::math::Rotate(q,center)*(units*scale);
+        float world[16]={r.x*mirror,r.y*mirror,r.z*mirror,0,0,1,0,0,b.x,b.y,b.z,0,23000+w.x,50+w.y,-18000+w.z,1};
+        Pose p;assert(FromAttachment(world,model,eye*units,chest,units,70000,9,p));
+        const Vec expected=framevr::math::Rotate(q,center);
+        assert(std::sqrt(framevr::math::Dot(p.center-expected,p.center-expected))<.002f);
+        assert(std::fabs(p.unitsPerMetre-units*scale)<.0001f);
+        State g;Update(g,p,true,true,p.at,true,t);
+        assert(Judge(g,framevr::math::Rotate(q,ahead+Vec{eye.x,0,eye.z}),p.at,t)==Verdict::Block);
+        world[0]=world[1]=world[2]=0;assert(!FromAttachment(world,model,eye*units,chest,units,70000,9,p));
+    }
+    // Fully evaluated item geometry: wrist and item attachment may disagree by
+    // 90 degrees. Coverage must use the drawn face, including mirrored transforms.
+    for(float units:{2.f,4.f,8.f})for(float yaw:{0.f,1.5707963f,3.1415926f})for(float mirror:{-1.f,1.f}) {
+        auto context=Surface(chest,{1,0,0},80000);context.unitsPerMetre=units;
+        const auto q=framevr::math::Yaw(yaw);
+        const Vec r=framevr::math::Rotate(q,{1,0,0}),u{0,1,0},z=framevr::math::Rotate(q,{0,0,1});
+        const Vec eye=framevr::math::Rotate(q,{.1f,1.7f,.05f}),center=eye+framevr::math::Rotate(q,{-.1f,-.45f,-.3f});
+        context.eye=eye;context.center=center;
+        const Vec player{12300,24,-11000};const Vec origin=player+center*units;
+        float world[16]={r.x*units*mirror,r.y*units*mirror,r.z*units*mirror,0,
+            u.x*units,u.y*units,u.z*units,0,z.x*units,z.y*units,z.z*units,0,origin.x,origin.y,origin.z,1};
+        Pose p;assert(FromBounds(world,{-.25f,-.5f,-.04f},{.25f,.5f,.04f},player,context,p));
+        assert(Measured(p)&&std::sqrt(framevr::math::Dot(p.center-center,p.center-center))<.002f);
+        assert(std::fabs(framevr::math::Dot(p.normal,z))>.999f);
+        State g;Update(g,p,true,true,p.at,true,t);
+        const auto attack=framevr::math::Rotate(q,{.1f,0,-1.5f});
+        assert(Judge(g,attack,p.at,t)==Verdict::Block);
+        // Physically rotate the item, not the controller/hero attachment.
+        const Vec edge=framevr::math::Rotate(q,{0,0,1});
+        world[0]=edge.x*units;world[1]=edge.y*units;world[2]=edge.z*units;
+        world[8]=r.x*units;world[9]=r.y*units;world[10]=r.z*units;
+        assert(FromBounds(world,{-.25f,-.5f,-.04f},{.25f,.5f,.04f},player,context,p));
+        Update(g,p,true,true,p.at,true,t);assert(Judge(g,attack,p.at,t)==Verdict::Open);
+        world[0]=NAN;assert(!FromBounds(world,{-.25f,-.5f,-.04f},{.25f,.5f,.04f},player,context,p));
+    }
+    {
+        Pose p=Surface({-.1f,-.72f,-.3f},view,90000);
+        p.halfRight={.3f,0,0};p.halfUp={0,.6f,0}; // large face still covers torso
+        State g;Update(g,p,true,true,p.at,true,t);assert(g.raised&&Judge(g,ahead,p.at,t)==Verdict::Block);
+        p.halfRight={.13f,0,0};p.halfUp={0,.13f,0};p.at++;
+        g={};Update(g,p,true,true,p.at,true,t);assert(!g.raised); // low buckler exposes torso
+        p=Surface(chest,view,90002);p.center.x=.39f;p.halfRight={.13f,0,0};p.halfUp={0,.13f,0};
+        g={};Update(g,p,true,true,p.at,true,t);assert(Judge(g,ahead,p.at,t)==Verdict::Open);
+        p.halfRight={.3f,0,0};p.halfUp={0,.6f,0};p.at++;
+        Update(g,p,true,true,p.at,true,t);assert(Judge(g,ahead,p.at,t)==Verdict::Block);
+        // A tilted face that still covers the torso is not discarded at 60 degrees.
+        p.center.x=0;p.normal={.916515f,0,.4f};p.halfRight={.12f,0,-.2749545f};p.at++;
+        Update(g,p,true,true,p.at,true,t);assert(Judge(g,ahead,p.at,t)==Verdict::Block);
+        p.center.z=.6f;p.at++;Update(g,p,true,true,p.at,true,t);assert(Judge(g,ahead,p.at,t)==Verdict::Open);
+        p.center.z=-.3f;p.center.y=.3f;p.at++;Update(g,p,true,true,p.at,true,t);assert(!g.raised);
+        p.center.y=2.6f;p.at++;Update(g,p,true,true,p.at,true,t);assert(!g.raised);
+        assert(ShieldMesh("armor_bucklerShape")&&ShieldMesh("armor_aerin_shield1Shape")&&!ShieldMesh("weapon_swordShape"));
+        const Pose context=Surface(chest,view,91000);Pose out;
+        float world[16]={4,0,0,0,0,4,0,0,0,0,4,0,-.48f,5.4f,-1,1};
+        assert(FromBounds(world,{-.2f,-.4f,-.03f},{.2f,.4f,.03f},{},context,out));
+        assert(!FromBounds(world,{-.2f,-.4f,-.03f},{-.3f,.4f,.03f},{},context,out)); // reversed bounds
+        assert(!FromBounds(world,{-.2f,-.2f,-.2f},{.2f,.2f,.2f},{},context,out)); // no broad face
+        world[0]=world[5]=world[10]=.0001f;
+        assert(!FromBounds(world,{-.2f,-.4f,-.03f},{.2f,.4f,.03f},{},context,out)); // hidden attachment
+        world[0]=world[5]=world[10]=400;
+        assert(!FromBounds(world,{-.2f,-.4f,-.03f},{.2f,.4f,.03f},{},context,out)); // implausible scale
+        world[0]=world[5]=world[10]=4;world[12]=300;
+        assert(!FromBounds(world,{-.2f,-.4f,-.03f},{.2f,.4f,.03f},{},context,out)); // another item/location
+    }
+    {
+        Debug d;d.pose=Surface(chest,view,100000);d.raised=true;
+        d.pose.player={10000,20,-20000};d.pose.halfRight={.3f,0,0};d.pose.halfUp={0,.6f,0};
+        const Vec camera=d.pose.player+d.pose.eye*d.pose.unitsPerMetre;
+        DebugDraw a,b;assert(DrawDebug(d,camera,100001,a));
+        assert(std::abs(a.center.y-(d.pose.center.y-d.pose.eye.y)*4)<.001f&&std::abs(a.right.x-1.2f)<.001f);
+        assert(a.color.y==1&&a.color.z==1&&!a.hit);
+        // Translation of both player and camera cannot make the wireframe drift.
+        d.pose.player=d.pose.player+Vec{3000,100,-2000};
+        assert(DrawDebug(d,camera+Vec{3000,100,-2000},100001,b));
+        assert(std::sqrt(framevr::math::Dot(a.center-b.center,a.center-b.center))<.003f);
+        d.pose.halfRight=d.pose.halfUp={};assert(DrawDebug(d,camera,100001,b));
+        assert(b.color.x==1&&b.color.y<1&&std::abs(framevr::math::Dot(b.right,d.pose.normal))<.001f);
+        d.raised=false;assert(DrawDebug(d,camera,100001,b)&&b.color.x==.5f&&b.color.y==.5f);
+        d.hitAt=100000;d.hitFrom=camera+Vec{0,0,-2};d.hitTo=camera;
+        for(int hit:{1,2,3}) {
+            d.hit=hit;assert(DrawDebug(d,camera,100100,b)&&b.hit&&b.hitFrom.z==-2);
+            assert(hit==1?b.color.y==1:hit==2?b.color.x==1&&b.color.z==.1f:b.color.z==1);
+        }
+        d.pose.at=100700;assert(DrawDebug(d,camera,100700,b)&&!b.hit);
+        assert(!DrawDebug(d,camera,100699,b)&&!DrawDebug(d,camera,100851,b));
+        assert(!DrawDebug(d,{NAN,0,0},100700,b));
+        d.pose.player.x=NAN;assert(!DrawDebug(d,camera,100700,b));
+    }
+    std::puts("Shield guard: rendered bounds, coverage, calibration, movement, parries, debug placement and expiry passed");
 }

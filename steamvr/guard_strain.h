@@ -20,7 +20,10 @@
 // re-triggers without dropping, so rapid blocks hold a swell rather than
 // strobing; breathing is well under 1 Hz; opacity never exceeds brightness.
 namespace framevr::strain {
+enum class BuildSpeed { Slow, Medium, Fast };
+inline float BuildMultiplier(BuildSpeed speed){return speed==BuildSpeed::Slow?.5f:speed==BuildSpeed::Fast?2.f:1.f;}
 struct Tuning {
+    BuildSpeed speed=BuildSpeed::Medium; // changes strain per block, never ring size or reset time
     float perBlock=.10f;     // strain per blocked hit (1 = broken)
     float resetSeconds=3.f;  // lowered: full strain clears in this long
     float clear=.10f;        // radius left clear at full swell (1 = visor image edge)
@@ -28,6 +31,7 @@ struct Tuning {
     float breatheSeconds=1.6f; // one slow swell while broken
     float feather=.45f;      // width of the inner blend (softness); the glow's midpoint stays put
     uint32_t color=0xFFF7EA; // 0xRRGGBB: the pale white light; 0x000000 (guard_strain_dark) darkens the rim
+    float density=1;         // >1 thickens the partly clear band (the black rim: guard_strain_dark_density)
 };
 // Ring geometry, in the visor image's radius (1 = image edge; the headset's
 // view ends near .95). The light covers everything outside `edge`.
@@ -72,7 +76,7 @@ public:
         last=in.time;
         const bool up=in.eligible&&in.raised;
         if(up&&in.blocks) {
-            strain=std::min(1.f,strain+float(in.blocks)*std::max(0.f,t.perBlock));
+            strain=std::min(1.f,strain+float(in.blocks)*std::max(0.f,t.perBlock)*BuildMultiplier(t.speed));
             attacking=true;pulseAt=in.time;
             if(strain>=1&&!broken){broken=true;out.brokeNow=true;}
         }
@@ -126,23 +130,27 @@ inline float Falloff(float edge,float feather,float radius) {
     const float a=SmoothStep(start,start+feather,radius);
     return a*a;
 }
-inline std::vector<uint8_t> Compose(float edge,float alpha,float feather=Feather,uint32_t color=0x000000) {
+// Density > 1 lifts the partly clear band toward full cover (1-(1-a)^density):
+// a dark rim over a dark scene reads far lighter than a pale one at the same
+// opacity, so the black rim is drawn denser to hide as much. 0 and 1 stay put.
+inline float Dense(float a,float density) {return density>1?1-std::pow(1-a,density):a;}
+inline std::vector<uint8_t> Compose(float edge,float alpha,float feather=Feather,uint32_t color=0x000000,float density=1) {
     std::vector<uint8_t> rgba(size_t(Size)*Size*4,0);
-    if(!std::isfinite(edge)||!std::isfinite(alpha)||!std::isfinite(feather)||alpha<=0)return rgba;
+    if(!std::isfinite(edge)||!std::isfinite(alpha)||!std::isfinite(feather)||!std::isfinite(density)||alpha<=0)return rgba;
     alpha=std::min(alpha,1.f);
     for(int y=0;y<Size;++y)for(int x=0;x<Size;++x) {
         auto* p=&rgba[(size_t(y)*Size+x)*4];
         p[0]=uint8_t(color>>16);p[1]=uint8_t(color>>8);p[2]=uint8_t(color);
-        p[3]=uint8_t(std::lround(255*alpha*Falloff(edge,feather,Radius(x,y))));
+        p[3]=uint8_t(std::lround(255*alpha*Dense(Falloff(edge,feather,Radius(x,y)),density)));
     }
     return rgba;
 }
 // Repaint only on a visible change: edge and softness to 1/256 of the image,
 // opacity to 1/128, or a new colour. 0: nothing to paint.
-inline uint64_t PaintKey(float edge,float alpha,float feather=Feather,uint32_t color=0x000000) {
-    if(!std::isfinite(edge)||!std::isfinite(alpha)||!std::isfinite(feather)||alpha<=0)return 0;
+inline uint64_t PaintKey(float edge,float alpha,float feather=Feather,uint32_t color=0x000000,float density=1) {
+    if(!std::isfinite(edge)||!std::isfinite(alpha)||!std::isfinite(feather)||!std::isfinite(density)||alpha<=0)return 0;
     const uint64_t shape=(uint64_t(std::lround(std::clamp(feather,0.f,1.f)*256))<<32)|
            (uint64_t(std::lround(std::clamp(edge,0.f,1.5f)*256))<<16)|uint64_t(std::lround(std::clamp(alpha,0.f,1.f)*128)+1);
-    return (shape*1000003u+(color&0xFFFFFFu))|1;
+    return ((shape*1000003u+(color&0xFFFFFFu))*31u+uint64_t(std::lround(std::clamp(density,1.f,6.f)*64)))|1;
 }
 }

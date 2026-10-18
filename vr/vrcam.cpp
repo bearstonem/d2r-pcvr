@@ -108,6 +108,8 @@ namespace gamestate {bool OpaqueMenuOpen();}
 #include "offline_difficulty.h"
 #include "projectiles.h"
 #include "combat.h"
+#include "dev_scenarios.h"
+#include "../steamvr/shield_debug.h"
 #include "melee.h"
 #include "bow.h"
 #include "crossbow.h"
@@ -835,7 +837,7 @@ void LoadSettings() {
     melee::ConfigureAttackSpeed(classicMelee,IniB(L"debug",L"melee_trace",false));
     melee::ConfigureAttackRating(classicMelee);
     // Unleashed only: a raised shield blocks instead of the block stat.
-    // [gameplay] parry_ms (VR Settings > Combat), 0 disables perfect parry.
+    // The perfect parry window is fixed at 400 ms (no longer a setting).
     melee::ConfigureParrySound((int)IniF(L"gameplay",L"parry_sound",236));
     melee::ConfigureBlockSound((int)IniF(L"gameplay",L"block_sound",398));
     // Unleashed only, like the guard below: Classic keeps the native monster to-hit roll.
@@ -865,13 +867,20 @@ void LoadSettings() {
                                  (uint32_t)std::clamp(IniF(L"gameplay",L"riposte_ms",1500),0.f,10000.f),
                                  std::clamp(IniF(L"gameplay",L"riposte_volume",100),0.f,400.f)/100.f,path.c_str());
     }
-    combat::ConfigureGuard(!classicMelee,(uint32_t)std::clamp(IniF(L"gameplay",L"parry_ms",400),0.f,400.f),IniB(L"debug",L"guard_trace",false));
+#ifdef D2RVR_DEVELOPER
+    constexpr bool guardTraceDefault=true;
+#else
+    constexpr bool guardTraceDefault=false;
+#endif
+    combat::ConfigureGuard(!classicMelee,400,IniB(L"debug",L"guard_trace",guardTraceDefault));
     // Guard strain light: % of the guard each block strains, lowered reset time,
     // % of the view left clear at full swell, the broken guard's breathing period,
     // the width of the light's inner blend (% of the visor radius), opacity (% peak;
     // 0 = none, strain and the heartbeat still run), and colour as RRGGBB hex
     // (FFF7EA, the pale white light, by default). guard_strain_dark (VR Settings >
-    // Combat > Guard strain color: Black) darkens the rim instead.
+    // Combat > Guard strain color: Black) darkens the rim instead, denser by
+    // guard_strain_dark_density (2.5; 1 = the same curve as the light): at equal
+    // opacity a dark rim over D2's dark scenes hides far less than a pale one.
     framevr::ConfigureGuardStrain(IniF(L"gameplay",L"guard_strain_per_block",10)/100.f,
                                   IniF(L"gameplay",L"guard_strain_reset_ms",3000)/1000.f,
                                   IniF(L"gameplay",L"guard_strain_clear",10)/100.f,
@@ -881,7 +890,9 @@ void LoadSettings() {
                                   IniB(L"gameplay",L"guard_strain_dark",false)?0u:
                                   [] {wchar_t hex[16];GetPrivateProfileStringW(L"gameplay",L"guard_strain_color",L"FFF7EA",hex,16,g_iniPath);
                                       wchar_t* end=nullptr;const unsigned long v=wcstoul(hex[0]==L'#'?hex+1:hex,&end,16);
-                                      return end&&end!=hex&&!*end&&v<=0xFFFFFFul?uint32_t(v):0xFFF7EAu;}());
+                                      return end&&end!=hex&&!*end&&v<=0xFFFFFFul?uint32_t(v):0xFFF7EAu;}(),
+                                  IniB(L"gameplay",L"guard_strain_dark",false)?
+                                      std::clamp(IniF(L"gameplay",L"guard_strain_dark_density",2.5f),1.f,6.f):1.f);
     {   // Guard strain heartbeat: % on top of the game's Master x Combat volume (0 = off),
         // tempo range, wind-down time from full, and an optional one-beat 16-bit PCM WAV (next to this ini unless a full path).
         wchar_t file[MAX_PATH];GetPrivateProfileStringW(L"gameplay",L"guard_strain_heart_file",L"",file,MAX_PATH,g_iniPath);
@@ -6077,19 +6088,17 @@ void ShieldContactTick() {
 // Unleashed physical guard: independent of Smite. Not eligible (first person,
 // menus, no shield) keeps the native block roll; eligible but lowered = hit.
 void ShieldGuardTick() {
-    skel::MeleeWeaponPose pose;
+    framevr::guard::Pose pose;
     const bool eligible=g_enabled.load()&&g_inWorld.load()&&!ThirdPerson()&&!Overhead()&&g_eyeOk.load()&&
         !gamestate::MenuOpen()&&gamestate::LeftShield();
-    const bool posed=eligible&&skel::ShieldWeapon(pose)&&pose.worldEpoch==g_meleeTurnEpoch.load();
-    const float eye=UserEyeHeightM(),upm=std::max(1.f,ViewHeight())/eye;
-    // The shield hand from the head, in the view's turn. D2R only equips a shield
-    // in the left hand; the guard takes the side so a right-hand shield would mirror.
-    const D2RVR_Shared* sh=g_shared;float hand[3]{};
+    const auto epoch=g_meleeTurnEpoch.load();
+    const bool posed=eligible&&skel::ShieldGuardPose(pose)&&pose.epoch==epoch;
+    pose.epoch=epoch; // invalidate cached coverage across a snap turn
+    // Coverage, height and scale all come from the completed shield pose.
+    // Latest tracking may invalidate it, but must not replace its input sample.
+    const D2RVR_Shared* sh=g_shared;
     const bool handOk=sh&&sh->version==D2RVR_SHARED_VERSION&&sh->headValid&&(sh->handsValid&2u);
-    if(handOk)memcpy(hand,sh->leftHand,sizeof hand);
-    // the way the guard faces: where the headset looks, on the ground (the hand's own frame)
-    AcquireSRWLockShared(&g_stickLock);const StickFrame view=g_stickFrame;ReleaseSRWLockShared(&g_stickLock);
-    combat::PublishGuard(gamestate::LocalPlayer(),eligible,posed&&view.valid,view.camF,upm,hand,handOk,true);
+    combat::PublishGuard(gamestate::LocalPlayer(),eligible,posed,pose,handOk,true);
 }
 #endif
 
@@ -7407,6 +7416,14 @@ bool BoneAxesWanted() { return g_set.boneAxes.load() && g_enabled.load() && g_in
 bool PhantomWanted() { return false; }
 bool BoneAxesWanted() { return false; }
 #endif
+bool ShieldDebugWanted() {
+#if defined(D2RVR_NATIVE_OPENXR) && D2RVR_FIRST_PERSON
+    return devscenarios::DebugDraws() && g_enabled.load() && g_inWorld.load() &&
+        !ThirdPerson() && !Overhead() && !gamestate::MenuOpen();
+#else
+    return false;
+#endif
+}
 
 // The frame stamp strip (D2R_DepthFog.fx PS_Stamp): whenever the camera turns
 // with the head, so that FlatVR can place its screen at the pose of the frame.
@@ -7498,7 +7515,7 @@ void OnFinishEffects(reshade::api::effect_runtime* rt, reshade::api::command_lis
     if (!g_tech[0].handle) { hud::SetPictureReady(false); return; }
     // Off while a menu is open: the fog lies over the whole picture, the
     // inventory and trade panels included, and darkened them.
-    const bool want = FogWanted() || g_skyPalette.load() >= 0 || g_arcaneSky.load() || CeilWanted() || HudWanted() || StampWanted() || hud::PictureWanted() || TableKeyWanted() || PhantomWanted() || BoneAxesWanted();
+    const bool want = FogWanted() || g_skyPalette.load() >= 0 || g_arcaneSky.load() || CeilWanted() || HudWanted() || StampWanted() || hud::PictureWanted() || TableKeyWanted() || PhantomWanted() || BoneAxesWanted() || ShieldDebugWanted();
     // The toolbar and the map are taken out of the game's picture to be drawn
     // back at their own size only while this effect runs, and is new enough to.
     {
@@ -8020,6 +8037,21 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
                 for (int k = 0; k < 3; ++k) d[k] = o[k] + d[k] * 0.5f * upm;
                 SetFloats(rt, kNames[i], d, 3);
             }
+        }
+    }
+#endif
+#ifdef D2RVR_NATIVE_OPENXR
+    {
+        framevr::guard::Debug state;framevr::guard::DebugDraw draw;
+        const framevr::guard::Vec camera{g_eyeWorld[0].load(),g_eyeWorld[1].load(),g_eyeWorld[2].load()};
+        const bool on=ShieldDebugWanted()&&combat::ReadGuardDebug(state)&&
+            framevr::guard::DrawDebug(state,camera,GetTickCount64(),draw);
+        SetBool(rt,"ShieldDebugOn",on);SetBool(rt,"ShieldDebugHit",on&&draw.hit);
+        if(on) {
+            const auto vector=[&](const char* name,framevr::guard::Vec v){const float f[]{v.x,v.y,v.z};SetFloats(rt,name,f,3);};
+            vector("ShieldDebugCenter",draw.center);vector("ShieldDebugRight",draw.right);vector("ShieldDebugUp",draw.up);
+            vector("ShieldDebugNormal",draw.normal);vector("ShieldDebugColor",draw.color);
+            vector("ShieldDebugHitFrom",draw.hitFrom);vector("ShieldDebugHitTo",draw.hitTo);
         }
     }
 #endif

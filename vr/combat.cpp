@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <mutex>
 #include "combat.h"
+#include "../steamvr/shield_debug.h"
 #include "combat_rules.h"
 #include "sigscan.h"
 #include "memory.h"
@@ -63,13 +64,15 @@ constexpr uint64_t BlockSeedReturn=0x44b9d1,BlockRollAt=0x44b9c9;
 constexpr uint8_t BlockRollSig[]={0x48,0x8b,0xcf,0xe8,0x0f,0xe8,0xef,0xff,0x8b,0x08,0x48,0x69,0xd9,0xc5,0x90,0xc6,0x6a};
 std::atomic<bool> guardEnabled{false},guardTrace{false};std::atomic<uint32_t> guardParryMs{400};
 bool guardChecked=false;
-struct GuardShared {framevr::guard::State state;uint64_t session=0,at=0;float upm=1;bool eligible=false;};
+struct GuardShared {framevr::guard::State state;uint64_t session=0,at=0;float upm=1;bool eligible=false;
+    framevr::guard::Debug debug{};uint32_t debugMonster=UINT32_MAX;};
 std::mutex guardMutex;GuardShared guard;
 enum class Forced:uint8_t {None,Block,Open};
 enum class Guard:uint8_t {Native,Open,Block,Parry};
 thread_local Forced forced=Forced::None;thread_local bool forcedServed=false;thread_local Seed forcedRoll;
 std::atomic<unsigned> guardBlocks{0},guardOpen{0},guardParries{0},guardUnserved{0},guardFallback{0},guardLate{0};
-std::atomic<unsigned> guardAttackKnown{0},guardMoving{0};
+std::atomic<unsigned> guardAttackKnown{0};
+std::array<std::atomic<unsigned>,size_t(framevr::guard::Rejection::Count)> guardRejections{};
 // Unit stats Get/Set (D2Common GetUnitStat / SetUnitStat) are jump stubs
 // through the game's own table; Set is a set, not an add (native fills life
 // with Set(u,6,Get(u,7))).
@@ -294,7 +297,8 @@ bool GridPosition(uintptr_t unit,float& x,float& z) {
 }
 // A monster (or its missile's owner) whose native to-hit roll already passed
 // against the local player. Native = keep the stat block roll.
-Guard Incoming(uintptr_t attacker,uintptr_t defender,uint32_t& monster,bool& inReach) {
+Guard Incoming(uintptr_t attacker,uintptr_t defender,uint32_t& monster,bool& inReach,uint64_t& parryAt) {
+    parryAt=0;
     if(!guardChecked||!guardEnabled.load(std::memory_order_relaxed)||!enabled.load(std::memory_order_relaxed)||!ready.load(std::memory_order_relaxed))return Guard::Native;
     uint32_t id=0,a[3]{},d[3]{};
     if(!LocalPlayerId(id)||!Read(attacker,a)||!Read(defender,d)||!IncomingContact(id,a[0],d[0],d[2]))return Guard::Native;
@@ -308,41 +312,76 @@ Guard Incoming(uintptr_t attacker,uintptr_t defender,uint32_t& monster,bool& inR
     const framevr::math::Vec to{(ax-px)/g.upm,0,(az-pz)/g.upm};
     // when this attacker's attack began (melee.cpp's mode hook; 0 = not seen)
     const uint64_t attackAt=melee::AttackStart(monster);if(attackAt)++guardAttackKnown;
-    auto v=framevr::guard::Judge(g.state,to,now,GuardTuning(),attackAt);
-    // A shield only guards a player standing still: walking or running (PlrMode
-    // WL 2, RN 3, TW 6 - the unit's mode at +0xC, as for monsters) it does not.
+    framevr::guard::Rejection reason;
+    const auto v=framevr::guard::Judge(g.state,to,now,GuardTuning(),attackAt,&reason);
+    {
+        std::lock_guard lock(guardMutex);
+        if(guard.session==g.session) {
+            const auto& p=g.state.surface;
+            guard.debug.hitFrom=p.player+framevr::math::Vec{to.x,p.center.y,to.z}*g.upm;
+            guard.debug.hitTo=p.player+framevr::math::Vec{p.eye.x,p.center.y,p.eye.z}*g.upm;
+            guard.debug.hitAt=now;guard.debug.hit=0;guard.debugMonster=monster;
+        }
+    }
+    if(v==Verdict::Open)++guardRejections[size_t(reason)];
+    // Walking/running does not invalidate a raised physical guard. Native
+    // block/dodge handling still runs below; keep the mode for diagnostics.
     uint32_t playerMode=UINT32_MAX;
-    const bool moving=Read(defender+0xc,playerMode)&&(playerMode==2||playerMode==3||playerMode==6);
-    if(moving&&v!=Verdict::Open){v=Verdict::Open;++guardMoving;}
+    Read(defender+0xc,playerMode);
     inReach=std::hypot(to.x,to.z)<=GuardTuning().parryRange;   // melee range (for the late-swing diagnostic)
-    if(v==Verdict::Parry){std::lock_guard lock(guardMutex);framevr::guard::SpendParry(guard.state,g.state.snapAt);}
+    if(v==Verdict::Parry)parryAt=g.state.snapAt;
     if(guardTrace.load(std::memory_order_relaxed)) {
-        // Why this hit was judged so: the shield hand from the head (shield_guard.h
-        // Tuning): forward -.20-.85 m, up -.62-.30 m, side -.50-.65 m (+5 cm held), cover cos>=.50 about the view.
         const float d=std::hypot(to.x,to.z);const auto& s=g.state;
-        const float cover=d>.05f?(s.facing.x*to.x+s.facing.z*to.z)/d:1.f;
-        char line[360];snprintf(line,sizeof line,
-            "Frame guard trace: monster=%u class=%u verdict=%s%s player_mode=%u raised=%d forward=%.2f up=%.2f side=%.2f m cover_cos=%.2f attacker=%.2f m swing=%.2f m swing_cos=%.2f snap_age=%lld ms snap_spent=%d attack_age=%lld ms pose_age=%llu ms",
-            a[2],a[1],v==Verdict::Parry?"PARRY":v==Verdict::Block?"BLOCK":"OPEN",moving?" (moving)":"",playerMode,int(s.raised),s.forward,s.up,s.side,cover,d,s.swing,s.swingCos,
+        float cover=0;framevr::guard::Coverage(s.surface,to,GuardTuning(),&cover);
+        char line[840];snprintf(line,sizeof line,
+            "Frame guard trace: monster=%u class=%u verdict=%s reason=%s player_mode=%u raised=%d forward=%.2f up=%.2f side=%.2f m cover_cos=%.2f attacker=%.2f m swing=%.2f m swing_cos=%.2f snap_age=%lld ms snap_spent=%d attack_age=%lld ms pose_age=%llu ms center=%.2f,%.2f,%.2f normal=%.2f,%.2f,%.2f eye=%.2f,%.2f,%.2f attacker_xz=%.2f,%.2f upm=%.3f",
+            a[2],a[1],v==Verdict::Parry?"PARRY":v==Verdict::Block?"BLOCK":"OPEN",framevr::guard::ReasonName(reason),playerMode,int(s.raised),s.forward,s.up,s.side,cover,d,s.swing,s.swingCos,
             s.snapAt&&now>=s.snapAt?(long long)(now-s.snapAt):-1LL,int(s.snapUsed),
             attackAt&&now>=attackAt?(long long)(now-attackAt):-1LL,
-            (unsigned long long)(s.seenAt&&now>=s.seenAt?now-s.seenAt:0));
+            (unsigned long long)(s.seenAt&&now>=s.seenAt?now-s.seenAt:0),
+            s.surface.center.x,s.surface.center.y,s.surface.center.z,s.surface.normal.x,s.surface.normal.y,s.surface.normal.z,
+            s.surface.eye.x,s.surface.eye.y,s.surface.eye.z,to.x,to.z,g.upm);
+        const auto& p=s.surface;
+        snprintf(line+strlen(line),sizeof line-strlen(line)," mesh=%d size=%.3f,%.3f m",
+            int(framevr::guard::Measured(p)),2*std::sqrt(framevr::math::Dot(p.halfRight,p.halfRight)),2*std::sqrt(framevr::math::Dot(p.halfUp,p.halfUp)));
         framevr::logging::Write(line);
     }
     return v==Verdict::Parry?Guard::Parry:v==Verdict::Block?Guard::Block:Guard::Open;
 }
 // Native still runs in full (avoid/dodge, block animation, FBR, sounds); only
 // its block roll is replaced by the physical verdict.
-int GuardedBlock(uintptr_t game,uintptr_t attacker,uintptr_t defender,int avoid,int block,Guard g,uint32_t monster,bool inReach) {
+uint64_t NativeCallerRva(uintptr_t caller) {
+    // Addr(0) means unresolved, not the image base. Subtract the resolved
+    // block offset so diagnostics also work when signatures relocate it.
+    const auto address=d2rsig::Addr(BlockRva),offset=d2rsig::Rva(BlockRva);
+    const auto base=address>offset?address-offset:0;
+    return base&&caller>=base&&caller-base<0x4000000?caller-base:0;
+}
+int GuardedBlock(uintptr_t game,uintptr_t attacker,uintptr_t defender,int avoid,int block,Guard g,uint32_t monster,bool inReach,uint64_t parryAt,uintptr_t caller) {
     const int32_t durability=gamestate::LeftDurability();   // before this block wears the shield
     const auto savedForced=forced;const bool savedServed=forcedServed;
     forced=g==Guard::Open?Forced::Open:Forced::Block;forcedServed=false;
     const int result=originalBlock(game,attacker,defender,avoid,block);
     const bool served=forcedServed;forced=savedForced;forcedServed=savedServed;
+    {
+        std::lock_guard lock(guardMutex);
+        if(guard.debugMonster==monster&&guard.session==gamestate::LocalPlayer())
+            guard.debug.hit=!served?3:result==1?1:2;
+    }
+    if(guardTrace.load(std::memory_order_relaxed)) {
+        const auto rva=NativeCallerRva(caller);
+        char line[280];snprintf(line,sizeof line,
+            "Frame guard native: monster=%u verdict=%s block_flag=%d avoid_flag=%d result=%d roll_served=%d durability=%d caller=0x%llx",
+            monster,g==Guard::Parry?"PARRY":g==Guard::Block?"BLOCK":"OPEN",block,avoid,result,int(served),durability,(unsigned long long)rva);
+        framevr::logging::Write(line);
+    }
     if(!served)++guardUnserved; // native never reached its block roll (dodged/avoided first, or cannot block)
     else if(g==Guard::Open)++guardOpen;
     else {
         ++guardBlocks;
+        // Unblockable damage can visit this adapter too. Do not consume the
+        // pending parry unless the native shield roll actually took place.
+        if(g==Guard::Parry){std::lock_guard lock(guardMutex);framevr::guard::SpendParry(guard.state,parryAt);}
         const bool parried=g==Guard::Parry&&melee::QueueParry(monster,durability);
         framevr::ShieldGuardImpact(parried);   // a block strains the guard; a parry does not
         if(parried)++guardParries;
@@ -361,9 +400,9 @@ int Block(uintptr_t game,uintptr_t attacker,uintptr_t defender,int avoid,int blo
     if(meleeHit)++nativeGuards;
     else if(Qualifies(attacker,defender)) {++blocks;return 0;}
     else {
-        uint32_t monster=0;bool inReach=false;
-        if(const auto g=Incoming(attacker,defender,monster,inReach);g!=Guard::Native)
-            return GuardedBlock(game,attacker,defender,avoid,block,g,monster,inReach);
+        uint32_t monster=0;bool inReach=false;uint64_t parryAt=0;
+        if(const auto g=Incoming(attacker,defender,monster,inReach,parryAt);g!=Guard::Native)
+            return GuardedBlock(game,attacker,defender,avoid,block,g,monster,inReach,parryAt,reinterpret_cast<uintptr_t>(_ReturnAddress()));
     }
     return originalBlock(game,attacker,defender,avoid,block);
 }
@@ -450,26 +489,24 @@ void ConfigureRiposte(float bonus,uint32_t windowMs,float volume,const wchar_t* 
         framevr::logging::Write(line);
     }
 }
-void PublishGuard(uint64_t session,bool eligible,bool posed,const float view[3],float upm,
-                  const float hand[3],bool handOk,bool leftShield) {
+void PublishGuard(uint64_t session,bool eligible,bool posed,const framevr::guard::Pose& pose,
+                  bool handOk,bool leftShield) {
     const auto now=GetTickCount64();const auto t=GuardTuning();
-    if(!(upm>=1))upm=1;
     uint64_t lateAfter=0;bool late=false,raised=false;
     {
     std::lock_guard lock(guardMutex);
-    if(guard.session!=session||!eligible)guard.state={};
-    if(eligible)framevr::guard::Update(guard.state,{hand[0],hand[1],hand[2]},handOk,leftShield,
-                                       {view[0],view[1],view[2]},now,posed,t);
+    if(guard.session!=session||!eligible||guard.state.surface.epoch!=pose.epoch){guard.state={};guard.debug={};}
+    if(eligible)framevr::guard::Update(guard.state,pose,handOk,leftShield,now,posed,t);
     if(eligible&&framevr::guard::SwingAfterBlock(guard.state,now,t,lateAfter)){late=true;++guardLate;}
-    guard.session=session;guard.eligible=eligible;guard.upm=upm;guard.at=now;
+    guard.session=session;guard.eligible=eligible;guard.upm=std::max(1.f,guard.state.surface.unitsPerMetre);guard.at=now;
     raised=eligible&&guard.state.raised;
     // Trace: where the posed shield sits relative to the body, every 2 s, so a
     // held guard can be checked against the thresholds without being hit.
     static uint64_t traceAt=0;
     if(guardTrace.load(std::memory_order_relaxed)&&now>=traceAt) {
         traceAt=now+2000;const auto& s=guard.state;
-        char line[260];snprintf(line,sizeof line,"Frame guard pose: eligible=%d posed=%d hand=%d raised=%d forward=%.2f up=%.2f side=%.2f m swing=%.2f m swing_cos=%.2f",
-            int(eligible),int(posed),int(handOk),int(s.raised),s.forward,s.up,s.side,s.swing,s.swingCos);
+        char line[300];snprintf(line,sizeof line,"Frame guard pose: eligible=%d posed=%d hand=%d raised=%d reason=%s forward=%.2f up=%.2f side=%.2f m swing=%.2f m swing_cos=%.2f",
+            int(eligible),int(posed),int(handOk),int(s.raised),framevr::guard::ReasonName(s.rejection),s.forward,s.up,s.side,s.swing,s.swingCos);
         framevr::logging::Write(line);
     }
     }
@@ -480,6 +517,13 @@ void PublishGuard(uint64_t session,bool eligible,bool posed,const float view[3],
         char line[160];snprintf(line,sizeof line,"Frame guard swing too late: %llu ms after the blocked hit (no parry)",(unsigned long long)lateAfter);
         framevr::logging::Write(line);
     }
+}
+bool ReadGuardDebug(framevr::guard::Debug& out) {
+    std::lock_guard lock(guardMutex);out={};
+    const auto now=GetTickCount64();
+    if(!guardEnabled.load()||!guard.eligible||guard.session!=gamestate::LocalPlayer()||!guard.state.seenAt||
+       now<guard.state.seenAt||now-guard.state.seenAt>GuardTuning().staleMs)return false;
+    out=guard.debug;out.pose=guard.state.surface;out.raised=guard.state.raised;return framevr::guard::Valid(out.pose);
 }
 void Install() {
     if(!enabled.load()||ready.load())return;
@@ -515,7 +559,13 @@ void Install() {
 }
 void Report() {
     const auto gb=guardBlocks.exchange(0),go=guardOpen.exchange(0),gp=guardParries.exchange(0),gu=guardUnserved.exchange(0),gf=guardFallback.exchange(0),gl=guardLate.exchange(0);
-    const auto ga=guardAttackKnown.exchange(0),gm=guardMoving.exchange(0);
+    const auto ga=guardAttackKnown.exchange(0);
+    std::string rejected;
+    for(size_t i=1;i<guardRejections.size();++i)if(const auto n=guardRejections[i].exchange(0)) {
+        if(rejected.empty())rejected="Frame guard rejected:";
+        rejected+=" ";rejected+=framevr::guard::ReasonName(framevr::guard::Rejection(i));rejected+="=";rejected+=std::to_string(n);
+    }
+    if(!rejected.empty())framevr::logging::Write(rejected.c_str());
     const auto fh=forcedHits.exchange(0);
     if(uint32_t m=riposteMonster.load(),seen=m;m!=NoSwing&&GetTickCount64()>riposteUntil.load()&&riposteMonster.compare_exchange_strong(m,NoSwing)) {
         char line[120];snprintf(line,sizeof line,"Frame riposte: window expired unused (monster=%u)",seen);framevr::logging::Write(line);
@@ -529,8 +579,8 @@ void Report() {
         char line[160];snprintf(line,sizeof line,"Frame riposte: landed=%u",rl);
         framevr::logging::Write(line);
     }
-    if(gb||go||gp||gu||gf||fh||gl||gm) {
-        char guardLine[260];snprintf(guardLine,sizeof guardLine,"Frame guard: blocked=%u open=%u (moving=%u) parries=%u swings_too_late=%u attack_start_known=%u no_block_roll=%u position_fallback=%u enemy_forced_hits=%u",gb,go,gm,gp,gl,ga,gu,gf,fh);
+    if(gb||go||gp||gu||gf||fh||gl) {
+        char guardLine[260];snprintf(guardLine,sizeof guardLine,"Frame guard: blocked=%u open=%u parries=%u swings_too_late=%u attack_start_known=%u no_block_roll=%u position_fallback=%u enemy_forced_hits=%u",gb,go,gp,gl,ga,gu,gf,fh);
         framevr::logging::Write(guardLine);
     }
     const auto m=meleeChecks.exchange(0),p=missileChecks.exchange(0),r=rolls.exchange(0),b=blocks.exchange(0),d=dodges.exchange(0),f=failed.exchange(0);

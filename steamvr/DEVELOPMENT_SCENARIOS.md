@@ -80,7 +80,7 @@ Open either hand's wheel and choose **DEV**. Its tabs are grouped by purpose:
 
 - **Character:** level 10, 30, 60 and 90 presets; heal life/mana.
 - **Equipment:** starter primary/alternate gear, class unique primary/alternate
-  gear, crossbow + bolts, bow + arrows, and a small shield.
+  gear, crossbow + bolts, bow + arrows, a small shield and **Render debug draws**.
 - **Act I - III:** towns, combat areas and inspection destinations.
 - **Act IV - V:** later-act combat areas and filming locations.
 
@@ -122,6 +122,39 @@ Native unique selection and random rolls apply. The separate crossbow kit is
 Leadcrow plus 250 bolts; the bow kit is Windforce plus 250 arrows. The small
 shield is a Pelta Lunata buckler. It is separate to avoid exceeding inventory
 capacity in a full Paladin kit.
+
+## Shield debug draws
+
+Select **DEV > Equipment > Render debug draws** to toggle the shield guard
+overlay. It starts Off each launch and does not change combat rules or saved
+settings. Equip a shield, select Unleashed melee rules, close the menu, and
+compare the outline with the visible shield while moving and rotating it.
+
+- **Cyan:** measured shield bounds used by the blocking check.
+- **Amber:** fallback attachment position and facing. Its rectangle is a
+  reference plane (0.9 m wide, 0.6 m tall), not measured mesh coverage.
+- **Grey:** the guard is lowered/inactive.
+- A hit flashes **green** for a native block, **red** for a rejected guard,
+  or **pink** if native combat skipped its block roll (for example an
+  unblockable attack or an earlier dodge). The flash lasts 0.6 seconds.
+
+The center cross and arrow show the guard position and facing. The temporary
+attacker line shows the native horizontal approach at shield height; the game
+does not provide an exact point where a weapon/projectile touched the shield.
+Lines draw over scenery so clipping cannot hide the inspected geometry.
+The overlay hides in menus, without a current shield/tracking pose, and in
+Classic mode. Test the large and small shields with the same enemies, including
+stationary guards, wrist rotation, walking and turning. Record video and keep
+the corresponding frame log; visual inspection still requires headset testing.
+
+While enabled, `Frame shield debug` logs discovery progress every two seconds.
+`cumulative_stages` is a diagnostic bitmask, accumulated during enabled periods:
+`0x1` hero pose, `0x2` context, `0x4` storage scan, `0x8` candidate,
+`0x10` skeleton, `0x20` mesh metadata, `0x40` shield name, `0x80` bounds,
+`0x100` local ownership, `0x200` source published, `0x400` render callback,
+`0x800` world matrices, `0x1000` valid surface, `0x2000` surface published.
+These are milestones across candidates, not proof a single candidate passed
+every stage. `mesh=1` confirms the current check actually uses measured bounds.
 
 ## Locations
 
