@@ -4,7 +4,7 @@ import contextlib
 import io
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -110,12 +110,29 @@ class BattleNetTests(unittest.TestCase):
                 self.assertIn('(Battle.net)', entries[key]['appname'])
                 self.assertNotIn('-applaunch', entries[key]['LaunchOptions'])
                 self.assertIn('--battlenet-game=', entries[key]['LaunchOptions'])
+            for key in ('2', '3'):
+                self.assertTrue(entries[key]['LaunchOptions'].startswith('launch_windows.py '))
+                self.assertEqual(entries[key]['StartDir'], '"' + str(routing['wrapper'].parent) + '"')
             self.assertIn('--frame-openxr-runtime=', entries['2']['LaunchOptions'])
             self.assertIn('--frame-vdxr', entries['3']['LaunchOptions'])
             vd_only = {**routing, 'runtime': None}
             steam.update_shortcuts(None, root, bnet, ['vdxr'], **vd_only)
             with self.assertRaisesRegex(ValueError, 'explicit SteamVR runtime'):
                 steam.update_shortcuts(None, root, bnet, ['steamvr'], **vd_only)
+
+    def test_reported_battlenet_shortcut_fits_steam_launch_option_limit(self):
+        # Paths from issue #137: Steam cut the old options after about 255 characters.
+        routing = {'store': 'battlenet', 'python': PureWindowsPath(r'C:\Users\jolle\AppData\Local\Programs\D2R PCVR\.runtime\python\python.exe'),
+                   'wrapper': PureWindowsPath(r'C:\Users\jolle\AppData\Local\Programs\D2R PCVR\steamvr\launch_windows.py'),
+                   'runtime': PureWindowsPath(r'C:\Program Files (x86)\Steam\steamapps\common\SteamVR\steamxr_win64.json')}
+        specs = steam.shortcut_specs(PureWindowsPath(r'C:\Program Files (x86)\Steam'),
+                                     PureWindowsPath(r'F:\Program Files\Blizzard\Diablo II Resurrected'), **routing)
+        name, options, _, executable, directory = specs['steamvr']
+        self.assertEqual(options, 'launch_windows.py "--battlenet-game=F:\\Program Files\\Blizzard\\Diablo II Resurrected" '
+                         '--experimental-battlenet --frame-vr '
+                         '"--frame-openxr-runtime=C:\\Program Files (x86)\\Steam\\steamapps\\common\\SteamVR\\steamxr_win64.json"')
+        self.assertLess(len(options), 255)
+        self.assertEqual(directory, routing['wrapper'].parent)
 
     def test_pinned_casc_abi_layout(self):
         self.assertEqual(ctypes.sizeof(casc_assets.FindData), 344)

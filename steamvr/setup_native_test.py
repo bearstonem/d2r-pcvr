@@ -260,7 +260,7 @@ class NativeSetupTests(unittest.TestCase):
             self.assertEqual(result['backup_folder'], '')
 
     def test_battlenet_shortcut_discovery_requires_matching_icon_game_and_wrapper(self):
-        for mismatch in ('none', 'icon', 'game', 'wrapper', 'truncated'):
+        for mismatch in ('none', 'legacy', 'icon', 'game', 'wrapper', 'truncated'):
             with self.subTest(mismatch=mismatch), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 app, game, client, saves, profile, values = self.fixture(root, 'battlenet')
@@ -278,12 +278,17 @@ class NativeSetupTests(unittest.TestCase):
                 elif mismatch == 'game':
                     item['LaunchOptions'] = item['LaunchOptions'].replace(str(game), str(root / 'other game'))
                 elif mismatch == 'wrapper':
-                    item['LaunchOptions'] = item['LaunchOptions'].replace('steamvr', 'unrelated')
+                    item['StartDir'] = item['StartDir'].replace('steamvr', 'unrelated')
+                elif mismatch == 'legacy':
+                    # Shortcuts from 0.3.19 and earlier name the wrapper by its full path.
+                    wrapper = '"' + str(helper / 'steamvr/launch_windows.py') + '"'
+                    item['LaunchOptions'] = item['LaunchOptions'].replace('launch_windows.py', wrapper, 1)
+                    item['StartDir'] = '"' + str(root) + '"'
                 self.put(profile / 'config/shortcuts.vdf',
                          b'\x00shortcuts\x00\x02bad\x00' if mismatch == 'truncated' else steam.encode_binary(entries))
                 result = self.probe(root, app, game, client, saves)
                 self.assertEqual(result['backup_required'], '1')
-                self.assertEqual(result['backup_folder'], str(folder.resolve()) if mismatch == 'none' else '')
+                self.assertEqual(result['backup_folder'], str(folder.resolve()) if mismatch in ('none', 'legacy') else '')
 
     def test_adopted_backups_are_automatically_remembered_by_receipt_in_new_helper(self):
         with tempfile.TemporaryDirectory() as directory:

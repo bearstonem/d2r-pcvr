@@ -110,7 +110,12 @@ def launch_helper_roots(game, accounts, steam_game):
                 if (not parts or len(games) != 1 or '--frame-vr' not in parts
                         or Path(games[0]).resolve() != game):
                     continue
-                helper = wrapper_root(parts[0])
+                # Current shortcuts name the wrapper relative to their start folder.
+                start = entry.get('StartDir')
+                wrapper = Path(parts[0])
+                if not wrapper.is_absolute() and isinstance(start, str) and len(start) > 2 and start[0] == start[-1] == '"':
+                    wrapper = Path(start[1:-1]) / wrapper
+                helper = wrapper_root(str(wrapper))
                 if helper is not None:
                     roots.add(helper)
         except BACKUP_ERRORS:

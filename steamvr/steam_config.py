@@ -185,7 +185,9 @@ def shortcut_specs(steam, game, store='steam', python=None, wrapper=None, runtim
                 for connection, (name, options, openvr) in SHORTCUTS.items()}
     if store != 'battlenet' or python is None or wrapper is None:
         raise ValueError('Battle.net shortcuts require the Python interpreter and launch wrapper')
-    common = [str(wrapper), '--battlenet-game=' + str(game),
+    # Steam keeps only about 255 characters of a shortcut's launch options (#137).
+    # The shortcut starts in the wrapper's folder, so its file name is enough.
+    common = [wrapper.name, '--battlenet-game=' + str(game),
               '--experimental-battlenet', '--frame-vr']
     result = {}
     for connection, suffix in [('steamvr', 'SteamVR'), ('vdxr', 'Virtual Desktop')]:
