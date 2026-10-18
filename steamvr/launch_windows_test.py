@@ -14,6 +14,7 @@ import launch_windows as launch
 
 
 class DesktopLaunchTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == 'nt', 'Steam launch commands use Windows paths')
     def test_dev_flag_selects_isolated_mod_and_is_not_forwarded(self):
         import prepare_dev_scenarios as dev
         with tempfile.TemporaryDirectory() as temporary:

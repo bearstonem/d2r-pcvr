@@ -158,6 +158,7 @@ class SteamSetupTests(unittest.TestCase):
             manifest.write_text('"AppState" { "installdir" "../../../escape" }')
             self.assertIsNone(setup.app_folder(roots, '2536520'))
 
+    @unittest.skipUnless(os.name == 'nt', 'The setup wizard runs only on Windows')
     def test_wizard_quest_vdxr_shortcuts_only_and_frame_install_routing(self):
         for quest, battlenet_in_package in ((True, False), (False, False), (True, True), (False, True)):
             with self.subTest(quest=quest, battlenet_in_package=battlenet_in_package), tempfile.TemporaryDirectory() as temp:
