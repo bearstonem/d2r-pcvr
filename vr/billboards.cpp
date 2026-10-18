@@ -94,8 +94,8 @@ void FinishShrineTrace(const ShrineBatch& batch) {
         const char* kind=s.kind==shrine::Kind::Direction?"direction":
             s.kind==shrine::Kind::Position?"position":"local19";
         char line[580];
-        std::snprintf(line,sizeof line,"Frame shrine trace: sample=%u kind=%s instance=%llx definition=%llx stream=%llx lane=%u count=%u stride=%u asset=%s",
-            s.serial,kind,static_cast<unsigned long long>(s.instance.address),
+        std::snprintf(line,sizeof line,"Frame shrine trace: sample=%u kind=%s layer=%s instance=%llx definition=%llx stream=%llx lane=%u count=%u stride=%u asset=%s",
+            s.serial,kind,s.layer==shrine::Layer::Symbol?"symbol":"environment",static_cast<unsigned long long>(s.instance.address),
             static_cast<unsigned long long>(s.instance.definition),static_cast<unsigned long long>(s.stream),s.lane,s.count,s.stride,s.path);
         logger(line);
         std::snprintf(line,sizeof line,"Frame shrine values: sample=%u view=%d camera_match=%d head=(%.6g,%.6g,%.6g) native_eye=(%.6g,%.6g,%.6g) local=(%.6g,%.6g,%.6g) output_ok=%d output=(%.6g,%.6g,%.6g)",
@@ -276,7 +276,7 @@ void Install(void (*log)(const char*),bool (*active)()) {
        d2rsig::Hook(LocalPositionRva,LocalPositionSig,sizeof LocalPositionSig,reinterpret_cast<void*>(&TracedLocalPosition),reinterpret_cast<void**>(&originalLocalPosition))) {
         if(logger)logger("VR portals: verified native center-position hook installed; NewStuff center offsets only");
 #if defined(D2RVR_DEVELOPER) && defined(D2RVR_NATIVE_OPENXR)
-        if(logger)logger("Frame shrine trace: read-only developer capture enabled; view queries and mask19; max1024 samples, 8 lanes per callback; shrine placement unchanged");
+        if(logger)logger("Frame shrine trace: read-only developer capture enabled; floating symbols and environment, view queries and mask19; max1024 samples (128 environment), 8 lanes per callback; shrine placement unchanged");
 #endif
     }
     if(installed)return;

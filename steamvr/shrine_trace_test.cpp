@@ -21,7 +21,30 @@ int main() {
     Check(shrine::Asset(forest),"forest altar lives outside the two shrine directories");
     Check(shrine::Asset("DATA\\HD\\VFX\\PARTICLES\\OBJECTS\\SHRINES_OTHER\\STELE_SHRINE\\VFX_STELE_SHRINE.PARTICLES"),"case and separators");
     Check(shrine::Asset("data/hd/vfx/particles/objects/shrines_healthmana/shrine_mana/vfx_shrine_mana.particles"),"health/mana comparison can be traced");
-    for(auto p:{"data/hd/vfx/particles/overlays/common/shrine_armor/vfx_shrine_armor_looping.particles",
+    constexpr char mana[]="data/hd/vfx/particles/overlays/common/shrine_mana_regen/vfx_shrine_mana_regen.particles";
+    for(auto suffix:{"shrine_armor/vfx_shrine_armor_looping.particles",
+        "shrine_combat/vfx_shrine_combat_looping.particles",
+        "shrine_experience/vfx_shrine_experience_looping.particles",
+        "shrine_mana_regen/vfx_shrine_mana_regen.particles",
+        "shrine_resist_cold/vfx_shrine_resist_cold_overlay.particles",
+        "shrine_resist_fire/vfx_shrine_resist_fire.particles",
+        "shrine_resist_lightning/vfx_shrine_resist_lightning.particles",
+        "shrine_resist_poison/vfx_shrine_resist_poison_looping.particles",
+        "shrine_skill/vfx_shrine_skill_looping.particles",
+        "shrine_stamina/vfx_shrine_stamina_looping.particles"}) {
+        char path[160];std::snprintf(path,sizeof path,"data/hd/vfx/particles/overlays/common/%s",suffix);
+        shrine::Layer layer{};
+        Check(shrine::Classify(path,layer)&&layer==shrine::Layer::Symbol,"floating shrine symbols included despite overlay directory");
+        Check(!portal::Asset(path)&&!portal::CenterAsset(path),"symbol capture never enables portal writes");
+    }
+    shrine::Layer layer=shrine::Layer::Symbol;
+    Check(shrine::Classify(forest,layer)&&layer==shrine::Layer::Environment,"built-in shrine effects identified separately");
+    Check(shrine::Classify("DATA\\HD\\VFX\\PARTICLES\\OVERLAYS\\COMMON\\SHRINE_MANA_REGEN\\VFX_SHRINE_MANA_REGEN.PARTICLES",layer)&&layer==shrine::Layer::Symbol,"symbol case and separators");
+    for(auto p:{"data/hd/vfx/particles/overlays/common/shrine_armor/other.particles",
+        "data/hd/vfx/particles/overlays/common/shrine_unknown/vfx_shrine_unknown.particles",
+        "data/hd/vfx/particles/overlays/common/shrine_armor/vfx_shrine_armor_looping.particles.extra",
+        "data/hd/vfx/particles/overlays/common/shrine_armor/../vfx_shrine_armor_looping.particles",
+        "data/hd/vfx/particles/overlays/common/poison/vfx_poison.particles",
         "data/hd/vfx/particles/objects/env_stone/other/vfx_other.particles",
         "data/hd/vfx/particles/objects/env_stone/forest_altar/new_variant.particles",
         "data/hd/vfx/particles/objects/shrines_other/../other.particles",
@@ -29,7 +52,7 @@ int main() {
         "data/hd/vfx/particles/objects/shrines_other/a/.particles",
         "data/hd/vfx/particles/objects/shrines_other/a/b.particles\n",
         "data/hd/vfx/particles/objects/vfx_only/town_portal/vfx_town_portal_NewStuff.particles"})
-        Check(!shrine::Asset(p),"overlays, unrelated paths and malformed names excluded");
+        Check(!shrine::Asset(p),"unrelated overlays, paths and malformed names excluded");
     Check(!portal::Asset(forest)&&!portal::CenterAsset(forest),"shrine trace never widens portal corrections");
     constexpr uint64_t base=0x140000000,scene=0x10000,pages=0x20000,page=0x30000,instance=0x40000,definition=0x50000,transform=0x60000,compiled=0x70000,path=0x80000;
     Memory m;auto read=[&](void* out,uint64_t at,size_t n){return m.Read(out,at,n);};
@@ -49,6 +72,11 @@ int main() {
     Check(shrine::Capture(read,c,base,shrine::Kind::Direction,out,in,0,{10,6,20},s)&&s.view==0&&s.cameraMatches&&s.matrix[12]==100&&s.output==out.data,"captures identity, transform and matched native camera");
     Check(shrine::Capture(read,c,base,shrine::Kind::Position,out,in,1,{10,6,20},s)&&s.view==1&&!s.cameraMatches,"mismatched cameras remain visible as diagnostic evidence");
     Check(m.blocks==before,"capture never writes native memory or script values");
+    name.fill(0);std::memcpy(name.data(),mana,sizeof mana);m.Put(path+32,name);
+    const auto symbolBefore=m.blocks;
+    Check(shrine::Capture(read,c,base,shrine::Kind::Direction,out,in,0,{10,6,20},s)&&s.layer==shrine::Layer::Symbol&&s.cameraMatches,"captures floating mana symbol with native camera and origin");
+    Check(m.blocks==symbolBefore,"symbol tracing remains read-only even for player-attached instance");
+    name.fill(0);std::memcpy(name.data(),forest,sizeof forest);m.Put(path+32,name);
     indices[1]=8;m.Put(in.data,indices);Check(!shrine::Capture(read,c,base,shrine::Kind::Position,out,in,1,{10,6,20},s),"invalid native view rejected");
     in.stride=0;Check(shrine::Capture(read,c,base,shrine::Kind::Direction,out,in,1,{10,6,20},s)&&s.view==0,"constant view stream");
     in={0xa0000,1,0};m.Put(in.data,portal::Vec{3,4,5});
@@ -74,7 +102,13 @@ int main() {
     s.stream++;Check(budget.Claim(s,1500),"distinct orb/glow streams retained");
     s.lane++;Check(budget.Claim(s,1500),"distinct lanes retained");
     s.kind=shrine::Kind::Direction;Check(budget.Claim(s,1500),"view and local samples independent");
-    for(uint32_t i=budget.used;i<shrine::MaxSamples;++i){s.stream++;Check(budget.Claim(s,2000),"bounded table eviction");}
+    for(uint32_t i=budget.used;i<shrine::MaxEnvironmentSamples;++i){s.stream++;Check(budget.Claim(s,2000),"bounded environment table eviction");}
+    s.stream++;Check(!budget.Claim(s,9999)&&budget.used==shrine::MaxEnvironmentSamples,"smoke cannot consume symbol reserve");
+    s.layer=shrine::Layer::Symbol;
+    for(uint32_t i=budget.used;i<shrine::MaxSamples;++i){s.stream++;Check(budget.Claim(s,2000),"symbols use remaining capture budget");}
     s.stream++;Check(!budget.Claim(s,99999)&&budget.used==shrine::MaxSamples,"process lifetime budget never wraps or refills");
+    shrine::Budget symbolsOnly;
+    for(uint32_t i=0;i<shrine::MaxSamples;++i){s.stream++;Check(symbolsOnly.Claim(s,2000),"unused environment budget available to symbols");}
+    Check(symbolsOnly.environmentUsed==0&&!symbolsOnly.Claim(s,99999),"symbol-only capture remains bounded");
     std::puts("Shrine tracing: asset scope, guarded read-only captures, mixed lanes and bounded sampling passed");
 }
