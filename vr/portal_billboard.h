@@ -83,16 +83,19 @@ template<class Read,class Classify> bool CorrectCenters(Vec* points,uint32_t cou
     }
     return changed;
 }
-template<class Read> bool IsPortal(Read read,uint64_t definition,uint64_t base,bool centerOffsets=false) {
+template<class Read> bool DefinitionPath(Read read,uint64_t definition,uint64_t base,char (&path)[160]) {
     uint64_t header[10]{},compiled[3]{};
     if(!read(header,definition,sizeof header)||header[0]!=base+0x1da0ff0||!header[9]||
        !read(compiled,header[9],sizeof compiled)||compiled[0]!=base+0x1da67f0||!compiled[2])return false;
-    uint64_t stringType=0;char path[160]{};
+    uint64_t stringType=0;
     if(!read(&stringType,compiled[2],8)||stringType!=base+0x1d9d258||
        !read(path,compiled[2]+0x20,sizeof path))return false;
-    const auto end=static_cast<const char*>(std::memchr(path,0,sizeof path));
-    if(!end)return false;
-    const std::string_view name{path,size_t(end-path)};
+    return std::memchr(path,0,sizeof path)!=nullptr;
+}
+template<class Read> bool IsPortal(Read read,uint64_t definition,uint64_t base,bool centerOffsets=false) {
+    char path[160]{};
+    if(!DefinitionPath(read,definition,base,path))return false;
+    const std::string_view name{path};
     return centerOffsets?CenterAsset(name):Asset(name);
 }
 template<class Read> bool Origin(Read read,const Instance& instance,Vec& out) {
