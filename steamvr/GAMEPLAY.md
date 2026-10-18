@@ -871,9 +871,12 @@ instead of a random one. Classic keeps the native roll.
   taps the left controller. Native unblockable damage remains unblockable.
 - **Parry**: a diagonal shield swing across the view, lower right to upper left for
   a left-hand shield (at least 15 cm within 120 ms, within ~35 degrees of the
-  diagonal), after the attacker's attack began (its mode change, 34E5F0) and at
-  most 400 ms (fixed) before
-  the hit, from a melee attacker within 3 m. One parry per swing. The attacker is
+  diagonal), starting no more than 150 ms before the attacker's attack began
+  (its mode change, 34E5F0) and at most 400 ms (fixed) before the hit, from a
+  melee attacker within 3 m. Fast attackers land 250-360 ms after starting, so
+  the lead allows an anticipated swing. A timed swing is judged before face
+  coverage: the swing itself turns the face edge-on, so it needs only the raised
+  shield out on the attacker's side of the eyes. One parry per swing. The attacker is
   put into native hit recovery (445E60) on a later game update, any shield wear
   the game applied for that hit is restored (`shield_wear_refunded` in `Frame
   guard:` counts it; not every block wears a shield, and none has been observed
@@ -930,7 +933,9 @@ spells, missiles or thorns. `[gameplay] enemies_always_hit=1` is a test aid that
 makes every enemy to-hit roll succeed so each attack reaches the shield. It applies
 in Unleashed only; Classic always uses the native monster chance to hit.
 `[debug] guard_trace=1` logs every judged hit (`Frame guard trace:`) with the hand
-position, cover angle, swing and attack timing. Hard swings (a riposte straight
+position, cover angle, swing and attack timing. Its `parry=` field names why a
+raised guard did not parry: `no_swing`, `spent`, `early` (more than 400 ms before
+the hit), `before_attack`, `range` or `side`; `ok` on a parry. Hard swings (a riposte straight
 after a parry) are tracked up to 20 m/s and 100 rad/s; `Frame melee resets:` and
 `Frame melee stale:` report any swing the tracker discarded, and
 `Frame riposte: window expired unused` any parry whose riposte never landed.

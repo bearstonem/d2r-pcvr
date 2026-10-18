@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 
 using namespace framevr::guard;
 using framevr::math::Vec;
@@ -147,10 +148,39 @@ int main() {
      const uint64_t attack=n;Hold(g,swingFrom,true,n,150,t);              // the attack winds up
      Move(g,swingFrom,swingTo,true,n,90,t);
      assert(Judge(g,ahead,n+30,t,attack)==Verdict::Parry);}
-    // ...not with a swing from before that attack began...
+    // ...or starting up to parryLeadMs before it began (fast attackers land
+    // 250-360 ms after starting), but not with a swing from well before it...
     {State g;uint64_t n=42000;Hold(g,swingFrom,true,n,300,t);Move(g,swingFrom,swingTo,true,n,90,t);
-     const uint64_t attack=n+40;assert(Judge(g,ahead,n+120,t,attack)==Verdict::Block);
+     const uint64_t snap=g.snapAt;assert(snap&&n+120>=snap+t.parryLeadMs+1);
+     assert(Judge(g,ahead,n+120,t,snap+t.parryLeadMs)==Verdict::Parry);
+     assert(Judge(g,ahead,n+120,t,snap+t.parryLeadMs+1)==Verdict::Block);
+     assert(ParryCheck(g,ahead,n+120,t,snap+t.parryLeadMs+1)==ParryMiss::BeforeAttack);
      assert(Judge(g,ahead,n+120,t,0)==Verdict::Parry);}                    // (attack start unknown: window alone)
+    // A timed swing parries even after it turned the face edge-on to the
+    // attacker (3 of 6 timed swings, log 2026-10-17); the same pose without a
+    // live swing is open.
+    {State g;uint64_t n=43000;Hold(g,swingFrom,true,n,300,t);Move(g,swingFrom,swingTo,true,n,90,t);
+     Pose p=Surface(swingTo,view,++n);p.normal={1,0,0};framevr::guard::Update(g,p,true,true,n,true,t);
+     Rejection why;assert(Judge(g,ahead,n,t,0,&why)==Verdict::Parry&&why==Rejection::None);
+     SpendParry(g,g.snapAt);
+     assert(Judge(g,ahead,n,t,0,&why)==Verdict::Open&&why==Rejection::OutsideCoverage);}
+    // The shield must be out on the attacker's side: a swing never parries an
+    // attacker behind, or across the body from, a left shield.
+    {State g;uint64_t n=43500;Hold(g,swingFrom,true,n,300,t);Move(g,swingFrom,swingTo,true,n,90,t);
+     for(Vec from:{Vec{0,0,1.5f},Vec{1.5f,0,0}}) {
+         assert(Judge(g,from,n,t)==Verdict::Open&&ParryCheck(g,from,n,t)==ParryMiss::Side);
+     }
+     assert(Judge(g,{-1.5f,0,-.2f},n,t)==Verdict::Parry);}                // the shield's own side
+    // Diagnostics name why a raised guard did not parry.
+    {State g;uint64_t n=43800;Hold(g,chest,true,n,300,t);
+     assert(ParryCheck(g,ahead,n,t)==ParryMiss::NoSwing);
+     Hold(g,swingFrom,true,n,300,t);Move(g,swingFrom,swingTo,true,n,90,t);
+     assert(ParryCheck(g,{0,0,-8.f},n,t)==ParryMiss::Range);
+     assert(ParryCheck(g,ahead,g.snapAt+t.parryMs+1,t)==ParryMiss::Early);
+     Tuning none=t;none.parryMs=0;assert(ParryCheck(g,ahead,n,none)==ParryMiss::Disabled);
+     assert(ParryCheck(g,ahead,n,t)==ParryMiss::None);
+     SpendParry(g,g.snapAt);assert(ParryCheck(g,ahead,n,t)==ParryMiss::Spent);
+     assert(!strcmp(ParryMissName(ParryMiss::BeforeAttack),"before_attack"));}
     // ...and never after the hit: a swing after a blocked hit is only logged, and spends nothing.
     {State g;uint64_t n=44000;Hold(g,swingFrom,true,n,300,t);
      assert(Judge(g,ahead,n,t,n-200)==Verdict::Block);NoteBlock(g,n);

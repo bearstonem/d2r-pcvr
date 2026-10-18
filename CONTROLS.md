@@ -139,7 +139,9 @@ One stroke can hit several monsters, each further one a little weaker.
   the guard.
 - **Parry:** as a melee attack comes in, swing the shield diagonally across
   your view (lower right to upper left with a left-hand shield) within
-  400 ms of the hit. The attacker staggers.
+  400 ms of the hit. You can start just before the enemy's wind-up. The swing
+  only needs to finish with the shield raised on the attacker's side, even if
+  it ends edge-on. The attacker staggers.
 - **Riposte:** your next weapon hit on the parried monster within 1.5 s is a
   clean hit: full damage, whatever your attack rating or timing.
 - **Guard strain:** every block (not a parry) strains your guard. A pale light
