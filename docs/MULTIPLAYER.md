@@ -27,8 +27,10 @@ each PC prepares its own local assets from its existing installation.
    .\deps\python\python.exe steamvr/coop_setup.py --game "YOUR GAME FOLDER" --stage-test --plugin build-frame/windows-developer/d2rl-pcvr.dll --enable-tcpip
    ```
 
-3. In the shared launcher, select **pcvr-coop** under Other mods and select
-   the usual VR runtime. Do not select `D2R-PCVR` or `pcvr-dev` for this test.
+3. On Steam, use the kit's **Launch-Coop-SteamVR.cmd** or
+   **Launch-Coop-VDXR.cmd**. Alternatively, in the shared launcher select
+   **pcvr-coop** under Other mods and choose the usual VR runtime. The shared
+   launcher is optional. Do not select `D2R-PCVR` or `pcvr-dev` for this test.
    Launch manually and create a disposable offline character on each PC.
 4. Open **Multiplayer** beside Play. Use **LAN Only** if both PCs are on the
    same local network. Otherwise use **Unlisted** and share the Game ID.
@@ -96,7 +98,7 @@ References: [D2RLoader TCP/IP guide](https://d2rloader.net/tcp-ip.html),
 
 ## Automated verification
 
-The initial candidate passed 112 native checks and 226 Python checks, with one
+The initial candidate passed 112 native checks and 227 Python checks, with one
 unavailable-symlink skip on Windows. The native adapter fixture runs the actual
 service callbacks against a synthetic loader: unavailable/short service tables,
 solo and non-TCP exclusions, session changes, delayed replies, rule/build

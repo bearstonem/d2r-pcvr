@@ -23,6 +23,8 @@ def main():
     paths += [p.relative_to(ROOT).as_posix() for p in sorted((ROOT/'steamvr/licenses').glob('*.txt'))]
     files={name:(ROOT/name).read_bytes() for name in paths}
     files['bin/d2rl-pcvr.dll']=args.plugin.read_bytes()
+    for name,extra in [('Launch-Coop-SteamVR.cmd',''),('Launch-Coop-VDXR.cmd','%%20--frame-vdxr')]:
+        files[name]=('@echo off\r\nstart "" "steam://run/2536520//--frame-vr'+extra+'%%20-mod%%20pcvr-coop/"\r\n').encode('ascii')
     files['Setup-Coop-Test.cmd']=b'''@echo off\r
 setlocal\r
 set "coop_python=%LOCALAPPDATA%\\Programs\\D2R PCVR\\.runtime\\python\\python.exe"\r
@@ -40,7 +42,8 @@ exit /b %coop_result%\r
     files['README.txt']=b'''Unleashed TCP/IP CONNECTION TEST - not a multiplayer combat release.\r
 Both PCs: install Unleashed v0.3.20, exit D2R/D2RLoader, extract this kit,\r
 then run Setup-Coop-Test.cmd. Use the SAME kit on both PCs.\r
-Launch pcvr-coop under Other mods in the shared launcher and create an\r
+Use a Launch-Coop CMD (Steam edition), or select pcvr-coop under Other\r
+mods in the shared launcher. Create an\r
 offline test character. Choose Multiplayer beside Play; host LAN Only\r
 or Unlisted, then have the other PC join. See docs/MULTIPLAYER.md.\r
 Physical guest swings, shield defense and custom projectiles still need\r
