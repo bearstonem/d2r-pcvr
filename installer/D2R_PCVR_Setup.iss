@@ -209,17 +209,23 @@ begin
 end;
 
 procedure CloseSteamButtonClick(Sender: TObject);
+var
+  GameStarted: Boolean;
 begin
+  GameStarted := False;
   CloseSteamButton.Enabled := False;
   WizardForm.NextButton.Enabled := False;
   WizardForm.BackButton.Enabled := False;
   try
-    CloseSteam(PathsPage.Values[0], CloseSteamStatus);
+    // CloseSteam checks the game again right before asking Steam: it may have started since the page was drawn.
+    CloseSteam(PathsPage.Values[0], CloseSteamStatus, GameStarted);
   finally
     WizardForm.NextButton.Enabled := True;
     WizardForm.BackButton.Enabled := True;
     RefreshCloseSteamPage;
   end;
+  if GameStarted then
+    MsgBox('Diablo II: Resurrected is running. Save & Exit the game first (Setup does not close it), then click Close Steam again.', mbError, MB_OK);
 end;
 
 procedure CreateCloseSteamPage;
@@ -452,6 +458,8 @@ begin
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  GameStartedNow: Boolean;   // with /CLOSESTEAM: the game started; the backend then stops with Save & Exit
 begin
   Result := '';
   if ExpandConstant('{param:CONFIG|}') <> '' then ChoicesFile := ExpandConstant('{param:CONFIG|}')
@@ -464,7 +472,7 @@ begin
       Exit;
     end;
     // Silent and /CONFIG installs close Steam only when asked to with /CLOSESTEAM.
-    if SwitchGiven('/CLOSESTEAM') then CloseSteam(GetIniString('setup', 'steam', '', ChoicesFile), nil);
+    if SwitchGiven('/CLOSESTEAM') then CloseSteam(GetIniString('setup', 'steam', '', ChoicesFile), nil, GameStartedNow);
   end;
   if not RunBackend(PayloadRoot, '--validate ' + Q(ChoicesFile) + ' --managed-root ' + Q(ExpandConstant('{app}'))) then begin
     if IsSecurityBlock then Result := SecurityBlockMessage

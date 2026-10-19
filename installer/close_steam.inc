@@ -27,9 +27,27 @@ begin
   end;
 end;
 
+// True when any of the comma-separated process names is running.
+function AnyRunning(Names: String): Boolean;
+var
+  Comma: Integer;
+begin
+  Result := False;
+  while (Names <> '') and not Result do begin
+    Comma := Pos(',', Names);
+    if Comma = 0 then Comma := Length(Names) + 1;
+    if Trim(Copy(Names, 1, Comma - 1)) <> '' then
+      Result := ProcessRunning(Trim(Copy(Names, 1, Comma - 1)));
+    Delete(Names, 1, Comma);
+  end;
+end;
+
+const
+  GameProcesses = 'D2R.exe,D2RLoader.exe';
+
 function GameRunning: Boolean;
 begin
-  Result := ProcessRunning('D2R.exe') or ProcessRunning('D2RLoader.exe');
+  Result := AnyRunning(GameProcesses);
 end;
 
 function SteamRunning: Boolean;
@@ -83,14 +101,24 @@ end;
 
 // Asks the running program to close itself (Exe Args, e.g. steam.exe -shutdown) and waits.
 // True when ProcessName is no longer running. Never terminates anything.
-function CloseGracefully(const Exe, Args, ProcessName: String; TimeoutMs: Integer; Status: TNewStaticText): Boolean;
+// BlockingProcesses (the game) are checked again immediately before the request: the page
+// may have been drawn before the game started. While one runs nothing is requested and
+// Blocked is True.
+function CloseGracefully(const BlockingProcesses, Exe, Args, ProcessName: String; TimeoutMs: Integer;
+  Status: TNewStaticText; var Blocked: Boolean): Boolean;
 var
   Code: Integer;
 begin
+  Blocked := False;
   Result := not ProcessRunning(ProcessName);
   if Result then Exit;
   if (Exe = '') or not FileExists(Exe) then begin
     ShowCloseStatus(Status, 'Setup could not find steam.exe to ask Steam to close. Choose Steam > Exit yourself.');
+    Exit;
+  end;
+  Blocked := AnyRunning(BlockingProcesses);
+  if Blocked then begin
+    ShowCloseStatus(Status, 'Diablo II: Resurrected is running. Save & Exit the game first; Setup did not ask Steam to close.');
     Exit;
   end;
   ShowCloseStatus(Status, 'Asking Steam to close (' + Exe + ' ' + Args + ')...');
@@ -105,7 +133,9 @@ begin
     ShowCloseStatus(Status, 'Steam is still running. Choose Steam > Exit on the PC (do not just close its window), then click Next.');
 end;
 
-function CloseSteam(const FallbackFolder: String; Status: TNewStaticText): Boolean;
+// GameStarted: the game was running at the moment of the request, so Steam was not asked.
+function CloseSteam(const FallbackFolder: String; Status: TNewStaticText; var GameStarted: Boolean): Boolean;
 begin
-  Result := CloseGracefully(SteamShutdownExe(FallbackFolder), '-shutdown', SteamProcess, SteamExitTimeoutMs, Status);
+  Result := CloseGracefully(GameProcesses, SteamShutdownExe(FallbackFolder), '-shutdown', SteamProcess,
+    SteamExitTimeoutMs, Status, GameStarted);
 end;

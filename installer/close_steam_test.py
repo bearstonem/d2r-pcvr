@@ -44,15 +44,27 @@ OutputBaseFilename=close-steam-fixture
 #include "{include}"
 
 // Runs one scenario from /SCENARIO=<ini> and writes [result]; never installs anything.
+// "Page refresh" (the game check the page makes), then optionally the game starting, then "the click".
 function InitializeSetup: Boolean;
 var
-  Scenario: String;
+  Scenario, Game: String;
+  Blocked: Boolean;
+  Code, Waited: Integer;
 begin
   Scenario := ExpandConstant('{{param:SCENARIO|}}');
+  Game := GetIniString('run', 'game', '', Scenario);
   SetIniString('result', 'running_before', IntToStr(Ord(ProcessRunning(GetIniString('run', 'process', '', Scenario)))), Scenario);
-  SetIniString('result', 'closed', IntToStr(Ord(CloseGracefully(GetIniString('run', 'exe', '', Scenario),
+  SetIniString('result', 'game_at_refresh', IntToStr(Ord(AnyRunning(Game))), Scenario);
+  if GetIniString('run', 'start_game', '', Scenario) <> '' then begin
+    Exec(GetIniString('run', 'start_game', '', Scenario), GetIniString('run', 'start_game_args', '', Scenario), '',
+      SW_HIDE, ewNoWait, Code);
+    Waited := 0;
+    while not AnyRunning(Game) and (Waited < 10000) do begin Sleep(100); Waited := Waited + 100; end;
+  end;
+  SetIniString('result', 'closed', IntToStr(Ord(CloseGracefully(Game, GetIniString('run', 'exe', '', Scenario),
     GetIniString('run', 'args', '', Scenario), GetIniString('run', 'process', '', Scenario),
-    GetIniInt('run', 'timeout', 0, 0, 600000, Scenario), nil))), Scenario);
+    GetIniInt('run', 'timeout', 0, 0, 600000, Scenario), nil, Blocked))), Scenario);
+  SetIniString('result', 'blocked', IntToStr(Ord(Blocked)), Scenario);
   SetIniString('result', 'steam_exe', SteamExeInFolder(GetIniString('run', 'steam_folder', '', Scenario)), Scenario);
   SetIniString('result', 'done', '1', Scenario);
   Result := False;
@@ -92,6 +104,10 @@ class CloseSteamFixtureTests(unittest.TestCase):
         shutil.copytree(python, root / 'runtime')
         cls.exe = root / 'runtime' / cls.name
         (root / 'runtime/python.exe').rename(cls.exe)
+        # The stand-in game, with a unique name too: never the real D2R.exe / D2RLoader.exe.
+        cls.game_name = 'pcvr-fake-game-' + uuid.uuid4().hex[:8] + '.exe'
+        cls.game_exe = root / 'runtime' / cls.game_name
+        shutil.copy2(cls.exe, cls.game_exe)
         (root / 'loop.py').write_text(LOOP)
         (root / 'stop.py').write_text(STOP)
         cls.root = root
@@ -113,11 +129,12 @@ class CloseSteamFixtureTests(unittest.TestCase):
         self.assertIsNone(process.poll())
         return process, flag
 
-    def scenario(self, exe, args, timeout, process=None):
+    def scenario(self, exe, args, timeout, process=None, **extra):
         path = self.root / ('scenario-' + uuid.uuid4().hex + '.ini')
         # Win32 INI reads drop one pair of enclosing quotes: keep the command line's own.
         path.write_text('[run]\nexe={}\nargs="{}"\nprocess={}\ntimeout={}\nsteam_folder=c:/Program Files (x86)/Steam\n'.format(
-            exe, args, process or self.name, timeout), encoding='utf-8')
+            exe, args, process or self.name, timeout) + ''.join(f'{key}="{value}"\n' for key, value in extra.items()),
+            encoding='utf-8')
         started = time.monotonic()
         subprocess.run([str(self.setup), '/VERYSILENT', '/SUPPRESSMSGBOXES', '/SCENARIO=' + str(path),
                         '/LOG=' + str(path.with_suffix('.log'))], timeout=120)
@@ -143,6 +160,30 @@ class CloseSteamFixtureTests(unittest.TestCase):
         self.assertGreaterEqual(elapsed, 2)
         self.assertTrue(flag.is_file(), 'the close request was sent')
         self.assertIsNone(process.poll(), 'still running: Setup gives up and asks the player instead')
+
+    def test_game_started_after_the_page_refresh_stops_the_request(self):
+        # The page saw no game, then the game started before the click: Steam must not be asked to close.
+        process, flag = self.start()
+        game_flag = self.root / ('game-flag-' + uuid.uuid4().hex)
+        self.addCleanup(lambda: game_flag.write_text('test over'))   # the stand-in game then exits by itself
+        result, _ = self.scenario(self.exe, self.stop_command(flag), 15000, game=f'D2R-not-this.exe,{self.game_name}',
+                                  start_game=self.game_exe, start_game_args=f'"{self.root / "loop.py"}" "{game_flag}" normal')
+        self.assertEqual((result['running_before'], result['game_at_refresh']), ('1', '0'))
+        self.assertEqual((result['blocked'], result['closed']), ('1', '0'))
+        self.assertFalse(flag.exists(), 'no shutdown request was sent')
+        self.assertIsNone(process.poll(), 'the stand-in Steam is still running')
+
+    def test_game_already_running_is_reported_the_same_way(self):
+        process, flag = self.start()
+        game_flag = self.root / ('game-flag-' + uuid.uuid4().hex)
+        game = subprocess.Popen([str(self.game_exe), str(self.root / 'loop.py'), str(game_flag), 'normal'], creationflags=0x08000000)
+        self.addCleanup(game.wait, 10)
+        self.addCleanup(lambda: game_flag.write_text('test over'))
+        time.sleep(0.5)
+        result, _ = self.scenario(self.exe, self.stop_command(flag), 15000, game=self.game_name)
+        self.assertEqual((result['game_at_refresh'], result['blocked'], result['closed']), ('1', '1', '0'))
+        self.assertFalse(flag.exists())
+        self.assertIsNone(process.poll())
 
     def test_nothing_to_close_runs_nothing(self):
         result, _ = self.scenario(self.root / 'missing.exe', '', 15000, process='pcvr-not-running-' + uuid.uuid4().hex + '.exe')
@@ -177,7 +218,11 @@ class CloseSteamScriptTests(unittest.TestCase):
         # CloseGracefully is only ever asked to close Steam.
         self.assertEqual(include.count('CloseGracefully('), 2)
         self.assertNotIn('CloseGracefully(', setup)
-        self.assertIn("ProcessRunning('D2R.exe') or ProcessRunning('D2RLoader.exe')", include)
+        self.assertIn("GameProcesses = 'D2R.exe,D2RLoader.exe';", include)
+        # The game is checked again inside the close itself, right before the request is sent.
+        request = include.index("Exec(Exe, Args")
+        self.assertLess(include.index('Blocked := AnyRunning(BlockingProcesses);'), request)
+        self.assertIn('CloseGracefully(GameProcesses, SteamShutdownExe(FallbackFolder)', include)
         self.assertIn('CloseSteamButton.Enabled := Steam and not Game;', setup)
         self.assertIn('if SteamRunning and not GameRunning then begin', setup)
         self.assertIn("if SwitchGiven('/CLOSESTEAM') then CloseSteam(", setup)
