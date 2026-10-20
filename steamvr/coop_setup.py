@@ -4,6 +4,7 @@ Uses offline characters and D2RLoader's own host/join UI. Never downloads a
 loader, opens ports, starts a game or changes character files.
 """
 import argparse
+import configparser
 import copy
 from datetime import datetime
 import hashlib
@@ -18,6 +19,7 @@ import tomllib
 from game_install import validate_game
 from install import require_game_closed
 from mod_identity import MOD_NAME
+from coop_connection import port_number
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG = Path('d2rloader/config/d2rloader.toml')
@@ -114,27 +116,49 @@ def inspect(game, mod=MOD_NAME, experimental_battlenet=False):
     store, version = validate_game(game, experimental_battlenet=experimental_battlenet)
     folder = game/'mods'/mod
     plugin = folder/PLUGIN
-    if not plugin.is_file():
+    if folder.resolve() != folder or plugin.resolve() != plugin or not plugin.is_file():
         raise ValueError('Install Unleashed in the selected mod folder first.')
     manifest = json.loads((ROOT/'vrmod-manifest.json').read_text(encoding='utf-8'))
     loader = next(r for r in manifest['requires'] if r['id']=='d2rloader')
+    loader_hashes = {}
     for entry in loader['files']:
         path = game/entry['path'].removeprefix('{game}/')
-        if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() not in entry['sha256_any_of']:
+        digest = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else ''
+        if digest not in entry['sha256_any_of']:
             raise ValueError('D2RLoader files do not match this Unleashed build. Repair with our installer first.')
+        loader_hashes[path.name] = digest
     settings = tomllib.loads((game/CONFIG).read_text(encoding='utf-8-sig'))
-    advanced = settings.get('d2rloader', {}).get('advanced', {})
+    section = settings.get('d2rloader', {})
+    if not isinstance(section, dict) or not isinstance(section.get('advanced', {}), dict):
+        raise ValueError('Expected D2RLoader settings tables.')
+    advanced = section.get('advanced', {})
     extensions = advanced.get('allow_mod_extensions', True)
     if extensions is not True:
         raise ValueError('Enable Allow Mod Extensions in D2RLoader General settings before co-op testing.')
-    return dict(store=store, game_version=version, mod=mod,
-                plugin_sha256=hashlib.sha256(plugin.read_bytes()).hexdigest(),
-                candidate_has_diagnostics=CAPABILITY in plugin.read_bytes(),
-                multiplayer_button=settings.get('d2rloader', {}).get('show_tcpip_button', False),
-                port=advanced.get('game_port', 4000),
+    for key, source in (('show_tcpip_button', section), ('automatic_port_mapping', advanced), ('hosting_check', advanced)):
+        if type(source.get(key, key != 'show_tcpip_button')) is not bool:
+            raise ValueError(f'{key} must be a TOML boolean.')
+    ini = configparser.ConfigParser(strict=False, interpolation=None, inline_comment_prefixes=('#', ';'))
+    preferences = folder/'d2rloader/plugins/d2r_pcvr.ini'
+    if preferences.is_file():
+        data = preferences.read_bytes()
+        ini.read_string(data.decode('utf-16' if data.startswith((b'\xff\xfe', b'\xfe\xff')) else 'utf-8-sig'))
+    policy = {}
+    for key, default in (('melee_rules', 0), ('contact_hits', 1), ('enemies_always_hit', 1)):
+        value = ini.get('gameplay', key, fallback=str(default)).strip()
+        # Match the native diagnostic adapter's integer policy reads.
+        if not re.fullmatch(r'-?\d+', value):
+            raise ValueError(f'Use a numeric {key} value in VR Settings before comparing co-op rules.')
+        policy[key] = int(int(value) == 1) if key == 'melee_rules' else int(int(value) != 0)
+    payload = plugin.read_bytes()
+    return dict(store=store, game_version=version, mod=mod, helper_version=manifest['version'],
+                plugin_sha256=hashlib.sha256(payload).hexdigest(), loader_sha256=loader_hashes,
+                combat_policy=policy, candidate_has_diagnostics=CAPABILITY in payload,
+                multiplayer_button=section.get('show_tcpip_button', False),
+                port=port_number(advanced.get('game_port', 4000)),
                 automatic_port_mapping=advanced.get('automatic_port_mapping', True),
                 hosting_check=advanced.get('hosting_check', True),
-                status='experimental connection diagnostics; guest physical actions not implemented')
+                status='community-reported co-op; remote VR movement is not replicated; full host/guest feature testing pending')
 
 
 def stage_test(game, plugin, experimental_battlenet=False):
@@ -210,10 +234,20 @@ def main():
     parser.add_argument('--json', action='store_true', help='Print a report to compare with the other player')
     parser.add_argument('--stage-test', action='store_true', help='Prepare isolated pcvr-coop mod and character list')
     parser.add_argument('--plugin', type=Path, help='Co-op diagnostic candidate DLL, required with --stage-test')
+    parser.add_argument('--wizard', action='store_true', help='Guided host/join setup for the existing installed mod')
+    parser.add_argument('--test-host', help='Test a host IPv4/name[:port] after the host creates a game')
+    parser.add_argument('--save-report', type=Path, help='Save compatibility information without paths, IPs or characters')
+    parser.add_argument('--compare-report', type=Path, help='Compare a friend compatibility JSON report')
     args = parser.parse_args()
     try:
         game = args.game or detect_game()
         report = inspect(game, args.mod, args.experimental_battlenet)
+        if args.wizard:
+            if args.stage_test or args.enable_tcpip or args.test_host or args.save_report or args.compare_report:
+                raise ValueError('Use --wizard by itself, or use the non-interactive options separately.')
+            from coop_wizard import run
+            run(game, report)
+            return
         if args.stage_test:
             if args.plugin is None:
                 raise ValueError('--stage-test requires --plugin PATH to the candidate DLL.')
@@ -231,12 +265,23 @@ def main():
         else:
             print(f'Unleashed co-op test setup: {report["game_version"]} ({report["store"]})')
             print('Multiplayer button: '+('shown' if report['multiplayer_button'] else 'hidden; run with --enable-tcpip'))
-            print('Experimental connection diagnostics only; guest physical combat is not implemented yet.')
+            print(report['status'])
             print('Start Unleashed normally, select an offline character, then choose Multiplayer beside Play.')
             print('Host: choose LAN Only or Unlisted. Guest: use Direct Join or the shared Game ID.')
             print('Both PCs need the same test DLL, mod folder name and combat rules. Keep the same game port.')
             print('No game was launched, no firewall/router changes were made, and no saves were changed.')
-    except (OSError, ValueError, KeyError) as error:
+        from coop_connection import friend_report, compare_reports, load_friend_report, probe
+        if args.save_report:
+            with args.save_report.open('x', encoding='utf-8') as output:
+                json.dump(friend_report(report), output, indent=2)
+                output.write('\n')
+            print(f'Compatibility report saved: {args.save_report}')
+        if args.compare_report:
+            differences = compare_reports(friend_report(report), load_friend_report(args.compare_report))
+            print('Differences: '+', '.join(differences) if differences else 'Compared setup fields match. The loader still checks game data and other extensions.')
+        if args.test_host:
+            print(json.dumps(probe(args.test_host, report['port']), indent=2))
+    except (OSError, ValueError, KeyError, configparser.Error) as error:
         parser.exit(1, f'Co-op setup: {error}\n')
 
 

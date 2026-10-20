@@ -1,11 +1,105 @@
-# Experimental TCP/IP co-op
+# TCP/IP co-op setup and experimental diagnostics
 
 Work tracked in [#179](https://github.com/bearstonem/d2r-pcvr/issues/179).
-This branch is a **connection diagnostic prototype**, not a release of working
-physical multiplayer combat. Both testers use the same Unleashed candidate.
-Use local offline test characters, separate from the normal save list.
+Players have reported hosting, joining and playing together with released
+Unleashed builds. Remote VR hand/body movements are not replicated. We have not
+yet verified the full host/guest gameplay matrix ourselves, including physical
+swings, custom projectiles, shield defense, portals and reconnects.
 
-## First connection test
+The **setup assistant works with the normal installed release**. It does not
+require a diagnostic DLL or a separate mod. The optional isolated connection
+test below remains available for investigating the remaining gameplay questions.
+Use local offline characters through D2RLoader TCP/IP, not Battle.net online play.
+
+## Easiest setup: both players
+
+1. Install the same Unleashed release with the official Windows installer.
+2. Open **Start > D2R VR Unleashed > Co-op Setup**, or double-click
+   `Coop-Setup.cmd` in the extracted package. Until this branch is released,
+   extract the small **co-op assistant ZIP** beside your existing installation
+   and double-click its `Coop-Setup.cmd`. It reuses the official private Python;
+   no system Python, new loader or replacement DLL is needed.
+3. Choose **Host** or **Join**, then **LAN**, **Internet** or an already
+   configured **private VPN**. Follow the steps for that role. If Multiplayer
+   is hidden, the assistant offers to enable it after the game is closed.
+4. Use **Save compatibility report** and exchange the small JSON files.
+   **Compare a friend report** identifies differences in the game build,
+   selected mod, actual DLL/loader hashes, port and shared combat policy.
+   Rendering, calibration and personal controls are excluded. Reports contain
+   no local paths, IPs, saved characters or passwords. A matching check code
+   means these compared fields match; the loader still checks game data and
+   other extensions when joining.
+5. Launch the usual Unleashed shortcut, select an offline character, then
+   **Multiplayer** beside Play. For the first test, use disposable characters.
+
+The assistant does not launch the game, change port/router/firewall rules,
+move saved characters or alter combat/rendering settings. Its only optional
+configuration edit enables the loader's Multiplayer button, with an exact backup.
+
+## Host and join
+
+**Same home network:** the host creates a **LAN Only** game. The guest uses
+**Direct Join** with the host's LAN IPv4, shown by the assistant. Router
+forwarding is unnecessary for the same LAN. Guest Wi-Fi isolation can prevent
+two PCs from reaching each other even when they use the same router.
+
+**Across the internet:** the host creates an **Unlisted** game. Let D2RLoader
+finish its **Hosting status** check and automatic router mapping first, then
+share the Game ID. Use Direct Join with the host's public IPv4 as an alternative.
+A LAN address such as `192.168.x.x` is not an internet address. Only the host
+normally needs incoming connectivity; the joining player does not need their
+own forwarding rule.
+
+If automatic setup cannot make the host reachable:
+
+- Allow `D2RLoader.exe` through Windows Firewall on the network being used.
+  Keep the firewall enabled.
+- Forward **TCP 4000** on the host's router to **TCP 4000** on the host PC's
+  LAN IPv4. If using another `game_port`, use that port on both ends and set
+  the same loader port on both PCs. Reserve the host LAN address in the router.
+- Two routers can require two forwarding rules. A router WAN address in a
+  private range or `100.64.0.0/10` can indicate double NAT or CGNAT; forwarding
+  your own router alone may not be enough. Ask the ISP about public IPv4 or
+  use a private VPN.
+
+**Optional private VPN:** configure both PCs on the same private network first,
+then use **LAN Only / Direct Join** with the host VPN IPv4. Tools such as
+Tailscale can avoid manual router forwarding and work through many CGNAT
+connections. They are optional, installed separately and not bundled. Their
+relay fallback can add latency. This alternative has not been tested with our
+assistant in a two-PC D2R session.
+
+## Test the host connection
+
+After the host creates the game, the guest can choose **Test the host address**
+in the assistant. Enter an IPv4/name, optionally `address:port`; Game IDs belong
+in D2RLoader, not the TCP test. The test opens and closes a TCP connection without
+sending game commands. It distinguishes name lookup failure, refusal, timeout
+and an unavailable network. A successful TCP test does not prove the loader
+accepted the mod or that gameplay works. The loader's Hosting status checks
+internet reachability from outside; testing your own public IP locally may fail
+on routers without NAT loopback even when an outside guest can connect.
+
+For terminal use:
+
+```powershell
+.\Coop-Setup.cmd --game "YOUR GAME FOLDER" --save-report "my-coop-check.json"
+.\Coop-Setup.cmd --game "YOUR GAME FOLDER" --compare-report "friend-coop-check.json"
+.\Coop-Setup.cmd --game "YOUR GAME FOLDER" --test-host "HOST IPV4"
+```
+
+## What still needs verifying
+
+Record **host and guest separately**: physical melee, trigger attacks, bows,
+crossbows, hand spells, shield blocks/parries, loot/trading, potions, portals,
+death, Save & Exit and reconnect. Record which release/mod each player used.
+Basic co-op reports are valuable, but do not establish every custom VR path.
+Remote tracked head/hand/weapon replication is a separate feature; normal
+network character animation does not transmit VR poses. Pose replication needs
+authenticated peer ownership, timestamps/interpolation, per-character skeleton
+binding, bandwidth limits and cleanup on disconnect/area changes.
+
+## Optional isolated diagnostic connection test
 
 The local **co-op connection test kit ZIP** contains `Setup-Coop-Test.cmd`.
 Extract the same kit on both PCs and double-click that file after closing
@@ -107,5 +201,9 @@ callbacks, bounded queues and shutdown. Python fixtures cover isolated staging,
 preservation of normal files, malformed settings, comments/BOM/newlines,
 concurrent changes, repeat setup and rejection while the game runs.
 
-Real two-PC, VR lobby and native gameplay checks are pending. Passing a protocol
-fixture is not evidence of synchronized physical combat.
+Real two-PC verification by the maintainer is pending. Community reports of
+basic play do not identify every tested feature or substitute for this matrix.
+Passing a protocol fixture is not evidence of synchronized physical combat.
+
+Setup references: [D2RLoader host/join and port guide](https://d2rloader.net/tcp-ip.html),
+[Tailscale connectivity and firewall documentation](https://tailscale.com/kb/1082/firewall-ports).

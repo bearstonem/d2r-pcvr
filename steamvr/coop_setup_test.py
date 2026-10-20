@@ -2,6 +2,8 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
+import hashlib
+import json
 import tomllib
 
 import coop_setup as coop
@@ -62,6 +64,40 @@ class ButtonSettingsTests(unittest.TestCase):
 
 
 class PreflightTests(unittest.TestCase):
+    def fixture(self,root):
+        game=root/'game';game.mkdir()
+        entries=[]
+        for name in ('D2RLoader.exe','D2RCore.dll','d2rloader.mpq'):
+            data=name.encode();(game/name).write_bytes(data)
+            entries.append(dict(path='{game}/'+name,sha256_any_of=[hashlib.sha256(data).hexdigest()]))
+        (root/'vrmod-manifest.json').write_text(json.dumps(dict(version='0.3.23',requires=[dict(id='d2rloader',files=entries)])))
+        plugin=game/'mods'/coop.MOD_NAME/coop.PLUGIN;plugin.parent.mkdir(parents=True);plugin.write_bytes(b'fixture')
+        config=game/coop.CONFIG;config.parent.mkdir(parents=True,exist_ok=True)
+        config.write_text('[d2rloader]\nshow_tcpip_button=true\n[d2rloader.advanced]\ngame_port=4123\n')
+        return game,plugin,config
+
+    def test_report_uses_actual_loader_plugin_port_and_saved_rules(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp).resolve();game,plugin,_=self.fixture(root)
+            plugin.with_name('d2r_pcvr.ini').write_text('[gameplay]\nmelee_rules=1\ncontact_hits=0\n',encoding='utf-16')
+            with patch.object(coop,'ROOT',root),patch.object(coop,'validate_game',return_value=('steam','3.3.93787')):
+                report=coop.inspect(game)
+            self.assertEqual(report['port'],4123)
+            self.assertEqual(report['plugin_sha256'],hashlib.sha256(b'fixture').hexdigest())
+            self.assertEqual(report['combat_policy'],dict(melee_rules=1,contact_hits=0,enemies_always_hit=1))
+            self.assertEqual(len(report['loader_sha256']),3)
+            self.assertFalse(report['candidate_has_diagnostics'])
+            self.assertIn('community-reported',report['status'])
+
+    def test_invalid_network_settings_fail_without_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp).resolve();game,_,config=self.fixture(root)
+            for value in ('game_port=0','game_port=true','automatic_port_mapping="yes"','hosting_check=1'):
+                data=('[d2rloader]\n[d2rloader.advanced]\n'+value).encode();config.write_bytes(data)
+                with patch.object(coop,'ROOT',root),patch.object(coop,'validate_game',return_value=('steam','3.3.93787')):
+                    with self.subTest(value=value),self.assertRaises(ValueError):coop.inspect(game)
+                self.assertEqual(config.read_bytes(),data)
+
     def test_unknown_loader_and_invalid_mod_refuse_without_changes(self):
         with tempfile.TemporaryDirectory() as folder,patch.object(coop,'validate_game',return_value=('steam','3.3.93787')):
             game=Path(folder).resolve();plugin=game/'mods'/coop.MOD_NAME/coop.PLUGIN
