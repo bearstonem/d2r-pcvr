@@ -58,6 +58,7 @@ void SetStereoUiEye(int eye);
 void TraceStereoLabels(int eye);
 void ArmLabelCapture();
 bool TakeLabelCapture();
+bool LabelCapturePending();
 
 // Called once per game frame, right after the game placed its camera and before
 // the view/projection callbacks, while a game is running (enabled or not).

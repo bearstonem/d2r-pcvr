@@ -34,6 +34,7 @@
 
 #include "d2r_vr_state.h"
 #include "interactionstate.h"
+#include "target_lock.h"
 #include "journal_ui.h"
 #include "../steamvr/native_panels.h"
 #include "../steamvr/callback_ticket.h"
@@ -787,6 +788,7 @@ void Init(const PluginContext* ctx) {
     g_ctx = ctx;
 #ifdef D2RVR_NATIVE_OPENXR
     interactionstate::Init(ctx);
+    targetlock::Init(ctx);
 #endif
     g_threads = Query<ThreadService>(ctx);
     g_widgets = Query<WidgetService>(ctx);

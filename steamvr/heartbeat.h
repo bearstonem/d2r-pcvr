@@ -5,16 +5,17 @@
 #include <cstring>
 #include <vector>
 
-// Guard strain heartbeat. Value-only: the strain level comes from the guard
-// strain light (guard_strain.h); the transport plays it on its own waveOut
-// stream (PlaySound plays one sound per process and would cut off the riposte).
+// Low-life heartbeat. Value-only: the transport supplies the published life and
+// the player's VR Settings > Combat > Heartbeat starts at (LifeLevel), and plays
+// it on its own waveOut stream (PlaySound plays one sound per process and would
+// cut off the riposte).
 //
-// While the guard is strained a heartbeat plays, louder and faster as strain
-// builds. When strain drains it winds down more slowly than the light (Level):
-// quieter and slower beat by beat, then silent. The built-in beat is a recording
-// embedded in the plugin (steamvr/assets/guard-heartbeat.wav); Synthesize() is
-// the fallback when that resource is missing. [gameplay] guard_strain_heart_file
-// replaces it with a 16-bit PCM WAV of one beat (any rate, mono or stereo).
+// Below the start the heartbeat steps up every 10 % of life lost, louder and
+// faster, loudest and fastest below 10 %. Healing back above a step winds it
+// down slowly (Level): quieter and slower beat by beat, then silent. The built-in beat is a recording embedded in the plugin
+// (steamvr/assets/guard-heartbeat.wav); Synthesize() is the fallback when that
+// resource is missing. [gameplay] low_life_heart_file replaces it with a 16-bit
+// PCM WAV of one beat (any rate, mono or stereo).
 namespace framevr::heartbeat {
 constexpr int Rate=44100;
 constexpr double Pi=3.14159265358979;
@@ -76,13 +77,40 @@ inline bool ParseWav(const std::vector<uint8_t>& w,Pcm& out) {
 }
 struct Tuning {
     float volume=2;              // heartbeat % x the game's Master x Combat volume; 0 = off
-    float bpmMin=70,bpmMax=115;  // first strain .. a broken guard
-    float quiet=.12f;            // loudness at the first touch of strain (of full)
+    float bpmMin=70,bpmMax=115;  // the first step .. below 10 % life
+    float quiet=.12f;            // loudness at the first touch (of full)
     float fadeSeconds=4;         // winding down from full to silent, at the slowest
 };
-// The heartbeat's own level: rises with strain at once, but falls no faster
+// How hard the heart works: start (10..90 %, a multiple of 10; 0 = off) and each
+// 10 % below it is one step, and life under k of those steps is k of them all,
+// so start 50 gives 1/5 below 50 %, 2/5 below 40 % ... full below 10 %.
+// Unknown, dead or off: 0, so it winds down.
+inline float LifeLevel(float health,float maxHealth,int startPercent) {
+    const int steps=std::clamp(startPercent,0,90)/10;
+    if(steps<1||!std::isfinite(health)||!std::isfinite(maxHealth)||health<=0||maxHealth<=0)return 0;
+    const float percent=100*health/maxHealth;
+    int below=0;
+    for(int k=0;k<steps;++k)if(percent<float(steps*10-k*10))++below;
+    return float(below)/float(steps);
+}
+// Wiping the visor clean quiets the heartbeat while still hurt: the target
+// drops to 0 and Level fades it out. The next hit brings it straight back at
+// its step (Level rises at once). Reaching silence anyway (healed above the
+// start, Off, dead) clears it. A hit in the same step as the last wipe stroke wins.
+class Hush {
+    bool on=false;
+public:
+    void Reset(){on=false;}
+    // cleaned: a scrub removed the last blood this step. hit: life fell by a hit.
+    float Step(float level,bool cleaned,bool hit) {
+        on=(on||cleaned)&&!hit&&level>0;
+        return on?0.f:level;
+    }
+    bool On() const {return on;}
+};
+// The heartbeat's own level: rises with LifeLevel at once, but falls no faster
 // than 1/fadeSeconds per second, so it keeps beating, quieter and slower, after
-// the guard light has cleared. A hitch over .25 s (a load) snaps it to strain.
+// a heal. A hitch over .25 s (a load) snaps it to the target.
 class Level {
     float level=0;
 public:
@@ -94,7 +122,7 @@ public:
         return level;
     }
 };
-// Loudness for this much strain: quiet at first, full when broken. 0 = silent.
+// Loudness for this level: quiet at first, full in the worst band. 0 = silent.
 inline float Gain(float strain,const Tuning& t) {
     if(!std::isfinite(strain)||strain<=0||!std::isfinite(t.volume)||!(t.volume>0))return 0;
     strain=std::min(strain,1.f);
@@ -115,10 +143,10 @@ inline float Limit(float x) {
     const float y=Knee+(1-Knee)*std::tanh((a-Knee)/(1-Knee));
     return x<0?-y:y;
 }
-// Exactly one beat period at this strain's tempo: the beat at this strain's
+// Exactly one beat period at this level's tempo: the beat at this level's
 // loudness, then silence. A beat longer than the period is cut with a 10 ms
 // fade. Queued back to back, the audio clock itself keeps the rhythm, and
-// loudness and tempo follow strain from one beat to the next. No strain: empty.
+// loudness and tempo follow life from one beat to the next. Level 0: empty.
 inline std::vector<int16_t> Beat(const Pcm& source,float strain,const Tuning& t) {
     const float gain=Gain(strain,t);
     if(gain<=0||source.rate<=0||source.channels<1||source.samples.size()<size_t(source.channels))return {};

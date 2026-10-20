@@ -94,5 +94,12 @@ int main() {
         {TextScaleScope nested(multiplier,.75f);assert(multiplier==.75f);}
         assert(multiplier==.45f);}
     assert(multiplier==0); // other native text retains its original scale
-    std::puts("Loot labels: contrast/geometry, Show Items lease, grip/trigger hysteresis, combat consumption and lifecycle guards passed");
+    // Labels are kept over the whole eye, not only the interface's widescreen band.
+    auto size=[](uint64_t w,uint64_t h){return h<<32|w;};
+    assert(LabelArea(size(2048,1152),size(2048,2048))==size(2048,2048)); // 2048 square
+    assert(LabelArea(size(2016,1134),size(2016,2240))==size(2016,2240)); // Index at 100%
+    assert(LabelArea(size(1900,1152),size(2048,2048))==size(1900,2048)); // the width stays the interface's
+    assert(LabelArea(size(3840,2160),size(3840,2160))==size(3840,2160)); // widescreen: nothing to add
+    assert(LabelArea(size(1920,1080),0)==size(1920,1080)); // desktop play: no VR size
+    std::puts("Loot labels: contrast/geometry, Show Items lease, grip/trigger hysteresis, combat consumption, lifecycle guards and the label area passed");
 }

@@ -1777,6 +1777,82 @@ float3 Phantom(float4 pos, float2 uv, int eye)
 float3 PS_Phantom(float4 pos : SV_Position, float2 uv : TEXCOORD) : SV_Target { return Phantom(pos, uv, 0); }
 float3 PS_PhantomR(float4 pos : SV_Position, float2 uv : TEXCOORD) : SV_Target { return Phantom(pos, uv, 1); }
 
+// Target outline: a glowing edge round the 3D model of the monster the target
+// lock holds, coloured by range. The model is found from depth: each pixel is
+// put back in the world (as the table's edge test does) and, inside a cylinder
+// round the target's cell, the pixels standing above the floor are the model
+// (OutlineShape: radius, lowest and highest height). A pixel whose neighbours
+// fall outside that shape is on its edge, so walls and other monsters in front
+// hide it. vrcam: each eye relative to the hero, in world units; OutlinePos xyz
+// the cylinder's foot relative to the hero, w strength, 0 = none.
+uniform bool OutlineOn < hidden = true; > = false;
+uniform float3 OutlineEye0 < hidden = true; > = float3(0.0, 0.0, 0.0);
+uniform float3 OutlineEye1 < hidden = true; > = float3(0.0, 0.0, 0.0);
+uniform float4 OutlinePos < hidden = true; > = float4(0.0, 0.0, 0.0, 0.0);
+uniform float3 OutlineShape < hidden = true; > = float3(2.6, 0.15, 4.0);
+uniform float3 OutlineColor < hidden = true; > = float3(1.0, 0.2, 0.12);
+uniform float OutlineWidth < hidden = true; > = 1.0;   // how far out a neighbour is looked for, in pixels: the edge's thickness
+uniform float OutlineJump < hidden = true; > = 6.0;    // a neighbour this close in 3D still belongs to the body (world units)
+uniform float OutlineInner < hidden = true; > = 0.05;  // a faint tint over the whole body, a share of the strength
+
+// The world point (relative to the hero) the eye sees at uv; ok = 0 for the sky.
+float3 OutlineWorld(float2 uv, int eye, out float ok)
+{
+    const float d = DepthAt(UpsideDown ? float2(uv.x, 1.0 - uv.y) : uv).x;
+    ok = d > 0.0 ? 1.0 : 0.0;
+    const float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    const float4 sp = eye == 0 ? SkyProj0 : SkyProj1;
+    const float3 v = float3((ndc.x + sp.z) / sp.x, (ndc.y + sp.w) / sp.y, -1.0);
+    const float3 off = eye == 0 ? v.x * CamRight0 + v.y * CamUp0 + v.z * CamBack0
+                                : v.x * CamRight1 + v.y * CamUp1 + v.z * CamBack1;
+    return (eye == 0 ? OutlineEye0 : OutlineEye1) + off * (NearPlane / max(d, 1e-6));
+}
+// Standing above the floor (between the shape's lowest and highest height).
+float Raised(float3 q, float4 o, float3 shape)
+{
+    const float h = q.y - o.y;
+    return step(shape.y, h) * step(h, shape.z);
+}
+// Inside the search cylinder round the target (and not sky).
+float Near(float3 q, float ok, float4 o, float3 shape)
+{
+    return ok * step(length(q.xz - o.xz), shape.x);
+}
+static const float2 kOutlineDirs[8] = { float2(1, 0), float2(-1, 0), float2(0, 1), float2(0, -1),
+                                       float2(0.707, 0.707), float2(-0.707, 0.707), float2(0.707, -0.707), float2(-0.707, -0.707) };
+// Only height edges inside the cylinder count: its own boundary never draws.
+float3 OutlineTint(float3 c, float2 uv, int eye, float3 p, float4 o, float3 shape, float3 colour)
+{
+    if (o.w <= 0.0 || length(p.xz - o.xz) > shape.x) return c;
+    const float centre = Raised(p, o, shape);
+    if (centre <= 0.0) return c;
+    // The glow sits on the model's own edge pixels. A neighbour belongs to the
+    // model when it is raised too and either inside the cylinder or right next
+    // to this pixel in the world; the background behind a monster's head is far
+    // away (a depth jump), so its silhouette edges glow, not just its feet.
+    const float jump = OutlineJump;
+    float edge = 0.0;
+    [unroll] for (int k = 0; k < 8; ++k) {   // one ring of neighbours: a thin line
+        float ok;
+        const float3 q = OutlineWorld(uv + kOutlineDirs[k] * float2(BUFFER_RCP_WIDTH, BUFFER_RCP_HEIGHT) * OutlineWidth, eye, ok);
+        const float model = ok * Raised(q, o, shape) * max(Near(q, ok, o, shape), step(length(q - p), jump));
+        edge += 1.0 - model;
+    }
+    const float a = max(saturate(edge / 3.0), OutlineInner) * o.w;
+    return lerp(c, colour, saturate(a));   // painted over the picture: subtle at low strength
+}
+float3 Outline(float2 uv, int eye)
+{
+    const float3 c = tex2D(FogColorSmp, uv).rgb;
+    if (!OutlineOn) return c;
+    float ok;
+    const float3 p = OutlineWorld(uv, eye, ok);
+    if (ok <= 0.0) return c;
+    return OutlineTint(c, uv, eye, p, OutlinePos, OutlineShape, OutlineColor);
+}
+float3 PS_Outline(float4 pos : SV_Position, float2 uv : TEXCOORD) : SV_Target { return Outline(uv, 0); }
+float3 PS_OutlineR(float4 pos : SV_Position, float2 uv : TEXCOORD) : SV_Target { return Outline(uv, 1); }
+
 float3 PS_GameHud(float4 pos : SV_Position, float2 uv : TEXCOORD) : SV_Target { return GameHud(uv, 1.0); }
 float3 PS_GameHudR(float4 pos : SV_Position, float2 uv : TEXCOORD) : SV_Target { return GameHud(uv, -1.0); }
 
@@ -1939,6 +2015,7 @@ technique D2R_DepthFog <
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_Peaks; RenderTarget = PeakTex; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_DomeSeeds; RenderTarget = DomeSeedTex; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_DepthFog; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_Outline; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_Hud; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_GameHud; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_Phantom; }
@@ -1973,6 +2050,7 @@ technique D2R_DepthFog_R <
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_Peaks; RenderTarget = PeakTex; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_DomeSeeds; RenderTarget = DomeSeedTex; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_DepthFogR; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_OutlineR; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_HudR; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_GameHudR; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_PhantomR; }

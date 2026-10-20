@@ -126,6 +126,11 @@ std::atomic<bool> g_labels{false};
 // monsters were fogged over the void, 2026-10-04) and the floor's key keeps the letters off
 // the void (2026-10-06). Only when the labels are not out anyway.
 std::atomic<bool> g_uiMask{false};
+// By turns (TakeInterface, the transport): the interface left over taken out whole once
+// the eye's pass has drawn it, for the transport to lay back over each eye. Moved with
+// the scene's depth into the eye not drawn, the labels over monsters flickered
+// (2026-10-19). g_taken: taken out in this eye's pass (UiFrame starts each).
+std::atomic<bool> g_takeOut{false},g_taken{false};
 // The orb shown or hidden on its own: only when the game's map cannot be set
 // (no widget service). Otherwise the "D2R: Map" action opens and closes the
 // game's map and the orb follows what the game draws (g_mapDrawn), so it is
@@ -584,9 +589,16 @@ void OnBind(command_list* cl, uint32_t count, const resource_view* rtvs, resourc
         }
         // From above: the rest of it out whole, for the effect to lay on the tilted plane.
         const bool labels = g_labels.load() && g_picReady.load() && !g_menu.load();
+        const bool turns = !labels && g_takeOut.load() && !g_menu.load();   // out, for the transport to lay back
         const bool mask = !labels && g_uiMask.load() && g_picReady.load() && !g_menu.load();   // copied, left in
-        g_lab.on = (labels || mask) && CopyLayer(cl, layerResource, it->second.w, it->second.h);
-        if (g_lab.on && labels) cl->clear_render_target_view(layerRtv, kEmpty);
+        g_lab.on = (labels || turns || mask) && CopyLayer(cl, layerResource, it->second.w, it->second.h);
+        if (g_lab.on && (labels || turns)) cl->clear_render_target_view(layerRtv, kEmpty);
+        if (g_lab.on && turns) {
+            if (g_taken.exchange(true)) {
+                static bool told = false;
+                if (!told) { told = true; Log("hud: by turns - the interface was drawn twice in one eye's pass; the last part is laid back"); }
+            }
+        }
         g_lab.at = GetTickCount64();
         Untrack(it);
     }
@@ -622,6 +634,7 @@ void Register() {
 
 void UiFrame(bool active,bool workspace,int eye){
     std::lock_guard lock(g_lock);
+    g_taken=false;
     if(!active||eye==0)uiCaptured=false;
     uiActive=active;workspaceActive=workspace;uiEye=eye;
 #ifdef D2RVR_NATIVE_OPENXR
@@ -632,6 +645,12 @@ void NativeSession(bool active){g_nativeSession.store(active);}
 void NativeGameplay(bool active){g_nativeGameplay.store(active);}
 void EndNativeEye(){g_nativeGameplay=false;}
 bool NativeToolbarHidden(){return g_nativeSession.load();}
+void TakeInterface(bool on){g_takeOut.store(on);}
+uint64_t TakenInterface(uint32_t& width,uint32_t& height) {
+    std::lock_guard lock(g_lock);
+    if(!g_taken.load()||!g_lab.on||!g_lab.tex.handle)return 0;
+    width=g_lab.w;height=g_lab.h;return g_lab.tex.handle;
+}
 uint64_t UiTexture(uint32_t& width,uint32_t& height,int32_t crop[4]) {
     std::lock_guard lock(g_lock);
     if(!uiActive.load()||!uiCaptured||!g_lab.tex.handle)return 0;

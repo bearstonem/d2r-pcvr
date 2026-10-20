@@ -70,15 +70,26 @@ supplied by the contributor (ChuckRibbits) as an MP3 and converted to WAV withou
 other changes. It is embedded by `interaction_assets.rc` and played from memory at
 the game's Master x Combat volume; `[gameplay] riposte_sound_file` replaces it.
 
-## Guard strain heartbeat
+## Low-life heartbeat
 
 `guard-heartbeat.wav` (16-bit PCM, 48 kHz stereo, 0.50 s) is one lub-dub played
-while the shield guard is strained. It is the third beat of "Heartbeat" by
+while life is low, below VR Settings > Combat > Heartbeat starts at (60 % by default). It is the third beat of "Heartbeat" by
 SoundReality on Pixabay (item 549797), supplied by the contributor (ChuckRibbits)
 as an MP3: decoded at its own 48 kHz, cut from 20 ms before the lub to 0.50 s with a
 5 ms fade in and a 60 ms fade out, and peak-normalised to -1 dBFS. It is embedded by
 `interaction_assets.rc` and queued once per beat at a tempo and loudness that follow
-the strain; `[gameplay] guard_strain_heart_file` replaces it.
+the life left; `[gameplay] low_life_heart_file` replaces it.
+
+## Guard break bone snap
+
+`guard-break-bone.wav` (16-bit PCM, 48 kHz stereo, 0.86 s) plays once when the
+shield guard breaks. It is "Bone Snap" by saboteurcomics on Pixabay (item 408148),
+supplied by the contributor (ChuckRibbits) as an MP3: resampled to 48 kHz, given a
++3 dB low shelf at 120 Hz for more weight, then raised 12 dB into a -1 dBFS peak
+limiter (louder in game: about +2 LU over the source). It is
+embedded by `interaction_assets.rc` and played on its own waveOut stream at the
+game's Master x Combat volume x `[gameplay] guard_break_volume` (100 %);
+`guard_break_sound_file` replaces it.
 
 ## Visor blood
 

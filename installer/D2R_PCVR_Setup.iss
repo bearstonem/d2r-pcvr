@@ -3,7 +3,7 @@
   #error PayloadDir must point to a verified native Windows package with its private Python runtime.
 #endif
 #ifndef ModVersion
-  #define ModVersion "0.3.20"
+  #define ModVersion "0.3.23"
 #endif
 #ifndef InstallerOutput
   #define InstallerOutput "Output"

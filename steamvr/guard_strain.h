@@ -8,24 +8,39 @@
 // supplies blocked hits, parries and whether the shield is raised; nothing
 // here reads native memory or XR state.
 //
-// Every blocked hit strains the guard. Strain shows as soft white light at
-// the rim of the view that creeps inward; each block sends one pulse in from
+// Every blocked hit strains the guard, weighted by the attacker's rank
+// (RankWeight). Strain shows as soft white light at the rim of the view that
+// creeps inward; each block sends one pulse in from
 // the edge. Full strain breaks the guard: the light swells toward the centre
 // and breathes slowly. The shield still blocks throughout; what the player
-// loses is sight of the fight. Lowering the shield is the only reset: strain
-// drains while it is down, and a broken guard stays broken until it has fully
-// faded. Raising it again part way keeps what is left. Parries add nothing.
+// loses is sight of the fight. Strain drains while the shield is down, and
+// also while it stays up once no hit has reached it (block or parry) for
+// recoverSeconds; the next hit stops the drain and restarts that wait. A broken
+// guard stays broken until it has fully faded. Raising it again part way keeps
+// what is left. Parries add nothing.
 //
 // Comfort: no hard flashes. Pulses are a smooth attack/release envelope that
 // re-triggers without dropping, so rapid blocks hold a swell rather than
 // strobing; breathing is well under 1 Hz; opacity never exceeds brightness.
 namespace framevr::strain {
 enum class BuildSpeed { Slow, Medium, Fast };
+// The attacker's rank weights the strain of each block it lands on the shield:
+// lesser monsters wear the guard down slowly, the rarest fastest. At Medium a
+// normal monster breaks the guard in 10 blocks, an act boss in 3.
+enum class Rank : uint8_t { Normal, Minion, Champion, Unique, PrimeEvil };
+inline float RankWeight(Rank r) {
+    switch(r){case Rank::Minion:return 1.25f;case Rank::Champion:return 2.f;case Rank::Unique:return 2.5f;case Rank::PrimeEvil:return 4.f;default:return 1.f;}
+}
+inline const char* RankName(Rank r) {
+    switch(r){case Rank::Minion:return "minion";case Rank::Champion:return "champion";case Rank::Unique:return "unique";case Rank::PrimeEvil:return "prime_evil";default:return "normal";}
+}
 inline float BuildMultiplier(BuildSpeed speed){return speed==BuildSpeed::Slow?.5f:speed==BuildSpeed::Fast?2.f:1.f;}
 struct Tuning {
     BuildSpeed speed=BuildSpeed::Medium; // changes strain per block, never ring size or reset time
     float perBlock=.10f;     // strain per blocked hit (1 = broken)
-    float resetSeconds=3.f;  // lowered: full strain clears in this long
+    float resetSeconds=1.5f; // draining: full strain clears in this long
+    float recoverSeconds=1.5f; // raised, no hit on the shield this long: drains as if lowered (0 = only lowering drains)
+                             // 1.5 s bridges most gaps between blocks in a fight (median 0.8 s); hold + fade = 3 s from full
     float clear=.10f;        // radius left clear at full swell (1 = visor image edge)
     float brightness=1.f;    // peak opacity, 0 = off ([gameplay] guard_strain_light)
     float breatheSeconds=1.6f; // one slow swell while broken
@@ -53,6 +68,7 @@ struct Input {
     bool eligible=false;      // first person, in a game, shield equipped, no menu
     bool raised=false;        // the guard is up (shield_guard.h)
     unsigned blocks=0,parries=0; // since the last step
+    float weight=-1;          // summed RankWeight of those blocks; <0 = one per block
 };
 struct Output {
     float strain=0,swell=0,pulse=0;
@@ -62,7 +78,7 @@ struct Output {
 };
 class Engine {
     uint64_t session=0;
-    double last=0,pulseAt=-1;
+    double last=0,pulseAt=-1,hitAt=-1; // hitAt: the last block or parry on the raised shield
     float strain=0,swell=0,pulse=0;
     bool broken=false,attacking=false;
 public:
@@ -75,18 +91,22 @@ public:
         const float dt=raw>0&&raw<=.25?float(raw):0; // hitches and loads do not drain or swell
         last=in.time;
         const bool up=in.eligible&&in.raised;
-        if(up&&in.blocks) {
-            strain=std::min(1.f,strain+float(in.blocks)*std::max(0.f,t.perBlock)*BuildMultiplier(t.speed));
+        if(up&&(in.blocks||in.parries||in.weight>0))hitAt=in.time;   // any hit on the shield restarts the recovery wait
+        if(up&&(in.blocks||in.weight>0)) {   // weight may arrive a step before its count
+            const float units=in.weight>=0?in.weight:float(in.blocks);
+            strain=std::min(1.f,strain+units*std::max(0.f,t.perBlock)*BuildMultiplier(t.speed));
             attacking=true;pulseAt=in.time;
             if(strain>=1&&!broken){broken=true;out.brokeNow=true;}
         }
-        if(!up&&strain>0) {
+        // Raised but left alone: after recoverSeconds without a hit it drains like lowering.
+        const bool idle=up&&t.recoverSeconds>0&&(hitAt<0||in.time-hitAt>=t.recoverSeconds);
+        if((!up||idle)&&strain>0) {
             strain=t.resetSeconds>0?std::max(0.f,strain-dt/t.resetSeconds):0;
             if(strain<=0&&broken){broken=false;out.clearedNow=true;}
         }
         if(strain<=0)broken=false;
-        // Swell: grows while broken, never outlasts the strain it came from.
-        if(broken&&up)swell=std::min(1.f,swell+dt/SwellSeconds);
+        // Swell: grows while broken and under attack, never outlasts the strain it came from.
+        if(broken&&up&&!idle)swell=std::min(1.f,swell+dt/SwellSeconds);
         swell=std::min(swell,strain);
         // Pulse envelope: re-triggered blocks keep rising instead of dropping.
         if(attacking) {

@@ -73,6 +73,13 @@ installer's full output. Share the error at the end of those logs when reporting
 a problem; review them for personal paths before posting. Older installers may
 only report an exit code in `setup-last.log` and do not create `setup-install.log`.
 
+If Setup reports **Permission denied** for **launcher_icon.png**, fully close
+**D2R VR Launcher** and any image viewer showing that file, then rerun Setup
+with **Update / repair**. Keep Steam and the game closed while Setup runs.
+The launcher can hold its displayed icon open, preventing an installer from
+replacing it. This error alone does not mean you need administrator rights or
+to change antivirus settings. Keep the installation backups when retrying.
+
 If setup reports **Checksum mismatch**, the downloaded bytes do not match a
 version approved by that installer. An upstream download can be replaced while
 keeping the same filename; a damaged download can also cause this error. Get the

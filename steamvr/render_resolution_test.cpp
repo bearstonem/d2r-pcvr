@@ -41,15 +41,15 @@ int main(){
     assert(Coordinate(100000,100,4096)==32767);
     assert(Coordinate(25,1,4096)==25);
     using namespace framevr::settings;
-    Snapshot s;s.ready=true;assert(s.values[RenderResolution]==0);
-    assert(Normalize(RenderResolution,9)==0&&Normalize(RenderResolution,1.5f)==0);
+    Snapshot s;s.ready=true;assert(s.values[RenderResolution]==1);   // the headset's own size by default
+    assert(Normalize(RenderResolution,9)==1&&Normalize(RenderResolution,1.5f)==1);
     Model model;model.Open(s);model.Click({Kind::Tab,int(Page::Video)});
     const int row=7;assert(RowKey(Page::Video,row)==RenderResolution&&RowKey(Page::Video,8)==DesktopOneEye);
-    const auto box=Increase(row);assert(box.y+box.h<806);
+    const auto box=Increase(row);assert(box.y+box.h<876);
     auto hit=HitTest(Page::Video,(box.x+box.w*.5f)/Width,(box.y+box.h*.5f)/Height);
     assert(hit.index==RenderResolution);model.Click(hit);
     const auto save=model.Click({Kind::Apply});
-    assert(save.changed==(1u<<RenderResolution)&&save.values[RenderResolution]==1);
+    assert(save.changed==(1u<<RenderResolution)&&save.values[RenderResolution]==2);
     WNDCLASSW cls{};cls.lpfnWndProc=Hook;cls.hInstance=GetModuleHandleW(nullptr);cls.lpszClassName=L"FrameResolutionFixture";
     assert(RegisterClassW(&cls));
     auto h=CreateWindowW(cls.lpszClassName,L"Resolution fixture",WS_OVERLAPPEDWINDOW,0,0,800,600,nullptr,nullptr,cls.hInstance,nullptr);

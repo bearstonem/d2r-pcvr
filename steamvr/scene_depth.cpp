@@ -21,6 +21,8 @@ resource copy{};
 resource_view view{};
 resource_desc description{};
 bool bound=false;
+Kept latest;   // this present's copy, until taken
+Candidate lastPick;   // the last eye's, for the replay's right eye
 struct OwnScope {OwnScope(){own=true;}~OwnScope(){own=false;}};
 format SrvFormat(format typeless) {
     switch(typeless) {
@@ -46,10 +48,11 @@ void Release() {
 void Destroyed(device* device,resource resource) {
     if(own)return;
     std::lock_guard lock(mutex);candidates.Destroy(uintptr_t(device),resource.handle);
+    if(lastPick.resource==resource.handle)lastPick={};
 }
 void DeviceDestroyed(device* device) {
     if(own)return;
-    std::lock_guard lock(mutex);candidates.Destroy(uintptr_t(device));
+    std::lock_guard lock(mutex);candidates.Destroy(uintptr_t(device));lastPick={};
 }
 void RuntimeDestroyed(effect_runtime* rt) {
     std::lock_guard lock(mutex);OwnScope scope;
@@ -82,18 +85,22 @@ void Observe(reshade::api::command_list* cl,uint32_t count,const reshade::api::r
     std::lock_guard lock(mutex);
     candidates.Bind(uintptr_t(device),depth.handle,desc.texture.width,desc.texture.height,color);
 }
-void Bind(reshade::api::effect_runtime* rt,reshade::api::command_list* cl,bool wanted,float scale[2]) {
+void Bind(reshade::api::effect_runtime* rt,reshade::api::command_list* cl,bool wanted,bool keep,bool reuse,float scale[2]) {
     std::lock_guard lock(mutex);OwnScope scope;
-    enabled.store(wanted,std::memory_order_relaxed);
+    latest={};
+    const bool track=wanted||keep;
+    enabled.store(track,std::memory_order_relaxed);
     if(runtime&&runtime!=rt)Release();
     runtime=rt;
     auto* device=rt->get_device();uint32_t w=0,h=0;rt->get_screenshot_width_and_height(&w,&h);
-    const auto best=candidates.Select(uintptr_t(device),w,h);
+    auto best=candidates.Select(uintptr_t(device),w,h);
     candidates.EndEye(uintptr_t(device));
-    if(!wanted||!cl||!best.resource) {
+    if(best.resource)lastPick=best;
+    else if(reuse&&lastPick.device==uintptr_t(device))best=lastPick;
+    if(!track||!cl||!best.resource) {
         if(bound)rt->update_texture_bindings("D2RVR_DEPTH",{},{});
         bound=false;
-        if(!wanted)candidates.Destroy(uintptr_t(device));
+        if(!track)candidates.Destroy(uintptr_t(device));
         return;
     }
     const auto source=resource{best.resource};
@@ -121,10 +128,18 @@ void Bind(reshade::api::effect_runtime* rt,reshade::api::command_list* cl,bool w
     cl->copy_resource(source,copy);
     cl->barrier(source,resource_usage::copy_source,before);
     cl->barrier(copy,resource_usage::copy_dest,resource_usage::shader_resource);
-    if(!bound){rt->update_texture_bindings("D2RVR_DEPTH",view,view);bound=true;}
+    if(wanted&&!bound){rt->update_texture_bindings("D2RVR_DEPTH",view,view);bound=true;}
+    else if(!wanted&&bound){rt->update_texture_bindings("D2RVR_DEPTH",{},{});bound=false;}
     // Scaled allocations use their entire own texture, unlike DLSS rendering
     // into the corner of a full-window allocation (existing DepthScale).
-    if(best.width!=w||best.height!=h)scale[0]=scale[1]=1;
+    const bool whole=best.width!=w||best.height!=h;
+    if(wanted&&whole)scale[0]=scale[1]=1;
+    latest={copy.handle,uint32_t(SrvFormat(typeless)),{whole?1.f:scale[0],whole?1.f:scale[1]}};
+}
+bool Take(Kept& out) {
+    std::lock_guard lock(mutex);
+    if(!latest.resource)return false;
+    out=latest;latest={};return true;
 }
 void Register(void (*log)(const char*)) {
     logger=log;
@@ -134,5 +149,5 @@ void Register(void (*log)(const char*)) {
     reshade::register_event<reshade::addon_event::destroy_effect_runtime>(&d2rvr::D3D12Only<&RuntimeDestroyed>::Call);
     reshade::register_event<reshade::addon_event::reshade_reloaded_effects>(&d2rvr::D3D12Only<&Reloaded>::Call);
 }
-void Shutdown(){std::lock_guard lock(mutex);OwnScope scope;enabled=false;Release();candidates={};}
+void Shutdown(){std::lock_guard lock(mutex);OwnScope scope;enabled=false;latest={};lastPick={};Release();candidates={};}
 }

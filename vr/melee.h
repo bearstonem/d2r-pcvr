@@ -38,14 +38,25 @@ bool QueueParry(uint32_t monster,int durability=-2);
 // When this monster's current attack began (GetTickCount64), from the native
 // mode setter on the server; 0 when not seen in the last 3 s. Thread-safe.
 uint64_t AttackStart(uint32_t monster);
+// When this monster's current attack starts coming down at you: its start plus
+// [gameplay] parry_downstroke % of the wind-up its type took last time (start
+// to to-hit roll, per attack mode). 0 = not seen, or wind-up not measured yet.
+// A parry swing must begin at or after it. Thread-safe.
+uint64_t ParryOpens(uint32_t monster);
+void ConfigureParryDownstroke(uint32_t percent);   // 0..95, default 90
+// On (default): a parry resolves at the attacker's hit frame, after the blow
+// comes down; off: it staggers the attacker the moment the swing is made.
+void ConfigureParryAtHit(bool on);
 // This monster's current attack reached its to-hit roll (hit or miss): too
-// late to stagger it before the hit. Game thread.
+// late to stagger it before the hit; its first roll times the wind-up. Game thread.
 void NoteAttackRolled(uint32_t monster);
 // A new parry swing: on a later game update, stagger the first monster whose
 // melee attack is under way and not yet rolled (combat::EarlyParry). Thread-safe.
 void QueueParrySwing();
 // The block sound at the hero ([gameplay] block_sound). Thread-safe.
 void QueueBlockSound();
+// A worn item's durability onto its client copy, on the UI thread. Thread-safe.
+void QueueClientDurability(uint32_t itemId,int value);
 // [gameplay] block_sound: sounds.txt row played at the hero on every physical
 // block (default 398 block_weapon_1); 0 is silent. A change plays it once.
 void ConfigureBlockSound(int sound);
@@ -65,5 +76,10 @@ bool HirelingVitals(uint32_t hint,float& health,float& maxHealth,uint32_t& class
 // reaches a dead one. A state set here outranks the hireling's other colour
 // tints (cold, poison) until it is cleared. False when unavailable or gone.
 bool HirelingState(uint32_t unitId,int state,bool on);
+// Owning game thread only. Live monsters hostile to the local player within
+// range grid cells: id, class, cell, and clear = no wall between. Returns the
+// count, -1 when the local server is unavailable; hero receives the player's cell.
+struct Hostile {uint32_t id,classId;float x,y;bool clear;};
+int Hostiles(Hostile* out,int max,float range,float& heroX,float& heroY);
 bool HirelingOverlay(uint32_t unitId,int overlay);
 }

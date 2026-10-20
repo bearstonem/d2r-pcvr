@@ -71,6 +71,18 @@ struct TextScaleScope {
     TextScaleScope(const TextScaleScope&)=delete;
 };
 
+// LabelLayout drops a label whose bottom passes the interface's height (the
+// size query, sizes packed width low, height high). Native VR lays the
+// interface out in a widescreen band of a square or taller eye
+// (resolution::UiCanvas) while labels are placed over the whole eye, so items
+// low in the view lost theirs - in a 2048 square or an Index eye that line is
+// about the middle, where the item looked at sits (2026-10-19). For that check
+// only, the whole eye's height; no eye size (desktop) leaves it as it is.
+inline uint64_t LabelArea(uint64_t interfaceSize,uint64_t eye) {
+    const uint32_t height=uint32_t(interfaceSize>>32),eyeHeight=uint32_t(eye>>32);
+    return eyeHeight>height?(interfaceSize&0xffffffffull)|(uint64_t(eyeHeight)<<32):interfaceSize;
+}
+
 // Rebuild the native bounds using actual text measurements at the new scale.
 // This keeps overlap placement, the backing box and click bounds in agreement.
 inline bool Resize(int32_t* box,const int32_t* oldText,const int32_t* newText,float scale) {

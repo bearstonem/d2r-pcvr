@@ -27,4 +27,10 @@ uint64_t MapTexture(uint32_t& width,uint32_t& height);
 // Owned copy of UI only, in R16G16B16A16_FLOAT, shader-resource state.
 // RGB is premultiplied, alpha is world transmittance; convert before XR use.
 uint64_t UiTexture(uint32_t& width,uint32_t& height,int32_t crop[4]);
+// By turns: the interface (labels over monsters, names, chat) taken out of each
+// eye's picture once its pass drew it, for the transport to lay back over each
+// eye. TakenInterface: this eye pass's copy, as UiTexture's, if it was taken
+// out; 0 if the interface is still in the picture.
+void TakeInterface(bool on);
+uint64_t TakenInterface(uint32_t& width,uint32_t& height);
 }

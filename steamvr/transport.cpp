@@ -2,6 +2,7 @@
 #define XR_USE_GRAPHICS_API_D3D12
 #define XR_NO_PROTOTYPES
 #include <windows.h>
+#include <shlobj.h>
 #include <d3d12.h>
 #include <dxgi1_4.h>
 #include <wrl/client.h>
@@ -60,6 +61,9 @@
 #include "render_resolution.h"
 #include "menu_controls.h"
 #include "ui_blit.h"
+#include "turn_warp.h"
+#include "dxgi_views.h"
+#include "scene_depth.h"
 #include "ui_world.h"
 #include "../vr/interactionstate.h"
 #include "../vr/journal_ui.h"
@@ -107,6 +111,7 @@ std::atomic<uint32_t> pipelineCreates{0};
 std::atomic<double> maxPipelineMs{0};
 std::atomic<bool> deferredWait{false};
 std::atomic<bool> symmetricProjection{true};
+std::atomic<bool> turnsFromDrawnEye{true};
 std::atomic<bool> eyeTracking{false};
 std::atomic<bool> motionControls{false};
 // Stamped each focused XR input while motion controls are on (menus included).
@@ -151,22 +156,25 @@ bool bloodAtlasPending=false,bloodImageReady=false;
 strain::Engine guardStrain;
 strain::Output strainOutput;
 std::mutex strainTuningMutex;strain::Tuning strainTuning;
-std::atomic<unsigned> guardBlockEvents{0},guardParryEvents{0};
+std::atomic<float> strainRecoverSeconds{1.5f};   // [gameplay] guard_strain_recover_ms; 0 = only lowering drains
+std::atomic<unsigned> guardBlockEvents{0},guardParryEvents{0},guardBlockWeight{0}; // weight in 1/1000ths
+std::atomic<bool> guardBroken{false};   // the game thread's chip check
 std::atomic<ULONGLONG> guardStateAt{0};std::atomic<bool> guardEligible{false},guardRaised{false};
 strain::Painter strainPainter;
 XrSwapchain strainChain=XR_NULL_HANDLE;
 uint64_t strainPaintKey=~0ull,strainPaintSession=0;
 ULONGLONG strainPaintAt=0;
 bool strainAtlasPending=false,strainImageReady=false,strainSlotReported=false;
-// Guard strain heartbeat: its own waveOut stream, since PlaySound plays one sound
+// Low-life heartbeat: its own waveOut stream, since PlaySound plays one sound
 // per process and would cut off the riposte. Frame thread only. Each buffer is
 // one beat period; the next is queued just before the current one ends, so
-// loudness and tempo follow strain beat by beat and stop with it.
+// loudness and tempo follow life beat by beat and stop with it.
 std::mutex heartMutex;heartbeat::Tuning heartTuning;
 std::shared_ptr<const heartbeat::Pcm> heartSource=std::make_shared<heartbeat::Pcm>(heartbeat::BuiltIn());
 std::wstring heartFile=L"?";   // never a real path: the first configure loads the built-in beat
 const char* heartSourceName="built-in recording"; // for the first "started" line (under heartMutex)
 heartbeat::Level heartLevel;double heartAt=0;
+heartbeat::Hush heartHush;float heartHealth=-1;   // wiped visor; last fresh life, for hits
 void Say(const char* msg);   // logging, defined below
 class HeartStream {
     using OpenFn=MMRESULT(WINAPI*)(LPHWAVEOUT,UINT,LPCWAVEFORMATEX,DWORD_PTR,DWORD_PTR,DWORD);
@@ -188,7 +196,7 @@ class HeartStream {
             position=reinterpret_cast<PositionFn>(GetProcAddress(m,"waveOutGetPosition"));
             reset=reinterpret_cast<HandleFn>(GetProcAddress(m,"waveOutReset"));close=reinterpret_cast<HandleFn>(GetProcAddress(m,"waveOutClose"));
         }
-        if(!(open&&prepare&&unprepare&&write&&position&&reset&&close)){open=nullptr;Say("Frame guard heartbeat: winmm waveOut unavailable; heartbeat silent");}
+        if(!(open&&prepare&&unprepare&&write&&position&&reset&&close)){open=nullptr;Say("Frame low-life heartbeat: winmm waveOut unavailable; heartbeat silent");}
         return open!=nullptr;
     }
     uint64_t Played() {
@@ -230,6 +238,23 @@ public:
     ~HeartStream(){Stop();}
 } heartStream;
 bool heartPlaying=false;
+// Guard break: a bone snap on its own stream, so neither the heartbeat nor the
+// riposte (PlaySound) cuts it off. Frame thread only; source under breakMutex.
+HeartStream breakStream;
+std::mutex breakMutex;std::shared_ptr<const heartbeat::Pcm> breakSource;float breakVolume=1;
+std::wstring breakFile=L"?";   // never a real path: the first configure loads the built-in snap
+void PlayGuardBreak() {
+    std::shared_ptr<const heartbeat::Pcm> source;float volume=0;
+    {std::lock_guard lock(breakMutex);source=breakSource;volume=breakVolume;}
+    if(!source||source->samples.empty()||!(volume>0))return;
+    const float gain=volume*combat::GameVolume();   // the game's Master x Combat sliders
+    if(!(gain>0))return;
+    std::vector<int16_t> pcm(source->samples.size());
+    // The heartbeat's soft limiter: guard_break_volume above 100 bends peaks instead of clipping.
+    for(size_t i=0;i<pcm.size();++i)pcm[i]=int16_t(std::lround(heartbeat::Limit(float(source->samples[i])*gain/32768.f)*32767.f));
+    breakStream.Reap();
+    if(!breakStream.Queue(source->rate,source->channels,std::move(pcm)))Say("Frame guard break: sound did not play");
+}
 XrSwapchain interactionChain=XR_NULL_HANDLE;
 XrSwapchain companionChain=XR_NULL_HANDLE;
 bool companionAtlasPending=false,companionPaintValid=false;
@@ -250,9 +275,43 @@ settings::Hit settingsHover;
 std::atomic<bool> settingsOpen{false};
 bool settingsAtlasPending=false,settingsImageReady=false;
 uint64_t settingsPaintRevision=~0ull,settingsSession=0;
-int settingsPaintHover=-1,settingsPaintStatus=-1;
+int settingsPaintHover=-1,settingsPaintStatus=-1,settingsPaintGame=-1;
 settings::HoverHelp settingsHelp;
 int settingsPaintHelp=settings::NoHelp,settingsHelpVisible=settings::NoHelp;
+// The game's own video options for the Video page's warnings, re-read at most
+// every 2 s while VR Settings is open and only when the game has saved them:
+// the mod's own Settings.json (settings::ModSettingsFile), or the unmodded
+// game's while the mod has none yet.
+settings::GameVideo GameVideoOptions(ULONGLONG now) {
+    static std::wstring modded,unmodded;
+    static const bool found=[]{
+        PWSTR dir=nullptr;std::wstring savedGames;
+        if(SUCCEEDED(SHGetKnownFolderPath(FOLDERID_SavedGames,0,nullptr,&dir)))savedGames=dir;
+        if(dir)CoTaskMemFree(dir);
+        if(savedGames.empty())return false;
+        wchar_t plugin[MAX_PATH]{};HMODULE self=nullptr;
+        if(GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                              reinterpret_cast<LPCWSTR>(&GameVideoOptions),&self))GetModuleFileNameW(self,plugin,MAX_PATH);
+        unmodded=savedGames+L"\\Diablo II Resurrected\\Settings.json";
+        modded=settings::ModSettingsFile(savedGames,plugin);
+        if(modded.empty())modded=unmodded;
+        char line[400];std::snprintf(line,sizeof line,"Frame VR settings: the game's video options from %ls",modded.c_str());
+        Say(line);
+        return true;
+    }();
+    static settings::GameVideo seen{};static ULONGLONG checkAt=0;static FILETIME written{};
+    if(now<checkAt||!found)return seen;
+    checkAt=now+2000;
+    const std::wstring& path=GetFileAttributesW(modded.c_str())!=INVALID_FILE_ATTRIBUTES?modded:unmodded;
+    WIN32_FILE_ATTRIBUTE_DATA a{};
+    if(!GetFileAttributesExW(path.c_str(),GetFileExInfoStandard,&a)){written={};return seen={};}
+    if(!CompareFileTime(&a.ftLastWriteTime,&written))return seen;
+    std::string json;
+    if(FILE* f=_wfopen(path.c_str(),L"rb")){char buf[4096];size_t n;while((n=fread(buf,1,sizeof buf,f))>0&&json.size()<256*1024)json.append(buf,n);fclose(f);}
+    else return seen;
+    written=a.ftLastWriteTime;seen=settings::ParseGameVideo(json);
+    return seen;
+}
 ULONGLONG settingsPaintAt=0;
 XrPosef settingsPose{};
 constexpr float settingsWidth=.95f,settingsHeight=settingsWidth*settings::Height/settings::Width;
@@ -272,13 +331,24 @@ uint64_t interactionPrefetchSession=0;
 uint32_t interactionPrefetchRevision=~0u;
 ULONGLONG interactionPaintAt=0;
 bool interactionAtlasPending=false;
-struct AtlasUpload {
-    ComPtr<ID3D12Resource> upload;
+// An atlas upload's buffer (kept mapped) and command list, reused once the GPU
+// is past them: making a 4 MB upload heap and a command list on each refresh,
+// and clearing the buffer first, held the frame thread 5.4-7 ms a refresh
+// (Frame UI refresh, 2026-10-19).
+struct AtlasStaging {
+    ComPtr<ID3D12Resource> upload;uint8_t* data=nullptr;UINT64 bytes=0;
     ComPtr<ID3D12CommandAllocator> allocator;
     ComPtr<ID3D12GraphicsCommandList> commands;
+};
+struct AtlasUpload {
+    AtlasStaging staging;
     uint64_t fence=0;
 };
 std::vector<AtlasUpload> atlasUploads;
+std::vector<AtlasStaging> atlasStagingFree;   // the GPU is done with these
+constexpr size_t AtlasStagingKept=6;
+// Where an upload's frame-thread time went; UploadAtlas adds to it.
+struct AtlasTiming {double image=0,buffers=0,copy=0,record=0,submit=0;int made=0;} atlasTiming;
 
 melee::PoseHistory meleePoses,offhandPoses;
 melee::PoseHistory shieldPoses;
@@ -386,6 +456,49 @@ constexpr uint32_t mapSide=512;
 // copied back over it, so the monitor shows only the left eye. [render]
 // desktop_one_eye turns it off; eye images need TRANSFER_SRC for it.
 bool mirrorSupported=false,mirrorMono=false;
+// Eyes by turns: a frame draws one eye. The other is turned from its kept
+// image to this frame's head (TurnEye) and goes at this frame's pose, as from
+// a pair; without the GPU pass, its last released image goes again at the
+// pose and FOV it was drawn with (lastEyes). A frame without a stereo layer
+// forgets both, so the next draws a pair.
+bool turnFrame=false;
+// Replay (Stereo rendering 3): this pair's right eye is the left one moved by
+// replayGap (metres) along the left eye's x - ReplayRight puts views[1] there,
+// so the camera, the potions and the layer all have it. replayShift: that gap
+// in the world's units, from View.
+bool replayPair=false;
+float replayGap=0,replayShift=0;
+// Where an eye stood and how it was turned in the game's world (View), and its
+// near plane (Projection): By turns moves the eye not drawn from there.
+struct EyeWorld {math::Vec at{};math::Quat turn{0,0,0,1};float nearPlane=0;bool ok=false;math::Vec hero{};};
+// base: the body's turn into the world the eye was drawn with (View), so a
+// stick, mouse or recentre turn since is turned out as well as the head's.
+struct LastEye {XrPosef pose{};XrFovf fov{};bool ok=false;math::Quat base{0,0,0,1};EyeWorld world{};};
+std::array<LastEye,2> lastEyes{};
+std::array<math::Quat,2> viewBase{{{0,0,0,1},{0,0,0,1}}};   // each eye's, as View last built it
+std::array<EyeWorld,2> viewWorld{};   // each eye's this frame
+// While the option is on, each eye's image as shown, kept by Copy (KeepTurn):
+// a released swapchain image is the runtime's. Also the desktop mirror's left
+// image on the frames that draw the right.
+bool keepTurns=false;
+std::array<ComPtr<ID3D12Resource>,2> turnImages;
+std::array<bool,2> turnKept{};
+bool turnImagesFailed=false,turnWarpTried=false;
+DXGI_FORMAT turnFormat=DXGI_FORMAT_UNKNOWN;
+TurnWarp turnWarp;
+// By turns: each eye's scene depth as drawn, beside its kept image (KeepDepth).
+bool keepDepth=false;
+struct KeptDepth {ComPtr<ID3D12Resource> texture;DXGI_FORMAT format=DXGI_FORMAT_UNKNOWN;float scale[2]{1,1};bool ok=false;};
+std::array<KeptDepth,2> turnDepths;
+// By turns: each eye's interface as its pass drew it (hud::TakenInterface),
+// laid back over its picture by Copy and, turned to this frame's head, over
+// the eye not drawn by TurnEye: into turnTarget (typeless, so the interface
+// goes over it UNORM as the game blends it), then to its swapchain image.
+std::array<ComPtr<ID3D12Resource>,2> turnLayers;
+std::array<bool,2> layerKept{};
+ComPtr<ID3D12Resource> turnTarget;
+bool layersFailed=false;
+TurnCounts turnCounts;
 std::atomic<bool> uiSupported{false};
 bool journalMode=false,spatialMode=false,workspacePlaced=false,opaqueMenuMode=false,upperBandMenuMode=false;
 bool npcChoicesMode=false;
@@ -763,21 +876,40 @@ bool UploadAtlas(XrSwapchain& chain,DXGI_FORMAT eyeFormat,int atlasWidth,int atl
     if(!Check(pEnumerateSwapchainImages(chain,0,&count,nullptr),"count static atlas images"))return false;
     std::vector<XrSwapchainImageD3D12KHR> images(count,{XR_TYPE_SWAPCHAIN_IMAGE_D3D12_KHR});
     if(!Check(pEnumerateSwapchainImages(chain,count,&count,reinterpret_cast<XrSwapchainImageBaseHeader*>(images.data())),"get static atlas images"))return false;
+    double at=Milliseconds();
+    const auto stage=[&](double& into){const double t=Milliseconds();into+=t-at;at=t;};
     uint32_t index=0;XrSwapchainImageAcquireInfo ai{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
     if(!Check(pAcquireSwapchainImage(chain,&ai,&index),"acquire static atlas atlas"))return false;
     XrSwapchainImageWaitInfo wi{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};wi.timeout=XR_INFINITE_DURATION;
     if(!Check(pWaitSwapchainImage(chain,&wi),"wait static atlas atlas"))return false;
+    stage(atlasTiming.image);
     auto* dest=images[index].texture;const auto desc=dest->GetDesc();
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};UINT64 bytes=0;
     device->GetCopyableFootprints(&desc,0,1,0,&footprint,nullptr,nullptr,&bytes);
-    D3D12_HEAP_PROPERTIES heap{};heap.Type=D3D12_HEAP_TYPE_UPLOAD;
-    D3D12_RESOURCE_DESC uploadDesc{};uploadDesc.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER;uploadDesc.Width=bytes;
-    uploadDesc.Height=uploadDesc.DepthOrArraySize=uploadDesc.MipLevels=uploadDesc.SampleDesc.Count=1;uploadDesc.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-    ComPtr<ID3D12Resource> upload;
-    if(!Hr(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&uploadDesc,D3D12_RESOURCE_STATE_GENERIC_READ,nullptr,IID_PPV_ARGS(&upload)),"create static atlas upload"))return false;
-    uint8_t* data=nullptr;D3D12_RANGE readRange{};
-    if(!Hr(upload->Map(0,&readRange,reinterpret_cast<void**>(&data)),"map static atlas upload"))return false;
-    std::memset(data,0,size_t(bytes));
+    // The smallest kept buffer that fits, else a new one, mapped for good.
+    AtlasStaging staging;
+    {
+        auto best=atlasStagingFree.end();
+        for(auto it=atlasStagingFree.begin();it!=atlasStagingFree.end();++it)
+            if(it->bytes>=bytes&&(best==atlasStagingFree.end()||it->bytes<best->bytes))best=it;
+        if(best!=atlasStagingFree.end()){staging=std::move(*best);atlasStagingFree.erase(best);}
+    }
+    if(!staging.upload) {
+        D3D12_HEAP_PROPERTIES heap{};heap.Type=D3D12_HEAP_TYPE_UPLOAD;
+        D3D12_RESOURCE_DESC uploadDesc{};uploadDesc.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER;uploadDesc.Width=bytes;
+        uploadDesc.Height=uploadDesc.DepthOrArraySize=uploadDesc.MipLevels=uploadDesc.SampleDesc.Count=1;uploadDesc.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        if(!Hr(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&uploadDesc,D3D12_RESOURCE_STATE_GENERIC_READ,nullptr,IID_PPV_ARGS(&staging.upload)),"create static atlas upload"))return false;
+        D3D12_RANGE readRange{};
+        if(!Hr(staging.upload->Map(0,&readRange,reinterpret_cast<void**>(&staging.data)),"map static atlas upload"))return false;
+        staging.bytes=bytes;
+        if(!Hr(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,IID_PPV_ARGS(&staging.allocator)),"create static atlas allocator")||
+           !Hr(device->CreateCommandList(0,D3D12_COMMAND_LIST_TYPE_DIRECT,staging.allocator.Get(),nullptr,IID_PPV_ARGS(&staging.commands)),"create static atlas list")||
+           !Hr(staging.commands->Close(),"close new static atlas list"))return false;
+        ++atlasTiming.made;
+    }
+    stage(atlasTiming.buffers);
+    // Only the footprint's rows are copied, so the rest of the buffer need not be cleared.
+    uint8_t* const data=staging.data;
     const bool bgra=eyeFormat==DXGI_FORMAT_B8G8R8A8_UNORM_SRGB||eyeFormat==DXGI_FORMAT_B8G8R8A8_UNORM;
     for(int y=0;y<atlasHeight;++y) {
       if(!bgra) {std::memcpy(data+footprint.Offset+y*footprint.Footprint.RowPitch,pixels.data()+y*atlasWidth*4,atlasWidth*4);continue;}
@@ -787,26 +919,28 @@ bool UploadAtlas(XrSwapchain& chain,DXGI_FORMAT eyeFormat,int atlasWidth,int atl
         pixel[0]=rgba[bgra?2:0];pixel[1]=rgba[1];pixel[2]=rgba[bgra?0:2];pixel[3]=rgba[3];
       }
     }
-    upload->Unmap(0,nullptr);
-    ComPtr<ID3D12CommandAllocator> alloc;ComPtr<ID3D12GraphicsCommandList> list;
-    if(!Hr(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,IID_PPV_ARGS(&alloc)),"create static atlas allocator")||
-       !Hr(device->CreateCommandList(0,D3D12_COMMAND_LIST_TYPE_DIRECT,alloc.Get(),nullptr,IID_PPV_ARGS(&list)),"create static atlas list"))return false;
+    stage(atlasTiming.copy);
+    auto* list=staging.commands.Get();
+    if(!Hr(staging.allocator->Reset(),"reset static atlas allocator")||!Hr(list->Reset(staging.allocator.Get(),nullptr),"reset static atlas list"))return false;
     D3D12_RESOURCE_BARRIER barrier{};barrier.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
     barrier.Transition={dest,D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_COPY_DEST};
     list->ResourceBarrier(1,&barrier);
-    D3D12_TEXTURE_COPY_LOCATION src{};src.pResource=upload.Get();src.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;src.PlacedFootprint=footprint;
+    D3D12_TEXTURE_COPY_LOCATION src{};src.pResource=staging.upload.Get();src.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;src.PlacedFootprint=footprint;
     D3D12_TEXTURE_COPY_LOCATION dst{};dst.pResource=dest;dst.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
     list->CopyTextureRegion(&dst,0,0,0,&src,nullptr);
     std::swap(barrier.Transition.StateBefore,barrier.Transition.StateAfter);list->ResourceBarrier(1,&barrier);
     if(!Hr(list->Close(),"close static atlas list"))return false;
-    ID3D12CommandList* lists[]={list.Get()};queue->ExecuteCommandLists(1,lists);
+    stage(atlasTiming.record);
+    ID3D12CommandList* lists[]={list};queue->ExecuteCommandLists(1,lists);
     if(!Hr(queue->Signal(fence.Get(),++fenceValue),"signal atlas fence"))return false;
+    stage(atlasTiming.submit);
     if(dynamic) {
-        atlasUploads.push_back({upload,alloc,list,fenceValue});
+        atlasUploads.push_back({std::move(staging),fenceValue});
         if(pending)*pending=true;else interactionAtlasPending=true;
         return true; // Released at EndPair, after the pair's existing GPU fence.
     }
     if(!WaitGpu())return false;
+    if(atlasStagingFree.size()<AtlasStagingKept)atlasStagingFree.push_back(std::move(staging));
     XrSwapchainImageReleaseInfo ri{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
     return Check(pReleaseSwapchainImage(chain,&ri),"release static atlas atlas");
 }
@@ -964,6 +1098,7 @@ bool Initialize(reshade::api::command_queue* rq,reshade::api::swapchain* swap) {
     atlasFormat=eyeFormat;
     if(!SetupGameplay(eyeFormat))Say("Frame gameplay: palette atlas unavailable; motion controls remain disabled");
     potionModels.Initialize(device.Get(),queue.Get(),eyeFormat,width,height,&Say);
+    turnFormat=eyeFormat;
     if(!tracking.Open(D2RVR_SHARED_NAME)||!pad.Open(BW_PAD_MIRROR_NAME)||!actions.Open(D2RVR_ACTIONS_NAME)) return false;
     tracking.data->version=D2RVR_SHARED_VERSION;pad.data->version=BW_PAD_MIRROR_VERSION;actions.data->version=D2RVR_ACTIONS_VERSION;
     gameSwapchain=swap;
@@ -1310,8 +1445,26 @@ void CalibrationInput() {
         settingsPaintAt=now+100;
     }
 }
+// Windows Mono audio (HKCU Software\Microsoft\Multimedia\Audio,
+// AccessibilityMonoMixState 1) for the title row's warning, read at most every
+// 2 s while VR Settings is open; logged when it changes.
+bool MonoAudioOn(ULONGLONG now) {
+    static bool on=false,told=false;static ULONGLONG checkAt=0;
+    if(now<checkAt)return on;
+    checkAt=now+2000;
+    DWORD value=0,size=sizeof value;
+    const bool mono=RegGetValueW(HKEY_CURRENT_USER,L"Software\\Microsoft\\Multimedia\\Audio",L"AccessibilityMonoMixState",
+                                 RRF_RT_REG_DWORD,nullptr,&value,&size)==ERROR_SUCCESS&&value!=0;
+    if(mono!=on||!told) {
+        told=true;
+        Say(mono?"Frame VR settings: Windows Mono audio is on - 3D sounds cannot follow the head; VR Settings warns":
+                 "Frame VR settings: Windows Mono audio is off");
+    }
+    on=mono;return on;
+}
 void SettingsPointer(const settings::InputGate::Edges& edges) {
     if(!settingsModel.open)return;
+    const bool monoAudio=MonoAudioOn(GetTickCount64());
     settingsModel.Observe(vrsettings::Read());settingsHover={};pointerVisible=pointerHit=false;
     int helpTarget=settings::NoHelp;
     const auto previousPage=settingsModel.page;
@@ -1325,7 +1478,7 @@ void SettingsPointer(const settings::InputGate::Edges& edges) {
         beamLength=pointerHit?hit.distance:1.5f;const auto mid=ray+direction*(beamLength*.5f);
         beamPose=XrPose({mid,math::BeamOrientation(direction,V(head.position)-mid)});pointerVisible=true;
         if(pointerHit){settingsHover=settings::HitTest(settingsModel.page,hit.u,hit.v,settingsModel.controllerMenu);dotPose=settingsPose;
-            helpTarget=settings::HelpAt(settingsModel.page,hit.u,hit.v,settingsModel.controllerMenu);
+            helpTarget=settings::HelpAt(settingsModel.page,hit.u,hit.v,settingsModel.controllerMenu,&settingsModel.Get(),monoAudio);
             const auto p=hit.point+math::Rotate(Q(settingsPose.orientation),{0,0,.004f});dotPose.position={p.x,p.y,p.z};}
     }
     if(edges.click&&pointerHit&&settingsImageReady&&settingsPaintRevision==settingsModel.revision){
@@ -1354,12 +1507,14 @@ void SettingsPointer(const settings::InputGate::Edges& edges) {
     const auto now=GetTickCount64();
     if(previousPage!=settingsModel.page||previousMenu!=settingsModel.controllerMenu)helpTarget=settings::NoHelp;
     const int help=settingsHelpVisible=settingsHelp.Step(helpTarget,now);
+    const auto game=GameVideoOptions(now);
+    const int warnings=game.Code()|(monoAudio?4:0);
     if(now>=settingsPaintAt&&!settingsAtlasPending&&atlasUploads.size()<3&&
-       (settingsPaintRevision!=settingsModel.revision||settingsPaintHover!=hover||settingsPaintStatus!=status||settingsPaintHelp!=help)){
+       (settingsPaintRevision!=settingsModel.revision||settingsPaintHover!=hover||settingsPaintStatus!=status||settingsPaintHelp!=help||settingsPaintGame!=warnings)){
         char resolutionStatus[160];resolution::Describe(resolutionStatus,sizeof resolutionStatus,{width,height});
-        auto pixels=settings::Paint(settingsModel,settingsHover,settingsModel.page==settings::Page::Video?resolutionStatus:descriptions[status],nullptr,detectedControllers,help);
+        auto pixels=settings::Paint(settingsModel,settingsHover,settingsModel.page==settings::Page::Video?resolutionStatus:descriptions[status],nullptr,detectedControllers,help,game,monoAudio);
         if(!pixels.empty()&&UploadAtlas(settingsChain,atlasFormat,settings::AtlasWidth,settings::Height,pixels,true,&settingsAtlasPending)){
-            settingsPaintRevision=settingsModel.revision;settingsPaintHover=hover;settingsPaintStatus=status;settingsPaintHelp=help;
+            settingsPaintRevision=settingsModel.revision;settingsPaintHover=hover;settingsPaintStatus=status;settingsPaintHelp=help;settingsPaintGame=warnings;
         }
         settingsPaintAt=now+100;
     }
@@ -1396,7 +1551,11 @@ void Input() {
     const bool modUi=settingsModel.open||bodyCalibration.Active()||calibrationRelease.blocked;
     auto controls=menuControls.Step(modUi?menus::Mode::Blocked:nativeUi?menus::Mode::Native:menus::Mode::World,inputEpoch,physical);
     SampleGaze();
-    atlasUploads.erase(std::remove_if(atlasUploads.begin(),atlasUploads.end(),[](const auto& a){return fence->GetCompletedValue()>=a.fence;}),atlasUploads.end());
+    for(auto upload=atlasUploads.begin();upload!=atlasUploads.end();) {
+        if(fence->GetCompletedValue()<upload->fence){++upload;continue;}
+        if(atlasStagingFree.size()<AtlasStagingKept)atlasStagingFree.push_back(std::move(upload->staging));
+        upload=atlasUploads.erase(upload);
+    }
     if(!calibrationPrompted&&!settingsModel.open&&!panelMode&&!spatialMode&&inWorld&&inWorld()){
         const auto config=vrsettings::Read();
         if(config.ready&&config.result!=settings::Result::Saving){calibrationPrompted=true;if(!calibration::Stored(config.values))OpenBodyCalibration();}
@@ -1624,24 +1783,29 @@ void Input() {
         }
     }
     // Guard strain light (Unleashed shield): blocks strain the guard, light
-    // creeps in from the rim; lowering the shield is the only reset.
+    // creeps in from the rim; it drains with the shield lowered, or raised with
+    // no hit on it for guard_strain_recover_ms.
     {
         const auto now=GetTickCount64();
         strain::Tuning tuning;{std::lock_guard lock(strainTuningMutex);tuning=strainTuning;}
         const float lightOn=tuning.brightness;   // [gameplay] guard_strain_light
         tuning.brightness=1;   // strain itself runs regardless of the light; only the drawing is scaled
         tuning.speed=strain::BuildSpeed(int(hudSettings.values[settings::StrainSpeed]));
+        tuning.recoverSeconds=strainRecoverSeconds.load(std::memory_order_relaxed);
         strain::Input in;
         in.time=interactionInput.time;in.session=interactionInput.session;
         in.enabled=hudSettings.values[settings::MeleeRules]<.5f&&motionControls.load();
         in.eligible=guardEligible.load()&&now-guardStateAt.load()<=250;
         in.raised=guardRaised.load();
         in.blocks=guardBlockEvents.exchange(0);in.parries=guardParryEvents.exchange(0);
+        in.weight=float(guardBlockWeight.exchange(0))/1000.f;   // rank-weighted strain of those blocks
         strainOutput=guardStrain.Step(in,tuning);
+        guardBroken=strainOutput.broken;
         strainOutput.alpha*=std::clamp(lightOn,0.f,1.f);strainOutput.visible=strainOutput.alpha>.004f;
         if(strainOutput.brokeNow) {
             MotionPulse(1,haptics::Category::Alert,.6f,120000000);
-            Say("Frame guard strain: guard broken; lower the shield to clear the light");
+            Say("Frame guard strain: guard broken; it clears once hits stop or the shield is lowered");
+            PlayGuardBreak();
         }
         if(strainOutput.clearedNow)Say("Frame guard strain: cleared");
         // Consume completed images before scheduling more work. Never replace an
@@ -1660,13 +1824,27 @@ void Input() {
             if(key!=strainPaintKey&&now>=strainPaintAt&&!strainPainter.Busy()&&
                strainPainter.Submit({strainOutput.edge,strainOutput.alpha,tuning.feather,tuning.color,tuning.density}))strainPaintAt=now+40;
         }
-        // Heartbeat: queue the next beat ~80 ms before the current one ends, at the
-        // strain's loudness and tempo now. No strain: the last beat finishes, then silence.
-        heartStream.Reap();
+    }
+    // Low-life heartbeat (Classic and Unleashed): queue the next beat ~80 ms before
+    // the current one ends, at the loudness and tempo of the 10 % step of life below
+    // VR Settings > Combat > Heartbeat starts at. Above it, Off, dead or stale vitals:
+    // the last beat finishes, then silence.
+    {
+        heartStream.Reap();breakStream.Reap();   // breakStream: the guard-break bone snap
         heartbeat::Tuning heart;std::shared_ptr<const heartbeat::Pcm> source;const char* sourceName=nullptr;
         {std::lock_guard lock(heartMutex);heart=heartTuning;source=heartSource;sourceName=heartSourceName;}
-        // Its own level: winds down slower than the light, quieter and slower beat by beat.
-        const float level=heartLevel.Step(strainOutput.strain,heartAt>0?interactionInput.time-heartAt:0,heart.fadeSeconds);
+        const auto& vitals=interactionInput.snapshot;
+        const bool lifeKnown=vitals.vitalsKnown&&interaction::Fresh(vitals,interactionInput.session,interactionInput.at);
+        const float life=lifeKnown?heartbeat::LifeLevel(vitals.health,vitals.maxHealth,int(hudSettings.values[settings::HeartbeatStart])):0.f;
+        // Tied to the blood: a scrub that clears the visor fades it out; the next hit
+        // (the blood visor's own hit size) brings it back at its step.
+        const bool hit=lifeKnown&&heartHealth>=0&&heartHealth-vitals.health>=blood::HitFraction*vitals.maxHealth;
+        if(lifeKnown)heartHealth=vitals.health;
+        const bool wasHushed=heartHush.On();
+        const float target=heartHush.Step(life,bloodOutput.clean,hit);
+        if(heartHush.On()!=wasHushed)Say(heartHush.On()?"Frame low-life heartbeat: visor wiped, fading":"Frame low-life heartbeat: struck again, resuming");
+        // Its own level: winds down slower than a heal, quieter and slower beat by beat.
+        const float level=heartLevel.Step(target,heartAt>0?interactionInput.time-heartAt:0,heart.fadeSeconds);
         heartAt=interactionInput.time;
         if(level>0&&heart.volume>0&&source) {
             if(heartStream.Remaining()<uint64_t(std::max(1,source->rate)*8/100)) {
@@ -1675,11 +1853,14 @@ void Input() {
                 if(!beat.empty()&&heartStream.Queue(source->rate,source->channels,std::move(beat))&&!heartPlaying) {
                     heartPlaying=true;
                     static bool namedSource=false;   // the first start says which beat is playing
-                    if(!namedSource){namedSource=true;char line[120];snprintf(line,sizeof line,"Frame guard heartbeat: started (%s)",sourceName?sourceName:"?");Say(line);}
-                    else Say("Frame guard heartbeat: started");
+                    char line[120];
+                    if(!namedSource){namedSource=true;snprintf(line,sizeof line,"Frame low-life heartbeat: started life=%.0f%% (%s)",
+                        vitals.maxHealth>0?100*vitals.health/vitals.maxHealth:-1.f,sourceName?sourceName:"?");}
+                    else snprintf(line,sizeof line,"Frame low-life heartbeat: started life=%.0f%%",vitals.maxHealth>0?100*vitals.health/vitals.maxHealth:-1.f);
+                    Say(line);
                 }
             }
-        } else if(heartPlaying&&!heartStream.Remaining()){heartPlaying=false;Say("Frame guard heartbeat: stopped");}
+        } else if(heartPlaying&&!heartStream.Remaining()){heartPlaying=false;Say("Frame low-life heartbeat: stopped");}
     }
     // Bounded diagnostics distinguish gesture misses from native refusal.
     static ULONGLONG potionReportAt=0;
@@ -1873,7 +2054,7 @@ void Input() {
             interaction::PaintedAtlas painted;
             if(key==interactionRequestedKey&&context==interactionRequestedContext&&atlasUploads.size()<2&&!interactionAtlasPending&&
                !companionAtlasPending&&interactionPainter.Take(interactionPaintRequest,painted)) {
-                const auto uploadStart=Milliseconds();
+                const auto uploadStart=Milliseconds();atlasTiming={};
                 if(!painted.pixels.empty()&&UploadAtlas(interactionChain,atlasFormat,1024,1024,painted.pixels,true)) {
                     interactionPaintKey=key;interactionPaintContext=context;interactionPaintValid=true;
                     companionPaintValid=!painted.companions.empty()&&UploadAtlas(companionChain,atlasFormat,
@@ -1882,9 +2063,24 @@ void Input() {
                 }
                 interactionPaintRequest=0;
                 const auto uploadMs=Milliseconds()-uploadStart;
+                const auto& t=atlasTiming;
                 static ULONGLONG reportAt=0;
                 if((profile::Active()||uploadMs>4)&&now>=reportAt) {
-                    char message[180];std::snprintf(message,sizeof message,"Frame UI refresh: background paint %.2f ms, frame-thread upload %.2f ms",painted.paintMs,uploadMs);Say(message);reportAt=now+1000;
+                    char message[300];std::snprintf(message,sizeof message,"Frame UI refresh: background paint %.2f ms, frame-thread upload %.2f ms "
+                        "(image wait %.2f, buffers %.2f%s, copy %.2f, commands %.2f, submit %.2f)",
+                        painted.paintMs,uploadMs,t.image,t.buffers,t.made?" new":"",t.copy,t.record,t.submit);Say(message);reportAt=now+1000;
+                }
+                // Every 10 s, all refreshes: the spikes above alone do not show the usual cost.
+                static ULONGLONG summaryFrom=0;static int refreshes=0,made=0;static double sumMs=0,maxMs=0;static AtlasTiming sum{};
+                if(!summaryFrom)summaryFrom=now;
+                ++refreshes;sumMs+=uploadMs;maxMs=std::max(maxMs,uploadMs);made+=t.made;
+                sum.image+=t.image;sum.buffers+=t.buffers;sum.copy+=t.copy;sum.record+=t.record;sum.submit+=t.submit;
+                if(now-summaryFrom>=10000) {
+                    const double n=1.0/refreshes;char message[300];
+                    std::snprintf(message,sizeof message,"Frame UI refresh: %d in %.0f s, frame-thread upload mean %.2f ms, max %.2f ms | a refresh: "
+                        "image wait %.2f, buffers %.2f (%d new), copy %.2f, commands %.2f, submit %.2f ms",
+                        refreshes,(now-summaryFrom)/1000.0,sumMs*n,maxMs,sum.image*n,sum.buffers*n,made,sum.copy*n,sum.record*n,sum.submit*n);
+                    Say(message);summaryFrom=now;refreshes=made=0;sumMs=maxMs=0;sum={};
                 }
             }
         }
@@ -2043,6 +2239,27 @@ void Events() {
         event={XR_TYPE_EVENT_DATA_BUFFER};
     }
 }
+// Replay: the right eye drawn as the left one moved along the left view's own
+// x (the camera fold folds that move into its projection) - and submitted so:
+// the left eye's turn, its place moved by the eyes' gap along that x. A
+// headset whose eyes are turned apart or set off along y or z is shown the
+// right image reprojected from there.
+void ReplayRight() {
+    const auto q0=Q(views[0].pose.orientation),q1=Q(views[1].pose.orientation);
+    const auto apart=math::Rotate(math::Conjugate(q0),V(views[1].pose.position)-V(views[0].pose.position));
+    static bool told=false;
+    if(!told){
+        told=true;
+        const float dot=std::min(1.f,std::fabs(q0.x*q1.x+q0.y*q1.y+q0.z*q1.z+q0.w*q1.w));
+        char b[224];std::snprintf(b,sizeof b,"Frame OpenXR: replay - right eye %.1f mm along the left eye's x (%.1f mm up, %.1f mm back), the eyes turned %.2f degrees apart",
+            apart.x*1000,apart.y*1000,apart.z*1000,2*std::acos(dot)*57.2957795f);
+        Say(b);
+    }
+    replayGap=apart.x;
+    const auto at=V(views[0].pose.position)+math::Rotate(q0,{apart.x,0,0});
+    views[1].pose.orientation=views[0].pose.orientation;
+    views[1].pose.position={at.x,at.y,at.z};
+}
 bool Begin() {
     if(!session||frame) return frame;
     Events();if(!running)return false;
@@ -2079,6 +2296,7 @@ bool Begin() {
     const bool panel=wantsPanel&&wantsPanel()&&!spatialMode;
     if(panel!=panelMode){ReleasePanelInput();panelMouse.Suspend();panelMode=panel;menuPlaced=false;Say(panel?"Frame OpenXR: flat menu panel active":"Frame OpenXR: stereo gameplay active");}
     for(auto& e:eyes)e.copied=false;
+    for(auto& w:viewWorld)w.ok=false;
     XrViewLocateInfo li{XR_TYPE_VIEW_LOCATE_INFO};li.viewConfigurationType=XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;li.displayTime=frameState.predictedDisplayTime;li.space=space;
     XrViewState vs{XR_TYPE_VIEW_STATE};uint32_t count=0;
     const double locateStart=Milliseconds();
@@ -2101,6 +2319,7 @@ bool Begin() {
                 {r.angleLeft,r.angleRight,r.angleDown,r.angleUp});
             for(auto& view:views)view.fov={f.left,f.right,f.up,f.down};
         }
+        if(replayPair)ReplayRight();
         static int lastProjectionMode=-1;
         if(lastProjectionMode!=int(centered)) {
             const auto& f=views[0].fov;char b[192];
@@ -2146,6 +2365,206 @@ bool WaitGpuValue(uint64_t value) {
     if(result!=WAIT_OBJECT_0) {Say("Frame D3D12: GPU copy fence timed out");return false;}
     return true;
 }
+bool KeepTurn(ID3D12GraphicsCommandList* list,ID3D12Resource* shown,int eye,D3D12_RESOURCE_STATES state=D3D12_RESOURCE_STATE_RENDER_TARGET) {
+    if(turnImagesFailed)return false;
+    if(!turnWarpTried){turnWarpTried=true;turnWarp.Initialize(device.Get(),turnFormat,&Say);}
+    // The eyes' size is the session's: a new size comes with a new session.
+    auto& kept=turnImages[eye];
+    if(!kept) {
+        D3D12_HEAP_PROPERTIES heap{};heap.Type=D3D12_HEAP_TYPE_DEFAULT;
+        auto r=shown->GetDesc();r.Alignment=0;r.Flags=D3D12_RESOURCE_FLAG_NONE;r.Format=turnFormat;
+        if(!Hr(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&r,D3D12_RESOURCE_STATE_COMMON,nullptr,IID_PPV_ARGS(&kept)),"create kept eye image")) {
+            turnImagesFailed=true;turnKept={};return false;   // the other may still be read on the GPU: kept to Shutdown
+        }
+    }
+    D3D12_RESOURCE_BARRIER b[2]{};
+    for(auto& x:b){x.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;x.Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;}
+    b[0].Transition.pResource=shown;b[0].Transition.StateBefore=state;b[0].Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_SOURCE;
+    b[1].Transition.pResource=kept.Get();b[1].Transition.StateBefore=D3D12_RESOURCE_STATE_COMMON;b[1].Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_DEST;
+    const UINT first=state==D3D12_RESOURCE_STATE_COPY_SOURCE?1:0;   // already readable
+    list->ResourceBarrier(2-first,b+first);list->CopyResource(kept.Get(),shown);
+    for(auto& x:b)std::swap(x.Transition.StateBefore,x.Transition.StateAfter);
+    list->ResourceBarrier(2-first,b+first);
+    return true;
+}
+// By turns: this present's scene depth (scenedepth's copy, made for it before
+// the effects) kept beside the eye's image, as the depth it was drawn with.
+bool KeepDepth(ID3D12GraphicsCommandList* list,int eye) {
+    scenedepth::Kept latest;
+    if(!scenedepth::Take(latest)) {
+        static bool told=false;
+        if(!told){told=true;Say("Frame OpenXR: by turns - no scene depth for an eye yet; moving draws both eyes until there is");}
+        return false;
+    }
+    constexpr auto readable=D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE|D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+    auto* source=reinterpret_cast<ID3D12Resource*>(latest.resource);
+    auto& kept=turnDepths[eye];
+    const auto desc=source->GetDesc();
+    if(kept.texture) {   // a new DLSS mode: a new size. The last turn may still read the old one.
+        const auto k=kept.texture->GetDesc();
+        if(k.Width!=desc.Width||k.Height!=desc.Height||k.Format!=desc.Format){if(!WaitGpu())return false;kept.texture.Reset();}
+    }
+    if(!kept.texture) {
+        D3D12_HEAP_PROPERTIES heap{};heap.Type=D3D12_HEAP_TYPE_DEFAULT;
+        auto r=desc;r.Alignment=0;r.Flags=D3D12_RESOURCE_FLAG_NONE;
+        if(!Hr(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&r,readable,nullptr,IID_PPV_ARGS(&kept.texture)),"create kept eye depth"))return false;
+        char line[192];std::snprintf(line,sizeof line,"Frame OpenXR: by turns - each eye's scene depth kept: %llux%u format %u, the scene in %.3f x %.3f of it",
+            (unsigned long long)desc.Width,desc.Height,latest.format,latest.scale[0],latest.scale[1]);Say(line);
+    }
+    D3D12_RESOURCE_BARRIER b[2]{};
+    for(auto& x:b){x.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;x.Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;}
+    b[0].Transition.pResource=source;b[0].Transition.StateBefore=readable;b[0].Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_SOURCE;
+    b[1].Transition.pResource=kept.texture.Get();b[1].Transition.StateBefore=readable;b[1].Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_DEST;
+    list->ResourceBarrier(2,b);list->CopyResource(kept.texture.Get(),source);
+    for(auto& x:b)std::swap(x.Transition.StateBefore,x.Transition.StateAfter);
+    list->ResourceBarrier(2,b);
+    kept.format=DXGI_FORMAT(latest.format);kept.scale[0]=latest.scale[0];kept.scale[1]=latest.scale[1];
+    return true;
+}
+// By turns: this eye's interface (hud's copy, in a shader-resource state) kept
+// beside its image, for TurnEye to lay over the eye when it is not drawn.
+bool KeepLayer(ID3D12GraphicsCommandList* list,ID3D12Resource* layer,int eye) {
+    auto& kept=turnLayers[eye];
+    const auto desc=layer->GetDesc();
+    if(kept) {   // the game's interface took a new size: the last turn may still read the old one
+        const auto k=kept->GetDesc();
+        if(k.Width!=desc.Width||k.Height!=desc.Height||k.Format!=desc.Format){if(!WaitGpu())return false;kept.Reset();}
+    }
+    if(!kept) {
+        D3D12_HEAP_PROPERTIES heap{};heap.Type=D3D12_HEAP_TYPE_DEFAULT;
+        auto r=desc;r.Alignment=0;r.Flags=D3D12_RESOURCE_FLAG_NONE;
+        if(!Hr(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&r,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,nullptr,IID_PPV_ARGS(&kept)),"create kept eye interface"))return false;
+        char line[160];std::snprintf(line,sizeof line,"Frame OpenXR: by turns - the game's interface taken out of each eye's picture and laid back over it (%llux%u)",
+            (unsigned long long)desc.Width,desc.Height);Say(line);
+    }
+    constexpr auto readable=D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE|D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+    D3D12_RESOURCE_BARRIER b[2]{};
+    for(auto& x:b){x.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;x.Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;}
+    b[0].Transition.pResource=layer;b[0].Transition.StateBefore=readable;b[0].Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_SOURCE;
+    b[1].Transition.pResource=kept.Get();b[1].Transition.StateBefore=D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;b[1].Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_DEST;
+    list->ResourceBarrier(2,b);list->CopyResource(kept.Get(),layer);
+    for(auto& x:b)std::swap(x.Transition.StateBefore,x.Transition.StateAfter);
+    list->ResourceBarrier(2,b);
+    return true;
+}
+// The interface over target (in `state`, and left in it): TurnWarp::Interface.
+bool LayInterface(ID3D12GraphicsCommandList* list,ID3D12Resource* layer,ID3D12Resource* target,const std::array<float,9>& homography,int at,D3D12_RESOURCE_STATES state) {
+    D3D12_RESOURCE_BARRIER b{};b.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    b.Transition={target,D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,state,D3D12_RESOURCE_STATE_RENDER_TARGET};
+    const bool moved=state!=D3D12_RESOURCE_STATE_RENDER_TARGET;
+    if(moved)list->ResourceBarrier(1,&b);
+    const bool laid=turnWarp.Interface(device.Get(),list,layer,target,homography,at);
+    std::swap(b.Transition.StateBefore,b.Transition.StateAfter);
+    if(moved)list->ResourceBarrier(1,&b);
+    return laid;
+}
+// The eye not drawn is turned here when its interface goes over it (TurnEye).
+bool TurnTarget(ID3D12Resource* image) {
+    const auto d=image->GetDesc();
+    if(turnTarget){const auto t=turnTarget->GetDesc();return t.Width==d.Width&&t.Height==d.Height;}   // one size a session
+    D3D12_HEAP_PROPERTIES heap{};heap.Type=D3D12_HEAP_TYPE_DEFAULT;
+    auto r=d;r.Alignment=0;r.Format=TypelessFamily(turnFormat);r.Flags=D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+    if(r.Format==DXGI_FORMAT_UNKNOWN||
+       !Hr(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&r,D3D12_RESOURCE_STATE_RENDER_TARGET,nullptr,IID_PPV_ARGS(&turnTarget)),"create turned eye target")) {
+        turnTarget.Reset();layersFailed=true;layerKept={};
+        Say("Frame OpenXR: by turns - no target to lay the interface over the eye not drawn; it stays in the picture");
+        return false;
+    }
+    return true;
+}
+// The eye not drawn this frame, turned from its kept image to this frame's
+// head into its swapchain. False leaves it unacquired: its last released
+// image goes again at the pose it was drawn with.
+// By turns: nearer than CarriedNear metres along the view the eye not drawn
+// moves with the hero (TurnDepth::carry), farther than CarriedFar with the
+// world. Hands and weapons sit within the first; the ground at the feet,
+// even looking straight down, past the second.
+constexpr float CarriedNear=1.0f,CarriedFar=1.6f;
+bool TurnEye(int i) {
+    auto& e=eyes[i];
+    // All of a swapchain's images are alike: checked before one is acquired,
+    // as an acquired image nothing was written to must never be released.
+    if(!turnKept[i]||!lastEyes[i].ok||e.acquired||e.images.empty()||!turnWarp.Fits(turnImages[i].Get(),e.images[0].texture))return false;
+    if(!Acquire(e)||!WaitGpuValue(e.copyFence)||
+       !Hr(e.allocator->Reset(),"reset turn allocator")||!Hr(e.commands->Reset(e.allocator.Get(),nullptr),"reset turn list")){failed=true;return false;}
+    // In the world: the body's turn then the head's, now the drawn eye's body turn.
+    const auto& was=lastEyes[i];const auto& now=views[i];
+    const auto h=TurnHomography(math::Multiply(was.base,Q(was.pose.orientation)),{was.fov.angleLeft,was.fov.angleRight,was.fov.angleDown,was.fov.angleUp},
+                                math::Multiply(viewBase[i^1],Q(now.pose.orientation)),{now.fov.angleLeft,now.fov.angleRight,now.fov.angleDown,now.fov.angleUp});
+    // By turns: moved as well, with the depth it was drawn with, to where View
+    // puts this eye this frame (the hero's step, the head's, the body's turn).
+    TurnDepth depth{},other{};const TurnDepth* moving=nullptr;const TurnDepth* fromDrawn=nullptr;
+    const auto& w=stageWorld;
+    const bool placed=keepDepth&&turnWarp.DepthReady()&&w.valid&&w.upm>0&&GetTickCount64()-w.at<250;
+    const auto offset=math::Rotate(w.base,V(now.pose.position)-w.origin)*w.upm;
+    const math::Vec at={w.hero.x+offset.x,w.hero.y+w.eyeHeight+offset.y,w.hero.z+offset.z};
+    // The drawn eye's picture of this frame (kept by Copy, before this on the
+    // queue), moved across with its depth from where View put it.
+    const auto& drawnAt=viewWorld[i^1];
+    if(placed&&turnsFromDrawnEye.load()&&eyes[i^1].copied&&turnKept[i^1]&&turnDepths[i^1].ok&&drawnAt.ok&&drawnAt.nearPlane>0) {
+        const auto& f=views[i^1].fov;
+        other.image=turnImages[i^1].Get();
+        other.depth=turnDepths[i^1].texture.Get();other.format=turnDepths[i^1].format;
+        other.scale[0]=turnDepths[i^1].scale[0];other.scale[1]=turnDepths[i^1].scale[1];
+        other.nearPlane=drawnAt.nearPlane;
+        other.move=TurnMove(drawnAt.at,drawnAt.turn,at,math::Multiply(w.base,Q(now.pose.orientation)));
+        other.drawnFov={f.angleLeft,f.angleRight,f.angleDown,f.angleUp};
+        other.nowFov={now.fov.angleLeft,now.fov.angleRight,now.fov.angleDown,now.fov.angleUp};
+        const auto gap=drawnAt.at-at;other.apart=std::sqrt(gap.x*gap.x+gap.y*gap.y+gap.z*gap.z);
+        fromDrawn=&other;
+    }
+    if(placed&&was.world.ok&&turnDepths[i].ok) {
+        depth.depth=turnDepths[i].texture.Get();depth.format=turnDepths[i].format;
+        depth.scale[0]=turnDepths[i].scale[0];depth.scale[1]=turnDepths[i].scale[1];
+        depth.nearPlane=was.world.nearPlane;
+        depth.move=TurnMove(was.world.at,was.world.turn,at,math::Multiply(w.base,Q(now.pose.orientation)));
+        depth.drawnFov={was.fov.angleLeft,was.fov.angleRight,was.fov.angleDown,was.fov.angleUp};
+        depth.nowFov={now.fov.angleLeft,now.fov.angleRight,now.fov.angleDown,now.fov.angleUp};
+        // Within reach (the hands, the weapon, the body): taken along by the
+        // hero's step and the body's turn since the eye was drawn.
+        depth.carry=TurnCarry(was.world.at,was.world.turn,was.world.hero,was.base,w.hero,w.base,at,math::Multiply(w.base,Q(now.pose.orientation)));
+        depth.reach[0]=CarriedNear*w.upm;depth.reach[1]=CarriedFar*w.upm;
+        moving=&depth;
+    }
+    D3D12_RESOURCE_BARRIER b[2]{};const UINT kept=fromDrawn?2:1;
+    for(UINT k=0;k<kept;++k){b[k].Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        b[k].Transition={turnImages[i^k].Get(),D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,D3D12_RESOURCE_STATE_COMMON,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE};}
+    e.commands->ResourceBarrier(kept,b);
+    // With its interface kept (the game's labels, out of its picture) the eye
+    // is turned into turnTarget, its interface laid over it there as the game
+    // blends it (UNORM), and then it goes to its swapchain image.
+    ID3D12Resource* image=e.images[e.index].texture;
+    const bool layered=layerKept[i]&&TurnTarget(image);
+    const bool turned=turnWarp.Render(device.Get(),e.commands.Get(),turnImages[i].Get(),layered?turnTarget.Get():image,h,i,moving,fromDrawn);
+    for(UINT k=0;k<kept;++k)std::swap(b[k].Transition.StateBefore,b[k].Transition.StateAfter);
+    e.commands->ResourceBarrier(kept,b);
+    if(turned&&layered) {
+        // Its own interface as its pass drew it, turned as its picture was:
+        // each label where this eye last saw it, at its own depth, never moved
+        // with the scene behind it or cut along a monster's edge.
+        LayInterface(e.commands.Get(),turnLayers[i].Get(),turnTarget.Get(),h,i*2,D3D12_RESOURCE_STATE_RENDER_TARGET);
+        D3D12_RESOURCE_BARRIER c[2]{};
+        for(auto& x:c){x.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;x.Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;}
+        c[0].Transition.pResource=turnTarget.Get();c[0].Transition.StateBefore=D3D12_RESOURCE_STATE_RENDER_TARGET;c[0].Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_SOURCE;
+        c[1].Transition.pResource=image;c[1].Transition.StateBefore=D3D12_RESOURCE_STATE_RENDER_TARGET;c[1].Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_DEST;
+        e.commands->ResourceBarrier(2,c);e.commands->CopyResource(image,turnTarget.Get());
+        for(auto& x:c)std::swap(x.Transition.StateBefore,x.Transition.StateAfter);
+        e.commands->ResourceBarrier(2,c);
+    }
+    // The belt's potion models, left out of the kept images (Copy), drawn fresh
+    // at this eye's pose: moved with the depth behind them they flickered and
+    // smeared (owner, 2026-10-19). The eye's copy fence was waited above.
+    if(turned&&interactionInput.active&&potionModels.Ready())
+        potionModels.Render(e.commands.Get(),image,unsigned(i),{V(now.pose.position),Q(now.pose.orientation)},
+            {now.fov.angleLeft,now.fov.angleRight,now.fov.angleDown,now.fov.angleUp},potionScene);
+    if(!Hr(e.commands->Close(),"close turn list")||!turned){failed=true;return false;}
+    ID3D12CommandList* lists[]={e.commands.Get()};queue->ExecuteCommandLists(1,lists);
+    if(!Hr(queue->Signal(fence.Get(),++fenceValue),"signal turn fence")){failed=true;return false;}
+    e.copyFence=fenceValue;
+    if(moving)++turnCounts.moved;else ++turnCounts.turned;
+    if(fromDrawn)++turnCounts.drawn;
+    return true;
+}
 bool Copy(ID3D12Resource* src,Eye& e,reshade::api::command_queue* rq) {
     // The runtime orders images on our bound D3D12 queue. Our allocator has a
     // separate lifetime: never reset it until its own previous copy completed.
@@ -2166,15 +2585,36 @@ bool Copy(ID3D12Resource* src,Eye& e,reshade::api::command_queue* rq) {
     barriers[0].Transition.pResource=src;barriers[0].Transition.StateBefore=D3D12_RESOURCE_STATE_PRESENT;barriers[0].Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_SOURCE;
     barriers[1].Transition.pResource=dest;barriers[1].Transition.StateBefore=D3D12_RESOURCE_STATE_RENDER_TARGET;barriers[1].Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_DEST;
     if(gpu)e.commands->EndQuery(gpuProfile.heap.Get(),D3D12_QUERY_TYPE_TIMESTAMP,eye*5+3);
-    e.commands->ResourceBarrier(2,barriers);e.commands->CopyResource(dest,src);
-    if(eye==1&&mirrorMono&&mirrorSupported&&eyes[0].acquired&&eyes[0].copied) {
-        // The headset already has this right frame; the window gets this pair's
-        // left image back. It stays acquired until EndPair releases both eyes.
+    e.commands->ResourceBarrier(2,barriers);
+    // Kept before the game's interface and the belt's potion models go over
+    // the picture: neither is in the scene's depth, so by turns the eye not
+    // drawn lays its own over (TurnEye) instead of moving these with the
+    // depth behind them.
+    turnKept[eye]=keepTurns&&KeepTurn(e.commands.Get(),src,int(eye),D3D12_RESOURCE_STATE_COPY_SOURCE);
+    turnDepths[eye].ok=keepDepth&&turnKept[eye]&&KeepDepth(e.commands.Get(),int(eye));
+    // By turns the game's interface was taken out of its picture: laid back as
+    // the game lays it, before the headset and the window get the picture.
+    uint32_t layerWidth=0,layerHeight=0;
+    auto* layer=reinterpret_cast<ID3D12Resource*>(hud::TakenInterface(layerWidth,layerHeight));
+    layerKept[eye]=layer&&turnKept[eye]&&KeepLayer(e.commands.Get(),layer,int(eye));
+    if(layer&&!LayInterface(e.commands.Get(),layerKept[eye]?turnLayers[eye].Get():layer,src,TurnIdentity,int(eye)*2,D3D12_RESOURCE_STATE_COPY_SOURCE)) {
+        layersFailed=true;layerKept={};
+        Say("Frame OpenXR: by turns - the game's interface could not be laid back; from the next frame it stays in the picture");
+    }
+    e.commands->CopyResource(dest,src);
+    const bool pairLeft=!turnFrame&&mirrorSupported&&eyes[0].acquired&&eyes[0].copied;
+    if(eye==1&&mirrorMono&&(pairLeft||(turnFrame&&turnKept[0]))) {
+        // The headset already has this right frame; the window gets the left
+        // image back: this pair's, still acquired until EndPair releases both
+        // eyes, or by turns the image kept from the last left frame.
         D3D12_RESOURCE_BARRIER m[2]{barriers[0],barriers[1]};
         m[0].Transition.StateBefore=D3D12_RESOURCE_STATE_COPY_SOURCE;m[0].Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_DEST;
-        m[1].Transition.pResource=eyes[0].images[eyes[0].index].texture;m[1].Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_SOURCE;
+        m[1].Transition.pResource=pairLeft?eyes[0].images[eyes[0].index].texture:turnImages[0].Get();m[1].Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_SOURCE;
+        if(!pairLeft)m[1].Transition.StateBefore=D3D12_RESOURCE_STATE_COMMON;
         e.commands->ResourceBarrier(2,m);e.commands->CopyResource(src,m[1].Transition.pResource);
         std::swap(m[1].Transition.StateBefore,m[1].Transition.StateAfter);e.commands->ResourceBarrier(1,&m[1]);
+        // By turns the kept left image is the scene alone: its interface over it.
+        if(!pairLeft&&layerKept[0])LayInterface(e.commands.Get(),turnLayers[0].Get(),src,TurnIdentity,3,D3D12_RESOURCE_STATE_COPY_DEST);
         barriers[0].Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_DEST;
     }
     for(auto& b:barriers)std::swap(b.Transition.StateBefore,b.Transition.StateAfter);
@@ -2293,14 +2733,17 @@ void Capture(reshade::api::command_queue* rq,reshade::api::swapchain* swap) {
     if(!Begin()||!render||!valid) {if(!stereo)EndPair();return;}
     const uint32_t eye=stereo?((afr->eye^afr->swap)&1u):0u;
     mirrorMono=stereo&&vrsettings::Read().values[settings::DesktopOneEye]>.5f;
-    if(eye==0&&!CopyMap(rq)) {mapSupported=false;mapEye.copied=false;Say("Frame menu map: copy unavailable; optional map suspended");}
-    if((eye==0&&!CopyUi(rq))||!Copy(src,eyes[eye],rq)){failed=true;EndPair();ClearInput();return;}
+    // The map and menu surfaces are copied once a frame: from the left eye's
+    // pass, or by turns from whichever eye this frame draws.
+    const bool shared=eye==0||(pairDrawing&&turnFrame);
+    if(shared&&!CopyMap(rq)) {mapSupported=false;mapEye.copied=false;Say("Frame menu map: copy unavailable; optional map suspended");}
+    if((shared&&!CopyUi(rq))||!Copy(src,eyes[eye],rq)){failed=true;EndPair();ClearInput();return;}
     if(!stereo) {
         PlaceMainMenu();
         EndPair();
     } else if(!pairDrawing&&eyes[0].copied&&eyes[1].copied) {
         EndPair();
-    } else if(eye==1&&!eyes[0].copied) {
+    } else if(eye==1&&!eyes[0].copied&&!turnFrame) {
         // Missed left eye: submit zero layers, never present an old/mono image as stereo.
         EndPair();
     }
@@ -2339,6 +2782,7 @@ void DestroySwap(reshade::api::swapchain* swap,bool resize) {
 }
 } // namespace
 
+void CaptureEffects(reshade::api::effect_runtime* rt){AfterEffects(rt);}
 bool HandleWindowFocusMessage(void* window,uint32_t message,uint64_t token,int64_t deadline) {
     return windowFocus.Handle(static_cast<HWND>(window),message,WPARAM(token),LPARAM(deadline));
 }
@@ -2365,10 +2809,16 @@ void ConfigureDeferredWait(bool on) {
     if(deferredWait.exchange(on)!=on)Say(on?"Frame OpenXR: GPU wait deferred until copy allocator reuse":"Frame OpenXR: conservative GPU wait before image release");
 }
 void ConfigureSymmetricProjection(bool on) {symmetricProjection.store(on);}
+void ConfigureTurnsFromDrawnEye(bool on) {
+    if(turnsFromDrawnEye.exchange(on)!=on)Say(on?"Frame OpenXR: by turns - the eye not drawn mostly from the drawn eye's picture":"Frame OpenXR: by turns - the eye not drawn from its own image alone");
+}
 void ConfigureEyeTracking(bool on) {eyeTracking.store(on);}
 void BeginEye(int eye) {
     hud::UiFrame(spatialMode,!journalMode,eye);
     std::lock_guard lock(mutex);
+    // By turns the game's interface comes out of the picture: Copy and TurnEye lay it back.
+    hud::TakeInterface(Active()&&keepDepth&&!layersFailed&&turnWarp.InterfaceReady()&&
+        RenderTargetCompatible(format,UnormView(turnFormat))&&TypelessFamily(turnFormat)!=DXGI_FORMAT_UNKNOWN);
     hud::NativeGameplay(nativehud::Gameplay(Active(),inWorld&&inWorld(),wantsPanel&&wantsPanel(),spatialMode));
     lightbounds::SetActive(Active()&&inWorld&&inWorld());
     d2rcam::SetStereoUiEye(Active()?(eye&1):-1);
@@ -2408,14 +2858,45 @@ bool TakeWorldRecenter() {
     std::lock_guard lock(mutex);const bool take=worldRecenter;worldRecenter=false;return take;
 }
 void RequestStereoCapture(){captureRequested.store(true);}
-void BeginPair() {
+int StereoRendering() {return std::clamp(int(std::lround(vrsettings::Read().values[settings::StereoRendering])),0,2);}
+bool GpuWaitDeferred() {return deferredWait.load();}
+bool ReplayReady() {
+    std::lock_guard lock(mutex);
+    return !captureRequested.load()&&!d2rcam::LabelCapturePending();
+}
+bool ReplayPair() {std::lock_guard lock(mutex);return replayPair&&!failed;}
+float ReplayShift() {std::lock_guard lock(mutex);return replayShift;}
+float ReplayProjShift() {
+    std::lock_guard lock(mutex);
+    const auto off=[](const XrFovf& f){const float l=std::tan(f.angleLeft),r=std::tan(f.angleRight);return (r+l)/(r-l);};
+    return .5f*(off(views[0].fov)-off(views[1].fov));
+}
+bool TurnDepthWanted() {return StereoRendering()==1;}
+bool TurnDepthReady() {
+    std::lock_guard lock(mutex);
+    return turnWarp.DepthReady()&&turnDepths[0].ok&&turnDepths[1].ok&&lastEyes[0].world.ok&&lastEyes[1].world.ok;
+}
+TurnCounts TakeTurnCounts() {
+    std::lock_guard lock(mutex);
+    const auto counts=turnCounts;turnCounts={};return counts;
+}
+bool TurnReady() {
+    std::lock_guard lock(mutex);
+    return lastEyes[0].ok&&lastEyes[1].ok&&!captureRequested.load()&&!d2rcam::LabelCapturePending();
+}
+void BeginPair(bool byTurns,bool replay) {
     std::lock_guard lock(mutex);
     lastTiming={};
     if(session&&!failed){
-        if(frame)EndPair();Begin();pairDrawing=true;
+        if(frame)EndPair();
+        const int mode=StereoRendering();
+        turnFrame=byTurns;replayPair=replay&&!byTurns;
+        keepTurns=byTurns||mode==1;keepDepth=mode==1;Begin();pairDrawing=true;
+        if(replayPair&&!(frame&&valid&&render&&!panelMode))replayPair=false;
         gpuProfile.started=gpuProfile.effects=gpuProfile.resolved=0;
-        if(Active())profile::BeginPair();else profile::SkipPair();
-        if(Active()&&(captureRequested.exchange(false)||d2rcam::TakeLabelCapture())) {
+        // The profile and stereo captures take both eyes from two passes.
+        if(Active()&&!byTurns&&!replayPair)profile::BeginPair();else profile::SkipPair();
+        if(Active()&&!byTurns&&!replayPair&&(captureRequested.exchange(false)||d2rcam::TakeLabelCapture())) {
             capturePair=true;captureEyes=0;++captureSerial;
             Say("Frame capture: recording one stereo pair (readback pause is diagnostic, exclude from performance comparison)");
         }
@@ -2423,25 +2904,32 @@ void BeginPair() {
 }
 void EndPair() {
     hud::EndNativeEye();
+    hud::TakeInterface(false);
     lightbounds::SetActive(false);
     foveation::EndWorld();
     d2rcam::SetStereoUiEye(-1);
-    std::lock_guard lock(mutex);pairDrawing=false;if(!frame||!session)return;
+    std::lock_guard lock(mutex);pairDrawing=false;const bool turn=turnFrame;turnFrame=false;replayPair=false;if(!frame||!session)return;
     d2rcam::TraceStereoLabels(-1);
     if(capturePair){Say(captureEyes==3?"Frame capture: both eye screenshots requested":"Frame capture: incomplete pair; do not use for stereo comparison");capturePair=false;}
+    // By turns: the eye not drawn, turned to this frame's head.
+    int turned=-1;
+    if(turn&&render&&valid&&!panelMode&&!failed)
+        for(int i=0;i<2;++i)if(!eyes[i].copied&&eyes[i^1].copied&&TurnEye(i))turned=i;
     // All image writes and state restoration have been submitted on the queue
     // bound to xrCreateSession. OpenXR orders its work after those commands;
     // it does not require a CPU completion wait before xrReleaseSwapchainImage.
     // WineOpenXR also drains that queue before its release/layout commands.
     // Keep the old path for A/B, and for synchronous diagnostic query readback.
     const bool waitNow=!deferredWait.load()||gpuProfile.started!=0;
-    if(waitNow&&fence&&!WaitGpu()){failed=true;for(auto& e:eyes)e.copied=false;}
+    if(waitNow&&fence&&!WaitGpu()){failed=true;for(auto& e:eyes)e.copied=false;turned=-1;}
     if(!failed)ReadGpuProfile();
     gpuProfile.started=gpuProfile.effects=gpuProfile.resolved=0;
     const double releaseStart=Milliseconds();
     for(auto& e:eyes)if(e.acquired){
+        const int i=int(&e-eyes.data());
         XrSwapchainImageReleaseInfo ri{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
-        if(!Check(pReleaseSwapchainImage(e.chain,&ri),"release copied eye")){failed=true;e.copied=false;}
+        if(!Check(pReleaseSwapchainImage(e.chain,&ri),"release copied eye")){failed=true;e.copied=false;if(i==turned)turned=-1;}
+        if(!e.copied&&i!=turned)lastEyes[i].ok=false;
         e.acquired=false;
     }
     if(uiEye.acquired){XrSwapchainImageReleaseInfo release{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
@@ -2453,10 +2941,18 @@ void EndPair() {
     std::array<XrCompositionLayerProjectionView,2> pv{{{XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW},{XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW}}};
     XrCompositionLayerQuad quad{XR_TYPE_COMPOSITION_LAYER_QUAD};
     const XrCompositionLayerBaseHeader* layer=nullptr;
-    if(render&&valid&&!panelMode&&eyes[0].copied&&eyes[1].copied) {
-        for(int i=0;i<2;++i){pv[i].pose=views[i].pose;pv[i].fov=views[i].fov;pv[i].subImage.swapchain=eyes[i].chain;pv[i].subImage.imageRect={{0,0},{int32_t(width),int32_t(height)}};}
+    const auto drawn=[&](int i){return eyes[i].copied||(turn&&lastEyes[i].ok);};
+    if(render&&valid&&!panelMode&&drawn(0)&&drawn(1)&&(eyes[0].copied||eyes[1].copied)) {
+        for(int i=0;i<2;++i){
+            if(eyes[i].copied)lastEyes[i]={views[i].pose,views[i].fov,true,viewBase[i],viewWorld[i]};
+            // drawn or turned this frame: this frame's pose; else as drawn
+            const bool now=eyes[i].copied||i==turned;
+            pv[i].pose=now?views[i].pose:lastEyes[i].pose;pv[i].fov=now?views[i].fov:lastEyes[i].fov;
+            pv[i].subImage.swapchain=eyes[i].chain;pv[i].subImage.imageRect={{0,0},{int32_t(width),int32_t(height)}};
+        }
         projection.space=space;projection.viewCount=2;projection.views=pv.data();layer=reinterpret_cast<const XrCompositionLayerBaseHeader*>(&projection);menuPlaced=false;
-    } else if(render&&valid&&eyes[0].copied&&menuPlaced) {
+    } else lastEyes={};
+    if(!layer&&render&&valid&&eyes[0].copied&&menuPlaced) {
         const auto size=panels::Fit(width,height,panelWidth);
         quad.space=space;quad.eyeVisibility=XR_EYE_VISIBILITY_BOTH;quad.pose=menuPose;quad.size={size.width,size.height};
         quad.subImage.swapchain=eyes[0].chain;quad.subImage.imageRect={{0,0},{int32_t(width),int32_t(height)}};layer=reinterpret_cast<const XrCompositionLayerBaseHeader*>(&quad);
@@ -2889,7 +3385,13 @@ void FinishShieldSkill(bool accepted) {
     if(accepted)shieldImpactAt=shieldFeedbackAt;
 }
 void MeleeImpact(int hand) {if(hand>=0&&hand<2)meleeImpactAt[hand]=GetTickCount64();}
-void ShieldGuardImpact(bool parry) {shieldImpactAt=GetTickCount64();(parry?guardParryEvents:guardBlockEvents).fetch_add(1);}
+void ShieldGuardImpact(bool parry,float weight) {
+    shieldImpactAt=GetTickCount64();
+    if(parry){guardParryEvents.fetch_add(1);return;}
+    guardBlockWeight.fetch_add(unsigned(std::clamp(std::isfinite(weight)?weight:1.f,0.f,16.f)*1000.f+.5f));
+    guardBlockEvents.fetch_add(1);
+}
+bool GuardBroken() {return guardBroken.load();}
 void ShieldParryMiss() {parryMissAt=GetTickCount64();}
 void ShieldGuardState(bool eligible,bool raised) {guardStateAt=GetTickCount64();guardEligible=eligible;guardRaised=raised;}
 void ConfigureGuardStrain(float perBlock,float resetSeconds,float clear,float breatheSeconds,float softness,float brightness,uint32_t color,float density) {
@@ -2903,6 +3405,9 @@ void ConfigureGuardStrain(float perBlock,float resetSeconds,float clear,float br
     t.color=color&0xFFFFFFu;
     t.density=std::isfinite(density)?std::clamp(density,1.f,6.f):1.f;
     std::lock_guard lock(strainTuningMutex);strainTuning=t;
+}
+void ConfigureGuardStrainRecover(float seconds) {
+    strainRecoverSeconds=std::isfinite(seconds)?std::clamp(seconds,0.f,30.f):1.5f;
 }
 void ConfigureHeartbeat(float volume,float bpmMin,float bpmMax,float fadeSeconds,const wchar_t* file) {
     heartbeat::Tuning t;
@@ -2933,10 +3438,36 @@ void ConfigureHeartbeat(float volume,float bpmMin,float bpmMax,float fadeSeconds
         if(!embedded)*pcm=heartbeat::BuiltIn();
     }
     {std::lock_guard lock(heartMutex);heartSource=pcm;heartSourceName=fromFile?"ini WAV":embedded?"built-in recording":"synthesized beat";}
-    Say(fromFile?"Frame guard heartbeat: ini WAV loaded":
-        !path.empty()?(embedded?"Frame guard heartbeat: ini WAV missing or not 16-bit PCM; built-in recording":
-                                "Frame guard heartbeat: ini WAV missing or not 16-bit PCM; synthesized beat"):
-        embedded?"Frame guard heartbeat: built-in recording":"Frame guard heartbeat: recording missing; synthesized beat");
+    Say(fromFile?"Frame low-life heartbeat: ini WAV loaded":
+        !path.empty()?(embedded?"Frame low-life heartbeat: ini WAV missing or not 16-bit PCM; built-in recording":
+                                "Frame low-life heartbeat: ini WAV missing or not 16-bit PCM; synthesized beat"):
+        embedded?"Frame low-life heartbeat: built-in recording":"Frame low-life heartbeat: recording missing; synthesized beat");
+}
+void ConfigureGuardBreakSound(float volume,const wchar_t* file) {
+    const std::wstring path=file?file:L"";
+    bool reload=false;
+    {std::lock_guard lock(breakMutex);breakVolume=std::isfinite(volume)?std::clamp(volume,0.f,4.f):1.f;reload=path!=breakFile;if(reload)breakFile=path;}
+    if(!reload)return;
+    auto pcm=std::make_shared<heartbeat::Pcm>();
+    bool fromFile=false,embedded=false;
+    if(!path.empty()) {
+        std::vector<uint8_t> bytes;
+        if(FILE* f=_wfopen(path.c_str(),L"rb")){uint8_t buf[65536];size_t n;while((n=fread(buf,1,sizeof buf,f))>0&&bytes.size()<16u<<20)bytes.insert(bytes.end(),buf,buf+n);fclose(f);}
+        fromFile=heartbeat::ParseWav(bytes,*pcm);
+    }
+    if(!fromFile) {   // the recording embedded by interaction_assets.rc
+        HMODULE module=nullptr;std::vector<uint8_t> bytes;
+        GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           reinterpret_cast<LPCWSTR>(&ConfigureGuardBreakSound),&module);
+        if(HRSRC res=module?FindResourceW(module,L"D2RVR_GUARD_BREAK_SOUND",MAKEINTRESOURCEW(10)):nullptr)
+            if(HGLOBAL h=LoadResource(module,res))
+                if(const auto* p=static_cast<const uint8_t*>(LockResource(h)))bytes.assign(p,p+SizeofResource(module,res));
+        embedded=heartbeat::ParseWav(bytes,*pcm);
+    }
+    {std::lock_guard lock(breakMutex);breakSource=fromFile||embedded?pcm:nullptr;}
+    Say(fromFile?"Frame guard break: ini WAV loaded":
+        embedded?(path.empty()?"Frame guard break: built-in bone snap":"Frame guard break: ini WAV missing or not 16-bit PCM; built-in bone snap"):
+        "Frame guard break: sound missing; silent");
 }
 bool OwnsControllerRumble() {return motionControls.load()&&controllerRumbleLease.Owns(GetTickCount64());}
 void SpellCast(int hand,uint64_t session) {spellHaptics.Publish(hand,session,GetTickCount64());}
@@ -3057,10 +3588,17 @@ bool View(float out[16],const float hero[3],float eyeHeight,float userEyeHeight,
     const auto& pose=eye<0?head:views[eye&1].pose;
     const auto offset=math::Rotate(base,V(pose.position)-origin)*upm;
     const math::Vec position={hero[0]+offset.x,hero[1]+eyeHeight+offset.y,hero[2]+offset.z};
-    math::View(position,math::Multiply(base,Q(pose.orientation)),out);return true;
+    const auto turn=math::Multiply(base,Q(pose.orientation));
+    if(eye>=0){viewBase[eye&1]=base;auto& w=viewWorld[eye&1];w.at=position;w.turn=turn;w.ok=true;w.hero={hero[0],hero[1],hero[2]};}
+    if(eye==0){   // the replay's eye gap in this view's units: along the left eye's x
+        const auto apart=math::Rotate(math::Conjugate(Q(views[0].pose.orientation)),V(views[1].pose.position)-V(views[0].pose.position));
+        replayShift=apart.x*upm;
+    }
+    math::View(position,turn,out);return true;
 }
 bool Projection(float out[16],float nearWorld,int eye) {
     std::lock_guard lock(mutex);if(!Active())return false;
+    viewWorld[eye&1].nearPlane=nearWorld;
     const auto& f=views[eye&1].fov;
     math::Projection(f.angleLeft,f.angleRight,f.angleDown,f.angleUp,nearWorld,out);return true;
 }
@@ -3080,7 +3618,7 @@ void Shutdown(bool preserveResolution) {
     settingsModel.Close();settingsOpen=false;settingsInputGate.Suspend();settingsPaintRevision=~0ull;settingsAtlasPending=settingsImageReady=false;
     bodyCalibration.Cancel();calibrationRelease={};calibrationPrompted=floorSpace=false;calibrationSession=0;calibrationPaintKey=-1;
     if(settingsChain&&pDestroySwapchain)pDestroySwapchain(settingsChain);settingsChain=XR_NULL_HANDLE;
-    atlasUploads.clear();interactionPaintKey=~0ull;interactionPrefetchSession=0;interactionPrefetchRevision=~0u;interactions.Reset();interactionstate::Cancel();
+    atlasUploads.clear();atlasStagingFree.clear();interactionPaintKey=~0ull;interactionPrefetchSession=0;interactionPrefetchRevision=~0u;interactions.Reset();interactionstate::Cancel();
     interactionPaintRequest=0;interactionRequestedKey=~0ull;interactionPaintValid=false;interactionPaintContext={};interactionRequestedContext={};interactionPaintAt=0;
     if(interactionChain&&pDestroySwapchain)pDestroySwapchain(interactionChain);interactionChain=XR_NULL_HANDLE;
     if(companionChain&&pDestroySwapchain)pDestroySwapchain(companionChain);companionChain=XR_NULL_HANDLE;
@@ -3090,7 +3628,7 @@ void Shutdown(bool preserveResolution) {
     if(bloodChain&&pDestroySwapchain)pDestroySwapchain(bloodChain);bloodChain=XR_NULL_HANDLE;
     bloodScreen.Reset();bloodOutput={};bloodShown=0;bloodPaintKey=bloodRequestedKey=~0ull;bloodPaintRequest=0;bloodPaintAt=0;bloodAtlasPending=bloodImageReady=false;
     if(strainChain&&pDestroySwapchain)pDestroySwapchain(strainChain);strainChain=XR_NULL_HANDLE;
-    heartStream.Stop();heartPlaying=false;heartLevel.Reset();heartAt=0;
+    heartStream.Stop();heartPlaying=false;heartLevel.Reset();heartAt=0;heartHush.Reset();heartHealth=-1;
     guardStrain.Reset();strainOutput={};strainPaintKey=~0ull;strainPaintSession=0;strainPaintAt=0;strainAtlasPending=strainImageReady=strainSlotReported=false;
     if(pointerChain&&pDestroySwapchain)pDestroySwapchain(pointerChain);pointerChain=XR_NULL_HANDLE;
     if(aimSpace&&pDestroySpace)pDestroySpace(aimSpace);aimSpace=XR_NULL_HANDLE;
@@ -3100,6 +3638,8 @@ void Shutdown(bool preserveResolution) {
     detectedControllers={};controllerLabels={};controllerProfilesDirty=true;frameControllerExtension=false;
     for(auto& e:eyes){if(e.chain&&pDestroySwapchain)pDestroySwapchain(e.chain);e={};}
     mirrorSupported=mirrorMono=false;
+    turnFrame=keepTurns=keepDepth=false;lastEyes={};viewBase={{{0,0,0,1},{0,0,0,1}}};viewWorld={};turnDepths={};turnCounts={};turnImages={};turnKept={};turnImagesFailed=turnWarpTried=false;turnWarp={};
+    turnLayers={};layerKept={};turnTarget.Reset();layersFailed=false;
     for(auto& s:handSpaces){if(s&&pDestroySpace)pDestroySpace(s);s=XR_NULL_HANDLE;}
     if(headSpace&&pDestroySpace)pDestroySpace(headSpace);if(space&&pDestroySpace)pDestroySpace(space);
     if(session&&pDestroySession)pDestroySession(session);if(actionSet&&pDestroyActionSet)pDestroyActionSet(actionSet);

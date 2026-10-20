@@ -651,6 +651,7 @@ void SetStereoUiEye(int eye){
 void TraceStereoLabels(int eye){g_traceLabelCount.store(0);g_traceLabelEye.store(eye);}
 void ArmLabelCapture(){g_labelSeen=false;g_waitForLabel=true;}
 bool TakeLabelCapture(){return g_labelSeen.exchange(false);}
+bool LabelCapturePending(){return g_labelSeen.load();}
 bool IsEnabled() { return g_enabled.load(); }
 
 void SetCallbacks(ViewFn view, ProjFn proj) {

@@ -7,8 +7,8 @@ several seconds for the view to return. Reopen Video to see the actual
 
 | Choice | Source dimensions | INI value |
 |---|---|---|
-| Desktop (default) | Physical game-window client size | 0 |
-| Headset | OpenXR runtime recommendation | 1 |
+| Desktop | Physical game-window client size | 0 |
+| Headset (default) | OpenXR runtime recommendation | 1 |
 | 1536 × 1536 | Fixed square preset | 2 |
 | 2048 × 2048 | Fixed square preset | 3 |
 | 2560 × 2560 | Fixed square preset | 4 |
@@ -16,7 +16,7 @@ several seconds for the view to return. Reopen Video to see the actual
 | 4096 × 4096 | Fixed square preset | 6 |
 
 The preference is `[render] vr_resolution` in `mods/D2R-PCVR/d2rloader/plugins/d2r_pcvr.ini`.
-Missing or invalid values retain Desktop. Start with a moderate preset and
+Missing or invalid values use Headset. Start with a moderate preset and
 increase only if frame timing permits. Independent sizes respect both eyes'
 OpenXR limits and the system's swapchain limits, with an additional cap of
 4096 pixels per side. Headset preserves the runtime's recommended aspect ratio.
@@ -224,6 +224,15 @@ return sites now receive the full applied VR source for that clamp. Height
 uses a direct call; width tail-calls the query, so both the caller and tail
 jump are signature-checked. UI layout/font callers still receive only the
 widescreen band. Desktop mode retains the native bounds.
+
+Ground-item labels are placed over the whole eye, but the game's label layout
+drops a label whose bottom passes the UI safe area's height, which is the
+widescreen band. Items lower in the view lost their labels. At a 2048 square or
+an Index eye that line is about the middle of the view, so the item a player
+looked at had no label, with Show Items on as well. The label layout's single
+safe-area size query (`0x8462E0`, called at `0x1FAC2A`, both signature-checked
+once the label code is decrypted) now receives the full source height. Its
+width, every other caller and Desktop mode are unchanged.
 
 The real-window fixture reproduces the desktop-height truncation and verifies
 bottom-row coordinates survive the corrected clamp after each live size

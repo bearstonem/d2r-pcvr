@@ -55,6 +55,7 @@ target_compile_options(d2rcam PRIVATE /utf-8 /W4 /EHsc /permissive-)
 add_library(d2rl-pcvr SHARED vr/vrcam.cpp vr/dlss_mv.cpp vr/skeletons.cpp vr/gamestate.cpp vr/gamecmd.cpp vr/probe.cpp vr/uitrace.cpp vr/hud.cpp vr/memdiff.cpp vr/writewatch.cpp vr/vrcam.rc)
 target_sources(d2rl-pcvr PRIVATE vr/dlss_depth.cpp)
 target_sources(d2rl-pcvr PRIVATE vr/billboards.cpp)
+target_sources(d2rl-pcvr PRIVATE vr/spatial_audio.cpp)   # head-relative sound
 target_include_directories(d2rl-pcvr PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/shared ${FLATVR_SHARED_DIR} ${RESHADE_SDK_INCLUDE} ${BODYWALK_SRC})
 target_link_libraries(d2rl-pcvr PRIVATE d2rcam minhook user32)
 target_compile_options(d2rl-pcvr PRIVATE /utf-8 /W3 /EHsc /permissive-)

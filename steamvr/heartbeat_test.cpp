@@ -28,7 +28,7 @@ int main() {
     }
     heartbeat::Tuning t;
     {   // Loudness and tempo follow strain; none means silence.
-        Check(heartbeat::Gain(0,t)==0&&heartbeat::Gain(-1,t)==0&&heartbeat::Gain(NAN,t)==0,"no strain, no heartbeat");
+        Check(heartbeat::Gain(0,t)==0&&heartbeat::Gain(-1,t)==0&&heartbeat::Gain(NAN,t)==0,"level 0, no heartbeat");
         Check(std::fabs(heartbeat::Gain(1e-4f,t)-t.quiet*t.volume)<.02f&&std::fabs(heartbeat::Gain(1,t)-t.volume)<1e-5f,"quiet at first touch, full when broken");
         float last=0;bool rising=true;
         for(float s=.05f;s<=1.0001f;s+=.05f){const float g=heartbeat::Gain(s,t);rising=rising&&g>last;last=g;}
@@ -44,7 +44,7 @@ int main() {
         const auto calm=heartbeat::Beat(src,.01f,t),broken=heartbeat::Beat(src,1,t);
         const size_t calmPeriod=size_t(std::lround(heartbeat::Rate*60.0/heartbeat::Bpm(.01f,t)));
         Check(calm.size()==calmPeriod&&broken.size()==size_t(std::lround(heartbeat::Rate*60.0/115)),"each buffer is one period at the current tempo");
-        Check(heartbeat::Beat(src,0,t).empty(),"no strain queues nothing");
+        Check(heartbeat::Beat(src,0,t).empty(),"level 0 queues nothing");
         int cp=0,bp=0;for(auto v:calm)cp=std::max(cp,std::abs(int(v)));for(auto v:broken)bp=std::max(bp,std::abs(int(v)));
         Check(bp>cp*4,"a broken guard pounds; the first strain is a murmur (limited at the top)");
         Check(calm.back()==0,"a slow beat is padded with silence");
@@ -64,12 +64,12 @@ int main() {
         Check(monotonic&&prev<=1&&prev>.99f&&maxStep<=.0011f,"no clipping corner: rises smoothly, never past full scale");
         Check(heartbeat::Limit(-4)==-heartbeat::Limit(4),"symmetric");
     }
-    {   // The heartbeat winds down slower than the strain that drives it.
+    {   // The heartbeat winds down slower than the life that drives it recovers.
         heartbeat::Level l;
         Check(l.Step(.4f,1/90.,4)==.4f&&l.Step(1,1/90.,4)==1,"rises with strain at once");
         float v=1;double t=0;
         for(;t<1.2;t+=1/90.)v=l.Step(0,1/90.,4);
-        Check(v>.65f&&v<.75f,"strain gone in 1.2 s: the heartbeat is still at ~70%");
+        Check(v>.65f&&v<.75f,"healed in an instant: 1.2 s later the heartbeat is still at ~70%");
         for(;t<4.1;t+=1/90.)v=l.Step(0,1/90.,4);
         Check(v==0,"silent by the fade time");
         l.Step(1,1/90.,4);v=l.Step(.2f,3,4);
@@ -88,5 +88,27 @@ int main() {
         Check(!heartbeat::ParseWav(Wav(1,1,44100,8,{1,2}),p),"8-bit WAV refused");
         Check(!heartbeat::ParseWav({'n','o','p','e'},p),"not a WAV refused");
     }
-    std::puts("Guard heartbeat: synthesized lub-dub, loudness and tempo follow strain, silent without strain, one-period beats (padded, cut, stereo, saturation) and WAV loading passed");
+    {   // VR Settings > Combat > Heartbeat starts at: one step per 10 % of life below it.
+        auto level=[](float h,int start){return heartbeat::LifeLevel(h,100,start);};
+        Check(level(100,50)==0&&level(50,50)==0,"silent at and above the start");
+        Check(level(49,50)==.2f&&level(41,50)==.2f,"start 50: the first of five steps from 49 % to 40 %");
+        Check(level(39,50)==.4f&&level(29,50)==.6f&&level(19,50)==.8f&&level(9,50)==1,"a step every 10 % lower, full below 10 %");
+        Check(level(59,60)>0&&std::fabs(level(59,60)-1/6.f)<1e-6f&&level(90,90)==0&&level(89,90)>0,"60 (default) and 90 starts");
+        Check(level(15,10)==0&&level(9,10)==1,"start 10: full at once below 10 %");
+        Check(level(5,0)==0,"Off is silent");
+        Check(level(0,50)==0&&heartbeat::LifeLevel(50,0,50)==0&&level(NAN,50)==0,"dead or unknown: winds down");
+        Check(heartbeat::Gain(level(39,50),t)>heartbeat::Gain(level(49,50),t)&&heartbeat::Bpm(level(39,50),t)>heartbeat::Bpm(level(49,50),t)&&
+              heartbeat::Bpm(level(9,50),t)==115,"each step is louder and faster");
+    }
+    {   // Wiping the visor clean quiets it until the next hit; healing to silence clears it.
+        heartbeat::Hush h;
+        Check(h.Step(.4f,false,false)==.4f,"beats at its step");
+        Check(h.Step(.4f,true,false)==0&&h.Step(.4f,false,false)==0,"a clean visor quiets it and stays quiet");
+        Check(h.Step(.4f,false,true)==.4f&&!h.On(),"the next hit resumes at its step");
+        h.Step(.6f,true,false);
+        Check(h.Step(0,false,false)==0&&!h.On()&&h.Step(.2f,false,false)==.2f,"healing above the start clears it");
+        Check(h.Step(.2f,true,true)==.2f,"a hit with the last stroke wins");
+        Check(h.Step(0,true,false)==0&&!h.On(),"nothing to quiet: no latch");
+    }
+    std::puts("Low-life heartbeat: synthesized lub-dub, loudness and tempo follow life, stepping every 10 % below the chosen start, silent when healthy or dead, hushed by a wiped visor until the next hit, one-period beats (padded, cut, stereo, saturation) and WAV loading passed");
 }

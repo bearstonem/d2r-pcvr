@@ -2,7 +2,7 @@
   "schema": "vrmod-manifest/1",
   "id": "d2r-pcvr",
   "name": "D2R VR Unleashed",
-  "version": "0.3.20",
+  "version": "0.3.23",
   "publisher": "bearstonem",
   "homepage": "https://github.com/bearstonem/d2r-pcvr",
   "support": "https://github.com/bearstonem/d2r-pcvr/issues",
@@ -142,7 +142,7 @@
   "x-source": {
     "repo": "https://github.com/bearstonem/d2r-pcvr",
     "commit": "a0a4f5fade27c18b3e82e64f02832ba6888a05a6",
-    "release_tag": "v0.3.20-windows-preview",
+    "release_tag": "v0.3.23-windows-preview",
     "installer_app_id": "D2R-PCVR-Native-Windows",
     "read_with": "git show <commit>:<path> only, none of his code was run",
     "files": [

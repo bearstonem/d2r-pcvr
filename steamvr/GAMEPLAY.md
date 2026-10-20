@@ -94,6 +94,9 @@ The build also adds an **in-headset VR settings panel**.
 Hold **Left Grip and press Left Y**, or select **VR SETTINGS** in the wheel.
 The shortcut also works with motion combat disabled. Use the right laser and
 trigger; **Right B**, the shortcut again, or **Close** dismisses the panel.
+Point at a row for a moment to see its help beside the panel. Rows with named
+choices, such as Stereo rendering or Foveated rendering, also explain the
+selected choice, so stepping through them with - and + explains each one.
 The owner verified panel visibility and laser/tab interaction after the
 October 9 Proton layer-conversion fix. Apply/cancel and broader input-ownership
 checks remain pending.
@@ -352,7 +355,7 @@ tabs and a **Reset eye height** button:
 |---|---|
 | Controls | Left/right controller reference for movement, menus, melee, bow, spells, potions, holsters and height reset |
 | VR | Controller labels, motion combat, seated belt position, dominant hand, smooth/snap turning, belt height and reach, weapon skill gestures and ordinary mob bars |
-| Video | Foveation Off / Fixed / Eye tracked and its strength (Low / Medium / High / Maximum), actual VR source size, added sky, fog, dungeon ceilings, terrain and object draw distances, VR render resolution |
+| Video | Foveation Off / Fixed / Eye tracked and its strength (Low / Medium / High / Maximum), actual VR source size, added sky, fog, dungeon ceilings, terrain and object draw distances, VR render resolution (Headset by default), desktop one eye, stereo rendering (Both eyes / By turns / Replay, By turns by default), a Defer GPU wait button while frames wait for the GPU, and warnings while the game's Vertical Sync is on or its anti-aliasing is not FXAA |
 | HUD | Health/mana location and tilt, optional resource alerts, navigation location, menu distance and tooltip timing |
 | Combat | Melee rules, swing hit speed and thrust speed |
 | Haptics | Overall strength and separate melee, bow draw, bow/throw release, spell, interaction and resource-alert strengths; tests follow each action's hands |
@@ -874,8 +877,7 @@ instead of a random one. Classic keeps the native roll.
   taps the left controller. Native unblockable damage remains unblockable.
 - **Parry**: a diagonal shield swing across the view, lower right to upper left for
   a left-hand shield (at least 15 cm within 120 ms, within ~35 degrees of the
-  diagonal), starting after the attacker's attack began (its mode change,
-  34E5F0; no lead - the swing must come during the wind-up) and at most 450 ms
+  diagonal), starting in the attacker's downstroke and at most 450 ms
   (fixed) before the hit, from a melee attacker within 3 m (2026-10-18: tightened
   from a 750 ms window with a 450 ms lead so a parry is a timed answer, not a
   held-up guess). A parry swing whose window runs out unspent gives a soft, dull
@@ -884,14 +886,40 @@ instead of a random one. Classic keeps the native roll.
   coverage: the swing itself turns the face edge-on, so it needs only the raised
   shield out on the attacker's side of the eyes (it may finish up to 10 cm behind
   them along the attack line, e.g. beside the head after a big swing). A monster
-  melee attack that misses its native to-hit roll never reaches the block check;
+  melee attack always lands (`enemies_always_hit`, default 1), so every attack is
+  judged at its hit frame: parry, else block or hit by the shield's position. Only
+  with `enemies_always_hit=0` can a monster attack miss its native to-hit roll; it
+  then never reaches the block check;
   a timed swing still parries it at that roll (the native miss is unchanged, and
   there is no shield wear to restore). Low-level monsters miss most attacks
   against a stronger hero, which made correct swings look ignored (2026-10-18:
   two Zombies, 7 hits from dozens of attacks). One parry per swing.
-  The parry resolves as soon as the swing and the attacker's melee attack have
-  both begun, on the next game update: at the swing during the wind-up. The attacker is
-  staggered before its hit frame, so the hit never lands. Hit-frame parries
+  **Downstroke** (2026-10-19): resolving as soon as the swing and the attack had
+  both begun staggered monsters that had barely raised their arms. The attack's
+  start (mode change, 34E5F0) to its to-hit roll (the hit frame) is that
+  monster type's wind-up, measured per class and attack mode from its last
+  attack; the swing must start once `[gameplay] parry_downstroke` % of it has
+  passed (default 90, from 60 then 80: parries still came before the blow visibly
+  landed - swings centred 55 ms after the hit frame, 2026-10-19; 0 = anywhere
+  after the attack began, the old rule). An
+  earlier swing is a `windup` miss and only blocks. Until a type's wind-up has
+  been measured once this session, its attacks are not staggered early and the
+  parry is judged at the hit as below. **Parry at hit** (`[gameplay] parry_at_hit`,
+  default 1, 2026-10-19): a downstroke swing resolves at the attacker's hit frame,
+  when the blow makes contact: the parry deflects it (no damage, any wear it caused
+  restored) and the attacker staggers. A swing that does not qualify is no parry;
+  the shield's position at that moment alone decides block or hit, as below.
+  Staggering at the swing itself fired 50-90 ms before the hit (Zombies: swing at
+  281 ms, hit at 330-375 ms) and cut the blow off before it came down. With 0, a
+  downstroke swing staggers the attacker on the next game update, before its hit frame.
+  **Late parry** (`[gameplay] parry_late_ms`, default 200, max 400, 0 = off): the
+  game's hit frame comes before the blow lands on screen - 15 of 24 swings
+  (2026-10-19) started 0-156 ms after a blocked hit, timed to the animation. A
+  parry swing within this long after a blocked melee hit (within 3 m) still parries
+  it: the attacker staggers and the block's wear is restored; the block's strain
+  stands. Act bosses are never parried late either (2026-10-20: the late parry
+  had skipped the act-boss gate, so Andariel could be parried). A hit that landed on you is not undone. Logged as `Frame guard late parry:`
+  and `late_parries` in `Frame guard:`; later swings stay `swing too late`. Hit-frame parries
   had come a median 516 ms after the swing (2026-10-18). An attack whose to-hit
   roll has already run is never staggered early; otherwise the to-hit roll or
   block check above still resolves the parry. The attacker is
@@ -911,7 +939,7 @@ instead of a random one. Classic keeps the native roll.
   `guard_strain_per_block` % (10). **VR Settings > Combat > Guard strain buildup**
   selects Slow / Medium / Fast (`guard_strain_speed` 0 / 1 / 2, default Medium).
   Slow halves strain per block; Fast doubles it. With default tuning, full
-  strain takes about 20 / 10 / 5 blocks without lowering the shield. The
+  strain takes about 20 / 10 / 5 blocks in a row. The
   vignette size, lowering/reset time and blocking rules stay the same. Existing
   custom `guard_strain_per_block` tuning is multiplied, not overwritten. Strain shows as a soft vignette at the
   rim of the view (a pale white light by default; VR Settings > Combat > **Guard strain
@@ -923,26 +951,62 @@ instead of a random one. Classic keeps the native roll.
   breaks: the light swells until only `guard_strain_clear` % (10) of the view is
   clear and breathes slowly (`guard_strain_breathe_ms`, 1600), with one alert tap on
   the left controller. The shield keeps blocking throughout; the cost is sight.
-  Strain never drains while the shield stays up. Lowering it (or a menu, or losing
-  the shield) drains full strain in `guard_strain_reset_ms` (3000); a broken guard
+  Strain holds while hits keep reaching the shield. Once no hit (block or parry)
+  has reached it for `guard_strain_recover_ms` (1500; 0 = only lowering drains), it
+  drains with the shield still up; the next hit stops the drain and restarts the
+  wait. Lowering it (or a menu, or losing the shield) drains at once, without the
+  wait. Either way full strain drains in `guard_strain_reset_ms` (1500), so a broken guard left alone clears 3 s after the last hit; a broken guard
   stays broken until the light has fully faded, and raising the shield again part
-  way keeps what is left. Opacity is `guard_strain_light` (100 %, 0 = none; strain and
-  the heartbeat still run). The light's inner blend is
+  way keeps what is left. Opacity is `guard_strain_light` (100 %, 0 = none; strain
+  still runs). The light's inner blend is
   `guard_strain_softness` % of the visor radius (45) about a fixed midpoint, so it
   fades toward the centre with no visible inner rim. Pulses re-trigger without
   dropping, so rapid blocks hold a swell rather than flashing.
-- **Guard strain heartbeat**: while the guard is strained a heartbeat plays, quiet at
-  the first block and louder and faster as strain builds (`guard_strain_heart_bpm_min`
-  70 to `guard_strain_heart_bpm_max` 115 when broken). The beat itself keeps its
-  natural speed and pitch; only the time between beats shortens. When strain drains
-  the heartbeat winds down more slowly than the light, no faster than
-  `guard_strain_heart_fade_ms` (4000) from full: quieter and slower beat by beat, then
-  silent. Loudness is `guard_strain_heartbeat` % (200, 0 = off) on top of the game's
+- **Low-life heartbeat** (Classic and Unleashed; guard strain no longer drives it):
+  **VR Settings > Combat > Heartbeat starts at** (`low_life_heart_start`, 60 %; Off or
+  10-90 % in 10 % steps) sets where it begins. Below that life the heartbeat steps up
+  every 10 % lost, louder and faster, to full loudness and `low_life_heart_bpm_max`
+  (115) below 10 %: a 50 % start gives five steps, at 50, 40, 30, 20 and 10 %. The
+  tempo runs from `low_life_heart_bpm_min` (70); loudness starts at 12 % of full and
+  rises with each step. Applied live. Wiping the visor clean (the last splat) fades
+  the heartbeat out while still hurt; the next hit (the blood visor's own hit size)
+  brings it straight back at its step, and healing to silence clears the wipe. A
+  partial wipe leaves it beating. The beat itself keeps
+  its natural speed and pitch; only the time between beats shortens. A heal winds it
+  down no faster than `low_life_heart_fade_ms` (4000) from full: quieter and slower beat
+  by beat, then silent; so does death or a loading screen. Loudness is
+  `low_life_heartbeat` % (200, 0 = off) on top of the game's
   Master x Combat volume; above 70 % of full scale the beat bends smoothly toward
   full scale (a soft limiter) rather than clipping. The built-in beat is a recording embedded in the plugin
-  (`steamvr/assets/guard-heartbeat.wav`); `guard_strain_heart_file` replaces it with a
+  (`steamvr/assets/guard-heartbeat.wav`); `low_life_heart_file` replaces it with a
   one-beat 16-bit PCM WAV, next to the ini unless a full path. It plays on its own
-  audio stream, so it never cuts off the riposte or block sounds.
+  audio stream, so it never cuts off the riposte or block sounds. The old
+  `guard_strain_heart*` keys are still read when the matching `low_life_heart*` key
+  is absent. The log's `Frame low-life heartbeat: started life=N%` line marks each start.
+- **Shield wear**: the game wears armor only when its wearer is struck: each
+  landed hit picks one armor piece by body-location weight (head 3, torso 5, left
+  hand 4, belt, feet and gloves 2) and gives it a 10% chance to lose 1 durability
+  (SUnitDmg 4526C0 / 441B10). A block never got there, so a raised shield never
+  wore. A physical block gives the shield alone that native roll, and a chip
+  through a broken guard has its struck wear given to the shield instead of a
+  random piece, for `shield_block_wear` % of contacts (22: the shield's native
+  share, 4 of 18 x 10% = 2.2% a contact; 100 = the full 10%; 0 = off). A parry wears nothing. Unblocked hits are
+  untouched. Indestructible and broken handling are the game's own.
+  In this setup the game updated only the server copy of a worn item, so
+  tooltips showed the old durability until a relaunch (its own armor wear
+  too). After every wear on the local player's gear the new value is copied
+  to the client item, so tooltips follow at once.
+- **Guard break**: the moment the guard breaks a bone snap plays
+  (`steamvr/assets/guard-break-bone.wav`) on its own audio stream, at
+  `guard_break_volume` % (100, 0 = off) of the game's Master x Combat volume, through
+  the heartbeat's soft limiter; `guard_break_sound_file` replaces it with a 16-bit PCM
+  WAV. While the guard is broken, a block lands as a **chip** (`guard_break_chip`, 1 in
+  Unleashed): the hit lands natively (damage reduction, resists and absorb; armor
+  wear; when-struck procs; the hero's hit sound) and its physical part is scaled by
+  (1 - chance to block) x `guard_break_chip_scale` (1), on top of the Defense factor.
+  Chance to block is the native rate, a third while running, capped at 75 %.
+  Elemental damage and its effects (poison, chill...) land as normal. The block
+  pulse, haptic and sound still play.
 
 Damage is scaled at the native damage application's final life write (44CE80,
 whose `Set(defender, life, ...)` returns to 44D098), so resistances, criticals and
@@ -964,7 +1028,8 @@ chance to hit. The log's `Frame incoming defense:` line counts scaled hits.
 `[debug] guard_trace=1` logs every judged hit (`Frame guard trace:`) with the hand
 position, cover angle, swing and attack timing. Its `parry=` field names why a
 raised guard did not parry: `no_swing`, `spent`, `early` (more than 450 ms before
-the hit), `before_attack`, `range` or `side`; `ok` on a parry. `Frame guard swing: armed` marks each new parry swing,
+the hit), `before_attack`, `windup` (before the downstroke), `range` or `side`; `ok` on a parry. `downstroke_at=` is
+when that attack's downstroke opened, in ms after it began (-1: wind-up not measured yet). `Frame guard swing: armed` marks each new parry swing,
 `Frame guard miss:` each monster melee attack that missed its to-hit roll (and
 whether a swing parried it), `Frame guard early parry:` each parry made before
 the hit (`trigger=attack_start` or `swing`), and `Frame guard:` adds
@@ -1057,6 +1122,39 @@ OpenXR quads, stereo-positioned but not depth-tested against the game world.
 The held bottle now uses the original 3D model when the local cache is available. Spell/item icons, belt contents/counts
 and health/mana now use the read-only native snapshot and local icon cache.
 Do not describe this prototype as completed physics combat.
+
+## Head-relative sound
+
+Monsters, NPCs, objects and other positioned sounds now come from where they
+are relative to where you look. Turn your head (or the stick) away from a
+monster and its sound moves to the other ear; a looping sound such as the
+Rogue Encampment's stream swings as you turn without you moving.
+
+Stock D2R pans its 3D sounds by their left/right position on the flat
+screen and never moves FMOD's listener, so in VR they stayed tied to the
+fixed camera. The plugin lays each 3D sound's screen offset onto the ground
+(screen-up is ahead) at the game's own distance, and turns FMOD's listener
+with the view every 10 ms, so FMOD re-pans everything that is playing.
+
+- Stereo left/right plus the game's distance falloff; front and back sound
+  alike (no HRTF).
+- Music, ambience, UI sounds and your own hero's sounds stay centred.
+- Not yet: monsters' attack cries (`<monster>_attack_*`, `damage_dealt`)
+  are 2D sounds in the game's sound table and still play centred.
+- If nothing pans at all, check Windows **Mono audio** (Settings >
+  Accessibility > Audio): it folds the PC's sound to mono before Quest Link,
+  Air Link or Virtual Desktop stream it. While it is on, VR Settings shows
+  **Windows Mono audio is on** at its top right on every page; pointing at it
+  explains where to turn it off.
+
+`d2r_pcvr.ini`, read at start:
+
+| `[audio]` key | Default | |
+|---|---|---|
+| `head_follow` | `1` | `0` = the game's own panning (flat-camera frame). |
+| `listener_turn` | `1` | `0` = keep the ground mapping but leave FMOD's listener facing the camera. |
+| `forward_sign` | `-1` | Which screen direction counts as ahead (`-1` = up). |
+| `depth_scale` | `2` | Stretches screen up/down to undo the isometric squash. |
 
 ## Cancellation and performance
 

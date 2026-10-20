@@ -221,7 +221,7 @@ inline Rejection Coverage(const Pose& p,Vec toAttacker,const Tuning& t,float* al
 }
 
 // Why a raised, fresh guard did not parry (diagnostics only).
-enum class ParryMiss { None, Disabled, NoSwing, Spent, Early, BeforeAttack, Range, Side };
+enum class ParryMiss { None, Disabled, NoSwing, Spent, Early, BeforeAttack, Windup, Range, Side };
 inline const char* ParryMissName(ParryMiss miss) {
     switch(miss) {
         case ParryMiss::None:return "ok";
@@ -230,6 +230,7 @@ inline const char* ParryMissName(ParryMiss miss) {
         case ParryMiss::Spent:return "spent";
         case ParryMiss::Early:return "early";
         case ParryMiss::BeforeAttack:return "before_attack";
+        case ParryMiss::Windup:return "windup";
         case ParryMiss::Range:return "range";
         case ParryMiss::Side:return "side";
         default:return "unknown";
@@ -248,12 +249,15 @@ inline bool ParrySide(const Pose& p,Vec toAttacker,float behind) {
 }
 // A parry is a swing while the attack is incoming: at most parryMs before the
 // hit, and no more than parryLeadMs before the attack began (0 = unknown).
-inline ParryMiss ParryCheck(const State& s,Vec toAttacker,uint64_t now,const Tuning& t,uint64_t attackAt=0) {
+// opensAt: when this attack's downstroke begins (0 = unknown); a swing that
+// starts while the attacker is still raising its arms is a windup miss.
+inline ParryMiss ParryCheck(const State& s,Vec toAttacker,uint64_t now,const Tuning& t,uint64_t attackAt=0,uint64_t opensAt=0) {
     if(!t.parryMs)return ParryMiss::Disabled;
     if(!s.snapAt||now<s.snapAt)return ParryMiss::NoSwing;
     if(s.snapUsed)return ParryMiss::Spent;
     if(now-s.snapAt>t.parryMs)return ParryMiss::Early;
     if(attackAt&&s.snapAt+t.parryLeadMs<attackAt)return ParryMiss::BeforeAttack;
+    if(opensAt&&s.snapAt<opensAt)return ParryMiss::Windup;
     if(std::hypot(toAttacker.x,toAttacker.z)>t.parryRange)return ParryMiss::Range;
     if(!ParrySide(s.surface,toAttacker,t.parryBehind))return ParryMiss::Side;
     return ParryMiss::None;
@@ -262,12 +266,15 @@ inline ParryMiss ParryCheck(const State& s,Vec toAttacker,uint64_t now,const Tun
 // toAttacker: grid-plane vector, player -> attacker, in metres. attackAt: when
 // this attacker's attack began (0 = unknown). A timed parry is judged before
 // face coverage; anything else must cover the attack to block.
-inline Verdict Judge(const State& s,Vec toAttacker,uint64_t now,const Tuning& t,uint64_t attackAt=0,Rejection* reason=nullptr) {
+// opensAt: when this attacker's downstroke opens (0 = not measured); a parry swing
+// before it is a windup miss. parryable=false (an act boss): a parry swing is judged
+// as a plain guard.
+inline Verdict Judge(const State& s,Vec toAttacker,uint64_t now,const Tuning& t,uint64_t attackAt=0,Rejection* reason=nullptr,uint64_t opensAt=0,bool parryable=true) {
     const auto reject=[&](Rejection why){if(reason)*reason=why;return Verdict::Open;};
     if(reason)*reason=Rejection::None;
     if(!s.raised)return reject(s.rejection);
     if(!s.seenAt||now<s.seenAt||now-s.seenAt>t.staleMs)return reject(Rejection::StalePose);
-    if(ParryCheck(s,toAttacker,now,t,attackAt)==ParryMiss::None)return Verdict::Parry;
+    if(parryable&&ParryCheck(s,toAttacker,now,t,attackAt,opensAt)==ParryMiss::None)return Verdict::Parry;
     const auto coverage=Coverage(s.surface,toAttacker,t);
     if(coverage!=Rejection::None)return reject(coverage);
     return Verdict::Block;

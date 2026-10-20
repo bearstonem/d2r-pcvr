@@ -52,6 +52,15 @@ int main(){
         Check(saved.values[StrainSpeed]==choice&&Int(path,L"gameplay",L"guard_strain_speed")==choice,"buildup survives reload");
         Check(Changed(saved.values,current.values)==request.changed&&Int(path,L"custom",L"keep")==12345,"buildup preserves other settings");
     }
+    Check(before.values[HeartbeatStart]==60,"missing heartbeat start uses 60%");
+    for(int choice:{50,0,90}){
+        const auto current=vrsettings::Read();auto values=current.values;values[HeartbeatStart]=float(choice);
+        const Request request{current.values,values,Changed(current.values,values),current.sequence+1};
+        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"save heartbeat start");
+        const auto saved=vrsettings::Read();
+        Check(saved.values[HeartbeatStart]==choice&&Int(path,L"gameplay",L"low_life_heart_start")==choice,"heartbeat start survives reload");
+        Check(Changed(saved.values,current.values)==request.changed&&Int(path,L"custom",L"keep")==12345,"heartbeat start preserves other settings");
+    }
     Check(before.values[OfflinePlayers]==0,"missing difficulty preserves game default");
     for(int choice:{1,8,3,0}){
         const auto current=vrsettings::Read();auto values=current.values;values[OfflinePlayers]=float(choice);
@@ -186,8 +195,8 @@ int main(){
     Check(vrsettings::Read().result==Result::Saving&&vrsettings::Poll(name),"write transaction succeeds");
     auto saved=vrsettings::Read();Check(saved.result==Result::Saved&&saved.values[Foveation]==2&&saved.values[Motion]==1,"saved values round trip");
     Check(saved.values[OrdinaryMobBars]==1&&Int(path,L"hud",L"ordinary_mob_bars")==1,"show ordinary bars round trips");
-    Check(saved.values[RenderResolution]==0,"legacy profile keeps desktop resolution until opted in");
-    for(int choice=1;choice<framevr::resolution::ChoiceCount;++choice){
+    Check(saved.values[RenderResolution]==1,"profiles without the key use the headset's own resolution");
+    for(int choice=2;choice<framevr::resolution::ChoiceCount;++choice){
         model.Open(vrsettings::Read());model.Click({Kind::Change,RenderResolution,1});request=model.Click({Kind::Apply});
         Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"save render resolution");
         saved=vrsettings::Read();
@@ -244,6 +253,20 @@ int main(){
         Check(saved.values[FoveationStrength]==level&&Int(path,L"render",L"foveation_strength")==level&&
               saved.values[Foveation]==2&&Int(path,L"custom",L"keep")==12345,"foveation strength survives reload without changing the mode");
     }
+    Check(saved.values[StereoRendering]==1,"profiles without the key go by turns");
+    for(int turns:{2,0,1}){
+        model.Open(saved);
+        for(int step=int(saved.values[StereoRendering]);step!=turns;step+=turns>step?1:-1)model.Click({Kind::Change,StereoRendering,turns>step?1:-1});
+        request=model.Click({Kind::Apply});
+        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"save stereo rendering");
+        saved=vrsettings::Read();
+        Check(saved.values[StereoRendering]==turns&&Int(path,L"stereo",L"rendering")==turns,"stereo rendering survives reload");
+    }
+    Check(saved.values[DeferGpuWait]==0,"the GPU wait stays as it was until asked");
+    model.Open(saved);model.Click({Kind::Change,DeferGpuWait,1});request=model.Click({Kind::Apply});
+    Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"save the deferred GPU wait");
+    saved=vrsettings::Read();
+    Check(saved.values[DeferGpuWait]==1&&Int(path,L"render",L"defer_gpu_wait")==1,"the Video page's button writes [render] defer_gpu_wait");
     Check(Int(path,L"custom",L"keep")==12345&&Int(path,L"render",L"rings")==6,"Apply preserves unrelated keys");
     Check(Int(backup,L"custom",L"keep")==12345&&Int(backup,L"gameplay",L"motion_controls")==-999,"first Apply preserves original config backup");
     model.Open(saved);model.Click({Kind::Change,SkillGestures,-1});request=model.Click({Kind::Apply});

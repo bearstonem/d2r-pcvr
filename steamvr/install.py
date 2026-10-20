@@ -38,6 +38,30 @@ COMPILER_HASH = '3bd6d7acfe8a0a84acd166fba1a537ce68bd21c8edce2bd9bb863cfa034136d
 RECORD = mod_identity.RECORD
 
 
+def check_launcher_icon(game, content):
+    """A launcher can keep its card picture open without write sharing.
+
+    Unchanged pictures need no write. If a changed picture is locked, stop
+    before creating a snapshot or changing the game, with a useful retry step.
+    Opening r+b checks access without truncating or modifying the picture.
+    """
+    icon = game / mod_identity.MOD_DIR / 'launcher_icon.png'
+    try:
+        if icon.is_file() and icon.read_bytes() != content:
+            with icon.open('r+b'):
+                pass
+    except PermissionError as error:
+        raise launcher_icon_write_error(icon, before_changes=True) from error
+
+
+def launcher_icon_write_error(path, before_changes=False):
+    # A launcher may reopen the picture after preflight. Setup's normal
+    # rollback still handles any changes made before this late failure.
+    message = (f'Cannot update the launcher icon: {path}. Close D2R VR Launcher '
+               'and any image viewer using this file, then retry Update / repair.')
+    return SystemExit(message + (' No game files changed.' if before_changes else ''))
+
+
 def read_record(game):
     source = game / RECORD
     if not source.resolve().is_relative_to(game.resolve()):
@@ -411,6 +435,7 @@ def main():
         payload.update({mod_identity.MOD_DIR / name: data for name, data in sewers.items()})
         print('Prepared dark Kurast sewer entrances from your installed game.')
     require_game_closed()
+    check_launcher_icon(game, payload[mod_identity.MOD_DIR / 'launcher_icon.png'])
     snapshot = args.backup_dir / datetime.now().strftime('%Y%m%d-%H%M%S-%f')
     snapshot.mkdir(parents=True)
     shutil.copytree(saves, snapshot / 'saves')
@@ -439,8 +464,18 @@ def main():
     def put(rel, content):
         journal(rel)
         dest = game / rel
+        # Still journal unchanged files so rollback and removal retain the
+        # complete ownership chain. Avoid write access (and file locks) when
+        # the bytes already match, notably the launcher's open card icon.
+        if dest.is_file() and dest.read_bytes() == content:
+            return
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(content)
+        try:
+            dest.write_bytes(content)
+        except PermissionError as error:
+            if rel == mod_identity.MOD_DIR / 'launcher_icon.png':
+                raise launcher_icon_write_error(dest) from error
+            raise
 
     def remove(rel):
         """Journaled removal: the snapshot keeps the file, so --restore and a
@@ -512,7 +547,7 @@ def main():
         'update': {'check': '0'},
         'gameplay': {'motion_controls': '1', 'arrow_speed': '2', 'arrow_direct_release': '1', 'contact_hits': '1'},
         'render': {'game_height_fog': '1', 'fixed_foveation': '1', 'foveation_inner': '0.55',
-                   'symmetric_projection': '1', 'defer_gpu_wait': '0',
+                   'symmetric_projection': '1', 'defer_gpu_wait': '1',
                    'eye_tracked_foveation': '0', 'gaze_foveation_inner': '0.35'},
     }
     for section, values in changes.items():

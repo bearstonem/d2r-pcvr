@@ -48,7 +48,7 @@ int main() {
             const int blocks=speed==strain::BuildSpeed::Slow?20:speed==strain::BuildSpeed::Fast?5:10;
             for(int i=0;i<blocks-1;++i)Check(!r.Step(true,1).broken,"guard does not reach full strain early");
             Check(r.Step(true,1).broken,"full strain after the expected block count");
-            Check(r.Hold(false,3.1).strain==0,"every speed clears fully in three seconds");
+            Check(r.Hold(false,1.6).strain==0,"every speed clears fully in 1.5 s lowered");
             Check(r.Step(true,0,1).strain==0,"parries stay free at every speed");
         }
     }
@@ -94,18 +94,74 @@ int main() {
         Check(five.strain>one.strain&&five.edge<one.edge&&five.alpha>one.alpha,"more blocks: light deeper and brighter");
         Check(five.edge>=strain::FullEdge-1e-4f,"before breaking the light stays outside the full-strain edge");
     }
-    {   // No decay while the shield stays up: lowering is the only reset.
+    {   // Raised: strain holds while hits keep coming, then recedes once they stop.
         Run r;
+        Check(r.tuning.recoverSeconds==1.5f&&r.tuning.resetSeconds==1.5f,"1.5 s hold, then full strain drains in 1.5 s, by default");
+        for(int i=0;i<3;++i){r.Step(true,1);r.Hold(true,.2);}
+        const auto before=r.Hold(true,.1);
+        const auto waiting=r.Hold(true,1.1);   // 1.4 s since the last block
+        Check(std::fabs(waiting.strain-before.strain)<1e-5f,"strain holds through the wait with the shield up");
+        const auto receding=r.Hold(true,.3);   // ~0.2 s into the drain
+        Check(receding.strain<before.strain-.05f&&receding.strain>0,"no hits for 1.5 s: it recedes with the shield still up");
+        const auto gone=r.Hold(true,.5);
+        Check(gone.strain==0&&!gone.visible,"and clears without lowering");
+    }
+    {   // From full, left alone with the shield up: clear 3 s after the last hit, not 6.
+        Run r;
+        for(int i=0;i<10;++i){r.Step(true,1);r.Hold(true,.15);}   // last block, then .15 s
+        auto o=r.Hold(true,2.75);   // 2.9 s after the last block
+        Check(o.strain>0,"not yet clear at 2.9 s");
+        o=r.Hold(true,.2);          // 3.1 s
+        Check(o.strain==0&&!o.broken,"clear 3 s after the last hit from full");
+    }
+    {   // Blocks at a monster's attack rhythm (1.2 s apart) still build strain to a break.
+        Run r;bool broke=false;
+        for(int i=0;i<10;++i){broke=r.Step(true,1).brokeNow||broke;r.Hold(true,1.2);}
+        Check(broke,"one monster hitting every 1.2 s still breaks the guard");
+    }
+    {   // A hit during the drain stops it and restarts the wait; a parry counts as a hit.
+        Run r;
+        for(int i=0;i<5;++i){r.Step(true,1);r.Hold(true,.2);}
+        auto o=r.Hold(true,1.6);   // 1.8 s since the last block
+        const float drained=o.strain;
+        Check(drained<.45f&&drained>0,"draining after the wait");
+        o=r.Step(true,1);
+        const float struck=o.strain;
+        o=r.Hold(true,1.2);
+        Check(std::fabs(o.strain-struck)<1e-5f&&struck>drained,"a block mid-drain adds strain and holds it for the wait");
+        o=r.Step(true,0,1);o=r.Hold(true,1.2);   // 1.2 s after the parry, 2.4 s after the block
+        Check(std::fabs(o.strain-struck)<1e-5f,"a parry restarts the wait without adding strain");
+        o=r.Hold(true,.6);
+        Check(o.strain<struck,"then it recedes");
+    }
+    {   // A broken guard left alone with the shield up: the swell stops and it clears.
+        Run r;
+        for(int i=0;i<10;++i){r.Step(true,1);r.Hold(true,.15);}
+        auto o=r.Hold(true,1.6);
+        Check(o.broken&&o.strain<1,"still broken while it drains");
+        const float swell=o.swell;
+        o=r.Hold(true,.3);
+        Check(o.swell<=swell,"the swell does not grow while the guard recovers");
+        bool cleared=false;
+        for(double t=0;t<1.6;t+=1/90.){o=r.Step(true);cleared=cleared||o.clearedNow;}
+        Check(cleared&&!o.broken&&!o.visible,"fully faded with the shield up: the guard resets");
+    }
+    {   // recoverSeconds 0: the old rule, only lowering drains.
+        Run r;r.tuning.recoverSeconds=0;
         for(int i=0;i<3;++i){r.Step(true,1);r.Hold(true,.2);}
         const auto before=r.Hold(true,.1);
         const auto later=r.Hold(true,10);
-        Check(std::fabs(later.strain-before.strain)<1e-5f,"strain holds while the guard stays raised");
-        Check(r.tuning.resetSeconds==3.f,"full strain drains in 3 s by default");
-        const auto lowered=r.Hold(false,1.2);   // 0.3 strain: 0.9 s of the 3 s drain
+        Check(std::fabs(later.strain-before.strain)<1e-5f,"0: strain holds while the guard stays raised");
+        const auto lowered=r.Hold(false,.6);   // 0.3 strain: 0.45 s of the 1.5 s drain
         Check(lowered.strain==0&&!lowered.visible,"lowering clears it");
     }
-    {   // Break: full strain swells toward the clear centre and breathes.
+    {   // Lowering still drains at once, without the wait.
         Run r;
+        for(int i=0;i<3;++i){r.Step(true,1);r.Hold(true,.2);}
+        Check(r.Hold(false,.6).strain==0,"lowering drains immediately");
+    }
+    {   // Break: full strain swells toward the clear centre and breathes.
+        Run r;r.tuning.recoverSeconds=0;   // the shield stays up with no hits for >1.5 s here
         strain::Output o;bool broke=false;
         for(int i=0;i<10;++i){o=r.Step(true,1);broke=broke||o.brokeNow;r.Hold(true,.15);}
         Check(broke,"the tenth block breaks the guard");
@@ -116,21 +172,21 @@ int main() {
         Check(lo<r.tuning.clear+.05f&&hi-lo>.02f,"broken: swollen to the clear radius and breathing");
         Check(amax<=r.tuning.brightness+1e-5f,"opacity never exceeds the brightness setting");
         // Partial lowering keeps what is left, and the guard stays broken until clear.
-        o=r.Hold(false,1.5);
-        Check(o.broken&&o.strain>.45f&&o.strain<.55f,"1.5 s down: still broken, half drained");
+        o=r.Hold(false,.75);
+        Check(o.broken&&o.strain>.45f&&o.strain<.55f,"0.75 s down: still broken, half drained");
         const float swell=o.swell;
         o=r.Hold(true,1);
         Check(o.broken&&o.swell>=swell,"re-raised part way: the swell resumes from what is left");
     }
     {   // Re-raise before fully drained: the remaining strain carries on.
-        Run r;
+        Run r;r.tuning.recoverSeconds=0;   // lowering only
         for(int i=0;i<10;++i){r.Step(true,1);r.Hold(true,.15);}
         auto o=r.Hold(false,.6);
         const float left=o.strain;
         o=r.Hold(true,2);
         Check(o.broken&&std::fabs(o.strain-left)<1e-4f,"re-raising part way keeps the remainder and the break");
         bool cleared=false;
-        for(double t=0;t<3.1;t+=1/90.){o=r.Step(false);cleared=cleared||o.clearedNow;}
+        for(double t=0;t<1.6;t+=1/90.){o=r.Step(false);cleared=cleared||o.clearedNow;}
         Check(cleared&&!o.broken&&!o.visible,"fully faded: the guard resets");
     }
     {   // Not eligible (menu, no shield, third person) counts as lowered.
@@ -153,6 +209,23 @@ int main() {
         float floor=1;
         for(int i=0;i<10;++i){o=r.Step(true,1);for(int k=0;k<18;++k){o=r.Step(true);if(i>0)floor=std::min(floor,o.pulse);}}
         Check(floor>.5f,"rapid blocks hold the swell rather than flashing");
+    }
+    {   // Rank: rarer attackers strain the guard faster; act bosses break it in 3 at Medium.
+        using strain::Rank;
+        const auto blocksToBreak=[](Rank rank) {
+            Run r;int n=0;
+            for(;n<40;){strain::Input in;r.time+=1/90.;in.time=r.time;in.session=7;in.enabled=in.eligible=in.raised=true;
+                in.blocks=1;in.weight=strain::RankWeight(rank);++n;if(r.engine.Step(in,r.tuning).broken)break;r.Hold(true,.2);}
+            return n;
+        };
+        Check(blocksToBreak(Rank::Normal)==10&&blocksToBreak(Rank::Minion)==8&&blocksToBreak(Rank::Champion)==5&&
+              blocksToBreak(Rank::Unique)==4&&blocksToBreak(Rank::PrimeEvil)==3,"blocks to break: 10/8/5/4/3 by rank");
+        // A block's weight can land a step before its count (two atomics): it still strains, once.
+        Run r;strain::Input in;r.time+=1/90.;in.time=r.time;in.session=7;in.enabled=in.eligible=in.raised=true;in.weight=2;
+        const float early=r.engine.Step(in,r.tuning).strain;
+        in.time=(r.time+=1/90.);in.weight=0;in.blocks=1;
+        const float late=r.engine.Step(in,r.tuning).strain;
+        Check(std::fabs(early-.2f)<1e-5f&&std::fabs(late-early)<1e-5f,"split weight and count strain once");
     }
     {   // Settings: off, sessions, hitches.
         Run r;r.tuning.brightness=0;
@@ -201,5 +274,5 @@ int main() {
         bool empty=true;for(size_t i=3;i<none.size();i+=4)empty=empty&&none[i]==0;
         Check(empty,"zero opacity paints nothing");
     }
-    std::puts("Guard strain light: rim build-up, parries free, hold while raised, lower to reset, break swell and breathing, partial re-raise, eligibility, smooth pulses, off, sessions, hitches and painter passed");
+    std::puts("Guard strain light: rim build-up, parries free, hold while hit, recede when hits stop, lower to reset, break swell and breathing, partial re-raise, eligibility, smooth pulses, off, sessions, hitches and painter passed");
 }

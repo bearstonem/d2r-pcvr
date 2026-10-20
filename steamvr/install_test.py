@@ -183,7 +183,7 @@ class InstallationTests(unittest.TestCase):
                         self.assertEqual(value.value, expected)
                 self.assertTrue(cfg.getboolean('render','symmetric_projection'))
                 self.assertTrue(cfg.getboolean('hud','monster_draw_order'))
-                self.assertFalse(cfg.getboolean('render','defer_gpu_wait'))
+                self.assertTrue(cfg.getboolean('render','defer_gpu_wait'))   # every stereo mode's full rate
                 self.assertEqual(json.loads((saves / 'Settings.json').read_text())['NVIDIA DLSS'],0)
                 self.assertEqual(json.loads((saves / 'Settings.json').read_text())['Resolution Scale'], 100)
                 # An upgrade refreshes files without resetting calibration/video.
@@ -402,6 +402,140 @@ class RenameMigrationTests(unittest.TestCase):
 
     def files(self, folder):
         return {path.relative_to(folder).as_posix(): path.read_bytes() for path in folder.rglob('*') if path.is_file()}
+
+    @contextlib.contextmanager
+    def held_icon(self, path):
+        """A real Windows read handle that denies writers, like GDI+ card art."""
+        import ctypes
+        from ctypes import wintypes
+        kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                      ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+        kernel.CreateFileW.restype = wintypes.HANDLE
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel.CloseHandle.restype = wintypes.BOOL
+        handle = kernel.CreateFileW(str(path), 0x80000000, 1, None, 3, 0x80, None)
+        if handle == ctypes.c_void_p(-1).value:
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            with self.assertRaises(PermissionError):
+                with path.open('r+b'):
+                    pass
+            yield
+        finally:
+            kernel.CloseHandle(handle)
+
+    def test_repair_keeps_identical_icon_and_journals_it_for_removal(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            game, saves = self.fixture(root)
+            self.run_install()
+            icon = game / mod_identity.MOD_DIR / 'launcher_icon.png'
+            original, stamp = icon.read_bytes(), icon.stat().st_mtime_ns
+            write_bytes = Path.write_bytes
+            def refuse_icon_write(path, data):
+                if path == icon:
+                    self.fail('Repair must not rewrite an identical launcher icon.')
+                return write_bytes(path, data)
+            with patch.object(Path, 'write_bytes', refuse_icon_write):
+                self.run_install('--preserve-settings')
+            self.assertEqual(icon.stat().st_mtime_ns, stamp)
+            snapshot = Path(install.read_record(game)['snapshots'][-1])
+            manifest = json.loads((snapshot / 'manifest.json').read_text())
+            self.assertIn(str(icon.relative_to(game)), manifest['installed'])
+            self.assertEqual((snapshot / 'previous' / icon.relative_to(game)).read_bytes(), original)
+            chain = uninstall.snapshots(game, install.read_record(game), [])
+            uninstall.apply_updates(uninstall.restore_plan(game, chain), root / 'removal', lambda: None)
+            self.assertFalse(icon.exists())
+            self.assertEqual((saves / 'Friend.d2s').read_bytes(), b'progress')
+
+    def test_repair_replaces_a_changed_unlocked_icon(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            game, _ = self.fixture(root)
+            self.run_install()
+            icon = game / mod_identity.MOD_DIR / 'launcher_icon.png'
+            icon.write_bytes(b'old icon')
+            self.run_install('--preserve-settings')
+            self.assertEqual(icon.read_bytes(), (install.ROOT / 'launcher_icon.png').read_bytes())
+
+    def test_changed_icon_access_failure_stops_before_game_writes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            game, saves = self.fixture(root)
+            icon = self.put(game / mod_identity.MOD_DIR / 'launcher_icon.png', b'old icon')
+            before, saved = self.files(game), self.files(saves)
+            open_file = Path.open
+            def refuse_icon_update(path, mode='r', *args, **kwargs):
+                if path == icon and mode == 'r+b':
+                    raise PermissionError(13, 'Permission denied', str(path))
+                return open_file(path, mode, *args, **kwargs)
+            with patch.object(Path, 'open', refuse_icon_update), self.assertRaises(SystemExit) as caught:
+                self.run_install('--preserve-settings')
+            self.assertIn('Close D2R VR Launcher', str(caught.exception))
+            self.assertIn('Update / repair', str(caught.exception))
+            self.assertIn('No game files changed.', str(caught.exception))
+            self.assertEqual(self.files(game), before)
+            self.assertEqual(self.files(saves), saved)
+            self.assertFalse((root / 'backups').exists())
+
+    def test_late_icon_lock_has_retry_advice_and_can_be_rolled_back(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            game, saves = self.fixture(root)
+            icon = self.put(game / mod_identity.MOD_DIR / 'launcher_icon.png', b'old icon')
+            before, saved = self.files(game), self.files(saves)
+            write_bytes = Path.write_bytes
+            def refuse_icon_write(path, data):
+                if path == icon:
+                    raise PermissionError(13, 'Permission denied', str(path))
+                return write_bytes(path, data)
+            with patch.object(Path, 'write_bytes', refuse_icon_write), self.assertRaises(SystemExit) as caught:
+                self.run_install('--preserve-settings')
+            self.assertIn('Close D2R VR Launcher', str(caught.exception))
+            self.assertNotIn('No game files changed.', str(caught.exception))
+            snapshot = Path(install.read_record(game)['snapshots'][-1])
+            manifest = json.loads((snapshot / 'manifest.json').read_text())
+            uninstall.apply_updates(uninstall.restore_plan(game, [(snapshot, manifest)]),
+                                    root / 'recovery', lambda: None)
+            self.assertEqual(self.files(game), before)
+            self.assertEqual(self.files(saves), saved)
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows file-sharing lock regression')
+    def test_repair_and_rollback_with_identical_icon_held_open(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            game, saves = self.fixture(root)
+            self.run_install()
+            icon = game / mod_identity.MOD_DIR / 'launcher_icon.png'
+            self.put(game / mod_identity.SETTINGS, self.CALIBRATION)
+            original_plugin = (game / mod_identity.PLUGIN).read_bytes()
+            (root / 'bin/d2rl-pcvr.dll').write_bytes(b'MZ updated plugin')
+            with self.held_icon(icon):
+                self.run_install('--preserve-settings')
+                self.assertEqual((game / mod_identity.PLUGIN).read_bytes(), b'MZ updated plugin')
+                snapshot = Path(install.read_record(game)['snapshots'][-1])
+                manifest = json.loads((snapshot / 'manifest.json').read_text())
+                uninstall.apply_updates(uninstall.restore_plan(game, [(snapshot, manifest)]),
+                                        root / 'recovery', lambda: None)
+                self.assertEqual((game / mod_identity.PLUGIN).read_bytes(), original_plugin)
+            self.assertEqual((game / mod_identity.SETTINGS).read_bytes(), self.CALIBRATION)
+            self.assertEqual((saves / 'Friend.d2s').read_bytes(), b'progress')
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows file-sharing lock regression')
+    def test_changed_locked_icon_stops_cleanly_then_succeeds_when_released(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            game, saves = self.fixture(root)
+            icon = self.put(game / mod_identity.MOD_DIR / 'launcher_icon.png', b'old icon')
+            before, saved = self.files(game), self.files(saves)
+            with self.held_icon(icon), self.assertRaisesRegex(SystemExit, 'Close D2R VR Launcher'):
+                self.run_install('--preserve-settings')
+            self.assertEqual(self.files(game), before)
+            self.assertEqual(self.files(saves), saved)
+            self.assertFalse((root / 'backups').exists())
+            self.run_install('--preserve-settings')
+            self.assertEqual(icon.read_bytes(), (install.ROOT / 'launcher_icon.png').read_bytes())
 
     def test_update_carries_settings_and_calibration_and_removes_the_old_files(self):
         with tempfile.TemporaryDirectory() as temporary:
