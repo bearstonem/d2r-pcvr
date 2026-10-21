@@ -13,6 +13,7 @@
 #include "../steamvr/dev_scenarios.h"
 #include "../steamvr/logging.h"
 namespace gamestate {uint64_t LocalPlayer();bool MenuOpen();}
+namespace framevr {void SetTurnsKeepOwn(int);int TurnsKeepOwn();}   // transport: [stereo] turns_keep_own
 
 namespace devscenarios {
 namespace {
@@ -88,6 +89,21 @@ void __cdecl Commands(const PluginContext*,void* token) noexcept {
         }
         framevr::logging::Write(debugDraws?"Frame development: debug draws ON (cyan measured shield, amber fallback; green blocked, red rejected, magenta native skip)":"Frame development: debug draws OFF");
         Finish(r,Result::DebugUpdated,claim);return;
+    }
+    // By turns A/B for the session; the ini's value applies again only when it changes.
+    if(r.index==framevr::dev::TurnsKeepOwnChoice) {
+        int mode;   // off, near things only, everywhere, the game's effects, near things and effects, and round
+        {
+            std::lock_guard lock(mutex);if(claim!=ticket)return;
+            mode=(framevr::TurnsKeepOwn()+1)%5;
+        }
+        framevr::SetTurnsKeepOwn(mode);
+        framevr::logging::Write(mode==1?"Frame development: by turns keeps the eye's own picture round near things only":
+                                mode==2?"Frame development: by turns keeps the eye's own picture wherever both show the same surface":
+                                mode==3?"Frame development: by turns keeps the eye's own picture where the game's effects are":
+                                mode==4?"Frame development: by turns keeps the eye's own picture round near things and where the game's effects are":
+                                "Frame development: by turns takes the drawn eye's picture wherever it reaches");
+        Finish(r,Result::TurnsUpdated,claim);return;
     }
     if(!execute){
         framevr::logging::Write("Frame development: console command export unavailable");
@@ -214,7 +230,7 @@ void Init(const D2RL::PluginContext* ctx) {
     framevr::logging::Write("Frame development: isolated pcvr-dev environment enabled; class presets require disposable offline expansion characters");
 }
 bool DebugDraws(){return enabled&&debugDraws.load();}
-void Capture(framevr::interaction::Snapshot& s){s.developer=enabled;s.devDebugDraws=DebugDraws();}
+void Capture(framevr::interaction::Snapshot& s){s.developer=enabled;s.devDebugDraws=DebugDraws();s.devTurnsKeepOwn=enabled?framevr::TurnsKeepOwn():0;}
 void Request(const framevr::interaction::Request& r) {
     const bool valid=Valid(r);
     const auto run=threads?(framevr::dev::IsKit(r.index)?threads->runOnGameThread:threads->runOnUiThread):nullptr;

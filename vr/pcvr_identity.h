@@ -16,8 +16,8 @@
 #define D2RPCVR_PLUGIN_ID "d2r-pcvr-vrcam"
 #define D2RPCVR_NAME "D2R PCVR"
 #define D2RPCVR_AUTHOR "bearstonem"
-#define D2RPCVR_VERSION "0.3.23"
-#define D2RPCVR_VERSION_RC 0, 3, 23, 0
+#define D2RPCVR_VERSION "0.3.24"
+#define D2RPCVR_VERSION_RC 0, 3, 24, 0
 #define D2RPCVR_PLUGIN_FILE "d2rl-pcvr.dll"
 #define D2RPCVR_SETTINGS_FILE_W L"d2r_pcvr.ini"
 // D2R VR's plugin. When it sits beside ours D2RLoader would load both VR layers

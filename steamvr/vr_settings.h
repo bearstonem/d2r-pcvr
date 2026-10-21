@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <limits>
 #include <string>
 #include <string_view>
@@ -12,13 +13,27 @@
 #include "haptic_strength.h"
 
 namespace framevr::settings {
-enum class Page { Controls, VR, Video, HUD, Combat, Aim, Haptics, ReleaseNotes };
+enum class Page { Controls, VR, Video, HUD, Combat, Aim, Haptics, Performance, ReleaseNotes };
 enum Key { Motion, Seated, Dominant, Snap, TurnSpeed, Waist, BeltForward,
            Foveation, Sky, Fog, Ceiling, DrawDistance, ObjectDistance,
-           EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, VitalsTilt, HapticStrength, HapticMelee, HapticBowDraw, HapticBowRelease, HapticSpell, HapticInteraction, HapticAlert, HapticShortMelee, BloodVisor, BloodWipe, MeleeRules, MeleeThrustSpeed, LootLabelSize, CompanionCounts, StrainDark, OfflinePlayers, ShieldBashSpeed, StrainSpeed, DesktopOneEye, MapTopDown, MapRotate, FoveationStrength, StereoRendering, DeferGpuWait, TargetHighlight, TargetOutlineColour, TargetOutlineHue, HeartbeatStart, Count };
-using ChangeMask=uint64_t;
-static_assert(Count<=64,"settings change mask capacity");
-constexpr ChangeMask SupportedChanges=~ChangeMask{0}>>(64-Count);
+           EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, VitalsTilt, HapticStrength, HapticMelee, HapticBowDraw, HapticBowRelease, HapticSpell, HapticInteraction, HapticAlert, HapticShortMelee, BloodVisor, BloodWipe, MeleeRules, MeleeThrustSpeed, LootLabelSize, CompanionCounts, StrainDark, OfflinePlayers, ShieldBashSpeed, StrainSpeed, DesktopOneEye, MapTopDown, MapRotate, FoveationStrength, StereoRendering, DeferGpuWait, TargetHighlight, TargetOutlineColour, TargetOutlineHue, HeartbeatStart, ReShadeDepth, Count };
+// One bit per setting, 128 wide: two words, since MSVC has no 128-bit integer.
+struct ChangeMask {
+    static constexpr int Bits=128;
+    uint64_t low=0,high=0;
+    constexpr ChangeMask(uint64_t bits=0):low(bits){}
+    constexpr ChangeMask(uint64_t lowBits,uint64_t highBits):low(lowBits),high(highBits){}
+    constexpr explicit operator bool()const{return (low|high)!=0;}
+    constexpr bool operator==(const ChangeMask&)const=default;
+    constexpr ChangeMask operator~()const{return {~low,~high};}
+    constexpr ChangeMask operator&(ChangeMask o)const{return {low&o.low,high&o.high};}
+    constexpr ChangeMask operator|(ChangeMask o)const{return {low|o.low,high|o.high};}
+    constexpr ChangeMask& operator|=(ChangeMask o){low|=o.low;high|=o.high;return *this;}
+    constexpr ChangeMask operator<<(int n)const{return n<=0?*this:n>=Bits?ChangeMask{}:n>=64?ChangeMask{0,low<<(n-64)}:ChangeMask{low<<n,high<<n|low>>(64-n)};}
+    constexpr ChangeMask operator>>(int n)const{return n<=0?*this:n>=Bits?ChangeMask{}:n>=64?ChangeMask{high>>(n-64),0}:ChangeMask{low>>n|high<<(64-n),high>>n};}
+};
+static_assert(Count<=ChangeMask::Bits,"settings change mask capacity");
+constexpr ChangeMask SupportedChanges=~ChangeMask{0}>>(ChangeMask::Bits-Count);
 struct Definition {
     const char* label;
     const char* detail;
@@ -39,7 +54,8 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"Added fog", "The mod's distance fog effect", L"fog",L"enabled",0,0,1,1},
     {"Dungeon ceiling", "The mod's overhead dungeon surfaces", L"ceiling",L"enabled",0,0,1,1},
     {"Terrain draw distance", "Higher values show more map tiles and cost more to render", L"render",L"rings",2,1,8,1},
-    {"Object draw distance", "Higher values retain more distant scenery", L"render",L"model_radius",300,10,10000,50},
+    // 210: just past the fog's end (200). In Rogue Encampment 360 held 45 fps, 260 55-80, 210 88-90 (steamvr/PERFORMANCE.md).
+    {"Object draw distance", "Higher values retain more distant scenery", L"render",L"model_radius",210,10,10000,50},
     {"Standing eye height", "Measured from the SteamVR floor", L"calibration",L"eye_height_m",1.64f,.8f,2.3f,.01f},
     {"Controller span", "Measured between grips in a T-pose", L"calibration",L"arm_span_m",1.6f,.85f,2.6f,.01f},
     {"Body calibration", "Saved body calibration version", L"calibration",L"version",0,0,1,1},
@@ -74,7 +90,7 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"Melee thrust speed", "Forward stabs along the blade; independent of swing speed", L"gameplay",L"melee_thrust_speed",2,.75f,10,.25f},
     {"Loot label size", "Dropped-item names; 45% is the original size", L"hud",L"labels_size",45,20,150,5},
     {"Companions & effects", "Companion counts and current buffs, auras and harmful effects", L"interactions",L"companion_counts",1,0,1,1},
-    {"Guard strain color", "Blocking strain at the rim of the view: pale white light or black shadow", L"gameplay",L"guard_strain_dark",0,0,1,1},
+    {"Guard strain color", "Blocking strain at the rim of the view: pale white light, black shadow or off", L"gameplay",L"guard_strain_dark",0,0,2,1},
     {"Offline difficulty", "Players 1-8 scaling for newly spawned monsters", L"gameplay",L"offline_players",0,0,8,1},
     {"Shield bash speed", "Hand speed for bash / Smite; wrist twisting never attacks", L"gameplay",L"shield_bash_speed",2,.75f,10,.25f},
     {"Guard strain buildup", "How quickly repeated blocks build the vignette; same size", L"gameplay",L"guard_strain_speed",1,0,2,1},
@@ -82,12 +98,13 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"Map view", "Isometric or Top-down wrist minimap", L"interactions",L"map_top_down",0,0,1,1},
     {"Rotate map", "Top-down only: keep your facing direction at the top", L"interactions",L"map_rotate",0,0,1,1},
     {"Foveation strength", "Higher levels shade a larger edge area more coarsely", L"render",L"foveation_strength",1,0,3,1},
-    {"Stereo rendering", "By turns: one eye a frame; Replay: one CPU pass for both eyes", L"stereo",L"rendering",1,0,2,1},
+    {"Stereo rendering", "Both eyes: each frame twice; By turns: one eye a frame", L"stereo",L"rendering",1,0,1,1},
     {"Defer GPU wait", "Start the next frame while the GPU finishes the last", L"render",L"defer_gpu_wait",0,0,1,1},
     {"Monster outline", "Outline strength for the monster you aim at; Off by default", L"gameplay",L"target_outline_pct",0,0,100,10},
     {"Monster outline colors", "Static: one color. By range: red near, orange mid-range, yellow far", L"gameplay",L"target_outline_by_range",0,0,1,1},
     {"Static color", "The outline's color around the color wheel", L"gameplay",L"target_outline_hue",45,0,345,15},
     {"Heartbeat starts at", "Life % where the heartbeat begins; louder and faster every 10% lower", L"gameplay",L"low_life_heart_start",60,0,90,10},
+    {"ReShade depth", "ReShade's Generic Depth add-on; applies after restarting the game", L"render",L"reshade_depth",1,0,1,1},
 }};
 using Values=std::array<float,Count>;
 inline bool HapticKey(Key key){return key>=HapticStrength&&key<=HapticAlert;}
@@ -107,7 +124,7 @@ inline float Normalize(Key key,float value){
     if(key==HeartbeatStart)return std::clamp(std::round(value/10)*10,d.min,d.max);   // 0 = Off, else a 10% step
     if(key==VitalsTilt)return vitals::NormalizeTilt(value);
     if(HapticKey(key))return haptics::NormalizeStrength(value);
-    if((key==ControllerLabels||key==VitalsLocation||key==NavigationLocation||key==RenderResolution||key==MenuDistance||key==TooltipTiming||key==ProjectileAimAssist||key==StrainSpeed||key==FoveationStrength||key==StereoRendering)&&(value<d.min||value>d.max||value!=std::round(value)))return d.defaultValue;
+    if((key==ControllerLabels||key==VitalsLocation||key==NavigationLocation||key==RenderResolution||key==MenuDistance||key==TooltipTiming||key==ProjectileAimAssist||key==StrainSpeed||key==StrainDark||key==FoveationStrength||key==StereoRendering)&&(value<d.min||value>d.max||value!=std::round(value)))return d.defaultValue;
     value=std::clamp(value,d.min,d.max);
     return d.step==1?std::round(value):value;
 }
@@ -126,9 +143,9 @@ struct Rect {
     bool Contains(float px,float py)const{return px>=x&&px<x+w&&py>=y&&py<y+h;}
 };
 constexpr int Width=1280,Height=1024;
-constexpr int TabCount=8;
-inline constexpr const char* TabNames[TabCount]={"Controls","VR","Video","HUD","Combat","Aim","Haptics","Release Notes"};
-constexpr Rect Tabs[TabCount]={{40,114,160,60},{212,114,96,60},{320,114,124,60},{456,114,112,60},{580,114,150,60},{742,114,96,60},{850,114,146,60},{1008,114,232,60}};
+constexpr int TabCount=9;
+inline constexpr const char* TabNames[TabCount]={"Controls","VR","Video","HUD","Combat","Aim","Haptics","Perf","Notes"};
+constexpr Rect Tabs[TabCount]={{40,114,160,60},{212,114,96,60},{320,114,124,60},{456,114,112,60},{580,114,150,60},{742,114,96,60},{850,114,146,60},{1008,114,104,60},{1124,114,116,60}};
 inline Rect TabBox(int index){return Tabs[index];}
 constexpr Rect Apply{965,918,275,68},Close{650,918,275,68},Recenter{40,918,270,68},Calibrate{330,918,300,68};
 constexpr int RowY=242,RowStep=62;
@@ -151,15 +168,24 @@ inline void HueRgb(float hue,float rgb[3]){
     for(int i=0;i<3;++i)rgb[i]=table[std::min(5,int(h))][i];
 }
 inline constexpr const char* MeleeRulesNames[]={"Unleashed","Classic"};
-inline constexpr const char* StrainColorNames[]={"White","Black"};
+inline constexpr const char* StrainColorNames[]={"White","Black","Off"};   // guard_strain_dark 0 / 1 / 2
 inline constexpr const char* StrainSpeedNames[]={"Slow","Medium","Fast"};
 inline constexpr const char* FoveationStrengthNames[]={"Low","Medium","High","Maximum"};
-inline constexpr const char* StereoRenderingNames[]={"Both eyes","By turns","Replay"};
+// Replay (one CPU pass for both eyes) left the choices on 2026-10-20: on the
+// owner's PC it halved the CPU work a frame but not the frame time - the right
+// eye's GPU work waits for the whole left pass - so it stayed at 45 Hz like
+// Both eyes, while By turns ran 74-90 (steamvr/PERFORMANCE.md). A profile
+// saved with it (2) is out of range and goes by turns.
+inline constexpr const char* StereoRenderingNames[]={"Both eyes","By turns"};
 // Every stereo rendering choice ends each frame waiting for the GPU unless
 // the wait is deferred ([render] defer_gpu_wait): then about half the frame
-// rate. While it is not deferred, the Video page warns and offers a button
+// rate. While it is not deferred, the Perf page warns and offers a button
 // that turns it on (Apply saves it).
-constexpr Rect VideoDeferBox{940,181,300,52};
+constexpr Rect DeferBox{940,181,300,52};
+// Under the Perf page's eight rows: the last second's frame times and whether
+// they fit the headset's frame, the game's graphics options, and a ReShade
+// depth change waiting for a restart.
+constexpr Rect PerformanceBox{40,742,1200,62},GameVideoBox{40,806,1200,32},DepthRestartBox{40,840,1200,32};
 // Windows Mono audio (Settings > Accessibility > Audio) folds the PC's sound to
 // the centre before any headset stream, so head-relative sound cannot pan.
 // While it is on, the title row's hint gives way to this warning on every page.
@@ -171,9 +197,16 @@ inline constexpr const char* DeferWarning="Each frame waits for the GPU: about h
 // Settings.json (Saved Games\Diablo II Resurrected, written when its options
 // close): Vertical Sync holds each frame to the monitor's refresh, and
 // anti-aliasing other than FXAA ("Anti Aliasing": 1) blurs (TAA builds each
-// frame from the ones before it) or costs more. The Video page warns about
-// each; a key the file lacks is not warned about.
-struct GameVideo {bool vsync=false,antiAliasing=false;int Code()const{return int(vsync)|int(antiAliasing)<<1;}};
+// frame from the ones before it) or costs more. The Perf page warns about
+// each; a key the file lacks is not warned about. It also shows the options
+// that set how much the game draws (-1: not in the file), beside the frame
+// times they change.
+struct GameVideo {
+    bool vsync=false,antiAliasing=false;
+    int shadows=-1,characterDetail=-1,ambientOcclusion=-1,atmospherics=-1,lights=-1,resolutionScale=-1,dlss=-1;
+    int Code()const{return int(vsync)|int(antiAliasing)<<1;}
+    bool operator==(const GameVideo&)const=default;
+};
 // "key": integer in the game's JSON; -1 if absent or not a number.
 inline int GameSetting(std::string_view json,std::string_view key) {
     for(size_t at=json.find(key);at!=std::string_view::npos;at=json.find(key,at+1)){
@@ -192,7 +225,56 @@ inline int GameSetting(std::string_view json,std::string_view key) {
 }
 inline GameVideo ParseGameVideo(std::string_view json) {
     const int antiAliasing=GameSetting(json,"Anti Aliasing");
-    return {GameSetting(json,"VSync")>0,antiAliasing>=0&&antiAliasing!=1};
+    GameVideo game;game.vsync=GameSetting(json,"VSync")>0;game.antiAliasing=antiAliasing>=0&&antiAliasing!=1;
+    game.shadows=GameSetting(json,"Shadow Quality");game.characterDetail=GameSetting(json,"Character Detail");
+    game.ambientOcclusion=GameSetting(json,"Ambient Occlusion Quality");game.atmospherics=GameSetting(json,"Atmospherics Quality");
+    game.lights=GameSetting(json,"Light Quality");
+    game.resolutionScale=GameSetting(json,"Resolution Scale");game.dlss=GameSetting(json,"NVIDIA DLSS");
+    return game;
+}
+// The game's options above as one line for the Perf page; empty when the file
+// has none of them. The numbers are the game's own, 0 its lowest.
+inline std::string GameVideoLine(const GameVideo& g) {
+    std::string line;
+    const auto add=[&](const char* name,int value,const char* unit=""){
+        if(value<0)return;
+        char part[64];std::snprintf(part,sizeof part,"%s%s %d%s",line.empty()?"":" \xc2\xb7 ",name,value,unit);line+=part;
+    };
+    // The CPU's first (what is drawn), then the graphics card's.
+    add("Shadows",g.shadows);add("Character detail",g.characterDetail);add("Lights",g.lights);
+    add("AO",g.ambientOcclusion);add("Atmospherics",g.atmospherics);add("Scale",g.resolutionScale,"%");
+    if(g.dlss>=0)line+=std::string(line.empty()?"":" \xc2\xb7 ")+(g.dlss>0?"DLSS on":"DLSS off");
+    return line.empty()?line:"Game: "+line;
+}
+// What the Perf page reports of the last second's frames, as the render
+// thread measured them: the game's update between frames, the wait for the
+// headset (xrWaitFrame), the game's drawing (one eye a frame by turns, both
+// with Both eyes) and the mod's own work around it (input, copies, submit).
+// budgetMs is the headset's frame.
+struct PerformanceReadout {
+    bool valid=false,byTurns=true;
+    float fps=0,budgetMs=0,gameMs=0,waitMs=0,drawMs=0,vrMs=0;
+    bool mixed=false;   // some frames by turns, some pairs
+    float CpuMs()const{return gameMs+drawMs+vrMs;}
+    bool operator==(const PerformanceReadout&)const=default;
+};
+inline std::string PerformanceLine(const PerformanceReadout& r) {
+    if(!r.valid)return "Now: waiting for a second of headset frames in the game";
+    char line[200];
+    std::snprintf(line,sizeof line,"Now: %.0f fps \xc2\xb7 drawing %.1f ms (%s) \xc2\xb7 game %.1f \xc2\xb7 VR %.1f \xc2\xb7 headset wait %.1f",
+        double(r.fps),double(r.drawMs),r.mixed?"mixed":r.byTurns?"one eye":"both eyes",double(r.gameMs),double(r.vrMs),double(r.waitMs));
+    return line;
+}
+inline constexpr const char* GameVideoUnsaved="Game: options not saved yet; the game writes them when its options menu closes";
+inline constexpr const char* DepthRestartNote="ReShade depth: restart the game to apply the change";
+// Whether the CPU's part fits the headset's frame: past it, the runtime
+// holds every late frame back to its next refresh.
+inline std::string PerformanceVerdict(const PerformanceReadout& r) {
+    if(!r.valid||r.budgetMs<=0)return {};
+    char line[200];
+    if(r.CpuMs()>r.budgetMs)std::snprintf(line,sizeof line,"CPU %.1f ms of the headset's %.1f ms frame: draw less (draw distances, shadows); resolution won't help",double(r.CpuMs()),double(r.budgetMs));
+    else std::snprintf(line,sizeof line,"CPU %.1f ms of the headset's %.1f ms frame: it fits",double(r.CpuMs()),double(r.budgetMs));
+    return line;
 }
 // Launched with -mod <mod>, the game keeps that mod's own Settings.json in
 // Saved Games\Diablo II Resurrected\mods\<mod>, not the unmodded game's one
@@ -221,7 +303,7 @@ inline Rect ControllerOption(int option){return {865,233+option*58,375,58};}
 inline Rect Decrease(int row){return {865,RowY+row*RowStep,64,52};}
 inline Rect Increase(int row){return {1176,RowY+row*RowStep,64,52};}
 inline Rect ValueBox(int row){return {942,RowY+row*RowStep,221,52};}
-inline int RowCount(Page page){return page==Page::Haptics?2+haptics::CategoryCount:page==Page::Combat?8:page==Page::Aim?3:page==Page::VR?10:page==Page::Video?10:page==Page::HUD?10:0;}
+inline int RowCount(Page page){return page==Page::Haptics?2+haptics::CategoryCount:page==Page::Combat?8:page==Page::Aim?3:page==Page::VR?10:page==Page::Video?3:page==Page::Performance?8:page==Page::HUD?10:0;}
 inline Key RowKey(Page page,int row){
     constexpr Key hapticRows[]={HapticStrength,HapticMelee,HapticShortMelee,HapticBowDraw,HapticBowRelease,HapticSpell,HapticInteraction,HapticAlert};
     if(page==Page::Haptics)return hapticRows[row];
@@ -229,8 +311,11 @@ inline Key RowKey(Page page,int row){
     if(page==Page::Aim)return row==0?TargetHighlight:row==1?TargetOutlineColour:TargetOutlineHue;
     constexpr Key hud[]={VitalsLocation,VitalsTilt,CriticalAlerts,NavigationLocation,MenuDistance,TooltipTiming,BloodVisor,BloodWipe,LootLabelSize,CompanionCounts};
     if(page==Page::HUD)return hud[row];
-    constexpr Key video[]={Foveation,FoveationStrength,Sky,Fog,Ceiling,DrawDistance,ObjectDistance,RenderResolution,DesktopOneEye,StereoRendering};
+    constexpr Key video[]={Sky,Fog,Ceiling};
     if(page==Page::Video)return video[row];
+    // Everything that changes the frame rate, with its numbers below.
+    constexpr Key performance[]={StereoRendering,RenderResolution,DrawDistance,ObjectDistance,Foveation,FoveationStrength,ReShadeDepth,DesktopOneEye};
+    if(page==Page::Performance)return performance[row];
     constexpr Key vrRows[]={Motion,Seated,Dominant,SmoothTurn,Snap,TurnSpeed,Waist,BeltForward,SkillGestures,OrdinaryMobBars};
     return vrRows[row];
 }
@@ -257,7 +342,7 @@ inline Hit HitTest(Page page,float u,float v,bool controllerMenu=false){
     if(page==Page::Controls&&AimAssistBox.Contains(x,y))return {Kind::Change,ProjectileAimAssist,1};
     if(page==Page::HUD&&HudMapViewBox.Contains(x,y))return {Kind::Change,MapTopDown,1};
     if(page==Page::HUD&&HudMapRotateBox.Contains(x,y))return {Kind::Change,MapRotate,1};
-    if(page==Page::Video&&VideoDeferBox.Contains(x,y))return {Kind::Change,DeferGpuWait,1};
+    if(page==Page::Performance&&DeferBox.Contains(x,y))return {Kind::Change,DeferGpuWait,1};
     for(int r=0;r<RowCount(page);++r){
         const auto key=RowKey(page,r);
         if(page==Page::Haptics&&HapticCategory(key)>=0){
@@ -267,7 +352,7 @@ inline Hit HitTest(Page page,float u,float v,bool controllerMenu=false){
         }
         if(Decrease(r).Contains(x,y))return {Kind::Change,key,-1};
         if(Increase(r).Contains(x,y))return {Kind::Change,key,1};
-        if(Definitions[key].max==1&&ValueBox(r).Contains(x,y))return {Kind::Change,key,1};
+        if((Definitions[key].max==1||key==StrainDark)&&ValueBox(r).Contains(x,y))return {Kind::Change,key,1};
     }
     return {};
 }
@@ -315,7 +400,7 @@ public:
             else if(key==OfflinePlayers)draft[key]=std::clamp(draft[key]+float(hit.delta),0.f,8.f);
             else if(key==StrainSpeed)draft[key]=std::clamp(draft[key]+float(hit.delta),0.f,2.f);
             else if(key==FoveationStrength||key==StereoRendering)draft[key]=std::clamp(draft[key]+float(hit.delta),d.min,d.max);
-            else if(key==ProjectileAimAssist)draft[key]=float((int(draft[key])+(hit.delta<0?2:1))%3);
+            else if(key==ProjectileAimAssist||key==StrainDark)draft[key]=float((int(draft[key])+(hit.delta<0?2:1))%3);   // cycles
             else draft[key]=Normalize(key,draft[key]+hit.delta*d.step);
             result=Result::None;++revision;
         }

@@ -189,7 +189,7 @@ Use a new offline expansion character in that separate save list.
 The tools are a **DEV tab on either hand's wheel**, beside VR Settings. Native
 builds include the dormant backend unless `-NoDevTools` is selected; the UI and
 actions require the exact isolated mod metadata. VR Settings has a separate
-Release Notes tab, available in regular and developer builds, containing a
+Notes tab (Release Notes), available in regular and developer builds, containing a
 read-only reference to the last published release. Follow [RELEASING.md](RELEASING.md)
 and the [.github release template](../.github/RELEASE_TEMPLATE.md) when publishing.
 Update the versioned `PCVR_IN_HEADSET_NOTES` summary inside `RELEASE_NOTES.md`;

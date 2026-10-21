@@ -43,10 +43,10 @@ int main(){
     using namespace framevr::settings;
     Snapshot s;s.ready=true;assert(s.values[RenderResolution]==1);   // the headset's own size by default
     assert(Normalize(RenderResolution,9)==1&&Normalize(RenderResolution,1.5f)==1);
-    Model model;model.Open(s);model.Click({Kind::Tab,int(Page::Video)});
-    const int row=7;assert(RowKey(Page::Video,row)==RenderResolution&&RowKey(Page::Video,8)==DesktopOneEye);
+    Model model;model.Open(s);model.Click({Kind::Tab,int(Page::Performance)});
+    const int row=1;assert(RowKey(Page::Performance,row)==RenderResolution&&RowKey(Page::Performance,7)==DesktopOneEye);
     const auto box=Increase(row);assert(box.y+box.h<876);
-    auto hit=HitTest(Page::Video,(box.x+box.w*.5f)/Width,(box.y+box.h*.5f)/Height);
+    auto hit=HitTest(Page::Performance,(box.x+box.w*.5f)/Width,(box.y+box.h*.5f)/Height);
     assert(hit.index==RenderResolution);model.Click(hit);
     const auto save=model.Click({Kind::Apply});
     assert(save.changed==(1u<<RenderResolution)&&save.values[RenderResolution]==2);

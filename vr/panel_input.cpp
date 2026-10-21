@@ -41,11 +41,18 @@ void InstallCanvasSize() {
         std::memcpy(call+1,&delta,sizeof delta);
         if(!d2rsig::Check(address-5,call,sizeof call))return;
     }
+    for(auto address:framevr::panels::CursorConversionReturns) {   // the cursor's conversions, direct calls
+        uint8_t call[5]{0xe8};const int32_t delta=int32_t(CanvasSizeRva-address);
+        std::memcpy(call+1,&delta,sizeof delta);
+        if(!d2rsig::Check(address-5,call,sizeof call))return;
+    }
     // The width helper uses a tail JMP, preserving its caller's return address.
     // Guard both that CALL and the tail JMP, plus the height helper's CALL.
+    // The controller cursor's clamp likewise: its CALLs to 0x7f4d0 and that tail JMP.
     for(const auto site:{std::pair<uint64_t,uint64_t>{0x7f4ad,CanvasSizeRva},
-                        {0x14fb25,0x7f510},{0x7f521,CanvasSizeRva}}) {
-        uint8_t branch[5]{uint8_t(site.first==0x7f521?0xe9:0xe8)};
+                        {0x14fb25,0x7f510},{0x7f521,CanvasSizeRva},
+                        {0x14e83c,0x7f4d0},{0x14e85b,0x7f4d0},{0x7f4e1,CanvasSizeRva}}) {
+        uint8_t branch[5]{uint8_t(site.first==0x7f521||site.first==0x7f4e1?0xe9:0xe8)};
         const int32_t delta=int32_t(site.second-(site.first+5));
         std::memcpy(branch+1,&delta,sizeof delta);
         if(!d2rsig::Check(site.first,branch,sizeof branch))return;
@@ -57,6 +64,7 @@ void InstallCanvasSize() {
         framevr::resolution::UiSizeReady();
         framevr::logging::Write("Frame panels: native UI canvas follows applied VR resolution; physical window unchanged");
         framevr::logging::Write("Frame panels: native cursor width/height clamp follows full VR source");
+        framevr::logging::Write("Frame panels: the cursor's window/game conversions and controller clamp follow full VR source");
     }
 }
 framevr::panels::InputModeLease lease;

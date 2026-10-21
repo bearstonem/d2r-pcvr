@@ -67,6 +67,7 @@
 #include "../steamvr/resource_descriptions.h"
 #include "../steamvr/active_keys.h"
 #include "../steamvr/native_hud.h"
+#include "../steamvr/render_resolution.h"
 
 #include "game_hud_shared.h"
 #include "settings_menu.h"
@@ -221,19 +222,30 @@ bool IsLayerClear(device* dev, resource_view rtv, const float c[4]) {
 // that, not by MapRect's size: the height rule held at 1920x1200 and
 // 1699x1274/80%, but at 1920x1440 the map is ~640 wide where it predicts 773,
 // past the tolerance - the map stayed in the picture and the share was empty.
+// The game window's own client size, read at each layer clear (IsMapScissor).
+std::atomic<uint32_t> g_windowW{0}, g_windowH{0};
+
+// Its size follows the game's own window, not the layer the mod resizes for
+// the headset: 1280x720 under a 3840x2160 desktop, 640x360 in a windowed
+// 1920x1080 game, both at the same corner of a 3072 layer. Judged by the layer
+// alone the small one was refused and the wrist map stayed empty (owner, a
+// player on Discord, 2026-10-20): by the window's size as well.
+bool MapSized(int32_t rw, int32_t rh, uint32_t w, uint32_t h) {
+    return rw > (int32_t)w / 8 && rw < (int32_t)w / 2 && rh > (int32_t)h / 8 && rh < (int32_t)(h * 0.6f);
+}
 bool IsMapScissor(const rect& r, uint32_t w, uint32_t h) {
     const float s = g_uiScale.load();
     const float left = 0.5f * (float)w * (1.0f - s), top = 0.5f * (float)h * (1.0f - s);
     const float tol = 0.07f * (float)h;
     const int32_t rw = r.right - r.left, rh = r.bottom - r.top;
+    const uint32_t ww = g_windowW.load(std::memory_order_relaxed), wh = g_windowH.load(std::memory_order_relaxed);
     // The game puts the mini map in either top corner (its own option): the
     // box hugs the safe area's left edge, or its right one.
     const float right = (float)w - left;
     const int which = g_mapCorner.load();
     const bool atLeft = std::abs(r.left - left) < tol, atRight = std::abs(r.right - right) < tol;
     const bool corner = which == 1 ? atLeft : which == 2 ? atRight : (atLeft || atRight);
-    return corner && std::abs(r.top - top) < tol &&
-           rw > (int32_t)w / 8 && rw < (int32_t)w / 2 && rh > (int32_t)h / 8 && rh < (int32_t)(h * 0.6f);
+    return corner && std::abs(r.top - top) < tol && (MapSized(rw, rh, w, h) || (ww && wh && MapSized(rw, rh, ww, wh)));
 }
 
 // The map scissor last seen, and the layer size it was seen at: what the
@@ -497,6 +509,7 @@ bool OnClear(command_list* cl, resource_view rtv, const float c[4], uint32_t, co
     device* dev = cl->get_device();
     if (!IsLayerClear(dev, rtv, c)) return false;
     g_frameMap.store(MapNow());
+    if (const auto window = framevr::resolution::WindowClient()) { g_windowW.store(window.w); g_windowH.store(window.h); }
     {   // the map's view, re-read now and then
         static uint64_t readAt = 0;
         const uint64_t now = GetTickCount64();

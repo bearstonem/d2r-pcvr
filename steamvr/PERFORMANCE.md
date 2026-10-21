@@ -1,5 +1,86 @@
 # VR performance investigations
 
+## Render thread waits, October 20
+
+**By turns' passes built in the background.** The passes that turn and move
+the eye not drawn were built on the render thread at the first turned eye of
+every OpenXR session: 9 shader compiles at optimisation level 3 and 7
+pipelines, under the transport lock. Timed on the owner's PC (RTX 5090,
+Ryzen 9 5950X), that took about 215 ms in a new process (107 ms compiling, the
+rest the driver building the pipelines for the first time) and 112 ms at every
+later session. A session starts at each game entry, resolution change and
+graphics Apply. The shaders now compile once a process, and a background worker
+builds the passes once when a session is set up. The render thread's own build
+then takes about 3 ms.
+
+**The transport lock costs no frame time.** The render thread holds the
+transport lock through the OpenXR frame wait, begin and end. The earlier notes
+below suggested that other threads stall on it. A private counting build
+measured 8 minutes of By turns play (town, melee, bow, spells, VR Settings).
+Other threads waited 1.5-4.1 s per 10 s in total, mostly during the frame wait,
+and all of that waiting was on the mod's own 1 kHz update thread: melee
+sampling 107 s, the bow's world epoch 19 s, shield, bow and spell shots under
+1 s. The game's threads waited twice (about 0 ms), and the render thread about
+0.4 ms per 10 s. The update thread waits for the very poses it then reads,
+which the frame publishes when it releases the lock, so nothing arrives later.
+The frame loop was left as it is.
+
+## Replay removed, October 20
+
+Replay left VR Settings > Video > Stereo rendering. Walks on the owner's PC
+(RTX 5090, Ryzen 9 5950X, 3072 square per eye, 90 Hz headset):
+
+- The game set its biome at every line of its 80-unit map grid, so the
+  240-pair settle restarted every 1-5 s while walking and Replay ran on no
+  pair. Within one level, the private test builds let it run through those
+  lines. Those builds waited for the last replay on every free the game made,
+  and never followed a held left present with a second pass, which stalled
+  the game for 1 s. With that, Replay ran on about 9 pairs in 10 while
+  walking.
+- It halved the game thread's CPU a pair (about 18 to 10 ms; fpsVR's CPU
+  frame time 17.6 to 12.8 ms), but not the frame time. The right eye's GPU
+  work can start only after the whole left pass is recorded, so a frame
+  spanned about 20 ms, the GPU busy about 13 of it (60% in fpsVR). SteamVR
+  paced it at 45 Hz, as it did Both eyes. By turns ran 74-90 frames/s in that
+  day's sessions.
+
+A profile saved with Replay goes by turns. Its code is kept but no longer
+registered; the test builds are on a local branch.
+
+## Draw distance and the frame, October 20
+
+Lowering the VR resolution from 3072 to 2560 and then 1536 square changed
+nothing: each eye's pass took 8-11 ms of CPU at every size. The game's drawing
+thread was busy 46-74% of a core, and the frame waited 2.5-8.5 ms for the
+headset because it had missed the 11.1 ms frame. The owner then stepped through
+the settings in Rogue Encampment, standing at one spot facing one way, and
+watched VR Settings' Perf page. The same timings are in the log's 10-second
+lines. The run used By turns, a 90 Hz headset and an RTX 5090 with a Ryzen 9
+5950X:
+
+| Setting | Drawing a frame | Frames/s |
+| --- | --- | --- |
+| Rings 3, objects 360, game Shadow Quality 4 (1536 square) | 10.8-11.6 ms | 45 |
+| Shadow Quality 4, then 2, then 1 | 9.8-11.4 ms | 45-50 |
+| Rings 2, objects 260 | 7.7-9.1 ms | 55-80 |
+| Objects 210 | 6.7-7.4 ms | 88-90 |
+| The same, ReShade's Generic Depth add-on off (restart) | 7.1-7.3 ms | 89-90 |
+| The same, at 3072 square | 7.0-7.3 ms | 89-90 |
+| Objects 160, 2560 square | 6.4-6.5 ms | 89-90 |
+
+The draw distances did it. Going from rings 3 / objects 360 to rings 2 /
+objects 210 halved the draws counted per frame, from about 14,000 to 6,500,
+and with that the drawing time. Once the frame fit, resolution made no
+difference. Shadows took off about half a millisecond, and Generic Depth
+nothing measurable. The default object distance became 210, just past the
+fog's end at 200, where further objects cost frames and hardly show. The
+shipped default had been 300, and 260 still missed the frame in the camp.
+Profiles that set the key keep their value.
+
+About 10 s after each VR resolution change the game stops drawing the world
+for about 3 s ("no world camera" in the log) while it rebuilds at the new size.
+That is the game's own work, not a gameplay stall.
+
 ## Replay, October 19
 
 **Replay** ports upstream's right-eye command-list replay (see the Issue 20

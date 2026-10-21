@@ -9,6 +9,7 @@
 #include <cstring>
 #include <functional>
 #include <stdexcept>
+#include <thread>
 #include <vector>
 using Microsoft::WRL::ComPtr;
 using framevr::math::Fov;
@@ -163,6 +164,20 @@ static bool Same(uint32_t got,uint32_t want) {
 }
 static constexpr std::array<float,9> Identity{1,0,0, 0,1,0, 0,0,1};
 
+// The transport builds a throwaway TurnWarp on a worker while a session
+// starts; the render thread's own Initialize may meet that compile still
+// running, and every later session reuses its code.
+static void Precompiled(Gpu& gpu) {
+    bool warmed=false;
+    std::thread worker([&]{framevr::TurnWarp warm;warmed=warm.Initialize(gpu.device.Get(),DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,nullptr);});
+    framevr::TurnWarp first;
+    const bool built=first.Initialize(gpu.device.Get(),DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,nullptr);
+    worker.join();
+    Check(warmed&&built&&first.DepthReady()&&first.NearReady()&&first.EffectsReady()&&first.InterfaceReady(),"every pass is built beside a running compile");
+    framevr::TurnWarp next;
+    Check(next.Initialize(gpu.device.Get(),DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,nullptr)&&next.DepthReady()&&next.NearReady()&&
+          next.EffectsReady()&&next.InterfaceReady(),"a later session builds every pass from the compiled code");
+}
 // The pass on the GPU: an 8x8 picture, the target typed or typeless as the runtime's may be.
 static void Turn(Gpu& gpu,bool typeless) {
     framevr::TurnWarp warp;
@@ -267,7 +282,7 @@ static void Move(Gpu& gpu,bool typeless) {
         gpu.Upload(picture.Get(),pixels,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
         const auto depth=distances([](UINT x){return x>=24&&x<40?2.f:4.f;});
         framevr::TurnDepth drawn=moved;drawn.depth=depth.Get();drawn.image=picture.Get();drawn.apart=.5f;
-        const auto out=gpu.Warp(warp,source.Get(),target.Get(),Identity,slot^=1,nullptr,&drawn);
+        auto out=gpu.Warp(warp,source.Get(),target.Get(),Identity,slot^=1,nullptr,&drawn);
         const auto from=[&](UINT a,UINT b,int shift,bool drawnEye,const char* what) {
             bool same=true;
             for(UINT y=0;y<side;++y)for(UINT x=a;x<b;++x) {
@@ -276,13 +291,39 @@ static void Move(Gpu& gpu,bool typeless) {
             }
             Check(same,what);
         };
-        from(2,11,4,true,"the wall from the drawn eye, moved 4 px");
-        from(18,28,8,true,"the post from the drawn eye, moved 8 px");
-        from(33,39,0,false,"what the post hid from the drawn eye keeps this eye's own");
-        from(44,56,4,true,"the wall past it from the drawn eye again");
+        // each pixel by its own depth, the cells across the post's edges too:
+        // the post whole to its edges, this eye's own exactly where it hid the wall
+        from(2,15,4,true,"the wall from the drawn eye, moved 4 px");
+        from(16,32,8,true,"the post from the drawn eye, moved 8 px to both its edges");
+        from(32,36,0,false,"what the post hid from the drawn eye keeps this eye's own");
+        from(36,56,4,true,"the wall past it from the drawn eye again, from its edge on");
         drawn.apart=0;   // no edge test: the post's edge drawn out over the gap instead
         const auto stretched=gpu.Warp(warp,source.Get(),target.Get(),Identity,slot^=1,nullptr,&drawn);
         Check(!Same(stretched[10*side+35],texel(35,10)),"without the cut the gap is the drawn eye's, drawn out");
+        // a blade two texels wide (columns 33-34) inside one cell, 2 units away
+        // before the wall at 4: it moves 8 px, not with the wall behind it
+        const auto blade=distances([](UINT x){return x==33||x==34?2.f:4.f;});
+        drawn.depth=blade.Get();drawn.apart=.5f;
+        out=gpu.Warp(warp,source.Get(),target.Get(),Identity,slot^=1,nullptr,&drawn);
+        from(2,24,4,true,"the wall left of the blade moved 4 px");
+        from(25,27,8,true,"the blade inside one cell moved 8 px");
+        from(29,31,0,false,"what the blade hid from the drawn eye keeps this eye's own");
+        from(31,56,4,true,"the wall right of the blade moved 4 px");
+        // This eye's own picture, moved with its own depth (the head still: in
+        // place), showed the wall alone; the drawn eye's shows the post moved
+        // in front of it since. Where both show the wall, this eye's own stays
+        // (as a glow or hair would, seen from this eye); the post is the drawn
+        // eye's; what it hid is this eye's own as before.
+        const auto post=distances([](UINT x){return x>=24&&x<40?2.f:4.f;}),wall=distances([](UINT){return 4.f;});
+        drawn.depth=post.Get();drawn.keep=framevr::TurnEdgePixels;
+        framevr::TurnDepth still=moved;still.depth=wall.Get();still.move=framevr::TurnMove({0,0,0},{0,0,0,1},{0,0,0},{0,0,0,1});
+        out=gpu.Warp(warp,source.Get(),target.Get(),Identity,slot^=1,&still,&drawn);
+        from(2,15,0,false,"where both show the wall this eye's own stays");
+        from(16,32,8,true,"the post moved in from the drawn eye");
+        from(32,56,0,false,"what it hid and the wall past it: this eye's own");
+        drawn.keep=0;
+        out=gpu.Warp(warp,source.Get(),target.Get(),Identity,slot^=1,&still,&drawn);
+        from(2,15,4,true,"keep off: the drawn eye's wall everywhere it reaches");
     }
     {   // DLSS: the scene drawn into the top-left quarter of a depth twice the size
         auto big=gpu.Texture(side*2,side*2,DXGI_FORMAT_R32_FLOAT,D3D12_RESOURCE_FLAG_NONE,D3D12_RESOURCE_STATE_COPY_DEST);
@@ -292,7 +333,72 @@ static void Move(Gpu& gpu,bool typeless) {
         framevr::TurnDepth corner=moved;corner.depth=big.Get();corner.scale[0]=corner.scale[1]=.5f;
         expect(gpu.Warp(warp,source.Get(),target.Get(),Identity,slot^=1,&corner),0,56,4,"the depth read from its drawn corner");
     }
-    std::printf("Turn depth GPU pass passed (%s target): wall, sky, occlusion, edge, carried, the drawn eye's picture, drawn corner\n",typeless?"typeless":"typed");
+    std::printf("Turn depth GPU pass passed (%s target): wall, sky, occlusion, edge, carried, the drawn eye's picture to the pixel, a thin blade, this eye's own where the surface is the same, drawn corner\n",typeless?"typeless":"typed");
+}
+
+// Near things only (TurnDepth::keepNear): a 256-pixel wall 4 units away, a
+// post 2 units away in columns 96-127, the drawn eye 0.125 units to the left
+// (the post goes 8 px, the wall 4). This eye's own picture is kept where it
+// shows the same wall within reach (32 px, two 16-px blocks) of the post -
+// as the drawn eye saw it, then as this eye did - and the drawn eye's
+// picture is taken everywhere else.
+static void KeepNear(Gpu& gpu,bool typeless) {
+    framevr::TurnWarp warp;
+    Check(warp.Initialize(gpu.device.Get(),DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,nullptr)&&warp.DepthReady()&&warp.NearReady(),"pipelines");
+    constexpr UINT side=256;constexpr float nearPlane=1;
+    const auto texel=[](UINT x,UINT y){return x|(y&255)<<8|0x80u<<16|0xffu<<24;};
+    const auto other=[](UINT x,UINT y){return x|(y&255)<<8|0x30u<<16|0xffu<<24;};
+    std::vector<uint32_t> own(side*side),pixels(side*side);
+    for(UINT y=0;y<side;++y)for(UINT x=0;x<side;++x){own[y*side+x]=texel(x,y);pixels[y*side+x]=other(x,y);}
+    auto source=gpu.Texture(side,side,DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,D3D12_RESOURCE_FLAG_NONE,D3D12_RESOURCE_STATE_COPY_DEST);
+    auto picture=gpu.Texture(side,side,DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,D3D12_RESOURCE_FLAG_NONE,D3D12_RESOURCE_STATE_COPY_DEST);
+    auto target=gpu.Texture(side,side,typeless?DXGI_FORMAT_R8G8B8A8_TYPELESS:DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,D3D12_RESOURCE_STATE_RENDER_TARGET);
+    gpu.Upload(source.Get(),own,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    gpu.Upload(picture.Get(),pixels,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    const auto distances=[&](bool post){
+        std::vector<uint32_t> d(side*side);
+        for(UINT y=0;y<side;++y)for(UINT x=0;x<side;++x){const float v=nearPlane/(post&&x>=96&&x<128?2.f:4.f);std::memcpy(&d[y*side+x],&v,4);}
+        auto texture=gpu.Texture(side,side,DXGI_FORMAT_R32_FLOAT,D3D12_RESOURCE_FLAG_NONE,D3D12_RESOURCE_STATE_COPY_DEST);
+        gpu.Upload(texture.Get(),d,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE|D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        return texture;
+    };
+    const auto withPost=distances(true),wallOnly=distances(false);
+    const float q=std::atan(1.f);const Fov square{-q,q,-q,q};
+    framevr::TurnDepth still;still.format=DXGI_FORMAT_R32_FLOAT;still.nearPlane=nearPlane;still.drawnFov=still.nowFov=square;
+    still.move=framevr::TurnMove({0,0,0},{0,0,0,1},{0,0,0},{0,0,0,1});
+    framevr::TurnDepth drawn=still;drawn.image=picture.Get();drawn.apart=.125f;
+    drawn.move=framevr::TurnMove({0,0,0},{0,0,0,1},{.125f,0,0},{0,0,0,1});
+    drawn.keep=framevr::TurnEdgePixels;drawn.keepNear=2;drawn.keepReach=32;   // the post parts from the wall by 4 px
+    std::vector<uint32_t> out;int slot=0;
+    const auto from=[&](UINT a,UINT b,int shift,bool drawnEye,const char* what) {
+        bool same=true;
+        for(UINT y=0;y<side;y+=7)for(UINT x=a;x<b;++x) {
+            const uint32_t want=drawnEye?other(x+shift,y):texel(x,y);
+            if(!Same(out[y*side+x],want)){if(same)std::printf("%s: pixel %u,%u = %08x, expected %08x\n",what,x,y,out[y*side+x],want);same=false;}
+        }
+        Check(same,what);
+    };
+    // The post moved in: the drawn eye shows it, this eye's own the wall alone.
+    // Round where the drawn eye saw it (columns 64-159) the wall stays this eye's.
+    drawn.depth=withPost.Get();still.depth=wallOnly.Get();
+    out=gpu.Warp(warp,source.Get(),target.Get(),Identity,slot^=1,&still,&drawn);
+    from(2,56,4,true,"far from the post the drawn eye's wall");
+    from(62,86,0,false,"within reach of the post, as the drawn eye saw it, this eye's own wall");
+    from(90,118,8,true,"the post from the drawn eye");
+    from(126,154,0,false,"within reach right of it, this eye's own wall");
+    from(160,250,4,true,"past the reach the drawn eye's wall again");
+    // The post moved away: this eye's own showed it, the drawn eye the wall
+    // alone. Round where this eye saw it the wall stays its own: its grid
+    // draws the post's edges out over a cell, into the blocks either side,
+    // so from those (columns 48-175).
+    drawn.depth=wallOnly.Get();still.depth=withPost.Get();
+    out=gpu.Warp(warp,source.Get(),target.Get(),Identity,slot^=1,&still,&drawn);
+    from(2,44,4,true,"far from it the drawn eye's wall");
+    from(50,92,0,false,"within reach of the post, as this eye saw it, its own wall");
+    from(98,126,4,true,"where the post was: the drawn eye's wall");
+    from(134,174,0,false,"within reach right of it, its own wall");
+    from(180,250,4,true,"past the reach the drawn eye's wall again");
+    std::printf("Near things GPU pass passed (%s target): this eye's own kept within reach of a near thing as either eye saw it, the drawn eye's elsewhere\n",typeless?"typeless":"typed");
 }
 
 // IEEE half for the interface's texels: 0 and normal values only.
@@ -301,6 +407,74 @@ static uint16_t Half(float f) {
     uint32_t b;std::memcpy(&b,&f,4);
     return uint16_t(((b>>16)&0x8000u)|((((b>>23)&0xffu)-112u)<<10)|((b>>13)&0x3ffu));
 }
+// The game's effects (TurnDepth::keepEffects): a 256-pixel wall 4 units away
+// in both eyes, the drawn eye 0.125 units to the left (the wall goes 4 px).
+// The drawn eye's effects layer has something in columns 96-127 (its first
+// target), this eye's in 160-191 (its second, left by the game to be copied
+// from). This eye's own picture is kept where the pixel comes from the drawn
+// eye's effect, and where this eye's own is; the drawn eye's elsewhere.
+static void KeepEffects(Gpu& gpu,bool typeless) {
+    framevr::TurnWarp warp;
+    Check(warp.Initialize(gpu.device.Get(),DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,nullptr)&&warp.DepthReady()&&warp.EffectsReady(),"pipelines");
+    constexpr UINT side=256;constexpr float nearPlane=1;
+    const auto texel=[](UINT x,UINT y){return x|(y&255)<<8|0x80u<<16|0xffu<<24;};
+    const auto other=[](UINT x,UINT y){return x|(y&255)<<8|0x30u<<16|0xffu<<24;};
+    std::vector<uint32_t> own(side*side),pixels(side*side);
+    for(UINT y=0;y<side;++y)for(UINT x=0;x<side;++x){own[y*side+x]=texel(x,y);pixels[y*side+x]=other(x,y);}
+    auto source=gpu.Texture(side,side,DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,D3D12_RESOURCE_FLAG_NONE,D3D12_RESOURCE_STATE_COPY_DEST);
+    auto picture=gpu.Texture(side,side,DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,D3D12_RESOURCE_FLAG_NONE,D3D12_RESOURCE_STATE_COPY_DEST);
+    auto target=gpu.Texture(side,side,typeless?DXGI_FORMAT_R8G8B8A8_TYPELESS:DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,D3D12_RESOURCE_STATE_RENDER_TARGET);
+    gpu.Upload(source.Get(),own,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    gpu.Upload(picture.Get(),pixels,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    std::vector<uint32_t> d(side*side);const float v=nearPlane/4;for(auto& t:d)std::memcpy(&t,&v,4);
+    auto wall=gpu.Texture(side,side,DXGI_FORMAT_R32_FLOAT,D3D12_RESOURCE_FLAG_NONE,D3D12_RESOURCE_STATE_COPY_DEST);
+    gpu.Upload(wall.Get(),d,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE|D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    using Texel=std::array<uint16_t,4>;
+    const auto layer=[&](UINT from,UINT to,D3D12_RESOURCE_STATES after) {   // an effect over these columns, nothing elsewhere
+        std::vector<Texel> texels(side*side,Texel{0,0,0,0});
+        for(UINT y=0;y<side;++y)for(UINT x=from;x<to;++x)texels[y*side+x]=Texel{Half(1),Half(.5f),Half(.25f),Half(1)};
+        auto texture=gpu.Texture(side,side,DXGI_FORMAT_R16G16B16A16_FLOAT,D3D12_RESOURCE_FLAG_NONE,D3D12_RESOURCE_STATE_COPY_DEST);
+        gpu.Upload(texture.Get(),texels,after);return texture;
+    };
+    const auto ps=D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,copied=D3D12_RESOURCE_STATE_COPY_SOURCE;
+    const auto drawnEffect=layer(96,128,ps),drawnNone=layer(0,0,ps),ownNone=layer(0,0,copied),ownEffect=layer(160,192,copied);
+    const auto effects=[&](ID3D12Resource* a,ID3D12Resource* b,D3D12_RESOURCE_STATES state,int slot) {
+        ID3D12Resource* const pair[2]={a,b};const D3D12_RESOURCE_STATES states[2]={state,state};
+        bool kept=false;gpu.Record([&]{kept=warp.Effects(gpu.device.Get(),gpu.list.Get(),pair,states,slot,0);});
+        Check(kept,"the effects layer read into its eye's blocks");
+    };
+    effects(drawnEffect.Get(),drawnNone.Get(),ps,1);     // the drawn eye: slot 1
+    effects(ownNone.Get(),ownEffect.Get(),copied,0);     // this eye: slot 0, its layer left as the game left it
+    const float q=std::atan(1.f);const Fov square{-q,q,-q,q};
+    framevr::TurnDepth still;still.format=DXGI_FORMAT_R32_FLOAT;still.nearPlane=nearPlane;still.drawnFov=still.nowFov=square;
+    still.move=framevr::TurnMove({0,0,0},{0,0,0,1},{0,0,0},{0,0,0,1});still.depth=wall.Get();
+    framevr::TurnDepth drawn=still;drawn.image=picture.Get();drawn.apart=.125f;
+    drawn.move=framevr::TurnMove({0,0,0},{0,0,0,1},{.125f,0,0},{0,0,0,1});
+    drawn.keep=framevr::TurnEdgePixels;drawn.keepEffects=.5f;
+    std::vector<uint32_t> out;
+    const auto from=[&](UINT a,UINT b,int shift,bool drawnEye,const char* what) {
+        bool same=true;
+        for(UINT y=0;y<side;y+=7)for(UINT x=a;x<b;++x) {
+            const uint32_t want=drawnEye?other(x+shift,y):texel(x,y);
+            if(!Same(out[y*side+x],want)){if(same)std::printf("%s: pixel %u,%u = %08x, expected %08x\n",what,x,y,out[y*side+x],want);same=false;}
+        }
+        Check(same,what);
+    };
+    out=gpu.Warp(warp,source.Get(),target.Get(),Identity,0,&still,&drawn);
+    from(2,88,4,true,"away from the effects the drawn eye's picture");
+    from(94,122,0,false,"where the drawn eye's effect would land, this eye's own");
+    from(128,156,4,true,"between them the drawn eye's again");
+    from(162,190,0,false,"where this eye's own effect is, its own");
+    from(196,250,4,true,"past them the drawn eye's again");
+    drawn.keepEffects=1.5f;   // above the effects' level: none count
+    out=gpu.Warp(warp,source.Get(),target.Get(),Identity,0,&still,&drawn);
+    from(2,250,4,true,"effects below the level keep nothing");
+    drawn.keepEffects=.5f;warp.ForgetEffects(0);warp.ForgetEffects(1);
+    out=gpu.Warp(warp,source.Get(),target.Get(),Identity,0,&still,&drawn);
+    from(2,250,4,true,"with no effects found, effects only keeps nothing - not everything");
+    std::printf("Effects GPU pass passed (%s target): this eye's own kept where either eye's effects layer has something, the drawn eye's elsewhere\n",typeless?"typeless":"typed");
+}
+
 // The game's interface laid back over a picture (TurnWarp::Interface), as the
 // game's last pass lays it: picture * alpha + colour, in the picture's UNORM
 // encoding, its alpha kept; nothing laid where the layer is not.
@@ -352,5 +526,5 @@ static void Lay(Gpu& gpu,bool typeless) {
 
 int main(int argc,char** argv) {try {
     const bool typeless=argc>1&&!std::strcmp(argv[1],"--typeless");
-    Math();Gpu gpu;Turn(gpu,typeless);Move(gpu,typeless);Lay(gpu,typeless);return 0;
+    Math();Gpu gpu;Precompiled(gpu);Turn(gpu,typeless);Move(gpu,typeless);KeepNear(gpu,typeless);KeepEffects(gpu,typeless);Lay(gpu,typeless);return 0;
 }catch(const std::exception& e){std::fprintf(stderr,"%s\n",e.what());return 1;}}

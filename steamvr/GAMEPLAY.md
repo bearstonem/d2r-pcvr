@@ -302,7 +302,26 @@ placement. Title and character-selection screens keep the existing flat panel.
 | Native menu navigation | Sticks or face buttons; triggers and grips map LT/RT/LB/RB in native navigation |
 | Native Ctrl modifier | Hold left trigger while clicking |
 | Native Shift modifier | Hold right grip while clicking |
+| Push / pull the panel | Point at it, hold right grip and move that hand toward or away from you; release to leave it there |
 | Back / close | Right B, or the native close button |
+
+Game menus push and pull only: the panel moves nearer or farther by exactly
+the hand's travel toward or away from it, between 0.40 m and 1.50 m, and
+ignores sideways, vertical and turning movement. It starts only when the right
+laser is on the panel and the hand travels 3 cm toward or away before any
+click, so a still grip followed by a trigger click stays a native Shift-click;
+a trigger squeezed while moving does nothing until released. The laser and
+clicks follow the moved panel. Every in-game and main/title menu reopens at
+that distance until the game is restarted or **VR Settings > HUD > Menu
+distance** is changed. The handheld quest log keeps its left-grip placement.
+
+The VR Settings panel is grabbed like a real window with the same right grip:
+the point you grabbed stays on the end of the laser. Moving the hand without
+turning it slides the panel 1:1 (up, down, left, right, nearer, farther);
+tilting the controller up/down or turning it left/right swings the panel
+around your hand by the same angle, but it never rolls. Tilt stops at 60
+degrees and the panel stays 0.40 m to 1.50 m from your head.
+It reopens in the same place relative to where you face until restart.
 
 Sticks/face buttons select native menu navigation without an idle laser stealing
 focus. Release native controls and deliberately move the ray across the surface
@@ -348,17 +367,20 @@ pending.
 
 ### In-headset VR settings
 
-The panel opens in front of the headset and stays in room space. It has six
+The panel opens in front of the headset and stays in room space. It has nine
 tabs and a **Reset eye height** button:
 
 | Tab | Contents |
 |---|---|
 | Controls | Left/right controller reference for movement, menus, melee, bow, spells, potions, holsters and height reset |
 | VR | Controller labels, motion combat, seated belt position, dominant hand, smooth/snap turning, belt height and reach, weapon skill gestures and ordinary mob bars |
-| Video | Foveation Off / Fixed / Eye tracked and its strength (Low / Medium / High / Maximum), actual VR source size, added sky, fog, dungeon ceilings, terrain and object draw distances, VR render resolution (Headset by default), desktop one eye, stereo rendering (Both eyes / By turns / Replay, By turns by default), a Defer GPU wait button while frames wait for the GPU, and warnings while the game's Vertical Sync is on or its anti-aliasing is not FXAA |
+| Video | Added sky, fog and dungeon ceilings |
 | HUD | Health/mana location and tilt, optional resource alerts, navigation location, menu distance and tooltip timing |
 | Combat | Melee rules, swing hit speed and thrust speed |
+| Aim | Outline for the monster you aim at: strength, static or by-range colors, and the static color |
 | Haptics | Overall strength and separate melee, bow draw, bow/throw release, spell, interaction and resource-alert strengths; tests follow each action's hands |
+| Perf | Everything that changes the frame rate: stereo rendering (Both eyes / By turns, By turns by default), VR render resolution (Headset by default), terrain and object draw distances, foveation Off / Fixed / Eye tracked and its strength, ReShade depth (after a restart) and desktop one eye; the actual VR source size, a Defer GPU wait button while frames wait for the GPU, and warnings while the game's Vertical Sync is on or its anti-aliasing is not FXAA. Under them, each second's frame rate and where the frame's time goes, whether the CPU's part fits the headset's frame, and the game's own graphics options |
+| Notes | The last published release's notes, read-only |
 
 Added indoor fog defaults to **Off** for new profiles, preserving the game's
 own lighting and effects, including Tyrael's wings. Outdoor fog keeps its
@@ -943,7 +965,8 @@ instead of a random one. Classic keeps the native roll.
   vignette size, lowering/reset time and blocking rules stay the same. Existing
   custom `guard_strain_per_block` tuning is multiplied, not overwritten. Strain shows as a soft vignette at the
   rim of the view (a pale white light by default; VR Settings > Combat > **Guard strain
-  color** switches it to a black shadow, `guard_strain_dark`, drawn denser by
+  color** switches it to a black shadow, `guard_strain_dark` 1, or hides it, `guard_strain_dark` 2
+  (Off: no light, but strain, guard breaks and chip damage still apply); the black is drawn denser by
   `guard_strain_dark_density` (2.5) so it hides as much as the light, and
   `guard_strain_color` takes any RRGGBB hex, default FFF7EA), beneath the blood on
   the visor, creeping inward as it builds;

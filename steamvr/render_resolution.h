@@ -18,4 +18,6 @@ void UiSizeReady();
 // Called before native UI dispatch; recovery is deferred until after Apply.
 void OptionsApplied();
 void Describe(char* text,size_t capacity,Size source);
+// The game window's own client area in physical pixels; none until attached.
+Size WindowClient();
 }

@@ -176,7 +176,8 @@ doesn't reduce them; resistances still matter.
   keeps blocking; the cost is sight, then chip damage (below). It fades once
   no hit has reached your shield for a moment, even held up, and is gone about
   3 seconds after the last hit; lowering the shield starts the fade at once.
-  **Combat > Guard strain color** switches the light to a black shadow.
+  **Combat > Guard strain color** switches the light to a black shadow, or
+  Off to hide it (strain, guard breaks and chip damage still apply).
   **Guard strain buildup** selects Slow / Medium / Fast: about 20 / 10 / 5
   normal-monster blocks to full strain with default tuning (an act boss: about
   6 / 3 / 2). Medium keeps the original rate.
@@ -366,6 +367,7 @@ aim across the panel. A small hand tremor will not change methods.
 | Context / alternate click | Left Grip + Right Trigger (hold grip first) |
 | Native Ctrl-click shortcut | Hold Left Trigger, then click with Right Trigger; the game chooses drop, sell or transfer for the current panel |
 | Native Shift modifier | Hold Right Grip while using the laser |
+| Push / pull the panel | Point at the panel, hold Right Grip and move that hand toward or away from you; release to leave it there. The VR Settings panel can also be moved and tilted this way |
 | Back / close | Right B, or point and click the panel's close/back button |
 | Tabs / page controls | Point and click the native on-screen controls |
 

@@ -1,4 +1,5 @@
 #include "memory.h"
+#include "guarded_text.h"
 #include <cstdio>
 #include <cstring>
 #include <atomic>
@@ -31,10 +32,33 @@ int main(int argc,char** argv) {
     if(framevr::ReadMemory(out,nullptr,sizeof out))return 7;
     if(framevr::WriteMemory(pages,out,sizeof out))return 11;
     if(framevr::WriteMemory(nullptr,out,sizeof out))return 18;
+    {   // strings one copy per page, never into a page they do not reach
+        auto* text=static_cast<char*>(VirtualAlloc(nullptr,page*2,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
+        if(!text)return 20;
+        int copies=0;
+        auto copy=[&](void* dst,const void* src,size_t size){++copies;return framevr::ReadMemory(dst,src,size);};
+        auto at=[&](size_t offset){return uintptr_t(text)+offset;};
+        char name[96];const int cap=int(sizeof name);
+        std::memcpy(text+100,"bolt_helper",12);
+        if(framevr::ReadText(at(100),name,cap,copy)!=11||std::strcmp(name,"bolt_helper")||copies!=1)return 21;
+        std::memset(text+page-4,'x',4);std::memcpy(text+page,"yz",3);   // across the page line, both readable
+        copies=0;if(framevr::ReadText(at(page-4),name,cap,copy)!=6||std::strcmp(name,"xxxxyz")||copies!=2)return 22;
+        std::memset(text,'a',page);   // no NUL within the cap: its first cap-1 characters
+        if(framevr::ReadText(at(0),name,cap,copy)!=cap-1||name[cap-1]||name[cap-2]!='a')return 23;
+        DWORD before=0;if(!VirtualProtect(text+page,page,PAGE_NOACCESS,&before))return 24;
+        std::memcpy(text+page-4,"cog",4);   // its NUL on the last byte of the page
+        if(framevr::ReadText(at(page-4),name,cap,copy)!=3||std::strcmp(name,"cog"))return 25;
+        std::memset(text+page-4,'x',4);   // runs on into the unreadable page
+        if(framevr::ReadText(at(page-4),name,cap,copy)!=-1)return 26;
+        std::memcpy(text+page-3,"a\x01z",3);copies=0;   // junk: refused where met, the next page never read
+        if(framevr::ReadText(at(page-3),name,cap,copy)!=-1||copies!=1)return 29;
+        if(framevr::ReadText(0x1000,name,cap,copy)!=-1)return 27;
+        if(!VirtualFree(text,0,MEM_RELEASE))return 28;
+    }
     if(exceptions.load()!=0)return 19; // errors stay inside the OS, not D2R's crash handler
     RemoveVectoredExceptionHandler(observer);
     // A caller may request a result file when stdout is not forwarded.
     FILE* f=argc>1?std::fopen(argv[1],"w"):stdout;if(!f)return 8;
-    std::fputs("Checked local copies succeed; inaccessible, freed, null, read-only and boundary-crossing buffers fail without entering application exception handlers.\n",f);
+    std::fputs("Checked local copies succeed; inaccessible, freed, null, read-only and boundary-crossing buffers fail without entering application exception handlers; strings are copied a page at a time, never past their own page or a byte that is not printable.\n",f);
     if(f!=stdout)std::fclose(f);return 0;
 }

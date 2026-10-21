@@ -49,6 +49,26 @@ inline float MenuDistance(int preset,bool main=false) {
 }
 struct Size {float width,height;};
 struct Placement {math::Vec position;math::Quat orientation;};
+// A grabbed panel, kept in its default placement's own frame so it reopens in
+// the same spot relative to where you face. Yaw then pitch: it never rolls.
+struct Offset {math::Vec position{};float yaw=0,pitch=0;};
+// A grabbed menu may sit a little inside and beyond the presets (.55-1.30 m).
+constexpr float NearDistance=.40f,FarDistance=1.50f,MaxTilt=1.0471976f;
+inline math::Quat Pitch(float angle) {return {std::sin(angle*.5f),0,0,std::cos(angle*.5f)};}
+inline Placement Apply(Placement base,Offset o) {
+    return {base.position+math::Rotate(base.orientation,o.position),
+        math::Multiply(base.orientation,math::Multiply(math::Yaw(o.yaw),Pitch(o.pitch)))};
+}
+// Moves only the offset's position, along the line from the head, so a panel
+// can never be pushed out of reach or into the face.
+inline Offset Limit(Placement base,Offset o,math::Vec head) {
+    const auto v=Apply(base,o).position-head;
+    const float n=std::sqrt(math::Dot(v,v)),d=std::clamp(n,NearDistance,FarDistance);
+    if(n==d)return o;
+    const auto direction=n>1e-4f?v*(1/n):math::Rotate(base.orientation,{0,0,-1});
+    o.position=math::Rotate(math::Conjugate(base.orientation),head+direction*d-base.position);
+    return o;
+}
 // A valid but untracked startup pose may still be at the reference-space origin.
 // Never latch that pose into a persistent menu. Once placed, keep it world-fixed.
 inline bool CanAnchor(bool placed,bool rendering,bool focused,bool tracked) {
@@ -93,6 +113,60 @@ struct MouseGate {
         return e;
     }
     void Suspend(){held[0]=held[1]=true;down[0]=down[1]=false;}
+};
+// Right grip on the laser's panel grabs it like a window: it follows the
+// hand's room-space travel 1:1, and the hand's heading/pitch changes turn it
+// about the hand; hand roll is ignored. Grip-then-trigger stays native Shift-click: moving needs 3 cm of
+// travel before any click, and a click first leaves the grip as Shift. Once
+// moving, the panel catches up with the travel since the press. A trigger
+// squeezed while moving is consumed until released.
+// 2026-10-19: the game's own menus have black backgrounds, so they only
+// push/pull: pass their default distance and only travel along the facing
+// axis counts, keeping that distance within the limits. 0 grabs freely.
+struct Grab {
+    enum class State {Idle,Armed,Moving,Held,Spent} state=State::Idle;
+    Placement from{};Offset start{};
+    static constexpr float Slack=.03f;
+    static float HandPitch(math::Quat q){return std::asin(std::clamp(math::Rotate(q,{0,0,-1}).y,-1.f,1.f));}
+    bool Step(bool grip,bool hit,bool click,Placement hand,Placement base,math::Vec head,Offset& offset,float pushOnly=0) {
+        auto travel=math::Rotate(math::Conjugate(base.orientation),hand.position-from.position);
+        if(pushOnly>0)travel={0,0,travel.z};
+        switch(state) {
+        case State::Idle:if(grip){state=hit&&!click?State::Armed:State::Spent;from=hand;start=offset;}break;
+        case State::Armed:
+            if(!grip)state=State::Idle;
+            else if(click)state=State::Spent;
+            else if(math::Dot(travel,travel)>Slack*Slack)state=State::Moving;
+            if(state!=State::Moving)break;
+            [[fallthrough]];
+        case State::Moving:
+            if(!grip){state=click?State::Held:State::Idle;break;}
+            if(pushOnly>0){
+                const float distance=std::clamp(pushOnly-start.position.z-travel.z,NearDistance,FarDistance);
+                offset={{0,0,pushOnly-distance},0,0};break;
+            }
+            {
+                // 2026-10-19: turning the panel about its own centre made an
+                // arm sweep (which turns the controller too) swing it around a
+                // point in front of it. The grabbed point now stays fixed in the
+                // hand's roll-free frame, like holding a real window.
+                const float heading=math::Heading(from.orientation),pitch=HandPitch(from.orientation);
+                const float yaw=math::Heading(hand.orientation)-heading;
+                offset.pitch=std::clamp(start.pitch+HandPitch(hand.orientation)-pitch,-MaxTilt,MaxTilt);
+                const auto before=math::Multiply(math::Yaw(heading),Pitch(pitch));
+                const auto after=math::Multiply(math::Yaw(heading+yaw),Pitch(pitch+offset.pitch-start.pitch));
+                const auto held=math::Rotate(math::Conjugate(before),Apply(base,start).position-from.position);
+                offset.position=math::Rotate(math::Conjugate(base.orientation),hand.position+math::Rotate(after,held)-base.position);
+                offset.yaw=std::remainder(start.yaw+yaw,6.2831853f);
+                offset=Limit(base,offset,head);
+            }
+            break;
+        case State::Held:if(!click)state=grip?State::Spent:State::Idle;break;
+        case State::Spent:if(!grip)state=State::Idle;break;
+        }
+        return state==State::Moving||state==State::Held;
+    }
+    void Suspend(){state=State::Spent;}
 };
 struct ScrollGate {
     double next=0;int direction=0;

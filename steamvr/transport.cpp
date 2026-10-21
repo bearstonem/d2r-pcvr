@@ -70,6 +70,7 @@
 #include "../vr/panel_input.h"
 #include "d2r_vr_state.h"
 #include "foveation.h"
+#include "effects_layer.h"
 #include "gaze.h"
 #include "d2rcam.h"
 #include "profile.h"
@@ -112,6 +113,9 @@ std::atomic<double> maxPipelineMs{0};
 std::atomic<bool> deferredWait{false};
 std::atomic<bool> symmetricProjection{true};
 std::atomic<bool> turnsFromDrawnEye{true};
+std::atomic<int> turnsKeepOwn{3};   // ConfigureTurnsKeepOwn: 0 off, 1 near things only, 2 everywhere, 3 the game's effects, 4 near things and effects
+std::atomic<float> turnsKeepGap{48},turnsKeepReach{96};   // ConfigureTurnsKeepNear: a 4096-wide eye's pixels
+std::atomic<float> turnsEffectsLevel{.02f},turnsEffectsReach{32};   // ConfigureTurnsKeepEffects: the layer's level; a 4096-wide eye's pixels
 std::atomic<bool> eyeTracking{false};
 std::atomic<bool> motionControls{false};
 // Stamped each focused XR input while motion controls are on (menus included).
@@ -274,11 +278,10 @@ settings::InputGate settingsInputGate;
 settings::Hit settingsHover;
 std::atomic<bool> settingsOpen{false};
 bool settingsAtlasPending=false,settingsImageReady=false;
-uint64_t settingsPaintRevision=~0ull,settingsSession=0;
-int settingsPaintHover=-1,settingsPaintStatus=-1,settingsPaintGame=-1;
+uint64_t settingsSession=0;
 settings::HoverHelp settingsHelp;
-int settingsPaintHelp=settings::NoHelp,settingsHelpVisible=settings::NoHelp;
-// The game's own video options for the Video page's warnings, re-read at most
+int settingsHelpVisible=settings::NoHelp;
+// The game's own video options for the Perf page's warnings and line, re-read at most
 // every 2 s while VR Settings is open and only when the game has saved them:
 // the mod's own Settings.json (settings::ModSettingsFile), or the unmodded
 // game's while the mod has none yet.
@@ -313,6 +316,38 @@ settings::GameVideo GameVideoOptions(ULONGLONG now) {
     return seen;
 }
 ULONGLONG settingsPaintAt=0;
+// VR Settings and body calibration are painted on a worker: GDI text over the
+// whole 1744 x 1024 page, with a new bitmap and fonts each time, held the frame
+// thread on every hover change. The frame thread uploads the finished picture,
+// and the painted state is what that picture shows, so a click still waits for
+// the page it lands on.
+struct SettingsPaintJob {
+    settings::Model model;settings::Hit hover;std::string status;controllers::Labels detected;
+    int help=settings::NoHelp;settings::GameVideo game{};bool monoAudio=false;
+    settings::PerformanceReadout performance{};bool depthRestart=false;
+    bool calibrating=false;calibration::Flow body;
+};
+struct SettingsPainted {std::vector<uint8_t> pixels;double paintMs=0;};
+LatestWorker<SettingsPaintJob,SettingsPainted> settingsPainter([](const SettingsPaintJob& job) {
+    const auto start=hookmetrics::Nanos();
+    auto pixels=job.calibrating?settings::Paint(job.model,{},"",&job.body):
+        settings::Paint(job.model,job.hover,job.status.c_str(),nullptr,job.detected,job.help,job.game,job.monoAudio,job.performance,job.depthRestart);
+    return SettingsPainted{std::move(pixels),double(hookmetrics::Nanos()-start)/1e6};
+});
+struct SettingsPicture {
+    uint64_t revision=~0ull;int hover=-1,status=-1,help=settings::NoHelp,game=-1;
+    uint64_t performance=0;bool depthRestart=false;settings::GameVideo gameVideo{};   // the Perf page's
+    bool operator==(const SettingsPicture&)const=default;
+};
+SettingsPicture settingsPainted;     // what the picture shown has
+SettingsPicture settingsRequested;   // what the outstanding settings request paints
+int calibrationRequestedKey=-1;      // the same for calibration
+// The Perf page's numbers: each second's frames as NoteFrame gets them.
+struct PerformanceWindow {double game=0,wait=0,draw=0,vr=0,period=0;uint32_t frames=0,periods=0,turns=0;ULONGLONG since=0,last=0;} performanceWindow;
+double performanceBudget=0;   // the headset's frame, from the last frame that had one
+settings::PerformanceReadout performance;
+uint64_t performanceSerial=0;ULONGLONG performanceAt=0;
+uint64_t settingsPaintRequest=0;
 XrPosef settingsPose{};
 constexpr float settingsWidth=.95f,settingsHeight=settingsWidth*settings::Height/settings::Width;
 DXGI_FORMAT atlasFormat=DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
@@ -486,6 +521,13 @@ std::array<bool,2> turnKept{};
 bool turnImagesFailed=false,turnWarpTried=false;
 DXGI_FORMAT turnFormat=DXGI_FORMAT_UNKNOWN;
 TurnWarp turnWarp;
+// Built once in the background as a session is set up, long before a frame
+// first turns an eye: that compiles its shaders for the process and has the
+// driver build its pipelines once. On the render thread these held it about
+// 215 ms in a new process and 112 ms at every later session; then about 3 ms
+// (RTX 5090 / Ryzen 9 5950X, 2026-10-20).
+struct TurnWarmJob {ComPtr<ID3D12Device> device;DXGI_FORMAT format=DXGI_FORMAT_UNKNOWN;};
+LatestWorker<TurnWarmJob,bool> turnCompiler([](const TurnWarmJob& job){TurnWarp warm;return warm.Initialize(job.device.Get(),job.format,nullptr);});
 // By turns: each eye's scene depth as drawn, beside its kept image (KeepDepth).
 bool keepDepth=false;
 struct KeptDepth {ComPtr<ID3D12Resource> texture;DXGI_FORMAT format=DXGI_FORMAT_UNKNOWN;float scale[2]{1,1};bool ok=false;};
@@ -570,9 +612,28 @@ constexpr float panelWidth=2.0f,panelDistance=panels::MainDistance;
 XrSwapchain pointerChain=XR_NULL_HANDLE;
 XrPosef beamPose{},dotPose{};
 float beamLength=0;
+// 2026-10-19: one remembered push/pull for every game menu, kept as an
+// offset on each default placement (the main menu sits 15 cm beyond the
+// workspace). Choosing another Menu distance preset clears it. VR Settings
+// keeps its own free grab, relative to where you face when it opens.
+panels::Grab panelGrab;
+panels::Offset menuOffset,settingsOffset;
+panels::Placement uiBase{},menuBase{},settingsBase{};
 
 math::Quat Q(XrQuaternionf q) { return {q.x,q.y,q.z,q.w}; }
 math::Vec V(XrVector3f p) { return {p.x,p.y,p.z}; }
+XrPosef PanelPose(panels::Placement p) {
+    return {{p.orientation.x,p.orientation.y,p.orientation.z,p.orientation.w},{p.position.x,p.position.y,p.position.z}};
+}
+XrPosef Placed(panels::Placement base,panels::Offset offset) {
+    return PanelPose(panels::Apply(base,panels::Limit(base,offset,V(head.position))));
+}
+// The grabbing hand is the laser's own pose; hit tests read the moved pose.
+bool GrabPanel(XrPosef& pose,panels::Placement base,panels::Offset& offset,bool grip,bool hit,bool click,const XrPosef& hand,float pushOnly=0) {
+    const bool owned=panelGrab.Step(grip,hit,click,{V(hand.position),Q(hand.orientation)},base,V(head.position),offset,pushOnly);
+    if(owned)pose=PanelPose(panels::Apply(base,offset));
+    return owned;
+}
 void Say(const char* msg) { if(logger) logger(msg); }
 struct PipelineStart {reshade::api::device* device=nullptr;uint64_t layout=0;double at=0;};
 thread_local PipelineStart pipelineStart;
@@ -672,7 +733,7 @@ void ReleasePanelInput() {
         if(held){INPUT up{};up.type=INPUT_MOUSE;up.mi.dwFlags=i?MOUSEEVENTF_RIGHTUP:MOUSEEVENTF_LEFTUP;SendInput(1,&up,sizeof up);held=false;}
     }
     PanelModifier(VK_CONTROL,false,controlDown);PanelModifier(VK_SHIFT,false,shiftDown);
-    panelMouse.Suspend();panelScroll={};
+    panelMouse.Suspend();panelScroll={};panelGrab.Suspend();
 }
 weaponskills::ContactContext ShieldContext(const melee::Sample& sample,uint64_t session) {
     return {session,sample.epoch,sample.skillContext,sample.equipment,sample.skillSlot,sample.skillOwner};
@@ -959,6 +1020,7 @@ bool SetupGameplay(DXGI_FORMAT eyeFormat) {
     if(!interactionPainter.Start())Say("Frame UI: background painter unavailable; interaction artwork cannot refresh");
     if(!bloodPainter.Start())Say("Frame blood visor: background painter unavailable; blood stays hidden");
     if(!strainPainter.Start())Say("Frame guard strain: background painter unavailable; the light stays hidden");
+    if(!settingsPainter.Start())Say("Frame VR settings: background painter unavailable; VR Settings and calibration cannot be shown");
     const auto compassPixels=compass::Paint();
     compassAtlasReady=!compassPixels.empty()&&UploadAtlas(compassChain,eyeFormat,compass::Width,compass::Height,compassPixels);
     if(!compassAtlasReady)Say("Frame wrist compass: static atlas unavailable");
@@ -1103,6 +1165,9 @@ bool Initialize(reshade::api::command_queue* rq,reshade::api::swapchain* swap) {
     tracking.data->version=D2RVR_SHARED_VERSION;pad.data->version=BW_PAD_MIRROR_VERSION;actions.data->version=D2RVR_ACTIONS_VERSION;
     gameSwapchain=swap;
     char b[160];std::snprintf(b,sizeof b,"Frame OpenXR: D3D12 session ready, eyes %ux%u format %d (game format %d)",width,height,int(eyeFormat),int(format));Say(b);
+    // Only for a session that started: a failed one is shut down at once, and
+    // that would wait here for the warm-up.
+    if(turnCompiler.Start())turnCompiler.Submit({device,turnFormat});   // else the first turned eye builds it all
     return true;
 }
 void UpdateControllerLabels() {
@@ -1197,6 +1262,11 @@ void MenuPointer(const menus::Pad& controls) {
         Say(menuNavigation.Native()?"Frame panels: native controller navigation":"Frame panels: laser navigation");
     const bool laser=!menuNavigation.Native();
     if(!laser){panelinput::UseController();pointerVisible=pointerHit=false;}
+    // The handheld journal has its own left-grip placement.
+    const bool grip=aimTracked&&laser&&!journalMode&&(controls.buttons&menus::RightBumper);
+    const bool grabbing=GrabPanel(spatialMode?uiPose:menuPose,spatialMode?uiBase:menuBase,menuOffset,
+        grip,pointerHit,pressed||mouseDown||rightMouseDown,aim.pose,
+        panels::MenuDistance(int(vrsettings::Read().values[settings::MenuDistance]),!spatialMode));
     const bool active=uiActive&&focused&&aimTracked&&laser;
     if(active)panelinput::OwnPointer();
     if(active&&pointerHit) {
@@ -1211,8 +1281,8 @@ void MenuPointer(const menus::Pad& controls) {
     }
     const bool modifiers=active&&(pointerHit||mouseDown||rightMouseDown);
     PanelModifier(VK_CONTROL,modifiers&&controls.lt>140,controlDown);
-    PanelModifier(VK_SHIFT,modifiers&&(controls.buttons&menus::RightBumper),shiftDown);
-    laserClick.Step(pressed,(controls.buttons&menus::LeftBumper)!=0);
+    PanelModifier(VK_SHIFT,modifiers&&!grabbing&&(controls.buttons&menus::RightBumper),shiftDown);
+    laserClick.Step(pressed&&!grabbing,(controls.buttons&menus::LeftBumper)!=0);
     const auto edges=panelMouse.Step(active,pointerHit,laserClick.Left(),laserClick.Right());
     panelinput::ItemHover(active,pointerHit,panelMouse.down[0]||panelMouse.down[1]);
     for(int i=0;i<2;++i) {
@@ -1374,7 +1444,7 @@ gameplay::MeleeStyle MotionMeleeStyle() {
     }
 }
 void ResetSettingsInput() {
-    settingsHelp.Clear();settingsPaintHelp=settingsHelpVisible=settings::NoHelp;
+    settingsHelp.Clear();settingsPainted.help=settingsHelpVisible=settings::NoHelp;
     hapticPulses.Cancel();
     spellHaptics.Clear();
     panelinput::WorldInput(false);
@@ -1386,11 +1456,11 @@ void ResetSettingsInput() {
     ReleasePanelInput();
 }
 void OpenSettings() {
-    settingsImageReady=false;settingsPaintRevision=~0ull;settingsPaintAt=0;
+    settingsImageReady=false;settingsPainted={};settingsPaintAt=0;settingsPaintRequest=0;settingsRequested={};
     settingsModel.Open(vrsettings::Read());settingsOpen=true;settingsSession=gamestate::LocalPlayer();
     const auto q=math::Yaw(math::Heading(Q(head.orientation)));
-    const auto p=V(head.position)+math::Rotate(q,{0,-.06f,-1.05f});
-    settingsPose=XrPose({p,q});settingsHover={};ResetSettingsInput();
+    settingsBase={V(head.position)+math::Rotate(q,{0,-.06f,-1.05f}),q};
+    settingsPose=Placed(settingsBase,settingsOffset);settingsHover={};ResetSettingsInput();
     Say("Frame VR settings: panel opened");
 }
 void CloseSettings() {
@@ -1400,11 +1470,26 @@ void CloseSettings() {
 void OpenBodyCalibration() {
     if(settingsModel.open)CloseSettings();
     bodyCalibration.Begin();calibrationRelease.Consume();calibrationPrompted=true;
-    calibrationSession=gamestate::LocalPlayer();calibrationPaintKey=-1;
-    settingsOpen=true;settingsImageReady=false;settingsPaintAt=0;
+    calibrationSession=gamestate::LocalPlayer();calibrationPaintKey=calibrationRequestedKey=-1;
+    settingsOpen=true;settingsImageReady=false;settingsPaintAt=0;settingsPaintRequest=0;
     const auto q=math::Yaw(math::Heading(Q(head.orientation)));
     settingsPose=XrPose({V(head.position)+math::Rotate(q,{0,-.06f,-1.05f}),q});
     ResetSettingsInput();Say("Frame body calibration: started; upright T-pose + both triggers; Right B cancels");
+}
+// Uploads the picture last asked of the settings painter once it is done;
+// true if it was uploaded.
+bool TakeSettingsPicture() {
+    SettingsPainted painted;
+    if(!settingsPaintRequest||settingsAtlasPending||atlasUploads.size()>=3||!settingsPainter.Take(settingsPaintRequest,painted))return false;
+    settingsPaintRequest=0;
+    const auto uploadStart=Milliseconds();
+    const bool uploaded=!painted.pixels.empty()&&UploadAtlas(settingsChain,atlasFormat,settings::AtlasWidth,settings::Height,painted.pixels,true,&settingsAtlasPending);
+    static ULONGLONG reportAt=0;const auto now=GetTickCount64();
+    if(uploaded&&now>=reportAt) {
+        char message[160];std::snprintf(message,sizeof message,"Frame VR settings: page painted in %.2f ms on the background painter, uploaded in %.2f ms",
+            painted.paintMs,Milliseconds()-uploadStart);Say(message);reportAt=now+5000;
+    }
+    return uploaded;
 }
 void CalibrationInput() {
     if(!bodyCalibration.Active())return;
@@ -1434,16 +1519,16 @@ void CalibrationInput() {
         }else bodyCalibration.Failed();
     }
     if(!bodyCalibration.Active()){
-        settingsOpen=false;settingsImageReady=false;settingsPaintRevision=~0ull;ResetSettingsInput();
+        settingsOpen=false;settingsImageReady=false;settingsPainted={};ResetSettingsInput();
         Say("Frame body calibration: closed; held input consumed");return;
     }
     const int key=int(bodyCalibration.hint)*100+int(bodyCalibration.progress*20);
     const auto now=GetTickCount64();
-    if(key!=calibrationPaintKey&&now>=settingsPaintAt&&!settingsAtlasPending&&atlasUploads.size()<3){
-        auto pixels=settings::Paint(settingsModel,{},"",&bodyCalibration);
-        if(!pixels.empty()&&UploadAtlas(settingsChain,atlasFormat,settings::AtlasWidth,settings::Height,pixels,true,&settingsAtlasPending))calibrationPaintKey=key;
-        settingsPaintAt=now+100;
+    if(key!=calibrationPaintKey&&now>=settingsPaintAt&&!settingsPaintRequest){
+        SettingsPaintJob job;job.model=settingsModel;job.calibrating=true;job.body=bodyCalibration;
+        settingsPaintRequest=settingsPainter.Submit(std::move(job));calibrationRequestedKey=key;settingsPaintAt=now+100;
     }
+    if(TakeSettingsPicture())calibrationPaintKey=calibrationRequestedKey;
 }
 // Windows Mono audio (HKCU Software\Microsoft\Multimedia\Audio,
 // AccessibilityMonoMixState 1) for the title row's warning, read at most every
@@ -1462,7 +1547,7 @@ bool MonoAudioOn(ULONGLONG now) {
     }
     on=mono;return on;
 }
-void SettingsPointer(const settings::InputGate::Edges& edges) {
+void SettingsPointer(const settings::InputGate::Edges& edges,bool grip) {
     if(!settingsModel.open)return;
     const bool monoAudio=MonoAudioOn(GetTickCount64());
     settingsModel.Observe(vrsettings::Read());settingsHover={};pointerVisible=pointerHit=false;
@@ -1481,7 +1566,8 @@ void SettingsPointer(const settings::InputGate::Edges& edges) {
             helpTarget=settings::HelpAt(settingsModel.page,hit.u,hit.v,settingsModel.controllerMenu,&settingsModel.Get(),monoAudio);
             const auto p=hit.point+math::Rotate(Q(settingsPose.orientation),{0,0,.004f});dotPose.position={p.x,p.y,p.z};}
     }
-    if(edges.click&&pointerHit&&settingsImageReady&&settingsPaintRevision==settingsModel.revision){
+    const bool grabbing=GrabPanel(settingsPose,settingsBase,settingsOffset,grip&&pointerVisible,pointerHit,Float(trigger,0)>.2f,aim.pose);
+    if(edges.click&&!grabbing&&pointerHit&&settingsImageReady&&settingsPainted.revision==settingsModel.revision){
         if(settingsHover.kind==settings::Kind::Close)CloseSettings();
         else if(settingsHover.kind==settings::Kind::Recenter){ResetHeight();MotionPulse(1,haptics::Category::Interaction,.4f,35000000);}
         else if(settingsHover.kind==settings::Kind::Calibrate&&settingsModel.ready&&!settingsModel.Busy()&&!settingsModel.Dirty())OpenBodyCalibration();
@@ -1509,15 +1595,22 @@ void SettingsPointer(const settings::InputGate::Edges& edges) {
     const int help=settingsHelpVisible=settingsHelp.Step(helpTarget,now);
     const auto game=GameVideoOptions(now);
     const int warnings=game.Code()|(monoAudio?4:0);
-    if(now>=settingsPaintAt&&!settingsAtlasPending&&atlasUploads.size()<3&&
-       (settingsPaintRevision!=settingsModel.revision||settingsPaintHover!=hover||settingsPaintStatus!=status||settingsPaintHelp!=help||settingsPaintGame!=warnings)){
+    // One request at a time, at most every 100 ms as when it was painted here.
+    // Each picture is shown when done, even if the pointer moved on meanwhile:
+    // the painted state names what it shows, and the next request catches up.
+    // The Perf page repaints with each second's numbers; the others never for them.
+    const bool performancePage=settingsModel.page==settings::Page::Performance;
+    const bool fresh=performance.valid&&now-performanceAt<=2000;
+    const bool depthRestart=(vrsettings::Read().values[settings::ReShadeDepth]>.5f)!=vrsettings::ReShadeDepthActive();
+    const SettingsPicture wanted{settingsModel.revision,hover,status,help,warnings,performancePage&&fresh?performanceSerial:0,
+                                 performancePage&&depthRestart,performancePage?game:settings::GameVideo{}};
+    if(!(wanted==settingsPainted)&&now>=settingsPaintAt&&!settingsPaintRequest){
         char resolutionStatus[160];resolution::Describe(resolutionStatus,sizeof resolutionStatus,{width,height});
-        auto pixels=settings::Paint(settingsModel,settingsHover,settingsModel.page==settings::Page::Video?resolutionStatus:descriptions[status],nullptr,detectedControllers,help,game,monoAudio);
-        if(!pixels.empty()&&UploadAtlas(settingsChain,atlasFormat,settings::AtlasWidth,settings::Height,pixels,true,&settingsAtlasPending)){
-            settingsPaintRevision=settingsModel.revision;settingsPaintHover=hover;settingsPaintStatus=status;settingsPaintHelp=help;settingsPaintGame=warnings;
-        }
-        settingsPaintAt=now+100;
+        settingsPaintRequest=settingsPainter.Submit({settingsModel,settingsHover,performancePage?resolutionStatus:descriptions[status],
+                                                    detectedControllers,help,game,monoAudio,fresh?performance:settings::PerformanceReadout{},depthRestart});
+        settingsRequested=wanted;settingsPaintAt=now+100;
     }
+    if(TakeSettingsPicture())settingsPainted=settingsRequested;
 }
 void Input() {
     gazeValid=false;
@@ -1600,7 +1693,7 @@ void Input() {
     }
     if(!settingsOwned&&!settingsChord)MenuPointer(controls);
     else {nativeMenuPad={};menuNavigation.Reset();panelinput::UseController();pointerVisible=pointerHit=false;triggerWasDown=Float(trigger,0)>.2f;cancelWasDown=Bool(secondary,0);}
-    SettingsPointer(settingsEdges);
+    SettingsPointer(settingsEdges,(controls.buttons&menus::RightBumper)!=0);
     settingsOwned=settingsOwned||bodyCalibration.Active();
     auto& s=*tracking.data;s.version=D2RVR_SHARED_VERSION;s.headValid=1;
     const auto q=Q(head.orientation);
@@ -2214,9 +2307,9 @@ void Input() {
 }
 void PlaceMainMenu() {
     if(!panels::CanAnchor(menuPlaced,render&&valid,state==XR_SESSION_STATE_FOCUSED,motionHeadTracked))return;
-    const auto placed=panels::AtEyeLevel(V(head.position),Q(head.orientation),
+    menuBase=panels::AtEyeLevel(V(head.position),Q(head.orientation),
         panels::MenuDistance(int(vrsettings::Read().values[settings::MenuDistance]),true));
-    menuPose=XrPose({placed.position,placed.orientation});menuPlaced=true;
+    menuPose=Placed(menuBase,menuOffset);menuPlaced=true;
     char b[160];std::snprintf(b,sizeof b,"Frame panels: main menu anchored from tracked head at eye height %.3f m",head.position.y);Say(b);
 }
 void Events() {
@@ -2334,10 +2427,10 @@ bool Begin() {
         }
         const int distancePreset=int(vrsettings::Read().values[settings::MenuDistance]);
         static int previousDistance=-1;
-        if(distancePreset!=previousDistance){workspacePlaced=menuPlaced=false;previousDistance=distancePreset;}
+        if(distancePreset!=previousDistance){workspacePlaced=menuPlaced=false;previousDistance=distancePreset;menuOffset={};}
         if(spatialMode&&!journalMode&&panels::CanAnchor(workspacePlaced,render,state==XR_SESSION_STATE_FOCUSED,motionHeadTracked)) {
-            const auto placed=panels::AtEyeLevel(V(head.position),Q(head.orientation),panels::MenuDistance(distancePreset));
-            uiPose=XrPose({placed.position,placed.orientation});
+            uiBase=panels::AtEyeLevel(V(head.position),Q(head.orientation),panels::MenuDistance(distancePreset));
+            uiPose=Placed(uiBase,menuOffset);
             uiSize=panels::Width;workspacePlaced=true;
         }
         if(panelMode)PlaceMainMenu();
@@ -2420,6 +2513,18 @@ bool KeepDepth(ID3D12GraphicsCommandList* list,int eye) {
     list->ResourceBarrier(2,b);
     kept.format=DXGI_FORMAT(latest.format);kept.scale[0]=latest.scale[0];kept.scale[1]=latest.scale[1];
     return true;
+}
+// By turns: this present's effects layer (the game's own targets, as
+// effectslayer last saw them) into the eye's effects blocks, while the
+// turns keep the eye's own picture where the effects are.
+void KeepEffects(ID3D12GraphicsCommandList* list,int eye) {
+    effectslayer::Layer layer;
+    if(turnsKeepOwn.load()<3||!effectslayer::Latest(layer)||
+       !turnWarp.Effects(device.Get(),list,layer.targets,layer.states,eye,turnsEffectsReach.load()*float(layer.width)/4096)) {
+        turnWarp.ForgetEffects(eye);return;
+    }
+    static bool told=false;
+    if(!told){told=true;Say("Frame OpenXR: by turns - the game's effects layer kept for each eye (first frame doing so)");}
 }
 // By turns: this eye's interface (hud's copy, in a shader-resource state) kept
 // beside its image, for TurnEye to lay over the eye when it is not drawn.
@@ -2511,6 +2616,12 @@ bool TurnEye(int i) {
         other.drawnFov={f.angleLeft,f.angleRight,f.angleDown,f.angleUp};
         other.nowFov={now.fov.angleLeft,now.fov.angleRight,now.fov.angleDown,now.fov.angleUp};
         const auto gap=drawnAt.at-at;other.apart=std::sqrt(gap.x*gap.x+gap.y*gap.y+gap.z*gap.z);
+        if(const int keep=turnsKeepOwn.load()) {   // this eye's own picture where it shows the same surface
+            other.keep=TurnEdgePixels;
+            const float wide=float(turnImages[i^1]->GetDesc().Width)/4096;
+            if(keep==1||keep==4){other.keepNear=turnsKeepGap.load()*wide;other.keepReach=turnsKeepReach.load()*wide;}   // round near things
+            if(keep>=3)other.keepEffects=turnsEffectsLevel.load();   // where the game's effects are
+        }
         fromDrawn=&other;
     }
     if(placed&&was.world.ok&&turnDepths[i].ok) {
@@ -2526,6 +2637,8 @@ bool TurnEye(int i) {
         depth.reach[0]=CarriedNear*w.upm;depth.reach[1]=CarriedFar*w.upm;
         moving=&depth;
     }
+    static bool keepTold=false;
+    if(moving&&fromDrawn&&other.keep>0&&!keepTold){keepTold=true;Say("Frame OpenXR: by turns - the eye not drawn keeps its own picture where the drawn eye's shows the same surface (first frame doing so)");}
     D3D12_RESOURCE_BARRIER b[2]{};const UINT kept=fromDrawn?2:1;
     for(UINT k=0;k<kept;++k){b[k].Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
         b[k].Transition={turnImages[i^k].Get(),D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,D3D12_RESOURCE_STATE_COMMON,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE};}
@@ -2592,6 +2705,8 @@ bool Copy(ID3D12Resource* src,Eye& e,reshade::api::command_queue* rq) {
     // depth behind them.
     turnKept[eye]=keepTurns&&KeepTurn(e.commands.Get(),src,int(eye),D3D12_RESOURCE_STATE_COPY_SOURCE);
     turnDepths[eye].ok=keepDepth&&turnKept[eye]&&KeepDepth(e.commands.Get(),int(eye));
+    // and where the game's effects were in it (TurnDepth::keepEffects)
+    if(turnDepths[eye].ok)KeepEffects(e.commands.Get(),int(eye));else turnWarp.ForgetEffects(int(eye));
     // By turns the game's interface was taken out of its picture: laid back as
     // the game lays it, before the headset and the window get the picture.
     uint32_t layerWidth=0,layerHeight=0;
@@ -2796,6 +2911,7 @@ void Register(LogFn log,PanelFn panel,PanelFn world,PanelFn toggle) {
     reshade::register_event<reshade::addon_event::create_pipeline>(&PipelineCreating);
     reshade::register_event<reshade::addon_event::init_pipeline>(&PipelineCreated);
     foveation::Register(log);
+    effectslayer::Register(log);
     resolution::Register(log);
     registered=true;Say("Frame OpenXR: registered D3D12 capture; awaiting game Present");
 }
@@ -2812,6 +2928,25 @@ void ConfigureSymmetricProjection(bool on) {symmetricProjection.store(on);}
 void ConfigureTurnsFromDrawnEye(bool on) {
     if(turnsFromDrawnEye.exchange(on)!=on)Say(on?"Frame OpenXR: by turns - the eye not drawn mostly from the drawn eye's picture":"Frame OpenXR: by turns - the eye not drawn from its own image alone");
 }
+void SetTurnsKeepOwn(int mode) {
+    static const char* const said[]={"Frame OpenXR: by turns - the eye not drawn takes the drawn eye's picture wherever it reaches",
+        "Frame OpenXR: by turns - the eye not drawn keeps its own picture where it shows the same surface, round near things only",
+        "Frame OpenXR: by turns - the eye not drawn keeps its own picture wherever it shows the same surface",
+        "Frame OpenXR: by turns - the eye not drawn keeps its own picture where it shows the same surface, where the game's effects are",
+        "Frame OpenXR: by turns - the eye not drawn keeps its own picture where it shows the same surface, round near things and where the game's effects are"};
+    mode=std::clamp(mode,0,4);
+    if(turnsKeepOwn.exchange(mode)!=mode)Say(said[mode]);
+}
+int TurnsKeepOwn() {return turnsKeepOwn.load();}
+void ConfigureTurnsKeepOwn(int mode) {
+    // Every ini reload passes it (VR Settings' Apply too): only a change of
+    // the ini's own value overrides the DEV switch.
+    static std::atomic<int> read{-1};
+    mode=std::clamp(mode,0,4);
+    if(read.exchange(mode)!=mode)SetTurnsKeepOwn(mode);
+}
+void ConfigureTurnsKeepNear(float gap,float reach) {turnsKeepGap.store(std::clamp(gap,1.f,1000.f));turnsKeepReach.store(std::clamp(reach,16.f,1024.f));}
+void ConfigureTurnsKeepEffects(float level,float reach) {turnsEffectsLevel.store(std::clamp(level,1e-4f,100.f));turnsEffectsReach.store(std::clamp(reach,0.f,512.f));}
 void ConfigureEyeTracking(bool on) {eyeTracking.store(on);}
 void BeginEye(int eye) {
     hud::UiFrame(spatialMode,!journalMode,eye);
@@ -2858,7 +2993,7 @@ bool TakeWorldRecenter() {
     std::lock_guard lock(mutex);const bool take=worldRecenter;worldRecenter=false;return take;
 }
 void RequestStereoCapture(){captureRequested.store(true);}
-int StereoRendering() {return std::clamp(int(std::lround(vrsettings::Read().values[settings::StereoRendering])),0,2);}
+int StereoRendering() {return std::clamp(int(std::lround(vrsettings::Read().values[settings::StereoRendering])),0,1);}
 bool GpuWaitDeferred() {return deferredWait.load();}
 bool ReplayReady() {
     std::lock_guard lock(mutex);
@@ -3148,7 +3283,9 @@ void EndPair() {
     if(layer&&(settingsModel.open||bodyCalibration.Active())&&settingsImageReady){
         // Extend to the right, without moving or shrinking any control. Input
         // still intersects the original panel. Calibration uses only that crop.
-        const bool showHelp=!bodyCalibration.Active()&&settingsHelpVisible!=settings::NoHelp&&settingsPaintHelp==settingsHelpVisible;
+        // The card while help is wanted and the picture shown has one: from one
+        // card to the next, the old stays until the new is painted, not a narrow frame.
+        const bool showHelp=!bodyCalibration.Active()&&settingsHelpVisible!=settings::NoHelp&&settingsPainted.help!=settings::NoHelp;
         const int pixels=showHelp?settings::AtlasWidth:settings::Width;
         const float fullWidth=settingsWidth*pixels/settings::Width;
         auto pose=settingsPose;
@@ -3264,6 +3401,24 @@ void EndPair() {
     lastTiming=timing;frame=false;
 }
 FrameTiming LastTiming() {std::lock_guard lock(mutex);return lastTiming;}
+void NoteFrame(double gameMs,double waitMs,double drawMs,double vrMs,double periodMs,double budgetMs,bool byTurns) {
+    std::lock_guard lock(mutex);
+    auto& w=performanceWindow;const auto now=GetTickCount64();
+    // A gap in frames (menus, loading) begins a new second: what came before
+    // it is not averaged in. Switching between turns and pairs is no gap.
+    if(!w.since||now-w.last>250){w={};w.since=now;}
+    w.last=now;
+    if(budgetMs>0)performanceBudget=budgetMs;
+    w.wait+=waitMs;w.draw+=drawMs;w.vr+=vrMs;++w.frames;w.turns+=byTurns?1:0;
+    if(periodMs>0){w.game+=gameMs;w.period+=periodMs;++w.periods;}
+    if(now-w.since<1000)return;
+    const double k=1.0/w.frames;
+    performance.valid=true;performance.byTurns=w.turns*2>=w.frames;performance.mixed=w.turns&&w.turns<w.frames;
+    performance.fps=w.periods?float(w.periods*1000.0/w.period):0.f;performance.budgetMs=float(performanceBudget);
+    performance.gameMs=w.periods?float(w.game/w.periods):0.f;performance.waitMs=float(w.wait*k);
+    performance.drawMs=float(w.draw*k);performance.vrMs=float(w.vr*k);
+    ++performanceSerial;performanceAt=now;w={};w.since=w.last=now;
+}
 void ConfigureGameplay(bool enabled) {
     std::lock_guard lock(mutex);
     if(!enabled)gamestate::MenuMap(false);
@@ -3609,14 +3764,15 @@ void Shutdown(bool preserveResolution) {
     if(!preserveResolution)hud::NativeSession(false);
     if(!preserveResolution)resolution::Restore();
     windowFocus.Cancel();
-    EndPair();ClearInput();interactionPainter.Stop();bloodPainter.Stop();strainPainter.Stop();interaction::icons::Shutdown();
+    EndPair();ClearInput();interactionPainter.Stop();bloodPainter.Stop();strainPainter.Stop();settingsPainter.Stop();turnCompiler.Stop();interaction::icons::Shutdown();
     // Completion is mandatory before destroying our commands/resources, even
     // when ordinary frame submission uses queue ordering without a CPU wait.
     if(fence&&!WaitGpu())failed=true;
     if(uiEye.chain&&pDestroySwapchain)pDestroySwapchain(uiEye.chain);uiEye={};journalMode=spatialMode=workspacePlaced=false;hud::UiFrame(false,false,0);uiSupported=false;uiBlit={};potionModels.Reset();potionScene={};
     if(mapEye.chain&&pDestroySwapchain)pDestroySwapchain(mapEye.chain);mapEye={};mapSupported=false;mapBlit={};gamestate::MenuMap(false);hud::MenuMapCapture(false);
-    settingsModel.Close();settingsOpen=false;settingsInputGate.Suspend();settingsPaintRevision=~0ull;settingsAtlasPending=settingsImageReady=false;
-    bodyCalibration.Cancel();calibrationRelease={};calibrationPrompted=floorSpace=false;calibrationSession=0;calibrationPaintKey=-1;
+    settingsModel.Close();settingsOpen=false;settingsInputGate.Suspend();settingsPainted={};settingsAtlasPending=settingsImageReady=false;
+    settingsPaintRequest=0;settingsRequested={};
+    bodyCalibration.Cancel();calibrationRelease={};calibrationPrompted=floorSpace=false;calibrationSession=0;calibrationPaintKey=calibrationRequestedKey=-1;
     if(settingsChain&&pDestroySwapchain)pDestroySwapchain(settingsChain);settingsChain=XR_NULL_HANDLE;
     atlasUploads.clear();atlasStagingFree.clear();interactionPaintKey=~0ull;interactionPrefetchSession=0;interactionPrefetchRevision=~0u;interactions.Reset();interactionstate::Cancel();
     interactionPaintRequest=0;interactionRequestedKey=~0ull;interactionPaintValid=false;interactionPaintContext={};interactionRequestedContext={};interactionPaintAt=0;

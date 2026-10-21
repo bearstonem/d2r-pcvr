@@ -99,6 +99,11 @@ void Update(HWND h,bool running,Size recommended,Size maximum,Size source,int ch
     }
 }
 void OptionsApplied(){if(requested.load())reapplyAt=GetTickCount64()+500;}
+Size WindowClient() {
+    RECT client{};const auto h=attached.load();
+    if(!h||!GetClientRect(h,&client)||client.right<1||client.bottom<1)return {};
+    return {uint32_t(client.right),uint32_t(client.bottom)};
+}
 void Restore(){reapplyAt=0;requested=0;window.Restore();}
 void Describe(char* text,size_t capacity,Size source) {
     const auto wanted=Unpack(requested.load());

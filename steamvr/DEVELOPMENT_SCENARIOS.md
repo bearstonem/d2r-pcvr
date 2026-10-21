@@ -55,7 +55,7 @@ choose local offline Play. Create a new character in the separate character list
 
 Normal native builds include the dormant backend. It only activates when the
 loader's active mod and exact metadata both identify the isolated environment.
-The hand-wheel DEV tab is hidden in ordinary play. VR Settings > Release Notes
+The hand-wheel DEV tab is hidden in ordinary play. VR Settings > Notes (Release Notes)
 is available in both regular and developer builds.
 
 ```powershell
@@ -80,7 +80,8 @@ Open either hand's wheel and choose **DEV**. Its tabs are grouped by purpose:
 
 - **Character:** level 10, 30, 60 and 90 presets; heal life/mana.
 - **Equipment:** starter primary/alternate gear, class unique primary/alternate
-  gear, crossbow + bolts, bow + arrows, a small shield and **Render debug draws**.
+  gear, crossbow + bolts, bow + arrows, a small shield, **Render debug draws**
+  and **By turns own picture**.
 - **Act I - II:** towns, combat areas and inspection destinations.
 - **Act III:** Kurast regions, sewer entrances, jungle areas and bosses.
 - **Act IV - V:** later-act combat areas and filming locations.
@@ -156,6 +157,26 @@ While enabled, `Frame shield debug` logs discovery progress every two seconds.
 `0x800` world matrices, `0x1000` valid surface, `0x2000` surface published.
 These are milestones across candidates, not proof a single candidate passed
 every stage. `mesh=1` confirms the current check actually uses measured bounds.
+
+## By turns own picture
+
+Select **DEV > Equipment > By turns own picture** to step, for the session,
+where the eye not drawn takes its picture with Stereo rendering: By turns.
+**FX** (the default, `[stereo] turns_keep_own=3`): where the game's effects
+layer has something - spells, flames, Tyrael's wings - it keeps its own
+picture from a frame back where that shows the same surface as the eye just
+drawn, so they stand where that eye sees them; elsewhere it takes the drawn
+eye's picture. **NEAR+FX** (4): round near things as well - the hands, the
+weapon, a monster close by - for anything else drawn without depth there
+(the game's bloom). **OFF** (0): the drawn eye's
+picture wherever it reaches, as v0.3.23 does. **NEAR** (1): round near things
+only. **ALL** (2): its own picture wherever it shows the same surface, so the
+whole eye is a frame behind the other. The button steps in that order, shows
+the current state, and the frame log records each step. It changes nothing
+else and no saved setting; editing the ini's value applies that value again.
+Compare Tyrael's wings, a waypoint's flame and spells against the scene
+behind them, the sword against the sky and monsters' heads close up, with
+the same view in each state.
 
 ## Locations
 

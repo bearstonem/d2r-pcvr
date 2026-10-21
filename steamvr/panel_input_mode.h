@@ -17,8 +17,22 @@ inline bool UiCanvasCaller(uintptr_t rva) {
 // Height returns here from GetHeight; width tail-calls the size query from
 // GetWidth, so its return address is in SetCursorPosition itself.
 inline constexpr uintptr_t CursorHeightReturn=0x7f4b2,CursorWidthReturn=0x14fb2a;
+// The cursor's conversions between the window's pixels and the game's space -
+// 0x7f350 in, 0x7f210 and 0x7f2d0 out, their content size 0x7f540 - fit a
+// letterbox and clamp X to a band 2.11 times the window's height, centred.
+// Given the desktop window while the cursor comes in VR-source pixels, X
+// stopped at 2100 of 3072 in a windowed 1920x1080 game and the right side of
+// every panel was out of the laser's reach (owner; a player at 3000 and 4000
+// sources, 2026-10-20). Each of their own size queries returns here.
+inline constexpr uintptr_t CursorConversionReturns[]={0x7f224,0x7f23a,0x7f2f0,0x7f36d,0x7f383,0x7f54b,0x7f561};
+// The controller cursor's own clamp calls 0x7f4d0, which tail-jumps to the
+// query: the return addresses are its own.
+inline constexpr uintptr_t CursorClampReturns[]={0x14e841,0x14e860};
 inline bool CursorBoundsCaller(uintptr_t rva) {
-    return rva==CursorHeightReturn||rva==CursorWidthReturn;
+    if(rva==CursorHeightReturn||rva==CursorWidthReturn)return true;
+    for(auto address:CursorConversionReturns)if(rva==address)return true;
+    for(auto address:CursorClampReturns)if(rva==address)return true;
+    return false;
 }
 // SendInput is queued: protection must already exist before moving/clicking
 // the pointer, and must survive the last button-up when a panel closes. The

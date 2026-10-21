@@ -126,7 +126,7 @@ Battle.net edition, headset, controllers, connection/runtime and resolution.
    Valve Index shows A/B and Grip + A/B on both wheels. Check each stick click,
    opposite-hand laser, trigger and face-button assignments. Repeat on Quest
    with left X/Y and right A/B. Verify settings survive restart.
-2. Turn NVIDIA DSR off if previously enabled. In VR Settings > Video select
+2. Turn NVIDIA DSR off if previously enabled. In VR Settings > Perf select
    4096 x 4096 and Apply. Confirm the reported source resolution and compare
    clarity/performance with a lower preset. High native graphics settings or
    VD quality alone do not establish the game's actual render resolution.

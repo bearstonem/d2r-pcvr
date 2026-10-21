@@ -39,6 +39,7 @@
 #include "../steamvr/dual_wield.h"
 #include "../steamvr/crossbow_pose.h"
 #include "../steamvr/profile.h"
+#include "../steamvr/guarded_text.h"
 #include "sigscan.h"
 #ifdef D2RVR_NATIVE_OPENXR
 #include "memory.h"
@@ -77,15 +78,11 @@ bool SafeWrite(void* dst, const void* src, size_t n) {
 #endif
 }
 
+// One guarded copy per page, not per character (natively each is a system call).
 std::string Str(uintptr_t p) {
     char buf[96];
-    int n = 0;
-    for (; n < 95; ++n) {
-        if (!Get(p + n, &buf[n])) return {};
-        if (!buf[n]) break;
-        if (buf[n] < 32 || buf[n] > 126) return {};
-    }
-    return std::string(buf, n);
+    const int n = framevr::ReadText(p, buf, int(sizeof buf), SafeCopy);
+    return n < 0 ? std::string() : std::string(buf, n);
 }
 
 SRWLOCK g_lock = SRWLOCK_INIT;
@@ -353,6 +350,11 @@ struct CrossbowGeometry {Mat boltToAttach{};uintptr_t hero=0;uint32_t generation
 CrossbowGeometry g_crossbowGeometry;
 framevr::crossbow::Pose g_crossbowPose;
 std::atomic<unsigned> g_crossbowStages{0};
+// When the hero's last weapon pose held a crossbow, else 0. Only within 100 ms
+// of one, as the capture itself requires, is every posed rig searched for its
+// helper bones; a static crossbow posed outside that is found by
+// RefreshCrossbow's scan of the skeleton storage.
+std::atomic<ULONGLONG> g_crossbowHeldAt{0};
 struct CrossbowRenderSource {
     uintptr_t self=0,hero=0;uint32_t parent=0,generation=0,equipment=0;
     int count=0,cog=-1;Mat relative{};ULONGLONG seen=0;
@@ -847,10 +849,15 @@ void ApplyWrist(Mat& hand, const Wrist& r) {
 }
 
 #ifdef D2RVR_NATIVE_OPENXR
-// The shield wrist's stop. The hand bending toward the shield's side of the
-// forearm (back of the hand up) swings the shield's elbow edge into the arm:
-// that bend eases into where the shield sat rigid on the forearm before it
-// followed the hand. Bending the other way, twisting and side to side stay free.
+// The shield wrist's stop. The hand bending back (back of the hand up) swings
+// the shield's elbow edge into the arm: that bend eases into where the shield
+// sat rigid on the forearm before it followed the hand. Bending the other way,
+// twisting and side to side stay free.
+// Always the back of the hand, from the knuckles (the fingers curl and the thumb
+// sits the other way on every hero rig). It was chosen by which side of the
+// forearm shield_attach sat on: the necromancer's animation holds it past the
+// palm side, the stop turned round and pushed his hand up as it bent down,
+// with a steel shield only (2026-10-20). The barbarian's never turned it.
 // Returns how much bend the controller asked that the wrist held back, degrees (0: none).
 float StopShieldWrist(const Hero& h,std::vector<Mat>& newW) {
     const int k=h.hand[1],sa=h.shieldAttach,l=h.lwr[1],i=h.ind[1],m=h.mid[1],p=h.pnk[1];
@@ -860,23 +867,37 @@ float StopShieldWrist(const Hero& h,std::vector<Mat>& newW) {
     // the hand as it would be, holding the shield where it sat on the forearm
     const Mat rigid=Mul(Mul(h.bind[k],InvAffine(h.bind[sa])),newW[sa]);
     const V3 f=Norm(Sub(Pos(newW[k]),Pos(newW[l])));   // elbow -> wrist
-    V3 now=Norm(RotOnly(back,newW[k])),stop=Norm(RotOnly(back,rigid));
-    // the shield's side of the forearm: the back of the hand's, unless its bone says otherwise
-    const V3 off=Sub(Pos(newW[sa]),Pos(newW[l])),side=Sub(off,Scale(f,Dot(off,f)));
-    if(Len(side)>1e-3f&&Dot(side,stop)<0){now=Scale(now,-1);stop=Scale(stop,-1);}
+    const V3 now=Norm(RotOnly(back,newW[k])),stop=Norm(RotOnly(back,rigid));
     // Bend as the angle off the forearm: easing starts kEase short of the stop
     // and only approaches it, so the shield slows into place and never reaches the arm.
     constexpr float kEase=15.0f/57.2958f;
     const float asked=acosf(std::clamp(Dot(now,f),-1.f,1.f)),at=acosf(std::clamp(Dot(stop,f),-1.f,1.f));
     const float knee=at-kEase;
-    if(asked<=knee)return 0;   // short of the easing
-    const float given=knee+kEase*(1-expf(-(asked-knee)/kEase));
-    const V3 w=Sub(now,Scale(f,Dot(now,f)));
-    if(Len(w)<1e-4f)return 0;
-    const V3 target=Add(Scale(f,cosf(given)),Scale(Norm(w),sinf(given)));
-    const auto before=newW;
-    TurnAboutSelf(newW[k],RotBetween(now,target));
-    std::vector<char> fromK(h.count,0);fromK[k]=1;Propagate(h,before,newW,fromK,k);   // fingers, L_weapon_attach
+    float given=asked;
+    if(asked>knee) {   // into the easing
+        const V3 w=Sub(now,Scale(f,Dot(now,f)));
+        if(Len(w)>=1e-4f) {
+            given=knee+kEase*(1-expf(-(asked-knee)/kEase));
+            const V3 target=Add(Scale(f,cosf(given)),Scale(Norm(w),sinf(given)));
+            const auto before=newW;
+            TurnAboutSelf(newW[k],RotBetween(now,target));
+            std::vector<char> fromK(h.count,0);fromK[k]=1;Propagate(h,before,newW,fromK,k);   // fingers, L_weapon_attach
+        }
+    }
+#ifdef D2RVR_DEVELOPER
+    // [diag] developer builds only. 90 = hand straight, above 90 = bent back (back of the
+    // hand up), below = bent toward the palm. old_flip: the side the old rule went by
+    // (shield_attach's offset from the forearm, untouched by the turn above); 1 = it
+    // would have turned the stop round.
+    static ULONGLONG reportAt=0;const auto nowMs=GetTickCount64();
+    if(nowMs>=reportAt) {
+        const V3 off=Sub(Pos(newW[sa]),Pos(newW[l])),side=Sub(off,Scale(f,Dot(off,f)));
+        const int oldFlip=Len(side)>1e-3f&&Dot(side,stop)<0?1:0;
+        char line[200];snprintf(line,sizeof line,"Frame shield wrist stop: class=%d asked=%.1f stop=%.1f given=%.1f held=%.1f deg old_flip=%d",
+            h.cls,asked*57.2958f,at*57.2958f,given*57.2958f,(asked-given)*57.2958f,oldFlip);
+        framevr::logging::Write(line);reportAt=nowMs+1000;
+    }
+#endif
     return (asked-given)*57.2958f;
 }
 #endif
@@ -1984,6 +2005,9 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& in) {
         }
 #endif
         AcquireSRWLockExclusive(&g_gunBoneLock); g_gunBone = g; ReleaseSRWLockExclusive(&g_gunBoneLock);
+#ifdef D2RVR_NATIVE_OPENXR
+        g_crossbowHeldAt.store(g.crossbow ? g.at : 0, std::memory_order_relaxed);
+#endif
     }
 
 #ifdef D2RVR_NATIVE_OPENXR
@@ -2250,14 +2274,17 @@ bool CaptureShield(uintptr_t self,const ShieldContext& context,const HeroXform& 
     uintptr_t nameObject=0,pathPointer=0;Get(self,&nameObject);Get(nameObject+8,&pathPointer);
     const auto path=Str(pathPointer);
     const bool shieldPath=path.find("/items/armor/shield/")!=std::string::npos;
-    std::array<std::string,64> names;
-    for(int i=0;i<source.count;++i) {
-        uintptr_t name=0;if(!Get(source.bones+uintptr_t(i)*0xA4,&name))return false;
-        names[i]=Str(name);
-    }
+    // The bone names only once a mesh is the shield's: RefreshShield's scan
+    // meets every skeleton in the game, and most have no shield mesh.
+    std::array<std::string,64> names;bool named=false;
     for(int m=0;m<meshes;++m) {
         uintptr_t mesh=0,name=0,bounds=0;int count=0;
         if(!Get(bindings+uintptr_t(m)*8,&mesh)||!Get(mesh,&name)||(!shieldPath&&!framevr::guard::ShieldMesh(Str(name))))continue;
+        for(int i=0;!named&&i<source.count;++i) {
+            uintptr_t boneName=0;if(!Get(source.bones+uintptr_t(i)*0xA4,&boneName))return false;
+            names[i]=Str(boneName);
+        }
+        named=true;
         ShieldStage(64);
         if(!Get(mesh+0x30,&count)||count<1||count>16||!Get(mesh+0x34,&bounds)||!bounds)return false;
         for(int b=0;b<count;++b) {
@@ -2327,6 +2354,27 @@ void RefreshShield(uintptr_t self) {
         if(CaptureShield(uintptr_t(components[i]),context,hero))return;
 }
 
+// Runtime model names need not be the asset's full archive path. Recognize
+// the authored helper bones; the caller then requires exact hero ownership.
+CrossbowRig LearnCrossbowRig(uintptr_t bones,int count) {
+    CrossbowRig rig;rig.bones=bones;
+    int cog=-1,bolt=-1,left=-1,right=-1;
+    for(int i=0;i<count;++i) {
+        uintptr_t n=0;if(!Get(bones+uintptr_t(i)*0xA4,&n))break;
+        const auto bone=Str(n);if(bone=="cog")cog=i;if(bone=="bolt_helper")bolt=i;
+        if(bone=="L_bowBend")left=i;if(bone=="R_bowBend")right=i;
+    }
+    if(cog>=0&&bolt>=0)g_crossbowStages.fetch_or(1);
+    bow::Mat inverseCog,inverseBolt,inverseLeft,inverseRight,barrel;
+    if(cog>=0&&bolt>=0&&left>=0&&right>=0&&SafeCopy(&inverseCog,reinterpret_cast<void*>(bones+uintptr_t(cog)*0xA4+0x50),sizeof inverseCog)&&
+       SafeCopy(&inverseBolt,reinterpret_cast<void*>(bones+uintptr_t(bolt)*0xA4+0x50),sizeof inverseBolt)&&
+       SafeCopy(&inverseLeft,reinterpret_cast<void*>(bones+uintptr_t(left)*0xA4+0x50),sizeof inverseLeft)&&
+       SafeCopy(&inverseRight,reinterpret_cast<void*>(bones+uintptr_t(right)*0xA4+0x50),sizeof inverseRight)&&
+       framevr::crossbow::BarrelInCog(inverseCog,inverseBolt,inverseLeft,inverseRight,barrel)) {
+        memcpy(&rig.relative,&barrel,sizeof barrel);rig.cog=cog;
+    }
+    return rig;
+}
 // Read the held crossbow's authored bolt helper through its actual item/root
 // transform. Never apply another player's, inventory preview's or dropped rig.
 void CaptureCrossbow(uintptr_t self) {
@@ -2335,32 +2383,26 @@ void CaptureCrossbow(uintptr_t self) {
     if(!Get(self+8,&model)||!Get(model+8,&skeleton)||!Get(skeleton+8,&count)||count<4||count>64||
        !Get(skeleton+0xC,&bones)||!bones)return;
     auto& rigs=g_crossbowRigs;
-    AcquireSRWLockExclusive(&g_crossbowRigLock);struct Unlock {SRWLOCK* lock;~Unlock(){ReleaseSRWLockExclusive(lock);}} unlock{&g_crossbowRigLock};
-    const auto key=std::make_pair(self,skeleton);auto it=rigs.find(key);
-    if(it==rigs.end()||it->second.bones!=bones) {
-        CrossbowRig rig;rig.bones=bones;
-        // Runtime model names need not be the asset's full archive path.
-        // Recognize the authored helper bones, then require exact hero ownership.
-        {
-            int cog=-1,bolt=-1,left=-1,right=-1;
-            for(int i=0;i<count;++i) {
-                uintptr_t n=0;if(!Get(bones+uintptr_t(i)*0xA4,&n))break;
-                const auto bone=Str(n);if(bone=="cog")cog=i;if(bone=="bolt_helper")bolt=i;
-                if(bone=="L_bowBend")left=i;if(bone=="R_bowBend")right=i;
-            }
-            if(cog>=0&&bolt>=0)g_crossbowStages.fetch_or(1);
-            bow::Mat inverseCog,inverseBolt,inverseLeft,inverseRight,barrel;
-            if(cog>=0&&bolt>=0&&left>=0&&right>=0&&SafeCopy(&inverseCog,reinterpret_cast<void*>(bones+uintptr_t(cog)*0xA4+0x50),sizeof inverseCog)&&
-               SafeCopy(&inverseBolt,reinterpret_cast<void*>(bones+uintptr_t(bolt)*0xA4+0x50),sizeof inverseBolt)&&
-               SafeCopy(&inverseLeft,reinterpret_cast<void*>(bones+uintptr_t(left)*0xA4+0x50),sizeof inverseLeft)&&
-               SafeCopy(&inverseRight,reinterpret_cast<void*>(bones+uintptr_t(right)*0xA4+0x50),sizeof inverseRight)&&
-               framevr::crossbow::BarrelInCog(inverseCog,inverseBolt,inverseLeft,inverseRight,barrel)) {
-                memcpy(&rig.relative,&barrel,sizeof barrel);rig.cog=cog;
-            }
-        }
-        if(rigs.size()>512)rigs.clear();it=rigs.insert_or_assign(key,rig).first;
+    const auto key=std::make_pair(self,skeleton);
+    // A rig met for the first time is learned outside the lock: the other
+    // render workers keep posing meanwhile. Most rigs are not crossbows.
+    bool known=false,crossbow=false;
+    AcquireSRWLockShared(&g_crossbowRigLock);
+    if(const auto found=rigs.find(key);found!=rigs.end()&&found->second.bones==bones){known=true;crossbow=found->second.cog>=0;}
+    ReleaseSRWLockShared(&g_crossbowRigLock);
+    if(!known) {
+        const CrossbowRig learned=LearnCrossbowRig(bones,count);crossbow=learned.cog>=0;
+        AcquireSRWLockExclusive(&g_crossbowRigLock);
+        if(rigs.size()>4096)std::erase_if(rigs,[](const auto& entry){return entry.second.cog<0;});
+        if(rigs.size()>4096)rigs.clear();
+        if(const auto found=rigs.find(key);found==rigs.end()||found->second.bones!=bones)rigs.insert_or_assign(key,learned);
+        ReleaseSRWLockExclusive(&g_crossbowRigLock);
     }
-    auto& rig=it->second;if(rig.cog<0)return;
+    if(!crossbow)return;
+    AcquireSRWLockExclusive(&g_crossbowRigLock);struct Unlock {SRWLOCK* lock;~Unlock(){ReleaseSRWLockExclusive(lock);}} unlock{&g_crossbowRigLock};
+    const auto it=rigs.find(key);
+    if(it==rigs.end()||it->second.bones!=bones||it->second.cog<0)return;   // dropped meanwhile: learned again on its next pose
+    auto& rig=it->second;
     g_crossbowStages.fetch_or(2);
     // Learn the item even if its skeleton is evaluated before the hero. Static
     // item poses need not be evaluated again after the hero becomes available.
@@ -2395,6 +2437,11 @@ void RefreshCrossbow(uintptr_t hero) {
     if(hero!=g_heroSelf.load())return;
     GunBoneOut attach;
     AcquireSRWLockShared(&g_gunBoneLock);attach=g_gunBone;ReleaseSRWLockShared(&g_gunBoneLock);
+    // Held again, or a rebuilt hero: a static crossbow posed while none was
+    // held is looked for at once below, not within the second.
+    static std::atomic<uint64_t> holding{0};
+    const uint64_t holdingNow=attach.crossbow?(uint64_t(attach.heroGeneration)<<1)|1:0;
+    const bool newlyHeld=holding.exchange(holdingNow)!=holdingNow;
     if(!attach.crossbow)return;
     std::vector<uintptr_t> items;
     AcquireSRWLockShared(&g_crossbowRigLock);
@@ -2407,7 +2454,8 @@ void RefreshCrossbow(uintptr_t hero) {
     // Also discover static held skeletons that were initialized before our
     // pose hook ran. Snapshot the same validated ECS storage as EntityOf;
     // never hold its lock while resolving an item or publishing a pose.
-    static std::atomic<uint64_t> nextLook{0};auto next=nextLook.load();const auto now=GetTickCount64();
+    static std::atomic<uint64_t> nextLook{0};if(newlyHeld)nextLook.store(0);
+    auto next=nextLook.load();const auto now=GetTickCount64();
     if(now<next||!nextLook.compare_exchange_strong(next,now+1000))return;
     std::vector<uint64_t> components;
     {
@@ -2856,7 +2904,7 @@ void __cdecl Hook(uintptr_t self, float a, float b, bool c) {
 #endif
     Arms(self);
 #ifdef D2RVR_NATIVE_OPENXR
-    CaptureCrossbow(self);
+    if (const ULONGLONG held = g_crossbowHeldAt.load(std::memory_order_relaxed); held && GetTickCount64() - held <= 100) CaptureCrossbow(self);
     RefreshCrossbow(self);
     RefreshShield(self);
     PoseMotionBow(self);

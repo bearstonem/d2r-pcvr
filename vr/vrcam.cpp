@@ -109,6 +109,7 @@ namespace gamestate {bool OpaqueMenuOpen();}
 #include "skill_pad.h"
 #include "spell_aim_signatures.h"
 #include "settings_menu.h"
+#include "../steamvr/reshade_addons.h"
 #include "offline_difficulty.h"
 #include "projectiles.h"
 #include "combat.h"
@@ -831,6 +832,9 @@ void LoadSettings() {
     framevr::ConfigureDeferredWait(IniB(L"render",L"defer_gpu_wait",false));
     framevr::ConfigureSymmetricProjection(IniB(L"render",L"symmetric_projection",true));
     framevr::ConfigureTurnsFromDrawnEye(IniB(L"stereo",L"turns_from_drawn_eye",true));
+    framevr::ConfigureTurnsKeepOwn(int(IniF(L"stereo",L"turns_keep_own",3)));
+    framevr::ConfigureTurnsKeepNear(IniF(L"stereo",L"turns_keep_gap",48),IniF(L"stereo",L"turns_keep_reach",96));
+    framevr::ConfigureTurnsKeepEffects(IniF(L"stereo",L"turns_effects_level",0.02f),IniF(L"stereo",L"turns_effects_reach",32));
     framevr::ConfigureEyeTracking(IniB(L"render",L"eye_tracked_foveation",false));
     framevr::ConfigureGameplay(IniB(L"gameplay",L"motion_controls",false));
     framevr::ConfigureQuiver(IniB(L"bow",L"quiver",true),IniB(L"bow",L"quiver_preview",true));
@@ -909,17 +913,19 @@ void LoadSettings() {
     // Combat > Guard strain color: Black) darkens the rim instead, denser by
     // guard_strain_dark_density (2.5; 1 = the same curve as the light): at equal
     // opacity a dark rim over D2's dark scenes hides far less than a pale one.
+    // guard_strain_dark 2 (Guard strain color: Off) hides the light; strain still runs.
+    const int strainLook=std::clamp(int(std::lround(IniF(L"gameplay",L"guard_strain_dark",0))),0,2);   // 0 white, 1 black, 2 off
     framevr::ConfigureGuardStrain(IniF(L"gameplay",L"guard_strain_per_block",10)/100.f,
                                   IniF(L"gameplay",L"guard_strain_reset_ms",1500)/1000.f,
                                   IniF(L"gameplay",L"guard_strain_clear",10)/100.f,
                                   IniF(L"gameplay",L"guard_strain_breathe_ms",1600)/1000.f,
                                   IniF(L"gameplay",L"guard_strain_softness",45)/100.f,
-                                  IniF(L"gameplay",L"guard_strain_light",100)/100.f,
-                                  IniB(L"gameplay",L"guard_strain_dark",false)?0u:
+                                  strainLook==2?0.f:IniF(L"gameplay",L"guard_strain_light",100)/100.f,
+                                  strainLook==1?0u:
                                   [] {wchar_t hex[16];GetPrivateProfileStringW(L"gameplay",L"guard_strain_color",L"FFF7EA",hex,16,g_iniPath);
                                       wchar_t* end=nullptr;const unsigned long v=wcstoul(hex[0]==L'#'?hex+1:hex,&end,16);
                                       return end&&end!=hex&&!*end&&v<=0xFFFFFFul?uint32_t(v):0xFFF7EAu;}(),
-                                  IniB(L"gameplay",L"guard_strain_dark",false)?
+                                  strainLook==1?
                                       std::clamp(IniF(L"gameplay",L"guard_strain_dark_density",2.5f),1.f,6.f):1.f);
     // Strain also recedes with the shield still up once no hit has reached it for
     // guard_strain_recover_ms (1500), at the guard_strain_reset_ms rate (1500): clear 3 s after the
@@ -5012,7 +5018,7 @@ std::string BusyThreads(double spanUs) {
 
 void Recenter();
 #ifdef D2RVR_NATIVE_OPENXR
-// Eyes by turns (VR Settings > Video > Stereo rendering): one pass a game frame,
+// Eyes by turns (VR Settings > Perf > Stereo rendering): one pass a game frame,
 // the eyes in turn. The headset gets this eye fresh and the other as it was
 // last drawn, at the pose it was drawn with - the runtime turns it to the head.
 // Half the CPU work a headset frame, each eye at half the rate, and the eyes a
@@ -5047,7 +5053,8 @@ bool TurnSafe(bool& moved, bool& snapped) {
 }
 // Stereo rendering: Replay (vr/stereo_replay.h): one CPU pass, the right eye
 // from its lists - first person in the world, no capture waiting for a pair of
-// two passes. The settle counts every pair, replayed or not.
+// two passes. The settle counts every pair, replayed or not. No longer a
+// choice (vr_settings.h): StereoRendering is never 2 and this never wanted.
 bool ReplayWanted() {
     if (framevr::StereoRendering() != 2) return false;
     static bool told = false;   // once a ready stretch: what else holds it back
@@ -5064,7 +5071,7 @@ void WarnGpuWait() {
     if (framevr::GpuWaitDeferred()) { told = false; return; }
     if (told) return;
     told = true;
-    Say("Each frame waits for the GPU ([render] defer_gpu_wait=0), about half the frame rate - VR Settings > Video > Defer GPU wait turns it on");
+    Say("Each frame waits for the GPU ([render] defer_gpu_wait=0), about half the frame rate - VR Settings > Perf > Defer GPU wait turns it on");
 }
 bool TurnsWanted() {
     if (framevr::StereoRendering() != 1) return false;
@@ -5105,6 +5112,9 @@ uintptr_t DrawTurn(int a, bool continued) {
     if (live) g_shared = live;
 
     const auto xr = framevr::LastTiming();
+    framevr::NoteFrame(lastEnd > 0.0 ? (entered - lastEnd) * 0.001 : 0.0, xr.waitFrameMs, (t1 - t0) * 0.001,
+                       std::max(0.0, (t0 - entered) * 0.001 - xr.waitFrameMs) + (ended - t1) * 0.001,
+                       lastEnd > 0.0 ? (ended - lastEnd) * 0.001 : 0.0, xr.displayPeriodMs, true);
     if (lastEnd > 0.0) { sumGap += entered - lastEnd; sumPeriod += ended - lastEnd; ++periods; longest = std::max(longest, ended - lastEnd); }
     sumBegin += t0 - entered; sumWait += xr.waitFrameMs; sumPass += t1 - t0; sumEnd += ended - t1;
     lastEnd = ended;
@@ -5263,6 +5273,8 @@ uintptr_t HookDrawGameScreen(int a) {
     const double ended=pairtime::UsNow();
 #ifdef D2RVR_NATIVE_OPENXR
     const auto xr=framevr::LastTiming();
+    framevr::NoteFrame(lastEnd>0?(entered-lastEnd)*.001:0,xr.waitFrameMs,(t2-t0)*.001,
+        std::max(0.0,(t0-entered)*.001-xr.waitFrameMs)+(ended-t2)*.001,lastEnd>0?(ended-lastEnd)*.001:0,xr.displayPeriodMs,false);
     sumBegin+=t0-entered;sumEnd+=ended-t2;
     sumWait+=xr.waitFrameMs;sumFence+=xr.waitGpuMs;sumSubmit+=xr.submitMs;
     if(xr.displayPeriodMs>0){sumPeriod+=xr.displayPeriodMs;++periodPairs;}
@@ -8664,8 +8676,8 @@ void TryRegister() {
     if (!reshade::register_addon(g_self)) return;
     framevr::resources::Register();
 #ifdef D2RVR_NATIVE_OPENXR
-    // before the game makes its device: the replay reads its upload buffers from their creation
-    stereoreplay::Register(&Log, g_replaySettings);
+    // (Stereo rendering: Replay is no longer a choice, so the replay is not
+    // registered: its resource, list and present hooks ran in every mode.)
     framevr::scenedepth::Register(&Log);
     framevr::lightbounds::Register(&Log);
 #endif
@@ -8713,6 +8725,12 @@ void TryRegister() {
 #endif
     g_registered = true;
     Log("vrcam: joined ReShade - the fog and the sky follow d2r_pcvr.ini [fog] [sky]");
+#ifdef D2RVR_NATIVE_OPENXR
+    // In VR the fog and sky read the mod's own depth (scenedepth); ReShade's,
+    // which Generic Depth provides, only outside it.
+    if (!vrsettings::ReShadeDepthActive())
+        Log("vrcam: ReShade's Generic Depth add-on is off (VR Settings > Perf > ReShade depth) - in VR the fog and sky use the mod's own depth; outside VR they have none and stay off");
+#else
     // Both read ReShade's depth, which Generic Depth provides (FlatVR's addon
     // only corrects its pick); without it the shader sees no depth and stays off.
     const std::wstring ini = ReShadeDir() + L"ReShade.ini";
@@ -8720,6 +8738,7 @@ void TryRegister() {
     GetPrivateProfileStringW(L"ADDON", L"DisabledAddons", L"", off, 512, ini.c_str());
     if (wcsstr(off, L"Generic Depth"))
         Log("vrcam: ReShade's Generic Depth add-on is OFF (ReShade.ini DisabledAddons) - the fog and the sky get no depth and stay off; tick it on ReShade's Add-ons tab");
+#endif
 }
 }  // namespace fx
 
@@ -9056,6 +9075,32 @@ DWORD WINAPI UpdateThread(void*) {
 
 }  // namespace
 
+#ifdef D2RVR_NATIVE_OPENXR
+// [render] reshade_depth (VR Settings > Perf > ReShade depth): ReShade's
+// Generic Depth add-on, written into its ini's [ADDON] DisabledAddons here,
+// before ReShade reads it - it cannot be switched while ReShade runs. In VR the
+// fog and sky read the mod's own depth (scenedepth); the add-on still watches
+// every draw call. Without the key ReShade.ini is left as it is. Returns
+// whether the add-on runs this session.
+bool SyncReShadeDepth(const std::wstring& ini) {
+    namespace addons = framevr::reshadeaddons;
+    wchar_t list[1024] = {};
+    GetPrivateProfileStringW(L"ADDON", L"DisabledAddons", L"", list, 1024, ini.c_str());
+    bool on = !addons::Disabled(list, addons::GenericDepth);
+    const float want = IniF(L"render", L"reshade_depth", -1.0f);
+    if ((want == 0.0f || want == 1.0f) && (want == 1.0f) != on) {
+        const std::wstring next = addons::WithEnabled(list, addons::GenericDepth, want == 1.0f);
+        if (GetFileAttributesW(ini.c_str()) == INVALID_FILE_ATTRIBUTES)
+            LogF("vrcam: no ReShade.ini yet (ReShade makes it when it first starts) - ReShade depth %s from the next start", want == 1.0f ? "on" : "off");
+        else if (WritePrivateProfileStringW(L"ADDON", L"DisabledAddons", next.c_str(), ini.c_str())) {
+            on = want == 1.0f;
+            LogF("vrcam: ReShade depth (Generic Depth add-on) %s - ReShade.ini set from VR Settings", on ? "on" : "off");
+        } else LogF("vrcam: ReShade depth could not be set in ReShade.ini (error %lu) - it stays %s", GetLastError(), on ? "on" : "off");
+    }
+    return on;
+}
+#endif
+
 // ReShade from the game's folder as ReShade64.dll, loaded here - only ever
 // under D2RLoader. As dxgi.dll it broke the plain game: D2R.exe checks the
 // signature of the dxgi.dll it loads, ReShade's has none, and the game stopped
@@ -9093,6 +9138,9 @@ void LoadReShade() {
         if(module){wchar_t loaded[MAX_PATH]{};GetModuleFileNameW(module,loaded,MAX_PATH);LogF("Frame effects: preloaded shader compiler %ls",loaded);}
         else LogF("Frame effects: optional shader compiler load failed (%lu); using system compiler",GetLastError());
     }
+#endif
+#ifdef D2RVR_NATIVE_OPENXR
+    vrsettings::SetReShadeDepth(SyncReShadeDepth(base + L"ReShade.ini"));
 #endif
     if (LoadLibraryW(path.c_str())) LogF("vrcam: ReShade loaded from ReShade64.dll - %ls", modOwn ? L"the D2RLoader mod's own (mods\\D2R-PCVR\\reshade)" : L"beside the game");
     else LogF("vrcam: ReShade64.dll did not load (error %lu)", GetLastError());

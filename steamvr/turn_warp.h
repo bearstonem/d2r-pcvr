@@ -72,9 +72,15 @@ inline std::array<float,12> TurnCarry(math::Vec drawnAt,math::Quat drawn,math::V
 // The other eye, drawn this frame (Render's `drawn`): its picture moved
 // across to this eye with its own depth, over this eye's older one, so what
 // moves by itself - monsters, missiles - stands where the drawn eye shows it
-// (owner, 2026-10-19: moving monsters). A cell whose corners' depths part by
-// more than TurnEdgePixels as seen from `apart` away held what that eye could
-// not see behind an edge: it is cut, and the older picture stays there.
+// (owner, 2026-10-19: moving monsters). A cell whose texels' depths part by
+// more than TurnEdgePixels as seen from `apart` away lies across an edge: it
+// goes as two flat layers, at its nearest depth and its farthest, each pixel
+// in the one its own depth is nearer. What that eye could not see behind the
+// edge, between them, keeps the older picture. Cut whole instead, such cells
+// left 4-pixel steps of the older picture along every edge, stale where a
+// head, a hand or a sword had moved since, and a blade thinner than a cell
+// went as the ground behind it: ghosting on heads and swords (owner,
+// 2026-10-20).
 struct TurnDepth {
     ID3D12Resource* depth=nullptr;   // in a shader-resource state
     DXGI_FORMAT format=DXGI_FORMAT_UNKNOWN;   // its shader-readable format
@@ -86,10 +92,40 @@ struct TurnDepth {
     float reach[2]{0,0};
     ID3D12Resource* image=nullptr;   // the drawn eye's picture (PIXEL_SHADER_RESOURCE); null: the source's
     float apart=0;   // the drawn eye: how far it stood from this one, in the world's units
+    // The drawn eye's: where this eye's own older picture, moved with its own
+    // depth (Render's `depth`), shows the same surface - within `keep` pixels
+    // of parallax - it stays; the drawn eye's goes only where they part: what
+    // moved since, what this eye's own could not show. The game's glow round a
+    // bright blade and a monster's hair have no depth of their own: moved
+    // across with the depth behind them they stood where the drawn eye saw
+    // them, a ghost blade with a glowing rim beside the sword, a second
+    // outline of hair round a head (owner's videos, 2026-10-20). This eye's
+    // own shows them from this eye. Carrying a near thing's depth over them
+    // instead dragged the ground and the grass round everything near along:
+    // a heat haze (owner, the same day). 0: the drawn eye's everywhere.
+    float keep=0;
+    // Kept everywhere, this eye was a frame behind the other all over - the
+    // grass, flames and monsters' motion - which the owner liked less than
+    // the ghosts. With keepNear only within keepReach target pixels of
+    // something nearer by more than keepNear pixels of parallax, as either
+    // eye sees it: the hands, the weapon, a monster close by, where a ghost
+    // is wide enough to see. 0: everywhere.
+    float keepNear=0,keepReach=0;
+    // Spells, flames and Tyrael's wings are the game's effects layer, with no
+    // depth of their own either: moved across with the depth behind them they
+    // stood where the drawn eye saw them and the scene showed through them,
+    // right only within the near things' reach round the sword (owner,
+    // 2026-10-20). With keepEffects, where the layer (TurnWarp::Effects) has
+    // anything from this level up - as the drawn eye drew it, round where its
+    // picture comes from, or as this eye did, round here - this eye's own
+    // picture stays as well. 0: off; with keepNear neither off, either keeps.
+    float keepEffects=0;
 };
 inline constexpr float TurnEdgePixels=2;
 // The grid's spacing in target pixels: an edge in depth stays within a few.
 inline constexpr uint32_t TurnGridStep=4;
+// TurnDepth::keepNear's blocks, target pixels square: the nearest depth in each.
+inline constexpr uint32_t TurnNearBlock=16;
 // The game's interface (labels over monsters, names, chat) has no depth of its
 // own. Moved with the scene behind it into the eye not drawn, each label was
 // misplaced and cut where a monster's edge parts the depth, a clean one every
@@ -105,13 +141,37 @@ class TurnWarp {
     Microsoft::WRL::ComPtr<ID3D12RootSignature> root,depthRoot;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> pipeline,depthPipeline,layerPipeline;
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> sourceHeap,targetHeap,depthHeap;
-    Microsoft::WRL::ComPtr<ID3D12Resource> depthTarget;   // the grid's own depth test, the target's size
+    Microsoft::WRL::ComPtr<ID3D12Resource> depthTarget;   // this eye's grid's own depth test, the target's size (R32 typeless: read by the next)
+    Microsoft::WRL::ComPtr<ID3D12Resource> drawnDepthTarget;   // the drawn eye's grid's
+    Microsoft::WRL::ComPtr<ID3D12Resource> ownTurned;   // the target as this eye's grid left it (TurnDepth::keep)
+    // TurnDepth::keepNear: the nearest depth within reach of each block, the
+    // drawn eye's and this eye's, and one between (R32_FLOAT).
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> nearRoot;
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> reducePipeline,spreadPipeline;
+    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> nearTargets;
+    std::array<Microsoft::WRL::ComPtr<ID3D12Resource>,3> nears;
+    // TurnDepth::keepEffects: the strongest of each eye's effects layer within
+    // reach of each block, as that eye was last drawn (Effects), then two
+    // between (R32_FLOAT, TurnNearBlock pixels a texel).
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> effectsPipeline;
+    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> effectsTargets;
+    std::array<Microsoft::WRL::ComPtr<ID3D12Resource>,4> effects;
+    std::array<bool,2> effectsKept{};
     DXGI_FORMAT format=DXGI_FORMAT_UNKNOWN;
 public:
     // format: the eye swapchain's typed format, of the source and the target alike.
+    // Any thread, for its own object: the shaders compile once for the process,
+    // and an Initialize meeting that compile running waits and reuses it.
     bool Initialize(ID3D12Device*,DXGI_FORMAT format,void (*log)(const char*));
     bool Ready() const {return pipeline!=nullptr;}
     bool DepthReady() const {return depthPipeline!=nullptr;}
+    bool NearReady() const {return spreadPipeline!=nullptr;}
+    bool EffectsReady() const {return effectsPipeline!=nullptr&&spreadPipeline!=nullptr;}
+    // The game's effects layer as the eye `slot` was drawn this frame: its two
+    // targets, in `states` and left so, into that eye's blocks, each the
+    // strongest of the layer within `reach` of its pixels (TurnDepth::keepEffects).
+    bool Effects(ID3D12Device*,ID3D12GraphicsCommandList*,ID3D12Resource* const layer[2],const D3D12_RESOURCE_STATES states[2],int slot,float reach);
+    void ForgetEffects(int slot){if(slot==0||slot==1)effectsKept[slot]=false;}
     // Render will take these: checked before a swapchain image is acquired for it.
     bool Fits(ID3D12Resource* source,ID3D12Resource* target) const;
     // source in PIXEL_SHADER_RESOURCE, target in RENDER_TARGET. slot 0 or 1, one

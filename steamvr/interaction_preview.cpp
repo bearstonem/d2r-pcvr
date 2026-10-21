@@ -222,6 +222,10 @@ int main(int argc,char** argv) {
         s.devClass=3;s.devDebugDraws=true;o.devPage=1;o.hover=DeveloperCell(framevr::dev::DebugDrawsChoice);o.result=Result::DebugUpdated;
         const auto debug=Paint(s,o,-1);s.devDebugDraws=false;
         if(debug==Paint(s,o,-1)||!SavePng((std::string(argv[1])+".debug-on.png").c_str(),debug,1024,1024))return 78;
+        s.devTurnsKeepOwn=1;o.hover=DeveloperCell(framevr::dev::TurnsKeepOwnChoice);o.result=Result::TurnsUpdated;
+        const auto turnsNear=Paint(s,o,-1);s.devTurnsKeepOwn=2;
+        if(turnsNear==Paint(s,o,-1)||!SavePng((std::string(argv[1])+".turns-own-near.png").c_str(),turnsNear,1024,1024))return 79;
+        s.devTurnsKeepOwn=0;
         std::puts("Development preview: page, hover and unavailable state passed");return 0;
     }
     s.health=74;s.maxHealth=100;s.mana=39;s.maxMana=80;

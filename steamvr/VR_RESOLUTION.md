@@ -257,3 +257,38 @@ The owner confirmed the complete bottom row is now clickable on Quest 3 through
 Virtual Desktop/VDXR with the combined cursor-bounds build. The earlier failed
 mouse-event-only test above is retained as diagnostic history. This does not
 establish every resolution/runtime combination.
+
+## A game window narrower than the VR source (October 20)
+
+With the game windowed at 1920 x 1080 and a 3072-square VR source, the laser
+could not reach the right side of any panel (the main menu's options, the
+inventory, the stash), and the wrist map stayed empty under its title and
+compass. A player reported the same on a Vive Pro at 3000 and 4000 sources:
+part of the inventory at 3000, nearly all of it at 4000. A full-screen 3840 x
+2160 desktop showed neither.
+
+- **Cursor.** The game converts the cursor between the window's pixels and its
+  own space (`0x7f350` in; `0x7f210` and `0x7f2d0` out; their content size
+  `0x7f540`). With modern graphics it fits a letterbox and clamps X to a
+  centred band 2.11 times the window's height. Those size queries returned
+  the physical window, while the cursor arrives in VR-source pixels. The band
+  ended at 2100 of 3072 in the 1920 x 1080 window, at 2800 for a 2560 x 1440
+  one and at 4200 for 3840 x 2160, which is past the source. The seven
+  return sites now receive the full applied VR source, as SetCursorPosition's
+  clamp already did, and so does the controller cursor's own clamp, which
+  calls `0x7f4d0` (it tail-jumps to the query). Each CALL and JMP is
+  signature-checked before the hook goes in. Desktop mode and the time before
+  a resize are unchanged.
+- **Wrist map.** The game sizes the corner map's box from its own window, a
+  third of it: 1280 x 720 under the 3840 desktop and 640 x 360 in the 1920
+  window, both at the same corner of the 3072 layer. The map's scissor test
+  required a box taller than an eighth of the layer, 384 at 3072, so the
+  windowed box was refused and nothing was copied. The box now passes when
+  its size fits the layer or the game window's own client area; the corner
+  test is unchanged.
+
+A private diagnostic build logged the game's cursor stopping at X = 2100
+while the converted pointer reached 2797, and the map's 640 x 360 box being
+refused. The owner then confirmed in the headset that the options panel and
+the inventory's right side can be pointed at and clicked, and that the
+wrist map shows, in the windowed 1920 x 1080 game.

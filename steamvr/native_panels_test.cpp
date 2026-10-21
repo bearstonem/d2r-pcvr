@@ -17,6 +17,102 @@ int main(){
         const auto p=panels::AtEyeLevel({0,1.7f,0},math::Yaw(.8f),distance);
         Check(p.position.y==1.7f,"all distance presets retain eye-level anchor");
     }
+    Check(panels::NearDistance<panels::MenuDistance(0)&&panels::FarDistance>panels::MenuDistance(2,true),
+        "grab limits reach past every preset");
+    {
+        const math::Vec head{0,1.6f,0};
+        const auto base=panels::AtEyeLevel(head,math::Yaw(.5f),panels::MenuDistance(1));
+        auto same=[](math::Vec a,math::Vec b){const auto d=a-b;return math::Dot(d,d)<1e-9f;};
+        auto len=[](math::Vec a){return std::sqrt(math::Dot(a,a));};
+        auto at=[&](math::Vec p,math::Quat q=math::Yaw(1)){return panels::Placement{math::Vec{.2f,1.2f,-.3f}+p,q};};
+        auto where=[&](panels::Offset o){return panels::Apply(base,o);};
+        const math::Quat roll{0,0,std::sin(.35f),std::cos(.35f)};
+        Check(same(where({}).position,base.position),"no grab keeps the default placement");
+        panels::Grab grab;panels::Offset o;
+        Check(!grab.Step(true,false,false,at({}),base,head,o)&&!grab.Step(true,true,false,at({.2f,0,0}),base,head,o)&&
+              same(where(o).position,base.position),"grip started off the panel never grabs");
+        grab.Step(false,true,false,at({}),base,head,o);
+        Check(!grab.Step(true,true,false,at({}),base,head,o)&&!grab.Step(true,true,false,at({.014f,.014f,0}),base,head,o)&&
+              same(where(o).position,base.position),"slack keeps a still grip as Shift");
+        Check(grab.Step(true,true,false,at({.02f,.02f,.02f}),base,head,o)&&same(where(o).position,base.position+math::Vec{.02f,.02f,.02f}),
+              "once moving, the panel catches up with all travel since the press");
+        const math::Vec travel{.1f,.05f,-.1f};
+        Check(grab.Step(true,false,false,at(travel),base,head,o)&&same(where(o).position,base.position+travel),
+              "diagonal travel moves the panel 1:1 in room space, even off the panel");
+        Check(std::fabs(o.yaw)<1e-6f&&std::fabs(o.pitch)<1e-6f,"translation alone does not tilt");
+        for(const math::Vec slide:{math::Vec{.6f,0,0},math::Vec{-.6f,0,0},math::Vec{0,.45f,0},math::Vec{0,-.45f,0},math::Vec{.5f,.3f,0}}){
+            const auto moved=travel+slide;
+            Check(grab.Step(true,true,false,at(moved),base,head,o)&&same(where(o).position,base.position+moved)&&
+                  std::fabs(o.yaw)<1e-6f&&std::fabs(o.pitch)<1e-6f,"sideways and vertical hand travel slides the panel exactly, with no turn");
+        }
+        grab.Step(true,true,false,at(travel),base,head,o);
+        const auto tilted=math::Multiply(math::Yaw(1.3f),panels::Pitch(.2f));
+        grab.Step(true,true,false,at(travel,tilted),base,head,o);
+        Check(std::fabs(o.yaw-.3f)<1e-4f&&std::fabs(o.pitch-.2f)<1e-4f,"heading and pitch follow the hand's change");
+        const auto before=o;
+        grab.Step(true,true,false,at(travel,math::Multiply(tilted,roll)),base,head,o);
+        Check(std::fabs(o.yaw-before.yaw)<1e-4f&&std::fabs(o.pitch-before.pitch)<1e-4f,"hand roll never rolls the panel");
+        Check(std::fabs(math::Rotate(where(o).orientation,{1,0,0}).y)<1e-5f,"panel's horizontal edge stays level");
+        grab.Step(true,true,false,at(travel,math::Multiply(math::Yaw(1),panels::Pitch(1.4f))),base,head,o);
+        Check(o.pitch==panels::MaxTilt,"tilt up is clamped");
+        grab.Step(true,true,false,at(travel,math::Multiply(math::Yaw(1),panels::Pitch(-1.4f))),base,head,o);
+        Check(o.pitch==-panels::MaxTilt,"tilt down is clamped");
+        const auto forward=math::Rotate(base.orientation,{0,0,-1});
+        grab.Step(true,true,false,at(forward*3),base,head,o);
+        Check(std::fabs(len(where(o).position-head)-panels::FarDistance)<1e-4f,"far limit from the head");
+        grab.Step(true,true,false,at(forward*-.6f),base,head,o);
+        Check(std::fabs(len(where(o).position-head)-panels::NearDistance)<1e-4f,"near limit from the head");
+        grab.Step(true,true,false,at(travel),base,head,o);
+        Check(grab.Step(true,true,true,at(travel),base,head,o),"a trigger squeezed while moving is consumed");
+        const auto kept=o;
+        Check(grab.Step(false,true,true,at({}),base,head,o)&&same(o.position,kept.position),"release keeps the place; held trigger stays consumed");
+        Check(!grab.Step(false,true,false,at({}),base,head,o),"trigger release ends the grab");
+        const auto reopened=panels::AtEyeLevel({1,1.5f,2},math::Yaw(-1),panels::MenuDistance(1));
+        Check(same(math::Rotate(math::Conjugate(reopened.orientation),panels::Apply(reopened,o).position-reopened.position),o.position),
+              "a reopened menu keeps its place relative to where you face");
+        o={};grab.Step(true,true,false,at({}),base,head,o);
+        Check(!grab.Step(true,true,true,at({}),base,head,o)&&!grab.Step(true,true,false,at({.3f,0,0}),base,head,o)&&
+              same(where(o).position,base.position),"grip then click stays Shift-click for the whole hold");
+        grab.Step(false,true,false,at({}),base,head,o);
+        Check(!grab.Step(true,true,true,at({}),base,head,o)&&!grab.Step(true,true,true,at({.3f,0,0}),base,head,o)&&
+              same(where(o).position,base.position),"grip during a drag or held click never grabs");
+        grab.Step(false,true,false,at({}),base,head,o);grab.Step(true,true,false,at({}),base,head,o);grab.Suspend();
+        Check(!grab.Step(true,true,false,at({.3f,0,0}),base,head,o)&&same(where(o).position,base.position),"a surface change needs a fresh grip");
+        grab.Step(false,true,false,at({}),base,head,o);grab.Step(true,true,false,at({}),base,head,o);
+        Check(grab.Step(true,true,false,at({.1f,0,0}),base,head,o),"fresh grip after suspension grabs again");
+        {
+            panels::Grab hold;panels::Offset g;const auto press=at({});
+            hold.Step(true,true,false,press,base,head,g);
+            const auto turned=at({.04f,0,0},math::Yaw(1.3f));
+            Check(hold.Step(true,true,false,turned,base,head,g)&&
+                  same(where(g).position,turned.position+math::Rotate(math::Yaw(.3f),base.position-press.position))&&std::fabs(g.yaw-.3f)<1e-5f,
+                  "turning the hand swings the panel about the hand, keeping the grabbed point on the laser");
+        }
+        // Game menus: push/pull only.
+        const float d0=panels::MenuDistance(1);
+        auto distance=[&](panels::Offset p){return len(where(p).position-head);};
+        const auto right=math::Rotate(base.orientation,{1,0,0});
+        panels::Grab push;o={};
+        Check(!push.Step(true,true,false,at({}),base,head,o,d0)&&!push.Step(true,true,false,at(right*.2f+math::Vec{0,.2f,0}),base,head,o,d0)&&
+              same(where(o).position,base.position),"sideways or vertical travel never moves a game menu or ends Shift");
+        Check(push.Step(true,true,false,at(right*.2f+math::Vec{0,.2f,0}+forward*.04f),base,head,o,d0)&&std::fabs(distance(o)-(d0+.04f))<1e-4f,
+              "push catches up with all travel along the axis since the press");
+        push.Step(true,true,false,at(right*-.3f+forward*.25f,tilted),base,head,o,d0);
+        Check(std::fabs(distance(o)-(d0+.25f))<1e-4f&&o.position.x==0&&o.position.y==0&&o.yaw==0&&o.pitch==0,
+              "diagonal travel pushes by its depth only and never tilts");
+        push.Step(true,true,false,at(forward*-.2f),base,head,o,d0);
+        Check(std::fabs(distance(o)-(d0-.2f))<1e-4f,"pull brings it nearer 1:1");
+        push.Step(true,true,false,at(forward*3),base,head,o,d0);
+        Check(std::fabs(distance(o)-panels::FarDistance)<1e-4f,"push stops at the far limit");
+        push.Step(true,true,false,at(forward*-3),base,head,o,d0);
+        Check(std::fabs(distance(o)-panels::NearDistance)<1e-4f,"pull stops at the near limit, still in front");
+        push.Step(false,true,false,at({}),base,head,o,d0);
+        const auto title=panels::AtEyeLevel(head,math::Yaw(.5f),panels::MenuDistance(1,true));
+        Check(std::fabs(len(panels::Apply(title,o).position-head)-(panels::MenuDistance(1,true)-d0+panels::NearDistance))<1e-4f,
+              "the same push/pull carries to the title menu");
+        Check(!push.Step(true,true,false,at({}),base,head,o,d0)&&!push.Step(true,true,true,at({}),base,head,o,d0)&&
+              !push.Step(true,true,false,at(forward*.3f),base,head,o,d0),"grip then click stays Shift-click");
+    }
     panels::TooltipDwell dwell;
     Check(dwell.Ready(1,2,100,0,1),"instant tooltip on first hover");
     Check(!dwell.Ready(1,2,110,1,1),"short mode starts fresh on setting change");
@@ -32,6 +128,12 @@ int main(){
     Check(panels::ItemCursorSnap(false,true,true)&&panels::ItemCursorSnap(true,false,true),"desktop and unrelated cursor queries remain native");
     Check(panels::CursorBoundsCaller(0x7f4b2)&&panels::CursorBoundsCaller(0x14fb2a),
         "native height and tail-called width clamp use full-source bounds");
+    for(auto address:panels::CursorConversionReturns)
+        Check(panels::CursorBoundsCaller(address)&&!panels::UiCanvasCaller(address),
+            "the cursor's window/game conversions use full-source bounds, never the UI band (X stopped at 2100 of 3072)");
+    for(auto address:panels::CursorClampReturns)
+        Check(panels::CursorBoundsCaller(address)&&!panels::UiCanvasCaller(address),"the controller cursor's clamp uses full-source bounds");
+    Check(std::size(panels::CursorConversionReturns)==7&&std::size(panels::CursorClampReturns)==2,"every audited cursor size query is listed");
     for(auto address:panels::UiCanvasReturns)
         Check(!panels::CursorBoundsCaller(address),"cursor bounds cannot enlarge native font/layout canvas");
     for(auto address:{uintptr_t(0),uintptr_t(0x14fb46),uintptr_t(0x667ff1),uintptr_t(0x904b3d)})
