@@ -111,6 +111,40 @@ def compare_reports(ours, theirs):
     return [label for key, label in FIELDS.items() if ours[key] != theirs[key]]
 
 
+def comparison_text(ours, theirs):
+    """Explain the actual differences and the next step, using validated data only."""
+    if not compare_reports(ours, theirs):
+        return 'Compared setup fields match. D2RLoader still checks game data and other extensions when joining.'
+    lines = ['Differences to fix:']
+    if ours['game_version'] != theirs['game_version']:
+        lines.append(f'Game build: this PC {ours["game_version"]}; friend {theirs["game_version"]}. '
+                     'Use matching game builds on both PCs.')
+    if ours['mod'] != theirs['mod']:
+        lines.append(f'Selected mod: this PC {ours["mod"]}; friend {theirs["mod"]}. '
+                     'Select the same mod on both PCs; normal Unleashed and pcvr-coop are separate choices.')
+    if ours['plugin_sha256'] != theirs['plugin_sha256']:
+        lines.append('Unleashed DLLs differ. Install the same release, or use the same diagnostic kit, on both PCs.')
+    if ours['loader_sha256'] != theirs['loader_sha256']:
+        files = [name for name in sorted(ours['loader_sha256'])
+                 if ours['loader_sha256'][name] != theirs['loader_sha256'][name]]
+        lines.append('D2RLoader files differ: '+', '.join(files)+'. Repair using the same reviewed Unleashed package.')
+    if ours['port'] != theirs['port']:
+        lines.append(f'Game port: this PC TCP {ours["port"]}; friend TCP {theirs["port"]}. '
+                     'Match game_port in D2RLoader Advanced settings and use that port for the host forwarding rule.')
+    for key in ('melee_rules', 'contact_hits', 'enemies_always_hit'):
+        our_value, their_value = ours['combat_policy'][key], theirs['combat_policy'][key]
+        if our_value == their_value:
+            continue
+        if key == 'melee_rules':
+            names = ('Unleashed', 'Classic')
+            lines.append(f'Melee rules: this PC {names[our_value]}; friend {names[their_value]}. '
+                         'Match VR Settings > Combat > Melee rules, then Apply on both PCs.')
+        else:
+            lines.append(f'{key}: this PC {our_value}; friend {their_value}. '
+                         'Match this shared [gameplay] option in the selected mod\'s d2r_pcvr.ini.')
+    return '\n'.join(lines)
+
+
 def load_friend_report(path):
     if path.stat().st_size > 16384:
         raise ValueError('Compatibility report is too large; ask for a fresh report from the assistant.')

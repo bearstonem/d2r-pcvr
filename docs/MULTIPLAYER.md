@@ -25,6 +25,8 @@ Use local offline characters through D2RLoader TCP/IP, not Battle.net online pla
 4. Use **Save compatibility report** and exchange the small JSON files.
    **Compare a friend report** identifies differences in the game build,
    selected mod, actual DLL/loader hashes, port and shared combat policy.
+   Differences show each player's value and where to fix it, such as
+   **VR Settings > Combat > Melee rules** or D2RLoader's **game_port**.
    Rendering, calibration and personal controls are excluded. Reports contain
    no local paths, IPs, saved characters or passwords. A matching check code
    means these compared fields match; the loader still checks game data and
@@ -192,14 +194,16 @@ References: [D2RLoader TCP/IP guide](https://d2rloader.net/tcp-ip.html),
 
 ## Automated verification
 
-The initial candidate passed 112 native checks and 227 Python checks, with one
-unavailable-symlink skip on Windows. The native adapter fixture runs the actual
+Current build/check results are recorded in the draft PR. The native adapter fixture runs the actual
 service callbacks against a synthetic loader: unavailable/short service tables,
 solo and non-TCP exclusions, session changes, delayed replies, rule/build
 mismatch, authenticated host-thread peer lookup, rejected peers, discarded
 callbacks, bounded queues and shutdown. Python fixtures cover isolated staging,
 preservation of normal files, malformed settings, comments/BOM/newlines,
 concurrent changes, repeat setup and rejection while the game runs.
+Assistant fixtures also cover actionable friend-report comparisons, malformed
+settings recovery, source-only distribution and the real loopback TCP probe
+without any game payload.
 
 Real two-PC verification by the maintainer is pending. Community reports of
 basic play do not identify every tested feature or substitute for this matrix.

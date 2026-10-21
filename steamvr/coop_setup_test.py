@@ -1,4 +1,7 @@
 from pathlib import Path
+import contextlib
+import io
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -105,6 +108,20 @@ class PreflightTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'D2RLoader files'):coop.inspect(game)
             with self.assertRaisesRegex(ValueError,'plain D2RLoader'):coop.inspect(game,'../other')
             self.assertEqual(plugin.read_bytes(),b'synthetic')
+
+    def test_command_line_friend_comparison_prints_actionable_port_difference(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp).resolve();game,_,_=self.fixture(root)
+            with patch.object(coop,'ROOT',root),patch.object(coop,'validate_game',return_value=('steam','3.3.93787')):
+                report=coop.inspect(game)
+                from coop_connection import friend_report
+                theirs=friend_report(report);theirs['port']=4000
+                path=root/'friend.json';path.write_text(json.dumps(theirs))
+                output=io.StringIO()
+                with patch.object(sys,'argv',['coop','--game',str(game),'--compare-report',str(path)]),contextlib.redirect_stdout(output):
+                    coop.main()
+            self.assertIn('this PC TCP 4123; friend TCP 4000',output.getvalue())
+            self.assertIn('game_port in D2RLoader Advanced',output.getvalue())
 
 
 class IsolatedStagingTests(unittest.TestCase):

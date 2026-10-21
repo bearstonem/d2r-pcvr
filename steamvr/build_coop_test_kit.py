@@ -51,8 +51,8 @@ Use a Launch-Coop CMD (Steam edition), or select pcvr-coop under Other\r
 mods in the shared launcher. Create an\r
 offline test character. Choose Multiplayer beside Play; host LAN Only\r
 or Unlisted, then have the other PC join. See docs/MULTIPLAYER.md.\r
-Physical guest swings, shield defense and custom projectiles still need\r
-their host-side action bridge. This kit verifies the connection path.\r
+Guest physical swings, shield defense and custom projectiles still need\r
+host/guest verification. This kit adds connection diagnostics, not an action bridge.\r
 Normal Unleashed, pcvr-dev and existing saves are preserved.\r
 No game assets, extracted caches, character files or loader are included.\r
 '''

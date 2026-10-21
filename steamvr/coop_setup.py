@@ -268,17 +268,16 @@ def main():
             print(report['status'])
             print('Start Unleashed normally, select an offline character, then choose Multiplayer beside Play.')
             print('Host: choose LAN Only or Unlisted. Guest: use Direct Join or the shared Game ID.')
-            print('Both PCs need the same test DLL, mod folder name and combat rules. Keep the same game port.')
+            print('Both PCs need the same Unleashed build, mod folder name and combat rules. Keep the same game port.')
             print('No game was launched, no firewall/router changes were made, and no saves were changed.')
-        from coop_connection import friend_report, compare_reports, load_friend_report, probe
+        from coop_connection import friend_report, comparison_text, load_friend_report, probe
         if args.save_report:
             with args.save_report.open('x', encoding='utf-8') as output:
                 json.dump(friend_report(report), output, indent=2)
                 output.write('\n')
             print(f'Compatibility report saved: {args.save_report}')
         if args.compare_report:
-            differences = compare_reports(friend_report(report), load_friend_report(args.compare_report))
-            print('Differences: '+', '.join(differences) if differences else 'Compared setup fields match. The loader still checks game data and other extensions.')
+            print(comparison_text(friend_report(report), load_friend_report(args.compare_report)))
         if args.test_host:
             print(json.dumps(probe(args.test_host, report['port']), indent=2))
     except (OSError, ValueError, KeyError, configparser.Error) as error:

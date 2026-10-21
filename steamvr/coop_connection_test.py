@@ -1,4 +1,5 @@
 from copy import deepcopy
+import configparser
 import json
 from pathlib import Path
 import socket
@@ -99,6 +100,41 @@ class CompatibilityTests(unittest.TestCase):
             path.write_bytes(b' '*16385)
             with self.assertRaisesRegex(ValueError,'too large'):connection.load_friend_report(path)
 
+    def test_comparison_shows_port_and_melee_values_with_their_remedies(self):
+        ours=connection.friend_report(report());theirs=deepcopy(ours)
+        theirs['port']=4123;theirs['combat_policy']['melee_rules']=1
+        text=connection.comparison_text(ours,theirs)
+        self.assertIn('this PC TCP 4000; friend TCP 4123',text)
+        self.assertIn('game_port in D2RLoader Advanced',text)
+        self.assertIn('this PC Unleashed; friend Classic',text)
+        self.assertIn('VR Settings > Combat > Melee rules',text)
+        self.assertNotIn('DLLs differ',text)
+
+    def test_comparison_covers_build_mod_and_shared_ini_options(self):
+        ours=connection.friend_report(report());theirs=deepcopy(ours)
+        theirs.update(game_version='3.3.93847',mod='pcvr-coop',plugin_sha256='c'*64)
+        theirs['combat_policy'].update(contact_hits=0,enemies_always_hit=0)
+        text=connection.comparison_text(ours,theirs)
+        for part in ('3.3.93787; friend 3.3.93847','D2R-PCVR; friend pcvr-coop',
+                     'same release','contact_hits: this PC 1; friend 0',
+                     'enemies_always_hit: this PC 1; friend 0','d2r_pcvr.ini'):
+            self.assertIn(part,text)
+        self.assertNotIn('192.168',text)
+        self.assertNotIn('calibration',text)
+
+    def test_comparison_names_only_the_loader_files_that_differ(self):
+        ours=connection.friend_report(report());theirs=deepcopy(ours)
+        theirs['loader_sha256']['D2RLoader.exe']='d'*64
+        text=connection.comparison_text(ours,theirs)
+        self.assertIn('D2RLoader files differ: D2RLoader.exe.',text)
+        self.assertNotIn('D2RCore.dll',text)
+
+    def test_matching_reports_still_explain_loader_checks_and_reject_invalid_input(self):
+        ours=connection.friend_report(report())
+        self.assertIn('D2RLoader still checks game data',connection.comparison_text(ours,deepcopy(ours)))
+        theirs=deepcopy(ours);theirs['mod']='bad\x1b[2J'
+        with self.assertRaises(ValueError):connection.comparison_text(ours,theirs)
+
 
 class WizardTests(unittest.TestCase):
     def test_guidance_distinguishes_host_guest_lan_internet_and_vpn(self):
@@ -139,6 +175,22 @@ class WizardTests(unittest.TestCase):
             with patch('coop_setup.inspect',return_value=report()):
                 wizard.run(Path('game'),report(),lambda _:next(answers),lambda _:None)
             self.assertEqual(path.read_bytes(),b'keep')
+
+    def test_friend_file_comparison_provides_the_setting_and_values(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'friend.json';theirs=connection.friend_report(report())
+            theirs['port']=4123;path.write_text(json.dumps(theirs))
+            answers=iter(['2','2','4',str(path),'q']);messages=[]
+            with patch('coop_setup.inspect',return_value=report()):
+                wizard.run(Path('game'),report(),lambda _:next(answers),messages.append)
+            self.assertTrue(any('this PC TCP 4000; friend TCP 4123' in line for line in messages))
+
+    def test_settings_parse_error_returns_to_menu_instead_of_ending_assistant(self):
+        answers=iter(['2','2','5','5','q']);messages=[]
+        with patch('coop_setup.inspect',side_effect=[configparser.MissingSectionHeaderError('ini',1,'bad'),report()]):
+            wizard.run(Path('game'),report(),lambda _:next(answers),messages.append)
+        self.assertTrue(any('Co-op check:' in line for line in messages))
+        self.assertIn('No game was launched',messages[-1])
 
     def test_input_end_is_a_clean_exit(self):
         messages=[]

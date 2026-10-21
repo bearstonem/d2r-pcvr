@@ -1,11 +1,12 @@
 """Double-click co-op assistant using the install's existing private Python."""
 from datetime import datetime
+import configparser
 import json
 import os
 from pathlib import Path
 import subprocess
 
-from coop_connection import check_code, compare_reports, friend_report, load_friend_report, local_addresses, probe
+from coop_connection import check_code, comparison_text, friend_report, load_friend_report, local_addresses, probe
 
 
 def choose(prompt, options, default, ask=input, say=print):
@@ -117,9 +118,7 @@ def run(game, report, ask=input, say=print):
                 elif action == '4':
                     name = ask('Friend report file (blank cancels): ').strip().strip('"')
                     if name:
-                        different = compare_reports(shared, load_friend_report(Path(name).expanduser()))
-                        say('Differences to fix: '+', '.join(different) if different
-                            else 'Compared setup fields match. D2RLoader still checks game data and other extensions when joining.')
+                        say(comparison_text(shared, load_friend_report(Path(name).expanduser())))
                 elif action == '5':
                     say(instructions(role, network, report['port'], addresses))
                 elif action == '6':
@@ -127,7 +126,7 @@ def run(game, report, ask=input, say=print):
                     if ask('Enable Multiplayer? [y/N]: ').strip().lower() == 'y':
                         backup = enable_button(game)
                         say('Multiplayer enabled.'+(f' Original loader settings: {backup}' if backup else ''))
-            except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+            except (OSError, ValueError, KeyError, configparser.Error, subprocess.SubprocessError) as error:
                 say(f'Co-op check: {error}')
     except (EOFError, KeyboardInterrupt):
         say('\nCo-op assistant closed.')
