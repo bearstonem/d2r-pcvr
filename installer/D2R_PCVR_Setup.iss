@@ -59,6 +59,7 @@ VersionInfoCopyright=MIT licence. D2R PCVR contributors; D2R VR (c) 2026 BodyWal
 Source: "{#PayloadDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
+Name: "{group}\Co-op Setup"; Filename: "{app}\Coop-Setup.cmd"; WorkingDir: "{app}"
 Name: "{group}\Installation help"; Filename: "{sys}\notepad.exe"; Parameters: """{app}\INSTALL-WINDOWS.md"""
 Name: "{group}\Controller mappings"; Filename: "{sys}\notepad.exe"; Parameters: """{app}\CONTROLS.md"""
 Name: "{group}\Uninstall D2R VR Unleashed"; Filename: "{uninstallexe}"
