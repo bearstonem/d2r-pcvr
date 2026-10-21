@@ -37,10 +37,16 @@ The remainder of this document is the **target design**. Its future requirements
 particularly spell-family adapters and readiness metadata, must not be mistaken for
 features already completed in the candidate.
 
-Owner refinement: **spell gestures are out of scope**. Equip a spell, point the
-right hand and pull the trigger to cast. Prioritize responsive projectile spells
-with impressive, coherent effects. The target-family adapters below are engine
-implementation details, not different gestures the player must learn.
+Owner refinement: equip a spell, point the hand and pull the trigger to cast.
+Prioritize responsive projectile spells with impressive, coherent effects. The
+target-family adapters below are engine implementation details, not different
+gestures the player must learn.
+
+Owner decision, 2026-10-21: **gesture casts are in scope**, especially for
+skills that don't shoot: self buffs, armors, novas, shouts and imbues. This
+replaces the earlier "spell gestures are out of scope". Tracked in #226, with
+ChuckRibbits's shapeshift gestures (not merged yet) as the pattern. Motion decides
+whether and where a skill lands, never how much it does.
 
 ## Recommended interaction scheme
 
@@ -138,9 +144,9 @@ The implementation still needs to resolve each native target type:
 
 Classify by skill behavior/data, with explicit supported adapters. Unknown or
 complex skills keep a visibly identified native fallback. Read availability
-instead of assuming every selected assignment can cast. Gesture recognition,
-throw-to-cast, two-hand casting, gesture strength and release-to-cast spell
-controls are outside this phase. Bow draw/release and potion drinking retain
+instead of assuming every selected assignment can cast. Gesture casts are
+tracked separately (#226); throw-to-cast, two-hand casting, gesture strength and
+release-to-cast spell controls are outside this phase. Bow draw/release and potion drinking retain
 their own existing physical controls.
 
 ### Responsive, visually complete projectile spells
@@ -265,7 +271,8 @@ objects must disappear behind hands/scenery rather than claiming it is automatic
    directed projectile, then ground placement/self buffs, channels, eligible
    corpse/unit targets and complex missiles behind the same simple controls.
    Verify latency, pose/effect/impact agreement, resources/cast rate, immunity/
-   procs and cancellation. Spell gestures remain out of scope.
+   procs and cancellation. Gesture casts for skills that don't shoot are
+   tracked in #226.
 
 Across every stage: death/loading/session changes, stale tracking, recenter,
 menu open/close and equipment changes cancel pending actions and require fresh

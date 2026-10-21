@@ -319,10 +319,11 @@ The owner will test the bow-height correction later. Work can proceed without
 another headset capture. See [INTERACTIONS.md](INTERACTIONS.md) for the concrete
 control design, current code capabilities and implementation order.
 
-Owner scope refinement: **no spell gestures for now**. Equip/select a spell,
-point the right hand and pull the trigger. Ready projectile spells launch on
-press, with snappy response and their full visual effects; no release-to-cast
-or gesture wind-up. Native resource and cast-rate gates still apply.
+Owner scope refinement: equip/select a spell, point the hand and pull the
+trigger. Ready projectile spells launch on press, with snappy response and their
+full visual effects; no release-to-cast or gesture wind-up. Native resource and
+cast-rate gates still apply. Since 2026-10-21, **gesture casts are in scope** for
+skills that don't shoot (self buffs, armors, novas, shouts, imbues); see #226.
 
 - [x] Design reachable weapon-set holsters, spell wheel and per-family casting,
   grab/drink potions, wrist gauges and a handheld/pinned quest journal.
