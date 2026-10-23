@@ -571,8 +571,9 @@ std::array<KeptDepth,2> turnDepths;
 // By turns: each eye's motion vectors as drawn (motionvectors), beside its
 // depth (KeepMotion), for TurnDepth::motion; and where the render before
 // (the other eye's) stood against it, for TurnDepth::back.
-// turned: how far the eye turned in the world a render, degrees (KeepMotion).
-struct KeptMotion {ComPtr<ID3D12Resource> texture;bool ok=false;std::array<float,12> back{};XrFovf backFov{};bool backOk=false;float turned=0;};
+// turned: how far the eye turned in the world a render, degrees; stepped:
+// how far the hero went, metres (KeepMotion).
+struct KeptMotion {ComPtr<ID3D12Resource> texture;bool ok=false;std::array<float,12> back{};XrFovf backFov{};bool backOk=false;float turned=0,stepped=0;};
 std::array<KeptMotion,2> turnMotions;
 // What the game's vectors say by distance (TurnWarp::MotionStats): each read-
 // back slot free (0), recorded but not yet submitted (MotionPending), or the
@@ -601,8 +602,13 @@ int motionNext=0;
 // too, so `from` has no floor of its own. Turning slower, the ground and the
 // walls still went red in SHOW (the session after): what is left counts as
 // none under StillPixels plus MotionTurnShare of the turn in pixels.
+// Strafing, the ghost beside monsters smeared the way the hero went (the
+// session after, ON): with the hero moving the camera's motion explained
+// only 57-76% at 2-4 m, against 94-99% standing. So none is used either
+// while the hero goes more than MotionStepMetres a render (KeptMotion::stepped,
+// about 0.45 m/s at 90 Hz).
 constexpr double MotionExplained=.8,MotionHeld=.97,MotionDecay=.999;
-constexpr float MotionTurnDegrees=.25f,MotionTurnShare=.3f;
+constexpr float MotionTurnDegrees=.25f,MotionTurnShare=.3f,MotionStepMetres=.005f;
 struct MotionGate {
     std::array<std::array<double,4>,MotionBins> seen{},window{};   // seen: decayed; window: for the log
     bool trusted=false;
@@ -631,7 +637,7 @@ struct MotionGate {
         if(!since)since=now;
         if(now-since<10000)return;
         // still / explained by the camera / mean length in pixels, by distance
-        char head[224];std::snprintf(head,sizeof head,"Frame OpenXR: by turns - the game's motion vectors, %u eye frames, %u moved by them from %.1f m, %u not while turning; still/camera %%/mean px by distance:",
+        char head[224];std::snprintf(head,sizeof head,"Frame OpenXR: by turns - the game's motion vectors, %u eye frames, %u moved by them from %.1f m, %u not while turning or walking; still/camera %%/mean px by distance:",
             frames,moved,double(from),turning);
         std::string line=head;
         double total=0;for(const auto& b:window)total+=b[0];
@@ -3017,10 +3023,13 @@ bool KeepMotion(ID3D12GraphicsCommandList* list,int eye,int& statsAt) {
         const auto t=math::Multiply(math::Conjugate(same.world.turn),now.turn);
         kept.turned=float(2*std::acos(std::min(1.0,double(std::fabs(t.w))))*180/3.14159265358979)/2;
     }
-    // Only the frames they may be used for (not turning): what the statistics
+    // and how far the hero went since then, a render
+    kept.stepped=1e9f;
+    if(now.ok&&same.ok&&same.world.ok&&w.valid&&w.upm>0){const auto d=now.hero-same.world.hero;kept.stepped=std::sqrt(d.x*d.x+d.y*d.y+d.z*d.z)/w.upm/2;}
+    // Only the frames they may be used for (not turning, the hero not going): what the statistics
     // say, and from how near they are used, are then of those alone.
     const int at=motionNext;
-    if(kept.backOk&&kept.turned<=MotionTurnDegrees&&now.nearPlane>0&&w.valid&&w.upm>0&&(!motionFences[at]||motionFences[at]==MotionPending)) {
+    if(kept.backOk&&kept.turned<=MotionTurnDegrees&&kept.stepped<=MotionStepMetres&&now.nearPlane>0&&w.valid&&w.upm>0&&(!motionFences[at]||motionFences[at]==MotionPending)) {
         TurnWarp::MotionInput in;
         in.depth=turnDepths[eye].texture.Get();in.format=turnDepths[eye].format;in.motion=kept.texture.Get();
         in.scale[0]=turnDepths[eye].scale[0];in.scale[1]=turnDepths[eye].scale[1];in.nearPlane=now.nearPlane;in.upm=w.upm;
@@ -3148,7 +3157,7 @@ bool TurnEye(int i) {
         // explain the game's vectors (motionGate), so what is left is the
         // objects' own.
         const auto& vectors=turnMotions[i];
-        const bool turning=vectors.turned>MotionTurnDegrees;
+        const bool turning=vectors.turned>MotionTurnDegrees||vectors.stepped>MotionStepMetres;   // or the hero going
         if(motion&&vectors.ok&&vectors.backOk&&turning&&motionGate.trusted)++motionGate.turning;
         if(motion&&vectors.ok&&vectors.backOk&&!turning&&motionGate.trusted&&motionGate.from>=0) {
             depth.motion=vectors.texture.Get();depth.ahead=1;depth.from=motionGate.from*w.upm;depth.show=motion==2;

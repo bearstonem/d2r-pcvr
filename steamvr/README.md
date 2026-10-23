@@ -196,10 +196,13 @@ headset frame are drawn:
   while the camera's motion explains at least 80% of them from 2 m out (70%
   to stop), so nothing moves on until that is seen, and only from where two
   half metres running are explained to 97%, over some 10-20 s of eye frames.
-  None is used while the eye turns more than a quarter of a degree a render:
-  what is left of the camera's part grows with the turn, and the ground and
-  the distance doubled while the head turned. The statistics are of the other
-  frames alone, so the distance is that of frames the vectors are used in.
+  None is used while the eye turns more than a quarter of a degree a render
+  (what is left of the camera's part grows with the turn, and the ground and
+  the distance doubled while the head turned) or the hero goes more than half
+  a centimetre a render (strafing, only 57-76% was explained at 2-4 m, and
+  the ghost beside monsters smeared the way the hero went). The statistics
+  are of the other frames alone, so the distance is that of frames the
+  vectors are used in.
   What is left under 1.5 px (DLSS's jitter) counts as none, and while the
   head turns slower, under that plus 30% of the turn in pixels. A grid point
   moves only where the vectors of its texels on one surface agree to a pixel,
