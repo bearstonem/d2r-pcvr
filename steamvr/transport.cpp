@@ -571,7 +571,8 @@ std::array<KeptDepth,2> turnDepths;
 // By turns: each eye's motion vectors as drawn (motionvectors), beside its
 // depth (KeepMotion), for TurnDepth::motion; and where the render before
 // (the other eye's) stood against it, for TurnDepth::back.
-struct KeptMotion {ComPtr<ID3D12Resource> texture;bool ok=false;std::array<float,12> back{};XrFovf backFov{};bool backOk=false;};
+// turned: how far the eye turned in the world a render, degrees (KeepMotion).
+struct KeptMotion {ComPtr<ID3D12Resource> texture;bool ok=false;std::array<float,12> back{};XrFovf backFov{};bool backOk=false;float turned=0;};
 std::array<KeptMotion,2> turnMotions;
 // What the game's vectors say by distance (TurnWarp::MotionStats): each read-
 // back slot free (0), recorded but not yet submitted (MotionPending), or the
@@ -589,15 +590,22 @@ int motionNext=0;
 // move by themselves).
 // Nearer, the ground at the feet was 52-90% explained: what was left of it
 // moved and doubled the ground (the owner's next session). So only from
-// where two bins running are explained to MotionHeld (`from`, metres).
-constexpr double MotionExplained=.8,MotionHeld=.97;
+// where two bins running are explained to MotionHeld (`from`, metres), never
+// nearer than MotionNearest; over some 10-20 s of eye frames, as over 2 s it
+// went from 0.5 to 5.5 m and back (the owner's session after).
+// That session the ground and the distance still doubled while the head
+// turned, not while walking: what is left of the camera's part grows with
+// the turn. So none is used while an eye turns more than MotionTurnDegrees a
+// render (KeptMotion::turned, about 22 degrees a second at 90 Hz).
+constexpr double MotionExplained=.8,MotionHeld=.97,MotionDecay=.999;
+constexpr float MotionNearest=3,MotionTurnDegrees=.25f;
 struct MotionGate {
     std::array<std::array<double,4>,MotionBins> seen{},window{};   // seen: decayed; window: for the log
     bool trusted=false;
     float from=-1;   // < 0: nowhere yet
-    uint32_t frames=0,moved=0;uint64_t since=0;
+    uint32_t frames=0,moved=0,turning=0;uint64_t since=0;
     void Add(const MotionHistogram& h,uint64_t now) {
-        for(int b=0;b<MotionBins;++b)for(int k=0;k<4;++k){seen[b][k]=seen[b][k]*.99+h.bins[b][k];window[b][k]+=h.bins[b][k];}
+        for(int b=0;b<MotionBins;++b)for(int k=0;k<4;++k){seen[b][k]=seen[b][k]*MotionDecay+h.bins[b][k];window[b][k]+=h.bins[b][k];}
         ++frames;
         double count=0,explained=0;
         for(int b=int(2/MotionBinMetres)+1;b<MotionBins;++b){count+=seen[b][0];explained+=seen[b][2];}   // from 2 m out
@@ -613,13 +621,14 @@ struct MotionGate {
             if(seen[b][2]>=MotionHeld*seen[b][0]){if(!run++)edge=(b-1)*MotionBinMetres;}
             else run=0;
         }
-        if(run<2)edge=-1;
+        if(run<2)edge=-1;else edge=std::max(edge,MotionNearest);
         if(edge>=0&&from<0){char line[160];std::snprintf(line,sizeof line,"Frame OpenXR: by turns - the game's motion vectors used from %.1f m out (first frame doing so)",double(edge));Say(line);}
         from=edge;
         if(!since)since=now;
         if(now-since<10000)return;
         // still / explained by the camera / mean length in pixels, by distance
-        char head[192];std::snprintf(head,sizeof head,"Frame OpenXR: by turns - the game's motion vectors, %u eye frames, %u moved by them from %.1f m; still/camera %%/mean px by distance:",frames,moved,double(from));
+        char head[224];std::snprintf(head,sizeof head,"Frame OpenXR: by turns - the game's motion vectors, %u eye frames, %u moved by them from %.1f m, %u not while turning; still/camera %%/mean px by distance:",
+            frames,moved,double(from),turning);
         std::string line=head;
         double total=0;for(const auto& b:window)total+=b[0];
         for(int b=0;b<MotionBins;++b) {
@@ -632,7 +641,7 @@ struct MotionGate {
             line+=bin;
         }
         Say(line.c_str());
-        window={};frames=moved=0;since=now;
+        window={};frames=moved=turning=0;since=now;
     }
 } motionGate;
 // By turns: each eye's interface as its pass drew it (hud::TakenInterface),
@@ -2997,6 +3006,13 @@ bool KeepMotion(ID3D12GraphicsCommandList* list,int eye,int& statsAt) {
     const auto& now=viewWorld[eye];const auto& before=lastEyes[eye^1];const auto& w=stageWorld;
     kept.backOk=now.ok&&before.ok&&before.world.ok;
     if(kept.backOk){kept.back=TurnMove(now.at,now.turn,before.world.at,before.world.turn);kept.backFov=before.fov;}
+    // how far this eye turned in the world since its own render before (two
+    // renders back, by turns: the eyes may be canted, so not against the other)
+    const auto& same=lastEyes[eye];kept.turned=1e9f;
+    if(now.ok&&same.ok&&same.world.ok) {
+        const auto t=math::Multiply(math::Conjugate(same.world.turn),now.turn);
+        kept.turned=float(2*std::acos(std::min(1.0,double(std::fabs(t.w))))*180/3.14159265358979)/2;
+    }
     const int at=motionNext;
     if(kept.backOk&&now.nearPlane>0&&w.valid&&w.upm>0&&(!motionFences[at]||motionFences[at]==MotionPending)) {
         TurnWarp::MotionInput in;
@@ -3126,7 +3142,9 @@ bool TurnEye(int i) {
         // explain the game's vectors (motionGate), so what is left is the
         // objects' own.
         const auto& vectors=turnMotions[i];
-        if(motion&&vectors.ok&&vectors.backOk&&motionGate.trusted&&motionGate.from>=0) {
+        const bool turning=vectors.turned>MotionTurnDegrees;
+        if(motion&&vectors.ok&&vectors.backOk&&turning&&motionGate.trusted)++motionGate.turning;
+        if(motion&&vectors.ok&&vectors.backOk&&!turning&&motionGate.trusted&&motionGate.from>=0) {
             depth.motion=vectors.texture.Get();depth.ahead=1;depth.from=motionGate.from*w.upm;depth.show=motion==2;
             const auto& f=vectors.backFov;depth.back=vectors.back;depth.backFov={f.angleLeft,f.angleRight,f.angleDown,f.angleUp};
             ++motionGate.moved;
