@@ -540,6 +540,10 @@ static void Motion(Gpu& gpu,bool typeless) {
     own.from=0;own.motion=shuffled.Get();   // a pixel: DLSS's jitter step, none
     out=gpu.Warp(warp,source.Get(),target.Get(),Identity,slot^=1,&own);
     stays("a vector under StillPixels is none");
+    own.motion=walked.Get();own.stillPixels=10;   // turning slowly: more of what is left counts as none
+    out=gpu.Warp(warp,source.Get(),target.Get(),Identity,slot^=1,&own);
+    stays("8 px under a stillPixels of 10 is none");
+    own.stillPixels=framevr::StillPixels;
     {   // one texel of the wall (12,12), a hair nearer so its grid point takes it, with a vector of
         // 8 px its neighbours on the surface do not have: not a thing moving
         std::vector<uint32_t> d(side*side),m(side*side,0);

@@ -590,15 +590,19 @@ int motionNext=0;
 // move by themselves).
 // Nearer, the ground at the feet was 52-90% explained: what was left of it
 // moved and doubled the ground (the owner's next session). So only from
-// where two bins running are explained to MotionHeld (`from`, metres), never
-// nearer than MotionNearest; over some 10-20 s of eye frames, as over 2 s it
-// went from 0.5 to 5.5 m and back (the owner's session after).
+// where two bins running are explained to MotionHeld (`from`, metres), over
+// some 10-20 s of eye frames, as over 2 s it went from 0.5 to 5.5 m and back
+// (the owner's session after).
 // That session the ground and the distance still doubled while the head
 // turned, not while walking: what is left of the camera's part grows with
 // the turn. So none is used while an eye turns more than MotionTurnDegrees a
-// render (KeptMotion::turned, about 22 degrees a second at 90 Hz).
+// render (KeptMotion::turned, about 22 degrees a second at 90 Hz), and the
+// statistics are of the other frames alone - the 52-90% were of all, turns
+// too, so `from` has no floor of its own. Turning slower, the ground and the
+// walls still went red in SHOW (the session after): what is left counts as
+// none under StillPixels plus MotionTurnShare of the turn in pixels.
 constexpr double MotionExplained=.8,MotionHeld=.97,MotionDecay=.999;
-constexpr float MotionNearest=3,MotionTurnDegrees=.25f;
+constexpr float MotionTurnDegrees=.25f,MotionTurnShare=.3f;
 struct MotionGate {
     std::array<std::array<double,4>,MotionBins> seen{},window{};   // seen: decayed; window: for the log
     bool trusted=false;
@@ -621,7 +625,7 @@ struct MotionGate {
             if(seen[b][2]>=MotionHeld*seen[b][0]){if(!run++)edge=(b-1)*MotionBinMetres;}
             else run=0;
         }
-        if(run<2)edge=-1;else edge=std::max(edge,MotionNearest);
+        if(run<2)edge=-1;
         if(edge>=0&&from<0){char line[160];std::snprintf(line,sizeof line,"Frame OpenXR: by turns - the game's motion vectors used from %.1f m out (first frame doing so)",double(edge));Say(line);}
         from=edge;
         if(!since)since=now;
@@ -3013,8 +3017,10 @@ bool KeepMotion(ID3D12GraphicsCommandList* list,int eye,int& statsAt) {
         const auto t=math::Multiply(math::Conjugate(same.world.turn),now.turn);
         kept.turned=float(2*std::acos(std::min(1.0,double(std::fabs(t.w))))*180/3.14159265358979)/2;
     }
+    // Only the frames they may be used for (not turning): what the statistics
+    // say, and from how near they are used, are then of those alone.
     const int at=motionNext;
-    if(kept.backOk&&now.nearPlane>0&&w.valid&&w.upm>0&&(!motionFences[at]||motionFences[at]==MotionPending)) {
+    if(kept.backOk&&kept.turned<=MotionTurnDegrees&&now.nearPlane>0&&w.valid&&w.upm>0&&(!motionFences[at]||motionFences[at]==MotionPending)) {
         TurnWarp::MotionInput in;
         in.depth=turnDepths[eye].texture.Get();in.format=turnDepths[eye].format;in.motion=kept.texture.Get();
         in.scale[0]=turnDepths[eye].scale[0];in.scale[1]=turnDepths[eye].scale[1];in.nearPlane=now.nearPlane;in.upm=w.upm;
@@ -3147,6 +3153,9 @@ bool TurnEye(int i) {
         if(motion&&vectors.ok&&vectors.backOk&&!turning&&motionGate.trusted&&motionGate.from>=0) {
             depth.motion=vectors.texture.Get();depth.ahead=1;depth.from=motionGate.from*w.upm;depth.show=motion==2;
             const auto& f=vectors.backFov;depth.back=vectors.back;depth.backFov={f.angleLeft,f.angleRight,f.angleDown,f.angleUp};
+            // the turn in the drawn part's pixels: a share of it left over counts as none
+            const float perDegree=float(turnDepths[i].texture->GetDesc().Width)*turnDepths[i].scale[0]/((was.fov.angleRight-was.fov.angleLeft)*57.29578f);
+            depth.stillPixels=StillPixels+MotionTurnShare*vectors.turned*perDegree;
             ++motionGate.moved;
         }
         moving=&depth;

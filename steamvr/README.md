@@ -195,14 +195,16 @@ headset frame are drawn:
   sampled 128 x 128 by half a metre of distance; the motion is used only
   while the camera's motion explains at least 80% of them from 2 m out (70%
   to stop), so nothing moves on until that is seen, and only from where two
-  half metres running are explained to 97%, never nearer than 3 m (nearer,
-  the ground at the feet was 52-90% explained, and what was left of it moved
-  and doubled the ground), over some 10-20 s of eye frames. None is used while
-  the eye turns more than a quarter of a degree a render: what is left of the
-  camera's part grows with the turn, and the ground and the distance doubled
-  while the head turned. A grid point moves only where the vectors of its
-  texels on one surface agree to a pixel. What is left under 1.5 px (DLSS's jitter) counts
-  as none, and what the hero carries keeps the carry alone. A monster that stops or turns overshoots by a frame. The game's
+  half metres running are explained to 97%, over some 10-20 s of eye frames.
+  None is used while the eye turns more than a quarter of a degree a render:
+  what is left of the camera's part grows with the turn, and the ground and
+  the distance doubled while the head turned. The statistics are of the other
+  frames alone, so the distance is that of frames the vectors are used in.
+  What is left under 1.5 px (DLSS's jitter) counts as none, and while the
+  head turns slower, under that plus 30% of the turn in pixels. A grid point
+  moves only where the vectors of its texels on one surface agree to a pixel,
+  and what the hero carries keeps the carry alone. A monster that stops or
+  turns overshoots by a frame. The game's
   effects are not in the vectors, so they still move with what is behind
   them. `turns_motion=2` shows the eye not drawn from its own picture alone,
   what moved on tinted red; 0 is off. Every 10 s the log has a `the game's

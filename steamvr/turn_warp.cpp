@@ -66,7 +66,8 @@ cbuffer Move : register(b0) {
 // This eye's own grid, moving by its motion vectors: TurnMove's rows from
 // this picture's view to the render before's (TurnDepth::back), the
 // tangents of that one's FOV, and from how far (gate.x, along the view)
-// and how alike on one surface (gate.y, pixels) they are taken.
+// and how alike on one surface (gate.y, pixels) they are taken; what is
+// left under gate.z pixels is none (TurnDepth::stillPixels).
 cbuffer Back : register(b1) {float4 back0;float4 back1;float4 back2;float4 backTan;float4 gate;};
 // split: 0 the whole cell; a cell across an edge as two layers, each keeping
 // its own pixels: > 0 the nearer, those nearer than it; < 0 the rest.
@@ -138,7 +139,7 @@ Pixel VS(uint id:SV_VertexID,uint layer:SV_InstanceID) {
         if(b.z<0&&apart*max(pixels.x,pixels.y)<gate.y) {
             const float2 seen=float2((-b.x/b.z-backTan.x)/(backTan.y-backTan.x),(backTan.w+b.y/b.z)/(backTan.w-backTan.z));
             const float2 itself=moved-(uv-seen);
-            if(length(itself*pixels)>=StillPixels){from+=itself*reach.w*free;o.tint=free;}
+            if(length(itself*pixels)>=gate.z){from+=itself*reach.w*free;o.tint=free;}
         }
     }
     const float3 p=float3(lerp(drawnTan.x,drawnTan.y,from.x),lerp(drawnTan.w,drawnTan.z,from.y),-1)*away;
@@ -665,7 +666,7 @@ bool TurnWarp::Render(ID3D12Device* device,ID3D12GraphicsCommandList* list,ID3D1
         list->SetGraphicsRoot32BitConstants(1,DepthConstants,constants,0);
         if(moving) {   // where the render before stood: the camera's part of its vectors
             float back[20]{};std::memcpy(back,d.back.data(),sizeof(float)*12);tangents(d.backFov,back+12);
-            back[16]=d.from;back[17]=SurfacePixels;
+            back[16]=d.from;back[17]=SurfacePixels;back[18]=d.stillPixels;
             std::memcpy(backData+BackSlotBytes*slot,back,sizeof back);
         }
         list->SetGraphicsRootConstantBufferView(2,backs->GetGPUVirtualAddress()+UINT64(BackSlotBytes)*slot);

@@ -56,6 +56,10 @@ inline std::array<float,12> TurnCarry(math::Vec drawnAt,math::Quat drawn,math::V
     return TurnMove(heroNow+math::Rotate(body,drawnAt-heroWas),math::Multiply(body,drawn),nowAt,now);
 }
 
+// Less than this many pixels of the drawn part, a motion vector is none: the
+// game's vectors carry DLSS's jitter step (under a pixel) everywhere.
+inline constexpr float StillPixels=1.5f;
+inline constexpr float SurfacePixels=1.f;
 // The scene's depth as the eye was drawn: a grid over the drawn image, each
 // point put back at its distance and seen from this frame's eye, nearer
 // points over farther ones. The drawn eye's projection is infinite reverse-Z:
@@ -137,16 +141,15 @@ struct TurnDepth {
     // in the owner's next session), and the ground left moving was a double
     // image there. And only where the vectors of a point's texels on one
     // surface agree to SurfacePixels: a lone texel's is not a thing moving.
+    // What is left under `stillPixels` counts as none: StillPixels, more while
+    // the head turns slowly (the transport's), as what is left of the camera's
+    // part grows with the turn - the ground and walls went red with it.
     ID3D12Resource* motion=nullptr;
-    float ahead=0,from=0;
+    float ahead=0,from=0,stillPixels=StillPixels;
     std::array<float,12> back{};
     math::Fov backFov{};
     bool show=false;   // the grid's points tinted red where they moved by their own motion
 };
-// Less than this many pixels of the drawn part, a motion vector is none: the
-// game's vectors carry DLSS's jitter step (under a pixel) everywhere.
-inline constexpr float StillPixels=1.5f;
-inline constexpr float SurfacePixels=1.f;
 // The motion statistics (TurnWarp::MotionStats): the sky, then half a metre
 // each from the eye to 16 m, then farther.
 inline constexpr int MotionBins=34;
