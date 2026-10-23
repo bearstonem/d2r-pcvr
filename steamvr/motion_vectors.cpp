@@ -22,15 +22,21 @@ bool Vectors(const resource_desc& d) {
     return d.type==resource_type::texture_2d&&d.texture.samples==1&&d.texture.depth_or_layers==1&&
         (d.texture.format==format::r16g16_float||d.texture.format==format::r16g16_typeless);
 }
+// Bound to be drawn into, it is a render target. With DLSS off nothing else
+// reads it, so no barrier ever moves it (the owner's session, 2026-10-23):
+// that state stands until one does.
+void Drawn() {
+    state.store(uint32_t(resource_usage::render_target),std::memory_order_relaxed);known.store(true,std::memory_order_release);
+}
 void Bind(command_list* cl,uint32_t count,const resource_view* rtvs,resource_view dsv) {
     if(count!=1||!rtvs||!rtvs[0].handle||!dsv.handle)return;
     auto* dev=cl->get_device();
     const auto r=resources::Resolve(dev,rtvs[0]);
-    if(r.handle==target.load(std::memory_order_relaxed))return;
+    if(r.handle==target.load(std::memory_order_relaxed)){Drawn();return;}
     const auto d=resources::Describe(dev,r),dd=resources::Describe(dev,resources::Resolve(dev,dsv));
     if(!Vectors(d)||dd.texture.width!=d.texture.width||dd.texture.height!=d.texture.height)return;
     std::lock_guard lock(found);
-    known.store(false);target.store(r.handle);
+    target.store(r.handle);Drawn();
     width.store(d.texture.width);height.store(d.texture.height);
     // a few times only: were two such targets bound by turns, every frame would say so
     static int told=0;
