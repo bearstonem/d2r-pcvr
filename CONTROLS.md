@@ -91,6 +91,7 @@ Quest left X/Y correspond to Index left A/B; right A/B labels are the same.
 | Support a crossbow | Hold Left Grip near the stock; release to free the hand. After a shoulder swap, release the swap grip before grabbing the stock again |
 | Javelin, throwing knife or axe throw | Right trigger on Attack, Throw or nothing; hold the trigger, throw, release |
 | Cancel a physical attack / draw | Open either wheel, then release the held controls |
+| Shout a warcry | Barbarian, with a warcry on that hand's trigger: bring the hand to your mouth, hold it there a moment, then push it out forward like a shout. The trigger still casts it as before ([details](#weapon-skill-gestures)) |
 | Swap weapon sets I / II | Dominant grip over either shoulder; or wheel → EQUIPMENT |
 | Stow / draw weapons | Wheel → EQUIPMENT → Stow / Draw |
 | Grab / drink potion | Grip a belt bottle, bring its opening to the mouth and tip it; release to return unused |
@@ -375,6 +376,19 @@ holding the trigger still for a moment casts natively as before, repeating
 while held. Start the throw right after pressing; a slow reach casts nothing.
 The models are the game's own, cached from your installed game by the
 installer. **Weapon skill gestures** Off turns this off.
+
+**Warcries by gesture.** A Barbarian can shout a warcry instead of pressing for
+it. Bind Howl, Shout, Taunt, Battle Cry, Battle Orders, War Cry or Battle
+Command to either hand's trigger. Bring that hand up to your mouth and hold it
+there for a moment, until a light tick confirms it is ready. Then push it out
+forward like a shout. A firmer pulse confirms the cast. It is one native cast
+of that hand's warcry, with its own mana cost, cooldown and effect; if the game
+refuses it, the game's own warning plays. Taunt goes to the monster that hand's
+cast would take, as a trigger press would. Find Potion, Find Item and Grim Ward
+need a corpse and stay on their buttons. The gesture never fires while that
+hand holds a bottle or another grabbed item, while its trigger is held, or
+with a wheel open. A swing that only passes your face, a slow reach, or a push
+down or to the side is no shout. **Weapon skill gestures** Off turns this off.
 
 Face-button skills never replace gesture skills. Ordinary melee swings remain
 basic attacks for skills without a supported physical adapter; assigning a

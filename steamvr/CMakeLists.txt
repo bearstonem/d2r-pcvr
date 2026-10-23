@@ -130,6 +130,7 @@ add_executable(dlss-depth-upload-test dlss_depth_upload_test.cpp)
 target_link_libraries(dlss-depth-upload-test PRIVATE d3d12 dxgi framevr-runtime)
 add_executable(gameplay-test gameplay_test.cpp)
 add_executable(weapon-skills-test weapon_skills_test.cpp)
+add_executable(warcry-gesture-test warcry_gesture_test.cpp)
 target_link_libraries(weapon-skills-test PRIVATE minhook)
 add_executable(quick-cast-test quick_cast_test.cpp)
 add_executable(hand-controls-test hand_controls_test.cpp)
@@ -309,7 +310,7 @@ set_tests_properties(arcane-sky-test PROPERTIES TIMEOUT 30)
 add_test(NAME light-bounds-test COMMAND light-bounds-test)
 set_tests_properties(light-bounds-test PROPERTIES TIMEOUT 30)
 foreach(test_target IN ITEMS memory-test hook-metrics-test active-keys-test resource-descriptions-test latest-worker-test haptic-pulse-test thread-stats-test
-    gameplay-test weapon-skills-test quick-cast-test hand-controls-test elemental-hands-test skill-pad-test interact-press-test sewer-interaction-test notice-card-test mod-layout-test spell-aim-test bow-pose-test crossbow-pose-test body-tracking-test shield-steady-test body-calibration-test shoulder-swap-test blood-screen-test
+    gameplay-test weapon-skills-test warcry-gesture-test quick-cast-test hand-controls-test elemental-hands-test skill-pad-test interact-press-test sewer-interaction-test notice-card-test mod-layout-test spell-aim-test bow-pose-test crossbow-pose-test body-tracking-test shield-steady-test body-calibration-test shoulder-swap-test blood-screen-test
     portal-billboard-test shrine-trace-test shrine-placement-test overlay-view-test composition-layers-test projectile-rules-test environment-cutaway-test roof-materials-test stereo-prop-physics-test dropped-bottles-test props-test
     combat-rules-test shield-guard-test guard-strain-test heartbeat-test logging-test melee-contact-test melee-weapon-test breakables-test offline-difficulty-test enemy-sight-test attack-speed-test world-coordinates-test bow-flight-test bow-laser-test spell-cast-test spell-aim-assist-test
     interaction-test dev-scenarios-test native-belt-test wrist-hud-test navigation-info-test companions-test active-effects-test dropped-item-labels-test stick-gestures-test show-items-command-test native-hud-test render-resolution-test render-pointer-test scene-depth-test game-device-only-test controller-bindings-test journal-test native-panels-test
