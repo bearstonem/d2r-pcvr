@@ -38,7 +38,7 @@ void ConfigureTurnsKeepNear(float gap,float reach);
 // where the game's effects layer has this much (its strongest channel)
 // within the reach.
 void ConfigureTurnsKeepEffects(float level,float reach);
-// [stereo] turns_motion (1): by turns, the eye not drawn also moves its own
+// [stereo] turns_motion (0, shelved: #281): by turns, the eye not drawn also moves its own
 // older picture on by the game's motion vectors (TurnDepth::motion):
 // what is left of them once the camera's motion is taken out; 2 the same
 // from its own picture alone, what moved on tinted red (a check); 0 off.

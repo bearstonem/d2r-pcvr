@@ -180,9 +180,11 @@ headset frame are drawn:
   close moves with the hero for that frame. The depth is the same copy the
   added fog reads (DLSS's corner included). Until both eyes have one, a pair
   is drawn from the hero's first step to 0.3 s after the last.
-  What moves by itself (a monster walking, a missile) also goes on in the eye's
-  own older picture by the game's motion vectors (`[stereo] turns_motion=1`,
-  live; in developer mode also DEV > Equipment > By turns motion): the game
+  Off by default and shelved (#281: the benefit was hard to see, and only
+  with the head and the hero still): with `[stereo] turns_motion=1` (live; in
+  developer mode also DEV > Equipment > By turns motion) what moves by itself
+  (a monster walking, a missile) also goes on in the eye's own older picture
+  by the game's motion vectors: the game
   draws its scene a second time into an R16G16_FLOAT target, the one DLSS
   gets, with each point's motion since the render before; the eye not drawn
   keeps a copy beside its depth and moves each point on by as much again, so

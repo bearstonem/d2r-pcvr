@@ -127,7 +127,7 @@ std::atomic<bool> turnsFromDrawnEye{true};
 std::atomic<int> turnsKeepOwn{3};   // ConfigureTurnsKeepOwn: 0 off, 1 near things only, 2 everywhere, 3 the game's effects, 4 near things and effects
 std::atomic<float> turnsKeepGap{48},turnsKeepReach{96};   // ConfigureTurnsKeepNear: a 4096-wide eye's pixels
 std::atomic<float> turnsEffectsLevel{.02f},turnsEffectsReach{32};   // ConfigureTurnsKeepEffects: the layer's level; a 4096-wide eye's pixels
-std::atomic<int> turnsMotion{1};   // ConfigureTurnsMotion: 0 off, 1 the game's motion vectors, 2 those shown
+std::atomic<int> turnsMotion{0};   // ConfigureTurnsMotion: 0 off (shelved, #281), 1 the game's motion vectors, 2 those shown
 std::atomic<bool> eyeTracking{false};
 std::atomic<bool> motionControls{false};
 // Stamped each focused XR input while motion controls are on (menus included).
