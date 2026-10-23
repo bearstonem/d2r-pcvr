@@ -375,16 +375,30 @@ int main(){
         Check(save.changed==(ChangeMask{1}<<BowLaser)&&save.values[BowLaser]==345,"Apply saves only the laser");
         Check(Normalize(BowLaser,-1)==LaserOff&&Normalize(BowLaser,-200)==LaserOff&&Normalize(BowLaser,400)==345&&Normalize(BowLaser,NAN)==LaserOff,
               "any negative saved value is Off; others stay on the wheel");}
+    {Model loot;loot.Open(s);loot.Click({Kind::Tab,int(Page::Aim)});
+        const auto& d=Definitions[LootPick];
+        // One row for the pick and its glow: Off (the game's nearest item, as before), On, On with glow.
+        Check(RowKey(Page::Aim,6)==LootPick&&s.values[LootPick]==0,"the loot pick is last on the Aim page, Off by default");
+        Check(std::wstring(d.section)==L"interactions"&&std::wstring(d.key)==L"loot_pick"&&d.min==0&&d.max==2&&d.step==1,"one [interactions] loot_pick value, 0 to 2");
+        loot.Click(At(loot,Page::Aim,Increase(6)));Check(loot.Get()[LootPick]==1,"plus turns the pick On");
+        loot.Click(At(loot,Page::Aim,Increase(6)));Check(loot.Get()[LootPick]==2,"then On with glow");
+        loot.Click(At(loot,Page::Aim,Increase(6)));Check(loot.Get()[LootPick]==0,"then round to Off, like Ground skills");
+        loot.Click(At(loot,Page::Aim,Decrease(6)));Check(loot.Get()[LootPick]==2,"and minus from Off is On with glow");
+        const auto save=loot.Click({Kind::Apply});
+        Check(save.changed==(ChangeMask{1}<<LootPick)&&save.values[LootPick]==2,"Apply saves only the loot pick");
+        Check(Normalize(LootPick,1.5f)==0&&Normalize(LootPick,3)==0&&Normalize(LootPick,-1)==0&&Normalize(LootPick,NAN)==0&&Normalize(LootPick,2)==2,
+              "a saved value that is not 0, 1 or 2 is Off");
+        Check(RowShown(LootPick,s.values,{heroclass::Paladin})&&RowShown(LootPick,s.values,{heroclass::Amazon}),"every class picks loot");}
     {Model aim;aim.Open(s);aim.Click({Kind::Tab,int(Page::Aim)});
         // The defaults (outline Off, Ground skills Game) leave out the rows that cannot apply.
-        Check(RowCount(Page::Aim)==6&&RowKey(Page::Aim,0)==SpellLock&&RowKey(Page::Aim,1)==StaffPoint&&RowKey(Page::Aim,2)==TargetHighlight&&
-              RowKey(Page::Aim,3)==GroundAim&&RowKey(Page::Aim,4)==BowLaser&&RowKey(Page::Aim,5)==ThrowLift,
-              "by default: the aimed monster, the staff, the outline, ground skills, the laser, the throws");
+        Check(RowCount(Page::Aim)==7&&RowKey(Page::Aim,0)==SpellLock&&RowKey(Page::Aim,1)==StaffPoint&&RowKey(Page::Aim,2)==TargetHighlight&&
+              RowKey(Page::Aim,3)==GroundAim&&RowKey(Page::Aim,4)==BowLaser&&RowKey(Page::Aim,5)==ThrowLift&&RowKey(Page::Aim,6)==LootPick,
+              "by default: the aimed monster, the staff, the outline, ground skills, the laser, the throws, the loot pick");
         Check(s.values[ThrowLift]==10&&std::wstring(Definitions[ThrowLift].key)==L"throw_lift_deg"&&Definitions[ThrowLift].min==-10&&
               Definitions[ThrowLift].max==30&&Definitions[ThrowLift].step==5,"[gameplay] throw_lift_deg: 10 degrees up by default, -10 to 30 in 5s");
         auto lit=s.values;lit[TargetHighlight]=50;lit[GroundAim]=1;
-        Check(RowCount(Page::Aim,lit)==9&&RowKey(Page::Aim,3,lit)==AimHighlights&&RowKey(Page::Aim,4,lit)==HighlightLeft&&
-              RowKey(Page::Aim,5,lit)==GroundAim&&RowKey(Page::Aim,6,lit)==LandingCircles&&RowKey(Page::Aim,7,lit)==BowLaser,
+        Check(RowCount(Page::Aim,lit)==10&&RowKey(Page::Aim,3,lit)==AimHighlights&&RowKey(Page::Aim,4,lit)==HighlightLeft&&
+              RowKey(Page::Aim,5,lit)==GroundAim&&RowKey(Page::Aim,6,lit)==LandingCircles&&RowKey(Page::Aim,7,lit)==BowLaser&&RowKey(Page::Aim,8,lit)==ThrowLift&&RowKey(Page::Aim,9,lit)==LootPick,
               "the outline brings its hands and colors, a placed ground skill its circles");
         Check(Paired(HighlightLeft)&&PairOf(HighlightLeft)==HighlightRight&&std::strcmp(RowLabel(HighlightLeft,{}),"Hand colors")==0,"one row for both hands' colors");
         // Every option that changes how a cast aims is Off by default: the casts aim as before the aim rules (#159 review).
@@ -395,13 +409,14 @@ int main(){
         Check(HelpAt(Page::Aim,(ValueBox(3).x+5.f)/Width,(ValueBox(3).y+5.f)/Height)==GroundAim&&
               HelpAt(Page::Aim,(ValueBox(6).x+5.f)/Width,(ValueBox(6).y+5.f)/Height,false,&lit)==LandingCircles,"the ground skills and circles rows explain themselves");
         Check(HelpChoices(GroundAim)==3&&std::strcmp(HelpChoice(GroundAim,1).name,"Where you point")==0,"the ground skills row names its three choices");
+        Check(HelpChoices(LootPick)==3&&std::strcmp(HelpChoice(LootPick,2).name,"On with glow")==0,"the loot pick row names its three choices");
         {auto off=s.values;off[TargetHighlight]=0;
             Check(RowEnabled(off,GroundAim)&&!RowEnabled(off,LandingCircles)&&!RowShown(LandingCircles,off,{}),"no circles while the game aims ground skills");
             off[GroundAim]=1;Check(RowEnabled(off,LandingCircles)&&RowShown(LandingCircles,off,{}),"and back once the mod places them");}
         {Model ground;ground.Open(s);ground.Click({Kind::Tab,int(Page::Aim)});
             ground.Click(At(ground,Page::Aim,Increase(3)));Check(ground.Get()[GroundAim]==1&&ground.Rows()[4]==LandingCircles,"plus: Where you point, and its circles row");
             ground.Click(At(ground,Page::Aim,Increase(3)));Check(ground.Get()[GroundAim]==2,"then Aimed monster");
-            ground.Click(At(ground,Page::Aim,Increase(3)));Check(ground.Get()[GroundAim]==0&&ground.Rows().count==6,"and round to Game, without circles");
+            ground.Click(At(ground,Page::Aim,Increase(3)));Check(ground.Get()[GroundAim]==0&&ground.Rows().count==7,"and round to Game, without circles");
             ground.Click(At(ground,Page::Aim,Decrease(3)));Check(ground.Get()[GroundAim]==2,"minus from Game: Aimed monster");
             Check(ground.Click({Kind::Apply}).changed==(ChangeMask{1}<<GroundAim),"Apply saves only the ground row");
             Check(Normalize(GroundAim,1.5f)==0&&Normalize(GroundAim,3)==0&&Normalize(GroundAim,NAN)==0&&Normalize(GroundAim,2)==2,"a malformed ground_aim reads as Game");}
@@ -424,7 +439,7 @@ int main(){
                   HelpAt(Page::Aim,(PairValue(4,1).x+5.f)/Width,(PairValue(4,1).y+5.f)/Height,false,&colors.Get())==HighlightRight,"each side explains its own hand");
             float rgb[3];HueRgb(45,rgb);Check(rgb[0]==1&&rgb[1]==.75f&&rgb[2]==0,"45 degrees is gold");}
         Check(HelpAt(Page::Aim,(ValueBox(2).x+5.f)/Width,(ValueBox(2).y+5.f)/Height)==TargetHighlight,"the outline row explains itself");
-        aim.Click(At(aim,Page::Aim,Increase(2)));Check(aim.Get()[TargetHighlight]==10&&aim.Rows().count==8,"plus turns the outline on at 10%, with its rows");
+        aim.Click(At(aim,Page::Aim,Increase(2)));Check(aim.Get()[TargetHighlight]==10&&aim.Rows().count==9,"plus turns the outline on at 10%, with its rows");
         aim.Click(At(aim,Page::Aim,Decrease(2)));aim.Click(At(aim,Page::Aim,Decrease(2)));Check(aim.Get()[TargetHighlight]==0,"Off is the lower bound");
         aim.Click(At(aim,Page::Aim,Increase(2)));aim.Click(At(aim,Page::Aim,Increase(2)));
         const auto request=aim.Click({Kind::Apply});
@@ -459,15 +474,15 @@ int main(){
               "the bow laser: an Amazon's, or any bow in hand");
         Check(RowShown(StaffPoint,v,{heroclass::Druid})&&!RowShown(StaffPoint,v,{heroclass::Assassin})&&RowShown(StaffPoint,v,{heroclass::Assassin,false,true}),
               "staff aim: the Sorceress's and Druid's, or a staff in hand");
-        Check(RowCount(Page::Aim,v,{heroclass::Barbarian})==3&&RowKey(Page::Aim,0,v,{heroclass::Barbarian})==SpellLock&&
-              RowKey(Page::Aim,1,v,{heroclass::Barbarian})==TargetHighlight&&RowKey(Page::Aim,2,v,{heroclass::Barbarian})==ThrowLift,
-              "a Barbarian's Aim page: the aimed monster, the outline and the throws");
+        Check(RowCount(Page::Aim,v,{heroclass::Barbarian})==4&&RowKey(Page::Aim,0,v,{heroclass::Barbarian})==SpellLock&&
+              RowKey(Page::Aim,1,v,{heroclass::Barbarian})==TargetHighlight&&RowKey(Page::Aim,2,v,{heroclass::Barbarian})==ThrowLift&&RowKey(Page::Aim,3,v,{heroclass::Barbarian})==LootPick,
+              "a Barbarian's Aim page: the aimed monster, the outline, the throws and the loot pick");
         Check(RowShown(ThrowLift,v,{heroclass::Amazon})&&!RowShown(ThrowLift,v,{heroclass::Sorceress})&&RowShown(ThrowLift,v,{heroclass::Sorceress,false,false,true}),
               "throw lift: the Amazon's and Barbarian's, or a thrown weapon in hand");
         Model druid;druid.Open(s);druid.SetContext({heroclass::Druid});druid.Click({Kind::Tab,int(Page::Aim)});
-        const auto rows=druid.Rows();Check(rows.count==4&&rows[1]==StaffPoint&&rows[3]==GroundAim,"a Druid: staff aim and ground skills, no laser");
+        const auto rows=druid.Rows();Check(rows.count==5&&rows[1]==StaffPoint&&rows[3]==GroundAim&&rows[4]==LootPick,"a Druid: staff aim and ground skills, no laser");
         const auto revision=druid.revision;druid.SetContext({heroclass::Druid});Check(druid.revision==revision,"the same character repaints nothing");
-        druid.SetContext({heroclass::Druid,true});Check(druid.revision!=revision&&druid.Rows().count==5,"a bow in hand brings the laser");
+        druid.SetContext({heroclass::Druid,true});Check(druid.revision!=revision&&druid.Rows().count==6,"a bow in hand brings the laser");
         Check(PairDecrease(0,0).x==PairLeft&&PairIncrease(0,1).x+PairIncrease(0,1).w==1240&&PairIncrease(0,0).x+PairIncrease(0,0).w<PairDecrease(0,1).x,
               "paired steppers fit the value column side by side");
     }

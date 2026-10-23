@@ -216,6 +216,45 @@ there is no saved toggle or automatic resume.
 The game's native item/filter rules apply. Inventory tooltips and monster labels
 keep their styling.
 
+**Choosing which item Interact picks up (native VR).** VR Settings > Aim >
+**Loot pick**: Off (default), On, or On with glow. With several items on the
+floor, Interact (right A by default) takes the item you choose rather than the
+game's nearest one. Hold the aiming arm out (about 20 cm from your head, less when
+pointing steeply down at your feet) and point at an item: the item nearest the
+spot where the hand's ray meets the floor is chosen. With the arm resting, the
+item nearest the spot you look at is chosen instead (the look is taken a few
+degrees below the head's forward, where the eyes rest). An item counts within one
+cell of that spot and up to 25 cells away. Between two items side by side the
+current choice stays until the other is clearly nearer, and the choice is held
+while Interact is held. If no item is chosen, the game's own target is used,
+including doors, chests, waypoints and NPCs. A chosen item comes first: looking
+at a chest with loot at its foot picks up the loot.
+A chosen item farther than the pick-up reach (5.5 cells by default, a tuned value)
+is not picked up and the hero does not walk to it; the game's nearest item is not
+taken instead. Doors, waypoints and NPCs the game targets keep working. Step
+closer or look at a nearer item. The item list comes from the hero's rooms, the
+walk the Kurast sewer entrance search uses; it has no line-of-sight test, so an
+item just behind a wall can be chosen and the hero walks around to it.
+
+With **On with glow**, the item Interact will take glows along its 3D model's
+outline in its rarity color: white normal (runes too), gray socketed or ethereal,
+blue magic, green set, yellow rare, gold unique, orange crafted. With no item
+chosen it outlines the game's own nearest item. Its name, when the game shows
+it (for example while holding the right stick down to show items, or for a fresh
+drop), gets a frame in the same color and is drawn 30% larger. The glow pulses
+gently. A chosen item past the pick-up reach glows a steady red instead. With A
+set to attack only, the game's "Interact" prompt keeps naming its nearest item
+while the glow shows the chosen one; Interact still takes the chosen one. The
+reach is INI only:
+
+```ini
+[interactions]
+loot_pick_reach_cells=5.5 ; 0 = no limit (A walks to the chosen item), up to 25
+```
+
+The highlight uses the same depth-outline pass as the monster target outline,
+so it follows the ReShade effect being active. Desktop play is unchanged.
+
 The minimap and compass form one navigation display on your left hand.
 **VR Settings > HUD > Minimap / compass location** offers **Wrist** (default),
 **Palm**, **Either**, or **Off**. Click **Apply** to save. Both appear and hide

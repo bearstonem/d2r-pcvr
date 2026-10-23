@@ -71,6 +71,7 @@ inline const char* HelpText(int id) {
         case GroundAim:return "Where ground skills land: Fire Blast and traps, Blizzard, Meteor, Fire Wall, Hydra, Fissure, Volcano, Bone Wall and Bone Prison. Aimed at the horizon or above, as far as the game lets a skill be cast.";
         case BowLaser:return "At full draw a faint line runs from the arrow's tip along the path a release would fly, ending in a brighter dot at the floor or fading out after 15 m. It doesn't stop at walls or monsters. Shown for basic arrows and Magic, Fire, Cold, Ice, Exploding, Immolation and Freezing Arrow; not Multiple Shot, Guided Arrow, Strafe or crossbows. Off by default, else its color in 15-degree steps from red 0; past 345 comes Off, both ways.";
         case ThrowLift:return "A thrown javelin, knife or axe leaves along your hand's motion, which tends to dip as you let go. This raises every throw above that path by the angle shown, 10 degrees by default, keeping its direction left or right. Minus values lower it; Off follows the hand exactly. Both hands, every throw and javelin skill.";
+        case LootPick:return "With several items on the floor, which one Interact (A) picks up. Point at it with your aiming arm held out, or just look at it. Too far away, A takes nothing and does not walk there. With no item chosen, doors, chests and NPCs work as before. Off by default.";
         case HeartbeatStart:return "The life percentage where the low-life heartbeat begins. Below it the heartbeat steps up every 10% of life you lose, louder and faster, until it is at full strength below 10%. 60% is the default; Off silences it. Healing winds it back down beat by beat; wiping the visor clean fades it until the next hit. Works in Unleashed and Classic.";
         case EnemySight:return "Scales how far away hostile monsters notice and approach you in offline VR, from 100% (game default) up to 300% (three times as far). 100% keeps the game's original sight distance and restores the unmodified table values. Friendly NPCs, mercenaries and summons are unchanged.";
         case MeleeHitSpeed:return "Minimum weapon movement speed for a swing to count as a strike. Lower it for easier swings; raise it to require faster movement. Default: 12 m/s. Both melee modes use this value. Shield bash has its own threshold.";
@@ -116,6 +117,7 @@ inline int HelpChoices(int id) {
         case ControllerLabels:return int(controllers::Choice::Count);
         case Dominant:case MeleeRules:case MapTopDown:case AimHighlights:return 2;
         case GroundAim:return int(std::size(GroundAimNames));
+        case LootPick:return int(std::size(LootPickNames));
         case SpellLock:return int(std::size(SpellLockNames));
         default:return 0;
     }
@@ -208,6 +210,12 @@ inline ChoiceHelp HelpChoice(int id,float value) {
                 "On the floor where your casting hand points, held out or not, with a landing circle.",
                 "On the monster your hands or eyes aim at (Bone Wall in front of it), else where you point, with a landing circle."};
             return {GroundAimNames[c],text[c]};}
+        case LootPick:{
+            static constexpr const char* text[]={
+                "A takes the item the game chooses, the one nearest the hero, as before.",
+                "A takes the item you point at, else the one you look at. Too far away, A takes nothing and does not walk there.",
+                "As On, and that item glows along its outline in its rarity color, red when out of reach; its name, when shown, gets a frame."};
+            return {LootPickNames[c],text[c]};}
         case AimHighlights:{
             static constexpr const char* text[]={
                 "One outline: the monster your dominant hand (VR > Dominant hand) points at, else the one you look at.",

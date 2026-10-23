@@ -17,7 +17,7 @@ namespace framevr::settings {
 enum class Page { Controls, VR, Video, HUD, Combat, Aim, Haptics, Performance, ReleaseNotes };
 enum Key { Motion, Seated, Dominant, Snap, TurnSpeed, Waist, BeltForward,
            Foveation, Sky, Fog, Ceiling, DrawDistance, ObjectDistance,
-           EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, VitalsTilt, HapticStrength, HapticMelee, HapticBowDraw, HapticBowRelease, HapticSpell, HapticInteraction, HapticAlert, HapticShortMelee, BloodVisor, BloodWipe, MeleeRules, MeleeThrustSpeed, LootLabelSize, CompanionCounts, StrainDark, OfflinePlayers, ShieldBashSpeed, StrainSpeed, DesktopOneEye, MapTopDown, MapRotate, FoveationStrength, StereoRendering, DeferGpuWait, TargetHighlight, HeartbeatStart, SpellLock, StaffPoint, LandingCircles, GroundAim, AimHighlights, HighlightRight, HighlightLeft, ReShadeDepth, ElementalHands, EnemySight, BowLaser, ThrowLift, Count };
+           EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, VitalsTilt, HapticStrength, HapticMelee, HapticBowDraw, HapticBowRelease, HapticSpell, HapticInteraction, HapticAlert, HapticShortMelee, BloodVisor, BloodWipe, MeleeRules, MeleeThrustSpeed, LootLabelSize, CompanionCounts, StrainDark, OfflinePlayers, ShieldBashSpeed, StrainSpeed, DesktopOneEye, MapTopDown, MapRotate, FoveationStrength, StereoRendering, DeferGpuWait, TargetHighlight, HeartbeatStart, SpellLock, StaffPoint, LandingCircles, GroundAim, AimHighlights, HighlightRight, HighlightLeft, ReShadeDepth, ElementalHands, EnemySight, BowLaser, ThrowLift, LootPick, Count };
 // One bit per setting, 128 wide: two words, since MSVC has no 128-bit integer.
 struct ChangeMask {
     static constexpr int Bits=128;
@@ -117,6 +117,7 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"Bow path laser", "A faint line along a drawn arrow's flight: Off or its color", L"bow",L"path_laser_hue",-15,-15,345,15},
     // Degrees above the throwing hand's path; a release follows through low.
     {"Throw lift", "Thrown weapons leave above the hand's path; - lowers them", L"gameplay",L"throw_lift_deg",10,-10,30,5},
+    {"Loot pick", "A takes the item you point at or look at, not the nearest", L"interactions",L"loot_pick",0,0,2,1},
 }};
 using Values=std::array<float,Count>;
 inline bool HapticKey(Key key){return key>=HapticStrength&&key<=HapticAlert;}
@@ -144,7 +145,7 @@ inline float Normalize(Key key,float value){
     if(key==EnemySight)return float(enemysight::NormalizePercent(value));
     if(key==VitalsTilt)return vitals::NormalizeTilt(value);
     if(HapticKey(key))return haptics::NormalizeStrength(value);
-    if((key==ControllerLabels||key==VitalsLocation||key==NavigationLocation||key==RenderResolution||key==MenuDistance||key==TooltipTiming||key==ProjectileAimAssist||key==GroundAim||key==SpellLock||key==StrainSpeed||key==StrainDark||key==FoveationStrength||key==StereoRendering)&&(value<d.min||value>d.max||value!=std::round(value)))return d.defaultValue;
+    if((key==ControllerLabels||key==VitalsLocation||key==NavigationLocation||key==RenderResolution||key==MenuDistance||key==TooltipTiming||key==ProjectileAimAssist||key==GroundAim||key==SpellLock||key==LootPick||key==StrainSpeed||key==StrainDark||key==FoveationStrength||key==StereoRendering)&&(value<d.min||value>d.max||value!=std::round(value)))return d.defaultValue;
     value=std::clamp(value,d.min,d.max);
     return d.step==1?std::round(value):value;
 }
@@ -190,6 +191,7 @@ inline void HueRgb(float hue,float rgb[3]){
 inline constexpr const char* MeleeRulesNames[]={"Unleashed","Classic"};
 inline constexpr const char* HighlightsNames[]={"Dominant hand","Both hands"};   // aim_highlights 0 / 1
 inline constexpr const char* GroundAimNames[]={"Game","Where you point","Aimed monster"};   // ground_aim 0 / 1 / 2
+inline constexpr const char* LootPickNames[]={"Off","On","On with glow"};   // loot_pick 0 / 1 / 2
 inline constexpr const char* StrainColorNames[]={"White","Black","Off"};   // guard_strain_dark 0 / 1 / 2
 inline constexpr const char* StrainSpeedNames[]={"Slow","Medium","Fast"};
 inline constexpr const char* FoveationStrengthNames[]={"Low","Medium","High","Maximum"};
@@ -392,14 +394,14 @@ inline Rect PairDecrease(int row,int side){return {PairX(side),RowY+row*RowStep,
 inline Rect PairValue(int row,int side){return {PairX(side)+56,RowY+row*RowStep,238,52};}
 inline Rect PairIncrease(int row,int side){return {PairX(side)+298,RowY+row*RowStep,52,52};}
 // Every row a page can show, in order (Rows leaves out those that cannot apply).
-inline int CatalogCount(Page page){return page==Page::Haptics?2+haptics::CategoryCount:page==Page::Combat?8:page==Page::Aim?9:page==Page::VR?10:page==Page::Video?4:page==Page::Performance?8:page==Page::HUD?10:0;}
+inline int CatalogCount(Page page){return page==Page::Haptics?2+haptics::CategoryCount:page==Page::Combat?8:page==Page::Aim?10:page==Page::VR?10:page==Page::Video?4:page==Page::Performance?8:page==Page::HUD?10:0;}
 inline Key CatalogKey(Page page,int row){
     constexpr Key hapticRows[]={HapticStrength,HapticMelee,HapticShortMelee,HapticBowDraw,HapticBowRelease,HapticSpell,HapticInteraction,HapticAlert};
     if(page==Page::Haptics)return hapticRows[row];
     constexpr Key combat[]={MeleeRules,MeleeHitSpeed,MeleeThrustSpeed,ShieldBashSpeed,StrainDark,OfflinePlayers,HeartbeatStart,EnemySight};   // StrainDark: with StrainSpeed
     if(page==Page::Combat)return combat[row];
-    // the aimed monster, the staff, the outline: strength, which hands, their colors; the ground skills, circles, the bow path laser, the throws
-    constexpr Key aim[]={SpellLock,StaffPoint,TargetHighlight,AimHighlights,HighlightLeft,GroundAim,LandingCircles,BowLaser,ThrowLift};   // HighlightLeft: with HighlightRight
+    // the aimed monster, the staff, the outline: strength, which hands, their colors; the ground skills, circles, the bow path laser, the throws; the loot pick
+    constexpr Key aim[]={SpellLock,StaffPoint,TargetHighlight,AimHighlights,HighlightLeft,GroundAim,LandingCircles,BowLaser,ThrowLift,LootPick};   // HighlightLeft: with HighlightRight
     if(page==Page::Aim)return aim[row];
     constexpr Key hud[]={VitalsLocation,VitalsTilt,CriticalAlerts,NavigationLocation,MenuDistance,TooltipTiming,BloodVisor,BloodWipe,LootLabelSize,CompanionCounts};
     if(page==Page::HUD)return hud[row];
@@ -522,7 +524,7 @@ public:
             else if(key==StrainSpeed)draft[key]=std::clamp(draft[key]+float(hit.delta),0.f,2.f);
             else if(key==FoveationStrength||key==StereoRendering)draft[key]=std::clamp(draft[key]+float(hit.delta),d.min,d.max);
             else if(key==SpellLock)draft[key]=LockStep(draft[key],hit.delta,context);
-            else if(key==ProjectileAimAssist||key==StrainDark||key==GroundAim)draft[key]=float((int(draft[key])+(hit.delta<0?2:1))%3);   // cycles
+            else if(key==ProjectileAimAssist||key==StrainDark||key==GroundAim||key==LootPick)draft[key]=float((int(draft[key])+(hit.delta<0?2:1))%3);   // cycles
             else if(key==BowLaser){   // round the wheel through Off: ... 345, Off, 0, 15 ... both ways
                 const float next=draft[key]+hit.delta*d.step;
                 draft[key]=Normalize(key,next>d.max?d.min:next<d.min?d.max:next);

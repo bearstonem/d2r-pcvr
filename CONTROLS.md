@@ -69,7 +69,7 @@ Quest left X/Y correspond to Index left A/B; right A/B labels are the same.
 | Reset height | VR Settings > Reset eye height |
 | Adjust controller vibration | **VR Settings > Haptics**: overall strength plus separate melee, bow draw, bow/throw release, spell, interaction and resource-alert strengths. Tests match each action's hands; **Apply** saves |
 | Hold to show all nearby loot labels (Alt) | Hold the **right stick down** during gameplay, outside wheels. Labels stay shown while it is held; let go to restore normal drop/hover labels. Uses the native Alt range, independently of where you aim. A mostly vertical push never turns you. Also listed in **VR Settings > Controls** |
-| Interact / pick up / talk | Right A by default; requires an aimed interactable. One press acts on one target: press again for each item, including loot a chest just dropped |
+| Interact / pick up / talk | Right A by default; requires an aimed interactable. One press acts on one target: press again for each item, including loot a chest just dropped. With **VR Settings > Aim > Loot pick** on, point at an item (arm out) or look at it to choose which one |
 | Free melee swing / thrust | Move the equipped weapon through an enemy |
 | Physical dual wield | Equip two supported melee weapons on a Barbarian or two claws on an Assassin; release both triggers and swing or thrust with either hand. Active skills retain their button bindings |
 | Break pots / barrels | Swing a held melee weapon through them with its trigger released. Either Barbarian weapon or Assassin claw works; ordinary button interaction/kicking remains available |
@@ -110,6 +110,17 @@ Interact latches the target present when you press A. Pressing at empty space
 does not wait for an item to come into range. Release and press again for each
 new target. A release during an inventory/NPC menu rearms interaction; holding
 the button through a menu or game-session change cannot reuse the old target.
+
+**VR Settings > Aim > Loot pick** (Off by default): with several items on the
+floor, Interact takes the one you choose, not the nearest. Point at it with the
+aiming hand held out, or with the arm resting just look at it. A chosen item
+farther than the pick-up reach (5.5 cells) is left alone: A takes nothing, not
+the nearest item either, and does not walk there.
+**On with glow** also outlines that item in its rarity color, steady red when out
+of reach, and frames its name when shown. With no item chosen, doors, chests,
+waypoints and NPCs work as before; a chosen item comes first.
+`[interactions] loot_pick_reach_cells` in `d2r_pcvr.ini` sets the reach
+(0 = no limit, up to 25 cells). Details are in [GAMEPLAY.md](steamvr/GAMEPLAY.md).
 
 On the **VR** settings tab, **Smooth turning** defaults to **Off** (30-degree
 snap turns). Turn it **On**, then **Apply**, for continuous right-stick turning.
