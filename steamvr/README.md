@@ -188,18 +188,20 @@ headset frame are drawn:
   keeps a copy beside its depth and moves each point on by as much again, so
   where its own picture shows (beside a monster, where only this eye sees
   past it, and round the effects) the monster stands where it is now, not a
-  frame back. Nearer than some distance the game's vectors hold the camera's
-  motion against the other eye as well, so they are used only farther: each
-  drawn eye's vectors are sampled 128 x 128 by half a metre of distance, and
-  the distance is where hardly a vector is still up to where the world
-  mostly is; until that is known nothing moves on. Vectors under 1.5 px (DLSS's
-  jitter) count as none, and what the hero carries keeps the carry alone. A
-  monster that stops or turns overshoots by a frame. The game's effects are
-  not in the vectors, so they still move with what is behind them.
-  `turns_motion=2` shows the eye not drawn from its own picture alone, what
-  moved on tinted red and vectors left unused blue; 0 is off. Every 10 s the
-  log has a `the game's motion vectors` line: by distance, how many vectors
-  were still, how many the camera's motion explains, and their mean length.
+  frame back. The game's vectors hold the camera's motion against the render
+  before (the other eye's, a frame back) as well: with DLSS off it explained
+  98-99% of them from 2 m out. Each point's is taken out by where that render
+  stood, and what is left is the point's own. Each drawn eye's vectors are
+  sampled 128 x 128 by half a metre of distance; the motion is used only
+  while the camera's motion explains at least 80% of them from 2 m out (70%
+  to stop), so nothing moves on until that is seen. What is left under 1.5 px
+  (DLSS's jitter) counts as none, and what the hero carries keeps the carry
+  alone. A monster that stops or turns overshoots by a frame. The game's
+  effects are not in the vectors, so they still move with what is behind
+  them. `turns_motion=2` shows the eye not drawn from its own picture alone,
+  what moved on tinted red; 0 is off. Every 10 s the log has a `the game's
+  motion vectors` line: by distance, how many vectors were still, how many
+  the camera's motion explains, and their mean length.
 
 By turns draws a pair on a snap turn, outside first person, in open menus,
 during stereo captures and on any frame without a reusable image for both eyes.

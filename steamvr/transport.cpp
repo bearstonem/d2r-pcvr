@@ -569,8 +569,9 @@ bool keepDepth=false;
 struct KeptDepth {ComPtr<ID3D12Resource> texture;DXGI_FORMAT format=DXGI_FORMAT_UNKNOWN;float scale[2]{1,1};bool ok=false;};
 std::array<KeptDepth,2> turnDepths;
 // By turns: each eye's motion vectors as drawn (motionvectors), beside its
-// depth (KeepMotion), for TurnDepth::motion.
-struct KeptMotion {ComPtr<ID3D12Resource> texture;bool ok=false;};
+// depth (KeepMotion), for TurnDepth::motion; and where the render before
+// (the other eye's) stood against it, for TurnDepth::back.
+struct KeptMotion {ComPtr<ID3D12Resource> texture;bool ok=false;std::array<float,12> back{};XrFovf backFov{};bool backOk=false;};
 std::array<KeptMotion,2> turnMotions;
 // What the game's vectors say by distance (TurnWarp::MotionStats): each read-
 // back slot free (0), recorded but not yet submitted (MotionPending), or the
@@ -578,30 +579,29 @@ std::array<KeptMotion,2> turnMotions;
 constexpr uint64_t MotionPending=~0ull;
 std::array<uint64_t,TurnWarp::MotionSlots> motionFences{};
 int motionNext=0;
-// Nearer than some distance the game's vectors hold the camera's motion
-// against the render before - the other eye, by turns - and the objects' own
-// only farther (vr/dlss_mv.cpp: "near" and "far"). Where that is, over the
-// session: from the eye out, the bins where hardly a vector is still, up to
-// the first where the world mostly is (a vector under StillPixels). The
-// world only stands still where the camera's motion is not in the vectors.
+// The game's vectors hold the camera's motion against the render before -
+// the other eye, by turns - as well as the objects' own: with DLSS off, the
+// camera's motion explained 98-99% of them from 2 m out, hardly any still
+// (the owner's session, 2026-10-23; vr/dlss_mv.cpp found the far part without
+// it, with DLSS on). Taken out (TurnDepth::back), what is left is the
+// objects' own - used only while the camera's motion explains this much of
+// them, over the last few seconds (nearer, the hero's own hands and weapon
+// move by themselves).
+constexpr double MotionExplained=.8;
 struct MotionGate {
     std::array<std::array<double,4>,MotionBins> seen{},window{};   // seen: decayed; window: for the log
-    float nearer=-1;   // metres; < 0 not known yet
+    bool trusted=false;
     uint32_t frames=0,moved=0;uint64_t since=0;
     void Add(const MotionHistogram& h,uint64_t now) {
-        for(int b=0;b<MotionBins;++b)for(int k=0;k<4;++k){seen[b][k]=seen[b][k]*.999+h.bins[b][k];window[b][k]+=h.bins[b][k];}
+        for(int b=0;b<MotionBins;++b)for(int k=0;k<4;++k){seen[b][k]=seen[b][k]*.99+h.bins[b][k];window[b][k]+=h.bins[b][k];}
         ++frames;
-        float edge=0;bool found=false;
-        for(int b=1;b<MotionBins-1;++b) {   // half a metre each from the eye; the sky and the farthest left out
-            if(seen[b][0]<200)continue;   // too little seen here
-            if(seen[b][1]/seen[b][0]>.4){found=true;break;}
-            edge=b*MotionBinMetres;
-        }
-        // The near part is the game's (the depth it gives DLSS): kept as found, never shrinking in a session.
-        if(found&&edge>nearer) {
-            const bool first=nearer<0;nearer=edge;
-            char line[192];std::snprintf(line,sizeof line,"Frame OpenXR: by turns - the game's motion vectors hold the camera's motion nearer than %.1f m; the objects' own motion moves the eye not drawn farther%s",
-                double(nearer),first?" (first frame doing so)":"");Say(line);
+        double count=0,explained=0;
+        for(int b=int(2/MotionBinMetres)+1;b<MotionBins;++b){count+=seen[b][0];explained+=seen[b][2];}   // from 2 m out
+        // a little hysteresis: no switching back and forth round the line
+        if(count>=2000&&(explained>=(trusted?MotionExplained-.1:MotionExplained)*count)!=trusted) {
+            trusted=!trusted;
+            char line[224];std::snprintf(line,sizeof line,trusted?"Frame OpenXR: by turns - the camera's motion explains %.0f%% of the game's motion vectors from 2 m out: what is left moves the eye not drawn on":
+                "Frame OpenXR: by turns - the camera's motion explains only %.0f%% of the game's motion vectors from 2 m out: not used",100*explained/count);Say(line);
         }
         if(!since)since=now;
         if(now-since<10000)return;
@@ -2977,15 +2977,18 @@ bool KeepMotion(ID3D12GraphicsCommandList* list,int eye,int& statsAt) {
     list->ResourceBarrier(2-first,b+first);list->CopyResource(kept.texture.Get(),latest.texture);
     for(auto& x:b)std::swap(x.Transition.StateBefore,x.Transition.StateAfter);
     list->ResourceBarrier(2-first,b+first);
-    // What they say by distance, against the render before (the other eye's)
+    // Where the render before (the other eye's) stood: the camera's part of
+    // these vectors; and what they say by distance against it.
     ReadMotionStats();
     const auto& now=viewWorld[eye];const auto& before=lastEyes[eye^1];const auto& w=stageWorld;
+    kept.backOk=now.ok&&before.ok&&before.world.ok;
+    if(kept.backOk){kept.back=TurnMove(now.at,now.turn,before.world.at,before.world.turn);kept.backFov=before.fov;}
     const int at=motionNext;
-    if(now.ok&&now.nearPlane>0&&before.ok&&before.world.ok&&w.valid&&w.upm>0&&(!motionFences[at]||motionFences[at]==MotionPending)) {
+    if(kept.backOk&&now.nearPlane>0&&w.valid&&w.upm>0&&(!motionFences[at]||motionFences[at]==MotionPending)) {
         TurnWarp::MotionInput in;
         in.depth=turnDepths[eye].texture.Get();in.format=turnDepths[eye].format;in.motion=kept.texture.Get();
         in.scale[0]=turnDepths[eye].scale[0];in.scale[1]=turnDepths[eye].scale[1];in.nearPlane=now.nearPlane;in.upm=w.upm;
-        in.back=TurnMove(now.at,now.turn,before.world.at,before.world.turn);
+        in.back=kept.back;
         const auto& f=views[eye].fov;in.fov={f.angleLeft,f.angleRight,f.angleDown,f.angleUp};
         in.backFov={before.fov.angleLeft,before.fov.angleRight,before.fov.angleDown,before.fov.angleUp};
         if(turnWarp.MotionStats(device.Get(),list,eye,in,at)){motionFences[at]=MotionPending;statsAt=at;motionNext=(at+1)%TurnWarp::MotionSlots;}
@@ -3105,12 +3108,13 @@ bool TurnEye(int i) {
         depth.carry=TurnCarry(was.world.at,was.world.turn,was.world.hero,was.base,w.hero,w.base,at,math::Multiply(w.base,Q(now.pose.orientation)));
         depth.reach[0]=CarriedNear*w.upm;depth.reach[1]=CarriedFar*w.upm;
         // Each point on by its own motion since the render before, as far
-        // again: where it is now. Only once the game's vectors are known to
-        // hold the objects' own motion from some distance (motionGate), and
-        // from a bin past that.
-        if(motion&&turnMotions[i].ok&&motionGate.nearer>=0) {
-            depth.motion=turnMotions[i].texture.Get();depth.ahead=1;
-            depth.still=(motionGate.nearer+MotionBinMetres)*w.upm;depth.show=motion==2;
+        // again: where it is now. Only while the camera's motion is seen to
+        // explain the game's vectors (motionGate), so what is left is the
+        // objects' own.
+        const auto& vectors=turnMotions[i];
+        if(motion&&vectors.ok&&vectors.backOk&&motionGate.trusted) {
+            depth.motion=vectors.texture.Get();depth.ahead=1;depth.show=motion==2;
+            const auto& f=vectors.backFov;depth.back=vectors.back;depth.backFov={f.angleLeft,f.angleRight,f.angleDown,f.angleUp};
             ++motionGate.moved;
         }
         moving=&depth;
@@ -3445,7 +3449,7 @@ void ConfigureTurnsKeepEffects(float level,float reach) {turnsEffectsLevel.store
 void SetTurnsMotion(int mode) {
     static const char* const said[]={"Frame OpenXR: by turns - the eye not drawn moves with the head and the hero alone",
         "Frame OpenXR: by turns - the eye not drawn also moves on by the game's motion vectors",
-        "Frame OpenXR: by turns - the eye not drawn from its own picture alone, moved by the game's motion vectors and tinted (red: moved, blue: left)"};
+        "Frame OpenXR: by turns - the eye not drawn from its own picture alone, moved by the game's motion vectors, what moved on tinted red"};
     mode=std::clamp(mode,0,2);
     if(turnsMotion.exchange(mode)!=mode)Say(said[mode]);
 }

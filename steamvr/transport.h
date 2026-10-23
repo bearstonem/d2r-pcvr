@@ -39,9 +39,9 @@ void ConfigureTurnsKeepNear(float gap,float reach);
 // within the reach.
 void ConfigureTurnsKeepEffects(float level,float reach);
 // [stereo] turns_motion (1): by turns, the eye not drawn also moves its own
-// older picture on by the game's motion vectors (TurnDepth::motion), where
-// they hold the objects' own motion; 2 the same from its own picture alone,
-// what moved tinted red and vectors left unused blue (a check); 0 off.
+// older picture on by the game's motion vectors (TurnDepth::motion):
+// what is left of them once the camera's motion is taken out; 2 the same
+// from its own picture alone, what moved on tinted red (a check); 0 off.
 // Applied when the ini's value changes; DEV > Equipment switches it for the
 // session (Set), and reads it back.
 void ConfigureTurnsMotion(int mode);

@@ -59,14 +59,18 @@ cbuffer Move : register(b0) {
     float4 reach;      // nearer than x: carried; farther than y: the world's; z: the drawn eye's edge scale;
                        // w: frames of each point's own motion it goes on by, 0 off (TurnDepth::ahead)
     float4 keep;       // x: parallax pixels a step in the depth buffer, 0 off; y: within how many the surface is the same;
-                       // z: only within reach of something nearer by this many, 0 everywhere; w: TurnDepth::still
+                       // z: only within reach of something nearer by this many, 0 everywhere
     float4 nearInfo;   // x, y: the picture's coordinates to the near blocks; z, w: this frame's pixels to them
     float4 effects;    // x, y: the effects' blocks across, down; z: from what level they count, 0 off; w: TurnDepth::show
 };
+// This eye's own grid, moving by its motion vectors: TurnMove's rows from
+// this picture's view to the render before's (TurnDepth::back), and the
+// tangents of that one's FOV.
+cbuffer Back : register(b1) {float4 back0;float4 back1;float4 back2;float4 backTan;};
 // split: 0 the whole cell; a cell across an edge as two layers, each keeping
 // its own pixels: > 0 the nearer, those nearer than it; < 0 the rest.
-// tint (TurnDepth::show): x moved by its own motion, y a vector left unused.
-struct Pixel {float4 position:SV_Position;float2 uv:TEXCOORD0;nointerpolation float split:TEXCOORD1;float2 tint:TEXCOORD2;};
+// tint (TurnDepth::show): moved by its own motion.
+struct Pixel {float4 position:SV_Position;float2 uv:TEXCOORD0;nointerpolation float split:TEXCOORD1;float tint:TEXCOORD2;};
 static const float2 Corner[6]={float2(0,0),float2(1,0),float2(0,1),float2(0,1),float2(1,0),float2(1,1)};
 static const float Ahead=1e-3;   // nearer than this to this frame's eye: cut off
 static const float EdgePixels=2;   // TurnEdgePixels
@@ -114,14 +118,19 @@ Pixel VS(uint id:SV_VertexID,uint layer:SV_InstanceID) {
     if(layer&&split==0){o.position=float4(0,0,0,-1);return o;}   // no farther part: outside the clip volume
     const float away=depthInfo.x/d,free=saturate((away-reach.x)/max(reach.y-reach.x,1e-6));
     // Its own motion since the render before, as far again: a monster walking
-    // goes where it is now. Nearer than keep.w the vectors hold the camera's
-    // motion, not its own; what the hero carries goes with the carry.
+    // goes where it is now. The game's vector holds the camera's motion
+    // against that render as well - the other eye's, a frame back - taken
+    // out here: where that render saw the point. What the hero carries goes
+    // with the carry.
     float2 from=uv;
     if(reach.w>0) {
-        float w,h;drawnDepth.GetDimensions(w,h);
-        if(length(moved*float2(w,h)*depthInfo.yz)>=StillPixels) {
-            if(away>keep.w){from+=moved*reach.w*free;o.tint.x=free;}
-            else o.tint.y=1;
+        const float3 here=float3(lerp(drawnTan.x,drawnTan.y,uv.x),lerp(drawnTan.w,drawnTan.z,uv.y),-1)*away;
+        const float3 b=float3(dot(back0.xyz,here)+back0.w,dot(back1.xyz,here)+back1.w,dot(back2.xyz,here)+back2.w);
+        if(b.z<0) {
+            const float2 seen=float2((-b.x/b.z-backTan.x)/(backTan.y-backTan.x),(backTan.w+b.y/b.z)/(backTan.w-backTan.z));
+            const float2 itself=moved-(uv-seen);
+            float w,h;drawnDepth.GetDimensions(w,h);
+            if(length(itself*float2(w,h)*depthInfo.yz)>=StillPixels){from+=itself*reach.w*free;o.tint=free;}
         }
     }
     const float3 p=float3(lerp(drawnTan.x,drawnTan.y,from.x),lerp(drawnTan.w,drawnTan.z,from.y),-1)*away;
@@ -158,11 +167,10 @@ float4 PS(Pixel p):SV_Target {
     }
     const float4 c=drawn.SampleLevel(edge,p.uv,0);
     if(effects.w<=0)return c;
-    const float3 tinted=lerp(c.rgb,float3(1,.15,.1),.55*saturate(p.tint.x));
-    return float4(lerp(tinted,float3(.1,.3,1),.45*saturate(p.tint.y)),c.a);
+    return float4(lerp(c.rgb,float3(1,.15,.1),.55*saturate(p.tint)),c.a);
 }
 )";
-constexpr UINT DepthConstants=56;
+constexpr UINT DepthConstants=56,BackSlotBytes=256;
 // TurnWarp::MotionStats: each sample a point into its distance's bin,
 // added up (MotionHistogram). The depth shader's root signature and table:
 // the depth at t1, the vectors at t8.
@@ -365,19 +373,21 @@ bool TurnWarp::Initialize(ID3D12Device* device,DXGI_FORMAT targetFormat,void (*l
     if(log)log("Frame OpenXR: eyes by turns - the eye not drawn is turned to each frame's head on the GPU");
     // The depth pass is optional: without it By turns draws pairs while the hero moves.
     const auto depthFail=[&](const char* why){
-        depthRoot.Reset();depthPipeline.Reset();depthHeap.Reset();
+        depthRoot.Reset();depthPipeline.Reset();depthHeap.Reset();backs.Reset();backData=nullptr;
         if(log){char b[160];std::snprintf(b,sizeof b,"Frame OpenXR: by turns - moving the eye with the scene depth unavailable (%s)",why);log(b);}
         return true;
     };
     errors.Reset();signature.Reset();
     if(shaders.depthVs.empty()||shaders.depthPs.empty()){if(log&&!shaders.depthErrors.empty())log(shaders.depthErrors.c_str());return depthFail("shader compile failed");}
     D3D12_DESCRIPTOR_RANGE both{D3D12_DESCRIPTOR_RANGE_TYPE_SRV,GridDescriptors,0,0,0};   // a picture, its depth; this eye's own and its depth; the near blocks; the effects blocks
-    D3D12_ROOT_PARAMETER depthParameters[2]{};
+    D3D12_ROOT_PARAMETER depthParameters[3]{};
     depthParameters[0].ParameterType=D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
     depthParameters[0].DescriptorTable={1,&both};depthParameters[0].ShaderVisibility=D3D12_SHADER_VISIBILITY_ALL;
     depthParameters[1].ParameterType=D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
     depthParameters[1].Constants={0,0,DepthConstants};depthParameters[1].ShaderVisibility=D3D12_SHADER_VISIBILITY_ALL;
-    D3D12_ROOT_SIGNATURE_DESC depthDesc=desc;depthDesc.pParameters=depthParameters;
+    depthParameters[2].ParameterType=D3D12_ROOT_PARAMETER_TYPE_CBV;   // Back: a slot's, from `backs`
+    depthParameters[2].Descriptor={1,0};depthParameters[2].ShaderVisibility=D3D12_SHADER_VISIBILITY_VERTEX;
+    D3D12_ROOT_SIGNATURE_DESC depthDesc=desc;depthDesc.NumParameters=3;depthDesc.pParameters=depthParameters;
     D3D12_STATIC_SAMPLER_DESC depthSampler=sampler;depthSampler.ShaderVisibility=D3D12_SHADER_VISIBILITY_ALL;depthDesc.pStaticSamplers=&depthSampler;
     if(FAILED(serialize(&depthDesc,D3D_ROOT_SIGNATURE_VERSION_1,&signature,&errors))||
        FAILED(device->CreateRootSignature(0,signature->GetBufferPointer(),signature->GetBufferSize(),IID_PPV_ARGS(&depthRoot))))
@@ -388,12 +398,21 @@ bool TurnWarp::Initialize(ID3D12Device* device,DXGI_FORMAT targetFormat,void (*l
     if(FAILED(device->CreateGraphicsPipelineState(&state,IID_PPV_ARGS(&depthPipeline))))return depthFail("no pipeline");
     heap.Type=D3D12_DESCRIPTOR_HEAP_TYPE_DSV;heap.NumDescriptors=2;   // this eye's grid's, the drawn eye's
     if(FAILED(device->CreateDescriptorHeap(&heap,IID_PPV_ARGS(&depthHeap))))return depthFail("no depth heap");
+    {   // Back's constants, one slot an eye: the GPU may still read the other's
+        D3D12_HEAP_PROPERTIES upload{};upload.Type=D3D12_HEAP_TYPE_UPLOAD;
+        D3D12_RESOURCE_DESC buffer{};buffer.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER;buffer.Width=2*BackSlotBytes;
+        buffer.Height=buffer.DepthOrArraySize=buffer.MipLevels=1;buffer.SampleDesc.Count=1;buffer.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        const D3D12_RANGE none{0,0};
+        if(FAILED(device->CreateCommittedResource(&upload,D3D12_HEAP_FLAG_NONE,&buffer,D3D12_RESOURCE_STATE_GENERIC_READ,nullptr,IID_PPV_ARGS(&backs)))||
+           FAILED(backs->Map(0,&none,reinterpret_cast<void**>(&backData))))return depthFail("no constant buffer");
+        std::memset(backData,0,2*BackSlotBytes);
+    }
     if(log)log("Frame OpenXR: by turns - the eye not drawn can be moved with the scene depth");
     // The motion statistics are optional: without them the game's motion
     // vectors are never trusted, and the eye not drawn moves as before.
     if(!shaders.statsVs.empty()&&!shaders.statsPs.empty()) {
         D3D12_GRAPHICS_PIPELINE_STATE_DESC stats=state;stats.VS=Code(shaders.statsVs);stats.PS=Code(shaders.statsPs);
-        stats.DepthStencilState={};stats.DSVFormat=DXGI_FORMAT_UNKNOWN;
+        stats.DepthStencilState={};stats.DSVFormat=DXGI_FORMAT_UNKNOWN;   // the depth shader's root signature; Back unread
         stats.PrimitiveTopologyType=D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT;stats.RTVFormats[0]=DXGI_FORMAT_R32G32B32A32_FLOAT;
         auto& sum=stats.BlendState.RenderTarget[0];
         sum.BlendEnable=TRUE;sum.SrcBlend=sum.DestBlend=D3D12_BLEND_ONE;sum.BlendOp=D3D12_BLEND_OP_ADD;
@@ -631,11 +650,16 @@ bool TurnWarp::Render(ID3D12Device* device,ID3D12GraphicsCommandList* list,ID3D1
         std::memcpy(constants+28,carried,sizeof carried);
         // its parallax a step in the depth buffer (near plane / distance = depth * near plane / Ahead)
         const auto blocks=effectsOn?effects[0]->GetDesc():D3D12_RESOURCE_DESC{};
-        const float same[12]={keep?carried[14]*d.nearPlane/Ahead:0,d.keep,nearOnly?d.keepNear:0,moving?d.still:0,
+        const float same[12]={keep?carried[14]*d.nearPlane/Ahead:0,d.keep,nearOnly?d.keepNear:0,0,
                               float(t.Width)/TurnNearBlock,float(t.Height)/TurnNearBlock,1.f/TurnNearBlock,1.f/TurnNearBlock,
                               float(blocks.Width),float(blocks.Height),effectsOn?d.keepEffects:0,moving&&d.show?1.f:0};
         std::memcpy(constants+44,same,sizeof same);
         list->SetGraphicsRoot32BitConstants(1,DepthConstants,constants,0);
+        if(moving) {   // where the render before stood: the camera's part of its vectors
+            float back[16]{};std::memcpy(back,d.back.data(),sizeof(float)*12);tangents(d.backFov,back+12);
+            std::memcpy(backData+BackSlotBytes*slot,back,sizeof back);
+        }
+        list->SetGraphicsRootConstantBufferView(2,backs->GetGPUVirtualAddress()+UINT64(BackSlotBytes)*slot);
         list->DrawInstanced(6*across*down,carried[14]>0?2:1,0,0);   // the drawn eye's: the farther layers too
     };
     // The nearest depth within `reach` target pixels of each block, from

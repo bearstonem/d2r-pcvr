@@ -287,7 +287,7 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
                                          s.devTurnsKeepOwn==4?"By turns: the eye not drawn keeps its own picture round near things and where the game's effects are.":
                                          "By turns: the eye not drawn takes the drawn eye's picture wherever it reaches."):
              o.result==Result::MotionUpdated?(s.devTurnsMotion==1?"By turns: what moves by itself moves on in the eye not drawn (the game's vectors).":
-                                          s.devTurnsMotion==2?"By turns: the eye not drawn from its own picture. Red: moved on. Blue: vector not used.":
+                                          s.devTurnsMotion==2?"By turns: the eye not drawn from its own picture alone. Red: what moved on by itself.":
                                           "By turns: the eye not drawn moves with your head and the hero alone."):
              o.result==Result::Applied?"Kit added to inventory. Equip it using the native inventory screen.":
              o.result==Result::Dispatched?"Commands sent. Check character stats / destination in game.":

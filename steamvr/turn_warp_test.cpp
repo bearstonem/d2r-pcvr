@@ -478,8 +478,10 @@ static void KeepEffects(Gpu& gpu,bool typeless) {
 // The game's motion vectors (TurnDepth::motion): a 64-pixel wall 4 units
 // away, a monster 2 units away in columns 24-39 that walked 8 px to the right
 // since the render before, the head still. One frame on, the monster stands
-// 8 px further right; the wall stays. Then the statistics (MotionStats) of
-// the same picture, the sky in its top 8 rows.
+// 8 px further right; the wall stays. With the render before a quarter unit
+// to the right, the vectors also hold its parallax (2 px at the wall, 4 at
+// the monster), taken out. Then the statistics (MotionStats) of the same
+// picture, the sky in its top 8 rows.
 static void Motion(Gpu& gpu,bool typeless) {
     framevr::TurnWarp warp;
     Check(warp.Initialize(gpu.device.Get(),DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,nullptr)&&warp.DepthReady()&&warp.MotionReady(),"pipelines");
@@ -497,16 +499,17 @@ static void Motion(Gpu& gpu,bool typeless) {
         auto texture=gpu.Texture(side,side,DXGI_FORMAT_R32_FLOAT,D3D12_RESOURCE_FLAG_NONE,D3D12_RESOURCE_STATE_COPY_DEST);
         gpu.Upload(texture.Get(),d,readable);return texture;
     };
-    const auto vectors=[&](float pixels){   // where each point is less where it was, in uv: the monster's alone
+    const auto vectors=[&](float wall,float onMonster){   // where each point is less where it was, in uv
         std::vector<uint32_t> m(side*side);
-        for(UINT y=0;y<side;++y)for(UINT x=0;x<side;++x)m[y*side+x]=monster(x)?Half(pixels/side):0;
+        for(UINT y=0;y<side;++y)for(UINT x=0;x<side;++x){const float v=monster(x)?onMonster:wall;m[y*side+x]=Half(v/side);}
         auto texture=gpu.Texture(side,side,DXGI_FORMAT_R16G16_FLOAT,D3D12_RESOURCE_FLAG_NONE,D3D12_RESOURCE_STATE_COPY_DEST);
         gpu.Upload(texture.Get(),m,readable);return texture;
     };
-    const auto depth=depthOf(false),walked=vectors(8),shuffled=vectors(1);
+    const auto depth=depthOf(false),walked=vectors(0,8),shuffled=vectors(0,1),parallax=vectors(2,4),walkedToo=vectors(2,12);
     const float q=std::atan(1.f);const Fov square{-q,q,-q,q};
+    const auto in_place=framevr::TurnMove({0,0,0},{0,0,0,1},{0,0,0},{0,0,0,1});
     framevr::TurnDepth own;own.format=DXGI_FORMAT_R32_FLOAT;own.nearPlane=nearPlane;own.depth=depth.Get();
-    own.drawnFov=own.nowFov=square;own.move=framevr::TurnMove({0,0,0},{0,0,0,1},{0,0,0},{0,0,0,1});
+    own.drawnFov=own.nowFov=own.backFov=square;own.move=own.back=in_place;
     own.motion=walked.Get();own.ahead=1;
     std::vector<uint32_t> out;int slot=0;
     const auto expect=[&](UINT from,UINT to,int shift,const char* what) {
@@ -523,10 +526,15 @@ static void Motion(Gpu& gpu,bool typeless) {
     expect(33,43,-8,"the monster goes on by its own motion, 8 px");
     expect(2,20,0,"the wall left of it stays");
     expect(52,64,0,"the wall right of it stays");
-    own.still=3;   // nearer than this the vectors hold the camera's motion: left
+    // the render before a quarter unit to the right: its parallax in every vector, taken out
+    own.back=framevr::TurnMove({0,0,0},{0,0,0,1},{.25f,0,0},{0,0,0,1});own.motion=parallax.Get();
     out=gpu.Warp(warp,source.Get(),target.Get(),Identity,slot^=1,&own);
-    stays("nearer than still the monster stays");
-    own.still=0;own.motion=shuffled.Get();   // a pixel: DLSS's jitter step, none
+    stays("the camera's motion alone moves nothing");
+    own.motion=walkedToo.Get();
+    out=gpu.Warp(warp,source.Get(),target.Get(),Identity,slot^=1,&own);
+    expect(33,43,-8,"less the camera's motion, the monster goes on by its own, 8 px");
+    expect(2,20,0,"and the wall stays");
+    own.back=in_place;own.motion=shuffled.Get();   // a pixel: DLSS's jitter step, none
     out=gpu.Warp(warp,source.Get(),target.Get(),Identity,slot^=1,&own);
     stays("a vector under StillPixels is none");
     own.motion=walked.Get();own.carry=own.move;own.reach[0]=3;own.reach[1]=3.5f;   // within reach: the hero carries it
@@ -543,7 +551,7 @@ static void Motion(Gpu& gpu,bool typeless) {
     // The statistics: 128 x 128 samples, four a texel; 1 world unit a metre
     const auto sky=depthOf(true);
     framevr::TurnWarp::MotionInput in;in.depth=sky.Get();in.format=DXGI_FORMAT_R32_FLOAT;in.motion=walked.Get();
-    in.nearPlane=nearPlane;in.upm=1;in.back=framevr::TurnMove({0,0,0},{0,0,0,1},{0,0,0},{0,0,0,1});in.fov=in.backFov=square;
+    in.nearPlane=nearPlane;in.upm=1;in.back=in_place;in.fov=in.backFov=square;
     bool recorded=false;gpu.Record([&]{recorded=warp.MotionStats(gpu.device.Get(),gpu.list.Get(),0,in,3);});
     framevr::MotionHistogram h;Check(recorded&&warp.ReadMotionStats(3,h),"the statistics recorded and read back");
     const auto bin=[&](int b,float count,float still,float explained,float pixels,const char* what){
@@ -557,7 +565,7 @@ static void Motion(Gpu& gpu,bool typeless) {
     bin(9,10752,10752,10752,0,"the wall, 4 m: in 3.5-4 m (bin 9), all still, all the camera's (none)");
     float rest=0;for(int b=0;b<framevr::MotionBins;++b)if(b!=0&&b!=5&&b!=9)rest+=h.bins[b][0];
     Check(rest==0,"no sample anywhere else");
-    std::printf("Motion GPU pass passed (%s target): moved on by its own motion, still distance, under a pixel, carried, off, shown; the statistics by distance\n",typeless?"typeless":"typed");
+    std::printf("Motion GPU pass passed (%s target): moved on by its own motion, the camera's motion taken out, under a pixel, carried, off, shown; the statistics by distance\n",typeless?"typeless":"typed");
 }
 
 // The game's interface laid back over a picture (TurnWarp::Interface), as the

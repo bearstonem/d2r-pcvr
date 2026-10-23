@@ -125,15 +125,18 @@ struct TurnDepth {
     // the size of `depth`). Moved with the head and the hero alone, a monster
     // walking stood a frame back where the eye's own picture shows: beside
     // it, where only this eye sees past it, and where the effects keep this
-    // eye's own (the owner, 2026-10-23). Each point farther than `still`
-    // (world units, along the view) also goes on by `ahead` times its own
-    // motion; nearer, the game's vectors hold the camera's motion against the
-    // other eye, so none is taken. Less than StillPixels counts as none. What
+    // eye's own (the owner, 2026-10-23). Each point also goes on by `ahead`
+    // times its own motion. The game's vectors hold the camera's motion
+    // against the render before as well (the other eye's, a frame back:
+    // 98-99% of them from 2 m out, the owner's session that day), taken out
+    // by where that render stood: `back`, TurnMove from this picture's view
+    // to its, and its FOV. Less than StillPixels left counts as none. What
     // the hero carries keeps the carry alone. 0: off.
     ID3D12Resource* motion=nullptr;
-    float ahead=0,still=0;
-    // the grid's points tinted: red moved by their own motion, blue a vector left unused nearer than `still`
-    bool show=false;
+    float ahead=0;
+    std::array<float,12> back{};
+    math::Fov backFov{};
+    bool show=false;   // the grid's points tinted red where they moved by their own motion
 };
 // Less than this many pixels of the drawn part, a motion vector is none: the
 // game's vectors carry DLSS's jitter step (under a pixel) everywhere.
@@ -187,6 +190,9 @@ class TurnWarp {
     Microsoft::WRL::ComPtr<ID3D12PipelineState> statsPipeline;
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> statsTargets;
     Microsoft::WRL::ComPtr<ID3D12Resource> statsBins,statsReadback;
+    // TurnDepth::back for the depth shader, a slot an eye (upload, mapped)
+    Microsoft::WRL::ComPtr<ID3D12Resource> backs;
+    uint8_t* backData=nullptr;
     DXGI_FORMAT format=DXGI_FORMAT_UNKNOWN;
 public:
     // format: the eye swapchain's typed format, of the source and the target alike.

@@ -196,18 +196,18 @@ picture from a frame back also goes on by the game's motion vectors, so a
 monster walking stands where it is now in the strip beside it that only this
 eye sees and where the effects keep this eye's own picture. **SHOW** (2): the
 eye not drawn from its own picture alone (no drawn eye's picture over it),
-what moved on tinted red and vectors left unused tinted blue. Red should sit
-on walking monsters and missiles, not on the ground or walls; blue marks
-where the game's vectors still hold the camera's motion (near the feet).
-With SHOW, a monster walking across should look single in both eyes; with
-OFF it is a frame behind in one eye. **OFF** (0): moved with the head and the
-hero alone, as before. The button steps in that order, shows the current
-state, and the frame log records each step. It changes no saved setting.
+what moved on tinted red. Red should sit on walking monsters and missiles,
+not on the ground or walls, even while you turn your head or walk. With
+SHOW, a monster walking across should look single in both eyes; with OFF it
+is a frame behind in one eye. **OFF** (0): moved with the head and the hero
+alone, as before. The button steps in that order, shows the current state,
+and the frame log records each step. It changes no saved setting.
 
-Nothing moves on until the frame log says where the game's vectors stop
-holding the camera's motion ("hold the camera's motion nearer than ... m").
-Every 10 seconds a line gives, by half a metre of distance, how many vectors
-were still, how many the camera's motion explains, and their mean length.
+Nothing moves on until the frame log says the camera's motion explains the
+game's vectors ("the camera's motion explains ...% of the game's motion
+vectors from 2 m out"). Every 10 seconds a line gives, by half a metre of
+distance, how many vectors were still, how many the camera's motion
+explains, and their mean length.
 
 ## Locations
 
