@@ -534,9 +534,24 @@ static void Motion(Gpu& gpu,bool typeless) {
     out=gpu.Warp(warp,source.Get(),target.Get(),Identity,slot^=1,&own);
     expect(33,43,-8,"less the camera's motion, the monster goes on by its own, 8 px");
     expect(2,20,0,"and the wall stays");
-    own.back=in_place;own.motion=shuffled.Get();   // a pixel: DLSS's jitter step, none
+    own.back=in_place;own.motion=walked.Get();own.from=3;   // nearer than this the camera's part is not trusted
+    out=gpu.Warp(warp,source.Get(),target.Get(),Identity,slot^=1,&own);
+    stays("nearer than from the monster stays");
+    own.from=0;own.motion=shuffled.Get();   // a pixel: DLSS's jitter step, none
     out=gpu.Warp(warp,source.Get(),target.Get(),Identity,slot^=1,&own);
     stays("a vector under StillPixels is none");
+    {   // one texel of the wall (12,12), a hair nearer so its grid point takes it, with a vector of
+        // 8 px its neighbours on the surface do not have: not a thing moving
+        std::vector<uint32_t> d(side*side),m(side*side,0);
+        for(UINT y=0;y<side;++y)for(UINT x=0;x<side;++x){const float v=nearPlane/(monster(x)?2.f:x==12&&y==12?3.99f:4.f);std::memcpy(&d[y*side+x],&v,4);}
+        m[12*side+12]=Half(8.f/side);
+        auto lone=gpu.Texture(side,side,DXGI_FORMAT_R32_FLOAT,D3D12_RESOURCE_FLAG_NONE,D3D12_RESOURCE_STATE_COPY_DEST);gpu.Upload(lone.Get(),d,readable);
+        auto stray=gpu.Texture(side,side,DXGI_FORMAT_R16G16_FLOAT,D3D12_RESOURCE_FLAG_NONE,D3D12_RESOURCE_STATE_COPY_DEST);gpu.Upload(stray.Get(),m,readable);
+        own.depth=lone.Get();own.motion=stray.Get();
+        out=gpu.Warp(warp,source.Get(),target.Get(),Identity,slot^=1,&own);
+        expect(2,20,0,"a lone texel's vector moves nothing");
+        own.depth=depth.Get();
+    }
     own.motion=walked.Get();own.carry=own.move;own.reach[0]=3;own.reach[1]=3.5f;   // within reach: the hero carries it
     out=gpu.Warp(warp,source.Get(),target.Get(),Identity,slot^=1,&own);
     stays("what the hero carries keeps the carry alone");
@@ -565,7 +580,7 @@ static void Motion(Gpu& gpu,bool typeless) {
     bin(9,10752,10752,10752,0,"the wall, 4 m: in 3.5-4 m (bin 9), all still, all the camera's (none)");
     float rest=0;for(int b=0;b<framevr::MotionBins;++b)if(b!=0&&b!=5&&b!=9)rest+=h.bins[b][0];
     Check(rest==0,"no sample anywhere else");
-    std::printf("Motion GPU pass passed (%s target): moved on by its own motion, the camera's motion taken out, under a pixel, carried, off, shown; the statistics by distance\n",typeless?"typeless":"typed");
+    std::printf("Motion GPU pass passed (%s target): moved on by its own motion, the camera's motion taken out, from a distance, under a pixel, a lone texel, carried, off, shown; the statistics by distance\n",typeless?"typeless":"typed");
 }
 
 // The game's interface laid back over a picture (TurnWarp::Interface), as the

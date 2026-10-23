@@ -64,9 +64,10 @@ cbuffer Move : register(b0) {
     float4 effects;    // x, y: the effects' blocks across, down; z: from what level they count, 0 off; w: TurnDepth::show
 };
 // This eye's own grid, moving by its motion vectors: TurnMove's rows from
-// this picture's view to the render before's (TurnDepth::back), and the
-// tangents of that one's FOV.
-cbuffer Back : register(b1) {float4 back0;float4 back1;float4 back2;float4 backTan;};
+// this picture's view to the render before's (TurnDepth::back), the
+// tangents of that one's FOV, and from how far (gate.x, along the view)
+// and how alike on one surface (gate.y, pixels) they are taken.
+cbuffer Back : register(b1) {float4 back0;float4 back1;float4 back2;float4 backTan;float4 gate;};
 // split: 0 the whole cell; a cell across an edge as two layers, each keeping
 // its own pixels: > 0 the nearer, those nearer than it; < 0 the rest.
 // tint (TurnDepth::show): moved by its own motion.
@@ -81,15 +82,19 @@ float Nearest(float2 uv) {
     const float4 d4=drawnDepth.GatherRed(edge,uv*depthInfo.yz);
     return max(max(max(d4.x,d4.y),max(d4.z,d4.w)),1e-6);
 }
-// The same, and the motion vector of the texel it came from: x, y, depth.
-float3 NearestMoving(float2 uv) {
+// The same, and the motion vector of the texel it came from: x, y, depth;
+// w how far apart the vectors of the texels on its surface (within 2% of
+// its depth) are, in uv - a lone texel's vector is not a thing moving.
+float4 NearestMoving(float2 uv) {
     const float2 at=uv*depthInfo.yz;
     const float4 d4=drawnDepth.GatherRed(edge,at),x4=motion.GatherRed(edge,at),y4=motion.GatherGreen(edge,at);
     float3 n=float3(x4.x,y4.x,d4.x);
     if(d4.y>n.z)n=float3(x4.y,y4.y,d4.y);
     if(d4.z>n.z)n=float3(x4.z,y4.z,d4.z);
     if(d4.w>n.z)n=float3(x4.w,y4.w,d4.w);
-    return float3(n.xy,max(n.z,1e-6));
+    float2 lo=n.xy,hi=n.xy;
+    [unroll] for(int k=0;k<4;++k)if(d4[k]>=n.z*.98){lo=min(lo,float2(x4[k],y4[k]));hi=max(hi,float2(x4[k],y4[k]));}
+    return float4(n.xy,max(n.z,1e-6),max(hi.x-lo.x,hi.y-lo.y));
 }
 // The farthest and the nearest of them.
 float2 Range(float2 uv) {
@@ -101,7 +106,7 @@ Pixel VS(uint id:SV_VertexID,uint layer:SV_InstanceID) {
     const uint cell=id/6;
     const float2 at=float2(cell%grid.x,cell/grid.x),size=float2(grid.xy),corner=Corner[id%6];
     const float2 uv=(at+corner)/size;
-    float d,split=0;float2 moved=0;
+    float d,split=0,apart=0;float2 moved=0;
     if(reach.z>0) {
         // The drawn eye's picture: its texels at the cell's corners and middle.
         // Across an edge in depth the cell goes as two flat layers, the nearest
@@ -112,7 +117,7 @@ Pixel VS(uint id:SV_VertexID,uint layer:SV_InstanceID) {
         d=corner.y>0?(corner.x>0?f.y:c.y):(corner.x>0?b.y:a.y);   // Nearest(uv)
         if((front-back)*reach.z>EdgePixels){split=(front+back)*.5;d=layer?back:front;if(layer)split=-split;}
     }
-    else if(reach.w>0){const float3 n=NearestMoving(uv);d=n.z;moved=n.xy;}
+    else if(reach.w>0){const float4 n=NearestMoving(uv);d=n.z;moved=n.xy;apart=n.w;}
     else d=Nearest(uv);
     Pixel o;o.uv=uv;o.split=split;o.tint=0;
     if(layer&&split==0){o.position=float4(0,0,0,-1);return o;}   // no farther part: outside the clip volume
@@ -120,17 +125,20 @@ Pixel VS(uint id:SV_VertexID,uint layer:SV_InstanceID) {
     // Its own motion since the render before, as far again: a monster walking
     // goes where it is now. The game's vector holds the camera's motion
     // against that render as well - the other eye's, a frame back - taken
-    // out here: where that render saw the point. What the hero carries goes
-    // with the carry.
+    // out here: where that render saw the point. Only as far out as that is
+    // seen to hold (gate.x: nearer, the ground at the feet was left moving,
+    // a double image) and where the surface's texels agree (gate.y). What
+    // the hero carries goes with the carry.
     float2 from=uv;
-    if(reach.w>0) {
+    if(reach.w>0&&away>gate.x) {
+        float w,h;drawnDepth.GetDimensions(w,h);
+        const float2 pixels=float2(w,h)*depthInfo.yz;
         const float3 here=float3(lerp(drawnTan.x,drawnTan.y,uv.x),lerp(drawnTan.w,drawnTan.z,uv.y),-1)*away;
         const float3 b=float3(dot(back0.xyz,here)+back0.w,dot(back1.xyz,here)+back1.w,dot(back2.xyz,here)+back2.w);
-        if(b.z<0) {
+        if(b.z<0&&apart*max(pixels.x,pixels.y)<gate.y) {
             const float2 seen=float2((-b.x/b.z-backTan.x)/(backTan.y-backTan.x),(backTan.w+b.y/b.z)/(backTan.w-backTan.z));
             const float2 itself=moved-(uv-seen);
-            float w,h;drawnDepth.GetDimensions(w,h);
-            if(length(itself*float2(w,h)*depthInfo.yz)>=StillPixels){from+=itself*reach.w*free;o.tint=free;}
+            if(length(itself*pixels)>=StillPixels){from+=itself*reach.w*free;o.tint=free;}
         }
     }
     const float3 p=float3(lerp(drawnTan.x,drawnTan.y,from.x),lerp(drawnTan.w,drawnTan.z,from.y),-1)*away;
@@ -656,7 +664,8 @@ bool TurnWarp::Render(ID3D12Device* device,ID3D12GraphicsCommandList* list,ID3D1
         std::memcpy(constants+44,same,sizeof same);
         list->SetGraphicsRoot32BitConstants(1,DepthConstants,constants,0);
         if(moving) {   // where the render before stood: the camera's part of its vectors
-            float back[16]{};std::memcpy(back,d.back.data(),sizeof(float)*12);tangents(d.backFov,back+12);
+            float back[20]{};std::memcpy(back,d.back.data(),sizeof(float)*12);tangents(d.backFov,back+12);
+            back[16]=d.from;back[17]=SurfacePixels;
             std::memcpy(backData+BackSlotBytes*slot,back,sizeof back);
         }
         list->SetGraphicsRootConstantBufferView(2,backs->GetGPUVirtualAddress()+UINT64(BackSlotBytes)*slot);

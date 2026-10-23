@@ -132,8 +132,13 @@ struct TurnDepth {
     // by where that render stood: `back`, TurnMove from this picture's view
     // to its, and its FOV. Less than StillPixels left counts as none. What
     // the hero carries keeps the carry alone. 0: off.
+    // Only farther than `from` (world units, along the view): nearer, the
+    // camera's part did not come out (the ground at the feet, 52-90% of it
+    // in the owner's next session), and the ground left moving was a double
+    // image there. And only where the vectors of a point's texels on one
+    // surface agree to SurfacePixels: a lone texel's is not a thing moving.
     ID3D12Resource* motion=nullptr;
-    float ahead=0;
+    float ahead=0,from=0;
     std::array<float,12> back{};
     math::Fov backFov{};
     bool show=false;   // the grid's points tinted red where they moved by their own motion
@@ -141,6 +146,7 @@ struct TurnDepth {
 // Less than this many pixels of the drawn part, a motion vector is none: the
 // game's vectors carry DLSS's jitter step (under a pixel) everywhere.
 inline constexpr float StillPixels=1.5f;
+inline constexpr float SurfacePixels=1.f;
 // The motion statistics (TurnWarp::MotionStats): the sky, then half a metre
 // each from the eye to 16 m, then farther.
 inline constexpr int MotionBins=34;

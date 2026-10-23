@@ -587,10 +587,14 @@ int motionNext=0;
 // objects' own - used only while the camera's motion explains this much of
 // them, over the last few seconds (nearer, the hero's own hands and weapon
 // move by themselves).
-constexpr double MotionExplained=.8;
+// Nearer, the ground at the feet was 52-90% explained: what was left of it
+// moved and doubled the ground (the owner's next session). So only from
+// where two bins running are explained to MotionHeld (`from`, metres).
+constexpr double MotionExplained=.8,MotionHeld=.97;
 struct MotionGate {
     std::array<std::array<double,4>,MotionBins> seen{},window{};   // seen: decayed; window: for the log
     bool trusted=false;
+    float from=-1;   // < 0: nowhere yet
     uint32_t frames=0,moved=0;uint64_t since=0;
     void Add(const MotionHistogram& h,uint64_t now) {
         for(int b=0;b<MotionBins;++b)for(int k=0;k<4;++k){seen[b][k]=seen[b][k]*.99+h.bins[b][k];window[b][k]+=h.bins[b][k];}
@@ -603,10 +607,20 @@ struct MotionGate {
             char line[224];std::snprintf(line,sizeof line,trusted?"Frame OpenXR: by turns - the camera's motion explains %.0f%% of the game's motion vectors from 2 m out: what is left moves the eye not drawn on":
                 "Frame OpenXR: by turns - the camera's motion explains only %.0f%% of the game's motion vectors from 2 m out: not used",100*explained/count);Say(line);
         }
+        float edge=-1;int run=0;
+        for(int b=1;b<MotionBins-1&&run<2;++b) {   // half a metre each from the eye; the sky and the farthest left out
+            if(seen[b][0]<200)continue;   // too little seen here
+            if(seen[b][2]>=MotionHeld*seen[b][0]){if(!run++)edge=(b-1)*MotionBinMetres;}
+            else run=0;
+        }
+        if(run<2)edge=-1;
+        if(edge>=0&&from<0){char line[160];std::snprintf(line,sizeof line,"Frame OpenXR: by turns - the game's motion vectors used from %.1f m out (first frame doing so)",double(edge));Say(line);}
+        from=edge;
         if(!since)since=now;
         if(now-since<10000)return;
         // still / explained by the camera / mean length in pixels, by distance
-        std::string line="Frame OpenXR: by turns - the game's motion vectors, "+std::to_string(frames)+" eye frames, "+std::to_string(moved)+" moved by them; still/camera %/mean px by distance:";
+        char head[192];std::snprintf(head,sizeof head,"Frame OpenXR: by turns - the game's motion vectors, %u eye frames, %u moved by them from %.1f m; still/camera %%/mean px by distance:",frames,moved,double(from));
+        std::string line=head;
         double total=0;for(const auto& b:window)total+=b[0];
         for(int b=0;b<MotionBins;++b) {
             const auto& w=window[b];
@@ -3112,8 +3126,8 @@ bool TurnEye(int i) {
         // explain the game's vectors (motionGate), so what is left is the
         // objects' own.
         const auto& vectors=turnMotions[i];
-        if(motion&&vectors.ok&&vectors.backOk&&motionGate.trusted) {
-            depth.motion=vectors.texture.Get();depth.ahead=1;depth.show=motion==2;
+        if(motion&&vectors.ok&&vectors.backOk&&motionGate.trusted&&motionGate.from>=0) {
+            depth.motion=vectors.texture.Get();depth.ahead=1;depth.from=motionGate.from*w.upm;depth.show=motion==2;
             const auto& f=vectors.backFov;depth.back=vectors.back;depth.backFov={f.angleLeft,f.angleRight,f.angleDown,f.angleUp};
             ++motionGate.moved;
         }
