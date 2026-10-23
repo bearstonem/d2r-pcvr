@@ -55,6 +55,7 @@ inline const char* HelpText(int id) {
         case MapRotate:return "In Top-down view, Off keeps north at the top and turns the arrow with you. On rotates the map so your facing direction stays at the top. This has no effect in Isometric view; your choice is kept for the next time you use Top-down. Apply saves it.";
         case OrdinaryMobBars:return "Shows names and health bars for ordinary enemies. Turn it Off to reduce clutter. Boss and elite bars remain visible.";
         case MenuDistance:return "How far away eye-level game panels, such as inventory and merchant menus, appear. You can also point at a game menu, hold Right Grip and push or pull it; menus reopen at that distance until you change this setting or restart. This does not move this VR Settings panel; grab it with Right Grip to move, push, pull or tilt it.";
+        case MenuInput:return "How game menus such as the inventory, stash and merchants take your input. Auto switches between the laser and the sticks and face buttons; Laser brings the laser back as soon as you let go of them; Controller uses only the sticks and buttons.";
         case TooltipTiming:return "How soon item details appear when you point the laser at an item in a game panel.";
         case MeleeRules:return "How your physical melee strokes deal damage.";
         case CompanionCounts:return "Shows companion counts and effects currently affecting your character below the left-hand minimap. This includes received buffs, auras and harmful effects, not just assigned skills. It follows Minimap & Compass placement.";
@@ -109,7 +110,7 @@ struct ChoiceHelp {const char* name=nullptr;const char* text=nullptr;};
 constexpr int HelpChoiceGap=18,HelpChoiceNameHeight=40;   // on the card: above the name, the name's line
 inline int HelpChoices(int id) {
     switch(id) {
-        case Foveation:case MenuDistance:case TooltipTiming:case StrainSpeed:case ProjectileAimAssist:case StrainDark:return 3;
+        case Foveation:case MenuDistance:case MenuInput:case TooltipTiming:case StrainSpeed:case ProjectileAimAssist:case StrainDark:return 3;
         case FoveationStrength:case VitalsLocation:case NavigationLocation:return 4;
         case StereoRendering:return int(std::size(StereoRenderingNames));
         case RenderResolution:return int(std::size(resolution::Choices));
@@ -189,6 +190,12 @@ inline ChoiceHelp HelpChoice(int id,float value) {
                 "Panels appear 85 cm in front of you, the main menu 1 m.",
                 "Panels appear 1.15 m in front of you, the main menu 1.3 m."};
             return {MenuDistanceNames[c],text[c]};}
+        case MenuInput:{
+            static constexpr const char* text[]={
+                "A stick or face button switches to the game's controller navigation and hides the laser, until you let go and move your aim across the menu.",
+                "The laser hides only while you hold a stick or face button, which still reach the game, and comes back as soon as you let go, so you can point at an item and press a button on it.",
+                "No laser in game menus: only the sticks and buttons. The grips and triggers act as the game's LB/RB/LT/RT, and Right Grip no longer moves the menu. VR Settings keeps its laser."};
+            return {MenuInputNames[c],text[c]};}
         case TooltipTiming:{
             static constexpr const char* text[]={
                 "Item details appear as soon as the laser reaches an item.",

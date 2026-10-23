@@ -377,12 +377,19 @@ The new physical casting path still requires offline headset validation.
 ## Menus: laser and native buttons
 
 Both methods work in the main menu and native game panels, including inventory,
-stash and merchants. Keep the D2R window focused on the PC.
+stash and merchants, unless VR Settings > HUD > Game menus is set to
+Controller. Keep the D2R window focused on the PC.
 
-Use a **stick or face button** to start native button navigation and follow the
-game's displayed prompts. The idle laser will not move your native selection.
-To return to the laser, release the native controls and deliberately move your
-aim across the panel. A small hand tremor will not change methods.
+With VR Settings > HUD > Game menus on **Auto** (the default), use a **stick or
+face button** to start native button navigation and follow the game's displayed
+prompts. The idle laser will not move your native selection. To return to the
+laser, release the native controls and deliberately move your aim across the
+panel. A small hand tremor will not change methods.
+
+**Laser** passes held buttons and sticks to the game and brings the laser back
+as soon as you let go, without moving your aim. **Controller** keeps native
+navigation with no laser: the grips and triggers act as LB/RB/LT/RT, and Right
+Grip no longer pushes or pulls the panel. VR Settings keeps its laser.
 
 ### Laser controls
 

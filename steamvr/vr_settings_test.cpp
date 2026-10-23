@@ -535,10 +535,20 @@ int main(){
     for(auto key:{MenuDistance,TooltipTiming}) {
         Check(Normalize(key,1.5f)==Definitions[key].defaultValue&&Normalize(key,9)==Definitions[key].defaultValue,"invalid comfort enums fall back safely");
         const int row=key==MenuDistance?4:5;
-        Check(RowKey(Page::HUD,row)==key&&At(Page::HUD,Increase(row)).index==key,"HUD comfort rows hit their own settings");
-        Model comfort;comfort.Open(s);comfort.Click(At(comfort,Page::HUD,Increase(row)));
+        const Rect plus=key==MenuDistance?PairIncrease(row,0):Increase(row);   // Menu distance: the Game menus row's left stepper
+        Check(RowKey(Page::HUD,row)==key&&At(Page::HUD,plus).index==key,"HUD comfort rows hit their own settings");
+        Model comfort;comfort.Open(s);comfort.Click(At(comfort,Page::HUD,plus));
         Check(comfort.Click({Kind::Apply}).changed==(1u<<key),"comfort Apply affects only its selected setting");
     }
+    Check(s.values[MenuInput]==0&&PairOf(MenuDistance)==MenuInput&&std::strcmp(RowLabel(MenuDistance,{}),"Game menus")==0,"menu pointer defaults to Auto, on the Game menus row's right");
+    for(float bad:{-1.f,3.f,1.5f,NAN})Check(Normalize(MenuInput,bad)==0,"invalid menu pointer falls back to Auto");
+    {Model pointer;pointer.Open(s);
+        Check(At(pointer,Page::HUD,PairIncrease(4,1)).index==MenuInput&&At(pointer,Page::HUD,PairDecrease(4,1)).index==MenuInput,"the right stepper sets the menu pointer");
+        // Cycles both ways, like the other three-choice rows (aim assist, guard strain color, ground skills).
+        for(float choice:{1.f,2.f,0.f,1.f}){pointer.Click(At(pointer,Page::HUD,PairIncrease(4,1)));Check(pointer.Get()[MenuInput]==choice,"menu pointer steps Auto, Laser, Controller, then Auto");}
+        for(float choice:{0.f,2.f}){pointer.Click(At(pointer,Page::HUD,PairDecrease(4,1)));Check(pointer.Get()[MenuInput]==choice,"minus from Auto wraps to Controller");}
+        Check(pointer.Get()[MenuDistance]==s.values[MenuDistance]&&pointer.Click({Kind::Apply}).changed==(ChangeMask{1}<<MenuInput),"the pointer edits only its own setting");
+        Check(HelpAt(Page::HUD,1100.f/Width,float(RowY+4*RowStep+20)/Height)==MenuInput&&HelpChoices(MenuInput)==3,"its half of the row explains each choice");}
     Check(s.values[ProjectileAimAssist]==2,"aim assist defaults to Strong");
     for(float bad:{-1.f,3.f,1.5f,NAN})Check(Normalize(ProjectileAimAssist,bad)==2,"invalid aim-assist preference falls back to Strong");
     {Model assist;assist.Open(s);const auto hit=At(Page::Controls,AimAssistBox);

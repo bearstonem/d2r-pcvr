@@ -338,9 +338,12 @@ around your hand by the same angle, but it never rolls. Tilt stops at 60
 degrees and the panel stays 0.40 m to 1.50 m from your head.
 It reopens in the same place relative to where you face until restart.
 
-Sticks/face buttons select native menu navigation without an idle laser stealing
-focus. Release native controls and deliberately move the ray across the surface
-to return to laser input. Dragging retains pointer ownership. All player-facing
+With VR Settings > HUD > Game menus on Auto (the default), sticks/face buttons
+select native menu navigation without an idle laser stealing focus. Release
+native controls and deliberately move the ray across the surface to return to
+laser input. Laser returns to laser input as soon as the native controls are
+released; Controller stays on native navigation, with no laser or Right Grip
+panel push/pull (VR Settings keeps its laser). Dragging retains pointer ownership. All player-facing
 Quest and Frame mappings are in [CONTROLS.md](../CONTROLS.md).
 
 For the native quick-drop shortcut, point at an inventory item, hold **Left
@@ -390,7 +393,7 @@ tabs and a **Reset eye height** button:
 | Controls | Left/right controller reference for movement, menus, melee, bow, spells, potions, holsters and height reset |
 | VR | Controller labels, motion combat, seated belt position, dominant hand, smooth/snap turning, belt height and reach, weapon skill gestures and ordinary mob bars |
 | Video | Added sky, fog and dungeon ceilings, and the experimental Sorceress elemental hand effects (Off by default) |
-| HUD | Health/mana location and tilt, optional resource alerts, navigation location, menu distance and tooltip timing |
+| HUD | Health/mana location and tilt, optional resource alerts, navigation location, game menus (distance and pointer: Auto, Laser or Controller) and tooltip timing |
 | Combat | Melee rules, swing hit speed and thrust speed |
 | Aim | Whether spells and bow skills go to the aimed monster, the staff aiming where your arm points, and the aimed monster's outline: strength, which hands show it, and each hand's color (by range or one hue), where ground skills land (the game's aim, where you point or the aimed monster), and landing circles. Every option that changes how a cast aims is Off (Game) by default |
 | Haptics | Overall strength and separate melee, bow draw, bow/throw release, spell, interaction and resource-alert strengths; tests follow each action's hands |

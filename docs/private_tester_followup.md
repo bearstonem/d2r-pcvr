@@ -85,7 +85,7 @@ to confirm gameplay keeps the saved values. Repeat on available controller types
 
 | Feedback | Change |
 | --- | --- |
-| Menus too close | VR Settings > HUD > Menu distance: Close / Medium / Far. Medium is the default, 30 cm farther than the previous build. Close retains the previous placement; Far adds 60 cm. Inventory/merchant anchors are 0.55 / 0.85 / 1.15 m; main menus are 0.70 / 1.00 / 1.30 m. Their size and eye-level alignment remain fixed. NPC speech keeps its separate placement. |
+| Menus too close | VR Settings > HUD > Game menus, left stepper: Close / Medium / Far. Medium is the default, 30 cm farther than the previous build. Close retains the previous placement; Far adds 60 cm. Inventory/merchant anchors are 0.55 / 0.85 / 1.15 m; main menus are 0.70 / 1.00 / 1.30 m. Their size and eye-level alignment remain fixed. NPC speech keeps its separate placement. |
 | Controller picker hard to find | The VR tab has a larger highlighted dropdown, an explicit controller-label heading and detected left/right controller names. Automatic and the Valve Index override remain available. |
 | Two hand wheels not obvious | Controls help explains clicking either stick and assigning with the opposite hand's laser. Each hand wheel also explains assignment and the top trigger slot's compatible weapon gestures. |
 | Compass option hard to find | The HUD tab explicitly labels the combined Minimap & Compass control, including Off and the independently accessible wheel map. |

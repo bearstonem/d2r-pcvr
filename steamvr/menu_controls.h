@@ -59,23 +59,29 @@ struct LaserClick {
     bool Right() const{return held&&context;}
 };
 
-// Sticks/face buttons select native navigation. A deliberate change in aim
-// returns to the laser after native controls are released. Tracking jitter
+// VR Settings > HUD > Game menus, the pointer half ([hud] menu_pointer).
+enum class Pointer { Auto, Laser, Controller };
+
+// Auto: sticks/face buttons select native navigation. A deliberate change in
+// aim returns to the laser after native controls are released. Tracking jitter
 // cannot steal focus; a drag keeps its pointer even outside the canvas.
+// Laser: controls still reach the game while held; the laser returns on release.
+// Controller: native navigation only.
 class Navigation {
     bool native=false,anchor=false;
     float u=0,v=0;
     ReleaseGate nativeGate;
 public:
+    Pointer pointer=Pointer::Auto;
     void Reset(){native=anchor=false;nativeGate.Suspend();}
     bool Native() const{return native;}
     Pad Step(bool active,Pad p,bool hit,float x,float y,bool dragging) {
         if(!active){Reset();return {};}
         const bool intent=(p.buttons&~(LeftBumper|RightBumper))||Tilted(p.lx,p.ly)||Tilted(p.rx,p.ry);
-        if(!dragging&&intent){
+        if((!dragging&&intent)||pointer==Pointer::Controller){
             if(!native){nativeGate.Suspend();native=true;}
             anchor=hit;u=x;v=y;
-        }else if(native&&!Busy(p)&&hit&&(!anchor||std::hypot(x-u,y-v)>.045f)) {
+        }else if(native&&!Busy(p)&&(pointer==Pointer::Laser||(hit&&(!anchor||std::hypot(x-u,y-v)>.045f)))) {
             native=false;anchor=false;
         }
         if(!native)return {};

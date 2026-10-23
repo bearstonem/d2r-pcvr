@@ -22,6 +22,7 @@ static void ValueLabel(Key key,float value,const Context& c,char* label,size_t s
     else if(key==VitalsLocation||key==NavigationLocation)std::snprintf(label,size,"%s",vitals::LocationNames[int(value)]);
     else if(key==RenderResolution)std::snprintf(label,size,"%s",resolution::Choices[int(value)]);
     else if(key==MenuDistance)std::snprintf(label,size,"%s",MenuDistanceNames[int(value)]);
+    else if(key==MenuInput)std::snprintf(label,size,"%s",MenuInputNames[int(value)]);
     else if(key==TooltipTiming)std::snprintf(label,size,"%s",TooltipTimingNames[int(value)]);
     else if(key==TargetHighlight){if(value==0)std::snprintf(label,size,"Off");else std::snprintf(label,size,"%.0f%%",value);}
     else if(key==AimHighlights)std::snprintf(label,size,"%s",HighlightsNames[value>.5f?1:0]);
