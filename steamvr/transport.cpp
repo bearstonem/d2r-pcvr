@@ -422,6 +422,12 @@ struct ShieldCast {
 };
 ShieldCast shieldCast;
 weaponskills::Pulse shieldPulse;
+// Warcries by gesture (#283): a hand at the mouth, pushed out, makes one native
+// press of its trigger's warcry.
+warcry::Shout warcryShout;
+weaponskills::Pulse warcryPulse;
+int warcrySlot=-1,warcryHand=-1;
+uint64_t warcryToldAt=0;
 // [bow] quiver: face-button arrow skills load the following physical arrows.
 std::atomic<bool> quiverEnabled{true},quiverPreview{true};
 weaponskills::Quiver quiver;
@@ -820,6 +826,7 @@ void ClearInput() {
     elementalState.Reset();elementalScene={};
     journalPlacement.LoseTracking();
     meleePoses.Clear();offhandPoses.Clear();CancelShieldCast();
+    warcryShout.Reset();warcryPulse.Cancel();warcrySlot=warcryHand=-1;
     bowNeedsWorld=bowHasShot=leftNeedsWorld=leftHasShot=false;
     skel::SetMotionBow(false,false,0);
     ReleaseUiKey();
@@ -2372,6 +2379,51 @@ void Input() {
         // Keep observing the left stroke during native wind-up. Resetting it
         // here would allow the same continuous swing to become another bash.
     }
+    {
+        // Warcries by gesture (#283): a hand brought to the mouth, held there a
+        // moment and pushed out forward casts its trigger's warcry with one
+        // native press, as the trigger would. The trigger itself still casts.
+        const bool gestures=gestureSettings[settings::SkillGestures]>.5f&&quickFresh&&motionInput.active&&!motionInput.palette&&
+            !motionInput.quickCast&&!motionOutput.block;
+        bool eligible[2]{};
+        for(int h=0;h<2;++h) {
+            const auto& skill=quickSnapshot.skills[skills::TriggerSlot(h)];
+            const float trigger=(h?controls.lt:controls.rt)/255.f;
+            eligible[h]=gestures&&motionInput.tracked[h]&&skill.known&&skill.available&&warcry::Gesture(skill.id)&&trigger<.2f&&
+                interactionOutput.owner[h]==interaction::Owner::Combat&&interactionOutput.bottleHand!=h;
+        }
+        const math::Vec hands[2]={motionInput.hand[0].p,motionInput.hand[1].p};
+        const auto shout=warcryShout.Update(motionInput.time,motionInput.head.p,motionInput.head.q,hands,eligible);
+        if(shout.ready>=0) {
+            MotionPulse(shout.ready,haptics::Category::Interaction,.2f,15000000);
+            if(motionAt-warcryToldAt>2000) {
+                warcryToldAt=motionAt;
+                char line[160];std::snprintf(line,sizeof line,"Frame warcry: %s hand at the mouth, ready to shout skill %d",shout.ready?"left":"right",
+                    quickSnapshot.skills[skills::TriggerSlot(shout.ready)].id);
+                Say(line);
+            }
+        }
+        if(shout.cast>=0) {
+            const int slot=skills::TriggerSlot(shout.cast);
+            const auto& skill=quickSnapshot.skills[slot];
+            // Another cast already holds the native buttons: that one goes on.
+            const bool started=motionOutput.skill<0&&!(shieldCast.issued&&!shieldCast.cancelled)&&
+                warcryPulse.Start(slot,skill.id,skill.owner,motionInput.skillContext,motionInput.time,skills::Alternate(slot));
+            if(started){warcrySlot=slot;warcryHand=shout.cast;MotionPulse(shout.cast,haptics::Category::Spell,.55f,60000000);}
+            char line[200];std::snprintf(line,sizeof line,"Frame warcry: %s hand shout -> skill %d (%s) from slot %s%s",shout.cast?"left":"right",
+                skill.id,skill.name,skills::NativeLabel(slot),started?"":", not cast: another cast holds the buttons");
+            Say(line);
+        }
+        if(warcrySlot>=0) {
+            const auto& skill=quickSnapshot.skills[warcrySlot];
+            const int pulsed=warcryPulse.Get(warcrySlot,skill.id,skill.owner,motionInput.skillContext,motionInput.time);
+            if(pulsed>=0) {
+                // The shouting hand's own aim: Taunt takes its monster from it.
+                motionOutput.skill=pulsed;motionOutput.meleeContact=false;castHand=warcryHand;
+                motionOutput.rayOrigin=handAim[warcryHand].p;motionOutput.rayDirection=math::Rotate(handAim[warcryHand].q,{0,0,-1});motionOutput.rayValid=true;
+            } else warcrySlot=warcryHand=-1;
+        }
+    }
     if(motionOutput.nativeBowRelease&&motionInput.bowSkill==weaponskills::Strafe)volleyRequestedAt=motionAt;
     interaction::SkillCue cue;
     cue.slot=motionInput.quickSkill>=0&&castHand==0?motionInput.quickSkill:motion.Selection();
@@ -2380,7 +2432,9 @@ void Input() {
         const auto& skill=quickSnapshot.skills[cue.slot];cue.id=skill.id;cue.owner=skill.owner;
         cue.known=skill.known;cue.available=skill.known&&skill.available&&skill.id>=0;
         std::snprintf(cue.name,sizeof cue.name,"%s",skill.known?skill.name:"Unknown skill");
-        std::snprintf(cue.hint,sizeof cue.hint,"%s",cue.available?(cue.temporary?"Right hand shortcut":"Right hand: point & trigger"):"Assignment unavailable");
+        const bool shout=!cue.temporary&&gestureSettings[settings::SkillGestures]>.5f&&warcry::Gesture(skill.id);
+        std::snprintf(cue.hint,sizeof cue.hint,"%s",cue.available?(cue.temporary?"Right hand shortcut":shout?weaponskills::Hint(skill.id,false,false):
+            "Right hand: point & trigger"):"Assignment unavailable");
     } else if(cue.slot<0) {
         cue.known=cue.available=true;
         std::snprintf(cue.name,sizeof cue.name,"%s",motionInput.weapon==gameplay::Weapon::Bow?"Basic Arrow":"Basic Attack");
@@ -2412,7 +2466,8 @@ void Input() {
     leftCue.known=quickFresh&&leftSkill.known;leftCue.available=leftCue.known&&leftSkill.available;
     std::snprintf(leftCue.name,sizeof leftCue.name,"%s",leftCue.known?leftSkill.name:"Unavailable");
     leftCue.gesture=!leftCue.temporary&&leftCue.available&&gestureSettings[settings::SkillGestures]>.5f&&leftSkill.motion&&
-        ((weaponskills::Bow(leftSkill.id)&&motionInput.weapon==gameplay::Weapon::Bow)||(leftSkill.id==weaponskills::Smite&&motionInput.shieldEquipped));
+        ((weaponskills::Bow(leftSkill.id)&&motionInput.weapon==gameplay::Weapon::Bow)||(leftSkill.id==weaponskills::Smite&&motionInput.shieldEquipped)||
+         warcry::Gesture(leftSkill.id));
     std::snprintf(leftCue.hint,sizeof leftCue.hint,"%s",leftCue.gesture?weaponskills::Hint(leftSkill.id,
         motionInput.weapon==gameplay::Weapon::Bow,motionInput.shieldEquipped):leftCue.temporary?"Left hand shortcut":"Left hand: point & trigger");
     leftCue.expanded=leftCue.temporary;

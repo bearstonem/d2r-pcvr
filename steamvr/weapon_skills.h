@@ -1,6 +1,7 @@
 #pragma once
 #include <cmath>
 #include "skill_slots.h"
+#include "warcry_gesture.h"
 #include <cstdint>
 
 namespace framevr::weaponskills {
@@ -94,6 +95,7 @@ public:
 inline const char* Hint(int skill,bool bow,bool shield) {
     if(bow&&Bow(skill))return skill==Strafe?"Release for volley":"Draw & release";
     if(shield&&skill==Smite)return "Shield swing / thrust";
+    if(warcry::Gesture(skill))return "Hand to mouth, push out";
     return "Point & trigger";
 }
 struct ContactContext {
@@ -113,14 +115,16 @@ class Pulse {
     double started=0,until=0;
 public:
     void Cancel(){*this=Pulse{};}
-    bool Start(int nextSlot,int nextId,int nextOwner,uint64_t nextContext,double now) {
+    // alternate: the press goes to the left trigger's alternate bank (a shout
+    // gesture's left-hand warcry), which needs Smite's longer press.
+    bool Start(int nextSlot,int nextId,int nextOwner,uint64_t nextContext,double now,bool alternate=false) {
         if(nextSlot<0||nextSlot>=skills::Count||nextId<0||!std::isfinite(now)||now<until)return false;
         // Shield contact uses the left trigger's alternate bank. SkillPad
         // needs 50 ms at the native consumer before exposing its button; a
         // 65 ms producer pulse can disappear between the game's polls.
         // Allow bank preparation plus two native ticks and XR scheduling.
         // FinishShieldSkill still cancels immediately when Smite executes.
-        const double duration=nextId==Smite?.180:.065;
+        const double duration=nextId==Smite||alternate?.180:.065;
         slot=nextSlot;id=nextId;owner=nextOwner;context=nextContext;started=now;until=now+duration;return true;
     }
     int Get(int currentSlot,int currentId,int currentOwner,uint64_t currentContext,double now) {

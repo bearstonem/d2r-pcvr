@@ -176,6 +176,7 @@ not generate melee velocity. The layout currently assumes a right-handed player.
 | Draw and shoot | Pull string hand back at least 12 cm (28 cm total separation), then release trigger |
 | Throw a javelin, throwing knife or axe | Any javelin, throwing knife or throwing axe equipped in WEAPON mode, right trigger bound to Attack, Throw or nothing: hold right trigger, make a deliberate throwing motion, release to throw along the hand's motion. The game's own Throw fires the weapon's own missile and consumes its quantity; a knife flies point first, an axe tumbles end over end. With a javelin, Poison Javelin, Lightning Bolt, Plague Javelin or Lightning Fury on the right trigger (or loaded from a face button, like the bow quiver) rides the throw: the skill's own mana, damage and effects. A Barbarian with a throwing weapon in each hand and Double Throw on the right trigger (or loaded) throws with both hands: the left trigger throws the left weapon, and each throw is one native Double Throw of that hand's weapon. Trigger-free jabs and swings stay available |
 | Throw a trap or bomb | An Assassin's Fire Blast, Shock Web, Blade Sentinel, sentry or wake on the right trigger: press it and the game's own bomb or trap model appears in the hand; throw and let go, and the native cast lands where the arc meets the floor, within the skill's reach (the throw picks the spot only). With Bottle physics on, the arc is traced through the physics world as you let go, so a wall, a table top or a prop stops it and the cast lands there; running carries the throw either way. A quick press casts where you point; held still for a moment, the native cast holds and repeats as before. Weapon skill gestures Off keeps the trigger native |
+| Shout a warcry | Barbarian with Howl, Shout, Taunt, Battle Cry, Battle Orders, War Cry or Battle Command on a hand's trigger: rest that hand at your mouth for 0.2 seconds (a light tick), then push it out forward; one native press of that trigger casts it |
 | Cancel active grab/draw | Right B; release inputs before starting again |
 | Physical belt potion | Reach to an original 3D bottle on the front belt and hold **Right Grip** to grab; left-hand grip also works |
 | Drink | Keep grip held, bring the bottle's opening to your mouth and tip nearly horizontal for 0.25 seconds; release to return an unused potion |
@@ -843,6 +844,31 @@ shield size therefore cannot amplify wrist twisting into an attack. The contact
 sweep covers only the current fast interval, not earlier slow approaches.
 Applying a new bash speed invalidates old queued/posed contacts. Native skill
 selection, mana costs, trigger casts, blocking and parries are unchanged.
+
+### Warcries by gesture
+
+A warcry on either hand's trigger can be shouted (#283): Howl (130), Shout
+(138), Taunt (137), Battle Cry (146), Battle Orders (149), War Cry (154) or
+Battle Command (155). The controller's grip must come within 15 cm of the mouth
+(10 cm below and 8 cm in front of the eyes, as for drinking), stay within 19 cm
+and nearly still (under 0.6 m/s) for 0.2 s, which plays a light tick. Then,
+within 0.25 s of starting to move, it must travel 22 cm from where it rested,
+at least 70% of that along the head's level forward. A guard or swing passing
+the face never rests, a slower reach times out, and a push down or sideways is
+refused; each refusal needs a fresh rest. One hand shouts at most every 0.6 s;
+two hands pushed together shout once, the right hand's.
+
+The shout makes one native press of that trigger's slot, 65 ms for the right
+trigger and 180 ms for the left trigger's alternate bank (as for Smite), aimed
+along that hand. The game decides mana, cooldown, effects and refusals. Taunt
+takes its monster the way a trigger press would (with **Skills go to the aimed
+monster** on Spells, the aimed monster). Find Potion, Find Item and Grim Ward
+need a corpse and stay buttons. The gesture needs **Weapon skill gestures** On,
+a tracked hand that holds nothing (no bottle, holster or wheel), its trigger
+released, and no other cast holding the native buttons. Logs: `Frame warcry:
+<hand> hand at the mouth, ready to shout skill N` (at most every 2 s) and
+`Frame warcry: <hand> hand shout -> skill N (<name>) from slot <button>`, with
+`not cast: another cast holds the buttons` when it is refused.
 Native reach, walls, resources, animation/cadence, damage, stun and knockback
 remain authoritative. Left-hand haptics acknowledge native acceptance, not proof
 of positive damage. Physical blocking and parrying are described under melee rules below.
