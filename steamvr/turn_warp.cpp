@@ -47,6 +47,7 @@ Texture2D<float> nearSource : register(t4);   // the nearest depth within reach 
 Texture2D<float> nearTarget : register(t5);   // this eye's, from that grid's depth
 Texture2D<float> effectsSource : register(t6);   // the strongest of the game's effects layer round each block (Effects): the drawn eye's
 Texture2D<float> effectsTarget : register(t7);   // this eye's, as it was last drawn
+Texture2D<float2> motion : register(t8);   // this eye's own grid: the game's motion vectors as it was drawn (TurnDepth::motion)
 SamplerState edge : register(s0);
 cbuffer Move : register(b0) {
     float4 move0;float4 move1;float4 move2;   // TurnMove's rows
@@ -55,23 +56,36 @@ cbuffer Move : register(b0) {
     float4 depthInfo;  // near plane, the depth's drawn part x, y
     uint4 grid;        // cells across, down
     float4 carry0;float4 carry1;float4 carry2;   // the carried's rows (TurnDepth::carry)
-    float4 reach;      // nearer than x: carried; farther than y: the world's; z: the drawn eye's edge scale
+    float4 reach;      // nearer than x: carried; farther than y: the world's; z: the drawn eye's edge scale;
+                       // w: frames of each point's own motion it goes on by, 0 off (TurnDepth::ahead)
     float4 keep;       // x: parallax pixels a step in the depth buffer, 0 off; y: within how many the surface is the same;
-                       // z: only within reach of something nearer by this many, 0 everywhere
+                       // z: only within reach of something nearer by this many, 0 everywhere; w: TurnDepth::still
     float4 nearInfo;   // x, y: the picture's coordinates to the near blocks; z, w: this frame's pixels to them
-    float4 effects;    // x, y: the effects' blocks across, down; z: from what level they count, 0 off
+    float4 effects;    // x, y: the effects' blocks across, down; z: from what level they count, 0 off; w: TurnDepth::show
 };
 // split: 0 the whole cell; a cell across an edge as two layers, each keeping
 // its own pixels: > 0 the nearer, those nearer than it; < 0 the rest.
-struct Pixel {float4 position:SV_Position;float2 uv:TEXCOORD0;nointerpolation float split:TEXCOORD1;};
+// tint (TurnDepth::show): x moved by its own motion, y a vector left unused.
+struct Pixel {float4 position:SV_Position;float2 uv:TEXCOORD0;nointerpolation float split:TEXCOORD1;float2 tint:TEXCOORD2;};
 static const float2 Corner[6]={float2(0,0),float2(1,0),float2(0,1),float2(0,1),float2(1,0),float2(1,1)};
 static const float Ahead=1e-3;   // nearer than this to this frame's eye: cut off
 static const float EdgePixels=2;   // TurnEdgePixels
+static const float StillPixels=1.5;   // StillPixels
 // The nearest of the texels round a point (reverse-Z: the largest), so an
 // edge stays with what is in front; the sky (0) far, not infinite.
 float Nearest(float2 uv) {
     const float4 d4=drawnDepth.GatherRed(edge,uv*depthInfo.yz);
     return max(max(max(d4.x,d4.y),max(d4.z,d4.w)),1e-6);
+}
+// The same, and the motion vector of the texel it came from: x, y, depth.
+float3 NearestMoving(float2 uv) {
+    const float2 at=uv*depthInfo.yz;
+    const float4 d4=drawnDepth.GatherRed(edge,at),x4=motion.GatherRed(edge,at),y4=motion.GatherGreen(edge,at);
+    float3 n=float3(x4.x,y4.x,d4.x);
+    if(d4.y>n.z)n=float3(x4.y,y4.y,d4.y);
+    if(d4.z>n.z)n=float3(x4.z,y4.z,d4.z);
+    if(d4.w>n.z)n=float3(x4.w,y4.w,d4.w);
+    return float3(n.xy,max(n.z,1e-6));
 }
 // The farthest and the nearest of them.
 float2 Range(float2 uv) {
@@ -83,7 +97,7 @@ Pixel VS(uint id:SV_VertexID,uint layer:SV_InstanceID) {
     const uint cell=id/6;
     const float2 at=float2(cell%grid.x,cell/grid.x),size=float2(grid.xy),corner=Corner[id%6];
     const float2 uv=(at+corner)/size;
-    float d,split=0;
+    float d,split=0;float2 moved=0;
     if(reach.z>0) {
         // The drawn eye's picture: its texels at the cell's corners and middle.
         // Across an edge in depth the cell goes as two flat layers, the nearest
@@ -94,14 +108,26 @@ Pixel VS(uint id:SV_VertexID,uint layer:SV_InstanceID) {
         d=corner.y>0?(corner.x>0?f.y:c.y):(corner.x>0?b.y:a.y);   // Nearest(uv)
         if((front-back)*reach.z>EdgePixels){split=(front+back)*.5;d=layer?back:front;if(layer)split=-split;}
     }
+    else if(reach.w>0){const float3 n=NearestMoving(uv);d=n.z;moved=n.xy;}
     else d=Nearest(uv);
-    Pixel o;o.uv=uv;o.split=split;
+    Pixel o;o.uv=uv;o.split=split;o.tint=0;
     if(layer&&split==0){o.position=float4(0,0,0,-1);return o;}   // no farther part: outside the clip volume
-    const float away=depthInfo.x/d;
-    const float3 p=float3(lerp(drawnTan.x,drawnTan.y,uv.x),lerp(drawnTan.w,drawnTan.z,uv.y),-1)*away;
+    const float away=depthInfo.x/d,free=saturate((away-reach.x)/max(reach.y-reach.x,1e-6));
+    // Its own motion since the render before, as far again: a monster walking
+    // goes where it is now. Nearer than keep.w the vectors hold the camera's
+    // motion, not its own; what the hero carries goes with the carry.
+    float2 from=uv;
+    if(reach.w>0) {
+        float w,h;drawnDepth.GetDimensions(w,h);
+        if(length(moved*float2(w,h)*depthInfo.yz)>=StillPixels) {
+            if(away>keep.w){from+=moved*reach.w*free;o.tint.x=free;}
+            else o.tint.y=1;
+        }
+    }
+    const float3 p=float3(lerp(drawnTan.x,drawnTan.y,from.x),lerp(drawnTan.w,drawnTan.z,from.y),-1)*away;
     const float3 world=float3(dot(move0.xyz,p)+move0.w,dot(move1.xyz,p)+move1.w,dot(move2.xyz,p)+move2.w);
     const float3 carried=float3(dot(carry0.xyz,p)+carry0.w,dot(carry1.xyz,p)+carry1.w,dot(carry2.xyz,p)+carry2.w);
-    const float3 q=lerp(carried,world,saturate((away-reach.x)/max(reach.y-reach.x,1e-6)));
+    const float3 q=lerp(carried,world,free);
     // this frame's projection, its depth reversed: nearer is larger
     const float w=-q.z;
     o.position=float4(2*(q.x-nowTan.x*w)/(nowTan.y-nowTan.x)-w,w-2*(nowTan.w*w-q.y)/(nowTan.w-nowTan.z),Ahead,w);
@@ -130,10 +156,56 @@ float4 PS(Pixel p):SV_Target {
         const bool where=keep.z<=0&&effects.z<=0||keep.z>0&&NearThing(p,there)||effects.z>0&&Effect(p);
         if(there>0&&abs(p.position.z-there)*keep.x<=keep.y&&where)return own.Load(at);
     }
-    return drawn.SampleLevel(edge,p.uv,0);
+    const float4 c=drawn.SampleLevel(edge,p.uv,0);
+    if(effects.w<=0)return c;
+    const float3 tinted=lerp(c.rgb,float3(1,.15,.1),.55*saturate(p.tint.x));
+    return float4(lerp(tinted,float3(.1,.3,1),.45*saturate(p.tint.y)),c.a);
 }
 )";
 constexpr UINT DepthConstants=56;
+// TurnWarp::MotionStats: each sample a point into its distance's bin,
+// added up (MotionHistogram). The depth shader's root signature and table:
+// the depth at t1, the vectors at t8.
+constexpr char StatsShader[]=R"(
+Texture2D<float> depth : register(t1);
+Texture2D<float2> motion : register(t8);
+cbuffer Stats : register(b0) {
+    float4 back0;float4 back1;float4 back2;   // TurnMove from this view to the render before's
+    float4 nowTan;    // this view's tangents: left, right, down, up
+    float4 backTan;   // the render before's
+    float4 depthInfo; // near plane; the depth's drawn part x, y; world units a metre
+    uint4 samples;    // across, down
+};
+static const float StillPixels=1.5;   // StillPixels
+static const int Bins=34;             // MotionBins
+static const float BinMetres=.5;      // MotionBinMetres
+struct Point {float4 position:SV_Position;nointerpolation float4 counts:TEXCOORD0;};
+Point VS(uint id:SV_VertexID) {
+    float w,h;depth.GetDimensions(w,h);
+    const float2 drawn=float2(w,h)*depthInfo.yz;   // the drawn part's pixels
+    const float2 uv=(float2(id%samples.x,id/samples.x)+.5)/float2(samples.xy);
+    const int3 texel=int3(uv*drawn,0);
+    const float d=depth.Load(texel);
+    const float2 g=motion.Load(texel)*drawn;   // pixels
+    int bin=0;float explained=0;
+    if(d>0) {
+        const float away=depthInfo.x/d;
+        bin=1+min(int(away/depthInfo.w/BinMetres),Bins-2);
+        // where the render before saw this point: the camera's part of the game's vector
+        const float3 p=float3(lerp(nowTan.x,nowTan.y,uv.x),lerp(nowTan.w,nowTan.z,uv.y),-1)*away;
+        const float3 q=float3(dot(back0.xyz,p)+back0.w,dot(back1.xyz,p)+back1.w,dot(back2.xyz,p)+back2.w);
+        if(q.z<0) {
+            const float2 seen=float2((-q.x/q.z-backTan.x)/(backTan.y-backTan.x),(backTan.w+q.y/q.z)/(backTan.w-backTan.z));
+            explained=length(g-(uv-seen)*drawn)<StillPixels?1:0;
+        }
+    }
+    Point o;o.position=float4((bin+.5)/Bins*2-1,0,0,1);
+    o.counts=float4(1,length(g)<StillPixels?1:0,explained,min(length(g),64));
+    return o;
+}
+float4 PS(Point p):SV_Target {return p.counts;}
+)";
+constexpr UINT StatsSamples=128,StatsConstants=28,StatsSlotBytes=1024;
 // TurnDepth::keepNear: the nearest depth in each block (Reduce), then the
 // nearest within reach of each block (Spread, across then down).
 constexpr char NearShader[]=R"(
@@ -192,13 +264,15 @@ float Reduce(float4 position:SV_Position):SV_Target {
 )";
 constexpr float Ahead=1e-3f;   // the depth shader's: a grid point's depth-buffer value is Ahead / its distance
 // The source heap: each eye's slot (Render's `slot`) holds its own grid's
-// table (its image, its depth, four none) and the drawn eye's (its picture,
-// its depth, this eye's own picture and depth as the first grid left them,
-// the drawn eye's and this eye's near blocks, then effects blocks), then the
-// near passes' block texture between; after both slots, two an eye for the
-// interface (Interface's `at`), then four an eye for Effects (its layer's
-// two targets, the two between).
-constexpr UINT GridDescriptors=8,SlotDescriptors=2*GridDescriptors+1,InterfaceDescriptors=2*SlotDescriptors,EffectsDescriptors=InterfaceDescriptors+4;
+// table (its image, its depth, six none, its motion vectors) and the drawn
+// eye's (its picture, its depth, this eye's own picture and depth as the
+// first grid left them, the drawn eye's and this eye's near blocks, then
+// effects blocks, no vectors), then the near passes' block texture between;
+// after both slots, two an eye for the interface (Interface's `at`), then
+// four an eye for Effects (its layer's two targets, the two between), then a
+// grid's table an eye for MotionStats.
+constexpr UINT GridDescriptors=9,SlotDescriptors=2*GridDescriptors+1,InterfaceDescriptors=2*SlotDescriptors,EffectsDescriptors=InterfaceDescriptors+4,
+               StatsDescriptors=EffectsDescriptors+8,HeapDescriptors=StatsDescriptors+2*GridDescriptors;
 // The shaders' bytecode, compiled once a process: the compiles were about 106
 // of the 112 ms Initialize took on the render thread at every new session
 // (RTX 5090 / Ryzen 9 5950X, 2026-10-20). Copied out of the compiler's blobs,
@@ -206,8 +280,8 @@ constexpr UINT GridDescriptors=8,SlotDescriptors=2*GridDescriptors+1,InterfaceDe
 // failed for the process; its pass is then unavailable as before.
 struct Compiled {
     bool compiler=false;
-    std::vector<uint8_t> vs,ps,layer,depthVs,depthPs,nearVs,nearReduce,nearSpread,effectsReduce;
-    std::string errors,depthErrors,nearErrors,effectsErrors;   // the first failure's messages of each group
+    std::vector<uint8_t> vs,ps,layer,depthVs,depthPs,nearVs,nearReduce,nearSpread,effectsReduce,statsVs,statsPs;
+    std::string errors,depthErrors,nearErrors,effectsErrors,statsErrors;   // the first failure's messages of each group
 };
 const Compiled& Shaders() {
     static std::once_flag once;static Compiled c;
@@ -232,6 +306,8 @@ const Compiled& Shaders() {
             build(NearShader,sizeof(NearShader)-1,"turn-near","Reduce","ps_5_0",c.nearReduce,&c.nearErrors);
             build(NearShader,sizeof(NearShader)-1,"turn-near","Spread","ps_5_0",c.nearSpread,&c.nearErrors);
             build(EffectsShader,sizeof(EffectsShader)-1,"turn-effects","Reduce","ps_5_0",c.effectsReduce,&c.effectsErrors);
+            build(StatsShader,sizeof(StatsShader)-1,"turn-motion-stats","VS","vs_5_0",c.statsVs,&c.statsErrors);
+            build(StatsShader,sizeof(StatsShader)-1,"turn-motion-stats","PS","ps_5_0",c.statsPs,&c.statsErrors);
         }catch(...) {}   // out of memory: what did not finish stays unavailable
         if(module)FreeLibrary(module);
     });
@@ -281,7 +357,7 @@ bool TurnWarp::Initialize(ID3D12Device* device,DXGI_FORMAT targetFormat,void (*l
         if(FAILED(device->CreateGraphicsPipelineState(&layer,IID_PPV_ARGS(&layerPipeline))))layerPipeline.Reset();
     }
     if(!layerPipeline&&log)log("Frame OpenXR: by turns - laying the game's interface over each eye unavailable; it stays in the picture");
-    D3D12_DESCRIPTOR_HEAP_DESC heap{};heap.Type=D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;heap.NumDescriptors=EffectsDescriptors+8;heap.Flags=D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+    D3D12_DESCRIPTOR_HEAP_DESC heap{};heap.Type=D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;heap.NumDescriptors=HeapDescriptors;heap.Flags=D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     if(FAILED(device->CreateDescriptorHeap(&heap,IID_PPV_ARGS(&sourceHeap))))return fail("no descriptor heap");
     heap.Type=D3D12_DESCRIPTOR_HEAP_TYPE_RTV;heap.NumDescriptors=1;heap.Flags=D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
     if(FAILED(device->CreateDescriptorHeap(&heap,IID_PPV_ARGS(&targetHeap))))return fail("no target heap");
@@ -313,6 +389,21 @@ bool TurnWarp::Initialize(ID3D12Device* device,DXGI_FORMAT targetFormat,void (*l
     heap.Type=D3D12_DESCRIPTOR_HEAP_TYPE_DSV;heap.NumDescriptors=2;   // this eye's grid's, the drawn eye's
     if(FAILED(device->CreateDescriptorHeap(&heap,IID_PPV_ARGS(&depthHeap))))return depthFail("no depth heap");
     if(log)log("Frame OpenXR: by turns - the eye not drawn can be moved with the scene depth");
+    // The motion statistics are optional: without them the game's motion
+    // vectors are never trusted, and the eye not drawn moves as before.
+    if(!shaders.statsVs.empty()&&!shaders.statsPs.empty()) {
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC stats=state;stats.VS=Code(shaders.statsVs);stats.PS=Code(shaders.statsPs);
+        stats.DepthStencilState={};stats.DSVFormat=DXGI_FORMAT_UNKNOWN;
+        stats.PrimitiveTopologyType=D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT;stats.RTVFormats[0]=DXGI_FORMAT_R32G32B32A32_FLOAT;
+        auto& sum=stats.BlendState.RenderTarget[0];
+        sum.BlendEnable=TRUE;sum.SrcBlend=sum.DestBlend=D3D12_BLEND_ONE;sum.BlendOp=D3D12_BLEND_OP_ADD;
+        sum.SrcBlendAlpha=sum.DestBlendAlpha=D3D12_BLEND_ONE;sum.BlendOpAlpha=D3D12_BLEND_OP_ADD;
+        D3D12_DESCRIPTOR_HEAP_DESC rtvs{};rtvs.Type=D3D12_DESCRIPTOR_HEAP_TYPE_RTV;rtvs.NumDescriptors=1;
+        if(FAILED(device->CreateGraphicsPipelineState(&stats,IID_PPV_ARGS(&statsPipeline)))||
+           FAILED(device->CreateDescriptorHeap(&rtvs,IID_PPV_ARGS(&statsTargets)))){statsPipeline.Reset();statsTargets.Reset();}
+    }
+    else if(log&&!shaders.statsErrors.empty())log(shaders.statsErrors.c_str());
+    if(!statsPipeline&&log)log("Frame OpenXR: by turns - reading the game's motion vectors unavailable; the eye not drawn moves with the head and the hero alone");
     // The near passes are optional: without them "near things only" keeps none.
     const auto nearFail=[&](const char* why){
         nearRoot.Reset();reducePipeline.Reset();spreadPipeline.Reset();nearTargets.Reset();
@@ -504,8 +595,10 @@ bool TurnWarp::Render(ID3D12Device* device,ID3D12GraphicsCommandList* list,ID3D1
     // GridDescriptors the drawn eye's), over its own depth test `k`; `keep`:
     // this eye's own picture and depth as its grid left them, at at + 2 and
     // 3; `nearOnly`: only within reach of near things, their blocks at 4 and 5;
-    // `effectsOn`: also where the game's effects are, their blocks at 6 and 7.
-    const auto grid=[&](const TurnDepth& d,ID3D12Resource* image,int at,int k,bool keep,bool nearOnly,bool effectsOn) {
+    // `effectsOn`: also where the game's effects are, their blocks at 6 and 7;
+    // `moving`: its own motion vectors at 8 (TurnDepth::motion).
+    D3D12_SHADER_RESOURCE_VIEW_DESC pair=srv;pair.Format=DXGI_FORMAT_R16G16_FLOAT;
+    const auto grid=[&](const TurnDepth& d,ID3D12Resource* image,int at,int k,bool keep,bool nearOnly,bool effectsOn,bool moving) {
         if(at)device->CreateShaderResourceView(image,&srv,descriptor(at));
         D3D12_SHADER_RESOURCE_VIEW_DESC depthView=srv;depthView.Format=d.format;
         device->CreateShaderResourceView(d.depth,&depthView,descriptor(at+1));
@@ -516,6 +609,7 @@ bool TurnWarp::Render(ID3D12Device* device,ID3D12GraphicsCommandList* list,ID3D1
             const int eye=n?slot:slot^1;
             device->CreateShaderResourceView(effectsOn&&effectsKept[eye]?effects[eye].Get():nullptr,&single,descriptor(at+6+n));
         }
+        device->CreateShaderResourceView(moving?d.motion:nullptr,&pair,descriptor(at+8));
         list->SetGraphicsRootSignature(depthRoot.Get());
         list->SetPipelineState(depthPipeline.Get());
         auto table=sourceGpu;table.ptr+=UINT64(step)*at;
@@ -533,12 +627,13 @@ bool TurnWarp::Render(ID3D12Device* device,ID3D12GraphicsCommandList* list,ID3D1
         std::memcpy(carried,carries?d.carry.data():d.move.data(),sizeof(float)*12);
         if(carries){carried[12]=d.reach[0];carried[13]=d.reach[1];}
         if(at)carried[14]=edgeScale(d);
+        if(moving)carried[15]=d.ahead;
         std::memcpy(constants+28,carried,sizeof carried);
         // its parallax a step in the depth buffer (near plane / distance = depth * near plane / Ahead)
         const auto blocks=effectsOn?effects[0]->GetDesc():D3D12_RESOURCE_DESC{};
-        const float same[12]={keep?carried[14]*d.nearPlane/Ahead:0,d.keep,nearOnly?d.keepNear:0,0,
+        const float same[12]={keep?carried[14]*d.nearPlane/Ahead:0,d.keep,nearOnly?d.keepNear:0,moving?d.still:0,
                               float(t.Width)/TurnNearBlock,float(t.Height)/TurnNearBlock,1.f/TurnNearBlock,1.f/TurnNearBlock,
-                              float(blocks.Width),float(blocks.Height),effectsOn?d.keepEffects:0,0};
+                              float(blocks.Width),float(blocks.Height),effectsOn?d.keepEffects:0,moving&&d.show?1.f:0};
         std::memcpy(constants+44,same,sizeof same);
         list->SetGraphicsRoot32BitConstants(1,DepthConstants,constants,0);
         list->DrawInstanced(6*across*down,carried[14]>0?2:1,0,0);   // the drawn eye's: the farther layers too
@@ -570,7 +665,12 @@ bool TurnWarp::Render(ID3D12Device* device,ID3D12GraphicsCommandList* list,ID3D1
         pass(spreadPipeline.Get(),between,out,0,1);
     };
     const bool own=usable(depth);
-    if(own)grid(*depth,source,0,0,false,false,false);
+    // the vectors' size must be the depth's: both read at one place
+    const auto fitting=[](const TurnDepth& d){
+        if(!d.motion||d.ahead<=0)return false;
+        const auto m=d.motion->GetDesc(),z=d.depth->GetDesc();return m.Width==z.Width&&m.Height==z.Height;
+    };
+    if(own)grid(*depth,source,0,0,false,false,false,fitting(*depth));
     if(other) {
         // Where this eye's own picture shows the same surface as the drawn
         // eye's, it stays: seen from this eye, a frame old. With keepNear only
@@ -606,9 +706,74 @@ bool TurnWarp::Render(ID3D12Device* device,ID3D12GraphicsCommandList* list,ID3D1
             nearBlocks(at+3,1,1,1,drawn->keepReach);                               // as this eye did
             list->RSSetViewports(1,&viewport);list->RSSetScissorRects(1,&rect);
         }
-        grid(*drawn,drawn->image,GridDescriptors,1,keep,keep&&nearOnly,keep&&effectsOn);
+        grid(*drawn,drawn->image,GridDescriptors,1,keep,keep&&nearOnly,keep&&effectsOn,false);
         if(keep){std::swap(b[2].Transition.StateBefore,b[2].Transition.StateAfter);list->ResourceBarrier(1,b+2);}
     }
+    return true;
+}
+bool TurnWarp::MotionStats(ID3D12Device* device,ID3D12GraphicsCommandList* list,int eye,const MotionInput& in,int at) {
+    if(eye<0||eye>1||at<0||at>=MotionSlots||!MotionReady()||!in.depth||!in.motion||in.nearPlane<=0||in.upm<=0)return false;
+    const auto z=in.depth->GetDesc(),m=in.motion->GetDesc();
+    if(z.Width!=m.Width||z.Height!=m.Height)return false;
+    if(!statsBins) {
+        D3D12_HEAP_PROPERTIES heapProps{};heapProps.Type=D3D12_HEAP_TYPE_DEFAULT;
+        D3D12_RESOURCE_DESC bins{};bins.Dimension=D3D12_RESOURCE_DIMENSION_TEXTURE2D;bins.Width=MotionBins;bins.Height=1;
+        bins.DepthOrArraySize=bins.MipLevels=1;bins.Format=DXGI_FORMAT_R32G32B32A32_FLOAT;bins.SampleDesc.Count=1;bins.Flags=D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+        D3D12_RESOURCE_DESC buffer{};buffer.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER;buffer.Width=UINT64(StatsSlotBytes)*MotionSlots;
+        buffer.Height=buffer.DepthOrArraySize=buffer.MipLevels=1;buffer.SampleDesc.Count=1;buffer.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        D3D12_HEAP_PROPERTIES readback{};readback.Type=D3D12_HEAP_TYPE_READBACK;
+        if(FAILED(device->CreateCommittedResource(&heapProps,D3D12_HEAP_FLAG_NONE,&bins,D3D12_RESOURCE_STATE_COPY_SOURCE,nullptr,IID_PPV_ARGS(&statsBins)))||
+           FAILED(device->CreateCommittedResource(&readback,D3D12_HEAP_FLAG_NONE,&buffer,D3D12_RESOURCE_STATE_COPY_DEST,nullptr,IID_PPV_ARGS(&statsReadback)))) {
+            statsBins.Reset();statsReadback.Reset();statsPipeline.Reset();return false;   // unavailable from now on
+        }
+        device->CreateRenderTargetView(statsBins.Get(),nullptr,statsTargets->GetCPUDescriptorHandleForHeapStart());
+    }
+    // this eye's table: the depth at 1, the vectors at 8, none elsewhere
+    const UINT step=device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    auto cpu=sourceHeap->GetCPUDescriptorHandleForHeapStart();auto gpu=sourceHeap->GetGPUDescriptorHandleForHeapStart();
+    cpu.ptr+=SIZE_T(step)*(StatsDescriptors+GridDescriptors*eye);gpu.ptr+=UINT64(step)*(StatsDescriptors+GridDescriptors*eye);
+    D3D12_SHADER_RESOURCE_VIEW_DESC srv{};srv.ViewDimension=D3D12_SRV_DIMENSION_TEXTURE2D;
+    srv.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;srv.Texture2D.MipLevels=1;
+    for(UINT k=0;k<GridDescriptors;++k) {
+        auto view=cpu;view.ptr+=SIZE_T(step)*k;
+        srv.Format=k==1?in.format:k==8?DXGI_FORMAT_R16G16_FLOAT:k<3?format:DXGI_FORMAT_R32_FLOAT;
+        device->CreateShaderResourceView(k==1?in.depth:k==8?in.motion:nullptr,&srv,view);
+    }
+    float values[StatsConstants]{};
+    std::memcpy(values,in.back.data(),sizeof(float)*12);
+    const auto tangents=[](const math::Fov& f,float* out){out[0]=std::tan(f.left);out[1]=std::tan(f.right);out[2]=std::tan(f.down);out[3]=std::tan(f.up);};
+    tangents(in.fov,values+12);tangents(in.backFov,values+16);
+    values[20]=in.nearPlane;values[21]=in.scale[0];values[22]=in.scale[1];values[23]=in.upm;
+    uint32_t constants[StatsConstants];std::memcpy(constants,values,sizeof values);
+    constants[24]=constants[25]=StatsSamples;constants[26]=constants[27]=0;
+    D3D12_RESOURCE_BARRIER b{};b.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    b.Transition={statsBins.Get(),D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,D3D12_RESOURCE_STATE_COPY_SOURCE,D3D12_RESOURCE_STATE_RENDER_TARGET};
+    list->ResourceBarrier(1,&b);
+    const auto rtv=statsTargets->GetCPUDescriptorHandleForHeapStart();const float none[4]{};
+    list->ClearRenderTargetView(rtv,none,0,nullptr);
+    list->OMSetRenderTargets(1,&rtv,FALSE,nullptr);
+    list->SetGraphicsRootSignature(depthRoot.Get());list->SetPipelineState(statsPipeline.Get());
+    ID3D12DescriptorHeap* heaps[]={sourceHeap.Get()};list->SetDescriptorHeaps(1,heaps);
+    list->SetGraphicsRootDescriptorTable(0,gpu);
+    list->SetGraphicsRoot32BitConstants(1,StatsConstants,constants,0);
+    const D3D12_VIEWPORT viewport{0,0,float(MotionBins),1,0,1};const D3D12_RECT rect{0,0,LONG(MotionBins),1};
+    list->RSSetViewports(1,&viewport);list->RSSetScissorRects(1,&rect);
+    list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_POINTLIST);list->DrawInstanced(StatsSamples*StatsSamples,1,0,0);
+    std::swap(b.Transition.StateBefore,b.Transition.StateAfter);list->ResourceBarrier(1,&b);
+    const auto bins=statsBins->GetDesc();
+    D3D12_TEXTURE_COPY_LOCATION from{},to{};from.pResource=statsBins.Get();from.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    to.pResource=statsReadback.Get();to.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    device->GetCopyableFootprints(&bins,0,1,UINT64(StatsSlotBytes)*at,&to.PlacedFootprint,nullptr,nullptr,nullptr);
+    list->CopyTextureRegion(&to,0,0,0,&from,nullptr);
+    return true;
+}
+bool TurnWarp::ReadMotionStats(int at,MotionHistogram& out) {
+    if(at<0||at>=MotionSlots||!statsReadback)return false;
+    const D3D12_RANGE range{SIZE_T(StatsSlotBytes)*at,SIZE_T(StatsSlotBytes)*at+sizeof out.bins},none{0,0};
+    void* data=nullptr;
+    if(FAILED(statsReadback->Map(0,&range,&data)))return false;
+    std::memcpy(out.bins.data(),static_cast<const char*>(data)+range.Begin,sizeof out.bins);
+    statsReadback->Unmap(0,&none);
     return true;
 }
 bool TurnWarp::Interface(ID3D12Device* device,ID3D12GraphicsCommandList* list,ID3D12Resource* layer,ID3D12Resource* target,

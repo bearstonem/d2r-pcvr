@@ -81,7 +81,7 @@ Open either hand's wheel and choose **DEV**. Its tabs are grouped by purpose:
 - **Character:** level 10, 30, 60 and 90 presets; heal life/mana.
 - **Equipment:** starter primary/alternate gear, class unique primary/alternate
   gear, crossbow + bolts, bow + arrows, a small shield, **Render debug draws**,
-  **By turns own picture**, a **Throwing kit** and a **Potion kit** (four Super
+  **By turns own picture**, **By turns motion**, a **Throwing kit** and a **Potion kit** (four Super
   Healing, two Full Rejuvenation, two Antidote and two Thawing potions, normal
   items in the inventory: put them in the belt to toss at the mercenary).
 - **Act I - II:** towns, combat areas and inspection destinations.
@@ -186,6 +186,28 @@ else and no saved setting; editing the ini's value applies that value again.
 Compare Tyrael's wings, a waypoint's flame and spells against the scene
 behind them, the sword against the sky and monsters' heads close up, with
 the same view in each state.
+
+## By turns motion
+
+Select **DEV > Equipment > By turns motion** to step, for the session, how
+the eye not drawn treats things that move by themselves with Stereo
+rendering: By turns. **ON** (the default, `[stereo] turns_motion=1`): its own
+picture from a frame back also goes on by the game's motion vectors, so a
+monster walking stands where it is now in the strip beside it that only this
+eye sees and where the effects keep this eye's own picture. **SHOW** (2): the
+eye not drawn from its own picture alone (no drawn eye's picture over it),
+what moved on tinted red and vectors left unused tinted blue. Red should sit
+on walking monsters and missiles, not on the ground or walls; blue marks
+where the game's vectors still hold the camera's motion (near the feet).
+With SHOW, a monster walking across should look single in both eyes; with
+OFF it is a frame behind in one eye. **OFF** (0): moved with the head and the
+hero alone, as before. The button steps in that order, shows the current
+state, and the frame log records each step. It changes no saved setting.
+
+Nothing moves on until the frame log says where the game's vectors stop
+holding the camera's motion ("hold the camera's motion nearer than ... m").
+Every 10 seconds a line gives, by half a metre of distance, how many vectors
+were still, how many the camera's motion explains, and their mean length.
 
 ## Locations
 

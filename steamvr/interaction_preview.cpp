@@ -244,6 +244,10 @@ int main(int argc,char** argv) {
         const auto turnsNear=Paint(s,o,-1);s.devTurnsKeepOwn=2;
         if(turnsNear==Paint(s,o,-1)||!SavePng((std::string(argv[1])+".turns-own-near.png").c_str(),turnsNear,1024,1024))return 79;
         s.devTurnsKeepOwn=0;
+        s.devTurnsMotion=2;o.hover=DeveloperCell(framevr::dev::TurnsMotionChoice);o.result=Result::MotionUpdated;
+        const auto motionShown=Paint(s,o,-1);s.devTurnsMotion=1;
+        if(motionShown==Paint(s,o,-1)||!SavePng((std::string(argv[1])+".turns-motion-show.png").c_str(),motionShown,1024,1024))return 80;
+        s.devTurnsMotion=0;
         std::puts("Development preview: page, hover and unavailable state passed");return 0;
     }
     s.health=74;s.maxHealth=100;s.mana=39;s.maxMana=80;

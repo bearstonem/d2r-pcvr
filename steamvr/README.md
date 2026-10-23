@@ -180,6 +180,26 @@ headset frame are drawn:
   close moves with the hero for that frame. The depth is the same copy the
   added fog reads (DLSS's corner included). Until both eyes have one, a pair
   is drawn from the hero's first step to 0.3 s after the last.
+  What moves by itself (a monster walking, a missile) also goes on in the eye's
+  own older picture by the game's motion vectors (`[stereo] turns_motion=1`,
+  live; in developer mode also DEV > Equipment > By turns motion): the game
+  draws its scene a second time into an R16G16_FLOAT target, the one DLSS
+  gets, with each point's motion since the render before; the eye not drawn
+  keeps a copy beside its depth and moves each point on by as much again, so
+  where its own picture shows (beside a monster, where only this eye sees
+  past it, and round the effects) the monster stands where it is now, not a
+  frame back. Nearer than some distance the game's vectors hold the camera's
+  motion against the other eye as well, so they are used only farther: each
+  drawn eye's vectors are sampled 128 x 128 by half a metre of distance, and
+  the distance is where hardly a vector is still up to where the world
+  mostly is; until that is known nothing moves on. Vectors under 1.5 px (DLSS's
+  jitter) count as none, and what the hero carries keeps the carry alone. A
+  monster that stops or turns overshoots by a frame. The game's effects are
+  not in the vectors, so they still move with what is behind them.
+  `turns_motion=2` shows the eye not drawn from its own picture alone, what
+  moved on tinted red and vectors left unused blue; 0 is off. Every 10 s the
+  log has a `the game's motion vectors` line: by distance, how many vectors
+  were still, how many the camera's motion explains, and their mean length.
 
 By turns draws a pair on a snap turn, outside first person, in open menus,
 during stereo captures and on any frame without a reusable image for both eyes.

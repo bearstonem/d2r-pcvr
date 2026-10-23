@@ -14,6 +14,7 @@
 #include "../steamvr/logging.h"
 namespace gamestate {uint64_t LocalPlayer();bool MenuOpen();}
 namespace framevr {void SetTurnsKeepOwn(int);int TurnsKeepOwn();}   // transport: [stereo] turns_keep_own
+namespace framevr {void SetTurnsMotion(int);int TurnsMotion();}       // and turns_motion
 
 namespace devscenarios {
 namespace {
@@ -104,6 +105,18 @@ void __cdecl Commands(const PluginContext*,void* token) noexcept {
                                 mode==4?"Frame development: by turns keeps the eye's own picture round near things and where the game's effects are":
                                 "Frame development: by turns takes the drawn eye's picture wherever it reaches");
         Finish(r,Result::TurnsUpdated,claim);return;
+    }
+    if(r.index==framevr::dev::TurnsMotionChoice) {
+        int mode;   // on, shown, off, and round
+        {
+            std::lock_guard lock(mutex);if(claim!=ticket)return;
+            mode=(framevr::TurnsMotion()+1)%3;
+        }
+        framevr::SetTurnsMotion(mode);
+        framevr::logging::Write(mode==1?"Frame development: by turns moves the eye not drawn on by the game's motion vectors":
+                                mode==2?"Frame development: by turns shows the eye not drawn from its own picture, moved by the game's motion vectors and tinted":
+                                "Frame development: by turns moves the eye not drawn with the head and the hero alone");
+        Finish(r,Result::MotionUpdated,claim);return;
     }
     if(!execute){
         framevr::logging::Write("Frame development: console command export unavailable");
@@ -243,7 +256,7 @@ void Init(const D2RL::PluginContext* ctx) {
     framevr::logging::Write("Frame development: isolated pcvr-dev environment enabled; class presets require disposable offline expansion characters");
 }
 bool DebugDraws(){return enabled&&debugDraws.load();}
-void Capture(framevr::interaction::Snapshot& s){s.developer=enabled;s.devDebugDraws=DebugDraws();s.devTurnsKeepOwn=enabled?framevr::TurnsKeepOwn():0;}
+void Capture(framevr::interaction::Snapshot& s){s.developer=enabled;s.devDebugDraws=DebugDraws();s.devTurnsKeepOwn=enabled?framevr::TurnsKeepOwn():0;s.devTurnsMotion=enabled?framevr::TurnsMotion():0;}
 void Request(const framevr::interaction::Request& r) {
     const bool valid=Valid(r);
     const auto run=threads?(framevr::dev::IsKit(r.index)?threads->runOnGameThread:threads->runOnUiThread):nullptr;

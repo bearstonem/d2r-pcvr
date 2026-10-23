@@ -120,7 +120,32 @@ struct TurnDepth {
     // picture comes from, or as this eye did, round here - this eye's own
     // picture stays as well. 0: off; with keepNear neither off, either keeps.
     float keepEffects=0;
+    // This eye's own picture (Render's `depth`): the game's motion vectors as
+    // it was drawn (motionvectors, R16G16_FLOAT, in a shader-resource state,
+    // the size of `depth`). Moved with the head and the hero alone, a monster
+    // walking stood a frame back where the eye's own picture shows: beside
+    // it, where only this eye sees past it, and where the effects keep this
+    // eye's own (the owner, 2026-10-23). Each point farther than `still`
+    // (world units, along the view) also goes on by `ahead` times its own
+    // motion; nearer, the game's vectors hold the camera's motion against the
+    // other eye, so none is taken. Less than StillPixels counts as none. What
+    // the hero carries keeps the carry alone. 0: off.
+    ID3D12Resource* motion=nullptr;
+    float ahead=0,still=0;
+    // the grid's points tinted: red moved by their own motion, blue a vector left unused nearer than `still`
+    bool show=false;
 };
+// Less than this many pixels of the drawn part, a motion vector is none: the
+// game's vectors carry DLSS's jitter step (under a pixel) everywhere.
+inline constexpr float StillPixels=1.5f;
+// The motion statistics (TurnWarp::MotionStats): the sky, then half a metre
+// each from the eye to 16 m, then farther.
+inline constexpr int MotionBins=34;
+inline constexpr float MotionBinMetres=.5f;
+// Per bin: samples, those whose vector is under StillPixels, those the camera's
+// motion against the render before explains to StillPixels, the vectors'
+// lengths in pixels (64 at most each).
+struct MotionHistogram {std::array<std::array<float,4>,MotionBins> bins{};};
 inline constexpr float TurnEdgePixels=2;
 // The grid's spacing in target pixels: an edge in depth stays within a few.
 inline constexpr uint32_t TurnGridStep=4;
@@ -157,6 +182,11 @@ class TurnWarp {
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> effectsTargets;
     std::array<Microsoft::WRL::ComPtr<ID3D12Resource>,4> effects;
     std::array<bool,2> effectsKept{};
+    // MotionStats: the bins (R32G32B32A32_FLOAT, MotionBins x 1), and
+    // MotionSlots of them read back.
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> statsPipeline;
+    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> statsTargets;
+    Microsoft::WRL::ComPtr<ID3D12Resource> statsBins,statsReadback;
     DXGI_FORMAT format=DXGI_FORMAT_UNKNOWN;
 public:
     // format: the eye swapchain's typed format, of the source and the target alike.
@@ -180,6 +210,20 @@ public:
     // the drawn eye's picture laid over it; false only when nothing was drawn.
     bool Render(ID3D12Device*,ID3D12GraphicsCommandList*,ID3D12Resource* source,ID3D12Resource* target,
                 const std::array<float,9>& homography,int slot,const TurnDepth* depth=nullptr,const TurnDepth* drawn=nullptr);
+    bool MotionReady() const {return statsPipeline!=nullptr;}
+    static constexpr int MotionSlots=8;
+    // What the game's motion vectors say as the eye `eye` was drawn: its
+    // depth and vectors (MotionInput, both in a shader-resource state, one
+    // size), sampled 128 x 128 into MotionBins by distance, into the read-back
+    // slot `at` (0 to MotionSlots - 1). ReadMotionStats once the list ran.
+    struct MotionInput {
+        ID3D12Resource* depth=nullptr;DXGI_FORMAT format=DXGI_FORMAT_UNKNOWN;ID3D12Resource* motion=nullptr;
+        float scale[2]{1,1};float nearPlane=0,upm=0;
+        std::array<float,12> back{};   // TurnMove from this eye's view to the render before's
+        math::Fov fov{},backFov{};
+    };
+    bool MotionStats(ID3D12Device*,ID3D12GraphicsCommandList*,int eye,const MotionInput&,int at);
+    bool ReadMotionStats(int at,MotionHistogram& out);
     bool InterfaceReady() const {return layerPipeline!=nullptr;}
     // The interface layer (R16G16B16A16_FLOAT, PIXEL_SHADER_RESOURCE) over target
     // (RENDER_TARGET; the eye format's UnormView, or typeless), each pixel from
