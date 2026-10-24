@@ -136,8 +136,10 @@ struct Readout {
     int backend=0,preset=1,scale=2;   // what the layer was asked for (Loaded)
     uint32_t sessions=0,ready=0,bypass=0,errors=0;int32_t lastError=0;
     bool byTurns=false;   // active while the game draws by turns: each eye a quarter of the headset's frames
-    // Game motion chosen; the layer asked for the mod's vectors (published now).
-    bool gameMotion=false,vectors=false;
+    // Game motion chosen; the layer asked for the mod's vectors (published
+    // now); the bridge refused every one of them for ten seconds (its copy
+    // failed), so its flow came back.
+    bool gameMotion=false,vectors=false,refused=false;
     bool operator==(const Readout&)const=default;
 };
 // started: as above; installed: plugins\ofxr has the manifest now; wanted: the
@@ -176,6 +178,7 @@ inline std::string Line(const Readout& r){
         case State::Active:
             if(r.gameMotion&&r.vectors)return "Frame generation: active, OFXR Bridge with game motion";
             if(r.gameMotion)return r.byTurns?"Frame generation: active, FidelityFX flow; game motion needs Both eyes":
+                                   r.refused?"Frame generation: active, FidelityFX flow; the bridge refused game motion":
                                                "Frame generation: active, FidelityFX flow until game motion starts";
             std::snprintf(line,sizeof line,"Frame generation: active, OFXR Bridge %s%s",running.c_str(),r.byTurns?"; best with Both eyes":"");return line;
         case State::Bypassed:return "Frame generation: OFXR Bridge loaded but bypassed; no generated frames";

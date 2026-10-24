@@ -136,7 +136,7 @@ bool Pass::Initialize(ID3D12Device* device,void (*log)(const char*)) {
     if(FAILED(device->CreateDescriptorHeap(&heap,IID_PPV_ARGS(&sources)))||FAILED(device->CreateDescriptorHeap(&rtv,IID_PPV_ARGS(&targets))))return fail("descriptor heaps");
     return true;
 }
-bool Pass::Render(ID3D12Device* device,ID3D12GraphicsCommandList* list,int eye,ID3D12Resource* depth,DXGI_FORMAT depthFormat,D3D12_RESOURCE_STATES depthState,
+bool Pass::Render(ID3D12Device* device,ID3D12Device* owner,ID3D12GraphicsCommandList* list,int eye,ID3D12Resource* depth,DXGI_FORMAT depthFormat,D3D12_RESOURCE_STATES depthState,
                   ID3D12Resource* game,D3D12_RESOURCE_STATES gameState,const Constants& c) {
     if(!pipeline||!depth||(eye!=0&&eye!=1))return false;
     const auto d=depth->GetDesc();
@@ -147,7 +147,7 @@ bool Pass::Render(ID3D12Device* device,ID3D12GraphicsCommandList* list,int eye,I
         D3D12_RESOURCE_DESC r{};r.Dimension=D3D12_RESOURCE_DIMENSION_TEXTURE2D;r.Width=w;r.Height=h;r.DepthOrArraySize=1;r.MipLevels=1;
         r.Format=DXGI_FORMAT_R16G16_FLOAT;r.SampleDesc.Count=1;r.Flags=D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
         target.Reset();
-        if(FAILED(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&r,Readable,nullptr,IID_PPV_ARGS(&target))))return false;
+        if(FAILED((owner?owner:device)->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&r,Readable,nullptr,IID_PPV_ARGS(&target))))return false;
         width[size_t(eye)]=w;height[size_t(eye)]=h;
     }
     const UINT step=device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);

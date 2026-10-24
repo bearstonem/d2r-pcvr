@@ -146,7 +146,9 @@ public:
     // the game's vectors in `gameState` (null: none); both left as they were.
     // Leaves the eye's vectors in PIXEL_SHADER_RESOURCE. Recorded after the
     // eye's last use completed (Copy waits for it): its descriptors are free.
-    bool Render(ID3D12Device*,ID3D12GraphicsCommandList*,int eye,ID3D12Resource* depth,DXGI_FORMAT depthFormat,D3D12_RESOURCE_STATES depthState,
+    // owner: the device the vectors are created on - the one the bridge's
+    // copy finds behind its queue (its identity check).
+    bool Render(ID3D12Device*,ID3D12Device* owner,ID3D12GraphicsCommandList*,int eye,ID3D12Resource* depth,DXGI_FORMAT depthFormat,D3D12_RESOURCE_STATES depthState,
                 ID3D12Resource* game,D3D12_RESOURCE_STATES gameState,const Constants&);
     // The eye's vectors to none (the bridge turns the image by the poses
     // alone), once there are any; false before the first Render.

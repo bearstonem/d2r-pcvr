@@ -154,11 +154,20 @@ framegen::ConfigureMotionFn frameMotionConfigure=nullptr;
 framegen::PublishMotionFn frameMotionPublish=nullptr;
 framegen::MotionStatisticsFn frameMotionStatistics=nullptr;
 std::atomic<bool> frameMotionUsable{false},frameMotionMonsters{true},frameMotionAsked{false};
+// The bridge copied none of ten seconds of vectors: game motion gives way to
+// its flow until the next session (the log says why).
+std::atomic<bool> frameMotionRefused{false};
 framemotion::Pass frameMotion;
 std::array<framemotion::Camera,2> motionWas{};   // each eye's camera a frame back
 framemotion::Camera motionLastRender{};          // the render before (the game's vectors' camera)
 std::array<bool,2> motionDrawn{};                // this frame's vectors drawn, else cleared to none
 struct MotionPublisher {ComPtr<ID3D12CommandAllocator> allocator;ComPtr<ID3D12GraphicsCommandList> list;uint64_t fence=0;};
+// The device behind the session's queue: the bridge copies the vectors only
+// when they, the list it copies on and the queue all report one device (COM
+// identity). Every publication failed so with the vectors and the list made
+// on the device ReShade hands over (owner's run, 2026-10-23: "snapshot
+// failures" = published), so both are made on the queue's own.
+ComPtr<ID3D12Device> motionDevice;
 std::array<MotionPublisher,2> motionPublishers;uint32_t motionPublisherNext=0;
 struct MotionCounts {uint32_t drawn=0,cleared=0,own=0,published=0;ULONGLONG since=0;} motionCounts;
 // Game motion takes the game's own vectors from this far out (By turns'
@@ -922,7 +931,7 @@ framegen::Options FrameGenWanted() {
 }
 // Game motion now: chosen, the bridge's vector input and the pass there, Both eyes.
 bool FrameMotionWanted() {
-    return frameMotionUsable.load()&&FrameGenWanted().mode==framegen::Mode::GameMotion&&StereoRendering()==0;
+    return frameMotionUsable.load()&&!frameMotionRefused.load()&&FrameGenWanted().mode==framegen::Mode::GameMotion&&StereoRendering()==0;
 }
 // Names OFXR Bridge's folder to the Khronos loader for this process only, as
 // a place for explicit layers (XR_API_LAYER_PATH, added to any path already
@@ -1033,6 +1042,11 @@ framegen::Readout FrameGenNow(ULONGLONG now,bool byTurns) {
     if(frameMotionAsked&&(!motionCounts.since||now-motionCounts.since>=10000)) {
         framegen::MotionVectorStatisticsV1 s;
         if(motionCounts.since&&frameMotionStatistics&&frameMotionStatistics(&s)) {
+            // Its copies all failed (its device check): its flow instead.
+            static uint64_t copiedBefore=0,failedBefore=0;
+            if(motionCounts.published&&s.snapshotCopies==copiedBefore&&s.snapshotFailures>failedBefore&&!frameMotionRefused.exchange(true))
+                Say("Frame generation: OFXR Bridge copied none of the game motion vectors for 10 s; its FidelityFX flow until the next start");
+            copiedBefore=s.snapshotCopies;failedBefore=s.snapshotFailures;
             char line[360];std::snprintf(line,sizeof line,"Frame generation: game motion, 10 s: eyes drawn %u (with the game's own motion %u), none %u, published %u; "
                 "the bridge: published %llu, matched %llu, used %llu, snapshot failures %llu, invalid %llu, now %s",
                 motionCounts.drawn,motionCounts.own,motionCounts.cleared,motionCounts.published,(unsigned long long)s.published,(unsigned long long)s.matched,
@@ -1053,6 +1067,7 @@ framegen::Readout FrameGenNow(ULONGLONG now,bool byTurns) {
     readout.byTurns=readout.state==framegen::State::Active&&byTurns;
     readout.gameMotion=wanted.mode==framegen::Mode::GameMotion;
     readout.vectors=readout.state==framegen::State::Active&&frameMotionAsked;
+    readout.refused=frameMotionRefused.load();
     if(!frameGenRead||!(readout==frameGenReadout)) {
         char line[260];std::snprintf(line,sizeof line,"%s [%s; sessions %u, ready %u, bypass %u, errors %u]",framegen::Line(readout).c_str(),
             framegen::StateName(readout.state),readout.sessions,readout.ready,readout.bypass,readout.errors);
@@ -1488,6 +1503,9 @@ bool Initialize(reshade::api::command_queue* rq,reshade::api::swapchain* swap) {
     // that would wait here for the warm-up.
     if(turnCompiler.Start())turnCompiler.Submit({device,turnFormat});   // else the first turned eye builds it all
     // Game motion's pass, while the bridge is loaded with its vector input.
+    motionDevice.Reset();
+    if(FAILED(queue->GetDevice(IID_PPV_ARGS(&motionDevice))))motionDevice.Reset();
+    frameMotionRefused=false;
     frameMotionUsable=frameMotionPublish&&frameMotionConfigure&&frameMotion.Initialize(device.Get(),&Say);
     return true;
 }
@@ -3555,7 +3573,7 @@ void DrawMotion(ID3D12GraphicsCommandList* list,int eye) {
         const bool own=frameMotionMonsters.load()&&motionLastRender.ok&&motionvectors::Latest(game)&&game.width==size[0]&&game.height==size[1];
         const auto c=framemotion::Build(now,motionWas[size_t(eye)],own?motionLastRender:framemotion::Camera{},upm,CarriedNear,CarriedFar,MotionOwnFrom,size,latest.scale,2);
         constexpr auto readable=D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE|D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-        motionDrawn[size_t(eye)]=frameMotion.Render(device.Get(),list,eye,depth,DXGI_FORMAT(latest.format),readable,own?game.texture:nullptr,game.state,c);
+        motionDrawn[size_t(eye)]=frameMotion.Render(device.Get(),motionDevice.Get(),list,eye,depth,DXGI_FORMAT(latest.format),readable,own?game.texture:nullptr,game.state,c);
         if(motionDrawn[size_t(eye)]){++motionCounts.drawn;if(c.renders>0)++motionCounts.own;}
         static bool told=false;
         if(motionDrawn[size_t(eye)]&&!told){told=true;char line[200];std::snprintf(line,sizeof line,"Frame generation: game motion drawn (%ux%u vectors from %ux%u depth; the game's own vectors %s)",
@@ -3569,8 +3587,9 @@ void DrawMotion(ID3D12GraphicsCommandList* list,int eye) {
 MotionPublisher* OpenMotionPublisher() {
     if(!frameMotionAsked||!frameMotionPublish)return nullptr;
     auto& p=motionPublishers[motionPublisherNext];
-    if(!p.allocator&&(!Hr(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,IID_PPV_ARGS(&p.allocator)),"create motion allocator")||
-       !Hr(device->CreateCommandList(0,D3D12_COMMAND_LIST_TYPE_DIRECT,p.allocator.Get(),nullptr,IID_PPV_ARGS(&p.list)),"create motion list")||
+    auto* owner=motionDevice?motionDevice.Get():device.Get();
+    if(!p.allocator&&(!Hr(owner->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,IID_PPV_ARGS(&p.allocator)),"create motion allocator")||
+       !Hr(owner->CreateCommandList(0,D3D12_COMMAND_LIST_TYPE_DIRECT,p.allocator.Get(),nullptr,IID_PPV_ARGS(&p.list)),"create motion list")||
        !Hr(p.list->Close(),"close motion list"))){p={};return nullptr;}
     if(!WaitGpuValue(p.fence)||!Hr(p.allocator->Reset(),"reset motion allocator")||!Hr(p.list->Reset(p.allocator.Get(),nullptr),"reset motion list"))return nullptr;
     motionPublisherNext^=1;
@@ -3588,6 +3607,22 @@ void PublishMotion(ID3D12GraphicsCommandList* list,const Eye& e,int eye) {
     p.motionWidth=frameMotion.Width(eye);p.motionHeight=frameMotion.Height(eye);
     p.scaleX=float(p.motionWidth);p.scaleY=float(p.motionHeight);
     p.resourceState=uint32_t(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    static bool told=false;
+    if(!told) {   // what the bridge's copy will compare, once
+        told=true;
+        const auto identity=[](auto* object)->void* {
+            if(!object)return nullptr;
+            ComPtr<ID3D12Device> owner;ComPtr<IUnknown> unknown;
+            if(FAILED(object->GetDevice(IID_PPV_ARGS(&owner)))||FAILED(owner->QueryInterface(IID_PPV_ARGS(&unknown))))return nullptr;
+            return unknown.Get();
+        };
+        ComPtr<IUnknown> handed;device->QueryInterface(IID_PPV_ARGS(&handed));
+        void* const vectorsDevice=identity(vectors);void* const listDevice=identity(list);void* const queueDevice=identity(queue.Get());
+        char line[300];std::snprintf(line,sizeof line,"Frame generation: game motion's devices - vectors %p, list %p, queue %p (ReShade's %p): %s",
+            vectorsDevice,listDevice,queueDevice,static_cast<void*>(handed.Get()),
+            vectorsDevice&&vectorsDevice==listDevice&&listDevice==queueDevice?"one device, as the bridge wants":"they differ: the bridge will not copy the vectors");
+        Say(line);
+    }
     if(frameMotionPublish(&p))++motionCounts.published;
 }
 bool Copy(ID3D12Resource* src,Eye& e,reshade::api::command_queue* rq) {
@@ -4952,7 +4987,7 @@ void Shutdown(bool preserveResolution) {
     // Destroying the instance unloads OFXR Bridge: its entry points go first.
     {std::lock_guard lock(frameGenMutex);frameGenSnapshot=nullptr;frameGenRequest=nullptr;frameGenStart=framegen::Start::NotAsked;frameGenRead=false;
      frameMotionConfigure=nullptr;frameMotionPublish=nullptr;frameMotionStatistics=nullptr;frameMotionAsked=false;frameMotionUsable=false;motionvectors::Watch(false);}
-    frameMotion={};motionWas={};motionLastRender={};motionDrawn={};motionPublishers={};motionCounts={};
+    frameMotion={};motionWas={};motionLastRender={};motionDrawn={};motionPublishers={};motionCounts={};motionDevice.Reset();
     runtimeEnumerateImages=nullptr;
     if(instance&&pDestroyInstance)pDestroyInstance(instance);
     session=XR_NULL_HANDLE;instance=XR_NULL_HANDLE;actionSet=XR_NULL_HANDLE;headSpace=space=XR_NULL_HANDLE;
