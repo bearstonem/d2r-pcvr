@@ -44,6 +44,23 @@ class StagingTests(unittest.TestCase):
             for name, digest in manifest['sha256'].items():
                 self.assertEqual(hashlib.sha256((root / 'staged' / name).read_bytes()).hexdigest(), digest)
 
+    def test_stages_all_ten_steam_artworks_byte_for_byte(self):
+        source = Path(__file__).resolve().parent.parent
+        files = {f'artwork/{runtime}/{name}.png':
+                 (source / f'artwork/{runtime}/{name}.png').read_bytes()
+                 for runtime in ('SteamVR', 'Virtual-Desktop')
+                 for name in ('Background', 'Cover', 'Wide-Cover', 'Icon', 'Logo')}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = self.stage(root, files)
+            for name, data in files.items():
+                self.assertEqual((root / 'staged' / name).read_bytes(), data)
+                self.assertEqual(manifest['sha256'][name], hashlib.sha256(data).hexdigest())
+            self.assertEqual(len(files), 10)
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, 'allowlist'):
+                self.stage(Path(directory), {'artwork/WiVRn/Cover.png': b'out of scope'})
+
     def test_stages_launcher_manifest_and_its_icon(self):
         source = Path(__file__).resolve().parent.parent
         descriptor = json.loads((source / 'vrmod-manifest.json').read_text(encoding='utf-8'))

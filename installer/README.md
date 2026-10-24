@@ -178,3 +178,38 @@ removes matching Steam entries in one transaction. It runs this operation at
 or incomplete setup retains its helpers and Windows uninstall entry for recovery.
 No operation disables Windows Security, terminates Steam/D2R or changes the
 system OpenXR runtime.
+
+## Steam shortcut artwork
+
+Windows packages include the ten original PNGs in `artwork/SteamVR` and
+`artwork/Virtual-Desktop`. No additional download or image library is needed.
+The files are copied without resizing or re-encoding, including alpha channels.
+
+The selected Steam account receives these files in `userdata/<account>/config/grid`:
+
+| Resource | Installed name |
+| --- | --- |
+| Cover.png | `<appid>p.png` |
+| Wide-Cover.png | `<appid>.png` |
+| Background.png | `<appid>_hero.png` |
+| Logo.png | `<appid>_logo.png` |
+| Icon.png | `<appid>_icon.png`, also referenced by the shortcut's `icon` field |
+
+`appid` is the shortcut's unsigned 32-bit ID, not its 64-bit launch ID. These
+conventions are also used by [steam-shortcut-artwork](https://github.com/pmacoutinho/steam-shortcut-artwork#what-gets-installed).
+Existing matching PCVR shortcut names migrate to D2R VR Unleashed while keeping
+their IDs. Ambiguous names, different launch targets and ID collisions stop setup
+before Steam writes. Other accounts and other shortcut IDs are left alone.
+
+Steam must remain closed. Images and VDF edits share the existing transaction:
+backups retain their relative paths (including `grid/`), staged writes are
+verified, and partial failures restore the previous bytes. Reinstallation reuses
+the same slots. Alternate image formats for those slots are backed up and removed
+to prevent stale images taking precedence. Removal deletes only artwork still
+identical to the bundled images; subsequently customized images are retained.
+Previously replaced artwork remains available in the Steam setup backups.
+
+Tests: `python -m unittest discover -s steamvr -p steam_artwork_test.py` and the
+existing setup, removal and installer staging suites. Windows client display and
+launch verification remain a separate manual test; fixture tests do not validate
+Steam's rendered UI.

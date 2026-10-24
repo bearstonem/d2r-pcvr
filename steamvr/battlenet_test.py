@@ -4,6 +4,7 @@ import contextlib
 import io
 import json
 import os
+import shutil
 from pathlib import Path
 import tempfile
 import unittest
@@ -152,6 +153,7 @@ class BattleNetTests(unittest.TestCase):
             (saves / 'Settings.json').write_text('{}')
             mod = root / 'mod'
             mod.mkdir()
+            shutil.copytree(Path(__file__).resolve().parent.parent / 'artwork', mod / 'artwork')
             with patch.object(setup, 'ROOT', mod), \
                     patch.object(setup, 'verify_release', return_value={'sha256': {'bin/CascLib.dll': 'fixture'}}), \
                     patch.object(setup, 'steam_location', return_value=root / 'steam'), \

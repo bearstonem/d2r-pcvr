@@ -2,6 +2,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 import copy
+import ntpath
 import os
 from pathlib import Path
 import re
@@ -13,8 +14,8 @@ import zlib
 
 APP_ID = '2536520'
 SHORTCUTS = {
-    'steamvr': ('Diablo II: Resurrected VR - SteamVR', '-applaunch 2536520 --frame-vr', 1),
-    'vdxr': ('Diablo II: Resurrected VR - Virtual Desktop', '-applaunch 2536520 --frame-vr --frame-vdxr', 0),
+    'steamvr': ('D2R VR Unleashed - SteamVR', '-applaunch 2536520 --frame-vr', 1),
+    'vdxr': ('D2R VR Unleashed - Virtual Desktop', '-applaunch 2536520 --frame-vr --frame-vdxr', 0),
 }
 
 
@@ -193,10 +194,40 @@ def shortcut_specs(steam, game, store='steam', python=None, wrapper=None, runtim
             continue
         arguments = common + (['--frame-openxr-runtime=' + str(runtime)]
                               if connection == 'steamvr' else ['--frame-vdxr'])
-        name = 'Diablo II: Resurrected VR (Battle.net) - ' + suffix
+        name = 'D2R VR Unleashed (Battle.net) - ' + suffix
         result[connection] = (name, subprocess.list2cmdline(arguments),
                               int(connection == 'steamvr'), python, wrapper.parent)
     return result
+
+
+def is_same_battlenet_shortcut(item, game, connection):
+    """Recognize generated routing for the same Battle.net game."""
+    exe = item.get('Exe', '')
+    options = item.get('LaunchOptions', '')
+    if not isinstance(exe, str) or not isinstance(options, str):
+        return False
+    executable = re.fullmatch(r'"([^"\r\n]+)"', exe)
+    if not executable or ntpath.basename(executable[1]).lower() not in {
+            'python.exe', 'pythonw.exe'}:
+        return False
+    token = r'(?:"[^"\r\n]+"|[^\s"]+)'
+    game_arg = subprocess.list2cmdline(['--battlenet-game=' + str(game)])
+    command = re.fullmatch(
+        rf'(?P<wrapper>{token}) {re.escape(game_arg)} '
+        rf'--experimental-battlenet --frame-vr (?P<runtime>{token})',
+        options)
+    if not command:
+        return False
+    wrapper = command['wrapper'].strip('"')
+    if (ntpath.basename(wrapper).lower() != 'launch_windows.py'
+            or ntpath.basename(ntpath.dirname(wrapper)).lower() != 'steamvr'):
+        return False
+    runtime = command['runtime'].strip('"')
+    if connection == 'vdxr':
+        return runtime == '--frame-vdxr'
+    prefix = '--frame-openxr-runtime='
+    return (connection == 'steamvr' and runtime.startswith(prefix)
+            and len(runtime) > len(prefix))
 
 
 def update_shortcuts(original, steam, game, connections, **routing):
@@ -212,15 +243,27 @@ def update_shortcuts(original, steam, game, connections, **routing):
     previous = copy.deepcopy(entries)
     for connection in connections:
         name, options, openvr, executable, directory = specs[connection]
-        matches = [key for key, item in entries.items() if item.get('appname', item.get('AppName')) == name]
+        aliases = {name, name.replace('D2R VR Unleashed', 'Diablo II: Resurrected VR')}
+        matches = [key for key, item in entries.items() if item.get('appname', item.get('AppName')) in aliases]
         if len(matches) > 1:
             raise ValueError(f'Remove duplicate library entries named {name} in Steam, then run setup again.')
         key = matches[0] if matches else str(max(map(int, entries), default=-1) + 1)
         item = entries.setdefault(key, {})
         exe = '"' + str(executable) + '"'
+        same_command = (item.get('Exe') == exe
+                        and item.get('LaunchOptions') == options)
+        same_game = (routing.get('store') == 'battlenet'
+                     and is_same_battlenet_shortcut(item, game, connection))
+        if item and not (same_command or same_game):
+            raise ValueError(f'A different shortcut already uses the name {name}. Rename it in Steam before setup.')
+        appid = item.get('appid', zlib.crc32((exe + name).encode('utf-8')) | 0x80000000)
+        if not isinstance(appid, int) or not 0x80000000 <= appid <= 0xffffffff:
+            raise ValueError('Invalid non-Steam shortcut appid')
+        if any(other != key and value.get('appid') == appid for other, value in entries.items()):
+            raise ValueError('Steam shortcut appid collision; no files were changed')
         item.pop('AppName', None)
         item.update({
-            'appid': zlib.crc32((exe + name).encode('utf-8')) | 0x80000000,
+            'appid': appid,
             'appname': name, 'Exe': exe, 'StartDir': '"' + str(directory) + '"',
             'icon': str(game / 'D2R.exe'), 'ShortcutPath': '', 'LaunchOptions': options,
             'IsHidden': 0, 'AllowDesktopConfig': 0, 'AllowOverlay': 0,
@@ -228,7 +271,8 @@ def update_shortcuts(original, steam, game, connections, **routing):
         })
         item.setdefault('LastPlayTime', 0)
         item.setdefault('tags', {'0': 'D2R PCVR'})
-    targets = {specs[connection][0] for connection in connections}
+    targets = {name for connection in connections for name in
+               (specs[connection][0], specs[connection][0].replace('D2R VR Unleashed', 'Diablo II: Resurrected VR'))}
     for key, value in previous.items():
         if value.get('appname', value.get('AppName')) not in targets and entries[key] != value:
             raise ValueError('An unrelated Steam shortcut changed')
@@ -257,6 +301,8 @@ def uninstall_updates(profile, game, store, state=None):
         names = {name for name, _, _ in SHORTCUTS.values()} if store == 'steam' else {
             'Diablo II: Resurrected VR (Battle.net) - SteamVR',
             'Diablo II: Resurrected VR (Battle.net) - Virtual Desktop'}
+        names |= {name.replace('D2R VR Unleashed', 'Diablo II: Resurrected VR') for name in names}
+        names |= {name.replace('Diablo II: Resurrected VR', 'D2R VR Unleashed') for name in names}
         removed = False
         for key, entry in list(root['shortcuts'].items()):
             if not isinstance(entry, dict):
@@ -266,7 +312,20 @@ def uninstall_updates(profile, game, store, state=None):
             icon = entry.get('icon', '')
             if (entry.get('appname', entry.get('AppName')) in names and isinstance(options, str)
                     and marker in options and '--frame-vr' in options and isinstance(icon, str)
-                    and Path(icon).resolve() == (game / 'D2R.exe').resolve()):
+                    and (Path(icon).resolve() == (game / 'D2R.exe').resolve()
+                         or (Path(icon).resolve() == (config / 'grid' / f"{entry.get('appid')}_icon.png").resolve()
+                             and (store == 'steam' or (' ' + subprocess.list2cmdline(['--battlenet-game=' + str(game)]) + ' ') in (' ' + options + ' '))))):
+                # Only remove images still identical to our bundled files; keep
+                # any artwork the player replaced after installation.
+                connection = 'vdxr' if '--frame-vdxr' in options else 'steamvr'
+                for name, suffix in ARTWORK_FILES.items():
+                    target = config / 'grid' / f"{entry.get('appid')}{suffix}.png"
+                    bundled = Path(__file__).resolve().parent.parent / 'artwork' / ARTWORK_FOLDERS[connection] / name
+                    if (not any(other != key and item.get('appid') == entry.get('appid')
+                                for other, item in root['shortcuts'].items())
+                            and not target.is_symlink() and target.is_file() and bundled.is_file()
+                            and target.read_bytes() == bundled.read_bytes()):
+                        updates[target] = None
                 del root['shortcuts'][key]
                 removed = True
         if removed:
@@ -290,7 +349,45 @@ def uninstall_updates(profile, game, store, state=None):
     return updates
 
 
-def configure(profile, steam, game, options, connections, backups, require_closed, **routing):
+ARTWORK_FILES = {'Background.png': '_hero', 'Cover.png': 'p',
+                 'Wide-Cover.png': '', 'Logo.png': '_logo', 'Icon.png': '_icon'}
+ARTWORK_FOLDERS = {'steamvr': 'SteamVR', 'vdxr': 'Virtual-Desktop'}
+
+
+def artwork_updates(payload, profile, steam, game, connections, artwork_root, **routing):
+    """Plan exact per-account grid files and the separate shortcut icon field.
+
+    Steam uses the unsigned 32-bit shortcut appid here, not its 64-bit launch ID.
+    PNGs are copied byte-for-byte. Alternate formats for these exact slots are
+    backed up and removed transactionally so Steam cannot choose stale artwork.
+    """
+    root = decode_binary(payload)
+    specs = shortcut_specs(steam, game, **routing)
+    grid = profile / 'config/grid'
+    if not grid.resolve().is_relative_to((profile / 'config').resolve()):
+        raise ValueError('Steam artwork directory points outside the selected profile')
+    updates = {}
+    for connection in connections:
+        entry = next(item for item in root['shortcuts'].values() if item.get('appname') == specs[connection][0])
+        appid = entry['appid']
+        for name, suffix in ARTWORK_FILES.items():
+            target = grid / f'{appid}{suffix}.png'
+            if target.is_symlink():
+                raise ValueError('Steam artwork target is a symbolic link')
+            data = (artwork_root / ARTWORK_FOLDERS[connection] / name).read_bytes()
+            if not data.startswith(b'\x89PNG\r\n\x1a\n'):
+                raise ValueError(f'Invalid bundled Steam artwork: {name}')
+            updates[target] = data
+            for existing in grid.glob(f'{appid}{suffix}.*'):
+                if existing != target and existing.suffix.lower() in {'.png', '.jpg', '.jpeg', '.webp', '.tga'}:
+                    if existing.is_symlink():
+                        raise ValueError('Steam artwork target is a symbolic link')
+                    updates[existing] = None
+        entry['icon'] = str(grid / f'{appid}_icon.png')
+    return encode_binary(root), updates
+
+
+def configure(profile, steam, game, options, connections, backups, require_closed, artwork_root=None, **routing):
     """Stage Steam edits and roll back a partial write; never edit a live Steam client."""
     config = profile / 'config'
     local = config / 'localconfig.vdf'
@@ -299,6 +396,10 @@ def configure(profile, steam, game, options, connections, backups, require_close
     # Battle.net shortcuts never modify the Steam game's launch options.
     originals = {shortcuts: shortcuts.read_bytes() if shortcuts.exists() else None}
     updates = {shortcuts: update_shortcuts(originals[shortcuts], steam, game, connections, **routing)}
+    if artwork_root is not None:
+        payload, artwork = artwork_updates(updates[shortcuts], profile, steam, game, connections, artwork_root, **routing)
+        updates = {**artwork, shortcuts: payload}
+        originals.update({path: path.read_bytes() if path.exists() else None for path in artwork})
     if options is not None:
         originals = {local: local.read_bytes(), **originals}
         updates = {local: set_launch_options(originals[local].decode('utf-8'), options).encode('utf-8'), **updates}
@@ -306,22 +407,31 @@ def configure(profile, steam, game, options, connections, backups, require_close
     backup.mkdir(parents=True)
     for path, original in originals.items():
         if original is not None:
-            shutil.copy2(path, backup / path.name)
+            destination = backup / path.relative_to(config)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, destination)
     staged, replaced = {}, []
     try:
         for path, payload in updates.items():
-            with tempfile.NamedTemporaryFile(dir=config, prefix='d2r-setup-', delete=False) as output:
-                output.write(payload)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if payload is None:
+                staged[path] = None
+                continue
+            with tempfile.NamedTemporaryFile(dir=path.parent, prefix='d2r-setup-', delete=False) as output:
                 staged[path] = Path(output.name)
+                output.write(payload)
         require_closed()
         for path, original in originals.items():
             current = path.read_bytes() if path.exists() else None
             if current != original:
                 raise ValueError('Steam configuration changed during setup. Close Steam and try again.')
         for path, temporary in staged.items():
-            os.replace(temporary, path)
+            if temporary is None:
+                path.unlink(missing_ok=True)
+            else:
+                os.replace(temporary, path)
             replaced.append(path)
-        if any(path.read_bytes() != payload for path, payload in updates.items()):
+        if any((path.read_bytes() if path.exists() else None) != payload for path, payload in updates.items()):
             raise OSError('Steam configuration verification failed')
     except BaseException:
         for path in reversed(replaced):
@@ -332,5 +442,6 @@ def configure(profile, steam, game, options, connections, backups, require_close
         raise
     finally:
         for temporary in staged.values():
-            temporary.unlink(missing_ok=True)
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
     return backup

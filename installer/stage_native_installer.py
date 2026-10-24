@@ -19,6 +19,9 @@ ROOT_FILES = {
     'reshade/D2R_DepthFog.fx', 'third_party/minhook/LICENSE.txt', 'external/reshade/LICENSE.md',
     'bin/d2rl-pcvr.dll', 'bin/openxr_loader.dll', 'bin/CascLib.dll', 'steamvr/vendor/bitknit.py',
 }
+ROOT_FILES |= {f'artwork/{runtime}/{name}.png'
+               for runtime in ('SteamVR', 'Virtual-Desktop')
+               for name in ('Background', 'Cover', 'Wide-Cover', 'Icon', 'Logo')}
 SCRIPTS = {'setup_windows.ps1', 'setup_windows.py', 'setup_native.py', 'uninstall_windows.py', 'hdr_check.py',
            'steam_config.py', 'install.py', 'mod_identity.py', 'launch_windows.py', 'prepare_icons.py',
            'steam_assets.py', 'game_assets.py', 'game_install.py', 'casc_assets.py',

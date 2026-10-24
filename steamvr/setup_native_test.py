@@ -30,6 +30,7 @@ class NativeSetupTests(unittest.TestCase):
     def fixture(self, root, store='steam'):
         app, game, client, saves = [root / name for name in ('helper', 'Game-' + store, 'Steam', 'Saved Games')]
         app.mkdir(exist_ok=True)
+        shutil.copytree(Path(__file__).resolve().parent.parent / "artwork", app / "artwork", dirs_exist_ok=True)
         self.put(client / 'steam.exe')
         self.put(client / 'steamapps/common/SteamVR/steamxr_win64.json', b'{}')
         self.put(client / 'steamapps/appmanifest_250820.acf', b'"AppState" { "installdir" "SteamVR" }')
@@ -343,7 +344,7 @@ class NativeSetupTests(unittest.TestCase):
                         native.validate_choices({**values, 'mode': mode}, app)
             self.assertEqual(plugin.read_bytes(), b'MZ D2R VR BodyWalk Game Link')
             self.assertEqual(ini.read_bytes(), b'[mode]\nplatform=1\n')
-            self.assertEqual(list(app.iterdir()), [])
+            self.assertEqual(list(app.iterdir()), [app / "artwork"])
 
     def test_old_release_under_old_names_is_offered_update_and_validates(self):
         for recorded in (True, False):
@@ -409,7 +410,7 @@ class NativeSetupTests(unittest.TestCase):
             with patch.object(setup, 'verify_release', return_value={'sha256': {'bin/CascLib.dll': 'fixture'}}):
                 with self.assertRaisesRegex(ValueError, 'does not match'):
                     native.validate_choices(values, app)
-            self.assertEqual(list(app.iterdir()), [])
+            self.assertEqual(list(app.iterdir()), [app / "artwork"])
 
     def test_utf8_and_utf16_choices_preserve_unicode_and_spaces(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -521,7 +522,7 @@ class NativeSetupTests(unittest.TestCase):
             with patch.object(setup, 'require_closed', side_effect=ValueError('Steam running')):
                 with self.assertRaisesRegex(ValueError, 'Steam running'):
                     native.remove_managed(app)
-            self.assertEqual(list(app.iterdir()), [])
+            self.assertEqual(list(app.iterdir()), [app / "artwork"])
 
     def test_preflight_rejects_missing_original_backup_before_helper_writes(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -531,7 +532,7 @@ class NativeSetupTests(unittest.TestCase):
             with patch.object(setup, 'verify_release', return_value={'sha256': {}}):
                 with self.assertRaisesRegex(ValueError, 'backup is missing'):
                     native.validate_choices(values, app)
-            self.assertEqual(list(app.iterdir()), [])
+            self.assertEqual(list(app.iterdir()), [app / "artwork"])
 
     def test_failed_install_after_steam_commit_restores_original_configuration(self):
         with tempfile.TemporaryDirectory() as directory:
