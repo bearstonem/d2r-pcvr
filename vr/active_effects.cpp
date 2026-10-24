@@ -21,6 +21,9 @@ constexpr uint8_t TailSig[]={0x5f,0xe9,0x9a,0x0f,0xfc,0xff};
 template<class T>bool Read(uintptr_t p,T& out){return p>=0x10000&&p<=UINTPTR_MAX-sizeof out&&framevr::ReadMemory(&out,reinterpret_cast<void*>(p),sizeof out);}
 // The last sample's Holy Shield, for the shield guard on another thread.
 std::atomic<uint64_t> holySession{0},holyAt{0};
+// Whether the last known sample had an aura, for the aura icon's release.
+std::atomic<uint64_t> auraSession{0},auraSampledAt{0};
+std::atomic<bool> auraOn{false};
 }
 void Init(const D2RL::PluginContext* c){context=c;c->QueryService(&tables);}
 framevr::effects::Status Sample(uint64_t session) {
@@ -36,6 +39,7 @@ framevr::effects::Status Sample(uint64_t session) {
         }
     }
     holyAt=result.Has(framevr::effects::HolyShieldState)?GetTickCount64():0;holySession=session;
+    auraOn=framevr::effects::AnyAura(result);auraSampledAt=result.known?GetTickCount64():0;auraSession=session;
     static framevr::effects::Status before;static uint64_t lastSession=0;
     if(result!=before||lastSession!=session) {
         char line[768];int n=std::snprintf(line,sizeof line,"Frame active effects: %s",result.known?"states":"unavailable");
@@ -50,5 +54,10 @@ namespace effectstate {
 bool HolyShield(uint64_t session) {
     const uint64_t at=holyAt.load(),now=GetTickCount64();
     return session&&holySession.load()==session&&at&&now>=at&&now-at<=1000;   // sampled every 200 ms
+}
+int AuraState(uint64_t session) {
+    const uint64_t at=auraSampledAt.load(),now=GetTickCount64();
+    if(!session||auraSession.load()!=session||!at||now<at||now-at>1000)return -1;
+    return auraOn.load()?1:0;
 }
 }

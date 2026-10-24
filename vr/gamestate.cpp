@@ -49,6 +49,8 @@
 #include "logging.h"
 #include "panel_input.h"
 #include "render_resolution.h"
+#include "active_effects.h"
+#include "settings_menu.h"
 #include "sigscan.h"
 #include "memory.h"
 #endif
@@ -58,6 +60,7 @@ using namespace D2RL;
 namespace gamestate {
 void __cdecl FinishMenuOpen(const PluginContext*,void*) noexcept;
 void __cdecl DispatchAutoMap(const PluginContext*,void*) noexcept;
+uint64_t LocalPlayer();
 namespace {
 
 const PluginContext* g_ctx = nullptr;
@@ -193,12 +196,81 @@ void MaintainNotice(const PluginContext* ctx) {
     });
     if(!previous&&g_noticeVisibility.hidden)framevr::logging::Write("Frame notices: native NotificationPanel hidden; its message goes to the room card");
 }
+// The aura icon at the top left (native_hud.h AuraIconHider): active auras
+// show on the wrist, so it is hidden in every VR session, menus included,
+// while VR Settings > HUD > Companions & effects is On.
+framevr::nativehud::AuraIconHider g_auraIcon;
+framevr::nativehud::AuraIconLog g_auraLog;
+void AuraLine(const char* line){if(g_auraLog.Allow())framevr::logging::Write(line);}   // detail lines, capped
+// HUD > Companions & effects, re-read at most every 250 ms (an Apply takes
+// effect within that); UI steps in between take no settings lock.
+bool WristEffectsOn(uint64_t now) {
+    static uint64_t readAt=0;static bool on=true;
+    if(!readAt||now-readAt>250){readAt=now;on=vrsettings::Read().values[framevr::settings::CompanionCounts]>.5f;}
+    return on;
+}
+void MaintainAuraIcon(const PluginContext* ctx) {
+    namespace nh=framevr::nativehud;
+    using Act=nh::AuraIconHider::Act;
+    static int toldFound=-1,toldHidden=-1,toldEffects=-1;static unsigned toldFailure=0;static bool toldWait=false,toldReentry=false,wasSession=false;
+    const bool session=hud::NativeToolbarHidden();
+    if(!session&&!g_auraIcon.Hidden()){wasSession=false;return;}   // the flat screen: nothing of ours to undo
+    if(g_auraIcon.busy) {                       // a message raised by our own call: never loop
+        if(!toldReentry){toldReentry=true;AuraLine("Frame aura icon: re-entered from inside our own visibility call; skipped");}
+        return;
+    }
+    if(session&&!wasSession){g_auraLog.Restart();toldFound=-1;toldEffects=-1;}   // a new VR session: fresh detail lines
+    wasSession=session;
+    const auto now=GetTickCount64();
+    const bool effects=session&&WristEffectsOn(now);
+    const bool want=nh::AuraIconHider::Want(session,effects);
+    if(session&&int(effects)!=toldEffects) {    // on change, outside the cap
+        toldEffects=effects;
+        if(effects)framevr::logging::Write("Frame aura icon: wrist effects on, hiding");
+        else if(!g_auraIcon.Hidden())framevr::logging::Write("Frame aura icon: wrist effects off, released: not hidden by us, left to the game");
+        // else the release line below, prefixed "wrist effects off, "
+    }
+    if(!want&&!g_auraIcon.Hidden())return;     // wrist effects Off: nothing of ours to undo
+    Widgets::WidgetHandle panel=0;
+    const bool found=g_widgets->findPanel(ctx,nh::AuraPanel,&panel)==Widgets::Result::Success&&panel;
+    if(int(found)!=toldFound) {
+        toldFound=found;
+        AuraLine(found?"Frame aura icon: found=1":"Frame aura icon: found=0");
+    }
+    // On release only: does the local player run an aura now (effectstate's last sample)?
+    const int aura=want?0:effectstate::AuraState(LocalPlayer());
+    auto result=Widgets::Result::Success;bool asked=false,visible=false;
+    const Act act=g_auraIcon.Step(want,found,aura,now,[&](bool show){
+        asked=true;visible=show;result=g_widgets->setWidgetVisible(ctx,panel,show);return result==Widgets::Result::Success;
+    });
+    if(asked&&result!=Widgets::Result::Success&&unsigned(result)!=toldFailure) {
+        toldFailure=unsigned(result);
+        char line[120];std::snprintf(line,sizeof line,"Frame aura icon: setWidgetVisible(%s) refused (result %u), retrying",visible?"true":"false",unsigned(result));
+        AuraLine(line);
+    }
+    if(asked&&result==Widgets::Result::Success)toldFailure=0;
+    if(act==Act::Wait&&!toldWait){toldWait=true;AuraLine("Frame aura icon: release waits for an aura sample");}
+    if(act!=Act::Wait)toldWait=false;
+    // The release's branch, outside the cap; in VR it was the wrist effects row turned Off.
+    const char* why=session?"wrist effects off, ":"";
+    char line[160];line[0]=0;
+    if(act==Act::Show)std::snprintf(line,sizeof line,"Frame aura icon: %sreleased, an aura runs: PaladinAuraPanel shown",why);
+    else if(act==Act::Leave)std::snprintf(line,sizeof line,"Frame aura icon: %sreleased, no aura runs: left hidden for the game to show",why);
+    else if(act==Act::LeaveUnknown)std::snprintf(line,sizeof line,"Frame aura icon: %sreleased, no aura sample for 2 s: left hidden for the game to show",why);
+    if(line[0])framevr::logging::Write(line);
+    if(int(g_auraIcon.Hidden())!=toldHidden) {
+        toldHidden=g_auraIcon.Hidden();
+        if(toldHidden)AuraLine("Frame aura icon: PaladinAuraPanel hidden");
+        else if(!found)AuraLine("Frame aura icon: PaladinAuraPanel unloaded; a new one starts shown");
+    }
+}
 // UI-thread-only refreshes; native menu handlers may rebuild/show HUDPanel.
 framevr::CallbackTicket g_toolbarTicket;
 bool g_toolbarUpdating=false;
 void MaintainToolbar(const PluginContext* ctx) {
     if(g_toolbarUpdating||!g_widgets||!g_widgets->findPanel||!g_widgets->setWidgetVisible)return;
     MaintainNotice(ctx);
+    MaintainAuraIcon(ctx);
     const bool hide=hud::NativeToolbarHidden()&&ProtectToolbarUpdate();
     if(!hide&&!g_toolbarVisibility.hidden)return;
     g_toolbarUpdating=true;

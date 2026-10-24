@@ -79,6 +79,17 @@ template<class Check>Status Capture(unsigned stateCount,Check check) {
     result.known=true;return result;
 }
 inline int Count(const Status& s){int n=0;for(const auto& d:Definitions)if(s.Has(d.state))++n;return n;}
+// The Paladin auras' skills (also from runewords), as the
+// table's own player states above; Holy Shield (117) is not an aura, and the
+// monsters' Convicted / Holy Freeze rows are harms, not the player's aura.
+inline bool AuraSkill(int skill){
+    constexpr int auras[]={98,99,100,102,103,104,105,108,109,110,113,114,115,118,119,120,122,123,124,125};
+    return std::find(std::begin(auras),std::end(auras),skill)!=std::end(auras);
+}
+inline bool AnyAura(const Status& s){
+    for(const auto& d:Definitions)if(d.kind==Kind::Benefit&&AuraSkill(d.skill)&&s.Has(d.state))return true;
+    return false;
+}
 inline auto Ordered(const Status& s) {
     std::array<const Definition*,std::size(Definitions)> result{};unsigned n=0;
     for(bool harmful:{true,false})for(const auto& d:Definitions)
