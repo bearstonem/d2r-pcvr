@@ -27,7 +27,7 @@ The frame loop was left as it is.
 
 ## Replay removed, October 20
 
-Replay left VR Settings > Video > Stereo rendering. Walks on the owner's PC
+Replay left Stereo rendering (now VR Settings > Performance > Eyes drawn per frame). Walks on the owner's PC
 (RTX 5090, Ryzen 9 5950X, 3072 square per eye, 90 Hz headset):
 
 - The game set its biome at every line of its 80-unit map grid, so the
@@ -54,7 +54,7 @@ nothing: each eye's pass took 8-11 ms of CPU at every size. The game's drawing
 thread was busy 46-74% of a core, and the frame waited 2.5-8.5 ms for the
 headset because it had missed the 11.1 ms frame. The owner then stepped through
 the settings in Rogue Encampment, standing at one spot facing one way, and
-watched VR Settings' Perf page. The same timings are in the log's 10-second
+watched VR Settings' Performance page. The same timings are in the log's 10-second
 lines. The run used By turns, a 90 Hz headset and an RTX 5090 with a Ryzen 9
 5950X:
 
@@ -147,7 +147,7 @@ left draw 6.86, right draw 6.95 and OpenXR submission 1.95 ms. That is over the
 11.1 ms budget at 90 Hz, so the runtime paced the game at about 44 pairs/s.
 These are one session's 10-second averages, not a controlled benchmark.
 
-VR Settings > Video > **Stereo rendering: By turns** (now `[stereo] rendering` 1)
+VR Settings > Performance > **Eyes drawn per frame: One by turns** (`[stereo] rendering` 1)
 draws one eye per game frame and resubmits the other eye's last image at its
 own pose, following upstream's "Native OpenXR - eyes by turns" mode. It removes
 the second CPU draw from every headset frame without replaying command lists,

@@ -4,7 +4,7 @@
 #include <cmath>
 #include <cstdint>
 
-// The wrist map from the game's full (Tab) map, VR Settings > HUD > Map view = Full map /
+// The wrist map from the game's full (Tab) map, VR Settings > Wrist > Map view = Full map /
 // Full top-down. The corner map the wrist copies otherwise is culled by the game to its
 // own box, so 1x already shows all of it and nothing further out exists. The full map is
 // a screen-sized window around the hero at a zoom the game takes per call (D2R 3.3.93787):

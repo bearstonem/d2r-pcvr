@@ -20,7 +20,7 @@ native piercing result is preserved, with each enemy contacted at most once.
 The owned visual definition's four-unit height and three-unit backward offset
 are canceled so the visible spear starts at the casting hand.
 
-In **VR Settings > Controls**, **Planar spell aiming** defaults to **Off** when
+In **VR Settings > Aim**, **Keep spell shots level** defaults to **Off** when
 no preference is saved. Keep it **Off** for full up/down aiming of
 Fire Bolt, Fireball, Ice Bolt, Ice Blast, Bone Spear and Holy Bolt. The change applies to new casts from
 both hands without restarting; projectiles already in flight keep their original
@@ -29,8 +29,8 @@ The saved preference is `[gameplay] planar_spell_aim=1` (or `0` for free aim).
 
 ## Optional projectile aim assist
 
-In **VR Settings > Controls**, cycle **Projectile aim assist** through **Off**,
-**Light**, and **Strong** (the default for missing preferences), then press **Apply**. The saved setting
+In **VR Settings > Aim**, choose **Spell aim assist**: **Off**,
+**Light** or **Strong** (the default for missing preferences), then press **Apply**. The saved setting
 is `[gameplay] projectile_aim_assist=0`, `1`, or `2`, respectively. This applies
 to the supported Sorceress hand spells, Necromancer Bone Spear and Paladin Holy Bolt, independently for each
 hand. Bow, javelin and native fallback skills retain their existing aiming.

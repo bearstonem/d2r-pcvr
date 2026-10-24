@@ -64,6 +64,7 @@
 #include "../vr/prop_scan.h"
 #include "elemental_hands_renderer.h"
 #include "vr_settings_ui.h"
+#include "vr_settings_pointer.h"
 #include "frame_generation.h"
 #include "../vr/settings_menu.h"
 #include "journal.h"
@@ -210,6 +211,12 @@ notice::Cards noticeCards;
 notice::Card noticeCard;
 panels::Placement noticePlacement{};
 uint64_t noticePaintRequest=0,noticeRequestedSequence=0,noticePaintedSequence=0;
+char noticeMessage[256]{};   // a notice::Message card's text (the mod's own words)
+// The mod's own message on the notice card, e.g. a VR Settings paint failure.
+void TellPlayer(const std::string& text) {
+    std::snprintf(noticeMessage,sizeof noticeMessage,"%s",text.c_str());
+    noticeCards.Push(notice::Message,GetTickCount64());
+}
 // The skill wheel's Left claw strikes box saves [gameplay] left_hand_strikes
 // itself; until the save lands (Poll, about 0.5 s) the box shows the choice made.
 uint64_t leftStrikesSequence=0,leftStrikesAt=0;float leftStrikesWanted=0;
@@ -343,9 +350,18 @@ settings::Hit settingsHover;
 std::atomic<bool> settingsOpen{false};
 bool settingsAtlasPending=false,settingsImageReady=false;
 uint64_t settingsSession=0;
-settings::HoverHelp settingsHelp;
-int settingsHelpVisible=settings::NoHelp;
-// The game's own video options for the Perf page's warnings and line, re-read at most
+// The redesign's pointing: the filter turns the laser and the right trigger
+// into hover, pressed and clicks; the card focus picks the help card's
+// subject. Both hit-test the layout of the picture shown, so a press lands on
+// what the player sees.
+settings::pointer::PointerFilter settingsPointer;
+settings::pointer::CardFocus settingsCard;
+settings::pointer::PopoverWatch settingsPopoverWatch;   // closes an open popover when the laser points away
+settings::Hit settingsPressed;
+bool settingsTriggerDown=false;
+// The menu clock (ms) for the pointer, the card and the model's guards.
+uint64_t MenuMs();
+// The game's own video options for the Performance page's warnings and line, re-read at most
 // every 2 s while VR Settings is open and only when the game has saved them:
 // the mod's own Settings.json (settings::ModSettingsFile), or the unmodded
 // game's while the mod has none yet.
@@ -386,27 +402,33 @@ ULONGLONG settingsPaintAt=0;
 // and the painted state is what that picture shows, so a click still waits for
 // the page it lands on.
 struct SettingsPaintJob {
-    settings::Model model;settings::Hit hover;std::string status;controllers::Labels detected;
-    int help=settings::NoHelp;settings::GameVideo game{};bool monoAudio=false;
-    settings::PerformanceReadout performance{};framegen::Readout frameGen{};
-    bool calibrating=false;calibration::Flow body;
+    settings::Model model;settings::layout::LayoutInput input;
 };
-struct SettingsPainted {std::vector<uint8_t> pixels;double paintMs=0;};
+// The picture and the layout it shows: the frame thread hit-tests that layout.
+struct SettingsPainted {std::vector<uint8_t> pixels;settings::layout::Layout layout;double paintMs=0;std::string error;};
 LatestWorker<SettingsPaintJob,SettingsPainted> settingsPainter([](const SettingsPaintJob& job) {
     const auto start=hookmetrics::Nanos();
-    auto pixels=job.calibrating?settings::Paint(job.model,{},"",&job.body):
-        settings::Paint(job.model,job.hover,job.status.c_str(),nullptr,job.detected,job.help,job.game,job.monoAudio,job.performance,job.frameGen);
-    return SettingsPainted{std::move(pixels),double(hookmetrics::Nanos()-start)/1e6};
+    auto picture=settings::PaintPage(job.model,job.input);   // Width x Height straight RGBA and the layout it drew
+    return SettingsPainted{std::move(picture.pixels),std::move(picture.layout),double(hookmetrics::Nanos()-start)/1e6,std::move(picture.error)};
 });
+// What a picture shows. Everything that changes the look is compared as is
+// (hover, pressed, the card), and the clock only through buckets: the confirm
+// row's and Undo reset's guards arming, Undo reset ending, and its drain bar
+// in 100 ms steps, so those animate without repainting every frame.
 struct SettingsPicture {
-    uint64_t revision=~0ull;int hover=-1,status=-1,help=settings::NoHelp,game=-1;
-    uint64_t performance=0;settings::GameVideo gameVideo{};framegen::Readout frameGen{};   // the Perf page's
+    uint64_t revision=~0ull;settings::Hit hover{},pressed{};int card=settings::NoHelp;bool cardArmed=true;
+    int status=-1,game=-1;
+    bool confirmArmed=false,undoArmed=false;int undoDrain=-1;
+    bool popoverArmed=false;   // an open popover's options take presses (Model::PopoverGuardMs after it opened)
+    uint64_t performance=0;settings::GameVideo gameVideo{};framegen::Readout frameGen{};   // the Perf view's
     bool operator==(const SettingsPicture&)const=default;
 };
+settings::layout::Layout settingsLayout;   // the layout of the picture shown
 SettingsPicture settingsPainted;     // what the picture shown has
 SettingsPicture settingsRequested;   // what the outstanding settings request paints
 int calibrationRequestedKey=-1;      // the same for calibration
-// The Perf page's numbers: each second's frames as NoteFrame gets them.
+settings::PaintGuard settingsPaintGuard;   // a failed picture closes the panel; no requests until the next open
+// The Performance page's numbers: each second's frames as NoteFrame gets them.
 struct PerformanceWindow {double game=0,wait=0,draw=0,vr=0,period=0;uint32_t frames=0,periods=0,turns=0;ULONGLONG since=0,last=0;} performanceWindow;
 double performanceBudget=0;   // the headset's frame, from the last frame that had one
 settings::PerformanceReadout performance;
@@ -518,6 +540,7 @@ double Milliseconds() {
     static const double scale=[](){LARGE_INTEGER f{};QueryPerformanceFrequency(&f);return 1000.0/double(f.QuadPart);}();
     LARGE_INTEGER t{};QueryPerformanceCounter(&t);return double(t.QuadPart)*scale;
 }
+uint64_t MenuMs() {return uint64_t(Milliseconds());}
 bool worldWasLoaded=false,worldCalibrationPending=false,worldRecenter=false;
 std::atomic<bool> captureRequested{false};
 bool capturePair=false;
@@ -563,7 +586,7 @@ std::array<Eye,2> eyes;
 Eye uiEye;
 Eye mapEye;
 // The wrist map's view: Isometric (the game's) or Top-down, and on the
-// top-down map whether it turns with you. Configured under VR Settings > HUD.
+// top-down map whether it turns with you. Configured under VR Settings > Wrist.
 bool MapTopDownOn(){return settings::MapViewTopDown(vrsettings::Read().values[settings::MapTopDown]);}
 // Map view = Full map / Full top-down: the wrist shows the game's full map (wrist_full_map.h)
 bool MapFullOn(){return settings::MapViewFull(vrsettings::Read().values[settings::MapTopDown]);}
@@ -862,7 +885,7 @@ void CancelShieldCast() {
     if(shieldCast.issued)shieldCast.cancelled=true;else shieldCast={};
 }
 void ClearInput() {
-    settingsHelp.Clear();settingsHelpVisible=settings::NoHelp;
+    settingsPointer.Reset();settingsCard.Reset();settingsPressed={};settingsPopoverWatch.Reset();
     controllerRumbleLease.Update(0,false);
     hapticPulses.Cancel();
     spellHaptics.Clear();
@@ -1725,7 +1748,7 @@ gameplay::MeleeStyle MotionMeleeStyle() {
     }
 }
 void ResetSettingsInput() {
-    settingsHelp.Clear();settingsPainted.help=settingsHelpVisible=settings::NoHelp;
+    settingsPointer.Reset();settingsCard.Reset();settingsPressed={};settingsPopoverWatch.Reset();
     hapticPulses.Cancel();
     spellHaptics.Clear();
     panelinput::WorldInput(false);
@@ -1737,8 +1760,8 @@ void ResetSettingsInput() {
     ReleasePanelInput();
 }
 void OpenSettings() {
-    settingsImageReady=false;settingsPainted={};settingsPaintAt=0;settingsPaintRequest=0;settingsRequested={};
-    settingsModel.Open(vrsettings::Read());settingsModel.SetNotesPages(settings::ReleaseNotesPages());settingsOpen=true;settingsSession=gamestate::LocalPlayer();
+    settingsImageReady=false;settingsPainted={};settingsPaintAt=0;settingsPaintRequest=0;settingsRequested={};settingsLayout={};
+    settingsModel.Open(vrsettings::Read());settingsModel.SetNotesPages(settings::ReleaseNotesPages());settingsOpen=true;settingsSession=gamestate::LocalPlayer();settingsPaintGuard.Open();
     const auto q=math::Yaw(math::Heading(Q(head.orientation)));
     settingsBase={V(head.position)+math::Rotate(q,{0,-.06f,-1.05f}),q};
     settingsPose=Placed(settingsBase,settingsOffset);settingsHover={};ResetSettingsInput();
@@ -1752,25 +1775,41 @@ void OpenBodyCalibration() {
     if(settingsModel.open)CloseSettings();
     bodyCalibration.Begin();calibrationRelease.Consume();calibrationPrompted=true;
     calibrationSession=gamestate::LocalPlayer();calibrationPaintKey=calibrationRequestedKey=-1;
-    settingsOpen=true;settingsImageReady=false;settingsPaintAt=0;settingsPaintRequest=0;
+    settingsOpen=true;settingsImageReady=false;settingsPaintAt=0;settingsPaintRequest=0;settingsPaintGuard.Open();
     const auto q=math::Yaw(math::Heading(Q(head.orientation)));
     settingsPose=XrPose({V(head.position)+math::Rotate(q,{0,-.06f,-1.05f}),q});
     ResetSettingsInput();Say("Frame body calibration: started; upright T-pose + both triggers; Right B cancels");
 }
+// The painter could not draw VR Settings or body calibration (no pixels, or
+// no worker to ask): a laser at nothing is no use, so the panel closes (the
+// calibration is cancelled) and the notice card says why. Nothing more goes
+// to the painter until the next open (settings::PaintGuard).
+void SettingsPaintFailed(const std::string& error) {
+    const bool calibrating=bodyCalibration.Active();
+    const auto notice=settings::PaintFailureNotice(calibrating?"Body calibration":"VR Settings",error);
+    static ULONGLONG reportAt=0;const auto now=GetTickCount64();
+    if(now>=reportAt){Say(("Frame VR settings: page paint failed, panel closed, notice shown: "+(error.empty()?std::string("unknown error"):error)).c_str());reportAt=now+5000;}
+    if(calibrating){bodyCalibration.Cancel();settingsOpen=false;settingsImageReady=false;settingsPainted={};ResetSettingsInput();}
+    else if(settingsModel.open)CloseSettings();
+    TellPlayer(notice);
+}
 // Uploads the picture last asked of the settings painter once it is done;
-// true if it was uploaded.
-bool TakeSettingsPicture() {
+// 1 if it was uploaded, -1 if the painter could not draw it (the first time
+// since the panel opened: the caller has closed it), else 0.
+int TakeSettingsPicture() {
     SettingsPainted painted;
-    if(!settingsPaintRequest||settingsAtlasPending||atlasUploads.size()>=3||!settingsPainter.Take(settingsPaintRequest,painted))return false;
+    if(!settingsPaintRequest||settingsAtlasPending||atlasUploads.size()>=3||!settingsPainter.Take(settingsPaintRequest,painted))return 0;
     settingsPaintRequest=0;
+    if(settingsPaintGuard.Failed(painted.pixels.empty())){SettingsPaintFailed(painted.error);return -1;}
     const auto uploadStart=Milliseconds();
-    const bool uploaded=!painted.pixels.empty()&&UploadAtlas(settingsChain,atlasFormat,settings::AtlasWidth,settings::Height,painted.pixels,true,&settingsAtlasPending);
+    const bool uploaded=!painted.pixels.empty()&&UploadAtlas(settingsChain,atlasFormat,settings::Width,settings::Height,painted.pixels,true,&settingsAtlasPending);
+    if(uploaded)settingsLayout=std::move(painted.layout);
     static ULONGLONG reportAt=0;const auto now=GetTickCount64();
     if(uploaded&&now>=reportAt) {
         char message[160];std::snprintf(message,sizeof message,"Frame VR settings: page painted in %.2f ms on the background painter, uploaded in %.2f ms",
             painted.paintMs,Milliseconds()-uploadStart);Say(message);reportAt=now+5000;
     }
-    return uploaded;
+    return uploaded?1:0;
 }
 void CalibrationInput() {
     if(!bodyCalibration.Active())return;
@@ -1805,11 +1844,12 @@ void CalibrationInput() {
     }
     const int key=int(bodyCalibration.hint)*100+int(bodyCalibration.progress*20);
     const auto now=GetTickCount64();
-    if(key!=calibrationPaintKey&&now>=settingsPaintAt&&!settingsPaintRequest){
-        SettingsPaintJob job;job.model=settingsModel;job.calibrating=true;job.body=bodyCalibration;
+    if(key!=calibrationPaintKey&&now>=settingsPaintAt&&!settingsPaintRequest&&settingsPaintGuard.CanRequest()){
+        SettingsPaintJob job;job.model=settingsModel;job.input.calibration=settings::CalibrationOf(bodyCalibration);
         settingsPaintRequest=settingsPainter.Submit(std::move(job));calibrationRequestedKey=key;settingsPaintAt=now+100;
+        if(!settingsPaintRequest&&settingsPaintGuard.Failed(true)){SettingsPaintFailed("background painter unavailable");return;}
     }
-    if(TakeSettingsPicture())calibrationPaintKey=calibrationRequestedKey;
+    if(TakeSettingsPicture()>0)calibrationPaintKey=calibrationRequestedKey;
 }
 // Windows Mono audio (HKCU Software\Microsoft\Multimedia\Audio,
 // AccessibilityMonoMixState 1) for the title row's warning, read at most every
@@ -1828,10 +1868,37 @@ bool MonoAudioOn(ULONGLONG now) {
     }
     on=mono;return on;
 }
-void SettingsPointer(const settings::InputGate::Edges& edges,bool grip) {
+// A press the pointer filter let through: the panel's own actions run here
+// (Feel it, Calibrate body, Set eye height), the rest go to layout::Press.
+void SettingsPress(const settings::Hit& hit,uint64_t ms) {
+    if(hit.kind==settings::Kind::Recenter){ResetHeight();MotionPulse(1,haptics::Category::Interaction,.4f,35000000);return;}
+    if(hit.kind==settings::Kind::Calibrate){if(settingsModel.CanCalibrate())OpenBodyCalibration();return;}
+    if(hit.kind==settings::Kind::TestHaptics){
+        if(!settingsModel.CanTestHaptics(hit.index))return;
+        const auto levels=settings::HapticLevels(settingsModel.Get());
+        const auto category=haptics::Category(hit.index);
+        MotionPattern(category,haptics::Preview(category,hit.delta-1,settingsModel.Get()[settings::HapticShortMelee]>.5f),&levels);
+        return;
+    }
+    const int popoverBefore=settingsModel.popoverKey;
+    const auto request=settings::layout::Press(settingsModel,hit,ms);
+    if(settingsModel.popoverKey!=popoverBefore){   // Frame VR settings popover: each open and close, and why
+        char message[160];
+        if(settingsModel.popoverKey>=0)std::snprintf(message,sizeof message,"Frame VR settings popover: opened key=%d",settingsModel.popoverKey);
+        else std::snprintf(message,sizeof message,"Frame VR settings popover: closed key=%d by %s",popoverBefore,
+                           hit.kind==settings::Kind::Set?"a pick":hit.kind==settings::Kind::Close?"Right B / Close":"a press outside it");
+        Say(message);
+    }
+    if(request.sequence&&!vrsettings::Submit(request)){
+        auto result=vrsettings::Read();result.sequence=request.sequence;result.result=settings::Result::Failed;settingsModel.Observe(result);
+    }
+    if(!settingsModel.open)CloseSettings();   // Close with no draft, Discard, or Apply and close with nothing to save
+}
+void SettingsPointer(bool grip) {
     if(!settingsModel.open)return;
     const bool monoAudio=MonoAudioOn(GetTickCount64());
     settingsModel.Observe(vrsettings::Read());settingsHover={};pointerVisible=pointerHit=false;
+    if(!settingsModel.open){CloseSettings();return;}   // Apply and close: the save landed
     {   // the character, for rows that only apply to some classes or weapons
         settings::Context context;
         const auto bindings=interactionstate::Read();
@@ -1841,9 +1908,8 @@ void SettingsPointer(const settings::InputGate::Edges& edges,bool grip) {
         context.thrown=weapon==D2RVR_TYPE_JAVELIN||weapon==D2RVR_TYPE_THROWING||gamestate::RightThrowingPotion();   // a throwing potion's toss is lifted too
         settingsModel.SetContext(context);
     }
-    int helpTarget=settings::NoHelp;
-    const auto previousPage=settingsModel.page;
-    const bool previousMenu=settingsModel.controllerMenu;
+    const auto previousView=settingsModel.view;
+    float canvasX=-1,canvasY=-1;
     XrSpaceLocation aim{XR_TYPE_SPACE_LOCATION};
     const auto needed=XR_SPACE_LOCATION_POSITION_VALID_BIT|XR_SPACE_LOCATION_ORIENTATION_VALID_BIT|
                       XR_SPACE_LOCATION_POSITION_TRACKED_BIT|XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT;
@@ -1852,55 +1918,86 @@ void SettingsPointer(const settings::InputGate::Edges& edges,bool grip) {
         pointerHit=math::IntersectPanel(ray,direction,V(settingsPose.position),Q(settingsPose.orientation),settingsWidth,settingsHeight,hit);
         beamLength=pointerHit?hit.distance:1.5f;const auto mid=ray+direction*(beamLength*.5f);
         beamPose=XrPose({mid,math::BeamOrientation(direction,V(head.position)-mid)});pointerVisible=true;
-        if(pointerHit){const auto rows=settingsModel.Rows();settingsHover=settings::HitTest(settingsModel.page,hit.u,hit.v,settingsModel.controllerMenu,&rows);dotPose=settingsPose;
-            helpTarget=settings::HelpAt(settingsModel.page,hit.u,hit.v,settingsModel.controllerMenu,&settingsModel.Get(),monoAudio,&settingsModel.context);
+        if(pointerHit){canvasX=hit.u*settings::Width;canvasY=hit.v*settings::Height;dotPose=settingsPose;
             const auto p=hit.point+math::Rotate(Q(settingsPose.orientation),{0,0,.004f});dotPose.position={p.x,p.y,p.z};}
     }
     const bool grabbing=GrabPanel(settingsPose,settingsBase,settingsOffset,grip&&pointerVisible,pointerHit,Float(trigger,0)>.2f,aim.pose);
-    if(edges.click&&!grabbing&&pointerHit&&settingsImageReady&&settingsPainted.revision==settingsModel.revision){
-        if(settingsHover.kind==settings::Kind::Close)CloseSettings();
-        else if(settingsHover.kind==settings::Kind::Recenter){ResetHeight();MotionPulse(1,haptics::Category::Interaction,.4f,35000000);}
-        else if(settingsHover.kind==settings::Kind::Calibrate&&settingsModel.ready&&!settingsModel.Busy()&&!settingsModel.Dirty())OpenBodyCalibration();
-        else if(settingsHover.kind==settings::Kind::TestHaptics&&settingsModel.CanTestHaptics(settingsHover.index)){
-            const auto levels=settings::HapticLevels(settingsModel.Get());
-            const auto category=haptics::Category(settingsHover.index);
-            MotionPattern(category,haptics::Preview(category,settingsHover.delta-1,settingsModel.Get()[settings::HapticShortMelee]>.5f),&levels);
-        }
-        else {
-            const auto request=settingsModel.Click(settingsHover);
-            if(request.sequence&&!vrsettings::Submit(request)){
-                auto result=vrsettings::Read();result.sequence=request.sequence;result.result=settings::Result::Failed;settingsModel.Observe(result);
+    // The laser on the picture shown, in canvas pixels. Grabbing the panel,
+    // missing it, or a picture of another view (just switched) is off the
+    // panel for the filter, which cancels a press.
+    const uint64_t ms=MenuMs();
+    settingsTriggerDown=Float(trigger,0)>(settingsTriggerDown?.20f:.55f);
+    const bool onPanel=pointerHit&&!grabbing&&settingsImageReady&&!settingsLayout.elements.empty()&&settingsLayout.view==settingsModel.view;
+    const auto pointed=settingsPointer.Step(settingsLayout,ms,onPanel,canvasX,canvasY,settingsTriggerDown);
+    settingsHover=pointed.hover;settingsPressed=pointed.pressed;
+    settingsCard.Step(ms,onPanel?settings::layout::HelpAt(settingsLayout,canvasX,canvasY):settings::NoHelp,canvasX,canvasY,onPanel,settingsLayout.card);
+    if(pointed.blocked){
+        MotionPulse(1,haptics::Category::Interaction,.2f,15000000);
+        static ULONGLONG reportAt=0;const auto now=GetTickCount64();
+        if(now>=reportAt){Say("Frame VR settings: press on a locked control blocked");reportAt=now+1000;}
+    }
+    // A click waits for the page it lands on; a hold-repeat or a drag keeps
+    // stepping the control it holds while the picture catches up.
+    if(pointed.click.kind!=settings::Kind::None&&(pointed.held||settingsPainted.revision==settingsModel.revision)){
+        if(!pointed.held) {
+            static ULONGLONG reportAt=0;const auto now=GetTickCount64();
+            if(now>=reportAt) {
+                char message[160];std::snprintf(message,sizeof message,"Frame VR settings: click kind=%d index=%d delta=%d value=%g view=%d",
+                    int(pointed.click.kind),pointed.click.index,pointed.click.delta,double(pointed.click.value),int(settingsModel.view));
+                Say(message);reportAt=now+200;
             }
         }
+        SettingsPress(pointed.click,ms);
     }
     if(!settingsModel.open)return;
-    const int hover=int(settingsHover.kind)*100+(settingsHover.index+1)*3+settingsHover.delta;
+    // A new view starts with a fresh pointer and card; Open's focus key points
+    // the card at the row it named (with the card buttons' guard).
+    if(settingsModel.view!=previousView){settingsPointer.Reset();settingsCard.Reset();settingsCard.Focus(settings::NoHelp,ms);settingsHover=settingsPressed={};}
+    if(settingsModel.focusKey>=0){settingsCard.Focus(settingsModel.focusKey,ms);settingsModel.focusKey=-1;}
+    // An open popover closes when the laser stays off it and its row (or off the panel).
+    if(settingsModel.popoverKey>=0&&settingsLayout.view==settingsModel.view&&
+       settingsPopoverWatch.Step(ms,true,onPanel,canvasX,canvasY,settingsLayout.popover,settingsLayout.popoverRow)){
+        char message[160];std::snprintf(message,sizeof message,"Frame VR settings popover: closed key=%d by pointing away",settingsModel.popoverKey);Say(message);
+        settingsModel.popoverKey=-1;++settingsModel.revision;
+    }else if(settingsModel.popoverKey<0)settingsPopoverWatch.Reset();
     const int status=!foveation::Available()?0:!gazeSupported?1:gazeValid?3:2;
     const char* descriptions[]={"Foveated shading unavailable on this GPU/runtime; full-quality rendering.",
         "Foveated shading available. Eye tracking unavailable on this headset/runtime.",
         "Foveated shading available. Gaze inactive or waiting for tracked samples.",
         "Foveated shading available. Eye-tracking samples are active."};
     const auto now=GetTickCount64();
-    if(previousPage!=settingsModel.page||previousMenu!=settingsModel.controllerMenu)helpTarget=settings::NoHelp;
-    const int help=settingsHelpVisible=settingsHelp.Step(helpTarget,now);
     const auto game=GameVideoOptions(now);
     const int warnings=game.Code()|(monoAudio?4:0);
     // One request at a time, at most every 100 ms as when it was painted here.
     // Each picture is shown when done, even if the pointer moved on meanwhile:
     // the painted state names what it shows, and the next request catches up.
-    // The Perf page repaints with each second's numbers; the others never for them.
-    const bool performancePage=settingsModel.page==settings::Page::Performance;
+    // The Perf view repaints with each second's numbers; the others never for them.
+    const bool performanceView=settingsModel.view==settings::View::Performance;
     const bool fresh=performance.valid&&now-performanceAt<=2000;
-    const auto frameGen=performancePage?FrameGenNow(now):framegen::Readout{};
-    const SettingsPicture wanted{settingsModel.revision,hover,status,help,warnings,performancePage&&fresh?performanceSerial:0,
-                                 performancePage?game:settings::GameVideo{},frameGen};
-    if(!(wanted==settingsPainted)&&now>=settingsPaintAt&&!settingsPaintRequest){
+    SettingsPicture wanted;
+    wanted.revision=settingsModel.revision;wanted.hover=settingsHover;wanted.pressed=settingsPressed;
+    wanted.card=settingsCard.Shown();wanted.cardArmed=settingsCard.ButtonsArmed(ms);
+    wanted.status=status;wanted.game=warnings;
+    wanted.confirmArmed=settingsModel.confirmClose&&ms>=settingsModel.confirmAt+settings::Model::ConfirmGuardMs;
+    const bool undoing=ms<settingsModel.undoResetUntil;
+    wanted.undoArmed=undoing&&ms>=settingsModel.undoResetAt+settings::Model::UndoResetGuardMs;
+    wanted.undoDrain=undoing?int((settingsModel.undoResetUntil-ms)/100):-1;
+    wanted.popoverArmed=settingsModel.popoverKey>=0&&ms>=settingsModel.popoverAt+settings::Model::PopoverGuardMs;
+    wanted.performance=performanceView&&fresh?performanceSerial:0;
+    wanted.gameVideo=performanceView?game:settings::GameVideo{};
+    wanted.frameGen=performanceView?FrameGenNow(now):framegen::Readout{};   // what OFXR Bridge is doing, under the frame times
+    if(!(wanted==settingsPainted)&&now>=settingsPaintAt&&!settingsPaintRequest&&settingsPaintGuard.CanRequest()){
         char resolutionStatus[160];resolution::Describe(resolutionStatus,sizeof resolutionStatus,{width,height});
-        settingsPaintRequest=settingsPainter.Submit({settingsModel,settingsHover,performancePage?resolutionStatus:descriptions[status],
-                                                    detectedControllers,help,game,monoAudio,fresh?performance:settings::PerformanceReadout{},frameGen});
+        SettingsPaintJob job;job.model=settingsModel;
+        auto& in=job.input;
+        in.hover=settingsHover;in.pressed=settingsPressed;in.card=wanted.card;in.cardArmed=wanted.cardArmed;in.nowMs=ms;
+        in.monoAudio=monoAudio;in.game=game;in.performance=fresh?performance:settings::PerformanceReadout{};in.frameGen=wanted.frameGen;
+        in.runtimeStatus=performanceView?resolutionStatus:descriptions[status];in.detected=detectedControllers;
+        settingsPaintRequest=settingsPainter.Submit(std::move(job));
         settingsRequested=wanted;settingsPaintAt=now+100;
+        if(!settingsPaintRequest&&settingsPaintGuard.Failed(true)){SettingsPaintFailed("background painter unavailable");return;}
     }
-    if(TakeSettingsPicture())settingsPainted=settingsRequested;
+    if(TakeSettingsPicture()>0)settingsPainted=settingsRequested;
 }
 // An emptied bottle let go of falls into the world as a Box3D body: onto the
 // floor under the player, against the game's wall cells around it. It stays
@@ -2105,12 +2202,15 @@ void Input() {
     const bool inventoryPressed=(inventoryButton.Update((controls.buttons&menus::X)!=0)&&!dualBindings)||gripMenuPressed;
     const bool menuPressed=menuButton.Update((controls.buttons&menus::Start)!=0);
     const bool settingsChord=!dualBindings&&menus::SettingsChord(physical,false);
-    const auto settingsEdges=settingsInputGate.Step(motionHeadTracked,settingsChord,Float(trigger,0),Bool(secondary,0));
+    const auto settingsEdges=settingsInputGate.Step(motionHeadTracked,settingsChord,Bool(secondary,0));
     bool settingsOwned=settingsModel.open||calibrationRelease.Step(bodyCalibration.Active(),Float(trigger,0),Float(trigger,1),physical.buttons&(menus::A|menus::B|menus::X|menus::Y|menus::Start));
     if(settingsModel.open&&settingsSession!=gamestate::LocalPlayer()){CloseSettings();settingsOwned=true;}
-    if(settingsEdges.chord&&!bodyCalibration.Active()&&!calibrationRelease.blocked){if(settingsModel.open)CloseSettings();else OpenSettings();settingsOwned=true;}
-    else if(settingsModel.open&&(settingsEdges.cancel||menuPressed||gripMenuPressed)){
-        if(!settingsModel.DismissControllerMenu())CloseSettings();settingsOwned=true;
+    if(settingsEdges.chord&&!settingsModel.open&&!bodyCalibration.Active()&&!calibrationRelease.blocked){OpenSettings();settingsOwned=true;}
+    else if(settingsModel.open&&(settingsEdges.chord||settingsEdges.cancel||menuPressed||gripMenuPressed)){
+        // Right B, Start, the inventory grip click and the settings chord are
+        // Close: with a draft it asks first, and again on the confirm row it
+        // is Keep editing (layout::Press).
+        SettingsPress({settings::Kind::Close},MenuMs());settingsOwned=true;
     }
     settingsOwned=settingsOwned||settingsModel.open;
     bool focused=gameWindow&&GetForegroundWindow()==gameWindow;
@@ -2136,7 +2236,7 @@ void Input() {
     }
     if(!settingsOwned&&!settingsChord)MenuPointer(controls);
     else {nativeMenuPad={};menuNavigation.Reset();panelinput::UseController();pointerVisible=pointerHit=false;triggerWasDown=Float(trigger,0)>.2f;cancelWasDown=Bool(secondary,0);}
-    SettingsPointer(settingsEdges,(controls.buttons&menus::RightBumper)!=0);
+    SettingsPointer((controls.buttons&menus::RightBumper)!=0);
     settingsOwned=settingsOwned||bodyCalibration.Active();
     auto& s=*tracking.data;s.version=D2RVR_SHARED_VERSION;s.headValid=1;
     const auto q=Q(head.orientation);
@@ -2318,7 +2418,11 @@ void Input() {
         noticeCard=noticeCards.Step(now);
         // A text the UI thread has not read yet is tried again next frame.
         NoticeJob job;
-        if(noticeCard.kind>=0&&noticeCard.sequence!=noticeRequestedSequence&&gamestate::NoticeText(noticeCard.kind,job.text,sizeof job.text)) {
+        auto text=[&] {
+            if(noticeCard.kind!=notice::Message)return gamestate::NoticeText(noticeCard.kind,job.text,sizeof job.text);
+            std::snprintf(job.text,sizeof job.text,"%s",noticeMessage);return true;
+        };
+        if(noticeCard.kind>=0&&noticeCard.sequence!=noticeRequestedSequence&&text()) {
             noticePaintRequest=noticePainter.Submit(job);noticeRequestedSequence=noticeCard.sequence;
         }
         std::vector<uint8_t> painted;
@@ -2368,7 +2472,7 @@ void Input() {
             bloodPaintRequest=0;
         }
     }
-    // Bow path laser color (VR Settings > Combat > Bow path laser); Off keeps the last.
+    // Arrow path line color (VR Settings > Targets > Arrow path line); Off keeps the last.
     if(const float hue=hudSettings.values[settings::BowLaser];hue>=0&&hue!=bowLaserHue&&!bowLaserAtlasPending&&atlasUploads.size()<3) {
         if(UploadAtlas(bowLaserChain,atlasFormat,bowlaser::AtlasWidth,bowlaser::AtlasHeight,bowlaser::Paint(hue),true,&bowLaserAtlasPending))bowLaserHue=hue;
     }
@@ -2438,7 +2542,7 @@ void Input() {
     }
     // Low-life heartbeat (Classic and Unleashed): queue the next beat ~80 ms before
     // the current one ends, at the loudness and tempo of the 10 % step of life below
-    // VR Settings > Combat > Heartbeat starts at. Above it, Off, dead or stale vitals:
+    // VR Settings > Survival > Heartbeat starts at. Above it, Off, dead or stale vitals:
     // the last beat finishes, then silence.
     {
         heartStream.Reap();breakStream.Reap();   // breakStream: the guard-break bone snap
@@ -2862,7 +2966,7 @@ void Input() {
         elementalInput.activation[h]=handOutput.activation[h];
     }
     elementalScene=elementalState.Step(elementalInput,interactionInput.snapshot);
-    // A torch club's flame (VR Settings > Video > Torch flame); its light is
+    // A torch club's flame (VR Settings > World > Torch flame); its light is
     // vrcam's and stays either way.
     const bool torchFlame=hudSettings.values[settings::TorchFlame]>.5f;
     for(int h=0;h<2&&torchFlame;++h) {
@@ -4124,10 +4228,12 @@ void EndPair() {
         }
     }
     // The quest / level-up card stays where it came up, like the native
-    // dialogue surfaces; opaque menus and VR Settings hold it back.
+    // dialogue surfaces; opaque menus and VR Settings hold it back. The mod's
+    // own message also shows over the flat menu panel (VR Settings opened
+    // from the title screen could not draw).
     XrCompositionLayerQuad noticeQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
     if(noticeImageReady&&noticeChain&&noticeCard.kind>=0&&noticePaintedSequence==noticeCard.sequence&&
-       layer&&!panelMode&&!blackMenu&&!settingsModel.open&&!bodyCalibration.Active()) {
+       layer&&(!panelMode||noticeCard.kind==notice::Message)&&!blackMenu&&!settingsModel.open&&!bodyCalibration.Active()) {
         if(noticeCard.place)noticePlacement=notice::Place(V(head.position),Q(head.orientation));
         const auto before=count;
         motionQuad(noticeQuad,XrPose({noticePlacement.position,noticePlacement.orientation}),notice::PanelWidth,notice::PanelHeight,
@@ -4195,17 +4301,8 @@ void EndPair() {
     }
     XrCompositionLayerQuad settingsPanel{XR_TYPE_COMPOSITION_LAYER_QUAD};
     if(layer&&(settingsModel.open||bodyCalibration.Active())&&settingsImageReady){
-        // Extend to the right, without moving or shrinking any control. Input
-        // still intersects the original panel. Calibration uses only that crop.
-        // The card while help is wanted and the picture shown has one: from one
-        // card to the next, the old stays until the new is painted, not a narrow frame.
-        const bool showHelp=!bodyCalibration.Active()&&settingsHelpVisible!=settings::NoHelp&&settingsPainted.help!=settings::NoHelp;
-        const int pixels=showHelp?settings::AtlasWidth:settings::Width;
-        const float fullWidth=settingsWidth*pixels/settings::Width;
-        auto pose=settingsPose;
-        const auto shift=math::Rotate(Q(pose.orientation),{(fullWidth-settingsWidth)*.5f,0,0});
-        pose.position.x+=shift.x;pose.position.y+=shift.y;pose.position.z+=shift.z;
-        motionQuad(settingsPanel,pose,fullWidth,settingsHeight,{{0,0},{pixels,settings::Height}},settingsChain);
+        // The help card is inside the panel: the atlas is the panel, Width wide.
+        motionQuad(settingsPanel,settingsPose,settingsWidth,settingsHeight,{{0,0},{settings::Width,settings::Height}},settingsChain);
     }
     XrCompositionLayerQuad laser{XR_TYPE_COMPOSITION_LAYER_QUAD},dot{XR_TYPE_COMPOSITION_LAYER_QUAD};
     if(layer&&(settingsModel.open||panelMode||spatialMode||(interactionVisible&&interactionOutput.wheel))&&pointerChain&&pointerVisible) {

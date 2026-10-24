@@ -73,7 +73,7 @@ the game's Master x Combat volume; `[gameplay] riposte_sound_file` replaces it.
 ## Low-life heartbeat
 
 `guard-heartbeat.wav` (16-bit PCM, 48 kHz stereo, 0.50 s) is one lub-dub played
-while life is low, below VR Settings > Combat > Heartbeat starts at (60 % by default). It is the third beat of "Heartbeat" by
+while life is low, below VR Settings > Survival > Heartbeat starts at (60 % by default). It is the third beat of "Heartbeat" by
 SoundReality on Pixabay (item 549797), supplied by the contributor (ChuckRibbits)
 as an MP3: decoded at its own 48 kHz, cut from 20 ms before the lub to 0.50 s with a
 5 ms fade in and a 60 ms fade out, and peak-normalised to -1 dBFS. It is embedded by
@@ -102,3 +102,30 @@ It is embedded by `interaction_assets.rc` and decoded once with WIC on the blood
 painter thread. `blood_screen.h` places the cells around the visor (`Layout`),
 grows drips from each placement's largest blobs and keeps the view's centre
 clear. A missing or wrong-sized strip falls back to generated discs.
+
+## Menu fonts
+
+`menu/fonts/Cinzel-wght.ttf` (variable, the Bold 700 instance is used),
+`menu/fonts/AlegreyaSans-Medium.ttf` and `menu/fonts/AlegreyaSans-Bold.ttf` are
+unmodified copies from google/fonts (`ofl/cinzel`, `ofl/alegreyasans`), SIL Open
+Font License 1.1; the license texts are `../licenses/Cinzel-OFL.txt` and
+`../licenses/AlegreyaSans-OFL.txt`. They are embedded by `vr_settings_assets.rc`
+and loaded by `vr_settings_draw.cpp` through DirectWrite's in-memory font loader;
+nothing is installed on the system. Bold is the chosen chip, the switch's On /
+Off, values, the current tab and Apply.
+`vr-settings-preview.exe --d2d-spike <out.png>` renders a test frame with them.
+
+## Menu icons
+
+`menu/icons-v2.inc` is the VR Settings icon set (39 icons on a 48 x 48
+grid), original artwork drawn for this project with no third-party paths, turned
+into a C++ table of SVG path layers (solid, solid with even-odd holes, band,
+carved detail line, carved area). `vr_settings_draw.cpp` reads the path data
+into Direct2D path geometries once per painter and tints them at draw time,
+with the 2 px ink outline and the carving drawn as in the SVG. Geometries rather
+than a rasterized atlas: the icons are drawn at 20 to 64 px, stay sharp at every
+size, need no build step or bitmap resource, and the table is about 12 KB. The
+cartouche and the band's sigil (also original) are path strings in
+`vr_settings_draw.cpp`.
+`vr-settings-preview.exe --draw-sheet <out.png>` renders every icon and every
+control in every state.

@@ -76,7 +76,7 @@ run the relevant Python fixture tests, for example:
 
 For isolated gameplay testing, see [developer mode](steamvr/DEVELOPMENT_SCENARIOS.md).
 `--frame-dev` selects a separate offline character list; its DEV tools provide
-level presets, class gear and travel. VR Settings > Release Notes is available
+level presets, class gear and travel. VR Settings > What's new is available
 in regular and developer builds.
 `build_windows.ps1 -Developer -Test` stages a candidate separately for this mode.
 Run `prepare_dev_scenarios_test.py` and `launch_windows_test.py` after changing

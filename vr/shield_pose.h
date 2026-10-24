@@ -100,7 +100,7 @@ inline bool TurnBetween(const Frame& a,const Frame& b,bow::Vec& axis,float& angl
     if(s<1e-6f){axis={1,0,0};angle=0;return true;}
     axis=q*(1/s);angle=2*std::atan2(s,w);return true;
 }
-// VR Settings > Shield > Shield follows ([gameplay] shield_follow_pct): t=0 strapped to the forearm (the
+// VR Settings > Shield > Shield wrist turn ([gameplay] shield_follow_pct): t=0 strapped to the forearm (the
 // wrist's bend ignored), 1 the hand's own turn - a slerp, so every share in
 // between turns smoothly and the same way for every class and shield.
 inline Frame Blend(const Frame& strapped,const Frame& wrist,float t) {
@@ -133,7 +133,7 @@ inline float RollSetting(float deg) {
     if(!std::isfinite(deg))return 0;
     return std::round(std::clamp(deg,-kRollMaxDeg,kRollMaxDeg)/kRollStepDeg)*kRollStepDeg+0.f;
 }
-// VR Settings > Shield > Shield follows ([gameplay] shield_follow_pct):
+// VR Settings > Shield > Shield wrist turn ([gameplay] shield_follow_pct):
 // 0 strapped to the forearm .. 100 turns with the wrist, in 10% steps; 50 when it
 // is not a number.
 constexpr float kFollowDefaultPct=50,kFollowStepPct=10;

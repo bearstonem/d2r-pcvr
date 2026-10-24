@@ -15,7 +15,7 @@ constexpr float DistanceWeight=1.f;   // degrees per cell
 constexpr float KeepMargin=3.f;       // score the current target is let off
 constexpr float NearCells=12.f,MidCells=24.f; // color bands: near / mid / far
 constexpr int MaxTargets=64;
-// VR Settings > Aim > Aim follows your view: the eyes catch a monster only
+// VR Settings > Aim > Aim with your view: the eyes catch a monster only
 // within TunnelDeg of the head's heading and keep it while within KeepDeg; the
 // hands pick only monsters within KeepDeg of it (Jeff's headset tests, 2026-10-22).
 constexpr float TunnelDeg=17.f,KeepDeg=30.f;

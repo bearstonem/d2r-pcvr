@@ -1,178 +1,276 @@
-// Synthetic UI preview; does not load the game or its configuration.
+// Synthetic VR Settings previews and checks; never loads the game or its configuration.
+//   --pages <folder>     every View and its key states as PNGs (PreviewShots), with timings
+//   --pages-check        every View for the title screen and four classes, plain and with
+//                        warnings: painted without error, and every text fits its element
+//   --fit-check          every row's help card at its real size (at its value, changed with
+//                        Undo / Default / Feel it, each option pointed), the preset, tab,
+//                        tool, pending and confirm cards: the whole help fits, nothing overflows
+//   --worker-check       pages painted on a background worker equal this thread's
+//   --draw-sheet <png>   the drawing layer's component sheet (vr_settings_draw.h)
 #include "vr_settings_ui.h"
-#include "release_notes.h"
 #include "latest_worker.h"
-#include "wide_text.h"
+#include "vr_settings_draw.h"
 #include <windows.h>
+#include <objbase.h>
+#include <wincodec.h>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
+#include <string>
+#include <vector>
+using namespace framevr::settings;
+namespace L=framevr::settings::layout;
+namespace C=framevr::settings::content;
+static_assert(draw::CanvasWidth==Width&&draw::CanvasHeight==Height);
+// Straight RGBA to a PNG file through WIC.
+static bool SavePng(const char* path,const std::vector<uint8_t>& rgba,int width,int height){
+    const HRESULT co=CoInitializeEx(nullptr,COINIT_MULTITHREADED);
+    wchar_t wide[MAX_PATH]{};MultiByteToWideChar(CP_UTF8,0,path,-1,wide,MAX_PATH);
+    std::vector<uint8_t> bgra=rgba;for(size_t i=0;i<bgra.size();i+=4)std::swap(bgra[i],bgra[i+2]);
+    IWICImagingFactory* wic=nullptr;IWICStream* stream=nullptr;IWICBitmapEncoder* encoder=nullptr;IWICBitmapFrameEncode* frame=nullptr;
+    WICPixelFormatGUID format=GUID_WICPixelFormat32bppBGRA;
+    const bool ok=SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&wic)))&&
+        SUCCEEDED(wic->CreateStream(&stream))&&SUCCEEDED(stream->InitializeFromFilename(wide,GENERIC_WRITE))&&
+        SUCCEEDED(wic->CreateEncoder(GUID_ContainerFormatPng,nullptr,&encoder))&&SUCCEEDED(encoder->Initialize(stream,WICBitmapEncoderNoCache))&&
+        SUCCEEDED(encoder->CreateNewFrame(&frame,nullptr))&&SUCCEEDED(frame->Initialize(nullptr))&&SUCCEEDED(frame->SetSize(width,height))&&
+        SUCCEEDED(frame->SetPixelFormat(&format))&&format==GUID_WICPixelFormat32bppBGRA&&
+        SUCCEEDED(frame->WritePixels(height,width*4,UINT(bgra.size()),bgra.data()))&&SUCCEEDED(frame->Commit())&&SUCCEEDED(encoder->Commit());
+    for(IUnknown* p:{static_cast<IUnknown*>(frame),static_cast<IUnknown*>(encoder),static_cast<IUnknown*>(stream),static_cast<IUnknown*>(wic)})if(p)p->Release();
+    if(SUCCEEDED(co))CoUninitialize();
+    return ok;
+}
+static int DrawSheetPreview(const char* out){
+    const auto sheet=draw::DrawSheet(50);
+    if(!sheet.error.empty()||sheet.rgba.empty()){std::fprintf(stderr,"Draw sheet failed: %s\n",sheet.error.c_str());return 40;}
+    std::printf("Draw sheet: first page %.1f ms (painter, fonts, icons, panel cache); full Aim page repaint %.2f ms average over 50; whole sheet (4 canvases) %.1f ms\n",sheet.firstMs,sheet.repaintMs,sheet.sheetMs);
+    if(!SavePng(out,sheet.rgba,sheet.width,sheet.height)){std::fprintf(stderr,"Could not write %s\n",out);return 41;}
+    std::printf("Wrote %s (%d x %d)\n",out,sheet.width,sheet.height);return 0;
+}
+static int Pages(const char* dir){
+    for(const auto& s:PreviewShots()){
+        const auto path=std::string(dir)+"\\"+s.name+".png";
+        if(s.picture.pixels.empty()||!SavePng(path.c_str(),s.picture.pixels,Width,Height)){std::fprintf(stderr,"%s: %s\n",s.name.c_str(),s.picture.error.c_str());return 50;}
+        std::printf("%-28s build %.2f ms, draw %.2f ms (first); warm %.2f ms\n",s.name.c_str(),s.picture.buildMs,s.picture.drawMs,s.warmMs);
+    }
+    return 0;
+}
+
+// ---- the checks' panels ----
+static constexpr int Classes[]={-1,heroclass::Amazon,heroclass::Sorceress,heroclass::Paladin,heroclass::Barbarian};
+static const char* ClassName(int c){return c<0?"title screen":c==heroclass::Amazon?"Amazon":c==heroclass::Sorceress?"Sorceress":c==heroclass::Paladin?"Paladin":"Barbarian";}
+static const char* ViewName(int v){return C::PageOf(View(v)).name;}
+struct Setup {Model m;L::LayoutInput in;};
+// Every dependent row shown (the outline's hands, ground skill circles, foveation strength, wipe).
+static Values AllRows(bool smooth){
+    Values v=Defaults();
+    v[TargetHighlight]=60;v[GroundAim]=1;v[SpellLock]=1;v[Foveation]=1;v[BloodVisor]=1;v[SmoothTurn]=smooth?1.f:0.f;v[Seated]=0;
+    return v;
+}
+static Setup Base(View v,int hero,const Values& values=AllRows(false),bool adapter=true){
+    Setup x;Snapshot s;s.values=values;s.ready=true;s.offlineDifficultyAvailable=adapter;
+    x.m.Open(s);x.m.SetNotesPages(ReleaseNotesPages());x.m.SetContext({hero,hero==heroclass::Amazon,hero==heroclass::Sorceress,false});x.m.view=v;
+    x.in.nowMs=100000;x.in.detected={{framevr::controllers::Layout::Touch,framevr::controllers::Layout::Touch}};
+    // transport.cpp: the Performance view shows render_resolution's Describe (its widest), the others the foveation status.
+    x.in.runtimeStatus=v==View::Performance?"VR source: 8192 x 8192 per eye (desktop fallback)":"Foveated shading available. Eye tracking unavailable on this headset/runtime.";
+    x.in.performance={true,true,90,11.1f,3.4f,2.6f,4.1f,.9f};
+    return x;
+}
+static int problems=0;
+static void Fail(const std::string& what){if(problems<40)std::fprintf(stderr,"%s\n",what.c_str());++problems;}
+static void Report(const std::string& where,const std::vector<std::string>& list){for(const auto& p:list)Fail(where+": "+p);}
+
+// --pages-check
+static int PagesCheck(){
+    int pages=0;
+    auto paint=[&](const Setup& x,const std::string& where){
+        const auto picture=PaintPage(x.m,x.in);++pages;
+        if(picture.pixels.size()!=size_t(Width)*Height*4){Fail(where+": paint error: "+picture.error);return;}
+        if(picture.pixels[(size_t(Height/2)*Width+Width/2)*4+3]!=255)Fail(where+": the panel is not opaque");
+        Report(where,FitProblems(picture.layout));
+    };
+    for(int hero:Classes)for(int v=0;v<int(View::Count);++v){
+        const std::string where=std::string(ViewName(v))+", "+ClassName(hero);
+        paint(Base(View(v),hero),where);
+        paint(Base(View(v),hero,AllRows(true)),where+", smooth turning");
+        // Warnings: Mono audio, the GPU wait not deferred, the game's video options, the widest frame times.
+        Values w=AllRows(false);w[DeferGpuWait]=0;
+        Setup x=Base(View(v),hero,w);x.in.monoAudio=true;x.in.game={true,true};x.in.frameGen={framevr::framegen::State::Active,1,1,2,1,1,0,0,0};   // frame generation's longest line
+        x.in.performance={true,false,144,13.9f,33.3f,99.9f,33.3f,33.3f};x.in.performance.mixed=true;   // three-digit fps, CPU 99.9 ms
+        paint(x,where+", warnings");
+        Setup off=Base(View(v),hero);off.m.ready=false;paint(off,where+", unavailable");
+        paint(Base(View(v),hero,AllRows(false),false),where+", no offline adapter");
+    }
+    {   // every popover open (the rows whose named list is too long for chips), every class, with and without a pointed option
+        for(int hero:Classes)for(int v=0;v<int(View::Count);++v){
+            const Setup probe=Base(View(v),hero);
+            const auto rows=L::RowsOf(View(v),probe.m.Get(),probe.m.context);
+            for(int i=0;i<rows.count;++i){
+                const auto* r=L::ContentTables().Row(rows.keys[size_t(i)]);
+                {const auto control=L::ControlOf(*r,probe.m.Get(),probe.m.context,ThisThreadMeasure());if(control!=L::Control::Popover&&control!=L::Control::Color)continue;}
+                for(bool pointed:{false,true}){
+                    Setup x=Base(View(v),hero);x.m.popoverKey=r->key;x.m.popoverAt=0;x.in.card=r->key;
+                    if(pointed){int n=0;const auto* o=C::OptionsFor(*r,x.m.context,n);if(n)x.in.hover={Kind::Set,r->key,0,o[n-1].value};}
+                    const auto picture=PaintPage(x.m,x.in);++pages;
+                    const std::string where=std::string("popover ")+r->label+", "+ClassName(hero)+(pointed?", pointed":"");
+                    if(picture.pixels.size()!=size_t(Width)*Height*4){Fail(where+": paint error: "+picture.error);continue;}
+                    if(picture.layout.popover.w<=0)Fail(where+": no popover");
+                    Report(where,FitProblems(picture.layout));
+                }
+            }
+        }
+    }
+    {   // frame generation's status on its row and card, every state, NVIDIA and FidelityFX, by turns or not
+        for(int state=0;state<=int(framevr::framegen::State::NeedsBothEyes);++state)for(int mode:{1,2})for(int hero:Classes){
+            Values v=AllRows(false);v[FrameGeneration]=float(mode);
+            Setup x=Base(View::Performance,hero,v);x.in.card=FrameGeneration;
+            x.in.frameGen={framevr::framegen::State(state),mode==2?1:0,1,2,1,1,0,1,-1};
+            const auto picture=PaintPage(x.m,x.in);++pages;
+            Report(std::string("frame generation ")+framevr::framegen::StateName(framevr::framegen::State(state))+", "+ClassName(hero),FitProblems(picture.layout));
+        }
+    }
+    {   // the fallback rows (content::FallbackDemo): every view, both More pages, with and without the Mono audio warning
+        static const L::Tables demo=L::TablesOf(C::FallbackDemo());
+        for(int hero:Classes)for(int v=0;v<int(View::Count);++v)for(int p=0;p<2;++p)for(bool mono:{false,true}){
+            Setup x=Base(View(v),hero);x.m.morePage=p;x.in.monoAudio=mono;
+            const auto picture=PaintPage(x.m,x.in,&demo);++pages;
+            const std::string where=std::string("fallback ")+ViewName(v)+", "+ClassName(hero)+(mono?", mono":"");
+            if(picture.pixels.size()!=size_t(Width)*Height*4){Fail(where+": paint error: "+picture.error);continue;}
+            Report(where,FitProblems(picture.layout));
+        }
+    }
+    {   // body calibration, both phases
+        Setup x=Base(View::Body,-1);framevr::calibration::Flow f;f.Begin();f.phase=framevr::calibration::Phase::Hold;f.hint=framevr::calibration::Hint::Arms;f.progress=.55f;
+        x.in.calibration=CalibrationOf(f);paint(x,"calibration");
+        x.in.calibration.hint=int(framevr::calibration::Hint::Saved);x.in.calibration.measured=true;x.in.calibration.eyeHeight=2.3f;x.in.calibration.armSpan=2.6f;paint(x,"calibration saved");
+    }
+    {   // the longest release (NotesMaxLines lines): every page fits above the card with Previous / Next,
+        // and Next walks to the last page, ready or not (paging needs no settings)
+        std::vector<std::string> text;std::vector<const char*> lines;
+        for(int i=0;i<NotesMaxLines;++i)text.push_back("Line "+std::to_string(i+1)+": a release line about as long as the notes allow on one line");
+        for(const auto& t:text)lines.push_back(t.c_str());
+        for(bool ready:{true,false}){
+            Setup x=Base(View::WhatsNew,-1);x.m.ready=ready;
+            x.in.notes=ReleaseNotesView();x.in.notes.lines=lines.data();x.in.notes.lineCount=NotesMaxLines;
+            x.m.SetNotesPages(NotesPages(NotesMaxLines));
+            for(int p=0;p<x.m.notesPages;++p){
+                const std::string where="What's new page "+std::to_string(p+1)+(ready?"":", unavailable");
+                paint(x,where);
+                const auto l=MeasuredLayout(x.m,x.in);int buttons=0,bottom=0;
+                for(const auto& e:l.elements){
+                    if(e.hit.kind==Kind::NotesPage)++buttons;
+                    if(e.role==L::Role::NotesText||e.hit.kind==Kind::NotesPage)bottom=std::max(bottom,e.rect.y+e.rect.h);
+                }
+                if(buttons!=2)Fail(where+": no Previous / Next");
+                if(bottom>l.card.y)Fail(where+": the lines run into the help card");
+                L::Press(x.m,{Kind::NotesPage,0,1},100000);
+            }
+            if(x.m.notesPage!=x.m.notesPages-1)Fail("What's new: Next did not reach the last page");
+        }
+    }
+    if(problems){std::fprintf(stderr,"%d problems on %d pages\n",problems,pages);return 60;}
+    std::printf("%d pages painted without error; every text fits\n",pages);return 0;
+}
+
+// --fit-check
+static std::string Expected(Key k,bool adapter){
+    const auto* r=C::RowOf(k);
+    std::string help=r&&r->help?r->help:HelpText(k);
+    if(k==OfflinePlayers)help=std::string(adapter?C::OfflineNote:C::OfflineUnavailable)+" "+help;
+    return help;
+}
+static const L::Element* FindRole(const L::Layout& l,L::Role role){for(const auto& e:l.elements)if(e.role==role)return &e;return nullptr;}
+static int CountRole(const L::Layout& l,L::Role role){int n=0;for(const auto& e:l.elements)if(e.role==role)++n;return n;}
+static int FitCheck(){
+    int cards=0;
+    auto check=[&](const Setup& x,const std::string& where)->L::Layout{
+        auto l=MeasuredLayout(x.m,x.in);++cards;
+        Report(where,FitProblems(l));
+        if(!FindRole(l,L::Role::CardTitle))Fail(where+": no card title");
+        return l;
+    };
+    // The whole help, word for word: never cut mid-sentence or dropped.
+    auto whole=[&](const L::Layout& l,const std::string& expected,const std::string& where){
+        const auto* t=FindRole(l,L::Role::CardText);
+        if(t&&t->text==expected)return;
+        std::string card;char part[96];
+        std::snprintf(part,sizeof part," (card %d,%d %dx%d:",l.card.x,l.card.y,l.card.w,l.card.h);card=part;
+        for(const auto& e:l.elements)if(e.rect.y>=l.card.y&&e.rect.y<l.card.y+l.card.h&&e.role!=L::Role::HelpCard){
+            std::snprintf(part,sizeof part," [role %d %d,%d %dx%d]",int(e.role),e.rect.x,e.rect.y,e.rect.w,e.rect.h);card+=part;}
+        Fail(where+": the help is cut: \""+(t?t->text:std::string("(none)"))+"\""+card+")");
+    };
+    for(int hero:Classes)for(bool smooth:{false,true})for(int v=0;v<int(View::Count);++v){
+        if(!C::PageOf(View(v)).settings)continue;
+        const Values values=AllRows(smooth);
+        const std::string page=std::string(ViewName(v))+", "+ClassName(hero)+(smooth?", smooth turning":"");
+        const auto idle=check(Base(View(v),hero,values),page+" idle card");
+        for(const auto& row:idle.elements){
+            if(row.role!=L::Role::Row)continue;
+            const Key k=row.key;const auto* content=C::RowOf(k);
+            const std::string where=page+" / "+(content?content->label:Definitions[k].label);
+            {Setup x=Base(View(v),hero,values);x.in.card=k;whole(check(x,where),Expected(k,true),where);}
+            if(!content||content->kind==C::RowKind::Button)continue;
+            {   // changed and not applied, away from the default: Undo and Default (and Feel it)
+                Setup x=Base(View(v),hero,values);const auto& d=Definitions[k];
+                x.m.Set(k,Normalize(k,d.defaultValue==d.min?d.min+d.step*2:d.min));x.in.card=k;
+                if(!x.m.Dirty())continue;
+                const auto l=check(x,where+", changed");whole(l,Expected(k,true),where+", changed");
+                const int want=(HapticCategory(k)>=0?1:0)+1+(L::Same(x.m.Get()[k],d.defaultValue)?0:1);
+                if(CountRole(l,L::Role::CardButton)!=want)Fail(where+", changed: the card shows "+std::to_string(CountRole(l,L::Role::CardButton))+" of its "+std::to_string(want)+" buttons");
+            }
+            for(const auto& e:idle.elements){   // each option pointed: its hint
+                if(e.key!=k||e.role!=L::Role::Chip)continue;
+                Setup x=Base(View(v),hero,values);x.in.card=k;x.in.hover=e.hit;check(x,where+", option "+e.text);
+            }
+        }
+        {Setup x=Base(View(v),hero,values);x.in.card=HelpTabFirst+v;check(x,page+" tab card");}
+        {Setup x=Base(View(v),hero,values);x.in.card=HelpResetPage;check(x,page+" Reset page card");}
+    }
+    {   // offline difficulty without its adapter: main's notice, whole
+        Setup x=Base(View::Survival,-1,AllRows(false),false);x.in.card=OfflinePlayers;
+        whole(check(x,"offline difficulty without the adapter"),Expected(OfflinePlayers,false),"offline difficulty without the adapter");
+    }
+    const auto& t=L::ContentTables();
+    for(int hero:Classes)for(size_t p=0;p<t.presetCount;++p){   // presets from the defaults and from changed settings
+        Setup x=Base(View::Presets,hero,Defaults());x.in.card=HelpPresetFirst+int(p);check(x,std::string("preset ")+t.presets[p].name+", "+ClassName(hero));
+        Setup y=Base(View::Presets,hero,AllRows(true));y.in.card=HelpPresetFirst+int(p);check(y,std::string("preset ")+t.presets[p].name+" from changed settings, "+ClassName(hero));
+    }
+    {   // a draft on every row: the pending lists, the tools' cards, confirm close
+        Setup x=Base(View::Body,-1);
+        for(size_t i=0;i<t.rowCount;++i){
+            const auto& r=t.rows[i];if(r.kind==C::RowKind::Button)continue;
+            const auto& d=Definitions[r.key];x.m.Set(r.key,Normalize(r.key,d.defaultValue==d.min?d.min+d.step*2:d.min));
+        }
+        for(int v=0;v<int(View::Count);++v){Setup y=x;y.m.view=View(v);check(y,std::string("pending, ")+ViewName(v));}
+        for(int id:{HelpApply,HelpClose,HelpRecenter,HelpCalibrate,HelpMonoAudio,HelpPerformance,HelpResetPage,HelpUndoReset,HelpGuide,HelpWhatsNew,HelpPresets,HelpDiscard,HelpKeepEditing,HelpApplyClose,HelpPending}){
+            Setup y=x;y.in.card=id;check(y,"tool card "+std::to_string(id));
+        }
+        Setup c=x;c.m.confirmClose=true;check(c,"confirm close");
+    }
+    if(problems){std::fprintf(stderr,"%d problems in %d cards\n",problems,cards);return 61;}
+    std::printf("%d help cards checked: every help whole, every text fits\n",cards);return 0;
+}
+
+// --worker-check
+static int WorkerCheck(){
+    const auto paint=[](const Setup& x){return PaintPage(x.m,x.in).pixels;};
+    framevr::LatestWorker<Setup,std::vector<uint8_t>> worker(paint);
+    if(!worker.Start())return 20;
+    int pages=0;
+    for(int hero:{-1,int(heroclass::Sorceress)})for(int v=0;v<int(View::Count);++v){
+        Setup x=Base(View(v),hero);x.in.hover={Kind::Open,(v+1)%int(View::Guide),-1};x.in.card=v%2?HelpClose:NoHelp;
+        const auto here=paint(x);const auto id=worker.Submit(x);std::vector<uint8_t> there;
+        for(int wait=0;wait<5000&&!worker.Take(id,there);++wait)Sleep(1);
+        if(here.size()!=size_t(Width)*Height*4||there!=here){std::fprintf(stderr,"Background paint differs: %s\n",ViewName(v));return 21;}
+        ++pages;
+    }
+    worker.Stop();std::printf("%d VR Settings pages paint identically on the background painter\n",pages);return 0;
+}
+
 int main(int argc,char** argv){
-    using namespace framevr::settings;
-    Snapshot s;s.ready=true;s.offlineDifficultyAvailable=true;s.values[Motion]=1;s.values[Snap]=30;s.values[Foveation]=2;
-    if(argc>3&&std::strcmp(argv[3],"--foveation-off")==0)s.values[Foveation]=0; // greyed Foveation strength row
-    if(argc>3&&std::strcmp(argv[3],"--all-rows")==0){   // the outline's rows (the longest hue names) and ground circles shown
-        s.values[TargetHighlight]=50;s.values[GroundAim]=1;s.values[HighlightLeft]=300;s.values[HighlightRight]=315;
-    }
-    Model m;m.Open(s);m.SetNotesPages(ReleaseNotesPages());const int page=argc>2?std::atoi(argv[2]):0;
-    m.Click({Kind::Tab,page});
-    if(argc>3&&std::strcmp(argv[3],"--release-notes-check")==0){
-        if(m.page!=Page::ReleaseNotes||m.Dirty())return 13;
-        HDC dc=CreateCompatibleDC(nullptr);
-        HFONT font=CreateFontW(27,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,ANTIALIASED_QUALITY,DEFAULT_PITCH,L"Arial");
-        auto old=SelectObject(dc,font);
-        for(const char* line:framevr::releasenotes::ReleaseLines){
-            SIZE size{};GetTextExtentPoint32A(dc,line,int(std::strlen(line)),&size);
-            if(size.cx>1170||size.cy>35){std::fprintf(stderr,"Release line too long: %s\n",line);return 12;}
-        }
-        for(const char* line:{framevr::releasenotes::Author,framevr::releasenotes::ProjectUrl,framevr::releasenotes::Credits}){
-            SIZE size{};GetTextExtentPoint32A(dc,line,int(std::strlen(line)),&size);
-            if(size.cx>1100||size.cy>35)return 15;
-        }
-        HFONT bold=CreateFontW(32,0,0,0,FW_SEMIBOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,ANTIALIASED_QUALITY,DEFAULT_PITCH,L"Arial");
-        SelectObject(dc,bold);
-        SIZE title{};GetTextExtentPoint32A(dc,framevr::releasenotes::ReleaseTitle,int(std::strlen(framevr::releasenotes::ReleaseTitle)),&title);
-        if(title.cx>1200||title.cy>45)return 16;
-        for(int i=0;i<TabCount;++i){
-            SIZE size{};GetTextExtentPoint32A(dc,TabNames[i],int(std::strlen(TabNames[i])),&size);
-            if(size.cx>TabBox(i).w-12||size.cy>TabBox(i).h-13){std::fprintf(stderr,"Tab label too long: %s\n",TabNames[i]);return 14;}
-        }
-        SelectObject(dc,font);DeleteObject(bold);
-        SelectObject(dc,old);DeleteObject(font);DeleteDC(dc);
-    }
-    if(argc>3&&std::strcmp(argv[3],"--dropdown")==0)m.Click({Kind::ControllerMenu});
-    if(argc>4&&std::strcmp(argv[3],"--notes-page")==0)for(int i=std::atoi(argv[4]);i>0;--i)m.Click({Kind::NotesPage,0,1});   // the Notes tab turned to that page
-    const int help=argc>4&&std::strcmp(argv[3],"--help")==0?std::atoi(argv[4]):NoHelp;
-    if(argc>3&&std::strcmp(argv[3],"--help-check")==0){
-        const auto plain=Paint(m,{},"");
-        if(plain.size()!=AtlasWidth*Height*4)return 5;
-        HDC dc=CreateCompatibleDC(nullptr);
-        HFONT normal=CreateFontW(27,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,ANTIALIASED_QUALITY,DEFAULT_PITCH,L"Arial");
-        HFONT bold=CreateFontW(32,0,0,0,FW_SEMIBOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,ANTIALIASED_QUALITY,DEFAULT_PITCH,L"Arial");
-        auto old=SelectObject(dc,normal);
-        for(int id=0;id<=HelpLast;++id){
-            for(int title=0;title<2;++title){
-                const auto wide=framevr::WideText(title?HelpTitle(id):HelpText(id));
-                SelectObject(dc,title?bold:normal);RECT bounds{0,0,HelpCard.w-48,0};
-                DrawTextW(dc,wide.c_str(),-1,&bounds,DT_CALCRECT|DT_WORDBREAK|DT_NOPREFIX);
-                if(bounds.bottom>(title?92:HelpCard.h-152)||bounds.right>HelpCard.w-48){std::fprintf(stderr,"Clipped help: %s\n",HelpTitle(id));return 6;}
-            }
-            // Every choice's name on one line, and its text under the general help.
-            for(int c=0;c<HelpChoices(id);++c) {
-                const auto choice=HelpChoice(id,float(c));
-                const auto measure=[&](const char* value,HFONT font){
-                    const auto wide=framevr::WideText(value);
-                    SelectObject(dc,font);RECT bounds{0,0,HelpCard.w-48,0};
-                    DrawTextW(dc,wide.c_str(),-1,&bounds,DT_CALCRECT|DT_WORDBREAK|DT_NOPREFIX);return bounds;
-                };
-                const auto general=measure(HelpText(id),normal),name=measure(choice.name,bold),text=measure(choice.text,normal);
-                if(name.bottom>HelpChoiceNameHeight||general.bottom+HelpChoiceGap+HelpChoiceNameHeight+text.bottom>HelpCard.h-152||text.right>HelpCard.w-48){
-                    std::fprintf(stderr,"Clipped help: %s, %s\n",HelpTitle(id),choice.name);return 12;
-                }
-            }
-            const auto shown=Paint(m,{},"",nullptr,{},id);
-            if(shown.size()!=plain.size())return 7;
-            bool content=false;
-            for(int y=0;y<Height;++y)for(int x=0;x<AtlasWidth;++x){
-                const int i=(y*AtlasWidth+x)*4;
-                if(x<Width&&std::memcmp(shown.data()+i,plain.data()+i,4))return 8;
-                if(x>=Width){
-                    if(plain[i+3])return 9;
-                    if(!HelpCard.Contains(float(x),float(y))&&shown[i+3])return 10;
-                    if(x>HelpCard.x+24&&y>HelpCard.y+128&&shown[i]>100&&shown[i+3])content=true;
-                }
-            }
-            if(!content)return 11;
-        }
-        // The Perf page's warning lines: one line each, left of the Defer GPU wait button.
-        SelectObject(dc,normal);
-        {   // the Mono audio warning: one line in the title row's hint box
-            wchar_t wide[128]{};MultiByteToWideChar(CP_UTF8,0,MonoAudioWarning,-1,wide,128);RECT bounds{0,0,420,0};
-            DrawTextW(dc,wide,-1,&bounds,DT_CALCRECT|DT_WORDBREAK|DT_NOPREFIX);
-            if(bounds.bottom>42||bounds.right>420){std::fprintf(stderr,"Mono audio warning too long\n");return 18;}
-        }
-        for(const char* line:{DeferWarning,GameVideoWarning({true,true}),GameVideoWarning({true,false}),GameVideoWarning({false,true})}){
-            wchar_t wide[512]{};MultiByteToWideChar(CP_UTF8,0,line,-1,wide,512);RECT bounds{0,0,DeferBox.x-50,0};
-            DrawTextW(dc,wide,-1,&bounds,DT_CALCRECT|DT_WORDBREAK|DT_NOPREFIX);
-            if(bounds.bottom>29||bounds.right>DeferBox.x-50){std::fprintf(stderr,"Video warning too long: %s\n",line);return 17;}
-        }
-        SelectObject(dc,old);DeleteObject(normal);DeleteObject(bold);DeleteDC(dc);
-        std::puts("All help text fits; help leaves every control pixel unchanged and unused space transparent");
-    }
-    framevr::calibration::Flow body;body.Begin();body.phase=framevr::calibration::Phase::Hold;body.hint=framevr::calibration::Hint::Pose;body.progress=.55f;
-    // --performance-check: each of the Perf page's lines stays on one line,
-    // at its widest numbers.
-    if(argc>3&&std::strcmp(argv[3],"--performance-check")==0){
-        HDC dc=CreateCompatibleDC(nullptr);
-        HFONT normal=CreateFontW(27,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,ANTIALIASED_QUALITY,DEFAULT_PITCH,L"Arial");
-        auto old=SelectObject(dc,normal);
-        const auto fits=[&](const std::string& value){
-            wchar_t wide[512]{};MultiByteToWideChar(CP_UTF8,0,value.c_str(),-1,wide,512);
-            RECT bounds{0,0,0,0};DrawTextW(dc,wide,-1,&bounds,DT_CALCRECT|DT_SINGLELINE|DT_NOPREFIX);
-            if(bounds.right<=1170)return true;
-            std::fprintf(stderr,"Perf page line too long (%ld px): %s\n",long(bounds.right),value.c_str());return false;
-        };
-        const PerformanceReadout widest{true,false,999,99.9f,99.9f,99.9f,99.9f,99.9f};
-        const auto most=ParseGameVideo(R"({"Shadow Quality": 44, "Character Detail": 55, "Light Quality": 44, "Ambient Occlusion Quality": 44,)"
-                                       R"( "Atmospherics Quality": 44, "Resolution Scale": 200, "NVIDIA DLSS": 1})");
-        bool ok=fits(PerformanceLine(widest))&&fits(PerformanceVerdict(widest))&&fits(PerformanceLine({}))&&fits(GameVideoLine(most))&&
-                      fits(GameVideoUnsaved);
-        for(int state=0;state<=int(framevr::framegen::State::NeedsBothEyes);++state){   // frame generation's status, its widest backend
-            framevr::framegen::Readout frameGen;frameGen.state=framevr::framegen::State(state);frameGen.backend=1;frameGen.preset=1;frameGen.scale=2;
-            frameGen.errors=1;frameGen.lastError=-1;ok=fits(framevr::framegen::Line(frameGen))&&ok;
-        }
-        SelectObject(dc,old);DeleteObject(normal);DeleteDC(dc);
-        if(!ok)return 22;
-        std::puts("Perf page lines fit at their widest");return 0;
-    }
-    // --worker-check: the transport paints VR Settings on a background painter;
-    // every page, with a hover and a help card, and the calibration page must
-    // come out there exactly as on this thread.
-    if(argc>3&&std::strcmp(argv[3],"--worker-check")==0){
-        struct Job {Model model;Hit hover;int help=NoHelp;bool calibrating=false;};
-        const auto paint=[&](const Job& j){
-            return Paint(j.model,j.hover,"Foveated shading available.",j.calibrating?&body:nullptr,
-                         framevr::controllers::Labels{{framevr::controllers::Layout::Touch,framevr::controllers::Layout::Touch}},j.help,GameVideo{true,false},true);
-        };
-        framevr::LatestWorker<Job,std::vector<uint8_t>> worker(paint);
-        if(!worker.Start())return 20;
-        for(int tab=0;tab<=TabCount;++tab){
-            Job job;job.model=m;job.calibrating=tab==TabCount;
-            if(!job.calibrating){job.model.Click({Kind::Tab,tab});job.hover={Kind::Tab,(tab+1)%TabCount};job.help=tab%2?HelpClose:NoHelp;}
-            const auto here=paint(job);const auto id=worker.Submit(job);std::vector<uint8_t> there;
-            for(int wait=0;wait<5000&&!worker.Take(id,there);++wait)Sleep(1);
-            if(here.size()!=AtlasWidth*Height*4||there!=here){std::fprintf(stderr,"Background paint differs: %s\n",job.calibrating?"calibration":TabNames[tab]);return 21;}
-        }
-        worker.Stop();std::puts("VR Settings pages and calibration paint identically on the background painter");return 0;
-    }
-    // --game-video: the Perf page as with Vertical Sync on and TAA; --deferred: the GPU wait already deferred.
-    if(argc>3&&std::strcmp(argv[3],"--deferred")==0){Snapshot d=s;d.values[DeferGpuWait]=1;m.Open(d);m.Click({Kind::Tab,page});}
-    GameVideo game=argc>3&&std::strcmp(argv[3],"--game-video")==0?GameVideo{true,true}:GameVideo{};
-    const bool monoAudio=argc>3&&std::strcmp(argv[3],"--mono-audio")==0;   // the title row's Windows Mono audio warning
-    // --performance: the Perf page with a second of frames over the headset's
-    // frame and the game's options as its Settings.json has them.
-    const bool sample=argc>3&&std::strcmp(argv[3],"--performance")==0;
-    PerformanceReadout performance;framevr::framegen::Readout frameGen;
-    if(sample){
-        frameGen={framevr::framegen::State::Active,1,1,2,1,1};
-        performance={true,true,52,11.1f,1.0f,7.0f,9.4f,1.5f};
-        game=ParseGameVideo(R"({"Shadow Quality": 4, "Character Detail": 5, "Ambient Occlusion Quality": 4, "Atmospherics Quality": 4,)"
-                            R"( "Light Quality": 2, "Texture Quality": 4, "Resolution Scale": 100, "NVIDIA DLSS": 0, "Anti Aliasing": 1, "VSync": 0})");
-    }
-    const auto pixels=Paint(m,{},page==int(Page::Performance)?"VR source: 2560 x 2560 per eye":"Foveated shading available. Eye-tracking samples are active.",page==TabCount?&body:nullptr,
-        framevr::controllers::Labels{{framevr::controllers::Layout::Touch,framevr::controllers::Layout::Touch}},help,game,monoAudio,performance,frameGen);
-    if(pixels.size()!=AtlasWidth*Height*4)return 1;
-    FILE* file=std::fopen(argc>1?argv[1]:"vr-settings-preview.ppm","wb");if(!file)return 2;
-    const char* name=argc>1?argv[1]:"";
-    if(std::strstr(name,".bmp")){
-        BITMAPFILEHEADER header{};header.bfType=0x4d42;header.bfOffBits=sizeof header+sizeof(BITMAPINFOHEADER);header.bfSize=header.bfOffBits+uint32_t(pixels.size());
-        BITMAPINFOHEADER info{};info.biSize=sizeof info;info.biWidth=AtlasWidth;info.biHeight=-Height;info.biPlanes=1;info.biBitCount=32;
-        if(std::fwrite(&header,1,sizeof header,file)!=sizeof header||std::fwrite(&info,1,sizeof info,file)!=sizeof info){std::fclose(file);return 3;}
-        auto bgra=pixels;for(size_t i=0;i<bgra.size();i+=4)std::swap(bgra[i],bgra[i+2]);
-        if(std::fwrite(bgra.data(),1,bgra.size(),file)!=bgra.size()){std::fclose(file);return 3;}
-    }else{
-        std::fprintf(file,"P6\n%d %d\n255\n",AtlasWidth,Height);
-        for(size_t i=0;i<pixels.size();i+=4)if(std::fwrite(pixels.data()+i,1,3,file)!=3){std::fclose(file);return 3;}
-    }
-    return std::fclose(file)==0?0:4;
+    if(argc>2&&std::strcmp(argv[1],"--draw-sheet")==0)return DrawSheetPreview(argv[2]);
+    if(argc>2&&std::strcmp(argv[1],"--pages")==0)return Pages(argv[2]);
+    if(argc>1&&std::strcmp(argv[1],"--pages-check")==0)return PagesCheck();
+    if(argc>1&&std::strcmp(argv[1],"--fit-check")==0)return FitCheck();
+    if(argc>1&&std::strcmp(argv[1],"--worker-check")==0)return WorkerCheck();
+    std::fprintf(stderr,"usage: vr-settings-preview --pages <folder> | --pages-check | --fit-check | --worker-check | --draw-sheet <out.png>\n");
+    return 2;
 }

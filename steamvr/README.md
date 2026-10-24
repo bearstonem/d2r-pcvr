@@ -129,7 +129,7 @@ a third scene for the monitor. Desktop presentation still has overhead;
 suppressing it safely is an open performance task. Do not minimize the game as
 a workaround: background/focus handling also affects input and frame pacing.
 
-VR Settings > Perf > **Stereo rendering** chooses how the two eyes of each
+VR Settings > Performance > **Eyes drawn per frame** (Both or One by turns) chooses how the two eyes of each
 headset frame are drawn:
 
 - **Both eyes** draws the left eye, then the right with the game time held.
@@ -218,15 +218,15 @@ installer sets it for new installs, and an upgrade keeps the existing value.
 With the conservative wait each frame takes the CPU's time plus the GPU's,
 and at 90 Hz SteamVR then paces the game at half (By turns at 3128 square:
 43-46 frames/s, against 86-88 with the wait deferred). While the wait is not
-deferred, the Perf page shows a warning and a **Defer GPU wait** button that
+deferred, the Performance page shows a warning and a **Defer GPU wait** button that
 turns it on (Apply saves it; it applies live), and the console says so once.
-The Perf page also warns while the game's Vertical Sync is on or its
+The Performance page also warns while the game's Vertical Sync is on or its
 anti-aliasing is anything but FXAA (the game's Options > Video). It reads the
 mod's own game settings, `Saved Games\Diablo II Resurrected\mods\<mod>\Settings.json`,
 which the game keeps apart from the unmodded game's
 `Saved Games\Diablo II Resurrected\Settings.json`.
 
-The Perf page holds every setting that changes the frame rate, and under them
+The Performance page holds every setting that changes the frame rate, and under them
 the last second's frames as the render thread measured them: frames per
 second, the game's drawing (one eye by turns, both with Both eyes), its update,
 the mod's own work and the wait for the headset. It says whether the CPU's part
@@ -235,7 +235,7 @@ refresh. Drawing grows with what is in view, the draw distances and the game's
 shadows, and hardly with resolution. The game's own graphics options are shown
 as it last saved them; change those in its Options > Video.
 
-VR Settings > Perf > **Frame generation** (experimental, Off by default) runs
+VR Settings > Performance > **Frame generation** (experimental, Off by default) runs
 [OFXR Bridge](https://github.com/tig3rmast3r/OFXR-Bridge) by tig3rmast3r
 (LGPL-3.0-or-later), an OpenXR API layer that adds a frame made by optical flow
 between two the game draws. On native Windows, Setup downloads its pinned
@@ -247,16 +247,17 @@ nothing is registered: while the setting is on, the mod adds that folder to
 `xrCreateInstance` (`steamvr/frame_generation.h`). Turning it on or off takes a
 restart; Off while it is loaded asks it to step aside at once. FidelityFX runs
 on any graphics card; NVIDIA uses the optical flow hardware of RTX and GTX 1660
-cards, with its quality (Slow, Medium, Fast) and scale (100%, 75%, 50%) on a
-row under it, sent to the loaded layer live through its control API. The Perf
-page's last line and the log say whether it is off, waiting for a restart,
-active, bypassed or failed. While it runs it doubles the frame time the game
+cards, with its quality (Slow, Medium, Fast) and scale (100%, 75%, 50%) as
+**NVIDIA flow quality** and **NVIDIA flow scale** on the **More** page while NVIDIA is
+chosen (Performance shows 8 rows), sent to the loaded layer live through its
+control API. The Frame generation row ("Now: active") and its help card, and the log,
+say whether it is off, waiting for a restart, active, bypassed or failed. While it runs it doubles the frame time the game
 is given, so the game draws every other headset frame (45 of 90) and the
 bridge makes the rest: Both eyes then shows each eye half its frames for real,
 By turns only a quarter (22 a second, where By turns alone ran 83-89 frames on
 the owner's PC). So it runs with Both eyes only: by turns the loaded bridge is
-asked to step aside, and Both eyes brings it back, both live; the Perf line
-says it is paused. VR Settings turns it on only with Both eyes (once on, it
+asked to step aside, and Both eyes brings it back, both live; its row in VR
+Settings says it is paused ("Now: needs both eyes"). VR Settings turns it on only with Both eyes (once on, it
 can still be changed or turned off). The bridge takes over every color swapchain whose images are listed
 through it (three more swapchains and an optical flow pipeline each); with the
 mod's panels SteamVR ran out of swapchains, and menus fell back to the flat
@@ -309,7 +310,7 @@ Hold **left grip**, then **click the left stick** to open or close the native
 inventory/character/skills menu. This works even when the runtime reserves the
 controller's menu button. A plain stick click still toggles that hand's wheel
 with motion controls enabled. Release the stick before another menu toggle.
-Reset eye height using **VR Settings > Reset eye height**. F11 also resets height
+Reset eye height using **VR Settings > Body > Height and arm span > Set eye height**. F11 also resets height
 as part of its full camera recenter, including horizontal position and facing.
 
 Each saved-game load calibrates from the current headset position at the first
@@ -352,7 +353,7 @@ reduced and foveation had no visible or GPU effect. Unsupported devices/command
 lists fall back to full quality. Immutable masks are uploaded once per viewport;
 routine draws do not upload or wait for them.
 
-VR Settings > Perf > **Foveation strength** (available when foveated rendering
+VR Settings > Performance > **Edge detail reduction** (available when **Lower detail at edges**
 is Fixed or Eye tracked) chooses how much detail is reduced:
 
 | Strength | Fixed protected radius | Gaze protected radius | Periphery |
@@ -668,7 +669,7 @@ Set 0 to restore runtime-recommended projections. See the
 [OpenXR projection-view contract](https://registry.khronos.org/OpenXR/specs/1.0/man/html/XrCompositionLayerProjectionView.html).
 
 `[render] defer_gpu_wait=1` is set by the installer; a missing key means 0, and
-VR Settings > Perf offers it while it is off (see Stereo rendering above). Image
+VR Settings > Performance offers it while it is off (see Eyes drawn per frame above). Image
 copies and state restoration are submitted on the D3D12 queue bound to OpenXR;
 completion is checked before each eye's copy allocator is reused and before
 shutdown, instead of blocking the CPU before every image release. Set it to 0

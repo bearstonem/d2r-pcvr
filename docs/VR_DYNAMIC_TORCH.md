@@ -73,7 +73,7 @@ Instead of fabricating a foreign item, D2R-PCVR qualifies **native one-handed wo
 * The apparent flame vector is:
   $$\mathbf{V}_{\text{flame}} = \text{Normalize}\left((0, 1, 0) - \mathbf{v}_{\text{hand}} \cdot k_{\text{drag}}\right)$$
   ensuring the flame trails behind rapid weapon swings before rising upright when still.
-* **VR Settings > Video > Torch flame** (`[torch] flame`, On by default) shows or hides the flame drawn on the club's head; the torch's light stays either way.
+* **VR Settings > World > Torch flame** (`[torch] flame`, On by default) shows or hides the flame drawn on the club's head; the torch's light stays either way.
 
 ### Pillar 3: Multi-Harmonic Organic Sinusoidal Flicker
 * Static light radii look sterile in VR. Natural flame turbulence is simulated by summing non-harmonic prime-frequency sine waves:

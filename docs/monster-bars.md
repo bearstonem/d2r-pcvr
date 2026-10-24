@@ -1,6 +1,6 @@
 # Ordinary monster bars in native VR
 
-Open **VR settings > VR > Ordinary mob bars** and press **Apply** to
+Open **VR Settings > Interface > Weak monster bars** and press **Apply** to
 show or hide ordinary monsters' health and name plates together. The default
 is Off, including existing profiles without `[hud] ordinary_mob_bars`.
 Bosses, champions, uniques and their minions retain their native bars.

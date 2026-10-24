@@ -3,7 +3,7 @@
 Equip two supported melee weapons on a Barbarian, or two claws on an Assassin,
 and release both triggers.
 Each tracked weapon supports deliberate swings and thrusts using the existing
-VR Settings > Combat thresholds. No extra grip or Attack binding is needed
+VR Settings > Combat speeds to hit. No extra grip or Attack binding is needed
 for physical contacts. This adds native basic attacks from the second weapon;
 Double Swing, Frenzy, Dragon Claw and other active skills retain their button
 casting.

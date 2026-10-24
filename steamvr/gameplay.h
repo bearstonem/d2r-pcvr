@@ -47,7 +47,7 @@ struct Input {
     float grip[2]{}, trigger=0;
     // Double Throw (#224): the left trigger arms the left hand's own throw.
     bool leftThrow=false; float leftTrigger=0;
-    float throwLift=0; // degrees above the hand's path (VR Settings > Aim > Throw lift)
+    float throwLift=0; // degrees above the hand's path (VR Settings > Combat > Thrown weapon lift)
     // The right trigger's skill is a trap or bomb thrown to place (toss::Skill, #224),
     // or Attack or Throw with a throwing potion in the right hand (potion): tossed
     // the same way, and never swung.

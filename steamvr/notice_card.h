@@ -11,6 +11,9 @@ namespace framevr::notice {
 // and its Start button action are untouched); the message is shown on a short
 // card standing in the room instead, like the native dialogue surfaces.
 enum Kind {Quest,Skills,Stats,Kinds};
+// The mod's own message on the same card (the frame thread holds its text,
+// e.g. "VR Settings could not draw: ..."); the game's kinds stay Kinds.
+constexpr int Message=Kinds,CardKinds=Kinds+1;
 // Controller wording: XR runs the native interface in controller mode.
 inline constexpr const char* Keys[Kinds]={"d2r:QuestLogNotificationController",
     "d2r:LevelUpNotificationController","d2r:LevelUpStatsNotificationController"};
@@ -49,7 +52,7 @@ class Cards {
     }
 public:
     void Push(int kind,uint64_t now) {
-        if(kind<0||kind>=Kinds||count==int(queue.size()))return;
+        if(kind<0||kind>=CardKinds||count==int(queue.size()))return;
         queue[count++]=kind;
         if(current<0)Next(now);
     }

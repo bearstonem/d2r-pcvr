@@ -7,8 +7,8 @@ below were verified the same day ("that works great").
 After drinking, opening the hand lets the empty bottle fall into the world.
 It keeps the hand's velocity and turn, bounces, rolls and stops at the game's
 walls. Previously it vanished on release. This is purely visual: no native
-request, item or game state is involved. VR Settings > Video > Bottle
-physics (`[interactions] bottle_physics=0`) restores the old behaviour, live,
+request, item or game state is involved. VR Settings > World > Roll and break
+bottles (`[interactions] bottle_physics=0`) restores the old behavior, live,
 for dropped bottles and thrown potions alike.
 
 ## Pieces

@@ -940,7 +940,7 @@ void LoadSettings() {
     // 0 = none, strain still runs). The rim is black only, drawn denser by
     // guard_strain_dark_density (2.5; 1 = the plain curve): over D2's dark scenes a
     // dark rim hides far less than its opacity suggests.
-    // guard_strain_vignette 0 (VR Settings > Combat > Guard strain vignette: Off) hides
+    // guard_strain_vignette 0 (VR Settings > Shield > Guard strain shadow: Off) hides
     // it; strain still runs. Missing: the old Guard strain color Off (guard_strain_dark 2) stays Off.
     const bool strainShown=std::lround(IniF(L"gameplay",L"guard_strain_vignette",
                                             std::lround(IniF(L"gameplay",L"guard_strain_dark",0))==2?0.f:1.f))!=0;
@@ -956,7 +956,7 @@ void LoadSettings() {
     // guard_strain_recover_ms (1500), at the guard_strain_reset_ms rate (1500): clear 3 s after the
     // last hit from full. 0 = only lowering clears it.
     framevr::ConfigureGuardStrainRecover(IniF(L"gameplay",L"guard_strain_recover_ms",1500)/1000.f);
-    {   // Low-life heartbeat (start: VR Settings > Combat, [gameplay] low_life_heart_start): % on top of
+    {   // Low-life heartbeat (start: VR Settings > Survival, [gameplay] low_life_heart_start): % on top of
         // the game's Master x Combat volume (0 = off), tempo range, wind-down time from full, and
         // an optional one-beat 16-bit PCM WAV (next to this ini unless a full path). The old
         // guard_strain_heart* keys are still read when the low_life_heart* key is absent.
@@ -2958,8 +2958,8 @@ namespace aimsettings {
 std::atomic<ULONGLONG> at{0};
 std::atomic<uint32_t> bits{0};
 std::atomic<float> hue[2]{45.0f, 210.0f};   // the outline colors: right hand, left hand (0 = By range)
-std::atomic<float> spanM{1.6f};   // VR Settings > Controller span (arm_span_m), set with or without Body calibration
-std::atomic<int> ground{0};       // VR Settings > Aim > Ground skills: 0 the game's aim, 1 where you point, 2 the aimed monster
+std::atomic<float> spanM{1.6f};   // the calibrated controller span (arm_span_m; Body > Height and arm span), set with or without Body calibration
+std::atomic<int> ground{0};       // VR Settings > Aim > Ground skill aim: 0 the game's aim, 1 where you point, 2 the aimed monster
 std::atomic<int> lock{0};         // Skills go to the aimed monster: bits 1 spells, 2 bow skills
 constexpr framevr::settings::Key keys[] = {framevr::settings::TargetHighlight,
                                            framevr::settings::StaffPoint,
@@ -2989,16 +2989,16 @@ bool AimOn(framevr::settings::Key key) {
 int GroundAimMode() { aimsettings::Refresh(); return aimsettings::ground.load(); }
 bool SpellsLocked() { aimsettings::Refresh(); return (aimsettings::lock.load() & 1) != 0; }
 bool BowSkillsLocked() { aimsettings::Refresh(); return (aimsettings::lock.load() & 2) != 0; }
-// VR Settings > Aim > Aim follows your view (Off by default): the eyes' tunnel,
+// VR Settings > Aim > Aim with your view (Off by default): the eyes' tunnel,
 // the hands' wedge and a raised hand aiming alone (aimtargets).
 bool FollowsView() { return AimOn(framevr::settings::AimFollowsView); }
 // How far a hand is held out from the head before it points, cm: the arm counts as
 // pointing once held out a tenth of the player's span (Jeff: 15 cm on a 1.5 m span).
 float AimArmOutCm() { aimsettings::Refresh(); return framevr::armpointing::ArmOutCm(aimsettings::spanM.load()); }
-// VR Settings > Aim > Right / Left hand color: the color of a source's outline
+// VR Settings > Targets > Right / Left hand outline color: the color of a source's outline
 // (aimrules::Source), 0 = By range. The eyes have no color of their own: their
 // monster is shown in the color of the hand that would cast at it - the bow hand
-// (left) while a bow is the equipped weapon, else VR Settings > Dominant hand.
+// (left) while a bow is the equipped weapon, else VR Settings > Body > Dominant hand.
 float OutlineHue(int source) {
     aimsettings::Refresh();
     if (source == framevr::aimrules::Eyes)
@@ -3405,7 +3405,7 @@ int HookSpellCommand(framevr::spellaim::NativeCommand* command) {
     return result;
 }
 
-// Monster outline strength (VR Settings > Aim, 0 = Off), read by the update and
+// Monster outline strength (VR Settings > Targets, 0 = Off), read by the update and
 // render threads: one settings snapshot every 200 ms, not one per frame.
 float TargetOutlineStrength() {
     static std::atomic<ULONGLONG> at{0};
@@ -3589,7 +3589,7 @@ bool Resolve(int button, bool bow, framevr::aimrules::Use use, float& x, float& 
         }
     return false;
 }
-// The outlines to draw: Both hands (VR Settings > Aim > Monster highlights)
+// The outlines to draw: Both hands (VR Settings > Targets > Outlines shown)
 // the right hand's monster and the left's - a held button's own while it is
 // held - and with neither, the eyes'; Dominant hand that hand's, else the
 // eyes'. How many (0-2). The render thread.
@@ -4830,8 +4830,8 @@ uint64_t HookMapClick(void* unit, int type, int x, int y, uint64_t flags) {
        framevr::spellaim::ControllerPoint(cast,px,py,tx,ty)) {
         g_spellCommand={reinterpret_cast<uintptr_t>(unit),tx,ty};
         x=tx;y=ty;
-        // Every ground skill the mod places (VR Settings > Aim > Ground skills
-        // not Game), Fire Blast included: a circle at the cast point, in the
+        // Every ground skill the mod places (VR Settings > Aim > Ground skill aim
+        // not Game's aim), Fire Blast included: a circle at the cast point, in the
         // element's color, once the game accepts the cast (HookSpellCommand).
         const int skill=GroundAimMode()>0?framevr::GroundSpellSkill():-1;
         if(skill>=0)g_landing={skill,tx,ty,float(tx)-px,float(ty)-py};
@@ -5595,7 +5595,7 @@ std::string BusyThreads(double spanUs) {
 
 void Recenter();
 #ifdef D2RVR_NATIVE_OPENXR
-// Eyes by turns (VR Settings > Perf > Stereo rendering): one pass a game frame,
+// Eyes by turns (VR Settings > Performance > Eyes drawn per frame): one pass a game frame,
 // the eyes in turn. The headset gets this eye fresh and the other as it was
 // last drawn, at the pose it was drawn with - the runtime turns it to the head.
 // Half the CPU work a headset frame, each eye at half the rate, and the eyes a
@@ -5648,7 +5648,7 @@ void WarnGpuWait() {
     if (framevr::GpuWaitDeferred()) { told = false; return; }
     if (told) return;
     told = true;
-    Say("Each frame waits for the GPU ([render] defer_gpu_wait=0), about half the frame rate - VR Settings > Perf > Defer GPU wait turns it on");
+    Say("Each frame waits for the GPU ([render] defer_gpu_wait=0), about half the frame rate - VR Settings > Performance > Defer GPU wait turns it on");
 }
 bool TurnsWanted() {
     if (framevr::StereoRendering() != 1) return false;
@@ -7128,7 +7128,7 @@ void BowTick() {
             using framevr::math::Vec;
             const Vec ground=framevr::bowflight::RenderGround(shot,Vec{mx*2.0f,0.0f,my*2.0f});
             if(framevr::bowflight::LockAimDirection(shot.origin,framevr::bowflight::LockAimPoint(ground,false,{},{}),shot.planar,shot.direction)) {
-                // one steerer per shot: VR Settings' Projectile aim assist would
+                // one steerer per shot: VR Settings' Spell aim assist would
                 // bend it again, perhaps toward another monster
                 shot.aimAssist=0;
                 shot.lockTarget=lockId;
@@ -9380,7 +9380,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
         // that shape's edge. xyz centre relative to the hero, w strength;
         // shape = radius, lowest and highest height (world units). Up to two
         // (aimtargets::ShownTargets: each hand's, else the eyes'), each in its
-        // own source's color (VR Settings > Aim; the eyes take the casting hand's).
+        // own source's color (VR Settings > Targets; the eyes take the casting hand's).
         SkyView sv[2];
         AcquireSRWLockShared(&g_skyLock); sv[0] = g_skyView[0]; sv[1] = g_skyView[1]; ReleaseSRWLockShared(&g_skyLock);
         aimtargets::Shown shown[2];

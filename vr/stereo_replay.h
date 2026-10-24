@@ -1,4 +1,4 @@
-// One CPU pass, two pictures (VR Settings > Video > Stereo rendering: Replay).
+// One CPU pass, two pictures (VR Settings > Performance > Eyes drawn per frame; Replay was its third choice, since removed).
 // Adapted from natpoh/diablo2-vr-port 8bd1d3b vr/vrcam.cpp namespaces camfix
 // and replay (MIT, Copyright (c) 2026 BodyWalkVR).
 //

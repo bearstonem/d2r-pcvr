@@ -95,6 +95,9 @@ target_link_libraries(torch-light-test PRIVATE framevr-runtime)
 add_executable(frame-generation-test frame_generation_test.cpp)
 target_include_directories(d2rl-pcvr PRIVATE ${ROOT}/shared ${ROOT}/external/flatvr ${ROOT}/external/bodywalk ${ROOT}/external/reshade/include ${CMAKE_CURRENT_SOURCE_DIR} ${OPENXR_SDK}/include)
 target_link_libraries(d2rl-pcvr PRIVATE d2rcam minhook user32 gdi32 framevr-runtime)
+# VR Settings drawing layer: Direct2D + DirectWrite with the embedded menu fonts.
+target_sources(d2rl-pcvr PRIVATE vr_settings_draw.cpp vr_settings_assets.rc)
+target_link_libraries(d2rl-pcvr PRIVATE d2d1 dwrite windowscodecs ole32)
 set_target_properties(d2rl-pcvr PROPERTIES PREFIX "")
 # Compile-check the retained desktop settings editor explicitly. It is not part
 # of the native PCVR release payload; in-headset settings remain the primary UI.
@@ -258,13 +261,15 @@ target_include_directories(interaction-preview PRIVATE ${CMAKE_CURRENT_SOURCE_DI
 target_link_libraries(interaction-preview PRIVATE user32 gdi32 framevr-runtime)
 
 add_executable(vr-settings-test vr_settings_test.cpp)
+add_executable(vr-settings-layout-test vr_settings_layout_test.cpp)
+add_executable(vr-settings-pointer-test vr_settings_pointer_test.cpp)
 add_executable(controller-labels-test controller_labels_test.cpp)
 add_executable(vr-settings-store-test vr_settings_store_test.cpp ${ROOT}/vr/settings_menu.cpp)
 target_link_libraries(vr-settings-store-test PRIVATE framevr-runtime)
-add_executable(vr-settings-preview vr_settings_preview.cpp vr_settings_ui.cpp)
+add_executable(vr-settings-preview vr_settings_preview.cpp vr_settings_ui.cpp vr_settings_draw.cpp vr_settings_assets.rc)
 add_dependencies(vr-settings-preview release-notes-generated)
 target_include_directories(vr-settings-preview PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
-target_link_libraries(vr-settings-preview PRIVATE user32 gdi32 framevr-runtime)
+target_link_libraries(vr-settings-preview PRIVATE user32 gdi32 d2d1 dwrite windowscodecs ole32 framevr-runtime)
 
 add_executable(math-test math_test.cpp)
 add_executable(environment-cutaway-test environment_cutaway_test.cpp)
@@ -321,7 +326,7 @@ foreach(test_target IN ITEMS memory-test hook-metrics-test active-keys-test reso
     portal-billboard-test shrine-trace-test shrine-placement-test overlay-view-test composition-layers-test projectile-rules-test environment-cutaway-test roof-materials-test stereo-prop-physics-test dropped-bottles-test props-test
     combat-rules-test strike-skills-test skill-usage-test shield-guard-test shapeshift-gesture-test guard-strain-test heartbeat-test logging-test melee-contact-test melee-weapon-test breakables-test offline-difficulty-test enemy-sight-test attack-speed-test world-coordinates-test bow-flight-test bow-laser-test spell-cast-test spell-aim-assist-test
     interaction-test dev-scenarios-test native-belt-test wrist-hud-test map-zoom-test navigation-info-test companions-test active-effects-test dropped-item-labels-test stick-gestures-test show-items-command-test native-hud-test render-resolution-test render-pointer-test scene-depth-test game-device-only-test controller-bindings-test journal-test native-panels-test
-    vr-settings-test vr-settings-store-test controller-labels-test math-test deferred-draw-test monster-bars-test telegraph-test aim-reach-test aim-rules-test target-cone-test gaze-test window-focus-test callback-ticket-test local-player-test shield-block-test companion-ai-test torch-light-test frame-generation-test)
+    vr-settings-test vr-settings-layout-test vr-settings-pointer-test vr-settings-store-test controller-labels-test math-test deferred-draw-test monster-bars-test telegraph-test aim-reach-test aim-rules-test target-cone-test gaze-test window-focus-test callback-ticket-test local-player-test shield-block-test companion-ai-test torch-light-test frame-generation-test)
   # These fixtures use assert for their checks, including in Release builds.
   if(MSVC)
     target_compile_options(${test_target} PRIVATE /UNDEBUG)
@@ -340,7 +345,6 @@ add_test(NAME skill-card-fit-test COMMAND interaction-preview "${CMAKE_CURRENT_B
 set_tests_properties(sewer-prompt-art-test PROPERTIES TIMEOUT 10)
 add_test(NAME notice-card-art-test COMMAND interaction-preview "${CMAKE_CURRENT_BINARY_DIR}/notice-cards.png" --notice-card-check)
 set_tests_properties(notice-card-art-test PROPERTIES TIMEOUT 10)
-add_test(NAME settings-release-notes-test COMMAND vr-settings-preview "${CMAKE_CURRENT_BINARY_DIR}/release-notes.bmp" 9 --release-notes-check)
 add_test(NAME ui-blit-typed COMMAND ui-blit-test)
 add_test(NAME ui-blit-typeless COMMAND ui-blit-test --typeless)
 add_test(NAME ui-blit-typeless-black COMMAND ui-blit-test black --typeless)
@@ -357,9 +361,11 @@ add_test(NAME interaction-map-tab-test COMMAND interaction-preview "${CMAKE_CURR
 add_test(NAME interaction-hand-wheels-test COMMAND interaction-preview "${CMAKE_CURRENT_BINARY_DIR}/hand-wheels-preview.png" --hands-check)
 add_test(NAME wrist-compass-art-test COMMAND interaction-preview "${CMAKE_CURRENT_BINARY_DIR}/wrist-compass-preview.png" --compass-check)
 add_test(NAME navigation-info-art-test COMMAND interaction-preview "${CMAKE_CURRENT_BINARY_DIR}/navigation-info-preview.png" --navigation-check)
-add_test(NAME vr-settings-help-art-test COMMAND vr-settings-preview "${CMAKE_CURRENT_BINARY_DIR}/settings-help.bmp" 4 --help-check)
-add_test(NAME vr-settings-worker-paint-test COMMAND vr-settings-preview "${CMAKE_CURRENT_BINARY_DIR}/settings-worker.bmp" 0 --worker-check)
-add_test(NAME vr-settings-performance-lines-test COMMAND vr-settings-preview "${CMAKE_CURRENT_BINARY_DIR}/settings-performance.bmp" 8 --performance-check)
+# VR Settings pages: every view for the title screen and four classes painted without error with all text fitting,
+# every row's help card whole at its real size, and the background painter identical.
+add_test(NAME vr-settings-pages-test COMMAND vr-settings-preview --pages-check)
+add_test(NAME vr-settings-fit-test COMMAND vr-settings-preview --fit-check)
+add_test(NAME vr-settings-worker-paint-test COMMAND vr-settings-preview --worker-check)
 add_test(NAME companions-art-test COMMAND interaction-preview "${CMAKE_CURRENT_BINARY_DIR}/companions-preview.png" --companions-check)
 
 add_test(NAME active-effects-art-test COMMAND interaction-preview "${CMAKE_CURRENT_BINARY_DIR}/active-effects-preview.png" --effects-check)

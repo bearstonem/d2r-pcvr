@@ -52,6 +52,8 @@ Game snapshots used for optional local allocator tests are not distributed.
 | JsonCpp (compiled into OpenXR loader) | OpenXR SDK's vendored JsonCpp | `steamvr/licenses/JsonCpp.txt`, public domain / MIT |
 | Box3D physics (compiled into plugin; dropped empty bottles) | [erincatto/box3d](https://github.com/erincatto/box3d), 0.1.0, `8441b4a06d6d09dcfb0b0f704df4d847d1437b92`, unmodified | `steamvr/licenses/Box3D-MIT.txt`, MIT, copyright 2026 Erin Catto |
 | MinGW runtime and GCC runtime libraries | MinGW-w64 / GCC 13, static linkage | `steamvr/licenses/MinGW-copyright.txt`, `GCC-runtime-copyright.txt`, `GPL-3.0.txt`; GCC Runtime Library Exception applies |
+| Cinzel font (embedded in plugin; VR Settings titles) | [google/fonts](https://github.com/google/fonts/tree/e7db6ca603fd4862010383ff17ffd6cc4ffac1c0/ofl/cinzel) `ofl/cinzel/Cinzel[wght].ttf` at `e7db6ca603fd4862010383ff17ffd6cc4ffac1c0`, unmodified, stored as `steamvr/assets/menu/fonts/Cinzel-wght.ttf` | `steamvr/licenses/Cinzel-OFL.txt`, SIL Open Font License 1.1, copyright 2020 The Cinzel Project Authors |
+| Alegreya Sans Medium and Bold fonts (embedded in plugin; VR Settings text) | [google/fonts](https://github.com/google/fonts/tree/e7db6ca603fd4862010383ff17ffd6cc4ffac1c0/ofl/alegreyasans) `ofl/alegreyasans/AlegreyaSans-Medium.ttf` and `AlegreyaSans-Bold.ttf` at `e7db6ca603fd4862010383ff17ffd6cc4ffac1c0`, unmodified | `steamvr/licenses/AlegreyaSans-OFL.txt`, SIL Open Font License 1.1, copyright 2013 The Alegreya Sans Project Authors |
 | Native Windows C++/compiler runtime | LLVM-MinGW 20260616, Clang 22.1.8, static libc++/compiler-rt and winpthreads | `steamvr/licenses/LLVM-Apache-2.0-with-exceptions.txt`, `LLVM-MinGW-runtime.txt`, `winpthreads-MIT.txt` |
 
 OpenXR loader copyright holders include The Khronos Group Inc. (2017–2026),
@@ -76,7 +78,7 @@ licensed under LGPL-3.0-or-later; it statically links AMD FidelityFX Optical Flo
 layer DLL with its `LICENSE`, `THIRD_PARTY.md` and `licenses/` in
 `mods/D2R-PCVR/d2rloader/plugins/ofxr`, plus a layer manifest and settings file
 that Setup writes; its tray program is not installed. The mod loads the layer
-only while VR Settings > Perf > Frame generation is on. It is not bundled in the
+only while VR Settings > Performance > Frame generation is on. It is not bundled in the
 release ZIP, and its archive checksum is pinned in `steamvr/install.py`. If the
 download fails, frame generation is unavailable and the rest of the mod installs.
 

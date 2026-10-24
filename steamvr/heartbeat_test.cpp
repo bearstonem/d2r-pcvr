@@ -88,7 +88,7 @@ int main() {
         Check(!heartbeat::ParseWav(Wav(1,1,44100,8,{1,2}),p),"8-bit WAV refused");
         Check(!heartbeat::ParseWav({'n','o','p','e'},p),"not a WAV refused");
     }
-    {   // VR Settings > Combat > Heartbeat starts at: one step per 10 % of life below it.
+    {   // VR Settings > Survival > Heartbeat starts at: one step per 10 % of life below it.
         auto level=[](float h,int start){return heartbeat::LifeLevel(h,100,start);};
         Check(level(100,50)==0&&level(50,50)==0,"silent at and above the start");
         Check(level(49,50)==.2f&&level(41,50)==.2f,"start 50: the first of five steps from 49 % to 40 %");

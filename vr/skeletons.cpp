@@ -2160,7 +2160,7 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
             // The visible shield hangs on shield_attach, a FOREARM child. It is
             // placed in the arm's own frame (shield::ArmFrame - joint positions,
             // never a bone's axes, so every slider means the same direction on
-            // every class): VR Settings > Shield > Shield follows blends it from
+            // every class): VR Settings > Shield > Shield wrist turn blends it from
             // strapped to the forearm (0%, the wrist's bend ignored) to turning
             // with the hand (100%, the original wrist attach), then the resting
             // roll (Shield roll) turns it about the forearm, and

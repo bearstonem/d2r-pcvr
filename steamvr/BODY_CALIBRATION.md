@@ -30,7 +30,7 @@ save offers another capture. Saved calibration applies on later launches.
 To switch between native weapon configurations I and II, reach the dominant
 hand over **either shoulder** and press that hand's grip once. Release before
 pressing again. **VR → Dominant hand** selects Right (default) or Left for this
-gesture. Other controller mappings remain as listed on the Controls tab.
+gesture. Other controller mappings remain as listed in VR Settings > Guide.
 The gesture requests the opposite observed native set and waits for confirmation;
 the grip cannot repeat while held. Reaching behind the head without pressing
 grip leaves combat available, including the wind-up for a javelin throw.

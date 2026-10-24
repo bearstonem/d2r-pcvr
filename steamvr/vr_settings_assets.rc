@@ -1,0 +1,5 @@
+// VR Settings menu fonts (SIL Open Font License 1.1; texts in steamvr/licenses),
+// embedded unmodified and loaded with DirectWrite's in-memory font loader.
+D2RVR_FONT_CINZEL RCDATA "assets/menu/fonts/Cinzel-wght.ttf"
+D2RVR_FONT_ALEGREYA_SANS RCDATA "assets/menu/fonts/AlegreyaSans-Medium.ttf"
+D2RVR_FONT_ALEGREYA_SANS_BOLD RCDATA "assets/menu/fonts/AlegreyaSans-Bold.ttf"

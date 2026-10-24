@@ -1,6 +1,6 @@
 # Sorceress elemental hand effects (prototype)
 
-Enable **VR Settings > Video > Elemental hand effects**, then **Apply**.
+Enable **VR Settings > World > Spell glow on hands**, then **Apply**.
 The setting defaults to Off and is saved as `[interactions] elemental_hands=1`.
 Motion combat must also be enabled.
 

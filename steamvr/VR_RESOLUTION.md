@@ -1,8 +1,8 @@
 # Independent VR render resolution
 
-Open **VR Settings → Video → VR render resolution**, choose a size, and
+Open **VR Settings > Performance > Render resolution**, choose a size, and
 press **Apply**. Applying rebuilds the VR session and closes the panel; allow
-several seconds for the view to return. Reopen Video to see the actual
+several seconds for the view to return. Reopen Performance to see the actual
 **VR source** dimensions per eye.
 
 | Choice | Source dimensions | INI value |

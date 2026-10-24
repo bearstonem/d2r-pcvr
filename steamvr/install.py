@@ -41,7 +41,7 @@ SDK_VERSION = '10.0.26100.9169'
 SDK_HASH = '475269434dcd808a67853773272f972c3229c0e10c3ddc821290e70cc0f6904d'
 COMPILER_HASH = '3bd6d7acfe8a0a84acd166fba1a537ce68bd21c8edce2bd9bb863cfa034136d4'
 # OFXR Bridge by tig3rmast3r (LGPL-3.0-or-later), the experimental frame
-# generation layer behind VR Settings > Perf > Frame generation. Fetched like
+# generation layer behind VR Settings > Performance > Frame generation. Fetched like
 # D2RLoader and ReShade, never attached to our releases, and optional: without
 # it the rest installs. Only its layer and licenses are installed, with a
 # manifest and settings written here: no tray app and no registry entry, as
@@ -472,7 +472,7 @@ def main():
     frame_generation = frame_generation_files(ofxr)
     if frame_generation:
         payload.update(frame_generation)
-        print('Prepared OFXR Bridge 0.2.1 for VR Settings > Perf > Frame generation (experimental, off by default).')
+        print('Prepared OFXR Bridge 0.2.1 for VR Settings > Performance > Frame generation (experimental, off by default).')
     # The launcher's descriptor of this mod (the D2R VR Launcher lists mods\*\vrmod-manifest.json). It is journaled like
     # every other file, so a restore or removal takes it away with the mod.
     payload[mod_identity.MOD_DIR / 'vrmod-manifest.json'] = (ROOT / 'vrmod-manifest.json').read_bytes()

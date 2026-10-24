@@ -6,7 +6,7 @@
 #include <vector>
 
 // Low-life heartbeat. Value-only: the transport supplies the published life and
-// the player's VR Settings > Combat > Heartbeat starts at (LifeLevel), and plays
+// the player's VR Settings > Survival > Heartbeat starts at (LifeLevel), and plays
 // it on its own waveOut stream (PlaySound plays one sound per process and would
 // cut off the riposte).
 //

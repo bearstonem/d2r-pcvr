@@ -11,7 +11,7 @@ namespace framevr::armpointing {
 // answer does not flicker. 0 cm: any reach. A feature keeps its own State.
 inline constexpr float ReleaseM=.06f,DownOn=-.707f,DownOff=-.766f;
 // The arm counts as pointing once held out a tenth of the player's span (Jeff:
-// 15 cm on a 1.5 m span): VR Settings > Controller span, metres, to the arm-out cm.
+// 15 cm on a 1.5 m span): the calibrated controller span (Body > Height and arm span), meters, to the arm-out cm.
 inline constexpr float SpanShare=.1f;
 inline float ArmOutCm(float spanM){return spanM*SpanShare*100.f;}
 struct State {bool on=false;};

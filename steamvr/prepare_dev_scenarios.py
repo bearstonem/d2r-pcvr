@@ -159,7 +159,7 @@ def main():
         parser.exit(1, f'{error}\n')
     print(f'Prepared {root}')
     print('Launch with --frame-vr --frame-dev; create a NEW offline expansion character.')
-    print('Wheel DEV: Character / Equipment / Act I - III / Act IV - V. VR Settings > DEV: release reference.')
+    print("Wheel DEV: Character / Equipment / Act I - III / Act IV - V. VR Settings > What's new: release reference.")
 
 
 if __name__ == '__main__':

@@ -189,7 +189,7 @@ Use a new offline expansion character in that separate save list.
 The tools are a **DEV tab on either hand's wheel**, beside VR Settings. Native
 builds include the dormant backend unless `-NoDevTools` is selected; the UI and
 actions require the exact isolated mod metadata. VR Settings has a separate
-Notes tab (Release Notes), available in regular and developer builds, containing a
+What's new view, available in regular and developer builds, containing a
 read-only reference to the last published release. Follow [RELEASING.md](RELEASING.md)
 and the [.github release template](../.github/RELEASE_TEMPLATE.md) when publishing.
 Update the versioned `PCVR_IN_HEADSET_NOTES` summary inside `RELEASE_NOTES.md`;
@@ -249,7 +249,7 @@ Known diagnostic lessons:
 
 - Loot label size comes from `[hud] labels_size` in `d2r_pcvr.ini` (formerly
   `d2r_vr.ini`) for native
-  first-person VR; VR Settings > HUD > Loot label size edits the same key.
+  first-person VR; VR Settings > Interface > Loot name size edits the same key.
   Default 45%, range 20-150%, five-point steps; explicit saved sizes are kept.
   The 150% enlargement bypassed this saved value. Changing that override to
   100% did not restore the earlier appearance; remove the override and respect

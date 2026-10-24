@@ -1,9 +1,9 @@
 # Offline difficulty scaling
 
-**VR Settings > Combat > Offline difficulty** offers **Game default** and
+**VR Settings > Survival > Offline difficulty** offers **Game's setting** and
 **Players 1** through **Players 8**. Press Apply to save the choice.
 
-Game default leaves Diablo II's existing offline difficulty scaling in charge.
+Game's setting leaves Diablo II's existing offline difficulty scaling in charge.
 It is the default for both fresh installations and updates. A numbered choice
 uses the game's effective player count for scaling; it does not add players or
 monsters, change their levels, or switch Normal/Nightmare/Hell.
@@ -16,7 +16,7 @@ session. Monster stats are set when the game creates them: enemies already
 spawned keep their existing stats, including those created before you reach
 them. For all monsters to use the new value, choose **Save and Exit**, then
 start a new game with the same character. There is no need to close the game
-application or restart VR. The Combat page and hover help explain this limit;
+application or restart VR. The Survival page and its help card explain this limit;
 the save confirmation does not promise immediate rescaling of existing enemies.
 
 This works with every class and either melee rules mode. It is independent of
@@ -24,12 +24,12 @@ swing/thrust thresholds, hit calculations, shields, bows and spell controls.
 The choice lives in the mod's `d2r_pcvr.ini` as `[gameplay] offline_players`:
 `0` follows the game; integers `1` through `8` override it. Invalid values fall
 back to the game. Calibration, other settings, saves and the desktop game's
-`Settings.json` are unchanged. Choosing Game default immediately releases the
+`Settings.json` are unchanged. Choosing Game's setting immediately releases the
 override for subsequent native calculations, including later loot evaluation.
 
 The game's own Options screen and `/players` message continue to show its saved
-native preference. The VR Combat setting takes precedence while a numbered
-choice is selected; use Game default to follow those native controls again.
+native preference. The VR Settings choice takes precedence while a numbered
+choice is selected; use Game's setting to follow those native controls again.
 
 ## Implementation and guards
 
@@ -49,7 +49,7 @@ monster scaling and treasure-class formulas consume the overridden count.
 The `0x543029` monster-scaling call and `0x440a7d` drop-count call both reach
 this accessor; the monster-count helper at `0x509430` also falls back to it.
 
-If a signature or hook is unavailable, native behavior remains and the Combat
+If a signature or hook is unavailable, native behavior remains and the Survival
 page reports that scaling is unavailable. Installation retries after code
 decryption. Logs distinguish adapter readiness from observed native uses of
 each selected count. Runtime availability updates never discard pending edits.
@@ -69,7 +69,7 @@ Headset/gameplay verification remains required:
 2. Apply Players 8, leave and start another game in that area. Compare several
    monsters of the same type; they should take appreciably more damage to kill.
 3. Confirm the log records `effective players=8`, then repeat with Players 1.
-4. Choose Game default; confirm it follows the game's native setting. Restart
+4. Choose Game's setting; confirm it follows the game's native setting. Restart
    to check persistence and verify other VR settings/calibration are preserved.
 5. Check both melee modes and a bow or spell. The difficulty choice should not
    change gesture recognition, skill assignment or attack controls.

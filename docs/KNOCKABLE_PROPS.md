@@ -24,7 +24,7 @@ then falls, bounces and rolls in the same Box3D world as the
 rest. The game draws its own model there, shadow included. This is purely
 visual: no native request, item, collision or game state is involved, and
 everything returns to its place when the area loads again.
-VR Settings > Video > Knockable props (`[interactions] prop_physics=0`)
+VR Settings > World > Knock over small props (`[interactions] prop_physics=0`)
 turns it off, live.
 
 ## Pieces

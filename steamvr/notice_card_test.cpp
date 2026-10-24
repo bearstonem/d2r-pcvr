@@ -61,7 +61,13 @@ int main() {
         int shown=0;uint64_t now=0;
         for(auto c=cards.Step(now);c.kind>=0;c=cards.Step(now+=ShowMs)){cards.Shown(now);++shown;}
         assert(shown==5);
-        cards.Push(-1,now);cards.Push(Kinds,now);assert(cards.Step(now).kind<0);
+        cards.Push(-1,now);cards.Push(CardKinds,now);assert(cards.Step(now).kind<0);
+    }
+    // The mod's own message (a VR Settings paint failure) takes the same queue.
+    {
+        Cards cards;cards.Push(Message,0);
+        auto c=cards.Step(0);assert(c.kind==Message&&c.place);
+        cards.Shown(0);assert(cards.Step(ShowMs-1).kind==Message);assert(cards.Step(ShowMs).kind<0);
     }
 
     // Counted quest updates and level-ups within one session add cards.
