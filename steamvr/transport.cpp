@@ -153,21 +153,38 @@ PFN_xrEnumerateSwapchainImages runtimeEnumerateImages=nullptr;
 framegen::ConfigureMotionFn frameMotionConfigure=nullptr;
 framegen::PublishMotionFn frameMotionPublish=nullptr;
 framegen::MotionStatisticsFn frameMotionStatistics=nullptr;
+framegen::PublishGuidesFn frameMotionPublishV2=nullptr;   // preferred: with the device checked here
 std::atomic<bool> frameMotionUsable{false},frameMotionMonsters{true},frameMotionAsked{false};
 // The bridge copied none of ten seconds of vectors: game motion gives way to
 // its flow until the next session (the log says why).
 std::atomic<bool> frameMotionRefused{false};
+// The session's device is the one the vectors report: the bridge's
+// synthesizer uses game motion only then (its own check). ReShade wraps the
+// game's device but not resources, so a session started with Game motion is
+// given the native device beneath (Initialize); one started otherwise, or
+// refused it by the runtime, keeps the wrapper and game motion waits for the
+// next start.
+std::atomic<bool> frameMotionSessionOk{false};
+// The object behind any of its interfaces (COM identity).
+bool SameObject(IUnknown* a,IUnknown* b) {
+    if(!a||!b)return false;
+    ComPtr<IUnknown> x,y;
+    return SUCCEEDED(a->QueryInterface(IID_PPV_ARGS(&x)))&&SUCCEEDED(b->QueryInterface(IID_PPV_ARGS(&y)))&&x.Get()==y.Get();
+}
 framemotion::Pass frameMotion;
 std::array<framemotion::Camera,2> motionWas{};   // each eye's camera a frame back
 framemotion::Camera motionLastRender{};          // the render before (the game's vectors' camera)
 std::array<bool,2> motionDrawn{};                // this frame's vectors drawn, else cleared to none
 struct MotionPublisher {ComPtr<ID3D12CommandAllocator> allocator;ComPtr<ID3D12GraphicsCommandList> list;uint64_t fence=0;};
-// The device behind the session's queue: the bridge copies the vectors only
-// when they, the list it copies on and the queue all report one device (COM
-// identity). Every publication failed so with the vectors and the list made
-// on the device ReShade hands over (owner's run, 2026-10-23: "snapshot
-// failures" = published), so both are made on the queue's own.
-ComPtr<ID3D12Device> motionDevice;
+// The device behind the session's queue, the vectors and the list are made
+// on; and the device the vectors themselves report. Through V1 the bridge
+// copies the vectors only when they, the list and the queue report one
+// device (COM identity), and refused every copy: ReShade wraps the device and
+// the queue (one device) but not resources, which report the device beneath
+// (owner's runs, 2026-10-23). A resource made through the queue's device
+// reporting this one shows it is the native device beneath that wrapper:
+// V2 is given it as checked (motionNative), and the bridge copies there.
+ComPtr<ID3D12Device> motionDevice,motionNative;
 std::array<MotionPublisher,2> motionPublishers;uint32_t motionPublisherNext=0;
 struct MotionCounts {uint32_t drawn=0,cleared=0,own=0,published=0;ULONGLONG since=0;} motionCounts;
 // Game motion takes the game's own vectors from this far out (By turns'
@@ -931,7 +948,7 @@ framegen::Options FrameGenWanted() {
 }
 // Game motion now: chosen, the bridge's vector input and the pass there, Both eyes.
 bool FrameMotionWanted() {
-    return frameMotionUsable.load()&&!frameMotionRefused.load()&&FrameGenWanted().mode==framegen::Mode::GameMotion&&StereoRendering()==0;
+    return frameMotionUsable.load()&&frameMotionSessionOk.load()&&!frameMotionRefused.load()&&FrameGenWanted().mode==framegen::Mode::GameMotion&&StereoRendering()==0;
 }
 // Names OFXR Bridge's folder to the Khronos loader for this process only, as
 // a place for explicit layers (XR_API_LAYER_PATH, added to any path already
@@ -1026,7 +1043,9 @@ framegen::Start FrameGenAttach() {
     frameMotionConfigure=reinterpret_cast<framegen::ConfigureMotionFn>(GetProcAddress(layer,framegen::ConfigureMotionExport));
     frameMotionPublish=reinterpret_cast<framegen::PublishMotionFn>(GetProcAddress(layer,framegen::PublishMotionExport));
     frameMotionStatistics=reinterpret_cast<framegen::MotionStatisticsFn>(GetProcAddress(layer,framegen::MotionStatisticsExport));
-    if(!frameMotionConfigure||!frameMotionPublish)Say("Frame generation: this OFXR Bridge has no motion vector input; game motion uses its optical flow");
+    const auto versionV2=reinterpret_cast<framegen::VersionFn>(GetProcAddress(layer,framegen::VersionV2Export));
+    frameMotionPublishV2=versionV2&&versionV2()==2?reinterpret_cast<framegen::PublishGuidesFn>(GetProcAddress(layer,framegen::PublishGuidesExport)):nullptr;
+    if(!frameMotionConfigure||(!frameMotionPublish&&!frameMotionPublishV2))Say("Frame generation: this OFXR Bridge has no motion vector input; game motion uses its optical flow");
     FrameGenAsk(FrameGenWanted());
     return framegen::Start::Loaded;
 }
@@ -1068,6 +1087,7 @@ framegen::Readout FrameGenNow(ULONGLONG now,bool byTurns) {
     readout.gameMotion=wanted.mode==framegen::Mode::GameMotion;
     readout.vectors=readout.state==framegen::State::Active&&frameMotionAsked;
     readout.refused=frameMotionRefused.load();
+    readout.nextStart=frameMotionUsable.load()&&!frameMotionSessionOk.load();
     if(!frameGenRead||!(readout==frameGenReadout)) {
         char line[260];std::snprintf(line,sizeof line,"%s [%s; sessions %u, ready %u, bypass %u, errors %u]",framegen::Line(readout).c_str(),
             framegen::StateName(readout.state),readout.sessions,readout.ready,readout.bypass,readout.errors);
@@ -1433,7 +1453,22 @@ bool Initialize(reshade::api::command_queue* rq,reshade::api::swapchain* swap) {
     if(!Hr(device->CheckFeatureSupport(D3D12_FEATURE_FEATURE_LEVELS,&levels,sizeof levels),"check feature level")) return false;
     XrGraphicsBindingD3D12KHR binding{XR_TYPE_GRAPHICS_BINDING_D3D12_KHR};binding.device=device.Get();binding.queue=queue.Get();
     XrSessionCreateInfo ci{XR_TYPE_SESSION_CREATE_INFO};ci.systemId=system;ci.next=&binding;
-    if(!Check(pCreateSession(instance,&ci,&session),"create D3D12 session")) return false;
+    // Game motion: the device the game's resources report (beneath ReShade's
+    // wrapper) for the session, so the bridge's synthesizer takes the vectors;
+    // the queue stays the game's. Refused by the runtime: the wrapper, as before.
+    ComPtr<ID3D12Device> native;
+    if(auto* buffer=reinterpret_cast<ID3D12Resource*>(swap->get_current_back_buffer().handle);buffer&&FAILED(buffer->GetDevice(IID_PPV_ARGS(&native))))native.Reset();
+    const bool wrapped=native&&!SameObject(native.Get(),device.Get());
+    bool nativeSession=frameMotionPublishV2&&FrameGenWanted().mode==framegen::Mode::GameMotion&&wrapped;
+    if(nativeSession)binding.device=native.Get();
+    XrResult made=pCreateSession(instance,&ci,&session);
+    if(nativeSession&&XR_FAILED(made)) {
+        char line[200];std::snprintf(line,sizeof line,"Frame generation: the runtime refused the native D3D12 device (%d); game motion waits for another start",int(made));Say(line);
+        nativeSession=false;session=XR_NULL_HANDLE;binding.device=device.Get();made=pCreateSession(instance,&ci,&session);
+    }
+    if(!Check(made,"create D3D12 session")) return false;
+    frameMotionSessionOk=nativeSession||(native&&!wrapped);
+    if(nativeSession)Say("Frame generation: the session has the game's native D3D12 device, beneath ReShade's, for game motion");
     XrViewConfigurationView resolutionViews[2]{{XR_TYPE_VIEW_CONFIGURATION_VIEW},{XR_TYPE_VIEW_CONFIGURATION_VIEW}};
     uint32_t resolutionCount=0;recommendedResolution=maximumResolution={};
     if(XR_SUCCEEDED(pEnumerateViewConfigurationViews(instance,system,XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO,2,&resolutionCount,resolutionViews))&&resolutionCount==2){
@@ -1506,7 +1541,7 @@ bool Initialize(reshade::api::command_queue* rq,reshade::api::swapchain* swap) {
     motionDevice.Reset();
     if(FAILED(queue->GetDevice(IID_PPV_ARGS(&motionDevice))))motionDevice.Reset();
     frameMotionRefused=false;
-    frameMotionUsable=frameMotionPublish&&frameMotionConfigure&&frameMotion.Initialize(device.Get(),&Say);
+    frameMotionUsable=(frameMotionPublish||frameMotionPublishV2)&&frameMotionConfigure&&frameMotion.Initialize(device.Get(),&Say);
     return true;
 }
 void UpdateControllerLabels() {
@@ -3585,7 +3620,7 @@ void DrawMotion(ID3D12GraphicsCommandList* list,int eye) {
 // Game motion: an open list to publish this frame's vectors from, while the
 // layer was asked for them; null: none.
 MotionPublisher* OpenMotionPublisher() {
-    if(!frameMotionAsked||!frameMotionPublish)return nullptr;
+    if(!frameMotionAsked||(!frameMotionPublish&&!frameMotionPublishV2))return nullptr;
     auto& p=motionPublishers[motionPublisherNext];
     auto* owner=motionDevice?motionDevice.Get():device.Get();
     if(!p.allocator&&(!Hr(owner->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,IID_PPV_ARGS(&p.allocator)),"create motion allocator")||
@@ -3600,6 +3635,10 @@ MotionPublisher* OpenMotionPublisher() {
 void PublishMotion(ID3D12GraphicsCommandList* list,const Eye& e,int eye) {
     auto* vectors=frameMotion.Vectors(eye);
     if(!vectors||e.images.empty())return;
+    // V2 with the vectors' own device as checked: made through the queue's
+    // device, they report the native device beneath it.
+    if(frameMotionPublishV2&&!motionNative&&FAILED(vectors->GetDevice(IID_PPV_ARGS(&motionNative))))motionNative.Reset();
+    const bool v2=frameMotionPublishV2&&motionNative;
     framegen::MotionVectorPublicationV1 p;
     p.stream=uint64_t(eye)+1;p.output=e.images[e.index].texture;p.motionVectors=vectors;
     p.producerQueue=queue.Get();p.producerCommandList=list;
@@ -3608,7 +3647,7 @@ void PublishMotion(ID3D12GraphicsCommandList* list,const Eye& e,int eye) {
     p.scaleX=float(p.motionWidth);p.scaleY=float(p.motionHeight);
     p.resourceState=uint32_t(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     static bool told=false;
-    if(!told) {   // what the bridge's copy will compare, once
+    if(!told) {   // what the bridge's copy will compare (V1), once
         told=true;
         const auto identity=[](auto* object)->void* {
             if(!object)return nullptr;
@@ -3620,10 +3659,17 @@ void PublishMotion(ID3D12GraphicsCommandList* list,const Eye& e,int eye) {
         void* const vectorsDevice=identity(vectors);void* const listDevice=identity(list);void* const queueDevice=identity(queue.Get());
         char line[300];std::snprintf(line,sizeof line,"Frame generation: game motion's devices - vectors %p, list %p, queue %p (ReShade's %p): %s",
             vectorsDevice,listDevice,queueDevice,static_cast<void*>(handed.Get()),
-            vectorsDevice&&vectorsDevice==listDevice&&listDevice==queueDevice?"one device, as the bridge wants":"they differ: the bridge will not copy the vectors");
+            vectorsDevice&&vectorsDevice==listDevice&&listDevice==queueDevice?"one device":
+            v2?"they differ (ReShade's wrapper): published through V2 with the vectors' own device as checked":"they differ: the bridge will not copy the vectors");
         Say(line);
     }
-    if(frameMotionPublish(&p))++motionCounts.published;
+    if(v2) {
+        framegen::MotionVectorPublicationV2 g;
+        g.stream=p.stream;g.output=p.output;g.motionVectors=p.motionVectors;g.producerQueue=p.producerQueue;g.producerCommandList=p.producerCommandList;
+        g.outputWidth=p.outputWidth;g.outputHeight=p.outputHeight;g.motionWidth=p.motionWidth;g.motionHeight=p.motionHeight;
+        g.scaleX=p.scaleX;g.scaleY=p.scaleY;g.resourceState=p.resourceState;g.verifiedNativeDevice=motionNative.Get();
+        if(frameMotionPublishV2(&g))++motionCounts.published;
+    } else if(frameMotionPublish&&frameMotionPublish(&p))++motionCounts.published;
 }
 bool Copy(ID3D12Resource* src,Eye& e,reshade::api::command_queue* rq) {
     // The runtime orders images on our bound D3D12 queue. Our allocator has a
@@ -4986,8 +5032,8 @@ void Shutdown(bool preserveResolution) {
     if(session&&pDestroySession)pDestroySession(session);if(actionSet&&pDestroyActionSet)pDestroyActionSet(actionSet);
     // Destroying the instance unloads OFXR Bridge: its entry points go first.
     {std::lock_guard lock(frameGenMutex);frameGenSnapshot=nullptr;frameGenRequest=nullptr;frameGenStart=framegen::Start::NotAsked;frameGenRead=false;
-     frameMotionConfigure=nullptr;frameMotionPublish=nullptr;frameMotionStatistics=nullptr;frameMotionAsked=false;frameMotionUsable=false;motionvectors::Watch(false);}
-    frameMotion={};motionWas={};motionLastRender={};motionDrawn={};motionPublishers={};motionCounts={};motionDevice.Reset();
+     frameMotionConfigure=nullptr;frameMotionPublish=nullptr;frameMotionStatistics=nullptr;frameMotionPublishV2=nullptr;frameMotionAsked=false;frameMotionUsable=false;motionvectors::Watch(false);}
+    frameMotion={};motionWas={};motionLastRender={};motionDrawn={};motionPublishers={};motionCounts={};motionDevice.Reset();motionNative.Reset();frameMotionSessionOk=false;
     runtimeEnumerateImages=nullptr;
     if(instance&&pDestroyInstance)pDestroyInstance(instance);
     session=XR_NULL_HANDLE;instance=XR_NULL_HANDLE;actionSet=XR_NULL_HANDLE;headSpace=space=XR_NULL_HANDLE;

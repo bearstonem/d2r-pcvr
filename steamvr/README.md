@@ -290,7 +290,18 @@ a frame back:
 
 Each eye's vectors (half the depth's size, R16G16 uv) are drawn as its image is
 copied. They are published just before that eye's image is released: the
-bridge takes the newest publication for an image of one layer. It copies them
+bridge takes the newest publication for an image of one layer. The bridge
+checks devices twice: its copy wants the vectors, the list and the queue on
+one device (V1), and its synthesizer wants the vectors on the session's
+device. ReShade wraps the game's device and queue but not resources, which
+report the native device beneath, so every V1 copy was refused (the owner's
+runs, 2026-10-23). The vectors go through the V2 input instead
+(`OFXR_PublishDlssGuidesV2`, no registration, no depth), with the native
+device as the one checked. A session started with Game motion is given that
+native device (the queue stays the game's). Started otherwise, or if the
+runtime refuses it, game motion waits for the next start. If the bridge still
+copies none of ten seconds of vectors, its FidelityFX flow takes over until
+the next start. It copies them
 through a list of the mod's that runs before the frame ends. Without a depth
 or a frame back the vectors are none, so the bridge turns the image by the
 poses alone. Game motion needs Both eyes; By turns, the bridge is asked for
