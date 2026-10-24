@@ -20,7 +20,7 @@ static void ValueLabel(Key key,float value,const Context& c,char* label,size_t s
     else if(key==Foveation){const char* modes[]={"Off","Fixed","Eye tracked"};std::snprintf(label,size,"%s",modes[int(value)]);}
     else if(key==FoveationStrength)std::snprintf(label,size,"%s",FoveationStrengthNames[int(value)]);
     else if(key==StereoRendering)std::snprintf(label,size,"%s",StereoRenderingNames[std::clamp(int(value),0,int(std::size(StereoRenderingNames))-1)]);
-    else if(key==FrameGeneration)std::snprintf(label,size,"%s",framegen::ModeNames[std::clamp(int(value),0,2)]);
+    else if(key==FrameGeneration)std::snprintf(label,size,"%s",framegen::ModeNames[std::clamp(int(value),0,3)]);
     else if(key==FrameGenPreset)std::snprintf(label,size,"%s",framegen::PresetNames[std::clamp(int(value),0,2)]);
     else if(key==FrameGenScale)std::snprintf(label,size,"%s",framegen::ScaleNames[std::clamp(int(value),0,2)]);
     else if(key==VitalsLocation||key==NavigationLocation)std::snprintf(label,size,"%s",vitals::LocationNames[int(value)]);

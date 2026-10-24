@@ -1,6 +1,7 @@
 #pragma once
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <string>
@@ -21,8 +22,10 @@
 // frames for real; By turns only a quarter, so the Perf line suggests Both eyes.
 // Value-only: nothing here loads a module or reads XR state.
 namespace framevr::framegen {
-enum class Mode {Off,FidelityFx,Nvidia};   // [render] frame_generation 0 / 1 / 2
-inline constexpr const char* ModeNames[]={"Off","FidelityFX","NVIDIA"};
+// Game motion: the mod's own motion vectors (framemotion) instead of optical
+// flow, Both eyes; By turns, or before the first vectors, FidelityFX's flow.
+enum class Mode {Off,FidelityFx,Nvidia,GameMotion};   // [render] frame_generation 0 / 1 / 2 / 3
+inline constexpr const char* ModeNames[]={"Off","FidelityFX","NVIDIA","Game motion"};
 // NVIDIA optical flow: [render] frame_generation_preset, frame_generation_scale.
 inline constexpr const char* PresetNames[]={"Slow","Medium","Fast"};
 inline constexpr const char* ScaleNames[]={"100% scale","75% scale","50% scale"};
@@ -46,10 +49,72 @@ struct ControlSnapshotV1 {
     int32_t lastError=0;
 };
 static_assert(sizeof(ControlSettingsV1)==28&&sizeof(ControlSnapshotV1)==72,"OFXR control ABI V1");
+// Its DLSS-style vector input (V1): one stream an eye. For an image of one
+// layer the bridge takes the newest publication when the image is released,
+// so each eye's goes just before its release. The vectors are copied there
+// and then (into its own snapshot, through producerCommandList on
+// producerQueue); in pixels after scale, where the point was less where it
+// is. Pointers as void*: the header stays free of D3D12.
+struct MotionVectorPublicationV1 {
+    uint32_t structSize=sizeof(MotionVectorPublicationV1),apiVersion=ApiVersion;
+    uint64_t stream=0;
+    void* output=nullptr;               // ID3D12Resource: the eye's swapchain image
+    void* motionVectors=nullptr;        // ID3D12Resource
+    void* producerQueue=nullptr;        // ID3D12CommandQueue: the session's
+    void* producerCommandList=nullptr;  // ID3D12GraphicsCommandList, open
+    uint32_t outputX=0,outputY=0,outputWidth=0,outputHeight=0;
+    uint32_t motionX=0,motionY=0,motionWidth=0,motionHeight=0;
+    float scaleX=1,scaleY=1,jitterX=0,jitterY=0;
+    uint32_t resourceState=0;           // D3D12_RESOURCE_STATES the vectors are in
+    int32_t jittered=0,reset=0;
+};
+static_assert(sizeof(MotionVectorPublicationV1)==112&&offsetof(MotionVectorPublicationV1,outputX)==48&&offsetof(MotionVectorPublicationV1,resourceState)==96,
+              "OFXR motion vector ABI V1");
+// The same input, V2: optional depth guides (not used here) and the device
+// the producer checked its objects against. With verifiedNativeDevice set the
+// bridge allocates its copy there and does not compare the devices the
+// vectors, the list and the queue report. ReShade wraps the device and the
+// queue but not resources, so they report different devices: V1's check
+// refused every copy (owner's runs, 2026-10-23). Publishing needs no
+// registration (only an OptiScaler provider registers, and this mod does not).
+struct MotionVectorPublicationV2 {
+    uint32_t structSize=sizeof(MotionVectorPublicationV2),apiVersion=2;
+    uint64_t stream=0;
+    void* output=nullptr;void* motionVectors=nullptr;void* producerQueue=nullptr;void* producerCommandList=nullptr;
+    uint32_t outputX=0,outputY=0,outputWidth=0,outputHeight=0;
+    uint32_t motionX=0,motionY=0,motionWidth=0,motionHeight=0;
+    float scaleX=1,scaleY=1,jitterX=0,jitterY=0;
+    uint32_t resourceState=0;
+    int32_t jittered=0,reset=0;
+    void* depth=nullptr;   // ID3D12Resource: none
+    uint32_t depthX=0,depthY=0,depthWidth=0,depthHeight=0,depthResourceState=0;
+    float frameTimeDeltaMs=16.6667f,cameraNear=.1f,cameraFar=1000;
+    int32_t depthInverted=0,depthInfinite=0;
+    void* verifiedNativeDevice=nullptr;   // ID3D12Device
+};
+static_assert(sizeof(MotionVectorPublicationV2)==168&&offsetof(MotionVectorPublicationV2,depth)==112&&
+              offsetof(MotionVectorPublicationV2,verifiedNativeDevice)==160,"OFXR guide ABI V2");
+// What became of the vectors (V1 statistics, V2's publications counted too): status 0 disabled, 1 waiting,
+// 2 not on the image, 3 another queue, 4 invalid, 5 out of step, 6 used.
+struct MotionVectorStatisticsV1 {
+    uint32_t structSize=sizeof(MotionVectorStatisticsV1),apiVersion=ApiVersion;
+    uint64_t published=0,invalidPublications=0,snapshotCopies=0,snapshotFailures=0,resolveCalls=0,resolveMissingStreams=0,
+             resolveStalePairs=0,resolveQueueMismatches=0,matched=0,temporalRejections=0,invalidRejections=0,used=0,lastUsedPublication=0;
+    uint32_t status=0;
+};
+static_assert(sizeof(MotionVectorStatisticsV1)==120,"OFXR motion vector statistics V1");
+inline constexpr const char* MotionStatusNames[]={"disabled","waiting","not on the image","another queue","invalid","out of step","used"};
 using VersionFn=uint32_t(*)();
 using SnapshotFn=int(*)(ControlSnapshotV1*);
 using RequestFn=int(*)(const ControlSettingsV1*);
+using ConfigureMotionFn=void(*)(int);
+using PublishMotionFn=int(*)(const MotionVectorPublicationV1*);
+using MotionStatisticsFn=int(*)(MotionVectorStatisticsV1*);
+using PublishGuidesFn=int(*)(const MotionVectorPublicationV2*);
 inline constexpr char VersionExport[]="OFXR_GetProviderApiVersionV1",SnapshotExport[]="OFXR_GetControlSnapshotV1",RequestExport[]="OFXR_RequestControlV1";
+inline constexpr char ConfigureMotionExport[]="OFXR_ConfigureDlssMotionVectorsV1",PublishMotionExport[]="OFXR_PublishDlssMotionVectorsV1",
+                      MotionStatisticsExport[]="OFXR_GetDlssMotionVectorStatisticsV1",
+                      VersionV2Export[]="OFXR_GetProviderApiVersionV2",PublishGuidesExport[]="OFXR_PublishDlssGuidesV2";
 
 struct Options {
     Mode mode=Mode::Off;int preset=1,scale=2;   // NVIDIA Medium at 50%: OFXR's suggested start
@@ -60,12 +125,15 @@ inline int Choice(float value,int count,int fallback){
     return std::isfinite(value)&&value>=0&&value<count&&value==std::round(value)?int(value):fallback;
 }
 inline Options Read(float mode,float preset,float scale){
-    return {Mode(Choice(mode,3,0)),Choice(preset,3,1),Choice(scale,3,2)};
+    return {Mode(Choice(mode,4,0)),Choice(preset,3,1),Choice(scale,3,2)};
 }
 // What the layer is asked for. Off with the layer loaded asks it to step
-// aside (enabled 0) until a restart leaves it out.
-inline ControlSettingsV1 Control(const Options& o){
+// aside (enabled 0) until a restart leaves it out. vectors: the mod's motion
+// vectors instead of optical flow (game motion, while they are published);
+// game motion without them uses FidelityFX's flow.
+inline ControlSettingsV1 Control(const Options& o,bool vectors=false){
     ControlSettingsV1 c;c.enabled=o.On();c.backend=o.mode==Mode::Nvidia;c.preset=o.preset;c.scale=o.scale;
+    c.motionVectors=o.mode==Mode::GameMotion&&vectors;
     return c;
 }
 // The backend and options as the status names them: "FidelityFX", "NVIDIA Medium, 50% scale".
@@ -94,6 +162,10 @@ struct Readout {
     int backend=0,preset=1,scale=2;   // what the layer was asked for (Loaded)
     uint32_t sessions=0,ready=0,bypass=0,errors=0;int32_t lastError=0;
     bool byTurns=false;   // active while the game draws by turns: each eye a quarter of the headset's frames
+    // Game motion chosen; the layer asked for the mod's vectors (published
+    // now); the bridge refused every one of them for ten seconds (its copy
+    // failed), so its flow came back.
+    bool gameMotion=false,vectors=false,refused=false;
     bool operator==(const Readout&)const=default;
 };
 // started: as above; installed: plugins\ofxr has the manifest now; wanted: the
@@ -129,7 +201,12 @@ inline std::string Line(const Readout& r){
         case State::Failed:return "Frame generation: OFXR Bridge did not start; playing without it (see the log)";
         case State::Starting:return "Frame generation: OFXR Bridge loaded, waiting for the headset session";
         case State::Applying:std::snprintf(line,sizeof line,"Frame generation: OFXR Bridge switching to %s",running.c_str());return line;
-        case State::Active:std::snprintf(line,sizeof line,"Frame generation: active, OFXR Bridge %s%s",running.c_str(),r.byTurns?"; best with Both eyes":"");return line;
+        case State::Active:
+            if(r.gameMotion&&r.vectors)return "Frame generation: active, OFXR Bridge with game motion";
+            if(r.gameMotion)return r.byTurns?"Frame generation: active, FidelityFX flow; game motion needs Both eyes":
+                                   r.refused?"Frame generation: active, FidelityFX flow; the bridge refused game motion":
+                                               "Frame generation: active, FidelityFX flow until game motion starts";
+            std::snprintf(line,sizeof line,"Frame generation: active, OFXR Bridge %s%s",running.c_str(),r.byTurns?"; best with Both eyes":"");return line;
         case State::Bypassed:return "Frame generation: OFXR Bridge loaded but bypassed; no generated frames";
         case State::Paused:return "Frame generation: Off for now; restart the game to unload OFXR Bridge";
         case State::Error:
@@ -142,6 +219,6 @@ inline std::string Line(const Readout& r){
 // Whether the line is a warning (amber on the Perf page).
 inline bool Warning(const Readout& r){
     return r.state==State::Failed||r.state==State::Bypassed||r.state==State::Error||r.state==State::NotInstalled||r.state==State::Unavailable||
-           (r.state==State::Active&&r.byTurns);
+           (r.state==State::Active&&(r.byTurns||(r.gameMotion&&!r.vectors)));
 }
 }

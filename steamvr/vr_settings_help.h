@@ -124,7 +124,8 @@ inline int HelpChoices(int id) {
         case Foveation:case MenuDistance:case TooltipTiming:case ProjectileAimAssist:return 3;
         case FoveationStrength:case VitalsLocation:case NavigationLocation:return 4;
         case StereoRendering:return int(std::size(StereoRenderingNames));
-        case FrameGeneration:case FrameGenPreset:case FrameGenScale:return 3;
+        case FrameGeneration:return int(std::size(framegen::ModeNames));
+        case FrameGenPreset:case FrameGenScale:return 3;
         case RenderResolution:return int(std::size(resolution::Choices));
         case ControllerLabels:return int(controllers::Choice::Count);
         case MapTopDown:return 4;
@@ -163,7 +164,8 @@ inline ChoiceHelp HelpChoice(int id,float value) {
             static constexpr const char* text[]={
                 "No layer: the headset shows the frames the game draws. The default.",
                 "AMD FidelityFX optical flow on any graphics card, the lightest. Dark areas can smear as you turn your head.",
-                "The optical flow hardware of RTX and GTX 1660 cards (not GTX 1650 or GTX 10). Quality and scale: the row below."};
+                "The optical flow hardware of RTX and GTX 1660 cards (not GTX 1650 or GTX 10). Quality and scale: the row below.",
+                "No guessing: the mod gives each point's motion from the scene's depth, and monsters' from the game's own. Both eyes only."};
             return {framegen::ModeNames[c],text[c]};}
         case FrameGenPreset:{
             static constexpr const char* text[]={

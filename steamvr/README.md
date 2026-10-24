@@ -266,8 +266,52 @@ generated frames come from color alone, so moving things and head turns can
 show artifacts, and the Perf page's frame rate counts the frames the game
 draws, not the generated ones. The layer needs the Microsoft Visual C++ x64
 runtime. Its settings are `[render] frame_generation` (0 Off, 1 FidelityFX,
-2 NVIDIA), `frame_generation_preset` (0 Slow, 1 Medium, 2 Fast) and
-`frame_generation_scale` (0 100%, 1 75%, 2 50%).
+2 NVIDIA, 3 Game motion), `frame_generation_preset` (0 Slow, 1 Medium, 2 Fast),
+`frame_generation_scale` (0 100%, 1 75%, 2 50%) and
+`frame_generation_monsters` (1).
+
+**Game motion** (#308 step 3, `steamvr/frame_motion.h`) gives the bridge
+the mod's own motion vectors through its DLSS-style input
+(`OFXR_PublishDlssMotionVectorsV1`) instead of its optical flow. For every
+pixel of an eye's image they say where that point was in the same eye's image
+a frame back:
+- From the scene's depth and where the eye stood now and a frame back. That is
+  exact for everything standing still, through head turns, walking and the
+  body's turn.
+- Within a metre and a half, what the hero carries goes along with the hero's
+  step and turn, as By turns moves it.
+- What moves by itself comes from the game's own motion vectors
+  (`motion_vectors.cpp`, the target DLSS gets), less the camera's part against
+  the render before (the other eye's), twice over. As in By turns' trial
+  (#281), only from 2 m out, where a surface's texels agree, above a pixel and a
+  half, and only while the head turned less than a quarter of a degree and the
+  hero moved less than half a centimetre between renders. Otherwise monsters
+  blend.
+
+Each eye's vectors (half the depth's size, R16G16 uv) are drawn as its image is
+copied. They are published just before that eye's image is released: the
+bridge takes the newest publication for an image of one layer. The bridge
+checks devices twice: its copy wants the vectors, the list and the queue on
+one device (V1), and its synthesizer wants the vectors on the session's
+device. ReShade wraps the game's device and queue but not resources, which
+report the native device beneath, so every V1 copy was refused (the owner's
+runs, 2026-10-23). The vectors go through the V2 input instead
+(`OFXR_PublishDlssGuidesV2`, no registration, no depth), with the native
+device as the one checked. That passes the copy, but the synthesizer's check
+still fails while the session holds ReShade's wrapped device. A session on the
+native device with ReShade's queue crashed the game at its start, so with
+ReShade, game motion is not used: the log says why, the Perf line says the
+bridge refused it, and its FidelityFX flow runs. If the bridge copies none of
+ten seconds of vectors, its flow also takes over until the next start. For it
+to work: the bridge comparing adapters rather than COM identity (an upstream
+request), or the session on a queue of its own on the native device, synced
+with the game's. It copies them
+through a list of the mod's that runs before the frame ends. Without a depth
+or a frame back the vectors are none, so the bridge turns the image by the
+poses alone. Game motion needs Both eyes; By turns, the bridge is asked for
+FidelityFX's flow instead, live. The log says every 10 s how many eyes were
+drawn and published, and what the bridge did with them (published, matched,
+used, its status).
 
 `[render] reshade_depth` in `d2r_pcvr.ini` (not in VR Settings) switches
 ReShade's Generic Depth add-on, which looks at every draw call to find the

@@ -105,7 +105,7 @@ int main(){
         auto fidelity=Defaults();fidelity[FrameGeneration]=1;
         Check(RowCount(Page::Performance,fidelity)==7,"FidelityFX has no NVIDIA row");
         Check(Defaults()[FrameGenPreset]==1&&Defaults()[FrameGenScale]==2,"NVIDIA Medium at 50% to start");
-        Check(Normalize(FrameGeneration,3)==0&&Normalize(FrameGeneration,1.5f)==0&&Normalize(FrameGenScale,-1)==2&&Normalize(FrameGenPreset,2)==2,
+        Check(Normalize(FrameGeneration,4)==0&&Normalize(FrameGeneration,3)==3&&Normalize(FrameGeneration,1.5f)==0&&Normalize(FrameGenScale,-1)==2&&Normalize(FrameGenPreset,2)==2,
               "out-of-range frame generation values read as their defaults");
         Check(std::wstring(Definitions[FrameGeneration].key)==L"frame_generation"&&std::wstring(Definitions[FrameGeneration].section)==L"render"&&
               std::wstring(Definitions[FrameGenPreset].key)==L"frame_generation_preset"&&std::wstring(Definitions[FrameGenScale].key)==L"frame_generation_scale",
@@ -157,18 +157,22 @@ int main(){
               Normalize(StereoRendering,0)==0,"malformed stereo rendering goes by turns");
         Check(Normalize(StereoRendering,2)==1,"a profile saved with Replay goes by turns");
     }
-    {   // Frame generation steps Off, FidelityFX, NVIDIA and stops at the ends; NVIDIA brings its row.
+    {   // Frame generation steps Off, FidelityFX, NVIDIA, Game motion and stops at the ends; NVIDIA brings its row.
         Model frames;frames.Open(s);frames.Click({Kind::Tab,int(Page::Performance)});
         frames.Click(At(frames,Page::Performance,Decrease(6)));
         Check(frames.Get()[FrameGeneration]==0,"Off stays Off");
         frames.Click(At(frames,Page::Performance,Increase(6)));
         Check(frames.Get()[FrameGeneration]==1&&frames.Rows().count==7,"FidelityFX");
-        frames.Click(At(frames,Page::Performance,Increase(6)));frames.Click(At(frames,Page::Performance,Increase(6)));
-        Check(frames.Get()[FrameGeneration]==2&&frames.Rows().count==8&&frames.Rows()[7]==FrameGenPreset,"NVIDIA, and no further");
+        frames.Click(At(frames,Page::Performance,Increase(6)));
+        Check(frames.Get()[FrameGeneration]==2&&frames.Rows().count==8&&frames.Rows()[7]==FrameGenPreset,"NVIDIA");
         frames.Click(At(frames,Page::Performance,PairDecrease(7,0)));frames.Click(At(frames,Page::Performance,PairIncrease(7,1)));
         Check(frames.Get()[FrameGenPreset]==0&&frames.Get()[FrameGenScale]==2,"Slow; the scale stops at 50%");
         frames.Click(At(frames,Page::Performance,PairDecrease(7,1)));
         Check(frames.Get()[FrameGenScale]==1&&frames.Dirty(),"75%");
+        frames.Click(At(frames,Page::Performance,Increase(6)));frames.Click(At(frames,Page::Performance,Increase(6)));
+        Check(frames.Get()[FrameGeneration]==3&&frames.Rows().count==7,"Game motion, and no further; no NVIDIA row");
+        Check(std::string(framevr::framegen::ModeNames[3])=="Game motion"&&HelpChoices(FrameGeneration)==4,"its name and help");
+        frames.Click(At(frames,Page::Performance,Decrease(6)));   // back to NVIDIA for its row's help below
         Check(HelpAt(Page::Performance,1000.f/Width,(RowY+7*RowStep+10.f)/Height,false,&frames.Get())==FrameGenScale&&
               HelpAt(Page::Performance,700.f/Width,(RowY+7*RowStep+10.f)/Height,false,&frames.Get())==FrameGenPreset,"each half explains its own setting");
         Check(HelpAt(Page::Performance,600.f/Width,(FrameGenBox.y+10.f)/Height)==HelpFrameGen&&HelpText(HelpFrameGen)[0]&&

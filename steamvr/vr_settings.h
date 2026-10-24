@@ -130,8 +130,8 @@ inline constexpr std::array<Definition,Count> Definitions{{
     // Set from the skill wheel's lower-left box (Druid), not a VR Settings row.
     {"Left-hand strikes", "Druid: the left claw casts its own trigger skill or the right trigger's", L"gameplay",L"left_hand_strikes",0,0,1,1},
     {"Torch flame", "The flame on a torch club's head; its light stays either way", L"torch",L"flame",1,0,1,1},
-    // OFXR Bridge (frame_generation.h): 0 Off, 1 FidelityFX, 2 NVIDIA; on or off at the next start.
-    {"Frame generation", "Experimental: OFXR Bridge; on or off takes a restart", L"render",L"frame_generation",0,0,2,1},
+    // OFXR Bridge (frame_generation.h): 0 Off, 1 FidelityFX, 2 NVIDIA, 3 Game motion (the mod's vectors); on or off at the next start.
+    {"Frame generation", "Experimental: OFXR Bridge; on or off takes a restart", L"render",L"frame_generation",0,0,3,1},
     // NVIDIA's optical flow, live: 0 Slow, 1 Medium, 2 Fast; its scale 0 100%, 1 75%, 2 50%.
     {"NVIDIA flow quality", "Slow, Medium or Fast optical flow", L"render",L"frame_generation_preset",1,0,2,1},
     {"NVIDIA flow scale", "The size the optical flow works at", L"render",L"frame_generation_scale",2,0,2,1},
