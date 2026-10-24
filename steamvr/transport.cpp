@@ -65,6 +65,8 @@
 #include "elemental_hands_renderer.h"
 #include "vr_settings_ui.h"
 #include "frame_generation.h"
+#include "frame_motion.h"
+#include "motion_vectors.h"
 #include "../vr/settings_menu.h"
 #include "journal.h"
 #include "native_panels.h"
@@ -142,6 +144,26 @@ ULONGLONG frameGenReadAt=0,frameGenInstalledAt=0;
 // (neither the loader nor the bridge wraps handles); the bridge passes their
 // acquire, wait and release on untouched and never builds anything for them.
 PFN_xrEnumerateSwapchainImages runtimeEnumerateImages=nullptr;
+// Game motion (frame_motion.h): the mod's own vectors for the bridge, Both
+// eyes. Its vector input (null: this bridge has none); whether that and the
+// pass are there; the game's own vectors wanted ([render]
+// frame_generation_monsters); whether the layer was last asked for the
+// vectors (set under frameGenMutex). Copy draws each eye's, EndPair publishes it just
+// before that eye's release, from a list of its own.
+framegen::ConfigureMotionFn frameMotionConfigure=nullptr;
+framegen::PublishMotionFn frameMotionPublish=nullptr;
+framegen::MotionStatisticsFn frameMotionStatistics=nullptr;
+std::atomic<bool> frameMotionUsable{false},frameMotionMonsters{true},frameMotionAsked{false};
+framemotion::Pass frameMotion;
+std::array<framemotion::Camera,2> motionWas{};   // each eye's camera a frame back
+framemotion::Camera motionLastRender{};          // the render before (the game's vectors' camera)
+std::array<bool,2> motionDrawn{};                // this frame's vectors drawn, else cleared to none
+struct MotionPublisher {ComPtr<ID3D12CommandAllocator> allocator;ComPtr<ID3D12GraphicsCommandList> list;uint64_t fence=0;};
+std::array<MotionPublisher,2> motionPublishers;uint32_t motionPublisherNext=0;
+struct MotionCounts {uint32_t drawn=0,cleared=0,own=0,published=0;ULONGLONG since=0;} motionCounts;
+// Game motion takes the game's own vectors from this far out (By turns'
+// trial, #281: nearer, the ground at the feet kept the camera's motion).
+constexpr float MotionOwnFrom=2;
 LogFn logger=nullptr;
 PanelFn wantsPanel=nullptr;
 PanelFn inWorld=nullptr;
@@ -898,6 +920,10 @@ framegen::Options FrameGenWanted() {
     const int packed=frameGenWanted.load();
     return packed<0?framegen::Options{}:framegen::Options{framegen::Mode(packed/100),packed/10%10,packed%10};
 }
+// Game motion now: chosen, the bridge's vector input and the pass there, Both eyes.
+bool FrameMotionWanted() {
+    return frameMotionUsable.load()&&FrameGenWanted().mode==framegen::Mode::GameMotion&&StereoRendering()==0;
+}
 // Names OFXR Bridge's folder to the Khronos loader for this process only, as
 // a place for explicit layers (XR_API_LAYER_PATH, added to any path already
 // set; a later instance finds it there). Nothing loads until the instance
@@ -965,9 +991,13 @@ void FrameGenCheckPanelImages(XrSwapchain chain,const std::vector<XrSwapchainIma
 // Asks the loaded layer for the settings (caller holds frameGenMutex).
 void FrameGenAsk(const framegen::Options& o) {
     if(!frameGenRequest)return;
-    const auto control=framegen::Control(o);
+    const auto control=framegen::Control(o,FrameMotionWanted());
+    if(frameMotionConfigure)frameMotionConfigure(control.motionVectors);
+    frameMotionAsked=control.motionVectors!=0;
+    motionvectors::Watch(frameMotionAsked&&frameMotionMonsters.load());
     const bool saved=frameGenRequest(&control)!=0;
-    const std::string what=o.On()?framegen::Describe(control.backend,control.preset,control.scale):"bypass (Off until the game restarts)";
+    const std::string what=!o.On()?"bypass (Off until the game restarts)":o.mode!=framegen::Mode::GameMotion?framegen::Describe(control.backend,control.preset,control.scale):
+                           frameMotionAsked?"game motion (the mod's motion vectors)":"FidelityFX flow (game motion needs Both eyes and its vector input)";
     char line[200];std::snprintf(line,sizeof line,"Frame generation: asked OFXR Bridge for %s%s",what.c_str(),saved?"":" (not saved to its ofxr_bridge.ini)");Say(line);
     frameGenReadAt=0;
 }
@@ -983,6 +1013,11 @@ framegen::Start FrameGenAttach() {
     }
     std::lock_guard lock(frameGenMutex);
     frameGenSnapshot=snapshot;frameGenRequest=request;
+    // Its vector input, for game motion (a bridge without it: optical flow only).
+    frameMotionConfigure=reinterpret_cast<framegen::ConfigureMotionFn>(GetProcAddress(layer,framegen::ConfigureMotionExport));
+    frameMotionPublish=reinterpret_cast<framegen::PublishMotionFn>(GetProcAddress(layer,framegen::PublishMotionExport));
+    frameMotionStatistics=reinterpret_cast<framegen::MotionStatisticsFn>(GetProcAddress(layer,framegen::MotionStatisticsExport));
+    if(!frameMotionConfigure||!frameMotionPublish)Say("Frame generation: this OFXR Bridge has no motion vector input; game motion uses its optical flow");
     FrameGenAsk(FrameGenWanted());
     return framegen::Start::Loaded;
 }
@@ -993,6 +1028,20 @@ framegen::Readout FrameGenNow(ULONGLONG now,bool byTurns) {
     if(frameGenRead&&now-frameGenReadAt<500)return frameGenReadout;
     frameGenReadAt=now;
     const auto wanted=FrameGenWanted();
+    // Game motion follows Stereo rendering (Both eyes) live, and starts once the pass is built.
+    if(frameGenRequest&&wanted.On()&&FrameMotionWanted()!=frameMotionAsked)FrameGenAsk(wanted);
+    if(frameMotionAsked&&(!motionCounts.since||now-motionCounts.since>=10000)) {
+        framegen::MotionVectorStatisticsV1 s;
+        if(motionCounts.since&&frameMotionStatistics&&frameMotionStatistics(&s)) {
+            char line[360];std::snprintf(line,sizeof line,"Frame generation: game motion, 10 s: eyes drawn %u (with the game's own motion %u), none %u, published %u; "
+                "the bridge: published %llu, matched %llu, used %llu, snapshot failures %llu, invalid %llu, now %s",
+                motionCounts.drawn,motionCounts.own,motionCounts.cleared,motionCounts.published,(unsigned long long)s.published,(unsigned long long)s.matched,
+                (unsigned long long)s.used,(unsigned long long)s.snapshotFailures,(unsigned long long)(s.invalidPublications+s.invalidRejections),
+                s.status<std::size(framegen::MotionStatusNames)?framegen::MotionStatusNames[s.status]:"?");
+            Say(line);
+        }
+        motionCounts={};motionCounts.since=now;
+    }
     // Installed since the start? Its manifest, at most every 5 s, only while it matters.
     if(wanted.On()&&frameGenStart!=framegen::Start::Loaded&&(!frameGenInstalledAt||now-frameGenInstalledAt>=5000)) {
         frameGenInstalled=!frameGenFolder.empty()&&GetFileAttributesW((frameGenFolder+L"\\"+framegen::ManifestFile).c_str())!=INVALID_FILE_ATTRIBUTES;
@@ -1002,6 +1051,8 @@ framegen::Readout FrameGenNow(ULONGLONG now,bool byTurns) {
     const bool answered=frameGenSnapshot&&frameGenSnapshot(&snapshot)!=0;
     auto readout=framegen::Classify(frameGenStart,frameGenInstalled,wanted,answered?&snapshot:nullptr);
     readout.byTurns=readout.state==framegen::State::Active&&byTurns;
+    readout.gameMotion=wanted.mode==framegen::Mode::GameMotion;
+    readout.vectors=readout.state==framegen::State::Active&&frameMotionAsked;
     if(!frameGenRead||!(readout==frameGenReadout)) {
         char line[260];std::snprintf(line,sizeof line,"%s [%s; sessions %u, ready %u, bypass %u, errors %u]",framegen::Line(readout).c_str(),
             framegen::StateName(readout.state),readout.sessions,readout.ready,readout.bypass,readout.errors);
@@ -1436,6 +1487,8 @@ bool Initialize(reshade::api::command_queue* rq,reshade::api::swapchain* swap) {
     // Only for a session that started: a failed one is shut down at once, and
     // that would wait here for the warm-up.
     if(turnCompiler.Start())turnCompiler.Submit({device,turnFormat});   // else the first turned eye builds it all
+    // Game motion's pass, while the bridge is loaded with its vector input.
+    frameMotionUsable=frameMotionPublish&&frameMotionConfigure&&frameMotion.Initialize(device.Get(),&Say);
     return true;
 }
 void UpdateControllerLabels() {
@@ -3482,6 +3535,61 @@ bool TurnEye(int i) {
     if(fromDrawn)++turnCounts.drawn;
     return true;
 }
+// Game motion (frame_motion.h): this eye's vectors for the bridge, from this
+// present's scene depth and where the eye stood now and a frame back, with the
+// game's own vectors for what moves by itself. Without a depth or a frame
+// back, none: the bridge then turns the image by the poses alone. EndPair
+// publishes them just before the eye's release.
+void DrawMotion(ID3D12GraphicsCommandList* list,int eye) {
+    motionDrawn[size_t(eye)]=false;
+    if(!FrameMotionWanted()||turnFrame||!frameMotion.Ready())return;
+    const auto& w=viewWorld[size_t(eye)];const auto& f=views[size_t(eye)].fov;
+    const framemotion::Camera now{w.at,w.turn,{f.angleLeft,f.angleRight,f.angleDown,f.angleUp},w.nearPlane,viewBase[size_t(eye)],w.hero,w.ok&&w.nearPlane>0};
+    scenedepth::Kept latest;
+    const float upm=stageWorld.upm;
+    if(now.ok&&motionWas[size_t(eye)].ok&&upm>0&&scenedepth::Take(latest)&&latest.resource) {
+        auto* depth=reinterpret_cast<ID3D12Resource*>(latest.resource);
+        const auto d=depth->GetDesc();
+        const uint32_t size[2]{uint32_t(d.Width),d.Height};
+        motionvectors::Target game{};
+        const bool own=frameMotionMonsters.load()&&motionLastRender.ok&&motionvectors::Latest(game)&&game.width==size[0]&&game.height==size[1];
+        const auto c=framemotion::Build(now,motionWas[size_t(eye)],own?motionLastRender:framemotion::Camera{},upm,CarriedNear,CarriedFar,MotionOwnFrom,size,latest.scale,2);
+        constexpr auto readable=D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE|D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+        motionDrawn[size_t(eye)]=frameMotion.Render(device.Get(),list,eye,depth,DXGI_FORMAT(latest.format),readable,own?game.texture:nullptr,game.state,c);
+        if(motionDrawn[size_t(eye)]){++motionCounts.drawn;if(c.renders>0)++motionCounts.own;}
+        static bool told=false;
+        if(motionDrawn[size_t(eye)]&&!told){told=true;char line[200];std::snprintf(line,sizeof line,"Frame generation: game motion drawn (%ux%u vectors from %ux%u depth; the game's own vectors %s)",
+            frameMotion.Width(eye),frameMotion.Height(eye),size[0],size[1],own?"in":"not yet");Say(line);}
+    }
+    if(!motionDrawn[size_t(eye)]&&frameMotion.Clear(device.Get(),list,eye))++motionCounts.cleared;
+    motionWas[size_t(eye)]=now;motionLastRender=now;
+}
+// Game motion: an open list to publish this frame's vectors from, while the
+// layer was asked for them; null: none.
+MotionPublisher* OpenMotionPublisher() {
+    if(!frameMotionAsked||!frameMotionPublish)return nullptr;
+    auto& p=motionPublishers[motionPublisherNext];
+    if(!p.allocator&&(!Hr(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,IID_PPV_ARGS(&p.allocator)),"create motion allocator")||
+       !Hr(device->CreateCommandList(0,D3D12_COMMAND_LIST_TYPE_DIRECT,p.allocator.Get(),nullptr,IID_PPV_ARGS(&p.list)),"create motion list")||
+       !Hr(p.list->Close(),"close motion list"))){p={};return nullptr;}
+    if(!WaitGpuValue(p.fence)||!Hr(p.allocator->Reset(),"reset motion allocator")||!Hr(p.list->Reset(p.allocator.Get(),nullptr),"reset motion list"))return nullptr;
+    motionPublisherNext^=1;
+    return &p;
+}
+// This eye's vectors to the bridge, in uv: scaled to the vectors' texels, which
+// it scales to the image's. Its copy goes on `list`, before the release.
+void PublishMotion(ID3D12GraphicsCommandList* list,const Eye& e,int eye) {
+    auto* vectors=frameMotion.Vectors(eye);
+    if(!vectors||e.images.empty())return;
+    framegen::MotionVectorPublicationV1 p;
+    p.stream=uint64_t(eye)+1;p.output=e.images[e.index].texture;p.motionVectors=vectors;
+    p.producerQueue=queue.Get();p.producerCommandList=list;
+    p.outputWidth=width;p.outputHeight=height;
+    p.motionWidth=frameMotion.Width(eye);p.motionHeight=frameMotion.Height(eye);
+    p.scaleX=float(p.motionWidth);p.scaleY=float(p.motionHeight);
+    p.resourceState=uint32_t(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    if(frameMotionPublish(&p))++motionCounts.published;
+}
 bool Copy(ID3D12Resource* src,Eye& e,reshade::api::command_queue* rq) {
     // The runtime orders images on our bound D3D12 queue. Our allocator has a
     // separate lifetime: never reset it until its own previous copy completed.
@@ -3549,6 +3657,7 @@ bool Copy(ID3D12Resource* src,Eye& e,reshade::api::command_queue* rq) {
         elementalRenderer.Render(e.commands.Get(),dest,eye,{V(v.pose.position),Q(v.pose.orientation)},
             {v.fov.angleLeft,v.fov.angleRight,v.fov.angleDown,v.fov.angleUp},elementalScene);
     }
+    DrawMotion(e.commands.Get(),int(eye));
     if(gpu){
         e.commands->EndQuery(gpuProfile.heap.Get(),D3D12_QUERY_TYPE_TIMESTAMP,eye*5+4);
         e.commands->ResolveQueryData(gpuProfile.heap.Get(),D3D12_QUERY_TYPE_TIMESTAMP,eye*5,5,gpuProfile.readback.Get(),eye*5*sizeof(uint64_t));
@@ -3635,7 +3744,12 @@ bool CopyUi(reshade::api::command_queue* rq) {
     if(!e.chain) {
         XrSwapchainCreateInfo c{XR_TYPE_SWAPCHAIN_CREATE_INFO};c.usageFlags=XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT|XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT;
         c.format=DXGI_FORMAT_R16G16B16A16_FLOAT;c.width=w;c.height=h;c.sampleCount=c.faceCount=c.arraySize=c.mipCount=1;
-        if(XR_FAILED(pCreateSwapchain(session,&c,&e.chain))) {uiSupported=false;Say("Frame panels: UI format unavailable; native menu retained");return true;}
+        // Its result in the log: with frame generation the Escape menu once fell back here (2026-10-23).
+        if(const XrResult made=pCreateSwapchain(session,&c,&e.chain);XR_FAILED(made)) {
+            uiSupported=false;e.chain=XR_NULL_HANDLE;
+            char line[160];std::snprintf(line,sizeof line,"Frame panels: UI swapchain %ux%u unavailable (%d); native menu retained",w,h,int(made));Say(line);
+            return true;
+        }
         uint32_t n=0;EnumeratePanelImages(e.chain,0,&n,nullptr);e.images.resize(n,{XR_TYPE_SWAPCHAIN_IMAGE_D3D12_KHR});
         if(XR_FAILED(EnumeratePanelImages(e.chain,n,&n,reinterpret_cast<XrSwapchainImageBaseHeader*>(e.images.data()))))return false;
         if(FAILED(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,IID_PPV_ARGS(&e.allocator)))||
@@ -3738,6 +3852,7 @@ void Register(LogFn log,PanelFn panel,PanelFn world,PanelFn toggle) {
     reshade::register_event<reshade::addon_event::init_pipeline>(&PipelineCreated);
     foveation::Register(log);
     effectslayer::Register(log);
+    motionvectors::Register(log);
     resolution::Register(log);
     registered=true;Say("Frame OpenXR: registered D3D12 capture; awaiting game Present");
 }
@@ -3751,6 +3866,12 @@ void ConfigureDeferredWait(bool on) {
     if(deferredWait.exchange(on)!=on)Say(on?"Frame OpenXR: GPU wait deferred until copy allocator reuse":"Frame OpenXR: conservative GPU wait before image release");
 }
 void ConfigureSymmetricProjection(bool on) {symmetricProjection.store(on);}
+void ConfigureFrameMotion(bool monsters) {
+    if(frameMotionMonsters.exchange(monsters)==monsters)return;
+    std::lock_guard lock(frameGenMutex);
+    motionvectors::Watch(frameMotionAsked&&monsters);
+    Say(monsters?"Frame generation: game motion takes what moves by itself from the game's own vectors":"Frame generation: game motion from the depth alone");
+}
 void ConfigureFrameGeneration(float mode,float preset,float scale) {
     const auto o=framegen::Read(mode,preset,scale);
     const int packed=int(o.mode)*100+o.preset*10+o.scale;
@@ -3860,7 +3981,7 @@ float ReplayProjShift() {
     const auto off=[](const XrFovf& f){const float l=std::tan(f.angleLeft),r=std::tan(f.angleRight);return (r+l)/(r-l);};
     return .5f*(off(views[0].fov)-off(views[1].fov));
 }
-bool TurnDepthWanted() {return StereoRendering()==1;}
+bool TurnDepthWanted() {return StereoRendering()==1||FrameMotionWanted();}   // game motion's too
 bool TurnDepthReady() {
     std::lock_guard lock(mutex);
     return turnWarp.DepthReady()&&turnDepths[0].ok&&turnDepths[1].ok&&lastEyes[0].world.ok&&lastEyes[1].world.ok;
@@ -3914,12 +4035,24 @@ void EndPair() {
     if(!failed)ReadGpuProfile();
     gpuProfile.started=gpuProfile.effects=gpuProfile.resolved=0;
     const double releaseStart=Milliseconds();
+    // Game motion: each eye's vectors published just before its release (the
+    // bridge takes the newest for an image of one layer); their copies run
+    // before this frame's end.
+    auto* publisher=OpenMotionPublisher();
     for(auto& e:eyes)if(e.acquired){
         const int i=int(&e-eyes.data());
+        if(publisher&&e.copied&&i!=turned)PublishMotion(publisher->list.Get(),e,i);
         XrSwapchainImageReleaseInfo ri{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
         if(!Check(pReleaseSwapchainImage(e.chain,&ri),"release copied eye")){failed=true;e.copied=false;if(i==turned)turned=-1;}
         if(!e.copied&&i!=turned)lastEyes[i].ok=false;
         e.acquired=false;
+    }
+    if(publisher) {
+        ID3D12CommandList* lists[]={publisher->list.Get()};
+        if(Hr(publisher->list->Close(),"close motion list")) {
+            queue->ExecuteCommandLists(1,lists);
+            if(Hr(queue->Signal(fence.Get(),++fenceValue),"signal motion fence"))publisher->fence=fenceValue;
+        }
     }
     if(uiEye.acquired){XrSwapchainImageReleaseInfo release{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
         Check(pReleaseSwapchainImage(uiEye.chain,&release),"release journal");uiEye.acquired=false;}
@@ -4817,7 +4950,9 @@ void Shutdown(bool preserveResolution) {
     if(headSpace&&pDestroySpace)pDestroySpace(headSpace);if(space&&pDestroySpace)pDestroySpace(space);
     if(session&&pDestroySession)pDestroySession(session);if(actionSet&&pDestroyActionSet)pDestroyActionSet(actionSet);
     // Destroying the instance unloads OFXR Bridge: its entry points go first.
-    {std::lock_guard lock(frameGenMutex);frameGenSnapshot=nullptr;frameGenRequest=nullptr;frameGenStart=framegen::Start::NotAsked;frameGenRead=false;}
+    {std::lock_guard lock(frameGenMutex);frameGenSnapshot=nullptr;frameGenRequest=nullptr;frameGenStart=framegen::Start::NotAsked;frameGenRead=false;
+     frameMotionConfigure=nullptr;frameMotionPublish=nullptr;frameMotionStatistics=nullptr;frameMotionAsked=false;frameMotionUsable=false;motionvectors::Watch(false);}
+    frameMotion={};motionWas={};motionLastRender={};motionDrawn={};motionPublishers={};motionCounts={};
     runtimeEnumerateImages=nullptr;
     if(instance&&pDestroyInstance)pDestroyInstance(instance);
     session=XR_NULL_HANDLE;instance=XR_NULL_HANDLE;actionSet=XR_NULL_HANDLE;headSpace=space=XR_NULL_HANDLE;

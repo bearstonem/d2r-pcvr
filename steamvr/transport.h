@@ -20,6 +20,10 @@ void ConfigureSymmetricProjection(bool enabled);
 // the next OpenXR start; the backend and NVIDIA's options reach a loaded layer
 // at once, and Off bypasses it until then.
 void ConfigureFrameGeneration(float mode,float preset,float scale);
+// [render] frame_generation_monsters (1): game motion takes what moves by
+// itself (monsters, missiles) from the game's own motion vectors; 0 the
+// scene's depth alone (what moves by itself is blended).
+void ConfigureFrameMotion(bool monsters);
 // [stereo] turns_from_drawn_eye (1): by turns, the eye not drawn mostly from
 // the drawn eye's picture of this frame (TurnDepth); 0: its own image alone.
 void ConfigureTurnsFromDrawnEye(bool enabled);
