@@ -68,6 +68,12 @@ int LastSwingWouldHit();
 // - forced hits under contact_hits - follow the contact rules: attack rating scales
 // their damage (with ar_damage) and the would-have-hit gate decides their effects.
 void ConfigureShotRules(bool unleashed);
+// Unleashed (applied live, Cal 2026-10-24): the local player's trigger/button melee - a
+// melee hit check outside a physical swing (basic attack, melee skills, Smite) - is a
+// stroke like a swing: it lands, attack rating scales its damage and the would-have-hit
+// gate decides its effects (Smite always hits natively: neither), and it shares the
+// swings' recovery (melee::ButtonHit: damage factor and on-hit cycle gate).
+void ConfigureButtonRules(bool unleashed);
 // A parry swing made during the monster's downstroke (opensAt, melee::ParryOpens)
 // resolves at once, before its hit frame. ParryArmed: an unspent recent swing (cheap gate,
 // thread-safe). Game thread: EarlyParry judges this attacking monster unit

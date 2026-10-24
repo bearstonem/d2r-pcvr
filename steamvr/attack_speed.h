@@ -78,6 +78,11 @@ inline int WereformFrames(int classId,int form,Weapon weapon,int eias) {
 // The speed sum past 100 % in form: item IAS (ItemStatCost 93, diminished) and
 // the unit's attackrate (68): 100, plus skill speed, less the weapon's WSM and slows.
 inline int FormEias(int ias,int attackRate) {return Eias(ias)+attackRate-100;}
+// Human form's skill speed (SIAS) for Frames: the unit's attackrate (68) less 100, with the
+// main-hand weapon's WSM it already subtracts put back (Frames takes WSM separately).
+// Fanaticism, Frenzy, Burst of Speed and slows (chill, Decrepify) move it. Logged
+// 2026-10-21, no buffs: WSM 0 -> attackrate 100, +10 -> 90, -10 -> 110 (SkillSpeed 0).
+inline int SkillSpeed(int attackRate,int mainWsm) {return attackRate-100+mainWsm;}
 inline uint32_t Milliseconds(int frames) {return frames>0?uint32_t(frames)*1000u/FramesPerSecond:0;}
 // One attack per cycle, on the authoritative game thread. A native-resolved
 // attack starts the cycle whether its roll hit or missed, as the native swing

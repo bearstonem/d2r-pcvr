@@ -31,6 +31,14 @@ void ConfigureSwingRecovery(bool on,float curve,float grace);
 // Unleashed cleave falloff: each further creature one stroke lands on deals
 // `step` less (0..1, 0 = off), never below `floor`. [gameplay] cleave_falloff, cleave_min
 void ConfigureCleave(float step,float floor);
+// Unleashed trigger/button melee (combat_rules.h TriggerRecovery): the local player's
+// melee hit check on this monster outside a physical swing, as combat.cpp's hit check
+// sees it. Measured from the latest landed swing on any hand (recovery damage factor
+// and the on-hit cycle gate), it becomes the latest trigger hit every later swing is
+// also measured from. smite: inside the native Smite (it always hits natively). Off the
+// owning game thread the clocks are neither read nor stamped: full recovery, effects on.
+struct ButtonStroke {float recovery=1;bool onHit=true,smite=false;};
+ButtonStroke ButtonHit(uint32_t monster);
 // Owning game thread only; shared with physical arrows. Re-resolves the unit
 // from its session/id rather than passing a native pointer across threads.
 bool LocalServer(uintptr_t& game,uintptr_t& player);

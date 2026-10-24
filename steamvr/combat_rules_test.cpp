@@ -71,6 +71,34 @@ int main() {
     assert(OnHitGate(true,10,0)==OnHit::Allowed);             // an unknown cycle counts as full
     // Grace gives full damage early but never opens the gate before the full cycle.
     assert(RecoveryFactor(520,600,2,.85f)==1.f&&OnHitGate(true,520,600)==OnHit::NotFullCycle);
+    {   // Trigger/button melee: a stroke on the swing clocks, never on another trigger hit.
+        assert(StrokeGap(0,500)==UINT64_MAX);                       // no trigger hit yet
+        assert(StrokeGap(1000,1250)==250&&StrokeGap(1250,1000)==250); // either order in one batch
+        assert(StrokeGap(1000,1000)==0);
+        const auto none=TriggerRecovery(UINT64_MAX,600,true,2,1);   // trigger only: native pace, full
+        assert(none.recovery==1.f&&none.onHit==OnHit::Allowed);
+        const auto soon=TriggerRecovery(300,600,true,2,1);          // half a cycle after a swing
+        assert(near(soon.recovery,.25f)&&soon.onHit==OnHit::NotFullCycle);
+        const auto full=TriggerRecovery(600,600,true,2,1);
+        assert(full.recovery==1.f&&full.onHit==OnHit::Allowed);
+        const auto off=TriggerRecovery(300,600,false,2,1);          // swing_recovery_damage 0: the gate still holds
+        assert(off.recovery==1.f&&off.onHit==OnHit::NotFullCycle);
+        assert(TriggerRecovery(10,0,true,2,1).recovery==1.f&&TriggerRecovery(10,0,true,2,1).onHit==OnHit::Allowed); // unknown cycle
+        // Alternating: swing at 0, trigger hit at 300, swing at 600 (cycle 600). The trigger is
+        // half recovered, and the second swing is measured from it, not from the first swing.
+        framevr::attackspeed::Cadence swing;const uint64_t s=1;const uint32_t cycle=600;
+        swing.Landed(s,1000,cycle);
+        assert(near(TriggerRecovery(swing.Since(s,1300),cycle,true,2,1).recovery,.25f));
+        const uint64_t trigger=1300;
+        const uint64_t since=SwingSince(swing.Since(s,1600),trigger,1600);
+        assert(since==300&&near(RecoveryFactor(since,cycle,2),.25f)&&OnHitGate(true,since,cycle)==OnHit::NotFullCycle);
+        // A second trigger hit 200 ms after the first, 500 ms after the swing: measured from
+        // the swing ((500/600)^2), not from the trigger hit ((200/600)^2).
+        assert(near(TriggerRecovery(swing.Since(s,1500),cycle,true,2,1).recovery,.25f*100/36));
+        // A swing sampled just before a trigger hit the batch already applied: the gap counts.
+        assert(SwingSince(5000,1300,1260)==40&&SwingSince(20,1300,1600)==20);
+        assert(SwingSince(UINT64_MAX,0,1600)==UINT64_MAX&&SwingSince(700,0,1600)==700);   // no trigger hit: its own clock
+    }
     {   // A form's two claws share one recovery clock: of two landing together, one carries effects.
         framevr::attackspeed::Cadence clock;const uint64_t s=1;const uint32_t cycle=600;
         assert(OnHitGate(true,clock.Since(s,1000),cycle)==OnHit::Allowed);clock.Landed(s,1000,cycle);   // right claw

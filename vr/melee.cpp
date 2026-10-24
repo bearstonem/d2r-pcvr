@@ -76,6 +76,12 @@ std::atomic<unsigned> tooSoon{0},extraTargets{0},missed{0},buttonAttacks{0};
 framevr::attackspeed::Cadence cadence; // Classic shares one native attack cycle across hands/buttons.
 std::atomic<bool> swingRecovery{false};std::atomic<float> recoveryCurve{2},recoveryGrace{1};
 std::atomic<float> cleaveStep{0},cleaveFloor{.25f};
+// Unleashed trigger/button melee (ButtonHit): the latest trigger hit, on the game
+// thread that owns the swing clocks (ObserveServer records it); swings are measured from it too.
+struct TriggerLanded {uint64_t session=0,at=0;} triggerLanded;
+std::atomic<DWORD> gameThread{0};
+std::atomic<unsigned> triggerPenalised{0},triggerOtherThread{0};
+thread_local int smiteDepth=0;   // inside the native Smite (the Smite hook)
 // Unleashed on-hit gate, per resolved contact (developer builds report it).
 enum OnHitReason {OnHitAllowed,OnHitUnknownCycle,OnHitRiposte,OnHitNotFull,OnHitCleave,OnHitFlurry,OnHitReasons};
 std::array<std::atomic<unsigned>,OnHitReasons> onHitWhy{};
@@ -188,6 +194,7 @@ void ObserveServer(uintptr_t game,uintptr_t unit) {
     uint32_t id=0,header[3]{};uintptr_t back=0;
     if(!game||!combat::LocalPlayerId(id)||!Read(unit,header)||header[0]!=0||header[2]!=id||!Read(unit+0xd8,back)||back!=game)return;
     const auto session=gamestate::LocalPlayer();
+    if(const DWORD self=GetCurrentThreadId();gameThread.load(std::memory_order_relaxed)!=self)gameThread=self;
     std::lock_guard lock(serverMutex);server={game,session,id};
 }
 uintptr_t Lookup(uintptr_t game,int type,uint32_t id) {
@@ -248,6 +255,7 @@ int Smite(uintptr_t game,uintptr_t player,int skill,int level) {
     uint32_t target=0,id=0,header[3]{};uintptr_t back=0;
     if(skill!=framevr::weaponskills::Smite||!combat::LocalPlayerId(id)||!Read(player,header)||
        header[0]!=0||header[2]!=id||!Read(player+0xd8,back)||back!=game)return originalSmite(game,player,skill,level);
+    struct Depth {Depth(){++smiteDepth;}~Depth(){--smiteDepth;}} inSmite;   // trigger and shield bash alike
     const int physical=framevr::TakeShieldTarget(target);
     if(physical==0)return originalSmite(game,player,skill,level);
     if(physical<0){++shieldRejected;framevr::FinishShieldSkill(false);return 0;}
@@ -581,7 +589,7 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
      if(!callback.Claim(reinterpret_cast<uintptr_t>(token)))return;
      n=count;std::copy_n(requests.begin(),n,batch.begin());count=0;}
     if(!n||!ready.load())return;
-    ++applied;
+    ++applied;gameThread=GetCurrentThreadId();   // the swing clocks' thread (ButtonHit), also seen by ObserveServer
     // Trigger/button melee shares the attack cycle: its latest native melee
     // hit check starts the cycle, so alternating it with swings is no faster.
     if(uint64_t s=0,at=0;attackSpeed.load()&&combat::TakeButtonMelee(s,at)&&s==batch[0].session) {
@@ -679,7 +687,9 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                             }
                             cycle=handCycle;
                         }
-                        const auto since=recoveryClock.Since(r.session,r.at);
+                        // Unleashed: measured from the latest trigger/button melee hit too (ButtonHit).
+                        const auto since=attackSpeed.load()?recoveryClock.Since(r.session,r.at):
+                            combat::SwingSince(recoveryClock.Since(r.session,r.at),triggerLanded.session==r.session?triggerLanded.at:0,r.at);
                         // Unleashed: the stroke's first landed contact measures how
                         // recovered it is; every creature that stroke reaches shares it.
                         // Kept with swing_recovery_damage off too: the on-hit gate reads it.
@@ -1213,6 +1223,25 @@ void ConfigureParrySound(int sound) {
     loaded=true;
 }
 void SetAttackCycle(uint64_t session,uint32_t milliseconds,int hand){if(hand==1)offCycleMs=milliseconds;else cycleMs=milliseconds;cycleSession=session;}
+ButtonStroke ButtonHit(uint32_t monster) {
+    ButtonStroke out;out.smite=smiteDepth>0;
+    // The swing clocks belong to the game thread (Apply); anywhere else nothing is read or stamped.
+    if(GetCurrentThreadId()!=gameThread.load(std::memory_order_relaxed)){++triggerOtherThread;return out;}
+    const auto session=gamestate::LocalPlayer(),now=GetTickCount64();
+    const uint32_t cycle=cycleSession.load()==session?cycleMs.load():0;
+    const uint64_t sinceSwing=std::min(hands[0].recovery.Since(session,now),hands[1].recovery.Since(session,now));
+    const auto v=combat::TriggerRecovery(sinceSwing,cycle,swingRecovery.load(std::memory_order_relaxed),
+                                         recoveryCurve.load(std::memory_order_relaxed),recoveryGrace.load(std::memory_order_relaxed));
+    out.recovery=v.recovery;out.onHit=v.onHit==combat::OnHit::Allowed;
+    triggerLanded={session,now};++buttonAttacks;
+    if(out.recovery<1||!out.onHit)++triggerPenalised;
+    if(trace.load()) {
+        char line[220];snprintf(line,sizeof line,"Frame melee trace: trigger target=%u%s since_last_swing=%lld ms cycle=%u ms recovery=%.2f onhit=%d",
+            monster,out.smite?" smite":"",sinceSwing==UINT64_MAX?-1LL:(long long)sinceSwing,cycle,out.recovery,int(out.onHit));
+        framevr::logging::Write(line);
+    }
+    return out;
+}
 void Submit(const Sample& sample) {
     if(sample.handIndex<0||sample.handIndex>1)return;
     uintptr_t token=0;
@@ -1297,6 +1326,10 @@ void Report() {
                 w[OnHitAllowed]+w[OnHitUnknownCycle]+w[OnHitRiposte]+w[OnHitFlurry],w[OnHitUnknownCycle],w[OnHitRiposte],w[OnHitFlurry],w[OnHitNotFull],w[OnHitCleave]);
             framevr::logging::Write(why);
         }
+    }
+    if(const auto tp=triggerPenalised.exchange(0),to=triggerOtherThread.exchange(0);tp||to) {
+        char line[200];snprintf(line,sizeof line,"Frame trigger melee: hits inside a swing's cycle (recovery / on-hit gated)=%u off the game thread (not timed)=%u",tp,to);
+        framevr::logging::Write(line);
     }
     {   // Melee-skill contact adapter: armed contacts, casts, and why the rest stayed basic.
         const auto armed=strikeArmed.exchange(0),cast=strikeCast.exchange(0),basic=strikeBasic.exchange(0),

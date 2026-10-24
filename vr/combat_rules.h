@@ -86,6 +86,29 @@ inline OnHit OnHitGate(bool firstContact,uint64_t sinceMs,uint32_t cycleMs) {
     if(cycleMs&&sinceMs!=UINT64_MAX&&sinceMs<cycleMs)return OnHit::NotFullCycle;
     return OnHit::Allowed;
 }
+// Unleashed trigger/button melee (Cal, 2026-10-24): a melee hit check outside a
+// physical swing (the trigger's basic attack or melee skill, the shield's Smite) is a
+// stroke too, so mixing it with swings is never faster than swinging. Its recovery is
+// measured from the latest landed swing on any hand, never from another trigger hit
+// (the native animation already paces those, and a multi-hit cast's later hits); a
+// swing is measured from the latest trigger hit as well as its own clock.
+// StrokeGap: the time between a landed stroke and now, in either order (one batch
+// can apply a swing sampled just before a trigger hit); UINT64_MAX when none.
+inline uint64_t StrokeGap(uint64_t landedAt,uint64_t now) {
+    if(!landedAt)return UINT64_MAX;
+    return now>=landedAt?now-landedAt:landedAt-now;
+}
+// A swing's time since the previous stroke: its own clock or the latest trigger hit
+// (triggerAt, 0 = none this session), whichever is nearer.
+inline uint64_t SwingSince(uint64_t ownSinceMs,uint64_t triggerAt,uint64_t now) {
+    const uint64_t t=StrokeGap(triggerAt,now);
+    return t<ownSinceMs?t:ownSinceMs;
+}
+struct TriggerStroke {float recovery=1;OnHit onHit=OnHit::Allowed;};
+// scale: [gameplay] swing_recovery_damage; the on-hit gate applies without it too, as for a swing.
+inline TriggerStroke TriggerRecovery(uint64_t sinceSwingMs,uint32_t cycleMs,bool scale,float curve,float grace) {
+    return {scale?RecoveryFactor(sinceSwingMs,cycleMs,curve,grace):1.f,OnHitGate(true,sinceSwingMs,cycleMs)};
+}
 // Scratch seed for a gated critical/deadly strike roll: it advances to 99,
 // under no chance below 100 (native: roll = low % 100, crit when roll < chance).
 inline Seed NoCritRoll() {return {0,99};}

@@ -58,6 +58,17 @@ int main(){
         Check(Frames(3,Weapon::OneHandSwing,ias+1,0)<=Frames(3,Weapon::OneHandSwing,ias,0),"more IAS is never slower");
     Check(Frames(3,Weapon::OneHandSwing,100000,-60,1000)==Frames(3,Weapon::OneHandSwing,100000,-60,75),"speed sum is bounded above");
     Check(Frames(3,Weapon::OneHandSwing,0,1000)>0,"heavily slowed attacks still have a finite cycle");
+    // Human form reads skill speed and slows from attackrate (68), which already subtracts the
+    // main hand's WSM: the logged unbuffed rows (WSM 0/+10/-10 -> 100/90/110) are no skill speed.
+    Check(SkillSpeed(100,0)==0&&SkillSpeed(90,10)==0&&SkillSpeed(110,-10)==0,"unbuffed attackrate is no skill speed");
+    for(int c=0;c<ClassCount;++c)for(int w=0;w<int(Weapon::Count);++w)for(int wsm=-30;wsm<=30;wsm+=10)for(int ias:{0,20,60,120})
+        Check(Frames(c,Weapon(w),ias,wsm,SkillSpeed(100-wsm,wsm))==Frames(c,Weapon(w),ias,wsm),"unbuffed cycles are unchanged");
+    // Paladin, one-handed sword (WSM 0), no IAS: 14 frames (560 ms); Fanaticism's +30% -> 11 (440 ms).
+    Check(Frames(3,Weapon::OneHandSwing,0,0,SkillSpeed(130,0))==11&&Milliseconds(11)==440,"skill speed shortens the human cycle");
+    Check(Frames(3,Weapon::OneHandSwing,0,0,SkillSpeed(50,0))>14,"a slow lengthens it");
+    // An off-hand blade keeps the same skill speed with its own WSM.
+    Check(Frames(4,Weapon::OneHandSwing,0,20,SkillSpeed(130-0,0))==Frames(4,Weapon::OneHandSwing,0,20,30),"off-hand: its own WSM, the main hand's skill speed");
+    Check(Frames(3,Weapon::OneHandSwing,200,0,SkillSpeed(200,0))==Frames(3,Weapon::OneHandSwing,200,0,1000),"the human 75 EIAS cap still holds");
     Check(Frames(-1,Weapon::OneHandSwing,0,0)==0&&Frames(7,Weapon::OneHandSwing,0,0)==0&&Frames(0,Weapon::Claw,0,0)==0,
           "unknown class or unusable weapon class has no cycle");
     Check(Milliseconds(15)==600&&Milliseconds(8)==320&&Milliseconds(0)==0,"25 frames per second");

@@ -287,8 +287,9 @@ void Capture(framevr::interaction::Snapshot& s) {
     }
     // Attack speed for free-swing melee (attack_speed.h): class, IAS from the
     // player's items (ItemStatCost 93, item_fasterattackrate) and the weapon in
-    // hand. Skill speed (Fanaticism, Frenzy, Burst of Speed) and slows are not
-    // read yet. An unknown class or weapon gives cycle 0, which never gates.
+    // hand, plus skill speed and slows (Fanaticism, Frenzy, Burst of Speed, chill,
+    // Decrepify) from the unit's attackrate (attack_speed.h SkillSpeed). An unknown
+    // class or weapon gives cycle 0, which never gates.
     {
         const auto equipment=gamestate::MeleeEquipment();
         if(framevr::dualwield::Eligible(int(h[1]),equipment)&&meleeweapon::Ready()) {
@@ -303,12 +304,13 @@ void Capture(framevr::interaction::Snapshot& s) {
         const int form=interactionstate::ShapeForm(s.session,GetTickCount64());
         const int attackRate=stat(player,68,0);
         const bool rateKnown=attackRate>=10&&attackRate<=400;
+        const int sias=rateKnown?framevr::attackspeed::SkillSpeed(attackRate,wsm):0;   // human form (an unreadable rate: none)
         const int frames=weapon<0?0:form?(rateKnown?framevr::attackspeed::WereformFrames(int(h[1]),form,framevr::attackspeed::Weapon(weapon),
                                                                                          framevr::attackspeed::FormEias(ias,attackRate)):0)
-                                         :framevr::attackspeed::Frames(int(h[1]),framevr::attackspeed::Weapon(weapon),ias,wsm);
+                                         :framevr::attackspeed::Frames(int(h[1]),framevr::attackspeed::Weapon(weapon),ias,wsm,sias);
         melee::SetAttackCycle(s.session,framevr::attackspeed::Milliseconds(frames));
         const int offWeapon=gamestate::AttackWeapon(1),offWsm=gamestate::AttackWsm(1);
-        const int offFrames=offWeapon>=0?framevr::attackspeed::Frames(int(h[1]),framevr::attackspeed::Weapon(offWeapon),ias,offWsm):0;
+        const int offFrames=offWeapon>=0?framevr::attackspeed::Frames(int(h[1]),framevr::attackspeed::Weapon(offWeapon),ias,offWsm,sias):0;
         melee::SetAttackCycle(s.session,framevr::attackspeed::Milliseconds(offFrames),1);
         bowvr::SetCrossbowCycle(s.session,gamestate::HandsKey()^(gamestate::WeaponSet()<<30),
             weapon==int(framevr::attackspeed::Weapon::Crossbow)?framevr::attackspeed::Milliseconds(frames):0);

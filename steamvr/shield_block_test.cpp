@@ -37,7 +37,7 @@ bool Hook(uint64_t,const void*,uint32_t,void*,void**){return false;}
 namespace framevr::logging {void Write(const char* line){fixture::log+=line;fixture::log+='\n';}}
 namespace framevr {void ShieldParryMiss(){}bool GuardBroken(){return false;}void ShieldGuardImpact(bool,float){++fixture::impacts;}void ShieldGuardState(bool,bool){}}
 namespace melee {bool QueueParry(uint32_t,int durability){++fixture::parries;fixture::parryDurability=durability;return true;}uint64_t AttackStart(uint32_t){return 0;}uint64_t ParryOpens(uint32_t){return 0;}void QueueBlockSound(){}void QueueClientDurability(uint32_t,int){}
-void NoteAttackRolled(uint32_t){++fixture::rolled;}void QueueParrySwing(){++fixture::swingScans;}}
+void NoteAttackRolled(uint32_t){++fixture::rolled;}void QueueParrySwing(){++fixture::swingScans;}ButtonStroke ButtonHit(uint32_t){return {};}}
 
 int main() {
     using namespace combat;
