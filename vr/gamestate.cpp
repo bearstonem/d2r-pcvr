@@ -115,8 +115,10 @@ void Install() {
     const bool b=a&&d2rsig::Hook(ScaleRva,scaleEntry,sizeof scaleEntry,reinterpret_cast<void*>(&OnScale),reinterpret_cast<void**>(&originalScale));
     ready.store(a&&b);
     char line[220];
+    // patterns (game_sigs.h MapPanelDraw / AutomapScale): an address 0 = not found in this build
+    const bool foundA=d2rsig::Addr(PanelMethodRva)!=0,foundB=d2rsig::Addr(ScaleRva)!=0;
     std::snprintf(line,sizeof line,"Frame full map: zoom hooks %s (map panel 0x14E3480 %s, scale 0xD1940 %s); %s",a&&b?"installed":"NOT installed",
-                  a?"ok":"bytes differ",b?"ok":a?"bytes differ":"not tried",a&&b?"the wrist's full map opens at game zoom 0.125":"the wrist shows the full map at the game's own zoom");
+                  a?"ok":foundA?"bytes differ":"not found",b?"ok":!a?"not tried":foundB?"bytes differ":"not found",a&&b?"the wrist's full map opens at game zoom 0.125":"the wrist shows the full map at the game's own zoom");
     framevr::logging::Write(line);
 }
 }
@@ -131,8 +133,11 @@ void MaintainMapLayout(bool capture) {
     static framevr::wrist::MapLayoutLease layout;
     if(!checked){if(!d2rsig::Check(modeRva,modeSig,sizeof modeSig))return;checked=true;}
     int small=0;uint8_t left=0;
-    if(!framevr::ReadMemory(&small,reinterpret_cast<void*>(d2rsig::Addr(0x2a2add0)),sizeof small)||
-       !framevr::ReadMemory(&left,reinterpret_cast<void*>(d2rsig::Addr(0x2a2add5)),sizeof left)||small<0||small>1){
+    // the small flag found by pattern (game_sigs.h AutomapSmall; 0 when not found: the read fails);
+    // the left flag is the byte 5 past it (the setter writes both)
+    const uintptr_t smallAt=d2rsig::Addr(0x2a2add0);
+    if(!smallAt||!framevr::ReadMemory(&small,reinterpret_cast<void*>(smallAt),sizeof small)||
+       !framevr::ReadMemory(&left,reinterpret_cast<void*>(smallAt+5),sizeof left)||small<0||small>1){
         framevr::fullmap::g_layout.store(-1);return;
     }
     // Map view = Full map: the wrist borrows the full map (0) instead of the left corner (1)

@@ -75,6 +75,8 @@ target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/settings_menu.cpp ${CMAKE_CURRENT_SO
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/native_belt.cpp ${ROOT}/vr/quick_items.cpp ${ROOT}/vr/melee_weapon.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/breakables.cpp ${ROOT}/vr/offline_difficulty.cpp ${ROOT}/vr/enemy_sight.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/target_lock.cpp)
+add_executable(map-sigs-test map_sigs_test.cpp)   # Map view = Full map: the patterns at their sites
+target_include_directories(map-sigs-test PRIVATE ${ROOT}/cleanroom/sigscan)
 add_executable(offline-difficulty-test offline_difficulty_test.cpp)
 target_include_directories(offline-difficulty-test PRIVATE ${ROOT}/cleanroom/sigscan ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(offline-difficulty-test PRIVATE framevr-runtime)

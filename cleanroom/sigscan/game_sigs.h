@@ -158,6 +158,16 @@ inline constexpr Sig kSigs[] = {
     {"TlsfAllocFree", 0x82DC60, Kind::Code, "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 48 8B F9 48 8B DA 48 83 C1 28 E8 ?? ?? ?? ?? 48 8B CB E8 ?? ?? ?? ?? 48 8B 4F 20 48 8B D3 E8 ?? ?? ?? ?? 48 8D 4F 28", 0x82DC60, 0, 0, 0, 0, "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 48 8B F9 48 8B DA 48 83 C1 28 E8 ?? ?? ?? ?? 48 8B CB E8 ?? ?? ?? ?? 48 8B 4F 20 48 8B D3 E8 ?? ?? ?? ??", nullptr, "bigger memory pools", "Memory pools"},
     // tlsf_free(tlsf, p), called
     {"TlsfFree", 0x1215C30, Kind::Code, "48 85 D2 0F 84 ?? ?? ?? ?? 56 48 83 EC 20 48 89 5C 24 30 48 8B F1 48 8D 5A F0 48 89 7C 24 38 48 8B 43 08 48 8D 7B 08 48 83 E0 FC 48 83 4C 18 10 02 48 89 5C 18 08 48 83 0F 01 F6 07 02 74 27 48 8B 1B", 0x1215C30, 0, 0, 0, 0, "48 85 D2 0F 84 ?? ?? ?? ?? 56 48 83 EC 20 48 89 5C 24 30 48 8B F1 48 8D 5A F0 48 89 7C 24 38 48 8B 43 08 48 8D 7B 08 48 83 E0 FC 48 83 4C 18 10 02 48 89 5C 18 08 48 83 0F 01 F6 07 02 74 27", nullptr, "bigger memory pools", "Memory pools"},
+    // Added by hand (2026-10-23, Map view = Full map, steamvr/wrist_full_map.h; patterns checked unique
+    // in an in-memory image of 3.3.93847, whose addresses match 3.3.93787 here). The map panel's draw
+    // method (vtable slot 3), hooked
+    {"MapPanelDraw", 0x14E3480, Kind::Code, "4C 8B DC 55 53 56 57 41 54 49 8D 6B A1 48 81 EC E0 00 00 00 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 45 FF 4D 89 7B 18 48 8B F9 41 0F 29 73 C8 41 0F 29 7B B8 E8 ?? ?? ?? ?? 0F B6 88 18 01 00 00", 0x14E3480, 0, 0, 0, 0, "4C 8B DC 55 53 56 57 41 54 49 8D 6B A1", nullptr, "the wrist's full map zoom", "Map"},
+    // the automap scale function (out, rect, extra, float zoom), hooked
+    {"AutomapScale", 0xD1940, Kind::Code, "4C 89 44 24 18 53 55 56 57 41 54 41 56 41 57 48 83 EC 50 0F 10 02 33 C0 49 8B F8 F3 0F 59 1D ?? ?? ?? ?? 4C 8B FA", 0xD1940, 0, 0, 0, 0, "4C 89 44 24 18 53 55 56 57 41 54 41 56 41 57", nullptr, "the wrist's full map zoom", "Map"},
+    // the map panel's vtable, from its constructor's lea rax, [vtable]; mov [rbx], rax
+    {"MapPanelVtable", 0x1FDC8A8, Kind::Ref, "4C 8B C7 48 8B D6 48 8B C8 E8 ?? ?? ?? ?? 48 8D 05 ?? ?? ?? ?? 33 F6 48 89 03 48 8D BB 68 01 00 00", 0x14E3385, 14, 3, 7, 0, nullptr, nullptr, "the wrist's full map zoom", "Map"},
+    // the automap's "small" layout flag (0 full), from the layout setter's cmp ecx, [flag]
+    {"AutomapSmall", 0x2A2ADD0, Kind::Ref, "83 F9 01 0F 94 05 ?? ?? ?? ?? 3B 0D ?? ?? ?? ?? 74 1D 33 C0 85 C9 0F 95 C0 89 05", 0xD3D84, 10, 2, 6, 0, nullptr, nullptr, "the wrist map's layout (full map zoom, corner map)", "Map"},
 };
 
 }   // namespace d2rsig
