@@ -58,7 +58,6 @@ int main() {
         Readout g=r;g.byTurns=false;g.gameMotion=true;g.vectors=true;
         assert(Line(g)=="Frame generation: active, OFXR Bridge with game motion"&&!Warning(g));
         g.vectors=false;assert(Line(g)=="Frame generation: active, FidelityFX flow until game motion starts"&&Warning(g));
-        g.nextStart=true;assert(Line(g)=="Frame generation: active, FidelityFX flow; game motion from the next start"&&Warning(g));
         g.refused=true;assert(Line(g)=="Frame generation: active, FidelityFX flow; the bridge refused game motion"&&Warning(g));
         g.byTurns=true;assert(Line(g)=="Frame generation: active, FidelityFX flow; game motion needs Both eyes"&&Warning(g));
     }

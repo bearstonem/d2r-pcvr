@@ -297,11 +297,15 @@ device. ReShade wraps the game's device and queue but not resources, which
 report the native device beneath, so every V1 copy was refused (the owner's
 runs, 2026-10-23). The vectors go through the V2 input instead
 (`OFXR_PublishDlssGuidesV2`, no registration, no depth), with the native
-device as the one checked. A session started with Game motion is given that
-native device (the queue stays the game's). Started otherwise, or if the
-runtime refuses it, game motion waits for the next start. If the bridge still
-copies none of ten seconds of vectors, its FidelityFX flow takes over until
-the next start. It copies them
+device as the one checked. That passes the copy, but the synthesizer's check
+still fails while the session holds ReShade's wrapped device. A session on the
+native device with ReShade's queue crashed the game at its start, so with
+ReShade, game motion is not used: the log says why, the Perf line says the
+bridge refused it, and its FidelityFX flow runs. If the bridge copies none of
+ten seconds of vectors, its flow also takes over until the next start. For it
+to work: the bridge comparing adapters rather than COM identity (an upstream
+request), or the session on a queue of its own on the native device, synced
+with the game's. It copies them
 through a list of the mod's that runs before the frame ends. Without a depth
 or a frame back the vectors are none, so the bridge turns the image by the
 poses alone. Game motion needs Both eyes; By turns, the bridge is asked for

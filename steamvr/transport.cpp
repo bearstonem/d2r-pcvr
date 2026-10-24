@@ -160,10 +160,10 @@ std::atomic<bool> frameMotionUsable{false},frameMotionMonsters{true},frameMotion
 std::atomic<bool> frameMotionRefused{false};
 // The session's device is the one the vectors report: the bridge's
 // synthesizer uses game motion only then (its own check). ReShade wraps the
-// game's device but not resources, so a session started with Game motion is
-// given the native device beneath (Initialize); one started otherwise, or
-// refused it by the runtime, keeps the wrapper and game motion waits for the
-// next start.
+// game's device and queue but not resources, which report the device beneath,
+// so with ReShade that never holds and the bridge's flow stays. A session on
+// the device beneath (the queue still ReShade's) crashed the game at its start
+// (owner, 2026-10-23), so the session keeps the wrapper.
 std::atomic<bool> frameMotionSessionOk{false};
 // The object behind any of its interfaces (COM identity).
 bool SameObject(IUnknown* a,IUnknown* b) {
@@ -1087,7 +1087,6 @@ framegen::Readout FrameGenNow(ULONGLONG now,bool byTurns) {
     readout.gameMotion=wanted.mode==framegen::Mode::GameMotion;
     readout.vectors=readout.state==framegen::State::Active&&frameMotionAsked;
     readout.refused=frameMotionRefused.load();
-    readout.nextStart=frameMotionUsable.load()&&!frameMotionSessionOk.load();
     if(!frameGenRead||!(readout==frameGenReadout)) {
         char line[260];std::snprintf(line,sizeof line,"%s [%s; sessions %u, ready %u, bypass %u, errors %u]",framegen::Line(readout).c_str(),
             framegen::StateName(readout.state),readout.sessions,readout.ready,readout.bypass,readout.errors);
@@ -1453,22 +1452,12 @@ bool Initialize(reshade::api::command_queue* rq,reshade::api::swapchain* swap) {
     if(!Hr(device->CheckFeatureSupport(D3D12_FEATURE_FEATURE_LEVELS,&levels,sizeof levels),"check feature level")) return false;
     XrGraphicsBindingD3D12KHR binding{XR_TYPE_GRAPHICS_BINDING_D3D12_KHR};binding.device=device.Get();binding.queue=queue.Get();
     XrSessionCreateInfo ci{XR_TYPE_SESSION_CREATE_INFO};ci.systemId=system;ci.next=&binding;
-    // Game motion: the device the game's resources report (beneath ReShade's
-    // wrapper) for the session, so the bridge's synthesizer takes the vectors;
-    // the queue stays the game's. Refused by the runtime: the wrapper, as before.
+    if(!Check(pCreateSession(instance,&ci,&session),"create D3D12 session")) return false;
+    // Game motion holds only when the game's resources report the session's
+    // device - not beneath ReShade's wrapper (frameMotionSessionOk).
     ComPtr<ID3D12Device> native;
     if(auto* buffer=reinterpret_cast<ID3D12Resource*>(swap->get_current_back_buffer().handle);buffer&&FAILED(buffer->GetDevice(IID_PPV_ARGS(&native))))native.Reset();
-    const bool wrapped=native&&!SameObject(native.Get(),device.Get());
-    bool nativeSession=frameMotionPublishV2&&FrameGenWanted().mode==framegen::Mode::GameMotion&&wrapped;
-    if(nativeSession)binding.device=native.Get();
-    XrResult made=pCreateSession(instance,&ci,&session);
-    if(nativeSession&&XR_FAILED(made)) {
-        char line[200];std::snprintf(line,sizeof line,"Frame generation: the runtime refused the native D3D12 device (%d); game motion waits for another start",int(made));Say(line);
-        nativeSession=false;session=XR_NULL_HANDLE;binding.device=device.Get();made=pCreateSession(instance,&ci,&session);
-    }
-    if(!Check(made,"create D3D12 session")) return false;
-    frameMotionSessionOk=nativeSession||(native&&!wrapped);
-    if(nativeSession)Say("Frame generation: the session has the game's native D3D12 device, beneath ReShade's, for game motion");
+    frameMotionSessionOk=native&&SameObject(native.Get(),device.Get());
     XrViewConfigurationView resolutionViews[2]{{XR_TYPE_VIEW_CONFIGURATION_VIEW},{XR_TYPE_VIEW_CONFIGURATION_VIEW}};
     uint32_t resolutionCount=0;recommendedResolution=maximumResolution={};
     if(XR_SUCCEEDED(pEnumerateViewConfigurationViews(instance,system,XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO,2,&resolutionCount,resolutionViews))&&resolutionCount==2){
@@ -1540,8 +1529,10 @@ bool Initialize(reshade::api::command_queue* rq,reshade::api::swapchain* swap) {
     // Game motion's pass, while the bridge is loaded with its vector input.
     motionDevice.Reset();
     if(FAILED(queue->GetDevice(IID_PPV_ARGS(&motionDevice))))motionDevice.Reset();
-    frameMotionRefused=false;
     frameMotionUsable=(frameMotionPublish||frameMotionPublishV2)&&frameMotionConfigure&&frameMotion.Initialize(device.Get(),&Say);
+    frameMotionRefused=frameMotionUsable&&!frameMotionSessionOk;
+    if(frameMotionRefused&&FrameGenWanted().mode==framegen::Mode::GameMotion)
+        Say("Frame generation: game motion needs the game's resources on the session's device; ReShade wraps the device (not its resources), so the bridge would refuse the vectors - its FidelityFX flow instead");
     return true;
 }
 void UpdateControllerLabels() {
