@@ -53,11 +53,32 @@ body:
       description: For visual problems, say whether they affect one eye, both eyes, the desktop or menus only.
     validations:
       required: true
+  - type: markdown
+    attributes:
+      value: |
+        ### Logs
+        Reproduce the problem, close the game, then attach these files, zipped (the frame log can be large).
+        The paths are for Steam's default library:
+
+        ```text
+        C:\Program Files (x86)\Steam\steamapps\common\Diablo II Resurrected\mods\D2R-PCVR\d2rloader\logs\d2r-vr-frame.log
+        C:\Program Files (x86)\Steam\steamapps\common\Diablo II Resurrected\mods\D2R-PCVR\d2rloader\logs\d2r-pcvr-vrcam.log
+        C:\Program Files (x86)\Steam\steamapps\common\Diablo II Resurrected\mods\D2R-PCVR\reshade\ReShade.log
+        C:\Program Files (x86)\Steam\steamapps\common\Diablo II Resurrected\d2rloader\logs\d2rloader.log
+        ```
+
+        If the game is elsewhere, open its folder from Steam (right-click Diablo II: Resurrected > Manage > Browse local files)
+        or Battle.net (the gear next to Play > Show in Explorer). Developer mode uses `mods\pcvr-dev` in place of `mods\D2R-PCVR`.
+        For installation problems, also attach `setup-install.log` and `setup-last.log` from `%LOCALAPPDATA%\Programs\D2R PCVR`
+        (paste that into Win+R to open the folder).
+
+        The `d2r-vr-frame.log` and `d2r-vr-vrcam.log` in the game's main `d2rloader\logs` folder are left over from older
+        versions and are no longer updated, so please don't send those. Logs show your Windows username in file paths.
   - type: textarea
     id: evidence
     attributes:
       label: Logs, screenshots or recording
-      description: Share relevant excerpts or a short recording. Remove private information first; do not attach memory dumps or game files.
+      description: Attach the logs above, or share relevant excerpts or a short recording. Remove private information first; do not attach `.dmp` memory dumps, saves or game files.
   - type: checkboxes
     id: offline
     attributes:
