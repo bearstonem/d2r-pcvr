@@ -216,7 +216,7 @@ switch. It changes no saved setting.
 
 Select **DEV > Character > By turns motion** to step, for the session, how
 the eye not drawn treats things that move by themselves with Stereo
-rendering: By turns (#281). **ON** (the default, `[stereo] turns_motion=1`): its own
+rendering: By turns; shelved, off by default (#281). **ON** (`[stereo] turns_motion=1`): its own
 picture from a frame back also goes on by the game's motion vectors, so a
 monster walking stands where it is now in the strip beside it that only this
 eye sees and where the effects keep this eye's own picture. **SHOW** (2): the
@@ -225,7 +225,7 @@ what moved on tinted red. Red should sit on walking monsters and missiles,
 not on the ground or walls, even while you turn your head or walk. With
 SHOW, a monster walking across should look single in both eyes; with OFF it
 is a frame behind in one eye. **OFF** (0): moved with the head and the hero
-alone, as before. The button steps in that order, shows the current state,
+alone, the default. The button steps in that order, shows the current state,
 and the frame log records each step. It changes no saved setting.
 
 Nothing moves on until the frame log says the camera's motion explains the

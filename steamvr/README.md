@@ -200,7 +200,7 @@ headset frame are drawn:
   developer mode also DEV > Equipment > By turns ghosts; 0 as before). The
   ends are looked for up to 128 px of a 4096-wide eye either side. On an RTX
   5090 it adds 0.1 ms at 3072 square and 0.23 ms at 4096.
-  On by default (#281; shelved once as the benefit was hard to see, and only
+  Off by default and shelved (#281: the benefit was hard to see, and only
   with the head and the hero still): with `[stereo] turns_motion=1` (live; in
   developer mode also DEV > Character > By turns motion) what moves by itself
   (a monster walking, a missile) also goes on in the eye's own older picture

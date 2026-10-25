@@ -172,7 +172,7 @@ std::atomic<float> turnsKeepGap{48},turnsKeepReach{96};   // ConfigureTurnsKeepN
 std::atomic<float> turnsEffectsLevel{.02f},turnsEffectsReach{32};   // ConfigureTurnsKeepEffects: the layer's level; a 4096-wide eye's pixels
 std::atomic<bool> turnsSharp{true};   // ConfigureTurnsSharp: the pictures read Catmull-Rom (TurnWarp::Sharpen)
 std::atomic<bool> turnsFill{true};    // ConfigureTurnsFill: no frame-old ghosts in the strips beside near things (TurnWarp::Fill)
-std::atomic<int> turnsMotion{1};   // ConfigureTurnsMotion: 0 off, 1 the game's motion vectors (#281), 2 those shown
+std::atomic<int> turnsMotion{0};   // ConfigureTurnsMotion: 0 off (shelved, #281), 1 the game's motion vectors, 2 those shown
 std::atomic<bool> eyeTracking{false};
 std::atomic<bool> motionControls{false};
 // Stamped each focused XR input while motion controls are on (menus included).
