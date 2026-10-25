@@ -856,6 +856,7 @@ void LoadSettings() {
     framevr::ConfigureTurnsKeepEffects(IniF(L"stereo",L"turns_effects_level",0.02f),IniF(L"stereo",L"turns_effects_reach",32));
     framevr::ConfigureTurnsSharp(IniB(L"stereo",L"turns_sharp",true));
     framevr::ConfigureTurnsFill(IniB(L"stereo",L"turns_fill",true));
+    framevr::ConfigureTurnsMotion(int(IniF(L"stereo",L"turns_motion",0)));
     framevr::ConfigureEyeTracking(IniB(L"render",L"eye_tracked_foveation",false));
     framevr::ConfigureGameplay(IniB(L"gameplay",L"motion_controls",false));
     framevr::ConfigureQuiver(IniB(L"bow",L"quiver",true),IniB(L"bow",L"quiver_preview",true));
@@ -5707,7 +5708,7 @@ uintptr_t DrawTurn(int a, bool continued) {
              rate, rate * 0.5, periods ? sumGap * 0.001 / periods : 0.0, sumBegin * k, sumWait / turns, sumPass * k, sumEnd * k, longest * 0.001,
              turns, how.moved, how.turned, g_movePairs.exchange(0));
         // (a line of its own: LogF keeps 255 characters)
-        LogF("vrcam: eyes by turns - the other eye: the drawn eye's picture laid over it in %u of %u", how.drawn, how.moved + how.turned);
+        LogF("vrcam: eyes by turns - the other eye: the drawn eye's picture laid over it in %u of %u, moved by the game's motion vectors in %u", how.drawn, how.moved + how.turned, how.motion);
         lastEnd = 0.0; sumGap = sumBegin = sumWait = sumPass = sumEnd = sumPeriod = longest = 0.0;
         since = now; turns = periods = 0;
     }

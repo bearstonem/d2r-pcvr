@@ -84,6 +84,7 @@
 #include "d2r_vr_state.h"
 #include "foveation.h"
 #include "effects_layer.h"
+#include "motion_vectors.h"
 #include "gaze.h"
 #include "d2rcam.h"
 #include "profile.h"
@@ -171,6 +172,7 @@ std::atomic<float> turnsKeepGap{48},turnsKeepReach{96};   // ConfigureTurnsKeepN
 std::atomic<float> turnsEffectsLevel{.02f},turnsEffectsReach{32};   // ConfigureTurnsKeepEffects: the layer's level; a 4096-wide eye's pixels
 std::atomic<bool> turnsSharp{true};   // ConfigureTurnsSharp: the pictures read Catmull-Rom (TurnWarp::Sharpen)
 std::atomic<bool> turnsFill{true};    // ConfigureTurnsFill: no frame-old ghosts in the strips beside near things (TurnWarp::Fill)
+std::atomic<int> turnsMotion{0};   // ConfigureTurnsMotion: 0 off (shelved, #281), 1 the game's motion vectors, 2 those shown
 std::atomic<bool> eyeTracking{false};
 std::atomic<bool> motionControls{false};
 // Stamped each focused XR input while motion controls are on (menus included).
@@ -641,6 +643,92 @@ LatestWorker<TurnWarmJob,bool> turnCompiler([](const TurnWarmJob& job){TurnWarp 
 bool keepDepth=false;
 struct KeptDepth {ComPtr<ID3D12Resource> texture;DXGI_FORMAT format=DXGI_FORMAT_UNKNOWN;float scale[2]{1,1};bool ok=false;};
 std::array<KeptDepth,2> turnDepths;
+// By turns: each eye's motion vectors as drawn (motionvectors), beside its
+// depth (KeepMotion), for TurnDepth::motion; and where the render before
+// (the other eye's) stood against it, for TurnDepth::back.
+// turned: how far the eye turned in the world a render, degrees; stepped:
+// how far the hero went, metres (KeepMotion).
+struct KeptMotion {ComPtr<ID3D12Resource> texture;bool ok=false;std::array<float,12> back{};XrFovf backFov{};bool backOk=false;float turned=0,stepped=0;};
+std::array<KeptMotion,2> turnMotions;
+// What the game's vectors say by distance (TurnWarp::MotionStats): each read-
+// back slot free (0), recorded but not yet submitted (MotionPending), or the
+// fence its copy signals.
+constexpr uint64_t MotionPending=~0ull;
+std::array<uint64_t,TurnWarp::MotionSlots> motionFences{};
+int motionNext=0;
+// The game's vectors hold the camera's motion against the render before -
+// the other eye, by turns - as well as the objects' own: with DLSS off, the
+// camera's motion explained 98-99% of them from 2 m out, hardly any still
+// (the owner's session, 2026-10-23; vr/dlss_mv.cpp found the far part without
+// it, with DLSS on). Taken out (TurnDepth::back), what is left is the
+// objects' own - used only while the camera's motion explains this much of
+// them, over the last few seconds (nearer, the hero's own hands and weapon
+// move by themselves).
+// Nearer, the ground at the feet was 52-90% explained: what was left of it
+// moved and doubled the ground (the owner's next session). So only from
+// where two bins running are explained to MotionHeld (`from`, metres), over
+// some 10-20 s of eye frames, as over 2 s it went from 0.5 to 5.5 m and back
+// (the owner's session after).
+// That session the ground and the distance still doubled while the head
+// turned, not while walking: what is left of the camera's part grows with
+// the turn. So none is used while an eye turns more than MotionTurnDegrees a
+// render (KeptMotion::turned, about 22 degrees a second at 90 Hz), and the
+// statistics are of the other frames alone - the 52-90% were of all, turns
+// too, so `from` has no floor of its own. Turning slower, the ground and the
+// walls still went red in SHOW (the session after): what is left counts as
+// none under StillPixels plus MotionTurnShare of the turn in pixels.
+// Strafing, the ghost beside monsters smeared the way the hero went (the
+// session after, ON): with the hero moving the camera's motion explained
+// only 57-76% at 2-4 m, against 94-99% standing. So none is used either
+// while the hero goes more than MotionStepMetres a render (KeptMotion::stepped,
+// about 0.45 m/s at 90 Hz).
+constexpr double MotionExplained=.8,MotionHeld=.97,MotionDecay=.999;
+constexpr float MotionTurnDegrees=.25f,MotionTurnShare=.3f,MotionStepMetres=.005f;
+struct MotionGate {
+    std::array<std::array<double,4>,MotionBins> seen{},window{};   // seen: decayed; window: for the log
+    bool trusted=false;
+    float from=-1;   // < 0: nowhere yet
+    uint32_t frames=0,moved=0,turning=0;uint64_t since=0;
+    void Add(const MotionHistogram& h,uint64_t now) {
+        for(int b=0;b<MotionBins;++b)for(int k=0;k<4;++k){seen[b][k]=seen[b][k]*MotionDecay+h.bins[b][k];window[b][k]+=h.bins[b][k];}
+        ++frames;
+        double count=0,explained=0;
+        for(int b=int(2/MotionBinMetres)+1;b<MotionBins;++b){count+=seen[b][0];explained+=seen[b][2];}   // from 2 m out
+        // a little hysteresis: no switching back and forth round the line
+        if(count>=2000&&(explained>=(trusted?MotionExplained-.1:MotionExplained)*count)!=trusted) {
+            trusted=!trusted;
+            char line[224];std::snprintf(line,sizeof line,trusted?"Frame OpenXR: by turns - the camera's motion explains %.0f%% of the game's motion vectors from 2 m out: what is left moves the eye not drawn on":
+                "Frame OpenXR: by turns - the camera's motion explains only %.0f%% of the game's motion vectors from 2 m out: not used",100*explained/count);Say(line);
+        }
+        float edge=-1;int run=0;
+        for(int b=1;b<MotionBins-1&&run<2;++b) {   // half a metre each from the eye; the sky and the farthest left out
+            if(seen[b][0]<200)continue;   // too little seen here
+            if(seen[b][2]>=MotionHeld*seen[b][0]){if(!run++)edge=(b-1)*MotionBinMetres;}
+            else run=0;
+        }
+        if(run<2)edge=-1;
+        if(edge>=0&&from<0){char line[160];std::snprintf(line,sizeof line,"Frame OpenXR: by turns - the game's motion vectors used from %.1f m out (first frame doing so)",double(edge));Say(line);}
+        from=edge;
+        if(!since)since=now;
+        if(now-since<10000)return;
+        // still / explained by the camera / mean length in pixels, by distance
+        char head[224];std::snprintf(head,sizeof head,"Frame OpenXR: by turns - the game's motion vectors, %u eye frames, %u moved by them from %.1f m, %u not while turning or walking; still/camera %%/mean px by distance:",
+            frames,moved,double(from),turning);
+        std::string line=head;
+        double total=0;for(const auto& b:window)total+=b[0];
+        for(int b=0;b<MotionBins;++b) {
+            const auto& w=window[b];
+            if(w[0]<total*.005||w[0]<1)continue;
+            char bin[48];
+            if(!b)std::snprintf(bin,sizeof bin," sky %d/%d/%.1f",int(100*w[1]/w[0]),int(100*w[2]/w[0]),w[3]/w[0]);
+            else if(b==MotionBins-1)std::snprintf(bin,sizeof bin," far %d/%d/%.1f",int(100*w[1]/w[0]),int(100*w[2]/w[0]),w[3]/w[0]);
+            else std::snprintf(bin,sizeof bin," <%.1f %d/%d/%.1f",b*MotionBinMetres,int(100*w[1]/w[0]),int(100*w[2]/w[0]),w[3]/w[0]);
+            line+=bin;
+        }
+        Say(line.c_str());
+        window={};frames=moved=turning=0;since=now;
+    }
+} motionGate;
 // By turns: each eye's interface as its pass drew it (hud::TakenInterface),
 // laid back over its picture by Copy and, turned to this frame's head, over
 // the eye not drawn by TurnEye: into turnTarget (typeless, so the interface
@@ -3362,6 +3450,86 @@ void KeepEffects(ID3D12GraphicsCommandList* list,int eye) {
     static bool told=false;
     if(!told){told=true;Say("Frame OpenXR: by turns - the game's effects layer kept for each eye (first frame doing so)");}
 }
+// By turns: the motion statistics whose copies have run, into the gate.
+void ReadMotionStats() {
+    const uint64_t done=fence?fence->GetCompletedValue():0;
+    for(int k=0;k<TurnWarp::MotionSlots;++k) {
+        const uint64_t f=motionFences[k];
+        if(!f||f==MotionPending||f>done)continue;
+        MotionHistogram h;
+        if(turnWarp.ReadMotionStats(k,h))motionGate.Add(h,GetTickCount64());
+        motionFences[k]=0;
+    }
+}
+// By turns: this present's motion vectors (the game's target, as
+// motionvectors last saw it) kept beside the eye's depth, and what they say
+// by distance into a read-back slot (statsAt, its fence set once submitted).
+bool KeepMotion(ID3D12GraphicsCommandList* list,int eye,int& statsAt) {
+    motionvectors::Target latest;
+    if(!motionvectors::Latest(latest)) {
+        static bool told=false;
+        if(!told){told=true;Say("Frame OpenXR: by turns - no motion vectors from the game yet; the eye not drawn moves with the head and the hero alone");}
+        return false;
+    }
+    const auto desc=latest.texture->GetDesc(),depth=turnDepths[eye].texture->GetDesc();
+    if(desc.Width!=depth.Width||desc.Height!=depth.Height) {
+        static bool told=false;
+        if(!told){told=true;char line[192];std::snprintf(line,sizeof line,"Frame OpenXR: by turns - the game's motion vectors (%llux%u) are not its depth's size (%llux%u); not used",
+            (unsigned long long)desc.Width,desc.Height,(unsigned long long)depth.Width,depth.Height);Say(line);}
+        return false;
+    }
+    constexpr auto readable=D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE|D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+    auto& kept=turnMotions[eye];
+    if(kept.texture) {   // a new DLSS mode: a new size. The last turn may still read the old one.
+        const auto k=kept.texture->GetDesc();
+        if(k.Width!=desc.Width||k.Height!=desc.Height||k.Format!=desc.Format){if(!WaitGpu())return false;kept.texture.Reset();}
+    }
+    if(!kept.texture) {
+        D3D12_HEAP_PROPERTIES heap{};heap.Type=D3D12_HEAP_TYPE_DEFAULT;
+        auto r=desc;r.Alignment=0;r.Flags=D3D12_RESOURCE_FLAG_NONE;
+        if(!Hr(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&r,readable,nullptr,IID_PPV_ARGS(&kept.texture)),"create kept eye motion"))return false;
+        char line[160];std::snprintf(line,sizeof line,"Frame OpenXR: by turns - each eye's motion vectors kept: %llux%u",(unsigned long long)desc.Width,desc.Height);Say(line);
+    }
+    D3D12_RESOURCE_BARRIER b[2]{};
+    for(auto& x:b){x.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;x.Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;}
+    b[0].Transition.pResource=latest.texture;b[0].Transition.StateBefore=latest.state;b[0].Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_SOURCE;
+    b[1].Transition.pResource=kept.texture.Get();b[1].Transition.StateBefore=readable;b[1].Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_DEST;
+    const UINT first=latest.state==D3D12_RESOURCE_STATE_COPY_SOURCE?1:0;   // already readable
+    list->ResourceBarrier(2-first,b+first);list->CopyResource(kept.texture.Get(),latest.texture);
+    for(auto& x:b)std::swap(x.Transition.StateBefore,x.Transition.StateAfter);
+    list->ResourceBarrier(2-first,b+first);
+    // Where the render before (the other eye's) stood: the camera's part of
+    // these vectors; and what they say by distance against it.
+    ReadMotionStats();
+    const auto& now=viewWorld[eye];const auto& before=lastEyes[eye^1];const auto& w=stageWorld;
+    kept.backOk=now.ok&&before.ok&&before.world.ok;
+    if(kept.backOk){kept.back=TurnMove(now.at,now.turn,before.world.at,before.world.turn);kept.backFov=before.fov;}
+    // how far this eye turned in the world since its own render before (two
+    // renders back, by turns: the eyes may be canted, so not against the other)
+    const auto& same=lastEyes[eye];kept.turned=1e9f;
+    if(now.ok&&same.ok&&same.world.ok) {
+        const auto t=math::Multiply(math::Conjugate(same.world.turn),now.turn);
+        kept.turned=float(2*std::acos(std::min(1.0,double(std::fabs(t.w))))*180/3.14159265358979)/2;
+    }
+    // and how far the hero went since then, a render
+    kept.stepped=1e9f;
+    if(now.ok&&same.ok&&same.world.ok&&w.valid&&w.upm>0){const auto d=now.hero-same.world.hero;kept.stepped=std::sqrt(d.x*d.x+d.y*d.y+d.z*d.z)/w.upm/2;}
+    // Only the frames they may be used for (not turning, the hero not going): what the statistics
+    // say, and from how near they are used, are then of those alone.
+    const int at=motionNext;
+    if(kept.backOk&&kept.turned<=MotionTurnDegrees&&kept.stepped<=MotionStepMetres&&now.nearPlane>0&&w.valid&&w.upm>0&&(!motionFences[at]||motionFences[at]==MotionPending)) {
+        TurnWarp::MotionInput in;
+        in.depth=turnDepths[eye].texture.Get();in.format=turnDepths[eye].format;in.motion=kept.texture.Get();
+        in.scale[0]=turnDepths[eye].scale[0];in.scale[1]=turnDepths[eye].scale[1];in.nearPlane=now.nearPlane;in.upm=w.upm;
+        in.back=kept.back;
+        const auto& f=views[eye].fov;in.fov={f.angleLeft,f.angleRight,f.angleDown,f.angleUp};
+        in.backFov={before.fov.angleLeft,before.fov.angleRight,before.fov.angleDown,before.fov.angleUp};
+        if(turnWarp.MotionStats(device.Get(),list,eye,in,at)){motionFences[at]=MotionPending;statsAt=at;motionNext=(at+1)%TurnWarp::MotionSlots;}
+    }
+    static bool told=false;
+    if(!told){told=true;Say("Frame OpenXR: by turns - the game's motion vectors kept for each eye (first frame doing so)");}
+    return true;
+}
 // By turns: this eye's interface (hud's copy, in a shader-resource state) kept
 // beside its image, for TurnEye to lay over the eye when it is not drawn.
 bool KeepLayer(ID3D12GraphicsCommandList* list,ID3D12Resource* layer,int eye) {
@@ -3442,7 +3610,8 @@ bool TurnEye(int i) {
     // The drawn eye's picture of this frame (kept by Copy, before this on the
     // queue), moved across with its depth from where View put it.
     const auto& drawnAt=viewWorld[i^1];
-    if(placed&&turnsFromDrawnEye.load()&&eyes[i^1].copied&&turnKept[i^1]&&turnDepths[i^1].ok&&drawnAt.ok&&drawnAt.nearPlane>0) {
+    const int motion=turnsMotion.load();   // 2: this eye's own picture alone, what moved by itself tinted
+    if(placed&&turnsFromDrawnEye.load()&&motion!=2&&eyes[i^1].copied&&turnKept[i^1]&&turnDepths[i^1].ok&&drawnAt.ok&&drawnAt.nearPlane>0) {
         const auto& f=views[i^1].fov;
         other.image=turnImages[i^1].Get();
         other.depth=turnDepths[i^1].texture.Get();other.format=turnDepths[i^1].format;
@@ -3471,6 +3640,21 @@ bool TurnEye(int i) {
         // hero's step and the body's turn since the eye was drawn.
         depth.carry=TurnCarry(was.world.at,was.world.turn,was.world.hero,was.base,w.hero,w.base,at,math::Multiply(w.base,Q(now.pose.orientation)));
         depth.reach[0]=CarriedNear*w.upm;depth.reach[1]=CarriedFar*w.upm;
+        // Each point on by its own motion since the render before, as far
+        // again: where it is now. Only while the camera's motion is seen to
+        // explain the game's vectors (motionGate), so what is left is the
+        // objects' own.
+        const auto& vectors=turnMotions[i];
+        const bool turning=vectors.turned>MotionTurnDegrees||vectors.stepped>MotionStepMetres;   // or the hero going
+        if(motion&&vectors.ok&&vectors.backOk&&turning&&motionGate.trusted)++motionGate.turning;
+        if(motion&&vectors.ok&&vectors.backOk&&!turning&&motionGate.trusted&&motionGate.from>=0) {
+            depth.motion=vectors.texture.Get();depth.ahead=1;depth.from=motionGate.from*w.upm;depth.show=motion==2;
+            const auto& f=vectors.backFov;depth.back=vectors.back;depth.backFov={f.angleLeft,f.angleRight,f.angleDown,f.angleUp};
+            // the turn in the drawn part's pixels: a share of it left over counts as none
+            const float perDegree=float(turnDepths[i].texture->GetDesc().Width)*turnDepths[i].scale[0]/((was.fov.angleRight-was.fov.angleLeft)*57.29578f);
+            depth.stillPixels=StillPixels+MotionTurnShare*vectors.turned*perDegree;
+            ++motionGate.moved;
+        }
         moving=&depth;
     }
     static bool keepTold=false;
@@ -3518,6 +3702,7 @@ bool TurnEye(int i) {
     e.copyFence=fenceValue;
     if(moving)++turnCounts.moved;else ++turnCounts.turned;
     if(fromDrawn)++turnCounts.drawn;
+    if(moving&&depth.motion)++turnCounts.motion;
     return true;
 }
 bool Copy(ID3D12Resource* src,Eye& e,reshade::api::command_queue* rq) {
@@ -3549,6 +3734,9 @@ bool Copy(ID3D12Resource* src,Eye& e,reshade::api::command_queue* rq) {
     turnDepths[eye].ok=keepDepth&&turnKept[eye]&&KeepDepth(e.commands.Get(),int(eye));
     // and where the game's effects were in it (TurnDepth::keepEffects)
     if(turnDepths[eye].ok)KeepEffects(e.commands.Get(),int(eye));else turnWarp.ForgetEffects(int(eye));
+    // and how each point in it moved by itself (TurnDepth::motion)
+    int statsAt=-1;
+    turnMotions[eye].ok=turnDepths[eye].ok&&turnsMotion.load()>0&&KeepMotion(e.commands.Get(),int(eye),statsAt);
     // By turns the game's interface was taken out of its picture: laid back as
     // the game lays it, before the headset and the window get the picture.
     uint32_t layerWidth=0,layerHeight=0;
@@ -3596,6 +3784,7 @@ bool Copy(ID3D12Resource* src,Eye& e,reshade::api::command_queue* rq) {
     ID3D12CommandList* lists[]={e.commands.Get()};queue->ExecuteCommandLists(1,lists);
     if(!Hr(queue->Signal(fence.Get(),++fenceValue),"signal copy fence"))return false;
     e.copyFence=fenceValue;
+    if(statsAt>=0)motionFences[statsAt]=fenceValue;
     timing.copySubmitMs[eye]+=Milliseconds()-copyStart;
     e.copied=true;return true;
 }
@@ -3782,6 +3971,7 @@ void Register(LogFn log,PanelFn panel,PanelFn world,PanelFn toggle) {
     reshade::register_event<reshade::addon_event::init_pipeline>(&PipelineCreated);
     foveation::Register(log);
     effectslayer::Register(log);
+    motionvectors::Register(log);
     resolution::Register(log);
     registered=true;Say("Frame OpenXR: registered D3D12 capture; awaiting game Present");
 }
@@ -3848,6 +4038,19 @@ void ConfigureTurnsFill(bool on) {
 void ConfigureTurnsSharp(bool on) {
     static std::atomic<int> read{-1};   // as ConfigureTurnsKeepOwn: only a change of the ini's own value overrides the DEV switch
     if(read.exchange(on?1:0)!=(on?1:0))SetTurnsSharp(on);
+}
+void SetTurnsMotion(int mode) {
+    static const char* const said[]={"Frame OpenXR: by turns - the eye not drawn moves with the head and the hero alone",
+        "Frame OpenXR: by turns - the eye not drawn also moves on by the game's motion vectors",
+        "Frame OpenXR: by turns - the eye not drawn from its own picture alone, moved by the game's motion vectors, what moved on tinted red"};
+    mode=std::clamp(mode,0,2);
+    if(turnsMotion.exchange(mode)!=mode)Say(said[mode]);
+}
+int TurnsMotion() {return turnsMotion.load();}
+void ConfigureTurnsMotion(int mode) {
+    static std::atomic<int> read{-1};   // as ConfigureTurnsKeepOwn: only a change of the ini's own value overrides the DEV switch
+    mode=std::clamp(mode,0,2);
+    if(read.exchange(mode)!=mode)SetTurnsMotion(mode);
 }
 void ConfigureEyeTracking(bool on) {eyeTracking.store(on);}
 void BeginEye(int eye) {
@@ -4861,6 +5064,7 @@ void Shutdown(bool preserveResolution) {
     for(auto& e:eyes){if(e.chain&&pDestroySwapchain)pDestroySwapchain(e.chain);e={};}
     mirrorSupported=mirrorMono=false;
     turnFrame=keepTurns=keepDepth=false;lastEyes={};viewBase={{{0,0,0,1},{0,0,0,1}}};viewWorld={};turnDepths={};turnCounts={};turnImages={};turnKept={};turnImagesFailed=turnWarpTried=false;turnWarp={};
+    turnMotions={};motionFences={};motionNext=0;motionGate={};
     turnLayers={};layerKept={};turnTarget.Reset();layersFailed=false;
     for(auto& s:handSpaces){if(s&&pDestroySpace)pDestroySpace(s);s=XR_NULL_HANDLE;}
     if(headSpace&&pDestroySpace)pDestroySpace(headSpace);if(space&&pDestroySpace)pDestroySpace(space);

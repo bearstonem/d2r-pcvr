@@ -30,8 +30,10 @@ inline constexpr int TurnsFillChoice=42;
 inline constexpr int TorchChoice=43;
 // #292's gas and oil potions; on CHARACTER, EQUIPMENT being full.
 inline constexpr int ThrowingPotionsChoice=44;
+// And [stereo] turns_motion (on, shown, off); on CHARACTER too.
+inline constexpr int TurnsMotionChoice=45;
 inline constexpr int PageSize=14;
-inline constexpr std::array<Choice,45> Choices{{
+inline constexpr std::array<Choice,46> Choices{{
     {"Level 90", "All class skills rank 20 / test attributes", nullptr},
     {"Primary gear", "Class-specific unique equipment", nullptr},
     {"Alternate gear", "Equipment for the other class abilities", nullptr},
@@ -84,6 +86,7 @@ inline constexpr std::array<Choice,45> Choices{{
     {"By turns ghosts", "Strips beside moving things: frame-old ghosts removed / kept", nullptr},
     {"Torch kit", "One-hand club torch / test lighting and melee", nullptr},
     {"Throwing potions", "Gas and oil potions / equip a stack to throw", nullptr},
+    {"By turns motion", "Eye not drawn: moved by the game's vectors / shown / off", nullptr},
 }};
 // Stable action IDs are independent of their presentation order.
 inline constexpr int PageCount=5;
@@ -96,7 +99,7 @@ inline constexpr const char* PageHelp[]={
     "Area entrances. Travel does not complete quests, reset bosses or change difficulty."
 };
 inline constexpr std::array<std::array<int,PageSize>,PageCount> Pages{{
-    {{Level10Choice,Level30Choice,Level60Choice,0,HealChoice,UnlockQuestsChoice,ThrowingPotionsChoice,-1,-1,-1,-1,-1,-1,-1}},
+    {{Level10Choice,Level30Choice,Level60Choice,0,HealChoice,UnlockQuestsChoice,ThrowingPotionsChoice,TurnsMotionChoice,-1,-1,-1,-1,-1,-1}},
     {{StarterPrimaryChoice,StarterAlternateChoice,1,2,CrossbowChoice,BowChoice,SmallShieldChoice,DebugDrawsChoice,TurnsKeepOwnChoice,ThrowingChoice,PotionsChoice,TurnsSharpChoice,TurnsFillChoice,TorchChoice}},
     {{4,11,14,15,16,5,3,8,9,-1,-1,-1,-1,-1}},
     {{17,UpperKurastChoice,KurastSewersChoice,18,19,26,27,-1,-1,-1,-1,-1,-1,-1}},

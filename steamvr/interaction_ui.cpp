@@ -279,7 +279,8 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
                               i==dev::TurnsKeepOwnChoice?(s.devTurnsKeepOwn==1?"By turns own picture: NEAR":s.devTurnsKeepOwn==2?"By turns own picture: ALL":
                                                           s.devTurnsKeepOwn==3?"By turns own picture: FX":s.devTurnsKeepOwn==4?"By turns own picture: NEAR+FX":"By turns own picture: OFF"):
                               i==dev::TurnsSharpChoice?(s.devTurnsSharp?"By turns filter: SHARP":"By turns filter: SOFT"):
-                              i==dev::TurnsFillChoice?(s.devTurnsFill?"By turns ghosts: FIXED":"By turns ghosts: OLD"):choice.name;
+                              i==dev::TurnsFillChoice?(s.devTurnsFill?"By turns ghosts: FIXED":"By turns ghosts: OLD"):
+                              i==dev::TurnsMotionChoice?(s.devTurnsMotion==1?"By turns motion: ON":s.devTurnsMotion==2?"By turns motion: SHOW":"By turns motion: OFF"):choice.name;
             text(title,{x+8,y+4,right-8,y+29});
             SelectObject(dc,shortcutFont);text(choice.detail,{x+8,y+29,right-8,bottom-4});SelectObject(dc,font);
         }
@@ -292,6 +293,9 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
                                          "By turns: the eye not drawn takes the drawn eye's picture wherever it reaches."):
              o.result==Result::SharpUpdated?(s.devTurnsSharp?"By turns: the eye not drawn is read sharp (Catmull-Rom).":"By turns: the eye not drawn is read soft (bilinear), as before."):
              o.result==Result::FillUpdated?(s.devTurnsFill?"By turns: no frame-old ghosts beside moving things.":"By turns: beside near things the eye keeps its own older picture, as before."):
+             o.result==Result::MotionUpdated?(s.devTurnsMotion==1?"By turns: what moves by itself moves on in the eye not drawn (the game's vectors).":
+                                          s.devTurnsMotion==2?"By turns: the eye not drawn from its own picture alone. Red: what moved on by itself.":
+                                          "By turns: the eye not drawn moves with your head and the hero alone."):
              o.result==Result::Applied?"Kit added to inventory. Equip it using the native inventory screen.":
              o.result==Result::Dispatched?"Commands sent. Check character stats / destination in game.":
              o.result==Result::KitRefused?"Kit could not be added. Check inventory space and the development log.":

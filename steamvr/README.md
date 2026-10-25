@@ -200,6 +200,41 @@ headset frame are drawn:
   developer mode also DEV > Equipment > By turns ghosts; 0 as before). The
   ends are looked for up to 128 px of a 4096-wide eye either side. On an RTX
   5090 it adds 0.1 ms at 3072 square and 0.23 ms at 4096.
+  Off by default and shelved (#281: the benefit was hard to see, and only
+  with the head and the hero still): with `[stereo] turns_motion=1` (live; in
+  developer mode also DEV > Character > By turns motion) what moves by itself
+  (a monster walking, a missile) also goes on in the eye's own older picture
+  by the game's motion vectors: the game
+  draws its scene a second time into an R16G16_FLOAT target, the one DLSS
+  gets, with each point's motion since the render before; the eye not drawn
+  keeps a copy beside its depth and moves each point on by as much again, so
+  where its own picture shows (beside a monster, where only this eye sees
+  past it, and round the effects) the monster stands where it is now, not a
+  frame back. The game's vectors hold the camera's motion against the render
+  before (the other eye's, a frame back) as well: with DLSS off it explained
+  98-99% of them from 2 m out. Each point's is taken out by where that render
+  stood, and what is left is the point's own. Each drawn eye's vectors are
+  sampled 128 x 128 by half a metre of distance; the motion is used only
+  while the camera's motion explains at least 80% of them from 2 m out (70%
+  to stop), so nothing moves on until that is seen, and only from where two
+  half metres running are explained to 97%, over some 10-20 s of eye frames.
+  None is used while the eye turns more than a quarter of a degree a render
+  (what is left of the camera's part grows with the turn, and the ground and
+  the distance doubled while the head turned) or the hero goes more than half
+  a centimetre a render (strafing, only 57-76% was explained at 2-4 m, and
+  the ghost beside monsters smeared the way the hero went). The statistics
+  are of the other frames alone, so the distance is that of frames the
+  vectors are used in.
+  What is left under 1.5 px (DLSS's jitter) counts as none, and while the
+  head turns slower, under that plus 30% of the turn in pixels. A grid point
+  moves only where the vectors of its texels on one surface agree to a pixel,
+  and what the hero carries keeps the carry alone. A monster that stops or
+  turns overshoots by a frame. The game's
+  effects are not in the vectors, so they still move with what is behind
+  them. `turns_motion=2` shows the eye not drawn from its own picture alone,
+  what moved on tinted red; 0 is off. Every 10 s the log has a `the game's
+  motion vectors` line: by distance, how many vectors were still, how many
+  the camera's motion explains, and their mean length.
 
 By turns draws a pair on a snap turn, outside first person, in open menus,
 during stereo captures and on any frame without a reusable image for both eyes.

@@ -212,6 +212,28 @@ strafe: with OLD a frame-old copy of the monster can trail beside it in one
 eye. The button shows the current state, and the frame log records each
 switch. It changes no saved setting.
 
+## By turns motion
+
+Select **DEV > Character > By turns motion** to step, for the session, how
+the eye not drawn treats things that move by themselves with Stereo
+rendering: By turns; shelved, off by default (#281). **ON** (`[stereo] turns_motion=1`): its own
+picture from a frame back also goes on by the game's motion vectors, so a
+monster walking stands where it is now in the strip beside it that only this
+eye sees and where the effects keep this eye's own picture. **SHOW** (2): the
+eye not drawn from its own picture alone (no drawn eye's picture over it),
+what moved on tinted red. Red should sit on walking monsters and missiles,
+not on the ground or walls, even while you turn your head or walk. With
+SHOW, a monster walking across should look single in both eyes; with OFF it
+is a frame behind in one eye. **OFF** (0): moved with the head and the hero
+alone, the default. The button steps in that order, shows the current state,
+and the frame log records each step. It changes no saved setting.
+
+Nothing moves on until the frame log says the camera's motion explains the
+game's vectors ("the camera's motion explains ...% of the game's motion
+vectors from 2 m out"). Every 10 seconds a line gives, by half a metre of
+distance, how many vectors were still, how many the camera's motion
+explains, and their mean length.
+
 ## Locations
 
 | Page | Destinations |

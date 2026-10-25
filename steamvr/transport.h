@@ -59,6 +59,15 @@ bool TurnsSharp();
 void ConfigureTurnsFill(bool on);
 void SetTurnsFill(bool on);
 bool TurnsFill();
+// [stereo] turns_motion (0, shelved: #281): by turns, the eye not drawn also moves its own
+// older picture on by the game's motion vectors (TurnDepth::motion):
+// what is left of them once the camera's motion is taken out; 2 the same
+// from its own picture alone, what moved on tinted red (a check); 0 off.
+// Applied when the ini's value changes; DEV > Equipment switches it for the
+// session (Set), and reads it back.
+void ConfigureTurnsMotion(int mode);
+void SetTurnsMotion(int mode);
+int TurnsMotion();
 void ConfigureEyeTracking(bool enabled);
 void ConfigureGameplay(bool enabled);
 void ConfigureQuiver(bool enabled,bool preview); // [bow] quiver, quiver_preview
@@ -177,8 +186,9 @@ bool TurnDepthWanted();
 bool TurnDepthReady();
 // How the eyes not drawn went since the last call: moved with depth, or turned only.
 // By turns, the eye not drawn: its own image moved with its depth, or turned
-// only; and of those, how many had the drawn eye's picture laid over them.
-struct TurnCounts {uint32_t moved=0,turned=0,drawn=0;};
+// only; and of those, how many had the drawn eye's picture laid over them,
+// and how many were moved on by the game's motion vectors too.
+struct TurnCounts {uint32_t moved=0,turned=0,drawn=0,motion=0;};
 TurnCounts TakeTurnCounts();
 // Diagnostic only: F8 saves the next complete gameplay pair via ReShade.
 void RequestStereoCapture();

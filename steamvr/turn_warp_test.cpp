@@ -173,10 +173,10 @@ static void Precompiled(Gpu& gpu) {
     framevr::TurnWarp first;
     const bool built=first.Initialize(gpu.device.Get(),DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,nullptr);
     worker.join();
-    Check(warmed&&built&&first.DepthReady()&&first.NearReady()&&first.EffectsReady()&&first.InterfaceReady(),"every pass is built beside a running compile");
+    Check(warmed&&built&&first.DepthReady()&&first.NearReady()&&first.EffectsReady()&&first.MotionReady()&&first.InterfaceReady(),"every pass is built beside a running compile");
     framevr::TurnWarp next;
     Check(next.Initialize(gpu.device.Get(),DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,nullptr)&&next.DepthReady()&&next.NearReady()&&
-          next.EffectsReady()&&next.InterfaceReady(),"a later session builds every pass from the compiled code");
+          next.EffectsReady()&&next.MotionReady()&&next.InterfaceReady(),"a later session builds every pass from the compiled code");
 }
 // The pass on the GPU: an 8x8 picture, the target typed or typeless as the runtime's may be.
 static void Turn(Gpu& gpu,bool typeless) {
@@ -493,6 +493,118 @@ static void KeepEffects(Gpu& gpu,bool typeless) {
     std::printf("Effects GPU pass passed (%s target): this eye's own kept where either eye's effects layer has something, the drawn eye's elsewhere\n",typeless?"typeless":"typed");
 }
 
+// The game's motion vectors (TurnDepth::motion): a 64-pixel wall 4 units
+// away, a monster 2 units away in columns 24-39 that walked 8 px to the right
+// since the render before, the head still. One frame on, the monster stands
+// 8 px further right; the wall stays. With the render before a quarter unit
+// to the right, the vectors also hold its parallax (2 px at the wall, 4 at
+// the monster), taken out. Then the statistics (MotionStats) of the same
+// picture, the sky in its top 8 rows.
+static void Motion(Gpu& gpu,bool typeless) {
+    framevr::TurnWarp warp;
+    Check(warp.Initialize(gpu.device.Get(),DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,nullptr)&&warp.DepthReady()&&warp.MotionReady(),"pipelines");
+    constexpr UINT side=64;constexpr float nearPlane=1;
+    auto source=gpu.Texture(side,side,DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,D3D12_RESOURCE_FLAG_NONE,D3D12_RESOURCE_STATE_COPY_DEST);
+    auto target=gpu.Texture(side,side,typeless?DXGI_FORMAT_R8G8B8A8_TYPELESS:DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,D3D12_RESOURCE_STATE_RENDER_TARGET);
+    const auto texel=[](UINT x,UINT y){return uint32_t(x*4)|uint32_t(y*4)<<8|0x80u<<16|0xffu<<24;};
+    std::vector<uint32_t> texels(side*side);for(UINT y=0;y<side;++y)for(UINT x=0;x<side;++x)texels[y*side+x]=texel(x,y);
+    gpu.Upload(source.Get(),texels,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    constexpr auto readable=D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE|D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+    const auto monster=[](UINT x){return x>=24&&x<40;};
+    const auto depthOf=[&](bool sky){   // depth = near / distance; 0 the sky
+        std::vector<uint32_t> d(side*side);
+        for(UINT y=0;y<side;++y)for(UINT x=0;x<side;++x){const float v=sky&&y<8?0.f:nearPlane/(monster(x)?2.f:4.f);std::memcpy(&d[y*side+x],&v,4);}
+        auto texture=gpu.Texture(side,side,DXGI_FORMAT_R32_FLOAT,D3D12_RESOURCE_FLAG_NONE,D3D12_RESOURCE_STATE_COPY_DEST);
+        gpu.Upload(texture.Get(),d,readable);return texture;
+    };
+    const auto vectors=[&](float wall,float onMonster){   // where each point is less where it was, in uv
+        std::vector<uint32_t> m(side*side);
+        for(UINT y=0;y<side;++y)for(UINT x=0;x<side;++x){const float v=monster(x)?onMonster:wall;m[y*side+x]=Half(v/side);}
+        auto texture=gpu.Texture(side,side,DXGI_FORMAT_R16G16_FLOAT,D3D12_RESOURCE_FLAG_NONE,D3D12_RESOURCE_STATE_COPY_DEST);
+        gpu.Upload(texture.Get(),m,readable);return texture;
+    };
+    const auto depth=depthOf(false),walked=vectors(0,8),shuffled=vectors(0,1),parallax=vectors(2,4),walkedToo=vectors(2,12);
+    const float q=std::atan(1.f);const Fov square{-q,q,-q,q};
+    const auto in_place=framevr::TurnMove({0,0,0},{0,0,0,1},{0,0,0},{0,0,0,1});
+    framevr::TurnDepth own;own.format=DXGI_FORMAT_R32_FLOAT;own.nearPlane=nearPlane;own.depth=depth.Get();
+    own.drawnFov=own.nowFov=own.backFov=square;own.move=own.back=in_place;
+    own.motion=walked.Get();own.ahead=1;
+    std::vector<uint32_t> out;int slot=0;
+    const auto expect=[&](UINT from,UINT to,int shift,const char* what) {
+        bool same=true;
+        for(UINT y=0;y<side;++y)for(UINT x=from;x<to;++x)if(!Same(out[y*side+x],texel(x+shift,y))) {
+            if(same)std::printf("%s: pixel %u,%u = %08x, expected %08x\n",what,x,y,out[y*side+x],texel(x+shift,y));same=false;
+        }
+        Check(same,what);
+    };
+    // in place: the cells across the monster's edges (20-23, 40-43) left out,
+    // their texels spread by depth as before
+    const auto stays=[&](const char* what){expect(2,20,0,what);expect(24,40,0,what);expect(44,62,0,what);};
+    out=gpu.Warp(warp,source.Get(),target.Get(),Identity,slot^=1,&own);
+    expect(33,43,-8,"the monster goes on by its own motion, 8 px");
+    expect(2,20,0,"the wall left of it stays");
+    expect(52,64,0,"the wall right of it stays");
+    // the render before a quarter unit to the right: its parallax in every vector, taken out
+    own.back=framevr::TurnMove({0,0,0},{0,0,0,1},{.25f,0,0},{0,0,0,1});own.motion=parallax.Get();
+    out=gpu.Warp(warp,source.Get(),target.Get(),Identity,slot^=1,&own);
+    stays("the camera's motion alone moves nothing");
+    own.motion=walkedToo.Get();
+    out=gpu.Warp(warp,source.Get(),target.Get(),Identity,slot^=1,&own);
+    expect(33,43,-8,"less the camera's motion, the monster goes on by its own, 8 px");
+    expect(2,20,0,"and the wall stays");
+    own.back=in_place;own.motion=walked.Get();own.from=3;   // nearer than this the camera's part is not trusted
+    out=gpu.Warp(warp,source.Get(),target.Get(),Identity,slot^=1,&own);
+    stays("nearer than from the monster stays");
+    own.from=0;own.motion=shuffled.Get();   // a pixel: DLSS's jitter step, none
+    out=gpu.Warp(warp,source.Get(),target.Get(),Identity,slot^=1,&own);
+    stays("a vector under StillPixels is none");
+    own.motion=walked.Get();own.stillPixels=10;   // turning slowly: more of what is left counts as none
+    out=gpu.Warp(warp,source.Get(),target.Get(),Identity,slot^=1,&own);
+    stays("8 px under a stillPixels of 10 is none");
+    own.stillPixels=framevr::StillPixels;
+    {   // one texel of the wall (12,12), a hair nearer so its grid point takes it, with a vector of
+        // 8 px its neighbours on the surface do not have: not a thing moving
+        std::vector<uint32_t> d(side*side),m(side*side,0);
+        for(UINT y=0;y<side;++y)for(UINT x=0;x<side;++x){const float v=nearPlane/(monster(x)?2.f:x==12&&y==12?3.99f:4.f);std::memcpy(&d[y*side+x],&v,4);}
+        m[12*side+12]=Half(8.f/side);
+        auto lone=gpu.Texture(side,side,DXGI_FORMAT_R32_FLOAT,D3D12_RESOURCE_FLAG_NONE,D3D12_RESOURCE_STATE_COPY_DEST);gpu.Upload(lone.Get(),d,readable);
+        auto stray=gpu.Texture(side,side,DXGI_FORMAT_R16G16_FLOAT,D3D12_RESOURCE_FLAG_NONE,D3D12_RESOURCE_STATE_COPY_DEST);gpu.Upload(stray.Get(),m,readable);
+        own.depth=lone.Get();own.motion=stray.Get();
+        out=gpu.Warp(warp,source.Get(),target.Get(),Identity,slot^=1,&own);
+        expect(2,20,0,"a lone texel's vector moves nothing");
+        own.depth=depth.Get();
+    }
+    own.motion=walked.Get();own.carry=own.move;own.reach[0]=3;own.reach[1]=3.5f;   // within reach: the hero carries it
+    out=gpu.Warp(warp,source.Get(),target.Get(),Identity,slot^=1,&own);
+    stays("what the hero carries keeps the carry alone");
+    own.reach[0]=own.reach[1]=0;own.ahead=0;
+    out=gpu.Warp(warp,source.Get(),target.Get(),Identity,slot^=1,&own);
+    stays("ahead 0: off");
+    own.ahead=1;own.show=true;
+    out=gpu.Warp(warp,source.Get(),target.Get(),Identity,slot^=1,&own);
+    expect(2,20,0,"shown: the wall as it is");
+    bool tinted=true;for(UINT y=0;y<side;++y)tinted=tinted&&!Same(out[y*side+36],texel(28,y))&&(out[y*side+36]&255)>(texel(28,y)&255);
+    Check(tinted,"shown: what moved on is tinted red");
+    // The statistics: 128 x 128 samples, four a texel; 1 world unit a metre
+    const auto sky=depthOf(true);
+    framevr::TurnWarp::MotionInput in;in.depth=sky.Get();in.format=DXGI_FORMAT_R32_FLOAT;in.motion=walked.Get();
+    in.nearPlane=nearPlane;in.upm=1;in.back=in_place;in.fov=in.backFov=square;
+    bool recorded=false;gpu.Record([&]{recorded=warp.MotionStats(gpu.device.Get(),gpu.list.Get(),0,in,3);});
+    framevr::MotionHistogram h;Check(recorded&&warp.ReadMotionStats(3,h),"the statistics recorded and read back");
+    const auto bin=[&](int b,float count,float still,float explained,float pixels,const char* what){
+        const auto& v=h.bins[b];
+        if(!Near(v[0],count,.5f)||!Near(v[1],still,.5f)||!Near(v[2],explained,.5f)||!Near(v[3],pixels,1)) {
+            std::printf("%s: bin %d = %.0f %.0f %.0f %.1f, expected %.0f %.0f %.0f %.1f\n",what,b,v[0],v[1],v[2],v[3],count,still,explained,pixels);Check(false,what);
+        }
+    };
+    bin(0,2048,1536,0,512*8,"the sky in bin 0, still but where the monster's vectors run up into it");
+    bin(5,3584,0,0,3584*8,"the monster, 2 m: in 1.5-2 m (bin 5), none still, 8 px each, not the camera's");
+    bin(9,10752,10752,10752,0,"the wall, 4 m: in 3.5-4 m (bin 9), all still, all the camera's (none)");
+    float rest=0;for(int b=0;b<framevr::MotionBins;++b)if(b!=0&&b!=5&&b!=9)rest+=h.bins[b][0];
+    Check(rest==0,"no sample anywhere else");
+    std::printf("Motion GPU pass passed (%s target): moved on by its own motion, the camera's motion taken out, from a distance, under a pixel, a lone texel, carried, off, shown; the statistics by distance\n",typeless?"typeless":"typed");
+}
+
 // The sharper read (TurnWarp::Sharpen): a 64-pixel picture of vertical
 // stripes, 4 px a period, turned half a pixel. Bilinear averages each two
 // neighbours; Catmull-Rom keeps more of the stripes' contrast. A whole-pixel
@@ -585,5 +697,5 @@ static void Lay(Gpu& gpu,bool typeless) {
 
 int main(int argc,char** argv) {try {
     const bool typeless=argc>1&&!std::strcmp(argv[1],"--typeless");
-    Math();Gpu gpu;Precompiled(gpu);Turn(gpu,typeless);Move(gpu,typeless);KeepNear(gpu,typeless);KeepEffects(gpu,typeless);Sharpness(gpu,typeless);Lay(gpu,typeless);return 0;
+    Math();Gpu gpu;Precompiled(gpu);Turn(gpu,typeless);Move(gpu,typeless);KeepNear(gpu,typeless);KeepEffects(gpu,typeless);Motion(gpu,typeless);Sharpness(gpu,typeless);Lay(gpu,typeless);return 0;
 }catch(const std::exception& e){std::fprintf(stderr,"%s\n",e.what());return 1;}}

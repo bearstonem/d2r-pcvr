@@ -56,6 +56,10 @@ inline std::array<float,12> TurnCarry(math::Vec drawnAt,math::Quat drawn,math::V
     return TurnMove(heroNow+math::Rotate(body,drawnAt-heroWas),math::Multiply(body,drawn),nowAt,now);
 }
 
+// Less than this many pixels of the drawn part, a motion vector is none: the
+// game's vectors carry DLSS's jitter step (under a pixel) everywhere.
+inline constexpr float StillPixels=1.5f;
+inline constexpr float SurfacePixels=1.f;
 // The scene's depth as the eye was drawn: a grid over the drawn image, each
 // point put back at its distance and seen from this frame's eye, nearer
 // points over farther ones. The drawn eye's projection is infinite reverse-Z:
@@ -120,7 +124,40 @@ struct TurnDepth {
     // picture comes from, or as this eye did, round here - this eye's own
     // picture stays as well. 0: off; with keepNear neither off, either keeps.
     float keepEffects=0;
+    // This eye's own picture (Render's `depth`): the game's motion vectors as
+    // it was drawn (motionvectors, R16G16_FLOAT, in a shader-resource state,
+    // the size of `depth`). Moved with the head and the hero alone, a monster
+    // walking stood a frame back where the eye's own picture shows: beside
+    // it, where only this eye sees past it, and where the effects keep this
+    // eye's own (the owner, 2026-10-23). Each point also goes on by `ahead`
+    // times its own motion. The game's vectors hold the camera's motion
+    // against the render before as well (the other eye's, a frame back:
+    // 98-99% of them from 2 m out, the owner's session that day), taken out
+    // by where that render stood: `back`, TurnMove from this picture's view
+    // to its, and its FOV. Less than StillPixels left counts as none. What
+    // the hero carries keeps the carry alone. 0: off.
+    // Only farther than `from` (world units, along the view): nearer, the
+    // camera's part did not come out (the ground at the feet, 52-90% of it
+    // in the owner's next session), and the ground left moving was a double
+    // image there. And only where the vectors of a point's texels on one
+    // surface agree to SurfacePixels: a lone texel's is not a thing moving.
+    // What is left under `stillPixels` counts as none: StillPixels, more while
+    // the head turns slowly (the transport's), as what is left of the camera's
+    // part grows with the turn - the ground and walls went red with it.
+    ID3D12Resource* motion=nullptr;
+    float ahead=0,from=0,stillPixels=StillPixels;
+    std::array<float,12> back{};
+    math::Fov backFov{};
+    bool show=false;   // the grid's points tinted red where they moved by their own motion
 };
+// The motion statistics (TurnWarp::MotionStats): the sky, then half a metre
+// each from the eye to 16 m, then farther.
+inline constexpr int MotionBins=34;
+inline constexpr float MotionBinMetres=.5f;
+// Per bin: samples, those whose vector is under StillPixels, those the camera's
+// motion against the render before explains to StillPixels, the vectors'
+// lengths in pixels (64 at most each).
+struct MotionHistogram {std::array<std::array<float,4>,MotionBins> bins{};};
 inline constexpr float TurnEdgePixels=2;
 // The grid's spacing in target pixels: an edge in depth stays within a few.
 inline constexpr uint32_t TurnGridStep=4;
@@ -157,6 +194,14 @@ class TurnWarp {
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> effectsTargets;
     std::array<Microsoft::WRL::ComPtr<ID3D12Resource>,4> effects;
     std::array<bool,2> effectsKept{};
+    // MotionStats: the bins (R32G32B32A32_FLOAT, MotionBins x 1), and
+    // MotionSlots of them read back.
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> statsPipeline;
+    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> statsTargets;
+    Microsoft::WRL::ComPtr<ID3D12Resource> statsBins,statsReadback;
+    // TurnDepth::back for the depth shader, a slot an eye (upload, mapped)
+    Microsoft::WRL::ComPtr<ID3D12Resource> backs;
+    uint8_t* backData=nullptr;
     DXGI_FORMAT format=DXGI_FORMAT_UNKNOWN;
     bool sharp=true;   // Sharpen
     Microsoft::WRL::ComPtr<ID3D12PipelineState> holePipeline;   // Fill
@@ -183,6 +228,20 @@ public:
     // the drawn eye's picture laid over it; false only when nothing was drawn.
     bool Render(ID3D12Device*,ID3D12GraphicsCommandList*,ID3D12Resource* source,ID3D12Resource* target,
                 const std::array<float,9>& homography,int slot,const TurnDepth* depth=nullptr,const TurnDepth* drawn=nullptr);
+    bool MotionReady() const {return statsPipeline!=nullptr;}
+    static constexpr int MotionSlots=8;
+    // What the game's motion vectors say as the eye `eye` was drawn: its
+    // depth and vectors (MotionInput, both in a shader-resource state, one
+    // size), sampled 128 x 128 into MotionBins by distance, into the read-back
+    // slot `at` (0 to MotionSlots - 1). ReadMotionStats once the list ran.
+    struct MotionInput {
+        ID3D12Resource* depth=nullptr;DXGI_FORMAT format=DXGI_FORMAT_UNKNOWN;ID3D12Resource* motion=nullptr;
+        float scale[2]{1,1};float nearPlane=0,upm=0;
+        std::array<float,12> back{};   // TurnMove from this eye's view to the render before's
+        math::Fov fov{},backFov{};
+    };
+    bool MotionStats(ID3D12Device*,ID3D12GraphicsCommandList*,int eye,const MotionInput&,int at);
+    bool ReadMotionStats(int at,MotionHistogram& out);
     // The pictures, turned, moved and laid over, read Catmull-Rom (the
     // default) or bilinear ([stereo] turns_sharp): from the next pass on.
     void Sharpen(bool on){sharp=on;}
