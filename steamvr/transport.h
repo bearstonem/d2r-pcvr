@@ -59,11 +59,11 @@ bool TurnsSharp();
 void ConfigureTurnsFill(bool on);
 void SetTurnsFill(bool on);
 bool TurnsFill();
-// [stereo] turns_motion (0, shelved: #281): by turns, the eye not drawn also moves its own
+// [stereo] turns_motion (1, #281): by turns, the eye not drawn also moves its own
 // older picture on by the game's motion vectors (TurnDepth::motion):
 // what is left of them once the camera's motion is taken out; 2 the same
 // from its own picture alone, what moved on tinted red (a check); 0 off.
-// Applied when the ini's value changes; DEV > Equipment switches it for the
+// Applied when the ini's value changes; DEV > Character switches it for the
 // session (Set), and reads it back.
 void ConfigureTurnsMotion(int mode);
 void SetTurnsMotion(int mode);
