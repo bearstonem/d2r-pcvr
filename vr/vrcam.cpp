@@ -23,6 +23,7 @@
 #endif
 #include <windows.h>
 #include "pcvr_identity.h"
+#include "coop.h"
 #include "pcvr_mod_layout.h"
 #include "../steamvr/profile.h"
 #include "../steamvr/resource_descriptions.h"
@@ -9798,6 +9799,9 @@ DWORD WINAPI UpdateThread(void*) {
         if (nowMs >= nextState) {   // what the hero holds, 5 times a second
             nextState = nowMs + 200;
             gamestate::Tick();
+#ifdef D2RVR_NATIVE_OPENXR
+            coop::Tick();
+#endif
             // A weapon change rebuilds the hero's model: the matrix the facing was
             // read from stays where it was and reads yaw 0 (log 2026-10-04: "model
             // 0.0", "8.00 above the look-at"), and the doll stopped following the
@@ -10126,6 +10130,7 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
     bowvr::Init(ctx);
     wallcells::Init(ctx);
     propscan::Init();
+    coop::Init(ctx,g_iniPath);
 #endif
     if (HANDLE h = CreateThread(nullptr, 0, UpdateThread, nullptr, 0, &g_updateThreadId)) CloseHandle(h);
     if (!ctx->RegisterConsoleCommand("vrcam", &CmdVrcam, "vrcam - the camera: off / first person / third person (F12)"))
@@ -10136,6 +10141,7 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
 D2RL_PLUGIN_EXPORT void D2RLoaderUnloadPlugin() noexcept {
     if (g_standDown) return;   // nothing was started
 #ifdef D2RVR_NATIVE_OPENXR
+    coop::Shutdown();
     enemysight::Shutdown();
     companionai::Shutdown();
     framevr::scenedepth::Shutdown();

@@ -47,7 +47,9 @@ def main():
     if args.platform == 'linux-proton':
         paths += ['INSTALL-LINUX.md', 'steamvr/launch.sh', 'steamvr/run-proton.sh', 'steamvr/session.py']
     else:
-        paths += ['steamvr/setup_native.py']
+        paths += ['steamvr/setup_native.py', 'Coop-Setup.cmd', 'docs/MULTIPLAYER.md',
+                  'steamvr/coop_assistant.py', 'steamvr/coop_setup.py',
+                  'steamvr/coop_connection.py', 'steamvr/coop_wizard.py']
     paths += ['steamvr/prepare_icons.py', 'steamvr/steam_assets.py', 'steamvr/game_assets.py',
               'steamvr/game_install.py', 'steamvr/casc_assets.py']
     paths += ['steamvr/prepare_potions.py', 'steamvr/potion_assets.py', 'steamvr/prepare_spell_sprites.py', 'steamvr/vendor/bitknit.py',

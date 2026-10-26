@@ -14,6 +14,17 @@ import launch_windows as launch
 
 
 class DesktopLaunchTests(unittest.TestCase):
+    def test_coop_keeps_explicit_mod_without_enabling_dev_staging(self):
+        import prepare_dev_scenarios as dev
+        with tempfile.TemporaryDirectory() as temporary, patch.object(dev, 'stage') as stage:
+            game = Path(temporary)
+            (game / 'D2RLoader.exe').touch()
+            for runtime in ([], ['--frame-vdxr']):
+                command, cwd = launch.prepare(['--frame-vr', *runtime, str(game / 'D2R.exe'), '-mod', 'pcvr-coop'])
+                self.assertEqual(command, [str(game / 'D2RLoader.exe'), '-mod', 'pcvr-coop'])
+                self.assertEqual(cwd, str(game))
+            stage.assert_not_called()
+
     def test_dev_flag_selects_isolated_mod_and_is_not_forwarded(self):
         import prepare_dev_scenarios as dev
         with tempfile.TemporaryDirectory() as temporary:

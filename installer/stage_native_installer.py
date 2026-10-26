@@ -14,6 +14,7 @@ ROOT_FILES = {
     'INSTALL.md', 'INSTALL-WINDOWS.md', 'README.md', 'CONTROLS.md', 'RELEASE_NOTES.md',
     'Launch-VR-SteamVR.cmd', 'Launch-VR-VDXR.cmd', 'Launch-Dev-SteamVR.cmd', 'Install-Windows.cmd',
     'steamvr/DEVELOPMENT_SCENARIOS.md',
+    'Coop-Setup.cmd', 'docs/MULTIPLAYER.md',
     'Install-BattleNet-Preview.cmd', 'Uninstall-Windows.cmd', 'THIRD_PARTY.md', 'LICENSE', 'd2r_pcvr.ini',
     'vrmod-manifest.json', 'launcher_icon.png',
     'reshade/D2R_DepthFog.fx', 'third_party/minhook/LICENSE.txt', 'external/reshade/LICENSE.md',
@@ -23,7 +24,8 @@ SCRIPTS = {'setup_windows.ps1', 'setup_windows.py', 'setup_native.py', 'uninstal
            'steam_config.py', 'install.py', 'mod_identity.py', 'launch_windows.py', 'prepare_icons.py',
            'steam_assets.py', 'game_assets.py', 'game_install.py', 'casc_assets.py',
            'prepare_potions.py', 'potion_assets.py', 'prepare_spell_sprites.py', 'prepare_arcane_sky.py', 'prepare_dev_scenarios.py',
-           'prepare_sewer_backdrop.py', 'prepare_kurast_dock.py', 'prepare_props.py'}
+           'prepare_sewer_backdrop.py', 'prepare_kurast_dock.py', 'prepare_props.py',
+           'coop_assistant.py', 'coop_setup.py', 'coop_connection.py', 'coop_wizard.py'}
 
 
 def safe_name(name):

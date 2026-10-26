@@ -12,6 +12,17 @@ import stage_native_installer as staging
 
 
 class StagingTests(unittest.TestCase):
+    def test_coop_assistant_helpers_are_allowlisted_and_hashed(self):
+        source=Path(__file__).resolve().parent.parent
+        names=('Coop-Setup.cmd','docs/MULTIPLAYER.md','steamvr/coop_assistant.py',
+               'steamvr/coop_setup.py','steamvr/coop_connection.py','steamvr/coop_wizard.py')
+        files={name:(source/name).read_bytes() for name in names}
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);manifest=self.stage(root,files)
+            for name,data in files.items():
+                self.assertEqual((root/'staged'/name).read_bytes(),data)
+                self.assertEqual(manifest['sha256'][name],hashlib.sha256(data).hexdigest())
+
     def fixture(self, root, extra=None, changed=False):
         files = {'steamvr/setup_native.py': b'backend', 'steamvr/mod_identity.py': b'identity', 'bin/d2rl-pcvr.dll': b'plugin',
                  'bin/openxr_loader.dll': b'loader', **(extra or {})}
