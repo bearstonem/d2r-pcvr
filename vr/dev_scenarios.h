@@ -8,4 +8,5 @@ void Request(const framevr::interaction::Request&);
 framevr::interaction::Reply Status();
 void Cancel();
 bool DebugDraws(); // isolated developer session only; starts Off
+bool Isolated(); // the isolated pcvr-dev session (its diagnostics log more)
 }

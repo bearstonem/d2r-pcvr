@@ -50,6 +50,10 @@ class PropCatalogTests(unittest.TestCase):
         self.assertEqual(props.kind_of('data/hd/x/book_red_01.model'), 'book_red')
         self.assertIsNone(props.kind_of('data/hd/x/candle01.model'))   # its flame is another entity
         self.assertIsNone(props.kind_of('data/hd/x/cupboard01.model'))
+        self.assertEqual(props.kind_of('data/hd/x/sword_rusty02.model'), 'sword_rusty')   # 4: loose weapons
+        self.assertEqual(props.kind_of('data/hd/x/L_Barrel01.model'), 'l_barrel')
+        self.assertIsNone(props.kind_of('data/hd/x/wall_shield01.model'))   # on a wall
+        self.assertIsNone(props.kind_of('data/hd/x/crates01.model'))   # several crates, one model
         self.assertIsNone(props.kind_of('data/hd/x/cup01.texture'))
 
     def test_only_plain_catalogued_props(self):

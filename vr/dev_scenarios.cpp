@@ -305,6 +305,7 @@ void Init(const D2RL::PluginContext* ctx) {
     framevr::logging::Write("Frame development: isolated pcvr-dev environment enabled; class presets require disposable offline expansion characters");
 }
 bool DebugDraws(){return enabled&&debugDraws.load();}
+bool Isolated(){return enabled;}
 void Capture(framevr::interaction::Snapshot& s){s.developer=enabled;s.devDebugDraws=DebugDraws();s.devTurnsKeepOwn=enabled?framevr::TurnsKeepOwn():0;s.devTurnsSharp=enabled&&framevr::TurnsSharp();s.devTurnsFill=enabled&&framevr::TurnsFill();s.devTurnsRims=enabled&&framevr::TurnsRims();s.devSkyRims=enabled&&d2rcam::SkyOverRims();}
 void Request(const framevr::interaction::Request& r) {
     const bool valid=Valid(r);
@@ -336,5 +337,6 @@ void Request(const framevr::interaction::Request&){}
 framevr::interaction::Reply Status(){return {};}
 void Cancel(){}
 bool DebugDraws(){return false;}
+bool Isolated(){return false;}
 }
 #endif
