@@ -1,5 +1,8 @@
 #pragma once
 #include "frame_math.h"
+#include "world_coordinates.h"
+#include "aim_rules.h"
+#include <algorithm>
 #include <cstdint>
 #include <cstddef>
 
@@ -7,6 +10,8 @@ namespace framevr::spellaim {
 // These skills are aimed with the casting controller, not the decorative
 // shaft of a wand/scepter or the hero's animated facing.
 inline bool TrackedAim(int skill){return skill==78||skill==84||skill==88||skill==101;}
+// Bone Wall and Bone Prison's own floor placement (GroundPoint below, six
+// cells ahead when level) while the aim rules leave ground skills to the game.
 inline bool BonePlacement(int skill){return skill==78||skill==88;}
 struct Cast {bool directed=false;float x=0,y=0;bool contactPoint=false;};
 struct Scope {
@@ -74,6 +79,44 @@ inline bool Point(float x,float y,math::Vec direction,float& targetX,float& targ
     float dx=0,dy=0;
     if(!std::isfinite(x+y)||!Horizontal(direction,dx,dy))return false;
     targetX=x+dx*AimDistance;targetY=y+dy*AimDistance;return true;
+}
+// Skills cast at a ground point: the aim rules table's ground skills - Fire
+// Blast, whose bomb explodes where its flight ends (missiles.txt AlwaysExplode),
+// traps and Shock Web, Sorceress Blizzard / Meteor / Fire Wall / Hydra, Druid
+// Fissure / Volcano, Necromancer Bone Wall / Bone Prison. All take the same
+// point: the aimed monster, else the floor point aimed at. Fire Blast is no
+// special case, and the bone walls no longer have their own placement.
+inline bool GroundTarget(int skill) { return aimrules::Of(skill, false) == aimrules::Use::Ground; }
+// The landing circle's color by element: 0 fire, 1 cold, 2 lightning, 3 poison/other.
+enum Element { Fire, Cold, Lightning, Other };
+inline Element ElementOf(int skill) {
+    switch(skill) {
+        case 59: return Cold;
+        case 256: case 261: case 271: case 276: return Lightning;
+        case 251: case 262: case 272: case 51: case 56: case 62: case 234: case 244: return Fire;
+        default: return Other;
+    }
+}
+inline constexpr float GroundMinDistance=2.f;
+// Land a lobbed skill where the aiming ray meets the player's floor. Render
+// units are converted to native cells by cellsPerUnit after removing the
+// floor shear (coordinates::GridPlane). Too short or too far points are kept
+// on the ray's heading at the nearest allowed distance; a ray that never
+// descends (HandRay always tilts it down) is refused.
+inline bool GroundPoint(math::Vec origin,math::Vec direction,float floorY,float cellsPerUnit,
+                        float playerX,float playerY,float& targetX,float& targetY,float maxDistance=AimDistance) {
+    if(!std::isfinite(origin.x+origin.y+origin.z+direction.x+direction.y+direction.z+floorY+cellsPerUnit+playerX+playerY)||
+       cellsPerUnit<=0||direction.y>=-1e-4f||origin.y<=floorY)return false;
+    const float t=(floorY-origin.y)/direction.y;
+    const auto hit=coordinates::GridPlane({origin.x+direction.x*t,floorY,origin.z+direction.z*t});
+    float dx=hit.x*cellsPerUnit-playerX,dy=hit.z*cellsPerUnit-playerY;
+    const float distance=std::hypot(dx,dy);
+    if(distance<.001f) {
+        if(!Horizontal(direction,dx,dy))return false;
+        targetX=playerX+dx*GroundMinDistance;targetY=playerY+dy*GroundMinDistance;return true;
+    }
+    const float scale=std::clamp(distance,GroundMinDistance,std::max(GroundMinDistance,maxDistance))/distance;
+    targetX=playerX+dx*scale;targetY=playerY+dy*scale;return true;
 }
 // The controller quick-cast path takes integer grid cells. Refuse malformed
 // positions before conversion, rather than returning an unrelated old target.

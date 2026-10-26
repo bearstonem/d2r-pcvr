@@ -18,10 +18,14 @@ inline float UnitsPerMetre(float standingEye, float userHeight, float reach) {
 }
 // Fit shoulder-to-wrist length to measured grip span at the height's world
 // scale. Hands and equipment keep their authored size; targets stay 1:1.
-inline float ArmScale(float modelEye,float userEye,float span,float shoulderWidth,float armLength,float palm) {
-    if(!std::isfinite(modelEye+userEye+span+shoulderWidth+armLength+palm)||
-       modelEye<=0||userEye<.8f||span<.85f||span>2.6f||shoulderWidth<0||armLength<.01f||palm<0)return 1;
-    return std::clamp(((span*UnitsPerMetre(modelEye,userEye,1)-shoulderWidth)*.5f-palm)/armLength,.65f,1.6f);
+// low: the shortest fit; a shapeshift form's long arms (the werebear's are 1.7x
+// the druid's) pass 0.5.
+// unitScale: the world's units per metre over the rig's own (a shapeshift form drawn
+// scaled in a world kept at the person's size).
+inline float ArmScale(float modelEye,float userEye,float span,float shoulderWidth,float armLength,float palm,float low=.65f,float unitScale=1.f) {
+    if(!std::isfinite(modelEye+userEye+span+shoulderWidth+armLength+palm+unitScale)||
+       modelEye<=0||userEye<.8f||span<.85f||span>2.6f||shoulderWidth<0||armLength<.01f||palm<0||unitScale<=0)return 1;
+    return std::clamp(((span*UnitsPerMetre(modelEye,userEye,unitScale)-shoulderWidth)*.5f-palm)/armLength,std::clamp(low,.3f,.65f),1.6f);
 }
 // Row-vector affine matrix: resize an arm around its shoulder. The caller
 // restores the hand subtree from its original local transforms afterwards.

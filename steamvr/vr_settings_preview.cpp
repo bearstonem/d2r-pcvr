@@ -2,6 +2,7 @@
 #include "vr_settings_ui.h"
 #include "release_notes.h"
 #include "latest_worker.h"
+#include "wide_text.h"
 #include <windows.h>
 #include <cstdio>
 #include <cstdlib>
@@ -10,7 +11,10 @@ int main(int argc,char** argv){
     using namespace framevr::settings;
     Snapshot s;s.ready=true;s.offlineDifficultyAvailable=true;s.values[Motion]=1;s.values[Snap]=30;s.values[Foveation]=2;
     if(argc>3&&std::strcmp(argv[3],"--foveation-off")==0)s.values[Foveation]=0; // greyed Foveation strength row
-    Model m;m.Open(s);const int page=argc>2?std::atoi(argv[2]):0;
+    if(argc>3&&std::strcmp(argv[3],"--all-rows")==0){   // the outline's rows (the longest hue names) and ground circles shown
+        s.values[TargetHighlight]=50;s.values[GroundAim]=1;s.values[HighlightLeft]=300;s.values[HighlightRight]=315;
+    }
+    Model m;m.Open(s);m.SetNotesPages(ReleaseNotesPages());const int page=argc>2?std::atoi(argv[2]):0;
     m.Click({Kind::Tab,page});
     if(argc>3&&std::strcmp(argv[3],"--release-notes-check")==0){
         if(m.page!=Page::ReleaseNotes||m.Dirty())return 13;
@@ -37,6 +41,7 @@ int main(int argc,char** argv){
         SelectObject(dc,old);DeleteObject(font);DeleteDC(dc);
     }
     if(argc>3&&std::strcmp(argv[3],"--dropdown")==0)m.Click({Kind::ControllerMenu});
+    if(argc>4&&std::strcmp(argv[3],"--notes-page")==0)for(int i=std::atoi(argv[4]);i>0;--i)m.Click({Kind::NotesPage,0,1});   // the Notes tab turned to that page
     const int help=argc>4&&std::strcmp(argv[3],"--help")==0?std::atoi(argv[4]):NoHelp;
     if(argc>3&&std::strcmp(argv[3],"--help-check")==0){
         const auto plain=Paint(m,{},"");
@@ -47,18 +52,18 @@ int main(int argc,char** argv){
         auto old=SelectObject(dc,normal);
         for(int id=0;id<=HelpLast;++id){
             for(int title=0;title<2;++title){
-                wchar_t wide[512]{};MultiByteToWideChar(CP_UTF8,0,title?HelpTitle(id):HelpText(id),-1,wide,512);
+                const auto wide=framevr::WideText(title?HelpTitle(id):HelpText(id));
                 SelectObject(dc,title?bold:normal);RECT bounds{0,0,HelpCard.w-48,0};
-                DrawTextW(dc,wide,-1,&bounds,DT_CALCRECT|DT_WORDBREAK|DT_NOPREFIX);
+                DrawTextW(dc,wide.c_str(),-1,&bounds,DT_CALCRECT|DT_WORDBREAK|DT_NOPREFIX);
                 if(bounds.bottom>(title?92:HelpCard.h-152)||bounds.right>HelpCard.w-48){std::fprintf(stderr,"Clipped help: %s\n",HelpTitle(id));return 6;}
             }
             // Every choice's name on one line, and its text under the general help.
             for(int c=0;c<HelpChoices(id);++c) {
                 const auto choice=HelpChoice(id,float(c));
                 const auto measure=[&](const char* value,HFONT font){
-                    wchar_t wide[512]{};MultiByteToWideChar(CP_UTF8,0,value,-1,wide,512);
+                    const auto wide=framevr::WideText(value);
                     SelectObject(dc,font);RECT bounds{0,0,HelpCard.w-48,0};
-                    DrawTextW(dc,wide,-1,&bounds,DT_CALCRECT|DT_WORDBREAK|DT_NOPREFIX);return bounds;
+                    DrawTextW(dc,wide.c_str(),-1,&bounds,DT_CALCRECT|DT_WORDBREAK|DT_NOPREFIX);return bounds;
                 };
                 const auto general=measure(HelpText(id),normal),name=measure(choice.name,bold),text=measure(choice.text,normal);
                 if(name.bottom>HelpChoiceNameHeight||general.bottom+HelpChoiceGap+HelpChoiceNameHeight+text.bottom>HelpCard.h-152||text.right>HelpCard.w-48){
@@ -110,8 +115,12 @@ int main(int argc,char** argv){
         const PerformanceReadout widest{true,false,999,99.9f,99.9f,99.9f,99.9f,99.9f};
         const auto most=ParseGameVideo(R"({"Shadow Quality": 44, "Character Detail": 55, "Light Quality": 44, "Ambient Occlusion Quality": 44,)"
                                        R"( "Atmospherics Quality": 44, "Resolution Scale": 200, "NVIDIA DLSS": 1})");
-        const bool ok=fits(PerformanceLine(widest))&&fits(PerformanceVerdict(widest))&&fits(PerformanceLine({}))&&fits(GameVideoLine(most))&&
-                      fits(GameVideoUnsaved)&&fits(DepthRestartNote);
+        bool ok=fits(PerformanceLine(widest))&&fits(PerformanceVerdict(widest))&&fits(PerformanceLine({}))&&fits(GameVideoLine(most))&&
+                      fits(GameVideoUnsaved)&&fits(FrameGenPerformanceNote[0])&&fits(FrameGenPerformanceNote[1]);
+        for(int state=0;state<=int(framevr::framegen::State::NeedsBothEyes);++state){   // frame generation's status, its widest backend
+            framevr::framegen::Readout frameGen;frameGen.state=framevr::framegen::State(state);frameGen.backend=1;frameGen.preset=1;frameGen.scale=2;
+            frameGen.errors=1;frameGen.lastError=-1;ok=fits(framevr::framegen::Line(frameGen))&&ok;
+        }
         SelectObject(dc,old);DeleteObject(normal);DeleteDC(dc);
         if(!ok)return 22;
         std::puts("Perf page lines fit at their widest");return 0;
@@ -141,17 +150,20 @@ int main(int argc,char** argv){
     GameVideo game=argc>3&&std::strcmp(argv[3],"--game-video")==0?GameVideo{true,true}:GameVideo{};
     const bool monoAudio=argc>3&&std::strcmp(argv[3],"--mono-audio")==0;   // the title row's Windows Mono audio warning
     // --performance: the Perf page with a second of frames over the headset's
-    // frame, the game's options as its Settings.json has them, and a ReShade
-    // depth change waiting for a restart.
-    const bool sample=argc>3&&std::strcmp(argv[3],"--performance")==0;
-    PerformanceReadout performance;
+    // frame and the game's options as its Settings.json has them (By turns, so
+    // frame generation waits for Both eyes). --performance-framegen: the same
+    // with frame generation active, its note in place of the numbers.
+    const bool generating=argc>3&&std::strcmp(argv[3],"--performance-framegen")==0;
+    const bool sample=generating||argc>3&&std::strcmp(argv[3],"--performance")==0;
+    PerformanceReadout performance;framevr::framegen::Readout frameGen;
     if(sample){
+        frameGen={generating?framevr::framegen::State::Active:framevr::framegen::State::NeedsBothEyes,1,1,2,1,1};
         performance={true,true,52,11.1f,1.0f,7.0f,9.4f,1.5f};
         game=ParseGameVideo(R"({"Shadow Quality": 4, "Character Detail": 5, "Ambient Occlusion Quality": 4, "Atmospherics Quality": 4,)"
                             R"( "Light Quality": 2, "Texture Quality": 4, "Resolution Scale": 100, "NVIDIA DLSS": 0, "Anti Aliasing": 1, "VSync": 0})");
     }
     const auto pixels=Paint(m,{},page==int(Page::Performance)?"VR source: 2560 x 2560 per eye":"Foveated shading available. Eye-tracking samples are active.",page==TabCount?&body:nullptr,
-        framevr::controllers::Labels{{framevr::controllers::Layout::Touch,framevr::controllers::Layout::Touch}},help,game,monoAudio,performance,sample);
+        framevr::controllers::Labels{{framevr::controllers::Layout::Touch,framevr::controllers::Layout::Touch}},help,game,monoAudio,performance,frameGen);
     if(pixels.size()!=AtlasWidth*Height*4)return 1;
     FILE* file=std::fopen(argc>1?argv[1]:"vr-settings-preview.ppm","wb");if(!file)return 2;
     const char* name=argc>1?argv[1]:"";

@@ -13,7 +13,26 @@ namespace framevr::bowflight {
 using math::Vec;
 inline constexpr float ArrowLength=.75f; // same tail/tip as the tracked draw guide
 inline constexpr float JavelinLength=1.5f,JavelinGrip=.6f;
+inline constexpr float FloorClearance=.015f; // a flight stops this far above its launch floor
+// Javelin: any thrown weapon - javelins, throwing knives and axes (#221). It
+// flies as the game's own missile for the weapon (Shot::missile, once the
+// native Throw names it; until then the javelin's).
 enum class Kind : uint32_t { Arrow=0,Javelin=1,Spell=2,Crossbow=31 };
+// The thrown weapons' missiles (weapons.txt missiletype) and their HD models
+// (data/hd/missiles/missiles.json): the model's axis (+Z, or +Y for the axe),
+// its authored tail and tip on it, the length it flies at and how far from
+// its tail the hand holds it (metres), and an axe's end-over-end tumble
+// (radians per metre flown). Measured from the models, 2026-10-22.
+struct Thrown {uint32_t missile;bool alongY;float tail,tip,length,grip,spin;};
+inline constexpr Thrown ThrownWeapons[]={
+    {1,false,-1.f,1.f,1.5f,.6f,0},          // javelin.model: Javelin, Short Spear, War and Hyperion Javelin
+    {371,false,-.873f,1.f,1.4f,.55f,0},     // pilum.model: Pilum, Throwing Spear, the Amazon javelins
+    {37,false,-.435f,1.f,1.1f,.45f,0},      // glaive.model: Glaive and the late spears
+    {36,false,-.53f,1.f,.3f,.08f,0},        // missile_dagger (throwing_knife.model): knives fly point first
+    {35,true,-.253f,1.f,.45f,.08f,1.6f},    // missile_hand_axe (throwing_axe.model): handle to head along +Y, blade +Z
+};
+inline bool ThrownMissile(uint32_t id) {for(const auto& t:ThrownWeapons)if(t.missile==id)return true;return false;}
+inline const Thrown& ThrownFor(uint32_t id) {for(const auto& t:ThrownWeapons)if(t.missile==id)return t;return ThrownWeapons[0];}
 inline float Length(Vec v) { return std::sqrt(math::Dot(v,v)); }
 inline bool Finite(Vec v) { return std::isfinite(v.x)&&std::isfinite(v.y)&&std::isfinite(v.z); }
 struct Shot {
@@ -28,13 +47,40 @@ struct Shot {
     int aimAssist=0;
     bool planar=true;
     float boltLength=0; // authored held-bolt size, metres
+    bool gripped=false; // a thrown weapon's origin moved from the hand to its tail
+    uint32_t lockTarget=0; // a spell locked on a monster: its server unit id, else 0
 };
-inline float ProjectileLength(const Shot& s) {return s.kind==Kind::Spell?0:s.kind==Kind::Crossbow?s.boltLength:s.kind==Kind::Javelin?JavelinLength:ArrowLength;}
+// A thrown weapon's missile: the one the native Throw named, else the javelin.
+inline uint32_t ThrownId(const Shot& s) {return s.missile>0&&ThrownMissile(uint32_t(s.missile))?uint32_t(s.missile):1u;}
+inline float ProjectileLength(const Shot& s) {return s.kind==Kind::Spell?0:s.kind==Kind::Crossbow?s.boltLength:s.kind==Kind::Javelin?ThrownFor(ThrownId(s)).length:ArrowLength;}
+// A release made at the throwing hand starts at the weapon's tail: its grip,
+// for the model it flies as (missile), behind the hand. Once.
+inline void Grip(Shot& s,uint32_t missile) {
+    if(s.kind!=Kind::Javelin||s.gripped)return;
+    s.origin=s.origin-s.direction*ThrownFor(missile).grip;s.gripped=true;
+}
+// Double Throw (#224): a throw that carries the skill but flies the hand's own
+// weapon, the missile its native function names, as a basic throw does.
+inline bool DoubleThrow(const Shot& s){return s.kind==Kind::Javelin&&s.skill==weaponskills::DoubleThrow;}
+// The native Throw (or Double Throw) named the thrown weapon's missile; a
+// javelin skill names its own missile up front.
+inline bool ResolveThrown(Shot& s,uint32_t missile) {
+    if(s.kind!=Kind::Javelin||(s.skill>=0&&!DoubleThrow(s))||s.missile>0||!ThrownMissile(missile))return false;
+    s.missile=int(missile);Grip(s,missile);return true;
+}
 // A quiver arrow: a physical bow release that carries a single-missile arrow
 // skill. It keeps the arrow's draw, length and flight; the skill supplies the
 // native missile, its costs, damage and hit effects.
 inline bool SkillArrow(const Shot& s){return s.kind==Kind::Arrow&&s.skill>=0;}
-inline uint32_t MissileId(const Shot& s){return s.kind==Kind::Spell||SkillArrow(s)?uint32_t(s.missile):uint32_t(s.kind);}
+// A thrown weapon that carries a javelin skill (#224): the skill's own missile.
+inline bool SkillJavelin(const Shot& s){return s.kind==Kind::Javelin&&s.skill>=0&&!DoubleThrow(s);}
+// A physical release carrying a skill: a quiver arrow or a javelin skill.
+inline bool SkillRelease(const Shot& s){return SkillArrow(s)||SkillJavelin(s);}
+// Lightning Bolt and Lightning Fury have no mesh (lightning_javelin
+// particles): like spells they follow their root. Poison and Plague Javelin
+// fly the javelin model, as a basic throw does.
+inline bool ParticleJavelin(int missile){return missile==205||missile==206;}
+inline uint32_t MissileId(const Shot& s){return s.kind==Kind::Spell||SkillRelease(s)?uint32_t(s.missile):s.kind==Kind::Javelin?ThrownId(s):uint32_t(s.kind);}
 inline bool BasicMissile(uint32_t id){return id<=1||id==31;}
 // What the client allocator returned for one of our visual requests. Only the
 // requested missile is kept; any other live missile unit we created is still a
@@ -53,8 +99,24 @@ inline Vec GridPoint(const Shot& shot,Vec renderMetres) {
 inline Vec RenderGround(const Shot& shot,Vec gridWorld) {
     return coordinates::RenderGround(gridWorld*(1/shot.unitsPerMetre),shot.player.y);
 }
+// A spell locked on a monster flies at the middle of its body capsule (floor
+// to its stats height), not 1 m above its floor, which passes over monsters
+// shorter than about 1 m. No body found: the old point, 1 m above the floor.
+inline constexpr float LockFallbackHeight=1.f;
+inline Vec LockAimPoint(Vec ground,bool body,Vec bottom,Vec top) {
+    return body?(bottom+top)*.5f:ground+Vec{0,LockFallbackHeight,0};
+}
+// The lock's direction from origin to point, flat for planar spells; false
+// (keep the direction) within 0.3 m, as the lock itself does.
+inline bool LockAimDirection(Vec origin,Vec point,bool planar,Vec& direction) {
+    Vec to=point-origin;
+    if(planar)to.y=0;
+    const float len=Length(to);
+    if(!(len>.3f))return false;
+    direction=to*(1/len);return true;
+}
 inline bool Valid(const Shot& s) {
-    const bool kind=(BasicMissile(uint32_t(s.kind))&&(!SkillArrow(s)||(weaponskills::QuiverSkill(s.skill)&&weaponskills::QuiverMissile(s.missile))))||
+    const bool kind=(BasicMissile(uint32_t(s.kind))&&(!SkillRelease(s)||weaponskills::Loadable(s.skill,s.missile,s.kind==Kind::Javelin)))||
         (s.kind==Kind::Spell&&spellcast::Supported(s.skill)&&s.hand>=0&&s.hand<2&&s.slot>=0&&s.slot<10);
     return kind&&s.session&&s.sequence&&Finite(s.origin)&&Finite(s.direction)&&Finite(s.player)&&
         std::isfinite(s.unitsPerMetre)&&s.unitsPerMetre>=1&&s.unitsPerMetre<=12&&
@@ -266,15 +328,37 @@ struct PreviewRenderPose {
         shot=pose;shown=visible;return true;
     }
 };
+// A thrown weapon in flight (Thrown): its model's axis along the flight,
+// scaled to the length it flies at, its tail on the flight's tail. An axe
+// tumbles end over end about its middle as it flies.
+inline void ThrownMatrix(const Flight& f,uint64_t now,float out[16]) {
+    const auto& t=ThrownFor(ThrownId(f.shot));
+    const Vec forward=f.shot.direction;
+    const Vec guide=std::fabs(forward.y)<.95f?Vec{0,1,0}:Vec{1,0,0};
+    const Vec right=math::Normalized(math::Cross(guide,forward)),up=math::Cross(forward,right);
+    const float upm=f.shot.unitsPerMetre,scale=t.length*upm/(t.tip-t.tail);
+    const Vec tail=f.TailAt(now);
+    const float angle=t.spin*Length(tail-f.shot.origin),c=std::cos(angle),s=std::sin(angle);
+    const Vec along=forward*c-up*s,across=up*c+forward*s;   // the head dips forward first
+    // Model axes: +Z along the flight (x right, y across), or for an axe +Y
+    // along it (x left, z across: its blade up at release). Both right-handed.
+    const Vec x=t.alongY?right*-1.f:right,y=t.alongY?along:across,z=t.alongY?across:along;
+    const Vec origin=(tail+forward*(t.length*.5f))*upm-along*((t.tail+t.tip)*.5f*scale);
+    out[0]=x.x*scale;out[1]=x.y*scale;out[2]=x.z*scale;out[3]=0;
+    out[4]=y.x*scale;out[5]=y.y*scale;out[6]=y.z*scale;out[7]=0;
+    out[8]=z.x*scale;out[9]=z.y*scale;out[10]=z.z*scale;out[11]=0;
+    out[12]=origin.x;out[13]=origin.y;out[14]=origin.z;out[15]=1;
+}
 // HD projectile models point along local +Z: arrow tail at -.98391676,
 // javelin tail at -1, and both tips at +1 (confirmed in the headset).
 // Its entity's stock 45-degree yaw/release-bone offset is replaced, not added.
 inline void ArrowMatrix(const Flight& f,uint64_t now,float out[16]) {
+    if(f.shot.kind==Kind::Javelin){ThrownMatrix(f,now,out);return;}
     const Vec forward=f.shot.direction;
     const Vec guide=std::fabs(forward.y)<.95f?Vec{0,1,0}:Vec{1,0,0};
     const Vec right=math::Normalized(math::Cross(guide,forward)),up=math::Cross(forward,right);
     const bool bolt=f.shot.kind==Kind::Crossbow;
-    const float modelTail=bolt?-.69698172f:f.shot.kind==Kind::Javelin?-1.f:-.98391676f;
+    const float modelTail=bolt?-.69698172f:-.98391676f;
     const float modelLength=(bolt?.69698172f:1.f)-modelTail;
     const float scale=ProjectileLength(f.shot)*f.shot.unitsPerMetre/modelLength;
     const Vec origin=f.TailAt(now)*f.shot.unitsPerMetre-forward*(modelTail*scale);

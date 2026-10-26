@@ -1,4 +1,5 @@
 """Packaging fixtures: reject unverified files before writing a payload."""
+import ast
 import hashlib
 import json
 from pathlib import Path
@@ -102,6 +103,33 @@ class StagingTests(unittest.TestCase):
             manifest = self.stage(root, {name: b'local archive preparation fixture'})
             self.assertIn(name, manifest['sha256'])
             self.assertEqual((root/'staged'/name).read_bytes(), b'local archive preparation fixture')
+
+    def test_every_module_setup_imports_is_packaged_and_staged(self):
+        # install.py imported prepare_props at its top without the package or
+        # the staging allowlist listing it: Setup would have stopped at once
+        # (found while cutting v0.3.25). Follow Setup's local imports.
+        repository = Path(__file__).resolve().parent.parent
+        steamvr = repository / 'steamvr'
+        package = (steamvr / 'package.py').read_text(encoding='utf-8')
+        entry = ['install.py', 'setup_native.py', 'setup_windows.py', 'launch_windows.py', 'uninstall_windows.py']
+        seen = set()
+        while entry:
+            name = entry.pop()
+            if name in seen:
+                continue
+            seen.add(name)
+            for node in ast.walk(ast.parse((steamvr / name).read_text(encoding='utf-8'))):
+                modules = ([alias.name for alias in node.names] if isinstance(node, ast.Import) else
+                           [node.module] if isinstance(node, ast.ImportFrom) and node.module and not node.level else [])
+                for module in modules:
+                    local = module.split('.')[0] + '.py'
+                    if (steamvr / local).is_file():
+                        entry.append(local)
+        self.assertIn('prepare_props.py', seen)
+        for name in sorted(seen):
+            with self.subTest(module=name):
+                self.assertIn(name, staging.SCRIPTS)
+                self.assertIn(f"'steamvr/{name}'", package)
 
     def test_rejects_changed_manifest_payload_and_unmanifested_files(self):
         with tempfile.TemporaryDirectory() as directory:

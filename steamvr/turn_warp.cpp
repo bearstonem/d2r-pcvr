@@ -1,6 +1,7 @@
 #include "turn_warp.h"
 #include "dxgi_views.h"
 #include <d3dcompiler.h>
+#include <algorithm>
 #include <climits>
 #include <cstdio>
 #include <cstring>
@@ -11,11 +12,35 @@
 namespace framevr {
 using Microsoft::WRL::ComPtr;
 namespace {
+// The pictures turned or moved land between texels nearly always. Read
+// bilinear, a half-texel step averages two, and fine detail and text lost
+// contrast every other frame in each eye: softer than Both eyes (the owner,
+// 2026-10-23). Catmull-Rom (TurnWarp::sharp) keeps more of it: five bilinear
+// taps (the four corner ones left out), kept within the four nearest texels,
+// so no ring or halo past them. On a texel's centre it is that texel.
+#define TURN_SHARP R"(
+float4 Sharp(Texture2D<float4> t,SamplerState s,float2 uv) {
+    float w,h;t.GetDimensions(w,h);
+    const float2 size=float2(w,h),at=uv*size,first=floor(at-.5)+.5,f=at-first;
+    const float2 w0=f*(-.5+f*(1-.5*f)),w1=1+f*f*(-2.5+1.5*f),w2=f*(.5+f*(2-1.5*f)),w3=f*f*(-.5+.5*f);
+    const float2 w12=w1+w2,mid=(first+w2/w12)/size,lo=(first-1)/size,hi=(first+2)/size;
+    const float4 c=(t.SampleLevel(s,float2(mid.x,lo.y),0)*(w12.x*w0.y)+t.SampleLevel(s,float2(lo.x,mid.y),0)*(w0.x*w12.y)
+                   +t.SampleLevel(s,mid,0)*(w12.x*w12.y)+t.SampleLevel(s,float2(hi.x,mid.y),0)*(w3.x*w12.y)
+                   +t.SampleLevel(s,float2(mid.x,hi.y),0)*(w12.x*w3.y))
+                  /(w12.x*w0.y+w0.x*w12.y+w12.x*w12.y+w3.x*w12.y+w12.x*w3.y);
+    const int2 last=int2(size)-1,a=clamp(int2(first-.5),0,last),b=clamp(int2(first+.5),0,last);
+    const float4 p=t.Load(int3(a,0)),q=t.Load(int3(b.x,a.y,0)),r=t.Load(int3(a.x,b.y,0)),u=t.Load(int3(b,0));
+    return clamp(c,min(min(p,q),min(r,u)),max(max(p,q),max(r,u)));
+}
+)"
 constexpr char Shader[]=R"(
 Texture2D<float4> drawn : register(t0);
 SamplerState edge : register(s0);
-// TurnHomography's rows: this frame's image coordinates to the drawn image's
-cbuffer Turn : register(b0) {float4 row0;float4 row1;float4 row2;};
+// TurnHomography's rows: this frame's image coordinates to the drawn image's;
+// filter.x: 1 Catmull-Rom (Sharp), 0 bilinear
+cbuffer Turn : register(b0) {float4 row0;float4 row1;float4 row2;float4 filter;};
+)" TURN_SHARP R"(
+float4 Read(float2 uv){return filter.x>0?Sharp(drawn,edge,uv):drawn.SampleLevel(edge,uv,0);}
 struct Pixel {float4 position:SV_Position;float2 uv:TEXCOORD0;};
 Pixel VS(uint id:SV_VertexID) {
     Pixel p;p.uv=float2(id==1?2:0,id==2?2:0);
@@ -25,7 +50,7 @@ float4 PS(Pixel p):SV_Target {
     const float3 at=float3(p.uv,1);
     const float3 h=float3(dot(row0.xyz,at),dot(row1.xyz,at),dot(row2.xyz,at));
     if(h.z<=1e-6)return float4(0,0,0,1);   // behind the drawn eye: nothing it saw
-    return drawn.SampleLevel(edge,h.xy/h.z,0);   // past its edge: the edge drawn out
+    return Read(h.xy/h.z);   // past its edge: the edge drawn out
 }
 // The game's interface laid over (Interface): blended as dest * a + rgb.
 float4 Layer(Pixel p):SV_Target {
@@ -33,10 +58,11 @@ float4 Layer(Pixel p):SV_Target {
     const float3 h=float3(dot(row0.xyz,at),dot(row1.xyz,at),dot(row2.xyz,at));
     const float2 uv=h.xy/max(h.z,1e-6);
     if(h.z<=1e-6||any(uv<0)||any(uv>1))return float4(0,0,0,1);   // none of the layer here: the picture as it is
-    const float4 l=drawn.SampleLevel(edge,uv,0);
+    const float4 l=Read(uv);
     return float4(l.rgb,saturate(l.a));
 }
 )";
+constexpr UINT TurnConstants=16;
 // The grid with the scene's depth (TurnDepth).
 constexpr char DepthShader[]=R"(
 Texture2D<float4> drawn : register(t0);
@@ -53,7 +79,7 @@ cbuffer Move : register(b0) {
     float4 drawnTan;   // tangents of the drawn eye's FOV: left, right, down, up
     float4 nowTan;     // this frame's
     float4 depthInfo;  // near plane, the depth's drawn part x, y
-    uint4 grid;        // cells across, down
+    uint4 grid;        // cells across, down; z: 1 Catmull-Rom (Sharp), 0 bilinear
     float4 carry0;float4 carry1;float4 carry2;   // the carried's rows (TurnDepth::carry)
     float4 reach;      // nearer than x: carried; farther than y: the world's; z: the drawn eye's edge scale
     float4 keep;       // x: parallax pixels a step in the depth buffer, 0 off; y: within how many the surface is the same;
@@ -61,6 +87,7 @@ cbuffer Move : register(b0) {
     float4 nearInfo;   // x, y: the picture's coordinates to the near blocks; z, w: this frame's pixels to them
     float4 effects;    // x, y: the effects' blocks across, down; z: from what level they count, 0 off
 };
+)" TURN_SHARP R"(
 // split: 0 the whole cell; a cell across an edge as two layers, each keeping
 // its own pixels: > 0 the nearer, those nearer than it; < 0 the rest.
 struct Pixel {float4 position:SV_Position;float2 uv:TEXCOORD0;nointerpolation float split:TEXCOORD1;};
@@ -72,6 +99,15 @@ static const float EdgePixels=2;   // TurnEdgePixels
 float Nearest(float2 uv) {
     const float4 d4=drawnDepth.GatherRed(edge,uv*depthInfo.yz);
     return max(max(max(d4.x,d4.y),max(d4.z,d4.w)),1e-6);
+}
+// The texel a point of the picture lies in. A cell across an edge sorts each
+// pixel into its two layers by this one texel: by the four round it (Nearest)
+// each layer, a fraction of a texel apart, could sort a texel out of both, and
+// it was left a hole - the eye's own older picture through it, a stripe off
+// a roof's ridge (turn captures, 2026-10-25).
+float Texel(float2 uv) {
+    float w,h;drawnDepth.GetDimensions(w,h);
+    return drawnDepth.Load(int3(min(int2(uv*depthInfo.yz*float2(w,h)),int2(w,h)-1),0));
 }
 // The farthest and the nearest of them.
 float2 Range(float2 uv) {
@@ -123,14 +159,14 @@ bool Effect(Pixel p) {
     return max(source,target)>=effects.z;
 }
 float4 PS(Pixel p):SV_Target {
-    if(p.split!=0&&(Nearest(p.uv)>abs(p.split))!=(p.split>0))discard;   // the other layer's pixel
+    if(p.split!=0&&(Texel(p.uv)>abs(p.split))!=(p.split>0))discard;   // the other layer's pixel
     if(keep.x>0) {   // where this eye's own picture shows the same surface, it stays (round near things: keep.z; effects: effects.z)
         const int3 at=int3(p.position.xy,0);
         const float there=ownDepth.Load(at);
         const bool where=keep.z<=0&&effects.z<=0||keep.z>0&&NearThing(p,there)||effects.z>0&&Effect(p);
         if(there>0&&abs(p.position.z-there)*keep.x<=keep.y&&where)return own.Load(at);
     }
-    return drawn.SampleLevel(edge,p.uv,0);
+    return grid.z?Sharp(drawn,edge,p.uv):drawn.SampleLevel(edge,p.uv,0);
 }
 )";
 constexpr UINT DepthConstants=56;
@@ -171,6 +207,69 @@ float Spread(float4 position:SV_Position):SV_Target {
 }
 )";
 constexpr UINT NearConstants=12;
+// TurnWarp::Fill: beside anything near, the eye not drawn sees a strip the
+// drawn eye could not (its grid reached nothing there), and keeps its own
+// picture from a frame back there. A monster that stood there a frame ago
+// and has moved since was left in it: a ghost beside it in one eye (the
+// owner, 2026-10-23). Such a strip is always of what is behind - the drawn
+// eye's view of it was blocked by something nearer - so where this eye's own
+// picture there is nearer than the farther end of the strip along the row
+// (the drawn eye's), it is something since gone: the picture beside that
+// end instead (filled from what is behind, as depth-image-based rendering
+// does). Where it shows what is behind, its own real texture stays. The
+// depth shader's root signature: the picture at t0, the drawn eye's grid's
+// depth at t1, this eye's own grid's at t2.
+constexpr char HoleShader[]=R"(
+Texture2D<float4> picture : register(t0);   // the eye not drawn as the grids left it (a copy)
+Texture2D<float> covered : register(t1);    // the drawn eye's grid's depth: 0 where it reached nothing
+Texture2D<float> ownDepth : register(t2);   // this eye's own grid's: 0 where it drew nothing
+// x: how far along the row to look either side, pixels; y: parallax pixels a
+// step in depth; z: within how many it shows what is behind
+cbuffer Holes : register(b0) {float4 holes;};
+float4 VS(uint id:SV_VertexID):SV_Position {
+    const float2 uv=float2(id==1?2:0,id==2?2:0);
+    return float4(uv.x*2-1,1-uv.y*2,0,1);
+}
+float4 PS(float4 position:SV_Position):SV_Target {
+    const int2 at=int2(position.xy);
+    if(covered.Load(int3(at,0))>0)discard;   // the drawn eye's picture: as it is
+    const float own=ownDepth.Load(int3(at,0));
+    if(own<=0)discard;   // nothing of its own with a depth here: as the turn left it
+    uint width,height;covered.GetDimensions(width,height);
+    float left=0,right=0;int2 l=at,r=at;   // the strip's ends: the drawn eye's nearest pixels either side
+    for(int k=1;k<=int(holes.x)&&(left<=0||right<=0);++k) {
+        if(left<=0&&at.x-k>=0){const float d=covered.Load(int3(at.x-k,at.y,0));if(d>0){left=d;l=int2(at.x-k,at.y);}}
+        if(right<=0&&at.x+k<int(width)){const float d=covered.Load(int3(at.x+k,at.y,0));if(d>0){right=d;r=int2(at.x+k,at.y);}}
+    }
+    if(left<=0&&right<=0)discard;
+    const bool fromLeft=right<=0||left>0&&left<=right;   // the farther end (reverse-Z: the smaller)
+    if((own-(fromLeft?left:right))*holes.y<=holes.z)discard;   // its own shows what is behind: it stays
+    return picture.Load(int3(fromLeft?l:r,0));
+}
+)";
+constexpr float HoleReach=128;   // how far along the row a strip's ends are looked for: a 4096-wide eye's pixels
+// TurnWarp::Rims: a depth, the void within TurnRimPixels of something taken
+// as the nearest depth there (TurnRimPixels). Through the turn's root
+// signature: the depth at t0.
+constexpr char RimShader[]=R"(
+Texture2D<float> input : register(t0);   // reverse-Z: nearer is larger, 0 the void
+static const int Rim=2;   // TurnRimPixels
+float4 VS(uint id:SV_VertexID):SV_Position {
+    const float2 uv=float2(id==1?2:0,id==2?2:0);
+    return float4(uv.x*2-1,1-uv.y*2,0,1);
+}
+float PS(float4 position:SV_Position):SV_Target {
+    const int2 at=int2(position.xy);
+    const float d=input.Load(int3(at,0));
+    if(d>0)return d;   // anything with depth keeps its own
+    uint width,height;input.GetDimensions(width,height);
+    const int2 last=int2(width,height)-1;
+    float nearest=0;
+    [unroll] for(int y=-Rim;y<=Rim;++y)[unroll] for(int x=-Rim;x<=Rim;++x)
+        if(x*x+y*y<=Rim*Rim+1)nearest=max(nearest,input.Load(int3(clamp(at+int2(x,y),0,last),0)));
+    return nearest;
+}
+)";
 // TurnDepth::keepEffects: the strongest channel of one of the game's effects
 // targets over each block, blended as the larger into the block (Effects),
 // then spread as the near blocks are (NearShader's Spread).
@@ -197,8 +296,10 @@ constexpr float Ahead=1e-3f;   // the depth shader's: a grid point's depth-buffe
 // the drawn eye's and this eye's near blocks, then effects blocks), then the
 // near passes' block texture between; after both slots, two an eye for the
 // interface (Interface's `at`), then four an eye for Effects (its layer's
-// two targets, the two between).
-constexpr UINT GridDescriptors=8,SlotDescriptors=2*GridDescriptors+1,InterfaceDescriptors=2*SlotDescriptors,EffectsDescriptors=InterfaceDescriptors+4;
+// two targets, the two between), then a grid's table an eye for the strips
+// (Fill), then two an eye for the rims (this eye's depth, the drawn eye's).
+constexpr UINT GridDescriptors=8,SlotDescriptors=2*GridDescriptors+1,InterfaceDescriptors=2*SlotDescriptors,EffectsDescriptors=InterfaceDescriptors+4,
+               HoleDescriptors=EffectsDescriptors+8,RimDescriptors=HoleDescriptors+2*GridDescriptors,HeapDescriptors=RimDescriptors+4;
 // The shaders' bytecode, compiled once a process: the compiles were about 106
 // of the 112 ms Initialize took on the render thread at every new session
 // (RTX 5090 / Ryzen 9 5950X, 2026-10-20). Copied out of the compiler's blobs,
@@ -206,8 +307,8 @@ constexpr UINT GridDescriptors=8,SlotDescriptors=2*GridDescriptors+1,InterfaceDe
 // failed for the process; its pass is then unavailable as before.
 struct Compiled {
     bool compiler=false;
-    std::vector<uint8_t> vs,ps,layer,depthVs,depthPs,nearVs,nearReduce,nearSpread,effectsReduce;
-    std::string errors,depthErrors,nearErrors,effectsErrors;   // the first failure's messages of each group
+    std::vector<uint8_t> vs,ps,layer,depthVs,depthPs,nearVs,nearReduce,nearSpread,effectsReduce,holeVs,holePs,rimVs,rimPs;
+    std::string errors,depthErrors,nearErrors,effectsErrors,holeErrors,rimErrors;   // the first failure's messages of each group
 };
 const Compiled& Shaders() {
     static std::once_flag once;static Compiled c;
@@ -232,6 +333,10 @@ const Compiled& Shaders() {
             build(NearShader,sizeof(NearShader)-1,"turn-near","Reduce","ps_5_0",c.nearReduce,&c.nearErrors);
             build(NearShader,sizeof(NearShader)-1,"turn-near","Spread","ps_5_0",c.nearSpread,&c.nearErrors);
             build(EffectsShader,sizeof(EffectsShader)-1,"turn-effects","Reduce","ps_5_0",c.effectsReduce,&c.effectsErrors);
+            build(HoleShader,sizeof(HoleShader)-1,"turn-holes","VS","vs_5_0",c.holeVs,&c.holeErrors);
+            build(HoleShader,sizeof(HoleShader)-1,"turn-holes","PS","ps_5_0",c.holePs,&c.holeErrors);
+            build(RimShader,sizeof(RimShader)-1,"turn-rims","VS","vs_5_0",c.rimVs,&c.rimErrors);
+            build(RimShader,sizeof(RimShader)-1,"turn-rims","PS","ps_5_0",c.rimPs,&c.rimErrors);
         }catch(...) {}   // out of memory: what did not finish stays unavailable
         if(module)FreeLibrary(module);
     });
@@ -253,7 +358,7 @@ bool TurnWarp::Initialize(ID3D12Device* device,DXGI_FORMAT targetFormat,void (*l
     parameters[0].ParameterType=D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
     parameters[0].DescriptorTable={1,&range};parameters[0].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
     parameters[1].ParameterType=D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-    parameters[1].Constants={0,0,12};parameters[1].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
+    parameters[1].Constants={0,0,TurnConstants};parameters[1].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
     D3D12_ROOT_SIGNATURE_DESC desc{};desc.NumParameters=2;desc.pParameters=parameters;
     D3D12_STATIC_SAMPLER_DESC sampler{};sampler.Filter=D3D12_FILTER_MIN_MAG_LINEAR_MIP_POINT;
     sampler.AddressU=sampler.AddressV=sampler.AddressW=D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
@@ -281,7 +386,7 @@ bool TurnWarp::Initialize(ID3D12Device* device,DXGI_FORMAT targetFormat,void (*l
         if(FAILED(device->CreateGraphicsPipelineState(&layer,IID_PPV_ARGS(&layerPipeline))))layerPipeline.Reset();
     }
     if(!layerPipeline&&log)log("Frame OpenXR: by turns - laying the game's interface over each eye unavailable; it stays in the picture");
-    D3D12_DESCRIPTOR_HEAP_DESC heap{};heap.Type=D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;heap.NumDescriptors=EffectsDescriptors+8;heap.Flags=D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+    D3D12_DESCRIPTOR_HEAP_DESC heap{};heap.Type=D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;heap.NumDescriptors=HeapDescriptors;heap.Flags=D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     if(FAILED(device->CreateDescriptorHeap(&heap,IID_PPV_ARGS(&sourceHeap))))return fail("no descriptor heap");
     heap.Type=D3D12_DESCRIPTOR_HEAP_TYPE_RTV;heap.NumDescriptors=1;heap.Flags=D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
     if(FAILED(device->CreateDescriptorHeap(&heap,IID_PPV_ARGS(&targetHeap))))return fail("no target heap");
@@ -313,6 +418,28 @@ bool TurnWarp::Initialize(ID3D12Device* device,DXGI_FORMAT targetFormat,void (*l
     heap.Type=D3D12_DESCRIPTOR_HEAP_TYPE_DSV;heap.NumDescriptors=2;   // this eye's grid's, the drawn eye's
     if(FAILED(device->CreateDescriptorHeap(&heap,IID_PPV_ARGS(&depthHeap))))return depthFail("no depth heap");
     if(log)log("Frame OpenXR: by turns - the eye not drawn can be moved with the scene depth");
+    // The strips' pass is optional: without it they keep this eye's own picture as before.
+    if(!shaders.holeVs.empty()&&!shaders.holePs.empty()) {
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC holes=state;holes.VS=Code(shaders.holeVs);holes.PS=Code(shaders.holePs);
+        holes.DepthStencilState={};holes.DSVFormat=DXGI_FORMAT_UNKNOWN;
+        if(FAILED(device->CreateGraphicsPipelineState(&holes,IID_PPV_ARGS(&holePipeline))))holePipeline.Reset();
+    }
+    else if(log&&!shaders.holeErrors.empty())log(shaders.holeErrors.c_str());
+    if(!holePipeline&&log)log("Frame OpenXR: by turns - filling the strips beside near things unavailable; they keep the eye's own picture");
+    // The rims' pass is optional: without it they stay with the void.
+    if(!shaders.rimVs.empty()&&!shaders.rimPs.empty()) {
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC rim{};
+        rim.pRootSignature=root.Get();rim.VS=Code(shaders.rimVs);rim.PS=Code(shaders.rimPs);
+        rim.BlendState.RenderTarget[0].RenderTargetWriteMask=D3D12_COLOR_WRITE_ENABLE_ALL;
+        rim.SampleMask=UINT_MAX;rim.RasterizerState=state.RasterizerState;
+        rim.PrimitiveTopologyType=D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+        rim.NumRenderTargets=1;rim.RTVFormats[0]=DXGI_FORMAT_R32_FLOAT;rim.SampleDesc.Count=1;
+        D3D12_DESCRIPTOR_HEAP_DESC targets{};targets.Type=D3D12_DESCRIPTOR_HEAP_TYPE_RTV;targets.NumDescriptors=UINT(rims.size());
+        if(FAILED(device->CreateGraphicsPipelineState(&rim,IID_PPV_ARGS(&rimPipeline)))||
+           FAILED(device->CreateDescriptorHeap(&targets,IID_PPV_ARGS(&rimTargets)))){rimPipeline.Reset();rimTargets.Reset();}
+    }
+    else if(log&&!shaders.rimErrors.empty())log(shaders.rimErrors.c_str());
+    if(!rimPipeline&&log)log("Frame OpenXR: by turns - moving the rims round things against the void with them unavailable; they stay with the void");
     // The near passes are optional: without them "near things only" keeps none.
     const auto nearFail=[&](const char* why){
         nearRoot.Reset();reducePipeline.Reset();spreadPipeline.Reset();nearTargets.Reset();
@@ -449,9 +576,10 @@ bool TurnWarp::Render(ID3D12Device* device,ID3D12GraphicsCommandList* list,ID3D1
     list->SetGraphicsRootSignature(root.Get());
     ID3D12DescriptorHeap* heaps[]={sourceHeap.Get()};list->SetDescriptorHeaps(1,heaps);
     list->SetGraphicsRootDescriptorTable(0,sourceGpu);
-    float rows[12]{};
+    float rows[TurnConstants]{};
     for(int r=0;r<3;++r)for(int c=0;c<3;++c)rows[r*4+c]=homography[r*3+c];
-    list->SetGraphicsRoot32BitConstants(1,12,rows,0);
+    rows[12]=sharp?1.f:0.f;
+    list->SetGraphicsRoot32BitConstants(1,TurnConstants,rows,0);
     list->OMSetRenderTargets(1,&rtvHandle,FALSE,nullptr);
     const D3D12_VIEWPORT viewport{0,0,float(t.Width),float(t.Height),0,1};const D3D12_RECT rect{0,0,LONG(t.Width),LONG(t.Height)};
     list->RSSetViewports(1,&viewport);list->RSSetScissorRects(1,&rect);
@@ -470,9 +598,8 @@ bool TurnWarp::Render(ID3D12Device* device,ID3D12GraphicsCommandList* list,ID3D1
         d.DepthOrArraySize=d.MipLevels=1;d.Format=DXGI_FORMAT_R32_TYPELESS;d.SampleDesc.Count=1;d.Flags=D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
         D3D12_CLEAR_VALUE clear{};clear.Format=DXGI_FORMAT_D32_FLOAT;clear.DepthStencil.Depth=0;
         D3D12_RESOURCE_DESC picture=d;picture.Format=format;picture.Flags=D3D12_RESOURCE_FLAG_NONE;
-        D3D12_RESOURCE_DESC unread=d;unread.Format=DXGI_FORMAT_D32_FLOAT;unread.Flags|=D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE;
         if(FAILED(device->CreateCommittedResource(&heapProps,D3D12_HEAP_FLAG_NONE,&d,D3D12_RESOURCE_STATE_DEPTH_WRITE,&clear,IID_PPV_ARGS(&depthTarget)))||
-           FAILED(device->CreateCommittedResource(&heapProps,D3D12_HEAP_FLAG_NONE,&unread,D3D12_RESOURCE_STATE_DEPTH_WRITE,&clear,IID_PPV_ARGS(&drawnDepthTarget)))||
+           FAILED(device->CreateCommittedResource(&heapProps,D3D12_HEAP_FLAG_NONE,&d,D3D12_RESOURCE_STATE_DEPTH_WRITE,&clear,IID_PPV_ARGS(&drawnDepthTarget)))||
            FAILED(device->CreateCommittedResource(&heapProps,D3D12_HEAP_FLAG_NONE,&picture,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,nullptr,IID_PPV_ARGS(&ownTurned)))) {
             depthTarget.Reset();drawnDepthTarget.Reset();ownTurned.Reset();return true;
         }
@@ -527,7 +654,7 @@ bool TurnWarp::Render(ID3D12Device* device,ID3D12GraphicsCommandList* list,ID3D1
         std::memcpy(values,d.move.data(),sizeof(float)*12);
         tangents(d.drawnFov,values+12);tangents(d.nowFov,values+16);
         values[20]=d.nearPlane;values[21]=d.scale[0];values[22]=d.scale[1];
-        std::memcpy(constants,values,sizeof values);constants[24]=across;constants[25]=down;
+        std::memcpy(constants,values,sizeof values);constants[24]=across;constants[25]=down;constants[26]=sharp?1:0;
         const bool carries=d.reach[1]>d.reach[0]&&d.reach[0]>0;
         float carried[16]{};
         std::memcpy(carried,carries?d.carry.data():d.move.data(),sizeof(float)*12);
@@ -569,6 +696,44 @@ bool TurnWarp::Render(ID3D12Device* device,ID3D12GraphicsCommandList* list,ID3D1
         pass(spreadPipeline.Get(),outAt,2,1,0);
         pass(spreadPipeline.Get(),between,out,0,1);
     };
+    // Each depth with the void round things taken as theirs (TurnRimPixels),
+    // this eye's own into rims[0], the drawn eye's into rims[1]; everything
+    // after reads those. A depth of another size than the first keeps its own.
+    TurnDepth ownRimmed,drawnRimmed;
+    if(rimsOn&&rimPipeline) {
+        const auto readable=D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE|D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+        const UINT rtvStep=device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+        const int rims0=int(RimDescriptors+2*slot)-int(SlotDescriptors*slot);   // this eye's two, from the slot's start
+        const auto rimmed=[&](const TurnDepth* d,int n,TurnDepth& out)->const TurnDepth* {
+            const auto size=d->depth->GetDesc();
+            auto rtv=rimTargets->GetCPUDescriptorHandleForHeapStart();rtv.ptr+=SIZE_T(rtvStep)*n;
+            if(rims[n]){const auto r=rims[n]->GetDesc();if(r.Width!=size.Width||r.Height!=size.Height)return d;}   // one size a session
+            else {
+                D3D12_HEAP_PROPERTIES heapProps{};heapProps.Type=D3D12_HEAP_TYPE_DEFAULT;
+                D3D12_RESOURCE_DESC r{};r.Dimension=D3D12_RESOURCE_DIMENSION_TEXTURE2D;r.Width=size.Width;r.Height=size.Height;
+                r.DepthOrArraySize=r.MipLevels=1;r.Format=DXGI_FORMAT_R32_FLOAT;r.SampleDesc.Count=1;r.Flags=D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+                if(FAILED(device->CreateCommittedResource(&heapProps,D3D12_HEAP_FLAG_NONE,&r,readable,nullptr,IID_PPV_ARGS(&rims[n])))){rims[n].Reset();return d;}
+                device->CreateRenderTargetView(rims[n].Get(),nullptr,rtv);
+            }
+            D3D12_SHADER_RESOURCE_VIEW_DESC depthView=srv;depthView.Format=d->format;
+            device->CreateShaderResourceView(d->depth,&depthView,descriptor(rims0+n));
+            D3D12_RESOURCE_BARRIER b{};b.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            b.Transition={rims[n].Get(),D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,readable,D3D12_RESOURCE_STATE_RENDER_TARGET};
+            list->ResourceBarrier(1,&b);
+            list->OMSetRenderTargets(1,&rtv,FALSE,nullptr);
+            const D3D12_VIEWPORT whole{0,0,float(size.Width),float(size.Height),0,1};const D3D12_RECT wholeRect{0,0,LONG(size.Width),LONG(size.Height)};
+            list->RSSetViewports(1,&whole);list->RSSetScissorRects(1,&wholeRect);
+            list->SetGraphicsRootSignature(root.Get());list->SetPipelineState(rimPipeline.Get());
+            auto table=sourceGpu;table.ptr+=UINT64(step)*(rims0+n);list->SetGraphicsRootDescriptorTable(0,table);
+            list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);list->DrawInstanced(3,1,0,0);
+            std::swap(b.Transition.StateBefore,b.Transition.StateAfter);list->ResourceBarrier(1,&b);
+            out=*d;out.depth=rims[n].Get();out.format=DXGI_FORMAT_R32_FLOAT;
+            return &out;
+        };
+        if(usable(depth))depth=rimmed(depth,0,ownRimmed);
+        if(other)drawn=rimmed(drawn,1,drawnRimmed);
+        list->RSSetViewports(1,&viewport);list->RSSetScissorRects(1,&rect);
+    }
     const bool own=usable(depth);
     if(own)grid(*depth,source,0,0,false,false,false);
     if(other) {
@@ -608,6 +773,32 @@ bool TurnWarp::Render(ID3D12Device* device,ID3D12GraphicsCommandList* list,ID3D1
         }
         grid(*drawn,drawn->image,GridDescriptors,1,keep,keep&&nearOnly,keep&&effectsOn);
         if(keep){std::swap(b[2].Transition.StateBefore,b[2].Transition.StateAfter);list->ResourceBarrier(1,b+2);}
+        // The strips the drawn eye's picture did not reach: what this eye's
+        // own picture left there, unless it is something nearer since gone.
+        if(fill&&own&&holePipeline&&drawn->apart>0) {
+            D3D12_RESOURCE_BARRIER r[4]{};
+            for(auto& x:r){x.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;x.Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;}
+            r[0].Transition={target,D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_COPY_SOURCE};
+            r[1].Transition={ownTurned.Get(),D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_COPY_DEST};
+            r[2].Transition={depthTarget.Get(),D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,D3D12_RESOURCE_STATE_DEPTH_WRITE,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE};
+            r[3].Transition={drawnDepthTarget.Get(),D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,D3D12_RESOURCE_STATE_DEPTH_WRITE,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE};
+            list->ResourceBarrier(2,r);list->CopyResource(ownTurned.Get(),target);   // the picture so far, to read beside the strips
+            for(int k=0;k<2;++k)std::swap(r[k].Transition.StateBefore,r[k].Transition.StateAfter);
+            list->ResourceBarrier(4,r);   // the target back, the copy readable, both grids' depth readable
+            const int holes=int(HoleDescriptors+GridDescriptors*slot)-int(SlotDescriptors*slot);   // this eye's table, from the slot's start
+            device->CreateShaderResourceView(ownTurned.Get(),&srv,descriptor(holes));
+            device->CreateShaderResourceView(drawnDepthTarget.Get(),&single,descriptor(holes+1));
+            device->CreateShaderResourceView(depthTarget.Get(),&single,descriptor(holes+2));
+            for(int n=3;n<int(GridDescriptors);++n)device->CreateShaderResourceView(nullptr,&single,descriptor(holes+n));
+            list->SetGraphicsRootSignature(depthRoot.Get());list->SetPipelineState(holePipeline.Get());
+            auto table=sourceGpu;table.ptr+=UINT64(step)*holes;list->SetGraphicsRootDescriptorTable(0,table);
+            const float reach[4]={std::max(16.f,HoleReach*float(t.Width)/4096),edgeScale(*drawn)*drawn->nearPlane/Ahead,TurnEdgePixels,0};
+            list->SetGraphicsRoot32BitConstants(1,4,reach,0);
+            list->OMSetRenderTargets(1,&rtvHandle,FALSE,nullptr);
+            list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);list->DrawInstanced(3,1,0,0);
+            for(auto& x:r)std::swap(x.Transition.StateBefore,x.Transition.StateAfter);
+            list->ResourceBarrier(2,r+2);   // both grids' depth back to be written
+        }
     }
     return true;
 }
@@ -629,9 +820,10 @@ bool TurnWarp::Interface(ID3D12Device* device,ID3D12GraphicsCommandList* list,ID
     list->SetGraphicsRootSignature(root.Get());
     ID3D12DescriptorHeap* heaps[]={sourceHeap.Get()};list->SetDescriptorHeaps(1,heaps);
     list->SetGraphicsRootDescriptorTable(0,gpu);
-    float rows[12]{};
+    float rows[TurnConstants]{};
     for(int r=0;r<3;++r)for(int c=0;c<3;++c)rows[r*4+c]=homography[r*3+c];
-    list->SetGraphicsRoot32BitConstants(1,12,rows,0);
+    rows[12]=sharp?1.f:0.f;
+    list->SetGraphicsRoot32BitConstants(1,TurnConstants,rows,0);
     list->OMSetRenderTargets(1,&rtvHandle,FALSE,nullptr);
     const D3D12_VIEWPORT viewport{0,0,float(t.Width),float(t.Height),0,1};const D3D12_RECT rect{0,0,LONG(t.Width),LONG(t.Height)};
     list->RSSetViewports(1,&viewport);list->RSSetScissorRects(1,&rect);

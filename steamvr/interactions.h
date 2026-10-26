@@ -10,6 +10,7 @@
 #include "navigation_info.h"
 #include "companions.h"
 #include "active_effects.h"
+#include "torch_light.h"
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -111,6 +112,9 @@ struct Item {
     uint32_t id=0,code=0;
     uint32_t quality=0;
     int32_t qualityRecord=-1;
+    uint32_t socketed=0;
+    uint32_t fireAffix=0;
+    uint32_t fireDamage=0;
     bool operator==(const Item&) const = default;
 };
 constexpr uint32_t Code(char a,char b=' ',char c=' ',char d=' ') {
@@ -131,7 +135,9 @@ inline const char* PotionName(Potion type) {
     return names[unsigned(type)<=unsigned(Potion::Stamina)?unsigned(type):0];
 }
 // A released Health/Rejuvenation/Antidote/Thawing bottle flies in room metres and lands on the
-// world floor. Only its landing point leaves the engine; the game thread
+// world floor. With the physics world (Input::physicsThrows) it flies as a
+// body there instead and lands where it first touches anything: a wall, a
+// table, a prop or the floor. Only its landing point leaves the engine; the game thread
 // decides whether it fell at the hireling's feet, and the native belt key's
 // mercenary use (not an item edit) gives the potion to the mercenary.
 // Launch speed is the PEAK hand speed in the last ThrowWindow before the grip
@@ -139,7 +145,41 @@ inline const char* PotionName(Potion type) {
 // samples are capped at ThrowMaxSpeed, never discarded; only tracking jumps
 // above ThrowGlitchSpeed are ignored.
 constexpr float ThrowGravity=9.81f,ThrowMinSpeed=1.4f,ThrowMaxSpeed=20.f,ThrowGlitchSpeed=30.f,ThrowClearOfBelt=.15f;
+constexpr float ThrowMaxSpin=30.f; // rad/s; a wrist flick, not a tracking jump
 constexpr double ThrowWindow=.12,ThrowMaxFlight=3.;
+constexpr double TossPickup=.2; // the physics world takes a throw within this, else it flies the arc
+// The player's own motion through the world (running, walking): the stage
+// frame's velocity in world metres per second. A throw or a let-go bottle
+// carries it, as anything thrown carries its thrower's speed. Whether a
+// release is a throw still depends on the hand alone. A jump faster than any
+// run (a waypoint, a portal, a recentre) or a gap in the frames resets it.
+constexpr float CarryMaxSpeed=10.f;
+constexpr double CarryTime=.1,CarryGap=.25;
+struct Carry {
+    bool known=false;
+    Vec velocity{};
+    double at=0;
+    Vec was{};
+    bool have=false;
+    void Reset() {*this={};}
+    void Update(double time,Vec anchor) {
+        if(!std::isfinite(time)||!std::isfinite(anchor.x)||!std::isfinite(anchor.y)||!std::isfinite(anchor.z)){Reset();return;}
+        if(!have||!(time>at)||time-at>CarryGap){*this={};have=true;at=time;was=anchor;return;}
+        const float dt=float(time-at);const Vec v=(anchor-was)*(1/dt);
+        at=time;was=anchor;
+        if(math::Dot(v,v)>CarryMaxSpeed*CarryMaxSpeed){known=false;velocity={};return;}
+        velocity=known?velocity+(v-velocity)*std::min(1.f,dt/float(CarryTime)):v;known=true;
+    }
+};
+// Hand turn between two poses as an angular velocity (rad/s, the poses' frame).
+inline Vec Spin(Quat from,Quat to,float dt) {
+    Quat d=math::Multiply(to,math::Conjugate(from));
+    if(d.w<0)d={-d.x,-d.y,-d.z,-d.w};
+    const float s=std::sqrt(d.x*d.x+d.y*d.y+d.z*d.z);
+    if(!(dt>0)||!std::isfinite(s)||s<1e-7f)return {};
+    const float rate=2*std::atan2(s,d.w)/dt;
+    return Vec{d.x,d.y,d.z}*(rate/s);
+}
 // Potions the game itself lets a mercenary take from the belt with Shift.
 inline bool Throwable(Potion type) {
     return type==Potion::Health||type==Potion::Rejuvenation||type==Potion::Antidote||type==Potion::Thawing;
@@ -175,6 +215,7 @@ struct Skill {
     int32_t owner=-1;
     int32_t missile=-1; // native srvmissile of the assigned skill, -1 if none
     bool known=false,available=false,directed=false,motion=false,physical=false;
+    bool strike=false; // a melee skill physical strikes cast, its compiled row confirmed (strike_skills.h)
     char name[64]{};
     bool operator==(const Skill&) const = default;
 };
@@ -209,6 +250,10 @@ struct Snapshot {
     bool developer=false;
     bool devDebugDraws=false;
     int devTurnsKeepOwn=0;   // [stereo] turns_keep_own as it stands (DEV switch): 0 off, 1 near things, 2 everywhere
+    bool devTurnsSharp=false;   // [stereo] turns_sharp as it stands (DEV switch)
+    bool devTurnsFill=false;    // and turns_fill
+    bool devTurnsRims=false;    // and turns_rims
+    bool devSkyRims=false;      // and [sky] cover_rims
     int devClass=-1,skillClass=-1;
     uint64_t session=0,at=0;
     uint32_t revision=0,activeSet=0;
@@ -230,6 +275,24 @@ struct Snapshot {
     companions::Roster companions;
     effects::Status effects;
 };
+inline bool HasTorchInHand(const Snapshot& s, int hand, uint32_t& outFlags) {
+    outFlags = 0;
+    if (!s.equipmentKnown || (s.activeSet != 1 && s.activeSet != 2) || hand < 0 || hand > 1) return false;
+    const auto& item = s.sets[s.activeSet - 1][hand];
+    if (!item.code) return false;
+    char codeText[5]{};
+    codeText[0] = static_cast<char>(item.code & 0xFF);
+    codeText[1] = static_cast<char>((item.code >> 8) & 0xFF);
+    codeText[2] = static_cast<char>((item.code >> 16) & 0xFF);
+    codeText[3] = static_cast<char>((item.code >> 24) & 0xFF);
+    const bool enchant = s.effects.Has(16);
+    const bool devClub = false;
+    const auto qual = framevr::torch::EvaluateQualification(codeText, item.fireDamage, enchant, devClub);
+    outFlags = static_cast<uint32_t>(qual);
+    return framevr::torch::IsTorchQualified(outFlags);
+}
+struct TorchHandTag {
+};
 struct SkillCue {
     int slot=-1,id=-1,owner=-1;
     bool known=false,available=false,temporary=false,expanded=false,busy=false,motionUnavailable=false;
@@ -241,7 +304,7 @@ inline bool Fresh(const Snapshot& s,uint64_t session,uint64_t now) {
     return session&&s.session==session&&now>=s.at&&now-s.at<=650;
 }
 enum class Action { None, Potion, Equip, Quest, Map, Character, Skills, BindSkill, Developer, FeedMerc, BindItem, UseItem, RunWalk };
-enum class Result { None, Pending, Applied, Refused, Cancelled, Dispatched, KitRefused, DebugUpdated, TurnsUpdated };
+enum class Result { None, Pending, Applied, Refused, Cancelled, Dispatched, KitRefused, DebugUpdated, TurnsUpdated, SharpUpdated, FillUpdated, RimsUpdated, SkyRimsUpdated };
 struct Request {
     Action action=Action::None;
     uint64_t sequence=0,session=0,at=0;
@@ -284,9 +347,12 @@ struct MenuBounds {
     float left,top,right,bottom;
     bool Contains(float u,float v) const {return u>left&&u<right&&v>top&&v<bottom;}
 };
-constexpr int QuickUseCell=210,RunWalkCell=211;
+constexpr int QuickUseCell=210,LeftStrikesCell=212;   // 211 was RUN / WALK, 213 the movement slider (now VR Settings > VR > Movement speed)
 constexpr double QuickEditHold=.65;
-constexpr MenuBounds QuickUseBounds{.025f,.025f,.255f,.18f},RunWalkBounds{.76f,.025f,.975f,.13f};
+constexpr MenuBounds QuickUseBounds{.025f,.025f,.255f,.18f};
+// Druid: the left claw's strike skill, [gameplay] left_hand_strikes. Lower left,
+// above the ACTIVE line (y 637) and clear of the hand wheel's 216-degree label.
+constexpr MenuBounds LeftStrikesBounds{.025f,.72f,.235f,.82f};
 inline bool QuickControls(MenuPage page){return page==MenuPage::Spells||page==MenuPage::Equipment;}
 constexpr int SkillCategoryCell(int category){return 220+category;}
 inline MenuBounds SkillCategoryBounds(int category){
@@ -296,6 +362,15 @@ inline MenuBounds SkillOptionBounds(int index){
     const float x=.05f+(index%2)*.46f,y=.305f+(index/2)*.13f;
     return {x,y,x+.44f,y+.118f};
 }
+// The skill picker's card for the option pointed at: over the other column,
+// from the category row's top to the last row's bottom; its text, in a
+// SkillCardFont px font, starts SkillCardTop pixels down (of 768),
+// SkillCardPad in from the sides.
+inline MenuBounds SkillCardBounds(int index){
+    const auto first=SkillOptionBounds(index%2?0:1),last=SkillOptionBounds(index%2?6:7);
+    return {first.left,SkillCategoryBounds(0).top,first.right,last.bottom};
+}
+constexpr int SkillCardTop=62,SkillCardPad=12,SkillCardFont=16;
 constexpr MenuBounds MapContent{.14f,.12f,.86f,.84f};
 // Footer cells occupy 9-13. Keep developer actions separate as the list grows.
 constexpr int DeveloperCell(int index) {return 14+index;}
@@ -319,12 +394,12 @@ inline MenuBounds FooterBounds(int index,MenuPage page,bool developer=false) {
 inline int FooterCell(int index,MenuPage page) {
     constexpr int tabs[]={9,12,10,11,13};return Editing(page)?9+index:tabs[index];
 }
-inline int WheelCell(float u,float v,int previous=-1,MenuPage page=MenuPage::Spells,int hand=-1,bool developer=false,int devPage=0) {
+inline int WheelCell(float u,float v,int previous=-1,MenuPage page=MenuPage::Spells,int hand=-1,bool developer=false,int devPage=0,bool leftStrikes=false) {
     if(!std::isfinite(u)||!std::isfinite(v)||u<0||u>1||v<0||v>1)return -1;
     for(int i=0;i<FooterCount(page,developer);++i)if(FooterBounds(i,page,developer).Contains(u,v))return FooterCell(i,page);
     if(QuickControls(page)) {
         if(QuickUseBounds.Contains(u,v))return QuickUseCell;
-        if(RunWalkBounds.Contains(u,v))return RunWalkCell;
+        if(leftStrikes&&LeftStrikesBounds.Contains(u,v))return LeftStrikesCell;
     }
     if(page==MenuPage::Map)return -1; // no invisible spells behind the map
     if(page==MenuPage::Developer) {
@@ -372,6 +447,8 @@ struct Input {
     double time=0;
     uint64_t session=0,epoch=0,at=0; // at shares the native snapshot's monotonic clock
     bool active=false,tracked[2]{},wheel=false,cancel=false,reservedLeft=false,spell=false,quickCast=false;
+    bool gaitToggle=false;   // the game's run / walk toggle is the other way than the hero should go (Movement speed's WALK or a run stop, or the stick's switch): send it
+    int leftStrikes=-1;   // Druid: [gameplay] left_hand_strikes for the wheel's box (0 own trigger, 1 same as right); -1 hides it
     vitals::Location navigationLocation=vitals::Location::Wrist;
     vitals::Location vitalsLocation=vitals::Location::Wrist;
     float vitalsTilt=0;
@@ -384,6 +461,11 @@ struct Input {
     int hover=-1,wheelHand=-1;
     Snapshot snapshot{};
     Reply reply{};
+    // Throws fly in the physics world (bottles::World), which reports the
+    // body of the last one: id, pose in world metres, and whether it landed.
+    bool physicsThrows=false;
+    struct Tossed {uint64_t id=0;bool landed=false;Vec p{};Quat q{0,0,0,1};} tossed{};
+    Vec carry{}; // the player's own world velocity (Carry), zero when unknown
 };
 struct Output {
     bool developer=false;
@@ -394,12 +476,23 @@ struct Output {
     bool vitals=false,palm=false,navigation=false,navigationPalm=false;
     int wheelHand=-1;
     bool inventory=false;
+    int leftStrikes=-1;             // the wheel's left-claw box: shown value, -1 hidden
+    bool toggleLeftStrikes=false;   // clicked this step: the transport saves the other choice
     int select=-2,bottle=-1,bottleHand=-1,nearBelt=-1,nearHolster=-1,hover=-1;
     int feedback=0,feedbackHand=0;
     Result result=Result::None;
     Item bottleItem{};
     bool bottleEmpty=false,beltReady=false;
     bool flying=false; Pose flight{}; Item flightItem{}; int flightColumn=-1; // thrown bottle, model pose
+    // An emptied bottle let go of, this step only: its model pose and the
+    // hand's motion in world metres (Stage::World), and the floor under the
+    // player. It falls into the world as a physics body, drawn only.
+    struct Discard {bool active=false;Vec p{},v{},w{};Quat q{0,0,0,1};float floor=0;uint32_t code=0;} discard{};
+    // A bottle thrown this step, for the physics world (Input::physicsThrows):
+    // the same release as a discard, named by id. flightId is the physics
+    // throw the flying bottle follows, 0 on the arc.
+    struct Toss {bool active=false;uint64_t id=0;Vec p{},v{},w{};Quat q{0,0,0,1};float floor=0;uint32_t code=0;} toss{};
+    uint64_t flightId=0;
     Pose body{},belt[4]{},holster[2]{};
     Request request{};
     int editor=0,editSlot=-1,editPage=0,editPages=1,editCount=0,editCategory=0,editClass=-1;
@@ -468,27 +561,48 @@ class Engine {
     }
     // p, v and q are in WORLD metres/orientation; stage is the latest frame
     // used to draw it, kept through a brief loss of the view frame.
-    struct Flight {bool active=false;double start=0,land=0;Vec p{},v{};Quat q{0,0,0,1};int column=-1,hand=-1;Item item{};uint32_t revision=0;Stage stage{};} flight;
-    struct Motion {double at=0;Vec v{};};
+    struct Flight {bool active=false;double start=0,land=0;Vec p{},v{};Quat q{0,0,0,1};int column=-1,hand=-1;Item item{};uint32_t revision=0;Stage stage{};
+                   uint64_t id=0;double arc=0;} flight; // id: the physics throw it follows (0 = the arc); arc: the arc's landing time
+    uint64_t tossSerial=0;
+    struct Motion {double at=0;Vec v{},w{};};
     std::array<Motion,32> motion{};unsigned motionNext=0;
-    Vec bottleWas{};bool bottleTracked=false;
+    Vec bottleWas{};Quat bottleTurnWas{0,0,0,1};bool bottleTracked=false;
     void Drop() {bottle=bottleHand=holster=holsterHand=-1;drinkStart=0;spent=consumed=false;held={};owner[0]=owner[1]=Owner::Combat;
         bottleTracked=false;motion={};motionNext=0;}
     // Fastest recent sample, capped in magnitude, keeping its direction.
-    bool PeakVelocity(double now,Vec& out) const {
+    bool PeakVelocity(double now,Vec& out,float minimum=ThrowMinSpeed) const {
         float best=0;
         for(const auto& m:motion) {
             if(!m.at||now-m.at>ThrowWindow||m.at>now)continue;
             const float s=std::sqrt(math::Dot(m.v,m.v));
             if(s>best){best=s;out=m.v;}
         }
-        if(best<ThrowMinSpeed)return false;
+        if(best<minimum)return false;
         if(best>ThrowMaxSpeed)out=out*(ThrowMaxSpeed/best);
         return true;
     }
+    // Mean hand turn over the release window, capped.
+    Vec ReleaseSpin(double now) const {
+        Vec sum{};int n=0;
+        for(const auto& m:motion)if(m.at&&now-m.at<=ThrowWindow&&m.at<=now){sum=sum+m.w;++n;}
+        if(!n)return {};
+        sum=sum*(1.f/n);
+        const float s=std::sqrt(math::Dot(sum,sum));
+        return s>ThrowMaxSpin?sum*(ThrowMaxSpin/s):sum;
+    }
+    // Let go of an emptied bottle: it leaves the hand into the world with the
+    // hand's motion, slow or fast. Nothing native follows; it is drawn only.
+    void Discard(const Input& in,Output& out) const {
+        if(!consumed||!in.floorKnown||!in.stage.known)return;
+        const auto& hand=in.hand[bottleHand];const auto& stage=in.stage;
+        Vec v{};PeakVelocity(in.time,v,0);
+        out.discard={true,stage.World(potions::Center(hand.p,hand.q)),math::Rotate(stage.base,v)+in.carry,
+            math::Rotate(stage.base,ReleaseSpin(in.time)),math::Multiply(stage.base,potions::HeldRotation(hand.q)),
+            stage.anchor.y+(in.floor-stage.origin.y),held.item.code};
+    }
     // Grip released with recent deliberate motion, away from the belt: launch.
     // A slow or still release keeps the original behaviour (back to the belt).
-    bool Throw(const Input& in,bool fresh,Vec slot) {
+    bool Throw(const Input& in,bool fresh,Vec slot,Output& out) {
         Vec throwVelocity{};
         if(spent||!in.floorKnown||!in.stage.known||!fresh||!SameBelt(in.snapshot,held)||!Throwable(PotionType(held.item.code))||
            !PeakVelocity(in.time,throwVelocity))return false;
@@ -498,11 +612,16 @@ class Engine {
         // Release: freeze the bottle into the world. The floor under the
         // player at release is the landing plane (yaw-only frame: heights map 1:1).
         const auto& stage=in.stage;
-        const Vec worldP=stage.World(p),worldV=math::Rotate(stage.base,throwVelocity);
+        const Vec worldP=stage.World(p),worldV=math::Rotate(stage.base,throwVelocity)+in.carry;
         const double land=LandingTime(worldP,worldV,stage.anchor.y+(in.floor-stage.origin.y));
         if(land<=0)return false;
         flight={true,in.time,in.time+land,worldP,worldV,math::Multiply(stage.base,potions::HeldRotation(hand.q)),
             bottle,bottleHand,held.item,held.revision,stage};
+        if(in.physicsThrows) {
+            flight.id=++tossSerial;flight.arc=flight.land;flight.land=in.time+ThrowMaxFlight;
+            out.toss={true,flight.id,worldP,worldV,math::Rotate(stage.base,ReleaseSpin(in.time)),flight.q,
+                stage.anchor.y+(in.floor-stage.origin.y),held.item.code};
+        }
         return true;
     }
 public:
@@ -551,7 +670,7 @@ public:
         if(in.cancel) {quickPressed=false;Drop();flight={};rearm=true;wheelLatch=true;pending={};out.cancelPending=true;editor=0;map=developer=false;editSlot=-1;}
         if(pending.action!=Action::None) {
             if(in.reply.sequence==pending.sequence&&in.reply.session==session&&in.reply.result!=Result::Pending) {
-                result=in.reply.result;resultAt=in.time;out.feedback=(result==Result::Applied||result==Result::Dispatched||result==Result::DebugUpdated||result==Result::TurnsUpdated)?2:3;
+                result=in.reply.result;resultAt=in.time;out.feedback=(result==Result::Applied||result==Result::Dispatched||result==Result::DebugUpdated||result==Result::TurnsUpdated||result==Result::SharpUpdated||result==Result::FillUpdated||result==Result::RimsUpdated||result==Result::SkyRimsUpdated)?2:3;
                 out.feedbackHand=pendingHand;
                 if(result==Result::Applied&&pending.action==Action::Equip)stowed=false;
                 if(result==Result::Applied&&pending.action==Action::Potion&&pending.item==held.item)consumed=true;
@@ -593,8 +712,11 @@ public:
         if(shoulder.swap&&request(Action::Equip,3-int(in.snapshot.activeSet))){
             pendingHand=dominant;out.feedback=1;out.feedbackHand=dominant;
         }
+        // VR Settings > Movement speed: WALK walks, every other stop runs. When the game's
+        // toggle is the other way, its own run / walk command (no tick).
+        if(in.gaitToggle&&fresh&&request(Action::RunWalk,0))pendingHand=0;
         if(wheel) {
-            out.wheel=true;out.utility=utility;out.map=map;out.hover=in.hover;out.block=true;
+            out.wheel=true;out.utility=utility;out.map=map;out.hover=in.hover;out.block=true;out.leftStrikes=in.leftStrikes;
             owner[0]=owner[1]=Owner::Wheel;
             if((editor==1||editor==2)&&fresh&&in.snapshot.bindingBank!=editBank){editor=in.wheelHand>=0?0:1;editSlot=-1;editBank=in.snapshot.bindingBank;rearm=true;}
             // A hold edits; a short click uses on release. A lost ray/session
@@ -622,10 +744,10 @@ public:
                         const auto* assigned=in.snapshot.quick.Find(quickPressedCode);
                         quickPressedItem=assigned?assigned->item:Item{};
                     } else out.feedback=3;
-                } else if(QuickControls(Page())&&in.hover==RunWalkCell) {
-                    if(fresh)request(Action::RunWalk,0);else out.feedback=3;
-                    pendingHand=in.wheelHand>=0?1-in.wheelHand:0;
-                    wheelLatch=true;out.wheel=false;rearm=true;
+                } else if(QuickControls(Page())&&in.hover==LeftStrikesCell) {
+                    // A local setting, not a game command: the wheel stays open to show it.
+                    if(in.leftStrikes>=0){out.toggleLeftStrikes=true;out.feedback=1;}else out.feedback=3;
+                    out.feedbackHand=in.wheelHand>=0?1-in.wheelHand:0;rearm=true;
                 } else if(editor==3) {
                     if(in.hover==11){editor=0;editSlot=-1;}
                     else if(in.hover==9)editPage=std::max(0,editPage-1);
@@ -752,14 +874,15 @@ public:
             held.at=now;
             // Prefer the runtime's own controller velocity; fall back to the
             // pose difference when the runtime does not report one.
-            const Vec handNow=in.hand[bottleHand].p;
+            const Vec handNow=in.hand[bottleHand].p;const Quat turnNow=in.hand[bottleHand].q;
             if(in.velocityKnown[bottleHand]||bottleTracked) {
                 const Vec v=in.velocityKnown[bottleHand]?in.handVelocity[bottleHand]:(handNow-bottleWas)*(1/float(dt));
-                if(math::Dot(v,v)<=ThrowGlitchSpeed*ThrowGlitchSpeed){motion[motionNext]={in.time,v};motionNext=(motionNext+1)%motion.size();}
+                const Vec w=bottleTracked?Spin(bottleTurnWas,turnNow,float(dt)):Vec{};
+                if(math::Dot(v,v)<=ThrowGlitchSpeed*ThrowGlitchSpeed){motion[motionNext]={in.time,v,w};motionNext=(motionNext+1)%motion.size();}
             }
-            bottleWas=handNow;bottleTracked=true;
-            if(!grips[bottleHand]&&Throw(in,fresh,out.belt[bottle].p)) {Drop();rearm=true;out.feedback=1;out.feedbackHand=flight.hand;}
-            else if(!grips[bottleHand]||(!spent&&(!fresh||!SameBelt(in.snapshot,held)))) {Drop();rearm=true;}
+            bottleWas=handNow;bottleTurnWas=turnNow;bottleTracked=true;
+            if(!grips[bottleHand]&&Throw(in,fresh,out.belt[bottle].p,out)) {Drop();rearm=true;out.feedback=1;out.feedbackHand=flight.hand;}
+            else if(!grips[bottleHand]||(!spent&&(!fresh||!SameBelt(in.snapshot,held)))) {if(!grips[bottleHand])Discard(in,out);Drop();rearm=true;}
             else {
                 out.bottle=bottle;out.bottleHand=bottleHand;out.bottleItem=held.item;out.bottleEmpty=consumed;owner[bottleHand]=Owner::Bottle;
                 if(!spent&&potions::AtMouth(in.hand[bottleHand].p,in.hand[bottleHand].q,in.head.p,in.head.q,drinkStart!=0)) {
@@ -770,21 +893,28 @@ public:
         }
         if(flight.active) {
             if(in.stage.known)flight.stage=in.stage; // follow walking/turning for drawing only
-            if(in.time>=flight.land) {
+            // The physics world never took it (unavailable now): the arc after all.
+            const bool carried=flight.id&&in.tossed.id==flight.id;
+            if(flight.id&&!carried&&in.time-flight.start>=TossPickup){flight.id=0;flight.land=flight.arc;}
+            if((carried&&in.tossed.landed)||in.time>=flight.land) {
                 // Landed: one exact-item request. A miss or a dead/absent
                 // hireling is refused natively-side and the bottle stays belted.
                 const float t=float(flight.land-flight.start);
+                const Vec where=carried?in.tossed.p:Ballistic(flight.p,flight.v,t);
                 const Request landed{Action::FeedMerc,0,session,now,flight.column,flight.item,flight.revision};
                 if(fresh&&SameBelt(in.snapshot,landed)&&request(Action::FeedMerc,flight.column,flight.item,flight.revision)) {
-                    pending.world=Ballistic(flight.p,flight.v,t);pending.point=flight.stage.Room(pending.world);
+                    pending.world=where;pending.point=flight.stage.Room(pending.world);
                     out.request=pending;pendingHand=flight.hand;
                 } else out.feedback=3;
                 out.feedbackHand=flight.hand;flight={};
             } else {
                 const float t=float(in.time-flight.start),spin=t*9.f; // tumble end over end
-                out.flying=true;out.flightColumn=flight.column;out.flightItem=flight.item;
-                const Quat world=math::Multiply(flight.q,{std::sin(spin*.5f),0,0,std::cos(spin*.5f)});
-                out.flight={flight.stage.Room(Ballistic(flight.p,flight.v,t)),math::Multiply(math::Conjugate(flight.stage.base),world)};
+                out.flying=true;out.flightColumn=flight.column;out.flightItem=flight.item;out.flightId=flight.id;
+                if(carried)out.flight={flight.stage.Room(in.tossed.p),math::Multiply(math::Conjugate(flight.stage.base),in.tossed.q)};
+                else {
+                    const Quat world=math::Multiply(flight.q,{std::sin(spin*.5f),0,0,std::cos(spin*.5f)});
+                    out.flight={flight.stage.Room(Ballistic(flight.p,flight.v,t)),math::Multiply(math::Conjugate(flight.stage.base),world)};
+                }
             }
         }
         out.developer=developer;out.devPage=devPage;out.stowed=stowed;out.result=result;

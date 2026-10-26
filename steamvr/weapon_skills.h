@@ -2,9 +2,10 @@
 #include <cmath>
 #include "skill_slots.h"
 #include <cstdint>
+#include <string_view>
 
 namespace framevr::weaponskills {
-inline constexpr int Smite=97,Strafe=26;
+inline constexpr int Attack=0,Throw=2,Smite=97,Strafe=26,DoubleThrow=140,Werewolf=223,Werebear=228;
 enum class Action { Native, Arrow, Volley, Shield };
 inline Action Classify(int skill) {
     switch(skill) {
@@ -32,6 +33,40 @@ inline bool QuiverMissile(int missile) {
         default:return false;
     }
 }
+// Javelin skills (#224): Skills.txt srvstfunc 4 with one srvmissile, the
+// same native shape as Fire Arrow, and a javelin used up per throw: Poison
+// Javelin (missile 38, poisonjav), Lightning Bolt (205, lightningjavelin),
+// Plague Javelin (43, plaguejavelin) and Lightning Fury (206, lightningfury).
+inline bool JavelinSkill(int skill) {
+    switch(skill) {
+        case 15:case 20:case 25:case 35:return true;
+        default:return false;
+    }
+}
+inline bool JavelinMissile(int missile) {
+    switch(missile) {
+        case 38:case 205:case 43:case 206:return true;
+        default:return false;
+    }
+}
+// Throwing potions (Weapons.txt type tpot): Rancid Gas, Oil, Choking Gas,
+// Exploding, Strangling Gas and Fulminating Potion. Their missiles (Missiles.txt
+// 44-49, CollideType 6) pass over monsters, stop at walls and burst where they
+// land, so a hand throw picks the spot like a tossed trap (toss.h). By item
+// code, for when the game's ItemTypes has no tpot row (gamestate.cpp).
+inline bool ThrowingPotion(std::string_view code) {
+    while(!code.empty()&&code.back()==' ')code.remove_suffix(1);
+    return code=="gps"||code=="ops"||code=="gpm"||code=="opm"||code=="gpl"||code=="opl";
+}
+// The right trigger's skills that throw the potion in hand: Throw, or Attack
+// (Skills.txt leaves tpot out of Attack, so the game is expected to throw).
+inline bool PotionThrow(int skill){return skill==Attack||skill==Throw;}
+// What a physical release can carry: a bow's arrow skills; a thrown weapon's
+// javelin skills, and the Barbarian's Double Throw (Skills.txt srvdofunc 74,
+// no srvmissile: each throw flies the throwing hand's own weapon).
+inline bool Loadable(int skill,int missile,bool javelin) {
+    return javelin?(JavelinSkill(skill)&&JavelinMissile(missile))||skill==DoubleThrow:QuiverSkill(skill)&&QuiverMissile(missile);
+}
 // Bow quiver: pressing a face button assigned to a quiver skill loads that
 // skill into every following nocked arrow instead of casting it. Pressing the
 // loaded skill's button again returns to basic arrows; another skill swaps.
@@ -53,15 +88,15 @@ public:
     const Loaded& Current() const {return loaded;}
     void Clear(){loaded={};held=-1;owned=false;}
     // slot: the face button currently held (-1 for none); its native assignment
-    // follows. eligible: a bow is ready and the feature is enabled. A press
-    // keeps its first owner until released: a stale frame mid-press neither
-    // leaks a native cast nor toggles again.
-    Result Step(uint64_t world,int slot,int skill,int owner,int missile,bool eligible) {
+    // follows. eligible: a bow (or, javelin, a thrown weapon) is ready and the
+    // feature is enabled. A press keeps its first owner until released: a stale
+    // frame mid-press neither leaks a native cast nor toggles again.
+    Result Step(uint64_t world,int slot,int skill,int owner,int missile,bool eligible,bool javelin=false) {
         if(world!=session){session=world;Clear();}
         Result out;
         if(slot<0){held=-1;owned=false;return out;}
         if(slot==held){out.consumed=owned;return out;}
-        held=slot;owned=eligible&&QuiverSkill(skill)&&QuiverMissile(missile);
+        held=slot;owned=eligible&&Loadable(skill,missile,javelin);
         if(!owned)return out;
         out.consumed=true;
         if(loaded.skill==skill&&loaded.owner==owner){loaded={};out.change=Change::Unloaded;}
@@ -91,14 +126,14 @@ class Pulse {
     double started=0,until=0;
 public:
     void Cancel(){*this=Pulse{};}
-    bool Start(int nextSlot,int nextId,int nextOwner,uint64_t nextContext,double now) {
+    bool Start(int nextSlot,int nextId,int nextOwner,uint64_t nextContext,double now,double hold=0) {
         if(nextSlot<0||nextSlot>=skills::Count||nextId<0||!std::isfinite(now)||now<until)return false;
         // Shield contact uses the left trigger's alternate bank. SkillPad
         // needs 50 ms at the native consumer before exposing its button; a
         // 65 ms producer pulse can disappear between the game's polls.
         // Allow bank preparation plus two native ticks and XR scheduling.
         // FinishShieldSkill still cancels immediately when Smite executes.
-        const double duration=nextId==Smite?.180:.065;
+        const double duration=hold>0?hold:nextId==Smite?.180:.065;
         slot=nextSlot;id=nextId;owner=nextOwner;context=nextContext;started=now;until=now+duration;return true;
     }
     int Get(int currentSlot,int currentId,int currentOwner,uint64_t currentContext,double now) {

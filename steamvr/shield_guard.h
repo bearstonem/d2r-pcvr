@@ -20,13 +20,23 @@ struct Pose {
     // attachment-only fallback. These include the item's own bone/transform.
     Vec halfRight{},halfUp{};
     Vec player{}; // render-world origin of this same pose; debug projection only
+    // Coverage grows by this about the shield's center (Holy Shield's glow); 1 is the shield.
+    float coverScale=1;
 };
+// 2026-10-20: Holy Shield (state 101) draws a large glowing shield around the
+// held one, and blocks are expected to land on the glow. Its size is not in the
+// tables (states.txt only names its overlay; Overlay.txt gives a light radius,
+// not the art's size), so this is a visual estimate: the glow's radius against
+// the held shield's, applied to the mesh surface and to the fallback alike.
+constexpr float HolyShieldCover=1.6f,MaxCoverScale=3;
+inline float CoverScale(bool holyShield) {return holyShield?HolyShieldCover:1.f;}
 inline bool Measured(const Pose& p) {return math::Dot(p.halfRight,p.halfRight)>.0025f&&math::Dot(p.halfUp,p.halfUp)>.0025f;}
 inline bool Finite(Vec v) {return std::isfinite(v.x)&&std::isfinite(v.y)&&std::isfinite(v.z);}
 inline bool Valid(const Pose& p) {
     const float n=math::Dot(p.normal,p.normal);
     return p.at&&Finite(p.center)&&Finite(p.normal)&&Finite(p.eye)&&Finite(p.hand)&&Finite(p.halfRight)&&Finite(p.halfUp)&&
-        std::isfinite(p.unitsPerMetre)&&p.unitsPerMetre>=1&&p.unitsPerMetre<=32&&n>.99f&&n<1.01f;
+        std::isfinite(p.unitsPerMetre)&&p.unitsPerMetre>=1&&p.unitsPerMetre<=32&&n>.99f&&n<1.01f&&
+        std::isfinite(p.coverScale)&&p.coverScale>=1&&p.coverScale<=MaxCoverScale;
 }
 // The coverage proxy uses the shield attachment's XY plane. Cross the final posed
 // axes so mirrored/nonuniform transforms retain a perpendicular surface normal.
@@ -133,6 +143,8 @@ inline bool InGuard(Vec hand,bool leftShield,bool raised,const Tuning& t) {retur
 inline Rejection PositionRejection(const Pose& p,bool leftShield,bool raised,const Tuning& t) {
     if(!Measured(p))return PositionRejection(p.hand,leftShield,raised,t);
     const float margin=raised?t.hold:0;
+    // The real shield's height, not Holy Shield's glow: coverScale widens what
+    // a raised shield covers (Coverage) but never what counts as raised.
     const float height=std::fabs(p.halfRight.y)+std::fabs(p.halfUp.y);
     // A tower shield can cover the torso with its grip below the old hand
     // cutoff. Use the visible surface, still relative to this pose's eyes.
@@ -207,9 +219,9 @@ inline Rejection Coverage(const Pose& p,Vec toAttacker,const Tuning& t,float* al
         // Project the actual face onto the incoming attack corridor. Rotation
         // continuously changes coverage instead of a hard 60-degree cutoff.
         // 12 cm allows for a native hit targeting the torso rather than its centre.
-        const float width=measured?std::fabs(math::Dot(p.halfRight,across))+std::fabs(math::Dot(p.halfUp,across))+.12f:t.lateral;
+        const float width=measured?(std::fabs(math::Dot(p.halfRight,across))+std::fabs(math::Dot(p.halfUp,across)))*p.coverScale+.12f:t.lateral*p.coverScale;
         if(along < -t.behind||along>distance+t.behind||side>width)return Rejection::OutsidePlacement;
-    } else if(std::hypot(offset.x,offset.z)>t.lateral)return Rejection::OutsidePlacement;
+    } else if(std::hypot(offset.x,offset.z)>t.lateral*p.coverScale)return Rejection::OutsidePlacement;
     // Native damage targets the body, not the offset shield grip. Use the same
     // corridor for both measured and fallback poses: moving a shield within
     // that corridor must not rotate the incoming direction or its facing test.

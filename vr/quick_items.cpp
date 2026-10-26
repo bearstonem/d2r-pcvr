@@ -33,7 +33,7 @@ bool Ready() {
 #undef CHECK
     ready=true;framevr::logging::Write("Frame quick use: native inventory activation verified");return true;
 }
-Item Copy(const Items::ItemInfo& i){return {i.handle,i.runtimeId,i.code,uint32_t(i.quality),i.qualityRecordId};}
+Item Copy(const Items::ItemInfo& i){const uint32_t sockets=(i.socketedItemCount>0)?i.socketedItemCount:i.socketCount;return {i.handle,i.runtimeId,i.code,uint32_t(i.quality),i.qualityRecordId,sockets,0,0};}
 bool Carried(const Items::ItemInfo& i){return i.handle&&i.container==Items::ItemContainer::Inventory;}
 int Quantity(const Items::ItemInfo& i) {
     // Empty tomes remain assignable but cannot be used. Non-stackable misc

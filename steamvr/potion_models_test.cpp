@@ -11,13 +11,14 @@ using namespace framevr;
 static void Check(HRESULT h,const char* s){if(FAILED(h)){std::fprintf(stderr,"%s %08lx\n",s,(unsigned long)h);throw std::runtime_error(s);}}
 int main(int argc,char** argv){try {
     if(argc<3)return 2;
-    bool typeless=false,srgb=false;
-    for(int i=3;i<argc;++i){typeless|=!std::strcmp(argv[i],"--typeless");srgb|=!std::strcmp(argv[i],"--srgb");}
+    bool typeless=false,srgb=false,toss=false;   // --toss: the thrown trap models in the middle row (#224)
+    for(int i=3;i<argc;++i){typeless|=!std::strcmp(argv[i],"--typeless");srgb|=!std::strcmp(argv[i],"--srgb");toss|=!std::strcmp(argv[i],"--toss");}
     const auto format=srgb?DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:DXGI_FORMAT_R8G8B8A8_UNORM;
     constexpr unsigned W=960,H=720;
     ComPtr<ID3D12Device> device;Check(D3D12CreateDevice(nullptr,D3D_FEATURE_LEVEL_11_0,IID_PPV_ARGS(&device)),"device");
     ComPtr<ID3D12CommandQueue> queue;D3D12_COMMAND_QUEUE_DESC q{};Check(device->CreateCommandQueue(&q,IID_PPV_ARGS(&queue)),"queue");
     potions::Models models;if(!models.Initialize(device.Get(),queue.Get(),format,W,H,+[](const char* s){std::puts(s);},argv[1]))return 1;
+    if(toss&&models.Tosses()!=5)throw std::runtime_error("thrown trap models missing");
     ComPtr<ID3D12CommandAllocator> allocator;ComPtr<ID3D12GraphicsCommandList> list;
     Check(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,IID_PPV_ARGS(&allocator)),"allocator");
     Check(device->CreateCommandList(0,D3D12_COMMAND_LIST_TYPE_DIRECT,allocator.Get(),nullptr,IID_PPV_ARGS(&list)),"list");
@@ -29,6 +30,7 @@ int main(int argc,char** argv){try {
     D3D12_DESCRIPTOR_HEAP_DESC rh{};rh.Type=D3D12_DESCRIPTOR_HEAP_TYPE_RTV;rh.NumDescriptors=2;ComPtr<ID3D12DescriptorHeap> rtv;Check(device->CreateDescriptorHeap(&rh,IID_PPV_ARGS(&rtv)),"RTV");
     const auto stride=device->GetDescriptorHandleIncrementSize(rh.Type);
     const char* codes[]={"hp1","hp2","hp3","hp4","hp5","mp1","mp2","mp3","mp4","mp5","rvs","rvl","yps","wms","vps"};
+    const char* tossCodes[]={"tfb","tsw","tbs","tst","twk"};
     for(unsigned eye=0;eye<2;++eye) {
         heap.Type=D3D12_HEAP_TYPE_DEFAULT;Check(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&tex,D3D12_RESOURCE_STATE_RENDER_TARGET,nullptr,IID_PPV_ARGS(&targets[eye])),"target");
         auto handle=rtv->GetCPUDescriptorHandleForHeapStart();handle.ptr+=eye*stride;
@@ -39,10 +41,12 @@ int main(int argc,char** argv){try {
         for(unsigned row=0;row<3;++row) {
             potions::Scene scene;scene.count=5;
             for(unsigned col=0;col<5;++col) {
-                auto& item=scene.items[col];const char* code=codes[row*5+col];item.code=interaction::Code(code[0],code[1],code[2]);
+                auto& item=scene.items[col];const char* code=toss&&row==1?tossCodes[col]:codes[row*5+col];item.code=interaction::Code(code[0],code[1],code[2]);
                 item.pose={{(float(col)-2)*.19f,(1-float(row))*.255f,-.85f},math::Yaw(.55f)};
                 item.highlight=col==0;
             }
+            // Under the potions, the cached arrow pointing right (along its +Y).
+            if(row==2&&models.HasArrow())potions::AddArrow(scene,{{0,-.47f,-.85f},math::BeamOrientation({1,0,0},{0,0,1})});
             if(!models.Render(list.Get(),targets[eye].Get(),eye,view,{-.65f,.65f,-.53f,.53f},scene))throw std::runtime_error("render");
         }
         D3D12_RESOURCE_BARRIER barrier{};barrier.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;barrier.Transition={targets[eye].Get(),D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_COPY_SOURCE};list->ResourceBarrier(1,&barrier);

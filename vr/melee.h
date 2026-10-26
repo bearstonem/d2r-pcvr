@@ -17,7 +17,11 @@ void ConfigureAttackSpeed(bool enabled,bool traceHits); // trace: [debug] melee_
 void SetAttackCycle(uint64_t session,uint32_t milliseconds,int hand=0);
 // Physical swings and trigger/button melee use the native to-hit/block/level
 // rolls. Off restores the contact_hits policy for them. Missiles unaffected.
-void ConfigureAttackRating(bool native); // [gameplay] melee_rules=1 (Classic)
+void ConfigureAttackRating(bool native); // Classic rules (unused: melee is Unleashed only)
+// [gameplay] player_flinch (Unleashed): native=false (default) refuses the local
+// hero's hit recovery (GetHit) and block animation when struck, so no hit locks
+// out casting, skills or movement; true (and Classic) keeps native flinching. Any thread.
+void ConfigurePlayerFlinch(bool native);
 // Unleashed: a stroke's damage scales with how much of the native attack cycle
 // passed since the previous landed stroke; every creature one stroke reaches
 // shares that factor. Contacts are never refused. [gameplay] swing_recovery_damage;
@@ -27,6 +31,14 @@ void ConfigureSwingRecovery(bool on,float curve,float grace);
 // Unleashed cleave falloff: each further creature one stroke lands on deals
 // `step` less (0..1, 0 = off), never below `floor`. [gameplay] cleave_falloff, cleave_min
 void ConfigureCleave(float step,float floor);
+// Unleashed trigger/button melee (combat_rules.h TriggerRecovery): the local player's
+// melee hit check on this monster outside a physical swing, as combat.cpp's hit check
+// sees it. Measured from the latest landed swing on any hand (recovery damage factor
+// and the on-hit cycle gate), it becomes the latest trigger hit every later swing is
+// also measured from. smite: inside the native Smite (it always hits natively). Off the
+// owning game thread the clocks are neither read nor stamped: full recovery, effects on.
+struct ButtonStroke {float recovery=1;bool onHit=true,smite=false;};
+ButtonStroke ButtonHit(uint32_t monster);
 // Owning game thread only; shared with physical arrows. Re-resolves the unit
 // from its session/id rather than passing a native pointer across threads.
 bool LocalServer(uintptr_t& game,uintptr_t& player);

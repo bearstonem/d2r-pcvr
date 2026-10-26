@@ -66,6 +66,6 @@ by **Sergious / BodyWalkVR**, with contributions from the community.
 <!-- PCVR_IN_HEADSET_NOTES
 release: v{VERSION}-windows-preview
 credits: {Release contributors}; Sergious / BodyWalkVR.
-- {One short line per major feature, meaningful change or major fix; 1-14 lines total.}
+- {One short line per major feature, meaningful change or major fix; 1-72 lines total, 12 to a page in the headset.}
 - {Group related follow-up fixes; include a useful control or setting path where it fits.}
 PCVR_IN_HEADSET_NOTES -->

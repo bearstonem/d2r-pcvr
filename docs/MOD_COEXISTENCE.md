@@ -12,8 +12,9 @@ does not select this mod. This change does not require the shared launcher.
 - Plugin: `mods/D2R-PCVR/d2rloader/plugins/d2rl-pcvr.dll`
 - Settings and calibration: the same folder's `d2r_pcvr.ini`
 - OpenXR loader: the same folder's `openxr_loader.dll`
-- Local game artwork/model caches: the same folder's `d2r_vr_icons` and
-  `d2r_vr_potions` (generated locally; never commit or distribute them)
+- Local game artwork/model caches: the same folder's `d2r_vr_icons`,
+  `d2r_vr_potions` and `d2r_vr_spell_sprites` (generated locally; never
+  commit or distribute them)
 - ReShade: `mods/D2R-PCVR/reshade`, with its own `ReShade.ini` and preset
 - Runtime diagnostics: `mods/D2R-PCVR/d2rloader/logs/d2r-vr-frame.log`
 - Launch diagnostics: `d2rloader/logs/pcvr-launch.log`

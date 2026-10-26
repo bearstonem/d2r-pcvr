@@ -27,14 +27,15 @@ The native OpenXR adaptation uses current-eye color/depth bindings, tracked
 resource states and device lifetimes to keep square shadow maps out of fog/sky
 sampling.
 
-The stereo replay (VR Settings > Video > Stereo rendering: Replay) in
-`vr/stereo_replay.*`, `vr/ecl_hook.*`, `steamvr/replay_camera.h`,
-`steamvr/replay_groups.h` and `steamvr/replay_pause.h` adapts upstream's
+The stereo replay in `vr/stereo_replay.*`, `vr/ecl_hook.*`,
+`steamvr/replay_camera.h`, `steamvr/replay_groups.h` and `steamvr/replay_pause.h`
+adapts upstream's
 "one pass, two pictures" renderer (`camfix` and `replay` in `vr/vrcam.cpp`,
 `vr/ecl_hook.*`, `vr/replay_groups.h`, `vr/replay_pause.h`) at
 `8bd1d3bc7f9f8a7d5fc2f49d250d57988ec6256e` (MIT, copyright 2026 BodyWalkVR).
 Upstream's DLSS predication, held queue signals, stall guard and stack dump
-are not included.
+are not included. Replay is no longer a Stereo rendering choice (removed in
+v0.3.24); the adapted code remains in the tree.
 
 Native renderer/entity pool growth, its allocator checks, signatures and snapshot
 test are adapted from Sergious / BodyWalkVR
@@ -49,6 +50,7 @@ Game snapshots used for optional local allocator tests are not distributed.
 | D2RLoader Plugin SDK headers | [D2RLoader/PluginSDK](https://github.com/D2RLoader/PluginSDK), `717f727a0ec52912d1558764345f8fa3453a2bd6` | `steamvr/licenses/D2RLoader-PluginSDK-MIT.txt` |
 | OpenXR headers and Windows loader | [KhronosGroup/OpenXR-SDK](https://github.com/KhronosGroup/OpenXR-SDK), 1.1.62, `57af7fc61f9f2d492580cb28aab6d0ea59d8d417` | `steamvr/licenses/OpenXR-Apache-2.0.txt`, `OpenXR-MIT.txt` |
 | JsonCpp (compiled into OpenXR loader) | OpenXR SDK's vendored JsonCpp | `steamvr/licenses/JsonCpp.txt`, public domain / MIT |
+| Box3D physics (compiled into plugin; dropped empty bottles) | [erincatto/box3d](https://github.com/erincatto/box3d), 0.1.0, `8441b4a06d6d09dcfb0b0f704df4d847d1437b92`, unmodified | `steamvr/licenses/Box3D-MIT.txt`, MIT, copyright 2026 Erin Catto |
 | MinGW runtime and GCC runtime libraries | MinGW-w64 / GCC 13, static linkage | `steamvr/licenses/MinGW-copyright.txt`, `GCC-runtime-copyright.txt`, `GPL-3.0.txt`; GCC Runtime Library Exception applies |
 | Native Windows C++/compiler runtime | LLVM-MinGW 20260616, Clang 22.1.8, static libc++/compiler-rt and winpthreads | `steamvr/licenses/LLVM-Apache-2.0-with-exceptions.txt`, `LLVM-MinGW-runtime.txt`, `winpthreads-MIT.txt` |
 
@@ -63,6 +65,20 @@ The installer downloads **D2RLoader 1.3.1-beta** from [d2rloader.net](https://d2
 and **ReShade 6.8.0 with full add-on support** from [reshade.me](https://reshade.me/).
 These binaries are not bundled in the release ZIP. The original dependency
 licenses and terms govern them. Pinned archive checksums are in `steamvr/install.py`.
+
+On native Windows the installer also downloads **OFXR Bridge 0.2.1 (build V116)**
+by tig3rmast3r, an experimental OpenXR API layer for frame generation, from its
+[GitHub release](https://github.com/tig3rmast3r/OFXR-Bridge/releases/tag/0.2.1).
+Source: [tig3rmast3r/OFXR-Bridge](https://github.com/tig3rmast3r/OFXR-Bridge),
+release commit `dad56acafc6e1dde219940427738b926cf2ea555`. OFXR Bridge is
+licensed under LGPL-3.0-or-later; it statically links AMD FidelityFX Optical Flow
+(MIT) and uses NVIDIA's Optical Flow SDK headers. Setup installs its unmodified
+layer DLL with its `LICENSE`, `THIRD_PARTY.md` and `licenses/` in
+`mods/D2R-PCVR/d2rloader/plugins/ofxr`, plus a layer manifest and settings file
+that Setup writes; its tray program is not installed. The mod loads the layer
+only while VR Settings > Perf > Frame generation is on. It is not bundled in the
+release ZIP, and its archive checksum is pinned in `steamvr/install.py`. If the
+download fails, frame generation is unavailable and the rest of the mod installs.
 
 The portable ZIP setup downloads the official **CPython 3.12.10 x64 embeddable
 package** from [python.org](https://www.python.org/downloads/release/python-31210/)

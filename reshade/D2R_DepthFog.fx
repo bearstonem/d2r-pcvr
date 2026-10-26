@@ -94,6 +94,9 @@ uniform bool ShowCeilingCut <
 // and the left eye drew the right eye's sky.
 uniform bool SkyOn < hidden = true; > = false;
 uniform bool ArcaneSkyOn < hidden = true; > = false;
+// vrcam, [sky] cover_rims: the sky goes over the dark rim the game leaves round
+// anything against the void (DepthFogWorld).
+uniform bool SkyOverRims < hidden = true; > = true;
 
 // These are prepared from the player's game, never distributed. Without a
 // complete cache the original native weather cards remain installed.
@@ -728,6 +731,31 @@ float4 GameLight(float3 p, float3 nrm, float3 v)
     }
     return float4(sum, glint);
 }
+
+// Their light on drawn world points (p: less the hero / floorY)
+float3 SceneLight(float3 p, float3 nrm)
+{
+    float3 sum = float3(0.0, 0.0, 0.0);
+    [loop] for (int i = 0; i < 16; ++i) {
+        const float4 L = GameLightPos[i];
+        if (L.w <= 0.0) continue;
+        const float3 dv = L.xyz - p;
+        const float dist = length(dv);
+        const float rad = max(CeilTorchRadius * L.w / 19.0, 1.0);
+        if (dist >= rad * 2.0) continue;
+        const float k = dist / rad;
+        const float3 l = dv / max(dist, 1e-3);
+        const float NdotL = saturate(dot(nrm, l));
+        const float flicker = 0.93 + 0.07 * sin(Timer * 0.011 + i * 2.3) * sin(Timer * 0.0037 + i * 1.1);
+        // Inverse-square quadratic falloff tuned for 1.5x-2x wider reach and distinct bright focal spot
+        const float atten = (1.0 / (1.0 + 0.12 * dist + 0.008 * dist * dist)) * Falloff(k);
+        const float fall = atten * flicker * GameLightCol[i].w * (0.35 + 0.65 * NdotL);
+        const float3 col = lerp(GameLightCol[i].rgb, float3(1.0, 0.58, 0.22), saturate(CeilTorchWarm));
+        sum += col * fall * 2.6;
+    }
+        return sum * CeilTorchBright;
+}
+float3 SceneLight(float3 p) { return SceneLight(p, float3(0.0, 1.0, 0.0)); }
 
 // The far wall (2026-10-07, the user: "paint the void in the distance - the cave's
 // texture round the hero, 200 away"): past the floor's edge the void stayed black under
@@ -1406,7 +1434,18 @@ float3 DepthFogWorld(float4 pos, float2 uv, int eye)
         // it does not, the void goes on as before (fogged below).
         float3 sky = float3(0.0, 0.0, 0.0);
         bool back = false;
-        if (ceilMode == 0 && dNear <= 1e-6) {
+        // A rim: no depth here, but something drawn beside it. The game's picture of
+        // anything over the void is a pixel larger than its depth, its edge blended into
+        // the void's black, and the sky was not painted there: a dark outline round every
+        // roof, treetop and far building against the sky, which By turns moved off them in
+        // every other frame of each eye (the owner, Kurast Docks: "why don't we just get rid
+        // of that outline", 2026-10-25). With SkyOverRims the sky goes there too. Only at an
+        // edge - at most two of the four neighbours drawn: a single empty pixel in the far
+        // ground stays fogged as before (the dots along the horizon).
+        bool rim = false;
+        if (ceilMode == 0 && dNear > 1e-6 && d <= 1e-6 && SkyOn && SkyOverRims)
+            rim = (d1 > 1e-6 ? 1 : 0) + (d2 > 1e-6 ? 1 : 0) + (d3 > 1e-6 ? 1 : 0) + (d4 > 1e-6 ? 1 : 0) <= 2;
+        if (ceilMode == 0 && (dNear <= 1e-6 || rim)) {
             if (SkyOn) {
                 sky = Sky(dir);
                 // with the act's own fog colour the sky's low part sinks into it too:
@@ -1435,7 +1474,9 @@ float3 DepthFogWorld(float4 pos, float2 uv, int eye)
         }
         if (back) {
             const float luma = dot(colour, float3(0.2126, 0.7152, 0.0722));
-            const float k = 1.0 - smoothstep(0.03, 0.08, luma);
+            // A rim is dim as what it rims (about 0.1): the sky takes it unless it is clearly
+            // light - a glow's edge beside a brazier stays, laid over the sky as below.
+            const float k = rim ? 1.0 - smoothstep(0.15, 0.35, luma) : 1.0 - smoothstep(0.03, 0.08, luma);
             // The interface over the void keeps its own colour; its dark parts are the void.
             const bool hud = uv.y >= HudTop && tex2Dlod(HudMaskSmp, float4(uv, 0, 0)).r > 0.0;
             if (hud) return lerp(colour, sky + dither, k);
@@ -1473,7 +1514,30 @@ float3 DepthFogWorld(float4 pos, float2 uv, int eye)
         const float3 fogDir = normalize(float3(dir.x, clamp(dir.y, -0.1, 0.15), dir.z));
         if (SkyOn && !FogFixed) fogColour = (SkyTex > 0.5 ? PaintedSky(fogDir) : SkyGradient(fogDir.y)) * SkyBrightness + dither;
     }
-    if (!FogOn) return colour;
+    float3 litColour = colour;
+    if (GameLightsOn && d > 1e-6) {
+        const float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+        const float4 sp = eye == 0 ? SkyProj0 : SkyProj1;
+        if (sp.x != 0.0 && sp.y != 0.0) {
+            const float3 v = float3((ndc.x + sp.z) / sp.x, (ndc.y + sp.w) / sp.y, -1.0);
+            const float3 off = (eye == 0 ? v.x * CamRight0 + v.y * CamUp0 + v.z * CamBack0
+                                         : v.x * CamRight1 + v.y * CamUp1 + v.z * CamBack1) * (NearPlane / d);
+            const float3 eP = eye == 0 ? CeilEye0 : CeilEye1;
+            const float3 worldP = eP + off;
+
+            // Reconstruct surface normal from screen derivatives of world position
+            const float3 dX = ddx(worldP);
+            const float3 dY = ddy(worldP);
+            const float3 nrm = cross(dX, dY);
+            const float nLen = length(nrm);
+            float3 N = (nLen > 1e-5) ? (nrm / nLen) : float3(0.0, 1.0, 0.0);
+            if (dot(N, off) > 0.0) N = -N;
+
+            const float3 lit = SceneLight(worldP, N);
+            litColour += colour * lit * 1.2 + lit * 0.05;
+        }
+    }
+    if (!FogOn) return litColour;
 
     if (!SkyOn && !CeilOn && dNear <= 1e-6) {
         // In unroofed interiors such as Tal Rasha's Chamber, zero depth belongs
@@ -1485,7 +1549,7 @@ float3 DepthFogWorld(float4 pos, float2 uv, int eye)
         // Without the effect's own depth, leave it at its authored brightness;
         // actual drawn scenery still uses its distance in the path below.
         if (ShowDistance) return 0.0;
-        return fogColour * FogAmount(dFar) + colour;
+        return fogColour * FogAmount(dFar) + litColour;
     }
 
     // The depth smeared: the fog of a 3x3 grid FogBlur pixels apart, averaged
@@ -1515,10 +1579,10 @@ float3 DepthFogWorld(float4 pos, float2 uv, int eye)
     // (2026-10-07). The halo is warm - red well over blue - and the cave's rock is not: what
     // is warm keeps its light through the fog (CeilHalo of it), as it does over the void.
     if (CeilOn && !SkyOn) {
-        const float warm = smoothstep(0.05, 0.25, colour.r - colour.b);
-        return lerp(colour, fogColour, t) + colour * (t * warm * saturate(CeilHalo));
+        const float warm = smoothstep(0.05, 0.25, litColour.r - litColour.b);
+        return lerp(litColour, fogColour, t) + litColour * (t * warm * saturate(CeilHalo));
     }
-    return lerp(colour, fogColour, t);
+    return lerp(litColour, fogColour, t);
 }
 // The interface keeps its own colour: the fog and the sky only where the layer lets the world through.
 float3 DepthFog(float4 pos, float2 uv, int eye)
@@ -1791,6 +1855,10 @@ uniform float3 OutlineEye1 < hidden = true; > = float3(0.0, 0.0, 0.0);
 uniform float4 OutlinePos < hidden = true; > = float4(0.0, 0.0, 0.0, 0.0);
 uniform float3 OutlineShape < hidden = true; > = float3(2.6, 0.15, 4.0);
 uniform float3 OutlineColor < hidden = true; > = float3(1.0, 0.2, 0.12);
+// A second aimed monster (the other hand's), drawn like the first in its own color.
+uniform float4 Outline2Pos < hidden = true; > = float4(0.0, 0.0, 0.0, 0.0);
+uniform float3 Outline2Shape < hidden = true; > = float3(2.6, 0.15, 4.0);
+uniform float3 Outline2Color < hidden = true; > = float3(0.2, 0.5, 1.0);
 uniform float OutlineWidth < hidden = true; > = 1.0;   // how far out a neighbour is looked for, in pixels: the edge's thickness
 uniform float OutlineJump < hidden = true; > = 6.0;    // a neighbour this close in 3D still belongs to the body (world units)
 uniform float OutlineInner < hidden = true; > = 0.05;  // a faint tint over the whole body, a share of the strength
@@ -1841,14 +1909,116 @@ float3 OutlineTint(float3 c, float2 uv, int eye, float3 p, float4 o, float3 shap
     const float a = max(saturate(edge / 3.0), OutlineInner) * o.w;
     return lerp(c, colour, saturate(a));   // painted over the picture: subtle at low strength
 }
+// Landing circles: where and when a ground skill will hit, painted on the ground
+// the eye actually sees (the same world point per pixel as the outline), so
+// monsters and walls standing in front hide it. One per cast or bomb in the air:
+// RingPos xyz the centre relative to the hero, w its alpha (0 = none); RingFill
+// how far the fill has grown from the center outward; RingCol rgb its element's
+// color, w its radius (world units); RingDir a strip instead (Fire Wall): xy its
+// direction on the ground, z its half-length, 0 = a circle.
+uniform bool RingOn < hidden = true; > = false;
+uniform float RingFloorTol < hidden = true; > = 1.0;
+uniform float4 RingPos0 < hidden = true; > = float4(0.0, 0.0, 0.0, 0.0);
+uniform float4 RingPos1 < hidden = true; > = float4(0.0, 0.0, 0.0, 0.0);
+uniform float4 RingPos2 < hidden = true; > = float4(0.0, 0.0, 0.0, 0.0);
+uniform float4 RingPos3 < hidden = true; > = float4(0.0, 0.0, 0.0, 0.0);
+uniform float4 RingPos4 < hidden = true; > = float4(0.0, 0.0, 0.0, 0.0);
+uniform float4 RingPos5 < hidden = true; > = float4(0.0, 0.0, 0.0, 0.0);
+uniform float RingFill0 < hidden = true; > = 0.0;
+uniform float RingFill1 < hidden = true; > = 0.0;
+uniform float RingFill2 < hidden = true; > = 0.0;
+uniform float RingFill3 < hidden = true; > = 0.0;
+uniform float RingFill4 < hidden = true; > = 0.0;
+uniform float RingFill5 < hidden = true; > = 0.0;
+uniform float4 RingCol0 < hidden = true; > = float4(1.0, 0.45, 0.05, 5.0);
+uniform float4 RingCol1 < hidden = true; > = float4(1.0, 0.45, 0.05, 5.0);
+uniform float4 RingCol2 < hidden = true; > = float4(1.0, 0.45, 0.05, 5.0);
+uniform float4 RingCol3 < hidden = true; > = float4(1.0, 0.45, 0.05, 5.0);
+uniform float4 RingCol4 < hidden = true; > = float4(1.0, 0.45, 0.05, 5.0);
+uniform float4 RingCol5 < hidden = true; > = float4(1.0, 0.45, 0.05, 5.0);
+uniform float4 RingDir0 < hidden = true; > = float4(0.0, 0.0, 0.0, 0.0);
+uniform float4 RingDir1 < hidden = true; > = float4(0.0, 0.0, 0.0, 0.0);
+uniform float4 RingDir2 < hidden = true; > = float4(0.0, 0.0, 0.0, 0.0);
+uniform float4 RingDir3 < hidden = true; > = float4(0.0, 0.0, 0.0, 0.0);
+uniform float4 RingDir4 < hidden = true; > = float4(0.0, 0.0, 0.0, 0.0);
+uniform float4 RingDir5 < hidden = true; > = float4(0.0, 0.0, 0.0, 0.0);
+
+// How much the surface at p faces up: 1 floor (slopes and bumps nearly so),
+// 0 a leg, wall or rock side. From its neighbours stepPx pixels right and down;
+// 1 where a neighbour has no depth, so the floor's own edges still paint.
+float FacingUp(float2 uv, int eye, float3 p, float stepPx)
+{
+    float ok1, ok2;
+    const float2 px = float2(BUFFER_RCP_WIDTH, BUFFER_RCP_HEIGHT) * stepPx;
+    const float3 a = OutlineWorld(uv + float2(px.x, 0.0), eye, ok1) - p;
+    const float3 b = OutlineWorld(uv + float2(0.0, px.y), eye, ok2) - p;
+    const float3 n = cross(a, b);
+    const float len = length(n);
+    return (ok1 * ok2 > 0.0 && len > 1e-6) ? abs(n.y) / len : 1.0;
+}
+// The landing circles' look: Jeff's tuned values from the DEV window, 2026-10-20.
+// Sizes are shares of the radius; strengths are 0..1. (Its height band,
+// RingFloorTol, comes from vrcam.)
+static const float kCircleOpacity = 0.5;        // the whole circle's strength
+static const float kCircleRim = 0.03;           // rim width
+static const float kCircleRimStrength = 0.95;
+static const float kCircleBase = 0.08;          // a faint tint over the whole circle
+static const float kCircleBand = 0.45;          // the filled part
+static const float kCircleEdgeGlow = 0.5;       // the glow on the fill's moving edge
+static const float kCircleGlowSharp = 18.0;     // how tight that glow is
+static const float kCircleBrighten = 0.3;       // how much that glow lightens the color
+static const float kCircleDot = 0.05;           // the center dot (the exact aim point)
+static const float kCircleDotStrength = 0.9;
+static const float kCircleInnerSize = 0.05;     // a glow from the rim inward
+static const float kCircleInnerOpacity = 0.25;
+static const float kCircleOuterSize = 0.05;     // a glow from the rim outward
+static const float kCircleOuterOpacity = 0.5;
+// One circle over color c, for the ground point p (relative to the hero). A
+// strip measures from its center line instead of the center point, so the same
+// rim and fill draw a rounded band. The fill is a disc growing from the center
+// to the rim over the cast's time (a Guild Wars 2 style tell). up (FacingUp)
+// keeps the paint on the floor: a monster's legs, a wall or a rock side inside
+// the circle stay unpainted. The color is added as light.
+float3 RingTint(float3 c, float3 p, float4 ring, float fill, float4 col, float4 dir, float up)
+{
+    if (ring.w <= 0.0 || abs(p.y - ring.y) > RingFloorTol) return c;
+    float2 q = p.xz - ring.xz;
+    if (dir.z > 0.0) q -= dir.xy * clamp(dot(q, dir.xy), -dir.z, dir.z);
+    const float r = length(q) / max(col.w, 1e-3);
+    if (r > 1.1 + kCircleOuterSize) return c;
+    const float aa = 0.02;
+    const float d = 1.0 - r;                                                    // in from the rim
+    const float innerGlow = step(0.0, d) * (1.0 - smoothstep(0.0, kCircleInnerSize + 1e-3, d));
+    const float outerGlow = step(0.0, -d) * (1.0 - smoothstep(0.0, kCircleOuterSize, -d));
+    const float rim = 1.0 - smoothstep(kCircleRim, kCircleRim + aa, abs(r - 1.0));   // the outline
+    const float inner = 1.0 - smoothstep(1.0 - aa, 1.0, r);                     // inside the circle
+    const float front = fill;                                                   // fill edge, moving outward
+    const float filled = inner * (1.0 - smoothstep(front, front + aa, r));      // the disc from the center to it
+    const float glow = inner * exp(-abs(r - front) * kCircleGlowSharp) * step(0.001, fill);
+    const float aim = 1.0 - smoothstep(kCircleDot, kCircleDot + aa, r);         // the exact aim point
+    const float a = saturate(kCircleBase * inner + kCircleBand * filled + kCircleEdgeGlow * glow + kCircleRimStrength * rim +
+                             kCircleDotStrength * aim + kCircleInnerOpacity * innerGlow + kCircleOuterOpacity * outerGlow) *
+                    ring.w * kCircleOpacity * smoothstep(0.55, 0.8, up);
+    return saturate(c + saturate(col.rgb + kCircleBrighten * glow) * a * 1.3);
+}
 float3 Outline(float2 uv, int eye)
 {
-    const float3 c = tex2D(FogColorSmp, uv).rgb;
-    if (!OutlineOn) return c;
+    float3 c = tex2D(FogColorSmp, uv).rgb;
+    if (!OutlineOn && !RingOn) return c;
     float ok;
     const float3 p = OutlineWorld(uv, eye, ok);
     if (ok <= 0.0) return c;
-    return OutlineTint(c, uv, eye, p, OutlinePos, OutlineShape, OutlineColor);
+    if (RingOn) {
+        const float up = FacingUp(uv, eye, p, 3.0);   // two more depth taps, only while a circle shows
+        c = RingTint(c, p, RingPos0, RingFill0, RingCol0, RingDir0, up);
+        c = RingTint(c, p, RingPos1, RingFill1, RingCol1, RingDir1, up);
+        c = RingTint(c, p, RingPos2, RingFill2, RingCol2, RingDir2, up);
+        c = RingTint(c, p, RingPos3, RingFill3, RingCol3, RingDir3, up);
+        c = RingTint(c, p, RingPos4, RingFill4, RingCol4, RingDir4, up);
+        c = RingTint(c, p, RingPos5, RingFill5, RingCol5, RingDir5, up);
+    }
+    if (OutlineOn) c = OutlineTint(OutlineTint(c, uv, eye, p, OutlinePos, OutlineShape, OutlineColor), uv, eye, p, Outline2Pos, Outline2Shape, Outline2Color);
+    return c;
 }
 float3 PS_Outline(float4 pos : SV_Position, float2 uv : TEXCOORD) : SV_Target { return Outline(uv, 0); }
 float3 PS_OutlineR(float4 pos : SV_Position, float2 uv : TEXCOORD) : SV_Target { return Outline(uv, 1); }

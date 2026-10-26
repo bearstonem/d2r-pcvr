@@ -23,7 +23,9 @@ bool NativeToolbarHidden();
 // capture a new native map before its texture can be submitted in either eye.
 void MenuMapCapture(bool active);
 void MapFrame();
-uint64_t MapTexture(uint32_t& width,uint32_t& height);
+// full (optional): the texture is the game's full map's box (Map view = Full map); gameZoom: the
+// game zoom it was drawn at (0: the game's own).
+uint64_t MapTexture(uint32_t& width,uint32_t& height,bool* full=nullptr,float* gameZoom=nullptr);
 // Owned copy of UI only, in R16G16B16A16_FLOAT, shader-resource state.
 // RGB is premultiplied, alpha is world transmittance; convert before XR use.
 uint64_t UiTexture(uint32_t& width,uint32_t& height,int32_t crop[4]);

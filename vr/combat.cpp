@@ -18,6 +18,7 @@
 #include "shield_guard.h"
 #include "guard_strain.h"
 #include "melee.h"
+#include "native_ui_signatures.h"
 #include "../steamvr/transport.h"
 
 namespace gamestate {uint64_t LocalPlayer();int32_t LeftDurability();}
@@ -130,6 +131,187 @@ thread_local int swingChance=-1;     // this swing's native to-hit %, -1 = not s
 thread_local float swingRecovery=1;  // this stroke's recovery factor (melee.cpp)
 std::atomic<unsigned> scaledHits{0},chanceUnseen{0};
 std::atomic<int> lastChance{-1};std::atomic<float> lastRecovery{1},lastFactor{1};
+// Unleashed on-hit gate (combat_rules.h OnHitGate; melee.cpp decides, around one
+// physical swing's native attack). Each effect is switched off where it rolls,
+// for this attacker on this thread only; damage, XP, wear and the rest of the
+// attack run as native. Mapped in a decrypted 3.3.93847 snapshot (2026-10-21)
+// against D2MOO's map of the 1.10 code; stat ids from D2R's ItemStatCost:
+// - critical/deadly strike: the damage fill 44C030 rolls the weapon mastery's
+//   crit (33D4F0), passive_critical_strike (337) and item_deadlystrike (141) on
+//   the attacker's seed (34A1E0, advanced inline, roll = low % 100, crit when
+//   roll < chance: +0x18 doubled, result flag 0x2000). Gated: the real seed
+//   advances once, the roll reads 99 (NoCritRoll). A chance of 100+ still crits.
+// - procs: ItemStatCost item events on domeleedamage (5: crushing blow 136, open
+//   wounds 135, freeze 134, slow 150, knockback 81, flee 112, blind 113, chance
+//   to cast on striking 198) and domeleeattack (7: chance to cast on attack 195)
+//   fire through 44D570(game, event, unit, source, damage), from 44CE80 and the
+//   melee executor 44B2B0. Skill events of the player's on those two (Warlock
+//   Hex Bane/Siphon/Purge) are gated with them; the defender's (thorns,
+//   Life Tap...) are not.
+// - leech: 450C90 (only from 44CE80) reads the record's +0x120 life and +0x124
+//   mana leech (lifedrainmindam 60, manadrainmindam 62, skill leech): zeroed.
+// - prevent monster heal (117): inline in the hit check, state 52 applied by
+//   433D20(curse), returning to 44BE61: skipped.
+// - defense lowered per hit (item_damagetargetac 120): 44C030 sets the
+//   defender's armorclass (31), returning to 44C155: skipped.
+thread_local uintptr_t onHitGated=0,onHitTarget=0;   // the attacker whose on-hit effects on this target are off (0 = none)
+thread_local Seed noCritRoll;
+constexpr uint64_t TriggerRva=0x44d570,CurseRva=0x433d20,PreventHealReturn=0x44be61,DefensePerHitReturn=0x44c155;
+constexpr uint64_t CritSeedReturn[3]={0x44c2e6,0x44c33e,0x44c392};   // weapon mastery, critical strike, deadly strike
+constexpr int DoMeleeDamage=5,DoMeleeAttack=7;   // Events.txt rows
+constexpr uint8_t TriggerSig[]={0x40,0x53,0x55,0x56,0x57,0x41,0x56,0x48,0x83,0xec,0x60};
+constexpr uint8_t CurseSig[]={0xff,0x25,0x1a,0x67,0x9f,0x03,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57};
+struct GateSite {uint64_t rva;uint8_t bytes[64];uint8_t size;};
+// Each roll site as this build has it: the seed fetches and their stat ids, the
+// doubling, both event calls, the leech reads and call, prevent heal's state 52
+// and its call, the defense-per-hit read and write.
+constexpr GateSite CritSites[]={
+    {0x44c2de,{0x48,0x8b,0xce,0xe8,0xfa,0xde,0xef,0xff,0x4c,0x8b,0xc8,0x8b,0x08,0x4c,0x69,0xc1,0xc5,0x90,0xc6,0x6a},20},
+    {0x44c323,{0xba,0x51,0x01,0x00,0x00},5},
+    {0x44c336,{0x48,0x8b,0xce,0xe8,0xa2,0xde,0xef,0xff,0x4c,0x8b,0xc8,0x8b,0x08,0x4c,0x69,0xc1,0xc5,0x90,0xc6,0x6a},20},
+    {0x44c377,{0xba,0x8d,0x00,0x00,0x00},5},
+    {0x44c38a,{0x48,0x8b,0xce,0xe8,0x4e,0xde,0xef,0xff,0x4c,0x8b,0xc8,0x8b,0x08,0x4c,0x69,0xc1,0xc5,0x90,0xc6,0x6a},20},
+    {0x44c3c8,{0x8b,0x47,0x18,0x03,0xc0,0x89,0x47,0x18,0xb8,0x00,0x20,0x00,0x00,0x66,0x09,0x47},16}};
+constexpr GateSite EventSites[]={
+    {0x44cfdc,{0xba,0x05,0x00,0x00,0x00,0x49,0x8b,0xcf,0xe8,0x87,0x05,0x00,0x00},13},
+    {0x44b463,{0xba,0x07,0x00,0x00,0x00,0x48,0x8b,0xcf,0xe8,0x00,0x21,0x00,0x00},13}};
+constexpr GateSite LeechSites[]={
+    {0x450c9a,{0x41,0x83,0xb9,0x20,0x01,0x00,0x00,0x00},8},
+    {0x450cb0,{0x41,0x83,0xb9,0x24,0x01,0x00,0x00,0x00},8},
+    {0x44d02c,{0x4c,0x8b,0xcf,0x4c,0x8b,0xc6,0x49,0x8b,0xd6,0x49,0x8b,0xcf,0xe8,0x53,0x3c,0x00,0x00},17}};
+constexpr GateSite HealSites[]={
+    {0x44be2e,{0x66,0x0f,0x6f,0x05,0x9a,0xee,0x8c,0x01,0x48,0x8d,0x4c,0x24,0x40,0xf3,0x0f,0x7f,0x44,0x24,0x50,0x48,0x89,0x6c,0x24,0x68,0x48,0x89,0x74,0x24,0x40,0x4c,0x89,0x74,0x24,0x48,0x89,0x6c,0x24,0x60,0xc7,0x44,0x24,0x64,0x34,0x00,0x00,0x00,0xe8,0xbf,0x7e,0xfe,0xff},51}};
+constexpr GateSite DefenseSites[]={
+    {0x44c117,{0x45,0x33,0xc0,0x8d,0x53,0x77,0x48,0x8b,0xce,0xe8,0x3b,0x9b,0xea,0xff,0x8b,0xd8,0x85,0xc0,0x74,0x2a,0x45,0x33,0xc0,0x49,0x8b,0xcc,0x41,0x8d,0x50,0x1f,0xe8,0x86,0x87,0xea,0xff,0x45,0x33,0xc9,0x45,0x8b,0xc7,0x8d,0x0c,0x18,0x85,0xc9,0x41,0x8d,0x51,0x1f,0x44,0x0f,0x49,0xc1,0x49,0x8b,0xcc,0xe8,0xbb,0xbb,0xea,0xff},62}};
+template<size_t N> bool CheckSites(const GateSite (&sites)[N]) {
+    for(const auto& s:sites)if(!d2rsig::Check(s.rva,s.bytes,s.size))return false;
+    return true;
+}
+using TriggerFn=uint32_t(*)(uintptr_t,int,uintptr_t,uintptr_t,uintptr_t);
+using CurseFn=uintptr_t(*)(uintptr_t);
+TriggerFn originalTrigger=nullptr;CurseFn originalCurse=nullptr;
+bool triggerIn=false,curseIn=false,critGate=false,leechGate=false,defenseGate=false,onHitLogged=false;
+std::atomic<unsigned> gatedMeleeDamage{0},gatedMeleeAttack{0},gatedLeech{0},gatedCrits{0},gatedHeal{0},gatedDefense{0};
+// Unleashed would-have-hit gate (Cal, 2026-10-22; combat_rules.h WouldHit). Every
+// forced contact - a monster's melee hit or missile on the local player
+// (enemies_always_hit) and the local player's physical swing - lands, and its
+// damage follows the Unleashed formula (Defense / attack-rating factor). Every
+// other effect of that attack delivers natively: only when the native roll would
+// have hit. The roll is exact, not just its odds: GetSeed still advances the
+// attacker's real seed once, and its low % 100 against the clamped chance
+// HitChance receives is the game's own verdict. A riposte is a clean hit. On a
+// would-miss, for that attacker and defender on this game thread (3.3.93847 map,
+// basic attack 42FF..430156 -> hit check 44B720 -> fill 44B600 -> executor 44B2B0):
+// - events that only fire on a landed hit (44CE80 44CFC5..44CFFC): domeleedamage
+//   / domissiledamage (5/6: the attacker's procs, Iron Maiden on a cursed
+//   attacker) and damagedinmelee / damagedbymissile (1/2: the struck unit's chance
+//   to cast when struck, damage to mana, attacker takes lightning damage, Frozen
+//   Armor, Life Tap): skipped.
+// - events that fire on a miss too (executor 44B46B / 44B488): domeleeattack (7:
+//   chance to cast on attack) and attackedinmelee (3: attacker takes damage incl.
+//   Thorns' flat part, Shiver Armor): run with the record's hit flag cleared, as on
+//   the miss it would have been.
+// - 450C90 (leech, only from 44D038), at entry, the record fields it and the rest
+//   of 44CE80 read: life/mana/stamina leech and drain (+0x120/+0x124/+0x128),
+//   stun (+0x12C), chill (+0x118) and freeze (+0x11C) lengths, absorb heal (+0x130,
+//   451820): zeroed.
+// - monster mods' on-hit functions 4990C0 (44D04F) and thorns 436FC0 / 436FE0
+//   (4395E0 with thorns_percent 131 / missile_thorns_percent 208, landed hits only):
+//   skipped.
+// - prevent monster heal and defense per hit (the player's, as the on-hit gate).
+// - item wear 4526C0 (executor 44B44B, landed melee hits only: armor 10%, weapon 4%):
+//   skipped. Missiles never wear an item natively. A block's shield wear is the
+//   designed exception and stays.
+// The local player's arrows and throws (missile hit checks forced by
+// contact_hits) are gated the same way in Unleashed, and attack rating scales
+// their damage at the life write like a swing's (ar_damage).
+// Absorb skills (absorbdamage, 11, fired in 44DF10 at 44EB3A before the total is
+// summed: Energy Shield, Bone Armor, Cyclone Armor, Psychic Ward, Health Link) run
+// on the forced contact's damage already scaled by its factor, then what they
+// leave is scaled back, so they soak and drain at native-average rates while the
+// life write still applies the factor once.
+// Critical and deadly strike are not gated: they multiply the damage the chance
+// already scales. Damage over time - poison (+0x38 rate, +0x3C length, the
+// +0x40 list; 4518C0) and burn (+0x24, +0x28; 451380) - is damage that never
+// reaches the scaled life write: scaled by the hit's factor on every contact.
+struct MissScope {uintptr_t attacker=0,defender=0;uint64_t at=0;bool missile=false;};
+thread_local MissScope missScope;                     // the would-miss attack running on this thread
+thread_local bool forcedCheck=false,forcedGate=false,forcedMissile=false;
+thread_local int nativeHitRoll=-1,nativeHitChance=-1;   // this forced check's real roll and clamped chance
+thread_local int lastSwingVerdict=-1;                   // the latest forced swing check: 1 would hit, 0 would miss, -1 unknown
+thread_local int lastIncomingVerdict=-1;                // the same for the latest forced incoming hit (guard trace)
+thread_local uintptr_t damageDefender=0;
+std::atomic<unsigned> verdictInHit{0},verdictInMiss{0},verdictSwingHit{0},verdictSwingMiss{0},verdictShotHit{0},verdictShotMiss{0},verdictUnknown{0},dotScaled{0};
+std::atomic<unsigned> absorbScaled{0},shotScaled{0},shotUnseen{0};std::atomic<int> lastShotChance{-1};
+std::atomic<bool> shotRules{false};   // Unleashed: the player's arrows and throws follow the contact rules
+// The local player's latest forced missile hit (arrow, throw), for its life write.
+struct ShotHit {uintptr_t attacker=0,defender=0;int chance=-1;uint64_t at=0;};
+thread_local ShotHit shotHit;
+// Unleashed trigger/button melee (ConfigureButtonRules): the local player's latest landed
+// melee hit check outside a physical swing, for its life write: its recovery since the
+// last swing (melee::ButtonHit) and, unless Smite, its attack rating. Consumed once.
+struct ButtonHit {uintptr_t attacker=0,defender=0;int chance=-1;float recovery=1;bool ar=true;uint64_t at=0;};
+thread_local ButtonHit buttonHit;
+// A trigger hit inside a swing's cycle: its on-hit effects are off, for its own call chain
+// on this thread (the same window as the would-hit gate's), like a gated swing's.
+struct ButtonGate {uintptr_t attacker=0,target=0;uint64_t at=0;};
+thread_local ButtonGate buttonOnHit;
+std::atomic<bool> buttonRules{false};
+std::atomic<unsigned> verdictButtonHit{0},verdictButtonMiss{0},buttonScaled{0},buttonUnseen{0};
+std::atomic<int> lastButtonChance{-1};std::atomic<float> lastButtonFactor{1};
+std::atomic<unsigned> missEvents{0},missAsMiss{0},missFields{0},missUmods{0},missThorns{0},missWear{0},missHeal{0},missDefense{0};
+constexpr int DamagedInMelee=1,DamagedByMissile=2,AttackedInMelee=3,DoMissileDamage=6,AbsorbDamage=11;   // Events.txt rows
+bool absorbReady=false;
+double ContactFactor(uintptr_t attacker,uintptr_t defender);
+uint32_t AbsorbScaled(uintptr_t game,uintptr_t unit,uintptr_t source,uintptr_t damage,double factor);
+bool missEventsReady=false;   // the hit-only / miss-too event sites match this build
+bool MissGated(uintptr_t attacker,uintptr_t defender);
+bool MissGatedDefender(uintptr_t defender);
+bool OnHitOff(uintptr_t attacker,uintptr_t target);
+bool OnHitOffAttacker(uintptr_t attacker);
+bool OnHitOffTarget(uintptr_t target);
+uint32_t Trigger(uintptr_t game,int event,uintptr_t unit,uintptr_t source,uintptr_t damage) {
+    // domeleedamage / domeleeattack: unit = the attacker, source = its defender.
+    if((event==DoMeleeDamage||event==DoMeleeAttack)&&OnHitOff(unit,source)) {
+        ++(event==DoMeleeDamage?gatedMeleeDamage:gatedMeleeAttack);return 0;
+    }
+    // Absorb skills soak the forced contact's damage at its factor (unit = the struck unit).
+    if(event==AbsorbDamage&&absorbReady&&damage)
+        if(const double factor=ContactFactor(source,unit);factor!=1&&factor>0)return AbsorbScaled(game,unit,source,damage,factor);
+    // Would-have-hit gate. 5/6/7: unit = the attacker; 1/2/3: unit = the struck unit.
+    if(missEventsReady&&missScope.attacker) {
+        const bool byAttacker=event==DoMeleeDamage||event==DoMissileDamage||event==DoMeleeAttack;
+        const bool byStruck=event==DamagedInMelee||event==DamagedByMissile||event==AttackedInMelee;
+        if((byAttacker&&MissGated(unit,source))||(byStruck&&MissGated(source,unit))) {
+            if(event!=DoMeleeAttack&&event!=AttackedInMelee){++missEvents;return 0;}
+            // Fired natively on a miss too: run it as the miss it would have been.
+            uint16_t flags=0;
+            if(damage&&framevr::ReadMemory(&flags,reinterpret_cast<const void*>(damage+4),sizeof flags)&&(flags&1)) {
+                const uint16_t miss=uint16_t(flags&~1u);
+                if(framevr::WriteMemory(reinterpret_cast<void*>(damage+4),&miss,sizeof miss)) {
+                    ++missAsMiss;
+                    const uint32_t result=originalTrigger(game,event,unit,source,damage);
+                    uint16_t now=0;
+                    if(framevr::ReadMemory(&now,reinterpret_cast<const void*>(damage+4),sizeof now)) {
+                        now|=1;framevr::WriteMemory(reinterpret_cast<void*>(damage+4),&now,sizeof now);   // the landed contact again
+                    }
+                    return result;
+                }
+            }
+        }
+    }
+    return originalTrigger(game,event,unit,source,damage);
+}
+uintptr_t Curse(uintptr_t curse) {
+    // Prevent monster heal from a gated swing (the curse record names its caster at +0, its target at +8).
+    uintptr_t units[2]{};
+    if((onHitGated||buttonOnHit.attacker||missScope.attacker)&&reinterpret_cast<uintptr_t>(_ReturnAddress())==d2rsig::Addr(PreventHealReturn)&&
+       framevr::ReadMemory(units,reinterpret_cast<const void*>(curse),sizeof units)) {
+        if(OnHitOff(units[0],units[1])){++gatedHeal;return 0;}
+        if(MissGated(units[0],units[1])){++missHeal;return 0;}
+    }
+    return originalCurse(curse);
+}
 // The riposte's own sound: a WAV next to d2r_vr.ini, played from memory at
 // the game's own volume (Settings.json: Master x the active preset's Combat).
 std::mutex riposteSoundMutex;std::vector<std::vector<uint8_t>> riposteWavs; // every buffer kept alive: one may be playing
@@ -214,7 +396,8 @@ std::atomic<unsigned> defenseScaled{0},defenseUnseen{0};std::atomic<int> lastDef
 // (poison, chill...) land as normal, Defense-scaled like any hit.
 // CTB is the native block rate 347DA0(defender) the block roll uses, divided
 // by 3 while running as native does, capped at 75.
-// Player hit recovery and the hit sound are left native (2026-10-19).
+// The hit sound is left native (2026-10-19); in Unleashed the hero's hit recovery
+// itself is refused by default ([gameplay] player_flinch, melee.cpp, 2026-10-22).
 // On by default in Unleashed; [debug] guard_trace logs each chip.
 constexpr uint64_t BlockRateRva=0x347da0;
 using BlockRateFn=int(*)(uintptr_t);
@@ -226,7 +409,182 @@ framevr::guard::Tuning GuardTuning() {framevr::guard::Tuning t;t.parryMs=guardPa
 template<class T> bool Read(uintptr_t p,T& out) {
     return p>0x10000&&framevr::ReadMemory(&out,reinterpret_cast<const void*>(p),sizeof out);
 }
+// Would-have-hit gate: this attacker striking this defender is the would-miss
+// attack running on this thread. Inside 44CE80 a missile's own unit (type 3) may
+// name the attacker, as at the incoming life write.
+bool MissGated(uintptr_t attacker,uintptr_t defender) {
+    const auto& s=missScope;
+    if(!s.attacker||!defender||defender!=s.defender||GetTickCount64()-s.at>IncomingWindowMs)return false;
+    if(attacker==s.attacker)return true;
+    uint32_t type=~0u;
+    return s.missile&&Read(attacker,type)&&type==3;
+}
+bool MissGatedDefender(uintptr_t defender) {
+    return missScope.attacker&&defender&&defender==missScope.defender&&GetTickCount64()-missScope.at<=IncomingWindowMs;
+}
+// The on-hit gate: this attacker's on-hit effects on this target are off on this
+// thread - around a gated swing's native attack (GateOnHit), or in the call chain of a
+// trigger hit inside a swing's cycle (buttonOnHit, within the would-hit gate's window).
+bool ButtonGateOpen() {return buttonOnHit.attacker&&GetTickCount64()-buttonOnHit.at<=IncomingWindowMs;}
+bool OnHitOff(uintptr_t attacker,uintptr_t target) {
+    if(onHitGated&&attacker==onHitGated&&target==onHitTarget)return true;
+    return buttonOnHit.attacker&&attacker==buttonOnHit.attacker&&target==buttonOnHit.target&&ButtonGateOpen();
+}
+bool OnHitOffAttacker(uintptr_t attacker) {
+    if(onHitGated&&attacker==onHitGated)return true;
+    return buttonOnHit.attacker&&attacker==buttonOnHit.attacker&&ButtonGateOpen();
+}
+bool OnHitOffTarget(uintptr_t target) {
+    if(onHitGated&&target==onHitTarget)return true;
+    return buttonOnHit.attacker&&target==buttonOnHit.target&&ButtonGateOpen();
+}
+// A trigger hit's life factor: its recovery, and its attack rating (not Smite).
+double ButtonFactor(const ButtonHit& hit) {
+    double factor=hit.recovery;
+    if(hit.ar&&hit.chance>=0&&arDamage.load(std::memory_order_relaxed))factor*=ArFactor(hit.chance,arFloor.load(std::memory_order_relaxed));
+    return factor;
+}
+// 450C90 (game, attacker, defender, record): leech, called once from 44CE80
+// (44D038) after the hit-only events and before every other effect field is read.
+using EffectsFn=uint64_t(*)(uintptr_t,uintptr_t,uintptr_t,uintptr_t);
+using UmodFn=uint64_t(*)(uintptr_t,uintptr_t);
+using ThornsFn=uint64_t(*)(uintptr_t,uintptr_t,uintptr_t,uintptr_t);
+constexpr uint64_t EffectsRva=0x450c90,UmodRva=0x4990c0,ThornsRva=0x436fc0,MissileThornsRva=0x436fe0;
+constexpr uint8_t EffectsSig[]={0x40,0x55,0x56,0x57,0x41,0x56,0x48,0x83,0xec,0x58,0x41,0x83,0xb9,0x20,0x01,0x00,0x00,0x00};
+constexpr uint8_t UmodSig[]={0x48,0x89,0x6c,0x24,0x20,0x56,0x57,0x41,0x56,0x48,0x83,0xec,0x20};
+constexpr uint8_t ThornsSig[]={0x48,0x83,0xec,0x38,0xc7,0x44,0x24,0x20,0x83,0x00,0x00,0x00};
+constexpr uint8_t MissileThornsSig[]={0x48,0x83,0xec,0x38,0xc7,0x44,0x24,0x20,0xd0,0x00,0x00,0x00};
+// Where 44CE80 and the executors read what the gate changes, as this build has it:
+// the 1/2/6 events, attackedinmelee, the umod call and the absorb, stun, chill,
+// freeze, poison and burn reads; thorns and item wear calls in the executors.
+constexpr GateSite MissEventSites[]={
+    {0x44cfb2,{0x4c,0x8b,0xce,0x48,0x89,0x7c,0x24,0x20,0x4d,0x8b,0xc6,0xba,0x06,0x00,0x00,0x00,0x49,0x8b,0xcf,0xe8,0xa6,0x05,0x00,0x00},24},
+    {0x44cfca,{0xba,0x02,0x00,0x00,0x00,0xeb,0x1d,0x4c,0x8b,0xce,0x48,0x89,0x7c,0x24,0x20,0x4d,0x8b,0xc6,0xba,0x05,0x00,0x00,0x00,0x49,0x8b,0xcf,0xe8,0x87,0x05,0x00,0x00,
+               0xba,0x01,0x00,0x00,0x00,0x4d,0x8b,0xce,0x48,0x89,0x7c,0x24,0x20,0x4c,0x8b,0xc6,0x49,0x8b,0xcf,0xe8,0x6f,0x05,0x00,0x00},55},
+    {0x44b470,{0x48,0x8d,0x44,0x24,0x30,0x4c,0x8b,0xce,0x4d,0x8b,0xc6,0x48,0x89,0x44,0x24,0x20,0xba,0x03,0x00,0x00,0x00,0x48,0x8b,0xcf,0xe8,0xe3,0x20,0x00,0x00},29}};
+constexpr GateSite EffectSites[]={
+    {0x44d03d,{0x41,0x83,0xfd,0x01,0x75,0x11,0x44,0x84,0x6f,0x04,0x74,0x0b,0x49,0x8b,0xd6,0x49,0x8b,0xcf,0xe8,0x6c,0xc0,0x04,0x00},23},
+    {0x44d054,{0x8b,0x97,0x30,0x01,0x00,0x00,0x48,0x8b,0xce,0xe8,0xbe,0x47,0x00,0x00},14},
+    {0x44d098,{0x8b,0x9f,0x24,0x01,0x00,0x00,0x85,0xdb},8},
+    {0x44d0ce,{0x8b,0x9f,0x28,0x01,0x00,0x00,0x85,0xdb},8},
+    {0x44d10f,{0x44,0x8b,0x87,0x2c,0x01,0x00,0x00,0x48,0x8b,0xd6,0x49,0x8b,0xce,0xe8,0x0f,0x4b,0x00,0x00,0x44,0x8b,0x87,0x18,0x01,0x00,0x00,0x48,0x8b,0xd6,0x49,0x8b,0xce,0xe8,0x7d,0x38,0x00,0x00,
+               0x44,0x8b,0x87,0x1c,0x01,0x00,0x00,0x48,0x8b,0xd6,0x49,0x8b,0xce,0xe8,0x2b,0x44,0x00,0x00},54},
+    {0x44d1cf,{0x48,0x8b,0x5f,0x40,0x33,0xc0,0x44,0x8b,0xe0,0x44,0x8b,0xe8,0x48,0x8b,0x47,0x48,0x48,0x8d,0x0c,0x40},20},
+    {0x44d237,{0x44,0x8b,0x4f,0x3c,0x44,0x8b,0x47,0x38},8},
+    {0x44d271,{0x44,0x8b,0x4f,0x28,0x48,0x8b,0xd6,0x44,0x8b,0x47,0x24,0x49,0x8b,0xce},14}};
+constexpr GateSite ThornsSites[]={
+    {0x44b4d3,{0x4c,0x8d,0x4c,0x24,0x30,0x4d,0x8b,0xc6,0x48,0x8b,0xd6,0x48,0x8b,0xcf,0xe8,0xda,0xba,0xfe,0xff},19},
+    {0x4630b1,{0x4c,0x8b,0xcb,0x4d,0x8b,0xc7,0x48,0x8b,0xd6,0x49,0x8b,0xce,0xe8,0x1e,0x3f,0xfd,0xff},17}};
+constexpr GateSite AbsorbSites[]={
+    {0x44eb25,{0x48,0x8b,0x4c,0x24,0x30,0x4d,0x8b,0xcd,0x4c,0x8b,0xc6,0x4c,0x89,0x7c,0x24,0x20,0xba,0x0b,0x00,0x00,0x00,0xe8,0x31,0xea,0xff,0xff},26},
+    {0x44ec71,{0x41,0x8b,0x47,0x30,0x4d,0x8b,0xcd,0x41,0x03,0x47,0x34,0x4c,0x8b,0xc6,0x41,0x03,0x47,0x18,0xba,0x10,0x00,0x00,0x00,0x41,0x03,0x47,0x2c,
+               0x41,0x03,0x47,0x38,0x41,0x03,0x47,0x20},35}};
+constexpr GateSite WearSites[]={
+    {0x44b438,{0x44,0x38,0xa4,0x24,0x20,0x02,0x00,0x00,0x74,0x0e,0x4d,0x8b,0xc6,0x48,0x8b,0xd6,0x48,0x8b,0xcf,0xe8,0x70,0x72,0x00,0x00},24}};
+EffectsFn originalEffects=nullptr;UmodFn originalUmod=nullptr;ThornsFn originalThorns=nullptr,originalMissileThorns=nullptr;
+bool effectsIn=false,umodIn=false,thornsIn=false,missileThornsIn=false,missWearReady=false,missLogged=false;
+// The life factor of a physical swing on this monster, as SetStat applies it at
+// the life write (a riposte: clean, plus its bonus). Peeks; consumes nothing.
+double SwingLifeFactor(uint32_t monster) {
+    if(riposteMonster.load()==monster&&GetTickCount64()<riposteUntil.load())return 1+riposteBonus.load();
+    double factor=1;
+    if(arDamage.load(std::memory_order_relaxed)&&swingChance>=0)factor*=ArFactor(swingChance,arFloor.load(std::memory_order_relaxed));
+    return factor*swingRecovery;
+}
+// The factor a forced contact's life damage gets: the incoming Defense factor,
+// the swing's, or an arrow's / throw's attack rating. 1 = not a forced contact.
+// Inside 44CE80 / 44DF10 a missile's own unit (type 3) may name the attacker.
+double ContactFactor(uintptr_t attacker,uintptr_t defender) {
+    const auto now=GetTickCount64();
+    uint32_t type=~0u;
+    const auto striker=[&](uintptr_t expected){return attacker==expected||(Read(attacker,type)&&type==3);};
+    if(incomingHit.attacker&&defender==incomingHit.defender&&now-incomingHit.at<=IncomingWindowMs&&incomingHit.chance>=0&&
+       striker(incomingHit.attacker))return DefenseFactor(incomingHit.chance);
+    if(shotHit.attacker&&defender==shotHit.defender&&now-shotHit.at<=IncomingWindowMs&&shotHit.chance>=0&&
+       arDamage.load(std::memory_order_relaxed)&&striker(shotHit.attacker))return ArFactor(shotHit.chance,arFloor.load(std::memory_order_relaxed));
+    if(buttonHit.attacker&&attacker==buttonHit.attacker&&defender==buttonHit.defender&&now-buttonHit.at<=IncomingWindowMs)return ButtonFactor(buttonHit);
+    if(swingTarget!=NoSwing) {
+        uint32_t a=~0u,d[3]{};
+        if(Read(attacker,a)&&a==0&&Read(defender,d)&&d[0]==1&&d[2]==swingTarget)return SwingLifeFactor(swingTarget);
+    }
+    return 1;
+}
+// absorbdamage (11) on a forced contact: the absorb skills see the damage
+// components 44DF10 sums into the total (physical, fire, lightning, magic, cold,
+// poison) at the contact's factor; what they leave is scaled back by it, so the
+// life write's factor still applies once. An untouched component is restored exactly.
+uint32_t AbsorbScaled(uintptr_t game,uintptr_t unit,uintptr_t source,uintptr_t damage,double factor) {
+    static constexpr int Parts[]={0x18,0x20,0x2c,0x30,0x34,0x38};
+    int32_t before[6]{},scaled[6]{};bool ok[6]{};
+    for(int i=0;i<6;++i)if(Read(damage+Parts[i],before[i])&&before[i]>0) {
+        scaled[i]=int32_t(std::min(double(before[i])*factor+.5,2147483647.));
+        ok[i]=framevr::WriteMemory(reinterpret_cast<void*>(damage+Parts[i]),&scaled[i],sizeof scaled[i]);
+    }
+    const uint32_t result=originalTrigger(game,AbsorbDamage,unit,source,damage);
+    bool changed=false;
+    for(int i=0;i<6;++i)if(ok[i]) {
+        int32_t after=0;if(!Read(damage+Parts[i],after))continue;
+        int32_t back=before[i];
+        if(after!=scaled[i]){back=after<=0?after:int32_t(std::min(double(after)/factor+.5,2147483647.));changed=true;}
+        framevr::WriteMemory(reinterpret_cast<void*>(damage+Parts[i]),&back,sizeof back);
+    }
+    if(changed)++absorbScaled;
+    return result;
+}
+void ScaleRecordDots(uintptr_t record,double factor) {
+    bool scaled=false;
+    const auto scale=[&](uintptr_t at){
+        int32_t rate=0;
+        if(!Read(at,rate)||rate<=0)return;
+        const int32_t to=combat::ScaleDamageOverTime(rate,factor);
+        if(to!=rate&&framevr::WriteMemory(reinterpret_cast<void*>(at),&to,sizeof to))scaled=true;
+    };
+    int32_t length=0;
+    if(Read(record+0x3c,length)&&length>0) {
+        // 44D1CF: each list entry {state, rate, length} is applied, then the rest of +0x38 / +0x3C.
+        scale(record+0x38);
+        uint64_t list[2]{};   // begin, count (12-byte entries)
+        if(Read(record+0x40,list)&&list[0]&&list[1]&&list[1]<=16)
+            for(uint64_t i=0;i<list[1];++i)scale(uintptr_t(list[0]+i*12+4));
+    }
+    if(Read(record+0x28,length)&&length>0)scale(record+0x24);
+    if(scaled)++dotScaled;
+}
+uint64_t DamageEffects(uintptr_t game,uintptr_t attacker,uintptr_t defender,uintptr_t record) {
+    if(record) {
+        if(MissGated(attacker,defender)) {
+            // Leech/drain, stun, chill, freeze and absorb heal: only a landed hit's.
+            static constexpr int Fields[]={0x118,0x11c,0x120,0x124,0x128,0x12c,0x130};
+            const int32_t none=0;
+            for(const int at:Fields) {
+                int32_t v=0;
+                if(Read(record+at,v)&&v&&framevr::WriteMemory(reinterpret_cast<void*>(record+at),&none,sizeof none))++missFields;
+            }
+        }
+        if(const double factor=ContactFactor(attacker,defender);factor!=1)ScaleRecordDots(record,factor);
+    }
+    return originalEffects(game,attacker,defender,record);
+}
+uint64_t MonsterOnHit(uintptr_t game,uintptr_t monster) {
+    // The attacking monster's mods' on-hit functions (MonUMod), on its landed hit only.
+    if(damageRecord&&MissGated(monster,damageDefender)){++missUmods;return 0;}
+    return originalUmod(game,monster);
+}
+uint64_t Thorns(uintptr_t game,uintptr_t attacker,uintptr_t defender,uintptr_t record) {
+    if(MissGated(attacker,defender)){++missThorns;return 0;}
+    return originalThorns(game,attacker,defender,record);
+}
+uint64_t MissileThorns(uintptr_t game,uintptr_t attacker,uintptr_t defender,uintptr_t record) {
+    if(MissGated(attacker,defender)){++missThorns;return 0;}
+    return originalMissileThorns(game,attacker,defender,record);
+}
 void SetStat(uintptr_t unit,int stat,int value,int layer) {
+    // Unleashed on-hit gate: a gated swing does not lower the target's Defense,
+    // nor does a swing that would have missed.
+    if(stat==31&&defenseGate&&reinterpret_cast<uintptr_t>(_ReturnAddress())==d2rsig::Addr(DefensePerHitReturn)) {
+        if(OnHitOffTarget(unit)){++gatedDefense;return;}
+        if(MissGatedDefender(unit)){++missDefense;return;}
+    }
     // The life write of a forced monster hit on the local player: its native
     // to-hit chance against the player's Defense decides how hard it lands;
     // through a broken guard, chance to block cuts it to a chip.
@@ -271,6 +629,40 @@ void SetStat(uintptr_t unit,int stat,int value,int layer) {
             }
         }
     }
+    // The life write of the local player's arrow or throw: attack rating decides
+    // how hard it lands (Unleashed, ar_damage), consumed once.
+    if(stat==6&&layer==0&&shotHit.attacker&&unit==shotHit.defender&&damageRecord&&damageScaleReady.load(std::memory_order_relaxed)&&
+       reinterpret_cast<uintptr_t>(_ReturnAddress())==d2rsig::Addr(LifeWriteReturn)) {
+        const ShotHit shot=shotHit;shotHit={};
+        uint32_t source=~0u;Read(damageAttacker,source);
+        int damage=0;
+        if(arDamage.load(std::memory_order_relaxed)&&GetTickCount64()-shot.at<=IncomingWindowMs&&(damageAttacker==shot.attacker||source==3)&&
+           Read(damageRecord+0x134,damage)&&damage>0) {
+            if(shot.chance<0)++shotUnseen;
+            else {
+                const int before=reinterpret_cast<GetStatFn>(d2rsig::Addr(GetStatRva))(unit,6,0);
+                const int64_t life=int64_t(before)-int64_t(double(damage)*ArFactor(shot.chance,arFloor.load(std::memory_order_relaxed)));
+                value=life>=0x100?int(life):0;   // native: under one point of life is death
+                ++shotScaled;lastShotChance=shot.chance;
+            }
+        }
+    }
+    // The life write of the local player's trigger/button melee hit: its recovery since
+    // the last swing and its attack rating (not Smite) decide how hard it lands, consumed once.
+    if(stat==6&&layer==0&&buttonHit.attacker&&unit==buttonHit.defender&&damageRecord&&damageScaleReady.load(std::memory_order_relaxed)&&
+       reinterpret_cast<uintptr_t>(_ReturnAddress())==d2rsig::Addr(LifeWriteReturn)) {
+        const ButtonHit hit=buttonHit;buttonHit={};
+        int damage=0;
+        if(GetTickCount64()-hit.at<=IncomingWindowMs&&damageAttacker==hit.attacker&&Read(damageRecord+0x134,damage)&&damage>0) {
+            if(hit.ar&&hit.chance<0&&arDamage.load(std::memory_order_relaxed))++buttonUnseen;
+            if(const double factor=ButtonFactor(hit);factor!=1) {
+                const int before=reinterpret_cast<GetStatFn>(d2rsig::Addr(GetStatRva))(unit,6,0);
+                const int64_t life=int64_t(before)-int64_t(double(damage)*factor);
+                value=life>=0x100?int(life):0;   // native: under one point of life is death
+                ++buttonScaled;lastButtonChance=hit.chance;lastButtonFactor=float(factor);
+            }
+        }
+    }
     // The life write of a physical swing's damage: a riposte on the parried
     // monster is stronger, once.
     if(stat==6&&layer==0&&swingTarget!=NoSwing&&damageRecord&&damageScaleReady.load(std::memory_order_relaxed)&&
@@ -307,9 +699,24 @@ uint64_t HitChance(uintptr_t game,uintptr_t attacker,uintptr_t defender,int chan
         if(Read(attacker,a)&&a==0&&Read(defender,d)&&d[0]==1&&d[2]==swingTarget)swingChance=chance;
     }
     if(incomingCheck)incomingChance=chance;   // the forced incoming hit check running on this thread
+    // Would-have-hit gate: decided here, before the rest of the hit check (prevent
+    // heal at 44BE5C) and the attack's fill, damage and executor.
+    if(forcedCheck) {
+        nativeHitChance=chance;
+        if(forcedGate&&nativeHitRoll>=0)
+            missScope=WouldHit(nativeHitRoll,chance)?MissScope{}:MissScope{attacker,defender,GetTickCount64(),forcedMissile};
+    }
     return originalHitChance(game,attacker,defender,chance,roll);
 }
 uint64_t ApplyDamage(uintptr_t game,uintptr_t attacker,uintptr_t defender,int flag,uintptr_t damage) {
+    const auto savedDefender=damageDefender;damageDefender=defender;
+    struct Restore {uintptr_t v;~Restore(){damageDefender=v;}} restoreDefender{savedDefender};
+    // Unleashed on-hit gate: a gated swing (or trigger hit) leeches nothing (450C90 reads these two).
+    if(!flag&&leechGate&&damage&&OnHitOff(attacker,defender)) {
+        int32_t leech[2]{};const int32_t none[2]{};
+        if(framevr::ReadMemory(leech,reinterpret_cast<const void*>(damage+0x120),sizeof leech)&&(leech[0]||leech[1])&&
+           framevr::WriteMemory(reinterpret_cast<void*>(damage+0x120),none,sizeof none))++gatedLeech;
+    }
     const auto saved=damageRecord;const auto savedAttacker=damageAttacker;damageRecord=damage;damageAttacker=attacker;
     const auto result=originalApplyDamage(game,attacker,defender,flag,damage);
     damageRecord=saved;damageAttacker=savedAttacker;return result;
@@ -350,7 +757,59 @@ int Hit(uintptr_t attacker,uintptr_t defender,int accuracy,int missile) {
         }
     }
     const bool forcedIncoming=incomingCheck;
+    // A new attack of the local player (swing, trigger, arrow): an earlier trigger hit's
+    // gate, or its damage record when no life write consumed it, never outlives it.
+    if(local){buttonOnHit={};buttonHit={};}
+    // Would-have-hit gate: a forced incoming hit, or the local player's physical
+    // swing on its target (not a riposte: that is a clean hit), arrow, throw or
+    // trigger/button melee hit (not Smite: it always hits natively).
+    bool swingGate=false,shotGate=false,buttonGate=false;
+    if(roll.attacker&&local&&!missile&&swingTarget!=NoSwing) {
+        uint32_t d[3]{};
+        swingGate=Read(defender,d)&&d[0]==1&&d[2]==swingTarget&&!RiposteDue(swingTarget);
+    }
+    // The local player's arrow or throw (contact_hits): Unleashed only.
+    if(roll.attacker&&local&&missile&&shotRules.load(std::memory_order_relaxed)) {
+        uint32_t d=~0u;
+        shotGate=Read(defender,d)&&d==1;
+    }
+    // The local player's melee hit check outside a physical swing (the trigger's basic
+    // attack or melee skill, Smite): a stroke on the swing clocks (Unleashed only).
+    bool buttonStroke=false;melee::ButtonStroke button{};
+    if(roll.attacker&&local&&!missile&&swingTarget==NoSwing&&buttonRules.load(std::memory_order_relaxed)) {
+        uint32_t d[3]{};
+        if(Read(defender,d)&&d[0]==1) {
+            button=melee::ButtonHit(d[2]);buttonStroke=true;buttonGate=!button.smite;
+            if(!button.onHit)buttonOnHit={attacker,defender,GetTickCount64()};   // inside a swing's cycle: no on-hit effects
+        }
+    }
+    const bool forcedHit=roll.attacker!=0;
+    const bool savedCheck=forcedCheck,savedGate=forcedGate,savedMissile=forcedMissile;
+    const int savedRoll=nativeHitRoll,savedChance=nativeHitChance;
+    if(forcedHit) {
+        forcedCheck=true;forcedGate=forcedIncoming||swingGate||shotGate||buttonGate;forcedMissile=missile!=0;nativeHitRoll=-1;nativeHitChance=-1;
+        if(forcedGate)missScope={};   // this attack's own verdict replaces any earlier one
+    }
     const int result=originalHit(attacker,defender,accuracy,missile);
+    if(forcedHit) {
+        if(forcedGate) {
+            const bool known=nativeHitRoll>=0&&nativeHitChance>=0;
+            const bool would=WouldHit(nativeHitRoll,nativeHitChance);
+            if(!result||!known)missScope={};   // unknown: native effects, as before the gate
+            if(!known)++verdictUnknown;
+            else if(forcedIncoming)++(would?verdictInHit:verdictInMiss);
+            else if(shotGate)++(would?verdictShotHit:verdictShotMiss);
+            else if(buttonGate)++(would?verdictButtonHit:verdictButtonMiss);
+            else ++(would?verdictSwingHit:verdictSwingMiss);
+            if(swingGate)lastSwingVerdict=known?int(would):-1;
+            else if(forcedIncoming)lastIncomingVerdict=known?int(would):-1;
+        }
+        // An arrow or throw that landed: its attack rating scales it at the life write.
+        if(shotGate)shotHit=result?ShotHit{attacker,defender,nativeHitChance,GetTickCount64()}:ShotHit{};
+        // A trigger hit that landed: its recovery and attack rating scale it at the life write.
+        if(buttonStroke)buttonHit=result?ButtonHit{attacker,defender,buttonGate?nativeHitChance:-1,button.recovery,buttonGate,GetTickCount64()}:ButtonHit{};
+        forcedCheck=savedCheck;forcedGate=savedGate;forcedMissile=savedMissile;nativeHitRoll=savedRoll;nativeHitChance=savedChance;
+    }
     if(forcedIncoming) {   // landed: its damage is scaled at the life write
         incomingCheck=false;
         incomingHit=result?IncomingHit{attacker,defender,incomingChance,GetTickCount64()}:IncomingHit{};
@@ -361,6 +820,19 @@ int Hit(uintptr_t attacker,uintptr_t defender,int accuracy,int missile) {
 }
 Seed* GetSeed(uintptr_t unit) {
     Seed* native=originalSeed(unit);
+    // Unleashed on-hit gate: a gated swing's critical/deadly strike rolls never
+    // crit. The real stream advances once, as the inline roll would.
+    if(critGate&&OnHitOffAttacker(unit)) {
+        const auto caller=reinterpret_cast<uintptr_t>(_ReturnAddress());
+        for(const auto at:CritSeedReturn)if(caller==d2rsig::Addr(at)) {
+            Seed current{};
+            if(!framevr::ReadMemory(&current,native,sizeof current)) {++failed;return native;}
+            const Seed next=AdvanceSeed(current);
+            if(!framevr::WriteMemory(native,&next,sizeof next)) {++failed;return native;}
+            noCritRoll=NoCritRoll();++gatedCrits;
+            return &noCritRoll;
+        }
+    }
     // Physical guard: only the block roll inside one judged incoming hit.
     // Advance the real stream once, exactly as the inline roll would.
     if(forced!=Forced::None&&!forcedServed&&reinterpret_cast<uintptr_t>(_ReturnAddress())==d2rsig::Addr(BlockSeedReturn)) {
@@ -383,6 +855,7 @@ Seed* GetSeed(uintptr_t unit) {
     // writes only thread-local scratch. No stats or save data are altered.
     if(!framevr::WriteMemory(native,&next,sizeof next)) {++failed;return native;}
     acceptedRoll={};++rolls;
+    if(forcedCheck)nativeHitRoll=NativeHitRoll(current);   // the roll the game would have compared
     return &acceptedRoll;
 }
 bool GridPosition(uintptr_t unit,float& x,float& z) {
@@ -536,10 +1009,13 @@ void StruckWear(uintptr_t game,uintptr_t attacker,uintptr_t defender) {
         chipWear={};++chipWearRedirects;WearShield(game,defender);   // a chip is a use of the shield
         return;
     }
+    // Would-have-hit gate: native wear comes with a landed melee hit only.
+    if(missWearReady&&MissGated(attacker,defender)){++missWear;return;}
     originalStruckWear(game,attacker,defender);
 }
-// Native still runs in full (avoid/dodge, block animation, FBR, sounds); only
-// its block roll is replaced by the physical verdict.
+// Native still runs in full (avoid/dodge, sounds; in Unleashed the hero's block
+// animation is refused by default, [gameplay] player_flinch); only its block
+// roll is replaced by the physical verdict.
 uint64_t NativeCallerRva(uintptr_t caller) {
     // Addr(0) means unresolved, not the image base. Subtract the resolved
     // block offset so diagnostics also work when signatures relocate it.
@@ -571,9 +1047,10 @@ int GuardedBlock(uintptr_t game,uintptr_t attacker,uintptr_t defender,int avoid,
     }
     if(guardTrace.load(std::memory_order_relaxed)) {
         const auto rva=NativeCallerRva(caller);
-        char line[300];snprintf(line,sizeof line,
-            "Frame guard native: monster=%u rank=%s verdict=%s block_flag=%d avoid_flag=%d result=%d roll_served=%d durability=%d caller=0x%llx",
-            monster,framevr::strain::RankName(rank),g==Guard::Parry?"PARRY":g==Guard::Block?"BLOCK":"OPEN",block,avoid,result,int(served),durability,(unsigned long long)rva);
+        char line[320];snprintf(line,sizeof line,
+            "Frame guard native: monster=%u rank=%s verdict=%s block_flag=%d avoid_flag=%d result=%d roll_served=%d durability=%d caller=0x%llx would_hit=%d",
+            monster,framevr::strain::RankName(rank),g==Guard::Parry?"PARRY":g==Guard::Block?"BLOCK":"OPEN",block,avoid,result,int(served),durability,(unsigned long long)rva,
+            lastIncomingVerdict);
         framevr::logging::Write(line);
     }
     if(!served)++guardUnserved; // native never reached its block roll (dodged/avoided first, or cannot block)
@@ -687,12 +1164,43 @@ void MirrorClientDurability(uint32_t itemId,int value) {
     }
     ++clientMissing;
 }
+int EquippedFireDamage(int location) {
+    uintptr_t player=0;
+    if(!LocalPlayerUnit(player)) {
+        const auto idxFn=reinterpret_cast<int(*)()>(d2rsig::Addr(nativeui::abi::LocalIndexRva));
+        const auto clientFn=reinterpret_cast<uintptr_t(*)(int)>(d2rsig::Addr(nativeui::abi::ClientPlayerRva));
+        if(idxFn&&clientFn) {
+            const int idx=idxFn();
+            if(idx>=0&&idx<8)player=clientFn(idx);
+        }
+    }
+    if(!player)return 0;
+    const auto invFn=reinterpret_cast<InventoryFn>(d2rsig::Addr(InventoryRva));
+    if(!invFn)return 0;
+    const uintptr_t inventory=invFn(player,reinterpret_cast<const char*>(d2rsig::Addr(InventoryFileRva)),0xb9e);
+    if(!inventory)return 0;
+    const auto eqFn=reinterpret_cast<EquippedFn>(d2rsig::Addr(EquippedRva));
+    if(!eqFn)return 0;
+    const uintptr_t item=eqFn(inventory,location);
+    if(!item)return 0;
+    uint32_t h[3]{};
+    if(!Read(item,h)||h[0]!=4)return 0;
+    const auto getStat=reinterpret_cast<GetStatFn>(d2rsig::Addr(GetStatRva));
+    if(!getStat)return 0;
+    const int maxFire=getStat(item,49,0);
+    const int minFire=getStat(item,48,0);
+    return maxFire>0?maxFire:(minFire>0?minFire:0);
+}
 bool LocalPlayerUnit(uintptr_t& unit) {
     UiPlayer player;{std::lock_guard lock(localPlayerMutex);player=uiPlayer;}
     uint32_t header[3]{};
     if(!player.unit||!player.session||player.session!=gamestate::LocalPlayer()||GetTickCount64()-player.at>650||
        !Read(player.unit,header)||header[0]!=0||header[2]!=player.id)return false;
     unit=player.unit;return true;
+}
+bool UnitStat(uintptr_t unit,int stat,int& value) {
+    if(unit<0x10000||!d2rsig::Check(GetStatRva,GetStatSig,sizeof GetStatSig))return false;
+    value=reinterpret_cast<GetStatFn>(d2rsig::Addr(GetStatRva))(unit,stat,0);return true;
 }
 bool LocalPlayerId(uint32_t& id) {
     const auto identity=localIdentity.load();const auto session=localSession.load();
@@ -722,13 +1230,28 @@ float GameVolume() {
     if(volume<0||!known||CompareFileTime(&a.ftLastWriteTime,&seen)){if(known)seen=a.ftLastWriteTime;volume=GameCombatVolume();}
     return volume;
 }
-uint32_t PhysicalSwing(uint32_t target) {const auto was=swingTarget;swingTarget=target;swingChance=-1;return was;}
+uint32_t PhysicalSwing(uint32_t target) {
+    const auto was=swingTarget;swingTarget=target;swingChance=-1;
+    if(target!=NoSwing)lastSwingVerdict=-1;   // a new swing's verdict (the restoring call keeps it for the trace)
+    return was;
+}
 float SwingRecovery(float factor) {const float was=swingRecovery;swingRecovery=factor;return was;}
 void ConfigureArDamage(bool on,float floor) {arDamage=on;arFloor=std::clamp(floor,0.f,1.f);}
 void NoteRiposte(uint32_t monster) {
     if(riposteMs.load()==0)return;   // a riposte is worth having with no bonus: it is a clean hit
     riposteMonster=monster;riposteUntil=GetTickCount64()+riposteMs.load();
 }
+bool RiposteDue(uint32_t monster) {return monster!=NoSwing&&riposteMonster.load()==monster&&GetTickCount64()<riposteUntil.load();}
+OnHitScope GateOnHit(OnHitScope scope) {
+    const OnHitScope was{onHitGated,onHitTarget};
+    onHitGated=scope.attacker&&scope.target?scope.attacker:0;onHitTarget=onHitGated?scope.target:0;
+    missScope={};   // around one swing's native attack: a would-miss verdict never outlives it
+    buttonOnHit={};buttonHit={};   // nor does a trigger hit's gate or unwritten damage
+    return was;
+}
+int LastSwingWouldHit() {return lastSwingVerdict;}
+void ConfigureShotRules(bool unleashed) {shotRules=unleashed;}
+void ConfigureButtonRules(bool unleashed) {buttonRules=unleashed;}
 void ConfigureRiposte(float bonus,uint32_t windowMs,float volume,const wchar_t* soundFile) {
     riposteBonus=std::clamp(bonus,0.f,4.f);riposteMs=windowMs;
     {std::lock_guard lock(riposteSoundMutex);const float v=std::clamp(volume,0.f,4.f);if(riposteExtra!=v){riposteExtra=v;riposteGain=-1;}}
@@ -898,8 +1421,43 @@ void Install() {
     if(!hitIn)hitIn=d2rsig::Hook(HitRva,HitSig,sizeof HitSig,reinterpret_cast<void*>(&Hit),reinterpret_cast<void**>(&originalHit));
     if(!blockIn)blockIn=d2rsig::Hook(BlockRva,BlockSig,sizeof BlockSig,reinterpret_cast<void*>(&Block),reinterpret_cast<void**>(&originalBlock));
     if(!dodgeIn)dodgeIn=d2rsig::Hook(DodgeRva,DodgeSig,sizeof DodgeSig,reinterpret_cast<void*>(&Dodge),reinterpret_cast<void**>(&originalDodge));
+    // Unleashed on-hit gate: each part only where its roll site matches this build;
+    // a part that does not stays native (its effects on every contact, as before).
+    if(!critGate)critGate=seedIn&&CheckSites(CritSites);
+    if(!leechGate)leechGate=applyDamageIn&&CheckSites(LeechSites);
+    if(!defenseGate)defenseGate=setStatIn&&CheckSites(DefenseSites);
+    if(!triggerIn&&CheckSites(EventSites))
+        triggerIn=d2rsig::Hook(TriggerRva,TriggerSig,sizeof TriggerSig,reinterpret_cast<void*>(&Trigger),reinterpret_cast<void**>(&originalTrigger));
+    if(!curseIn&&hitIn&&CheckSites(HealSites))
+        curseIn=d2rsig::Hook(CurseRva,CurseSig,sizeof CurseSig,reinterpret_cast<void*>(&Curse),reinterpret_cast<void**>(&originalCurse));
+    // Would-have-hit gate: each part only where this build has its sites; a part
+    // that does not match stays native (its effects on every forced contact, as before).
+    if(!missEventsReady)missEventsReady=triggerIn&&CheckSites(MissEventSites);
+    if(!effectsIn&&leechGate&&applyDamageIn&&CheckSites(EffectSites))   // after leechGate: this hook covers 450C9A
+        effectsIn=d2rsig::Hook(EffectsRva,EffectsSig,sizeof EffectsSig,reinterpret_cast<void*>(&DamageEffects),reinterpret_cast<void**>(&originalEffects));
+    if(!umodIn&&effectsIn)
+        umodIn=d2rsig::Hook(UmodRva,UmodSig,sizeof UmodSig,reinterpret_cast<void*>(&MonsterOnHit),reinterpret_cast<void**>(&originalUmod));
+    if(!thornsIn&&CheckSites(ThornsSites)) {
+        thornsIn=d2rsig::Hook(ThornsRva,ThornsSig,sizeof ThornsSig,reinterpret_cast<void*>(&Thorns),reinterpret_cast<void**>(&originalThorns));
+        missileThornsIn=thornsIn&&d2rsig::Hook(MissileThornsRva,MissileThornsSig,sizeof MissileThornsSig,reinterpret_cast<void*>(&MissileThorns),reinterpret_cast<void**>(&originalMissileThorns));
+    }
+    if(!missWearReady)missWearReady=struckWearIn&&CheckSites(WearSites);
+    if(!absorbReady)absorbReady=triggerIn&&CheckSites(AbsorbSites);
     if(seedIn&&hitIn&&blockIn&&dodgeIn&&!ready.exchange(true))
         framevr::logging::Write("Frame combat: deterministic local-player hit checks ready; native collision/range and damage retained");
+    if(ready.load()&&!onHitLogged) {
+        onHitLogged=true;
+        char line[260];snprintf(line,sizeof line,"Frame on-hit gate: crit/deadly strike=%s proc events=%s leech=%s prevent heal=%s defense per hit=%s (Unleashed: a full-cycle stroke's first contact only; off = native on every contact)",
+            critGate?"ready":"off",triggerIn?"ready":"off",leechGate?"ready":"off",curseIn?"ready":"off",defenseGate?"ready":"off");
+        framevr::logging::Write(line);
+    }
+    if(ready.load()&&!missLogged) {
+        missLogged=true;
+        char line[400];snprintf(line,sizeof line,"Frame would-hit gate: verdict=%s events=%s effects=%s monster mods=%s thorns=%s missile thorns=%s wear=%s prevent heal=%s defense per hit=%s absorb=%s (Unleashed: a forced contact's other effects only when its native roll would have hit; off = on every contact)",
+            hitChanceIn&&seedIn?"ready":"off",missEventsReady?"ready":"off",effectsIn?"ready":"off",umodIn?"ready":"off",thornsIn?"ready":"off",
+            missileThornsIn?"ready":"off",missWearReady?"ready":"off",curseIn?"ready":"off",defenseGate?"ready":"off",absorbReady?"ready":"off");
+        framevr::logging::Write(line);
+    }
 }
 void Report() {
     const auto gb=guardBlocks.exchange(0),go=guardOpen.exchange(0),gp=guardParries.exchange(0),gu=guardUnserved.exchange(0),gf=guardFallback.exchange(0),gl=guardLate.exchange(0);
@@ -924,6 +1482,38 @@ void Report() {
             ds,lastDefenseChance.load(),du);
         framevr::logging::Write(line);
     }
+    if(const auto ih=verdictInHit.exchange(0),im=verdictInMiss.exchange(0),sh=verdictSwingHit.exchange(0),sm=verdictSwingMiss.exchange(0),
+                  th=verdictShotHit.exchange(0),tm=verdictShotMiss.exchange(0),vu=verdictUnknown.exchange(0),ds=dotScaled.exchange(0),
+                  ab=absorbScaled.exchange(0);ih||im||sh||sm||th||tm||vu||ds||ab) {
+        char line[300];snprintf(line,sizeof line,"Frame would-hit gate: incoming would hit=%u would miss=%u swings would hit=%u would miss=%u shots would hit=%u would miss=%u unknown=%u damage over time scaled=%u absorbs scaled=%u",
+            ih,im,sh,sm,th,tm,vu,ds,ab);
+        framevr::logging::Write(line);
+    }
+    if(const auto ss=shotScaled.exchange(0),su=shotUnseen.exchange(0);ss||su) {
+        char line[160];snprintf(line,sizeof line,"Frame shot damage: scaled hits=%u last chance=%d%% chance unseen=%u",ss,lastShotChance.load(),su);
+        framevr::logging::Write(line);
+    }
+    {
+        const auto bh=verdictButtonHit.exchange(0),bm=verdictButtonMiss.exchange(0),bs=buttonScaled.exchange(0),bu=buttonUnseen.exchange(0);
+#ifdef D2RVR_DEVELOPER
+        if(bh||bm||bs||bu) {   // trigger/button melee: would-hit verdicts and life writes scaled
+            char line[220];snprintf(line,sizeof line,"Frame trigger melee damage: would hit=%u would miss=%u scaled hits=%u last chance=%d%% last factor=%.2f chance unseen=%u",
+                bh,bm,bs,lastButtonChance.load(),lastButtonFactor.load(),bu);
+            framevr::logging::Write(line);
+        }
+#else
+        (void)bh;(void)bm;(void)bs;(void)bu;
+#endif
+    }
+#ifdef D2RVR_DEVELOPER
+    // What the would-hit gate switched off on would-miss contacts.
+    if(const auto ev=missEvents.exchange(0),am=missAsMiss.exchange(0),fi=missFields.exchange(0),um=missUmods.exchange(0),
+                  th=missThorns.exchange(0),we=missWear.exchange(0),he=missHeal.exchange(0),de=missDefense.exchange(0);ev||am||fi||um||th||we||he||de) {
+        char line[280];snprintf(line,sizeof line,"Frame would-hit gate native: hit-only events skipped=%u events run as a miss=%u effect fields zeroed=%u monster mods skipped=%u thorns skipped=%u item wear skipped=%u prevent heal=%u defense per hit=%u",
+            ev,am,fi,um,th,we,he,de);
+        framevr::logging::Write(line);
+    }
+#endif
     if(const auto cm=clientMirrored.exchange(0),cx=clientMissing.exchange(0);cm||cx) {
         char line[120];snprintf(line,sizeof line,"Frame item wear: client durability updated=%u item not found on the client=%u",cm,cx);
         framevr::logging::Write(line);
@@ -941,6 +1531,15 @@ void Report() {
         char line[160];snprintf(line,sizeof line,"Frame riposte: landed=%u",rl);
         framevr::logging::Write(line);
     }
+#ifdef D2RVR_DEVELOPER
+    // What the on-hit gate switched off in gated swings' native attacks.
+    if(const auto md=gatedMeleeDamage.exchange(0),ma=gatedMeleeAttack.exchange(0),le=gatedLeech.exchange(0),
+                  cr=gatedCrits.exchange(0),he=gatedHeal.exchange(0),de=gatedDefense.exchange(0);md||ma||le||cr||he||de) {
+        char line[260];snprintf(line,sizeof line,"Frame on-hit gate native: domeleedamage events=%u domeleeattack events=%u leech zeroed=%u crit rolls=%u prevent heal=%u defense per hit=%u",
+            md,ma,le,cr,he,de);
+        framevr::logging::Write(line);
+    }
+#endif
     const auto ih=incomingHits.exchange(0),im=incomingMisses.exchange(0),mp=missParries.exchange(0),ep=earlyParries.exchange(0),pm=parryMisses.exchange(0),lp=lateParries.exchange(0);
     if(gb||go||gp||gu||gf||fh||gl||ih||im||ep||pm) {
         char guardLine[448];snprintf(guardLine,sizeof guardLine,"Frame guard: blocked=%u open=%u parries=%u swings_too_late=%u attack_start_known=%u no_block_roll=%u position_fallback=%u enemy_forced_hits=%u incoming_hits=%u incoming_misses=%u miss_parries=%u early_parries=%u late_parries=%u parry_misses=%u",gb,go,gp,gl,ga,gu,gf,fh,ih,im,mp,ep,lp,pm);

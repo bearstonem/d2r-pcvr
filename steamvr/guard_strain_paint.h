@@ -5,10 +5,12 @@
 namespace framevr::strain {
 struct PaintJob {
     float edge=1,alpha=0,feather=Feather;
-    uint32_t color=White;
-    float density=1;
+    uint32_t color=0x000000;   // black only
+    float density=2.5f;
+    float reachX=1,reachY=1; // the quad over the visor per axis (guard_strain.h Reach)
 };
-struct PaintImage {uint64_t key=0;std::vector<uint8_t> pixels;};
+// reach: what the image was painted for; the quad is drawn at that size.
+struct PaintImage {uint64_t key=0;std::vector<uint8_t> pixels;float reachX=1,reachY=1;};
 
 // Let each requested image finish before scheduling another one. Replacing
 // the request before Take discarded every finished image below 25 FPS while
@@ -19,8 +21,8 @@ class Painter {
 public:
     using Work=std::function<PaintImage(const PaintJob&)>;
     explicit Painter(Work work=[](const PaintJob& job){
-        return PaintImage{PaintKey(job.edge,job.alpha,job.feather,job.color,job.density),
-            Compose(job.edge,job.alpha,job.feather,job.color,job.density)};
+        return PaintImage{PaintKey(job.edge,job.alpha,job.feather,job.color,job.density,job.reachX,job.reachY),
+            Compose(job.edge,job.alpha,job.feather,job.color,job.density,job.reachX,job.reachY),Reach(job.reachX),Reach(job.reachY)};
     }):worker(std::move(work)){}
     bool Start(){return worker.Start();}
     bool Busy()const{return request!=0;}

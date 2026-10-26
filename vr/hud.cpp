@@ -75,6 +75,7 @@
 
 #include "journal_ui.h"
 #include "../steamvr/journal.h"
+#include "../steamvr/wrist_full_map.h"
 #ifdef D2RVR_NATIVE_OPENXR
 #include "../steamvr/ui_world.h"
 #endif
@@ -144,7 +145,8 @@ bool g_mapDrawn = false;
 framevr::NativeMutex g_lock;
 // Lists that have the interface bound now: the view they draw it through, and
 // whether the map's draws are being sent to our own target right now.
-struct Drawing { resource_view layer{}; bool inMap = false; uint32_t w = 0, h = 0; };
+struct Drawing { resource_view layer{}; bool inMap = false; uint32_t w = 0, h = 0;
+                 bool inFull = false; };   // Map view = Full map: under the full map's box now
 std::unordered_map<command_list*, Drawing> g_drawing;
 framevr::ActiveKeys g_drawingKeys;
 // The command-list API serializes recording on any one list. Unrelated world
@@ -252,6 +254,23 @@ bool IsMapScissor(const rect& r, uint32_t w, uint32_t h) {
 // share copies (the map is drawn only inside it). Under g_lock.
 rect g_mapScissor{};
 uint32_t g_mapScissorW = 0, g_mapScissorH = 0;
+
+// Map view = Full map (steamvr/wrist_full_map.h): set at each layer clear while the wrist
+// captures the full map. The draws under the full map's box (OnScissor) go to our map target,
+// never the eyes; any that could not (no target) are skipped (FullMapDraw).
+std::atomic<bool> g_fullFrame{false};
+rect g_fullBox{};   // the box last seen and its layer size, under g_lock
+uint32_t g_fullBoxW = 0, g_fullBoxH = 0;
+bool g_fullDrawn = false;   // drawn into our map target this frame: Publish copies the box. Under g_lock.
+bool g_mapFull = false;     // the wrist share holds the full map's box. Under g_lock.
+float g_mapGameZoom = 0.0f; // the game zoom that share was drawn at (0: the game's own). Under g_lock.
+// One full map a frame (fullmap::DrawForWrist): this frame's share already holds it (cleared
+// by MapFrame, the transport's frame start) and when it was copied; g_fullReuse: decided at
+// this pass's layer clear - its full map is skipped, the share and its tags stay. Under g_lock.
+bool g_fullThisFrame = false, g_fullReuse = false;
+uint64_t g_fullAt = 0;
+// The full map's draws and passes, logged every 10 s while it is shown. Under g_lock.
+struct FullCounts { uint64_t sent = 0, skipped = 0; uint32_t drawn = 0, reused = 0; uint64_t since = 0, last = 0; } g_fullCounts;
 
 // ── The pieces handed to FlatVR ─────────────────────────────────────────────
 
@@ -410,6 +429,11 @@ void Publish(command_list* cl, resource layer, uint32_t w, uint32_t h, framevr::
     if (policy.copyToolbar) bar = CopyOut(cl, layer, barBox, kBar);
     const bool drawn = g_mapDrawn;
     g_mapDrawn = false;
+    const bool full = g_fullDrawn && g_fullBoxW == w && g_fullBoxH == h;   // Map view = Full map
+    g_fullDrawn = false;
+    // this pass reused the frame's full map: the share and its tags stay as the first pass left them
+    const bool reused = g_fullReuse;
+    g_fullReuse = false;
     // the parts the labels' plane leaves flat: the toolbar's strip, and the map's box while it is drawn
     {
         const rect m = g_mapScissorW == w && g_mapScissorH == h ? g_mapScissor : MapRect(w, h);
@@ -420,17 +444,52 @@ void Publish(command_list* cl, resource layer, uint32_t w, uint32_t h, framevr::
         }
         if (!drawn) for (float& v : g_lab.keep[1]) v = 0.0f;
     }
-    if (drawn && g_frameMap.load() == 1 && g_mapTex.handle && g_mapW == w && g_mapH == h) {
+    if ((drawn || full) && g_frameMap.load() == 1 && g_mapTex.handle && g_mapW == w && g_mapH == h) {
         // the box the game drew the map in, once seen; the predicted one until then
-        const rect box = g_mapScissorW == w && g_mapScissorH == h ? g_mapScissor : MapRect(w, h);
+        // (Map view = Full map: the full map's box)
+        const rect box = full ? g_fullBox : g_mapScissorW == w && g_mapScissorH == h ? g_mapScissor : MapRect(w, h);
         mapBox = Clamped((float)box.left, (float)box.top, (float)box.right, (float)box.bottom, w, h);
         map = CopyOut(cl, g_mapTex, mapBox, kMap);
+        if (map) {   // the wrist share's size, once per change (at most 40 lines a session)
+            static uint32_t toldW = 0, toldH = 0; static bool toldFull = false; static int told = 0;
+            const uint32_t sw = (uint32_t)(mapBox.right - mapBox.left), sh = (uint32_t)(mapBox.bottom - mapBox.top);
+            if ((sw != toldW || sh != toldH || full != toldFull) && (full || toldFull) && told < 40) {
+                ++told; toldW = sw; toldH = sh; toldFull = full;
+                char line[160];
+                snprintf(line, sizeof line, "Frame full map: wrist share %ux%u from box %d,%d-%d,%d (%s)",
+                         sw, sh, mapBox.left, mapBox.top, mapBox.right, mapBox.bottom, full ? "the full map" : "the corner map");
+                Log(line);
+            }
+        }
     }
-    mapCaptured=map&&g_menuMap.load()&&!menu;
+    if (map && full) { g_fullThisFrame = true; g_fullAt = GetTickCount64(); }
+    if (full || reused) {   // a line every 10 s while the full map is shown, and when it stops
+        FullCounts& c = g_fullCounts;
+        const uint64_t now = GetTickCount64();
+        auto tell = [&](uint64_t until) {
+            if (c.drawn + c.reused) {
+                char line[240];
+                snprintf(line, sizeof line, "Frame full map: %.1f s: %u passes drew it for the wrist (%llu draws, %.0f a pass), %u reused the frame's first (%llu draws skipped)",
+                         (until - c.since) * .001, c.drawn, (unsigned long long)c.sent, c.drawn ? double(c.sent) / c.drawn : 0.0, c.reused, (unsigned long long)c.skipped);
+                Log(line);
+            }
+            c = {}; c.since = c.last = now;
+        };
+        if (!c.since || now - c.last > 2000) tell(c.last);
+        if (full) ++c.drawn; else ++c.reused;
+        c.last = now;
+        if (now - c.since >= 10000) tell(now);
+    }
+    if (!reused) {
+        g_mapFull = map && full;
+        // the zoom this frame's full map was drawn at (0: the game's own), so the wrist scales by what it shows
+        if (map) g_mapGameZoom = full ? framevr::fullmap::g_applied.load(std::memory_order_relaxed) : 0.0f;
+        mapCaptured=map&&g_menuMap.load()&&!menu;
+    }
     // From above and behind: back into the picture, grown from the toolbar's
     // bottom middle and from the map's own corner (left or right, by its middle).
     g_pic.on[kBar] = policy.redrawToolbar && bar && g_share[kBar].srv.handle;
-    g_pic.on[kMap] = classic && map && g_share[kMap].srv.handle;
+    g_pic.on[kMap] = classic && map && !full && g_share[kMap].srv.handle;   // the full map goes to the wrist only
     g_pic.at = GetTickCount64();
     if (g_pic.on[kBar]) {
         ZoomedUv(barBox, 0.5f * (float)(barBox.left + barBox.right), (float)barBox.bottom, g_barZoom.load(), w, h, g_pic.box[kBar]);
@@ -448,7 +507,7 @@ void Publish(command_list* cl, resource layer, uint32_t w, uint32_t h, framevr::
     if (FlatVRGameHud* b = (bar || map || g_block) ? Block() : nullptr) {
         // in the picture from above and behind: nothing in the room
         b->panel[kBar].visible = bar && !classic ? 1u : 0u;
-        b->panel[kMap].visible = map && !classic && g_mapShown.load() ? 1u : 0u;
+        b->panel[kMap].visible = map && !full && !classic && g_mapShown.load() ? 1u : 0u;
         b->look = g_look;
         for (int i = 0; i < kShares; ++i) b->pose[i] = g_pose[i];
         b->counter = b->counter + 1;
@@ -502,8 +561,20 @@ bool SkipMapName(command_list* cl) {
     }
     return ps == kMapTextPsA || ps == kMapTextPsB;
 }
-bool OnMapDraw(command_list* cl, uint32_t, uint32_t, uint32_t, uint32_t) { return SkipMapName(cl); }
-bool OnMapDrawIndexed(command_list* cl, uint32_t, uint32_t, uint32_t, int32_t, uint32_t) { return SkipMapName(cl); }
+// Map view = Full map: a draw under the full map's box that did not go to our map target is
+// skipped, so the wrist's full map never shows in the eyes - nor drawn again in a pass that
+// reuses the frame's first (g_fullReuse). Otherwise one relaxed load.
+bool FullMapDraw(command_list* cl) {
+    if (!g_fullFrame.load(std::memory_order_relaxed) || !g_drawingKeys.MaybeContains(ListKey(cl))) return false;
+    DrawingLock g;
+    auto it = g_drawing.find(cl);
+    if (it == g_drawing.end() || !it->second.inFull) return false;
+    if (it->second.inMap) { ++g_fullCounts.sent; return false; }
+    ++g_fullCounts.skipped;
+    return true;
+}
+bool OnMapDraw(command_list* cl, uint32_t, uint32_t, uint32_t, uint32_t) { return FullMapDraw(cl) || SkipMapName(cl); }
+bool OnMapDrawIndexed(command_list* cl, uint32_t, uint32_t, uint32_t, int32_t, uint32_t) { return FullMapDraw(cl) || SkipMapName(cl); }
 
 bool OnClear(command_list* cl, resource_view rtv, const float c[4], uint32_t, const rect*) {
     device* dev = cl->get_device();
@@ -513,13 +584,21 @@ bool OnClear(command_list* cl, resource_view rtv, const float c[4], uint32_t, co
     {   // the map's view, re-read now and then
         static uint64_t readAt = 0;
         const uint64_t now = GetTickCount64();
-        if (now - readAt > 250) { readAt = now; g_topDownNames.store(vrsettings::Read().values[framevr::settings::MapTopDown] > .5f); }
+        if (now - readAt > 250) { readAt = now; g_topDownNames.store(framevr::settings::MapViewTopDown(vrsettings::Read().values[framevr::settings::MapTopDown])); }
     }
-    if (g_frameMap.load() == 1) {   // the frame's interface starts: so does the map's
-        const resource_desc d = framevr::resources::Describe(dev,framevr::resources::Resolve(dev,rtv));
-        std::lock_guard g(g_lock);
-        if (EnsureMapTarget(dev, d.texture.width, d.texture.height)) cl->clear_render_target_view(g_mapRtv, kEmpty);
+    {   // Map view = Full map: this frame's full map goes to the wrist
+        namespace fm = framevr::fullmap;
+        g_fullFrame.store(fm::Active(fm::g_on.load(std::memory_order_relaxed), fm::g_capture.load(std::memory_order_relaxed),
+                                     fm::g_layout.load(std::memory_order_relaxed), fm::g_panel.load(std::memory_order_relaxed)), std::memory_order_relaxed);
     }
+    const bool redirect = g_frameMap.load() == 1;
+    const resource_desc d = redirect ? framevr::resources::Describe(dev,framevr::resources::Resolve(dev,rtv)) : resource_desc{};
+    std::lock_guard g(g_lock);
+    // one full map a frame: a later pass keeps the first pass's share (fullmap::DrawForWrist)
+    g_fullReuse = redirect && g_fullFrame.load(std::memory_order_relaxed) &&
+                  !framevr::fullmap::DrawForWrist(g_fullThisFrame, GetTickCount64() - g_fullAt);
+    // the frame's interface starts: so does the map's
+    if (redirect && EnsureMapTarget(dev, d.texture.width, d.texture.height) && !g_fullReuse) cl->clear_render_target_view(g_mapRtv, kEmpty);
     return false;
 }
 
@@ -527,12 +606,20 @@ bool OnClear(command_list* cl, resource_view rtv, const float c[4], uint32_t, co
 void OnScissor(command_list* cl, uint32_t, uint32_t count, const rect* rects) {
     framevr::hookmetrics::Scope measured(framevr::hookmetrics::HudScissor);
     const bool redirect = g_frameMap.load() == 1;   // else only seen: the labels keep the map flat
-    if (count == 0 || (!redirect && !g_labels.load()) || !g_drawingKeys.MaybeContains(ListKey(cl))) return;
+    const bool fullFrame = g_fullFrame.load(std::memory_order_relaxed);   // Map view = Full map
+    if (count == 0 || (!redirect && !g_labels.load() && !fullFrame) || !g_drawingKeys.MaybeContains(ListKey(cl))) return;
     DrawingLock g;
     auto it = g_drawing.find(cl);
     if (it == g_drawing.end()) return;
     Drawing& d = it->second;
-    const bool map = IsMapScissor(rects[0], d.w, d.h);
+    // Map view = Full map: the full map's box (the 16:9 band of the layer); its draws go to
+    // our target like the corner map's, or are skipped (FullMapDraw) when they cannot, or when
+    // this pass reuses the frame's first full map.
+    const bool full = fullFrame && framevr::fullmap::IsFullBox(rects[0].left, rects[0].top, rects[0].right, rects[0].bottom, d.w, d.h);
+    const bool toWrist = full && redirect && g_mapRtv.handle && !g_fullReuse;
+    d.inFull = full;
+    if (full) { g_fullBox = rects[0]; g_fullBoxW = d.w; g_fullBoxH = d.h; if (toWrist) g_fullDrawn = true; }
+    const bool map = !full && IsMapScissor(rects[0], d.w, d.h);
     if (map && (rects[0].left != g_mapScissor.left || rects[0].top != g_mapScissor.top ||
                 rects[0].right != g_mapScissor.right || rects[0].bottom != g_mapScissor.bottom)) {
         char line[160];
@@ -541,8 +628,9 @@ void OnScissor(command_list* cl, uint32_t, uint32_t count, const rect* rects) {
     }
     if (map) { g_mapScissor = rects[0]; g_mapScissorW = d.w; g_mapScissorH = d.h; g_mapDrawn = true; }
     if (!redirect || !g_mapRtv.handle) return;
-    if (map && !d.inMap) { Bind(cl, g_mapRtv); d.inMap = true; }
-    else if (!map && d.inMap) { Bind(cl, d.layer); d.inMap = false; }
+    const bool toMap = map || toWrist;
+    if (toMap && !d.inMap) { Bind(cl, g_mapRtv); d.inMap = true; }
+    else if (!toMap && d.inMap) { Bind(cl, d.layer); d.inMap = false; }
 }
 
 // The list leaves the interface for another target: the interface is drawn - empty it.
@@ -670,11 +758,13 @@ uint64_t UiTexture(uint32_t& width,uint32_t& height,int32_t crop[4]) {
     width=g_lab.w;height=g_lab.h;std::copy_n(uiCrop,4,crop);return g_lab.tex.handle;
 }
 void MenuMapCapture(bool active) {g_menuMap.store(active);}
-void MapFrame() {std::lock_guard lock(g_lock);mapCaptured=false;}
-uint64_t MapTexture(uint32_t& width,uint32_t& height) {
+void MapFrame() {std::lock_guard lock(g_lock);mapCaptured=false;g_fullThisFrame=false;}
+uint64_t MapTexture(uint32_t& width,uint32_t& height,bool* full,float* gameZoom) {
     std::lock_guard lock(g_lock);
     const auto& s=g_share[kMap];
     if(!g_menuMap.load()||g_menu.load()||!mapCaptured||!s.tex.handle)return 0;
+    if(full)*full=g_mapFull;
+    if(gameZoom)*gameZoom=g_mapGameZoom;
     width=s.w;height=s.h;return s.tex.handle;
 }
 void SetHide(int mode) { g_hide.store(mode); }

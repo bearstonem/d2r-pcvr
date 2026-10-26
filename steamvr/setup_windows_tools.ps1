@@ -67,7 +67,9 @@ Set-Content -LiteralPath (Join-Path $pythonDirectory 'python312._pth') -Encoding
 
 $sdkRepos = @(
     @{name = 'D2RLoader-PluginSDK'; url = 'https://github.com/D2RLoader/PluginSDK.git'; commit = '717f727a0ec52912d1558764345f8fa3453a2bd6'},
-    @{name = 'OpenXR-SDK'; url = 'https://github.com/KhronosGroup/OpenXR-SDK.git'; commit = '57af7fc61f9f2d492580cb28aab6d0ea59d8d417'}
+    @{name = 'OpenXR-SDK'; url = 'https://github.com/KhronosGroup/OpenXR-SDK.git'; commit = '57af7fc61f9f2d492580cb28aab6d0ea59d8d417'},
+    # Box3D v0.1.0 (MIT): rigid-body physics for dropped empty bottles.
+    @{name = 'box3d'; url = 'https://github.com/erincatto/box3d.git'; commit = '8441b4a06d6d09dcfb0b0f704df4d847d1437b92'}
 )
 foreach ($sdkRepo in $sdkRepos) {
     $checkout = Join-Path $depsRoot $sdkRepo.name

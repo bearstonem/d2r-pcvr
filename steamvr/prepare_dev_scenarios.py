@@ -16,6 +16,8 @@ FILES = (PLUGIN, Path('d2rloader/plugins/d2r_pcvr.ini'),
          Path('reshade/ReShade.ini'), Path('reshade/D2R_Frame_ReShade.ini'))
 TREES = ('d2rloader/plugins/d2r_vr_icons', 'd2rloader/plugins/d2r_vr_potions',
          'reshade/reshade-shaders', 'reshade/D2R_Sky_ours')
+# Copied when present; the installer may be unable to prepare them.
+OPTIONAL_TREES = ('d2rloader/plugins/d2r_vr_spell_sprites', 'd2rloader/plugins/d2r_vr_props')
 
 
 def checked(path):
@@ -57,6 +59,7 @@ def stage(game, plugin=None, experimental_battlenet=False):
     capable(candidates.get(PLUGIN, root / PLUGIN))
     if missing:
         trees = [(tree, tree) for tree in TREES]
+        trees += [(tree, tree) for tree in OPTIONAL_TREES if checked(source / tree).is_dir()]
         # Locally prepared native assets (e.g. Arcane sky overrides) mount under
         # the selected mod's .mpq folder. Never copy the normal savepath metadata.
         if checked(source / 'D2R-PCVR.mpq/data').is_dir():

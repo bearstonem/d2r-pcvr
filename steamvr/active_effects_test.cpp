@@ -18,6 +18,10 @@ int main() {
     auto next=sample();assert(!next.Has(33)&&!next.Has(32)&&!next.Has(2)&&next.Has(49)&&next.Has(101));
     // Permanent passives, internal flags and learned skills are not status icons.
     native[70]=true;native[91]=true;native[185]=true;assert(sample()==next);
+    // An aura on the player (Fanaticism 49 here); Holy Shield, curses and monster rows are not
+    assert(effects::AnyAura(next)&&effects::AnyAura(active)&&!effects::AnyAura(empty));
+    {effects::Status s;s.known=true;for(int state:{101,29,44,32,2})s.Set(state);assert(!effects::AnyAura(s));
+     s.Set(43);assert(effects::AnyAura(s));s.known=false;assert(!effects::AnyAura(s));}
     unsigned calls=0;
     for(unsigned n:{0u,179u,513u})assert(!effects::Capture(n,[&](int){++calls;return 0;}).known);
     assert(!calls);

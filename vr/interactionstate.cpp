@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdio>
 #include "interactionstate.h"
+#include "skeletons.h"
 #include "logging.h"
 #include "native_ui.h"
 #include "native_belt.h"
@@ -13,7 +14,10 @@
 #include "melee.h"
 #include "bow.h"
 #include "companions.h"
+#include "companion_ai.h"
 #include "active_effects.h"
+#include "../steamvr/shapeshift_form.h"
+#include "combat.h"
 namespace gamestate {uint32_t WeaponSet();uint64_t LocalPlayer();bool MenuOpen();}
 namespace gamecmd {bool ExecuteUiCommand(uint32_t);}
 namespace framevr {bool VrGameplay(uint64_t now);}
@@ -46,7 +50,9 @@ constexpr int GlassBreak=2587;
 uint64_t issuedAt=0,cancelEpoch=0;
 bool scheduled=false;
 template<class T>const T* Service(const PluginContext* c) {const T* p=nullptr;return c->QueryService(&p)==ServiceQueryResult::Success?p:nullptr;}
-Item Copy(const Items::ItemInfo& i){return {i.handle,i.runtimeId,i.code,uint32_t(i.quality),i.qualityRecordId};}
+Item Copy(const Items::ItemInfo& i, uint32_t fireDamage = 0) {
+    return {i.handle, i.runtimeId, i.code, uint32_t(i.quality), i.qualityRecordId, i.socketedItemCount, 0, fireDamage};
+}
 void __cdecl PlayHeal(const PluginContext*,void* unit) noexcept {
     const bool played=melee::HirelingOverlay(uint32_t(reinterpret_cast<uintptr_t>(unit)),HealOverlay);
     framevr::logging::Write(played?"Frame potion toss: native healing overlay played on the mercenary":
@@ -74,13 +80,15 @@ Snapshot Collect() {
     s.session=player;s.activeSet=gamestate::WeaponSet();
     s.equipmentKnown=s.activeSet==1||s.activeSet==2;
     for(int i=0;i<4;++i) {
+        const int loc = i<2 ? 4+i : 9+i;
         ItemHandle handle=InvalidItemHandle;
-        const auto result=inventory->getEquippedItem(context,player,i<2?4+i:9+i,&handle);
+        const auto result=inventory->getEquippedItem(context,player,loc,&handle);
         if(result!=Inventory::Result::Success&&result!=Inventory::Result::NotFound){s.equipmentKnown=false;continue;}
         if(!handle)continue;
         Items::ItemInfo item{};item.structSize=sizeof item;
         if(items->getItemInfo(context,handle,&item)!=Items::Result::Success){s.equipmentKnown=false;continue;}
-        if(s.activeSet==1||s.activeSet==2)s.sets[(i/2)^(s.activeSet-1)][i%2]=Copy(item);
+        const uint32_t fireDmg = static_cast<uint32_t>(std::max(0, combat::EquippedFireDamage(loc)));
+        if(s.activeSet==1||s.activeSet==2)s.sets[(i/2)^(s.activeSet-1)][i%2]=Copy(item, fireDmg);
     }
     Inventory::ItemFilter filter{sizeof filter,0,Items::ContainerBit(Items::ItemContainer::Belt),0};
     BeltRead belt{&s};
@@ -126,7 +134,7 @@ void __cdecl ClearTint(const PluginContext*,void*) noexcept {
 void Publish(Snapshot s) {
     std::lock_guard lock(mutex);
     s.revision=snapshot.revision;
-    bool changed=s.developer!=snapshot.developer||s.devDebugDraws!=snapshot.devDebugDraws||s.devTurnsKeepOwn!=snapshot.devTurnsKeepOwn||s.devClass!=snapshot.devClass||s.skillClass!=snapshot.skillClass||s.session!=snapshot.session||s.activeSet!=snapshot.activeSet||s.equipmentKnown!=snapshot.equipmentKnown||
+    bool changed=s.developer!=snapshot.developer||s.devDebugDraws!=snapshot.devDebugDraws||s.devTurnsKeepOwn!=snapshot.devTurnsKeepOwn||s.devTurnsSharp!=snapshot.devTurnsSharp||s.devTurnsFill!=snapshot.devTurnsFill||s.devTurnsRims!=snapshot.devTurnsRims||s.devSkyRims!=snapshot.devSkyRims||s.devClass!=snapshot.devClass||s.skillClass!=snapshot.skillClass||s.session!=snapshot.session||s.activeSet!=snapshot.activeSet||s.equipmentKnown!=snapshot.equipmentKnown||
                  s.sets!=snapshot.sets||s.beltKnown!=snapshot.beltKnown||s.skills!=snapshot.skills||
                  s.catalog!=snapshot.catalog||s.skillCount!=snapshot.skillCount||s.bindingBank!=snapshot.bindingBank||s.bindingsEditable!=snapshot.bindingsEditable||
                  s.vitalsKnown!=snapshot.vitalsKnown||int(s.health)!=int(snapshot.health)||int(s.mana)!=int(snapshot.mana)||
@@ -155,6 +163,7 @@ void Publish(Snapshot s) {
             // The game's own healing overlay on the merc, with its "thanks".
             if(threads&&threads->runOnGameThread&&merc.unitId)
                 threads->runOnGameThread(context,&PlayHeal,reinterpret_cast<void*>(uintptr_t(merc.unitId)));
+            companionai::OnPotionReceived();
         }
         else if(waiting.action==Action::FeedMerc&&result==Result::Refused)
             framevr::logging::Write("Frame potion toss: native mercenary belt use did not consume the thrown item");
@@ -262,6 +271,15 @@ framevr::interaction::Snapshot Read(){std::lock_guard lock(mutex);return snapsho
 int CurrentLevel(uint64_t session,uint64_t now) {
     std::lock_guard lock(mutex);
     return framevr::interaction::Fresh(snapshot,session,now)?snapshot.location.level:0;
+}
+int ShapeForm(uint64_t session,uint64_t now) {
+    // The rig the game draws as the hero, while one is drawn: the state sample trails the swap
+    // and goes stale after a load (a shield druid lost every block in that window - the guard
+    // was armed for a shield the form doesn't draw).
+    if(const int posed=skel::PosedForm();posed>=0)return posed;
+    std::lock_guard lock(mutex);
+    if(!session||mercSession!=session||now<mercAt||now-mercAt>MercMaxAge)return 0;
+    return framevr::shapeshift::FromStates(effects);
 }
 framevr::interaction::Reply Status(){const auto dev=devscenarios::Status();if(dev.sequence)return dev;std::lock_guard lock(mutex);return reply;}
 void Request(const framevr::interaction::Request& r) {

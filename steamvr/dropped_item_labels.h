@@ -1,5 +1,4 @@
 #pragma once
-#include "menu_controls.h"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -31,39 +30,6 @@ inline Display display;
 // the game not to fill it; rarity colors and intentional no-fill styles survive.
 inline float BackingAlpha(float native){return native>0?std::max(native,BackgroundAlpha):native;}
 
-class Shortcut {
-    uint64_t session=0,epoch=0,last=0;
-    bool armed=false,triggerHeld=false,gripHeld=false,triggerConsumed=false,gripConsumed=false;
-public:
-    void Suspend(){armed=false;last=0;}
-    bool Step(uint64_t player,uint64_t version,uint64_t now,bool allowed,float trigger,float grip) {
-        const bool finite=std::isfinite(trigger)&&std::isfinite(grip);
-        const bool valid=allowed&&player&&finite;
-        if(!valid||player!=session||version!=epoch||now<=last||now-last>150)armed=false;
-        session=player;epoch=version;last=now;
-        const bool wasTrigger=triggerHeld;
-        // Use the analog actions directly. Hysteresis tolerates squeeze noise;
-        // adding grip to a trigger already used for combat is not a new chord.
-        triggerHeld=finite&&trigger>(triggerHeld?.2f:.55f);
-        gripHeld=finite&&grip>(gripHeld?.35f:.55f);
-        const bool edge=triggerHeld&&!wasTrigger;
-        if(!triggerHeld)triggerConsumed=false;
-        if(!gripHeld)gripConsumed=false;
-        if(valid&&triggerHeld&&gripHeld&&(edge||!armed||triggerConsumed))triggerConsumed=gripConsumed=true;
-        if(!triggerHeld&&valid)armed=true;
-        // Hold, never latch. Either release hides the extra labels immediately,
-        // while the remaining consumed button cannot replay into combat/grabs.
-        // Grip may be re-squeezed during our consumed trigger hold; adding it
-        // to an unrelated attack still cannot steal that attack's trigger.
-        return valid&&armed&&triggerHeld&&gripHeld&&triggerConsumed;
-    }
-    bool Consumed(bool nativeUi=false)const{return !nativeUi&&triggerConsumed;}
-    bool GripConsumed(bool nativeUi=false)const{return !nativeUi&&gripConsumed;}
-    void Filter(menus::Pad& controls,float& rightGrip,bool nativeUi=false)const {
-        if(Consumed(nativeUi))controls.rt=0;
-        if(GripConsumed(nativeUi)){controls.buttons&=~menus::RightBumper;rightGrip=0;}
-    }
-};
 struct TextScaleScope {
     float& slot;float previous;
     TextScaleScope(float& value,float scale):slot(value),previous(value){slot=scale;}

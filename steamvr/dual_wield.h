@@ -23,6 +23,12 @@ inline bool Eligible(int heroClass,const Equipment& e) {
     if(heroClass==6)return e.type[0]==D2RVR_TYPE_CLAW&&e.type[1]==D2RVR_TYPE_CLAW;
     return heroClass==4&&MeleeType(e.type[0])&&MeleeType(e.type[1]);
 }
+// Double Throw (#224): a throwing weapon in each of a Barbarian's hands, each
+// thrown by its own hand.
+inline bool ThrownType(uint32_t type) {return type==D2RVR_TYPE_THROWING||type==D2RVR_TYPE_JAVELIN;}
+inline bool ThrownPair(int heroClass,const Equipment& e) {
+    return heroClass==4&&Eligible(heroClass,e)&&ThrownType(e.type[0])&&ThrownType(e.type[1]);
+}
 // Rendered R/L attachments use the native primary/secondary composite slots,
 // which can differ from inventory body-slot order after equipping items.
 inline bool SamePair(uint32_t right,uint32_t left,const Equipment& e) {

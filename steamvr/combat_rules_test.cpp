@@ -1,4 +1,5 @@
 #include "../vr/combat_rules.h"
+#include "attack_speed.h"
 #undef NDEBUG
 #include <cassert>
 #include <cstdio>
@@ -62,5 +63,73 @@ int main() {
     assert(near(CleaveFactor(0,.25f,.25f),1)&&near(CleaveFactor(1,.25f,.25f),.75f)&&near(CleaveFactor(2,.25f,.25f),.5f));
     assert(near(CleaveFactor(3,.25f,.25f),.25f)&&near(CleaveFactor(9,.25f,.25f),.25f));
     assert(near(CleaveFactor(5,0,.25f),1)&&near(CleaveFactor(5,-1,.25f),1)&&near(CleaveFactor(4,.25f,0),0));
-    std::puts("Combat rules: local ownership, guaranteed accuracy, subsequent random-stream and swing damage tests passed");
+    // On-hit gate: a full-cycle stroke's first landed contact only.
+    assert(OnHitGate(true,600,600)==OnHit::Allowed&&OnHitGate(true,5000,600)==OnHit::Allowed);           // at the breakpoint and after
+    assert(OnHitGate(true,599,600)==OnHit::NotFullCycle&&OnHitGate(true,0,600)==OnHit::NotFullCycle);    // a stroke inside the cycle
+    assert(OnHitGate(false,5000,600)==OnHit::CleaveFollowUp&&OnHitGate(false,UINT64_MAX,0)==OnHit::CleaveFollowUp); // the stroke's next creature
+    assert(OnHitGate(true,UINT64_MAX,600)==OnHit::Allowed);   // the first stroke
+    assert(OnHitGate(true,10,0)==OnHit::Allowed);             // an unknown cycle counts as full
+    // Grace gives full damage early but never opens the gate before the full cycle.
+    assert(RecoveryFactor(520,600,2,.85f)==1.f&&OnHitGate(true,520,600)==OnHit::NotFullCycle);
+    {   // Trigger/button melee: a stroke on the swing clocks, never on another trigger hit.
+        assert(StrokeGap(0,500)==UINT64_MAX);                       // no trigger hit yet
+        assert(StrokeGap(1000,1250)==250&&StrokeGap(1250,1000)==250); // either order in one batch
+        assert(StrokeGap(1000,1000)==0);
+        const auto none=TriggerRecovery(UINT64_MAX,600,true,2,1);   // trigger only: native pace, full
+        assert(none.recovery==1.f&&none.onHit==OnHit::Allowed);
+        const auto soon=TriggerRecovery(300,600,true,2,1);          // half a cycle after a swing
+        assert(near(soon.recovery,.25f)&&soon.onHit==OnHit::NotFullCycle);
+        const auto full=TriggerRecovery(600,600,true,2,1);
+        assert(full.recovery==1.f&&full.onHit==OnHit::Allowed);
+        const auto off=TriggerRecovery(300,600,false,2,1);          // swing_recovery_damage 0: the gate still holds
+        assert(off.recovery==1.f&&off.onHit==OnHit::NotFullCycle);
+        assert(TriggerRecovery(10,0,true,2,1).recovery==1.f&&TriggerRecovery(10,0,true,2,1).onHit==OnHit::Allowed); // unknown cycle
+        // Alternating: swing at 0, trigger hit at 300, swing at 600 (cycle 600). The trigger is
+        // half recovered, and the second swing is measured from it, not from the first swing.
+        framevr::attackspeed::Cadence swing;const uint64_t s=1;const uint32_t cycle=600;
+        swing.Landed(s,1000,cycle);
+        assert(near(TriggerRecovery(swing.Since(s,1300),cycle,true,2,1).recovery,.25f));
+        const uint64_t trigger=1300;
+        const uint64_t since=SwingSince(swing.Since(s,1600),trigger,1600);
+        assert(since==300&&near(RecoveryFactor(since,cycle,2),.25f)&&OnHitGate(true,since,cycle)==OnHit::NotFullCycle);
+        // A second trigger hit 200 ms after the first, 500 ms after the swing: measured from
+        // the swing ((500/600)^2), not from the trigger hit ((200/600)^2).
+        assert(near(TriggerRecovery(swing.Since(s,1500),cycle,true,2,1).recovery,.25f*100/36));
+        // A swing sampled just before a trigger hit the batch already applied: the gap counts.
+        assert(SwingSince(5000,1300,1260)==40&&SwingSince(20,1300,1600)==20);
+        assert(SwingSince(UINT64_MAX,0,1600)==UINT64_MAX&&SwingSince(700,0,1600)==700);   // no trigger hit: its own clock
+    }
+    {   // A form's two claws share one recovery clock: of two landing together, one carries effects.
+        framevr::attackspeed::Cadence clock;const uint64_t s=1;const uint32_t cycle=600;
+        assert(OnHitGate(true,clock.Since(s,1000),cycle)==OnHit::Allowed);clock.Landed(s,1000,cycle);   // right claw
+        assert(OnHitGate(true,clock.Since(s,1030),cycle)==OnHit::NotFullCycle);clock.Landed(s,1030,cycle); // left claw, its own stroke
+        assert(OnHitGate(true,clock.Since(s,1400),cycle)==OnHit::NotFullCycle);                         // flailing
+        assert(OnHitGate(true,clock.Since(s,1630),cycle)==OnHit::Allowed);                              // a full cycle after the last
+        // Dual wield: one clock per hand, so each blade's full-cycle stroke carries effects.
+        framevr::attackspeed::Cadence right,left;
+        right.Landed(s,1000,cycle);left.Landed(s,1030,cycle);
+        assert(OnHitGate(true,right.Since(s,1600),cycle)==OnHit::Allowed&&OnHitGate(true,left.Since(s,1600),cycle)==OnHit::NotFullCycle);
+    }
+    // A gated critical/deadly strike roll reads 99: under no chance from 0 to 99.
+    assert(AdvanceSeed(NoCritRoll()).low%100==99);
+    for(int chance=0;chance<=99;++chance)assert(!(AdvanceSeed(NoCritRoll()).low%100<uint32_t(chance)));
+    // Would-have-hit gate: the roll is the game's own (advanced low % 100), hit when roll < chance.
+    {
+        Seed s{0x12345678u,0x9abcdef0u};
+        for(int i=0;i<1000;++i){assert(NativeHitRoll(s)==int(AdvanceSeed(s).low%100));s=AdvanceSeed(s);}
+        assert(WouldHit(4,5)&&!WouldHit(5,5)&&WouldHit(94,95)&&!WouldHit(95,95)&&!WouldHit(99,95));   // the clamp ends
+        assert(WouldHit(-1,50)&&WouldHit(50,-1)&&WouldHit(-1,-1));   // unknown = native effects
+        // Over the real stream, the would-hit share is the chance: effects match native on average.
+        for(int chance:{5,30,61,95}) {
+            Seed r{0xdeadbeefu,0x1234u};int hits=0;const int n=200000;
+            for(int i=0;i<n;++i){hits+=WouldHit(NativeHitRoll(r),chance);r=AdvanceSeed(r);}
+            const double share=double(hits)/n;
+            assert(share>chance/100.-.01&&share<chance/100.+.01);
+        }
+        // Damage over time follows the hit's factor; a positive rate never rounds to nothing.
+        assert(ScaleDamageOverTime(400,.25)==100&&ScaleDamageOverTime(50,.05)==3&&ScaleDamageOverTime(16,.3)==5);
+        assert(ScaleDamageOverTime(10,.01)==1&&ScaleDamageOverTime(10,0)==0&&ScaleDamageOverTime(10,1)==10);
+        assert(ScaleDamageOverTime(0,.5)==0&&ScaleDamageOverTime(-3,.5)==-3&&ScaleDamageOverTime(100,1.5)==150);
+    }
+    std::puts("Combat rules: local ownership, guaranteed accuracy, subsequent random-stream, swing damage, on-hit and would-hit gate tests passed");
 }

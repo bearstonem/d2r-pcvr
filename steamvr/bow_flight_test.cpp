@@ -145,6 +145,53 @@ int main() {
             auto bad=f.shot;bad.kind=Kind(2);Check(!Valid(bad),"unknown projectile cannot reach native firing path");
         }
     }
+    {   // #221: every javelin, throwing knife and axe flies as the game's own missile for it
+        for(uint32_t id:{1u,35u,36u,37u,371u})Check(ThrownMissile(id)&&ThrownFor(id).missile==id,"each thrown weapon's missile is known");
+        Check(!ThrownMissile(0)&&!ThrownMissile(31)&&!ThrownMissile(2)&&ThrownFor(99).missile==1,"arrows, bolts and spells are not thrown; unknown falls back to the javelin");
+        Shot s=Release();s.kind=Kind::Javelin;
+        Check(MissileId(s)==1&&ProjectileLength(s)==JavelinLength,"a throw the game has not named yet is a javelin");
+        const Vec hand=s.origin;
+        Check(ResolveThrown(s,36)&&MissileId(s)==36&&ProjectileLength(s)==.3f&&Length(s.origin-(hand-s.direction*.08f))<1e-5f,
+              "a knife: its missile, its length, and the hand at its grip");
+        Check(!ResolveThrown(s,35)&&MissileId(s)==36,"named once");
+        Shot arrow=Release();Check(!ResolveThrown(arrow,36)&&MissileId(arrow)==0,"never an arrow");
+        Shot javelin=Release();javelin.kind=Kind::Javelin;Check(ResolveThrown(javelin,1)&&Length(javelin.origin-(hand-javelin.direction*JavelinGrip))<1e-5f,
+              "a javelin keeps its grip");
+        // #224: a javelin skill flies its own missile from the javelin's grip; a basic resolution never touches it.
+        Shot skill=Release();skill.kind=Kind::Javelin;skill.skill=15;skill.missile=38;
+        Check(SkillJavelin(skill)&&SkillRelease(skill)&&!SkillArrow(skill)&&MissileId(skill)==38&&Valid(skill),"Poison Javelin flies missile 38");
+        Check(!ResolveThrown(skill,1)&&MissileId(skill)==38,"the native Throw cannot rename a skill's missile");
+        Grip(skill,1);Grip(skill,1);Check(Length(skill.origin-(hand-skill.direction*JavelinGrip))<1e-5f&&skill.gripped,"gripped at the javelin's grip, once");
+        Check(ProjectileLength(skill)==JavelinLength&&!ParticleJavelin(38)&&ParticleJavelin(205)&&ParticleJavelin(206),
+              "Poison and Plague Javelin fly the javelin model; Lightning Bolt and Fury are particles");
+        auto stranger=skill;stranger.missile=12;Check(!Valid(stranger),"a javelin cannot carry an arrow skill's missile");
+        auto refused=Release();refused.kind=Kind::Javelin;Grip(refused,1);
+        Check(ResolveThrown(refused,371)&&Length(refused.origin-(hand-refused.direction*JavelinGrip))<1e-5f,"a refused skill's basic throw is not gripped twice");
+        // Double Throw carries its skill but flies the hand's own weapon, named by the native.
+        Shot both=Release();both.kind=Kind::Javelin;both.skill=framevr::weaponskills::DoubleThrow;both.hand=1;
+        Check(DoubleThrow(both)&&!SkillJavelin(both)&&!SkillRelease(both)&&Valid(both)&&MissileId(both)==1,"Double Throw is a throw, not a skill missile");
+        Check(ResolveThrown(both,35)&&MissileId(both)==35&&Length(both.origin-(hand-both.direction*.08f))<1e-5f,"its axe is named, and gripped once");
+        Check(!ResolveThrown(both,36)&&MissileId(both)==35,"named once");
+        auto det=[](const float* m){return m[0]*(m[5]*m[10]-m[6]*m[9])-m[4]*(m[1]*m[10]-m[2]*m[9])+m[8]*(m[1]*m[6]-m[2]*m[5]);};
+        for(const Vec d:{Vec{0,0,-1},Vec{1,0,0},Vec{0,1,0},Vec{.6f,0,.8f}}) {
+            Flight knife;knife.shot=Release();knife.shot.kind=Kind::Javelin;knife.shot.direction=d;ResolveThrown(knife.shot,36);knife.alive=true;knife.distance=3;
+            float m[16]{};ArrowMatrix(knife,1000,m);const float upm=knife.shot.unitsPerMetre;
+            Check(Length(Point(m,{0,0,-.53f})-knife.TailAt(1000)*upm)<.0005f&&Length(Point(m,{0,0,1})-(knife.TailAt(1000)+d*.3f)*upm)<.0005f,
+                  "a knife flies point first, 0.3 m long, from its tail");
+            Check(det(m)>0,"its transform keeps the model's handedness");
+            Flight axe;axe.shot=Release();axe.shot.kind=Kind::Javelin;axe.shot.direction=d;ResolveThrown(axe.shot,35);axe.alive=true;
+            const auto& t=ThrownFor(35);const float mid=(t.tail+t.tip)*.5f;
+            for(float flown:{0.f,.5f,1.f,2.f}) {
+                axe.distance=flown;ArrowMatrix(axe,1000,m);
+                const Vec middle=(axe.TailAt(1000)+d*(t.length*.5f))*upm;
+                Check(Length(Point(m,{0,mid,0})-middle)<.0005f,"an axe tumbles about its middle, which follows the flight");
+                Check(std::fabs(Length(Point(m,{0,t.tip,0})-Point(m,{0,t.tail,0}))-t.length*upm)<.0005f&&det(m)>0,"keeping its length and handedness");
+                if(flown==0)Check(Length(Point(m,{0,t.tip,0})-Point(m,{0,t.tail,0})-d*(t.length*upm))<.0005f,"head first at release");
+            }
+            float start[16]{},later[16]{};axe.distance=0;ArrowMatrix(axe,1000,start);axe.distance=1;ArrowMatrix(axe,1000,later);
+            Check(Length(Vec{start[4],start[5],start[6]}-Vec{later[4],later[5],later[6]})>.1f,"and turns as it flies");
+        }
+    }
     {
         // The nocked mesh must match the tracked guide even when the native
         // bow's grip/animation rig differs. Releasing starts at that same pose.
@@ -291,6 +338,20 @@ int main() {
         Check(!render.Read(live.session,2200,2200,pose,visible),"recenter context mismatch rejects old hand pose");
         --gate.epoch;render.Publish(live,gate,false,2200);
         Check(render.Read(live.session,2200,2200,pose,visible)&&!visible,"out-of-reach preview remains hidden with valid tracking");
+    }
+    {   // Spell lock: a 0.6 m monster 10 m away, the hand 1.4 m up
+        const Vec origin{0,1.4f,0},ground{10,0,0},bottom{10,.2f,0},top{10,.4f,0};const float radius=.2f;
+        Check(Near(LockAimPoint(ground,true,bottom,top).y,.3f)&&Near(LockAimPoint(ground,true,bottom,top).x,10),"the lock aims at the body's middle");
+        Check(Near(LockAimPoint(ground,false,bottom,top).y,1)&&Near(LockAimPoint(ground,false,bottom,top).x,10),"no body: the old 1 m point");
+        Vec old{},body{};float t=0;
+        Check(LockAimDirection(origin,LockAimPoint(ground,false,bottom,top),false,old)&&!CapsuleEntry(origin,origin+old*12,bottom,top,radius,t),
+              "the 1 m aim flies over a small monster");
+        Check(LockAimDirection(origin,LockAimPoint(ground,true,bottom,top),false,body)&&CapsuleEntry(origin,origin+body*12,bottom,top,radius,t),
+              "the body aim hits it");
+        Vec flat{};
+        Check(LockAimDirection(origin,LockAimPoint(ground,true,bottom,top),true,flat)&&flat.y==0&&Near(flat.x,1),"planar spells stay flat");
+        Vec kept{0,0,-1};
+        Check(!LockAimDirection(origin,origin+Vec{.1f,-.2f,0},false,kept)&&kept.z==-1,"too close keeps the direction");
     }
     std::puts("Physical bow: release ownership, cancellation, cave coordinates, swept contacts, walls, speed, visual-axis, mesh-binding, preview recovery and render-pose tests passed");
 }

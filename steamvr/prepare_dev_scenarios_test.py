@@ -28,10 +28,13 @@ class PrepareTests(unittest.TestCase):
             game, normal = self.fixture(directory)
             native = normal / 'D2R-PCVR.mpq/data/hd/env/fixture.json'
             native.parent.mkdir(parents=True); native.write_bytes(b'local native override')
+            sprites = normal / dev.OPTIONAL_TREES[0] / 'sprites.ssp'
+            sprites.parent.mkdir(parents=True); sprites.write_bytes(b'local sprite cache')
             (normal / 'D2R-PCVR.mpq/modinfo.json').write_bytes(b'normal save path')
             save = game / 'Hero.d2s'; save.write_bytes(b'normal progress')
             root = dev.stage(game)
             self.assertEqual((root / 'pcvr-dev.mpq/data/hd/env/fixture.json').read_bytes(), b'local native override')
+            self.assertEqual((root / dev.OPTIONAL_TREES[0] / 'sprites.ssp').read_bytes(), b'local sprite cache')
             self.assertEqual((root / 'pcvr-dev.mpq/modinfo.json').read_bytes(), dev.MOD_INFO.encode())
             ini = root / 'd2rloader/plugins/d2r_pcvr.ini'
             self.assertEqual(ini.read_bytes(), b'normal settings/calibration')

@@ -50,6 +50,39 @@ inline int Frames(int classId,Weapon weapon,int ias,int wsm,int sias=0) {
     const int length=(a.frames-a.start)*256;
     return rate>0?(length+rate-1)/rate-1:0;
 }
+// A druid's Werewolf / Werebear normal attack (D2R 2.4). The form uses the
+// human class's A1 animation speed and starting frame for the weapon class,
+// with the increment slowed by the form's A1 length over the human's, and its
+// own A1 length: Werewolf 13 frames, Werebear 12. EIAS here is the whole sum
+// past 100 % - item IAS after diminishing returns plus skill speed (Werewolf,
+// Maul, Fanaticism, Burst of Speed), less WSM and slows - capped at -85..150
+// in form (75 in human form). Per ChthonVII's 2.4 PTR2 wereform calculator
+// (github.com/ChthonVII/d2r_24ptr2_wereform_calculator, tested with
+// Warren1001) and Warren1001's IAS calculator: this closed form reproduces
+// the former's animation loop for every weapon class and EIAS. Facts about
+// the game's mechanics; no game data files.
+enum Form:int {Human=0,Wolf=1,Bear=2};
+inline int FormFrames(int form) {return form==Wolf?13:form==Bear?12:0;}
+inline int TruncDiv(int value,int by) {return value/by;}   // C++: toward zero, as D2R
+inline int WereformFrames(int classId,int form,Weapon weapon,int eias) {
+    if(classId<0||classId>=ClassCount||weapon>=Weapon::Count||!FormFrames(form))return 0;
+    const auto human=Table[classId][int(weapon)];
+    if(!human.frames)return 0;
+    const int length=FormFrames(form),capped=std::clamp(eias,-85,150);
+    int increment=human.speed+TruncDiv(human.speed*capped,100);
+    increment=TruncDiv(increment*length,human.frames);
+    if(increment<=0)return 0;
+    const int counter=(length-human.start)*256;
+    return (counter+increment-1)/increment-1;
+}
+// The speed sum past 100 % in form: item IAS (ItemStatCost 93, diminished) and
+// the unit's attackrate (68): 100, plus skill speed, less the weapon's WSM and slows.
+inline int FormEias(int ias,int attackRate) {return Eias(ias)+attackRate-100;}
+// Human form's skill speed (SIAS) for Frames: the unit's attackrate (68) less 100, with the
+// main-hand weapon's WSM it already subtracts put back (Frames takes WSM separately).
+// Fanaticism, Frenzy, Burst of Speed and slows (chill, Decrepify) move it. Logged
+// 2026-10-21, no buffs: WSM 0 -> attackrate 100, +10 -> 90, -10 -> 110 (SkillSpeed 0).
+inline int SkillSpeed(int attackRate,int mainWsm) {return attackRate-100+mainWsm;}
 inline uint32_t Milliseconds(int frames) {return frames>0?uint32_t(frames)*1000u/FramesPerSecond:0;}
 // One attack per cycle, on the authoritative game thread. A native-resolved
 // attack starts the cycle whether its roll hit or missed, as the native swing
@@ -59,8 +92,15 @@ class Cadence {
 public:
     bool Ready(uint64_t s,uint64_t now) const {return s!=session||now>=readyAt;}
     uint64_t Remaining(uint64_t s,uint64_t now) const {return Ready(s,now)?0:readyAt-now;}
-    // Milliseconds since the previous landed hit; UINT64_MAX when there is none.
-    uint64_t Since(uint64_t s,uint64_t now) const {return s==session&&landedAt&&now>=landedAt?now-landedAt:UINT64_MAX;}
-    void Landed(uint64_t s,uint64_t now,uint32_t cycle) {session=s;landedAt=now;readyAt=now+cycle;}
+    // Milliseconds since the previous landed hit; UINT64_MAX when there is none. One batch
+    // can apply its contacts out of time order (creature by creature): one timed before the
+    // latest landed hit is not recovered at all, and the clock never runs back.
+    uint64_t Since(uint64_t s,uint64_t now) const {
+        return s==session&&landedAt?(now>=landedAt?now-landedAt:0):UINT64_MAX;
+    }
+    void Landed(uint64_t s,uint64_t now,uint32_t cycle) {
+        if(s==session&&landedAt&&now<landedAt){readyAt=std::max(readyAt,now+cycle);return;}
+        session=s;landedAt=now;readyAt=now+cycle;
+    }
 };
 }

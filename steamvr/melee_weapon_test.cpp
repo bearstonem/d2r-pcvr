@@ -113,4 +113,9 @@ int main() {
     player[1]=4;
     assert(Select(P(),0,e)==R()&&Select(P(),1,e)==L()); // Barbarian regression
     assert(right[2]==41&&left[2]==42&&inventory==0x01020304);
+    // Double Throw (#224): only a Barbarian's throwing weapon in each hand.
+    e.type[0]=D2RVR_TYPE_THROWING;e.type[1]=D2RVR_TYPE_JAVELIN;
+    assert(framevr::dualwield::ThrownPair(4,e)&&!framevr::dualwield::ThrownPair(6,e));
+    e.type[1]=D2RVR_TYPE_SWORD;assert(framevr::dualwield::Eligible(4,e)&&!framevr::dualwield::ThrownPair(4,e));
+    e.type[1]=D2RVR_TYPE_THROWING;e.id[1]=0;assert(!framevr::dualwield::ThrownPair(4,e));e.id[1]=42;
 }

@@ -13,12 +13,18 @@ namespace framevr::potions {
 using Microsoft::WRL::ComPtr;
 namespace {
 constexpr const char* Codes[]={"hp1","hp2","hp3","hp4","hp5","mp1","mp2","mp3","mp4","mp5","rvs","rvl","yps","wms","vps"};
-constexpr unsigned Count=15;
+constexpr unsigned Count=15;   // the potions, all required; then the extras, each optional
+// The arrow (the bow's), then the traps and bombs thrown by hand (#224, toss::Model),
+// then the gas and oil potions, which fly as their own bottles when thrown (#292).
+constexpr const char* Extras[]={"arw","tfb","tsw","tbs","tst","twk","gps","gpm","gpl","ops","opm","opl"};
+constexpr float ExtraExtent[]={.45f,.1f,.1f,.1f,.1f,.1f,.2f,.2f,.2f,.2f,.2f,.2f};
+constexpr unsigned ExtraCount=12,TossExtras=5;
 struct Vertex {float p[3],n[3],uv[2],glass;};
 struct Asset {std::vector<Vertex> vertices;std::vector<uint32_t> indices;unsigned w,h,format;std::vector<std::vector<uint8_t>> mips;};
 void Require(bool condition,const char* error){if(!condition)throw std::runtime_error(error);}
 void Check(HRESULT hr,const char* error){Require(SUCCEEDED(hr),error);}
-Asset Load(const std::filesystem::path& file) {
+// extent: the furthest a vertex may lie from the origin (metres).
+Asset Load(const std::filesystem::path& file,float extent=.2f) {
     std::ifstream input(file,std::ios::binary|std::ios::ate);
     Require(bool(input),"potion cache missing; run prepare_potions.py");
     const auto size=input.tellg();Require(size>32&&size<8*1024*1024,"invalid potion cache size");
@@ -31,7 +37,7 @@ Asset Load(const std::filesystem::path& file) {
     Require(a.w&&a.h&&a.w<=4096&&a.h<=4096&&(a.format==72||a.format==78||a.format==29)&&header[7]>0&&header[7]<=14,"invalid potion texture");
     a.vertices.resize(header[2]);a.indices.resize(header[3]);read(a.vertices.data(),a.vertices.size()*sizeof(Vertex));read(a.indices.data(),a.indices.size()*4);
     for(const auto& v:a.vertices) {
-        for(float x:v.p)Require(std::isfinite(x)&&std::fabs(x)<=.2f,"invalid potion position");
+        for(float x:v.p)Require(std::isfinite(x)&&std::fabs(x)<=extent,"invalid potion position");
         for(float x:v.n)Require(std::isfinite(x)&&std::fabs(x)<=1.01f,"invalid potion normal");
         for(float x:v.uv)Require(std::isfinite(x)&&std::fabs(x)<=16,"invalid potion UV");
         Require(v.glass==0||v.glass==1,"invalid potion material");
@@ -65,14 +71,23 @@ struct Models::Impl {
     ComPtr<ID3D12PipelineState> pipeline;
     ComPtr<ID3D12DescriptorHeap> srv,rtv,dsv;
     ComPtr<ID3D12Resource> depth[2];
-    struct Mesh {ComPtr<ID3D12Resource> vertices,indices,texture;D3D12_VERTEX_BUFFER_VIEW vb{};D3D12_INDEX_BUFFER_VIEW ib{};uint32_t code=0,count=0;};
-    Mesh meshes[Count];
+    struct Mesh {ComPtr<ID3D12Resource> vertices,indices,texture;D3D12_VERTEX_BUFFER_VIEW vb{};D3D12_INDEX_BUFFER_VIEW ib{};uint32_t code=0,count=0;float radius=0;};
+    Mesh meshes[Count+ExtraCount];unsigned meshCount=Count;   // the extras loaded follow the potions
+    bool arrow=false;unsigned tosses=0;
     uint32_t width=0,height=0,srvStride=0,rtvStride=0,dsvStride=0;
     DXGI_FORMAT format=DXGI_FORMAT_UNKNOWN;bool encode=false;
 };
 Models::Models()=default;Models::~Models()=default;
 void Models::Reset(){impl.reset();}
 bool Models::Ready() const {return impl!=nullptr;}
+bool Models::HasArrow() const {return impl&&impl->arrow;}
+unsigned Models::Tosses() const {return impl?impl->tosses:0;}
+float Models::Radius(uint32_t code) const {
+    if(!impl)return 0;
+    code=(code&0xffffff)|(uint32_t(' ')<<24);
+    for(unsigned i=0;i<impl->meshCount;++i)if(impl->meshes[i].code==code)return impl->meshes[i].radius;
+    return 0;
+}
 bool Models::Initialize(ID3D12Device* device,ID3D12CommandQueue* queue,DXGI_FORMAT format,uint32_t w,uint32_t h,void (*log)(const char*),const std::filesystem::path& directory) {
     if(impl)return true;
     try {
@@ -80,8 +95,17 @@ bool Models::Initialize(ID3D12Device* device,ID3D12CommandQueue* queue,DXGI_FORM
         Require(format==DXGI_FORMAT_R8G8B8A8_UNORM||format==DXGI_FORMAT_R8G8B8A8_UNORM_SRGB||format==DXGI_FORMAT_B8G8R8A8_UNORM||format==DXGI_FORMAT_B8G8R8A8_UNORM_SRGB,"potion renderer requires SDR eye target");
         p->encode=format==DXGI_FORMAT_R8G8B8A8_UNORM||format==DXGI_FORMAT_B8G8R8A8_UNORM;
         const auto folder=directory.empty()?Directory():directory;
-        std::array<Asset,Count> assets;
-        for(unsigned i=0;i<Count;++i)assets[i]=Load(folder/(std::string(Codes[i])+".pvr"));
+        std::vector<Asset> assets(Count);std::vector<uint32_t> codes;
+        const auto code=[](const char* c){return interaction::Code(c[0],c[1],c[2]);};
+        for(unsigned i=0;i<Count;++i){assets[i]=Load(folder/(std::string(Codes[i])+".pvr"));codes.push_back(code(Codes[i]));}
+        // The extras are optional: an older cache, or one without them, keeps the
+        // bow's draw guide and throws traps with nothing in the hand.
+        std::string arrowNote;
+        for(unsigned i=0;i<ExtraCount;++i) {
+            try{assets.push_back(Load(folder/(std::string(Extras[i])+".pvr"),ExtraExtent[i]));codes.push_back(code(Extras[i]));if(!i)p->arrow=true;else if(i<=TossExtras)++p->tosses;}
+            catch(const std::exception& e){if(!i)arrowNote=e.what();}
+        }
+        p->meshCount=unsigned(assets.size());
         struct Lib {HMODULE h=LoadLibraryW(L"d3dcompiler_47.dll");~Lib(){if(h)FreeLibrary(h);}} compiler;
         auto compile=compiler.h?reinterpret_cast<decltype(&D3DCompile)>(GetProcAddress(compiler.h,"D3DCompile")):nullptr;
         const auto d12=GetModuleHandleW(L"d3d12.dll");
@@ -125,7 +149,7 @@ float4 PS(Out v):SV_Target {
         state.DepthStencilState.DepthEnable=TRUE;state.DepthStencilState.DepthWriteMask=D3D12_DEPTH_WRITE_MASK_ALL;state.DepthStencilState.DepthFunc=D3D12_COMPARISON_FUNC_GREATER_EQUAL;
         state.PrimitiveTopologyType=D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;state.NumRenderTargets=1;state.RTVFormats[0]=format;state.DSVFormat=DXGI_FORMAT_D32_FLOAT;state.SampleDesc.Count=1;
         Check(device->CreateGraphicsPipelineState(&state,IID_PPV_ARGS(&p->pipeline)),"potion pipeline creation failed");
-        D3D12_DESCRIPTOR_HEAP_DESC heap{};heap.Type=D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;heap.NumDescriptors=Count;heap.Flags=D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+        D3D12_DESCRIPTOR_HEAP_DESC heap{};heap.Type=D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;heap.NumDescriptors=Count+ExtraCount;heap.Flags=D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
         Check(device->CreateDescriptorHeap(&heap,IID_PPV_ARGS(&p->srv)),"potion texture descriptors failed");p->srvStride=device->GetDescriptorHandleIncrementSize(heap.Type);
         heap.NumDescriptors=2;heap.Flags=D3D12_DESCRIPTOR_HEAP_FLAG_NONE;heap.Type=D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
         Check(device->CreateDescriptorHeap(&heap,IID_PPV_ARGS(&p->rtv)),"potion target descriptors failed");p->rtvStride=device->GetDescriptorHandleIncrementSize(heap.Type);
@@ -139,8 +163,9 @@ float4 PS(Out v):SV_Target {
         Check(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,IID_PPV_ARGS(&allocator)),"potion upload allocator failed");
         Check(device->CreateCommandList(0,D3D12_COMMAND_LIST_TYPE_DIRECT,allocator.Get(),nullptr,IID_PPV_ARGS(&list)),"potion upload list failed");
         std::vector<ComPtr<ID3D12Resource>> uploads;
-        for(unsigned i=0;i<Count;++i) {
-            const auto& a=assets[i];auto& m=p->meshes[i];m.code=interaction::Code(Codes[i][0],Codes[i][1],Codes[i][2]);m.count=unsigned(a.indices.size());
+        for(unsigned i=0;i<p->meshCount;++i) {
+            const auto& a=assets[i];auto& m=p->meshes[i];m.code=codes[i];m.count=unsigned(a.indices.size());
+            for(const auto& v:a.vertices)m.radius=std::max(m.radius,std::hypot(v.p[0],v.p[2])); // about the model's +Y
             m.vertices=Buffer(device,a.vertices.data(),a.vertices.size()*sizeof(Vertex));m.indices=Buffer(device,a.indices.data(),a.indices.size()*4);
             m.vb={m.vertices->GetGPUVirtualAddress(),UINT(a.vertices.size()*sizeof(Vertex)),sizeof(Vertex)};m.ib={m.indices->GetGPUVirtualAddress(),UINT(a.indices.size()*4),DXGI_FORMAT_R32_UINT};
             D3D12_RESOURCE_DESC tex=depth;tex.Width=a.w;tex.Height=a.h;tex.MipLevels=UINT16(a.mips.size());tex.Format=DXGI_FORMAT(a.format);tex.Flags=D3D12_RESOURCE_FLAG_NONE;
@@ -174,7 +199,13 @@ float4 PS(Out v):SV_Target {
             for(auto& m:p->meshes)retired.push_back(m.texture);
         }
         Require(wait==WAIT_OBJECT_0,"potion upload timeout");impl=std::move(p);
-        if(log)log("Frame potions: 15 original 3D potion models ready; stereo belt and grip rendering active");return true;
+        if(log) {
+            std::string text="Frame potions: 15 original 3D potion models ready; stereo belt and grip rendering active";
+            text+=HasArrow()?"; the game's arrow model ready for the bow":"; arrow model unavailable ("+arrowNote+"), the bow keeps its draw guide";
+            text+="; "+std::to_string(Tosses())+" of 5 thrown trap models";
+            log(text.c_str());
+        }
+        return true;
     } catch(const std::exception& e) {if(log){std::string text="Frame potions: ";text+=e.what();text+="; retaining icon fallback";log(text.c_str());}return false;}
 }
 bool Models::Render(ID3D12GraphicsCommandList* list,ID3D12Resource* target,unsigned eye,interaction::Pose view,math::Fov f,const Scene& scene) {
@@ -190,7 +221,7 @@ bool Models::Render(ID3D12GraphicsCommandList* list,ID3D12Resource* target,unsig
     ID3D12DescriptorHeap* heaps[]={p.srv.Get()};list->SetDescriptorHeaps(1,heaps);list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     for(unsigned i=0;i<scene.count;++i) {
         const auto& item=scene.items[i];if(!interaction::Valid(item.pose))continue;
-        const auto code=(item.code&0xffffff)|(uint32_t(' ')<<24);unsigned mesh=0;while(mesh<Count&&p.meshes[mesh].code!=code)++mesh;if(mesh==Count)continue;
+        const auto code=(item.code&0xffffff)|(uint32_t(' ')<<24);unsigned mesh=0;while(mesh<p.meshCount&&p.meshes[mesh].code!=code)++mesh;if(mesh==p.meshCount)continue;
         auto& m=p.meshes[mesh];float constants[32]{};math::Projection(f.left,f.right,f.down,f.up,.02f,constants);
         const auto inverse=math::Conjugate(view.q),rotation=math::Multiply(inverse,item.pose.q);
         const auto translation=math::Rotate(inverse,item.pose.p-view.p),light=math::Rotate(inverse,math::Normalized({-.4f,.8f,.3f}));

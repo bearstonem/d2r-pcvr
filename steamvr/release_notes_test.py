@@ -63,10 +63,16 @@ PCVR_IN_HEADSET_NOTES -->
         original = self.document.read_text(encoding='utf-8')
         for invalid in (original.replace(notes.START, ''), original + original,
                         original.replace('First feature.', 'W' * 101),
-                        original.replace('- Second feature.', '\n'.join('- Feature.' for _ in range(14)))):
+                        original.replace('- Second feature.', '\n'.join('- Feature.' for _ in range(notes.MAX_LINES)))):
             self.document.write_text(invalid, encoding='utf-8')
             with self.assertRaises(ValueError):
                 self.read()
+
+    def test_a_long_release_fills_the_headset_pages(self):
+        # 72 lines: the Notes tab shows them 12 to a page.
+        original = self.document.read_text(encoding='utf-8')
+        self.document.write_text(original.replace('- Second feature.', '\n'.join('- Feature.' for _ in range(notes.MAX_LINES - 1))), encoding='utf-8')
+        self.assertEqual(len(self.read()['lines']), notes.MAX_LINES)
 
     def test_native_header_escapes_text_and_preserves_credits(self):
         self.change('First feature.', 'A "quoted" feature in C:\\folder.')
@@ -80,7 +86,7 @@ PCVR_IN_HEADSET_NOTES -->
         with self.assertRaisesRegex(ValueError, 'placeholders'):
             self.read()
         template = template.replace('{Release contributors}', 'Community contributors')
-        template = template.replace('{One short line per major feature, meaningful change or major fix; 1-14 lines total.}', 'Improved physical combat.')
+        template = template.replace('{One short line per major feature, meaningful change or major fix; 1-72 lines total, 12 to a page in the headset.}', 'Improved physical combat.')
         template = template.replace('{Group related follow-up fixes; include a useful control or setting path where it fits.}', 'Added a combat setting.')
         self.document.write_text(template, encoding='utf-8')
         self.assertEqual(self.read()['lines'], ['Improved physical combat.', 'Added a combat setting.'])

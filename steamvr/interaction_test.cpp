@@ -8,6 +8,7 @@
 using namespace framevr::interaction;
 namespace math=framevr::math;
 static void Check(bool b,const char* s){if(!b){std::fprintf(stderr,"FAIL: %s\n",s);std::exit(1);}}
+static float distance(Vec a,Vec b){return std::sqrt(math::Dot(a-b,a-b));}
 struct Sim {
     Engine e;Input in;Output out;
     Sim(){in.active=true;in.tracked[0]=in.tracked[1]=true;in.session=10;in.epoch=1;in.head.p={0,1.7f,0};
@@ -19,6 +20,18 @@ struct Sim {
     Output Step(int count=1){while(count--){in.time+=.02;in.at=1000000+uint64_t(in.time*1000);in.snapshot.at=in.at;out=e.Step(in);}return out;}
 };
 int main(){
+    // The player's own speed: steady running is measured, jumps and gaps reset it.
+    {
+        Carry c;double time=0;Vec at{100,2,50};
+        for(int i=0;i<20;++i){time+=.011;at=at+Vec{4*.011f,0,0};c.Update(time,at);}
+        Check(c.known&&distance(c.velocity,{4,0,0})<.05f,"a steady run is measured in world metres per second");
+        at=at+Vec{30,0,0};time+=.011;c.Update(time,at);
+        Check(!c.known&&distance(c.velocity,{})<1e-6f,"a waypoint or portal jump is not a run");
+        for(int i=0;i<3;++i){time+=.011;at=at+Vec{4*.011f,0,0};c.Update(time,at);}
+        Check(c.known,"running is measured again after the jump");
+        time+=.5;c.Update(time,at);Check(!c.known,"a gap in the frames resets it");
+        c.Update(time+.011,{std::numeric_limits<float>::quiet_NaN(),0,0});Check(!c.known&&!c.have,"a broken position resets it");
+    }
     // Integration: the quick-use inventory has no skill-category strip.
     for(int i=0;i<8;++i){
         const float x=.05f+(i%2)*.46f,y=.23f+(i/2)*.145f;
@@ -65,17 +78,41 @@ int main(){
         s.Step();s.in.hover=8;s.in.trigger=1;s.Step();Check(s.out.request.action==Action::BindItem&&!s.out.request.index&&!s.out.request.item.handle,"clear slot uses explicit empty assignment");
     }
     {
-        Sim s;quick(s);s.in.hover=RunWalkCell;s.in.trigger=1;s.Step();
-        Check(s.out.request.action==Action::RunWalk&&!s.out.wheel,"run/walk dispatches native toggle");
-        Check(s.Step(40).request.action==Action::None,"holding run/walk never toggles repeatedly");
+        Sim s;quick(s);
+        // The movement slider's gait: the transport asks for the game's run / walk toggle when the
+        // hero moves in the other gait; the engine sends it like any native action, without a tick.
+        Sim gait;gait.in.gaitToggle=true;gait.Step();
+        Check(gait.out.request.action==Action::RunWalk&&gait.out.feedback==0,"a gait mismatch sends the native run / walk toggle silently");
+        gait.in.gaitToggle=false;Check(gait.Step().request.action==Action::None,"once per mismatch the transport reports");
+        Sim stale;stale.in.snapshot.session=99;stale.in.gaitToggle=true;stale.Step();
+        Check(stale.out.request.action==Action::None&&stale.out.feedback==0,"an unknown character: no toggle, no buzz");
         auto c=Context(s.in.snapshot,s.out,true);s.in.snapshot.quick.items[0].quantity--;
         Check(c!=Context(s.in.snapshot,s.out,true),"count changes invalidate paint and old click eligibility");
         for(auto page:{MenuPage::Spells,MenuPage::Equipment}) {
             Check(WheelCell(.1f,.1f,-1,page,1)==QuickUseCell,"quick slot shares hit and paint bounds");
-            Check(WheelCell(.85f,.07f,-1,page,1)==RunWalkCell,"run/walk shares hit and paint bounds");
+            Check(WheelCell(.85f,.14f,-1,page,1)==-1,"no RUN / WALK box or movement slider on the wheel (VR Settings > VR > Movement speed)");
         }
         for(auto page:{MenuPage::Map,MenuPage::Developer,MenuPage::EditSlots,MenuPage::EditSkills,MenuPage::EditItems})
             Check(WheelCell(.1f,.1f,-1,page,1)!=QuickUseCell,"hidden quick control never intercepts another page");
+    }
+    {   // Druid: the lower-left box toggles which trigger skill the left claw's strikes cast
+        Sim s;quick(s);s.in.leftStrikes=0;s.Step();
+        Check(s.out.wheel&&s.out.leftStrikes==0,"the wheel shows the left claw's choice");
+        s.in.hover=LeftStrikesCell;s.in.trigger=1;s.Step();
+        Check(s.out.toggleLeftStrikes&&s.out.wheel&&s.out.request.action==Action::None&&s.out.feedback==1,"a click asks to save the other choice; the wheel stays open");
+        Check(!s.Step(40).toggleLeftStrikes,"holding the trigger never toggles again");
+        s.in.trigger=0;s.Step();s.in.leftStrikes=1;s.in.trigger=1;s.Step();
+        Check(s.out.toggleLeftStrikes&&s.out.leftStrikes==1,"a fresh click toggles back");
+        Sim other;quick(other);other.Step();other.in.hover=LeftStrikesCell;other.in.trigger=1;other.Step();
+        Check(other.out.leftStrikes<0&&!other.out.toggleLeftStrikes&&other.out.feedback==3,"another class: no box, and a stray click only buzzes");
+        auto c=Context(s.in.snapshot,s.out,true);auto flipped=s.out;flipped.leftStrikes=0;
+        Check(c!=Context(s.in.snapshot,flipped,true),"a changed choice repaints the box");
+        for(auto page:{MenuPage::Spells,MenuPage::Equipment})for(int hand:{-1,0,1}) {
+            Check(WheelCell(.1f,.77f,-1,page,hand,false,0,true)==LeftStrikesCell,"left claw box shares hit and paint bounds");
+            Check(WheelCell(.1f,.77f,-1,page,hand,false,0,false)!=LeftStrikesCell,"no box for other classes");
+        }
+        for(auto page:{MenuPage::Map,MenuPage::Developer,MenuPage::EditSlots,MenuPage::EditSkills,MenuPage::EditItems})
+            Check(WheelCell(.1f,.77f,-1,page,1,false,0,true)!=LeftStrikesCell,"the left claw box never intercepts another page");
     }
 
     {
@@ -602,6 +639,51 @@ int main(){
         s.in.trigger=1;s.in.grip[0]=0;Check(s.Step().block,"held trigger after bottle drop stays blocked");
         auto snap=s.in.snapshot;snap.belt[0].items[0]={43,2,Code('m','p','1')};snap.belt[0].items[1]={};
         Check(PotionGone(snap,request),"authoritative removal can acknowledge native use");
+        Check(!s.out.discard.active,"without a known world floor an emptied bottle vanishes as before");
+    }
+    {
+        // An emptied bottle let go of falls into the world with the hand's motion.
+        auto drink=[](Sim& s) {
+            s.in.floorKnown=true;s.in.floor=.05f;
+            s.in.stage={true,{0,1.7f,0},{100.f,3.f,-50.f},math::Yaw(.5f)};
+            s.in.hand[0].p=s.out.belt[0].p;s.Step();s.in.grip[0]=1;s.Step();
+            s.in.hand[0].q=math::Multiply({0,0,-.70710678f,.70710678f},{.70710678f,0,0,.70710678f});
+            s.in.hand[0].p={-.115f,1.6f,-.08f};
+            Request request;for(int i=0;i<30;++i){auto o=s.Step();if(o.request.action==Action::Potion)request=o.request;}
+            Check(request.action==Action::Potion,"sip before letting go");
+            s.in.snapshot.belt[0].items[0]={43,2,Code('m','p','1')};s.in.snapshot.belt[0].items[1]={};++s.in.snapshot.belt[0].revision;
+            s.in.reply={request.sequence,10,Result::Applied};
+            Check(s.Step().bottleEmpty&&!s.out.discard.active,"an emptied bottle stays in the hand while gripped");
+        };
+        Sim s;drink(s);
+        // 2 m/s along room +x, turning 2 rad/s about room +y, still moving as the grip opens.
+        auto swing=[](Sim& t){t.in.hand[0].p=t.in.hand[0].p+Vec{.04f,0,0};t.in.hand[0].q=math::Multiply(math::Yaw(.04f),t.in.hand[0].q);};
+        for(int i=0;i<8;++i){swing(s);s.Step();}
+        swing(s);s.in.grip[0]=0;const auto hand=s.in.hand[0];const auto o=s.Step();
+        Check(o.discard.active&&o.discard.code==Code('h','p','1')&&o.bottle<0&&o.request.action==Action::None,
+            "letting go of an emptied bottle discards it into the world, without a native request");
+        const auto start=s.in.stage.World(framevr::potions::Center(hand.p,hand.q));
+        Check(distance(o.discard.p,start)<1e-4f,"it starts where it was held, in world metres");
+        const auto q=math::Multiply(s.in.stage.base,framevr::potions::HeldRotation(hand.q));
+        Check(std::fabs(std::fabs(q.x*o.discard.q.x+q.y*o.discard.q.y+q.z*o.discard.q.z+q.w*o.discard.q.w)-1)<1e-4f,"with the held model's world orientation");
+        Check(distance(o.discard.v,math::Rotate(s.in.stage.base,{2,0,0}))<.01f,"keeping the hand's speed, turned into the world");
+        Check(distance(o.discard.w,math::Rotate(s.in.stage.base,{0,2,0}))<.05f,"and the hand's spin");
+        Check(std::fabs(o.discard.floor-(3.f+.05f-1.7f))<1e-4f,"above the world floor under the player");
+        Check(!s.Step().discard.active,"the discard is reported once");
+        Sim still;drink(still);still.in.grip[0]=0;
+        Check(still.Step().discard.active&&distance(still.out.discard.v,{})<.01f&&distance(still.out.discard.w,{})<.01f,
+            "a still hand just lets it fall");
+        Sim run;drink(run);run.in.carry={0,0,-3};run.in.grip[0]=0;
+        Check(run.Step().discard.active&&distance(run.out.discard.v,{0,0,-3})<.01f,"let go of while running, it keeps the run's speed");
+        Sim frameless;drink(frameless);frameless.in.stage.known=false;frameless.in.grip[0]=0;
+        Check(!frameless.Step().discard.active,"no discard without the room-to-world frame");
+        Sim full;full.in.floorKnown=true;full.in.hand[0].p=full.out.belt[0].p;full.Step();full.in.grip[0]=1;full.Step();
+        full.in.grip[0]=0;Check(!full.Step().discard.active,"a full bottle let go of returns to the belt, never discarded");
+        // Spin follows the shorter way round, in the poses' frame.
+        Check(distance(Spin({0,0,0,1},math::Yaw(.1f),.05f),{0,2,0})<1e-3f,"turn rate from two poses");
+        const auto flipped=math::Yaw(-.1f);
+        Check(distance(Spin({0,0,0,1},{-flipped.x,-flipped.y,-flipped.z,-flipped.w},.05f),{0,-2,0})<1e-3f,"either quaternion sign");
+        Check(distance(Spin({0,0,0,1},{0,0,0,1},.05f),{})<1e-6f&&distance(Spin({0,0,0,1},math::Yaw(1),0),{})<1e-6f,"no turn, or no time");
     }
     {
         Sim s;auto scene=framevr::potions::MakeScene(s.in,s.out);
@@ -723,6 +805,57 @@ int main(){
             Sim s;toss(s,{0,1.f,-3.f});int requests=0;Request request;land(s,requests,request);
             s.in.reply={request.sequence,s.in.session,Result::Applied};
             Check(s.Step().feedback==2,"confirmed hireling feed is a success pulse");
+        }
+        {
+            // In the physics world: the release is handed over, the flight
+            // follows the body, and it lands where the body first touched.
+            Sim s;s.in.physicsThrows=true;const auto o=toss(s,{0,1.f,-3.f});
+            Check(o.toss.active&&o.toss.id&&o.toss.code==Code('h','p','1')&&o.flying&&o.flightId==o.toss.id&&o.request.action==Action::None,
+                "a physics throw hands the release to the world and flies it");
+            Check(distance(o.toss.v,{0,1.f,-3.f})<.05f&&std::fabs(o.toss.floor)<1e-4f,"with the hand's speed and the floor under the player");
+            Check(!s.Step().toss.active,"the release is handed over once");
+            const auto id=o.toss.id;
+            s.in.tossed={id,false,{.3f,1.1f,-2.5f},{0,0,0,1}};
+            Check(s.Step().flying&&distance(s.out.flight.p,{.3f,1.1f,-2.5f})<1e-4f&&s.out.request.action==Action::None,
+                "while the body flies the bottle is drawn there, and nothing is requested");
+            for(int i=0;i<100;++i)Check(s.Step().request.action==Action::None,"no landing while the body is still in the air, past the arc's own landing time");
+            s.in.tossed={id,true,{.5f,.8f,-3.1f},{0,0,0,1}};
+            const auto l=s.Step();
+            Check(l.request.action==Action::FeedMerc&&distance(l.request.world,{.5f,.8f,-3.1f})<1e-4f&&!l.flying,
+                "it lands where the body first touched something: one feed request there");
+            Check(s.Step().request.action==Action::None,"one request per throw");
+        }
+        {
+            // Thrown while running: the throw carries the player's own speed;
+            // whether it is a throw at all still depends on the hand.
+            Sim s;s.in.physicsThrows=true;s.in.carry={3,0,0};const auto o=toss(s,{0,1.f,-3.f});
+            Check(o.toss.active&&distance(o.toss.v,{3,1.f,-3.f})<.05f,"a throw while running carries the run");
+            Sim arc;arc.in.carry={0,0,-4};toss(arc,{0,1.f,-3.f});
+            const auto a=arc.out.flight.p;arc.Step();const auto b=arc.out.flight.p;
+            Check(std::fabs((b.z-a.z)/.02f-(-7.f))<.1f,"the arc carries it too");
+            Sim slow;slow.in.carry={0,0,-6};const auto r=toss(slow,{0,.2f,-.6f},20);
+            Check(!r.flying,"running alone never turns a slow release into a throw");
+        }
+        {
+            // The world never takes it: the arc, as without physics.
+            Sim s;s.in.physicsThrows=true;const auto o=toss(s,{0,1.f,-3.f});
+            Check(o.toss.active,"handed over");
+            int requests=0;Request request;land(s,requests,request);
+            Check(requests==1&&std::fabs(request.point.y)<1e-3f,"no body within the pickup time: it lands on the arc");
+        }
+        {
+            // A body that never touches anything lands where it is after the flight limit.
+            Sim s;s.in.physicsThrows=true;const auto o=toss(s,{0,1.f,-3.f});
+            s.in.tossed={o.toss.id,false,{1,2,-6},{0,0,0,1}};
+            int requests=0;Request request;
+            for(int i=0;i<200&&!requests;++i)if(s.Step().request.action==Action::FeedMerc){++requests;request=s.out.request;}
+            Check(requests==1&&distance(request.world,{1,2,-6})<1e-4f,"after the flight limit it lands where the body is");
+        }
+        {
+            // Another body's report never lands this one.
+            Sim s;s.in.physicsThrows=true;const auto o=toss(s,{0,1.f,-3.f});
+            s.in.tossed={o.toss.id+7,true,{0,0,0},{0,0,0,1}};
+            Check(s.Step().request.action==Action::None,"a stale body's landing is ignored");
         }
         {
             Sim s;const auto o=toss(s,{0,.2f,-.6f},20);int requests=0;Request request;land(s,requests,request);

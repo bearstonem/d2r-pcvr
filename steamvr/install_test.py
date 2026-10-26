@@ -73,6 +73,10 @@ class InstallationTests(unittest.TestCase):
             compiler = deps / 'd3dcompiler47/modern/d3dcompiler_47.dll'
             compiler.parent.mkdir(parents=True)
             compiler.write_bytes(b'fixture compiler')
+            # OFXR Bridge's release, as Setup caches it: only its layer and licenses install.
+            ofxr = deps / install.OFXR_ARCHIVE
+            FrameGenerationTests.write_release(ofxr)
+            ofxr_hash = hashlib.sha256(ofxr.read_bytes()).hexdigest()
             plugin = root / 'plugin.dll'
             plugin.write_bytes(b'fixture plugin')
             loader = root / 'openxr_loader.dll'
@@ -90,9 +94,17 @@ class InstallationTests(unittest.TestCase):
                     (out / name).write_bytes(b'local generated fixture')
                 return {'images': ['fixture.png'], 'icons': 1}
             def potions(game, output, **kwargs):
-                for name in [code + '.pvr' for code in install.POTION_CODES] + ['cache.json']:
+                for name in list(install.POTION_FILES) + ['cache.json']:
                     (Path(output) / name).write_bytes(b'local potion fixture')
                 return {'models': len(install.POTION_CODES)}
+            def prop_catalog(game, output, **kwargs):
+                for name in list(install.PROP_FILES) + ['cache.json']:
+                    (Path(output) / name).write_bytes(b'local prop fixture')
+                return {'props': 3}
+            def spell_sprites(game, output, **kwargs):
+                for name in (install.SPELL_SPRITES, 'cache.json'):
+                    (Path(output) / name).write_bytes(b'local sprite fixture')
+                return {'textures': 11}
             arcane_name = 'D2R-PCVR.mpq/data/hd/env/vis/act2_arcane_day.json'
             arcane = {arcane_name: b'local visual fixture',
                       'reshade/reshade-shaders/Textures/PCVR_Arcane/stars.png': b'local star fixture'}
@@ -103,8 +115,10 @@ class InstallationTests(unittest.TestCase):
                 name: hashlib.sha256(data).hexdigest() for name, data in sewers.items()}}).encode()
             with patch.object(install, 'require_game_closed'), contextlib.redirect_stdout(io.StringIO()), \
                     patch.object(install, 'COMPILER_HASH', hashlib.sha256(compiler.read_bytes()).hexdigest()), \
+                    patch.object(install, 'OFXR_HASH', ofxr_hash), \
                     patch.object(install, 'prepare_icons', side_effect=icons), \
                     patch.object(install, 'prepare_potions', side_effect=potions), \
+                    patch.object(install, 'prepare_spell_sprites', side_effect=spell_sprites),                     patch.object(install, 'prepare_props', side_effect=prop_catalog), \
                     patch.object(install.prepare_arcane_sky, 'prepare', return_value=arcane), \
                     patch.object(install.prepare_sewer_backdrop, 'prepare', return_value=sewers):
                 unapproved_hashes = ('0' * 64, '1' * 64)
@@ -142,6 +156,9 @@ class InstallationTests(unittest.TestCase):
                 self.assertEqual((icon_dir / 'fixture.png').read_bytes(), b'local generated fixture')
                 self.assertEqual((potion_dir / 'hp1.pvr').read_bytes(), b'local potion fixture')
                 self.assertTrue((potion_dir / 'rvl.pvr').is_file())
+                self.assertTrue((potion_dir / 'arw.pvr').is_file())
+                self.assertEqual((mod_plugins / 'd2r_vr_spell_sprites' / install.SPELL_SPRITES).read_bytes(), b'local sprite fixture')
+                self.assertEqual((mod_plugins / 'd2r_vr_props/props.bin').read_bytes(), b'local prop fixture')
                 for name, data in arcane.items():
                     self.assertEqual((mod / name).read_bytes(), data)
                 for name, data in sewers.items():
@@ -163,6 +180,16 @@ class InstallationTests(unittest.TestCase):
                 self.assertTrue((mod / 'reshade/reshade-shaders/Shaders/D2R_DepthFog.fx').is_file())
                 self.assertEqual((mod_plugins / 'openxr_loader.dll').read_bytes(), b'fixture xr loader')
                 self.assertEqual((mod_plugins / 'd2rl-pcvr.dll').read_bytes(), b'fixture plugin')
+                ofxr_dir = mod_plugins / 'ofxr'
+                self.assertEqual((ofxr_dir / f'{install.OFXR_LAYER}.dll').read_bytes(), b'fixture layer')
+                self.assertTrue((ofxr_dir / 'LICENSE').is_file())
+                self.assertTrue((ofxr_dir / 'licenses/AMD-FidelityFX-MIT.txt').is_file())
+                self.assertFalse((ofxr_dir / 'OFXRBridgeTray.exe').exists())
+                manifest = json.loads((ofxr_dir / f'{install.OFXR_LAYER}.json').read_text())
+                self.assertEqual(manifest['api_layer']['library_path'], f'./{install.OFXR_LAYER}.dll')
+                self.assertEqual((ofxr_dir / 'ofxr_bridge.ini').read_bytes(), install.OFXR_DEFAULT_SETTINGS)
+                for name in (f'{install.OFXR_LAYER}.dll', f'{install.OFXR_LAYER}.json', 'ofxr_bridge.ini'):
+                    self.assertIn(str(install.OFXR_DIR / name), journal['installed'])
                 self.assertEqual((game / 'ReShade.ini').read_text(), 'existing config')
                 for name in ('ReShade64.dll', 'openxr_loader.dll', 'D2R_Frame_ReShade.ini', 'reshade-shaders', 'D2R_Sky_ours',
                              'd2rloader/plugins/d2rl-pcvr.dll', 'd2rloader/plugins/d2r_pcvr.ini'):
@@ -192,6 +219,8 @@ class InstallationTests(unittest.TestCase):
                 (mod_plugins / 'd2r_pcvr.ini').write_bytes(custom_ini)
                 (saves / 'Settings.json').write_bytes(custom_video)
                 (mod / 'reshade/ReShade.ini').write_bytes(b'custom reshade settings')
+                # The bridge saves the backend the mod asks for here: an update keeps it.
+                (ofxr_dir / 'ofxr_bridge.ini').write_bytes(b'[ofxr]\r\nbackend=nvidia\r\n')
                 # D2RLoader's own settings (another mod made itself the default) stay as they are.
                 (game / 'd2rloader/config/d2rloader.toml').write_text('default_mod = "D2R-VR"')
                 plugin.write_bytes(b'updated fixture plugin')
@@ -202,6 +231,7 @@ class InstallationTests(unittest.TestCase):
                 self.assertEqual((mod_plugins / 'd2r_pcvr.ini').read_bytes(), custom_ini)
                 self.assertEqual((saves / 'Settings.json').read_bytes(), custom_video)
                 self.assertEqual((mod / 'reshade/ReShade.ini').read_bytes(), b'custom reshade settings')
+                self.assertEqual((ofxr_dir / 'ofxr_bridge.ini').read_bytes(), b'[ofxr]\r\nbackend=nvidia\r\n')
                 self.assertEqual((game / 'd2rloader/config/d2rloader.toml').read_text(), 'default_mod = "D2R-VR"')
                 self.assertEqual((mod_plugins / 'd2rl-pcvr.dll').read_bytes(), b'updated fixture plugin')
                 for name, data in sewers.items():
@@ -223,8 +253,12 @@ class InstallationTests(unittest.TestCase):
                 self.assertEqual((icon_dir / 'manifest.tsv').read_text(), 'old local cache')
                 self.assertEqual((potion_dir / 'hp1.pvr').read_bytes(), b'previous potion')
                 self.assertFalse((potion_dir / 'rvl.pvr').exists())
+                self.assertFalse((mod_plugins / 'd2r_vr_spell_sprites' / install.SPELL_SPRITES).exists())
+                self.assertFalse((mod_plugins / 'd2r_vr_props/props.bin').exists())
                 self.assertFalse((mod_plugins / 'openxr_loader.dll').exists())
                 self.assertFalse((mod_plugins / 'd2rl-pcvr.dll').exists())
+                for name in (f'{install.OFXR_LAYER}.dll', f'{install.OFXR_LAYER}.json', 'ofxr_bridge.ini', 'LICENSE'):
+                    self.assertFalse((ofxr_dir / name).exists(), name)
                 self.assertFalse((mod / 'reshade/ReShade64.dll').exists())
                 self.assertFalse((mod / 'D2R-PCVR.mpq/modinfo.json').exists())
                 self.assertFalse((mod / 'vrmod-manifest.json').exists())
@@ -394,6 +428,7 @@ class RenameMigrationTests(unittest.TestCase):
                 patch.object(install, 'COMPILER_HASH', self.hashes['COMPILER_HASH']), \
                 patch.object(install, 'prepare_icons', side_effect=ValueError('fixture: no game archives')), \
                 patch.object(install, 'prepare_potions', side_effect=ValueError('fixture: no game archives')), \
+                patch.object(install, 'prepare_spell_sprites', side_effect=ValueError('fixture: no game archives')),                 patch.object(install, 'prepare_props', side_effect=ValueError('fixture: no game archives')), \
                 patch.object(install.prepare_arcane_sky, 'prepare', side_effect=ValueError('fixture: no game archives')), \
                 patch.object(install.prepare_sewer_backdrop, 'prepare', side_effect=ValueError('fixture: no game archives')), \
                 patch.object(sys, 'argv', self.argv + list(extra)), contextlib.redirect_stdout(output):
@@ -682,6 +717,72 @@ class RenameMigrationTests(unittest.TestCase):
             self.assertEqual((game / 'D2RLoader.exe').read_bytes(), b'fixture loader')
             self.assertEqual({name: path.read_bytes() for name, path in theirs.items()}, before)
             self.assertFalse((game / install.RECORD).exists())
+
+
+class FrameGenerationTests(unittest.TestCase):
+    """OFXR Bridge (VR Settings > Perf > Frame generation): optional, pinned,
+    and only its layer, licenses and our manifest reach the game folder."""
+
+    @staticmethod
+    def write_release(path):
+        with zipfile.ZipFile(path, 'w') as z:
+            z.writestr(f'ofxr/{install.OFXR_LAYER}.dll', b'fixture layer')
+            z.writestr('ofxr/ofxr_bridge.ini', b'[ofxr]\r\ncontrol_event=Local\\OFXRBridgeArmStop-1\r\n')
+            z.writestr('OFXRBridgeTray.exe', b'fixture tray')
+            z.writestr('LICENSE', b'fixture LGPL')
+            z.writestr('THIRD_PARTY.md', b'fixture notices')
+            z.writestr('licenses/', b'')
+            z.writestr('licenses/AMD-FidelityFX-MIT.txt', b'fixture MIT')
+            z.writestr('README.md', b'fixture readme')
+            z.writestr('docs/BUILDING.md', b'fixture docs')
+
+    def test_pinned_release_gives_layer_licenses_and_relative_manifest(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            archive = Path(temporary) / install.OFXR_ARCHIVE
+            self.write_release(archive)
+            with patch.object(install, 'OFXR_HASH', hashlib.sha256(archive.read_bytes()).hexdigest()):
+                files = install.frame_generation_files(archive)
+        names = {path.relative_to(install.OFXR_DIR).as_posix() for path in files}
+        self.assertEqual(names, {f'{install.OFXR_LAYER}.dll', f'{install.OFXR_LAYER}.json', 'LICENSE',
+                                 'THIRD_PARTY.md', 'licenses/AMD-FidelityFX-MIT.txt'})
+        self.assertEqual(install.OFXR_DIR, mod_identity.PLUGIN.parent / 'ofxr')
+        layer = json.loads(files[install.OFXR_DIR / f'{install.OFXR_LAYER}.json'])['api_layer']
+        self.assertEqual(layer['name'], 'XR_APILAYER_XRFrameBridge_diagnostic')
+        self.assertEqual(layer['library_path'], './XR_APILAYER_XRFrameBridge_diagnostic.dll')
+        self.assertEqual((layer['api_version'], layer['implementation_version']), ('1.0', '116'))
+        # No tray switch: the layer stays armed while the mod names it; no FPS number in the headset.
+        self.assertNotIn(b'control_event', install.OFXR_DEFAULT_SETTINGS)
+        self.assertIn(b'[overlay]\r\nposition=off', install.OFXR_DEFAULT_SETTINGS)
+
+    def test_missing_or_unpinned_release_installs_nothing(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            archive = Path(temporary) / install.OFXR_ARCHIVE
+            self.assertEqual(install.frame_generation_files(archive), {})
+            self.write_release(archive)
+            with contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(install.frame_generation_files(archive), {})
+            self.assertIn('checksum mismatch', output.getvalue())
+
+    def test_failed_download_is_reported_and_does_not_stop_setup(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            archive = Path(temporary) / install.OFXR_ARCHIVE
+            with patch.object(install.urllib.request, 'urlopen', side_effect=install.urllib.error.URLError('offline')), \
+                    contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertFalse(install.download_frame_generation(archive))
+            self.assertIn('frame generation will be unavailable', output.getvalue())
+            with patch.object(install.urllib.request, 'urlopen', return_value=io.BytesIO(b'replaced upstream')), \
+                    contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertFalse(install.download_frame_generation(archive))
+            self.assertIn('Checksum mismatch', output.getvalue())
+            self.assertFalse(archive.exists())
+            release = b'fixture release'
+            with patch.object(install, 'OFXR_HASH', hashlib.sha256(release).hexdigest()), \
+                    patch.object(install.urllib.request, 'urlopen', return_value=io.BytesIO(release)), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertTrue(install.download_frame_generation(archive))
+            self.assertEqual(archive.read_bytes(), release)
+            self.assertEqual(install.OFXR_URL,
+                             'https://github.com/tig3rmast3r/OFXR-Bridge/releases/download/0.2.1/OFXR-Bridge-v0.2.1-V116.zip')
 
 
 class DependencyDownloadTests(unittest.TestCase):

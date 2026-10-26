@@ -211,7 +211,7 @@ The existing owner test character is not permission to alter normal saves.
   nor completes the quest.
 - Crossbow + bolts supplies Leadcrow and 250 bolts for any class; Blood Moor
   supplies an outdoor test destination. Compare existing versus explicit Attack
-  on Right Trigger. Release Right Grip: Right Grip + Right Trigger shows loot.
+  on Right Trigger. Hold the right stick down to show loot labels.
 - Do not hold developer status locks across native dispatch or item operations.
   Those calls can pump rendering/UI; an earlier travel hang came from that lock.
 

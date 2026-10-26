@@ -20,7 +20,7 @@ the original VR mod for Diablo II: Resurrected. See [Credits](#credits).
 and install your own legitimate copy of Diablo II: Resurrected.** The mod adds
 VR support and motion interactions on top of your existing game installation.
 
-The Windows preview supports **Steam 3.3.93787** and experimental
+The Windows preview supports **Steam 3.3.94995** (and the earlier 3.3.93787) and experimental
 **Battle.net 3.3.93847** installations.
 Run Setup (or **Install-Windows.cmd** in the ZIP) and choose **Steam** or **Battle.net** before choosing
 your headset and connection. See
@@ -56,7 +56,7 @@ backups, including those in older release folders, until removal is complete.
 
 ## What you need
 
-- A Windows PC with your **purchased Steam copy of D2R 3.3.93787**, or
+- A Windows PC with your **purchased Steam copy of D2R 3.3.94995** (or 3.3.93787), or
   **Battle.net copy of D2R 3.3.93847** (experimental support).
 - The Steam desktop client, including for Battle.net VR library shortcuts.
 - A VR headset and two tracked controllers.
@@ -77,7 +77,12 @@ This is a PCVR mod: the game runs on your Windows PC and streams to the headset.
 ## In the game
 
 - First-person VR with your character's body, hands and equipment.
-- Free-swing melee, including with a wheel skill selected, aimed spells, bows and physical javelin throws.
+- Optional experimental [Sorceress elemental hand effects](docs/elemental_hands.md), enabled under VR Settings > Video.
+- Optional experimental frame generation under **VR Settings > Perf**, through
+  [OFXR Bridge](https://github.com/tig3rmast3r/OFXR-Bridge) by tig3rmast3r, which
+  Setup downloads on native Windows. Off by default; turning it on restarts the VR session
+  for a moment, without restarting the game.
+- Free-swing melee, including with a wheel skill selected, aimed spells, bows and physical javelin, throwing knife and axe throws.
 - Belt potions you can grab and drink, plus wrist health, mana, level and experience progress.
 - A left-hand minimap/compass with current area and act, independent health/mana tilt,
   and adjustable controller vibration under **VR Settings > Haptics**.
@@ -131,11 +136,11 @@ Quest left X/Y correspond to Index left A/B; right A/B labels are the same.
 | Minimap | Either wheel → MAP; movement remains available |
 | Reset height | VR Settings > Reset eye height |
 | Adjust controller vibration | **VR Settings > Haptics**; preview each action and **Apply** to save |
-| Hold to show nearby loot labels (Alt) | Hold **Right Grip + Right Trigger**, grip first; release either to restore normal drop/hover labels |
+| Hold to show nearby loot labels (Alt) | Hold the **right stick down**; let go to restore normal drop/hover labels. With **VR Settings > VR > Stick toggle** on (Off by default), push it **up** to switch between walking and running |
 | Interact / pick up / talk | Right A by default; requires an aimed interactable |
 | Free melee swing / thrust | Move the equipped weapon through an enemy |
 | Bow draw | Right trigger near the left-hand bow string; draw and release |
-| Javelin throw | Clear the right trigger skill for basic weapon mode; hold trigger, throw, release |
+| Javelin, throwing knife or axe throw | Right trigger on Attack, Throw or nothing; hold the trigger, throw, release |
 | Cancel a physical attack / draw | Open either wheel, then release the held controls |
 | Swap weapon sets I / II | Dominant grip over either shoulder; or wheel → EQUIPMENT |
 | Stow / draw weapons | Wheel → EQUIPMENT → Stow / Draw |
@@ -225,7 +230,9 @@ basic attacks for skills without a supported physical adapter; assigning a
 spell does not cast it on every swing. Physical skill gestures can be disabled
 under **VR settings → VR → Weapon skill gestures** (on by default), retaining
 button casting and basic physical attacks. This implementation supports the
-existing Smite and bow adapters; it does not generalize arbitrary melee skills.
+existing Smite and bow adapters and melee skill strikes: a supported melee
+skill on a hand's trigger (Bash, Stun, Charged Strike, Maul and others; see
+CONTROLS.md) casts when that hand's strike lands.
 
 Turning gestures off or changing equipment/assignments cancels an in-progress
 skill draw. Shield contact and its trigger fallback cannot duplicate a cast.

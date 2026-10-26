@@ -96,6 +96,31 @@ inline QuadExtent VisorExtent(math::Fov left,math::Fov right) {
     return {2*VisorDistance*std::tan(std::min(f.right,maxHorizontal))*1.05f,
             2*VisorDistance*std::tan(std::min(f.up,maxVertical))*1.05f};
 }
+// The whole view at VisorDistance, for screen effects that must reach its edge
+// (the guard strain light). No 54 / 55 degree bound, so a wider headset is
+// covered to its rim; an eye turned against the head (canted displays: `turn`
+// is that eye's orientation in head space) widens it to its outer corners.
+// Up to ~80 degrees per side, the old visor's limit. Equals VisorExtent
+// wherever that bound does not apply.
+inline QuadExtent ViewExtent(math::Fov left,math::Fov right,math::Quat leftTurn={0,0,0,1},math::Quat rightTurn={0,0,0,1}) {
+    constexpr float maxTan=5.6712818f; // tan 80 degrees
+    const math::Fov fovs[2]={left,right};const math::Quat turns[2]={leftTurn,rightTurn};
+    float h=0,v=0;
+    for(int i=0;i<2;++i) {
+        const auto& f=fovs[i];
+        for(float a:{f.left,f.right,f.down,f.up})if(!std::isfinite(a)||std::fabs(a)>=1.5707963f)return {};
+        if(f.left>=0||f.right<=0||f.down>=0||f.up<=0)return {};
+        auto q=turns[i];
+        const float n=std::sqrt(q.x*q.x+q.y*q.y+q.z*q.z+q.w*q.w);
+        q=std::isfinite(n)&&n>.5f?math::Quat{q.x/n,q.y/n,q.z/n,q.w/n}:math::Quat{0,0,0,1};
+        for(float x:{std::tan(f.left),std::tan(f.right)})for(float y:{std::tan(f.down),std::tan(f.up)}) {
+            const auto r=math::Rotate(q,{x,y,-1});
+            if(!(r.z<-1e-3f)){h=v=maxTan;continue;} // at or past the side of the head: as far as a quad can go
+            h=std::max(h,std::fabs(r.x/-r.z));v=std::max(v,std::fabs(r.y/-r.z));
+        }
+    }
+    return {2*VisorDistance*std::min(h,maxTan)*1.05f,2*VisorDistance*std::min(v,maxTan)*1.05f};
+}
 // Splatter art: SpriteCount square cells side by side (assets/blood-splatters.png).
 constexpr int SpriteCount=8,Cell=384,StripWidth=SpriteCount*Cell,StripHeight=Cell;
 constexpr int Placements=16;

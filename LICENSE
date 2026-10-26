@@ -1,6 +1,7 @@
 MIT License
 
 Copyright (c) 2026 BodyWalkVR
+Copyright (c) 2026 bearstonem
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -22,9 +23,9 @@ SOFTWARE.
 
 ---------------------------------------------------------------------------
 
-This licence covers D2R VR's own code, shaders and pictures. It does not cover
-the name "D2R VR" as a mark, nor BodyWalk, BodyWalkVR and FlatVR, which are
-separate products under their own terms.
+This licence covers D2R VR's and D2R PCVR's own code, shaders and pictures. It
+does not cover the name "D2R VR" as a mark, nor BodyWalk, BodyWalkVR and
+FlatVR, which are separate products under their own terms.
 
 Third-party parts, each under its own licence:
 - MinHook - BSD 2-clause, Copyright (C) 2009-2017 Tsuda Kageyu.

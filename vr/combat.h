@@ -48,6 +48,32 @@ float SwingRecovery(float factor);
 void ConfigureArDamage(bool on,float floor);
 // Game thread: a parry flinched this monster; its next physical hit within the window is a riposte.
 void NoteRiposte(uint32_t monster);
+// True while a riposte on this monster is due (its window open, not yet landed). Thread-safe.
+bool RiposteDue(uint32_t monster);
+// Game thread (melee.cpp), around one physical swing's native attack: this
+// attacker's on-hit effects against this target are off for the call
+// (Unleashed on-hit gate): domeleedamage/domeleeattack events (item procs, CTC,
+// crushing blow, open wounds...), life/mana leech, critical and deadly strike,
+// prevent monster heal and defense lowered per hit. {} = none. Returns the previous scope.
+struct OnHitScope {uintptr_t attacker=0,target=0;};
+OnHitScope GateOnHit(OnHitScope scope);
+// Unleashed would-have-hit gate (combat_rules.h WouldHit): a forced contact - the
+// local player's physical swing, or a monster's hit on the local player - keeps its
+// Unleashed damage, but its other effects (procs, leech, chill/freeze/stun, thorns,
+// item wear...) only come when the native roll would have hit. Game thread: the
+// latest swing's verdict on this thread (1 would hit, 0 would miss, -1 unknown or
+// not gated, e.g. a riposte), for the melee trace.
+int LastSwingWouldHit();
+// Unleashed (default on there, applied live): the local player's arrows and throws
+// - forced hits under contact_hits - follow the contact rules: attack rating scales
+// their damage (with ar_damage) and the would-have-hit gate decides their effects.
+void ConfigureShotRules(bool unleashed);
+// Unleashed (applied live, Cal 2026-10-24): the local player's trigger/button melee - a
+// melee hit check outside a physical swing (basic attack, melee skills, Smite) - is a
+// stroke like a swing: it lands, attack rating scales its damage and the would-have-hit
+// gate decides its effects (Smite always hits natively: neither), and it shares the
+// swings' recovery (melee::ButtonHit: damage factor and on-hit cycle gate).
+void ConfigureButtonRules(bool unleashed);
 // A parry swing made during the monster's downstroke (opensAt, melee::ParryOpens)
 // resolves at once, before its hit frame. ParryArmed: an unspent recent swing (cheap gate,
 // thread-safe). Game thread: EarlyParry judges this attacking monster unit
@@ -76,4 +102,9 @@ bool LocalPlayerUnit(uintptr_t& unit);
 // UI thread: a worn item's new durability onto the local player's client item.
 void MirrorClientDurability(uint32_t itemId,int value);
 bool LocalPlayerId(uint32_t& id);
+// A unit's full stat (D2Common GetUnitStat, layer 0: base + items + states). False
+// when the game's stat getter is not as expected. Any game thread.
+bool UnitStat(uintptr_t unit,int stat,int& value);
+// Returns the maximum fire damage on the equipped item at body location (4=right hand, 5=left hand, 9/10=swap).
+int EquippedFireDamage(int location);
 }

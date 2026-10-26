@@ -78,10 +78,16 @@ setup first. Return to normal play with the ordinary VR shortcut.
 
 Open either hand's wheel and choose **DEV**. Its tabs are grouped by purpose:
 
-- **Character:** level 10, 30, 60 and 90 presets; heal life/mana.
+- **Character:** level 10, 30, 60 and 90 presets; heal life/mana; unlock quests and
+  waypoints; a **Throwing potions** kit (one stack each of Rancid, Choking and
+  Strangling Gas and Oil, Exploding and Fulminating Potion, to equip in the right
+  hand and throw), **By turns rims** and **Sky over rims** (all on this page
+  as Equipment is full).
 - **Equipment:** starter primary/alternate gear, class unique primary/alternate
-  gear, crossbow + bolts, bow + arrows, a small shield, **Render debug draws**
-  and **By turns own picture**.
+  gear, crossbow + bolts, bow + arrows, a small shield, **Render debug draws**,
+  **By turns own picture**, **By turns filter**, **By turns ghosts**, a **Throwing kit** and a **Potion kit** (four Super
+  Healing, two Full Rejuvenation, two Antidote and two Thawing potions, normal
+  items in the inventory: put them in the belt to toss at the mercenary).
 - **Act I - II:** towns, combat areas and inspection destinations.
 - **Act III:** Kurast regions, sewer entrances, jungle areas and bosses.
 - **Act IV - V:** later-act combat areas and filming locations.
@@ -125,11 +131,18 @@ Leadcrow plus 250 bolts; the bow kit is Windforce plus 250 arrows. The small
 shield is a Pelta Lunata buckler. It is separate to avoid exceeding inventory
 capacity in a full Paladin kit.
 
+The throwing kit, for any class, is one normal stack of each thrown weapon
+missile: a Javelin, a Pilum, a Glaive, Throwing Knives and Throwing Axes
+(14 inventory cells). Equip one in the right hand and throw it by hand with the
+right trigger on Attack, Throw or nothing; the kit leaves bindings alone. A
+Barbarian can equip the knives in one hand and the axes in the other to test
+Double Throw.
+
 ## Shield debug draws
 
 Select **DEV > Equipment > Render debug draws** to toggle the shield guard
 overlay. It starts Off each launch and does not change combat rules or saved
-settings. Equip a shield, select Unleashed melee rules, close the menu, and
+settings. Equip a shield (melee is Unleashed), close the menu, and
 compare the outline with the visible shield while moving and rotating it.
 
 - **Cyan:** measured shield bounds used by the blocking check.
@@ -177,6 +190,49 @@ else and no saved setting; editing the ini's value applies that value again.
 Compare Tyrael's wings, a waypoint's flame and spells against the scene
 behind them, the sword against the sky and monsters' heads close up, with
 the same view in each state.
+
+## By turns filter
+
+Select **DEV > Equipment > By turns filter** to switch, for the session, how
+the eye not drawn reads the pictures it is made from with Stereo rendering:
+By turns. **SHARP** (the default, `[stereo] turns_sharp=1`): Catmull-Rom,
+kept within the nearest texels. **SOFT** (0): bilinear, as before. The
+button shows the current state, and the frame log records each switch. It
+changes no saved setting. Compare text on loot labels and in the distance,
+ground textures and fine edges, looking with one eye then the other.
+
+## By turns ghosts
+
+Select **DEV > Equipment > By turns ghosts** to switch, for the session, the
+strips beside near things that only the eye not drawn sees. **FIXED** (the
+default, `[stereo] turns_fill=1`): where its frame-old picture there shows
+something nearer since gone, what is behind beside the strip instead. **OLD**
+(0): its own frame-old picture, as before. Watch a monster walking across
+in front of a wall a few metres away, and the edges of things while you
+strafe: with OLD a frame-old copy of the monster can trail beside it in one
+eye. The button shows the current state, and the frame log records each
+switch. It changes no saved setting.
+
+## By turns rims
+
+Select **DEV > Character > By turns rims** to switch, for the session, the
+dark rim the game draws round anything against the sky: **MOVED** with it
+(the default, `[stereo] turns_rims=1`) or **OLD** (0), left with the sky.
+In By turns, look at hut roofs, treetops and far buildings against the sky,
+for example in Kurast Docks: with OLD a dark, ragged outline stands a few
+pixels off each of them and flickers; with MOVED only the thin rim of Both
+eyes stays. The button shows the current state, and the frame log records
+each switch. It changes no saved setting.
+
+## Sky over rims
+
+Select **DEV > Character > Sky over rims** to switch, for the session,
+whether the sky is painted over that rim itself (`[sky] cover_rims`, **ON**
+by default) or the rim stays (**OFF**). It works in both stereo modes: with
+ON roofs, treetops and far buildings meet the sky without the thin dark
+outline (a pixel thinner), and By turns has no rim left to move. The button
+shows the current state, and the frame log records each switch. It changes
+no saved setting.
 
 ## Locations
 

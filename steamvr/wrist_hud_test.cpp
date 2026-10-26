@@ -13,6 +13,13 @@ int main() {
     assert(layout.Step(true,0)==1&&layout.Step(true,2)==1&&layout.Step(false,1)==2);
     assert(layout.Step(true,0)==1&&layout.Step(false,2)==-1);
     assert(layout.Step(true,1)==-1&&layout.Step(false,1)==-1);
+    {   // Map view = Full map: borrows 0, gives the player's corner back
+        MapLayoutLease full;
+        assert(full.Step(true,1,0)==0&&full.Step(true,0,0)==-1&&full.Step(false,0)==1);
+        assert(full.Step(true,1,1)==-1&&full.Step(true,1,0)==0&&full.Step(true,0,0)==-1);   // switched while borrowed
+        assert(full.Step(false,0)==1);   // the player's left corner, not lost to the borrowed 1
+        assert(full.Step(true,2,0)==0&&full.Step(true,0,1)==1&&full.Step(true,1,1)==-1&&full.Step(false,1)==2);
+    }
     using namespace framevr;
     compass::Heading heading;
     const float north=.71f;

@@ -118,6 +118,20 @@ int main() {
         r=fresh(3,11,40,true);Check(r.consumed&&q.Current().skill==11,"next press loads");
         for(int i=0;i<3;++i){r=q.Step(5,3,11,-1,40,false);Check(r.consumed&&r.change==Quiver::Change::None&&q.Current().skill==11,"stale frame mid-press: no native cast, no second toggle");}
         r=q.Step(6,-1,-1,-1,-1,true);Check(!q.Current().Active(),"character/session change empties the quiver");
+        // #224: a thrown weapon loads the javelin skills the same way, and only those.
+        for(int id:{15,20,25,35})Check(weaponskills::JavelinSkill(id)&&!weaponskills::QuiverSkill(id),"the four javelin skills ride a throw, not a bow");
+        Check(weaponskills::Loadable(15,38,true)&&weaponskills::Loadable(20,205,true)&&weaponskills::Loadable(25,43,true)&&weaponskills::Loadable(35,206,true),
+              "each with its own missile");
+        Check(!weaponskills::Loadable(15,38,false)&&!weaponskills::Loadable(7,12,true)&&!weaponskills::Loadable(15,1,true)&&!weaponskills::Loadable(10,-1,true),
+              "no javelin skill on a bow, no arrow skill on a javelin, no stranger missile, no melee Jab");
+        Check(weaponskills::Loadable(weaponskills::DoubleThrow,-1,true)&&!weaponskills::Loadable(weaponskills::DoubleThrow,-1,false),
+              "Double Throw (no missile of its own) rides a throw, never a bow");
+        q.Step(7,-1,-1,-1,-1,true);
+        r=q.Step(7,2,25,-1,43,true,true);Check(r.consumed&&r.change==Quiver::Change::Loaded&&q.Current().skill==25,"a thrown weapon loads Plague Javelin");
+        q.Step(7,-1,-1,-1,-1,true,true);
+        r=q.Step(7,3,7,-1,12,true,true);Check(!r.consumed&&q.Current().skill==25,"Fire Arrow stays native with a javelin in hand");
+        q.Step(7,-1,-1,-1,-1,true,true);
+        r=q.Step(7,2,25,-1,43,true,true);Check(r.change==Quiver::Change::Unloaded&&!q.Current().Active(),"the same button again: basic throws");
         r=q.Step(6,3,7,-1,12,true);Check(r.consumed&&q.Current().skill==7,"new character starts empty and loads normally");
     }
     {
@@ -216,8 +230,8 @@ int main() {
         for(uint32_t missile:{0u,12u,27u,28u,40u,41u,85u,87u}) {
             const uintptr_t unit=0x1000+missile;
             const uint32_t header[3]{3,missile,500+missile};
-            retire.Request(unit,header[2],missile); // UI: schedule only
-            retire.Request(unit,header[2],missile); // repeated UI callback
+            retire.Request(unit,header[2],missile,0); // UI: schedule only
+            retire.Request(unit,header[2],missile,0); // repeated UI callback
             Check(retire.Pending()&&retire.Contains(unit,header[2],missile),"swap keeps exact old preview owned until native cleanup");
             Check(!retire.Begin(unit+1000,header),"unrelated missile is not retired");
             const auto ticket=retire.Begin(unit,header); // native client update
@@ -231,21 +245,37 @@ int main() {
         }
         Check(destroys==8,"one retirement per old model, including unloading to basic");
         for(const std::array<uint32_t,3> recycled: {std::array<uint32_t,3>{3,12,902},{3,40,901},{1,12,901}}) {
-            retire.Request(0x2000,901,12);
+            retire.Request(0x2000,901,12,0);
             Check(!retire.Begin(0x2000,recycled.data())&&!retire.Pending(),"reused address/id/type is discarded without deleting another unit");
         }
         const uint32_t fire[3]{3,12,901},ice[3]{3,40,902};
-        retire.Request(0x2000,901,12);const auto stale=retire.Begin(0x2000,fire);
+        retire.Request(0x2000,901,12,0);const auto stale=retire.Begin(0x2000,fire);
         retire.Reset(); // area/character teardown owns the old objects
-        retire.Request(0x3000,902,40);const auto current=retire.Begin(0x3000,ice);
+        retire.Request(0x3000,902,40,0);const auto current=retire.Begin(0x3000,ice);
         retire.Finish(stale);
         Check(retire.Pending()&&current!=stale,"old-session completion cannot clear new preview retirement");
         retire.Finish(current);
-        retire.Request(0x2000,901,12);retire.Request(0x3000,902,40);
+        retire.Request(0x2000,901,12,0);retire.Request(0x3000,902,40,0);
         const auto first=retire.Begin(0x2000,fire);retire.Finish(first);
         Check(retire.Pending(),"unwanted creation and old preview can both wait for native cleanup");
         retire.Finish(retire.Begin(0x3000,ice));
         Check(!retire.Pending(),"all queued native objects are retired");
+        // Regression (2026-10-21): a recovery retired a preview the game had
+        // already removed. ClientTick never reached it, and the barrier held
+        // back every new preview for the rest of the session.
+        retire.Request(0x2000,901,12,5000);
+        Check(retire.Blocking(5000)&&retire.Blocking(5000+ClientRetirements::Unreached-1)&&
+              !retire.Abandoned(0x2000,901,12,5000+ClientRetirements::Unreached-1),"a live missile has a second to reach its retirement");
+        Check(!retire.Blocking(5000+ClientRetirements::Unreached)&&retire.Abandoned(0x2000,901,12,5000+ClientRetirements::Unreached),
+              "an unreached retirement stops holding back the replacement");
+        Check(retire.Pending()&&retire.Contains(0x2000,901,12),"the native hooks still watch for it");
+        const auto late=retire.Begin(0x2000,fire); // the game updates it after all (a paused game)
+        Check(late!=0&&retire.Blocking(99999)&&!retire.Abandoned(0x2000,901,12,99999),"a late update still retires it, and its destruction blocks however old");
+        retire.Finish(late);
+        Check(!retire.Pending(),"and then it is gone");
+        retire.Request(0x2000,901,12,5000);
+        Check(retire.Blocking(4000),"a clock behind the request keeps waiting");
+        Check(!retire.Begin(0x2000,ice)&&!retire.Pending(),"an unreached address reused by another missile is dropped, never destroyed");
     }
     std::puts("quiver tests passed");
 }

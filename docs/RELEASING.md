@@ -25,7 +25,8 @@ complete change history.
    and `installer/build_native_installer.ps1`. Existing identity tests check agreement.
 3. Fill the template in `RELEASE_NOTES.md`, including its versioned heading and
    links. Update the `PCVR_IN_HEADSET_NOTES` comment at the end with the same
-   release tag, current contributor credits, and 1-14 short feature bullets.
+   release tag, current contributor credits, and 1-72 short feature bullets (the
+   headset's Notes tab shows 12 a page, with Previous / Next).
    Each summary line must be at most 100 characters and fit the UI preview.
    This comment is hidden in rendered GitHub notes. Its summaries are curated
    during release preparation; the build does not invent summaries from commits.

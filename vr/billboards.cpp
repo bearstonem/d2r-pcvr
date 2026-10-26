@@ -13,6 +13,9 @@
 #ifdef D2RVR_NATIVE_OPENXR
 #include "memory.h"
 #include "shrine_placement.h"
+#include "overlay_view.h"
+#include "bone_armor_height.h"
+#include <cstdio>
 #endif
 
 namespace billboards {
@@ -77,6 +80,97 @@ bool ShrineDefinition(uint64_t definition) {
     }
     return e.shrine;
 }
+// Bone Armor's orbit centre (bone_armor_height.h): [render] bone_armor_height.
+std::atomic<float> boneArmorHeight{bone_armor::Default};
+std::atomic<bool> boneArmorReported{false};
+bool BoneArmorDefinition(uint64_t definition) {
+    struct Entry {uint64_t definition=0;ULONGLONG at=0;bool bone=false;};
+    thread_local Entry cache[32];
+    auto& e=cache[(definition>>6)%32];const auto now=GetTickCount64();
+    if(e.definition!=definition||now-e.at>1000) {
+        char path[160]{};
+        e={definition,now,portal::DefinitionPath(ReadAt,definition,gameBase,path)&&bone_armor::Asset(path)};
+    }
+    return e.bone;
+}
+bool BoneArmorWanted() {return std::fabs(boneArmorHeight.load(std::memory_order_relaxed)-bone_armor::Native)>=1e-4f;}
+// Per lane, as CorrectCenters: mixed batches never lend one effect's
+// classification to another's lane.
+bool LowerBoneArmor(portal::Vec* points,uint32_t count,const portal::Context& c) {
+    const float height=boneArmorHeight.load(std::memory_order_relaxed);
+    struct Entry {int32_t id=-1;bool bone=false;};Entry cache[8];bool changed=false;
+    for(uint32_t i=0;i<count;++i) {
+        portal::Vec lowered;if(!bone_armor::Lowered(points[i],height,lowered))continue;
+        int32_t id=c.instance;
+        if(id<0&&(i>=c.count||!ReadAt(&id,c.indices+4ull*i,4)))continue;
+        if(id<0)continue;
+        auto& entry=cache[uint32_t(id)%8];
+        if(entry.id!=id) {
+            portal::Instance instance{};entry.id=id;
+            entry.bone=portal::Resolve(ReadAt,c,i,gameBase,instance)&&BoneArmorDefinition(instance.definition);
+        }
+        if(entry.bone){points[i]=lowered;changed=true;}
+    }
+    return changed;
+}
+// Paladin aura overlays (overlay_view.h). The game camera's direction is
+// written on the render thread each frame and read by PopcornFX workers.
+SRWLOCK forwardLock=SRWLOCK_INIT;
+portal::Vec gameForward{};ULONGLONG forwardAt=0;
+std::atomic<bool> overlayReported{false};std::atomic<ULONGLONG> overlayLogAt{0};
+std::atomic<int> overlayLogBudget{12};
+struct OverlayEntry {uint64_t definition=0;ULONGLONG at=0;bool overlay=false;char path[160]{};};
+const OverlayEntry& OverlayDefinition(uint64_t definition) {
+    thread_local OverlayEntry cache[32];
+    auto& e=cache[(definition>>6)%32];const auto now=GetTickCount64();
+    if(e.definition!=definition||now-e.at>1000) {
+        e.definition=definition;e.at=now;e.path[0]=0;
+        e.overlay=portal::DefinitionPath(ReadAt,definition,gameBase,e.path)&&overlay_view::Asset(e.path);
+    }
+    return e;
+}
+// Aura overlays take part of the game camera's vertical as view.direction,
+// for every view: an effect that spawns with the flat camera's view is
+// pushed sideways in VR too.
+void CorrectOverlayView(void* output,const void* context) {
+    framevr::hookmetrics::Scope measured(framevr::hookmetrics::PortalView);
+    if(!portalReady.load()||!wanted||!wanted())return;
+    portal::Vec forward,value;ULONGLONG at;
+    AcquireSRWLockShared(&forwardLock);forward=gameForward;at=forwardAt;ReleaseSRWLockShared(&forwardLock);
+    if(!at||GetTickCount64()-at>250||!overlay_view::Upright(forward,value))return;
+    struct Stream {uint64_t data;uint32_t count,stride;};
+    Stream out{};portal::Context c{};
+    if(!Read(&out,output,sizeof out)||!Read(&c,context,sizeof c)||
+       !out.data||!out.count||out.count>1024||out.stride!=12)return;
+    int32_t lastId=-1;const OverlayEntry* entry=nullptr;
+    for(uint32_t i=0;i<out.count;++i) {
+        int32_t id=c.instance;
+        if(id<0&&(i>=c.count||!ReadAt(&id,c.indices+4ull*i,4)))continue;
+        if(id<0)continue;
+        if(id!=lastId) {
+            lastId=id;entry=nullptr;portal::Instance instance{};
+            if(portal::Resolve(ReadAt,c,i,gameBase,instance))entry=&OverlayDefinition(instance.definition);
+        }
+        if(!entry||!entry->overlay)continue;
+        // Frame aura: the direction the effect asked for and what it got, at
+        // most every 5 s and 12 times per session.
+        portal::Vec native{};bool log=false;
+        if(logger&&overlayLogBudget.load(std::memory_order_relaxed)>0) {
+            const auto now=GetTickCount64();auto last=overlayLogAt.load();
+            log=now-last>=5000&&overlayLogAt.compare_exchange_strong(last,now)&&
+                ReadAt(&native,out.data+12ull*i,sizeof native)&&overlayLogBudget.fetch_sub(1)>0;
+        }
+        if(!framevr::WriteMemory(reinterpret_cast<void*>(out.data+12ull*i),&value,sizeof value))continue;
+        if(log) {
+            char line[360];
+            std::snprintf(line,sizeof line,"Frame aura: overlay view direction native=(%.3f,%.3f,%.3f) -> (0,%.3f,0), no sideways push; asset=%s",
+                native.x,native.y,native.z,value.y,entry->path);
+            logger(line);
+        }
+        if(!overlayReported.exchange(true)&&logger)
+            logger("VR overlays: Paladin aura overlays keep a small lift without the sideways push toward the camera");
+    }
+}
 #endif
 #if defined(D2RVR_DEVELOPER) && defined(D2RVR_NATIVE_OPENXR)
 SRWLOCK shrineLock=SRWLOCK_INIT;
@@ -132,7 +226,13 @@ void CenterPosition(void* output,const void* input,uint32_t mask,const void* wor
     portal::Vec head;
     // 19 is the observed native local-point -> world-point path. Keep all
     // other conversions and non-center particle positions exactly native.
-    if(mask!=19||!portalReady.load()||!centerEnabled.load()||!wanted||!wanted()||!Head(head)) {
+#ifdef D2RVR_NATIVE_OPENXR
+    const bool bones=BoneArmorWanted();
+#else
+    const bool bones=false;
+#endif
+    const bool centers=centerEnabled.load();
+    if(mask!=19||!portalReady.load()||(!centers&&!bones)||!wanted||!wanted()||!Head(head)) {
         originalLocalPosition(output,input,mask,worker);return;
     }
     struct Stream {uint64_t data;uint32_t count,stride;};
@@ -152,14 +252,26 @@ void CenterPosition(void* output,const void* input,uint32_t mask,const void* wor
         originalLocalPosition(output,input,mask,worker);return;
     }
     if(!in.stride)for(uint32_t i=1;i<out.count;++i)points[i]=points[0];
-    const bool changed=portal::CorrectCenters(points,out.count,c,gameBase,ReadAt,
+    const bool portals=centers&&portal::CorrectCenters(points,out.count,c,gameBase,ReadAt,
         [](uint64_t definition){return PortalDefinition(definition,true);});
-    if(!changed){originalLocalPosition(output,input,mask,worker);return;}
+    bool lowered=false;
+#ifdef D2RVR_NATIVE_OPENXR
+    lowered=bones&&LowerBoneArmor(points,out.count,c);
+#endif
+    if(!portals&&!lowered){originalLocalPosition(output,input,mask,worker);return;}
     // A private input stream keeps the native transform/interpolation path and
     // never edits shared VM inputs. Resolve separately for mixed-instance lanes.
     const Stream local{reinterpret_cast<uint64_t>(points),out.count,12};
     originalLocalPosition(output,&local,mask,worker);
-    if(!centerReported.exchange(true)&&logger)
+#ifdef D2RVR_NATIVE_OPENXR
+    if(lowered&&!boneArmorReported.exchange(true)&&logger) {
+        char line[160];
+        std::snprintf(line,sizeof line,"VR overlays: Bone Armor orbit centre lowered to %.2f units (native %.2f); native transform retained",
+            boneArmorHeight.load(),bone_armor::Native);
+        logger(line);
+    }
+#endif
+    if(portals&&!centerReported.exchange(true)&&logger)
         logger("VR portals: targeted center-offset correction active; native local-to-world transform retained");
 }
 void CorrectScriptView(void* output,const void* input,const void* context,bool direction) {
@@ -265,6 +377,9 @@ void ViewDirection(void* out,const void* in,const void* context) {
     FinishShrineTrace(trace);
 #endif
     CorrectScriptView(out,in,context,true);
+#ifdef D2RVR_NATIVE_OPENXR
+    CorrectOverlayView(out,context);
+#endif
 }
 void ViewPosition(void* out,const void* in,const void* context) {
 #if defined(D2RVR_DEVELOPER) && defined(D2RVR_NATIVE_OPENXR)
@@ -297,6 +412,22 @@ void SetCenter(const float position[3]) {
     ReleaseSRWLockExclusive(&centerLock);
 }
 void ConfigurePortalCenters(bool enabled) {centerEnabled.store(enabled);}
+void ConfigureBoneArmorHeight(float units) {
+#ifdef D2RVR_NATIVE_OPENXR
+    boneArmorHeight.store(bone_armor::Height(units));
+#else
+    (void)units;
+#endif
+}
+void SetGameForward(const float forward[3]) {
+#ifdef D2RVR_NATIVE_OPENXR
+    AcquireSRWLockExclusive(&forwardLock);
+    gameForward={forward[0],forward[1],forward[2]};forwardAt=GetTickCount64();
+    ReleaseSRWLockExclusive(&forwardLock);
+#else
+    (void)forward;
+#endif
+}
 void Install(void (*log)(const char*),bool (*active)()) {
     if(installed&&portalReady.load()&&originalLocalPosition)return;logger=log;wanted=active;
     using namespace signatures;

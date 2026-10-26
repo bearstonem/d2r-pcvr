@@ -18,7 +18,7 @@ the required assets from your own game and keeps its asset caches local.
    and the Steam account for your shortcuts.
    See **[Install and play on Windows](INSTALL-WINDOWS.md)** for help.
 
-This preview accepts your **Steam copy of D2R 3.3.93787** or
+This preview accepts your **Steam copy of D2R 3.3.94995** (or 3.3.93787) or
 **Battle.net copy of D2R 3.3.93847** (experimental); see
 [Battle.net installation](INSTALL-WINDOWS.md#battlenet-preview-packages).
 Battle.net has been confirmed with SteamVR; Battle.net with Virtual Desktop / VDXR

@@ -275,6 +275,8 @@ int main(){
         Sim s;for(int i=0;i<5;++i)s.Move({.07f,0,0});
         ++s.sample.epoch;Check(!s.Move({.07f,0,0}),"snap turn/recenter cancels old stroke");
         s.Step(8);++s.sample.equipment;Check(!s.Move({.07f,0,0}),"equipment cancels previous geometry");
+        s.Step(8);s.sample.claws=true;Check(!s.Move({.07f,0,0}),"taking a form: a weapon's pose and a claw's never join one sweep");
+        s.Step(8);s.sample.claws=false;Check(!s.Move({.07f,0,0}),"and leaving it");
         s.Step(8);s.sample.active=false;Check(!s.Move({.07f,0,0}),"menus and pose loss clear sweep");
         s.sample.active=true;Check(!s.Move({.07f,0,0}),"returning from menu primes anew");
         s.Step(8);s.sample.time+=.3;Check(!s.Move({.07f,0,0}),"hitch cannot replay stale stroke");

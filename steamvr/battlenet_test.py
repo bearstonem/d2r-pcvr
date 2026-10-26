@@ -45,6 +45,21 @@ class BattleNetTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'does not match'):
                 game_install.validate_game(bnet, experimental_battlenet=True)
 
+    def test_steam_accepts_the_new_build_and_the_previous_one(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stock = self.game(root, 'steam', '3.3.94995')
+            self.assertEqual(game_install.STEAM_VERSION, '3.3.94995')
+            self.assertEqual(game_install.validate_game(stock), ('steam', '3.3.94995'))
+            (stock / 'D2R.exe').write_bytes('3.3.93787'.encode('utf-16-le'))
+            self.assertEqual(game_install.validate_game(stock), ('steam', '3.3.93787'))
+            # Another build is refused, naming the one found in the version resource.
+            resource = b'\0\0'.join(['FileVersion'.encode('utf-16-le'), '3.3.99999'.encode('utf-16-le'), b''])
+            (stock / 'D2R.exe').write_bytes(b'MZ' + resource)
+            with self.assertRaisesRegex(ValueError, r'3\.3\.94995 or 3\.3\.93787; your game is 3\.3\.99999\. Your game version does not match'):
+                game_install.validate_game(stock)
+            self.assertEqual(game_install.file_version(b'MZ'), None)
+
     def test_asset_reader_selection_and_cache_invalidation(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

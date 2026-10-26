@@ -94,6 +94,20 @@ All 55 checks still used `mesh=0`. Developer discovery stages stopped at `0x1F`
 not verification of runtime mesh-size capture. Keep the measured capture issue
 open separately; the fallback correction does not repair that discovery path.
 
+The shield pose blocking reads is the steadied one (`vr/shield_steady.h`: 1 degree / 1.5 mm
+dead zones, so the controller's tremor doesn't move the guard; real moves pass in
+the same frame).
+
+Holy Shield (state 101): while the local Paladin has it, the covered width grows
+1.6x about the shield's center - the measured face's extent across the attack, or
+the fallback's lateral proxy; the raised-height check uses the real shield - because blocks are expected to land on the glow drawn
+around the shield. The glow's size is not in the tables (states.txt names its
+overlay; Overlay.txt gives only a light radius), so 1.6 is a visual estimate
+(`HolyShieldCover` in `steamvr/shield_guard.h`). The state comes from the
+game-thread effects sample (every 200 ms, stale after 1 s); facing, height and
+parry rules are unchanged. `Frame guard: Holy Shield coverage on/off` is logged
+on each switch.
+
 ## Diagnostics and test route
 
 - `Frame guard rejected:` counts decisions rejected by hand height/reach,

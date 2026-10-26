@@ -28,6 +28,12 @@ int main(){
     Check(std::fabs(body::ArmScale(6.8f,1.7f,1.82f,1.6f,2.2f,.2f)-1.2f)<1e-5f,"arm bones grow to measured span");
     Check(body::UnitsPerMetre(6.8f,1.7f,1)==scale,"arm fitting does not change controller scale");
     Check(body::ArmScale(6.8f,1.7f,NAN,1.6f,2.2f,.2f)==1,"invalid measurements preserve authored bones");
+    // A shapeshift form's arm twice the reach: the default stops at 0.65, a form passes 0.5.
+    Check(std::fabs(body::ArmScale(6.8f,1.7f,1.6f,1.6f,4.4f,.2f)-.65f)<1e-5f,"long arms stop at the default fit");
+    Check(std::fabs(body::ArmScale(6.8f,1.7f,1.6f,1.6f,4.4f,.2f,.5f)-.5f)<1e-5f,"a form's long arms fit the span");
+    Check(std::fabs(body::ArmScale(6.8f,1.7f,1.6f,1.6f,22.f,.2f,0)-.3f)<1e-5f,"the shortest fit is bounded");
+    Check(std::fabs(body::ArmScale(6.8f,1.7f,1.6f,1.6f,2.2f,.2f,.65f,1.25f)-3.f/2.2f)<1e-5f,"a world at another scale than the rig fits the arms in its units");
+    Check(body::ArmScale(6.8f,1.7f,1.6f,1.6f,2.2f,.2f,.65f,0)==1,"no unit scale keeps authored bones");
     float bone[16]={1,0,0,0,0,1,0,0,0,0,1,0,3,6,2,1};
     body::ScaleArmBone(bone,{1,6,2},1.2f);
     Check(std::fabs(bone[12]-3.4f)<1e-5f&&bone[13]==6&&bone[14]==2&&std::fabs(bone[0]-1.2f)<1e-5f,"skin and bone length scale about the shoulder");

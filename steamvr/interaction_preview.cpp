@@ -7,6 +7,8 @@
 #include "latest_worker.h"
 #include "wrist_compass.h"
 #include "sewer_prompt_art.h"
+#include "notice_card_art.h"
+#include "skill_usage.h"
 #include <cstdio>
 #include <cstring>
 #include <limits>
@@ -46,6 +48,23 @@ int main(int argc,char** argv) {
         SelectObject(dc,old);DeleteObject(bitmap);DeleteDC(dc);
         if(!fits||!SavePng(argv[1],rgba,prompt::Width,prompt::Height))return 121;
         std::puts("Sewer entry prompt painted; both lines fit");return 0;
+    }
+    if(argc>2&&!std::strcmp(argv[2],"--notice-card-check")) {
+        // Synthetic messages of the native lengths, with the Start glyph.
+        namespace notice=framevr::notice;
+        const char* messages[]={"Quest log changed. Press \xEE\x80\x9D to open the quest.",
+            "Level gained. Press \xEE\x80\x9D to spend the new Skill Points.",
+            "A deliberately long message that has to wrap onto a second line and shrink a little, "
+            "press \xEE\x80\x9D to continue reading it."};
+        std::vector<uint8_t> gallery;
+        for(const char* message:messages) {
+            char text[256]{};std::snprintf(text,sizeof text,"%s",message);notice::StartGlyph(text);
+            std::vector<uint8_t> card;
+            if(!notice::Paint(text,card)||card.size()!=size_t(notice::Width)*notice::Height*4)return 125;
+            gallery.insert(gallery.end(),card.begin(),card.end());
+        }
+        if(!SavePng(argv[1],gallery,notice::Width,notice::Height*3))return 126;
+        std::puts("Notice cards painted; every message fits");return 0;
     }
     if(argc>2&&!std::strcmp(argv[2],"--quick-use-check")) {
         if(argc>3){wchar_t path[32768]{};MultiByteToWideChar(CP_UTF8,0,argv[3],-1,path,32768);icons::Directory(path);}
@@ -226,6 +245,18 @@ int main(int argc,char** argv) {
         const auto turnsNear=Paint(s,o,-1);s.devTurnsKeepOwn=2;
         if(turnsNear==Paint(s,o,-1)||!SavePng((std::string(argv[1])+".turns-own-near.png").c_str(),turnsNear,1024,1024))return 79;
         s.devTurnsKeepOwn=0;
+        s.devTurnsSharp=true;o.hover=DeveloperCell(framevr::dev::TurnsSharpChoice);o.result=Result::SharpUpdated;
+        const auto sharpOn=Paint(s,o,-1);s.devTurnsSharp=false;
+        if(sharpOn==Paint(s,o,-1)||!SavePng((std::string(argv[1])+".turns-sharp.png").c_str(),sharpOn,1024,1024))return 80;
+        s.devTurnsSharp=true;s.devTurnsFill=true;o.hover=DeveloperCell(framevr::dev::TurnsFillChoice);o.result=Result::FillUpdated;
+        const auto fillOn=Paint(s,o,-1);s.devTurnsFill=false;
+        if(fillOn==Paint(s,o,-1)||!SavePng((std::string(argv[1])+".turns-fill.png").c_str(),fillOn,1024,1024))return 81;
+        o.devPage=0;s.devTurnsRims=true;o.hover=DeveloperCell(framevr::dev::TurnsRimsChoice);o.result=Result::RimsUpdated;
+        const auto rimsOn=Paint(s,o,-1);s.devTurnsRims=false;
+        if(rimsOn==Paint(s,o,-1)||!SavePng((std::string(argv[1])+".turns-rims.png").c_str(),rimsOn,1024,1024))return 82;
+        s.devSkyRims=true;o.hover=DeveloperCell(framevr::dev::SkyRimsChoice);o.result=Result::SkyRimsUpdated;
+        const auto skyRims=Paint(s,o,-1);s.devSkyRims=false;
+        if(skyRims==Paint(s,o,-1)||!SavePng((std::string(argv[1])+".sky-rims.png").c_str(),skyRims,1024,1024))return 83;
         std::puts("Development preview: page, hover and unavailable state passed");return 0;
     }
     s.health=74;s.maxHealth=100;s.mana=39;s.maxMana=80;
@@ -346,18 +377,34 @@ int main(int argc,char** argv) {
         std::fclose(file);return 0;
     }
     if(editorCheck) {
+        {   // Every skill's card text fits its card on every slot (skill_usage.h Details, in the card's font).
+            HDC measure=CreateCompatibleDC(nullptr);
+            HFONT card=CreateFontW(SkillCardFont,0,0,0,FW_SEMIBOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,ANTIALIASED_QUALITY,DEFAULT_PITCH,L"Georgia");
+            const auto old=SelectObject(measure,card);const auto c=SkillCardBounds(0);
+            const int width=int(768*(c.right-c.left))-2*SkillCardPad,height=int(768*(c.bottom-c.top))-SkillCardTop-SkillCardPad;
+            int tallest=0;
+            for(int skill=0;skill<400;++skill)for(int slot=0;slot<framevr::skills::Count;++slot) {
+                wchar_t w[1024]{};MultiByteToWideChar(CP_UTF8,0,framevr::skillusage::Details(skill,slot).c_str(),-1,w,1024);
+                RECT r{0,0,width,0};DrawTextW(measure,w,-1,&r,DT_LEFT|DT_TOP|DT_WORDBREAK|DT_NOPREFIX|DT_CALCRECT);tallest=std::max(tallest,int(r.bottom));
+            }
+            SelectObject(measure,old);DeleteObject(card);DeleteDC(measure);
+            if(tallest>height){std::fprintf(stderr,"Skill card text too tall: %d of %d px\n",tallest,height);return 26;}
+            std::printf("Skill cards: the tallest text takes %d of %d px\n",tallest,height);
+        }
         s.bindingsEditable=true;s.bindingBank=0;s.skillCount=7;
         std::copy_n(s.skills.begin(),7,s.catalog.begin());
-        std::vector<uint8_t> gallery(1536*768*4);
-        for(int page=0;page<2;++page) {
-            o.utility=false;o.editor=page+1;o.editSlot=1;o.editCount=7;
+        std::vector<uint8_t> gallery(3072*768*4);
+        for(int page=0;page<4;++page) {
+            o.utility=false;o.editor=page?2:1;o.editSlot=page==2?framevr::skills::TriggerSlot(0):1;o.editCount=7;
             o.editClass=1;o.editCategoryCounts={7,2,1,1,3};
             std::copy_n(s.skills.begin(),o.editOptions.size(),o.editOptions.begin());o.hover=page?3:1;
+            if(page>=2){auto& zeal=o.editOptions[2];zeal.id=framevr::strikeskills::Zeal;std::snprintf(zeal.name,sizeof zeal.name,"Zeal");o.hover=2;}
+            if(page==3){auto& attack=o.editOptions[1];attack.id=framevr::weaponskills::Attack;std::snprintf(attack.name,sizeof attack.name,"Attack");o.hover=1;}
             const auto atlas=Paint(s,o,2);
-            for(int y=0;y<768;++y)std::memcpy(&gallery[(y*1536+page*768)*4],&atlas[y*1024*4],768*4);
+            for(int y=0;y<768;++y)std::memcpy(&gallery[(y*3072+page*768)*4],&atlas[y*1024*4],768*4);
         }
-        if(!SavePng(argv[1],gallery,1536,768))return 25;
-        std::puts("Skill editor preview: slot selection and native skill icon list rendered");return 0;
+        if(!SavePng(argv[1],gallery,3072,768))return 25;
+        std::puts("Skill editor preview: slot selection, a skill card on a face button, Zeal's and Attack's on the right trigger");return 0;
     }
     if(wheelCheck) {
         if(argc<4||!icons::Get("s36")||!icons::Get(s.belt[0].Next())||!icons::Get(s.sets[0][0]))return 21;

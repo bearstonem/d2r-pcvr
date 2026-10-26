@@ -40,6 +40,7 @@
 #include "../steamvr/crossbow_pose.h"
 #include "../steamvr/profile.h"
 #include "../steamvr/guarded_text.h"
+#include "../steamvr/shapeshift_form.h"
 #include "sigscan.h"
 #ifdef D2RVR_NATIVE_OPENXR
 #include "memory.h"
@@ -47,6 +48,7 @@
 #include "hero_selection.h"
 #include "bow_pose.h"
 #include "shield_pose.h"
+#include "shield_steady.h"
 #include "dev_scenarios.h"
 #include "../steamvr/shield_surface.h"
 namespace gamestate {framevr::dualwield::Equipment MeleeEquipment();uint64_t LocalPlayer();uint32_t HandsKey();uint32_t WeaponSet();}
@@ -129,6 +131,10 @@ void FindHeroTransform(uintptr_t self) {
     fprintf(g_out, "   %d hits\n", hits);
 }
 
+// The bone's bind-pose (rest) translation, model space, from its InverseWorld4x4
+// at +0x50 (stride 0xA4). Defined with the matrix helpers below.
+bool BindTranslation(uintptr_t bone, float out[3]);
+
 void DumpOne(uintptr_t self) {
     uintptr_t modelInst = 0, skel = 0, world = 0, nameObj = 0;
     if (!Get(self + 0x08, &modelInst) || !Get(modelInst + 0x08, &skel) || !Get(self + 0x20, &world)) return;
@@ -174,6 +180,8 @@ void DumpOne(uintptr_t self) {
         const bool haveM = i < wpCount && SafeCopy(m, (const void*)(mats + i * 64), 64);
         fprintf(g_out, "   [%3d] parent %3d  %-40s", i, parent, Str(nm).c_str());
         if (haveM) fprintf(g_out, "  t %8.3f %8.3f %8.3f  x %6.3f %6.3f %6.3f", m[12], m[13], m[14], m[0], m[1], m[2]);
+        float b[3];   // the rest pose: a shapeshift form's posture comes from it
+        if (stride == 0xA4 && BindTranslation(bones + i * stride, b)) fprintf(g_out, "  b %8.3f %8.3f %8.3f", b[0], b[1], b[2]);
         fprintf(g_out, "\n");
     }
     fflush(g_out);
@@ -211,6 +219,15 @@ Mat InvAffine(const Mat& a) {
     for (int j = 0; j < 3; ++j) r.m[12+j] = -(m[12]*r.m[j] + m[13]*r.m[4+j] + m[14]*r.m[8+j]);
     r.m[15] = 1.0f;
     return r;
+}
+
+bool BindTranslation(uintptr_t bone, float out[3]) {
+    Mat inv{};
+    if (!SafeCopy(inv.m, (const void*)(bone + 0x50), sizeof inv.m)) return false;
+    for (float f : inv.m) if (!std::isfinite(f)) return false;
+    const Mat w = InvAffine(inv);
+    out[0] = w.m[12]; out[1] = w.m[13]; out[2] = w.m[14];
+    return std::isfinite(out[0] + out[1] + out[2]);
 }
 
 struct V3 { float x, y, z; };
@@ -291,6 +308,13 @@ struct Hero {
     std::vector<Finger> fingers[2];
     bool bindOk = false;
     int cls = -1;   // kHeroClasses, from the model's folder
+    // A druid shapeshift form's rig (framevr::shapeshift: 1 werewolf, 2 werebear; enemy
+    // models, 2026-10-21): held with its torso tipped upright about the spine root
+    // (upright, a rotation) and grafted under the player by its shoulders, at the
+    // shoulders' height then (shoulderUp). eyeY is then the rig's eye for those shoulders.
+    int form = 0;
+    Mat upright{{1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1}};
+    float shoulderUp = 0.0f;
 };
 
 std::atomic<int> g_lockState{0};
@@ -367,7 +391,45 @@ struct GrabLineOut { float a[3], b[3]; ULONGLONG at; };
 GrabLineOut g_grabLine{};
 #endif
 std::atomic<ULONGLONG> g_eyeAt{0};
+std::atomic<float> g_eyeSettled{0.0f};   // the eye height the ease is heading for (HeroEye)
+// The world's scale (HeroEye): a person's eye height, kept through a druid's form - the
+// eyes stand at the form's height, the world stays the druid's size (Cal, 2026-10-21: a
+// world scaled with the form looked awkward). g_personEye: the hero's own rig, last posed.
+std::atomic<float> g_scaleEye{0.0f}, g_personEye{0.0f}, g_personWorldScale{0.0f};
 std::atomic<float> g_poseYaw[3];
+// The camera's eye height eases when the hero's rig changes (a shapeshift), and the
+// form's hips, legs and tail are held while it stands (shapeshift_form.h).
+SRWLOCK g_formLock = SRWLOCK_INIT;
+framevr::shapeshift::EyeEase g_eyeEase;   // g_formLock
+framevr::shapeshift::LegHold g_legHold;   // g_formLock
+// Both eyes of a pair share one input stamp: the ease and the hold step once per pair,
+// so the two eyes never draw different heights. (g_formLock)
+uint32_t g_eyeStamp = 0, g_legStamp = 0; float g_eyeTarget = 0, g_eyeShown = 0, g_legWeight = 1; bool g_eyeStamped = false, g_legStamped = false;
+// The form rig taken as the hero: kept while the game still draws it (RigGoneMs) unless
+// another is clearly nearer the player (a summon can share the rig). (g_formLock)
+uintptr_t g_formSelf = 0; ULONGLONG g_formSelfAt = 0; float g_formApart = 0;
+std::atomic<ULONGLONG> g_formPosedAt{0};   // a form rig was the hero then: the druid's own model is not
+// When each rig was last posed as the hero: [0] a person's (the druid's own), [1] the
+// werewolf's, [2] the werebear's - the one the state sample names, while the game swaps them.
+std::atomic<ULONGLONG> g_rigPosedAt[3] = {};
+#ifdef D2RVR_DEVELOPER
+// Form rig frames, for the log: taken before the state sample caught up with the swap;
+// left to the game (not standing, another rig taken); grafted without the neck anchor.
+std::atomic<unsigned> g_formAhead{0}, g_formUnstanding{0}, g_formOther{0}, g_formLoose{0};
+void ReportFormFrames() {
+    static std::atomic<uint64_t> nextAt{0};
+    static unsigned told = 0;   // the sum last written: only a change is worth a line
+    auto before = nextAt.load(); const auto now = GetTickCount64();
+    if (now < before || !nextAt.compare_exchange_strong(before, now + 5000)) return;
+    const unsigned a = g_formAhead.load(), u = g_formUnstanding.load(), o = g_formOther.load(), l = g_formLoose.load();
+    if (a + u + o + l == told) return;
+    told = a + u + o + l;
+    char line[220];
+    std::snprintf(line, sizeof line, "Frame shapeshift body: form rig frames - posed ahead of the state sample %u; left to the game: "
+                  "not standing %u, another rig taken %u; grafted without the neck anchor %u", a, u, o, l);
+    framevr::logging::Write(line);
+}
+#endif
 
 SRWLOCK g_heroLock = SRWLOCK_INIT;
 // Per SkeletonInstance, keyed with its skeleton too: an instance address the
@@ -548,10 +610,15 @@ bool Learn(uintptr_t self, Hero* h) {
     Get(self, &nameObj); Get(nameObj + 8, &nameP);
     const std::string model = Str(nameP);
     const size_t at = model.find("/character/player/");
-    if (at == std::string::npos) return false;
-    h->cls = -1;
-    for (int c = 0; c < 8; ++c)
-        if (model.compare(at + 18, strlen(kHeroClasses[c]) + 1, std::string(kHeroClasses[c]) + "/") == 0) h->cls = c;
+    // A druid's shapeshift form is drawn with an enemy model (F10, 2026-10-21). Its rig is
+    // learned here; Arms takes it as the hero only while the player is in that form.
+    const int form = framevr::shapeshift::FromModel(model);
+    if (at == std::string::npos && !form) return false;
+    h->form = form;
+    h->cls = form ? 5 : -1;
+    if (!form)
+        for (int c = 0; c < 8; ++c)
+            if (model.compare(at + 18, strlen(kHeroClasses[c]) + 1, std::string(kHeroClasses[c]) + "/") == 0) h->cls = c;
     int32_t count = 0; uintptr_t bones = 0;
     if (!Get(skel + 8, &count) || !Get(skel + 0xC, &bones) || count <= 0 || count > 1024) return false;
     h->skel = skel; h->count = count; h->parent.assign(count, -1); h->inHead.assign(count, 0); h->upper.assign(count, 0);
@@ -597,7 +664,28 @@ bool Learn(uintptr_t self, Hero* h) {
             {&h->twoHand, {"two_hand_weapon_attach", "two_hand_weapon_attach", "two_hand_weapon_attach"}},
             {&h->shieldAttach, {"shield_attach", "shield_attach", "shield_attach"}},
         };
-        for (const Alias& a : kAliases) {
+        // The shapeshift forms (F10, 2026-10-21): werewolf, werebear. Sorceress-style names, the
+        // bear's with an R_Arm_ prefix; their own spine and head names; no weapon or shield bones.
+        const Alias kFormAliases[] = {
+            {&h->upr[0], {"R_UpperArm", "R_Arm_UpperArm", "R_Arm_UpperArm"}},
+            {&h->upr[1], {"L_UpperArm", "L_Arm_UpperArm", "L_Arm_UpperArm"}},
+            {&h->lwr[0], {"R_ForeArm", "R_Arm_ForeArm", "R_Arm_ForeArm"}},
+            {&h->lwr[1], {"L_ForeArm", "L_Arm_ForeArm", "L_Arm_ForeArm"}},
+            {&h->hand[0], {"R_Wrist", "R_Arm_Wrist", "R_Arm_Wrist"}},
+            {&h->hand[1], {"L_Wrist", "L_Arm_Wrist", "L_Arm_Wrist"}},
+            {&h->ind[0], {"R_finger_A_A", "R_Arm_finger_A_A", "R_Arm_finger_A_A"}},
+            {&h->ind[1], {"L_finger_A_A", "L_Arm_finger_A_A", "L_Arm_finger_A_A"}},
+            {&h->mid[0], {"R_finger_B_A", "R_Arm_finger_B_A", "R_Arm_finger_B_A"}},
+            {&h->mid[1], {"L_finger_B_A", "L_Arm_finger_B_A", "L_Arm_finger_B_A"}},
+            {&h->pnk[0], {"R_finger_D_A", "R_Arm_finger_D_A", "R_Arm_finger_D_A"}},
+            {&h->pnk[1], {"L_finger_D_A", "L_Arm_finger_D_A", "L_Arm_finger_D_A"}},
+            {&h->head, {"C_NeckHead_head", "head", "head"}},
+            {&h->spine, {"C_spine1", "C_Spine_spine1", "C_Spine_spine1"}},
+        };
+        const Alias* table = form ? kFormAliases : kAliases;
+        const size_t tableSize = form ? std::size(kFormAliases) : std::size(kAliases);
+        for (size_t t = 0; t < tableSize; ++t) {
+            const Alias& a = table[t];
             if (*a.slot >= 0) continue;
             if (n == a.names[0] || n == a.names[1] || n == a.names[2]) { *a.slot = i; break; }
         }
@@ -673,11 +761,12 @@ bool Learn(uintptr_t self, Hero* h) {
         }
     }
     uintptr_t world = 0, mats = 0; float headNow[16] = {};
+    // A form's idle hunches far from its rest pose (the werewolf's head 5.25 up as drawn).
     if (ok && Get(self + 0x20, &world) && Get(world + 4, &mats) && SafeCopy(headNow, (const void*)(mats + h->head * 64), 64))
-        ok = fabsf(h->bind[h->head].m[13] - headNow[13]) < 1.5f && h->bind[h->head].m[13] > 2.0f;
+        ok = fabsf(h->bind[h->head].m[13] - headNow[13]) < (form ? 4.0f : 1.5f) && h->bind[h->head].m[13] > 2.0f;
     else ok = false;
     h->bindOk = ok;
-    g_lockState.store(ok ? 1 : -1);
+    if (!form) g_lockState.store(ok ? 1 : -1);   // a monster on a form's rig must not touch the hero's state
 
     // Standing heights from the bind pose (the animation's would bob with the
     // stride). Eyes 5.65 (sorceress) .. 7.04 (druid) in the F10 dumps; a rig
@@ -697,6 +786,18 @@ bool Learn(uintptr_t self, Hero* h) {
             }
         }
         if (h->pelvis >= 0) h->pelvisY = h->bind[h->pelvis].m[13];
+        // A form: its torso tipped upright about the spine root (the lateral axis only), and
+        // its eye height taken as a person's for where its shoulders then stand.
+        if (form) {
+            const V3 p = Pos(h->bind[h->spine]);
+            const V3 a = Pos(h->bind[h->upr[0]]), b = Pos(h->bind[h->upr[1]]);
+            const V3 mid = {(a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f, (a.z + b.z) * 0.5f};
+            // about the model's lateral (x) axis only, v' = v * upright: (0, y, z) onto (0, |yz|, 0)
+            const float tilt = std::hypot(mid.y - p.y, mid.z - p.z) > 0.1f ? atan2f(-(mid.z - p.z), mid.y - p.y) : 0.0f;
+            h->upright = Mat{{1,0,0,0, 0,cosf(tilt),sinf(tilt),0, 0,-sinf(tilt),cosf(tilt),0, 0,0,0,1}};
+            h->shoulderUp = framevr::shapeshift::UprightShoulders(p.y, p.z, mid.y, mid.z);
+            h->eyeY = framevr::shapeshift::RigEye(h->shoulderUp);
+        }
         if (!(h->eyeY > 3.0f && h->eyeY < 12.0f)) h->eyeY = 0.0f;   // not a standing body: no height from it
         // Resolve by the rig's hierarchy/geometry, not the hero class. Ignore
         // toe/end/helper bones and require a descending, plausible leg chain.
@@ -714,6 +815,20 @@ bool Learn(uintptr_t self, Hero* h) {
             if(h->leg[side][2]<0){h->leg[side][0]=hip;h->leg[side][1]=knee;h->leg[side][2]=foot;}
         }
     }
+#ifdef D2RVR_NATIVE_OPENXR
+    if (form) {   // once per form skeleton: what the graft is built from
+        static std::atomic<uintptr_t> told[2];
+        if (told[form - 1].exchange(skel) != skel) {
+            const float leanDeg = h->bindOk ? acosf(std::clamp(h->upright.m[5], -1.0f, 1.0f)) * 57.2958f : 0.0f;
+            char line[300];
+            snprintf(line, sizeof line, "Frame shapeshift body: %s rig bones=%d bind=%d head bind=%.2f drawn=%.2f spine lean=%.0f deg "
+                     "upright shoulders=%.2f rig eye=%.2f legs=%d,%d fingers=%d,%d",
+                     framevr::shapeshift::Name(form), count, int(h->bindOk), h->head >= 0 ? h->bind[h->head].m[13] : 0.0f, headNow[13],
+                     leanDeg, h->shoulderUp, h->eyeY, h->leg[0][2], h->leg[1][2], int(h->fingers[0].size()), int(h->fingers[1].size()));
+            framevr::logging::Write(line);
+        }
+    }
+#endif
     return true;
 }
 
@@ -858,8 +973,10 @@ void ApplyWrist(Mat& hand, const Wrist& r) {
 // forearm shield_attach sat on: the necromancer's animation holds it past the
 // palm side, the stop turned round and pushed his hand up as it bent down,
 // with a steel shield only (2026-10-20). The barbarian's never turned it.
-// Returns how much bend the controller asked that the wrist held back, degrees (0: none).
-float StopShieldWrist(const Hero& h,std::vector<Mat>& newW) {
+// Returns how much bend the controller asked that the wrist held back, degrees (0: none);
+// sideOut (if given): -1 when the shield's bone puts it on the palm's side, else +1 -
+// for the shield's placement, never to turn the stop round.
+float StopShieldWrist(const Hero& h,std::vector<Mat>& newW,int* sideOut=nullptr) {
     const int k=h.hand[1],sa=h.shieldAttach,l=h.lwr[1],i=h.ind[1],m=h.mid[1],p=h.pnk[1];
     if(k<0||sa<0||l<0||i<0||m<0||p<0)return 0;
     // the back of the hand in the hand bone's frame (Fist's left palm, reversed)
@@ -868,6 +985,16 @@ float StopShieldWrist(const Hero& h,std::vector<Mat>& newW) {
     const Mat rigid=Mul(Mul(h.bind[k],InvAffine(h.bind[sa])),newW[sa]);
     const V3 f=Norm(Sub(Pos(newW[k]),Pos(newW[l])));   // elbow -> wrist
     const V3 now=Norm(RotOnly(back,newW[k])),stop=Norm(RotOnly(back,rigid));
+    // the shield's side of the forearm, for its placement only (the stop above stays
+    // the back of the hand's): the back of the hand's, unless its bone says otherwise.
+    // 2026-10-20: decided from the bind pose, once per model. Read each frame, an
+    // attach bone near the forearm's line flipped the side as the arm moved, and
+    // the shield following the hand jumped across the wrist.
+    if(sideOut) {
+        const V3 fb=Norm(Sub(Pos(h.bind[k]),Pos(h.bind[l]))),ob=Sub(Pos(h.bind[sa]),Pos(h.bind[l]));
+        const V3 off=Sub(ob,Scale(fb,Dot(ob,fb)));
+        *sideOut=Len(off)>.05f*Len(Sub(Pos(h.bind[k]),Pos(h.bind[l])))&&Dot(off,RotOnly(back,h.bind[k]))<0?-1:1;
+    }
     // Bend as the angle off the forearm: easing starts kEase short of the stop
     // and only approaches it, so the shield slows into place and never reaches the arm.
     constexpr float kEase=15.0f/57.2958f;
@@ -944,7 +1071,9 @@ Mat TurnAbout(V3 k, float deg) {
 
 // One arm's two-bone IK, the wrist to T: elbow down, a little out to its own
 // side and back - of the body as turned.
-void Reach(const Hero& h, int side, V3 T, bool turn, float c, float s, const std::vector<Mat>& baseW, std::vector<Mat>& newW, bool trackedShield=false) {
+// trackedShield / extend: beyond the arm's reach it lengthens (up to twice) so the hand stays on
+// the controller - the shield arm, and both arms of a grafted shapeshift form.
+void Reach(const Hero& h, int side, V3 T, bool turn, float c, float s, const std::vector<Mat>& baseW, std::vector<Mat>& newW, bool trackedShield=false, bool extend=false) {
     const int u = h.upr[side], l = h.lwr[side], k = h.hand[side];
     const V3 S = Pos(newW[u]);
     float L1 = Len(Sub(Pos(newW[l]), S)), L2 = Len(Sub(Pos(newW[k]), Pos(newW[l])));
@@ -953,7 +1082,7 @@ void Reach(const Hero& h, int side, V3 T, bool turn, float c, float s, const std
 #ifdef D2RVR_NATIVE_OPENXR
     const V3 requested=T;
     float reachScale=1;
-    if(trackedShield) {
+    if(trackedShield||extend) {
         const float scale=shield::ReachScale({S.x,S.y,S.z},{T.x,T.y,T.z},L1,L2);
         reachScale=scale;
         if(scale>1.f) {
@@ -1119,7 +1248,93 @@ void Fist(const Hero& h, int side, float grip, float closed, float open, const s
 }
 
 #endif
-void PoseBody(uintptr_t self, const Hero& h, const Input& in) {
+#if D2RVR_FIRST_PERSON && defined(D2RVR_NATIVE_OPENXR)
+// A grafted shapeshift form's claws, from the pose as drawn (after its uniform scale): each
+// paw a capsule from the palm's middle to one segment past the middle finger's last joint,
+// half the knuckle span thick, published as that hand's melee weapon (right: the main hand,
+// left: the off hand). The form draws no weapon; these are what strikes. The paw is measured
+// in its rest shape hung on the drawn wrist: a grip curls the fingers into a fist ([hands]
+// fist), and measured as drawn the claw folded back into the palm - a stub pointing back,
+// so a forward thrust read as a withdrawal. Both hands are written every pass: one not
+// measured this pass is cleared, never left to an earlier pass.
+void PublishClaws(uintptr_t self, const Hero& h, const Input& in, const std::vector<Mat>& w, float c, float s, float drawScale) {
+    HeroXform hx; Mat model;
+    MeleeWeaponPose out[2]{}; bool ok[2]{};
+    V3 palmAt{}; int axesFrom = -1;
+    if (in.havePoseStamp && HeroTransform(&hx) && hx.self == self && (hx.parent & 0xFFFFFu) == 0xFFFFFu &&
+        SafeCopy(model.m, reinterpret_cast<const void*>(hx.comp), sizeof model)) {
+        auto toWorld = [&](V3 p) { Mat t{{1,0,0,0, 0,1,0,0, 0,0,1,0, p.x,p.y,p.z,1}}; return Pos(Mul(t, model)); };
+        const V3 player = Pos(model);
+        for (int side = 0; side < 2; ++side) {
+            if (!(in.handsValid & (1u << side)) || h.hand[side] < 0 || h.mid[side] < 0 || h.ind[side] < 0 || h.pnk[side] < 0) continue;
+            const Hero::Finger* middle = nullptr;
+            for (const auto& f : h.fingers[side]) if (!f.bones.empty() && f.bones[0] == h.mid[side]) middle = &f;
+            if (!middle || middle->bones.size() < 2) continue;
+            const Mat& wristDrawn = w[h.hand[side]];
+            const Mat fromWrist = InvAffine(h.bind[h.hand[side]]);
+            auto rest = [&](int b) { return Pos(Mul(Mul(h.bind[b], fromWrist), wristDrawn)); };
+            const V3 wrist = Pos(wristDrawn), knuckle = rest(h.mid[side]);
+            const V3 last = rest(middle->bones.back()), before = rest(middle->bones[middle->bones.size() - 2]);
+            const V3 palm = Add(wrist, Scale(Sub(knuckle, wrist), 0.5f)), tip = Add(last, Sub(last, before));
+            const V3 a = toWorld(palm), b = toWorld(tip);
+            const float length = Len(Sub(b, a)), radius = 0.5f * Len(Sub(toWorld(rest(h.ind[side])), toWorld(rest(h.pnk[side]))));
+            if (!(length > 0.01f) || !(radius > 0.005f) || !std::isfinite(length + radius + a.x + a.y + a.z + player.x + player.y + player.z)) continue;
+            const V3 axis = Scale(Sub(b, a), 1.0f / length);
+            auto& p = out[side];
+            p.origin[0] = a.x; p.origin[1] = a.y; p.origin[2] = a.z;
+            p.axis[0] = axis.x; p.axis[1] = axis.y; p.axis[2] = axis.z;
+            p.castingAxis[0] = axis.x; p.castingAxis[1] = axis.y; p.castingAxis[2] = axis.z;
+            p.player[0] = player.x; p.player[1] = player.y; p.player[2] = player.z;
+            p.poseStamp = in.poseStamp; p.worldEpoch = in.worldEpoch; p.heroGeneration = HeroGen();
+            p.weaponType = D2RVR_TYPE_CLAW; p.length = length; p.radius = radius;
+            // the claw's direction in its controller's own frame: a thrust runs along it
+            const V3 d = Norm(Sub(tip, palm));
+            const V3 headAxis = {-(d.x * c - d.z * s), d.y, -(d.x * s + d.z * c)};
+            const framevr::math::Quat grip{in.rot[side][0], in.rot[side][1], in.rot[side][2], in.rot[side][3]};
+            const auto g = framevr::math::Rotate(framevr::math::Conjugate(grip), {headAxis.x, headAxis.y, headAxis.z});
+            p.gripAxis[0] = g.x; p.gripAxis[1] = g.y; p.gripAxis[2] = g.z;
+            ok[side] = true;
+            if (side == 0) { palmAt = palm; axesFrom = h.hand[0]; }
+        }
+    }
+    const ULONGLONG at = GetTickCount64();
+    GunBoneOut g{};
+    if (ok[0]) {
+        g.melee = out[0]; g.haveMelee = true; g.at = at; g.hero = self; g.poseStamp = in.poseStamp; g.havePoseStamp = true;
+        // [debug] bone_axes: the right wrist's axes from the palm, metres from the eyes (as a weapon bone's)
+        auto back = [&](V3 d) { const V3 m = {d.x * c - d.z * s, d.y, d.x * s + d.z * c}; return V3{-m.x, m.y, -m.z}; };
+        const V3 head = {in.eyeModel[0] * drawScale, in.eyeModel[1] * drawScale, in.eyeModel[2] * drawScale};
+        const float upm = framevr::body::UnitsPerMetre(h.eyeY * drawScale, in.userHeadM, in.scale);
+        const V3 o = back(Scale(Sub(palmAt, head), 1.0f / upm));
+        g.o[0] = o.x; g.o[1] = o.y; g.o[2] = o.z;
+        for (int i = 0; i < 3; ++i) {
+            const Mat& m = w[axesFrom];
+            const V3 d = back(Norm(V3{m.m[i * 4], m.m[i * 4 + 1], m.m[i * 4 + 2]}));
+            g.ax[i][0] = d.x; g.ax[i][1] = d.y; g.ax[i][2] = d.z;
+        }
+    }
+    AcquireSRWLockExclusive(&g_gunBoneLock);
+    g_gunBone = g;
+    g_offhandPose = ok[1] ? out[1] : MeleeWeaponPose{}; g_offhandAt = ok[1] ? at : 0;
+    ReleaseSRWLockExclusive(&g_gunBoneLock);
+}
+#endif
+void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) {
+    // A shapeshift form's rig is drawn at a uniform scale (drawScale) about the model's origin (the feet stay on the
+    // ground). It is posed in the rig's own units - the camera's eye point taken back
+    // by drawScale below - and scaled as it is written.
+    Input in = given;
+#if D2RVR_FIRST_PERSON
+    if (h.form) {   // a form's rig draws only claws: nothing is held, both paws are free
+        in.staff = in.staffFreeLeft = in.leftHilt = in.gunStock = in.bothAttach = false;
+        in.weaponType = 0;
+        in.handFree[0] = in.handFree[1] = true;
+        in.leftShield = false;
+    }
+#endif
+    // grafted under the player in their own view only; elsewhere (third person, a flat
+    // menu) the form is the game's, unscaled
+    const bool graft = h.form && in.firstPerson && in.lockUpper && h.bindOk;
     uintptr_t world = 0, mats = 0; int32_t n = 0;
     if (!Get(self + 0x20, &world) || !Get(world, &n) || !Get(world + 4, &mats) || n != h.count) return;
     std::vector<Mat> oldW(n);
@@ -1136,15 +1351,49 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& in) {
     // The hips above where they stand: a jump. The stride bobs them a little,
     // so up to jumpFrom nothing follows, and from there to twice that it eases
     // in to the whole lift - no step. Crouches and lunges (lower) are not lifts.
-    float lift = 0.0f;
+    float lift = 0.0f, drawScale = 1.0f, unitScale = 1.0f;
     if (h.eyeY > 0.0f) {
         const float raw = h.pelvis >= 0 && h.pelvisY > 0.0f ? oldW[h.pelvis].m[13] - h.pelvisY : 0.0f;
         const float a = std::max(in.jumpFrom, 0.01f);
         const float t = std::clamp((raw - a) / a, 0.0f, 1.0f);
-        lift = in.followJump ? raw * t * t * (3.0f - 2.0f * t) : 0.0f;
-        g_eyeY.store(h.eyeY);
-        g_lift.store(lift);
-        g_rawLift.store(raw);
+        // A form's idle hunches below its rest pose and never jumps: no lift.
+        lift = in.followJump && !h.form ? raw * t * t * (3.0f - 2.0f * t) : 0.0f;
+        // The eyes stand at the form's own height ([shapeshift] wolf_height / bear_height),
+        // easing in over half a second; a person's at their rig's, at once and unscaled.
+        // The druid's model is drawn at another world scale than a form's (0.95 / 1.0): her
+        // units, taken into this rig's, for the form's height and the world's scale.
+        float worldScale = 0.0f;
+#ifdef D2RVR_NATIVE_OPENXR
+        {HeroXform hx;Mat m;
+         if (HeroTransform(&hx) && hx.self == self && SafeCopy(m.m, reinterpret_cast<const void*>(hx.comp), sizeof m))
+             worldScale = Len({m.m[0], m.m[1], m.m[2]});}
+#endif
+        if (!h.form) { g_personEye.store(h.eyeY); if (worldScale > 0.0f) g_personWorldScale.store(worldScale); }
+        const float units = h.form ? framevr::shapeshift::PersonUnits(g_personWorldScale.load(), worldScale) : 1.0f;
+        const float target = h.form ? framevr::shapeshift::TargetEye(h.form, in.formHeight[h.form - 1]) * units : h.eyeY;
+        AcquireSRWLockExclusive(&g_formLock);
+        float shown = g_eyeShown;
+        if (!(in.havePoseStamp && g_eyeStamped && in.poseStamp == g_eyeStamp && target == g_eyeTarget)) {
+            shown = g_eyeEase.Step(target, GetTickCount64(), h.form != 0);
+            g_eyeStamp = in.poseStamp; g_eyeStamped = in.havePoseStamp; g_eyeTarget = target; g_eyeShown = shown;
+        }
+        ReleaseSRWLockExclusive(&g_formLock);
+        if (graft) {
+            drawScale = framevr::shapeshift::Scale(shown, h.eyeY);
+            shown = drawScale * h.eyeY;   // as drawn, should the scale be bounded
+        }
+        for (float& e : in.eyeModel) e /= drawScale;
+        // A form's hands and arms at the person's scale: units per metre from the druid's
+        // eyes, not the form's (in the rig's own units, taken back by drawScale).
+        const float person = g_personEye.load();
+        const float scaleEye = h.form && person > 0.0f ? person * units : shown;
+        if (graft && shown > 0.0f) unitScale = scaleEye / shown;
+        in.scale *= unitScale;
+        g_eyeY.store(shown);
+        g_scaleEye.store(scaleEye);
+        g_eyeSettled.store(target);
+        g_lift.store(lift * drawScale);
+        g_rawLift.store(h.form ? 0.0f : raw * drawScale);
         g_eyeAt.store(GetTickCount64());
     }
 
@@ -1158,7 +1407,11 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& in) {
         for (int i = 0; i < n; ++i) {
             if (!h.upper[i]) continue;
             const int p = h.parent[i];
-            if (i == h.spine || p < 0) { newW[i] = h.bind[i]; newW[i].m[13] += lift; }   // up with the hips in a jump
+            if (i == h.spine || p < 0) {   // up with the hips in a jump; a form's torso tipped upright
+                newW[i] = h.bind[i];
+                if (graft && i == h.spine) TurnAboutSelf(newW[i], h.upright);
+                newW[i].m[13] += lift;
+            }
             else if (h.inHand[i]) newW[i] = Mul(Mul(oldW[i], InvAffine(oldW[p])), newW[p]);
             else newW[i] = Mul(Mul(h.bind[i], InvAffine(h.bind[p])), newW[p]);
         }
@@ -1185,6 +1438,40 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& in) {
             T.m[12] = b.m[12] - pt.x; T.m[14] = b.m[14] - pt.z;
             for (int i = 0; i < n; ++i) if (!h.upper[i]) newW[i] = Mul(oldW[i], T);
         }
+        // A grafted form: its hips are held at rest under the upright torso - the idle
+        // sways and the player moves the body. Standing still (legHold 1) the legs and tail
+        // are held at rest too; walking or running (0) they take the game's stride, hung
+        // from the held hips, the feet kept at the stride's height by leg IK. Blended.
+        if (graft) {
+            const float w = std::clamp(legHold, 0.0f, 1.0f);
+            const std::vector<Mat> anim = newW;
+            std::vector<char> hips(n, 0);
+            for (int b = h.spine >= 0 ? h.parent[h.spine] : -1; b >= 0; b = h.parent[b]) hips[b] = 1;
+            for (int i = 0; i < n; ++i) if (!h.upper[i] && h.parent[i] >= 0 && h.parent[i] == h.pelvis) hips[i] = 1;
+            for (int i = 0; i < n; ++i) {
+                if (h.upper[i]) continue;
+                const int p = h.parent[i];
+                if (hips[i] || p < 0) { newW[i] = h.bind[i]; continue; }
+                const Mat la = Mul(anim[i], InvAffine(anim[p])), lb = Mul(h.bind[i], InvAffine(h.bind[p]));
+                Mat local = BlendRot(la, lb, w);
+                for (int j = 12; j < 15; ++j) local.m[j] = la.m[j] + (lb.m[j] - la.m[j]) * w;
+                newW[i] = Mul(local, newW[p]);
+            }
+            if (w < 0.999f && h.leg[0][2] >= 0 && h.leg[1][2] >= 0)
+                for (int side = 0; side < 2; ++side) {
+                    const int hip = h.leg[side][0], knee = h.leg[side][1], foot = h.leg[side][2];
+                    const V3 a = Pos(newW[hip]), b = Pos(newW[knee]), z = Pos(newW[foot]);
+                    framevr::math::Vec end{z.x, anim[foot].m[13] + (h.bind[foot].m[13] - anim[foot].m[13]) * w, z.z}, bend;
+                    const V3 pole = Sub(b, a);
+                    if (framevr::body::Knee({a.x, a.y, a.z}, Len(Sub(b, a)), Len(Sub(z, b)), end, {pole.x, pole.y, pole.z}, bend)) {
+                        const auto base = newW;
+                        AimChain(h, hip, knee, foot, {bend.x, bend.y, bend.z}, {end.x, end.y, end.z}, base, newW);
+                        const V3 at = Pos(newW[foot]);   // the foot keeps its own turn
+                        newW[foot] = base[foot]; newW[foot].m[12] = at.x; newW[foot].m[13] = at.y; newW[foot].m[14] = at.z;
+                        std::vector<char> moved(n, 0); moved[foot] = 1; Propagate(h, base, newW, moved, foot);
+                    }
+                }
+        }
     }
 
 #endif
@@ -1194,8 +1481,8 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& in) {
     const bool turn = in.bodyTurn > 0 && in.haveYaw && in.yawInModel != 0.0f && (in.bodyTurn == 2 || h.spine >= 0);
     if (turn) {
         Mat T{}; T.m[0] = c; T.m[2] = -s; T.m[5] = 1; T.m[8] = s; T.m[10] = c; T.m[15] = 1;
-        if (in.bodyTurn == 1) {   // pivot p: p - p*R
-            const V3 p = Pos(oldW[h.spine]);
+        if (in.bodyTurn == 1) {   // pivot p: p - p*R (a grafted form's torso stands at rest)
+            const V3 p = Pos(graft ? newW[h.spine] : oldW[h.spine]);
             T.m[12] = p.x - (p.x * c + p.z * s); T.m[14] = p.z - (-p.x * s + p.z * c);
         }
         for (int i = 0; i < n; ++i) if (in.bodyTurn == 2 || h.upper[i]) newW[i] = Mul(newW[i], T);
@@ -1203,10 +1490,16 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& in) {
 #if D2RVR_FIRST_PERSON
     if(in.followTrackedNeck&&in.haveEye&&in.haveYaw&&h.bindOk&&h.head>=0&&h.eyeY>0) {
         const int neck=h.neck>=0?h.neck:h.head;
-        const V3 bindNeck=Pos(h.bind[neck]),current=Pos(newW[neck]);
+        const V3 bindNeck=Pos(h.bind[neck]);
+        V3 current=Pos(newW[neck]),toEye{h.eyeBind.x-bindNeck.x,h.eyeBind.y-bindNeck.y,h.eyeBind.z-bindNeck.z};
+        if(graft) {   // grafted by the shoulders: a person's neck above them; the form's own is hidden
+            const V3 a=Pos(newW[h.upr[0]]),b=Pos(newW[h.upr[1]]);
+            current={(a.x+b.x)*.5f,(a.y+b.y)*.5f+framevr::shapeshift::NeckAboveShoulders*h.eyeY,(a.z+b.z)*.5f};
+            toEye={0.0f,framevr::shapeshift::EyeAboveNeck*h.eyeY,framevr::shapeshift::EyeAheadOfNeck*h.eyeY};
+        }
         const auto target=framevr::body::NeckTarget(
             {in.eyeModel[0],in.eyeModel[1],in.eyeModel[2]},
-            {h.eyeBind.x-bindNeck.x,h.eyeBind.y-bindNeck.y,h.eyeBind.z-bindNeck.z},
+            {toEye.x,toEye.y,toEye.z},
             in.yawInModel,in.headPitch,in.headRoll);
         const V3 shift{target.x-current.x,target.y-current.y,target.z-current.z};
         if(framevr::body::Finite(target)&&Len(shift)<h.eyeY*3.f) {
@@ -1236,14 +1529,19 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& in) {
             }
         }
     }
+#ifdef D2RVR_DEVELOPER
+    if(graft&&!trackedNeckApplied)++g_formLoose;   // drawn at its rest place, not under the eyes
+#endif
     if(in.mode==2&&in.armSpanM>0&&h.bindOk&&h.upr[0]>=0&&h.upr[1]>=0){
-        const float shoulderWidth=Len(Sub(Pos(h.bind[h.upr[0]]),Pos(h.bind[h.upr[1]])));
+        float shoulderWidth=Len(Sub(Pos(h.bind[h.upr[0]]),Pos(h.bind[h.upr[1]])));
+        // a grafted form's arms reach as far as the player's own, from a person's shoulders
+        if(graft)shoulderWidth=framevr::shapeshift::ArmFitShoulders(shoulderWidth,h.eyeY*unitScale);
         for(int side=0;side<2;++side){
             const int u=h.upr[side],l=h.lwr[side],k=h.hand[side];
             if(u<0||l<0||k<0)continue;
             const float length=Len(Sub(Pos(h.bind[l]),Pos(h.bind[u])))+Len(Sub(Pos(h.bind[k]),Pos(h.bind[l])));
             const float palm=h.mid[side]>=0?.5f*Len(Sub(Pos(h.bind[h.mid[side]]),Pos(h.bind[k]))):0;
-            const float scale=framevr::body::ArmScale(h.eyeY,in.userHeadM,in.armSpanM,shoulderWidth,length,palm);
+            const float scale=framevr::body::ArmScale(h.eyeY,in.userHeadM,in.armSpanM,shoulderWidth,length,palm,graft?.5f:.65f,unitScale);
             const auto before=newW;const V3 shoulder=Pos(newW[u]);
             std::vector<char> subtree(n,0);subtree[u]=1;
             for(int i=u;i<n;++i){
@@ -1274,7 +1572,7 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& in) {
             const Wrist wr = PlanWrist(h, side, baseW, in, c, s);
             // The grip point is the middle of the palm; the wrist bone is half a hand behind it.
             if (wr.ok) T = Sub(T, Scale(wr.point, 0.5f * wr.reach));
-            Reach(h, side, T, turn, c, s, baseW, newW, side==1&&in.leftShield);
+            Reach(h, side, T, turn, c, s, baseW, newW, side==1&&in.leftShield, graft);
             if (wr.ok) {
                 ApplyWrist(newW[k], wr);
                 std::vector<char> fromK(n, 0); fromK[k] = 1;
@@ -1782,14 +2080,73 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& in) {
         }
     }
 
+    // Forearm twist: the hand alone turned with the controller, so a turned
+    // wrist left the sleeve, bracer and shield facing the old way. The forearm
+    // takes a share of the twist the hand has about it - measured against the
+    // hand as the animation holds it on that forearm - turned about its own
+    // length at the elbow. The hand and all it holds keep exactly the pose the
+    // controller gave them.
+    if (in.mode == 2 && in.forearmTwist) {
+        // One hand axis can lie nearly along the forearm and then swings wildly
+        // (the arm twisted ~90 degrees and pinched the elbow): instead two
+        // directions square to the forearm are carried from the held hand to
+        // the real one, and their mean turn about the forearm is the twist.
+        constexpr float kShare = 0.6f, kMaxTurn = 1.0f;   // radians the forearm may turn
+        for (int side = 0; side < 2; ++side) {
+            const int l = h.lwr[side], k = h.hand[side];
+            if (l < 0 || k < 0 || !(in.handsValid & (1u << side))) continue;
+            const V3 axis = Norm(Sub(Pos(newW[k]), Pos(newW[l])));
+            const Mat held = Mul(Mul(baseW[k], InvAffine(baseW[l])), newW[l]);   // the hand untwisted on this forearm
+            V3 heldAx[3], nowAx[3];
+            for (int r = 0; r < 3; ++r) {
+                heldAx[r] = Norm({held.m[r * 4], held.m[r * 4 + 1], held.m[r * 4 + 2]});
+                nowAx[r] = Norm({newW[k].m[r * 4], newW[k].m[r * 4 + 1], newW[k].m[r * 4 + 2]});
+            }
+            const V3 p = Norm(Cross(axis, fabsf(axis.y) < 0.9f ? V3{0, 1, 0} : V3{1, 0, 0}));
+            const V3 q = Cross(axis, p);
+            auto carry = [&](V3 v) {   // v as the held hand has it, where the real hand has it
+                V3 out{0, 0, 0};
+                for (int r = 0; r < 3; ++r) out = Add(out, Scale(nowAx[r], Dot(v, heldAx[r])));
+                return out;
+            };
+            const V3 p2 = carry(p), q2 = carry(q);
+            float twist = atan2f(Dot(Add(Cross(p, p2), Cross(q, q2)), axis), Dot(p, p2) + Dot(q, q2));
+            if (!std::isfinite(twist)) continue;
+            // Near half a turn (the wrist turned up to read the map) the reading
+            // wraps from +180 to -180 degrees and the forearm flipped between its limits.
+            // Keep the reading continuous with the last frame's, and ease into
+            // the limit instead of stopping hard at it.
+            static float lastTwist[2] = {0.0f, 0.0f};
+            constexpr float kTau = 6.2831853f;
+            while (twist - lastTwist[side] > kTau * 0.5f) twist -= kTau;
+            while (twist - lastTwist[side] < -kTau * 0.5f) twist += kTau;
+            twist = std::clamp(twist, -kTau * 0.75f, kTau * 0.75f);   // a real wrist goes no further
+            lastTwist[side] = twist;
+            if (fabsf(twist) < 0.01f) continue;
+            const float t = kMaxTurn * tanhf(kShare * twist / kMaxTurn);
+            const V3 a = p;
+            const Mat R = RotBetween(a, Add(Scale(a, cosf(t)), Scale(Cross(axis, a), sinf(t))));
+            // keep the hand's whole subtree as posed; turn the forearm and re-derive
+            // only its other children (twist helpers, armor pieces)
+            std::vector<char> handTree(n, 0); handTree[k] = 1;
+            for (int i = k + 1; i < n; ++i) if (h.parent[i] >= 0 && handTree[h.parent[i]]) handTree[i] = 1;
+            const auto before = newW;
+            TurnAboutSelf(newW[l], R);
+            std::vector<char> fromL(n, 0); fromL[l] = 1;
+            Propagate(h, before, newW, fromL, l);
+            for (int i = 0; i < n; ++i) if (handTree[i]) newW[i] = before[i];
+        }
+    }
+
 #ifdef D2RVR_NATIVE_OPENXR
     // A shield has its own left-wrist attachment. Taking it from a random
     // combat animation or applying the sword/bow adjustment makes it orbit
     // the forearm. The bind relationship follows the final tracked wrist.
     bool shieldFollowed=false;
+    struct {int bone=-1,side=1;float heldBack=0,bend=-1;shield::Frame frame;} seatTrace;   // for [debug] shield_trace
     if(in.mode==2&&in.leftShield&&(in.handsValid&2u)&&h.bindOk&&h.weapon[1]>=0&&h.hand[1]>=0) {
         const int wb=h.weapon[1],hand=h.hand[1];
-        StopShieldWrist(h,newW);   // before the shield takes the hand's turn
+        int side=1;const float heldBack=StopShieldWrist(h,newW,&side);   // before the shield takes the hand's turn
         bow::Mat wristBind,shieldBind,wristNow,result;
         memcpy(&wristBind,&h.bind[hand],sizeof wristBind);
         memcpy(&shieldBind,&h.bind[wb],sizeof shieldBind);
@@ -1800,13 +2157,54 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& in) {
             const auto before=newW;memcpy(&newW[wb],&result,sizeof result);
             std::vector<char> moved(n,0);moved[wb]=1;Propagate(h,before,newW,moved,wb);
             shieldFollowed=true;
-            // The visible shield hangs on shield_attach, a FOREARM child: give it
-            // the same bind relationship to the tracked hand, so it bends with the wrist.
-            const int sa=h.shieldAttach;bow::Mat attachBind,attachNow;
-            if(sa>=0&&sa!=wb) {
+            // The visible shield hangs on shield_attach, a FOREARM child. It is
+            // placed in the arm's own frame (shield::ArmFrame - joint positions,
+            // never a bone's axes, so every slider means the same direction on
+            // every class): VR Settings > Shield > Shield follows blends it from
+            // strapped to the forearm (0%, the wrist's bend ignored) to turning
+            // with the hand (100%, the original wrist attach), then the resting
+            // roll (Shield roll) turns it about the forearm, and
+            // Grip / Out / Up move it - a big shield's straps are far from its
+            // attach bone - scaled by this model's forearm (~0.26 m on an adult).
+            const int sa=h.shieldAttach,l=h.lwr[1],ki=h.ind[1],kp=h.pnk[1],km=h.mid[1];bow::Mat attachBind,attachNow;
+            if(sa>=0&&sa!=wb&&l>=0) {
                 memcpy(&attachBind,&h.bind[sa],sizeof attachBind);
-                if(shield::Follow(wristBind,attachBind,wristNow,attachNow)) {
+                auto bv=[](V3 v){return bow::Vec{v.x,v.y,v.z};};
+                shield::Frame bindFrame,wristFrame,strapped,frame;
+                if(ki>=0&&kp>=0&&km>=0) {
+                    const float handed=shield::Handed(bv(Pos(h.bind[l])),bv(Pos(h.bind[hand])),bv(Pos(h.bind[ki])),bv(Pos(h.bind[kp])),bv(Pos(h.bind[km])),side);
+                    bindFrame=shield::ArmFrame(bv(Pos(h.bind[l])),bv(Pos(h.bind[hand])),bv(Pos(h.bind[ki])),bv(Pos(h.bind[kp])),handed);
+                    wristFrame=shield::Carry(bindFrame,wristBind,wristNow);
+                    strapped=shield::ArmFrame(bv(Pos(newW[l])),bv(Pos(newW[hand])),bv(Pos(newW[ki])),bv(Pos(newW[kp])),handed);
+                    frame=shield::Roll(shield::Blend(strapped,wristFrame,in.shieldFollowPct/shield::kFollowMaxPct),in.shieldRollDeg);
+                }
+                const V3 handRow{newW[hand].m[0],newW[hand].m[1],newW[hand].m[2]},bindRow{h.bind[hand].m[0],h.bind[hand].m[1],h.bind[hand].m[2]};
+                const bool placed=frame.ok&&shield::Place(attachBind,bindFrame,bv(Pos(h.bind[hand])),Len(bindRow),frame,bv(Pos(newW[hand])),Len(handRow),attachNow);
+                if(placed||shield::Follow(wristBind,attachBind,wristNow,attachNow)) {   // no knuckles: the wrist attach, unmoved
                     const auto beforeAttach=newW;memcpy(&newW[sa],&attachNow,sizeof attachNow);
+                    if(placed) {
+                        const float units=Len(Sub(Pos(newW[hand]),Pos(newW[l])));   // this model's forearm, ~0.26 m on an adult
+                        const bow::Vec move=shield::Offset(frame.along,frame.out,frame.up,in.shieldGripCm,
+                                                           in.shieldOutCm,in.shieldUpCm,units/0.26f);
+                        newW[sa].m[12]+=move.x;newW[sa].m[13]+=move.y;newW[sa].m[14]+=move.z;
+                    }
+                    // Steadied last of all (shield_steady.h): the controller's tremor
+                    // shook the shield; dead zones drop it, real moves pass at once. The guard pose
+                    // blocking reads is this bone, so it is the steady one too.
+                    {
+                        static steady::Filter steadied;static LARGE_INTEGER last{};
+                        static LARGE_INTEGER freq{};if(!freq.QuadPart)QueryPerformanceFrequency(&freq);
+                        LARGE_INTEGER now;QueryPerformanceCounter(&now);
+                        const float dt=last.QuadPart?float(double(now.QuadPart-last.QuadPart)/double(freq.QuadPart)):0.f;
+                        last=now;
+                        bow::Mat m;memcpy(&m,&newW[sa],sizeof m);
+                        steadied.Apply(m,dt,std::max(1e-4f,Len(Sub(Pos(newW[hand]),Pos(newW[l]))))/26.f,steady::Shield);   // forearm ~26 cm
+                        memcpy(&newW[sa],&m,sizeof m);
+                        static bool told=false;
+                        if(!told){told=true;char line[120];snprintf(line,sizeof line,"Frame shield steady: on (dead zones %.1f degree and %.1f mm)",steady::Shield.angleDeadDeg,steady::Shield.moveDeadCm*10);framevr::logging::Write(line);}
+                    }
+                    seatTrace.bone=sa;seatTrace.side=side;seatTrace.heldBack=heldBack;seatTrace.frame=placed?frame:shield::Frame{};
+                    if(in.shieldTrace){bow::Vec axis;float angle;seatTrace.bend=shield::TurnBetween(strapped,wristFrame,axis,angle)?angle*57.2958f:-1;}
                     std::vector<char> movedAttach(n,0);movedAttach[sa]=1;Propagate(h,beforeAttach,newW,movedAttach,sa);
                 }
             }
@@ -1943,11 +2341,11 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& in) {
         auto size = [&](int side) { const Mat a = Mul(oldW[h.weapon[side]], InvAffine(oldW[h.hand[side]])); return Len({a.m[0], a.m[1], a.m[2]}); };
         if (size(axesSide) < 0.3f && size(axesSide ^ 1) > 0.7f) axesSide ^= 1;
     }
+    auto back = [&](V3 d) { const V3 m = {d.x * c - d.z * s, d.y, d.x * s + d.z * c}; return V3{-m.x, m.y, -m.z}; };
+    const V3 head = in.haveEye ? V3{in.eyeModel[0], in.eyeModel[1], in.eyeModel[2]} : Pos(newW[h.head >= 0 ? h.head : 0]);
+    const float upm = framevr::body::UnitsPerMetre(h.eyeY>0?h.eyeY:head.y, in.userHeadM, in.scale);   // model units per metre
     if (h.weapon[axesSide] >= 0) {
         const Mat& w = newW[h.weapon[axesSide]];
-        auto back = [&](V3 d) { const V3 m = {d.x * c - d.z * s, d.y, d.x * s + d.z * c}; return V3{-m.x, m.y, -m.z}; };
-        const V3 head = in.haveEye ? V3{in.eyeModel[0], in.eyeModel[1], in.eyeModel[2]} : Pos(newW[h.head >= 0 ? h.head : 0]);
-        const float upm = framevr::body::UnitsPerMetre(h.eyeY>0?h.eyeY:head.y, in.userHeadM, in.scale);   // model units per metre
         GunBoneOut g{};
         const V3 o = back(Scale(Sub(Pos(w), head), 1.0f / upm));
         g.o[0] = o.x; g.o[1] = o.y; g.o[2] = o.z;
@@ -1976,7 +2374,7 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& in) {
         // Keep collision in the world frame of THIS completed pose. Rebuilding
         // it later from the timer's newer camera yaw/eye displaced fast swings.
         HeroXform hx;Mat model;
-        if(in.havePoseStamp&&HeroTransform(&hx)&&hx.self==self&&(hx.parent&0xFFFFFu)==0xFFFFFu&&
+        if(HeroTransform(&hx)&&hx.self==self&&(hx.parent&0xFFFFFu)==0xFFFFFu&&
            SafeCopy(model.m,reinterpret_cast<const void*>(hx.comp),sizeof model)) {
             // Contact motion follows the right controller, independently of
             // native inventory slots. A free staff uses its authored attachment.
@@ -2000,6 +2398,14 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& in) {
             const int row=abs(castingAxis)-1;
             const V3 casting=Scale(Norm({world.m[row*4],world.m[row*4+1],world.m[row*4+2]}),castingAxis<0?-1.f:1.f);
             g.melee.castingAxis[0]=casting.x;g.melee.castingAxis[1]=casting.y;g.melee.castingAxis[2]=casting.z;
+            if (contactBone >= 0) {
+                const V3 o = back(Scale(Sub(Pos(attachment), head), 1.0f / upm));
+                const V3 d = back(Norm(V3{attachment.m[4], attachment.m[5], attachment.m[6]}));
+                g.melee.tipHead[0] = o.x + d.x * 0.56f;
+                g.melee.tipHead[1] = o.y + d.y * 0.56f;
+                g.melee.tipHead[2] = o.z + d.z * 0.56f;
+                g.melee.dirHead[0] = d.x; g.melee.dirHead[1] = d.y; g.melee.dirHead[2] = d.z;
+            }
             g.haveMelee=Len({world.m[4],world.m[5],world.m[6]})>.001f&&
                 std::isfinite(origin.x+origin.y+origin.z+axis.x+axis.y+axis.z+player.x+player.y+player.z);
         }
@@ -2015,8 +2421,8 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& in) {
         MeleeWeaponPose offhand{};ULONGLONG offAt=0;
         const auto weapons=gamestate::MeleeEquipment();
         HeroXform offHx;Mat offModel;
-        if(in.mode==2&&!freeStaff&&in.havePoseStamp&&(in.handsValid&2u)&&h.weapon[1]>=0&&
-           framevr::dualwield::Eligible(h.cls,weapons)&&HeroTransform(&offHx)&&offHx.self==self&&
+        if(!freeStaff&&h.weapon[1]>=0&&h.weapon[1]<n&&
+           HeroTransform(&offHx)&&offHx.self==self&&
            (offHx.parent&0xFFFFFu)==0xFFFFFu&&SafeCopy(offModel.m,reinterpret_cast<const void*>(offHx.comp),sizeof offModel)) {
             const Mat& attachment=newW[h.weapon[1]];const Mat world=Mul(attachment,offModel);
             const V3 origin=Pos(world),axis=Norm({world.m[4],world.m[5],world.m[6]}),player=Pos(offModel);
@@ -2029,10 +2435,17 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& in) {
                 const framevr::math::Quat grip{in.rot[1][0],in.rot[1][1],in.rot[1][2],in.rot[1][3]};
                 const auto axisInGrip=framevr::math::Rotate(framevr::math::Conjugate(grip),{headAxis.x,headAxis.y,headAxis.z});
                 offhand.gripAxis[0]=axisInGrip.x;offhand.gripAxis[1]=axisInGrip.y;offhand.gripAxis[2]=axisInGrip.z;
+                const V3 o1 = back(Scale(Sub(Pos(attachment), head), 1.0f / upm));
+                const V3 d1 = back(Norm(V3{attachment.m[4], attachment.m[5], attachment.m[6]}));
+                offhand.tipHead[0] = o1.x + d1.x * 0.56f;
+                offhand.tipHead[1] = o1.y + d1.y * 0.56f;
+                offhand.tipHead[2] = o1.z + d1.z * 0.56f;
+                offhand.dirHead[0] = d1.x; offhand.dirHead[1] = d1.y; offhand.dirHead[2] = d1.z;
                 offAt=GetTickCount64();
             }
         }
-        AcquireSRWLockExclusive(&g_gunBoneLock);g_offhandPose=offhand;g_offhandAt=offAt;ReleaseSRWLockExclusive(&g_gunBoneLock);
+        // a grafted form's paws are its weapons: PublishClaws writes the off hand once this pass is drawn
+        if(!(graft&&in.mode==2)){AcquireSRWLockExclusive(&g_gunBoneLock);g_offhandPose=offhand;g_offhandAt=offAt;ReleaseSRWLockExclusive(&g_gunBoneLock);}
         MeleeWeaponPose shieldPose{};framevr::guard::Pose guardPose{};ULONGLONG at=0;HeroXform hx;Mat model;
         const int shieldBone=h.shieldAttach>=0?h.shieldAttach:h.weapon[1];
         if(shieldFollowed&&in.havePoseStamp&&shieldBone>=0&&
@@ -2058,7 +2471,7 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& in) {
     }
 #endif
     // [hands] fist: free hands close and open with the controllers' grips.
-    if (h.cls >= 0) g_heroClass.store(h.cls);
+    if (h.cls >= 0 && !h.form) g_heroClass.store(h.cls);   // a form's rig is not the hero's class
     if (in.fist && in.mode == 2)
         for (int side = 0; side < 2; ++side)
             if (in.handFree[side] && (in.handsValid & (1u << side)) && in.grip[side] >= 0.0f && !(side == 1 && leftOnStaff))   // on a shaft: the game's grip, not our fist (it wraps better, 2026-10-06)
@@ -2122,16 +2535,81 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& in) {
         ReleaseSRWLockShared(&g_namesLock);
     }
 #endif
+#ifdef D2RVR_NATIVE_OPENXR
+    // [debug] shield_trace: the held shield's pose chain at 5 Hz, and at once when
+    // it jumps (turns over 20 degrees in one frame). Everything is in model space
+    // from the eye - the tracked hand too, turned by the yaw the controllers are
+    // placed with (`face`) - so a body turn or a level load no longer reads as a
+    // flip; a new world placement (snap turn, recenter, level) restarts the check.
+    if (in.shieldTrace && shieldFollowed && seatTrace.bone >= 0 && h.hand[1] >= 0 && h.lwr[1] >= 0 && h.head >= 0) {
+        const int k = h.hand[1], l = h.lwr[1], sb = seatTrace.bone;
+        const V3 head = in.haveEye ? V3{in.eyeModel[0], in.eyeModel[1], in.eyeModel[2]} : Pos(newW[h.head]);
+        const float upm = framevr::body::UnitsPerMetre(h.eyeY > 0 ? h.eyeY : head.y, in.userHeadM, in.scale);
+        bow::Mat hand, elbow, shieldNow;
+        memcpy(&hand, &newW[k], sizeof hand); memcpy(&elbow, &newW[l], sizeof elbow); memcpy(&shieldNow, &newW[sb], sizeof shieldNow);
+        const float cm = upm > 0 ? 100 / upm : 0;
+        static bow::Mat lastFrame{}, lastLine{}; static bool haveFrame = false; static ULONGLONG nextLine = 0, lastSeen = 0; static uint32_t lastEpoch = 0;
+        static uintptr_t lastSkel = 0; static int lastBone = -1;
+        const ULONGLONG now = GetTickCount64();
+        // a new world placement, the first frame after the shield or arm appears, or a gap
+        // (a level loading) starts the jump check over, so spawning never prints a JUMP
+        if (in.worldEpoch != lastEpoch || shield::TraceFresh(haveFrame, lastSeen, now, lastSkel == h.skel && lastBone == sb)) {
+            haveFrame = false; lastEpoch = in.worldEpoch;
+        }
+        lastSeen = now; lastSkel = h.skel; lastBone = sb;
+        const float jump = haveFrame ? shield::TurnDeg(lastFrame, shieldNow) : 0;
+        const bool sudden = jump > 20;
+        if (now >= nextLine || sudden) {
+            nextLine = now + 200;
+            bow::Mat tracked = bow::Identity();
+            const float* q = in.rot[1];
+            const Q4 qq = {q[0], q[1], q[2], q[3]};
+            const V3 raw[3] = {QRot(qq, {1, 0, 0}), QRot(qq, {0, 1, 0}), QRot(qq, {0, 0, 1})};
+            for (int r = 0; r < 3; ++r) {   // the controller's axes in model space, as the hand is placed
+                const float a[3] = {raw[r].x, raw[r].y, raw[r].z};
+                const V3 m = Norm(ToModel(a, c, s));
+                tracked.m[r * 4] = m.x; tracked.m[r * 4 + 1] = m.y; tracked.m[r * 4 + 2] = m.z;
+            }
+            const auto ta = shield::Angles(tracked), wa = shield::Angles(hand), ea = shield::Angles(elbow), sa = shield::Angles(shieldNow);
+            auto at = [&](V3 p) { p = Sub(p, head); return V3{p.x * cm, p.y * cm, p.z * cm}; };
+            const V3 t = at(ControllerPoint(h, 1, in, newW, c, s)), w = at(Pos(newW[k])), e = at(Pos(newW[l])), s2 = at(Pos(newW[sb]));
+            // the attach bone from the wrist in the arm's frame (along, out, up), cm
+            const shield::Frame& f = seatTrace.frame;
+            const V3 d = Sub(Pos(newW[sb]), Pos(newW[k]));
+            const V3 seat = f.ok ? V3{Dot(d, {f.along.x, f.along.y, f.along.z}) * cm, Dot(d, {f.out.x, f.out.y, f.out.z}) * cm, Dot(d, {f.up.x, f.up.y, f.up.z}) * cm} : V3{0, 0, 0};
+            char line[640]; std::snprintf(line, sizeof line,
+                "Frame shield trace: t=%llu%s face=%.0f hand=(%.1f,%.1f,%.1f|%.0f,%.0f,%.0f) wrist=(%.1f,%.1f,%.1f|%.0f,%.0f,%.0f) "
+                "elbow=(%.1f,%.1f,%.1f|%.0f,%.0f,%.0f) seat=(%.1f,%.1f,%.1f) shield=(%.1f,%.1f,%.1f|%.0f,%.0f,%.0f) side=%s stop=%.0f "
+                "follow=%.0f%% roll=%.0f bend=%.0f%s turn=%.1fdeg",
+                (unsigned long long)now, sudden ? " JUMP" : "", in.yawInModel * 57.29578f,
+                t.x, t.y, t.z, ta.x, ta.y, ta.z,
+                w.x, w.y, w.z, wa.x, wa.y, wa.z, e.x, e.y, e.z, ea.x, ea.y, ea.z, seat.x, seat.y, seat.z,
+                s2.x, s2.y, s2.z, sa.x, sa.y, sa.z, seatTrace.side < 0 ? "palm" : "back", seatTrace.heldBack,
+                in.shieldFollowPct, in.shieldRollDeg, seatTrace.bend, f.ok ? "" : " (wrist attach)",
+                haveFrame ? shield::TurnDeg(lastLine, shieldNow) : 0.f);
+            framevr::logging::Write(line);
+            lastLine = shieldNow;
+        }
+        lastFrame = shieldNow; haveFrame = true;
+    }
+#endif
+    if (graft && std::fabs(drawScale - 1.0f) > 1e-4f)   // a grafted form's rig only
+        for (Mat& w : newW)
+            for (int r = 0; r < 4; ++r) for (int col = 0; col < 3; ++col) w.m[r * 4 + col] *= drawScale;
+#if D2RVR_FIRST_PERSON && defined(D2RVR_NATIVE_OPENXR)
+    if (graft && in.mode == 2) PublishClaws(self, h, in, newW, c, s, drawScale);
+#endif
     const bool written = SafeWrite((void*)mats, newW.data(), sizeof(Mat) * n);
 #ifdef D2RVR_NATIVE_OPENXR
     if(written&&in.followTrackedNeck&&h.spine>=0&&h.head>=0) {
         static std::atomic<uint64_t> nextReport{0};auto before=nextReport.load();const auto now=GetTickCount64();
         if(now>=before&&nextReport.compare_exchange_strong(before,now+5000)) {
-            const auto eye=V3{in.eyeModel[0],in.eyeModel[1],in.eyeModel[2]},chest=Pos(newW[h.spine]);
+            // as drawn: the eye point back at the drawn scale, standing = the eyes' height then
+            const auto eye=V3{in.eyeModel[0]*drawScale,in.eyeModel[1]*drawScale,in.eyeModel[2]*drawScale},chest=Pos(newW[h.spine]);
             char message[340];std::snprintf(message,sizeof message,
-                "VR body pose: class=%d bones=%d head=%d neck=%d spine=%d hidden=%u aligned=%d eye=%.2f,%.2f,%.2f chest=%.2f,%.2f,%.2f standing=%.2f",
+                "VR body pose: class=%d bones=%d head=%d neck=%d spine=%d hidden=%u aligned=%d eye=%.2f,%.2f,%.2f chest=%.2f,%.2f,%.2f standing=%.2f form=%d scale=%.2f legs_held=%.2f",
                 h.cls,n,h.head,h.neck,h.spine,unsigned(std::count(h.inNeck.begin(),h.inNeck.end(),char(1))),trackedNeckApplied,
-                eye.x,eye.y,eye.z,chest.x,chest.y,chest.z,h.eyeY);
+                eye.x,eye.y,eye.z,chest.x,chest.y,chest.z,h.eyeY*drawScale,h.form,drawScale,legHold);
             framevr::logging::Write(message);
         }
     }
@@ -2605,12 +3083,66 @@ void Arms(uintptr_t self) {
         hero = h;
     }
     if (hero.count <= 0) return;
+    // A shapeshift form's rig (an enemy model) is the hero's only while the player is in that form -
+    // or, as the game swaps the models, once the rig the state sample still names is no longer
+    // drawn: the sample trails the swap, and the form's first frames were the game's own beast.
+    bool ahead = false;
+    if (hero.form && hero.form != in.shapeForm) {
 #ifdef D2RVR_NATIVE_OPENXR
+        // any class: a druid, or a hero shifted by an item (Beast, Wolfhowl)
+        ahead = framevr::shapeshift::RigJustGone(GetTickCount64(), g_rigPosedAt[std::clamp(in.shapeForm, 0, 2)].load());
+#endif
+        if (!ahead) return;
+    }
+#ifdef D2RVR_NATIVE_OPENXR
+    // Standing, not a corpse: by the head's height - a form's by its hips'. The game's own
+    // werewolf bites low (its head under a third of its rest height through each attack),
+    // and those frames were left to the game: its unscaled beast lunging out ahead of the eyes.
+    const int stand=hero.form&&hero.pelvis>=0&&hero.pelvisY>2.0f?hero.pelvis:hero.head;
     float position[3],head[16];uintptr_t pose=0,matrices=0;
-    if(hero.head<0||size_t(hero.head)>=hero.bind.size()||!ecs::CandidatePosition(self,position)||
+    if(hero.head<0||size_t(hero.head)>=hero.bind.size()||stand<0||size_t(stand)>=hero.bind.size()||!ecs::CandidatePosition(self,position)||
        !Get(self+0x20,&pose)||!Get(pose+4,&matrices)||
-       !SafeCopy(head,reinterpret_cast<const void*>(matrices+uintptr_t(hero.head)*64),sizeof head)||
-       !framevr::LocalStandingBody(position[0],position[2],playerPosition[0],playerPosition[2],head[13],hero.bind[hero.head].m[13]))return;
+       !SafeCopy(head,reinterpret_cast<const void*>(matrices+uintptr_t(stand)*64),sizeof head))return;
+    if(!framevr::LocalStandingBody(position[0],position[2],playerPosition[0],playerPosition[2],head[13],hero.bind[stand].m[13])) {
+#ifdef D2RVR_DEVELOPER
+        if(hero.form&&std::hypot(position[0]-playerPosition[0],position[2]-playerPosition[2])<=2.0f)++g_formUnstanding;
+#endif
+        return;
+    }
+    // and standing where the player does, not merely near: a summon can share the rig
+    if(hero.form) {
+        const float apart=std::hypot(position[0]-playerPosition[0],position[2]-playerPosition[2]);
+#ifdef D2RVR_DEVELOPER
+        static std::atomic<uint64_t> toldAt{0};
+        if(apart>2.0f&&GetTickCount64()-toldAt.load()>5000) {
+            toldAt=GetTickCount64();char line[160];
+            snprintf(line,sizeof line,"Frame shapeshift body: %s rig %.2f units from the player - not the hero",framevr::shapeshift::Name(hero.form),apart);
+            framevr::logging::Write(line);
+        }
+#endif
+        if(apart>2.0f)return;
+        const auto now=GetTickCount64();bool mine;
+        AcquireSRWLockExclusive(&g_formLock);
+        mine=self==g_formSelf;
+        if(!mine&&(!framevr::shapeshift::RigDrawn(now,g_formSelfAt)||apart+.5f<g_formApart)){g_formSelf=self;mine=true;}
+        if(mine){g_formSelfAt=now;g_formApart=apart;}
+        ReleaseSRWLockExclusive(&g_formLock);
+        if(!mine) {
+#ifdef D2RVR_DEVELOPER
+            ++g_formOther;ReportFormFrames();
+#endif
+            return;
+        }
+        g_formPosedAt.store(now);g_rigPosedAt[hero.form].store(now);
+#ifdef D2RVR_DEVELOPER
+        if(ahead)++g_formAhead;
+        ReportFormFrames();
+#endif
+    }
+    // in form, the druid's own model (should the game still pose it) is not the hero - while the
+    // form's is still drawn: back from a form, the sample trails the swap as it did going in
+    else if(in.shapeForm&&framevr::shapeshift::RigDrawn(GetTickCount64(),g_formPosedAt.load()))return;
+    else g_rigPosedAt[0].store(GetTickCount64());
 #endif
     NoteHero(self);
     if (!active) return;
@@ -2631,7 +3163,18 @@ void Arms(uintptr_t self) {
     // sample. A timer tick between pairs must not disable just one eye's body.
     in.followTrackedNeck = in.followTrackedNeck && framevr::Active();
 #endif
-    PoseBody(self, hero, in);
+    // A form standing still: its legs and tail are held (the idle sways). Once per pair.
+    float legHold = 1.0f;
+    if (hero.form) {
+        AcquireSRWLockExclusive(&g_formLock);
+        if (in.havePoseStamp && g_legStamped && in.poseStamp == g_legStamp) legHold = g_legWeight;
+        else {
+            legHold = g_legHold.Step(GetTickCount64(), playerPosition[0], playerPosition[2]);
+            g_legStamp = in.poseStamp; g_legStamped = in.havePoseStamp; g_legWeight = legHold;
+        }
+        ReleaseSRWLockExclusive(&g_formLock);
+    }
+    PoseBody(self, hero, in, legHold);
 }
 
 }  // namespace
@@ -2663,10 +3206,12 @@ bool MotionBowAnchored() {
 // From vrcam, every 10 ms.
 int LockState() { return g_lockState.load(); }
 
-bool HeroEye(float* eyeY, float* lift, float* rawLift) {
+bool HeroEye(float* eyeY, float* lift, float* rawLift, float* settled, float* scaleEye) {
     if (GetTickCount64() - g_eyeAt.load() > 1000) return false;
     *eyeY = g_eyeY.load(); *lift = g_lift.load();
     if (rawLift) *rawLift = g_rawLift.load();
+    if (settled) *settled = g_eyeSettled.load();
+    if (scaleEye) *scaleEye = g_scaleEye.load();
     return *eyeY > 0.0f;
 }
 #if D2RVR_FIRST_PERSON
@@ -2703,12 +3248,12 @@ bool GunBone(float origin[3], float axes[3][3], unsigned maxAgeMs) {
 bool MeleeWeapon(MeleeWeaponPose& out,int hand) {
     if(hand==1) {
         AcquireSRWLockShared(&g_gunBoneLock);const auto pose=g_offhandPose;const auto at=g_offhandAt;ReleaseSRWLockShared(&g_gunBoneLock);
-        if(!at||GetTickCount64()-at>100||pose.heroGeneration!=HeroGen())return false;
+        if(!at||GetTickCount64()-at>500||pose.heroGeneration!=HeroGen())return false;
         out=pose;return true;
     }
     if(hand!=0)return false;
     AcquireSRWLockShared(&g_gunBoneLock);const auto g=g_gunBone;ReleaseSRWLockShared(&g_gunBoneLock);
-    if(!g.haveMelee||!g.at||GetTickCount64()-g.at>100||g.melee.heroGeneration!=HeroGen())return false;
+    if(!g.haveMelee||!g.at||GetTickCount64()-g.at>500||g.melee.heroGeneration!=HeroGen())return false;
     out=g.melee;return true;
 }
 void CrossbowRendered(uint32_t entity,uintptr_t component,uintptr_t matrix) {
@@ -2865,6 +3410,14 @@ bool HeroForearm(int side, float elbow[3], float wrist[3], float across[3]) {
 
 #endif
 int HeroClass() { return g_heroClass.load(); }
+int PosedForm() {
+#ifdef D2RVR_NATIVE_OPENXR
+    const uint64_t at[3] = {g_rigPosedAt[0].load(), g_rigPosedAt[1].load(), g_rigPosedAt[2].load()};
+    return framevr::shapeshift::PosedRig(GetTickCount64(), at);
+#else
+    return -1;
+#endif
+}
 void AttachSizes(float out[2]) { out[0] = g_attachSize[0].load(); out[1] = g_attachSize[1].load(); }
 #if D2RVR_FIRST_PERSON
 std::string WeaponItemDiag() {

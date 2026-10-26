@@ -2,10 +2,10 @@
   "schema": "vrmod-manifest/1",
   "id": "d2r-pcvr",
   "name": "D2R VR Unleashed",
-  "version": "0.3.24",
+  "version": "0.3.27",
   "publisher": "bearstonem",
   "homepage": "https://github.com/bearstonem/d2r-pcvr",
-  "support": "https://github.com/bearstonem/d2r-pcvr/issues",
+  "support": "https://discord.gg/DmbFfJAnnm",
   "license": "MIT",
   "description": "Diablo II reimagined for physical, immersive VR.",
   "icon": "launcher_icon.png",
@@ -15,6 +15,7 @@
   "game": {
     "id": "d2r",
     "builds": [
+      "3.3.94995",
       "3.3.93787",
       "3.3.93847"
     ],
@@ -27,7 +28,7 @@
       "D2RLoader.exe"
     ],
     "x-builds-by-store": {
-      "steam": "3.3.93787",
+      "steam": "3.3.94995 (October 22 update), 3.3.93787",
       "battlenet": "3.3.93847 (experimental: offline testing)"
     }
   },
@@ -142,7 +143,7 @@
   "x-source": {
     "repo": "https://github.com/bearstonem/d2r-pcvr",
     "commit": "a0a4f5fade27c18b3e82e64f02832ba6888a05a6",
-    "release_tag": "v0.3.24-windows-preview",
+    "release_tag": "v0.3.27-windows-preview",
     "installer_app_id": "D2R-PCVR-Native-Windows",
     "read_with": "git show <commit>:<path> only, none of his code was run",
     "files": [
@@ -163,7 +164,7 @@
     ]
   },
   "x-unverified": {
-    "game.builds": "a flat list. Steam 3.3.93787 is the build his releases are verified on, Battle.net 3.3.93847 is experimental (his wrapper wants --experimental-battlenet). The manifest cannot say which build belongs to which store (see x-builds-by-store).",
+    "game.builds": "a flat list. Steam 3.3.94995 is the October 22 game update (D2RLoader 1.3.1 and all 64 of his game addresses unchanged, checked at start-up and in town), Steam 3.3.93787 the build his releases were verified on, Battle.net 3.3.93847 is experimental (his wrapper wants --experimental-battlenet). The manifest cannot say which build belongs to which store (see x-builds-by-store).",
     "launch.options[0].via": "not run. His wrapper always goes through Explorer's desktop for Steam, the launcher does not (it starts from its own desktop process). Whether that is enough against Steam's overlay injection is untested.",
     "launch.options[0]": "his wrapper also passes on whatever else is in Steam's launch command after D2R.exe, and the Steam shortcut has the OpenVR flag set for SteamVR. The launcher passes neither.",
     "developer mode": "his wrapper's --frame-dev (Launch-Dev-SteamVR.cmd, steamvr/DEVELOPMENT_SCENARIOS.md) stages a second D2RLoader mod of its own, mods\\pcvr-dev, and starts that one with an offline test character. The launcher has no such option. A mods\\pcvr-dev folder, once it exists, is listed by the launcher as a plain D2RLoader mod and started with -mod pcvr-dev alone (his docs say that route works too for a prepared environment), without the environment rules above.",

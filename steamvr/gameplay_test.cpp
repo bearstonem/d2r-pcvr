@@ -100,8 +100,11 @@ int main() {
         Check(s.Step(3).meleeContact,"new weapon needs no grip release/activation");
     }
     {
-        Sim s;s.Nock();s.Move({0,1.3f,0},10);s.in.trigger=0;
-        auto shot=s.Step();Check(shot.bowRelease&&!shot.attack&&shot.feedback==2,"draw release shoots");
+        Sim s;s.Nock();s.Move({0,1.3f,0},10);
+        Check(s.out.bowDrawing&&s.out.bowCharged&&s.out.bowPhysical,"a basic draw is a physical arrow for the path laser");
+        s.in.trigger=0;
+        auto shot=s.Step();
+        Check(!shot.bowPhysical,"no path laser after release");Check(shot.bowRelease&&!shot.attack&&shot.feedback==2,"draw release shoots");
         Check(shot.rayDirection.z<-.99f&&std::fabs(shot.rayOrigin.z+.5f)<.001,"arrow aims from string through bow hand");
         s.in.hand[0].p.x+=.1f;shot=s.Step();Check(shot.rayDirection.z<-.99f,"release direction stays latched through input pulse");
         Check(!s.Step(5).bowRelease&&!s.out.attack,"release event cannot become a held attack");
@@ -119,6 +122,111 @@ int main() {
         Check(!s.Step(20).javelinRelease,"idle hand never spends more javelins");
         s.engine.Select(2);s.Step(3);Check(s.out.meleeContact,"selected skill preserves javelin jabs");
         s.in.trigger=1;Check(s.Step().skill==2&&!s.out.javelinRelease,"selected skill retains its trigger binding");
+    }
+    // Hand bindings always give the right trigger a slot (a javelin in the
+    // hand): Attack, Throw or nothing there throws.
+    // A javelin skill or Double Throw there arms the throw too, which then carries it (#224).
+    for(const int bound:{weaponskills::Attack,weaponskills::Throw,-1,36,15,35,weaponskills::DoubleThrow}) {
+        Sim s;s.in.handBindings=true;s.in.weapon=Weapon::Javelin;s.engine.Select(0);
+        s.in.selectedSkill=bound;s.in.selectedAvailable=true;s.Step(3);
+        const bool hand=bound!=36;
+        Check(s.out.javelinReady==hand,"hand bindings: Attack, Throw or nothing arms the hand's throw, another skill keeps the trigger");
+        s.in.trigger=1;s.Step();
+        Check(hand?s.out.skill<0&&!s.out.attack:s.out.skill==0,"hand bindings: a throw never also presses the native trigger skill");
+        s.Move({.25f,1.55f,-.2f},10);s.Move({.25f,1.55f,-.75f},5);
+        s.in.trigger=0;
+        Check(s.Step().javelinRelease==hand,"hand bindings: deliberate throw releases only when the trigger is the hand's");
+    }
+    // Double Throw (#224): the left trigger throws the left hand's own weapon,
+    // together with the right hand or apart, and only while it is armed.
+    for(const bool armed:{false,true})for(const bool together:{false,true}) {
+        Sim s;s.in.handBindings=true;s.in.weapon=Weapon::Javelin;s.engine.Select(0);
+        s.in.selectedSkill=weaponskills::DoubleThrow;s.in.selectedAvailable=true;s.in.leftThrow=armed;s.Step(3);
+        s.in.trigger=together?1.f:0.f;s.in.leftTrigger=1;s.Step();
+        Check(s.out.leftFeedback==(armed?1u:0u)&&!s.out.attack&&s.out.skill<0,"the left trigger arms the left throw only with Double Throw");
+        const Vec right=s.in.hand[0].p,left=s.in.hand[1].p;
+        for(int i=1;i<=6;++i){s.in.hand[0].p=right+Vec{0,0,-.1f*i};s.in.hand[1].p=left+Vec{0,0,-.1f*i};s.Step();}
+        s.in.trigger=s.in.leftTrigger=0;s.Step();
+        Check(s.out.javelinRelease==together,"the right hand throws only with its own trigger");
+        Check(s.out.leftRelease==armed,"the left hand throws only while armed");
+        if(armed)Check(s.out.leftDirection.z<-.99f&&Length(s.out.leftOrigin-s.in.hand[1].p)<1e-5f&&s.out.leftFeedback==2,
+            "from the left hand, along its own motion");
+        Check(!s.Step(10).leftRelease,"a left throw releases once");
+    }
+    for(int kind=0;kind<3;++kind) {
+        Sim s;s.in.weapon=Weapon::Javelin;s.in.leftThrow=true;s.Step(3);s.in.leftTrigger=1;s.Step();
+        const Vec left=s.in.hand[1].p;
+        for(int i=1;i<=6;++i){s.in.hand[1].p=left+Vec{0,0,-.1f*i};s.Step();}
+        if(kind==1){s.in.leftThrow=false;s.Step();s.in.leftThrow=true;} // Double Throw unarmed mid-throw
+        if(kind==2){s.in.palette=true;s.Step();s.in.palette=false;}
+        s.in.leftTrigger=kind==0?.4f:0.f; // a partial release keeps holding
+        Check(!s.Step().leftRelease&&!s.Step(3).leftRelease,"a partial release, unarming or the wheel never throw the left weapon");
+    }
+    {
+        // Throw lift: degrees above the hand's path, heading kept, never past vertical.
+        const auto pitch=[](Vec d){return std::atan2(d.y,std::sqrt(d.x*d.x+d.z*d.z))*180/3.14159265f;};
+        for(const Vec d:{Vec{0,0,-1},Vec{.6f,0,.8f},math::Normalized(Vec{.3f,-.5f,-.8f})}) {
+            for(const float lift:{-10.f,10.f,30.f}) {
+                const Vec up=Lift(d,lift);
+                Check(std::fabs(pitch(up)-(pitch(d)+lift))<.01f&&std::fabs(Length(up)-1)<1e-5f,"lift adds its angle and keeps a unit direction");
+                Check(std::fabs(up.x*d.z-up.z*d.x)<1e-5f&&up.x*d.x+up.z*d.z>0,"keeping the heading");
+            }
+            Check(Lift(d,0).y==d.y&&Lift(d,NAN).y==d.y,"Off (or a bad value) follows the hand");
+        }
+        Check(pitch(Lift(Vec{0,0,-1},120))<89&&Lift(Vec{0,1,0},10).y==1,"never past straight up; straight up stays");
+        for(const bool left:{false,true}) {
+            Sim s;s.in.weapon=Weapon::Javelin;s.in.leftThrow=left;s.in.throwLift=15;s.Step(3);
+            (left?s.in.leftTrigger:s.in.trigger)=1;s.Step();
+            const Vec start=s.in.hand[left].p;
+            for(int i=1;i<=6;++i){s.in.hand[left].p=start+Vec{0,0,-.1f*i};s.Step();}
+            (left?s.in.leftTrigger:s.in.trigger)=0;s.Step();
+            const Vec d=left?s.out.leftDirection:s.out.rayDirection;
+            Check((left?s.out.leftRelease:s.out.javelinRelease)&&std::fabs(pitch(d)-15)<.01f&&d.z<0,"either hand's throw leaves 15 degrees above its level path");
+        }
+    }
+    // A trap or bomb thrown to place (#224): a quick press, a still hold, a throw.
+    const auto tossing=[](Sim& s){s.in.handBindings=true;s.in.weapon=Weapon::Melee;s.engine.Select(0);
+        s.in.selectedSkill=251;s.in.selectedAvailable=true;s.in.toss=true;s.Step(3);};
+    {
+        Sim s;tossing(s);s.in.trigger=1;s.Step();
+        Check(s.out.tossHeld&&s.out.skill<0&&s.out.feedback==1&&!s.out.attack,"a press puts the bomb in the hand without casting yet");
+        s.Step(3);s.in.trigger=0;s.Step();
+        Check(s.out.skill==0&&!s.out.tossRelease&&!s.out.tossHeld,"a quick still press casts where you point, on release");
+        int pressed=1;for(int i=0;i<10;++i)pressed+=s.Step().skill==0;
+        Check(pressed>=3&&pressed<=5&&s.out.skill<0,"one brief native press");
+    }
+    {
+        Sim s;tossing(s);s.in.trigger=1;s.Step();
+        Check(s.Step(10).skill<0&&s.out.tossHeld,"held still a moment, it is still in the hand");
+        Check(s.Step(10).skill==0&&!s.out.tossHeld,"held still, the native cast holds as before, where you point");
+        Check(s.Step(20).skill==0,"and keeps holding while the trigger does");
+        s.in.trigger=0;Check(s.Step().skill<0&&s.Step(5).skill<0,"letting go ends it, with no extra cast");
+    }
+    for(const float lift:{0.f,15.f}) {
+        Sim s;tossing(s);s.in.throwLift=lift;s.in.trigger=1;s.Step();
+        s.Move({.25f,1.55f,-.2f},4);s.Move({.25f,1.55f,-.9f},5);s.in.trigger=0;s.Step();
+        Check(s.out.tossRelease&&s.out.skill==0&&s.out.feedback==2&&!s.out.tossHeld,"a throw releases the trap with one native press");
+        const Vec v=s.out.tossVelocity;const float pitch=std::atan2(v.y,std::sqrt(v.x*v.x+v.z*v.z))*180/3.14159265f;
+        Check(v.z<-5&&std::fabs(Length(v)-7)<.05f&&std::fabs(pitch-lift)<.05f,"along the hand at its peak speed, lifted like any throw");
+        Check(Length(s.out.tossOrigin-s.in.hand[0].p)<1e-5f,"from the hand");
+    }
+    {
+        Sim s;tossing(s);s.in.trigger=1;s.Step();s.Move({.25f,1.25f,-.55f},15);s.in.trigger=0;
+        bool cast=false;for(int i=0;i<8;++i){s.Step();cast|=s.out.skill>=0||s.out.tossRelease;}
+        Check(!cast,"a slow reach is neither a quick press nor a throw: nothing is cast");
+        s.in.toss=false;s.in.trigger=1;Check(s.Step().skill==0&&!s.out.tossHeld,"any other skill keeps the trigger as before");
+    }
+    // A throwing potion (Attack or Throw on the right trigger): tossed like a trap, never swung.
+    for(const int skill:{weaponskills::Attack,weaponskills::Throw}) {
+        Sim s;tossing(s);s.in.selectedSkill=skill;s.in.potion=true;s.Step();
+        Check(s.out.meleeContact==false,"a throwing potion in hand never swings");
+        s.in.trigger=1;s.Step();
+        s.Move({.25f,1.55f,-.2f},4);s.Move({.25f,1.55f,-.9f},5);s.in.trigger=0;s.Step();
+        Check(s.out.tossRelease&&s.out.skill==0&&!s.out.meleeContact,"thrown, one native press of its slot, and no swing after the release");
+        bool swung=false;for(int i=0;i<10;++i)swung|=s.Step().meleeContact;
+        Check(!swung,"nor while it rests in the hand");
+        Sim trap;tossing(trap);trap.Step();
+        Check(trap.out.meleeContact,"a trap's hand still swings its weapon between throws");
     }
     for(int kind=0;kind<4;++kind) {
         Sim s;s.in.weapon=Weapon::Javelin;s.Step(3);s.in.trigger=1;s.Step();

@@ -73,7 +73,7 @@ bool Player(uintptr_t game,uintptr_t player,Vec& pos) {
 bool Weapon(uintptr_t player,const Sample& s) {
     if(s.handIndex<0||s.handIndex>1||s.shield||!s.active)return false;
     const bool dual=s.weapons.id[0]&&s.weapons.id[1];
-    if(!dual)return s.handIndex==0;
+    if(!dual)return s.handIndex==0||s.claws;   // a form's two claws: both strike, no weapon to select
     const uintptr_t weapon=meleeweapon::Select(player,s.handIndex,s.weapons);
     uint32_t id=0;return Read(weapon+8,id)&&id==s.weapons.displayed[s.handIndex];
 }

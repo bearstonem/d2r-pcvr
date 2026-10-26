@@ -4,18 +4,21 @@
 namespace framevr::wrist {
 // Borrow a corner layout without writing the game's saved map preference.
 // If the player changes it while borrowed, remember the new value to restore.
+// want: the layout borrowed, 1 the left corner; Map view = Full map borrows 0,
+// the full map (wrist_full_map.h). A switch of want while borrowed keeps the
+// player's saved layout, not the one borrowed before.
 class MapLayoutLease {
     bool owned=false;
-    int saved=0;
+    int saved=0,mode=1;
 public:
-    int Step(bool active,int current) {
+    int Step(bool active,int current,int want=1) {
         if(current<0||current>2){owned=false;return -1;}
         if(active){
-            if(!owned||current!=1)saved=current;
-            owned=true;return current==1?-1:1;
+            if(!owned||(current!=mode&&current!=want))saved=current;
+            owned=true;mode=want;return current==want?-1:want;
         }
         if(!owned)return -1;
-        owned=false;return current==1&&saved!=1?saved:-1;
+        owned=false;return current==mode&&saved!=mode?saved:-1;
     }
 };
 // Cumulative XP exceeds INT_MAX at high levels. Keep the native unsigned

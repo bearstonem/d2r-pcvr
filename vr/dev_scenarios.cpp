@@ -14,6 +14,10 @@
 #include "../steamvr/logging.h"
 namespace gamestate {uint64_t LocalPlayer();bool MenuOpen();}
 namespace framevr {void SetTurnsKeepOwn(int);int TurnsKeepOwn();}   // transport: [stereo] turns_keep_own
+namespace framevr {void SetTurnsSharp(bool);bool TurnsSharp();}     // and turns_sharp
+namespace framevr {void SetTurnsFill(bool);bool TurnsFill();}       // and turns_fill
+namespace framevr {void SetTurnsRims(bool);bool TurnsRims();}       // and turns_rims
+namespace d2rcam {void SetSkyOverRims(bool);bool SkyOverRims();}    // vrcam: [sky] cover_rims
 
 namespace devscenarios {
 namespace {
@@ -105,11 +109,64 @@ void __cdecl Commands(const PluginContext*,void* token) noexcept {
                                 "Frame development: by turns takes the drawn eye's picture wherever it reaches");
         Finish(r,Result::TurnsUpdated,claim);return;
     }
+    if(r.index==framevr::dev::TurnsSharpChoice) {
+        bool sharp;
+        {
+            std::lock_guard lock(mutex);if(claim!=ticket)return;
+            sharp=!framevr::TurnsSharp();
+        }
+        framevr::SetTurnsSharp(sharp);
+        framevr::logging::Write(sharp?"Frame development: by turns reads the eye not drawn sharp (Catmull-Rom)":"Frame development: by turns reads the eye not drawn soft (bilinear)");
+        Finish(r,Result::SharpUpdated,claim);return;
+    }
+    if(r.index==framevr::dev::TurnsFillChoice) {
+        bool fill;
+        {
+            std::lock_guard lock(mutex);if(claim!=ticket)return;
+            fill=!framevr::TurnsFill();
+        }
+        framevr::SetTurnsFill(fill);
+        framevr::logging::Write(fill?"Frame development: by turns removes frame-old ghosts beside near things":"Frame development: by turns keeps the eye's own picture beside near things");
+        Finish(r,Result::FillUpdated,claim);return;
+    }
+    if(r.index==framevr::dev::TurnsRimsChoice) {
+        bool rims;
+        {
+            std::lock_guard lock(mutex);if(claim!=ticket)return;
+            rims=!framevr::TurnsRims();
+        }
+        framevr::SetTurnsRims(rims);
+        framevr::logging::Write(rims?"Frame development: by turns moves the rims round things against the sky with them":"Frame development: by turns leaves the rims round things against the sky with the sky");
+        Finish(r,Result::RimsUpdated,claim);return;
+    }
+    if(r.index==framevr::dev::SkyRimsChoice) {
+        bool rims;
+        {
+            std::lock_guard lock(mutex);if(claim!=ticket)return;
+            rims=!d2rcam::SkyOverRims();
+        }
+        d2rcam::SetSkyOverRims(rims);
+        framevr::logging::Write(rims?"Frame development: the sky goes over the dark rim round things against it":"Frame development: the dark rim round things against the sky stays");
+        Finish(r,Result::SkyRimsUpdated,claim);return;
+    }
     if(!execute){
         framevr::logging::Write("Frame development: console command export unavailable");
         Finish(r,Result::Refused,claim);return;
     }
     bool accepted=true;
+    if(r.index==framevr::dev::UnlockQuestsChoice) {
+        const auto send=[&](const char* command) {
+            if(!Current(claim))return false;
+            if(r.session!=gamestate::LocalPlayer()||!execute(command)) {
+                char line[160];std::snprintf(line,sizeof line,"Frame development: quest unlock dispatch refused at %s",command);
+                framevr::logging::Write(line);return false;
+            }
+            return true;
+        };
+        accepted=send("cheat quests")&&send("cheat waypoints");
+        Finish(r,accepted?Result::Dispatched:Result::Refused,claim);
+        return;
+    }
     if(const int level=framevr::dev::LevelFor(r.index)) {
         const int cls=interactionstate::Read().devClass;
         if(!framevr::dev::ValidClass(cls)){Finish(r,Result::Refused,claim);return;}
@@ -166,12 +223,30 @@ void __cdecl Gear(const PluginContext*,void* callbackToken) noexcept {
         const bool ammo=framevr::dev::Ammo(codes[i]);
         auto& spec=specs[count++];spec.structSize=sizeof spec;
         spec.code=Items::MakeItemCode(codes[i][0],codes[i][1],codes[i][2]);
-        const bool normal=ammo||framevr::dev::StarterKit(r.index);
+        const bool normal=ammo||framevr::dev::NormalKit(r.index);
         spec.quality=normal?Items::Quality::Normal:Items::Quality::Unique;spec.qualityRecordId=Items::RandomQualityRecord;
         spec.flags=normal?0:Items::ItemCreateFlagBit(Items::ItemCreateFlag::AllowDuplicateUnique);
-        spec.itemLevel=framevr::dev::StarterKit(r.index)?1:99;spec.seedMode=Items::SeedMode::Random;
+        spec.itemLevel=framevr::dev::NormalKit(r.index)?1:99;spec.seedMode=Items::SeedMode::Random;
         spec.quantity=spec.durability=Items::DefaultValue;spec.stateFlags=Items::ItemStateIdentified;
         if(ammo)spec.quantity=250;
+        if(r.index==framevr::dev::TorchChoice) {
+            if(i==0||i==1) {
+                spec.quality=Items::Quality::Normal;
+                spec.socketCount=1;
+                spec.itemLevel=1;
+            } else if(i==2||i==3) {
+                spec.quality=Items::Quality::Normal;
+                spec.itemLevel=1;
+            } else if(i==4) {
+                spec.quality=Items::Quality::Unique;
+                spec.qualityRecordId=Items::RandomQualityRecord;
+                spec.flags=Items::ItemCreateFlagBit(Items::ItemCreateFlag::AllowDuplicateUnique);
+                spec.itemLevel=99;
+            } else if(i==5) {
+                spec.quality=Items::Quality::Magic;
+                spec.itemLevel=30;
+            }
+        }
         spec.destination.structSize=sizeof spec.destination;
         spec.destination.container=Items::ItemContainer::Inventory;
         spec.destination.placement=Items::Placement::Automatic;
@@ -230,7 +305,7 @@ void Init(const D2RL::PluginContext* ctx) {
     framevr::logging::Write("Frame development: isolated pcvr-dev environment enabled; class presets require disposable offline expansion characters");
 }
 bool DebugDraws(){return enabled&&debugDraws.load();}
-void Capture(framevr::interaction::Snapshot& s){s.developer=enabled;s.devDebugDraws=DebugDraws();s.devTurnsKeepOwn=enabled?framevr::TurnsKeepOwn():0;}
+void Capture(framevr::interaction::Snapshot& s){s.developer=enabled;s.devDebugDraws=DebugDraws();s.devTurnsKeepOwn=enabled?framevr::TurnsKeepOwn():0;s.devTurnsSharp=enabled&&framevr::TurnsSharp();s.devTurnsFill=enabled&&framevr::TurnsFill();s.devTurnsRims=enabled&&framevr::TurnsRims();s.devSkyRims=enabled&&d2rcam::SkyOverRims();}
 void Request(const framevr::interaction::Request& r) {
     const bool valid=Valid(r);
     const auto run=threads?(framevr::dev::IsKit(r.index)?threads->runOnGameThread:threads->runOnUiThread):nullptr;

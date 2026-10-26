@@ -18,7 +18,7 @@ using namespace framevr::bowflight;
 using namespace native;
 std::atomic<bool> ready{false};
 bool castSoundReady=false;
-std::atomic<bool> feedbackReady{false};
+std::atomic<bool> feedbackReady{false},throwReady{false};
 std::atomic<unsigned> casts[2]{},denied{};
 std::atomic<unsigned> warnings{};
 framevr::spellcast::Cadence cadence;
@@ -78,6 +78,11 @@ void Install() {
        !d2rsig::Check(nativeui::abi::StatRva,nativeui::abi::StatSig,sizeof nativeui::abi::StatSig))return;
     if(!originalTarget&&!d2rsig::Hook(TargetRva,TargetSig,sizeof TargetSig,reinterpret_cast<void*>(&Target),reinterpret_cast<void**>(&originalTarget)))return;
     castSoundReady=d2rsig::Check(CastSoundRva,CastSoundSig,sizeof CastSoundSig);
+    // Optional: Double Throw and the left hand's throw (#224).
+#define CHECK(name) d2rsig::Check(name##Rva,name##Sig,sizeof name##Sig)
+    throwReady=CHECK(DoubleThrow)&&CHECK(DoubleThrowWeapon)&&CHECK(DoubleThrowShoot)&&CHECK(LeftThrow)&&CHECK(LeftThrowHand)&&CHECK(LeftThrowShoot);
+#undef CHECK
+    if(throwReady.load())framevr::logging::Write("Frame hand spells: Double Throw and the left hand's throw ready");
     ready=true;
     framevr::logging::Write("Frame hand spells: Sorceress bolts/balls, Necromancer Bone Spear, Paladin Holy Bolt and native Charged Bolt volleys ready");
 }
@@ -106,7 +111,7 @@ bool Prepare(Shot& shot,uintptr_t game,uintptr_t player) {
     return shot.level>0;
 }
 bool PrepareArrow(Shot& shot,uintptr_t game,uintptr_t player) {
-    if(!ready.load()||!SkillArrow(shot))return false;
+    if(!ready.load()||!SkillRelease(shot))return false;
     uint32_t mode=0;uintptr_t list=0;
     if(!Read(player+0xc,mode)||(mode!=1&&mode!=2&&mode!=3)||!Read(player+0x100,list)||!list)return false;
     // Same compiled Skills row fields as Prepare: srvdofunc 0 with the
@@ -115,10 +120,28 @@ bool PrepareArrow(Shot& shot,uintptr_t game,uintptr_t player) {
     int16_t id=-1,action=-1,missile=-1;
     if(!node||!Read(node,row)||!Read(row,id)||id!=shot.skill||!Read(row+0x4e,action)||action!=0||
        !Read(row+0x66,missile)||missile!=shot.missile||
-       !framevr::weaponskills::QuiverSkill(id)||!framevr::weaponskills::QuiverMissile(missile))return false;
+       !framevr::weaponskills::Loadable(id,missile,shot.kind==Kind::Javelin))return false;
     shot.level=reinterpret_cast<int(*)(uintptr_t,uintptr_t,int,int)>(d2rsig::Addr(SkillLevelRva))(player,node,1,0);
     return shot.level>0;
 }
+bool PrepareThrow(Shot& shot,uintptr_t game,uintptr_t player) {
+    if(!ready.load()||!throwReady.load()||!DoubleThrow(shot))return false;
+    uint32_t mode=0;uintptr_t list=0,function=0;
+    if(!Read(player+0xc,mode)||(mode!=1&&mode!=2&&mode!=3)||!Read(player+0x100,list)||!list)return false;
+    // srvdofunc 74 is the audited Double Throw, which throws one weapon per call.
+    const auto node=Skill(player,shot);uintptr_t row=0;
+    int16_t id=-1,action=-1;
+    if(!node||!Read(node,row)||!Read(row,id)||id!=shot.skill||!Read(row+0x4e,action)||action!=74||
+       !Read(d2rsig::Addr(DoFunctionsRva+74*8),function)||function!=d2rsig::Addr(DoubleThrowRva))return false;
+    shot.level=reinterpret_cast<int(*)(uintptr_t,uintptr_t,int,int)>(d2rsig::Addr(SkillLevelRva))(player,node,1,0);
+    return shot.level>0;
+}
+bool ThrowLeft(uintptr_t game,uintptr_t player) {
+    uintptr_t function=0;
+    if(!ready.load()||!throwReady.load()||!Read(d2rsig::Addr(DoFunctionsRva+5*8),function)||function!=d2rsig::Addr(LeftThrowRva))return false;
+    return reinterpret_cast<int(*)(uintptr_t,uintptr_t,int,int)>(d2rsig::Addr(LeftThrowRva))(game,player,4,1)!=0;
+}
+bool ThrowReady(){return ready.load()&&throwReady.load();}
 bool Cast(const Shot& shot,uintptr_t game,uintptr_t player) {
     const auto node=Skill(player,shot);if(!node)return false;
     // Temporarily supply THIS hand's skill to the game's own mana checks and
@@ -154,6 +177,11 @@ bool Cast(const Shot& shot,uintptr_t game,uintptr_t player) {
     using DispatchFn=int(*)(uintptr_t,uintptr_t,int,int,int,int,int);
     return reinterpret_cast<DispatchFn>(d2rsig::Addr(DispatchRva))(game,player,shot.skill,shot.level,1,0,0)!=0;
 }
+void WarnMana(uint64_t session,uint32_t playerId) {
+    if(!feedbackReady.load())return;
+    std::lock_guard lock(feedbackMutex);
+    castWarning.Request(session,playerId,GetTickCount64(),framevr::spellcast::Failure::Mana);
+}
 void Feedback(uint64_t session,uintptr_t player,uint32_t id,bool active) {
     auto reason=framevr::spellcast::Failure::None;
     {
@@ -170,6 +198,7 @@ void Feedback(uint64_t session,uintptr_t player,uint32_t id,bool active) {
 void Fired(const Shot& shot,uintptr_t game,uintptr_t player) {
     ++casts[shot.hand];
     framevr::SpellCast(shot.hand,shot.session);
+    framevr::SpellVisualCast(shot);
     uint32_t tick=0;if(!Read(game+0x170,tick))return;
     const int fcr=reinterpret_cast<int(*)(uintptr_t,int,int)>(d2rsig::Addr(nativeui::abi::StatRva))(player,105,0);
     uint32_t character=~0u;if(!Read(player+4,character))return;

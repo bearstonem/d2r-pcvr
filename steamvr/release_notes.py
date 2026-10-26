@@ -8,6 +8,9 @@ import re
 PROJECT_URL = 'https://github.com/bearstonem/d2r-pcvr'
 AUTHOR = 'A mod by monkeylashes'
 START, END = '<!-- PCVR_IN_HEADSET_NOTES', 'PCVR_IN_HEADSET_NOTES -->'
+# The headset's Notes tab pages them, 12 a page (vr_settings.h NotesPerPage,
+# NotesMaxLines): a release after a long gap can list everything.
+MAX_LINES = 72
 
 
 def read_notes(notes, identity):
@@ -25,8 +28,8 @@ def read_notes(notes, identity):
     if len(rows) < 3 or rows[0] != 'release: ' + tag or not rows[1].startswith('credits: '):
         raise ValueError('Update the in-headset summary release tag and credits for this release.')
     lines = rows[2:]
-    if not 1 <= len(lines) <= 14 or any(not line.startswith('- ') for line in lines):
-        raise ValueError('The in-headset summary needs 1-14 one-line feature bullets.')
+    if not 1 <= len(lines) <= MAX_LINES or any(not line.startswith('- ') for line in lines):
+        raise ValueError(f'The in-headset summary needs 1-{MAX_LINES} one-line feature bullets.')
     lines = [line[2:].strip() for line in lines]
     credits = rows[1][len('credits: '):].strip()
     if any('{' in line or '}' in line for line in [credits, *lines]):

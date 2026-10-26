@@ -15,6 +15,11 @@ void Register(LogFn log, PanelFn wantsPanel, PanelFn inWorld, PanelFn toggleMenu
 bool HandleWindowFocusMessage(void* window,uint32_t message,uint64_t token,int64_t deadline);
 void ConfigureDeferredWait(bool enabled);
 void ConfigureSymmetricProjection(bool enabled);
+// [render] frame_generation (0 Off, 1 FidelityFX, 2 NVIDIA), frame_generation_preset
+// and frame_generation_scale: OFXR Bridge (frame_generation.h). On or off at
+// the next OpenXR start; the backend and NVIDIA's options reach a loaded layer
+// at once, and Off bypasses it until then.
+void ConfigureFrameGeneration(float mode,float preset,float scale);
 // [stereo] turns_from_drawn_eye (1): by turns, the eye not drawn mostly from
 // the drawn eye's picture of this frame (TurnDepth); 0: its own image alone.
 void ConfigureTurnsFromDrawnEye(bool enabled);
@@ -38,10 +43,36 @@ void ConfigureTurnsKeepNear(float gap,float reach);
 // where the game's effects layer has this much (its strongest channel)
 // within the reach.
 void ConfigureTurnsKeepEffects(float level,float reach);
+// [stereo] turns_sharp (1): by turns, the pictures turned, moved and laid
+// over the eye not drawn read Catmull-Rom, sharper than bilinear
+// (TurnWarp::Sharpen); 0 bilinear. Applied when the ini's value changes;
+// DEV > Equipment switches it for the session (Set), and reads it back.
+void ConfigureTurnsSharp(bool on);
+void SetTurnsSharp(bool on);
+bool TurnsSharp();
+// [stereo] turns_fill (1): by turns, in the strips beside near things the
+// drawn eye's picture does not reach, where the eye's own frame-old picture
+// shows something nearer since gone (a monster that walked on), what is
+// behind beside the strip instead (TurnWarp::Fill); 0 its own picture as
+// before. Applied when the ini's value changes; DEV > Equipment switches it
+// for the session (Set), and reads it back.
+void ConfigureTurnsFill(bool on);
+void SetTurnsFill(bool on);
+bool TurnsFill();
+// [stereo] turns_rims (1): by turns, the rim the game's picture has round
+// anything against the sky (its colour, the sky's depth) goes with it
+// (TurnWarp::Rims); 0 it stays with the sky as before, a dark outline beside
+// roofs and treetops in every other frame. Applied when the ini's value
+// changes; DEV > Equipment switches it for the session (Set), and reads it back.
+void ConfigureTurnsRims(bool on);
+void SetTurnsRims(bool on);
+bool TurnsRims();
 void ConfigureEyeTracking(bool enabled);
 void ConfigureGameplay(bool enabled);
 void ConfigureQuiver(bool enabled,bool preview); // [bow] quiver, quiver_preview
 void ConfigureInteractions(bool seated,float waistBelowEyes,float beltForward,int dominantHand);
+void ConfigureBottlePhysics(bool on); // [interactions] bottle_physics: emptied bottles fall into the world
+void ConfigurePropPhysics(bool on);   // [interactions] prop_physics: weapons knock the level's small props about
 void PublishSewerPrompt(const sewerprompt::Target&); // Values only; XR follows no game pointers.
 // Current motion-combat aim in the existing head-yaw-relative hand frame.
 bool SettingsOpen();
@@ -52,9 +83,25 @@ bool CrossbowAiming();
 bool NativeAimOwnership(); // hand casting or wheel: preserve locomotion, suppress legacy aim modes
 bool NativeSkillCasting(); // any active trigger/quick cast; retain native locomotion input
 bool DirectedSpellActive(); // fresh native assignment, actually casting (wheel or quick shortcut)
+bool BowSkillActive();   // a bow or crossbow skill is being cast from a button (bow ready)
+int GroundSpellSkill();   // a ground skill (spellaim::GroundTarget) being cast that lands where it is aimed: its id, or -1
 int NativeCastSkill(); // current fresh native cast id, -1 when idle/blocked/stale
 bool GameplayRay(float origin[3],float direction[3]);
+// Aim rules: each hand's own aim in GameplayRay's frame - the controller's
+// pointer, or the bow's forward for the left hand holding a bow.
+bool HandAimRay(int hand,float origin[3],float direction[3]);
+int CastButtonHand();        // the hand whose button holds a native cast now, -1 none
+bool HandSpellHeld(int hand); // that hand's physical spell button is held
+int PointSpellSkill();       // the cast skill when the aim rules place it at a point, else -1
+int AimRulesSkill();         // the cast skill (any), -1 none; with its game "directed" flag
+// A trap or bomb thrown to place (#224): where its arc landed, in grid cells,
+// for that skill's cast (skill -1: any) just after the throw.
+bool TossTarget(int skill,float& x,float& y);
+bool AimRulesDirected();
 bool MeleeSample(uint32_t poseStamp,melee::Sample& sample,int hand=0);
+// The posed melee capsule (world metres) that also pushes dropped bottles:
+// slot 0 right hand, 1 left hand, 2 shield. Null clears it. Any thread.
+void BottleWeapon(int slot,const melee::Blade* blade);
 bool ShieldSample(uint32_t poseStamp,melee::Sample& sample);
 bool RequestShieldSkill(const melee::Sample& sample,uint32_t target,math::Vec gridTarget);
 int TakeShieldTarget(uint32_t& target); // 1 physical target, -1 cancelled cast, 0 native fallback
@@ -82,6 +129,7 @@ void ConfigureHeartbeat(float volume,float bpmMin,float bpmMax,float fadeSeconds
 // optional 16-bit PCM WAV (empty: the built-in bone snap) played once as the guard breaks.
 void ConfigureGuardBreakSound(float volume,const wchar_t* file);
 void SpellCast(int hand,uint64_t session); // one successful hand spell, not each projectile
+void SpellVisualCast(const bowflight::Shot&); // confirmed hand cast; cosmetic only
 bool TakeBowShot(bowflight::Shot& shot);
 bool TakeCrossbowShot(bowflight::Shot& shot);
 bool CrossbowHeld(const bowflight::Shot& shot);
@@ -95,7 +143,7 @@ struct FrameTiming {
     double waitFrameMs=0,waitGpuMs=0,submitMs=0,maxPipelineMs=0,locateMs=0,inputMs=0,releaseMs=0;
     double displayPeriodMs=0; // Runtime-predicted application period; may differ from panel refresh.
     double acquireMs[2]{},copySubmitMs[2]{},gpuSceneMs[2]{},gpuEffectsMs[2]{},gpuCopyMs[2]{};
-    uint32_t pipelines=0;bool gpuValid=false;
+    uint32_t pipelines=0,layers=0;bool gpuValid=false;   // layers: composition layers the last xrEndFrame sent
 };
 FrameTiming LastTiming();
 // One headset frame as the render thread measured it, for VR Settings > Perf:
@@ -152,7 +200,9 @@ bool Active();
 bool VrGameplay(uint64_t now);
 bool SpatialMenu();
 // mapNorth is the unmodified native camera's horizontal heading (map-up).
+// scaleHeight: the eye height the world's scale is taken from (units per metre over
+// userEyeHeight), 0 = eyeHeight; a druid's form stands its eyes apart from it.
 bool View(float out[16], const float hero[3], float eyeHeight,
-          float userEyeHeight, float bodyHeading, float recenterYaw, int eye, float mapNorth);
+          float userEyeHeight, float bodyHeading, float recenterYaw, int eye, float mapNorth, float scaleHeight = 0);
 bool Projection(float out[16], float nearWorld, int eye);
 }

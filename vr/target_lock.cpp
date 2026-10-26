@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <mutex>
 #include "melee.h"
+#include "projectiles.h"
 #include "../steamvr/logging.h"
 
 namespace targetlock {
@@ -20,13 +21,14 @@ std::atomic<uint64_t> askedAt{0};
 void __cdecl Refresh(const PluginContext*,void*) noexcept {
     melee::Hostile found[framevr::targetcone::MaxTargets];
     float heroX=0,heroY=0;
-    const int n=melee::Hostiles(found,framevr::targetcone::MaxTargets,framevr::targetcone::RangeCells+4,heroX,heroY);
+    const int n=melee::Hostiles(found,framevr::targetcone::MaxTargets,framevr::aimreach::CornerCells+4,heroX,heroY);   // the game's reach (aimreach), its corners included
     Snapshot s;
     if(n>=0) {
         for(int i=0;i<n;++i)s.targets[i]={found[i].id,found[i].x,found[i].y,found[i].clear};
         s.count=n;s.heroX=heroX;s.heroY=heroY;s.at=GetTickCount64();
     }
     {std::lock_guard lock(mutex);latest=s;}
+    projectiles::FollowFlights();   // telemetry: where the hero's missiles end (game thread)
     static int told=-2;
     if((n<0)!=(told<0)||(n>0)!=(told>0)) {
         told=n;

@@ -37,8 +37,11 @@
 #include "target_lock.h"
 #include "journal_ui.h"
 #include "../steamvr/native_panels.h"
+#include "../steamvr/notice_card.h"
+#include "../steamvr/weapon_skills.h"
 #include "../steamvr/callback_ticket.h"
 #include "../steamvr/native_hud.h"
+#include "../steamvr/wrist_full_map.h"
 #include "../steamvr/attack_speed.h"
 #include "../steamvr/dual_wield.h"
 #include <mutex>
@@ -46,6 +49,8 @@
 #include "logging.h"
 #include "panel_input.h"
 #include "render_resolution.h"
+#include "active_effects.h"
+#include "settings_menu.h"
 #include "sigscan.h"
 #include "memory.h"
 #endif
@@ -55,6 +60,7 @@ using namespace D2RL;
 namespace gamestate {
 void __cdecl FinishMenuOpen(const PluginContext*,void*) noexcept;
 void __cdecl DispatchAutoMap(const PluginContext*,void*) noexcept;
+uint64_t LocalPlayer();
 namespace {
 
 const PluginContext* g_ctx = nullptr;
@@ -65,6 +71,60 @@ const ThreadService* g_threads = nullptr;
 const WidgetService* g_widgets = nullptr;
 framevr::nativehud::VisibilityOverride g_toolbarVisibility;
 #ifdef D2RVR_NATIVE_OPENXR
+// Map view = Full map (steamvr/wrist_full_map.h): the full map's zoom for the wrist's capture.
+// Two hooks, each installed only when its entry bytes match D2R 3.3.93787 and only once the
+// setting is first on. Both call the original with the same arguments, except that the scale
+// function's zoom is replaced for the wrist's full map; nothing in the game's memory is written.
+//  - the map panel's draw method (RVA 0x14E3480, slot 3 of the panel's vtable 0x1FDC8A8)
+//    records its `this`;
+//  - the scale function (RVA 0xD1940: out, rect, extra, float zoom) gets the wrist's zoom when
+//    every gate holds on that call: the setting on, the wrist capturing, the layout full (the
+//    small flag 0), and the last panel `this` still has the map panel's vtable.
+namespace fullmapzoom {
+constexpr uint64_t PanelMethodRva=0x14E3480,ScaleRva=0xD1940,PanelVtableRva=0x1FDC8A8,SmallRva=0x2a2add0;
+using PanelMethod=uint64_t(*)(void*);
+using ScaleFn=void*(*)(void*,void*,void*,float);
+PanelMethod originalPanel=nullptr;ScaleFn originalScale=nullptr;
+std::atomic<uint64_t> panelSelf{0};
+std::atomic<bool> ready{false};
+uint64_t OnPanelMethod(void* self) {
+    panelSelf.store(reinterpret_cast<uint64_t>(self),std::memory_order_relaxed);
+    return originalPanel(self);
+}
+bool Gates() {
+    namespace fm=framevr::fullmap;
+    const uint64_t self=panelSelf.load(std::memory_order_relaxed);
+    if(!self||!fm::g_on.load(std::memory_order_relaxed)||!fm::g_capture.load(std::memory_order_relaxed))return false;
+    uint32_t small=1;uint64_t vt=0;
+    return framevr::ReadMemory(&small,reinterpret_cast<const void*>(d2rsig::Addr(SmallRva)),4)&&small==0&&
+           framevr::ReadMemory(&vt,reinterpret_cast<const void*>(self),8)&&vt==d2rsig::Addr(PanelVtableRva);
+}
+void* OnScale(void* out,void* rect,void* extra,float zoom) {
+    namespace fm=framevr::fullmap;
+    const float wanted=fm::g_wanted.load(std::memory_order_relaxed);
+    if(wanted>0&&ready.load(std::memory_order_relaxed)&&Gates()) {
+        const float use=fm::ZoomArg(zoom,wanted,true);
+        fm::g_applied.store(fm::GameRounded(use),std::memory_order_relaxed);   // what this draw really shows (hud tags the share)
+        return originalScale(out,rect,extra,use);
+    }
+    return originalScale(out,rect,extra,zoom);
+}
+// UI thread, while the setting is on: once a process.
+void Install() {
+    static bool tried=false;if(tried)return;tried=true;
+    constexpr uint8_t panelEntry[]={0x4c,0x8b,0xdc,0x55,0x53,0x56,0x57,0x41,0x54,0x49,0x8d,0x6b,0xa1};
+    constexpr uint8_t scaleEntry[]={0x4c,0x89,0x44,0x24,0x18,0x53,0x55,0x56,0x57,0x41,0x54,0x41,0x56,0x41,0x57};
+    const bool a=d2rsig::Hook(PanelMethodRva,panelEntry,sizeof panelEntry,reinterpret_cast<void*>(&OnPanelMethod),reinterpret_cast<void**>(&originalPanel));
+    const bool b=a&&d2rsig::Hook(ScaleRva,scaleEntry,sizeof scaleEntry,reinterpret_cast<void*>(&OnScale),reinterpret_cast<void**>(&originalScale));
+    ready.store(a&&b);
+    char line[220];
+    // patterns (game_sigs.h MapPanelDraw / AutomapScale): an address 0 = not found in this build
+    const bool foundA=d2rsig::Addr(PanelMethodRva)!=0,foundB=d2rsig::Addr(ScaleRva)!=0;
+    std::snprintf(line,sizeof line,"Frame full map: zoom hooks %s (map panel 0x14E3480 %s, scale 0xD1940 %s); %s",a&&b?"installed":"NOT installed",
+                  a?"ok":foundA?"bytes differ":"not found",b?"ok":!a?"not tried":foundB?"bytes differ":"not found",a&&b?"the wrist's full map opens at game zoom 0.125":"the wrist shows the full map at the game's own zoom");
+    framevr::logging::Write(line);
+}
+}
 void MaintainMapLayout(bool capture) {
     // D2R 3.3.93787 native automap mode setter: 0 full, 1 left, 2 right.
     // This updates transient map geometry only, not the saved options file.
@@ -76,10 +136,25 @@ void MaintainMapLayout(bool capture) {
     static framevr::wrist::MapLayoutLease layout;
     if(!checked){if(!d2rsig::Check(modeRva,modeSig,sizeof modeSig))return;checked=true;}
     int small=0;uint8_t left=0;
-    if(!framevr::ReadMemory(&small,reinterpret_cast<void*>(d2rsig::Addr(0x2a2add0)),sizeof small)||
-       !framevr::ReadMemory(&left,reinterpret_cast<void*>(d2rsig::Addr(0x2a2add5)),sizeof left)||small<0||small>1)return;
-    const int action=layout.Step(capture,small?(left?1:2):0);
+    // the small flag found by pattern (game_sigs.h AutomapSmall; 0 when not found: the read fails);
+    // the left flag is the byte 5 past it (the setter writes both)
+    const uintptr_t smallAt=d2rsig::Addr(0x2a2add0);
+    if(!smallAt||!framevr::ReadMemory(&small,reinterpret_cast<void*>(smallAt),sizeof small)||
+       !framevr::ReadMemory(&left,reinterpret_cast<void*>(smallAt+5),sizeof left)||small<0||small>1){
+        framevr::fullmap::g_layout.store(-1);return;
+    }
+    // Map view = Full map: the wrist borrows the full map (0) instead of the left corner (1)
+    const bool full=framevr::fullmap::g_on.load(std::memory_order_relaxed);
+    if(full)fullmapzoom::Install();
+    const int current=small?(left?1:2):0;
+    const int action=layout.Step(capture,current,full?0:1);
     if(action>=0)reinterpret_cast<void(*)(int)>(d2rsig::Addr(modeRva))(action);
+    framevr::fullmap::g_layout.store(action>=0?action:current);
+    framevr::fullmap::g_capture.store(capture);
+    if(action>=0&&full) {   // the full map's lease, both ways: at most 40 lines a session
+        static int told=0;
+        if(told<40){++told;char line[160];std::snprintf(line,sizeof line,"Frame full map: automap layout %d -> %d (wrist capture %s)",current,action,capture?"on":"off");framevr::logging::Write(line);}
+    }
 }
 using ToolbarUpdate=void(*)(void*);
 ToolbarUpdate g_originalToolbarUpdate=nullptr;
@@ -111,11 +186,96 @@ bool ProtectToolbarUpdate() {
     framevr::logging::Write("Frame HUD: hidden toolbar notification guard installed");
     return true;
 }
+// The quest / level-up NotificationPanel would hang at the eyes in XR. It stays
+// open but hidden, so its timers and Start action keep working; the transport
+// shows its message on a card in the room (notice_card.h).
+framevr::nativehud::VisibilityOverride g_noticeVisibility;
+void MaintainNotice(const PluginContext* ctx) {
+    const bool hide=hud::NativeToolbarHidden();
+    if(!hide&&!g_noticeVisibility.hidden)return;
+    Widgets::WidgetHandle panel=0;
+    const bool found=g_widgets->findPanel(ctx,"NotificationPanel",&panel)==Widgets::Result::Success&&panel;
+    const bool previous=g_noticeVisibility.hidden;
+    g_noticeVisibility.Update(hide,found,[&](bool visible){
+        return g_widgets->setWidgetVisible(ctx,panel,visible)==Widgets::Result::Success;
+    });
+    if(!previous&&g_noticeVisibility.hidden)framevr::logging::Write("Frame notices: native NotificationPanel hidden; its message goes to the room card");
+}
+// The aura icon at the top left (native_hud.h AuraIconHider): active auras
+// show on the wrist, so it is hidden in every VR session, menus included,
+// while VR Settings > HUD > Companions & effects is On.
+framevr::nativehud::AuraIconHider g_auraIcon;
+framevr::nativehud::AuraIconLog g_auraLog;
+void AuraLine(const char* line){if(g_auraLog.Allow())framevr::logging::Write(line);}   // detail lines, capped
+// HUD > Companions & effects, re-read at most every 250 ms (an Apply takes
+// effect within that); UI steps in between take no settings lock.
+bool WristEffectsOn(uint64_t now) {
+    static uint64_t readAt=0;static bool on=true;
+    if(!readAt||now-readAt>250){readAt=now;on=vrsettings::Read().values[framevr::settings::CompanionCounts]>.5f;}
+    return on;
+}
+void MaintainAuraIcon(const PluginContext* ctx) {
+    namespace nh=framevr::nativehud;
+    using Act=nh::AuraIconHider::Act;
+    static int toldFound=-1,toldHidden=-1,toldEffects=-1;static unsigned toldFailure=0;static bool toldWait=false,toldReentry=false,wasSession=false;
+    const bool session=hud::NativeToolbarHidden();
+    if(!session&&!g_auraIcon.Hidden()){wasSession=false;return;}   // the flat screen: nothing of ours to undo
+    if(g_auraIcon.busy) {                       // a message raised by our own call: never loop
+        if(!toldReentry){toldReentry=true;AuraLine("Frame aura icon: re-entered from inside our own visibility call; skipped");}
+        return;
+    }
+    if(session&&!wasSession){g_auraLog.Restart();toldFound=-1;toldEffects=-1;}   // a new VR session: fresh detail lines
+    wasSession=session;
+    const auto now=GetTickCount64();
+    const bool effects=session&&WristEffectsOn(now);
+    const bool want=nh::AuraIconHider::Want(session,effects);
+    if(session&&int(effects)!=toldEffects) {    // on change, outside the cap
+        toldEffects=effects;
+        if(effects)framevr::logging::Write("Frame aura icon: wrist effects on, hiding");
+        else if(!g_auraIcon.Hidden())framevr::logging::Write("Frame aura icon: wrist effects off, released: not hidden by us, left to the game");
+        // else the release line below, prefixed "wrist effects off, "
+    }
+    if(!want&&!g_auraIcon.Hidden())return;     // wrist effects Off: nothing of ours to undo
+    Widgets::WidgetHandle panel=0;
+    const bool found=g_widgets->findPanel(ctx,nh::AuraPanel,&panel)==Widgets::Result::Success&&panel;
+    if(int(found)!=toldFound) {
+        toldFound=found;
+        AuraLine(found?"Frame aura icon: found=1":"Frame aura icon: found=0");
+    }
+    // On release only: does the local player run an aura now (effectstate's last sample)?
+    const int aura=want?0:effectstate::AuraState(LocalPlayer());
+    auto result=Widgets::Result::Success;bool asked=false,visible=false;
+    const Act act=g_auraIcon.Step(want,found,aura,now,[&](bool show){
+        asked=true;visible=show;result=g_widgets->setWidgetVisible(ctx,panel,show);return result==Widgets::Result::Success;
+    });
+    if(asked&&result!=Widgets::Result::Success&&unsigned(result)!=toldFailure) {
+        toldFailure=unsigned(result);
+        char line[120];std::snprintf(line,sizeof line,"Frame aura icon: setWidgetVisible(%s) refused (result %u), retrying",visible?"true":"false",unsigned(result));
+        AuraLine(line);
+    }
+    if(asked&&result==Widgets::Result::Success)toldFailure=0;
+    if(act==Act::Wait&&!toldWait){toldWait=true;AuraLine("Frame aura icon: release waits for an aura sample");}
+    if(act!=Act::Wait)toldWait=false;
+    // The release's branch, outside the cap; in VR it was the wrist effects row turned Off.
+    const char* why=session?"wrist effects off, ":"";
+    char line[160];line[0]=0;
+    if(act==Act::Show)std::snprintf(line,sizeof line,"Frame aura icon: %sreleased, an aura runs: PaladinAuraPanel shown",why);
+    else if(act==Act::Leave)std::snprintf(line,sizeof line,"Frame aura icon: %sreleased, no aura runs: left hidden for the game to show",why);
+    else if(act==Act::LeaveUnknown)std::snprintf(line,sizeof line,"Frame aura icon: %sreleased, no aura sample for 2 s: left hidden for the game to show",why);
+    if(line[0])framevr::logging::Write(line);
+    if(int(g_auraIcon.Hidden())!=toldHidden) {
+        toldHidden=g_auraIcon.Hidden();
+        if(toldHidden)AuraLine("Frame aura icon: PaladinAuraPanel hidden");
+        else if(!found)AuraLine("Frame aura icon: PaladinAuraPanel unloaded; a new one starts shown");
+    }
+}
 // UI-thread-only refreshes; native menu handlers may rebuild/show HUDPanel.
 framevr::CallbackTicket g_toolbarTicket;
 bool g_toolbarUpdating=false;
 void MaintainToolbar(const PluginContext* ctx) {
     if(g_toolbarUpdating||!g_widgets||!g_widgets->findPanel||!g_widgets->setWidgetVisible)return;
+    MaintainNotice(ctx);
+    MaintainAuraIcon(ctx);
     const bool hide=hud::NativeToolbarHidden()&&ProtectToolbarUpdate();
     if(!hide&&!g_toolbarVisibility.hidden)return;
     g_toolbarUpdating=true;
@@ -164,6 +324,11 @@ std::atomic<bool> g_journalOnly{false};
 std::atomic<bool> g_opaqueMenu{false};
 std::atomic<bool> g_upperBandMenu{false};
 std::atomic<bool> g_npcChoices{false};
+std::atomic<uint32_t> g_questNotices{0};   // quest updates while the notification panel is hidden
+std::atomic<bool> g_noticePanel{false};     // the native NotificationPanel is open (hidden or not)
+std::mutex noticeMutex;
+char noticeTexts[framevr::notice::Kinds][256]{};
+uint64_t noticeTextsAt=0;   // UI thread only
 std::mutex npcChoicesMutex;
 int32_t npcChoicesRect[4]{};
 uint64_t npcChoicesAt=0;
@@ -207,6 +372,7 @@ bool IsCrossbow(const std::string& c) {
 // type index for a short bow, a light crossbow, a short sword and a hand axe
 // at once. Each kind's ItemTypes index then maps to a BodyWalk tab.
 const DataTableService* g_tables = nullptr;
+const LocalizationService* g_strings = nullptr;
 std::atomic<uint32_t> g_type{D2RVR_TYPE_UNKNOWN};
 std::atomic<uint32_t> g_held{0};   // bit 0: something in the right hand's slot (body location 4), bit 1: the left's (5)
 int g_typeOffset = -2;                       // -2 not tried yet, -1 failed
@@ -221,6 +387,9 @@ std::atomic<uint32_t> g_from{0};
 std::atomic<bool> g_leftShield{false};
 std::mutex g_meleeEquipmentMutex;framevr::dualwield::Equipment g_meleeEquipment;
 std::vector<uint32_t> g_shieldTypes;
+std::vector<uint32_t> g_potionTypes;            // ItemTypes tpot: the throwing potions (RightThrowingPotion)
+std::atomic<bool> g_rightPotion{false};
+std::atomic<uint32_t> g_rightPotionCode{0};   // its item code, for the bottle that flies (#292)
 std::atomic<uint32_t> g_handsKey{0};          // what is in the two hands, as one number (HandsKey)             // the hand slot the weapon kind came from: 0 right, 1 left              // D2RVR_TWO_HANDED* bits of what is held
 
 constexpr uint32_t Four(const char* s) { return DataTables::MakeFourCC(s[0], s[1], s[2], s[3]); }
@@ -274,6 +443,7 @@ void CalibrateTypes() {
         uint32_t index=0;
         if(TypeRow(Four(code),&index))g_shieldTypes.push_back(index);
     }
+    if(uint32_t index=0;TypeRow(Four("tpot"),&index))g_potionTypes.push_back(index);
     for (const auto& k : kKinds) {
         uint32_t idx;
         if (TypeRow(Four(k.code), &idx)) g_typeIndex.push_back({idx, k.type});
@@ -382,6 +552,14 @@ bool IsShield(const std::string& code) {
     memcpy(&type,row+g_typeOffset,sizeof type);
     return std::find(g_shieldTypes.begin(),g_shieldTypes.end(),type)!=g_shieldTypes.end();
 }
+// A throwing potion by its item type (tpot); by its code when the types are unknown.
+bool IsThrowingPotion(const std::string& code) {
+    if(code.size()!=4||g_typeOffset<0||g_potionTypes.empty())return framevr::weaponskills::ThrowingPotion(code);
+    uint32_t size=0;const auto* row=ItemRow(Four(code.c_str()),&size);uint16_t type=0;
+    if(!row||uint32_t(g_typeOffset)+sizeof type>size)return false;
+    memcpy(&type,row+g_typeOffset,sizeof type);
+    return std::find(g_potionTypes.begin(),g_potionTypes.end(),type)!=g_potionTypes.end();
+}
 
 // Weapons.txt "speed" (WSM) and "wclass"/"2handedwclass" in an Items row, for
 // the melee attack cycle (attack_speed.h). Found like the two-handed flag: the
@@ -478,6 +656,20 @@ std::atomic<uint64_t> g_player{0};   // the local player's handle, as the SDK gi
 void CalibrateObjectLights();   // the Objects table's light fields, below
 extern int g_objLitOffset;
 
+// On the UI thread: the notification texts in the game's language, for the
+// room card. Re-read now and then, so a language change follows.
+void ReadNoticeTexts() {
+    const auto now=GetTickCount64();
+    if(!g_strings||!g_strings->getStringByKey||(noticeTextsAt&&now-noticeTextsAt<5000))return;
+    noticeTextsAt=now;
+    char texts[framevr::notice::Kinds][256]{};
+    for(int k=0;k<framevr::notice::Kinds;++k) {
+        if(g_strings->getStringByKey(g_ctx,framevr::notice::Keys[k],texts[k],sizeof texts[k],nullptr)!=Localization::Result::Success)texts[k][0]=0;
+        framevr::notice::StartGlyph(texts[k]);
+    }
+    std::lock_guard lock(noticeMutex);std::memcpy(noticeTexts,texts,sizeof texts);
+}
+
 // On the UI thread: the two hands of the active set.
 void __cdecl ReadItems(const PluginContext* ctx, void* token) noexcept {
     {std::lock_guard lock(g_readMutex);if(!g_readTicket.Claim(reinterpret_cast<uintptr_t>(token)))return;}
@@ -487,6 +679,7 @@ void __cdecl ReadItems(const PluginContext* ctx, void* token) noexcept {
 #ifdef D2RVR_NATIVE_OPENXR
     panelinput::MaintainWorldController(havePlayer,g_menu.load()!=0);
     MaintainToolbar(ctx);
+    ReadNoticeTexts();
     const auto now=GetTickCount64(),mapAt=g_menuMapAt.load();
     const bool mapWanted=mapAt&&now>=mapAt&&now-mapAt<400;
     const int mapAction=g_menuMapLease.Step(havePlayer?player:0,now,mapWanted,g_menu.load()!=0,g_autoMap.load()!=0);
@@ -574,6 +767,8 @@ void __cdecl ReadItems(const PluginContext* ctx, void* token) noexcept {
     // The tracked shield is on the left wrist even when the SDK reports it
     // in body location 4 (observed with the development Paladin).
     g_leftShield=IsShield(code[0])||IsShield(code[1]);
+    g_rightPotion=IsThrowingPotion(code[0]);   // thrown by hand to a spot (transport: motionInput.potion)
+    g_rightPotionCode=g_rightPotion&&code[0].size()>=3?uint32_t(uint8_t(code[0][0]))|uint32_t(uint8_t(code[0][1]))<<8|uint32_t(uint8_t(code[0][2]))<<16|uint32_t(' ')<<24:0u;
     const uint32_t handTypes[2]={KindOf(code[0]),KindOf(code[1])};
     {std::lock_guard lock(g_meleeEquipmentMutex);
         if(g_meleeEquipment.id[0]!=id[0]||g_meleeEquipment.id[1]!=id[1])g_meleeEquipment={};
@@ -678,6 +873,8 @@ SharedEvents::UiMessageAction __cdecl OnUiMessage(const PluginContext* ctx, cons
         else if (!strcmp(command, "ClosePanel") || !strcmp(command, "UnloadPanel")) g_panels.erase(text);
         else if (!strcmp(command, "UnloadAll") || !strcmp(command, "CloseAll")) g_panels.clear();
         g_autoMap.store(g_panels.count("AutoMap") ? 1 : 0);
+        framevr::fullmap::g_panel.store(g_panels.count("AutoMap") != 0);
+        g_noticePanel.store(g_panels.count("NotificationPanel") != 0);
         g_upperBandMenu.store(std::any_of(g_panels.begin(),g_panels.end(),
             [](const auto& name){return framevr::panels::UpperBand(name);}));
         g_opaqueMenu.store(std::any_of(g_panels.begin(),g_panels.end(),
@@ -710,6 +907,14 @@ SharedEvents::UiMessageAction __cdecl OnUiMessage(const PluginContext* ctx, cons
         framevr::resolution::OptionsApplied();
     if(!strcmp(target,"PanelManager")||!strcmp(target,"HUDPanel")||
        (!strcmp(target,"SystemMessage")&&!strcmp(command,"ResolutionChanged")))RefreshToolbarAfterMessage(ctx);
+    // A quest update opens the NotificationPanel and sets the journal's alert
+    // in the same UI tick (2026-10 logs); a queued one finds the panel open.
+    // The journal may set the alert for its own reasons, so only an alert
+    // beside the open panel counts, and none while the journal is up.
+    if(!strcmp(target,"QuestLogPanelMessage")&&!strcmp(command,"SetQuestAlert")&&hud::NativeToolbarHidden()&&
+       g_panels.count("NotificationPanel")&&std::none_of(g_panels.begin(),g_panels.end(),
+           [](const std::string& name){return name.find("QuestLog")!=std::string::npos;}))
+        g_questNotices.fetch_add(1);
 #endif
     if (g_state) {
         strncpy_s(g_state->lastUi, key.c_str(), _TRUNCATE);
@@ -797,6 +1002,7 @@ void Init(const PluginContext* ctx) {
     g_items = Query<ItemService>(ctx);
     g_events = Query<SharedEventService>(ctx);
     g_tables = Query<DataTableService>(ctx);
+    g_strings = Query<LocalizationService>(ctx);
     char b[160];
     snprintf(b, sizeof b, "gamestate: threads %s, inventory %s, items %s, events %s", g_threads ? "ok" : "MISSING",
              g_inventory ? "ok" : "MISSING", g_items ? "ok" : "MISSING", g_events ? "ok" : "MISSING");
@@ -838,6 +1044,8 @@ uint32_t WeaponSet() { return g_set.load(); }
 uint32_t WeaponType() { return g_type.load(); }
 uint32_t HandsHeld() { return g_held.load(); }
 bool LeftShield() {return g_leftShield.load();}
+bool RightThrowingPotion() {return g_rightPotion.load();}
+uint32_t RightThrowingPotionCode() {return g_rightPotionCode.load();}
 uint32_t TwoHanded() { return g_two.load(); }
 uint32_t WeaponHand() { return g_from.load(); }
 uint32_t HandsKey() { return g_handsKey.load(); }
@@ -880,6 +1088,14 @@ int ObjectLight(uint32_t txt, uint32_t mode, float rgb[3]) {
     return o.lit[mode];
 }
 
+uint32_t QuestNotices(){return g_questNotices.load();}
+bool NoticePanelOpen(){return g_noticePanel.load();}
+bool NoticeText(int kind,char* out,uint32_t size) {
+    if(kind<0||kind>=framevr::notice::Kinds||!out||!size)return false;
+    std::lock_guard lock(noticeMutex);
+    if(!noticeTexts[kind][0])return false;
+    snprintf(out,size,"%s",noticeTexts[kind]);return true;
+}
 bool JournalOnly(){return g_journalOnly.load();}
 bool OpaqueMenuOpen(){return g_opaqueMenu.load();}
 bool UpperBandMenuOpen(){return g_upperBandMenu.load();}

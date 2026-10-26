@@ -28,7 +28,24 @@ static void CheckVisorExtent() {
     for(const math::Fov invalid:{math::Fov{},math::Fov{NAN,.8f,-.8f,.8f},math::Fov{-.8f,INFINITY,-.8f,.8f},math::Fov{-.8f,.8f,-.8f,1.6f}}) {
         Check(blood::VisorExtent(invalid,quest).width==0&&blood::VisorExtent(quest,invalid).height==0,
               "invalid eye FOVs suppress the optional visor quad");
+        Check(blood::ViewExtent(invalid,quest).width==0&&blood::ViewExtent(quest,invalid).height==0,
+              "invalid eye FOVs suppress the whole-view quad");
     }
+    // Whole view (the guard strain light): the visor wherever its bound does not apply, the real edge where it does.
+    for(const auto& fit:{std::array<math::Fov,2>{quest,quest},{narrow,narrow},{asymmetricLeft,asymmetricRight}}) {
+        const auto v=blood::ViewExtent(fit[0],fit[1]),b=blood::VisorExtent(fit[0],fit[1]);
+        Check(std::fabs(v.width/b.width-1)<1e-5f&&std::fabs(v.height/b.height-1)<1e-5f,"Quest 3 and narrower views: the whole view is the visor");
+    }
+    const auto wide=blood::ViewExtent(frame,frame);
+    Check(std::fabs(wide.width-oldFrame.width)<.0001f&&std::fabs(wide.height-oldFrame.height)<.0001f&&wide.width>f.width*1.15f,
+          "Frame: the whole view reaches its own rim, past the Quest-bound visor");
+    const math::Quat outLeft{0,std::sin(.15f),0,std::cos(.15f)},outRight{0,-std::sin(.15f),0,std::cos(.15f)}; // eyes canted 0.3 rad outward
+    const auto canted=blood::ViewExtent(quest,quest,outLeft,outRight);
+    Check(canted.width>8*std::tan(.94248f+.29f)*1.05f&&canted.height>q.height,"canted eyes: the quad covers each eye's outer corners");
+    Check(blood::ViewExtent(quest,quest,{0,0,0,0},{NAN,0,0,1}).width==blood::ViewExtent(quest,quest).width,"a missing eye turn reads as straight ahead");
+    const math::Fov huge{-1.55f,1.55f,-1.55f,1.55f};
+    const auto bounded=blood::ViewExtent(huge,huge,outLeft,outRight);
+    Check(std::isfinite(bounded.width)&&bounded.width<=8*5.6713f*1.05f+.001f&&bounded.height<=8*5.6713f*1.05f+.001f,"bounded at about 80 degrees per side");
 }
 struct Sim {
     blood::Engine e;blood::Input in;blood::Output out;

@@ -1,6 +1,7 @@
 #include "shield_guard.h"
 #include "shield_surface.h"
 #include "shield_debug.h"
+#include "active_effects.h"
 #undef NDEBUG
 #include <cassert>
 #include <cmath>
@@ -370,6 +371,29 @@ int main() {
         assert(!DrawDebug(d,camera,100699,b)&&!DrawDebug(d,camera,100851,b));
         assert(!DrawDebug(d,{NAN,0,0},100700,b));
         d.pose.player.x=NAN;assert(!DrawDebug(d,camera,100700,b));
+    }
+    {   // 2026-10-20: Holy Shield's glow: coverage x1.6 about the shield's center, mesh or fallback
+        const Tuning t;
+        assert(CoverScale(false)==1&&CoverScale(true)==HolyShieldCover&&HolyShieldCover>1&&HolyShieldCover<=MaxCoverScale);
+        bool listed=false;for(const auto& d:framevr::effects::Definitions)listed|=d.state==framevr::effects::HolyShieldState&&d.skill==117;
+        assert(listed);
+        Pose p=Surface({-.1f,-.45f,-.3f},view,95000);p.center.x=.3f;p.halfRight={.13f,0,0};p.halfUp={0,.13f,0};   // a buckler off to the side
+        assert(Coverage(p,ahead,t)==Rejection::OutsidePlacement);
+        p.coverScale=CoverScale(true);assert(Coverage(p,ahead,t)==Rejection::None);
+        p.center.x=.6f;assert(Coverage(p,ahead,t)==Rejection::OutsidePlacement);   // the glow has an edge too
+        Pose f=Surface({-.1f,-.45f,-.3f},view,95001);f.center.x=.6f;   // no mesh: the fallback grows the same way
+        assert(Coverage(f,ahead,t)==Rejection::OutsidePlacement);
+        f.coverScale=CoverScale(true);assert(Coverage(f,ahead,t)==Rejection::None);
+        f.center.x=.8f;assert(Coverage(f,ahead,t)==Rejection::OutsidePlacement);
+        for(const float bad:{NAN,.5f,4.f}){Pose b=p;b.coverScale=bad;assert(!Valid(b)&&Coverage(b,ahead,t)==Rejection::InvalidSurface);}
+        Pose turned=p;turned.normal={1,0,0};turned.coverScale=CoverScale(true);turned.center.x=0;
+        turned.halfRight={0,0,.13f};assert(Coverage(turned,ahead,t)==Rejection::OutsideCoverage);   // edge-on stays open
+        // Only the width grows: a shield held too low (or high) to count as raised stays so under Holy Shield.
+        Pose low=p;low.center.x=0;low.center.y=low.eye.y-.50f-.13f-.04f;
+        assert(Measured(low)&&PositionRejection(low,true,false,t)==Rejection::TooLow);
+        low.coverScale=CoverScale(true);assert(PositionRejection(low,true,false,t)==Rejection::TooLow);
+        Pose high=p;high.center.x=0;high.center.y=high.eye.y+.15f+.13f+.04f;high.coverScale=CoverScale(true);
+        assert(PositionRejection(high,true,false,t)==Rejection::TooHigh);
     }
     std::puts("Shield guard: rendered bounds, coverage, calibration, movement, parries, debug placement and expiry passed");
 }
