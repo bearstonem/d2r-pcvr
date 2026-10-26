@@ -20,7 +20,8 @@ import struct
 from pathlib import Path
 from game_assets import open_assets
 
-VERSION = 3   # the cache; 2 adds wall-faded props, static native bodies, furniture and cloth; 3 barrels, shovels, hay
+VERSION = 4   # the cache; 2 adds wall-faded props, static native bodies, furniture and cloth; 3 barrels, shovels, hay;
+              # 4 loose weapons, shields, helms, tools, broken pottery, bones, more barrels, baskets and bags
 FORMAT = 1    # props.bin layout, read by steamvr/props.h
 MAGIC = 0x31505250   # 'PRP1'
 FILES = ('props.bin',)
@@ -60,6 +61,36 @@ KINDS = {
     **{name: ('box', 'furniture') for name in ('chair', 'stool', 'act1_stool', 'barstool')},
     **{name: ('box', 'stone') for name in ('tablet', 'tablet_small')},
     **{name: ('box', 'sack') for name in ('sack', 'sack_small', 'hay_bale')},
+    # 4: what lies about in houses, barns, camps and dungeons (owner 2026-10-25, in an Act 1
+    # house: "we should probably map them"). Groups (crates, sacks, barrels as one model),
+    # wall-mounted pieces, candles and lanterns stay out; anything over MaxExtent (1.2 m, a
+    # long spear or a wagon wheel) is left where it is at run time.
+    **{name: ('round', 'wood') for name in (
+        'l_barrel', 'r_barrel', 'global_barrel', 'global_barrel01_open', 'global_barrel02_open', 'burned_barrel',
+        'barrel_broken', 'cell_barrel', 'drum', 'wheel', 'wheel_broken', 'wagonwheel')},
+    **{name: ('box', 'furniture') for name in ('chair_broken', 'stoolframe', 'stool_frame', 'bench', 'act1_bench')},
+    **{name: ('box', 'wood') for name in (
+        'wood_board_broken', 'burned_board', 'firewood_a', 'wood_log', 'log', 'burnt_log', 'cutting_board',
+        'sticks_bundled', 'crate01_open', 'crate02_open', 'quiver', 'bow', 'crossbow', 'arrows', 'arrow',
+        'club_devilkin', 'axe_handle', 'shield_wood')},
+    **{name: ('box', 'metal') for name in (
+        'sword', 'sword_rusty', 'sword_corrupted', 'sword_bare', 'short_sword', 'bastard_sword', 'claymore_sword',
+        'dagger', 'axe', 'axe_crude', 'battle_axe', 'great_axe', 'large_axe', 'spear', 'spear_corrupted',
+        'fishing_spear', 'mace', 'shield', 'shield_rusty', 'shield_corrupted', 'shield_fallen', 'kite_shield',
+        'buckler_shield', 'body_shield', 'armor_shoulderpad_fallen', 'tongs', 'tools', 'tool', 'tool_cleaver',
+        'tool_sharpener', 'mining_tools', 'rake', 'pitchfork')},
+    **{name: ('round', 'metal') for name in ('armor_helm', 'armor_helm_cap', 'overseer_helmet')},
+    **{name: ('round', 'ceramic') for name in (
+        'bowl_broken', 'plate_broken', 'vase_brown_broken', 'vase_blue_broken', 'vase_red_broken', 'canopic_jar_broken')},
+    **{name: ('box', 'bone') for name in (
+        'skull_fragment', 'long_skull', 'short_skull', 'baboon_skull', 'skull_mandible', 'skull_animal_mandible',
+        'rib_cage', 'horn')},
+    'onion': ('ball', 'food'),
+    **{name: ('box', 'food') for name in ('meat', 'fish_bunch')},
+    **{name: ('box', 'sack') for name in ('bag', 'sack_striped')},
+    **{name: ('round', 'wicker') for name in (
+        'act3_basket01_open', 'act3_basket02_open', 'act3_basket03_open', 'lobster_pot', 'fishing_trap')},
+    'figurine': ('box', 'stone'),
 }
 NUMBER = re.compile(r'_?\d+$')
 
@@ -97,6 +128,25 @@ def entities(preset):
             continue
         if all(abs(v) < 1e6 for v in position):
             yield identifier, kind, position
+
+
+def lookup(assets, wanted):
+    """Preset entities by id (pcvr-dev's "not catalogued in reach" log): file, model and components."""
+    found = []
+    for name in sorted(n for n in assets.files if n.startswith(PRESETS) and n.endswith('.json')):
+        try:
+            preset = json.loads(assets.read(name))
+        except ValueError:
+            continue
+        for entity in preset.get('entities', []) if isinstance(preset, dict) else []:
+            if not isinstance(entity, dict) or entity.get('id') not in wanted:
+                continue
+            components = [c for c in entity.get('components', []) if isinstance(c, dict)]
+            model = next((c.get('filename') for c in components if c.get('type') == 'ModelDefinitionComponent'), None)
+            transform = next((c for c in components if c.get('type') == 'TransformDefinitionComponent'), {})
+            found.append({'id': entity['id'], 'preset': name[len(PRESETS):], 'model': model, 'kind': kind_of(model) if model else None,
+                          'position': transform.get('position'), 'components': sorted({c.get('type') for c in components})})
+    return found
 
 
 def encode(rows):
@@ -161,6 +211,12 @@ if __name__ == '__main__':
     parser.add_argument('--output', type=Path)
     parser.add_argument('--force', action='store_true')
     parser.add_argument('--casclib', type=Path, help='Packaged Unicode x64 CascLib 3.0 (Battle.net only)')
+    parser.add_argument('--lookup', type=int, nargs='+', metavar='ID', help='Show these preset entities instead (no catalog written)')
     args = parser.parse_args()
+    if args.lookup:
+        with open_assets(args.game, args.casclib) as assets:
+            for row in lookup(assets, set(args.lookup)):
+                print(json.dumps(row))
+        raise SystemExit(0)
     result = prepare(args.game, args.output, args.force, args.casclib)
     print(f"Knockable prop catalog: {result['props']} props of {result['kinds']} kinds from {result['presets']} level presets")

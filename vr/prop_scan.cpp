@@ -21,9 +21,11 @@
 #include <fstream>
 #include <iterator>
 #include <mutex>
+#include <string>
 #include <unordered_map>
 #include <vector>
 #include "prop_scan.h"
+#include "dev_scenarios.h"
 #include "../steamvr/latest_worker.h"
 #include "../steamvr/transport.h"
 #include "sigscan.h"
@@ -79,7 +81,7 @@ struct Storage {
 };
 // An entity near the player, from its transform.
 struct Near {
-    uint32_t entity=0,index=0,parent=0,boundsIndex=0;
+    uint32_t entity=0,index=0,parent=0,boundsIndex=0,preset=0;   // preset: its level preset id, catalogued or not
     float local[3]{},world[16]{};
     int kind=-1;
     bool reach=false,bounded=false;
@@ -93,7 +95,12 @@ struct Tracked {
     bool hasBounds=false,settle=false;
     uint64_t writtenAt=0;
 };
-struct Job {Request request;int idPool=-1,boundsPool=-1;bool discover=false;};
+struct Job {Request request;int idPool=-1,boundsPool=-1;bool discover=false,unknown=false;};
+// A level entity in reach the catalog does not know (pcvr-dev's log, to map more
+// props): its preset id and local position (prepare_props.py --lookup), its size.
+struct Unknown {uint32_t preset=0;float local[3]{},size[3]{},distance=0;};
+constexpr unsigned MaxUnknown=12;
+constexpr float UnknownLargest=2.5f;   // metres: walls, floors and buildings are larger
 struct Found {
     bool ok=false;
     const char* why="";
@@ -103,6 +110,7 @@ struct Found {
     int idPool=-1,boundsPool=-1;
     unsigned nearby=0,matched=0;
     unsigned unbounded=0,unrigid=0,sized=0,beyond=0; // catalogued props in reach left out, and why
+    std::vector<Unknown> unknown;   // nearest first, pcvr-dev only
     double ms=0;
 };
 props::Catalog catalog;
@@ -172,6 +180,7 @@ Found Work(const Job& job) {
             if(it==nearIndex.end())continue;
             auto& e=nearby[it->second];
             if((e.parent&NoParent)==NoParent)continue;   // not part of a level preset
+            if(apply)e.preset=values[i];
             const int kind=catalog.Find(values[i],e.local);
             if(kind<0)continue;
             ++matched;if(apply)e.kind=kind;
@@ -231,6 +240,20 @@ Found Work(const Job& job) {
         if(e.bounded&&e.kind<0&&(e.parent&NoParent)!=NoParent&&props::Finite(e.worldBounds.lo)&&props::Finite(e.worldBounds.hi)&&
            e.worldBounds.lo.x<=e.worldBounds.hi.x&&e.worldBounds.lo.y<=e.worldBounds.hi.y&&e.worldBounds.lo.z<=e.worldBounds.hi.z)
             around.push_back(e.worldBounds);
+    if(job.unknown) {
+        for(const auto& e:nearby) {
+            props::Placement at;
+            if(e.kind>=0||!e.reach||!e.preset||!e.bounded||!props::Decompose(e.world,at))continue;
+            const Vec size=e.localBounds.hi-e.localBounds.lo;
+            Unknown n;n.preset=e.preset;std::memcpy(n.local,e.local,12);
+            n.size[0]=size.x*at.scale.x/u;n.size[1]=size.y*at.scale.y/u;n.size[2]=size.z*at.scale.z/u;
+            if(std::max({n.size[0],n.size[1],n.size[2]})>UnknownLargest)continue;
+            n.distance=std::hypot(e.world[12]-r.centre[0],e.world[14]-r.centre[2])/u;
+            f.unknown.push_back(n);
+        }
+        std::sort(f.unknown.begin(),f.unknown.end(),[](const Unknown& a,const Unknown& b){return a.distance<b.distance;});
+        if(f.unknown.size()>MaxUnknown)f.unknown.resize(MaxUnknown);
+    }
     std::vector<const Near*> found;
     for(const auto& e:nearby) {
         if(e.kind<0||!e.reach)continue;
@@ -290,6 +313,7 @@ std::atomic<unsigned> scans{0},failed{0},seenProps{0},matchedProps{0},writes{0},
 std::atomic<unsigned> struckKnocks{0},chainedKnocks{0},mostSeen{0};
 std::atomic<unsigned> leftOut[4]{}; // the last scan's catalogued props in reach left out: unbounded, unrigid, size, beyond the nearest
 uint64_t reportedAt=0; // Report's caller only
+std::vector<Unknown> unknownNow;std::vector<uint32_t> unknownLogged;   // the XR thread (Latest, Report)
 std::atomic<uint32_t> scanMicros{0};
 
 void Lose(size_t i) {
@@ -377,7 +401,7 @@ void Want(const Request& r,uint64_t now) {
     // Looking for the id and bounds storages reads every candidate: not every scan.
     const bool discover=(idPool<0||boundsPool<0)&&(!discoveredAt||now-discoveredAt>=Rediscover);
     if(discover)discoveredAt=now;
-    job=worker.Submit({r,idPool,boundsPool,discover});
+    job=worker.Submit({r,idPool,boundsPool,discover,devscenarios::Isolated()});
     submittedAt=now;
 }
 bool Latest(props::Scan& out) {
@@ -389,6 +413,7 @@ bool Latest(props::Scan& out) {
     if(f.ok) {
         ++scans;scanMicros=uint32_t(f.ms*1000);seenProps=f.scan.count;matchedProps=f.matched;if(f.scan.count>mostSeen)mostSeen=f.scan.count;
         leftOut[0]=f.unbounded;leftOut[1]=f.unrigid;leftOut[2]=f.sized;leftOut[3]=f.beyond;
+        unknownNow=std::move(f.unknown);
     }
     else ++failed;
     lastWhy=f.why;
@@ -443,5 +468,18 @@ void Report() {
         s,x,scanMicros.load()/1000.,*lastWhy?", ":"",lastWhy,seenProps.load(),most,matchedProps.load(),leftOut[0].load(),leftOut[1].load(),leftOut[2].load(),
         props::MaxSeen,leftOut[3].load(),idPool,boundsPool,k,c,p,w,t,l,b);
     logging::Write(line);
+    // pcvr-dev: what is in reach but stays put, when that changes - each id's model
+    // from `prepare_props.py --game <game> --lookup <id>...`, to add it to KINDS.
+    std::vector<uint32_t> ids;for(const auto& n:unknownNow)ids.push_back(n.preset);
+    std::sort(ids.begin(),ids.end());
+    if(ids.empty()||ids==unknownLogged)return;
+    unknownLogged=ids;
+    std::string text="Frame props: not catalogued in reach (preset id, local position, size in m, distance):";
+    for(const auto& n:unknownNow) {
+        char one[160];
+        std::snprintf(one,sizeof one," %u (%.2f %.2f %.2f) %.2fx%.2fx%.2f %.1f m;",n.preset,n.local[0],n.local[1],n.local[2],n.size[0],n.size[1],n.size[2],n.distance);
+        text+=one;
+    }
+    logging::Write(text.c_str());
 }
 }
