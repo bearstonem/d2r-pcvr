@@ -119,7 +119,7 @@ Instead of fabricating a foreign item, D2R-PCVR qualifies **native one-handed wo
 
 ## 5. Development Scenario & Testing
 
-* The developer scenario system ([steamvr/dev_scenarios.h](file:///c:/Users/Player%201/Desktop/d2r-pcvr/steamvr/dev_scenarios.h)) provides the **"Torch kit"** option (Choice 41) on the **EQUIPMENT** page.
+* The developer scenario system ([steamvr/dev_scenarios.h](../steamvr/dev_scenarios.h)) provides the **"Torch kit"** option (Choice 41) on the **EQUIPMENT** page.
 * In isolated testing (`pcvr-dev`), this supplies a level-1 club (`clb`) ready for immediate socketing or melee testing in Blood Moor and the Catacombs.
 * Verified with passing CTest test cases (`torch-light-test`, `dev-scenarios-test`, `elemental-hands-test`, `elemental-hands-render-test`).
 

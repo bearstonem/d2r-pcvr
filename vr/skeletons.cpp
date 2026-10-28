@@ -42,6 +42,9 @@
 #include "../steamvr/guarded_text.h"
 #include "../steamvr/shapeshift_form.h"
 #include "sigscan.h"
+#include "d2r_vr_gore.h"
+#include "d2r_vr_decapitation.h"
+#include "combat.h"
 #ifdef D2RVR_NATIVE_OPENXR
 #include "memory.h"
 #include "logging.h"
@@ -578,7 +581,7 @@ bool EntityOf(uintptr_t self, uint32_t* e) {
     return false;
 }
 #ifdef D2RVR_NATIVE_OPENXR
-bool CandidatePosition(uintptr_t self,float position[3]) {
+bool CandidatePosition(uintptr_t self,float position[3],uint32_t* outEntity=nullptr) {
     AcquireSRWLockExclusive(&g_lock);
     struct Unlock {~Unlock(){ReleaseSRWLockExclusive(&g_lock);}} unlock;
     if(!IsStorage(g_xs,g_vtX)||!IsStorage(g_ss,g_vtS)) {
@@ -593,6 +596,7 @@ bool CandidatePosition(uintptr_t self,float position[3]) {
         if(g_candidateEntities.size()>4096)g_candidateEntities.clear();
         g_candidateEntities[self]=entity;
     }
+    if(outEntity)*outEntity=entity;
     uint32_t index=0;uintptr_t components=0;
     if(!Dense(g_xs,entity,&index)||!Get(g_xs+0x38,&components)||!components)return false;
     const auto at=components+uintptr_t(index)*kTransformSize;
@@ -600,6 +604,15 @@ bool CandidatePosition(uintptr_t self,float position[3]) {
     // Child transforms have their composed placement in +0x40.
     const uintptr_t matrix=at+((parentEntity&0xFFFFF)==0xFFFFF?0:0x40);
     return SafeCopy(position,reinterpret_cast<const void*>(matrix+12*sizeof(float)),3*sizeof(float));
+}
+
+bool EntityStillOwnsSkeleton(uint32_t entity, uintptr_t self) {
+    if (!entity || !self) return false;
+    AcquireSRWLockExclusive(&g_lock);
+    struct Unlock {~Unlock(){ReleaseSRWLockExclusive(&g_lock);}} unlock;
+    if (!IsStorage(g_ss, g_vtS)) return false;
+    uintptr_t held = 0;
+    return SkeletonOf(entity, &held) && held == self;
 }
 #endif
 }  // namespace ecs
@@ -3439,6 +3452,102 @@ void Set(const Input& in) {
     ReleaseSRWLockExclusive(&g_inLock);
 }
 
+void DecapitateMonster(uintptr_t self) {
+    if (!self || self == g_heroSelf.load()) return;
+    const uint64_t now = GetTickCount64();
+
+    // Fast path: already recognized and tracked as decapitated.
+    // Require the stored ECS entity (with its version bits) to still own `self`;
+    // if the corpse was freed and a new monster reused this skeleton address, drop the entry.
+    uint32_t trackedEntity = 0;
+    if (framevr::decap::Manager().IsDecapitated(self, now, &trackedEntity)) {
+#ifdef D2RVR_NATIVE_OPENXR
+        const uint32_t currentEntity = (trackedEntity && ecs::EntityStillOwnsSkeleton(trackedEntity, self)) ? trackedEntity : 0;
+#else
+        const uint32_t currentEntity = 0;
+#endif
+        if (framevr::decap::Manager().IsDecapitated(self, currentEntity, now)) {
+            uintptr_t world = 0;
+            int32_t wpCount = 0;
+            uintptr_t mats = 0;
+            if (Get(self + 0x20, &world) && Get(world, &wpCount) && Get(world + 4, &mats) && mats && wpCount > 0) {
+                float pivot[3] = {};
+                framevr::decap::Manager().ApplyCollapse(self, reinterpret_cast<Mat*>(mats), wpCount, now, pivot);
+            }
+            return;
+        }
+    }
+
+    // Fast path: if no gore events in queue, skip matching
+    if (framevr::gore::Queue().Count() == 0) return;
+
+    // Filter out player models, items, bosses, and non-humanoids
+    uintptr_t modelInst = 0, skel = 0, nameObj = 0, nameP = 0;
+    if (!Get(self + 0x08, &modelInst) || !Get(modelInst + 0x08, &skel)) return;
+    Get(self, &nameObj); Get(nameObj + 8, &nameP);
+    const std::string model = Str(nameP);
+    if (!framevr::decap::IsDecapitableModel(model)) {
+        return;
+    }
+
+    // Get 3D world position and versioned ECS entity of skeleton
+    float pos[3] = {};
+    uint32_t entity = 0;
+#ifdef D2RVR_NATIVE_OPENXR
+    if (!ecs::CandidatePosition(self, pos, &entity) || !entity) return;
+#else
+    return;
+#endif
+
+    // Check if a recent decapitation strike occurred within reach and consume it
+    // Consuming ensures only ONE skeleton is decapitated per lethal strike, preventing living monsters from losing heads.
+    framevr::gore::GoreEvent ev{};
+    if (framevr::gore::Queue().ConsumeRecentDecapitation(now, 500, pos[0], pos[2], 0.8f, ev)) {
+        int32_t count = 0;
+        uintptr_t bones = 0;
+        if (!Get(skel + 8, &count) || !Get(skel + 0xC, &bones) || count <= 0 || count > 1024) return;
+
+        std::vector<std::string> names(count);
+        std::vector<int32_t> parents(count, -1);
+        for (int i = 0; i < count; ++i) {
+            uintptr_t nm = 0; int32_t p = -1;
+            Get(bones + i * 0xA4, &nm);
+            Get(bones + i * 0xA4 + 8, &p);
+            names[i] = Str(nm);
+            parents[i] = p;
+        }
+
+        const int headBone = framevr::decap::FindHeadBone(names, parents);
+        if (headBone >= 0) {
+            const int neckBone = framevr::decap::FindNeckBone(names, parents, headBone);
+            const auto inHead = framevr::decap::BuildHeadMask(count, names, parents, headBone, neckBone);
+
+            const float* impulse = ev.impactNormal;
+            const float floorY = 0.0f;
+
+            uint8_t propTaxonomy = 2;
+            if (model.find("skeleton") != std::string::npos || model.find("sk_") != std::string::npos || model.find("skmage") != std::string::npos) {
+                propTaxonomy = 0;
+            } else if (model.find("zombie") != std::string::npos || model.find("corpse") != std::string::npos || model.find("reanimated") != std::string::npos || model.find("mummy") != std::string::npos) {
+                propTaxonomy = 1;
+            } else if (model.find("brute") != std::string::npos || model.find("goat") != std::string::npos || model.find("yeti") != std::string::npos || model.find("bighead") != std::string::npos || model.find("blunderbore") != std::string::npos || model.find("gargoyle") != std::string::npos) {
+                propTaxonomy = 3;
+            } else {
+                propTaxonomy = 2;
+            }
+            framevr::decap::Manager().RegisterDecapitation(self, entity, ev.monsterId, headBone, neckBone, inHead, now, floorY, impulse, propTaxonomy, pos);
+
+            uintptr_t world = 0;
+            int32_t wpCount = 0;
+            uintptr_t mats = 0;
+            if (Get(self + 0x20, &world) && Get(world, &wpCount) && Get(world + 4, &mats) && mats && wpCount > 0) {
+                float pivot[3] = {};
+                framevr::decap::Manager().ApplyCollapse(self, reinterpret_cast<Mat*>(mats), wpCount, now, pivot);
+            }
+        }
+    }
+}
+
 using ComputeFn = void (*)(uintptr_t self, float a, float b, bool c);
 ComputeFn g_orig = nullptr;
 
@@ -3461,6 +3570,7 @@ void __cdecl Hook(uintptr_t self, float a, float b, bool c) {
     RefreshCrossbow(self);
     RefreshShield(self);
     PoseMotionBow(self);
+    DecapitateMonster(self);
 #endif
     if (GetTickCount64() < g_dumpUntil.load()) {
         AcquireSRWLockExclusive(&g_lock);

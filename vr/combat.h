@@ -39,6 +39,7 @@ float GameVolume();
 // Game thread (melee.cpp): a physical swing's native attack on this monster id
 // is running (NoSwing UINT32_MAX = none). Returns the previous value.
 uint32_t PhysicalSwing(uint32_t target);
+uint32_t PhysicalSwing(uint32_t target, int hand);
 // Game thread (melee.cpp), around one physical swing's native attack: that
 // stroke's recovery damage factor (0..1, Unleashed). Returns the previous value.
 float SwingRecovery(float factor);
@@ -107,4 +108,6 @@ bool LocalPlayerId(uint32_t& id);
 bool UnitStat(uintptr_t unit,int stat,int& value);
 // Returns the maximum fire damage on the equipped item at body location (4=right hand, 5=left hand, 9/10=swap).
 int EquippedFireDamage(int location);
+void ConfigureGore(int decapitationRate);
+int GoreDecapitationRate();
 }

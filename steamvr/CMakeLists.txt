@@ -21,6 +21,7 @@ else()
   target_link_libraries(framevr-runtime INTERFACE Threads::Threads)
 endif()
 get_filename_component(ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+target_include_directories(framevr-runtime INTERFACE ${ROOT}/shared)
 # Box3D v0.1.0 (MIT), pinned by setup_windows_tools.ps1: dropped empty bottles.
 # Added before this project's definitions so its C sources build as upstream.
 set(BOX3D_SDK "$ENV{BOX3D_SDK}" CACHE PATH "Box3D checkout")
@@ -70,7 +71,7 @@ target_sources(d2rl-pcvr PRIVATE interaction_assets.rc interaction_icons.cpp ui_
 target_sources(d2rl-pcvr PRIVATE potion_models.cpp)
 target_sources(d2rl-pcvr PRIVATE dropped_bottles.cpp ${ROOT}/vr/wall_cells.cpp ${ROOT}/vr/prop_scan.cpp)
 target_link_libraries(d2rl-pcvr PRIVATE box3d)
-target_sources(d2rl-pcvr PRIVATE elemental_hands_renderer.cpp)
+target_sources(d2rl-pcvr PRIVATE elemental_hands_renderer.cpp severed_head_renderer.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/settings_menu.cpp ${CMAKE_CURRENT_SOURCE_DIR}/vr_settings_ui.cpp ${ROOT}/vr/native_ui.cpp ${CMAKE_CURRENT_SOURCE_DIR}/interaction_ui.cpp ${ROOT}/vr/interactionstate.cpp ${ROOT}/vr/bow.cpp ${ROOT}/vr/projectiles.cpp ${ROOT}/vr/combat.cpp ${ROOT}/vr/melee.cpp ${CMAKE_CURRENT_SOURCE_DIR}/transport.cpp ${CMAKE_CURRENT_SOURCE_DIR}/foveation.cpp ${CMAKE_CURRENT_SOURCE_DIR}/effects_layer.cpp ${CMAKE_CURRENT_SOURCE_DIR}/logging.cpp ${CMAKE_CURRENT_SOURCE_DIR}/profile.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/native_belt.cpp ${ROOT}/vr/quick_items.cpp ${ROOT}/vr/melee_weapon.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/breakables.cpp ${ROOT}/vr/offline_difficulty.cpp ${ROOT}/vr/enemy_sight.cpp)
@@ -94,6 +95,10 @@ target_include_directories(companion-ai-test PRIVATE ${ROOT}/cleanroom/sigscan $
 target_link_libraries(companion-ai-test PRIVATE framevr-runtime)
 add_executable(torch-light-test torch_light_test.cpp)
 target_link_libraries(torch-light-test PRIVATE framevr-runtime)
+add_executable(gore-events-test gore_events_test.cpp)
+target_link_libraries(gore-events-test PRIVATE framevr-runtime)
+add_executable(granny-decapitation-test granny_decapitation_test.cpp)
+target_link_libraries(granny-decapitation-test PRIVATE framevr-runtime)
 add_executable(frame-generation-test frame_generation_test.cpp)
 target_include_directories(d2rl-pcvr PRIVATE ${ROOT}/shared ${ROOT}/external/flatvr ${ROOT}/external/bodywalk ${ROOT}/external/reshade/include ${CMAKE_CURRENT_SOURCE_DIR} ${OPENXR_SDK}/include)
 target_link_libraries(d2rl-pcvr PRIVATE d2rcam minhook user32 gdi32 framevr-runtime)
@@ -334,7 +339,7 @@ foreach(test_target IN ITEMS memory-test hook-metrics-test active-keys-test reso
     portal-billboard-test shrine-trace-test shrine-placement-test overlay-view-test bone-armor-height-test composition-layers-test projectile-rules-test environment-cutaway-test roof-materials-test stereo-prop-physics-test dropped-bottles-test props-test
     combat-rules-test strike-skills-test skill-usage-test shield-guard-test shapeshift-gesture-test guard-strain-test heartbeat-test run-speed-test logging-test melee-contact-test melee-weapon-test breakables-test offline-difficulty-test enemy-sight-test attack-speed-test world-coordinates-test bow-flight-test bow-laser-test spell-cast-test spell-aim-assist-test
     interaction-test dev-scenarios-test native-belt-test wrist-hud-test map-zoom-test navigation-info-test companions-test active-effects-test dropped-item-labels-test stick-gestures-test show-items-command-test native-hud-test render-resolution-test render-pointer-test scene-depth-test game-device-only-test controller-bindings-test journal-test native-panels-test
-    vr-settings-test vr-settings-store-test controller-labels-test math-test deferred-draw-test monster-bars-test telegraph-test aim-reach-test aim-rules-test target-cone-test gaze-test window-focus-test callback-ticket-test local-player-test shield-block-test trigger-melee-test companion-ai-test torch-light-test frame-generation-test turn-capture-test panel-atlas-test)
+    vr-settings-test vr-settings-store-test controller-labels-test math-test deferred-draw-test monster-bars-test telegraph-test aim-reach-test aim-rules-test target-cone-test gaze-test window-focus-test callback-ticket-test local-player-test shield-block-test trigger-melee-test companion-ai-test torch-light-test frame-generation-test gore-events-test granny-decapitation-test turn-capture-test panel-atlas-test)
   # These fixtures use assert for their checks, including in Release builds.
   if(MSVC)
     target_compile_options(${test_target} PRIVATE /UNDEBUG)

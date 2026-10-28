@@ -44,6 +44,10 @@ static void ValueLabel(Key key,float value,const Context& c,char* label,size_t s
         if(runspeed::Walks(p))std::snprintf(label,size,"Walk");else if(p==0)std::snprintf(label,size,"Base run");
         else if(p==100)std::snprintf(label,size,"Full run");else std::snprintf(label,size,"Run %d%%",p);}
     else if(key==CompanionAi)std::snprintf(label,size,"%s",value>.5f?"Enabled":"Legacy");
+    else if(key==Decapitations){
+        static constexpr const char* rates[]={"Off","Crits only","Dynamic (35%)","High (65%)","Always (100%)"};
+        std::snprintf(label,size,"%s",rates[std::clamp(int(value),0,4)]);
+    }
     else if(key==RunWalkToggle)std::snprintf(label,size,"Stick toggle %s",value>.5f?"On":"Off");
     else if(Definitions[key].max==1)std::snprintf(label,size,"%s",value>.5f?"On":"Off");
     else if(key==Snap)std::snprintf(label,size,"%.0f deg",value);
@@ -239,10 +243,9 @@ std::vector<uint8_t> Paint(const Model& m,Hit hover,const char* runtimeStatus,co
             }
         }
         if(m.page==Page::Combat){
-            // The ninth row ends at 800; without the offline adapter its notice replaces the difficulty note.
-            if(m.offlineDifficultyAvailable)
+            if(m.offlineDifficultyAvailable) {
                 text("Difficulty affects new monsters only; existing monsters keep their stats. To apply it throughout the game, Save and Exit, then start a new game with the same character.",{58,804,1160,56},false,false,quiet);
-            else text("Offline scaling adapter unavailable. Game difficulty remains unchanged.",{58,804,1160,30},false,false,quiet);
+            } else text("Offline scaling adapter unavailable. Game difficulty remains unchanged.",{58,804,1160,56},false,false,quiet);
         }
         if(m.page==Page::Haptics){
             text("0% is Off; 100% is normal. Overall strength scales each category, up to the controller's maximum. Adjust in steps of 10%.",{58,750,1160,56},false,false,quiet);

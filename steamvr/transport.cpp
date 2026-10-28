@@ -27,6 +27,7 @@
 #include <vector>
 #include "afr_eye_shared.h"
 #include "d2r_vr_shared.h"
+#include "../shared/d2r_vr_gore.h"
 #include "pad_mirror_shared.h"
 #include "transport.h"
 #include "../vr/bow.h"
@@ -67,6 +68,7 @@
 #include "../vr/wall_cells.h"
 #include "../vr/prop_scan.h"
 #include "elemental_hands_renderer.h"
+#include "severed_head_renderer.h"
 #include "vr_settings_ui.h"
 #include "frame_generation.h"
 #include "../vr/settings_menu.h"
@@ -717,6 +719,7 @@ std::mutex bottleWeaponMutex;
 std::array<BottleWeaponPose,bottles::Colliders> bottleWeapons{};
 ULONGLONG bottleStruckAt[2]{};
 elements::Renderer elementalRenderer;
+framevr::decap::SeveredHeadRenderer severedHeadRenderer;
 elements::State elementalState;
 elements::Scene elementalScene;
 panels::MouseGate panelMouse;
@@ -1636,6 +1639,7 @@ bool Initialize(reshade::api::command_queue* rq,reshade::api::swapchain* swap) {
     potionModels.Initialize(device.Get(),queue.Get(),eyeFormat,width,height,&Say);
     turnFormat=eyeFormat;
     elementalRenderer.Initialize(device.Get(),queue.Get(),eyeFormat,width,height,&Say);
+    severedHeadRenderer.Initialize(device.Get(),queue.Get(),eyeFormat,width,height,&Say);
     if(!tracking.Open(D2RVR_SHARED_NAME)||!pad.Open(BW_PAD_MIRROR_NAME)||!actions.Open(D2RVR_ACTIONS_NAME)) return false;
     tracking.data->version=D2RVR_SHARED_VERSION;pad.data->version=BW_PAD_MIRROR_VERSION;actions.data->version=D2RVR_ACTIONS_VERSION;
     gameSwapchain=swap;
@@ -3282,12 +3286,16 @@ void Input() {
     // One sharp tap per confirmed impact. Consume the event once; do not
     // sustain or refresh it while the weapon remains inside the creature.
     auto impactPulse=[&](int hand,bool shield=false){
-        const auto impact=settings::HapticSample(gestureSettings,haptics::Category::Melee,shield?1:0);
+        auto impact=settings::HapticSample(gestureSettings,haptics::Category::Melee,shield?1:0);
+        framevr::gore::GoreEvent goreEv{};
+        if(!shield&&framevr::gore::LatestForHand(hand,GetTickCount64(),150,goreEv)&&goreEv.type!=framevr::gore::GoreType::None) {
+            impact=haptics::GoreSampleFor(goreEv.type,impact);
+        }
         const bool sent=MotionPulse(hand,haptics::Category::Melee,impact.amplitude,XrDuration(impact.milliseconds)*1000000,impact.frequency);
         static ULONGLONG reportAt[2]{};const auto now=GetTickCount64();
         if(now>=reportAt[hand]) {
-            char line[160];std::snprintf(line,sizeof line,"Frame melee haptics: source=%s output=%s duration_ms=%d frequency=%.0f sent=%d",
-                shield?"shield":"weapon",hand==0?"right":"left",impact.milliseconds,impact.frequency,sent);Say(line);reportAt[hand]=now+1000;
+            char line[160];std::snprintf(line,sizeof line,"Frame melee haptics: source=%s output=%s duration_ms=%d frequency=%.0f sent=%d gore=%d",
+                shield?"shield":"weapon",hand==0?"right":"left",impact.milliseconds,impact.frequency,sent,int(goreEv.type));Say(line);reportAt[hand]=now+1000;
         }
     };
     for(int hand=0;hand<2;++hand)if(const auto at=meleeImpactAt[hand].exchange(0);at&&motionInput.active&&GetTickCount64()-at<150)
@@ -3739,6 +3747,17 @@ bool TurnEye(int i) {
        elements::Current(elementalScene,gamestate::LocalPlayer(),GetTickCount64()))
         elementalRenderer.Render(e.commands.Get(),image,unsigned(i),{V(now.pose.position),Q(now.pose.orientation)},
             {now.fov.angleLeft,now.fov.angleRight,now.fov.angleDown,now.fov.angleUp},elementalScene);
+    if(turned&&interactionInput.active&&severedHeadRenderer.Ready()) {
+        std::vector<framevr::decap::SeveredHeadProp> activeHeads;
+        framevr::decap::Manager().GetActiveSeveredHeads(activeHeads, GetTickCount64());
+        if(!activeHeads.empty()) {
+            const float upm = (stageWorld.valid && stageWorld.upm > 0.5f) ? stageWorld.upm : 4.0f;
+            severedHeadRenderer.Render(e.commands.Get(), image, unsigned(i),
+                V(now.pose.position), Q(now.pose.orientation),
+                {now.fov.angleLeft, now.fov.angleRight, now.fov.angleDown, now.fov.angleUp},
+                activeHeads, interactionInput.stage, upm);
+        }
+    }
     if(!Hr(e.commands->Close(),"close turn list")||!turned){failed=true;return false;}
     ID3D12CommandList* lists[]={e.commands.Get()};queue->ExecuteCommandLists(1,lists);
     if(!Hr(queue->Signal(fence.Get(),++fenceValue),"signal turn fence")){failed=true;return false;}
@@ -3972,6 +3991,18 @@ bool Copy(ID3D12Resource* src,Eye& e,reshade::api::command_queue* rq) {
         const auto& v=views[eye];
         elementalRenderer.Render(e.commands.Get(),dest,eye,{V(v.pose.position),Q(v.pose.orientation)},
             {v.fov.angleLeft,v.fov.angleRight,v.fov.angleDown,v.fov.angleUp},elementalScene);
+    }
+    if(!panelMode&&interactionInput.active&&severedHeadRenderer.Ready()) {
+        const auto& v=views[eye];
+        std::vector<framevr::decap::SeveredHeadProp> activeHeads;
+        framevr::decap::Manager().GetActiveSeveredHeads(activeHeads, GetTickCount64());
+        if(!activeHeads.empty()) {
+            const float upm = (stageWorld.valid && stageWorld.upm > 0.5f) ? stageWorld.upm : 4.0f;
+            severedHeadRenderer.Render(e.commands.Get(), dest, eye,
+                V(v.pose.position), Q(v.pose.orientation),
+                {v.fov.angleLeft, v.fov.angleRight, v.fov.angleDown, v.fov.angleUp},
+                activeHeads, interactionInput.stage, upm);
+        }
     }
     if(gpu){
         e.commands->EndQuery(gpuProfile.heap.Get(),D3D12_QUERY_TYPE_TIMESTAMP,eye*5+4);
@@ -5278,7 +5309,7 @@ void Shutdown(bool preserveResolution) {
     // when ordinary frame submission uses queue ordering without a CPU wait.
     if(fence&&!WaitGpu())failed=true;
     if(uiEye.chain&&pDestroySwapchain)pDestroySwapchain(uiEye.chain);uiEye={};journalMode=spatialMode=workspacePlaced=false;hud::UiFrame(false,false,0);uiSupported=false;uiBlit={};potionModels.Reset();potionScene={};
-    elementalRenderer.Reset();elementalState.Reset();elementalScene={};
+    elementalRenderer.Reset();elementalState.Reset();elementalScene={};severedHeadRenderer.Reset();
     if(mapEye.chain&&pDestroySwapchain)pDestroySwapchain(mapEye.chain);mapEye={};mapSupported=false;mapBlit={};gamestate::MenuMap(false);hud::MenuMapCapture(false);
     settingsModel.Close();settingsOpen=false;settingsInputGate.Suspend();settingsPainted={};settingsAtlasPending=settingsImageReady=false;
     settingsPaintRequest=0;settingsRequested={};

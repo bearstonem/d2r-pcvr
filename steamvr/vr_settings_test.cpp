@@ -383,7 +383,7 @@ int main(){
         thrust.Click(hit);Check(thrust.Get()[MeleeThrustSpeed]==2.25f,"thrust speed adjusts in quarter steps");
         const auto request=thrust.Click({Kind::Apply});
         Check(request.changed==(ChangeMask{1}<<MeleeThrustSpeed),"thrust edit does not change swing speed or combat rules");
-        Check(RowCount(Page::Combat)==8&&RowKey(Page::Combat,2)==ShieldBashSpeed,"eight Combat rows retain independent bash speed; parry window is fixed");
+        Check(RowCount(Page::Combat)==9&&RowKey(Page::Combat,2)==ShieldBashSpeed,"nine Combat rows retain independent bash speed; parry window is fixed");
         Check(Normalize(MeleeThrustSpeed,NAN)==2&&Normalize(MeleeThrustSpeed,0)==.75f&&Normalize(MeleeThrustSpeed,99)==10,"thrust speed has finite usable bounds");
     }
     {Model strain;strain.Open(s);strain.Click({Kind::Tab,int(Page::Combat)});
@@ -638,6 +638,30 @@ int main(){
         Check(companion.Get()[CompanionAi]==1,"increase selects Enabled (1)");
         companion.Click(At(companion,Page::Combat,Decrease(7)));
         Check(companion.Click({Kind::Apply}).changed==(ChangeMask{1}<<CompanionAi),"companion AI saves only its own setting");
+    }
+    {Model gore;gore.Open(s);gore.Click({Kind::Tab,int(Page::Combat)});
+        Check(s.values[Decapitations]==1&&RowKey(Page::Combat,8)==Decapitations,"decapitations is the ninth Combat row, Crits only (1) by default");
+        Check(std::wstring(Definitions[Decapitations].section)==L"gore"&&std::wstring(Definitions[Decapitations].key)==L"decapitation",
+              "decapitation INI key is [gore] decapitation");
+        Check(!Paired(Decapitations),"decapitations is a single full row");
+        Check(RowCount(Page::Combat,gore.Get())==9,"Combat page has 9 rows");
+
+        // Stepping with Decrease/Increase
+        gore.Click(At(gore,Page::Combat,Decrease(8)));
+        Check(gore.Get()[Decapitations]==0,"minus steps to Off (0)");
+        gore.Click(At(gore,Page::Combat,Decrease(8)));
+        Check(gore.Get()[Decapitations]==0,"decapitations does not underflow below 0");
+        gore.Click(At(gore,Page::Combat,Increase(8)));
+        Check(gore.Get()[Decapitations]==1,"plus steps to Crits only (1)");
+        gore.Click(At(gore,Page::Combat,Increase(8)));
+        Check(gore.Get()[Decapitations]==2,"plus steps to Dynamic (35%) (2)");
+        gore.Click(At(gore,Page::Combat,Increase(8)));
+        Check(gore.Get()[Decapitations]==3,"plus steps to High (65%) (3)");
+        gore.Click(At(gore,Page::Combat,Increase(8)));
+        Check(gore.Get()[Decapitations]==4,"plus steps to Always (100%) (4)");
+        gore.Click(At(gore,Page::Combat,Increase(8)));
+        Check(gore.Get()[Decapitations]==4,"plus does not overflow above 4");
+        Check(gore.Click({Kind::Apply}).changed==(ChangeMask{1}<<Decapitations),"saves only decapitations setting");
     }
     {Model difficulty;difficulty.Open(s);difficulty.Click({Kind::Tab,int(Page::Combat)});
         Check(s.values[OfflinePlayers]==0&&RowKey(Page::Combat,4)==OfflinePlayers,"difficulty preserves native settings by default");

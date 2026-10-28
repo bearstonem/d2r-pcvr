@@ -721,7 +721,7 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                         // proc events, criticals, resistances, leech, XP and item
                         // durability. TLS redirects only THIS invocation's target.
                         const bool rolls=combat::NativeRolls(attackRating.load());
-                        const uint32_t swing=combat::PhysicalSwing(header[2]);   // its damage may be scaled (riposte, attack rating, recovery)
+                        const uint32_t swing=combat::PhysicalSwing(header[2],hand);   // its damage may be scaled (riposte, attack rating, recovery)
                         // Unleashed: each further creature this stroke lands on takes less.
                         float cleave=1;bool cleaveTracked=false;
                         if(const float step=cleaveStep.load(std::memory_order_relaxed);step>0&&!attackSpeed.load()) {

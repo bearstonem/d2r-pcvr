@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include "../shared/d2r_vr_gore.h"
 
 namespace framevr::haptics {
 constexpr float DefaultStrength=100,MaxStrength=200,StrengthStep=10;
@@ -31,6 +32,15 @@ inline constexpr Sample SampleFor(Category category,bool shortMelee=false,int ha
     if(category==Category::Melee&&shortMelee)return {.95f,10,180};
     if(category==Category::Melee&&hand==1)return {.95f,45};
     return Samples[int(category)];
+}
+// Start from the player's own melee sample (respecting Short melee pulses and hand variant)
+// and double its duration at the same frequency so a lethal kill buzz always feels heavier.
+inline constexpr Sample GoreSampleFor(gore::GoreType type, Sample base = SampleFor(Category::Melee)) {
+    if(type==gore::GoreType::None)return base;
+    return {1.0f, base.milliseconds * 2, base.frequency};
+}
+inline constexpr Sample GoreSampleFor(gore::GoreType type, bool shortMelee, int hand = 0) {
+    return GoreSampleFor(type, SampleFor(Category::Melee, shortMelee, hand));
 }
 using Pattern=std::array<Sample,2>; // right, left
 inline Pattern BowPull(float draw) {
