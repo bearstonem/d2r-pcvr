@@ -79,6 +79,7 @@
 #include "leather_menu.h"
 #include "stats_button.h"
 #include "menu_drop.h"
+#include "respec_button.h"
 #include "native_panels.h"
 #include "npc_dialogue.h"
 #include "native_hud.h"
@@ -93,6 +94,7 @@
 #include "ui_world.h"
 #include "../vr/interactionstate.h"
 #include "../vr/journal_ui.h"
+#include "../vr/respec.h"
 #include "../vr/panel_input.h"
 #include "d2r_vr_state.h"
 #include "foveation.h"
@@ -812,6 +814,13 @@ std::atomic<bool> leftDominant{false};
 // in the hand with the world kept (Leather or Menu only), each unless its VR Settings location
 // is Off. The interaction engine stays off there; only its painter and the map run for it.
 bool leatherHudVitals=false,leatherHudMap=false;
+// Reset Skills & Stats on the Character page (respec_button.h): its faces painted
+// into the static image; shown and lit this frame (MenuPointer); two pulls on it
+// ask vr/respec.cpp for the game's own reset. No game input is sent.
+bool respecArtReady=false,respecShown=false,respecLit=false;
+statsbutton::Press respecPress;
+respecbutton::Button respecButton;
+respecbutton::Face respecFace=respecbutton::Face::Reset;
 leather::Holder leatherHolder;
 leather::Back leatherBack;   // Right B the game leaves unanswered closes the leather's menu
 leather::Art leatherArt=leather::PlaceholderArt();
@@ -1559,6 +1568,33 @@ std::vector<uint8_t> PaintPointer() {
 // Static text atlas: painted once, never repainted in the frame loop; empty if
 // GDI could not. Native skill icons, names and belt counts require a separate
 // read-only UI adapter.
+// Reset Skills & Stats' label as coverage (0-255 per texel, w x h): GDI's
+// antialiased Georgia bold (the sewer prompt's face), the largest that fits.
+std::vector<uint8_t> RespecLabel(const wchar_t* text,int w,int h) {
+    std::vector<uint8_t> coverage;
+    BITMAPINFO info{};info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);
+    info.bmiHeader.biWidth=w;info.bmiHeader.biHeight=-h;info.bmiHeader.biPlanes=1;info.bmiHeader.biBitCount=32;
+    void* bits=nullptr;HDC dc=CreateCompatibleDC(nullptr);
+    HBITMAP bitmap=dc?CreateDIBSection(dc,&info,DIB_RGB_COLORS,&bits,nullptr,0):nullptr;
+    if(!dc||!bitmap||!bits){if(bitmap)DeleteObject(bitmap);if(dc)DeleteDC(dc);return coverage;}
+    auto old=SelectObject(dc,bitmap);std::memset(bits,0,size_t(w)*h*4);
+    SetBkMode(dc,TRANSPARENT);SetTextColor(dc,RGB(255,255,255));
+    bool fits=false;
+    for(int px=h*30/64;px>=h/4&&!fits;px-=2) {
+        HFONT font=CreateFontW(px,0,0,0,FW_BOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,
+            ANTIALIASED_QUALITY,DEFAULT_PITCH,L"Georgia");
+        auto before=SelectObject(dc,font);RECT measured{0,0,0,0};
+        DrawTextW(dc,text,-1,&measured,DT_CALCRECT|DT_SINGLELINE|DT_NOPREFIX);
+        fits=measured.right<=w-h*7/16||px-2<h/4;   // clear of the rim (respec_button.h)
+        if(fits){RECT bounds{0,0,w,h};DrawTextW(dc,text,-1,&bounds,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX);}
+        SelectObject(dc,before);DeleteObject(font);
+    }
+    GdiFlush();
+    coverage.resize(size_t(w)*h);const auto* b=static_cast<const uint8_t*>(bits);
+    for(size_t i=0;i<coverage.size();++i)coverage[i]=std::max({b[4*i],b[4*i+1],b[4*i+2]});
+    SelectObject(dc,old);DeleteObject(bitmap);DeleteDC(dc);
+    return coverage;
+}
 std::vector<uint8_t> PaintGameplay() {
     BITMAPINFO info{};info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);
     info.bmiHeader.biWidth=1024;info.bmiHeader.biHeight=-1024;info.bmiHeader.biPlanes=1;info.bmiHeader.biBitCount=32;
@@ -1667,8 +1703,27 @@ bool SetupStatic(DXGI_FORMAT eyeFormat) {
     }();
     // The tabbed menu's Advanced Stats button, plain and lit (stats_button.h); premultiplied, as its quad blends.
     const bool statsPainted=put(statsbutton::Paint(StatsSize,false),Stats)&&put(statsbutton::Paint(StatsSize,true),StatsLit);
+    // Reset Skills & Stats: each face on the stone plaque, Reset and Confirm? lit as well.
+    static_assert(RespecWidth==respecbutton::TexelWidth&&RespecHeight==respecbutton::TexelHeight&&
+                  RespecPictures==respecbutton::Faces+2,"one atlas picture per face, two lit");
+    const bool respecPainted=[&]{
+        const auto face=[&](int label,bool lit,int at) {
+            auto px=respecbutton::PaintFace(RespecWidth,RespecHeight,lit);
+            const auto text=RespecLabel(respecbutton::Labels[label],RespecWidth,RespecHeight);
+            if(text.empty())return false;
+            respecbutton::Stamp(px,text,RespecWidth,RespecHeight,lit);
+            return put(px,Respec(at));
+        };
+        bool ok=true;
+        for(int f=0;f<respecbutton::Faces;++f)ok=face(f,false,f)&&ok;
+        ok=face(int(respecbutton::Face::Reset),true,RespecLitReset)&&ok;
+        ok=face(int(respecbutton::Face::Confirm),true,RespecLitConfirm)&&ok;
+        return ok;
+    }();
     if(!UploadAtlas(staticChain,eyeFormat,StaticWidth,StaticHeight,pixels))return false;
     statsIconReady=statsPainted;
+    respecArtReady=respecPainted;
+    if(!respecPainted)Say("Frame panels: Reset Skills & Stats could not be painted; the button stays hidden");
     if(!statsPainted)Say("Frame panels: the Advanced Stats button could not be painted; the menu button alone opens it");
     pointerChain=staticChain;
     compassAtlasReady=compassPainted;compassChain=compassPainted?staticChain:XR_NULL_HANDLE;
@@ -1844,7 +1899,7 @@ XrPosef UiSurfacePose() {
 void MenuPointer(const menus::Pad& controls) {
     nativeMenuPad={};
     pointerVisible=pointerHit=false;
-    if(settingsModel.open||bodyCalibration.Active()||calibrationRelease.blocked){panelinput::ItemHover(false);menuDrop.Reset();return;}
+    if(settingsModel.open||bodyCalibration.Active()||calibrationRelease.blocked){panelinput::ItemHover(false);menuDrop.Reset();respecShown=false;respecButton.Hide();return;}
     const bool spatialReady=spatialMode&&SurfacePlaced()&&uiCrop[2]>0;
     const bool uiActive=(panelMode&&menuPlaced)||spatialReady;
     const auto surfacePose=spatialMode?UiSurfacePose():menuPose;
@@ -1879,16 +1934,42 @@ void MenuPointer(const menus::Pad& controls) {
     statsLit=onStats;
     if(statsPress.Step(onStats&&uiActive,pressed,GetTickCount64()))
         Say(focused?"Frame panels: Advanced Stats button - View sent to the game":"Frame panels: Advanced Stats button - View sent (game window not focused)");
+    // Reset Skills & Stats on the Character page (respec_button.h): as above, the laser on
+    // it moves no game cursor and its trigger is never the game's. The first pull asks
+    // Confirm?, the second asks vr/respec.cpp for the game's own reset; no game input is sent.
+    const uint64_t respecNow=GetTickCount64();
+    const auto respecEngine=[]{
+        switch(respec::Status()) {
+            case respec::State::Busy:return respecbutton::Engine::Busy;
+            case respec::State::Done:return respecbutton::Engine::Done;
+            case respec::State::NoRoom:return respecbutton::Engine::NoRoom;
+            case respec::State::Failed:return respecbutton::Engine::Failed;
+            default:return respecbutton::Engine::Idle;
+        }
+    }();
+    respecShown=respecArtReady&&spatialReady&&!journalMode&&gamestate::RespecButtonShown();
+    respecButton.Step(respecShown,respecEngine,respecNow);
+    respecFace=respecButton.Showing(respecNow);
+    const auto respecSpot=respecShown?respecbutton::Place(surface.width,surface.height):respecbutton::Spot{};
+    const bool onRespec=respecShown&&!onStats&&aimTracked&&pointerHit&&!(mouseDown||rightMouseDown)&&
+        respecbutton::Hit(respecSpot,surface.width,surface.height,hit.u,hit.v);
+    respecLit=onRespec&&respecbutton::Clickable(respecFace);
+    if(respecPress.Step(onRespec&&uiActive,pressed,respecNow)&&respecbutton::Clickable(respecFace)) {
+        if(respecButton.Click(respecNow,respecEngine)) {
+            if(!respec::Request()){respecButton.Refused();Say("Frame panels: Reset Skills & Stats refused (not an offline game, or a reset already running)");}
+        } else if(respecButton.Confirming())Say("Frame panels: Reset Skills & Stats - Confirm? shown");
+    }
+    const bool onButton=onStats||onRespec;   // a stamped button: no game cursor, no game trigger
     // An item on the game's cursor and a trigger pull begun off the menu's art (past or on the
     // hide, or the band's see-through margins): the pad's X, the controller menu's own Drop for
     // the item held (menu_drop.h). The tabbed menu (and its cube) only; never without an item on
     // the cursor, where X would drop the controller's selected item instead.
     const bool dropMenu=spatialReady&&!journalMode&&gamestate::LeatherMenuOpen();
     const bool cursorItem=dropMenu&&gamestate::CursorItemHeld();
-    const bool offArt=dropMenu&&aimTracked&&!menuNavigation.Native()&&!(mouseDown||rightMouseDown)&&!onStats&&
+    const bool offArt=dropMenu&&aimTracked&&!menuNavigation.Native()&&!(mouseDown||rightMouseDown)&&!onButton&&
         (!pointerHit||!menudrop::InArt(hit.u,hit.v,surface.width,surface.height));
     const auto drop=menuDrop.Step(offArt&&uiActive&&focused,cursorItem,pressed,GetTickCount64());
-    if(dropMenu&&pressed&&!triggerWasDown&&!drop.press&&aimTracked&&!onStats&&!(mouseDown||rightMouseDown)&&
+    if(dropMenu&&pressed&&!triggerWasDown&&!drop.press&&aimTracked&&!onButton&&!(mouseDown||rightMouseDown)&&
        (!pointerHit||!menudrop::InArt(hit.u,hit.v,surface.width,surface.height))) {   // a pull off the menu that did not drop: why
         static ULONGLONG toldAt=0;
         if(GetTickCount64()-toldAt>500) {
@@ -1909,8 +1990,8 @@ void MenuPointer(const menus::Pad& controls) {
     // navigation" / "laser navigation" every second while walking and turning), hiding it.
     menus::Pad navigation=controls;
     if(leatherMode&&leatherShown.load())navigation.lx=navigation.ly=navigation.rx=navigation.ry=0;
-    if(onStats||statsPress.Held()||dropOwns)navigation.rt=0;   // the button's or the drop's trigger is never the game's RT
-    nativeMenuPad=menuNavigation.Step(uiActive&&focused,navigation,pointerHit&&!onStats,hit.u,hit.v,mouseDown||rightMouseDown);
+    if(onButton||statsPress.Held()||respecPress.Held()||dropOwns)navigation.rt=0;   // a button's or the drop's trigger is never the game's RT
+    nativeMenuPad=menuNavigation.Step(uiActive&&focused,navigation,pointerHit&&!onButton,hit.u,hit.v,mouseDown||rightMouseDown);
     if(statsPress.Held())nativeMenuPad.buttons|=menus::Back;   // View: Advanced Stats (Start closes the menu)
     if(menuDrop.Down())nativeMenuPad.buttons|=menus::X;   // X: the controller menu's Drop for the item on the cursor
     if(wasNative!=menuNavigation.Native()&&uiActive&&focused)
@@ -1924,7 +2005,7 @@ void MenuPointer(const menus::Pad& controls) {
         panels::MenuDistance(int(vrsettings::Read().values[settings::MenuDistance]),!spatialMode));
     const bool active=uiActive&&focused&&aimTracked&&laser;
     if(active)panelinput::OwnPointer();
-    if(active&&pointerHit&&!onStats&&!dropOwns) {
+    if(active&&pointerHit&&!onButton&&!dropOwns) {
         RECT client{};
         if(GetClientRect(gameWindow,&client)) {
             math::Vec native{hit.u,hit.v,0};
@@ -1934,8 +2015,8 @@ void MenuPointer(const menus::Pad& controls) {
             else pointerHit=false;
         } else pointerHit=false;
     }
-    // On the button, or off the art with an item to drop, the dot shows and no game click is made there.
-    const bool gamePointer=pointerHit&&!onStats&&!dropOwns&&!(offArt&&cursorItem);
+    // On a button, or off the art with an item to drop, the dot shows and no game click is made there.
+    const bool gamePointer=pointerHit&&!onButton&&!dropOwns&&!(offArt&&cursorItem);
     const bool modifiers=active&&(gamePointer||mouseDown||rightMouseDown);
     PanelModifier(VK_CONTROL,modifiers&&controls.lt>140,controlDown);
     PanelModifier(VK_SHIFT,modifiers&&!grabbing&&(controls.buttons&menus::RightBumper),shiftDown);
@@ -5296,6 +5377,17 @@ void EndPair() {
             motionQuad(hudMap,XrPose({V(at.position)+math::Rotate(q,hud.map),q}),hud.mapSize,hud.mapSize,{{0,0},{int32_t(mapSide),int32_t(mapSide)}},mapEye.chain);
         if(leatherHudVitals&&interactionPaintValid&&interactionChain)
             motionQuad(hudVitals,XrPose({V(at.position)+math::Rotate(q,hud.vitals),q}),hud.vitalsWidth,hud.vitalsHeight,{{512,768},{512,256}},interactionChain);
+    }
+    // Reset Skills & Stats, a hair in front of the Character page's lower right (MenuPointer).
+    XrCompositionLayerQuad respecQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    if(book.subImage.swapchain&&respecShown&&staticChain) {
+        const auto size=UiSurfaceSize();const auto spot=respecbutton::Place(size.width,size.height);
+        const auto at=UiSurfacePose();const auto q=Q(at.orientation);
+        const auto p=V(at.position)+math::Rotate(q,{spot.x,spot.y,.004f});
+        const int picture=respecLit&&respecFace==respecbutton::Face::Reset?panelatlas::RespecLitReset:
+            respecLit&&respecFace==respecbutton::Face::Confirm?panelatlas::RespecLitConfirm:int(respecFace);
+        motionQuad(respecQuad,XrPose({p,q}),spot.width,spot.height,Rect(panelatlas::Respec(picture)),staticChain);
+        respecQuad.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;   // premultiplied (SetupStatic)
     }
     XrCompositionLayerQuad settingsPanel{XR_TYPE_COMPOSITION_LAYER_QUAD};
     if(layer&&(settingsModel.open||bodyCalibration.Active())&&settingsImageReady){

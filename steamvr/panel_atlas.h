@@ -34,6 +34,13 @@ constexpr Region Leather{0,Compass.y+Compass.h+Gap,1024,800};
 constexpr int StatsSize=64;
 constexpr Region Stats{Leather.w+Gap,Leather.y,StatsSize,StatsSize};
 constexpr Region StatsLit{Stats.x,Stats.y+Stats.h+Gap,StatsSize,StatsSize};
+// Beside those: Reset Skills & Stats (respec_button.h), one picture per face
+// (Reset, Confirm?, Resetting..., done, no room, not available), then Reset and
+// Confirm? lit under the laser. 320 x 64: its quad is five times the Advanced
+// Stats button's width at its height, so the same texel density.
+constexpr int RespecWidth=320,RespecHeight=64,RespecPictures=8;
+constexpr int RespecLitReset=6,RespecLitConfirm=7;
+constexpr Region Respec(int i){return {Stats.x+StatsSize+Gap,Leather.y+i*(RespecHeight+Gap),RespecWidth,RespecHeight};}
 constexpr int StaticWidth=1536,StaticHeight=Leather.y+Leather.h;
 // Dynamic: VR Settings (its help card inside the panel) across the top, the
 // blood visor under it, then the strain light, the quest card and the bow

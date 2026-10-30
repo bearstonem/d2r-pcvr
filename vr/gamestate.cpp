@@ -39,6 +39,8 @@
 #include "../steamvr/native_panels.h"
 #include "../steamvr/leather_menu.h"
 #include "../steamvr/stats_button.h"
+#include "../steamvr/respec_button.h"
+#include "respec.h"
 #include "../steamvr/notice_card.h"
 #include "../steamvr/weapon_skills.h"
 #include "../steamvr/callback_ticket.h"
@@ -336,6 +338,7 @@ std::atomic<bool> g_statsButton{false};   // the tabbed menu alone: its Advanced
 // every 200 ms; when it was read (CursorItemHeld wants it recent).
 std::atomic<bool> g_cursorItem{false};
 std::atomic<uint64_t> g_cursorItemAt{0};
+std::atomic<bool> g_respecButton{false};  // its Character page alone: Reset Skills & Stats (respec_button.h)
 std::atomic<uint32_t> g_panelChanges{0};   // every panel opened or closed (leather::Back)
 std::atomic<bool> g_npcChoices{false};
 std::atomic<uint32_t> g_questNotices{0};   // quest updates while the notification panel is hidden
@@ -698,6 +701,7 @@ void __cdecl ReadItems(const PluginContext* ctx, void* token) noexcept {
         g_cursorItemAt.store(GetTickCount64());
     }
 #ifdef D2RVR_NATIVE_OPENXR
+    respec::Poll();   // Reset Skills & Stats: the minted token's native use (respec.cpp)
     panelinput::MaintainWorldController(havePlayer,g_menu.load()!=0);
     MaintainToolbar(ctx);
     ReadNoticeTexts();
@@ -919,6 +923,7 @@ SharedEvents::UiMessageAction __cdecl OnUiMessage(const PluginContext* ctx, cons
             [](const auto& name){return framevr::panels::OpaqueBackground(name);}));
         g_leatherMenu.store(framevr::leather::OnSheet(g_panels));
         g_statsButton.store(framevr::statsbutton::Shown(g_panels));
+        g_respecButton.store(framevr::respecbutton::Shown(g_panels));
         bool menu = false;
         for (const std::string& n : g_panels) if (IsMenuPanel(n)) { menu = true; break; }
         if(menu!=before)++g_menuEpoch;
@@ -1038,6 +1043,7 @@ void Init(const PluginContext* ctx) {
 #ifdef D2RVR_NATIVE_OPENXR
     interactionstate::Init(ctx);
     targetlock::Init(ctx);
+    respec::Init(ctx);
 #endif
     g_threads = Query<ThreadService>(ctx);
     g_widgets = Query<WidgetService>(ctx);
@@ -1148,6 +1154,11 @@ bool LeatherMenuOpen(){return g_leatherMenu.load();}
 bool StatsButtonShown(){return g_statsButton.load();}
 bool CursorItemHeld(){return g_cursorItem.load()&&GetTickCount64()-g_cursorItemAt.load()<600;}
 uint64_t CursorItemReadAt(){return g_cursorItemAt.load();}
+#ifdef D2RVR_NATIVE_OPENXR
+bool RespecButtonShown(){return g_respecButton.load()&&respec::Available();}
+#else
+bool RespecButtonShown(){return false;}   // the reset engine is in the native OpenXR build only
+#endif
 uint32_t PanelChanges(){return g_panelChanges.load();}
 bool NpcChoicesOnly(){return g_npcChoices.load();}
 void ReadNpcChoicesRect() {
