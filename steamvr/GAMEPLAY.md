@@ -1168,23 +1168,31 @@ and trigger/button melee were:
   - **Attack rating** (`ar_damage`, 1): damage x the native to-hit chance (5-95%,
     attack rating, defense and level penalty), read where the game's hit check
     passes it on. `ar_damage_floor` (0) keeps that % of damage at zero chance.
-  - **Recovery** (`swing_recovery_damage`, 1): damage x the share of the native
-    attack cycle (class, weapon, IAS, WSM, skill speed and slows) since the previous landed stroke, to
-    the power `swing_recovery_curve` (2), at most 1. With 2, flailing at twice
-    the cycle's rate deals half the damage per second (1 would be neutral).
-    `swing_recovery_grace` (100 = none) counts a stroke from that % of the cycle
-    as fully recovered. Every creature one stroke reaches shares the stroke's
-    recovery factor, so flailing does not pay.
+  - **Recovery** on a fixed attack cycle (Cal, 2026-10-30): the native attack
+    cycle (class, weapon, IAS, WSM, skill speed and slows) is a fixed rhythm. A
+    stroke one full cycle or more after your latest full-cycle attack is a full
+    hit: full damage, on-hit effects, a strike skill's cast, and it starts the
+    next cycle. A stroke before that is in between: it never moves your next
+    breakpoint, carries no on-hit effects, and with `swing_recovery_damage` (1)
+    its damage is x the share of the cycle since your previous stroke of any
+    kind, to the power `swing_recovery_curve` (2), at most 1. So one extra swing
+    at half a cycle adds 25% of a hit, and fast flailing adds about 2% a swing;
+    the full hits keep their pace either way. `swing_recovery_grace` (100 =
+    none) gives an in-between stroke full damage from that % of the cycle, never
+    a full hit's effects. Every creature one stroke reaches shares the stroke's
+    factor. (Before 2026-10-30 every stroke restarted the cycle, so flailing
+    pushed every breakpoint back.)
   - **Cleave falloff** (`cleave_falloff`, 25): each further creature one stroke
     lands on deals that % less than the one before, never below `cleave_min` (25):
     100%, 75%, 50%, 25%, 25%... 0 turns it off. Creatures count in the order
     the game resolves them, which follows the blade frame to frame but not
     within a single frame. A riposte is still a clean hit (no falloff) and
     counts as one of the stroke's creatures.
-  - **On-hit effects** come only from a stroke that waited a full native attack
-    cycle (the breakpoint, from the previous landed stroke on the same recovery
-    clock: per hand when dual wielding, one shared clock for a shapeshift
-    form's two claws), and only on the first creature that stroke lands on.
+  - **On-hit effects** come only from a full-cycle stroke (the breakpoint, a
+    full cycle after the latest full-cycle attack on the one shared clock: both
+    blades when dual wielding (2026-10-30; each stroke's cycle is its own
+    weapon's) and a shapeshift form's two claws),
+    and only on the first creature that stroke lands on.
     That covers life and mana leech, critical and deadly strike, crushing blow,
     open wounds, freeze, slow, knockback, flee, blind, prevent monster heal,
     defense lowered per hit and chance to cast on striking or attack (curses
@@ -1224,8 +1232,8 @@ and trigger/button melee were:
     Those hits are the cast's own (rev3): the trigger rules' recovery factor
     and on-hit gate don't apply to them (attack rating still scales them, and
     the would-have-hit gate still holds back effects a miss would not have).
-    Each is still the latest attack later swings are measured from (rev5), so
-    strokes while it runs stay recovery-scaled basic attacks; a game/form change or death ends it. Developer builds log `Frame melee sequences (Fury, Zeal):`
+    Each is still the latest attack later swings are measured from (rev5), and
+    a full-cycle one, so strokes while it runs stay recovery-scaled basic attacks; a game/form change or death ends it. Developer builds log `Frame melee sequences (Fury, Zeal):`
     and trace `cast 1/N` on the casting stroke and
     `sequence skill=... hit k/N target=... after N ms` for the rest.
   - **Zeal's light** (Cal, 2026-10-26; `steamvr/zeal_light.h`): every Zeal
@@ -1302,10 +1310,11 @@ In Unleashed your trigger/button melee (a melee hit check outside a physical
 swing: the trigger's basic attack or melee skill, Smite from the trigger or a
 shield bash) is a stroke like a swing (2026-10-24): it lands, attack rating scales
 its damage at the life write (`ar_damage`), the would-have-hit gate decides its
-other effects, and it shares the swings' recovery. It is measured from your latest
-landed swing on any hand (the recovery damage factor and the on-hit cycle gate, as
-a swing's), and every later swing is measured from it as well as from its own
-clock, so mixing trigger attacks with swings is never faster than swinging. Trigger
+other effects, and it shares the swings' fixed cycle. It is full when a full cycle
+has passed since your latest full-cycle swing on any hand, and then starts the next
+cycle; otherwise it is in between, scaled by the time since your latest landed swing
+(as a swing's). Every later swing is measured from it as well as from its own
+clocks, so mixing trigger attacks with swings is never faster than swinging. Trigger
 hits never count against each other: the native animation already paces them, and
 a multi-hit cast (Zeal, Fury, Whirlwind) keeps its later hits. Smite always hits
 natively, so it skips attack rating and the would-have-hit gate and only shares the
