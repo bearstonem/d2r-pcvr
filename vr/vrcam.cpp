@@ -33,6 +33,7 @@
 #include "../steamvr/interact_press.h"
 #include "../steamvr/sewer_interaction.h"
 #include "../steamvr/dropped_item_labels.h"
+#include "../steamvr/loot_aim.h"
 #include "../steamvr/arm_pointing.h"
 #include "../steamvr/aim_reach.h"
 #include "../steamvr/torch_light.h"
@@ -230,6 +231,8 @@ struct Settings {
     std::atomic<float> labelsAlphaFloor{0.5f};   // labels_alpha: their dark box, 1 = as the game draws it, 0 = none
     std::atomic<float> labelsSizeFloor{1.0f};    // labels_size, %: the names and their box smaller (needs the game's label code, LabelHooks)
     std::atomic<bool>  labelsNativeFloor{true};  // labels_native (not on the settings page): 0 = never the game's code, the box faded as a picture
+    // [interactions] loot_pick_reach_cells (INI only): native VR's loot pick (VR Settings > Interface > Loot pick)
+    std::atomic<float> lootPickReach{framevr::lootaim::DefaultPickupCells};   // loot_pick_reach_cells: farther, A takes no item (0 = any distance)
     // The same two for the other views (2026-10-06): [hud_top] F1, [hud_third] F2, [hud] F4 - the game's own by default.
     std::atomic<float> labelsAlphaTop{1.0f}, labelsAlphaThird{1.0f}, labelsAlphaBody{1.0f};
     std::atomic<float> plateAlpha{1.0f};   // [hud] monster_alpha: the name plate over the target monster, 1 = as the game draws it
@@ -1144,6 +1147,7 @@ void LoadSettings() {
     g_set.labelsAlphaFloor.store(std::clamp(IniF(L"hud_floor", L"labels_alpha", 0.5f), 0.0f, 1.0f));
     g_set.labelsSizeFloor.store(std::clamp(IniF(L"hud_floor", L"labels_size", 100.0f), 20.0f, 150.0f) * 0.01f);
     g_set.labelsNativeFloor.store(IniF(L"hud_floor", L"labels_native", 1.0f) != 0.0f);
+    g_set.lootPickReach.store(std::clamp(IniF(L"interactions", L"loot_pick_reach_cells", framevr::lootaim::DefaultPickupCells), 0.0f, framevr::lootaim::ReachCells));
     g_set.labelsAlphaTop.store(std::clamp(IniF(L"hud_top", L"labels_alpha", 1.0f), 0.0f, 1.0f));
     g_set.labelsAlphaThird.store(std::clamp(IniF(L"hud_third", L"labels_alpha", 1.0f), 0.0f, 1.0f));
     g_set.labelsAlphaBody.store(std::clamp(IniF(L"hud", L"labels_alpha", 1.0f), 0.0f, 1.0f));
@@ -3013,7 +3017,8 @@ std::atomic<int> lock{0};         // Skills go to the aimed monster: bits 1 spel
 constexpr framevr::settings::Key keys[] = {framevr::settings::TargetHighlight,
                                            framevr::settings::StaffPoint,
                                            framevr::settings::LandingCircles, framevr::settings::AimHighlights,
-                                           framevr::settings::Dominant, framevr::settings::AimFollowsView};
+                                           framevr::settings::Dominant, framevr::settings::AimFollowsView,
+                                           framevr::settings::LootPick};
 constexpr int KeyCount = int(std::size(keys));
 void Refresh() {
     const ULONGLONG now = GetTickCount64();
@@ -3038,6 +3043,8 @@ bool AimOn(framevr::settings::Key key) {
 int GroundAimMode() { aimsettings::Refresh(); return aimsettings::ground.load(); }
 bool SpellsLocked() { aimsettings::Refresh(); return (aimsettings::lock.load() & 1) != 0; }
 bool BowSkillsLocked() { aimsettings::Refresh(); return (aimsettings::lock.load() & 2) != 0; }
+// VR Settings > Interface > Loot pick (Off by default): A takes the item you point at (lootaimvr).
+bool LootPickOn() { return AimOn(framevr::settings::LootPick); }
 // VR Settings > Aim > Aim with your view (Off by default): the eyes' tunnel,
 // the hands' wedge and a raised hand aiming alone (aimtargets).
 bool FollowsView() { return AimOn(framevr::settings::AimFollowsView); }
@@ -3963,13 +3970,28 @@ bool NativeSpellAimDecide(float playerX,float playerY,framevr::spellaim::Cast& c
     return cast.directed;
 }
 uintptr_t NearbySewerInteraction();
+namespace lootaimvr { uintptr_t Selected(); bool PickInReach(); bool IsItem(uintptr_t unit); }
+// 0x18DDE0 (controller manager, skill) is the controller's own target for a
+// skill. A on an item casts Interact (357: the A press at 0x14A6F7 swaps it in
+// when 0x145CB0 says interact) and the cast asks here, where the game's answer
+// is the nearest item. With a loot pick, Interact takes the picked item instead;
+// InteractTarget asks here too, so its prompt and the highlight agree.
+constexpr int kInteractSkill = 357;
 uintptr_t HookSpellControllerTarget(uintptr_t manager,int id) {
     if(g_spellCast.directed&&uintptr_t(_ReturnAddress())==d2rsig::Addr(spellaimabi::ControllerCallRva+5))return 0;
-    const auto target=OrigSpellControllerTarget(manager,id);
+    uintptr_t target=OrigSpellControllerTarget(manager,id);
     if(const uintptr_t unit=RulesUnit(id))return unit;   // the aim rules: the aimed monster itself
+    if(id==kInteractSkill) {
+        // Past the pick-up reach no item at all: neither walking to the picked item
+        // nor the game's nearest instead. A door, waypoint or NPC it chose still works.
+        if(const uintptr_t pick=lootaimvr::Selected()) {
+            if(!lootaimvr::PickInReach()){if(lootaimvr::IsItem(target))target=0;}
+            else target=pick;
+        }
+    }
     // Interact's common query feeds BOTH the native prompt and its action.
     // Other skills and every target already selected by the game keep priority.
-    return !target&&id==357?NearbySewerInteraction():target;
+    return !target&&id==kInteractSkill?NearbySewerInteraction():target;
 }
 uintptr_t HookSpellHoverTarget(int player) {
     if(g_spellCast.directed&&uintptr_t(_ReturnAddress())==d2rsig::Addr(spellaimabi::HoverCallRva+5))return 0;
@@ -4034,6 +4056,7 @@ std::atomic<void*> g_heroUnit{nullptr};
 // whose place on its path, times 2, is the look-at (2026-10-07: "on entering the cave").
 std::atomic<void*> g_heroSeen{nullptr};
 std::atomic<bool> g_heroWanted{false};
+std::atomic<bool> g_lootWantsHero{false};   // the loot pick needs the hero unit too (lootaimvr)
 
 bool IsHeroUnit(const void* unit) {
     float L[3];
@@ -4074,7 +4097,7 @@ LONGLONG QpcUs() {
 
 void HookUnitFacing(void* unit, float* out) {
     OrigUnitFacing(unit, out);
-    if (unit && g_heroWanted.load() && !g_heroSeen.load() && IsHeroUnit(unit)) g_heroSeen.store(unit);   // until one is found
+    if (unit && (g_heroWanted.load() || g_lootWantsHero.load()) && !g_heroSeen.load() && IsHeroUnit(unit)) g_heroSeen.store(unit);   // until one is found
     if (out && unit && unit == g_heroUnit.load()) {
         g_logicFacingDeg.store(atan2f(out[1], out[0]) * 57.2957795f);
         g_logicFacingAt.store(QpcUs());
@@ -4506,6 +4529,376 @@ void ApplyActions(XINPUT_STATE* s) {
 }
 
 #ifdef D2RVR_NATIVE_OPENXR
+// Loot pick (VR Settings > Interface > Loot pick): the dropped item Interact
+// takes is the one the player points at with the dominant hand held out, not
+// the game's nearest (lootaim). Chosen on the game thread from InteractTarget,
+// which runs every world frame; the room walk runs every 100 ms.
+void LabelNameOf(uintptr_t unit, char* out, size_t size);
+bool SewerInteractionLayoutReady();
+namespace lootaimvr {
+uintptr_t g_units[framevr::lootaim::MaxItems];
+uint32_t g_ids[framevr::lootaim::MaxItems];   // each unit's id when walked: a reused address is another unit
+float g_cells[framevr::lootaim::MaxItems * 2];
+int g_count = 0;
+float g_heroX = 0, g_heroY = 0;
+ULONGLONG g_scanAt = 0;
+framevr::lootaim::Area g_area;            // the area the last walk saw (g_units and the pick belong to it)
+std::atomic<uintptr_t> g_pick{0};
+std::atomic<uint32_t> g_pickId{0};        // the pick's unit id when chosen
+bool g_pointing[2] = {false, false};      // each hand's arm-out state (0 right, 1 left)
+std::atomic<ULONGLONG> g_pickAt{0};       // when HandItem last chose
+std::atomic<float> g_pickCells{-1.0f};    // the pick's distance from the hero, in cells (-1 none)
+std::atomic<uintptr_t> g_glowUnit{0};     // the item A acts on, whose name gets the rim
+std::atomic<float> g_glowRgb[3] = {1.0f, 1.0f, 1.0f};   // its rarity color, as the game draws its name
+std::atomic<uint32_t> g_glowQuality{0};   // its quality as read (item data +0x00, 1 low .. 8 crafted), for the log
+std::atomic<bool> g_glowFar{false};       // past the pick-up reach: the out-of-reach look
+std::atomic<ULONGLONG> g_glowAt{0};
+framevr::lootaim::PressWatch g_press;     // the last A press, for its log line (WatchPress)
+
+template <class T> bool Rd(uintptr_t a, T& out) { return a >= 0x10000 && framevr::ReadMemory(&out, (const void*)a, sizeof(T)); }
+
+// In the headset only: desktop play keeps the game's own pick. framevr::Active is true only inside
+// our frame pair; A's press and its Interact target run in the game's logic between pairs, so the
+// last headset frame counts for lootaim::HeadsetGapMs (2026-10-29: every A press handed nothing).
+// between: asked outside a headset frame (the game's logic), for the log.
+std::atomic<ULONGLONG> g_headsetFrameAt{0};
+bool InVr(bool* between = nullptr) {
+    const ULONGLONG now = GetTickCount64();
+    const bool frame = framevr::Active();
+    if (frame) g_headsetFrameAt.store(now);
+    if (between) *between = !frame;
+    return framevr::lootaim::InHeadset(frame, g_headsetFrameAt.load(), now) && g_enabled.load() && g_inWorld.load() && !gamestate::MenuOpen();
+}
+bool On(bool* between = nullptr) { return LootPickOn() && InVr(between); }
+
+// The cell of a unit on a static path (objects, items, tiles; +0x10/+0x14) or
+// a dynamic one (players, monsters; 16.16 at +0x00).
+bool UnitCell(uintptr_t unit, float& x, float& y) {
+    uint32_t type = 0;
+    uintptr_t path = 0;
+    if (!Rd(unit, type) || !Rd(unit + 0x38, path)) return false;
+    uint32_t p[2] = {};
+    if (type == 2 || type == 4 || type == 5) {
+        if (!Rd(path + 0x10, p) || !p[0] || !p[1]) return false;
+        x = float(p[0]); y = float(p[1]); return true;   // the cell's own point (no half-cell shift)
+    }
+    if (!Rd(path, p) || !p[0] || !p[1]) return false;
+    x = p[0] / 65536.f; y = p[1] / 65536.f; return true;
+}
+
+// The hero unit: combat's record, else the attack or facing hook's unit or the
+// SDK's handle, each checked against the camera's look-at.
+uintptr_t Hero() {
+    g_lootWantsHero.store(true);
+    uintptr_t hero = 0;
+    if (combat::LocalPlayerUnit(hero)) return hero;
+    for (const uintptr_t u : {(uintptr_t)g_heroUnit.load(), (uintptr_t)g_heroSeen.load(), (uintptr_t)gamestate::LocalPlayer()})
+        if (u >= 0x10000 && IsHeroUnit((void*)u)) return u;
+    g_heroSeen.store(nullptr);   // stale (another area): the facing hook finds it again
+    return 0;
+}
+
+// The hero unit now when combat's record has it (cheap: a lock and one read), else
+// the last walk's: a new hero unit (a new game) shows as another area.
+uintptr_t HeroNow() {
+    uintptr_t hero = 0;
+    return combat::LocalPlayerUnit(hero) ? hero : g_area.hero;
+}
+// The area now, without walking (cheap: every frame). Defense in depth only: the
+// area id reads 0 while the game state is stale, and neighboring areas may share
+// a look. The fresh walk before each handover is the guarantee.
+framevr::lootaim::Area AreaNow(uintptr_t hero) {
+    return {hero, interactionstate::CurrentLevel(gamestate::LocalPlayer(), GetTickCount64()), g_biomeGen.load()};
+}
+// Another area (or hero) than the last walk's: its units may be freed, so drop
+// them, the pick and its name look, and walk again now.
+void ForgetIfMoved() {
+    const auto now = AreaNow(HeroNow());
+    if (framevr::lootaim::SameArea(now, g_area)) { if (now.level) g_area.level = now.level; return; }
+    if (g_count || g_pick.load()) Log("Frame loot aim: another area - the items and the pick are dropped");
+    g_count = 0; g_pick.store(0); g_scanAt = 0; g_area = now; g_press.Cancel();
+    g_glowUnit.store(0);
+}
+
+// Walks the hero's rooms at most every 100 ms; true when it walked in this call.
+bool Scan() {
+    ForgetIfMoved();
+    const ULONGLONG now = GetTickCount64();
+    if (now - g_scanAt < 100) return false;
+    g_scanAt = now;
+    const uintptr_t hero = Hero();
+    // The room links are the sewer warp search's, checked against the game's own code first.
+    const bool layout = hero && SewerInteractionLayoutReady();
+    const auto area = AreaNow(hero);
+    if (!framevr::lootaim::SameArea(area, g_area)) { g_pick.store(0); g_press.Cancel(); }   // another hero unit: a new game
+    if (!layout) g_press.Cancel();   // no walk: an empty list is no proof an item was taken
+    g_area = area;
+    const int count = layout ? framevr::lootaim::Collect(hero, [](uintptr_t at, auto& value) { return Rd(at, value); },
+                                                         g_units, g_ids, g_cells, framevr::lootaim::MaxItems, g_heroX, g_heroY) : 0;
+    static int toldHero = -1;
+    const int state = !hero ? 0 : layout ? 1 : 2;
+    if (state != toldHero) {
+        toldHero = state;
+        Log(state == 1 ? "Frame loot aim: hero unit found - dropped items near the hero can be picked by pointing"
+            : state == 2 ? "Frame loot aim: the room layout is not verified on this game version - the game's own loot pick"
+                         : "Frame loot aim: hero unit not found yet - the game's own loot pick");
+    }
+    static int told = -1;
+    if ((count > 0) != (told > 0) || told < 0) { told = count; LogF("Frame loot aim: %d dropped items near the hero", count); }
+    g_count = count;
+    return true;
+}
+
+// Still an item on the floor? A read through ReadProcessMemory, safe on freed memory.
+bool OnFloor(uintptr_t unit) {
+    uint32_t header[4] = {};
+    return unit && Rd(unit, header) && framevr::lootaim::OnFloor(header[0], header[3]);
+}
+// The pick, checked right before the game gets it: like the owner's ClientMonster,
+// a walk of the hero's rooms on every handover (no cache: a unit freed a moment
+// ago keeps its old header bytes, but it is gone from the room lists) must find
+// it on the floor with the id it had when picked, in the walk's area, chosen just
+// now. walked: the walk that chose it ran in this same call, so it is that fresh.
+// The confirmed cell refreshes the pick's distance (an address reused by another
+// item cannot carry the old one's reach). Returns the pick or 0.
+uintptr_t Handed(uintptr_t pick, bool walked) {
+    if (!pick) return 0;
+    const uint32_t id = g_pickId.load();
+    const bool same = framevr::lootaim::SameArea(AreaNow(HeroNow()), g_area);
+    const ULONGLONG now = GetTickCount64();
+    framevr::lootaim::Live live;
+    if (walked) {
+        live.found = Rd(pick, live.header);
+    } else if (g_area.hero) {
+        live = framevr::lootaim::Find(g_area.hero, [](uintptr_t at, auto& value) { return Rd(at, value); }, pick, id);
+        if (live.found) g_pickCells.store(std::hypot(live.x - live.heroX, live.y - live.heroY));
+    }
+    if (framevr::lootaim::HandOver(live.header, id, same, now - g_pickAt.load(), live.found)) return pick;
+    g_scanAt = 0;   // walk again on the next frame
+    static ULONGLONG told = 0;
+    if (now - told > 1000) { told = now; LogF("Frame loot aim: the pick %p is gone from the floor - not handed to the game", (void*)pick); }
+    return 0;
+}
+// Proof for the headset log that the two hooks touching the pick share a thread
+// (the pick's state is not locked): each logs its thread once a session.
+void TellThread(const char* hook, int slot) {
+    static std::atomic<uintptr_t> told[2] = {0, 0};
+    const uintptr_t session = (uintptr_t)gamestate::LocalPlayer();
+    if (!session || told[slot].exchange(session) == session) return;
+    LogF("Frame loot aim: threads - %s runs on thread %lu", hook, GetCurrentThreadId());
+}
+
+// The pointing hand: VR Settings > Body > Dominant hand (0 right, 1 left).
+int PointingHand() {
+    const int hand = AimOn(framevr::settings::Dominant) ? 1 : 0;
+    static int told = -1;
+    if (hand != told) { told = hand; LogF("Frame loot aim source: the %s hand points (VR Settings > Body > Dominant hand)", hand ? "left" : "right"); }
+    return hand;
+}
+// "Frame loot aim source:" once a second at most per hand while it keeps pointing with the motion layer off.
+void TellAwake(int hand, bool kept, uint32_t gate) {
+    static uint32_t told[2] = {0, 0};
+    static ULONGLONG at[2] = {0, 0};
+    const int h = hand & 1;
+    if (!kept) { told[h] = 0; return; }
+    const ULONGLONG now = GetTickCount64();
+    if (gate == told[h] || now - at[h] < 1000) return;
+    told[h] = gate; at[h] = now;
+    char why[200]; framevr::lootaim::GateText(gate, why, sizeof why);
+    LogF("Frame loot aim source: the %s hand still points (motion layer off: %s)", h ? "left" : "right", why);
+}
+// One hand's controller aim, in HandAimRay's frame (the head's turn undone). It keeps
+// pointing while that hand is tracked in the world even when the motion layer is off
+// (transport's LootHandRay: an interaction starting, a slow frame), never in menus,
+// panels or with the skill wheel open. With the map open (an overlay you walk and
+// fight with) a hand points as the other aims do, only while the motion layer is on.
+bool HandAim(int hand, float o[3], float d[3]) {
+    if (gamestate::AutoMapOpen()) return framevr::HandAimRay(hand, o, d);
+    uint32_t gate = 0;
+    const bool ok = framevr::LootHandRay(hand, o, d, &gate);
+    if (ok || !gate) TellAwake(hand, ok && gate, gate);   // an untracked hand leaves its state as it was
+    return ok;
+}
+// Is this hand held out to point (12 cm out from the head, level distance; let go 6 cm
+// nearer)? aimed: its HandAim this frame (mo: its origin). The monster target's pointing
+// keeps its own, longer reach. "Frame loot aim source:" once a second at most.
+bool Pointing(int hand, bool aimed, const float mo[3]) {
+    bool& on = g_pointing[hand & 1];
+    const bool was = on;
+    on = g_eyeOk.load() && aimed && framevr::lootaim::Pointing(on, std::hypot(mo[0], mo[2]));
+    static ULONGLONG toldAt = 0;
+    static int changes = 0;
+    static bool told = false;
+    if (on != was) ++changes;
+    if (changes && on != told && GetTickCount64() - toldAt >= 1000) {
+        LogF("Frame loot aim source: %s hand %s (%d change%s since the last line)", hand ? "left" : "right", on ? "pointing (arm out)" : "lowered",
+             changes, changes == 1 ? "" : "s");
+        toldAt = GetTickCount64(); changes = 0; told = on;
+    }
+    return on;
+}
+// That hand's controller pointer in the world, as HandRay places a hand's aim (its
+// motion ray mo, md turned with the camera, from the eye, scaled).
+bool HandWorldRay(const float mo[3], const float md[3], float o[3], float d[3]) {
+    if (!g_eyeOk.load()) return false;
+    AcquireSRWLockShared(&g_stickLock); const StickFrame f = g_stickFrame; ReleaseSRWLockShared(&g_stickLock);
+    if (!f.valid) return false;
+    const float scale = std::max(1.0f, ScaleHeight()) / UserEyeHeightM();
+    for (int i = 0; i < 3; ++i) {
+        o[i] = g_eyeWorld[i].load() + scale * (mo[0] * f.camR[i] - mo[2] * f.camF[i]);
+        d[i] = md[0] * f.camR[i] - md[2] * f.camF[i];
+    }
+    o[1] += scale * mo[1]; d[1] += md[1];
+    const float length = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    if (!std::isfinite(length + o[0] + o[1] + o[2]) || length < 1e-3f || std::hypot(d[0], d[2]) < 1e-3f) return false;
+    for (int i = 0; i < 3; ++i) d[i] /= length;
+    return true;
+}
+
+// One line per A press with items on the floor: which one the press took, from
+// the unit ids of the pick's own walks (no extra reads of the game, no pointer
+// kept), against the item chosen at the press. walked: a walk ran in this call.
+// pressed: Interact or Attack held (A on a gamepad-style binding casts Attack,
+// whose interact-on-attack finds items).
+void WatchPress(bool pressed, uintptr_t pick, uint32_t pickId, float cells, bool walked) {
+    namespace la = framevr::lootaim;
+    static bool wasPressed = false;
+    static char names[la::MaxItems][48], chosen[48];
+    static float chosenCells = -1.0f;
+    const ULONGLONG now = GetTickCount64();
+    if (pressed && !wasPressed && g_count > 0) {   // the press: what lies on the floor, what is chosen
+        g_press.Press(g_ids, g_count, pick ? pickId : 0, now);
+        for (int i = 0; i < g_count; ++i) LabelNameOf(g_units[i], names[i], sizeof names[i]);
+        if (pick) LabelNameOf(pick, chosen, sizeof chosen); else snprintf(chosen, sizeof chosen, "nothing");
+        chosenCells = cells;
+    }
+    wasPressed = pressed;
+    if (walked) {
+        const int i = g_press.Walked(g_ids, g_count);
+        if (i >= 0)
+            LogF("Frame loot aim: A took '%s' id %u (selected '%s' id %u) - %s", names[i], g_press.ids[i], chosen, g_press.chosen,
+                 !g_press.chosen ? "none selected, the game's choice" : g_press.ids[i] == g_press.chosen ? "match" : "MISMATCH");
+        else if (i == -2) Log("Frame loot aim: A press - several items left the list at once (failed walk or the hero moved on), no verdict");
+    }
+    if (g_press.Expired(now))
+        LogF("Frame loot aim: A took nothing within 3 s (selected '%s' id %u, %.1f cells from the hero%s)", chosen, g_press.chosen,
+             chosenCells, la::InReach(chosenCells, g_set.lootPickReach.load()) ? "" : ", past the pick-up reach");
+}
+
+// The item Interact takes, or 0 (off, or nothing pointed at).
+uintptr_t HandItem() {
+    if (!On()) {
+        g_press.Cancel();
+        g_pick.store(0);
+        if (!LootPickOn()) g_lootWantsHero.store(false);   // Off: the facing hook stops looking for the hero for us
+        return 0;
+    }
+    TellThread("InteractTarget", 1);
+    if (g_pick.load() && !OnFloor(g_pick.load())) g_scanAt = 0;   // picked up: walk again now
+    const bool walked = Scan();
+    namespace la = framevr::lootaim;
+    AcquireSRWLockShared(&g_skyLock); const SkyView s = g_skyView[0]; ReleaseSRWLockShared(&g_skyLock);
+    la::Item items[la::MaxItems];
+    int n = 0;
+    const float floor = s.hero[1], shear = framevr::coordinates::GroundShear;
+    for (int i = 0; s.axes_ok && i < g_count; ++i) {   // each item's floor point in the world (render = grid*2 + floor x shear)
+        const float x = g_cells[i * 2], y = g_cells[i * 2 + 1];
+        items[n++] = {g_units[i], {x * la::CellUnits + floor * shear, floor, y * la::CellUnits + floor * shear}, std::hypot(x - g_heroX, y - g_heroY)};
+    }
+    la::Ray hand;
+    float o[3], d[3];
+    const int pointing = PointingHand();
+    float mo[3] = {}, md[3] = {};
+    const bool aimed = HandAim(pointing, mo, md);   // one transport read a frame
+    if (Pointing(pointing, aimed, mo) && HandWorldRay(mo, md, o, d)) hand = {{o[0], o[1], o[2]}, {d[0], d[1], d[2]}, true};
+    const uintptr_t was = g_pick.load();
+    const auto c = la::Select(items, n, hand, was);
+    const uintptr_t pick = c.unit;
+    float cells = -1.0f;
+    uint32_t id = 0;
+    for (int i = 0; i < n && pick; ++i) if (items[i].unit == pick) { cells = items[i].heroCells; id = g_ids[i]; }
+    g_pickId.store(id);
+    g_pick.store(pick);
+    g_pickAt.store(GetTickCount64());
+    g_pickCells.store(cells);
+    if (pick && pick != was) {
+        static ULONGLONG lastLog = 0;
+        if (GetTickCount64() - lastLog > 1000) {
+            lastLog = GetTickCount64();
+            char name[48]; LabelNameOf(pick, name, sizeof name);
+            // the item data its rim's color comes from (+0x10: quality, flags +0x18), to check against its name's color
+            uintptr_t data = 0;
+            uint32_t quality = 0, flags = 0;
+            if (Rd(pick + 0x10, data)) { Rd(data, quality); Rd(data + 0x18, flags); }
+            LogF("Frame loot aim: %s hand picks '%s' %p quality %u flags 0x%x (%d items near, %.2f cells off the pointed spot, %.1f cells from the hero%s)",
+                 pointing ? "left" : "right", name, (void*)pick, quality, flags, n, c.distance / la::CellUnits, cells,
+                 la::InReach(cells, g_set.lootPickReach.load()) ? "" : ", past the pick-up reach");
+        }
+    }
+    WatchPress((ActionsHeld() & (D2RVR_ACT_INTERACT | D2RVR_ACT_ATTACK)) != 0, pick, id, cells, walked);
+    return Handed(pick, walked);   // the prompt and A get only a live item
+}
+
+// The pick while fresh and still on the floor, for the Interact skill's target
+// (0x18DDE0), confirmed by a fresh walk before the game gets it.
+uintptr_t Selected() {
+    bool between = false;
+    if (!On(&between)) return 0;
+    TellThread("the Interact skill's target", 0);
+    const uintptr_t handed = Handed(g_pick.load(), false);
+    if (handed && between) {   // asked between headset frames (A's press): once a second at most
+        static ULONGLONG toldAt = 0;
+        const ULONGLONG now = GetTickCount64(), at = g_headsetFrameAt.load();
+        if (now - toldAt >= 1000) {
+            toldAt = now;
+            LogF("Frame loot aim: between headset frames (%llu ms after the last), the Interact skill's target gets the selection id %u",
+                 at < now ? now - at : 0ull, g_pickId.load());
+        }
+    }
+    return handed;
+}
+// Close enough for A to pick it up without walking ([interactions] loot_pick_reach_cells, 0 = any).
+bool PickInReach() { return framevr::lootaim::InReach(g_pickCells.load(), g_set.lootPickReach.load()); }
+// A dropped item (unit type 4), not an NPC, object or monster.
+bool IsItem(uintptr_t unit) {
+    uint32_t type = 0;
+    return Rd(unit, type) && type == 4;
+}
+
+// Publish the dropped item A acts on, for the rim round its name: the item pointed
+// at, else the game's own nearest item. Doors, chests and NPCs keep the game's own
+// prompt only. pointed: the item is the pointed one, whose name is laid out on
+// request (lootaim::pointedAt; transport holds Show items for it).
+void Publish(uintptr_t item, bool tooFar, bool pointed) {
+    if (!item || !LootPickOn() || !InVr() || !IsItem(item)) { g_glowUnit.store(0); return; }
+    static uint32_t glowId = 0;   // the unit id too: an address reused by another item gets its own color
+    uint32_t id = 0;
+    Rd(item + 0x08, id);
+    if (item != g_glowUnit.load() || id != glowId) {
+        glowId = id;
+        uintptr_t data = 0;
+        uint32_t quality = 0, flags = 0;
+        float rgb[3] = {1.0f, 1.0f, 1.0f};
+        if (Rd(item + 0x10, data) && Rd(data, quality) && Rd(data + 0x18, flags)) framevr::lootaim::RarityColor(quality, flags, rgb);
+        for (int i = 0; i < 3; ++i) g_glowRgb[i].store(rgb[i]);
+        g_glowQuality.store(quality);
+    }
+    g_glowFar.store(tooFar);
+    g_glowUnit.store(item);
+    g_glowAt.store(GetTickCount64());
+    // only with the label layout hook in: without it the hold would show every name, none of them cut
+    if (pointed && g_labelSizeIn.load()) framevr::lootaim::pointedAt.store(GetTickCount64());
+}
+// The highlighted unit while fresh (InteractTarget runs every frame in the world;
+// 300 ms, tuned in the headset, so a dropped frame does not blink the rim).
+uintptr_t Highlighted() {
+    if (!InVr()) return 0;
+    return GetTickCount64() - g_glowAt.load() < 300 ? g_glowUnit.load() : 0;
+}
+// The highlighted name's look: in reach (A takes it) or not.
+const framevr::lootaim::NameLook& Look() { return framevr::lootaim::LookFor(!g_glowFar.load()); }
+void Rarity(float rgb[3]) { for (int i = 0; i < 3; ++i) rgb[i] = g_glowRgb[i].load(); }
+}
 bool SewerInteractionLayoutReady() {
     static std::atomic<bool> ready{false};
     if(ready.load())return true;
@@ -4575,8 +4968,13 @@ void UpdateSewerPrompt(uintptr_t target) {
 
 uintptr_t HookInteractTarget(uintptr_t mgr, uint32_t player) {
     static thread_local bool inside = false;
-    const uintptr_t r = OrigInteractTarget(mgr, player);
+    uintptr_t r = OrigInteractTarget(mgr, player);
     if (inside) return r;
+#ifdef D2RVR_NATIVE_OPENXR
+    // The loot pick: the item pointed at replaces the game's
+    // nearest, for its prompt and for A. No pick leaves the game's own choice.
+    const uintptr_t pick = lootaimvr::HandItem();
+#endif
     uintptr_t t = r;
     uint8_t* flag = (uint8_t*)d2rsig::Addr(RVA_INTERACT_ON_ATTACK);
     uint8_t f = 1;
@@ -4587,6 +4985,14 @@ uintptr_t HookInteractTarget(uintptr_t mgr, uint32_t player) {
         *flag = 0;
         inside = false;
     }
+#ifdef D2RVR_NATIVE_OPENXR
+    const bool tooFar = pick && !lootaimvr::PickInReach();
+    if (tooFar) {   // too far for A: no item prompt or pick-up; NPCs, doors and waypoints stay
+        if (lootaimvr::IsItem(t)) t = 0;
+        if (f && lootaimvr::IsItem(r)) r = 0;
+    } else if (pick) { t = pick; if (f) r = pick; }   // with A only attacking, the game keeps its own answer
+    lootaimvr::Publish(pick ? pick : t, tooFar, pick != 0);
+#endif
     g_interactTarget.store(t);
     g_interactTargetAt.store(GetTickCount64());
 #ifdef D2RVR_NATIVE_OPENXR
@@ -6249,9 +6655,83 @@ float LabelSizeNow() {
     return (native||g_set.labelsNativeFloor.load()) && g_labelSizeIn.load() ? size : 1.0f;
 }
 
+// The loot pick's name look: which unit each label record belongs to, from its
+// layout, so its paint can tell the item A acts on. Records are found again by
+// their name address (the game lays every name out in one scratch box, then
+// paints each from its own record): lootaim::LabelOwners has the rule and why.
+constexpr int kLabelOwners = 64;
+framevr::lootaim::LabelOwners<kLabelOwners> g_labelOwners;
+char g_labelOwnerText[kLabelOwners][48];
+SRWLOCK g_labelOwnerLock = SRWLOCK_INIT;
+void RememberLabel(const void* box, const char* name, uintptr_t unit) {
+    AcquireSRWLockExclusive(&g_labelOwnerLock);
+    const int slot = g_labelOwners.Remember(box, name, unit);
+    // the name for the log, without the game's color code (a private-use character and a letter)
+    const char* n = name ? name : "";
+    if ((uint8_t)n[0] == 0xEE && n[1] && n[2] && n[3]) n += 4;
+    snprintf(g_labelOwnerText[slot], sizeof g_labelOwnerText[slot], "%s", n);
+    ReleaseSRWLockExclusive(&g_labelOwnerLock);
+}
+// The exact pair, else the name, else the box, each only when it names one item.
+uintptr_t LabelUnit(const void* box, const void* name) {
+    AcquireSRWLockShared(&g_labelOwnerLock);
+    const uintptr_t unit = g_labelOwners.Unit(box, name);
+    ReleaseSRWLockShared(&g_labelOwnerLock);
+    return unit;
+}
+// An item's name as the game last laid it out, or "?" (its name is not shown).
+void LabelNameOf(uintptr_t unit, char* out, size_t size) {
+    snprintf(out, size, "?");
+    AcquireSRWLockShared(&g_labelOwnerLock);
+    if (const int slot = g_labelOwners.Find(unit); slot >= 0) snprintf(out, size, "%s", g_labelOwnerText[slot]);
+    ReleaseSRWLockShared(&g_labelOwnerLock);
+}
+bool LabelHighlightWanted() {
+#ifdef D2RVR_NATIVE_OPENXR
+    return LootPickOn();
+#else
+    return false;
+#endif
+}
+uintptr_t HighlightedLabelUnit() {
+#ifdef D2RVR_NATIVE_OPENXR
+    return LabelHighlightWanted() ? lootaimvr::Highlighted() : 0;
+#else
+    return 0;
+#endif
+}
+// The highlighted item's name size, times the game's: 180% in reach, 130% out of reach.
+float HighlightedLabelScale() {
+#ifdef D2RVR_NATIVE_OPENXR
+    return lootaimvr::Look().nameScale;
+#else
+    return 1.0f;
+#endif
+}
+
 bool HookLabelLayout(void* unit, char* name, int32_t* box, int32_t minX, int32_t maxX, uint8_t flag) {
-    const bool shown = OrigLabelLayout(unit, name, box, minX, maxX, flag);
-    const float k = LabelSizeNow();
+    const bool gameShown = OrigLabelLayout(unit, name, box, minX, maxX, flag);
+    bool shown = gameShown;
+    const uintptr_t lit = HighlightedLabelUnit();
+#ifdef D2RVR_NATIVE_OPENXR
+    if (lit && (uintptr_t)unit == lit && !shown && box && name && name[0]) {
+        // The item A acts on always shows its name: the game laid it out but hid it,
+        // mostly for an item at the hero's feet (2026-10-18 log).
+        shown = true;
+        static ULONGLONG told = 0;
+        if (GetTickCount64() - told > 5000) {
+            told = GetTickCount64();
+            LogF("Frame loot names: showing the selected item's name the game hid, box %d %d %d %d", box[0], box[1], box[2], box[3]);
+        }
+    }
+    // While Show items is held for the pointed item alone (transport, lootaim::onlyPointedUntil),
+    // every other name the game lays out is cut: the pointed one shows by itself.
+    if (shown && unit && (uintptr_t)unit != lit && framevr::lootaim::OnlyPointed(framevr::lootaim::onlyPointedUntil.load(), GetTickCount64()))
+        return false;
+#endif
+    if (shown && box && unit && LabelHighlightWanted()) RememberLabel(box, name, (uintptr_t)unit);
+    float k = LabelSizeNow();
+    if (lit && (uintptr_t)unit == lit) k = std::min(framevr::lootaim::MaxNameScale, k * HighlightedLabelScale());
     if (!shown || !box || !name || std::abs(k - 1.0f) < 0.005f) return shown;
     if (!((IsHdFn)d2rsig::Addr(RVA_IS_HD))()) return shown;   // the old graphics: their text has no scale
     const float s = ((UiScaleFn)d2rsig::Addr(RVA_UI_SCALE))();
@@ -6266,7 +6746,60 @@ bool HookLabelLayout(void* unit, char* name, int32_t* box, int32_t minX, int32_t
     return shown;
 }
 
+#ifdef D2RVR_NATIVE_OPENXR
+// The highlighted item's label (lootaim::NameLook): a 1 px rim of four strips round
+// its box, pulsing (its rarity color within reach, red past it), the box filled (a
+// dark shade of the rarity color, or the game's own fill) and the name drawn at the
+// larger size its layout made room for. The name keeps the game's rarity color.
+uintptr_t PaintHighlighted(const int32_t* box, const char* name, const float* colour) {
+    namespace la = framevr::lootaim;
+    const auto& look = lootaimvr::Look();
+    float rarity[3], rim[4], c[4];
+    lootaimvr::Rarity(rarity);
+    la::RimRgba(look, rarity, GetTickCount64(), rim);
+    int32_t ring[4][4];
+    const int strips = la::Ring(box, la::RimPx, ring);
+    for (int i = 0; i < strips; ++i) OrigLabelPaint(ring[i], "", rim);
+    la::BoxRgba(look, colour, rarity, c);
+    {   // "Frame loot frame:" when the look changes
+        char line[200];
+        snprintf(line, sizeof line, "Frame loot frame: %s, %d strips of %d px, rim %.2f %.2f %.2f, box %.2f %.2f %.2f %.0f%%, name %.0f%%",
+                 &look == &la::InReachLook ? "in reach" : "out of reach", strips, la::RimPx, rim[0], rim[1], rim[2], c[0], c[1], c[2], c[3] * 100.0f,
+                 look.nameScale * 100.0f);
+        static std::string told;
+        if (told != line) { told = line; Log(line); }
+    }
+    static ULONGLONG told = 0;
+    static uintptr_t toldUnit = 0;
+    const uintptr_t unitNow = lootaimvr::g_glowUnit.load();
+    if (name && unitNow != toldUnit && GetTickCount64() - told >= 1000) {   // once for each new item, once a second at most
+        told = GetTickCount64(); toldUnit = unitNow;
+        char first[64];   // the label on one line, without the game's color code: an identified item's two lines joined by " / "
+        const char* from = name;
+        if ((uint8_t)from[0] == 0xEE && from[1] && from[2] && from[3]) from += 4;
+        int n = 0;
+        for (const char* p = from; *p && n < int(sizeof first) - 4; ++p) {
+            if (*p == '\n') { first[n++] = ' '; first[n++] = '/'; first[n++] = ' '; }
+            else first[n++] = *p;
+        }
+        first[n] = 0;
+        // the painted colors and where they come from (the item's quality, not the label's code)
+        LogF("Frame loot highlight: '%s' quality %u, rim %.2f %.2f %.2f, box %.2f %.2f %.2f %.2f (the game's %.2f %.2f %.2f %.2f)",
+             first, lootaimvr::g_glowQuality.load(), rim[0], rim[1], rim[2], c[0], c[1], c[2], c[3],
+             colour ? colour[0] : -1.f, colour ? colour[1] : -1.f, colour ? colour[2] : -1.f, colour ? colour[3] : -1.f);
+    }
+    const framevr::lootlabels::TextScaleScope scope(t_labelScale, std::min(la::MaxNameScale, LabelSizeNow() * look.nameScale));
+    return OrigLabelPaint(box, name, c);
+}
+#endif
+
 uintptr_t HookLabelPaint(const int32_t* box, const char* name, const float* colour) {
+#ifdef D2RVR_NATIVE_OPENXR
+    if (box) {
+        const uintptr_t lit = HighlightedLabelUnit();
+        if (lit && LabelUnit(box, name) == lit) return PaintHighlighted(box, name, colour);
+    }
+#endif
     float alpha, size;
     LabelLookNow(&alpha, &size);
     bool native=false;
@@ -6301,7 +6834,8 @@ void InstallLabelHooks() {
     float alpha, size;
     LabelLookNow(&alpha, &size);   // the view now: the hooks go in the first time any view wants them
     const bool wantBox = native||alpha < 0.995f;
-    const bool wantSize = std::abs(size - 1.0f) > 0.005f;
+    // the layout hook also tells the loot highlight which label is whose
+    const bool wantSize = std::abs(size - 1.0f) > 0.005f || LabelHighlightWanted();
     if (!wantBox && !wantSize) return;
     if (!g_labelPaintIn.load()) {
         if (paintFailed) return;

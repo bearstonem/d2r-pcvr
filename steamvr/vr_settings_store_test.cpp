@@ -397,6 +397,22 @@ int main(){
         Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"save companion count preference");
         Check(vrsettings::Read().values[CompanionCounts]==enabled&&Int(path,L"interactions",L"companion_counts")==enabled&&Int(path,L"custom",L"keep")==12345,"companion preference survives reload without touching other settings");
     }
+    // Loot pick (#257): Off when missing, On and Off saved as [interactions] loot_pick; the retired 2 (On with glow) reads On.
+    Check(vrsettings::Read().values[LootPick]==0&&Int(path,L"interactions",L"loot_pick")==-999,"a profile without loot_pick reads Off");
+    for(int enabled:{1,0}) {
+        const auto current=vrsettings::Read();
+        model.Open(current);model.Click({Kind::Change,LootPick,enabled?1:-1});request=model.Click({Kind::Apply});
+        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"save the loot pick");
+        const auto saved=vrsettings::Read();
+        Check(saved.values[LootPick]==enabled&&Int(path,L"interactions",L"loot_pick")==enabled&&
+              Changed(saved.values,current.values)==(ChangeMask{1}<<LootPick)&&Int(path,L"custom",L"keep")==12345,"the loot pick survives reload and touches nothing else");
+    }
+    Check(WritePrivateProfileStringW(L"interactions",L"loot_pick",L"2",name),"write the retired On with glow");
+    vrsettings::Poll(name);Check(vrsettings::Read().values[LootPick]==1,"the retired On with glow reads On");
+    Check(WritePrivateProfileStringW(L"interactions",L"loot_pick",L"7",name),"write an unknown loot pick");
+    vrsettings::Poll(name);Check(vrsettings::Read().values[LootPick]==0,"an unknown loot_pick reads Off");
+    Check(WritePrivateProfileStringW(L"interactions",L"loot_pick",nullptr,name),"remove the loot pick");
+    vrsettings::Poll(name);
     model.Open(vrsettings::Read());model.Click({Kind::Change,Motion,-1});request=model.Click({Kind::Apply});
     Check(DeleteFileW(name)&&vrsettings::Submit(request)&&!vrsettings::Poll(name),"missing file fails safely");
     Check(!vrsettings::Read().ready&&vrsettings::Read().result==Result::Failed,"failure status published");

@@ -37,6 +37,7 @@
 #include "swapchain_format.h"
 #include "input.h"
 #include "dropped_item_labels.h"
+#include "loot_aim.h"
 #include "stick_gestures.h"
 #include "window_focus.h"
 #include "panel_input_mode.h"
@@ -582,6 +583,8 @@ sewerprompt::Target sewerPrompt;
 XrPosef palettePose{};
 constexpr float paletteWidth=.45f,paletteHeight=.45f;
 ULONGLONG motionAt=0;
+// Loot pick's pointing hand (LootHandRay): why the motion layer is off (lootaim::Gate bits), the skill wheel, the aim poses' age.
+uint32_t lootGate=0;bool lootWheel=false;ULONGLONG handAimAt=0;
 bool motionHeadTracked=false;
 bool gazeExtension=false,gazeSupported=false,gazeReady=false,gazeValid=false;
 XrAction gazeAction=XR_NULL_HANDLE;
@@ -2780,6 +2783,12 @@ void Input() {
     s.gripMagic=D2RVR_GRIP_MAGIC;s.rightGrip=Float(squeeze,0);s.leftGrip=Float(squeeze,1);s.handsValid=0;
     motionInput={};motionInput.time=Milliseconds()/1000.;motionInput.head=MotionPose(head);
     motionInput.active=motionControls.load()&&gameplayChain&&motionHeadTracked&&!panelMode&&!spatialMode&&!settingsOwned&&!settingsChord&&!inventoryPressed&&!menuPressed&&inWorld&&inWorld();
+    {   // the same terms, one bit each, for the loot pick's pointing hand (LootHandRay); changes nothing else
+        using namespace lootaim;
+        lootGate=(motionControls.load()?0:GateControls)|(gameplayChain?0:GateChain)|(motionHeadTracked?0:GateHead)|(panelMode?GatePanel:0)|
+            (spatialMode?GateSpatial:0)|(settingsOwned?GateSettings:0)|(settingsChord?GateChord:0)|(inventoryPressed?GateInventory:0)|
+            (menuPressed?GateMenu:0)|(inWorld&&inWorld()?0:GateWorld);
+    }
     motionInput.handBindings=true;
     motionInput.grip[0]=(physical.buttons&menus::RightBumper)&&!(controls.buttons&menus::RightBumper)?0:s.rightGrip;
     motionInput.grip[1]=(physical.buttons&menus::LeftBumper)&&!(controls.buttons&menus::LeftBumper)?0:s.leftGrip;
@@ -2816,6 +2825,7 @@ void Input() {
         handAimTracked[h]=XR_SUCCEEDED(pLocateSpace(h?leftAimSpace:aimSpace,space,frameState.predictedDisplayTime,&aimed))&&(aimed.locationFlags&aimFlags)==aimFlags;
         if(handAimTracked[h])handAim[h]=MotionPose(aimed.pose);
     }
+    handAimAt=GetTickCount64();
     const auto bindingSnapshot=interactionstate::Read();
     uint64_t bindingContext=bindingSnapshot.session^(uint64_t(bindingSnapshot.bindingBank+1)<<48)^(meleeEpoch<<16)^motionInput.equipment;
     uint64_t bindingLayout=0;
@@ -2839,8 +2849,25 @@ void Input() {
         controls.rx/32767.f,controls.ry/32767.f);
     if(rightStick.owned)controls.rx=controls.ry=0;
     const bool lootHeld=rightStick.showLoot;
-    const bool wasLootHeld=lootlabels::display.ShowAll(lootNow);
-    lootlabels::display.Refresh(lootSession,lootNow,lootWorld,lootHeld);
+    // Loot pick: while an item is pointed at and the stick does not hold Show items, hold it for that
+    // item, so the game lays out its name even far off; the label layout cuts every other name
+    // (lootaim::onlyPointedUntil). 2026-10-29: a pointed item a few cells off showed no name without the stick.
+    static bool wasForPointed=false;
+    const bool forPointed=lootaim::HoldsForPointed(lootaim::PointedNow(lootaim::pointedAt.load(),lootNow),lootWorld,lootHeld);
+    lootaim::onlyPointedUntil.store(lootaim::OnlyPointedUntil(forPointed,lootHeld,lootaim::onlyPointedUntil.load(),lootNow,lootlabels::LeaseMs));
+    {   // "Frame loot names:" one line a second at most; the toggles in between are counted
+        static uint64_t saidAt=0;static int toggles=0;static bool said=false;
+        if(forPointed!=wasForPointed)++toggles;
+        if(toggles&&forPointed!=said&&lootNow-saidAt>=1000){
+            char line[160];
+            std::snprintf(line,sizeof line,"Frame loot names: %s (%d change%s since the last line)",forPointed?
+                "Show Items held for the pointed item's name alone":"Show Items for the pointed item let go",toggles,toggles==1?"":"s");
+            Say(line);saidAt=lootNow;toggles=0;said=forPointed;
+        }
+    }
+    const bool wasLootHeld=lootlabels::display.ShowAll(lootNow)&&!wasForPointed;
+    wasForPointed=forPointed;
+    lootlabels::display.Refresh(lootSession,lootNow,lootWorld,lootHeld||forPointed);
     if(lootHeld!=wasLootHeld) {
         Say(lootHeld?"Frame loot labels: Show Items (Alt) held (right stick down)":"Frame loot labels: normal drop/hover behavior");
         if(lootHeld)MotionPulse(0,haptics::Category::Interaction,.45f,45000000);
@@ -3173,7 +3200,7 @@ void Input() {
             potions::AtMouth(hand.p,hand.q,interactionInput.head.p,interactionInput.head.q),interactionOutput.bottleEmpty);
         Say(line);potionReportAt=GetTickCount64()+2000;
     }
-    if(interactionOutput.settings){OpenSettings();settingsOwned=true;interactionInput.active=motionInput.active=false;}
+    if(interactionOutput.settings){OpenSettings();settingsOwned=true;interactionInput.active=motionInput.active=false;lootGate|=lootaim::GateSettings;}
     {
         // Minimap zoom: while the wrist / palm map is shown (the wrist turned
         // toward you, or the palm raised) or the wheel's MAP tab is open, and you
@@ -3231,6 +3258,8 @@ void Input() {
         interactionOutput.feedback==2?.65f:.25f,interactionOutput.feedback>=3?100000000:35000000);
     motionInput.palette=false; // Dedicated interaction owner handles the new wheel/belt.
     motionInput.active=motionInput.active&&!interactionOutput.block&&!bloodOutput.block[0]&&!bloodOutput.block[1];
+    lootGate|=(interactionOutput.block?lootaim::GateInteraction:0)|(bloodOutput.block[0]||bloodOutput.block[1]?lootaim::GateBlood:0);
+    lootWheel=interactionOutput.wheel;
     const auto& quickSnapshot=interactionInput.snapshot;
     const bool quickFresh=interaction::Fresh(quickSnapshot,interactionInput.session,interactionInput.at);
     const auto& rightSkill=quickSnapshot.skills[skills::TriggerSlot(0)];
@@ -5559,6 +5588,24 @@ bool HandAimRay(int hand,float outOrigin[3],float outDirection[3]) {
     if(hand==1&&motionInput.weapon==gameplay::Weapon::Bow&&motionInput.tracked[1]){p=motionInput.hand[1].p;d=gameplay::BowForward(motionInput.hand[1]);}
     else if(handAimTracked[hand]){p=handAim[hand].p;d=math::Rotate(handAim[hand].q,{0,0,-1});}
     else return false;
+    const auto undo=math::Conjugate(math::Yaw(math::Heading(Q(head.orientation))));
+    const auto o=math::Rotate(undo,p-V(head.position)),r=math::Rotate(undo,d);
+    outOrigin[0]=o.x;outOrigin[1]=o.y;outOrigin[2]=o.z;
+    outDirection[0]=r.x;outDirection[1]=r.y;outDirection[2]=r.z;
+    return std::isfinite(o.x+o.y+o.z+r.x+r.y+r.z);
+}
+// Loot pick's pointing hand: a hand's aim as HandAimRay has it, but alive while that hand is tracked in the world
+// (lootaim::AwakeWorld: no menu, panel, VR Settings or skill wheel), whatever else turned the motion layer off.
+// gate: the reasons the motion layer is off now (0: on), for the log.
+bool LootHandRay(int hand,float outOrigin[3],float outDirection[3],uint32_t* gate) {
+    std::lock_guard lock(mutex);
+    if(gate)*gate=motionInput.active?0u:lootGate;
+    if(hand<0||hand>1||!motionControls.load())return false;
+    const bool bow=hand==1&&motionInput.weapon==gameplay::Weapon::Bow&&motionInput.tracked[1];
+    if(!lootaim::HandLive(lootaim::AwakeWorld(motionInput.active?0u:lootGate,lootWheel),bow||handAimTracked[hand],GetTickCount64()-handAimAt))return false;
+    math::Vec p,d;
+    if(bow){p=motionInput.hand[1].p;d=gameplay::BowForward(motionInput.hand[1]);}
+    else{p=handAim[hand].p;d=math::Rotate(handAim[hand].q,{0,0,-1});}
     const auto undo=math::Conjugate(math::Yaw(math::Heading(Q(head.orientation))));
     const auto o=math::Rotate(undo,p-V(head.position)),r=math::Rotate(undo,d);
     outOrigin[0]=o.x;outOrigin[1]=o.y;outOrigin[2]=o.z;

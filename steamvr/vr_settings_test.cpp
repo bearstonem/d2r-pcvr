@@ -868,6 +868,22 @@ int main(int argc,char** argv){
         Check(Normalize(LeatherMenu,2)==2&&Normalize(LeatherMenu,.4f)==1&&Normalize(LeatherMenu,7)==1&&Normalize(LeatherMenu,NAN)==1,
               "Off, On or Menu only; an odd INI value or none reads On");
     }
+    {   // Loot pick (#257): Off by default, a switch on Interface beside the loot names, saved alone
+        Check(Defaults()[LootPick]==0&&std::wstring(Definitions[LootPick].section)==L"interactions"&&
+              std::wstring(Definitions[LootPick].key)==L"loot_pick"&&Definitions[LootPick].max==1&&HelpText(LootPick)[0]!=0&&
+              LootPick<ChangeMask::Bits,"loot pick: Off by default, [interactions] loot_pick Off / On, explained, its own change bit");
+        const auto* loot=content::RowOf(LootPick);
+        Check(loot&&!loot->beside&&loot->page==View::Interface&&loot->kind==content::RowKind::Toggle&&std::strcmp(loot->label,"Loot pick")==0&&
+              PageOf(LootLabelSize)==View::Interface&&loot->section==content::RowOf(LootLabelSize)->section&&loot->classes==content::AllClasses,
+              "Loot pick: its own switch row beside Loot name size, every class");
+        for(int c=-1;c<=heroclass::Assassin;++c)Check(RowShown(LootPick,s.values,{c}),"every class, and the title screen, see Loot pick");
+        Model m;m.Open(s);
+        layout::Press(m,{Kind::Set,LootPick,0,1},0);Check(m.Get()[LootPick]==1,"the switch turns the loot pick On");
+        Check(m.Click({Kind::Apply}).changed==(ChangeMask{1}<<LootPick),"Apply saves only the loot pick");
+        Check(Normalize(LootPick,1)==1&&Normalize(LootPick,2)==1&&Normalize(LootPick,0)==0&&Normalize(LootPick,.4f)==0&&
+              Normalize(LootPick,7)==0&&Normalize(LootPick,-1)==0&&Normalize(LootPick,NAN)==0,
+              "On, or the retired 2 (On with glow) reads On; anything else, or none, reads Off");
+    }
     PrintReport();
     std::puts("VR settings draft, persistence requests, conflicts, row rules and input-gating tests passed");
 }

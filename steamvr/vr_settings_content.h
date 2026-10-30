@@ -1,7 +1,7 @@
 #pragma once
 // VR Settings content: the words of the redesigned menu (labels, help, option
 // names and hints, units, warn lines, pages, sections, presets, guide), minus
-// LootPick and MenuPointer (not on upstream main).
+// MenuPointer (not on upstream main).
 //
 // Data only: no drawing, no layout, no input. The menu's data rules
 // (docs/VR_SETTINGS_MENU.md):
@@ -533,6 +533,9 @@ inline constexpr Override Overrides[]={
     {.id="hud.labels_size",.page=View::Interface,.section="Labels and bars",.kind=RowKind::Slider,.label="Loot name size",
      .help="Size of item names on the ground; 45% is the game's size. Hold the right stick down to show every nearby name.",
      .format={.unit="%"}},
+    // Loot pick (#257; loot_aim.h): which dropped item A takes. Off: the game's nearest, as before.
+    {.id="interactions.loot_pick",.page=View::Interface,.section="Labels and bars",.kind=RowKind::Toggle,.label="Loot pick",
+     .help="Hold your arm out and point at an item: A picks up that one, not the nearest, and its name shows. Too far away, A takes nothing."},
     {.id="hud.ordinary_mob_bars",.page=View::Interface,.section="Labels and bars",.kind=RowKind::Toggle,.label="Weak monster bars",
      .help="Names and health bars over ordinary monsters. Bosses and elites always show theirs. Off keeps the view clear."},
 

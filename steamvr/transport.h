@@ -99,6 +99,9 @@ bool GameplayRay(float origin[3],float direction[3]);
 // Aim rules: each hand's own aim in GameplayRay's frame - the controller's
 // pointer, or the bow's forward for the left hand holding a bow.
 bool HandAimRay(int hand,float origin[3],float direction[3]);
+// Loot pick: the same, alive while that hand is tracked in the world (not in menus or the skill wheel) even with the
+// motion layer off; gate: why the motion layer is off (lootaim::Gate bits, 0 while on).
+bool LootHandRay(int hand,float origin[3],float direction[3],uint32_t* gate);
 int CastButtonHand();        // the hand whose button holds a native cast now, -1 none
 bool HandSpellHeld(int hand); // that hand's physical spell button is held
 int PointSpellSkill();       // the cast skill when the aim rules place it at a point, else -1

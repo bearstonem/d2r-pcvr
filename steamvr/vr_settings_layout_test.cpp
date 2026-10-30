@@ -78,6 +78,7 @@ static const GoldenRow Golden[]={
     {"hud.tooltip_timing",View(7),0,content::RowKind::Choice,"Item details delay",3,0},
     {"interactions.controller_labels",View(7),0,content::RowKind::Choice,"Button names",5,0},
     {"hud.labels_size",View(7),1,content::RowKind::Slider,"Loot name size",0,0},
+    {"interactions.loot_pick",View(7),1,content::RowKind::Toggle,"Loot pick",0,0},   // #257: Loot pick, Off / On
     {"hud.ordinary_mob_bars",View(7),1,content::RowKind::Toggle,"Weak monster bars",0,0},
     {"interactions.critical_alerts",View(8),0,content::RowKind::Toggle,"Low life and mana alert",0,0},
     {"gameplay.low_life_heart_start",View(8),0,content::RowKind::Stepper,"Heartbeat starts at",0,1},
