@@ -230,6 +230,10 @@ def apply_setup(manifest, store, version, headset, connections, steam, game, pro
     options = launch_options(Path(sys.executable).resolve(), root / 'steamvr/launch_windows.py', runtime) if store == 'steam' else None
     # Steam may have flushed new bytes while closing after the preview.
     old_options = preflight_steam(profile, steam, game, options, connections, **routing)
+    preview = steam_config.update_shortcuts(
+        (profile / 'config/shortcuts.vdf').read_bytes() if (profile / 'config/shortcuts.vdf').exists() else None,
+        steam, game, connections, **routing)
+    steam_config.artwork_updates(preview, profile, steam, game, connections, root / 'artwork', **routing)
     if mode != 2:
         command = [sys.executable, str(root / 'steamvr/install.py'), '--game', str(game),
                    '--saves', str(saves), '--plugin', str(root / 'bin/d2rl-pcvr.dll'),
@@ -242,7 +246,7 @@ def apply_setup(manifest, store, version, headset, connections, steam, game, pro
         run_installer(command, root, hide_console=hide_console)
     require_closed()
     backup = steam_config.configure(profile, steam, game, options, connections,
-                                   root / 'setup-backups', require_closed, **routing)
+                                   root / 'setup-backups', require_closed, artwork_root=root / 'artwork', **routing)
     if on_steam_configured is not None:
         on_steam_configured()
     record = install.read_record(game)
@@ -338,6 +342,10 @@ def main():
     print('  Game files, saves and Steam configuration are backed up before replacement.')
     if old_options and old_options != options:
         print('  Existing D2R launch options will be replaced; a backup will retain them.')
+    preview = steam_config.update_shortcuts(
+        (profile / 'config/shortcuts.vdf').read_bytes() if (profile / 'config/shortcuts.vdf').exists() else None,
+        steam, game, connections, **routing)
+    steam_config.artwork_updates(preview, profile, steam, game, connections, ROOT / 'artwork', **routing)
     if mode != 2:
         print('  Required loader / ReShade components are downloaded from their official sites and checksum-checked.')
     if choose('Continue with this setup?', ['Install and configure shortcuts', 'Cancel']) == 1:
