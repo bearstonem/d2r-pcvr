@@ -75,6 +75,12 @@ std::atomic<unsigned> dualLanded[2]{},dualRefused{0},clawLanded[2]{};
 // already landed live on the game thread (Apply) only.
 std::atomic<bool> attackSpeed{false},trace{false},attackRating{true};
 std::atomic<uint64_t> cycleSession{0};std::atomic<uint32_t> cycleMs{0},offCycleMs{0};
+// Dual wield's native attack rate (attack_speed.h DualFrames, Cal 2026-10-30): the UI thread's
+// equipment read packs the hero class and, per inventory arm (0 right, 1 left), the weapon
+// class and WSM (SetDualSpeed); 0 = not dual wielding. The game thread reads each stroke's
+// IAS and attackrate with its own weapon merged (DualCycle).
+std::atomic<uint64_t> dualSpeed{0},dualSpeedSession{0};
+std::atomic<unsigned> dualCycleRead{0},dualCycleUnknown{0},strikePrimary{0},strikePrimaryMissing{0};
 std::atomic<unsigned> tooSoon{0},extraTargets{0},missed{0},buttonAttacks{0};
 framevr::attackspeed::Cadence cadence; // Classic shares one native attack cycle across hands/buttons.
 std::atomic<bool> swingRecovery{false};std::atomic<float> recoveryCurve{2},recoveryGrace{1};
@@ -82,6 +88,9 @@ std::atomic<float> cleaveStep{0},cleaveFloor{.25f};
 // Unleashed trigger/button melee (ButtonHit): the latest trigger hit, on the game
 // thread that owns the swing clocks (ObserveServer records it); swings are measured from it too.
 struct TriggerLanded {uint64_t session=0,at=0;} triggerLanded;
+// The latest full-cycle trigger hit or melee skill hit (combat_rules.h FixedCycle): swings
+// count their next breakpoint from it too; in-between trigger hits never stamp it.
+TriggerLanded triggerFull;
 std::atomic<DWORD> gameThread{0};
 std::atomic<unsigned> triggerPenalised{0},triggerOtherThread{0};
 thread_local int smiteDepth=0;   // inside the native Smite (the Smite hook)
@@ -733,12 +742,50 @@ void TraceRefusal(int kind,const Request& r,uint32_t target) {
         (unsigned long long)cadence.Remaining(r.session,r.at),cycleMs.load());
     framevr::logging::Write(line);
 }
-void TraceHit(const Request& r,uint32_t target,const char* outcome,uint64_t since,uint32_t cycle,bool onHit,const char* skill="basic") {
+// sinceFull/full: the fixed cycle (combat_rules.h FixedCycle): ms since the latest full-cycle
+// attack and whether this stroke was one (-1: not decided here, e.g. Classic or a later creature).
+void TraceHit(const Request& r,uint32_t target,const char* outcome,uint64_t since,uint32_t cycle,bool onHit,const char* skill="basic",
+              uint64_t sinceFull=UINT64_MAX,int full=-1) {
     if(!trace.load())return;
-    char line[340];snprintf(line,sizeof line,"Frame melee trace: hand=%s stroke=%llu target=%u %s since_last_landed=%lld ms cycle=%u ms %s=%.1f m/s onhit=%d would_hit=%d strike=%d %s",
-        r.sample.handIndex?"left":"right",(unsigned long long)r.sweep.stroke,target,outcome,since==UINT64_MAX?-1LL:(long long)since,cycle,r.sweep.thrust?"thrust":"swing",r.sweep.speed,int(onHit),
+    char line[380];snprintf(line,sizeof line,"Frame melee trace: hand=%s stroke=%llu target=%u %s since_last_landed=%lld ms since_full=%lld ms full=%d cycle=%u ms %s=%.1f m/s onhit=%d would_hit=%d strike=%d %s",
+        r.sample.handIndex?"left":"right",(unsigned long long)r.sweep.stroke,target,outcome,since==UINT64_MAX?-1LL:(long long)since,
+        sinceFull==UINT64_MAX?-1LL:(long long)sinceFull,full,cycle,r.sweep.thrust?"thrust":"swing",r.sweep.speed,int(onHit),
         combat::LastSwingWouldHit(),r.sample.strikeSkill,skill);
     framevr::logging::Write(line);
+}
+// Dual wield (Cal, 2026-10-30): a stroke's native cycle. Native D2 merges the swinging
+// weapon's stat lists into the hero before it times the attack (D2MOO
+// UNITS_UpdateAttackAnimRateAndVelocity), so item IAS and attackrate are read here under
+// that weapon's own scope; the two WSMs are averaged (attack_speed.h DualFrames). Read once
+// per blade and stroke (the scope refreshes the hero's stat lists). 0: unknown, and the UI
+// thread's per-weapon cycle stands.
+struct DualMemo {uint64_t session=0,stroke=0;uint32_t cycle=0;bool set=false;};
+DualMemo dualMemo[2];
+uint32_t DualCycle(uintptr_t player,uintptr_t weapon,int hand,int body,uint64_t session,uint64_t stroke) {
+    auto& memo=dualMemo[hand&1];
+    if(memo.set&&memo.session==session&&memo.stroke==stroke)return memo.cycle;
+    memo={session,stroke,0,true};
+    const uint64_t packed=dualSpeed.load();
+    static const bool statOk=d2rsig::Check(nativeui::abi::StatRva,nativeui::abi::StatSig,sizeof nativeui::abi::StatSig);
+    if(!packed||dualSpeedSession.load()!=session||!statOk||body<0||body>1){++dualCycleUnknown;return 0;}
+    const int classId=int(packed&0xff)-1;
+    const int weaponClass[2]={int((packed>>8)&0xff),int((packed>>16)&0xff)};
+    const int wsm[2]={int((packed>>24)&0xff)-128,int((packed>>32)&0xff)-128};
+    const auto stat=reinterpret_cast<int(*)(uintptr_t,int,int)>(d2rsig::Addr(nativeui::abi::StatRva));
+    int ias=0,attackRate=0;
+    {meleeweapon::Scope swinging(player,weapon);ias=stat(player,93,0);attackRate=stat(player,68,0);}
+    if(attackRate<10||attackRate>400||weaponClass[body]>=int(framevr::attackspeed::Weapon::Count)){++dualCycleUnknown;return 0;}
+    const int frames=framevr::attackspeed::DualFrames(classId,framevr::attackspeed::Weapon(weaponClass[body]),ias,attackRate,wsm[body],wsm[body^1]);
+    memo.cycle=framevr::attackspeed::Milliseconds(frames);++dualCycleRead;
+    static int told[2][5]={{-1,-1,-1,-1,-1},{-1,-1,-1,-1,-1}};
+    const int now[5]={ias,attackRate,wsm[body],wsm[body^1],frames};
+    if(!std::equal(now,now+5,told[body])) {
+        std::copy(now,now+5,told[body]);
+        char line[240];snprintf(line,sizeof line,"Frame dual wield speed: %s-arm weapon ias=%d attackrate=%d wsm=%d other=%d -> dual wsm=%d, %d frames (%u ms)",
+            body?"left":"right",ias,attackRate,wsm[body],wsm[body^1],framevr::attackspeed::DualWsm(wsm[body],wsm[body^1]),frames,memo.cycle);
+        framevr::logging::Write(line);
+    }
+    return memo.cycle;
 }
 // Every weapon contact with a hostile creature feels struck: one tap per
 // stroke and creature, whether native then lands, misses or refuses it.
@@ -814,9 +861,16 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                         // shared recovery (Cal, 2026-10-21) and the native form attack with the
                         // druid's one weapon (no weapon selection); the cycle is the form's.
                         const bool claws=r.sample.claws;
-                        auto& recoveryState=claws?hands[0].recovery:state.recovery;
-                        auto& recoveryClock=attackSpeed.load()?cadence:recoveryState;
                         const bool dual=!claws&&r.sample.weapons.id[0]&&r.sample.weapons.id[1];
+                        // Dual wield shares the claws' one recovery clock too (Cal, 2026-10-30: "put
+                        // all dual wielders on a shared cycle, like we have with werewolf"): natively a
+                        // basic attack swings one weapon at a time on one attack rhythm, so two blades
+                        // must not earn two full-cycle hits per cycle. Each stroke's cycle is still its
+                        // own weapon's (handCycle); hits, strokes and cleave stay per blade.
+                        const bool sharedClock=claws||dual;
+                        auto& recoveryState=sharedClock?hands[0].recovery:state.recovery;
+                        auto& fullState=sharedClock?hands[0].full:state.full;   // the fixed cycle's last full-cycle stroke
+                        auto& recoveryClock=attackSpeed.load()?cadence:recoveryState;
                         const uintptr_t weapon=dual?meleeweapon::Select(player,hand,r.sample.weapons):0;
                         const int speedHand=dual?r.sample.weapons.BodyHand(hand):0;
                         if((dual&&(!weapon||speedHand<0))||(hand==1&&!dual&&!claws)){++dualRefused;continue;}
@@ -824,7 +878,9 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                         if(dual&&(!Read(weapon+8,selectedId)||selectedId!=r.sample.weapons.displayed[hand])){++dualRefused;continue;}
                         Feel(r,header[2]);
                         if(hits.Contains(r.session,r.sweep.stroke,header[2]))continue;
-                        const uint32_t handCycle=cycleSession.load()==r.session?(speedHand?offCycleMs.load():cycleMs.load()):0;
+                        uint32_t handCycle=cycleSession.load()==r.session?(speedHand?offCycleMs.load():cycleMs.load()):0;
+                        // Dual wield: native times both weapons at one averaged WSM, with the swinging weapon's IAS.
+                        if(dual)if(const uint32_t native=DualCycle(player,weapon,hand,speedHand,r.session,r.sweep.stroke))handCycle=native;
                         const int shape=claws?interactionstate::ShapeForm(r.session,GetTickCount64()):0;
                         // Attack speed: a basic attack strikes one creature, and
                         // no sooner than its native attack cycle (IAS, WSM, class)
@@ -841,19 +897,24 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                             cycle=handCycle;
                         }
                         // Unleashed: measured from the latest trigger/button melee hit too (ButtonHit).
+                        // since: from the previous stroke of any kind; sinceFull: from the latest
+                        // full-cycle one, which alone sets the next breakpoint (FixedCycle, 2026-10-30).
                         const auto since=attackSpeed.load()?recoveryClock.Since(r.session,r.at):
                             combat::SwingSince(recoveryClock.Since(r.session,r.at),triggerLanded.session==r.session?triggerLanded.at:0,r.at);
-                        // Unleashed: the stroke's first landed contact measures how
-                        // recovered it is; every creature that stroke reaches shares it.
-                        // Kept with swing_recovery_damage off too: the on-hit gate reads it.
-                        float recovery=1;bool strokeStart=false;
+                        const auto sinceFull=attackSpeed.load()?since:
+                            combat::SwingSince(fullState.Since(r.session,r.at),triggerFull.session==r.session?triggerFull.at:0,r.at);
+                        // Unleashed: the stroke's first landed contact decides whether it is a
+                        // full-cycle stroke and how recovered an in-between one is; every creature
+                        // that stroke reaches shares it. Kept with swing_recovery_damage off too:
+                        // the on-hit gate and the cycle read it.
+                        float recovery=1;bool strokeStart=false,strokeFull=true;
                         if(!attackSpeed.load()) {
-                            if(state.strokeSession==r.session&&state.strokeId==r.sweep.stroke)recovery=state.strokeRecovery;
+                            if(state.strokeSession==r.session&&state.strokeId==r.sweep.stroke){recovery=state.strokeRecovery;strokeFull=state.strokeFull;}
                             else {
                                 cycle=handCycle;
-                                if(swingRecovery.load(std::memory_order_relaxed))
-                                    recovery=combat::RecoveryFactor(since,cycle,recoveryCurve.load(std::memory_order_relaxed),
-                                                                    recoveryGrace.load(std::memory_order_relaxed));
+                                const auto c=combat::FixedCycle(sinceFull,since,cycle,swingRecovery.load(std::memory_order_relaxed),
+                                                                recoveryCurve.load(std::memory_order_relaxed),recoveryGrace.load(std::memory_order_relaxed));
+                                recovery=c.recovery;strokeFull=c.full;
                                 strokeStart=true;
                             }
                         }
@@ -876,7 +937,7 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                         // stroke's first landed contact; a riposte has earned them. Classic: native.
                         auto onHit=combat::OnHit::Allowed;bool riposte=false;
                         if(!attackSpeed.load()) {
-                            onHit=combat::OnHitGate(strokeStart,since,cycle);
+                            onHit=combat::OnHitGate(strokeStart,sinceFull,cycle);
                             riposte=onHit!=combat::OnHit::Allowed&&combat::RiposteDue(header[2]);
                         }
                         const bool effects=onHit==combat::OnHit::Allowed||riposte;
@@ -890,9 +951,15 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                         // while it runs, and those before the next full cycle, stay basic attacks.
                         const int strikeSkill=r.sample.strikeSkill;
                         auto strike=StrikeOutcome::Basic;int castHits=0;
-                        {
-                            meleeweapon::Scope selected(player,weapon);
-                            if(strikeSkill>=0) {
+                        if(strikeSkill>=0) {
+                            // Dual wield (Cal, 2026-10-30): natively a single-weapon skill (Bash, Stun,
+                            // Concentrate, Berserk; Skills.txt weapsel 0) swings the primary weapon - the
+                            // rendered right one, composite slot 5 - whichever blade struck. The left blade's
+                            // basic attack stays its own weapon's. No primary: the cast falls back to it.
+                            const uintptr_t primary=dual?meleeweapon::Select(player,0,r.sample.weapons):weapon;
+                            if(dual)++(primary?strikePrimary:strikePrimaryMissing);
+                            meleeweapon::Scope selected(player,primary?primary:weapon);
+                            {
                                 ++strikeArmed;
                                 if(sequence.Open(r.session)){++strikeBasic;++sequenceBusy;}
                                 else if(framevr::strikeskills::Casts(strikeSkill,attackSpeed.load(),onHit==combat::OnHit::Allowed)) {
@@ -905,8 +972,10 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                                     }
                                 } else ++strikeBasic;
                             }
-                            if(strike==StrikeOutcome::Basic)
-                                reinterpret_cast<int(*)(uintptr_t,uintptr_t,int,int)>(d2rsig::Addr(AttackRva))(local.game,player,0,1);
+                        }
+                        if(strike==StrikeOutcome::Basic) {
+                            meleeweapon::Scope selected(player,weapon);   // the basic attack swings the blade that struck
+                            reinterpret_cast<int(*)(uintptr_t,uintptr_t,int,int)>(d2rsig::Addr(AttackRva))(local.game,player,0,1);
                         }
                         // A cast that ran spends the stroke like a resolved swing, even if its
                         // hit check was not seen (the clocks must move on).
@@ -932,7 +1001,11 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                         if(dual&&contact.accepted)++dualLanded[hand];
                         if(claws&&contact.accepted)++clawLanded[hand];
                         if(contact.resolved&&attackSpeed.load()){cadence.Landed(r.session,r.at,cycle);landed.Insert(r.session,r.sweep.stroke,0);}
-                        if(contact.resolved&&strokeStart){recoveryState.Landed(r.session,r.at,cycle);state.strokeSession=r.session;state.strokeId=r.sweep.stroke;state.strokeRecovery=recovery;}
+                        if(contact.resolved&&strokeStart){
+                            recoveryState.Landed(r.session,r.at,cycle);
+                            if(strokeFull)fullState.Landed(r.session,r.at,cycle);   // only a full-cycle stroke moves the breakpoint
+                            state.strokeSession=r.session;state.strokeId=r.sweep.stroke;state.strokeRecovery=recovery;state.strokeFull=strokeFull;
+                        }
                         if(contact.resolved&&cleaveTracked)++state.cleaveLanded;
                         if(trace.load()) {
                             // "cast 1/5": Fury or Zeal, hit 1 of its count (SequenceHit logs the rest).
@@ -940,7 +1013,8 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                             if(strike==StrikeOutcome::Cast&&castHits>0)snprintf(tag,sizeof tag,"cast 1/%d",castHits);
                             else snprintf(tag,sizeof tag,"%s",strike==StrikeOutcome::Cast?"cast":strike==StrikeOutcome::StartRefused?"cast_start_refused":
                                           strikeSkill<0?"basic":"basic_strike");
-                            TraceHit(r,header[2],contact.accepted?"LANDED":contact.resolved?"MISSED (roll)":"native rejected",since,cycle,effects,tag);
+                            TraceHit(r,header[2],contact.accepted?"LANDED":contact.resolved?"MISSED (roll)":"native rejected",since,cycle,effects,tag,
+                                     sinceFull,!attackSpeed.load()&&strokeStart?int(strokeFull):-1);
                         }
                         contact=saved;
                         if(!dual&&!claws)break; // Both blades (or claws) may strike this creature in the same batch.
@@ -1435,6 +1509,13 @@ void ConfigureParrySound(int sound) {
     loaded=true;
 }
 void SetAttackCycle(uint64_t session,uint32_t milliseconds,int hand){if(hand==1)offCycleMs=milliseconds;else cycleMs=milliseconds;cycleSession=session;}
+void SetDualSpeed(uint64_t session,int classId,const int weaponClass[2],const int wsm[2]) {
+    uint64_t packed=0;
+    if(classId>=0&&classId<255&&weaponClass&&wsm&&weaponClass[0]>=0&&weaponClass[1]>=0&&weaponClass[0]<256&&weaponClass[1]<256&&
+       wsm[0]>=-128&&wsm[0]<128&&wsm[1]>=-128&&wsm[1]<128)
+        packed=uint64_t(classId+1)|uint64_t(weaponClass[0])<<8|uint64_t(weaponClass[1])<<16|uint64_t(wsm[0]+128)<<24|uint64_t(wsm[1]+128)<<32;
+    dualSpeedSession=session;dualSpeed=packed;
+}
 // The hero is using a melee skill, not a basic attack: the used skill (skill list
 // +0x18, as the do functions read it) is past the basic ones (Skills.txt 0 Attack,
 // 1 Kick, 2 Throw, 3 Unsummon, 4 Left Hand Throw, 5 Left Hand Swing). Game thread.
@@ -1466,7 +1547,7 @@ ButtonStroke ButtonHit(uint32_t monster) {
     if(sequenceScope||UsingSkill()) {
         ++(sequenceScope?sequenceWhole:skillWhole);
         ZealButtonHit(monster);
-        triggerLanded={session,now};++buttonAttacks;
+        triggerLanded={session,now};triggerFull={session,now};++buttonAttacks;   // a skill hit is a full attack
         if(trace.load()&&!sequenceScope) {
             char line[160];snprintf(line,sizeof line,"Frame melee trace: trigger target=%u%s skill hit: whole (recovery 1, on-hit effects)",monster,out.smite?" smite":"");
             framevr::logging::Write(line);
@@ -1475,14 +1556,17 @@ ButtonStroke ButtonHit(uint32_t monster) {
     }
     const uint32_t cycle=cycleSession.load()==session?cycleMs.load():0;
     const uint64_t sinceSwing=std::min(hands[0].recovery.Since(session,now),hands[1].recovery.Since(session,now));
-    const auto v=combat::TriggerRecovery(sinceSwing,cycle,swingRecovery.load(std::memory_order_relaxed),
+    const uint64_t sinceFullSwing=std::min(hands[0].full.Since(session,now),hands[1].full.Since(session,now));
+    const auto v=combat::TriggerRecovery(sinceFullSwing,sinceSwing,cycle,swingRecovery.load(std::memory_order_relaxed),
                                          recoveryCurve.load(std::memory_order_relaxed),recoveryGrace.load(std::memory_order_relaxed));
     out.recovery=v.recovery;out.onHit=v.onHit==combat::OnHit::Allowed;
     triggerLanded={session,now};++buttonAttacks;
+    if(out.onHit)triggerFull={session,now};   // a full-cycle trigger hit starts the next cycle
     if(out.recovery<1||!out.onHit)++triggerPenalised;
     if(trace.load()) {
-        char line[220];snprintf(line,sizeof line,"Frame melee trace: trigger target=%u%s since_last_swing=%lld ms cycle=%u ms recovery=%.2f onhit=%d",
-            monster,out.smite?" smite":"",sinceSwing==UINT64_MAX?-1LL:(long long)sinceSwing,cycle,out.recovery,int(out.onHit));
+        char line[260];snprintf(line,sizeof line,"Frame melee trace: trigger target=%u%s since_last_swing=%lld ms since_full_swing=%lld ms cycle=%u ms recovery=%.2f onhit=%d",
+            monster,out.smite?" smite":"",sinceSwing==UINT64_MAX?-1LL:(long long)sinceSwing,
+            sinceFullSwing==UINT64_MAX?-1LL:(long long)sinceFullSwing,cycle,out.recovery,int(out.onHit));
         framevr::logging::Write(line);
     }
     return out;
@@ -1530,8 +1614,10 @@ void Report() {
         framevr::logging::Write(line);
     }
     const auto right=dualLanded[0].exchange(0),left=dualLanded[1].exchange(0),invalid=dualRefused.exchange(0);
-    if(right||left||invalid) {
-        char line[180];snprintf(line,sizeof line,"Frame dual wield: right landed=%u left landed=%u stale/unavailable weapon=%u",right,left,invalid);
+    const auto speedRead=dualCycleRead.exchange(0),speedUnknown=dualCycleUnknown.exchange(0),primary=strikePrimary.exchange(0),noPrimary=strikePrimaryMissing.exchange(0);
+    if(right||left||invalid||speedRead||speedUnknown||primary||noPrimary) {
+        char line[300];snprintf(line,sizeof line,"Frame dual wield: right landed=%u left landed=%u stale/unavailable weapon=%u; "
+            "native speed strokes=%u unknown=%u; strike casts with primary weapon=%u primary missing=%u",right,left,invalid,speedRead,speedUnknown,primary,noPrimary);
         framevr::logging::Write(line);
     }
     if(const auto pd=parried.exchange(0),pr=parryRefused.exchange(0),pf=parryRepaired.exchange(0),as=attackStarts.exchange(0),dv=deflected.exchange(0);pd||pr||pf||dv) {

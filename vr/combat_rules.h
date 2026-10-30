@@ -53,8 +53,8 @@ inline int32_t ScaleDamageOverTime(int32_t rate,double factor) {
 }
 // Unleashed swing damage: how recovered a stroke is - the time since the
 // previous landed stroke over the native attack cycle, raised to `curve`, at
-// most 1. curve 1 is damage-per-second neutral (twice the strokes at half the
-// damage); 2 makes flailing lose damage (twice the rate = half the DPS).
+// most 1. On the fixed cycle (FixedCycle, 2026-10-30) it scales only the strokes
+// in between full-cycle ones, so it decides how little an extra swing adds.
 // grace (0..1]: the share of the cycle after which a stroke counts as fully
 // recovered (1 = none). An unknown cycle (0) or no previous stroke
 // (UINT64_MAX) is fully recovered.
@@ -65,6 +65,22 @@ inline float RecoveryFactor(uint64_t sinceMs,uint32_t cycleMs,float curve=1,floa
     if(x>=1)return 1;
     const float k=curve>=1&&curve<=4?curve:1;
     return k==1?x:k==2?x*x:float(std::pow(double(x),double(k)));
+}
+// Unleashed fixed attack cycle (Cal, 2026-10-30: "The IAS cooldown/breakpoint should be
+// fixed and you should only be penalized for swinging within a fixed window between full
+// cycles ... Swings out of cycle should never delay your access to the next breakpoint").
+// A stroke one full native cycle (or more) after the latest full-cycle attack (sinceFullMs)
+// is full: full damage, on-hit effects, a strike skill's cast, and it starts the next cycle.
+// A stroke before that is in between: it never moves the next breakpoint, carries no on-hit
+// effects, and its damage scales by the time since the previous stroke of any kind
+// (sinceAnyMs; RecoveryFactor's curve and grace), so one well-timed extra swing per cycle
+// pays a little and flailing pays almost nothing. No full-cycle attack yet (UINT64_MAX) or
+// an unknown cycle (0): full. scale: [gameplay] swing_recovery_damage.
+struct CycleStroke {bool full=true;float recovery=1;};
+inline CycleStroke FixedCycle(uint64_t sinceFullMs,uint64_t sinceAnyMs,uint32_t cycleMs,bool scale,float curve,float grace) {
+    if(!cycleMs||sinceFullMs==UINT64_MAX||sinceFullMs>=cycleMs)return {};
+    const uint64_t since=sinceAnyMs<sinceFullMs?sinceAnyMs:sinceFullMs;
+    return {false,scale?RecoveryFactor(since,cycleMs,curve,grace):1.f};
 }
 // Unleashed cleave falloff: the n-th creature (0 = first) one stroke lands on
 // deals 1 - step*n of its damage, never below floor. step 0 = no falloff.
@@ -77,7 +93,7 @@ inline float CleaveFactor(unsigned index,float step,float floor) {
 // (leech, chance-on-hit procs, crushing blow, open wounds, prevent heal,
 // critical and deadly strike) roll only on the stroke's first landed contact,
 // and only when that stroke spent a full native attack cycle (the breakpoint)
-// since the previous landed stroke on its recovery clock. swing_recovery_grace
+// since the latest full-cycle attack on its clock (FixedCycle). swing_recovery_grace
 // does not shorten it. An unknown cycle (0) or no previous stroke (UINT64_MAX)
 // counts as full. Every other contact still lands its scaled damage.
 enum class OnHit:uint8_t {Allowed,NotFullCycle,CleaveFollowUp};
@@ -88,10 +104,11 @@ inline OnHit OnHitGate(bool firstContact,uint64_t sinceMs,uint32_t cycleMs) {
 }
 // Unleashed trigger/button melee (Cal, 2026-10-24): a melee hit check outside a
 // physical swing (the trigger's basic attack or melee skill, the shield's Smite) is a
-// stroke too, so mixing it with swings is never faster than swinging. Its recovery is
-// measured from the latest landed swing on any hand, never from another trigger hit
-// (the native animation already paces those, and a multi-hit cast's later hits); a
-// swing is measured from the latest trigger hit as well as its own clock.
+// stroke too, so mixing it with swings is never faster than swinging. It is measured
+// from the swings on any hand, never from another trigger hit (the native animation
+// already paces those, and a multi-hit cast's later hits); a swing is measured from
+// the latest trigger hit as well as its own clock. Both on the fixed cycle (FixedCycle):
+// full ones start the next cycle, in-between ones never move it.
 // StrokeGap: the time between a landed stroke and now, in either order (one batch
 // can apply a swing sampled just before a trigger hit); UINT64_MAX when none.
 inline uint64_t StrokeGap(uint64_t landedAt,uint64_t now) {
@@ -105,9 +122,12 @@ inline uint64_t SwingSince(uint64_t ownSinceMs,uint64_t triggerAt,uint64_t now) 
     return t<ownSinceMs?t:ownSinceMs;
 }
 struct TriggerStroke {float recovery=1;OnHit onHit=OnHit::Allowed;};
-// scale: [gameplay] swing_recovery_damage; the on-hit gate applies without it too, as for a swing.
-inline TriggerStroke TriggerRecovery(uint64_t sinceSwingMs,uint32_t cycleMs,bool scale,float curve,float grace) {
-    return {scale?RecoveryFactor(sinceSwingMs,cycleMs,curve,grace):1.f,OnHitGate(true,sinceSwingMs,cycleMs)};
+// sinceFullSwingMs: since the latest full-cycle swing on any hand; sinceAnySwingMs: since the
+// latest landed swing on any hand. scale: [gameplay] swing_recovery_damage; the on-hit gate
+// applies without it too, as for a swing. A full trigger hit (onHit Allowed) starts the next cycle.
+inline TriggerStroke TriggerRecovery(uint64_t sinceFullSwingMs,uint64_t sinceAnySwingMs,uint32_t cycleMs,bool scale,float curve,float grace) {
+    const auto c=FixedCycle(sinceFullSwingMs,sinceAnySwingMs,cycleMs,scale,curve,grace);
+    return {c.recovery,c.full?OnHit::Allowed:OnHit::NotFullCycle};
 }
 // Scratch seed for a gated critical/deadly strike roll: it advances to 99,
 // under no chance below 100 (native: roll = low % 100, crit when roll < chance).
