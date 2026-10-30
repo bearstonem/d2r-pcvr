@@ -86,6 +86,7 @@ static const GoldenRow Golden[]={
     {"gameplay.offline_players",View(8),1,content::RowKind::Stepper,"Offline difficulty",0,2},
     {"gameplay.enemy_sight_pct",View(8),1,content::RowKind::Slider,"Monster sight range",0,0},
     {"gameplay.companion_ai",View(8),1,content::RowKind::Toggle,"Smarter mercenary",0,0},
+    {"gameplay.companion_tactical_commands",View(8),1,content::RowKind::Toggle,"Tactical commands",0,0},
     {"sky.enabled",View(9),0,content::RowKind::Toggle,"Outdoor sky",0,0},
     {"fog.enabled",View(9),0,content::RowKind::Toggle,"Distance fog",0,0},
     {"fog.end",View(9),0,content::RowKind::Slider,"Fog distance",0,0},   // main's #366, drawn inside Distance fog's row

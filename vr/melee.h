@@ -100,5 +100,6 @@ bool HirelingState(uint32_t unitId,int state,bool on);
 // count, -1 when the local server is unavailable; hero receives the player's cell.
 struct Hostile {uint32_t id,classId;float x,y;bool clear;};
 int Hostiles(Hostile* out,int max,float range,float& heroX,float& heroY);
+int HostilesAround(Hostile* out,int max,float range,float centerX,float centerY,uintptr_t viewerUnit=0);
 bool HirelingOverlay(uint32_t unitId,int overlay);
 }

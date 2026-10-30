@@ -1963,20 +1963,20 @@ float FacingUp(float2 uv, int eye, float3 p, float stepPx)
 // The landing circles' look: Jeff's tuned values from the DEV window, 2026-10-20.
 // Sizes are shares of the radius; strengths are 0..1. (Its height band,
 // RingFloorTol, comes from vrcam.)
-static const float kCircleOpacity = 0.5;        // the whole circle's strength
-static const float kCircleRim = 0.03;           // rim width
-static const float kCircleRimStrength = 0.95;
-static const float kCircleBase = 0.08;          // a faint tint over the whole circle
-static const float kCircleBand = 0.45;          // the filled part
-static const float kCircleEdgeGlow = 0.5;       // the glow on the fill's moving edge
-static const float kCircleGlowSharp = 18.0;     // how tight that glow is
-static const float kCircleBrighten = 0.3;       // how much that glow lightens the color
-static const float kCircleDot = 0.05;           // the center dot (the exact aim point)
-static const float kCircleDotStrength = 0.9;
-static const float kCircleInnerSize = 0.05;     // a glow from the rim inward
-static const float kCircleInnerOpacity = 0.25;
-static const float kCircleOuterSize = 0.05;     // a glow from the rim outward
-static const float kCircleOuterOpacity = 0.5;
+static const float kCircleOpacity = 0.32;       // the whole circle's strength (more transparent)
+static const float kCircleRim = 0.015;          // rim width (narrower)
+static const float kCircleRimStrength = 0.85;   // outline strength
+static const float kCircleBase = 0.02;          // subtle floor tint
+static const float kCircleBand = 0.05;          // filled band
+static const float kCircleEdgeGlow = 0.25;      // edge glow
+static const float kCircleGlowSharp = 20.0;     // tightness of edge glow
+static const float kCircleBrighten = 0.2;       // lighten factor
+static const float kCircleDot = 0.025;          // center dot
+static const float kCircleDotStrength = 0.5;    // center dot strength
+static const float kCircleInnerSize = 0.02;     // inner glow size
+static const float kCircleInnerOpacity = 0.12;  // inner glow opacity
+static const float kCircleOuterSize = 0.02;     // outer glow size
+static const float kCircleOuterOpacity = 0.20;  // outer glow opacity
 // One circle over color c, for the ground point p (relative to the hero). A
 // strip measures from its center line instead of the center point, so the same
 // rim and fill draw a rounded band. The fill is a disc growing from the center
@@ -2003,7 +2003,7 @@ float3 RingTint(float3 c, float3 p, float4 ring, float fill, float4 col, float4 
     const float a = saturate(kCircleBase * inner + kCircleBand * filled + kCircleEdgeGlow * glow + kCircleRimStrength * rim +
                              kCircleDotStrength * aim + kCircleInnerOpacity * innerGlow + kCircleOuterOpacity * outerGlow) *
                     ring.w * kCircleOpacity * smoothstep(0.55, 0.8, up);
-    return saturate(c + saturate(col.rgb + kCircleBrighten * glow) * a * 1.3);
+    return saturate(c + saturate(col.rgb + kCircleBrighten * glow) * a);
 }
 float3 Outline(float2 uv, int eye)
 {

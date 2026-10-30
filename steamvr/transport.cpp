@@ -71,6 +71,9 @@
 #include "../vr/wall_cells.h"
 #include "../vr/prop_scan.h"
 #include "elemental_hands_renderer.h"
+#include "../vr/companion_ai.h"
+#include "telegraph.h"
+#include "../vr/target_lock.h" 
 #include "vr_settings_ui.h"
 #include "vr_settings_pointer.h"
 #include "frame_generation.h"
@@ -2400,6 +2403,312 @@ bottles::Prop Metres(const props::Seen& s,float upm) {
     p.unitsPerMetre=upm;
     return p;
 }
+bool g_tacticalPrevGrip[2]{};
+uint64_t g_openPalmHoldStart[2]{};
+bool g_openPalmLocked[2]{};
+int g_tacticalGrabHand = -1;
+uint64_t g_tacticalGrabStartMs = 0;
+uint64_t g_lastTacticalOrderMs = 0;
+bool g_tacticalTargetOutOfRange[2]{};
+
+void StepCompanionTacticalGestures(uint64_t now, float rightTrigger, float leftTrigger) {
+    if (!::companionai::IsTacticalCommandsEnabled() || !interactionInput.active) {
+        g_tacticalPrevGrip[0] = g_tacticalPrevGrip[1] = false;
+        g_openPalmHoldStart[0] = g_openPalmHoldStart[1] = 0;
+        g_openPalmLocked[0] = g_openPalmLocked[1] = false;
+        if (g_tacticalGrabHand >= 0) {
+            framevr::telegraph::Current().ClearSkill(-2);
+            g_tacticalGrabHand = -1;
+        }
+        return;
+    }
+
+    const bool handsBusy = interactionOutput.nearBelt >= 0 || interactionOutput.nearHolster >= 0 ||
+                           interactionOutput.wheel || interactionOutput.settings || motionOutput.bowDrawing;
+    if (handsBusy) {
+        if (g_tacticalGrabHand >= 0) {
+            framevr::telegraph::Current().ClearSkill(-2);
+            g_tacticalGrabHand = -1;
+        }
+    }
+
+    float compX = 0.0f, compY = 0.0f;
+    const bool hasCompPos = ::companionai::GetHirelingWorldSubtilePos(compX, compY);
+
+    for (int h = 0; h < 2; ++h) {
+        if (!interactionInput.tracked[h]) {
+            g_tacticalPrevGrip[h] = false;
+            g_openPalmHoldStart[h] = 0;
+            g_openPalmLocked[h] = false;
+            if (g_tacticalGrabHand == h) {
+                framevr::telegraph::Current().ClearSkill(-2);
+                g_tacticalGrabHand = -1;
+            }
+            continue;
+        }
+
+        const bool gripDown = motionInput.grip[h] > 0.6f;
+        const bool gripHeld = motionInput.grip[h] >= 0.4f;
+        const bool gripClick = gripDown && !g_tacticalPrevGrip[h];
+        g_tacticalPrevGrip[h] = gripDown;
+
+        // 1. Gesture: Open-Palm Defensive Hold (Upright palm facing companion / forward)
+        const float trigger = (h == 0) ? rightTrigger : leftTrigger;
+        const bool handOpen = motionInput.grip[h] < 0.2f && trigger < 0.2f;
+        if (handOpen && g_tacticalGrabHand < 0) {
+            const auto handUp = math::Rotate(interactionInput.hand[h].q, {0, 1, 0});
+            if (handUp.y > 0.82f) {
+                const auto palmNormal = math::Rotate(interactionInput.hand[h].q, h ? math::Vec{1, 0, 0} : math::Vec{-1, 0, 0});
+                const auto headForward = math::Rotate(interactionInput.head.q, {0, 0, -1});
+                if (math::Dot(palmNormal, headForward) > 0.70f) {
+                    if (g_openPalmHoldStart[h] == 0) {
+                        g_openPalmHoldStart[h] = now;
+                    } else if (now - g_openPalmHoldStart[h] >= 400 && !g_openPalmLocked[h] && (now - g_lastTacticalOrderMs >= 300)) {
+                        g_openPalmLocked[h] = true;
+                        g_lastTacticalOrderMs = now;
+                        framevr::companionai::TacticalOrder order;
+                        order.type = framevr::companionai::TacticalOrderType::DefensiveHold;
+                        if (::companionai::IssueTacticalOrder(order)) {
+                            if (hasCompPos) {
+                                framevr::telegraph::Current().Place(compX, compY, now, 3000, 2, 1.5f);
+                            }
+                            MotionPulse(h, haptics::Category::Interaction, 0.45f, 50000000);
+                            Say("Frame companion tactical: open-palm defensive hold ordered");
+                        }
+                    }
+                    continue;
+                }
+            }
+            g_openPalmHoldStart[h] = 0;
+            g_openPalmLocked[h] = false;
+        } else {
+            g_openPalmHoldStart[h] = 0;
+            g_openPalmLocked[h] = false;
+        }
+
+        // 2. Gesture: Select Companion First -> Hold Grip & Aim -> Release Grip to Execute
+        if ((gripClick || g_tacticalGrabHand == h) && (handAimTracked[h] || interactionInput.tracked[h])) {
+            const auto headP = interactionInput.head.p;
+            const auto handP = interactionInput.hand[h].p;
+            const auto eyeToHand = handP - headP;
+            const float eyeDist2 = eyeToHand.x * eyeToHand.x + eyeToHand.y * eyeToHand.y + eyeToHand.z * eyeToHand.z;
+
+            // Sightline ray: from the player's view through the hand / index finger tip
+            const math::Vec rayDir = (eyeDist2 > 0.0025f) ? math::Normalized(eyeToHand) : math::Rotate(handAim[h].q, {0, 0, -1});
+            const math::Vec rayOrigin = handP + rayDir * 0.10f;
+
+            const auto& tossStage = interactionInput.stage;
+            const bool tossWorld = interactionInput.floorKnown && tossStage.known && stageWorld.upm >= 1.0f && stageWorld.upm <= 12.0f;
+            const float tossFloor = tossStage.anchor.y + (interactionInput.floor - tossStage.origin.y);
+            const auto worldP = tossStage.known ? tossStage.World(rayOrigin) : (stageWorld.valid ? (stageWorld.hero + math::Rotate(stageWorld.base, rayOrigin)) : rayOrigin);
+            const auto worldV = tossStage.known ? math::Rotate(tossStage.base, rayDir) : (stageWorld.valid ? math::Rotate(stageWorld.base, rayDir) : rayDir);
+            const auto worldDir = math::Normalized(worldV);
+
+            // Compute ground hit (gx, gy) in sub-tiles
+            float gx = 0.0f, gy = 0.0f;
+            bool groundHit = false;
+            if (tossWorld && worldV.y < -1e-4f && worldP.y > tossFloor) {
+                const float t = (tossFloor - worldP.y) / worldV.y;
+                const math::Vec hit = worldP + worldV * t;
+                groundHit = toss::Cell(hit, tossFloor, stageWorld.upm, gx, gy);
+            }
+
+            // 3D vertical cylinder intersection helper in sheared RenderGround world metres
+            const auto hitsUnitCylinder3D = [&](float ux, float uy, float radiusMetres, float groundTolSubtiles, float& outScore) noexcept -> bool {
+                outScore = 9999.0f;
+                if (groundHit) {
+                    const float gDist = std::hypot(ux - gx, uy - gy);
+                    if (gDist <= groundTolSubtiles) {
+                        outScore = gDist * 0.25f;
+                        return true;
+                    }
+                }
+                if (!tossWorld) return false;
+                const math::Vec unitFeet = coordinates::RenderGround(
+                    { ux * 2.0f / stageWorld.upm, 0.0f, uy * 2.0f / stageWorld.upm },
+                    tossFloor);
+                const float dHoriz2 = worldDir.x * worldDir.x + worldDir.z * worldDir.z;
+                if (dHoriz2 < 1e-5f) return false;
+                const float dx = unitFeet.x - worldP.x;
+                const float dz = unitFeet.z - worldP.z;
+                const float t = (dx * worldDir.x + dz * worldDir.z) / dHoriz2;
+                if (t <= 0.1f || t > 28.0f) return false;
+                const float rx = worldP.x + worldDir.x * t;
+                const float ry = worldP.y + worldDir.y * t;
+                const float rz = worldP.z + worldDir.z * t;
+                const float horizDist = std::hypot(rx - unitFeet.x, rz - unitFeet.z);
+                const float heightAboveFloor = ry - tossFloor;
+                if (horizDist <= radiusMetres && heightAboveFloor >= -0.45f && heightAboveFloor <= 2.00f) {
+                    outScore = horizDist;
+                    return true;
+                }
+                return false;
+            };
+
+            float mercScore = 9999.0f;
+            // Original companion cylinder: radius 0.95m, ground foot tolerance 3.5 sub-tiles, height [-0.45m, 2.00f]
+            const bool pointingAtMerc = hasCompPos && hitsUnitCylinder3D(compX, compY, 0.95f, 3.5f, mercScore);
+
+            // Step 2a: On initial Grip press, Merc Grip Priority gives absolute precedence to latching the companion.
+            // Even if the ray intersects both the companion and nearby monsters (or monsters in front),
+            // pointing at the companion unconditionally latches the companion for tactical commanding.
+            if (gripClick && g_tacticalGrabHand < 0) {
+                if (pointingAtMerc) {
+                    g_tacticalGrabHand = h;
+                    g_tacticalGrabStartMs = now;
+                    MotionPulse(h, haptics::Category::Interaction, 0.30f, 25000000);
+                    framevr::telegraph::Current().Place(compX, compY, now, 250, 2, 1.5f, 0, 0, 0, -2);
+                }
+                continue;
+            }
+
+            if (g_tacticalGrabHand != h) continue;
+
+            // Evaluate candidate monster target when aiming away from the mercenary
+            int picked = -1;
+            const auto snapshot = targetlock::Get();
+            if (snapshot.count > 0 && snapshot.at > 0 && (now - snapshot.at <= 800)) {
+                float bestMonsterScore = 9999.0f;
+                for (int i = 0; i < snapshot.count; ++i) {
+                    const auto& t = snapshot.targets[i];
+                    float score = 9999.0f;
+                    if (hitsUnitCylinder3D(t.x, t.y, 0.85f, 2.5f, score) && score < bestMonsterScore) {
+                        bestMonsterScore = score;
+                        picked = i;
+                    }
+                }
+            }
+
+            // Once companion is grabbed, distinguish ground move aim from direct companion aim:
+            // If the ray hits the ground further than 2.0 sub-tiles from the companion, it is a Move order,
+            // not an order on the companion herself.
+            const float compDistFromGround = (hasCompPos && groundHit) ? std::hypot(compX - gx, compY - gy) : 9999.0f;
+            const bool aimingAtCompanion = hasCompPos && (compDistFromGround <= 2.0f || (!groundHit && pointingAtMerc));
+
+            // Step 2b: While holding Grip, render live preview telegraph
+            if (gripHeld) {
+                float plyrX = 0.0f, plyrY = 0.0f;
+                const bool hasPlyrPos = ::companionai::GetPlayerWorldSubtilePos(plyrX, plyrY);
+
+                if (picked >= 0 && (!aimingAtCompanion || mercScore > 0.6f)) {
+                    const float distToPlayer = hasPlyrPos
+                        ? std::hypot(snapshot.targets[picked].x - plyrX, snapshot.targets[picked].y - plyrY)
+                        : 0.0f;
+                    const bool inRange = (!hasPlyrPos || distToPlayer <= float(framevr::companionai::ElasticCombatLeashDistance));
+
+                    if (inRange != !g_tacticalTargetOutOfRange[h]) {
+                        g_tacticalTargetOutOfRange[h] = !inRange;
+                        MotionPulse(h, haptics::Category::Interaction, inRange ? 0.20f : 0.35f, inRange ? 15000000 : 25000000);
+                    }
+
+                    const int element = inRange ? 1 : 4; // 1 = cold blue for prioritized enemy, 4 = warning crimson red beyond leash
+                    const float radius = inRange ? 1.6f : 2.0f;
+                    framevr::telegraph::Current().Place(snapshot.targets[picked].x, snapshot.targets[picked].y, now, 150, element, radius, 0, 0, 0, -2);
+                } else if (groundHit && !aimingAtCompanion) {
+                    const float distToPlayer = hasPlyrPos ? std::hypot(gx - plyrX, gy - plyrY) : 0.0f;
+                    const bool inRange = (!hasPlyrPos || distToPlayer <= float(framevr::companionai::ElasticCombatLeashDistance));
+
+                    if (inRange != !g_tacticalTargetOutOfRange[h]) {
+                        g_tacticalTargetOutOfRange[h] = !inRange;
+                        MotionPulse(h, haptics::Category::Interaction, inRange ? 0.20f : 0.35f, inRange ? 15000000 : 25000000);
+                    }
+
+                    const int element = inRange ? 3 : 4; // 3 = tactical green within leash, 4 = warning crimson red beyond leash
+                    const float radius = inRange ? 1.8f : 2.2f;
+                    framevr::telegraph::Current().Place(gx, gy, now, 150, element, radius, 0, 0, 0, -2);
+                } else if (aimingAtCompanion) {
+                    g_tacticalTargetOutOfRange[h] = false;
+                    framevr::telegraph::Current().Place(compX, compY, now, 150, 2, 1.5f, 0, 0, 0, -2);
+                }
+                continue;
+            }
+
+            // Step 2c: On Grip release, execute the selected tactical command
+            const uint64_t holdDurationMs = (now >= g_tacticalGrabStartMs) ? (now - g_tacticalGrabStartMs) : 0;
+            g_tacticalGrabHand = -1;
+            g_tacticalTargetOutOfRange[h] = false;
+            framevr::telegraph::Current().ClearSkill(-2);
+
+            if (now - g_lastTacticalOrderMs < 300) continue;
+
+            const auto curState = ::companionai::GetTacticalCommandState();
+            const bool orderActive = (curState == framevr::companionai::TacticalCommandState::Requested ||
+                                      curState == framevr::companionai::TacticalCommandState::Moving ||
+                                      curState == framevr::companionai::TacticalCommandState::Arrived);
+
+            float plyrX = 0.0f, plyrY = 0.0f;
+            const bool hasPlyrPos = ::companionai::GetPlayerWorldSubtilePos(plyrX, plyrY);
+
+            if (picked >= 0 && (!aimingAtCompanion || mercScore > 0.6f)) {
+                g_lastTacticalOrderMs = now;
+                const float distToPlayer = hasPlyrPos
+                    ? std::hypot(snapshot.targets[picked].x - plyrX, snapshot.targets[picked].y - plyrY)
+                    : 0.0f;
+                const bool inRange = (!hasPlyrPos || distToPlayer <= float(framevr::companionai::ElasticCombatLeashDistance));
+
+                framevr::companionai::TacticalOrder order;
+                order.type = framevr::companionai::TacticalOrderType::PrioritizeEnemy;
+                order.targetUnitId = snapshot.targets[picked].id;
+                order.targetPos = { snapshot.targets[picked].x, snapshot.targets[picked].y };
+
+                if (!inRange) {
+                    (void)::companionai::IssueTacticalOrder(order);
+                    MotionPulse(h, haptics::Category::Interaction, 0.60f, 60000000);
+                    char line[128];
+                    std::snprintf(line, sizeof line, "Frame companion tactical: monster target out of leash range (%.1f > %.0f sub-tiles)",
+                        distToPlayer, float(framevr::companionai::ElasticCombatLeashDistance));
+                    Say(line);
+                } else if (::companionai::IssueTacticalOrder(order)) {
+                    framevr::telegraph::Current().Place(order.targetPos.x, order.targetPos.y, now, 3000, 1, 1.6f);
+                    MotionPulse(h, haptics::Category::Interaction, 0.45f, 40000000);
+                    char line[128];
+                    std::snprintf(line, sizeof line, "Frame companion tactical: prioritized monster unit=%u at (%.1f, %.1f)", order.targetUnitId, order.targetPos.x, order.targetPos.y);
+                    Say(line);
+                }
+            } else if (groundHit && !aimingAtCompanion) {
+                g_lastTacticalOrderMs = now;
+                const float distToPlayer = hasPlyrPos ? std::hypot(gx - plyrX, gy - plyrY) : 0.0f;
+                const bool inRange = (!hasPlyrPos || distToPlayer <= float(framevr::companionai::ElasticCombatLeashDistance));
+
+                framevr::companionai::TacticalOrder order;
+                order.type = framevr::companionai::TacticalOrderType::MoveAndHold;
+                order.targetPos = { gx, gy };
+
+                if (!inRange) {
+                    (void)::companionai::IssueTacticalOrder(order);
+                    MotionPulse(h, haptics::Category::Interaction, 0.60f, 60000000);
+                    char line[128];
+                    std::snprintf(line, sizeof line, "Frame companion tactical: ground target out of leash range (%.1f > %.0f sub-tiles)",
+                        distToPlayer, float(framevr::companionai::ElasticCombatLeashDistance));
+                    Say(line);
+                } else if (::companionai::IssueTacticalOrder(order)) {
+                    MotionPulse(h, haptics::Category::Interaction, 0.35f, 30000000);
+                    char line[128];
+                    std::snprintf(line, sizeof line, "Frame companion tactical: move-and-hold ordered at (%.1f, %.1f)", gx, gy);
+                    Say(line);
+                }
+            } else if (aimingAtCompanion || (holdDurationMs <= 300 && !groundHit)) {
+                g_lastTacticalOrderMs = now;
+                if (orderActive) {
+                    ::companionai::CancelTacticalOrder();
+                    MotionPulse(h, haptics::Category::Interaction, 0.35f, 30000000);
+                    Say("Frame companion tactical: regroup / follow player ordered");
+                } else {
+                    framevr::companionai::TacticalOrder order;
+                    order.type = framevr::companionai::TacticalOrderType::DefensiveHold;
+                    if (::companionai::IssueTacticalOrder(order)) {
+                        if (hasCompPos) {
+                            framevr::telegraph::Current().Place(compX, compY, now, 3000, 2, 1.5f);
+                        }
+                        MotionPulse(h, haptics::Category::Interaction, 0.45f, 50000000);
+                        Say("Frame companion tactical: defensive hold ordered on companion");
+                    }
+                }
+            }
+        }
+    }
+}
+
 // The weapons, shield and fists that push things, posed this frame (world metres).
 std::array<bottles::Collider,bottles::Colliders> HeldColliders() {
     const auto& in=interactionInput;const auto& out=interactionOutput;
@@ -3086,6 +3395,7 @@ void Input() {
             PlayGuardBreak();
         }
         if(strainOutput.clearedNow)Say("Frame guard strain: cleared");
+        StepCompanionTacticalGestures(now, Float(trigger, 0), Float(trigger, 1));
         // Consume completed images before scheduling more work. Never replace an
         // in-flight request: at <=25 FPS that discarded every animated result.
         if(in.session!=strainPaintSession||!strainOutput.visible) {
