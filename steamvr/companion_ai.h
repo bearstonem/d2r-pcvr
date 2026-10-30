@@ -6,6 +6,7 @@
 #include <cstring>
 #include <span>
 #include <vector>
+#include "companion_item_skills_ui.h"
 
 namespace framevr::companionai {
 
@@ -64,6 +65,72 @@ inline int GetArchetypeDistressSound(uint16_t classId) {
             return 3015; // barbarian_chat_a_1 (HD redirect: barbarian_chat_a_hd1 10115)
         default:
             return 3171; // Default to Paladin help
+    }
+}
+
+// Tactical voice cues for gesture-based commands
+enum class TacticalVoiceCue : uint8_t {
+    None = 0,
+    Impossible,    // Command rejected / unreachable / out of leash / retreating
+    MoveConfirm,   // Acknowledged MoveAndHold
+    AttackConfirm, // Acknowledged PrioritizeEnemy
+    HoldConfirm,   // Acknowledged DefensiveHold
+    RegroupLeash,  // Auto-cancelled hold by leash break
+    Distress       // Critical health < 50%
+};
+
+// Maps hireling class and tactical voice cue to native sounds.txt row
+inline int GetArchetypeVoiceCue(uint16_t classId, TacticalVoiceCue cue) {
+    if (cue == TacticalVoiceCue::None) return 0;
+
+    static std::atomic<unsigned> g_voiceVariation{0};
+    const unsigned var = g_voiceVariation.fetch_add(1, std::memory_order_relaxed) & 1;
+
+    if (cue == TacticalVoiceCue::Distress) return GetArchetypeDistressSound(classId) + int(var);
+
+    // sounds.txt row indices per character archetype:
+    // Amazon base: 2937, Barbarian base: 3015, Necromancer base: 3093, Paladin base: 3171
+    int base = 3171; // Default to Paladin
+    switch (classId) {
+        case MonStatsIndex::Rogue:      base = 2937; break; // Amazon
+        case MonStatsIndex::Desert:     base = 3171; break; // Paladin
+        case MonStatsIndex::IronWolf:   base = 3093; break; // Necromancer
+        case MonStatsIndex::Barbarian1:
+        case MonStatsIndex::Barbarian2: base = 3015; break; // Barbarian
+        default:                        base = 3171; break;
+    }
+
+    switch (cue) {
+        case TacticalVoiceCue::Impossible:
+            return base + 16 + int(var); // impossible_1 (ama_impossible) / impossible_2 (ama_cant)
+        case TacticalVoiceCue::MoveConfirm: {
+            switch (classId) {
+                case MonStatsIndex::Rogue:
+                    return (var == 0) ? 4294 : 4291; // rogue_confirm_a_4 ("Sí") / rogue_confirm_a_1 ("Como desees") - both Voice Set A
+                case MonStatsIndex::Desert:
+                    return 3952;                      // greiz_greeting_inactive_2 ("Sí" / "Vale" / "Okay")
+                case MonStatsIndex::IronWolf:
+                    return (var == 0) ? 4040 : 4041; // ironwolf_yes_1 / ironwolf_yes_2 ("Sí" / "Vale" / "Okay")
+                case MonStatsIndex::Barbarian1:
+                case MonStatsIndex::Barbarian2:
+                    return 4565;                      // qualkehk_greeting_inactive_3 ("Sí" / "Vale" / "Okay")
+                default:
+                    return 3952;
+            }
+        }
+        case TacticalVoiceCue::AttackConfirm:
+            return base + 12 + int(var); // chat_g_1 (ama_die) / chat_g_2 (ama_timetodie)
+        case TacticalVoiceCue::HoldConfirm:
+            return base + 6 + int(var);  // chat_d_1 (ama_thanks) / chat_d_2 (ama_thankyou)
+        case TacticalVoiceCue::RegroupLeash: {
+            // ~10% probability of saying farewell / "hasta luego" (chat_f_1 / chat_f_2, base + 10)
+            // ~90% probability of follow / regroup call (chat_b_1 / chat_b_2, base + 2)
+            static std::atomic<unsigned> s_leashCallCount{0};
+            const bool isFarewell = ((s_leashCallCount.fetch_add(1, std::memory_order_relaxed) % 10) == 0);
+            return base + (isFarewell ? 10 : 2) + int(var);
+        }
+        default:
+            return 0;
     }
 }
 
@@ -659,6 +726,537 @@ struct TacticalFormationController {
     }
 };
 
+// Phase 6: Gesture-Based Tactical Commands (Point & Hold)
+enum class TacticalOrderType : uint8_t {
+    None = 0,         // Autonomous mode: standard formations and peeling
+    MoveAndHold,      // March to target ground coordinate and hold defensive ground
+    PrioritizeEnemy,  // Focus attack exclusively on a specific monster entity
+    DefensiveHold     // Cease movement and lock current ground position
+};
+
+enum class TacticalCommandState : uint8_t {
+    Idle = 0,         // No active custom movement command; native AI operates normally
+    Requested,        // Valid destination accepted, awaiting game-thread submission
+    Moving,           // Movement request active; monitoring progress and stall state
+    Arrived,          // Within arrival tolerance and holding position
+    Failed,           // Destination rejected/unreachable or stalled past retry limit
+    Cancelled         // Explicitly released, expired, leash broken, or unit/level invalidated
+};
+
+enum class TacticalCommandCancelReason : uint8_t {
+    None = 0,
+    ExplicitCancel,
+    RetreatOrCriticalHealth,
+    LeashExceeded,
+    HoldExpired,
+    TargetDefeated,
+    DestinationUnreachable,
+    StalledNoProgress,
+    UnitInvalidated,
+    LevelTransition
+};
+
+inline constexpr const char* TacticalCommandStateName(TacticalCommandState s) noexcept {
+    switch (s) {
+        case TacticalCommandState::Idle:      return "Idle";
+        case TacticalCommandState::Requested: return "Requested";
+        case TacticalCommandState::Moving:    return "Moving";
+        case TacticalCommandState::Arrived:   return "Arrived";
+        case TacticalCommandState::Failed:    return "Failed";
+        case TacticalCommandState::Cancelled: return "Cancelled";
+        default:                              return "Unknown";
+    }
+}
+
+inline constexpr const char* TacticalCommandCancelReasonName(TacticalCommandCancelReason r) noexcept {
+    switch (r) {
+        case TacticalCommandCancelReason::None:                    return "None";
+        case TacticalCommandCancelReason::ExplicitCancel:          return "ExplicitCancel";
+        case TacticalCommandCancelReason::RetreatOrCriticalHealth: return "RetreatOrCriticalHealth";
+        case TacticalCommandCancelReason::LeashExceeded:           return "LeashExceeded";
+        case TacticalCommandCancelReason::HoldExpired:             return "HoldExpired";
+        case TacticalCommandCancelReason::TargetDefeated:          return "TargetDefeated";
+        case TacticalCommandCancelReason::DestinationUnreachable:  return "DestinationUnreachable";
+        case TacticalCommandCancelReason::StalledNoProgress:       return "StalledNoProgress";
+        case TacticalCommandCancelReason::UnitInvalidated:         return "UnitInvalidated";
+        case TacticalCommandCancelReason::LevelTransition:         return "LevelTransition";
+        default:                                                   return "Unknown";
+    }
+}
+
+struct TacticalOrder {
+    TacticalOrderType type = TacticalOrderType::None;
+    uint32_t targetUnitId = 0;       // Unit ID if type == PrioritizeEnemy
+    Vec2 targetPos{};                // Sub-tile world coordinates
+    uintptr_t targetRoom = 0;        // D2RoomStrc pointer
+    uint64_t issuedMs = 0;           // Timestamp of command issuance
+    uint64_t holdDurationMs = 0;     // 0 = indefinite until leash break or cancel
+    bool operator==(const TacticalOrder&) const = default;
+};
+
+struct TacticalOrderController {
+    static constexpr float ArrivalTolerance = 2.0f;
+    static constexpr float NearObstacleArrivalTolerance = 4.5f;
+    static constexpr float HoldReleaseDeadband = 3.5f;
+    static constexpr float MeleeSentryTetherRadius = 5.5f;
+    static constexpr float MeleeHoldEngageRadius = 6.0f;
+    static constexpr float RangedHoldEngageRadius = 24.0f;
+    static constexpr float EngagementTolerance = 3.5f;
+    static constexpr float EngagementReleaseDeadband = 5.0f;
+    static constexpr float RangedMinStandOff = 5.0f;
+    static constexpr float RangedOptimalStandOff = 10.0f;
+    static constexpr float RangedEngagementTolerance = 14.0f;
+    static constexpr float RangedEngagementReleaseDeadband = 16.5f;
+    static constexpr float DuplicateTargetTolerance = 0.5f;
+    static constexpr float ProgressThreshold = 0.25f;
+    static constexpr uint64_t StallTimeoutMs = 2000;
+    static constexpr uint8_t MaxMoveRetries = 2;
+
+    TacticalOrder activeOrder{};
+    uint64_t lastOrderMs = 0;
+    bool inTacticalOrder = false;
+
+    TacticalCommandState state = TacticalCommandState::Idle;
+    TacticalCommandCancelReason lastCancelReason = TacticalCommandCancelReason::None;
+    uint64_t commandId = 0;
+    uint64_t stateEnteredMs = 0;
+    uint64_t lastProgressMs = 0;
+    float bestDistToTarget = 0.0f;
+    uint8_t retryCount = 0;
+    bool pendingMoveSubmission = false;
+    uint32_t boundUnitId = 0;
+    uintptr_t boundAreaRoom = 0;
+
+    // Computes archetype-aware arrival and release tolerances for the active order
+    static void GetOrderTolerances(TacticalOrderType type, Archetype arch, float& outArrivalTol, float& outReleaseDeadband) noexcept {
+        if (type == TacticalOrderType::MoveAndHold || type == TacticalOrderType::DefensiveHold) {
+            outArrivalTol = ArrivalTolerance;
+            outReleaseDeadband = (arch == Archetype::MeleeVanguard) ? (MeleeHoldEngageRadius + 1.5f) : HoldReleaseDeadband;
+            return;
+        }
+        if (type == TacticalOrderType::PrioritizeEnemy) {
+            if (arch == Archetype::RangedOverwatch) {
+                outArrivalTol = RangedEngagementTolerance;
+                outReleaseDeadband = RangedEngagementReleaseDeadband;
+            } else {
+                outArrivalTol = EngagementTolerance;
+                outReleaseDeadband = EngagementReleaseDeadband;
+            }
+            return;
+        }
+        outArrivalTol = ArrivalTolerance;
+        outReleaseDeadband = HoldReleaseDeadband;
+    }
+
+    // Computes the effective destination coordinate for a movement submission, respecting ranged stand-off
+    Vec2 ComputeEffectiveMoveTarget(Vec2 compPos, Archetype arch = Archetype::MeleeVanguard, Vec2 playerPos = {}) const noexcept {
+        if (activeOrder.type == TacticalOrderType::PrioritizeEnemy && arch == Archetype::RangedOverwatch) {
+            float dx = compPos.x - activeOrder.targetPos.x;
+            float dy = compPos.y - activeOrder.targetPos.y;
+            float dist = std::hypot(dx, dy);
+            if (dist < 1e-3f) {
+                dx = (playerPos.x != 0.0f || playerPos.y != 0.0f) ? (playerPos.x - activeOrder.targetPos.x) : 1.0f;
+                dy = (playerPos.x != 0.0f || playerPos.y != 0.0f) ? (playerPos.y - activeOrder.targetPos.y) : 0.0f;
+                dist = std::hypot(dx, dy);
+                if (dist < 1e-3f) { dx = 1.0f; dy = 0.0f; dist = 1.0f; }
+            }
+            if (dist > RangedEngagementTolerance || dist < RangedMinStandOff) {
+                // Walk or kite to optimal stand-off firing distance (~10 sub-tiles)
+                return {
+                    activeOrder.targetPos.x + (dx / dist) * RangedOptimalStandOff,
+                    activeOrder.targetPos.y + (dy / dist) * RangedOptimalStandOff
+                };
+            }
+            return compPos;
+        }
+        return activeOrder.targetPos;
+    }
+
+    static void AssignConfirmationCue(TacticalOrderType type, TacticalVoiceCue& outCue) noexcept {
+        switch (type) {
+            case TacticalOrderType::MoveAndHold:
+                outCue = TacticalVoiceCue::MoveConfirm;
+                break;
+            case TacticalOrderType::PrioritizeEnemy:
+                outCue = TacticalVoiceCue::AttackConfirm;
+                break;
+            case TacticalOrderType::DefensiveHold:
+                outCue = TacticalVoiceCue::HoldConfirm;
+                break;
+            default:
+                outCue = TacticalVoiceCue::None;
+                break;
+        }
+    }
+
+    // Issues an order. Validates finite coordinates, health/retreat, and leash distance.
+    // Deduplicates identical active orders so repeated inputs do not reset progress or spam requests.
+    // Returns true if accepted (outCue set to confirmation cue),
+    // or false if rejected (outCue set to TacticalVoiceCue::Impossible).
+    bool IssueOrder(const TacticalOrder& order, uint64_t nowMs, Vec2 compPos, Vec2 playerPos, TacticalVoiceCue& outCue, bool inRetreat = false, float health = 0.0f, float maxHealth = 0.0f, Archetype arch = Archetype::MeleeVanguard) {
+        if (order.type == TacticalOrderType::None) {
+            outCue = TacticalVoiceCue::None;
+            return false;
+        }
+
+        if (!std::isfinite(compPos.x) || !std::isfinite(compPos.y) ||
+            !std::isfinite(playerPos.x) || !std::isfinite(playerPos.y)) {
+            outCue = TacticalVoiceCue::Impossible;
+            return false;
+        }
+
+        if (inRetreat || IsCriticalHealth(health, maxHealth)) {
+            outCue = TacticalVoiceCue::Impossible;
+            return false;
+        }
+
+        const float compDistToPlayer = std::hypot(compPos.x - playerPos.x, compPos.y - playerPos.y);
+        if (compDistToPlayer > float(ElasticCombatLeashDistance)) {
+            outCue = TacticalVoiceCue::Impossible;
+            return false;
+        }
+
+        if (order.type == TacticalOrderType::MoveAndHold || order.type == TacticalOrderType::PrioritizeEnemy) {
+            if (!std::isfinite(order.targetPos.x) || !std::isfinite(order.targetPos.y) ||
+                (order.targetPos.x <= 0.0f && order.targetPos.y <= 0.0f)) {
+                outCue = TacticalVoiceCue::Impossible;
+                return false;
+            }
+            const float targetDistToPlayer = std::hypot(order.targetPos.x - playerPos.x, order.targetPos.y - playerPos.y);
+            if (targetDistToPlayer > float(ElasticCombatLeashDistance)) {
+                outCue = TacticalVoiceCue::Impossible;
+                return false;
+            }
+        }
+
+        // Deduplicate identical active commands so repeated clicks do not reset progress or spam dispatches
+        if (IsActive() && activeOrder.type == order.type) {
+            bool isDuplicate = false;
+            if (order.type == TacticalOrderType::MoveAndHold) {
+                const float delta = std::hypot(activeOrder.targetPos.x - order.targetPos.x, activeOrder.targetPos.y - order.targetPos.y);
+                isDuplicate = (delta <= DuplicateTargetTolerance);
+            } else if (order.type == TacticalOrderType::PrioritizeEnemy) {
+                isDuplicate = (order.targetUnitId != 0 && activeOrder.targetUnitId == order.targetUnitId);
+            } else if (order.type == TacticalOrderType::DefensiveHold) {
+                isDuplicate = true;
+            }
+
+            if (isDuplicate) {
+                activeOrder.issuedMs = nowMs;
+                activeOrder.holdDurationMs = order.holdDurationMs;
+                if (order.type == TacticalOrderType::PrioritizeEnemy) {
+                    activeOrder.targetPos = order.targetPos;
+                }
+                lastOrderMs = nowMs;
+                AssignConfirmationCue(order.type, outCue);
+                return true;
+            }
+        }
+
+        ++commandId;
+        activeOrder = order;
+        activeOrder.issuedMs = nowMs;
+        lastOrderMs = nowMs;
+        inTacticalOrder = true;
+        lastCancelReason = TacticalCommandCancelReason::None;
+        retryCount = 0;
+        stateEnteredMs = nowMs;
+        lastProgressMs = nowMs;
+
+        if (order.type == TacticalOrderType::DefensiveHold) {
+            if (activeOrder.targetPos.x == 0.0f && activeOrder.targetPos.y == 0.0f) {
+                activeOrder.targetPos = compPos;
+            }
+            bestDistToTarget = 0.0f;
+            state = TacticalCommandState::Arrived;
+            pendingMoveSubmission = false;
+        } else {
+            const float distToTarget = std::hypot(compPos.x - order.targetPos.x, compPos.y - order.targetPos.y);
+            bestDistToTarget = distToTarget;
+            float arrivalTol = ArrivalTolerance;
+            float releaseDeadband = HoldReleaseDeadband;
+            GetOrderTolerances(order.type, arch, arrivalTol, releaseDeadband);
+            if (order.type == TacticalOrderType::PrioritizeEnemy && arch == Archetype::RangedOverwatch) {
+                if (distToTarget >= RangedMinStandOff && distToTarget <= RangedEngagementTolerance) {
+                    state = TacticalCommandState::Arrived;
+                    pendingMoveSubmission = false;
+                } else {
+                    state = TacticalCommandState::Requested;
+                    pendingMoveSubmission = true;
+                }
+            } else if (distToTarget <= arrivalTol) {
+                state = TacticalCommandState::Arrived;
+                pendingMoveSubmission = false;
+            } else {
+                state = TacticalCommandState::Requested;
+                pendingMoveSubmission = true;
+            }
+        }
+
+        AssignConfirmationCue(order.type, outCue);
+        return true;
+    }
+
+    void CancelOrder(TacticalCommandCancelReason reason = TacticalCommandCancelReason::ExplicitCancel, uint64_t nowMs = 0) {
+        if (inTacticalOrder || state == TacticalCommandState::Requested || state == TacticalCommandState::Moving || state == TacticalCommandState::Arrived) {
+            state = TacticalCommandState::Cancelled;
+            lastCancelReason = reason;
+            stateEnteredMs = nowMs;
+        } else if (state != TacticalCommandState::Failed && state != TacticalCommandState::Cancelled) {
+            state = TacticalCommandState::Idle;
+        }
+        activeOrder = {};
+        inTacticalOrder = false;
+        pendingMoveSubmission = false;
+        retryCount = 0;
+    }
+
+    void ResetToIdle() {
+        activeOrder = {};
+        inTacticalOrder = false;
+        state = TacticalCommandState::Idle;
+        lastCancelReason = TacticalCommandCancelReason::None;
+        pendingMoveSubmission = false;
+        retryCount = 0;
+        boundUnitId = 0;
+        boundAreaRoom = 0;
+    }
+
+    void BindUnitAndArea(uint32_t unitId, uintptr_t areaRoom) {
+        boundUnitId = unitId;
+        boundAreaRoom = areaRoom;
+    }
+
+    // Validates that the mercenary unit and active level context remain valid.
+    // Returns false if the active command was invalidated and cancelled.
+    bool ValidateRuntimeContext(uint32_t currentUnitId, uintptr_t currentAreaRoom, uint32_t animMode, float health, uint64_t nowMs, TacticalVoiceCue& outCue) {
+        outCue = TacticalVoiceCue::None;
+        const bool unitDeadOrMissing = (currentUnitId == 0 || health <= 0.0f || animMode == 0 || animMode == 12);
+        const bool unitChanged = (boundUnitId != 0 && currentUnitId != 0 && currentUnitId != boundUnitId);
+        const bool levelInvalid = (boundAreaRoom != 0 && currentAreaRoom == 0);
+
+        if (unitDeadOrMissing || unitChanged) {
+            boundUnitId = currentUnitId;
+            boundAreaRoom = currentAreaRoom;
+            if (IsActive()) {
+                CancelOrder(TacticalCommandCancelReason::UnitInvalidated, nowMs);
+            }
+            return false;
+        }
+
+        if (levelInvalid) {
+            boundAreaRoom = currentAreaRoom;
+            if (IsActive()) {
+                CancelOrder(TacticalCommandCancelReason::LevelTransition, nowMs);
+            }
+            return false;
+        }
+
+        boundUnitId = currentUnitId;
+        boundAreaRoom = currentAreaRoom;
+        return true;
+    }
+
+    // Marks the active order as Failed because the destination room/coordinates are unreachable.
+    void ReportDestinationUnreachable(uint64_t nowMs, TacticalVoiceCue& outCue) {
+        state = TacticalCommandState::Failed;
+        lastCancelReason = TacticalCommandCancelReason::DestinationUnreachable;
+        stateEnteredMs = nowMs;
+        activeOrder = {};
+        inTacticalOrder = false;
+        pendingMoveSubmission = false;
+        retryCount = 0;
+        outCue = TacticalVoiceCue::Impossible;
+    }
+
+    // Marks a PrioritizeEnemy order as Cancelled when the target enemy dies or despawns.
+    void ReportTargetDefeated(uint64_t nowMs) {
+        CancelOrder(TacticalCommandCancelReason::TargetDefeated, nowMs);
+    }
+
+    // If MoveAndHold walked up to an obstacle edge within NearObstacleArrivalTolerance (4.5 sub-tiles)
+    // and native A* cannot step any closer, snap anchor to compPos and mark Arrived rather than failing.
+    bool SnapArrivedIfNearObstacle(Vec2 compPos, uint64_t nowMs, Archetype arch = Archetype::MeleeVanguard) noexcept {
+        if (!inTacticalOrder || state != TacticalCommandState::Moving) {
+            return false;
+        }
+        const float dist = std::hypot(compPos.x - activeOrder.targetPos.x, compPos.y - activeOrder.targetPos.y);
+        if (activeOrder.type == TacticalOrderType::MoveAndHold) {
+            if (dist <= NearObstacleArrivalTolerance) {
+                activeOrder.targetPos = compPos;
+                state = TacticalCommandState::Arrived;
+                stateEnteredMs = nowMs;
+                retryCount = 0;
+                pendingMoveSubmission = false;
+                return true;
+            }
+        } else if (activeOrder.type == TacticalOrderType::PrioritizeEnemy && arch == Archetype::RangedOverwatch) {
+            if (dist <= RangedEngagementTolerance && dist >= RangedMinStandOff) {
+                state = TacticalCommandState::Arrived;
+                stateEnteredMs = nowMs;
+                retryCount = 0;
+                pendingMoveSubmission = false;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Evaluates the active order on tick.
+    // Returns true ONLY when a single movement request should be submitted (on Requested -> Moving
+    // or a bounded stall retry), never spamming on every tick.
+    // If order is cancelled or fails, transitions state and sets outCue appropriately.
+    bool Evaluate(Vec2 compPos, Vec2 playerPos, uint64_t nowMs, bool inRetreat, Vec2& outTarget, TacticalVoiceCue& outCue, float health = 0.0f, float maxHealth = 0.0f, Archetype arch = Archetype::MeleeVanguard) {
+        outCue = TacticalVoiceCue::None;
+        if (!inTacticalOrder || activeOrder.type == TacticalOrderType::None) {
+            return false;
+        }
+
+        // Priority 1: Critical health retreat aborts tactical orders immediately
+        if (inRetreat || IsCriticalHealth(health, maxHealth)) {
+            CancelOrder(TacticalCommandCancelReason::RetreatOrCriticalHealth, nowMs);
+            outCue = TacticalVoiceCue::Distress;
+            return false;
+        }
+
+        // Priority 2: Elastic leash auto-cancel (> 40 sub-tiles from player)
+        const float compDistToPlayer = std::hypot(compPos.x - playerPos.x, compPos.y - playerPos.y);
+        if (compDistToPlayer > float(ElasticCombatLeashDistance)) {
+            CancelOrder(TacticalCommandCancelReason::LeashExceeded, nowMs);
+            outCue = TacticalVoiceCue::RegroupLeash;
+            return false;
+        }
+
+        if (activeOrder.type == TacticalOrderType::MoveAndHold || activeOrder.type == TacticalOrderType::PrioritizeEnemy) {
+            const float targetDistToPlayer = std::hypot(activeOrder.targetPos.x - playerPos.x, activeOrder.targetPos.y - playerPos.y);
+            if (targetDistToPlayer > float(ElasticCombatLeashDistance)) {
+                CancelOrder(TacticalCommandCancelReason::LeashExceeded, nowMs);
+                outCue = TacticalVoiceCue::RegroupLeash;
+                return false;
+            }
+        }
+
+        // Priority 3: Optional timeout duration
+        if (activeOrder.holdDurationMs > 0 && (nowMs - activeOrder.issuedMs) >= activeOrder.holdDurationMs) {
+            CancelOrder(TacticalCommandCancelReason::HoldExpired, nowMs);
+            outCue = TacticalVoiceCue::RegroupLeash;
+            return false;
+        }
+
+        // Priority 4: State-machine evaluation by order type
+        if (activeOrder.type == TacticalOrderType::DefensiveHold) {
+            const float distToHold = std::hypot(compPos.x - activeOrder.targetPos.x, compPos.y - activeOrder.targetPos.y);
+            if (distToHold > HoldReleaseDeadband) {
+                outTarget = activeOrder.targetPos;
+                return true;
+            }
+            state = TacticalCommandState::Arrived;
+            pendingMoveSubmission = false;
+            return false; // Hold current position
+        }
+
+        if (activeOrder.type == TacticalOrderType::MoveAndHold || activeOrder.type == TacticalOrderType::PrioritizeEnemy) {
+            float arrivalTol = ArrivalTolerance;
+            float releaseDeadband = HoldReleaseDeadband;
+            GetOrderTolerances(activeOrder.type, arch, arrivalTol, releaseDeadband);
+            const float distToTarget = std::hypot(compPos.x - activeOrder.targetPos.x, compPos.y - activeOrder.targetPos.y);
+            const Vec2 effectiveMoveTarget = ComputeEffectiveMoveTarget(compPos, arch, playerPos);
+
+            if (state == TacticalCommandState::Arrived) {
+                // For RangedOverwatch under PrioritizeEnemy: if the enemy approaches closer than RangedMinStandOff (5.0 sub-tiles),
+                // the archer must kite away rather than letting the enemy get glued to her!
+                if (activeOrder.type == TacticalOrderType::PrioritizeEnemy &&
+                    arch == Archetype::RangedOverwatch &&
+                    distToTarget < RangedMinStandOff) {
+                    state = TacticalCommandState::Moving;
+                    stateEnteredMs = nowMs;
+                    lastProgressMs = nowMs;
+                    bestDistToTarget = distToTarget;
+                    retryCount = 0;
+                    pendingMoveSubmission = false;
+                    outTarget = effectiveMoveTarget;
+                    return true;
+                }
+
+                // Hysteresis deadband prevents oscillation between Arrived and Moving on minor collision pushback
+                if (distToTarget <= releaseDeadband) {
+                    pendingMoveSubmission = false;
+                    return false;
+                }
+                // Pushed significantly outside hold deadband: transition back to Moving with a single re-submission
+                state = TacticalCommandState::Moving;
+                stateEnteredMs = nowMs;
+                lastProgressMs = nowMs;
+                bestDistToTarget = distToTarget;
+                retryCount = 0;
+                pendingMoveSubmission = false;
+                outTarget = effectiveMoveTarget;
+                return true;
+            }
+
+            // Check arrival within tolerance
+            if (distToTarget <= arrivalTol) {
+                state = TacticalCommandState::Arrived;
+                stateEnteredMs = nowMs;
+                retryCount = 0;
+                pendingMoveSubmission = false;
+                return false; // Arrived; hold position without thrashing path calls
+            }
+
+            // Initial submission: transition Requested -> Moving once
+            if (state == TacticalCommandState::Requested || pendingMoveSubmission) {
+                state = TacticalCommandState::Moving;
+                stateEnteredMs = nowMs;
+                lastProgressMs = nowMs;
+                bestDistToTarget = distToTarget;
+                pendingMoveSubmission = false;
+                outTarget = effectiveMoveTarget;
+                return true;
+            }
+
+            // Currently Moving: track progress toward target and enforce stall/retry bounds
+            if (state == TacticalCommandState::Moving) {
+                if (distToTarget + ProgressThreshold < bestDistToTarget) {
+                    bestDistToTarget = distToTarget;
+                    lastProgressMs = nowMs;
+                    return false; // Making progress; do not spam movement entry point
+                }
+
+                if (nowMs >= lastProgressMs && (nowMs - lastProgressMs) >= StallTimeoutMs) {
+                    if (retryCount < MaxMoveRetries) {
+                        ++retryCount;
+                        lastProgressMs = nowMs;
+                        outTarget = effectiveMoveTarget;
+                        return true; // Bounded retry after stall timeout
+                    }
+                    // Stalled beyond retry limit: transition Moving -> Failed and stop retrying
+                    state = TacticalCommandState::Failed;
+                    lastCancelReason = TacticalCommandCancelReason::StalledNoProgress;
+                    stateEnteredMs = nowMs;
+                    activeOrder = {};
+                    inTacticalOrder = false;
+                    pendingMoveSubmission = false;
+                    outCue = TacticalVoiceCue::Impossible;
+                    return false;
+                }
+
+                return false; // Waiting for movement progress within stall window
+            }
+        }
+
+        return false;
+    }
+
+    bool IsActive() const { return inTacticalOrder && activeOrder.type != TacticalOrderType::None; }
+    const TacticalOrder& GetOrder() const { return activeOrder; }
+    TacticalOrderType GetOrderType() const { return activeOrder.type; }
+    TacticalCommandState GetState() const { return state; }
+    TacticalCommandCancelReason GetLastCancelReason() const { return lastCancelReason; }
+    uint64_t GetCommandId() const { return commandId; }
+    uint8_t GetRetryCount() const { return retryCount; }
+    float GetBestDistanceToTarget() const { return bestDistToTarget; }
+};
+
 struct HirelingBaseline {
     uint16_t row = 0;
     uint8_t aidist[3]{};
@@ -699,6 +1297,8 @@ inline bool RestoreHirelingBaselines(std::span<uint8_t> table, size_t rowCount, 
     }
     return true;
 }
+
+void GetLiveMercenarySkillBadges(std::vector<companionui::MercenarySkillBadge>& out, uint64_t& rev);
 
 } // namespace framevr::companionai
 

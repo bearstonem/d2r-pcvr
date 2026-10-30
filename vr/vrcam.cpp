@@ -1052,6 +1052,11 @@ void LoadSettings() {
         IniF(L"gameplay",L"companion_ai",1.0f)))!=0&&g_set.platform.load()==1);
     companionai::ConfigureDistressSound((int)IniF(L"gameplay",L"companion_distress_sound",1));
     companionai::ConfigurePeel(IniF(L"gameplay",L"companion_peel",1.0f)!=0.0f);
+    companionai::ConfigureTacticalCommands(int(framevr::settings::Normalize(framevr::settings::CompanionTactical,
+        IniF(L"gameplay",L"companion_tactical_commands",1.0f)))!=0&&g_set.platform.load()==1);
+    companionai::ConfigureItemSkills(int(framevr::settings::Normalize(framevr::settings::CompanionItemSkills,
+        IniF(L"gameplay",L"companion_item_skills",1.0f)))!=0&&g_set.platform.load()==1);
+    companionai::ConfigureConsumeItemCharges(IniF(L"dev",L"companion_consume_item_charges",0.0f)!=0.0f);
 #endif
 #if D2RVR_FIRST_PERSON
     g_set.flatView.store(std::clamp((int)IniF(L"mode", L"flat_view", 3.0f), 1, 3));
@@ -3503,7 +3508,7 @@ Pick g_pick[3];                      // aimrules::Source: right, left, eyes
 std::atomic<bool> g_pointing[2]{};   // that arm is held out
 std::atomic<uint32_t> g_held[2]{};   // the target a held button took, 0 none
 std::atomic<int> g_heldSource[2]{};
-const char* SourceName(int source) { return source == 0 ? "right hand" : source == 1 ? "left hand" : "eyes"; }
+const char* SourceName(int source) { return source == 0 ? "right hand" : source == 1 ? "left hand" : source == 99 ? "tactical priority" : "eyes"; }
 bool Pointing(int hand) { return hand >= 0 && hand < 2 && g_pointing[hand].load(); }
 void Store(int k, const targetlock::Snapshot* s, int i) {
     if (!s || i < 0) { g_pick[k].id.store(0); return; }
@@ -3671,6 +3676,16 @@ int ShownTargets(Shown out[2]) {
     // Aim follows your view: while the hand whose color the eyes' monster takes points, it is not outlined (that hand's cast never takes it)
     const bool eyes = framevr::aimrules::EyesOutlined(FollowsView(), Pointing(dominant));
     if (n == 0 && eyes) if (const uint32_t id = idOf(framevr::aimrules::Eyes); id && fill(id, framevr::aimrules::Eyes, out[n])) ++n;
+#if D2RVR_NATIVE_OPENXR
+    if (companionai::IsTacticalCommandsEnabled() && n < 2) {
+        const auto tactical = companionai::GetActiveTacticalOrder();
+        if (tactical.type == framevr::companionai::TacticalOrderType::PrioritizeEnemy && tactical.targetUnitId) {
+            if (tactical.targetUnitId != first && fill(tactical.targetUnitId, 99, out[n])) {
+                ++n;
+            }
+        }
+    }
+#endif
     // Telemetry: "Frame aim outline:" whenever what is outlined changes
     static uint64_t shownKey = ~0ull;
     uint64_t key = n;
@@ -3739,9 +3754,10 @@ bool RulesAimCast() {
 // Kept only while something uses a target: the outline or a spell lock.
 namespace mobaim {
 bool Wanted() {
-    return g_enabled.load() && g_inWorld.load() &&
+    const bool tacticalActive = companionai::IsTacticalCommandsEnabled();
+    return g_enabled.load() && g_inWorld.load() && d2rcam::InWorld() &&
         (TargetHighlightOn() || SpellsLocked() || BowSkillsLocked() ||
-         GroundAimMode() == 2);
+         GroundAimMode() == 2 || tacticalActive);
 }
 void Tick() {
     const bool wanted = Wanted();
@@ -3763,7 +3779,7 @@ void Tick() {
     // From the settings alone, so loading screens and menus don't flip it.
     // Aim follows your view is not counted (aimrules::Any): it only changes which
     // monster the picks take, so with nothing using them it has nothing to do.
-    const bool resting = !TargetHighlightOn() && !framevr::aimrules::Any(aimtargets::Options());
+    const bool resting = !TargetHighlightOn() && !framevr::aimrules::Any(aimtargets::Options()) && !companionai::IsTacticalCommandsEnabled();
     static bool rested = false;
     if (resting != rested) {
         rested = resting;
@@ -8781,14 +8797,20 @@ bool ShieldDebugWanted() {
 bool OutlineWanted() {
 #ifdef D2RVR_NATIVE_OPENXR
     aimtargets::Shown shown[2];
-    return g_enabled.load() && g_inWorld.load() && !gamestate::MenuOpen() && TargetHighlightOn() && aimtargets::ShownTargets(shown) > 0;
+    const bool tacticalActive = companionai::IsTacticalCommandsEnabled() &&
+        (companionai::GetActiveTacticalOrder().type == framevr::companionai::TacticalOrderType::PrioritizeEnemy);
+    return g_enabled.load() && g_inWorld.load() && d2rcam::InWorld() && !gamestate::MenuOpen() &&
+        (TargetHighlightOn() || tacticalActive) && aimtargets::ShownTargets(shown) > 0;
 #else
     return false;
 #endif
 }
 // Landing circles (same pass): while any ground skill's circle is showing.
 bool RingWanted() {
-    return g_enabled.load() && g_inWorld.load() && !gamestate::MenuOpen() && AimOn(framevr::settings::LandingCircles) &&
+    const bool tacticalActive = companionai::IsTacticalCommandsEnabled() &&
+        (companionai::GetActiveTacticalOrder().type == framevr::companionai::TacticalOrderType::MoveAndHold);
+    return g_enabled.load() && g_inWorld.load() && d2rcam::InWorld() && !gamestate::MenuOpen() &&
+        (AimOn(framevr::settings::LandingCircles) || tacticalActive) &&
         framevr::telegraph::AnyOn(framevr::telegraph::Current().Get(), GetTickCount64());
 }
 
@@ -9581,9 +9603,9 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
                 char n[16];
                 snprintf(n, sizeof n, "RingPos%d", k); SetFloats(rt, n, ring, 4);
                 snprintf(n, sizeof n, "RingFill%d", k); SetFloat(rt, n, draw.fill);
-                // rgb its element's color (fire orange, cold blue, lightning yellow, other green), w its radius
-                static const float kElement[4][3] = {{1.0f, 0.45f, 0.05f}, {0.3f, 0.7f, 1.0f}, {1.0f, 0.92f, 0.35f}, {0.4f, 1.0f, 0.3f}};
-                const int el = mark.element >= 0 && mark.element < 4 ? mark.element : 0;
+                // rgb its element's color (fire orange, cold blue, lightning yellow, other green, warning red), w its radius
+                static const float kElement[5][3] = {{1.0f, 0.45f, 0.05f}, {0.3f, 0.7f, 1.0f}, {1.0f, 0.92f, 0.35f}, {0.25f, 1.0f, 0.4f}, {1.0f, 0.05f, 0.05f}};
+                const int el = mark.element >= 0 && mark.element < 5 ? mark.element : 0;
                 const float col[4] = {kElement[el][0], kElement[el][1], kElement[el][2], mark.radius * 2.0f};
                 snprintf(n, sizeof n, "RingCol%d", k); SetFloats(rt, n, col, 4);
                 // a strip: its direction (grid x/y are world x/z) and half-length in world units; 0 = a circle
@@ -9612,7 +9634,11 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
                 const float hue = OutlineHue(t.source);
                 float wheel[3];
                 framevr::settings::HueRgb(hue, wheel);
-                SetFloats(rt, k ? "Outline2Color" : "OutlineColor", hue <= 0 ? kBands[framevr::targetcone::Band(t.distance)] : wheel, 3);
+                const auto tactical = companionai::GetActiveTacticalOrder();
+                const bool isTactical = (t.source == 99 || (tactical.type == framevr::companionai::TacticalOrderType::PrioritizeEnemy && tactical.targetUnitId == t.id));
+                static const float kTacticalCrimson[3] = {1.0f, 0.05f, 0.05f};
+                const float* col = isTactical ? kTacticalCrimson : (hue <= 0 ? kBands[framevr::targetcone::Band(t.distance)] : wheel);
+                SetFloats(rt, k ? "Outline2Color" : "OutlineColor", col, 3);
                 SetFloats(rt, k ? "Outline2Shape" : "OutlineShape", mobShape, 3);
             }
         }
@@ -9949,7 +9975,7 @@ DWORD WINAPI UpdateThread(void*) {
         AfrQuietWhenOff();
         if (nowMs >= nextState) {   // what the hero holds, 5 times a second
             nextState = nowMs + 200;
-            gamestate::Tick();
+            if (g_inWorld.load() && d2rcam::InWorld()) gamestate::Tick();
             // A weapon change rebuilds the hero's model: the matrix the facing was
             // read from stays where it was and reads yaw 0 (log 2026-10-04: "model
             // 0.0", "8.00 above the look-at"), and the doll stopped following the

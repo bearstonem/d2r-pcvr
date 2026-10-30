@@ -63,8 +63,8 @@ static Items::Result __cdecl RemoveToken(const PluginContext*,PlayerHandle playe
     ++tokenRemoves;tokenLive=false;return Items::Result::Success;
 }
 static Items::Result __cdecl ItemsCall(const PluginContext*,const Items::Transaction* t,Items::TransactionResult* r) noexcept {
-    ++itemCalls;assert(t->player==local&&(t->outputCount==1||t->outputCount==2||(t->outputCount>=5&&t->outputCount<=10)));
-    if(t->outputCount==1)assert(t->outputs[0].code==Items::MakeItemCode("buc")||t->outputs[0].code==Items::MakeItemCode("clb"));
+    ++itemCalls;assert(t->player==local&&(t->outputCount>=1&&t->outputCount<=10));
+    if(t->outputCount==1)assert(t->outputs[0].code!=0);
     if(t->outputCount==5){constexpr const char* kit[]={"jav","pil","glv","tkf","tax"};   // the throwing kit
         for(unsigned i=0;i<5;++i)assert(t->outputs[i].code==Items::MakeItemCode(kit[i][0],kit[i][1],kit[i][2]));}
     if(t->outputCount==2) {
@@ -82,7 +82,8 @@ static Items::Result __cdecl ItemsCall(const PluginContext*,const Items::Transac
         grantedCodes.push_back(s.code);
         const bool potions=t->outputCount==10&&t->outputs[0].code==Items::MakeItemCode("hp5"); // the potion kit
         const bool torch=t->outputCount==6&&t->outputs[0].code==Items::MakeItemCode("clb");
-        const bool starter=(t->outputCount<9&&t->outputCount>2)||potions;
+        const bool merc=(t->outputCount==3||t->outputCount==4)&&s.quality==Items::Quality::Unique;
+        const bool starter=((t->outputCount<9&&t->outputCount>2)||potions)&&!merc;
         if(torch) {
             if(i==0||i==1)assert(s.quality==Items::Quality::Normal&&s.socketCount==1&&s.itemLevel==1);
             else if(i==2||i==3)assert(s.quality==Items::Quality::Normal&&s.itemLevel==1);
@@ -279,9 +280,20 @@ int main(){
     assert(commands[beforeQuestCommands] == "cheat quests");
     assert(commands[beforeQuestCommands + 1] == "cheat waypoints");
 
+    // Mercenary dev choices: MercChargesChoice (slot 9) and MercSkillsChoice (slot 10)
+    assert(ValidChoice(MercChargesChoice)&&PageFor(MercChargesChoice)==0&&SlotFor(MercChargesChoice)==9);
+    assert(ValidChoice(MercSkillsChoice)&&PageFor(MercSkillsChoice)==0&&SlotFor(MercSkillsChoice)==10);
+    assert(IsKit(MercChargesChoice)&&!NormalKit(MercChargesChoice));
+    assert(IsKit(MercSkillsChoice)&&!NormalKit(MercSkillsChoice));
+    assert(Kit(0, MercChargesChoice)[0] != nullptr);
+    assert(Kit(0, MercSkillsChoice, 271)[0] == std::string_view("8cb"));
+    assert(Kit(0, MercSkillsChoice, 338)[0] == std::string_view("7sr"));
+    assert(Kit(0, MercSkillsChoice, 359)[0] == std::string_view("9b9"));
+    assert(Kit(0, MercSkillsChoice, 560)[0] == std::string_view("7gd"));
+
     // Failed standalone kits clean up only the generated exchange token.
     failItems=true;
-    for(int choice:{CrossbowChoice,BowChoice,SmallShieldChoice,ThrowingChoice,PotionsChoice,TorchChoice,ThrowingPotionsChoice}) {
+    for(int choice:{CrossbowChoice,BowChoice,SmallShieldChoice,ThrowingChoice,PotionsChoice,TorchChoice,ThrowingPotionsChoice,MercChargesChoice,MercSkillsChoice}) {
         const auto beforeCleanup=tokenRemoves;
         devscenarios::Request(Make(choice));Run(tasks.size()-1);
         assert(devscenarios::Status().result==Result::KitRefused&&!tokenLive&&tokenRemoves==beforeCleanup+1);

@@ -72,5 +72,19 @@ int main() {
     marks=wall.Get();found=-1;for(int i=0;i<MaxMarks;++i)if(marks[i].cast==30000)found=i;
     Check(found>=0&&marks[found].dirX==0&&marks[found].dirY==1&&marks[found].halfLength==5.f,"its direction is kept as a unit vector");
     Check(wall.Place(40,10,30000,700,0,2,0,0,5)&&[&]{for(const auto& k:wall.Get())if(k.x==40)return k.halfLength==0;return false;}(),"no direction: a circle");
+    // Live interactive cursor preview (skill == -2): updates in place every frame without debouncing, clears on release
+    {
+        Board previewBoard;
+        Check(previewBoard.Place(10, 10, 1000, 150, 3, 1.8f, 0, 0, 0, -2), "interactive preview places initial mark");
+        auto m1 = previewBoard.Get();
+        Check(Showing(m1, 1010) == 1 && m1[0].element == 3, "initial preview is element 3 (green)");
+        // Next frame 11ms later, hand moves slightly and crosses leash limit: element changes to 4 (red) without debounce block
+        Check(previewBoard.Place(10.2f, 10.1f, 1011, 150, 4, 2.0f, 0, 0, 0, -2), "subsequent frame updates preview in place");
+        auto m2 = previewBoard.Get();
+        Check(Showing(m2, 1020) == 1 && m2[0].element == 4 && m2[0].x == 10.2f, "updated in place to element 4 (red)");
+        // ClearSkill(-2) removes the interactive mark immediately
+        previewBoard.ClearSkill(-2);
+        Check(Showing(previewBoard.Get(), 1020) == 0, "ClearSkill(-2) immediately clears preview mark");
+    }
     std::puts("Landing circle: timing, several casts, burst matching and reuse passed");
 }

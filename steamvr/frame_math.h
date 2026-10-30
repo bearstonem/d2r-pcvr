@@ -3,8 +3,14 @@
 #include <cmath>
 
 namespace framevr::math {
-struct Vec { float x, y, z; };
-struct Quat { float x, y, z, w; };
+struct Vec {
+    float x, y, z;
+    bool operator==(const Vec&) const = default;
+};
+struct Quat {
+    float x, y, z, w;
+    bool operator==(const Quat&) const = default;
+};
 struct Fov { float left, right, down, up; };
 // Keep every runtime-recommended ray while removing projection offsets that
 // D2R's native light-bin shader does not account for. Eye poses stay unchanged.

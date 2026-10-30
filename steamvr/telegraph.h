@@ -117,8 +117,20 @@ public:
     static constexpr uint64_t RepeatMs=350;
     bool Place(float x,float y,uint64_t now,uint64_t showMs,int element,float radius,float dirX=0,float dirY=0,float halfLength=0,int skill=-1) {
         std::lock_guard lock(mutex);
-        for(const auto& m:marks)
-            if(m.cast&&now>=m.cast&&now-m.cast<RepeatMs&&std::hypot(m.x-x,m.y-y)<1.5f)return false;
+        if (skill == -2) {
+            for (auto& m : marks) {
+                if (m.skill == -2) {
+                    showMs = std::max<uint64_t>(showMs, MinFlightMs);
+                    const float d = std::hypot(dirX, dirY);
+                    if (!(halfLength > 0 && d > 1e-4f)) dirX = dirY = halfLength = 0; else { dirX /= d; dirY /= d; }
+                    m = {x, y, now, showMs, now + showMs, ++sequence, element, radius, dirX, dirY, halfLength, -2};
+                    return true;
+                }
+            }
+        } else {
+            for(const auto& m:marks)
+                if(m.cast&&now>=m.cast&&now-m.cast<RepeatMs&&std::hypot(m.x-x,m.y-y)<1.5f)return false;
+        }
         Mark* slot=&marks[0];
         for(auto& m:marks) {
             if(!Sample(m,now).on){slot=&m;break;}
@@ -129,6 +141,14 @@ public:
         if(!(halfLength>0&&d>1e-4f))dirX=dirY=halfLength=0;else{dirX/=d;dirY/=d;}
         *slot={x,y,now,showMs,now+showMs,++sequence,element,radius,dirX,dirY,halfLength,skill};
         return true;
+    }
+    void ClearSkill(int skill) {
+        std::lock_guard lock(mutex);
+        for (auto& m : marks) {
+            if (m.skill == skill) {
+                m = {};
+            }
+        }
     }
     // A skill's launch missile appeared, flying from (ox, oy) to (tx, ty) at
     // live cells/s (the game's velocity for it; 0 = unknown, then the speed it

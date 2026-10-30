@@ -1,5 +1,6 @@
 #pragma once
 #include <D2RLPlugin/api.h>
+#include "../steamvr/companion_ai.h"
 
 namespace companionai {
 void Init(const D2RL::PluginContext* ctx);
@@ -13,8 +14,36 @@ unsigned UnstuckCount();
 unsigned TacticalMoveCount();
 void ConfigureDistressSound(int soundId);
 void ConfigurePeel(bool enabled);
+void ConfigureTacticalCommands(bool enabled);
+bool IsTacticalCommandsEnabled();
+unsigned TacticalCommandCount();
+bool IssueTacticalOrder(const framevr::companionai::TacticalOrder& order);
+void CancelTacticalOrder();
+framevr::companionai::TacticalOrder GetActiveTacticalOrder();
+framevr::companionai::TacticalCommandState GetTacticalCommandState();
+framevr::companionai::TacticalCommandCancelReason GetTacticalCommandCancelReason();
+uint64_t GetTacticalCommandId();
+uintptr_t GetTacticalCombatTarget(uintptr_t game, uintptr_t unit);
+bool TryOverrideCombatTarget(uintptr_t game, uintptr_t unit, uintptr_t& outTarget);
+uintptr_t FilterNativeCombatTarget(uintptr_t game, uintptr_t unit, uintptr_t candidateTarget);
+bool GetHirelingWorldSubtilePos(float& outX, float& outY);
+bool GetPlayerWorldSubtilePos(float& outX, float& outY);
 void OnPotionReceived();
 bool IsInTacticalRetreat();
 unsigned PeelCount();
-}
-
+void ConfigureItemSkills(bool enabled);
+bool IsItemSkillsEnabled();
+void ConfigureConsumeItemCharges(bool enabled);
+bool IsConsumeItemChargesEnabled();
+void ExecuteCompanionTacticalCharges(
+    uintptr_t game,
+    uintptr_t hireling,
+    uint32_t classId,
+    float health,
+    float maxHealth,
+    framevr::companionai::Vec2 compPos,
+    framevr::companionai::Vec2 plyrPos,
+    uint64_t nowMs,
+    bool inRetreat,
+    bool isTacticalActive);
+} // namespace companionai

@@ -31,6 +31,7 @@
 #include "sigscan.h"
 #include "memory.h"
 #include "logging.h"
+#include "companion_ai.h"
 #include "../steamvr/transport.h"
 #include "../steamvr/callback_ticket.h"
 #include "../steamvr/world_coordinates.h"
@@ -213,7 +214,9 @@ uintptr_t Target(uintptr_t game,uintptr_t unit) {
     const auto caller=reinterpret_cast<uintptr_t>(_ReturnAddress());
     if(contact.game==game&&contact.attacker==unit&&
        (contact.smite||contact.skill||caller==d2rsig::Addr(0x42ffaa)||caller==d2rsig::Addr(0x43010a)))return contact.defender;
-    const auto result=originalTarget(game,unit);
+    uintptr_t tactical=0;if(companionai::TryOverrideCombatTarget(game,unit,tactical))return tactical;
+    const auto result=companionai::FilterNativeCombatTarget(game,unit,originalTarget(game,unit));
+    // Observe server state and return filtered combat target
     ObserveServer(game,unit);if(result)ObserveServer(game,result);
     return result;
 }
@@ -1221,15 +1224,12 @@ uint32_t MonsterFlags(uintptr_t unit) {
     return flags;
 }
 constexpr uint32_t kMonNpc=0x100,kMonInTown=0x400;
-int Hostiles(Hostile* out,int max,float range,float& heroX,float& heroY) {
-    uintptr_t game=0,self=0;Vec selfPos{};
-    if(!out||max<=0||!LocalServer(game,self)||!Position(self,selfPos))return -1;
-    heroX=selfPos.x*.5f;heroY=selfPos.z*.5f;
+int HostilesAround(Hostile* out,int max,float range,float centerX,float centerY,uintptr_t viewerUnit) {
+    uintptr_t game=0,self=0;
+    if(!out||max<=0||!LocalServer(game,self))return -1;
+    if(!viewerUnit) viewerUnit = self;
     uintptr_t buckets[128]{};
     if(!Read(game+0x4c6*8,buckets))return -1;
-    // The NEAREST max within range, not the first in hash order: in a crowd a
-    // far monster must not push out a near one. Line of sight only for the
-    // ones kept.
     constexpr int Cap=128;
     max=std::min(max,Cap);
     uintptr_t units[Cap]{};float distance[Cap]{};
@@ -1238,7 +1238,7 @@ int Hostiles(Hostile* out,int max,float range,float& heroX,float& heroY) {
         for(unsigned chain=0;unit&&chain<256&&visited++<4096;++chain) {
             uintptr_t next=0;uint32_t header[4]{};Vec pos{};
             if(!Read(unit+0x158,next)||!Read(unit,header))break;
-            const float d=header[0]==1&&header[3]!=0&&header[3]!=12&&Position(unit,pos)?std::hypot(pos.x*.5f-heroX,pos.z*.5f-heroY):-1.f;
+            const float d=header[0]==1&&header[3]!=0&&header[3]!=12&&Position(unit,pos)?std::hypot(pos.x*.5f-centerX,pos.z*.5f-centerY):-1.f;
             if(d>=0&&d<=range&&
                reinterpret_cast<int(*)(uintptr_t,uintptr_t,uintptr_t)>(d2rsig::Addr(RelationRva))(game,self,unit)&&
                !(MonsterFlags(unit)&(kMonNpc|kMonInTown))) {   // not town residents
@@ -1249,12 +1249,54 @@ int Hostiles(Hostile* out,int max,float range,float& heroX,float& heroY) {
             unit=next;
         }
     }
-    for(int i=0;i<n;++i)out[i].clear=reinterpret_cast<int(*)(uintptr_t,uintptr_t,int)>(d2rsig::Addr(LineRva))(self,units[i],0x804)==0;
+    const auto lineFn=reinterpret_cast<int(*)(uintptr_t,uintptr_t,int)>(d2rsig::Addr(LineRva));
+    constexpr int MaxLineChecks = 8;
+    const int checks = std::min(n, MaxLineChecks);
+    for(int i=0;i<checks;++i)out[i].clear=lineFn&&lineFn(viewerUnit,units[i],0x804)==0;
+    for(int i=checks;i<n;++i)out[i].clear=false;
+    return n;
+}
+int CorpsesAround(Corpse* out,int max,float range,float centerX,float centerY,uintptr_t viewerUnit) {
+    uintptr_t game=0,self=0;
+    if(!out||max<=0||!LocalServer(game,self))return -1;
+    if(!viewerUnit) viewerUnit = self;
+    uintptr_t buckets[128]{};
+    if(!Read(game+0x4c6*8,buckets))return -1;
+    constexpr int Cap=128;
+    max=std::min(max,Cap);
+    uintptr_t units[Cap]{};float distance[Cap]{};
+    int n=0;unsigned visited=0;
+    const auto checkState=reinterpret_cast<int(*)(uintptr_t,int)>(d2rsig::Addr(CheckStateRva));
+    for(uintptr_t unit:buckets) {
+        for(unsigned chain=0;unit&&chain<256&&visited++<4096;++chain) {
+            uintptr_t next=0;uint32_t header[4]{};Vec pos{};
+            if(!Read(unit+0x158,next)||!Read(unit,header))break;
+            if(header[0]==1&&header[3]==12&&Position(unit,pos)) {
+                const bool inTown=(MonsterFlags(unit)&(kMonNpc|kMonInTown))!=0;
+                const bool consumed=checkState&&(checkState(unit,102)||checkState(unit,108)||checkState(unit,103));
+                if(!inTown&&!consumed) {
+                    const float d=std::hypot(pos.x*.5f-centerX,pos.z*.5f-centerY);
+                    if(d>=0&&d<=range) {
+                        const int slot=framevr::targetcone::NearestSlot(distance,n,max,d);
+                        if(slot>=0){units[slot]=unit;distance[slot]=d;out[slot]={header[2],header[1],pos.x*.5f,pos.z*.5f,unit};if(slot==n)++n;}
+                    }
+                }
+            }
+            unit=next;
+        }
+    }
+    return n;
+}
+int Hostiles(Hostile* out,int max,float range,float& heroX,float& heroY) {
+    uintptr_t game=0,self=0;Vec selfPos{};
+    if(!LocalServer(game,self)||!Position(self,selfPos))return -1;
+    heroX=selfPos.x*.5f;heroY=selfPos.z*.5f;
+    const int n = HostilesAround(out,max,range,heroX,heroY,self);
     // Telemetry: a crowd bigger than the list, at most every 5 s.
     static ULONGLONG crowdLogged=0;
-    if(inRange>n&&GetTickCount64()-crowdLogged>5000) {
+    if(n>0&&GetTickCount64()-crowdLogged>5000) {
         crowdLogged=GetTickCount64();
-        char line[128];snprintf(line,sizeof line,"Frame target lock: kept the nearest %d of %d hostiles in range",n,inRange);
+        char line[128];snprintf(line,sizeof line,"Frame target lock: scanned %d hostiles in range",n);
         framevr::logging::Write(line);
     }
     return n;

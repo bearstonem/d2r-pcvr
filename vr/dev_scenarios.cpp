@@ -230,9 +230,11 @@ void __cdecl Gear(const PluginContext*,void* callbackToken) noexcept {
     if(!Valid(r)||!items||!items->createItem||!items->destroyItem||!items->executeTransaction) {
         Finish(r,Result::Refused,claim);return;
     }
-    const int cls=interactionstate::Read().devClass;
+    const auto s=interactionstate::Read();
+    const int cls=s.devClass;
     if(!framevr::dev::ValidClass(cls)){Finish(r,Result::Refused,claim);return;}
-    const auto codes=framevr::dev::Kit(cls,r.index);
+    const int mercClassId=s.merc.known?int(s.merc.classId):-1;
+    const auto codes=framevr::dev::Kit(cls,r.index,mercClassId);
     std::array<Items::ItemCreateSpec,10> specs{};
     std::array<ItemHandle,10> handles{};
     size_t count=0;

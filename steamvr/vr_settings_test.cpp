@@ -562,6 +562,32 @@ int main(int argc,char** argv){
         companion.Click(Step(CompanionAi,-1));
         Check(companion.Click({Kind::Apply}).changed==(ChangeMask{1}<<CompanionAi),"companion AI saves only its own setting");
     }
+    {Model tactical;tactical.Open(s);
+        Check(s.values[CompanionTactical]==1&&PageOf(CompanionTactical)==View::Survival,"companion tactical defaults to Enabled (1) on the Survival page");
+        Check(Normalize(CompanionTactical,NAN)==1&&Normalize(CompanionTactical,0)==0&&Normalize(CompanionTactical,1)==1&&Normalize(CompanionTactical,2)==1,"companion tactical normalizes to binary choice");
+        Check(std::wstring_view(Definitions[CompanionTactical].section)==L"gameplay"&&std::wstring_view(Definitions[CompanionTactical].key)==L"companion_tactical_commands","companion tactical writes to [gameplay] companion_tactical_commands");
+        tactical.Click(Step(CompanionTactical));
+        Check(tactical.Get()[CompanionTactical]==0,"a step toggles to Disabled (0)");
+        tactical.Click(Step(CompanionTactical));
+        Check(tactical.Get()[CompanionTactical]==1,"and back to Enabled (1)");
+        tactical.Click(Step(CompanionTactical,-1));
+        Check(tactical.Click({Kind::Apply}).changed==(ChangeMask{1}<<CompanionTactical),"companion tactical saves only its own setting");
+    }
+    {Model itemSkills;itemSkills.Open(s);
+        Check(s.values[CompanionItemSkills]==1&&PageOf(CompanionItemSkills)==View::Combat,"companion item skills defaults to Enabled (1) on the Combat page");
+        Check(Normalize(CompanionItemSkills,NAN)==1&&Normalize(CompanionItemSkills,0)==0&&Normalize(CompanionItemSkills,1)==1&&Normalize(CompanionItemSkills,2)==1,"companion item skills normalizes to binary choice");
+        Check(std::wstring_view(Definitions[CompanionItemSkills].section)==L"gameplay"&&std::wstring_view(Definitions[CompanionItemSkills].key)==L"companion_item_skills","companion item skills writes to [gameplay] companion_item_skills");
+        auto v = s.values; v[CompanionAi] = 1;
+        Check(RowShown(CompanionItemSkills, v, {}), "companion item skills row shown when companion AI is enabled");
+        v[CompanionAi] = 0;
+        Check(!RowShown(CompanionItemSkills, v, {}), "companion item skills row hidden when companion AI is legacy");
+        itemSkills.Click(Step(CompanionItemSkills));
+        Check(itemSkills.Get()[CompanionItemSkills]==0,"a step toggles to Disabled (0)");
+        itemSkills.Click(Step(CompanionItemSkills));
+        Check(itemSkills.Get()[CompanionItemSkills]==1,"and back to Enabled (1)");
+        itemSkills.Click(Step(CompanionItemSkills,-1));
+        Check(itemSkills.Click({Kind::Apply}).changed==(ChangeMask{1}<<CompanionItemSkills),"companion item skills saves only its own setting");
+    }
     {Model difficulty;difficulty.Open(s);
         Check(s.values[OfflinePlayers]==0,"difficulty preserves native settings by default");
         Check(Normalize(OfflinePlayers,NAN)==0&&Normalize(OfflinePlayers,9)==0&&Normalize(OfflinePlayers,2.5f)==0,"invalid offline counts fail back to native");

@@ -183,18 +183,36 @@ std::string FromTables(int id) {
     return ById(U16(desc.rows,desc.rowSize,d,layout.name));
 }
 std::string Name(int id) {
-    if(auto i=names.find(id);i!=names.end())return i->second;
-    char key[80]{},text[256]{};
-    if(Lookup(SkillKey(id,key),text,sizeof text))return names.emplace(id,text).first->second;
-    if(auto t=FromTables(id);!t.empty())return names.emplace(id,t).first->second;   // the Warlock's, and any key miss
-    // Item-granted Druid skills such as 221 and 225 showed as "Skill 221": the
-    // shifted key is not every skill's. Try the other spellings.
-    if(id>=0&&id<=511) {   // to the end of the class trees, the Warlock's included
-        auto found=FirstKnown(id,{"d2r:skillname%d","d2r:Skillname%d","d2r:skillsname%d","d2r:SkillName%d"},id>=221&&id<=280?1:0);
-        if(!found.empty())return names.emplace(id,found).first->second;
-    }
-    std::snprintf(text,sizeof text,"Skill %d",id);return text;
+    static SRWLOCK s_nameLock = SRWLOCK_INIT;
+    AcquireSRWLockExclusive(&s_nameLock);
+    auto resolve = [&]() -> std::string {
+        if(auto i=names.find(id);i!=names.end())return i->second;
+        char key[80]{},text[256]{};
+        if(Lookup(SkillKey(id,key),text,sizeof text))return names.emplace(id,text).first->second;
+        if(auto t=FromTables(id);!t.empty())return names.emplace(id,t).first->second;   // the Warlock's, and any key miss
+        // Item-granted Druid skills such as 221 and 225 showed as "Skill 221": the
+        // shifted key is not every skill's. Try the other spellings.
+        if(id>=0&&id<=511) {   // to the end of the class trees, the Warlock's included
+            auto found=FirstKnown(id,{"d2r:skillname%d","d2r:Skillname%d","d2r:skillsname%d","d2r:SkillName%d"},id>=221&&id<=280?1:0);
+            if(!found.empty())return names.emplace(id,found).first->second;
+        }
+        std::snprintf(text,sizeof text,"Skill %d",id);return text;
+    };
+    std::string res = resolve();
+    ReleaseSRWLockExclusive(&s_nameLock);
+    return res;
 }
+}
+std::string SkillName(int id) {
+    return Name(id);
+}
+const void* GetSkillRow(int id) {
+    using D2RL::DataTables::TableId;
+    D2RL::DataTables::TableView skills;
+    if (!Tables(TableId::Skills, skills) || id < 0 || uint32_t(id) >= skills.rowCount || !skills.rows) {
+        return nullptr;
+    }
+    return static_cast<const uint8_t*>(skills.rows) + uint32_t(id) * skills.rowSize;
 }
 void Init(const D2RL::PluginContext* c){
     context=c;c->QueryService(&strings);c->QueryService(&tables);

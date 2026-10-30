@@ -48,6 +48,7 @@ static const GoldenRow Golden[]={
     {"gameplay.skill_gestures",View(2),1,content::RowKind::Toggle,"Skills on your moves",0,0},
     {"interactions.weapon_skill_indicators",View(2),1,content::RowKind::Toggle,"Skill icons on weapons",0,0},
     {"gameplay.throw_lift_deg",View(2),1,content::RowKind::Stepper,"Thrown weapon lift",0,1},
+    {"gameplay.companion_item_skills",View(2),1,content::RowKind::Toggle,"Mercenary item skills",0,0},
     {"gameplay.spell_lock",View(3),0,content::RowKind::Choice,"Skills go to the aimed monster",4,0},
     {"gameplay.projectile_aim_assist",View(3),0,content::RowKind::Choice,"Spell aim assist",3,0},
     {"gameplay.planar_spell_aim",View(3),0,content::RowKind::Toggle,"Keep spell shots level",0,0},
@@ -86,6 +87,7 @@ static const GoldenRow Golden[]={
     {"gameplay.offline_players",View(8),1,content::RowKind::Stepper,"Offline difficulty",0,2},
     {"gameplay.enemy_sight_pct",View(8),1,content::RowKind::Slider,"Monster sight range",0,0},
     {"gameplay.companion_ai",View(8),1,content::RowKind::Toggle,"Smarter mercenary",0,0},
+    {"gameplay.companion_tactical_commands",View(8),1,content::RowKind::Toggle,"Tactical commands",0,0},
     {"sky.enabled",View(9),0,content::RowKind::Toggle,"Outdoor sky",0,0},
     {"fog.enabled",View(9),0,content::RowKind::Toggle,"Distance fog",0,0},
     {"fog.end",View(9),0,content::RowKind::Slider,"Fog distance",0,0},   // main's #366, drawn inside Distance fog's row

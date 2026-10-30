@@ -38,9 +38,10 @@ inline constexpr int SkyRimsChoice=46;
 // Pushable bodies (limb_tuning.h): one value each, stepped and saved to
 // [bodies] in the dev INI; the last puts them all back to their defaults.
 inline constexpr int BodyKnobChoice=47,BodyResetChoice=BodyKnobChoice+limbs::Knobs;
+inline constexpr int MercChargesChoice=BodyResetChoice+1,MercSkillsChoice=BodyResetChoice+2;
 inline int BodyKnob(int choice){return choice>=BodyKnobChoice&&choice<BodyResetChoice?choice-BodyKnobChoice:-1;}
 inline constexpr int PageSize=14;
-inline constexpr std::array<Choice,BodyResetChoice+1> Choices{{
+inline constexpr std::array<Choice,MercSkillsChoice+1> Choices{{
     {"Level 90", "All class skills rank 20 / test attributes", nullptr},
     {"Primary gear", "Class-specific unique equipment", nullptr},
     {"Alternate gear", "Equipment for the other class abilities", nullptr},
@@ -107,6 +108,8 @@ inline constexpr std::array<Choice,BodyResetChoice+1> Choices{{
     {"Most shove", "How far the whole body may be pushed", nullptr},
     {"Ease back", "When the physics lets a body go, how long it eases back", nullptr},
     {"Bodies: defaults", "Every value above back to its default", nullptr},
+    {"Merc charged item", "Random charged item (helm, armor, shield, weapons)", nullptr},
+    {"Merc class gear", "Class skill gear matching hired mercenary", nullptr},
 }};
 static_assert(limbs::Knobs==10,"one BODIES choice per knob");
 // Stable action IDs are independent of their presentation order.
@@ -121,7 +124,7 @@ inline constexpr const char* PageHelp[]={
     "Each press steps a value and saves it in the dev INI's [bodies]. Then push a body to feel it."
 };
 inline constexpr std::array<std::array<int,PageSize>,PageCount> Pages{{
-    {{Level10Choice,Level30Choice,Level60Choice,0,HealChoice,UnlockQuestsChoice,ThrowingPotionsChoice,TurnsRimsChoice,SkyRimsChoice,-1,-1,-1,-1,-1}},
+    {{Level10Choice,Level30Choice,Level60Choice,0,HealChoice,UnlockQuestsChoice,ThrowingPotionsChoice,TurnsRimsChoice,SkyRimsChoice,MercChargesChoice,MercSkillsChoice,-1,-1,-1}},
     {{StarterPrimaryChoice,StarterAlternateChoice,1,2,CrossbowChoice,BowChoice,SmallShieldChoice,DebugDrawsChoice,TurnsKeepOwnChoice,ThrowingChoice,PotionsChoice,TurnsSharpChoice,TurnsFillChoice,TorchChoice}},
     {{4,11,14,15,16,5,3,8,9,-1,-1,-1,-1,-1}},
     {{17,UpperKurastChoice,KurastSewersChoice,18,19,26,27,-1,-1,-1,-1,-1,-1,-1}},
@@ -243,7 +246,65 @@ inline Choice ChoiceFor(int cls,int index){
 inline constexpr int PreparationCount=5;
 // Native unique generation selects eligible unique rows and random stat rolls.
 // nullptr skips an off-hand item for a two-handed staff/maul.
-inline std::array<const char*,10> Kit(int cls,int choice){
+inline std::array<const char*,10> Kit(int cls,int choice,int mercClassId=-1){
+    if(ValidClass(cls)&&choice==MercChargesChoice) {
+        if(mercClassId==338||(mercClassId<0&&cls==3)) { // Desert Guard / Paladin
+            constexpr const char* pool[] = {
+                "7sp", // Bonehew (Ogre Axe, Corpse Explosion lvl 14, 30 charges)
+                "7pa", // Tomb Reaver (Cryptic Axe, Revive lvl 1-3, 14 charges)
+                "9pa", // Soulfeast Tine (Partizan, Decrepify lvl 7, 20 charges)
+                "9b7", // Blackleach Blade (Bill, Weaken lvl 5, 30 charges)
+                "9ha", // Spellsteel (Bearded Axe, Decrepify lvl 3, Teleport lvl 1, Firestorm lvl 12, Holy Bolt lvl 10)
+                "xh9", // Darksight Helm (Basinet, Cloak of Shadows lvl 5, 30 charges)
+                "xar", // Corpse Mourn (Ornate Plate, Corpse Explosion lvl 5, 40 charges)
+            };
+            static size_t rot = 0;
+            return {pool[rot++ % std::size(pool)]};
+        } else if(mercClassId==359||(mercClassId<0&&cls==1)) { // Iron Wolf / Sorceress
+            constexpr const char* pool[] = {
+                "9sb", // Hexfire (Shamshir, Hydra lvl 6, 36 charges)
+                "7sb", // Bloodmoon (Elegant Blade, Blood Golem lvl 15, 9 charges)
+                "xts", // Radament's Sphere (Ancient Shield, Poison Explosion lvl 6, 40 charges)
+                "xh9", // Darksight Helm (Basinet, Cloak of Shadows lvl 5, 30 charges)
+                "xar", // Corpse Mourn (Ornate Plate, Corpse Explosion lvl 5, 40 charges)
+            };
+            static size_t rot = 0;
+            return {pool[rot++ % std::size(pool)]};
+        } else if(mercClassId==560||mercClassId==561||(mercClassId<0&&cls==4)) { // Barbarian
+            constexpr const char* pool[] = {
+                "9ba", // Moonfall (Jagged Star, Meteor lvl 11, 60 charges)
+                "9fb", // Sureshrill Frost (Flanged Mace, Frozen Orb lvl 9, 50 charges)
+                "6hx", // Demonlimb (Tyrant Club, Enchant lvl 23, 20 charges)
+                "9sb", // Hexfire (Shamshir, Hydra lvl 6, 36 charges)
+                "7sb", // Bloodmoon (Elegant Blade, Blood Golem lvl 15, 9 charges)
+                "9ha", // Spellsteel (Bearded Axe, Decrepify lvl 3, Teleport lvl 1, Firestorm lvl 12, Holy Bolt lvl 10)
+                "xh9", // Darksight Helm (Basinet, Cloak of Shadows lvl 5, 30 charges)
+                "xar", // Corpse Mourn (Ornate Plate, Corpse Explosion lvl 5, 40 charges)
+            };
+            static size_t rot = 0;
+            return {pool[rot++ % std::size(pool)]};
+        } else { // Rogue / Amazon (default)
+            constexpr const char* pool[] = {
+                "8cb", // Cliffkiller (Large Siege Bow, Weaken lvl 10, 45 charges)
+                "7o7", // Hellrack (Colossus Crossbow, Immolation Arrow lvl 18, 150 charges)
+                "xh9", // Darksight Helm (Basinet, Cloak of Shadows lvl 5, 30 charges)
+                "xar", // Corpse Mourn (Ornate Plate, Corpse Explosion lvl 5, 40 charges)
+            };
+            static size_t rot = 0;
+            return {pool[rot++ % std::size(pool)]};
+        }
+    }
+    if(ValidClass(cls)&&choice==MercSkillsChoice) {
+        if(mercClassId==338||(mercClassId<0&&cls==3)) { // Desert Guard / Paladin
+            return {"7sr", "uap", "xld"};
+        } else if(mercClassId==359||(mercClassId<0&&cls==1)) { // Iron Wolf / Sorceress
+            return {"9b9", "xsh", "uap", "xea"};
+        } else if(mercClassId==560||mercClassId==561||(mercClassId<0&&cls==4)) { // Barbarian
+            return {"7gd", "baa", "utu"};
+        } else { // Rogue / Amazon (default)
+            return {"8cb", "xhm", "xea"};
+        }
+    }
     if(ValidClass(cls)&&(choice==StarterPrimaryChoice||choice==StarterAlternateChoice)) {
         constexpr const char* primary[8][2]={{"sbw","aqv"},{"sst",nullptr},{"wnd","buc"},{"ssd","buc"},{"ssd","hax"},{"clb","buc"},{"ktr","ktr"},{"2hs",nullptr}};
         constexpr const char* alternate[8][2]={{"jav","buc"},{"sst",nullptr},{"dgr","buc"},{"scp","buc"},{"jav","tax"},{"clb","buc"},{"dgr","buc"},{"dgr","buc"}};
@@ -281,6 +342,6 @@ inline bool ValidChoice(int choice){return choice>=0&&choice<int(Choices.size())
 inline bool StarterKit(int choice){return choice==StarterPrimaryChoice||choice==StarterAlternateChoice;}
 // Normal quality at item level 1, usable at once; the other kits roll uniques at 99.
 inline bool NormalKit(int choice){return StarterKit(choice)||choice==ThrowingChoice||choice==PotionsChoice||choice==TorchChoice||choice==ThrowingPotionsChoice;}
-inline bool IsKit(int choice){return choice==1||choice==2||choice==CrossbowChoice||choice==BowChoice||choice==SmallShieldChoice||NormalKit(choice);}
+inline bool IsKit(int choice){return choice==1||choice==2||choice==CrossbowChoice||choice==BowChoice||choice==SmallShieldChoice||NormalKit(choice)||choice==MercChargesChoice||choice==MercSkillsChoice;}
 inline bool Isolated(std::string_view mod,std::string_view metadata){return mod==Mod&&metadata==ModInfo;}
 }

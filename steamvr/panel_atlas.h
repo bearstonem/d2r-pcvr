@@ -47,6 +47,11 @@ constexpr Region Blood{0,Settings.h+Gap,blood::Size,blood::Size};
 constexpr Region Strain{Blood.x+Blood.w+Gap,Blood.y,strain::Size,strain::Size};
 constexpr Region Notice{Strain.x+Strain.w+Gap,Blood.y,notice::Width,notice::Height};
 constexpr Region BowLaser{Notice.x+Notice.w+Gap,Blood.y,bowlaser::AtlasWidth,bowlaser::AtlasHeight};
+// Beside VR Settings in the dynamic atlas: Mercenary equipped skills & charges overlay and tooltip
+constexpr int HirelingSkillsWidth=512,HirelingSkillsHeight=64;
+constexpr Region HirelingSkills{Settings.w+Gap,0,HirelingSkillsWidth,HirelingSkillsHeight};
+constexpr int HirelingTooltipWidth=440,HirelingTooltipHeight=220;
+constexpr Region HirelingTooltip{HirelingSkills.x,HirelingSkills.y+HirelingSkills.h+Gap,HirelingTooltipWidth,HirelingTooltipHeight};
 constexpr int SharedWidth=2048,SharedHeight=Blood.y+Blood.h;
 
 constexpr bool Inside(Region r,int width,int height){return r.x>=0&&r.y>=0&&r.w>0&&r.h>0&&r.x+r.w<=width&&r.y+r.h<=height;}
