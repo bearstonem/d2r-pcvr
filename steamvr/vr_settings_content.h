@@ -531,8 +531,11 @@ inline constexpr Override Overrides[]={
      FRAMEVR_OPTIONS(ButtonNamesOptions)},
     // Interface: Labels and bars
     {.id="hud.labels_size",.page=View::Interface,.section="Labels and bars",.kind=RowKind::Slider,.label="Loot name size",
-     .help="Size of item names on the ground; 45% is the game's size. Hold the right stick down to show every nearby name.",
+     .help="Size of item names on the ground; 45% is the game's size. Hold the right stick down to show every nearby name (or press it once with Latch on).",
      .format={.unit="%"}},
+    {.id="hud.labels_latch",.page=View::Interface,.section="Labels and bars",.kind=RowKind::Toggle,.label="Latch",
+     .help="Off: hold the right stick down to show every nearby loot name. On: press it down once to show them, again to hide them.",
+     .beside=true},
     {.id="hud.ordinary_mob_bars",.page=View::Interface,.section="Labels and bars",.kind=RowKind::Toggle,.label="Weak monster bars",
      .help="Names and health bars over ordinary monsters. Bosses and elites always show theirs. Off keeps the view clear."},
 

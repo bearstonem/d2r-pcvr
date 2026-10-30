@@ -851,6 +851,16 @@ int main(int argc,char** argv){
         Check(menu.presets.size()==1&&menu.presets[0].count==1&&menu.presets[0].values[0].key==Sky&&reported("orphan preset entry: test gameplay.no_such_setting")&&
               reported("preset value out of range"),"preset entries by ini id: a removed setting or a value out of range is skipped and reported");
     }
+    {   // Loot names latch: off by default (hold, as before), beside Loot name size on Interface, saved alone
+        Check(Defaults()[LootLabelLatch]==0&&std::wstring(Definitions[LootLabelLatch].section)==L"hud"&&
+              std::wstring(Definitions[LootLabelLatch].key)==L"labels_latch"&&HelpText(LootLabelLatch)[0]!=0&&
+              LootLabelLatch<ChangeMask::Bits,"loot latch: off by default, [hud] labels_latch, explained, its own change bit");
+        const auto* latch=content::RowOf(LootLabelLatch);
+        Check(latch&&latch->beside&&latch->page==View::Interface&&PageOf(LootLabelSize)==View::Interface,"the latch shares Loot name size's row");
+        Model m;m.Open(s);layout::Press(m,{Kind::Set,LootLabelLatch,0,1},0);
+        Check(m.Get()[LootLabelLatch]==1&&m.Get()[LootLabelSize]==45,"the latch turns on without touching the size");
+        Check(m.Click({Kind::Apply}).changed==(ChangeMask{1}<<LootLabelLatch),"Apply saves only the latch");
+    }
     {   // The leather menu (main's #360): on by default, on Interface beside Menu distance, saved alone
         Check(Defaults()[LeatherMenu]==1&&std::wstring(Definitions[LeatherMenu].section)==L"interactions"&&
               std::wstring(Definitions[LeatherMenu].key)==L"leather_menu"&&HelpText(LeatherMenu)[0]!=0&&

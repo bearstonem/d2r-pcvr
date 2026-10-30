@@ -187,7 +187,7 @@ not generate melee velocity. The layout currently assumes a right-handed player.
 | Seated weapon selection | Utility wheel → **Weapon I** or **Weapon II** |
 | Stow/draw | Utility wheel → **Stow weapons** / **Draw weapons**; native equipped stats stay unchanged |
 | Health/mana | Check the back of your left wrist, or choose **Palm** in **VR Settings > Wrist > Life and mana** and hold your left palm upward in front of you briefly. No button required; automatic alerts are off by default |
-| Show all nearby loot labels (Alt) | Hold the **right stick down** to hold the native Show Items action; let go to restore normal drop/hover labels. Push it **up** to toggle running / walking. Neither while you look at the wrist / palm map, which they zoom instead. Listed in **VR Settings > Guide** |
+| Show all nearby loot labels (Alt) | Hold the **right stick down** to hold the native Show Items action; let go to restore normal drop/hover labels (with **VR Settings > Interface > Loot name size > Latch** on, one push shows them and the next hides them). Push it **up** to toggle running / walking. Neither while you look at the wrist / palm map, which they zoom instead. Listed in **VR Settings > Guide** |
 | Explored minimap | Hold Left Y ? **MAP** in the bottom tabs; point right laser + trigger. **SPELLS** returns to skills; releasing Left Y closes the menu |
 | Zoom the minimap | Look at the wrist / palm map or the wheel's MAP tab; right stick up zooms in, down zooms out. No run / walk toggle or loot labels meanwhile; left / right still turns, except during a zoom push; looking away returns the stick |
 | Quest journal | Open the native tabbed game menu with Left X / Frame Left A, then select Journal. The duplicate wheel entry is removed |
@@ -215,7 +215,7 @@ Use it outside menus and wheels, with no potion or holster interaction active.
 Normal right-stick clicks still toggle the wheel; native menu hold-to-sort stays
 available. Menus, tracking/focus loss, leaving VR or changing character release
 the command. Release the trigger before starting a fresh hold after an interruption;
-there is no saved toggle or automatic resume.
+there is no automatic resume. With the Latch setting (Off by default) one down push shows the labels until the next down push; menus, tracking or focus loss, and leaving the game clear it, and a wheel or the wrist map ignore the push.
 The game's native item/filter rules apply. Inventory tooltips and monster labels
 keep their styling.
 
