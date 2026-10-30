@@ -8,8 +8,17 @@ for physical contacts. This adds native basic attacks from the second weapon;
 Double Swing, Frenzy, Dragon Claw and other active skills retain their button
 casting.
 
-- Unleashed tracks contacts, recovery and cleave independently for each hand.
-  Both blades can strike the same creature, including in the same input batch.
+- Unleashed tracks contacts and cleave independently for each hand. Both blades
+  share one attack cycle (Cal, 2026-10-30, as a shapeshift form's claws do): a
+  full-cycle hit with either blade starts the next cycle, so two blades earn one
+  full hit (on-hit effects, strike skills) per cycle, as one native attack rhythm.
+  Each stroke is timed as native times a dual-wield attack (2026-10-30): both
+  weapons at their averaged WSM, with the swinging weapon's IAS (read with that
+  weapon merged; the other weapon's IAS does not count). Both blades can strike
+  the same creature, including in the same input batch.
+- A strike skill (Bash, Stun, Concentrate, Berserk) cast from either blade
+  swings the primary weapon, the rendered right one, as native single-weapon
+  skills do; basic attacks swing the blade that struck.
 - Classic keeps a shared basic attack cycle across hands and button attacks,
   native hit rolls, and one target per stroke.
 - A weapon impact vibrates its driving controller with the weapon-impact
@@ -40,9 +49,11 @@ for accuracy and damage. The native attack still owns damage, resistances,
 criticals, procs, leech and durability. A scoped exit restores the native weapon
 selection and refreshes its stat lists. There are no permanent equipment,
 skill-binding, item-stat or save edits. Other units and threads keep the
-original selector. The existing attack-cycle approximation now reads each
-weapon's class and base speed; skill speed, slows and native dual-skill animation
-sequences remain outside that approximation.
+original selector. Each stroke's cycle follows D2Common
+`UNITS_UpdateAttackAnimRateAndVelocity` (D2MOO): the swinging weapon is merged,
+the hero's item IAS and attackrate (skill speed and slows included) are read,
+and the two weapons' WSMs are averaged for both arms (D2R 2.4). Native
+dual-skill animation sequences (Double Swing, Frenzy) remain outside it.
 
 The legacy [D2MOO basic attack implementation](https://github.com/ThePhrozenKeep/D2MOO/blob/master/source/D2Game/src/SKILLS/Skills.cpp)
 helped identify the corresponding native flow. Current addresses and behavior

@@ -26,7 +26,7 @@
 #include "bow.h"
 #include "../steamvr/attack_speed.h"
 namespace gamestate {framevr::dualwield::Equipment MeleeEquipment();void SetMeleeOrder(uint32_t,uint32_t);uint32_t DataBank();bool MenuOpen();int AttackWeapon(int hand=0);int AttackWsm(int hand=0);uint32_t HandsKey();uint32_t WeaponSet();}
-namespace melee {void SetAttackCycle(uint64_t session,uint32_t milliseconds,int hand=0);}
+namespace melee {void SetAttackCycle(uint64_t session,uint32_t milliseconds,int hand=0);void SetDualSpeed(uint64_t session,int classId,const int weaponClass[2],const int wsm[2]);}
 namespace interactionstate {int ShapeForm(uint64_t session,uint64_t now);}
 namespace nativeui {
 namespace {
@@ -294,7 +294,8 @@ void Capture(framevr::interaction::Snapshot& s) {
     // class or weapon gives cycle 0, which never gates.
     {
         const auto equipment=gamestate::MeleeEquipment();
-        if(framevr::dualwield::Eligible(int(h[1]),equipment)&&meleeweapon::Ready()) {
+        const bool dualWield=framevr::dualwield::Eligible(int(h[1]),equipment);
+        if(dualWield&&meleeweapon::Ready()) {
             const auto right=meleeweapon::Select(player,0,equipment),left=meleeweapon::Select(player,1,equipment);
             uint32_t rightId=0,leftId=0;
             if(right&&left&&Read(right+8,rightId)&&Read(left+8,leftId))gamestate::SetMeleeOrder(rightId,leftId);
@@ -312,7 +313,15 @@ void Capture(framevr::interaction::Snapshot& s) {
                                          :framevr::attackspeed::Frames(int(h[1]),framevr::attackspeed::Weapon(weapon),ias,wsm,sias);
         melee::SetAttackCycle(s.session,framevr::attackspeed::Milliseconds(frames));
         const int offWeapon=gamestate::AttackWeapon(1),offWsm=gamestate::AttackWsm(1);
-        const int offFrames=offWeapon>=0?framevr::attackspeed::Frames(int(h[1]),framevr::attackspeed::Weapon(offWeapon),ias,offWsm,sias):0;
+        // Dual wield (attack_speed.h DualFrames, Cal 2026-10-30): native times both weapons at their
+        // averaged WSM. The game thread reads each stroke's IAS and attackrate with that weapon merged;
+        // these per-arm cycles (averaged WSM, the hero's stats as they read now) stand in when it cannot.
+        const bool dualTimed=dualWield&&!form&&weapon>=0&&offWeapon>=0;
+        const int dualWsm=framevr::attackspeed::DualWsm(wsm,offWsm);
+        if(dualTimed){const int classes[2]={weapon,offWeapon},wsms[2]={wsm,offWsm};melee::SetDualSpeed(s.session,int(h[1]),classes,wsms);}
+        else melee::SetDualSpeed(s.session,-1,nullptr,nullptr);
+        if(dualTimed)melee::SetAttackCycle(s.session,framevr::attackspeed::Milliseconds(framevr::attackspeed::Frames(int(h[1]),framevr::attackspeed::Weapon(weapon),ias,dualWsm,sias)));
+        const int offFrames=offWeapon>=0?framevr::attackspeed::Frames(int(h[1]),framevr::attackspeed::Weapon(offWeapon),ias,dualTimed?dualWsm:offWsm,sias):0;
         melee::SetAttackCycle(s.session,framevr::attackspeed::Milliseconds(offFrames),1);
         bowvr::SetCrossbowCycle(s.session,gamestate::HandsKey()^(gamestate::WeaponSet()<<30),
             weapon==int(framevr::attackspeed::Weapon::Crossbow)?framevr::attackspeed::Milliseconds(frames):0);
@@ -320,9 +329,12 @@ void Capture(framevr::interaction::Snapshot& s) {
         const int now[7]={int(h[1]),weapon,ias,wsm,frames,form,form?attackRate:0};   // attackrate moves with every aura and slow: logged only in form
         if(!std::equal(now,now+7,told)) {
             std::copy(now,now+7,told);
-            char line[260];std::snprintf(line,sizeof line,"Frame melee attack speed: class=%d weapon_class=%d ias=%d eias=%d wsm=%d attackrate=%d form=%s -> %d frames (%u ms per landed hit)",
+            // Dual wield: this is the right weapon alone; each swing's real timing is its
+            // "Frame dual wield speed:" line (melee.cpp DualCycle).
+            char line[320];std::snprintf(line,sizeof line,"Frame melee attack speed: class=%d weapon_class=%d ias=%d eias=%d wsm=%d attackrate=%d form=%s -> %d frames (%u ms per landed hit)%s",
                 now[0],weapon,ias,form?framevr::attackspeed::FormEias(ias,attackRate):framevr::attackspeed::Eias(ias),wsm,attackRate,
-                form==1?"werewolf":form==2?"werebear":"human",frames,framevr::attackspeed::Milliseconds(frames));
+                form==1?"werewolf":form==2?"werebear":"human",frames,framevr::attackspeed::Milliseconds(frames),
+                dualTimed?" - single weapon; dual wield times each swing on its Frame dual wield speed line":"");
             framevr::logging::Write(line);
         }
     }

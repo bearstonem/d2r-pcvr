@@ -69,32 +69,44 @@ int main() {
     assert(OnHitGate(false,5000,600)==OnHit::CleaveFollowUp&&OnHitGate(false,UINT64_MAX,0)==OnHit::CleaveFollowUp); // the stroke's next creature
     assert(OnHitGate(true,UINT64_MAX,600)==OnHit::Allowed);   // the first stroke
     assert(OnHitGate(true,10,0)==OnHit::Allowed);             // an unknown cycle counts as full
+    // Life Tap: a gated stroke's struck events may not raise the striker's life.
+    assert(TapHealBlocked(true,100<<8,150<<8));               // the heal on a sub-cycle stroke or cleave follow-up
+    assert(!TapHealBlocked(true,100<<8,90<<8));               // attacker takes damage stays native
+    assert(!TapHealBlocked(true,100<<8,100<<8));              // no change
+    assert(!TapHealBlocked(false,100<<8,150<<8));             // a full-cycle first contact heals natively
     // Grace gives full damage early but never opens the gate before the full cycle.
     assert(RecoveryFactor(520,600,2,.85f)==1.f&&OnHitGate(true,520,600)==OnHit::NotFullCycle);
     {   // Trigger/button melee: a stroke on the swing clocks, never on another trigger hit.
         assert(StrokeGap(0,500)==UINT64_MAX);                       // no trigger hit yet
         assert(StrokeGap(1000,1250)==250&&StrokeGap(1250,1000)==250); // either order in one batch
         assert(StrokeGap(1000,1000)==0);
-        const auto none=TriggerRecovery(UINT64_MAX,600,true,2,1);   // trigger only: native pace, full
+        const auto none=TriggerRecovery(UINT64_MAX,UINT64_MAX,600,true,2,1);   // trigger only: native pace, full
         assert(none.recovery==1.f&&none.onHit==OnHit::Allowed);
-        const auto soon=TriggerRecovery(300,600,true,2,1);          // half a cycle after a swing
+        const auto soon=TriggerRecovery(300,300,600,true,2,1);          // half a cycle after a full swing
         assert(near(soon.recovery,.25f)&&soon.onHit==OnHit::NotFullCycle);
-        const auto full=TriggerRecovery(600,600,true,2,1);
+        const auto full=TriggerRecovery(600,600,600,true,2,1);
         assert(full.recovery==1.f&&full.onHit==OnHit::Allowed);
-        const auto off=TriggerRecovery(300,600,false,2,1);          // swing_recovery_damage 0: the gate still holds
+        const auto off=TriggerRecovery(300,300,600,false,2,1);          // swing_recovery_damage 0: the gate still holds
         assert(off.recovery==1.f&&off.onHit==OnHit::NotFullCycle);
-        assert(TriggerRecovery(10,0,true,2,1).recovery==1.f&&TriggerRecovery(10,0,true,2,1).onHit==OnHit::Allowed); // unknown cycle
-        // Alternating: swing at 0, trigger hit at 300, swing at 600 (cycle 600). The trigger is
-        // half recovered, and the second swing is measured from it, not from the first swing.
-        framevr::attackspeed::Cadence swing;const uint64_t s=1;const uint32_t cycle=600;
-        swing.Landed(s,1000,cycle);
-        assert(near(TriggerRecovery(swing.Since(s,1300),cycle,true,2,1).recovery,.25f));
+        assert(TriggerRecovery(10,10,0,true,2,1).recovery==1.f&&TriggerRecovery(10,10,0,true,2,1).onHit==OnHit::Allowed); // unknown cycle
+        // A full cycle after the full swing, 100 ms after an in-between one: full (fixed cycle).
+        const auto due=TriggerRecovery(650,100,600,true,2,1);
+        assert(due.recovery==1.f&&due.onHit==OnHit::Allowed);
+        // Alternating: full swing at 0, trigger hit at 300, swing at 600 (cycle 600). The trigger
+        // is half recovered and in between; the second swing is a full cycle after the full
+        // swing, so it is full (fixed cycle, 2026-10-30), although only 300 ms after the trigger.
+        framevr::attackspeed::Cadence swing,swingFull;const uint64_t s=1;const uint32_t cycle=600;
+        swing.Landed(s,1000,cycle);swingFull.Landed(s,1000,cycle);
+        const auto mid=TriggerRecovery(swingFull.Since(s,1300),swing.Since(s,1300),cycle,true,2,1);
+        assert(near(mid.recovery,.25f)&&mid.onHit==OnHit::NotFullCycle);   // in between: triggerFull not stamped
         const uint64_t trigger=1300;
         const uint64_t since=SwingSince(swing.Since(s,1600),trigger,1600);
-        assert(since==300&&near(RecoveryFactor(since,cycle,2),.25f)&&OnHitGate(true,since,cycle)==OnHit::NotFullCycle);
+        const uint64_t sinceFull=SwingSince(swingFull.Since(s,1600),0,1600);
+        const auto second=FixedCycle(sinceFull,since,cycle,true,2,1);
+        assert(since==300&&sinceFull==600&&second.full&&second.recovery==1.f&&OnHitGate(true,sinceFull,cycle)==OnHit::Allowed);
         // A second trigger hit 200 ms after the first, 500 ms after the swing: measured from
         // the swing ((500/600)^2), not from the trigger hit ((200/600)^2).
-        assert(near(TriggerRecovery(swing.Since(s,1500),cycle,true,2,1).recovery,.25f*100/36));
+        assert(near(TriggerRecovery(swingFull.Since(s,1500),swing.Since(s,1500),cycle,true,2,1).recovery,.25f*100/36));
         // A swing sampled just before a trigger hit the batch already applied: the gap counts.
         assert(SwingSince(5000,1300,1260)==40&&SwingSince(20,1300,1600)==20);
         assert(SwingSince(UINT64_MAX,0,1600)==UINT64_MAX&&SwingSince(700,0,1600)==700);   // no trigger hit: its own clock
@@ -105,10 +117,45 @@ int main() {
         assert(OnHitGate(true,clock.Since(s,1030),cycle)==OnHit::NotFullCycle);clock.Landed(s,1030,cycle); // left claw, its own stroke
         assert(OnHitGate(true,clock.Since(s,1400),cycle)==OnHit::NotFullCycle);                         // flailing
         assert(OnHitGate(true,clock.Since(s,1630),cycle)==OnHit::Allowed);                              // a full cycle after the last
-        // Dual wield: one clock per hand, so each blade's full-cycle stroke carries effects.
-        framevr::attackspeed::Cadence right,left;
-        right.Landed(s,1000,cycle);left.Landed(s,1030,cycle);
-        assert(OnHitGate(true,right.Since(s,1600),cycle)==OnHit::Allowed&&OnHitGate(true,left.Since(s,1600),cycle)==OnHit::NotFullCycle);
+        // Dual wield shares the claws' one clock (2026-10-30): the left blade 30 ms after a full
+        // right-blade stroke is in between, and the next full one is a cycle after the right's.
+        framevr::attackspeed::Cadence blades,bladesFull;
+        auto blade=[&](uint64_t at,uint32_t own){const auto c=FixedCycle(bladesFull.Since(s,at),blades.Since(s,at),own,true,2,1);blades.Landed(s,at,own);if(c.full)bladesFull.Landed(s,at,own);return c.full;};
+        assert(blade(1000,cycle)&&!blade(1030,cycle)&&!blade(1400,720)&&blade(1600,cycle)&&!blade(1610,720));
+        assert(blade(2320,720));   // the left blade's own (slower) cycle after the right's full hit
+    }
+    {   // Fixed attack cycle (Cal, 2026-10-30): in-between strokes never move the next breakpoint.
+        // Cycle 720 ms, curve 2. Flailing every 300 ms: full at 0, in between at 300 and 600
+        // (each measured from the previous stroke: (300/720)^2), full again at 900.
+        const uint32_t cycle=720;const uint64_t s=1;
+        framevr::attackspeed::Cadence any,full;
+        auto stroke=[&](uint64_t at){
+            const auto c=FixedCycle(full.Since(s,at),any.Since(s,at),cycle,true,2,1);
+            any.Landed(s,at,cycle);if(c.full)full.Landed(s,at,cycle);
+            return c;
+        };
+        const auto a0=stroke(1000);assert(a0.full&&a0.recovery==1.f);   // the first stroke
+        const auto a1=stroke(1300);assert(!a1.full&&near(a1.recovery,(300.f/720)*(300.f/720)));
+        const auto a2=stroke(1600);assert(!a2.full&&near(a2.recovery,(300.f/720)*(300.f/720)));   // from the previous stroke
+        const auto a3=stroke(1900);assert(a3.full&&a3.recovery==1.f);   // 900 ms after the full one: the breakpoint was never delayed
+        // A patient player: every 720 ms, all full.
+        framevr::attackspeed::Cadence any2,full2;
+        for(uint64_t at=5000;at<9000;at+=720){const auto c=FixedCycle(full2.Since(s,at),any2.Since(s,at),cycle,true,2,1);assert(c.full);any2.Landed(s,at,cycle);full2.Landed(s,at,cycle);}
+        // One extra swing at half a cycle: +25% damage per cycle (0.5^2), the most any extra swing earns.
+        assert(near(FixedCycle(360,360,cycle,true,2,1).recovery,.25f));
+        // Very fast flailing (100 ms): each extra swing (100/720)^2 ~ 2%.
+        assert(near(FixedCycle(500,100,cycle,true,2,1).recovery,(100.f/720)*(100.f/720)));
+        // swing_recovery_damage off: in-between strokes deal full damage but still never move the cycle.
+        const auto off=FixedCycle(300,300,cycle,false,2,1);assert(!off.full&&off.recovery==1.f);
+        // Unknown cycle / no full stroke yet: full.
+        assert(FixedCycle(10,10,0,true,2,1).full&&FixedCycle(UINT64_MAX,10,cycle,true,2,1).full);
+        // Exactly at the breakpoint: full; grace never makes an in-between stroke full.
+        assert(FixedCycle(720,50,cycle,true,2,1).full&&!FixedCycle(719,719,cycle,true,2,.5f).full&&FixedCycle(719,719,cycle,true,2,.5f).recovery==1.f);
+        // A shapeshift form's claws share the clocks: right claw full at 1000, left claw 30 ms later
+        // in between, a flail at 1400 in between; full again at 1600 (600 ms cycle) - not 1630.
+        framevr::attackspeed::Cadence clawAny,clawFull;const uint32_t form=600;
+        auto claw=[&](uint64_t at){const auto c=FixedCycle(clawFull.Since(s,at),clawAny.Since(s,at),form,true,2,1);clawAny.Landed(s,at,form);if(c.full)clawFull.Landed(s,at,form);return c.full;};
+        assert(claw(1000)&&!claw(1030)&&!claw(1400)&&claw(1600));
     }
     // A gated critical/deadly strike roll reads 99: under no chance from 0 to 99.
     assert(AdvanceSeed(NoCritRoll()).low%100==99);
@@ -126,10 +173,9 @@ int main() {
             const double share=double(hits)/n;
             assert(share>chance/100.-.01&&share<chance/100.+.01);
         }
-        // Damage over time follows the hit's factor; a positive rate never rounds to nothing.
-        assert(ScaleDamageOverTime(400,.25)==100&&ScaleDamageOverTime(50,.05)==3&&ScaleDamageOverTime(16,.3)==5);
-        assert(ScaleDamageOverTime(10,.01)==1&&ScaleDamageOverTime(10,0)==0&&ScaleDamageOverTime(10,1)==10);
-        assert(ScaleDamageOverTime(0,.5)==0&&ScaleDamageOverTime(-3,.5)==-3&&ScaleDamageOverTime(100,1.5)==150);
+        // Poison and burn: whole from a contact that counts as a hit, none from any other.
+        assert(DamageOverTime(false,false));
+        assert(!DamageOverTime(true,false)&&!DamageOverTime(false,true)&&!DamageOverTime(true,true));
     }
     std::puts("Combat rules: local ownership, guaranteed accuracy, subsequent random-stream, swing damage, on-hit and would-hit gate tests passed");
 }

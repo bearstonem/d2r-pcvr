@@ -1168,32 +1168,44 @@ and trigger/button melee were:
   - **Attack rating** (`ar_damage`, 1): damage x the native to-hit chance (5-95%,
     attack rating, defense and level penalty), read where the game's hit check
     passes it on. `ar_damage_floor` (0) keeps that % of damage at zero chance.
-  - **Recovery** (`swing_recovery_damage`, 1): damage x the share of the native
-    attack cycle (class, weapon, IAS, WSM, skill speed and slows) since the previous landed stroke, to
-    the power `swing_recovery_curve` (2), at most 1. With 2, flailing at twice
-    the cycle's rate deals half the damage per second (1 would be neutral).
-    `swing_recovery_grace` (100 = none) counts a stroke from that % of the cycle
-    as fully recovered. Every creature one stroke reaches shares the stroke's
-    recovery factor, so flailing does not pay.
+  - **Recovery** on a fixed attack cycle (Cal, 2026-10-30): the native attack
+    cycle (class, weapon, IAS, WSM, skill speed and slows) is a fixed rhythm. A
+    stroke one full cycle or more after your latest full-cycle attack is a full
+    hit: full damage, on-hit effects, a strike skill's cast, and it starts the
+    next cycle. A stroke before that is in between: it never moves your next
+    breakpoint, carries no on-hit effects, and with `swing_recovery_damage` (1)
+    its damage is x the share of the cycle since your previous stroke of any
+    kind, to the power `swing_recovery_curve` (2), at most 1. So one extra swing
+    at half a cycle adds 25% of a hit, and fast flailing adds about 2% a swing;
+    the full hits keep their pace either way. `swing_recovery_grace` (100 =
+    none) gives an in-between stroke full damage from that % of the cycle, never
+    a full hit's effects. Every creature one stroke reaches shares the stroke's
+    factor. (Before 2026-10-30 every stroke restarted the cycle, so flailing
+    pushed every breakpoint back.)
   - **Cleave falloff** (`cleave_falloff`, 25): each further creature one stroke
     lands on deals that % less than the one before, never below `cleave_min` (25):
     100%, 75%, 50%, 25%, 25%... 0 turns it off. Creatures count in the order
     the game resolves them, which follows the blade frame to frame but not
     within a single frame. A riposte is still a clean hit (no falloff) and
     counts as one of the stroke's creatures.
-  - **On-hit effects** come only from a stroke that waited a full native attack
-    cycle (the breakpoint, from the previous landed stroke on the same recovery
-    clock: per hand when dual wielding, one shared clock for a shapeshift
-    form's two claws), and only on the first creature that stroke lands on.
-    That covers life and mana leech, critical and deadly strike, crushing blow,
+  - **On-hit effects** come only from a full-cycle stroke (the breakpoint, a
+    full cycle after the latest full-cycle attack on the one shared clock: both
+    blades when dual wielding (2026-10-30; each stroke is timed as native times
+    a dual-wield attack: the two weapons' averaged WSM, with the swinging
+    weapon's own IAS) and a shapeshift form's two claws),
+    and only on the first creature that stroke lands on.
+    That covers life and mana leech, Life Tap's heal (a Life-Tapped monster
+    heals you only from such a stroke), critical and deadly strike, crushing blow,
     open wounds, freeze, slow, knockback, flee, blind, prevent monster heal,
     defense lowered per hit and chance to cast on striking or attack (curses
     included). Every other contact still lands its scaled damage, with no
     on-hit effects. `swing_recovery_grace` does not shorten the wait. A riposte
     always carries them; an unknown cycle counts as full. Elemental damage is
-    damage (scaled like the hit; poison and burn by the contact's factor), its
-    effects (chill, freeze) follow the would-have-hit gate below, and on-kill
-    effects are unchanged. The game's
+    damage (scaled like the hit), its effects (chill, freeze) follow the
+    would-have-hit gate below, and on-kill effects are unchanged. Poison and
+    burn are on-hit effects (Cal, 2026-10-30): they don't stack, so a stroke that
+    carries on-hit effects applies them whole (native rate and length) and every
+    other contact applies none. The game's
     own roll sites are checked at start (`Frame on-hit gate:`); a part not
     found stays native. `[debug] melee_trace=1` adds `onhit=1/0` to each
     traced contact.
@@ -1202,11 +1214,25 @@ and trigger/button melee were:
     so a full-cycle stroke at 60% attack rating chance carries them about 60%
     of the time, as natively. `would_hit=1/0` (-1: not gated, e.g. a riposte)
     ends each `melee_trace` contact line.
+  - **Monster reactions and the stroke's share** (Cal, 2026-10-30): a monster
+    flinches only when it should. A contact that would have missed, or a stroke
+    without on-hit effects (not a full cycle, a cleave follow-up, a trigger hit
+    inside a swing's cycle), lands its scaled damage but the monster does not
+    react: no hit recovery, knockback or soft-hit reaction, and Lightning
+    Enchanted's on-hit bolts don't fire. A monster's Thorns aura and Iron Maiden
+    cursed on you return a % of the damage the stroke actually dealt (its
+    recovery x cleave share), on every such stroke. Your weapon wears with a
+    stroke's first creature only, at the native chance times that stroke's
+    recovery share (a half-recovered stroke: half the chance). Ripostes, arrows,
+    throws and skill hits count whole. Checked at start (`Frame stroke share:`).
   - **Melee skill strikes** (CONTROLS.md): a hand armed with a strike skill
     (the Druid's Maul, Feral Rage, Rabies, Fire Claws, Hunger and Fury; Bash, Stun, Concentrate, Berserk, Sacrifice, Vengeance, Conversion, Zeal,
     Power Strike, Impale, Charged Strike, Lightning Strike and Poison Dagger) casts it natively on a full-cycle stroke's first landed
     contact, inside that contact's scaling and on-hit gate; every other contact
-    stays a basic attack. Classic casts on every paced contact. Developer
+    stays a basic attack. Classic casts on every paced contact. Dual wielding
+    (2026-10-30), the cast swings the primary weapon (the rendered right one)
+    whichever blade struck, as native single-weapon skills do; a basic attack
+    swings the blade that struck. Developer
     builds log `Frame melee skills:` (armed contacts, casts, refusals by
     reason) and add `strike=<skill> cast|basic_strike` to `melee_trace` lines.
   - **Fury and Zeal** (Cal, 2026-10-25; replaces the swing flurry; rev2
@@ -1224,8 +1250,8 @@ and trigger/button melee were:
     Those hits are the cast's own (rev3): the trigger rules' recovery factor
     and on-hit gate don't apply to them (attack rating still scales them, and
     the would-have-hit gate still holds back effects a miss would not have).
-    Each is still the latest attack later swings are measured from (rev5), so
-    strokes while it runs stay recovery-scaled basic attacks; a game/form change or death ends it. Developer builds log `Frame melee sequences (Fury, Zeal):`
+    Each is still the latest attack later swings are measured from (rev5), and
+    a full-cycle one, so strokes while it runs stay recovery-scaled basic attacks; a game/form change or death ends it. Developer builds log `Frame melee sequences (Fury, Zeal):`
     and trace `cast 1/N` on the casting stroke and
     `sequence skill=... hit k/N target=... after N ms` for the rest.
   - **Zeal's light** (Cal, 2026-10-26; `steamvr/zeal_light.h`): every Zeal
@@ -1302,10 +1328,11 @@ In Unleashed your trigger/button melee (a melee hit check outside a physical
 swing: the trigger's basic attack or melee skill, Smite from the trigger or a
 shield bash) is a stroke like a swing (2026-10-24): it lands, attack rating scales
 its damage at the life write (`ar_damage`), the would-have-hit gate decides its
-other effects, and it shares the swings' recovery. It is measured from your latest
-landed swing on any hand (the recovery damage factor and the on-hit cycle gate, as
-a swing's), and every later swing is measured from it as well as from its own
-clock, so mixing trigger attacks with swings is never faster than swinging. Trigger
+other effects, and it shares the swings' fixed cycle. It is full when a full cycle
+has passed since your latest full-cycle swing on any hand, and then starts the next
+cycle; otherwise it is in between, scaled by the time since your latest landed swing
+(as a swing's). Every later swing is measured from it as well as from its own
+clocks, so mixing trigger attacks with swings is never faster than swinging. Trigger
 hits never count against each other: the native animation already paces them, and
 a multi-hit cast (Zeal, Fury, Whirlwind) keeps its later hits. Smite always hits
 natively, so it skips attack rating and the would-have-hit gate and only shares the
@@ -1347,7 +1374,14 @@ paced only by its own native animation. This needs the combat hooks, which
 Skill speed and slows (Fanaticism, Frenzy, Burst of Speed, chill, Decrepify) come
 from the unit's attackrate (ItemStatCost 68, which already subtracts the main
 hand's WSM; `attack_speed.h` `SkillSpeed`); the forms' own cycle is below.
-Dual-wield attack sequences are not read yet. An unknown class or weapon class (including
+Dual wield (2026-10-30, `attack_speed.h` `DualFrames`): native D2 merges the
+swinging weapon's stat lists before timing the attack, so each stroke reads the
+hero's item IAS and attackrate under that weapon's own scope (the other
+weapon's IAS does not count), and both weapons run at their averaged WSM (D2R
+2.4's fix of the old left-arm offset). The log reports `Frame dual wield speed:`
+per arm when its inputs change, and `native speed strokes=`/`unknown=` on
+`Frame dual wield:`; an unknown read keeps the per-arm cycle with the averaged
+WSM. Double Swing, Frenzy and Double Throw sequences are not read yet. An unknown class or weapon class (including
 classes outside the original seven) leaves the cycle unknown, which does not
 gate hits. Unleashed restores unlimited free-swing contacts. The log
 reports the cycle inputs (`Frame melee attack speed:`) and refused contacts
@@ -1558,7 +1592,8 @@ the game would have compared. On a would-miss contact:
   damage, Frozen Armor, Life Tap's heal), life/mana/stamina leech and drain, mana
   burn, chill, freeze and stun lengths, absorb heal, monster mods' on-hit
   effects, Thorns' damage return, prevent monster heal, defense lowered per hit,
-  and item wear (your armor when struck, your weapon when you strike).
+  item wear (your armor when struck, your weapon when you strike), and the
+  struck monster's reaction (hit recovery, knockback, Lightning Enchanted's bolts).
 - **As a miss:** effects the game fires on a miss as well - chance to cast on
   attack and attacked-in-melee (attacker takes damage, Shiver Armor) - run as if
   the attack had missed.
@@ -1566,9 +1601,11 @@ the game would have compared. On a would-miss contact:
   chance already scales), blocks, parries, chip, guard strain and the block's
   shield wear (designed), spells and enchantment procs (never roll to hit),
   on-kill effects. A riposte is a clean hit and always carries its effects.
-- **Damage over time** - poison and burn - is damage that never reaches the scaled
-  life write: it takes the hit's own factor (Defense, or attack rating x recovery
-  x cleave, a riposte's bonus) on every contact.
+- **Damage over time** - poison and burn - is a state, not damage the life write
+  scales (Cal, 2026-10-30): a contact that would have hit applies it whole, at its
+  native rate and length; a would-miss contact applies none. So a monster's poison
+  on you lands as natively when its roll hits, and yours as natively per full,
+  would-hit stroke (on-hit gate above).
 - **Absorb skills** (Energy Shield, Bone Armor, Cyclone Armor, Psychic Ward,
   Health Link: the absorbdamage event, before the life write) see the contact's
   damage at its factor and what they leave is scaled back, so they soak and drain

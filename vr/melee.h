@@ -15,6 +15,10 @@ void Report();
 // which never gates. SetAttackCycle comes from the UI thread's stat read.
 void ConfigureAttackSpeed(bool enabled,bool traceHits); // trace: [debug] melee_trace
 void SetAttackCycle(uint64_t session,uint32_t milliseconds,int hand=0);
+// Dual wield (attack_speed.h DualFrames): the hero class and, per inventory arm (0 right,
+// 1 left), the weapon class and WSM; classId < 0 when not dual wielding. UI thread's read;
+// the game thread times each stroke from them with the swinging weapon's IAS and attackrate.
+void SetDualSpeed(uint64_t session,int classId,const int weaponClass[2],const int wsm[2]);
 // Physical swings and trigger/button melee use the native to-hit/block/level
 // rolls. Off restores the contact_hits policy for them. Missiles unaffected.
 void ConfigureAttackRating(bool native); // Classic rules (unused: melee is Unleashed only)
