@@ -808,10 +808,13 @@ menudrop::Drop menuDrop;
 // (leather::Reach), watched while it is held; off with Dominant hand = Left, as the reach out is.
 leather::Reach leatherStow;
 std::atomic<bool> leftDominant{false};
-// The HUD held with the menu (leather::HudPlaces): its vitals and map while the tabbed menu is
-// in the hand with the world kept (Leather or Menu only), each unless its VR Settings location
-// is Off. The interaction engine stays off there; only its painter and the map run for it.
-bool leatherHudVitals=false,leatherHudMap=false;
+// The HUD held with the menu (leather::HudPlaces): its life / mana / XP while the tabbed menu is
+// in the hand with the world kept (Leather or Menu only), unless its VR Settings location is
+// Off. The interaction engine stays off there; only its painter runs for it. No minimap there
+// (owner 2026-10-30, "Drop the map!"): it needed the game's map held open under the menu, and
+// Save and Exit from the Options tab tore the level down under it (automap.cpp:636 assert,
+// then an access violation on the draw thread).
+bool leatherHudVitals=false;
 leather::Holder leatherHolder;
 leather::Back leatherBack;   // Right B the game leaves unanswered closes the leather's menu
 leather::Art leatherArt=leather::PlaceholderArt();
@@ -2887,17 +2890,11 @@ void Input() {
     const auto hudSettings=vrsettings::Read();
     interactionInput.navigationLocation=vitals::Location(int(hudSettings.values[settings::NavigationLocation]));
     interactionInput.vitalsLocation=vitals::Location(int(hudSettings.values[settings::VitalsLocation]));
-    {   // the HUD held with the menu: its picture and map (the map lease may open the game's map under the menu)
+    {   // the HUD held with the menu: its life / mana / XP picture
         const bool held=leatherMode&&leatherShown.load()&&inWorld&&inWorld()&&!settingsModel.open;
-        const bool vitalsWas=leatherHudVitals,mapWas=leatherHudMap;
+        const bool vitalsWas=leatherHudVitals;
         leatherHudVitals=held&&interactionInput.vitalsLocation!=vitals::Location::Off;
-        leatherHudMap=held&&interactionInput.navigationLocation!=vitals::Location::Off&&mapSupported;
-        gamestate::MenuMapUnderMenu(leatherHudMap);
-        if((leatherHudVitals&&!vitalsWas)||(leatherHudMap&&!mapWas)) {
-            char line[160];std::snprintf(line,sizeof line,"Frame leather: the HUD held with the menu - %s%s%s",leatherHudVitals?"life and mana":"",
-                leatherHudVitals&&leatherHudMap?" and ":"",leatherHudMap?"the map":"");
-            Say(line);
-        }
+        if(leatherHudVitals&&!vitalsWas)Say("Frame leather: the HUD held with the menu - life and mana");
     }
     interactionInput.vitalsTilt=hudSettings.values[settings::VitalsTilt];
     interactionInput.criticalAlerts=hudSettings.values[settings::CriticalAlerts]>.5f;
@@ -3216,7 +3213,7 @@ void Input() {
             mapZoomLogged=false;
         }
     }
-    gamestate::MenuMap(mapSupported&&(leatherHudMap||interaction::MapWanted(interactionInput,interactionOutput,interactionInput.at)));
+    gamestate::MenuMap(mapSupported&&interaction::MapWanted(interactionInput,interactionOutput,interactionInput.at));
     if(interactionOutput.inventory&&toggleMenus)toggleMenus();
     if(handOutput.wheel>=0&&!interactionOutput.wheel){handControls.Close();handOutput={};}
     if(interactionOutput.cancelPending)interactionstate::Cancel();
@@ -4555,7 +4552,7 @@ bool Copy(ID3D12Resource* src,Eye& e,reshade::api::command_queue* rq) {
     e.copied=true;return true;
 }
 bool CopyMap(reshade::api::command_queue* rq) {
-    if(!mapSupported||mapEye.copied||!(leatherHudMap||interaction::MapWanted(interactionInput,interactionOutput,GetTickCount64())))return true;
+    if(!mapSupported||mapEye.copied||!interaction::MapWanted(interactionInput,interactionOutput,GetTickCount64()))return true;
     if(swapchainsShort&&spatialMode)return true;   // the native menus' panel may need its surface: no map while they are open
     uint32_t w=0,h=0;
     bool fullMap=false;float drawnZoom=0;   // Map view = Full map: the share is the full map's box, drawn at that game zoom
@@ -5287,14 +5284,12 @@ void EndPair() {
         motionQuad(statsQuad,XrPose({p,q}),spot.size,spot.size,Rect(statsLit?panelatlas::StatsLit:panelatlas::Stats),staticChain);
         statsQuad.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;   // premultiplied (SetupStatic)
     }
-    // The HUD held with the menu (leather::HudPlaces): the map over life / mana / XP, beside the menu.
-    XrCompositionLayerQuad hudMap{XR_TYPE_COMPOSITION_LAYER_QUAD},hudVitals{XR_TYPE_COMPOSITION_LAYER_QUAD};
-    if(book.subImage.swapchain&&leatherMode&&(leatherHudVitals||leatherHudMap)) {
+    // The HUD held with the menu (leather::HudPlaces): life / mana / XP above the menu.
+    XrCompositionLayerQuad hudVitals{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    if(book.subImage.swapchain&&leatherMode&&leatherHudVitals) {
         const auto hud=leather::HudPlaces(leatherMenuWidth.load());
         const auto at=UiSurfacePose();const auto q=Q(at.orientation);
-        if(leatherHudMap&&mapEye.copied&&mapEye.chain)
-            motionQuad(hudMap,XrPose({V(at.position)+math::Rotate(q,hud.map),q}),hud.mapSize,hud.mapSize,{{0,0},{int32_t(mapSide),int32_t(mapSide)}},mapEye.chain);
-        if(leatherHudVitals&&interactionPaintValid&&interactionChain)
+        if(interactionPaintValid&&interactionChain)
             motionQuad(hudVitals,XrPose({V(at.position)+math::Rotate(q,hud.vitals),q}),hud.vitalsWidth,hud.vitalsHeight,{{512,768},{512,256}},interactionChain);
     }
     XrCompositionLayerQuad settingsPanel{XR_TYPE_COMPOSITION_LAYER_QUAD};

@@ -7,7 +7,6 @@ bool UpperBandMenuOpen();
 bool LeatherMenuOpen();   // the tabbed menu (or a cube from it) with no world-opened panel: leather_menu.h
 bool CursorItemHeld();    // an item on the game's cursor, read in the last 600 ms (a drop outside the menu)
 uint64_t CursorItemReadAt();   // when CursorItemHeld's value was read (GetTickCount64)
-void MenuMapUnderMenu(bool on);   // the map on the leather: the map lease may open the game's map under the tabbed menu
 bool StatsButtonShown();  // the tabbed menu alone (not a cube or world panel): its Advanced Stats button, stats_button.h
 uint32_t PanelChanges();  // counts every panel opened or closed (leather::Back)
 bool CloseLeatherMenu();  // queue: close the tabbed menu if only it and its pages are open, the cursor empty

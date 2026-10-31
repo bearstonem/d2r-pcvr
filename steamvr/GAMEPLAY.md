@@ -393,12 +393,9 @@ work the menu (the right stick is all turning while it is held). An item picked
 up with the laser (a click, as ever) and then **clicked outside the menu** - a trigger pull off
 the menu's art, on or past the hide - drops to the ground, as in flat D2R: the mod presses the
 controller menu's own Drop (X) for the item held (logs: `Frame panels: item let go outside the
-menu - X ...`, then whether it dropped; a pull off the menu that did not drop says why). The **HUD comes with it**: the life / mana / XP panel above the menu,
-and the minimap at the menu's left edge, above your fist (each unless its VR Settings
-location is Off). The map
-opens the game's own map under the menu; should the game close the menu as it does, the
-map stays off there from then on (log: `gamestate: the tabbed menu closed as its map
-opened under it ...`). Nothing else is drawn over it: quest and level-up cards wait until it
+menu - X ...`, then whether it dropped; a pull off the menu that did not drop says why). The **life / mana / XP panel comes with it**,
+above the menu (unless its VR Settings location is Off); the minimap does not (the game's map
+is never kept open under a menu). Nothing else is drawn over it: quest and level-up cards wait until it
 closes, and the wrist and palm displays themselves are hidden while a menu is open, as before.
 
 Only the menu's 16:9 band is on the hide, on the middle of its body, and the

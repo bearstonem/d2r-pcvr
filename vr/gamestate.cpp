@@ -309,11 +309,6 @@ void RefreshToolbarAfterMessage(const PluginContext* ctx) {
 #endif
 std::atomic<int> g_autoMap{0};
 std::atomic<uint64_t> g_menuMapAt{0};
-// The map on the leather (owner 2026-10-29: the HUD on the hide): the map lease may open the
-// game's map under the tabbed menu while this is set (transport, each frame). Should the game
-// close the tabbed menu as its map opens under it, the map stays off under menus from then on.
-std::atomic<bool> g_mapUnderMenu{false},g_mapUnderMenuBroken{false};
-std::atomic<uint64_t> g_mapUnderMenuOpenedAt{0};
 framevr::wrist::MapLease g_menuMapLease;
 const InventoryService* g_inventory = nullptr;
 const ItemService* g_items = nullptr;
@@ -703,16 +698,11 @@ void __cdecl ReadItems(const PluginContext* ctx, void* token) noexcept {
     ReadNoticeTexts();
     const auto now=GetTickCount64(),mapAt=g_menuMapAt.load();
     const bool mapWanted=mapAt&&now>=mapAt&&now-mapAt<400;
-    // A menu stops the map, but for the map on the leather (g_mapUnderMenu).
-    const bool underMenu=g_menu.load()!=0&&g_mapUnderMenu.load()&&!g_mapUnderMenuBroken.load();
-    const bool menuBlocks=g_menu.load()!=0&&!underMenu;
-    const int mapAction=g_menuMapLease.Step(havePlayer?player:0,now,mapWanted,menuBlocks,g_autoMap.load()!=0);
-    if(mapAction==1&&underMenu) {
-        g_mapUnderMenuOpenedAt.store(now);
-        static int told=0;if(told<5){++told;Log("gamestate: the leather's map - opening the game's map under the tabbed menu");}
-    }
+    // Every menu stops the map, the held tabbed menu too: no game map is ever open under a menu
+    // (2026-10-30: the leather's map, held open under it, crashed Save and Exit; dropped).
+    const int mapAction=g_menuMapLease.Step(havePlayer?player:0,now,mapWanted,g_menu.load()!=0,g_autoMap.load()!=0);
     // Keep native widget calls on this UI callback, never on the XR thread.
-    const bool capture=g_menuMapLease.Active(now,menuBlocks);
+    const bool capture=g_menuMapLease.Active(now,g_menu.load()!=0);
     MaintainMapLayout(capture);
     if(mapAction>=0)DispatchAutoMap(ctx,mapAction?(void*)1:nullptr);
     hud::MenuMapCapture(capture);
@@ -899,14 +889,7 @@ SharedEvents::UiMessageAction __cdecl OnUiMessage(const PluginContext* ctx, cons
     if (strcmp(target, "PanelManager") == 0) {
         const bool before = g_menu.load() != 0;
         if (!strcmp(command, "OpenPanel") || !strcmp(command, "OpenExclusivePanel")) { if (*text) g_panels.insert(text); }
-        else if (!strcmp(command, "ClosePanel") || !strcmp(command, "UnloadPanel")) {
-            g_panels.erase(text);
-            // The tabbed menu closed just as the leather's map opened under it: the game will not
-            // have its map under the menu, so the leather shows no map from now on.
-            const uint64_t opened=g_mapUnderMenuOpenedAt.load();
-            if(opened&&!strcmp(text,framevr::panels::TabbedMenu)&&GetTickCount64()-opened<600&&!g_mapUnderMenuBroken.exchange(true))
-                Log("gamestate: the tabbed menu closed as its map opened under it - no map on the leather from now on");
-        }
+        else if (!strcmp(command, "ClosePanel") || !strcmp(command, "UnloadPanel")) g_panels.erase(text);
         else if (!strcmp(command, "UnloadAll") || !strcmp(command, "CloseAll")) g_panels.clear();
         if (!strcmp(command, "OpenPanel") || !strcmp(command, "OpenExclusivePanel") || !strcmp(command, "ClosePanel") ||
             !strcmp(command, "UnloadPanel") || !strcmp(command, "UnloadAll") || !strcmp(command, "CloseAll")) g_panelChanges.fetch_add(1);
@@ -1124,7 +1107,6 @@ bool RestoreLeftDurability(const PluginContext* ctx, int32_t value) {
 }
 uint32_t DataBank() {return uint32_t(g_bank);} // UI-thread-only table bank
 void MenuMap(bool wanted) {g_menuMapAt.store(wanted?GetTickCount64():0);}
-void MenuMapUnderMenu(bool on) {g_mapUnderMenu.store(on);}
 // An object's light in a mode: its radius (Objects.txt Lit, 0 = none) and colour 0..1.
 int ObjectLight(uint32_t txt, uint32_t mode, float rgb[3]) {
     if (txt >= g_objCount.load() || mode > 7) return 0;
