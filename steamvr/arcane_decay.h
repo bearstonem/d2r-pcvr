@@ -166,7 +166,7 @@ public:
 };
 
 // Generates 512x512 straight-RGBA overlay image containing the 4 visual layers:
-// 1. Spectral Vignette (dark sapphire blue shading)
+// 1. Spectral Vignette (deep midnight sapphire blue)
 // 2. Arcane Mist (translucent blue/cyan drift)
 // 3. Spectral Filaments (thin glowing strands)
 // 4. Arcane Pulse (subtle atmospheric pulse that deepens with depletion)
@@ -182,9 +182,10 @@ inline std::vector<uint8_t> Compose(float intensity, float depletion, double tim
     // Subtle atmospheric pulse factor: at critically low mana, breathing amplitude increases
     constexpr double PulseFreq = 0.60;
     const float pulseCycle = static_cast<float>(0.5 + 0.5 * std::sin(time * (2.0 * 3.14159265358979323846 * PulseFreq)));
-    const float pulseMod = 1.0f + 0.20f * depletion * pulseCycle;
+    const float pulseMod = 1.0f + 0.25f * depletion * pulseCycle;
 
-    const float t = static_cast<float>(time);
+    // Wrap time to avoid floating point precision degradation over long uptime
+    const float t = static_cast<float>(std::fmod(time, 3600.0));
 
     for (int y = 0; y < Size; ++y) {
         const float v = ((y + 0.5f) / static_cast<float>(Size) * 2.0f - 1.0f);
@@ -193,44 +194,47 @@ inline std::vector<uint8_t> Compose(float intensity, float depletion, double tim
 
             // Elliptical radius matching the visor aspect ratio: keeps the central viewing area unobstructed
             const float r = std::sqrt(u * u * 0.85f + v * v);
-            if (r <= 0.48f) {
-                continue; // Clear center
+            if (r <= 0.32f) {
+                continue; // Clear central viewing area (crosshair / character target)
             }
 
             const float theta = std::atan2(v, u * 0.92f);
 
-            // Layer 1: Spectral Vignette (deep midnight blue)
-            const float vigT = std::clamp((r - 0.48f) / 0.52f, 0.0f, 1.0f);
+            // Layer 1: Spectral Vignette (deep midnight sapphire blue)
+            // Starts at r = 0.32, reaches full at r = 0.72
+            const float vigT = std::clamp((r - 0.32f) / 0.40f, 0.0f, 1.0f);
             const float vigCurve = vigT * vigT * (3.0f - 2.0f * vigT);
-            const float alpha1 = 0.65f * vigCurve * intensity;
+            const float alpha1 = 0.70f * vigCurve * intensity;
 
             // Layer 2: Arcane Mist (translucent blue/cyan drift around peripheral rim)
-            const float mistBand = std::clamp((r - 0.54f) / 0.42f, 0.0f, 1.0f);
-            const float drift1 = std::sin(theta * 3.0f + t * 0.35f);
-            const float drift2 = std::cos(theta * 5.0f - t * 0.22f + r * 2.5f);
-            const float mistNoise = 0.5f + 0.25f * drift1 + 0.25f * drift2;
-            const float alpha2 = 0.48f * mistBand * mistNoise * intensity * pulseMod;
+            // Starts at r = 0.36, reaches full at r = 0.72
+            const float mistBand = std::clamp((r - 0.36f) / 0.36f, 0.0f, 1.0f);
+            const float drift1 = std::sin(theta * 3.0f + t * 0.40f);
+            const float drift2 = std::cos(theta * 5.0f - t * 0.25f + r * 3.0f);
+            const float mistNoise = 0.5f + 0.28f * drift1 + 0.22f * drift2;
+            const float alpha2 = 0.55f * mistBand * mistNoise * intensity * pulseMod;
 
-            // Layer 3: Spectral Filaments (occasional thin glowing strands within mist)
-            const float filBand = std::clamp((r - 0.60f) / 0.36f, 0.0f, 1.0f);
-            const float strandOsc = std::sin(theta * 7.0f + t * 0.18f) * std::cos(theta * 11.0f - t * 0.14f + r * 3.0f);
-            const float strandSharp = std::pow(std::max(0.0f, strandOsc), 6.0f);
-            const float alpha3 = 0.45f * filBand * strandSharp * intensity * (1.0f + 0.25f * depletion * pulseCycle);
+            // Layer 3: Spectral Filaments (occasional glowing strands within mist)
+            // Starts at r = 0.42, reaches full at r = 0.72
+            const float filBand = std::clamp((r - 0.42f) / 0.32f, 0.0f, 1.0f);
+            const float strandOsc = std::sin(theta * 6.0f + t * 0.20f) * std::cos(theta * 10.0f - t * 0.15f + r * 4.0f);
+            const float strandSharp = std::pow(std::max(0.0f, strandOsc), 4.0f);
+            const float alpha3 = 0.50f * filBand * strandSharp * intensity * (1.0f + 0.30f * depletion * pulseCycle);
 
             // Layer 4: Combine layers into straight RGBA with Gothic Diablo I/II tones
-            const float totalAlpha = std::clamp(alpha1 + alpha2 + alpha3, 0.0f, 1.0f);
-            if (totalAlpha <= 0.002f) {
+            const float totalAlpha = std::clamp(alpha1 + alpha2 + alpha3, 0.0f, 0.92f);
+            if (totalAlpha <= 0.004f) {
                 continue;
             }
 
             // Weighted color blend between:
-            // Vignette: deep spectral sapphire (10, 32, 75)
-            // Mist:     arcane cyan drift (28, 95, 160)
-            // Filament: bright spectral filament (65, 165, 245)
+            // Vignette: deep spectral sapphire (16, 48, 105)
+            // Mist:     arcane cyan drift (35, 130, 205)
+            // Filament: bright spectral filament (95, 200, 255)
             const float sum = std::max(0.001f, alpha1 + alpha2 + alpha3);
-            const float cr = (10.0f * alpha1 + 28.0f * alpha2 + 65.0f * alpha3) / sum;
-            const float cg = (32.0f * alpha1 + 95.0f * alpha2 + 165.0f * alpha3) / sum;
-            const float cb = (75.0f * alpha1 + 160.0f * alpha2 + 245.0f * alpha3) / sum;
+            const float cr = (16.0f * alpha1 + 35.0f * alpha2 + 95.0f * alpha3) / sum;
+            const float cg = (48.0f * alpha1 + 130.0f * alpha2 + 200.0f * alpha3) / sum;
+            const float cb = (105.0f * alpha1 + 205.0f * alpha2 + 255.0f * alpha3) / sum;
 
             auto* p = &rgba[(static_cast<size_t>(y) * Size + x) * 4];
             p[0] = static_cast<uint8_t>(std::clamp(std::lround(cr), 0L, 255L));

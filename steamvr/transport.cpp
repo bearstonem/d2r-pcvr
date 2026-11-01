@@ -3103,6 +3103,12 @@ void Input() {
             if(!arcaneAtlasPending&&atlasUploads.size()<3&&arcanePainter.Take(painted)) {
                 if(!painted.pixels.empty()&&UploadShared(panelatlas::ArcaneDecay,painted.pixels,&arcaneAtlasPending)) {
                     arcanePaintKey=painted.key;
+                    static bool uploadedReported=false;
+                    if(!uploadedReported) {
+                        char line[128];
+                        std::snprintf(line,sizeof line,"Frame arcane decay: uploaded to shared atlas key=%llx pixels=%zu",painted.key,painted.pixels.size());
+                        Say(line);uploadedReported=true;
+                    }
                 }
             }
             if(now>=arcanePaintAt&&!arcanePainter.Busy()&&!arcaneAtlasPending) {
@@ -3110,6 +3116,12 @@ void Input() {
                 if(key!=arcanePaintKey) {
                     if(arcanePainter.Submit({arcaneOutput.intensity,arcaneOutput.depletion,in.time})) {
                         arcanePaintAt=now+40;
+                        static bool submitReported=false;
+                        if(!submitReported) {
+                            char line[128];
+                            std::snprintf(line,sizeof line,"Frame arcane decay: submitted paint job key=%llx intensity=%.2f",key,arcaneOutput.intensity);
+                            Say(line);submitReported=true;
+                        }
                     }
                 }
             }
@@ -5425,6 +5437,20 @@ void EndPair() {
             const uint32_t below=count&&layers[0]==layer?1:0;
             for(uint32_t i=count;i>below;--i)layers[i]=layers[i-1];
             layers[below]=reinterpret_cast<const XrCompositionLayerBaseHeader*>(&arcaneQuad);++count;
+            static bool submittedReported=false;
+            if(!submittedReported) {
+                char line[160];
+                std::snprintf(line,sizeof line,"Frame arcane decay: quad SUBMITTED to layers at index %u, size=%.2fx%.2f",below,width,height);
+                Say(line);submittedReported=true;
+            }
+        }
+    } else if(arcaneOutput.visible) {
+        static ULONGLONG failReportAt=0;const auto now=GetTickCount64();
+        if(now>=failReportAt) {
+            char line[240];
+            std::snprintf(line,sizeof line,"Frame arcane decay: quad NOT submitted (ready=%d key=%llx vis=%d layer=%d panel=%d black=%d open=%d count=%u/%u)",
+                arcaneImageReady,arcanePaintKey,arcaneOutput.visible,layer!=nullptr,panelMode,blackMenu,settingsModel.open,count,contentLimit);
+            Say(line);failReportAt=now+2000;
         }
     }
     XrCompositionLayerQuad winePadding{XR_TYPE_COMPOSITION_LAYER_QUAD};
