@@ -1191,15 +1191,18 @@ and trigger/button melee were:
     a dual-wield attack: the two weapons' averaged WSM, with the swinging
     weapon's own IAS) and a shapeshift form's two claws),
     and only on the first creature that stroke lands on.
-    That covers life and mana leech, critical and deadly strike, crushing blow,
+    That covers life and mana leech, Life Tap's heal (a Life-Tapped monster
+    heals you only from such a stroke), critical and deadly strike, crushing blow,
     open wounds, freeze, slow, knockback, flee, blind, prevent monster heal,
     defense lowered per hit and chance to cast on striking or attack (curses
     included). Every other contact still lands its scaled damage, with no
     on-hit effects. `swing_recovery_grace` does not shorten the wait. A riposte
     always carries them; an unknown cycle counts as full. Elemental damage is
-    damage (scaled like the hit; poison and burn by the contact's factor), its
-    effects (chill, freeze) follow the would-have-hit gate below, and on-kill
-    effects are unchanged. The game's
+    damage (scaled like the hit), its effects (chill, freeze) follow the
+    would-have-hit gate below, and on-kill effects are unchanged. Poison and
+    burn are on-hit effects (Cal, 2026-10-30): they don't stack, so a stroke that
+    carries on-hit effects applies them whole (native rate and length) and every
+    other contact applies none. The game's
     own roll sites are checked at start (`Frame on-hit gate:`); a part not
     found stays native. `[debug] melee_trace=1` adds `onhit=1/0` to each
     traced contact.
@@ -1208,6 +1211,17 @@ and trigger/button melee were:
     so a full-cycle stroke at 60% attack rating chance carries them about 60%
     of the time, as natively. `would_hit=1/0` (-1: not gated, e.g. a riposte)
     ends each `melee_trace` contact line.
+  - **Monster reactions and the stroke's share** (Cal, 2026-10-30): a monster
+    flinches only when it should. A contact that would have missed, or a stroke
+    without on-hit effects (not a full cycle, a cleave follow-up, a trigger hit
+    inside a swing's cycle), lands its scaled damage but the monster does not
+    react: no hit recovery, knockback or soft-hit reaction, and Lightning
+    Enchanted's on-hit bolts don't fire. A monster's Thorns aura and Iron Maiden
+    cursed on you return a % of the damage the stroke actually dealt (its
+    recovery x cleave share), on every such stroke. Your weapon wears with a
+    stroke's first creature only, at the native chance times that stroke's
+    recovery share (a half-recovered stroke: half the chance). Ripostes, arrows,
+    throws and skill hits count whole. Checked at start (`Frame stroke share:`).
   - **Melee skill strikes** (CONTROLS.md): a hand armed with a strike skill
     (the Druid's Maul, Feral Rage, Rabies, Fire Claws, Hunger and Fury; Bash, Stun, Concentrate, Berserk, Sacrifice, Vengeance, Conversion, Zeal,
     Power Strike, Impale, Charged Strike, Lightning Strike and Poison Dagger) casts it natively on a full-cycle stroke's first landed
@@ -1575,7 +1589,8 @@ the game would have compared. On a would-miss contact:
   damage, Frozen Armor, Life Tap's heal), life/mana/stamina leech and drain, mana
   burn, chill, freeze and stun lengths, absorb heal, monster mods' on-hit
   effects, Thorns' damage return, prevent monster heal, defense lowered per hit,
-  and item wear (your armor when struck, your weapon when you strike).
+  item wear (your armor when struck, your weapon when you strike), and the
+  struck monster's reaction (hit recovery, knockback, Lightning Enchanted's bolts).
 - **As a miss:** effects the game fires on a miss as well - chance to cast on
   attack and attacked-in-melee (attacker takes damage, Shiver Armor) - run as if
   the attack had missed.
@@ -1583,9 +1598,11 @@ the game would have compared. On a would-miss contact:
   chance already scales), blocks, parries, chip, guard strain and the block's
   shield wear (designed), spells and enchantment procs (never roll to hit),
   on-kill effects. A riposte is a clean hit and always carries its effects.
-- **Damage over time** - poison and burn - is damage that never reaches the scaled
-  life write: it takes the hit's own factor (Defense, or attack rating x recovery
-  x cleave, a riposte's bonus) on every contact.
+- **Damage over time** - poison and burn - is a state, not damage the life write
+  scales (Cal, 2026-10-30): a contact that would have hit applies it whole, at its
+  native rate and length; a would-miss contact applies none. So a monster's poison
+  on you lands as natively when its roll hits, and yours as natively per full,
+  would-hit stroke (on-hit gate above).
 - **Absorb skills** (Energy Shield, Bone Armor, Cyclone Armor, Psychic Ward,
   Health Link: the absorbdamage event, before the life write) see the contact's
   damage at its factor and what they leave is scaled back, so they soak and drain

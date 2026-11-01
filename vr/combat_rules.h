@@ -42,15 +42,14 @@ inline float DefenseFactor(int chance) {return ArFactor(chance,0);}
 inline int NativeHitRoll(Seed current) {return int(AdvanceSeed(current).low%100);}
 // An unknown roll or chance (-1) counts as a hit: native effects, as before the gate.
 inline bool WouldHit(int roll,int chance) {return roll<0||chance<0||roll<chance;}
-// Damage over time (poison, burn) never reaches the scaled life write, so it takes
-// the hit's factor itself. A positive rate never rounds away to nothing.
-inline int32_t ScaleDamageOverTime(int32_t rate,double factor) {
-    if(rate<=0||!(factor>=0)||factor==1)return rate;
-    const double v=double(rate)*(factor>8?8:factor)+.5;
-    if(v>=2147483647.)return 2147483647;
-    const int32_t scaled=int32_t(v);
-    return factor>0&&scaled<1?1:scaled;
-}
+// Damage over time (Cal, 2026-10-30): poison and burn are states that don't stack - a
+// new one only replaces a weaker one, and refreshes it (D2MOO SUnitDmg.cpp 1472-1566) -
+// so scaling their rate by a contact's factor undercut native even without flailing (at
+// 60% chance about 60% of native poison damage, where native hits keep the full rate up).
+// Like an on-hit effect: full native rate and length from a contact that would have hit
+// and isn't a gated stroke (not a full cycle, a cleave follow-up, a trigger hit inside a
+// swing's cycle); none from any other.
+inline bool DamageOverTime(bool wouldMiss,bool gatedStroke) {return !wouldMiss&&!gatedStroke;}
 // Unleashed swing damage: how recovered a stroke is - the time since the
 // previous landed stroke over the native attack cycle, raised to `curve`, at
 // most 1. On the fixed cycle (FixedCycle, 2026-10-30) it scales only the strokes
@@ -120,6 +119,16 @@ inline uint64_t StrokeGap(uint64_t landedAt,uint64_t now) {
 inline uint64_t SwingSince(uint64_t ownSinceMs,uint64_t triggerAt,uint64_t now) {
     const uint64_t t=StrokeGap(triggerAt,now);
     return t<ownSinceMs?t:ownSinceMs;
+}
+// Life Tap on a gated stroke (Cal, 2026-10-30; audit 2026-10-25 B2): a monster
+// cursed with Life Tap heals its striker from its own damagedinmelee /
+// damagedbymissile events (D2MOO EventFunc05: life += phys% of the record, set
+// with SetStat(striker, 6)). It is leech by another name, so a stroke the on-hit
+// gate switches off heals nothing, like leech; a would-miss contact already
+// skips those events. Inside a gated stroke's struck events any rise of the
+// striker's life is that heal; a fall (attacker takes damage) stays native.
+inline bool TapHealBlocked(bool gatedStroke,int lifeBefore,int lifeAfter) {
+    return gatedStroke&&lifeAfter>lifeBefore;
 }
 struct TriggerStroke {float recovery=1;OnHit onHit=OnHit::Allowed;};
 // sinceFullSwingMs: since the latest full-cycle swing on any hand; sinceAnySwingMs: since the

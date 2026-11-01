@@ -69,6 +69,11 @@ int main() {
     assert(OnHitGate(false,5000,600)==OnHit::CleaveFollowUp&&OnHitGate(false,UINT64_MAX,0)==OnHit::CleaveFollowUp); // the stroke's next creature
     assert(OnHitGate(true,UINT64_MAX,600)==OnHit::Allowed);   // the first stroke
     assert(OnHitGate(true,10,0)==OnHit::Allowed);             // an unknown cycle counts as full
+    // Life Tap: a gated stroke's struck events may not raise the striker's life.
+    assert(TapHealBlocked(true,100<<8,150<<8));               // the heal on a sub-cycle stroke or cleave follow-up
+    assert(!TapHealBlocked(true,100<<8,90<<8));               // attacker takes damage stays native
+    assert(!TapHealBlocked(true,100<<8,100<<8));              // no change
+    assert(!TapHealBlocked(false,100<<8,150<<8));             // a full-cycle first contact heals natively
     // Grace gives full damage early but never opens the gate before the full cycle.
     assert(RecoveryFactor(520,600,2,.85f)==1.f&&OnHitGate(true,520,600)==OnHit::NotFullCycle);
     {   // Trigger/button melee: a stroke on the swing clocks, never on another trigger hit.
@@ -168,10 +173,9 @@ int main() {
             const double share=double(hits)/n;
             assert(share>chance/100.-.01&&share<chance/100.+.01);
         }
-        // Damage over time follows the hit's factor; a positive rate never rounds to nothing.
-        assert(ScaleDamageOverTime(400,.25)==100&&ScaleDamageOverTime(50,.05)==3&&ScaleDamageOverTime(16,.3)==5);
-        assert(ScaleDamageOverTime(10,.01)==1&&ScaleDamageOverTime(10,0)==0&&ScaleDamageOverTime(10,1)==10);
-        assert(ScaleDamageOverTime(0,.5)==0&&ScaleDamageOverTime(-3,.5)==-3&&ScaleDamageOverTime(100,1.5)==150);
+        // Poison and burn: whole from a contact that counts as a hit, none from any other.
+        assert(DamageOverTime(false,false));
+        assert(!DamageOverTime(true,false)&&!DamageOverTime(false,true)&&!DamageOverTime(true,true));
     }
     std::puts("Combat rules: local ownership, guaranteed accuracy, subsequent random-stream, swing damage, on-hit and would-hit gate tests passed");
 }

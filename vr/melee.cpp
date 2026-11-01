@@ -933,6 +933,7 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                             cleave=combat::CleaveFactor(state.cleaveLanded,step,cleaveFloor.load(std::memory_order_relaxed));cleaveTracked=true;
                         }
                         const float swingRecoverySaved=combat::SwingRecovery(recovery*cleave);
+                        const bool swingFirstSaved=combat::SwingFirst(attackSpeed.load()||strokeStart);   // weapon wear: the stroke's first creature only
                         // Unleashed on-hit gate (Cal, 2026-10-21): on-hit effects only on a full-cycle
                         // stroke's first landed contact; a riposte has earned them. Classic: native.
                         auto onHit=combat::OnHit::Allowed;bool riposte=false;
@@ -995,6 +996,7 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                             ++onHitWhy[riposte?OnHitRiposte:onHit==combat::OnHit::CleaveFollowUp?OnHitCleave:
                                        onHit==combat::OnHit::NotFullCycle?OnHitNotFull:cycle?OnHitAllowed:OnHitUnknownCycle];
                         combat::SwingRecovery(swingRecoverySaved);
+                        combat::SwingFirst(swingFirstSaved);
                         combat::PhysicalSwing(swing);
                         combat::NativeRolls(rolls);
                         if(contact.accepted)++accepted;else if(contact.resolved)++missed;else ++rejected;
