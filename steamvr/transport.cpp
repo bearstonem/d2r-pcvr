@@ -75,6 +75,7 @@
 #include "elemental_hands_renderer.h"
 #include "../vr/companion_ai.h"
 #include "telegraph.h"
+#include "tactical_chord.h"
 #include "../vr/target_lock.h" 
 #include "vr_settings_ui.h"
 #include "vr_settings_pointer.h"
@@ -2503,7 +2504,9 @@ bottles::Prop Metres(const props::Seen& s,float upm) {
     p.unitsPerMetre=upm;
     return p;
 }
-bool g_tacticalPrevGrip[2]{};
+// Grip + Trigger per hand (tactical_chord.h): grip on the companion arms, the trigger latches,
+// letting go carries the command out. An armed or latched hand's trigger is kept from the game (Input).
+framevr::tacticalchord::Hand g_tacticalChord[2];
 uint64_t g_openPalmHoldStart[2]{};
 bool g_openPalmLocked[2]{};
 int g_tacticalGrabHand = -1;
@@ -2513,7 +2516,7 @@ bool g_tacticalTargetOutOfRange[2]{};
 
 void StepCompanionTacticalGestures(uint64_t now, float rightTrigger, float leftTrigger) {
     if (!::companionai::IsTacticalCommandsEnabled() || !interactionInput.active) {
-        g_tacticalPrevGrip[0] = g_tacticalPrevGrip[1] = false;
+        g_tacticalChord[0].Reset(); g_tacticalChord[1].Reset();
         g_openPalmHoldStart[0] = g_openPalmHoldStart[1] = 0;
         g_openPalmLocked[0] = g_openPalmLocked[1] = false;
         if (g_tacticalGrabHand >= 0) {
@@ -2536,8 +2539,11 @@ void StepCompanionTacticalGestures(uint64_t now, float rightTrigger, float leftT
     const bool hasCompPos = ::companionai::GetHirelingWorldSubtilePos(compX, compY);
 
     for (int h = 0; h < 2; ++h) {
+        auto& chord = g_tacticalChord[h];
+        const float grip = motionInput.grip[h];
+        const float trigger = (h == 0) ? rightTrigger : leftTrigger;
         if (!interactionInput.tracked[h]) {
-            g_tacticalPrevGrip[h] = false;
+            chord.Step(grip, trigger, false, false);
             g_openPalmHoldStart[h] = 0;
             g_openPalmLocked[h] = false;
             if (g_tacticalGrabHand == h) {
@@ -2547,14 +2553,8 @@ void StepCompanionTacticalGestures(uint64_t now, float rightTrigger, float leftT
             continue;
         }
 
-        const bool gripDown = motionInput.grip[h] > 0.6f;
-        const bool gripHeld = motionInput.grip[h] >= 0.4f;
-        const bool gripClick = gripDown && !g_tacticalPrevGrip[h];
-        g_tacticalPrevGrip[h] = gripDown;
-
         // 1. Gesture: Open-Palm Defensive Hold (Upright palm facing companion / forward)
-        const float trigger = (h == 0) ? rightTrigger : leftTrigger;
-        const bool handOpen = motionInput.grip[h] < 0.2f && trigger < 0.2f;
+        const bool handOpen = grip < 0.2f && trigger < 0.2f;
         if (handOpen && g_tacticalGrabHand < 0) {
             const auto handUp = math::Rotate(interactionInput.hand[h].q, {0, 1, 0});
             if (handUp.y > 0.82f) {
@@ -2576,6 +2576,7 @@ void StepCompanionTacticalGestures(uint64_t now, float rightTrigger, float leftT
                             Say("Frame companion tactical: open-palm defensive hold ordered");
                         }
                     }
+                    chord.Step(grip, trigger, false, !handsBusy);   // an open hand: at most an armed grip let go
                     continue;
                 }
             }
@@ -2586,8 +2587,13 @@ void StepCompanionTacticalGestures(uint64_t now, float rightTrigger, float leftT
             g_openPalmLocked[h] = false;
         }
 
-        // 2. Gesture: Select Companion First -> Hold Grip & Aim -> Release Grip to Execute
-        if ((gripClick || g_tacticalGrabHand == h) && (handAimTracked[h] || interactionInput.tracked[h])) {
+        // 2. Gesture: Select Companion First -> Grip on it, then Trigger & Aim -> Release to Execute
+        // (tactical_chord.h). The ray is only tested on the frame the grip closes, or while engaged.
+        if (!chord.Closing(grip) && !chord.Engaged()) {
+            chord.Step(grip, trigger, false, !handsBusy);
+            continue;
+        }
+        {
             const auto headP = interactionInput.head.p;
             const auto handP = interactionInput.hand[h].p;
             const auto eyeToHand = handP - headP;
@@ -2649,17 +2655,19 @@ void StepCompanionTacticalGestures(uint64_t now, float rightTrigger, float leftT
             // Original companion cylinder: radius 0.95m, ground foot tolerance 3.5 sub-tiles, height [-0.45m, 2.00f]
             const bool pointingAtMerc = hasCompPos && hitsUnitCylinder3D(compX, compY, 0.95f, 3.5f, mercScore);
 
-            // Step 2a: On initial Grip press, Merc Grip Priority gives absolute precedence to latching the companion.
-            // Even if the ray intersects both the companion and nearby monsters (or monsters in front),
-            // pointing at the companion unconditionally latches the companion for tactical commanding.
-            if (gripClick && g_tacticalGrabHand < 0) {
-                if (pointingAtMerc) {
-                    g_tacticalGrabHand = h;
-                    g_tacticalGrabStartMs = now;
-                    MotionPulse(h, haptics::Category::Interaction, 0.30f, 25000000);
-                    framevr::telegraph::Current().Place(compX, compY, now, 250, 2, 1.5f, 0, 0, 0, -2);
-                }
-                continue;
+            // Step 2a: Merc Grip Priority: the grip closing on the companion arms the hand even if the ray
+            // also crosses monsters. Arming shows and pulses nothing (a Paladin's fist near the companion,
+            // then opened, orders nothing); the trigger pulled while armed latches the command.
+            const auto chordEvent = chord.Step(grip, trigger, pointingAtMerc, !handsBusy);
+            if (chordEvent == framevr::tacticalchord::Event::Latched && g_tacticalGrabHand < 0) {
+                g_tacticalGrabHand = h;
+                g_tacticalGrabStartMs = now;
+                MotionPulse(h, haptics::Category::Interaction, 0.30f, 25000000);
+                framevr::telegraph::Current().Place(compX, compY, now, 250, 2, 1.5f, 0, 0, 0, -2);
+            }
+            if (chordEvent == framevr::tacticalchord::Event::Disarmed && g_tacticalGrabHand == h) {
+                framevr::telegraph::Current().ClearSkill(-2);
+                g_tacticalGrabHand = -1;
             }
 
             if (g_tacticalGrabHand != h) continue;
@@ -2685,8 +2693,8 @@ void StepCompanionTacticalGestures(uint64_t now, float rightTrigger, float leftT
             const float compDistFromGround = (hasCompPos && groundHit) ? std::hypot(compX - gx, compY - gy) : 9999.0f;
             const bool aimingAtCompanion = hasCompPos && (compDistFromGround <= 2.0f || (!groundHit && pointingAtMerc));
 
-            // Step 2b: While holding Grip, render live preview telegraph
-            if (gripHeld) {
+            // Step 2b: While holding Grip + Trigger, render live preview telegraph
+            if (chord.latched) {
                 float plyrX = 0.0f, plyrY = 0.0f;
                 const bool hasPlyrPos = ::companionai::GetPlayerWorldSubtilePos(plyrX, plyrY);
 
@@ -2723,7 +2731,7 @@ void StepCompanionTacticalGestures(uint64_t now, float rightTrigger, float leftT
                 continue;
             }
 
-            // Step 2c: On Grip release, execute the selected tactical command
+            // Step 2c: On Trigger or Grip release, execute the selected tactical command
             const uint64_t holdDurationMs = (now >= g_tacticalGrabStartMs) ? (now - g_tacticalGrabStartMs) : 0;
             g_tacticalGrabHand = -1;
             g_tacticalTargetOutOfRange[h] = false;
@@ -3079,8 +3087,10 @@ void Input() {
     if(Bool(stickClick,0))physical.buttons|=menus::RightStick;
     if(Float(squeeze,1)>.6f)physical.buttons|=menus::LeftBumper;
     if(Float(squeeze,0)>.6f)physical.buttons|=menus::RightBumper;
-    physical.lt=uint8_t(std::clamp(Float(trigger,1),0.f,1.f)*255);
-    physical.rt=uint8_t(std::clamp(Float(trigger,0),0.f,1.f)*255);
+    // A hand armed or latched on a mercenary command (tactical_chord.h): its trigger is the command's,
+    // never the game's, until let go (as of the last step, StepCompanionTacticalGestures below).
+    physical.lt=g_tacticalChord[1].triggerOwned?0:uint8_t(std::clamp(Float(trigger,1),0.f,1.f)*255);
+    physical.rt=g_tacticalChord[0].triggerOwned?0:uint8_t(std::clamp(Float(trigger,0),0.f,1.f)*255);
     const auto physicalLeft=Stick(1),physicalRight=Stick(0);
     const auto axis=[](float value){return int16_t(std::clamp(value,-1.f,1.f)*32767.f);};
     physical.lx=axis(physicalLeft.x);physical.ly=axis(physicalLeft.y);
