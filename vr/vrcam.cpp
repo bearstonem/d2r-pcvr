@@ -38,6 +38,7 @@
 #include "../steamvr/aim_reach.h"
 #include "../steamvr/torch_light.h"
 #include "../steamvr/leather_menu.h"
+#include "../steamvr/head_shadow.h"
 #include <tlhelp32.h>
 #include <intrin.h>
 #include <xinput.h>
@@ -133,6 +134,7 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "melee.h"
 #include "target_lock.h"
 #include "bow.h"
+#include "loot_beam_scan.h"
 #include "wall_cells.h"
 #include "prop_scan.h"
 #include "crossbow.h"
@@ -331,7 +333,8 @@ struct Settings {
     std::atomic<bool>  torchFlicker{true};       // [torch] flicker: organic turbulent flame flicker
     std::atomic<float> torchWarmth{0.65f};       // [torch] warmth: color warmth toward fire orange
     std::atomic<int>   armsMode{0};        // 0 game animation, 1 test pose (arms ahead), 2 controllers
-    std::atomic<bool>  hideHead{false};     // shrink the hero's head away (first person)
+    std::atomic<bool>  hideHead{false};     // hide the hero's head from the eyes (first person): shrunk, or cut (headShadow)
+    std::atomic<bool>  headShadow{true};    // [arms] head_shadow: the hidden head stays whole for its shadow, the eye views cut it (head_shadow.h)
     std::atomic<float> armScale{1.0f};      // reach on top of the hero/user height ratio
     std::atomic<bool>  bodywalkPad{true};   // [input] bodywalk_pad: the game's pad is BodyWalk's own report (pad_mirror_shared.h) - no virtual pad needed
     std::atomic<int>   inventoryPad{0};     // [input] inventory_button: the pad button "D2R: Inventory" sends - 0 Menu (Start), 1 View (Back)
@@ -1057,6 +1060,8 @@ void LoadSettings() {
         IniF(L"gameplay",L"companion_ai",1.0f)))!=0&&g_set.platform.load()==1);
     companionai::ConfigureDistressSound((int)IniF(L"gameplay",L"companion_distress_sound",1));
     companionai::ConfigurePeel(IniF(L"gameplay",L"companion_peel",1.0f)!=0.0f);
+    companionai::ConfigureTacticalCommands(int(framevr::settings::Normalize(framevr::settings::CompanionTactical,
+        IniF(L"gameplay",L"companion_tactical_commands",1.0f)))!=0&&g_set.platform.load()==1);
 #endif
 #if D2RVR_FIRST_PERSON
     g_set.flatView.store(std::clamp((int)IniF(L"mode", L"flat_view", 3.0f), 1, 3));
@@ -1363,6 +1368,18 @@ void LoadSettings() {
     LoadCeilingTextures();
     g_set.armsMode.store(std::clamp((int)IniF(L"arms", L"mode", 0.0f), 0, 2));
     g_set.hideHead.store(IniB(L"arms", L"hide_head", false));
+    {   // the head kept for its shadow (steamvr/head_shadow.h): told at start and on each change
+        static int told = -1;
+        const bool keep = IniB(L"arms", L"head_shadow", true), hide = g_set.hideHead.load(), trace = IniB(L"debug", L"head_shadow", false);
+        g_set.headShadow.store(keep);
+        headshadow::SetTrace(trace);
+        if (const int now = int(keep) | int(hide) << 1 | int(trace) << 2; now != told) {
+            told = now;
+            LogF("Frame head shadow: [arms] head_shadow=%d, hide_head=%d, [debug] head_shadow=%d (%s)", int(keep), int(hide), int(trace),
+                 !hide ? "the head is not hidden: nothing changes" : keep ? "full-body first person keeps the head whole for its shadow; the eye views cut it"
+                                                                         : "the hidden head shrinks to the neck, its shadow headless");
+        }
+    }
     g_set.armScale.store(std::clamp(IniF(L"arms", L"scale", 1.0f), 0.3f, 3.0f));
     g_set.poseOrderLog.store(IniB(L"debug", L"pose_order", false));
     g_set.frameLog.store(IniB(L"debug", L"frame_log", false));
@@ -2791,6 +2808,7 @@ bool VrViewInner(const d2rcam::WorldView& in, float out[16]) {
 // clip that cuts the hero's own head away, and in AFR each eye's off-axis
 // shift so what lies at `convergence` sits on the screen.
 bool VrProjInner(const d2rcam::WorldView& in, float M[16]);
+int ShapeFormNow();
 bool VrProj(const d2rcam::WorldView& in, float M[16]) {
     FRAME_PROFILE(Projection);
 #ifdef D2RVR_NATIVE_OPENXR
@@ -2810,7 +2828,20 @@ bool VrProjInner(const d2rcam::WorldView& in, float M[16]) {
     const float aspect = ratio > 0.1f && ratio < 10.0f ? ratio : 16.0f / 9.0f;
     g_lastAspect.store(aspect);
     // The table: nothing of the hero to cut away, and the head may come down close to the game - 5 cm.
-    const float nearZ = TableView() ? 0.05f * g_set.tableScale.load() : TopPersp() ? 0.5f : std::max(g_set.nearClip.load(), 0.05f);
+    float nearZ = TableView() ? 0.05f * g_set.tableScale.load() : TopPersp() ? 0.5f : std::max(g_set.nearClip.load(), 0.05f);
+#if D2RVR_FIRST_PERSON
+    // First person in full body with the head kept whole for its shadow ([arms] hide_head and head_shadow, as PushArms
+    // decides): nothing nearer than the cut at this head pitch is drawn, so the head is not seen from inside
+    // (steamvr/head_shadow.h). Not in a shapeshift form: its head shrinks as before.
+    if (!ThirdPerson() && !Overhead()) {
+        const bool keep = g_set.headShadow.load() && g_set.hideHead.load() && FullBody() && !ShapeFormNow();
+        if (keep || headshadow::Holding()) {
+            const D2RVR_Shared* sh = g_shared;
+            const float pitch = sh && sh->version == D2RVR_SHARED_VERSION && sh->headValid && sh->pitchValid ? sh->headPitchDeg : NAN;
+            nearZ = headshadow::EyeNear(nearZ, keep, std::max(1.0f, ScaleHeight()) / UserEyeHeightM(), pitch);
+        }
+    }
+#endif
     g_lastNear.store(nearZ);
     d2rcam::m4::PerspectiveRevZ(CameraFov() * 3.14159265f / 180.0f, aspect, nearZ, M);
     // The frustum IS the FlatVR screen: each side by its own size at its distance.
@@ -3512,7 +3543,7 @@ Pick g_pick[3];                      // aimrules::Source: right, left, eyes
 std::atomic<bool> g_pointing[2]{};   // that arm is held out
 std::atomic<uint32_t> g_held[2]{};   // the target a held button took, 0 none
 std::atomic<int> g_heldSource[2]{};
-const char* SourceName(int source) { return source == 0 ? "right hand" : source == 1 ? "left hand" : "eyes"; }
+const char* SourceName(int source) { return source == 0 ? "right hand" : source == 1 ? "left hand" : source == 99 ? "tactical priority" : "eyes"; }
 bool Pointing(int hand) { return hand >= 0 && hand < 2 && g_pointing[hand].load(); }
 void Store(int k, const targetlock::Snapshot* s, int i) {
     if (!s || i < 0) { g_pick[k].id.store(0); return; }
@@ -3680,6 +3711,16 @@ int ShownTargets(Shown out[2]) {
     // Aim follows your view: while the hand whose color the eyes' monster takes points, it is not outlined (that hand's cast never takes it)
     const bool eyes = framevr::aimrules::EyesOutlined(FollowsView(), Pointing(dominant));
     if (n == 0 && eyes) if (const uint32_t id = idOf(framevr::aimrules::Eyes); id && fill(id, framevr::aimrules::Eyes, out[n])) ++n;
+#if D2RVR_NATIVE_OPENXR
+    if (companionai::IsTacticalCommandsEnabled() && n < 2) {
+        const auto tactical = companionai::GetActiveTacticalOrder();
+        if (tactical.type == framevr::companionai::TacticalOrderType::PrioritizeEnemy && tactical.targetUnitId) {
+            if (tactical.targetUnitId != first && fill(tactical.targetUnitId, 99, out[n])) {
+                ++n;
+            }
+        }
+    }
+#endif
     // Telemetry: "Frame aim outline:" whenever what is outlined changes
     static uint64_t shownKey = ~0ull;
     uint64_t key = n;
@@ -3748,9 +3789,10 @@ bool RulesAimCast() {
 // Kept only while something uses a target: the outline or a spell lock.
 namespace mobaim {
 bool Wanted() {
+    const bool tacticalActive = companionai::IsTacticalCommandsEnabled();
     return g_enabled.load() && g_inWorld.load() &&
         (TargetHighlightOn() || SpellsLocked() || BowSkillsLocked() ||
-         GroundAimMode() == 2);
+         GroundAimMode() == 2 || tacticalActive);
 }
 void Tick() {
     const bool wanted = Wanted();
@@ -3772,7 +3814,7 @@ void Tick() {
     // From the settings alone, so loading screens and menus don't flip it.
     // Aim follows your view is not counted (aimrules::Any): it only changes which
     // monster the picks take, so with nothing using them it has nothing to do.
-    const bool resting = !TargetHighlightOn() && !framevr::aimrules::Any(aimtargets::Options());
+    const bool resting = !TargetHighlightOn() && !framevr::aimrules::Any(aimtargets::Options()) && !companionai::IsTacticalCommandsEnabled();
     static bool rested = false;
     if (resting != rested) {
         rested = resting;
@@ -8045,6 +8087,7 @@ void PushArms() {
     in.bodyTurn = own ? (FullBody() ? g_set.bodyTurn.load() : 2) : on && ThirdPerson() && !Overhead() && g_set.thirdTurn.load() ? 2 : 0;
 #if D2RVR_FIRST_PERSON
     in.hideHead = own && (g_set.hideHead.load() || !FullBody());
+    in.headShadow = g_set.headShadow.load() && FullBody();   // VR's full-body view only: a flat first person shrinks as before
     const int likeStaff = HeldLikeStaff();
     // a staff in the hands: aimed from hand to hand ([bow] staff_two_hands) or fast in the right one with
     // the left free (staff_free_left) - the latter no longer waits for the aim's box (off by default since
@@ -9390,15 +9433,25 @@ bool ShieldDebugWanted() {
 bool OutlineWanted() {
 #ifdef D2RVR_NATIVE_OPENXR
     aimtargets::Shown shown[2];
-    return g_enabled.load() && g_inWorld.load() && !gamestate::MenuOpen() && TargetHighlightOn() && aimtargets::ShownTargets(shown) > 0;
+    const bool tacticalActive = companionai::IsTacticalCommandsEnabled() &&
+        (companionai::GetActiveTacticalOrder().type == framevr::companionai::TacticalOrderType::PrioritizeEnemy);
+    return g_enabled.load() && g_inWorld.load() && !gamestate::MenuOpen() &&
+        (TargetHighlightOn() || tacticalActive) && aimtargets::ShownTargets(shown) > 0;
 #else
     return false;
 #endif
 }
 // Landing circles (same pass): while any ground skill's circle is showing.
 bool RingWanted() {
-    return g_enabled.load() && g_inWorld.load() && !gamestate::MenuOpen() && AimOn(framevr::settings::LandingCircles) &&
+    const bool tacticalActive = companionai::IsTacticalCommandsEnabled() &&
+        (companionai::GetActiveTacticalOrder().type == framevr::companionai::TacticalOrderType::MoveAndHold);
+    return g_enabled.load() && g_inWorld.load() && !gamestate::MenuOpen() &&
+        (AimOn(framevr::settings::LandingCircles) || tacticalActive) &&
         framevr::telegraph::AnyOn(framevr::telegraph::Current().Get(), GetTickCount64());
+}
+// Loot beams (same pass): while a Rare, Set or Unique item or a high rune lies near the hero.
+bool BeamWanted() {
+    return g_enabled.load() && g_inWorld.load() && !gamestate::MenuOpen() && lootscan::Latest(GetTickCount64()).count > 0;
 }
 
 // The frame stamp strip (D2R_DepthFog.fx PS_Stamp): whenever the camera turns
@@ -9495,7 +9548,7 @@ void OnFinishEffects(reshade::api::effect_runtime* rt, reshade::api::command_lis
     if (!g_tech[0].handle) { hud::SetPictureReady(false); return; }
     // Off while a menu is open: the fog lies over the whole picture, the
     // inventory and trade panels included, and darkened them.
-    const bool want = FogWanted() || g_skyPalette.load() >= 0 || g_arcaneSky.load() || CeilWanted() || HudWanted() || StampWanted() || hud::PictureWanted() || TableKeyWanted() || PhantomWanted() || BoneAxesWanted() || ShieldDebugWanted() || OutlineWanted() || RingWanted();
+    const bool want = FogWanted() || g_skyPalette.load() >= 0 || g_arcaneSky.load() || CeilWanted() || HudWanted() || StampWanted() || hud::PictureWanted() || TableKeyWanted() || PhantomWanted() || BoneAxesWanted() || ShieldDebugWanted() || OutlineWanted() || RingWanted() || BeamWanted();
     // The toolbar and the map are taken out of the game's picture to be drawn
     // back at their own size only while this effect runs, and is new enough to.
     {
@@ -9697,7 +9750,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
         renderscale::Frame(rt, s);
 #ifdef D2RVR_NATIVE_OPENXR
         const bool ownDepth=g_enabled.load()&&g_inWorld.load()&&framevr::Active()&&
-            (FogWanted()||g_set.skyOn.load()||g_arcaneSky.load()||CeilWanted()||TableKeyWanted()||OutlineWanted()||RingWanted());
+            (FogWanted()||g_set.skyOn.load()||g_arcaneSky.load()||CeilWanted()||TableKeyWanted()||OutlineWanted()||RingWanted()||BeamWanted());
         const bool turnDepth=g_enabled.load()&&g_inWorld.load()&&framevr::Active()&&framevr::TurnDepthWanted();
         framevr::scenedepth::Bind(rt,cl,ownDepth,turnDepth,stereoreplay::RightEffects(),s);
         SetBool(rt,"OwnDepth",ownDepth);
@@ -10159,10 +10212,13 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
         const bool view = sv[0].proj_ok && sv[0].axes_ok;
         const int count = OutlineWanted() && view ? aimtargets::ShownTargets(shown) : 0;
         const bool rings = RingWanted() && view;
+        const auto loot = lootscan::Latest(GetTickCount64());
+        const bool beams = BeamWanted() && view && loot.count > 0;   // the same snapshot as the beams drawn
         SetBool(rt, "OutlineOn", count > 0);
         SetBool(rt, "RingOn", rings);
+        SetBool(rt, "BeamOn", beams);
         float mob[2][4] = {};
-        if (count > 0 || rings) {
+        if (count > 0 || rings || beams) {
             for (int e = 0; e < 2; ++e) {
                 const SkyView& s = sv[e].axes_ok && sv[e].proj_ok ? sv[e] : sv[0];
                 char n[16];
@@ -10190,9 +10246,9 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
                 char n[16];
                 snprintf(n, sizeof n, "RingPos%d", k); SetFloats(rt, n, ring, 4);
                 snprintf(n, sizeof n, "RingFill%d", k); SetFloat(rt, n, draw.fill);
-                // rgb its element's color (fire orange, cold blue, lightning yellow, other green), w its radius
-                static const float kElement[4][3] = {{1.0f, 0.45f, 0.05f}, {0.3f, 0.7f, 1.0f}, {1.0f, 0.92f, 0.35f}, {0.4f, 1.0f, 0.3f}};
-                const int el = mark.element >= 0 && mark.element < 4 ? mark.element : 0;
+                // rgb its element's color (fire orange, cold blue, lightning yellow, other green, warning red), w its radius
+                static const float kElement[5][3] = {{1.0f, 0.45f, 0.05f}, {0.3f, 0.7f, 1.0f}, {1.0f, 0.92f, 0.35f}, {0.25f, 1.0f, 0.4f}, {1.0f, 0.05f, 0.05f}};
+                const int el = mark.element >= 0 && mark.element < 5 ? mark.element : 0;
                 const float col[4] = {kElement[el][0], kElement[el][1], kElement[el][2], mark.radius * 2.0f};
                 snprintf(n, sizeof n, "RingCol%d", k); SetFloats(rt, n, col, 4);
                 // a strip: its direction (grid x/y are world x/z) and half-length in world units; 0 = a circle
@@ -10204,6 +10260,45 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
             // 2026-10-20, like the rest of the look (D2R_DepthFog.fx, kCircle*).
             constexpr float kCircleHeightM = 0.15f;
             SetFloat(rt, "RingFloorTol", kCircleHeightM * std::max(1.0f, ScaleHeight()) / UserEyeHeightM());
+        }
+        if (beams) {   // loot beams: each item's cell on the hero's floor, in its label colour
+            namespace lb = framevr::lootbeams;
+            const float upm = std::max(1.0f, ScaleHeight()) / UserEyeHeightM();   // world units per metre
+            const float floor = sv[0].hero[1], shear = framevr::coordinates::GroundShear;
+            // A new beam fades in over 0.4 s; the ids seen last frame keep their start.
+            static uint32_t ids[lb::MaxBeams] = {};
+            static uint64_t since[lb::MaxBeams] = {};
+            uint32_t nextIds[lb::MaxBeams] = {};
+            uint64_t nextSince[lb::MaxBeams] = {};
+            const uint64_t now = GetTickCount64();
+            for (size_t k = 0; k < lb::MaxBeams; ++k) {
+                float pos[4] = {}, col[4] = {1.0f, 1.0f, 1.0f, 0.0f};
+                if (k < loot.count) {
+                    const auto& item = loot.items[k];
+                    uint64_t start = now;
+                    for (size_t j = 0; j < lb::MaxBeams; ++j) if (ids[j] == item.id && since[j]) start = since[j];
+                    nextIds[k] = item.id; nextSince[k] = start;
+                    // The cell itself, as the breakables, landing circles and outlines place theirs
+                    // (2 x cell): headset 2026-10-31, half a cell added put the beam beside the item.
+                    pos[0] = float(item.x) * 2.0f + floor * shear - sv[0].hero[0];
+                    pos[1] = floor - sv[0].hero[1];
+                    pos[2] = float(item.y) * 2.0f + floor * shear - sv[0].hero[2];
+                    pos[3] = std::min(1.0f, float(now - start) / 400.0f);
+                    const auto rgb = lb::Colour(item.beam);
+                    col[0] = rgb.r / 255.0f; col[1] = rgb.g / 255.0f; col[2] = rgb.b / 255.0f;
+                    col[3] = float(item.id % 97u) * 0.37f;   // each its own shimmer phase
+                }
+                char n[16];
+                snprintf(n, sizeof n, "BeamPos%zu", k); SetFloats(rt, n, pos, 4);
+                snprintf(n, sizeof n, "BeamCol%zu", k); SetFloats(rt, n, col, 4);
+            }
+            std::copy(std::begin(nextIds), std::end(nextIds), ids);
+            std::copy(std::begin(nextSince), std::end(nextSince), since);
+            // core radius 0.18 m, 12 m tall, a floor glow of 0.7 m; painted within 0.3 m of the floor;
+            // w the brightness slider (VR Settings > Interface > Loot beams, 10% to 100%)
+            const float shape[4] = {0.18f * upm, 12.0f * upm, 0.7f * upm, loot.strength};
+            SetFloats(rt, "BeamShape", shape, 4);
+            SetFloat(rt, "BeamFloorTol", 0.3f * upm);
         }
         if (count > 0) {
             const float upm = std::max(1.0f, ScaleHeight()) / UserEyeHeightM();
@@ -10221,7 +10316,11 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
                 const float hue = OutlineHue(t.source);
                 float wheel[3];
                 framevr::settings::HueRgb(hue, wheel);
-                SetFloats(rt, k ? "Outline2Color" : "OutlineColor", hue <= 0 ? kBands[framevr::targetcone::Band(t.distance)] : wheel, 3);
+                const auto tactical = companionai::GetActiveTacticalOrder();
+                const bool isTactical = (t.source == 99 || (tactical.type == framevr::companionai::TacticalOrderType::PrioritizeEnemy && tactical.targetUnitId == t.id));
+                static const float kTacticalCrimson[3] = {1.0f, 0.05f, 0.05f};
+                const float* col = isTactical ? kTacticalCrimson : (hue <= 0 ? kBands[framevr::targetcone::Band(t.distance)] : wheel);
+                SetFloats(rt, k ? "Outline2Color" : "OutlineColor", col, 3);
                 SetFloats(rt, k ? "Outline2Shape" : "OutlineShape", mobShape, 3);
             }
         }
@@ -10552,6 +10651,7 @@ DWORD WINAPI UpdateThread(void*) {
 #ifdef D2RVR_DEVELOPER
         talkstop::Tick(nowMs);      // how far the hero goes after a conversation opens (log)
 #endif
+        lootscan::Tick(nowMs);      // loot beams: the beam-worthy items lying near the hero
 #endif
 #ifdef D2RVR_NATIVE_OPENXR
         mobaim::Tick();    // the aim rules' targets: each hand's held out, and the one looked at
@@ -10902,6 +11002,12 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
     bowvr::Init(ctx);
     wallcells::Init(ctx);
     propscan::Init();
+    {   // loot beams: [loot] beams (master), rune_min (26 = Vex); the rarities are VR Settings (lootscan)
+        framevr::lootbeams::Wanted wanted;
+        wanted.highRune = std::clamp(int(IniF(L"loot", L"rune_min", float(framevr::lootbeams::DefaultHighRune))),
+                                     framevr::lootbeams::FirstRune, framevr::lootbeams::LastRune + 1);   // 34 = no runes
+        lootscan::Init(ctx, IniB(L"loot", L"beams", true), wanted);
+    }
 #endif
     if (HANDLE h = CreateThread(nullptr, 0, UpdateThread, nullptr, 0, &g_updateThreadId)) CloseHandle(h);
     if (!ctx->RegisterConsoleCommand("vrcam", &CmdVrcam, "vrcam - the camera: off / first person / third person (F12)"))

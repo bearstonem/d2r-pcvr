@@ -145,4 +145,43 @@ bool Use(const Request& r,const Snapshot& s) {
     reinterpret_cast<void(*)(uintptr_t,int)>(d2rsig::Addr(abi::UseRva))(unit,3);
     framevr::logging::Write("Frame quick use: native inventory action dispatched once");return true;
 }
+const char* UseResultName(UseResult c) {
+    switch(c) {
+        case UseResult::Used:return "used";
+        case UseResult::NotReady:return "native inventory use unverified";
+        case UseResult::NoPlayer:return "no local player";
+        case UseResult::ListUnreadable:return "client inventory list unreadable";
+        case UseResult::Missing:return "not in the client's inventory list";
+        case UseResult::WrongCode:return "a different item under that id";
+        case UseResult::Unusable:return "the game says it cannot be used now";
+    }
+    return "?";
+}
+UseResult UseClientItem(uint64_t session,const ClientItem& item,uint32_t* seen,unsigned capacity,unsigned* count) {
+    if(count)*count=0;
+    if(!Ready())return UseResult::NotReady;
+    if(!session||session!=gamestate::LocalPlayer())return UseResult::NoPlayer;
+    ClientItems client;if(!client.Load(session))return UseResult::ListUnreadable;
+    const auto code=reinterpret_cast<uint32_t(*)(uintptr_t)>(d2rsig::Addr(abi::CodeRva));
+    for(unsigned n=0;n<client.count;++n) {
+        const auto& e=client.entries[n];
+        if(e.id!=item.runtimeId||e.classId!=item.classId)continue;
+        if(code(e.unit)!=item.code)return UseResult::WrongCode;
+        if(!reinterpret_cast<int(*)(uintptr_t)>(d2rsig::Addr(abi::UsableRva))(e.unit))return UseResult::Unusable;
+        reinterpret_cast<void(*)(uintptr_t,int)>(d2rsig::Addr(abi::UseRva))(e.unit,3);   // InventoryGrid's mask, as Use
+        framevr::logging::Write("Frame respec: native inventory use of the token dispatched once");
+        return UseResult::Used;
+    }
+    for(unsigned n=0;n<client.count&&seen&&count&&*count<capacity;++n)
+        if(code(client.entries[n].unit)==item.code)seen[(*count)++]=client.entries[n].id;
+    return UseResult::Missing;
+}
+bool HoldsClientItem(uint64_t session,const ClientItem& item,bool& holds) {
+    holds=false;
+    if(!Ready()||!session||session!=gamestate::LocalPlayer())return false;
+    ClientItems client;if(!client.Load(session))return false;
+    for(unsigned n=0;n<client.count;++n)
+        if(client.entries[n].id==item.runtimeId&&client.entries[n].classId==item.classId){holds=true;break;}
+    return true;
+}
 }

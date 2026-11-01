@@ -54,6 +54,7 @@ enum class RowKind : uint8_t {
     Swatch,    // hue: < swatch name > cycler, or the card's color grid
     Button,    // an action, not a value (Calibrate body)
     Offer,     // a one-way button shown while the setting is Off (Defer GPU wait)
+    Filter,    // its own number as a slider, then a Filter button opening a card of the On/Off switches (the inFilter rows after it): Loot beams
     Auto,      // an override's default: the kind comes from the data (DerivedKind)
 };
 
@@ -125,6 +126,7 @@ struct Override {
     bool beside=false;               // a toggle or a number drawn as the right half of the previous override's row (main's PairOf)
     bool instead=false;              // shows only when the previous override's row does not (RowShown: snap / smooth turn speed)
     const char* besideLabel=nullptr; // beside: the word before its value in the box ("Big:" -> "Big: 600"); nullptr: the label; "": the value alone
+    bool inFilter=false;             // a toggle that is one switch in the previous Filter row's card, no row of its own; its label is its word there (Loot beams: Unique, Set, Rare, Runes)
 };
 
 // One row of the menu as the layout reads it: a Definitions entry merged with
@@ -150,6 +152,7 @@ struct ContentRow {
     bool fallback=false;        // no override placed it: upstream's words on its owner page or More
     bool beside=false;          // a toggle or a number on the previous row's right half (Override::beside), no row of its own
     const char* besideLabel=nullptr;   // the word before its value there (Override::besideLabel)
+    bool inFilter=false;        // one switch in the previous Filter row's card, no row of its own (Override::inFilter)
 };
 
 // A section: 2-5 rows that share an object, titled in sentence case.
@@ -538,6 +541,21 @@ inline constexpr Override Overrides[]={
      .help="Hold your arm out and point at an item: A picks up that one, not the nearest, and its name shows. Too far away, A takes nothing."},
     {.id="hud.ordinary_mob_bars",.page=View::Interface,.section="Labels and bars",.kind=RowKind::Toggle,.label="Weak monster bars",
      .help="Names and health bars over ordinary monsters. Bosses and elites always show theirs. Off keeps the view clear."},
+    // Loot beams (vr/loot_beam_scan.cpp): one row - its brightness slider, then a Filter button
+    // opening a card of four switches (owner 2026-10-31: "one line item that says loot beams and
+    // then the button says filter", a sub-menu "selecting on or off for each type of beam";
+    // 2026-11-01: a slider on that row "so players can decrease the current vibrancy").
+    {.id="loot.beams_brightness",.page=View::Interface,.section="Labels and bars",.kind=RowKind::Filter,.label="Loot beams",
+     .help="Pillars of light over unique, set and rare items and runes Vex and up. The slider sets their brightness; Filter chooses which.",
+     .format={.unit="%"}},
+    {.id="loot.beams_unique",.page=View::Interface,.section="Labels and bars",.kind=RowKind::Toggle,.label="Unique",
+     .help="A gold beam over unique items lying near you, until you pick them up.",.inFilter=true},
+    {.id="loot.beams_set",.page=View::Interface,.section="Labels and bars",.kind=RowKind::Toggle,.label="Set",
+     .help="A green beam over set items lying near you, until you pick them up.",.inFilter=true},
+    {.id="loot.beams_rare",.page=View::Interface,.section="Labels and bars",.kind=RowKind::Toggle,.label="Rare",
+     .help="A yellow beam over rare items lying near you. Rares drop often: Off lights only the rarer finds.",.inFilter=true},
+    {.id="loot.beams_runes",.page=View::Interface,.section="Labels and bars",.kind=RowKind::Toggle,.label="Runes",
+     .help="An orange beam over high runes lying near you, Vex and up.",.inFilter=true},
 
     // Survival: Low life
     {.id="interactions.critical_alerts",.page=View::Survival,.section="Low life",.kind=RowKind::Toggle,.label="Low life and mana alert",
@@ -558,6 +576,9 @@ inline constexpr Override Overrides[]={
      .format={.unit="%"}},
     {.id="gameplay.companion_ai",.page=View::Survival,.section="Offline monsters",.kind=RowKind::Toggle,.label="Smarter mercenary",
      .help="Your mercenary keeps close in fights, spots monsters as far as they spot you, and is moved behind you if it gets stuck."},
+    {.id="gameplay.companion_tactical_commands",.page=View::Survival,.section="Offline monsters",.kind=RowKind::Toggle,.label="Tactical commands",
+     .help="Point and hold gestures to direct your mercenary: hold ground, prioritize monsters, or regroup.",
+     .beside=true,.besideLabel="Commands"},
 
     // World: Sky and dungeons
     {.id="sky.enabled",.page=View::World,.section="Sky and dungeons",.kind=RowKind::Toggle,.label="Outdoor sky",
@@ -879,6 +900,7 @@ inline bool KindFits(RowKind k,const Definition& d,const Override& o){
     const bool open=!(d.max<std::numeric_limits<float>::max());
     switch(k){
         case RowKind::Toggle:case RowKind::Offer:case RowKind::Button:return d.min==0&&d.max==1&&!o.optionCount;
+        case RowKind::Filter:return !open&&!o.optionCount&&d.max>d.min;   // its own number is a slider
         case RowKind::Choice:case RowKind::Cycler:return o.options&&o.optionCount&&d.step==1&&!open;
         case RowKind::Slider:return !open&&!o.optionCount;
         case RowKind::Stepper:return !o.optionCount;
@@ -912,6 +934,7 @@ inline MenuData BuildMenu(const Override* overrides,size_t overrideCount,const P
         r.label=o.label?o.label:d.label;r.warn=o.warn;
         r.help=o.help?o.help:HelpText(k)[0]?HelpText(k):d.detail;   // no words of ours: upstream's long help, else its detail
         r.classes=o.classes;r.wraps=o.wraps;r.warnWhen=o.warnWhen;r.beside=o.beside&&(r.kind==RowKind::Toggle||r.kind==RowKind::Slider||r.kind==RowKind::Stepper);r.besideLabel=o.besideLabel;
+        r.inFilter=o.inFilter&&r.kind==RowKind::Toggle;
         r.recommended=o.recommended==o.recommended&&o.recommended>=d.min&&o.recommended<=d.max?o.recommended:std::numeric_limits<float>::quiet_NaN();
         // Value words in range only.
         if(o.nameCount){
@@ -973,7 +996,7 @@ inline MenuData BuildMenu(const Override* overrides,size_t overrideCount,const P
     for(int k=0;k<Count;++k){
         if(placed[size_t(k)])continue;
         View page=OwnerOf(Definitions[size_t(k)].section);
-        int rows=0;for(const auto& r:m.rows)if(r.page==page&&!r.beside)++rows;   // a side half takes no row
+        int rows=0;for(const auto& r:m.rows)if(r.page==page&&!r.beside&&!r.inFilter)++rows;   // a side half or a filter switch takes no row
         if(page!=View::More&&(rows>=MaxPageRows||(sectionIndex(page,NewSection)<0&&sectionCount(page)>=MaxPageSections)))page=View::More;
         if(sectionIndex(page,NewSection)<0)m.sections.push_back({page,NewSection});
         const Override none{.id=nullptr};
@@ -1123,6 +1146,7 @@ constexpr bool TextsFit(){
         for(int i=0;i<r.optionCount;++i)
             if(!Length(r.options[i].label)||Length(r.options[i].label)>14||!Length(r.options[i].hint)||Length(r.options[i].hint)>160)return false;
         for(int i=0;i<r.nameCount;++i)if(!Length(r.names[i].label)||Length(r.names[i].label)>14)return false;
+        if(r.inFilter&&r.label&&Length(r.label)>14)return false;   // a card switch's word: an option name's length
     }
     for(const auto& p:PageTable)if(!Length(p.name)||Length(p.intro)>160)return false;
     for(const auto& s:SectionTable)if(!Length(s.title)||Length(s.title)>26)return false;
@@ -1166,10 +1190,23 @@ constexpr bool OrderOk(){
     // A beside toggle or number follows a placed row of its page and section, and shares that row.
     for(size_t i=0;i<std::size(Overrides);++i)if(Overrides[i].beside){
         const auto& r=Overrides[i];
-        if(!i||(r.kind!=RowKind::Toggle&&r.kind!=RowKind::Slider&&r.kind!=RowKind::Stepper)||Overrides[i-1].beside||Overrides[i-1].page!=r.page||!SameText(Overrides[i-1].section,r.section))return false;
+        if(!i||(r.kind!=RowKind::Toggle&&r.kind!=RowKind::Slider&&r.kind!=RowKind::Stepper)||Overrides[i-1].beside||Overrides[i-1].inFilter||Overrides[i-1].kind==RowKind::Filter||
+           Overrides[i-1].page!=r.page||!SameText(Overrides[i-1].section,r.section))return false;
+    }
+    // A filter switch is a toggle after its Filter row (or the switch before it) on that page and section;
+    // a Filter row has 1 to 6 of them (its card); neither is beside nor instead.
+    for(size_t i=0;i<std::size(Overrides);++i){
+        const auto& r=Overrides[i];
+        if(r.inFilter&&(!i||r.kind!=RowKind::Toggle||r.beside||r.instead||(Overrides[i-1].kind!=RowKind::Filter&&!Overrides[i-1].inFilter)||
+                        Overrides[i-1].page!=r.page||!SameText(Overrides[i-1].section,r.section)))return false;
+        if(r.kind==RowKind::Filter){
+            if(r.beside||r.inFilter||r.instead)return false;
+            int n=0;while(i+1+size_t(n)<std::size(Overrides)&&Overrides[i+1+size_t(n)].inFilter)++n;
+            if(n<1||n>6)return false;
+        }
     }
     for(const auto& p:PageTable){
-        int rows=0;for(const auto& r:Overrides)if(r.page==p.id&&!r.beside&&!r.instead)++rows;   // the slabs that can show at once
+        int rows=0;for(const auto& r:Overrides)if(r.page==p.id&&!r.beside&&!r.instead&&!r.inFilter)++rows;   // the slabs that can show at once
         if(rows>8||SectionCount(p.id)>3)return false;
     }
     for(size_t i=1;i<std::size(SectionTable);++i)if(SectionTable[i-1].page>SectionTable[i].page)return false;
@@ -1188,7 +1225,7 @@ constexpr bool PresetsOk(){
 static_assert(TextsFit(),"labels <= 26 (30), help and hints <= 160, warn <= 56, option names <= 14");
 static_assert(IdsUnique(),"one override per ini id");
 static_assert(PlacesKnown(),"a placed override names a settings page and one of its section titles");
-static_assert(OrderOk(),"overrides in page and section order; at most 8 rows and 3 sections a page");
+static_assert(OrderOk(),"overrides in page and section order; at most 8 rows and 3 sections a page; filter switches follow their Filter row");
 static_assert(PresetsOk(),"presets list each setting once, never the owner's excluded settings");
 }
 }

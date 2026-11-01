@@ -80,6 +80,11 @@ static const GoldenRow Golden[]={
     {"hud.labels_size",View(7),1,content::RowKind::Slider,"Loot name size",0,0},
     {"interactions.loot_pick",View(7),1,content::RowKind::Toggle,"Loot pick",0,0},   // #257: Loot pick, Off / On
     {"hud.ordinary_mob_bars",View(7),1,content::RowKind::Toggle,"Weak monster bars",0,0},
+    {"loot.beams_brightness",View(7),1,content::RowKind::Filter,"Loot beams",0,0},   // loot beams: one row, its brightness slider
+    {"loot.beams_unique",View(7),1,content::RowKind::Toggle,"Unique",0,0},           // (2026-11-01) and a Filter button whose
+    {"loot.beams_set",View(7),1,content::RowKind::Toggle,"Set",0,0},                 // card holds Unique, Set, Rare and Runes
+    {"loot.beams_rare",View(7),1,content::RowKind::Toggle,"Rare",0,0},               // (inFilter: no rows of their own)
+    {"loot.beams_runes",View(7),1,content::RowKind::Toggle,"Runes",0,0},
     {"interactions.critical_alerts",View(8),0,content::RowKind::Toggle,"Low life and mana alert",0,0},
     {"gameplay.low_life_heart_start",View(8),0,content::RowKind::Stepper,"Heartbeat starts at",0,1},
     {"hud.blood_visor",View(8),0,content::RowKind::Toggle,"Blood on visor",0,0},
@@ -87,6 +92,7 @@ static const GoldenRow Golden[]={
     {"gameplay.offline_players",View(8),1,content::RowKind::Stepper,"Offline difficulty",0,2},
     {"gameplay.enemy_sight_pct",View(8),1,content::RowKind::Slider,"Monster sight range",0,0},
     {"gameplay.companion_ai",View(8),1,content::RowKind::Toggle,"Smarter mercenary",0,0},
+    {"gameplay.companion_tactical_commands",View(8),1,content::RowKind::Toggle,"Tactical commands",0,0},
     {"sky.enabled",View(9),0,content::RowKind::Toggle,"Outdoor sky",0,0},
     {"fog.enabled",View(9),0,content::RowKind::Toggle,"Distance fog",0,0},
     {"fog.end",View(9),0,content::RowKind::Slider,"Fog distance",0,0},   // main's #366, drawn inside Distance fog's row
@@ -117,7 +123,7 @@ static const GoldenRow Golden[]={
     {"render.frame_generation_scale",View(14),0,content::RowKind::Choice,"NVIDIA flow scale",3,0},
 };
 
-static bool PopoverLayer(L::Role r){return r==L::Role::PopoverDim||r==L::Role::Popover||r==L::Role::PopoverTitle||r==L::Role::PopoverOption||r==L::Role::PopoverHint||r==L::Role::ColorDot;}
+static bool PopoverLayer(L::Role r){return r==L::Role::PopoverDim||r==L::Role::Popover||r==L::Role::PopoverTitle||r==L::Role::PopoverOption||r==L::Role::PopoverHint||r==L::Role::ColorDot||r==L::Role::PopoverLabel||r==L::Role::PopoverSwitch;}
 // Every geometric rule of one built panel. Pressables are checked by their hit
 // box (64 x 64 at least; a row's controls take the full row height and meet
 // their neighbors in the gap, so hit boxes never overlap) and drawn at least
@@ -511,6 +517,72 @@ int main(int argc,char** argv){
         L::Press(m,open,4000);L::Press(m,{Kind::Close},4100);Check(m.popoverKey<0&&m.open&&!m.confirmClose,"Right B closes the popover first, not the panel");
         L::Press(m,open,5000);L::Press(m,{Kind::Open,int(View::Body),-1},5100);Check(m.popoverKey<0&&m.view==View::Performance,"a tab under the dim does not change the page");
         Model locked;locked.Open(Ready());locked.ready=false;L::Press(locked,open,0);Check(locked.popoverKey<0,"a row that cannot change does not open");
+        {   // A Filter row (Loot beams, owner 2026-10-31 and 2026-11-01): one row, its brightness
+            // slider and a Filter button; the card holds four switches, each flipping its own
+            // setting, and stays open between presses.
+            const Key B=LootBeamBrightness;
+            Model f;f.Open(Ready());L::Press(f,{Kind::Open,int(View::Interface),-1},0);
+            const auto page=L::Build(f,{},{});CheckLayout(page,"interface: loot beams row");
+            int rows=0;for(const auto& e:page.elements)if(e.role==L::Role::Row&&(e.key==B||e.key==LootBeamUnique||e.key==LootBeamSet||e.key==LootBeamRare||e.key==LootBeamRunes))++rows;
+            Check(rows==1&&FindRole(page,L::Role::Row,B),"Loot beams: one row, the brightness slider's");
+            const L::Element* button=nullptr;for(const auto& e:page.elements)if(e.hit.kind==Kind::Popover&&e.hit.index==B)button=&e;
+            const auto* value=FindRole(page,L::Role::Value,B);
+            Check(value&&value->text=="100%"&&value->hit.kind==Kind::Change&&FindRole(page,L::Role::StepMinus,B)&&FindRole(page,L::Role::StepPlus,B),"its slider: - 100% +");
+            Check(button&&button->role==L::Role::Button&&button->text=="Filter"&&button->Has(L::Enabled)&&value&&button->rect.x>value->rect.x+value->rect.w,"then a Filter button, right of it");
+            Check(!FindRole(page,L::Role::Toggle,LootBeamUnique)&&!FindRole(page,L::Role::Value,LootBeamSet)&&!FindRole(page,L::Role::Toggle,LootBeamRunes),"no switch on the page");
+            const auto* label=FindRole(page,L::Role::Label,B);
+            Check(label&&label->text=="Loot beams"&&label->sub=="Unique, Set, Rare, Runes","the label says which beams show");
+            L::Press(f,{Kind::Change,B,-1},10);Check(f.Get()[B]==90,"- lowers the brightness a step (10%)");
+            for(int i=0;i<12;++i)L::Press(f,{Kind::Change,B,-1},20);Check(f.Get()[B]==10,"and stops at 10%");
+            L::Press(f,{Kind::Undo,B},30);Check(f.Get()[B]==100&&!f.Dirty(),"Undo: back to 100%");
+            const auto keys=L::RowsOf(View::Interface,f.Get(),{});bool all[5]={};
+            for(int i=0;i<keys.count;++i){const Key k=keys.keys[size_t(i)];if(k==B)all[4]=true;for(int b=0;b<4;++b)if(k==LootBeamUnique+b)all[b]=true;}
+            Check(all[0]&&all[1]&&all[2]&&all[3]&&all[4],"the page's keys hold all five (Reset page resets them)");
+            L::Press(f,button->hit,1000);Check(f.popoverKey==B,"Filter opens the card");
+            L::LayoutInput armedAt;armedAt.nowMs=1400;
+            const auto card=L::Build(f,{},armedAt);CheckLayout(card,"loot beams filter open");
+            std::vector<const L::Element*> switches;for(const auto& e:card.elements)if(e.role==L::Role::PopoverSwitch)switches.push_back(&e);
+            Check(switches.size()==4,"four switches in the card, not the slider");
+            const char* words[]={"Unique","Set","Rare","Runes"};int labels=0;
+            for(const auto& e:card.elements)if(e.role==L::Role::PopoverLabel&&labels<4&&e.text==words[labels])++labels;
+            Check(labels==4,"Unique, Set, Rare, Runes, in that order");
+            for(size_t i=0;i<switches.size();++i){
+                const auto& e=*switches[i];
+                Check(e.hit.kind==Kind::Set&&e.hit.index==LootBeamUnique+int(i)&&e.hit.value==0&&e.Has(L::Selected)&&e.Has(L::Enabled)&&e.text=="On","each its own setting, On");
+                Check(L::HitTest(card,float(e.HitBox().x+8),float(e.rect.y+e.rect.h/2))==e.hit,"the whole line presses its switch");
+                if(i)Check(e.HitBox().y==switches[i-1]->HitBox().y+switches[i-1]->HitBox().h,"lines meet: no dead zone");
+            }
+            L::Press(f,switches[2]->hit,1100);Check(f.Get()[LootBeamRare]==1,"a press before 300 ms is ignored");
+            L::Press(f,switches[2]->hit,1400);Check(f.Get()[LootBeamRare]==0&&f.popoverKey==B&&f.Dirty(),"Rare Off; the card stays open");
+            L::Press(f,switches[0]->hit,1500);Check(f.Get()[LootBeamUnique]==0&&f.popoverKey==B,"and Unique Off");
+            const auto after=L::Build(f,{},armedAt);
+            const L::Element* rare=nullptr;for(const auto& e:after.elements)if(e.role==L::Role::PopoverSwitch&&e.key==LootBeamRare)rare=&e;
+            Check(rare&&!rare->Has(L::Selected)&&rare->text=="Off"&&rare->hit.value==1&&rare->Has(L::Changed),"Rare reads Off, changed; a press turns it back On");
+            L::Press(f,{Kind::PopoverClose},1600);Check(f.popoverKey<0&&f.Get()[LootBeamRare]==0,"an outside press closes it, the changes kept as a draft");
+            L::Press(f,{Kind::Change,B,-3},1650);Check(f.Get()[B]==70,"the slider: 70%");
+            {   // its help card: Undo and Default take the slider and all four switches
+                L::LayoutInput help;help.card=B;const auto card2=L::Build(f,{},help);
+                int buttons=0;for(const auto& e:card2.elements)if(e.role==L::Role::CardButton)++buttons;
+                Check(buttons==2,"the Loot beams card: Undo and Default");
+                Model u=f;L::Press(u,{Kind::Undo,B},1700);
+                Check(!u.Dirty()&&u.Get()[B]==100&&u.Get()[LootBeamUnique]==1&&u.Get()[LootBeamRare]==1,"Undo puts the slider and every switch back");
+                Model d=f;d.Set(LootBeamSet,0);L::Press(d,{Kind::Default,B},1700);
+                Check(d.Get()[B]==100&&d.Get()[LootBeamUnique]==1&&d.Get()[LootBeamSet]==1&&d.Get()[LootBeamRare]==1&&d.Get()[LootBeamRunes]==1,"Default: 100%, all four On");
+                Model one=f;L::Press(one,{Kind::Undo,ProjectileAimAssist},1700);Check(one.Get()[LootBeamRare]==0&&one.Get()[B]==70,"another row's Undo leaves them");
+            }
+            const auto closed=L::Build(f,{},{});
+            const auto* summary=FindRole(closed,L::Role::Label,B);
+            Check(summary&&summary->sub=="Set, Runes"&&summary->Has(L::Changed),"the row: what shows now, marked changed");
+            Check(L::ChangedCount(f,View::Interface,{})==3,"three changes on the page");
+            L::Press(f,button->hit,2000);L::Press(f,{Kind::Set,LootBeamSet,0,0},2400);L::Press(f,{Kind::Set,LootBeamRunes,0,0},2500);
+            L::Press(f,{Kind::Close},2600);Check(f.popoverKey<0&&f.open,"Right B closes the card first");
+            const auto none=L::Build(f,{},{});
+            Check(FindRole(none,L::Role::Label,B)->sub=="Off: none","all four Off: none");
+            L::Press(f,{Kind::ResetPage},3000);
+            Check(f.Get()[B]==100&&f.Get()[LootBeamUnique]==1&&f.Get()[LootBeamSet]==1&&f.Get()[LootBeamRare]==1&&f.Get()[LootBeamRunes]==1,"Reset page: 100%, all four On");
+            Model g;g.Open(Ready());L::Press(g,{Kind::Open,int(View::Interface),-1},0);L::Press(g,{Kind::Popover,B},100);
+            L::Press(g,{Kind::Set,ProjectileAimAssist,0,1},500);Check(g.popoverKey<0&&g.Get()[ProjectileAimAssist]!=1,"a setting outside the card only closes it");
+        }
         // A grid: 9 named choices in two columns (a made-up list for Offline difficulty).
         static constexpr content::Option nine[]={{0,"Game's setting","a"},{1,"1 player","b"},{2,"2 players","c"},{3,"3 players","d"},{4,"4 players","e"},
                                                   {5,"5 players","f"},{6,"6 players","g"},{7,"7 players","h"},{8,"8 players","i"}};

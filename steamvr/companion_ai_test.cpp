@@ -41,20 +41,46 @@ uintptr_t FakeRoomPoint(uintptr_t room, int x, int y) {
     return room ? room + 0x10 : 0;
 }
 
-int pathMoveCalls = 0;
-uintptr_t lastPathMovePath = 0;
-uintptr_t lastPathMoveUnit = 0;
-uintptr_t lastPathMoveRoom = 0;
-int lastPathMoveX = 0;
-int lastPathMoveY = 0;
+int serverMoveCoordCalls = 0;
+uintptr_t lastServerMoveGame = 0;
+uintptr_t lastServerMoveUnit = 0;
+int lastServerMoveX = 0;
+int lastServerMoveY = 0;
 
-int FakePathMove(uintptr_t path, uintptr_t unit, uintptr_t room, int x, int y) {
-    ++pathMoveCalls;
-    lastPathMovePath = path;
-    lastPathMoveUnit = unit;
-    lastPathMoveRoom = room;
-    lastPathMoveX = x;
-    lastPathMoveY = y;
+int FakeServerMoveToCoord(uintptr_t game, uintptr_t unit, int x, int y) {
+    ++serverMoveCoordCalls;
+    lastServerMoveGame = game;
+    lastServerMoveUnit = unit;
+    lastServerMoveX = x;
+    lastServerMoveY = y;
+    return 1;
+}
+
+int origServerMoveUnitCalls = 0;
+int FakeOriginalServerMoveUnit(uintptr_t game, uintptr_t unit, uintptr_t targetUnit, int moveMode, int x, int y, uint8_t pathType, uint16_t flags) {
+    (void)game; (void)unit; (void)targetUnit; (void)moveMode; (void)x; (void)y; (void)pathType; (void)flags;
+    ++origServerMoveUnitCalls;
+    return 1;
+}
+
+int origServerStartWalkCalls = 0;
+int FakeOriginalServerStartWalk(uintptr_t game, uintptr_t moveStruct) {
+    (void)game; (void)moveStruct;
+    ++origServerStartWalkCalls;
+    return 1;
+}
+
+int origServerStartRunCalls = 0;
+int FakeOriginalServerStartRun(uintptr_t game, uintptr_t moveStruct) {
+    (void)game; (void)moveStruct;
+    ++origServerStartRunCalls;
+    return 1;
+}
+
+int testAttackCalls = 0;
+int FakeAttack(uintptr_t game, uintptr_t unit, int skillId, int arg4) {
+    (void)game; (void)unit; (void)skillId; (void)arg4;
+    ++testAttackCalls;
     return 1;
 }
 
@@ -127,7 +153,12 @@ bool Check(uint64_t rva, const void*, uint32_t) {
     if (rva == companionai::abi::ModeRva ||
         rva == companionai::abi::RelocateRva ||
         rva == companionai::abi::RoomPointRva ||
-        rva == companionai::abi::PathMoveRva) {
+        rva == companionai::abi::PathMoveRva ||
+        rva == companionai::abi::ServerMoveToCoordRva ||
+        rva == companionai::abi::ServerMoveUnitRva ||
+        rva == companionai::abi::ServerStartWalkRva ||
+        rva == companionai::abi::ServerStartRunRva ||
+        rva == companionai::abi::AttackRva) {
         return signatures;
     }
     return false;
@@ -136,9 +167,30 @@ uintptr_t Addr(uint64_t rva) {
     if (rva == companionai::abi::ModeRva) return reinterpret_cast<uintptr_t>(&FakeMode);
     if (rva == companionai::abi::RelocateRva) return reinterpret_cast<uintptr_t>(&FakeRelocate);
     if (rva == companionai::abi::RoomPointRva) return reinterpret_cast<uintptr_t>(&FakeRoomPoint);
-    if (rva == companionai::abi::PathMoveRva) return reinterpret_cast<uintptr_t>(&FakePathMove);
+    if (rva == companionai::abi::ServerMoveToCoordRva) return reinterpret_cast<uintptr_t>(&FakeServerMoveToCoord);
+    if (rva == companionai::abi::ServerMoveUnitRva) return reinterpret_cast<uintptr_t>(&FakeOriginalServerMoveUnit);
+    if (rva == companionai::abi::ServerStartWalkRva) return reinterpret_cast<uintptr_t>(&FakeOriginalServerStartWalk);
+    if (rva == companionai::abi::ServerStartRunRva) return reinterpret_cast<uintptr_t>(&FakeOriginalServerStartRun);
+    if (rva == companionai::abi::AttackRva) return reinterpret_cast<uintptr_t>(&FakeAttack);
     return 0;
 }
+bool Hook(uint64_t rva, const void*, uint32_t, void*, void** original) {
+    if (!signatures) return false;
+    if (rva == companionai::abi::ServerMoveUnitRva) {
+        if (original) *original = reinterpret_cast<void*>(&FakeOriginalServerMoveUnit);
+        return true;
+    }
+    if (rva == companionai::abi::ServerStartWalkRva) {
+        if (original) *original = reinterpret_cast<void*>(&FakeOriginalServerStartWalk);
+        return true;
+    }
+    if (rva == companionai::abi::ServerStartRunRva) {
+        if (original) *original = reinterpret_cast<void*>(&FakeOriginalServerStartRun);
+        return true;
+    }
+    return false;
+}
+uint64_t Rva(uint64_t rva) { return rva; }
 } // namespace d2rsig
 
 namespace framevr::logging {
@@ -153,6 +205,7 @@ int AppliedPercent() {
 } // namespace enemysight
 
 namespace melee {
+uintptr_t g_testServerUnit = 0;
 bool LocalServer(uintptr_t& game, uintptr_t& player) {
     game = 0x20000;
     player = 0x30000;
@@ -160,7 +213,7 @@ bool LocalServer(uintptr_t& game, uintptr_t& player) {
 }
 uintptr_t ServerUnit(uintptr_t game, int type, uint32_t id) {
     (void)game; (void)type; (void)id;
-    return 0x40000;
+    return g_testServerUnit ? g_testServerUnit : 0x40000;
 }
 bool HirelingVitals(uint32_t hint, float& health, float& maxHealth, uint32_t& classId, uint32_t& unitId) {
     (void)hint;
@@ -169,6 +222,10 @@ bool HirelingVitals(uint32_t hint, float& health, float& maxHealth, uint32_t& cl
     classId = 271;
     unitId = 12345;
     return true;
+}
+int HostilesAround(Hostile* out, int max, float range, float centerX, float centerY, uintptr_t viewerUnit) {
+    (void)out; (void)max; (void)range; (void)centerX; (void)centerY; (void)viewerUnit;
+    return 0;
 }
 int Hostiles(Hostile* out, int max, float range, float& heroX, float& heroY) {
     (void)out; (void)max; (void)range;
@@ -770,6 +827,729 @@ int main() {
         const Vec2 arrivedPos = CalculateInterceptPosition(playerPos, best.pos, Archetype::MeleeVanguard);
         assert(!controller.Evaluate(best, arrivedPos, playerPos, Archetype::MeleeVanguard, 2500, targetMove));
         assert(controller.inPeelAction);
+    }
+
+    // =========================================================================
+    // 21. Phase 6: Archetype Tactical Voice Cue Mapping Tests
+    // =========================================================================
+    {
+        using namespace framevr::companionai;
+        // Rogue Scout (Amazon base: 2937, Dedicated move confirm: 4293/4297 "Sí / Vale")
+        assert(GetArchetypeVoiceCue(MonStatsIndex::Rogue, TacticalVoiceCue::None) == 0);
+        const int rogueDistress = GetArchetypeVoiceCue(MonStatsIndex::Rogue, TacticalVoiceCue::Distress);
+        assert(rogueDistress == 2937 || rogueDistress == 2938);
+        const int rogueMove = GetArchetypeVoiceCue(MonStatsIndex::Rogue, TacticalVoiceCue::MoveConfirm);
+        assert(rogueMove == 4294 || rogueMove == 4291);
+        const int rogueAtk = GetArchetypeVoiceCue(MonStatsIndex::Rogue, TacticalVoiceCue::AttackConfirm);
+        assert(rogueAtk == 2937 + 12 || rogueAtk == 2937 + 13);
+        const int rogueImp = GetArchetypeVoiceCue(MonStatsIndex::Rogue, TacticalVoiceCue::Impossible);
+        assert(rogueImp == 2937 + 16 || rogueImp == 2937 + 17);
+        const int rogueHold = GetArchetypeVoiceCue(MonStatsIndex::Rogue, TacticalVoiceCue::HoldConfirm);
+        assert(rogueHold == 2937 + 6 || rogueHold == 2937 + 7);
+        // RegroupLeash: 90% follow (base + 2/3), 10% farewell / "hasta luego" (base + 10/11)
+        bool sawFollow = false;
+        bool sawFarewell = false;
+        for (int i = 0; i < 20; ++i) {
+            const int reg = GetArchetypeVoiceCue(MonStatsIndex::Rogue, TacticalVoiceCue::RegroupLeash);
+            if (reg == 2937 + 2 || reg == 2937 + 3) sawFollow = true;
+            if (reg == 2937 + 10 || reg == 2937 + 11) sawFarewell = true;
+        }
+        assert(sawFollow && sawFarewell);
+
+        // Desert Guard (Paladin base: 3171, Dedicated move confirm: 3952 "Sí / Vale")
+        const int palDist = GetArchetypeVoiceCue(MonStatsIndex::Desert, TacticalVoiceCue::Distress);
+        assert(palDist == 3171 || palDist == 3172);
+        const int palMove = GetArchetypeVoiceCue(MonStatsIndex::Desert, TacticalVoiceCue::MoveConfirm);
+        assert(palMove == 3952);
+        const int palImp = GetArchetypeVoiceCue(MonStatsIndex::Desert, TacticalVoiceCue::Impossible);
+        assert(palImp == 3171 + 16 || palImp == 3171 + 17);
+        const int palHold = GetArchetypeVoiceCue(MonStatsIndex::Desert, TacticalVoiceCue::HoldConfirm);
+        assert(palHold == 3171 + 6 || palHold == 3171 + 7);
+
+        // Iron Wolf (Necromancer base: 3093, Dedicated move confirm: 4040/4041 "Sí / Vale")
+        const int necDist = GetArchetypeVoiceCue(MonStatsIndex::IronWolf, TacticalVoiceCue::Distress);
+        assert(necDist == 3093 || necDist == 3094);
+        const int necMove = GetArchetypeVoiceCue(MonStatsIndex::IronWolf, TacticalVoiceCue::MoveConfirm);
+        assert(necMove == 4040 || necMove == 4041);
+        const int necImp = GetArchetypeVoiceCue(MonStatsIndex::IronWolf, TacticalVoiceCue::Impossible);
+        assert(necImp == 3093 + 16 || necImp == 3093 + 17);
+
+        // Barbarian (Barbarian base: 3015, Dedicated move confirm: 4565 "Sí / Vale")
+        const int barbDist = GetArchetypeVoiceCue(MonStatsIndex::Barbarian1, TacticalVoiceCue::Distress);
+        assert(barbDist == 3015 || barbDist == 3016);
+        const int barbMove = GetArchetypeVoiceCue(MonStatsIndex::Barbarian1, TacticalVoiceCue::MoveConfirm);
+        assert(barbMove == 4565);
+        const int barbImp = GetArchetypeVoiceCue(MonStatsIndex::Barbarian2, TacticalVoiceCue::Impossible);
+        assert(barbImp == 3015 + 16 || barbImp == 3015 + 17);
+    }
+
+    // =========================================================================
+    // 22. Phase 6: Tactical Order Issuance & Rejection Validation Tests
+    // =========================================================================
+    {
+        using namespace framevr::companionai;
+        TacticalOrderController controller;
+        const Vec2 playerPos{ 100.0f, 100.0f };
+        const Vec2 compNear{ 100.0f, 96.0f }; // dist 4
+        TacticalVoiceCue cue = TacticalVoiceCue::None;
+
+        // 1. Valid MoveAndHold within leash (target at dist 15 < 40)
+        TacticalOrder moveOrder{};
+        moveOrder.type = TacticalOrderType::MoveAndHold;
+        moveOrder.targetPos = { 100.0f, 85.0f };
+        assert(controller.IssueOrder(moveOrder, 1000, compNear, playerPos, cue, false));
+        assert(cue == TacticalVoiceCue::MoveConfirm);
+        assert(controller.IsActive());
+        assert(controller.GetOrderType() == TacticalOrderType::MoveAndHold);
+
+        // 2. Reject order if companion is in retreat (< 50% HP)
+        assert(!controller.IssueOrder(moveOrder, 1050, compNear, playerPos, cue, true));
+        assert(cue == TacticalVoiceCue::Impossible);
+
+        // 2b. Reject order if companion has critical health (< 50% HP)
+        assert(!controller.IssueOrder(moveOrder, 1060, compNear, playerPos, cue, false, 40.0f, 100.0f));
+        assert(cue == TacticalVoiceCue::Impossible);
+
+        // 3. Reject order if target is beyond ElasticCombatLeashDistance (> 40 sub-tiles)
+        TacticalOrder farTargetOrder{};
+        farTargetOrder.type = TacticalOrderType::MoveAndHold;
+        farTargetOrder.targetPos = { 100.0f, 150.0f }; // dist 50 > 40
+        assert(!controller.IssueOrder(farTargetOrder, 1100, compNear, playerPos, cue, false));
+        assert(cue == TacticalVoiceCue::Impossible);
+
+        // 4. Reject order if companion itself is beyond leash (> 40 sub-tiles)
+        const Vec2 compFar{ 100.0f, 150.0f }; // dist 50 > 40
+        assert(!controller.IssueOrder(moveOrder, 1200, compFar, playerPos, cue, false));
+        assert(cue == TacticalVoiceCue::Impossible);
+
+        // 5. Valid DefensiveHold within leash
+        TacticalOrder holdOrder{};
+        holdOrder.type = TacticalOrderType::DefensiveHold;
+        assert(controller.IssueOrder(holdOrder, 1300, compNear, playerPos, cue, false));
+        assert(cue == TacticalVoiceCue::HoldConfirm);
+        assert(controller.GetOrderType() == TacticalOrderType::DefensiveHold);
+
+        // 6. Valid PrioritizeEnemy within leash
+        TacticalOrder attackOrder{};
+        attackOrder.type = TacticalOrderType::PrioritizeEnemy;
+        attackOrder.targetUnitId = 42;
+        attackOrder.targetPos = { 105.0f, 98.0f };
+        assert(controller.IssueOrder(attackOrder, 1400, compNear, playerPos, cue, false));
+        assert(cue == TacticalVoiceCue::AttackConfirm);
+        assert(controller.GetOrderType() == TacticalOrderType::PrioritizeEnemy);
+    }
+
+    // =========================================================================
+    // 23. Phase 6: Tactical Order Execution & Deadband Arrival Tests
+    // =========================================================================
+    {
+        using namespace framevr::companionai;
+        TacticalOrderController controller;
+        const Vec2 playerPos{ 100.0f, 100.0f };
+        const Vec2 compPos{ 100.0f, 96.0f };
+        TacticalVoiceCue cue = TacticalVoiceCue::None;
+
+        TacticalOrder moveOrder{};
+        moveOrder.type = TacticalOrderType::MoveAndHold;
+        moveOrder.targetPos = { 100.0f, 85.0f }; // dist 11 from compPos
+        assert(controller.IssueOrder(moveOrder, 1000, compPos, playerPos, cue));
+
+        Vec2 outTarget{};
+        // En route: returns true to dispatch movement
+        assert(controller.Evaluate(compPos, playerPos, 1100, false, outTarget, cue));
+        assert(outTarget.x == 100.0f && outTarget.y == 85.0f);
+        assert(cue == TacticalVoiceCue::None);
+
+        // Arrived within deadband (<= 2.0 sub-tiles): returns false to hold ground stably
+        const Vec2 compArrived{ 100.0f, 86.0f }; // dist 1.0 from target
+        assert(!controller.Evaluate(compArrived, playerPos, 1200, false, outTarget, cue));
+        assert(controller.IsActive()); // Still active holding position!
+
+        // Defensive hold order: always returns false to hold current ground
+        TacticalOrder holdOrder{};
+        holdOrder.type = TacticalOrderType::DefensiveHold;
+        assert(controller.IssueOrder(holdOrder, 1300, compPos, playerPos, cue));
+        assert(!controller.Evaluate(compPos, playerPos, 1400, false, outTarget, cue));
+        assert(controller.IsActive());
+
+        // CancelOrder resets state
+        controller.CancelOrder();
+        assert(!controller.IsActive());
+        assert(!controller.Evaluate(compPos, playerPos, 1500, false, outTarget, cue));
+    }
+
+    // =========================================================================
+    // 24. Phase 6: Tactical Order Auto-Cancel by Retreat and Leash Break
+    // =========================================================================
+    {
+        using namespace framevr::companionai;
+        TacticalOrderController controller;
+        const Vec2 playerPos{ 100.0f, 100.0f };
+        const Vec2 compPos{ 100.0f, 96.0f };
+        TacticalVoiceCue cue = TacticalVoiceCue::None;
+
+        // Auto-cancel 1: Companion health drops below 50% (inRetreat = true)
+        TacticalOrder moveOrder{};
+        moveOrder.type = TacticalOrderType::MoveAndHold;
+        moveOrder.targetPos = { 100.0f, 85.0f };
+        assert(controller.IssueOrder(moveOrder, 1000, compPos, playerPos, cue));
+        assert(controller.IsActive());
+
+        Vec2 outTarget{};
+        // Companion enters critical retreat: order must be auto-cancelled immediately!
+        assert(!controller.Evaluate(compPos, playerPos, 1100, true, outTarget, cue));
+        assert(cue == TacticalVoiceCue::Distress);
+        assert(!controller.IsActive()); // Order aborted!
+
+        // Auto-cancel 1b: Companion health drops below 50% during evaluation
+        assert(controller.IssueOrder(moveOrder, 1150, compPos, playerPos, cue));
+        assert(controller.IsActive());
+        assert(!controller.Evaluate(compPos, playerPos, 1160, false, outTarget, cue, 30.0f, 100.0f));
+        assert(cue == TacticalVoiceCue::Distress);
+        assert(!controller.IsActive());
+
+        // Auto-cancel 2: Player moves away and distance exceeds leash (> 40 sub-tiles)
+        assert(controller.IssueOrder(moveOrder, 1200, compPos, playerPos, cue));
+        assert(controller.IsActive());
+
+        const Vec2 playerFar{ 100.0f, 150.0f }; // Player ran 50 sub-tiles away
+        assert(!controller.Evaluate(compPos, playerFar, 1300, false, outTarget, cue));
+        assert(cue == TacticalVoiceCue::RegroupLeash);
+        assert(!controller.IsActive()); // Leash broke hold order!
+
+        // Auto-cancel 3: Order duration timeout
+        TacticalOrder timedOrder{};
+        timedOrder.type = TacticalOrderType::DefensiveHold;
+        timedOrder.holdDurationMs = 5000; // 5s duration
+        assert(controller.IssueOrder(timedOrder, 2000, compPos, playerPos, cue));
+        assert(controller.IsActive());
+
+        // At 4s: still active
+        assert(!controller.Evaluate(compPos, playerPos, 6000, false, outTarget, cue));
+        assert(controller.IsActive());
+
+        // At 7.1s (> 5s): timed out!
+        assert(!controller.Evaluate(compPos, playerPos, 7100, false, outTarget, cue));
+        assert(cue == TacticalVoiceCue::RegroupLeash);
+        assert(!controller.IsActive());
+    }
+
+    // =========================================================================
+    // 25. Phase 2: Engine Adapter & Tactical Commands Configuration Tests
+    // =========================================================================
+    {
+        using namespace companionai;
+        ConfigureTacticalCommands(true);
+        assert(IsTacticalCommandsEnabled());
+
+        ConfigureTacticalCommands(false);
+        assert(!IsTacticalCommandsEnabled());
+
+        ConfigureTacticalCommands(true);
+        assert(IsTacticalCommandsEnabled());
+        assert(TacticalCommandCount() == 0);
+
+        CancelTacticalOrder();
+        assert(GetActiveTacticalOrder().type == framevr::companionai::TacticalOrderType::None);
+        assert(GetTacticalCommandState() == framevr::companionai::TacticalCommandState::Idle ||
+               GetTacticalCommandState() == framevr::companionai::TacticalCommandState::Cancelled);
+    }
+
+    // =========================================================================
+    // 26. Explicit Command State Machine: Lifecycle, Deduplication & No-Spam
+    // =========================================================================
+    {
+        using namespace framevr::companionai;
+        TacticalOrderController controller;
+        const Vec2 playerPos{ 100.0f, 100.0f };
+        const Vec2 compStart{ 100.0f, 96.0f };
+        TacticalVoiceCue cue = TacticalVoiceCue::None;
+        Vec2 outTarget{};
+
+        assert(controller.GetState() == TacticalCommandState::Idle);
+        assert(controller.GetCommandId() == 0);
+
+        // Reject invalid (0, 0) target coordinates for MoveAndHold
+        TacticalOrder zeroOrder{};
+        zeroOrder.type = TacticalOrderType::MoveAndHold;
+        zeroOrder.targetPos = { 0.0f, 0.0f };
+        assert(!controller.IssueOrder(zeroOrder, 500, compStart, playerPos, cue));
+        assert(cue == TacticalVoiceCue::Impossible);
+        assert(controller.GetState() == TacticalCommandState::Idle);
+
+        // 1. Issue valid MoveAndHold -> transitions Idle -> Requested with commandId = 1
+        TacticalOrder moveOrder{};
+        moveOrder.type = TacticalOrderType::MoveAndHold;
+        moveOrder.targetPos = { 100.0f, 80.0f }; // dist 16 from compStart
+        assert(controller.IssueOrder(moveOrder, 1000, compStart, playerPos, cue));
+        assert(controller.GetState() == TacticalCommandState::Requested);
+        assert(controller.GetCommandId() == 1);
+
+        // 2. First Evaluate on game thread -> transitions Requested -> Moving and submits once
+        assert(controller.Evaluate(compStart, playerPos, 1250, false, outTarget, cue));
+        assert(controller.GetState() == TacticalCommandState::Moving);
+        assert(outTarget.x == 100.0f && outTarget.y == 80.0f);
+
+        // 3. Subsequent 250ms ticks while mercenary walks -> MUST NOT spam movement requests!
+        assert(!controller.Evaluate({ 100.0f, 94.0f }, playerPos, 1500, false, outTarget, cue));
+        assert(controller.GetState() == TacticalCommandState::Moving);
+        assert(!controller.Evaluate({ 100.0f, 91.0f }, playerPos, 1750, false, outTarget, cue));
+        assert(controller.GetState() == TacticalCommandState::Moving);
+        assert(!controller.Evaluate({ 100.0f, 87.0f }, playerPos, 2000, false, outTarget, cue));
+        assert(controller.GetState() == TacticalCommandState::Moving);
+
+        // 4. Duplicate command within DuplicateTargetTolerance (0.5 sub-tiles) while Moving:
+        //    Must NOT increment commandId, reset state to Requested, or trigger spam!
+        TacticalOrder dupOrder = moveOrder;
+        dupOrder.targetPos = { 100.2f, 80.1f };
+        assert(controller.IssueOrder(dupOrder, 2100, { 100.0f, 87.0f }, playerPos, cue));
+        assert(controller.GetCommandId() == 1);
+        assert(controller.GetState() == TacticalCommandState::Moving);
+        assert(!controller.Evaluate({ 100.0f, 85.0f }, playerPos, 2250, false, outTarget, cue));
+
+        // 5. Arrival within ArrivalTolerance (<= 2.0 sub-tiles) -> transitions Moving -> Arrived
+        assert(!controller.Evaluate({ 100.0f, 81.5f }, playerPos, 2500, false, outTarget, cue, 100.0f, 100.0f, Archetype::RangedOverwatch));
+        assert(controller.GetState() == TacticalCommandState::Arrived);
+        assert(controller.IsActive());
+
+        // 6. Hysteresis deadband (HoldReleaseDeadband = 3.5f for Ranged/Caster):
+        //    Minor pushback to dist 3.0 (> 2.0, <= 3.5) MUST stay Arrived without oscillating to Moving!
+        assert(!controller.Evaluate({ 100.0f, 83.0f }, playerPos, 2750, false, outTarget, cue, 100.0f, 100.0f, Archetype::RangedOverwatch));
+        assert(controller.GetState() == TacticalCommandState::Arrived);
+
+        //    Large knockback beyond HoldReleaseDeadband (dist 5.0 > 3.5) transitions Arrived -> Moving once
+        assert(controller.Evaluate({ 100.0f, 85.0f }, playerPos, 3000, false, outTarget, cue, 100.0f, 100.0f, Archetype::RangedOverwatch));
+        assert(controller.GetState() == TacticalCommandState::Moving);
+        assert(!controller.Evaluate({ 100.0f, 81.0f }, playerPos, 3250, false, outTarget, cue, 100.0f, 100.0f, Archetype::RangedOverwatch));
+        assert(controller.GetState() == TacticalCommandState::Arrived);
+
+        //    MeleeVanguard extended deadband (MeleeHoldEngageRadius + 1.5f = 7.5f):
+        //    Dist 5.0 <= 7.5 remains Arrived so melee can strike hostiles within engage radius
+        assert(!controller.Evaluate({ 100.0f, 85.0f }, playerPos, 3500, false, outTarget, cue, 100.0f, 100.0f, Archetype::MeleeVanguard));
+        assert(controller.GetState() == TacticalCommandState::Arrived);
+        //    Knockback beyond 7.5 (dist 8.0) transitions Arrived -> Moving
+        assert(controller.Evaluate({ 100.0f, 88.0f }, playerPos, 3750, false, outTarget, cue, 100.0f, 100.0f, Archetype::MeleeVanguard));
+        assert(controller.GetState() == TacticalCommandState::Moving);
+    }
+
+    // =========================================================================
+    // 27. Explicit Command State Machine: Stall Detection, Retry Limits & Failure
+    // =========================================================================
+    {
+        using namespace framevr::companionai;
+        TacticalOrderController controller;
+        const Vec2 playerPos{ 100.0f, 100.0f };
+        const Vec2 stuckPos{ 100.0f, 95.0f };
+        TacticalVoiceCue cue = TacticalVoiceCue::None;
+        Vec2 outTarget{};
+
+        TacticalOrder moveOrder{};
+        moveOrder.type = TacticalOrderType::MoveAndHold;
+        moveOrder.targetPos = { 100.0f, 80.0f };
+        assert(controller.IssueOrder(moveOrder, 1000, stuckPos, playerPos, cue));
+        assert(controller.GetState() == TacticalCommandState::Requested);
+
+        // Initial submission at t=1000 -> Moving (retryCount = 0)
+        assert(controller.Evaluate(stuckPos, playerPos, 1000, false, outTarget, cue));
+        assert(controller.GetState() == TacticalCommandState::Moving);
+        assert(controller.GetRetryCount() == 0);
+
+        // No spam before StallTimeoutMs (2000ms)
+        assert(!controller.Evaluate(stuckPos, playerPos, 1500, false, outTarget, cue));
+        assert(!controller.Evaluate(stuckPos, playerPos, 2500, false, outTarget, cue));
+        assert(controller.GetRetryCount() == 0);
+
+        // Stall timeout #1 at t=3000 -> retry #1
+        assert(controller.Evaluate(stuckPos, playerPos, 3000, false, outTarget, cue));
+        assert(controller.GetState() == TacticalCommandState::Moving);
+        assert(controller.GetRetryCount() == 1);
+
+        // No spam between t=3000 and t=5000
+        assert(!controller.Evaluate(stuckPos, playerPos, 4000, false, outTarget, cue));
+
+        // Stall timeout #2 at t=5000 -> retry #2 (MaxMoveRetries = 2)
+        assert(controller.Evaluate(stuckPos, playerPos, 5000, false, outTarget, cue));
+        assert(controller.GetState() == TacticalCommandState::Moving);
+        assert(controller.GetRetryCount() == 2);
+
+        // Stall timeout #3 at t=7000 -> exceeds MaxMoveRetries, transitions Moving -> Failed!
+        assert(!controller.Evaluate(stuckPos, playerPos, 7000, false, outTarget, cue));
+        assert(controller.GetState() == TacticalCommandState::Failed);
+        assert(controller.GetLastCancelReason() == TacticalCommandCancelReason::StalledNoProgress);
+        assert(cue == TacticalVoiceCue::Impossible);
+        assert(!controller.IsActive());
+
+        // Subsequent ticks after Failed remain inert (no infinite retry loop)
+        assert(!controller.Evaluate(stuckPos, playerPos, 7500, false, outTarget, cue));
+        assert(controller.GetState() == TacticalCommandState::Failed);
+    }
+
+    // =========================================================================
+    // 28. Explicit Command State Machine: Unreachable Room, Unit Death & Level Change
+    // =========================================================================
+    {
+        using namespace framevr::companionai;
+        TacticalOrderController controller;
+        const Vec2 playerPos{ 100.0f, 100.0f };
+        const Vec2 compPos{ 100.0f, 95.0f };
+        TacticalVoiceCue cue = TacticalVoiceCue::None;
+
+        // 1. Unreachable destination room -> Failed (DestinationUnreachable)
+        TacticalOrder moveOrder{};
+        moveOrder.type = TacticalOrderType::MoveAndHold;
+        moveOrder.targetPos = { 100.0f, 80.0f };
+        assert(controller.IssueOrder(moveOrder, 1000, compPos, playerPos, cue));
+        controller.BindUnitAndArea(77, 0x20000);
+        controller.ReportDestinationUnreachable(1100, cue);
+        assert(controller.GetState() == TacticalCommandState::Failed);
+        assert(controller.GetLastCancelReason() == TacticalCommandCancelReason::DestinationUnreachable);
+        assert(cue == TacticalVoiceCue::Impossible);
+        assert(!controller.IsActive());
+
+        // 2. Mercenary death (animMode == 12 or health <= 0) -> Cancelled (UnitInvalidated)
+        assert(controller.IssueOrder(moveOrder, 2000, compPos, playerPos, cue));
+        controller.BindUnitAndArea(77, 0x20000);
+        assert(controller.ValidateRuntimeContext(77, 0x20000, 2, 100.0f, 2100, cue));
+        assert(!controller.ValidateRuntimeContext(77, 0x20000, 12, 0.0f, 2200, cue));
+        assert(controller.GetState() == TacticalCommandState::Cancelled);
+        assert(controller.GetLastCancelReason() == TacticalCommandCancelReason::UnitInvalidated);
+        assert(!controller.IsActive());
+
+        // 3. Mercenary unit ID change (resummoned/replaced) -> Cancelled (UnitInvalidated)
+        assert(controller.IssueOrder(moveOrder, 3000, compPos, playerPos, cue));
+        controller.BindUnitAndArea(77, 0x20000);
+        assert(!controller.ValidateRuntimeContext(88, 0x20000, 1, 100.0f, 3100, cue));
+        assert(controller.GetState() == TacticalCommandState::Cancelled);
+        assert(controller.GetLastCancelReason() == TacticalCommandCancelReason::UnitInvalidated);
+
+        // 4. Level/area transition (areaRoom becomes 0) -> Cancelled (LevelTransition)
+        assert(controller.IssueOrder(moveOrder, 4000, compPos, playerPos, cue));
+        controller.BindUnitAndArea(88, 0x20000);
+        assert(!controller.ValidateRuntimeContext(88, 0, 1, 100.0f, 4100, cue));
+        assert(controller.GetState() == TacticalCommandState::Cancelled);
+        assert(controller.GetLastCancelReason() == TacticalCommandCancelReason::LevelTransition);
+
+        // 5. PrioritizeEnemy target defeated -> Cancelled (TargetDefeated)
+        TacticalOrder atkOrder{};
+        atkOrder.type = TacticalOrderType::PrioritizeEnemy;
+        atkOrder.targetUnitId = 555;
+        atkOrder.targetPos = { 105.0f, 95.0f };
+        assert(controller.IssueOrder(atkOrder, 5000, compPos, playerPos, cue));
+        controller.ReportTargetDefeated(5500);
+        assert(controller.GetState() == TacticalCommandState::Cancelled);
+        assert(controller.GetLastCancelReason() == TacticalCommandCancelReason::TargetDefeated);
+        assert(!controller.IsActive());
+    }
+
+    // =========================================================================
+    // 29. Verified Server Walk Entry Point (0x4a77e0) & Native AI Detour (0x4a8a10)
+    // =========================================================================
+    {
+        using namespace framevr::companionai;
+        signatures = true;
+        companionai::Configure(true);
+        companionai::ConfigureTacticalCommands(true);
+        companionai::Install();
+
+        serverMoveCoordCalls = 0;
+        origServerMoveUnitCalls = 0;
+
+        // 1. Direct dispatch via 0x4a77e0 invokes ServerMoveToCoord with exact coordinates
+        assert(companionai::DispatchServerMoveToCoord(0x20000, 0x40000, { 100.0f, 95.0f }, 100, 80));
+        assert(serverMoveCoordCalls == 1);
+        assert(lastServerMoveGame == 0x20000);
+        assert(lastServerMoveUnit == 0x40000);
+        assert(lastServerMoveX == 100);
+        assert(lastServerMoveY == 80);
+
+        // 2. Non-hireling units pass straight through DetourServerMoveUnit (0x4a8a10) untouched
+        alignas(8) uint8_t otherUnit[0x80]{};
+        alignas(8) uint16_t otherPath[32]{};
+        const uint32_t otherHeader[4] = { 1, 10, 99999, 1 };
+        std::memcpy(otherUnit, otherHeader, sizeof(otherHeader));
+        const uintptr_t otherPathPtr = reinterpret_cast<uintptr_t>(otherPath);
+        std::memcpy(otherUnit + 0x38, &otherPathPtr, sizeof(otherPathPtr));
+
+        companionai::g_lastHirelingId.store(12345);
+        assert(companionai::DetourServerMoveUnit(0x20000, reinterpret_cast<uintptr_t>(otherUnit), 0, 2, 110, 110, 1, 0) == 1);
+        assert(origServerMoveUnitCalls == 1);
+        assert(serverMoveCoordCalls == 1);
+
+        // 3. Active hireling during MoveAndHold (Moving): native AI wander toward player is redirected to targetPos
+        alignas(8) uint8_t mercUnit[0x80]{};
+        alignas(8) uint16_t mercPath[32]{};
+        mercPath[1] = 100; // posX = 100
+        mercPath[3] = 95;  // posY = 95
+        mercPath[10] = 100; // finalTargetX = 100 (player)
+        mercPath[11] = 100; // finalTargetY = 100 (player)
+        mercPath[26] = 0;   // dwPathPoints = 0
+        const uint32_t mercHeader[4] = { 1, 271, 12345, 1 };
+        std::memcpy(mercUnit, mercHeader, sizeof(mercHeader));
+        const uintptr_t mercPathPtr = reinterpret_cast<uintptr_t>(mercPath);
+        std::memcpy(mercUnit + 0x38, &mercPathPtr, sizeof(mercPathPtr));
+
+        TacticalVoiceCue cue = TacticalVoiceCue::None;
+        TacticalOrder moveOrder{};
+        moveOrder.type = TacticalOrderType::MoveAndHold;
+        moveOrder.targetPos = { 100.0f, 80.0f };
+        assert(companionai::g_tacticalOrderController.IssueOrder(moveOrder, 1000, { 100.0f, 95.0f }, { 100.0f, 100.0f }, cue));
+        Vec2 evalTarget{};
+        assert(companionai::g_tacticalOrderController.Evaluate({ 100.0f, 95.0f }, { 100.0f, 100.0f }, 1000, false, evalTarget, cue));
+        assert(companionai::g_tacticalOrderController.GetState() == TacticalCommandState::Moving);
+
+        // Native AI attempts to move hireling to player (100, 102) -> redirected to (100, 80) via ServerMoveToCoord!
+        assert(companionai::DetourServerMoveUnit(0x20000, reinterpret_cast<uintptr_t>(mercUnit), 0, 2, 100, 102, 1, 0) == 1);
+        assert(origServerMoveUnitCalls == 1); // Not passed to original wander
+        assert(serverMoveCoordCalls == 2);    // Redirected to (100, 80)
+        assert(lastServerMoveX == 100);
+        assert(lastServerMoveY == 80);
+
+        // 4. Active hireling during MoveAndHold (Arrived): native AI wander is suppressed (returns 1 without moving)
+        mercPath[1] = 100;
+        mercPath[3] = 80; // Arrived at (100, 80)
+        assert(!companionai::g_tacticalOrderController.Evaluate({ 100.0f, 80.0f }, { 100.0f, 100.0f }, 2000, false, evalTarget, cue));
+        assert(companionai::g_tacticalOrderController.GetState() == TacticalCommandState::Arrived);
+
+        assert(companionai::DetourServerMoveUnit(0x20000, reinterpret_cast<uintptr_t>(mercUnit), 0, 2, 100, 102, 1, 0) == 1);
+        assert(origServerMoveUnitCalls == 1); // Suppressed!
+        assert(serverMoveCoordCalls == 2);    // No extra move call while holding at destination!
+
+        // 5. DetourServerStartWalk (0x445cc0) & DetourServerStartRun (0x445db0) block native 0x4a88fd->0x4475c0 follow-player walk
+        alignas(8) uint8_t moveStruct[0x40]{};
+        const uintptr_t mercUnitPtr = reinterpret_cast<uintptr_t>(mercUnit);
+        std::memcpy(moveStruct + 0x08, &mercUnitPtr, sizeof(mercUnitPtr));
+        const int wanderX = 100, wanderY = 102;
+        std::memcpy(moveStruct + 0x18, &wanderX, sizeof(wanderX));
+        std::memcpy(moveStruct + 0x1c, &wanderY, sizeof(wanderY));
+
+        origServerStartWalkCalls = 0;
+        origServerStartRunCalls = 0;
+        assert(companionai::DetourServerStartWalk(0x20000, reinterpret_cast<uintptr_t>(moveStruct)) == 0);
+        assert(companionai::DetourServerStartRun(0x20000, reinterpret_cast<uintptr_t>(moveStruct)) == 0);
+        assert(origServerStartWalkCalls == 0);
+        assert(origServerStartRunCalls == 0);
+
+        // 6. Combat target arbitration during MoveAndHold:
+        //    - While Moving (dist > ArrivalTolerance): TryOverrideCombatTarget suppresses combat targets (outTarget = 0)
+        //    - Once Arrived: FilterNativeCombatTarget allows close targets and rejects distant targets beyond hold radius
+        mercPath[1] = 100;
+        mercPath[3] = 95; // Far from (100, 80)
+        assert(companionai::g_tacticalOrderController.IssueOrder(moveOrder, 3000, { 100.0f, 95.0f }, { 100.0f, 100.0f }, cue));
+        assert(companionai::g_tacticalOrderController.Evaluate({ 100.0f, 95.0f }, { 100.0f, 100.0f }, 3000, false, evalTarget, cue));
+        uintptr_t overriddenTarget = 0x99999;
+        assert(companionai::TryOverrideCombatTarget(0x20000, mercUnitPtr, overriddenTarget));
+        assert(overriddenTarget == 0); // Suppressed while Moving to destination!
+
+        // Arrive at (100, 80) with MeleeVanguard (Act 2 Desert Mercenary classId = 338)
+        const uint32_t meleeMercHeader[4] = { 1, 338, 12345, 1 };
+        std::memcpy(mercUnit, meleeMercHeader, sizeof(meleeMercHeader));
+        mercPath[1] = 100;
+        mercPath[3] = 80;
+        assert(!companionai::g_tacticalOrderController.Evaluate({ 100.0f, 80.0f }, { 100.0f, 100.0f }, 4000, false, evalTarget, cue, 100.0f, 100.0f, Archetype::MeleeVanguard));
+        assert(!companionai::TryOverrideCombatTarget(0x20000, mercUnitPtr, overriddenTarget));
+
+        // Test hold sentry target acquisition: when g_activeHoldTargetId is populated,
+        // TryOverrideCombatTarget overrides with that enemy!
+        alignas(8) uint8_t enemyUnit[0x80]{};
+        const uint32_t liveEnemyHeader[4] = { 1, 1, 888, 1 };
+        std::memcpy(enemyUnit, liveEnemyHeader, sizeof(liveEnemyHeader));
+        melee::g_testServerUnit = reinterpret_cast<uintptr_t>(enemyUnit);
+        companionai::g_activeHoldTargetId.store(888);
+        assert(companionai::TryOverrideCombatTarget(0x20000, mercUnitPtr, overriddenTarget));
+        assert(overriddenTarget == reinterpret_cast<uintptr_t>(enemyUnit));
+        companionai::g_activeHoldTargetId.store(0);
+        melee::g_testServerUnit = 0;
+        assert(!companionai::TryOverrideCombatTarget(0x20000, mercUnitPtr, overriddenTarget));
+
+        alignas(8) uint16_t enemyPath[32]{};
+        const uintptr_t enemyPathPtr = reinterpret_cast<uintptr_t>(enemyPath);
+        std::memcpy(enemyUnit + 0x38, &enemyPathPtr, sizeof(enemyPathPtr));
+        enemyPath[1] = 100;
+        enemyPath[3] = 84; // 4 sub-tiles from anchor (<= 6.0 MeleeHoldEngageRadius)
+        assert(companionai::FilterNativeCombatTarget(0x20000, mercUnitPtr, reinterpret_cast<uintptr_t>(enemyUnit)) == reinterpret_cast<uintptr_t>(enemyUnit));
+        enemyPath[1] = 100;
+        enemyPath[3] = 92; // 12 sub-tiles from anchor (> 6.0 MeleeHoldEngageRadius) -> rejected!
+        assert(companionai::FilterNativeCombatTarget(0x20000, mercUnitPtr, reinterpret_cast<uintptr_t>(enemyUnit)) == 0);
+
+        // 6b. Self-defense exception tests:
+        //     - In FilterNativeCombatTarget: enemy at (100, 92) is 12 sub-tiles from anchor (100, 80) (> 6.0 MeleeHoldEngageRadius).
+        //       If mercenary is at (100, 90), enemy is only 2 sub-tiles away (<= 3.5 self-defense radius) -> target allowed!
+        mercPath[1] = 100;
+        mercPath[3] = 90;
+        assert(companionai::FilterNativeCombatTarget(0x20000, mercUnitPtr, reinterpret_cast<uintptr_t>(enemyUnit)) == reinterpret_cast<uintptr_t>(enemyUnit));
+
+        //     - In TryOverrideCombatTarget: when Moving (distToAnchor > ArrivalTolerance), combat target is normally suppressed (outTarget = 0).
+        //       If mercenary takes damage (animMode == 3 MONMODE_GETHIT), TryOverrideCombatTarget does NOT suppress (returns false), allowing self-defense!
+        mercPath[3] = 95; // dist 15 to anchor
+        uint32_t getHitMode = 3;
+        std::memcpy(mercUnit + 0xc, &getHitMode, sizeof(getHitMode));
+        uintptr_t hitTarget = 0x99999;
+        assert(!companionai::TryOverrideCombatTarget(0x20000, mercUnitPtr, hitTarget));
+        uint32_t walkMode = 1;
+        std::memcpy(mercUnit + 0xc, &walkMode, sizeof(walkMode));
+
+        // 7. Archetype-aware PrioritizeEnemy for RangedOverwatch (Act 1 Rogue classId = 271):
+        //    Engages from stand-off distance (10..14 sub-tiles) without closing into < 4 sub-tile panic-flee range
+        TacticalOrder rangedAtk{};
+        rangedAtk.type = TacticalOrderType::PrioritizeEnemy;
+        rangedAtk.targetUnitId = 777;
+        rangedAtk.targetPos = { 100.0f, 80.0f };
+        // Rogue at (100, 91) is 11 sub-tiles away -> already inside [5.0, 14.0] ranged firing window -> immediately Arrived!
+        assert(companionai::g_tacticalOrderController.IssueOrder(rangedAtk, 5000, { 100.0f, 91.0f }, { 100.0f, 100.0f }, cue, false, 100.0f, 100.0f, Archetype::RangedOverwatch));
+        assert(companionai::g_tacticalOrderController.GetState() == TacticalCommandState::Arrived);
+        // Rogue at (100, 100) is 20 sub-tiles away (> 14.0) -> walks to stand-off point (100, 90) (10 sub-tiles from enemy), NOT (100, 80)!
+        assert(companionai::g_tacticalOrderController.IssueOrder(rangedAtk, 6000, { 100.0f, 100.0f }, { 100.0f, 100.0f }, cue, false, 100.0f, 100.0f, Archetype::RangedOverwatch));
+        assert(companionai::g_tacticalOrderController.Evaluate({ 100.0f, 100.0f }, { 100.0f, 100.0f }, 6000, false, evalTarget, cue, 100.0f, 100.0f, Archetype::RangedOverwatch));
+        assert(std::fabs(evalTarget.x - 100.0f) < 1e-3f);
+        assert(std::fabs(evalTarget.y - 90.0f) < 1e-3f);
+
+        // Rogue arrives at (100, 90) -> Arrived
+        assert(!companionai::g_tacticalOrderController.Evaluate({ 100.0f, 90.0f }, { 100.0f, 100.0f }, 6200, false, evalTarget, cue, 100.0f, 100.0f, Archetype::RangedOverwatch));
+        assert(companionai::g_tacticalOrderController.GetState() == TacticalCommandState::Arrived);
+
+        // While in optimal firing window, native AI walk/run towards the prioritized monster is suppressed
+        const uint32_t rogueHeader[4] = { 1, 271, 12345, 1 };
+        std::memcpy(mercUnit, rogueHeader, sizeof(rogueHeader));
+        mercPath[1] = 100;
+        mercPath[3] = 90;
+        const int preWalkCalls = origServerMoveUnitCalls;
+        assert(companionai::DetourServerMoveUnit(0x20000, reinterpret_cast<uintptr_t>(mercUnit), reinterpret_cast<uintptr_t>(enemyUnit), 2, 100, 80, 1, 0) == 1);
+        assert(origServerMoveUnitCalls == preWalkCalls); // Suppressed: archer does NOT close into melee contact!
+
+        // Kiting: Enemy moves into melee (dist < RangedMinStandOff = 5.0f, e.g. Rogue at (100, 83) is 3 sub-tiles from enemy at (100, 80))
+        // Evaluate must transition back to Moving and compute kite destination keeping 10 sub-tiles stand-off!
+        assert(companionai::g_tacticalOrderController.Evaluate({ 100.0f, 83.0f }, { 100.0f, 100.0f }, 6500, false, evalTarget, cue, 100.0f, 100.0f, Archetype::RangedOverwatch));
+        assert(companionai::g_tacticalOrderController.GetState() == TacticalCommandState::Moving);
+        assert(std::fabs(evalTarget.x - 100.0f) < 1e-3f);
+        assert(std::fabs(evalTarget.y - 90.0f) < 1e-3f);
+
+        // If issued when Rogue is already too close to a new target (e.g. at (100, 82), dist 2.0 < 5.0), must NOT mark Arrived!
+        TacticalOrder closeEnemyAtk = rangedAtk;
+        closeEnemyAtk.targetUnitId = 778;
+        assert(companionai::g_tacticalOrderController.IssueOrder(closeEnemyAtk, 6600, { 100.0f, 82.0f }, { 100.0f, 100.0f }, cue, false, 100.0f, 100.0f, Archetype::RangedOverwatch));
+        assert(companionai::g_tacticalOrderController.GetState() == TacticalCommandState::Requested);
+
+        // 8. Near-obstacle arrival snap (<= 4.5 sub-tiles when A* stops at obstacle edge)
+        TacticalOrder wallOrder{};
+        wallOrder.type = TacticalOrderType::MoveAndHold;
+        wallOrder.targetPos = { 100.0f, 80.0f };
+        assert(companionai::g_tacticalOrderController.IssueOrder(wallOrder, 7000, { 100.0f, 95.0f }, { 100.0f, 100.0f }, cue));
+        assert(companionai::g_tacticalOrderController.Evaluate({ 100.0f, 95.0f }, { 100.0f, 100.0f }, 7000, false, evalTarget, cue));
+        assert(companionai::g_tacticalOrderController.GetState() == TacticalCommandState::Moving);
+        assert(companionai::g_tacticalOrderController.SnapArrivedIfNearObstacle({ 100.0f, 83.7f }, 7500)); // dist = 3.7 <= 4.5
+        assert(companionai::g_tacticalOrderController.GetState() == TacticalCommandState::Arrived);
+
+        companionai::CancelTacticalOrder();
+        assert(companionai::g_pendingRegroupMove.load());
+        companionai::g_pendingRegroupMove.store(false);
+
+        // 9. World Subtile Position Getters for VR raycasting and leash threshold
+        float hx = 0.0f, hy = 0.0f;
+        companionai::g_lastHirelingPosX.store(150.5f);
+        companionai::g_lastHirelingPosY.store(250.25f);
+        assert(companionai::GetHirelingWorldSubtilePos(hx, hy));
+        assert(std::fabs(hx - 150.5f) < 1e-3f && std::fabs(hy - 250.25f) < 1e-3f);
+
+        float px = 0.0f, py = 0.0f;
+        companionai::g_lastPlayerPosX.store(140.0f);
+        companionai::g_lastPlayerPosY.store(240.0f);
+        assert(companionai::GetPlayerWorldSubtilePos(px, py));
+        assert(std::fabs(px - 140.0f) < 1e-3f && std::fabs(py - 240.0f) < 1e-3f);
+
+        // 10. Regression Coverage: MoveAndHold & DefensiveHold combat deadlock prevention
+        //     Verifies enemy in/out of range before and after arrival, attack execution while holding,
+        //     and resuming hold afterward for both RangedOverwatch and MeleeVanguard.
+        {
+            // Reset state
+            companionai::CancelTacticalOrder();
+            companionai::g_pendingRegroupMove.store(false);
+
+            // A) RangedOverwatch (Act 1 Rogue, class 271) under MoveAndHold
+            const uint32_t rogueHdr[4] = { 1, 271, 12345, 1 };
+            std::memcpy(mercUnit, rogueHdr, sizeof(rogueHdr));
+            mercPath[1] = 100;
+            mercPath[3] = 100;
+
+            TacticalOrder holdOrder{};
+            holdOrder.type = TacticalOrderType::MoveAndHold;
+            holdOrder.targetPos = { 100.0f, 80.0f };
+
+            // Issue order: Requested -> Moving
+            assert(companionai::g_tacticalOrderController.IssueOrder(holdOrder, 8000, { 100.0f, 100.0f }, { 100.0f, 100.0f }, cue));
+            assert(companionai::g_tacticalOrderController.Evaluate({ 100.0f, 100.0f }, { 100.0f, 100.0f }, 8000, false, evalTarget, cue));
+            assert(companionai::g_tacticalOrderController.GetState() == TacticalCommandState::Moving);
+
+            // Before arrival (dist = 20.0 > ArrivalTolerance):
+            // Enemy in range (anchor distance 15.0 <= 24.0)
+            enemyPath[1] = 100;
+            enemyPath[3] = 65;
+            uintptr_t targetBefore = 0x99999;
+            assert(companionai::TryOverrideCombatTarget(0x20000, mercUnitPtr, targetBefore));
+            assert(targetBefore == 0); // Suppressed during transit so companion walks to destination uninterrupted
+
+            // Mercenary walks to anchor: arrives at (100.0, 80.5), dist = 0.5 <= ArrivalTolerance
+            mercPath[1] = 100;
+            mercPath[3] = 80;
+            assert(!companionai::g_tacticalOrderController.Evaluate({ 100.0f, 80.5f }, { 100.0f, 100.0f }, 8500, false, evalTarget, cue));
+            assert(companionai::g_tacticalOrderController.GetState() == TacticalCommandState::Arrived);
+
+            // After arrival:
+            // 1) Enemy in range: enemy at (100, 65), anchor distance = 15.0 <= 24.0 (RangedHoldEngageRadius)
+            int preCombatCalls = origServerMoveUnitCalls;
+            assert(companionai::DetourServerMoveUnit(0x20000, mercUnitPtr, reinterpret_cast<uintptr_t>(enemyUnit), 4 /* MONMODE_ATTACK1 */, 100, 65, 1, 0) == 1);
+            assert(origServerMoveUnitCalls == preCombatCalls + 1); // Allowed! Bow attack dispatched!
+
+            // 2) Enemy out of range: enemy at (100, 50), anchor distance = 30.0 > 24.0 (RangedHoldEngageRadius)
+            enemyPath[3] = 50;
+            preCombatCalls = origServerMoveUnitCalls;
+            assert(companionai::DetourServerMoveUnit(0x20000, mercUnitPtr, reinterpret_cast<uintptr_t>(enemyUnit), 4 /* MONMODE_ATTACK1 */, 100, 50, 1, 0) == 1);
+            assert(origServerMoveUnitCalls == preCombatCalls); // Suppressed! Distant enemy outside engagement radius rejected!
+
+            // 3) Companion remains in Arrived state after attack
+            assert(companionai::g_tacticalOrderController.GetState() == TacticalCommandState::Arrived);
+            assert(companionai::g_tacticalOrderController.IsActive());
+
+            // B) MeleeVanguard (Act 2 Desert Mercenary, class 338) under DefensiveHold
+            companionai::CancelTacticalOrder();
+            companionai::g_pendingRegroupMove.store(false);
+
+            const uint32_t meleeHdr[4] = { 1, 338, 12345, 1 };
+            std::memcpy(mercUnit, meleeHdr, sizeof(meleeHdr));
+            mercPath[1] = 100;
+            mercPath[3] = 100;
+
+            TacticalOrder defHold{};
+            defHold.type = TacticalOrderType::DefensiveHold;
+            defHold.targetPos = { 100.0f, 100.0f };
+
+            assert(companionai::g_tacticalOrderController.IssueOrder(defHold, 9000, { 100.0f, 100.0f }, { 100.0f, 100.0f }, cue));
+            assert(companionai::g_tacticalOrderController.GetState() == TacticalCommandState::Arrived);
+
+            // 1) Enemy in melee engagement range: enemy at (100, 104), distance = 4.0 <= 6.0 (MeleeHoldEngageRadius)
+            enemyPath[1] = 100;
+            enemyPath[3] = 104;
+            preCombatCalls = origServerMoveUnitCalls;
+            assert(companionai::DetourServerMoveUnit(0x20000, mercUnitPtr, reinterpret_cast<uintptr_t>(enemyUnit), 4 /* MONMODE_ATTACK1 */, 100, 104, 1, 0) == 1);
+            assert(origServerMoveUnitCalls == preCombatCalls + 1); // Allowed melee attack!
+
+            // Stepping toward hostile in range is also allowed for MeleeVanguard
+            preCombatCalls = origServerMoveUnitCalls;
+            assert(companionai::DetourServerMoveUnit(0x20000, mercUnitPtr, reinterpret_cast<uintptr_t>(enemyUnit), 15 /* step walk */, 100, 104, 1, 0) == 1);
+            assert(origServerMoveUnitCalls == preCombatCalls + 1); // Allowed step toward enemy!
+
+            // 2) Enemy outside melee engagement range: enemy at (100, 110), distance = 10.0 > 6.0
+            enemyPath[3] = 110;
+            preCombatCalls = origServerMoveUnitCalls;
+            assert(companionai::DetourServerMoveUnit(0x20000, mercUnitPtr, reinterpret_cast<uintptr_t>(enemyUnit), 4 /* MONMODE_ATTACK1 */, 100, 110, 1, 0) == 1);
+            assert(origServerMoveUnitCalls == preCombatCalls); // Suppressed! Outside melee radius!
+
+            // 3) Companion resumes holding at anchor afterward
+            assert(companionai::g_tacticalOrderController.GetState() == TacticalCommandState::Arrived);
+            assert(companionai::g_tacticalOrderController.IsActive());
+
+            companionai::CancelTacticalOrder();
+            companionai::g_pendingRegroupMove.store(false);
+        }
     }
 
     return 0;

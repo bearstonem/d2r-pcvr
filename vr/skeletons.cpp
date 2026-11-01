@@ -41,6 +41,7 @@
 #include "../steamvr/profile.h"
 #include "../steamvr/guarded_text.h"
 #include "../steamvr/shapeshift_form.h"
+#include "../steamvr/head_shadow.h"
 #include "sigscan.h"
 #include <memory>
 #include <unordered_map>
@@ -2529,6 +2530,11 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
     // First person: the head and the neck shrink into a point at the neck's
     // base, so a camera at the eyes sees out instead of the inside of the skull,
     // and looking down sees the chest, not a neck.
+    // [arms] head_shadow (full body): the head stays whole, so the hero's shadow has one,
+    // while the eye views cut it away instead (steamvr/head_shadow.h; not in a shapeshift form).
+    if (in.hideHead && in.headShadow && h.head >= 0)
+        in.hideHead = headshadow::HideHead(h.form != 0, reinterpret_cast<const float*>(newW.data()), h.inNeck.data(), n,
+                                           in.haveEye ? in.eyeModel : nullptr, upm * 0.01f);
     if (in.hideHead && h.head >= 0) {
         const V3 p = Pos(newW[h.neck >= 0 ? h.neck : h.head]);
         for (int i = 0; i < n; ++i) if (h.inNeck[i]) {

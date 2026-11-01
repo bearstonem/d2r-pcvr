@@ -147,8 +147,10 @@ stabs. The old `attack_speed` INI key does not select Classic; choose it here.
 **Unleashed swing damage:** every stroke that connects lands, but how hard it
 hits depends on your character. Your attack rating against the monster's
 defense scales the damage (the game's own hit chance, 5-95%), and so does your
-rhythm: a stroke before your attack speed has recovered hits much weaker, so
-measured swings beat flailing. Faster attack speed (IAS) shortens the wait.
+rhythm: your attack speed sets a fixed beat. A stroke on the beat (a full cycle
+after your last full hit) hits fully; strokes in between hit much weaker but never
+delay the next beat, so measured swings beat flailing. Faster attack speed (IAS)
+shortens the beat.
 One stroke can hit several monsters, each further one a little weaker.
 On-hit effects (life and mana leech, critical and deadly strike, crushing blow,
 open wounds, chance to cast and the like) come only from a stroke made after
@@ -533,6 +535,7 @@ not convert it into a context-click.
 | LT / RT | Left Trigger / Right Trigger | Left Trigger / Right Trigger |
 | Menu / Start, where available to the game | Controller menu button | Controller menu button |
 | Advanced Stats (the game's View in the tabbed menu) | Laser + trigger on the stone stats button below the menu's hint row | Laser + trigger on the stone stats button below the menu's hint row |
+| Reset Skills & Stats (offline) | Laser + trigger twice on the Character page's **Reset Skills & Stats** button | Laser + trigger twice on the Character page's **Reset Skills & Stats** button |
 
 Quest and most VR controllers have no View button (the menu buttons belong to
 the headset), so the
@@ -540,6 +543,15 @@ tabbed menu (on the leather or the room panel alike) carries its own Advanced
 Stats button: a small stone badge with three gold bars just below the menu's
 hint row. Point the laser at it (it lights) and pull the trigger: the game gets
 one View press, as from an Xbox pad, and opens or closes Advanced Stats. It is not shown with the cube, the stash, merchants or other panels.
+
+The Character page also carries a stone **Reset Skills & Stats** button in its
+lower right, in offline games. Pull the trigger on it once and it asks
+**Confirm?** (with no time limit; leaving the page or closing the menu takes the
+question back); pull again and the game resets every stat and skill point, as a
+Token of Absolution does. It is free, works as often as you like and leaves
+Akara's own reset untouched. It needs one free inventory square for a moment
+(the button says so if there is none) and does nothing for Classic characters
+or in TCP/IP games.
 
 Native menu actions use the same buttons in the main menu, tabbed menu, stash,
 inventory and merchant panels. **Inside a native menu, left primary performs the displayed X action.**

@@ -210,6 +210,8 @@ void Draw(Painter& p,const Layout& l,bool monoAudio){
                 break;
             case Role::ColorDot:p.Dot(r,e.hue,s);break;
             case Role::PopoverHint:p.TextFit(e.text,TextStyle::Help,r,Color::TipBody,Align::Center,true);break;
+            case Role::PopoverLabel:p.Label(r,e.text,"",s,Icon::None,Color::Quiet);break;   // a Filter card's switch word (its ember when changed)
+            case Role::PopoverSwitch:p.Toggle(r,e.Has(Selected),s);break;
             default:break;   // unused roles (Slider, Swatch, FooterRecenter, PresetLine) and calibration's
         }
     }
@@ -291,6 +293,7 @@ std::vector<std::string> FitProblems(const layout::Layout& l){
             case Role::PopoverTitle:shrinks(e,e.text,TextStyle::CardTitle,r,false,"popover title");break;
             case Role::PopoverOption:line(e,e.text,e.Has(Selected)?TextStyle::Strong:TextStyle::Value,r.w-16,"popover option");break;
             case Role::PopoverHint:shrinks(e,e.text,TextStyle::Help,r,true,"popover hint");break;
+            case Role::PopoverLabel:line(e,e.text,TextStyle::Label,r.w-(e.Has(layout::Changed)?56.f:0.f),"filter switch");break;
             case Role::StatusStrip:shrinks(e,e.text,TextStyle::Value,r,false,"status");break;
             default:break;
         }
@@ -385,6 +388,13 @@ std::vector<PreviewShot> PreviewShots(){
         Setup g=base(View::Targets,-1,s);g.m.popoverKey=HighlightRight;g.m.popoverAt=now-1000;g.in.hover={Kind::Set,HighlightRight,0,210};g.in.card=HighlightRight;add("color-grid",g);
         Setup l=base(View::Targets,heroclass::Amazon,s);l.m.popoverKey=BowLaser;l.m.popoverAt=now-1000;l.in.card=BowLaser;add("color-grid-arrow-path",l);
         Setup b=base(View::Targets,-1,s);b.m.popoverKey=HighlightLeft;b.m.popoverAt=now-1000;b.in.hover={Kind::Set,HighlightLeft,0,0};b.in.card=HighlightLeft;add("color-grid-by-range",b);
+    }
+    {   // Loot beams: one row, its slider (70%) and Filter button, and its card of four switches open (Rare Off, Set pointed).
+        Snapshot s;s.values[LootBeamRare]=0;
+        s.values[LootBeamBrightness]=70;
+        Setup row=base(View::Interface,-1,s);row.in.hover={Kind::Popover,LootBeamBrightness};row.in.card=LootBeamBrightness;add("interface-loot-beams",row);
+        Setup card=base(View::Interface,-1,s);card.m.popoverKey=LootBeamBrightness;card.m.popoverAt=now-1000;
+        card.in.hover={Kind::Set,LootBeamSet,0,0};card.in.card=LootBeamBrightness;add("loot-beams-filter",card);
     }
     {   // Frame generation (main's #313): its row on Performance; NVIDIA's quality and scale on More while NVIDIA is chosen.
         // Active needs Both eyes (By turns hides the row, #343); the readout shows main's note, not the numbers (#342).

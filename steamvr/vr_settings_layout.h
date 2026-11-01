@@ -172,6 +172,8 @@ enum class Role : uint8_t {
     PopoverOption,  // one option: hit Set, drawn as a chip; its hit box is the whole cell
     PopoverHint,    // the pointed (else the chosen) option's hint, at the bottom
     ColorDot,       // a color popover's hue: hit Set, hue the dot's; drawn 46 px in its 66 px cell (its hit box)
+    PopoverLabel,   // a Filter card's line: its switch's word (Loot beams: Unique, Set, Rare, Runes)
+    PopoverSwitch,  // that line's On / Off pill: hit Set on its own setting, the whole line its hit box; the card stays open
     Count
 };
 
@@ -317,7 +319,7 @@ constexpr int MaxViewRows=8;
 // A view's rows in order: at most MaxViewRows slabs, each followed by the toggle
 // drawn beside it (ContentRow::beside, Movement speed's Stick toggle) when it has one.
 struct ViewRows {
-    std::array<Key,MaxViewRows*2> keys{};
+    std::array<Key,MaxViewRows*4> keys{};   // slabs, the toggles beside them and the switches in their Filter cards
     int count=0;
 };
 // Whether a row shows now: its rule, its class, and an offer (Defer GPU wait)
@@ -327,9 +329,9 @@ inline bool RowVisible(const content::ContentRow& r,const Values& values,const C
     return RowShown(r.key,values,context)&&content::ForCharacter(r,context);
 }
 // Every row (slab) the view would show, uncapped (the tests check it stays <= 8);
-// a toggle drawn beside the row before it adds none.
+// a toggle drawn beside the row before it, or a switch in its Filter card, adds none.
 inline int CountRows(View view,const Values& values,const Context& context,const Tables& t=ContentTables()){
-    int n=0;for(size_t i=0;i<t.rowCount;++i)if(t.rows[i].page==view&&!t.rows[i].beside&&RowVisible(t.rows[i],values,context))++n;
+    int n=0;for(size_t i=0;i<t.rowCount;++i)if(t.rows[i].page==view&&!t.rows[i].beside&&!t.rows[i].inFilter&&RowVisible(t.rows[i],values,context))++n;
     return n;
 }
 // skip: the visible slabs before this page of a paged view (More: Model::morePage x MaxViewRows).
@@ -339,7 +341,7 @@ inline ViewRows RowsOf(View view,const Values& values,const Context& context,con
     for(size_t i=0;i<t.rowCount;++i){
         const auto& r=t.rows[i];
         if(r.page!=view)continue;
-        if(r.beside){if(took&&RowVisible(r,values,context))list.keys[size_t(list.count++)]=r.key;continue;}
+        if(r.beside||r.inFilter){if(took&&RowVisible(r,values,context))list.keys[size_t(list.count++)]=r.key;continue;}   // with its slab (Reset page takes them too)
         took=false;
         if(!RowVisible(r,values,context)||skip-->0||slabs>=MaxViewRows)continue;
         list.keys[size_t(list.count++)]=r.key;++slabs;took=true;
@@ -365,6 +367,42 @@ inline void SettleView(Model& m,const Tables& t=ContentTables()){
 // Whether a key's row shows now in its own view.
 inline bool KeyVisible(Key key,const Values& values,const Context& context,const Tables& t=ContentTables()){
     const auto* r=t.Row(key);return r&&RowVisible(*r,values,context);
+}
+// A Filter row's card (content::RowKind::Filter, Loot beams): the inFilter rows after it,
+// in content order. The row's own setting is its slider, not in the card. Not a Filter row: none.
+struct FilterSwitches {
+    std::array<const content::ContentRow*,6> rows{};
+    int count=0;
+    bool Has(int key)const{for(int i=0;i<count;++i)if(int(rows[size_t(i)]->key)==key)return true;return false;}
+};
+inline FilterSwitches FilterOf(Key head,const Tables& t=ContentTables()){
+    FilterSwitches f;
+    for(size_t i=0;i<t.rowCount;++i){
+        if(t.rows[i].key!=head)continue;
+        if(t.rows[i].kind!=content::RowKind::Filter)return f;
+        for(size_t j=i+1;j<t.rowCount&&t.rows[j].inFilter&&f.count<int(f.rows.size());++j)f.rows[size_t(f.count++)]=&t.rows[j];
+        return f;
+    }
+    return f;
+}
+// The Filter row whose card holds this switch, or nullptr (also for the Filter row's own setting).
+inline const content::ContentRow* FilterHead(Key key,const Tables& t=ContentTables()){
+    for(size_t i=0;i<t.rowCount;++i){
+        if(t.rows[i].key!=key)continue;
+        if(!t.rows[i].inFilter)return nullptr;
+        for(size_t j=i;j-->0;)if(t.rows[j].kind==content::RowKind::Filter)return &t.rows[j];else if(!t.rows[j].inFilter)return nullptr;
+        return nullptr;
+    }
+    return nullptr;
+}
+// A switch's word in its card: its label (14 characters at most).
+inline const char* SwitchWord(const content::ContentRow& r){return r.label;}
+// What a Filter row shows now: the words of its switches that are On ("Unique, Set, Rare,
+// Runes"), or "Off: none" when every one is Off.
+inline std::string FilterSummary(Key head,const Values& values,const Tables& t=ContentTables()){
+    const FilterSwitches f=FilterOf(head,t);std::string s;
+    for(int i=0;i<f.count;++i)if(values[f.rows[size_t(i)]->key]>.5f){if(!s.empty())s+=", ";s+=SwitchWord(*f.rows[size_t(i)]);}
+    return s.empty()?std::string("Off: none"):s;
 }
 
 // Busy (saving) or not ready: no control that changes a value takes presses;
@@ -670,7 +708,7 @@ struct Builder {
                     for(const auto& o:OptionsOf(r,v,c))fit(o.label,0);
                     if(r.optionCount==0)fit(ValueOf(r,v,c),0);
                     break;
-                case content::RowKind::Stepper:case content::RowKind::Slider:case content::RowKind::Swatch:{
+                case content::RowKind::Stepper:case content::RowKind::Slider:case content::RowKind::Swatch:case content::RowKind::Filter:{
                     const float extra=r.kind==content::RowKind::Swatch?44.f:0.f;
                     if(r.kind==content::RowKind::Swatch){for(const char* name:content::HueNames)fit(name,extra);for(int i=0;i<r.nameCount;++i)fit(r.names[i].label,extra);}
                     fit(ValueOf(r,v,c),extra);fit(ValueOf(r,d.min,c),extra);fit(ValueOf(r,d.defaultValue,c),extra);
@@ -715,9 +753,13 @@ struct Builder {
     void Row(const content::ContentRow& r,int y,int pitch,int vw,const content::ContentRow* beside=nullptr){
         const Key k=r.key;const auto& d=Definitions[k];const float v=m.Get()[k];
         const int bw=beside?BesideWidth(*beside):0;
-        const int ctlH=pitch>=PitchRoomy?66:64,cy=y+(pitch-ctlH)/2,right=ContentRight-RowPad-(beside?bw+PairGap:0);
+        const FilterSwitches filter=FilterOf(k,t);   // a Filter row: its slider, then the Filter button opening its card (Loot beams)
+        const bool filterRow=r.kind==content::RowKind::Filter;
+        const int fw=filterRow?std::max(ToggleW,int(std::ceil(W("Filter",draw::TextStyle::Value)))+48):0;
+        const int ctlH=pitch>=PitchRoomy?66:64,cy=y+(pitch-ctlH)/2,right=ContentRight-RowPad-(beside?bw+PairGap:0)-(filterRow?fw+PairGap:0);
         const char* locked=LockReason(m,k);
-        const bool live=!blocked&&!locked,dirty=Dirty(k),rowDirty=dirty||(beside&&Dirty(beside->key));
+        bool filterDirty=false;for(int i=0;i<filter.count;++i)filterDirty=filterDirty||Dirty(filter.rows[size_t(i)]->key);
+        const bool live=!blocked&&!locked,dirty=Dirty(k),rowDirty=dirty||filterDirty||(beside&&Dirty(beside->key));
         std::vector<Element> controls;
         auto control=[&](Role role,Rect rect,Hit hit,uint16_t flags,std::string text={},std::string sub={})->Element&{
             Element e;e.rect=rect;e.role=role;e.hit=hit;e.help=k;e.key=k;e.flags=flags;e.text=std::move(text);e.sub=std::move(sub);
@@ -784,6 +826,8 @@ struct Builder {
             }
             control(Role::StepPlus,{vx+vw+StepGap,cy,StepW,ctlH},{Kind::Change,k,1},uint16_t((live&&canUp?Enabled:0)|Repeat|(locked?Locked:0)));
         }
+        if(filterRow)   // right of its slider: the Filter button opens the card of its switches (FilterPopover)
+            control(Role::Button,{right+PairGap,cy,fw,ctlH},{Kind::Popover,k},uint16_t((live?Enabled:0)|(filterDirty?Changed:0)|(locked?Locked:0)),"Filter");
         if(beside){   // its own setting, help card and lock; a press flips a toggle, or opens a number's steps
             const Key b=beside->key;const float bv=m.Get()[b];
             const char* bLocked=LockReason(m,b);
@@ -803,6 +847,7 @@ struct Builder {
         }
         uint16_t labelFlags=rowDirty&&r.kind!=RowKind::Button?Changed:0;
         std::string sub=SubLine(r,locked,labelFlags);
+        if(sub.empty()&&r.kind==RowKind::Filter)sub=FilterSummary(k,m.Get(),t);   // which switches are On
         auto& slab=Add(Role::Row,{ContentX,y,ContentW,pitch},{},k,rowDirty?Changed:0);slab.key=k;
         if(std::isfinite(r.recommended)&&!Same(v,r.recommended)&&!locked){slab.flags|=Recommended;labelFlags|=Recommended;slab.sub="Recommended: "+ValueOf(r,r.recommended,c);}
         const int lx=ContentX+RowPad;
@@ -872,6 +917,7 @@ struct Builder {
             const auto* r=t.Row(shown.keys[size_t(i)]);
             if(r->kind==content::RowKind::Offer){offer=r;continue;}
             if(r->beside){if(!rows.empty())rows.back().beside=r;continue;}
+            if(r->inFilter)continue;   // a switch in the Filter card of the row before it
             rows.push_back({r,r->section});
         }
         int sections=0;for(size_t i=0;i<rows.size();++i)if(i==0||rows[i].section!=rows[i-1].section)if(t.Section(m.view,rows[i].section))++sections;
@@ -994,6 +1040,7 @@ struct Builder {
     std::string OldNew(Key k,float from,float to)const{
         const auto* r=t.Row(k);
         if(!r)return std::string(Definitions[k].label)+": "+Printf("%g",double(from))+Arrow+Printf("%g",double(to));
+        if(const auto* head=FilterHead(k,t))return std::string(LabelOf(*head,c))+" ("+SwitchWord(*r)+"): "+ValueOf(*r,from,c)+Arrow+ValueOf(*r,to,c);   // Loot beams (Set): On -> Off
         return std::string(LabelOf(*r,c))+": "+ValueOf(*r,from,c)+Arrow+ValueOf(*r,to,c);
     }
     std::string HiddenTag(Key k)const{
@@ -1054,6 +1101,27 @@ struct Builder {
         s.title=r?LabelOf(*r,c):HelpTitle(k);
         std::string help=RowHelp(k);
         if(!r||r->kind==content::RowKind::Button){s.text=help;return s;}
+        if(r->kind==content::RowKind::Filter){   // the whole row's subject: its slider and the switches in its card
+            s.text=help;
+            const FilterSwitches f=FilterOf(k,t);
+            bool dirty=Dirty(k);for(int i=0;i<f.count;++i)dirty=dirty||Dirty(f.rows[size_t(i)]->key);
+            // "70%, Unique, Set, Runes"; in the button column "all On" / "all Off" when every switch is alike
+            auto full=[&](const Values& vs){return ValueOf(*r,vs[k],c)+", "+FilterSummary(k,vs,t);};
+            auto brief=[&](const Values& vs){int on=0;for(int i=0;i<f.count;++i)on+=vs[f.rows[size_t(i)]->key]>.5f;
+                                             return ValueOf(*r,vs[k],c)+", "+(on==f.count?std::string("all On"):on==0?std::string("all Off"):FilterSummary(k,vs,t));};
+            Values defaults=m.Get();defaults[k]=d.defaultValue;bool atDefault=Same(v,d.defaultValue);
+            for(int i=0;i<f.count;++i){const Key key=f.rows[size_t(i)]->key;defaults[key]=Definitions[key].defaultValue;atDefault=atDefault&&Same(m.Get()[key],defaults[key]);}
+            const std::string now=full(m.Get());
+            if(LockReason(m,k)){s.titleFlags=Locked;s.stateFlags=Locked;s.state="Locked. Now: "+now;return s;}
+            if(dirty){s.titleFlags=Changed;s.stateFlags=Changed;s.state="Not applied. Applied: "+full(m.Applied());s.shortState="Applied: "+brief(m.Applied());}
+            else if(!atDefault){s.titleFlags=Selected;s.state="Now: "+now+". Default: "+brief(defaults);s.shortState="Default: "+brief(defaults);}
+            else s.state=in.hover.kind==Kind::Popover&&in.hover.index==k?"Now: "+now+". Press to choose":"Now: "+now;
+            // Undo and Default take the slider and every switch in the card at once (Press)
+            if(dirty){const std::string was=brief(m.Applied());s.buttons.push_back({{"Undo: back to "+was,"Undo: "+was,"Undo"},{Kind::Undo,k},draw::Icon::Undo,Armed(),1});}
+            if(!atDefault){const std::string def=brief(defaults);
+                s.buttons.push_back({{std::string(LabelOf(*r,c))+" to "+def,"Default: "+def,"Default"},{Kind::Default,k},draw::Icon::Default,Armed()&&Editable(m,k),2});}
+            return s;
+        }
         // A pointed chip: its hint, and whether it is chosen.
         if(in.hover.kind==Kind::Set&&in.hover.index==k&&r->kind!=content::RowKind::Toggle&&r->kind!=content::RowKind::Offer){
             StepList steps;const auto options=ListOf(*r,v,c,steps);const int i=OptionIndex(options,in.hover.value);
@@ -1409,6 +1477,7 @@ struct Builder {
         const Key k=Key(m.popoverKey);const auto* r=t.Row(k);
         if(!r||out.popoverRow.w<=0)return;
         if(r->kind==content::RowKind::Swatch){ColorPopover(*r);return;}
+        if(r->kind==content::RowKind::Filter){FilterPopover(*r);return;}
         const float v=m.Get()[k];const auto& d=Definitions[k];
         StepList steps;const auto options=ListOf(*r,v,c,steps);const int n=int(options.size());
         if(n<1)return;
@@ -1453,6 +1522,41 @@ struct Builder {
         const Rect row=out.popoverRow;
         const int below=row.y+row.h+PopGap,above=row.y-PopGap-h,bottom=RegionEnd();
         return below+h<=bottom?below:above>=ViewTop?above:(bottom-below>row.y-ViewTop?bottom-h:ViewTop);
+    }
+    // A Filter row's card (Loot beams): one line a switch, its word at the left and an
+    // On / Off pill at the right; the whole line is the pill's hit box. A press flips that
+    // switch and the card stays open, so several can change; an outside press or Close
+    // closes it (Press). Every line's help is the Filter row's own card.
+    void FilterPopover(const content::ContentRow& r){
+        const Key k=r.key;const FilterSwitches f=FilterOf(k,t);const int n=f.count;
+        if(n<1)return;
+        int cellP=PopCell,titleH=PopTitleH,hintH=PopHintH;
+        auto heightFor=[&]{return PopPad*2+titleH+n*cellP+hintH;};
+        if(!PopoverFits(heightFor()))titleH=0;
+        if(!PopoverFits(heightFor())){cellP=PopCellMin;hintH=PopHintCompact;}
+        float widest=0;for(int i=0;i<n;++i)widest=std::max(widest,W(SwitchWord(*f.rows[size_t(i)]),draw::TextStyle::Label));
+        const int w=std::clamp(int(std::ceil(widest))+ToggleW+3*PopPad+48,PopMinW,ContentW),h=heightFor();
+        const Rect card{ContentRight-w,PopoverTop(h),w,h};
+        out.popover=card;
+        Add(Role::PopoverDim,PanelInner,{Kind::PopoverClose},k,Enabled);
+        Add(Role::Popover,card,{Kind::Card},k,Enabled);
+        if(titleH)Add(Role::PopoverTitle,{card.x+PopPad,card.y+PopPad,card.w-2*PopPad,titleH},{},k,0,LabelOf(r,c));
+        const int top=card.y+PopPad+titleH;const int drawnH=cellP-PopCellGap;
+        std::string hint="Turn each kind On or Off. All Off: no beams. Apply keeps it.";
+        for(int i=0;i<n;++i){
+            const auto& s=*f.rows[size_t(i)];const Key key=s.key;const float v=m.Get()[key];
+            const char* locked=LockReason(m,key);
+            const bool on=v>.5f&&!locked,armed=in.nowMs>=m.popoverAt+Model::PopoverGuardMs&&Editable(m,key);
+            const Rect cell{card.x+PopPad,top+i*cellP,card.w-2*PopPad,cellP};
+            auto& label=Add(Role::PopoverLabel,{cell.x+12,cell.y+PopCellGap/2,cell.w-ToggleW-36,drawnH},{},k,uint16_t(Dirty(key)?Changed:0),SwitchWord(s));
+            label.key=key;
+            const Hit hit{Kind::Set,key,0,on?0.f:1.f};
+            auto& e=Add(Role::PopoverSwitch,{cell.x+cell.w-12-ToggleW,cell.y+PopCellGap/2,ToggleW,drawnH},hit,k,
+                        uint16_t((armed?Enabled:0)|(on?Selected:0)|(Same(v,Definitions[key].defaultValue)?IsDefault:0)|(Dirty(key)?Changed:0)|(locked?Locked:0)),on?"On":"Off");
+            e.key=key;e.option=i;e.hitRect=cell;
+            if(in.hover==hit)hint=std::string(SwitchWord(s))+(on?": On. Press to turn it Off.":": Off. Press to turn it On.");
+        }
+        Add(Role::PopoverHint,{card.x+PopPad,card.y+card.h-PopPad-hintH,card.w-2*PopPad,hintH},{},k,0,hint);
     }
     // The color grid (a hue row): named values outside the hue wheel (By
     // range, Off) as full-width chips above, then every hue as a dot, 6 a row (8 when
@@ -1608,12 +1712,17 @@ inline Request Press(Model& model,const Hit& hit,uint64_t nowMs,const Tables& t=
     const bool keyOk=hit.index>=0&&hit.index<Count;
     // An open popover is modal: Right B (Close) and an outside press close it
     // without a change; a pick sets its row and closes it. Nothing else reaches the page.
+    // A Filter row's card (Loot beams) flips one switch a press and stays open.
     if(model.popoverKey>=0){
-        const bool pick=hit.kind==Kind::Set&&hit.index==model.popoverKey;
-        if(!pick&&hit.kind!=Kind::Card&&hit.kind!=Kind::TestHaptics){model.popoverKey=-1;++model.revision;return {};}
-        if(pick){
+        const FilterSwitches filter=FilterOf(Key(model.popoverKey),t);
+        const bool flip=filter.count>0&&hit.kind==Kind::Set&&filter.Has(hit.index);
+        const bool pick=!filter.count&&hit.kind==Kind::Set&&hit.index==model.popoverKey;
+        if(!pick&&!flip&&hit.kind!=Kind::Card&&hit.kind!=Kind::TestHaptics){model.popoverKey=-1;++model.revision;return {};}
+        if(pick||flip){
             if(nowMs<model.popoverAt+Model::PopoverGuardMs||!Editable(model,Key(hit.index)))return {};
-            SetValue(model,Key(hit.index),hit.value);model.popoverKey=-1;++model.revision;return {};
+            SetValue(model,Key(hit.index),hit.value);
+            if(pick)model.popoverKey=-1;
+            ++model.revision;return {};
         }
     }
     switch(hit.kind){
@@ -1649,9 +1758,17 @@ inline Request Press(Model& model,const Hit& hit,uint64_t nowMs,const Tables& t=
             SetValue(model,Key(hit.index),hit.value);return {};
         case Kind::Change:return keyOk?Step(model,hit,t):Request{};
         case Kind::Undo:
-            if(keyOk&&!Blocked(model))model.Set(Key(hit.index),model.Applied()[hit.index]);
+            if(keyOk&&!Blocked(model)){
+                const FilterSwitches f=FilterOf(Key(hit.index),t);   // a Filter row: every switch in its card too
+                for(int i=0;i<f.count;++i){const Key key=f.rows[size_t(i)]->key;model.Set(key,model.Applied()[key]);}
+                model.Set(Key(hit.index),model.Applied()[hit.index]);
+            }
             return {};
         case Kind::Default:
+            if(keyOk){
+                const FilterSwitches f=FilterOf(Key(hit.index),t);   // a Filter row: every switch in its card too
+                for(int i=0;i<f.count;++i){const Key key=f.rows[size_t(i)]->key;if(Editable(model,key))SetValue(model,key,Definitions[key].defaultValue);}   // and then the row's own
+            }
             if(keyOk&&!(t.Row(Key(hit.index))&&t.Row(Key(hit.index))->kind==content::RowKind::Offer)&&Editable(model,Key(hit.index)))SetValue(model,Key(hit.index),Definitions[hit.index].defaultValue);
             return {};
         case Kind::Preset:   // no preset applies until content::PresetsReady

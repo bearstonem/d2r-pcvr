@@ -8,6 +8,7 @@
 #include <vector>
 #include <atomic>
 #include <cstdio>
+#include <cstring>
 #include <mutex>
 #include "combat.h"
 #include "../steamvr/shield_debug.h"
@@ -110,6 +111,7 @@ ApplyDamageFn originalApplyDamage=nullptr;bool applyDamageIn=false;std::atomic<b
 // (melee.cpp), and inside its damage application with this record.
 constexpr uint32_t NoSwing=UINT32_MAX;
 thread_local uint32_t swingTarget=NoSwing;thread_local uintptr_t damageRecord=0;
+thread_local int damageFlag=-1;   // that application's 44CE80 flag: 0 melee, else missile/spell (-1 none)
 // Riposte: a parry opens a window for one stronger hit on the parried monster.
 std::atomic<float> riposteBonus{0};std::atomic<uint32_t> riposteMs{1500};
 std::atomic<uint32_t> riposteMonster{NoSwing};std::atomic<uint64_t> riposteUntil{0};
@@ -129,6 +131,8 @@ HitChanceFn originalHitChance=nullptr;bool hitChanceIn=false;
 std::atomic<bool> arDamage{false};std::atomic<float> arFloor{0};
 thread_local int swingChance=-1;     // this swing's native to-hit %, -1 = not seen
 thread_local float swingRecovery=1;  // this stroke's recovery factor (melee.cpp)
+thread_local bool swingFirst=true;   // this contact is its stroke's first creature (melee.cpp)
+thread_local bool swingClean=false;  // this swing's life write was a riposte's (a clean hit)
 std::atomic<unsigned> scaledHits{0},chanceUnseen{0};
 std::atomic<int> lastChance{-1};std::atomic<float> lastRecovery{1},lastFactor{1};
 // Unleashed on-hit gate (combat_rules.h OnHitGate; melee.cpp decides, around one
@@ -146,8 +150,12 @@ std::atomic<int> lastChance{-1};std::atomic<float> lastRecovery{1},lastFactor{1}
 //   to cast on striking 198) and domeleeattack (7: chance to cast on attack 195)
 //   fire through 44D570(game, event, unit, source, damage), from 44CE80 and the
 //   melee executor 44B2B0. Skill events of the player's on those two (Warlock
-//   Hex Bane/Siphon/Purge) are gated with them; the defender's (thorns,
-//   Life Tap...) are not.
+//   Hex Bane/Siphon/Purge) are gated with them; the defender's (thorns...) are
+//   not, except Life Tap's heal (below).
+// - Life Tap's heal (D2MOO EventFunc05 on the struck unit's damagedinmelee 1 /
+//   damagedbymissile 2: SetStat(striker,6,life+phys%)): while a gated stroke's
+//   struck events run (Trigger, tapScope), the striker's life may not rise
+//   (SetStat, combat_rules.h TapHealBlocked). Leech by another name.
 // - leech: 450C90 (only from 44CE80) reads the record's +0x120 life and +0x124
 //   mana leech (lifedrainmindam 60, manadrainmindam 62, skill leech): zeroed.
 // - prevent monster heal (117): inline in the hit check, state 52 applied by
@@ -192,6 +200,12 @@ using CurseFn=uintptr_t(*)(uintptr_t);
 TriggerFn originalTrigger=nullptr;CurseFn originalCurse=nullptr;
 bool triggerIn=false,curseIn=false,critGate=false,leechGate=false,defenseGate=false,onHitLogged=false;
 std::atomic<unsigned> gatedMeleeDamage{0},gatedMeleeAttack{0},gatedLeech{0},gatedCrits{0},gatedHeal{0},gatedDefense{0};
+// Life Tap: the player's struck events running on this thread (Trigger), and whether
+// that stroke is gated. Heals inside them are counted (passed) or refused (gated).
+struct TapScope {uintptr_t striker=0,struck=0;bool gated=false;};
+thread_local TapScope tapScope;
+std::atomic<unsigned> gatedTap{0},passedTap{0};
+bool hitReactions=false;   // ApplyDamage clears a quiet contact's reaction flags (Install)
 // Unleashed would-have-hit gate (Cal, 2026-10-22; combat_rules.h WouldHit). Every
 // forced contact - a monster's melee hit or missile on the local player
 // (enemies_always_hit) and the local player's physical swing - lands, and its
@@ -232,8 +246,9 @@ std::atomic<unsigned> gatedMeleeDamage{0},gatedMeleeAttack{0},gatedLeech{0},gate
 // life write still applies the factor once.
 // Critical and deadly strike are not gated: they multiply the damage the chance
 // already scales. Damage over time - poison (+0x38 rate, +0x3C length, the
-// +0x40 list; 4518C0) and burn (+0x24, +0x28; 451380) - is damage that never
-// reaches the scaled life write: scaled by the hit's factor on every contact.
+// +0x40 list; 4518C0) and burn (+0x24, +0x28; 451380) - is a state, not scaled
+// damage (Cal, 2026-10-30; combat_rules.h DamageOverTime): whole from a contact
+// that would have hit and isn't a gated stroke, cleared from any other.
 struct MissScope {uintptr_t attacker=0,defender=0;uint64_t at=0;bool missile=false;};
 thread_local MissScope missScope;                     // the would-miss attack running on this thread
 thread_local bool forcedCheck=false,forcedGate=false,forcedMissile=false;
@@ -241,7 +256,7 @@ thread_local int nativeHitRoll=-1,nativeHitChance=-1;   // this forced check's r
 thread_local int lastSwingVerdict=-1;                   // the latest forced swing check: 1 would hit, 0 would miss, -1 unknown
 thread_local int lastIncomingVerdict=-1;                // the same for the latest forced incoming hit (guard trace)
 thread_local uintptr_t damageDefender=0;
-std::atomic<unsigned> verdictInHit{0},verdictInMiss{0},verdictSwingHit{0},verdictSwingMiss{0},verdictShotHit{0},verdictShotMiss{0},verdictUnknown{0},dotScaled{0};
+std::atomic<unsigned> verdictInHit{0},verdictInMiss{0},verdictSwingHit{0},verdictSwingMiss{0},verdictShotHit{0},verdictShotMiss{0},verdictUnknown{0},dotCleared{0};
 std::atomic<unsigned> absorbScaled{0},shotScaled{0},shotUnseen{0};std::atomic<int> lastShotChance{-1};
 std::atomic<bool> shotRules{false};   // Unleashed: the player's arrows and throws follow the contact rules
 // The local player's latest forced missile hit (arrow, throw), for its life write.
@@ -252,6 +267,10 @@ thread_local ShotHit shotHit;
 // last swing (melee::ButtonHit) and, unless Smite, its attack rating. Consumed once.
 struct ButtonHit {uintptr_t attacker=0,defender=0;int chance=-1;float recovery=1;bool ar=true;uint64_t at=0;};
 thread_local ButtonHit buttonHit;
+// That trigger hit's recovery, kept past its life write for what follows it in the same
+// native attack (thorns, Iron Maiden, weapon wear): StrokeShare. Never consumed.
+struct ButtonShare {uintptr_t attacker=0,defender=0;float recovery=1;uint64_t at=0;};
+thread_local ButtonShare buttonShare;
 // A trigger hit inside a swing's cycle: its on-hit effects are off, for its own call chain
 // on this thread (the same window as the would-hit gate's), like a gated swing's.
 struct ButtonGate {uintptr_t attacker=0,target=0;uint64_t at=0;};
@@ -270,10 +289,13 @@ bool MissGatedDefender(uintptr_t defender);
 bool OnHitOff(uintptr_t attacker,uintptr_t target);
 bool OnHitOffAttacker(uintptr_t attacker);
 bool OnHitOffTarget(uintptr_t target);
-uint32_t Trigger(uintptr_t game,int event,uintptr_t unit,uintptr_t source,uintptr_t damage) {
+uint32_t MaidenOnly(uintptr_t game,uintptr_t player,uintptr_t monster,uintptr_t damage);
+uint32_t TriggerEvents(uintptr_t game,int event,uintptr_t unit,uintptr_t source,uintptr_t damage) {
     // domeleedamage / domeleeattack: unit = the attacker, source = its defender.
     if((event==DoMeleeDamage||event==DoMeleeAttack)&&OnHitOff(unit,source)) {
-        ++(event==DoMeleeDamage?gatedMeleeDamage:gatedMeleeAttack);return 0;
+        ++(event==DoMeleeDamage?gatedMeleeDamage:gatedMeleeAttack);
+        // Iron Maiden cursed on the player still returns this stroke's share (Cal, 2026-10-30).
+        return event==DoMeleeDamage?MaidenOnly(game,unit,source,damage):0;
     }
     // Absorb skills soak the forced contact's damage at its factor (unit = the struck unit).
     if(event==AbsorbDamage&&absorbReady&&damage)
@@ -301,6 +323,21 @@ uint32_t Trigger(uintptr_t game,int event,uintptr_t unit,uintptr_t source,uintpt
         }
     }
     return originalTrigger(game,event,unit,source,damage);
+}
+// The struck unit's damage events (1/2: unit = the struck unit, source = its striker)
+// when the striker is a player: Life Tap's heal runs inside them (SetStat). On a gated
+// stroke (OnHitOff) it is refused; otherwise only counted. Nested events keep their own scope.
+uint32_t Trigger(uintptr_t game,int event,uintptr_t unit,uintptr_t source,uintptr_t damage) {
+    uint32_t type=~0u;
+    if((event==DamagedInMelee||event==DamagedByMissile)&&setStatIn&&unit&&source&&
+       framevr::ReadMemory(&type,reinterpret_cast<const void*>(source),sizeof type)&&type==0) {
+        const TapScope outer=tapScope;
+        tapScope={source,unit,event==DamagedInMelee&&OnHitOff(source,unit)};   // the on-hit gate is melee's
+        const uint32_t result=TriggerEvents(game,event,unit,source,damage);
+        tapScope=outer;
+        return result;
+    }
+    return TriggerEvents(game,event,unit,source,damage);
 }
 uintptr_t Curse(uintptr_t curse) {
     // Prevent monster heal from a gated swing (the curse record names its caster at +0, its target at +8).
@@ -484,6 +521,150 @@ constexpr GateSite WearSites[]={
     {0x44b438,{0x44,0x38,0xa4,0x24,0x20,0x02,0x00,0x00,0x74,0x0e,0x4d,0x8b,0xc6,0x48,0x8b,0xd6,0x48,0x8b,0xcf,0xe8,0x70,0x72,0x00,0x00},24}};
 EffectsFn originalEffects=nullptr;UmodFn originalUmod=nullptr;ThornsFn originalThorns=nullptr,originalMissileThorns=nullptr;
 bool effectsIn=false,umodIn=false,thornsIn=false,missileThornsIn=false,missWearReady=false,missLogged=false;
+// Unleashed (Cal, 2026-10-30): the share of a native hit the local player's contact on
+// this monster delivered, attack rating aside (the would-hit gate already decides whether
+// it hit at all): a swing's recovery x cleave falloff, a trigger hit's recovery; a riposte,
+// an arrow or throw, a skill hit and anything else whole (1). wear: only a stroke's first
+// creature wears the weapon (a native attack strikes one), so a follow-up's share is 0.
+// Valid inside that contact's native attack, after its life write too.
+double StrokeShare(uintptr_t attacker,uintptr_t defender,bool wear) {
+    uint32_t a=~0u,d[3]{};
+    if(!Read(attacker,a)||a!=0||!Read(defender,d)||d[0]!=1)return 1;
+    if(swingTarget!=NoSwing&&d[2]==swingTarget) {
+        if(swingClean||RiposteDue(swingTarget))return 1;
+        if(wear&&!swingFirst)return 0;
+        return std::clamp(double(swingRecovery),0.,1.);
+    }
+    if(buttonShare.attacker==attacker&&buttonShare.defender==defender&&GetTickCount64()-buttonShare.at<=IncomingWindowMs)
+        return std::clamp(double(buttonShare.recovery),0.,1.);
+    return 1;
+}
+// 0..1, independent of the game's seeds (so no native roll shifts). Game thread.
+double UnitRoll() {
+    static std::atomic<uint32_t> state{0x2545f491u};
+    uint32_t x=state.load()^uint32_t(GetTickCount64());x^=x<<13;x^=x>>17;x^=x<<5;state=x;
+    return (x>>8)*(1.0/16777216.0);
+}
+// Runs call with the record's physical damage (+0x18) at share of itself, then puts it back.
+template<class Call> uint64_t WithPhysicalShare(uintptr_t record,double share,Call call) {
+    int32_t physical=0;
+    if(!record||share>=1||!Read(record+0x18,physical)||physical<=0)return call();
+    const int32_t scaled=int32_t(double(physical)*share+.5);
+    if(!framevr::WriteMemory(reinterpret_cast<void*>(record+0x18),&scaled,sizeof scaled))return call();
+    const uint64_t result=call();
+    framevr::WriteMemory(reinterpret_cast<void*>(record+0x18),&physical,sizeof physical);
+    return result;
+}
+std::atomic<unsigned> quietHits{0},thornsShared{0},wearSkipped{0},wearRolled{0},maidenReflects{0},maidenParked{0},maidenLost{0};
+// Iron Maiden cursed on the player (Oblivion Knights; audit 2026-10-25 B3). Its return is a
+// state event on the player's own domeleedamage list (D2MOO EventFunc04 SkillNec.cpp:1902,
+// registered by the curse with group 1, key = its state 55, param1 = skill 76), dispatched
+// together with the item procs and skill events the on-hit gate drops on a gated stroke.
+// There only it runs: every other domeleedamage event on the list is parked (its type byte
+// set to Parked, which no dispatch matches) for that one dispatch, at the stroke's share of
+// the physical damage, then put back. The list's place in the unit and its link offset
+// are found once, while cursed, and only taken when every node checks out: an event type,
+// a group 0..2, a callback inside the game's image, and a doubly linked chain.
+constexpr uint64_t CheckStateRva=0x3351b0;   // as active_effects.cpp / melee.cpp
+constexpr uint8_t CheckStateSig[]={0x48,0x89,0x5c,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xec,0x20,0x8b,0xda,0x48,0x8b,0xf1};
+constexpr int IronMaidenState=55,IronMaidenSkill=76,UnitEventTypes=32,MaxEvents=64;   // Events.txt has 14 rows; room for D2R's own
+constexpr uint8_t Parked=0xfe;
+bool maidenReady=false,maidenLogged=false;
+struct EventLayout {int head=-1,next=0;} eventLayout;
+uint64_t layoutTriedAt=0;
+uintptr_t imageLow=0,imageHigh=0;
+bool InImage(uintptr_t p) {
+    if(!imageLow) {
+        const auto base=reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+        IMAGE_DOS_HEADER dos{};IMAGE_NT_HEADERS64 nt{};
+        if(base&&Read(base,dos)&&dos.e_magic==IMAGE_DOS_SIGNATURE&&Read(base+uintptr_t(dos.e_lfanew),nt)&&nt.Signature==IMAGE_NT_SIGNATURE)
+            {imageLow=base;imageHigh=base+nt.OptionalHeader.SizeOfImage;}
+    }
+    return imageLow&&p>=imageLow&&p<imageHigh;
+}
+struct EventNode {uintptr_t at=0;uint8_t type=0;bool maiden=false;};
+// A candidate event list from first, linked at +next (callback at next-0x10, previous at
+// next-8, as D2MOO's D2UnitEventStrc). The node count, or -1 when it isn't such a list.
+int WalkEvents(uintptr_t first,int next,EventNode* out) {
+    int n=0;uintptr_t previous=0;
+    for(uintptr_t node=first;node;) {
+        if(n>=MaxEvents)return -1;
+        uint8_t head[0x10]{};uintptr_t callback=0,back=0,forward=0;
+        if(node<0x10000||!framevr::ReadMemory(head,reinterpret_cast<const void*>(node),sizeof head)||
+           !Read(node+next-0x10,callback)||!Read(node+next-8,back)||!Read(node+next,forward))return -1;
+        uint32_t group=0;int32_t key=0,param1=0;
+        std::memcpy(&group,head+4,4);std::memcpy(&key,head+8,4);std::memcpy(&param1,head+0xc,4);
+        if((head[0]>=UnitEventTypes&&head[0]!=Parked)||group>2||!InImage(callback)||back!=previous)return -1;
+        out[n++]={node,head[0],head[0]==DoMeleeDamage&&group==1&&key==IronMaidenState&&param1==IronMaidenSkill};
+        previous=node;node=forward;
+    }
+    return n;
+}
+bool HasMaiden(const EventNode* nodes,int n) {for(int i=0;i<n;++i)if(nodes[i].maiden)return true;return false;}
+// Finds where the player keeps its event list, while it carries Iron Maiden's event.
+void FindEventLayout(uintptr_t player) {
+    EventNode nodes[MaxEvents];
+    for(int head=0x40;head<0x400;head+=8) {
+        uintptr_t first=0;
+        if(!Read(player+head,first)||first<0x10000)continue;
+        for(const int next:{0x28,0x30,0x38,0x40}) {
+            const int n=WalkEvents(first,next,nodes);
+            if(n>0&&HasMaiden(nodes,n)) {
+                eventLayout={head,next};
+                char line[160];snprintf(line,sizeof line,"Frame iron maiden: player event list at unit+0x%x, linked at +0x%x (%d events)",head,next,n);
+                framevr::logging::Write(line);
+                return;
+            }
+        }
+    }
+}
+uint32_t MaidenOnly(uintptr_t game,uintptr_t player,uintptr_t monster,uintptr_t damage) {
+    if(!maidenReady||!damage||MissGated(player,monster))return 0;
+    uint32_t type=~0u;
+    if(!Read(player,type)||type!=0||!reinterpret_cast<int(*)(uintptr_t,int)>(d2rsig::Addr(CheckStateRva))(player,IronMaidenState))return 0;
+    if(eventLayout.head<0) {
+        const auto now=GetTickCount64();
+        if(layoutTriedAt&&now-layoutTriedAt<60000)return 0;   // ~2000 guarded reads a try
+        layoutTriedAt=now;FindEventLayout(player);
+        if(eventLayout.head<0) {
+            if(!maidenLogged){maidenLogged=true;framevr::logging::Write("Frame iron maiden: cursed, but the player's event list was not found; gated strokes return nothing");}
+            return 0;
+        }
+    }
+    uintptr_t first=0;EventNode nodes[MaxEvents];
+    if(!Read(player+eventLayout.head,first))return 0;
+    const int n=WalkEvents(first,eventLayout.next,nodes);
+    if(n<=0||!HasMaiden(nodes,n))return 0;
+    uintptr_t parked[MaxEvents];int p=0;
+    for(int i=0;i<n;++i)if(nodes[i].type==DoMeleeDamage&&!nodes[i].maiden) {
+        if(framevr::WriteMemory(reinterpret_cast<void*>(nodes[i].at),&Parked,1))parked[p++]=nodes[i].at;
+    }
+    const double share=StrokeShare(player,monster,false);
+    uint32_t result=0;
+    if(share>0)result=uint32_t(WithPhysicalShare(damage,share,[&]{return uint64_t(originalTrigger(game,DoMeleeDamage,player,monster,damage));}));
+    // Back on the list: every parked node still on it (a dispatch may free events).
+    if(p) {
+        EventNode after[MaxEvents];int m=-1;
+        if(Read(player+eventLayout.head,first))m=WalkEvents(first,eventLayout.next,after);
+        const uint8_t restored=DoMeleeDamage;
+        for(int i=0;i<p;++i) {
+            bool listed=false;   // the list unreadable (e.g. the reflect killed the hero): never write blind
+            for(int j=0;j<m&&!listed;++j)listed=after[j].at==parked[i];
+            uint8_t now=0;
+            if(listed&&Read(parked[i],now)&&now==Parked)framevr::WriteMemory(reinterpret_cast<void*>(parked[i]),&restored,1);
+            else ++maidenLost;
+        }
+        maidenParked+=unsigned(p);
+        static bool unreadableLogged=false;
+        if(m<0&&!unreadableLogged) {
+            unreadableLogged=true;
+            char line[200];snprintf(line,sizeof line,"Frame iron maiden: the player's event list no longer checks out after a return; %d parked events left off (procs may need a re-equip)",p);
+            framevr::logging::Write(line);
+        }
+    }
+    ++maidenReflects;
+    return result;
+}
 // The life factor of a physical swing on this monster, as SetStat applies it at
 // the life write (a riposte: clean, plus its bonus). Peeks; consumes nothing.
 double SwingLifeFactor(uint32_t monster) {
@@ -532,28 +713,27 @@ uint32_t AbsorbScaled(uintptr_t game,uintptr_t unit,uintptr_t source,uintptr_t d
     if(changed)++absorbScaled;
     return result;
 }
-void ScaleRecordDots(uintptr_t record,double factor) {
-    bool scaled=false;
-    const auto scale=[&](uintptr_t at){
-        int32_t rate=0;
-        if(!Read(at,rate)||rate<=0)return;
-        const int32_t to=combat::ScaleDamageOverTime(rate,factor);
-        if(to!=rate&&framevr::WriteMemory(reinterpret_cast<void*>(at),&to,sizeof to))scaled=true;
+// Poison and burn off for this record: rate and length zeroed (4518C0 / 451380 return
+// on either <= 0). 44D1CF: each +0x40 list entry {state, rate, length} is applied,
+// then the rest of +0x38 / +0x3C.
+void ClearRecordDots(uintptr_t record) {
+    bool cleared=false;
+    const int32_t none=0;
+    const auto clear=[&](uintptr_t at){
+        int32_t v=0;
+        if(Read(at,v)&&v>0&&framevr::WriteMemory(reinterpret_cast<void*>(at),&none,sizeof none))cleared=true;
     };
-    int32_t length=0;
-    if(Read(record+0x3c,length)&&length>0) {
-        // 44D1CF: each list entry {state, rate, length} is applied, then the rest of +0x38 / +0x3C.
-        scale(record+0x38);
-        uint64_t list[2]{};   // begin, count (12-byte entries)
-        if(Read(record+0x40,list)&&list[0]&&list[1]&&list[1]<=16)
-            for(uint64_t i=0;i<list[1];++i)scale(uintptr_t(list[0]+i*12+4));
-    }
-    if(Read(record+0x28,length)&&length>0)scale(record+0x24);
-    if(scaled)++dotScaled;
+    clear(record+0x38);clear(record+0x3c);
+    uint64_t list[2]{};   // begin, count (12-byte entries)
+    if(Read(record+0x40,list)&&list[0]&&list[1]&&list[1]<=16)
+        for(uint64_t i=0;i<list[1];++i){clear(uintptr_t(list[0]+i*12+4));clear(uintptr_t(list[0]+i*12+8));}
+    clear(record+0x24);clear(record+0x28);
+    if(cleared)++dotCleared;
 }
 uint64_t DamageEffects(uintptr_t game,uintptr_t attacker,uintptr_t defender,uintptr_t record) {
     if(record) {
-        if(MissGated(attacker,defender)) {
+        const bool wouldMiss=MissGated(attacker,defender);
+        if(wouldMiss) {
             // Leech/drain, stun, chill, freeze and absorb heal: only a landed hit's.
             static constexpr int Fields[]={0x118,0x11c,0x120,0x124,0x128,0x12c,0x130};
             const int32_t none=0;
@@ -562,7 +742,9 @@ uint64_t DamageEffects(uintptr_t game,uintptr_t attacker,uintptr_t defender,uint
                 if(Read(record+at,v)&&v&&framevr::WriteMemory(reinterpret_cast<void*>(record+at),&none,sizeof none))++missFields;
             }
         }
-        if(const double factor=ContactFactor(attacker,defender);factor!=1)ScaleRecordDots(record,factor);
+        // Poison and burn: whole from a hit that counts, none from any other (DamageOverTime).
+        // The on-hit gate is melee's: a spell inside a trigger hit's window keeps its poison.
+        if(!DamageOverTime(wouldMiss,damageFlag==0&&OnHitOff(attacker,defender)))ClearRecordDots(record);
     }
     return originalEffects(game,attacker,defender,record);
 }
@@ -573,6 +755,13 @@ uint64_t MonsterOnHit(uintptr_t game,uintptr_t monster) {
 }
 uint64_t Thorns(uintptr_t game,uintptr_t attacker,uintptr_t defender,uintptr_t record) {
     if(MissGated(attacker,defender)){++missThorns;return 0;}
+    // Unleashed (Cal, 2026-10-30): Thorns returns a % of the hit's physical damage, which
+    // the record still holds whole; a recovery- or cleave-scaled stroke returns its share.
+    if(const double share=StrokeShare(attacker,defender,false);share<1) {
+        ++thornsShared;
+        if(share<=0)return 0;
+        return WithPhysicalShare(record,share,[&]{return originalThorns(game,attacker,defender,record);});
+    }
     return originalThorns(game,attacker,defender,record);
 }
 uint64_t MissileThorns(uintptr_t game,uintptr_t attacker,uintptr_t defender,uintptr_t record) {
@@ -580,6 +769,12 @@ uint64_t MissileThorns(uintptr_t game,uintptr_t attacker,uintptr_t defender,uint
     return originalMissileThorns(game,attacker,defender,record);
 }
 void SetStat(uintptr_t unit,int stat,int value,int layer) {
+    // Life Tap's heal inside a player's struck events (Trigger): refused on a gated stroke.
+    if(stat==6&&layer==0&&tapScope.striker&&unit==tapScope.striker) {
+        const int before=reinterpret_cast<GetStatFn>(d2rsig::Addr(GetStatRva))(unit,6,0);
+        if(TapHealBlocked(tapScope.gated,before,value)){++gatedTap;return;}
+        if(value>before)++passedTap;
+    }
     // Unleashed on-hit gate: a gated swing does not lower the target's Defense,
     // nor does a swing that would have missed.
     if(stat==31&&defenseGate&&reinterpret_cast<uintptr_t>(_ReturnAddress())==d2rsig::Addr(DefensePerHitReturn)) {
@@ -677,6 +872,7 @@ void SetStat(uintptr_t unit,int stat,int value,int layer) {
             if(riposteMonster.load()==header[2]&&now<riposteUntil.load()) {
                 // A riposte is a clean hit: no attack-rating or recovery penalty.
                 factor=1+riposteBonus.load();riposteMonster=NoSwing;riposteUntil=0;++ripostesLanded;PlayRiposteSound();
+                swingClean=true;   // what follows in this attack (thorns, wear) counts it whole
             } else {
                 // Unleashed: attack rating and recovery decide how hard it lands.
                 if(arDamage.load(std::memory_order_relaxed)) {
@@ -721,7 +917,37 @@ uint64_t ApplyDamage(uintptr_t game,uintptr_t attacker,uintptr_t defender,int fl
            framevr::WriteMemory(reinterpret_cast<void*>(damage+0x120),none,sizeof none))++gatedLeech;
     }
     const auto saved=damageRecord;const auto savedAttacker=damageAttacker;damageRecord=damage;damageAttacker=attacker;
+    const int savedFlag=damageFlag;damageFlag=flag;
+    // A damage application nested in a Life Tap scope (e.g. a reflect onto the player
+    // from the struck unit's events) is its own hit: its heals (absorb) stay native.
+    const TapScope savedTap=tapScope;tapScope={};
+    // Unleashed (Cal, 2026-10-30): a monster flinches only when it should. A contact the
+    // native roll would have missed, or a gated stroke (not a full cycle, a cleave
+    // follow-up, a trigger hit inside a swing's cycle), still lands its scaled damage, but
+    // the monster does not react: GetHit 0x4, knockback 0x8 and soft hit 0x4000 are
+    // cleared from the result flags (+4) after 44CE80, before the executor hands this record
+    // to the mode change (D2MOO SUnitDmg.cpp 2084-2170, where Lightning Enchanted's
+    // on-damaged bolts and the reaction AI also hang). Native for a would-hit full stroke.
+    // The player's own contact only (a merc's arrow on the same monster is not), and a
+    // missile record only under its own shot's verdict (not an aura or spell in the window).
+    uint32_t attackerType=~0u,defenderType=~0u;
+    const bool gated=!flag?MissGated(attacker,defender)||OnHitOff(attacker,defender):
+                           missScope.missile&&MissGated(attacker,defender);
+    const bool quiet=gated&&hitReactions&&damage&&Read(attacker,attackerType)&&attackerType==0&&
+                     Read(defender,defenderType)&&defenderType==1;
+    // Cleared before too, in case this build reacts inside 44CE80 (D2MOO doesn't read them there).
+    const auto clearReactions=[&]{
+        constexpr uint16_t Reactions=0x4|0x8|0x4000;
+        uint16_t flags=0;
+        if(!Read(damage+4,flags)||!(flags&Reactions))return false;
+        const uint16_t kept=uint16_t(flags&~Reactions);
+        return framevr::WriteMemory(reinterpret_cast<void*>(damage+4),&kept,sizeof kept);
+    };
+    bool cleared=quiet&&clearReactions();
     const auto result=originalApplyDamage(game,attacker,defender,flag,damage);
+    if(quiet&&clearReactions())cleared=true;
+    if(cleared)++quietHits;
+    tapScope=savedTap;damageFlag=savedFlag;
     damageRecord=saved;damageAttacker=savedAttacker;return result;
 }
 // Set only by melee.cpp around ONE physical swing's native basic attack
@@ -762,7 +988,7 @@ int Hit(uintptr_t attacker,uintptr_t defender,int accuracy,int missile) {
     const bool forcedIncoming=incomingCheck;
     // A new attack of the local player (swing, trigger, arrow): an earlier trigger hit's
     // gate, or its damage record when no life write consumed it, never outlives it.
-    if(local){buttonOnHit={};buttonHit={};}
+    if(local){buttonOnHit={};buttonHit={};buttonShare={};}
     // Would-have-hit gate: a forced incoming hit, or the local player's physical
     // swing on its target (not a riposte: that is a clean hit), arrow, throw or
     // trigger/button melee hit (not Smite: it always hits natively).
@@ -811,6 +1037,7 @@ int Hit(uintptr_t attacker,uintptr_t defender,int accuracy,int missile) {
         if(shotGate)shotHit=result?ShotHit{attacker,defender,nativeHitChance,GetTickCount64()}:ShotHit{};
         // A trigger hit that landed: its recovery and attack rating scale it at the life write.
         if(buttonStroke)buttonHit=result?ButtonHit{attacker,defender,buttonGate?nativeHitChance:-1,button.recovery,buttonGate,GetTickCount64()}:ButtonHit{};
+        if(buttonStroke)buttonShare=result?ButtonShare{attacker,defender,button.recovery,GetTickCount64()}:ButtonShare{};
         forcedCheck=savedCheck;forcedGate=savedGate;forcedMissile=savedMissile;nativeHitRoll=savedRoll;nativeHitChance=savedChance;
     }
     if(forcedIncoming) {   // landed: its damage is scaled at the life write
@@ -1030,6 +1257,14 @@ void StruckWear(uintptr_t game,uintptr_t attacker,uintptr_t defender) {
     }
     // Would-have-hit gate: native wear comes with a landed melee hit only.
     if(missWearReady&&MissGated(attacker,defender)){++missWear;return;}
+    // Unleashed (Cal, 2026-10-30): the local player's weapon wears with a stroke's first
+    // creature only, and its native wear chance is scaled by the share of a native hit
+    // that stroke dealt (a half-recovered stroke: half the chance). Our roll gates the
+    // game's own (4% weapon), which then runs as native.
+    if(const double share=StrokeShare(attacker,defender,true);share<1) {
+        if(share<=0||UnitRoll()>=share){++wearSkipped;return;}
+        ++wearRolled;
+    }
     originalStruckWear(game,attacker,defender);
 }
 // Native still runs in full (avoid/dodge, sounds; in Unleashed the hero's block
@@ -1257,11 +1492,12 @@ float GameVolume() {
     return volume;
 }
 uint32_t PhysicalSwing(uint32_t target) {
-    const auto was=swingTarget;swingTarget=target;swingChance=-1;
+    const auto was=swingTarget;swingTarget=target;swingChance=-1;swingClean=false;
     if(target!=NoSwing)lastSwingVerdict=-1;   // a new swing's verdict (the restoring call keeps it for the trace)
     return was;
 }
 float SwingRecovery(float factor) {const float was=swingRecovery;swingRecovery=factor;return was;}
+bool SwingFirst(bool first) {const bool was=swingFirst;swingFirst=first;return was;}
 void ConfigureArDamage(bool on,float floor) {arDamage=on;arFloor=std::clamp(floor,0.f,1.f);}
 void NoteRiposte(uint32_t monster) {
     if(riposteMs.load()==0)return;   // a riposte is worth having with no bonus: it is a clean hit
@@ -1272,7 +1508,7 @@ OnHitScope GateOnHit(OnHitScope scope) {
     const OnHitScope was{onHitGated,onHitTarget};
     onHitGated=scope.attacker&&scope.target?scope.attacker:0;onHitTarget=onHitGated?scope.target:0;
     missScope={};   // around one swing's native attack: a would-miss verdict never outlives it
-    buttonOnHit={};buttonHit={};   // nor does a trigger hit's gate or unwritten damage
+    buttonOnHit={};buttonHit={};buttonShare={};   // nor does a trigger hit's gate or unwritten damage
     return was;
 }
 int LastSwingWouldHit() {return lastSwingVerdict;}
@@ -1454,6 +1690,9 @@ void Install() {
     if(!defenseGate)defenseGate=setStatIn&&CheckSites(DefenseSites);
     if(!triggerIn&&CheckSites(EventSites))
         triggerIn=d2rsig::Hook(TriggerRva,TriggerSig,sizeof TriggerSig,reinterpret_cast<void*>(&Trigger),reinterpret_cast<void**>(&originalTrigger));
+    // Unleashed (2026-10-30): monster reactions, Iron Maiden on gated strokes.
+    hitReactions=applyDamageIn;
+    if(!maidenReady)maidenReady=triggerIn&&d2rsig::Check(CheckStateRva,CheckStateSig,sizeof CheckStateSig);
     if(!curseIn&&hitIn&&CheckSites(HealSites))
         curseIn=d2rsig::Hook(CurseRva,CurseSig,sizeof CurseSig,reinterpret_cast<void*>(&Curse),reinterpret_cast<void**>(&originalCurse));
     // Would-have-hit gate: each part only where this build has its sites; a part
@@ -1473,8 +1712,11 @@ void Install() {
         framevr::logging::Write("Frame combat: deterministic local-player hit checks ready; native collision/range and damage retained");
     if(ready.load()&&!onHitLogged) {
         onHitLogged=true;
-        char line[260];snprintf(line,sizeof line,"Frame on-hit gate: crit/deadly strike=%s proc events=%s leech=%s prevent heal=%s defense per hit=%s (Unleashed: a full-cycle stroke's first contact only; off = native on every contact)",
-            critGate?"ready":"off",triggerIn?"ready":"off",leechGate?"ready":"off",curseIn?"ready":"off",defenseGate?"ready":"off");
+        char line[400];snprintf(line,sizeof line,"Frame on-hit gate: crit/deadly strike=%s proc events=%s leech=%s life tap=%s prevent heal=%s defense per hit=%s (Unleashed: a full-cycle stroke's first contact only; off = native on every contact)",
+            critGate?"ready":"off",triggerIn?"ready":"off",leechGate?"ready":"off",triggerIn&&setStatIn?"ready":"off",curseIn?"ready":"off",defenseGate?"ready":"off");
+        framevr::logging::Write(line);
+        snprintf(line,sizeof line,"Frame stroke share: monster reactions=%s thorns=%s weapon wear=%s iron maiden=%s (Unleashed: a would-miss contact or gated stroke doesn't make monsters react; thorns, Iron Maiden and wear follow the damage a stroke dealt)",
+            hitReactions?"ready":"off",thornsIn?"ready":"off",struckWearIn?"ready":"off",maidenReady?"ready":"off");
         framevr::logging::Write(line);
     }
     if(ready.load()&&!missLogged) {
@@ -1509,9 +1751,9 @@ void Report() {
         framevr::logging::Write(line);
     }
     if(const auto ih=verdictInHit.exchange(0),im=verdictInMiss.exchange(0),sh=verdictSwingHit.exchange(0),sm=verdictSwingMiss.exchange(0),
-                  th=verdictShotHit.exchange(0),tm=verdictShotMiss.exchange(0),vu=verdictUnknown.exchange(0),ds=dotScaled.exchange(0),
+                  th=verdictShotHit.exchange(0),tm=verdictShotMiss.exchange(0),vu=verdictUnknown.exchange(0),ds=dotCleared.exchange(0),
                   ab=absorbScaled.exchange(0);ih||im||sh||sm||th||tm||vu||ds||ab) {
-        char line[300];snprintf(line,sizeof line,"Frame would-hit gate: incoming would hit=%u would miss=%u swings would hit=%u would miss=%u shots would hit=%u would miss=%u unknown=%u damage over time scaled=%u absorbs scaled=%u",
+        char line[300];snprintf(line,sizeof line,"Frame would-hit gate: incoming would hit=%u would miss=%u swings would hit=%u would miss=%u shots would hit=%u would miss=%u unknown=%u damage over time off=%u absorbs scaled=%u",
             ih,im,sh,sm,th,tm,vu,ds,ab);
         framevr::logging::Write(line);
     }
@@ -1560,9 +1802,17 @@ void Report() {
 #ifdef D2RVR_DEVELOPER
     // What the on-hit gate switched off in gated swings' native attacks.
     if(const auto md=gatedMeleeDamage.exchange(0),ma=gatedMeleeAttack.exchange(0),le=gatedLeech.exchange(0),
-                  cr=gatedCrits.exchange(0),he=gatedHeal.exchange(0),de=gatedDefense.exchange(0);md||ma||le||cr||he||de) {
-        char line[260];snprintf(line,sizeof line,"Frame on-hit gate native: domeleedamage events=%u domeleeattack events=%u leech zeroed=%u crit rolls=%u prevent heal=%u defense per hit=%u",
-            md,ma,le,cr,he,de);
+                  cr=gatedCrits.exchange(0),he=gatedHeal.exchange(0),de=gatedDefense.exchange(0),tg=gatedTap.exchange(0),tp=passedTap.exchange(0);
+       md||ma||le||cr||he||de||tg||tp) {
+        char line[320];snprintf(line,sizeof line,"Frame on-hit gate native: domeleedamage events=%u domeleeattack events=%u leech zeroed=%u crit rolls=%u prevent heal=%u defense per hit=%u life tap heals refused=%u passed=%u",
+            md,ma,le,cr,he,de,tg,tp);
+        framevr::logging::Write(line);
+    }
+    // Stroke share (2026-10-30): reactions cleared, thorns/Iron Maiden scaled, wear gated.
+    if(const auto qh=quietHits.exchange(0),ts=thornsShared.exchange(0),ws=wearSkipped.exchange(0),wr=wearRolled.exchange(0),
+                  mr=maidenReflects.exchange(0),mp=maidenParked.exchange(0),ml=maidenLost.exchange(0);qh||ts||ws||wr||mr||mp||ml) {
+        char line[320];snprintf(line,sizeof line,"Frame stroke share: monster reactions cleared=%u thorns at a share=%u weapon wear skipped=%u rolled at a share=%u iron maiden returns=%u parked=%u not restored=%u",
+            qh,ts,ws,wr,mr,mp,ml);
         framevr::logging::Write(line);
     }
 #endif

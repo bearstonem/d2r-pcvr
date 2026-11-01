@@ -1963,20 +1963,20 @@ float FacingUp(float2 uv, int eye, float3 p, float stepPx)
 // The landing circles' look: Jeff's tuned values from the DEV window, 2026-10-20.
 // Sizes are shares of the radius; strengths are 0..1. (Its height band,
 // RingFloorTol, comes from vrcam.)
-static const float kCircleOpacity = 0.5;        // the whole circle's strength
-static const float kCircleRim = 0.03;           // rim width
-static const float kCircleRimStrength = 0.95;
-static const float kCircleBase = 0.08;          // a faint tint over the whole circle
-static const float kCircleBand = 0.45;          // the filled part
-static const float kCircleEdgeGlow = 0.5;       // the glow on the fill's moving edge
-static const float kCircleGlowSharp = 18.0;     // how tight that glow is
-static const float kCircleBrighten = 0.3;       // how much that glow lightens the color
-static const float kCircleDot = 0.05;           // the center dot (the exact aim point)
-static const float kCircleDotStrength = 0.9;
-static const float kCircleInnerSize = 0.05;     // a glow from the rim inward
-static const float kCircleInnerOpacity = 0.25;
-static const float kCircleOuterSize = 0.05;     // a glow from the rim outward
-static const float kCircleOuterOpacity = 0.5;
+static const float kCircleOpacity = 0.32;       // the whole circle's strength (more transparent)
+static const float kCircleRim = 0.015;          // rim width (narrower)
+static const float kCircleRimStrength = 0.85;   // outline strength
+static const float kCircleBase = 0.02;          // subtle floor tint
+static const float kCircleBand = 0.05;          // filled band
+static const float kCircleEdgeGlow = 0.25;      // edge glow
+static const float kCircleGlowSharp = 20.0;     // tightness of edge glow
+static const float kCircleBrighten = 0.2;       // lighten factor
+static const float kCircleDot = 0.025;          // center dot
+static const float kCircleDotStrength = 0.5;    // center dot strength
+static const float kCircleInnerSize = 0.02;     // inner glow size
+static const float kCircleInnerOpacity = 0.12;  // inner glow opacity
+static const float kCircleOuterSize = 0.02;     // outer glow size
+static const float kCircleOuterOpacity = 0.20;  // outer glow opacity
 // One circle over color c, for the ground point p (relative to the hero). A
 // strip measures from its center line instead of the center point, so the same
 // rim and fill draw a rounded band. The fill is a disc growing from the center
@@ -2003,14 +2003,100 @@ float3 RingTint(float3 c, float3 p, float4 ring, float fill, float4 col, float4 
     const float a = saturate(kCircleBase * inner + kCircleBand * filled + kCircleEdgeGlow * glow + kCircleRimStrength * rim +
                              kCircleDotStrength * aim + kCircleInnerOpacity * innerGlow + kCircleOuterOpacity * outerGlow) *
                     ring.w * kCircleOpacity * smoothstep(0.55, 0.8, up);
-    return saturate(c + saturate(col.rgb + kCircleBrighten * glow) * a * 1.3);
+    return saturate(c + saturate(col.rgb + kCircleBrighten * glow) * a);
+}
+// Loot beams (vr/loot_beam_scan.cpp, steamvr/loot_beams.h): a pillar of light
+// over each Rare, Set or Unique item and each high rune lying near the hero, in
+// the colour the game writes its name in, and a soft glow on the floor round it.
+// Each pixel's ray from the eye is tested against each beam's vertical axis; the
+// beam counts only where it passes in front of what the eye sees there, so walls,
+// monsters and hills in front hide it and the sky behind shows it. Drawn after
+// the fog, so a beam stays visible in it; never over the game's interface left in
+// the picture (UiMaskOn). vrcam: BeamPos xyz the item's spot on
+// the hero's floor, relative to the hero, w its strength (0 = none); BeamCol rgb
+// its colour, w a phase for its shimmer; BeamShape core radius, height and floor
+// glow radius (world units), overall strength.
+uniform bool BeamOn < hidden = true; > = false;
+uniform float4 BeamShape < hidden = true; > = float4(0.7, 56.0, 2.8, 1.0);
+uniform float BeamFloorTol < hidden = true; > = 0.6;
+uniform float4 BeamPos0 < hidden = true; > = float4(0.0, 0.0, 0.0, 0.0);
+uniform float4 BeamPos1 < hidden = true; > = float4(0.0, 0.0, 0.0, 0.0);
+uniform float4 BeamPos2 < hidden = true; > = float4(0.0, 0.0, 0.0, 0.0);
+uniform float4 BeamPos3 < hidden = true; > = float4(0.0, 0.0, 0.0, 0.0);
+uniform float4 BeamPos4 < hidden = true; > = float4(0.0, 0.0, 0.0, 0.0);
+uniform float4 BeamPos5 < hidden = true; > = float4(0.0, 0.0, 0.0, 0.0);
+uniform float4 BeamPos6 < hidden = true; > = float4(0.0, 0.0, 0.0, 0.0);
+uniform float4 BeamPos7 < hidden = true; > = float4(0.0, 0.0, 0.0, 0.0);
+uniform float4 BeamCol0 < hidden = true; > = float4(1.0, 1.0, 1.0, 0.0);
+uniform float4 BeamCol1 < hidden = true; > = float4(1.0, 1.0, 1.0, 0.0);
+uniform float4 BeamCol2 < hidden = true; > = float4(1.0, 1.0, 1.0, 0.0);
+uniform float4 BeamCol3 < hidden = true; > = float4(1.0, 1.0, 1.0, 0.0);
+uniform float4 BeamCol4 < hidden = true; > = float4(1.0, 1.0, 1.0, 0.0);
+uniform float4 BeamCol5 < hidden = true; > = float4(1.0, 1.0, 1.0, 0.0);
+uniform float4 BeamCol6 < hidden = true; > = float4(1.0, 1.0, 1.0, 0.0);
+uniform float4 BeamCol7 < hidden = true; > = float4(1.0, 1.0, 1.0, 0.0);
+
+// The eye (relative to the hero) and the direction its pixel at uv looks along,
+// scaled so that t = 1 is one world unit of view depth (as OutlineWorld).
+void BeamRay(float2 uv, int eye, out float3 e, out float3 dir)
+{
+    const float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    const float4 sp = eye == 0 ? SkyProj0 : SkyProj1;
+    const float3 v = float3((ndc.x + sp.z) / sp.x, (ndc.y + sp.w) / sp.y, -1.0);
+    dir = eye == 0 ? v.x * CamRight0 + v.y * CamUp0 + v.z * CamBack0
+                   : v.x * CamRight1 + v.y * CamUp1 + v.z * CamBack1;
+    e = eye == 0 ? OutlineEye0 : OutlineEye1;
+}
+// One beam's light at this pixel. tSurf: how far (view depth) the eye sees here,
+// huge over the sky. The core narrows towards the top, where it fades out; a
+// slow shimmer climbs it. The floor point p (ok = 1) round the foot is lit too.
+float3 BeamLight(float3 e, float3 dir, float tSurf, float3 p, float ok, float4 b, float4 col)
+{
+    if (b.w <= 0.0) return 0.0;
+    float3 light = 0.0;
+    const float2 dxz = dir.xz;
+    const float t = dot(b.xz - e.xz, dxz) / max(dot(dxz, dxz), 1e-6);   // nearest the axis, across the ground
+    if (t > 0.0) {
+        const float h = (e.y + t * dir.y - b.y) / max(BeamShape.y, 1e-3);   // 0 the floor, 1 the top
+        const float r = BeamShape.x * lerp(1.0, 0.3, saturate(h));
+        const float d = length(e.xz + t * dxz - b.xz) / max(r, 1e-3);
+        const float front = smoothstep(-1.0, 0.5, tSurf - t);             // in front of the scene there
+        const float along = smoothstep(0.0, 0.015, h) * (1.0 - smoothstep(0.2, 1.0, h));
+        const float shimmer = 0.82 + 0.18 * sin(h * 55.0 - Timer * 0.0025 + col.w);
+        const float core = exp(-d * d), halo = exp(-d * d / 9.0);
+        const float a = along * front * shimmer;
+        light += col.rgb * (0.75 * core + 0.25 * halo) * a + core * core * core * a * 0.08;   // a little white at the very heart
+    }
+    if (ok > 0.0 && abs(p.y - b.y) < BeamFloorTol) {   // the glow on the floor round its foot
+        const float g = length(p.xz - b.xz) / max(BeamShape.z, 1e-3);
+        light += col.rgb * exp(-g * g * 2.5) * (0.5 + 0.1 * sin(Timer * 0.002 + col.w));
+    }
+    return light * b.w * BeamShape.w;
+}
+float3 Beams(float3 c, float2 uv, int eye, float3 p, float ok)
+{
+    float3 e, dir;
+    BeamRay(uv, eye, e, dir);
+    const float tSurf = ok > 0.0 ? dot(p - e, dir) / max(dot(dir, dir), 1e-6) : 1e7;
+    float3 light = BeamLight(e, dir, tSurf, p, ok, BeamPos0, BeamCol0);
+    light += BeamLight(e, dir, tSurf, p, ok, BeamPos1, BeamCol1);
+    light += BeamLight(e, dir, tSurf, p, ok, BeamPos2, BeamCol2);
+    light += BeamLight(e, dir, tSurf, p, ok, BeamPos3, BeamCol3);
+    light += BeamLight(e, dir, tSurf, p, ok, BeamPos4, BeamCol4);
+    light += BeamLight(e, dir, tSurf, p, ok, BeamPos5, BeamCol5);
+    light += BeamLight(e, dir, tSurf, p, ok, BeamPos6, BeamCol6);
+    light += BeamLight(e, dir, tSurf, p, ok, BeamPos7, BeamCol7);
+    // Not over the game's interface left in the picture (names, labels, chat), as the fog.
+    if (UiMaskOn && !UiMaskOff) light *= saturate(tex2Dlod(GameLayerSmp, float4(uv, 0, 0)).a);
+    return saturate(c + light);
 }
 float3 Outline(float2 uv, int eye)
 {
     float3 c = tex2D(FogColorSmp, uv).rgb;
-    if (!OutlineOn && !RingOn) return c;
+    if (!OutlineOn && !RingOn && !BeamOn) return c;
     float ok;
     const float3 p = OutlineWorld(uv, eye, ok);
+    if (BeamOn) c = Beams(c, uv, eye, p, ok);   // over the sky as well
     if (ok <= 0.0) return c;
     if (RingOn) {
         const float up = FacingUp(uv, eye, p, 3.0);   // two more depth taps, only while a circle shows
