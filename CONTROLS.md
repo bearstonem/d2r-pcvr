@@ -137,8 +137,10 @@ stabs. The old `attack_speed` INI key does not select Classic; choose it here.
 **Unleashed swing damage:** every stroke that connects lands, but how hard it
 hits depends on your character. Your attack rating against the monster's
 defense scales the damage (the game's own hit chance, 5-95%), and so does your
-rhythm: a stroke before your attack speed has recovered hits much weaker, so
-measured swings beat flailing. Faster attack speed (IAS) shortens the wait.
+rhythm: your attack speed sets a fixed beat. A stroke on the beat (a full cycle
+after your last full hit) hits fully; strokes in between hit much weaker but never
+delay the next beat, so measured swings beat flailing. Faster attack speed (IAS)
+shortens the beat.
 One stroke can hit several monsters, each further one a little weaker.
 On-hit effects (life and mana leech, critical and deadly strike, crushing blow,
 open wounds, chance to cast and the like) come only from a stroke made after

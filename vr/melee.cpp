@@ -82,6 +82,9 @@ std::atomic<float> cleaveStep{0},cleaveFloor{.25f};
 // Unleashed trigger/button melee (ButtonHit): the latest trigger hit, on the game
 // thread that owns the swing clocks (ObserveServer records it); swings are measured from it too.
 struct TriggerLanded {uint64_t session=0,at=0;} triggerLanded;
+// The latest full-cycle trigger hit or melee skill hit (combat_rules.h FixedCycle): swings
+// count their next breakpoint from it too; in-between trigger hits never stamp it.
+TriggerLanded triggerFull;
 std::atomic<DWORD> gameThread{0};
 std::atomic<unsigned> triggerPenalised{0},triggerOtherThread{0};
 thread_local int smiteDepth=0;   // inside the native Smite (the Smite hook)
@@ -733,10 +736,14 @@ void TraceRefusal(int kind,const Request& r,uint32_t target) {
         (unsigned long long)cadence.Remaining(r.session,r.at),cycleMs.load());
     framevr::logging::Write(line);
 }
-void TraceHit(const Request& r,uint32_t target,const char* outcome,uint64_t since,uint32_t cycle,bool onHit,const char* skill="basic") {
+// sinceFull/full: the fixed cycle (combat_rules.h FixedCycle): ms since the latest full-cycle
+// attack and whether this stroke was one (-1: not decided here, e.g. Classic or a later creature).
+void TraceHit(const Request& r,uint32_t target,const char* outcome,uint64_t since,uint32_t cycle,bool onHit,const char* skill="basic",
+              uint64_t sinceFull=UINT64_MAX,int full=-1) {
     if(!trace.load())return;
-    char line[340];snprintf(line,sizeof line,"Frame melee trace: hand=%s stroke=%llu target=%u %s since_last_landed=%lld ms cycle=%u ms %s=%.1f m/s onhit=%d would_hit=%d strike=%d %s",
-        r.sample.handIndex?"left":"right",(unsigned long long)r.sweep.stroke,target,outcome,since==UINT64_MAX?-1LL:(long long)since,cycle,r.sweep.thrust?"thrust":"swing",r.sweep.speed,int(onHit),
+    char line[380];snprintf(line,sizeof line,"Frame melee trace: hand=%s stroke=%llu target=%u %s since_last_landed=%lld ms since_full=%lld ms full=%d cycle=%u ms %s=%.1f m/s onhit=%d would_hit=%d strike=%d %s",
+        r.sample.handIndex?"left":"right",(unsigned long long)r.sweep.stroke,target,outcome,since==UINT64_MAX?-1LL:(long long)since,
+        sinceFull==UINT64_MAX?-1LL:(long long)sinceFull,full,cycle,r.sweep.thrust?"thrust":"swing",r.sweep.speed,int(onHit),
         combat::LastSwingWouldHit(),r.sample.strikeSkill,skill);
     framevr::logging::Write(line);
 }
@@ -814,9 +821,16 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                         // shared recovery (Cal, 2026-10-21) and the native form attack with the
                         // druid's one weapon (no weapon selection); the cycle is the form's.
                         const bool claws=r.sample.claws;
-                        auto& recoveryState=claws?hands[0].recovery:state.recovery;
-                        auto& recoveryClock=attackSpeed.load()?cadence:recoveryState;
                         const bool dual=!claws&&r.sample.weapons.id[0]&&r.sample.weapons.id[1];
+                        // Dual wield shares the claws' one recovery clock too (Cal, 2026-10-30: "put
+                        // all dual wielders on a shared cycle, like we have with werewolf"): natively a
+                        // basic attack swings one weapon at a time on one attack rhythm, so two blades
+                        // must not earn two full-cycle hits per cycle. Each stroke's cycle is still its
+                        // own weapon's (handCycle); hits, strokes and cleave stay per blade.
+                        const bool sharedClock=claws||dual;
+                        auto& recoveryState=sharedClock?hands[0].recovery:state.recovery;
+                        auto& fullState=sharedClock?hands[0].full:state.full;   // the fixed cycle's last full-cycle stroke
+                        auto& recoveryClock=attackSpeed.load()?cadence:recoveryState;
                         const uintptr_t weapon=dual?meleeweapon::Select(player,hand,r.sample.weapons):0;
                         const int speedHand=dual?r.sample.weapons.BodyHand(hand):0;
                         if((dual&&(!weapon||speedHand<0))||(hand==1&&!dual&&!claws)){++dualRefused;continue;}
@@ -841,19 +855,24 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                             cycle=handCycle;
                         }
                         // Unleashed: measured from the latest trigger/button melee hit too (ButtonHit).
+                        // since: from the previous stroke of any kind; sinceFull: from the latest
+                        // full-cycle one, which alone sets the next breakpoint (FixedCycle, 2026-10-30).
                         const auto since=attackSpeed.load()?recoveryClock.Since(r.session,r.at):
                             combat::SwingSince(recoveryClock.Since(r.session,r.at),triggerLanded.session==r.session?triggerLanded.at:0,r.at);
-                        // Unleashed: the stroke's first landed contact measures how
-                        // recovered it is; every creature that stroke reaches shares it.
-                        // Kept with swing_recovery_damage off too: the on-hit gate reads it.
-                        float recovery=1;bool strokeStart=false;
+                        const auto sinceFull=attackSpeed.load()?since:
+                            combat::SwingSince(fullState.Since(r.session,r.at),triggerFull.session==r.session?triggerFull.at:0,r.at);
+                        // Unleashed: the stroke's first landed contact decides whether it is a
+                        // full-cycle stroke and how recovered an in-between one is; every creature
+                        // that stroke reaches shares it. Kept with swing_recovery_damage off too:
+                        // the on-hit gate and the cycle read it.
+                        float recovery=1;bool strokeStart=false,strokeFull=true;
                         if(!attackSpeed.load()) {
-                            if(state.strokeSession==r.session&&state.strokeId==r.sweep.stroke)recovery=state.strokeRecovery;
+                            if(state.strokeSession==r.session&&state.strokeId==r.sweep.stroke){recovery=state.strokeRecovery;strokeFull=state.strokeFull;}
                             else {
                                 cycle=handCycle;
-                                if(swingRecovery.load(std::memory_order_relaxed))
-                                    recovery=combat::RecoveryFactor(since,cycle,recoveryCurve.load(std::memory_order_relaxed),
-                                                                    recoveryGrace.load(std::memory_order_relaxed));
+                                const auto c=combat::FixedCycle(sinceFull,since,cycle,swingRecovery.load(std::memory_order_relaxed),
+                                                                recoveryCurve.load(std::memory_order_relaxed),recoveryGrace.load(std::memory_order_relaxed));
+                                recovery=c.recovery;strokeFull=c.full;
                                 strokeStart=true;
                             }
                         }
@@ -876,7 +895,7 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                         // stroke's first landed contact; a riposte has earned them. Classic: native.
                         auto onHit=combat::OnHit::Allowed;bool riposte=false;
                         if(!attackSpeed.load()) {
-                            onHit=combat::OnHitGate(strokeStart,since,cycle);
+                            onHit=combat::OnHitGate(strokeStart,sinceFull,cycle);
                             riposte=onHit!=combat::OnHit::Allowed&&combat::RiposteDue(header[2]);
                         }
                         const bool effects=onHit==combat::OnHit::Allowed||riposte;
@@ -932,7 +951,11 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                         if(dual&&contact.accepted)++dualLanded[hand];
                         if(claws&&contact.accepted)++clawLanded[hand];
                         if(contact.resolved&&attackSpeed.load()){cadence.Landed(r.session,r.at,cycle);landed.Insert(r.session,r.sweep.stroke,0);}
-                        if(contact.resolved&&strokeStart){recoveryState.Landed(r.session,r.at,cycle);state.strokeSession=r.session;state.strokeId=r.sweep.stroke;state.strokeRecovery=recovery;}
+                        if(contact.resolved&&strokeStart){
+                            recoveryState.Landed(r.session,r.at,cycle);
+                            if(strokeFull)fullState.Landed(r.session,r.at,cycle);   // only a full-cycle stroke moves the breakpoint
+                            state.strokeSession=r.session;state.strokeId=r.sweep.stroke;state.strokeRecovery=recovery;state.strokeFull=strokeFull;
+                        }
                         if(contact.resolved&&cleaveTracked)++state.cleaveLanded;
                         if(trace.load()) {
                             // "cast 1/5": Fury or Zeal, hit 1 of its count (SequenceHit logs the rest).
@@ -940,7 +963,8 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                             if(strike==StrikeOutcome::Cast&&castHits>0)snprintf(tag,sizeof tag,"cast 1/%d",castHits);
                             else snprintf(tag,sizeof tag,"%s",strike==StrikeOutcome::Cast?"cast":strike==StrikeOutcome::StartRefused?"cast_start_refused":
                                           strikeSkill<0?"basic":"basic_strike");
-                            TraceHit(r,header[2],contact.accepted?"LANDED":contact.resolved?"MISSED (roll)":"native rejected",since,cycle,effects,tag);
+                            TraceHit(r,header[2],contact.accepted?"LANDED":contact.resolved?"MISSED (roll)":"native rejected",since,cycle,effects,tag,
+                                     sinceFull,!attackSpeed.load()&&strokeStart?int(strokeFull):-1);
                         }
                         contact=saved;
                         if(!dual&&!claws)break; // Both blades (or claws) may strike this creature in the same batch.
@@ -1466,7 +1490,7 @@ ButtonStroke ButtonHit(uint32_t monster) {
     if(sequenceScope||UsingSkill()) {
         ++(sequenceScope?sequenceWhole:skillWhole);
         ZealButtonHit(monster);
-        triggerLanded={session,now};++buttonAttacks;
+        triggerLanded={session,now};triggerFull={session,now};++buttonAttacks;   // a skill hit is a full attack
         if(trace.load()&&!sequenceScope) {
             char line[160];snprintf(line,sizeof line,"Frame melee trace: trigger target=%u%s skill hit: whole (recovery 1, on-hit effects)",monster,out.smite?" smite":"");
             framevr::logging::Write(line);
@@ -1475,14 +1499,17 @@ ButtonStroke ButtonHit(uint32_t monster) {
     }
     const uint32_t cycle=cycleSession.load()==session?cycleMs.load():0;
     const uint64_t sinceSwing=std::min(hands[0].recovery.Since(session,now),hands[1].recovery.Since(session,now));
-    const auto v=combat::TriggerRecovery(sinceSwing,cycle,swingRecovery.load(std::memory_order_relaxed),
+    const uint64_t sinceFullSwing=std::min(hands[0].full.Since(session,now),hands[1].full.Since(session,now));
+    const auto v=combat::TriggerRecovery(sinceFullSwing,sinceSwing,cycle,swingRecovery.load(std::memory_order_relaxed),
                                          recoveryCurve.load(std::memory_order_relaxed),recoveryGrace.load(std::memory_order_relaxed));
     out.recovery=v.recovery;out.onHit=v.onHit==combat::OnHit::Allowed;
     triggerLanded={session,now};++buttonAttacks;
+    if(out.onHit)triggerFull={session,now};   // a full-cycle trigger hit starts the next cycle
     if(out.recovery<1||!out.onHit)++triggerPenalised;
     if(trace.load()) {
-        char line[220];snprintf(line,sizeof line,"Frame melee trace: trigger target=%u%s since_last_swing=%lld ms cycle=%u ms recovery=%.2f onhit=%d",
-            monster,out.smite?" smite":"",sinceSwing==UINT64_MAX?-1LL:(long long)sinceSwing,cycle,out.recovery,int(out.onHit));
+        char line[260];snprintf(line,sizeof line,"Frame melee trace: trigger target=%u%s since_last_swing=%lld ms since_full_swing=%lld ms cycle=%u ms recovery=%.2f onhit=%d",
+            monster,out.smite?" smite":"",sinceSwing==UINT64_MAX?-1LL:(long long)sinceSwing,
+            sinceFullSwing==UINT64_MAX?-1LL:(long long)sinceFullSwing,cycle,out.recovery,int(out.onHit));
         framevr::logging::Write(line);
     }
     return out;

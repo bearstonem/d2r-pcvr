@@ -8,8 +8,12 @@ for physical contacts. This adds native basic attacks from the second weapon;
 Double Swing, Frenzy, Dragon Claw and other active skills retain their button
 casting.
 
-- Unleashed tracks contacts, recovery and cleave independently for each hand.
-  Both blades can strike the same creature, including in the same input batch.
+- Unleashed tracks contacts and cleave independently for each hand. Both blades
+  share one attack cycle (Cal, 2026-10-30, as a shapeshift form's claws do): a
+  full-cycle hit with either blade starts the next cycle, so two blades earn one
+  full hit (on-hit effects, strike skills) per cycle, as one native attack rhythm.
+  Each stroke's cycle is its own weapon's. Both blades can strike the same
+  creature, including in the same input batch.
 - Classic keeps a shared basic attack cycle across hands and button attacks,
   native hit rolls, and one target per stroke.
 - A weapon impact vibrates its driving controller with the weapon-impact
