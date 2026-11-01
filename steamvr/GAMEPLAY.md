@@ -1187,8 +1187,9 @@ and trigger/button melee were:
     counts as one of the stroke's creatures.
   - **On-hit effects** come only from a full-cycle stroke (the breakpoint, a
     full cycle after the latest full-cycle attack on the one shared clock: both
-    blades when dual wielding (2026-10-30; each stroke's cycle is its own
-    weapon's) and a shapeshift form's two claws),
+    blades when dual wielding (2026-10-30; each stroke is timed as native times
+    a dual-wield attack: the two weapons' averaged WSM, with the swinging
+    weapon's own IAS) and a shapeshift form's two claws),
     and only on the first creature that stroke lands on.
     That covers life and mana leech, critical and deadly strike, crushing blow,
     open wounds, freeze, slow, knockback, flee, blind, prevent monster heal,
@@ -1211,7 +1212,10 @@ and trigger/button melee were:
     (the Druid's Maul, Feral Rage, Rabies, Fire Claws, Hunger and Fury; Bash, Stun, Concentrate, Berserk, Sacrifice, Vengeance, Conversion, Zeal,
     Power Strike, Impale, Charged Strike, Lightning Strike and Poison Dagger) casts it natively on a full-cycle stroke's first landed
     contact, inside that contact's scaling and on-hit gate; every other contact
-    stays a basic attack. Classic casts on every paced contact. Developer
+    stays a basic attack. Classic casts on every paced contact. Dual wielding
+    (2026-10-30), the cast swings the primary weapon (the rendered right one)
+    whichever blade struck, as native single-weapon skills do; a basic attack
+    swings the blade that struck. Developer
     builds log `Frame melee skills:` (armed contacts, casts, refusals by
     reason) and add `strike=<skill> cast|basic_strike` to `melee_trace` lines.
   - **Fury and Zeal** (Cal, 2026-10-25; replaces the swing flurry; rev2
@@ -1353,7 +1357,14 @@ paced only by its own native animation. This needs the combat hooks, which
 Skill speed and slows (Fanaticism, Frenzy, Burst of Speed, chill, Decrepify) come
 from the unit's attackrate (ItemStatCost 68, which already subtracts the main
 hand's WSM; `attack_speed.h` `SkillSpeed`); the forms' own cycle is below.
-Dual-wield attack sequences are not read yet. An unknown class or weapon class (including
+Dual wield (2026-10-30, `attack_speed.h` `DualFrames`): native D2 merges the
+swinging weapon's stat lists before timing the attack, so each stroke reads the
+hero's item IAS and attackrate under that weapon's own scope (the other
+weapon's IAS does not count), and both weapons run at their averaged WSM (D2R
+2.4's fix of the old left-arm offset). The log reports `Frame dual wield speed:`
+per arm when its inputs change, and `native speed strokes=`/`unknown=` on
+`Frame dual wield:`; an unknown read keeps the per-arm cycle with the averaged
+WSM. Double Swing, Frenzy and Double Throw sequences are not read yet. An unknown class or weapon class (including
 classes outside the original seven) leaves the cycle unknown, which does not
 gate hits. Unleashed restores unlimited free-swing contacts. The log
 reports the cycle inputs (`Frame melee attack speed:`) and refused contacts
