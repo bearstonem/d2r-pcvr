@@ -306,9 +306,10 @@ int main() {
         const auto barbBadgesPre = CollectMercenarySkillBadges(VirtualPlayerClass::Barbarian, barbSlots, getBarbStat, getBarbSkillName, preBarbCharges);
         assert(barbBadgesPre.size() == 2);
 
-        // Verify that neither Blood Golem (summon) nor Arctic Blast (channeled) is usable for combat casting
+        // Verify that Blood Golem (summon) is NOT usable for native combat casting,
+        // but Arctic Blast (channeled) IS usable via server-side CreateMissile stream emission!
         assert(!IsSkillUsableByCompanion(VirtualPlayerClass::Barbarian, 85));
-        assert(!IsSkillUsableByCompanion(VirtualPlayerClass::Barbarian, 230));
+        assert(IsSkillUsableByCompanion(VirtualPlayerClass::Barbarian, 230));
 
         std::printf("  [PASS] Test 4: CollectMercenarySkillBadges (with dynamic localized names, pre-scanned charges, and Blood Golem/Arctic Blast safety)\n");
     }

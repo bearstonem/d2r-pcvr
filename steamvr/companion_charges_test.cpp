@@ -168,16 +168,16 @@ void TestCompanionSkillUsability() {
     assert(!IsSkillUsableByCompanion(VirtualPlayerClass::Amazon, 9));
     assert(!IsSkillUsableByCompanion(VirtualPlayerClass::Amazon, 89));
 
-    // Incompatible player-locked animations, shapeshifts, continuous channeled spells, and client-bound summons rejected for ALL
-    for (uint16_t bannedSkill : {97, 106, 107, 132, 143, 151, 223, 228, 255, 260, 270, 275, 41 /*Inferno*/, 230 /*Arctic Blast*/, 85 /*Blood Golem*/, 246 /*Wolverine*/}) {
+    // Incompatible player-locked animations, shapeshifts, and client-bound summons rejected for ALL
+    for (uint16_t bannedSkill : {97, 106, 107, 132, 143, 151, 223, 228, 255, 260, 270, 275, 85 /*Blood Golem*/, 246 /*Wolverine*/}) {
         assert(!IsSkillUsableByCompanion(VirtualPlayerClass::Amazon, bannedSkill));
         assert(!IsSkillUsableByCompanion(VirtualPlayerClass::Paladin, bannedSkill));
         assert(!IsSkillUsableByCompanion(VirtualPlayerClass::Sorceress, bannedSkill));
         assert(!IsSkillUsableByCompanion(VirtualPlayerClass::Barbarian, bannedSkill));
     }
 
-    // Standard spells/curses/buffs usable by ALL
-    for (uint16_t universalSkill : {54 /*Teleport*/, 82 /*Life Tap*/, 17 /*Slow Missiles*/, 44 /*Frost Nova*/, 138 /*Shout*/}) {
+    // Standard spells/curses/buffs and streaming breath spells (Inferno 41 / Arctic Blast 230) usable by ALL
+    for (uint16_t universalSkill : {54 /*Teleport*/, 82 /*Life Tap*/, 17 /*Slow Missiles*/, 44 /*Frost Nova*/, 138 /*Shout*/, 41 /*Inferno*/, 230 /*Arctic Blast*/}) {
         assert(IsSkillUsableByCompanion(VirtualPlayerClass::Amazon, universalSkill));
         assert(IsSkillUsableByCompanion(VirtualPlayerClass::Paladin, universalSkill));
         assert(IsSkillUsableByCompanion(VirtualPlayerClass::Sorceress, universalSkill));

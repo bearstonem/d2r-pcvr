@@ -2028,6 +2028,35 @@ int main() {
                 g_testEquippedSlots.clear();
             }
 
+            // Test 9: Continuous Channeled Stream Spell (Arctic Blast 230 on Act 5 Barbarian)
+            {
+                g_dispatchCount = 0;
+                g_fakeMissilesCreated = 0;
+                g_lastStartedSkill = 0;
+                g_testEquippedSlots.clear();
+                companionai::ClearCachedSkillBadges();
+
+                // Act 5 Barbarian (class 561) with Frostwind (+14 to Arctic Blast, Oskill Stat 97)
+                const uint16_t abSkillId = 230;
+                const int32_t abLvl = 14;
+                g_testEquippedSlots[4].header[2] = 401; // Mainhand
+                g_testEquippedSlots[4].stats = { { static_cast<int>(ItemStat::NonClassSkill), abSkillId, abLvl } };
+
+                const framevr::companionai::Vec2 compP{ 100.0f, 100.0f };
+                const framevr::companionai::Vec2 plyrP{ 100.0f, 100.0f };
+                uint64_t tickMs = 400000;
+
+                companionai::ExecuteCompanionTacticalCharges(
+                    1, mercUnitPtr, 561, 100.0f, 100.0f,
+                    compP, plyrP, tickMs, true, true);
+
+                // Arctic Blast must emit continuous stream missiles without calling startFn (bypassing ptClient null crash!)
+                assert(g_fakeMissilesCreated == (14 / 2 + 6)); // streamCount = 13 missiles
+                assert(g_lastStartedSkill != 230); // startFn must NOT be invoked for channeled spells!
+
+                g_testEquippedSlots.clear();
+            }
+
             g_testEquippedSlots.clear();
         }
     }

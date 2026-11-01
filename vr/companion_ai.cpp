@@ -1503,69 +1503,52 @@ void ExecuteCompanionTacticalChargesInternal(
             (void)originalServerMoveUnit(game, hireling, targetUnit, animMode, destX, destY, 1, 0);
         }
 
-        const int arrowCount = (decision.skillId == 26)
-            ? std::clamp(static_cast<int>(decision.level) + 4, 4, 10)
-            : 1;
-
-        const int startRes = startFn(game, hireling, decision.skillId, decision.level, 0);
-
+        int startRes = 0;
         int castRes = 0;
         int successfulDispatches = 0;
-        for (int a = 0; a < arrowCount; ++a) {
-            uint32_t arrowTargetId = primaryTargetId;
-            int arrowDestX = destX;
-            int arrowDestY = destY;
+        int arrowCount = 1;
 
-            if (hCount > 0) {
-                const auto& h = hostiles[a % hCount];
-                arrowTargetId = h.id;
-                arrowDestX = int(std::round(h.x));
-                arrowDestY = int(std::round(h.y));
-            }
-
-            for (size_t i = 0; i < s_activeSyntheticNodeCount; ++i) {
-                if (activeSkillNode == reinterpret_cast<uintptr_t>(&s_companionSyntheticNodes[i])) {
-                    s_companionSyntheticNodes[i].targetId = arrowTargetId;
-                    s_companionSyntheticNodes[i].hitCount = arrowCount - a;
-                    break;
-                }
-            }
-
-            const int res = dispatchFn(game, hireling, decision.skillId, decision.level, 1, arrowDestX, arrowDestY);
-            if (res != 0) {
-                successfulDispatches++;
-                castRes = res;
-            }
-
-            // For bow attack skills (e.g. Strafe 26), vanilla D2R srvdofunc 12 requires player ammunition/quiver
-            // which hirelings do not have, so it skips spawning missiles.
-            // Create the physical arrow missiles natively via CreateMissile (0x5371a0) with Strafe skill context:
-            if (decision.skillId == 26 || framevr::weaponskills::Bow(decision.skillId)) {
-                using CreateMissileFn = uintptr_t(*)(uintptr_t game, uintptr_t params);
-                const auto createMissileFn = reinterpret_cast<CreateMissileFn>(d2rsig::Addr(abi::CreateMissileRva));
-                if (createMissileFn) {
-                    float offsetX = 0.0f;
-                    float offsetY = 0.0f;
-                    if (hCount <= 1 && arrowCount > 1) {
-                        const float angle = std::atan2(static_cast<float>(destY) - compPos.y, static_cast<float>(destX) - compPos.x);
-                        const float perpAngle = angle + 1.5707963f;
-                        const float spread = (static_cast<float>(a) - (arrowCount - 1) * 0.5f) * 0.25f;
-                        offsetX = std::cos(perpAngle) * spread;
-                        offsetY = std::sin(perpAngle) * spread;
+        if (decision.skillId == 41 || decision.skillId == 230) {
+            // Channeled continuous stream skills (Inferno ID 41 & Arctic Blast ID 230):
+            // Native player srvstfunc 19 expects a human player ptClient for continuous mouse-hold streaming,
+            // which crashes on hirelings (null ptClient). Instead, dispatch the native cast animation and
+            // emit the stream missiles directly via CreateMissile (0x5371a0), exactly like monster NPCs
+            // (e.g. Act 3 Flayer Shamans and Act 4 Megademons) breathe fire!
+            using CreateMissileFn = uintptr_t(*)(uintptr_t game, uintptr_t params);
+            const auto createMissileFn = reinterpret_cast<CreateMissileFn>(d2rsig::Addr(abi::CreateMissileRva));
+            if (createMissileFn) {
+                const int streamCount = std::clamp(static_cast<int>(decision.level) / 2 + 6, 6, 16);
+                int streamMissileId = (decision.skillId == 230) ? 460 : 60; // 460 = arcticblast1, 60 = infernoflame1
+                const void* skillRow = nativeui::GetSkillRow(decision.skillId);
+                if (skillRow) {
+                    const int srvM = *reinterpret_cast<const int16_t*>(static_cast<const uint8_t*>(skillRow) + 0x66);
+                    if (srvM > 0) {
+                        streamMissileId = srvM;
                     }
-                    const int finalDestX = int(std::round(arrowDestX + offsetX));
-                    const int finalDestY = int(std::round(arrowDestY + offsetY));
+                }
+
+                const float dx = static_cast<float>(destX) - compPos.x;
+                const float dy = static_cast<float>(destY) - compPos.y;
+                const float baseAngle = std::atan2(dy, dx);
+                const float dist = std::max(2.0f, std::hypot(dx, dy));
+                constexpr float coneSpread = 0.28f; // ~16 degrees total cone spread
+
+                for (int m = 0; m < streamCount; ++m) {
+                    const float t = (streamCount > 1) ? (float(m) / float(streamCount - 1) - 0.5f) : 0.0f;
+                    const float plumeAngle = baseAngle + t * coneSpread;
+                    const int plumeDestX = int(std::round(compPos.x + std::cos(plumeAngle) * dist));
+                    const int plumeDestY = int(std::round(compPos.y + std::sin(plumeAngle) * dist));
 
                     std::array<uint8_t, 0x98> missileParams{};
                     SetMissileParam(missileParams, 0x00, uint32_t(0x21));                         // Flags: directed + unit owner
                     SetMissileParam(missileParams, 0x08, hireling);                               // Owner unit
                     SetMissileParam(missileParams, 0x10, hireling);                               // Source unit
-                    SetMissileParam(missileParams, 0x20, uint32_t(0));                            // Missile ID: 0 (arrow)
+                    SetMissileParam(missileParams, 0x20, uint32_t(streamMissileId));              // Missile ID: 460 or 60
                     SetMissileParam(missileParams, 0x24, int(std::round(compPos.x)));             // Origin X (sub-tiles)
                     SetMissileParam(missileParams, 0x28, int(std::round(compPos.y)));             // Origin Y (sub-tiles)
-                    SetMissileParam(missileParams, 0x2c, finalDestX);                             // Target X (sub-tiles)
-                    SetMissileParam(missileParams, 0x30, finalDestY);                             // Target Y (sub-tiles)
-                    SetMissileParam(missileParams, 0x3c, int(decision.skillId));                  // Skill ID (26 = Strafe)
+                    SetMissileParam(missileParams, 0x2c, plumeDestX);                             // Target X (sub-tiles)
+                    SetMissileParam(missileParams, 0x30, plumeDestY);                             // Target Y (sub-tiles)
+                    SetMissileParam(missileParams, 0x3c, int(decision.skillId));                  // Skill ID (230 or 41)
                     SetMissileParam(missileParams, 0x40, int(decision.level));                    // Skill Level
 
                     const uintptr_t mUnit = createMissileFn(game, reinterpret_cast<uintptr_t>(missileParams.data()));
@@ -1574,13 +1557,87 @@ void ExecuteCompanionTacticalChargesInternal(
                         castRes = 1;
                     }
                 }
+                startRes = (successfulDispatches > 0) ? 1 : 0;
+            }
+        } else {
+            arrowCount = (decision.skillId == 26)
+                ? std::clamp(static_cast<int>(decision.level) + 4, 4, 10)
+                : 1;
+
+            startRes = startFn(game, hireling, decision.skillId, decision.level, 0);
+
+            for (int a = 0; a < arrowCount; ++a) {
+                uint32_t arrowTargetId = primaryTargetId;
+                int arrowDestX = destX;
+                int arrowDestY = destY;
+
+                if (hCount > 0) {
+                    const auto& h = hostiles[a % hCount];
+                    arrowTargetId = h.id;
+                    arrowDestX = int(std::round(h.x));
+                    arrowDestY = int(std::round(h.y));
+                }
+
+                for (size_t i = 0; i < s_activeSyntheticNodeCount; ++i) {
+                    if (activeSkillNode == reinterpret_cast<uintptr_t>(&s_companionSyntheticNodes[i])) {
+                        s_companionSyntheticNodes[i].targetId = arrowTargetId;
+                        s_companionSyntheticNodes[i].hitCount = arrowCount - a;
+                        break;
+                    }
+                }
+
+                const int res = dispatchFn(game, hireling, decision.skillId, decision.level, 1, arrowDestX, arrowDestY);
+                if (res != 0) {
+                    successfulDispatches++;
+                    castRes = res;
+                }
+
+                // For bow attack skills (e.g. Strafe 26), vanilla D2R srvdofunc 12 requires player ammunition/quiver
+                // which hirelings do not have, so it skips spawning missiles.
+                // Create the physical arrow missiles natively via CreateMissile (0x5371a0) with Strafe skill context:
+                if (decision.skillId == 26 || framevr::weaponskills::Bow(decision.skillId)) {
+                    using CreateMissileFn = uintptr_t(*)(uintptr_t game, uintptr_t params);
+                    const auto createMissileFn = reinterpret_cast<CreateMissileFn>(d2rsig::Addr(abi::CreateMissileRva));
+                    if (createMissileFn) {
+                        float offsetX = 0.0f;
+                        float offsetY = 0.0f;
+                        if (hCount <= 1 && arrowCount > 1) {
+                            const float angle = std::atan2(static_cast<float>(destY) - compPos.y, static_cast<float>(destX) - compPos.x);
+                            const float perpAngle = angle + 1.5707963f;
+                            const float spread = (static_cast<float>(a) - (arrowCount - 1) * 0.5f) * 0.25f;
+                            offsetX = std::cos(perpAngle) * spread;
+                            offsetY = std::sin(perpAngle) * spread;
+                        }
+                        const int finalDestX = int(std::round(arrowDestX + offsetX));
+                        const int finalDestY = int(std::round(arrowDestY + offsetY));
+
+                        std::array<uint8_t, 0x98> missileParams{};
+                        SetMissileParam(missileParams, 0x00, uint32_t(0x21));                         // Flags: directed + unit owner
+                        SetMissileParam(missileParams, 0x08, hireling);                               // Owner unit
+                        SetMissileParam(missileParams, 0x10, hireling);                               // Source unit
+                        SetMissileParam(missileParams, 0x20, uint32_t(0));                            // Missile ID: 0 (arrow)
+                        SetMissileParam(missileParams, 0x24, int(std::round(compPos.x)));             // Origin X (sub-tiles)
+                        SetMissileParam(missileParams, 0x28, int(std::round(compPos.y)));             // Origin Y (sub-tiles)
+                        SetMissileParam(missileParams, 0x2c, finalDestX);                             // Target X (sub-tiles)
+                        SetMissileParam(missileParams, 0x30, finalDestY);                             // Target Y (sub-tiles)
+                        SetMissileParam(missileParams, 0x3c, int(decision.skillId));                  // Skill ID (26 = Strafe)
+                        SetMissileParam(missileParams, 0x40, int(decision.level));                    // Skill Level
+
+                        const uintptr_t mUnit = createMissileFn(game, reinterpret_cast<uintptr_t>(missileParams.data()));
+                        if (mUnit) {
+                            successfulDispatches++;
+                            castRes = 1;
+                        }
+                    }
+                }
             }
         }
 
+        const int reportedDispatches = (decision.skillId == 41 || decision.skillId == 230) ? successfulDispatches : arrowCount;
         char logBuf[256];
         std::snprintf(logBuf, sizeof logBuf,
             "Frame companion AI: tactical cast skill %u (lvl %u, %s, %d arrows/hits) -> dest (%d,%d) startRes=%d castRes=%d",
-            decision.skillId, decision.level, decision.reason, arrowCount, destX, destY, startRes, successfulDispatches);
+            decision.skillId, decision.level, decision.reason, reportedDispatches, destX, destY, startRes, successfulDispatches);
         framevr::logging::Write(logBuf);
 
         if (castRes != 0 || startRes != 0) {
