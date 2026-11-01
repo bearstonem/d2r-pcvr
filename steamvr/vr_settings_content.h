@@ -589,6 +589,11 @@ inline constexpr Override Overrides[]={
      .beside=true,.besideLabel="Ends at"},
     {.id="ceiling.enabled",.page=View::World,.section="Sky and dungeons",.kind=RowKind::Toggle,.label="Dungeon ceilings",
      .help="Covers the open black space above you in supported dungeons. Building roofs are the game's own."},
+    // Dungeon torchlight (owner 2026-11-01): the game's own lights ([ceiling] torches), the right half of
+    // Dungeon ceilings' row - they are gathered only under it (RowEnabled), and Performance holds 8 rows already.
+    {.id="ceiling.torches",.page=View::World,.section="Sky and dungeons",.kind=RowKind::Toggle,.label="Dungeon torchlight",
+     .help="The game's own torches and braziers light the dungeon around them. Finding them scans game memory every 1.5 s: turn it off if dungeons stutter.",
+     .beside=true,.besideLabel="Torches"},
     // World: Things that move and glow
     {.id="interactions.bottle_physics",.page=View::World,.section="Things that move and glow",.kind=RowKind::Toggle,.label="Roll and break bottles",
      .help="Empty bottles drop and roll. Potions thrown at your mercenary break where they hit; thrown traps and gas or oil potions stop at walls."},

@@ -67,6 +67,7 @@ inline const char* HelpText(int id) {
         case LootBeamSet:return "A green pillar of light over every set item lying near you, until you pick it up.";
         case LootBeamRare:return "A yellow pillar of light over every rare item lying near you, until you pick it up. Rares drop often: turn this Off to light only the rarer finds.";
         case LootBeamRunes:return "An orange pillar of light over every high rune lying near you, Vex and up ([loot] rune_min in d2r_pcvr.ini sets the lowest), until you pick it up.";
+        case CeilingTorches:return "On: the game's own torches, braziers and other lit objects light the dungeon walls, floor and the mod's ceiling around them, as the flames suggest. Off: only your own light and a torch you carry light it. Finding the game's lights scans its memory every 1.5 seconds, which can cause stutter or dropouts on slower PCs. Only under Dungeon ceilings; off by default.";
         case LootBeamBrightness:return "How bright the loot beams are, the pillar and the glow on the floor round it alike. 100% is the full beam; lower it if the beams feel too strong. Filter chooses which kinds of loot get one; all four Off, none.";
         case TooltipTiming:return "How soon item details appear when you point the laser at an item in a game panel.";
         case CompanionCounts:return "Shows companion counts and effects currently affecting your character below the left-hand minimap. This includes received buffs, auras and harmful effects, not just assigned skills. It follows Map and compass placement.";

@@ -96,6 +96,7 @@ static const GoldenRow Golden[]={
     {"fog.enabled",View(9),0,content::RowKind::Toggle,"Distance fog",0,0},
     {"fog.end",View(9),0,content::RowKind::Slider,"Fog distance",0,0},   // main's #366, drawn inside Distance fog's row
     {"ceiling.enabled",View(9),0,content::RowKind::Toggle,"Dungeon ceilings",0,0},
+    {"ceiling.torches",View(9),0,content::RowKind::Toggle,"Dungeon torchlight",0,0},   // the game's own lights, drawn inside Dungeon ceilings' row
     {"interactions.bottle_physics",View(9),1,content::RowKind::Toggle,"Roll and break bottles",0,0},
     {"interactions.prop_physics",View(9),1,content::RowKind::Toggle,"Knock over small props",0,0},
     {"interactions.body_physics",View(9),1,content::RowKind::Toggle,"Pushable bodies",0,0},   // main's #361

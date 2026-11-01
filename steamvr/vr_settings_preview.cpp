@@ -59,10 +59,10 @@ static constexpr int Classes[]={-1,heroclass::Amazon,heroclass::Sorceress,herocl
 static const char* ClassName(int c){return c<0?"title screen":c==heroclass::Amazon?"Amazon":c==heroclass::Sorceress?"Sorceress":c==heroclass::Paladin?"Paladin":"Barbarian";}
 static const char* ViewName(int v){return C::PageOf(View(v)).name;}
 struct Setup {Model m;L::LayoutInput in;};
-// Every dependent row shown (the outline's hands, ground skill circles, foveation strength, wipe).
+// Every dependent row shown (the outline's hands, ground skill circles, foveation strength, wipe, torchlight).
 static Values AllRows(bool smooth){
     Values v=Defaults();
-    v[TargetHighlight]=60;v[GroundAim]=1;v[SpellLock]=1;v[Foveation]=1;v[BloodVisor]=1;v[SmoothTurn]=smooth?1.f:0.f;v[Seated]=0;
+    v[TargetHighlight]=60;v[GroundAim]=1;v[SpellLock]=1;v[Foveation]=1;v[BloodVisor]=1;v[Ceiling]=1;v[SmoothTurn]=smooth?1.f:0.f;v[Seated]=0;
     return v;
 }
 static Setup Base(View v,int hero,const Values& values=AllRows(false),bool adapter=true){

@@ -573,6 +573,13 @@ int main(int argc,char** argv){
         tactical.Click(Step(CompanionTactical,-1));
         Check(tactical.Click({Kind::Apply}).changed==(ChangeMask{1}<<CompanionTactical),"companion tactical saves only its own setting");
     }
+    {   // Dungeon torchlight (owner 2026-11-01): the game's own lights, beside Dungeon ceilings
+        Check(s.values[CeilingTorches]==0&&PageOf(CeilingTorches)==View::World,"dungeon torchlight is off by default, on the World page");
+        Check(std::wstring_view(Definitions[CeilingTorches].section)==L"ceiling"&&std::wstring_view(Definitions[CeilingTorches].key)==L"torches","dungeon torchlight writes [ceiling] torches");
+        Check(Normalize(CeilingTorches,NAN)==0&&Normalize(CeilingTorches,1)==1&&Normalize(CeilingTorches,2)==1,"dungeon torchlight is On or Off");
+        auto v=s.values;v[Ceiling]=0;Check(!RowEnabled(v,CeilingTorches)&&!RowShown(CeilingTorches,v,{}),"hidden without dungeon ceilings");
+        v[Ceiling]=1;Check(RowEnabled(v,CeilingTorches)&&RowShown(CeilingTorches,v,{}),"shown with dungeon ceilings");
+    }
     {Model difficulty;difficulty.Open(s);
         Check(s.values[OfflinePlayers]==0,"difficulty preserves native settings by default");
         Check(Normalize(OfflinePlayers,NAN)==0&&Normalize(OfflinePlayers,9)==0&&Normalize(OfflinePlayers,2.5f)==0,"invalid offline counts fail back to native");

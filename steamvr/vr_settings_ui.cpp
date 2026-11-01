@@ -365,6 +365,8 @@ std::vector<PreviewShot> PreviewShots(){
     {Snapshot s;s.values[DeferGpuWait]=0;Setup x=base(View::Performance,-1,s);x.in.game={true,true};
      x.in.performance={true,true,52,11.1f,1.0f,7.0f,9.4f,1.5f};add("performance-warnings",x);}
     {Setup x=base(View::Presets,-1);x.in.hover={Kind::Preset,0};x.in.card=HelpPresetFirst;add("presets-pointed",x);}
+    // World with Dungeon ceilings on: Torchlight beside them, its card open (owner 2026-11-01).
+    {Snapshot s;s.values[Ceiling]=1;Setup x=base(View::World,-1,s);x.in.card=CeilingTorches;add("world-torchlight",x);}
     // Vibration: a Feel it per test (Weapon / Shield), at the default and changed (with Undo and Default).
     {Setup x=base(View::Vibration,-1);x.in.card=HapticMelee;add("vibration-feel-it",x);
      Setup y=base(View::Vibration,-1);y.m.Set(HapticMelee,60);y.in.card=HapticMelee;y.in.hover={Kind::TestHaptics,int(haptics::Category::Melee),2};add("vibration-feel-it-changed",y);}
