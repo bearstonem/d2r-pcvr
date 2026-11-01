@@ -22,7 +22,7 @@ flowchart TD
         S1["Player HMD Pose & 110° FOV / 250° Blind Spot"]
         S2["Hireling Vitals, Room & D2DynamicPathStrc State"]
         S3["Archetype Profile: MeleeVanguard vs RangedOverwatch"]
-        S4["VR Gesture Input: Point Raycast & Open-Palm Hold"]
+        S4["VR Gesture Input: Point Raycast, Grip + Trigger"]
     end
 
     subgraph L2["Layer 2: Hierarchical Intent Arbitrator (Single Active Intent)"]

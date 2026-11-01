@@ -2507,8 +2507,6 @@ bottles::Prop Metres(const props::Seen& s,float upm) {
 // Grip + Trigger per hand (tactical_chord.h): grip on the companion arms, the trigger latches,
 // letting go carries the command out. An armed or latched hand's trigger is kept from the game (Input).
 framevr::tacticalchord::Hand g_tacticalChord[2];
-uint64_t g_openPalmHoldStart[2]{};
-bool g_openPalmLocked[2]{};
 int g_tacticalGrabHand = -1;
 uint64_t g_tacticalGrabStartMs = 0;
 uint64_t g_lastTacticalOrderMs = 0;
@@ -2517,8 +2515,6 @@ bool g_tacticalTargetOutOfRange[2]{};
 void StepCompanionTacticalGestures(uint64_t now, float rightTrigger, float leftTrigger) {
     if (!::companionai::IsTacticalCommandsEnabled() || !interactionInput.active) {
         g_tacticalChord[0].Reset(); g_tacticalChord[1].Reset();
-        g_openPalmHoldStart[0] = g_openPalmHoldStart[1] = 0;
-        g_openPalmLocked[0] = g_openPalmLocked[1] = false;
         if (g_tacticalGrabHand >= 0) {
             framevr::telegraph::Current().ClearSkill(-2);
             g_tacticalGrabHand = -1;
@@ -2544,8 +2540,6 @@ void StepCompanionTacticalGestures(uint64_t now, float rightTrigger, float leftT
         const float trigger = (h == 0) ? rightTrigger : leftTrigger;
         if (!interactionInput.tracked[h]) {
             chord.Step(grip, trigger, false, false);
-            g_openPalmHoldStart[h] = 0;
-            g_openPalmLocked[h] = false;
             if (g_tacticalGrabHand == h) {
                 framevr::telegraph::Current().ClearSkill(-2);
                 g_tacticalGrabHand = -1;
@@ -2553,41 +2547,9 @@ void StepCompanionTacticalGestures(uint64_t now, float rightTrigger, float leftT
             continue;
         }
 
-        // 1. Gesture: Open-Palm Defensive Hold (Upright palm facing companion / forward)
-        const bool handOpen = grip < 0.2f && trigger < 0.2f;
-        if (handOpen && g_tacticalGrabHand < 0) {
-            const auto handUp = math::Rotate(interactionInput.hand[h].q, {0, 1, 0});
-            if (handUp.y > 0.82f) {
-                const auto palmNormal = math::Rotate(interactionInput.hand[h].q, h ? math::Vec{1, 0, 0} : math::Vec{-1, 0, 0});
-                const auto headForward = math::Rotate(interactionInput.head.q, {0, 0, -1});
-                if (math::Dot(palmNormal, headForward) > 0.70f) {
-                    if (g_openPalmHoldStart[h] == 0) {
-                        g_openPalmHoldStart[h] = now;
-                    } else if (now - g_openPalmHoldStart[h] >= 400 && !g_openPalmLocked[h] && (now - g_lastTacticalOrderMs >= 300)) {
-                        g_openPalmLocked[h] = true;
-                        g_lastTacticalOrderMs = now;
-                        framevr::companionai::TacticalOrder order;
-                        order.type = framevr::companionai::TacticalOrderType::DefensiveHold;
-                        if (::companionai::IssueTacticalOrder(order)) {
-                            if (hasCompPos) {
-                                framevr::telegraph::Current().Place(compX, compY, now, 3000, 2, 1.5f);
-                            }
-                            MotionPulse(h, haptics::Category::Interaction, 0.45f, 50000000);
-                            Say("Frame companion tactical: open-palm defensive hold ordered");
-                        }
-                    }
-                    chord.Step(grip, trigger, false, !handsBusy);   // an open hand: at most an armed grip let go
-                    continue;
-                }
-            }
-            g_openPalmHoldStart[h] = 0;
-            g_openPalmLocked[h] = false;
-        } else {
-            g_openPalmHoldStart[h] = 0;
-            g_openPalmLocked[h] = false;
-        }
-
-        // 2. Gesture: Select Companion First -> Grip on it, then Trigger & Aim -> Release to Execute
+        // The open-palm Defensive Hold (an upright open hand for 400 ms) is gone (owner 2026-11-01):
+        // it fired during Paladin gestures, and Grip + Trigger on the companion holds it on purpose.
+        // Select Companion First -> Grip on it, then Trigger & Aim -> Release to Execute
         // (tactical_chord.h). The ray is only tested on the frame the grip closes, or while engaged.
         if (!chord.Closing(grip) && !chord.Engaged()) {
             chord.Step(grip, trigger, false, !handsBusy);
