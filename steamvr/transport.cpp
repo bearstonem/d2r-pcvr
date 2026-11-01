@@ -51,6 +51,8 @@
 #include "shapeshift_gesture.h"
 #include "hammer_gesture.h"
 #include "charge_gesture.h"
+#include "cross_gesture.h"
+#include "heavens_gesture.h"
 #include "guard_strain.h"
 #include "guard_strain_paint.h"
 #include "heartbeat.h"
@@ -531,6 +533,20 @@ hammerpump::Engine hammerGesture;
 weaponskills::Pulse hammerPulse;
 int hammerSlot=-1,hammerOwner=-1;
 uint32_t hammerCasts=0;
+// [holy shield] Paladin sign of the cross pulses whichever slot holds Holy Shield.
+holycross::Engine crossGesture;
+weaponskills::Pulse crossPulse;
+int crossSlot=-1,crossOwner=-1;
+// [fist of the heavens] the call waits up to HeavensWaitMs for vrcam to hand the
+// game the monster the arm points at, then presses the slot.
+heavensfist::Engine heavensGesture;
+weaponskills::Pulse heavensPulse;
+int heavensSlot=-1,heavensOwner=-1,heavensPendingSlot=-1;
+uint32_t heavensRequest=0,heavensAnswered=0,heavensMonster=0,heavensCasts=0;
+float heavensFrom=0,heavensAt=0;   // the last call's start and stop elevation (degrees), for the log
+ULONGLONG heavensAskedAt=0;
+std::atomic<bool> heavensArmed{false};
+constexpr ULONGLONG HeavensWaitMs=120;
 // [charge] Paladin Charge punch pulses whichever slot holds Charge.
 chargepunch::Engine chargeGesture;
 weaponskills::Pulse chargePulse;
@@ -3570,6 +3586,100 @@ void Input() {
             else if(motionOutput.skill<0&&quickFresh&&quickSnapshot.skills[pulse].available)motionOutput.skill=pulse;
         }
     }
+    // Paladin Holy Shield: the sign of the cross (forehead, chest, one shoulder,
+    // the other) with either hand, trigger free, casts Holy Shield through the
+    // slot it is bound to; mana, the buff and its glow stay native. Only runs
+    // while the skill sits on a slot.
+    {
+        int slot=-1;
+        if(quickFresh)for(int i=0;i<skills::Count;++i)if(quickSnapshot.skills[i].known&&quickSnapshot.skills[i].id==weaponskills::HolyShield){slot=i;break;}
+        holycross::Input in;
+        in.time=interactionInput.time;in.session=interactionInput.session;in.epoch=interactionInput.epoch;
+        in.active=slot>=0&&motionInput.active&&!motionOutput.block&&!motionInput.quickCast&&
+            gestureSettings[settings::SkillGestures]>.5f&&!interactionOutput.wheel&&!interactionOutput.settings;
+        in.head=interactionInput.head.p;in.headRotation=interactionInput.head.q;
+        for(int h=0;h<2;++h) {
+            in.hand[h]=interactionInput.hand[h].p;in.tracked[h]=interactionInput.tracked[h];
+            in.handVelocity[h]=interactionInput.handVelocity[h];in.velocityKnown[h]=interactionInput.velocityKnown[h];
+            in.busy[h]=interactionOutput.bottleHand==h||interactionOutput.owner[h]!=interaction::Owner::Combat||
+                handInput.trigger[h]>.3f||(h==0&&motionOutput.bowDrawing)||bloodOutput.block[h];
+        }
+        const auto sign=crossGesture.Step(in);
+        if(sign.dropped) {
+            char line[160];std::snprintf(line,sizeof line,"Frame holy shield: %s hand sign dropped after %d of 4 touches: %s",sign.droppedHand?"left":"right",sign.reached,sign.dropped);Say(line);
+        }
+        if(sign.cast>=0&&slot>=0) {
+            const char* hand=sign.cast?"left":"right";
+            char line[160];
+            if(!quickSnapshot.skills[slot].available)std::snprintf(line,sizeof line,"Frame holy shield: %s hand sign, skill unavailable on slot %d",hand,slot);
+            // Alternate-bank slots need the modifier prepared first: hold like Smite.
+            else if(crossPulse.Start(slot,weaponskills::HolyShield,quickSnapshot.skills[slot].owner,motionInput.skillContext,motionInput.time,skills::Alternate(slot)?.180:.065)) {
+                crossSlot=slot;crossOwner=quickSnapshot.skills[slot].owner;
+                MotionPulse(sign.cast,haptics::Category::Spell,.6f,60000000);
+                std::snprintf(line,sizeof line,"Frame holy shield: %s hand sign of the cross cast via slot %d",hand,slot);
+            }
+            else std::snprintf(line,sizeof line,"Frame holy shield: %s hand sign dropped: the previous press is still held",hand);
+            Say(line);
+        }
+        if(crossSlot>=0) {
+            const int pulse=crossPulse.Get(crossSlot,weaponskills::HolyShield,crossOwner,motionInput.skillContext,motionInput.time);
+            if(pulse<0)crossSlot=crossOwner=-1;
+            else if(motionOutput.skill<0&&quickFresh&&quickSnapshot.skills[pulse].available)motionOutput.skill=pulse;
+        }
+    }
+    // Paladin Fist of the Heavens: the weapon arm straight, raised ~45 degrees,
+    // brought down to stop level with the shoulder (grip held, trigger free).
+    // The monster the arm points at is handed to the game (vrcam answers
+    // HeavensRequest), else the game picks; then the slot is pressed. Mana,
+    // cast rate and the bolt stay native. Only while the skill is on a slot.
+    {
+        constexpr int weaponHand=0;
+        int slot=-1;
+        if(quickFresh)for(int i=0;i<skills::Count;++i)if(quickSnapshot.skills[i].known&&quickSnapshot.skills[i].id==weaponskills::FistOfHeavens){slot=i;break;}
+        heavensfist::Input in;
+        in.time=interactionInput.time;in.session=interactionInput.session;in.epoch=interactionInput.epoch;
+        in.active=slot>=0&&motionInput.active&&!motionOutput.block&&!motionInput.quickCast&&
+            gestureSettings[settings::SkillGestures]>.5f&&!interactionOutput.wheel&&!interactionOutput.settings;
+        heavensArmed=slot>=0&&gestureSettings[settings::SkillGestures]>.5f;
+        in.head=interactionInput.head.p;in.headRotation=interactionInput.head.q;
+        in.hand=interactionInput.hand[weaponHand].p;in.tracked=interactionInput.tracked[weaponHand];in.grip=motionInput.grip[weaponHand];
+        in.handVelocity=interactionInput.handVelocity[weaponHand];in.velocityKnown=interactionInput.velocityKnown[weaponHand];
+        in.armSpan=calibration::Stored(gestureSettings)?gestureSettings[settings::ArmSpan]:0;
+        in.busy=interactionOutput.bottleHand==weaponHand||interactionOutput.owner[weaponHand]!=interaction::Owner::Combat||
+            handInput.trigger[weaponHand]>.3f||motionOutput.bowDrawing||bloodOutput.block[weaponHand];
+        const auto call=heavensGesture.Step(in);
+        if(call.dropped) {
+            char line[192];std::snprintf(line,sizeof line,"Frame heavens: call dropped: %s (from %.0f to %.0f deg)",call.dropped,call.from,call.at);Say(line);
+        }
+        if(call.cast&&slot>=0) {
+            if(!quickSnapshot.skills[slot].available){char line[128];std::snprintf(line,sizeof line,"Frame heavens: call, skill unavailable on slot %d",slot);Say(line);}
+            else {heavensPendingSlot=slot;heavensAskedAt=motionAt;heavensFrom=call.from;heavensAt=call.at;heavensRequest=heavensRequest+1?heavensRequest+1:1;}
+        }
+        if(heavensPendingSlot>=0&&(heavensAnswered==heavensRequest||motionAt-heavensAskedAt>HeavensWaitMs)) {
+            const int at=heavensPendingSlot;heavensPendingSlot=-1;
+            const bool answered=heavensAnswered==heavensRequest;
+            char line[192];
+            if(at<skills::Count&&quickFresh&&quickSnapshot.skills[at].id==weaponskills::FistOfHeavens&&
+               heavensPulse.Start(at,weaponskills::FistOfHeavens,quickSnapshot.skills[at].owner,motionInput.skillContext,motionInput.time,skills::Alternate(at)?.180:.065)) {
+                heavensSlot=at;heavensOwner=quickSnapshot.skills[at].owner;
+                MotionPulse(weaponHand,haptics::Category::Spell,.6f,60000000);
+                ++heavensCasts;
+                if(heavensCasts<=10||heavensCasts%25==0||!answered)
+                    std::snprintf(line,sizeof line,"Frame heavens: call cast via slot %d at %s, from %.0f to %.0f deg (%u since launch)",at,
+                        !answered?"the game's pick (no answer from the aim)":heavensMonster?"the monster the arm points at":"the game's pick (no monster where the arm points)",
+                        heavensFrom,heavensAt,heavensCasts);
+                else line[0]=0;
+            }
+            else std::snprintf(line,sizeof line,"Frame heavens: call dropped: the previous press is still held");
+            if(line[0])Say(line);
+            heavensAnswered=heavensRequest;
+        }
+        if(heavensSlot>=0) {
+            const int pulse=heavensPulse.Get(heavensSlot,weaponskills::FistOfHeavens,heavensOwner,motionInput.skillContext,motionInput.time);
+            if(pulse<0)heavensSlot=heavensOwner=-1;
+            else if(motionOutput.skill<0&&quickFresh&&quickSnapshot.skills[pulse].available)motionOutput.skill=pulse;
+        }
+    }
     // Paladin Charge punch: a weapon-hand fist (grip held, trigger free) drawn
     // in and punched straight out, arm extended, casts Charge through the slot
     // it is bound to; the aim rules hand it the monster that hand points at,
@@ -3666,8 +3776,19 @@ void Input() {
         std::snprintf(cue.name,sizeof cue.name,"Skill unavailable");std::snprintf(cue.hint,sizeof cue.hint,"Refresh assignments");
     }
     // Paladin body gestures (fist pump, Charge punch) work from any slot.
-    const auto paladinGesture=[&](int id){
-        return gestureSettings[settings::SkillGestures]>.5f?id==weaponskills::BlessedHammer?"Punch up to cast":id==weaponskills::Charge?"Punch out to charge":nullptr:nullptr;
+    // Body gestures that work from any slot: the Paladin's (fist pump, Charge
+    // punch, sign of the cross) and the Druid's shapeshifts.
+    const auto paladinGesture=[&](int id)->const char*{
+        if(gestureSettings[settings::SkillGestures]<=.5f)return nullptr;
+        switch(id) {
+            case weaponskills::BlessedHammer:return "Punch up to cast";
+            case weaponskills::Charge:return "Punch out to charge";
+            case weaponskills::HolyShield:return "Sign of the cross";
+            case weaponskills::FistOfHeavens:return "Raise, bring down";
+            case weaponskills::Werewolf:return "Cross, bow, fling open";
+            case weaponskills::Werebear:return "Hands high, slam down";
+            default:return nullptr;
+        }
     };
     if(cue.available&&!cue.temporary)if(const char* how=paladinGesture(cue.id)){cue.gesture=true;std::snprintf(cue.hint,sizeof cue.hint,"%s",how);}
     if(quiverArrow.Active()&&!cue.temporary&&(motionInput.weapon==gameplay::Weapon::Bow||motionInput.weapon==gameplay::Weapon::Javelin)) {
@@ -5659,6 +5780,15 @@ int CastButtonHand() {
 bool HandSpellHeld(int hand) {
     std::lock_guard lock(mutex);
     return hand>=0&&hand<2&&motionControls.load()&&handOutput.spells[hand]>=0;
+}
+bool HeavensArmed(){return heavensArmed.load();}
+uint32_t HeavensRequest() {
+    std::lock_guard lock(mutex);
+    return heavensPendingSlot>=0&&heavensAnswered!=heavensRequest&&GetTickCount64()-heavensAskedAt<=HeavensWaitMs?heavensRequest:0;
+}
+void HeavensResolved(uint32_t request,uint32_t monster) {
+    std::lock_guard lock(mutex);
+    if(request&&request==heavensRequest){heavensAnswered=request;heavensMonster=monster;}
 }
 namespace {
 // The fresh native cast's skill row, or nullptr.
