@@ -8310,7 +8310,9 @@ void Tick() {
 // of the wall behind the flame, and its light jumped about as the hero walked. Objects
 // near the hero, walked to the classic D2 way - the hero's path (+0x38), its room
 // (+0x20), the rooms near it (+0x00, count +0x40), each room's units (+0xA8, next
-// +0x158) - the offsets MapAssist reads in D2R, confirmed on this build by a probe: the
+// +0x160: the room link, steamvr/sewer_interaction.h; MapAssist's +0x158 is the unit
+// hash-list link on this build, and walked from a room's first unit it saw only a few
+// units until 2026-11-01) - the offsets confirmed on this build by a probe: the
 // hero's place on the path (+2/+6, subtiles, fraction below) times 2 is vrcam's look-at,
 // x to x and y to z; an object's (static path +0x10/+0x14) found a tiki torch where one
 // stood. What gives light and how far is the game's Objects table (gamestate::ObjectLight).
@@ -8541,7 +8543,8 @@ void Gather() {
     if (hero && Rd(hero + 0x38, &path) && Rd(path + 0x20, &room) && Rd(room, &nearRooms) && Rd(room + 0x40, &nNear) &&
         nearRooms && nNear > 0 && nNear <= 64) {
         // The rooms near the hero's and the rooms near those: a crypt's rooms are small, and
-        // the near ones held 2 objects - its torches stood a room further (2026-10-07).
+        // the near ones held 2 objects - its torches stood a room further (2026-10-07; then
+        // walked by the hash link, which saw only a few of each room's units).
         uintptr_t rooms[128];
         uint32_t nRooms = 0;
         auto addRoom = [&](uintptr_t rm) {
@@ -8564,7 +8567,7 @@ void Gather() {
             for (int k = 0; u && k < 512; ++k) {
                 uint32_t ut = 0, txt = 0, mode = 0;
                 uintptr_t up = 0, next = 0;
-                Rd(u, &ut); Rd(u + 4, &txt); Rd(u + 0xC, &mode); Rd(u + 0x38, &up); Rd(u + 0x158, &next);
+                Rd(u, &ut); Rd(u + 4, &txt); Rd(u + 0xC, &mode); Rd(u + 0x38, &up); Rd(u + 0x160, &next);   // the room's next unit
                 if (ut == 2 && up) {
                     ++objects;
                     float rgb[3];
