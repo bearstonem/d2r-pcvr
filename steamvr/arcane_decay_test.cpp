@@ -1,8 +1,10 @@
 #include "arcane_decay.h"
 #include <cassert>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <thread>
 
 using namespace framevr::arcane;
 
@@ -392,6 +394,34 @@ int main() {
         Expect(k1 != k3, "PaintKey changes over time for procedural drift");
         Expect(k1 != k4, "PaintKey changes for different intensity/depletion");
         Expect(PaintKey(0.0f, 0.0f, 1.0) == 0, "PaintKey is 0 when invisible");
+    }
+
+    // 12. Painter worker tests
+    {
+        Painter painter;
+        Expect(painter.Start(), "Painter worker starts successfully");
+        Expect(!painter.Busy(), "Painter is not busy initially");
+
+        PaintJob job{0.8f, 0.5f, 1.0};
+        Expect(painter.Submit(job), "Painter submits job successfully");
+        Expect(painter.Busy(), "Painter is busy after submit");
+        Expect(!painter.Submit(job), "Painter rejects duplicate submit while busy (prevents worker starvation)");
+
+        PaintImage img;
+        int retries = 0;
+        while (!painter.Take(img) && retries++ < 200) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        Expect(!img.pixels.empty(), "Painter produces non-empty image");
+        Expect(img.key != 0, "Painter produces non-zero paint key");
+        Expect(!painter.Busy(), "Painter is not busy after Take");
+
+        // Discard test
+        Expect(painter.Submit(job), "Painter submits another job");
+        painter.Discard();
+        Expect(!painter.Busy(), "Painter is not busy after Discard");
+
+        painter.Stop();
     }
 
     std::printf("arcane_decay_test: all %d checks passed.\n", testsPassed);

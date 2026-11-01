@@ -1,8 +1,10 @@
 #pragma once
+#include "latest_worker.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 // Arcane Decay: Low Mana Visual Warning.
@@ -180,7 +182,7 @@ inline std::vector<uint8_t> Compose(float intensity, float depletion, double tim
     // Subtle atmospheric pulse factor: at critically low mana, breathing amplitude increases
     constexpr double PulseFreq = 0.60;
     const float pulseCycle = static_cast<float>(0.5 + 0.5 * std::sin(time * (2.0 * 3.14159265358979323846 * PulseFreq)));
-    const float pulseMod = 1.0f + 0.18f * depletion * pulseCycle;
+    const float pulseMod = 1.0f + 0.20f * depletion * pulseCycle;
 
     const float t = static_cast<float>(time);
 
@@ -191,29 +193,29 @@ inline std::vector<uint8_t> Compose(float intensity, float depletion, double tim
 
             // Elliptical radius matching the visor aspect ratio: keeps the central viewing area unobstructed
             const float r = std::sqrt(u * u * 0.85f + v * v);
-            if (r <= 0.52f) {
+            if (r <= 0.48f) {
                 continue; // Clear center
             }
 
             const float theta = std::atan2(v, u * 0.92f);
 
-            // Layer 1: Spectral Vignette (dark sapphire blue)
-            const float vigT = std::clamp((r - 0.55f) / 0.45f, 0.0f, 1.0f);
+            // Layer 1: Spectral Vignette (deep midnight blue)
+            const float vigT = std::clamp((r - 0.48f) / 0.52f, 0.0f, 1.0f);
             const float vigCurve = vigT * vigT * (3.0f - 2.0f * vigT);
-            const float alpha1 = 0.50f * vigCurve * intensity;
+            const float alpha1 = 0.65f * vigCurve * intensity;
 
             // Layer 2: Arcane Mist (translucent blue/cyan drift around peripheral rim)
-            const float mistBand = std::clamp((r - 0.60f) / 0.38f, 0.0f, 1.0f);
+            const float mistBand = std::clamp((r - 0.54f) / 0.42f, 0.0f, 1.0f);
             const float drift1 = std::sin(theta * 3.0f + t * 0.35f);
             const float drift2 = std::cos(theta * 5.0f - t * 0.22f + r * 2.5f);
             const float mistNoise = 0.5f + 0.25f * drift1 + 0.25f * drift2;
-            const float alpha2 = 0.35f * mistBand * mistNoise * intensity * pulseMod;
+            const float alpha2 = 0.48f * mistBand * mistNoise * intensity * pulseMod;
 
             // Layer 3: Spectral Filaments (occasional thin glowing strands within mist)
-            const float filBand = std::clamp((r - 0.68f) / 0.30f, 0.0f, 1.0f);
+            const float filBand = std::clamp((r - 0.60f) / 0.36f, 0.0f, 1.0f);
             const float strandOsc = std::sin(theta * 7.0f + t * 0.18f) * std::cos(theta * 11.0f - t * 0.14f + r * 3.0f);
             const float strandSharp = std::pow(std::max(0.0f, strandOsc), 6.0f);
-            const float alpha3 = 0.30f * filBand * strandSharp * intensity * (1.0f + 0.25f * depletion * pulseCycle);
+            const float alpha3 = 0.45f * filBand * strandSharp * intensity * (1.0f + 0.25f * depletion * pulseCycle);
 
             // Layer 4: Combine layers into straight RGBA with Gothic Diablo I/II tones
             const float totalAlpha = std::clamp(alpha1 + alpha2 + alpha3, 0.0f, 1.0f);
@@ -222,13 +224,13 @@ inline std::vector<uint8_t> Compose(float intensity, float depletion, double tim
             }
 
             // Weighted color blend between:
-            // Vignette: (8, 22, 54)
-            // Mist:     (18, 68, 108)
-            // Filament: (45, 125, 195)
+            // Vignette: deep spectral sapphire (10, 32, 75)
+            // Mist:     arcane cyan drift (28, 95, 160)
+            // Filament: bright spectral filament (65, 165, 245)
             const float sum = std::max(0.001f, alpha1 + alpha2 + alpha3);
-            const float cr = (8.0f * alpha1 + 18.0f * alpha2 + 45.0f * alpha3) / sum;
-            const float cg = (22.0f * alpha1 + 68.0f * alpha2 + 125.0f * alpha3) / sum;
-            const float cb = (54.0f * alpha1 + 108.0f * alpha2 + 195.0f * alpha3) / sum;
+            const float cr = (10.0f * alpha1 + 28.0f * alpha2 + 65.0f * alpha3) / sum;
+            const float cg = (32.0f * alpha1 + 95.0f * alpha2 + 165.0f * alpha3) / sum;
+            const float cb = (75.0f * alpha1 + 160.0f * alpha2 + 245.0f * alpha3) / sum;
 
             auto* p = &rgba[(static_cast<size_t>(y) * Size + x) * 4];
             p[0] = static_cast<uint8_t>(std::clamp(std::lround(cr), 0L, 255L));
@@ -252,6 +254,46 @@ inline uint64_t PaintKey(float intensity, float depletion, double time) {
     const uint64_t tKey = static_cast<uint64_t>(std::lround(time * 25.0));
     return (iKey << 40) | (dKey << 32) | (tKey & 0xFFFFFFFFull) | 1ull;
 }
+
+struct PaintJob {
+    float intensity = 0.0f;
+    float depletion = 0.0f;
+    double time = 0.0;
+};
+
+struct PaintImage {
+    uint64_t key = 0;
+    std::vector<uint8_t> pixels;
+};
+
+// Arcane Decay Painter: runs Compose() asynchronously on a background worker thread.
+// Ensures in-flight requests finish before scheduling new ones, preventing worker starvation.
+class Painter {
+    LatestWorker<PaintJob, PaintImage> worker;
+    uint64_t request = 0;
+
+public:
+    using Work = std::function<PaintImage(const PaintJob&)>;
+    explicit Painter(Work work = [](const PaintJob& job) {
+        return PaintImage{PaintKey(job.intensity, job.depletion, job.time),
+                          Compose(job.intensity, job.depletion, job.time)};
+    }) : worker(std::move(work)) {}
+
+    bool Start() { return worker.Start(); }
+    bool Busy() const { return request != 0; }
+    bool Submit(PaintJob job) {
+        if (request) return false;
+        request = worker.Submit(std::move(job));
+        return request != 0;
+    }
+    bool Take(PaintImage& image) {
+        if (!request || !worker.Take(request, image)) return false;
+        request = 0;
+        return true;
+    }
+    void Discard() { request = 0; }
+    void Stop() { worker.Stop(); Discard(); }
+};
 
 } // namespace framevr::arcane
 

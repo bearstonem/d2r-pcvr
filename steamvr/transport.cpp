@@ -229,14 +229,9 @@ bool bloodAtlasPending=false,bloodImageReady=false;
 // Arcane Decay: subtle spectral peripheral warning when mana is low.
 arcane::Controller arcaneController;
 arcane::Output arcaneOutput;
-struct ArcaneJob {float intensity=0,depletion=0;double time=0;};
-struct ArcaneImage {std::vector<uint8_t> pixels;uint64_t key=0;};
-LatestWorker<ArcaneJob,ArcaneImage> arcanePainter([](const ArcaneJob& job) {
-    return ArcaneImage{arcane::Compose(job.intensity,job.depletion,job.time),
-                       arcane::PaintKey(job.intensity,job.depletion,job.time)};
-});
-uint64_t arcanePaintKey=~0ull,arcaneRequestedKey=~0ull,arcanePaintRequest=0;
-bool arcaneShown=false;
+arcane::Painter arcanePainter;
+uint64_t arcanePaintKey=~0ull;
+uint64_t arcanePaintSession=0;
 ULONGLONG arcanePaintAt=0;
 bool arcaneAtlasPending=false,arcaneImageReady=false;
 // Quest / level-up notices: a card standing in the room for a few seconds
@@ -3073,7 +3068,7 @@ void Input() {
     {
         const auto now=GetTickCount64();
         arcane::Input in;
-        in.time=interactionInput.at>0?(interactionInput.at/1000.0):(now/1000.0);
+        in.time=interactionInput.time>0?interactionInput.time:(now/1000.0);
         in.session=interactionInput.session;
         in.vitalsKnown=interactionInput.snapshot.vitalsKnown;
         in.mana=interactionInput.snapshot.mana;
@@ -3082,25 +3077,42 @@ void Input() {
         in.config.fadeAnimation=hudSettings.values[settings::ArcaneFade]>.5f;
         in.config.threshold=hudSettings.values[settings::ManaThreshold];
         in.config.intensity=hudSettings.values[settings::ArcaneIntensity]/100.0f;
+        const bool wasActive=arcaneOutput.active;
         arcaneOutput=arcaneController.Step(in);
 
-        if(arcaneOutput.visible) {
-            const auto key=arcane::PaintKey(arcaneOutput.intensity,arcaneOutput.depletion,in.time);
-            if(key!=arcanePaintKey&&now>=arcanePaintAt&&(!arcanePaintRequest||key!=arcaneRequestedKey)) {
-                arcanePaintRequest=arcanePainter.Submit({arcaneOutput.intensity,arcaneOutput.depletion,in.time});
-                arcaneRequestedKey=key;
-                arcanePaintAt=now+40;
+        if(arcaneOutput.active!=wasActive) {
+            char line[160];
+            if(arcaneOutput.active) {
+                std::snprintf(line,sizeof line,"Frame arcane decay: activated at mana=%.1f/%.1f (%.0f%%, threshold=%.0f%%, intensity=%.0f%%)",
+                    in.mana,in.maxMana,arcaneOutput.manaPercent,in.config.threshold,in.config.intensity*100.f);
+            } else {
+                std::snprintf(line,sizeof line,"Frame arcane decay: deactivated at mana=%.1f/%.1f (%.0f%%, threshold=%.0f%%)",
+                    in.mana,in.maxMana,arcaneOutput.manaPercent,in.config.threshold);
             }
-        } else {
-            arcaneShown=false;
+            Say(line);
         }
-        ArcaneImage painted;
-        if(arcanePaintRequest&&!arcaneAtlasPending&&atlasUploads.size()<3&&arcanePainter.Take(arcanePaintRequest,painted)) {
-            if(!painted.pixels.empty()&&UploadShared(panelatlas::ArcaneDecay,painted.pixels,&arcaneAtlasPending)) {
-                arcanePaintKey=arcaneRequestedKey;
-                arcaneShown=true;
+
+        // Consume completed images before scheduling more work. Never replace an
+        // in-flight request: that discarded every animated result.
+        if(in.session!=arcanePaintSession||!arcaneOutput.visible) {
+            arcanePainter.Discard();arcanePaintKey=~0ull;
+            arcanePaintAt=0;arcanePaintSession=in.session;
+        }
+        if(arcaneOutput.visible) {
+            arcane::PaintImage painted;
+            if(!arcaneAtlasPending&&atlasUploads.size()<3&&arcanePainter.Take(painted)) {
+                if(!painted.pixels.empty()&&UploadShared(panelatlas::ArcaneDecay,painted.pixels,&arcaneAtlasPending)) {
+                    arcanePaintKey=painted.key;
+                }
             }
-            arcanePaintRequest=0;
+            if(now>=arcanePaintAt&&!arcanePainter.Busy()&&!arcaneAtlasPending) {
+                const auto key=arcane::PaintKey(arcaneOutput.intensity,arcaneOutput.depletion,in.time);
+                if(key!=arcanePaintKey) {
+                    if(arcanePainter.Submit({arcaneOutput.intensity,arcaneOutput.depletion,in.time})) {
+                        arcanePaintAt=now+40;
+                    }
+                }
+            }
         }
     }
     // Arrow path line color (VR Settings > Targets > Arrow path line); Off keeps the last.
@@ -5399,7 +5411,7 @@ void EndPair() {
     }
     // Arcane Decay: head-locked quad directly above the world scene and beneath HUD panels
     XrCompositionLayerQuad arcaneQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
-    if(arcaneImageReady&&arcaneShown&&arcaneOutput.visible&&layer&&!panelMode&&!blackMenu&&!settingsModel.open&&
+    if(arcaneImageReady&&arcanePaintKey&&arcanePaintKey!=~0ull&&arcaneOutput.visible&&layer&&!panelMode&&!blackMenu&&!settingsModel.open&&
        !bodyCalibration.Active()&&headSpace&&count<contentLimit) {
         const auto extent=blood::VisorExtent(
             {views[0].fov.angleLeft,views[0].fov.angleRight,views[0].fov.angleDown,views[0].fov.angleUp},
@@ -5975,7 +5987,7 @@ void Shutdown(bool preserveResolution) {
     compassChain=XR_NULL_HANDLE;wristHeading.Reset();compassFrame=compassAtlasReady=false;   // staticChain, below
     gameplayChain=XR_NULL_HANDLE;
     bloodScreen.Reset();bloodOutput={};bloodShown=0;bloodPaintKey=bloodRequestedKey=~0ull;bloodPaintRequest=0;bloodPaintAt=0;bloodAtlasPending=bloodImageReady=false;
-    arcaneController.Reset();arcaneOutput={};arcaneShown=false;arcanePaintKey=arcaneRequestedKey=~0ull;arcanePaintRequest=0;arcanePaintAt=0;arcaneAtlasPending=arcaneImageReady=false;
+    arcaneController.Reset();arcaneOutput={};arcanePaintKey=~0ull;arcanePaintSession=0;arcanePaintAt=0;arcaneAtlasPending=arcaneImageReady=false;
     bowLaserHue=-1;bowLaserAtlasPending=bowLaserImageReady=false;
     noticeWatch={};noticeCards.Clear();noticeCard={};noticePaintRequest=noticeRequestedSequence=noticePaintedSequence=0;noticeAtlasPending=noticeImageReady=false;
     heartStream.Stop();heartPlaying=false;heartLevel.Reset();heartAt=0;heartHush.Reset();heartHealth=-1;

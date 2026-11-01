@@ -36,6 +36,7 @@ bool NotInBuild(uint64_t rva);
 bool Check(uint64_t rva, const void* expected, uint32_t size);
 bool Hook(uint64_t rva, const void* expected, uint32_t size, void* detour, void** original);
 bool Patch(uint64_t rva, const void* expected, uint32_t expectedSize, const void* bytes, uint32_t size);
+bool IsHooked(uint64_t rva);
 
 // For the log and the settings program: "game code: all 54 addresses found
 // (3 moved)" or "game code: 52 of 54 addresses found - not found: X (what

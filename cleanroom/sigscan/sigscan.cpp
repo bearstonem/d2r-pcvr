@@ -475,7 +475,16 @@ bool CheckMoved(int i, const void* expected, uint32_t size) {
 }
 }   // namespace
 
+static std::vector<uint64_t> g_hookedRvas;
+static std::recursive_mutex g_hookLock;
+
+bool IsHooked(uint64_t rva) {
+	std::lock_guard<std::recursive_mutex> lock(g_hookLock);
+	return std::find(g_hookedRvas.begin(), g_hookedRvas.end(), rva) != g_hookedRvas.end();
+}
+
 bool Check(uint64_t rva, const void* expected, uint32_t size) {
+	if (IsHooked(rva)) return true;
 	if (g_ctx == nullptr) return false;
 	const int i = Index(rva);
 	if (i < 0 || !g_resolved.load()) return g_ctx->CheckExpectedBytes(rva, expected, size);
@@ -486,13 +495,22 @@ bool Check(uint64_t rva, const void* expected, uint32_t size) {
 bool Hook(uint64_t rva, const void* expected, uint32_t size, void* detour, void** original) {
 	if (g_ctx == nullptr) return false;
 	const int i = Index(rva);
-	if (i < 0 || !g_resolved.load()) return g_ctx->InstallInlineHook(rva, expected, size, detour, original);
+	auto recordHook = [&](bool success) {
+		if (success) {
+			std::lock_guard<std::recursive_mutex> lock(g_hookLock);
+			if (std::find(g_hookedRvas.begin(), g_hookedRvas.end(), rva) == g_hookedRvas.end()) {
+				g_hookedRvas.push_back(rva);
+			}
+		}
+		return success;
+	};
+	if (i < 0 || !g_resolved.load()) return recordHook(g_ctx->InstallInlineHook(rva, expected, size, detour, original));
 	const uint64_t at = Rva(rva);
 	if (!at) return false;
-	if (!Moved(i)) return g_ctx->InstallInlineHook(rva, expected, size, detour, original);
+	if (!Moved(i)) return recordHook(g_ctx->InstallInlineHook(rva, expected, size, detour, original));
 	std::vector<uint8_t> live(size);
 	if (!CheckMoved(i, expected, size) || !ReadLive(live.data(), at, size)) return false;
-	return g_ctx->InstallInlineHook(at, live.data(), size, detour, original);
+	return recordHook(g_ctx->InstallInlineHook(at, live.data(), size, detour, original));
 }
 
 bool Patch(uint64_t rva, const void* expected, uint32_t expectedSize, const void* bytes, uint32_t size) {
