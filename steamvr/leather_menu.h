@@ -183,6 +183,24 @@ inline Rect Band(int width,int height) {
     return {(width-w)/2,0,w,height};
 }
 
+// The gameplay HUD held with the menu (owner 2026-10-29, a tester: "With inventory open
+// you no longer get to see hp/mana/map"; Cal chose "on the hide, beside the menu", then
+// "health/mana UI to be above the menu and slightly larger"): the life / mana / XP panel
+// (the wrist's picture, 2:1, HudVitalsWidth across) centred above the menu band, HudGap
+// over it; the minimap (HudMap square) centred on the band's left edge - over the band's
+// see-through margin and the hide beyond it, clear of the art (MenuArtInset in) - its top
+// HudAbove above the band, so it sits above the fist, which holds the band's middle.
+// Menu-local metres from the menu's centre, x right, y up, HudLift in front of the menu.
+constexpr float HudMap=.10f,HudVitalsWidth=.14f,HudVitalsHeight=HudVitalsWidth*.5f,HudAbove=.04f,HudGap=.01f,HudLift=.004f;
+struct Hud {math::Vec map{},vitals{};float mapSize=HudMap,vitalsWidth=HudVitalsWidth,vitalsHeight=HudVitalsHeight;};
+inline Hud HudPlaces(float menuWidth) {
+    const float w=NormalizeMenuWidth(menuWidth),top=w*9.f/32.f;
+    Hud h;
+    h.map={-w*.5f,top+HudAbove-HudMap*.5f,HudLift};
+    h.vitals={0,top+HudGap+HudVitalsHeight*.5f,HudLift};
+    return h;
+}
+
 // The sheet strapped to the left hand: the quest log's hold (its face along the
 // fist's top, its up along the fist), turned back by `tilt` degrees. The fist
 // holds the leather at the middle of the menu's left edge, Gap short of it, so

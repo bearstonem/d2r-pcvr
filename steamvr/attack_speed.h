@@ -83,6 +83,23 @@ inline int FormEias(int ias,int attackRate) {return Eias(ias)+attackRate-100;}
 // Fanaticism, Frenzy, Burst of Speed and slows (chill, Decrepify) move it. Logged
 // 2026-10-21, no buffs: WSM 0 -> attackrate 100, +10 -> 90, -10 -> 110 (SkillSpeed 0).
 inline int SkillSpeed(int attackRate,int mainWsm) {return attackRate-100+mainWsm;}
+// Dual wield (a Barbarian's two weapons, an Assassin's two claws), Cal 2026-10-30: native D2
+// animates every attack at one rate. D2Common UNITS_UpdateAttackAnimRateAndVelocity (D2MOO)
+// merges the swinging weapon's stat lists into the hero (its IAS and its attackrate, which is
+// 100 less its WSM, count; the other weapon's do not), then, with a weapon in each arm, adds
+// (right + left) / 2 - right of the two weapons' own attackrates (-WSM). Before D2R 2.4 that
+// "right" was always the right-arm weapon, so a left-arm stroke ran at the average plus the
+// two WSMs' difference; 2.4 "changed how attack speed is determined while dual-wielding
+// weapons. Swapping weapons between hands should no longer result in dramatically different
+// attack speeds": every stroke runs at the two WSMs' average. C division of the negated
+// attackrates truncates toward zero, as the average here does.
+inline int DualWsm(int ownWsm,int otherWsm) {return (ownWsm+otherWsm)/2;}
+// One dual-wield stroke's cycle, read with its own weapon merged (melee_weapon Scope): item
+// IAS and attackrate are the hero's stats at that moment, ownWsm the swinging weapon's.
+// The speed sum is EIAS + attackrate + ownWsm - DualWsm: the attackrate's own WSM swapped for the average.
+inline int DualFrames(int classId,Weapon weapon,int ias,int attackRate,int ownWsm,int otherWsm) {
+    return Frames(classId,weapon,ias,DualWsm(ownWsm,otherWsm),SkillSpeed(attackRate,ownWsm));
+}
 inline uint32_t Milliseconds(int frames) {return frames>0?uint32_t(frames)*1000u/FramesPerSecond:0;}
 // One attack per cycle, on the authoritative game thread. A native-resolved
 // attack starts the cycle whether its roll hit or missed, as the native swing

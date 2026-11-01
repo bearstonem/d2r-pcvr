@@ -42,6 +42,9 @@ uint32_t PhysicalSwing(uint32_t target);
 // Game thread (melee.cpp), around one physical swing's native attack: that
 // stroke's recovery damage factor (0..1, Unleashed). Returns the previous value.
 float SwingRecovery(float factor);
+// Whether that swing's contact is its stroke's first creature (the weapon wears with it
+// only; Unleashed). Returns the previous value, to restore after the attack.
+bool SwingFirst(bool first);
 // Unleashed: attack rating scales physical swing damage - the native 5..95 to-hit
 // chance, read where HitSuccessful passes it on - instead of deciding a miss.
 // floor: the share of damage kept at zero chance (0 = the raw chance).

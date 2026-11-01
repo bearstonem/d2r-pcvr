@@ -101,6 +101,14 @@ bool GameplayRay(float origin[3],float direction[3]);
 bool HandAimRay(int hand,float origin[3],float direction[3]);
 int CastButtonHand();        // the hand whose button holds a native cast now, -1 none
 bool HandSpellHeld(int hand); // that hand's physical spell button is held
+// Paladin Fist of the Heavens gesture (heavens_gesture.h). Armed: the skill is
+// on a slot and gestures are on (vrcam keeps the monster scan running).
+// Request: a call waiting for its target (its number, 0 none); vrcam answers
+// with the monster the weapon arm points at (0: the game's own pick) after
+// handing it to the game's target query. The slot is pressed after the answer.
+bool HeavensArmed();
+uint32_t HeavensRequest();
+void HeavensResolved(uint32_t request,uint32_t monster);
 int PointSpellSkill();       // the cast skill when the aim rules place it at a point, else -1
 int AimRulesSkill();         // the cast skill (any), -1 none; with its game "directed" flag
 // A trap or bomb thrown to place (#224): where its arc landed, in grid cells,

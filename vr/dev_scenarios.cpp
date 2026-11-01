@@ -267,6 +267,16 @@ void __cdecl Gear(const PluginContext*,void* callbackToken) noexcept {
                 spec.itemLevel=30;
             }
         }
+        if(r.index==framevr::dev::LootBeamsChoice&&i<framevr::dev::LootBeamKit.size()) {
+            using framevr::dev::KitQuality;
+            const auto& item=framevr::dev::LootBeamKit[i];
+            spec.quality=item.quality==KitQuality::Unique?Items::Quality::Unique:item.quality==KitQuality::Set?Items::Quality::Set:
+                item.quality==KitQuality::Rare?Items::Quality::Rare:item.quality==KitQuality::Magic?Items::Quality::Magic:Items::Quality::Normal;
+            spec.qualityRecordId=Items::RandomQualityRecord;
+            spec.flags=item.quality==KitQuality::Unique?Items::ItemCreateFlagBit(Items::ItemCreateFlag::AllowDuplicateUnique):0;
+            spec.itemLevel=uint32_t(item.itemLevel);
+            spec.stateFlags=item.identified?Items::ItemStateIdentified:0;
+        }
         spec.destination.structSize=sizeof spec.destination;
         spec.destination.container=Items::ItemContainer::Inventory;
         spec.destination.placement=Items::Placement::Automatic;

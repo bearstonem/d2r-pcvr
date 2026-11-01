@@ -81,8 +81,10 @@ Open either hand's wheel and choose **DEV**. Its tabs are grouped by purpose:
 - **Character:** level 10, 30, 60 and 90 presets; heal life/mana; unlock quests and
   waypoints; a **Throwing potions** kit (one stack each of Rancid, Choking and
   Strangling Gas and Oil, Exploding and Fulminating Potion, to equip in the right
-  hand and throw), **By turns rims** and **Sky over rims** (all on this page
-  as Equipment is full).
+  hand and throw), **By turns rims**, **Sky over rims** and a **Loot beam test**
+  kit (a unique ring, a set amulet, a rare ring, a magic amulet, a white dagger
+  and the runes Vex, Gul, Ohm, Lo and Sur: drop them to see each beam, or none;
+  see GAMEPLAY.md, Loot beams) (all on this page as Equipment is full).
 - **Equipment:** starter primary/alternate gear, class unique primary/alternate
   gear, crossbow + bolts, bow + arrows, a small shield, **Render debug draws**,
   **By turns own picture**, **By turns filter**, **By turns ghosts**, a **Throwing kit** and a **Potion kit** (four Super

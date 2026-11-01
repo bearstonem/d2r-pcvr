@@ -62,7 +62,7 @@ Quest left X/Y correspond to Index left A/B; right A/B labels are the same.
 | Assign / change quick-use item | Hold the trigger over **QUICK USE** for 0.65 seconds, then select a carried scroll, tome or other usable item. An empty slot also opens the picker on a short click. **CLEAR SLOT** removes the assignment |
 | Walk / run speed | VR Settings > **Body** > **Movement speed** (Hands and moving), then Apply: **Walk**; **Base run** (your class's run with no speed bonus); **Run 10%…90%** of the way up; **Full run** (the default, the full speed your gear and skills give). Saved to `[gameplay] run_speed_pct`; the game's own run / walk toggle is kept in line with it. Movement skills keep their own speed, and it never runs faster than the game. With **Stick toggle** beside it on (Off by default; `[gameplay] run_walk_toggle`), push the **right stick up** to switch between walking and that run (from Walk, the full run) |
 | Finish editing | Click the wheel hand's stick again, or select CLOSE in its center |
-| Inventory / character / skills / journal | Reach the **left hand over the left shoulder** and grip; or Left Grip + left stick click; or either wheel > INVENTORY. However it opens, the tabbed menu comes up on a leather sheet strapped to your left hand, with the world still around you; the right laser works on it as before, the left stick still walks, and closing the menu (Right B or its close button) puts the leather away. Native tabs retain their controls. **VR Settings > Interface > Hold menu** sets it: **Leather**, **Menu only** (held by its left edge, no hide) or **Off** (in front of you instead, without the shoulder reach). With Dominant hand = Left the left shoulder stays the weapon swap; use the other two |
+| Inventory / character / skills / journal | Reach the **left hand over the left shoulder** and grip; or Left Grip + left stick click; or either wheel > INVENTORY. However it opens, the tabbed menu comes up on a leather sheet strapped to your left hand, with the world still around you; the right laser works on it as before, the left stick still walks and the right stick turns, an item picked up and clicked outside the menu drops to the ground, life / mana show above it, and closing the menu (Right B, its close button, or reaching back over the left shoulder and gripping) puts the leather away. Native tabs retain their controls. **VR Settings > Interface > Hold menu** sets it: **Leather**, **Menu only** (held by its left edge, no hide) or **Off** (in front of you instead, without the shoulder reach). With Dominant hand = Left the left shoulder stays the weapon swap; use the other two |
 | VR settings / body calibration | Either wheel → VR SETTINGS |
 | Explain a VR setting | Point the right-hand laser at its label or controls for about half a second. Help appears beside the panel and disappears when you point away; no click needed |
 | Minimap | Either wheel → MAP; movement remains available |
@@ -98,6 +98,7 @@ Quest left X/Y correspond to Index left A/B; right A/B labels are the same.
 | Drop the empty bottle | Open your hand after drinking; it falls, bounces and rolls on the floor (visual only). Swing a weapon or shield into it to knock it away |
 | Knock over cups, plates, vases, stools | Swing a weapon, punch or block into the level's small props; they fall and roll where they land until the area reloads (visual only) |
 | Heal your mercenary | Toss a held Health, Rejuvenation, Antidote or Thawing bottle so it lands near its feet; with bottle physics it flies as a real body and breaks where it first hits. A miss keeps the potion |
+| Command your mercenary (offline) | Point at it, hold **Grip** and pull **Trigger** (the trigger casts nothing while you do), aim, and let go: at the ground it walks there and holds; at a monster it focuses it; still on the mercenary it holds its place, or regroups if it was holding. Grip alone does nothing to it. **VR Settings > Survival > Tactical commands** turns this off |
 | Quick potion | Wheel → EQUIPMENT → potion, using opposite laser + trigger |
 | Grab wheel potion | Wheel → EQUIPMENT → potion, using the pointing hand's grip |
 | Wrist health / mana / XP | Look at the back of the left wrist |
@@ -137,8 +138,10 @@ stabs. The old `attack_speed` INI key does not select Classic; choose it here.
 **Unleashed swing damage:** every stroke that connects lands, but how hard it
 hits depends on your character. Your attack rating against the monster's
 defense scales the damage (the game's own hit chance, 5-95%), and so does your
-rhythm: a stroke before your attack speed has recovered hits much weaker, so
-measured swings beat flailing. Faster attack speed (IAS) shortens the wait.
+rhythm: your attack speed sets a fixed beat. A stroke on the beat (a full cycle
+after your last full hit) hits fully; strokes in between hit much weaker but never
+delay the next beat, so measured swings beat flailing. Faster attack speed (IAS)
+shortens the beat.
 One stroke can hit several monsters, each further one a little weaker.
 On-hit effects (life and mana leech, critical and deadly strike, crushing blow,
 open wounds, chance to cast and the like) come only from a stroke made after
@@ -523,6 +526,7 @@ not convert it into a context-click.
 | LT / RT | Left Trigger / Right Trigger | Left Trigger / Right Trigger |
 | Menu / Start, where available to the game | Controller menu button | Controller menu button |
 | Advanced Stats (the game's View in the tabbed menu) | Laser + trigger on the stone stats button below the menu's hint row | Laser + trigger on the stone stats button below the menu's hint row |
+| Reset Skills & Stats (offline) | Laser + trigger twice on the Character page's **Reset Skills & Stats** button | Laser + trigger twice on the Character page's **Reset Skills & Stats** button |
 
 Quest and most VR controllers have no View button (the menu buttons belong to
 the headset), so the
@@ -530,6 +534,15 @@ tabbed menu (on the leather or the room panel alike) carries its own Advanced
 Stats button: a small stone badge with three gold bars just below the menu's
 hint row. Point the laser at it (it lights) and pull the trigger: the game gets
 one View press, as from an Xbox pad, and opens or closes Advanced Stats. It is not shown with the cube, the stash, merchants or other panels.
+
+The Character page also carries a stone **Reset Skills & Stats** button in its
+lower right, in offline games. Pull the trigger on it once and it asks
+**Confirm?** (with no time limit; leaving the page or closing the menu takes the
+question back); pull again and the game resets every stat and skill point, as a
+Token of Absolution does. It is free, works as often as you like and leaves
+Akara's own reset untouched. It needs one free inventory square for a moment
+(the button says so if there is none) and does nothing for Classic characters
+or in TCP/IP games.
 
 Native menu actions use the same buttons in the main menu, tabbed menu, stash,
 inventory and merchant panels. **Inside a native menu, left primary performs the displayed X action.**

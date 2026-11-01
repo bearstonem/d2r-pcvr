@@ -7,10 +7,10 @@
 En *Diablo II: Resurrected* de escritorio, el jugador no dispone de ningún mecanismo directo para ordenar a su mercenario que avance hasta una puerta, mantenga una posición defensiva o concentre sus ataques en un chamán o jefe peligroso manteniendo una distancia segura.
 
 En Realidad Virtual (VR), `d2r-pcvr` permite dar órdenes tácticas naturales mediante gestos de mano a través de la **Máquina de Estados Explícita de Órdenes Tácticas** (`TacticalOrderController` en [`steamvr/companion_ai.h`](../../steamvr/companion_ai.h) y [`vr/companion_ai.cpp`](../../vr/companion_ai.cpp)):
-- **Avanzar y Mantener Posición (`MoveAndHold`):** Apunta con tu mano a un punto del suelo y pulsa **Grip (Agarre)** para ordenar al mercenario que camine hasta esa coordenada y mantenga la posición sin oscilar ni regresar hacia ti.
-- **Priorizar Enemigo (`PrioritizeEnemy`):** Apunta directamente a un monstruo hostil y pulsa **Grip** para concentrar el ataque sobre ese objetivo respetando el arquetipo del mercenario (`MeleeVanguard` cierra a cuerpo a cuerpo; `RangedOverwatch` ataca desde una ventana óptima de `10.0` sub-casillas).
+- **Avanzar y Mantener Posición (`MoveAndHold`):** Apunta al mercenario, cierra **Grip (Agarre)** y aprieta **Gatillo**; apunta a un punto del suelo y suelta para ordenar al mercenario que camine hasta esa coordenada y mantenga la posición sin oscilar ni regresar hacia ti.
+- **Priorizar Enemigo (`PrioritizeEnemy`):** Engancha al mercenario con **Grip + Gatillo**, apunta directamente a un monstruo hostil y suelta para concentrar el ataque sobre ese objetivo respetando el arquetipo del mercenario (`MeleeVanguard` cierra a cuerpo a cuerpo; `RangedOverwatch` ataca desde una ventana óptima de `10.0` sub-casillas).
 - **Mantener Posición Defensiva (`DefensiveHold`):** Levanta la palma abierta hacia delante durante `400 ms` para fijar inmediatamente al mercenario en su posición actual como torreta o vanguardia defensiva.
-- **Reagrupar / Cancelar Orden (`ExplicitCancel`):** Mientras una orden esté activa, apunta directamente al propio mercenario (`<= 2.5` sub-casillas) y pulsa **Grip** para cancelar la orden y volver al seguimiento normal en formación.
+- **Reagrupar / Cancelar Orden (`ExplicitCancel`):** Mientras una orden esté activa, apunta directamente al propio mercenario (`<= 2.5` sub-casillas) y pulsa **Grip + Gatillo** para cancelar la orden y volver al seguimiento normal en formación.
 
 ---
 
@@ -36,7 +36,7 @@ stateDiagram-v2
 ### Motivos de Cancelación (`TacticalCommandCancelReason`)
 - `None`: Orden activa o en reposo (`Idle`).
 - `Superseded`: Reemplazada por una nueva orden táctica del jugador.
-- `ExplicitCancel`: El jugador apuntó al mercenario + Grip para reagruparlo.
+- `ExplicitCancel`: El jugador apuntó al mercenario + Grip + Gatillo para reagruparlo.
 - `HealthRetreat`: La salud del mercenario bajó del `50%` (`CriticalHealthRatio = 0.50f`); la supervivencia tiene prioridad absoluta.
 - `LeashBreak`: El jugador o el mercenario superaron la correa elástica máxima (`ElasticCombatLeashDistance = 40.0` sub-casillas / ~16m).
 - `TargetDefeated`: El monstruo marcado con `PrioritizeEnemy` murió (`animMode == 0 || animMode == 12`) o desapareció.
@@ -75,14 +75,15 @@ El análisis en vivo sobre `D2R.exe 3.3.93847` reveló que la rutina nativa `AIT
 
 ## 4. Reconocimiento y Desambiguación de Gestos (`steamvr/transport.cpp`)
 
-### 4.1. Señalar Primero al Mercenario: Mantener Grip, Apuntar y Soltar (`Pinchar y Arrastrar Táctico`)
-Para eliminar por completo los falsos positivos al usar el botón `Grip` en otras acciones del juego (coger pociones del cinturón, desenfundar armas o interactuar con el entorno), toda orden táctica por `Grip` **debe iniciarse señalando primero al mercenario**:
-- **Paso 1 — Enganchar al Mercenario (`Pulsar y Mantener Grip` sobre el mercenario):**
+### 4.1. Señalar Primero al Mercenario: Grip, Gatillo, Apuntar y Soltar (`Pinchar y Arrastrar Táctico`)
+Para eliminar por completo los falsos positivos al usar el botón `Grip` en otras acciones del juego (coger pociones del cinturón, desenfundar armas, interactuar con el entorno o los gestos de puño del Paladín: Puño de los Cielos, el martillo y la Carga cierran el `Grip` con el gatillo libre), toda orden táctica usa **`Grip` + Gatillo** y **debe iniciarse señalando primero al mercenario** ([`steamvr/tactical_chord.h`](../../steamvr/tactical_chord.h)):
+- **Paso 1 — Armar (`Cerrar Grip` sobre el mercenario):**
   - Se evalúa mediante intersección 3D con el cilindro vertical del cuerpo del mercenario (`hitsUnitCylinder3D` en coordenadas `coordinates::RenderGround`, radio `0.95m`, altura `[-0.45m, 2.00m]`) o radio en el suelo junto a sus pies (`<= 3.5` sub-casillas).
-  - Si pulsas `Grip` apuntando a cualquier otro lugar sin haber señalado antes al mercenario, el sistema táctico lo ignora por completo.
-  - Al enganchar al mercenario se emite un pulso háptico corto (`0.30f`) y se muestra un anillo dorado/verde (`color = 2`) bajo sus pies.
-- **Paso 2 — Previsualización en Vivo y Umbral de Correa (`Manteniendo Grip`):**
-  - Mientras mantienes `Grip` apretado y mueves la mano hacia el objetivo:
+  - Si cierras `Grip` apuntando a cualquier otro lugar, o con el gatillo ya apretado (un ataque), el sistema táctico lo ignora por completo.
+  - Armar no muestra ni vibra nada. Desde ese momento el gatillo de esa mano es de la orden, nunca del juego (no lanza ninguna habilidad sobre el mercenario), hasta soltarlo. Abrir el `Grip` sin apretar el gatillo no ordena nada.
+- **Paso 1b — Enganchar (`Apretar Gatillo` armado):** se emite un pulso háptico corto (`0.30f`) y se muestra un anillo dorado/verde (`color = 2`) bajo sus pies.
+- **Paso 2 — Previsualización en Vivo y Umbral de Correa (`Manteniendo Grip + Gatillo`):**
+  - Mientras mantienes `Grip` y el gatillo apretados y mueves la mano hacia el objetivo:
     - **Umbral de Correa Reactivo:** Si el objetivo se encuentra dentro de la correa máxima (`dist <= 40.0` sub-casillas / ~16m del jugador):
       - Si apuntas a un **monstruo hostil** (cilindro 3D `1.25m` o radio en suelo `4.0` sub-casillas), se previsualiza un **anillo azul gélido** (`color = 1`) sobre el enemigo.
       - Si apuntas a un punto del **suelo**, se previsualiza un **anillo verde táctico** (`color = 3`, radio `1.8`) en `{ gx, gy }`.
@@ -90,12 +91,12 @@ Para eliminar por completo los falsos positivos al usar el botón `Grip` en otra
     - **Estilizado Visual Refinado:** El shader ReShade (`D2R_DepthFog.fx`) dibuja una silueta de anillo estrecha (`kCircleRim = 0.015`, resplandor `0.02`), limpia (sin relleno opaco en el disco interior) y con mayor transparencia (`kCircleOpacity = 0.32`), permitiendo ver el suelo del escenario con total claridad.
     - **Paso de Frontera Háptico:** Al cruzar la frontera de los 16 metros en cualquier sentido, el mando emite un ligero pulso táctil advertidor (`0.20f` / `0.35f`).
     - Si mantienes el puntero sobre el **mercenario**, permanece el **anillo dorado/amarillo** (`color = 2`) sobre él.
-- **Paso 3 — Ejecución al Soltar (`Soltar Grip`):**
-  1. **Enemigo Hostil (`PrioritizeEnemy`):** Si está en rango, soltar `Grip` emite `PrioritizeEnemy`. Si excede los 16m, la orden se rechaza, suena la voz de *"Imposible"* (*"No puedo"*) y se emite un pulso háptico de error (`0.60f`).
-  2. **Alternar sobre el Mercenario (`DefensiveHold` / `Regroup`):** Soltar `Grip` manteniendo el puntero sobre el propio mercenario (o tras un clic rápido `<= 300 ms`) alterna su estado:
+- **Paso 3 — Ejecución al Soltar (`Soltar Gatillo` o `Grip`):** soltar cualquiera de los dos ejecuta la orden; un gatillo aún apretado tras abrir el `Grip` sigue siendo de la orden hasta soltarlo.
+  1. **Enemigo Hostil (`PrioritizeEnemy`):** Si está en rango, soltar emite `PrioritizeEnemy`. Si excede los 16m, la orden se rechaza, suena la voz de *"Imposible"* (*"No puedo"*) y se emite un pulso háptico de error (`0.60f`).
+  2. **Alternar sobre el Mercenario (`DefensiveHold` / `Regroup`):** Soltar manteniendo el puntero sobre el propio mercenario (o tras un clic rápido `<= 300 ms`) alterna su estado:
      - Si tenía una orden activa (`Requested`, `Moving` o `Arrived`): ejecuta `CancelTacticalOrder()` (`Regroup`) y despacha inmediatamente una caminata de servidor (`DispatchServerMoveToCoord`) de regreso al flanco del jugador.
      - Si te estaba siguiendo normalmente (`Idle` / `Cancelled`): activa `DefensiveHold` clavándolo en su posición actual.
-  3. **Coordenada del Suelo (`MoveAndHold`):** Soltar `Grip` dentro de rango emite `MoveAndHold` hacia `{ gx, gy }`. Si el pathfinder A* se detiene junto a un muro u obstáculo dentro de `NearObstacleArrivalTolerance` (`4.5` sub-casillas), adopta esa posición como `Arrived`. Si se suelta fuera de rango (>16m), se rechaza con doble pulso háptico de error y audio de *"Imposible"*.
+  3. **Coordenada del Suelo (`MoveAndHold`):** Soltar dentro de rango emite `MoveAndHold` hacia `{ gx, gy }`. Si el pathfinder A* se detiene junto a un muro u obstáculo dentro de `NearObstacleArrivalTolerance` (`4.5` sub-casillas), adopta esa posición como `Arrived`. Si se suelta fuera de rango (>16m), se rechaza con doble pulso háptico de error y audio de *"Imposible"*.
 
 ### 4.2. Palma Abierta para Mantener Posición (`DefensiveHold` tras `400 ms`)
 - **Filtro Cinemático:** Mano abierta (`grip < 0.2f && trigger < 0.2f`), dedos apuntando hacia arriba (`handUp.y > 0.82f`) y normal de la palma alineada con la vista del jugador (`dot > 0.70f`) mantenida durante `400 ms`.

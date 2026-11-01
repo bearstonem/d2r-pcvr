@@ -62,6 +62,7 @@ if(D2RVR_DEVELOPER)
 endif()
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/dlss_depth.cpp ${ROOT}/vr/crossbow.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/billboards.cpp)
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/head_shadow.cpp)   # the head kept for its shadow, the eye's cut (head_shadow.h)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/stereo_replay.cpp ${ROOT}/vr/ecl_hook.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/spatial_audio.cpp)   # head-relative sound
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/roof_materials.cpp)
@@ -74,7 +75,9 @@ target_sources(d2rl-pcvr PRIVATE elemental_hands_renderer.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/settings_menu.cpp ${CMAKE_CURRENT_SOURCE_DIR}/vr_settings_ui.cpp ${ROOT}/vr/native_ui.cpp ${CMAKE_CURRENT_SOURCE_DIR}/interaction_ui.cpp ${ROOT}/vr/interactionstate.cpp ${ROOT}/vr/bow.cpp ${ROOT}/vr/projectiles.cpp ${ROOT}/vr/combat.cpp ${ROOT}/vr/melee.cpp ${CMAKE_CURRENT_SOURCE_DIR}/transport.cpp ${CMAKE_CURRENT_SOURCE_DIR}/foveation.cpp ${CMAKE_CURRENT_SOURCE_DIR}/effects_layer.cpp ${CMAKE_CURRENT_SOURCE_DIR}/logging.cpp ${CMAKE_CURRENT_SOURCE_DIR}/profile.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/native_belt.cpp ${ROOT}/vr/quick_items.cpp ${ROOT}/vr/melee_weapon.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/breakables.cpp ${ROOT}/vr/offline_difficulty.cpp ${ROOT}/vr/enemy_sight.cpp)
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/respec.cpp)   # Reset Skills & Stats (respec_button.h)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/target_lock.cpp)
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/loot_beam_scan.cpp)   # loot beams: the items on the floor that get one
 add_executable(map-sigs-test map_sigs_test.cpp)   # Map view = Full map: the patterns at their sites
 target_include_directories(map-sigs-test PRIVATE ${ROOT}/cleanroom/sigscan)
 add_executable(far-objects-test far_objects_test.cpp)   # big objects drawn farther: the reach, the setting, the game's test
@@ -167,16 +170,20 @@ target_link_libraries(crossbow-pose-test PRIVATE framevr-runtime)
 add_executable(body-tracking-test body_tracking_test.cpp)
 add_executable(shield-steady-test shield_steady_test.cpp)
 add_executable(shapeshift-form-test shapeshift_form_test.cpp)
+add_executable(head-shadow-test head_shadow_test.cpp)   # the head kept for its shadow: the decision, the cut by pitch, the near
 add_executable(body-calibration-test body_calibration_test.cpp)
 add_executable(shoulder-swap-test shoulder_swap_test.cpp)
 add_executable(leather-menu-test leather_menu_test.cpp)
 add_executable(stats-button-test stats_button_test.cpp)
+add_executable(menu-drop-test menu_drop_test.cpp)
+add_executable(respec-button-test respec_button_test.cpp)
 add_executable(blood-screen-test blood_screen_test.cpp)
 add_executable(portal-billboard-test portal_billboard_test.cpp)
 target_link_libraries(portal-billboard-test PRIVATE framevr-runtime)
 add_executable(shrine-trace-test shrine_trace_test.cpp)
 add_executable(shrine-placement-test shrine_placement_test.cpp)
 add_executable(overlay-view-test overlay_view_test.cpp)
+add_executable(talk-stop-test talk_stop_test.cpp)
 add_executable(bone-armor-height-test bone_armor_height_test.cpp)
 add_executable(bone-graft-test bone_graft_test.cpp)
 add_executable(composition-layers-test composition_layers_test.cpp)
@@ -186,11 +193,15 @@ add_executable(projectile-rules-test projectile_rules_test.cpp)
 add_executable(combat-rules-test combat_rules_test.cpp)
 add_executable(strike-skills-test strike_skills_test.cpp)
 add_executable(zeal-light-test zeal_light_test.cpp)
+add_executable(loot-beams-test loot_beams_test.cpp)
 add_executable(skill-usage-test skill_usage_test.cpp)
 add_executable(shield-guard-test shield_guard_test.cpp)
 add_executable(shapeshift-gesture-test shapeshift_gesture_test.cpp)
 add_executable(hammer-gesture-test hammer_gesture_test.cpp)
 add_executable(charge-gesture-test charge_gesture_test.cpp)
+add_executable(cross-gesture-test cross_gesture_test.cpp)
+add_executable(heavens-gesture-test heavens_gesture_test.cpp)
+add_executable(tactical-chord-test tactical_chord_test.cpp)   # the mercenary commands: Grip + Trigger
 add_executable(guard-strain-test guard_strain_test.cpp)
 add_executable(heartbeat-test heartbeat_test.cpp)
 add_executable(run-speed-test run_speed_test.cpp)
@@ -246,6 +257,8 @@ add_executable(depth-fog-test depth_fog_test.cpp)
 target_link_libraries(depth-fog-test PRIVATE d3d11 d3dcompiler framevr-runtime)
 add_executable(shield-debug-shader-test shield_debug_shader_test.cpp)
 target_link_libraries(shield-debug-shader-test PRIVATE d3d11 d3dcompiler framevr-runtime)
+add_executable(loot-beams-shader-test loot_beams_shader_test.cpp)
+target_link_libraries(loot-beams-shader-test PRIVATE d3d11 d3dcompiler framevr-runtime)
 add_executable(arcane-sky-test arcane_sky_test.cpp)
 target_link_libraries(arcane-sky-test PRIVATE d3d11 d3dcompiler framevr-runtime)
 add_executable(scene-depth-test scene_depth_test.cpp)
@@ -351,15 +364,17 @@ add_test(NAME depth-fog-test COMMAND depth-fog-test "${ROOT}/reshade/D2R_DepthFo
 set_tests_properties(depth-fog-test PROPERTIES TIMEOUT 30)
 add_test(NAME shield-debug-shader-test COMMAND shield-debug-shader-test "${ROOT}/reshade/D2R_DepthFog.fx")
 set_tests_properties(shield-debug-shader-test PROPERTIES TIMEOUT 30)
+add_test(NAME loot-beams-shader-test COMMAND loot-beams-shader-test "${ROOT}/reshade/D2R_DepthFog.fx")
+set_tests_properties(loot-beams-shader-test PROPERTIES TIMEOUT 30)
 add_test(NAME arcane-sky-test COMMAND arcane-sky-test "${ROOT}/reshade/D2R_DepthFog.fx")
 set_tests_properties(arcane-sky-test PROPERTIES TIMEOUT 30)
 add_test(NAME light-bounds-test COMMAND light-bounds-test)
 set_tests_properties(light-bounds-test PROPERTIES TIMEOUT 30)
 foreach(test_target IN ITEMS memory-test biome-list-test hook-metrics-test active-keys-test resource-descriptions-test latest-worker-test haptic-pulse-test thread-stats-test
-    gameplay-test weapon-skills-test quick-cast-test hand-controls-test elemental-hands-test skill-pad-test interact-press-test sewer-interaction-test notice-card-test mod-layout-test spell-aim-test bow-pose-test crossbow-pose-test body-tracking-test shapeshift-form-test shield-steady-test body-calibration-test shoulder-swap-test blood-screen-test
-    portal-billboard-test shrine-trace-test shrine-placement-test overlay-view-test bone-armor-height-test composition-layers-test projectile-rules-test environment-cutaway-test roof-materials-test stereo-prop-physics-test dropped-bottles-test props-test limb-rig-test limb-physics-test leather-menu-test stats-button-test
-    combat-rules-test strike-skills-test zeal-light-test skill-usage-test shield-guard-test shapeshift-gesture-test guard-strain-test heartbeat-test run-speed-test logging-test melee-contact-test melee-weapon-test breakables-test offline-difficulty-test enemy-sight-test attack-speed-test world-coordinates-test bow-flight-test bow-laser-test spell-cast-test spell-aim-assist-test hammer-gesture-test charge-gesture-test bone-graft-test
-    interaction-test dev-scenarios-test native-belt-test wrist-hud-test map-zoom-test navigation-info-test companions-test active-effects-test dropped-item-labels-test stick-gestures-test show-items-command-test native-hud-test render-resolution-test render-pointer-test scene-depth-test game-device-only-test controller-bindings-test journal-test native-panels-test
+    gameplay-test weapon-skills-test quick-cast-test hand-controls-test elemental-hands-test skill-pad-test interact-press-test sewer-interaction-test notice-card-test mod-layout-test spell-aim-test bow-pose-test crossbow-pose-test body-tracking-test shapeshift-form-test head-shadow-test shield-steady-test body-calibration-test shoulder-swap-test blood-screen-test
+    portal-billboard-test shrine-trace-test shrine-placement-test overlay-view-test bone-armor-height-test composition-layers-test projectile-rules-test environment-cutaway-test roof-materials-test stereo-prop-physics-test dropped-bottles-test props-test limb-rig-test limb-physics-test leather-menu-test stats-button-test menu-drop-test respec-button-test
+    combat-rules-test strike-skills-test zeal-light-test skill-usage-test shield-guard-test shapeshift-gesture-test guard-strain-test heartbeat-test run-speed-test logging-test melee-contact-test melee-weapon-test breakables-test offline-difficulty-test enemy-sight-test attack-speed-test world-coordinates-test bow-flight-test bow-laser-test spell-cast-test spell-aim-assist-test hammer-gesture-test charge-gesture-test tactical-chord-test cross-gesture-test heavens-gesture-test bone-graft-test
+    interaction-test dev-scenarios-test native-belt-test wrist-hud-test map-zoom-test navigation-info-test companions-test active-effects-test dropped-item-labels-test stick-gestures-test show-items-command-test native-hud-test render-resolution-test render-pointer-test scene-depth-test game-device-only-test controller-bindings-test journal-test native-panels-test talk-stop-test loot-beams-test
     vr-settings-test vr-settings-layout-test vr-settings-pointer-test vr-settings-store-test controller-labels-test math-test deferred-draw-test monster-bars-test telegraph-test aim-reach-test aim-rules-test target-cone-test gaze-test window-focus-test callback-ticket-test local-player-test shield-block-test trigger-melee-test companion-ai-test companion-skills-test companion-charges-test companion-item-skills-ui-test torch-light-test frame-generation-test turn-capture-test panel-atlas-test far-objects-test)
   # These fixtures use assert for their checks, including in Release builds.
   if(MSVC)
@@ -415,5 +430,10 @@ target_include_directories(quick-items-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} 
 target_link_libraries(quick-items-test PRIVATE framevr-runtime)
 add_test(NAME quick-items-test COMMAND quick-items-test)
 add_test(NAME quick-items-signature-test COMMAND quick-items-test --mismatch)
+add_executable(respec-test respec_test.cpp ${ROOT}/vr/respec.cpp)
+target_include_directories(respec-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${D2RL_SDK}/include)
+target_link_libraries(respec-test PRIVATE framevr-runtime)
+target_compile_options(respec-test PRIVATE -UNDEBUG)
+add_test(NAME respec-test COMMAND respec-test)
 
 target_compile_options(quick-items-test PRIVATE -UNDEBUG)

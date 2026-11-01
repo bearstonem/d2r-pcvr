@@ -52,6 +52,8 @@
 #include "shapeshift_gesture.h"
 #include "hammer_gesture.h"
 #include "charge_gesture.h"
+#include "cross_gesture.h"
+#include "heavens_gesture.h"
 #include "guard_strain.h"
 #include "guard_strain_paint.h"
 #include "heartbeat.h"
@@ -76,6 +78,7 @@
 #include "companion_ai.h"
 #include "companion_item_skills_ui.h"
 #include "telegraph.h"
+#include "tactical_chord.h"
 #include "../vr/target_lock.h" 
 #include "vr_settings_ui.h"
 #include "vr_settings_pointer.h"
@@ -84,6 +87,8 @@
 #include "journal.h"
 #include "leather_menu.h"
 #include "stats_button.h"
+#include "menu_drop.h"
+#include "respec_button.h"
 #include "native_panels.h"
 #include "npc_dialogue.h"
 #include "native_hud.h"
@@ -98,6 +103,7 @@
 #include "ui_world.h"
 #include "../vr/interactionstate.h"
 #include "../vr/journal_ui.h"
+#include "../vr/respec.h"
 #include "../vr/panel_input.h"
 #include "d2r_vr_state.h"
 #include "foveation.h"
@@ -540,6 +546,20 @@ hammerpump::Engine hammerGesture;
 weaponskills::Pulse hammerPulse;
 int hammerSlot=-1,hammerOwner=-1;
 uint32_t hammerCasts=0;
+// [holy shield] Paladin sign of the cross pulses whichever slot holds Holy Shield.
+holycross::Engine crossGesture;
+weaponskills::Pulse crossPulse;
+int crossSlot=-1,crossOwner=-1;
+// [fist of the heavens] the call waits up to HeavensWaitMs for vrcam to hand the
+// game the monster the arm points at, then presses the slot.
+heavensfist::Engine heavensGesture;
+weaponskills::Pulse heavensPulse;
+int heavensSlot=-1,heavensOwner=-1,heavensPendingSlot=-1;
+uint32_t heavensRequest=0,heavensAnswered=0,heavensMonster=0,heavensCasts=0;
+float heavensFrom=0,heavensAt=0;   // the last call's start and stop elevation (degrees), for the log
+ULONGLONG heavensAskedAt=0;
+std::atomic<bool> heavensArmed{false};
+constexpr ULONGLONG HeavensWaitMs=120;
 // [charge] Paladin Charge punch pulses whichever slot holds Charge.
 chargepunch::Engine chargeGesture;
 weaponskills::Pulse chargePulse;
@@ -811,6 +831,28 @@ bool leatherMode=false;
 // image; shown and lit this frame (MenuPointer); its press sends the game one View.
 bool statsIconReady=false,statsShown=false,statsLit=false;
 statsbutton::Press statsPress;
+// An item let go outside the tabbed menu drops (menu_drop.h): the pad's X, the controller
+// menu's Drop for the item held, while menuDrop is down.
+menudrop::Drop menuDrop;
+// The held menu put away over the left shoulder (owner 2026-10-29: "put the inventory away behind my
+// back by reaching over left shoulder and pressing grab"): the same reach that takes it out
+// (leather::Reach), watched while it is held; off with Dominant hand = Left, as the reach out is.
+leather::Reach leatherStow;
+std::atomic<bool> leftDominant{false};
+// The HUD held with the menu (leather::HudPlaces): its life / mana / XP while the tabbed menu is
+// in the hand with the world kept (Leather or Menu only), unless its VR Settings location is
+// Off. The interaction engine stays off there; only its painter runs for it. No minimap there
+// (owner 2026-10-30, "Drop the map!"): it needed the game's map held open under the menu, and
+// Save and Exit from the Options tab tore the level down under it (automap.cpp:636 assert,
+// then an access violation on the draw thread).
+bool leatherHudVitals=false;
+// Reset Skills & Stats on the Character page (respec_button.h): its faces painted
+// into the static image; shown and lit this frame (MenuPointer); two pulls on it
+// ask vr/respec.cpp for the game's own reset. No game input is sent.
+bool respecArtReady=false,respecShown=false,respecLit=false;
+statsbutton::Press respecPress;
+respecbutton::Button respecButton;
+respecbutton::Face respecFace=respecbutton::Face::Reset;
 leather::Holder leatherHolder;
 leather::Back leatherBack;   // Right B the game leaves unanswered closes the leather's menu
 leather::Art leatherArt=leather::PlaceholderArt();
@@ -1021,7 +1063,7 @@ void ClearInput() {
     panelinput::WorldInput(false);
     gamestate::MenuMap(false);
     menuControls.Suspend();menuNavigation.Reset();nativeMenuPad={};laserClick={};panelinput::UseController();
-    statsPress.Reset();statsShown=statsLit=false;
+    statsPress.Reset();statsShown=statsLit=false;menuDrop.Reset();
     handControls.Suspend();
     bodyCalibration.Suspend();
     settingsInputGate.Suspend();
@@ -1558,6 +1600,33 @@ std::vector<uint8_t> PaintPointer() {
 // Static text atlas: painted once, never repainted in the frame loop; empty if
 // GDI could not. Native skill icons, names and belt counts require a separate
 // read-only UI adapter.
+// Reset Skills & Stats' label as coverage (0-255 per texel, w x h): GDI's
+// antialiased Georgia bold (the sewer prompt's face), the largest that fits.
+std::vector<uint8_t> RespecLabel(const wchar_t* text,int w,int h) {
+    std::vector<uint8_t> coverage;
+    BITMAPINFO info{};info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);
+    info.bmiHeader.biWidth=w;info.bmiHeader.biHeight=-h;info.bmiHeader.biPlanes=1;info.bmiHeader.biBitCount=32;
+    void* bits=nullptr;HDC dc=CreateCompatibleDC(nullptr);
+    HBITMAP bitmap=dc?CreateDIBSection(dc,&info,DIB_RGB_COLORS,&bits,nullptr,0):nullptr;
+    if(!dc||!bitmap||!bits){if(bitmap)DeleteObject(bitmap);if(dc)DeleteDC(dc);return coverage;}
+    auto old=SelectObject(dc,bitmap);std::memset(bits,0,size_t(w)*h*4);
+    SetBkMode(dc,TRANSPARENT);SetTextColor(dc,RGB(255,255,255));
+    bool fits=false;
+    for(int px=h*30/64;px>=h/4&&!fits;px-=2) {
+        HFONT font=CreateFontW(px,0,0,0,FW_BOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,
+            ANTIALIASED_QUALITY,DEFAULT_PITCH,L"Georgia");
+        auto before=SelectObject(dc,font);RECT measured{0,0,0,0};
+        DrawTextW(dc,text,-1,&measured,DT_CALCRECT|DT_SINGLELINE|DT_NOPREFIX);
+        fits=measured.right<=w-h*7/16||px-2<h/4;   // clear of the rim (respec_button.h)
+        if(fits){RECT bounds{0,0,w,h};DrawTextW(dc,text,-1,&bounds,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX);}
+        SelectObject(dc,before);DeleteObject(font);
+    }
+    GdiFlush();
+    coverage.resize(size_t(w)*h);const auto* b=static_cast<const uint8_t*>(bits);
+    for(size_t i=0;i<coverage.size();++i)coverage[i]=std::max({b[4*i],b[4*i+1],b[4*i+2]});
+    SelectObject(dc,old);DeleteObject(bitmap);DeleteDC(dc);
+    return coverage;
+}
 std::vector<uint8_t> PaintGameplay() {
     BITMAPINFO info{};info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);
     info.bmiHeader.biWidth=1024;info.bmiHeader.biHeight=-1024;info.bmiHeader.biPlanes=1;info.bmiHeader.biBitCount=32;
@@ -1666,8 +1735,27 @@ bool SetupStatic(DXGI_FORMAT eyeFormat) {
     }();
     // The tabbed menu's Advanced Stats button, plain and lit (stats_button.h); premultiplied, as its quad blends.
     const bool statsPainted=put(statsbutton::Paint(StatsSize,false),Stats)&&put(statsbutton::Paint(StatsSize,true),StatsLit);
+    // Reset Skills & Stats: each face on the stone plaque, Reset and Confirm? lit as well.
+    static_assert(RespecWidth==respecbutton::TexelWidth&&RespecHeight==respecbutton::TexelHeight&&
+                  RespecPictures==respecbutton::Faces+2,"one atlas picture per face, two lit");
+    const bool respecPainted=[&]{
+        const auto face=[&](int label,bool lit,int at) {
+            auto px=respecbutton::PaintFace(RespecWidth,RespecHeight,lit);
+            const auto text=RespecLabel(respecbutton::Labels[label],RespecWidth,RespecHeight);
+            if(text.empty())return false;
+            respecbutton::Stamp(px,text,RespecWidth,RespecHeight,lit);
+            return put(px,Respec(at));
+        };
+        bool ok=true;
+        for(int f=0;f<respecbutton::Faces;++f)ok=face(f,false,f)&&ok;
+        ok=face(int(respecbutton::Face::Reset),true,RespecLitReset)&&ok;
+        ok=face(int(respecbutton::Face::Confirm),true,RespecLitConfirm)&&ok;
+        return ok;
+    }();
     if(!UploadAtlas(staticChain,eyeFormat,StaticWidth,StaticHeight,pixels))return false;
     statsIconReady=statsPainted;
+    respecArtReady=respecPainted;
+    if(!respecPainted)Say("Frame panels: Reset Skills & Stats could not be painted; the button stays hidden");
     if(!statsPainted)Say("Frame panels: the Advanced Stats button could not be painted; the menu button alone opens it");
     pointerChain=staticChain;
     compassAtlasReady=compassPainted;compassChain=compassPainted?staticChain:XR_NULL_HANDLE;
@@ -1843,7 +1931,7 @@ XrPosef UiSurfacePose() {
 void MenuPointer(const menus::Pad& controls) {
     nativeMenuPad={};
     pointerVisible=pointerHit=false;
-    if(settingsModel.open||bodyCalibration.Active()||calibrationRelease.blocked){panelinput::ItemHover(false);return;}
+    if(settingsModel.open||bodyCalibration.Active()||calibrationRelease.blocked){panelinput::ItemHover(false);menuDrop.Reset();respecShown=false;respecButton.Hide();return;}
     const bool spatialReady=spatialMode&&SurfacePlaced()&&uiCrop[2]>0;
     const bool uiActive=(panelMode&&menuPlaced)||spatialReady;
     const auto surfacePose=spatialMode?UiSurfacePose():menuPose;
@@ -1883,12 +1971,66 @@ void MenuPointer(const menus::Pad& controls) {
     }
     if(statsPress.Step(onStats&&uiActive,pressed,GetTickCount64()))
         Say(focused?"Frame panels: Advanced Stats button - View sent to the game":"Frame panels: Advanced Stats button - View sent (game window not focused)");
+    // Reset Skills & Stats on the Character page (respec_button.h): as above, the laser on
+    // it moves no game cursor and its trigger is never the game's. The first pull asks
+    // Confirm?, the second asks vr/respec.cpp for the game's own reset; no game input is sent.
+    const uint64_t respecNow=GetTickCount64();
+    const auto respecEngine=[]{
+        switch(respec::Status()) {
+            case respec::State::Busy:return respecbutton::Engine::Busy;
+            case respec::State::Done:return respecbutton::Engine::Done;
+            case respec::State::NoRoom:return respecbutton::Engine::NoRoom;
+            case respec::State::Failed:return respecbutton::Engine::Failed;
+            default:return respecbutton::Engine::Idle;
+        }
+    }();
+    respecShown=respecArtReady&&spatialReady&&!journalMode&&gamestate::RespecButtonShown();
+    respecButton.Step(respecShown,respecEngine,respecNow);
+    respecFace=respecButton.Showing(respecNow);
+    const auto respecSpot=respecShown?respecbutton::Place(surface.width,surface.height):respecbutton::Spot{};
+    const bool onRespec=respecShown&&!onStats&&aimTracked&&pointerHit&&!(mouseDown||rightMouseDown)&&
+        respecbutton::Hit(respecSpot,surface.width,surface.height,hit.u,hit.v);
+    respecLit=onRespec&&respecbutton::Clickable(respecFace);
+    if(respecPress.Step(onRespec&&uiActive,pressed,respecNow)&&respecbutton::Clickable(respecFace)) {
+        if(respecButton.Click(respecNow,respecEngine)) {
+            if(!respec::Request()){respecButton.Refused();Say("Frame panels: Reset Skills & Stats refused (not an offline game, or a reset already running)");}
+        } else if(respecButton.Confirming())Say("Frame panels: Reset Skills & Stats - Confirm? shown");
+    }
+    const bool onButton=onStats||onRespec;   // a stamped button: no game cursor, no game trigger
+    // An item on the game's cursor and a trigger pull begun off the menu's art (past or on the
+    // hide, or the band's see-through margins): the pad's X, the controller menu's own Drop for
+    // the item held (menu_drop.h). The tabbed menu (and its cube) only; never without an item on
+    // the cursor, where X would drop the controller's selected item instead.
+    const bool dropMenu=spatialReady&&!journalMode&&gamestate::LeatherMenuOpen();
+    const bool cursorItem=dropMenu&&gamestate::CursorItemHeld();
+    const bool offArt=dropMenu&&aimTracked&&!menuNavigation.Native()&&!(mouseDown||rightMouseDown)&&!onButton&&
+        (!pointerHit||!menudrop::InArt(hit.u,hit.v,surface.width,surface.height));
+    const auto drop=menuDrop.Step(offArt&&uiActive&&focused,cursorItem,pressed,GetTickCount64());
+    if(dropMenu&&pressed&&!triggerWasDown&&!drop.press&&aimTracked&&!onButton&&!(mouseDown||rightMouseDown)&&
+       (!pointerHit||!menudrop::InArt(hit.u,hit.v,surface.width,surface.height))) {   // a pull off the menu that did not drop: why
+        static ULONGLONG toldAt=0;
+        if(GetTickCount64()-toldAt>500) {
+            toldAt=GetTickCount64();
+            const uint64_t read=gamestate::CursorItemReadAt();
+            char line[220];std::snprintf(line,sizeof line,"Frame panels: a pull off the menu, no drop - item on the cursor %s (read %llu ms ago), %s, game window %s",
+                gamestate::CursorItemHeld()?"yes":"no",read?(unsigned long long)(GetTickCount64()-read):0ull,
+                menuNavigation.Native()?"controller navigation":"laser",focused?"focused":"not focused");
+            Say(line);
+        }
+    }
+    const bool dropOwns=menuDrop.Down();   // X down: the trigger is the drop's
     const bool wasNative=menuNavigation.Native();
-    menus::Pad navigation=controls;   // on the leather the left stick walks: no menu cursor, no switch from the laser
-    if(leatherMode&&leatherShown.load())navigation.lx=navigation.ly=0;
-    if(onStats||statsPress.Held())navigation.rt=0;   // the button's trigger is never the game's RT
-    nativeMenuPad=menuNavigation.Step(uiActive&&focused,navigation,pointerHit&&!onStats,hit.u,hit.v,mouseDown||rightMouseDown);
+    // Held in the hand (the world kept round it), the left stick walks and the right stick
+    // turns (tester 2026-10-29: "cannot rotate with right stick"): neither moves the menu's
+    // cursor or takes the laser's place. The right stick's up / down too: a turn's slight tilt
+    // flipped the laser to controller navigation (owner's rev1 log: "native controller
+    // navigation" / "laser navigation" every second while walking and turning), hiding it.
+    menus::Pad navigation=controls;
+    if(leatherMode&&leatherShown.load())navigation.lx=navigation.ly=navigation.rx=navigation.ry=0;
+    if(onButton||statsPress.Held()||respecPress.Held()||dropOwns)navigation.rt=0;   // a button's or the drop's trigger is never the game's RT
+    nativeMenuPad=menuNavigation.Step(uiActive&&focused,navigation,pointerHit&&!onButton,hit.u,hit.v,mouseDown||rightMouseDown);
     if(statsPress.Held())nativeMenuPad.buttons|=menus::Back;   // View: Advanced Stats (Start closes the menu)
+    if(menuDrop.Down())nativeMenuPad.buttons|=menus::X;   // X: the controller menu's Drop for the item on the cursor
     if(wasNative!=menuNavigation.Native()&&uiActive&&focused)
         Say(menuNavigation.Native()?"Frame panels: native controller navigation":"Frame panels: laser navigation");
     const bool laser=!menuNavigation.Native();
@@ -1900,7 +2042,7 @@ void MenuPointer(const menus::Pad& controls) {
         panels::MenuDistance(int(vrsettings::Read().values[settings::MenuDistance]),!spatialMode));
     const bool active=uiActive&&focused&&aimTracked&&laser;
     if(active)panelinput::OwnPointer();
-    if(active&&pointerHit&&!onStats) {
+    if(active&&pointerHit&&!onButton&&!dropOwns) {
         RECT client{};
         if(GetClientRect(gameWindow,&client)) {
             math::Vec native{hit.u,hit.v,0};
@@ -1910,7 +2052,8 @@ void MenuPointer(const menus::Pad& controls) {
             else pointerHit=false;
         } else pointerHit=false;
     }
-    const bool gamePointer=pointerHit&&!onStats;   // on the button the dot shows, the game's cursor stays put
+    // On a button, or off the art with an item to drop, the dot shows and no game click is made there.
+    const bool gamePointer=pointerHit&&!onButton&&!dropOwns&&!(offArt&&cursorItem);
     const bool modifiers=active&&(gamePointer||mouseDown||rightMouseDown);
     PanelModifier(VK_CONTROL,modifiers&&controls.lt>140,controlDown);
     PanelModifier(VK_SHIFT,modifiers&&!grabbing&&(controls.buttons&menus::RightBumper),shiftDown);
@@ -1926,6 +2069,10 @@ void MenuPointer(const menus::Pad& controls) {
             if(!held)panelMouse.down[i]=false;
         }
     }
+    if(drop.press)Say(focused?"Frame panels: item let go outside the menu - X (the menu's Drop) sent to the game":
+                              "Frame panels: item let go outside the menu - X sent (game window not focused)");
+    if(drop.check)Say(gamestate::CursorItemHeld()?"Frame panels: the item is still on the cursor after X (the game did not drop it)":
+                                                "Frame panels: the item left the cursor - dropped");
     triggerWasDown=pressed;cancelWasDown=(controls.buttons&menus::B)!=0;
 }
 
@@ -2371,7 +2518,9 @@ bottles::Prop Metres(const props::Seen& s,float upm) {
     p.unitsPerMetre=upm;
     return p;
 }
-bool g_tacticalPrevGrip[2]{};
+// Grip + Trigger per hand (tactical_chord.h): grip on the companion arms, the trigger latches,
+// letting go carries the command out. An armed or latched hand's trigger is kept from the game (Input).
+framevr::tacticalchord::Hand g_tacticalChord[2];
 uint64_t g_openPalmHoldStart[2]{};
 bool g_openPalmLocked[2]{};
 int g_tacticalGrabHand = -1;
@@ -2381,7 +2530,7 @@ bool g_tacticalTargetOutOfRange[2]{};
 
 void StepCompanionTacticalGestures(uint64_t now, float rightTrigger, float leftTrigger) {
     if (!::companionai::IsTacticalCommandsEnabled() || !interactionInput.active) {
-        g_tacticalPrevGrip[0] = g_tacticalPrevGrip[1] = false;
+        g_tacticalChord[0].Reset(); g_tacticalChord[1].Reset();
         g_openPalmHoldStart[0] = g_openPalmHoldStart[1] = 0;
         g_openPalmLocked[0] = g_openPalmLocked[1] = false;
         if (g_tacticalGrabHand >= 0) {
@@ -2404,8 +2553,11 @@ void StepCompanionTacticalGestures(uint64_t now, float rightTrigger, float leftT
     const bool hasCompPos = ::companionai::GetHirelingWorldSubtilePos(compX, compY);
 
     for (int h = 0; h < 2; ++h) {
+        auto& chord = g_tacticalChord[h];
+        const float grip = motionInput.grip[h];
+        const float trigger = (h == 0) ? rightTrigger : leftTrigger;
         if (!interactionInput.tracked[h]) {
-            g_tacticalPrevGrip[h] = false;
+            chord.Step(grip, trigger, false, false);
             g_openPalmHoldStart[h] = 0;
             g_openPalmLocked[h] = false;
             if (g_tacticalGrabHand == h) {
@@ -2415,14 +2567,8 @@ void StepCompanionTacticalGestures(uint64_t now, float rightTrigger, float leftT
             continue;
         }
 
-        const bool gripDown = motionInput.grip[h] > 0.6f;
-        const bool gripHeld = motionInput.grip[h] >= 0.4f;
-        const bool gripClick = gripDown && !g_tacticalPrevGrip[h];
-        g_tacticalPrevGrip[h] = gripDown;
-
         // 1. Gesture: Open-Palm Defensive Hold (Upright palm facing companion / forward)
-        const float trigger = (h == 0) ? rightTrigger : leftTrigger;
-        const bool handOpen = motionInput.grip[h] < 0.2f && trigger < 0.2f;
+        const bool handOpen = grip < 0.2f && trigger < 0.2f;
         if (handOpen && g_tacticalGrabHand < 0) {
             const auto handUp = math::Rotate(interactionInput.hand[h].q, {0, 1, 0});
             if (handUp.y > 0.82f) {
@@ -2444,6 +2590,7 @@ void StepCompanionTacticalGestures(uint64_t now, float rightTrigger, float leftT
                             Say("Frame companion tactical: open-palm defensive hold ordered");
                         }
                     }
+                    chord.Step(grip, trigger, false, !handsBusy);   // an open hand: at most an armed grip let go
                     continue;
                 }
             }
@@ -2454,38 +2601,13 @@ void StepCompanionTacticalGestures(uint64_t now, float rightTrigger, float leftT
             g_openPalmLocked[h] = false;
         }
 
-        // 2. Gesture: Select Companion First -> Hold Grip & Aim -> Release Grip to Execute
-        // Exclude hands armed for Paladin grip body gestures (Blessed Hammer pump or Charge punch)
-        // to prevent accidental companion command latching during combat fists/punches.
-        bool gripGestureArmed = false;
-        if (interactionInput.active) {
-            const auto& quickSnapshot = interactionInput.snapshot;
-            const bool quickFresh = interaction::Fresh(quickSnapshot, interactionInput.session, interactionInput.at);
-            const auto gestureSettings = vrsettings::Read().values;
-            if (quickFresh && gestureSettings[settings::SkillGestures] > 0.5f) {
-                for (int i = 0; i < skills::Count; ++i) {
-                    if (quickSnapshot.skills[i].known && quickSnapshot.skills[i].available) {
-                        if (quickSnapshot.skills[i].id == weaponskills::BlessedHammer) {
-                            gripGestureArmed = true;
-                            break;
-                        }
-                        if (quickSnapshot.skills[i].id == weaponskills::Charge && h == 0) {
-                            gripGestureArmed = true;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        if (gripGestureArmed) {
-            if (g_tacticalGrabHand == h) {
-                framevr::telegraph::Current().ClearSkill(-2);
-                g_tacticalGrabHand = -1;
-            }
+        // 2. Gesture: Select Companion First -> Grip on it, then Trigger & Aim -> Release to Execute
+        // (tactical_chord.h). The ray is only tested on the frame the grip closes, or while engaged.
+        if (!chord.Closing(grip) && !chord.Engaged()) {
+            chord.Step(grip, trigger, false, !handsBusy);
             continue;
         }
-
-        if ((gripClick || g_tacticalGrabHand == h) && (handAimTracked[h] || interactionInput.tracked[h])) {
+        {
             const auto headP = interactionInput.head.p;
             const auto handP = interactionInput.hand[h].p;
             const auto eyeToHand = handP - headP;
@@ -2547,17 +2669,19 @@ void StepCompanionTacticalGestures(uint64_t now, float rightTrigger, float leftT
             // Original companion cylinder: radius 0.95m, ground foot tolerance 3.5 sub-tiles, height [-0.45m, 2.00f]
             const bool pointingAtMerc = hasCompPos && hitsUnitCylinder3D(compX, compY, 0.95f, 3.5f, mercScore);
 
-            // Step 2a: On initial Grip press, Merc Grip Priority gives absolute precedence to latching the companion.
-            // Even if the ray intersects both the companion and nearby monsters (or monsters in front),
-            // pointing at the companion unconditionally latches the companion for tactical commanding.
-            if (gripClick && g_tacticalGrabHand < 0) {
-                if (pointingAtMerc) {
-                    g_tacticalGrabHand = h;
-                    g_tacticalGrabStartMs = now;
-                    MotionPulse(h, haptics::Category::Interaction, 0.30f, 25000000);
-                    framevr::telegraph::Current().Place(compX, compY, now, 250, 2, 1.5f, 0, 0, 0, -2);
-                }
-                continue;
+            // Step 2a: Merc Grip Priority: the grip closing on the companion arms the hand even if the ray
+            // also crosses monsters. Arming shows and pulses nothing (a Paladin's fist near the companion,
+            // then opened, orders nothing); the trigger pulled while armed latches the command.
+            const auto chordEvent = chord.Step(grip, trigger, pointingAtMerc, !handsBusy);
+            if (chordEvent == framevr::tacticalchord::Event::Latched && g_tacticalGrabHand < 0) {
+                g_tacticalGrabHand = h;
+                g_tacticalGrabStartMs = now;
+                MotionPulse(h, haptics::Category::Interaction, 0.30f, 25000000);
+                framevr::telegraph::Current().Place(compX, compY, now, 250, 2, 1.5f, 0, 0, 0, -2);
+            }
+            if (chordEvent == framevr::tacticalchord::Event::Disarmed && g_tacticalGrabHand == h) {
+                framevr::telegraph::Current().ClearSkill(-2);
+                g_tacticalGrabHand = -1;
             }
 
             if (g_tacticalGrabHand != h) continue;
@@ -2583,8 +2707,8 @@ void StepCompanionTacticalGestures(uint64_t now, float rightTrigger, float leftT
             const float compDistFromGround = (hasCompPos && groundHit) ? std::hypot(compX - gx, compY - gy) : 9999.0f;
             const bool aimingAtCompanion = hasCompPos && (compDistFromGround <= 2.0f || (!groundHit && pointingAtMerc));
 
-            // Step 2b: While holding Grip, render live preview telegraph
-            if (gripHeld) {
+            // Step 2b: While holding Grip + Trigger, render live preview telegraph
+            if (chord.latched) {
                 float plyrX = 0.0f, plyrY = 0.0f;
                 const bool hasPlyrPos = ::companionai::GetPlayerWorldSubtilePos(plyrX, plyrY);
 
@@ -2621,7 +2745,7 @@ void StepCompanionTacticalGestures(uint64_t now, float rightTrigger, float leftT
                 continue;
             }
 
-            // Step 2c: On Grip release, execute the selected tactical command
+            // Step 2c: On Trigger or Grip release, execute the selected tactical command
             const uint64_t holdDurationMs = (now >= g_tacticalGrabStartMs) ? (now - g_tacticalGrabStartMs) : 0;
             g_tacticalGrabHand = -1;
             g_tacticalTargetOutOfRange[h] = false;
@@ -2977,8 +3101,10 @@ void Input() {
     if(Bool(stickClick,0))physical.buttons|=menus::RightStick;
     if(Float(squeeze,1)>.6f)physical.buttons|=menus::LeftBumper;
     if(Float(squeeze,0)>.6f)physical.buttons|=menus::RightBumper;
-    physical.lt=uint8_t(std::clamp(Float(trigger,1),0.f,1.f)*255);
-    physical.rt=uint8_t(std::clamp(Float(trigger,0),0.f,1.f)*255);
+    // A hand armed or latched on a mercenary command (tactical_chord.h): its trigger is the command's,
+    // never the game's, until let go (as of the last step, StepCompanionTacticalGestures below).
+    physical.lt=g_tacticalChord[1].triggerOwned?0:uint8_t(std::clamp(Float(trigger,1),0.f,1.f)*255);
+    physical.rt=g_tacticalChord[0].triggerOwned?0:uint8_t(std::clamp(Float(trigger,0),0.f,1.f)*255);
     const auto physicalLeft=Stick(1),physicalRight=Stick(0);
     const auto axis=[](float value){return int16_t(std::clamp(value,-1.f,1.f)*32767.f);};
     physical.lx=axis(physicalLeft.x);physical.ly=axis(physicalLeft.y);
@@ -3052,9 +3178,22 @@ void Input() {
         const float width=leatherMenuWidth.load(),inset=leatherHide.load()?0.f:leather::MenuArtInset*width;
         leatherHolder.Step(V(hand.pose.position),Q(hand.pose.orientation),tracked,leatherArt,width,leatherTilt.load(),inset);
         const auto menu=leatherHolder.Get().menu;uiPose=XrPose({menu.p,menu.q});
-    }
+        // Put away: the left hand back over the left shoulder and a fresh grip (the grip that took it
+        // out must be let go first: a new menu epoch primes the reach as held). Not mid-drag, nor
+        // with VR Settings over it; with an item on the cursor the game side leaves it open.
+        leather::ReachInput stow;stow.time=Milliseconds()/1000.;stow.session=gamestate::LocalPlayer();stow.epoch=inputEpoch;
+        stow.active=!leftDominant.load()&&!settingsOwned&&!settingsChord;stow.tracked=tracked&&motionHeadTracked;
+        stow.allowed=!mouseDown&&!rightMouseDown;
+        stow.head=V(head.position);stow.hand=V(hand.pose.position);stow.heading=math::Yaw(math::Heading(Q(head.orientation)));
+        stow.grip=Float(squeeze,leather::Hand);
+        if(leatherStow.Step(stow).open) {
+            const bool queued=gamestate::StowLeatherMenu();
+            MotionPulse(leather::Hand,haptics::Category::Interaction,.25f,35000000);
+            Say(queued?"Frame leather: put away over the left shoulder":"Frame leather: put away over the left shoulder - the game's UI thread refused");
+        }
+    } else leatherStow.Reset();
     if(!settingsOwned&&!settingsChord)MenuPointer(controls);
-    else {nativeMenuPad={};menuNavigation.Reset();panelinput::UseController();pointerVisible=pointerHit=false;triggerWasDown=Float(trigger,0)>.2f;cancelWasDown=Bool(secondary,0);}
+    else {menuDrop.Reset();nativeMenuPad={};menuNavigation.Reset();panelinput::UseController();pointerVisible=pointerHit=false;triggerWasDown=Float(trigger,0)>.2f;cancelWasDown=Bool(secondary,0);}
     // The native Back went to the game above; one it leaves unanswered closes the menu (leather::Back).
     if(leatherBack.Step(leatherMode&&!settingsOwned&&!settingsChord,(controls.buttons&menus::B)!=0,mouseDown||rightMouseDown,
                         gamestate::PanelChanges(),GetTickCount64())&&gamestate::CloseLeatherMenu())
@@ -3181,6 +3320,12 @@ void Input() {
     const auto hudSettings=vrsettings::Read();
     interactionInput.navigationLocation=vitals::Location(int(hudSettings.values[settings::NavigationLocation]));
     interactionInput.vitalsLocation=vitals::Location(int(hudSettings.values[settings::VitalsLocation]));
+    {   // the HUD held with the menu: its life / mana / XP picture
+        const bool held=leatherMode&&leatherShown.load()&&inWorld&&inWorld()&&!settingsModel.open;
+        const bool vitalsWas=leatherHudVitals;
+        leatherHudVitals=held&&interactionInput.vitalsLocation!=vitals::Location::Off;
+        if(leatherHudVitals&&!vitalsWas)Say("Frame leather: the HUD held with the menu - life and mana");
+    }
     interactionInput.vitalsTilt=hudSettings.values[settings::VitalsTilt];
     interactionInput.criticalAlerts=hudSettings.values[settings::CriticalAlerts]>.5f;
     if(leftStrikesSequence&&((hudSettings.sequence==leftStrikesSequence&&hudSettings.result!=settings::Result::Saving)||interactionInput.at-leftStrikesAt>2000))
@@ -3816,6 +3961,100 @@ void Input() {
             else if(motionOutput.skill<0&&quickFresh&&quickSnapshot.skills[pulse].available)motionOutput.skill=pulse;
         }
     }
+    // Paladin Holy Shield: the sign of the cross (forehead, chest, one shoulder,
+    // the other) with either hand, trigger free, casts Holy Shield through the
+    // slot it is bound to; mana, the buff and its glow stay native. Only runs
+    // while the skill sits on a slot.
+    {
+        int slot=-1;
+        if(quickFresh)for(int i=0;i<skills::Count;++i)if(quickSnapshot.skills[i].known&&quickSnapshot.skills[i].id==weaponskills::HolyShield){slot=i;break;}
+        holycross::Input in;
+        in.time=interactionInput.time;in.session=interactionInput.session;in.epoch=interactionInput.epoch;
+        in.active=slot>=0&&motionInput.active&&!motionOutput.block&&!motionInput.quickCast&&
+            gestureSettings[settings::SkillGestures]>.5f&&!interactionOutput.wheel&&!interactionOutput.settings;
+        in.head=interactionInput.head.p;in.headRotation=interactionInput.head.q;
+        for(int h=0;h<2;++h) {
+            in.hand[h]=interactionInput.hand[h].p;in.tracked[h]=interactionInput.tracked[h];
+            in.handVelocity[h]=interactionInput.handVelocity[h];in.velocityKnown[h]=interactionInput.velocityKnown[h];
+            in.busy[h]=interactionOutput.bottleHand==h||interactionOutput.owner[h]!=interaction::Owner::Combat||
+                handInput.trigger[h]>.3f||(h==0&&motionOutput.bowDrawing)||bloodOutput.block[h];
+        }
+        const auto sign=crossGesture.Step(in);
+        if(sign.dropped) {
+            char line[160];std::snprintf(line,sizeof line,"Frame holy shield: %s hand sign dropped after %d of 4 touches: %s",sign.droppedHand?"left":"right",sign.reached,sign.dropped);Say(line);
+        }
+        if(sign.cast>=0&&slot>=0) {
+            const char* hand=sign.cast?"left":"right";
+            char line[160];
+            if(!quickSnapshot.skills[slot].available)std::snprintf(line,sizeof line,"Frame holy shield: %s hand sign, skill unavailable on slot %d",hand,slot);
+            // Alternate-bank slots need the modifier prepared first: hold like Smite.
+            else if(crossPulse.Start(slot,weaponskills::HolyShield,quickSnapshot.skills[slot].owner,motionInput.skillContext,motionInput.time,skills::Alternate(slot)?.180:.065)) {
+                crossSlot=slot;crossOwner=quickSnapshot.skills[slot].owner;
+                MotionPulse(sign.cast,haptics::Category::Spell,.6f,60000000);
+                std::snprintf(line,sizeof line,"Frame holy shield: %s hand sign of the cross cast via slot %d",hand,slot);
+            }
+            else std::snprintf(line,sizeof line,"Frame holy shield: %s hand sign dropped: the previous press is still held",hand);
+            Say(line);
+        }
+        if(crossSlot>=0) {
+            const int pulse=crossPulse.Get(crossSlot,weaponskills::HolyShield,crossOwner,motionInput.skillContext,motionInput.time);
+            if(pulse<0)crossSlot=crossOwner=-1;
+            else if(motionOutput.skill<0&&quickFresh&&quickSnapshot.skills[pulse].available)motionOutput.skill=pulse;
+        }
+    }
+    // Paladin Fist of the Heavens: the weapon arm straight, raised ~45 degrees,
+    // brought down to stop level with the shoulder (grip held, trigger free).
+    // The monster the arm points at is handed to the game (vrcam answers
+    // HeavensRequest), else the game picks; then the slot is pressed. Mana,
+    // cast rate and the bolt stay native. Only while the skill is on a slot.
+    {
+        constexpr int weaponHand=0;
+        int slot=-1;
+        if(quickFresh)for(int i=0;i<skills::Count;++i)if(quickSnapshot.skills[i].known&&quickSnapshot.skills[i].id==weaponskills::FistOfHeavens){slot=i;break;}
+        heavensfist::Input in;
+        in.time=interactionInput.time;in.session=interactionInput.session;in.epoch=interactionInput.epoch;
+        in.active=slot>=0&&motionInput.active&&!motionOutput.block&&!motionInput.quickCast&&
+            gestureSettings[settings::SkillGestures]>.5f&&!interactionOutput.wheel&&!interactionOutput.settings;
+        heavensArmed=slot>=0&&gestureSettings[settings::SkillGestures]>.5f;
+        in.head=interactionInput.head.p;in.headRotation=interactionInput.head.q;
+        in.hand=interactionInput.hand[weaponHand].p;in.tracked=interactionInput.tracked[weaponHand];in.grip=motionInput.grip[weaponHand];
+        in.handVelocity=interactionInput.handVelocity[weaponHand];in.velocityKnown=interactionInput.velocityKnown[weaponHand];
+        in.armSpan=calibration::Stored(gestureSettings)?gestureSettings[settings::ArmSpan]:0;
+        in.busy=interactionOutput.bottleHand==weaponHand||interactionOutput.owner[weaponHand]!=interaction::Owner::Combat||
+            handInput.trigger[weaponHand]>.3f||motionOutput.bowDrawing||bloodOutput.block[weaponHand];
+        const auto call=heavensGesture.Step(in);
+        if(call.dropped) {
+            char line[192];std::snprintf(line,sizeof line,"Frame heavens: call dropped: %s (from %.0f to %.0f deg)",call.dropped,call.from,call.at);Say(line);
+        }
+        if(call.cast&&slot>=0) {
+            if(!quickSnapshot.skills[slot].available){char line[128];std::snprintf(line,sizeof line,"Frame heavens: call, skill unavailable on slot %d",slot);Say(line);}
+            else {heavensPendingSlot=slot;heavensAskedAt=motionAt;heavensFrom=call.from;heavensAt=call.at;heavensRequest=heavensRequest+1?heavensRequest+1:1;}
+        }
+        if(heavensPendingSlot>=0&&(heavensAnswered==heavensRequest||motionAt-heavensAskedAt>HeavensWaitMs)) {
+            const int at=heavensPendingSlot;heavensPendingSlot=-1;
+            const bool answered=heavensAnswered==heavensRequest;
+            char line[192];
+            if(at<skills::Count&&quickFresh&&quickSnapshot.skills[at].id==weaponskills::FistOfHeavens&&
+               heavensPulse.Start(at,weaponskills::FistOfHeavens,quickSnapshot.skills[at].owner,motionInput.skillContext,motionInput.time,skills::Alternate(at)?.180:.065)) {
+                heavensSlot=at;heavensOwner=quickSnapshot.skills[at].owner;
+                MotionPulse(weaponHand,haptics::Category::Spell,.6f,60000000);
+                ++heavensCasts;
+                if(heavensCasts<=10||heavensCasts%25==0||!answered)
+                    std::snprintf(line,sizeof line,"Frame heavens: call cast via slot %d at %s, from %.0f to %.0f deg (%u since launch)",at,
+                        !answered?"the game's pick (no answer from the aim)":heavensMonster?"the monster the arm points at":"the game's pick (no monster where the arm points)",
+                        heavensFrom,heavensAt,heavensCasts);
+                else line[0]=0;
+            }
+            else std::snprintf(line,sizeof line,"Frame heavens: call dropped: the previous press is still held");
+            if(line[0])Say(line);
+            heavensAnswered=heavensRequest;
+        }
+        if(heavensSlot>=0) {
+            const int pulse=heavensPulse.Get(heavensSlot,weaponskills::FistOfHeavens,heavensOwner,motionInput.skillContext,motionInput.time);
+            if(pulse<0)heavensSlot=heavensOwner=-1;
+            else if(motionOutput.skill<0&&quickFresh&&quickSnapshot.skills[pulse].available)motionOutput.skill=pulse;
+        }
+    }
     // Paladin Charge punch: a weapon-hand fist (grip held, trigger free) drawn
     // in and punched straight out, arm extended, casts Charge through the slot
     // it is bound to; the aim rules hand it the monster that hand points at,
@@ -3912,8 +4151,19 @@ void Input() {
         std::snprintf(cue.name,sizeof cue.name,"Skill unavailable");std::snprintf(cue.hint,sizeof cue.hint,"Refresh assignments");
     }
     // Paladin body gestures (fist pump, Charge punch) work from any slot.
-    const auto paladinGesture=[&](int id){
-        return gestureSettings[settings::SkillGestures]>.5f?id==weaponskills::BlessedHammer?"Punch up to cast":id==weaponskills::Charge?"Punch out to charge":nullptr:nullptr;
+    // Body gestures that work from any slot: the Paladin's (fist pump, Charge
+    // punch, sign of the cross) and the Druid's shapeshifts.
+    const auto paladinGesture=[&](int id)->const char*{
+        if(gestureSettings[settings::SkillGestures]<=.5f)return nullptr;
+        switch(id) {
+            case weaponskills::BlessedHammer:return "Punch up to cast";
+            case weaponskills::Charge:return "Punch out to charge";
+            case weaponskills::HolyShield:return "Sign of the cross";
+            case weaponskills::FistOfHeavens:return "Raise, bring down";
+            case weaponskills::Werewolf:return "Cross, bow, fling open";
+            case weaponskills::Werebear:return "Hands high, slam down";
+            default:return nullptr;
+        }
     };
     if(cue.available&&!cue.temporary)if(const char* how=paladinGesture(cue.id)){cue.gesture=true;std::snprintf(cue.hint,sizeof cue.hint,"%s",how);}
     if(quiverArrow.Active()&&!cue.temporary&&(motionInput.weapon==gameplay::Weapon::Bow||motionInput.weapon==gameplay::Weapon::Javelin)) {
@@ -4033,7 +4283,7 @@ void Input() {
             }
         }
     }
-    if(interactionInput.active) {
+    if(interactionInput.active||leatherHudVitals) {   // the HUD held with the menu repaints its vitals too
         const bool snapshotFresh=interaction::Fresh(interactionInput.snapshot,interactionInput.session,interactionInput.at);
         if(snapshotFresh&&(interactionPrefetchSession!=interactionInput.session||interactionPrefetchRevision!=interactionInput.snapshot.revision)) {
             interaction::icons::Prefetch(interactionInput.snapshot);
@@ -4042,7 +4292,7 @@ void Input() {
         const uint64_t key=(interaction::icons::Revision()*0x9e3779b97f4a7c15ull)^(uint64_t(interactionOutput.editor)<<60)^(uint64_t(interactionOutput.editSlot+1)<<56)^(uint64_t(interactionOutput.editPage)<<48)^(uint64_t(interactionInput.snapshot.revision)<<32)^(uint64_t(interactionOutput.utility)<<24)^(
             uint64_t(interactionOutput.hover+1)<<16)^(uint64_t(motion.Selection()+1)<<8)^(uint64_t(interactionOutput.result)<<4)^uint64_t(interactionOutput.stowed)^(uint64_t(interactionOutput.map)<<1)^(uint64_t(interactionOutput.nearHolster+1)<<26)^(uint64_t(interactionOutput.bottle+1)<<28)^(uint64_t(interactionOutput.bottleEmpty)<<2)^(uint64_t(snapshotFresh)<<3);
         const auto now=GetTickCount64();
-        const bool visible=motionInput.active||interactionOutput.wheel||interactionOutput.wrist||interactionOutput.vitals||interactionOutput.critical||interactionOutput.bottle>=0||
+        const bool visible=leatherHudVitals||motionInput.active||interactionOutput.wheel||interactionOutput.wrist||interactionOutput.vitals||interactionOutput.critical||interactionOutput.bottle>=0||
             interactionOutput.nearBelt>=0||interactionOutput.nearHolster>=0||math::Rotate(Q(head.orientation),{0,0,-1}).y<-.60f;
         const auto context=interaction::Context(interactionInput.snapshot,interactionOutput,snapshotFresh,controllerLabels);
         const bool missingCompanions=snapshotFresh&&wriststatus::Rows(context.companions,context.effects)&&!companionPaintValid;
@@ -4239,7 +4489,8 @@ void Input() {
         // On the leather the left stick walks (owner 2026-10-28: "No one needs the left
         // thumbstick to act as the menu cursor"): it goes to BodyWalk's walk, which vrcam
         // feeds into the game's walk (DirectWalkNow), and never to the menu's cursor.
-        if(leatherMode&&leatherShown.load()&&!settingsOwned&&!settingsChord){p.thumb_lx=controls.lx;p.thumb_ly=controls.ly;}
+        // The right stick's left / right turns there too: vrcam takes it for the turn, as in play.
+        if(leatherMode&&leatherShown.load()&&!settingsOwned&&!settingsChord){p.thumb_lx=controls.lx;p.thumb_ly=controls.ly;p.thumb_rx=controls.rx;p.thumb_ry=0;}
     }
     p.reserved[0]=uint32_t(settingsOwned||settingsChord?menus::Mode::Blocked:nativeUi?menus::Mode::Native:menus::Mode::World);
     p.reserved[1]=inputEpoch;
@@ -5610,6 +5861,25 @@ void EndPair() {
         motionQuad(statsQuad,XrPose({p,q}),spot.size,spot.size,Rect(statsLit?panelatlas::StatsLit:panelatlas::Stats),staticChain);
         statsQuad.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;   // premultiplied (SetupStatic)
     }
+    // The HUD held with the menu (leather::HudPlaces): life / mana / XP above the menu.
+    XrCompositionLayerQuad hudVitals{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    if(book.subImage.swapchain&&leatherMode&&leatherHudVitals) {
+        const auto hud=leather::HudPlaces(leatherMenuWidth.load());
+        const auto at=UiSurfacePose();const auto q=Q(at.orientation);
+        if(interactionPaintValid&&interactionChain)
+            motionQuad(hudVitals,XrPose({V(at.position)+math::Rotate(q,hud.vitals),q}),hud.vitalsWidth,hud.vitalsHeight,{{512,768},{512,256}},interactionChain);
+    }
+    // Reset Skills & Stats, a hair in front of the Character page's lower right (MenuPointer).
+    XrCompositionLayerQuad respecQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    if(book.subImage.swapchain&&respecShown&&staticChain) {
+        const auto size=UiSurfaceSize();const auto spot=respecbutton::Place(size.width,size.height);
+        const auto at=UiSurfacePose();const auto q=Q(at.orientation);
+        const auto p=V(at.position)+math::Rotate(q,{spot.x,spot.y,.004f});
+        const int picture=respecLit&&respecFace==respecbutton::Face::Reset?panelatlas::RespecLitReset:
+            respecLit&&respecFace==respecbutton::Face::Confirm?panelatlas::RespecLitConfirm:int(respecFace);
+        motionQuad(respecQuad,XrPose({p,q}),spot.width,spot.height,Rect(panelatlas::Respec(picture)),staticChain);
+        respecQuad.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;   // premultiplied (SetupStatic)
+    }
     XrCompositionLayerQuad hirelingSkillsQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
     XrCompositionLayerQuad hirelingTooltipQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
     if(book.subImage.swapchain && sharedChain && hirelingSkillsImageReady && gamestate::HirelingPanelOpen() && !hirelingBadges.empty()) {
@@ -5783,6 +6053,7 @@ void ConfigureQuiver(bool enabled,bool preview) {
     }
 }
 void ConfigureInteractions(bool seated,float waist,float forward,int dominant) {
+    leftDominant=dominant==1;   // the left shoulder is the weapon swap's then: no reach to open or put away the menu
     static interaction::Config previous;static bool configured=false;
     interaction::Config c;c.seated=seated;c.waistBelowEyes=std::clamp(waist,.30f,.95f);
     c.beltForward=std::clamp(forward,.03f,.5f);c.holsters=false;c.dominant=dominant==1?1:0;
@@ -5902,6 +6173,15 @@ int CastButtonHand() {
 bool HandSpellHeld(int hand) {
     std::lock_guard lock(mutex);
     return hand>=0&&hand<2&&motionControls.load()&&handOutput.spells[hand]>=0;
+}
+bool HeavensArmed(){return heavensArmed.load();}
+uint32_t HeavensRequest() {
+    std::lock_guard lock(mutex);
+    return heavensPendingSlot>=0&&heavensAnswered!=heavensRequest&&GetTickCount64()-heavensAskedAt<=HeavensWaitMs?heavensRequest:0;
+}
+void HeavensResolved(uint32_t request,uint32_t monster) {
+    std::lock_guard lock(mutex);
+    if(request&&request==heavensRequest){heavensAnswered=request;heavensMonster=monster;}
 }
 namespace {
 // The fresh native cast's skill row, or nullptr.

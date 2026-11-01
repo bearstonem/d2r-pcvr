@@ -2005,12 +2005,98 @@ float3 RingTint(float3 c, float3 p, float4 ring, float fill, float4 col, float4 
                     ring.w * kCircleOpacity * smoothstep(0.55, 0.8, up);
     return saturate(c + saturate(col.rgb + kCircleBrighten * glow) * a * 1.3);
 }
+// Loot beams (vr/loot_beam_scan.cpp, steamvr/loot_beams.h): a pillar of light
+// over each Rare, Set or Unique item and each high rune lying near the hero, in
+// the colour the game writes its name in, and a soft glow on the floor round it.
+// Each pixel's ray from the eye is tested against each beam's vertical axis; the
+// beam counts only where it passes in front of what the eye sees there, so walls,
+// monsters and hills in front hide it and the sky behind shows it. Drawn after
+// the fog, so a beam stays visible in it; never over the game's interface left in
+// the picture (UiMaskOn). vrcam: BeamPos xyz the item's spot on
+// the hero's floor, relative to the hero, w its strength (0 = none); BeamCol rgb
+// its colour, w a phase for its shimmer; BeamShape core radius, height and floor
+// glow radius (world units), overall strength.
+uniform bool BeamOn < hidden = true; > = false;
+uniform float4 BeamShape < hidden = true; > = float4(0.7, 56.0, 2.8, 1.0);
+uniform float BeamFloorTol < hidden = true; > = 0.6;
+uniform float4 BeamPos0 < hidden = true; > = float4(0.0, 0.0, 0.0, 0.0);
+uniform float4 BeamPos1 < hidden = true; > = float4(0.0, 0.0, 0.0, 0.0);
+uniform float4 BeamPos2 < hidden = true; > = float4(0.0, 0.0, 0.0, 0.0);
+uniform float4 BeamPos3 < hidden = true; > = float4(0.0, 0.0, 0.0, 0.0);
+uniform float4 BeamPos4 < hidden = true; > = float4(0.0, 0.0, 0.0, 0.0);
+uniform float4 BeamPos5 < hidden = true; > = float4(0.0, 0.0, 0.0, 0.0);
+uniform float4 BeamPos6 < hidden = true; > = float4(0.0, 0.0, 0.0, 0.0);
+uniform float4 BeamPos7 < hidden = true; > = float4(0.0, 0.0, 0.0, 0.0);
+uniform float4 BeamCol0 < hidden = true; > = float4(1.0, 1.0, 1.0, 0.0);
+uniform float4 BeamCol1 < hidden = true; > = float4(1.0, 1.0, 1.0, 0.0);
+uniform float4 BeamCol2 < hidden = true; > = float4(1.0, 1.0, 1.0, 0.0);
+uniform float4 BeamCol3 < hidden = true; > = float4(1.0, 1.0, 1.0, 0.0);
+uniform float4 BeamCol4 < hidden = true; > = float4(1.0, 1.0, 1.0, 0.0);
+uniform float4 BeamCol5 < hidden = true; > = float4(1.0, 1.0, 1.0, 0.0);
+uniform float4 BeamCol6 < hidden = true; > = float4(1.0, 1.0, 1.0, 0.0);
+uniform float4 BeamCol7 < hidden = true; > = float4(1.0, 1.0, 1.0, 0.0);
+
+// The eye (relative to the hero) and the direction its pixel at uv looks along,
+// scaled so that t = 1 is one world unit of view depth (as OutlineWorld).
+void BeamRay(float2 uv, int eye, out float3 e, out float3 dir)
+{
+    const float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    const float4 sp = eye == 0 ? SkyProj0 : SkyProj1;
+    const float3 v = float3((ndc.x + sp.z) / sp.x, (ndc.y + sp.w) / sp.y, -1.0);
+    dir = eye == 0 ? v.x * CamRight0 + v.y * CamUp0 + v.z * CamBack0
+                   : v.x * CamRight1 + v.y * CamUp1 + v.z * CamBack1;
+    e = eye == 0 ? OutlineEye0 : OutlineEye1;
+}
+// One beam's light at this pixel. tSurf: how far (view depth) the eye sees here,
+// huge over the sky. The core narrows towards the top, where it fades out; a
+// slow shimmer climbs it. The floor point p (ok = 1) round the foot is lit too.
+float3 BeamLight(float3 e, float3 dir, float tSurf, float3 p, float ok, float4 b, float4 col)
+{
+    if (b.w <= 0.0) return 0.0;
+    float3 light = 0.0;
+    const float2 dxz = dir.xz;
+    const float t = dot(b.xz - e.xz, dxz) / max(dot(dxz, dxz), 1e-6);   // nearest the axis, across the ground
+    if (t > 0.0) {
+        const float h = (e.y + t * dir.y - b.y) / max(BeamShape.y, 1e-3);   // 0 the floor, 1 the top
+        const float r = BeamShape.x * lerp(1.0, 0.3, saturate(h));
+        const float d = length(e.xz + t * dxz - b.xz) / max(r, 1e-3);
+        const float front = smoothstep(-1.0, 0.5, tSurf - t);             // in front of the scene there
+        const float along = smoothstep(0.0, 0.015, h) * (1.0 - smoothstep(0.2, 1.0, h));
+        const float shimmer = 0.82 + 0.18 * sin(h * 55.0 - Timer * 0.0025 + col.w);
+        const float core = exp(-d * d), halo = exp(-d * d / 9.0);
+        const float a = along * front * shimmer;
+        light += col.rgb * (0.75 * core + 0.25 * halo) * a + core * core * core * a * 0.08;   // a little white at the very heart
+    }
+    if (ok > 0.0 && abs(p.y - b.y) < BeamFloorTol) {   // the glow on the floor round its foot
+        const float g = length(p.xz - b.xz) / max(BeamShape.z, 1e-3);
+        light += col.rgb * exp(-g * g * 2.5) * (0.5 + 0.1 * sin(Timer * 0.002 + col.w));
+    }
+    return light * b.w * BeamShape.w;
+}
+float3 Beams(float3 c, float2 uv, int eye, float3 p, float ok)
+{
+    float3 e, dir;
+    BeamRay(uv, eye, e, dir);
+    const float tSurf = ok > 0.0 ? dot(p - e, dir) / max(dot(dir, dir), 1e-6) : 1e7;
+    float3 light = BeamLight(e, dir, tSurf, p, ok, BeamPos0, BeamCol0);
+    light += BeamLight(e, dir, tSurf, p, ok, BeamPos1, BeamCol1);
+    light += BeamLight(e, dir, tSurf, p, ok, BeamPos2, BeamCol2);
+    light += BeamLight(e, dir, tSurf, p, ok, BeamPos3, BeamCol3);
+    light += BeamLight(e, dir, tSurf, p, ok, BeamPos4, BeamCol4);
+    light += BeamLight(e, dir, tSurf, p, ok, BeamPos5, BeamCol5);
+    light += BeamLight(e, dir, tSurf, p, ok, BeamPos6, BeamCol6);
+    light += BeamLight(e, dir, tSurf, p, ok, BeamPos7, BeamCol7);
+    // Not over the game's interface left in the picture (names, labels, chat), as the fog.
+    if (UiMaskOn && !UiMaskOff) light *= saturate(tex2Dlod(GameLayerSmp, float4(uv, 0, 0)).a);
+    return saturate(c + light);
+}
 float3 Outline(float2 uv, int eye)
 {
     float3 c = tex2D(FogColorSmp, uv).rgb;
-    if (!OutlineOn && !RingOn) return c;
+    if (!OutlineOn && !RingOn && !BeamOn) return c;
     float ok;
     const float3 p = OutlineWorld(uv, eye, ok);
+    if (BeamOn) c = Beams(c, uv, eye, p, ok);   // over the sky as well
     if (ok <= 0.0) return c;
     if (RingOn) {
         const float up = FacingUp(uv, eye, p, 3.0);   // two more depth taps, only while a circle shows

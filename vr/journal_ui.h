@@ -5,9 +5,13 @@ bool JournalOnly();
 bool OpaqueMenuOpen();
 bool UpperBandMenuOpen();
 bool LeatherMenuOpen();   // the tabbed menu (or a cube from it) with no world-opened panel: leather_menu.h
+bool CursorItemHeld();    // an item on the game's cursor, read in the last 600 ms (a drop outside the menu)
+uint64_t CursorItemReadAt();   // when CursorItemHeld's value was read (GetTickCount64)
 bool StatsButtonShown();  // the tabbed menu alone (not a cube or world panel): its Advanced Stats button, stats_button.h
+bool RespecButtonShown(); // the tabbed menu's Character page alone: Reset Skills & Stats, respec_button.h
 uint32_t PanelChanges();  // counts every panel opened or closed (leather::Back)
 bool CloseLeatherMenu();  // queue: close the tabbed menu if only it and its pages are open, the cursor empty
+bool StowLeatherMenu();   // queue: the held menu put away over the left shoulder (any page or dialog; not with an item on the cursor)
 bool NpcChoicesOnly();
 bool NpcChoicesRect(int32_t out[4]);
 void ReadNpcChoicesRect(); // UI thread only

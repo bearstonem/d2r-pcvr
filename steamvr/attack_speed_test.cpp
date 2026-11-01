@@ -66,6 +66,19 @@ int main(){
     // Paladin, one-handed sword (WSM 0), no IAS: 14 frames (560 ms); Fanaticism's +30% -> 11 (440 ms).
     Check(Frames(3,Weapon::OneHandSwing,0,0,SkillSpeed(130,0))==11&&Milliseconds(11)==440,"skill speed shortens the human cycle");
     Check(Frames(3,Weapon::OneHandSwing,0,0,SkillSpeed(50,0))>14,"a slow lengthens it");
+    {   // Dual wield (D2R 2.4): both strokes at the two weapons' average WSM.
+        Check(DualWsm(-30,0)==-15&&DualWsm(0,-30)==-15&&DualWsm(10,-20)==-5&&DualWsm(-20,10)==-5&&DualWsm(-5,0)==-2,
+              "the average truncates toward zero, either order");
+        // Phase Blade (-30) and Berserker Axe (0), no IAS, no buffs: each stroke's attackrate is 100 less its own WSM.
+        const int blade=DualFrames(4,Weapon::OneHandSwing,0,130,-30,0),axe=DualFrames(4,Weapon::OneHandSwing,0,100,0,-30);
+        Check(blade==axe&&blade==Frames(4,Weapon::OneHandSwing,0,-15),"both blades swing at the averaged speed");
+        Check(blade>Frames(4,Weapon::OneHandSwing,0,-30)&&axe<Frames(4,Weapon::OneHandSwing,0,0),"faster than the slow blade alone, slower than the fast one");
+        Check(DualFrames(4,Weapon::OneHandSwing,0,110,-10,-10)==Frames(4,Weapon::OneHandSwing,0,-10),"a matched pair is each weapon's own speed");
+        // Skill speed (Frenzy, Burst of Speed) rides attackrate for both strokes.
+        Check(DualFrames(4,Weapon::OneHandSwing,0,150,-30,0)==Frames(4,Weapon::OneHandSwing,0,-15,20),"skill speed carries through");
+        // Only the swinging weapon's IAS counts: the item IAS read under its own scope.
+        Check(DualFrames(4,Weapon::OneHandSwing,60,130,-30,0)<DualFrames(4,Weapon::OneHandSwing,0,130,-30,0),"the swinging weapon's IAS speeds its stroke");
+    }
     // An off-hand blade keeps the same skill speed with its own WSM.
     Check(Frames(4,Weapon::OneHandSwing,0,20,SkillSpeed(130-0,0))==Frames(4,Weapon::OneHandSwing,0,20,30),"off-hand: its own WSM, the main hand's skill speed");
     Check(Frames(3,Weapon::OneHandSwing,200,0,SkillSpeed(200,0))==Frames(3,Weapon::OneHandSwing,200,0,1000),"the human 75 EIAS cap still holds");

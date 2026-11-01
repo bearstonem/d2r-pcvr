@@ -75,5 +75,22 @@ int main(int argc,char**) {
     Request clear{Action::BindItem,2,session,GetTickCount64(),0,{},s.quick.assigned};assert(quickitems::Assign(clear,s));
     s=Capture();assert(!s.quick.assigned&&!quickitems::Use(r,s));
     assert(!quickitems::Assign(bind,s)); // old picker cannot overwrite new assignment
+    // Reset Skills & Stats (vr/respec.cpp): the minted token found in the client's own
+    // list by the identity the game gave it (runtime id 17, class 22), menu open.
+    using quickitems::UseResult;
+    item.code=Code('t','o','a');item.quantity=1;menu=true;const int before=uses;
+    const quickitems::ClientItem token{17,22,Code('t','o','a')};
+    assert(quickitems::UseClientItem(session,token)==UseResult::Used&&uses==before+1&&opens==1);
+    uint32_t seen[4]{};unsigned count=9;
+    assert(quickitems::UseClientItem(session,{18,22,Code('t','o','a')},seen,4,&count)==UseResult::Missing&&count==1&&seen[0]==17);
+    assert(quickitems::UseClientItem(session,{17,23,Code('t','o','a')})==UseResult::Missing);
+    assert(quickitems::UseClientItem(session,{17,22,Code('h','p','1')})==UseResult::WrongCode);
+    assert(quickitems::UseClientItem(session+1,token)==UseResult::NoPlayer&&quickitems::UseClientItem(0,token)==UseResult::NoPlayer);
+    usable=false;assert(quickitems::UseClientItem(session,token)==UseResult::Unusable);usable=true;
+    local=false;assert(quickitems::UseClientItem(session,token)==UseResult::ListUnreadable);local=true;
+    bool holds=false;assert(quickitems::HoldsClientItem(session,token,holds)&&holds);
+    assert(quickitems::HoldsClientItem(session,{18,22,Code('t','o','a')},holds)&&!holds);
+    local=false;assert(!quickitems::HoldsClientItem(session,token,holds));local=true;
+    assert(uses==before+1&&opens==1);menu=false; // refusals never dispatch
     std::puts("Quick-use ownership, native dispatch, empty tomes, targeting, cancellation, persistence and corrupt-list guards passed");
 }

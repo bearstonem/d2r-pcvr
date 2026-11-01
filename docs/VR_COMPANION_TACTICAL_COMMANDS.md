@@ -6,11 +6,11 @@
 
 In flat *Diablo II: Resurrected*, mercenaries are passive followers with no mechanism for the player to command them to hold a doorway, step onto a specific tile, or focus down a dangerous shaman/boss from a safe stand-off distance.
 
-In Virtual Reality (VR), `d2r-pcvr` gives players natural hand-gesture agency over their companion through the **Explicit Tactical Command State Machine** (`TacticalOrderController` in [`steamvr/companion_ai.h`](../steamvr/companion_ai.h) and [`vr/companion_ai.cpp`](../vr/companion_ai.cpp)). To avoid accidental triggers during combat or inventory interactions, Grip-based orders use a **Select Companion First (Grab -> Aim -> Release)** flow:
-- **Move & Hold (`MoveAndHold`):** Point at your companion (`<= 3.5` sub-tiles or 3D body cylinder) and hold **Grip** to latch, redirect your aim to a walkable ground coordinate, and release **Grip** to command the mercenary to walk there and hold position without oscillating back toward the player.
-- **Focus Enemy (`PrioritizeEnemy`):** Latch onto your companion with **Grip**, aim directly at a hostile monster (`<= 2.5` sub-tiles or 3D cylinder), and release **Grip** to focus attacks on that target using archetype-aware engagement distances (`MeleeVanguard` closes to melee; `RangedOverwatch` engages from a `10.0`-sub-tile stand-off window).
-- **Defensive Hold (`DefensiveHold`):** Hold an upright open palm facing forward for `400 ms` (or quick-click **Grip** on the companion while following normally) to freeze the mercenary at their current position as a defensive turret/vanguard.
-- **Regroup / Cancel (`ExplicitCancel`):** Point at the companion itself (`<= 3.5` sub-tiles or 3D body cylinder) and click/release **Grip** while an order is active to cancel the hold and return to normal squad follow.
+In Virtual Reality (VR), `d2r-pcvr` gives players natural hand-gesture agency over their companion through the **Explicit Tactical Command State Machine** (`TacticalOrderController` in [`steamvr/companion_ai.h`](../steamvr/companion_ai.h) and [`vr/companion_ai.cpp`](../vr/companion_ai.cpp)). To avoid accidental triggers during combat, inventory interactions or the Paladin's grip gestures, orders take **Grip + Trigger** on one hand with a **Select Companion First (Grip on it -> Trigger -> Aim -> Release)** flow ([`steamvr/tactical_chord.h`](../steamvr/tactical_chord.h)):
+- **Move & Hold (`MoveAndHold`):** Point at your companion (`<= 3.5` sub-tiles or 3D body cylinder), close **Grip**, then pull **Trigger** to latch; redirect your aim to a walkable ground coordinate and let go of **Trigger** (or **Grip**) to command the mercenary to walk there and hold position without oscillating back toward the player.
+- **Focus Enemy (`PrioritizeEnemy`):** Latch onto your companion with **Grip + Trigger**, aim directly at a hostile monster (`<= 2.5` sub-tiles or 3D cylinder), and let go to focus attacks on that target using archetype-aware engagement distances (`MeleeVanguard` closes to melee; `RangedOverwatch` engages from a `10.0`-sub-tile stand-off window).
+- **Defensive Hold (`DefensiveHold`):** Hold an upright open palm facing forward for `400 ms` (or quick-click **Trigger** with **Grip** held on the companion while following normally) to freeze the mercenary at their current position as a defensive turret/vanguard.
+- **Regroup / Cancel (`ExplicitCancel`):** Point at the companion itself (`<= 3.5` sub-tiles or 3D body cylinder) and click **Grip + Trigger** while an order is active to cancel the hold and return to normal squad follow.
 
 ---
 
@@ -36,7 +36,7 @@ stateDiagram-v2
 ### Cancellation Reasons (`TacticalCommandCancelReason`)
 - `None`: Order active or idle.
 - `Superseded`: Replaced by a newer player tactical command.
-- `ExplicitCancel`: Player pointed at the companion + Grip release to regroup.
+- `ExplicitCancel`: Player pointed at the companion + Grip + Trigger click to regroup.
 - `HealthRetreat`: Companion HP dropped below `50%` (`CriticalHealthRatio = 0.50f`); self-preservation takes priority.
 - `LeashExceeded`: Player or companion exceeded `ElasticCombatLeashDistance` (`40.0` sub-tiles / ~16m).
 - `HoldExpired`: Hold duration timer expired.
@@ -76,14 +76,15 @@ A critical finding from live runtime analysis in `D2R.exe` (`3.3.93787 / 3.3.938
 
 ## 4. Gesture Recognition & Disambiguation (`steamvr/transport.cpp`)
 
-### 4.1. Select Companion First: Grab, Aim & Release (`Grip Hold` on Companion -> Aim -> `Grip Release`)
-To prevent accidental tactical commands when using the Grip button for belt potions, weapon holsters, or world interactions, every Grip-based tactical order must **begin by pointing at the companion first**:
-- **Step 1 — Latch Companion (`Grip Press` on Companion):**
-  - Evaluated via 3D vertical cylinder intersection (`hitsUnitCylinder3D` in sheared `coordinates::RenderGround` world metres, radius `0.95m`, height `[-0.45m, 2.00m]`) or ground foot radius (`<= 3.5` sub-tiles).
-  - Pressing Grip anywhere else when not pointing at the companion is ignored by the tactical system.
-  - Engaging Grip on the companion triggers a short confirmation haptic pulse (`0.30f`) and places a Gold/Green ring (`color = 2`) under the companion's feet.
-- **Step 2 — Live Aim Preview & Reactive Leash Threshold (`Grip Held`):**
-  - While holding Grip and redirecting your hand:
+### 4.1. Select Companion First: Grip, Trigger, Aim & Release (`Grip` on Companion -> `Trigger` -> Aim -> Release)
+To prevent accidental tactical commands when using the Grip button for belt potions, weapon holsters, world interactions or the Paladin's grip gestures (Fist of the Heavens, the Blessed Hammer pump and the Charge punch all close the grip with the trigger free), every tactical order takes **Grip + Trigger** and must **begin by pointing at the companion first** ([`steamvr/tactical_chord.h`](../steamvr/tactical_chord.h), `tactical-chord-test`):
+- **Step 1 — Arm (`Grip Press` on Companion):**
+  - Evaluated via 3D vertical cylinder intersection (`hitsUnitCylinder3D` in sheared `coordinates::RenderGround` world metres, radius `0.95m`, height `[-0.45m, 2.00m]`) or ground foot radius (`<= 3.5` sub-tiles), on the frame the grip closes.
+  - Closing Grip anywhere else when not pointing at the companion, or with the trigger already pulled (an attack), is ignored by the tactical system.
+  - Arming shows and pulses nothing. From then that hand's trigger is the command's, never the game's (no skill is cast at the companion), until it is let go. Opening the grip without pulling the trigger orders nothing.
+- **Step 1b — Latch (`Trigger Pull` while armed):** a short confirmation haptic pulse (`0.30f`) and a Gold/Green ring (`color = 2`) under the companion's feet.
+- **Step 2 — Live Aim Preview & Reactive Leash Threshold (`Grip + Trigger Held`):**
+  - While holding Grip + Trigger and redirecting your hand:
     - **Within Leash Boundary (`dist <= 40.0` sub-tiles / ~16m from player):**
       - Aiming at a **hostile monster** (3D cylinder `1.25m` or ground radius `4.0` sub-tiles) previews a **Cold Blue ring** (`color = 1`).
       - Aiming at **walkable ground** previews a **Tactical Green ring** (`color = 3`, radius `1.8`) at `{ gx, gy }`.
@@ -91,12 +92,12 @@ To prevent accidental tactical commands when using the Grip button for belt poti
     - **Refined Visual Styling:** The ReShade shader (`D2R_DepthFog.fx`) renders a crisp, narrow silhouette (`kCircleRim = 0.015`, glow `0.02`), clean hollow interior (no heavy disc fill), and increased transparency (`kCircleOpacity = 0.32`), keeping the ground surface clearly visible.
     - **Haptic Boundary Crossing:** Moving the aim across the 16m threshold in either direction delivers a subtle tactile boundary click (`0.20f` / `0.35f`).
     - Keeping aim on the **companion** previews the **Yellow/Gold ring** (`color = 2`) on the companion.
-- **Step 3 — Execute on Release (`Grip Release`):**
-  1. **Hostile Monster (`PrioritizeEnemy`):** If in range, releasing Grip issues `PrioritizeEnemy`. If out of leash range, the command is rejected with an error haptic buzz (`0.60f`) and the companion's *"Impossible"* voice cue.
-  2. **Companion Toggle (`DefensiveHold` / `Regroup`):** Releasing Grip while still pointing at the companion (or after a quick click `<= 300 ms`) toggles:
+- **Step 3 — Execute on Release (`Trigger` or `Grip Release`):** letting go of either carries the command out; a trigger still held after the grip opens stays the command's until it is let go.
+  1. **Hostile Monster (`PrioritizeEnemy`):** If in range, releasing issues `PrioritizeEnemy`. If out of leash range, the command is rejected with an error haptic buzz (`0.60f`) and the companion's *"Impossible"* voice cue.
+  2. **Companion Toggle (`DefensiveHold` / `Regroup`):** Releasing while still pointing at the companion (or after a quick click `<= 300 ms`) toggles:
      - If an order is currently active (`Requested`, `Moving`, or `Arrived`): calls `CancelTacticalOrder()` (`Regroup`) and actively dispatches a server walk (`DispatchServerMoveToCoord`) back to the player's flank.
      - If following normally (`Idle` / `Cancelled`): issues `DefensiveHold` at the companion's current coordinates.
-  3. **Ground Coordinate (`MoveAndHold`):** Releasing Grip on walkable ground within range issues `MoveAndHold` at `{ gx, gy }`. If native A* stops at an obstacle edge within `NearObstacleArrivalTolerance` (`4.5` sub-tiles), it snaps to `Arrived`. If released beyond the 16m leash, the command is rejected with an error haptic buzz and *"Impossible"* vocal feedback.
+  3. **Ground Coordinate (`MoveAndHold`):** Releasing on walkable ground within range issues `MoveAndHold` at `{ gx, gy }`. If native A* stops at an obstacle edge within `NearObstacleArrivalTolerance` (`4.5` sub-tiles), it snaps to `Arrived`. If released beyond the 16m leash, the command is rejected with an error haptic buzz and *"Impossible"* vocal feedback.
 
 ### 4.2. Open-Palm Defensive Hold (`400 ms` Hold)
 - **Posture Filter:** Hand open (`grip < 0.2f && trigger < 0.2f`), fingers pointing upward (`handUp.y > 0.82f`), and palm normal aligned with headset forward vector (`dot > 0.70f`) sustained for `400 ms`.

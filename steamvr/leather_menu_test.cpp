@@ -146,6 +146,18 @@ int main(){
         Check(Near(lean,tilt,.05f),"tilt leans the face back from the quest log's");
         Check(Near(menu.q.w,sheet.q.w)&&Near(menu.q.x,sheet.q.x),"menu and leather face the same way");
     }
+    // The HUD held with the menu (owner 2026-10-29): life / mana above the menu, the map
+    // on the band's left edge above the fist.
+    {
+        const float w=.57f,h=w*9/16;const auto hud=leather::HudPlaces(w);
+        Check(Near(hud.vitals.x,0)&&Near(hud.vitals.y-hud.vitalsHeight*.5f,h*.5f+leather::HudGap),"life / mana centred just above the menu");
+        Check(Near(hud.vitalsWidth,.14f)&&Near(hud.vitalsWidth,2*hud.vitalsHeight),"slightly larger (14 cm, was 10), 2:1 as the wrist's picture");
+        Check(Near(hud.map.x,-w*.5f)&&hud.map.x+hud.mapSize*.5f<-w*.5f+leather::MenuArtInset*w,"the map on the band's left edge, clear of the art");
+        Check(Near(hud.map.y+hud.mapSize*.5f,h*.5f+leather::HudAbove)&&hud.map.y-hud.mapSize*.5f>.04f,"its top a little above the band, above the fist");
+        Check(hud.vitals.x-hud.vitalsWidth*.5f>hud.map.x+hud.mapSize*.5f,"the two never overlap");
+        Check(hud.map.z>0&&Near(hud.map.z,hud.vitals.z),"in front of the menu");
+        Check(Near(leather::HudPlaces(NAN).map.x,leather::HudPlaces(leather::DefaultMenuWidth).map.x),"a bad width is the default's");
+    }
     // Menu only (owner 2026-10-29): no hide, and the fist holds the menu art's own left edge.
     {
         using leather::Style;using leather::NormalizeStyle;

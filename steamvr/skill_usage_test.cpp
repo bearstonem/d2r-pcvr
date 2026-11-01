@@ -38,6 +38,13 @@ int main() {
           Has(Details(weaponskills::Attack,rightTrigger),"thrown by hand"),"Throw and Attack on the right trigger throw a held javelin or potion by hand");
     for(int slot=0;slot<skills::Count;++slot)
         Check(Gesture(weaponskills::BlessedHammer,slot)&&Gesture(weaponskills::Charge,slot),"Blessed Hammer and Charge are gestures from every slot");
+    for(int slot=0;slot<skills::Count;++slot)
+        Check(Gesture(weaponskills::HolyShield,slot)&&Gesture(weaponskills::Werewolf,slot)&&Gesture(weaponskills::Werebear,slot),
+              "Holy Shield and the Druid's shapeshifts are gestures from every slot");
+    for(int slot=0;slot<skills::Count;++slot)Check(Gesture(weaponskills::FistOfHeavens,slot),"Fist of the Heavens is a gesture from every slot");
+    Check(Has(Details(weaponskills::FistOfHeavens,leftTrigger),"points at"),"Fist of the Heavens is described");
+    Check(Has(Details(weaponskills::HolyShield,rightFace),"sign of the cross")&&Has(Line(weaponskills::Werewolf,leftTrigger),"bow")&&
+          Has(Line(weaponskills::Werebear,rightTrigger),"slam"),"Holy Shield and the shapeshifts are described");
     Check(Has(Line(weaponskills::BlessedHammer,rightFace),"punch")&&Has(Details(weaponskills::Charge,leftTrigger),"weapon hand"),"the Paladin punches are described");
     if(failures)return 1;
     std::puts("skill usage: every skill and slot fits; gestures and native sequences described");

@@ -334,6 +334,15 @@ shop panes keep their native relative positions; hovering a comparison tooltip
 does not resize or move the surface. The quest log retains its handheld/pinned
 placement. Title and character-selection screens keep the existing flat panel.
 
+Talking to an NPC stops you. Press A on an NPC while walking and you stop at
+the press: the left stick is let go for that moment (the game's own stop, as
+when you release it) and A reaches the game 50 ms later, so the conversation
+opens with you standing. Once a conversation is up the game takes no walk at
+all, so the hero used to carry on to the point the stick had set, round the
+NPC where it did not block the way. A on items, chests and doors, and A while
+standing, are as before. Log: `vrcam: NPC talk: A on an NPC while walking ...`
+(developer builds also log how far you moved after the conversation opened).
+
 | Native panel action | Control |
 |---|---|
 | Open the tabbed character menu | Left primary face button during gameplay; native X in menus |
@@ -364,22 +373,34 @@ hide (the one drying on the Rogue Encampment's farm racks, read from your own
 game at install) strapped to your left hand, and the world stays in view all
 round it: no black backdrop. You hold the hide at the menu's left edge; its
 neck and legs reach past your fist. The hide follows the hand whether or not
-you hold the grip, until the menu closes (Right B, its close button, or anything
-that closes the native menu); then it is gone. Below the menu's hint row sits a
+you hold the grip, until the menu closes (Right B, its close button, putting it
+**back over your left shoulder** - reach there and grip again, the way it came out - or
+anything that closes the native menu); then it is gone. Putting it away leaves it open
+while an item is on the cursor (log: `Frame leather: put away over the left shoulder`). Below the menu's hint row sits a
 small stone **Advanced Stats** button (three gold bars), the same one the room
 panel shows when the leather is off: laser + trigger sends the game one View
 press, a button VR controllers lack (log:
-`Frame panels: Advanced Stats button - View sent to the game`). Right B goes to the game first,
+`Frame panels: Advanced Stats button - View sent to the game`). On the Character page, offline,
+a stone **Reset Skills & Stats** button sits in the lower right: one pull asks **Confirm?**, a
+second has the game reset every stat and skill point. The mod makes one Token of Absolution in a
+free inventory square and uses it at once, so the game's own reset runs; a token the game does not
+consume (a Classic character) is removed again (log: `Frame respec: ...`). Right B goes to the game first,
 so a cube, a dialog or the options pages still step back one at a time; a press
 the game leaves unanswered for a quarter of a second, with only the menu and
 its pages open and nothing on the cursor, closes the menu (the log:
 `gamestate: B on the leather went unanswered by the game ...`). The right laser and every native
 control work on it as on the room panel, Left Grip + Right Trigger included
-(the left grip is free while the sheet is strapped on). The **left stick walks** while the
-leather is out, as in play (it never moves the menu's controller cursor); the
-right laser, face buttons and right stick work the menu. Nothing else is drawn
-over it: quest and level-up cards wait until it closes, and the wrist and palm
-displays are hidden while a menu is open, as before.
+(the left grip is free while the sheet is strapped on). The **left stick walks** and the
+**right stick turns** while the menu is held (Leather or Menu only), as in
+play (neither moves the menu's controller cursor); the right laser and the face buttons
+work the menu (the right stick is all turning while it is held). An item picked
+up with the laser (a click, as ever) and then **clicked outside the menu** - a trigger pull off
+the menu's art, on or past the hide - drops to the ground, as in flat D2R: the mod presses the
+controller menu's own Drop (X) for the item held (logs: `Frame panels: item let go outside the
+menu - X ...`, then whether it dropped; a pull off the menu that did not drop says why). The **life / mana / XP panel comes with it**,
+above the menu (unless its VR Settings location is Off); the minimap does not (the game's map
+is never kept open under a menu). Nothing else is drawn over it: quest and level-up cards wait until it
+closes, and the wrist and palm displays themselves are hidden while a menu is open, as before.
 
 Only the menu's 16:9 band is on the hide, on the middle of its body, and the
 game's translucent dim under the menu is taken out of it, so the hide shows
@@ -1148,32 +1169,44 @@ and trigger/button melee were:
   - **Attack rating** (`ar_damage`, 1): damage x the native to-hit chance (5-95%,
     attack rating, defense and level penalty), read where the game's hit check
     passes it on. `ar_damage_floor` (0) keeps that % of damage at zero chance.
-  - **Recovery** (`swing_recovery_damage`, 1): damage x the share of the native
-    attack cycle (class, weapon, IAS, WSM, skill speed and slows) since the previous landed stroke, to
-    the power `swing_recovery_curve` (2), at most 1. With 2, flailing at twice
-    the cycle's rate deals half the damage per second (1 would be neutral).
-    `swing_recovery_grace` (100 = none) counts a stroke from that % of the cycle
-    as fully recovered. Every creature one stroke reaches shares the stroke's
-    recovery factor, so flailing does not pay.
+  - **Recovery** on a fixed attack cycle (Cal, 2026-10-30): the native attack
+    cycle (class, weapon, IAS, WSM, skill speed and slows) is a fixed rhythm. A
+    stroke one full cycle or more after your latest full-cycle attack is a full
+    hit: full damage, on-hit effects, a strike skill's cast, and it starts the
+    next cycle. A stroke before that is in between: it never moves your next
+    breakpoint, carries no on-hit effects, and with `swing_recovery_damage` (1)
+    its damage is x the share of the cycle since your previous stroke of any
+    kind, to the power `swing_recovery_curve` (2), at most 1. So one extra swing
+    at half a cycle adds 25% of a hit, and fast flailing adds about 2% a swing;
+    the full hits keep their pace either way. `swing_recovery_grace` (100 =
+    none) gives an in-between stroke full damage from that % of the cycle, never
+    a full hit's effects. Every creature one stroke reaches shares the stroke's
+    factor. (Before 2026-10-30 every stroke restarted the cycle, so flailing
+    pushed every breakpoint back.)
   - **Cleave falloff** (`cleave_falloff`, 25): each further creature one stroke
     lands on deals that % less than the one before, never below `cleave_min` (25):
     100%, 75%, 50%, 25%, 25%... 0 turns it off. Creatures count in the order
     the game resolves them, which follows the blade frame to frame but not
     within a single frame. A riposte is still a clean hit (no falloff) and
     counts as one of the stroke's creatures.
-  - **On-hit effects** come only from a stroke that waited a full native attack
-    cycle (the breakpoint, from the previous landed stroke on the same recovery
-    clock: per hand when dual wielding, one shared clock for a shapeshift
-    form's two claws), and only on the first creature that stroke lands on.
-    That covers life and mana leech, critical and deadly strike, crushing blow,
+  - **On-hit effects** come only from a full-cycle stroke (the breakpoint, a
+    full cycle after the latest full-cycle attack on the one shared clock: both
+    blades when dual wielding (2026-10-30; each stroke is timed as native times
+    a dual-wield attack: the two weapons' averaged WSM, with the swinging
+    weapon's own IAS) and a shapeshift form's two claws),
+    and only on the first creature that stroke lands on.
+    That covers life and mana leech, Life Tap's heal (a Life-Tapped monster
+    heals you only from such a stroke), critical and deadly strike, crushing blow,
     open wounds, freeze, slow, knockback, flee, blind, prevent monster heal,
     defense lowered per hit and chance to cast on striking or attack (curses
     included). Every other contact still lands its scaled damage, with no
     on-hit effects. `swing_recovery_grace` does not shorten the wait. A riposte
     always carries them; an unknown cycle counts as full. Elemental damage is
-    damage (scaled like the hit; poison and burn by the contact's factor), its
-    effects (chill, freeze) follow the would-have-hit gate below, and on-kill
-    effects are unchanged. The game's
+    damage (scaled like the hit), its effects (chill, freeze) follow the
+    would-have-hit gate below, and on-kill effects are unchanged. Poison and
+    burn are on-hit effects (Cal, 2026-10-30): they don't stack, so a stroke that
+    carries on-hit effects applies them whole (native rate and length) and every
+    other contact applies none. The game's
     own roll sites are checked at start (`Frame on-hit gate:`); a part not
     found stays native. `[debug] melee_trace=1` adds `onhit=1/0` to each
     traced contact.
@@ -1182,11 +1215,25 @@ and trigger/button melee were:
     so a full-cycle stroke at 60% attack rating chance carries them about 60%
     of the time, as natively. `would_hit=1/0` (-1: not gated, e.g. a riposte)
     ends each `melee_trace` contact line.
+  - **Monster reactions and the stroke's share** (Cal, 2026-10-30): a monster
+    flinches only when it should. A contact that would have missed, or a stroke
+    without on-hit effects (not a full cycle, a cleave follow-up, a trigger hit
+    inside a swing's cycle), lands its scaled damage but the monster does not
+    react: no hit recovery, knockback or soft-hit reaction, and Lightning
+    Enchanted's on-hit bolts don't fire. A monster's Thorns aura and Iron Maiden
+    cursed on you return a % of the damage the stroke actually dealt (its
+    recovery x cleave share), on every such stroke. Your weapon wears with a
+    stroke's first creature only, at the native chance times that stroke's
+    recovery share (a half-recovered stroke: half the chance). Ripostes, arrows,
+    throws and skill hits count whole. Checked at start (`Frame stroke share:`).
   - **Melee skill strikes** (CONTROLS.md): a hand armed with a strike skill
     (the Druid's Maul, Feral Rage, Rabies, Fire Claws, Hunger and Fury; Bash, Stun, Concentrate, Berserk, Sacrifice, Vengeance, Conversion, Zeal,
     Power Strike, Impale, Charged Strike, Lightning Strike and Poison Dagger) casts it natively on a full-cycle stroke's first landed
     contact, inside that contact's scaling and on-hit gate; every other contact
-    stays a basic attack. Classic casts on every paced contact. Developer
+    stays a basic attack. Classic casts on every paced contact. Dual wielding
+    (2026-10-30), the cast swings the primary weapon (the rendered right one)
+    whichever blade struck, as native single-weapon skills do; a basic attack
+    swings the blade that struck. Developer
     builds log `Frame melee skills:` (armed contacts, casts, refusals by
     reason) and add `strike=<skill> cast|basic_strike` to `melee_trace` lines.
   - **Fury and Zeal** (Cal, 2026-10-25; replaces the swing flurry; rev2
@@ -1204,8 +1251,8 @@ and trigger/button melee were:
     Those hits are the cast's own (rev3): the trigger rules' recovery factor
     and on-hit gate don't apply to them (attack rating still scales them, and
     the would-have-hit gate still holds back effects a miss would not have).
-    Each is still the latest attack later swings are measured from (rev5), so
-    strokes while it runs stay recovery-scaled basic attacks; a game/form change or death ends it. Developer builds log `Frame melee sequences (Fury, Zeal):`
+    Each is still the latest attack later swings are measured from (rev5), and
+    a full-cycle one, so strokes while it runs stay recovery-scaled basic attacks; a game/form change or death ends it. Developer builds log `Frame melee sequences (Fury, Zeal):`
     and trace `cast 1/N` on the casting stroke and
     `sequence skill=... hit k/N target=... after N ms` for the rest.
   - **Zeal's light** (Cal, 2026-10-26; `steamvr/zeal_light.h`): every Zeal
@@ -1282,10 +1329,11 @@ In Unleashed your trigger/button melee (a melee hit check outside a physical
 swing: the trigger's basic attack or melee skill, Smite from the trigger or a
 shield bash) is a stroke like a swing (2026-10-24): it lands, attack rating scales
 its damage at the life write (`ar_damage`), the would-have-hit gate decides its
-other effects, and it shares the swings' recovery. It is measured from your latest
-landed swing on any hand (the recovery damage factor and the on-hit cycle gate, as
-a swing's), and every later swing is measured from it as well as from its own
-clock, so mixing trigger attacks with swings is never faster than swinging. Trigger
+other effects, and it shares the swings' fixed cycle. It is full when a full cycle
+has passed since your latest full-cycle swing on any hand, and then starts the next
+cycle; otherwise it is in between, scaled by the time since your latest landed swing
+(as a swing's). Every later swing is measured from it as well as from its own
+clocks, so mixing trigger attacks with swings is never faster than swinging. Trigger
 hits never count against each other: the native animation already paces them, and
 a multi-hit cast (Zeal, Fury, Whirlwind) keeps its later hits. Smite always hits
 natively, so it skips attack rating and the would-have-hit gate and only shares the
@@ -1327,7 +1375,14 @@ paced only by its own native animation. This needs the combat hooks, which
 Skill speed and slows (Fanaticism, Frenzy, Burst of Speed, chill, Decrepify) come
 from the unit's attackrate (ItemStatCost 68, which already subtracts the main
 hand's WSM; `attack_speed.h` `SkillSpeed`); the forms' own cycle is below.
-Dual-wield attack sequences are not read yet. An unknown class or weapon class (including
+Dual wield (2026-10-30, `attack_speed.h` `DualFrames`): native D2 merges the
+swinging weapon's stat lists before timing the attack, so each stroke reads the
+hero's item IAS and attackrate under that weapon's own scope (the other
+weapon's IAS does not count), and both weapons run at their averaged WSM (D2R
+2.4's fix of the old left-arm offset). The log reports `Frame dual wield speed:`
+per arm when its inputs change, and `native speed strokes=`/`unknown=` on
+`Frame dual wield:`; an unknown read keeps the per-arm cycle with the averaged
+WSM. Double Swing, Frenzy and Double Throw sequences are not read yet. An unknown class or weapon class (including
 classes outside the original seven) leaves the cycle unknown, which does not
 gate hits. Unleashed restores unlimited free-swing contacts. The log
 reports the cycle inputs (`Frame melee attack speed:`) and refused contacts
@@ -1538,7 +1593,8 @@ the game would have compared. On a would-miss contact:
   damage, Frozen Armor, Life Tap's heal), life/mana/stamina leech and drain, mana
   burn, chill, freeze and stun lengths, absorb heal, monster mods' on-hit
   effects, Thorns' damage return, prevent monster heal, defense lowered per hit,
-  and item wear (your armor when struck, your weapon when you strike).
+  item wear (your armor when struck, your weapon when you strike), and the
+  struck monster's reaction (hit recovery, knockback, Lightning Enchanted's bolts).
 - **As a miss:** effects the game fires on a miss as well - chance to cast on
   attack and attacked-in-melee (attacker takes damage, Shiver Armor) - run as if
   the attack had missed.
@@ -1546,9 +1602,11 @@ the game would have compared. On a would-miss contact:
   chance already scales), blocks, parries, chip, guard strain and the block's
   shield wear (designed), spells and enchantment procs (never roll to hit),
   on-kill effects. A riposte is a clean hit and always carries its effects.
-- **Damage over time** - poison and burn - is damage that never reaches the scaled
-  life write: it takes the hit's own factor (Defense, or attack rating x recovery
-  x cleave, a riposte's bonus) on every contact.
+- **Damage over time** - poison and burn - is a state, not damage the life write
+  scales (Cal, 2026-10-30): a contact that would have hit applies it whole, at its
+  native rate and length; a would-miss contact applies none. So a monster's poison
+  on you lands as natively when its roll hits, and yours as natively per full,
+  would-hit stroke (on-hit gate above).
 - **Absorb skills** (Energy Shield, Bone Armor, Cyclone Armor, Psychic Ward,
   Health Link: the absorbdamage event, before the life write) see the contact's
   damage at its factor and what they leave is scaled back, so they soak and drain
@@ -1804,6 +1862,48 @@ with the view every 10 ms, so FMOD re-pans everything that is playing.
 | `forward_sign` | `-1` | Which screen direction counts as ahead (`-1` = up). |
 | `depth_scale` | `2` | Stretches screen up/down to undo the isometric squash. |
 
+## Loot beams
+
+A pillar of light stands over every Rare, Set and Unique item and every high
+rune (Vex and up) lying on the floor near you, in the colour the game writes
+its name in: unique gold, set green, rare yellow, rune orange. A soft glow of
+the same colour lies on the floor round its foot. The beam fades in as the
+item lands and is gone within a quarter of a second of it being picked up.
+
+The mod draws the beams itself, in the same depth pass as the landing circles
+(`D2R_DepthFog.fx`): each pixel's line of sight is tested against each beam, so
+walls, fences, monsters and hills in front hide it, while the sky and the fog
+behind it do not. Four times a second the game thread lists the items lying in
+the local game (`vr/loot_beam_scan.cpp`); the nearest 8 within 60 cells get a
+beam. The game's own Horadric Light beam was tried first and could not be
+recoloured.
+
+- Local games only (offline, or the game you host). A joined TCP/IP game shows
+  none.
+- Not yet: items your loot filter hides still get a beam; an item on a floor
+  above or below yours draws its beam from your floor's height.
+- Hidden while a menu is open, like the landing circles, and never drawn over
+  item names, labels or chat left in the picture.
+
+**VR Settings > Interface > Loot beams**: its slider sets how bright the beams
+are, pillar and floor glow alike, from 10% to 100% (the default). Its **Filter**
+button opens a card of four switches, **Unique**, **Set**, **Rare** and
+**Runes**, all On by default, and the row's line names the ones that are On.
+Turn them all Off for no beams. A change takes effect within a quarter of a
+second of **Apply**.
+
+To try it: **DEV > Character > Loot beam test** puts one item of each kind in
+the inventory (see DEVELOPMENT_SCENARIOS.md); drop them.
+
+`d2r_pcvr.ini`:
+
+| `[loot]` key | Default | |
+|---|---|---|
+| `beams_unique`, `beams_set`, `beams_rare`, `beams_runes` | `1` | The four VR Settings switches. |
+| `beams_brightness` | `100` | The VR Settings slider, `10` to `100` (%). |
+| `beams` | `1` | `0` = no loot beams at all (read at start; not in the menu). |
+| `rune_min` | `26` | The lowest rune with a beam: 26 = Vex, 20 = Lem (read at start; not in the menu). |
+
 ## Cancellation and performance
 
 Menus, focus/tracking loss, weapon changes, recenter and discontinuous samples
@@ -1984,6 +2084,9 @@ button (the log says which skill was not assigned). Both controllers pulse once
 when the cast is issued. Thresholds live in `shapeshift::Tuning`
 (`steamvr/shapeshift_gesture.h`); `shapeshift-gesture-test` walks both
 performances, lazy and partial versions, loot stooping and overhead swings.
+The skill picker and the hand wheel tag Werewolf and Werebear GESTURE on any
+slot, and the hand cue reads "Cross, bow, fling open" / "Hands high, slam
+down" while Weapon skill gestures is on.
 
 ### Paladin Blessed Hammer fist pump
 
@@ -2048,6 +2151,66 @@ unavailable. Thresholds live in `chargepunch::Tuning`
 (`steamvr/charge_gesture.h`); `charge-gesture-test` covers headings, holding
 out, re-loading, open and busy hands, slow reaches, half punches, the hammer's
 upward punch, chops, slashes, jabs from an extended arm, and arm-span scaling.
+
+### Paladin Holy Shield sign of the cross
+
+A Paladin casts Holy Shield by making the sign of the cross, while **VR
+Settings > VR > Weapon skill gestures** is on:
+
+- With either hand, trigger free, touch your forehead, then your chest, then
+  one shoulder and the other (left then right, or right then left).
+- Each touch is a brief pause: the hand slows below 1 m/s inside the spot.
+  A swing through the same places never counts, nor does a face wipe.
+- Up to 1 s between touches; one sign casts once, with a 1.5 s cooldown.
+
+The sign presses the controller button Holy Shield is assigned to (the skill
+must be on one of the ten slots; pressing still casts it). Mana, duration and
+the shield's glow stay native. The spots are head-relative boxes in
+`holycross::Tuning` (`steamvr/cross_gesture.h`); `cross-gesture-test` covers
+both shoulder orders, either hand, a flowing sign, the cooldown, wrong orders,
+a face wipe, fast swings through the spots and a session reset. The skill
+picker tags Holy Shield GESTURE on any slot ("Sign of the cross"). The log
+(`Frame holy shield:`) has a line per cast, per sign abandoned after the chest
+touch, and when the skill is unavailable.
+
+### Paladin Fist of the Heavens call
+
+A Paladin calls Fist of the Heavens with the weapon (right) arm, while **VR
+Settings > VR > Weapon skill gestures** is on:
+
+- Make a fist (hold the grip, trigger free) and hold the arm straight out in
+  front, raised about 45 degrees: the fist a little above your forehead. No
+  need to rest there: reaching the pose loads the call.
+- Bring the straight arm down, pivoting at the shoulder, and stop it about level
+  with your shoulder. The stop casts, or opening the fist at the end of the
+  swing.
+- The bolt falls on the monster the arm points at (the hands' 30-degree cone,
+  within the game's reach), whatever the Aim options; with none there, the
+  nearest monster in sight within 75 degrees of the arm; with none of those,
+  the game picks its own target. The scan reads the server's monsters; the
+  handed monster is found on the client by id among the hero's nearby rooms, or
+  else by place (the nearest live one within 2.5 cells). A room's units are
+  linked by Unit+0x160: the walk followed the hash link +0x158 before and nearly
+  every hand-off missed (Fist of the Heavens 30 of 34, 2026-11-01); this also
+  fixes the aim rules' unit hand-off (Charge, Leap Attack, Guided Arrow...).
+
+The arm must stay straight (70 % of its reach from the shoulder: 38 % of the
+calibrated arm span, 0.45-0.85 m, 0.62 m uncalibrated), start 25-70 degrees up
+and within 50 degrees of straight ahead, drop at least 22 degrees within 0.9 s
+reaching 0.9 m/s, and stop between 14 degrees above and 55 below level (slower than 0.8 m/s
+for 40 ms), or open the fist there once it has. Where a call ends varies by player: Cal's
+stopped near -25, the owner's at -36..-47 (2026-11-01). Carrying on past 65 degrees below
+level is a chop, and a bent elbow drops it. One call casts once; raise the arm again for the next. The
+call presses the slot the skill is on; mana, cast rate and the bolt stay
+native, and pressing the slot still casts it. While the skill is on a slot the
+monster scan runs (vrcam answers the call: `HeavensRequest` /
+`HeavensResolved`, then the slot is pressed, at most 120 ms later), and the
+pointed monster is handed to the game's target query for 500 ms (`RulesUnit`).
+Thresholds: `heavensfist::Tuning` (`steamvr/heavens_gesture.h`);
+`heavens-gesture-test`. Logs: `Frame heavens:` (the first casts, every 25th,
+any cast without an answer, abandoned calls with their angles) and
+`Frame heavens aim:` (per call: handed or the game's pick). The skill picker
+tags it GESTURE ("Raise, bring down").
 
 ### Ice Bolt visual height correction
 

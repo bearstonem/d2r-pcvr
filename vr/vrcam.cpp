@@ -37,6 +37,7 @@
 #include "../steamvr/aim_reach.h"
 #include "../steamvr/torch_light.h"
 #include "../steamvr/leather_menu.h"
+#include "../steamvr/head_shadow.h"
 #include <tlhelp32.h>
 #include <intrin.h>
 #include <xinput.h>
@@ -132,6 +133,7 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "melee.h"
 #include "target_lock.h"
 #include "bow.h"
+#include "loot_beam_scan.h"
 #include "wall_cells.h"
 #include "prop_scan.h"
 #include "crossbow.h"
@@ -150,6 +152,8 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #endif
 #include "../steamvr/panel_input_mode.h"
 #include "pad_mirror_shared.h"
+#include "../steamvr/talk_stop.h"
+namespace gamestate {uint32_t TalkOpens();}   // NPC conversations opened (talk_stop.h)
 
 #pragma intrinsic(_ReturnAddress)
 
@@ -326,7 +330,8 @@ struct Settings {
     std::atomic<bool>  torchFlicker{true};       // [torch] flicker: organic turbulent flame flicker
     std::atomic<float> torchWarmth{0.65f};       // [torch] warmth: color warmth toward fire orange
     std::atomic<int>   armsMode{0};        // 0 game animation, 1 test pose (arms ahead), 2 controllers
-    std::atomic<bool>  hideHead{false};     // shrink the hero's head away (first person)
+    std::atomic<bool>  hideHead{false};     // hide the hero's head from the eyes (first person): shrunk, or cut (headShadow)
+    std::atomic<bool>  headShadow{true};    // [arms] head_shadow: the hidden head stays whole for its shadow, the eye views cut it (head_shadow.h)
     std::atomic<float> armScale{1.0f};      // reach on top of the hero/user height ratio
     std::atomic<bool>  bodywalkPad{true};   // [input] bodywalk_pad: the game's pad is BodyWalk's own report (pad_mirror_shared.h) - no virtual pad needed
     std::atomic<int>   inventoryPad{0};     // [input] inventory_button: the pad button "D2R: Inventory" sends - 0 Menu (Start), 1 View (Back)
@@ -1362,6 +1367,18 @@ void LoadSettings() {
     LoadCeilingTextures();
     g_set.armsMode.store(std::clamp((int)IniF(L"arms", L"mode", 0.0f), 0, 2));
     g_set.hideHead.store(IniB(L"arms", L"hide_head", false));
+    {   // the head kept for its shadow (steamvr/head_shadow.h): told at start and on each change
+        static int told = -1;
+        const bool keep = IniB(L"arms", L"head_shadow", true), hide = g_set.hideHead.load(), trace = IniB(L"debug", L"head_shadow", false);
+        g_set.headShadow.store(keep);
+        headshadow::SetTrace(trace);
+        if (const int now = int(keep) | int(hide) << 1 | int(trace) << 2; now != told) {
+            told = now;
+            LogF("Frame head shadow: [arms] head_shadow=%d, hide_head=%d, [debug] head_shadow=%d (%s)", int(keep), int(hide), int(trace),
+                 !hide ? "the head is not hidden: nothing changes" : keep ? "full-body first person keeps the head whole for its shadow; the eye views cut it"
+                                                                         : "the hidden head shrinks to the neck, its shadow headless");
+        }
+    }
     g_set.armScale.store(std::clamp(IniF(L"arms", L"scale", 1.0f), 0.3f, 3.0f));
     g_set.poseOrderLog.store(IniB(L"debug", L"pose_order", false));
     g_set.frameLog.store(IniB(L"debug", L"frame_log", false));
@@ -2790,6 +2807,7 @@ bool VrViewInner(const d2rcam::WorldView& in, float out[16]) {
 // clip that cuts the hero's own head away, and in AFR each eye's off-axis
 // shift so what lies at `convergence` sits on the screen.
 bool VrProjInner(const d2rcam::WorldView& in, float M[16]);
+int ShapeFormNow();
 bool VrProj(const d2rcam::WorldView& in, float M[16]) {
     FRAME_PROFILE(Projection);
 #ifdef D2RVR_NATIVE_OPENXR
@@ -2809,7 +2827,20 @@ bool VrProjInner(const d2rcam::WorldView& in, float M[16]) {
     const float aspect = ratio > 0.1f && ratio < 10.0f ? ratio : 16.0f / 9.0f;
     g_lastAspect.store(aspect);
     // The table: nothing of the hero to cut away, and the head may come down close to the game - 5 cm.
-    const float nearZ = TableView() ? 0.05f * g_set.tableScale.load() : TopPersp() ? 0.5f : std::max(g_set.nearClip.load(), 0.05f);
+    float nearZ = TableView() ? 0.05f * g_set.tableScale.load() : TopPersp() ? 0.5f : std::max(g_set.nearClip.load(), 0.05f);
+#if D2RVR_FIRST_PERSON
+    // First person in full body with the head kept whole for its shadow ([arms] hide_head and head_shadow, as PushArms
+    // decides): nothing nearer than the cut at this head pitch is drawn, so the head is not seen from inside
+    // (steamvr/head_shadow.h). Not in a shapeshift form: its head shrinks as before.
+    if (!ThirdPerson() && !Overhead()) {
+        const bool keep = g_set.headShadow.load() && g_set.hideHead.load() && FullBody() && !ShapeFormNow();
+        if (keep || headshadow::Holding()) {
+            const D2RVR_Shared* sh = g_shared;
+            const float pitch = sh && sh->version == D2RVR_SHARED_VERSION && sh->headValid && sh->pitchValid ? sh->headPitchDeg : NAN;
+            nearZ = headshadow::EyeNear(nearZ, keep, std::max(1.0f, ScaleHeight()) / UserEyeHeightM(), pitch);
+        }
+    }
+#endif
     g_lastNear.store(nearZ);
     d2rcam::m4::PerspectiveRevZ(CameraFov() * 3.14159265f / 180.0f, aspect, nearZ, M);
     // The frustum IS the FlatVR screen: each side by its own size at its distance.
@@ -3500,6 +3531,13 @@ bool HeadHeading(float& gx, float& gy) {
 // the button whose cast handed it.
 std::atomic<int> g_unitSkill{-1};
 std::atomic<uint32_t> g_unitId{0};
+// Where that monster stood (grid cells) when handed: the scan reads the server's
+// units; the client's unit is found by the same id, else by place (2026-11-01:
+// nearly every hand-off missed - the room walk followed the hash link, see ClientMonster).
+std::atomic<float> g_unitX{-1.f},g_unitY{-1.f};
+// x,y (grid cells, -1 none): no client monster with this id, the nearest live one
+// within ClientNearCells of there.
+namespace worldobj { uintptr_t ClientMonster(uint32_t id,float x=-1.f,float y=-1.f); }
 std::atomic<ULONGLONG> g_unitAt{0};
 std::atomic<int> g_unitButton{-1};
 namespace aimtargets {
@@ -3757,7 +3795,7 @@ bool Wanted() {
     const bool tacticalActive = companionai::IsTacticalCommandsEnabled();
     return g_enabled.load() && g_inWorld.load() && d2rcam::InWorld() &&
         (TargetHighlightOn() || SpellsLocked() || BowSkillsLocked() ||
-         GroundAimMode() == 2 || tacticalActive);
+         GroundAimMode() == 2 || tacticalActive || framevr::HeavensArmed());
 }
 void Tick() {
     const bool wanted = Wanted();
@@ -3779,7 +3817,9 @@ void Tick() {
     // From the settings alone, so loading screens and menus don't flip it.
     // Aim follows your view is not counted (aimrules::Any): it only changes which
     // monster the picks take, so with nothing using them it has nothing to do.
-    const bool resting = !TargetHighlightOn() && !framevr::aimrules::Any(aimtargets::Options()) && !companionai::IsTacticalCommandsEnabled();
+    // Fist of the Heavens on a slot with gestures on: its call hands the game the
+    // pointed monster, so the scan runs and the hand-off is not reset.
+    const bool resting = !TargetHighlightOn() && !framevr::aimrules::Any(aimtargets::Options()) && !companionai::IsTacticalCommandsEnabled() && !framevr::HeavensArmed();
     static bool rested = false;
     if (resting != rested) {
         rested = resting;
@@ -3789,6 +3829,40 @@ void Tick() {
     const auto s = targetlock::Get();
     const bool fresh = wanted && !gamestate::MenuOpen() && s.at && GetTickCount64() - s.at <= 500;
     aimtargets::Tick(fresh ? &s : nullptr);
+    // A Fist of the Heavens call (heavens_gesture.h): the monster nearest the
+    // weapon arm's line, in the same cone and reach as the hands' picks, is
+    // handed to the game's target query for the skill (RulesUnit). None: no
+    // hand-off, the game picks its own target. Whatever the Aim options.
+    if (const uint32_t request = framevr::HeavensRequest()) {
+        int i = -1;
+        bool wide = false;
+        float o[3], d[3];
+        if (fresh && HandRay(o, d, true, 0) && std::hypot(d[0], d[2]) > 1e-3f) {
+            i = framevr::targetcone::Pick(s.targets, s.count, s.heroX, s.heroY, d[0], d[2], 0);
+            // rev3 (Cal: close enemies but none further, the cast sounded and struck
+            // nothing): none in the arm's 30-degree cone: the nearest one in sight
+            // within 75 degrees of it, before leaving it to the game.
+            if (i < 0) {
+                float best = 1e9f;
+                for (int k = 0; k < s.count && k < framevr::targetcone::MaxTargets; ++k) {
+                    const auto& t = s.targets[k];
+                    const float dx = t.x - s.heroX, dy = t.y - s.heroY, dist = std::hypot(dx, dy);
+                    if (t.clear && framevr::aimreach::Within(dx, dy) && framevr::targetcone::AngleOff(dx, dy, d[0], d[2]) <= 75.f && dist < best) { best = dist; i = k; }
+                }
+                wide = i >= 0;
+            }
+        }
+        const uint32_t id = i >= 0 ? s.targets[i].id : 0;
+        if (id) {
+            g_unitId.store(id); g_unitX.store(s.targets[i].x); g_unitY.store(s.targets[i].y);
+            g_unitButton.store(-1); g_unitAt.store(GetTickCount64()); g_unitSkill.store(121);
+        }
+        framevr::HeavensResolved(request, id);
+        const uintptr_t client = id ? worldobj::ClientMonster(id, s.targets[i].x, s.targets[i].y) : 0;
+        LogF("Frame heavens aim: %s%s", !id ? (fresh ? "no monster near where the arm points: the game's own pick" : "no fresh monster scan: the game's own pick") :
+             wide ? "the nearest monster within 75 degrees of the arm is handed to the game" : "the monster the arm points at is handed to the game",
+             id ? (client ? " (found on the client)" : " (NOT found on the client: the game's own pick)") : "");
+    }
 }
 }
 
@@ -3871,10 +3945,9 @@ bool PointSpellAim(float playerX,float playerY,float& targetX,float& targetY) {
 // A skill handed the monster itself (aimrules::WantsUnit) is left to the game's
 // own target query, which HookSpellControllerTarget and HookSpellHoverTarget
 // answer with this monster for this skill.
-namespace worldobj { uintptr_t ClientMonster(uint32_t id); }
 uintptr_t RulesUnit(int skill) {
     if(skill!=g_unitSkill.load()||!framevr::aimrules::HandOffLive(skill,g_unitAt.load(),GetTickCount64()))return 0;
-    const uintptr_t unit=worldobj::ClientMonster(g_unitId.load());
+    const uintptr_t unit=worldobj::ClientMonster(g_unitId.load(),g_unitX.load(),g_unitY.load());
     static ULONGLONG told=0;
     if(GetTickCount64()-told>2000){told=GetTickCount64();LogF("Frame aim rules: skill %d handed monster id %u (%s)",skill,g_unitId.load(),unit?"found":"not near: the game's own pick");}
     return unit;
@@ -3954,10 +4027,10 @@ bool NativeSpellAimDecide(float playerX,float playerY,framevr::spellaim::Cast& c
     // Only when the game's own unit is found here (the game thread): otherwise
     // the rule's heading or spot below (Guided Arrow flew into a wall).
     if(c.skill>=0&&framevr::aimrules::WantsUnit(c.skill)&&aimtargets::SwitchOn(c)) {
-        if(aimtargets::Resolve(c.button,c.bow,c.use,mx,my,md,&g_note.source,&id)&&worldobj::ClientMonster(id)) {
+        if(aimtargets::Resolve(c.button,c.bow,c.use,mx,my,md,&g_note.source,&id)&&worldobj::ClientMonster(id,mx,my)) {
             // the button that cast it, while it is held: letting go drops the hand-off (aimtargets::Tick)
             const bool pressed=framevr::CastButtonHand()==c.button||framevr::HandSpellHeld(c.button);
-            g_unitId.store(id);g_unitButton.store(pressed?c.button:-1);g_unitAt.store(GetTickCount64());g_unitSkill.store(c.skill);
+            g_unitId.store(id);g_unitX.store(mx);g_unitY.store(my);g_unitButton.store(pressed?c.button:-1);g_unitAt.store(GetTickCount64());g_unitSkill.store(c.skill);
             g_note.unit="handed";g_note.id=id;g_note.distance=md;g_note.by="unit";
             cast.directed=false;return false;
         }
@@ -4280,6 +4353,11 @@ bool ViewStickToGame(float* px, float* py) {
 
 bool DirectWalkNow();
 bool StickHookIn();
+// A on an NPC while walking (talk_stop.h; TalkHoldA beside ApplyActions): the walk is let go
+// until this time, so the game stops the hero before the conversation opens.
+std::atomic<uint64_t> g_talkWalkUntil{0};
+std::atomic<uint32_t> g_talkWalkTalks{0};   // conversations opened at the press: one more, and the walk is back
+bool TalkWalkHeld() { return GetTickCount64() < g_talkWalkUntil.load() && gamestate::TalkOpens() == g_talkWalkTalks.load(); }
 void TurnStick(XINPUT_STATE* s, bool fromBodyWalk) {
     if (!s || !g_enabled.load()) return;
     const XINPUT_GAMEPAD in = s->Gamepad;
@@ -4317,6 +4395,7 @@ void TurnStick(XINPUT_STATE* s, bool fromBodyWalk) {
     // stick is kept from the game in the world - it would walk twice, and a stick
     // pushed flips the game's interface to the controller.
     if (DirectWalkNow() && StickHookIn()) { s->Gamepad.sThumbLX = 0; s->Gamepad.sThumbLY = 0; return; }
+    if (TalkWalkHeld()) { s->Gamepad.sThumbLX = 0; s->Gamepad.sThumbLY = 0; return; }   // the pad's walk, let go the same
     float x = s->Gamepad.sThumbLX / 32767.0f, y = s->Gamepad.sThumbLY / 32767.0f;
     if (!ViewStickToGame(&x, &y)) return;
     s->Gamepad.sThumbLX = (SHORT)std::clamp(x * 32767.0f, -32768.0f, 32767.0f);
@@ -4425,6 +4504,42 @@ bool InteractButton(bool active,uint32_t held) {
     return out.down;
 }
 
+// A on an NPC while walking (owner 2026-10-30: "instantly stop player movement when the NPC
+// dialogue starts"; talk_stop.h). The conversation opens in the frame A lands, and from then
+// on the game takes no walk command, so the stop goes first: at the press the walk is let go
+// (TalkWalkHeld: BodyWalkWalk and the pad's stick read as released, the game's own stop) and
+// A reaches the game HoldMs later. The target's unit type 1: a monster, which as an interact
+// target is an NPC. Items, chests, doors and standing presses get A at once, as ever.
+SRWLOCK g_talkHoldLock = SRWLOCK_INIT;
+framevr::talkstop::Hold g_talkHold;
+std::atomic<uint32_t> g_talkHolds{0};
+bool TalkHoldA(bool interact, const XINPUT_STATE* s) {
+    if (g_set.platform.load() != 1 || !g_enabled.load() || !g_inWorld.load()) { g_talkWalkUntil.store(0); return interact; }
+    const uintptr_t target = interact && g_interactHooked.load() && GetTickCount64() - g_interactTargetAt.load() < 200 ? g_interactTarget.load() : 0;
+    uint32_t type = ~0u;
+    const bool npc = target > 0x10000 && SafeRead(&type, reinterpret_cast<const void*>(target), sizeof type) && type == 1;
+    const float lx = s->Gamepad.sThumbLX, ly = s->Gamepad.sThumbLY;
+    const bool walking = lx * lx + ly * ly > 10349.0f * 10349.0f;   // the game's own dead zone
+    const ULONGLONG now = GetTickCount64();
+    const uint32_t talks = gamestate::TalkOpens();
+    bool began = false;
+    AcquireSRWLockExclusive(&g_talkHoldLock);
+    const bool a = g_talkHold.Poll(interact, npc, walking, talks, now, &began);
+    const uint64_t until = g_talkHold.WalkHeld(now) ? g_talkHold.pressAt + framevr::talkstop::WalkMaxMs : 0;
+    ReleaseSRWLockExclusive(&g_talkHoldLock);
+    if (began) g_talkWalkTalks.store(talks);
+    g_talkWalkUntil.store(until);
+#ifdef D2RVR_DEVELOPER
+    constexpr bool everyHold = true;
+#else
+    constexpr bool everyHold = false;   // the first of a session only
+#endif
+    if (began && (g_talkHolds.fetch_add(1) == 0 || everyHold))
+        LogF("vrcam: NPC talk: A on an NPC while walking - the walk let go, A to the game %llu ms later",
+             (unsigned long long)framevr::talkstop::HoldMs);
+    return a;
+}
+
 void ApplyActions(XINPUT_STATE* s) {
     const uint32_t held = ActionsHeld();
     // Pick up only onto a target: nothing there, nothing pressed - never an attack.
@@ -4435,7 +4550,9 @@ void ApplyActions(XINPUT_STATE* s) {
     // floor. Native menus observe releases separately without changing menu A.
     // Without the hook (another build) it cannot tell, and stays a plain A.
     const bool interact = InteractButton(true,held);
-    if ((held & D2RVR_ACT_ATTACK) || interact) s->Gamepad.wButtons |= XINPUT_GAMEPAD_A;
+    const bool interactA = TalkHoldA(interact, s);   // A on an NPC while walking: the walk stops first
+    if (interact && !interactA && !(held & D2RVR_ACT_ATTACK)) s->Gamepad.wButtons &= ~XINPUT_GAMEPAD_A;   // held back, the pad's own A too
+    if ((held & D2RVR_ACT_ATTACK) || interactA) s->Gamepad.wButtons |= XINPUT_GAMEPAD_A;
     // A pad button, not the keyboard's I: a key press flips the game's UI to
     // mouse and keyboard, the way Shift + click did in bow mode 2. Menu (Start)
     // by default: View (Back) opens the map in D2R's pad layout - "the inventory
@@ -4709,6 +4826,7 @@ bool DirectWalkNow() {
 // BodyWalk's stick as the game takes a walking vector (x right, y up on its screen,
 // length <= 1, its dead zone 10349 of 32767 with no rescale), turned by our camera.
 bool BodyWalkWalk(float* px, float* py) {
+    if (TalkWalkHeld()) return false;   // A on an NPC: the stick as released, the game stops him
     BWPadMirror m;
     if (!PadMirrorRead(&m)) return false;
     const float lx = (float)m.thumb_lx, ly = (float)m.thumb_ly;
@@ -5023,6 +5141,30 @@ void Tick(ULONGLONG now) {
     if (!g_queued.exchange(true) && !gamestate::RunOnUi(&Click)) g_queued.store(false);
 }
 }
+
+// Developer builds: how far the hero goes after a conversation opens (talk_stop.h Watch),
+// the evidence for the stop at the press (talkhold, beside ApplyActions).
+#ifdef D2RVR_DEVELOPER
+namespace talkstop {
+framevr::talkstop::Watch g_watch;   // the 1 ms timer only
+void Tick(ULONGLONG now) {
+    const bool active = g_enabled.load() && g_inWorld.load() && g_set.platform.load() == 1;
+    const uint32_t opened = gamestate::TalkOpens();
+    uintptr_t hero = 0; float x = 0, y = 0;
+    const bool known = active && g_watch.Wants(opened, now) && combat::LocalPlayerUnit(hero) &&
+                       SpellPlayerPosition(reinterpret_cast<void*>(hero), x, y);
+    using Action = framevr::talkstop::Watch::Action;
+    switch (g_watch.Step(active, opened, now, known, x, y)) {
+    case Action::Report:
+        LogF("vrcam: NPC talk: %.2f cells moved in the %llu ms after the conversation opened", g_watch.drift,
+             (unsigned long long)framevr::talkstop::WatchMs);
+        break;
+    case Action::Lost: Log("vrcam: NPC talk: no hero position as the conversation opened - not measured"); break;
+    default: break;
+    }
+}
+}
+#endif
 #endif
 
 // Twice a second: says when the game loses or gets back its pads, and when W A
@@ -5122,9 +5264,13 @@ template <int I> DWORD WINAPI XDetour(DWORD idx, XINPUT_STATE* s) {
         const bool allowed=!tagged||framevr::menus::Allowed(report.reserved[0],report.reserved[1],gamestate::MenuEpoch(),nativeUi,framevr::SettingsOpen());
         if(!allowed||nativeUi||framevr::SettingsOpen()) {
             if(idx==0){SequenceSkillPad(s,false);InteractButton(false,ActionsHeld());}
+            // The menu held in the hand (the world kept): the left stick walks (DirectWalkNow) and the
+            // right stick's left / right turns (TurnTick), as in play; neither reaches the menu.
+            const bool held=allowed&&!framevr::SettingsOpen()&&gamestate::MenuOpen()&&framevr::LeatherMenuWorld();
+            const float turn=held&&mirror&&g_set.rightTurn.load()?s->Gamepad.sThumbRX/32767.0f:0.f;
             if(!allowed||framevr::SettingsOpen())s->Gamepad={};
-            else if(gamestate::MenuOpen()&&framevr::LeatherMenuWorld())s->Gamepad.sThumbLX=s->Gamepad.sThumbLY=0;   // it walks (DirectWalkNow), not the cursor
-            if(idx==0){g_aHeld.store(false);g_skillHeld.store(false);g_rightX.store(0.f);}
+            else if(held){s->Gamepad.sThumbLX=s->Gamepad.sThumbLY=0;s->Gamepad.sThumbRX=s->Gamepad.sThumbRY=0;}
+            if(idx==0){g_aHeld.store(false);g_skillHeld.store(false);g_rightX.store(turn);}
             // Native menu buttons/sticks bypass gameplay action translation
             // and camera-relative movement. Laser reports are already empty.
             return r;
@@ -7452,6 +7598,7 @@ void PushArms() {
     in.bodyTurn = own ? (FullBody() ? g_set.bodyTurn.load() : 2) : on && ThirdPerson() && !Overhead() && g_set.thirdTurn.load() ? 2 : 0;
 #if D2RVR_FIRST_PERSON
     in.hideHead = own && (g_set.hideHead.load() || !FullBody());
+    in.headShadow = g_set.headShadow.load() && FullBody();   // VR's full-body view only: a flat first person shrinks as before
     const int likeStaff = HeldLikeStaff();
     // a staff in the hands: aimed from hand to hand ([bow] staff_two_hands) or fast in the right one with
     // the left free (staff_free_left) - the latter no longer waits for the aim's box (off by default since
@@ -8499,9 +8646,13 @@ void Gather() {
 }
 
 // The aim rules: the game's own client unit of a monster, by its id (the target
-// lock knows the server's), from the rooms near the hero - the walk above, for
-// monsters (type 1) still standing. The game thread. 0: not found.
-uintptr_t ClientMonster(uint32_t id) {
+// lock knows the server's), from the rooms near the hero, for monsters (type 1)
+// still standing; else, with x,y, the nearest live one within ClientNearCells of
+// there. A room's units are linked by Unit+0x160 (steamvr/sewer_interaction.h,
+// checked against the game's code); +0x158 is the hash-list link: walked from a
+// room's first unit it visits a few unrelated units, and until 2026-11-01 nearly
+// every hand-off missed (Fist of the Heavens: 30 of 34). The game thread. 0: not found.
+uintptr_t ClientMonster(uint32_t id, float x, float y) {
     if (!id) return 0;
     uintptr_t hero = 0, path = 0, room = 0, nearRooms = 0;
     uint32_t nNear = 0;
@@ -8517,19 +8668,39 @@ uintptr_t ClientMonster(uint32_t id) {
     }
     char seen[160] = {};
     int monsters = 0;
+    uintptr_t nearest = 0;
+    float nearestCells = 2.5f;   // ClientNearCells: the server's place and the client's agree within a cell or two
+    float closest = -1;          // the nearest live monster at any distance, for the log
     for (uint32_t r = 0; r < nNear; ++r) {
         uintptr_t rm = 0, u = 0;
         if (!Rd(nearRooms + r * 8, &rm) || !Rd(rm + 0xA8, &u)) continue;
         for (int k = 0; u && k < 512; ++k) {
             uint32_t header[4] = {};   // type, class, id, mode
             uintptr_t next = 0;
-            Rd(u, &header); Rd(u + 0x158, &next);
+            Rd(u, &header); Rd(u + 0x160, &next);   // the room's next unit
             if (header[0] == 1 && header[2] == id && header[3] != 0 && header[3] != 12) return u;
-            if (header[0] == 1 && tell && monsters++ < 8) snprintf(seen + strlen(seen), sizeof seen - strlen(seen), " %u/m%u", header[2], header[3]);
+            if (x >= 0 && header[0] == 1 && header[3] != 0 && header[3] != 12) {
+                uintptr_t path = 0; uint32_t at[2] = {};
+                if (Rd(u + 0x38, &path) && path > 0x10000 && Rd(path, &at)) {
+                    const float d = std::hypot(at[0] / 65536.f - x, at[1] / 65536.f - y);
+                    if (d < nearestCells) { nearestCells = d; nearest = u; }
+                    if (closest < 0 || d < closest) closest = d;
+                }
+            }
+            if (header[0] == 1 && monsters++ < 8 && tell) snprintf(seen + strlen(seen), sizeof seen - strlen(seen), " %u/m%u", header[2], header[3]);
             u = next;
         }
     }
-    if (tell) { told = GetTickCount64(); LogF("Frame aim rules: monster id %u not among the hero's rooms (%u rooms, %d monsters:%s)", id, nNear, monsters, seen); }
+    if (nearest) {   // the same monster by place (no client unit with its id)
+        if (tell) { told = GetTickCount64(); LogF("Frame aim rules: monster id %u found by place, %.1f cells off (no client unit with that id; %d monsters near)", id, nearestCells, monsters); }
+        return nearest;
+    }
+    if (tell) {
+        told = GetTickCount64();
+        if (x >= 0) LogF("Frame aim rules: monster id %u at (%.1f, %.1f) not among the hero's rooms (%u rooms, %d monsters:%s; the nearest live one %.1f cells away)",
+                         id, x, y, nNear, monsters, seen, closest);
+        else LogF("Frame aim rules: monster id %u not among the hero's rooms (%u rooms, %d monsters:%s)", id, nNear, monsters, seen);
+    }
     return 0;
 }
 
@@ -8813,6 +8984,10 @@ bool RingWanted() {
         (AimOn(framevr::settings::LandingCircles) || tacticalActive) &&
         framevr::telegraph::AnyOn(framevr::telegraph::Current().Get(), GetTickCount64());
 }
+// Loot beams (same pass): while a Rare, Set or Unique item or a high rune lies near the hero.
+bool BeamWanted() {
+    return g_enabled.load() && g_inWorld.load() && !gamestate::MenuOpen() && lootscan::Latest(GetTickCount64()).count > 0;
+}
 
 // The frame stamp strip (D2R_DepthFog.fx PS_Stamp): whenever the camera turns
 // with the head, so that FlatVR can place its screen at the pose of the frame.
@@ -8908,7 +9083,7 @@ void OnFinishEffects(reshade::api::effect_runtime* rt, reshade::api::command_lis
     if (!g_tech[0].handle) { hud::SetPictureReady(false); return; }
     // Off while a menu is open: the fog lies over the whole picture, the
     // inventory and trade panels included, and darkened them.
-    const bool want = FogWanted() || g_skyPalette.load() >= 0 || g_arcaneSky.load() || CeilWanted() || HudWanted() || StampWanted() || hud::PictureWanted() || TableKeyWanted() || PhantomWanted() || BoneAxesWanted() || ShieldDebugWanted() || OutlineWanted() || RingWanted();
+    const bool want = FogWanted() || g_skyPalette.load() >= 0 || g_arcaneSky.load() || CeilWanted() || HudWanted() || StampWanted() || hud::PictureWanted() || TableKeyWanted() || PhantomWanted() || BoneAxesWanted() || ShieldDebugWanted() || OutlineWanted() || RingWanted() || BeamWanted();
     // The toolbar and the map are taken out of the game's picture to be drawn
     // back at their own size only while this effect runs, and is new enough to.
     {
@@ -9110,7 +9285,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
         renderscale::Frame(rt, s);
 #ifdef D2RVR_NATIVE_OPENXR
         const bool ownDepth=g_enabled.load()&&g_inWorld.load()&&framevr::Active()&&
-            (FogWanted()||g_set.skyOn.load()||g_arcaneSky.load()||CeilWanted()||TableKeyWanted()||OutlineWanted()||RingWanted());
+            (FogWanted()||g_set.skyOn.load()||g_arcaneSky.load()||CeilWanted()||TableKeyWanted()||OutlineWanted()||RingWanted()||BeamWanted());
         const bool turnDepth=g_enabled.load()&&g_inWorld.load()&&framevr::Active()&&framevr::TurnDepthWanted();
         framevr::scenedepth::Bind(rt,cl,ownDepth,turnDepth,stereoreplay::RightEffects(),s);
         SetBool(rt,"OwnDepth",ownDepth);
@@ -9572,10 +9747,13 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
         const bool view = sv[0].proj_ok && sv[0].axes_ok;
         const int count = OutlineWanted() && view ? aimtargets::ShownTargets(shown) : 0;
         const bool rings = RingWanted() && view;
+        const auto loot = lootscan::Latest(GetTickCount64());
+        const bool beams = BeamWanted() && view && loot.count > 0;   // the same snapshot as the beams drawn
         SetBool(rt, "OutlineOn", count > 0);
         SetBool(rt, "RingOn", rings);
+        SetBool(rt, "BeamOn", beams);
         float mob[2][4] = {};
-        if (count > 0 || rings) {
+        if (count > 0 || rings || beams) {
             for (int e = 0; e < 2; ++e) {
                 const SkyView& s = sv[e].axes_ok && sv[e].proj_ok ? sv[e] : sv[0];
                 char n[16];
@@ -9617,6 +9795,45 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
             // 2026-10-20, like the rest of the look (D2R_DepthFog.fx, kCircle*).
             constexpr float kCircleHeightM = 0.15f;
             SetFloat(rt, "RingFloorTol", kCircleHeightM * std::max(1.0f, ScaleHeight()) / UserEyeHeightM());
+        }
+        if (beams) {   // loot beams: each item's cell on the hero's floor, in its label colour
+            namespace lb = framevr::lootbeams;
+            const float upm = std::max(1.0f, ScaleHeight()) / UserEyeHeightM();   // world units per metre
+            const float floor = sv[0].hero[1], shear = framevr::coordinates::GroundShear;
+            // A new beam fades in over 0.4 s; the ids seen last frame keep their start.
+            static uint32_t ids[lb::MaxBeams] = {};
+            static uint64_t since[lb::MaxBeams] = {};
+            uint32_t nextIds[lb::MaxBeams] = {};
+            uint64_t nextSince[lb::MaxBeams] = {};
+            const uint64_t now = GetTickCount64();
+            for (size_t k = 0; k < lb::MaxBeams; ++k) {
+                float pos[4] = {}, col[4] = {1.0f, 1.0f, 1.0f, 0.0f};
+                if (k < loot.count) {
+                    const auto& item = loot.items[k];
+                    uint64_t start = now;
+                    for (size_t j = 0; j < lb::MaxBeams; ++j) if (ids[j] == item.id && since[j]) start = since[j];
+                    nextIds[k] = item.id; nextSince[k] = start;
+                    // The cell itself, as the breakables, landing circles and outlines place theirs
+                    // (2 x cell): headset 2026-10-31, half a cell added put the beam beside the item.
+                    pos[0] = float(item.x) * 2.0f + floor * shear - sv[0].hero[0];
+                    pos[1] = floor - sv[0].hero[1];
+                    pos[2] = float(item.y) * 2.0f + floor * shear - sv[0].hero[2];
+                    pos[3] = std::min(1.0f, float(now - start) / 400.0f);
+                    const auto rgb = lb::Colour(item.beam);
+                    col[0] = rgb.r / 255.0f; col[1] = rgb.g / 255.0f; col[2] = rgb.b / 255.0f;
+                    col[3] = float(item.id % 97u) * 0.37f;   // each its own shimmer phase
+                }
+                char n[16];
+                snprintf(n, sizeof n, "BeamPos%zu", k); SetFloats(rt, n, pos, 4);
+                snprintf(n, sizeof n, "BeamCol%zu", k); SetFloats(rt, n, col, 4);
+            }
+            std::copy(std::begin(nextIds), std::end(nextIds), ids);
+            std::copy(std::begin(nextSince), std::end(nextSince), since);
+            // core radius 0.18 m, 12 m tall, a floor glow of 0.7 m; painted within 0.3 m of the floor;
+            // w the brightness slider (VR Settings > Interface > Loot beams, 10% to 100%)
+            const float shape[4] = {0.18f * upm, 12.0f * upm, 0.7f * upm, loot.strength};
+            SetFloats(rt, "BeamShape", shape, 4);
+            SetFloat(rt, "BeamFloorTol", 0.3f * upm);
         }
         if (count > 0) {
             const float upm = std::max(1.0f, ScaleHeight()) / UserEyeHeightM();
@@ -9966,6 +10183,10 @@ DWORD WINAPI UpdateThread(void*) {
         gamecmd::Tick();   // skills, potions, Alt... held in BodyWalk: pressed on the UI thread
 #ifdef D2RVR_NATIVE_OPENXR
         leatherwalk::Tick(nowMs);   // the left stick walks with the tabbed menu on the leather
+#ifdef D2RVR_DEVELOPER
+        talkstop::Tick(nowMs);      // how far the hero goes after a conversation opens (log)
+#endif
+        lootscan::Tick(nowMs);      // loot beams: the beam-worthy items lying near the hero
 #endif
 #ifdef D2RVR_NATIVE_OPENXR
         mobaim::Tick();    // the aim rules' targets: each hand's held out, and the one looked at
@@ -10316,6 +10537,12 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
     bowvr::Init(ctx);
     wallcells::Init(ctx);
     propscan::Init();
+    {   // loot beams: [loot] beams (master), rune_min (26 = Vex); the rarities are VR Settings (lootscan)
+        framevr::lootbeams::Wanted wanted;
+        wanted.highRune = std::clamp(int(IniF(L"loot", L"rune_min", float(framevr::lootbeams::DefaultHighRune))),
+                                     framevr::lootbeams::FirstRune, framevr::lootbeams::LastRune + 1);   // 34 = no runes
+        lootscan::Init(ctx, IniB(L"loot", L"beams", true), wanted);
+    }
 #endif
     if (HANDLE h = CreateThread(nullptr, 0, UpdateThread, nullptr, 0, &g_updateThreadId)) CloseHandle(h);
     if (!ctx->RegisterConsoleCommand("vrcam", &CmdVrcam, "vrcam - the camera: off / first person / third person (F12)"))
