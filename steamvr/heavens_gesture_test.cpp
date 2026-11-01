@@ -36,10 +36,22 @@ int main(){
     {Sim s;s.Call(.6f);Check(s.casts==1,"a deliberate call casts");}
     {Sim s;s.Call(1.2f);Check(s.casts==0&&s.lastDrop.find("slow")!=std::string::npos,"a slow lowering is not a call");}
     {Sim s;s.Call();s.Hold(1);Check(s.casts==1,"an arm held at the shoulder never repeats");s.Call();Check(s.casts==2,"raising it again loads the next");}
-    {Sim s;s.Call(.35f,-70);Check(s.casts==0&&s.lastDrop.find("chop")!=std::string::npos,"a straight arm carried down past the shoulder is a chop");}
+    {Sim s;s.Call(.35f,-75);Check(s.casts==0&&s.lastDrop.find("chop")!=std::string::npos,"a straight arm carried down past -65 degrees is a chop");}
     {Sim s;s.Call(.35f,-8);Check(s.casts==1,"stopping a little below level still counts");}
     {Sim s;s.Call(.35f,-28);Check(s.casts==1,"the headset test's overshoot (stopping near -25 degrees) counts");}
-    {Sim s;s.Call(.25f,-45);Check(s.casts==0,"stopping at the hip (-45 degrees) is not level");}
+    {Sim s;s.Call(.25f,-45);Check(s.casts==1,"the owner's natural stop (-36..-47 degrees, 2026-11-01) counts");}
+    {Sim s;s.Call(.3f,-53);Check(s.casts==1,"a stop a little past -50 still counts");}
+    // The fist opening ends the call: after a fast sweep far enough down it casts, before that it drops.
+    {Sim s;s.in.grip=1;s.Move(Arm(45,.6f),.4f);s.Hold(.15f);s.Sweep(45,-40,.3f);s.in.grip=0;s.Step();s.Hold(.2f);
+     Check(s.casts==1,"opening the fist at -40 after a fast sweep casts (the owner's 29 dropped calls)");}
+    {Sim s;s.in.grip=1;s.Move(Arm(45,.6f),.4f);s.Hold(.15f);s.Sweep(45,-5,.3f);s.in.grip=0;s.Step();s.Hold(.2f);
+     Check(s.casts==1,"opening the fist at level casts once, not twice");}
+    {Sim s;s.in.grip=1;s.Move(Arm(40,.6f),.4f);s.Hold(.15f);s.Sweep(40,22,.1f);s.in.grip=0;s.Step();
+     Check(s.casts==0&&s.lastDrop=="fist opened","opening the fist early in the sweep (18 degrees down, under 22) drops the call");}
+    {Sim s;s.in.grip=1;s.Move(Arm(45,.6f),.4f);s.Hold(.15f);s.Sweep(45,-30,2.5f);s.in.grip=0;s.Step();
+     Check(s.casts==0,"opening the fist after a slow lowering does not cast");}
+    {Sim s;s.in.grip=1;s.Move(Arm(45,.6f),.4f);s.Hold(.15f);s.Sweep(45,-80,.35f);s.in.grip=0;s.Step();
+     Check(s.casts==0,"opening the fist after a chop past -65 does not cast");}
     {Sim s;s.Call(.35f,30);Check(s.casts==0,"stopping above the shoulder does not cast");}
     {Sim s;s.in.grip=0;s.Move(Arm(45,.6f),.4f);s.Hold(.15f);s.Sweep(45,0,.35f);s.Hold(.2f);Check(s.casts==0,"an open hand is not a fist: no cast");}
     {Sim s;s.in.busy=true;s.Call();Check(s.casts==0,"a busy hand never calls");}

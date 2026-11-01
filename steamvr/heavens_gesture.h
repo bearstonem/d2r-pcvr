@@ -7,7 +7,8 @@
 // Paladin Fist of the Heavens (Cal, 2026-11-01): the weapon arm held straight
 // out, raised about 45 degrees (the fist a little above the forehead), then
 // brought down, still straight, to stop level with the shoulder. Grip held
-// (a fist), trigger free. The stop is the cast. Value-only: the transport
+// (a fist), trigger free. The stop is the cast, or the fist opening once the arm
+// has come down far and fast enough. Value-only: the transport
 // supplies the head and the weapon hand; the monster the arm points at is
 // handed to the game (vrcam), else the game's own target pick.
 //
@@ -27,8 +28,11 @@ struct Tuning {
     float sideMax=50;            // and within this many degrees of straight ahead (head yaw)
     // Cal's 2026-11-01 test: 21 of 36 calls overshot to -22..-27 degrees and were
     // dropped as chops (the stop settles a little below the estimated shoulder).
-    float levelHigh=14,levelLow=-35;   // degrees: the stop counts between these
-    float belowMax=-50;          // passing this far below level is a chop: dropped
+    // The owner's (2026-11-01, 37 casts / 41 dropped): his calls end at -36..-47
+    // and 5 reached -51..-53, so the stop counts down to -55 and a chop is past -65:
+    // where a straight arm's call ends varies from player to player.
+    float levelHigh=14,levelLow=-55;   // degrees: the stop counts between these
+    float belowMax=-65;          // passing this far below level is a chop: dropped
     float dropMin=22;            // the arm came down at least this many degrees
     float window=.90f;           // seconds from leaving the raised pose to the stop
     float sweepSpeed=.9f;        // m/s: the fist reaches this on the way down (a lowering arm doesn't)
@@ -86,7 +90,17 @@ public:
         const bool straightArm=length>=tuning.straight*tuning.Reach(in.armSpan);
         const bool forward=ahead>0&&side<=tuning.sideMax;
         const bool raised=straightArm&&forward&&ahead>=tuning.aheadMin&&elevation>=tuning.raisedMin&&elevation<=tuning.raisedMax;
-        if(!fist){Drop(out,"fist opened",elevation);if(phase==Phase::Spent)phase=Phase::Open;return out;}
+        if(!fist) {
+            // The hand opening ends the call (the owner's 2026-11-01 session: 29 of
+            // the 41 dropped calls opened the fist on the way down, at -36..-47): a
+            // sweep already come down far and fast enough, within the window, casts.
+            if(phase==Phase::Sweep&&top-elevation>=tuning.dropMin&&peak>=tuning.sweepSpeed&&elevation<=tuning.levelHigh&&elevation>=tuning.belowMax&&
+               !(castAt>=0&&in.time-castAt<tuning.cooldown)) {
+                out.cast=true;out.from=top;out.at=elevation;castAt=in.time;phase=Phase::Open;slowAt=-1;
+                return out;
+            }
+            Drop(out,"fist opened",elevation);if(phase==Phase::Spent)phase=Phase::Open;return out;
+        }
         if(castAt>=0&&in.time-castAt<tuning.cooldown)return out;
         switch(phase) {
         case Phase::Open:

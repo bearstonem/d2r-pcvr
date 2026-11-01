@@ -2181,22 +2181,26 @@ Settings > VR > Weapon skill gestures** is on:
 - Make a fist (hold the grip, trigger free) and hold the arm straight out in
   front, raised about 45 degrees: the fist a little above your forehead. No
   need to rest there: reaching the pose loads the call.
-- Bring the straight arm down, pivoting at the shoulder, and stop it level with
-  your shoulder. The stop casts.
+- Bring the straight arm down, pivoting at the shoulder, and stop it about level
+  with your shoulder. The stop casts, or opening the fist at the end of the
+  swing.
 - The bolt falls on the monster the arm points at (the hands' 30-degree cone,
   within the game's reach), whatever the Aim options; with none there, the
   nearest monster in sight within 75 degrees of the arm; with none of those,
-  the game picks its own target. The scan reads the server's monsters, whose
-  ids the client's need not share, so the handed monster is found on the
-  client by id or else by place (the nearest live one within 2.5 cells); this
-  also fixes the aim rules' unit hand-off (Charge, Leap Attack, Guided Arrow...).
+  the game picks its own target. The scan reads the server's monsters; the
+  handed monster is found on the client by id among the hero's nearby rooms, or
+  else by place (the nearest live one within 2.5 cells). A room's units are
+  linked by Unit+0x160: the walk followed the hash link +0x158 before and nearly
+  every hand-off missed (Fist of the Heavens 30 of 34, 2026-11-01); this also
+  fixes the aim rules' unit hand-off (Charge, Leap Attack, Guided Arrow...).
 
 The arm must stay straight (70 % of its reach from the shoulder: 38 % of the
 calibrated arm span, 0.45-0.85 m, 0.62 m uncalibrated), start 25-70 degrees up
 and within 50 degrees of straight ahead, drop at least 22 degrees within 0.9 s
-reaching 0.9 m/s, and stop between 14 degrees above and 35 below level (slower than 0.8 m/s
-for 40 ms; Cal's first test overshot to about -25). Carrying on past 50 degrees below level is a chop, and a bent
-elbow drops it. One call casts once; raise the arm again for the next. The
+reaching 0.9 m/s, and stop between 14 degrees above and 55 below level (slower than 0.8 m/s
+for 40 ms), or open the fist there once it has. Where a call ends varies by player: Cal's
+stopped near -25, the owner's at -36..-47 (2026-11-01). Carrying on past 65 degrees below
+level is a chop, and a bent elbow drops it. One call casts once; raise the arm again for the next. The
 call presses the slot the skill is on; mana, cast rate and the bolt stay
 native, and pressing the slot still casts it. While the skill is on a slot the
 monster scan runs (vrcam answers the call: `HeavensRequest` /
