@@ -3239,7 +3239,18 @@ bool g_on = false;
 float g_centre[3] = {}, g_upm = 0, g_radius = DefaultRadius;
 // Every skeleton met: what it is (players, items and props are Kind::None),
 // and its model's path as a key (every monster of a kind shares its limbs).
-struct Known { limbs::Kind kind = limbs::Kind::None; uint32_t entity = 0; uint64_t model = 0; ULONGLONG at = 0; bool form = false; };
+// farUntil: a body found beyond the radius is not looked at again before then (FarFor).
+struct Known { limbs::Kind kind = limbs::Kind::None; uint32_t entity = 0; uint64_t model = 0; ULONGLONG at = 0; ULONGLONG farUntil = 0; bool form = false; };
+// How long a body found beyond the radius is left alone: the time it and the player, closing at
+// ClosingSpeed, would need to bring it inside the radius; at most MaxFarFor. Each look costs about
+// fifteen guarded reads, and natively each is a system call (framevr::ReadMemory): ~1 us apiece,
+// 30-60 ms a second for a town's bodies when every one was looked at every frame (owner 2026-11-01).
+constexpr float ClosingSpeed = 15.0f;   // m/s: a running player and a charging monster
+constexpr ULONGLONG MaxFarFor = 2000;
+ULONGLONG FarFor(float awayMetres, float radiusMetres) {
+    const float gap = awayMetres - radiusMetres;
+    return gap > 0 && std::isfinite(gap) ? std::min(MaxFarFor, ULONGLONG(gap / ClosingSpeed * 1000.0f)) : 0;
+}
 uint64_t PathKey(const std::string& path) {
     uint64_t h = 1469598103934665603ull;
     for (const unsigned char c : path) { h ^= c; h *= 1099511628211ull; }
@@ -3336,12 +3347,15 @@ const Model* ModelOf(uintptr_t self, uint64_t key, uintptr_t model, uintptr_t sk
 // A body bent here earlier and not bent this frame: its buffer goes back to the game's pose
 // (a corpse is not posed again by the game, so it would keep the bend). raw: the buffer as
 // read this frame when haveRaw, else room to read it into.
-void PutBack(uintptr_t self, uintptr_t matrices, int count, float* raw, bool haveRaw) {
+bool Bent(uintptr_t self) {
     bool bent = false;
     AcquireSRWLockShared(&g_keptLock);
     if (const auto it = g_kept.find(self); it != g_kept.end()) bent = it->second.pose.written != 0;
     ReleaseSRWLockShared(&g_keptLock);
-    if (!bent || (!haveRaw && !SafeCopy(raw, reinterpret_cast<const void*>(matrices), size_t(count) * 64))) return;
+    return bent;
+}
+void PutBack(uintptr_t self, uintptr_t matrices, int count, float* raw, bool haveRaw) {
+    if (!Bent(self) || (!haveRaw && !SafeCopy(raw, reinterpret_cast<const void*>(matrices), size_t(count) * 64))) return;
     AcquireSRWLockExclusive(&g_keptLock);
     if (const auto it = g_kept.find(self); it != g_kept.end())
         if (const float* game = it->second.pose.Restore(raw, count))
@@ -3370,6 +3384,7 @@ void Limbs(uintptr_t self) {
     ReleaseSRWLockShared(&g_lock);
     if (!on || self == g_heroSelf.load(std::memory_order_relaxed)) return;
     if (known && k.kind == limbs::Kind::None && now - k.at < OtherRecheck) return;   // not a body (an item, a prop, a player)
+    if (known && k.kind != limbs::Kind::None && now < k.farUntil) { auto& b = limbs::Shared(); ++b.calls; ++b.outside; return; }   // far a moment ago (FarFor)
     // This hook's own cost, in the ten-second "Frame bodies:" line.
     auto& board = limbs::Shared();
     struct Timed {
@@ -3385,10 +3400,18 @@ void Limbs(uintptr_t self) {
     bool placed = false;
     if (known && k.kind != limbs::Kind::None && k.entity && ecs::Placement(k.entity, placement)) {
         placed = true;
-        if (!(Away(placement, centre) <= reach)) {
+        if (const float away = Away(placement, centre); !(away <= reach)) {
             ++board.outside;
-            uintptr_t model = 0, skeleton = 0, matrices = 0; int count = 0;
-            if (Buffer(self, model, skeleton, matrices, count)) PutBack(self, matrices, count, t_raw.data(), false);
+            // Left alone for a while; its pose read only when it was bent here (a body pushed, then left).
+            if (const ULONGLONG wait = FarFor(away / upm, radius)) {
+                AcquireSRWLockExclusive(&g_lock);
+                if (const auto it = g_known.find(self); it != g_known.end() && it->second.entity == k.entity) it->second.farUntil = now + wait;
+                ReleaseSRWLockExclusive(&g_lock);
+            }
+            if (Bent(self)) {
+                uintptr_t model = 0, skeleton = 0, matrices = 0; int count = 0;
+                if (Buffer(self, model, skeleton, matrices, count)) PutBack(self, matrices, count, t_raw.data(), false);
+            }
             return;
         }
     }

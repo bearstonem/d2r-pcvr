@@ -795,9 +795,10 @@ monster that runs or attacks does not lag behind it. Purely visual: where a
 monster stands, its hits and your attacks are unchanged. Up to six bodies
 move at once; one back on its animation with no weapon near for 1.5 s is let
 go. VR Settings > World > Pushable bodies (`[interactions] body_physics`)
-turns it off. A body beyond the radius costs only a look-up of its place: its
-model and pose are not read (a player lost 10-15 fps to them in Lut Gholein with
-frame generation, 2026-11-01). The log names each model's limbs once (`Frame bodies: <model>
+turns it off. A body beyond the radius costs only a look-up of its place, and is
+then left alone for as long as it would take to come within the radius closing at
+15 m/s (at most 2 s): each look is about fifteen guarded reads, each a system call
+(a player lost 10-15 fps to them in Lut Gholein with frame generation, 2026-11-01). The log names each model's limbs once (`Frame bodies: <model>
 - N limbs of M bones`), the first push each second, and a summary every ten
 seconds, ending with the skeleton hook's cost: its calls for bodies, those beyond
 the radius and its milliseconds a second.
