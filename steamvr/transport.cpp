@@ -2929,10 +2929,12 @@ void ReportBodies(ULONGLONG now) {
     auto& board=limbs::Shared();
     const unsigned posed=board.posed.exchange(0),bent=board.bent.exchange(0),refused=board.refused.exchange(0),learned=board.learned.exchange(0);
     const unsigned kept=board.kept.exchange(0),restored=board.restored.exchange(0);
+    const unsigned calls=board.calls.exchange(0),outside=board.outside.exchange(0);const uint64_t micros=board.micros.exchange(0);
     const unsigned pushes=std::exchange(bodyPushes,0u),most=std::exchange(bodyMost,0u),strikes=std::exchange(bodyStrikes,0u),slips=std::exchange(bodySlips,0u);
-    if(!posed&&!bent&&!pushes&&!learned)return;
-    char line[400];std::snprintf(line,sizeof line,"Frame bodies: ten seconds: poses posted=%u bent=%u refused=%u models learned=%u, not posed again by the game=%u, put back=%u; ragdolls most=%u now=%u, lifeless now=%u; pushes=%u hits=%u slipped through=%u",
-        posed,bent,refused,learned,kept,restored,most,bodyWorld?bodyWorld->Simulated():0u,bodyWorld?bodyWorld->Lifeless():0u,pushes,strikes,slips);
+    if(!posed&&!bent&&!pushes&&!learned&&!calls)return;
+    // The skeleton hook's cost: its calls for bodies, those beyond [bodies] radius, its time (owner 2026-11-01).
+    char line[480];std::snprintf(line,sizeof line,"Frame bodies: ten seconds: poses posted=%u bent=%u refused=%u models learned=%u, not posed again by the game=%u, put back=%u; ragdolls most=%u now=%u, lifeless now=%u; pushes=%u hits=%u slipped through=%u; hook %u calls, %u beyond the radius, %.2f ms a second",
+        posed,bent,refused,learned,kept,restored,most,bodyWorld?bodyWorld->Simulated():0u,bodyWorld?bodyWorld->Lifeless():0u,pushes,strikes,slips,calls,outside,double(micros)/10000.0);
     Say(line);
 }
 void StepBodies() {

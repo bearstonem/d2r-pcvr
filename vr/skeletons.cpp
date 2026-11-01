@@ -43,6 +43,7 @@
 #include "../steamvr/shapeshift_form.h"
 #include "../steamvr/head_shadow.h"
 #include "sigscan.h"
+#include <chrono>
 #include <memory>
 #include <unordered_map>
 #ifdef D2RVR_NATIVE_OPENXR
@@ -3224,14 +3225,18 @@ void Arms(uintptr_t self) {
 // so the physics always works from the animation.
 namespace bodies {
 namespace limbs = framevr::limbs;
-constexpr float Reach = 4.0f;          // metres around the player: the bodies posted
+// Metres around the player: the bodies posted ([bodies] radius, SetLimbs). A body farther away
+// costs only the look-up of its place (owner 2026-11-01: "limit the pushable bodies and physics
+// to only a set radius around the player"; a player lost 10-15 fps to them with frame generation).
+// 3 m: the hand's reach and the longest weapon, with a body's limbs out to the side.
+constexpr float DefaultRadius = 3.0f, MinRadius = 1.5f, MaxRadius = 8.0f;
 constexpr ULONGLONG Recheck = 250;     // ms between checks that an instance is still its entity's
 constexpr ULONGLONG OtherRecheck = 2000;
 constexpr size_t MaxKnown = 4096, MaxModels = 256;
 SRWLOCK g_lock = SRWLOCK_INIT;
 std::atomic<bool> g_live{false};       // g_on, read without the lock: most poses stop here
 bool g_on = false;
-float g_centre[3] = {}, g_upm = 0;
+float g_centre[3] = {}, g_upm = 0, g_radius = DefaultRadius;
 // Every skeleton met: what it is (players, items and props are Kind::None),
 // and its model's path as a key (every monster of a kind shares its limbs).
 struct Known { limbs::Kind kind = limbs::Kind::None; uint32_t entity = 0; uint64_t model = 0; ULONGLONG at = 0; bool form = false; };
@@ -3328,16 +3333,65 @@ const Model* ModelOf(uintptr_t self, uint64_t key, uintptr_t model, uintptr_t sk
     return result;
 }
 
+// A body bent here earlier and not bent this frame: its buffer goes back to the game's pose
+// (a corpse is not posed again by the game, so it would keep the bend). raw: the buffer as
+// read this frame when haveRaw, else room to read it into.
+void PutBack(uintptr_t self, uintptr_t matrices, int count, float* raw, bool haveRaw) {
+    bool bent = false;
+    AcquireSRWLockShared(&g_keptLock);
+    if (const auto it = g_kept.find(self); it != g_kept.end()) bent = it->second.pose.written != 0;
+    ReleaseSRWLockShared(&g_keptLock);
+    if (!bent || (!haveRaw && !SafeCopy(raw, reinterpret_cast<const void*>(matrices), size_t(count) * 64))) return;
+    AcquireSRWLockExclusive(&g_keptLock);
+    if (const auto it = g_kept.find(self); it != g_kept.end())
+        if (const float* game = it->second.pose.Restore(raw, count))
+            if (SafeWrite(reinterpret_cast<void*>(matrices), game, size_t(count) * 64)) ++limbs::Shared().restored;
+    ReleaseSRWLockExclusive(&g_keptLock);
+}
+// A skeleton instance's model, skeleton and pose buffer: false when they do not read.
+bool Buffer(uintptr_t self, uintptr_t& model, uintptr_t& skeleton, uintptr_t& matrices, int& count) {
+    uintptr_t worldPose = 0;
+    return Get(self + 0x08, &model) && Get(model + 0x08, &skeleton) && Get(self + 0x20, &worldPose) && Get(worldPose, &count) &&
+           count >= 2 && count <= limbs::MaxBones && Get(worldPose + 4, &matrices) && matrices;
+}
+float Away(const float placement[16], const float centre[3]) {
+    const float dx = placement[12] - centre[0], dz = placement[14] - centre[2];
+    return std::sqrt(dx * dx + dz * dz);
+}
+
 void Limbs(uintptr_t self) {
     if (!g_live.load(std::memory_order_relaxed)) return;
-    bool on = false; float centre[3]; float upm = 0;
+    bool on = false; float centre[3]; float upm = 0, radius = DefaultRadius;
     Known k; bool known = false;
     const ULONGLONG now = GetTickCount64();
     AcquireSRWLockShared(&g_lock);
-    on = g_on; memcpy(centre, g_centre, sizeof centre); upm = g_upm;
+    on = g_on; memcpy(centre, g_centre, sizeof centre); upm = g_upm; radius = g_radius;
     if (on) if (const auto it = g_known.find(self); it != g_known.end()) { k = it->second; known = true; }
     ReleaseSRWLockShared(&g_lock);
     if (!on || self == g_heroSelf.load(std::memory_order_relaxed)) return;
+    if (known && k.kind == limbs::Kind::None && now - k.at < OtherRecheck) return;   // not a body (an item, a prop, a player)
+    // This hook's own cost, in the ten-second "Frame bodies:" line.
+    auto& board = limbs::Shared();
+    struct Timed {
+        limbs::Board& board;
+        std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
+        ~Timed() { board.micros += uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - started).count()); }
+    } timed{board};
+    ++board.calls;
+    const float reach = radius * upm;
+    // A known body beyond the radius stops here, before its identity is checked again or its pose
+    // read: in a town most bodies are, and each would cost a look-up of its model and entity.
+    float placement[16];
+    bool placed = false;
+    if (known && k.kind != limbs::Kind::None && k.entity && ecs::Placement(k.entity, placement)) {
+        placed = true;
+        if (!(Away(placement, centre) <= reach)) {
+            ++board.outside;
+            uintptr_t model = 0, skeleton = 0, matrices = 0; int count = 0;
+            if (Buffer(self, model, skeleton, matrices, count)) PutBack(self, matrices, count, t_raw.data(), false);
+            return;
+        }
+    }
     // What the instance is: its model's path, rechecked now and then (an
     // instance's memory can be another model's later), its entity kept.
     if (!known || now - k.at >= (k.kind == limbs::Kind::None ? OtherRecheck : Recheck)) {
@@ -3350,6 +3404,7 @@ void Limbs(uintptr_t self) {
             next.model = PathKey(path);
         }
         if (next.kind != limbs::Kind::None && !ecs::Owner(self, known ? k.entity : 0, &next.entity)) next.kind = limbs::Kind::None;
+        if (next.entity != k.entity) placed = false;
         k = next;
         AcquireSRWLockExclusive(&g_lock);
         if (g_known.size() >= MaxKnown) g_known.clear();
@@ -3357,10 +3412,8 @@ void Limbs(uintptr_t self) {
         ReleaseSRWLockExclusive(&g_lock);
     }
     if (k.kind == limbs::Kind::None) return;
-    uintptr_t model = 0, skeleton = 0, worldPose = 0, matrices = 0; int count = 0;
-    if (!Get(self + 0x08, &model) || !Get(model + 0x08, &skeleton) || !Get(self + 0x20, &worldPose) || !Get(worldPose, &count) ||
-        count < 2 || count > limbs::MaxBones || !Get(worldPose + 4, &matrices) || !matrices) return;
-    auto& board = limbs::Shared();
+    uintptr_t model = 0, skeleton = 0, matrices = 0; int count = 0;
+    if (!Buffer(self, model, skeleton, matrices, count)) return;
     if (now - g_keptPruned > 2000) {
         AcquireSRWLockExclusive(&g_keptLock);
         g_keptPruned = now;
@@ -3370,23 +3423,12 @@ void Limbs(uintptr_t self) {
     auto& raw = t_raw;
     bool haveRaw = false;
     // Not bent this frame: a bent pose the game has not posed over goes back to the game's.
-    auto putBack = [&] {
-        bool bent = false;
-        AcquireSRWLockShared(&g_keptLock);
-        if (const auto it = g_kept.find(self); it != g_kept.end()) bent = it->second.pose.written != 0;
-        ReleaseSRWLockShared(&g_keptLock);
-        if (!bent || (!haveRaw && !SafeCopy(raw.data(), reinterpret_cast<const void*>(matrices), size_t(count) * 64))) return;
-        AcquireSRWLockExclusive(&g_keptLock);
-        if (const auto it = g_kept.find(self); it != g_kept.end())
-            if (const float* game = it->second.pose.Restore(raw.data(), count))
-                if (SafeWrite(reinterpret_cast<void*>(matrices), game, size_t(count) * 64)) ++board.restored;
-        ReleaseSRWLockExclusive(&g_keptLock);
-    };
-    float placement[16];
-    if (!ecs::Placement(k.entity, placement)) { putBack(); return; }
-    const float dx = placement[12] - centre[0], dz = placement[14] - centre[2], away = std::sqrt(dx * dx + dz * dz);
+    auto putBack = [&] { PutBack(self, matrices, count, raw.data(), haveRaw); };
+    if (!placed && !ecs::Placement(k.entity, placement)) { putBack(); return; }
+    const float away = Away(placement, centre);
     // Out of reach; or a druid's own form, drawn with a wolf's or bear's model where the player stands.
-    if (!(away <= Reach * upm) || (k.form && away < 0.3f * upm)) { putBack(); return; }
+    if (!(away <= reach)) { ++board.outside; putBack(); return; }
+    if (k.form && away < 0.3f * upm) { putBack(); return; }
     if (!SafeCopy(raw.data(), reinterpret_cast<const void*>(matrices), size_t(count) * 64)) return;
     haveRaw = true;
     // The game's own pose: what the buffer holds, unless it is the pose bent here last frame.
@@ -3419,11 +3461,14 @@ void Limbs(uintptr_t self) {
 }  // namespace
 
 #ifdef D2RVR_NATIVE_OPENXR
-void SetLimbs(bool on, const float centre[3], float unitsPerMetre) {
+void SetLimbs(bool on, const float centre[3], float unitsPerMetre, float radiusMetres) {
     on = on && centre && std::isfinite(centre[0] + centre[1] + centre[2]) && unitsPerMetre >= 1 && unitsPerMetre <= 12;
     AcquireSRWLockExclusive(&bodies::g_lock);
     bodies::g_on = on;
-    if (on) { memcpy(bodies::g_centre, centre, sizeof bodies::g_centre); bodies::g_upm = unitsPerMetre; }
+    if (on) {
+        memcpy(bodies::g_centre, centre, sizeof bodies::g_centre); bodies::g_upm = unitsPerMetre;
+        bodies::g_radius = std::isfinite(radiusMetres) ? std::clamp(radiusMetres, bodies::MinRadius, bodies::MaxRadius) : bodies::DefaultRadius;
+    }
     ReleaseSRWLockExclusive(&bodies::g_lock);
     bodies::g_live.store(on, std::memory_order_relaxed);
 }
