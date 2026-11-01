@@ -2084,6 +2084,9 @@ button (the log says which skill was not assigned). Both controllers pulse once
 when the cast is issued. Thresholds live in `shapeshift::Tuning`
 (`steamvr/shapeshift_gesture.h`); `shapeshift-gesture-test` walks both
 performances, lazy and partial versions, loot stooping and overhead swings.
+The skill picker and the hand wheel tag Werewolf and Werebear GESTURE on any
+slot, and the hand cue reads "Cross, bow, fling open" / "Hands high, slam
+down" while Weapon skill gestures is on.
 
 ### Paladin Blessed Hammer fist pump
 
@@ -2148,6 +2151,66 @@ unavailable. Thresholds live in `chargepunch::Tuning`
 (`steamvr/charge_gesture.h`); `charge-gesture-test` covers headings, holding
 out, re-loading, open and busy hands, slow reaches, half punches, the hammer's
 upward punch, chops, slashes, jabs from an extended arm, and arm-span scaling.
+
+### Paladin Holy Shield sign of the cross
+
+A Paladin casts Holy Shield by making the sign of the cross, while **VR
+Settings > VR > Weapon skill gestures** is on:
+
+- With either hand, trigger free, touch your forehead, then your chest, then
+  one shoulder and the other (left then right, or right then left).
+- Each touch is a brief pause: the hand slows below 1 m/s inside the spot.
+  A swing through the same places never counts, nor does a face wipe.
+- Up to 1 s between touches; one sign casts once, with a 1.5 s cooldown.
+
+The sign presses the controller button Holy Shield is assigned to (the skill
+must be on one of the ten slots; pressing still casts it). Mana, duration and
+the shield's glow stay native. The spots are head-relative boxes in
+`holycross::Tuning` (`steamvr/cross_gesture.h`); `cross-gesture-test` covers
+both shoulder orders, either hand, a flowing sign, the cooldown, wrong orders,
+a face wipe, fast swings through the spots and a session reset. The skill
+picker tags Holy Shield GESTURE on any slot ("Sign of the cross"). The log
+(`Frame holy shield:`) has a line per cast, per sign abandoned after the chest
+touch, and when the skill is unavailable.
+
+### Paladin Fist of the Heavens call
+
+A Paladin calls Fist of the Heavens with the weapon (right) arm, while **VR
+Settings > VR > Weapon skill gestures** is on:
+
+- Make a fist (hold the grip, trigger free) and hold the arm straight out in
+  front, raised about 45 degrees: the fist a little above your forehead. No
+  need to rest there: reaching the pose loads the call.
+- Bring the straight arm down, pivoting at the shoulder, and stop it about level
+  with your shoulder. The stop casts, or opening the fist at the end of the
+  swing.
+- The bolt falls on the monster the arm points at (the hands' 30-degree cone,
+  within the game's reach), whatever the Aim options; with none there, the
+  nearest monster in sight within 75 degrees of the arm; with none of those,
+  the game picks its own target. The scan reads the server's monsters; the
+  handed monster is found on the client by id among the hero's nearby rooms, or
+  else by place (the nearest live one within 2.5 cells). A room's units are
+  linked by Unit+0x160: the walk followed the hash link +0x158 before and nearly
+  every hand-off missed (Fist of the Heavens 30 of 34, 2026-11-01); this also
+  fixes the aim rules' unit hand-off (Charge, Leap Attack, Guided Arrow...).
+
+The arm must stay straight (70 % of its reach from the shoulder: 38 % of the
+calibrated arm span, 0.45-0.85 m, 0.62 m uncalibrated), start 25-70 degrees up
+and within 50 degrees of straight ahead, drop at least 22 degrees within 0.9 s
+reaching 0.9 m/s, and stop between 14 degrees above and 55 below level (slower than 0.8 m/s
+for 40 ms), or open the fist there once it has. Where a call ends varies by player: Cal's
+stopped near -25, the owner's at -36..-47 (2026-11-01). Carrying on past 65 degrees below
+level is a chop, and a bent elbow drops it. One call casts once; raise the arm again for the next. The
+call presses the slot the skill is on; mana, cast rate and the bolt stay
+native, and pressing the slot still casts it. While the skill is on a slot the
+monster scan runs (vrcam answers the call: `HeavensRequest` /
+`HeavensResolved`, then the slot is pressed, at most 120 ms later), and the
+pointed monster is handed to the game's target query for 500 ms (`RulesUnit`).
+Thresholds: `heavensfist::Tuning` (`steamvr/heavens_gesture.h`);
+`heavens-gesture-test`. Logs: `Frame heavens:` (the first casts, every 25th,
+any cast without an answer, abandoned calls with their angles) and
+`Frame heavens aim:` (per call: handed or the game's pick). The skill picker
+tags it GESTURE ("Raise, bring down").
 
 ### Ice Bolt visual height correction
 
