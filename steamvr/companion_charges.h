@@ -382,6 +382,16 @@ inline bool IsSkillUsableByCompanion(VirtualPlayerClass vclass, uint16_t skillId
             return false;
     }
 
+    // Continuous channeled stream spells require human player client packet buffers (ptClient / stream):
+    // Monster/hireling caster units (UnitType 1) do not have a ptClient; dispatching native srvdofunc
+    // for continuous channeled spells dereferences ptClient + 0x28 and crashes with
+    // EXCEPTION_ACCESS_VIOLATION reading address 0x0000000000000028 at RIP 0x140551B9E (Arctic Blast) or Inferno:
+    switch (skillId) {
+        case 41:  // Inferno
+        case 230: // Arctic Blast
+            return false;
+    }
+
     // Player pet and minion summoning skills require a human player client structure
     // (ptClient / CLIENTS_GetClientFromUnit) to track pets in the player's pet management table.
     // Monster/hireling caster units (UnitType 1) do not have a ptClient; dispatching native srvdofunc

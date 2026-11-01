@@ -220,7 +220,7 @@ inline std::vector<MercenarySkillBadge> CollectMercenarySkillBadges(
 
         for (const auto& slot : slots) {
             for (uint16_t sId : ChargeCandidateSkills) {
-                if (!companionai::IsSkillUsableByCompanion(vclass, sId)) {
+                if (sId == 0 || companionai::IsSkillPassive(sId)) {
                     continue;
                 }
                 for (uint8_t lvl : {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20}) {
@@ -229,7 +229,7 @@ inline std::vector<MercenarySkillBadge> CollectMercenarySkillBadges(
                     if (val > 0) {
                         const uint8_t cur = static_cast<uint8_t>(val & 0xFF);
                         const uint8_t maxC = static_cast<uint8_t>((val >> 8) & 0xFF);
-                        if (maxC > 0 && companionai::IsSkillUsableByCompanion(vclass, sId)) {
+                        if (maxC > 0) {
                             bool exists = false;
                             for (auto& b : badges) {
                                 if (b.skillId == sId && b.type == SkillBadgeType::ChargedSkill) {

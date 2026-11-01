@@ -239,7 +239,78 @@ int main() {
         }
         assert(foundPreHydra);
 
-        std::printf("  [PASS] Test 4: CollectMercenarySkillBadges (with dynamic localized names and pre-scanned charges)\n");
+        // Case F: Item with Blood Golem (85) charges (Bloodmoon) & Arctic Blast (230) oskill (Frostwind) on Act 5 Barbarian
+        constexpr uintptr_t itemBloodmoon = 0x2001;
+        constexpr uintptr_t itemFrostwind = 0x2002;
+        std::map<std::tuple<uintptr_t, int, int>, int32_t> barbGearStats;
+        // Bloodmoon in mainhand (slot 4): Level 15 Blood Golem charges (3/3)
+        const uint16_t paramBloodGolem = PackChargedSkillParam(85, 15);
+        const int32_t valBloodGolem = PackChargedSkillValue(3, 3);
+        barbGearStats[{itemBloodmoon, 204, static_cast<int>(paramBloodGolem)}] = valBloodGolem;
+
+        // Frostwind in offhand (slot 5): +14 to Arctic Blast (Oskill Stat 97, Skill 230)
+        barbGearStats[{itemFrostwind, 97, 230}] = 14;
+
+        const std::array<EquippedItemSlot, 2> barbSlots = {{
+            { 201, 4, itemBloodmoon },
+            { 202, 5, itemFrostwind }
+        }};
+
+        auto getBarbStat = [&](uintptr_t unit, int stat, int param) -> int32_t {
+            auto it = barbGearStats.find({unit, stat, param});
+            return (it != barbGearStats.end()) ? it->second : 0;
+        };
+
+        auto getBarbSkillName = [](int id) -> std::string {
+            if (id == 85) return "Golem de sangre";
+            if (id == 230) return "Explosion artica";
+            return "";
+        };
+
+        // Fallback standalone probe (empty preDiscoveredCharges):
+        const auto barbBadges = CollectMercenarySkillBadges(VirtualPlayerClass::Barbarian, barbSlots, getBarbStat, getBarbSkillName);
+        assert(barbBadges.size() == 2);
+        bool foundBloodGolem = false;
+        bool foundArcticBlast = false;
+        for (const auto& b : barbBadges) {
+            if (b.skillId == 85) {
+                assert(b.type == SkillBadgeType::ChargedSkill);
+                assert(b.level == 15);
+                assert(b.currentCharges == 3);
+                assert(b.maxCharges == 3);
+                assert(b.itemId == 201);
+                assert(std::strcmp(b.skillName, "Golem de sangre") == 0);
+                foundBloodGolem = true;
+            } else if (b.skillId == 230) {
+                assert(b.type == SkillBadgeType::Oskill);
+                assert(b.level == 14);
+                assert(b.itemId == 202);
+                assert(std::strcmp(b.skillName, "Explosion artica") == 0);
+                foundArcticBlast = true;
+            }
+        }
+        assert(foundBloodGolem);
+        assert(foundArcticBlast);
+
+        // Pre-discovered path: passing preDiscoveredCharges with Blood Golem
+        std::vector<CompanionChargedSkill> preBarbCharges;
+        CompanionChargedSkill bloodGolemCharge{};
+        bloodGolemCharge.itemId = 201;
+        bloodGolemCharge.bodyLocation = 4;
+        bloodGolemCharge.skillId = 85;
+        bloodGolemCharge.level = 15;
+        bloodGolemCharge.currentCharges = 3;
+        bloodGolemCharge.maxCharges = 3;
+        preBarbCharges.push_back(bloodGolemCharge);
+
+        const auto barbBadgesPre = CollectMercenarySkillBadges(VirtualPlayerClass::Barbarian, barbSlots, getBarbStat, getBarbSkillName, preBarbCharges);
+        assert(barbBadgesPre.size() == 2);
+
+        // Verify that neither Blood Golem (summon) nor Arctic Blast (channeled) is usable for combat casting
+        assert(!IsSkillUsableByCompanion(VirtualPlayerClass::Barbarian, 85));
+        assert(!IsSkillUsableByCompanion(VirtualPlayerClass::Barbarian, 230));
+
+        std::printf("  [PASS] Test 4: CollectMercenarySkillBadges (with dynamic localized names, pre-scanned charges, and Blood Golem/Arctic Blast safety)\n");
     }
 
     // TEST 5: PaintSkillsOverlay output with hover

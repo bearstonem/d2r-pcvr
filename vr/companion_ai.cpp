@@ -1090,6 +1090,9 @@ void ExecuteCompanionTacticalChargesInternal(
         auto prevCharges = std::move(s_cachedCharges);
         s_cachedCharges.clear();
 
+        // Discovered charged skills on equipment for UI badge presentation (includes summons & all active charges)
+        std::vector<framevr::companionai::CompanionChargedSkill> discoveredCharges;
+
         // Verified candidate charged skills in Diablo II (expanded for all classes, items, and assassin traps)
         static constexpr uint16_t CandidateSkills[] = {
             54,  // Teleport
@@ -1134,12 +1137,12 @@ void ExecuteCompanionTacticalChargesInternal(
                     else { skillId = s4 ? s4 : (p & 0xFF); lvl = l4 ? l4 : 1; }
                 }
 
-                if (skillId > 0 && maxC > 0 && framevr::companionai::IsSkillUsableByCompanion(vclass, skillId)) {
-                    bool already = false;
-                    for (const auto& cs : s_cachedCharges) {
-                        if (cs.itemId == slot.itemId && cs.skillId == skillId) { already = true; break; }
+                if (skillId > 0 && maxC > 0 && !framevr::companionai::IsSkillPassive(skillId)) {
+                    bool alreadyDiscovered = false;
+                    for (const auto& cs : discoveredCharges) {
+                        if (cs.itemId == slot.itemId && cs.skillId == skillId) { alreadyDiscovered = true; break; }
                     }
-                    if (!already) {
+                    if (!alreadyDiscovered) {
                         framevr::companionai::CompanionChargedSkill cSkillObj{};
                         cSkillObj.itemId = slot.itemId;
                         cSkillObj.bodyLocation = slot.bodyLocation;
@@ -1154,14 +1157,19 @@ void ExecuteCompanionTacticalChargesInternal(
                                 break;
                             }
                         }
-                        s_cachedCharges.push_back(cSkillObj);
+                        discoveredCharges.push_back(cSkillObj);
+
+                        // Only add to AI combat casting rotation if the skill can be safely executed by the companion
+                        if (framevr::companionai::IsSkillUsableByCompanion(vclass, skillId)) {
+                            s_cachedCharges.push_back(cSkillObj);
+                        }
                     }
                 }
             };
 
             // Targeted candidate skill probe (Levels 1..25 and 30,33 with early exit per skill)
             for (uint16_t cSkill : CandidateSkills) {
-                if (!framevr::companionai::IsSkillUsableByCompanion(vclass, cSkill)) {
+                if (framevr::companionai::IsSkillPassive(cSkill)) {
                     continue;
                 }
 
@@ -1192,7 +1200,7 @@ void ExecuteCompanionTacticalChargesInternal(
             }
         }
 
-        // Update live mercenary UI badges (passing preDiscoveredCharges to avoid re-scanning)
+        // Update live mercenary UI badges (passing discoveredCharges to include all valid charges)
         // Localized skill name resolution (nativeui::SkillName) is performed on the UI thread
         // when the mercenary inventory panel is open, preserving thread safety.
         auto newBadges = framevr::companionui::CollectMercenarySkillBadges(
@@ -1202,7 +1210,7 @@ void ExecuteCompanionTacticalChargesInternal(
                 return statFn(itm, st, pr);
             },
             nullptr,
-            s_cachedCharges
+            discoveredCharges
         );
 
         // Integrate active non-passive equipment skills (VirtualClassSkill STAT 107 & Oskill STAT 97)
@@ -1401,7 +1409,8 @@ void ExecuteCompanionTacticalChargesInternal(
     const auto decision = framevr::companionai::SelectBestTacticalCharge(
         s_cachedCharges, sensors, true, consumeCharges);
 
-    if (!decision.shouldCast || decision.kind == framevr::companionai::TacticalSkillKind::Summon) {
+    if (!decision.shouldCast || decision.kind == framevr::companionai::TacticalSkillKind::Summon ||
+        !framevr::companionai::IsSkillUsableByCompanion(vclass, decision.skillId)) {
         static uint64_t s_lastNoCastLogMs = 0;
         if (sensors.isCombatActive && nowMs - s_lastNoCastLogMs > 5000) {
             s_lastNoCastLogMs = nowMs;
