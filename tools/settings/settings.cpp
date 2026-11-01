@@ -317,7 +317,8 @@ std::vector<Item> g_items = {
 #if D2RVR_FIRST_PERSON
     Group(L"F3  First person"),
     Slider(L"camera", L"near", L"Near clip (hides the hero's head)", 0, 5, 0.1f, 1.5f,
-           L"Nothing closer than this is drawn: hides the hero's own head and hair. World units, about 0.24 m each."),
+           L"Nothing closer than this is drawn: hides the hero's own head and hair. World units, about 0.24 m each. "
+           L"In F4 with \"Hide the hero's head\" on, the head's own cut (about 11 cm) is used when it is farther."),
     Toggle(L"camera", L"height_auto", L"Eye height from the hero's class", 1,
            L"First person: the eyes at the hero's own height, taken from the model (the sorceress is the shortest, "
            L"the druid the tallest). The world's scale follows it."),
@@ -372,7 +373,9 @@ std::vector<Item> g_items = {
     // The arms follow the controllers in VR view F4 and the game's animation in every other ([arms] mode is gone from here).
     Only(kVr, Group(L"Arms (F4: the body follows yours)")),
     Toggle(L"arms", L"hide_head", L"Hide the hero's head and neck", 0,
-           L"Shrinks the hero's head and neck away, for a camera right at the eyes: looking down shows the chest. "
+           L"Hides the hero's head and neck from your eyes, for a camera right at the eyes: looking down shows the chest. "
+           L"In F4 his shadow keeps the head: instead, nothing nearer than about 11 cm in front of your eyes is drawn "
+           L"(13 looking up, 3 looking down). [arms] head_shadow=0: the head shrinks away, the shadow headless. "
            L"Keep \"Camera ahead / behind\" at 0 then - moved ahead, the camera leaves the hands out of reach."),
     Needs(L"arms", L"mode", 2, Slider(L"arms", L"scale", L"Arm length (scale)", 0.3f, 3, 0.05f, 1, L"Arm reach on top of the hero-to-your-height ratio.")),
     Needs(L"arms", L"mode", 2, Slider(L"arms", L"up", L"Hands up (+) / down (-), cm", -40, 40, 1, 0)),
