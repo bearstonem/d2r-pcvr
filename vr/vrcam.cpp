@@ -3529,11 +3529,11 @@ bool HeadHeading(float& gx, float& gy) {
 std::atomic<int> g_unitSkill{-1};
 std::atomic<uint32_t> g_unitId{0};
 // Where that monster stood (grid cells) when handed: the scan reads the server's
-// units, whose ids the client's units need not share (2026-11-01: every Fist of
-// the Heavens hand-off missed by id), so the client's unit is also found by place.
+// units; the client's unit is found by the same id, else by place (2026-11-01:
+// nearly every hand-off missed - the room walk followed the hash link, see ClientMonster).
 std::atomic<float> g_unitX{-1.f},g_unitY{-1.f};
 // x,y (grid cells, -1 none): no client monster with this id, the nearest live one
-// within ClientNearCells of there (the server and client ids can differ).
+// within ClientNearCells of there.
 namespace worldobj { uintptr_t ClientMonster(uint32_t id,float x=-1.f,float y=-1.f); }
 std::atomic<ULONGLONG> g_unitAt{0};
 std::atomic<int> g_unitButton{-1};
@@ -8643,8 +8643,12 @@ void Gather() {
 }
 
 // The aim rules: the game's own client unit of a monster, by its id (the target
-// lock knows the server's), from the rooms near the hero - the walk above, for
-// monsters (type 1) still standing. The game thread. 0: not found.
+// lock knows the server's), from the rooms near the hero, for monsters (type 1)
+// still standing; else, with x,y, the nearest live one within ClientNearCells of
+// there. A room's units are linked by Unit+0x160 (steamvr/sewer_interaction.h,
+// checked against the game's code); +0x158 is the hash-list link: walked from a
+// room's first unit it visits a few unrelated units, and until 2026-11-01 nearly
+// every hand-off missed (Fist of the Heavens: 30 of 34). The game thread. 0: not found.
 uintptr_t ClientMonster(uint32_t id, float x, float y) {
     if (!id) return 0;
     uintptr_t hero = 0, path = 0, room = 0, nearRooms = 0;
@@ -8663,27 +8667,37 @@ uintptr_t ClientMonster(uint32_t id, float x, float y) {
     int monsters = 0;
     uintptr_t nearest = 0;
     float nearestCells = 2.5f;   // ClientNearCells: the server's place and the client's agree within a cell or two
+    float closest = -1;          // the nearest live monster at any distance, for the log
     for (uint32_t r = 0; r < nNear; ++r) {
         uintptr_t rm = 0, u = 0;
         if (!Rd(nearRooms + r * 8, &rm) || !Rd(rm + 0xA8, &u)) continue;
         for (int k = 0; u && k < 512; ++k) {
             uint32_t header[4] = {};   // type, class, id, mode
             uintptr_t next = 0;
-            Rd(u, &header); Rd(u + 0x158, &next);
+            Rd(u, &header); Rd(u + 0x160, &next);   // the room's next unit
             if (header[0] == 1 && header[2] == id && header[3] != 0 && header[3] != 12) return u;
             if (x >= 0 && header[0] == 1 && header[3] != 0 && header[3] != 12) {
                 uintptr_t path = 0; uint32_t at[2] = {};
                 if (Rd(u + 0x38, &path) && path > 0x10000 && Rd(path, &at)) {
                     const float d = std::hypot(at[0] / 65536.f - x, at[1] / 65536.f - y);
                     if (d < nearestCells) { nearestCells = d; nearest = u; }
+                    if (closest < 0 || d < closest) closest = d;
                 }
             }
-            if (header[0] == 1 && tell && monsters++ < 8) snprintf(seen + strlen(seen), sizeof seen - strlen(seen), " %u/m%u", header[2], header[3]);
+            if (header[0] == 1 && monsters++ < 8 && tell) snprintf(seen + strlen(seen), sizeof seen - strlen(seen), " %u/m%u", header[2], header[3]);
             u = next;
         }
     }
-    if (nearest) return nearest;   // the same monster by place (its client id differs)
-    if (tell) { told = GetTickCount64(); LogF("Frame aim rules: monster id %u not among the hero's rooms (%u rooms, %d monsters:%s)", id, nNear, monsters, seen); }
+    if (nearest) {   // the same monster by place (no client unit with its id)
+        if (tell) { told = GetTickCount64(); LogF("Frame aim rules: monster id %u found by place, %.1f cells off (no client unit with that id; %d monsters near)", id, nearestCells, monsters); }
+        return nearest;
+    }
+    if (tell) {
+        told = GetTickCount64();
+        if (x >= 0) LogF("Frame aim rules: monster id %u at (%.1f, %.1f) not among the hero's rooms (%u rooms, %d monsters:%s; the nearest live one %.1f cells away)",
+                         id, x, y, nNear, monsters, seen, closest);
+        else LogF("Frame aim rules: monster id %u not among the hero's rooms (%u rooms, %d monsters:%s)", id, nNear, monsters, seen);
+    }
     return 0;
 }
 
