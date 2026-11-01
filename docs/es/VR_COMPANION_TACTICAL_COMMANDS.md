@@ -9,7 +9,7 @@ En *Diablo II: Resurrected* de escritorio, el jugador no dispone de ningún meca
 En Realidad Virtual (VR), `d2r-pcvr` permite dar órdenes tácticas naturales mediante gestos de mano a través de la **Máquina de Estados Explícita de Órdenes Tácticas** (`TacticalOrderController` en [`steamvr/companion_ai.h`](../../steamvr/companion_ai.h) y [`vr/companion_ai.cpp`](../../vr/companion_ai.cpp)):
 - **Avanzar y Mantener Posición (`MoveAndHold`):** Apunta al mercenario, cierra **Grip (Agarre)** y aprieta **Gatillo**; apunta a un punto del suelo y suelta para ordenar al mercenario que camine hasta esa coordenada y mantenga la posición sin oscilar ni regresar hacia ti.
 - **Priorizar Enemigo (`PrioritizeEnemy`):** Engancha al mercenario con **Grip + Gatillo**, apunta directamente a un monstruo hostil y suelta para concentrar el ataque sobre ese objetivo respetando el arquetipo del mercenario (`MeleeVanguard` cierra a cuerpo a cuerpo; `RangedOverwatch` ataca desde una ventana óptima de `10.0` sub-casillas).
-- **Mantener Posición Defensiva (`DefensiveHold`):** Levanta la palma abierta hacia delante durante `400 ms` para fijar inmediatamente al mercenario en su posición actual como torreta o vanguardia defensiva.
+- **Mantener Posición Defensiva (`DefensiveHold`):** Con **Grip** cerrado sobre el mercenario mientras te sigue, haz un clic rápido de **Gatillo** para fijar inmediatamente al mercenario en su posición actual como torreta o vanguardia defensiva.
 - **Reagrupar / Cancelar Orden (`ExplicitCancel`):** Mientras una orden esté activa, apunta directamente al propio mercenario (`<= 2.5` sub-casillas) y pulsa **Grip + Gatillo** para cancelar la orden y volver al seguimiento normal en formación.
 
 ---
@@ -98,9 +98,8 @@ Para eliminar por completo los falsos positivos al usar el botón `Grip` en otra
      - Si te estaba siguiendo normalmente (`Idle` / `Cancelled`): activa `DefensiveHold` clavándolo en su posición actual.
   3. **Coordenada del Suelo (`MoveAndHold`):** Soltar dentro de rango emite `MoveAndHold` hacia `{ gx, gy }`. Si el pathfinder A* se detiene junto a un muro u obstáculo dentro de `NearObstacleArrivalTolerance` (`4.5` sub-casillas), adopta esa posición como `Arrived`. Si se suelta fuera de rango (>16m), se rechaza con doble pulso háptico de error y audio de *"Imposible"*.
 
-### 4.2. Palma Abierta para Mantener Posición (`DefensiveHold` tras `400 ms`)
-- **Filtro Cinemático:** Mano abierta (`grip < 0.2f && trigger < 0.2f`), dedos apuntando hacia arriba (`handUp.y > 0.82f`) y normal de la palma alineada con la vista del jugador (`dot > 0.70f`) mantenida durante `400 ms`.
-- **Acción:** Emite `DefensiveHold` anclado en la coordenada actual del mercenario (`compPos`).
+### 4.2. Sin Palma Abierta
+La palma abierta levantada durante `400 ms` también emitía `DefensiveHold`. Se eliminó (2026-11-01): no necesitaba ningún botón, así que saltaba durante otros gestos (tres veces en una sesión de Paladín), y `Grip` + Gatillo sobre el mercenario da la misma orden a propósito.
 
 ---
 

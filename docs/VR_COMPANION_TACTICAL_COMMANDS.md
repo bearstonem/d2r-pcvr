@@ -9,7 +9,7 @@ In flat *Diablo II: Resurrected*, mercenaries are passive followers with no mech
 In Virtual Reality (VR), `d2r-pcvr` gives players natural hand-gesture agency over their companion through the **Explicit Tactical Command State Machine** (`TacticalOrderController` in [`steamvr/companion_ai.h`](../steamvr/companion_ai.h) and [`vr/companion_ai.cpp`](../vr/companion_ai.cpp)). To avoid accidental triggers during combat, inventory interactions or the Paladin's grip gestures, orders take **Grip + Trigger** on one hand with a **Select Companion First (Grip on it -> Trigger -> Aim -> Release)** flow ([`steamvr/tactical_chord.h`](../steamvr/tactical_chord.h)):
 - **Move & Hold (`MoveAndHold`):** Point at your companion (`<= 3.5` sub-tiles or 3D body cylinder), close **Grip**, then pull **Trigger** to latch; redirect your aim to a walkable ground coordinate and let go of **Trigger** (or **Grip**) to command the mercenary to walk there and hold position without oscillating back toward the player.
 - **Focus Enemy (`PrioritizeEnemy`):** Latch onto your companion with **Grip + Trigger**, aim directly at a hostile monster (`<= 2.5` sub-tiles or 3D cylinder), and let go to focus attacks on that target using archetype-aware engagement distances (`MeleeVanguard` closes to melee; `RangedOverwatch` engages from a `10.0`-sub-tile stand-off window).
-- **Defensive Hold (`DefensiveHold`):** Hold an upright open palm facing forward for `400 ms` (or quick-click **Trigger** with **Grip** held on the companion while following normally) to freeze the mercenary at their current position as a defensive turret/vanguard.
+- **Defensive Hold (`DefensiveHold`):** Quick-click **Trigger** with **Grip** held on the companion while following normally to freeze the mercenary at their current position as a defensive turret/vanguard.
 - **Regroup / Cancel (`ExplicitCancel`):** Point at the companion itself (`<= 3.5` sub-tiles or 3D body cylinder) and click **Grip + Trigger** while an order is active to cancel the hold and return to normal squad follow.
 
 ---
@@ -99,9 +99,8 @@ To prevent accidental tactical commands when using the Grip button for belt poti
      - If following normally (`Idle` / `Cancelled`): issues `DefensiveHold` at the companion's current coordinates.
   3. **Ground Coordinate (`MoveAndHold`):** Releasing on walkable ground within range issues `MoveAndHold` at `{ gx, gy }`. If native A* stops at an obstacle edge within `NearObstacleArrivalTolerance` (`4.5` sub-tiles), it snaps to `Arrived`. If released beyond the 16m leash, the command is rejected with an error haptic buzz and *"Impossible"* vocal feedback.
 
-### 4.2. Open-Palm Defensive Hold (`400 ms` Hold)
-- **Posture Filter:** Hand open (`grip < 0.2f && trigger < 0.2f`), fingers pointing upward (`handUp.y > 0.82f`), and palm normal aligned with headset forward vector (`dot > 0.70f`) sustained for `400 ms`.
-- **Action:** Issues `DefensiveHold` anchored at the companion's current sub-tile position (`compPos`).
+### 4.2. No Open-Palm Hold
+An upright open palm held for `400 ms` used to issue `DefensiveHold` as well. It was removed (2026-11-01): it needed no button, so it fired during other gestures (three times in one Paladin session), and Grip + Trigger on the companion gives the same order on purpose.
 
 ---
 

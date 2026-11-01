@@ -22,7 +22,7 @@ flowchart TD
         S1["Pose del Visor (HMD) y Cono Visual 110° / Punto Ciego 250°"]
         S2["Salud del Mercenario, Sala (D2RoomStrc) y Camino (D2DynamicPathStrc)"]
         S3["Perfil de Arquetipo: MeleeVanguard vs RangedOverwatch"]
-        S4["Entrada Gestual VR: Rayo de Apuntado y Palma Abierta"]
+        S4["Entrada Gestual VR: Rayo de Apuntado, Grip + Gatillo"]
     end
 
     subgraph L2["Capa 2: Árbitro Jerárquico de Intención (Una Única Intención Activa)"]
