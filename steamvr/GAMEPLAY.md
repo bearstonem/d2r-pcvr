@@ -380,7 +380,11 @@ while an item is on the cursor (log: `Frame leather: put away over the left shou
 small stone **Advanced Stats** button (three gold bars), the same one the room
 panel shows when the leather is off: laser + trigger sends the game one View
 press, a button VR controllers lack (log:
-`Frame panels: Advanced Stats button - View sent to the game`). Right B goes to the game first,
+`Frame panels: Advanced Stats button - View sent to the game`). On the Character page, offline,
+a stone **Reset Skills & Stats** button sits in the lower right: one pull asks **Confirm?**, a
+second has the game reset every stat and skill point. The mod makes one Token of Absolution in a
+free inventory square and uses it at once, so the game's own reset runs; a token the game does not
+consume (a Classic character) is removed again (log: `Frame respec: ...`). Right B goes to the game first,
 so a cube, a dialog or the options pages still step back one at a time; a press
 the game leaves unanswered for a quarter of a second, with only the menu and
 its pages open and nothing on the cursor, closes the menu (the log:

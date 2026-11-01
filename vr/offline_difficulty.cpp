@@ -59,6 +59,7 @@ void Install() {
         framevr::logging::Write("Frame offline difficulty: native Players 1-8 scaling adapter ready; offline VR only");
     }
 }
+bool Offline(){return mode&&mode()==0;}
 void Report() {
     static unsigned reported=0;
     const auto seen=observed.load();
