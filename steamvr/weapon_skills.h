@@ -5,7 +5,7 @@
 #include <string_view>
 
 namespace framevr::weaponskills {
-inline constexpr int Attack=0,Throw=2,Smite=97,Charge=107,BlessedHammer=112,Strafe=26,DoubleThrow=140,Werewolf=223,Werebear=228;
+inline constexpr int Attack=0,Throw=2,Smite=97,Charge=107,BlessedHammer=112,HolyShield=117,FistOfHeavens=121,Strafe=26,DoubleThrow=140,Werewolf=223,Werebear=228;
 enum class Action { Native, Arrow, Volley, Shield };
 inline Action Classify(int skill) {
     switch(skill) {

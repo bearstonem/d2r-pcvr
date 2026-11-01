@@ -3528,6 +3528,13 @@ bool HeadHeading(float& gx, float& gy) {
 // the button whose cast handed it.
 std::atomic<int> g_unitSkill{-1};
 std::atomic<uint32_t> g_unitId{0};
+// Where that monster stood (grid cells) when handed: the scan reads the server's
+// units, whose ids the client's units need not share (2026-11-01: every Fist of
+// the Heavens hand-off missed by id), so the client's unit is also found by place.
+std::atomic<float> g_unitX{-1.f},g_unitY{-1.f};
+// x,y (grid cells, -1 none): no client monster with this id, the nearest live one
+// within ClientNearCells of there (the server and client ids can differ).
+namespace worldobj { uintptr_t ClientMonster(uint32_t id,float x=-1.f,float y=-1.f); }
 std::atomic<ULONGLONG> g_unitAt{0};
 std::atomic<int> g_unitButton{-1};
 namespace aimtargets {
@@ -3785,7 +3792,7 @@ bool Wanted() {
     const bool tacticalActive = companionai::IsTacticalCommandsEnabled();
     return g_enabled.load() && g_inWorld.load() &&
         (TargetHighlightOn() || SpellsLocked() || BowSkillsLocked() ||
-         GroundAimMode() == 2 || tacticalActive);
+         GroundAimMode() == 2 || tacticalActive || framevr::HeavensArmed());
 }
 void Tick() {
     const bool wanted = Wanted();
@@ -3807,7 +3814,9 @@ void Tick() {
     // From the settings alone, so loading screens and menus don't flip it.
     // Aim follows your view is not counted (aimrules::Any): it only changes which
     // monster the picks take, so with nothing using them it has nothing to do.
-    const bool resting = !TargetHighlightOn() && !framevr::aimrules::Any(aimtargets::Options()) && !companionai::IsTacticalCommandsEnabled();
+    // Fist of the Heavens on a slot with gestures on: its call hands the game the
+    // pointed monster, so the scan runs and the hand-off is not reset.
+    const bool resting = !TargetHighlightOn() && !framevr::aimrules::Any(aimtargets::Options()) && !companionai::IsTacticalCommandsEnabled() && !framevr::HeavensArmed();
     static bool rested = false;
     if (resting != rested) {
         rested = resting;
@@ -3817,6 +3826,40 @@ void Tick() {
     const auto s = targetlock::Get();
     const bool fresh = wanted && !gamestate::MenuOpen() && s.at && GetTickCount64() - s.at <= 500;
     aimtargets::Tick(fresh ? &s : nullptr);
+    // A Fist of the Heavens call (heavens_gesture.h): the monster nearest the
+    // weapon arm's line, in the same cone and reach as the hands' picks, is
+    // handed to the game's target query for the skill (RulesUnit). None: no
+    // hand-off, the game picks its own target. Whatever the Aim options.
+    if (const uint32_t request = framevr::HeavensRequest()) {
+        int i = -1;
+        bool wide = false;
+        float o[3], d[3];
+        if (fresh && HandRay(o, d, true, 0) && std::hypot(d[0], d[2]) > 1e-3f) {
+            i = framevr::targetcone::Pick(s.targets, s.count, s.heroX, s.heroY, d[0], d[2], 0);
+            // rev3 (Cal: close enemies but none further, the cast sounded and struck
+            // nothing): none in the arm's 30-degree cone: the nearest one in sight
+            // within 75 degrees of it, before leaving it to the game.
+            if (i < 0) {
+                float best = 1e9f;
+                for (int k = 0; k < s.count && k < framevr::targetcone::MaxTargets; ++k) {
+                    const auto& t = s.targets[k];
+                    const float dx = t.x - s.heroX, dy = t.y - s.heroY, dist = std::hypot(dx, dy);
+                    if (t.clear && framevr::aimreach::Within(dx, dy) && framevr::targetcone::AngleOff(dx, dy, d[0], d[2]) <= 75.f && dist < best) { best = dist; i = k; }
+                }
+                wide = i >= 0;
+            }
+        }
+        const uint32_t id = i >= 0 ? s.targets[i].id : 0;
+        if (id) {
+            g_unitId.store(id); g_unitX.store(s.targets[i].x); g_unitY.store(s.targets[i].y);
+            g_unitButton.store(-1); g_unitAt.store(GetTickCount64()); g_unitSkill.store(121);
+        }
+        framevr::HeavensResolved(request, id);
+        const uintptr_t client = id ? worldobj::ClientMonster(id, s.targets[i].x, s.targets[i].y) : 0;
+        LogF("Frame heavens aim: %s%s", !id ? (fresh ? "no monster near where the arm points: the game's own pick" : "no fresh monster scan: the game's own pick") :
+             wide ? "the nearest monster within 75 degrees of the arm is handed to the game" : "the monster the arm points at is handed to the game",
+             id ? (client ? " (found on the client)" : " (NOT found on the client: the game's own pick)") : "");
+    }
 }
 }
 
@@ -3899,10 +3942,9 @@ bool PointSpellAim(float playerX,float playerY,float& targetX,float& targetY) {
 // A skill handed the monster itself (aimrules::WantsUnit) is left to the game's
 // own target query, which HookSpellControllerTarget and HookSpellHoverTarget
 // answer with this monster for this skill.
-namespace worldobj { uintptr_t ClientMonster(uint32_t id); }
 uintptr_t RulesUnit(int skill) {
     if(skill!=g_unitSkill.load()||!framevr::aimrules::HandOffLive(skill,g_unitAt.load(),GetTickCount64()))return 0;
-    const uintptr_t unit=worldobj::ClientMonster(g_unitId.load());
+    const uintptr_t unit=worldobj::ClientMonster(g_unitId.load(),g_unitX.load(),g_unitY.load());
     static ULONGLONG told=0;
     if(GetTickCount64()-told>2000){told=GetTickCount64();LogF("Frame aim rules: skill %d handed monster id %u (%s)",skill,g_unitId.load(),unit?"found":"not near: the game's own pick");}
     return unit;
@@ -3982,10 +4024,10 @@ bool NativeSpellAimDecide(float playerX,float playerY,framevr::spellaim::Cast& c
     // Only when the game's own unit is found here (the game thread): otherwise
     // the rule's heading or spot below (Guided Arrow flew into a wall).
     if(c.skill>=0&&framevr::aimrules::WantsUnit(c.skill)&&aimtargets::SwitchOn(c)) {
-        if(aimtargets::Resolve(c.button,c.bow,c.use,mx,my,md,&g_note.source,&id)&&worldobj::ClientMonster(id)) {
+        if(aimtargets::Resolve(c.button,c.bow,c.use,mx,my,md,&g_note.source,&id)&&worldobj::ClientMonster(id,mx,my)) {
             // the button that cast it, while it is held: letting go drops the hand-off (aimtargets::Tick)
             const bool pressed=framevr::CastButtonHand()==c.button||framevr::HandSpellHeld(c.button);
-            g_unitId.store(id);g_unitButton.store(pressed?c.button:-1);g_unitAt.store(GetTickCount64());g_unitSkill.store(c.skill);
+            g_unitId.store(id);g_unitX.store(mx);g_unitY.store(my);g_unitButton.store(pressed?c.button:-1);g_unitAt.store(GetTickCount64());g_unitSkill.store(c.skill);
             g_note.unit="handed";g_note.id=id;g_note.distance=md;g_note.by="unit";
             cast.directed=false;return false;
         }
@@ -8603,7 +8645,7 @@ void Gather() {
 // The aim rules: the game's own client unit of a monster, by its id (the target
 // lock knows the server's), from the rooms near the hero - the walk above, for
 // monsters (type 1) still standing. The game thread. 0: not found.
-uintptr_t ClientMonster(uint32_t id) {
+uintptr_t ClientMonster(uint32_t id, float x, float y) {
     if (!id) return 0;
     uintptr_t hero = 0, path = 0, room = 0, nearRooms = 0;
     uint32_t nNear = 0;
@@ -8619,6 +8661,8 @@ uintptr_t ClientMonster(uint32_t id) {
     }
     char seen[160] = {};
     int monsters = 0;
+    uintptr_t nearest = 0;
+    float nearestCells = 2.5f;   // ClientNearCells: the server's place and the client's agree within a cell or two
     for (uint32_t r = 0; r < nNear; ++r) {
         uintptr_t rm = 0, u = 0;
         if (!Rd(nearRooms + r * 8, &rm) || !Rd(rm + 0xA8, &u)) continue;
@@ -8627,10 +8671,18 @@ uintptr_t ClientMonster(uint32_t id) {
             uintptr_t next = 0;
             Rd(u, &header); Rd(u + 0x158, &next);
             if (header[0] == 1 && header[2] == id && header[3] != 0 && header[3] != 12) return u;
+            if (x >= 0 && header[0] == 1 && header[3] != 0 && header[3] != 12) {
+                uintptr_t path = 0; uint32_t at[2] = {};
+                if (Rd(u + 0x38, &path) && path > 0x10000 && Rd(path, &at)) {
+                    const float d = std::hypot(at[0] / 65536.f - x, at[1] / 65536.f - y);
+                    if (d < nearestCells) { nearestCells = d; nearest = u; }
+                }
+            }
             if (header[0] == 1 && tell && monsters++ < 8) snprintf(seen + strlen(seen), sizeof seen - strlen(seen), " %u/m%u", header[2], header[3]);
             u = next;
         }
     }
+    if (nearest) return nearest;   // the same monster by place (its client id differs)
     if (tell) { told = GetTickCount64(); LogF("Frame aim rules: monster id %u not among the hero's rooms (%u rooms, %d monsters:%s)", id, nNear, monsters, seen); }
     return 0;
 }
