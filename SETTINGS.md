@@ -55,8 +55,9 @@ the headset-only ones.
 
 ![Body](screenshots/settings_02_body.png)
 
-- **Arms** (F4) - hide the hero's head, arm length, shift the hands up, forward
-  or sideways, how much the hands follow the camera.
+- **Arms** (F4) - hide the hero's head (from your eyes only: his shadow keeps
+  it), arm length, shift the hands up, forward or sideways, how much the hands
+  follow the camera.
 - **Body** - no game animation above the pelvis in F4 (your body drives it),
   legs stay under the body, how the hero turns to where you look.
 - **Hands** - the hands turn with the controllers; tilt, turn and roll offsets
