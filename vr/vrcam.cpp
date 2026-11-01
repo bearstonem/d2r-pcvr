@@ -132,6 +132,7 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "melee.h"
 #include "target_lock.h"
 #include "bow.h"
+#include "loot_beam_scan.h"
 #include "wall_cells.h"
 #include "prop_scan.h"
 #include "crossbow.h"
@@ -8866,6 +8867,10 @@ bool RingWanted() {
     return g_enabled.load() && g_inWorld.load() && !gamestate::MenuOpen() && AimOn(framevr::settings::LandingCircles) &&
         framevr::telegraph::AnyOn(framevr::telegraph::Current().Get(), GetTickCount64());
 }
+// Loot beams (same pass): while a Rare, Set or Unique item or a high rune lies near the hero.
+bool BeamWanted() {
+    return g_enabled.load() && g_inWorld.load() && !gamestate::MenuOpen() && lootscan::Latest(GetTickCount64()).count > 0;
+}
 
 // The frame stamp strip (D2R_DepthFog.fx PS_Stamp): whenever the camera turns
 // with the head, so that FlatVR can place its screen at the pose of the frame.
@@ -8961,7 +8966,7 @@ void OnFinishEffects(reshade::api::effect_runtime* rt, reshade::api::command_lis
     if (!g_tech[0].handle) { hud::SetPictureReady(false); return; }
     // Off while a menu is open: the fog lies over the whole picture, the
     // inventory and trade panels included, and darkened them.
-    const bool want = FogWanted() || g_skyPalette.load() >= 0 || g_arcaneSky.load() || CeilWanted() || HudWanted() || StampWanted() || hud::PictureWanted() || TableKeyWanted() || PhantomWanted() || BoneAxesWanted() || ShieldDebugWanted() || OutlineWanted() || RingWanted();
+    const bool want = FogWanted() || g_skyPalette.load() >= 0 || g_arcaneSky.load() || CeilWanted() || HudWanted() || StampWanted() || hud::PictureWanted() || TableKeyWanted() || PhantomWanted() || BoneAxesWanted() || ShieldDebugWanted() || OutlineWanted() || RingWanted() || BeamWanted();
     // The toolbar and the map are taken out of the game's picture to be drawn
     // back at their own size only while this effect runs, and is new enough to.
     {
@@ -9163,7 +9168,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
         renderscale::Frame(rt, s);
 #ifdef D2RVR_NATIVE_OPENXR
         const bool ownDepth=g_enabled.load()&&g_inWorld.load()&&framevr::Active()&&
-            (FogWanted()||g_set.skyOn.load()||g_arcaneSky.load()||CeilWanted()||TableKeyWanted()||OutlineWanted()||RingWanted());
+            (FogWanted()||g_set.skyOn.load()||g_arcaneSky.load()||CeilWanted()||TableKeyWanted()||OutlineWanted()||RingWanted()||BeamWanted());
         const bool turnDepth=g_enabled.load()&&g_inWorld.load()&&framevr::Active()&&framevr::TurnDepthWanted();
         framevr::scenedepth::Bind(rt,cl,ownDepth,turnDepth,stereoreplay::RightEffects(),s);
         SetBool(rt,"OwnDepth",ownDepth);
@@ -9625,10 +9630,13 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
         const bool view = sv[0].proj_ok && sv[0].axes_ok;
         const int count = OutlineWanted() && view ? aimtargets::ShownTargets(shown) : 0;
         const bool rings = RingWanted() && view;
+        const auto loot = lootscan::Latest(GetTickCount64());
+        const bool beams = BeamWanted() && view && loot.count > 0;   // the same snapshot as the beams drawn
         SetBool(rt, "OutlineOn", count > 0);
         SetBool(rt, "RingOn", rings);
+        SetBool(rt, "BeamOn", beams);
         float mob[2][4] = {};
-        if (count > 0 || rings) {
+        if (count > 0 || rings || beams) {
             for (int e = 0; e < 2; ++e) {
                 const SkyView& s = sv[e].axes_ok && sv[e].proj_ok ? sv[e] : sv[0];
                 char n[16];
@@ -9670,6 +9678,45 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
             // 2026-10-20, like the rest of the look (D2R_DepthFog.fx, kCircle*).
             constexpr float kCircleHeightM = 0.15f;
             SetFloat(rt, "RingFloorTol", kCircleHeightM * std::max(1.0f, ScaleHeight()) / UserEyeHeightM());
+        }
+        if (beams) {   // loot beams: each item's cell on the hero's floor, in its label colour
+            namespace lb = framevr::lootbeams;
+            const float upm = std::max(1.0f, ScaleHeight()) / UserEyeHeightM();   // world units per metre
+            const float floor = sv[0].hero[1], shear = framevr::coordinates::GroundShear;
+            // A new beam fades in over 0.4 s; the ids seen last frame keep their start.
+            static uint32_t ids[lb::MaxBeams] = {};
+            static uint64_t since[lb::MaxBeams] = {};
+            uint32_t nextIds[lb::MaxBeams] = {};
+            uint64_t nextSince[lb::MaxBeams] = {};
+            const uint64_t now = GetTickCount64();
+            for (size_t k = 0; k < lb::MaxBeams; ++k) {
+                float pos[4] = {}, col[4] = {1.0f, 1.0f, 1.0f, 0.0f};
+                if (k < loot.count) {
+                    const auto& item = loot.items[k];
+                    uint64_t start = now;
+                    for (size_t j = 0; j < lb::MaxBeams; ++j) if (ids[j] == item.id && since[j]) start = since[j];
+                    nextIds[k] = item.id; nextSince[k] = start;
+                    // The cell itself, as the breakables, landing circles and outlines place theirs
+                    // (2 x cell): headset 2026-10-31, half a cell added put the beam beside the item.
+                    pos[0] = float(item.x) * 2.0f + floor * shear - sv[0].hero[0];
+                    pos[1] = floor - sv[0].hero[1];
+                    pos[2] = float(item.y) * 2.0f + floor * shear - sv[0].hero[2];
+                    pos[3] = std::min(1.0f, float(now - start) / 400.0f);
+                    const auto rgb = lb::Colour(item.beam);
+                    col[0] = rgb.r / 255.0f; col[1] = rgb.g / 255.0f; col[2] = rgb.b / 255.0f;
+                    col[3] = float(item.id % 97u) * 0.37f;   // each its own shimmer phase
+                }
+                char n[16];
+                snprintf(n, sizeof n, "BeamPos%zu", k); SetFloats(rt, n, pos, 4);
+                snprintf(n, sizeof n, "BeamCol%zu", k); SetFloats(rt, n, col, 4);
+            }
+            std::copy(std::begin(nextIds), std::end(nextIds), ids);
+            std::copy(std::begin(nextSince), std::end(nextSince), since);
+            // core radius 0.18 m, 12 m tall, a floor glow of 0.7 m; painted within 0.3 m of the floor;
+            // w the brightness slider (VR Settings > Interface > Loot beams, 10% to 100%)
+            const float shape[4] = {0.18f * upm, 12.0f * upm, 0.7f * upm, loot.strength};
+            SetFloats(rt, "BeamShape", shape, 4);
+            SetFloat(rt, "BeamFloorTol", 0.3f * upm);
         }
         if (count > 0) {
             const float upm = std::max(1.0f, ScaleHeight()) / UserEyeHeightM();
@@ -10018,6 +10065,7 @@ DWORD WINAPI UpdateThread(void*) {
 #ifdef D2RVR_DEVELOPER
         talkstop::Tick(nowMs);      // how far the hero goes after a conversation opens (log)
 #endif
+        lootscan::Tick(nowMs);      // loot beams: the beam-worthy items lying near the hero
 #endif
 #ifdef D2RVR_NATIVE_OPENXR
         mobaim::Tick();    // the aim rules' targets: each hand's held out, and the one looked at
@@ -10368,6 +10416,12 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
     bowvr::Init(ctx);
     wallcells::Init(ctx);
     propscan::Init();
+    {   // loot beams: [loot] beams (master), rune_min (26 = Vex); the rarities are VR Settings (lootscan)
+        framevr::lootbeams::Wanted wanted;
+        wanted.highRune = std::clamp(int(IniF(L"loot", L"rune_min", float(framevr::lootbeams::DefaultHighRune))),
+                                     framevr::lootbeams::FirstRune, framevr::lootbeams::LastRune + 1);   // 34 = no runes
+        lootscan::Init(ctx, IniB(L"loot", L"beams", true), wanted);
+    }
 #endif
     if (HANDLE h = CreateThread(nullptr, 0, UpdateThread, nullptr, 0, &g_updateThreadId)) CloseHandle(h);
     if (!ctx->RegisterConsoleCommand("vrcam", &CmdVrcam, "vrcam - the camera: off / first person / third person (F12)"))

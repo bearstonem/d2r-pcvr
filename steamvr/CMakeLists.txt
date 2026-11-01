@@ -75,6 +75,7 @@ target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/settings_menu.cpp ${CMAKE_CURRENT_SO
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/native_belt.cpp ${ROOT}/vr/quick_items.cpp ${ROOT}/vr/melee_weapon.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/breakables.cpp ${ROOT}/vr/offline_difficulty.cpp ${ROOT}/vr/enemy_sight.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/target_lock.cpp)
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/loot_beam_scan.cpp)   # loot beams: the items on the floor that get one
 add_executable(map-sigs-test map_sigs_test.cpp)   # Map view = Full map: the patterns at their sites
 target_include_directories(map-sigs-test PRIVATE ${ROOT}/cleanroom/sigscan)
 add_executable(far-objects-test far_objects_test.cpp)   # big objects drawn farther: the reach, the setting, the game's test
@@ -179,6 +180,7 @@ add_executable(projectile-rules-test projectile_rules_test.cpp)
 add_executable(combat-rules-test combat_rules_test.cpp)
 add_executable(strike-skills-test strike_skills_test.cpp)
 add_executable(zeal-light-test zeal_light_test.cpp)
+add_executable(loot-beams-test loot_beams_test.cpp)
 add_executable(skill-usage-test skill_usage_test.cpp)
 add_executable(shield-guard-test shield_guard_test.cpp)
 add_executable(shapeshift-gesture-test shapeshift_gesture_test.cpp)
@@ -239,6 +241,8 @@ add_executable(depth-fog-test depth_fog_test.cpp)
 target_link_libraries(depth-fog-test PRIVATE d3d11 d3dcompiler framevr-runtime)
 add_executable(shield-debug-shader-test shield_debug_shader_test.cpp)
 target_link_libraries(shield-debug-shader-test PRIVATE d3d11 d3dcompiler framevr-runtime)
+add_executable(loot-beams-shader-test loot_beams_shader_test.cpp)
+target_link_libraries(loot-beams-shader-test PRIVATE d3d11 d3dcompiler framevr-runtime)
 add_executable(arcane-sky-test arcane_sky_test.cpp)
 target_link_libraries(arcane-sky-test PRIVATE d3d11 d3dcompiler framevr-runtime)
 add_executable(scene-depth-test scene_depth_test.cpp)
@@ -344,6 +348,8 @@ add_test(NAME depth-fog-test COMMAND depth-fog-test "${ROOT}/reshade/D2R_DepthFo
 set_tests_properties(depth-fog-test PROPERTIES TIMEOUT 30)
 add_test(NAME shield-debug-shader-test COMMAND shield-debug-shader-test "${ROOT}/reshade/D2R_DepthFog.fx")
 set_tests_properties(shield-debug-shader-test PROPERTIES TIMEOUT 30)
+add_test(NAME loot-beams-shader-test COMMAND loot-beams-shader-test "${ROOT}/reshade/D2R_DepthFog.fx")
+set_tests_properties(loot-beams-shader-test PROPERTIES TIMEOUT 30)
 add_test(NAME arcane-sky-test COMMAND arcane-sky-test "${ROOT}/reshade/D2R_DepthFog.fx")
 set_tests_properties(arcane-sky-test PROPERTIES TIMEOUT 30)
 add_test(NAME light-bounds-test COMMAND light-bounds-test)
@@ -352,7 +358,7 @@ foreach(test_target IN ITEMS memory-test biome-list-test hook-metrics-test activ
     gameplay-test weapon-skills-test quick-cast-test hand-controls-test elemental-hands-test skill-pad-test interact-press-test sewer-interaction-test notice-card-test mod-layout-test spell-aim-test bow-pose-test crossbow-pose-test body-tracking-test shapeshift-form-test shield-steady-test body-calibration-test shoulder-swap-test blood-screen-test
     portal-billboard-test shrine-trace-test shrine-placement-test overlay-view-test bone-armor-height-test composition-layers-test projectile-rules-test environment-cutaway-test roof-materials-test stereo-prop-physics-test dropped-bottles-test props-test limb-rig-test limb-physics-test leather-menu-test stats-button-test menu-drop-test
     combat-rules-test strike-skills-test zeal-light-test skill-usage-test shield-guard-test shapeshift-gesture-test guard-strain-test heartbeat-test run-speed-test logging-test melee-contact-test melee-weapon-test breakables-test offline-difficulty-test enemy-sight-test attack-speed-test world-coordinates-test bow-flight-test bow-laser-test spell-cast-test spell-aim-assist-test hammer-gesture-test charge-gesture-test bone-graft-test
-    interaction-test dev-scenarios-test native-belt-test wrist-hud-test map-zoom-test navigation-info-test companions-test active-effects-test dropped-item-labels-test stick-gestures-test show-items-command-test native-hud-test render-resolution-test render-pointer-test scene-depth-test game-device-only-test controller-bindings-test journal-test native-panels-test talk-stop-test
+    interaction-test dev-scenarios-test native-belt-test wrist-hud-test map-zoom-test navigation-info-test companions-test active-effects-test dropped-item-labels-test stick-gestures-test show-items-command-test native-hud-test render-resolution-test render-pointer-test scene-depth-test game-device-only-test controller-bindings-test journal-test native-panels-test talk-stop-test loot-beams-test
     vr-settings-test vr-settings-layout-test vr-settings-pointer-test vr-settings-store-test controller-labels-test math-test deferred-draw-test monster-bars-test telegraph-test aim-reach-test aim-rules-test target-cone-test gaze-test window-focus-test callback-ticket-test local-player-test shield-block-test trigger-melee-test companion-ai-test torch-light-test frame-generation-test turn-capture-test panel-atlas-test far-objects-test)
   # These fixtures use assert for their checks, including in Release builds.
   if(MSVC)

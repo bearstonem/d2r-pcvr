@@ -65,6 +65,7 @@ setting's ini id (`"gameplay.highlight_left_hue"`), never by its `Key`.
 | `.beside` an on / off setting | a box on the right of the row before it, "<word> On", flipped by a press |
 | `.beside` a number | a box on the right of the row before it, "<word> <value>"; pressing it opens the list of its steps (`Normalize`'s distinct values, at most 24) |
 | more than 24 named choices | not allowed: the number control, and `--tidy` asks to split the setting |
+| `RowKind::Filter` on a number, `.inFilter` on the on / off settings after it | one row: its number as - value + with a bar, then a **Filter** button; pressing it opens a card of the On / Off switches |
 
 A `.beside` setting shares its partner's row and takes none of the page's 8
 (main's paired rows: Movement speed | Stick toggle, Menu distance | Leather
@@ -76,10 +77,20 @@ The choice is made per row and character, never per value. Named choices
 missing some names read "Choice n" for those values. Every control takes a
 press anywhere in its row's height.
 
+A Filter row and its `.inFilter` settings (Loot beams: its brightness, 10% to
+100%; then Unique, Set, Rare, Runes) take one of the page's 8 rows, on the same
+page and section, 1 to 6 switches. The row's line under its label names the
+switches that are On ("Unique, Set, Runes"; "Off: none"). Each `.inFilter`
+setting's label is its word in the card (14 characters at most). The pending
+list names them "Loot beams (Set): On -> Off", Reset page resets them all, and
+the row's help card's Undo and Default take the number and every switch.
+
 **Popover:** opens over the page beside its row without moving any row, the
 rest dimmed. One press on an option picks it and closes; options take presses
 300 ms after it opens; a press outside it, Right B, or pointing away for
-450 ms closes it without a change.
+450 ms closes it without a change. A Filter card is the exception: a press
+flips one switch and the card stays open, so several can change before it
+closes; every line is that switch's press target.
 
 **Color grid:** named values outside the hue wheel (By range, Off) are chips
 above; the 24 hues are dots, 6 a row in hue order (Red first, Crimson last),
