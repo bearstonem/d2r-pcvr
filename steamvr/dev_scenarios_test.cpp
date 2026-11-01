@@ -82,8 +82,18 @@ static Items::Result __cdecl ItemsCall(const PluginContext*,const Items::Transac
         grantedCodes.push_back(s.code);
         const bool potions=t->outputCount==10&&t->outputs[0].code==Items::MakeItemCode("hp5"); // the potion kit
         const bool torch=t->outputCount==6&&t->outputs[0].code==Items::MakeItemCode("clb");
+        const bool loot=t->outputCount==10&&t->outputs[0].code==Items::MakeItemCode("rin")&&t->outputs[1].code==Items::MakeItemCode("amu");
         const bool starter=(t->outputCount<9&&t->outputCount>2)||potions;
-        if(torch) {
+        if(loot) {   // the loot beam test kit
+            constexpr Items::Quality quality[]={Items::Quality::Unique,Items::Quality::Set,Items::Quality::Rare,
+                                               Items::Quality::Magic,Items::Quality::Normal,Items::Quality::Normal,Items::Quality::Normal,
+                                               Items::Quality::Normal,Items::Quality::Normal,Items::Quality::Normal};
+            constexpr uint32_t level[]={99,99,99,30,1,1,1,1,1,1};
+            constexpr bool identified[]={false,false,true,false,true,true,true,true,true,true};
+            assert(s.quality==quality[i]&&s.itemLevel==level[i]&&s.qualityRecordId==Items::RandomQualityRecord);
+            assert(s.stateFlags==(identified[i]?Items::ItemStateIdentified:0u));
+            assert(s.flags==(i==0?Items::ItemCreateFlagBit(Items::ItemCreateFlag::AllowDuplicateUnique):0u));
+        } else if(torch) {
             if(i==0||i==1)assert(s.quality==Items::Quality::Normal&&s.socketCount==1&&s.itemLevel==1);
             else if(i==2||i==3)assert(s.quality==Items::Quality::Normal&&s.itemLevel==1);
             else if(i==4)assert(s.quality==Items::Quality::Unique&&s.itemLevel==99);
@@ -210,7 +220,7 @@ int main(){
                 assert(commands[start+PreparationCount+i]==expected);
             }
         }
-        for(int choice:{1,2,CrossbowChoice,BowChoice,SmallShieldChoice,StarterPrimaryChoice,StarterAlternateChoice,ThrowingChoice,PotionsChoice,TorchChoice,ThrowingPotionsChoice}) {
+        for(int choice:{1,2,CrossbowChoice,BowChoice,SmallShieldChoice,StarterPrimaryChoice,StarterAlternateChoice,ThrowingChoice,PotionsChoice,TorchChoice,ThrowingPotionsChoice,LootBeamsChoice}) {
             const auto commandCount=commands.size();
             devscenarios::Request(Make(choice));assert(tasks.back().game);Run(tasks.size()-1);
             assert(devscenarios::Status().result==Result::Applied&&!tokenLive);
@@ -268,6 +278,12 @@ int main(){
         std::vector<std::string_view> codes;for(const char* code:Kit(cls,TorchChoice))if(code)codes.push_back(code);
         assert((codes==std::vector<std::string_view>{"clb","clb","gcr","r08","clb","clb"}));
     }
+    // The loot beam test kit on HERO, the same for every class.
+    assert(IsKit(LootBeamsChoice)&&NormalKit(LootBeamsChoice)&&PageFor(LootBeamsChoice)==0&&SlotFor(LootBeamsChoice)==9);
+    for(int cls=0;cls<8;++cls) {
+        std::vector<std::string_view> codes;for(const char* code:Kit(cls,LootBeamsChoice))if(code)codes.push_back(code);
+        assert((codes==std::vector<std::string_view>{"rin","amu","rin","amu","dgr","r26","r25","r27","r28","r29"}));
+    }
     // Unlock quests & waypoints button: sends cheat quests and cheat waypoints via console
     assert(ValidChoice(UnlockQuestsChoice)&&PageFor(UnlockQuestsChoice)==0&&SlotFor(UnlockQuestsChoice)==5);
     const auto beforeQuestCommands = commands.size();
@@ -281,7 +297,7 @@ int main(){
 
     // Failed standalone kits clean up only the generated exchange token.
     failItems=true;
-    for(int choice:{CrossbowChoice,BowChoice,SmallShieldChoice,ThrowingChoice,PotionsChoice,TorchChoice,ThrowingPotionsChoice}) {
+    for(int choice:{CrossbowChoice,BowChoice,SmallShieldChoice,ThrowingChoice,PotionsChoice,TorchChoice,ThrowingPotionsChoice,LootBeamsChoice}) {
         const auto beforeCleanup=tokenRemoves;
         devscenarios::Request(Make(choice));Run(tasks.size()-1);
         assert(devscenarios::Status().result==Result::KitRefused&&!tokenLive&&tokenRemoves==beforeCleanup+1);

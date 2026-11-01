@@ -39,8 +39,11 @@ inline constexpr int SkyRimsChoice=46;
 // [bodies] in the dev INI; the last puts them all back to their defaults.
 inline constexpr int BodyKnobChoice=47,BodyResetChoice=BodyKnobChoice+limbs::Knobs;
 inline int BodyKnob(int choice){return choice>=BodyKnobChoice&&choice<BodyResetChoice?choice-BodyKnobChoice:-1;}
+// Loot beam test (owner, 2026-10-31): one item for each beam rule, to drop on
+// the floor (LootBeamKit below).
+inline constexpr int LootBeamsChoice=BodyResetChoice+1;
 inline constexpr int PageSize=14;
-inline constexpr std::array<Choice,BodyResetChoice+1> Choices{{
+inline constexpr std::array<Choice,LootBeamsChoice+1> Choices{{
     {"Level 90", "All class skills rank 20 / test attributes", nullptr},
     {"Primary gear", "Class-specific unique equipment", nullptr},
     {"Alternate gear", "Equipment for the other class abilities", nullptr},
@@ -107,6 +110,7 @@ inline constexpr std::array<Choice,BodyResetChoice+1> Choices{{
     {"Most shove", "How far the whole body may be pushed", nullptr},
     {"Ease back", "When the physics lets a body go, how long it eases back", nullptr},
     {"Bodies: defaults", "Every value above back to its default", nullptr},
+    {"Loot beam test", "Unique, set, rare, magic, white, 5 runes / drop them", nullptr},
 }};
 static_assert(limbs::Knobs==10,"one BODIES choice per knob");
 // Stable action IDs are independent of their presentation order.
@@ -121,7 +125,7 @@ inline constexpr const char* PageHelp[]={
     "Each press steps a value and saves it in the dev INI's [bodies]. Then push a body to feel it."
 };
 inline constexpr std::array<std::array<int,PageSize>,PageCount> Pages{{
-    {{Level10Choice,Level30Choice,Level60Choice,0,HealChoice,UnlockQuestsChoice,ThrowingPotionsChoice,TurnsRimsChoice,SkyRimsChoice,-1,-1,-1,-1,-1}},
+    {{Level10Choice,Level30Choice,Level60Choice,0,HealChoice,UnlockQuestsChoice,ThrowingPotionsChoice,TurnsRimsChoice,SkyRimsChoice,LootBeamsChoice,-1,-1,-1,-1}},
     {{StarterPrimaryChoice,StarterAlternateChoice,1,2,CrossbowChoice,BowChoice,SmallShieldChoice,DebugDrawsChoice,TurnsKeepOwnChoice,ThrowingChoice,PotionsChoice,TurnsSharpChoice,TurnsFillChoice,TorchChoice}},
     {{4,11,14,15,16,5,3,8,9,-1,-1,-1,-1,-1}},
     {{17,UpperKurastChoice,KurastSewersChoice,18,19,26,27,-1,-1,-1,-1,-1,-1,-1}},
@@ -241,6 +245,19 @@ inline Choice ChoiceFor(int cls,int index){
 // Attributes cover the supplied equipment. No class conversion, inventory
 // deletion, quest completion or save editing. Dispatch is not proof of success.
 inline constexpr int PreparationCount=5;
+// The loot beam test (loot_beams.h): a unique ring, a set amulet and a rare ring (the
+// gold, green and yellow beams), a magic amulet and a white dagger (no beam), Vex
+// (r26, the first high rune: orange), Gul (r25, one below: none) and Ohm, Lo and Sur
+// (r27-r29: more orange). The rare ring is identified and the other magic-or-better
+// items are not, as fresh drops are. 12 inventory cells; Kit() holds at most 10 items.
+enum class KitQuality {Normal,Magic,Rare,Set,Unique};
+struct KitItem {const char* code;KitQuality quality;int itemLevel;bool identified;};
+inline constexpr std::array<KitItem,10> LootBeamKit{{
+    {"rin",KitQuality::Unique,99,false},{"amu",KitQuality::Set,99,false},{"rin",KitQuality::Rare,99,true},
+    {"amu",KitQuality::Magic,30,false},{"dgr",KitQuality::Normal,1,true},{"r26",KitQuality::Normal,1,true},
+    {"r25",KitQuality::Normal,1,true},{"r27",KitQuality::Normal,1,true},{"r28",KitQuality::Normal,1,true},
+    {"r29",KitQuality::Normal,1,true}
+}};
 // Native unique generation selects eligible unique rows and random stat rolls.
 // nullptr skips an off-hand item for a two-handed staff/maul.
 inline std::array<const char*,10> Kit(int cls,int choice){
@@ -268,6 +285,12 @@ inline std::array<const char*,10> Kit(int cls,int choice){
     // (Rancid, Choking, Strangling Gas; Oil, Exploding, Fulminating). 6 cells.
     if(ValidClass(cls)&&choice==ThrowingPotionsChoice)return {"gps","gpm","gpl","ops","opm","opl"};
     if(ValidClass(cls)&&choice==TorchChoice)return {"clb","clb","gcr","r08","clb","clb"};
+    if(ValidClass(cls)&&choice==LootBeamsChoice) {
+        std::array<const char*,10> codes{};
+        static_assert(LootBeamKit.size()<=10,"Kit() returns at most 10 codes");
+        for(size_t i=0;i<LootBeamKit.size();++i)codes[i]=LootBeamKit[i].code;
+        return codes;
+    }
     if(!ValidClass(cls)||(choice!=1&&choice!=2))return {};
     const auto& p=Presets[cls];const bool caster=choice==2&&cls!=0&&cls!=4;
     const auto& weapons=choice==1?p.primaryWeapons:p.alternateWeapons;
@@ -280,7 +303,7 @@ inline bool Ammo(std::string_view code){return code=="aqv"||code=="cqv";}
 inline bool ValidChoice(int choice){return choice>=0&&choice<int(Choices.size());}
 inline bool StarterKit(int choice){return choice==StarterPrimaryChoice||choice==StarterAlternateChoice;}
 // Normal quality at item level 1, usable at once; the other kits roll uniques at 99.
-inline bool NormalKit(int choice){return StarterKit(choice)||choice==ThrowingChoice||choice==PotionsChoice||choice==TorchChoice||choice==ThrowingPotionsChoice;}
+inline bool NormalKit(int choice){return StarterKit(choice)||choice==ThrowingChoice||choice==PotionsChoice||choice==TorchChoice||choice==ThrowingPotionsChoice||choice==LootBeamsChoice;}
 inline bool IsKit(int choice){return choice==1||choice==2||choice==CrossbowChoice||choice==BowChoice||choice==SmallShieldChoice||NormalKit(choice);}
 inline bool Isolated(std::string_view mod,std::string_view metadata){return mod==Mod&&metadata==ModInfo;}
 }

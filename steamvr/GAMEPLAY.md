@@ -1858,6 +1858,48 @@ with the view every 10 ms, so FMOD re-pans everything that is playing.
 | `forward_sign` | `-1` | Which screen direction counts as ahead (`-1` = up). |
 | `depth_scale` | `2` | Stretches screen up/down to undo the isometric squash. |
 
+## Loot beams
+
+A pillar of light stands over every Rare, Set and Unique item and every high
+rune (Vex and up) lying on the floor near you, in the colour the game writes
+its name in: unique gold, set green, rare yellow, rune orange. A soft glow of
+the same colour lies on the floor round its foot. The beam fades in as the
+item lands and is gone within a quarter of a second of it being picked up.
+
+The mod draws the beams itself, in the same depth pass as the landing circles
+(`D2R_DepthFog.fx`): each pixel's line of sight is tested against each beam, so
+walls, fences, monsters and hills in front hide it, while the sky and the fog
+behind it do not. Four times a second the game thread lists the items lying in
+the local game (`vr/loot_beam_scan.cpp`); the nearest 8 within 60 cells get a
+beam. The game's own Horadric Light beam was tried first and could not be
+recoloured.
+
+- Local games only (offline, or the game you host). A joined TCP/IP game shows
+  none.
+- Not yet: items your loot filter hides still get a beam; an item on a floor
+  above or below yours draws its beam from your floor's height.
+- Hidden while a menu is open, like the landing circles, and never drawn over
+  item names, labels or chat left in the picture.
+
+**VR Settings > Interface > Loot beams**: its slider sets how bright the beams
+are, pillar and floor glow alike, from 10% to 100% (the default). Its **Filter**
+button opens a card of four switches, **Unique**, **Set**, **Rare** and
+**Runes**, all On by default, and the row's line names the ones that are On.
+Turn them all Off for no beams. A change takes effect within a quarter of a
+second of **Apply**.
+
+To try it: **DEV > Character > Loot beam test** puts one item of each kind in
+the inventory (see DEVELOPMENT_SCENARIOS.md); drop them.
+
+`d2r_pcvr.ini`:
+
+| `[loot]` key | Default | |
+|---|---|---|
+| `beams_unique`, `beams_set`, `beams_rare`, `beams_runes` | `1` | The four VR Settings switches. |
+| `beams_brightness` | `100` | The VR Settings slider, `10` to `100` (%). |
+| `beams` | `1` | `0` = no loot beams at all (read at start; not in the menu). |
+| `rune_min` | `26` | The lowest rune with a beam: 26 = Vex, 20 = Lem (read at start; not in the menu). |
+
 ## Cancellation and performance
 
 Menus, focus/tracking loss, weapon changes, recenter and discontinuous samples
