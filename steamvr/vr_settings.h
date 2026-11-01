@@ -24,7 +24,7 @@ namespace framevr::settings {
 enum class View : uint8_t { Presets, Body, Combat, Aim, Targets, Shield, Wrist, Interface, Survival, World, Vibration, Performance, Guide, WhatsNew, More, Count };
 enum Key { Motion, Seated, Dominant, Snap, TurnSpeed, Waist, BeltForward,
            Foveation, Sky, Fog, Ceiling, DrawDistance, ObjectDistance,
-           EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, VitalsTilt, HapticStrength, HapticMelee, HapticBowDraw, HapticBowRelease, HapticSpell, HapticInteraction, HapticAlert, HapticShortMelee, BloodVisor, BloodWipe, MeleeThrustSpeed, LootLabelSize, CompanionCounts, StrainVignette, OfflinePlayers, ShieldBashSpeed, DesktopOneEye, MapTopDown, MapRotate, FoveationStrength, StereoRendering, DeferGpuWait, TargetHighlight, HeartbeatStart, SpellLock, StaffPoint, LandingCircles, GroundAim, AimHighlights, HighlightRight, HighlightLeft, ElementalHands, EnemySight, BowLaser, ThrowLift, BottlePhysics, PropPhysics, CompanionAi, ShieldGrip, ShieldOut, ShieldUp, ShieldFollow, ShieldRoll, AimFollowsView, CompanionTactical, LeftHandStrikes, TorchFlame, FrameGeneration, FrameGenPreset, FrameGenScale, RunSpeed, RunWalkToggle, BodyPhysics, BigObjectDistance, FogDistance, LeatherMenu, LootBeamUnique, LootBeamSet, LootBeamRare, LootBeamRunes, LootBeamBrightness, Count };
+           EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, VitalsTilt, HapticStrength, HapticMelee, HapticBowDraw, HapticBowRelease, HapticSpell, HapticInteraction, HapticAlert, HapticShortMelee, BloodVisor, BloodWipe, MeleeThrustSpeed, LootLabelSize, CompanionCounts, StrainVignette, OfflinePlayers, ShieldBashSpeed, DesktopOneEye, MapTopDown, MapRotate, FoveationStrength, StereoRendering, DeferGpuWait, TargetHighlight, HeartbeatStart, SpellLock, StaffPoint, LandingCircles, GroundAim, AimHighlights, HighlightRight, HighlightLeft, ElementalHands, EnemySight, BowLaser, ThrowLift, BottlePhysics, PropPhysics, CompanionAi, ShieldGrip, ShieldOut, ShieldUp, ShieldFollow, ShieldRoll, AimFollowsView, CompanionTactical, LeftHandStrikes, TorchFlame, FrameGeneration, FrameGenPreset, FrameGenScale, RunSpeed, RunWalkToggle, BodyPhysics, BigObjectDistance, FogDistance, LeatherMenu, LootBeamUnique, LootBeamSet, LootBeamRare, LootBeamRunes, LootBeamBrightness, CeilingTorches, Count };
 // One bit per setting, 128 wide: two words, since MSVC has no 128-bit integer.
 struct ChangeMask {
     static constexpr int Bits=128;
@@ -173,6 +173,11 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"Rare beams", "A yellow beam over rare items lying near you", L"loot",L"beams_rare",1,0,1,1},
     {"Rune beams", "An orange beam over high runes (Vex and up) lying near you", L"loot",L"beams_runes",1,0,1,1},
     {"Loot beam brightness", "How bright the loot beams and their floor glow are; 100% is full", L"loot",L"beams_brightness",100,10,100,10},
+    // Dungeon torchlight (owner 2026-11-01: "this should be a setting"): the game's own torches, braziers and lit
+    // objects light the dungeon round them (vrcam worldobj::Gather, the shader's game lights); beside Dungeon
+    // ceilings (Performance is full). Off by default since 0.142: finding them reads the game's memory every 1.5 s
+    // (VR dropouts on a weak PC).
+    {"Dungeon torchlight", "The game's own torches light the dungeon around them; finding them costs CPU", L"ceiling",L"torches",0,0,1,1},
 }};
 using Values=std::array<float,Count>;
 inline bool HapticKey(Key key){return key>=HapticStrength&&key<=HapticAlert;}
@@ -377,6 +382,7 @@ inline bool RowEnabled(const Values& values,Key key){
     if(key==AimHighlights||HighlightKey(key))return values[TargetHighlight]>0;   // only while the monster outline shows
     if(key==LandingCircles)return values[GroundAim]>.5f;   // only while the mod places ground skills
     if(key==FogDistance)return values[Fog]>.5f;   // only while the added fog is on
+    if(key==CeilingTorches)return values[Ceiling]>.5f;   // the game's lights are gathered only under the dungeon ceiling
     return key!=FoveationStrength||values[Foveation]>.5f;
 }
 // The character the panel is open for: rows for another class, or for a
@@ -425,6 +431,7 @@ inline bool RowShown(Key key,const Values& v,const Context& c){
         case BloodWipe:return v[BloodVisor]>.5f;
         case CompanionTactical:return v[CompanionAi]>.5f;
         case FogDistance:return v[Fog]>.5f;   // beside Distance fog while the fog is on (main greyed it; RowEnabled)
+        case CeilingTorches:return v[Ceiling]>.5f;   // beside Dungeon ceilings while they are on (a greyed half has no room for its lock)
         // Frame generation runs with Both eyes only (frame_generation.h): By turns leaves its rows out,
         // with its status line (owner, 2026-10-25), and NVIDIA's rows on More with them.
         case FrameGeneration:return v[StereoRendering]<.5f;
