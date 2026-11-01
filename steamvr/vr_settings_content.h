@@ -574,7 +574,7 @@ inline constexpr Override Overrides[]={
     {.id="gameplay.companion_ai",.page=View::Survival,.section="Offline monsters",.kind=RowKind::Toggle,.label="Smarter mercenary",
      .help="Your mercenary keeps close in fights, spots monsters as far as they spot you, and is moved behind you if it gets stuck."},
     {.id="gameplay.companion_tactical_commands",.page=View::Survival,.section="Offline monsters",.kind=RowKind::Toggle,.label="Tactical commands",
-     .help="Point and hold gestures to direct your mercenary: hold ground, prioritize monsters, or regroup.",
+     .help="Point at your mercenary, hold Grip and pull Trigger, aim and let go: hold ground, prioritize monsters, or regroup.",
      .beside=true,.besideLabel="Commands"},
 
     // World: Sky and dungeons
