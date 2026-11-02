@@ -251,7 +251,7 @@ inline constexpr ContentSection SectionTable[]={
     {View::Targets,"Monster outline"},{View::Targets,"Bow"},
     {View::Shield,"Bash and block"},{View::Shield,"Fit on the arm"},
     {View::Wrist,"Life and mana"},{View::Wrist,"Map"},
-    {View::Interface,"Game menus"},{View::Interface,"Labels and bars"},
+    {View::Interface,"Game menus"},{View::Interface,"Labels and bars"},{View::Interface,"Mana Warning"},
     {View::Survival,"Low life"},{View::Survival,"Offline monsters"},
     {View::World,"Sky and dungeons"},{View::World,"Things that move and glow"},
     {View::Vibration,"Strength"},
@@ -553,6 +553,19 @@ inline constexpr Override Overrides[]={
      .help="A yellow beam over rare items lying near you. Rares drop often: Off lights only the rarer finds.",.inFilter=true},
     {.id="loot.beams_runes",.page=View::Interface,.section="Labels and bars",.kind=RowKind::Toggle,.label="Runes",
      .help="An orange beam over high runes lying near you, Vex and up.",.inFilter=true},
+
+    // Interface: Mana Warning
+    {.id="hud.arcane_decay",.page=View::Interface,.section="Mana Warning",.kind=RowKind::Toggle,.label="Arcane Decay",
+     .help="A subtle spectral vignette when mana is low, warning of magical depletion without obscuring your view."},
+    {.id="hud.arcane_fade",.page=View::Interface,.section="Mana Warning",.kind=RowKind::Toggle,.label="Fade animation",
+     .help="Smoothly fade the arcane vignette in and out as mana changes.",
+     .beside=true,.besideLabel="Fade"},
+    {.id="hud.mana_threshold_pct",.page=View::Interface,.section="Mana Warning",.kind=RowKind::Slider,.label="Starts below",
+     .help="Mana percentage below which the arcane decay warning begins to appear.",
+     .format={.unit="%"}},
+    {.id="hud.arcane_intensity_pct",.page=View::Interface,.section="Mana Warning",.kind=RowKind::Slider,.label="Effect intensity",
+     .help="Overall brightness and opacity scale of the arcane warning effect.",
+     .format={.unit="%"},.beside=true,.besideLabel="Strength"},   // beside Mana threshold: Interface holds 8 rows
 
     // Survival: Low life
     {.id="interactions.critical_alerts",.page=View::Survival,.section="Low life",.kind=RowKind::Toggle,.label="Low life and mana alert",

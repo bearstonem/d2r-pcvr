@@ -47,6 +47,7 @@
 #include "interaction_ui.h"
 #include "sewer_prompt_art.h"
 #include "notice_card_art.h"
+#include "arcane_decay.h"
 #include "blood_screen.h"
 #include "shapeshift_gesture.h"
 #include "hammer_gesture.h"
@@ -233,6 +234,14 @@ uint64_t bloodPaintKey=~0ull,bloodRequestedKey=~0ull,bloodPaintRequest=0;
 uint32_t bloodShown=0; // splats in the uploaded image
 ULONGLONG bloodPaintAt=0;
 bool bloodAtlasPending=false,bloodImageReady=false;
+// Arcane Decay: subtle spectral peripheral warning when mana is low.
+arcane::Controller arcaneController;
+arcane::Output arcaneOutput;
+arcane::Painter arcanePainter;
+uint64_t arcanePaintKey=~0ull;
+uint64_t arcanePaintSession=0;
+ULONGLONG arcanePaintAt=0;
+bool arcaneAtlasPending=false,arcaneImageReady=false;
 // Quest / level-up notices: a card standing in the room for a few seconds
 // instead of the native panel at the eyes (notice_card.h). Each card is
 // painted once, in the background, when it comes up.
@@ -1698,6 +1707,7 @@ leather::Art LoadLeather(std::vector<uint8_t>& rgba,std::wstring& from) {
 bool SetupStatic(DXGI_FORMAT eyeFormat) {
     if(!interactionPainter.Start())Say("Frame UI: background painter unavailable; interaction artwork cannot refresh");
     if(!bloodPainter.Start())Say("Frame blood visor: background painter unavailable; blood stays hidden");
+    if(!arcanePainter.Start())Say("Frame arcane decay: background painter unavailable; arcane warning stays hidden");
     if(!noticePainter.Start())Say("Frame notices: background painter unavailable; quest and level-up cards stay hidden");
     if(!strainPainter.Start())Say("Frame guard strain: background painter unavailable; the light stays hidden");
     if(!settingsPainter.Start())Say("Frame VR settings: background painter unavailable; VR Settings and calibration cannot be shown");
@@ -1844,7 +1854,7 @@ bool Initialize(reshade::api::command_queue* rq,reshade::api::swapchain* swap) {
     if(!fenceEvent) return false;
     if(!SetupStatic(eyeFormat))return false;
     atlasFormat=eyeFormat;
-    if(!MakeShared())Say("Frame panels: the shared atlas unavailable; VR Settings, the quest card, blood, the strain light and the bow laser stay hidden");
+    if(!MakeShared())Say("Frame panels: the shared atlas unavailable; VR Settings, the quest card, blood, the strain light, arcane decay and the bow laser stay hidden");
     potionModels.Initialize(device.Get(),queue.Get(),eyeFormat,width,height,&Say);
     turnFormat=eyeFormat;
     elementalRenderer.Initialize(device.Get(),queue.Get(),eyeFormat,width,height,&Say);
@@ -3432,6 +3442,69 @@ void Input() {
                 bloodPaintKey=bloodRequestedKey;bloodShown=painted.visible;
             }
             bloodPaintRequest=0;
+        }
+    }
+    // Arcane Decay (arcane_decay.h): subtle spectral visual warning when mana is low
+    {
+        const auto now=GetTickCount64();
+        arcane::Input in;
+        in.time=interactionInput.time>0?interactionInput.time:(now/1000.0);
+        in.session=interactionInput.session;
+        in.vitalsKnown=interactionInput.snapshot.vitalsKnown;
+        in.mana=interactionInput.snapshot.mana;
+        in.maxMana=interactionInput.snapshot.maxMana;
+        in.config.enabled=hudSettings.values[settings::ArcaneDecay]>.5f;
+        in.config.fadeAnimation=hudSettings.values[settings::ArcaneFade]>.5f;
+        in.config.threshold=hudSettings.values[settings::ManaThreshold];
+        in.config.intensity=hudSettings.values[settings::ArcaneIntensity]/100.0f;
+        const bool wasActive=arcaneOutput.active;
+        arcaneOutput=arcaneController.Step(in);
+
+        if(arcaneOutput.active!=wasActive) {
+            char line[160];
+            if(arcaneOutput.active) {
+                std::snprintf(line,sizeof line,"Frame arcane decay: activated at mana=%.1f/%.1f (%.0f%%, threshold=%.0f%%, intensity=%.0f%%)",
+                    in.mana,in.maxMana,arcaneOutput.manaPercent,in.config.threshold,in.config.intensity*100.f);
+            } else {
+                std::snprintf(line,sizeof line,"Frame arcane decay: deactivated at mana=%.1f/%.1f (%.0f%%, threshold=%.0f%%)",
+                    in.mana,in.maxMana,arcaneOutput.manaPercent,in.config.threshold);
+            }
+            Say(line);
+        }
+
+        // Consume completed images before scheduling more work. Never replace an
+        // in-flight request: that discarded every animated result.
+        if(in.session!=arcanePaintSession||!arcaneOutput.visible) {
+            arcanePainter.Discard();arcanePaintKey=~0ull;
+            arcanePaintAt=0;arcanePaintSession=in.session;
+        }
+        if(arcaneOutput.visible) {
+            arcane::PaintImage painted;
+            if(!arcaneAtlasPending&&atlasUploads.size()<3&&arcanePainter.Take(painted)) {
+                if(!painted.pixels.empty()&&UploadShared(panelatlas::ArcaneDecay,painted.pixels,&arcaneAtlasPending)) {
+                    arcanePaintKey=painted.key;
+                    static bool uploadedReported=false;
+                    if(!uploadedReported) {
+                        char line[128];
+                        std::snprintf(line,sizeof line,"Frame arcane decay: uploaded to shared atlas key=%llx pixels=%zu",painted.key,painted.pixels.size());
+                        Say(line);uploadedReported=true;
+                    }
+                }
+            }
+            if(now>=arcanePaintAt&&!arcanePainter.Busy()&&!arcaneAtlasPending) {
+                const auto key=arcane::PaintKey(arcaneOutput.intensity,arcaneOutput.depletion,in.time);
+                if(key!=arcanePaintKey) {
+                    if(arcanePainter.Submit({arcaneOutput.intensity,arcaneOutput.depletion,in.time})) {
+                        arcanePaintAt=now+40;
+                        static bool submitReported=false;
+                        if(!submitReported) {
+                            char line[128];
+                            std::snprintf(line,sizeof line,"Frame arcane decay: submitted paint job key=%llx intensity=%.2f",key,arcaneOutput.intensity);
+                            Say(line);submitReported=true;
+                        }
+                    }
+                }
+            }
         }
     }
     // Arrow path line color (VR Settings > Targets > Arrow path line); Off keeps the last.
@@ -5519,10 +5592,11 @@ void EndPair() {
     // The shared panels' pictures uploaded this frame, all in one copy (panelatlas).
     if(sharedDirty) {
         const bool flushed=FlushShared();
-        for(auto* p:{&settingsAtlasPending,&bloodAtlasPending,&strainAtlasPending,&bowLaserAtlasPending,&noticeAtlasPending})if(*p) {
+        for(auto* p:{&settingsAtlasPending,&bloodAtlasPending,&strainAtlasPending,&bowLaserAtlasPending,&noticeAtlasPending,&arcaneAtlasPending})if(*p) {
             *p=false;
             if(p==&settingsAtlasPending)settingsImageReady=flushed;else if(p==&bloodAtlasPending)bloodImageReady=flushed;
-            else if(p==&strainAtlasPending)strainImageReady=flushed;else if(p==&bowLaserAtlasPending)bowLaserImageReady=flushed;else noticeImageReady=flushed;
+            else if(p==&strainAtlasPending)strainImageReady=flushed;else if(p==&bowLaserAtlasPending)bowLaserImageReady=flushed;
+            else if(p==&arcaneAtlasPending)arcaneImageReady=flushed;else noticeImageReady=flushed;
         }
     }
     // The native menus closed short of swapchains: their surface goes back for the map.
@@ -5842,6 +5916,38 @@ void EndPair() {
             const uint32_t below=count&&layers[0]==layer?1:0;
             for(uint32_t i=count;i>below;--i)layers[i]=layers[i-1];
             layers[below]=reinterpret_cast<const XrCompositionLayerBaseHeader*>(&strainQuad);++count;
+        }
+    }
+    // Arcane Decay: head-locked quad directly above the world scene and beneath HUD panels
+    XrCompositionLayerQuad arcaneQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    if(arcaneImageReady&&arcanePaintKey&&arcanePaintKey!=~0ull&&arcaneOutput.visible&&layer&&!panelMode&&!blackMenu&&!settingsModel.open&&
+       !bodyCalibration.Active()&&headSpace&&count<contentLimit) {
+        const auto extent=blood::VisorExtent(
+            {views[0].fov.angleLeft,views[0].fov.angleRight,views[0].fov.angleDown,views[0].fov.angleUp},
+            {views[1].fov.angleLeft,views[1].fov.angleRight,views[1].fov.angleDown,views[1].fov.angleUp});
+        const float width=extent.width,height=extent.height;
+        if(std::isfinite(width)&&std::isfinite(height)&&width>0&&height>0) {
+            arcaneQuad.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT|XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
+            arcaneQuad.space=headSpace;arcaneQuad.eyeVisibility=XR_EYE_VISIBILITY_BOTH;
+            arcaneQuad.pose.orientation.w=1;arcaneQuad.pose.position.z=-blood::VisorDistance;arcaneQuad.size={width,height};
+            arcaneQuad.subImage.swapchain=sharedChain;arcaneQuad.subImage.imageRect=Rect(panelatlas::ArcaneDecay);
+            const uint32_t below=count&&layers[0]==layer?1:0;
+            for(uint32_t i=count;i>below;--i)layers[i]=layers[i-1];
+            layers[below]=reinterpret_cast<const XrCompositionLayerBaseHeader*>(&arcaneQuad);++count;
+            static bool submittedReported=false;
+            if(!submittedReported) {
+                char line[160];
+                std::snprintf(line,sizeof line,"Frame arcane decay: quad SUBMITTED to layers at index %u, size=%.2fx%.2f",below,width,height);
+                Say(line);submittedReported=true;
+            }
+        }
+    } else if(arcaneOutput.visible) {
+        static ULONGLONG failReportAt=0;const auto now=GetTickCount64();
+        if(now>=failReportAt) {
+            char line[240];
+            std::snprintf(line,sizeof line,"Frame arcane decay: quad NOT submitted (ready=%d key=%llx vis=%d layer=%d panel=%d black=%d open=%d count=%u/%u)",
+                arcaneImageReady,arcanePaintKey,arcaneOutput.visible,layer!=nullptr,panelMode,blackMenu,settingsModel.open,count,contentLimit);
+            Say(line);failReportAt=now+2000;
         }
     }
     XrCompositionLayerQuad winePadding{XR_TYPE_COMPOSITION_LAYER_QUAD};
@@ -6393,7 +6499,7 @@ void Shutdown(bool preserveResolution) {
     if(!preserveResolution)hud::NativeSession(false);
     if(!preserveResolution)resolution::Restore();
     windowFocus.Cancel();
-    EndPair();ClearInput();interactionPainter.Stop();bloodPainter.Stop();strainPainter.Stop();noticePainter.Stop();settingsPainter.Stop();turnCompiler.Stop();interaction::icons::Shutdown();
+    EndPair();ClearInput();interactionPainter.Stop();bloodPainter.Stop();arcanePainter.Stop();strainPainter.Stop();noticePainter.Stop();settingsPainter.Stop();turnCompiler.Stop();interaction::icons::Shutdown();
     // Completion is mandatory before destroying our commands/resources, even
     // when ordinary frame submission uses queue ordering without a CPU wait.
     if(fence&&!WaitGpu())failed=true;
@@ -6413,6 +6519,7 @@ void Shutdown(bool preserveResolution) {
     compassChain=XR_NULL_HANDLE;wristHeading.Reset();compassFrame=compassAtlasReady=false;   // staticChain, below
     gameplayChain=XR_NULL_HANDLE;
     bloodScreen.Reset();bloodOutput={};bloodShown=0;bloodPaintKey=bloodRequestedKey=~0ull;bloodPaintRequest=0;bloodPaintAt=0;bloodAtlasPending=bloodImageReady=false;
+    arcaneController.Reset();arcaneOutput={};arcanePaintKey=~0ull;arcanePaintSession=0;arcanePaintAt=0;arcaneAtlasPending=arcaneImageReady=false;
     bowLaserHue=-1;bowLaserAtlasPending=bowLaserImageReady=false;
     noticeWatch={};noticeCards.Clear();noticeCard={};noticePaintRequest=noticeRequestedSequence=noticePaintedSequence=0;noticeAtlasPending=noticeImageReady=false;
     heartStream.Stop();heartPlaying=false;heartLevel.Reset();heartAt=0;heartHush.Reset();heartHealth=-1;
