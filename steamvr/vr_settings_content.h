@@ -695,6 +695,10 @@ inline constexpr Override Overrides[]={
     {.id="interactions.wrist_compass",.page=NotInMenu},
     {.id="render.desktop_one_eye",.page=NotInMenu},
     {.id="gameplay.left_hand_strikes",.page=NotInMenu},
+    // Glyph casting: edited on the wheel (the button picker's "Draw glyph", the GLYPHS page).
+    {.id="glyphs.draw_slot",.page=NotInMenu},{.id="glyphs.circle",.page=NotInMenu},{.id="glyphs.triangle",.page=NotInMenu},
+    {.id="glyphs.square",.page=NotInMenu},{.id="glyphs.lightning",.page=NotInMenu},{.id="glyphs.spiral",.page=NotInMenu},
+    {.id="glyphs.v",.page=NotInMenu},{.id="glyphs.star",.page=NotInMenu},{.id="glyphs.wave",.page=NotInMenu},
 };
 #undef FRAMEVR_OPTIONS
 #undef FRAMEVR_NAMES

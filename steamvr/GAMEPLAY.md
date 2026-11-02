@@ -2216,6 +2216,49 @@ any cast without an answer, abandoned calls with their angles) and
 `Frame heavens aim:` (per call: handed or the game's pick). The skill picker
 tags it GESTURE ("Raise, bring down").
 
+### Glyph casting
+
+A hand button bound to **Draw glyph** (the hand wheel's button picker) draws: while it is
+held, the drawing hand's aim point is kept as a stroke on the upright plane facing the
+player as it began (a point every 6 mm, at most 800); letting go recognises it
+(`steamvr/glyph_recognizer.h`) and casts the skill the player put on that shape on the
+wheel's GLYPHS page (`[glyphs] circle ... wave`, skill ids; `draw_slot`, 0-9 or -1). The
+press is never a native cast (the transport drops it from the hand slots and from the
+physical spells). A wheel, a held bottle, a native menu, a grip change on a face button or
+lost tracking cancels the stroke; the button still held but no longer the press is a
+cancel, not a release.
+
+Recognition: $P point clouds (32 points, direction and start free, upright) against
+procedural templates, gated by sharp corners (45-degree turns) and each shape's build
+(closed shapes end near their start; the V and the wave run one way across, the bolt one
+way down). Refused: smaller than 12 cm, shorter than 25 cm of path, flatter than 1:5,
+held over 4 s, a match score over 2.0, or two shapes within 0.14 of each other.
+`glyph-recognizer-test` draws each shape 42 ways (wobble, stretch, turn, start, either way
+round, uneven speed) over six seeds: 98-99% recognised, none as another shape, at most 3%
+of random scribbles cast.
+
+Cast (`steamvr/glyph_cast.h`): the skill's own hand slot when it is on one (pressed as Holy
+Shield's sign does: 65 ms, 180 ms for an LT slot); else the game's right-trigger record.
+The game's `ButtonSlot` gives the right trigger (its button bit 0x0800) record 5, and 11
+with LT: two of the six records no hand button reaches (a lookup-only probe of every pad
+bit, 2026-11-01), and the mod never presses the game's right trigger otherwise in Motion
+combat. When record 5 already holds the skill, the right trigger is pressed for 100 ms;
+else the UI thread puts it there with the game's own setter (`nativeui::Park`, as a wheel
+assignment, read back) and the press follows the read-back, or nothing is cast after
+0.6 s. The snapshot carries the record (`glyphRecord/Skill/Owner`; -1 when a custom layout
+gives a hand button that record).
+
+Trail (`steamvr/glyph_trail.h`): a 512 x 512 straight-alpha picture, 1 m a side, in the
+shared atlas (`panelatlas::Glyph`, beside VR Settings), shown as a room-space quad in the
+drawing plane with the stroke's start in the middle. A worker paints it, keeping each
+pixel's core and glow between paints: drawing adds only the new segments, the fade only
+re-shades (at most 40 paints a second). Pale arcane while drawing; recognised, the
+skill's element colour with a 0.35 s white flash, fading over 2 s; refused, grey over
+0.8 s. Logs: `Frame glyph:` (each glyph with its score, the next shape's, corners and
+time, and the way it cast or why not; each record change). Tests: `glyph-trail-test`,
+`glyph-cast-test`, the picker and GLYPHS page in `skill-categories-test`, and the art in
+`interaction-glyphs-test`.
+
 ### Ice Bolt visual height correction
 
 New or missing combat preferences default to **Aim > Keep spell shots level: Off** and

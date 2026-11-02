@@ -2,6 +2,7 @@
 #include "arcane_decay.h"
 #include "blood_screen.h"
 #include "bow_laser.h"
+#include "glyph_trail.h"
 #include "guard_strain.h"
 #include "notice_card.h"
 #include "vr_settings_draw.h"
@@ -44,13 +45,14 @@ constexpr int RespecLitReset=6,RespecLitConfirm=7;
 constexpr Region Respec(int i){return {Stats.x+StatsSize+Gap,Leather.y+i*(RespecHeight+Gap),RespecWidth,RespecHeight};}
 constexpr int StaticWidth=1536,StaticHeight=Leather.y+Leather.h;
 // Dynamic: VR Settings (its help card inside the panel) across the top, the
-// blood visor under it, then the strain light, the quest card and the bow
-// laser beside it.
+// glyph trail beside it, the blood visor under them, then the strain light, the
+// quest card and the bow laser beside it.
 constexpr Region Settings{0,0,settings::Width,settings::Height};
 // UploadShared refuses a picture of any other size without a word, and the
 // menu would never show: the painted canvas must be exactly this region.
 static_assert(Settings.w==settings::draw::CanvasWidth&&Settings.h==settings::draw::CanvasHeight,
     "VR Settings' painted canvas must equal its shared-atlas region");
+constexpr Region Glyph{Settings.x+Settings.w+Gap,0,glyphtrail::Size,glyphtrail::Size};   // glyph casting's trail
 constexpr Region Blood{0,Settings.h+Gap,blood::Size,blood::Size};
 constexpr Region Strain{Blood.x+Blood.w+Gap,Blood.y,strain::Size,strain::Size};
 constexpr Region Notice{Strain.x+Strain.w+Gap,Blood.y,notice::Width,notice::Height};

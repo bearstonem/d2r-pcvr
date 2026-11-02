@@ -12,6 +12,8 @@ struct PaintContext {
     int editor=0,slot=-1,page=0,count=0,bank=-1,category=0,skillClass=-1,leftStrikes=-1;
     std::array<int,skillcategories::Count> categoryCounts{};
     bool utility=false,map=false,fresh=false,editable=false,equipmentKnown=false,beltKnown=false;
+    bool glyphs=false;int glyphEdit=-1,glyphDraw=-1;
+    std::array<Skill,GlyphShapes> glyphSkills{};
     std::array<Skill,skills::Count> skills{};
     std::array<Skill,8> options{};
     std::array<std::array<Item,2>,2> sets{};
@@ -31,7 +33,10 @@ inline PaintContext Context(const Snapshot& s,const Output& o,bool fresh,const c
     c.category=o.editCategory;c.skillClass=o.editClass;c.categoryCounts=o.editCategoryCounts;
     c.page=o.editPage;c.count=o.editCount;c.bank=s.bindingBank;c.utility=o.utility;c.map=o.map;c.fresh=fresh;
     c.editable=s.bindingsEditable;c.equipmentKnown=s.equipmentKnown;c.beltKnown=s.beltKnown;
-    c.quick=s.quick;c.itemOptions=o.itemOptions;c.skills=s.skills;c.options=o.editOptions;c.sets=s.sets;c.belt=s.belt;c.cue=o.cue;c.leftCue=o.leftCue;c.location=s.location;c.companions=s.companions;c.effects=s.effects;c.leftStrikes=o.leftStrikes;return c;
+    c.quick=s.quick;c.itemOptions=o.itemOptions;c.skills=s.skills;c.options=o.editOptions;c.sets=s.sets;c.belt=s.belt;c.cue=o.cue;c.leftCue=o.leftCue;c.location=s.location;c.companions=s.companions;c.effects=s.effects;c.leftStrikes=o.leftStrikes;
+    c.glyphs=o.glyphs;c.glyphEdit=o.glyphEdit;c.glyphDraw=o.glyphDraw;
+    for(int i=0;i<GlyphShapes;++i)c.glyphSkills[size_t(i)]=GlyphSkill(s,o.glyphSkills[size_t(i)]);
+    return c;
 }
 inline bool LocationImageCurrent(const PaintContext& painted,const Snapshot& snapshot) {
     return painted.fresh&&painted.session==snapshot.session&&painted.location==snapshot.location;

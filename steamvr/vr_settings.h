@@ -24,7 +24,7 @@ namespace framevr::settings {
 enum class View : uint8_t { Presets, Body, Combat, Aim, Targets, Shield, Wrist, Interface, Survival, World, Vibration, Performance, Guide, WhatsNew, More, Count };
 enum Key { Motion, Seated, Dominant, Snap, TurnSpeed, Waist, BeltForward,
            Foveation, Sky, Fog, Ceiling, DrawDistance, ObjectDistance,
-           EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, VitalsTilt, HapticStrength, HapticMelee, HapticBowDraw, HapticBowRelease, HapticSpell, HapticInteraction, HapticAlert, HapticShortMelee, BloodVisor, BloodWipe, MeleeThrustSpeed, LootLabelSize, CompanionCounts, StrainVignette, OfflinePlayers, ShieldBashSpeed, DesktopOneEye, MapTopDown, MapRotate, FoveationStrength, StereoRendering, DeferGpuWait, TargetHighlight, HeartbeatStart, SpellLock, StaffPoint, LandingCircles, GroundAim, AimHighlights, HighlightRight, HighlightLeft, ElementalHands, EnemySight, BowLaser, ThrowLift, BottlePhysics, PropPhysics, CompanionAi, ShieldGrip, ShieldOut, ShieldUp, ShieldFollow, ShieldRoll, AimFollowsView, CompanionTactical, LeftHandStrikes, TorchFlame, FrameGeneration, FrameGenPreset, FrameGenScale, RunSpeed, RunWalkToggle, BodyPhysics, BigObjectDistance, FogDistance, LeatherMenu, LootBeamUnique, LootBeamSet, LootBeamRare, LootBeamRunes, LootBeamBrightness, CeilingTorches, ArcaneDecay, ArcaneFade, ManaThreshold, ArcaneIntensity, Count };
+           EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, VitalsTilt, HapticStrength, HapticMelee, HapticBowDraw, HapticBowRelease, HapticSpell, HapticInteraction, HapticAlert, HapticShortMelee, BloodVisor, BloodWipe, MeleeThrustSpeed, LootLabelSize, CompanionCounts, StrainVignette, OfflinePlayers, ShieldBashSpeed, DesktopOneEye, MapTopDown, MapRotate, FoveationStrength, StereoRendering, DeferGpuWait, TargetHighlight, HeartbeatStart, SpellLock, StaffPoint, LandingCircles, GroundAim, AimHighlights, HighlightRight, HighlightLeft, ElementalHands, EnemySight, BowLaser, ThrowLift, BottlePhysics, PropPhysics, CompanionAi, ShieldGrip, ShieldOut, ShieldUp, ShieldFollow, ShieldRoll, AimFollowsView, CompanionTactical, LeftHandStrikes, TorchFlame, FrameGeneration, FrameGenPreset, FrameGenScale, RunSpeed, RunWalkToggle, BodyPhysics, BigObjectDistance, FogDistance, LeatherMenu, LootBeamUnique, LootBeamSet, LootBeamRare, LootBeamRunes, LootBeamBrightness, CeilingTorches, ArcaneDecay, ArcaneFade, ManaThreshold, ArcaneIntensity, GlyphDraw, GlyphCircle, GlyphTriangle, GlyphSquare, GlyphLightning, GlyphSpiral, GlyphV, GlyphStar, GlyphWave, Count };
 // One bit per setting, 128 wide: two words, since MSVC has no 128-bit integer.
 struct ChangeMask {
     static constexpr int Bits=128;
@@ -182,8 +182,24 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"Fade animation", "Smoothly fade Arcane Decay in and out with mana changes", L"hud",L"arcane_fade",1,0,1,1},
     {"Mana threshold", "Mana percentage below which Arcane Decay activates", L"hud",L"mana_threshold_pct",50,5,90,5},
     {"Effect intensity", "Maximum opacity of the Arcane Decay visual warning", L"hud",L"arcane_intensity_pct",100,0,100,5},
+    // Glyph casting (glyph_cast.h; owner 2026-11-01): the hand-button slot that draws (skill_slots.h, 0..9;
+    // -1 none), set from the wheel's button picker ("Draw glyph"); and the skill on each of the eight
+    // shapes (glyph_recognizer.h order; a game skill id, -1 none), set on the wheel's GLYPHS page. Not
+    // in VR Settings: the wheel is their editor.
+    {"Draw glyph button", "The hand button that draws glyphs; -1 none", L"glyphs",L"draw_slot",-1,-1,9,1},
+    {"Circle glyph", "The skill a drawn circle casts", L"glyphs",L"circle",-1,-1,4095,1},
+    {"Triangle glyph", "The skill a drawn triangle casts", L"glyphs",L"triangle",-1,-1,4095,1},
+    {"Square glyph", "The skill a drawn square casts", L"glyphs",L"square",-1,-1,4095,1},
+    {"Lightning glyph", "The skill a drawn lightning bolt casts", L"glyphs",L"lightning",-1,-1,4095,1},
+    {"Spiral glyph", "The skill a drawn spiral casts", L"glyphs",L"spiral",-1,-1,4095,1},
+    {"V glyph", "The skill a drawn V casts", L"glyphs",L"v",-1,-1,4095,1},
+    {"Star glyph", "The skill a drawn star casts", L"glyphs",L"star",-1,-1,4095,1},
+    {"Wave glyph", "The skill a drawn wave casts", L"glyphs",L"wave",-1,-1,4095,1},
 }};
 using Values=std::array<float,Count>;
+// The setting holding the skill on glyph shape i (glyph_recognizer.h order).
+inline Key GlyphKey(int shape){return Key(GlyphCircle+shape);}
+static_assert(GlyphWave-GlyphCircle==7,"one key per glyph shape, in the recognizer's order");
 inline bool HapticKey(Key key){return key>=HapticStrength&&key<=HapticAlert;}
 // An outline's color per source (right hand, left hand; the eyes take the hand that would cast): 0 By range, else its hue.
 inline bool HighlightKey(Key key){return key==HighlightRight||key==HighlightLeft;}

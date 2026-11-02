@@ -10,13 +10,14 @@ int main() {
         Respec(0),Respec(1),Respec(2),Respec(3),Respec(4),Respec(5),Respec(6),Respec(7)};
     constexpr int Statics=int(sizeof statics/sizeof statics[0]);
     static_assert(Statics==6+RespecPictures,"every static picture checked");
-    const Region shared[]={Settings,Blood,Strain,Notice,BowLaser,ArcaneDecay};
+    const Region shared[]={Settings,Blood,Strain,Notice,BowLaser,ArcaneDecay,Glyph};
+    constexpr int Shared=int(sizeof shared/sizeof shared[0]);
     for(const auto& r:statics)assert(Inside(r,StaticWidth,StaticHeight));
     for(const auto& r:shared)assert(Inside(r,SharedWidth,SharedHeight));
     for(int i=0;i<Statics;++i)for(int j=i+1;j<Statics;++j)assert(Apart(statics[i],statics[j]));
-    for(int i=0;i<6;++i)for(int j=i+1;j<6;++j)assert(Apart(shared[i],shared[j]));
+    for(int i=0;i<Shared;++i)for(int j=i+1;j<Shared;++j)assert(Apart(shared[i],shared[j]));
     // The sizes the panels paint at, and the regions the transport's quads read.
-    assert(Settings.w==1280&&Settings.h==1024&&Blood.w==1024&&Strain.w==256&&Notice.w==512&&Notice.h==112&&BowLaser.w==64&&BowLaser.h==160&&ArcaneDecay.w==512&&ArcaneDecay.h==512);
+    assert(Settings.w==1280&&Settings.h==1024&&Blood.w==1024&&Strain.w==256&&Notice.w==512&&Notice.h==112&&BowLaser.w==64&&BowLaser.h==160&&ArcaneDecay.w==512&&ArcaneDecay.h==512&&Glyph.w==512&&Glyph.h==512);
     assert(Pointer.w==64&&Pointer.h==96&&Compass.w==1536&&Compass.h==112);
     // The leather region holds the largest art the cache may carry, and the stand-in.
     assert(Leather.w==framevr::leather::MaxArtWidth&&Leather.h==framevr::leather::MaxArtHeight);
@@ -29,7 +30,7 @@ int main() {
     // Apart is strict: touching or closer than Gap is not apart; a gap of exactly Gap is.
     assert(!Apart({0,0,10,10},{10,0,10,10})&&!Apart({0,0,10,10},{17,0,10,10})&&Apart({0,0,10,10},{18,0,10,10}));
     assert(!Inside({0,0,10,10},9,10)&&!Inside({-1,0,1,1},10,10)&&Inside({0,0,10,10},10,10));
-    std::printf("Panel atlases: static %dx%d (%d pictures), shared %dx%d (6 panels), all inside and %d texels apart\n",
-        StaticWidth,StaticHeight,Statics,SharedWidth,SharedHeight,Gap);
+    std::printf("Panel atlases: static %dx%d (%d pictures), shared %dx%d (%d panels), all inside and %d texels apart\n",
+        StaticWidth,StaticHeight,Statics,SharedWidth,SharedHeight,Shared,Gap);
     return 0;
 }

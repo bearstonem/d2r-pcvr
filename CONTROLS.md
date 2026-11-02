@@ -58,6 +58,7 @@ Quest left X/Y correspond to Index left A/B; right A/B labels are the same.
 | Open or close a hand wheel | Click that hand's thumbstick; it stays open without holding, and reopens on that hand's last page (Map or Equipment; **SPELLS** goes back), and its skill editor on the last tree you picked, until a new game |
 | Switch to the other wheel | Click the other thumbstick |
 | Assign a button | Opposite hand's laser + trigger: select a wedge, then a skill |
+| Cast a buff by drawing a glyph | Hold your **Draw glyph** button, draw a shape in the air and let go: the skill on that shape is cast. See [Glyph casting](#glyph-casting) |
 | Use an inventory item | Either wheel > **QUICK USE**: point with the opposite hand and briefly click its trigger; use happens on release |
 | Assign / change quick-use item | Hold the trigger over **QUICK USE** for 0.65 seconds, then select a carried scroll, tome or other usable item. An empty slot also opens the picker on a short click. **CLEAR SLOT** removes the assignment |
 | Walk / run speed | VR Settings > **Body** > **Movement speed** (Hands and moving), then Apply: **Walk**; **Base run** (your class's run with no speed bonus); **Run 10%…90%** of the way up; **Full run** (the default, the full speed your gear and skills give). Saved to `[gameplay] run_speed_pct`; the game's own run / walk toggle is kept in line with it. Movement skills keep their own speed, and it never runs faster than the game. With **Stick toggle** beside it on (Off by default; `[gameplay] run_walk_toggle`), push the **right stick up** to switch between walking and that run (from Walk, the full run) |
@@ -321,6 +322,43 @@ These are underlying **native gamepad slots**, not physical VR button labels.
 Native duplicate-assignment rules still apply: assigning a skill may clear its
 previous native slot. Native menus show their usual gamepad prompts. The mod
 does not directly edit saves or invent extra game-owned skill records.
+
+### Glyph casting
+
+Draw a shape in the air to cast a buff, an aura or another skill that needs no
+target: armors, warcries, auras, Energy Shield, summons and the like.
+
+1. Choose the button that draws: open a hand's wheel, select one of its
+   wedges and pick **Draw glyph** (last under **General / Items**). That button
+   now draws and casts nothing else; its game skill is cleared. Putting a skill
+   back on it, or **CLEAR SLOT**, stops it drawing.
+2. Give the shapes their skills: the wheel's **GLYPHS** box (upper right, on the
+   spells and equipment pages) opens a page of eight shapes: circle, triangle,
+   square, lightning bolt, spiral, V, star and wave. Select a shape, then the
+   skill it casts; the list holds your hero's own skills that need no target.
+   **CLEAR GLYPH** takes its skill off; **BACK** keeps it.
+3. In play, hold the Draw glyph button and draw the shape in front of you, like
+   writing on a window: one stroke, at least about 12 cm across, in under four
+   seconds. Where you start and which way round you go don't matter; the
+   triangle points up and the V opens up, and the lightning bolt runs from the
+   top down. Let go to cast.
+
+The line glows pale while you draw. A recognised glyph flashes in the colour of
+its skill (fire orange, cold blue, lightning white, poison green, holy gold,
+warcries red...) and fades over two seconds; one that isn't recognised, or has
+no skill, turns grey and fades quickly with a short buzz. Opening a wheel or
+losing tracking mid-stroke cancels it.
+
+The skill is cast by a native button press, so mana, cast rate, the buff and its
+sound stay the game's: the skill's own hand button when it is on one, else the
+game's **right-trigger** skill slot (native slot RT, which no hand button
+reaches in VR). A shape's skill is put on that slot when you first draw it, the
+way the game assigns any skill; like every assignment the game saves it with
+the character and weapon set, and a skill you had on RT in a plain controller
+layout is replaced. The shapes are shared by all your characters: a shape whose
+skill your hero lacks shows **Another hero's** and casts nothing. Settings:
+`[glyphs]` in the profile INI (`draw_slot`, and one skill id per shape), edited
+from the wheel only.
 
 ## Weapon skill gestures
 

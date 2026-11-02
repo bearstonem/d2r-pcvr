@@ -65,31 +65,40 @@ int Slot(int wheel) {
     return reinterpret_cast<int(*)(int,bool)>(d2rsig::Addr(abi::ButtonSlotRva))(
         framevr::skills::Buttons(wheel),framevr::skills::Alternate(wheel));
 }
-// Glyph casting's probe (owner 2026-11-01, "probe the 6 spare slots"): the game keeps 16 controller
-// binding records per weapon set and the hand buttons reach 10 of them. Once a session, ask the
-// game's own lookup which record each pad button answers to, alone and with LT, and log what the
-// 16 records of both sets hold. A lookup and reads only: nothing is pressed, assigned or written.
-void ProbeButtonSlots() {
-    static uint64_t told=0;
-    if(told&&GetTickCount64()-told<60000)return;   // once a game (Read runs while one is loaded)
-    told=GetTickCount64();
-    const auto lookup=reinterpret_cast<int(*)(int,bool)>(d2rsig::Addr(abi::ButtonSlotRva));
-    static const char* const names[16]={"DPAD_UP","DPAD_DOWN","DPAD_LEFT","DPAD_RIGHT","START","BACK","LS","RS",
-                                        "LB","RB","bit10","bit11","A","B","X","Y"};
-    char line[900];int at=std::snprintf(line,sizeof line,"Frame glyph probe: ButtonSlot (button: record alone/with LT):");
-    for(int bit=0;bit<16&&at<int(sizeof line)-40;++bit)
-        at+=std::snprintf(line+at,sizeof line-size_t(at)," %s=%d/%d",names[bit],lookup(1<<bit,false),lookup(1<<bit,true));
-    framevr::logging::Write(line);
-    for(int bank:{0,16}) {
-        at=std::snprintf(line,sizeof line,"Frame glyph probe: bank %d records (skill/owner):",bank);
-        for(int r=0;r<16&&at<int(sizeof line)-24;++r) {
-            framevr::interaction::ControllerBinding v;
-            if(framevr::interaction::ReadControllerBinding(d2rsig::Addr(abi::ControllerTableRva),bank,r,[](uintptr_t p,auto& x){return Read(p,x);},v))
-                at+=std::snprintf(line+at,sizeof line-size_t(at)," %d=%d/%d",r,v.skill,v.owner);
-            else at+=std::snprintf(line+at,sizeof line-size_t(at)," %d=?",r);
-        }
-        framevr::logging::Write(line);
+// Glyph casting (glyph_cast.h): the game's own button bit for the right trigger. Asked of ButtonSlot
+// (2026-11-01, lookups only) it answers record 5 alone and 11 with LT, two of the six records no hand
+// button reaches; the mod never presses the game's right trigger otherwise.
+constexpr int RightTriggerButton=0x0800;
+int GlyphRecord(){return reinterpret_cast<int(*)(int,bool)>(d2rsig::Addr(abi::ButtonSlotRva))(RightTriggerButton,false);}
+// Whether the native setter takes the skill as a left skill (its row's flag, or Interact / Loot /
+// Cube loot); false when the hero has no such skill.
+bool LeftSkill(int skill,int owner,bool& left) {
+    left=skill==357||skill==358||skill==370;
+    if(skill<0||skill==357)return true;
+    const int index=reinterpret_cast<int(*)()>(d2rsig::Addr(abi::LocalIndexRva))();
+    if(index<0||index>=8)return false;
+    const auto player=reinterpret_cast<uintptr_t(*)(int)>(d2rsig::Addr(abi::ClientPlayerRva))(index);
+    const auto lookup=reinterpret_cast<uintptr_t(*)(uintptr_t,int,int)>(d2rsig::Addr(abi::SkillRva));
+    auto node=lookup(player,skill==359?219:skill,owner);
+    if(skill==359) {
+        int level=0;
+        if(!node||!Read(node+0x48,level)||level<=0)node=lookup(player,220,-1);
     }
+    uintptr_t row=0;uint8_t flag=0;
+    if(!node||!Read(node,row)||!Read(row+0x27,flag))return false;
+    left=left||(flag&0x40)!=0;
+    return true;
+}
+struct AssignArgs {int slot,skill,owner;bool left;};
+// The native setter chooses its table through the controller getter. Scope that choice to this
+// synchronous UI-thread operation; do not alter the user's desktop input mode or write to their
+// save/skill records ourselves.
+bool NativeAssign(AssignArgs args) {
+    return panelinput::ControllerAction(+[](void* data){
+        const auto& a=*static_cast<AssignArgs*>(data);
+        if(a.skill<0)reinterpret_cast<void(*)(int)>(d2rsig::Addr(abi::ClearSkillRva))(a.slot);
+        else reinterpret_cast<void(*)(int,bool,int,int)>(d2rsig::Addr(abi::AssignSkillRva))(a.slot,a.left,a.skill,a.owner);
+    },&args);
 }
 const char* SkillKey(int id,char key[80]) {
     // Original localization keys are not fully regular across the expansion.
@@ -370,7 +379,6 @@ void Capture(framevr::interaction::Snapshot& s) {
     if(!Read(player+0x100,skillList)||skillList<0x10000)return;
     const int bank=reinterpret_cast<int(*)()>(d2rsig::Addr(abi::ControllerBankRva))();
     if(bank!=0&&bank!=16)return;
-    ProbeButtonSlots();
     s.bindingBank=bank;
     unsigned usedSlots=0;
     for(int i=0;i<framevr::skills::Count;++i){
@@ -380,6 +388,12 @@ void Capture(framevr::interaction::Snapshot& s) {
         // a different slot. Equipment, vitals and native menus remain usable.
         if(slot<0||slot>=16||(usedSlots&(1u<<slot)))return;
         usedSlots|=1u<<slot;
+    }
+    // Glyph casting: the right trigger's record and its skill, unless a hand button reaches it.
+    if(const int record=GlyphRecord();record>=0&&record<16&&!(usedSlots&(1u<<record))) {
+        framevr::interaction::ControllerBinding binding;
+        if(framevr::interaction::ReadControllerBinding(d2rsig::Addr(abi::ControllerTableRva),bank,record,
+            [](uintptr_t p,auto& value){return Read(p,value);},binding)){s.glyphRecord=record;s.glyphSkill=binding.skill;s.glyphOwner=binding.owner;}
     }
     for(int i=0;i<framevr::skills::Count;++i) {
         const int slot=Slot(i);
@@ -475,34 +489,26 @@ bool Assign(const framevr::interaction::Request& r,const framevr::interaction::S
     const int slot=Slot(r.index);
     const int bank=reinterpret_cast<int(*)()>(d2rsig::Addr(abi::ControllerBankRva))();
     if(slot<0||slot>=16||bank!=r.bank)return false;
-    bool left=r.skill==357;
-    if(r.skill>=0&&r.skill!=357) {
-        const int index=reinterpret_cast<int(*)()>(d2rsig::Addr(abi::LocalIndexRva))();
-        if(index<0||index>=8)return false;
-        const auto player=reinterpret_cast<uintptr_t(*)(int)>(d2rsig::Addr(abi::ClientPlayerRva))(index);
-        const auto lookup=reinterpret_cast<uintptr_t(*)(uintptr_t,int,int)>(d2rsig::Addr(abi::SkillRva));
-        auto node=lookup(player,r.skill==359?219:r.skill,r.skillOwner);
-        if(r.skill==359) {
-            int level=0;
-            if(!node||!Read(node+0x48,level)||level<=0)node=lookup(player,220,-1);
-        }
-        uintptr_t row=0;uint8_t flag=0;
-        if(!node||!Read(node,row)||!Read(row+0x27,flag))return false;
-        left=(flag&0x40)!=0||r.skill==357||r.skill==358||r.skill==370;
-    }
-    struct Args {int slot,skill,owner;bool left;} args{slot,r.skill,r.skillOwner,left};
-    // The native setter chooses its table through the controller getter. Scope
-    // that choice to this synchronous UI-thread operation; do not alter the
-    // user's desktop input mode or write to their save/skill records ourselves.
-    if(!panelinput::ControllerAction(+[](void* data){
-        const auto& a=*static_cast<Args*>(data);
-        if(a.skill<0)reinterpret_cast<void(*)(int)>(d2rsig::Addr(abi::ClearSkillRva))(a.slot);
-        else reinterpret_cast<void(*)(int,bool,int,int)>(d2rsig::Addr(abi::AssignSkillRva))(a.slot,a.left,a.skill,a.owner);
-    },&args))return false;
+    bool left=false;
+    if(!LeftSkill(r.skill,r.skillOwner,left)||!NativeAssign({slot,r.skill,r.skillOwner,left}))return false;
     framevr::interaction::ControllerBinding value;
     const bool applied=framevr::interaction::ReadControllerBinding(d2rsig::Addr(abi::ControllerTableRva),bank,slot,
         [](uintptr_t p,auto& v){return Read(p,v);},value)&&value.skill==r.skill&&value.owner==r.skillOwner;
     char line[160];std::snprintf(line,sizeof line,"Frame skill editor: slot=%d bank=%d skill=%d native readback=%s",r.index,bank,r.skill,applied?"confirmed":"refused");
+    framevr::logging::Write(line);return applied;
+}
+bool Park(int skill,int owner,const framevr::interaction::Snapshot& current,uint64_t session) {
+    if(!Ready()||!BindingReady()||skill<0||!framevr::interaction::Fresh(current,session,GetTickCount64())||
+       !current.bindingsEditable||current.glyphRecord<0)return false;
+    const int bank=reinterpret_cast<int(*)()>(d2rsig::Addr(abi::ControllerBankRva))();
+    const int record=GlyphRecord();
+    if(bank!=current.bindingBank||record!=current.glyphRecord)return false;
+    bool left=false;
+    if(!LeftSkill(skill,owner,left)||!NativeAssign({record,skill,owner,left}))return false;
+    framevr::interaction::ControllerBinding value;
+    const bool applied=framevr::interaction::ReadControllerBinding(d2rsig::Addr(abi::ControllerTableRva),bank,record,
+        [](uintptr_t p,auto& v){return Read(p,v);},value)&&value.skill==skill&&value.owner==owner;
+    char line[160];std::snprintf(line,sizeof line,"Frame glyph: skill %d put on the right trigger's record %d (bank %d), native readback %s",skill,record,bank,applied?"confirmed":"refused");
     framevr::logging::Write(line);return applied;
 }
 }
