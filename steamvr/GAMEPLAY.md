@@ -220,7 +220,7 @@ The game's native item/filter rules apply. Inventory tooltips and monster labels
 keep their styling.
 
 **Choosing which item Interact picks up (native VR).** VR Settings > Interface >
-Labels and bars > **Loot pick**: Off (default) or On. With several items on the
+Labels and bars > **Loot pick**: On (default) or Off. With several items on the
 floor, Interact (right A by default) takes the item you point at rather than the
 game's nearest one. Hold your dominant hand (VR Settings > Body > Dominant hand)
 out, at least 12 cm from your head measured level, and point at an item: the item nearest

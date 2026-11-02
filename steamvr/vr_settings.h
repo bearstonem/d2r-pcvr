@@ -196,7 +196,8 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"Star glyph", "The skill a drawn star casts", L"glyphs",L"star",-1,-1,4095,1},
     {"Wave glyph", "The skill a drawn wave casts", L"glyphs",L"wave",-1,-1,4095,1},
     // Loot pick (loot_aim.h): 0 Off, A takes the game's nearest item; 1 On, the item you point at. VR Settings > Interface.
-    {"Loot pick", "A picks up the item you point at, not the nearest", L"interactions",L"loot_pick",0,0,1,1},
+    // On by default (owner 2026-11-01, after headset play: "let's make it so it is on by default").
+    {"Loot pick", "A picks up the item you point at, not the nearest", L"interactions",L"loot_pick",1,0,1,1},
 }};
 using Values=std::array<float,Count>;
 // The setting holding the skill on glyph shape i (glyph_recognizer.h order).
@@ -233,7 +234,7 @@ inline float Normalize(Key key,float value){
     if(key==OfflinePlayers&&(value<0||value>8||std::floor(value)!=value))return 0;
     if(key==BowLaser&&value<0)return LaserOff;
     if(key==LeftHandStrikes)return std::round(value)==1?1.f:0.f;   // the retired 2 (Basic attack) reads Own trigger skill
-    if(key==LootPick)return std::round(value)==1||std::round(value)==2?1.f:0.f;   // the retired 2 (On with glow) reads On
+    if(key==LootPick)return std::round(value)==0?0.f:1.f;   // only 0 is Off: the retired 2 (On with glow), or any other, reads On (the default)
     if(key==HeartbeatStart)return std::clamp(std::round(value/10)*10,d.min,d.max);   // 0 = Off, else a 10% step
     if(key==BigObjectDistance)return farobjects::Normalize(value);   // 0 = Off, else 300 - 1000
     if(key==ShieldFollow||key==ShieldRoll)return std::clamp(std::round(value/d.step)*d.step,d.min,d.max)+0.f;   // whole steps, as skel::shield::FollowSetting / RollSetting

@@ -3076,7 +3076,7 @@ bool AimOn(framevr::settings::Key key) {
 int GroundAimMode() { aimsettings::Refresh(); return aimsettings::ground.load(); }
 bool SpellsLocked() { aimsettings::Refresh(); return (aimsettings::lock.load() & 1) != 0; }
 bool BowSkillsLocked() { aimsettings::Refresh(); return (aimsettings::lock.load() & 2) != 0; }
-// VR Settings > Interface > Loot pick (Off by default): A takes the item you point at (lootaimvr).
+// VR Settings > Interface > Loot pick (On by default): A takes the item you point at (lootaimvr).
 bool LootPickOn() { return AimOn(framevr::settings::LootPick); }
 // VR Settings > Aim > Aim with your view (Off by default): the eyes' tunnel,
 // the hands' wedge and a raised hand aiming alone (aimtargets).

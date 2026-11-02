@@ -116,7 +116,7 @@ does not wait for an item to come into range. Release and press again for each
 new target. A release during an inventory/NPC menu rearms interaction; holding
 the button through a menu or game-session change cannot reuse the old target.
 
-**VR Settings > Interface > Loot pick** (Off by default): with several items on
+**VR Settings > Interface > Loot pick** (On by default): with several items on
 the floor, Interact takes the one you point at, not the nearest. Hold your
 dominant hand (**Body > Dominant hand**) out and point at the item: its name
 shows, even far away, with a thin pulsing rim. Within the pick-up reach (4 cells)

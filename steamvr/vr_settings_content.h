@@ -536,7 +536,7 @@ inline constexpr Override Overrides[]={
     {.id="hud.labels_size",.page=View::Interface,.section="Labels and bars",.kind=RowKind::Slider,.label="Loot name size",
      .help="Size of item names on the ground; 45% is the game's size. Hold the right stick down to show every nearby name.",
      .format={.unit="%"}},
-    // Loot pick (#257; loot_aim.h): which dropped item A takes. Off: the game's nearest, as before. The right
+    // Loot pick (#257; loot_aim.h): which dropped item A takes, On by default. Off: the game's nearest. The right
     // half of Loot name size's row: Interface holds 8 rows (Arcane Decay, main's #395, took the last).
     {.id="interactions.loot_pick",.page=View::Interface,.section="Labels and bars",.kind=RowKind::Toggle,.label="Loot pick",
      .help="Hold your arm out and point at an item: A picks up that one, not the nearest, and its name shows. Too far away, A takes nothing.",
