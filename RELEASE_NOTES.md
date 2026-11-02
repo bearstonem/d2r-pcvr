@@ -24,7 +24,8 @@ tactical commands, and makes Unleashed melee fairer.
   buttons. Werewolf and Werebear now carry the wheel's GESTURE tag, and skills
   that lock onto a monster (Charge, Leap Attack and others) now find it reliably.
 - **Mercenary tactical commands - contributed by Mcklem:** Point at your
-  mercenary, hold **Grip** and pull **Trigger**, aim and let go:
+  mercenary, or the ground at its feet, hold **Grip** and pull **Trigger**, aim
+  and let go:
   - at the ground, it walks there and holds;
   - at a monster, it focuses it;
   - on the mercenary itself, it holds its place, or regroups if it was holding.
