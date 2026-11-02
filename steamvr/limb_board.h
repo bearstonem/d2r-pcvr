@@ -26,6 +26,10 @@ public:
     // The hook's counters, for the physics' log line.
     std::atomic<unsigned> posed{0},bent{0},refused{0},learned{0};
     std::atomic<unsigned> kept{0},restored{0};   // the game had not posed a body again (its own pose kept); a bent one put back
+    // The skeleton hook's own cost (owner 2026-11-01: a player measured 10-15 fps with frame generation on):
+    // bodies skipped as beyond the radius, the hook's calls for bodies, and its time in microseconds.
+    std::atomic<unsigned> outside{0},calls{0};
+    std::atomic<uint64_t> micros{0};
     // This body's pose, in place of its last; the stalest goes when full.
     void Pose(const Rig& r) {
         std::lock_guard lock(mutex);

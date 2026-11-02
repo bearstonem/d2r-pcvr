@@ -333,6 +333,7 @@ struct Settings {
     std::atomic<bool>  hideHead{false};     // hide the hero's head from the eyes (first person): shrunk, or cut (headShadow)
     std::atomic<bool>  headShadow{true};    // [arms] head_shadow: the hidden head stays whole for its shadow, the eye views cut it (head_shadow.h)
     std::atomic<float> armScale{1.0f};      // reach on top of the hero/user height ratio
+    std::atomic<float> bodyRadius{3.0f};    // [bodies] radius: metres round the hero whose bodies are pushable (skel::SetLimbs)
     std::atomic<bool>  bodywalkPad{true};   // [input] bodywalk_pad: the game's pad is BodyWalk's own report (pad_mirror_shared.h) - no virtual pad needed
     std::atomic<int>   inventoryPad{0};     // [input] inventory_button: the pad button "D2R: Inventory" sends - 0 Menu (Start), 1 View (Back)
     std::atomic<bool>  aAttackOnly{false};  // [input] a_attack_only: pad A never picks up or interacts; "D2R: Pick up / interact" does
@@ -882,6 +883,7 @@ void LoadSettings() {
     framevr::ConfigureBottlePhysics(IniB(L"interactions",L"bottle_physics",true));
     framevr::ConfigurePropPhysics(IniB(L"interactions",L"prop_physics",true));
     framevr::ConfigureBodyPhysics(IniB(L"interactions",L"body_physics",true));
+    g_set.bodyRadius.store(IniF(L"bodies", L"radius", 3.0f));   // clamped 1.5..8 by skel::SetLimbs
     {   // [bodies]: how bodies react (limb_tuning.h), live; DEV > Bodies steps and saves them
         framevr::limbs::Tuning tuning;
         for (int k = 0; k < framevr::limbs::Knobs; ++k) {
@@ -7585,7 +7587,7 @@ void PushArms() {
 #ifdef D2RVR_NATIVE_OPENXR
     // Bodies that give way: in first person with physical melee, the hook
     // posts the monsters and townsfolk within reach of the hero.
-    skel::SetLimbs(own && heroPlaced && framevr::BodyPhysics(), hero, std::max(1.f, ScaleHeight()) / UserEyeHeightM());
+    skel::SetLimbs(own && heroPlaced && framevr::BodyPhysics(), hero, std::max(1.f, ScaleHeight()) / UserEyeHeightM(), g_set.bodyRadius.load());
 #endif
     in.mode = own ? ArmsMode() : 0;
     // From behind the game animates all of him, but he still turns with the
