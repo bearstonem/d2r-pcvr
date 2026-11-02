@@ -219,6 +219,48 @@ there is no saved toggle or automatic resume.
 The game's native item/filter rules apply. Inventory tooltips and monster labels
 keep their styling.
 
+**Choosing which item Interact picks up (native VR).** VR Settings > Interface >
+Labels and bars > **Loot pick**: Off (default) or On. With several items on the
+floor, Interact (right A by default) takes the item you point at rather than the
+game's nearest one. Hold your dominant hand (VR Settings > Body > Dominant hand)
+out, at least 12 cm from your head measured level, and point at an item: the item nearest
+the spot where the hand's ray meets the floor is chosen, within 1.5 cells of that
+spot and up to 40 cells from the hero. Lowering the arm (6 cm nearer) lets the
+item go. Between two items side by side the current choice stays until the other
+is a quarter cell nearer, and out to 130% of the 1.5 cells. The hand keeps
+pointing while the mod's motion controls pause for a moment in the world (an
+interaction starting, a slow frame); in game menus, VR Settings and the skill
+wheel it does not, and with the map open only while motion controls are on. If
+no item is pointed at, the game's own target is used, including doors, chests,
+waypoints and NPCs. A pointed item comes first: pointing at the loot at a chest's
+foot picks up the loot.
+
+The pointed item's name shows even where the game would show none: while you
+point at it, the mod holds the game's Show items for that one name and hides the
+others, which come back when you lower the arm. Holding the right stick down
+shows every name, as before. A pointed item within the pick-up reach (4 cells by
+default) is drawn with a thin rim in its rarity color (white normal and runes,
+gray socketed or ethereal, blue magic, green set, yellow rare, gold unique, orange
+crafted), a dark shade of that color behind the name, and the name at 180% of
+its size. Farther away the rim is red, the box stays the game's own and the name
+is at 130%: A does not pick that item up and the hero does not walk to it; the
+game's nearest item is not taken instead. Doors, waypoints and NPCs the game
+targets keep working. Step closer or point at a nearer item. Each rim pulses
+gently. With no item pointed at, the item the game itself would pick up (if any)
+shows the same look. With A set to attack only, the game's "Interact" prompt
+keeps naming its nearest item while the rim shows the pointed one; Interact still
+takes the pointed one. The item list comes from the hero's rooms, the walk the
+Kurast sewer entrance search uses; it has no line-of-sight test, so an item just
+behind a wall can be chosen and the hero walks around to it. The reach is INI
+only:
+
+```ini
+[interactions]
+loot_pick_reach_cells=4 ; 0 = no limit (A walks to the chosen item), up to 40
+```
+
+Desktop play is unchanged.
+
 The minimap and compass form one navigation display on your left hand.
 **VR Settings > Wrist > Map and compass** offers **Wrist** (default),
 **Palm**, **Wrist or palm**, or **Off**. Click **Apply** to save. Both appear and hide
