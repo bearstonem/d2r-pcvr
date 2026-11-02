@@ -2261,9 +2261,13 @@ tags it GESTURE ("Raise, bring down").
 ### Glyph casting
 
 A hand button bound to **Draw glyph** (the hand wheel's button picker) draws: while it is
-held, the drawing hand's aim point is kept as a stroke on the upright plane facing the
-player as it began (a point every 6 mm, at most 800); letting go recognises it
-(`steamvr/glyph_recognizer.h`) and casts the skill the player put on that shape on the
+held, the drawing hand's aim point is kept as a stroke in the room (a point every 6 mm, at
+most 800), and for its trail on the upright plane facing the player as it began; letting
+go flattens it onto the plane it was drawn in (`glyphs::Flatten`: the best fit through its
+points, up as near the room's up as that plane allows, away from the player on one lying
+nearly flat; a path deeper than half its next extent, or a line, stays on the facing
+plane), recognises it (`steamvr/glyph_recognizer.h`) and casts the skill the player put on
+that shape on the
 wheel's GLYPHS page (`[glyphs] circle ... wave`, skill ids; `draw_slot`, 0-9 or -1). The
 press is never a native cast (the transport drops it from the hand slots and from the
 physical spells). A wheel, a held bottle, a native menu, a grip change on a face button or
@@ -2271,13 +2275,21 @@ lost tracking cancels the stroke; the button still held but no longer the press 
 cancel, not a release.
 
 Recognition: $P point clouds (32 points, direction and start free, upright) against
-procedural templates, gated by sharp corners (45-degree turns) and each shape's build
-(closed shapes end near their start; the V and the wave run one way across, the bolt one
-way down). Refused: smaller than 12 cm, shorter than 25 cm of path, flatter than 1:5,
-held over 4 s, a match score over 2.0, or two shapes within 0.14 of each other.
-`glyph-recognizer-test` draws each shape 42 ways (wobble, stretch, turn, start, either way
-round, uneven speed) over six seeds: 98-99% recognised, none as another shape, at most 3%
-of random scribbles cast.
+procedural templates. The stroke is compared as drawn and mirrored left to right (a bolt
+zigzagging either way, a wave starting up or down, a spiral either way round), each turned
+0, 10 and 20 degrees either way, and brought up to 1.4 times towards each shape's
+proportions (a square drawn as a rectangle, or seen from an angle); never turned far, so a
+V is not a caret. Gated by sharp corners (45-degree turns; a wave may have 3 to 7, two
+swells or three and a half) and each shape's build (closed shapes end near their start;
+the V and the wave run one way across, the bolt one way down). Refused: smaller than 12 cm,
+shorter than 25 cm of path, flatter than 1:5, held over 4 s, a match score over 1.8, or two
+shapes within 0.14 of each other. `glyph-recognizer-test` draws each shape 54 ways (wobble,
+stretch, turn, start, backwards, mirrored, uneven speed), then 40 more in each of the four
+directions (as drawn, backwards, mirrored, both) started anywhere, turned up to 0.3 rad and
+.75 to 1.35 as wide: over twelve seeds at least 95% recognised in every direction (431-432
+of the 432 fixed drawings), none as another shape, at most 4.5% of random scribbles cast.
+It also draws shapes in the room on planes turned 60 degrees, tilted back 60 degrees or
+lying nearly flat, with the arm's arc, and flattens them.
 
 Cast (`steamvr/glyph_cast.h`): the skill's own hand slot when it is on one (pressed as Holy
 Shield's sign does: 65 ms, 180 ms for an LT slot); else the game's right-trigger record.
@@ -2303,8 +2315,9 @@ tree), from 45% of it the exit; refused, grey ash over 0.8 s. Each look is a pal
 some of: a smear carried up or down off the line through scrolling noise (flames, mist,
 rays, smoke), particles (embers, ice shards, sparks, drops, bubbles, motes, spores, chips,
 blades), arcs re-jittered 24 times a second, echoes of the line by distance, and its exit
-(burning edge, cracking cells, flicker, noise dissolve). Logs: `Frame glyph:` (each glyph with its score, the next shape's, corners and
-time, and the way it cast or why not; each record change). Tests: `glyph-trail-test`,
+(burning edge, cracking cells, flicker, noise dissolve). Logs: `Frame glyph:` (each glyph with its score, the next shape's, corners,
+time and the plane it was flattened onto, and the way it cast or why not; a refused
+stroke's 24 points in cm; each record change). Tests: `glyph-trail-test`,
 `glyph-cast-test`, the picker and GLYPHS page in `skill-categories-test`, and the art in
 `interaction-glyphs-test`.
 
