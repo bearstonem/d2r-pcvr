@@ -20,6 +20,23 @@ import uninstall_windows as uninstall
 
 
 class InstallationTests(unittest.TestCase):
+    def test_shader_files_are_found_by_pattern_and_missing_ones_stop_the_install(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'reshade').mkdir()
+            with self.assertRaises(SystemExit) as stop:   # no effect at all
+                install.reshade_shader_files(root)
+            self.assertIn('D2R_DepthFog.fx is missing', str(stop.exception))
+            (root / 'reshade/D2R_DepthFog.fx').write_text('// effect\n#include "D2R_Fog.fxh"\n#include "D2R_Sky.fxh"\n', encoding='utf-8')
+            (root / 'reshade/D2R_Fog.fxh').write_text('// header\n', encoding='utf-8')
+            with self.assertRaises(SystemExit) as stop:   # a header the effect includes is not in the source
+                install.reshade_shader_files(root)
+            self.assertIn('D2R_Sky.fxh', str(stop.exception))
+            (root / 'reshade/D2R_Sky.fxh').write_text('// header\n', encoding='utf-8')
+            (root / 'reshade/D2R_Other.txt').write_text('not a shader\n', encoding='utf-8')
+            self.assertEqual(install.reshade_shader_files(root), ['D2R_DepthFog.fx', 'D2R_Fog.fxh', 'D2R_Sky.fxh'])
+        self.assertEqual(install.reshade_shader_files(install.ROOT), sorted(p.name for pat in ('D2R_*.fx', 'D2R_*.fxh') for p in (install.ROOT / 'reshade').glob(pat)))
+
     def test_install_restore_keeps_progress_and_stock_executable(self):
         self.install_round_trip('steam')
 
@@ -178,6 +195,9 @@ class InstallationTests(unittest.TestCase):
                 self.assertTrue((mod / 'reshade/ReShade.ini').is_file())
                 self.assertTrue((mod / 'reshade/D2R_Frame_ReShade.ini').is_file())
                 self.assertTrue((mod / 'reshade/reshade-shaders/Shaders/D2R_DepthFog.fx').is_file())
+                # the effect and every feature header (the shader is split into D2R_*.fxh files), by pattern
+                for shader in sorted(p.name for pattern in ('D2R_*.fx', 'D2R_*.fxh') for p in (install.ROOT / 'reshade').glob(pattern)):
+                    self.assertEqual((mod / 'reshade/reshade-shaders/Shaders' / shader).read_bytes(), (install.ROOT / 'reshade' / shader).read_bytes())
                 self.assertEqual((mod_plugins / 'openxr_loader.dll').read_bytes(), b'fixture xr loader')
                 self.assertEqual((mod_plugins / 'd2rl-pcvr.dll').read_bytes(), b'fixture plugin')
                 ofxr_dir = mod_plugins / 'ofxr'
