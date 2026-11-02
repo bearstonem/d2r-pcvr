@@ -2267,8 +2267,10 @@ go flattens it onto the plane it was drawn in (`glyphs::Flatten`: the best fit t
 points, up as near the room's up as that plane allows, away from the player on one lying
 nearly flat; a path deeper than half its next extent, or a line, stays on the facing
 plane), recognises it (`steamvr/glyph_recognizer.h`) and casts the skill the player put on
-that shape on the
-wheel's GLYPHS page (`[glyphs] circle ... wave`, skill ids; `draw_slot`, 0-9 or -1). The
+that shape on the wheel's GLYPHS page (`[glyphs] circle ... wave`, skill ids; `draw_slot`,
+0-9 or -1). Its picker offers the hero's skills that need no target and Town Portal (359,
+the game's shortcut: a scroll if there is one, else the tome; a hand slot holding it reads
+as 219 or 220), not Interact. The
 press is never a native cast (the transport drops it from the hand slots and from the
 physical spells). A wheel, a held bottle, a native menu, a grip change on a face button or
 lost tracking cancels the stroke; the button still held but no longer the press is a

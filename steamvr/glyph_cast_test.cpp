@@ -69,6 +69,14 @@ int main() {
     Check(Dispatch(138, -1, slots, 155, -1).how == How::Park, "else: put it on the record");
     Check(Dispatch(-1, -1, slots, -1, -1).how == How::None, "no skill on the glyph: nothing");
     Check(Dispatch(149, 3, slots, -1, -1).how == How::Park, "an item's skill (another owner) is not the class skill");
+    {   // Town Portal (359): its slot reads as the tome (220) or a scroll (219) it will use
+        auto portal = slots;
+        portal[6] = {220, -1, true, true};
+        Check(Dispatch(359, -1, portal, -1, -1).how == How::Slot && Dispatch(359, -1, portal, -1, -1).slot == 6, "Town Portal on a button (the tome): that button");
+        portal[6] = {219, -1, true, true};
+        Check(Dispatch(359, -1, portal, -1, -1).slot == 6, "Town Portal on a button (a scroll): that button");
+        Check(Dispatch(359, -1, slots, 359, -1).how == How::Record && Dispatch(359, -1, slots, 70, -1).how == How::Park, "else the right trigger's record, as any skill");
+    }
     {   // a park waits for the record, then presses RT for PressSeconds
         Cast c; c.Begin(Dispatch(138, -1, slots, 155, -1), 138, -1, 5.0);
         Check(c.state == Cast::State::Waiting && !c.Step(5.1, 155, -1).rt, "waiting: no press yet");

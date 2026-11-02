@@ -9,12 +9,14 @@
 //
 // Cast: the skill the player put on that shape is cast through a native button press, so mana, cast
 // rate, the buff and its sound stay the game's. In order (Plan):
-//   1. the skill is on one of the ten hand-button slots: that slot is pressed (as Holy Shield's sign);
+//   1. the skill is on one of the ten hand-button slots: that slot is pressed (as Holy Shield's sign;
+//      Town Portal's slot reads as the scroll or the tome it will use, 219 or 220);
 //   2. the game's spare right-trigger skill record (record 5, which no hand button reaches and which the
 //      mod never presses otherwise) already holds it: RT is pressed;
 //   3. else it is put on that record first (the UI thread, nativeui) and RT pressed once the binding
 //      reads back; ParkWaitSeconds without it, the cast is dropped.
 // Value-only: steamvr/glyph_cast_test.cpp.
+#include "controller_bindings.h"
 #include "glyph_recognizer.h"
 #include "skill_slots.h"
 #include <array>
@@ -118,7 +120,7 @@ struct Plan { How how = How::None; int slot = -1; };
 inline Plan Dispatch(int skill, int owner, const std::array<Slot, skills::Count>& slots, int recordSkill, int recordOwner) {
     if (skill < 0) return {};
     for (int i = 0; i < skills::Count; ++i)
-        if (slots[size_t(i)].known && slots[size_t(i)].id == skill && slots[size_t(i)].owner == owner) return {How::Slot, i};
+        if (slots[size_t(i)].known && interaction::CatalogSkillId(slots[size_t(i)].id) == skill && slots[size_t(i)].owner == owner) return {How::Slot, i};
     if (recordSkill == skill && recordOwner == owner) return {How::Record, GlyphRecord};
     return {How::Park, GlyphRecord};
 }

@@ -233,7 +233,7 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
             box={x-30,y-44,x+30,y+12};
             glyph(shape,box,!set?RGB(118,110,96):element(skill.id),4);
             if(have)icon(icons::Get("s"+std::to_string(skill.id)),{box.right-6,box.bottom-24,box.right+22,box.bottom+4},skill.available);
-            std::snprintf(label,sizeof label,"%s",!set?"No skill":have?skill.name:"Another hero's");
+            std::snprintf(label,sizeof label,"%s",!set?"No skill":have?skill.name:skill.id==359?"Town Portal":"Another hero's");
             SetTextColor(dc,have?RGB(235,218,181):RGB(148,137,117));
             auto previous=SelectObject(dc,skillFont);
             text(label,{x-63,y+14,x+63,y+52});

@@ -620,12 +620,13 @@ class Engine {
         FilterSkills(keep?filter:skillcategories::All);editor=2;
     }
     // The GLYPHS page's picker: the character's own skills that need no target (buffs, auras, armors,
-    // warcries, summons), not Interact or Town Portal; the tree filter as the button picker's.
+    // warcries, summons) and Town Portal (359: opens at your feet, from a scroll or the tome), not
+    // Interact; the tree filter as the button picker's.
     void OpenGlyphSkills(const Snapshot& s) {
         choices={};allCount=0;editClass=s.skillClass;
         for(unsigned i=0;i<s.skillCount&&i<s.catalog.size();++i) {
             const auto& k=s.catalog[i];
-            if(k.id<0||k.id==357||k.id==359||k.owner!=-1||k.directed||allCount>=int(choices.size()))continue;
+            if(k.id<0||k.id==357||k.owner!=-1||(k.directed&&k.id!=359)||allCount>=int(choices.size()))continue;
             choices[size_t(allCount++)]=k;
         }
         categoryCounts={};categoryCounts[skillcategories::All]=allCount;
