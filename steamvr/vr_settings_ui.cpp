@@ -255,7 +255,7 @@ std::vector<std::string> FitProblems(const layout::Layout& l){
     for(size_t i=0;i<l.elements.size();++i){
         const Element& e=l.elements[i];const RectF r=F(e.rect);
         switch(e.role){
-            case Role::Tab:line(e,e.text,TextStyle::Label,r.w-76,"tab name");break;   // Painter::Tab draws at 34 px; Label is 36
+            case Role::Tab:line(e,e.text,draw::TabStyle(e.text),r.w-76,"tab name");break;   // Painter::Tab draws at 34 px; Label is 36
             case Role::Section:line(e,e.text,TextStyle::Section,r.w,"section heading");break;
             case Role::Label:{
                 if(e.text.empty()){line(e,e.sub,TextStyle::Small,r.w-16,"preset tag");break;}
@@ -342,7 +342,7 @@ std::vector<PreviewShot> PreviewShots(){
         const auto t=Now();const PagePicture warm=PaintPage(x.m,x.in,tables);shot.warmMs=Ms(t,Now());
         shots.push_back(std::move(shot));
     };
-    static constexpr const char* names[]={"presets","body","combat","aim","targets","shield","wrist","interface","survival","world","vibration","performance","guide","whats-new","more"};
+    static constexpr const char* names[]={"presets","body","combat","aim","targets","shield","wrist","interface","survival","world","vibration","performance","quality-of-life","guide","whats-new","more"};
     static_assert(std::size(names)==size_t(View::Count));
     // Every view with no character (class tags shown).
     for(int v=0;v<int(View::Count);++v){

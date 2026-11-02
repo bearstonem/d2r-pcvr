@@ -1022,7 +1022,7 @@ void Painter::Tab(RectF r,Icon icon,std::string_view name,ControlState s){
     i.DrawIcon(icon,{d.left+16,d.top+(r.h-40)/2,40,40},iconColor);
     if(s.changed)i.DrawIcon(Icon::Changed,{d.left+40,d.top+6,28,28},Rgb(Color::Changed));
     const uint32_t color=off?Rgb(Color::Dim):s.chosen?Rgb(Color::GoldHi):s.pointed?Rgb(Color::Text):Rgb(Color::Quiet);
-    i.DrawText(name,s.chosen?TextStyle::Strong:TextStyle::Label,{d.left+70,d.top,d.right-d.left-76,r.h},color,Align::Leading,false,34);
+    i.DrawText(name,s.chosen?TextStyle::Strong:TextStyle::Label,{d.left+70,d.top,d.right-d.left-76,r.h},color,Align::Leading,false,std::min(34.f,FontSize(TabStyle(name))));
     if(s.pointed)i.Ring(d,off);
 }
 void Painter::PageTitle(RectF r,Icon icon,std::string_view title){

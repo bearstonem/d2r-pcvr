@@ -85,6 +85,18 @@ tactical commands, and makes Unleashed melee fairer.
   frame generation on, turning Pushable bodies off no longer gains 10-15 frames
   a second.
 
+## Quality of Life (unreleased)
+
+- **VR Settings > Quality of Life:** Optional incoming direct-damage and hostile
+  monster movement multipliers, plus shared player summon
+  aggression and leash controls. Skeletal mage missile speed follows summon aggression.
+  Skeleton and golem aggro uses the range multiplier squared (4x becomes 16x);
+  their leash uses the normal multiplier. Mercenaries retain native behavior.
+  Summon sliders support up to 5x. All default to 1x (native behavior). Damage and movement apply
+  live; summon range changes require restarting the game after Apply. Attack
+  reach stays native. Intended for local offline characters. Poison and
+  burning are outside the direct-damage control's established coverage.
+
 ## Updating
 
 Download **D2R-PCVR-Setup-0.3.31.exe** for graphical installation, or

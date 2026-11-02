@@ -21,10 +21,10 @@ namespace framevr::settings {
 // vr_settings_content.h). Presets heads the rail; Guide and WhatsNew open from
 // the page band, not the rail; More (rows no override placed yet, the menu data
 // rules) too, and only while it has rows.
-enum class View : uint8_t { Presets, Body, Combat, Aim, Targets, Shield, Wrist, Interface, Survival, World, Vibration, Performance, Guide, WhatsNew, More, Count };
+enum class View : uint8_t { Presets, Body, Combat, Aim, Targets, Shield, Wrist, Interface, Survival, World, Vibration, Performance, QualityOfLife, Guide, WhatsNew, More, Count };
 enum Key { Motion, Seated, Dominant, Snap, TurnSpeed, Waist, BeltForward,
            Foveation, Sky, Fog, Ceiling, DrawDistance, ObjectDistance,
-           EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, VitalsTilt, HapticStrength, HapticMelee, HapticBowDraw, HapticBowRelease, HapticSpell, HapticInteraction, HapticAlert, HapticShortMelee, BloodVisor, BloodWipe, MeleeThrustSpeed, LootLabelSize, CompanionCounts, StrainVignette, OfflinePlayers, ShieldBashSpeed, DesktopOneEye, MapTopDown, MapRotate, FoveationStrength, StereoRendering, DeferGpuWait, TargetHighlight, HeartbeatStart, SpellLock, StaffPoint, LandingCircles, GroundAim, AimHighlights, HighlightRight, HighlightLeft, ElementalHands, EnemySight, BowLaser, ThrowLift, BottlePhysics, PropPhysics, CompanionAi, ShieldGrip, ShieldOut, ShieldUp, ShieldFollow, ShieldRoll, AimFollowsView, CompanionTactical, LeftHandStrikes, TorchFlame, FrameGeneration, FrameGenPreset, FrameGenScale, RunSpeed, RunWalkToggle, BodyPhysics, BigObjectDistance, FogDistance, LeatherMenu, LootBeamUnique, LootBeamSet, LootBeamRare, LootBeamRunes, LootBeamBrightness, CeilingTorches, ArcaneDecay, ArcaneFade, ManaThreshold, ArcaneIntensity, GlyphDraw, GlyphCircle, GlyphTriangle, GlyphSquare, GlyphLightning, GlyphSpiral, GlyphV, GlyphStar, GlyphWave, LootPick, Count };
+           EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, VitalsTilt, HapticStrength, HapticMelee, HapticBowDraw, HapticBowRelease, HapticSpell, HapticInteraction, HapticAlert, HapticShortMelee, BloodVisor, BloodWipe, MeleeThrustSpeed, LootLabelSize, CompanionCounts, StrainVignette, OfflinePlayers, ShieldBashSpeed, DesktopOneEye, MapTopDown, MapRotate, FoveationStrength, StereoRendering, DeferGpuWait, TargetHighlight, HeartbeatStart, SpellLock, StaffPoint, LandingCircles, GroundAim, AimHighlights, HighlightRight, HighlightLeft, ElementalHands, EnemySight, BowLaser, ThrowLift, BottlePhysics, PropPhysics, CompanionAi, ShieldGrip, ShieldOut, ShieldUp, ShieldFollow, ShieldRoll, AimFollowsView, CompanionTactical, LeftHandStrikes, TorchFlame, FrameGeneration, FrameGenPreset, FrameGenScale, RunSpeed, RunWalkToggle, BodyPhysics, BigObjectDistance, FogDistance, LeatherMenu, LootBeamUnique, LootBeamSet, LootBeamRare, LootBeamRunes, LootBeamBrightness, CeilingTorches, ArcaneDecay, ArcaneFade, ManaThreshold, ArcaneIntensity, GlyphDraw, GlyphCircle, GlyphTriangle, GlyphSquare, GlyphLightning, GlyphSpiral, GlyphV, GlyphStar, GlyphWave, LootPick, IncomingDamage, MonsterMovement, DruidAggro, DruidLeash, Count };
 // One bit per setting, 128 wide: two words, since MSVC has no 128-bit integer.
 struct ChangeMask {
     static constexpr int Bits=128;
@@ -198,6 +198,10 @@ inline constexpr std::array<Definition,Count> Definitions{{
     // Loot pick (loot_aim.h): 0 Off, A takes the game's nearest item; 1 On, the item you point at. VR Settings > Interface.
     // On by default (owner 2026-11-01, after headset play: "let's make it so it is on by default").
     {"Loot pick", "A picks up the item you point at, not the nearest", L"interactions",L"loot_pick",1,0,1,1},
+    {"Incoming damage", "Supported direct health damage only; 1 is normal, 0 prevents it", L"quality_of_life",L"incoming_damage_multiplier",1,0,1,.05f},
+    {"Monster movement", "Hostile monster walking/running only; attack speed stays native", L"quality_of_life",L"monster_movement_multiplier",1,0,3,.05f},
+    {"Summon aggression", "Player summons search/pursuit distance; mercenaries unchanged; requires restart", L"quality_of_life",L"druid_aggro_multiplier",1,1,5,.25f},
+    {"Summon leash", "Player summons owner-follow/catch-up distance; mercenaries unchanged; requires restart", L"quality_of_life",L"druid_leash_multiplier",1,1,5,.25f},
 }};
 using Values=std::array<float,Count>;
 // The setting holding the skill on glyph shape i (glyph_recognizer.h order).
@@ -256,7 +260,7 @@ inline float EffectiveSnapAngle(float snap,float smooth){return SmoothTurning(sn
 inline ChangeMask Changed(const Values& a,const Values& b){ChangeMask mask=0;for(int i=0;i<Count;++i)if(std::fabs(a[i]-b[i])>.0001f)mask|=ChangeMask{1}<<i;return mask;}
 inline bool Conflict(const Values& current,const Values& base,ChangeMask mask){return (Changed(current,base)&mask)!=0;}
 enum class Result { None, Saving, Saved, Failed, Conflict };
-struct Snapshot {Values values=Defaults();bool ready=false,offlineDifficultyAvailable=false;uint64_t sequence=0,revision=0;Result result=Result::None;};
+struct Snapshot {Values values=Defaults();bool ready=false,offlineDifficultyAvailable=false;uint8_t qualityOfLifeAvailable=0;uint64_t sequence=0,revision=0;Result result=Result::None;};
 struct Request {Values base{},values{};ChangeMask changed=0;uint64_t sequence=0;};
 struct Rect {
     int x,y,w,h;
@@ -509,7 +513,7 @@ class Model {
     Values base=Defaults(),draft=base;
     uint64_t serial=0,pending=0;
 public:
-    bool open=false,ready=false,offlineDifficultyAvailable=false;
+    bool open=false,ready=false,offlineDifficultyAvailable=false;uint8_t qualityOfLifeAvailable=0;
     int notesPage=0,notesPages=1;   // What's new's page, of SetNotesPages
     int morePage=0;                 // the More view's page (8 rows a page; layout::Press turns it)
     Context context;   // the character: SetContext each frame while open
@@ -554,7 +558,7 @@ public:
     // in memory only (menus-remember, #352). StartOver (a new game) goes back to the Guide, page 1. A kept view with
     // nothing to show any more (More once NVIDIA is no longer chosen) falls back: layout::SettleView.
     void Open(const Snapshot& s){
-        open=true;base=draft=s.values;ready=s.ready;offlineDifficultyAvailable=s.offlineDifficultyAvailable;result=s.result;serial=std::max(serial,s.sequence);pending=s.result==Result::Saving?s.sequence:0;
+        open=true;base=draft=s.values;ready=s.ready;offlineDifficultyAvailable=s.offlineDifficultyAvailable;qualityOfLifeAvailable=s.qualityOfLifeAvailable;result=s.result;serial=std::max(serial,s.sequence);pending=s.result==Result::Saving?s.sequence:0;
         confirmClose=false;confirmAt=0;undoResetUntil=undoResetAt=0;beforeReset={};resetKeys=0;focusKey=-1;pickedPreset=-1;closeWhenSaved=false;popoverKey=-1;popoverAt=0;
         ++revision;
     }
@@ -562,6 +566,7 @@ public:
     void Close(){open=false;confirmClose=false;undoResetUntil=0;closeWhenSaved=false;popoverKey=-1;++revision;}
     void Observe(const Snapshot& s){
         if(!open)return;
+        if(qualityOfLifeAvailable!=s.qualityOfLifeAvailable){qualityOfLifeAvailable=s.qualityOfLifeAvailable;++revision;}
         if(offlineDifficultyAvailable!=s.offlineDifficultyAvailable){offlineDifficultyAvailable=s.offlineDifficultyAvailable;++revision;}
         if(pending){
             if(s.sequence==pending&&s.result!=Result::Saving){
@@ -585,7 +590,7 @@ public:
         if(!ready||Busy())return {};
         if(hit.kind==Kind::Change&&hit.index>=0&&hit.index<Count&&RowEnabled(draft,Key(hit.index))){
             const auto key=Key(hit.index);const auto& d=Definitions[key];
-            if(d.max==1)draft[key]=draft[key]>.5f?0.f:1.f;
+            if(d.min==0&&d.max==1&&d.step==1)draft[key]=draft[key]>.5f?0.f:1.f;
             else if(key==OfflinePlayers)draft[key]=std::clamp(draft[key]+float(hit.delta),0.f,8.f);
             else if(key==FoveationStrength||key==StereoRendering||key==FrameGeneration||key==FrameGenPreset||key==FrameGenScale)draft[key]=std::clamp(draft[key]+float(hit.delta),d.min,d.max);
             else if(key==SpellLock)draft[key]=LockStep(draft[key],hit.delta,context);

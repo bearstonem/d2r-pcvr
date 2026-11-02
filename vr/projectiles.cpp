@@ -1,3 +1,4 @@
+#include "quality_of_life.h"
 // D2R 3.3.93787: client/server missile creation, path velocity, and the HD
 // release-point handoff. Kept separate from posing the held bow.
 #include <windows.h>
@@ -76,7 +77,7 @@ uint32_t LocalArrowParams(uintptr_t params) {
 // Scope is on the game's actual creation thread, on BOTH client and server.
 // Nesting an unrelated projectile temporarily clears it; unrelated path calls
 // never inherit a previous arrow. No game-owned table or request is edited.
-struct Creation {int side=-1;float multiplier=1;uintptr_t changedPath=0;uint32_t missile=0;};
+struct Creation {int side=-1;float multiplier=1;uintptr_t changedPath=0;uint32_t missile=0;bool mage=false;};
 // A ground skill's launch missile (telegraph::Flights) being created on the
 // server: the velocity the game sets for it, live for this build and level.
 struct FlightWatch {uint32_t missile=0;int velocity=0;uintptr_t unit=0;};
@@ -89,6 +90,10 @@ struct Scope {
         const uint32_t missile=speedHooksReady.load()?LocalArrowParams(params):~0u;
         if(missile!=~0u) {
             creation.side=side;creation.multiplier=speed.load();creation.missile=missile;++observed[side];
+        } else if(speedHooksReady.load()) {
+            const float factor=qualityoflife::SummonAggroFactor();
+            const uint32_t mage=factor>1?MageMissile(params,[](uintptr_t p,auto& v){return Read(p,v);}):~0u;
+            if(mage!=~0u){creation.side=side;creation.multiplier=factor;creation.missile=mage;creation.mage=true;}
         }
     }
     ~Scope(){creation=saved;}
@@ -236,16 +241,16 @@ void Velocity(uintptr_t path,int native,uintptr_t source,int line) {
         if(Read(path+0x40,unit)&&Read(unit,type)&&type==3&&Read(unit+4,missile)&&missile==flightWatch.missile&&Read(unit+0x38,back)&&back==path)
             {flightWatch.velocity=native;flightWatch.unit=unit;}
     }
-    int adjusted=RunVelocity(path,native);
+    int adjusted=qualityoflife::AdjustVelocity(path,RunVelocity(path,native));
     // Native creation first clears velocity, then sets the final value. Only
     // the latter is scaled, once per path per creation; slow-missile and later
     // corrections outside creation retain their normal behavior.
     if(creation.side>=0&&native>0&&path!=creation.changedPath) {
         uintptr_t unit=0,back=0;uint32_t type=~0u,missile=~0u;
         if(Read(path+0x40,unit)&&Read(unit,type)&&type==3&&Read(unit+4,missile)&&missile==creation.missile&&Read(unit+0x38,back)&&back==path) {
-            adjusted=ScaledVelocity(native,creation.multiplier);
+            adjusted=ScaledVelocity(native,creation.multiplier,5.f);
             creation.changedPath=path;
-            if(adjusted!=native) {const int side=creation.side;++accelerated[side];before[side]=native;after[side]=adjusted;}
+            if(adjusted!=native&&!creation.mage) {const int side=creation.side;++accelerated[side];before[side]=native;after[side]=adjusted;}
         }
     }
     originalVelocity(path,adjusted,source,line);
@@ -341,12 +346,16 @@ void ConfigureRunSpeed(int percent){runSpeed=framevr::runspeed::NormalizePercent
 void StickFullRun(bool on){stickFullRun=on;}
 int ObservedGait(uint64_t& at,bool* tired){const uint64_t v=gaitSeen.load();at=v>>3;if(tired)*tired=(v&4)!=0;return int(v&3);}
 void Install() {
-    if(!enabled.load())return;
+    const bool mageSpeed=qualityoflife::SummonAggroFactor()>1;
+    if(!enabled.load()&&!qualityoflife::NeedsMovement()&&!mageSpeed)return;
     if(!velocityIn)velocityIn=d2rsig::Hook(VelocityRva,VelocitySig,sizeof VelocitySig,reinterpret_cast<void*>(&Velocity),reinterpret_cast<void**>(&originalVelocity));
+    qualityoflife::VelocityReady(velocityIn);
+    if(!enabled.load()&&!mageSpeed)return;
     if(!clientIn)clientIn=d2rsig::Hook(ClientRva,ClientSig,sizeof ClientSig,reinterpret_cast<void*>(&Client),reinterpret_cast<void**>(&originalClient));
     if(!serverIn)serverIn=d2rsig::Hook(ServerRva,ServerSig,sizeof ServerSig,reinterpret_cast<void*>(&Server),reinterpret_cast<void**>(&originalServer));
     if(velocityIn&&clientIn&&serverIn&&!speedHooksReady.exchange(true))
-        framevr::logging::Write("Frame bow flight: client/server velocity hooks ready (local basic arrows only)");
+        framevr::logging::Write("Frame missile flight: client/server velocity hooks ready (local arrows and summon mage bolts)");
+    if(!enabled.load())return;
     if(!releaseIn&&d2rsig::Check(OwnerRva,OwnerSig,sizeof OwnerSig)&&d2rsig::Check(RemoveReleaseRva,RemoveSig,sizeof RemoveSig)&&
        d2rsig::Check(ReleaseStorageRva,StorageSig,sizeof StorageSig)&&
        d2rsig::Check(TransformStorageRva,TransformStorageSig,sizeof TransformStorageSig)&&

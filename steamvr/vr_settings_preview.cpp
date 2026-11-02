@@ -66,7 +66,7 @@ static Values AllRows(bool smooth){
     return v;
 }
 static Setup Base(View v,int hero,const Values& values=AllRows(false),bool adapter=true){
-    Setup x;Snapshot s;s.values=values;s.ready=true;s.offlineDifficultyAvailable=adapter;
+    Setup x;Snapshot s;s.values=values;s.ready=true;s.offlineDifficultyAvailable=adapter;s.qualityOfLifeAvailable=7;
     x.m.Open(s);x.m.SetNotesPages(ReleaseNotesPages());x.m.SetContext({hero,hero==heroclass::Amazon,hero==heroclass::Sorceress,false});x.m.view=v;
     x.in.nowMs=100000;x.in.detected={{framevr::controllers::Layout::Touch,framevr::controllers::Layout::Touch}};
     // transport.cpp: the Performance view shows render_resolution's Describe (its widest), the others the foveation status.
@@ -208,6 +208,10 @@ static int FitCheck(){
             std::snprintf(part,sizeof part," [role %d %d,%d %dx%d]",int(e.role),e.rect.x,e.rect.y,e.rect.w,e.rect.h);card+=part;}
         Fail(where+": the help is cut: \""+(t?t->text:std::string("(none)"))+"\""+card+")");
     };
+    for(auto key:{IncomingDamage,MonsterMovement,DruidAggro,DruidLeash}) {
+        Setup x=Base(View::QualityOfLife,-1);x.m.qualityOfLifeAvailable=0;x.in.card=key;
+        whole(check(x,"inactive Quality of Life adapter"),"Adapter inactive. "+Expected(key,true),"inactive Quality of Life adapter");
+    }
     for(int hero:Classes)for(bool smooth:{false,true})for(int v=0;v<int(View::Count);++v){
         if(!C::PageOf(View(v)).settings)continue;
         const Values values=AllRows(smooth);

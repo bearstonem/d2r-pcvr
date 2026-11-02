@@ -34,6 +34,8 @@ setting's ini id (`"gameplay.highlight_left_hue"`), never by its `Key`.
    | `render`, `stereo` | Performance |
    | `gameplay`, `interactions`, anything else | More |
 
+   `quality_of_life` belongs to **Quality of Life**.
+
    A page that already shows 8 rows, or 3 sections without a "New" one, sends
    it to **More**.
 3. To give it proper words, add an override in `vr_settings_content.h` at the
@@ -111,3 +113,6 @@ shows only while it has rows, 8 a page with Previous / Next. Today it holds
 NVIDIA's flow quality and scale while Frame generation is NVIDIA, since
 Performance has no room for two more rows; otherwise it is a safety net for
 settings added since the menu was last sorted.
+
+The **Quality of Life** page contains built-in offline damage, monster movement,
+and shared summon range controls; see [behavior and validation](QUALITY_OF_LIFE.md).

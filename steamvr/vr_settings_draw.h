@@ -108,6 +108,8 @@ constexpr float FontSize(TextStyle s){
     static_assert(sizeof sizes/sizeof sizes[0]==size_t(TextStyle::Count),"one size per text style");
     return sizes[size_t(s)];
 }
+// Keep longer page names readable inside the same rail hit target.
+inline TextStyle TabStyle(std::string_view name){return name.size()>12?TextStyle::Small:TextStyle::Label;}
 constexpr float MinFontSize=22.f;   // the fit helpers never go below this
 // Swatch hues besides 0-360: Off (a slashed ring), By range (the outline's
 // red-orange-yellow range gradient) and none (no swatch in a value box).

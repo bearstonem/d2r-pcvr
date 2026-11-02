@@ -96,6 +96,10 @@ void SetOfflineDifficultyAvailable(bool available){
     std::lock_guard lock(mutex);
     if(published.offlineDifficultyAvailable!=available){published.offlineDifficultyAvailable=available;++published.revision;}
 }
+void SetQualityOfLifeAvailable(uint8_t mask){
+    std::lock_guard lock(mutex);
+    if(published.qualityOfLifeAvailable!=mask){published.qualityOfLifeAvailable=mask;++published.revision;}
+}
 bool Submit(const framevr::settings::Request& r){
     using namespace framevr::settings;
     if(!r.sequence||!r.changed||(r.changed&~SupportedChanges)||r.changed!=Changed(r.base,r.values))return false;

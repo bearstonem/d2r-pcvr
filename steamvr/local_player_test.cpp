@@ -6,6 +6,7 @@
 #include <cstdint>
 
 namespace {std::atomic<uint64_t> session{1};}
+namespace qualityoflife {float DamageFactor(){return 1;}bool NeedsDamage(){return false;}void DamageReady(bool){}}
 namespace gamestate {uint64_t LocalPlayer(){return session.load();}}
 // The fixture exercises the real combat identity readers without installing
 // hooks or opening a game. Native accessors are represented by owned unit data.

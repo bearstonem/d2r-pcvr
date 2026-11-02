@@ -124,8 +124,12 @@ static const GoldenRow Golden[]={
     {"render.model_radius",View(11),1,content::RowKind::Slider,"Scenery distance",0,0},
     {"render.big_radius",View(11),1,content::RowKind::Slider,"Big objects",0,1},   // main's #366, drawn inside Scenery distance's row
     {"render.defer_gpu_wait",View(11),1,content::RowKind::Offer,"Defer GPU wait",0,0},
-    {"render.frame_generation_preset",View(14),0,content::RowKind::Choice,"NVIDIA flow quality",3,0},
-    {"render.frame_generation_scale",View(14),0,content::RowKind::Choice,"NVIDIA flow scale",3,0},
+    {"quality_of_life.incoming_damage_multiplier",View::QualityOfLife,0,content::RowKind::Slider,"Incoming damage",0,0},
+    {"quality_of_life.monster_movement_multiplier",View::QualityOfLife,0,content::RowKind::Slider,"Monster movement",0,0},
+    {"quality_of_life.druid_aggro_multiplier",View::QualityOfLife,1,content::RowKind::Slider,"Summon aggression",0,0},
+    {"quality_of_life.druid_leash_multiplier",View::QualityOfLife,1,content::RowKind::Slider,"Summon leash",0,0},
+    {"render.frame_generation_preset",View(15),0,content::RowKind::Choice,"NVIDIA flow quality",3,0},
+    {"render.frame_generation_scale",View(15),0,content::RowKind::Choice,"NVIDIA flow scale",3,0},
 };
 
 static bool PopoverLayer(L::Role r){return r==L::Role::PopoverDim||r==L::Role::Popover||r==L::Role::PopoverTitle||r==L::Role::PopoverOption||r==L::Role::PopoverHint||r==L::Role::ColorDot||r==L::Role::PopoverLabel||r==L::Role::PopoverSwitch;}

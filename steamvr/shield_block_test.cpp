@@ -27,6 +27,7 @@ int NativeBlock(uintptr_t game,uintptr_t,uintptr_t,int avoid,int block) {
     return combat::forced==combat::Forced::Block?1:0;
 }
 }
+namespace qualityoflife {float DamageFactor(){return 1;}bool NeedsDamage(){return false;}void DamageReady(bool){}}
 namespace gamestate {uint64_t LocalPlayer(){return fixture::session;}int32_t LeftDurability(){return -1;}}
 namespace d2rsig {
 uint64_t Rva(uint64_t rva){return rva?rva+fixture::relocation:0;}

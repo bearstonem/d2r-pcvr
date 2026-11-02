@@ -32,8 +32,16 @@ template<class Read> bool VisualRoot(uintptr_t definition,uintptr_t storage,uint
 inline bool SamePlayer(uint32_t localType,uint32_t localId,uint32_t ownerType,uint32_t ownerId) {
     return localType==0&&ownerType==0&&localId!=UINT32_MAX&&localId==ownerId;
 }
-inline int ScaledVelocity(int native,float multiplier) {
-    if(native<=0||!std::isfinite(multiplier)||multiplier<1.f||multiplier>3.f)return native;
+// necromage1..4, emitted by the dedicated summoned necromage monster row.
+// Check both fields so enemy elemental bolts and mercenaries cannot match.
+template<class Read> uint32_t MageMissile(uintptr_t params,Read read) {
+    uint32_t missile=~0u,header[2]{};uintptr_t owner=0;
+    if(!read(params+0x20,missile)||missile<208||missile>211||
+       !read(params+8,owner)||!owner||!read(owner,header)||header[0]!=1||header[1]!=364)return ~0u;
+    return missile;
+}
+inline int ScaledVelocity(int native,float multiplier,float maximum=3.f) {
+    if(native<=0||!std::isfinite(multiplier)||multiplier<1.f||multiplier>maximum)return native;
     const double value=double(native)*multiplier;
     return value<=std::numeric_limits<int>::max()?int(std::lround(value)):native;
 }

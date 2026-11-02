@@ -1,3 +1,5 @@
+#include "quality_of_life.h"
+#include "../steamvr/quality_of_life_rules.h"
 // Offline D2R 3.3.93787 contact resolution. Native range/collision, damage,
 // skills and costs stay in charge; only the local player's random misses go.
 #include <windows.h>
@@ -775,6 +777,11 @@ void SetStat(uintptr_t unit,int stat,int value,int layer) {
         if(TapHealBlocked(tapScope.gated,before,value)){++gatedTap;return;}
         if(value>before)++passedTap;
     }
+    const auto localDefender=[&]{uint32_t id=0,h[3]{};return LocalPlayerId(id)&&Read(unit,h)&&h[0]==0&&h[2]==id;};
+    const float qolFactor=stat==6&&layer==0&&qualityoflife::NeedsDamage()&&damageRecord&&unit==damageDefender&&
+        damageScaleReady.load(std::memory_order_relaxed)&&
+        reinterpret_cast<uintptr_t>(_ReturnAddress())==d2rsig::Addr(LifeWriteReturn)&&localDefender()?qualityoflife::DamageFactor():1.f;
+    bool qolApplied=false;
     // Unleashed on-hit gate: a gated swing does not lower the target's Defense,
     // nor does a swing that would have missed.
     if(stat==31&&defenseGate&&reinterpret_cast<uintptr_t>(_ReturnAddress())==d2rsig::Addr(DefensePerHitReturn)) {
@@ -820,10 +827,11 @@ void SetStat(uintptr_t unit,int stat,int value,int layer) {
                     framevr::logging::Write(line);
                 }
             }
+            factor*=qolFactor;qolApplied=true;
             if(factor!=1) {
                 const int before=reinterpret_cast<GetStatFn>(d2rsig::Addr(GetStatRva))(unit,6,0);
                 const int64_t life=int64_t(before)-int64_t(double(damage)*factor);
-                value=life>=0x100?int(life):0;   // native: under one point of life is death
+                value=qolFactor!=1?framevr::qol::ScaleHealthWrite(before,value,damage,factor):(life>=0x100?int(life):0);   // native: under one point of life is death
             }
         }
     }
@@ -887,6 +895,13 @@ void SetStat(uintptr_t unit,int stat,int value,int layer) {
                 const int64_t life=int64_t(before)-int64_t(double(damage)*factor);
                 value=life>=0x100?int(life):0;   // native: under one point of life is death
             }
+        }
+    }
+    if(qolFactor!=1&&!qolApplied) {
+        int damage=0;
+        if(Read(damageRecord+0x134,damage)&&damage>0) {
+            const int before=reinterpret_cast<GetStatFn>(d2rsig::Addr(GetStatRva))(unit,6,0);
+            value=framevr::qol::ScaleHealthWrite(before,value,damage,qolFactor);
         }
     }
     originalSetStat(unit,stat,value,layer);
@@ -1645,6 +1660,17 @@ bool ReadGuardDebug(framevr::guard::Debug& out) {
     out=guard.debug;out.pose=guard.state.surface;out.raised=guard.state.raised;return framevr::guard::Valid(out.pose);
 }
 void Install() {
+    if(enabled.load()||qualityoflife::NeedsDamage()) {
+        // The stat setter and damage application: riposte damage
+        // scaling on physical swings.
+        if(!setStatIn&&d2rsig::Check(GetStatRva,GetStatSig,sizeof GetStatSig))
+            setStatIn=d2rsig::Hook(SetStatRva,SetStatSig,sizeof SetStatSig,reinterpret_cast<void*>(&SetStat),reinterpret_cast<void**>(&originalSetStat));
+        if(setStatIn&&!applyDamageIn&&d2rsig::Check(LifeWriteAt,LifeWriteSig,sizeof LifeWriteSig))
+            applyDamageIn=d2rsig::Hook(ApplyDamageRva,ApplyDamageSig,sizeof ApplyDamageSig,reinterpret_cast<void*>(&ApplyDamage),reinterpret_cast<void**>(&originalApplyDamage));
+        if(applyDamageIn&&!damageScaleReady.exchange(true))
+            framevr::logging::Write("Frame riposte: damage application verified; riposte damage ready");
+        qualityoflife::DamageReady(damageScaleReady.load());
+    }
     if(!enabled.load()||ready.load())return;
     if(!rollChecked)rollChecked=d2rsig::Check(0x44bd65,RollSig,sizeof RollSig);
     if(!rollChecked)return;
@@ -1653,14 +1679,6 @@ void Install() {
         framevr::logging::Write(guardChecked?"Frame guard: block roll verified; Unleashed physical shield blocking ready":
                                              "Frame guard: block roll signature mismatch; native block roll retained");
     }
-    // The stat setter and damage application: riposte damage
-    // scaling on physical swings.
-    if(!setStatIn&&d2rsig::Check(GetStatRva,GetStatSig,sizeof GetStatSig))
-        setStatIn=d2rsig::Hook(SetStatRva,SetStatSig,sizeof SetStatSig,reinterpret_cast<void*>(&SetStat),reinterpret_cast<void**>(&originalSetStat));
-    if(setStatIn&&!applyDamageIn&&d2rsig::Check(LifeWriteAt,LifeWriteSig,sizeof LifeWriteSig))
-        applyDamageIn=d2rsig::Hook(ApplyDamageRva,ApplyDamageSig,sizeof ApplyDamageSig,reinterpret_cast<void*>(&ApplyDamage),reinterpret_cast<void**>(&originalApplyDamage));
-    if(applyDamageIn&&!damageScaleReady.exchange(true))
-        framevr::logging::Write("Frame riposte: damage application verified; riposte damage ready");
     // Unleashed attack-rating damage: the native to-hit chance, read where
     // HitSuccessful hands it to 427EA0. Without it swings keep full damage.
     if(damageScaleReady.load()&&!hitChanceIn&&d2rsig::Check(ChanceClampAt,ChanceClampSig,sizeof ChanceClampSig)&&

@@ -7,6 +7,8 @@ bool Submit(const framevr::settings::Request& request);
 bool Poll(const wchar_t* path);
 // Runtime capability, separate from persisted preferences and pending edits.
 void SetOfflineDifficultyAvailable(bool available);
+// Bit 0 damage, bit 1 monster movement, bit 2 shared summon ranges.
+void SetQualityOfLifeAvailable(uint8_t mask);
 // ReShade's Generic Depth add-on as it runs this session, set before ReShade
 // loads from d2r_pcvr.ini [render] reshade_depth.
 void SetReShadeDepth(bool active);

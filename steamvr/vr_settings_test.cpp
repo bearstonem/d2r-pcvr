@@ -903,6 +903,20 @@ int main(int argc,char** argv){
               Normalize(LootPick,7)==1&&Normalize(LootPick,-1)==1&&Normalize(LootPick,NAN)==1,
               "only 0 reads Off; On, the retired 2 (On with glow), or anything else reads On, the default");
     }
+    {
+        Model m;m.Open(s);m.view=View::QualityOfLife;
+        for(auto key:{IncomingDamage,MonsterMovement,DruidAggro,DruidLeash}) {
+            Check(Definitions[key].defaultValue==1,"QoL defaults preserve native behavior");
+            Check(content::RowOf(key)->page==View::QualityOfLife,"QoL controls have their own page");
+            Check(Normalize(key,NAN)==1,"invalid QoL value falls back to native");
+        }
+        layout::Press(m,{Kind::Change,IncomingDamage,-1},0);
+        Check(std::fabs(m.Get()[IncomingDamage]-.95f)<.0001f,"fractional 0..1 slider steps without toggling");
+        Check(m.Click({Kind::Apply}).changed==(ChangeMask{1}<<IncomingDamage),"QoL apply isolates the edited multiplier");
+        Check(Normalize(IncomingDamage,5)==1&&Normalize(MonsterMovement,-1)==0&&Normalize(DruidLeash,6)==5&&Normalize(DruidAggro,6)==5,"QoL ranges bounded");
+        m.Observe(Snapshot{.qualityOfLifeAvailable=7});
+        Check(m.qualityOfLifeAvailable==7,"runtime adapter availability reaches menu model");
+    }
     PrintReport();
     std::puts("VR settings draft, persistence requests, conflicts, row rules and input-gating tests passed");
 }

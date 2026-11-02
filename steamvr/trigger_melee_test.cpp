@@ -33,6 +33,7 @@ unsigned nativeEvents=0;
 uint32_t NativeTrigger(uintptr_t,int,uintptr_t,uintptr_t,uintptr_t){++nativeEvents;return 1;}
 uint64_t NativeApplyDamage(uintptr_t,uintptr_t,uintptr_t,int,uintptr_t){return 0;}
 }
+namespace qualityoflife {float DamageFactor(){return 1;}bool NeedsDamage(){return false;}void DamageReady(bool){}}
 namespace gamestate {uint64_t LocalPlayer(){return fixture::session;}int32_t LeftDurability(){return -1;}}
 namespace d2rsig {
 uint64_t Rva(uint64_t rva){return rva;}

@@ -35,6 +35,8 @@ __pycache__/
 promo/
 
 /build-frame/
+# Early standalone QoL prototype; superseded by the built-in controls.
+/plugins/damage-multiplier/
 # Downloaded dependencies and extracted preview payloads stay local.
 /deps/
 /bin/

@@ -1,3 +1,4 @@
+#include "quality_of_life.h"
 // Free-swing contact -> native basic attack, on the authoritative game thread.
 // All addresses/signatures are for D2R 3.3.93787. No HP/stat/table/save edits.
 #include <windows.h>
@@ -217,6 +218,7 @@ void ObserveServer(uintptr_t game,uintptr_t unit) {
 uintptr_t Lookup(uintptr_t game,int type,uint32_t id) {
     const auto unit=originalLookup(game,type,id);
     if(type==0&&unit)ObserveServer(game,unit);
+    qualityoflife::ObserveLookup(game,type,id,unit);
     return unit;
 }
 uintptr_t Target(uintptr_t game,uintptr_t unit) {
@@ -1458,6 +1460,10 @@ bool HirelingOverlay(uint32_t unitId,int overlay) {
     return true;
 }
 void Install() {
+    // Share this lookup with QoL even when motion combat is disabled.
+    if(qualityoflife::NeedsMovement()&&!lookupIn)
+        lookupIn=d2rsig::Hook(LookupRva,LookupSig,sizeof LookupSig,reinterpret_cast<void*>(&Lookup),reinterpret_cast<void**>(&originalLookup));
+    qualityoflife::LookupReady(lookupIn);
     meleeweapon::Install();
     breakables::Install();
     InstallTint();

@@ -422,6 +422,14 @@ int main(){
     vrsettings::Poll(name);Check(vrsettings::Read().values[LootPick]==1,"an unknown loot_pick reads On, the default");
     Check(WritePrivateProfileStringW(L"interactions",L"loot_pick",nullptr,name),"remove the loot pick");
     vrsettings::Poll(name);
+    for(auto key:{IncomingDamage,MonsterMovement,DruidAggro,DruidLeash}) {
+        const auto before=vrsettings::Read();
+        model.Open(before);model.Click({Kind::Change,key,key==IncomingDamage?-2:2});
+        request=model.Click({Kind::Apply});
+        Check(request.changed==(ChangeMask{1}<<key),"QoL transaction isolates changed key");
+        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"QoL setting saves through normal transaction");
+        Check(vrsettings::Read().values[key]==request.values[key]&&Int(path,L"custom",L"keep")==12345,"QoL round trip preserves unrelated settings");
+    }
     model.Open(vrsettings::Read());model.Click({Kind::Change,Motion,-1});request=model.Click({Kind::Apply});
     Check(DeleteFileW(name)&&vrsettings::Submit(request)&&!vrsettings::Poll(name),"missing file fails safely");
     Check(!vrsettings::Read().ready&&vrsettings::Read().result==Result::Failed,"failure status published");

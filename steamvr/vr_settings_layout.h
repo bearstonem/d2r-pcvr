@@ -79,7 +79,7 @@ inline float DragStepPx(float min,float max,float step,float sweepPx){
 // ---- geometry (canvas pixels) ----
 constexpr int Inner=22;                                          // the bronze frame's inner edge
 constexpr Rect PanelInner{Inner,Inner,Width-2*Inner,Height-2*Inner};
-constexpr int RailX=24,RailW=270,TabY=29,TabPitch=78,TabH=66;    // 12 tabs: 29-953
+constexpr int RailX=24,RailW=270,TabY=25,TabPitch=76,TabH=64;    // 13 tabs: 25-1001, all 64 px targets
 constexpr int ContentX=328,ContentW=920,ContentRight=ContentX+ContentW;
 constexpr int RowPad=20;                                         // label inset; controls end this far from the slab's right
 // The band's links keep 64 px hit areas (22-86); the title and links are drawn
@@ -649,7 +649,7 @@ struct Builder {
     void Rail(){
         const uint32_t changed=ChangedViews(m,c,t);
         content::Group group=content::PageOf(View::Presets).group;
-        for(int i=0;i<=int(View::Performance);++i){
+        for(int i=0;i<=int(View::QualityOfLife);++i){
             const View v=View(i);const auto& p=content::PageOf(v);
             const int y=TabY+i*TabPitch;
             if(p.group!=group){Add(Role::GroupLine,{RailX+16,y-7,RailW-32,2});group=p.group;}
@@ -1092,6 +1092,10 @@ struct Builder {
     std::string RowHelp(Key k)const{
         const auto* r=t.Row(k);
         std::string help=r&&r->help?r->help:HelpText(k);
+        if(k>=IncomingDamage&&k<=DruidLeash){
+            const uint8_t bit=k==IncomingDamage?1:k==MonsterMovement?2:4;
+            if(!(m.qualityOfLifeAvailable&bit))help="Adapter inactive. "+help;
+        }
         if(hooks::OfflineAdapterNotice(k))help=std::string(m.offlineDifficultyAvailable?content::OfflineNote:content::OfflineUnavailable)+" "+help;
         return help;
     }

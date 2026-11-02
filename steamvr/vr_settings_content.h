@@ -233,6 +233,7 @@ inline constexpr ContentPage PageTable[]={
     {View::World,"World",Group::World,Icon::World,"Extra sights and moving things the mod adds to the game world.",true},
     {View::Vibration,"Vibration",Group::Device,Icon::Haptics,"Controller vibration. Feel it uses the strength shown here, before you apply.",true},
     {View::Performance,"Performance",Group::Device,Icon::Performance,"Everything that changes the frame rate, with the last second's frame times below.",true},
+    {View::QualityOfLife,"Quality of Life",Group::Device,Icon::Survival,"Offline adjustments. Summon range changes require restart.",true},
     {View::Guide,"Guide",Group::Header,Icon::Controls,"Each stick opens its hand's wheel. Point the other hand's laser at a wedge to assign a skill.",false},
     {View::WhatsNew,"What's new",Group::Header,Icon::Notes,"Changes in this version of the mod.",false},
     // Settings without a page: NVIDIA's flow quality and scale (Performance is full;
@@ -256,6 +257,7 @@ inline constexpr ContentSection SectionTable[]={
     {View::World,"Sky and dungeons"},{View::World,"Things that move and glow"},
     {View::Vibration,"Strength"},
     {View::Performance,"Image"},{View::Performance,"Draw distance"},
+    {View::QualityOfLife,"Damage and movement"},{View::QualityOfLife,"Summons"},
 };
 
 // ---- options and value words (ini order: option i has value min + i) ----
@@ -704,6 +706,15 @@ inline constexpr Override Overrides[]={
     {.id="glyphs.draw_slot",.page=NotInMenu},{.id="glyphs.circle",.page=NotInMenu},{.id="glyphs.triangle",.page=NotInMenu},
     {.id="glyphs.square",.page=NotInMenu},{.id="glyphs.lightning",.page=NotInMenu},{.id="glyphs.spiral",.page=NotInMenu},
     {.id="glyphs.v",.page=NotInMenu},{.id="glyphs.star",.page=NotInMenu},{.id="glyphs.wave",.page=NotInMenu},
+    {.id="quality_of_life.incoming_damage_multiplier",.page=View::QualityOfLife,.section="Damage and movement",.label="Incoming damage",
+     .help="Direct health damage you take. 1x is normal; 0x prevents supported hits. Poison and burning may bypass this. Offline only.",.format={.unit="x",.decimals=2}},
+    {.id="quality_of_life.monster_movement_multiplier",.page=View::QualityOfLife,.section="Damage and movement",.label="Monster movement",
+     .help="Hostile monsters walk and run at this speed. 0x stops ordinary movement. Attacks, special movement and friendly units stay native.",.format={.unit="x",.decimals=2}},
+    {.id="quality_of_life.druid_aggro_multiplier",.page=View::QualityOfLife,.section="Summons",.label="Summon aggression",
+       .help="Summon search/pursuit. Skeletons/golems: 4x gives 16x range. Mage bolt speed: 4x gives 4x. Mercenaries/attack reach unchanged. Requires restart.",.warn="Requires restart",.format={.unit="x",.decimals=2}},
+    {.id="quality_of_life.druid_leash_multiplier",.page=View::QualityOfLife,.section="Summons",.label="Summon leash",
+     .help="Player summons can roam farther before following or catching up to you. Mercenaries and attack reach stay native. Requires restart.",.warn="Requires restart",.format={.unit="x",.decimals=2}},
+
 };
 #undef FRAMEVR_OPTIONS
 #undef FRAMEVR_NAMES
@@ -871,6 +882,7 @@ inline View OwnerOf(const wchar_t* section){
     if(s==L"hud")return View::Interface;
     if(s==L"sky"||s==L"fog"||s==L"ceiling"||s==L"torch")return View::World;
     if(s==L"haptics")return View::Vibration;
+    if(s==L"quality_of_life")return View::QualityOfLife;
     if(s==L"render"||s==L"stereo")return View::Performance;
     return View::More;   // gameplay, interactions and any new section
 }
