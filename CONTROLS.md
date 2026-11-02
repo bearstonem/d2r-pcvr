@@ -597,6 +597,7 @@ not convert it into a context-click.
 | Menu / Start, where available to the game | Controller menu button | Controller menu button |
 | Advanced Stats (the game's View in the tabbed menu) | Laser + trigger on the stone stats button below the menu's hint row | Laser + trigger on the stone stats button below the menu's hint row |
 | Reset Skills & Stats (offline) | Laser + trigger twice on the Character page's **Reset Skills & Stats** button | Laser + trigger twice on the Character page's **Reset Skills & Stats** button |
+| Previous / next stash tab | Point and pull Right Trigger on **Previous tab** / **Next tab** beside the stash gold field | Point and pull Right Trigger on **Previous tab** / **Next tab** beside the stash gold field |
 
 Quest and most VR controllers have no View button (the menu buttons belong to
 the headset), so the

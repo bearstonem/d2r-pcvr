@@ -426,7 +426,11 @@ while an item is on the cursor (log: `Frame leather: put away over the left shou
 small stone **Advanced Stats** button (three gold bars), the same one the room
 panel shows when the leather is off: laser + trigger sends the game one View
 press, a button VR controllers lack (log:
-`Frame panels: Advanced Stats button - View sent to the game`). On the Character page, offline,
+`Frame panels: Advanced Stats button - View sent to the game`). The stash has
+stone **Previous tab** and **Next tab** buttons beside its gold field: point with the
+right laser and pull Right Trigger to send LB or RB to the game. Release and
+pull again for each tab. They appear only while the stash is open.
+On the Character page, offline,
 a stone **Reset Skills & Stats** button sits in the lower right: one pull asks **Confirm?**, a
 second has the game reset every stat and skill point. The mod makes one Token of Absolution in a
 free inventory square and uses it at once, so the game's own reset runs; a token the game does not

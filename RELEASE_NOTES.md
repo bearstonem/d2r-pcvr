@@ -87,6 +87,11 @@ tactical commands, and makes Unleashed melee fairer.
 
 ## Quality of Life (unreleased)
 
+- **Stash tab buttons:** Point at the stone **Previous tab** or **Next tab**
+  button beside the stash gold field and pull Right Trigger to switch tabs.
+  Each pull sends one LB/RB press, so controllers without bumpers can navigate
+  the shared stash too.
+
 - **Click to drink:** Optional toggle lets the holding hand's trigger drink a
   grabbed flask. Off by default; the mouth-and-tip gesture works in either mode.
 

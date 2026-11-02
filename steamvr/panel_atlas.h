@@ -43,7 +43,9 @@ constexpr Region StatsLit{Stats.x,Stats.y+Stats.h+Gap,StatsSize,StatsSize};
 constexpr int RespecWidth=320,RespecHeight=64,RespecPictures=8;
 constexpr int RespecLitReset=6,RespecLitConfirm=7;
 constexpr Region Respec(int i){return {Stats.x+StatsSize+Gap,Leather.y+i*(RespecHeight+Gap),RespecWidth,RespecHeight};}
-constexpr int StaticWidth=1536,StaticHeight=Leather.y+Leather.h;
+// Stash navigation plaques, below the respec faces in the same static image.
+constexpr Region Stash(int i){return {Stats.x+StatsSize+Gap,Leather.y+(RespecPictures+i)*(RespecHeight+Gap),240,64};}
+constexpr int StaticWidth=1536,StaticHeight=Leather.y+864;
 // Dynamic: VR Settings (its help card inside the panel) across the top, the
 // glyph trail beside it, the blood visor under them, then the strain light, the
 // quest card and the bow laser beside it.
