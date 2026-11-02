@@ -79,13 +79,12 @@ int main(){
     }
     {
         Sim s;quick(s);
-        // The movement slider's gait: the transport asks for the game's run / walk toggle when the
-        // hero moves in the other gait; the engine sends it like any native action, without a tick.
-        Sim gait;gait.in.gaitToggle=true;gait.Step();
-        Check(gait.out.request.action==Action::RunWalk&&gait.out.feedback==0,"a gait mismatch sends the native run / walk toggle silently");
-        gait.in.gaitToggle=false;Check(gait.Step().request.action==Action::None,"once per mismatch the transport reports");
-        Sim stale;stale.in.snapshot.session=99;stale.in.gaitToggle=true;stale.Step();
-        Check(stale.out.request.action==Action::None&&stale.out.feedback==0,"an unknown character: no toggle, no buzz");
+        // The game's run / walk toggle (Movement speed, the combat walk) no longer passes through the
+        // engine (2026-11-02): transport sends it on its own slot (interactionstate::ToggleRunWalk), so it
+        // never takes the request slot a potion, holster draw or merc toss needs, never sets block (motion
+        // input stays live) and never buzzes. Idle, the engine asks for nothing and blocks nothing.
+        Sim gait;gait.Step(10);
+        Check(gait.out.request.action==Action::None&&gait.out.feedback==0&&!gait.out.block,"idle: no request, no buzz, motion input free");
         auto c=Context(s.in.snapshot,s.out,true);s.in.snapshot.quick.items[0].quantity--;
         Check(c!=Context(s.in.snapshot,s.out,true),"count changes invalidate paint and old click eligibility");
         for(auto page:{MenuPage::Spells,MenuPage::Equipment}) {

@@ -19,6 +19,7 @@
 #include "shield_guard.h"
 #include "guard_strain.h"
 #include "melee.h"
+#include "projectiles.h"
 #include "native_ui_signatures.h"
 #include "../steamvr/transport.h"
 
@@ -946,6 +947,12 @@ uint64_t ApplyDamage(uintptr_t game,uintptr_t attacker,uintptr_t defender,int fl
     bool cleared=quiet&&clearReactions();
     const auto result=originalApplyDamage(game,attacker,defender,flag,damage);
     if(quiet&&clearReactions())cleared=true;
+    // Combat walk (Cal, 2026-11-02): a monster's hit or missile that would have hit
+    // (not the would-have-hit gate's miss) dealing damage to the local hero.
+    if(damage&&!gated&&Read(attacker,attackerType)&&(attackerType==1||attackerType==3)) {
+        uint32_t hero[3]{},id=0;int dealt=0;
+        if(Read(defender,hero)&&hero[0]==0&&LocalPlayerId(id)&&hero[2]==id&&Read(damage+0x134,dealt)&&dealt>0)projectiles::CombatWalk(1);
+    }
     if(cleared)++quietHits;
     tapScope=savedTap;damageFlag=savedFlag;
     damageRecord=saved;damageAttacker=savedAttacker;return result;

@@ -112,6 +112,19 @@ struct StickToggle {
     // Running though Movement speed is on Walk: at the full run (Scaled would give BASE RUN).
     bool FullRun()const{return switched&&Walks(percent);}
 };
+// Combat walk ([gameplay] combat_walk_ms, Cal 2026-11-02): an enemy hit that would have hit
+// the hero, or the hero's landed strike, cast or shot, puts the game's run / walk toggle on walk
+// until windowMs passes with no new one; then Movement speed's own setting again. GaitSync sends
+// the toggle (one a second at most, CooldownMs), so a single exchange runs again about a second
+// after the walk began, however short the window. windowMs 0 = off. Times in ms.
+constexpr int CombatWalkDefaultMs=500,CombatWalkMaxMs=60000;
+inline int NormalizeCombatWalkMs(float value) {
+    if(!std::isfinite(value))return CombatWalkDefaultMs;
+    return std::clamp(int(std::lround(value)),0,CombatWalkMaxMs);
+}
+inline bool CombatWalking(uint64_t lastEvent,uint64_t now,int windowMs) {
+    return windowMs>0&&lastEvent&&now>=lastEvent&&now-lastEvent<uint64_t(windowMs);
+}
 // The velocity the slider gives a native run velocity. Never above native, never below the base.
 inline int Scaled(int native,int velocityPercent,int percent) {
     percent=std::clamp(percent,0,MaxPercent);   // WALK while still running (until the toggle lands): BASE RUN

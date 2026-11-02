@@ -1610,6 +1610,25 @@ applied live. Developer builds log `Frame flinch:` counts and, once per distinct
 call chain (at most 8 a session), a `Frame flinch probe:` line naming the game code
 that asked for the flinch.
 
+**Combat walk (Cal, 2026-11-02):** with no flinch and no cast animation holding the
+hero (hand spells, arrows, throws and physical strikes never enter one), players could
+fight while moving at full speed. Instead, the game's run / walk toggle goes to walk
+while fighting: when a monster's hit or missile damages the hero (not one the
+would-have-hit gate counts as a miss: the scope set at the forced hit check), when a
+physical stroke lands a strike (any resolved contact, strike-skill casts and Fury /
+Zeal's later hits included; a swing that touches nothing never counts), and when a
+hand spell, arrow, bolt, javelin or throw leaves the hand. Movement speed's own setting
+returns `[gameplay] combat_walk_ms` (default 500; 0 = off; applied live) after the last
+of them. Button, wheel and gesture skills are not counted: they play the game's own
+animation, which already stops the hero. The toggle is the game's own (UI command 0x23),
+kept in line by the same `GaitSync` as Movement speed (`run_speed.h`), so it changes at
+most once a second: a single exchange runs again about a second after the walk began.
+It is sent on its own UI-thread slot (`interactionstate::ToggleRunWalk`), never through
+the interaction engine's request slot, which would block motion input while in flight,
+refuse a holster draw, merc toss or quick-use item in that window, and buzz the right
+hand on every toggle. Developer builds log `Frame combat walk: on - struck | strike |
+cast / shot` and `off`; release builds log Movement speed's own toggles only.
+
 **Incoming defense (Unleashed):** every monster melee attack and projectile aimed at
 the local player lands - its to-hit roll always succeeds, so only the raised shield
 (or the native block roll without one) stops it. Defense still counts: the native
