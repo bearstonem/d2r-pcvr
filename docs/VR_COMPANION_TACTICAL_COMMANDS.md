@@ -78,11 +78,11 @@ A critical finding from live runtime analysis in `D2R.exe` (`3.3.93787 / 3.3.938
 
 ### 4.1. Select Companion First: Grip, Trigger, Aim & Release (`Grip` on Companion -> `Trigger` -> Aim -> Release)
 To prevent accidental tactical commands when using the Grip button for belt potions, weapon holsters, world interactions or the Paladin's grip gestures (Fist of the Heavens, the Blessed Hammer pump and the Charge punch all close the grip with the trigger free), every tactical order takes **Grip + Trigger** and must **begin by pointing at the companion first** ([`steamvr/tactical_chord.h`](../steamvr/tactical_chord.h), `tactical-chord-test`):
-- **Step 1 — Arm (`Grip Press` on Companion):**
-  - Evaluated via 3D vertical cylinder intersection (`hitsUnitCylinder3D` in sheared `coordinates::RenderGround` world metres, radius `0.95m`, height `[-0.45m, 2.00m]`) or ground foot radius (`<= 3.5` sub-tiles), on the frame the grip closes.
-  - Closing Grip anywhere else when not pointing at the companion, or with the trigger already pulled (an attack), is ignored by the tactical system.
-  - Arming shows and pulses nothing. From then that hand's trigger is the command's, never the game's (no skill is cast at the companion), until it is let go. Opening the grip without pulling the trigger orders nothing.
-- **Step 1b — Latch (`Trigger Pull` while armed):** a short confirmation haptic pulse (`0.30f`) and a Gold/Green ring (`color = 2`) under the companion's feet.
+- **Step 1 — Arm (`Grip` held on the Companion):**
+  - Evaluated every frame the hand may command, along the sightline through the hand (3D vertical cylinder, `cylinder3D` in sheared `coordinates::RenderGround` world metres, radius `0.95m`, height `[-0.45m, 2.00m]`, or ground foot radius `<= 3.5` sub-tiles) **or** the hand's own laser (the cylinder): a controller held low and pointed at the companion missed the sightline alone. A monster nearer the ray than the companion keeps the trigger an attack.
+  - The grip may close before or after the hand comes onto the companion; the hand stays on it for `0.25 s` after the ray leaves (`GraceSeconds`). A trigger already pulled for an attack keeps its trigger.
+  - Arming shows and pulses nothing. From then that hand's trigger is the command's, never the game's (no skill is cast at the companion), until it is let go. Opening the grip, or leaving the companion, without pulling the trigger orders nothing.
+- **Step 1b — Latch (`Trigger Pull` while armed, or with the grip in one go):** a short confirmation haptic pulse (`0.30f`) and a Gold/Green ring (`color = 2`) under the companion's feet. The game's input takes this frame's trigger before the step runs, so `Hand::Withholds` decides first, from the raw grip and trigger and where the hand last pointed: the pull that latches never reaches the game (owner 2026-11-01: Grip + Trigger "somehow triggers the primary action"). Logs: `Frame companion tactical:` a line per latch, and per grip + trigger pull that stayed the game's, with why (rays off the companion, a monster nearer).
 - **Step 2 — Live Aim Preview & Reactive Leash Threshold (`Grip + Trigger Held`):**
   - While holding Grip + Trigger and redirecting your hand:
     - **Within Leash Boundary (`dist <= 40.0` sub-tiles / ~16m from player):**
