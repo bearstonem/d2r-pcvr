@@ -162,3 +162,10 @@ The texture header/format mapping was checked against
 Original potion models and textures belong to the game and are extracted into
 the local `d2r_vr_potions` cache; neither that cache nor raw game assets are
 distributed in the repository or release. No Granny runtime is needed.
+
+## Steam shortcut artwork
+
+The Windows shortcut artwork in `artwork/` was supplied by SarbaLabs. It adapts
+Diablo II: Resurrected promotional imagery and includes stylized SteamVR and
+Virtual Desktop marks. Original imagery and marks remain with their respective
+owners; see `artwork/README.md`. The ten supplied PNGs are distributed unchanged.

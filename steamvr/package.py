@@ -48,6 +48,9 @@ def main():
         paths += ['INSTALL-LINUX.md', 'steamvr/launch.sh', 'steamvr/run-proton.sh', 'steamvr/session.py']
     else:
         paths += ['steamvr/setup_native.py']
+        paths += [f'artwork/{runtime}/{name}.png'
+                  for runtime in ('SteamVR', 'Virtual-Desktop')
+                  for name in ('Background', 'Cover', 'Wide-Cover', 'Icon', 'Logo')]
     paths += ['steamvr/prepare_icons.py', 'steamvr/steam_assets.py', 'steamvr/game_assets.py',
               'steamvr/game_install.py', 'steamvr/casc_assets.py']
     paths += ['steamvr/prepare_potions.py', 'steamvr/potion_assets.py', 'steamvr/bone_pieces.py', 'steamvr/prepare_spell_sprites.py', 'steamvr/vendor/bitknit.py',
