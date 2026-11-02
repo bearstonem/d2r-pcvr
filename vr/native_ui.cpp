@@ -65,6 +65,32 @@ int Slot(int wheel) {
     return reinterpret_cast<int(*)(int,bool)>(d2rsig::Addr(abi::ButtonSlotRva))(
         framevr::skills::Buttons(wheel),framevr::skills::Alternate(wheel));
 }
+// Glyph casting's probe (owner 2026-11-01, "probe the 6 spare slots"): the game keeps 16 controller
+// binding records per weapon set and the hand buttons reach 10 of them. Once a session, ask the
+// game's own lookup which record each pad button answers to, alone and with LT, and log what the
+// 16 records of both sets hold. A lookup and reads only: nothing is pressed, assigned or written.
+void ProbeButtonSlots() {
+    static uint64_t told=0;
+    if(told&&GetTickCount64()-told<60000)return;   // once a game (Read runs while one is loaded)
+    told=GetTickCount64();
+    const auto lookup=reinterpret_cast<int(*)(int,bool)>(d2rsig::Addr(abi::ButtonSlotRva));
+    static const char* const names[16]={"DPAD_UP","DPAD_DOWN","DPAD_LEFT","DPAD_RIGHT","START","BACK","LS","RS",
+                                        "LB","RB","bit10","bit11","A","B","X","Y"};
+    char line[900];int at=std::snprintf(line,sizeof line,"Frame glyph probe: ButtonSlot (button: record alone/with LT):");
+    for(int bit=0;bit<16&&at<int(sizeof line)-40;++bit)
+        at+=std::snprintf(line+at,sizeof line-size_t(at)," %s=%d/%d",names[bit],lookup(1<<bit,false),lookup(1<<bit,true));
+    framevr::logging::Write(line);
+    for(int bank:{0,16}) {
+        at=std::snprintf(line,sizeof line,"Frame glyph probe: bank %d records (skill/owner):",bank);
+        for(int r=0;r<16&&at<int(sizeof line)-24;++r) {
+            framevr::interaction::ControllerBinding v;
+            if(framevr::interaction::ReadControllerBinding(d2rsig::Addr(abi::ControllerTableRva),bank,r,[](uintptr_t p,auto& x){return Read(p,x);},v))
+                at+=std::snprintf(line+at,sizeof line-size_t(at)," %d=%d/%d",r,v.skill,v.owner);
+            else at+=std::snprintf(line+at,sizeof line-size_t(at)," %d=?",r);
+        }
+        framevr::logging::Write(line);
+    }
+}
 const char* SkillKey(int id,char key[80]) {
     // Original localization keys are not fully regular across the expansion.
     // These are identifiers, not copied text/images from the game.
@@ -344,6 +370,7 @@ void Capture(framevr::interaction::Snapshot& s) {
     if(!Read(player+0x100,skillList)||skillList<0x10000)return;
     const int bank=reinterpret_cast<int(*)()>(d2rsig::Addr(abi::ControllerBankRva))();
     if(bank!=0&&bank!=16)return;
+    ProbeButtonSlots();
     s.bindingBank=bank;
     unsigned usedSlots=0;
     for(int i=0;i<framevr::skills::Count;++i){
