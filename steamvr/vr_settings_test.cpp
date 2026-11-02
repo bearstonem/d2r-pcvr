@@ -156,7 +156,8 @@ int main(int argc,char** argv){
             Check(layout::KeyVisible(FogDistance,on,{})&&!layout::KeyVisible(FogDistance,off,{}),"its box shows beside Distance fog while the fog is on");
             Model list;list.Open(fogged);layout::Press(list,{Kind::Open,int(View::World),-1},0);layout::Press(list,{Kind::Popover,FogDistance},0);
             int listed=0;for(const auto& e:layout::Build(list,list.context,{}).elements)listed+=e.role==layout::Role::PopoverOption&&e.key==FogDistance;
-            const auto* box=layout::Find(layout::Build(list,list.context,{}),{Kind::Popover,FogDistance});
+            const auto built=layout::Build(list,list.context,{});   // Find points into it: kept for the check
+            const auto* box=layout::Find(built,{Kind::Popover,FogDistance});
             Check(listed==23&&box&&box->text=="Ends at 600","Fog distance: Ends at 600, a list of 100 - 1200 in 50s");
         }
         Model strength;strength.Open(s);

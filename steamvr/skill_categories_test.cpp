@@ -50,7 +50,7 @@ int main(){
     for(int hand:{0,1}){
         Sim s(hand);s.Open();
         Check(s.out.editCategory==categories::All&&s.out.editCount==8&&s.out.editPages==3,"All preserves full catalog and pagination");
-        Check(s.out.editCategoryCounts==std::array<int,5>{17,1,10,2,4},"tree counts include learned skills, general actions and charges separately");
+        Check(s.out.editCategoryCounts==std::array<int,5>{18,1,10,2,5},"tree counts include learned skills, general actions (and Draw glyph) and charges separately");
         s.Click(10);s.Click(10);Check(s.out.editPage==2,"All reaches last page");
         s.Click(SkillCategoryCell(2));
         Check(s.out.editPage==0&&s.out.editPages==2&&s.out.editOptions[0].id==98&&s.out.editCount==8,"category change resets page and filters exact identities");
@@ -58,7 +58,7 @@ int main(){
         s.in.hover=0;s.Step();Check(s.out.request.action==Action::None,"held tab trigger cannot select a newly exposed skill");
         s.Click(10);Check(s.out.editCount==2&&s.out.editOptions[0].id==122,"filtered next page uses filtered index");
         s.Click(SkillCategoryCell(categories::General));
-        Check(s.out.editCount==4&&s.out.editOptions[2].id==54&&s.out.editOptions[3].owner==777,"foreign oskills and own-class item charges remain selectable");
+        Check(s.out.editCount==5&&s.out.editOptions[2].id==54&&s.out.editOptions[3].owner==777,"foreign oskills and own-class item charges remain selectable");
         auto context=Context(s.in.snapshot,s.out,true);auto changed=s.out;
         changed.editCategory=categories::All;Check(context!=Context(s.in.snapshot,changed,true),"category header invalidates stale paint even for same rows");
         changed=s.out;changed.editClass=1;Check(context!=Context(s.in.snapshot,changed,true),"class headings invalidate paint");
@@ -82,6 +82,43 @@ int main(){
         s.Click(0);Check(s.out.editCategory==3&&s.out.editPage==0,"reopening picker keeps the tree picked in this game, on page 1 (menus remember)");
         s.in.snapshot.bindingBank=16;s.in.trigger=0;s.Step();Check(s.out.editor==0,"weapon swap closes frozen picker");
         s.Click(0);s.in.cancel=true;s.Step();Check(s.out.editor==0&&s.out.cancelPending,"menu cancellation drops category picker");
+    }
+    for(int hand:{0,1}) {   // Glyph casting: Draw glyph in the button picker, last under General / Items
+        Sim s(hand);s.Open();
+        s.Click(SkillCategoryCell(categories::General));
+        Check(s.out.editCount==5&&s.out.editOptions[4].id==GlyphDrawId,"Draw glyph: last under General / Items");
+        const auto r=s.Click(4).request;
+        Check(r.action==Action::BindGlyphDraw&&r.index==framevr::skills::HandSlot(hand,0)&&r.skill==-1&&r.skillOwner==-1&&r.bank==0&&
+              r.previousSkill==s.in.snapshot.skills[size_t(r.index)].id,"choosing it: this button draws, its game skill cleared");
+        Check(CanBind(s.in.snapshot,r,s.in.at),"the clear is a valid binding");
+        s.in.reply={r.sequence,r.session,Result::Applied};s.Step();
+        Check(s.out.editor==0,"applied: back on the hand wheel");
+    }
+    {   // the GLYPHS page: a shape's skill, from the hero's own skills that need no target
+        Sim s;s.in.snapshot.catalog[2].directed=true;   // 96 needs a target
+        s.in.wheel=true;s.Step();
+        s.Click(GlyphsCell);Check(s.out.glyphs&&Page(s.out)==MenuPage::Glyphs&&s.out.feedback==1,"the GLYPHS box opens the page");
+        Check(WheelCell(.85f,.1f,-1,MenuPage::Glyphs,0)==GlyphsCell&&WheelCell(.1f,.1f,-1,MenuPage::Glyphs,0)!=QuickUseCell,"only the GLYPHS box on its page");
+        s.Click(2);Check(s.out.editor==2&&s.out.glyphEdit==2&&s.out.editSlot==-1,"a shape opens the skill picker for it, not a button's");
+        bool clean=true;
+        for(int i=0;i<s.out.editCount;++i){const auto& k=s.out.editOptions[size_t(i)];clean=clean&&k.id!=357&&k.id!=96&&k.owner==-1&&k.id!=GlyphDrawId;}
+        Check(clean&&s.out.editCategoryCounts[categories::All]==14,"no Interact, no targeted skill, no item charges, no Draw glyph");
+        const int chosen=s.out.editOptions[1].id;
+        auto r=s.Click(1).request;
+        Check(r.action==Action::BindGlyph&&r.index==2&&r.skill==chosen&&r.skillOwner==-1,"choosing: the square's skill");
+        s.in.reply={r.sequence,r.session,Result::Applied};s.Step();
+        Check(s.out.editor==0&&s.out.glyphEdit<0&&s.out.glyphs,"applied: back on the GLYPHS page");
+        s.Click(3);r=s.Click(8).request;
+        Check(r.action==Action::BindGlyph&&r.index==3&&r.skill==-1,"CLEAR GLYPH: no skill");
+        s.in.reply={r.sequence,r.session,Result::Refused};s.Step();
+        Check(s.out.editor==2&&s.out.feedback==3,"refused: the picker stays, a buzz");
+        s.Click(11);Check(s.out.editor==0&&s.out.glyphs&&s.out.request.action==Action::None,"BACK keeps the shape's skill");
+        s.in.snapshot.bindingBank=16;s.Step();Check(s.out.glyphs,"a weapon swap leaves the page as it is");
+        s.Click(4);s.in.snapshot.bindingBank=0;s.Step();Check(s.out.editor==2&&s.out.glyphEdit==4,"nor closes a shape's picker");
+        s.Click(11);s.Click(9);Check(!s.out.glyphs&&!s.out.utility&&Page(s.out)==MenuPage::Spells,"SPELLS leaves it");
+        s.Click(GlyphsCell);s.Click(GlyphsCell);Check(!s.out.glyphs,"the box goes back too");
+        auto c=Context(s.in.snapshot,s.out,true);auto changed=s.out;changed.glyphSkills[0]=99;
+        Check(c!=Context(s.in.snapshot,changed,true),"a shape's skill repaints the page");
     }
     std::puts("Skill categories: native classes, filtering, paging, exact assignments, cancellation and paint invalidation passed");
 }

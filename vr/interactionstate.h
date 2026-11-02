@@ -11,5 +11,8 @@ int CurrentLevel(uint64_t session,uint64_t now); // Fresh location only; avoids 
 int ShapeForm(uint64_t session,uint64_t now);
 framevr::interaction::Reply Status();
 void Request(const framevr::interaction::Request&);
+// Glyph casting (glyph_cast.h): put a skill on the right trigger's record, on the UI thread; apart from
+// Request's one slot so a cast never waits on the wheel. False while the previous one is scheduled.
+bool Park(uint64_t session,int skill,int owner);
 void Cancel();
 }

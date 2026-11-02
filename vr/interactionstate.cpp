@@ -49,6 +49,9 @@ std::atomic<uint32_t> tintedUnit{0}; // written on the game thread: hireling cur
 constexpr int GlassBreak=2587;
 uint64_t issuedAt=0,cancelEpoch=0;
 bool scheduled=false;
+// Glyph casting's park (Park): its own slot.
+struct Parking {uint64_t session=0;int skill=-1,owner=-1;} parking;
+bool parkScheduled=false;
 template<class T>const T* Service(const PluginContext* c) {const T* p=nullptr;return c->QueryService(&p)==ServiceQueryResult::Success?p:nullptr;}
 Item Copy(const Items::ItemInfo& i, uint32_t fireDamage = 0) {
     return {i.handle, i.runtimeId, i.code, uint32_t(i.quality), i.qualityRecordId, i.socketedItemCount, 0, fireDamage};
@@ -223,6 +226,13 @@ void __cdecl Apply(const PluginContext*,void*) noexcept {
     } else reply={r.sequence,r.session,accepted?Result::Applied:Result::Refused};
     framevr::logging::Write(accepted?"Frame interactions: native action accepted; item/set changes require confirmation":"Frame interactions: stale or refused native action discarded");
 }
+void __cdecl ApplyPark(const PluginContext*,void*) noexcept {
+    Parking p;
+    {std::lock_guard lock(mutex);p=parking;parking={};parkScheduled=false;}
+    if(p.skill<0)return;
+    const auto s=Read();
+    if(!gamestate::MenuOpen()&&nativeui::Park(p.skill,p.owner,s,p.session))Publish(Collect());   // the cast reads the record back at once
+}
 // Game thread: did the thrown bottle land at the local hireling's feet? Every
 // landing continues to the UI thread, which plays the shatter; only a hit then
 // uses the belt item on the mercenary. A miss leaves the belt untouched.
@@ -302,4 +312,10 @@ void Request(const framevr::interaction::Request& r) {
     }
 }
 void Cancel(){devscenarios::Cancel();std::lock_guard lock(mutex);++cancelEpoch;queued={};waiting={};reply={};}
+bool Park(uint64_t session,int skill,int owner) {
+    if(!threads||!threads->runOnUiThread||skill<0)return false;
+    {std::lock_guard lock(mutex);if(parkScheduled)return false;parking={session,skill,owner};parkScheduled=true;}
+    if(threads->runOnUiThread(context,&ApplyPark,nullptr)==D2RL::Threads::Result::Success)return true;
+    std::lock_guard lock(mutex);parking={};parkScheduled=false;return false;
+}
 }

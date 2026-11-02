@@ -48,6 +48,8 @@
 #include "sewer_prompt_art.h"
 #include "notice_card_art.h"
 #include "arcane_decay.h"
+#include "glyph_cast.h"
+#include "glyph_trail.h"
 #include "blood_screen.h"
 #include "shapeshift_gesture.h"
 #include "hammer_gesture.h"
@@ -242,6 +244,23 @@ uint64_t arcanePaintKey=~0ull;
 uint64_t arcanePaintSession=0;
 ULONGLONG arcanePaintAt=0;
 bool arcaneAtlasPending=false,arcaneImageReady=false;
+// Glyph casting (glyph_cast.h): the stroke the Draw glyph button draws, the cast it makes, and its
+// trail (glyph_trail.h), painted into the shared atlas and shown where it was drawn.
+glyphcast::Stroke glyphStroke;
+glyphcast::Cast glyphCast;
+glyphtrail::Painter glyphPainter;
+uint64_t glyphStrokeId=0,glyphPaintKey=0,glyphShownStroke=0;
+double glyphBeganAt=0,glyphEndedAt=-1,glyphPaintAt=0;   // the stroke's start and end (recognised, refused or cancelled; -1 drawing or none)
+bool glyphPressRt=false,glyphTrailShown=false;
+glyphtrail::Look glyphLook=glyphtrail::Look::Drawing;   // the trail's look: drawing, refused or the skill's element
+bool glyphAtlasPending=false,glyphImageReady=false;
+// The wheel's glyph settings ([glyphs]) are saved here, one save at a time; until it lands the wheel
+// and the draw button follow the values asked for. The engine's request is answered as
+// interactionstate answers its own.
+uint64_t glyphSaveSequence=0,glyphSaveAt=0;
+settings::Values glyphWanted{};
+interaction::Reply glyphReply{};
+bool glyphDrawClear=false;   // a game skill was put on the draw button: draw_slot goes back to none
 // Quest / level-up notices: a card standing in the room for a few seconds
 // instead of the native panel at the eyes (notice_card.h). Each card is
 // painted once, in the background, when it comes up.
@@ -1708,6 +1727,7 @@ bool SetupStatic(DXGI_FORMAT eyeFormat) {
     if(!interactionPainter.Start())Say("Frame UI: background painter unavailable; interaction artwork cannot refresh");
     if(!bloodPainter.Start())Say("Frame blood visor: background painter unavailable; blood stays hidden");
     if(!arcanePainter.Start())Say("Frame arcane decay: background painter unavailable; arcane warning stays hidden");
+    if(!glyphPainter.Start())Say("Frame glyph: background painter unavailable; glyph trails stay hidden");
     if(!noticePainter.Start())Say("Frame notices: background painter unavailable; quest and level-up cards stay hidden");
     if(!strainPainter.Start())Say("Frame guard strain: background painter unavailable; the light stays hidden");
     if(!settingsPainter.Start())Say("Frame VR settings: background painter unavailable; VR Settings and calibration cannot be shown");
@@ -1854,7 +1874,7 @@ bool Initialize(reshade::api::command_queue* rq,reshade::api::swapchain* swap) {
     if(!fenceEvent) return false;
     if(!SetupStatic(eyeFormat))return false;
     atlasFormat=eyeFormat;
-    if(!MakeShared())Say("Frame panels: the shared atlas unavailable; VR Settings, the quest card, blood, the strain light, arcane decay and the bow laser stay hidden");
+    if(!MakeShared())Say("Frame panels: the shared atlas unavailable; VR Settings, the quest card, blood, the strain light, arcane decay, glyph trails and the bow laser stay hidden");
     potionModels.Initialize(device.Get(),queue.Get(),eyeFormat,width,height,&Say);
     turnFormat=eyeFormat;
     elementalRenderer.Initialize(device.Get(),queue.Get(),eyeFormat,width,height,&Say);
@@ -3219,6 +3239,14 @@ void Input() {
     if(bowvr::SpellReady()&&interaction::Fresh(bindingSnapshot,gamestate::LocalPlayer(),GetTickCount64()))
         for(int i=0;i<skills::Count;++i)if(bindingSnapshot.skills[i].physical&&bindingSnapshot.skills[i].available)
             handInput.independentSlots|=1u<<i;
+    // Glyph casting: the Draw glyph button ([glyphs] draw_slot, or the save on its way) draws, below;
+    // it is never a physical spell.
+    const auto glyphSettings=vrsettings::Read();
+    if(glyphSaveSequence&&((glyphSettings.sequence==glyphSaveSequence&&glyphSettings.result!=settings::Result::Saving)||GetTickCount64()-glyphSaveAt>2000))
+        glyphSaveSequence=0;   // saved, refused, or overtaken by another save: the profile's values again
+    const auto& glyphValues=glyphSaveSequence?glyphWanted:glyphSettings.values;
+    const int glyphDrawSlot=glyphSettings.ready?glyphcast::DrawSlot(glyphValues[settings::GlyphDraw]):-1;
+    if(glyphDrawSlot>=0)handInput.independentSlots&=~(1u<<glyphDrawSlot);
     handInput.layout^=uint64_t(handInput.independentSlots)<<48;
     handInput.active=motionInput.active&&motionInput.tracked[0]&&motionInput.tracked[1]&&handAimTracked[0]&&handAimTracked[1]&&gamestate::LocalPlayer();
     handInput.occupied=interactionOutput.bottle>=0||interactionOutput.owner[0]==interaction::Owner::Holster||interactionOutput.owner[1]==interaction::Owner::Holster;
@@ -3292,6 +3320,9 @@ void Input() {
         leftStrikesSequence=0;   // saved, refused, or overtaken by another save: the profile's value again
     interactionInput.leftStrikes=hudSettings.ready&&bindingSnapshot.skillClass==settings::heroclass::Druid?
         int(leftStrikesSequence?leftStrikesWanted:hudSettings.values[settings::LeftHandStrikes]):-1;
+    interactionInput.glyphDraw=glyphDrawSlot;
+    for(int i=0;i<glyphs::ShapeCount;++i)interactionInput.glyphSkills[size_t(i)]=glyphcast::SkillOf(glyphValues[settings::GlyphKey(i)]);
+    if(glyphReply.sequence){if(glyphReply.session==interactionInput.session)interactionInput.reply=glyphReply;glyphReply={};}   // once
     {
         uint64_t seenAt=0;bool tired=false;const int gait=projectiles::ObservedGait(seenAt,&tired);   // 1 walking, 2 running, 0 not seen
         const float stick=std::min(1.f,std::hypot(float(controls.lx),float(controls.ly))/32767.f);
@@ -3677,7 +3708,36 @@ void Input() {
         auto& r=interactionOutput.request;const auto& w=stageWorld;
         r.player=w.hero*(1/w.upm);r.unitsPerMetre=w.upm;
     }
-    if(interactionOutput.request.action!=interaction::Action::None)interactionstate::Request(interactionOutput.request);
+    // One save of the [glyphs] settings (the wheel's); false while another runs.
+    auto saveGlyphs=[&](settings::Key key,float value) {
+        const auto current=vrsettings::Read();
+        if(!current.ready||glyphSaveSequence)return false;
+        settings::Request save{current.values,current.values,0,current.sequence+1};
+        save.values[key]=value;save.changed=settings::Changed(save.base,save.values);
+        if(!save.changed)return true;
+        if(!vrsettings::Submit(save))return false;
+        glyphSaveSequence=save.sequence;glyphSaveAt=GetTickCount64();glyphWanted=save.values;return true;
+    };
+    if(interactionOutput.request.action==interaction::Action::BindGlyph||interactionOutput.request.action==interaction::Action::BindGlyphDraw) {
+        // Glyph casting's wheel settings. Draw glyph also clears the game skill on that button, so it
+        // casts nothing else (that clear's reply answers the wheel).
+        const auto& r=interactionOutput.request;
+        const bool shape=r.action==interaction::Action::BindGlyph;
+        const bool valid=shape?r.index>=0&&r.index<glyphs::ShapeCount:r.index>=0&&r.index<skills::Count;
+        const bool saved=valid&&saveGlyphs(shape?settings::GlyphKey(r.index):settings::GlyphDraw,float(shape?r.skill:r.index));
+        char line[160];
+        if(shape)std::snprintf(line,sizeof line,"Frame glyph: the %s's skill = %d (%s)",valid?glyphs::Name(glyphs::Shape(r.index)):"?",r.skill,saved?"saved":"refused: another save is running");
+        else std::snprintf(line,sizeof line,"Frame glyph: Draw glyph on hand slot %d (%s)",r.index,saved?"saved; its game skill cleared":"refused: another save is running");
+        Say(line);
+        if(saved&&!shape){auto clear=r;clear.action=interaction::Action::BindSkill;interactionstate::Request(clear);}
+        else glyphReply={r.sequence,r.session,saved?interaction::Result::Applied:interaction::Result::Refused};
+        if(saved&&!shape)glyphDrawClear=false;
+    } else if(interactionOutput.request.action!=interaction::Action::None) {
+        // A game skill (or none) put on the draw button: it stops drawing.
+        if(interactionOutput.request.action==interaction::Action::BindSkill&&interactionOutput.request.index==glyphDrawSlot)glyphDrawClear=true;
+        interactionstate::Request(interactionOutput.request);
+    }
+    if(glyphDrawClear&&saveGlyphs(settings::GlyphDraw,-1)){glyphDrawClear=false;Say("Frame glyph: a skill put on the Draw glyph button - it no longer draws");}
     if(interactionOutput.feedback)MotionPulse(interactionOutput.feedbackHand,interactionOutput.feedback==4?haptics::Category::Alert:haptics::Category::Interaction,
         interactionOutput.feedback==2?.65f:.25f,interactionOutput.feedback>=3?100000000:35000000);
     motionInput.palette=false; // Dedicated interaction owner handles the new wheel/belt.
@@ -3750,6 +3810,9 @@ void Input() {
             dualwield::ThrownPair(skel::HeroClass(),gamestate::MeleeEquipment());
         if(leftThrowArmed&&requested==shieldSlot){requested=-1;handOutput.interact=false;}
     }
+    // Glyph casting: the Draw glyph button's press draws (below), never a native cast.
+    const bool glyphPressed=glyphDrawSlot>=0&&handOutput.slot==glyphDrawSlot;
+    if(glyphPressed){requested=-1;handOutput.interact=false;}
     const bool requestedKnown=requested>=0&&quickFresh&&quickSnapshot.skills[requested].known&&quickSnapshot.skills[requested].available;
     handOutput.interact=requestedKnown&&quickSnapshot.skills[requested].id==357;
     const bool quick=requested>=0&&requested!=skills::TriggerSlot(0);
@@ -3983,6 +4046,96 @@ void Input() {
             if(pulse<0)crossSlot=crossOwner=-1;
             else if(motionOutput.skill<0&&quickFresh&&quickSnapshot.skills[pulse].available)motionOutput.skill=pulse;
         }
+    }
+    // Glyph casting (glyph_cast.h): while the Draw glyph button is held its hand's path is a stroke on
+    // the upright plane facing the player; let go, it is recognised and the skill on that shape is
+    // cast by a native press: its own hand slot, else the game's right trigger with the skill put on
+    // that record first. The trail glows where it was drawn and fades (glyph_trail.h).
+    {
+        const double now=motionInput.time;
+        int hand=-1,button=-1;
+        for(int h=0;h<2&&glyphDrawSlot>=0;++h)for(int b=0;b<5;++b)if(skills::HandSlot(h,b)==glyphDrawSlot){hand=h;button=b;}
+        // Still down, but no longer the press (a wheel, a grip change, another owner): cancelled, not let go.
+        const bool down=hand>=0&&(button==0?handInput.trigger[hand]>.2f:handInput.face[hand][(button-1)%2]);
+        glyphcast::StrokeInput in;
+        in.time=now;in.held=glyphPressed;
+        in.tracked=hand>=0&&handAimTracked[hand]&&motionHeadTracked;
+        in.allowed=hand>=0&&motionControls.load()&&gameplayChain&&motionInput.active&&quickFresh&&!panelMode&&!spatialMode&&!settingsOwned&&
+            !interactionOutput.wheel&&!interactionOutput.settings&&interactionOutput.bottleHand!=hand&&
+            interactionOutput.owner[hand]==interaction::Owner::Combat&&!bloodOutput.block[hand]&&!(glyphStroke.Drawing()&&!glyphPressed&&down);
+        if(hand>=0){const auto& tip=handAim[hand].p;in.x=tip.x;in.y=tip.y;in.z=tip.z;}
+        const auto right=math::Rotate(interactionInput.head.q,{1,0,0});in.rightX=right.x;in.rightZ=right.z;
+        const auto stroke=glyphStroke.Step(in);
+        if(stroke.event==glyphcast::Event::Began) {
+            ++glyphStrokeId;glyphBeganAt=now;glyphEndedAt=-1;glyphLook=glyphtrail::Look::Drawing;
+            MotionPulse(hand,haptics::Category::Interaction,.2f,15000000);
+        } else if(stroke.event==glyphcast::Event::Cancelled) {
+            glyphEndedAt=now;glyphLook=glyphtrail::Look::Refused;
+            Say("Frame glyph: stroke cancelled (the button was taken, or tracking lost)");
+        } else if(stroke.event==glyphcast::Event::Refused||stroke.event==glyphcast::Event::Recognised) {
+            glyphEndedAt=now;
+            const auto& r=stroke.result;
+            const int skill=stroke.event==glyphcast::Event::Recognised?interactionInput.glyphSkills[size_t(r.shape)]:-1;
+            const auto known=interaction::GlyphSkill(quickSnapshot,skill);
+            const char* refused=stroke.event==glyphcast::Event::Refused?r.why:skill<0?"no skill on it (the wheel's GLYPHS page)":
+                !known.known?"not this hero's skill":!known.available?"the skill is unavailable now":glyphCast.Busy()?"the last glyph is still casting":nullptr;
+            glyphcast::Plan plan;
+            if(!refused) {
+                std::array<glyphcast::Slot,skills::Count> slots{};
+                for(int i=0;i<skills::Count;++i){const auto& k=quickSnapshot.skills[i];slots[size_t(i)]={k.id,k.owner,k.known,k.available};}
+                const bool record=quickSnapshot.glyphRecord>=0;
+                plan=glyphcast::Dispatch(skill,-1,slots,record?quickSnapshot.glyphSkill:-2,record?quickSnapshot.glyphOwner:-2);
+                if(plan.how==glyphcast::How::Park&&!record)refused="the right trigger's skill record is unknown (a custom controller layout?)";
+                else if(plan.how==glyphcast::How::Park&&!interactionstate::Park(interactionInput.session,skill,-1))refused="the last skill change is still running";
+            }
+            char line[320];
+            if(refused) {
+                glyphLook=glyphtrail::Look::Refused;
+                std::snprintf(line,sizeof line,"Frame glyph: %s%s, %s (score %.2f, next %.2f, corners %d, %.1f s)",
+                    stroke.event==glyphcast::Event::Recognised?"the ":"not recognised, nearest the ",glyphs::Name(stroke.event==glyphcast::Event::Recognised?r.shape:r.nearest),
+                    refused,r.score,r.second,r.corners,stroke.seconds);
+                MotionPulse(hand,haptics::Category::Interaction,.25f,100000000);
+            } else {
+                glyphCast.Begin(plan,skill,-1,now);glyphLook=glyphtrail::ElementLook(skill);
+                std::snprintf(line,sizeof line,"Frame glyph: the %s -> %s (skill %d) via %s (score %.2f, next %.2f, corners %d, %.1f s)",
+                    glyphs::Name(r.shape),known.name,skill,plan.how==glyphcast::How::Slot?"its hand slot":plan.how==glyphcast::How::Record?"the right trigger":
+                    "the right trigger, put on it first",r.score,r.second,r.corners,stroke.seconds);
+                MotionPulse(hand,haptics::Category::Spell,.6f,60000000);
+            }
+            Say(line);
+        }
+        glyphPressRt=false;
+        if(!quickFresh||!motionInput.active)glyphCast.Cancel();
+        if(glyphCast.Busy()) {
+            const bool record=quickSnapshot.glyphRecord>=0;
+            const auto press=glyphCast.Step(now,record?quickSnapshot.glyphSkill:-2,record?quickSnapshot.glyphOwner:-2);
+            if(press.slot>=0&&motionOutput.skill<0)motionOutput.skill=press.slot;
+            glyphPressRt=press.rt;
+            if(glyphCast.state==glyphcast::Cast::State::TimedOut) {
+                glyphLook=glyphtrail::Look::Refused;
+                Say("Frame glyph: the right trigger's record never took the skill; not cast");
+            }
+        }
+        // The trail: drawing, then its look's effect and exit (glyph_trail.h), repainted up to 30 times
+        // a second while it moves.
+        const double since=glyphStroke.Drawing()?now-glyphBeganAt:glyphEndedAt<0?0:now-glyphEndedAt;
+        const bool trail=glyphStrokeId&&(glyphStroke.Drawing()||(glyphEndedAt>=0&&since<glyphtrail::Duration(glyphLook)));
+        if(trail) {
+            glyphtrail::Image painted;
+            if(!glyphAtlasPending&&atlasUploads.size()<3&&glyphPainter.Take(painted)&&!painted.pixels.empty()&&
+               UploadShared(panelatlas::Glyph,painted.pixels,&glyphAtlasPending)){glyphPaintKey=painted.key;glyphShownStroke=painted.strokeId;}
+            glyphtrail::Job job;
+            job.strokeId=glyphStrokeId;job.look=glyphLook;job.t=float(since);
+            uint64_t key=1469598103934665603ull;
+            for(const uint64_t part:{glyphStrokeId,uint64_t(glyphStroke.Points().size()),uint64_t(glyphLook),uint64_t(since*30)})
+                key=(key^part)*1099511628211ull;
+            job.key=key|1;
+            if(job.key!=glyphPaintKey&&now>=glyphPaintAt&&!glyphPainter.Busy()&&!glyphAtlasPending) {
+                job.stroke=glyphStroke.Points();
+                if(glyphPainter.Submit(std::move(job)))glyphPaintAt=now+1./30;
+            }
+        }
+        glyphTrailShown=trail&&glyphImageReady&&glyphPaintKey&&glyphShownStroke==glyphStrokeId;
     }
     // Paladin Fist of the Heavens: the weapon arm straight, raised ~45 degrees,
     // brought down to stop level with the shoulder (grip held, trigger free).
@@ -4460,6 +4613,9 @@ void Input() {
         if(motionOutput.block||!motionInput.active||!motionOutput.rayValid) {
             a.held=motionOutput.swap?D2RVR_ACT_SWAP:0;p.buttons=0;p.left_trigger=0;
         }
+        // Glyph casting: the game's right trigger, whose record holds the glyph's skill (glyph_cast.h);
+        // nothing else presses it in motion combat. Not with LT down: that is another record.
+        else if(glyphPressRt&&!p.left_trigger)p.right_trigger=255;
         // Wheel ownership consumes combat, never locomotion or turning.
     }
     if(panelMode||spatialMode||settingsOwned||settingsChord) {
@@ -5592,11 +5748,11 @@ void EndPair() {
     // The shared panels' pictures uploaded this frame, all in one copy (panelatlas).
     if(sharedDirty) {
         const bool flushed=FlushShared();
-        for(auto* p:{&settingsAtlasPending,&bloodAtlasPending,&strainAtlasPending,&bowLaserAtlasPending,&noticeAtlasPending,&arcaneAtlasPending})if(*p) {
+        for(auto* p:{&settingsAtlasPending,&bloodAtlasPending,&strainAtlasPending,&bowLaserAtlasPending,&noticeAtlasPending,&arcaneAtlasPending,&glyphAtlasPending})if(*p) {
             *p=false;
             if(p==&settingsAtlasPending)settingsImageReady=flushed;else if(p==&bloodAtlasPending)bloodImageReady=flushed;
             else if(p==&strainAtlasPending)strainImageReady=flushed;else if(p==&bowLaserAtlasPending)bowLaserImageReady=flushed;
-            else if(p==&arcaneAtlasPending)arcaneImageReady=flushed;else noticeImageReady=flushed;
+            else if(p==&arcaneAtlasPending)arcaneImageReady=flushed;else if(p==&glyphAtlasPending)glyphImageReady=flushed;else noticeImageReady=flushed;
         }
     }
     // The native menus closed short of swapchains: their surface goes back for the map.
@@ -5867,6 +6023,14 @@ void EndPair() {
     if(layer&&(settingsModel.open||bodyCalibration.Active())&&settingsImageReady){
         // The help card is inside the panel: its region is the panel, Width wide.
         motionQuad(settingsPanel,settingsPose,settingsWidth,settingsHeight,Rect(panelatlas::Settings),sharedChain);
+    }
+    // Glyph casting's trail, in the plane it was drawn in, the stroke's start in the middle (glyph_trail.h).
+    XrCompositionLayerQuad glyphQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    if(glyphTrailShown&&layer&&!panelMode&&!blackMenu&&!settingsModel.open&&sharedChain) {
+        const auto& plane=glyphStroke.Where();
+        const float yaw=std::atan2(-plane.rightZ,plane.rightX);   // the quad's +x along the plane's right
+        XrPosef pose{};pose.orientation={0,std::sin(yaw/2),0,std::cos(yaw/2)};pose.position={plane.originX,plane.originY,plane.originZ};
+        motionQuad(glyphQuad,pose,glyphtrail::Side,glyphtrail::Side,Rect(panelatlas::Glyph),sharedChain);
     }
     XrCompositionLayerQuad laser{XR_TYPE_COMPOSITION_LAYER_QUAD},dot{XR_TYPE_COMPOSITION_LAYER_QUAD};
     if(layer&&(settingsModel.open||panelMode||spatialMode||(interactionVisible&&interactionOutput.wheel))&&pointerChain&&pointerVisible) {
@@ -6499,7 +6663,7 @@ void Shutdown(bool preserveResolution) {
     if(!preserveResolution)hud::NativeSession(false);
     if(!preserveResolution)resolution::Restore();
     windowFocus.Cancel();
-    EndPair();ClearInput();interactionPainter.Stop();bloodPainter.Stop();arcanePainter.Stop();strainPainter.Stop();noticePainter.Stop();settingsPainter.Stop();turnCompiler.Stop();interaction::icons::Shutdown();
+    EndPair();ClearInput();interactionPainter.Stop();bloodPainter.Stop();arcanePainter.Stop();glyphPainter.Stop();strainPainter.Stop();noticePainter.Stop();settingsPainter.Stop();turnCompiler.Stop();interaction::icons::Shutdown();
     // Completion is mandatory before destroying our commands/resources, even
     // when ordinary frame submission uses queue ordering without a CPU wait.
     if(fence&&!WaitGpu())failed=true;
@@ -6520,6 +6684,7 @@ void Shutdown(bool preserveResolution) {
     gameplayChain=XR_NULL_HANDLE;
     bloodScreen.Reset();bloodOutput={};bloodShown=0;bloodPaintKey=bloodRequestedKey=~0ull;bloodPaintRequest=0;bloodPaintAt=0;bloodAtlasPending=bloodImageReady=false;
     arcaneController.Reset();arcaneOutput={};arcanePaintKey=~0ull;arcanePaintSession=0;arcanePaintAt=0;arcaneAtlasPending=arcaneImageReady=false;
+    glyphStroke={};glyphCast={};glyphPaintKey=glyphShownStroke=0;glyphBeganAt=0;glyphEndedAt=-1;glyphPaintAt=0;glyphLook=glyphtrail::Look::Drawing;glyphPressRt=glyphTrailShown=false;glyphAtlasPending=glyphImageReady=false;
     bowLaserHue=-1;bowLaserAtlasPending=bowLaserImageReady=false;
     noticeWatch={};noticeCards.Clear();noticeCard={};noticePaintRequest=noticeRequestedSequence=noticePaintedSequence=0;noticeAtlasPending=noticeImageReady=false;
     heartStream.Stop();heartPlaying=false;heartLevel.Reset();heartAt=0;heartHush.Reset();heartHealth=-1;

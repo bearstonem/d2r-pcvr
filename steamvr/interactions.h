@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdio>
 #include "shoulder_swap.h"
 #include "leather_menu.h"
 #include "skill_slots.h"
@@ -268,6 +269,9 @@ struct Snapshot {
     uint32_t skillCount=0;
     int32_t bindingBank=-1;
     bool bindingsEditable=false;
+    // Glyph casting (glyph_cast.h): the binding record the game's right trigger answers to (-1 unknown,
+    // or one a hand button reaches) and the skill it holds there.
+    int glyphRecord=-1,glyphSkill=-1,glyphOwner=-1;
     float health=0,maxHealth=0,mana=0,maxMana=0;
     bool vitalsKnown=false;
     // Bone Armor's absorb pool and its maximum (ItemStatCost 132 / 133, 8.8 fixed
@@ -281,6 +285,12 @@ struct Snapshot {
     companions::Roster companions;
     effects::Status effects;
 };
+// A glyph shape's skill as the hero has it (the catalog's own entry); an id the hero lacks is kept, unknown.
+inline Skill GlyphSkill(const Snapshot& s,int id) {
+    Skill skill{};skill.id=id;
+    for(unsigned i=0;id>=0&&i<s.skillCount&&i<s.catalog.size();++i)if(s.catalog[i].id==id&&s.catalog[i].owner==-1)return s.catalog[i];
+    return skill;
+}
 inline bool HasTorchInHand(const Snapshot& s, int hand, uint32_t& outFlags) {
     outFlags = 0;
     if (!s.equipmentKnown || (s.activeSet != 1 && s.activeSet != 2) || hand < 0 || hand > 1) return false;
@@ -309,7 +319,9 @@ struct SkillCue {
 inline bool Fresh(const Snapshot& s,uint64_t session,uint64_t now) {
     return session&&s.session==session&&now>=s.at&&now-s.at<=650;
 }
-enum class Action { None, Potion, Equip, Quest, Map, Character, Skills, BindSkill, Developer, FeedMerc, BindItem, UseItem, RunWalk };
+// BindGlyph / BindGlyphDraw: glyph casting's wheel settings (index: the shape / the hand slot), answered
+// by the transport, which saves them; no game command.
+enum class Action { None, Potion, Equip, Quest, Map, Character, Skills, BindSkill, Developer, FeedMerc, BindItem, UseItem, RunWalk, BindGlyph, BindGlyphDraw };
 enum class Result { None, Pending, Applied, Refused, Cancelled, Dispatched, KitRefused, DebugUpdated, TurnsUpdated, SharpUpdated, FillUpdated, RimsUpdated, SkyRimsUpdated, BodiesUpdated };
 struct Request {
     Action action=Action::None;
@@ -348,7 +360,7 @@ inline bool PotionGone(const Snapshot& s,const Request& r) {
 // clockwise from the upper-right segment; center is weapon mode.
 constexpr float Pi=3.14159265358979323846f;
 constexpr float WheelPhase=Pi/8;
-enum class MenuPage { Spells, Equipment, Map, EditSlots, EditSkills, Developer, EditItems };
+enum class MenuPage { Spells, Equipment, Map, EditSlots, EditSkills, Developer, EditItems, Glyphs };
 struct MenuBounds {
     float left,top,right,bottom;
     bool Contains(float u,float v) const {return u>left&&u<right&&v>top&&v<bottom;}
@@ -356,6 +368,11 @@ struct MenuBounds {
 constexpr int QuickUseCell=210,LeftStrikesCell=212;   // 211 was RUN / WALK, 213 the movement slider (now VR Settings > Body > Movement speed)
 constexpr double QuickEditHold=.65;
 constexpr MenuBounds QuickUseBounds{.025f,.025f,.255f,.18f};
+// Glyph casting (glyph_cast.h): the GLYPHS box, upper right on the Spells and Equipment pages and on the
+// GLYPHS page itself (where it goes back); the button picker's "Draw glyph" entry, no game skill.
+constexpr int GlyphsCell=214,GlyphDrawId=9000;
+constexpr MenuBounds GlyphsBounds{.745f,.025f,.975f,.18f};
+constexpr int GlyphShapes=8;
 // Druid: the left claw's strike skill, [gameplay] left_hand_strikes. Lower left,
 // above the ACTIVE line (y 637) and clear of the hand wheel's 216-degree label.
 constexpr MenuBounds LeftStrikesBounds{.025f,.72f,.235f,.82f};
@@ -407,6 +424,7 @@ inline int WheelCell(float u,float v,int previous=-1,MenuPage page=MenuPage::Spe
         if(QuickUseBounds.Contains(u,v))return QuickUseCell;
         if(leftStrikes&&LeftStrikesBounds.Contains(u,v))return LeftStrikesCell;
     }
+    if((QuickControls(page)||page==MenuPage::Glyphs)&&GlyphsBounds.Contains(u,v))return GlyphsCell;
     if(page==MenuPage::Map)return -1; // no invisible spells behind the map
     if(page==MenuPage::Developer) {
         if(developer&&devPage>=0&&devPage<dev::PageCount) {
@@ -473,6 +491,9 @@ struct Input {
     bool physicsThrows=false;
     struct Tossed {uint64_t id=0;bool landed=false;Vec p{};Quat q{0,0,0,1};} tossed{};
     Vec carry{}; // the player's own world velocity (Carry), zero when unknown
+    // Glyph casting's settings as they stand ([glyphs]): each shape's skill (-1 none) and the slot that draws.
+    std::array<int,GlyphShapes> glyphSkills{-1,-1,-1,-1,-1,-1,-1,-1};
+    int glyphDraw=-1;
 };
 struct Output {
     bool developer=false;
@@ -507,9 +528,14 @@ struct Output {
     std::array<int,skillcategories::Count> editCategoryCounts{};
     std::array<Skill,8> editOptions{};
     std::array<QuickItem,8> itemOptions{};
+    // Glyph casting: the GLYPHS page is open; the shape whose skill the picker is choosing (-1 none);
+    // the settings as Input gave them, for the painter.
+    bool glyphs=false;
+    int glyphEdit=-1,glyphDraw=-1;
+    std::array<int,GlyphShapes> glyphSkills{-1,-1,-1,-1,-1,-1,-1,-1};
 };
 inline MenuPage Page(const Output& out) {
-    return out.developer?MenuPage::Developer:out.editor==3?MenuPage::EditItems:out.editor==2?MenuPage::EditSkills:out.editor?MenuPage::EditSlots:out.map?MenuPage::Map:out.utility?MenuPage::Equipment:MenuPage::Spells;
+    return out.developer?MenuPage::Developer:out.editor==3?MenuPage::EditItems:out.editor==2?MenuPage::EditSkills:out.editor?MenuPage::EditSlots:out.map?MenuPage::Map:out.glyphs?MenuPage::Glyphs:out.utility?MenuPage::Equipment:MenuPage::Spells;
 }
 inline bool MenuMapWanted(const Input& in,const Output& out,uint64_t now) {
     return in.active&&out.wheel&&out.map&&!out.editor&&Fresh(in.snapshot,in.session,now);
@@ -528,6 +554,8 @@ class Engine {
     uint64_t session=0,epoch=0,sequence=0;
     double lastTime=0,drinkStart=0,pendingAt=0,resultAt=0,criticalUntil=0,criticalAgain=0;
     bool primed=false,triggerWas=false,gripWas[2]{},wheelLatch=false,utility=false,map=false,rearm=true,stowed=false;
+    bool glyphs=false;   // the GLYPHS page
+    int glyphEdit=-1;    // the shape the skill picker chooses for, -1 none
     bool spent=false,consumed=false;
     Owner owner[2]{Owner::Combat,Owner::Combat};
     int bottle=-1,bottleHand=-1,holster=-1,holsterHand=-1,pendingHand=0;
@@ -560,14 +588,14 @@ class Engine {
     // Each wheel hand keeps its own page (Spells / Equipment / Map / Developer and its page) and
     // tree filter, for this game: slot = wheelHand+1 (0: the combined wheel). pageHand is the slot
     // loaded into the fields above; a closed wheel (wheelHand -1) changes nothing.
-    struct HandMenu {bool utility=false,map=false,developer=false;int devPage=0,filter=skillcategories::All,filterClass=-1;};
+    struct HandMenu {bool utility=false,map=false,developer=false;int devPage=0,filter=skillcategories::All,filterClass=-1;bool glyphs=false;};
     std::array<HandMenu,3> handMenus{};
     int pageHand=-2;
     uint64_t joined=0;   // the last non-zero session (mapzoom::NewGame: a new one is a new game)
-    void StoreHand(){if(pageHand>=0&&pageHand<int(handMenus.size()))handMenus[pageHand]={utility,map,developer,devPage,filter,filterClass};}
+    void StoreHand(){if(pageHand>=0&&pageHand<int(handMenus.size()))handMenus[pageHand]={utility,map,developer,devPage,filter,filterClass,glyphs};}
     void LoadHand(int slot){
         pageHand=std::clamp(slot,0,int(handMenus.size())-1);const auto& h=handMenus[pageHand];
-        utility=h.utility;map=h.map;developer=h.developer;devPage=h.devPage;filter=h.filter;filterClass=h.filterClass;
+        utility=h.utility;map=h.map;developer=h.developer;devPage=h.devPage;filter=h.filter;filterClass=h.filterClass;glyphs=h.glyphs;
     }
     const Skill& Choice(int index)const{return choices[choiceIndices[index]];}
     void FilterSkills(int category) {
@@ -576,12 +604,32 @@ class Engine {
             if(category==skillcategories::All||skillcategories::Category(editClass,choices[i].id,choices[i].owner)==category)
                 choiceIndices[choiceCount++]=i;
     }
-    void OpenSkills(const Snapshot& s) {
+    void OpenSkills(const Snapshot& s,bool handButton=false) {
         // Freeze identities, ordering and class for the whole edit transaction.
         choices=s.catalog;allCount=std::clamp<int>(s.skillCount,0,choices.size());editClass=s.skillClass;
+        // A hand button can also draw glyphs (glyph_cast.h): "Draw glyph", last, under General / Items (an
+        // unknown id); no game skill.
+        if(handButton&&allCount<int(choices.size())) {
+            Skill draw{};draw.id=GlyphDrawId;draw.known=draw.available=true;std::snprintf(draw.name,sizeof draw.name,"Draw glyph");
+            choices[size_t(allCount++)]=draw;
+        }
         categoryCounts={};categoryCounts[skillcategories::All]=allCount;
         for(int i=0;i<allCount;++i)++categoryCounts[skillcategories::Category(editClass,choices[i].id,choices[i].owner)];
         // The tree last picked in this game, unless it has no skills now (or another class): All.
+        const bool keep=filter>=0&&filter<skillcategories::Count&&filterClass==editClass&&categoryCounts[filter]>0;
+        FilterSkills(keep?filter:skillcategories::All);editor=2;
+    }
+    // The GLYPHS page's picker: the character's own skills that need no target (buffs, auras, armors,
+    // warcries, summons), not Interact or Town Portal; the tree filter as the button picker's.
+    void OpenGlyphSkills(const Snapshot& s) {
+        choices={};allCount=0;editClass=s.skillClass;
+        for(unsigned i=0;i<s.skillCount&&i<s.catalog.size();++i) {
+            const auto& k=s.catalog[i];
+            if(k.id<0||k.id==357||k.id==359||k.owner!=-1||k.directed||allCount>=int(choices.size()))continue;
+            choices[size_t(allCount++)]=k;
+        }
+        categoryCounts={};categoryCounts[skillcategories::All]=allCount;
+        for(int i=0;i<allCount;++i)++categoryCounts[skillcategories::Category(editClass,choices[i].id,choices[i].owner)];
         const bool keep=filter>=0&&filter<skillcategories::Count&&filterClass==editClass&&categoryCounts[filter]>0;
         FilterSkills(keep?filter:skillcategories::All);editor=2;
     }
@@ -654,8 +702,8 @@ public:
     void Configure(Config c) {config=c;Reset();}
     // Each hand's page (Map, Equipment, Developer and its page) and tree filter are kept through a close,
     // a tracking or frame hiccup and character select; only a new game (Step) starts them over. Editors close.
-    void Reset() {quickPressed=false;primed=false;rearm=true;wheelLatch=true;Drop();flight={};pending={};result=Result::None;criticalUntil=criticalAgain=0;editor=0;editSlot=-1;shoulderSwap.Reset();leatherReach.Reset();}
-    MenuPage Page() const {return developer?MenuPage::Developer:editor==3?MenuPage::EditItems:editor==2?MenuPage::EditSkills:editor?MenuPage::EditSlots:map?MenuPage::Map:utility?MenuPage::Equipment:MenuPage::Spells;}
+    void Reset() {quickPressed=false;primed=false;rearm=true;wheelLatch=true;Drop();flight={};pending={};result=Result::None;criticalUntil=criticalAgain=0;editor=0;editSlot=-1;glyphEdit=-1;shoulderSwap.Reset();leatherReach.Reset();}
+    MenuPage Page() const {return developer?MenuPage::Developer:editor==3?MenuPage::EditItems:editor==2?MenuPage::EditSkills:editor?MenuPage::EditSlots:map?MenuPage::Map:glyphs?MenuPage::Glyphs:utility?MenuPage::Equipment:MenuPage::Spells;}
     int DeveloperPage() const {return devPage;}
     int TreeFilter() const {return filter;}        // the open hand's kept skill tree (All when none)
     int TreeFilterClass() const {return filterClass;}
@@ -693,7 +741,7 @@ public:
         }
         lastTime=in.time;
         const bool handChanged=in.wheelHand!=lastWheelHand;
-        if(handChanged){quickPressed=false;editor=0;editSlot=-1;rearm=true;wheelLatch=false;lastWheelHand=in.wheelHand;}
+        if(handChanged){quickPressed=false;editor=0;editSlot=-1;glyphEdit=-1;rearm=true;wheelLatch=false;lastWheelHand=in.wheelHand;}
         // The open wheel's hand shows that hand's own last page; a closed wheel (wheelHand -1 in the
         // transport) is not a hand, so a close and reopen on the same hand keeps everything.
         if(in.wheel&&in.wheelHand+1!=pageHand){StoreHand();LoadHand(in.wheelHand+1);}
@@ -701,10 +749,10 @@ public:
         const bool edges[2]={grips[0]&&!gripWas[0],grips[1]&&!gripWas[1]};
         triggerWas=trigger;gripWas[0]=grips[0];gripWas[1]=grips[1];
         // A plain close keeps the page for the next open (Map and Developer too); the editors close.
-        if(!in.wheel){quickPressed=false;wheelLatch=false;editor=0;editSlot=-1;}
+        if(!in.wheel){quickPressed=false;wheelLatch=false;editor=0;editSlot=-1;glyphEdit=-1;}
         if(!in.snapshot.developer)developer=false;
         if(!trigger&&!grips[0]&&!grips[1])rearm=false;
-        if(in.cancel) {quickPressed=false;Drop();flight={};rearm=true;wheelLatch=true;pending={};out.cancelPending=true;editor=0;map=developer=false;devPage=0;editSlot=-1;}   // the cancel input, as before (transport has sent none since the per-hand wheels)
+        if(in.cancel) {quickPressed=false;Drop();flight={};rearm=true;wheelLatch=true;pending={};out.cancelPending=true;editor=0;map=developer=glyphs=false;devPage=0;editSlot=-1;glyphEdit=-1;}   // the cancel input, as before (transport has sent none since the per-hand wheels)
         if(pending.action!=Action::None) {
             if(in.reply.sequence==pending.sequence&&in.reply.session==session&&in.reply.result!=Result::Pending) {
                 result=in.reply.result;resultAt=in.time;out.feedback=(result==Result::Applied||result==Result::Dispatched||result==Result::DebugUpdated||result==Result::TurnsUpdated||result==Result::SharpUpdated||result==Result::FillUpdated||result==Result::RimsUpdated||result==Result::SkyRimsUpdated||result==Result::BodiesUpdated)?2:3;
@@ -713,6 +761,8 @@ public:
                 if(result==Result::Applied&&pending.action==Action::Potion&&pending.item==held.item)consumed=true;
                 if(result==Result::Applied&&pending.action==Action::BindItem&&editor==3){editor=0;rearm=true;}
                 if(result==Result::Applied&&pending.action==Action::BindSkill&&editor){editor=in.wheelHand>=0?0:1;editSlot=-1;}
+                if(result==Result::Applied&&pending.action==Action::BindGlyphDraw&&editor){editor=in.wheelHand>=0?0:1;editSlot=-1;}
+                if(result==Result::Applied&&pending.action==Action::BindGlyph&&editor){editor=0;glyphEdit=-1;}
                 pending={};
             } else if(in.time-pendingAt>(pending.action==Action::Developer?10.:1.5)) {result=Result::Refused;resultAt=in.time;out.feedback=3;pending={};out.cancelPending=true;}
         }
@@ -761,9 +811,9 @@ public:
         // toggle is the other way, its own run / walk command (no tick).
         if(in.gaitToggle&&fresh&&request(Action::RunWalk,0))pendingHand=0;
         if(wheel) {
-            out.wheel=true;out.utility=utility;out.map=map;out.hover=in.hover;out.block=true;out.leftStrikes=in.leftStrikes;
+            out.wheel=true;out.utility=utility;out.map=map;out.glyphs=glyphs;out.hover=in.hover;out.block=true;out.leftStrikes=in.leftStrikes;
             owner[0]=owner[1]=Owner::Wheel;
-            if((editor==1||editor==2)&&fresh&&in.snapshot.bindingBank!=editBank){editor=in.wheelHand>=0?0:1;editSlot=-1;editBank=in.snapshot.bindingBank;rearm=true;}
+            if((editor==1||editor==2)&&glyphEdit<0&&fresh&&in.snapshot.bindingBank!=editBank){editor=in.wheelHand>=0?0:1;editSlot=-1;editBank=in.snapshot.bindingBank;rearm=true;}
             // A hold edits; a short click uses on release. A lost ray/session
             // or changed item cancels without spending anything.
             if(quickPressed) {
@@ -793,6 +843,10 @@ public:
                     // A local setting, not a game command: the wheel stays open to show it.
                     if(in.leftStrikes>=0){out.toggleLeftStrikes=true;out.feedback=1;}else out.feedback=3;
                     out.feedbackHand=in.wheelHand>=0?1-in.wheelHand:0;rearm=true;
+                } else if(!editor&&in.hover==GlyphsCell&&(QuickControls(Page())||glyphs)) {
+                    // Glyph casting's page, and back.
+                    glyphs=!glyphs;utility=map=developer=false;out.utility=out.map=false;out.glyphs=glyphs;glyphEdit=-1;
+                    out.feedback=1;out.feedbackHand=in.wheelHand>=0?1-in.wheelHand:0;rearm=true;
                 } else if(editor==3) {
                     if(in.hover==11){editor=0;editSlot=-1;}
                     else if(in.hover==9)editPage=std::max(0,editPage-1);
@@ -805,7 +859,7 @@ public:
                     }
                     rearm=true;
                 } else if(!editor&&in.hover==13&&fresh&&in.snapshot.developer) {
-                    developer=!developer;devPage=std::clamp(devPage,0,dev::PageCount-1);utility=map=false;out.utility=out.map=false;rearm=true;   // its last page
+                    developer=!developer;devPage=std::clamp(devPage,0,dev::PageCount-1);utility=map=glyphs=false;out.utility=out.map=false;rearm=true;   // its last page
                 } else if(developer&&in.hover>=DeveloperPageCell(0)&&in.hover<DeveloperPageCell(dev::PageCount)) {
                     if(fresh)devPage=in.hover-DeveloperPageCell(0);
                     out.hover=-1;rearm=true;
@@ -820,12 +874,21 @@ public:
                         if(fresh&&categoryCounts[category]){FilterSkills(category);filter=category;filterClass=editClass;out.treePicked=true;}
                         else out.feedback=3;
                     }
-                    else if(in.hover==11){editor=in.wheelHand>=0?0:1;editSlot=-1;}
+                    else if(in.hover==11){if(glyphEdit>=0){editor=0;glyphEdit=-1;}else{editor=in.wheelHand>=0?0:1;editSlot=-1;}}
                     else if(in.hover==9)editPage=std::max(0,editPage-1);
                     else if(in.hover==10)editPage=std::min(std::max(0,(choiceCount-1)/8),editPage+1);
                     else if(in.hover==8||(in.hover>=0&&in.hover<8&&editPage*8+in.hover<choiceCount)) {
                         const auto skill=in.hover==8?Skill{}:Choice(editPage*8+in.hover);
-                        if(fresh&&in.snapshot.bindingsEditable&&request(Action::BindSkill,editSlot)) {
+                        if(glyphEdit>=0) {   // the GLYPHS page: that shape's skill (CLEAR: none)
+                            if(fresh&&request(Action::BindGlyph,glyphEdit)){pending.skill=skill.id;pending.skillOwner=skill.owner;out.request=pending;}
+                            else out.feedback=3;
+                        } else if(skill.id==GlyphDrawId) {   // this button draws glyphs; the transport clears its game skill
+                            if(fresh&&in.snapshot.bindingsEditable&&request(Action::BindGlyphDraw,editSlot)) {
+                                pending.skill=-1;pending.skillOwner=-1;pending.bank=editBank;
+                                pending.previousSkill=previousBinding.id;pending.previousOwner=previousBinding.owner;
+                                out.request=pending;
+                            } else out.feedback=3;
+                        } else if(fresh&&in.snapshot.bindingsEditable&&request(Action::BindSkill,editSlot)) {
                             pending.skill=skill.id;pending.skillOwner=skill.owner;pending.bank=editBank;
                             pending.previousSkill=previousBinding.id;pending.previousOwner=previousBinding.owner;
                             out.request=pending;
@@ -839,15 +902,21 @@ public:
                         OpenSkills(in.snapshot);
                     } else out.feedback=3;
                     rearm=true;
-                } else if(in.wheelHand>=0&&in.hover==11){developer=false;out.inventory=true;out.wheel=false;wheelLatch=true;rearm=true;}
-                else if(in.wheelHand>=0&&!utility&&!map&&in.hover>=0&&in.hover<5&&fresh&&in.snapshot.bindingsEditable){
-                    editSlot=skills::HandSlot(in.wheelHand,in.hover);editPage=0;editBank=in.snapshot.bindingBank;previousBinding=in.snapshot.skills[editSlot];
-                    OpenSkills(in.snapshot);rearm=true;
+                } else if(in.wheelHand>=0&&in.hover==11){developer=glyphs=false;out.inventory=true;out.wheel=false;wheelLatch=true;rearm=true;}
+                else if(glyphs&&!map&&in.hover>=0&&in.hover<GlyphShapes) {
+                    // A shape on the GLYPHS page: choose its skill.
+                    if(fresh&&in.snapshot.skillCount){glyphEdit=in.hover;editSlot=-1;editPage=0;OpenGlyphSkills(in.snapshot);}
+                    else out.feedback=3;
+                    rearm=true;
                 }
-                else if(in.hover==11){developer=false;editor=1;editBank=in.snapshot.bindingBank;editSlot=-1;map=false;out.map=false;utility=false;out.utility=false;rearm=true;}
+                else if(in.wheelHand>=0&&!utility&&!map&&!glyphs&&in.hover>=0&&in.hover<5&&fresh&&in.snapshot.bindingsEditable){
+                    editSlot=skills::HandSlot(in.wheelHand,in.hover);editPage=0;editBank=in.snapshot.bindingBank;previousBinding=in.snapshot.skills[editSlot];
+                    OpenSkills(in.snapshot,true);rearm=true;
+                }
+                else if(in.hover==11){developer=glyphs=false;editor=1;editBank=in.snapshot.bindingBank;editSlot=-1;map=false;out.map=false;utility=false;out.utility=false;rearm=true;}
                 else if(in.hover==10){out.settings=true;out.wheel=false;wheelLatch=true;rearm=true;}
-                else if(in.hover==12){developer=false;map=true;out.map=true;utility=false;out.utility=false;rearm=true;}
-                else if(in.hover==9){utility=(map||developer)?false:!utility;developer=false;out.utility=utility;map=false;out.map=false;rearm=true;}
+                else if(in.hover==12){developer=glyphs=false;map=true;out.map=true;utility=false;out.utility=false;rearm=true;}
+                else if(in.hover==9){utility=(map||developer||glyphs)?false:!utility;developer=glyphs=false;out.utility=utility;map=false;out.map=false;rearm=true;}
                 else if(!map&&in.hover==8) {if(in.wheelHand<0)out.select=-1;stowed=false;wheelLatch=true;out.wheel=false;rearm=true;out.feedback=1;}
                 else if(!map&&in.hover>=0&&in.hover<8&&(in.wheelHand<0||utility)&&(!utility||in.hover!=2)) {
                     if(!utility) {
@@ -966,6 +1035,7 @@ public:
         out.editor=editor;out.editSlot=editSlot;out.editPage=editPage;out.editPages=std::max(1,(choiceCount+7)/8);
         if(editor==3)for(int i=0;i<8&&editPage*8+i<choiceCount;++i){out.itemOptions[i]=itemChoices[editPage*8+i];++out.editCount;}
         out.editCategory=editCategory;out.editClass=editClass;out.editCategoryCounts=categoryCounts;
+        out.glyphs=out.wheel&&glyphs;out.glyphEdit=glyphEdit;out.glyphDraw=in.glyphDraw;out.glyphSkills=in.glyphSkills;   // the page as the clicks left it
         if(editor==2)for(int i=0;i<8&&editPage*8+i<choiceCount;++i){out.editOptions[i]=Choice(editPage*8+i);++out.editCount;}
         out.block=out.block||rearm||stowed||pending.action!=Action::None;
         for(int h=0;h<2;++h)out.owner[h]=rearm?Owner::Rearm:owner[h];
