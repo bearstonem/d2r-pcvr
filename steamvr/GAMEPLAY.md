@@ -2251,10 +2251,17 @@ gives a hand button that record).
 Trail (`steamvr/glyph_trail.h`): a 512 x 512 straight-alpha picture, 1 m a side, in the
 shared atlas (`panelatlas::Glyph`, beside VR Settings), shown as a room-space quad in the
 drawing plane with the stroke's start in the middle. A worker paints it, keeping each
-pixel's core and glow between paints: drawing adds only the new segments, the fade only
-re-shades (at most 40 paints a second). Pale arcane while drawing; recognised, the
-skill's element colour with a 0.35 s white flash, fading over 2 s; refused, grey over
-0.8 s. Logs: `Frame glyph:` (each glyph with its score, the next shape's, corners and
+pixel's core, glow and distance to the line between paints: drawing adds only the new
+segments, an effect frame only re-shades (at most 30 paints a second, about 11 ms each).
+Everything is drawn as light, from the stroke, its id and the time alone, so a job always
+paints the same picture. Pale arcane with glints while drawing; recognised, a 0.35 s white
+flash, then the skill's element for 2.2 s (`ElementColour`, every class: fire, cold,
+lightning, poison, holy, magic, war, nature, bone, curse, shadow, steel; the Warlock by
+tree), from 45% of it the exit; refused, grey ash over 0.8 s. Each look is a palette and
+some of: a smear carried up or down off the line through scrolling noise (flames, mist,
+rays, smoke), particles (embers, ice shards, sparks, drops, bubbles, motes, spores, chips,
+blades), arcs re-jittered 24 times a second, echoes of the line by distance, and its exit
+(burning edge, cracking cells, flicker, noise dissolve). Logs: `Frame glyph:` (each glyph with its score, the next shape's, corners and
 time, and the way it cast or why not; each record change). Tests: `glyph-trail-test`,
 `glyph-cast-test`, the picker and GLYPHS page in `skill-categories-test`, and the art in
 `interaction-glyphs-test`.

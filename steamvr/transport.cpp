@@ -250,9 +250,9 @@ glyphcast::Stroke glyphStroke;
 glyphcast::Cast glyphCast;
 glyphtrail::Painter glyphPainter;
 uint64_t glyphStrokeId=0,glyphPaintKey=0,glyphShownStroke=0;
-double glyphEndedAt=-1,glyphPaintAt=0;   // the stroke's end (recognised, refused or cancelled), -1 drawing or none
-bool glyphRefused=false,glyphPressRt=false,glyphTrailShown=false;
-glyphtrail::Colour glyphColour=glyphtrail::Drawing;
+double glyphBeganAt=0,glyphEndedAt=-1,glyphPaintAt=0;   // the stroke's start and end (recognised, refused or cancelled; -1 drawing or none)
+bool glyphPressRt=false,glyphTrailShown=false;
+glyphtrail::Look glyphLook=glyphtrail::Look::Drawing;   // the trail's look: drawing, refused or the skill's element
 bool glyphAtlasPending=false,glyphImageReady=false;
 // The wheel's glyph settings ([glyphs]) are saved here, one save at a time; until it lands the wheel
 // and the draw button follow the values asked for. The engine's request is answered as
@@ -4067,10 +4067,10 @@ void Input() {
         const auto right=math::Rotate(interactionInput.head.q,{1,0,0});in.rightX=right.x;in.rightZ=right.z;
         const auto stroke=glyphStroke.Step(in);
         if(stroke.event==glyphcast::Event::Began) {
-            ++glyphStrokeId;glyphEndedAt=-1;glyphRefused=false;glyphColour=glyphtrail::Drawing;
+            ++glyphStrokeId;glyphBeganAt=now;glyphEndedAt=-1;glyphLook=glyphtrail::Look::Drawing;
             MotionPulse(hand,haptics::Category::Interaction,.2f,15000000);
         } else if(stroke.event==glyphcast::Event::Cancelled) {
-            glyphEndedAt=now;glyphRefused=true;glyphColour=glyphtrail::Refused;
+            glyphEndedAt=now;glyphLook=glyphtrail::Look::Refused;
             Say("Frame glyph: stroke cancelled (the button was taken, or tracking lost)");
         } else if(stroke.event==glyphcast::Event::Refused||stroke.event==glyphcast::Event::Recognised) {
             glyphEndedAt=now;
@@ -4090,13 +4090,13 @@ void Input() {
             }
             char line[320];
             if(refused) {
-                glyphRefused=true;glyphColour=glyphtrail::Refused;
+                glyphLook=glyphtrail::Look::Refused;
                 std::snprintf(line,sizeof line,"Frame glyph: %s%s, %s (score %.2f, next %.2f, corners %d, %.1f s)",
                     stroke.event==glyphcast::Event::Recognised?"the ":"not recognised, nearest the ",glyphs::Name(stroke.event==glyphcast::Event::Recognised?r.shape:r.nearest),
                     refused,r.score,r.second,r.corners,stroke.seconds);
                 MotionPulse(hand,haptics::Category::Interaction,.25f,100000000);
             } else {
-                glyphCast.Begin(plan,skill,-1,now);glyphColour=glyphtrail::ElementColour(skill);
+                glyphCast.Begin(plan,skill,-1,now);glyphLook=glyphtrail::ElementLook(skill);
                 std::snprintf(line,sizeof line,"Frame glyph: the %s -> %s (skill %d) via %s (score %.2f, next %.2f, corners %d, %.1f s)",
                     glyphs::Name(r.shape),known.name,skill,plan.how==glyphcast::How::Slot?"its hand slot":plan.how==glyphcast::How::Record?"the right trigger":
                     "the right trigger, put on it first",r.score,r.second,r.corners,stroke.seconds);
@@ -4112,29 +4112,27 @@ void Input() {
             if(press.slot>=0&&motionOutput.skill<0)motionOutput.skill=press.slot;
             glyphPressRt=press.rt;
             if(glyphCast.state==glyphcast::Cast::State::TimedOut) {
-                glyphRefused=true;glyphColour=glyphtrail::Refused;
+                glyphLook=glyphtrail::Look::Refused;
                 Say("Frame glyph: the right trigger's record never took the skill; not cast");
             }
         }
-        // The trail: drawing, then the fade.
-        const float fade=glyphRefused?glyphtrail::RefusedFadeSeconds:glyphtrail::FadeSeconds;
-        const double since=glyphEndedAt<0?0:now-glyphEndedAt;
-        const bool trail=glyphStrokeId&&(glyphStroke.Drawing()||(glyphEndedAt>=0&&since<fade));
+        // The trail: drawing, then its look's effect and exit (glyph_trail.h), repainted up to 30 times
+        // a second while it moves.
+        const double since=glyphStroke.Drawing()?now-glyphBeganAt:glyphEndedAt<0?0:now-glyphEndedAt;
+        const bool trail=glyphStrokeId&&(glyphStroke.Drawing()||(glyphEndedAt>=0&&since<glyphtrail::Duration(glyphLook)));
         if(trail) {
             glyphtrail::Image painted;
             if(!glyphAtlasPending&&atlasUploads.size()<3&&glyphPainter.Take(painted)&&!painted.pixels.empty()&&
                UploadShared(panelatlas::Glyph,painted.pixels,&glyphAtlasPending)){glyphPaintKey=painted.key;glyphShownStroke=painted.strokeId;}
             glyphtrail::Job job;
-            job.strokeId=glyphStrokeId;job.colour=glyphColour;
-            job.alpha=glyphStroke.Drawing()?1.f:float(std::clamp(1-since/fade,0.,1.));
-            job.flare=glyphStroke.Drawing()||glyphRefused?0.f:float(std::clamp(1-since/.35,0.,1.));
+            job.strokeId=glyphStrokeId;job.look=glyphLook;job.t=float(since);
             uint64_t key=1469598103934665603ull;
-            for(const uint64_t part:{glyphStrokeId,uint64_t(glyphStroke.Points().size()),uint64_t(job.alpha*32),uint64_t(job.flare*16),
-                uint64_t(job.colour.r*255)<<16|uint64_t(job.colour.g*255)<<8|uint64_t(job.colour.b*255)})key=(key^part)*1099511628211ull;
+            for(const uint64_t part:{glyphStrokeId,uint64_t(glyphStroke.Points().size()),uint64_t(glyphLook),uint64_t(since*30)})
+                key=(key^part)*1099511628211ull;
             job.key=key|1;
             if(job.key!=glyphPaintKey&&now>=glyphPaintAt&&!glyphPainter.Busy()&&!glyphAtlasPending) {
                 job.stroke=glyphStroke.Points();
-                if(glyphPainter.Submit(std::move(job)))glyphPaintAt=now+.025;   // at most 40 a second
+                if(glyphPainter.Submit(std::move(job)))glyphPaintAt=now+1./30;
             }
         }
         glyphTrailShown=trail&&glyphImageReady&&glyphPaintKey&&glyphShownStroke==glyphStrokeId;
@@ -6686,7 +6684,7 @@ void Shutdown(bool preserveResolution) {
     gameplayChain=XR_NULL_HANDLE;
     bloodScreen.Reset();bloodOutput={};bloodShown=0;bloodPaintKey=bloodRequestedKey=~0ull;bloodPaintRequest=0;bloodPaintAt=0;bloodAtlasPending=bloodImageReady=false;
     arcaneController.Reset();arcaneOutput={};arcanePaintKey=~0ull;arcanePaintSession=0;arcanePaintAt=0;arcaneAtlasPending=arcaneImageReady=false;
-    glyphStroke={};glyphCast={};glyphPaintKey=glyphShownStroke=0;glyphEndedAt=-1;glyphPaintAt=0;glyphPressRt=glyphTrailShown=false;glyphAtlasPending=glyphImageReady=false;
+    glyphStroke={};glyphCast={};glyphPaintKey=glyphShownStroke=0;glyphBeganAt=0;glyphEndedAt=-1;glyphPaintAt=0;glyphLook=glyphtrail::Look::Drawing;glyphPressRt=glyphTrailShown=false;glyphAtlasPending=glyphImageReady=false;
     bowLaserHue=-1;bowLaserAtlasPending=bowLaserImageReady=false;
     noticeWatch={};noticeCards.Clear();noticeCard={};noticePaintRequest=noticeRequestedSequence=noticePaintedSequence=0;noticeAtlasPending=noticeImageReady=false;
     heartStream.Stop();heartPlaying=false;heartLevel.Reset();heartAt=0;heartHush.Reset();heartHealth=-1;

@@ -464,6 +464,11 @@ void Capture(framevr::interaction::Snapshot& s) {
                 if(s.skillCount==s.catalog.size()){valid=false;break;}
                 auto& option=s.catalog[s.skillCount++];option.id=choice;option.owner=owner;
                 option.level=n.level+n.bonus;option.known=option.available=true;
+                // Shots and other targeted skills (spell_aim.h), from the same row as a slot's: the
+                // GLYPHS page's picker leaves them out.
+                int16_t missile=-1,serverFunction=0;uint32_t flags=0;
+                if(Read(n.row+0x24,flags)&&Read(n.row+0x4e,serverFunction)&&Read(n.row+0x66,missile))
+                    option.directed=framevr::spellaim::Directed(flags,missile,serverFunction);
                 const auto name=Name(choice);std::snprintf(option.name,sizeof option.name,"%s",name.c_str());
             }
             node=n.next;

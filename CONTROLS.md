@@ -343,11 +343,29 @@ target: armors, warcries, auras, Energy Shield, summons and the like.
    triangle points up and the V opens up, and the lightning bolt runs from the
    top down. Let go to cast.
 
-The line glows pale while you draw. A recognised glyph flashes in the colour of
-its skill (fire orange, cold blue, lightning white, poison green, holy gold,
-warcries red...) and fades over two seconds; one that isn't recognised, or has
-no skill, turns grey and fades quickly with a short buzz. Opening a wheel or
-losing tracking mid-stroke cancels it.
+The line glows pale while you draw. A recognised glyph flashes, then takes on
+its skill's element for about two seconds before it goes:
+
+- **Fire**: flames lick up off the line and embers rise; it burns away along a
+  glowing edge.
+- **Cold**: ice shards grow out of it; it cracks, and the pieces fall away.
+- **Lightning**: arcs crackle and jump along it, throwing sparks; it flickers out.
+- **Poison**: green mist sinks from it and drops fall; bubbles rise and pop.
+- **Holy** (most Paladin auras): golden rays rise from it among glints.
+- **Magic** (Energy Shield, Teleport, Inner Sight, Valkyrie, Meditation,
+  Conviction...): motes run along it.
+- **Warcries** (and Might, Thorns): it beats like a shout and rings out in echoes.
+- **Nature** (the Druid's spirits, vines, beasts and forms, Cleansing): spores
+  drift off it in echoes.
+- **Bone** (bone spells, skeletons, Clay Golem, Revive): it smokes and sheds chips.
+- **Curse** (Necromancer curses, Blood Golem, Corpse Explosion, Death Sentry):
+  blood-red mist sinks and a ring closes in on it.
+- **Shadow** (the Assassin's shadow disciplines): it smokes away.
+- **Steel** (blade skills, Iron Golem): blades spin along it striking sparks.
+
+The Warlock's skills follow their tree: Demon a curse's, Eldritch shadow's and
+Chaos fire's. A glyph that isn't recognised, or has no skill, greys and crumbles
+to ash with a short buzz. Opening a wheel or losing tracking mid-stroke cancels it.
 
 The skill is cast by a native button press, so mana, cast rate, the buff and its
 sound stay the game's: the skill's own hand button when it is on one, else the
