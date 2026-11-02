@@ -257,7 +257,7 @@ inline constexpr ContentSection SectionTable[]={
     {View::World,"Sky and dungeons"},{View::World,"Things that move and glow"},
     {View::Vibration,"Strength"},
     {View::Performance,"Image"},{View::Performance,"Draw distance"},
-    {View::QualityOfLife,"Damage and movement"},{View::QualityOfLife,"Summons"},
+    {View::QualityOfLife,"Damage and movement"},{View::QualityOfLife,"Summons"},{View::QualityOfLife,"Potions"},
 };
 
 // ---- options and value words (ini order: option i has value min + i) ----
@@ -715,6 +715,10 @@ inline constexpr Override Overrides[]={
     {.id="quality_of_life.druid_leash_multiplier",.page=View::QualityOfLife,.section="Summons",.label="Summon leash",
      .help="Player summons can roam farther before following or catching up to you. Mercenaries and attack reach stay native. Requires restart.",.warn="Requires restart",.format={.unit="x",.decimals=2}},
 
+    {.id="quality_of_life.click_to_drink",.page=View::QualityOfLife,.section="Potions",.kind=RowKind::Toggle,.label="Click to drink",
+     .help="On: hold a flask and press that hand's trigger to drink. The mouth gesture still works. Off: bring the opening to your mouth and tip to drink."},
+    {.id="quality_of_life.merc_potion_assist",.page=View::QualityOfLife,.section="Potions",.kind=RowKind::Toggle,.label="Merc potion assist",
+     .help="On: thrown potions feed your living mercenary wherever they land. Off: land within 1.5 m of its feet; misses keep the potion. Slow releases return it."},
 };
 #undef FRAMEVR_OPTIONS
 #undef FRAMEVR_NAMES

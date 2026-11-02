@@ -87,6 +87,12 @@ tactical commands, and makes Unleashed melee fairer.
 
 ## Quality of Life (unreleased)
 
+- **Click to drink:** Optional toggle lets the holding hand's trigger drink a
+  grabbed flask. Off by default; the mouth-and-tip gesture works in either mode.
+
+- **Merc potion assist:** Optional toggle gives thrown Health, Rejuvenation,
+  Antidote and Thawing potions to your living mercenary even when the bottle
+  misses. Off by default, preserving the existing landing-distance check.
 - **VR Settings > Quality of Life:** Optional incoming direct-damage and hostile
   monster movement multipliers, plus shared player summon
   aggression and leash controls. Skeletal mage missile speed follows summon aggression.

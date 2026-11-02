@@ -3,7 +3,9 @@
 The **VR Settings > Quality of Life** page is built into PCVR. No additional
 plugin is needed.
 
-All four settings default to **1**, preserving native behavior. They persist
+The four multipliers default to **1**; **Merc potion assist** and
+**Click to drink** default to **Off**, preserving existing behavior. These
+settings persist
 in `d2r_pcvr.ini` under `[quality_of_life]` through the normal menu Apply,
 backup and conflict-handling path. Use with **local offline characters only**.
 
@@ -13,6 +15,23 @@ backup and conflict-handling path. Use with **local offline characters only**.
 | `monster_movement_multiplier` | 0–3 | Next native velocity assignment after Apply |
 | `druid_aggro_multiplier` | 1-5 | Restart after Apply |
 | `druid_leash_multiplier` | 1-5 | Restart after Apply |
+| `click_to_drink` | 0 (Off) or 1 (On) | After Apply |
+| `merc_potion_assist` | 0 (Off) or 1 (On) | After Apply |
+
+With **Click to drink** on, hold a flask and press the trigger on the same
+hand to drink it without bringing it to your face. The mouth-and-tip gesture
+remains available. Off keeps gesture-only drinking. One potion is consumed per
+grab; an already-held trigger must be released and pressed again. Presets leave
+this preference alone. While a potion is held with this option on, mercenary
+commands are blocked so the drinking trigger cannot also issue an order.
+
+With **Merc potion assist** on, a thrown Health, Rejuvenation, Antidote or
+Thawing potion feeds your living mercenary wherever the bottle first lands,
+including a miss against the ground, a wall or a prop. With it off, the bottle
+must land within 1.5 m of the mercenary's feet; a miss keeps the potion on your
+belt. Both bottle physics modes support assistance. Slow releases still return
+the bottle. Native potion rules and belt-item checks still apply; an absent or
+dead mercenary never consumes the potion. Presets leave this preference alone.
 
 The damage control covers the verified direct-damage final health write.
 Healing is unchanged. Zero prevents supported damage; it does not promise
@@ -95,3 +114,7 @@ with Druid, Necromancer, Assassin and Amazon on Pico 4 through Virtual Desktop
 and SteamVR, Battle.net build 93847, including the final summon changes. Human
 also confirmed the integration with current main works as expected. This report
 does not establish that every individual edge case above was tested in game.
+
+The newer **Click to drink** and **Merc potion assist** options have automated
+coverage but have not yet been tested in a headset. The rebuilt DLL is staged
+only; these additions have not been installed for gameplay validation.

@@ -128,6 +128,8 @@ static const GoldenRow Golden[]={
     {"quality_of_life.monster_movement_multiplier",View::QualityOfLife,0,content::RowKind::Slider,"Monster movement",0,0},
     {"quality_of_life.druid_aggro_multiplier",View::QualityOfLife,1,content::RowKind::Slider,"Summon aggression",0,0},
     {"quality_of_life.druid_leash_multiplier",View::QualityOfLife,1,content::RowKind::Slider,"Summon leash",0,0},
+    {"quality_of_life.click_to_drink",View::QualityOfLife,2,content::RowKind::Toggle,"Click to drink",0,0},
+    {"quality_of_life.merc_potion_assist",View::QualityOfLife,2,content::RowKind::Toggle,"Merc potion assist",0,0},
     {"render.frame_generation_preset",View(15),0,content::RowKind::Choice,"NVIDIA flow quality",3,0},
     {"render.frame_generation_scale",View(15),0,content::RowKind::Choice,"NVIDIA flow scale",3,0},
 };

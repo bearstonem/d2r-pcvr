@@ -905,6 +905,22 @@ int main(int argc,char** argv){
     }
     {
         Model m;m.Open(s);m.view=View::QualityOfLife;
+        Check(Defaults()[ClickToDrink]==0&&content::RowOf(ClickToDrink)->page==View::QualityOfLife&&
+              content::RowOf(ClickToDrink)->kind==content::RowKind::Toggle,"click to drink defaults off on QoL page");
+        m.Click(Step(ClickToDrink));
+        Check(m.Get()[ClickToDrink]==1,"click to drink toggles on");
+        layout::ApplyPreset(m,0);
+        Check(m.Get()[ClickToDrink]==1,"presets preserve click to drink");
+        m.Click(Step(ClickToDrink));
+        Check(m.Get()[ClickToDrink]==0,"click to drink toggles off");
+        m.Open(s);m.view=View::QualityOfLife;
+        Check(Defaults()[MercPotionAssist]==0&&content::RowOf(MercPotionAssist)->page==View::QualityOfLife,
+              "merc potion assistance is opt-in on the QoL page");
+        m.Click(Step(MercPotionAssist));
+        Check(m.Get()[MercPotionAssist]==1,"merc potion assistance toggles on");
+        layout::ApplyPreset(m,0);
+        Check(m.Get()[MercPotionAssist]==1,"presets preserve merc potion assistance");
+        m.Open(s);m.view=View::QualityOfLife;
         for(auto key:{IncomingDamage,MonsterMovement,DruidAggro,DruidLeash}) {
             Check(Definitions[key].defaultValue==1,"QoL defaults preserve native behavior");
             Check(content::RowOf(key)->page==View::QualityOfLife,"QoL controls have their own page");

@@ -422,6 +422,22 @@ int main(){
     vrsettings::Poll(name);Check(vrsettings::Read().values[LootPick]==1,"an unknown loot_pick reads On, the default");
     Check(WritePrivateProfileStringW(L"interactions",L"loot_pick",nullptr,name),"remove the loot pick");
     vrsettings::Poll(name);
+    Check(vrsettings::Read().values[ClickToDrink]==0,"missing click to drink preserves gesture-only drinking");
+    for(int choice:{1,0}) {
+        model.Open(vrsettings::Read());model.Click({Kind::Change,ClickToDrink,choice?1:-1});request=model.Click({Kind::Apply});
+        Check(request.changed==(ChangeMask{1}<<ClickToDrink),"click to drink transaction isolates toggle");
+        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"click to drink preference saves");
+        Check(vrsettings::Read().values[ClickToDrink]==choice&&Int(path,L"quality_of_life",L"click_to_drink")==choice&&
+              Int(path,L"custom",L"keep")==12345,"click to drink on and off survive reload preserving unrelated settings");
+    }
+    Check(vrsettings::Read().values[MercPotionAssist]==0,"missing merc potion assist retains old landing behavior");
+    for(int choice:{1,0}) {
+        model.Open(vrsettings::Read());model.Click({Kind::Change,MercPotionAssist,choice?1:-1});request=model.Click({Kind::Apply});
+        Check(request.changed==(ChangeMask{1}<<MercPotionAssist),"merc assist transaction isolates toggle");
+        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"merc assist preference saves");
+        Check(vrsettings::Read().values[MercPotionAssist]==choice&&Int(path,L"quality_of_life",L"merc_potion_assist")==choice,
+              "merc assist on and off survive reload");
+    }
     for(auto key:{IncomingDamage,MonsterMovement,DruidAggro,DruidLeash}) {
         const auto before=vrsettings::Read();
         model.Open(before);model.Click({Kind::Change,key,key==IncomingDamage?-2:2});

@@ -196,6 +196,10 @@ not generate melee velocity. The layout currently assumes a right-handed player.
 | Walk / snap turn | Sticks; paused while wheel or journal is open |
 | Inventory menu / height reset | Left grip + left stick click / VR Settings > Body > Height and arm span > Set eye height |
 
+**VR Settings > Quality of Life > Click to drink** (Off by default) also lets
+you drink a held flask by pressing that hand's trigger. The mouth-and-tip
+gesture remains available when enabled.
+
 Dropped-item names use **VR Settings > Interface > Loot name size**: **45%** by
 default, adjustable from **20% to 150%** in five-percentage-point steps.
 Apply saves `[hud] labels_size` in `d2r_pcvr.ini` and updates it live; existing
@@ -779,6 +783,13 @@ a confirmed feed plays the game's own `healing` overlay (overlay.txt row 26) on
 the merc through the native set-overlay call. Slow releases still return the
 bottle; mana and stamina potions are never thrown. The log records each
 landing's hireling class and distance (`Frame potion toss:`).
+
+**VR Settings > Quality of Life > Merc potion assist** changes missed throws:
+On gives the potion to your living mercenary wherever the bottle lands, including
+walls and props. Off (the default) keeps the distance check and returns misses
+to the belt. The INI key is `[quality_of_life] merc_potion_assist=0` (Off) or `1`
+(On). This applies after Apply with either bottle physics mode. Native potion
+rules, belt identity checks and the requirement for a living mercenary remain.
 
 **Emptied bottles.** Letting go of a bottle you have drunk from no longer makes
 it vanish: it leaves the hand with the hand's speed and turn and falls into the
