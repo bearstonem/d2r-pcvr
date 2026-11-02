@@ -115,6 +115,5 @@ and SteamVR, Battle.net build 93847, including the final summon changes. Human
 also confirmed the integration with current main works as expected. This report
 does not establish that every individual edge case above was tested in game.
 
-The newer **Click to drink** and **Merc potion assist** options have automated
-coverage but have not yet been tested in a headset. The rebuilt DLL is staged
-only; these additions have not been installed for gameplay validation.
+The newer **Click to drink** and **Merc potion assist** options also have
+automated coverage, and Robin confirms both have passed headset testing.
