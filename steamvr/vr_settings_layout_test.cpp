@@ -84,6 +84,10 @@ static const GoldenRow Golden[]={
     {"loot.beams_set",View(7),1,content::RowKind::Toggle,"Set",0,0},                 // card holds Unique, Set, Rare and Runes
     {"loot.beams_rare",View(7),1,content::RowKind::Toggle,"Rare",0,0},               // (inFilter: no rows of their own)
     {"loot.beams_runes",View(7),1,content::RowKind::Toggle,"Runes",0,0},
+    {"hud.arcane_decay",View(7),2,content::RowKind::Toggle,"Arcane Decay",0,0},
+    {"hud.arcane_fade",View(7),2,content::RowKind::Toggle,"Fade animation",0,0},
+    {"hud.mana_threshold_pct",View(7),2,content::RowKind::Slider,"Starts below",0,0},
+    {"hud.arcane_intensity_pct",View(7),2,content::RowKind::Slider,"Effect intensity",0,0},
     {"interactions.critical_alerts",View(8),0,content::RowKind::Toggle,"Low life and mana alert",0,0},
     {"gameplay.low_life_heart_start",View(8),0,content::RowKind::Stepper,"Heartbeat starts at",0,1},
     {"hud.blood_visor",View(8),0,content::RowKind::Toggle,"Blood on visor",0,0},
