@@ -2650,26 +2650,67 @@ void StepCompanionTacticalGestures(uint64_t now, float rightTrigger, float leftT
             };
 
             // The hand's own laser too: a controller held low and pointed at the companion misses the
-            // sightline through the hand.
+            // sightline through the hand. Like the sightline, where it meets the floor counts: pointed at the
+            // ground by the companion's feet it is on the companion (owner 2026-11-01: a pull with the laser
+            // on the floor by the mercenary, an item lying there, stayed the game's).
             const math::Vec laserOrigin = handAim[h].p, laserDir = math::Rotate(handAim[h].q, {0, 0, -1});
             const auto laserP = tossStage.known ? tossStage.World(laserOrigin) : (stageWorld.valid ? (stageWorld.hero + math::Rotate(stageWorld.base, laserOrigin)) : laserOrigin);
-            const auto laserD = math::Normalized(tossStage.known ? math::Rotate(tossStage.base, laserDir) : (stageWorld.valid ? math::Rotate(stageWorld.base, laserDir) : laserDir));
+            const auto laserV = tossStage.known ? math::Rotate(tossStage.base, laserDir) : (stageWorld.valid ? math::Rotate(stageWorld.base, laserDir) : laserDir);
+            const auto laserD = math::Normalized(laserV);
+            float laserGx = 0.0f, laserGy = 0.0f;
+            bool laserGround = false;
+            if (tossWorld && laserV.y < -1e-4f && laserP.y > tossFloor) {
+                const float t = (tossFloor - laserP.y) / laserV.y;
+                laserGround = toss::Cell(laserP + laserV * t, tossFloor, stageWorld.upm, laserGx, laserGy);
+            }
+            const auto laserHits = [&](float ux, float uy, float radiusMetres, float groundTolSubtiles, float& outScore) noexcept -> bool {
+                outScore = 9999.0f;
+                if (laserGround) {
+                    const float gDist = std::hypot(ux - laserGx, uy - laserGy);
+                    if (gDist <= groundTolSubtiles) {
+                        outScore = gDist * 0.25f;
+                        return true;
+                    }
+                }
+                return cylinder3D(laserP, laserD, ux, uy, radiusMetres, outScore);
+            };
+            // And a ray within AimDegrees of the unit's body, a metre up: far away a small aim error passes
+            // a 0.95 m cylinder by.
+            constexpr float AimDegrees = 10.0f;
+            const auto degreesOff = [&](math::Vec rayP, math::Vec rayD, float ux, float uy) noexcept -> float {
+                if (!tossWorld) return 180.0f;
+                const math::Vec feet = coordinates::RenderGround({ ux * 2.0f / stageWorld.upm, 0.0f, uy * 2.0f / stageWorld.upm }, tossFloor);
+                const math::Vec to = feet + math::Vec{0.0f, 1.0f, 0.0f} - rayP;
+                const float len = std::sqrt(math::Dot(to, to));
+                if (len < 0.3f) return 180.0f;
+                return std::acos(std::clamp(math::Dot(to, rayD) / len, -1.0f, 1.0f)) * 57.2958f;
+            };
 
             // Original companion cylinder: radius 0.95m, ground foot tolerance 3.5 sub-tiles, height [-0.45m, 2.00f]
             float mercScore = 9999.0f, laserScore = 9999.0f;
             const bool sightOnMerc = hasCompPos && hitsUnitCylinder3D(compX, compY, 0.95f, 3.5f, mercScore);
-            const bool laserOnMerc = hasCompPos && handAimTracked[h] && cylinder3D(laserP, laserD, compX, compY, 0.95f, laserScore);
+            const bool laserOnMerc = hasCompPos && handAimTracked[h] && laserHits(compX, compY, 0.95f, 3.5f, laserScore);
+            const float sightDegrees = hasCompPos ? degreesOff(worldP, worldDir, compX, compY) : 180.0f;
+            const float laserDegrees = hasCompPos && handAimTracked[h] ? degreesOff(laserP, laserD, compX, compY) : 180.0f;
             // A monster nearer the ray than the companion keeps the trigger an attack.
             const auto snapshot = targetlock::Get();
             const bool monstersFresh = snapshot.count > 0 && snapshot.at > 0 && (now - snapshot.at <= 800);
-            float sightMonster = 9999.0f, laserMonster = 9999.0f;
-            if (monstersFresh && (sightOnMerc || laserOnMerc))
+            float sightMonster = 9999.0f, laserMonster = 9999.0f, sightMonsterDegrees = 180.0f, laserMonsterDegrees = 180.0f;
+            const bool anyNear = sightOnMerc || laserOnMerc || sightDegrees <= AimDegrees || laserDegrees <= AimDegrees;
+            if (monstersFresh && anyNear)
                 for (int i = 0; i < snapshot.count; ++i) {
+                    const auto& m = snapshot.targets[i];
                     float score = 9999.0f;
-                    if (sightOnMerc && hitsUnitCylinder3D(snapshot.targets[i].x, snapshot.targets[i].y, 0.85f, 2.5f, score)) sightMonster = std::min(sightMonster, score);
-                    if (laserOnMerc && cylinder3D(laserP, laserD, snapshot.targets[i].x, snapshot.targets[i].y, 0.85f, score)) laserMonster = std::min(laserMonster, score);
+                    if (sightOnMerc && hitsUnitCylinder3D(m.x, m.y, 0.85f, 2.5f, score)) sightMonster = std::min(sightMonster, score);
+                    if (laserOnMerc && laserHits(m.x, m.y, 0.85f, 2.5f, score)) laserMonster = std::min(laserMonster, score);
+                    if (sightDegrees <= AimDegrees) sightMonsterDegrees = std::min(sightMonsterDegrees, degreesOff(worldP, worldDir, m.x, m.y));
+                    if (laserDegrees <= AimDegrees) laserMonsterDegrees = std::min(laserMonsterDegrees, degreesOff(laserP, laserD, m.x, m.y));
                 }
-            const bool pointingAtMerc = (sightOnMerc && mercScore <= sightMonster) || (laserOnMerc && laserScore <= laserMonster);
+            const bool sightPoints = sightOnMerc && mercScore <= sightMonster;
+            const bool laserPoints = laserOnMerc && laserScore <= laserMonster;
+            const bool anglePoints = (sightDegrees <= AimDegrees && sightDegrees <= sightMonsterDegrees) ||
+                                     (laserDegrees <= AimDegrees && laserDegrees <= laserMonsterDegrees);
+            const bool pointingAtMerc = sightPoints || laserPoints || anglePoints;
 
             // Step 2a: with the grip held on the companion the hand is armed; arming shows and pulses
             // nothing (a Paladin's fist across the companion, then opened, orders nothing); the trigger
@@ -2683,17 +2724,24 @@ void StepCompanionTacticalGestures(uint64_t now, float rightTrigger, float leftT
                 framevr::telegraph::Current().Place(compX, compY, now, 250, 2, 1.5f, 0, 0, 0, -2);
                 char line[160];
                 std::snprintf(line, sizeof line, "Frame companion tactical: %s hand grip + trigger on the mercenary - command latched (by the %s)",
-                              h ? "left" : "right", sightOnMerc && mercScore <= sightMonster ? "sightline" : "laser");
+                              h ? "left" : "right", sightPoints ? "sightline" : laserPoints ? "laser" : "angle");
                 Say(line);
             } else if (chord.trigger && !triggerWas && chord.grip && !chord.Engaged() && !handsBusy) {
                 // Grip + trigger that stayed the game's: say why, at most every 2 s.
                 static uint64_t toldAt[2]{};
                 if (now - toldAt[h] > 2000) {
                     toldAt[h] = now;
-                    char line[220];
-                    std::snprintf(line, sizeof line, "Frame companion tactical: %s hand grip + trigger stayed the game's (mercenary %s; sightline %s, laser %s%s)",
-                                  h ? "left" : "right", hasCompPos ? "known" : "not found", sightOnMerc ? "on it" : "off", laserOnMerc ? "on it" : "off",
-                                  (sightOnMerc && mercScore > sightMonster) || (laserOnMerc && laserScore > laserMonster) ? ", a monster nearer the ray" : "");
+                    float plyrX = 0.0f, plyrY = 0.0f;
+                    const bool hasPlyr = ::companionai::GetPlayerWorldSubtilePos(plyrX, plyrY);
+                    char line[320];
+                    std::snprintf(line, sizeof line, "Frame companion tactical: %s hand grip + trigger stayed the game's (mercenary %s, %.1f sub-tiles away; "
+                                  "sightline %s, %.0f deg off; laser %s, %.0f deg off%s%s%s)",
+                                  h ? "left" : "right", hasCompPos ? "known" : "not found", hasCompPos && hasPlyr ? std::hypot(compX - plyrX, compY - plyrY) : -1.0f,
+                                  sightOnMerc ? "on it" : groundHit ? "on the floor" : "off", sightDegrees,
+                                  laserOnMerc ? "on it" : laserGround ? "on the floor" : "off", laserDegrees,
+                                  (sightOnMerc && mercScore > sightMonster) || (laserOnMerc && laserScore > laserMonster) ? "; a monster nearer the ray" : "",
+                                  (sightDegrees <= AimDegrees && sightDegrees > sightMonsterDegrees) || (laserDegrees <= AimDegrees && laserDegrees > laserMonsterDegrees) ? "; a monster nearer in angle" : "",
+                                  tossWorld ? "" : "; the floor unknown");
                     Say(line);
                 }
             }
