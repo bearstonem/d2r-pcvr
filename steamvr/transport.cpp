@@ -2568,8 +2568,9 @@ void StepCompanionTacticalGestures(uint64_t now, float rightTrigger, float leftT
         auto& chord = g_tacticalChord[h];
         const float grip = motionInput.grip[h];
         const float trigger = (h == 0) ? rightTrigger : leftTrigger;
+        const double seconds = double(now) / 1000.0;
         if (!interactionInput.tracked[h]) {
-            chord.Step(grip, trigger, false, false);
+            chord.Step(seconds, grip, trigger, false, false);
             if (g_tacticalGrabHand == h) {
                 framevr::telegraph::Current().ClearSkill(-2);
                 g_tacticalGrabHand = -1;
@@ -2579,12 +2580,9 @@ void StepCompanionTacticalGestures(uint64_t now, float rightTrigger, float leftT
 
         // The open-palm Defensive Hold (an upright open hand for 400 ms) is gone (owner 2026-11-01):
         // it fired during Paladin gestures, and Grip + Trigger on the companion holds it on purpose.
-        // Select Companion First -> Grip on it, then Trigger & Aim -> Release to Execute
-        // (tactical_chord.h). The ray is only tested on the frame the grip closes, or while engaged.
-        if (!chord.Closing(grip) && !chord.Engaged()) {
-            chord.Step(grip, trigger, false, !handsBusy);
-            continue;
-        }
+        // Point at the companion with the grip held, then Trigger & Aim -> Release to Execute
+        // (tactical_chord.h). The rays are tested every frame the hand may command: where it points
+        // decides, before the game sees it, whether a pull with the grip is the command's.
         {
             const auto headP = interactionInput.head.p;
             const auto handP = interactionInput.hand[h].p;
@@ -2611,7 +2609,31 @@ void StepCompanionTacticalGestures(uint64_t now, float rightTrigger, float leftT
                 groundHit = toss::Cell(hit, tossFloor, stageWorld.upm, gx, gy);
             }
 
-            // 3D vertical cylinder intersection helper in sheared RenderGround world metres
+            // 3D vertical cylinder intersection helper in sheared RenderGround world metres, along a ray
+            // (the sightline, or the hand's own laser)
+            const auto cylinder3D = [&](math::Vec rayP, math::Vec rayD, float ux, float uy, float radiusMetres, float& outScore) noexcept -> bool {
+                outScore = 9999.0f;
+                if (!tossWorld) return false;
+                const math::Vec unitFeet = coordinates::RenderGround(
+                    { ux * 2.0f / stageWorld.upm, 0.0f, uy * 2.0f / stageWorld.upm },
+                    tossFloor);
+                const float dHoriz2 = rayD.x * rayD.x + rayD.z * rayD.z;
+                if (dHoriz2 < 1e-5f) return false;
+                const float dx = unitFeet.x - rayP.x;
+                const float dz = unitFeet.z - rayP.z;
+                const float t = (dx * rayD.x + dz * rayD.z) / dHoriz2;
+                if (t <= 0.1f || t > 28.0f) return false;
+                const float rx = rayP.x + rayD.x * t;
+                const float ry = rayP.y + rayD.y * t;
+                const float rz = rayP.z + rayD.z * t;
+                const float horizDist = std::hypot(rx - unitFeet.x, rz - unitFeet.z);
+                const float heightAboveFloor = ry - tossFloor;
+                if (horizDist <= radiusMetres && heightAboveFloor >= -0.45f && heightAboveFloor <= 2.00f) {
+                    outScore = horizDist;
+                    return true;
+                }
+                return false;
+            };
             const auto hitsUnitCylinder3D = [&](float ux, float uy, float radiusMetres, float groundTolSubtiles, float& outScore) noexcept -> bool {
                 outScore = 9999.0f;
                 if (groundHit) {
@@ -2621,41 +2643,56 @@ void StepCompanionTacticalGestures(uint64_t now, float rightTrigger, float leftT
                         return true;
                     }
                 }
-                if (!tossWorld) return false;
-                const math::Vec unitFeet = coordinates::RenderGround(
-                    { ux * 2.0f / stageWorld.upm, 0.0f, uy * 2.0f / stageWorld.upm },
-                    tossFloor);
-                const float dHoriz2 = worldDir.x * worldDir.x + worldDir.z * worldDir.z;
-                if (dHoriz2 < 1e-5f) return false;
-                const float dx = unitFeet.x - worldP.x;
-                const float dz = unitFeet.z - worldP.z;
-                const float t = (dx * worldDir.x + dz * worldDir.z) / dHoriz2;
-                if (t <= 0.1f || t > 28.0f) return false;
-                const float rx = worldP.x + worldDir.x * t;
-                const float ry = worldP.y + worldDir.y * t;
-                const float rz = worldP.z + worldDir.z * t;
-                const float horizDist = std::hypot(rx - unitFeet.x, rz - unitFeet.z);
-                const float heightAboveFloor = ry - tossFloor;
-                if (horizDist <= radiusMetres && heightAboveFloor >= -0.45f && heightAboveFloor <= 2.00f) {
-                    outScore = horizDist;
-                    return true;
-                }
-                return false;
+                return cylinder3D(worldP, worldDir, ux, uy, radiusMetres, outScore);
             };
 
-            float mercScore = 9999.0f;
-            // Original companion cylinder: radius 0.95m, ground foot tolerance 3.5 sub-tiles, height [-0.45m, 2.00f]
-            const bool pointingAtMerc = hasCompPos && hitsUnitCylinder3D(compX, compY, 0.95f, 3.5f, mercScore);
+            // The hand's own laser too: a controller held low and pointed at the companion misses the
+            // sightline through the hand.
+            const math::Vec laserOrigin = handAim[h].p, laserDir = math::Rotate(handAim[h].q, {0, 0, -1});
+            const auto laserP = tossStage.known ? tossStage.World(laserOrigin) : (stageWorld.valid ? (stageWorld.hero + math::Rotate(stageWorld.base, laserOrigin)) : laserOrigin);
+            const auto laserD = math::Normalized(tossStage.known ? math::Rotate(tossStage.base, laserDir) : (stageWorld.valid ? math::Rotate(stageWorld.base, laserDir) : laserDir));
 
-            // Step 2a: Merc Grip Priority: the grip closing on the companion arms the hand even if the ray
-            // also crosses monsters. Arming shows and pulses nothing (a Paladin's fist near the companion,
-            // then opened, orders nothing); the trigger pulled while armed latches the command.
-            const auto chordEvent = chord.Step(grip, trigger, pointingAtMerc, !handsBusy);
+            // Original companion cylinder: radius 0.95m, ground foot tolerance 3.5 sub-tiles, height [-0.45m, 2.00f]
+            float mercScore = 9999.0f, laserScore = 9999.0f;
+            const bool sightOnMerc = hasCompPos && hitsUnitCylinder3D(compX, compY, 0.95f, 3.5f, mercScore);
+            const bool laserOnMerc = hasCompPos && handAimTracked[h] && cylinder3D(laserP, laserD, compX, compY, 0.95f, laserScore);
+            // A monster nearer the ray than the companion keeps the trigger an attack.
+            const auto snapshot = targetlock::Get();
+            const bool monstersFresh = snapshot.count > 0 && snapshot.at > 0 && (now - snapshot.at <= 800);
+            float sightMonster = 9999.0f, laserMonster = 9999.0f;
+            if (monstersFresh && (sightOnMerc || laserOnMerc))
+                for (int i = 0; i < snapshot.count; ++i) {
+                    float score = 9999.0f;
+                    if (sightOnMerc && hitsUnitCylinder3D(snapshot.targets[i].x, snapshot.targets[i].y, 0.85f, 2.5f, score)) sightMonster = std::min(sightMonster, score);
+                    if (laserOnMerc && cylinder3D(laserP, laserD, snapshot.targets[i].x, snapshot.targets[i].y, 0.85f, score)) laserMonster = std::min(laserMonster, score);
+                }
+            const bool pointingAtMerc = (sightOnMerc && mercScore <= sightMonster) || (laserOnMerc && laserScore <= laserMonster);
+
+            // Step 2a: with the grip held on the companion the hand is armed; arming shows and pulses
+            // nothing (a Paladin's fist across the companion, then opened, orders nothing); the trigger
+            // pulled while armed, or with the grip in one go, latches the command.
+            const bool triggerWas = chord.trigger;
+            const auto chordEvent = chord.Step(seconds, grip, trigger, pointingAtMerc && !handsBusy, !handsBusy);
             if (chordEvent == framevr::tacticalchord::Event::Latched && g_tacticalGrabHand < 0) {
                 g_tacticalGrabHand = h;
                 g_tacticalGrabStartMs = now;
                 MotionPulse(h, haptics::Category::Interaction, 0.30f, 25000000);
                 framevr::telegraph::Current().Place(compX, compY, now, 250, 2, 1.5f, 0, 0, 0, -2);
+                char line[160];
+                std::snprintf(line, sizeof line, "Frame companion tactical: %s hand grip + trigger on the mercenary - command latched (by the %s)",
+                              h ? "left" : "right", sightOnMerc && mercScore <= sightMonster ? "sightline" : "laser");
+                Say(line);
+            } else if (chord.trigger && !triggerWas && chord.grip && !chord.Engaged() && !handsBusy) {
+                // Grip + trigger that stayed the game's: say why, at most every 2 s.
+                static uint64_t toldAt[2]{};
+                if (now - toldAt[h] > 2000) {
+                    toldAt[h] = now;
+                    char line[220];
+                    std::snprintf(line, sizeof line, "Frame companion tactical: %s hand grip + trigger stayed the game's (mercenary %s; sightline %s, laser %s%s)",
+                                  h ? "left" : "right", hasCompPos ? "known" : "not found", sightOnMerc ? "on it" : "off", laserOnMerc ? "on it" : "off",
+                                  (sightOnMerc && mercScore > sightMonster) || (laserOnMerc && laserScore > laserMonster) ? ", a monster nearer the ray" : "");
+                    Say(line);
+                }
             }
             if (chordEvent == framevr::tacticalchord::Event::Disarmed && g_tacticalGrabHand == h) {
                 framevr::telegraph::Current().ClearSkill(-2);
@@ -2666,8 +2703,7 @@ void StepCompanionTacticalGestures(uint64_t now, float rightTrigger, float leftT
 
             // Evaluate candidate monster target when aiming away from the mercenary
             int picked = -1;
-            const auto snapshot = targetlock::Get();
-            if (snapshot.count > 0 && snapshot.at > 0 && (now - snapshot.at <= 800)) {
+            if (monstersFresh) {
                 float bestMonsterScore = 9999.0f;
                 for (int i = 0; i < snapshot.count; ++i) {
                     const auto& t = snapshot.targets[i];
@@ -3082,9 +3118,12 @@ void Input() {
     if(Float(squeeze,1)>.6f)physical.buttons|=menus::LeftBumper;
     if(Float(squeeze,0)>.6f)physical.buttons|=menus::RightBumper;
     // A hand armed or latched on a mercenary command (tactical_chord.h): its trigger is the command's,
-    // never the game's, until let go (as of the last step, StepCompanionTacticalGestures below).
-    physical.lt=g_tacticalChord[1].triggerOwned?0:uint8_t(std::clamp(Float(trigger,1),0.f,1.f)*255);
-    physical.rt=g_tacticalChord[0].triggerOwned?0:uint8_t(std::clamp(Float(trigger,0),0.f,1.f)*255);
+    // never the game's, until let go. Decided here, before this frame's pull is handed on: a pull made
+    // with the grip on the mercenary is withheld already, though the step (StepCompanionTacticalGestures,
+    // below) latches it only later this frame.
+    const double chordTime=double(GetTickCount64())/1000.0;
+    physical.lt=g_tacticalChord[1].Withholds(chordTime,Float(squeeze,1),Float(trigger,1))?0:uint8_t(std::clamp(Float(trigger,1),0.f,1.f)*255);
+    physical.rt=g_tacticalChord[0].Withholds(chordTime,Float(squeeze,0),Float(trigger,0))?0:uint8_t(std::clamp(Float(trigger,0),0.f,1.f)*255);
     const auto physicalLeft=Stick(1),physicalRight=Stick(0);
     const auto axis=[](float value){return int16_t(std::clamp(value,-1.f,1.f)*32767.f);};
     physical.lx=axis(physicalLeft.x);physical.ly=axis(physicalLeft.y);
