@@ -1464,20 +1464,29 @@ void ExecuteCompanionTacticalChargesInternal(
             return;
         }
 
+        const uint32_t activeTargetId = framevr::companionai::SkillRequiresCorpse(decision.skillId)
+            ? sensors.closestCorpseId
+            : primaryTargetId;
+
         // Configure target and level on the synthetic node if applicable
         for (size_t i = 0; i < s_activeSyntheticNodeCount; ++i) {
             if (activeSkillNode == reinterpret_cast<uintptr_t>(&s_companionSyntheticNodes[i])) {
-                s_companionSyntheticNodes[i].targetId = primaryTargetId;
+                s_companionSyntheticNodes[i].targetId = activeTargetId;
                 s_companionSyntheticNodes[i].hitCount = 1;
                 s_companionSyntheticNodes[i].level = decision.level > 0 ? decision.level : 1;
                 break;
             }
         }
 
-        // Supply this skill node to list + 0x18 and list + 0x20 (pUsedSkill / pRightSkill)
-        // PERSISTENTLY across the animation duration (critical for multi-frame attacks like Strafe)
+        // Temporarily supply this skill node to list + 0x18 and list + 0x20 (pUsedSkill / pRightSkill)
+        // only during the tactical cast execution, and restore previous values immediately after so that
+        // the companion's native melee attacks and class skills (e.g. Bash, Stun) are not permanently corrupted.
+        uintptr_t prevUsedSkill = 0;
+        uintptr_t prevRightSkill = 0;
         uintptr_t list = 0;
         if (Read(hireling + 0x100, list) && list >= 0x10000) {
+            (void)Read(list + 0x18, prevUsedSkill);
+            (void)Read(list + 0x20, prevRightSkill);
             (void)framevr::WriteMemory(reinterpret_cast<void*>(list + 0x18), &activeSkillNode, sizeof(activeSkillNode));
             (void)framevr::WriteMemory(reinterpret_cast<void*>(list + 0x20), &activeSkillNode, sizeof(activeSkillNode));
         }
@@ -1495,12 +1504,13 @@ void ExecuteCompanionTacticalChargesInternal(
         };
         CommandedActionScope actionScope(targetUnit);
 
-        // 1. Dispatch native hireling animation via originalServerMoveUnit:
-        // Physical bow skills (e.g. Strafe 26) use MONMODE_ATTACK1 (mode 4)
-        // Spells, curses and buffs use MONMODE_CAST (mode 7)
-        if (originalServerMoveUnit) {
-            const int animMode = (decision.skillId == 26 || framevr::weaponskills::Bow(decision.skillId)) ? 4 : 7;
-            (void)originalServerMoveUnit(game, hireling, targetUnit, animMode, destX, destY, 1, 0);
+        // 1. Dispatch native hireling animation via originalServerMoveUnit ONLY for physical bow skills (e.g. Strafe 26)
+        // using MONMODE_ATTACK1 (mode 4).
+        // Spells, curses, summons, and buffs must NOT invoke ServerMoveUnit with mode 7, because melee companions
+        // (Act 5 Barbarians and Act 2 Desert Guards) lack a MONMODE_SC (7) animation, causing them to stall and
+        // walk in place permanently ("andando en estático"). Spells are handled natively by dispatchFn.
+        if (originalServerMoveUnit && (decision.skillId == 26 || framevr::weaponskills::Bow(decision.skillId))) {
+            (void)originalServerMoveUnit(game, hireling, targetUnit, 4 /* MONMODE_ATTACK1 */, destX, destY, 1, 0);
         }
 
         int startRes = 0;
@@ -1567,11 +1577,11 @@ void ExecuteCompanionTacticalChargesInternal(
             startRes = startFn(game, hireling, decision.skillId, decision.level, 0);
 
             for (int a = 0; a < arrowCount; ++a) {
-                uint32_t arrowTargetId = primaryTargetId;
+                uint32_t arrowTargetId = activeTargetId;
                 int arrowDestX = destX;
                 int arrowDestY = destY;
 
-                if (hCount > 0) {
+                if (!framevr::companionai::SkillRequiresCorpse(decision.skillId) && hCount > 0) {
                     const auto& h = hostiles[a % hCount];
                     arrowTargetId = h.id;
                     arrowDestX = int(std::round(h.x));
@@ -1678,6 +1688,19 @@ void ExecuteCompanionTacticalChargesInternal(
                     break;
                 }
             }
+        }
+
+        // Restore original pUsedSkill and pRightSkill so companion returns to its native combat stance
+        if (list >= 0x10000) {
+            (void)framevr::WriteMemory(reinterpret_cast<void*>(list + 0x18), &prevUsedSkill, sizeof(prevUsedSkill));
+            (void)framevr::WriteMemory(reinterpret_cast<void*>(list + 0x20), &prevRightSkill, sizeof(prevRightSkill));
+        }
+
+        // Safety: Ensure hireling is not left in stalled mode 7 (MONMODE_SC)
+        uint32_t compPostMode = 0;
+        if (Read(hireling + 0xc, compPostMode) && compPostMode == 7) {
+            const uint32_t neutralMode = 1;
+            (void)framevr::WriteMemory(reinterpret_cast<void*>(hireling + 0xc), &neutralMode, sizeof(neutralMode));
         }
     }
 }

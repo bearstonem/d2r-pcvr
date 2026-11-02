@@ -568,6 +568,70 @@ void TestEquipmentSkillsAndStrafe() {
 }
 
 
+
+void TestFairRotationAmongMultipleSkillsOfSameKind() {
+    // Companion equipped with both Hydra (skill 62) and Arctic Blast (skill 230), both DamageSpells
+    std::vector<CompanionChargedSkill> skills;
+
+    CompanionChargedSkill hydra{};
+    hydra.itemId = 101;
+    hydra.skillId = 62;
+    hydra.level = 6;
+    hydra.currentCharges = 30;
+    hydra.maxCharges = 30;
+    hydra.kind = TacticalSkillKind::DamageSpell;
+    skills.push_back(hydra);
+
+    CompanionChargedSkill arcticBlast{};
+    arcticBlast.itemId = 102;
+    arcticBlast.skillId = 230;
+    arcticBlast.level = 7;
+    arcticBlast.currentCharges = 255;
+    arcticBlast.maxCharges = 0;
+    arcticBlast.isEquipmentSkill = true;
+    arcticBlast.kind = TacticalSkillKind::DamageSpell;
+    skills.push_back(arcticBlast);
+
+    TacticalCombatSensors sensors{};
+    sensors.nowMs = 10000;
+    sensors.isCombatActive = true;
+    sensors.nearbyHostilesCount = 2;
+
+    // 1. Initial cast: both never cast (lastCastMs == 0). First one (Hydra) is selected.
+    auto d1 = SelectBestTacticalCharge(skills, sensors, true, true);
+    assert(d1.shouldCast && d1.skillId == 62);
+
+    // Simulate Hydra being cast at t = 10000
+    skills[0].lastCastMs = 10000;
+
+    // 2. Second cast opportunity at t = 10500: Hydra is on cooldown (10000 + 4000 > 10500).
+    // Arctic Blast has never been cast (lastCastMs == 0). MUST select Arctic Blast!
+    sensors.nowMs = 10500;
+    auto d2 = SelectBestTacticalCharge(skills, sensors, true, true);
+    assert(d2.shouldCast && d2.skillId == 230);
+
+    // Simulate Arctic Blast being cast at t = 10500
+    skills[1].lastCastMs = 10500;
+
+    // 3. Third cast opportunity at t = 15000:
+    // Both skills are off cooldown (10000 + 4000 <= 15000 and 10500 + 4000 <= 15000).
+    // Fair round-robin / LRU MUST select Hydra (cast at 10000 < 10500) rather than monopolizing!
+    sensors.nowMs = 15000;
+    auto d3 = SelectBestTacticalCharge(skills, sensors, true, true);
+    assert(d3.shouldCast && d3.skillId == 62);
+
+    // Simulate Hydra being cast at t = 15000
+    skills[0].lastCastMs = 15000;
+
+    // 4. Fourth cast opportunity at t = 15500:
+    // Hydra is on cooldown. Arctic Blast (last cast at 10500) is ready. MUST select Arctic Blast!
+    sensors.nowMs = 15500;
+    auto d4 = SelectBestTacticalCharge(skills, sensors, true, true);
+    assert(d4.shouldCast && d4.skillId == 230);
+
+    std::puts("TestFairRotationAmongMultipleSkillsOfSameKind: OK");
+}
+
 } // namespace
 
 int main() {
@@ -580,6 +644,7 @@ int main() {
     TestChargeAccounting();
     TestCorpseSkillsIndexingAndTriggering();
     TestEquipmentSkillsAndStrafe();
+    TestFairRotationAmongMultipleSkillsOfSameKind();
     std::puts("All companion_charges_test checks passed successfully!");
     return 0;
 }

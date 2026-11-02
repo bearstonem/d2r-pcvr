@@ -681,21 +681,35 @@ inline TacticalCastDecision SelectBestTacticalCharge(
     };
 
     for (TacticalSkillKind kind : PriorityOrder) {
-        for (auto& skill : skills) {
+        const CompanionChargedSkill* bestCandidate = nullptr;
+        const char* bestReason = "";
+        uint64_t oldestCastMs = UINT64_MAX;
+
+        for (const auto& skill : skills) {
             if (skill.kind != kind) continue;
 
             const char* reason = "";
             if (EvaluateTacticalCharge(skill, sensors, consumeCharges, reason)) {
-                decision.shouldCast = true;
-                decision.skillId = skill.skillId;
-                decision.level = skill.level;
-                decision.itemId = skill.itemId;
-                decision.bodyLocation = skill.bodyLocation;
-                decision.kind = skill.kind;
-                decision.reason = reason;
-                decision.isEquipmentSkill = skill.isEquipmentSkill;
-                return decision;
+                // Fair round-robin / LRU rotation: prioritize the candidate least recently cast
+                // (or uncast with lastCastMs == 0) to prevent a single skill from monopolizing combat
+                if (!bestCandidate || skill.lastCastMs < oldestCastMs) {
+                    bestCandidate = &skill;
+                    bestReason = reason;
+                    oldestCastMs = skill.lastCastMs;
+                }
             }
+        }
+
+        if (bestCandidate) {
+            decision.shouldCast = true;
+            decision.skillId = bestCandidate->skillId;
+            decision.level = bestCandidate->level;
+            decision.itemId = bestCandidate->itemId;
+            decision.bodyLocation = bestCandidate->bodyLocation;
+            decision.kind = bestCandidate->kind;
+            decision.reason = bestReason;
+            decision.isEquipmentSkill = bestCandidate->isEquipmentSkill;
+            return decision;
         }
     }
 
