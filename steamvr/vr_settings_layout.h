@@ -165,6 +165,8 @@ enum class Role : uint8_t {
     CalibHint,      // body calibration: the hint box
     CalibProgress,  // body calibration: the hold's progress bar (fill)
     CalibNote,      // body calibration: the measured values / notes
+    CalibFigure,    // body calibration: the T cross figure (the painter draws it)
+    CalibTip,       // body calibration: you can do the T cross at any time
     // the popover (a named list too long for chips; docs/VR_SETTINGS_MENU.md), over everything else
     PopoverDim,     // the whole panel dimmed 40%; hit PopoverClose (an outside press closes, without a change, and goes no further)
     Popover,        // the floating card; hit Card (swallows presses between its options)
@@ -224,6 +226,7 @@ struct CalibrationView {
     bool active=false;
     int hint=0;                // calibration::Hint (Pose, Release, Floor, Height, Tracking, Upright, Arms, Still, Saving, Saved, Failed, Conflict)
     float progress=0;          // the hold, 0-1
+    bool anyTime=true;         // the T cross can open this (its switch on, not Seated play, a floor): say so
     bool measured=false;       // Saving / Saved: show the measurements
     float eyeHeight=0,armSpan=0;   // meters
     bool operator==(const CalibrationView&)const=default;
@@ -1447,15 +1450,17 @@ struct Builder {
     void Calibration(){
         const auto& cv=in.calibration;
         Add(Role::PageTitle,{60,48,1160,65},{},NoHelp,0,"Calibrate your body");
-        Add(Role::CalibStep,{80,153,1120,60},{},NoHelp,0,"1. Stand upright and look straight ahead.");
-        Add(Role::CalibStep,{80,238,1120,100},{},NoHelp,0,"2. Stretch both arms out sideways at shoulder height (T-pose).");
-        Add(Role::CalibStep,{80,348,1120,100},{},NoHelp,0,"3. Release both triggers, then squeeze and hold both for a moment.");
-        Add(Role::CalibHint,{80,493,1120,160},{},NoHelp,0,HintText(cv.hint));
-        auto& bar=Add(Role::CalibProgress,{110,663,1060,13});bar.fill=std::clamp(cv.progress,0.f,1.f);
-        if(cv.measured)Add(Role::CalibNote,{80,744,1120,55},{},NoHelp,0,Printf("Standing eye height: %.1f cm     Controller span: %.1f cm",double(cv.eyeHeight*100),double(cv.armSpan*100)));
-        else Add(Role::CalibNote,{80,744,1120,65},{},NoHelp,0,"Height sets world scale. Controller span fits your character's arms.");
-        Add(Role::CalibNote,{80,846,1120,80},{},NoHelp,0,"Right B: skip / cancel. Reopen any time: VR Settings > Body > Calibrate body.");
-        Add(Role::CalibNote,{80,939,1120,50},{},NoHelp,0,"Controls are blocked. The game world remains live.");
+        Add(Role::CalibFigure,{892,128,308,308});
+        Add(Role::CalibStep,{80,143,800,60},{},NoHelp,0,"1. Stand upright and look straight ahead.");
+        Add(Role::CalibStep,{80,223,800,60},{},NoHelp,0,"2. Stretch both arms out sideways at shoulder height: a T cross.");
+        Add(Role::CalibStep,{80,303,800,100},{},NoHelp,0,"3. Release both triggers, then squeeze and hold both for a moment.");
+        Add(Role::CalibHint,{80,452,1120,160},{},NoHelp,0,HintText(cv.hint));
+        auto& bar=Add(Role::CalibProgress,{110,622,1060,13});bar.fill=std::clamp(cv.progress,0.f,1.f);
+        if(cv.anyTime)Add(Role::CalibTip,{80,672,1120,50},{},NoHelp,0,"You can do the T cross at any time to calibrate: hold it for 2 seconds.");
+        if(cv.measured)Add(Role::CalibNote,{80,736,1120,50},{},NoHelp,0,Printf("Standing eye height: %.1f cm     Controller span: %.1f cm",double(cv.eyeHeight*100),double(cv.armSpan*100)));
+        else Add(Role::CalibNote,{80,736,1120,50},{},NoHelp,0,"Height sets world scale. Controller span fits your character's arms.");
+        Add(Role::CalibNote,{80,796,1120,50},{},NoHelp,0,"Right B: skip / cancel. Reopen any time: VR Settings > Body > Calibrate body.");
+        Add(Role::CalibNote,{80,856,1120,50},{},NoHelp,0,"Controls are blocked. The game world remains live.");
     }
     void Flags(){
         Key pointed=Count;

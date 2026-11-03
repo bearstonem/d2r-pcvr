@@ -98,7 +98,7 @@ struct Scope {
 // (Jeff, 2026-10-20: Cold Arrow looked short). Watched from their server
 // creation only while FollowFlights runs (the target lock's scan, game thread:
 // the Monster outline, Skills go to the aimed monster, or Ground skills on
-// Aimed monster is On), and summed up in at most one line a second.
+// Aimed monster is On, or a T cross is held), and summed up in at most one line a second.
 struct Flight {uint32_t unit=0,missile=0;float ox=0,oy=0,x=0,y=0;bool seen=false;ULONGLONG at=0;};
 std::mutex flightMutex;
 Flight flights[32];

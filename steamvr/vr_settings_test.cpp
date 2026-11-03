@@ -887,6 +887,20 @@ int main(int argc,char** argv){
         Check(Normalize(LeatherMenu,2)==2&&Normalize(LeatherMenu,.4f)==1&&Normalize(LeatherMenu,7)==1&&Normalize(LeatherMenu,NAN)==1,
               "Off, On or Menu only; an odd INI value or none reads On");
     }
+    {   // The T cross: On by default, a switch on Body, the right half of Seated play's row, saved alone
+        Check(Defaults()[TCrossCalibrate]==1&&std::wstring(Definitions[TCrossCalibrate].section)==L"interactions"&&
+              std::wstring(Definitions[TCrossCalibrate].key)==L"t_cross_calibrate"&&Definitions[TCrossCalibrate].max==1&&HelpText(TCrossCalibrate)[0]!=0&&
+              TCrossCalibrate<ChangeMask::Bits,"the T cross: On by default, [interactions] t_cross_calibrate Off / On, explained, its own change bit");
+        {   // beside Seated play, on Body's 8 rows; a seated player does not see a switch that does nothing for them
+            const auto* row=content::RowOf(TCrossCalibrate);
+            Check(row&&row->beside&&row->page==View::Body,"the switch rides on Seated play's row");
+            Values standing=Defaults(),seated=Defaults();standing[Seated]=0;seated[Seated]=1;
+            Check(RowShown(TCrossCalibrate,standing,{})&&!RowShown(TCrossCalibrate,seated,{}),"left out in Seated play");
+            for(int c=-1;c<=heroclass::Assassin+1;++c)Check(RowShown(TCrossCalibrate,standing,{c}),"every class, the Warlock too, sees the T cross");
+            Model t;Snapshot ready;ready.ready=true;t.Open(ready);layout::Press(t,{Kind::Set,TCrossCalibrate,0,0},0);
+            Check(t.Get()[TCrossCalibrate]==0&&t.Click({Kind::Apply}).changed==(ChangeMask{1}<<TCrossCalibrate),"the switch turns it Off, and Apply saves only it");
+        }
+    }
     {   // Loot pick (#257): On by default, a switch on Interface, the right half of Loot name size's row, saved alone
         Check(Defaults()[LootPick]==1&&std::wstring(Definitions[LootPick].section)==L"interactions"&&
               std::wstring(Definitions[LootPick].key)==L"loot_pick"&&Definitions[LootPick].max==1&&HelpText(LootPick)[0]!=0&&

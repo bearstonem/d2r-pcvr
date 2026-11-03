@@ -148,6 +148,8 @@ constexpr const char* CartouchePath="M170 4.5L176.5 15.5H163.5Z M166.5 11.5Q170 
 constexpr const char* SigilOuter="M3 28a25 25 0 1 0 50 0a25 25 0 1 0 -50 0z M28 9.5L44 37.5H12Z";
 constexpr const char* SigilThin="M8.5 28a19.5 19.5 0 1 0 39 0a19.5 19.5 0 1 0 -39 0z";
 constexpr const char* SigilMid="M19.5 29Q28 21.5 36.5 29Q28 36.5 19.5 29Z M28 1V5 M28 51V55 M1 28H5 M51 28H55 M8.9 8.9L11.8 11.8 M47.1 8.9L44.2 11.8 M8.9 47.1L11.8 44.2 M47.1 47.1L44.2 44.2";
+// A person in a T cross, our own drawing, one closed outline in a 100 x 100 box: over the head, down the right arm, leg and foot, then the left.
+constexpr const char* TCrossPath="M46.6 14.8A7.3 7.3 0 1 1 53.4 14.8V18.5C54 20.5 56.5 21.8 60 22.2L93 24C96.5 24.2 98.5 25.2 98.5 26.8C98.5 28.4 96.5 29.4 93 29.4L64 30.2C62.2 30.3 61.5 31.4 61.4 33L60.4 49C60.3 52 60.8 54.5 60.8 58L59.8 92.5L63.2 95.8C64 97 63.2 98 61.6 98L54.5 98C53.2 98 52.7 97.2 52.6 96L51.2 62C51.1 60.5 50.6 60 50 60C49.4 60 48.9 60.5 48.8 62L47.4 96C47.3 97.2 46.8 98 45.5 98L38.4 98C36.8 98 36 97 36.8 95.8L40.2 92.5L39.2 58C39.2 54.5 39.7 52 39.6 49L38.6 33C38.5 31.4 37.8 30.3 36 30.2L7 29.4C3.5 29.4 1.5 28.4 1.5 26.8C1.5 25.2 3.5 24.2 7 24L40 22.2C43.5 21.8 46 20.5 46.6 18.5Z";
 
 // A small SVG path-data reader (M L H V C S Q T A Z, absolute and relative)
 // that feeds a Direct2D geometry sink.
@@ -317,7 +319,7 @@ struct Painter::Impl {
     Com<ID2D1Bitmap> background;
     struct IconGeometry { const IconLayer* layer; Com<ID2D1PathGeometry> geometry; };
     std::vector<IconGeometry> icons[size_t(Icon::Count)];
-    Com<ID2D1PathGeometry> cartouche,sigilOuter,sigilThin,sigilMid;
+    Com<ID2D1PathGeometry> cartouche,sigilOuter,sigilThin,sigilMid,tCross;
     std::unordered_map<std::string,Com<IDWriteTextLayout>> layouts;
     std::string titleKey;std::vector<Com<ID2D1Geometry>> titleRuns;   // the page title's glyph outlines
     bool ok=false,drawing=false;
@@ -389,8 +391,8 @@ struct Painter::Impl {
                 icons[i].push_back({&layer,std::move(g)});
             }
         }
-        cartouche=Svg(CartouchePath,false);sigilOuter=Svg(SigilOuter,false);sigilThin=Svg(SigilThin,false);sigilMid=Svg(SigilMid,false);
-        if(!cartouche||!sigilOuter||!sigilThin||!sigilMid){error="ornament path failed";return false;}
+        cartouche=Svg(CartouchePath,false);sigilOuter=Svg(SigilOuter,false);sigilThin=Svg(SigilThin,false);sigilMid=Svg(SigilMid,false);tCross=Svg(TCrossPath,true);
+        if(!cartouche||!sigilOuter||!sigilThin||!sigilMid||!tCross){error="ornament path failed";return false;}
         return true;
     }
     bool CreateTarget(){
@@ -729,7 +731,7 @@ Painter::~Painter(){
     auto& i=*impl;
     i.layouts.clear();i.shades.clear();i.titleRuns.clear();
     for(auto& list:i.icons)list.clear();
-    i.cartouche.Reset();i.sigilOuter.Reset();i.sigilThin.Reset();i.sigilMid.Reset();
+    i.cartouche.Reset();i.sigilOuter.Reset();i.sigilThin.Reset();i.sigilMid.Reset();i.tCross.Reset();
     i.background.Reset();i.crimson.Reset();i.bronzeFill.Reset();i.plate.Reset();
     i.roundJoin.Reset();i.roundCap.Reset();i.dashed.Reset();i.squareCap.Reset();
     i.layer.Reset();i.stoneBrush.Reset();i.stone.Reset();i.solid.Reset();i.rt.Reset();i.target.Reset();i.wic.Reset();i.d2d.Reset();
@@ -1003,6 +1005,15 @@ void Painter::Button(RectF r,std::string_view utf8,Icon icon,ControlState s,Plat
     i.Finish(d,r,s);
 }
 void Painter::IconAt(Icon icon,RectF r,Color c,float alpha){auto& i=*impl;if(i.drawing)i.DrawIcon(icon,r,Rgb(c),alpha);}
+void Painter::TCrossFigure(RectF r,Color c){
+    auto& i=*impl;if(!i.drawing)return;
+    D2D1_MATRIX_3X2_F old;i.rt->GetTransform(&old);
+    const float s=std::min(r.w,r.h)/100.f;
+    i.rt->SetTransform(D2D1::Matrix3x2F::Scale(s,s)*D2D1::Matrix3x2F::Translation(r.x+(r.w-100*s)/2,r.y+(r.h-100*s)/2)**D2D1::Matrix3x2F::ReinterpretBaseType(&old));
+    i.rt->FillGeometry(i.tCross,i.Solid(Rgb(c),.14f));
+    i.rt->DrawGeometry(i.tCross,i.Solid(Rgb(c)),1.5f,i.roundJoin);
+    i.rt->SetTransform(old);
+}
 void Painter::Tab(RectF r,Icon icon,std::string_view name,ControlState s){
     auto& i=*impl;if(!i.drawing)return;
     D2D1_RECT_F d=R(r);

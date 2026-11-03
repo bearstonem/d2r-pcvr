@@ -90,8 +90,9 @@ This is a PCVR mod: the game runs on your Windows PC and streams to the headset.
 - A **MAP** tab at the bottom of the spell menu, showing explored areas and native markers.
 - Load supported arrow skills into a physical bow quiver, with the selected
   arrow visible on the string. Selected Paladin Smite works with left-shield contact.
-- Body calibration for your height and arm span, available on first load
-  and through **Left Grip + left secondary → Calibrate body**.
+- Body calibration for your height and arm span, available on first load,
+  through **Left Grip + left secondary → Calibrate body**, and any time you
+  stand in a T cross for 2 seconds.
 - Weapon-set swapping: reach your right hand over either shoulder and press
   its grip. You can change the swap hand in VR Settings > Body > Dominant hand.
 - Inventory, skills, conversations and Journal through the game menu:
@@ -133,6 +134,7 @@ Quest left X/Y correspond to Index left A/B; right A/B labels are the same.
 | Finish editing | Click the wheel hand's stick again, or select CLOSE in its center |
 | Inventory / character / skills / journal | Left Grip + left stick click; or either wheel → INVENTORY |
 | VR settings / body calibration | Either wheel → VR SETTINGS |
+| Recalibrate body and eye height, no menu | Stand in a **T cross**, nothing pressed, for 2 seconds: the controllers buzz while you hold it, then the prompt opens. Not in Seated play |
 | Minimap | Either wheel → MAP; movement remains available |
 | Reset height | VR Settings > Body > Height and arm span > **Set eye height** |
 | Adjust controller vibration | **VR Settings > Vibration**; **Feel it** on a row's help card previews it, **Apply** saves |

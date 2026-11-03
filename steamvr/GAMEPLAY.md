@@ -185,6 +185,7 @@ not generate melee velocity. The layout currently assumes a right-handed player.
 | Quick potion | Left Y → **EQUIPMENT / BELT** → trigger a potion wedge; grip on a potion wedge instead grabs it into the right hand |
 | Swap weapon sets | Reach the swap hand over either shoulder and press its grip; right hand by default, selectable in VR Settings > Body > Dominant hand. Hip anchors are removed |
 | Seated weapon selection | Utility wheel → **Weapon I** or **Weapon II** |
+| Recalibrate body and eye height | Stand in a **T cross**, nothing pressed and no potion in hand, for 2 seconds: both controllers buzz while you hold it, then the calibration prompt opens ([BODY_CALIBRATION.md](BODY_CALIBRATION.md)). Not in Seated play. Vibration off: the prompt opening is the only cue |
 | Stow/draw | Utility wheel → **Stow weapons** / **Draw weapons**; native equipped stats stay unchanged |
 | Health/mana | Check the back of your left wrist, or choose **Palm** in **VR Settings > Wrist > Life and mana** and hold your left palm upward in front of you briefly. No button required; automatic alerts are off by default |
 | Show all nearby loot labels (Alt) | Hold the **right stick down** to hold the native Show Items action; let go to restore normal drop/hover labels. Push it **up** to toggle running / walking. Neither while you look at the wrist / palm map, which they zoom instead. Listed in **VR Settings > Guide** |
@@ -559,7 +560,7 @@ sets the page's rows back to their defaults, with **Undo reset** for 6 seconds.
 | Page | Contents |
 |---|---|
 | Presets | Coming in a later update: the tab is grayed out and its card says so. Each preset will set only the rows it lists |
-| Body | Dominant hand, smooth turning with its snap angle or turn speed, seated play, the belt's height and reach, and **Height and arm span** (**Calibrate body**, **Set eye height**) |
+| Body | Dominant hand, smooth turning with its snap angle or turn speed, seated play with the **T cross to calibrate** switch beside it (standing only), the belt's height and reach, and **Height and arm span** (**Calibrate body**, **Set eye height**) |
 | Combat | Motion combat, swing and stab speed to hit, skills on your moves (melee skills on a landed strike, Smite on a bash, arrow skills on a release), skill icons on weapons and thrown weapon lift |
 | Aim | Whether skills go to the aimed monster, spell aim assist, keeping spell shots level, aiming a staff along the arm, aiming with your view (the eyes' 17-degree tunnel, the hands within 30 degrees of your head, a raised hand aiming alone), where ground skills land (the game's aim, where you point or the aimed monster) and landing circles. Every option that changes how a cast aims is Off (Game's aim) by default, except Spell aim assist (Strong) |
 | Targets | The aimed monster's outline: its strength, which hands show it, and each hand's outline color (By range or one color, shown as a swatch); the arrow path line |
@@ -877,6 +878,7 @@ Optional live configuration (metres below/forward/from the estimated torso):
 ```ini
 [interactions]
 seated=0
+t_cross_calibrate=1
 navigation_location=0
 vitals_location=0
 vitals_tilt=0
