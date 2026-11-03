@@ -365,7 +365,7 @@ struct MenuBounds {
     float left,top,right,bottom;
     bool Contains(float u,float v) const {return u>left&&u<right&&v>top&&v<bottom;}
 };
-constexpr int QuickUseCell=210,LeftStrikesCell=212;   // 211 was RUN / WALK, 213 the movement slider (now VR Settings > Body > Movement speed)
+constexpr int QuickUseCell=210,LeftStrikesCell=212;   // 211 was RUN / WALK, 213 the movement slider (now VR Settings > Comfort > Moving > Movement speed)
 constexpr double QuickEditHold=.65;
 constexpr MenuBounds QuickUseBounds{.025f,.025f,.255f,.18f};
 // Glyph casting (glyph_cast.h): the GLYPHS box, upper right on the Spells and Equipment pages and on the
@@ -807,7 +807,7 @@ public:
         sheet.allowed=!wheel&&!in.quickCast&&!in.cancel&&!rearm&&bottle<0&&holster<0&&pending.action==Action::None;
         const auto reached=leatherReach.Step(sheet);out.block=out.block||reached.block;
         if(reached.open){out.inventory=true;out.feedback=1;out.feedbackHand=leather::Hand;}
-        // VR Settings > Movement speed: WALK walks, every other stop runs. When the game's
+        // VR Settings > Comfort > Moving > Movement speed: WALK walks, every other stop runs. When the game's
         // toggle is the other way, its own run / walk command (no tick).
         if(in.gaitToggle&&fresh&&request(Action::RunWalk,0))pendingHand=0;
         if(wheel) {

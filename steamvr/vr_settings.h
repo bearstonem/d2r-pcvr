@@ -21,7 +21,10 @@ namespace framevr::settings {
 // vr_settings_content.h). Presets heads the rail; Guide and WhatsNew open from
 // the page band, not the rail; More (rows no override placed yet, the menu data
 // rules) too, and only while it has rows.
-enum class View : uint8_t { Presets, Body, Combat, Aim, Targets, Shield, Wrist, Interface, Survival, World, Vibration, Performance, Guide, WhatsNew, More, Count };
+enum class View : uint8_t { Presets, Combat, Targeting, Shield, Monsters, Physics, Moving, Body, Hands, Vibration, Wrist, Menus, Labels, Outlines, Warnings, Performance, Frames, Environment, Guide, WhatsNew, More, Count };
+// The rail's groups (content::Group, content::GroupTable) number below this, so the model
+// can remember a page per group and the help card has an id per group.
+constexpr int MaxRailGroups=8;
 enum Key { Motion, Seated, Dominant, Snap, TurnSpeed, Waist, BeltForward,
            Foveation, Sky, Fog, Ceiling, DrawDistance, ObjectDistance,
            EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, VitalsTilt, HapticStrength, HapticMelee, HapticBowDraw, HapticBowRelease, HapticSpell, HapticInteraction, HapticAlert, HapticShortMelee, BloodVisor, BloodWipe, MeleeThrustSpeed, LootLabelSize, CompanionCounts, StrainVignette, OfflinePlayers, ShieldBashSpeed, DesktopOneEye, MapTopDown, MapRotate, FoveationStrength, StereoRendering, DeferGpuWait, TargetHighlight, HeartbeatStart, SpellLock, StaffPoint, LandingCircles, GroundAim, AimHighlights, HighlightRight, HighlightLeft, ElementalHands, EnemySight, BowLaser, ThrowLift, BottlePhysics, PropPhysics, CompanionAi, ShieldGrip, ShieldOut, ShieldUp, ShieldFollow, ShieldRoll, AimFollowsView, CompanionTactical, LeftHandStrikes, TorchFlame, FrameGeneration, FrameGenPreset, FrameGenScale, RunSpeed, RunWalkToggle, BodyPhysics, BigObjectDistance, FogDistance, LeatherMenu, LootBeamUnique, LootBeamSet, LootBeamRare, LootBeamRunes, LootBeamBrightness, CeilingTorches, ArcaneDecay, ArcaneFade, ManaThreshold, ArcaneIntensity, GlyphDraw, GlyphCircle, GlyphTriangle, GlyphSquare, GlyphLightning, GlyphSpiral, GlyphV, GlyphStar, GlyphWave, LootPick, Count };
@@ -145,9 +148,9 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"NVIDIA flow quality", "Slow, Medium or Fast optical flow", L"render",L"frame_generation_preset",1,0,2,1},
     {"NVIDIA flow scale", "The size the optical flow works at", L"render",L"frame_generation_scale",2,0,2,1},
     // Movement speed (run_speed.h): -10 Walk, 0 Base run (the no-gear run), 100 Full run (the gear's).
-    // VR Settings > Body > Movement speed (Cal 2026-10-25; it was a skill-wheel slider, which replaced RUN / WALK).
+    // VR Settings > Comfort > Moving > Movement speed (Cal 2026-10-25; it was a skill-wheel slider, which replaced RUN / WALK).
     {"Movement speed", "Walk, or run from your class's no-gear speed up to your gear's full speed", L"gameplay",L"run_speed_pct",runspeed::DefaultPercent,runspeed::MinPercent,runspeed::MaxPercent,runspeed::StepPercent},
-    // Right stick up switches walk / run (runspeed::StickToggle), beside Movement speed on its row;
+    // Right stick up switches walk / run (runspeed::StickToggle), a row of its own on Controls > Hands;
     // off by default (owner 2026-10-25).
     {"Stick toggle", "Right stick up switches between walking and running", L"gameplay",L"run_walk_toggle",0,0,1,1},
     // Monsters' and townsfolk's limbs pushed aside by weapons (limb_rig.h); drawn only.
@@ -159,13 +162,13 @@ inline constexpr std::array<Definition,Count> Definitions{{
     // same haze close by, see-through to Big objects' 600. Start and curve stay INI-only.
     {"Fog distance", "Where the fog is complete; farther shows more of the distance", L"fog",L"end",600,100,1200,50},
     // The tabbed menu on the hide in the left hand (leather_menu.h), or in front of you as before;
-    // VR Settings > Interface, beside Menu distance on its row (owner 2026-10-28: "a toggle in VR Settings
+    // VR Settings > Interface > Menus, beside Menu distance on its row (owner 2026-10-28: "a toggle in VR Settings
     // so people can opt out and just use the normal full screen menu"); 2 Menu only: the menu held without the hide
     // (owner 2026-10-29: "in case players dont like the hide"; leather::Style).
     {"Hold menu", "The tabbed menu held in your left hand, on a hide (Leather) or alone (Menu only); Off: in front of you", L"interactions",L"leather_menu",1,0,2,1},
     // Loot beams (vr/loot_beam_scan.cpp): which rarities get a beam on the floor; all Off, none
     // (owner 2026-10-31: "a VR setting that acts as a filter for what rarities to show, or can
-    // be turned off altogether"). VR Settings > Interface > Loot beams: its brightness slider, and
+    // be turned off altogether"). VR Settings > Interface > Labels > Loot beams: its brightness slider, and
     // its Filter card of the four (owner 2026-11-01: a slider "so players can decrease the
     // current vibrancy of the beam", 10% to 100%; 100% the beam as first tuned).
     {"Unique beams", "A gold beam over unique items lying near you", L"loot",L"beams_unique",1,0,1,1},
@@ -175,7 +178,7 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"Loot beam brightness", "How bright the loot beams and their floor glow are; 100% is full", L"loot",L"beams_brightness",100,10,100,10},
     // Dungeon torchlight (owner 2026-11-01: "this should be a setting"): the game's own torches, braziers and lit
     // objects light the dungeon round them (vrcam worldobj::Gather, the shader's game lights); beside Dungeon
-    // ceilings (Performance is full). Off by default since 0.142: finding them reads the game's memory every 1.5 s
+    // ceilings. Off by default since 0.142: finding them reads the game's memory every 1.5 s
     // (VR dropouts on a weak PC).
     {"Dungeon torchlight", "The game's own torches light the dungeon around them; finding them costs CPU", L"ceiling",L"torches",0,0,1,1},
     {"Arcane Decay", "Spectral peripheral warning when mana is depleted", L"hud",L"arcane_decay",1,0,1,1},
@@ -195,7 +198,7 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"V glyph", "The skill a drawn V casts", L"glyphs",L"v",-1,-1,4095,1},
     {"Star glyph", "The skill a drawn star casts", L"glyphs",L"star",-1,-1,4095,1},
     {"Wave glyph", "The skill a drawn wave casts", L"glyphs",L"wave",-1,-1,4095,1},
-    // Loot pick (loot_aim.h): 0 Off, A takes the game's nearest item; 1 On, the item you point at. VR Settings > Interface.
+    // Loot pick (loot_aim.h): 0 Off, A takes the game's nearest item; 1 On, the item you point at. VR Settings > Interface > Labels.
     // On by default (owner 2026-11-01, after headset play: "let's make it so it is on by default").
     {"Loot pick", "A picks up the item you point at, not the nearest", L"interactions",L"loot_pick",1,0,1,1},
 }};
@@ -298,7 +301,7 @@ inline constexpr const char* DeferWarning="Each frame waits for the GPU: about h
 // Settings.json (Saved Games\Diablo II Resurrected, written when its options
 // close): Vertical Sync holds each frame to the monitor's refresh, and
 // anti-aliasing other than FXAA ("Anti Aliasing": 1) blurs (TAA builds each
-// frame from the ones before it) or costs more. The Performance page warns about
+// frame from the ones before it) or costs more. The readout warns about
 // each; a key the file lacks is not warned about. It also shows the options
 // that set how much the game draws (-1: not in the file), beside the frame
 // times they change.
@@ -333,7 +336,7 @@ inline GameVideo ParseGameVideo(std::string_view json) {
     game.resolutionScale=GameSetting(json,"Resolution Scale");game.dlss=GameSetting(json,"NVIDIA DLSS");
     return game;
 }
-// The game's options above as one line for the Performance page; empty when the file
+// The game's options above as one line for the readout; empty when the file
 // has none of them. The numbers are the game's own, 0 its lowest.
 inline std::string GameVideoLine(const GameVideo& g) {
     std::string line;
@@ -347,7 +350,7 @@ inline std::string GameVideoLine(const GameVideo& g) {
     if(g.dlss>=0)line+=std::string(line.empty()?"":" \xc2\xb7 ")+(g.dlss>0?"DLSS on":"DLSS off");
     return line.empty()?line:"Game: "+line;
 }
-// What the Performance page reports of the last second's frames, as the render
+// What the readout reports of the last second's frames, as the render
 // thread measured them: the game's update between frames, the wait for the
 // headset (xrWaitFrame), the game's drawing (one eye a frame by turns, both
 // with Both eyes) and the mod's own work around it (input, copies, submit).
@@ -401,9 +404,12 @@ inline const char* GameVideoWarning(GameVideo game) {
            game.vsync?"Game Options > Video: turn Vertical Sync off":
            game.antiAliasing?"Game Options > Video: set Anti-Aliasing to FXAA":nullptr;
 }
+// Frame generation's own rows: they run with Both eyes only (frame_generation.h).
+constexpr bool FrameGenRow(Key key){return key==FrameGeneration||key==FrameGenPreset||key==FrameGenScale;}
 // Strength only applies while foveated rendering is selected; Off greys it out.
 inline bool RowEnabled(const Values& values,Key key){
     if(key==DeferGpuWait)return DeferOffered(values);   // the button only turns it on
+    if(FrameGenRow(key))return values[StereoRendering]<.5f;
     if(key==AimHighlights||HighlightKey(key))return values[TargetHighlight]>0;   // only while the monster outline shows
     if(key==LandingCircles)return values[GroundAim]>.5f;   // only while the mod places ground skills
     if(key==FogDistance)return values[Fog]>.5f;   // only while the added fog is on
@@ -441,7 +447,8 @@ inline bool RowForClass(Key key,const Context& c){
     }
 }
 // A row that cannot apply is left out rather than grayed: one that only
-// matters with another row's choice, or for another class or weapon.
+// matters with another row's choice, or for another class or weapon. Frame
+// generation's are the exception: Frames grays them and says why (RowEnabled).
 // Each hand's color has its own row (HighlightLeft, HighlightRight).
 inline bool RowShown(Key key,const Values& v,const Context& c){
     if(!RowForClass(key,c))return false;
@@ -457,10 +464,8 @@ inline bool RowShown(Key key,const Values& v,const Context& c){
         case CompanionTactical:return v[CompanionAi]>.5f;
         case FogDistance:return v[Fog]>.5f;   // beside Distance fog while the fog is on (main greyed it; RowEnabled)
         case CeilingTorches:return v[Ceiling]>.5f;   // beside Dungeon ceilings while they are on (a greyed half has no room for its lock)
-        // Frame generation runs with Both eyes only (frame_generation.h): By turns leaves its rows out,
-        // with its status line (owner, 2026-10-25), and NVIDIA's rows on More with them.
-        case FrameGeneration:return v[StereoRendering]<.5f;
-        case FrameGenPreset:case FrameGenScale:return v[StereoRendering]<.5f&&framegen::Read(v[FrameGeneration],0,0).mode==framegen::Mode::Nvidia;   // with its scale
+        // NVIDIA's rows follow the NVIDIA mode alone: By turns grays them with Frame generation (RowEnabled).
+        case FrameGenPreset:case FrameGenScale:return framegen::Read(v[FrameGeneration],0,0).mode==framegen::Mode::Nvidia;
         default:return true;
     }
 }
@@ -495,9 +500,11 @@ inline float LockStep(float value,int delta,const Context& c){
 //   Card         inside the help card but on none of its buttons: swallows the press
 //   Popover      index Key: open its list (a named list too long for chips) on the press's release
 //   PopoverClose the dimmed panel around an open popover: close it without a change (the press goes no further)
+//   OpenGroup    index content::Group: a rail group's row; opens the page last opened in that group (its
+//                first when fresh); the group of the page shown: nothing
 enum class Kind { None, Change, Apply, Close, Recenter, Calibrate, TestHaptics, NotesPage,
                   Open, Set, Undo, Default, Preset, ResetPage, UndoReset, ConfirmClose, KeepEditing, ApplyClose, Card,
-                  Popover, PopoverClose };
+                  Popover, PopoverClose, OpenGroup };
 // What's new pages its release lines (2026-10-23: a long list since the last
 // release): NotesPerPage a page, at most NotesMaxLines (release_notes.py
 // MAX_LINES). Previous / Next and the page number sit under the lines, shown
@@ -524,7 +531,8 @@ public:
     uint64_t undoResetAt=0;         // when Reset page was pressed: Undo reset ignores presses for UndoResetGuardMs
     Values beforeReset{};           // the draft from before Reset page, for Undo reset
     ChangeMask resetKeys=0;         // the rows Reset page changed (Undo reset puts back only these)
-    View lastPage=View::Body;       // the settings page Guide / What's new return to when pressed again
+    View lastPage=View::Combat;     // the settings page Guide / What's new return to when pressed again
+    std::array<View,MaxRailGroups> groupPage{};   // per rail group (content::Group): the page last opened there, which its row opens; Presets (in no group): none yet
     int focusKey=-1;                // Open's delta: the Key the card should point at on arrival (-1: none); the pointer layer reads and clears it
     int pickedPreset=-1;            // the preset last pressed (content::PresetSpecs index), for "Edited" on Presets
     bool closeWhenSaved=false;      // Apply and close: close once this save lands as Saved
@@ -551,14 +559,15 @@ public:
     // Feel it: on the Vibration view.
     bool CanTestHaptics(int category)const{return open&&ready&&!Busy()&&view==View::Vibration&&category>=0&&category<haptics::CategoryCount;}
     // The panel reopens on the view, What's new page and More page it was closed on, however it was closed (Right B too),
-    // in memory only (menus-remember, #352). StartOver (a new game) goes back to the Guide, page 1. A kept view with
-    // nothing to show any more (More once NVIDIA is no longer chosen) falls back: layout::SettleView.
+    // and each rail group keeps its last page, in memory only (menus-remember, #352). StartOver (a new game) goes back
+    // to the Guide, page 1, and every group to its first page. A kept view with
+    // nothing to show any more (More once it has no rows) falls back: layout::SettleView.
     void Open(const Snapshot& s){
         open=true;base=draft=s.values;ready=s.ready;offlineDifficultyAvailable=s.offlineDifficultyAvailable;result=s.result;serial=std::max(serial,s.sequence);pending=s.result==Result::Saving?s.sequence:0;
         confirmClose=false;confirmAt=0;undoResetUntil=undoResetAt=0;beforeReset={};resetKeys=0;focusKey=-1;pickedPreset=-1;closeWhenSaved=false;popoverKey=-1;popoverAt=0;
         ++revision;
     }
-    void StartOver(){view=View::Guide;lastPage=View::Body;notesPage=0;morePage=0;++revision;}
+    void StartOver(){view=View::Guide;lastPage=View::Combat;groupPage={};notesPage=0;morePage=0;++revision;}
     void Close(){open=false;confirmClose=false;undoResetUntil=0;closeWhenSaved=false;popoverKey=-1;++revision;}
     void Observe(const Snapshot& s){
         if(!open)return;
