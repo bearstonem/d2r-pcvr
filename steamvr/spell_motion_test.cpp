@@ -69,8 +69,9 @@ int main() {
         {Sim s(m.motion);s.Trigger(true);s.Hold(.3f);s.Trigger(false);
          Check(s.casts==0&&s.drops==1&&s.lastDrop.find("let go")!=std::string::npos,(label+"let go without the motion: dropped, logged").c_str());}
         {Sim s(m.motion);s.in.active=false;s.Trigger(true);m.perform(s);Check(s.casts==0,(label+"inactive (a wheel, a menu, a bottle) casts nothing").c_str());}
-        // Every other motion, done well, is not this spell's.
-        for(const auto& other:all)if(other.motion!=m.motion) {
+        // Every other motion, done well, is not this spell's. Only the readied spell's motion is
+        // watched, so one overlap is allowed: Static Field's snap apart is as wide as a Nova fling.
+        for(const auto& other:all)if(other.motion!=m.motion&&!(m.motion==Motion::FlingOut&&other.motion==Motion::RubSnap)) {
             Sim s(m.motion);s.Trigger(true);other.perform(s);
             Check(s.casts==0,(label+"another spell's motion ("+other.name+") casts nothing").c_str());
         }
@@ -83,12 +84,21 @@ int main() {
      Check(s.casts==0,"Nova: arms flung out from the sides, never together first, casts nothing");}
     {Sim s(Motion::PushDown);s.Trigger(true);s.Move({.15f,-.35f,-.30f},{-.15f,-.35f,-.30f},.35f);s.MoveR({.15f,-.78f,-.30f},.3f);
      Check(s.casts==0,"Frost Nova: one hand pushed down casts nothing");}
-    {Sim s(Motion::PushDown);s.Trigger(true);s.Move({.15f,-.35f,-.30f},{-.15f,-.35f,-.30f},.35f);s.Move({.15f,-.78f,-.30f},{-.15f,-.78f,-.30f},1.6f);
+    {Sim s(Motion::PushDown);s.Trigger(true);s.Move({.15f,-.35f,-.30f},{-.15f,-.35f,-.30f},.35f);s.Move({.15f,-.78f,-.30f},{-.15f,-.78f,-.30f},2.5f);
      Check(s.casts==0,"Frost Nova: hands lowered slowly cast nothing");}
+    // The owner's first session (2026-11-03): what was missed then casts now.
+    {Sim s(Motion::FlingOut);s.Trigger(true);s.Move({.08f,-.40f,-.30f},{-.08f,-.40f,-.30f},.35f);s.Move({.40f,-.35f,-.20f},{-.40f,-.35f,-.20f},.25f);
+     Check(s.casts==1,"Nova: a fling 80 cm wide casts (78 and 89 cm were missed)");}
+    {Sim s(Motion::PushDown);s.Trigger(true);s.Move({.15f,-.36f,-.25f},{-.15f,-.36f,-.25f},.35f);s.Move({.30f,-.62f,.12f},{-.30f,-.62f,.12f},.3f);
+     Check(s.casts==1,"Frost Nova: pushed down from the chest to the sides casts");}
+    {Sim s(Motion::CrossGuard);s.Trigger(true);s.Move({-.07f,-.08f,-.08f},{.07f,-.08f,-.08f},.4f);s.Hold(.5f);
+     Check(s.casts==1,"Energy Shield: the guard held 14 cm apart close to the face casts");}
     {Sim s(Motion::RubSnap);s.Trigger(true);s.Move({.045f,-.45f,-.30f},{-.045f,-.45f,-.30f},.35f);s.Hold(.4f);s.Move({.38f,-.45f,-.25f},{-.38f,-.45f,-.25f},.15f);
      Check(s.casts==0,"Static Field: palms together, no rubbing, then apart, casts nothing");}
     {Sim s(Motion::CrossGuard);s.Trigger(true);s.Move({.10f,-.12f,-.30f},{-.10f,-.12f,-.30f},.4f);s.Hold(.6f);
-     Check(s.casts==0,"Energy Shield: hands up in front, not crossed, cast nothing");}
+     Check(s.casts==1,"Energy Shield: hands up before the face, not crossed, casts too");}
+    {Sim s(Motion::CrossGuard);s.Trigger(true);s.Move({.30f,-.12f,-.30f},{-.30f,-.12f,-.30f},.4f);s.Hold(.6f);
+     Check(s.casts==0,"Energy Shield: hands 60 cm apart at the face cast nothing");}
     {Sim s(Motion::CrossGuard);s.Trigger(true);s.Move({-.10f,-.12f,-.30f},{.10f,-.12f,-.30f},.4f);s.Hold(.2f);s.Move(RestR,RestL,.4f);
      Check(s.casts==0,"Energy Shield: crossed too briefly casts nothing");}
     {Sim s(Motion::ArmUp);s.Trigger(true);s.MoveR({.15f,.08f,-.25f},.4f);s.Hold(.6f);
@@ -104,6 +114,17 @@ int main() {
      Check(s.casts==0,"made inactive while held: the trigger must be pressed again");s.Trigger(false);s.Trigger(true);Nova(s);Check(s.casts==1,"pressed again, it casts");}
     {Sim s(Motion::FlingOut);s.Trigger(true);s.Move({.08f,-.40f,-.30f},{-.08f,-.40f,-.30f},.35f);s.in.session=4;s.Move({.62f,-.35f,-.15f},{-.62f,-.35f,-.15f},.25f);
      Check(s.casts==0,"a new session forgets the hold");}
+    // Free: a spell on a hand slot, its motion alone, no trigger.
+    for(const auto& m:all) {
+        std::string label=std::string(m.name)+" (on a slot): ";
+        Sim s(m.motion);s.in.free=true;m.perform(s);
+        Check(s.casts==1&&s.began==0&&s.drops==0,(label+"the motion alone casts, nothing to let go").c_str());
+        s.Move(RestR,RestL,.5f);s.Hold(.8f);m.perform(s);Check(s.casts==2,(label+"and again").c_str());
+    }
+    {Sim s(Motion::FlingOut);s.in.free=true;s.in.active=false;Nova(s);Check(s.casts==0,"free: inactive (a trigger squeezed, a bottle) casts nothing");
+     s.in.active=true;s.Hold(.2f);Nova(s);Check(s.casts==1,"free: active again, no press needed");}
+    {Sim s(Motion::PushDown);s.in.free=true;s.Move({.15f,-.35f,-.30f},{-.15f,-.35f,-.30f},.4f);s.Move(RestR,RestL,1.5f);s.Hold(1.f);
+     Check(s.casts==0,"free: arms lowered to rest at an easy pace cast no Frost Nova");}
     std::puts("spell-motion-test: ok");
     return 0;
 }

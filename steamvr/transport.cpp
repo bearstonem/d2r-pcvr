@@ -263,6 +263,10 @@ int spellReady=-1;
 float spellTrigger=0;
 spellmotion::Engine spellMotion;
 double spellCastAt=-1;
+// Spells on a hand slot cast by their motion alone (spell_motion.h, free): a watcher per motion, and
+// the last such cast (every watcher waits a second after one).
+std::array<spellmotion::Engine,9> spellFree;
+double spellFreeAt=-1;
 // The wheel's glyph settings ([glyphs]) are saved here, one save at a time; until it lands the wheel
 // and the draw button follow the values asked for. The engine's request is answered as
 // interactionstate answers its own.
@@ -4293,9 +4297,11 @@ void Input() {
             if(watch.began)MotionPulse(0,haptics::Category::Interaction,.15f,15000000);
             const auto known=interaction::GlyphSkill(quickSnapshot,spellReady);
             if(watch.dropped) {
-                char line[320];std::snprintf(line,sizeof line,
-                    "Frame spell motion: %s not cast: %s after %.1f s (hands apart %.0f-%.0f cm, highest %.0f / lowest %.0f cm from the eyes, fastest %.1f m/s)",
-                    known.name,watch.dropped,watch.seconds,watch.apartMin*100,watch.apartMax*100,watch.top*100,watch.low*100,watch.fastest);
+                char line[480];std::snprintf(line,sizeof line,
+                    "Frame spell motion: %s not cast: %s after %.1f s (hands apart %.0f-%.0f cm, highest %.0f / lowest %.0f cm from the eyes, fastest %.1f m/s; "
+                    "biggest fall in 0.5 s: right %.0f, left %.0f cm; last at right %+.0f,%+.0f,%+.0f left %+.0f,%+.0f,%+.0f cm right,up,forward of the eyes)",
+                    known.name,watch.dropped,watch.seconds,watch.apartMin*100,watch.apartMax*100,watch.top*100,watch.low*100,watch.fastest,
+                    watch.fall[0]*100,watch.fall[1]*100,watch.end[0].x*100,watch.end[0].y*100,-watch.end[0].z*100,watch.end[1].x*100,watch.end[1].y*100,-watch.end[1].z*100);
                 Say(line);
             }
             if(watch.cast&&spellReady>=0) {
@@ -4319,6 +4325,54 @@ void Input() {
                     std::snprintf(line,sizeof line,"Frame spell motion: %s cast by its motion after %.2f s held, via %s",known.name,watch.seconds,
                         plan.how==glyphcast::How::Slot?"its hand slot":plan.how==glyphcast::How::Record?"the right trigger's record":"the right trigger's record, put on it first");
                     MotionPulse(0,haptics::Category::Spell,.7f,70000000);
+                }
+                Say(line);
+            }
+        }
+        // A spell already on a hand slot (either hand's buttons) casts by its motion alone, the triggers
+        // free, as the Paladin's and Druid's gestures (spell_motion.h, free). Every motion with a slot is
+        // watched; the first to complete casts by pressing that slot (Static Field before Nova: its snap
+        // apart is as wide as a fling), then every watcher starts over a second later.
+        {
+            constexpr spellmotion::Motion order[9]={spellmotion::Motion::RubSnap,spellmotion::Motion::FlingOut,spellmotion::Motion::PushDown,
+                spellmotion::Motion::CrossGuard,spellmotion::Motion::ArmUp,spellmotion::Motion::MatchStrike,spellmotion::Motion::ForearmSweep,
+                spellmotion::Motion::Shake,spellmotion::Motion::Hug};
+            int slotOf[10];for(auto& s:slotOf)s=-1;
+            for(int i=0;i<skills::Count&&quickFresh;++i) {
+                const auto& k=quickSnapshot.skills[i];
+                const int m=int(spellmotion::For(k.id));
+                if(k.known&&k.owner==-1&&m>0&&m<10&&slotOf[m]<0)slotOf[m]=i;
+            }
+            const bool free=gestureSettings[settings::SkillGestures]>.5f&&motionControls.load()&&gameplayChain&&motionInput.active&&quickFresh&&
+                !motionOutput.block&&!motionInput.quickCast&&!motionOutput.bowDrawing&&!panelMode&&!spatialMode&&!settingsOwned&&
+                !interactionOutput.wheel&&!interactionOutput.settings&&interactionOutput.bottleHand<0&&!glyphStroke.Drawing()&&
+                interactionOutput.owner[0]==interaction::Owner::Combat&&interactionOutput.owner[1]==interaction::Owner::Combat&&
+                !bloodOutput.block[0]&&!bloodOutput.block[1]&&spellTrigger<=.3f&&handInput.trigger[1]<=.3f&&!spellMotion.Watching()&&
+                (spellFreeAt<0||now-spellFreeAt>=1.);
+            int done=-1;
+            for(const auto motion:order) {
+                const int m=int(motion);
+                spellmotion::Input freeIn;
+                freeIn.time=now;freeIn.session=interactionInput.session;freeIn.epoch=interactionInput.epoch;
+                freeIn.free=true;freeIn.motion=motion;freeIn.active=free&&slotOf[m]>=0;
+                freeIn.head=interactionInput.head.p;freeIn.headRotation=interactionInput.head.q;
+                for(int h=0;h<2;++h){freeIn.hand[h]=interactionInput.hand[h].p;freeIn.tracked[h]=interactionInput.tracked[h];}
+                if(spellFree[size_t(m-1)].Step(freeIn).cast&&done<0)done=m;
+            }
+            if(done>0) {
+                for(auto& e:spellFree)e.Reset();
+                spellFreeAt=now;
+                const int slot=slotOf[done];
+                const auto& k=quickSnapshot.skills[slot];
+                const char* refused=!k.available?"the skill is unavailable now (mana, or a cooldown)":glyphCast.Busy()?"the last cast is still pressing":nullptr;
+                char line[200];
+                if(refused) {
+                    std::snprintf(line,sizeof line,"Frame spell motion: %s's motion done (on slot %d), not cast: %s",k.name,slot,refused);
+                    MotionPulse(0,haptics::Category::Interaction,.25f,100000000);
+                } else {
+                    glyphCast.Begin({glyphcast::How::Slot,slot},k.id,-1,now);
+                    std::snprintf(line,sizeof line,"Frame spell motion: %s cast by its motion alone, via its slot %d",k.name,slot);
+                    MotionPulse(0,haptics::Category::Spell,.7f,70000000);MotionPulse(1,haptics::Category::Spell,.7f,70000000);
                 }
                 Say(line);
             }
@@ -6937,7 +6991,7 @@ void Shutdown(bool preserveResolution) {
     bloodScreen.Reset();bloodOutput={};bloodShown=0;bloodPaintKey=bloodRequestedKey=~0ull;bloodPaintRequest=0;bloodPaintAt=0;bloodAtlasPending=bloodImageReady=false;
     arcaneController.Reset();arcaneOutput={};arcanePaintKey=~0ull;arcanePaintSession=0;arcanePaintAt=0;arcaneAtlasPending=arcaneImageReady=false;
     glyphStroke={};glyphCast={};glyphPaintKey=glyphShownStroke=0;glyphBeganAt=0;glyphEndedAt=-1;glyphPaintAt=0;glyphLook=glyphtrail::Look::Drawing;glyphPressRt=glyphTrailShown=false;glyphAtlasPending=glyphImageReady=false;
-    spellReady=-1;spellTrigger=0;spellMotion.Reset();spellCastAt=-1;
+    spellReady=-1;spellTrigger=0;spellMotion.Reset();spellCastAt=-1;for(auto& e:spellFree)e.Reset();spellFreeAt=-1;
     bowLaserHue=-1;bowLaserAtlasPending=bowLaserImageReady=false;
     noticeWatch={};noticeCards.Clear();noticeCard={};noticePaintRequest=noticeRequestedSequence=noticePaintedSequence=0;noticeAtlasPending=noticeImageReady=false;
     heartStream.Stop();heartPlaying=false;heartLevel.Reset();heartAt=0;heartHush.Reset();heartHealth=-1;

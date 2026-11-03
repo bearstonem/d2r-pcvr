@@ -2305,7 +2305,11 @@ assignment, read back) and the press follows the read-back, or nothing is cast a
 gives a hand button that record).
 
 Readied spells (prototype, `steamvr/spell_motion.h`; owner, 2026-11-03: draw the glyph to
-activate the spell, then do its motion with the trigger held). With **Weapon skill gestures**
+activate the spell, then do its motion with the trigger held). A spell already on one of the ten
+hand slots needs no glyph: its motion alone casts it, both triggers free, as the Paladin's and
+Druid's gestures (one watcher per motion with a slot; the first to complete presses that slot,
+Static Field before Nova, then all of them wait a second; not while a readied spell's trigger is
+held, a bottle, bow, wheel or menu has the hands). With **Weapon skill gestures**
 on, a glyph whose skill has a motion readies it instead of casting it: the right hand glows
 in its element (Energy Shield as lightning) and the right trigger is the spell's until another
 glyph readies one, or a tap of Draw glyph (a stroke under 0.4 s) clears it. Readying puts the
@@ -2314,14 +2318,18 @@ spell's motion is watched, in the head's frame (its yaw); done, the spell is cas
 casts, and still held, the motion again casts again (0.6 s apart). The trigger is held back from
 the game and from the trigger's own skill meanwhile. Not with Draw glyph on the right trigger.
 The motions: Nova, the hands together then flung out wide; Frost Nova, both hands pushed down
-past the waist; Static Field, the palms rubbed together then snapped apart; Energy Shield, the
-forearms crossed in front of the face, held; Thunder Storm, one arm raised above the head,
+past the chest; Static Field, the palms rubbed together then snapped apart; Energy Shield, both
+hands up at the face within 35 cm (the forearms crossed or not), held; Thunder Storm, one arm raised above the head,
 held; Blaze, one hand struck down the thigh; Frozen Armor, the left hand from the right hand up
 to the right shoulder; Shiver Armor, both fists shaken; Chilling Armor, a hug, held. Thresholds
 in `spellmotion::Tuning`; `spell-motion-test` performs each at three headings and checks that
 no other spell's motion, the motion without the trigger, or a slow version casts it. Logs:
 `Frame spell motion:` (each cast, and each hold let go without the motion with how far apart
-the hands went, the highest and lowest hand and the fastest, for tuning).
+the hands went, the highest and lowest hand, the fastest, each hand's biggest fall in 0.5 s and
+where the hands ended, for tuning). Tuned on the owner's first session (2026-11-03: Nova 28 of
+36, Frost Nova 27 of 42, Static Field 16 of 20, Energy Shield 0 of 10): Nova's fling 75 cm wide
+(was 90), Frost Nova's push 20 cm (was 25) ending 40 cm below the eyes (was 50) and allowed out
+to the sides, Energy Shield's hands no longer crossed and no longer 15 cm out from the face.
 
 Trail (`steamvr/glyph_trail.h`): a 512 x 512 straight-alpha picture, 1 m a side, in the
 shared atlas (`panelatlas::Glyph`, beside VR Settings), shown as a room-space quad in the

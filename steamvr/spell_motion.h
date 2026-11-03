@@ -13,6 +13,11 @@
 // presses the skill as a glyph does, glyph_cast.h), so mana, cast rate and the spell stay native.
 // Still held, the motion again casts again.
 //
+// Free (owner, 2026-11-03: "any spell we already have added to either hand's spell wheels should be
+// accessible to us by simply doing the motion of it"): a spell on a hand slot casts by its motion
+// alone, the triggers free, as the Paladin's and Druid's gestures; the transport runs one watcher per
+// motion and takes the first to complete.
+//
 // Prototype: the Sorceress's self-casts and bursts, which need no target. Head-local frame as
 // holycross (+X right, +Y up from the eyes, forward -Z, the head's yaw only); hand 0 is the right.
 // Value-only: steamvr/spell_motion_test.cpp.
@@ -48,17 +53,21 @@ inline const char* Cue(Motion m) {
     }
 }
 struct Tuning {
+    // Tuned on the owner's first session (2026-11-03): Nova flings that reached 78 and 89 cm, Frost
+    // Nova pushes begun at the chest and ending at the sides, and an Energy Shield held 12-22 cm apart
+    // at the face that never cast.
     float together=.30f;      // m: Nova starts with the hands this close...
-    float flingApart=.90f;    // ...and ends with them this far apart,
-    float flingSide=.30f;     // each this far out on its own side,
+    float flingApart=.75f;    // ...and ends with them this far apart,
+    float flingSide=.25f;     // each this far out on its own side,
     float flingWindow=.8f;    // s after they were together
-    float pushDrop=.25f;      // m: Frost Nova: both hands this much lower than
-    float pushWindow=.45f;    // s ago (a push, not lowering the arms),
-    float pushBelow=-.50f;    // m: ending this far below the eyes
+    float pushDrop=.20f;      // m: Frost Nova: both hands this much lower than
+    float pushWindow=.5f;     // s ago (a push, not lowering the arms),
+    float pushBelow=-.40f;    // m: ending this far below the eyes, not behind the back
     float rubClose=.18f;      // m: Static Field: controllers this close are palms together;
     float rubPath=.15f;       // m of their rubbing charges it,
     float snapApart=.45f;     // m: then the hands this far apart
     float snapWindow=.5f;     // s after they parted
+    float guardApart=.35f;    // m: Energy Shield: both hands up at the face, this close (crossed or not)
     float holdSeconds=.35f;   // a held pose (Energy Shield, Thunder Storm, Chilling Armor)
     float stillSpeed=.8f;     // m/s: a held pose moves slower than this
     float raiseAbove=.22f;    // m above the eyes: Thunder Storm's raised hand
@@ -79,6 +88,7 @@ struct Input {
     uint64_t session=0,epoch=0;
     bool active=false;            // a spell with a motion readied, the hands free for it (no wheel, menu, bottle)
     bool held=false;              // the right trigger
+    bool free=false;              // no trigger: watched whenever active, and never dropped (a spell on a slot)
     Motion motion=Motion::None;
     math::Vec head{};math::Quat headRotation{0,0,0,1};
     math::Vec hand[2]{};          // world frame; 0 right, 1 left
@@ -90,8 +100,10 @@ struct Output {
     const char* dropped=nullptr;  // let go, or stopped, without it (for the log)
     float seconds=0;              // held so far
     // Over the hold, for tuning: the hands least and most apart, the highest and lowest hand from the
-    // eyes, the fastest hand (m, m/s).
-    float apartMin=0,apartMax=0,top=0,low=0,fastest=0;
+    // eyes, the fastest hand, each hand's biggest fall within pushWindow, and where the hands were last
+    // (head-local: x right, y up, z back) (m, m/s).
+    float apartMin=0,apartMax=0,top=0,low=0,fastest=0,fall[2]{};
+    math::Vec end[2]{};
 };
 class Engine {
     struct Sample {double t=0;math::Vec l[2]{};};
@@ -140,7 +152,7 @@ class Engine {
             return false;
         }
         case Motion::PushDown: {
-            if(n.l[0].y>t.pushBelow||n.l[1].y>t.pushBelow||Forward(n.l[0])<-.05f||Forward(n.l[1])<-.05f)return false;
+            if(n.l[0].y>t.pushBelow||n.l[1].y>t.pushBelow||Forward(n.l[0])<-.25f||Forward(n.l[1])<-.25f)return false;
             for(const auto& s:samples)
                 if(n.t-s.t<=t.pushWindow&&s.l[0].y-n.l[0].y>=t.pushDrop&&s.l[1].y-n.l[1].y>=t.pushDrop)return true;
             return false;
@@ -157,8 +169,9 @@ class Engine {
             return rub>=t.rubPath&&parted>=0&&apart>=t.snapApart;
         }
         case Motion::CrossGuard: {
-            bool pose=n.l[0].x<n.l[1].x;   // crossed: the right hand left of the left
-            for(int h=0;h<2;++h){const auto& l=n.l[h];pose=pose&&l.y>=-.30f&&l.y<=.15f&&Forward(l)>=.15f&&Forward(l)<=.60f&&std::fabs(l.x)<=.25f&&Still(h);}
+            // Crossed or not: the owner's guard held the controllers 12-22 cm apart at the face.
+            bool pose=Apart(n)<=t.guardApart;
+            for(int h=0;h<2;++h){const auto& l=n.l[h];pose=pose&&l.y>=-.30f&&l.y<=.20f&&Forward(l)>=0&&Forward(l)<=.60f&&std::fabs(l.x)<=.30f&&Still(h);}
             return Held(pose,n.t);
         }
         case Motion::ArmUp: {
@@ -224,18 +237,18 @@ public:
         const bool pressed=in.held&&!wasHeld;
         wasHeld=in.held;
         const bool ready=in.active&&in.motion!=Motion::None&&in.tracked[0]&&in.tracked[1]&&Finite(in.hand[0])&&Finite(in.hand[1]);
-        if(watching&&(!in.held||!ready||!continuous)) {
-            if(!casts) {   // a hold that cast at least once was not dropped
+        if(watching&&(!(in.free||in.held)||!ready||!continuous)) {
+            if(!casts&&!in.free) {   // a hold that cast at least once was not dropped
                 out=stats;out.seconds=float(in.time-since);
                 out.dropped=!in.held?"let go without the motion":!continuous?"frame gap":"hands busy, untracked or input inactive";
             }
             Stop();return out;
         }
         if(!watching) {
-            if(!pressed||!ready)return out;   // only a fresh press watches: a trigger held as the spell was readied does not
+            if(!(in.free||pressed)||!ready)return out;   // only a fresh press watches: a trigger held as the spell was readied does not
             watching=true;since=in.time;casts=0;Clear();
             stats={};stats.apartMin=1e9f;stats.top=-1e9f;stats.low=1e9f;
-            out.began=true;
+            out.began=!in.free;
         }
         const auto inverse=math::Conjugate(math::Yaw(math::Heading(in.headRotation)));
         Sample s;s.t=in.time;
@@ -244,12 +257,15 @@ public:
         samples.erase(samples.begin(),std::find_if(samples.begin(),samples.end(),[&](const Sample& x){return in.time-x.t<=tuning.history;}));
         const float apart=Apart(s);
         stats.apartMin=std::min(stats.apartMin,apart);stats.apartMax=std::max(stats.apartMax,apart);
-        for(int h=0;h<2;++h){stats.top=std::max(stats.top,s.l[h].y);stats.low=std::min(stats.low,s.l[h].y);stats.fastest=std::max(stats.fastest,Len(Velocity(h)));}
+        for(int h=0;h<2;++h) {
+            stats.top=std::max(stats.top,s.l[h].y);stats.low=std::min(stats.low,s.l[h].y);stats.fastest=std::max(stats.fastest,Len(Velocity(h)));
+            for(const auto& x:samples)if(in.time-x.t<=tuning.pushWindow)stats.fall[h]=std::max(stats.fall[h],x.l[h].y-s.l[h].y);
+            stats.end[h]=s.l[h];
+        }
         out.seconds=float(in.time-since);
         if(castAt>=0&&in.time-castAt<tuning.cooldown)return out;
         if(Done(in.motion)) {
-            out.cast=true;
-            out.apartMin=stats.apartMin;out.apartMax=stats.apartMax;out.top=stats.top;out.low=stats.low;out.fastest=stats.fastest;
+            const auto seconds=out.seconds;out=stats;out.seconds=seconds;out.cast=true;
             castAt=in.time;++casts;Clear();   // the motion again, from its start, casts again
         }
         return out;
