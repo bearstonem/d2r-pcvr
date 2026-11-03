@@ -265,11 +265,12 @@ spellmotion::Engine spellMotion;
 double spellCastAt=-1;
 // Spells on a hand slot cast by their motion alone (spell_motion.h, free): a watcher per motion, and
 // the last such cast (every watcher waits a second after one).
-std::array<spellmotion::Engine,9> spellFree;
+std::array<spellmotion::Engine,spellmotion::MotionCount> spellFree;
 double spellFreeAt=-1;
 double spellGripSince=-1;   // a grip held for them (-1 none), and whether that hold cast
 bool spellGripCast=false;
 std::atomic<bool> spellGripsArmed{false};   // a motion spell on a slot, Weapon skill gestures on (vrcam: the staff's left grip)
+bool spellGripDown[2]{};
 // The wheel's glyph settings ([glyphs]) are saved here, one save at a time; until it lands the wheel
 // and the draw button follow the values asked for. The engine's request is answered as
 // interactionstate answers its own.
@@ -3492,6 +3493,7 @@ void Input() {
     }
     if(!interactionPaintValid||interactionPaintContext!=interaction::Context(interactionInput.snapshot,interactionOutput,
         interaction::Fresh(interactionInput.snapshot,interactionInput.session,interactionInput.at),controllerLabels))interactionInput.hover=-1;
+    interactionInput.spellGrips=spellGripsArmed.load();   // both grips cast spells: a grip grabs only alone
     for(int i=0;i<2;++i){interactionInput.tracked[i]=motionInput.tracked[i];interactionInput.grip[i]=motionInput.grip[i];
         interactionInput.hand[i]={motionInput.hand[i].p,motionInput.hand[i].q};
         interactionInput.handVelocity[i]=handVelocity[i];interactionInput.velocityKnown[i]=handVelocityKnown[i];}
@@ -4338,18 +4340,20 @@ void Input() {
         // that slot (Static Field before Nova: its snap apart is as wide as a fling), then every watcher
         // starts over a second later. A grip pressed at a bottle, holster or shoulder is that grab's.
         {
-            constexpr spellmotion::Motion order[9]={spellmotion::Motion::RubSnap,spellmotion::Motion::FlingOut,spellmotion::Motion::PushDown,
+            constexpr spellmotion::Motion order[spellmotion::MotionCount]={spellmotion::Motion::RubSnap,spellmotion::Motion::FlingOut,spellmotion::Motion::PushDown,
                 spellmotion::Motion::CrossGuard,spellmotion::Motion::ArmUp,spellmotion::Motion::MatchStrike,spellmotion::Motion::ForearmSweep,
-                spellmotion::Motion::Shake,spellmotion::Motion::Hug};
-            int slotOf[10];for(auto& s:slotOf)s=-1;
+                spellmotion::Motion::Shake,spellmotion::Motion::Hug,spellmotion::Motion::Punch};
+            int slotOf[spellmotion::MotionCount+1];for(auto& s:slotOf)s=-1;
             for(int i=0;i<skills::Count&&quickFresh;++i) {
                 const auto& k=quickSnapshot.skills[i];
                 const int m=int(spellmotion::For(k.id));
-                if(k.known&&k.owner==-1&&m>0&&m<10&&slotOf[m]<0)slotOf[m]=i;
+                if(k.known&&k.owner==-1&&m>0&&m<=spellmotion::MotionCount&&slotOf[m]<0)slotOf[m]=i;
             }
-            bool slotted=false;for(int m=1;m<10;++m)slotted=slotted||slotOf[m]>=0;
+            bool slotted=false;for(int m=1;m<=spellmotion::MotionCount;++m)slotted=slotted||slotOf[m]>=0;
             spellGripsArmed.store(slotted&&gestureSettings[settings::SkillGestures]>.5f);
-            const bool gripHeld=motionInput.grip[0]>.6f&&motionInput.grip[1]>.6f;
+            // Held above .6, let go below .35: a squeeze that dips mid-motion keeps the hold.
+            for(int h=0;h<2;++h)spellGripDown[h]=std::isfinite(motionInput.grip[h])&&motionInput.grip[h]>(spellGripDown[h]?.35f:.6f);
+            const bool gripHeld=spellGripDown[0]&&spellGripDown[1];
             const bool free=gripHeld&&slotted&&gestureSettings[settings::SkillGestures]>.5f&&motionControls.load()&&gameplayChain&&motionInput.active&&quickFresh&&
                 !motionOutput.block&&!motionInput.quickCast&&!motionOutput.bowDrawing&&!panelMode&&!spatialMode&&!settingsOwned&&
                 !interactionOutput.wheel&&!interactionOutput.settings&&interactionOutput.bottleHand<0&&!glyphStroke.Drawing()&&
@@ -4363,7 +4367,7 @@ void Input() {
             }
             else if(!free&&spellGripSince>=0) {
                 const double heldFor=now-spellGripSince;spellGripSince=-1;
-                int first=-1;for(int m=1;m<10&&first<0;++m)if(slotOf[m]>=0)first=m;
+                int first=-1;for(int m=1;m<=spellmotion::MotionCount&&first<0;++m)if(slotOf[m]>=0)first=m;
                 if(!gripHeld&&!spellGripCast&&heldFor>=.3&&first>0) {
                     const auto& w=spellFree[size_t(first-1)].Stats();
                     char line[480];std::snprintf(line,sizeof line,
@@ -7017,7 +7021,7 @@ void Shutdown(bool preserveResolution) {
     bloodScreen.Reset();bloodOutput={};bloodShown=0;bloodPaintKey=bloodRequestedKey=~0ull;bloodPaintRequest=0;bloodPaintAt=0;bloodAtlasPending=bloodImageReady=false;
     arcaneController.Reset();arcaneOutput={};arcanePaintKey=~0ull;arcanePaintSession=0;arcanePaintAt=0;arcaneAtlasPending=arcaneImageReady=false;
     glyphStroke={};glyphCast={};glyphPaintKey=glyphShownStroke=0;glyphBeganAt=0;glyphEndedAt=-1;glyphPaintAt=0;glyphLook=glyphtrail::Look::Drawing;glyphPressRt=glyphTrailShown=false;glyphAtlasPending=glyphImageReady=false;
-    spellReady=-1;spellTrigger=0;spellMotion.Reset();spellCastAt=-1;for(auto& e:spellFree)e.Reset();spellFreeAt=-1;spellGripSince=-1;spellGripCast=false;spellGripsArmed.store(false);
+    spellReady=-1;spellTrigger=0;spellMotion.Reset();spellCastAt=-1;for(auto& e:spellFree)e.Reset();spellFreeAt=-1;spellGripSince=-1;spellGripCast=false;spellGripsArmed.store(false);spellGripDown[0]=spellGripDown[1]=false;
     bowLaserHue=-1;bowLaserAtlasPending=bowLaserImageReady=false;
     noticeWatch={};noticeCards.Clear();noticeCard={};noticePaintRequest=noticeRequestedSequence=noticePaintedSequence=0;noticeAtlasPending=noticeImageReady=false;
     heartStream.Stop();heartPlaying=false;heartLevel.Reset();heartAt=0;heartHush.Reset();heartHealth=-1;

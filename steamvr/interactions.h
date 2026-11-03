@@ -9,6 +9,7 @@
 #include "wrist_hud.h"
 #include "hand_vitals.h"
 #include "dev_scenarios.h"
+#include "spell_motion.h"
 #include "navigation_info.h"
 #include "companions.h"
 #include "active_effects.h"
@@ -483,6 +484,7 @@ struct Input {
     Pose head{},hand[2]{};
     Vec handVelocity[2]{}; bool velocityKnown[2]{}; // runtime-reported room-space m/s at the pose time
     float trigger=0,leftTrigger=0,grip[2]{};
+    bool spellGrips=false;   // both grips cast spells (spell_motion.h): a grip grabs only alone (SoloGrips)
     int hover=-1,wheelHand=-1;
     Snapshot snapshot{};
     Reply reply{};
@@ -577,6 +579,7 @@ class Engine {
     }
     shoulder::Gesture shoulderSwap;
     leather::Reach leatherReach;
+    spellmotion::SoloGrips soloGrips;
     vitals::PalmReveal palmReveal;
     std::array<Skill,128> choices{};
     std::array<int,128> choiceIndices{};
@@ -725,7 +728,9 @@ public:
         out.navigationPalm=palm&&vitals::Palm(in.navigationLocation);
         out.navigation=out.navigationPalm||(out.wrist&&vitals::Wrist(in.navigationLocation));
         const bool trigger=in.trigger>(triggerWas?.2f:.55f);
-        const bool grips[2]={in.grip[0]>.6f,in.grip[1]>.6f};
+        // Both grips cast spells: a grip grabs (a bottle, a holster, a shoulder) only alone.
+        if(in.spellGrips)soloGrips.Step(in.time,in.grip);else soloGrips.Reset();
+        const bool grips[2]={in.spellGrips?soloGrips.solo[0]:in.grip[0]>.6f,in.spellGrips?soloGrips.solo[1]:in.grip[1]>.6f};
         const uint64_t now=in.at;
         const bool fresh=Fresh(in.snapshot,in.session,now);
         const double dt=in.time-lastTime;
@@ -793,7 +798,7 @@ public:
         const int dominant=config.dominant==1?1:0;
         shoulder::Input reach;reach.time=in.time;reach.session=in.session;reach.epoch=in.epoch;reach.dominant=dominant;
         reach.active=in.active;reach.tracked=in.tracked[dominant];reach.head=in.head.p;reach.hand=in.hand[dominant].p;reach.heading=body.q;
-        reach.grip=in.grip[dominant];
+        reach.grip=in.spellGrips?(grips[dominant]?1.f:0.f):in.grip[dominant];
         reach.allowed=!wheel&&!in.quickCast&&!in.cancel&&!rearm&&bottle<0&&holster<0&&pending.action==Action::None&&
             fresh&&in.snapshot.equipmentKnown&&(in.snapshot.activeSet==1||in.snapshot.activeSet==2);
         const auto shoulder=shoulderSwap.Step(reach);out.block=out.block||shoulder.block;
@@ -804,7 +809,7 @@ public:
         // left shoulder and grips. With Dominant hand = Left that is the swap's, so off.
         leather::ReachInput sheet;sheet.time=in.time;sheet.session=in.session;sheet.epoch=in.epoch;
         sheet.active=in.active&&in.leatherReach&&dominant==0;sheet.tracked=in.tracked[leather::Hand];
-        sheet.head=in.head.p;sheet.hand=in.hand[leather::Hand].p;sheet.heading=body.q;sheet.grip=in.grip[leather::Hand];
+        sheet.head=in.head.p;sheet.hand=in.hand[leather::Hand].p;sheet.heading=body.q;sheet.grip=in.spellGrips?(grips[leather::Hand]?1.f:0.f):in.grip[leather::Hand];
         sheet.allowed=!wheel&&!in.quickCast&&!in.cancel&&!rearm&&bottle<0&&holster<0&&pending.action==Action::None;
         const auto reached=leatherReach.Step(sheet);out.block=out.block||reached.block;
         if(reached.open){out.inventory=true;out.feedback=1;out.feedbackHand=leather::Hand;}

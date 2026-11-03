@@ -2314,7 +2314,12 @@ held, a bottle, holster, bow, wheel or menu has the hands, so a grip pressed at 
 or a shoulder is that grab's). Grips let go after 0.3 s without a cast log what the hands did.
 With such a spell on a slot, the left grip takes a staff only alone (`crossbow::SoloSupportLatched`):
 pressed at the shaft and held 0.12 s with the right grip free; the right grip held lets the staff
-go, so both grips never hold it (owner: "these don't accidently start holding the staff"). With **Weapon skill gestures**
+go, so both grips never hold it (owner: "these don't accidently start holding the staff"). Nor
+do they grab (owner: "when both grips are held you should prevent actions like grabbing potions
+or grabbing above the shoulder"): a grip takes a belt bottle, a holster, the shoulder swap or the
+over-the-shoulder menu only alone, held 0.1 s with the other free (`spellmotion::SoloGrips`), and
+a grip counts as held above 0.6 and let go below 0.35, here and for the spells, so a squeeze that
+dips mid-motion is not a new press. With **Weapon skill gestures**
 on, a glyph whose skill has a motion readies it instead of casting it: the right hand glows
 in its element (Energy Shield as lightning) and the right trigger is the spell's until another
 glyph readies one, or a tap of Draw glyph (a stroke under 0.4 s) clears it. Readying puts the
@@ -2325,7 +2330,8 @@ the game and from the trigger's own skill meanwhile. Not with Draw glyph on the 
 The motions: Nova, the hands together then flung out wide; Frost Nova, both hands pushed down
 past the chest; Static Field, the palms rubbed together then snapped apart; Energy Shield, both
 hands up at the face within 35 cm (the forearms crossed or not), held; Thunder Storm, one arm raised above the head,
-held; Blaze, one hand struck down the thigh; Frozen Armor, the left hand from the right hand up
+held; Teleport, the right fist drawn in and punched straight out where you want to land (as the
+Paladin's Charge); Blaze, one hand struck down the thigh; Frozen Armor, the left hand from the right hand up
 to the right shoulder; Shiver Armor, both fists shaken; Chilling Armor, a hug, held. Thresholds
 in `spellmotion::Tuning`; `spell-motion-test` performs each at three headings and checks that
 no other spell's motion, the motion without the trigger, or a slow version casts it. Logs:

@@ -24,7 +24,8 @@
 // holycross (+X right, +Y up from the eyes, forward -Z, the head's yaw only); hand 0 is the right.
 // Value-only: steamvr/spell_motion_test.cpp.
 namespace framevr::spellmotion {
-enum class Motion {None,FlingOut,PushDown,RubSnap,CrossGuard,ArmUp,MatchStrike,ForearmSweep,Shake,Hug};
+enum class Motion {None,FlingOut,PushDown,RubSnap,CrossGuard,ArmUp,MatchStrike,ForearmSweep,Shake,Hug,Punch};
+constexpr int MotionCount=int(Motion::Punch);   // the motions, 1..MotionCount
 inline Motion For(int skill) {
     switch(skill) {
     case 48:return Motion::FlingOut;      // Nova
@@ -36,6 +37,7 @@ inline Motion For(int skill) {
     case 40:return Motion::ForearmSweep;  // Frozen Armor
     case 50:return Motion::Shake;         // Shiver Armor
     case 60:return Motion::Hug;           // Chilling Armor
+    case 54:return Motion::Punch;         // Teleport (owner: "as a motion similar to Paladin's Charge")
     default:return Motion::None;
     }
 }
@@ -51,9 +53,32 @@ inline const char* Cue(Motion m) {
     case Motion::ForearmSweep:return "sweep the left hand from the right hand up to the right shoulder";
     case Motion::Shake:return "shake both fists";
     case Motion::Hug:return "hug yourself, each hand on the other shoulder";
+    case Motion::Punch:return "draw the right fist in, then punch it straight out where you want to land";
     default:return "no motion";
     }
 }
+// While both grips cast spells (owner, 2026-11-03: "when both grips are held you should prevent
+// actions like grabbing potions or grabbing above the shoulder"): a grip counts for a grab only
+// alone - held SoloSeconds with the other free - and then until it is let go; pressed with the
+// other, or while the other is held, never until it is let go. Held above .6, let go below .35, so a
+// squeeze that dips mid-motion is not a new press (the grabs take a grip's press: a dip and back at
+// the belt or a shoulder took a potion or swapped weapons).
+struct SoloGrips {
+    static constexpr double SoloSeconds=.1;
+    bool held[2]{},solo[2]{};
+    double since[2]{-1,-1};   // when pressed alone; -2 pressed with the other (never, until let go)
+    void Reset(){*this=SoloGrips{};}
+    void Step(double now,const float grip[2]) {
+        for(int h=0;h<2;++h)held[h]=std::isfinite(grip[h])&&grip[h]>(held[h]?.35f:.6f);
+        for(int h=0;h<2;++h) {
+            if(!held[h]){solo[h]=false;since[h]=-1;continue;}
+            if(solo[h])continue;
+            if(held[1-h]){since[h]=-2;continue;}
+            if(since[h]==-1)since[h]=now;
+            if(since[h]>=0&&now-since[h]>=SoloSeconds)solo[h]=true;
+        }
+    }
+};
 struct Tuning {
     // Tuned on the owner's first session (2026-11-03): Nova flings that reached 78 and 89 cm, Frost
     // Nova pushes begun at the chest and ending at the sides, and an Energy Shield held 12-22 cm apart
@@ -82,6 +107,10 @@ struct Tuning {
     float shakeSpeed=.35f;    // m/s: Shiver Armor: a swing faster than this, then back,
     int shakeTurns=3;         // this many times with each hand
     float shakeWindow=.9f;    // s
+    // Teleport, the Paladin's Charge punch (charge_gesture.h): the right hand drawn in (at most punchFrom
+    // ahead of the eyes, hip to brow), then punched straight out to punchReach ahead, punchTravel
+    // forward within punchWindow, at least 1.5 times as far forward as up, down or sideways.
+    float punchFrom=.30f,punchReach=.45f,punchTravel=.25f,punchWindow=.20f;
     float cooldown=.6f;       // s after a cast
     float history=1.5f;       // s of the hands kept
 };
@@ -214,6 +243,17 @@ class Engine {
             }
             const bool front=Forward(n.l[0])>-.10f&&Forward(n.l[1])>-.10f&&n.l[0].y>-.90f&&n.l[1].y>-.90f;
             return front&&most[0]>=t.shakeTurns&&most[1]>=t.shakeTurns;
+        }
+        case Motion::Punch: {
+            const auto& c=n.l[0];
+            if(Forward(c)<t.punchReach)return false;
+            for(const auto& s:samples) {
+                const auto& a=s.l[0];
+                const float forward=Forward(c)-Forward(a);
+                if(n.t-s.t<=t.punchWindow&&Forward(a)<=t.punchFrom&&a.y>=-.70f&&a.y<=.10f&&forward>=t.punchTravel&&
+                   std::fabs(c.y-a.y)*1.5f<=forward&&std::fabs(c.x-a.x)*1.5f<=forward)return true;
+            }
+            return false;
         }
         case Motion::Hug: {
             const auto& r=n.l[0];const auto& l=n.l[1];

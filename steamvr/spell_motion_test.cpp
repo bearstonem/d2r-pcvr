@@ -53,13 +53,15 @@ static void ShiverArmor(Sim& s) {
     s.Drive(1.f,[](float t,math::Vec& r,math::Vec& l){const float y=-.40f+.06f*std::sin(t*6.2832f*4);r.y=l.y=y;});
 }
 static void Hug(Sim& s){s.Move({-.18f,-.32f,-.05f},{.18f,-.32f,-.05f},.45f);s.Hold(.5f);}
+static void Teleport(Sim& s){s.MoveR({.15f,-.32f,-.12f},.35f);s.Hold(.1f);s.MoveR({.17f,-.28f,-.62f},.2f);}
 
 int main() {
     using Do=void(*)(Sim&);
     const struct {Motion motion;Do perform;int skill;const char* name;} all[]={
         {Motion::FlingOut,Nova,48,"Nova"},{Motion::PushDown,FrostNova,44,"Frost Nova"},{Motion::RubSnap,StaticField,42,"Static Field"},
         {Motion::CrossGuard,EnergyShield,58,"Energy Shield"},{Motion::ArmUp,ThunderStorm,57,"Thunder Storm"},{Motion::MatchStrike,Blaze,46,"Blaze"},
-        {Motion::ForearmSweep,FrozenArmor,40,"Frozen Armor"},{Motion::Shake,ShiverArmor,50,"Shiver Armor"},{Motion::Hug,Hug,60,"Chilling Armor"}};
+        {Motion::ForearmSweep,FrozenArmor,40,"Frozen Armor"},{Motion::Shake,ShiverArmor,50,"Shiver Armor"},{Motion::Hug,Hug,60,"Chilling Armor"},
+        {Motion::Punch,Teleport,54,"Teleport"}};
     for(const auto& m:all) {
         std::string label=std::string(m.name)+": ";
         Check(spellmotion::For(m.skill)==m.motion&&std::string(spellmotion::Cue(m.motion))!="no motion",(label+"its skill has the motion and a cue").c_str());
@@ -76,8 +78,12 @@ int main() {
             Check(s.casts==0,(label+"another spell's motion ("+other.name+") casts nothing").c_str());
         }
     }
-    Check(spellmotion::For(36)==Motion::None&&spellmotion::For(54)==Motion::None&&spellmotion::For(117)==Motion::None,
-        "Fire Bolt, Teleport and a Paladin skill have no motion: their glyph casts as before");
+    Check(spellmotion::For(36)==Motion::None&&spellmotion::For(117)==Motion::None,
+        "Fire Bolt and a Paladin skill have no motion: their glyph casts as before");
+    {Sim s(Motion::Punch);s.Trigger(true);s.MoveR({.15f,-.32f,-.12f},.35f);s.Hold(.1f);s.MoveR({.17f,-.28f,-.62f},.9f);
+     Check(s.casts==0,"Teleport: the arm pushed out slowly casts nothing");}
+    {Sim s(Motion::Punch);s.Trigger(true);s.MoveR({.15f,-.32f,-.12f},.35f);s.Hold(.1f);s.MoveR({.15f,.20f,-.50f},.2f);
+     Check(s.casts==0,"Teleport: an uppercut is not a punch");}
     {Sim s(Motion::FlingOut);s.Trigger(true);Nova(s);s.Move(RestR,RestL,.4f);s.Hold(.4f);Nova(s);
      Check(s.casts==2,"still held, Nova again from the start casts again");s.Trigger(false);Check(s.drops==0,"a hold that cast is not dropped");}
     {Sim s(Motion::FlingOut);s.Trigger(true);s.Move({.62f,-.35f,-.15f},{-.62f,-.35f,-.15f},.3f);
@@ -125,6 +131,18 @@ int main() {
      s.in.active=true;s.Hold(.2f);Nova(s);Check(s.casts==1,"free: active again, no press needed");}
     {Sim s(Motion::PushDown);s.in.free=true;s.Move({.15f,-.35f,-.30f},{-.15f,-.35f,-.30f},.4f);s.Move(RestR,RestL,1.5f);s.Hold(1.f);
      Check(s.casts==0,"free: arms lowered to rest at an easy pace cast no Frost Nova");}
+    {   // both grips cast spells: a grip grabs only alone
+        spellmotion::SoloGrips g;double t=0;
+        auto step=[&](float r,float l,double dt){t+=dt;const float v[2]={r,l};g.Step(t,v);};
+        step(1,0,.01);Check(!g.solo[0],"a grip alone grabs only after a moment...");
+        step(1,0,.11);Check(g.solo[0],"...held alone 0.1 s, it grabs");
+        step(1,1,.01);Check(g.solo[0]&&!g.solo[1],"the other pressed after: the first keeps its grab, the other never");
+        step(.5f,1,.2);Check(g.solo[0]&&!g.solo[1],"a squeeze dipping to .5 is still held");
+        step(0,1,.01);step(0,1,.2);Check(!g.solo[0]&&!g.solo[1],"let go: nothing");
+        step(1,1,.01);step(.2f,1,.01);step(1,1,.2);Check(!g.solo[0]&&!g.solo[1],"both held, a grip let go and pressed again: still no grab");
+        step(0,0,.01);step(1,0,.03);step(1,1,.01);step(1,1,.3);Check(!g.solo[0]&&!g.solo[1],"pressed together (the other 30 ms later): no grab");
+        step(0,0,.01);step(0,1,.01);step(0,1,.11);Check(g.solo[1],"the left alone grabs too");
+    }
     std::puts("spell-motion-test: ok");
     return 0;
 }
