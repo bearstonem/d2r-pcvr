@@ -7,6 +7,7 @@
 #include "memory.h"
 #include "logging.h"
 #include "../steamvr/world_coordinates.h"
+#include "../steamvr/bow_flight.h"
 #include <intrin.h>
 #include <array>
 #include <atomic>
@@ -21,7 +22,7 @@ using namespace abi;
 using ModeFn=int(*)(uintptr_t,uintptr_t,uintptr_t,int,int,uint32_t,int,int);
 ModeFn originalMode=nullptr;
 std::atomic<bool> ready{false};
-std::atomic<unsigned> broken[2]{},blocked{0},refused{0};
+std::atomic<unsigned> broken[2]{},brokenProjectiles{0},blocked{0},refused{0};
 std::array<HitSet,2> attempted; // separate from monster hits, cleave and cadence
 struct Context {uintptr_t game=0,player=0;uint32_t object=0;};
 thread_local Context physical;
@@ -77,14 +78,14 @@ bool Weapon(uintptr_t player,const Sample& s) {
     const uintptr_t weapon=meleeweapon::Select(player,s.handIndex,s.weapons);
     uint32_t id=0;return Read(weapon+8,id)&&id==s.weapons.displayed[s.handIndex];
 }
-Body Volume(const Object& o,const Sample& s) {
-    const float scale=s.unitsPerMetre;
+Body Volume(const Object& o,float unitsPerMetre,float playerY) {
+    const float scale=unitsPerMetre;
     // Native footprint, approximate vertical volume in game world units.
     // Large urns are taller; remaining pots/baskets are lower than barrels.
     const bool large=o.classId==4||o.classId==94||o.classId==95;
     const float radius=std::clamp(float(std::max(o.sizeX,o.sizeY))/scale,.16f,.6f);
     const float height=std::max(2*radius,(large?4.8f:o.operation==3?3.2f:4.f)/scale);
-    const Vec ground=framevr::coordinates::RenderGround({2.f*o.x/scale,0,2.f*o.y/scale},s.player.y);
+    const Vec ground=framevr::coordinates::RenderGround({2.f*o.x/scale,0,2.f*o.y/scale},playerY);
     return {ground+Vec{0,radius,0},ground+Vec{0,height-radius,0},radius};
 }
 }
@@ -118,7 +119,7 @@ void Apply(uintptr_t game,uintptr_t player,std::span<const Strike> strikes,bool 
         const auto unit=melee::ServerUnit(game,2,ids[i]);Object o;
         if(!Inspect(game,unit,o)||o.id!=ids[i])continue;
         if(attempted[s.handIndex].Contains(r.session,r.sweep.stroke,o.id))continue;
-        if(!Touches(r.sweep.before,r.sweep.after,Volume(o,s)))continue;
+        if(!Touches(r.sweep.before,r.sweep.after,Volume(o,s.unitsPerMetre,s.player.y)))continue;
         // Native interaction line test temporarily excludes endpoint collision,
         // so the pot's own footprint cannot masquerade as an intervening wall.
         if(reinterpret_cast<int(*)(uintptr_t,uintptr_t,int)>(d2rsig::Addr(LineRva))(player,unit,0x804)) {++blocked;continue;}
@@ -133,10 +134,56 @@ void Apply(uintptr_t game,uintptr_t player,std::span<const Strike> strikes,bool 
         } else ++refused;
     }
 }
+bool ArrowHit(uintptr_t game,Vec from,Vec to,float unitsPerMetre,float playerY,float stopFraction,ArrowContact& out) {
+    if(!ready.load()||stopFraction<=0.f)return false;
+    uintptr_t buckets[128]{};if(!Read(game+0x546*8,buckets))return false;
+    const float minX=std::min(from.x,to.x)-2.f,maxX=std::max(from.x,to.x)+2.f;
+    const float minZ=std::min(from.z,to.z)-2.f,maxZ=std::max(from.z,to.z)+2.f;
+    float bestFraction=stopFraction;
+    uintptr_t bestUnit=0;
+    uint32_t bestId=0;
+    unsigned visited=0;
+    for(uintptr_t unit:buckets)for(unsigned chain=0;unit&&chain<256&&visited++<4096;++chain) {
+        uintptr_t next=0;if(!Read(unit+0x158,next))break;
+        Object o;
+        if(Inspect(game,unit,o)) {
+            const float scale=unitsPerMetre;
+            const Vec ground=framevr::coordinates::RenderGround({2.f*o.x/scale,0,2.f*o.y/scale},playerY);
+            if(ground.x>=minX&&ground.x<=maxX&&ground.z>=minZ&&ground.z<=maxZ) {
+                const Body body=Volume(o,unitsPerMetre,playerY);
+                float fraction=0;
+                if(framevr::bowflight::CapsuleEntry(from,to,body.bottom,body.top,body.radius,fraction)&&fraction<bestFraction) {
+                    bestFraction=fraction;bestUnit=unit;bestId=o.id;
+                }
+            }
+        }
+        unit=next;
+    }
+    if(!bestUnit)return false;
+    out={bestFraction,bestUnit,bestId};
+    return true;
+}
+bool OperateArrow(uintptr_t game,uintptr_t player,uintptr_t unit,uint32_t id) {
+    if(!ready.load()||!game||!player||!unit||!id)return false;
+    const auto resolved=melee::ServerUnit(game,2,id);
+    if(resolved!=unit)return false;
+    Object o;if(!Inspect(game,unit,o)||o.id!=id)return false;
+    {Scope scope(game,player,id);
+     reinterpret_cast<int(*)(uintptr_t,uintptr_t,uintptr_t)>(d2rsig::Addr(OperateRva))(game,player,unit);}
+    uint32_t after[4]{};
+    const auto check=melee::ServerUnit(game,2,id);
+    if(Read(check,after)&&after[0]==2&&after[2]==id&&after[3]!=0) {
+        ++brokenProjectiles;
+        framevr::MeleeImpact(0);
+        return true;
+    }
+    ++refused;
+    return false;
+}
 void Report() {
-    const auto r=broken[0].exchange(0),l=broken[1].exchange(0),w=blocked.exchange(0),f=refused.exchange(0);
-    if(!r&&!l&&!w&&!f)return;
-    char line[180];std::snprintf(line,sizeof line,"Frame breakables: right broken=%u left broken=%u walls=%u native refused=%u",r,l,w,f);
+    const auto r=broken[0].exchange(0),l=broken[1].exchange(0),p=brokenProjectiles.exchange(0),w=blocked.exchange(0),f=refused.exchange(0);
+    if(!r&&!l&&!p&&!w&&!f)return;
+    char line[200];std::snprintf(line,sizeof line,"Frame breakables: right broken=%u left broken=%u arrow broken=%u walls=%u native refused=%u",r,l,p,w,f);
     framevr::logging::Write(line);
 }
 }
