@@ -14,9 +14,11 @@
 // Still held, the motion again casts again.
 //
 // Free (owner, 2026-11-03: "any spell we already have added to either hand's spell wheels should be
-// accessible to us by simply doing the motion of it"): a spell on a hand slot casts by its motion
-// alone, the triggers free, as the Paladin's and Druid's gestures; the transport runs one watcher per
-// motion and takes the first to complete.
+// accessible to us by simply doing the motion of it"): a spell on a hand slot casts by its motion, no
+// glyph; the transport runs one watcher per motion and takes the first to complete. Only while both
+// grips are held (owner, the same day: "we are tracking motion all the time so it gets triggered in
+// unwanted situations ... put a button that you have to hold while you're doing the motion", then
+// "what about holding both grips to cast?"): the transport makes them active only then.
 //
 // Prototype: the Sorceress's self-casts and bursts, which need no target. Head-local frame as
 // holycross (+X right, +Y up from the eyes, forward -Z, the head's yaw only); hand 0 is the right.
@@ -226,6 +228,8 @@ public:
     Tuning tuning;
     void Reset(){const auto keep=tuning;*this=Engine{};tuning=keep;}
     bool Watching()const{return watching;}
+    // The figures of the hold being watched, or of the last one (until the next begins).
+    const Output& Stats()const{return stats;}
     Output Step(const Input& in) {
         Output out;
         // A reset forgets the hold: a trigger still held must be pressed again.

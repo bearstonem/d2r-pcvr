@@ -2306,10 +2306,15 @@ gives a hand button that record).
 
 Readied spells (prototype, `steamvr/spell_motion.h`; owner, 2026-11-03: draw the glyph to
 activate the spell, then do its motion with the trigger held). A spell already on one of the ten
-hand slots needs no glyph: its motion alone casts it, both triggers free, as the Paladin's and
-Druid's gestures (one watcher per motion with a slot; the first to complete presses that slot,
-Static Field before Nova, then all of them wait a second; not while a readied spell's trigger is
-held, a bottle, bow, wheel or menu has the hands). With **Weapon skill gestures**
+hand slots needs no glyph: its motion casts it while both grips are held, both triggers free
+(owner, 2026-11-03: watched all the time, motions went off unwanted, then "what about holding both
+grips to cast?"; one watcher per motion with a slot, only while both grips are held; the first to complete presses that slot, Static Field before
+Nova, then all of them wait a second, still held or not; not while a readied spell's trigger is
+held, a bottle, holster, bow, wheel or menu has the hands, so a grip pressed at a bottle, a hip
+or a shoulder is that grab's). Grips let go after 0.3 s without a cast log what the hands did.
+With such a spell on a slot, the left grip takes a staff only alone (`crossbow::SoloSupportLatched`):
+pressed at the shaft and held 0.12 s with the right grip free; the right grip held lets the staff
+go, so both grips never hold it (owner: "these don't accidently start holding the staff"). With **Weapon skill gestures**
 on, a glyph whose skill has a motion readies it instead of casting it: the right hand glows
 in its element (Energy Shield as lightning) and the right trigger is the spell's until another
 glyph readies one, or a tap of Draw glyph (a stroke under 0.4 s) clears it. Readying puts the

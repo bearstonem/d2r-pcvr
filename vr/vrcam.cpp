@@ -8163,6 +8163,7 @@ void PushArms() {
     // spears, polearms and two-handed swords have only this way (the old one turned the
     // weapon through both hands as the animation holds them)
     in.staffFreeLeft = g_set.staffFreeLeft.load() || likeStaff;
+    in.soloStaffGrip = framevr::SpellGripsArmed();
     // [hands] fist: a hand whose slot holds nothing is free. Bows and crossbows
     // keep the animation's hands (the drawing hand holds the string); a staff
     // sits in the right slot, and the left is free only in staff_free_left

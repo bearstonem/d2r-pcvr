@@ -64,6 +64,19 @@ int main() {
     assert(SupportLatched(true,true,true,false,true)); // latched until release
     assert(!SupportLatched(false,true,true,true,true));
     assert(!SupportLatched(true,true,false,true,false)); // existing staff press behavior
+    {   // both grips cast a spell's motion: the left grip alone takes the staff
+        double pending=-1;
+        assert(!SoloSupportLatched(true,false,false,true,false,1.0,pending)&&pending==1.0);   // pressed at the shaft: wait
+        assert(!SoloSupportLatched(true,true,false,true,false,1.05,pending));
+        assert(SoloSupportLatched(true,true,false,true,false,1.13,pending)&&pending<0);      // still alone: taken
+        assert(SoloSupportLatched(true,true,true,false,false,2.0,pending));                  // held, it stays
+        assert(!SoloSupportLatched(true,true,true,true,true,2.1,pending));                   // the right grip too: let go
+        pending=-1;
+        assert(!SoloSupportLatched(true,false,false,true,false,3.0,pending));
+        assert(!SoloSupportLatched(true,true,false,true,true,3.04,pending)&&pending<0);      // the right grip follows: a spell, not the staff
+        assert(!SoloSupportLatched(true,true,false,true,false,3.5,pending));                 // and no later take without a new press
+        assert(!SoloSupportLatched(true,false,false,false,false,4.0,pending)&&pending<0);    // pressed away from the shaft: nothing
+    }
     // Shield-set swaps can leave the native palms 1.3-4.48 model units apart
     // throughout idle. Controller placement must work without first firing
     // an attack animation to bring those palms together.
