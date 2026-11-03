@@ -18,7 +18,7 @@ prefers a nonempty tome. Restocking retains the assignment. Stash, cube, cursor,
 equipment and belt items are excluded. Native restrictions still apply.
 
 RUN / WALK and the wheel's movement slider are gone: walking and run speed live
-in VR Settings > Body > Movement speed (`[gameplay] run_speed_pct`,
+in VR Settings > Comfort > Moving > Movement speed (`[gameplay] run_speed_pct`,
 `steamvr/run_speed.h`): Walk (-10), Base run (0), Run 10..90%, Full run (100).
 Walk walks and every other stop runs; the game's own run / walk command 0x23 is
 sent when its toggle is set the other way (`runspeed::GaitSync`: a run seen means

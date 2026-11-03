@@ -249,7 +249,7 @@ Known diagnostic lessons:
 
 - Loot label size comes from `[hud] labels_size` in `d2r_pcvr.ini` (formerly
   `d2r_vr.ini`) for native
-  first-person VR; VR Settings > Interface > Loot name size edits the same key.
+  first-person VR; VR Settings > Interface > Labels > Loot name size edits the same key.
   Default 45%, range 20-150%, five-point steps; explicit saved sizes are kept.
   The 150% enlargement bypassed this saved value. Changing that override to
   100% did not restore the earlier appearance; remove the override and respect

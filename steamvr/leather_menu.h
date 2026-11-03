@@ -128,7 +128,7 @@ inline void Premultiply(std::vector<uint8_t>& rgba) {
     }
 }
 
-// [interactions] leather_menu (VR Settings > Interface, beside Menu distance):
+// [interactions] leather_menu (VR Settings > Interface > Menus, beside Menu distance):
 // 0 Off, the tabbed menu in front of you against black; 1 On, on the hide in the
 // left hand; 2 Menu only, the same menu held in the left hand with no hide
 // (owner 2026-10-29: "in case players dont like the hide"). A value that is

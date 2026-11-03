@@ -34,7 +34,7 @@ tactical commands, and makes Unleashed melee fairer.
   and a monster nearer your aim keeps the trigger an attack. The mercenary also
   fights from the spot you send it to, and when badly hurt falls back beside you,
   ready for a thrown potion.
-  **VR Settings > Survival > Tactical commands** turns the commands off.
+  **VR Settings > Gameplay > Monsters > Tactical commands** turns the commands off.
 - **A fairer Unleashed attack cycle - contributed by ChuckRibbits:**
   - Swings between beats never delay your next full hit; dual wielders share one
     cycle.
@@ -48,13 +48,13 @@ tactical commands, and makes Unleashed melee fairer.
   instead of the item nearest your feet. Its name shows with a thin rim in its
   rarity color within reach, or red when too far, where A takes nothing and
   doesn't walk there. Pointing at no item, doors, chests and NPCs work as before.
-  The switch is on **VR Settings > Interface**, beside Loot name size.
+  The switch is on **VR Settings > Interface > Labels**, beside Loot name size.
 
 ## Controls and interface
 
 - **Loot beams - contributed by ChuckRibbits:** Colored pillars of light rise over
   unique (gold), set (green) and rare (yellow) items and runes Vex and up
-  (orange) lying near you; walls and hills hide them. **VR Settings > Interface >
+  (orange) lying near you; walls and hills hide them. **VR Settings > Interface > Labels >
   Loot beams** sets their brightness, and its **Filter** chooses which kinds.
 - **The held menu - contributed by ChuckRibbits:** While you hold the tabbed
   menu, the right stick turns you, and pulling the trigger off the menu drops
@@ -67,9 +67,8 @@ tactical commands, and makes Unleashed melee fairer.
 - **Talking to NPCs - contributed by ChuckRibbits:** Pressing A on an NPC while
   walking stops you first, so the conversation opens with you standing.
 - **Arcane Decay - contributed by Mcklem:** A spectral blue vignette grows at the
-  edge of your view as your mana runs low. **VR Settings > Interface > Mana
-  Warning** turns it on or off, sets the mana level it starts below (50%) and
-  its strength, and fades it in and out.
+  edge of your view as your mana runs low. **VR Settings > Interface > Warnings > Low mana** turns it
+  on or off, sets the mana level it starts below (50%) and its strength, and fades it in and out.
 
 ## Visuals and stability
 
@@ -237,7 +236,7 @@ credits: ChuckRibbits; beadlebytes; Mcklem; tig3rmast3r (OFXR Bridge); Sergious.
 - Mercenary: point at it, hold Grip, pull Trigger, aim and let go to move it or focus a foe.
 - Loot pick (on): hold your arm out and point at an item; A picks that one, not the nearest.
 - Loot beams: colored pillars over unique, set and rare items and high runes.
-- Interface > Loot beams sets their brightness; Filter chooses which kinds.
+- Interface > Labels > Loot beams sets their brightness; Filter chooses which kinds.
 - Unleashed: extra swings never delay your next full hit; dual wield shares one cycle.
 - Dual wield swings at native speed; in-between strokes no longer stun-lock or heal.
 - Character page: Reset Skills & Stats, free and unlimited offline, with a confirmation.
@@ -245,7 +244,7 @@ credits: ChuckRibbits; beadlebytes; Mcklem; tig3rmast3r (OFXR Bridge); Sergious.
 - Arcane Decay: a blue vignette at the edge of your view when mana runs low.
 - A on an NPC while walking stops you, so the conversation opens with you standing.
 - Your shadow keeps its head in first person.
-- Performance > Torches: the game's torches light dungeons (off by default, costs CPU).
+- Graphics > Environment > Dungeon torchlight: the game's torches light dungeons (off, costs CPU).
 - Pushable bodies only push bodies within 3 m: no fps loss with frame generation.
 - Fixed: Save and Exit no longer crashes from the held menu.
 PCVR_IN_HEADSET_NOTES -->
