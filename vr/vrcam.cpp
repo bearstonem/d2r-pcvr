@@ -135,6 +135,7 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "target_lock.h"
 #include "bow.h"
 #include "loot_beam_scan.h"
+#include "monster_immunity.h"
 #include "wall_cells.h"
 #include "prop_scan.h"
 #include "crossbow.h"
@@ -631,6 +632,7 @@ SkyAct g_skyAct[7];
 struct CaveFog { float rgb[3]; bool set; };
 CaveFog g_caveFog{};
 std::atomic<uint32_t> g_skyCfgGen{0};   // bumped when a picture name changes
+std::atomic<bool> g_immunityTextureReady{false};
 std::atomic<bool> g_arcaneSkyReady{false}; // locally prepared native star/cloud maps
 
 std::string Utf8(const wchar_t* w) {
@@ -753,6 +755,8 @@ void LoadCeilingTextures() {
 }
 
 void LoadSkyActs() {
+    const bool immunityTexture = SkyFileExists(L"PCVR_Immunity/feral_glow.png");
+    if (g_immunityTextureReady.exchange(immunityTexture) != immunityTexture) g_skyCfgGen.fetch_add(1);
     const bool arcane = SkyFileExists(L"PCVR_Arcane/stars.png") && SkyFileExists(L"PCVR_Arcane/clouds.png") &&
         GetFileAttributesW((ReShadeDir() + L"..\\pcvr-arcane-sky.json").c_str()) != INVALID_FILE_ATTRIBUTES;
     if (g_arcaneSkyReady.exchange(arcane) != arcane) g_skyCfgGen.fetch_add(1);
@@ -9525,6 +9529,11 @@ bool BeamWanted() {
     return g_enabled.load() && g_inWorld.load() && !gamestate::MenuOpen() && lootscan::Latest(GetTickCount64()).count > 0;
 }
 
+bool ImmunityWanted() {
+    return g_enabled.load() && g_inWorld.load() && !gamestate::MenuOpen() &&
+        monsterimmunity::Latest(GetTickCount64()).count > 0;
+}
+
 // The frame stamp strip (D2R_DepthFog.fx PS_Stamp): whenever the camera turns
 // with the head, so that FlatVR can place its screen at the pose of the frame.
 bool StampWanted() { return g_enabled.load() && g_afrBlock && g_set.stamps.load() && g_set.stampPixels.load(); }
@@ -9557,6 +9566,14 @@ bool ApplySkyPictures(reshade::api::effect_runtime* rt) {
         char have[16] = {}; size_t size = sizeof have;
         if (!rt->get_preprocessor_definition_for_effect("D2R_DepthFog.fx", "D2R_ARCANE_SKY_CACHE", have, &size) || strcmp(have, want)) {
             rt->set_preprocessor_definition_for_effect("D2R_DepthFog.fx", "D2R_ARCANE_SKY_CACHE", want);
+            set = true;
+        }
+    }
+    {
+        const char* want = g_immunityTextureReady.load() ? "1" : "0";
+        char have[16] = {}; size_t size = sizeof have;
+        if (!rt->get_preprocessor_definition_for_effect("D2R_DepthFog.fx", "D2R_IMMUNITY_TEXTURE", have, &size) || strcmp(have, want)) {
+            rt->set_preprocessor_definition_for_effect("D2R_DepthFog.fx", "D2R_IMMUNITY_TEXTURE", want);
             set = true;
         }
     }
@@ -9619,7 +9636,7 @@ void OnFinishEffects(reshade::api::effect_runtime* rt, reshade::api::command_lis
     if (!g_tech[0].handle) { hud::SetPictureReady(false); return; }
     // Off while a menu is open: the fog lies over the whole picture, the
     // inventory and trade panels included, and darkened them.
-    const bool want = FogWanted() || g_skyPalette.load() >= 0 || g_arcaneSky.load() || CeilWanted() || HudWanted() || StampWanted() || hud::PictureWanted() || TableKeyWanted() || PhantomWanted() || BoneAxesWanted() || ShieldDebugWanted() || OutlineWanted() || RingWanted() || BeamWanted();
+    const bool want = FogWanted() || g_skyPalette.load() >= 0 || g_arcaneSky.load() || CeilWanted() || HudWanted() || StampWanted() || hud::PictureWanted() || TableKeyWanted() || PhantomWanted() || BoneAxesWanted() || ShieldDebugWanted() || OutlineWanted() || RingWanted() || BeamWanted() || ImmunityWanted();
     // The toolbar and the map are taken out of the game's picture to be drawn
     // back at their own size only while this effect runs, and is new enough to.
     {
@@ -9821,7 +9838,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
         renderscale::Frame(rt, s);
 #ifdef D2RVR_NATIVE_OPENXR
         const bool ownDepth=g_enabled.load()&&g_inWorld.load()&&framevr::Active()&&
-            (FogWanted()||g_set.skyOn.load()||g_arcaneSky.load()||CeilWanted()||TableKeyWanted()||OutlineWanted()||RingWanted()||BeamWanted());
+            (FogWanted()||g_set.skyOn.load()||g_arcaneSky.load()||CeilWanted()||TableKeyWanted()||OutlineWanted()||RingWanted()||BeamWanted()||ImmunityWanted());
         const bool turnDepth=g_enabled.load()&&g_inWorld.load()&&framevr::Active()&&framevr::TurnDepthWanted();
         framevr::scenedepth::Bind(rt,cl,ownDepth,turnDepth,stereoreplay::RightEffects(),s);
         SetBool(rt,"OwnDepth",ownDepth);
@@ -10288,8 +10305,33 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
         SetBool(rt, "OutlineOn", count > 0);
         SetBool(rt, "RingOn", rings);
         SetBool(rt, "BeamOn", beams);
+        const auto immunity = monsterimmunity::Latest(GetTickCount64());
+        const bool immunityOn = ImmunityWanted() && view && immunity.count > 0;
+        SetBool(rt, "ImmunityOn", immunityOn);
+        float immunityPos[framevr::immunity::MaxMonsters][4] = {};
+        float immunityPhase[framevr::immunity::MaxMonsters] = {};
+        if (immunityOn) {
+            const float floor = sv[0].hero[1], shear = framevr::coordinates::GroundShear;
+            const uint64_t now = GetTickCount64();
+            for (size_t i = 0; i < immunity.count; ++i) {
+                const auto& monster = immunity.monsters[i];
+                const auto xy = framevr::immunity::Position(monster, immunity, now);
+                immunityPos[i][0] = xy[0] * 2.0f + floor * shear - sv[0].hero[0];
+                immunityPos[i][2] = xy[1] * 2.0f + floor * shear - sv[0].hero[2];
+                immunityPos[i][3] = float(monster.mask);
+                immunityPhase[i] = float(monster.id % 997u) * 0.063f;
+            }
+        }
+        SetFloats(rt, "ImmunityPos", immunityPos[0], framevr::immunity::MaxMonsters * 4);
+        // A float4 per phase avoids scalar-array cbuffer padding in ReShade.
+        float phases[framevr::immunity::MaxMonsters][4] = {};
+        for (size_t i = 0; i < framevr::immunity::MaxMonsters; ++i) phases[i][0] = immunityPhase[i];
+        SetFloats(rt, "ImmunityPhase", phases[0], framevr::immunity::MaxMonsters * 4);
+        const float immunityUpm = std::max(1.0f, ScaleHeight()) / UserEyeHeightM();
+        const float immunityShape[4] = {.65f * immunityUpm, .65f * immunityUpm, .16f * immunityUpm, .8f};
+        SetFloats(rt, "ImmunityShape", immunityShape, 4);
         float mob[2][4] = {};
-        if (count > 0 || rings || beams) {
+        if (count > 0 || rings || beams || immunityOn) {
             for (int e = 0; e < 2; ++e) {
                 const SkyView& s = sv[e].axes_ok && sv[e].proj_ok ? sv[e] : sv[0];
                 char n[16];
@@ -10713,7 +10755,7 @@ DWORD WINAPI UpdateThread(void*) {
         }
         hud::SetLabels(LabelsWanted());
         // the fog leaves the interface alone; the floor's key never takes its text for the void
-        hud::SetUiMask((fx::FogWanted() || fx::TableKeyWanted()) && !LabelsWanted());
+        hud::SetUiMask((fx::FogWanted() || fx::TableKeyWanted() || fx::ImmunityWanted()) && !LabelsWanted());
         SkyTick();
         flog::Tick(g_set.frameLog.load());
         gamecmd::Tick();   // skills, potions, Alt... held in BodyWalk: pressed on the UI thread
@@ -10723,6 +10765,7 @@ DWORD WINAPI UpdateThread(void*) {
         talkstop::Tick(nowMs);      // how far the hero goes after a conversation opens (log)
 #endif
         lootscan::Tick(nowMs);      // loot beams: the beam-worthy items lying near the hero
+        monsterimmunity::Tick(nowMs, g_enabled.load() && g_inWorld.load() && !gamestate::MenuOpen());
 #endif
 #ifdef D2RVR_NATIVE_OPENXR
         mobaim::Tick();    // the aim rules' targets: each hand's held out, and the one looked at
@@ -11078,6 +11121,7 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
         wanted.highRune = std::clamp(int(IniF(L"loot", L"rune_min", float(framevr::lootbeams::DefaultHighRune))),
                                      framevr::lootbeams::FirstRune, framevr::lootbeams::LastRune + 1);   // 34 = no runes
         lootscan::Init(ctx, IniB(L"loot", L"beams", true), wanted);
+        monsterimmunity::Init(ctx);
     }
 #endif
     if (HANDLE h = CreateThread(nullptr, 0, UpdateThread, nullptr, 0, &g_updateThreadId)) CloseHandle(h);

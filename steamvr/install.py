@@ -21,6 +21,7 @@ from bone_pieces import CODES as BONE_CODES
 from prepare_spell_sprites import prepare as prepare_spell_sprites, FILE as SPELL_SPRITES
 from prepare_props import prepare as prepare_props, FILES as PROP_FILES
 from prepare_leather import prepare as prepare_leather, FILES as LEATHER_FILES
+import prepare_monster_immunity
 import prepare_arcane_sky
 import prepare_sewer_backdrop
 import prepare_kurast_dock
@@ -528,6 +529,13 @@ def main():
             for name in (SPELL_SPRITES, 'cache.json'):
                 payload[mod_identity.PLUGIN.parent / 'd2r_vr_spell_sprites' / safe_relative(name)] = (Path(temporary) / name).read_bytes()
             print(f"Prepared {result['textures']} spell effect textures from your installed game.")
+    try:
+        immunity = prepare_monster_immunity.prepare(game, casclib=args.casclib)
+    except (OSError, ValueError, KeyError, IndexError) as error:
+        print(f'Feral Rage artwork unavailable; monster immunities use a procedural glow: {error}')
+    else:
+        payload.update({mod_identity.MOD_DIR / name: data for name, data in immunity.items()})
+        print('Prepared Feral Rage glow for monster immunity indicators.')
     try:
         arcane = prepare_arcane_sky.prepare(game, casclib=args.casclib)
         prepare_arcane_sky.check_existing(game / mod_identity.MOD_DIR, arcane)
