@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "fx_source.h"
 using Microsoft::WRL::ComPtr;
 static void Check(HRESULT hr,const char* what) {
     if(FAILED(hr)) throw std::runtime_error(what);
@@ -93,9 +94,7 @@ float3 SkyGradient(float y) { return 0.1; }
 )hlsl";
 int main(int argc,char** argv) {try {
     if(argc!=2) throw std::runtime_error("expected D2R_DepthFog.fx path");
-    std::ifstream file(argv[1]);
-    if(!file) throw std::runtime_error("cannot read production fog shader");
-    const std::string source{std::istreambuf_iterator<char>(file),{}};
+    const std::string source=fxsource::ReadWithIncludes(argv[1]);   // the effect with its feature headers (D2R_Sky.fxh, D2R_Fog.fxh ...) pasted in
     std::string shader=Fixture;
     shader+=Function(source,"float FogAt(");
     shader+=Function(source,"float FogAmount(");
