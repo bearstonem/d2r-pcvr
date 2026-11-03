@@ -11,6 +11,7 @@
 
 namespace gamestate {uint64_t LocalPlayer();}
 namespace monsterimmunity {
+bool ReadPosition(uint32_t id,float out[3]); // owning game thread, implemented by vrcam
 namespace {
 const D2RL::PluginContext* context=nullptr;
 const D2RL::ThreadService* threads=nullptr;
@@ -41,7 +42,11 @@ void __cdecl Scan(const D2RL::PluginContext*,void* user) noexcept {
             const auto unit=melee::ServerUnit(game,1,found[i].id);
             if(!unit)continue;
             const auto result=Detect([&](int stat,int& value){return combat::UnitStat(unit,stat,value);});
-            if(result.known&&result.mask)Insert(latest,{found[i].id,found[i].x,found[i].y,0,0,result.mask},heroX,heroY);
+            float position[3]{};
+            if(result.known&&result.mask&&ReadPosition(found[i].id,position)) {
+                const auto grid=framevr::coordinates::GridPlane({position[0],position[1],position[2]});
+                Insert(latest,{found[i].id,grid.x*.5f,grid.z*.5f,0,0,result.mask,position[1]},heroX,heroY);
+            }
         }
     }
     std::lock_guard lock(mutex);

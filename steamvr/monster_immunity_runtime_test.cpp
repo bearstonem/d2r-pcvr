@@ -6,6 +6,8 @@
 namespace {
 uint64_t session=7;
 bool signatures=true,localServer=true,statAvailable=true,cancelDuringRead=false;
+bool positionAvailable=true;
+float monsterHeight=17;
 int mode=0,statReads=0,hostileScans=0;
 std::array<int,6> resistance{0,0,100,0,100,0};
 std::vector<melee::Hostile> hostiles{{1,0,3,4,true}};
@@ -18,6 +20,13 @@ void Run(size_t index=0) {auto p=pending[index];pending.erase(pending.begin()+in
 int Mode(){return mode;}
 }
 namespace gamestate {uint64_t LocalPlayer(){return session;}}
+namespace monsterimmunity {
+bool ReadPosition(uint32_t id,float out[3]) {
+    assert(id==1||id==2);
+    const auto position=framevr::coordinates::RenderGround({6,0,8},id==1?monsterHeight:-monsterHeight);
+    out[0]=position.x;out[1]=position.y;out[2]=position.z;return positionAvailable;
+}
+}
 namespace framevr::logging {void Write(const char*){}}
 namespace d2rsig {
 bool Check(uint64_t,const void*,uint32_t){return signatures;}
@@ -50,6 +59,7 @@ int main(){
     Tick(now+20,true);assert(pending.size()==1);
     Run();auto shown=Latest(GetTickCount64());
     assert(shown.count==1&&shown.monsters[0].mask==20&&statReads==6);
+    assert(shown.monsters[0].height==17&&std::abs(shown.monsters[0].x-3)<.0001f);
     assert(Latest(GetTickCount64()+501).count==0);
     ++session;assert(Latest(GetTickCount64()).count==0);--session;
 
@@ -70,10 +80,16 @@ int main(){
     statAvailable=true;now+=100;Tick(now,true);Run();assert(Latest(GetTickCount64()).monsters[0].mask==63);
     hostiles.clear();now+=100;Tick(now,true);Run();assert(Latest(GetTickCount64()).count==0);
     hostiles={{1,0,3,4,true}};
+    positionAvailable=false;now+=100;Tick(now,true);Run();assert(Latest(GetTickCount64()).count==0);
+    positionAvailable=true;monsterHeight=-17;now+=100;Tick(now,true);Run();
+    assert(Latest(GetTickCount64()).monsters[0].height==-17);
 
     for(int online:{1,5,7}){mode=online;const int scans=hostileScans;now+=100;Tick(now,true);Run();
         assert(hostileScans==scans&&Latest(GetTickCount64()).count==0);}
     mode=0;signatures=false;now+=100;Tick(now,true);Run();assert(Latest(GetTickCount64()).count==0);
     signatures=true;localServer=false;now+=100;Tick(now,true);Run();assert(Latest(GetTickCount64()).count==0);
     localServer=true;cancelDuringRead=true;now+=100;Tick(now,true);Run();assert(Latest(GetTickCount64()).count==0);
+    Tick(now,false);monsterHeight=17;hostiles={{1,0,3,4,true},{2,0,3,4,true}};
+    now+=100;Tick(now,true);Run();shown=Latest(GetTickCount64());
+    assert(shown.count==2&&shown.monsters[0].height==17&&shown.monsters[1].height==-17);
 }

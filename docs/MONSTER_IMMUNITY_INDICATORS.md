@@ -29,6 +29,14 @@ calculations, including Sunder and item effects, are not evaluated here: a
 marker describes the monster's shared resistance, not a guarantee that a
 particular player's attack cannot damage it.
 
+The fixed-size orbit follows each monster's rendered root position, including
+its own terrain height and the renderer's horizontal terrain offset. Position
+is smoothed in three dimensions; vertical teleports snap to the new height.
+The read-only lookup uses the exact client unit ID and validates the model's
+entity generation and transform component. Missing models or failed layout
+checks hide that marker until a valid position is available. Native particle
+emission and individual monster bounds are future improvements.
+
 The artwork is the gritty glow texture referenced by the game's Feral Rage
 overlay. Our renderer supplies the orbit, trail, scale and color; this is not
 the complete native Feral Rage particle emitter. No Feral Rage state, skill
@@ -48,15 +56,13 @@ provides the Feral Rage artwork; otherwise the procedural fallback is used.
 The local test stage contains these files and a manual installer. It does not modify
 settings, launch the game, or update the regular D2R-PCVR installation.
 
-The initial orbit uses a fixed size and the hero's current floor height, like
-the existing target and loot effects. Check small/large monsters, ramps and
-stairs in the headset: uneven ground can displace the orbit vertically. Native
-particle emission and individual monster bounds are future improvements.
 
 ## Validation
 
 Automated checks cover resistance boundaries, multiple types, failed reads,
 nearest selection, snapshot/session expiry, movement interpolation, teleports,
+individual heights, stale model/entity/component rejection, bounded native
+lookups and player movement independent of monster height,
 artwork validation, and the production vertex and
 pixel shaders on D3D11 WARP. Shader checks include both eyes, each color,
 occlusion, interface masking, inactive-world hiding, trail fading and both texture paths.
@@ -65,9 +71,13 @@ These are separate from live ReShade compilation and headset validation.
 In-game checks for this candidate:
 
 - [x] Compare each colored wisp with the game's immunity label on an offline enemy.
-- [ ] Find a dual-immune enemy and confirm that both colors remain distinguishable.
+- [x] Find a dual-immune enemy and confirm that both colors remain distinguishable.
 - [x] Move around an enemy and check depth, motion, walls, death and area changes.
-- [ ] Apply resistance-lowering effects and check that broken shared immunities clear.
+- [x] Apply resistance-lowering effects and check that broken shared immunities clear.
 - [x] Open menus and leave/rejoin a game; check that indicators hide and return automatically.
-- [ ] Use Feral Rage on the player and verify that its own effect is unchanged.
-- [ ] Check positions on slopes and different monster sizes.
+- [x] Use Feral Rage on the player and verify that its own effect is unchanged.
+- [x] Check positions on slopes and different monster sizes.
+
+All tests have been carried out in-game using a VR headset. Feature functions as expected.
+
+Headset: Pico VR 4 - Visual Desktop

@@ -136,6 +136,8 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "bow.h"
 #include "loot_beam_scan.h"
 #include "monster_immunity.h"
+#include "monster_position_signatures.h"
+#include "../steamvr/monster_position.h"
 #include "wall_cells.h"
 #include "prop_scan.h"
 #include "crossbow.h"
@@ -9251,6 +9253,29 @@ int Lights(Light* out) {
     ReleaseSRWLockShared(&g_lock);
     return n;
 }
+// Owning game thread only. Exact client ID, never the nearest monster's height.
+bool MonsterPosition(uint32_t id,float out[3]) {
+    using namespace monsterimmunity::abi;
+    if(!d2rsig::Check(ContextRva,ContextSig,sizeof ContextSig)||
+       !d2rsig::Check(ContextLayoutRva,ContextLayoutSig,sizeof ContextLayoutSig)||
+       !d2rsig::Check(ManagerLayoutRva,ManagerLayoutSig,sizeof ManagerLayoutSig)||
+       !d2rsig::Check(ManagerBucketsRva,ManagerBucketsSig,sizeof ManagerBucketsSig)||
+       !d2rsig::Check(ModelLayoutRva,ModelLayoutSig,sizeof ModelLayoutSig)||
+       !d2rsig::Check(UnitKeyRva,UnitKeySig,sizeof UnitKeySig)||
+       !d2rsig::Check(RootLayoutRva,RootLayoutSig,sizeof RootLayoutSig)||
+       !d2rsig::Check(TransformTypeRva,TransformTypeSig,sizeof TransformTypeSig)||
+       !d2rsig::Check(TransformLayoutRva,TransformLayoutSig,sizeof TransformLayoutSig))return false;
+    const auto unit=ClientMonster(id);
+    const auto typeSequence=d2rsig::Addr(TransformTypeRva);
+    if(!unit||!typeSequence)return false;
+    const auto context=reinterpret_cast<uintptr_t(*)()>(d2rsig::Addr(ContextRva))();
+    uintptr_t manager=0;
+    if(!context||!Rd(context+0x20,&manager))return false;
+    const auto type=reinterpret_cast<uint32_t(*)()>(typeSequence)();
+    return framevr::immunity::RenderedPosition(manager,d2rsig::Addr(0x2677170),type,unit,
+        [](uintptr_t address,auto& value){return Rd(address,&value);},out);
+}
+
 }  // namespace worldobj
 
 bool WorldMenuBlocksEffects() {
@@ -10311,13 +10336,14 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
         float immunityPos[framevr::immunity::MaxMonsters][4] = {};
         float immunityPhase[framevr::immunity::MaxMonsters] = {};
         if (immunityOn) {
-            const float floor = sv[0].hero[1], shear = framevr::coordinates::GroundShear;
             const uint64_t now = GetTickCount64();
             for (size_t i = 0; i < immunity.count; ++i) {
                 const auto& monster = immunity.monsters[i];
-                const auto xy = framevr::immunity::Position(monster, immunity, now);
-                immunityPos[i][0] = xy[0] * 2.0f + floor * shear - sv[0].hero[0];
-                immunityPos[i][2] = xy[1] * 2.0f + floor * shear - sv[0].hero[2];
+                const auto foot = framevr::immunity::FootPosition(monster, immunity, now,
+                    {sv[0].hero[0],sv[0].hero[1],sv[0].hero[2]});
+                immunityPos[i][0] = foot.x;
+                immunityPos[i][1] = foot.y;
+                immunityPos[i][2] = foot.z;
                 immunityPos[i][3] = float(monster.mask);
                 immunityPhase[i] = float(monster.id % 997u) * 0.063f;
             }
@@ -10920,6 +10946,10 @@ DWORD WINAPI UpdateThread(void*) {
 }
 
 }  // namespace
+
+namespace monsterimmunity {
+bool ReadPosition(uint32_t id,float out[3]) {return worldobj::MonsterPosition(id,out);}
+}
 
 namespace d2rcam {
 // DEV > Character > Sky over rims switches [sky] cover_rims for the session.

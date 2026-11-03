@@ -104,6 +104,8 @@ int main(int argc,char** argv){try {
     s={};s.monster[3]=4;inputs.push_back(s); // fire immune must not draw physical wisp
     s={};s.control[2]=.5f;inputs.push_back(s); // half covered by interface
     s={};s.sample[2]=.5f;inputs.push_back(s); // real mask modulates brightness
+    s={};s.monster[1]+=2;inputs.push_back(s); // monster above the player's floor
+    s={};s.monster[1]-=2;inputs.push_back(s); // monster below the player's floor
     for(bool texture:{false,true}) {
         auto blob=compile(shader,"main","cs_5_0",texture);
         ComPtr<ID3D11Device> device;ComPtr<ID3D11DeviceContext> context;
@@ -139,6 +141,9 @@ int main(int argc,char** argv){try {
             expect(std::abs(pixel(15,eye,0)-(texture?0:.8f))<.0001f,"texture cache is sampled only when present");
             expect(std::abs(pixel(17,eye,0)-.4f)<.0001f,"interface coverage scales glow");
             expect(std::abs(pixel(18,eye,0)-(texture?.4f:.8f))<.0001f,"Feral Rage texture controls the glow");
+            const auto screenY=[&](size_t scene){return values[(scene*4+eye*2)*4+1];};
+            expect(std::abs(screenY(19)-screenY(0)-.5f)<.0001f,"raised monster raises its wisp in both eyes");
+            expect(std::abs(screenY(20)-screenY(0)+.5f)<.0001f,"lower monster lowers its wisp in both eyes");
         }
         expect(values[0]>values[8],"each eye projects from its own position");
         context->Unmap(readback.Get(),0);context->ClearState();
