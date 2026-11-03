@@ -5,24 +5,19 @@
 #include <cstdint>
 #include <vector>
 
-// Spells readied by a glyph and cast by their motion (owner, 2026-11-03: "the sorceress first draws
-// the glyph to "activate" the right spell, then uses the trigger ... to then do the motion to cast
-// it"). A glyph whose skill has a motion readies it instead of casting it, until another glyph
-// readies another or a tap of Draw glyph clears it. While a spell is readied the right trigger is
-// the spell's: held, only that spell's motion is watched, and completing it casts (the transport
-// presses the skill as a glyph does, glyph_cast.h), so mana, cast rate and the spell stay native.
-// Still held, the motion again casts again.
+// Spells cast by their motion (owner, 2026-11-03). Every Sorceress spell with a motion, unless the
+// wheel's MOTIONS page turned it off, casts by it while both grips are held (owner: "we are tracking
+// motion all the time so it gets triggered in unwanted situations", "what about holding both grips to
+// cast?"): no button or glyph needed. The transport runs one watcher per motion (free: watched while
+// active, the grips' hold) and casts the first to complete as a glyph casts (glyph_cast.h), so mana,
+// cast rate and the spell stay native. Held, the motion again casts again.
 //
-// Free (owner, 2026-11-03: "any spell we already have added to either hand's spell wheels should be
-// accessible to us by simply doing the motion of it"): a spell on a hand slot casts by its motion, no
-// glyph; the transport runs one watcher per motion and takes the first to complete. Only while both
-// grips are held (owner, the same day: "we are tracking motion all the time so it gets triggered in
-// unwanted situations ... put a button that you have to hold while you're doing the motion", then
-// "what about holding both grips to cast?"): the transport makes them active only then.
+// The first prototype readied a glyph's spell on the right trigger instead (Input::held, a gate
+// pressed fresh, with a drop logged on its release: the tests still use it); the MOTIONS page retired
+// that ("I don't want this to get over complicated").
 //
-// Prototype: the Sorceress's self-casts and bursts, which need no target. Head-local frame as
-// holycross (+X right, +Y up from the eyes, forward -Z, the head's yaw only); hand 0 is the right.
-// Value-only: steamvr/spell_motion_test.cpp.
+// Head-local frame as holycross (+X right, +Y up from the eyes, forward -Z, the head's yaw only); hand
+// 0 is the right. Value-only: steamvr/spell_motion_test.cpp.
 namespace framevr::spellmotion {
 enum class Motion {None,FlingOut,PushDown,RubSnap,CrossGuard,ArmUp,MatchStrike,ForearmSweep,Shake,Hug,Punch};
 constexpr int MotionCount=int(Motion::Punch);   // the motions, 1..MotionCount
@@ -41,13 +36,28 @@ inline Motion For(int skill) {
     default:return Motion::None;
     }
 }
-// What to do, for the log when a spell is readied.
+// The MOTIONS page (the wheel; owner 2026-11-03: "a place where you can see the motion spells that are
+// active"): the motion spells in the order it shows them (skill ids, the trees' order), each with its
+// bit in [motions] off (the motion's number - 1), set to turn it off.
+constexpr int PageSkills[MotionCount]={40,42,44,46,48,50,54,57,58,60};
+inline int Bit(int skill){const int m=int(For(skill));return m>0?m-1:-1;}
+inline int OffMask(float value){return std::isfinite(value)?std::clamp(int(std::lround(value)),0,(1<<MotionCount)-1):0;}
+inline bool On(int skill,int off){const int b=Bit(skill);return b>=0&&!((off>>b)&1);}
+// Its name, for a hero without the spell (the catalog has none then).
+inline const char* SpellName(int skill) {
+    switch(skill) {
+    case 40:return "Frozen Armor";case 42:return "Static Field";case 44:return "Frost Nova";case 46:return "Blaze";
+    case 48:return "Nova";case 50:return "Shiver Armor";case 54:return "Teleport";case 57:return "Thunder Storm";
+    case 58:return "Energy Shield";case 60:return "Chilling Armor";default:return "";
+    }
+}
+// How to do it: on the MOTIONS page and in the log.
 inline const char* Cue(Motion m) {
     switch(m) {
     case Motion::FlingOut:return "bring the hands together, then fling both arms out wide";
     case Motion::PushDown:return "push both hands down toward the floor";
     case Motion::RubSnap:return "rub the palms together, then snap them apart";
-    case Motion::CrossGuard:return "cross the forearms in front of the face and hold";
+    case Motion::CrossGuard:return "both hands up at the face, close together (crossed or not), and hold";
     case Motion::ArmUp:return "raise one arm straight up and hold";
     case Motion::MatchStrike:return "strike one hand down the thigh, hip to knee";
     case Motion::ForearmSweep:return "sweep the left hand from the right hand up to the right shoulder";

@@ -389,6 +389,7 @@ add_test(NAME interaction-developer-tab-test COMMAND interaction-preview "${CMAK
 add_test(NAME sewer-prompt-art-test COMMAND interaction-preview "${CMAKE_CURRENT_BINARY_DIR}/sewer-prompt.png" --sewer-prompt-check)
 add_test(NAME skill-card-fit-test COMMAND interaction-preview "${CMAKE_CURRENT_BINARY_DIR}/skill-editor.png" --editor-check)
 add_test(NAME interaction-glyphs-test COMMAND interaction-preview "${CMAKE_CURRENT_BINARY_DIR}/glyphs-preview.png" --glyphs-check)
+add_test(NAME interaction-motions-test COMMAND interaction-preview "${CMAKE_CURRENT_BINARY_DIR}/motions-preview.png" --motions-check)
 set_tests_properties(sewer-prompt-art-test PROPERTIES TIMEOUT 10)
 add_test(NAME notice-card-art-test COMMAND interaction-preview "${CMAKE_CURRENT_BINARY_DIR}/notice-cards.png" --notice-card-check)
 set_tests_properties(notice-card-art-test PROPERTIES TIMEOUT 10)

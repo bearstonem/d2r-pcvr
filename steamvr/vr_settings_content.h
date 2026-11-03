@@ -704,6 +704,8 @@ inline constexpr Override Overrides[]={
     {.id="glyphs.draw_slot",.page=NotInMenu},{.id="glyphs.circle",.page=NotInMenu},{.id="glyphs.triangle",.page=NotInMenu},
     {.id="glyphs.square",.page=NotInMenu},{.id="glyphs.lightning",.page=NotInMenu},{.id="glyphs.spiral",.page=NotInMenu},
     {.id="glyphs.v",.page=NotInMenu},{.id="glyphs.star",.page=NotInMenu},{.id="glyphs.wave",.page=NotInMenu},
+    // Motions: edited on the wheel's MOTIONS page.
+    {.id="motions.off",.page=NotInMenu},
 };
 #undef FRAMEVR_OPTIONS
 #undef FRAMEVR_NAMES
