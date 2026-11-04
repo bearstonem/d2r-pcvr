@@ -90,6 +90,7 @@
 #include "stats_button.h"
 #include "menu_drop.h"
 #include "respec_button.h"
+#include "stash_buttons.h"
 #include "native_panels.h"
 #include "npc_dialogue.h"
 #include "native_hud.h"
@@ -868,6 +869,11 @@ std::atomic<bool> leftDominant{false};
 // Save and Exit from the Options tab tore the level down under it (automap.cpp:636 assert,
 // then an access violation on the draw thread).
 bool leatherHudVitals=false;
+// Stash navigation plaques share the Character button's art and pointer path.
+bool stashArtReady=false,stashShown=false;
+int stashHover=-1;
+uint16_t stashPad=0;
+stashbuttons::Input stashInput;
 // Reset Skills & Stats on the Character page (respec_button.h): its faces painted
 // into the static image; shown and lit this frame (MenuPointer); two pulls on it
 // ask vr/respec.cpp for the game's own reset. No game input is sent.
@@ -1085,6 +1091,7 @@ void ClearInput() {
     panelinput::WorldInput(false);
     gamestate::MenuMap(false);
     menuControls.Suspend();menuNavigation.Reset();nativeMenuPad={};laserClick={};panelinput::UseController();
+    stashInput.Reset();stashShown=false;stashPad=0;
     statsPress.Reset();statsShown=statsLit=false;menuDrop.Reset();
     handControls.Suspend();
     bodyCalibration.Suspend();
@@ -1624,7 +1631,7 @@ std::vector<uint8_t> PaintPointer() {
 // read-only UI adapter.
 // Reset Skills & Stats' label as coverage (0-255 per texel, w x h): GDI's
 // antialiased Georgia bold (the sewer prompt's face), the largest that fits.
-std::vector<uint8_t> RespecLabel(const wchar_t* text,int w,int h) {
+std::vector<uint8_t> RespecLabel(const wchar_t* text,int w,int h,int maximumFontHeight=0) {
     std::vector<uint8_t> coverage;
     BITMAPINFO info{};info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);
     info.bmiHeader.biWidth=w;info.bmiHeader.biHeight=-h;info.bmiHeader.biPlanes=1;info.bmiHeader.biBitCount=32;
@@ -1634,12 +1641,13 @@ std::vector<uint8_t> RespecLabel(const wchar_t* text,int w,int h) {
     auto old=SelectObject(dc,bitmap);std::memset(bits,0,size_t(w)*h*4);
     SetBkMode(dc,TRANSPARENT);SetTextColor(dc,RGB(255,255,255));
     bool fits=false;
-    for(int px=h*30/64;px>=h/4&&!fits;px-=2) {
+    const int fontScaleHeight=maximumFontHeight>0?std::min(h,maximumFontHeight*64/30):h;
+    for(int px=maximumFontHeight>0?maximumFontHeight:h*30/64;px>=fontScaleHeight/4&&!fits;px-=2) {
         HFONT font=CreateFontW(px,0,0,0,FW_BOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,
             ANTIALIASED_QUALITY,DEFAULT_PITCH,L"Georgia");
         auto before=SelectObject(dc,font);RECT measured{0,0,0,0};
         DrawTextW(dc,text,-1,&measured,DT_CALCRECT|DT_SINGLELINE|DT_NOPREFIX);
-        fits=measured.right<=w-h*7/16||px-2<h/4;   // clear of the rim (respec_button.h)
+        fits=measured.right<=w-fontScaleHeight*7/16||px-2<fontScaleHeight/4;   // keep labels inset without scaling them with a taller face
         if(fits){RECT bounds{0,0,w,h};DrawTextW(dc,text,-1,&bounds,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX);}
         SelectObject(dc,before);DeleteObject(font);
     }
@@ -1776,7 +1784,17 @@ bool SetupStatic(DXGI_FORMAT eyeFormat) {
         ok=face(int(respecbutton::Face::Confirm),true,RespecLitConfirm)&&ok;
         return ok;
     }();
+    bool stashPainted=true;
+    for(int i=0;i<4;++i) {
+        const bool lit=(i%2)!=0;
+        auto px=stashbuttons::PaintFace(stashbuttons::Width,stashbuttons::Height,lit);
+        const auto label=RespecLabel(stashbuttons::Labels[i/2],stashbuttons::Width,stashbuttons::Height,stashbuttons::LabelHeight);
+        if(label.empty()){stashPainted=false;continue;}
+        respecbutton::Stamp(px,label,stashbuttons::Width,stashbuttons::Height,lit);
+        stashPainted=put(px,Stash(i))&&stashPainted;
+    }
     if(!UploadAtlas(staticChain,eyeFormat,StaticWidth,StaticHeight,pixels))return false;
+    stashArtReady=stashPainted;
     statsIconReady=statsPainted;
     respecArtReady=respecPainted;
     if(!respecPainted)Say("Frame panels: Reset Skills & Stats could not be painted; the button stays hidden");
@@ -1955,7 +1973,7 @@ XrPosef UiSurfacePose() {
 void MenuPointer(const menus::Pad& controls) {
     nativeMenuPad={};
     pointerVisible=pointerHit=false;
-    if(settingsModel.open||bodyCalibration.Active()||calibrationRelease.blocked){panelinput::ItemHover(false);menuDrop.Reset();respecShown=false;respecButton.Hide();return;}
+    if(settingsModel.open||bodyCalibration.Active()||calibrationRelease.blocked){panelinput::ItemHover(false);menuDrop.Reset();stashInput.Reset();stashShown=false;stashPad=0;respecShown=false;respecButton.Hide();return;}
     const bool spatialReady=spatialMode&&SurfacePlaced()&&uiCrop[2]>0;
     const bool uiActive=(panelMode&&menuPlaced)||spatialReady;
     const auto surfacePose=spatialMode?UiSurfacePose():menuPose;
@@ -2015,7 +2033,13 @@ void MenuPointer(const menus::Pad& controls) {
             if(!respec::Request()){respecButton.Refused();Say("Frame panels: Reset Skills & Stats refused (not an offline game, or a reset already running)");}
         } else if(respecButton.Confirming())Say("Frame panels: Reset Skills & Stats - Confirm? shown");
     }
-    const bool onButton=onStats||onRespec;   // a stamped button: no game cursor, no game trigger
+    stashShown=stashArtReady&&spatialReady&&!journalMode&&gamestate::StashButtonsShown();
+    stashHover=-1;
+    if(stashShown&&focused&&aimTracked&&pointerHit&&!(mouseDown||rightMouseDown))
+        for(int i=0;i<2;++i)
+            if(respecbutton::Hit(stashbuttons::Place(surface.width,surface.height,i),surface.width,surface.height,hit.u,hit.v))stashHover=i;
+    stashPad=stashInput.Step(stashShown&&uiActive&&focused,stashHover,pressed,respecNow);
+    const bool onButton=onStats||onRespec||stashHover>=0;   // a stamped button: no game cursor, no game trigger
     // An item on the game's cursor and a trigger pull begun off the menu's art (past or on the
     // hide, or the band's see-through margins): the pad's X, the controller menu's own Drop for
     // the item held (menu_drop.h). The tabbed menu (and its cube) only; never without an item on
@@ -2046,8 +2070,9 @@ void MenuPointer(const menus::Pad& controls) {
     // navigation" / "laser navigation" every second while walking and turning), hiding it.
     menus::Pad navigation=controls;
     if(leatherMode&&leatherShown.load())navigation.lx=navigation.ly=navigation.rx=navigation.ry=0;
-    if(onButton||statsPress.Held()||respecPress.Held()||dropOwns)navigation.rt=0;   // a button's or the drop's trigger is never the game's RT
+    if(onButton||statsPress.Held()||respecPress.Held()||stashInput.Held()||dropOwns)navigation.rt=0;   // a button's or the drop's trigger is never the game's RT
     nativeMenuPad=menuNavigation.Step(uiActive&&focused,navigation,pointerHit&&!onButton,hit.u,hit.v,mouseDown||rightMouseDown);
+    nativeMenuPad.buttons|=stashPad;
     if(statsPress.Held())nativeMenuPad.buttons|=menus::Back;   // View: Advanced Stats (Start closes the menu)
     if(menuDrop.Down())nativeMenuPad.buttons|=menus::X;   // X: the controller menu's Drop for the item on the cursor
     if(wasNative!=menuNavigation.Native()&&uiActive&&focused)
@@ -3263,7 +3288,7 @@ void Input() {
         }
     } else leatherStow.Reset();
     if(!settingsOwned&&!settingsChord)MenuPointer(controls);
-    else {menuDrop.Reset();nativeMenuPad={};menuNavigation.Reset();panelinput::UseController();pointerVisible=pointerHit=false;triggerWasDown=Float(trigger,0)>.2f;cancelWasDown=Bool(secondary,0);}
+    else {stashInput.Reset();stashShown=false;stashPad=0;menuDrop.Reset();nativeMenuPad={};menuNavigation.Reset();panelinput::UseController();pointerVisible=pointerHit=false;triggerWasDown=Float(trigger,0)>.2f;cancelWasDown=Bool(secondary,0);}
     // The native Back went to the game above; one it leaves unanswered closes the menu (leather::Back).
     if(leatherBack.Step(leatherMode&&!settingsOwned&&!settingsChord,(controls.buttons&menus::B)!=0,mouseDown||rightMouseDown,
                         gamestate::PanelChanges(),GetTickCount64())&&gamestate::CloseLeatherMenu())
@@ -6135,6 +6160,16 @@ void EndPair() {
         motionQuad(respecQuad,XrPose({p,q}),spot.width,spot.height,Rect(panelatlas::Respec(picture)),staticChain);
         respecQuad.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;   // premultiplied (SetupStatic)
     }
+    XrCompositionLayerQuad stashQuads[2]={{XR_TYPE_COMPOSITION_LAYER_QUAD},{XR_TYPE_COMPOSITION_LAYER_QUAD}};
+    if(book.subImage.swapchain&&stashShown&&staticChain) {
+        const auto size=UiSurfaceSize();const auto at=UiSurfacePose();const auto q=Q(at.orientation);
+        for(int i=0;i<2;++i) {
+            const auto spot=stashbuttons::Place(size.width,size.height,i);
+            const auto p=V(at.position)+math::Rotate(q,{spot.x,spot.y,.004f});
+            motionQuad(stashQuads[i],XrPose({p,q}),spot.width,spot.height,Rect(panelatlas::Stash(i*2+(stashHover==i))),staticChain);
+            stashQuads[i].layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+        }
+    }
     XrCompositionLayerQuad settingsPanel{XR_TYPE_COMPOSITION_LAYER_QUAD};
     if(layer&&(settingsModel.open||bodyCalibration.Active())&&settingsImageReady){
         // The help card is inside the panel: its region is the panel, Width wide.
@@ -6823,7 +6858,7 @@ void Shutdown(bool preserveResolution) {
     noticeWatch={};noticeCards.Clear();noticeCard={};noticePaintRequest=noticeRequestedSequence=noticePaintedSequence=0;noticeAtlasPending=noticeImageReady=false;
     heartStream.Stop();heartPlaying=false;heartLevel.Reset();heartAt=0;heartHush.Reset();heartHealth=-1;
     guardStrain.Reset();strainOutput={};strainPaintKey=~0ull;strainPaintSession=0;strainPaintAt=0;strainAtlasPending=strainImageReady=strainSlotReported=false;
-    if(staticChain&&pDestroySwapchain)pDestroySwapchain(staticChain);staticChain=pointerChain=leatherChain=XR_NULL_HANDLE;statsIconReady=statsShown=statsLit=false;
+    if(staticChain&&pDestroySwapchain)pDestroySwapchain(staticChain);staticChain=pointerChain=leatherChain=XR_NULL_HANDLE;stashArtReady=stashShown=false;stashInput.Reset();stashPad=0;statsIconReady=statsShown=statsLit=false;
     if(aimSpace&&pDestroySpace)pDestroySpace(aimSpace);aimSpace=XR_NULL_HANDLE;
     if(leftAimSpace&&pDestroySpace)pDestroySpace(leftAimSpace);leftAimSpace=XR_NULL_HANDLE;
     if(gazeSpace&&pDestroySpace)pDestroySpace(gazeSpace);gazeSpace=XR_NULL_HANDLE;
