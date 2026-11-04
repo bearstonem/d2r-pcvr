@@ -903,6 +903,20 @@ int main(int argc,char** argv){
               Normalize(LootPick,7)==1&&Normalize(LootPick,-1)==1&&Normalize(LootPick,NAN)==1,
               "only 0 reads Off; On, the retired 2 (On with glow), or anything else reads On, the default");
     }
+    {
+        Model m;m.Open(s);m.view=View::Combat;
+        const auto* row=content::RowOf(SummonRangeMultiplier);
+        Check(Defaults()[SummonRangeMultiplier]==1&&row&&row->page==View::Combat&&row->kind==content::RowKind::Slider,
+              "one shared summon range slider defaults to native on Combat");
+        Check(Definitions[SummonRangeMultiplier].min==1&&Definitions[SummonRangeMultiplier].max==5&&Definitions[SummonRangeMultiplier].step==.25f,
+              "shared range slider supports 1x to 5x in quarter steps");
+        m.Click(Step(SummonRangeMultiplier));
+        Check(m.Get()[SummonRangeMultiplier]==1.25f,"summon range advances fractionally");
+        layout::ApplyPreset(m,0);
+        Check(m.Get()[SummonRangeMultiplier]==1.25f,"presets preserve summon range");
+        Check(Normalize(SummonRangeMultiplier,NAN)==1&&Normalize(SummonRangeMultiplier,0)==1&&Normalize(SummonRangeMultiplier,6)==5,
+              "shared multiplier normalizes invalid and out-of-range choices");
+    }
     PrintReport();
     std::puts("VR settings draft, persistence requests, conflicts, row rules and input-gating tests passed");
 }

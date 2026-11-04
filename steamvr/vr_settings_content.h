@@ -223,7 +223,7 @@ struct GuideLine {
 inline constexpr ContentPage PageTable[]={
     {View::Presets,"Presets",Group::Tools,Icon::Presets,"Each preset sets only the rows it lists. Point at one to see what it changes.",false},
     {View::Body,"Body",Group::You,Icon::Body,"Fit the mod to your hands, turning and play space.",true},
-    {View::Combat,"Combat",Group::Fight,Icon::Combat,"How your real swings, stabs and throws hit.",true},
+    {View::Combat,"Combat",Group::Fight,Icon::Combat,"Motion combat, weapon skills, throws and summon ranges.",true},
     {View::Aim,"Aim",Group::Fight,Icon::Aim,"Where your spells and skills go. Rows for other classes stay hidden.",true},
     {View::Targets,"Targets",Group::Fight,Icon::Targets,"What you see of your aim. Nothing here changes where a skill goes.",true},
     {View::Shield,"Shield",Group::Fight,Icon::Shield,"Bash, block and seat a shield on your arm.",true},
@@ -246,7 +246,7 @@ static_assert(std::size(PageTable)==size_t(View::Count),"one page per view, in V
 // within its page.
 inline constexpr ContentSection SectionTable[]={
     {View::Body,"Hands and moving"},{View::Body,"Potion belt"},{View::Body,"Measurements"},
-    {View::Combat,"Melee"},{View::Combat,"Skills and throws"},
+    {View::Combat,"Melee"},{View::Combat,"Skills and throws"},{View::Combat,"Summons"},
     {View::Aim,"Spells and skills"},{View::Aim,"Ground skills"},
     {View::Targets,"Monster outline"},{View::Targets,"Bow"},
     {View::Shield,"Bash and block"},{View::Shield,"Fit on the arm"},
@@ -434,6 +434,10 @@ inline constexpr Override Overrides[]={
     {.id="gameplay.throw_lift_deg",.page=View::Combat,.section="Skills and throws",.kind=RowKind::Stepper,.label="Thrown weapon lift",
      .help="Your hand dips as you let go. This lifts javelins, knives, axes and thrown potions above that path. Minus lowers them; Off follows your hand.",
      .format={.unit=Degrees,.sign=true},FRAMEVR_NAMES(OffAtZero),.classes=Amazon|Barbarian|Assassin|WithThrown},
+
+    // Combat: Summons
+    {.id="gameplay.summon_range_multiplier",.page=View::Combat,.section="Summons",.kind=RowKind::Slider,.label="Summon range",
+     .help="Multiplies summon target search and owner-follow ranges together. Mercenaries and attack reach stay native. Apply, then restart the game.",.warn="Requires restart",.format={.unit="x",.decimals=2}},
 
     // Aim: Spells and skills (Aim with your view sits here: it is not a ground skill)
     {.id="gameplay.spell_lock",.page=View::Aim,.section="Spells and skills",.kind=RowKind::Choice,.label="Skills go to the aimed monster",
