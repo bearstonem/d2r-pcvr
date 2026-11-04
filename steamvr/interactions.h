@@ -187,6 +187,11 @@ inline Vec Spin(Quat from,Quat to,float dt) {
 inline bool Throwable(Potion type) {
     return type==Potion::Health||type==Potion::Rejuvenation||type==Potion::Antidote||type==Potion::Thawing;
 }
+// A negative distance means there is no live hireling. Assistance only
+// removes the landing-distance requirement; native potion-use rules remain.
+inline bool MercThrowAccepted(float distance,bool mercPotionAutoaimEnabled) {
+    return std::isfinite(distance)&&distance>=0&&(mercPotionAutoaimEnabled||distance<=1.5f);
+}
 inline double LandingTime(Vec p,Vec v,float floor) {
     const double drop=double(p.y)-floor;
     if(!std::isfinite(drop)||drop<=0||!std::isfinite(v.y))return -1;

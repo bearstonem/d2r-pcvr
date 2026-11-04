@@ -422,6 +422,14 @@ int main(){
     vrsettings::Poll(name);Check(vrsettings::Read().values[LootPick]==1,"an unknown loot_pick reads On, the default");
     Check(WritePrivateProfileStringW(L"interactions",L"loot_pick",nullptr,name),"remove the loot pick");
     vrsettings::Poll(name);
+    Check(vrsettings::Read().values[MercPotionAssist]==0,"missing merc potion assist retains old landing behavior");
+    for(int choice:{1,0}) {
+        model.Open(vrsettings::Read());model.Click({Kind::Change,MercPotionAssist,choice?1:-1});request=model.Click({Kind::Apply});
+        Check(request.changed==(ChangeMask{1}<<MercPotionAssist),"merc assist transaction isolates toggle");
+        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"merc assist preference saves");
+        Check(vrsettings::Read().values[MercPotionAssist]==choice&&Int(path,L"gameplay",L"merc_potion_assist")==choice,
+              "merc assist on and off survive reload");
+    }
     model.Open(vrsettings::Read());model.Click({Kind::Change,Motion,-1});request=model.Click({Kind::Apply});
     Check(DeleteFileW(name)&&vrsettings::Submit(request)&&!vrsettings::Poll(name),"missing file fails safely");
     Check(!vrsettings::Read().ready&&vrsettings::Read().result==Result::Failed,"failure status published");

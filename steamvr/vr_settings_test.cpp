@@ -903,6 +903,20 @@ int main(int argc,char** argv){
               Normalize(LootPick,7)==1&&Normalize(LootPick,-1)==1&&Normalize(LootPick,NAN)==1,
               "only 0 reads Off; On, the retired 2 (On with glow), or anything else reads On, the default");
     }
+    {
+        Model m;m.Open(s);m.view=View::Aim;
+        const auto* row=content::RowOf(MercPotionAssist);
+        Check(Defaults()[MercPotionAssist]==0&&row&&row->page==View::Aim&&row->kind==content::RowKind::Toggle,
+              "merc potion throw autoaim defaults off on Aim");
+        Check(RowShown(MercPotionAssist,m.Get(),{})&&RowShown(MercPotionAssist,m.Get(),{heroclass::Barbarian}),
+              "merc potion throw autoaim is available without outlines or a bow");
+        m.Click(Step(MercPotionAssist));
+        Check(m.Get()[MercPotionAssist]==1,"merc potion throw autoaim toggles on");
+        layout::ApplyPreset(m,0);
+        Check(m.Get()[MercPotionAssist]==1,"presets preserve merc potion throw autoaim");
+        m.Click(Step(MercPotionAssist));
+        Check(m.Get()[MercPotionAssist]==0,"merc potion throw autoaim toggles off");
+    }
     PrintReport();
     std::puts("VR settings draft, persistence requests, conflicts, row rules and input-gating tests passed");
 }
