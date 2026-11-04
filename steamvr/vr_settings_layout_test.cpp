@@ -93,6 +93,7 @@ static const GoldenRow Golden[]={
     {"gameplay.low_life_heart_start",View(8),0,content::RowKind::Stepper,"Heartbeat starts at",0,1},
     {"hud.blood_visor",View(8),0,content::RowKind::Toggle,"Blood on visor",0,0},
     {"hud.blood_wipe",View(8),0,content::RowKind::Toggle,"Wipe blood by hand",0,0},
+    {"interactions.click_to_drink",View::Survival,0,content::RowKind::Toggle,"Click to drink",0,0},
     {"gameplay.offline_players",View(8),1,content::RowKind::Stepper,"Offline difficulty",0,2},
     {"gameplay.enemy_sight_pct",View(8),1,content::RowKind::Slider,"Monster sight range",0,0},
     {"gameplay.companion_ai",View(8),1,content::RowKind::Toggle,"Smarter mercenary",0,0},
@@ -243,6 +244,16 @@ int main(int argc,char** argv){
             Check(!(RowShown(Snap,v,c)&&RowShown(TurnSpeed,v,c)),"Snap turn angle and Smooth turn speed are never shown together (the compile-time count relies on it)");
             if(content::PageOf(View(view)).settings&&View(view)!=View::More)Check(n>=1,std::string("a settings page shows rows: ")+ViewName(View(view)));
         }
+    }
+    {
+        const auto* drinking=content::RowOf(ClickToDrink);
+        Check(drinking&&!drinking->beside&&drinking->page==View::Survival,"Click to drink has its own row on Survival");
+        Values v=Defaults();v[BloodVisor]=1;
+        Check(L::CountRows(View::Survival,v,{})==8,"Survival fits eight rows with Click to drink and blood wiping visible");
+        const auto rows=L::RowsOf(View::Survival,v,{});
+        bool found=false;
+        for(int i=0;i<rows.count;++i)if(rows.keys[size_t(i)]==ClickToDrink)found=true;
+        Check(found,"Click to drink appears on Survival");
     }
     // Title screen, everything on: the fullest pages.
     {

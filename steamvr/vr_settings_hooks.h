@@ -33,7 +33,7 @@ inline bool ModelSteps(Key k){return k==SpellLock||k==BowLaser;}
 // Presets never set these: the owner's calls (stereo rendering, the GPU wait,
 // elemental hands, the smarter mercenary) and calibration's own keys.
 inline bool PresetSkips(Key k){
-    return k==StereoRendering||k==DeferGpuWait||k==ElementalHands||k==CompanionAi||k==EyeHeight||k==ArmSpan||k==BodyCalibration;
+    return k==ClickToDrink||k==StereoRendering||k==DeferGpuWait||k==ElementalHands||k==CompanionAi||k==EyeHeight||k==ArmSpan||k==BodyCalibration;
 }
 // A preset card lists these first, in the comfort color: they change how the
 // game feels on the stomach.

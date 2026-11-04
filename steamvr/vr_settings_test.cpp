@@ -903,6 +903,18 @@ int main(int argc,char** argv){
               Normalize(LootPick,7)==1&&Normalize(LootPick,-1)==1&&Normalize(LootPick,NAN)==1,
               "only 0 reads Off; On, the retired 2 (On with glow), or anything else reads On, the default");
     }
+    {
+        Model m;m.Open(s);m.view=View::Survival;
+        const auto* row=content::RowOf(ClickToDrink);
+        Check(Defaults()[ClickToDrink]==0&&row&&row->page==View::Survival&&row->kind==content::RowKind::Toggle,
+              "click to drink defaults off on Survival");
+        m.Click(Step(ClickToDrink));
+        Check(m.Get()[ClickToDrink]==1,"click to drink toggles on");
+        layout::ApplyPreset(m,0);
+        Check(m.Get()[ClickToDrink]==1,"presets preserve click to drink");
+        m.Click(Step(ClickToDrink));
+        Check(m.Get()[ClickToDrink]==0,"click to drink toggles off");
+    }
     PrintReport();
     std::puts("VR settings draft, persistence requests, conflicts, row rules and input-gating tests passed");
 }
