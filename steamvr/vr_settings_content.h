@@ -229,7 +229,7 @@ inline constexpr ContentPage PageTable[]={
     {View::Shield,"Shield",Group::Fight,Icon::Shield,"Bash, block and seat a shield on your arm.",true},
     {View::Wrist,"Wrist",Group::Info,Icon::Wrist,"What your left hand shows when you look at it.",true},
     {View::Interface,"Interface",Group::Info,Icon::Interface,"Game menus, button names and labels.",true},
-    {View::Survival,"Survival",Group::World,Icon::Survival,"Warnings when you are hurt, and how tough offline monsters are.",true},
+    {View::Survival,"Survival",Group::World,Icon::Survival,"Low-life warnings, offline monsters and potion drinking.",true},
     {View::World,"World",Group::World,Icon::World,"Extra sights and moving things the mod adds to the game world.",true},
     {View::Vibration,"Vibration",Group::Device,Icon::Haptics,"Controller vibration. Feel it uses the strength shown here, before you apply.",true},
     {View::Performance,"Performance",Group::Device,Icon::Performance,"Everything that changes the frame rate, with the last second's frame times below.",true},
@@ -582,9 +582,12 @@ inline constexpr Override Overrides[]={
      .help="Blood splashes the edges of your view as life drops below 60%, 40% and 20%. Healing back up fades it."},
     {.id="hud.blood_wipe",.page=View::Survival,.section="Low life",.kind=RowKind::Toggle,.label="Wipe blood by hand",
      .help="Wave a hand side to side in front of your face, trigger released, to wipe the blood away. It does not heal you."},
+    {.id="interactions.click_to_drink",.page=View::Survival,.section="Low life",.kind=RowKind::Toggle,.label="Click to drink",
+     .help="On: hold a flask and press that hand's trigger to drink. The mouth gesture still works. Off: bring the opening to your mouth and tip to drink."},
+
     // Survival: Offline monsters
     {.id="gameplay.offline_players",.page=View::Survival,.section="Offline monsters",.kind=RowKind::Stepper,.label="Offline difficulty",
-     .help="Monsters as tough as in a game of this many players, with more experience and loot. Applies to monsters that spawn after Apply.",
+     .help="Offline monsters scale for this many players, with more experience and loot.",
      .format={.unit="players"},FRAMEVR_NAMES(OfflinePlayersNames)},
     {.id="gameplay.enemy_sight_pct",.page=View::Survival,.section="Offline monsters",.kind=RowKind::Slider,.label="Monster sight range",
      .help="How far away monsters notice you offline. 100% is the game's range; 300% is three times as far.",
@@ -811,7 +814,7 @@ inline constexpr GuideLine GuideTable[]={
 // Under Offline difficulty: the card leads with the note; without the
 // offline scaling adapter, main's notice instead (row and card), and the row
 // stays editable as on main.
-inline constexpr const char* OfflineNote="Difficulty affects new monsters only; existing monsters keep their stats. To apply it throughout the game, Save and Exit, then start a new game with the same character.";
+inline constexpr const char* OfflineNote="Only new monsters change. Save and Exit, then rejoin with the same character to refresh them all.";
 inline constexpr const char* OfflineUnavailable="Offline scaling adapter unavailable. Game difficulty remains unchanged.";
 inline constexpr const char* OfflineUnavailableShort="Offline scaling adapter unavailable";
 // Under Button names: the controllers the headset reports.
