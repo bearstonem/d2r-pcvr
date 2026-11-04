@@ -224,7 +224,7 @@ inline constexpr ContentPage PageTable[]={
     {View::Presets,"Presets",Group::Tools,Icon::Presets,"Each preset sets only the rows it lists. Point at one to see what it changes.",false},
     {View::Body,"Body",Group::You,Icon::Body,"Fit the mod to your hands, turning and play space.",true},
     {View::Combat,"Combat",Group::Fight,Icon::Combat,"How your real swings, stabs and throws hit.",true},
-    {View::Aim,"Aim",Group::Fight,Icon::Aim,"Where your spells and skills go. Rows for other classes stay hidden.",true},
+    {View::Aim,"Aim",Group::Fight,Icon::Aim,"Spell and skill aim, and mercenary potion throws. Rows for other classes stay hidden.",true},
     {View::Targets,"Targets",Group::Fight,Icon::Targets,"What you see of your aim. Nothing here changes where a skill goes.",true},
     {View::Shield,"Shield",Group::Fight,Icon::Shield,"Bash, block and seat a shield on your arm.",true},
     {View::Wrist,"Wrist",Group::Info,Icon::Wrist,"What your left hand shows when you look at it.",true},
@@ -247,7 +247,7 @@ static_assert(std::size(PageTable)==size_t(View::Count),"one page per view, in V
 inline constexpr ContentSection SectionTable[]={
     {View::Body,"Hands and moving"},{View::Body,"Potion belt"},{View::Body,"Measurements"},
     {View::Combat,"Melee"},{View::Combat,"Skills and throws"},
-    {View::Aim,"Spells and skills"},{View::Aim,"Ground skills"},
+    {View::Aim,"Spells and skills"},{View::Aim,"Ground skills"},{View::Aim,"Mercenary"},
     {View::Targets,"Monster outline"},{View::Targets,"Bow"},
     {View::Shield,"Bash and block"},{View::Shield,"Fit on the arm"},
     {View::Wrist,"Life and mana"},{View::Wrist,"Map"},
@@ -456,6 +456,10 @@ inline constexpr Override Overrides[]={
     {.id="gameplay.landing_circles",.page=View::Aim,.section="Ground skills",.kind=RowKind::Toggle,.label="Landing circles",
      .help="A circle on the floor in the skill's color shows where it will land. It fills up until the skill hits.",
      .classes=Sorceress|Assassin|Druid|Necromancer},
+
+    // Mercenary potion assistance, independent of class and outline settings.
+    {.id="gameplay.merc_potion_assist",.page=View::Aim,.section="Mercenary",.kind=RowKind::Toggle,.label="Merc potion throw autoaim",
+     .help="On: thrown potions feed your living mercenary wherever they land. Off: land within 1.5 m of its feet; misses keep the potion. Slow releases return it."},
 
     // Targets: Monster outline (left before right)
     {.id="gameplay.target_outline_pct",.page=View::Targets,.section="Monster outline",.kind=RowKind::Slider,.label="Monster outline",

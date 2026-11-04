@@ -55,6 +55,7 @@ static const GoldenRow Golden[]={
     {"gameplay.aim_follows_view",View(3),0,content::RowKind::Toggle,"Aim with your view",0,0},
     {"gameplay.ground_aim",View(3),1,content::RowKind::Choice,"Ground skill aim",3,0},
     {"gameplay.landing_circles",View(3),1,content::RowKind::Toggle,"Landing circles",0,0},
+    {"gameplay.merc_potion_assist",View::Aim,2,content::RowKind::Toggle,"Merc potion throw autoaim",0,0},
     {"gameplay.target_outline_pct",View(4),0,content::RowKind::Slider,"Monster outline",0,1},
     {"gameplay.aim_highlights",View(4),0,content::RowKind::Choice,"Outlines shown",2,0},
     {"gameplay.highlight_left_hue",View(4),0,content::RowKind::Swatch,"Left hand outline color",0,1},
@@ -248,7 +249,8 @@ int main(int argc,char** argv){
     {
         Values v=state(0b0100'0101);v[GroundAim]=2;
         Check(L::CountRows(View::Vibration,v,{})==8&&L::CountRows(View::Shield,v,{})==7,"Vibration holds 8 rows; Shield 7 (one guard strain switch since main's #310)");
-        Check(L::RowsOf(View::Targets,v,{}).count==5,"Targets: the outline, both hand colors as their own rows, and the arrow path line");
+        Check(L::RowsOf(View::Targets,v,{}).count==5,"Targets: outline settings and arrow path line fit on five rows");
+        Check(L::CountRows(View::Aim,v,{})==8,"Aim: spell and ground aim plus merc potion throw autoaim fit on eight rows");
         bool right=false;const auto rows=L::RowsOf(View::Targets,v,{});
         for(int i=0;i<rows.count;++i)if(rows.keys[size_t(i)]==HighlightRight)right=true;
         Check(right&&RowShown(HighlightRight,v,{}),"the right hand's color has its own row");
