@@ -418,7 +418,12 @@ says how: **Shield swing / thrust** (Smite with a shield), **Draw & release**
 where you point.
 Pointing at a skill in the skill picker (**EDIT SKILLS**), or at a slot in a
 hand wheel, shows a line under it saying how that skill works from that slot:
-the gesture on a trigger, or what its button does.
+the gesture on a trigger, or what its button does. Skills a landed swing or shield
+bash casts (melee strike skills, Fury and Zeal, Smite with a shield) are
+tagged **CAST ON STRIKE**; body gestures (Holy Shield's sign of
+the cross, the shapeshifts, Blessed Hammer, Charge, Fist of the Heavens), bow draws
+and throws keep **GESTURE**. Both need a trigger slot, except the body gestures,
+which work from any slot.
 
 **Bow quiver.** With a bow, a face button assigned to Magic Arrow, Fire Arrow,
 Cold Arrow, Exploding Arrow, Ice Arrow, Immolation Arrow or Freezing Arrow loads

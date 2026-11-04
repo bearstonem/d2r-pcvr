@@ -4392,7 +4392,7 @@ void Input() {
         std::snprintf(cue.name,sizeof cue.name,"%s",skill.known?skill.name:"Unknown skill");
         std::snprintf(cue.hint,sizeof cue.hint,"%s",cue.available?(cue.temporary?"Right hand shortcut":"Right hand: point & trigger"):"Assignment unavailable");
         if(cue.available&&!cue.temporary&&cue.slot==skills::TriggerSlot(0)&&(motionInput.toss||strikes(skill))) {
-            cue.gesture=true;std::snprintf(cue.hint,sizeof cue.hint,"%s",motionInput.toss?"Throw to place":"Swing to strike");
+            cue.gesture=true;cue.strike=!motionInput.toss;std::snprintf(cue.hint,sizeof cue.hint,"%s",motionInput.toss?"Throw to place":"Swing to strike");
         }
     } else if(cue.slot<0) {
         cue.known=cue.available=true;
@@ -4443,6 +4443,7 @@ void Input() {
     std::snprintf(leftCue.name,sizeof leftCue.name,"%s",leftCue.known?leftSkill.name:"Unavailable");
     leftCue.gesture=!leftCue.temporary&&leftCue.available&&((gestureSettings[settings::SkillGestures]>.5f&&leftSkill.motion&&
         ((weaponskills::Bow(leftSkill.id)&&motionInput.weapon==gameplay::Weapon::Bow)||(leftSkill.id==weaponskills::Smite&&motionInput.shieldEquipped)))||leftStrikes);
+    leftCue.strike=leftCue.gesture&&(leftStrikes||(leftSkill.id==weaponskills::Smite&&motionInput.shieldEquipped));   // Cast On Strike: a swing or a shield bash
     std::snprintf(leftCue.hint,sizeof leftCue.hint,"%s",leftCue.gesture?(leftStrikes?"Swing to strike":weaponskills::Hint(leftSkill.id,
         motionInput.weapon==gameplay::Weapon::Bow,motionInput.shieldEquipped)):leftCue.temporary?"Left hand shortcut":"Left hand: point & trigger");
     if(leftCue.available&&!leftCue.temporary)if(const char* how=paladinGesture(leftCue.id)){leftCue.gesture=true;std::snprintf(leftCue.hint,sizeof leftCue.hint,"%s",how);}

@@ -313,6 +313,7 @@ struct SkillCue {
     int slot=-1,id=-1,owner=-1;
     bool known=false,available=false,temporary=false,expanded=false,busy=false,motionUnavailable=false;
     bool gesture=false;
+    bool strike=false;   // with gesture: Cast On Strike (a landed swing or shield bash casts it), not a body gesture
     char name[64]{},hint[64]{};
     bool operator==(const SkillCue&) const=default;
 };
