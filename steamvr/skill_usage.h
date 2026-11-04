@@ -17,13 +17,14 @@
 namespace framevr::skillusage {
 inline constexpr size_t LineLength=180,DetailsLength=900;
 inline constexpr int Interact=357;   // the catalog's Interact / pick up entry (native_ui)
-enum class Kind {None,Interact,Attack,Throw,Strike,Sequence,Smite,Bow,Quiver,Javelin,DoubleThrow,Toss,Pump,Punch,Cross,Call,Shape,Native};
+enum class Kind {None,Interact,Attack,Throw,Strike,Sequence,Dual,Smite,Bow,Quiver,Javelin,DoubleThrow,Toss,Pump,Punch,Cross,Call,Shape,Native};
 inline Kind Classify(int skill) {
     namespace ws=weaponskills;namespace st=strikeskills;
     if(skill<0)return Kind::None;
     if(skill==Interact)return Kind::Interact;
     if(skill==ws::Attack)return Kind::Attack;
     if(skill==ws::Throw)return Kind::Throw;
+    if(st::DualStrike(skill))return Kind::Dual;
     if(st::Known(skill))return st::MultiHit(skill)?Kind::Sequence:Kind::Strike;
     if(skill==ws::Smite)return Kind::Smite;
     if(ws::Bow(skill))return ws::QuiverSkill(skill)?Kind::Quiver:Kind::Bow;
@@ -61,6 +62,9 @@ inline const char* Line(int skill,int slot) {
             if(!at.trigger)return "Press to cast it, aimed by this hand. On a trigger it is a gesture: a swing that lands casts it; its other hits land by themselves.";
             if(at.left)return "Gesture with a second weapon or claw: a full-cycle swing of the left hand that lands casts it, as on the right trigger.";
             return "Gesture: a full-cycle swing that lands casts it; its other hits then land by themselves. Swings while it runs stay basic attacks.";
+        case Kind::Dual:
+            if(!at.trigger)return "Press to cast it, aimed by this hand. On a trigger with two weapons it is a gesture: swing one blade, then the other.";
+            return "Gesture with two weapons: a full-cycle swing that lands casts it with that blade; your other blade's next hit is its second swing.";
         case Kind::Smite:
             return at.left?"Gesture with a shield: bash or thrust the shield into a monster to cast it. Without a shield, press to cast.":
                            "Press to cast it at what this hand points at. On the left trigger with a shield, a shield bash casts it.";
@@ -135,6 +139,17 @@ inline std::string Details(int skill,int slot) {
             text+="A full-cycle swing that lands casts it on the monster you hit: its mana once and hit 1. Its other hits then land by themselves "
                   "at the skill's own pace, moving on to monsters nearby within reach, while you keep moving. Swings while it runs, and quicker "
                   "swings, stay basic attacks, with less damage and no on-hit effects.";
+            text+=refused;
+            if(at.right)text+=" Holding the trigger still casts it natively.";
+            return text;
+        }
+        case Kind::Dual: {
+            if(!at.trigger)return "Press to cast it natively, aimed by this hand. On a trigger with a weapon in each hand it becomes a gesture: one cast is one swing of each blade.";
+            std::string text="Gesture with a weapon in each hand: one cast is one swing of each blade. A full-cycle swing that lands casts it "
+                             "on the monster you hit, with that blade's weapon: its mana once and its first swing. Your other blade's next hit, "
+                             "before the cast's beat ends, is its second swing, with that weapon, on whatever it strikes. No second hit in time: "
+                             "it is lost. The beat while it is armed is the skill's own cast, timed on your right-hand weapon; Frenzy's charges "
+                             "speed it up. Quicker swings stay basic attacks, with less damage and no on-hit effects.";
             text+=refused;
             if(at.right)text+=" Holding the trigger still casts it natively.";
             return text;

@@ -12,7 +12,7 @@
 namespace framevr::strikeskills {
 inline constexpr int FeralRage=232,Maul=233,Rabies=238,FireClaws=239,Hunger=242,Fury=248;
 inline constexpr int PowerStrike=14,Impale=19,ChargedStrike=24,LightningStrike=34,PoisonDagger=73,Sacrifice=96,Zeal=106,Vengeance=111,
-                     Conversion=116,Bash=126,Stun=139,Concentrate=144,Berserk=152;
+                     Conversion=116,Bash=126,DoubleSwing=133,Stun=139,Concentrate=144,Frenzy=147,Berserk=152;
 // The Skills.txt srvstfunc / srvdofunc each skill must still have in its
 // compiled row (D2R skills data; D2MOO for the logic). A row that differs (a
 // game patch, a mod) keeps the basic attack. The Druid's single-hit form skills:
@@ -31,12 +31,15 @@ inline constexpr int PowerStrike=14,Impale=19,ChargedStrike=24,LightningStrike=3
 //    (its bolts), Lightning Strike 14 (its chain), Poison Dagger 32,
 //    Sacrifice 64, Conversion 79.
 // Zeal is Fury's start 37 and do 13 with a weapon: multi-hit (Sequence below).
-// Jab, Fend, Frenzy, Double Swing and Whirlwind hit more than once a cast
-// with functions of their own, and Charge runs first: not (yet) strike skills.
+// Double Swing (start 68, do 70) and Frenzy (start 67, do 9) swing each of two
+// weapons once a cast: dual strike skills (DualCast below, Cal 2026-11-03).
+// Jab, Fend and Whirlwind hit more than once a cast with functions of their
+// own, and Charge runs first: not (yet) strike skills.
 struct Row {int skill,start,action;};
 inline constexpr Row Supported[]={{Maul,56,120},{FeralRage,56,120},{Rabies,57,121},{FireClaws,58,2},{Hunger,0,122},{Fury,37,13},
     {Bash,32,2},{Stun,32,2},{Concentrate,32,2},{Berserk,39,2},{Sacrifice,29,64},{Vengeance,35,2},
-    {PowerStrike,6,2},{Impale,7,2},{ChargedStrike,6,11},{LightningStrike,10,14},{PoisonDagger,16,32},{Zeal,37,13},{Conversion,32,79}};
+    {PowerStrike,6,2},{Impale,7,2},{ChargedStrike,6,11},{LightningStrike,10,14},{PoisonDagger,16,32},{Zeal,37,13},{Conversion,32,79},
+    {DoubleSwing,68,70},{Frenzy,67,9}};
 inline bool Known(int skill) {
     for(const auto& r:Supported)if(r.skill==skill)return true;
     return false;
@@ -151,6 +154,41 @@ public:
     int Left() const {return left;}
     uint64_t Gap() const {return gap;}
     uint32_t Last() const {return last;}   // the creature the previous hit struck
+};
+// Dual strike skills: Double Swing and Frenzy (Cal, 2026-11-03). Natively one cast
+// swings each of two weapons once (Skills.txt weapsel 3, sequence 11): hit 1, then
+// hit 2 about 120-190 ms later on the next creature in reach, or the same one when
+// it is alone. In VR one cast is one swing of each blade (decision A): a full-cycle
+// stroke with either blade starts the cast (mana, use check, start function) and
+// lands hit 1 with that blade's weapon; the OTHER blade's first landed contact before
+// the cast's beat ends lands hit 2 with its weapon, on whatever it struck (no second
+// mana, whole with its on-hit effects as a cast's own hits are). No second contact
+// by then: hit 2 is forfeited, so a cast never lands more than native. Each hit is
+// the blade that struck it (decision 2); the beat while one is armed is the skill's
+// own cast length (attack_speed.h DualSequenceFrames).
+inline bool DualStrike(int skill) {return skill==DoubleSwing||skill==Frenzy;}
+class DualCast {
+    uint64_t session=0,closesAt=0;int skill=-1,blade=-1,owner=0;bool open=false;
+public:
+    // blade (rendered hand 0/1) cast `sk` (its skill owner) at `now`; its beat ends castMs later.
+    void Begin(uint64_t s,int sk,int bladeHand,uint64_t now,uint32_t castMs,int skillOwner=0) {
+        session=s;skill=sk;blade=bladeHand;owner=skillOwner;closesAt=now+(castMs?castMs:500);open=true;
+    }
+    int Owner() const {return owner;}
+    bool Open(uint64_t s,uint64_t now) const {return open&&s==session&&now<closesAt;}
+    // The other blade's first landed contact while it is open: true = it lands hit 2 (closes it).
+    bool Second(uint64_t s,int bladeHand,uint64_t now) {
+        if(!Open(s,now)||bladeHand==blade)return false;
+        open=false;return true;
+    }
+    // Once the beat has ended unclaimed: true once (a forfeited hit 2).
+    bool Forfeit(uint64_t s,uint64_t now) {
+        if(!open||(s==session&&now<closesAt))return false;
+        open=false;return s==session;
+    }
+    void End() {open=false;}
+    int Skill() const {return skill;}
+    int Blade() const {return blade;}
 };
 // A refused cast lands the strike as a basic attack (Cal, 2026-10-22); a mana
 // refusal also asks for the native "I need mana" voice. A start function that

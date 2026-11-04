@@ -3432,7 +3432,10 @@ void Input() {
     interactionInput.criticalAlerts=hudSettings.values[settings::CriticalAlerts]>.5f;
     if(leftStrikesSequence&&((hudSettings.sequence==leftStrikesSequence&&hudSettings.result!=settings::Result::Saving)||interactionInput.at-leftStrikesAt>2000))
         leftStrikesSequence=0;   // saved, refused, or overtaken by another save: the profile's value again
-    interactionInput.leftStrikes=hudSettings.ready&&bindingSnapshot.skillClass==settings::heroclass::Druid?
+    // The wheel's left-hand strikes box: a Druid (claws in form) or a dual wielder (Barbarian or
+    // Assassin with a weapon in each hand: Double Swing / Frenzy on the right trigger, both blades).
+    interactionInput.leftStrikes=hudSettings.ready&&(bindingSnapshot.skillClass==settings::heroclass::Druid||
+                                 dualwield::Eligible(skel::HeroClass(),gamestate::MeleeEquipment()))?
         int(leftStrikesSequence?leftStrikesWanted:hudSettings.values[settings::LeftHandStrikes]):-1;
     interactionInput.glyphDraw=glyphDrawSlot;
     for(int i=0;i<glyphs::ShapeCount;++i)interactionInput.glyphSkills[size_t(i)]=glyphcast::SkillOf(glyphValues[settings::GlyphKey(i)]);

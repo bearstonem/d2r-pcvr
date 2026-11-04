@@ -479,11 +479,11 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
         SelectObject(dc,shortcutFont);
         if(item){char count[32];std::snprintf(count,sizeof count,"x %d",item->quantity);text(count,{box.left+60,box.bottom-44,box.right-8,box.bottom-25});}
         text("Click: use | Hold: edit",{box.left+6,box.bottom-23,box.right-6,box.bottom-5});SelectObject(dc,font);
-        if(o.leftStrikes>=0) {   // Druid: which trigger skill the left claw's strikes cast
+        if(o.leftStrikes>=0) {   // Druid or dual wield: which trigger skill the left claw's or blade's strikes cast
             const auto l=LeftStrikesBounds;
             RECT claw{LONG(l.left*768),LONG(l.top*768),LONG(l.right*768),LONG(l.bottom*768)};
             frame(claw,o.hover==LeftStrikesCell);
-            SelectObject(dc,shortcutFont);text("LEFT CLAW STRIKES",{claw.left+6,claw.top+5,claw.right-6,claw.top+22});
+            SelectObject(dc,shortcutFont);text("LEFT HAND STRIKES",{claw.left+6,claw.top+5,claw.right-6,claw.top+22});
             SelectObject(dc,skillFont);text(o.leftStrikes==1?"Right trigger skill":"Own trigger skill",{claw.left+6,claw.top+23,claw.right-6,claw.bottom-22});
             SelectObject(dc,shortcutFont);text("Click to toggle",{claw.left+6,claw.bottom-22,claw.right-6,claw.bottom-5});SelectObject(dc,font);
         }
