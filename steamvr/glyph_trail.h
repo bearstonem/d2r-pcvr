@@ -90,6 +90,12 @@ inline Colour ElementColour(int skill) {
     if (skill >= 373 && skill <= 382) return Curse;
     if (skill >= 383 && skill <= 392) return Shadow;
     if (skill >= 393 && skill <= 402) return Fire;
+    // Commander of the Dead virtual skills (summon_commander.h):
+    if (skill == 3901 || skill == 3902) return Cold;
+    if (skill == 3903 || skill == 3907) return Bone;
+    if (skill == 3904) return War;
+    if (skill == 3905) return Holy;
+    if (skill == 3906) return Magic;
     return Drawing;
 }
 

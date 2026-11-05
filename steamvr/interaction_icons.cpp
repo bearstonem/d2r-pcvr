@@ -65,8 +65,14 @@ void Run(std::wstring location) {
     if(wic)wic->Release();if(SUCCEEDED(co))CoUninitialize();
 }
 }
-std::shared_ptr<const Image> Get(const std::string& key) {
-    if(key.empty())return {};
+std::shared_ptr<const Image> Get(const std::string& rawKey) {
+    if(rawKey.empty())return {};
+    std::string key=rawKey;
+    if(key.size()==5&&key[0]=='s'&&key[1]=='3'&&key[2]=='9'&&key[3]=='0'&&key[4]>='1'&&key[4]<='7') {
+        const int cmdId=3900+(key[4]-'0');
+        const int iconId=commander::CommanderSkillIconId(cmdId);
+        if(iconId>=0)key="s"+std::to_string(iconId);
+    }
     std::lock_guard lock(mutex);
     if(auto it=cache.find(key);it!=cache.end())return it->second;
     if(cache.size()>=2048)return {};
@@ -98,6 +104,7 @@ void Prefetch(const Snapshot& s) {
     if(s.equipmentKnown)for(const auto& set:s.sets)for(const auto& item:set)Get(item);
     for(const auto& belt:s.belt)if(belt.known&&belt.count)Get(belt.Next());
     for(const auto& d:effects::Definitions)if(d.skill>=0&&s.effects.Has(d.state))Get("s"+std::to_string(d.skill));
+    if(HasSummonArmy(s))for(int id=commander::SkillPhalanxDef;id<=commander::SkillFallOut;++id)Get("s"+std::to_string(id));
     Get("journal");
 }
 void Shutdown() {

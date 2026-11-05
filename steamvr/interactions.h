@@ -11,6 +11,7 @@
 #include "dev_scenarios.h"
 #include "navigation_info.h"
 #include "companions.h"
+#include "summon_commander.h"
 #include "active_effects.h"
 #include "torch_light.h"
 #include "map_zoom.h"
@@ -285,9 +286,24 @@ struct Snapshot {
     companions::Roster companions;
     effects::Status effects;
 };
+inline bool HasSummonArmy(const Snapshot& s) {
+    if((s.companions.relevant&companions::ArmyTypeMask)!=0)return true;
+    for(unsigned i=0;i<s.skillCount&&i<s.catalog.size();++i) {
+        const int type=companions::SkillType(s.catalog[i].id);
+        if(type>0&&(companions::Bit(type)&companions::ArmyTypeMask)!=0)return true;
+    }
+    return false;
+}
+inline Skill MakeCommanderSkill(int id,bool available=true) {
+    Skill skill{};skill.id=id;skill.level=1;skill.owner=-1;skill.known=true;skill.available=available;
+    skill.directed=(id==commander::SkillArmyFocus||id==commander::SkillMoveHold);
+    std::snprintf(skill.name,sizeof skill.name,"%s",commander::CommanderSkillName(id));
+    return skill;
+}
 // A glyph shape's skill as the hero has it (the catalog's own entry); an id the hero lacks is kept, unknown.
 inline Skill GlyphSkill(const Snapshot& s,int id) {
     Skill skill{};skill.id=id;
+    if(commander::IsCommanderSkill(id))return MakeCommanderSkill(id,HasSummonArmy(s)||s.skillCount==0);
     for(unsigned i=0;id>=0&&i<s.skillCount&&i<s.catalog.size();++i)if(s.catalog[i].id==id&&s.catalog[i].owner==-1)return s.catalog[i];
     return skill;
 }
@@ -340,6 +356,7 @@ inline bool CanBind(const Snapshot& s,const Request& r,uint64_t now) {
        s.bindingBank!=r.bank||(r.bank!=0&&r.bank!=16)||s.skills[r.index].id!=r.previousSkill||
        s.skills[r.index].owner!=r.previousOwner)return false;
     if(r.skill==-1)return r.skillOwner==-1;
+    if(commander::IsCommanderSkill(r.skill))return r.skillOwner==-1&&HasSummonArmy(s);
     for(unsigned i=0;i<s.skillCount&&i<s.catalog.size();++i)
         if(s.catalog[i].id==r.skill&&s.catalog[i].owner==r.skillOwner&&s.catalog[i].available)return true;
     return false;
@@ -607,6 +624,10 @@ class Engine {
     void OpenSkills(const Snapshot& s,bool handButton=false) {
         // Freeze identities, ordering and class for the whole edit transaction.
         choices=s.catalog;allCount=std::clamp<int>(s.skillCount,0,choices.size());editClass=s.skillClass;
+        if(HasSummonArmy(s)) {
+            for(int id=commander::SkillPhalanxDef;id<=commander::SkillFallOut&&allCount<int(choices.size());++id)
+                choices[size_t(allCount++)]=MakeCommanderSkill(id,true);
+        }
         // A hand button can also draw glyphs (glyph_cast.h): "Draw glyph", last, under General / Items (an
         // unknown id); no game skill.
         if(handButton&&allCount<int(choices.size())) {
@@ -627,6 +648,12 @@ class Engine {
             const auto& k=s.catalog[i];
             if(k.id<0||k.id==357||k.id==359||k.owner!=-1||k.directed||allCount>=int(choices.size()))continue;
             choices[size_t(allCount++)]=k;
+        }
+        if(HasSummonArmy(s)) {
+            for(int id=commander::SkillPhalanxDef;id<=commander::SkillFallOut&&allCount<int(choices.size());++id) {
+                auto cmd=MakeCommanderSkill(id,true);cmd.directed=false;
+                choices[size_t(allCount++)]=cmd;
+            }
         }
         categoryCounts={};categoryCounts[skillcategories::All]=allCount;
         for(int i=0;i<allCount;++i)++categoryCounts[skillcategories::Category(editClass,choices[i].id,choices[i].owner)];
@@ -905,7 +932,7 @@ public:
                 } else if(in.wheelHand>=0&&in.hover==11){developer=glyphs=false;out.inventory=true;out.wheel=false;wheelLatch=true;rearm=true;}
                 else if(glyphs&&!map&&in.hover>=0&&in.hover<GlyphShapes) {
                     // A shape on the GLYPHS page: choose its skill.
-                    if(fresh&&in.snapshot.skillCount){glyphEdit=in.hover;editSlot=-1;editPage=0;OpenGlyphSkills(in.snapshot);}
+                    if(fresh&&(in.snapshot.skillCount||HasSummonArmy(in.snapshot))){glyphEdit=in.hover;editSlot=-1;editPage=0;OpenGlyphSkills(in.snapshot);}
                     else out.feedback=3;
                     rearm=true;
                 }
