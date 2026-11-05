@@ -34,30 +34,22 @@ constexpr bool IsCommanderSkill(int id) noexcept {
 
 inline const char* CommanderSkillName(int id) noexcept {
     switch (id) {
-        case SkillPhalanxDef: return "Army: Phalanx Wall (Def)";
-        case SkillRingDef:    return "Army: Protective Ring (Def)";
-        case SkillMarchBal:   return "Army: Marching Escort (Bal)";
-        case SkillWedgeAgg:   return "Army: Spearhead Assault (Agg)";
-        case SkillHoldGround: return "Army: Hold / Anchor Here";
-        case SkillRegroup:    return "Army: Regroup Now";
+        case SkillPhalanxDef: return "Army: Phalanx Wall";
+        case SkillRingDef:    return "Army: Protective Ring";
+        case SkillMarchBal:   return "Army: Marching Escort";
+        case SkillWedgeAgg:   return "Army: Spearhead Assault";
+        case SkillHoldGround: return "Army: Hold Ground";
+        case SkillRegroup:    return "Army: Regroup";
         case SkillFallOut:    return "Army: Fall Out";
         default:              return "";
     }
 }
 
-// Returns a representative native Necromancer summoning skill ID whose sprite can be
-// used as an icon fallback in the VR wheel / skill picker.
+// Returns native Necromancer skill ID 69 (Skeleton Mastery) for all commander skills
+// so they share a unified, thematic skill icon in the VR wheel and pickers.
 constexpr int CommanderSkillIconId(int id) noexcept {
-    switch (id) {
-        case SkillPhalanxDef: return 70; // Raise Skeleton
-        case SkillRingDef:    return 68; // Bone Armor
-        case SkillMarchBal:   return 80; // Raise Skeletal Mage
-        case SkillWedgeAgg:   return 95; // Revive
-        case SkillHoldGround: return 75; // Clay Golem
-        case SkillRegroup:    return 69; // Skeleton Mastery
-        case SkillFallOut:    return 70; // Raise Skeleton
-        default:              return -1;
-    }
+    if (IsCommanderSkill(id)) return 69; // Skeleton Mastery
+    return -1;
 }
 
 enum class ArmyStance : uint8_t {

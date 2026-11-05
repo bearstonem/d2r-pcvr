@@ -90,7 +90,7 @@ void TestRoleClassificationAndVirtualSkills() {
     for (int id = SkillPhalanxDef; id <= SkillFallOut; ++id) {
         assert(IsCommanderSkill(id));
         assert(std::strlen(CommanderSkillName(id)) > 0);
-        assert(CommanderSkillIconId(id) > 0);
+        assert(CommanderSkillIconId(id) == 69); // All commander skills use Skeleton Mastery icon
     }
     assert(!IsCommanderSkill(70));
     assert(!IsCommanderSkill(9000));

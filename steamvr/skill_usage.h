@@ -48,13 +48,20 @@ inline const char* Line(int skill,int slot) {
     if(slot<0||slot>=skills::Count)return "";
     if(commander::IsCommanderSkill(skill)) {
         switch(skill) {
-            case commander::SkillPhalanxDef:return "Squad order: form a defensive frontal phalanx arc with clear central sightline and a tight 7.5-subtile leash.";
-            case commander::SkillRingDef:return "Squad order: surround yourself in a 360-degree bone wall, shielding Skeleton Mages inside the outer ring.";
-            case commander::SkillMarchBal:return "Squad order: form a balanced marching escort with a clear 24-degree aiming corridor dead ahead.";
-            case commander::SkillWedgeAgg:return "Squad order: form an aggressive V-wedge vanguard behind your Golem with a wide 32-subtile combat leash.";
-            case commander::SkillHoldGround:return "Squad order: march the summon army to the pointed ground spot and hold defensive formation there.";
-            case commander::SkillRegroup:return "Squad order: cancel any ground hold or focus order and immediately regroup summons around you.";
-            case commander::SkillFallOut:return "Squad order: break ranks and restore standard D2R vanilla AI with no formation restrictions.";
+            case commander::SkillPhalanxDef:
+                return "Commands your army into a solid shield wall ahead. Warriors hold the frontline while mages fire from behind, leaving the center clear for your spells.";
+            case commander::SkillRingDef:
+                return "Forms a protective circle around you. Skeletons form a defensive perimeter in all directions while mages shelter safely within.";
+            case commander::SkillMarchBal:
+                return "Orders an advancing escort formation. Your minions march ahead in two coordinated columns, keeping your path and sightlines clear.";
+            case commander::SkillWedgeAgg:
+                return "Deploys an aggressive assault wedge. Your heavy summons lead the charge at the tip to pierce enemy lines and push deep into rooms.";
+            case commander::SkillHoldGround:
+                return "Orders your army to hold position at the targeted location, guarding doorways, choke points, or chests without following you.";
+            case commander::SkillRegroup:
+                return "Recalls your entire army back to your side immediately, breaking any hold order and reforming around you.";
+            case commander::SkillFallOut:
+                return "Dismisses tactical formations. Your summons break ranks and roam freely, fighting and following at their own will.";
             default:break;
         }
     }
@@ -114,27 +121,32 @@ inline std::string Details(int skill,int slot) {
     if(commander::IsCommanderSkill(skill)) {
         switch(skill) {
             case commander::SkillPhalanxDef:
-                return "Squad formation & stance (zero individual skeleton micromanagement): puts your summoned army into Phalanx Arc "
-                       "with Defensive stance (7.5-subtile leash). Melee skeletons form a frontal shield with a clear 24-degree aiming "
-                       "corridor dead ahead, while Skeleton Mages stay protected behind them and never walk into melee.";
+                return "Orders your summoned army into a fortified Phalanx Wall ahead of you.\n\n"
+                       "Skeleton Warriors form a tight frontal shield with heavy summons guarding the flanks, while Skeleton Mages provide artillery from the rear. "
+                       "The center remains wide open so you can freely cast spells, curses, and bone projectiles without your minions blocking your view. "
+                       "In this defensive stance, your minions hold their line and will not break ranks to chase distant enemies.";
             case commander::SkillRingDef:
-                return "Squad formation & stance: surrounds you with a 360-degree outer bone wall of melee skeletons, Golem and Revives "
-                       "in Defensive stance, while Skeleton Mages fire safely from an inner ring around you.";
+                return "Deploys your summons into a 360-degree Protective Ring encircling you.\n\n"
+                       "Your warriors, Golem, and revives create an impenetrable outer wall facing outwards in all directions, guarding you against ambushes from behind. "
+                       "Skeleton Mages form a sheltered inner circle with generous space around you, firing safe from harm.";
             case commander::SkillMarchBal:
-                return "Squad formation & stance: puts your summoned army into Balanced Phalanx escort (14-subtile leash) with a clear "
-                       "central aiming corridor and automatic narrow-corridor compression.";
+                return "Arranges your army into a balanced marching escort formation.\n\n"
+                       "Your minions march ahead in two coordinated columns, naturally adapting as you navigate doorways, dungeons, and narrow corridors. "
+                       "The middle lane stays open for easy movement, and your troops actively guard your blind spots as you explore.";
             case commander::SkillWedgeAgg:
-                return "Squad formation & stance: puts your Golem or Bear at the tip of an offensive Spearhead Wedge with melee wings "
-                       "and Aggressive stance (32-subtile combat leash) to push forward into rooms.";
+                return "Commands your army into an aggressive Spearhead Assault formation.\n\n"
+                       "Your Golem leads the vanguard at the apex of a sharp V-wedge, flanked by warrior chevrons and revives on the wings. "
+                       "Troops will aggressively push into rooms, charge into enemy mobs, and crush resistant defenses.";
             case commander::SkillHoldGround:
-                return "Squad order: anchors your summoned army's formation at the ground spot this hand points at in Defensive stance, "
-                       "holding that choke point or doorway until you cast Army: Regroup Now.";
+                return "Orders your army to hold their ground at the targeted position.\n\n"
+                       "Aim at the ground and activate this order to lock your formation firmly in place. Your summons will defend that exact choke point, doorway, or room entrance, "
+                       "standing guard and fighting nearby monsters without following you when you step away.";
             case commander::SkillRegroup:
-                return "Squad order: clears any ground hold anchor or priority target, switches to Balanced stance, and immediately "
-                       "reforms your summoned army around your position.";
+                return "Instantly recalls your entire army back to your side.\n\n"
+                       "Cancels any hold ground orders or target locks, summoning all skeletons, mages, golems, and revives to quickly rally around you in an escort formation.";
             case commander::SkillFallOut:
-                return "Squad order: breaks formation ranks and restores standard Diablo II vanilla summon AI (free roam and unrestricted "
-                       "movement/combat) until you activate another Army formation skill.";
+                return "Orders your army to break ranks and stand at ease.\n\n"
+                       "Releases your summons from formation constraints, allowing them to roam freely, wander, and fight independently as classic minions until you issue a new formation command.";
             default:break;
         }
     }
