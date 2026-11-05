@@ -127,18 +127,45 @@ void TestPhalanxVisualCorridorAndStratification() {
     const size_t n = GenerateFormationSlots(anchor, heading, ArmyFormation::PhalanxArc, ArmyStance::Balanced, counts, slots);
     assert(n == counts.Total());
 
-    for (size_t i = 0; i < n; ++i) {
-        // Every unit in PhalanxArc must respect the [-12 deg, +12 deg] central sightline corridor!
-        assert(std::fabs(slots[i].localAngleDeg) >= 12.0f);
+    float minMageDist = 999.0f, maxMageDist = 0.0f;
+    float minMeleeDist = 999.0f, maxMeleeDist = 0.0f;
+    size_t leftWingCount = 0, rightWingCount = 0;
 
-        // RangedArtillery (Mages) must sit at a strictly smaller radius inside/behind the frontline melee shield wall
-        const float r = std::hypot(slots[i].worldPos.x - anchor.x, slots[i].worldPos.y - anchor.y);
+    for (size_t i = 0; i < n; ++i) {
+        // Every unit in Phalanx Wall must be well in front of the player (North = -Y)
+        assert(slots[i].worldPos.y < anchor.y);
+        const float forwardDist = anchor.y - slots[i].worldPos.y;
+        const float lateralDist = slots[i].worldPos.x - anchor.x;
+
         if (slots[i].role == SummonRole::RangedArtillery) {
-            assert(r <= 5.1f);
+            // Central block rear rank: mages right in front of player
+            assert(std::fabs(lateralDist) <= 3.5f);
+            minMageDist = std::min(minMageDist, forwardDist);
+            maxMageDist = std::max(maxMageDist, forwardDist);
         } else if (slots[i].role == SummonRole::FrontlineMelee) {
-            assert(r >= 5.5f);
+            // Central block front rank: warriors in front of mages
+            assert(std::fabs(lateralDist) <= 3.5f);
+            minMeleeDist = std::min(minMeleeDist, forwardDist);
+            maxMeleeDist = std::max(maxMeleeDist, forwardDist);
+        } else if (slots[i].role == SummonRole::HeavyFlanker || slots[i].role == SummonRole::TacticalAnchor) {
+            // Flank Cavalry Wings (Alas de Caballería): Revives and Golem on lateral flanks!
+            assert(std::fabs(lateralDist) >= 4.5f);
+            if (lateralDist < 0.0f) {
+                ++leftWingCount;
+            } else {
+                ++rightWingCount;
+            }
         }
     }
+
+    // Central block rank stratification:
+    // Player -> [Mages (rear, closest)] -> [Warriors (frontline shield wall)]
+    assert(minMageDist >= 4.0f && maxMageDist <= 6.5f);
+    assert(minMeleeDist > maxMageDist + 1.2f);
+
+    // Flank wings: 1 Golem + 4 Revives = 5 units distributed across left and right wings
+    assert(leftWingCount + rightWingCount == 5);
+    assert(leftWingCount == 3 && rightWingCount == 2);
 }
 
 void TestProtectiveRingWedgeAndColumn() {

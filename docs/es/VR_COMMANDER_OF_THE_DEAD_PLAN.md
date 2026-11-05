@@ -87,14 +87,17 @@ Esta es la pieza clave para evitar el micromanagement: el jugador elige una **Po
 
 Todas las coordenadas de slot se calculan en el plano de sub-casillas respecto a la posición del jugador `P = (px, py)` y al vector director suavizado de marcha/mirada `F = (fx, fy)` (con filtro de histéresis angular de `22.5°` para que girar ligeramente la cabeza en VR **no** haga correr a los esqueletos en círculos):
 
-#### A. Formación en Falange / Media Luna (*Phalanx Arc* — Por defecto en Postura Equilibrada)
-- **Gólem (`TacticalAnchor`):** 1 slot central en vanguardia a `d = 7.0` sub-casillas (`0°`).
-- **Guerreros Esqueleto (`FrontlineMelee`):** Semicírculo frontal protector delante del jugador:
-  - Fila 1 (hasta 8 guerreros): radio `r = 5.5` sub-casillas, ángulos distribuidos uniformemente en `[-75°, +75°]` (`~2.2m` frente al jugador, dejando libre un pasillo visual central de `±12°` para que el jugador vea y apunte maldiciones/Lanza Ósea sin cabezas de esqueleto tapando la vista).
-  - Fila 2 (guerreros 9 a 16): radio `r = 8.0` sub-casillas, ángulos intercalados (*staggered*) en `[-85°, +85°]`.
-- **Magos Esqueleto (`RangedSupport`):** Semicírculo de flanco/retaguardia:
-  - Radio `r = 4.5 .. 6.5` sub-casillas en arcos laterales/traseros `[-135°, -90°]` y `[+90°, +135°]`, protegidos detrás de la línea de guerreros pero con ángulo de disparo hacia el frente.
-- **Revividos (`FlexibleSupport`):** Flancos exteriores a `r = 7.5` sub-casillas (`±95° .. ±125°`), evitando que sus grandes cajas de colisión atasquen a los guerreros.
+#### A. Formación en Muro Falange con Alas de Caballería (*Phalanx Wall / Horse Wings* — Habilidad `3901` y por defecto en Marcha)
+Inspirada en las formaciones de alas de caballería de estrategia militar clásica (ej. *Celtic Kings: Horse Wings*):
+- **Posicionamiento respecto al jugador:**
+  - El **Nigromante (Jugador)** actúa como comandante en el eje central de retaguardia (`anchorPos`), observando toda la estructura desplegada frente a él.
+- **Bloque Central de Infantería (Guerreros y Magos):**
+  - **Retaguardia de la Infantería (Magos Esqueleto / `RangedArtillery`):** Desplegados directamente frente al jugador (`forwardMages ~ 4.4 .. 5.6` sub-casillas) en filas de hasta 6 columnas. El jugador contempla claramente la espalda de los magos, quienes tienen línea de tiro despejada por encima de los guerreros hacia el frente.
+  - **Vanguardia de la Infantería (Guerreros Esqueleto / `FrontlineMelee`):** Muro compacto de escudos y hachas situado frente a los magos con separación limpia (`forwardMelee ~ 7.0 .. 8.5` sub-casillas) en filas de hasta 6 columnas.
+- **Alas Laterales de Caballería (Flancos Izquierdo y Derecho — Resucitados y Gólem):**
+  - **Revividos (`HeavyFlanker`) y Gólem (`TacticalAnchor`):** Desplegados a los lados exteriores del bloque central en **dos columnas paralelas por cada flanco** (`offset lateral |lateral| >= 4.8 .. 6.5` sub-casillas), cubriendo los costados y protegiendo a los magos y al jugador de ataques envolventes.
+- **Orientación de Formación:**
+  - Todas las invocaciones marchan hacia sus casillas mediante `DispatchServerMoveToCoord` sin mutación directa de memoria interna del pathfinding para garantizar máxima estabilidad y cero violaciones de acceso.
 
 #### B. Formación en Bastión / Anillo Cerrado 360° (*Protective Ring* — Ideal con Postura Defensiva)
 - **Guerreros Esqueleto:** Anillo perimetral completo de `360°` alrededor del Nigromante (o del punto de guardia ordenado) a radio `r = 4.8` sub-casillas (`~1.9m`), espaciados a `360° / N`.
