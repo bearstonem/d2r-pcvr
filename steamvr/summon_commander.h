@@ -275,18 +275,10 @@ inline size_t GenerateFormationSlots(
         // 3. Flank Cavalry Wings (Alas de Caballería Laterales):
         //    - Left and Right Wings: Revives (HeavyFlanker) and Golem (TacticalAnchor) deployed in
         //      parallel columns on the lateral flanks of the infantry block, guarding the sides.
-        const float forwardMagesBase = tight ? 4.4f : 5.0f;
-        const uint8_t maxCols = 6;
-
-        // Calculate infantry dimensions
-        const uint8_t mageCols = std::min<uint8_t>(counts.ranged > 0 ? counts.ranged : 0, maxCols);
-        const uint8_t meleeCols = std::min<uint8_t>(counts.melee > 0 ? counts.melee : 0, maxCols);
-        const uint8_t infantryCols = std::max<uint8_t>({ mageCols, meleeCols, uint8_t(4) });
-        const float centerHalfWidth = (float(infantryCols - 1) * 0.5f) * 1.25f;
-
-        const float forwardMagesRow2 = (counts.ranged > maxCols) ? (forwardMagesBase + 1.20f) : forwardMagesBase;
-        const float forwardMeleeBase = forwardMagesRow2 + (tight ? 2.2f : 2.6f);
-        const float forwardMeleeRow2 = (counts.melee > maxCols) ? (forwardMeleeBase + 1.20f) : forwardMeleeBase;
+        const float forwardMagesBase = tight ? 4.8f : 5.4f;
+        const uint8_t maxCols = 5;
+        const float colSpacing = 2.10f;
+        const float rowSpacing = 2.10f;
 
         const auto appendSlot = [&](SummonRole role, float forwardDist, float lateralDist) noexcept {
             if (cursor >= out.size()) return;
@@ -295,43 +287,46 @@ inline size_t GenerateFormationSlots(
         };
 
         // 1. RangedArtillery (Skeleton Mages / Archers): Rear ranks of the central infantry block
-        if (counts.ranged > 0) {
-            const uint8_t rank1Mages = std::min<uint8_t>(counts.ranged, maxCols);
-            const uint8_t rank2Mages = uint8_t(counts.ranged - rank1Mages);
-            for (uint8_t i = 0; i < rank1Mages; ++i) {
-                const float lateral = (float(i) - float(rank1Mages - 1) * 0.5f) * 1.25f;
-                appendSlot(SummonRole::RangedArtillery, forwardMagesBase, lateral);
-            }
-            for (uint8_t i = 0; i < rank2Mages; ++i) {
-                const float lateral = (float(i) - float(rank2Mages - 1) * 0.5f) * 1.25f;
-                appendSlot(SummonRole::RangedArtillery, forwardMagesBase + 1.20f, lateral);
-            }
+        const uint8_t mageRows = (counts.ranged > 0) ? uint8_t((counts.ranged + maxCols - 1) / maxCols) : 0;
+        for (uint8_t i = 0; i < counts.ranged; ++i) {
+            const uint8_t row = i / maxCols;
+            const uint8_t col = i % maxCols;
+            const uint8_t numInRow = std::min<uint8_t>(uint8_t(counts.ranged - row * maxCols), maxCols);
+            const float lateral = (float(col) - float(numInRow - 1) * 0.5f) * colSpacing;
+            const float fwd = forwardMagesBase + float(row) * rowSpacing;
+            appendSlot(SummonRole::RangedArtillery, fwd, lateral);
         }
 
         // 2. FrontlineMelee (Skeleton Warriors / Axe Warriors): Front ranks of the central infantry block
-        if (counts.melee > 0) {
-            const uint8_t rank1Melee = std::min<uint8_t>(counts.melee, maxCols);
-            const uint8_t rank2Melee = uint8_t(counts.melee - rank1Melee);
-            // Rank 1: Main front shield-wall
-            for (uint8_t i = 0; i < rank1Melee; ++i) {
-                const float lateral = (float(i) - float(rank1Melee - 1) * 0.5f) * 1.25f;
-                appendSlot(SummonRole::FrontlineMelee, (rank2Melee > 0 ? forwardMeleeBase + 1.20f : forwardMeleeBase), lateral);
-            }
-            // Rank 2: Support melee rank behind Rank 1
-            for (uint8_t i = 0; i < rank2Melee; ++i) {
-                const float lateral = (float(i) - float(rank2Melee - 1) * 0.5f) * 1.25f;
-                appendSlot(SummonRole::FrontlineMelee, forwardMeleeBase, lateral);
-            }
+        const float forwardMagesMax = (mageRows > 0)
+            ? (forwardMagesBase + float(mageRows - 1) * rowSpacing)
+            : (forwardMagesBase - rowSpacing);
+        const float forwardMeleeBase = forwardMagesMax + (tight ? 2.6f : 3.0f);
+
+        const uint8_t meleeRows = (counts.melee > 0) ? uint8_t((counts.melee + maxCols - 1) / maxCols) : 0;
+        for (uint8_t i = 0; i < counts.melee; ++i) {
+            const uint8_t row = i / maxCols;
+            const uint8_t col = i % maxCols;
+            const uint8_t numInRow = std::min<uint8_t>(uint8_t(counts.melee - row * maxCols), maxCols);
+            const float lateral = (float(col) - float(numInRow - 1) * 0.5f) * colSpacing;
+            // Place row 0 furthest forward, subsequent rows behind it
+            const float fwd = forwardMeleeBase + float(meleeRows - 1 - row) * rowSpacing;
+            appendSlot(SummonRole::FrontlineMelee, fwd, lateral);
         }
 
         // 3. Flank Cavalry Wings (TacticalAnchor / Golem and HeavyFlanker / Revives):
         // Deployed in neat 2-wide columns on the left and right flanks of the central block!
+        const uint8_t totalInfantryCols = (counts.ranged >= maxCols || counts.melee >= maxCols)
+            ? maxCols
+            : std::max<uint8_t>({ counts.ranged, counts.melee, uint8_t(4) });
+        const float centerHalfWidth = (float(totalInfantryCols - 1) * 0.5f) * colSpacing;
+
         const uint8_t totalWings = counts.anchors + counts.flankers;
         if (totalWings > 0) {
-            const float wingLateralBase = centerHalfWidth + 1.8f;
-            const float wingColSpacing = 1.35f;
+            const float wingLateralBase = centerHalfWidth + 2.60f;
+            const float wingColSpacing = 2.40f;
             const float forwardWingStart = forwardMagesBase + 0.6f;
-            const float forwardWingStep = 1.35f;
+            const float forwardWingStep = 2.60f;
 
             const uint8_t leftWingTotal = (totalWings + 1) / 2;
             const uint8_t rightWingTotal = totalWings - leftWingTotal;
@@ -382,10 +377,24 @@ inline size_t GenerateFormationSlots(
 
     if (formation == ArmyFormation::ProtectiveRing) {
         // Outer 360-degree bone wall: Anchors + Melee + Flankers
-        const float outerRadius = tight ? 6.0f : 6.8f;
+        // Dynamic radii ensure minimum chord separation >= 2.10f between adjacent summons
         const size_t outerTotal = size_t(counts.anchors) + size_t(counts.melee) + size_t(counts.flankers);
-        size_t outerIdx = 0;
+        const float minOuterR = (outerTotal > 1)
+            ? (2.15f / (2.0f * std::sin(3.14159265f / float(outerTotal))))
+            : 7.8f;
+        const float baseOuter = tight ? 7.8f : 8.6f;
+        float outerRadius = std::max(baseOuter, minOuterR);
 
+        const float minInnerR = (counts.ranged > 1)
+            ? (2.15f / (2.0f * std::sin(3.14159265f / float(counts.ranged))))
+            : 4.6f;
+        const float baseInner = tight ? 4.6f : 5.2f;
+        const float innerRadius = std::max(baseInner, minInnerR);
+        if (outerRadius < innerRadius + 2.80f) {
+            outerRadius = innerRadius + 2.80f;
+        }
+
+        size_t outerIdx = 0;
         auto emitOuter = [&](SummonRole role, uint8_t roleCount) noexcept {
             for (uint8_t i = 0; i < roleCount && cursor < out.size(); ++i, ++outerIdx) {
                 // Start at +15 deg and sweep 330 deg so 0 deg (dead ahead) stays clear unless crowded
@@ -403,7 +412,6 @@ inline size_t GenerateFormationSlots(
         emitOuter(SummonRole::HeavyFlanker, counts.flankers);
 
         // Inner 360-degree artillery ring: Skeleton Mages shielded inside the outer wall
-        const float innerRadius = tight ? 3.5f : 4.0f;
         for (uint8_t i = 0; i < counts.ranged && cursor < out.size(); ++i) {
             const float deg = (counts.ranged == 1)
                 ? 180.0f
@@ -422,15 +430,14 @@ inline size_t GenerateFormationSlots(
         //    - If no anchor is summoned, the foremost FrontlineMelee unit takes the apex so
         //      the spearhead is never headless or split open!
         // 2. Outer Chevron (Arms of the V):
-        //    - FrontlineMelee units flank the apex and step back in a sharp ~45-degree angle.
-        //    - If melee units exceed rank 5 (10 units), subsequent ranks form a double chevron (Rank 2)
-        //      reinforcing the arms without over-extending into dungeon walls.
+        //    - FrontlineMelee units flank the apex and step back in a sharp 45-degree angle.
+        //      Spacing: 1.45f fwd and 1.45f lateral -> Euclidean distance = 2.051f >= 2.05f.
         // 3. Inner Chevron (Sheltered Hollow):
         //    - RangedArtillery (Skeleton Mages) form an inner V sheltered safely inside the hollow,
-        //      stepping back with an open sightline corridor (|lateral| >= 0.85) to allow player VR aiming.
+        //      stepping back with an open sightline corridor (|lateral| >= 1.25f) to allow player VR aiming.
         // 4. Rear Flank Escorts:
-        //    - HeavyFlanker (Revives) form powerful flanking guards reinforcing the rear-outer wings.
-        const float apexFwd = tight ? 8.8f : 9.8f;
+        //    - HeavyFlanker (Revives) form powerful flanking guards reinforcing the outer wings.
+        const float apexFwd = tight ? 10.2f : 11.4f;
         const bool hasAnchor = (counts.anchors > 0);
 
         const auto appendSlot = [&](SummonRole role, float forwardDist, float lateralDist) noexcept {
@@ -441,7 +448,7 @@ inline size_t GenerateFormationSlots(
 
         // 1. TacticalAnchor at apex (Golem)
         for (uint8_t i = 0; i < counts.anchors && cursor < out.size(); ++i) {
-            const float fwd = apexFwd - float(i) * 1.2f;
+            const float fwd = apexFwd - float(i) * 2.2f;
             appendSlot(SummonRole::TacticalAnchor, fwd, 0.0f);
         }
 
@@ -457,54 +464,43 @@ inline size_t GenerateFormationSlots(
         for (uint8_t i = 0; i < meleeOnArms && cursor < out.size(); ++i) {
             const int rank = int(i / 2) + 1;
             const float side = (i % 2 == 0) ? -1.0f : +1.0f;
-            if (rank <= 5) {
-                const float fwd = apexFwd - float(rank) * 0.85f;
-                const float lateral = side * (float(rank) * 1.0f);
-                appendSlot(SummonRole::FrontlineMelee, fwd, lateral);
-            } else {
-                const int subRank = rank - 5;
-                const float fwd = (apexFwd - float(subRank) * 0.85f) - 1.10f;
-                const float lateral = side * (float(subRank) * 1.0f + 0.35f);
-                appendSlot(SummonRole::FrontlineMelee, fwd, lateral);
-            }
+            const float fwd = apexFwd - float(rank) * 1.45f;
+            const float lateral = side * (float(rank) * 1.45f);
+            appendSlot(SummonRole::FrontlineMelee, fwd, lateral);
         }
 
-        // 3. HeavyFlanker (Revives) along the rear-outer flank wings
-        for (uint8_t i = 0; i < counts.flankers && cursor < out.size(); ++i) {
-            const int rank = int(i / 2) + 1;
-            const float side = (i % 2 == 0) ? -1.0f : +1.0f;
-            const float fwd = (apexFwd - 2.5f) - float(rank) * 0.95f;
-            const float lateral = side * (3.8f + float(rank) * 0.85f);
-            appendSlot(SummonRole::HeavyFlanker, fwd, lateral);
-        }
-
-        // 4. RangedArtillery (Skeleton Mages) forming an inner chevron inside the hollow
-        const float innerApexFwd = apexFwd - 2.6f;
+        // 3. RangedArtillery (Skeleton Mages) forming an inner chevron inside the hollow
+        const float innerApexFwd = apexFwd - 3.4f;
         for (uint8_t i = 0; i < counts.ranged && cursor < out.size(); ++i) {
             const int rank = int(i / 2) + 1;
             const float side = (i % 2 == 0) ? -1.0f : +1.0f;
-            if (rank <= 5) {
-                const float fwd = innerApexFwd - float(rank) * 0.75f;
-                const float lateral = side * (0.85f + float(rank - 1) * 0.85f);
-                appendSlot(SummonRole::RangedArtillery, fwd, lateral);
-            } else {
-                const int subRank = rank - 5;
-                const float fwd = (innerApexFwd - float(subRank) * 0.75f) - 1.0f;
-                const float lateral = side * (0.85f + float(subRank - 1) * 0.85f);
-                appendSlot(SummonRole::RangedArtillery, fwd, lateral);
-            }
+            const float fwd = innerApexFwd - float(rank) * 1.45f;
+            const float lateral = side * (1.25f + float(rank - 1) * 1.45f);
+            appendSlot(SummonRole::RangedArtillery, fwd, lateral);
+        }
+
+        // 4. HeavyFlanker (Revives) along the rear-outer flank wings outside the melee arms
+        const float maxMeleeRank = float((meleeOnArms + 1) / 2);
+        const float maxMeleeLat = maxMeleeRank * 1.45f;
+        const float wingBaseLat = std::max(maxMeleeLat + 2.60f, 8.50f);
+        for (uint8_t i = 0; i < counts.flankers && cursor < out.size(); ++i) {
+            const int rank = int(i / 2) + 1;
+            const float side = (i % 2 == 0) ? -1.0f : +1.0f;
+            const float fwd = (apexFwd - 3.2f) - float(rank) * 2.2f;
+            const float lateral = side * (wingBaseLat + float(rank) * 1.6f);
+            appendSlot(SummonRole::HeavyFlanker, fwd, lateral);
         }
 
         return cursor;
     }
 
-    // ArmyFormation::CorridorColumn: two side-rails at right = +-1.6 sub-tiles, keeping the
+    // ArmyFormation::CorridorColumn: two side-rails at right = +-2.2 sub-tiles, keeping the
     // center lane open for the player and avoiding doorway congestion.
     int frontRailIdx = 0;
     auto emitFrontColumn = [&](SummonRole role, uint8_t count) noexcept {
         for (uint8_t i = 0; i < count && cursor < out.size(); ++i, ++frontRailIdx) {
-            const float side = (frontRailIdx % 2 == 0) ? -1.6f : +1.6f;
-            const float fwd = 3.2f + float(frontRailIdx / 2) * 1.6f;
+            const float side = (frontRailIdx % 2 == 0) ? -2.2f : +2.2f;
+            const float fwd = 3.6f + float(frontRailIdx / 2) * 2.40f;
             const float deg = std::atan2(side, fwd) * (180.0f / 3.14159265358979323846f);
             out[cursor++] = { detail::LocalToWorld(anchorPos, heading, fwd, side), role, deg };
         }
@@ -515,12 +511,16 @@ inline size_t GenerateFormationSlots(
     int rearRailIdx = 0;
     auto emitRearColumn = [&](SummonRole role, uint8_t count) noexcept {
         for (uint8_t i = 0; i < count && cursor < out.size(); ++i, ++rearRailIdx) {
-            const float side = (rearRailIdx % 2 == 0) ? -1.6f : +1.6f;
-            const float fwd = -2.2f - float(rearRailIdx / 2) * 1.6f;
+            const float side = (rearRailIdx % 2 == 0) ? -2.2f : +2.2f;
+            const float fwd = -2.6f - float(rearRailIdx / 2) * 2.40f;
             const float deg = std::atan2(side, fwd) * (180.0f / 3.14159265358979323846f);
             out[cursor++] = { detail::LocalToWorld(anchorPos, heading, fwd, side), role, deg };
         }
     };
+    emitRearColumn(SummonRole::RangedArtillery, counts.ranged);
+    emitRearColumn(SummonRole::HeavyFlanker, counts.flankers);
+
+    return cursor;
     emitRearColumn(SummonRole::RangedArtillery, counts.ranged);
     emitRearColumn(SummonRole::HeavyFlanker, counts.flankers);
 
@@ -636,10 +636,10 @@ struct ArmyMoveOrder {
 // arrival/release deadband hysteresis, corridor auto-compression, stance gatekeeping,
 // and the staggered A* pathfinding budget.
 struct SummonArmyCoordinator {
-    static constexpr float ArrivalTolerance        = 1.25f; // sub-tiles: considered settled in slot
-    static constexpr float ReleaseDeadbandBalanced = 2.40f; // sub-tiles: drift allowed before re-walking
-    static constexpr float ReleaseDeadbandDef      = 1.85f; // tighter discipline in Defensive stance
-    static constexpr float StickySlotMaxDist       = 14.0f; // preserve slot assignment within this radius
+    static constexpr float ArrivalTolerance        = 0.85f; // sub-tiles: considered settled in slot
+    static constexpr float ReleaseDeadbandBalanced = 1.60f; // sub-tiles: drift allowed before re-walking
+    static constexpr float ReleaseDeadbandDef      = 1.30f; // tighter discipline in Defensive stance
+    static constexpr float StickySlotMaxDist       = 3.00f; // preserve slot assignment within this radius
     static constexpr uint64_t MinRedispatchMs      = 300;   // per-unit cooldown between move dispatches
     static constexpr float CorridorEnterWidth      = 6.5f;  // compress to CorridorColumn below 6.5 sub-tiles
     static constexpr float CorridorExitWidth       = 8.5f;  // expand back above 8.5 sub-tiles
@@ -1067,6 +1067,8 @@ struct SummonArmyCoordinator {
             : ReleaseDeadbandBalanced;
 
         std::array<bool, MaxArmyUnits> needsMove{};
+        std::array<Vec2, MaxArmyUnits> navTargets{};
+
         for (size_t i = 0; i < n; ++i) {
             if (!unitAssigned[i] || nextTracked[i].slotIndex >= slotCount) continue;
             const auto& slot = slots[nextTracked[i].slotIndex];
@@ -1081,12 +1083,37 @@ struct SummonArmyCoordinator {
             }
             nextTracked[i].inSlot = false;
 
-            const int tx = int(std::round(slot.worldPos.x));
-            const int ty = int(std::round(slot.worldPos.y));
+            // Determine desired facing direction for this slot
+            Vec2 faceDir = heading;
+            if (effectiveFormation == ArmyFormation::ProtectiveRing) {
+                const float dx = slot.worldPos.x - center.x;
+                const float dy = slot.worldPos.y - center.y;
+                const float rLen = std::hypot(dx, dy);
+                if (rLen > 1e-4f) faceDir = { dx / rLen, dy / rLen };
+            }
+
+            // Check if unit is ahead of its slot along the facing vector.
+            // If so, route through an approach-from-rear waypoint behind the slot so that
+            // its final arrival step moves forward into the slot, naturally facing the battle line!
+            Vec2 navTarget = slot.worldPos;
+            const float relX = units[i].pos.x - slot.worldPos.x;
+            const float relY = units[i].pos.y - slot.worldPos.y;
+            const float dotAhead = relX * faceDir.x + relY * faceDir.y;
+            const float distToSlot = std::hypot(relX, relY);
+
+            if (dotAhead > 0.8f && distToSlot > 1.4f) {
+                navTarget = {
+                    slot.worldPos.x - faceDir.x * 1.5f,
+                    slot.worldPos.y - faceDir.y * 1.5f
+                };
+            }
+            navTargets[i] = navTarget;
+
+            const int tx = int(std::round(navTarget.x));
+            const int ty = int(std::round(navTarget.y));
             // Suppress duplicate move spam if unit is already walking (2) or running (15) toward the same sub-tile
             // and was dispatched recently.
-            const bool sameDest = ( std::abs(tx - nextTracked[i].lastTargetX) <= 1 &&
-                                    std::abs(ty - nextTracked[i].lastTargetY) <= 1 );
+            const bool sameDest = (tx == nextTracked[i].lastTargetX && ty == nextTracked[i].lastTargetY);
             if ((units[i].animMode == 2 || units[i].animMode == 15) && sameDest && nextTracked[i].lastMoveDispatchMs != 0 &&
                 nowMs >= nextTracked[i].lastMoveDispatchMs &&
                 (nowMs - nextTracked[i].lastMoveDispatchMs) < 1200) {
@@ -1112,9 +1139,9 @@ struct SummonArmyCoordinator {
                 const bool isAnchor = (unitRoles[idx] == SummonRole::TacticalAnchor);
                 if ((rolePriority == 0) != isAnchor) continue;
 
-                const auto& slot = slots[nextTracked[idx].slotIndex];
-                const int tx = int(std::round(slot.worldPos.x));
-                const int ty = int(std::round(slot.worldPos.y));
+                const auto& target = navTargets[idx];
+                const int tx = int(std::round(target.x));
+                const int ty = int(std::round(target.y));
                 outMoves[emitted++] = {
                     units[idx].unitId,
                     units[idx].petType,

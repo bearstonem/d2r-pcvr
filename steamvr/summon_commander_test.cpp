@@ -139,17 +139,17 @@ void TestPhalanxVisualCorridorAndStratification() {
 
         if (slots[i].role == SummonRole::RangedArtillery) {
             // Central block rear rank: mages right in front of player
-            assert(std::fabs(lateralDist) <= 3.5f);
+            assert(std::fabs(lateralDist) <= 4.5f);
             minMageDist = std::min(minMageDist, forwardDist);
             maxMageDist = std::max(maxMageDist, forwardDist);
         } else if (slots[i].role == SummonRole::FrontlineMelee) {
             // Central block front rank: warriors in front of mages
-            assert(std::fabs(lateralDist) <= 3.5f);
+            assert(std::fabs(lateralDist) <= 4.5f);
             minMeleeDist = std::min(minMeleeDist, forwardDist);
             maxMeleeDist = std::max(maxMeleeDist, forwardDist);
         } else if (slots[i].role == SummonRole::HeavyFlanker || slots[i].role == SummonRole::TacticalAnchor) {
             // Flank Cavalry Wings (Alas de Caballería): Revives and Golem on lateral flanks!
-            assert(std::fabs(lateralDist) >= 4.5f);
+            assert(std::fabs(lateralDist) >= 6.5f);
             if (lateralDist < 0.0f) {
                 ++leftWingCount;
             } else {
@@ -160,8 +160,8 @@ void TestPhalanxVisualCorridorAndStratification() {
 
     // Central block rank stratification:
     // Player -> [Mages (rear, closest)] -> [Warriors (frontline shield wall)]
-    assert(minMageDist >= 4.0f && maxMageDist <= 6.5f);
-    assert(minMeleeDist > maxMageDist + 1.2f);
+    assert(minMageDist >= 5.0f && maxMageDist <= 8.0f);
+    assert(minMeleeDist > maxMageDist + 2.0f);
 
     // Flank wings: 1 Golem + 4 Revives = 5 units distributed across left and right wings
     assert(leftWingCount + rightWingCount == 5);
@@ -181,9 +181,9 @@ void TestProtectiveRingWedgeAndColumn() {
     for (size_t i = 0; i < n; ++i) {
         const float r = std::hypot(slots[i].worldPos.x - anchor.x, slots[i].worldPos.y - anchor.y);
         if (slots[i].role == SummonRole::RangedArtillery) {
-            assert(r < 4.5f);
+            assert(r < 5.5f);
         } else {
-            assert(r > 5.0f);
+            assert(r > 7.0f);
         }
     }
 
@@ -215,12 +215,12 @@ void TestProtectiveRingWedgeAndColumn() {
     assert(slots[apexIdx].role == SummonRole::FrontlineMelee);
     assert(std::fabs(slots[apexIdx].worldPos.y - anchor.y) < 1e-3f);
 
-    // 3. CorridorColumn: Center walking lane (|y - anchor.y| < 1.2) must be completely clear
+    // 3. CorridorColumn: Center walking lane (|y - anchor.y| < 1.8) must be completely clear
     n = GenerateFormationSlots(anchor, heading, ArmyFormation::CorridorColumn, ArmyStance::Balanced, counts, slots);
     assert(n == counts.Total());
     for (size_t i = 0; i < n; ++i) {
         const float lateralDist = std::fabs(slots[i].worldPos.y - anchor.y);
-        assert(lateralDist >= 1.4f && lateralDist <= 1.8f);
+        assert(lateralDist >= 2.0f && lateralDist <= 2.4f);
     }
 }
 
@@ -258,7 +258,7 @@ void TestCoordinatorAntiSwapAndStaggeredBudget() {
         army[i].pos = slots[initialSlots[i]].worldPos;
     }
 
-    // Tick 2 (t = 2000ms): All units have arrived within ArrivalTolerance (0.0 <= 1.25) -> 0 move orders!
+    // Tick 2 (t = 2000ms): All units have arrived within ArrivalTolerance (0.0 <= 0.85) -> 0 move orders!
     emitted = coord.Step(army, playerPos, 0.0f, -1.0f, 2000, moves, slots);
     assert(emitted == 0);
     for (size_t i = 0; i < army.size(); ++i) {
@@ -266,14 +266,14 @@ void TestCoordinatorAntiSwapAndStaggeredBudget() {
         assert(coord.tracked[i].slotIndex == initialSlots[i]); // Zero slot swapping!
     }
 
-    // Drift units by 1.8 sub-tiles (< ReleaseDeadbandBalanced 2.40) -> still 0 move orders!
+    // Drift units by 1.2 sub-tiles (< ReleaseDeadbandBalanced 1.60) -> still 0 move orders!
     for (size_t i = 0; i < army.size(); ++i) {
-        army[i].pos.x += 1.8f;
+        army[i].pos.x += 1.2f;
     }
     emitted = coord.Step(army, playerPos, 0.0f, -1.0f, 2500, moves, slots);
     assert(emitted == 0);
 
-    // Virtual Skill 3901 (Army: Phalanx Wall Def) tightens stance to Defensive (ReleaseDeadbandDef = 1.85)
+    // Virtual Skill 3901 (Army: Phalanx Wall Def) tightens stance to Defensive (ReleaseDeadbandDef = 1.30)
     assert(coord.ApplyCommanderSkill(SkillPhalanxDef, playerPos));
     assert(coord.activeStance == ArmyStance::Defensive);
     assert(coord.activeFormation == ArmyFormation::PhalanxArc);
@@ -437,6 +437,78 @@ void TestCommanderUiAndGlyphIntegration() {
     }
 }
 
+void TestApproachFromRearOrientationWaypoint() {
+    SummonArmyCoordinator coord;
+    const Vec2 playerPos{ 500.0f, 500.0f };
+    const Vec2 heading{ 0.0f, -1.0f }; // North (-Y)
+
+    // Slot 0 for warrior will be North of player (Y < 500.0f)
+    // Place a warrior far ahead (North) of its formation slot (e.g. spawned from corpse ahead)
+    std::vector<ArmyUnitSample> army = {
+        { 201, 363, 4, 1, { 500.0f, 480.0f } } // Y = 480 is ahead of slot (~490) along North heading
+    };
+
+    std::array<ArmyMoveOrder, MaxMovesPerTick> moves{};
+    std::array<FormationSlot, MaxArmyUnits> slots{};
+    size_t emitted = coord.Step(army, playerPos, heading.x, heading.y, 1000, moves, slots);
+    assert(emitted == 1);
+
+    const auto& slot = slots[moves[0].slotIndex];
+    // Since warrior was ahead of slot along heading, the move order target must be BEHIND the slot
+    // (i.e. target.y > slot.worldPos.y since heading is North = -Y)
+    const float expectedRearY = slot.worldPos.y - heading.y * 1.5f; // slot.y + 1.5f
+    assert(moves[0].targetY == int(std::round(expectedRearY)));
+    assert(moves[0].targetX == int(std::round(slot.worldPos.x)));
+
+    // Now place warrior behind the slot (e.g. it has reached the rear waypoint)
+    army[0].pos = { slot.worldPos.x, slot.worldPos.y + 1.5f };
+    emitted = coord.Step(army, playerPos, heading.x, heading.y, 2000, moves, slots);
+    assert(emitted == 1);
+    // Target is now directly the formation slot! Final arrival step will move forward into slot!
+    assert(moves[0].targetX == int(std::round(slot.worldPos.x)));
+    assert(moves[0].targetY == int(std::round(slot.worldPos.y)));
+}
+
+void TestFormationMinimumSeparation() {
+    const Vec2 anchor{ 100.0f, 100.0f };
+    const Vec2 heading{ 0.0f, -1.0f };
+    const ArmyFormation formations[] = {
+        ArmyFormation::PhalanxArc,
+        ArmyFormation::ProtectiveRing,
+        ArmyFormation::SpearheadWedge,
+        ArmyFormation::CorridorColumn
+    };
+    const ArmyStance stances[] = {
+        ArmyStance::Defensive,
+        ArmyStance::Balanced,
+        ArmyStance::Aggressive
+    };
+    const RoleCounts compositions[] = {
+        { 1, 10, 6, 4 }, // Full endgame army: 21 minions
+        { 0, 8, 4, 0 },  // No golem, no revives
+        { 1, 4, 2, 1 },  // Small midgame army
+        { 1, 12, 8, 6 }, // Huge army: 27 minions
+        { 1, 16, 12, 8 } // Massive army: 37 minions
+    };
+
+    std::array<FormationSlot, MaxArmyUnits> slots{};
+    for (auto formation : formations) {
+        for (auto stance : stances) {
+            for (const auto& counts : compositions) {
+                const size_t n = GenerateFormationSlots(anchor, heading, formation, stance, counts, slots);
+                assert(n == counts.Total());
+                for (size_t i = 0; i < n; ++i) {
+                    for (size_t j = i + 1; j < n; ++j) {
+                        const float dist = std::hypot(slots[i].worldPos.x - slots[j].worldPos.x,
+                                                      slots[i].worldPos.y - slots[j].worldPos.y);
+                        assert(dist >= 2.05f);
+                    }
+                }
+            }
+        }
+    }
+}
+
 } // namespace
 
 int main() {
@@ -449,6 +521,8 @@ int main() {
     TestCorridorCompressionAndWalkableSpiral();
     TestStanceGatekeeperAndArmyWatchdog();
     TestCommanderUiAndGlyphIntegration();
+    TestApproachFromRearOrientationWaypoint();
+    TestFormationMinimumSeparation();
     std::puts("Summon commander: pet extraction, role stratification, +-12 deg sightline, anti-swap slots, corridor compression, stance gatekeeper and virtual skills passed");
     return 0;
 }
