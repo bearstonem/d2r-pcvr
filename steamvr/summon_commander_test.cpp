@@ -175,15 +175,17 @@ void TestProtectiveRingWedgeAndColumn() {
 
     std::array<FormationSlot, MaxArmyUnits> slots{};
 
-    // 1. ProtectiveRing: Mages must have strictly smaller radius from ring center than Melee/Anchor outer ring,
-    // and all slots must be positioned strictly ahead of the anchor along heading +X.
+    // 1. ProtectiveRing: Encircles the anchor (player) with wide separation between inner mages and outer warriors.
+    // Mages must have strictly smaller radius (< 5.0f) and outer ring must have radius > 8.0f (radial gap >= 4.20f).
     size_t n = GenerateFormationSlots(anchor, heading, ArmyFormation::ProtectiveRing, ArmyStance::Defensive, counts, slots);
     assert(n == counts.Total());
     for (size_t i = 0; i < n; ++i) {
-        assert(slots[i].worldPos.x >= anchor.x + 1.8f); // All slots ahead of player
-        // Check radial stratification around the ring's focal center (anchor.y along +X)
-        const float lateralDist = std::fabs(slots[i].worldPos.y - anchor.y);
-        assert(lateralDist <= 8.8f);
+        const float r = std::hypot(slots[i].worldPos.x - anchor.x, slots[i].worldPos.y - anchor.y);
+        if (slots[i].role == SummonRole::RangedArtillery) {
+            assert(r < 5.0f);
+        } else {
+            assert(r > 8.0f);
+        }
     }
 
     // 2. SpearheadWedge: TacticalAnchor is furthest forward along +X heading

@@ -376,41 +376,41 @@ inline size_t GenerateFormationSlots(
     }
 
     if (formation == ArmyFormation::ProtectiveRing) {
-        // Outer 360-degree bone wall: Anchors + Melee + Flankers
-        // Dynamic radii ensure minimum chord separation >= 2.10f between adjacent summons
+        // Outer 360-degree bone wall: Anchors + Melee + Flankers encircling the player.
+        // Dynamic radii ensure generous chord separation between adjacent summons and a wide
+        // radial separation (>= 4.20 sub-tiles) between the inner mage artillery tier and the outer melee shield.
         const size_t outerTotal = size_t(counts.anchors) + size_t(counts.melee) + size_t(counts.flankers);
+        const float outerSpan = (outerTotal <= 14) ? 330.0f : 360.0f;
+        const float outerStart = (outerTotal <= 14) ? 15.0f : 0.0f;
+        const float outerStepRad = (outerTotal > 1) ? detail::DegToRad(outerSpan / float(outerTotal)) : 3.14159f;
         const float minOuterR = (outerTotal > 1)
-            ? (2.15f / (2.0f * std::sin(3.14159265f / float(outerTotal))))
-            : 7.8f;
-        const float baseOuter = tight ? 7.8f : 8.6f;
+            ? (2.20f / (2.0f * std::sin(outerStepRad * 0.5f)))
+            : 8.6f;
+        const float baseOuter = tight ? 8.6f : 9.6f;
         float outerRadius = std::max(baseOuter, minOuterR);
 
+        const float innerSpan = (counts.ranged <= 6) ? 320.0f : 360.0f;
+        const float innerStart = (counts.ranged <= 6) ? 20.0f : 0.0f;
+        const float innerStepRad = (counts.ranged > 1) ? detail::DegToRad(innerSpan / float(counts.ranged)) : 3.14159f;
         const float minInnerR = (counts.ranged > 1)
-            ? (2.15f / (2.0f * std::sin(3.14159265f / float(counts.ranged))))
-            : 4.6f;
-        const float baseInner = tight ? 4.6f : 5.2f;
+            ? (2.20f / (2.0f * std::sin(innerStepRad * 0.5f)))
+            : 4.2f;
+        const float baseInner = tight ? 4.2f : 4.8f;
         const float innerRadius = std::max(baseInner, minInnerR);
-        if (outerRadius < innerRadius + 2.80f) {
-            outerRadius = innerRadius + 2.80f;
-        }
 
-        // Shift the center of the ring forward along heading so the entire defensive ring
-        // is deployed in front of the player (commander), allowing the player to clearly view
-        // the backs of all skeletons forming the perimeter shield!
-        const float centerFwd = outerRadius + (tight ? 2.0f : 2.5f);
-        const Vec2 ringCenter = detail::LocalToWorld(anchorPos, heading, centerFwd, 0.0f);
+        // Enforce a wide, clear radial moat (>= 4.20 sub-tiles) between inner mages and outer warriors
+        if (outerRadius < innerRadius + 4.20f) {
+            outerRadius = innerRadius + 4.20f;
+        }
 
         size_t outerIdx = 0;
         auto emitOuter = [&](SummonRole role, uint8_t roleCount) noexcept {
             for (uint8_t i = 0; i < roleCount && cursor < out.size(); ++i, ++outerIdx) {
-                // Start at +15 deg and sweep 330 deg so 0 deg (dead ahead) stays clear unless crowded
-                const float span = (outerTotal <= 14) ? 330.0f : 360.0f;
-                const float start = (outerTotal <= 14) ? 15.0f : 0.0f;
                 const float deg = (outerTotal <= 1)
-                    ? 15.0f
-                    : (start + (span * float(outerIdx)) / float(outerTotal));
+                    ? outerStart
+                    : (outerStart + (outerSpan * float(outerIdx)) / float(outerTotal));
                 const float normDeg = (deg > 180.0f) ? (deg - 360.0f) : deg;
-                out[cursor++] = { detail::PolarToWorld(ringCenter, heading, outerRadius, normDeg), role, normDeg };
+                out[cursor++] = { detail::PolarToWorld(anchorPos, heading, outerRadius, normDeg), role, normDeg };
             }
         };
         emitOuter(SummonRole::TacticalAnchor, counts.anchors);
@@ -421,9 +421,9 @@ inline size_t GenerateFormationSlots(
         for (uint8_t i = 0; i < counts.ranged && cursor < out.size(); ++i) {
             const float deg = (counts.ranged == 1)
                 ? 180.0f
-                : (20.0f + (320.0f * float(i)) / float(counts.ranged));
+                : (innerStart + (innerSpan * float(i)) / float(counts.ranged));
             const float normDeg = (deg > 180.0f) ? (deg - 360.0f) : deg;
-            out[cursor++] = { detail::PolarToWorld(ringCenter, heading, innerRadius, normDeg), SummonRole::RangedArtillery, normDeg };
+            out[cursor++] = { detail::PolarToWorld(anchorPos, heading, innerRadius, normDeg), SummonRole::RangedArtillery, normDeg };
         }
         return cursor;
     }
@@ -1129,9 +1129,15 @@ struct SummonArmyCoordinator {
             nextTracked[i].inSlot = false;
 
             // Determine desired facing direction for this slot:
-            // All formations face forward along heading so the commander (VR player)
-            // clearly views the backs of all minions in the army.
-            const Vec2 faceDir = heading;
+            // Phalanx, Wedge, and Column face forward along heading (backs visible to player);
+            // ProtectiveRing faces radially outwards from the center (360-degree perimeter watch).
+            Vec2 faceDir = heading;
+            if (effectiveFormation == ArmyFormation::ProtectiveRing) {
+                const float dx = slot.worldPos.x - center.x;
+                const float dy = slot.worldPos.y - center.y;
+                const float rLen = std::hypot(dx, dy);
+                if (rLen > 1e-4f) faceDir = { dx / rLen, dy / rLen };
+            }
 
             // Check if unit is significantly ahead of its slot along the facing vector.
             // If coming from far ahead (e.g. corpses ahead in battle), route through an approach-from-rear
