@@ -148,7 +148,7 @@ inline const char* Cue(Motion m) {
     case Motion::ForearmSweep:return "sweep the left hand from the right hand up to the right shoulder";
     case Motion::Shake:return "shake both fists";
     case Motion::Hug:return "hug yourself, each hand on the other shoulder";
-    case Motion::Punch:return "draw the right fist in, then punch it straight out where you want to land";
+    case Motion::Punch:return "pull the right fist in fast to show where you land, then punch it straight out";
     default:return m>Motion::Punch&&m<Motion::End?ClassCue(m):"no motion";
     }
 }
@@ -243,6 +243,18 @@ struct Tuning {
     // forward within punchWindow, at least 1.5 times as far forward as up, down or sideways.
     // The cast goes the way of the punch (Output::aim).
     float punchFrom=.30f,punchReach=.45f,punchTravel=.25f,punchWindow=.20f;
+    // Teleport aimed first (owner, 2026-11-05: "One fast pull of the hand ... that shows the target circle
+    // we are facing and a push out of our hand that initiates the teleport. And in between we can even do
+    // slight adjustments"): the right fist pulled in fast, drawTravel back toward the eyes within
+    // drawWindow and ending drawn in as the punch begins, shows where it lands (Output::aiming), aimCells
+    // ahead of the eyes' heading. Held there, the fist moved forward or back takes it farther or nearer
+    // and moved sideways takes it across, aimCellsPerMetre (at most aimOut forward, aimBack back, aimSide
+    // across, never nearer than aimNear); only while it moves slower than aimStill, so a punch never moves it. The
+    // punch then casts there (Output::landing), from up to aimOut further out than punchFrom. Shown at
+    // most aimSeconds without a punch.
+    float drawTravel=.16f,drawWindow=.25f;
+    float aimCells=20.f,aimCellsPerMetre=100.f,aimOut=.15f,aimBack=.12f,aimSide=.20f,aimNear=4.f,aimSeconds=8.f;
+    float aimStill=.40f;      // m/s: the fist held still for its landing (slower than a punch's start)
     float cooldown=.6f;       // s after a cast
     float history=1.5f;       // s of the hands kept
 };
@@ -270,7 +282,19 @@ struct Output {
     // With a cast that goes somewhere (Teleport): the way the motion went, head-local as end (the punch,
     // from where it began to where it ended); zero for the rest.
     math::Vec aim{};
+    // Teleport drawn in fast (Tuning::drawTravel): its landing shown, where TeleportSpot puts it for
+    // adjust (the still fist's move since it settled, head-local). With cast, landing: the punch came
+    // while it showed, so it lands there.
+    bool aiming=false,landing=false;
+    math::Vec adjust{};
 };
+// Teleport's landing for a fist moved by adjust (Output::adjust), in cells ahead of the eyes' heading
+// and to its right.
+struct Spot {float ahead=0,right=0;};
+inline Spot TeleportSpot(math::Vec adjust,const Tuning& t) {
+    const float out=std::clamp(-adjust.z,-t.aimBack,t.aimOut),across=std::clamp(adjust.x,-t.aimSide,t.aimSide);
+    return {std::max(t.aimNear,t.aimCells+out*t.aimCellsPerMetre),across*t.aimCellsPerMetre};
+}
 // The hands at one frame, head-local: l[0] the right, l[1] the left.
 struct Sample {double t=0;math::Vec l[2]{};};
 class Engine;
@@ -284,6 +308,9 @@ class Engine {
     double since=0,last=0,castAt=-1,poseSince=-1;
     float rub=0;double parted=-1; // Static Field
     math::Vec aimed{};            // Teleport: the punch Done found
+    // Teleport drawn in: since when (-1: not), the fist where it first held still after (anchored) and
+    // where it last held still; landed: the punch came while it showed.
+    double drawnAt=-1;bool anchored=false,landed=false;math::Vec anchor{},settled{};
     struct Swing {int sign=0;float peak=0;};
     Swing swing[2][3]{};          // Shiver Armor: each hand's last swing on each axis
     std::vector<double> turns[2][3];
@@ -291,6 +318,7 @@ class Engine {
     static bool Finite(math::Vec v){return std::isfinite(v.x)&&std::isfinite(v.y)&&std::isfinite(v.z);}
     void Clear() {
         samples.clear();poseSince=-1;rub=0;parted=-1;aimed={};scratch={};
+        drawnAt=-1;anchored=landed=false;anchor=settled={};
         for(auto& h:swing)for(auto& a:h)a={};
         for(auto& h:turns)for(auto& a:h)a.clear();
     }
@@ -394,12 +422,25 @@ private:
         }
         case Motion::Punch: {
             const auto& c=n.l[0];
+            const bool drawn=Forward(c)<=t.punchFrom&&c.y>=-.70f&&c.y<=.10f;
+            if(drawnAt>=0&&n.t-drawnAt>t.aimSeconds){drawnAt=-1;anchored=false;}   // shown long enough: given up
+            if(drawnAt<0&&drawn)
+                for(const auto& s:samples) {   // pulled in fast, mostly toward the eyes
+                    const auto& a=s.l[0];
+                    const float back=Forward(a)-Forward(c);
+                    if(n.t-s.t<=t.drawWindow&&back>=t.drawTravel&&std::fabs(c.y-a.y)<=back&&std::fabs(c.x-a.x)<=back){drawnAt=n.t;anchored=false;break;}
+                }
+            if(drawnAt>=0&&Len(Velocity(0))<t.aimStill) {
+                if(!anchored){anchored=true;anchor=c;}
+                settled=c;
+            }
             if(Forward(c)<t.punchReach)return false;
+            const float from=t.punchFrom+(drawnAt>=0?t.aimOut:0.f);
             for(const auto& s:samples) {
                 const auto& a=s.l[0];
                 const float forward=Forward(c)-Forward(a);
-                if(n.t-s.t<=t.punchWindow&&Forward(a)<=t.punchFrom&&a.y>=-.70f&&a.y<=.10f&&forward>=t.punchTravel&&
-                   std::fabs(c.y-a.y)*1.5f<=forward&&std::fabs(c.x-a.x)*1.5f<=forward){aimed=c-a;return true;}
+                if(n.t-s.t<=t.punchWindow&&Forward(a)<=from&&a.y>=-.70f&&a.y<=.10f&&forward>=t.punchTravel&&
+                   std::fabs(c.y-a.y)*1.5f<=forward&&std::fabs(c.x-a.x)*1.5f<=forward){aimed=c-a;landed=drawnAt>=0;return true;}
             }
             return false;
         }
@@ -458,8 +499,10 @@ public:
         if(castAt>=0&&in.time-castAt<tuning.cooldown)return out;
         if(Done(in.motion)) {
             const auto seconds=out.seconds;out=stats;out.seconds=seconds;out.cast=true;out.aim=aimed;
+            out.landing=landed;out.adjust=landed&&anchored?settled-anchor:math::Vec{};
             castAt=in.time;++casts;Clear();   // the motion again, from its start, casts again
         }
+        else if(drawnAt>=0){out.aiming=true;out.adjust=anchored?settled-anchor:math::Vec{};}
         return out;
     }
 };

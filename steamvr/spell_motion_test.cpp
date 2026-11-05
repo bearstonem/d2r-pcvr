@@ -16,6 +16,7 @@ struct Sim {
     math::Quat yaw{0,0,0,1};math::Vec head{0,1.7f,0};
     int casts=0,drops=0,began=0;std::string lastDrop;
     math::Vec aim{};   // the last cast's way
+    bool landing=false;math::Vec adjust{};   // the last cast's: Teleport on its shown landing, and the fist's move for it
     float frame=1/90.f;
     Sim(Motion m,float heading=0){yaw=math::Yaw(heading);in.time=1;in.session=3;in.epoch=1;in.active=true;in.motion=m;
         in.tracked[0]=in.tracked[1]=true;in.head=head;in.headRotation=yaw;Place(0,RestR);Place(1,RestL);Step();}
@@ -36,7 +37,7 @@ struct Sim {
     }
     void Hold(float s){for(int i=0;i<int(s/frame);++i)Step();}
     void Trigger(bool down){in.held=down;Step();}
-    void Step(){in.time+=frame;out=g.Step(in);if(out.cast){++casts;aim=out.aim;}if(out.began)++began;if(out.dropped){++drops;lastDrop=out.dropped;}}
+    void Step(){in.time+=frame;out=g.Step(in);if(out.cast){++casts;aim=out.aim;landing=out.landing;adjust=out.adjust;}if(out.began)++began;if(out.dropped){++drops;lastDrop=out.dropped;}}
 };
 // The motions, done well, from the resting pose; the trigger is the caller's.
 static void Nova(Sim& s){s.Move({.08f,-.40f,-.30f},{-.08f,-.40f,-.30f},.35f);s.Move({.62f,-.35f,-.15f},{-.62f,-.35f,-.15f},.25f);}
@@ -140,6 +141,39 @@ int main() {
      Check(s.casts==1&&s.aim.z<-.25f&&std::fabs(s.aim.x)<.1f&&std::fabs(s.aim.y)<.1f,"Teleport: it goes the way of the punch, head-local (straight ahead at any heading)");}
     {Sim s(Motion::Punch);s.Trigger(true);s.MoveR({.05f,-.32f,-.12f},.35f);s.Hold(.1f);s.MoveR({.25f,-.30f,-.58f},.2f);
      Check(s.casts==1&&s.aim.x>.1f&&s.aim.z<-.25f,"Teleport: a punch out to the right goes right of ahead");}
+    {Sim s(Motion::Punch);s.Trigger(true);Teleport(s);Check(s.casts==1&&!s.landing,"Teleport: a punch with no fast pull first casts as before, along the punch");}
+    // Aimed first (owner, 2026-11-05): the fist pulled in fast shows the landing, nudged, then the punch.
+    {
+        const auto pulled=[](Sim& s){s.MoveR({.15f,-.32f,-.45f},.5f);s.Hold(.2f);s.MoveR({.15f,-.32f,-.12f},.18f);};
+        const auto near=[](float a,float b,float within){return std::fabs(a-b)<=within;};
+        {Sim s(Motion::Punch);s.Trigger(true);pulled(s);s.Hold(.3f);
+         Check(s.out.aiming&&s.casts==0&&spellmotion::Engine::Len(s.out.adjust)<.02f,"Teleport: the fist pulled in fast shows its landing, casting nothing");
+         const auto spot=spellmotion::TeleportSpot(s.out.adjust,s.g.tuning);
+         Check(near(spot.ahead,s.g.tuning.aimCells,2)&&near(spot.right,0,2),"Teleport: shown straight ahead of the eyes at first");
+         s.MoveR({.17f,-.28f,-.62f},.2f);
+         Check(s.casts==1&&s.landing&&!s.out.aiming,"Teleport: then the punch casts on the landing shown");}
+        for(float heading:{-2.f,1.f}){Sim s(Motion::Punch,heading);s.Trigger(true);pulled(s);s.Hold(.3f);
+         s.MoveR({.15f,-.32f,-.22f},1.f);s.Hold(.3f);
+         Check(s.out.aiming&&near(s.out.adjust.z,-.10f,.02f),"Teleport: the fist moved 10 cm out slowly, head-local at any heading");
+         Check(near(spellmotion::TeleportSpot(s.out.adjust,s.g.tuning).ahead,s.g.tuning.aimCells+10,2),"Teleport: 10 cm out is 10 cells farther");
+         s.MoveR({.17f,-.28f,-.72f},.2f);
+         Check(s.casts==1&&s.landing&&near(s.adjust.z,-.10f,.03f),"Teleport: the punch from further out still casts, on the landing as it was before the punch");}
+        {Sim s(Motion::Punch);s.Trigger(true);pulled(s);s.Hold(.3f);s.MoveR({.25f,-.32f,-.12f},1.f);s.Hold(.3f);
+         const auto spot=spellmotion::TeleportSpot(s.out.adjust,s.g.tuning);
+         Check(s.out.aiming&&near(spot.right,10,2)&&near(spot.ahead,s.g.tuning.aimCells,2),"Teleport: the fist moved 10 cm right takes it 10 cells across");}
+        {Sim s(Motion::Punch);s.Trigger(true);s.MoveR({.15f,-.32f,-.45f},.5f);s.Hold(.2f);s.MoveR({.15f,-.32f,-.12f},1.f);s.Hold(.3f);
+         Check(!s.out.aiming,"Teleport: the fist drawn in slowly shows nothing");}
+        {Sim s(Motion::Punch);s.Trigger(true);pulled(s);s.Hold(.3f);s.in.active=false;s.Step();s.in.active=true;s.Hold(.3f);
+         Check(!s.out.aiming,"Teleport: the grips let go, the landing goes");}
+        {Sim s(Motion::Punch);s.Trigger(true);pulled(s);s.Hold(s.g.tuning.aimSeconds+.5f);
+         Check(!s.out.aiming,"Teleport: shown aimSeconds with no punch, it goes");}
+        const auto& t=spellmotion::Tuning{};
+        Check(near(spellmotion::TeleportSpot({0,0,.5f},t).ahead,t.aimCells-t.aimBack*t.aimCellsPerMetre,.01f)&&
+              near(spellmotion::TeleportSpot({0,0,-.5f},t).ahead,t.aimCells+t.aimOut*t.aimCellsPerMetre,.01f)&&
+              near(spellmotion::TeleportSpot({1,0,0},t).right,t.aimSide*t.aimCellsPerMetre,.01f)&&
+              spellmotion::TeleportSpot({0,0,5},[&]{auto far=t;far.aimBack=1;return far;}()).ahead==t.aimNear,
+              "Teleport: the landing's adjustment stops at its limits, never nearer than aimNear");
+    }
     {Sim s(Motion::FlingOut);s.Trigger(true);Nova(s);Check(s.casts==1&&math::Dot(s.aim,s.aim)==0,"Nova: no way to go");}
     {Sim s(Motion::FlingOut);s.Trigger(true);Nova(s);s.Move(RestR,RestL,.4f);s.Hold(.4f);Nova(s);
      Check(s.casts==2,"still held, Nova again from the start casts again");s.Trigger(false);Check(s.drops==0,"a hold that cast is not dropped");}

@@ -3989,6 +3989,24 @@ bool TossAim(int skill,float playerX,float playerY,framevr::spellaim::Cast& cast
     }
     return true;
 }
+// Teleport punched while its landing showed (spell_motion.h, the transport's
+// circle): there, whatever the Aim options, never past the game's reach.
+bool MotionAim(int skill,float playerX,float playerY,framevr::spellaim::Cast& cast) {
+    float x=0,y=0;
+    if(!g_spellAimReady.load()||!g_enabled.load()||gamestate::MenuOpen()||!framevr::MotionLanding(skill,x,y))return false;
+    float dx=x-playerX,dy=y-playerY;
+    const float wanted=std::hypot(dx,dy);
+    if(wanted<framevr::spellaim::GroundMinDistance&&wanted>.001f){dx*=framevr::spellaim::GroundMinDistance/wanted;dy*=framevr::spellaim::GroundMinDistance/wanted;}
+    if(!framevr::aimreach::Clamp(dx,dy))return false;
+    cast.x=playerX+dx;cast.y=playerY+dy;cast.directed=cast.contactPoint=true;
+    g_note.by="motion";g_note.distance=std::hypot(dx,dy);
+    static ULONGLONG lastLog=0;
+    if(GetTickCount64()-lastLog>250) {
+        lastLog=GetTickCount64();
+        LogF("Frame motion aim: skill %d on the landing shown, %.1f cells (shown %.1f from here)",skill,g_note.distance,wanted);
+    }
+    return true;
+}
 // Telemetry: "Frame aim cast:" - every cast the aim rules see, at most one line
 // per skill per 250 ms: the rule, the button, the target and where it came
 // from, a unit hand-off, and the point or heading sent to the game.
@@ -3996,9 +4014,9 @@ bool UpstreamSpellAim(float playerX,float playerY,framevr::spellaim::Cast& cast)
 bool NativeSpellAim(float playerX,float playerY,framevr::spellaim::Cast& cast) {
     g_note={};
     const auto c=aimtargets::Now();
-    // A thrown trap first; then the aim rules only with this kind of cast's Aim
-    // option On; Off, as before them.
-    const bool directed=TossAim(c.skill,playerX,playerY,cast)||
+    // Teleport on its shown landing or a thrown trap first; then the aim rules
+    // only with this kind of cast's Aim option On; Off, as before them.
+    const bool directed=MotionAim(c.skill,playerX,playerY,cast)||TossAim(c.skill,playerX,playerY,cast)||
         (aimtargets::RulesOn(c)?NativeSpellAimDecide(playerX,playerY,cast):UpstreamSpellAim(playerX,playerY,cast));
     static ULONGLONG told=0;static int toldSkill=-2;
     if(c.skill>=0&&(c.skill!=toldSkill||GetTickCount64()-told>250)) {
@@ -9528,9 +9546,12 @@ bool OutlineWanted() {
 bool RingWanted() {
     const bool tacticalActive = companionai::IsTacticalCommandsEnabled() &&
         (companionai::GetActiveTacticalOrder().type == framevr::companionai::TacticalOrderType::MoveAndHold);
+    // Teleport's landing while its fist is drawn in shows whatever the Aim options (its motion is the aim).
+    const auto marks = framevr::telegraph::Current().Get();
+    const auto now = GetTickCount64();
     return g_enabled.load() && g_inWorld.load() && !gamestate::MenuOpen() &&
-        (AimOn(framevr::settings::LandingCircles) || tacticalActive) &&
-        framevr::telegraph::AnyOn(framevr::telegraph::Current().Get(), GetTickCount64());
+        (((AimOn(framevr::settings::LandingCircles) || tacticalActive) && framevr::telegraph::AnyOn(marks, now)) ||
+         framevr::telegraph::SkillOn(marks, framevr::telegraph::TeleportMark, now));
 }
 // Loot beams (same pass): while a Rare, Set or Unique item or a high rune lies near the hero.
 bool BeamWanted() {

@@ -118,6 +118,7 @@
 #include "spell_aim.h"
 #include "aim_rules.h"
 #include "toss.h"
+#include "aim_reach.h"
 
 namespace gamestate {uint32_t WeaponType();uint32_t HandsKey();uint32_t WeaponSet();uint32_t WeaponClass();uint32_t TwoHanded();uint64_t LocalPlayer();uint32_t MenuEpoch();}
 namespace gamecmd {void RequestPotion(int slot);void CancelPotion();}
@@ -648,6 +649,27 @@ constexpr double PotionFlightMax=3;   // seconds; a bottle still in the air then
 // for the room height of the world floor and to place a thrown bottle's
 // landing point in world metres; both run under the transport mutex.
 struct StageWorld {bool valid=false;math::Vec origin{},hero{};math::Quat base{0,0,0,1};float upm=0,eyeHeight=0;uint64_t at=0;} stageWorld;
+// Teleport aimed by its motion (spell_motion.h Output::aiming; owner, 2026-11-05): its landing, in grid
+// cells, shown as a circle while the fist is drawn in (telegraph::TeleportMark), and the cast's point
+// when the punch came then (MotionLanding).
+struct MotionSpot {int skill=-1;float x=0,y=0;uint64_t at=0,session=0;} motionLanding;
+bool teleportShown=false;
+// Where Teleport lands for the fist's adjust (spellmotion::TeleportSpot: cells ahead of the eyes' heading
+// and to its right), in grid cells on the floor under the player, within the game's reach.
+bool TeleportCell(math::Vec adjust,const spellmotion::Tuning& tuning,float& x,float& y) {
+    const auto& stage=interactionInput.stage;
+    if(!interactionInput.floorKnown||!stage.known||!(stageWorld.upm>=1&&stageWorld.upm<=12))return false;
+    const float floor=stage.anchor.y+(interactionInput.floor-stage.origin.y);
+    const auto spot=spellmotion::TeleportSpot(adjust,tuning);
+    const float metres=2.f/stageWorld.upm;   // a cell (toss::Cell)
+    const auto head=interactionInput.head.p;
+    const auto at=head+math::Rotate(math::Yaw(math::Heading(interactionInput.head.q)),math::Vec{spot.right*metres,0,-spot.ahead*metres});
+    float heroX=0,heroY=0;
+    if(!toss::Cell(stage.World(head),floor,stageWorld.upm,heroX,heroY)||!toss::Cell(stage.World(at),floor,stageWorld.upm,x,y))return false;
+    float dx=x-heroX,dy=y-heroY;
+    if(!aimreach::Clamp(dx,dy))return false;
+    x=heroX+dx;y=heroY+dy;return true;
+}
 bool crossbowFire=false;
 uint64_t crossbowActivation=0,crossbowTakenAt=0;
 bowflight::Shot spellReadyShot[2]{};
@@ -4368,6 +4390,7 @@ void Input() {
             {const auto page=spellmotion::PageOf(motionClass);
              for(int i=0;i<page.count;++i)if(const int id=page.skills[i],m=int(spellmotion::For(id));m>0&&motionOn(id))skillOf[m]=id;}
             int done=-1;math::Vec doneAim{};
+            bool doneLanding=false,teleportAiming=false;math::Vec doneAdjust{},teleportAdjust{};
             for(int i=0;i<order.count;++i) {
                 const auto motion=order.motions[i];
                 const int m=int(motion);
@@ -4377,11 +4400,39 @@ void Input() {
                 freeIn.head=interactionInput.head.p;freeIn.headRotation=interactionInput.head.q;
                 for(int h=0;h<2;++h){freeIn.hand[h]=interactionInput.hand[h].p;freeIn.tracked[h]=interactionInput.tracked[h];}
                 const auto watched=spellFree[size_t(m-1)].Step(freeIn);
-                if(watched.cast&&done<0){done=m;doneAim=watched.aim;}
+                if(watched.cast&&done<0){done=m;doneAim=watched.aim;doneLanding=watched.landing;doneAdjust=watched.adjust;}
+                if(watched.aiming){teleportAiming=true;teleportAdjust=watched.adjust;}
             }
+            // Teleport's fist drawn in: a circle where it lands, placed again every frame (it fades a moment
+            // after the last), gone with the punch or the grips let go. The punch then lands there, its way
+            // toward it too (MotionCastRay).
+            const auto& punchTuning=spellFree[size_t(int(spellmotion::Motion::Punch)-1)].tuning;
+            float landX=0,landY=0;
+            const bool landKnown=(teleportAiming||doneLanding)&&TeleportCell(doneLanding?doneAdjust:teleportAdjust,punchTuning,landX,landY);
+            if(teleportAiming&&landKnown&&done<0) {
+                telegraph::Current().Place(landX,landY,GetTickCount64(),250,int(spellaim::Cold),1.5f,0,0,0,telegraph::TeleportMark);
+                if(!teleportShown) {
+                    const auto spot=spellmotion::TeleportSpot(teleportAdjust,punchTuning);
+                    char line[160];std::snprintf(line,sizeof line,"Frame spell motion: Teleport's fist drawn in - its landing shown %.0f cells ahead, %+.0f across",spot.ahead,spot.right);
+                    Say(line);
+                }
+                teleportShown=true;
+            }
+            else if(teleportShown){telegraph::Current().ClearSkill(telegraph::TeleportMark);teleportShown=false;}
             if(done>0) {
                 for(auto& e:spellFree)e.Reset();
-                motionCast(spellmotion::CastSkillOf(skillOf[done],[&](int id){return interaction::GlyphSkill(quickSnapshot,id).known;}),doneAim,true);
+                const int skill=spellmotion::CastSkillOf(skillOf[done],[&](int id){return interaction::GlyphSkill(quickSnapshot,id).known;});
+                const auto spot=spellmotion::TeleportSpot(doneAdjust,punchTuning);
+                if(doneLanding&&landKnown)doneAim={spot.right,0,-spot.ahead};
+                if(motionCast(skill,doneAim,true)&&doneLanding) {
+                    char line[160];
+                    if(landKnown) {
+                        motionLanding={skill,landX,landY,GetTickCount64(),gamestate::LocalPlayer()};
+                        std::snprintf(line,sizeof line,"Frame spell motion: Teleport on its landing shown, %.0f cells ahead, %+.0f across (cell %.1f,%.1f)",spot.ahead,spot.right,landX,landY);
+                    }
+                    else std::snprintf(line,sizeof line,"Frame spell motion: Teleport's landing unknown (no room floor yet) - along the punch");
+                    Say(line);
+                }
             }
         }
         glyphPressRt=false;
@@ -6689,6 +6740,12 @@ bool TossTarget(int skill,float& x,float& y) {
     if(t.skill<0||now<t.at||now-t.at>700||t.session!=gamestate::LocalPlayer()||(skill>=0&&skill!=t.skill))return false;
     x=t.x;y=t.y;return true;
 }
+bool MotionLanding(int skill,float& x,float& y) {
+    std::lock_guard lock(mutex);
+    const auto now=GetTickCount64();const auto& l=motionLanding;
+    if(l.skill<0||now<l.at||now-l.at>700||l.session!=gamestate::LocalPlayer()||(skill>=0&&skill!=l.skill))return false;
+    x=l.x;y=l.y;return true;
+}
 int AimRulesSkill() {
     std::lock_guard lock(mutex);
     const auto* skill=CastSkillRow();return skill?skill->id:-1;
@@ -7014,6 +7071,7 @@ void Shutdown(bool preserveResolution) {
     arcaneController.Reset();arcaneOutput={};arcanePaintKey=~0ull;arcanePaintSession=0;arcanePaintAt=0;arcaneAtlasPending=arcaneImageReady=false;
     glyphStroke={};glyphCast={};glyphPaintKey=glyphShownStroke=0;glyphBeganAt=0;glyphEndedAt=-1;glyphPaintAt=0;glyphLook=glyphtrail::Look::Drawing;glyphPressRt=glyphTrailShown=false;glyphAtlasPending=glyphImageReady=false;
     glyphPress={};glyphRecordAt.store(0);
+    motionLanding={};if(teleportShown){telegraph::Current().ClearSkill(telegraph::TeleportMark);teleportShown=false;}
     spellTrigger=0;for(auto& e:spellFree)e.Reset();spellFreeAt=-1;spellGripSince=-1;spellGripCast=false;spellGripsArmed.store(false);spellGate.Reset();
     bowLaserHue=-1;bowLaserAtlasPending=bowLaserImageReady=false;
     noticeWatch={};noticeCards.Clear();noticeCard={};noticePaintRequest=noticeRequestedSequence=noticePaintedSequence=0;noticeAtlasPending=noticeImageReady=false;

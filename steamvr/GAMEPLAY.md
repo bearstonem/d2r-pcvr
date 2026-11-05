@@ -2413,6 +2413,19 @@ ending 40 cm below the eyes (was 50) and allowed out to the sides, Energy Shield
 crossed and no longer 15 cm out from the face. Tests: `interaction-test` (the box and the cards'
 hit bounds, the page's clicks), `interaction-motions-test` (its art).
 
+Teleport aimed first (owner, 2026-11-05: "One fast pull of the hand ... that shows the target circle
+we are facing and a push out of our hand that initiates the teleport. And in between we can even do
+slight adjustments to the circle"). The right fist pulled in fast (16 cm toward the eyes within
+0.25 s, ending drawn in) shows a circle where Teleport lands, 20 cells ahead of where the eyes face,
+in the landing circles' cold blue (`telegraph::TeleportMark`), whatever the Aim options. Held there,
+the fist moved slowly forward or back takes it a cell farther or nearer per centimetre (15 cm out at
+most, 12 back, never nearer than 4 cells) and sideways a cell across per centimetre (20 at most);
+turning the head turns it with the eyes. The punch then lands there (`MotionLanding`, the cast's
+point within the game's reach, logged `Frame motion aim:`), on the landing as it was before the punch
+began: the fist counts only while slower than 0.4 m/s. A punch with no fast pull first casts as before,
+along the punch. Letting the grips go, any other motion's cast or 8 s without a punch takes the circle
+away. Thresholds in `spellmotion::Tuning` (draw*, aim*); `spell-motion-test` and `telegraph-test`.
+
 Trail (`steamvr/glyph_trail.h`): a 512 x 512 straight-alpha picture, 1 m a side, in the
 shared atlas (`panelatlas::Glyph`, beside VR Settings), shown as a room-space quad in the
 drawing plane with the stroke's start in the middle. A worker paints it, keeping each

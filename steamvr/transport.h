@@ -120,6 +120,9 @@ int AimRulesSkill();         // the cast skill (any), -1 none; with its game "di
 // A trap or bomb thrown to place (#224): where its arc landed, in grid cells,
 // for that skill's cast (skill -1: any) just after the throw.
 bool TossTarget(int skill,float& x,float& y);
+// Teleport punched while its landing showed (spell_motion.h Output::landing): that landing, in grid
+// cells, for that skill's cast (skill -1: any) just after the punch.
+bool MotionLanding(int skill,float& x,float& y);
 bool AimRulesDirected();
 bool MeleeSample(uint32_t poseStamp,melee::Sample& sample,int hand=0);
 // The posed melee capsule (world metres) that also pushes dropped bottles:
