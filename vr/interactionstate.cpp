@@ -52,6 +52,7 @@ bool scheduled=false;
 // Glyph casting's park (Park): its own slot.
 struct Parking {uint64_t session=0;int skill=-1,owner=-1;} parking;
 bool parkScheduled=false;
+std::array<int,framevr::skills::Count> commanderSlotSkills[2]{}; // bank 0 (set I) and bank 16 (set II)
 template<class T>const T* Service(const PluginContext* c) {const T* p=nullptr;return c->QueryService(&p)==ServiceQueryResult::Success?p:nullptr;}
 Item Copy(const Items::ItemInfo& i, uint32_t fireDamage = 0) {
     return {i.handle, i.runtimeId, i.code, uint32_t(i.quality), i.qualityRecordId, i.socketedItemCount, 0, fireDamage};
@@ -101,9 +102,30 @@ Snapshot Collect() {
     quickitems::Capture(s);
     devscenarios::Capture(s);
     {std::lock_guard lock(mutex);if(mercSession==s.session&&s.at>=mercAt&&s.at-mercAt<=MercMaxAge){s.merc=merc;s.companions=companions;s.effects=effects;}}
-    if(s.companions.known)for(unsigned i=0;i<s.skillCount&&i<s.catalog.size();++i)
-        if(s.catalog[i].known&&s.catalog[i].available)
-            s.companions.relevant|=framevr::companions::Bit(framevr::companions::SkillType(s.catalog[i].id));
+    if(s.companions.known) {
+        for(unsigned i=0;i<s.skillCount&&i<s.catalog.size();++i)
+            if(s.catalog[i].known&&s.catalog[i].available)
+                s.companions.relevant|=framevr::companions::Bit(framevr::companions::SkillType(s.catalog[i].id));
+        s.companions.stance=uint8_t(companionai::GetActiveSummonStance());
+        s.companions.formation=uint8_t(companionai::GetActiveSummonFormation());
+        s.companions.anchorActive=companionai::IsSummonAnchorActive();
+        s.companions.freeRoam=companionai::IsSummonFreeRoam();
+        s.companions.commanderBadge=(s.companions.relevant&framevr::companions::ArmyTypeMask)!=0;
+    }
+    if(s.bindingBank==0||s.bindingBank==16) {
+        const int bankIdx=s.bindingBank==16?1:0;
+        const bool hasArmy=HasSummonArmy(s);
+        std::lock_guard lock(mutex);
+        for(int i=0;i<framevr::skills::Count;++i) {
+            const int cmdId=commanderSlotSkills[bankIdx][size_t(i)];
+            if(!framevr::commander::IsCommanderSkill(cmdId))continue;
+            if(s.skills[size_t(i)].id>=0) {
+                commanderSlotSkills[bankIdx][size_t(i)]=0; // overwritten by a native assignment
+            } else {
+                s.skills[size_t(i)]=MakeCommanderSkill(cmdId,hasArmy);
+            }
+        }
+    }
     return s;
 }
 void __cdecl SampleMerc(const PluginContext*,void* token) noexcept {
@@ -190,7 +212,26 @@ void __cdecl Apply(const PluginContext*,void*) noexcept {
     if(r.action==Action::BindSkill) {
         {
             std::lock_guard lock(mutex);
-            const bool accepted=valid&&epoch==cancelEpoch&&nativeui::Assign(r,s);
+            bool accepted=false;
+            const int bankIdx=r.bank==16?1:0;
+            if(framevr::commander::IsCommanderSkill(r.skill)) {
+                accepted=valid&&epoch==cancelEpoch&&CanBind(s,r,now);
+                if(accepted&&r.previousSkill>=0&&!framevr::commander::IsCommanderSkill(r.previousSkill)) {
+                    auto clearReq=r;clearReq.skill=-1;clearReq.skillOwner=-1;
+                    accepted=nativeui::Assign(clearReq,s);
+                }
+                if(accepted)commanderSlotSkills[bankIdx][size_t(r.index)]=r.skill;
+            } else if(framevr::commander::IsCommanderSkill(r.previousSkill)) {
+                accepted=valid&&epoch==cancelEpoch&&CanBind(s,r,now);
+                if(accepted&&r.skill>=0) {
+                    auto assignReq=r;assignReq.previousSkill=-1;assignReq.previousOwner=-1;
+                    accepted=nativeui::Assign(assignReq,s);
+                }
+                if(accepted)commanderSlotSkills[bankIdx][size_t(r.index)]=0;
+            } else {
+                accepted=valid&&epoch==cancelEpoch&&nativeui::Assign(r,s);
+                if(accepted&&(r.bank==0||r.bank==16))commanderSlotSkills[bankIdx][size_t(r.index)]=0;
+            }
             reply={r.sequence,r.session,accepted?Result::Applied:Result::Refused};
         }
         Publish(Collect()); // refresh wheel and any duplicates cleared by D2R

@@ -2,6 +2,7 @@
 #include <string>
 #include "skill_slots.h"
 #include "strike_skills.h"
+#include "summon_commander.h"
 #include "toss.h"
 #include "weapon_skills.h"
 
@@ -45,6 +46,18 @@ inline Place Where(int slot) {
 }
 inline const char* Line(int skill,int slot) {
     if(slot<0||slot>=skills::Count)return "";
+    if(commander::IsCommanderSkill(skill)) {
+        switch(skill) {
+            case commander::SkillPhalanxDef:return "Squad order: form a defensive frontal phalanx arc with clear central sightline and a tight 7.5-subtile leash.";
+            case commander::SkillRingDef:return "Squad order: surround yourself in a 360-degree bone wall, shielding Skeleton Mages inside the outer ring.";
+            case commander::SkillMarchBal:return "Squad order: form a balanced marching escort with a clear 24-degree aiming corridor dead ahead.";
+            case commander::SkillWedgeAgg:return "Squad order: form an aggressive V-wedge vanguard behind your Golem with a wide 32-subtile combat leash.";
+            case commander::SkillHoldGround:return "Squad order: march the summon army to the pointed ground spot and hold defensive formation there.";
+            case commander::SkillRegroup:return "Squad order: cancel any ground hold or focus order and immediately regroup summons around you.";
+            case commander::SkillFallOut:return "Squad order: break ranks and restore standard D2R vanilla AI with no formation restrictions.";
+            default:break;
+        }
+    }
     const auto at=Where(slot);
     switch(Classify(skill)) {
         case Kind::None:return "";
@@ -98,6 +111,33 @@ inline const char* Line(int skill,int slot) {
 // The picker's card: the same, in full, with what the gesture adds.
 inline std::string Details(int skill,int slot) {
     if(slot<0||slot>=skills::Count)return {};
+    if(commander::IsCommanderSkill(skill)) {
+        switch(skill) {
+            case commander::SkillPhalanxDef:
+                return "Squad formation & stance (zero individual skeleton micromanagement): puts your summoned army into Phalanx Arc "
+                       "with Defensive stance (7.5-subtile leash). Melee skeletons form a frontal shield with a clear 24-degree aiming "
+                       "corridor dead ahead, while Skeleton Mages stay protected behind them and never walk into melee.";
+            case commander::SkillRingDef:
+                return "Squad formation & stance: surrounds you with a 360-degree outer bone wall of melee skeletons, Golem and Revives "
+                       "in Defensive stance, while Skeleton Mages fire safely from an inner ring around you.";
+            case commander::SkillMarchBal:
+                return "Squad formation & stance: puts your summoned army into Balanced Phalanx escort (14-subtile leash) with a clear "
+                       "central aiming corridor and automatic narrow-corridor compression.";
+            case commander::SkillWedgeAgg:
+                return "Squad formation & stance: puts your Golem or Bear at the tip of an offensive Spearhead Wedge with melee wings "
+                       "and Aggressive stance (32-subtile combat leash) to push forward into rooms.";
+            case commander::SkillHoldGround:
+                return "Squad order: anchors your summoned army's formation at the ground spot this hand points at in Defensive stance, "
+                       "holding that choke point or doorway until you cast Army: Regroup Now.";
+            case commander::SkillRegroup:
+                return "Squad order: clears any ground hold anchor or priority target, switches to Balanced stance, and immediately "
+                       "reforms your summoned army around your position.";
+            case commander::SkillFallOut:
+                return "Squad order: breaks formation ranks and restores standard Diablo II vanilla summon AI (free roam and unrestricted "
+                       "movement/combat) until you activate another Army formation skill.";
+            default:break;
+        }
+    }
     const auto at=Where(slot);
     const char* refused=" Without mana, outside its form or with the wrong weapon, the swing is a basic attack.";
     switch(Classify(skill)) {

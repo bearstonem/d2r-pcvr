@@ -1,6 +1,7 @@
 #pragma once
 #include <D2RLPlugin/api.h>
 #include "../steamvr/companion_ai.h"
+#include "../steamvr/summon_commander.h"
 
 namespace companionai {
 void Init(const D2RL::PluginContext* ctx);
@@ -31,4 +32,14 @@ bool GetPlayerWorldSubtilePos(float& outX, float& outY);
 void OnPotionReceived();
 bool IsInTacticalRetreat();
 unsigned PeelCount();
+void ConfigureSummonFormations(bool enabled);
+bool IsSummonFormationsEnabled();
+void SetSummonStanceAndFormation(framevr::commander::ArmyStance stance, framevr::commander::ArmyFormation formation);
+bool ExecuteCommanderSkill(int skillId, float targetX = 0.0f, float targetY = 0.0f);
+framevr::commander::ArmyStance GetActiveSummonStance();
+framevr::commander::ArmyFormation GetActiveSummonFormation();
+bool IsSummonAnchorActive();
+bool IsSummonFreeRoam();
+unsigned SummonFormationMoveCount();
+unsigned ActiveSummonArmyCount();
 } // namespace companionai
