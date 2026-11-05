@@ -66,6 +66,7 @@ target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/head_shadow.cpp)   # the head kept f
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/stereo_replay.cpp ${ROOT}/vr/ecl_hook.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/spatial_audio.cpp)   # head-relative sound
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/roof_materials.cpp)
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/engine_units.cpp)   # the game-drawn dungeon ceiling (shared/game_ceiling.h)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/panel_input.cpp)
 target_sources(d2rl-pcvr PRIVATE interaction_assets.rc interaction_icons.cpp ui_blit.cpp turn_warp.cpp ui_world.cpp)
 target_sources(d2rl-pcvr PRIVATE potion_models.cpp)

@@ -233,6 +233,10 @@ void TrackHero(bool on);
 bool HeroTransform(HeroXform* out, const char** why = nullptr);
 // Bumped whenever the hero's SkeletonInstance changes: a weapon swap rebuilds his model.
 uint32_t HeroGen();
+// Any entity's TransformComponent (its layout as HeroXform's comp), and the model instance its ModelComponent
+// holds (0: none, or not made yet) - the game-drawn ceiling's units (vr/engine_units.cpp).
+bool EntityTransform(uint32_t entity, uintptr_t* comp);
+uintptr_t EntityModelInstance(uint32_t entity);
 void** OrigSlot();
 void* Detour();
 
