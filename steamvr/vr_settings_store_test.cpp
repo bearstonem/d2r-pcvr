@@ -14,14 +14,14 @@ int main(){
     Check(WritePrivateProfileStringW(L"custom",L"keep",L"12345",name),"write unrelated key");
     Check(WritePrivateProfileStringW(L"render",L"rings",L"6",name),"write existing setting");
     vrsettings::Poll(name);auto before=vrsettings::Read();
-    Check(before.values[ElementalHands]==0,"missing elemental setting defaults off");
+    Check(before.values[HapticShortMelee]==0,"a missing toggle takes its default (Off)");
     for(int enabled:{1,0}) {
-        Model effects;effects.Open(vrsettings::Read());effects.Click({Kind::Change,ElementalHands,1});
+        Model effects;effects.Open(vrsettings::Read());effects.Click({Kind::Change,HapticShortMelee,1});
         auto request=effects.Click({Kind::Apply});auto malformed=request;malformed.changed|=ChangeMask{1}<<(ChangeMask::Bits-1);
         Check(!vrsettings::Submit(malformed),"unsupported high change bits rejected");
-        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"elemental setting saves through its own mask bit");
-        Check(vrsettings::Read().values[ElementalHands]==enabled&&Int(path,L"interactions",L"elemental_hands")==enabled&&
-            Int(path,L"custom",L"keep")==12345,"elemental opt-in/out round trips and preserves unrelated keys");
+        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"a toggle saves through its own mask bit");
+        Check(vrsettings::Read().values[HapticShortMelee]==enabled&&Int(path,L"haptics",L"short_melee")==enabled&&
+            Int(path,L"custom",L"keep")==12345,"its on/off round trips and preserves unrelated keys");
     }
     Check(before.values[MapTopDown]==0&&before.values[MapRotate]==0,"missing map preferences retain the existing view");
     Check(WritePrivateProfileStringW(L"interactions",L"map_top_down",L"1",name)&&

@@ -4484,7 +4484,6 @@ void Input() {
     elements::Input elementalInput;
     elementalInput.context={interactionInput.session,(meleeEpoch<<32)|bowWorldEpoch,motionInput.skillContext,motionInput.equipment};
     elementalInput.at=interactionInput.at;
-    elementalInput.enabled=hudSettings.values[settings::ElementalHands]>.5f;
     elementalInput.active=motionInput.active&&!interactionOutput.wheel&&!interactionOutput.stowed&&!journalMode;
     elementalInput.head=interactionInput.head;
     for(int h=0;h<2;++h) {

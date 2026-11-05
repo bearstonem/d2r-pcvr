@@ -30,7 +30,7 @@ struct Sim {
     State state;
     Scene scene;
     Sim() {
-        in.enabled=in.active=in.tracked[0]=in.tracked[1]=true;
+        in.active=in.tracked[0]=in.tracked[1]=true;
         in.context={7,9,11,13};in.at=1000;
         in.hands[0].p={.2f,0,-.5f};in.hands[1].p={-.2f,0,-.5f};
         snapshot.session=7;snapshot.skillClass=1;snapshot.vitalsKnown=true;snapshot.health=50;
@@ -76,9 +76,8 @@ int main() {
         s.Bind(1,54);s.in.casting[0]=1;s.Step();Check(s.scene.hands[0].opacity==0,"utility shortcut suppresses idle element");
         s.in.casting[0]=4;s.Step();Check(s.scene.hands[0].opacity==0,"foreign hand slot cannot borrow an element");
     }
-    for(int reason=0;reason<12;++reason) {
+    for(int reason=1;reason<12;++reason) {
         Sim s;
-        if(reason==0)s.in.enabled=false;
         if(reason==1)s.in.active=false;
         if(reason==2)s.snapshot.skillClass=0;
         if(reason==3)s.snapshot.skillClass=-1;
@@ -90,7 +89,7 @@ int main() {
         if(reason==9)s.snapshot.actionKnown=false;
         if(reason==10)s.snapshot.actionMode=0;
         if(reason==11)s.snapshot.actionMode=17;
-        Check(!s.Step().Visible(),"disabled/inactive/other class/dead/invalid state clears both hands");
+        Check(!s.Step().Visible(),"inactive/other class/dead/invalid state clears both hands");
     }
     {
         Sim s;s.in.at+=651;Check(!s.state.Step(s.in,s.snapshot).Visible(),"stale snapshot clears effects");

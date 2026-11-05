@@ -31,9 +31,9 @@ inline float ClassValue(Key k,float value,float current,const Context& c){
 // path line's wheel through Off (... 345, Off, 0 ...).
 inline bool ModelSteps(Key k){return k==SpellLock||k==BowLaser;}
 // Presets never set these: the owner's calls (stereo rendering, the GPU wait,
-// elemental hands, the smarter mercenary) and calibration's own keys.
+// the smarter mercenary) and calibration's own keys.
 inline bool PresetSkips(Key k){
-    return k==StereoRendering||k==DeferGpuWait||k==ElementalHands||k==CompanionAi||k==EyeHeight||k==ArmSpan||k==BodyCalibration;
+    return k==StereoRendering||k==DeferGpuWait||k==CompanionAi||k==EyeHeight||k==ArmSpan||k==BodyCalibration;
 }
 // A preset card lists these first, in the comfort color: they change how the
 // game feels on the stomach.

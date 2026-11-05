@@ -1,8 +1,9 @@
-# Sorceress elemental hand effects (prototype)
+# Sorceress elemental hand effects
 
-Enable **VR Settings > World > Spell glow on hands**, then **Apply**.
-The setting defaults to Off and is saved as `[interactions] elemental_hands=1`.
-Motion combat must also be enabled.
+Always on for a Sorceress with Motion combat. Until 2026-11-04 it was an opt-in
+setting (VR Settings > World > Spell glow on hands, off by default); the owner
+made it on for everyone and took the option out of the menu, so
+`[interactions] elemental_hands` is no longer read.
 
 Each Sorceress hand shows a small representation of its trigger-bound skill,
 made from that spell's own effect textures in the installed game:
@@ -71,8 +72,7 @@ completed VR eye image, without the game's scene depth. They can therefore
 appear over fingers, weapons or nearby scenery. They do not coat the hand mesh,
 follow individual finger bones, emit light onto the world, or use the game's
 own particle simulation. The renderer supports the existing RGBA/BGRA SDR eye
-targets; initialization failure leaves effects hidden. The feature remains an
-opt-in draft pending further headset review.
+targets; initialization failure leaves effects hidden.
 
 ## Validation
 
@@ -85,8 +85,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File steamvr/build_windows.ps1 -T
 `elemental-hands-test` exercises independent skill selection, each skill's
 look, utility overrides, class/lifecycle guards, proximity fading,
 confirmed-cast feedback matching and rejection of corrupt sprite caches.
-The settings fixtures cover the toggle, its own change-mask bit, conflicts and
-INI opt-in/opt-out; existing setting indices are unchanged.
 `prepare_spell_sprites_test` covers texture formats and mips, invalid
 textures, the cache layout, reuse and rebuilds after a game update, and
 refusal when a spell no longer names a texture.

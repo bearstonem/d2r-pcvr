@@ -37,7 +37,7 @@ struct Context {
 struct Input {
     Context context;
     uint64_t at=0;
-    bool enabled=false,active=false,tracked[2]{},occupied[2]{};
+    bool active=false,tracked[2]{},occupied[2]{};
     interaction::Pose head,hands[2];
     int casting[2]{-1,-1};
     uint64_t activation[2]{};
@@ -78,7 +78,7 @@ public:
     }
     Scene Step(const Input& in,const interaction::Snapshot& snapshot) {
         Scene scene;
-        if(!in.enabled||!in.active||!interaction::Valid(in.head)||
+        if(!in.active||!interaction::Valid(in.head)||
            !interaction::Fresh(snapshot,in.context.session,in.at)||snapshot.skillClass!=1||
            !snapshot.vitalsKnown||!std::isfinite(snapshot.health)||snapshot.health<=0||
            !snapshot.actionKnown||snapshot.actionMode==0||snapshot.actionMode==17) {
