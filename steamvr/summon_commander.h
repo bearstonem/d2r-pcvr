@@ -415,52 +415,86 @@ inline size_t GenerateFormationSlots(
     }
 
     if (formation == ArmyFormation::SpearheadWedge) {
-        // 1. TacticalAnchor at the tip of the spearhead (9.2 sub-tiles ahead)
+        // Spearhead Assault Wedge: True penetrating inverted-V battle formation.
+        // Geometry:
+        // 1. Apex (Tip):
+        //    - Led by TacticalAnchor (Golem) if present at (apexFwd, 0.0).
+        //    - If no anchor is summoned, the foremost FrontlineMelee unit takes the apex so
+        //      the spearhead is never headless or split open!
+        // 2. Outer Chevron (Arms of the V):
+        //    - FrontlineMelee units flank the apex and step back in a sharp ~45-degree angle.
+        //    - If melee units exceed rank 5 (10 units), subsequent ranks form a double chevron (Rank 2)
+        //      reinforcing the arms without over-extending into dungeon walls.
+        // 3. Inner Chevron (Sheltered Hollow):
+        //    - RangedArtillery (Skeleton Mages) form an inner V sheltered safely inside the hollow,
+        //      stepping back with an open sightline corridor (|lateral| >= 0.85) to allow player VR aiming.
+        // 4. Rear Flank Escorts:
+        //    - HeavyFlanker (Revives) form powerful flanking guards reinforcing the rear-outer wings.
+        const float apexFwd = tight ? 8.8f : 9.8f;
+        const bool hasAnchor = (counts.anchors > 0);
+
+        const auto appendSlot = [&](SummonRole role, float forwardDist, float lateralDist) noexcept {
+            if (cursor >= out.size()) return;
+            const float deg = std::atan2(lateralDist, forwardDist) * (180.0f / 3.14159265358979323846f);
+            out[cursor++] = { detail::LocalToWorld(anchorPos, heading, forwardDist, lateralDist), role, deg };
+        };
+
+        // 1. TacticalAnchor at apex (Golem)
         for (uint8_t i = 0; i < counts.anchors && cursor < out.size(); ++i) {
-            const float rightOffset = (i == 0) ? 0.0f : ((i % 2 == 1) ? 1.6f : -1.6f) * float((i + 1) / 2);
-            const float fwdOffset = 9.2f - float(i / 2) * 1.2f;
-            const float deg = std::atan2(rightOffset, fwdOffset) * (180.0f / 3.14159265358979323846f);
-            out[cursor++] = { detail::LocalToWorld(anchorPos, heading, fwdOffset, rightOffset), SummonRole::TacticalAnchor, deg };
+            const float fwd = apexFwd - float(i) * 1.2f;
+            appendSlot(SummonRole::TacticalAnchor, fwd, 0.0f);
         }
 
-        // 2. FrontlineMelee along the two angled arms of the V (kept strictly ahead of the player)
-        for (uint8_t i = 0; i < counts.melee && cursor < out.size(); ++i) {
+        // 2. FrontlineMelee (Skeleton Warriors)
+        uint8_t meleeArmStart = 0;
+        if (!hasAnchor && counts.melee > 0) {
+            // Frontline warrior takes the apex point when no Golem is active!
+            appendSlot(SummonRole::FrontlineMelee, apexFwd, 0.0f);
+            meleeArmStart = 1;
+        }
+
+        const uint8_t meleeOnArms = (counts.melee > meleeArmStart) ? uint8_t(counts.melee - meleeArmStart) : 0;
+        for (uint8_t i = 0; i < meleeOnArms && cursor < out.size(); ++i) {
             const int rank = int(i / 2) + 1;
             const float side = (i % 2 == 0) ? -1.0f : +1.0f;
-            const float fwd = std::max(1.5f, 8.2f - float(rank) * 0.95f);
-            const float right = side * (1.2f + float(rank) * 0.95f);
-            const float deg = std::atan2(right, fwd) * (180.0f / 3.14159265358979323846f);
-            out[cursor++] = { detail::LocalToWorld(anchorPos, heading, fwd, right), SummonRole::FrontlineMelee, deg };
+            if (rank <= 5) {
+                const float fwd = apexFwd - float(rank) * 0.85f;
+                const float lateral = side * (float(rank) * 1.0f);
+                appendSlot(SummonRole::FrontlineMelee, fwd, lateral);
+            } else {
+                const int subRank = rank - 5;
+                const float fwd = (apexFwd - float(subRank) * 0.85f) - 1.10f;
+                const float lateral = side * (float(subRank) * 1.0f + 0.35f);
+                appendSlot(SummonRole::FrontlineMelee, fwd, lateral);
+            }
         }
 
-        // 3. HeavyFlanker extending the rear outer wings of the wedge
-        const int baseRank = int((counts.melee + 1) / 2) + 1;
+        // 3. HeavyFlanker (Revives) along the rear-outer flank wings
         for (uint8_t i = 0; i < counts.flankers && cursor < out.size(); ++i) {
-            const int rank = baseRank + int(i / 2);
+            const int rank = int(i / 2) + 1;
             const float side = (i % 2 == 0) ? -1.0f : +1.0f;
-            const float fwd = std::max(1.0f, 8.2f - float(rank) * 0.95f);
-            const float right = side * (1.5f + float(rank) * 1.0f);
-            const float deg = std::atan2(right, fwd) * (180.0f / 3.14159265358979323846f);
-            out[cursor++] = { detail::LocalToWorld(anchorPos, heading, fwd, right), SummonRole::HeavyFlanker, deg };
+            const float fwd = (apexFwd - 2.5f) - float(rank) * 0.95f;
+            const float lateral = side * (3.8f + float(rank) * 0.85f);
+            appendSlot(SummonRole::HeavyFlanker, fwd, lateral);
         }
 
-        // 4. RangedArtillery forming a two-rank firing line sheltered inside the hollow of the V
-        const uint8_t row1Count = std::min<uint8_t>(counts.ranged, 5);
-        const uint8_t row2Count = uint8_t(counts.ranged - row1Count);
-        for (uint8_t i = 0; i < row1Count && cursor < out.size(); ++i) {
-            const float t = (row1Count == 1) ? 0.0f : (-1.0f + 2.0f * float(i) / float(row1Count - 1));
-            const float right = t * 2.6f;
-            const float fwd = 4.6f;
-            const float deg = std::atan2(right, fwd) * (180.0f / 3.14159265358979323846f);
-            out[cursor++] = { detail::LocalToWorld(anchorPos, heading, fwd, right), SummonRole::RangedArtillery, deg };
+        // 4. RangedArtillery (Skeleton Mages) forming an inner chevron inside the hollow
+        const float innerApexFwd = apexFwd - 2.6f;
+        for (uint8_t i = 0; i < counts.ranged && cursor < out.size(); ++i) {
+            const int rank = int(i / 2) + 1;
+            const float side = (i % 2 == 0) ? -1.0f : +1.0f;
+            if (rank <= 5) {
+                const float fwd = innerApexFwd - float(rank) * 0.75f;
+                const float lateral = side * (0.85f + float(rank - 1) * 0.85f);
+                appendSlot(SummonRole::RangedArtillery, fwd, lateral);
+            } else {
+                const int subRank = rank - 5;
+                const float fwd = (innerApexFwd - float(subRank) * 0.75f) - 1.0f;
+                const float lateral = side * (0.85f + float(subRank - 1) * 0.85f);
+                appendSlot(SummonRole::RangedArtillery, fwd, lateral);
+            }
         }
-        for (uint8_t i = 0; i < row2Count && cursor < out.size(); ++i) {
-            const float t = (row2Count == 1) ? 0.0f : (-1.0f + 2.0f * float(i) / float(row2Count - 1));
-            const float right = t * 3.2f;
-            const float fwd = 2.8f;
-            const float deg = std::atan2(right, fwd) * (180.0f / 3.14159265358979323846f);
-            out[cursor++] = { detail::LocalToWorld(anchorPos, heading, fwd, right), SummonRole::RangedArtillery, deg };
-        }
+
         return cursor;
     }
 

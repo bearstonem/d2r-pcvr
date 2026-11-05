@@ -200,6 +200,21 @@ void TestProtectiveRingWedgeAndColumn() {
         }
     }
 
+    // 2b. SpearheadWedge without anchor: FrontlineMelee takes the apex at y == anchor.y
+    RoleCounts countsNoAnchor{ 0, 8, 4, 2 };
+    n = GenerateFormationSlots(anchor, heading, ArmyFormation::SpearheadWedge, ArmyStance::Aggressive, countsNoAnchor, slots);
+    assert(n == countsNoAnchor.Total());
+    float maxMeleeX = 0.0f;
+    size_t apexIdx = 0;
+    for (size_t i = 0; i < n; ++i) {
+        if (slots[i].worldPos.x > maxMeleeX) {
+            maxMeleeX = slots[i].worldPos.x;
+            apexIdx = i;
+        }
+    }
+    assert(slots[apexIdx].role == SummonRole::FrontlineMelee);
+    assert(std::fabs(slots[apexIdx].worldPos.y - anchor.y) < 1e-3f);
+
     // 3. CorridorColumn: Center walking lane (|y - anchor.y| < 1.2) must be completely clear
     n = GenerateFormationSlots(anchor, heading, ArmyFormation::CorridorColumn, ArmyStance::Balanced, counts, slots);
     assert(n == counts.Total());

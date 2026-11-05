@@ -943,7 +943,6 @@ void StepSummonArmyServer(
     bool anchorActive = false;
     bool isFreeRoam = false;
     framevr::companionai::Vec2 centerPos = plyrPos;
-    bool isAggressiveFree = false;
     bool reformBurst = false;
     framevr::commander::ArmyStance curStance{};
     framevr::commander::ArmyFormation curFormation{};
@@ -974,8 +973,6 @@ void StepSummonArmyServer(
         curFormation = g_summonCoordinator.corridorActive
             ? framevr::commander::ArmyFormation::CorridorColumn
             : g_summonCoordinator.activeFormation;
-        isAggressiveFree = (curStance == framevr::commander::ArmyStance::Aggressive) &&
-                           !anchorActive && !reformBurst;
         ReleaseSRWLockExclusive(&g_tacticalLock);
     }
 
@@ -1014,12 +1011,6 @@ void StepSummonArmyServer(
                 }
             }
         }
-    }
-
-    // In Aggressive stance while hostiles are actively within 22 sub-tiles, let combat run free
-    // unless an explicit anchor hold or formation command burst is active.
-    if (isAggressiveFree && hostilesNear) {
-        return;
     }
 
     std::array<framevr::commander::ArmyMoveOrder, framevr::commander::MaxMovesPerTick> moves{};
