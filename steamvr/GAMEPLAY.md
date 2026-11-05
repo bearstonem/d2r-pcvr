@@ -2338,8 +2338,51 @@ trigger's record (Fist of the Heavens after its monster hand-off; Charge's melee
 the slot). Then every motion waits a second, except Blessed Hammer's pumps (one hammer a punch, as fast
 as the cast rate, and they never start the wait). Each cast logs one `Frame spell motion:` line.
 Tests: `spell-motion-test` (the pages, the gate), each gesture's test (gated: one grip or none never
-casts, both do), `interaction-test` (the Paladin's and the Druid's pages; no box for the others),
+casts, both do), `interaction-test` (the Paladin's and the Druid's pages; no box for the Warlock or an unknown class),
 `interaction-motions-test` (the Paladin's page drawn).
+
+The Amazon's, the Barbarian's, the Necromancer's and the Assassin's motions (owner, 2026-11-04: "also
+have multiple agents implement the motions", from the drafted table: codes A1-A4, B1-B8, N1-N8
+with Lower Resist as N6, S1-S7) run on the Sorceress's engine and gate, a watcher each, in their class's
+order (`spellmotion::OrderOf`). Each class's detectors, tuning and cues are in its own header
+(`motions_amazon.h`, `motions_barbarian.h`, `motions_necromancer.h`, `motions_assassin.h`, reached
+through `spellmotion::ClassDone`/`ClassCue`), and each class has its own MOTIONS page and setting
+(`[motions] amazon_off`, `barbarian_off`, `necromancer_off`, `assassin_off`, one bit a card). The
+controllers give positions only, so a fist, a palm or an open hand in the table became a path of the
+hand, and the cards say so. A family's card casts the strongest skill of it learned
+(`spellmotion::CastSkillOf`): the golems' (Fire, then Blood, then Clay; Iron Golem takes an item and
+stays on its button), and Shadow Warrior's (Shadow Master once learned). A cast that goes to a spot
+aims along the motion (Decoy, Valkyrie, Leap, Golem ahead, Shadow Warrior to the side pushed); one
+that takes a monster or a corpse leaves the aim to the right hand's own ray, so the motion ends with
+it pointing there.
+
+- Amazon: Inner Sight, one hand at the brow, then swept out forward; Slow Missiles, the right hand
+  pushed straight out from the chest and held; Decoy, both hands from the chest swept together to one
+  side; Valkyrie, the right fist raised high, then brought down to point where she lands.
+- Barbarian: Battle Orders, the right fist at the mouth a moment, then thrust straight up; War Cry,
+  the same, thrust forward and down; Shout, both fists at the mouth, pushed out forward together;
+  Battle Command, the right fist beaten on the chest twice; Howl, both arms flung wide from the chest;
+  Battle Cry, both fists at the shoulders pulled hard to the hips; Leap, both arms swung down behind
+  then up past the head, fast (arms only, so seated too); Find Item, the right hand rested low by the
+  floor, then lifted.
+- Necromancer: Bone Armor, both fists crossed on the chest, held; Raise Skeleton, both hands lifted
+  slowly from the hips to the chest; Corpse Explosion, the right hand held out at a corpse, then jabbed
+  forward; Golem, both hands pressed down to the floor, then lifted; Amplify Damage, the right hand held
+  out at a monster, then yanked back; Lower Resist, the same, dragged down slowly; Poison Nova, hands
+  together at the chest, then flung out low and wide; Bone Prison, both hands apart in front, then
+  brought together round a monster.
+- Assassin: Burst of Speed, both arms pumped fast as in a sprint, three swings each; Fade, both hands
+  drawn down in front of the face; Cloak of Shadows, both arms swept across from wide at the shoulders
+  until they cross; Venom, the crossed wrists flicked apart fast; Blade Shield, the right hand circled
+  in front twice; Shadow Warrior, both hands from the chest pushed together to one side; Mind Blast,
+  both hands at the temples, pushed straight forward.
+
+Every threshold is from simulated hands until a headset session tunes it. Tests: one per class
+(`motions-amazon-test`, `-barbarian-test`, `-necromancer-test`, `-assassin-test`, on `motion_sim.h`):
+each motion at three headings and its aim, no other motion of the class casting it, nothing with the
+gate closed, slow versions, and the class's everyday moves (resting, walking arm swing, a reach to the
+belt, and its own attacks: a Barbarian's chops and slashes, an Assassin's claw jabs and trap throw, a
+Necromancer's wand flick) casting nothing.
 
 Both grips never grab: a grip takes a belt bottle, a holster, the shoulder swap or the
 over-the-shoulder menu only alone, held 0.1 s with the other free (`spellmotion::SoloGrips`), and
