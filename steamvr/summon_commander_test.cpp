@@ -392,6 +392,14 @@ void TestStanceGatekeeperAndArmyWatchdog() {
     assert(!coord.CheckArmyUnstuck(201, trappedPos, playerPos, 9000, relocPos)); // 7000ms < 8000ms
     assert(coord.CheckArmyUnstuck(201, trappedPos, playerPos, 10000, relocPos)); // 8000ms reached!
     assert(std::fabs(relocPos.x - warriorSlot.x) < 1e-4f && std::fabs(relocPos.y - warriorSlot.y) < 1e-4f);
+
+    // 4. Congestion Watchdog: if Warrior is near slot but body-blocked (!inSlot) for >= 3500ms out of combat, triggers relocation
+    coord.tracked[1].inSlot = false;
+    const Vec2 nearPos{ warriorSlot.x + 2.0f, warriorSlot.y }; // dist to player is small (~10 < 28)
+    assert(!coord.CheckArmyUnstuck(201, nearPos, playerPos, 11000, relocPos)); // starts congestion timer
+    assert(!coord.CheckArmyUnstuck(201, nearPos, playerPos, 13000, relocPos)); // 2000ms < 3500ms
+    assert(coord.CheckArmyUnstuck(201, nearPos, playerPos, 14600, relocPos));  // 3600ms >= 3500ms reached!
+    assert(std::fabs(relocPos.x - warriorSlot.x) < 1e-4f && std::fabs(relocPos.y - warriorSlot.y) < 1e-4f);
 }
 
 void TestCommanderUiAndGlyphIntegration() {

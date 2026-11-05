@@ -346,7 +346,7 @@ bool IsSubtileWalkable(uintptr_t hintRoom, int x, int y) noexcept {
     if (!roomPointFn) return true;
     const uintptr_t room = roomPointFn(hintRoom, x, y);
     if (!room) return false;
-    if (collisionMaskFn && collisionMaskFn(room, x, y, 1, 0x804) != 0) return false;
+    if (collisionMaskFn && collisionMaskFn(room, x, y, 1, 0x0001) != 0) return false;
     return true;
 }
 
@@ -1060,25 +1060,7 @@ void StepSummonArmyServer(
         }
 
         // Always walk/run naturally to the formation slot via DispatchServerMoveToCoord (no teleportation!).
-        // If another skeleton's dynamic bounding box momentarily occupies (tx, ty), fall back to an adjacent
-        // walkable sub-tile so the skeleton still walks smoothly into rank.
         bool moved = DispatchServerMoveToCoord(game, uPtr, uPos, tx, ty);
-        if (!moved) {
-            static constexpr int kWalkOffsets[8][2] = {
-                { -1, 0 }, { 1, 0 }, { 0, -1 }, { 0, 1 },
-                { -1, -1 }, { 1, -1 }, { -1, 1 }, { 1, 1 }
-            };
-            for (const auto& off : kWalkOffsets) {
-                const int nx = tx + off[0];
-                const int ny = ty + off[1];
-                if (!IsSubtileWalkable(playerRoom, nx, ny)) continue;
-                if (DispatchServerMoveToCoord(game, uPtr, uPos, nx, ny)) {
-                    moved = true;
-                    break;
-                }
-            }
-        }
-
         if (moved) {
             ++dispatchedNow;
             g_summonFormationMoves.fetch_add(1, std::memory_order_relaxed);

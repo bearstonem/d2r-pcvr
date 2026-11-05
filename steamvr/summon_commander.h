@@ -636,10 +636,10 @@ struct ArmyMoveOrder {
 // arrival/release deadband hysteresis, corridor auto-compression, stance gatekeeping,
 // and the staggered A* pathfinding budget.
 struct SummonArmyCoordinator {
-    static constexpr float ArrivalTolerance        = 0.85f; // sub-tiles: considered settled in slot
-    static constexpr float ReleaseDeadbandBalanced = 1.60f; // sub-tiles: drift allowed before re-walking
-    static constexpr float ReleaseDeadbandDef      = 1.30f; // tighter discipline in Defensive stance
-    static constexpr float StickySlotMaxDist       = 3.00f; // preserve slot assignment within this radius
+    static constexpr float ArrivalTolerance        = 1.10f; // sub-tiles: considered settled in slot
+    static constexpr float ReleaseDeadbandBalanced = 1.80f; // sub-tiles: drift allowed before re-walking
+    static constexpr float ReleaseDeadbandDef      = 1.40f; // tighter discipline in Defensive stance
+    static constexpr float StickySlotMaxDist       = 3.50f; // preserve slot assignment within this radius
     static constexpr uint64_t MinRedispatchMs      = 300;   // per-unit cooldown between move dispatches
     static constexpr float CorridorEnterWidth      = 6.5f;  // compress to CorridorColumn below 6.5 sub-tiles
     static constexpr float CorridorExitWidth       = 8.5f;  // expand back above 8.5 sub-tiles
@@ -648,6 +648,7 @@ struct SummonArmyCoordinator {
     static constexpr float SelfDefenseRadius       = 3.8f;  // Immediate melee self-defense radius
     static constexpr float UnstuckDistThreshold    = 28.0f; // sub-tiles before stuck timer starts
     static constexpr uint64_t UnstuckTimeoutMs     = 8000;  // 8s stuck behind wall -> relocate to slot
+    static constexpr uint64_t CongestionTimeoutMs  = 3500;  // 3.5s unable to reach slot due to minion traffic -> settle to slot
 
     struct TrackedUnit {
         uint32_t   unitId             = 0;
@@ -659,6 +660,7 @@ struct SummonArmyCoordinator {
         int        lastTargetY        = 0;
         Vec2       slotPos{};
         uint64_t   farSinceMs         = 0;
+        uint64_t   stuckSinceMs       = 0;
     };
 
     ArmyStance    activeStance      = ArmyStance::Balanced;
@@ -699,6 +701,7 @@ struct SummonArmyCoordinator {
             tracked[i].slotIndex = 0xFF;
             tracked[i].inSlot = false;
             tracked[i].lastMoveDispatchMs = 0;
+            tracked[i].stuckSinceMs = 0;
         }
     }
 
@@ -711,6 +714,7 @@ struct SummonArmyCoordinator {
         for (size_t i = 0; i < trackedCount; ++i) {
             tracked[i].inSlot = false;
             tracked[i].lastMoveDispatchMs = 0;
+            tracked[i].stuckSinceMs = 0;
         }
     }
 
@@ -721,6 +725,7 @@ struct SummonArmyCoordinator {
             for (size_t i = 0; i < trackedCount; ++i) {
                 tracked[i].inSlot = false;
                 tracked[i].lastMoveDispatchMs = 0;
+                tracked[i].stuckSinceMs = 0;
             }
         }
     }
@@ -749,6 +754,7 @@ struct SummonArmyCoordinator {
                 tracked[i].slotIndex = 0xFF;
                 tracked[i].inSlot = false;
                 tracked[i].lastMoveDispatchMs = 0;
+                tracked[i].stuckSinceMs = 0;
             }
         }
         return corridorActive;
@@ -879,27 +885,48 @@ struct SummonArmyCoordinator {
         return true;
     }
 
-    // Phase 4: Unstuck Watchdog for individual summons trapped behind walls > 28 sub-tiles for > 8s
+    // Phase 4: Unstuck Watchdog for individual summons:
+    // 1. Trapped behind walls > 28 sub-tiles for > 8s -> relocate to slot or player
+    // 2. Blocked by minion traffic/crowding and unable to reach assigned slot for >= 3.5s (out of combat)
     bool CheckArmyUnstuck(uint32_t unitId, Vec2 unitPos, Vec2 playerPos, uint64_t nowMs, Vec2& outRelocatePos) noexcept {
         const Vec2 refCenter = anchorActive ? anchorPos : playerPos;
-        const float dist = std::hypot(unitPos.x - refCenter.x, unitPos.y - refCenter.y);
+        const float distToRef = std::hypot(unitPos.x - refCenter.x, unitPos.y - refCenter.y);
         for (size_t i = 0; i < trackedCount; ++i) {
             if (tracked[i].unitId != unitId) continue;
-            if (dist <= UnstuckDistThreshold) {
-                tracked[i].farSinceMs = 0;
+
+            // 1. Far stuck check (> 28 sub-tiles away behind walls for > 8s)
+            if (distToRef > UnstuckDistThreshold) {
+                if (tracked[i].farSinceMs == 0) {
+                    tracked[i].farSinceMs = nowMs;
+                    return false;
+                }
+                if (nowMs >= tracked[i].farSinceMs && (nowMs - tracked[i].farSinceMs) >= UnstuckTimeoutMs) {
+                    tracked[i].farSinceMs = nowMs;
+                    outRelocatePos = (tracked[i].slotPos.x != 0.0f || tracked[i].slotPos.y != 0.0f)
+                        ? tracked[i].slotPos
+                        : refCenter;
+                    return true;
+                }
                 return false;
             }
-            if (tracked[i].farSinceMs == 0) {
-                tracked[i].farSinceMs = nowMs;
+            tracked[i].farSinceMs = 0;
+
+            // 2. Traffic congestion check: unit has an assigned slot, is NOT in slot, and has been
+            // blocked/stuck trying to reach it for >= CongestionTimeoutMs (3.5s) while out of combat
+            const bool hasSlot = (tracked[i].slotPos.x != 0.0f || tracked[i].slotPos.y != 0.0f);
+            if (hasSlot && !tracked[i].inSlot && !inCombat && !freeRoam) {
+                if (tracked[i].stuckSinceMs == 0) {
+                    tracked[i].stuckSinceMs = nowMs;
+                    return false;
+                }
+                if (nowMs >= tracked[i].stuckSinceMs && (nowMs - tracked[i].stuckSinceMs) >= CongestionTimeoutMs) {
+                    tracked[i].stuckSinceMs = nowMs;
+                    outRelocatePos = tracked[i].slotPos;
+                    return true;
+                }
                 return false;
             }
-            if (nowMs >= tracked[i].farSinceMs && (nowMs - tracked[i].farSinceMs) >= UnstuckTimeoutMs) {
-                tracked[i].farSinceMs = nowMs;
-                outRelocatePos = (tracked[i].slotPos.x != 0.0f || tracked[i].slotPos.y != 0.0f)
-                    ? tracked[i].slotPos
-                    : refCenter;
-                return true;
-            }
+            tracked[i].stuckSinceMs = 0;
             return false;
         }
         return false;
@@ -939,6 +966,7 @@ struct SummonArmyCoordinator {
                 for (size_t i = 0; i < trackedCount; ++i) {
                     tracked[i].inSlot = false;
                     tracked[i].lastMoveDispatchMs = 0;
+                    tracked[i].stuckSinceMs = 0;
                 }
                 return true;
             case SkillFallOut:
@@ -1014,6 +1042,7 @@ struct SummonArmyCoordinator {
                     nextTracked[i].lastTargetX = tracked[oldIdx].lastTargetX;
                     nextTracked[i].lastTargetY = tracked[oldIdx].lastTargetY;
                     nextTracked[i].farSinceMs = tracked[oldIdx].farSinceMs;
+                    nextTracked[i].stuckSinceMs = tracked[oldIdx].stuckSinceMs;
                     const uint8_t prevSlot = tracked[oldIdx].slotIndex;
                     if (prevSlot < slotCount && !slotTaken[prevSlot] && slots[prevSlot].role == unitRoles[i]) {
                         const float dist = std::hypot(units[i].pos.x - slots[prevSlot].worldPos.x,
@@ -1076,6 +1105,7 @@ struct SummonArmyCoordinator {
 
             if (dist <= ArrivalTolerance) {
                 nextTracked[i].inSlot = true;
+                nextTracked[i].stuckSinceMs = 0;
                 continue;
             }
             if (nextTracked[i].inSlot && dist <= releaseDeadband) {
@@ -1092,16 +1122,18 @@ struct SummonArmyCoordinator {
                 if (rLen > 1e-4f) faceDir = { dx / rLen, dy / rLen };
             }
 
-            // Check if unit is ahead of its slot along the facing vector.
-            // If so, route through an approach-from-rear waypoint behind the slot so that
-            // its final arrival step moves forward into the slot, naturally facing the battle line!
+            // Check if unit is significantly ahead of its slot along the facing vector.
+            // If coming from far ahead (e.g. corpses ahead in battle), route through an approach-from-rear
+            // waypoint behind the slot so that its final arrival step moves forward into the slot.
+            // When already in the immediate vicinity (<= 2.5 sub-tiles), head directly into the slot
+            // to avoid any hunting or back-and-forth oscillation.
             Vec2 navTarget = slot.worldPos;
             const float relX = units[i].pos.x - slot.worldPos.x;
             const float relY = units[i].pos.y - slot.worldPos.y;
             const float dotAhead = relX * faceDir.x + relY * faceDir.y;
             const float distToSlot = std::hypot(relX, relY);
 
-            if (dotAhead > 0.8f && distToSlot > 1.4f) {
+            if (dotAhead > 2.0f && distToSlot > 2.5f) {
                 navTarget = {
                     slot.worldPos.x - faceDir.x * 1.5f,
                     slot.worldPos.y - faceDir.y * 1.5f
