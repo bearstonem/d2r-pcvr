@@ -79,6 +79,39 @@ int main() {
             Check(s.casts==0,(label+"another spell's motion ("+other.name+") casts nothing").c_str());
         }
     }
+    {   // Every class's page (owner, 2026-11-04: "Both grips, like Sorceress"): the Sorceress's bits as saved
+        // since 2026-11-03, the Paladin's and the Druid's by card; a name and a cue on every card.
+        Check(spellmotion::PageOf(1).count==spellmotion::MotionCount&&spellmotion::PageOf(3).count==4&&spellmotion::PageOf(5).count==2,
+              "the Sorceress's 10, the Paladin's 4, the Druid's 2");
+        for(int c:{0,2,4,6,7,-1})Check(!spellmotion::HasMotions(c)&&spellmotion::PageOf(c).count==0,"no motions for the other classes yet");
+        for(const int id:spellmotion::PageSkills)Check(spellmotion::Bit(1,id)==spellmotion::Bit(id)&&spellmotion::On(1,id,0)&&!spellmotion::On(1,id,1<<spellmotion::Bit(id)),
+              "the Sorceress's bits are her motions' as before");
+        for(int c:{1,3,5}) {
+            const auto page=spellmotion::PageOf(c);
+            for(int i=0;i<page.count;++i) {
+                const int id=page.skills[i];
+                if(c!=1)Check(spellmotion::Bit(c,id)==i,"another class's bit is its card's");
+                Check(spellmotion::SpellName(id)[0]&&std::string(spellmotion::CueOf(id))!="no motion","every card has a name and a cue");
+                Check(!spellmotion::On(c,id,1<<spellmotion::Bit(c,id))&&spellmotion::On(c,id,~(1<<spellmotion::Bit(c,id))&1023)==true,"its bit alone turns it off");
+            }
+        }
+        Check(spellmotion::Bit(3,48)==-1&&!spellmotion::On(3,48,0)&&spellmotion::Bit(1,107)==-1,"a skill is on its own class's page only");
+    }
+    {   // The grips' hold every class's motions take: both above .6, kept down to .35, never one alone.
+        spellmotion::GripGate g;
+        const float none[2]{0,0},right[2]{.9f,0},left[2]{0,.9f},both[2]{.9f,.9f},dip[2]{.5f,.4f},low[2]{.3f,.9f},nan[2]{std::nanf(""),.9f};
+        Check(!g.Step(none)&&!g.Step(right)&&!g.Step(left),"one grip alone never opens it");
+        Check(g.Step(both)&&g.Step(dip),"both open it, and a squeeze that dips keeps it");
+        Check(!g.Step(low),"one let go below .35 closes it");
+        Check(!g.Step(dip),"closed, a half squeeze does not open it again");
+        Check(g.Step(both)&&!g.Step(nan),"an unknown grip closes it");
+        g.Step(both);g.Reset();Check(!g.Held(),"a reset lets go");
+        spellmotion::Gate gate;
+        Check(!gate.Step(both,false).watch&&!gate.Step(both,false).open,"busy hands: never watched");
+        auto st=gate.Step(both,true);Check(st.open&&st.watch,"both grips, hands free: watched");
+        st=gate.Step(none,true);Check(!st.open&&st.watch&&!st.held,"the frame the grips open is still watched (a gesture may end on it)");
+        st=gate.Step(none,true);Check(!st.open&&!st.watch,"then not");
+    }
     Check(spellmotion::For(36)==Motion::None&&spellmotion::For(117)==Motion::None,
         "Fire Bolt and a Paladin skill have no motion: their glyph casts as before");
     {Sim s(Motion::Punch);s.Trigger(true);s.MoveR({.15f,-.32f,-.12f},.35f);s.Hold(.1f);s.MoveR({.17f,-.28f,-.62f},.9f);

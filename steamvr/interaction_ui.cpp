@@ -454,17 +454,20 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
         }
         if(!o.editCount)text(o.glyphEdit>=0?"No skills that need no target":"No active skills available",{56,249,712,430});
     } else if(o.motions) {
-        // Motions (spell_motion.h): each motion spell, how to do it, and whether it is on; pressed, a card
-        // turns it on or off. A spell the hero has no points in is shown dimmed.
+        // Motions (spell_motion.h): each of the class's motion skills, how to do it, and whether it is on;
+        // pressed, a card turns it on or off. A skill the hero has no points in is shown dimmed.
         frame({20,28,748,681});
         text("MOTIONS",{38,34,730,62});
         SelectObject(dc,shortcutFont);SetTextColor(dc,RGB(232,196,119));
-        text("Hold both grips and do a spell's motion to cast it: no button needed.",{38,62,730,80});
-        text("Point at a spell and press the trigger to turn its motion on or off.",{38,79,730,97});
-        for(int i=0;i<MotionCards;++i) {
-            const int id=spellmotion::PageSkills[i];
+        const auto motions=spellmotion::PageOf(s.skillClass);
+        text(s.skillClass==1?"Hold both grips and do a spell's motion to cast it: no button needed.":
+            "Hold both grips and do a skill's motion to cast it: no button needed.",{38,62,730,80});
+        text(s.skillClass==1?"Point at a spell and press the trigger to turn its motion on or off.":
+            "Point at a skill and press the trigger to turn its motion on or off.",{38,79,730,97});
+        for(int i=0;i<motions.count&&i<MotionCards;++i) {
+            const int id=motions.skills[i];
             const auto skill=GlyphSkill(s,id);
-            const bool have=skill.known,on=spellmotion::On(id,o.motionsOff);
+            const bool have=skill.known,on=spellmotion::On(s.skillClass,id,o.motionsOff);
             const auto b=MotionCardBounds(i);
             const int x=int(768*b.left),y=int(768*b.top),right=int(768*b.right),bottom=int(768*b.bottom);
             frame({x,y,right,bottom},o.hover==MotionCardCell(i));
@@ -475,7 +478,7 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
             const RECT chip{right-72,y+9,right-9,y+31};
             fill(chip,on?RGB(100,74,29):RGB(48,40,28));
             SelectObject(dc,shortcutFont);SetTextColor(dc,on?RGB(235,218,181):RGB(148,137,117));text(on?"ON":"OFF",chip);
-            char cue[160];std::snprintf(cue,sizeof cue,"%s%s",spellmotion::Cue(spellmotion::For(id)),have?".":" (no points yet).");
+            char cue[160];std::snprintf(cue,sizeof cue,"%s%s",spellmotion::CueOf(id),have?".":" (no points yet).");
             cue[0]=char(std::toupper(static_cast<unsigned char>(cue[0])));
             SetTextColor(dc,RGB(169,151,118));paragraph(cue,{x+76,y+36,right-8,bottom-4});
         }
@@ -519,7 +522,8 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
             RECT box{LONG(m.left*768),LONG(m.top*768),LONG(m.right*768),LONG(m.bottom*768)};
             frame(box,o.hover==MotionsCell);
             int have=0,on=0;
-            for(const int id:spellmotion::PageSkills)if(GlyphSkill(s,id).known){++have;if(spellmotion::On(id,o.motionsOff))++on;}
+            const auto motions=spellmotion::PageOf(s.skillClass);
+            for(int i=0;i<motions.count;++i)if(GlyphSkill(s,motions.skills[i]).known){++have;if(spellmotion::On(s.skillClass,motions.skills[i],o.motionsOff))++on;}
             SelectObject(dc,shortcutFont);text("MOTIONS",{box.left+6,box.top+5,box.right-6,box.top+22});
             char line[48];if(have)std::snprintf(line,sizeof line,"%d of %d on",on,have);else std::snprintf(line,sizeof line,"None learned yet");
             SelectObject(dc,skillFont);text(line,{box.left+6,box.top+23,box.right-6,box.bottom-22});
@@ -579,7 +583,7 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
     if(o.motions&&!o.developer&&!o.editor&&!o.map) {
         const auto prior=SelectObject(dc,shortcutFont);SetTextColor(dc,RGB(232,196,119));
         text(o.result==Result::Pending?"Saving...":o.result==Result::Refused?"Not saved; press it again.":
-            "A motion that is off still casts from a button its spell is on.",{38,639,730,662});
+            "A motion that is off still casts from a button its skill is on.",{38,639,730,662});
         text("Both grips never grab a potion, a holster or a shoulder; one alone still does.",{38,662,730,685});
         SelectObject(dc,prior);
     }

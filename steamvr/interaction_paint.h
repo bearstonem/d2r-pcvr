@@ -39,7 +39,8 @@ inline PaintContext Context(const Snapshot& s,const Output& o,bool fresh,const c
     c.glyphs=o.glyphs;c.glyphEdit=o.glyphEdit;c.glyphDraw=o.glyphDraw;
     for(int i=0;i<GlyphShapes;++i)c.glyphSkills[size_t(i)]=GlyphSkill(s,o.glyphSkills[size_t(i)]);
     c.motions=o.motions;c.motionsBox=o.motionsBox;c.motionsOff=o.motionsOff;
-    for(int i=0;i<MotionCards;++i)c.motionSkills[size_t(i)]=GlyphSkill(s,spellmotion::PageSkills[i]);
+    const auto motions=spellmotion::PageOf(s.skillClass);
+    for(int i=0;i<motions.count&&i<MotionCards;++i)c.motionSkills[size_t(i)]=GlyphSkill(s,motions.skills[i]);
     return c;
 }
 inline bool LocationImageCurrent(const PaintContext& painted,const Snapshot& snapshot) {

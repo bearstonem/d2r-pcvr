@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <iterator>
 #include <vector>
 
 // Spells cast by their motion (owner, 2026-11-03). Every Sorceress spell with a motion, unless the
@@ -15,6 +16,10 @@
 // The first prototype readied a glyph's spell on the right trigger instead (Input::held, a gate
 // pressed fresh, with a drop logged on its release: the tests still use it); the MOTIONS page retired
 // that ("I don't want this to get over complicated").
+//
+// The Paladin's and the Druid's gestures (hammer_gesture.h, charge_gesture.h, cross_gesture.h,
+// heavens_gesture.h, shapeshift_gesture.h) take the same gate and their own MOTIONS page (owner,
+// 2026-11-04: "Both grips, like Sorceress"); their detectors stay their own (PageOf).
 //
 // Head-local frame as holycross (+X right, +Y up from the eyes, forward -Z, the head's yaw only); hand
 // 0 is the right. Value-only: steamvr/spell_motion_test.cpp.
@@ -43,12 +48,37 @@ constexpr int PageSkills[MotionCount]={40,42,44,46,48,50,54,57,58,60};
 inline int Bit(int skill){const int m=int(For(skill));return m>0?m-1:-1;}
 inline int OffMask(float value){return std::isfinite(value)?std::clamp(int(std::lround(value)),0,(1<<MotionCount)-1):0;}
 inline bool On(int skill,int off){const int b=Bit(skill);return b>=0&&!((off>>b)&1);}
-// Its name, for a hero without the spell (the catalog has none then).
+// Every class's MOTIONS page (owner, 2026-11-04: "Both grips, like Sorceress" for the Paladin's and the
+// Druid's gestures as well): its skills in card order, each turned off by a bit of the class's own
+// setting. The Sorceress's bit is her motion's number - 1 ([motions] off, as saved since 2026-11-03);
+// another class's is its card's. skillClass as the game's: 1 Sorceress, 3 Paladin, 5 Druid.
+constexpr int PaladinSkills[]={107,112,117,121};   // Charge, Blessed Hammer, Holy Shield, Fist of the Heavens
+constexpr int DruidSkills[]={223,228};             // Werewolf, Werebear
+struct Page {const int* skills=nullptr;int count=0;};
+inline Page PageOf(int skillClass) {
+    switch(skillClass) {
+    case 1:return {PageSkills,MotionCount};
+    case 3:return {PaladinSkills,int(std::size(PaladinSkills))};
+    case 5:return {DruidSkills,int(std::size(DruidSkills))};
+    default:return {};
+    }
+}
+inline bool HasMotions(int skillClass){return PageOf(skillClass).count>0;}
+inline int Bit(int skillClass,int skill) {
+    if(skillClass==1)return Bit(skill);
+    const auto page=PageOf(skillClass);
+    for(int i=0;i<page.count;++i)if(page.skills[i]==skill)return i;
+    return -1;
+}
+inline bool On(int skillClass,int skill,int off){const int b=Bit(skillClass,skill);return b>=0&&!((off>>b)&1);}
+// Its name, for a hero without the skill (the catalog has none then).
 inline const char* SpellName(int skill) {
     switch(skill) {
     case 40:return "Frozen Armor";case 42:return "Static Field";case 44:return "Frost Nova";case 46:return "Blaze";
     case 48:return "Nova";case 50:return "Shiver Armor";case 54:return "Teleport";case 57:return "Thunder Storm";
-    case 58:return "Energy Shield";case 60:return "Chilling Armor";default:return "";
+    case 58:return "Energy Shield";case 60:return "Chilling Armor";
+    case 107:return "Charge";case 112:return "Blessed Hammer";case 117:return "Holy Shield";case 121:return "Fist of the Heavens";
+    case 223:return "Werewolf";case 228:return "Werebear";default:return "";
     }
 }
 // How to do it: on the MOTIONS page and in the log.
@@ -67,6 +97,42 @@ inline const char* Cue(Motion m) {
     default:return "no motion";
     }
 }
+// A page skill's cue: the Sorceress's by her motion, the Paladin's and the Druid's by their gesture.
+inline const char* CueOf(int skill) {
+    switch(skill) {
+    case 107:return "draw the right fist in, then punch it straight out at a monster";
+    case 112:return "punch a fist from below your head up past it, one hammer a punch";
+    case 117:return "make the sign of the cross: forehead, chest, one shoulder, the other";
+    case 121:return "raise the right arm straight, then bring it down level with the shoulder";
+    case 223:return "cross the arms on the chest, bow, then straighten up flinging them out";
+    case 228:return "raise both hands overhead, hold, then slam them down together";
+    default:return Cue(For(skill));
+    }
+}
+// The grips' hold every class's motions take (owner, 2026-11-03: "what about holding both grips to
+// cast?"): both held above .6, let go below .35, so a squeeze that dips mid-motion keeps it.
+struct GripGate {
+    bool down[2]{};
+    void Reset(){*this=GripGate{};}
+    bool Step(const float grip[2]) {
+        for(int h=0;h<2;++h)down[h]=std::isfinite(grip[h])&&grip[h]>(down[h]?.35f:.6f);
+        return Held();
+    }
+    bool Held()const{return down[0]&&down[1];}
+};
+// The gate every class's motions take: the grips' hold with the hands free for them (hands: the
+// transport's - a motion of the class learned and on, Weapon skill gestures, both triggers free, no
+// bottle, holster, bow, wheel, menu or glyph stroke). open: the motions are watched; watch: open, or
+// the grips open this frame after a hold (a gesture may end as they open: Fist of the Heavens' fist).
+struct Gate {
+    GripGate grips;bool was=false;
+    struct State{bool held=false,open=false,watch=false;};
+    void Reset(){*this=Gate{};}
+    State Step(const float grip[2],bool hands) {
+        State s;s.held=grips.Step(grip);s.open=s.held&&hands;s.watch=hands&&(s.held||was);
+        was=s.held;return s;
+    }
+};
 // While both grips cast spells (owner, 2026-11-03: "when both grips are held you should prevent
 // actions like grabbing potions or grabbing above the shoulder"): a grip counts for a grab only
 // alone - held SoloSeconds with the other free - and then until it is let go; pressed with the
