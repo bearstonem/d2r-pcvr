@@ -706,6 +706,8 @@ inline constexpr Override Overrides[]={
     {.id="glyphs.v",.page=NotInMenu},{.id="glyphs.star",.page=NotInMenu},{.id="glyphs.wave",.page=NotInMenu},
     // Motions: edited on the wheel's MOTIONS page.
     {.id="motions.off",.page=NotInMenu},{.id="motions.paladin_off",.page=NotInMenu},{.id="motions.druid_off",.page=NotInMenu},
+    {.id="motions.amazon_off",.page=NotInMenu},{.id="motions.necromancer_off",.page=NotInMenu},
+    {.id="motions.barbarian_off",.page=NotInMenu},{.id="motions.assassin_off",.page=NotInMenu},
 };
 #undef FRAMEVR_OPTIONS
 #undef FRAMEVR_NAMES

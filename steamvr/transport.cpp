@@ -274,7 +274,13 @@ spellmotion::Gate spellGate;   // every class's motions' gate: both grips held, 
 struct GlyphPress {interaction::Skill skill{};bool record=false;math::Vec aim{};uint64_t at=0;} glyphPress;
 std::atomic<uint64_t> glyphRecordAt{0};
 // The setting holding which of a class's motions are off (spellmotion::PageOf), -1 for a class without.
-int MotionsKey(int skillClass){return skillClass==1?settings::MotionsOff:skillClass==3?settings::MotionsPaladinOff:skillClass==5?settings::MotionsDruidOff:-1;}
+int MotionsKey(int skillClass) {
+    switch(skillClass) {
+    case 0:return settings::MotionsAmazonOff;case 1:return settings::MotionsOff;case 2:return settings::MotionsNecromancerOff;
+    case 3:return settings::MotionsPaladinOff;case 4:return settings::MotionsBarbarianOff;case 5:return settings::MotionsDruidOff;
+    case 6:return settings::MotionsAssassinOff;default:return -1;
+    }
+}
 // The wheel's glyph settings ([glyphs]) are saved here, one save at a time; until it lands the wheel
 // and the draw button follow the values asked for. The engine's request is answered as
 // interactionstate answers its own.
@@ -3874,7 +3880,7 @@ void Input() {
         // The MOTIONS page: a card's motion on or off (the class's setting, one bit each: MotionsKey).
         const auto& r=interactionOutput.request;
         const int skillClass=interactionInput.snapshot.skillClass,key=MotionsKey(skillClass);
-        const bool valid=key>=0&&r.index>=0&&r.index<(skillClass==1?spellmotion::MotionCount:spellmotion::PageOf(skillClass).count);
+        const bool valid=key>=0&&r.index>=0&&r.index<spellmotion::PageOf(skillClass).count;
         const int was=key>=0?spellmotion::OffMask(vrsettings::Read().values[key]):0;
         const bool saved=valid&&saveGlyphs(settings::Key(key),float(was^(1<<r.index)));
         char line[160];std::snprintf(line,sizeof line,"Frame spell motion: motion %d turned %s on the MOTIONS page (%s)",r.index+1,
@@ -4107,7 +4113,8 @@ void Input() {
         const double heldFor=motionNow-spellGripSince;spellGripSince=-1;
         if(!gripHeld&&!spellGripCast&&heldFor>=.3) {
             int first=-1;
-            if(motionClass==1)for(const int id:spellmotion::PageSkills){const int m=int(spellmotion::For(id));if(m>0&&motionOn(id)&&(first<0||m<first))first=m;}
+            {const auto page=spellmotion::PageOf(motionClass);
+             for(int i=0;i<page.count;++i){const int id=page.skills[i],m=int(spellmotion::For(id));if(m>0&&motionOn(id)&&(first<0||m<first))first=m;}}
             char line[480];
             if(first>0) {
                 const auto& w=spellFree[size_t(first-1)].Stats();
@@ -4350,18 +4357,19 @@ void Input() {
                 Say(drawn.c_str());
             }
         }
-        // The Sorceress's motions (spell_motion.h): every spell of hers with a motion, unless the wheel's
-        // MOTIONS page turned it off, under the motions' gate (above). The first motion to complete casts
-        // (motionCast). Static Field before Nova: its snap apart is as wide as a fling. Then every watcher
-        // starts over a second later.
+        // The motions on spellmotion's engine (spell_motion.h): the Sorceress's, and the Amazon's,
+        // Necromancer's, Barbarian's and Assassin's (motions_<class>.h); every one of the class's whose card
+        // is on, under the motions' gate (above). The first to complete casts (motionCast) its card's skill,
+        // the strongest learned of a family (CastSkillOf: the golems, the shadows), in the class's order
+        // (OrderOf: Static Field before Nova). Then every watcher starts over a second later.
         {
-            constexpr spellmotion::Motion order[spellmotion::MotionCount]={spellmotion::Motion::RubSnap,spellmotion::Motion::FlingOut,spellmotion::Motion::PushDown,
-                spellmotion::Motion::CrossGuard,spellmotion::Motion::ArmUp,spellmotion::Motion::MatchStrike,spellmotion::Motion::ForearmSweep,
-                spellmotion::Motion::Shake,spellmotion::Motion::Hug,spellmotion::Motion::Punch};
+            const auto order=spellmotion::OrderOf(motionClass);
             int skillOf[spellmotion::MotionCount+1];for(auto& k:skillOf)k=-1;
-            if(motionClass==1)for(const int id:spellmotion::PageSkills)if(const int m=int(spellmotion::For(id));m>0&&motionOn(id))skillOf[m]=id;
+            {const auto page=spellmotion::PageOf(motionClass);
+             for(int i=0;i<page.count;++i)if(const int id=page.skills[i],m=int(spellmotion::For(id));m>0&&motionOn(id))skillOf[m]=id;}
             int done=-1;math::Vec doneAim{};
-            for(const auto motion:order) {
+            for(int i=0;i<order.count;++i) {
+                const auto motion=order.motions[i];
                 const int m=int(motion);
                 spellmotion::Input freeIn;
                 freeIn.time=now;freeIn.session=interactionInput.session;freeIn.epoch=interactionInput.epoch;
@@ -4373,7 +4381,7 @@ void Input() {
             }
             if(done>0) {
                 for(auto& e:spellFree)e.Reset();
-                motionCast(skillOf[done],doneAim,true);
+                motionCast(spellmotion::CastSkillOf(skillOf[done],[&](int id){return interaction::GlyphSkill(quickSnapshot,id).known;}),doneAim,true);
             }
         }
         glyphPressRt=false;

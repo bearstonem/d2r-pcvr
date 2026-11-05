@@ -474,7 +474,8 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
             const bool haveIcon=icon(icons::Get("s"+std::to_string(id)),{x+9,y+12,x+67,y+70},have&&on);
             if(!haveIcon)fill({x+12,y+15,x+64,y+67},RGB(48,40,28));
             SelectObject(dc,font);SetTextColor(dc,have?RGB(235,218,181):RGB(148,137,117));
-            paragraph(have?skill.name:spellmotion::SpellName(id),{x+76,y+8,right-78,y+34});
+            const char* family=spellmotion::CardName(id);
+            paragraph(family?family:have?skill.name:spellmotion::SpellName(id),{x+76,y+8,right-78,y+34});
             const RECT chip{right-72,y+9,right-9,y+31};
             fill(chip,on?RGB(100,74,29):RGB(48,40,28));
             SelectObject(dc,shortcutFont);SetTextColor(dc,on?RGB(235,218,181):RGB(148,137,117));text(on?"ON":"OFF",chip);
