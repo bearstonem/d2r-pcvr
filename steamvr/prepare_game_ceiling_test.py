@@ -242,6 +242,9 @@ class GrannyWriteTest(unittest.TestCase):
         lod, _ = w.member(w.ptr(ext), w.ptr(gw.at(ext, 8)), 'lodLevel')
         self.assertEqual(w.get(lod, '<i'), 3)
         self.assertEqual(gw.bounds(back), ([-240.0, mesh.mn[1], -240.0], [240.0, mesh.mx[1], 240.0]))
+        shapes = {}   # each struct named once, then known by its shape from file to file
+        self.assertEqual([gw.bounds(gw.File(data), shapes) for _ in range(2)], [gw.bounds(back)] * 2)
+        self.assertIn(['bbMin', 'bbMax', 'VertexScale'], shapes.values())
         skel, t = w.member(back.root_type, back.root_obj, 'Skeletons')
         bones, bt = w.member(w.ref(t), w.ptr(w.ptr(gw.at(skel, 4))), 'Bones')
         transform, _ = w.member(w.ref(bt), w.ptr(gw.at(bones, 4)), 'Transform')

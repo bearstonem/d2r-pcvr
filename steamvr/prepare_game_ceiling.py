@@ -246,7 +246,7 @@ def parse_measures(text):
 def measure(assets, texts):
     """Each indoor area's walls' top: the median top of the wall pieces its own biome's presets place, each model's bounds
     read once from its own lod0 file. `texts`: preset name -> its text (already read). Areas with no wall piece are left out."""
-    boxes = {}
+    boxes, shapes = {}, {}
 
     def bounds_of(model):
         if len(model) < 7 or not model.endswith('.model'):
@@ -256,7 +256,8 @@ def measure(assets, texts):
             name = model[:-6] + '_lod0.model'
             if name in assets.files:
                 try:
-                    box = granny_write.bounds(granny_write.File(assets.read(name)))
+                    # (each struct's names learnt once, from the first file that has it: the rest decode only their start)
+                    box = granny_write.bounds(granny_write.File(assets.read(name)), shapes)
                 except (ValueError, KeyError, struct.error):
                     box = None
             boxes[model] = box
@@ -294,26 +295,35 @@ def measure(assets, texts):
 
 # ---- the collision guard ------------------------------------------------------------------------------------------------------
 
-def named_in_play(texts, level_presets):
+class Guard:
     """For every kind's slab and wall: the JSON files outside the LOD table, the test presets and the warehouses that
     name its model (an empty list: free to write over). A test preset or warehouse a level loads counts as in play."""
-    loaded = level_presets.lower()
-    unplayed = tuple(p for p in UNPLAYED
-                     if not re.search(r'(^|[\\/\s])' + re.escape(p.rstrip('/').rsplit('/', 1)[1]) + r'[\\/]', loaded))
-    files = {}
-    for kind in KINDS:
-        for f in (kind[3], kind[4]):
-            if f:   # (as a preset or unit names it: "<path>.model" or "<path>_lod<n>.model", whatever comes before it)
-                files[f] = re.compile(re.escape(model_base(f).removeprefix('data/hd/env/model/').lower()) + r'(?:\.model|_lod\d)')
-    hits = {f: [] for f in files}
-    for name, text in texts.items():
-        if name == LOD_TABLE or name.startswith(unplayed):
-            continue
+
+    def __init__(self, level_presets):
+        loaded = level_presets.lower()
+        self.unplayed = tuple(p for p in UNPLAYED
+                              if not re.search(r'(^|[\\/\s])' + re.escape(p.rstrip('/').rsplit('/', 1)[1]) + r'[\\/]', loaded))
+        self.patterns = {}
+        for kind in KINDS:
+            for f in (kind[3], kind[4]):
+                if f:   # (as a preset or unit names it: "<path>.model" or "<path>_lod<n>.model", whatever comes before it)
+                    self.patterns[f] = re.compile(re.escape(model_base(f).removeprefix('data/hd/env/model/').lower()) + r'(?:\.model|_lod\d)')
+        self.hits = {f: [] for f in self.patterns}
+
+    def scan(self, name, text):
+        if name == LOD_TABLE or name.startswith(self.unplayed):
+            return
         low = text.lower()
-        for f, pattern in files.items():
+        for f, pattern in self.patterns.items():
             if pattern.search(low):
-                hits[f].append(name)
-    return hits
+                self.hits[f].append(name)
+
+
+def named_in_play(texts, level_presets):
+    guard = Guard(level_presets)
+    for name, text in texts.items():
+        guard.scan(name, text)
+    return guard.hits
 
 
 # ---- the maker ----------------------------------------------------------------------------------------------------------------
@@ -327,19 +337,25 @@ def generate(assets, mod_name='D2R-PCVR', log=print, walls=None):
     if SOURCE not in assets.files:
         raise ValueError("act 1's cave rock model is not in this game: no game-drawn ceiling")
     rock = assets.read(SOURCE)
-    texts = {}
+    try:
+        level_presets = assets.read(LEVEL_PRESETS).decode('latin-1') if LEVEL_PRESETS in assets.files else ''
+    except (ValueError, KeyError, OSError):
+        level_presets = ''
+    guard = Guard(level_presets)
+    areas = tuple(PRESETS + folder for _, folder in AREAS)
+    texts = {}   # (the areas' presets, kept for the walls' top; every JSON is scanned by the guard as it is read)
     for name in sorted(n for n in assets.files if n.startswith('data/hd/') and n.endswith('.json')):
         try:
             data = assets.read(name)
         except (ValueError, KeyError, OSError):
             continue
-        if len(data) <= 16 * 1024 * 1024:
-            texts[name] = data.decode('utf-8', 'replace')
-    try:
-        level_presets = assets.read(LEVEL_PRESETS).decode('latin-1') if LEVEL_PRESETS in assets.files else ''
-    except (ValueError, KeyError, OSError):
-        level_presets = ''
-    hits = named_in_play(texts, level_presets)
+        if len(data) > 16 * 1024 * 1024:
+            continue
+        text = data.decode('utf-8', 'replace')
+        guard.scan(name, text)
+        if name.startswith(areas):
+            texts[name] = text
+    hits = guard.hits
     made, skipped = [], []
     files = {}
     wall = granny_write.wall_mesh(WALL_RADIUS, WALL_HEIGHT, WALL_SEGMENTS, WALL_ROWS, TILE)

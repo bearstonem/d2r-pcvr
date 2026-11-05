@@ -13,7 +13,7 @@ import struct
 import zlib
 from types import SimpleNamespace
 
-from vendor.bitknit import decompress_bitknit
+from vendor.bitknit import _classic_bitknit_state7_candidates, decode_bitknit_state7_stream, decompress_bitknit
 
 MAGIC_BYTES, HEADER_AT, SECTIONS_AT = 32, 32, 32 + 72
 BITKNIT2 = 4
@@ -86,8 +86,9 @@ class Sections:
         return self._cache[i]
 
     def view(self, i, end):
-        """Section `i` decompressed at least to `end` (or whole): a BitKnit2 stream stops early only where no match runs
-        past the stop, so the stop moves on a step at a time until one does."""
+        """Section `i` decompressed at least to `end` (or whole). The BitKnit2 stream is decoded up to a stop a little
+        past `end`; what it gives back before the stop is the section's own (a match running past it ends the
+        decode there), and a model's mesh lies within its first 40 KB or so."""
         if i in self._cache:
             return self._cache[i]
         compression, _, _, size = self._sh[i][:4]
@@ -96,14 +97,16 @@ class Sections:
             return self[i]
         if have is not None and len(have) >= end:
             return have
-        n = max(end, 2 * len(have) if have is not None else 0, 32768)
-        n = min(size, -(-n // self.STEP) * self.STEP)
-        while n < size:
-            try:
-                self._prefix[i] = bytearray(_decode(self._packed(i), n, BITKNIT2))
-                return self._prefix[i]
-            except ValueError:
-                n = min(size, n + self.STEP)
+        stop = max(end + self.STEP, 2 * len(have) if have is not None else 0, 40000)
+        if stop < size:
+            for candidate in _classic_bitknit_state7_candidates(self._packed(i)):
+                try:
+                    out = decode_bitknit_state7_stream(candidate, size, max_output_size=stop).output
+                except (EOFError, ValueError):
+                    continue
+                if len(out) >= end:
+                    self._prefix[i] = bytearray(out)
+                    return self._prefix[i]
         return self[i]
 
     def __iter__(self):
@@ -174,9 +177,10 @@ def at(a, d):
 class Walk:
     """The file walked by its own types (an address: (section, offset), None when not found)."""
 
-    def __init__(self, f):
+    def __init__(self, f, shapes=None):
         self.f = f
         self.map = [{x[0]: k for k, x in enumerate(fx)} for fx in f.fix]
+        self.shapes = shapes   # struct_names' learnt names, shared between files (None: read every name)
 
     def inside(self, a, n):
         return a is not None and a[0] < len(self.f.sec) and a[1] + n <= self._size(a[0])
@@ -286,8 +290,39 @@ class Walk:
             t = at(t, 44)
         return n
 
+    def struct_names(self, t):
+        """The members' names of the struct of type `t`, from `shapes` when a struct of its very shape was named before:
+        its entries' bytes but the pointers, and how far apart their names lie (the names' lengths). The names are
+        strings at the end of the first section, which only a whole decode reaches: learnt once a shape."""
+        entries, places = [], []
+        for _ in range(256):
+            if not self.inside(t, 44) or self.kind(t) == 0:
+                break
+            raw = self._view(t[0], t[1] + 44)
+            entries.append(bytes(raw[t[1]:t[1] + 4]) + bytes(raw[t[1] + 20:t[1] + 44]))
+            places.append(self.ptr(at(t, 4)))
+            t = at(t, 44)
+        if not places or None in places:
+            return None
+        # (a name the file shares with a string elsewhere - "Name", "FromFileName" - lies anywhere: only the block of the
+        # struct's own names, within 4 KB of its last, keys it)
+        last = places[-1]
+        key = (tuple(entries), tuple(p[1] - last[1] if p[0] == last[0] and abs(p[1] - last[1]) <= 4096 else None for p in places))
+        if key not in self.shapes:
+            self.shapes[key] = [self.string(p) for p in places]
+        return self.shapes[key]
+
     def member(self, t, obj, name):
         """A member of a struct of type `t` at `obj`: (its place, its type entry); (None, None) when not found."""
+        names = self.struct_names(t) if self.shapes is not None else None
+        if names is not None:
+            off = 0
+            for known in names:
+                if known == name:
+                    return at(obj, off), t
+                off += self.size(t)
+                t = at(t, 44)
+            return None, None
         off = 0
         for _ in range(256):
             if not self.inside(t, 44) or self.kind(t) == 0:
@@ -498,9 +533,11 @@ def _mesh_ext(g, mesh_type, mesh):
     return (et, eo) if et is not None and eo is not None else (None, None)
 
 
-def bounds(f):
-    """Every mesh's bounds together (ExtendedData bbMin / bbMax), model units; None when it has none."""
-    g = Walk(f)
+def bounds(f, shapes=None):
+    """Every mesh's bounds together (ExtendedData bbMin / bbMax), model units; None when it has none. `shapes`: the
+    structs named so far ({}: shared from file to file, so that only the start of the first section is decoded once
+    each struct's names are known)."""
+    g = Walk(f, shapes)
     meshes, t = g.member(f.root_type, f.root_obj, 'Meshes')
     if meshes is None or g.kind(t) != 4:
         return None
