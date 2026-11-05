@@ -14,6 +14,7 @@ struct Sim {
     spellmotion::Engine g;spellmotion::Input in;spellmotion::Output out;
     math::Quat yaw{0,0,0,1};math::Vec head{0,1.7f,0};
     int casts=0,drops=0,began=0;std::string lastDrop;
+    math::Vec aim{};   // the last cast's way
     float frame=1/90.f;
     Sim(Motion m,float heading=0){yaw=math::Yaw(heading);in.time=1;in.session=3;in.epoch=1;in.active=true;in.motion=m;
         in.tracked[0]=in.tracked[1]=true;in.head=head;in.headRotation=yaw;Place(0,RestR);Place(1,RestL);Step();}
@@ -34,7 +35,7 @@ struct Sim {
     }
     void Hold(float s){for(int i=0;i<int(s/frame);++i)Step();}
     void Trigger(bool down){in.held=down;Step();}
-    void Step(){in.time+=frame;out=g.Step(in);if(out.cast)++casts;if(out.began)++began;if(out.dropped){++drops;lastDrop=out.dropped;}}
+    void Step(){in.time+=frame;out=g.Step(in);if(out.cast){++casts;aim=out.aim;}if(out.began)++began;if(out.dropped){++drops;lastDrop=out.dropped;}}
 };
 // The motions, done well, from the resting pose; the trigger is the caller's.
 static void Nova(Sim& s){s.Move({.08f,-.40f,-.30f},{-.08f,-.40f,-.30f},.35f);s.Move({.62f,-.35f,-.15f},{-.62f,-.35f,-.15f},.25f);}
@@ -84,6 +85,11 @@ int main() {
      Check(s.casts==0,"Teleport: the arm pushed out slowly casts nothing");}
     {Sim s(Motion::Punch);s.Trigger(true);s.MoveR({.15f,-.32f,-.12f},.35f);s.Hold(.1f);s.MoveR({.15f,.20f,-.50f},.2f);
      Check(s.casts==0,"Teleport: an uppercut is not a punch");}
+    for(float heading:{-2.f,1.f}){Sim s(Motion::Punch,heading);s.Trigger(true);Teleport(s);
+     Check(s.casts==1&&s.aim.z<-.25f&&std::fabs(s.aim.x)<.1f&&std::fabs(s.aim.y)<.1f,"Teleport: it goes the way of the punch, head-local (straight ahead at any heading)");}
+    {Sim s(Motion::Punch);s.Trigger(true);s.MoveR({.05f,-.32f,-.12f},.35f);s.Hold(.1f);s.MoveR({.25f,-.30f,-.58f},.2f);
+     Check(s.casts==1&&s.aim.x>.1f&&s.aim.z<-.25f,"Teleport: a punch out to the right goes right of ahead");}
+    {Sim s(Motion::FlingOut);s.Trigger(true);Nova(s);Check(s.casts==1&&math::Dot(s.aim,s.aim)==0,"Nova: no way to go");}
     {Sim s(Motion::FlingOut);s.Trigger(true);Nova(s);s.Move(RestR,RestL,.4f);s.Hold(.4f);Nova(s);
      Check(s.casts==2,"still held, Nova again from the start casts again");s.Trigger(false);Check(s.drops==0,"a hold that cast is not dropped");}
     {Sim s(Motion::FlingOut);s.Trigger(true);s.Move({.62f,-.35f,-.15f},{-.62f,-.35f,-.15f},.3f);

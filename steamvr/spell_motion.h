@@ -120,6 +120,7 @@ struct Tuning {
     // Teleport, the Paladin's Charge punch (charge_gesture.h): the right hand drawn in (at most punchFrom
     // ahead of the eyes, hip to brow), then punched straight out to punchReach ahead, punchTravel
     // forward within punchWindow, at least 1.5 times as far forward as up, down or sideways.
+    // The cast goes the way of the punch (Output::aim).
     float punchFrom=.30f,punchReach=.45f,punchTravel=.25f,punchWindow=.20f;
     float cooldown=.6f;       // s after a cast
     float history=1.5f;       // s of the hands kept
@@ -145,6 +146,9 @@ struct Output {
     // (head-local: x right, y up, z back) (m, m/s).
     float apartMin=0,apartMax=0,top=0,low=0,fastest=0,fall[2]{};
     math::Vec end[2]{};
+    // With a cast that goes somewhere (Teleport): the way the motion went, head-local as end (the punch,
+    // from where it began to where it ended); zero for the rest.
+    math::Vec aim{};
 };
 class Engine {
     struct Sample {double t=0;math::Vec l[2]{};};
@@ -154,6 +158,7 @@ class Engine {
     int casts=0;                  // in this hold
     double since=0,last=0,castAt=-1,poseSince=-1;
     float rub=0;double parted=-1; // Static Field
+    math::Vec aimed{};            // Teleport: the punch Done found
     struct Swing {int sign=0;float peak=0;};
     Swing swing[2][3]{};          // Shiver Armor: each hand's last swing on each axis
     std::vector<double> turns[2][3];
@@ -163,7 +168,7 @@ class Engine {
     static float Apart(const Sample& s){return Len(s.l[0]-s.l[1]);}
     static float Forward(math::Vec l){return -l.z;}
     void Clear() {
-        samples.clear();poseSince=-1;rub=0;parted=-1;
+        samples.clear();poseSince=-1;rub=0;parted=-1;aimed={};
         for(auto& h:swing)for(auto& a:h)a={};
         for(auto& h:turns)for(auto& a:h)a.clear();
     }
@@ -261,7 +266,7 @@ class Engine {
                 const auto& a=s.l[0];
                 const float forward=Forward(c)-Forward(a);
                 if(n.t-s.t<=t.punchWindow&&Forward(a)<=t.punchFrom&&a.y>=-.70f&&a.y<=.10f&&forward>=t.punchTravel&&
-                   std::fabs(c.y-a.y)*1.5f<=forward&&std::fabs(c.x-a.x)*1.5f<=forward)return true;
+                   std::fabs(c.y-a.y)*1.5f<=forward&&std::fabs(c.x-a.x)*1.5f<=forward){aimed=c-a;return true;}
             }
             return false;
         }
@@ -319,7 +324,7 @@ public:
         out.seconds=float(in.time-since);
         if(castAt>=0&&in.time-castAt<tuning.cooldown)return out;
         if(Done(in.motion)) {
-            const auto seconds=out.seconds;out=stats;out.seconds=seconds;out.cast=true;
+            const auto seconds=out.seconds;out=stats;out.seconds=seconds;out.cast=true;out.aim=aimed;
             castAt=in.time;++casts;Clear();   // the motion again, from its start, casts again
         }
         return out;

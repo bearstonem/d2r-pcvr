@@ -3121,12 +3121,16 @@ bool HandRay(float* o, float* d,bool forceGround=true,int forHand=-1) {
 #ifdef D2RVR_NATIVE_OPENXR
     // forHand -1: the casting hand (GameplayRay); 0 or 1: that hand (the aim rules).
     const bool left=forHand>=0?forHand==1:framevr::LeftHandAiming();
+    // A motion that aims its cast (Teleport's punch, spell_motion.h): along the punch, not the fist's
+    // pointer or a staff's shaft (owner, 2026-11-04).
+    float motionOrigin[3],motionDirection[3];
+    const bool way=!left&&framevr::MotionCastRay(motionOrigin,motionDirection);
     // The menu aim pose can differ greatly from the weapon's shaft. Use the
     // final posed weapon in its captured WORLD frame, not a bone from one
     // frame combined with a newer headset yaw from another.
     const auto castingType=HeldType();
     const bool staffByHand=StaffByHand();
-    if(g_eyeOk.load()&&!framevr::spellaim::TrackedAim(framevr::NativeCastSkill())&&!left&&(forHand==0||framevr::SpellSelected())&&!staffByHand&&
+    if(!way&&g_eyeOk.load()&&!framevr::spellaim::TrackedAim(framevr::NativeCastSkill())&&!left&&(forHand==0||framevr::SpellSelected())&&!staffByHand&&
        (castingType==D2RVR_TYPE_WAND||castingType==D2RVR_TYPE_STAFF||castingType==D2RVR_TYPE_SCEPTER||castingType==D2RVR_TYPE_ORB)) {
         skel::MeleeWeaponPose pose;
         if(skel::MeleeWeapon(pose)&&pose.weaponType==castingType&&pose.worldEpoch==g_meleeTurnEpoch.load()) {
@@ -3141,12 +3145,11 @@ bool HandRay(float* o, float* d,bool forceGround=true,int forHand=-1) {
         // casting hand and remains usable when the render pose is unavailable.
     }
     framevr::crossbow::Pose crossbow;
-    if(castingType==D2RVR_TYPE_CROSSBOW&&framevr::CrossbowAiming()&&skel::CrossbowPose(crossbow)&&
+    if(!way&&castingType==D2RVR_TYPE_CROSSBOW&&framevr::CrossbowAiming()&&skel::CrossbowPose(crossbow)&&
        framevr::crossbow::Fresh(crossbow,GetTickCount64(),gamestate::LocalPlayer(),gamestate::HandsKey()^(gamestate::WeaponSet()<<30),g_meleeTurnEpoch.load())) {
         o[0]=crossbow.muzzle.x;o[1]=crossbow.muzzle.y;o[2]=crossbow.muzzle.z;
         d[0]=crossbow.direction.x;d[1]=crossbow.direction.y;d[2]=crossbow.direction.z;return true;
     }
-    float motionOrigin[3],motionDirection[3];
     // An upright staff or an empty hand: along the arm, from the casting hand's
     // shoulder through the hand, so a bent wrist, knuckles to the side or a
     // hand overhead all aim where the arm reaches. The empty hand's own pointer
@@ -3156,8 +3159,8 @@ bool HandRay(float* o, float* d,bool forceGround=true,int forHand=-1) {
     // empty hand's arm line is the rules' only (forHand): with their Aim
     // options Off it casts along its own pointer, as before (#159 review).
     const bool arm=(staffByHand&&(forHand>=0||framevr::SpellSelected()))||(castingType==D2RVR_TYPE_UNARMED&&forHand>=0);
-    if(g_eyeOk.load()&&(forHand>=0?framevr::HandAimRay(forHand,motionOrigin,motionDirection):framevr::GameplayRay(motionOrigin,motionDirection))) {
-        if(arm) {
+    if(g_eyeOk.load()&&(way||(forHand>=0?framevr::HandAimRay(forHand,motionOrigin,motionDirection):framevr::GameplayRay(motionOrigin,motionDirection)))) {
+        if(arm&&!way) {
             const float a[3]={motionOrigin[0]-(left?-.17f:.17f),motionOrigin[1]+.22f,motionOrigin[2]};
             const float al=std::sqrt(a[0]*a[0]+a[1]*a[1]+a[2]*a[2]);
             if(al>.15f)for(int i=0;i<3;++i)motionDirection[i]=a[i]/al;
@@ -3448,7 +3451,15 @@ bool HandGridDir(float* gx, float* gy) {
 
 // A skill button is down (A, B, X, Y, RB), no menu: the attack or spell it casts goes along the hand.
 std::atomic<bool> g_skillHeld{false};
-bool AimByVector() { return g_enabled.load() && g_set.bowMode.load() == 4 && (g_aHeld.load() || g_skillHeld.load()); }
+// A glyph's or motion's press of the right trigger's record (glyph_cast.h) too: no button above shows it.
+bool RecordCastHeld() {
+#ifdef D2RVR_NATIVE_OPENXR
+    return framevr::RecordCastLive();
+#else
+    return false;
+#endif
+}
+bool AimByVector() { return g_enabled.load() && g_set.bowMode.load() == 4 && (g_aHeld.load() || g_skillHeld.load() || RecordCastHeld()); }
 
 #ifdef D2RVR_NATIVE_OPENXR
 using SpellControllerTargetFn=uintptr_t(*)(uintptr_t,int);

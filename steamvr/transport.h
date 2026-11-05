@@ -97,6 +97,8 @@ bool BowSkillActive();   // a bow or crossbow skill is being cast from a button 
 int GroundSpellSkill();   // a ground skill (spellaim::GroundTarget) being cast that lands where it is aimed: its id, or -1
 int NativeCastSkill(); // current fresh native cast id, -1 when idle/blocked/stale
 bool GameplayRay(float origin[3],float direction[3]);
+bool MotionCastRay(float origin[3],float direction[3]);   // a motion's cast with a way (Teleport's punch), live: from the right hand along it, as GameplayRay
+bool RecordCastLive();      // a glyph's or motion's press of the right trigger's record, now or within 150 ms (lock-free)
 // Aim rules: each hand's own aim in GameplayRay's frame - the controller's
 // pointer, or the bow's forward for the left hand holding a bow.
 bool HandAimRay(int hand,float origin[3],float direction[3]);
