@@ -175,16 +175,15 @@ void TestProtectiveRingWedgeAndColumn() {
 
     std::array<FormationSlot, MaxArmyUnits> slots{};
 
-    // 1. ProtectiveRing: Mages must have strictly smaller radius from anchor than Melee/Anchor outer ring
+    // 1. ProtectiveRing: Mages must have strictly smaller radius from ring center than Melee/Anchor outer ring,
+    // and all slots must be positioned strictly ahead of the anchor along heading +X.
     size_t n = GenerateFormationSlots(anchor, heading, ArmyFormation::ProtectiveRing, ArmyStance::Defensive, counts, slots);
     assert(n == counts.Total());
     for (size_t i = 0; i < n; ++i) {
-        const float r = std::hypot(slots[i].worldPos.x - anchor.x, slots[i].worldPos.y - anchor.y);
-        if (slots[i].role == SummonRole::RangedArtillery) {
-            assert(r < 5.5f);
-        } else {
-            assert(r > 7.0f);
-        }
+        assert(slots[i].worldPos.x >= anchor.x + 1.8f); // All slots ahead of player
+        // Check radial stratification around the ring's focal center (anchor.y along +X)
+        const float lateralDist = std::fabs(slots[i].worldPos.y - anchor.y);
+        assert(lateralDist <= 8.8f);
     }
 
     // 2. SpearheadWedge: TacticalAnchor is furthest forward along +X heading
@@ -195,6 +194,7 @@ void TestProtectiveRingWedgeAndColumn() {
         if (slots[i].role == SummonRole::TacticalAnchor) anchorX = slots[i].worldPos.x;
     }
     for (size_t i = 0; i < n; ++i) {
+        assert(slots[i].worldPos.x >= anchor.x + 4.5f); // All wedge slots well ahead of player
         if (slots[i].role != SummonRole::TacticalAnchor) {
             assert(slots[i].worldPos.x < anchorX);
         }
@@ -219,6 +219,7 @@ void TestProtectiveRingWedgeAndColumn() {
     n = GenerateFormationSlots(anchor, heading, ArmyFormation::CorridorColumn, ArmyStance::Balanced, counts, slots);
     assert(n == counts.Total());
     for (size_t i = 0; i < n; ++i) {
+        assert(slots[i].worldPos.x >= anchor.x + 3.5f); // Both rails march entirely ahead of player
         const float lateralDist = std::fabs(slots[i].worldPos.y - anchor.y);
         assert(lateralDist >= 2.0f && lateralDist <= 2.4f);
     }

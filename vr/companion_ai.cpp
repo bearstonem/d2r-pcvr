@@ -43,18 +43,21 @@ const DataTableService* g_tables = nullptr;
 const ThreadService* g_threads = nullptr;
 ModeFn mode = nullptr;
 RelocateFn relocateFn = nullptr;
+RelocateFn originalRelocateUnit = nullptr;
 RoomPointFn roomPointFn = nullptr;
 CollisionMaskFn collisionMaskFn = nullptr;
 ServerMoveToCoordFn serverMoveToCoordFn = nullptr;
 ServerMoveUnitFn originalServerMoveUnit = nullptr;
 ServerStartMoveModeFn originalServerStartWalk = nullptr;
 ServerStartMoveModeFn originalServerStartRun = nullptr;
+std::atomic<bool> g_relocateHooked{false};
 std::atomic<bool> g_serverMoveHooked{false};
 std::atomic<bool> g_serverStartWalkHooked{false};
 std::atomic<bool> g_serverStartRunHooked{false};
 std::atomic<bool> g_nativeMoveBlockedWhileMoving{false};
 std::atomic<bool> g_pendingRegroupMove{false};
 thread_local bool g_inCommandedMove = false;
+thread_local bool g_inCommandedRelocate = false;
 
 std::atomic<bool> g_enabled{true};
 std::atomic<bool> g_installed{false};
@@ -587,6 +590,67 @@ bool ShouldAllowNativeMoveStruct(uintptr_t game, uintptr_t moveStruct) noexcept 
     return true;
 }
 
+int DetourRelocateUnit(uintptr_t game, uintptr_t unit, uintptr_t targetRoom, int x, int y, int unk1, int unk2) {
+    if (g_inCommandedRelocate || !g_enabled.load(std::memory_order_relaxed) || !unit) {
+        return originalRelocateUnit ? originalRelocateUnit(game, unit, targetRoom, x, y, unk1, unk2) : 1;
+    }
+
+    uint32_t header[4]{};
+    if (!Read(unit, header) || header[0] != 1) { // 1 = Monster / Pet / Hireling
+        return originalRelocateUnit ? originalRelocateUnit(game, unit, targetRoom, x, y, unk1, unk2) : 1;
+    }
+
+    const uint32_t unitId = header[2];
+    const uint32_t hirelingId = g_lastHirelingId.load(std::memory_order_relaxed);
+
+    // 1. Check summon army during Hold Ground (anchorActive)
+    if (unitId != hirelingId) {
+        bool isSummonAnchored = false;
+        {
+            AcquireSRWLockShared(&g_tacticalLock);
+            if (g_summonCoordinator.anchorActive && g_summonCoordinator.IsTrackedUnit(unitId)) {
+                isSummonAnchored = true;
+            }
+            ReleaseSRWLockShared(&g_tacticalLock);
+        }
+        if (isSummonAnchored) {
+            char line[180];
+            std::snprintf(line, sizeof line,
+                "Frame summon commander: DetourRelocateUnit suppressed native leash relocation for anchored summon %u to (%d, %d)",
+                unitId, x, y);
+            framevr::logging::Write(line);
+            return 1;
+        }
+        return originalRelocateUnit ? originalRelocateUnit(game, unit, targetRoom, x, y, unk1, unk2) : 1;
+    }
+
+    // 2. Check hireling during MoveAndHold / DefensiveHold
+    if (g_tacticalCommandsEnabled.load(std::memory_order_relaxed)) {
+        bool isHirelingHolding = false;
+        {
+            AcquireSRWLockShared(&g_tacticalLock);
+            if (g_tacticalOrderController.IsActive()) {
+                const auto ord = g_tacticalOrderController.GetOrder();
+                if (ord.type == framevr::companionai::TacticalOrderType::MoveAndHold ||
+                    ord.type == framevr::companionai::TacticalOrderType::DefensiveHold) {
+                    isHirelingHolding = true;
+                }
+            }
+            ReleaseSRWLockShared(&g_tacticalLock);
+        }
+        if (isHirelingHolding) {
+            char line[180];
+            std::snprintf(line, sizeof line,
+                "Frame companion AI: DetourRelocateUnit suppressed native leash relocation for hold hireling %u to (%d, %d)",
+                unitId, x, y);
+            framevr::logging::Write(line);
+            return 1;
+        }
+    }
+
+    return originalRelocateUnit ? originalRelocateUnit(game, unit, targetRoom, x, y, unk1, unk2) : 1;
+}
+
 int DetourServerStartWalk(uintptr_t game, uintptr_t moveStruct) {
     if (!ShouldAllowNativeMoveStruct(game, moveStruct)) {
         return 0;
@@ -827,6 +891,19 @@ void EnsureServerMoveInstalled() noexcept {
     if (!serverMoveToCoordFn && d2rsig::Check(abi::ServerMoveToCoordRva, abi::ServerMoveToCoordSig, sizeof(abi::ServerMoveToCoordSig))) {
         serverMoveToCoordFn = reinterpret_cast<ServerMoveToCoordFn>(d2rsig::Addr(abi::ServerMoveToCoordRva));
     }
+    if (!g_relocateHooked.load(std::memory_order_relaxed) &&
+        d2rsig::Check(abi::RelocateRva, abi::RelocateSig, sizeof(abi::RelocateSig))) {
+        if (d2rsig::Hook(
+                abi::RelocateRva,
+                abi::RelocateSig,
+                sizeof(abi::RelocateSig),
+                reinterpret_cast<void*>(&DetourRelocateUnit),
+                reinterpret_cast<void**>(&originalRelocateUnit))) {
+            g_relocateHooked.store(true, std::memory_order_relaxed);
+            relocateFn = originalRelocateUnit;
+            framevr::logging::Write("Frame companion AI: verified and hooked native RelocateUnit gatekeeper (0x491ca0)");
+        }
+    }
     if (!g_serverMoveHooked.load(std::memory_order_relaxed) &&
         d2rsig::Check(abi::ServerMoveUnitRva, abi::ServerMoveUnitSig, sizeof(abi::ServerMoveUnitSig))) {
         if (d2rsig::Hook(
@@ -977,6 +1054,25 @@ void StepSummonArmyServer(
     }
 
     if (isFreeRoam) {
+        bool doDisperse = false;
+        {
+            AcquireSRWLockExclusive(&g_tacticalLock);
+            doDisperse = g_summonCoordinator.pendingFallOutDispersal;
+            g_summonCoordinator.pendingFallOutDispersal = false;
+            ReleaseSRWLockExclusive(&g_tacticalLock);
+        }
+        if (doDisperse && validCount > 0) {
+            for (size_t i = 0; i < validCount; ++i) {
+                const float angle = float(i) * (6.28318530718f / float(validCount));
+                const float dist = 2.5f + float(i % 3) * 1.2f;
+                const int targetX = int(std::round(plyrPos.x + std::cos(angle) * dist));
+                const int targetY = int(std::round(plyrPos.y + std::sin(angle) * dist));
+                if (walkablePred(targetX, targetY)) {
+                    (void)DispatchServerMoveToCoord(game, unitPtrs[i], samples[i].pos, targetX, targetY);
+                }
+            }
+            framevr::logging::Write("Frame summon commander: dispatched fall-out dispersal wake-up to army");
+        }
         return;
     }
 
@@ -998,13 +1094,26 @@ void StepSummonArmyServer(
                 int rx = int(std::round(relocPos.x));
                 int ry = int(std::round(relocPos.y));
                 (void)framevr::commander::ResolveWalkableSlot(rx, ry, centerPos, rx, ry, walkablePred);
-                uintptr_t dstRoom = roomPointFn ? roomPointFn(playerRoom, rx, ry) : playerRoom;
-                if (!dstRoom) {
+                uintptr_t uPath = 0;
+                uintptr_t uRoom = 0;
+                if (Read(unitPtrs[i] + 0x38, uPath) && uPath) {
+                    (void)Read(uPath + 0x20, uRoom);
+                }
+                uintptr_t hintRoom = uRoom ? uRoom : playerRoom;
+                uintptr_t dstRoom = roomPointFn ? roomPointFn(hintRoom, rx, ry) : 0;
+                if (!dstRoom && roomPointFn) {
+                    dstRoom = roomPointFn(playerRoom, rx, ry);
+                }
+                if (!dstRoom && !anchorActive) {
                     dstRoom = playerRoom;
                     rx = int(std::round(plyrPos.x));
                     ry = int(std::round(plyrPos.y));
                 }
                 if (dstRoom) {
+                    struct CommandedRelocateScope {
+                        CommandedRelocateScope() noexcept { g_inCommandedRelocate = true; }
+                        ~CommandedRelocateScope() noexcept { g_inCommandedRelocate = false; }
+                    } scope;
                     relocateFn(game, unitPtrs[i], dstRoom, rx, ry, 1, 0);
                     g_unstuckEvents.fetch_add(1, std::memory_order_relaxed);
                     samples[i].pos = { float(rx), float(ry) };
@@ -1272,6 +1381,10 @@ void __cdecl CompanionGameThreadTick(const PluginContext*, void*) noexcept {
         }
 
         if (relocateFn && targetRoom) {
+            struct CommandedRelocateScope {
+                CommandedRelocateScope() noexcept { g_inCommandedRelocate = true; }
+                ~CommandedRelocateScope() noexcept { g_inCommandedRelocate = false; }
+            } scope;
             relocateFn(game, hireling, targetRoom, targetX, targetY, 1, 0);
             g_unstuckEvents.fetch_add(1, std::memory_order_relaxed);
             g_formationController.Reset();
@@ -1472,6 +1585,10 @@ void __cdecl CompanionGameThreadTick(const PluginContext*, void*) noexcept {
                 if (!regrouped && relocateFn && std::hypot(compPos.x - plyrPos.x, compPos.y - plyrPos.y) > 28.0f) {
                     uintptr_t targetRoom = roomPointFn ? roomPointFn(playerRoom, rx, ry) : playerRoom;
                     if (!targetRoom) targetRoom = playerRoom;
+                    struct CommandedRelocateScope {
+                        CommandedRelocateScope() noexcept { g_inCommandedRelocate = true; }
+                        ~CommandedRelocateScope() noexcept { g_inCommandedRelocate = false; }
+                    } scope;
                     relocateFn(game, hireling, targetRoom, rx, ry, 1, 0);
                 }
                 if (cancelReason == framevr::companionai::TacticalCommandCancelReason::ExplicitCancel) {
