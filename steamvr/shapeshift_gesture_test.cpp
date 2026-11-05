@@ -1,4 +1,5 @@
 #include "shapeshift_gesture.h"
+#include "spell_motion.h"
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -8,6 +9,8 @@ static void Check(bool b,const char* label){if(!b){std::fprintf(stderr,"FAIL: %s
 // the standing head. Each hand is {right, left}. The simulation walks the
 // controllers between keyframes at 50 Hz, so velocities come from motion.
 struct Sim {
+    // The motions' gate (spell_motion.h, owner 2026-11-04: "Both grips, like Sorceress"): gated, in.active is it.
+    bool gated=false;spellmotion::Gate gate;float grips[2]{};
     shapeshift::Engine g;shapeshift::Input in;shapeshift::Output out;
     math::Quat yaw{0,0,0,1};math::Vec standing{0,1.7f,0};
     int casts=0;shapeshift::Form last=shapeshift::Form::None;
@@ -32,7 +35,7 @@ struct Sim {
         }
     }
     void Hold(float seconds){for(int i=0;i<int(seconds/.02f);++i)Step();}
-    void Step(){in.time+=.02;out=g.Step(in);if(out.cast!=shapeshift::Form::None){++casts;last=out.cast;}}
+    void Step(){in.time+=.02;if(gated)in.active=gate.Step(grips,true).watch;out=g.Step(in);if(out.cast!=shapeshift::Form::None){++casts;last=out.cast;}}
     void Werewolf(float flingSeconds=.25f) {
         Move({0,0,0},0,{{-.12f,-.25f,-.22f},{.12f,-.27f,-.20f}},.4f);   // cross arms: right hand on the left side
         Hold(.2f);
@@ -48,6 +51,11 @@ struct Sim {
     }
 };
 int main(){
+    {   // Under the motions' gate (both grips, owner 2026-11-04): free hands, as before, no longer change form.
+        Sim none;none.gated=true;none.Werewolf();Check(none.casts==0,"gated, free hands no longer shift");
+        Sim wolf;wolf.gated=true;wolf.grips[0]=wolf.grips[1]=1;wolf.Werewolf();Check(wolf.casts==1&&wolf.last==shapeshift::Form::Werewolf,"gated, both grips held: Werewolf");
+        Sim bear;bear.gated=true;bear.grips[0]=bear.grips[1]=1;bear.Werebear();Check(bear.casts==1&&bear.last==shapeshift::Form::Werebear,"gated, both grips held: Werebear");
+    }
     for(float heading:{-2.f,0.f,2.f}) {
         Sim s(heading);s.Werewolf();
         Check(s.casts==1&&s.last==shapeshift::Form::Werewolf,"crossed arms, bow and wrench open casts Werewolf at any heading");

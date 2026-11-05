@@ -2109,9 +2109,10 @@ Arrow/spell live verification remains open.
 
 ### Druid shapeshift gestures
 
-A Druid changes form by performing the transformation, in either melee rules
-mode, while **VR Settings > Combat > Skills on your moves** is on (as the other
-gesture skills):
+A Druid changes form by performing the transformation with both grips held, in
+either melee rules mode, while **VR Settings > Combat > Skills on your moves** is
+on (as the other gesture skills; the motions' gate since 2026-11-04, see Motions
+under Glyph casting):
 
 - **Werewolf:** cross both arms over your chest (each hand on the opposite side),
   bow forward over them, then wrench upright while flinging both arms up and
@@ -2119,63 +2120,67 @@ gesture skills):
 - **Werebear:** hold both hands above your head for a moment, then slam them
   down together to waist height or lower.
 
-The gesture presses the controller button the shape skill is assigned to, so the
-skill must be on one of the ten slots; the native cast, mana, cooldown and the
-transformation itself stay native. Performing the gesture again while
+The gesture presses the controller button the shape skill is assigned to, or on
+no button casts through the right trigger's record; the native cast, mana,
+cooldown and the transformation itself stay native. Each form has its card on
+the Druid's MOTIONS page. Performing the gesture again while
 transformed casts the skill again, which returns you to human form; a 1.5 s
 cooldown after each cast stops one sloppy performance from casting twice. A
 performance is ignored while a hand is busy (trigger squeezed, bottle held, bow
-drawn, face wipe), while menus or the wheel are open, and without the skill on a
-button (the log says which skill was not assigned). Both controllers pulse once
+drawn, face wipe), while menus or the wheel are open, without both grips held,
+and with its card off. Both controllers pulse once
 when the cast is issued. Thresholds live in `shapeshift::Tuning`
 (`steamvr/shapeshift_gesture.h`); `shapeshift-gesture-test` walks both
 performances, lazy and partial versions, loot stooping and overhead swings.
 The skill picker and the hand wheel tag Werewolf and Werebear GESTURE on any
-slot, and the hand cue reads "Cross, bow, fling open" / "Hands high, slam
+slot, and the hand cue reads "Both grips, bow, fling" / "Both grips, slam
 down" while Weapon skill gestures is on.
 
 ### Paladin Blessed Hammer fist pump
 
-A Paladin casts Blessed Hammer by punching a fist up to the sky, while
-**VR Settings > Combat > Skills on your moves** is on:
+A Paladin casts Blessed Hammer by punching a fist up to the sky with both grips
+held (the motions' gate since 2026-11-04), while **VR Settings > Combat > Skills
+on your moves** is on:
 
-- Make a fist (hold the grip, trigger free) with either hand somewhere below
-  your head, then punch it straight up so it ends above your head.
+- Hold both grips (triggers free) and, with either fist somewhere below your
+  head, punch it straight up so it ends above your head.
 - One pump casts one hammer. Bring the fist back down below your head to load
   the next pump; a fist held up high never repeats.
 - The punch counts from where it began (the bottom of the wind-up), so an
   ordinary accelerating punch from the shoulder or hip qualifies: at least
   25 cm of rise, ending above your head.
 - The skill picker and the hand wheel tag Blessed Hammer GESTURE on any slot
-  ("Punch up to cast").
+  ("Both grips, punch up").
 
-The pump presses the controller button Blessed Hammer is assigned to, so the
-skill must be on one of the ten slots (the trigger still casts it as before);
+The pump presses the controller button Blessed Hammer is assigned to, or on no
+button casts through the right trigger's record (the trigger still casts it as
+before); pumps never wait the motions' second;
 mana, cast rate and the hammer's spiral stay native, and a pump faster than the
 game's cast rate is a press the game ignores, as with the button. The hammer's
 heading comes from the usual aim rules (the outlined monster, else where you
 point or look). A pump is ignored while that hand is busy (trigger squeezed,
 bottle or other held item, bow drawn, face wipe) and while menus or the wheel
 are open. The punching hand gets a short pulse when the cast is issued. The log
-(`Frame hammer:`) has the first cast and a running count every 25, a line for
-each abandoned punch (why), and a line when the skill is unavailable.
+has a `Frame spell motion:` line per cast and `Frame hammer:` lines for each
+abandoned punch (why) and when the skill is unavailable.
 Thresholds live in `hammerpump::Tuning` (`steamvr/hammer_gesture.h`);
 `hammer-gesture-test` covers both hands, holding high, re-loading, open hands,
 slow raises, stalled and forward punches.
 
 ### Paladin Charge punch
 
-A Paladin casts Charge by punching straight out with the weapon hand, while
-**VR Settings > Combat > Skills on your moves** is on:
+A Paladin casts Charge by punching straight out with the weapon hand with both
+grips held (the motions' gate since 2026-11-04), while **VR Settings > Combat >
+Skills on your moves** is on:
 
-- Make a fist with the weapon hand (hold the grip, trigger free), drawn back
-  near your body, then punch it straight out ahead, extending the arm.
+- Hold both grips (triggers free), draw the weapon-hand fist back near your
+  body, then punch it straight out ahead, extending the arm.
 - One punch casts once. Draw the fist back in to load the next; an arm held
   out never repeats.
 - The punch counts from the most drawn-back point, so an ordinary accelerating
   punch qualifies: at least 20 cm of travel, ending with the arm extended.
-- The skill picker and the hand wheel tag Charge GESTURE on any slot ("Punch
-  out to charge").
+- The skill picker and the hand wheel tag Charge GESTURE on any slot ("Both
+  grips, punch out").
 - Physical melee contacts pause while a Charge is in flight (however it was
   cast), from the press until the hero leaves the rush (mode 18, at most 4 s).
   A swing or the punch itself touching a monster mid-rush used to land a basic
@@ -2183,53 +2188,56 @@ A Paladin casts Charge by punching straight out with the weapon hand, while
   has one `Frame charge: melee contacts held N ms during the charge` line per
   Charge.
 
-The punch presses the controller button Charge is assigned to (the skill must be
-on one of the ten slots; the trigger still casts it as before). The aim rules
+The punch presses the controller button Charge is assigned to, or on no button
+casts through the right trigger's record, the right hand's cast for the aim (the
+trigger still casts it as before). The aim rules
 hand Charge the monster the weapon hand points at, else the spot it points to;
 the rush, mana and hit stay native. "Extended" scales with the calibrated arm
 span (28 % of it, 0.38-0.60 m ahead of the head; 0.45 m without calibration).
 The weapon hand is the right hand. A punch is ignored while that hand is busy
 (trigger squeezed, bottle or other held item, bow drawn, face wipe) and while
 menus or the wheel are open. The weapon hand gets a short pulse when the cast
-is issued. The log (`Frame charge:`) has the first cast and a running count
-every 25, a line for each abandoned punch (why), and a line when the skill is
-unavailable. Thresholds live in `chargepunch::Tuning`
+is issued. The log has a `Frame spell motion:` line per cast and `Frame charge:`
+lines for each abandoned punch (why) and when the skill is unavailable. Thresholds live in `chargepunch::Tuning`
 (`steamvr/charge_gesture.h`); `charge-gesture-test` covers headings, holding
 out, re-loading, open and busy hands, slow reaches, half punches, the hammer's
 upward punch, chops, slashes, jabs from an extended arm, and arm-span scaling.
 
 ### Paladin Holy Shield sign of the cross
 
-A Paladin casts Holy Shield by making the sign of the cross, while **VR
-Settings > VR > Weapon skill gestures** is on:
+A Paladin casts Holy Shield by making the sign of the cross with both grips held
+(the motions' gate since 2026-11-04), while **VR Settings > VR > Weapon skill
+gestures** is on:
 
-- With either hand, trigger free, touch your forehead, then your chest, then
-  one shoulder and the other (left then right, or right then left).
+- Holding both grips (triggers free), with either hand touch your forehead, then
+  your chest, then one shoulder and the other (left then right, or right then
+  left).
 - Each touch is a brief pause: the hand slows below 1 m/s inside the spot.
   A swing through the same places never counts, nor does a face wipe.
 - Up to 1 s between touches; one sign casts once, with a 1.5 s cooldown.
 
-The sign presses the controller button Holy Shield is assigned to (the skill
-must be on one of the ten slots; pressing still casts it). Mana, duration and
+The sign presses the controller button Holy Shield is assigned to, or on no
+button casts through the right trigger's record (pressing still casts it). Mana, duration and
 the shield's glow stay native. The spots are head-relative boxes in
 `holycross::Tuning` (`steamvr/cross_gesture.h`); `cross-gesture-test` covers
 both shoulder orders, either hand, a flowing sign, the cooldown, wrong orders,
 a face wipe, fast swings through the spots and a session reset. The skill
-picker tags Holy Shield GESTURE on any slot ("Sign of the cross"). The log
-(`Frame holy shield:`) has a line per cast, per sign abandoned after the chest
-touch, and when the skill is unavailable.
+picker tags Holy Shield GESTURE on any slot ("Both grips, sign a cross"). The log
+has a `Frame spell motion:` line per cast and `Frame holy shield:` lines per sign
+abandoned after the chest touch and when the skill is unavailable.
 
 ### Paladin Fist of the Heavens call
 
-A Paladin calls Fist of the Heavens with the weapon (right) arm, while **VR
-Settings > VR > Weapon skill gestures** is on:
+A Paladin calls Fist of the Heavens with the weapon (right) arm with both grips
+held (the motions' gate since 2026-11-04), while **VR Settings > VR > Weapon
+skill gestures** is on:
 
-- Make a fist (hold the grip, trigger free) and hold the arm straight out in
+- Hold both grips (triggers free) and hold the weapon arm straight out in
   front, raised about 45 degrees: the fist a little above your forehead. No
   need to rest there: reaching the pose loads the call.
 - Bring the straight arm down, pivoting at the shoulder, and stop it about level
-  with your shoulder. The stop casts, or opening the fist at the end of the
-  swing.
+  with your shoulder. The stop casts, or opening the fists at the end of the
+  swing (the gate watches the frame the grips open).
 - The bolt falls on the monster the arm points at (the hands' 30-degree cone,
   within the game's reach), whatever the Aim options; with none there, the
   nearest monster in sight within 75 degrees of the arm; with none of those,
@@ -2247,16 +2255,17 @@ reaching 0.9 m/s, and stop between 14 degrees above and 55 below level (slower t
 for 40 ms), or open the fist there once it has. Where a call ends varies by player: Cal's
 stopped near -25, the owner's at -36..-47 (2026-11-01). Carrying on past 65 degrees below
 level is a chop, and a bent elbow drops it. One call casts once; raise the arm again for the next. The
-call presses the slot the skill is on; mana, cast rate and the bolt stay
-native, and pressing the slot still casts it. While the skill is on a slot the
-monster scan runs (vrcam answers the call: `HeavensRequest` /
-`HeavensResolved`, then the slot is pressed, at most 120 ms later), and the
+call presses the slot the skill is on, or on no button casts through the right
+trigger's record; mana, cast rate and the bolt stay native, and pressing the slot
+still casts it. While the skill is learned and its card on, the monster scan runs
+(vrcam answers the call: `HeavensRequest` / `HeavensResolved`, then the slot or
+the record is pressed, at most 120 ms later), and the
 pointed monster is handed to the game's target query for 500 ms (`RulesUnit`).
 Thresholds: `heavensfist::Tuning` (`steamvr/heavens_gesture.h`);
 `heavens-gesture-test`. Logs: `Frame heavens:` (the first casts, every 25th,
 any cast without an answer, abandoned calls with their angles) and
 `Frame heavens aim:` (per call: handed or the game's pick). The skill picker
-tags it GESTURE ("Raise, bring down").
+tags it GESTURE ("Both grips, raise, drop").
 
 ### Glyph casting
 
@@ -2307,7 +2316,7 @@ gives a hand button that record).
 Motions (`steamvr/spell_motion.h`; owner, 2026-11-03). With **Weapon skill gestures** on, every
 Sorceress spell that has a motion casts by it while both grips are held, both triggers free: no
 button or glyph needed. The wheel's MOTIONS page (the box at the lower right of the Spells and
-Equipment pages, a Sorceress's only) lists them with how to do each, and a press on one turns its
+Equipment pages; each class with motions has its own, below) lists them with how to do each, and a press on one turns its
 motion on or off (`[motions] off`, one bit each, `spellmotion::Bit`; 0, all on); a spell with no
 points shows dimmed. A motion that is off still casts from a button its spell is on. One watcher
 per motion that is on and learned, active only while both grips are held (held above 0.6, let go
@@ -2316,6 +2325,21 @@ bow, wheel or menu has the hands. The first to complete casts as a glyph does: t
 when it is on one, else the right-trigger record (put there first; about 25 ms in the owner's
 session). Static Field before Nova (its snap apart is as wide as a fling); then all of them wait a
 second, still held or not. Grips let go after 0.3 s without a cast log what the hands did.
+
+Every class with motions (owner, 2026-11-04: "Both grips, like Sorceress"). The Paladin's gestures
+(Charge, Blessed Hammer, Holy Shield, Fist of the Heavens) and the Druid's (Werewolf, Werebear) take
+the same gate (`spellmotion::Gate`: both grips held, the hands free, Weapon skill gestures on) and
+their own MOTIONS page (the same box, `spellmotion::PageOf`; `[motions] paladin_off` and
+`[motions] druid_off`, one bit a card; the Sorceress's `[motions] off` keeps her bits). Each gesture
+keeps its own detector and tuning; one grip, or none, no longer casts any of them. They watch the
+frame the grips open as well (`Gate::State::watch`), so Fist of the Heavens still ends on the fists
+opening. No button needed: on a slot the gesture presses it as before, else it casts through the right
+trigger's record (Fist of the Heavens after its monster hand-off; Charge's melee contacts held as for
+the slot). Then every motion waits a second, except Blessed Hammer's pumps (one hammer a punch, as fast
+as the cast rate, and they never start the wait). Each cast logs one `Frame spell motion:` line.
+Tests: `spell-motion-test` (the pages, the gate), each gesture's test (gated: one grip or none never
+casts, both do), `interaction-test` (the Paladin's and the Druid's pages; no box for the others),
+`interaction-motions-test` (the Paladin's page drawn).
 
 Both grips never grab: a grip takes a belt bottle, a holster, the shoulder swap or the
 over-the-shoulder menu only alone, held 0.1 s with the other free (`spellmotion::SoloGrips`), and
