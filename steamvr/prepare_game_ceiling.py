@@ -214,8 +214,8 @@ def median(tops):
 
 
 def format_measures(walls):
-    s = ("# D2R VR - the game's rooms measured from its own models by D2R_VR_Settings "
-         "([ceiling] height_from_walls, game_ceiling_beams, game_ceiling_dome)\n")
+    s = ("# D2R VR Unleashed - the game's rooms measured from its own models by the installer "
+         "([ceiling] height_from_walls)\n")   # (shared/ceiling_measures.h Format's first line)
     s += f'version {MEASURES_VERSION}\n'
     for biome, h in walls:
         s += f'walls {biome} {h:.2f}\n'
