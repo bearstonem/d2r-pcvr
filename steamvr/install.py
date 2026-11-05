@@ -24,6 +24,7 @@ from prepare_leather import prepare as prepare_leather, FILES as LEATHER_FILES
 import prepare_arcane_sky
 import prepare_sewer_backdrop
 import prepare_kurast_dock
+import prepare_game_ceiling
 from game_install import validate_game
 import mod_identity
 
@@ -552,6 +553,14 @@ def main():
     else:
         payload.update({mod_identity.MOD_DIR / name: data for name, data in docktown.items()})
         print('Prepared Kurast Docks preset (removed flying canoe) from your installed game.')
+    try:
+        ceilings = prepare_game_ceiling.prepare(game, casclib=args.casclib)
+        prepare_game_ceiling.check_existing(game / mod_identity.MOD_DIR, ceilings)
+    except (OSError, ValueError, KeyError, IndexError) as error:
+        print(f'Game-drawn dungeon ceilings unavailable; the shader ceiling stays: {error}')
+    else:
+        payload.update({mod_identity.MOD_DIR / name: data for name, data in ceilings.items()})
+        print('Prepared the dungeon ceilings the game draws, from your installed game.')
     require_game_closed()
     check_launcher_icon(game, payload[mod_identity.MOD_DIR / 'launcher_icon.png'])
     snapshot = args.backup_dir / datetime.now().strftime('%Y%m%d-%H%M%S-%f')
