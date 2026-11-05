@@ -1,7 +1,9 @@
 # Game-drawn dungeon ceilings
 
-Status: candidate, not yet seen in a headset. Adapted from `natpoh/diablo2-vr-port`
-at `91cb1e85466c730652eecb665f5355e92b56d1dc` (MIT; see [THIRD_PARTY.md](../THIRD_PARTY.md)).
+Status: candidate. The owner played it in Act I's caves on 2026-11-05 (Steam
+3.3.94995) and found it works well; the other kinds still need a headset look.
+Adapted MIT code: the source, its notice and the ported files are in
+[THIRD_PARTY.md](../THIRD_PARTY.md).
 
 In VR first person (F4) a dungeon's ceiling is a model the game draws itself: the
 area's own rock, stone or beams, lit by the game's torches, fires and spells and
@@ -73,5 +75,10 @@ unit without exactly one root leaves that kind to the shader, and the log says w
   `shared/game_ceiling.h`.
 - A read-only run against Steam 3.3.94995 made all 15 kinds (110 files, 21.5 MB);
   every model re-parses and every unit is valid JSON.
-- Still needed in a headset: each kind's look and height, torchlight on the rock,
-  leaving a game and starting another, and the log's hook lines on 3.3.94995.
+- Headset, 2026-11-05, Steam 3.3.94995, pcvr-dev: both hooks went in and every
+  function checked out; the cave ceiling loaded, was placed and shown (its top
+  23 units over the floor, from `height_act1_caves`), was put away when not
+  wanted and shown again; leaving the game removed the placed instance
+  and let its definition go, and the game exited cleanly.
+- Still needed in a headset: the other 14 kinds' look and height, torchlight on
+  the rock, and starting a second game after leaving one.
