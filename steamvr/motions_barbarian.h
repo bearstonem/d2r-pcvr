@@ -13,6 +13,10 @@
 // Leap goes to a spot ahead, the way the arms swung (Engine::Aim); Find Item's corpse is where the right
 // hand points, so it leaves the aim to the hand's own ray. The controllers' palms and fingers are not
 // known, and both grips are held throughout: every motion is the hands' positions only.
+//
+// Find Item reached down to the floor and rested there until a tester's first pass (2026-11-05: "Find Item
+// never worked for me. Also, we're all getting old man... Please no floor stuff"): now the right hand is
+// held out at the corpse a moment, then snatched back to the shoulder, quick, with nothing low.
 namespace framevr::spellmotion::barbarian {
 struct Tuning {
     // The mouth (a fist at it: the controller just in front): |x| <= mouthSide, y in [mouthLow, mouthHigh],
@@ -48,11 +52,13 @@ struct Tuning {
     // eyes by leapAbove, at least leapApart apart (not a two-handed grip), risen leapRise within leapWindow s.
     float backLow=-.50f,backBehind=-.08f,leapAbove=.10f,leapApart=.22f,leapRise=.60f;double leapWindow=.6;
     float swingSpeed=1.5f;    // m/s: the leap's swing, each arm at its fastest
-    // Find Item: the right hand rests low (y at most reachLow, forward at least reachFront, the left hand
-    // findApart or more from it) after coming down no faster than reachSpeed, then lifts findLift to above
-    // findUp within findWindow s.
-    float reachLow=-1.0f,reachFront=-.15f,findApart=.30f,reachSpeed=2.5f,findLift=.35f,findUp=-.80f;double findWindow=.8;
-    float liftSpeed=.9f;      // m/s: the lift at its fastest
+    // Find Item: the right hand held out at the corpse (pointOut ahead or more, y in [pointLow, pointHigh],
+    // |x| at most pointSide), resting dwellSeconds, then snatched back to the right shoulder (forward at most
+    // snatchTo, y in [shoulderMin, shoulderMax], x in [shoulderIn, shoulderOut]), snatchBack or more toward
+    // the eyes within snatchWindow s, at snatchSpeed or faster at its fastest.
+    float pointOut=.30f,pointLow=-.75f,pointHigh=-.05f,pointSide=.45f;
+    float snatchTo=.15f,snatchBack=.22f,shoulderMin=-.30f,shoulderMax=.10f,shoulderIn=.08f,shoulderOut=.42f,snatchSpeed=1.0f;
+    double snatchWindow=.45;
 };
 inline Tuning tuning;
 // The order they are watched in: the first to complete in a frame casts. Shout before War Cry (both hands
@@ -69,7 +75,7 @@ inline const char* Cue(Motion m) {
     case Motion::Howl:return "fling both arms wide from the chest";
     case Motion::BattleCry:return "both fists up by the shoulders, pulled down hard to the hips";
     case Motion::Leap:return "swing both arms down behind, then up past the head, fast, as for a jump";
-    case Motion::FindItem:return "reach the right hand down toward the floor, rest it there a moment, then lift it";
+    case Motion::FindItem:return "hold the right hand out at a corpse a moment, then snatch it back to the shoulder";
     default:return "no motion";
     }
 }
@@ -120,37 +126,44 @@ inline bool Done(Engine& e,Motion m) {
     const auto& r=n.l[0];const auto& l=n.l[1];
     switch(m) {
     case Motion::BattleOrders: {
-        if(r.y<t.ordersAbove||std::fabs(r.x)>.35f||Forward(r)<-.25f||Forward(r)>.45f||l.y>t.otherBelow)return false;
+        const bool end=r.y>=t.ordersAbove&&std::fabs(r.x)<=.35f&&Forward(r)>=-.25f&&Forward(r)<=.45f&&l.y<=t.otherBelow;
         return AfterDwell(h,t.thrustWindow+t.dwellSeconds,t.dwellSeconds,1,[&](const Sample& s){return AtMouth(s.l[0],t.mouthSide);},[&](int i) {
             const auto a=h[size_t(i)].l[0];
+            if(n.t-h[size_t(i)].t>t.thrustWindow)return false;
             const float rise=r.y-a.y,across=std::hypot(r.x-a.x,r.z-a.z);
-            return n.t-h[size_t(i)].t<=t.thrustWindow&&rise>=t.ordersRise&&rise>=1.2f*across&&Peak(h,i,1)>=t.thrustSpeed;
+            e.Toward(rise/t.ordersRise);   // at the mouth, then warmer as it rises
+            return end&&rise>=t.ordersRise&&rise>=1.2f*across&&Peak(h,i,1)>=t.thrustSpeed;
         });
     }
     case Motion::WarCry: {
-        if(Forward(r)<t.cryReach||r.y<-.85f)return false;
+        const bool end=Forward(r)>=t.cryReach&&r.y>=-.85f;
         return AfterDwell(h,t.thrustWindow+t.dwellSeconds,t.dwellSeconds,1,
             [&](const Sample& s){return AtMouth(s.l[0],t.mouthSide)&&Len(s.l[1]-math::Vec{0,-.12f,-.16f})>=t.otherAway;},[&](int i) {
             const auto a=h[size_t(i)].l[0];
+            if(n.t-h[size_t(i)].t>t.thrustWindow)return false;
             const float travel=Forward(r)-Forward(a),drop=a.y-r.y;
-            return n.t-h[size_t(i)].t<=t.thrustWindow&&travel>=t.cryTravel&&drop>=t.cryDrop&&drop<=1.5f*travel&&std::fabs(r.x-a.x)<=travel&&
+            e.Toward(travel/t.cryTravel);
+            return end&&travel>=t.cryTravel&&drop>=t.cryDrop&&drop<=1.5f*travel&&std::fabs(r.x-a.x)<=travel&&
                 Peak(h,i,1)>=t.thrustSpeed;
         });
     }
     case Motion::Shout: {
-        if(Forward(r)<t.cryReach||Forward(l)<t.cryReach||Len(r-l)>t.shoutEndApart)return false;
+        const bool end=Forward(r)>=t.cryReach&&Forward(l)>=t.cryReach&&Len(r-l)<=t.shoutEndApart;
         return AfterDwell(h,t.thrustWindow+t.dwellSeconds,t.dwellSeconds,3,
             [&](const Sample& s){return AtMouth(s.l[0],t.shoutSide)&&AtMouth(s.l[1],t.shoutSide)&&Len(s.l[0]-s.l[1])<=t.shoutApart;},[&](int i) {
             const auto& a=h[size_t(i)];
             if(n.t-a.t>t.thrustWindow)return false;
+            float least=1e9f;bool level=true;
             for(int k=0;k<2;++k){const auto& c=n.l[k];const auto& b=a.l[k];
-                if(Forward(c)-Forward(b)<t.cryTravel||std::fabs(c.y-b.y)>t.shoutLevel)return false;}
-            return Peak(h,i,3)>=t.thrustSpeed;
+                least=std::min(least,Forward(c)-Forward(b));level=level&&std::fabs(c.y-b.y)<=t.shoutLevel;}
+            e.Toward(least/t.cryTravel);
+            return end&&level&&least>=t.cryTravel&&Peak(h,i,3)>=t.thrustSpeed;
         });
     }
     case Motion::BattleCommand: {
         // scratch: 0 out since the last beat, 1 the last beat's time, 2 beats, 3 the first beat's time
         auto& s=e.scratch;
+        if(s[2]>=1&&n.t-s[3]<=t.beatWindow)e.Toward(.5f);   // a beat: one more to come
         const bool box=r.x>=t.chestLeft&&r.x<=t.chestRight&&r.y>=t.chestLow&&r.y<=t.chestHigh&&Forward(r)>=-.20f;
         const bool in=box&&Forward(r)<=t.chestIn,out=!box||Forward(r)>=t.chestOut;
         if(out)s[0]=1;
@@ -162,19 +175,21 @@ inline bool Done(Engine& e,Motion m) {
         return ++s[2]>=2;
     }
     case Motion::Howl: {
-        if(r.x<t.howlSide||l.x>-t.howlSide||Len(r-l)<t.howlApart||r.y<t.howlLow||l.y<t.howlLow)return false;
+        const bool end=r.x>=t.howlSide&&l.x<=-t.howlSide&&Len(r-l)>=t.howlApart&&r.y>=t.howlLow&&l.y>=t.howlLow;
         for(size_t i=0;i<h.size();++i) {
             const auto& s=h[i];
             if(n.t-s.t>t.howlWindow)continue;
             bool chest=Len(s.l[0]-s.l[1])<=t.howlTogether;
             for(int k=0;k<2;++k){const auto& c=s.l[k];chest=chest&&std::fabs(c.x)<=.22f&&c.y>=-.62f&&c.y<=-.18f&&Forward(c)>=-.10f&&Forward(c)<=.35f;}
-            if(chest&&Peak(h,int(i),1)>=t.flingSpeed&&Peak(h,int(i),2)>=t.flingSpeed)return true;
+            if(!chest)continue;
+            e.Toward((Len(r-l)-t.howlTogether)/(t.howlApart-t.howlTogether));
+            if(end&&Peak(h,int(i),1)>=t.flingSpeed&&Peak(h,int(i),2)>=t.flingSpeed)return true;
         }
         return false;
     }
     case Motion::BattleCry: {
-        if(r.y>t.hipBelow||l.y>t.hipBelow||r.x<0||l.x>0)return false;
-        for(int k=0;k<2;++k)if(Forward(n.l[k])<-.12f||Forward(n.l[k])>.35f)return false;
+        bool end=r.y<=t.hipBelow&&l.y<=t.hipBelow&&r.x>=0&&l.x<=0;
+        for(int k=0;k<2;++k)end=end&&Forward(n.l[k])>=-.12f&&Forward(n.l[k])<=.35f;
         for(size_t i=0;i<h.size();++i) {
             const auto& s=h[i];
             if(n.t-s.t>t.cryWindow)continue;
@@ -182,18 +197,21 @@ inline bool Done(Engine& e,Motion m) {
             const bool up=a.x>=t.cryFistIn&&a.x<=t.cryFistOut&&-b.x>=t.cryFistIn&&-b.x<=t.cryFistOut&&
                 a.y>=t.shoulderLow&&a.y<=t.shoulderHigh&&b.y>=t.shoulderLow&&b.y<=t.shoulderHigh&&
                 Forward(a)>=-.15f&&Forward(a)<=.30f&&Forward(b)>=-.15f&&Forward(b)<=.30f&&Len(a-b)>=t.fistsApart;
-            if(up&&a.y-r.y>=t.cryFall&&b.y-l.y>=t.cryFall&&Peak(h,int(i),1)>=t.flingSpeed&&Peak(h,int(i),2)>=t.flingSpeed)return true;
+            if(!up)continue;
+            e.Toward(std::min(a.y-r.y,b.y-l.y)/t.cryFall);
+            if(end&&a.y-r.y>=t.cryFall&&b.y-l.y>=t.cryFall&&Peak(h,int(i),1)>=t.flingSpeed&&Peak(h,int(i),2)>=t.flingSpeed)return true;
         }
         return false;
     }
     case Motion::Leap: {
-        if(r.y<t.leapAbove||l.y<t.leapAbove||Len(r-l)<t.leapApart||Forward(r)<-.20f||Forward(l)<-.20f)return false;
+        const bool end=r.y>=t.leapAbove&&l.y>=t.leapAbove&&Len(r-l)>=t.leapApart&&Forward(r)>=-.20f&&Forward(l)>=-.20f;
         for(size_t i=0;i<h.size();++i) {
             const auto& s=h[i];
             if(n.t-s.t>t.leapWindow)continue;
             const auto& a=s.l[0];const auto& b=s.l[1];
             if(a.y>t.backLow||b.y>t.backLow||Forward(a)>t.backBehind||Forward(b)>t.backBehind)continue;
-            if(r.y-a.y<t.leapRise||l.y-b.y<t.leapRise||Peak(h,int(i),1)<t.swingSpeed||Peak(h,int(i),2)<t.swingSpeed)continue;
+            e.Toward(std::min(r.y-a.y,l.y-b.y)/t.leapRise);
+            if(!end||r.y-a.y<t.leapRise||l.y-b.y<t.leapRise||Peak(h,int(i),1)<t.swingSpeed||Peak(h,int(i),2)<t.swingSpeed)continue;
             // the way the arms swung, level; straight ahead if they swung straight up
             math::Vec way=((r-a)+(l-b))*.5f;way.y=0;
             if(Forward(way)<.05f)way={0,0,-1};
@@ -203,20 +221,15 @@ inline bool Done(Engine& e,Motion m) {
         return false;
     }
     case Motion::FindItem: {
-        return AfterDwell(h,t.findWindow+t.dwellSeconds,t.dwellSeconds,1,
-            [&](const Sample& s){return s.l[0].y<=t.reachLow&&Forward(s.l[0])>=t.reachFront&&Len(s.l[0]-s.l[1])>=t.findApart;},[&](int i) {
-            const auto& low=h[size_t(i)];
-            if(n.t-low.t>t.findWindow||r.y-low.l[0].y<t.findLift||r.y<t.findUp||Peak(h,i,1)<t.liftSpeed)return false;
-            // came down reaching, not a swing that ends low: no faster than reachSpeed in the .35 s before
-            double start=low.t;
-            for(int j=i;j>=0&&low.t-h[size_t(j)].t<t.dwellSeconds;--j)start=h[size_t(j)].t;
-            for(size_t j=1;j<h.size();++j) {
-                const double at=h[j].t;
-                if(at>start||start-at>.35)continue;
-                const double dt=at-h[j-1].t;
-                if(dt>1e-4&&Len(h[j].l[0]-h[j-1].l[0])/float(dt)>t.reachSpeed)return false;
-            }
-            return true;
+        // the right hand held out at the corpse a moment (its ray aims the cast), then snatched back to the shoulder
+        const bool end=Forward(r)<=t.snatchTo&&Forward(r)>=-.15f&&r.y>=t.shoulderMin&&r.y<=t.shoulderMax&&r.x>=t.shoulderIn&&r.x<=t.shoulderOut;
+        return AfterDwell(h,t.snatchWindow+t.dwellSeconds,t.dwellSeconds,1,[&](const Sample& s) {
+            const auto& p=s.l[0];return Forward(p)>=t.pointOut&&p.y>=t.pointLow&&p.y<=t.pointHigh&&std::fabs(p.x)<=t.pointSide;},[&](int i) {
+            const auto a=h[size_t(i)].l[0];
+            if(n.t-h[size_t(i)].t>t.snatchWindow)return false;
+            const float back=Forward(a)-Forward(r);
+            e.Toward(back/std::max(t.snatchBack,Forward(a)-t.snatchTo));
+            return end&&back>=t.snatchBack&&Peak(h,i,1)>=t.snatchSpeed;
         });
     }
     default:return false;

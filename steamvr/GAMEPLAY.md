@@ -2351,31 +2351,59 @@ through `spellmotion::ClassDone`/`ClassCue`), and each class has its own MOTIONS
 controllers give positions only, so a fist, a palm or an open hand in the table became a path of the
 hand, and the cards say so. A family's card casts the strongest skill of it learned
 (`spellmotion::CastSkillOf`): the golems' (Fire, then Blood, then Clay; Iron Golem takes an item and
-stays on its button), and Shadow Warrior's (Shadow Master once learned). A cast that goes to a spot
-aims along the motion (Decoy, Valkyrie, Leap, Golem ahead, Shadow Warrior to the side pushed); one
-that takes a monster or a corpse leaves the aim to the right hand's own ray, so the motion ends with
-it pointing there.
+stays on its button), and Shadow Warrior's (Shadow Master once learned). A cast that goes somewhere
+aims along the motion (Leap, Shadow Warrior to the side pushed); a summon stands on a spot of its own,
+sent as the cast's point (`spellmotion::Land`, the transport's `SpotCell` and `PointedCell`, vrcam
+`MotionAim`): Decoy 3 cells ahead and 6 to the side pushed, the golems 4 cells ahead, the Valkyrie
+where the right hand's pointer meets the floor (14 cells along it when it points level or up),
+logged as "Frame spell motion: <skill> on its spot" or "where the right hand points". One that takes
+a monster or a corpse leaves the aim to the right hand's own ray, so the motion ends with it pointing
+there.
 
 - Amazon: Inner Sight, one hand at the brow, then swept out forward; Slow Missiles, the right hand
-  pushed straight out from the chest and held; Decoy, both hands from the chest swept together to one
-  side; Valkyrie, the right fist raised high, then brought down to point where she lands.
+  pushed straight out (chest to eye level) and stopped there a moment, like "halt!"; Decoy, both hands
+  from the chest pushed together to one side; Valkyrie, the right fist raised high, then brought down
+  to point at the floor where she lands.
 - Barbarian: Battle Orders, the right fist at the mouth a moment, then thrust straight up; War Cry,
   the same, thrust forward and down; Shout, both fists at the mouth, pushed out forward together;
   Battle Command, the right fist beaten on the chest twice; Howl, both arms flung wide from the chest;
   Battle Cry, both fists at the shoulders pulled hard to the hips; Leap, both arms swung down behind
-  then up past the head, fast (arms only, so seated too); Find Item, the right hand rested low by the
-  floor, then lifted.
+  then up past the head, fast (arms only, so seated too); Find Item, the right hand held out at the
+  corpse a moment, then snatched back to the shoulder.
 - Necromancer: Bone Armor, both fists crossed on the chest, held; Raise Skeleton, both hands lifted
-  slowly from the hips to the chest; Corpse Explosion, the right hand held out at a corpse, then jabbed
-  forward; Golem, both hands pressed down to the floor, then lifted; Amplify Damage, the right hand held
-  out at a monster, then yanked back; Lower Resist, the same, dragged down slowly; Poison Nova, hands
+  fast from the hips to the chest, and stopped there; Corpse Explosion, the right hand held out at a
+  corpse, then jabbed forward; Golem, both fists raised over the head, then slammed down in front;
+  Amplify Damage, the right hand held out at a monster, then yanked back; Lower Resist, the same,
+  chopped down; Poison Nova, hands
   together at the chest, then flung out low and wide; Bone Prison, both hands apart in front, then
   brought together round a monster.
-- Assassin: Burst of Speed, both arms pumped fast as in a sprint, three swings each; Fade, both hands
-  drawn down in front of the face; Cloak of Shadows, both arms swept across from wide at the shoulders
+- Assassin: Burst of Speed, both arms pumped fast as in a sprint, two swings each; Fade, both hands
+  drawn down in front of the face, from the eyes to the chin; Cloak of Shadows, both arms swept across from wide at the shoulders
   until they cross; Venom, the crossed wrists flicked apart fast; Blade Shield, the right hand circled
   in front twice; Shadow Warrior, both hands from the chest pushed together to one side; Mind Blast,
   both hands at the temples, pushed straight forward.
+
+A tester's first pass (2026-11-05) changed them: "All motions should be quick and repeatable
+sequences that don't need you to move slow", "Please no floor stuff", Raise Skeleton worked once
+and Golem never, Find Item, Slow Missiles and Decoy never, Burst of Speed and Fade did not register,
+and the Valkyrie "didnt spawn her where I pointed. Was off to the side" (she went along the arm's
+line from the shoulder, levelled, far off). Nothing now asks for a slow move or a hand by the floor:
+the slow lift, the press to the floor, the slow drag and the reach down are a fast lift that stops,
+a slam from overhead, a chop and a snatch back; the point at a monster before Corpse Explosion,
+Amplify Damage and Lower Resist is held 0.15 s (was 0.25); Slow Missiles' stop is 0.15 s (was a
+0.35 s hold below the shoulder); Decoy has Shadow Warrior's 0.6 s push (was a 0.35 s sweep); Burst
+of Speed's pumps may stay in front of the hips and as low as them; Fade starts at the eyes with the
+hands up to 45 cm apart.
+
+Warmer or colder (the tester: "maybe we can have the controllers do a simulation with continuous
+vibration as you get closer to the 2nd part of the sequence. Think of 'am I getting warmer or
+colder'"). Each detector tells how near its motion is to casting (`spellmotion::Output::progress`,
+`Engine::Toward`): nothing until its first part is done (the hands together, a fist at the mouth or
+overhead, the right hand pointing still, a pose taken), then `Begun` rising to 1 as the second part
+nears its end, and lower again when the hands go the wrong way. While the grips are held and no
+motion has just cast, both controllers hum from that, a 70 ms pulse every 50 ms, from 6% to 36% as
+it nears the cast; Haptics' Spell strength in VR Settings scales it. The Paladin's and the Druid's
+gestures (their own detectors) and Teleport's punch do not hum.
 
 Every threshold is from simulated hands until a headset session tunes it. Tests: one per class
 (`motions-amazon-test`, `-barbarian-test`, `-necromancer-test`, `-assassin-test`, on `motion_sim.h`):
@@ -2397,11 +2425,13 @@ get over complicated") retired the readied spell: buttons press, motions take bo
 draw. A glyph whose skill has a motion casts it at once, as any glyph.
 
 The motions: Nova, the hands together then flung out wide; Frost Nova, both hands pushed down
-past the chest; Static Field, the palms rubbed together then snapped apart; Energy Shield, both
+past the chest (to the waist, not the floor); Static Field, the palms rubbed together then snapped apart; Energy Shield, both
 hands up at the face within 35 cm (the forearms crossed or not), held; Thunder Storm, one arm
 raised above the head, held; Teleport, the right fist drawn in and punched straight out where you
 want to land (as the Paladin's Charge); Blaze, one hand struck down the thigh; Frozen Armor, the
-left hand from the right hand up to the right shoulder; Shiver Armor, both fists shaken; Chilling
+left hand from the right hand up to the right shoulder; Shiver Armor, both fists shaken, held at
+least 25 cm apart (a tester, 2026-11-05: Static Field's rub "reads as shaking": fists shaken any
+closer are a rub, and its count starts over); Chilling
 Armor, a hug, held. Thresholds in `spellmotion::Tuning`; `spell-motion-test` performs each at three
 headings and checks that no other spell's motion, the motion without the gate, or a slow version
 casts it. Logs: `Frame spell motion:` (each cast and the way it went, each grip hold let go

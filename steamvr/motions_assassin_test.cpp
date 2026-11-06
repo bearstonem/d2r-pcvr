@@ -91,6 +91,13 @@ int main() {
      Check(s.casts==0,"Fade: hands lowered to the nose only are not drawn to the chin");}
     {Sim s(Motion::CloakOfShadows);s.Move({.38f,-.28f,-.25f},{-.38f,-.28f,-.25f},.4f);s.Move({.04f,-.32f,-.30f},{-.04f,-.32f,-.30f},.4f);
      Check(s.casts==0,"Cloak of Shadows: arms brought together but not crossed");}
+    // What a tester could not get to register (2026-11-05): pumps in front of the body, the hands low;
+    // Fade from the eyes, hands a little apart.
+    {Sim s(Motion::BurstOfSpeed);
+     for(int i=0;i<4;++i){const bool r=i%2==0;s.Move({.22f,r?-.50f:-.80f,r?-.32f:-.05f},{-.22f,r?-.80f:-.50f,r?-.05f:-.32f},.25f);}
+     Check(s.casts==1,"Burst of Speed: two pumps a hand in front of the hips, low, cast");}
+    {Sim s(Motion::Fade);s.Move({.14f,-.04f,-.25f},{-.14f,-.04f,-.25f},.4f);s.Move({.14f,-.26f,-.28f},{-.14f,-.26f,-.28f},.4f);
+     Check(s.casts==1,"Fade: from the eyes to the chin, the hands 28 cm apart, casts");}
     // Done again after its wait, it casts again.
     {Sim s(Motion::Venom);Venom(s);s.Hold(.8f);Venom(s);Check(s.casts==2,"Venom: again after the wait, again");}
     std::puts("motions-assassin-test: ok");

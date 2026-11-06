@@ -58,6 +58,18 @@ int main() {
      Check(s.casts==1&&s.aim.x<-.2f,"Decoy: to the left, the way the hands swept");}
     {Sim s(Motion::Valkyrie);s.MoveR({.15f,.32f,-.10f},.40f);s.MoveR({.55f,-.20f,-.40f},.30f);
      Check(s.casts==1&&s.aim.x>.2f&&s.aim.z<-.2f,"Valkyrie: ahead and to the right, where the arm points");}
+    // A tester's first pass (2026-11-05): Decoy and Valkyrie go to a spot, Slow Missiles' push up to eye level stops a moment.
+    for(float heading:{-2.f,0.f,2.f}) {
+        {Sim s(Motion::Decoy,heading);Decoy(s);Check(s.land==spellmotion::Land::Spot&&s.spot.right>0&&s.spot.ahead>0,"Decoy: she stands ahead on the side pushed");}
+        {Sim s(Motion::Valkyrie,heading);Valkyrie(s);Check(s.land==spellmotion::Land::Pointed,"Valkyrie: she lands where the right hand points");}
+        {Sim s(Motion::InnerSight,heading);InnerSight(s);Check(s.land==spellmotion::Land::None,"Inner Sight: no spot");}
+    }
+    {Sim s(Motion::Decoy);s.Move({.08f,-.38f,-.25f},{-.08f,-.38f,-.25f},.35f);s.Move({-.30f,-.36f,-.30f},{-.55f,-.36f,-.30f},.30f);
+     Check(s.casts==1&&s.land==spellmotion::Land::Spot&&s.spot.right<0,"Decoy: pushed left, she stands on the left");}
+    {Sim s(Motion::SlowMissiles);s.MoveR({.12f,-.20f,-.18f},.35f);s.MoveR({.12f,0,-.55f},.25f);s.Hold(.25f);
+     Check(s.casts==1,"Slow Missiles: pushed out at eye level toward the archers and stopped, casts");}
+    {Sim s(Motion::Decoy);s.Move({.08f,-.38f,-.25f},{-.08f,-.38f,-.25f},.35f);s.Move({.55f,-.36f,-.30f},{.30f,-.36f,-.30f},.5f);
+     Check(s.casts==1,"Decoy: a push to the side in half a second casts");}
     // At an unhurried pace (about 0.6 s for the stroke) each still casts.
     {Sim s(Motion::InnerSight);s.MoveR({.06f,.04f,-.15f},.5f);s.Hold(.2f);s.MoveR({.10f,0,-.58f},.6f);Check(s.casts==1,"Inner Sight: an unhurried sweep casts");}
     {Sim s(Motion::SlowMissiles);s.MoveR({.12f,-.32f,-.18f},.5f);s.MoveR({.15f,-.28f,-.60f},.6f);s.Hold(.6f);Check(s.casts==1,"Slow Missiles: an unhurried push casts");}

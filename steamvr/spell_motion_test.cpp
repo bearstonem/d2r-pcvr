@@ -52,7 +52,7 @@ static void ThunderStorm(Sim& s){s.MoveR({.15f,.40f,-.10f},.45f);s.Hold(.5f);}
 static void Blaze(Sim& s){s.MoveR({.24f,-.55f,0},.3f);s.MoveR({.24f,-.95f,0},.2f);}
 static void FrozenArmor(Sim& s){s.Move({.45f,-.35f,-.35f},{.32f,-.35f,-.32f},.45f);s.MoveL({.17f,-.24f,.05f},.45f);}
 static void ShiverArmor(Sim& s) {
-    s.Move({.15f,-.40f,-.30f},{-.15f,-.40f,-.30f},.35f);
+    s.Move({.18f,-.40f,-.30f},{-.18f,-.40f,-.30f},.35f);
     s.Drive(1.f,[](float t,math::Vec& r,math::Vec& l){const float y=-.40f+.06f*std::sin(t*6.2832f*4);r.y=l.y=y;});
 }
 static void Hug(Sim& s){s.Move({-.18f,-.32f,-.05f},{.18f,-.32f,-.05f},.45f);s.Hold(.5f);}
@@ -207,6 +207,32 @@ int main() {
     {Sim s(Motion::Shake);s.Trigger(true);s.Move({.15f,-.40f,-.30f},{-.15f,-.40f,-.30f},.35f);
      s.Drive(1.f,[](float t,math::Vec& r,math::Vec&){r.y=-.40f+.06f*std::sin(t*6.2832f*4);});
      Check(s.casts==0,"Shiver Armor: one fist shaken casts nothing");}
+    {   // Shiver Armor apart from Static Field (a tester, 2026-11-05: "Rubbing reads as shaking"): both palms rubbed
+        // together shake nothing, and still charge Static Field; fists shaken close together are a rub, not a shake.
+        const auto rub=[](Sim& s){s.Move({.045f,-.45f,-.30f},{-.045f,-.45f,-.30f},.35f);
+            s.Drive(1.f,[](float t,math::Vec& r,math::Vec& l){const float w=.05f*std::sin(t*6.2832f*4);r.z=-.30f+w;l.z=-.30f-w;r.y=l.y=-.45f+.03f*w;});};
+        {Sim s(Motion::Shake);s.in.free=true;rub(s);Check(s.casts==0,"Shiver Armor: both palms rubbed together shake nothing");}
+        {Sim s(Motion::RubSnap);s.in.free=true;rub(s);s.Move({.38f,-.45f,-.25f},{-.38f,-.45f,-.25f},.15f);
+         Check(s.casts==1,"Static Field: both palms rubbed, then snapped apart, casts");}
+        {Sim s(Motion::Shake);s.in.free=true;s.Move({.08f,-.40f,-.30f},{-.08f,-.40f,-.30f},.35f);
+         s.Drive(1.f,[](float t,math::Vec& r,math::Vec& l){const float y=-.40f+.06f*std::sin(t*6.2832f*4);r.y=l.y=y;});
+         Check(s.casts==0,"Shiver Armor: fists shaken 16 cm apart cast nothing (held well apart)");}
+    }
+    {   // The warmer/colder buzz (Output::progress): nothing at rest, Begun once the first part is done, rising to the cast
+        {Sim s(Motion::FlingOut);s.in.free=true;s.Hold(.5f);Check(s.out.progress==0,"progress: resting, none");
+         s.Move({.08f,-.40f,-.30f},{-.08f,-.40f,-.30f},.35f);
+         Check(std::fabs(s.out.progress-spellmotion::Begun)<.02f,"progress: Nova's hands together, Begun");
+         s.Move({.25f,-.37f,-.24f},{-.25f,-.37f,-.24f},.12f);
+         const float mid=s.out.progress;
+         Check(mid>spellmotion::Begun+.1f&&mid<1,"progress: halfway through the fling, warmer");
+         s.Move({.62f,-.35f,-.15f},{-.62f,-.35f,-.15f},.12f);
+         Check(s.casts==1&&s.out.progress==0,"progress: cast, and none on the cast's frame");}
+        {Sim s(Motion::CrossGuard);s.in.free=true;s.Move({-.10f,-.12f,-.30f},{.10f,-.12f,-.30f},.4f);s.Hold(.15f);
+         Check(s.out.progress>spellmotion::Begun&&s.out.progress<1&&s.casts==0,"progress: Energy Shield's guard held part of the time");}
+        {Sim s(Motion::Shake);s.in.free=true;s.Move({.18f,-.40f,-.30f},{-.18f,-.40f,-.30f},.35f);
+         s.Drive(.25f,[](float t,math::Vec& r,math::Vec& l){const float y=-.40f+.06f*std::sin(t*6.2832f*4);r.y=l.y=y;});
+         Check(s.casts==0&&s.out.progress>spellmotion::Begun,"progress: Shiver Armor shaken a little, warmer");}
+    }
     {Sim s(Motion::FlingOut);s.Trigger(true);s.in.motion=Motion::FlingOut;s.Trigger(true);s.in.active=false;s.Step();s.in.active=true;Nova(s);
      Check(s.casts==0,"made inactive while held: the trigger must be pressed again");s.Trigger(false);s.Trigger(true);Nova(s);Check(s.casts==1,"pressed again, it casts");}
     {Sim s(Motion::FlingOut);s.Trigger(true);s.Move({.08f,-.40f,-.30f},{-.08f,-.40f,-.30f},.35f);s.in.session=4;s.Move({.62f,-.35f,-.15f},{-.62f,-.35f,-.15f},.25f);

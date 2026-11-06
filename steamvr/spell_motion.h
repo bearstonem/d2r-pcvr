@@ -140,13 +140,13 @@ inline const char* ClassCue(Motion m);
 inline const char* Cue(Motion m) {
     switch(m) {
     case Motion::FlingOut:return "bring the hands together, then fling both arms out wide";
-    case Motion::PushDown:return "push both hands down toward the floor";
+    case Motion::PushDown:return "push both hands down hard in front of you, to the waist";
     case Motion::RubSnap:return "rub the palms together, then snap them apart";
     case Motion::CrossGuard:return "both hands up at the face, close together (crossed or not), and hold";
     case Motion::ArmUp:return "raise one arm straight up and hold";
     case Motion::MatchStrike:return "strike one hand down the thigh, hip to knee";
     case Motion::ForearmSweep:return "sweep the left hand from the right hand up to the right shoulder";
-    case Motion::Shake:return "shake both fists";
+    case Motion::Shake:return "shake both fists hard, held well apart (not rubbed together)";
     case Motion::Hug:return "hug yourself, each hand on the other shoulder";
     case Motion::Punch:return "pull the right fist in fast to show where you land, then punch it straight out";
     default:return m>Motion::Punch&&m<Motion::End?ClassCue(m):"no motion";
@@ -238,6 +238,9 @@ struct Tuning {
     float shakeSpeed=.35f;    // m/s: Shiver Armor: a swing faster than this, then back,
     int shakeTurns=3;         // this many times with each hand
     float shakeWindow=.9f;    // s
+    // m: and the fists at least this far apart throughout: Static Field's rub has them together (a tester,
+    // 2026-11-05: "This was getting confused with static field ... Rubbing reads as shaking")
+    float shakeApart=.25f;
     // Teleport, the Paladin's Charge punch (charge_gesture.h): the right hand drawn in (at most punchFrom
     // ahead of the eyes, hip to brow), then punched straight out to punchReach ahead, punchTravel
     // forward within punchWindow, at least 1.5 times as far forward as up, down or sideways.
@@ -258,6 +261,14 @@ struct Tuning {
     float cooldown=.6f;       // s after a cast
     float history=1.5f;       // s of the hands kept
 };
+// A spot on the floor, in cells ahead of the eyes' heading and to its right: Teleport's landing for a
+// fist moved by adjust (Output::adjust, TeleportSpot), or a summon's (Output::spot).
+struct Spot {float ahead=0,right=0;};
+// Where a cast goes besides its way: nowhere of its own (the way, else the right hand's ray), a Spot
+// (Decoy, Golem), or where the right hand's pointer meets the floor (Valkyrie: "it didn't spawn her where
+// I pointed", 2026-11-05).
+enum class Land {None,Spot,Pointed};
+constexpr float Begun=.25f;   // Output::progress once a motion's first part is done
 struct Input {
     double time=0;
     uint64_t session=0,epoch=0;
@@ -287,10 +298,14 @@ struct Output {
     // while it showed, so it lands there.
     bool aiming=false,landing=false;
     math::Vec adjust{};
+    // How near the watched motion is to casting, for the controllers' warmer/colder buzz (a tester,
+    // 2026-11-05: "continuous vibration as you get closer to the 2nd part of the sequence"): 0 nothing
+    // begun, Begun once its first part is done (the hands together, a fist at the mouth, a pose taken),
+    // rising to 1 as the second nears its end. Zero on the cast's frame and while cooling down.
+    float progress=0;
+    // With cast: a summon that goes to a spot of its own (Engine::LandAt, LandPointed), not along aim.
+    Land land=Land::None;Spot spot{};
 };
-// Teleport's landing for a fist moved by adjust (Output::adjust), in cells ahead of the eyes' heading
-// and to its right.
-struct Spot {float ahead=0,right=0;};
 inline Spot TeleportSpot(math::Vec adjust,const Tuning& t) {
     const float out=std::clamp(-adjust.z,-t.aimBack,t.aimOut),across=std::clamp(adjust.x,-t.aimSide,t.aimSide);
     return {std::max(t.aimNear,t.aimCells+out*t.aimCellsPerMetre),across*t.aimCellsPerMetre};
@@ -311,13 +326,15 @@ class Engine {
     // Teleport drawn in: since when (-1: not), the fist where it first held still after (anchored) and
     // where it last held still; landed: the punch came while it showed.
     double drawnAt=-1;bool anchored=false,landed=false;math::Vec anchor{},settled{};
+    float progress=0;             // this frame's (Output::progress), the most any part of Done reported
+    Land land=Land::None;Spot spot{};   // a summon's spot (LandAt, LandPointed)
     struct Swing {int sign=0;float peak=0;};
     Swing swing[2][3]{};          // Shiver Armor: each hand's last swing on each axis
     std::vector<double> turns[2][3];
     Output stats;
     static bool Finite(math::Vec v){return std::isfinite(v.x)&&std::isfinite(v.y)&&std::isfinite(v.z);}
     void Clear() {
-        samples.clear();poseSince=-1;rub=0;parted=-1;aimed={};scratch={};
+        samples.clear();poseSince=-1;rub=0;parted=-1;aimed={};scratch={};land=Land::None;spot={};
         drawnAt=-1;anchored=landed=false;anchor=settled={};
         for(auto& h:swing)for(auto& a:h)a={};
         for(auto& h:turns)for(auto& a:h)a.clear();
@@ -330,6 +347,15 @@ public:
     const std::vector<Sample>& History()const{return samples;}
     std::array<double,8> scratch{};
     void Aim(math::Vec way){aimed=way;}
+    // A summon's spot: cells ahead of the eyes' heading and to its right, or where the right hand points.
+    void LandAt(float ahead,float right){land=Land::Spot;spot={ahead,right};}
+    void LandPointed(){land=Land::Pointed;spot={};}
+    // The motion's first part is done and its second this fraction of the way (0..1) to its end
+    // (Output::progress: Begun to 1). Several reports in a frame keep the most.
+    void Toward(float fraction) {
+        if(!std::isfinite(fraction))return;
+        progress=std::max(progress,Begun+(1-Begun)*std::clamp(fraction,0.f,1.f));
+    }
     static float Len(math::Vec v){return std::sqrt(math::Dot(v,v));}
     static float Apart(const Sample& s){return Len(s.l[0]-s.l[1]);}
     static float Forward(math::Vec l){return -l.z;}
@@ -345,7 +371,9 @@ public:
     bool Held(bool pose,double now,double seconds=-1) {
         if(!pose){poseSince=-1;return false;}
         if(poseSince<0)poseSince=now;
-        return now-poseSince>=(seconds>=0?seconds:tuning.holdSeconds);
+        const double need=seconds>=0?seconds:tuning.holdSeconds;
+        Toward(need>0?float((now-poseSince)/need):1.f);   // the pose taken: warmer as it is held
+        return now-poseSince>=need;
     }
 private:
     bool Done(Motion m) {
@@ -353,12 +381,17 @@ private:
         const auto& t=tuning;
         switch(m) {
         case Motion::FlingOut: {
-            if(Apart(n)<t.flingApart||n.l[0].x<t.flingSide||n.l[1].x>-t.flingSide)return false;
+            bool together=false;
             for(const auto& s:samples)
-                if(n.t-s.t<=t.flingWindow&&Apart(s)<=t.together&&Forward(s.l[0])>-.1f&&Forward(s.l[1])>-.1f)return true;
-            return false;
+                if(n.t-s.t<=t.flingWindow&&Apart(s)<=t.together&&Forward(s.l[0])>-.1f&&Forward(s.l[1])>-.1f){together=true;break;}
+            if(!together)return false;
+            Toward((Apart(n)-t.together)/(t.flingApart-t.together));
+            return Apart(n)>=t.flingApart&&n.l[0].x>=t.flingSide&&n.l[1].x<=-t.flingSide;
         }
         case Motion::PushDown: {
+            float fall[2]{};   // each hand's biggest fall within the window, for the buzz
+            for(const auto& s:samples)if(n.t-s.t<=t.pushWindow)for(int h=0;h<2;++h)fall[h]=std::max(fall[h],s.l[h].y-n.l[h].y);
+            if(std::min(fall[0],fall[1])>=.06f)Toward(std::min(fall[0],fall[1])/t.pushDrop);
             if(n.l[0].y>t.pushBelow||n.l[1].y>t.pushBelow||Forward(n.l[0])<-.25f||Forward(n.l[1])<-.25f)return false;
             for(const auto& s:samples)
                 if(n.t-s.t<=t.pushWindow&&s.l[0].y-n.l[0].y>=t.pushDrop&&s.l[1].y-n.l[1].y>=t.pushDrop)return true;
@@ -373,6 +406,7 @@ private:
             if(apart<=t.rubClose)parted=-1;
             else if(parted<0&&rub>0)parted=n.t;
             if(parted>=0&&n.t-parted>t.snapWindow){rub=0;parted=-1;}   // apart too long: the charge is lost
+            if(rub>=.03f)Toward(.7f*std::min(rub/t.rubPath,1.f)+(parted>=0?.3f*(apart-t.rubClose)/(t.snapApart-t.rubClose):0.f));
             return rub>=t.rubPath&&parted>=0&&apart>=t.snapApart;
         }
         case Motion::CrossGuard: {
@@ -390,20 +424,31 @@ private:
             for(int h=0;h<2;++h) {
                 const auto& c=n.l[h];
                 if(Forward(c)>.20f||Forward(c)<-.35f||std::fabs(c.x)<.15f)continue;   // at the side, not in front
-                for(const auto& s:samples)
-                    if(n.t-s.t<=t.strikeWindow&&s.l[h].y<=t.strikeFrom&&s.l[h].y-c.y>=t.strikeDrop&&std::fabs(s.l[h].x-c.x)<=.20f)return true;
+                for(const auto& s:samples) {
+                    if(n.t-s.t>t.strikeWindow||s.l[h].y>t.strikeFrom||std::fabs(s.l[h].x-c.x)>.20f)continue;
+                    if(s.l[h].y-c.y>=.05f)Toward((s.l[h].y-c.y)/t.strikeDrop);
+                    if(s.l[h].y-c.y>=t.strikeDrop)return true;
+                }
             }
             return false;
         }
         case Motion::ForearmSweep: {
             const math::Vec shoulder{.17f,-.22f,.05f};
             // The right arm held out on its own side (a hug has it across the chest).
-            if(Len(n.l[1]-shoulder)>t.sweepTo||Len(n.l[0]-shoulder)<.30f||n.l[0].x<.10f)return false;
-            for(const auto& s:samples)if(n.t-s.t<=t.sweepWindow&&Apart(s)<=t.sweepAt)return true;
-            return false;
+            if(Len(n.l[0]-shoulder)<.30f||n.l[0].x<.10f)return false;
+            bool met=false;
+            for(const auto& s:samples)if(n.t-s.t<=t.sweepWindow&&Apart(s)<=t.sweepAt){met=true;break;}
+            if(!met)return false;
+            Toward(1-(Len(n.l[1]-shoulder)-t.sweepTo)/.30f);
+            return Len(n.l[1]-shoulder)<=t.sweepTo;
         }
         case Motion::Shake: {
             if(samples.size()<3)return false;
+            if(Apart(n)<t.shakeApart) {   // together: rubbing, never shaking
+                for(auto& h:swing)for(auto& a:h)a={};
+                for(auto& h:turns)for(auto& a:h)a.clear();
+                return false;
+            }
             int most[2]{};
             for(int h=0;h<2;++h) {
                 const auto v=Velocity(h);const float axis[3]={v.x,v.y,v.z};
@@ -418,6 +463,7 @@ private:
                 }
             }
             const bool front=Forward(n.l[0])>-.10f&&Forward(n.l[1])>-.10f&&n.l[0].y>-.90f&&n.l[1].y>-.90f;
+            if(front&&std::min(most[0],most[1])>=1)Toward(float(std::min(most[0],most[1]))/float(t.shakeTurns));
             return front&&most[0]>=t.shakeTurns&&most[1]>=t.shakeTurns;
         }
         case Motion::Punch: {
@@ -497,12 +543,17 @@ public:
         }
         out.seconds=float(in.time-since);
         if(castAt>=0&&in.time-castAt<tuning.cooldown)return out;
+        progress=0;
         if(Done(in.motion)) {
             const auto seconds=out.seconds;out=stats;out.seconds=seconds;out.cast=true;out.aim=aimed;
             out.landing=landed;out.adjust=landed&&anchored?settled-anchor:math::Vec{};
+            out.land=land;out.spot=spot;
             castAt=in.time;++casts;Clear();   // the motion again, from its start, casts again
         }
-        else if(drawnAt>=0){out.aiming=true;out.adjust=anchored?settled-anchor:math::Vec{};}
+        else {
+            out.progress=progress;
+            if(drawnAt>=0){out.aiming=true;out.adjust=anchored?settled-anchor:math::Vec{};}
+        }
         return out;
     }
 };

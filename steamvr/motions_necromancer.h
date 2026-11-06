@@ -7,9 +7,16 @@
 //
 // Only the controllers' positions count: no palm, finger or fist. So the table's "clench" (Amplify Damage)
 // is a short sharp yank back, its "fling open" (Corpse Explosion) a jab forward, and Lower Resist's "palm
-// down" a slow drag down, each from the right hand held out still at the corpse or monster (the pointing
-// start), so it ends pointing where the right hand's own ray aims the cast. Golem goes to the spot ahead
-// (Aim); the rest have no way of their own.
+// down" a chop down, each from the right hand held out still at the corpse or monster (the pointing
+// start), so it ends pointing where the right hand's own ray aims the cast. Golem goes to a spot ahead
+// (Aim, LandAt); the rest have no way of their own.
+//
+// A tester's first pass (2026-11-05): "big issues with summoning skeletons and golem. I only got the
+// skeleton one to work once and the golem one I could never get right. Also, any motions that require a
+// slow movement as part of the sequence are not going to work well in combat. All motions should be quick
+// and repeatable". Raise Skeleton was a slow lift from the hips, Golem a press toward the floor and Lower
+// Resist a slow drag: now Raise Skeleton is a fast lift that stops at the chest, Golem both fists slammed
+// down from overhead, Lower Resist a chop down, and the point before the three is held a moment less.
 // Value-only: steamvr/motions_necromancer_test.cpp.
 namespace framevr::spellmotion::necromancer {
 struct Tuning {
@@ -18,16 +25,19 @@ struct Tuning {
     float armorCross=.04f,armorHigh=-.12f,armorLow=-.60f,armorNear=.30f,armorApart=.35f,armorHold=.40f;
     // The pointing start (N3, N5, N6): the right hand at least pointFrom ahead, held still (every step
     // under pointStill m/s) for pointHold s.
-    float pointFrom=.30f,pointHold=.25f,pointStill=.35f;
+    float pointFrom=.30f,pointHold=.15f,pointStill=.35f;
     float jab=.12f,jabWindow=.20f;     // N3 Corpse Explosion: then this far forward within the window
     float yank=.15f,yankWindow=.20f;   // N5 Amplify Damage: then this far back toward the eyes
-    float drag=.20f,dragMin=.30f,dragWindow=1.2f,dragSpeed=1.3f;   // N6 Lower Resist: this far down, slowly
-    // N4 Golem: both hands pressed pressDrop down to below pressLow within pressWindow, then lifted
-    // liftBack within liftWindow.
-    float pressLow=-.75f,pressDrop=.20f,pressWindow=.6f,liftBack=.20f,liftWindow=.6f;
-    // N2 Raise Skeleton: both hands low (below riseFrom) and still for restStill s, then lifted riseMin
-    // each to above riseTo, taking at least riseSlow s and never faster than riseSpeed.
-    float riseFrom=-.62f,riseTo=-.42f,riseMin=.25f,riseSlow=.45f,riseWindow=1.5f,riseSpeed=1.2f,restStill=.15f;
+    float chop=.18f,chopWindow=.30f;   // N6 Lower Resist: then this far down
+    // N4 Golem: both fists overhead (golemHigh above the eyes or more), then slammed down within golemWindow,
+    // each golemFall or more, to golemLow or below in front of the chest, at slamSpeed or faster at their
+    // fastest. It stands golemAhead cells ahead.
+    float golemHigh=.08f,golemFall=.40f,golemLow=-.28f,golemWindow=.6f,slamSpeed=1.2f,golemAhead=4;
+    // N2 Raise Skeleton: both hands low (riseFrom or below: at rest by the hips), then lifted fast, riseMin
+    // or more each, to the chest (riseTo to riseTop) within riseWindow, riseSpeed or faster at their
+    // fastest, and stopped there (both still): a lift on overhead passes the chest without stopping. Each
+    // rises riseUpright times as far as it moves across, and they end at most riseApart apart.
+    float riseFrom=-.48f,riseTo=-.36f,riseTop=-.05f,riseMin=.18f,riseWindow=.6f,riseSpeed=1.0f,riseUpright=1.5f,riseApart=.55f;
     // N7 Poison Nova: hands together at the chest, then flung novaApart apart, each novaSide out on its
     // own side and below novaLow, within novaWindow and at least flingSpeed fast.
     float novaTogether=.30f,novaApart=.75f,novaSide=.25f,novaLow=-.40f,novaWindow=.8f,flingSpeed=1.5f;
@@ -45,11 +55,11 @@ constexpr Motion Order[]={Motion::BoneArmor,Motion::BonePrison,Motion::Golem,Mot
 inline const char* Cue(Motion m) {
     switch(m) {
     case Motion::BoneArmor:return "cross both fists on the chest and hold";
-    case Motion::RaiseSkeleton:return "both hands low at the hips, then lift them slowly to the chest";
+    case Motion::RaiseSkeleton:return "both hands down by the hips, then lift them fast to the chest and stop";
     case Motion::CorpseExplosion:return "hold the right hand out at a corpse, then jab it forward";
-    case Motion::Golem:return "press both hands down toward the floor, then lift them";
+    case Motion::Golem:return "raise both fists over the head, then slam them down in front of you";
     case Motion::AmplifyDamage:return "hold the right hand out at a monster, then yank it back";
-    case Motion::LowerResist:return "hold the right hand out at a monster, then drag it down slowly";
+    case Motion::LowerResist:return "hold the right hand out at a monster, then chop it down";
     case Motion::PoisonNova:return "hands together at the chest, then fling them out low and wide";
     case Motion::BonePrison:return "hold both hands apart in front, then bring them together round a monster";
     default:return "no motion";
@@ -78,8 +88,10 @@ inline bool Pointing(const std::vector<Sample>& s,size_t i) {
         StillBefore(s,i,0,tuning.pointHold,tuning.pointStill);
 }
 // A pointing motion: from a pointing start no more than window s ago, does end hold for the start and the newest?
-template<class End> bool FromPoint(const std::vector<Sample>& s,double window,End end) {
+// The hand pointing now is the first part done (Engine::Toward).
+template<class End> bool FromPoint(Engine& e,const std::vector<Sample>& s,double window,End end) {
     const auto& n=s.back();
+    if(Pointing(s,s.size()-1))e.Toward(0);
     for(size_t i=s.size()-1;i-->0&&n.t-s[i].t<=window;)
         if(Pointing(s,i)&&end(s[i],i))return true;
     return false;
@@ -100,62 +112,73 @@ inline bool Done(Engine& e,Motion m) {
         return e.Held(pose&&e.Still(0)&&e.Still(1),n.t,t.armorHold);
     }
     case Motion::RaiseSkeleton: {
-        // up at the chest, side by side in front, the right hand on the right
-        for(const auto& h:n.l)if(h.y<t.riseTo||F(h)<0||std::fabs(h.x)>.45f)return false;
-        if(Engine::Apart(n)>.70f||n.l[0].x<=n.l[1].x)return false;
-        // from the latest moment both hands were low and still, slowly
+        // from the latest moment both hands were low, lifted fast
+        bool end=Engine::Apart(n)<=t.riseApart&&n.l[0].x>n.l[1].x&&e.Still(0)&&e.Still(1);
+        for(const auto& h:n.l)end=end&&h.y>=t.riseTo&&h.y<=t.riseTop&&F(h)>=0&&std::fabs(h.x)<=.45f;
         for(size_t i=s.size()-1;i-->0&&n.t-s[i].t<=t.riseWindow;) {
             const auto& a=s[i];
             if(a.l[0].y>t.riseFrom||a.l[1].y>t.riseFrom||a.l[0].y<-1.f||a.l[1].y<-1.f)continue;
-            if(!detail::StillBefore(s,i,-1,t.restStill,t.pointStill))continue;
-            return n.t-a.t>=t.riseSlow&&n.l[0].y-a.l[0].y>=t.riseMin&&n.l[1].y-a.l[1].y>=t.riseMin&&
-                detail::PeakSpeed(s,i,-1)<=t.riseSpeed;
+            const float lift=std::min(n.l[0].y-a.l[0].y,n.l[1].y-a.l[1].y);
+            if(lift>=.06f)e.Toward(lift/(t.riseTo-a.l[0].y));
+            bool up=true;   // mostly up, each hand: Bone Prison's hands also rise as they open out wide
+            for(int k=0;k<2;++k)up=up&&n.l[k].y-a.l[k].y>=t.riseUpright*std::hypot(n.l[k].x-a.l[k].x,n.l[k].z-a.l[k].z);
+            return end&&up&&lift>=t.riseMin&&detail::PeakSpeed(s,i,0)>=t.riseSpeed&&detail::PeakSpeed(s,i,1)>=t.riseSpeed;
         }
         return false;
     }
     case Motion::CorpseExplosion:
-        return FromPoint(s,t.jabWindow,[&](const Sample& a,size_t){
+        return FromPoint(e,s,t.jabWindow,[&](const Sample& a,size_t){
             const auto& c=n.l[0];const auto& o=a.l[0];const float forward=F(c)-F(o);
+            if(forward>=.03f)e.Toward(forward/t.jab);
             return forward>=t.jab&&std::fabs(c.y-o.y)<=.6f*forward&&std::fabs(c.x-o.x)<=.6f*forward;});
     case Motion::AmplifyDamage:
-        return FromPoint(s,t.yankWindow,[&](const Sample& a,size_t){
+        return FromPoint(e,s,t.yankWindow,[&](const Sample& a,size_t){
             const auto& c=n.l[0];const auto& o=a.l[0];const float back=F(o)-F(c);
+            if(back>=.03f)e.Toward(back/t.yank);
             return back>=t.yank&&std::fabs(c.y-o.y)<=.6f*back&&std::fabs(c.x-o.x)<=.6f*back;});
     case Motion::LowerResist:
-        return FromPoint(s,t.dragWindow,[&](const Sample& a,size_t i){
-            const auto& c=n.l[0];const auto& o=a.l[0];
-            return o.y-c.y>=t.drag&&n.t-a.t>=t.dragMin&&F(c)>=t.pointFrom-.07f&&F(o)-F(c)<=.12f&&std::fabs(c.x-o.x)<=.15f&&
-                detail::PeakSpeed(s,i,0)<=t.dragSpeed;});
+        return FromPoint(e,s,t.chopWindow,[&](const Sample& a,size_t){
+            const auto& c=n.l[0];const auto& o=a.l[0];const float down=o.y-c.y;
+            if(down>=.04f)e.Toward(down/t.chop);
+            return down>=t.chop&&std::fabs(F(c)-F(o))<=.6f*down&&std::fabs(c.x-o.x)<=.6f*down;});
     case Motion::Golem: {
-        if(n.t-s.front().t<.1)return false;
-        for(size_t j=s.size()-1;j-->0&&n.t-s[j].t<=t.liftWindow;) {
-            const auto& lo=s[j];
-            bool low=Engine::Apart(lo)<=.75f;
-            for(const auto& h:lo.l)low=low&&h.y<=t.pressLow&&F(h)>=-.15f&&std::fabs(h.x)<=.50f;
-            if(!low||n.l[0].y-lo.l[0].y<t.liftBack||n.l[1].y-lo.l[1].y<t.liftBack)continue;
-            for(size_t k=j;k-->0&&lo.t-s[k].t<=t.pressWindow;)
-                if(s[k].l[0].y-lo.l[0].y>=t.pressDrop&&s[k].l[1].y-lo.l[1].y>=t.pressDrop){e.Aim({0,0,-1});return true;}
+        // from the latest moment both fists were overhead, slammed down in front
+        bool end=true;
+        for(const auto& h:n.l)end=end&&h.y<=t.golemLow&&h.y>=-.85f&&F(h)>=.05f&&std::fabs(h.x)<=.50f;
+        for(size_t i=s.size()-1;i-->0&&n.t-s[i].t<=t.golemWindow;) {
+            const auto& a=s[i];
+            if(a.l[0].y<t.golemHigh||a.l[1].y<t.golemHigh)continue;
+            const float fall=std::min(a.l[0].y-n.l[0].y,a.l[1].y-n.l[1].y);
+            e.Toward(fall/t.golemFall);   // overhead, then warmer as they come down
+            if(!end||fall<t.golemFall||detail::PeakSpeed(s,i,0)<t.slamSpeed||detail::PeakSpeed(s,i,1)<t.slamSpeed)return false;
+            e.Aim({0,0,-1});e.LandAt(t.golemAhead,0);
+            return true;
         }
         return false;
     }
     case Motion::PoisonNova: {
-        if(Engine::Apart(n)<t.novaApart||n.l[0].x<t.novaSide||n.l[1].x>-t.novaSide||n.l[0].y>t.novaLow||n.l[1].y>t.novaLow)return false;
+        const bool end=Engine::Apart(n)>=t.novaApart&&n.l[0].x>=t.novaSide&&n.l[1].x<=-t.novaSide&&n.l[0].y<=t.novaLow&&n.l[1].y<=t.novaLow;
         for(size_t i=s.size()-1;i-->0&&n.t-s[i].t<=t.novaWindow;) {
             const auto& a=s[i];
             bool chest=Engine::Apart(a)<=t.novaTogether;
             for(const auto& h:a.l)chest=chest&&h.y>=-.60f&&h.y<=-.10f&&F(h)>=-.10f;
-            if(chest)return detail::PeakSpeed(s,i,0)>=t.flingSpeed&&detail::PeakSpeed(s,i,1)>=t.flingSpeed;
+            if(!chest)continue;
+            e.Toward((Engine::Apart(n)-t.novaTogether)/(t.novaApart-t.novaTogether));
+            return end&&detail::PeakSpeed(s,i,0)>=t.flingSpeed&&detail::PeakSpeed(s,i,1)>=t.flingSpeed;
         }
         return false;
     }
     case Motion::BonePrison: {
-        if(Engine::Apart(n)>t.prisonTogether||n.l[0].x<n.l[1].x-.05f)return false;
-        for(const auto& h:n.l)if(F(h)<t.prisonFront||h.y<-.60f||h.y>0)return false;
+        bool end=Engine::Apart(n)<=t.prisonTogether&&n.l[0].x>=n.l[1].x-.05f;
+        for(const auto& h:n.l)end=end&&F(h)>=t.prisonFront&&h.y>=-.60f&&h.y<=0;
         for(size_t i=s.size()-1;i-->0&&n.t-s[i].t<=t.prisonWindow;) {
             const auto& a=s[i];
-            bool open=Engine::Apart(a)>=t.prisonApart&&a.l[0].x>a.l[1].x&&a.l[0].x-n.l[0].x>=t.prisonIn&&n.l[1].x-a.l[1].x>=t.prisonIn;
+            bool open=Engine::Apart(a)>=t.prisonApart&&a.l[0].x>a.l[1].x;
             for(const auto& h:a.l)open=open&&F(h)>=t.prisonFront-.05f&&h.y>=-.65f&&h.y<=.05f;
-            if(open&&detail::PeakSpeed(s,i,0)>=t.closeSpeed&&detail::PeakSpeed(s,i,1)>=t.closeSpeed)return true;
+            if(!open)continue;
+            e.Toward((Engine::Apart(a)-Engine::Apart(n))/(Engine::Apart(a)-t.prisonTogether));
+            if(end&&a.l[0].x-n.l[0].x>=t.prisonIn&&n.l[1].x-a.l[1].x>=t.prisonIn&&
+               detail::PeakSpeed(s,i,0)>=t.closeSpeed&&detail::PeakSpeed(s,i,1)>=t.closeSpeed)return true;
         }
         return false;
     }

@@ -262,6 +262,7 @@ bool glyphAtlasPending=false,glyphImageReady=false;
 float spellTrigger=0;
 std::array<spellmotion::Engine,spellmotion::MotionCount> spellFree;
 double spellFreeAt=-1;
+double motionBuzzAt=-1;      // the warmer/colder buzz's last pulse (spellmotion::Output::progress)
 double spellGripSince=-1;   // a grip held for them (-1 none), and whether that hold cast
 bool spellGripCast=false;
 std::atomic<bool> spellGripsArmed{false};   // a motion of the hero's class learned and on, Weapon skill gestures on (vrcam: the staff's left grip)
@@ -654,21 +655,42 @@ struct StageWorld {bool valid=false;math::Vec origin{},hero{};math::Quat base{0,
 // when the punch came then (MotionLanding).
 struct MotionSpot {int skill=-1;float x=0,y=0;uint64_t at=0,session=0;} motionLanding;
 bool teleportShown=false;
-// Where Teleport lands for the fist's adjust (spellmotion::TeleportSpot: cells ahead of the eyes' heading
-// and to its right), in grid cells on the floor under the player, within the game's reach.
-bool TeleportCell(math::Vec adjust,const spellmotion::Tuning& tuning,float& x,float& y) {
+// A room point on the floor under the player, in grid cells, within the game's reach of the player.
+bool FloorCell(math::Vec at,float& x,float& y) {
     const auto& stage=interactionInput.stage;
     if(!interactionInput.floorKnown||!stage.known||!(stageWorld.upm>=1&&stageWorld.upm<=12))return false;
     const float floor=stage.anchor.y+(interactionInput.floor-stage.origin.y);
-    const auto spot=spellmotion::TeleportSpot(adjust,tuning);
-    const float metres=2.f/stageWorld.upm;   // a cell (toss::Cell)
-    const auto head=interactionInput.head.p;
-    const auto at=head+math::Rotate(math::Yaw(math::Heading(interactionInput.head.q)),math::Vec{spot.right*metres,0,-spot.ahead*metres});
     float heroX=0,heroY=0;
-    if(!toss::Cell(stage.World(head),floor,stageWorld.upm,heroX,heroY)||!toss::Cell(stage.World(at),floor,stageWorld.upm,x,y))return false;
+    if(!toss::Cell(stage.World(interactionInput.head.p),floor,stageWorld.upm,heroX,heroY)||!toss::Cell(stage.World(at),floor,stageWorld.upm,x,y))return false;
     float dx=x-heroX,dy=y-heroY;
     if(!aimreach::Clamp(dx,dy))return false;
     x=heroX+dx;y=heroY+dy;return true;
+}
+// A spot (spellmotion::Spot: cells ahead of the eyes' heading and to its right) in grid cells.
+bool SpotCell(spellmotion::Spot spot,float& x,float& y) {
+    if(!(stageWorld.upm>=1&&stageWorld.upm<=12))return false;
+    const float metres=2.f/stageWorld.upm;   // a cell (toss::Cell)
+    return FloorCell(interactionInput.head.p+math::Rotate(math::Yaw(math::Heading(interactionInput.head.q)),math::Vec{spot.right*metres,0,-spot.ahead*metres}),x,y);
+}
+// Where Teleport lands for the fist's adjust (spellmotion::TeleportSpot), in grid cells.
+bool TeleportCell(math::Vec adjust,const spellmotion::Tuning& tuning,float& x,float& y) {
+    return SpotCell(spellmotion::TeleportSpot(adjust,tuning),x,y);
+}
+// Where the right hand's pointer meets the floor, in grid cells within the game's reach (Valkyrie's
+// spellmotion::Land::Pointed). A pointer level or up, or meeting the floor beyond PointedCells: that far
+// along it. way: the pointer's heading, head-local and level, for the cast's way.
+constexpr float PointedCells=14.f;
+bool PointedCell(float& x,float& y,math::Vec& way) {
+    if(!handAimTracked[0]||!interactionInput.floorKnown||!(stageWorld.upm>=1&&stageWorld.upm<=12))return false;
+    const auto o=handAim[0].p,d=math::Rotate(handAim[0].q,math::Vec{0,0,-1});
+    const float level=std::hypot(d.x,d.z);
+    if(!std::isfinite(o.x+o.y+o.z+d.x+d.y+d.z)||level<.05f)return false;   // straight up or down: no heading
+    const float most=PointedCells*2.f/stageWorld.upm;   // metres
+    const float reach=d.y<-.02f?(o.y-interactionInput.floor)/-d.y*level:most;   // along the floor to where it meets it
+    const float along=std::clamp(std::isfinite(reach)?reach:most,0.f,most);
+    const math::Vec flat{d.x/level,0,d.z/level};
+    way=math::Rotate(math::Conjugate(math::Yaw(math::Heading(interactionInput.head.q))),flat);
+    return FloorCell(math::Vec{o.x+flat.x*along,interactionInput.floor,o.z+flat.z*along},x,y);
 }
 bool crossbowFire=false;
 uint64_t crossbowActivation=0,crossbowTakenAt=0;
@@ -4391,6 +4413,8 @@ void Input() {
              for(int i=0;i<page.count;++i)if(const int id=page.skills[i],m=int(spellmotion::For(id));m>0&&motionOn(id))skillOf[m]=id;}
             int done=-1;math::Vec doneAim{};
             bool doneLanding=false,teleportAiming=false;math::Vec doneAdjust{},teleportAdjust{};
+            spellmotion::Land doneLand=spellmotion::Land::None;spellmotion::Spot doneSpot{};
+            float progress=0;   // the nearest any watched motion is to casting (Output::progress)
             for(int i=0;i<order.count;++i) {
                 const auto motion=order.motions[i];
                 const int m=int(motion);
@@ -4400,9 +4424,24 @@ void Input() {
                 freeIn.head=interactionInput.head.p;freeIn.headRotation=interactionInput.head.q;
                 for(int h=0;h<2;++h){freeIn.hand[h]=interactionInput.hand[h].p;freeIn.tracked[h]=interactionInput.tracked[h];}
                 const auto watched=spellFree[size_t(m-1)].Step(freeIn);
-                if(watched.cast&&done<0){done=m;doneAim=watched.aim;doneLanding=watched.landing;doneAdjust=watched.adjust;}
+                if(watched.cast&&done<0){done=m;doneAim=watched.aim;doneLanding=watched.landing;doneAdjust=watched.adjust;doneLand=watched.land;doneSpot=watched.spot;}
                 if(watched.aiming){teleportAiming=true;teleportAdjust=watched.adjust;}
+                progress=std::max(progress,watched.progress);
             }
+            // Warmer/colder (a tester, 2026-11-05: "have the controllers do a simulation with continuous
+            // vibration as you get closer to the 2nd part of the sequence ... SO people can feel the
+            // movement's working"): once a motion's first part is done, both controllers hum, stronger as
+            // its second nears the cast; a pulse every 50 ms, each lasting 70 ms. Haptics' Spell strength
+            // scales it (VR Settings).
+            if(done<0&&motionGate&&!motionCooling&&progress>=spellmotion::Begun) {
+                if(motionBuzzAt<0||now-motionBuzzAt>=.05||now<motionBuzzAt) {
+                    const float warm=(progress-spellmotion::Begun)/(1-spellmotion::Begun);
+                    const float amplitude=.06f+.30f*warm*warm;
+                    for(int h=0;h<2;++h)MotionPulse(h,haptics::Category::Spell,amplitude,70000000);
+                    motionBuzzAt=now;
+                }
+            }
+            else motionBuzzAt=-1;
             // Teleport's fist drawn in: a circle where it lands, placed again every frame (it fades a moment
             // after the last), gone with the punch or the grips let go. The punch then lands there, its way
             // toward it too (MotionCastRay).
@@ -4424,7 +4463,26 @@ void Input() {
                 const int skill=spellmotion::CastSkillOf(skillOf[done],[&](int id){return interaction::GlyphSkill(quickSnapshot,id).known;});
                 const auto spot=spellmotion::TeleportSpot(doneAdjust,punchTuning);
                 if(doneLanding&&landKnown)doneAim={spot.right,0,-spot.ahead};
-                if(motionCast(skill,doneAim,true)&&doneLanding) {
+                // A summon on a spot of its own: Decoy and the golems ahead (spellmotion::Engine::LandAt), the
+                // Valkyrie where the right hand points (LandPointed); its way toward it too.
+                float summonX=0,summonY=0;math::Vec pointed{};
+                const bool summonKnown=!doneLanding&&(doneLand==spellmotion::Land::Spot?SpotCell(doneSpot,summonX,summonY):
+                    doneLand==spellmotion::Land::Pointed&&PointedCell(summonX,summonY,pointed));
+                if(summonKnown)doneAim=doneLand==spellmotion::Land::Spot?math::Vec{doneSpot.right,0,-doneSpot.ahead}:pointed;
+                const bool cast=motionCast(skill,doneAim,true);
+                if(cast&&doneLand!=spellmotion::Land::None&&!doneLanding) {
+                    char line[200];
+                    if(summonKnown) {
+                        motionLanding={skill,summonX,summonY,GetTickCount64(),gamestate::LocalPlayer()};
+                        if(doneLand==spellmotion::Land::Spot)
+                            std::snprintf(line,sizeof line,"Frame spell motion: %s on its spot, %.0f cells ahead, %+.0f across (cell %.1f,%.1f)",
+                                motionName(skill).c_str(),doneSpot.ahead,doneSpot.right,summonX,summonY);
+                        else std::snprintf(line,sizeof line,"Frame spell motion: %s where the right hand points (cell %.1f,%.1f)",motionName(skill).c_str(),summonX,summonY);
+                    }
+                    else std::snprintf(line,sizeof line,"Frame spell motion: %s's spot unknown (no room floor or pointer yet) - along its way",motionName(skill).c_str());
+                    Say(line);
+                }
+                if(cast&&doneLanding) {
                     char line[160];
                     if(landKnown) {
                         motionLanding={skill,landX,landY,GetTickCount64(),gamestate::LocalPlayer()};
