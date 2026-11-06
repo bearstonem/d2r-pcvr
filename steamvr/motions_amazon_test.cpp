@@ -72,6 +72,22 @@ int main() {
      Check(s.casts==1,"Decoy: a push to the side in half a second casts");}
     // At an unhurried pace (about 0.6 s for the stroke) each still casts.
     {Sim s(Motion::InnerSight);s.MoveR({.06f,.04f,-.15f},.5f);s.Hold(.2f);s.MoveR({.10f,0,-.58f},.6f);Check(s.casts==1,"Inner Sight: an unhurried sweep casts");}
+    // the owner's sweeps (2026-11-05): out to the right at eye level, 30-50 cm to the side and 16-43 cm ahead
+    for(const math::Vec end:{math::Vec{.36f,.08f,-.35f},math::Vec{.52f,.01f,-.29f},math::Vec{.32f,.05f,-.27f}}) {
+        Sim s(Motion::InnerSight);s.MoveR({.10f,.05f,-.10f},.35f);s.Hold(.15f);s.MoveR(end,.25f);s.Hold(.2f);
+        Check(s.casts==1,"Inner Sight: swept out forward and to the right at eye level casts");
+    }
+    {Sim s(Motion::InnerSight);s.MoveR({.10f,.05f,-.10f},.35f);s.Hold(.15f);s.MoveR({-.30f,.05f,-.30f},.25f);s.Hold(.2f);
+     Check(s.casts==0,"Inner Sight: the right hand swept across to the left is not its sweep out");}
+    // the owner's Decoy pushes (2026-11-05): 37 cm apart at the chest, 22-28 cm, the trailing hand short of the middle
+    {Sim s(Motion::Decoy);s.Move({.20f,-.32f,-.25f},{-.17f,-.33f,-.22f},.35f);s.Hold(.1f);s.Move({.55f,-.30f,-.17f},{.18f,-.31f,-.18f},.3f);s.Hold(.2f);
+     Check(s.casts==1&&s.spot.right>0,"Decoy: pushed right from hands 37 cm apart casts, on the right");}
+    {Sim s(Motion::Decoy);s.Move({.10f,-.33f,-.25f},{-.15f,-.32f,-.22f},.35f);s.Hold(.1f);s.Move({.38f,-.33f,-.43f},{.08f,-.32f,-.36f},.3f);s.Hold(.2f);
+     Check(s.casts==1,"Decoy: pushed 28 cm right and half forward casts");}
+    {Sim s(Motion::Decoy);s.Move({.18f,-.33f,-.25f},{-.10f,-.37f,-.22f},.35f);s.Hold(.1f);s.Move({-.04f,-.33f,-.30f},{-.41f,-.37f,-.41f},.3f);s.Hold(.2f);
+     Check(s.casts==1&&s.spot.right<0,"Decoy: pushed left, the right hand 4 cm short of the middle, casts on the left");}
+    {Sim s(Motion::InnerSight);s.MoveR({.10f,.05f,-.10f},.35f);s.Hold(.15f);s.MoveR({.18f,.03f,-.16f},.25f);s.Hold(.2f);
+     Check(s.casts==0,"Inner Sight: a short move from the brow casts nothing");}
     {Sim s(Motion::SlowMissiles);s.MoveR({.12f,-.32f,-.18f},.5f);s.MoveR({.15f,-.28f,-.60f},.6f);s.Hold(.6f);Check(s.casts==1,"Slow Missiles: an unhurried push casts");}
     {Sim s(Motion::Decoy);s.Move({.08f,-.38f,-.25f},{-.08f,-.38f,-.25f},.5f);s.Move({.55f,-.36f,-.30f},{.30f,-.36f,-.30f},.6f);Check(s.casts==1,"Decoy: an unhurried sweep casts");}
     {Sim s(Motion::Valkyrie);s.MoveR({.15f,.32f,-.10f},.5f);s.MoveR({.20f,-.22f,-.55f},.6f);Check(s.casts==1,"Valkyrie: an unhurried stroke casts");}

@@ -22,11 +22,15 @@
 namespace framevr::spellmotion::amazon {
 struct Tuning {
     // Inner Sight: either hand at the brow (in front of the face, the eyes' height up to just over them)
-    // for browSeconds, then swept forward to sweepReach ahead within sweepWindow, mostly forward, ending
-    // at eye level and never above the head.
+    // for browSeconds, then swept out within sweepWindow, forward or forward and out to its own side, level
+    // (rising or falling at most two thirds as far as it goes out), ending sweepReach from the eyes (level
+    // distance), sweepFront ahead or more, at eye level and never above the head, at sweepSpeed or faster at its
+    // fastest. The owner's sweeps
+    // (2026-11-05) went out to the right, ending 30-50 cm to the side and 16-43 cm ahead: it had to go
+    // straight forward to 45 cm ahead.
     float browLow=-.06f,browHigh=.16f,browFront=.26f,browSide=.16f;
     double browSeconds=.08;
-    float sweepReach=.45f,sweepEndLow=-.10f,overHead=.19f;
+    float sweepReach=.40f,sweepFront=.15f,sweepEndLow=-.10f,overHead=.19f,sweepSpeed=.9f;
     double sweepWindow=.40;
     // Slow Missiles: the right hand pushed from below the brow (at most pushFrom ahead, below the eyes by
     // pushStartLow..pushStartHigh) to pushReach ahead within pushWindow, mostly forward, then stopped there
@@ -36,10 +40,13 @@ struct Tuning {
     double pushWindow=.45,holdSeconds=.15,holdAfter=.30;
     // Decoy: both hands at the chest (within chestSide of the middle, chestApart apart, chestLow to
     // chestHigh, chestNear to chestFar ahead), then pushed sideTravel or more to the same side, the leading
-    // hand sideReach out and the other past the middle, mostly sideways, within decoyWindow s. She stands
-    // decoyAhead cells ahead and decoyAcross to that side.
-    float chestSide=.22f,chestApart=.30f,chestLow=-.50f,chestHigh=-.10f,chestNear=0,chestFar=.40f;
-    float sideTravel=.30f,sideReach=.25f,decoyAhead=3,decoyAcross=6;
+    // hand sideReach out and the other up to trailShort short of the middle, sideways at least sideways
+    // times as far as forward or back, within decoyWindow s. She stands decoyAhead cells ahead and
+    // decoyAcross to that side. The owner's pushes (2026-11-05) missed with the hands 37 cm apart at the
+    // chest, pushed 22-28 cm, the trailing hand 4-6 cm short of the middle, or a push half forward (it took
+    // 30 cm apart, 30 cm, past the middle and 1.2 times as far sideways).
+    float chestSide=.22f,chestApart=.45f,chestLow=-.50f,chestHigh=-.10f,chestNear=0,chestFar=.40f;
+    float sideTravel=.22f,sideReach=.25f,trailShort=.08f,sideways=.8f,decoyAhead=3,decoyAcross=6;
     double decoyWindow=.6;
     // Valkyrie: the right fist overhead (above the eyes by raiseHigh), then brought down within
     // valkyrieWindow, at least valkyrieDrop, to point ahead at shoulder height (pointReach ahead).
@@ -86,10 +93,19 @@ inline bool InnerSight(Engine& e,const Tuning& t) {
         const Sample* from=nullptr;for(const auto& s:h)if(s.t==browEnd){from=&s;break;}
         if(!from)continue;
         const auto& a=from->l[k];
-        const float forward=Engine::Forward(c)-Engine::Forward(a);
-        e.Toward(forward/std::max(.15f,t.sweepReach-Engine::Forward(a)));   // at the brow, then warmer as it sweeps out
-        if(Engine::Forward(c)<t.sweepReach||c.y<t.sweepEndLow)continue;
-        if(forward>=.15f&&std::fabs(c.y-a.y)*1.5f<=forward&&std::fabs(c.x-a.x)*1.5f<=forward)return true;
+        const float forward=Engine::Forward(c)-Engine::Forward(a),out=std::hypot(c.x-a.x,forward);
+        const float reach=std::hypot(c.x,Engine::Forward(c)),start=std::hypot(a.x,Engine::Forward(a));
+        e.Toward((reach-start)/std::max(.15f,t.sweepReach-start));   // at the brow, then warmer as it sweeps out
+        if(reach<t.sweepReach||Engine::Forward(c)<t.sweepFront||c.y<t.sweepEndLow)continue;
+        // out from the brow, never back across the face: forward, and to its own side if at all
+        const float own=k==0?c.x-a.x:a.x-c.x;   // out to its own side, not across the face
+        if(out<.15f||forward<0||own<-.05f||std::fabs(c.y-a.y)*1.5f>out)continue;
+        float fastest=0;   // a quick sweep, not the hand drifting out
+        for(size_t i=size_t(from-h.data())+1;i<h.size();++i) {
+            const double dt=h[i].t-h[i-1].t;
+            if(dt>1e-4)fastest=std::max(fastest,Engine::Len(h[i].l[k]-h[i-1].l[k])/float(dt));
+        }
+        if(fastest>=t.sweepSpeed)return true;
     }
     return false;
 }
@@ -127,11 +143,11 @@ inline bool Decoy(Engine& e,const Tuning& t) {
             float least=1e9f;bool sideways=true;math::Vec way{};
             for(int k=0;k<2;++k) {
                 const auto d=n.l[k]-s.l[k];least=std::min(least,d.x*float(side));
-                sideways=sideways&&d.x*float(side)>=1.2f*std::fabs(d.z)&&std::fabs(d.y)<=.25f;way=way+d*.5f;
+                sideways=sideways&&d.x*float(side)>=t.sideways*std::fabs(d.z)&&std::fabs(d.y)<=.25f;way=way+d*.5f;
             }
             if(!sideways||least<.06f)continue;
             e.Toward(least/t.sideTravel);
-            if(least>=t.sideTravel&&lead.x*float(side)>=t.sideReach&&trail.x*float(side)>=.02f) {
+            if(least>=t.sideTravel&&lead.x*float(side)>=t.sideReach&&trail.x*float(side)>=-t.trailShort) {
                 e.Aim({way.x,0,way.z});e.LandAt(t.decoyAhead,float(side)*t.decoyAcross);
                 return true;
             }
