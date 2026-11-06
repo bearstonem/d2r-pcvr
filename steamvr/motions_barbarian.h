@@ -49,7 +49,11 @@ struct Tuning {
     // Battle Cry: both fists up by the shoulders (|x| in [cryFistIn, cryFistOut] on their own side, y in
     // [shoulderLow, shoulderHigh], at least fistsApart apart), then both pulled down past hipBelow, each
     // falling cryFall or more, within cryWindow s.
-    float cryFistIn=.08f,cryFistOut=.40f,shoulderLow=-.40f,shoulderHigh=-.02f,fistsApart=.25f,hipBelow=-.68f,cryFall=.38f;
+    // The owner's pulls (2026-11-05) ended 53-67 cm under the eyes, the line was 68, up to 31 cm behind them
+    // (pulled down and back; 12 was the most), and some began over the head (up to 12 cm over the eyes, the top
+    // was 2 under): now from up to 20 over, down to 50 under, as far back as cryBack. The fists at least
+    // fistsApart apart, wider than Howl's start (howlTogether), which may be at the face too.
+    float cryFistIn=.08f,cryFistOut=.40f,shoulderLow=-.40f,shoulderHigh=.20f,fistsApart=.32f,hipBelow=-.50f,cryFall=.38f,cryBack=.35f;
     double cryWindow=.6;
     // Leap: both arms back and down (y at most backLow, forward at most backBehind), then both above the
     // eyes by leapAbove, at least leapApart apart (not a two-handed grip), risen leapRise within leapWindow s.
@@ -192,7 +196,7 @@ inline bool Done(Engine& e,Motion m) {
     }
     case Motion::BattleCry: {
         bool end=r.y<=t.hipBelow&&l.y<=t.hipBelow&&r.x>=0&&l.x<=0;
-        for(int k=0;k<2;++k)end=end&&Forward(n.l[k])>=-.12f&&Forward(n.l[k])<=.35f;
+        for(int k=0;k<2;++k)end=end&&Forward(n.l[k])>=-t.cryBack&&Forward(n.l[k])<=.35f;
         for(size_t i=0;i<h.size();++i) {
             const auto& s=h[i];
             if(n.t-s.t>t.cryWindow)continue;

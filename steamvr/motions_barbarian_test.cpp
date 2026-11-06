@@ -125,6 +125,14 @@ int main() {
         Sim shout(Motion::Howl);shout.Move({.07f,-.08f,-.10f},{-.07f,-.08f,-.10f},.35f);shout.Hold(.2f);shout.Move({.08f,-.10f,-.55f},{-.08f,-.10f,-.55f},.2f);shout.Hold(.2f);
         Check(shout.casts==0,"Howl: both fists pushed forward together from the mouth (Shout) is no Howl");
     }
+    {   // the owner's Battle Cries (2026-11-05): from by the head down to the hips, ending 61-67 cm under the eyes, wide
+        Sim pull(Motion::BattleCry);pull.Move({.25f,.08f,-.10f},{-.25f,.06f,-.10f},.35f);pull.Hold(.1f);pull.Move({.50f,-.64f,.07f},{-.45f,-.62f,.0f},.25f);pull.Hold(.2f);
+        Check(pull.casts==1,"Battle Cry: fists from by the head pulled down to 62-64 cm under the eyes casts");
+        Sim back(Motion::BattleCry);back.Move({.25f,.08f,-.10f},{-.25f,.06f,-.10f},.35f);back.Hold(.1f);back.Move({.43f,-.68f,.31f},{-.49f,-.66f,.07f},.25f);back.Hold(.2f);
+        Check(back.casts==1,"Battle Cry: pulled down and back, 31 cm behind the eyes, casts");
+        Sim howl(Motion::BattleCry);howl.Move({.07f,.05f,-.25f},{-.07f,.05f,-.25f},.35f);howl.Hold(.1f);howl.Move({.50f,.05f,-.28f},{-.50f,.0f,-.32f},.25f);howl.Hold(.2f);
+        Check(howl.casts==0,"Battle Cry: the owner's Howl, flung wide at eye level, is not its pull");
+    }
     std::puts("motions-barbarian-test: ok");
     return 0;
 }
