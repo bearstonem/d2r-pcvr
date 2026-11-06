@@ -264,6 +264,11 @@ struct Tuning {
     // shoulder, yankBack or more within yankWindow, mostly back (rising, falling or drifting at most 0.7 as far), from where it pointed, casts there
     // (Output::landing). The arm drawn in or let down without a yank for aimLost, or aimSeconds, gives it up.
     float pointOut=.30f,pointArm=.38f,pointUp=.30f,pointSteady=.60f,pointHold=.15f;
+    // The right arm alone (owner, 2026-11-05, in the headset: "it should only be showing that circle if one arm
+    // is raised. When we raise both arms, the circle shouldn't be drawn for teleport"): the left hand out in
+    // front (pointOtherAhead or more) at the chest or higher (over pointOtherLow), or up past pointOtherHigh
+    // anywhere, shows none and takes one shown away at once (the yank then casts nothing).
+    float pointOtherAhead=.25f,pointOtherLow=-.45f,pointOtherHigh=-.15f;
     float pointFar=32.f,pointNear=6.f,pointSteepDeg=50.f;
     float yankBack=.18f,yankWindow=.25f,aimLost=.6f,aimSeconds=8.f;
     float cooldown=.6f;       // s after a cast
@@ -489,6 +494,11 @@ private:
             const bool out=Forward(c)>=t.pointOut&&arm>=t.pointArm&&way.y<=t.pointUp*arm;
             // shown long enough: given up, not shown again until the arm has come in (steadySince -2)
             if(aimingSince>=0&&n.t-aimingSince>t.aimSeconds){aimingSince=-1;steadySince=-2;}
+            const auto& l=n.l[1];   // the left arm raised too: none
+            if((Forward(l)>=t.pointOtherAhead&&l.y>=t.pointOtherLow)||l.y>=t.pointOtherHigh) {
+                aimingSince=outLost=-1;if(steadySince!=-2)steadySince=-1;
+                return false;
+            }
             if(out&&Len(Velocity(0))<t.pointSteady) {   // held out steady: aimed, and following the arm
                 if(steadySince==-1)steadySince=n.t;
                 if(steadySince>=0&&n.t-steadySince>=t.pointHold){if(aimingSince<0)aimingSince=n.t;pointWay=way;}

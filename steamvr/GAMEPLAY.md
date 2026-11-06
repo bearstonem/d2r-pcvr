@@ -2461,8 +2461,11 @@ us. It's hard to aim where you want to go"). The same day's first version, a fas
 showing the circle and a punch landing there, missed punches that stopped short and showed the circle
 as the arm came back after a teleport and at the start of Frost Nova and Blaze. Now the right arm held
 out ahead (the fist 30 cm ahead of the eyes or more and 38 cm from the shoulder, not pointing up) and
-steady for 0.15 s shows a circle where Teleport lands, in the landing circles' cold blue
-(`telegraph::TeleportMark`), whatever the Aim options: along the arm's heading (the line from the
+steady for 0.15 s, the left arm not raised too (out in front at the chest or higher, or up past the
+chin: owner, 2026-11-05, "When we raise both arms, the circle shouldn't be drawn for teleport"), shows
+where Teleport lands: an arcane violet sigil with a pillar of light over it (`telegraph::TeleportMark`,
+`D2R_DepthFog.fx` TeleportSigil and TelePillar), whatever the Aim options; the left arm raised takes it
+away at once. It goes along the arm's heading (the line from the
 shoulder through the fist), 32 cells away with the arm level, nearer evenly as it points down, 6 cells
 at 50 degrees below (`spellmotion::PointSpot`). It follows the arm while the arm stays out and steady.
 The fist yanked back toward the shoulder (18 cm within 0.25 s, mostly back) lands there

@@ -161,6 +161,18 @@ int main() {
          Check(s.casts==0&&!s.out.aiming,"Teleport: the arm let down slowly: no cast, and the circle goes");}
         {Sim s(Motion::Punch);s.Trigger(true);s.MoveR({.15f,.40f,-.15f},.4f);s.Hold(.4f);
          Check(!s.out.aiming,"Teleport: an arm raised overhead (Thunder Storm) points nowhere");}
+        // the right arm alone (owner, 2026-11-05: "When we raise both arms, the circle shouldn't be drawn")
+        {Sim s(Motion::Punch);s.Trigger(true);s.Move({.17f,-.22f,-.50f},{-.12f,-.25f,-.45f},.35f);s.Hold(.4f);
+         Check(!s.out.aiming,"Teleport: both arms out in front show no circle");}
+        {Sim s(Motion::Punch);s.Trigger(true);s.MoveL({-.20f,.10f,-.10f},.3f);point(s,{.17f,-.22f,-.50f});
+         Check(!s.out.aiming,"Teleport: the right arm out with the left raised high shows no circle");}
+        {Sim s(Motion::Punch);s.Trigger(true);point(s,{.17f,-.22f,-.50f});s.MoveL({-.15f,-.28f,-.40f},.2f);
+         Check(!s.out.aiming,"Teleport: the left arm raised in front takes the circle away at once");
+         s.MoveR({.17f,-.20f,-.22f},.15f);s.Hold(.2f);Check(s.casts==0,"Teleport: and the yank then casts nothing");
+         s.MoveL(RestL,.3f);s.MoveR({.17f,-.22f,-.50f},.3f);s.Hold(.25f);
+         Check(s.out.aiming,"Teleport: the left let down again and the right held out, it shows again");}
+        {Sim s(Motion::Punch);s.Trigger(true);s.MoveL({-.15f,-.38f,-.10f},.3f);point(s,{.17f,-.22f,-.50f});
+         Check(s.out.aiming,"Teleport: the left hand resting at the chest (not out in front) leaves the circle");}
         {Sim s(Motion::Punch);s.Trigger(true);point(s,{.17f,-.22f,-.50f});s.in.active=false;s.Step();s.in.active=true;s.Hold(.1f);
          Check(!s.out.aiming,"Teleport: the grips let go, the landing goes");}
         {Sim s(Motion::Punch);s.Trigger(true);point(s,{.17f,-.22f,-.50f});s.Hold(t.aimSeconds+.5f);
