@@ -25,22 +25,31 @@ struct Tuning {
     float armorCross=.04f,armorHigh=-.12f,armorLow=-.60f,armorNear=.30f,armorApart=.35f,armorHold=.40f;
     // The pointing start (N3, N5, N6): the right hand at least pointFrom ahead, held still (every step
     // under pointStill m/s) for pointHold s.
-    float pointFrom=.30f,pointHold=.15f,pointStill=.35f;
+    // up to pointHigh above the eyes (the owner chopped from a hand raised over eye level, 2026-11-05).
+    float pointFrom=.30f,pointHold=.15f,pointStill=.35f,pointHigh=.25f;
     float jab=.12f,jabWindow=.20f;     // N3 Corpse Explosion: then this far forward within the window
     float yank=.15f,yankWindow=.20f;   // N5 Amplify Damage: then this far back toward the eyes
-    float chop=.18f,chopWindow=.30f;   // N6 Lower Resist: then this far down
+    // N6 Lower Resist: then this far down, its fall at least as large as its move back toward the body (the
+    // owner's chops arc down and in, 2026-11-05: 16-19 cm down, coming in as far; Amplify Damage's yank is
+    // mostly back, at most 0.6 down for its pull, so the two keep apart).
+    // The chop at chopSpeed or faster at its fastest: the arm let down after pointing is no chop (the owner's
+    // were 7-8 m/s).
+    float chop=.15f,chopWindow=.30f,chopSpeed=1.8f;
     // N4 Golem: both fists overhead (golemHigh above the eyes or more), then slammed down within golemWindow,
-    // each golemFall or more, to golemLow or below in front of the chest, at slamSpeed or faster at their
-    // fastest. It stands golemAhead cells ahead.
+    // each golemFall or more, to golemLow or below, in front of the body or by its sides (the owner's slam
+    // ended at the sides, 2026-11-05), at slamSpeed or faster at their fastest. It stands golemAhead cells ahead.
     float golemHigh=.08f,golemFall=.40f,golemLow=-.28f,golemWindow=.6f,slamSpeed=1.2f,golemAhead=4;
     // N2 Raise Skeleton: both hands low (riseFrom or below: at rest by the hips), then lifted fast, riseMin
     // or more each, to the chest (riseTo to riseTop) within riseWindow, riseSpeed or faster at their
     // fastest, and stopped there (both still): a lift on overhead passes the chest without stopping. Each
-    // rises riseUpright times as far as it moves across, and they end at most riseApart apart.
-    float riseFrom=-.48f,riseTo=-.36f,riseTop=-.05f,riseMin=.18f,riseWindow=.6f,riseSpeed=1.0f,riseUpright=1.5f,riseApart=.55f;
+    // rises riseUpright times as far as it moves across, and they end at most riseApart apart, side by side (the
+    // right hand riseCross or less left of the left: crossed is Bone Armor). The owner's headset session
+    // (2026-11-05) widened them: lifts ended 58 cm apart, at eye level, the hands overlapping a centimetre.
+    float riseFrom=-.48f,riseTo=-.36f,riseTop=.05f,riseMin=.18f,riseWindow=.7f,riseSpeed=1.0f,riseUpright=1.5f,riseApart=.70f,riseCross=.03f;
     // N7 Poison Nova: hands together at the chest, then flung novaApart apart, each novaSide out on its
-    // own side and below novaLow, within novaWindow and at least flingSpeed fast.
-    float novaTogether=.30f,novaApart=.75f,novaSide=.25f,novaLow=-.40f,novaWindow=.8f,flingSpeed=1.5f;
+    // own side, at any height up to novaHigh (the owner's flings, 2026-11-05: 130-160 cm wide at shoulder
+    // height; it once had to end below the chest), within novaWindow and at least flingSpeed fast.
+    float novaTogether=.30f,novaApart=.75f,novaSide=.25f,novaHigh=.10f,novaWindow=.8f,flingSpeed=1.5f;
     // N8 Bone Prison: both hands out in front prisonApart apart, then brought within prisonTogether,
     // each in by prisonIn, within prisonWindow and at least closeSpeed fast.
     float prisonApart=.55f,prisonTogether=.20f,prisonFront=.30f,prisonIn=.15f,prisonWindow=.9f,closeSpeed=1.0f;
@@ -60,7 +69,7 @@ inline const char* Cue(Motion m) {
     case Motion::Golem:return "raise both fists over the head, then slam them down in front of you";
     case Motion::AmplifyDamage:return "hold the right hand out at a monster, then yank it back";
     case Motion::LowerResist:return "hold the right hand out at a monster, then chop it down";
-    case Motion::PoisonNova:return "hands together at the chest, then fling them out low and wide";
+    case Motion::PoisonNova:return "hands together at the chest, then fling them out wide";
     case Motion::BonePrison:return "hold both hands apart in front, then bring them together round a monster";
     default:return "no motion";
     }
@@ -84,7 +93,7 @@ inline float PeakSpeed(const std::vector<Sample>& s,size_t i,int h) {
 // The right hand held out still at a corpse or a monster: where the pointing motions begin.
 inline bool Pointing(const std::vector<Sample>& s,size_t i) {
     const auto& r=s[i].l[0];
-    return Engine::Forward(r)>=tuning.pointFrom&&r.y>=-.60f&&r.y<=.05f&&std::fabs(r.x)<=.45f&&
+    return Engine::Forward(r)>=tuning.pointFrom&&r.y>=-.60f&&r.y<=tuning.pointHigh&&std::fabs(r.x)<=.45f&&
         StillBefore(s,i,0,tuning.pointHold,tuning.pointStill);
 }
 // A pointing motion: from a pointing start no more than window s ago, does end hold for the start and the newest?
@@ -113,7 +122,7 @@ inline bool Done(Engine& e,Motion m) {
     }
     case Motion::RaiseSkeleton: {
         // from the latest moment both hands were low, lifted fast
-        bool end=Engine::Apart(n)<=t.riseApart&&n.l[0].x>n.l[1].x&&e.Still(0)&&e.Still(1);
+        bool end=Engine::Apart(n)<=t.riseApart&&n.l[0].x>=n.l[1].x-t.riseCross&&e.Still(0)&&e.Still(1);
         for(const auto& h:n.l)end=end&&h.y>=t.riseTo&&h.y<=t.riseTop&&F(h)>=0&&std::fabs(h.x)<=.45f;
         for(size_t i=s.size()-1;i-->0&&n.t-s[i].t<=t.riseWindow;) {
             const auto& a=s[i];
@@ -137,14 +146,14 @@ inline bool Done(Engine& e,Motion m) {
             if(back>=.03f)e.Toward(back/t.yank);
             return back>=t.yank&&std::fabs(c.y-o.y)<=.6f*back&&std::fabs(c.x-o.x)<=.6f*back;});
     case Motion::LowerResist:
-        return FromPoint(e,s,t.chopWindow,[&](const Sample& a,size_t){
+        return FromPoint(e,s,t.chopWindow,[&](const Sample& a,size_t i){
             const auto& c=n.l[0];const auto& o=a.l[0];const float down=o.y-c.y;
             if(down>=.04f)e.Toward(down/t.chop);
-            return down>=t.chop&&std::fabs(F(c)-F(o))<=.6f*down&&std::fabs(c.x-o.x)<=.6f*down;});
+            return down>=t.chop&&std::fabs(F(c)-F(o))<=down&&std::fabs(c.x-o.x)<=.6f*down&&detail::PeakSpeed(s,i,0)>=t.chopSpeed;});
     case Motion::Golem: {
         // from the latest moment both fists were overhead, slammed down in front
         bool end=true;
-        for(const auto& h:n.l)end=end&&h.y<=t.golemLow&&h.y>=-.85f&&F(h)>=.05f&&std::fabs(h.x)<=.50f;
+        for(const auto& h:n.l)end=end&&h.y<=t.golemLow&&h.y>=-.95f&&F(h)>=-.40f&&std::fabs(h.x)<=.55f;
         for(size_t i=s.size()-1;i-->0&&n.t-s[i].t<=t.golemWindow;) {
             const auto& a=s[i];
             if(a.l[0].y<t.golemHigh||a.l[1].y<t.golemHigh)continue;
@@ -157,7 +166,7 @@ inline bool Done(Engine& e,Motion m) {
         return false;
     }
     case Motion::PoisonNova: {
-        const bool end=Engine::Apart(n)>=t.novaApart&&n.l[0].x>=t.novaSide&&n.l[1].x<=-t.novaSide&&n.l[0].y<=t.novaLow&&n.l[1].y<=t.novaLow;
+        const bool end=Engine::Apart(n)>=t.novaApart&&n.l[0].x>=t.novaSide&&n.l[1].x<=-t.novaSide&&n.l[0].y<=t.novaHigh&&n.l[1].y<=t.novaHigh;
         for(size_t i=s.size()-1;i-->0&&n.t-s[i].t<=t.novaWindow;) {
             const auto& a=s[i];
             bool chest=Engine::Apart(a)<=t.novaTogether;

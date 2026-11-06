@@ -75,6 +75,22 @@ int main() {
         {Motion::RaiseSkeleton,ArmsOverhead,"Raise Skeleton: the arms raised on overhead (a golem's start) cast nothing"},
         {Motion::BoneArmor,ShortArmor,"Bone Armor: crossed for a moment casts nothing"}};
     for(const auto& l:lazy){Sim s(l.motion);l.perform(s);Check(s.casts==0,l.label);}
+    {   // the owner's headset session (2026-11-05): what was missed then casts now
+        Sim wide(Motion::RaiseSkeleton);wide.Move({.29f,-.62f,-.15f},{-.29f,-.62f,-.15f},.3f);wide.Move({.29f,-.22f,-.10f},{-.29f,-.22f,-.10f},.3f);wide.Hold(.2f);
+        Check(wide.casts==1,"Raise Skeleton: lifted 58 cm apart casts");
+        Sim high(Motion::RaiseSkeleton);high.Move({.20f,-.62f,-.15f},{-.20f,-.62f,-.15f},.3f);high.Move({.24f,0,-.05f},{-.24f,0,-.05f},.3f);high.Hold(.2f);
+        Check(high.casts==1,"Raise Skeleton: lifted to eye level casts");
+        Sim close(Motion::RaiseSkeleton);close.Move({.10f,-.62f,-.15f},{-.10f,-.62f,-.15f},.3f);close.Move({.08f,-.25f,-.15f},{.09f,-.25f,-.15f},.3f);close.Hold(.2f);
+        Check(close.casts==1,"Raise Skeleton: the hands overlapping a centimetre cast");
+        Sim crossed(Motion::RaiseSkeleton);crossed.Move({.10f,-.62f,-.15f},{-.10f,-.62f,-.15f},.3f);crossed.Move({-.10f,-.30f,-.15f},{.10f,-.30f,-.15f},.3f);crossed.Hold(.2f);
+        Check(crossed.casts==0,"Raise Skeleton: crossed is Bone Armor's, not it");
+        Sim nova(Motion::PoisonNova);nova.Move({.08f,-.38f,-.25f},{-.08f,-.38f,-.25f},.35f);nova.Move({.70f,-.15f,-.10f},{-.68f,-.12f,-.15f},.25f);nova.Hold(.2f);
+        Check(nova.casts==1,"Poison Nova: flung 138 cm wide at shoulder height casts");
+        Sim side(Motion::Golem);side.Move({.15f,.20f,-.15f},{-.15f,.20f,-.15f},.45f);side.Move({.36f,-.75f,.29f},{-.36f,-.75f,.16f},.25f);side.Hold(.2f);
+        Check(side.casts==1,"Golem: slammed down to the sides casts");
+        Sim chop(Motion::LowerResist);chop.MoveR({.18f,.08f,-.45f},.35f);chop.Hold(.3f);chop.MoveR({.18f,-.55f,-.30f},.2f);chop.Hold(.2f);
+        Check(chop.casts==1,"Lower Resist: a big chop from a hand raised over the eyes, arcing in, casts");
+    }
     {   // nothing low (a tester, 2026-11-05: "Please no floor stuff"), and the golem's spot ahead
         for(const auto m:{Motion::RaiseSkeleton,Motion::Golem}) {
             Sim s(m);(m==Motion::Golem?Golem:RaiseSkeleton)(s);

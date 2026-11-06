@@ -222,7 +222,8 @@ struct Tuning {
     float pushWindow=.5f;     // s ago (a push, not lowering the arms),
     float pushBelow=-.40f;    // m: ending this far below the eyes, not behind the back
     float rubClose=.18f;      // m: Static Field: controllers this close are palms together;
-    float rubPath=.15f;       // m of their rubbing charges it,
+    float rubPath=.15f;       // m of their rubbing charges it (leaking rubLeak m a second: the owner's two hands
+    float rubLeak=.12f;       // held together to point charged it by their wobble and a yank cast it, 2026-11-05),
     float snapApart=.45f;     // m: then the hands this far apart
     float snapWindow=.5f;     // s after they parted
     float guardApart=.35f;    // m: Energy Shield: both hands up at the face, this close (crossed or not)
@@ -406,6 +407,7 @@ private:
             if(samples.size()>=2) {
                 const auto& p=samples[samples.size()-2];
                 if(apart<=t.rubClose&&Apart(p)<=t.rubClose)rub+=Len((n.l[0]-n.l[1])-(p.l[0]-p.l[1]));
+                rub=std::max(0.f,rub-t.rubLeak*float(n.t-p.t));
             }
             if(apart<=t.rubClose)parted=-1;
             else if(parted<0&&rub>0)parted=n.t;
