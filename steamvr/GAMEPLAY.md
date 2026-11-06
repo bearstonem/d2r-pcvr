@@ -2276,14 +2276,41 @@ go flattens it onto the plane it was drawn in (`glyphs::Flatten`: the best fit t
 points, up as near the room's up as that plane allows, away from the player on one lying
 nearly flat; a path deeper than half its next extent, or a line, stays on the facing
 plane), recognises it (`steamvr/glyph_recognizer.h`) and casts the skill the player put on
-that shape on the wheel's GLYPHS page (`[glyphs] circle ... wave`, skill ids; `draw_slot`,
-0-9 or -1). Its picker offers the hero's skills that need no target and Town Portal (359,
+that shape for that hand on the wheel's GLYPHS page (`[glyphs] circle ... wave`, skill ids; `draw_slot`,
+0-9 or -1; each hand its own set, below). Its picker offers the hero's skills that need no target and Town Portal (359,
 the game's shortcut: a scroll if there is one, else the tome; a hand slot holding it reads
 as 219 or 220), not Interact. The
 press is never a native cast (the transport drops it from the hand slots and from the
 physical spells). A wheel, a held bottle, a native menu, a grip change on a face button or
 lost tracking cancels the stroke; the button still held but no longer the press is a
 cancel, not a release.
+
+Each hand its own set (owner, 2026-11-05: "expand the glyphs where left and the right hand glyphs
+can be different sets. That way doubling the amount of glyphs we can draw and assign spells to").
+Each hand may have a Draw glyph button: `draw_slot` (the only one before, on either hand) and
+`second_draw_slot`, each a slot of either hand, one a hand (`glyphcast::DrawSlots`; two on one hand,
+as only an INI edited by hand has, draw `draw_slot`'s). Draw glyph picked on a hand's button takes the
+key already on that hand, else a free one (`glyphcast::DrawKeyFor`), so the other hand's stays; a game
+skill put on either stops that one drawing (`DrawKeyHolding`). The shapes: `circle ... wave` stay the
+right hand's, `left_circle ... left_wave` are the left's, -1 none of its own: then the left hand's
+shape casts the right hand's (`interaction::GlyphCasts`; 16 skills when every left shape has its own).
+Nothing is rewritten: a profile saved with the one set reads as before, and a Draw glyph button already
+on the left keeps casting the same skills until a left shape is given its own. One stroke at a time:
+its hand is latched as it begins (the other hand's button is not the press meanwhile, as any second
+cast). The GLYPHS page shows one hand's set, the wheel's own when opened; its hand box ("SHAPES OF THE
+Right hand", upper left where QUICK USE is on the Spells page; `GlyphHandCell`) shows the other's, with
+that hand's Draw glyph button, and each wheel keeps the set
+it was left on. The centre names the hand; a left shape casting the right hand's shows that skill
+dimmed under RIGHT HAND'S; CLEAR GLYPH on a left shape gives it back the right hand's. The picker's
+title, card and hint name the hand (`BindGlyph`'s index: the shape, the left hand's 8 on,
+`interaction::GlyphIndex`). Logs: each `Frame glyph:` cast or refusal names the hand (and "the right
+hand's" for a left shape casting it); each save names the hand and the key. Tests: `glyph-cast-test`
+(the two buttons: a saved one on either hand, one a hand, the key a pick takes and a skill clears),
+`skill-categories-test` (the lookup by hand and the fallback, the hand box, a left shape's request, the
+set kept per wheel, what repaints), `vr-settings-test` (the keys, -1 when missing),
+`vr-settings-store-test` (a one-set profile with its button on the left reads as saved; a save writes
+its one key), `interaction-glyphs-test` (the left hand's set and a left shape's picker drawn).
+Headset play has not tried it yet.
 
 Recognition: $P point clouds (32 points, direction and start free, upright) against
 procedural templates. The stroke is compared as drawn and mirrored left to right (a bolt

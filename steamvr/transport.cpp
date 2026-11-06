@@ -250,6 +250,7 @@ bool arcaneAtlasPending=false,arcaneImageReady=false;
 // Glyph casting (glyph_cast.h): the stroke the Draw glyph button draws, the cast it makes, and its
 // trail (glyph_trail.h), painted into the shared atlas and shown where it was drawn.
 glyphcast::Stroke glyphStroke;
+int glyphHand=-1;   // the hand drawing the stroke (right = 0), latched as it begins: each hand casts its own set
 glyphcast::Cast glyphCast;
 glyphtrail::Painter glyphPainter;
 uint64_t glyphStrokeId=0,glyphPaintKey=0,glyphShownStroke=0;
@@ -290,7 +291,7 @@ int MotionsKey(int skillClass) {
 uint64_t glyphSaveSequence=0,glyphSaveAt=0;
 settings::Values glyphWanted{};
 interaction::Reply glyphReply{};
-bool glyphDrawClear=false;   // a game skill was put on the draw button: draw_slot goes back to none
+int glyphDrawClear=-1;   // a game skill was put on a Draw glyph button: its key (0 draw_slot, 1 second_draw_slot) goes back to none
 // Quest / level-up notices: a card standing in the room for a few seconds
 // instead of the native panel at the eyes (notice_card.h). Each card is
 // painted once, in the background, when it comes up.
@@ -3408,14 +3409,14 @@ void Input() {
     if(bowvr::SpellReady()&&interaction::Fresh(bindingSnapshot,gamestate::LocalPlayer(),GetTickCount64()))
         for(int i=0;i<skills::Count;++i)if(bindingSnapshot.skills[i].physical&&bindingSnapshot.skills[i].available)
             handInput.independentSlots|=1u<<i;
-    // Glyph casting: the Draw glyph button ([glyphs] draw_slot, or the save on its way) draws, below;
-    // it is never a physical spell.
+    // Glyph casting: each hand's Draw glyph button ([glyphs] draw_slot and second_draw_slot, one a hand,
+    // or the save on its way) draws, below; it is never a physical spell.
     const auto glyphSettings=vrsettings::Read();
     if(glyphSaveSequence&&((glyphSettings.sequence==glyphSaveSequence&&glyphSettings.result!=settings::Result::Saving)||GetTickCount64()-glyphSaveAt>2000))
         glyphSaveSequence=0;   // saved, refused, or overtaken by another save: the profile's values again
     const auto& glyphValues=glyphSaveSequence?glyphWanted:glyphSettings.values;
-    const int glyphDrawSlot=glyphSettings.ready?glyphcast::DrawSlot(glyphValues[settings::GlyphDraw]):-1;
-    if(glyphDrawSlot>=0)handInput.independentSlots&=~(1u<<glyphDrawSlot);
+    const auto glyphDrawSlots=glyphSettings.ready?glyphcast::DrawSlots(glyphValues[settings::GlyphDraw],glyphValues[settings::GlyphDrawSecond]):std::array<int,2>{-1,-1};
+    for(const int slot:glyphDrawSlots)if(slot>=0)handInput.independentSlots&=~(1u<<slot);
     handInput.layout^=uint64_t(handInput.independentSlots)<<48;
     handInput.active=motionInput.active&&motionInput.tracked[0]&&motionInput.tracked[1]&&handAimTracked[0]&&handAimTracked[1]&&gamestate::LocalPlayer();
     handInput.occupied=interactionOutput.bottle>=0||interactionOutput.owner[0]==interaction::Owner::Holster||interactionOutput.owner[1]==interaction::Owner::Holster;
@@ -3507,8 +3508,8 @@ void Input() {
         leftStrikesSequence=0;   // saved, refused, or overtaken by another save: the profile's value again
     interactionInput.leftStrikes=hudSettings.ready&&bindingSnapshot.skillClass==settings::heroclass::Druid?
         int(leftStrikesSequence?leftStrikesWanted:hudSettings.values[settings::LeftHandStrikes]):-1;
-    interactionInput.glyphDraw=glyphDrawSlot;
-    for(int i=0;i<glyphs::ShapeCount;++i)interactionInput.glyphSkills[size_t(i)]=glyphcast::SkillOf(glyphValues[settings::GlyphKey(i)]);
+    interactionInput.glyphDraw=glyphDrawSlots;
+    for(int h=0;h<2;++h)for(int i=0;i<glyphs::ShapeCount;++i)interactionInput.glyphSkills[size_t(h)][size_t(i)]=glyphcast::SkillOf(glyphValues[settings::GlyphKey(i,h)]);
     {const int key=MotionsKey(interactionInput.snapshot.skillClass);interactionInput.motionsOff=key>=0?spellmotion::OffMask(glyphValues[key]):0;}
     if(glyphReply.sequence){if(glyphReply.session==interactionInput.session)interactionInput.reply=glyphReply;glyphReply={};}   // once
     {
@@ -3908,19 +3909,25 @@ void Input() {
         glyphSaveSequence=save.sequence;glyphSaveAt=GetTickCount64();glyphWanted=save.values;return true;
     };
     if(interactionOutput.request.action==interaction::Action::BindGlyph||interactionOutput.request.action==interaction::Action::BindGlyphDraw) {
-        // Glyph casting's wheel settings. Draw glyph also clears the game skill on that button, so it
-        // casts nothing else (that clear's reply answers the wheel).
+        // Glyph casting's wheel settings: a shape's skill for one hand (index: interaction::GlyphIndex), or a
+        // hand's Draw glyph button (the key on that hand already, else a free one: glyphcast::DrawKeyFor).
+        // Draw glyph also clears the game skill on that button, so it casts nothing else (that clear's reply
+        // answers the wheel).
         const auto& r=interactionOutput.request;
         const bool shape=r.action==interaction::Action::BindGlyph;
-        const bool valid=shape?r.index>=0&&r.index<glyphs::ShapeCount:r.index>=0&&r.index<skills::Count;
-        const bool saved=valid&&saveGlyphs(shape?settings::GlyphKey(r.index):settings::GlyphDraw,float(shape?r.skill:r.index));
+        const bool valid=shape?r.index>=0&&r.index<2*glyphs::ShapeCount:r.index>=0&&r.index<skills::Count;
+        const int shapeHand=r.index/glyphs::ShapeCount,shapeOf=r.index%glyphs::ShapeCount;
+        const int drawKey=shape||!valid?-1:glyphcast::DrawKeyFor(glyphValues[settings::GlyphDraw],glyphValues[settings::GlyphDrawSecond],r.index);
+        const bool saved=valid&&saveGlyphs(shape?settings::GlyphKey(shapeOf,shapeHand):drawKey?settings::GlyphDrawSecond:settings::GlyphDraw,float(shape?r.skill:r.index));
         char line[160];
-        if(shape)std::snprintf(line,sizeof line,"Frame glyph: the %s's skill = %d (%s)",valid?glyphs::Name(glyphs::Shape(r.index)):"?",r.skill,saved?"saved":"refused: another save is running");
-        else std::snprintf(line,sizeof line,"Frame glyph: Draw glyph on hand slot %d (%s)",r.index,saved?"saved; its game skill cleared":"refused: another save is running");
+        if(shape)std::snprintf(line,sizeof line,"Frame glyph: the %s hand's %s = skill %d%s (%s)",shapeHand?"left":"right",valid?glyphs::Name(glyphs::Shape(shapeOf)):"?",r.skill,
+            shapeHand&&r.skill<0?", the right hand's again":"",saved?"saved":"refused: another save is running");
+        else std::snprintf(line,sizeof line,"Frame glyph: Draw glyph on hand slot %d, the %s hand's ([glyphs] %s; %s)",r.index,skills::Hand(r.index)?"left":"right",
+            drawKey?"second_draw_slot":"draw_slot",saved?"saved; its game skill cleared":"refused: another save is running");
         Say(line);
         if(saved&&!shape){auto clear=r;clear.action=interaction::Action::BindSkill;interactionstate::Request(clear);}
         else glyphReply={r.sequence,r.session,saved?interaction::Result::Applied:interaction::Result::Refused};
-        if(saved&&!shape)glyphDrawClear=false;
+        if(saved&&!shape&&glyphDrawClear==drawKey)glyphDrawClear=-1;
     } else if(interactionOutput.request.action==interaction::Action::ToggleMotion) {
         // The MOTIONS page: a card's motion on or off (the class's setting, one bit each: MotionsKey).
         const auto& r=interactionOutput.request;
@@ -3933,11 +3940,12 @@ void Input() {
         Say(line);
         glyphReply={r.sequence,r.session,saved?interaction::Result::Applied:interaction::Result::Refused};
     } else if(interactionOutput.request.action!=interaction::Action::None) {
-        // A game skill (or none) put on the draw button: it stops drawing.
-        if(interactionOutput.request.action==interaction::Action::BindSkill&&interactionOutput.request.index==glyphDrawSlot)glyphDrawClear=true;
+        // A game skill (or none) put on a Draw glyph button: it stops drawing.
+        if(interactionOutput.request.action==interaction::Action::BindSkill)
+            if(const int key=glyphcast::DrawKeyHolding(glyphValues[settings::GlyphDraw],glyphValues[settings::GlyphDrawSecond],interactionOutput.request.index);key>=0)glyphDrawClear=key;
         interactionstate::Request(interactionOutput.request);
     }
-    if(glyphDrawClear&&saveGlyphs(settings::GlyphDraw,-1)){glyphDrawClear=false;Say("Frame glyph: a skill put on the Draw glyph button - it no longer draws");}
+    if(glyphDrawClear>=0&&saveGlyphs(glyphDrawClear?settings::GlyphDrawSecond:settings::GlyphDraw,-1)){glyphDrawClear=-1;Say("Frame glyph: a skill put on a Draw glyph button - it no longer draws");}
     if(interactionOutput.feedback)MotionPulse(interactionOutput.feedbackHand,interactionOutput.feedback==4?haptics::Category::Alert:haptics::Category::Interaction,
         interactionOutput.feedback==2?.65f:.25f,interactionOutput.feedback>=3?100000000:35000000);
     motionInput.palette=false; // Dedicated interaction owner handles the new wheel/belt.
@@ -4012,8 +4020,8 @@ void Input() {
             dualwield::ThrownPair(skel::HeroClass(),gamestate::MeleeEquipment());
         if(leftThrowArmed&&requested==shieldSlot){requested=-1;handOutput.interact=false;}
     }
-    // Glyph casting: the Draw glyph button's press draws (below), never a native cast.
-    const bool glyphPressed=glyphDrawSlot>=0&&handOutput.slot==glyphDrawSlot;
+    // Glyph casting: a hand's Draw glyph button's press draws (below), never a native cast.
+    const bool glyphPressed=handOutput.slot>=0&&glyphDrawSlots[size_t(skills::Hand(handOutput.slot))]==handOutput.slot;
     if(glyphPressed){requested=-1;handOutput.interact=false;}
     const bool requestedKnown=requested>=0&&quickFresh&&quickSnapshot.skills[requested].known&&quickSnapshot.skills[requested].available;
     handOutput.interact=requestedKnown&&quickSnapshot.skills[requested].id==357;
@@ -4349,27 +4357,30 @@ void Input() {
             else if(motionOutput.skill<0&&quickFresh&&quickSnapshot.skills[pulse].available)motionOutput.skill=pulse;
         }
     }
-    // Glyph casting (glyph_cast.h): while the Draw glyph button is held its hand's path is a stroke on
-    // the upright plane facing the player; let go, it is recognised and the skill on that shape is
+    // Glyph casting (glyph_cast.h): while a hand's Draw glyph button is held its path is a stroke on
+    // the upright plane facing the player; let go, it is recognised and the skill that hand has on that
+    // shape (each hand its own set; a left shape with none, the right hand's: interaction::GlyphCasts) is
     // cast by a native press: its own hand slot, else the game's right trigger with the skill put on
-    // that record first. The trail glows where it was drawn and fades (glyph_trail.h).
+    // that record first. The trail glows where it was drawn and fades (glyph_trail.h). One stroke at a
+    // time: the hand is latched as it begins (the other's press is not the cast owner meanwhile).
     {
         const double now=motionInput.time;
-        int hand=-1,button=-1;
-        for(int h=0;h<2&&glyphDrawSlot>=0;++h)for(int b=0;b<5;++b)if(skills::HandSlot(h,b)==glyphDrawSlot){hand=h;button=b;}
+        const int hand=glyphStroke.Drawing()?glyphHand:glyphPressed?skills::Hand(handOutput.slot):-1;
+        int button=-1;
+        for(int b=0;b<5&&hand>=0;++b)if(skills::HandSlot(hand,b)==glyphDrawSlots[size_t(hand)])button=b;
         // Still down, but no longer the press (a wheel, a grip change, another owner): cancelled, not let go.
-        const bool down=hand>=0&&(button==0?handInput.trigger[hand]>.2f:handInput.face[hand][(button-1)%2]);
+        const bool down=button>=0&&(button==0?handInput.trigger[hand]>.2f:handInput.face[hand][(button-1)%2]);
         glyphcast::StrokeInput in;
-        in.time=now;in.held=glyphPressed;
+        in.time=now;in.held=glyphPressed&&skills::Hand(handOutput.slot)==hand;
         in.tracked=hand>=0&&handAimTracked[hand]&&motionHeadTracked;
         in.allowed=hand>=0&&motionControls.load()&&gameplayChain&&motionInput.active&&quickFresh&&!panelMode&&!spatialMode&&!settingsOwned&&
             !interactionOutput.wheel&&!interactionOutput.settings&&interactionOutput.bottleHand!=hand&&
-            interactionOutput.owner[hand]==interaction::Owner::Combat&&!bloodOutput.block[hand]&&!(glyphStroke.Drawing()&&!glyphPressed&&down);
+            interactionOutput.owner[hand]==interaction::Owner::Combat&&!bloodOutput.block[hand]&&!(glyphStroke.Drawing()&&!in.held&&down);
         if(hand>=0){const auto& tip=handAim[hand].p;in.x=tip.x;in.y=tip.y;in.z=tip.z;}
         const auto right=math::Rotate(interactionInput.head.q,{1,0,0});in.rightX=right.x;in.rightZ=right.z;
         const auto stroke=glyphStroke.Step(in);
         if(stroke.event==glyphcast::Event::Began) {
-            ++glyphStrokeId;glyphBeganAt=now;glyphEndedAt=-1;glyphLook=glyphtrail::Look::Drawing;
+            ++glyphStrokeId;glyphBeganAt=now;glyphEndedAt=-1;glyphLook=glyphtrail::Look::Drawing;glyphHand=hand;
             MotionPulse(hand,haptics::Category::Interaction,.2f,15000000);
         } else if(stroke.event==glyphcast::Event::Cancelled) {
             glyphEndedAt=now;glyphLook=glyphtrail::Look::Refused;
@@ -4377,7 +4388,10 @@ void Input() {
         } else if(stroke.event==glyphcast::Event::Refused||stroke.event==glyphcast::Event::Recognised) {
             glyphEndedAt=now;
             const auto& r=stroke.result;
-            const int skill=stroke.event==glyphcast::Event::Recognised?interactionInput.glyphSkills[size_t(r.shape)]:-1;
+            const bool recognised=stroke.event==glyphcast::Event::Recognised;
+            const int skill=recognised?interaction::GlyphCasts(interactionInput.glyphSkills,hand,int(r.shape)):-1;
+            const bool follows=recognised&&interaction::GlyphFollows(interactionInput.glyphSkills,hand,int(r.shape));   // a left shape with none of its own
+            const char* whose=hand==1?"left":"right";
             const auto known=interaction::GlyphSkill(quickSnapshot,skill);
             const char* refused=stroke.event==glyphcast::Event::Refused?r.why:skill<0?"no skill on it (the wheel's GLYPHS page)":
                 !known.known?(skill==359?"no Town Portal scroll or tome":"not this hero's skill"):!known.available?"the skill is unavailable now":glyphCast.Busy()?"the last glyph is still casting":nullptr;
@@ -4395,15 +4409,15 @@ void Input() {
             else std::snprintf(plane,sizeof plane,"the plane facing you");
             if(refused) {
                 glyphLook=glyphtrail::Look::Refused;
-                std::snprintf(line,sizeof line,"Frame glyph: %s%s, %s (score %.2f, next %.2f, corners %d, %.1f s, %s)",
-                    stroke.event==glyphcast::Event::Recognised?"the ":"not recognised, nearest the ",glyphs::Name(stroke.event==glyphcast::Event::Recognised?r.shape:r.nearest),
+                std::snprintf(line,sizeof line,"Frame glyph: %s hand, %s%s, %s (score %.2f, next %.2f, corners %d, %.1f s, %s)",whose,
+                    recognised?"the ":"not recognised, nearest the ",glyphs::Name(recognised?r.shape:r.nearest),
                     refused,r.score,r.second,r.corners,stroke.seconds,plane);
                 MotionPulse(hand,haptics::Category::Interaction,.25f,100000000);
             } else {
                 glyphCast.Begin(plan,skill,-1,now);glyphLook=glyphtrail::ElementLook(skill);
                 glyphPress={};glyphPress.skill=known;
-                std::snprintf(line,sizeof line,"Frame glyph: the %s -> %s (skill %d) via %s (score %.2f, next %.2f, corners %d, %.1f s, %s)",
-                    glyphs::Name(r.shape),known.name,skill,plan.how==glyphcast::How::Slot?"its hand slot":plan.how==glyphcast::How::Record?"the right trigger":
+                std::snprintf(line,sizeof line,"Frame glyph: %s hand, the %s -> %s (skill %d%s) via %s (score %.2f, next %.2f, corners %d, %.1f s, %s)",whose,
+                    glyphs::Name(r.shape),known.name,skill,follows?", the right hand's":"",plan.how==glyphcast::How::Slot?"its hand slot":plan.how==glyphcast::How::Record?"the right trigger":
                     "the right trigger, put on it first",r.score,r.second,r.corners,stroke.seconds,plane);
                 MotionPulse(hand,haptics::Category::Spell,.6f,60000000);
             }
@@ -7145,7 +7159,7 @@ void Shutdown(bool preserveResolution) {
     gameplayChain=XR_NULL_HANDLE;
     bloodScreen.Reset();bloodOutput={};bloodShown=0;bloodPaintKey=bloodRequestedKey=~0ull;bloodPaintRequest=0;bloodPaintAt=0;bloodAtlasPending=bloodImageReady=false;
     arcaneController.Reset();arcaneOutput={};arcanePaintKey=~0ull;arcanePaintSession=0;arcanePaintAt=0;arcaneAtlasPending=arcaneImageReady=false;
-    glyphStroke={};glyphCast={};glyphPaintKey=glyphShownStroke=0;glyphBeganAt=0;glyphEndedAt=-1;glyphPaintAt=0;glyphLook=glyphtrail::Look::Drawing;glyphPressRt=glyphTrailShown=false;glyphAtlasPending=glyphImageReady=false;
+    glyphStroke={};glyphHand=-1;glyphCast={};glyphPaintKey=glyphShownStroke=0;glyphBeganAt=0;glyphEndedAt=-1;glyphPaintAt=0;glyphLook=glyphtrail::Look::Drawing;glyphPressRt=glyphTrailShown=false;glyphAtlasPending=glyphImageReady=false;
     glyphPress={};glyphRecordAt.store(0);
     motionLanding={};if(teleportShown){telegraph::Current().ClearSkill(telegraph::TeleportMark);teleportShown=false;}
     spellTrigger=0;for(auto& e:spellFree)e.Reset();spellFreeAt=-1;spellGripSince=-1;spellGripCast=false;spellGripsArmed.store(false);spellGate.Reset();

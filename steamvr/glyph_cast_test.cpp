@@ -106,6 +106,21 @@ int main() {
     }
     Check(DrawSlot(3) == 3 && DrawSlot(-1) == -1 && DrawSlot(10) == -1 && DrawSlot(std::nanf("")) == -1, "the draw slot setting");
     Check(SkillOf(149) == 149 && SkillOf(-1) == -1, "a shape's skill setting");
+    {   // each hand its own Draw glyph button (owner, 2026-11-05): draw_slot and second_draw_slot, either key either hand
+        using Slots = std::array<int, 2>;
+        const int right = skills::HandSlot(0, 1), right2 = skills::HandSlot(0, 2), left = skills::HandSlot(1, 0), left2 = skills::HandSlot(1, 3);
+        Check(DrawSlots(float(right), -1) == Slots{right, -1} && DrawSlots(-1, -1) == Slots{-1, -1}, "one button, as saved before: its hand draws");
+        Check(DrawSlots(float(left), -1) == Slots{-1, left}, "a draw_slot saved on the left hand stays the left hand's");
+        Check(DrawSlots(float(left), float(right)) == Slots{right, left} && DrawSlots(float(right), float(left)) == Slots{right, left}, "one a hand, from either key");
+        Check(DrawSlots(float(right), float(right2)) == Slots{right, -1} && DrawSlots(std::nanf(""), float(left)) == Slots{-1, left}, "two on one hand: draw_slot's; an unreadable key: none");
+        Check(DrawKeyFor(-1, -1, right) == 0 && DrawKeyFor(-1, -1, left) == 0, "the first: draw_slot");
+        Check(DrawKeyFor(float(left), -1, right) == 1 && DrawKeyFor(float(right), -1, left) == 1, "the other hand: the second, the first hand's stays");
+        Check(DrawKeyFor(float(right), float(left), right2) == 0 && DrawKeyFor(float(right), float(left), left2) == 1 && DrawKeyFor(-1, float(left), left2) == 1,
+              "a hand's button moved: the key already on that hand");
+        Check(DrawKeyFor(-1, float(left), right) == 0 && DrawKeyFor(float(right), float(right2), left) == 1, "else a free key; two on one hand (edited): the second makes room");
+        Check(DrawKeyHolding(float(right), float(left), left) == 1 && DrawKeyHolding(float(right), float(left), right) == 0 &&
+              DrawKeyHolding(float(right), float(left), right2) == -1 && DrawKeyHolding(-1, -1, -1) == -1, "the key a game skill put on a Draw glyph button clears");
+    }
     if (failures) { std::fprintf(stderr, "%d failures\n", failures); return 1; }
     std::puts("glyph-cast-test: ok");
     return 0;

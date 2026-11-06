@@ -320,8 +320,8 @@ struct SkillCue {
 inline bool Fresh(const Snapshot& s,uint64_t session,uint64_t now) {
     return session&&s.session==session&&now>=s.at&&now-s.at<=650;
 }
-// BindGlyph / BindGlyphDraw: glyph casting's wheel settings (index: the shape / the hand slot), answered
-// by the transport, which saves them; no game command.
+// BindGlyph / BindGlyphDraw: glyph casting's wheel settings (index: the shape, the left hand's 8 on
+// (GlyphIndex) / the hand slot), answered by the transport, which saves them; no game command.
 enum class Action { None, Potion, Equip, Quest, Map, Character, Skills, BindSkill, Developer, FeedMerc, BindItem, UseItem, RunWalk, BindGlyph, BindGlyphDraw, ToggleMotion };
 enum class Result { None, Pending, Applied, Refused, Cancelled, Dispatched, KitRefused, DebugUpdated, TurnsUpdated, SharpUpdated, FillUpdated, RimsUpdated, SkyRimsUpdated, BodiesUpdated };
 struct Request {
@@ -374,6 +374,21 @@ constexpr MenuBounds QuickUseBounds{.025f,.025f,.255f,.18f};
 constexpr int GlyphsCell=214,GlyphDrawId=9000;
 constexpr MenuBounds GlyphsBounds{.745f,.025f,.975f,.18f};
 constexpr int GlyphShapes=8;
+// Each hand its own glyphs (owner, 2026-11-05: "left and the right hand glyphs can be different sets. That way
+// doubling the amount of glyphs we can draw and assign spells to"): the skill on each shape per hand (right = 0),
+// as [glyphs] has them, -1 none. A left shape with none of its own casts the right hand's (the one set saved
+// before), so a Draw glyph button already on the left keeps working. The GLYPHS page shows one hand's set,
+// the wheel's own first; its hand box (upper left, where QUICK USE is on the Spells page) shows the other's.
+using GlyphSets=std::array<std::array<int,GlyphShapes>,2>;
+constexpr GlyphSets NoGlyphs{{{-1,-1,-1,-1,-1,-1,-1,-1},{-1,-1,-1,-1,-1,-1,-1,-1}}};
+inline int GlyphCasts(const GlyphSets& sets,int hand,int shape) {
+    if(shape<0||shape>=GlyphShapes)return -1;
+    return hand==1&&sets[1][size_t(shape)]>=0?sets[1][size_t(shape)]:sets[0][size_t(shape)];
+}
+inline bool GlyphFollows(const GlyphSets& sets,int hand,int shape){return hand==1&&shape>=0&&shape<GlyphShapes&&sets[1][size_t(shape)]<0&&sets[0][size_t(shape)]>=0;}
+constexpr int GlyphIndex(int hand,int shape){return (hand==1?GlyphShapes:0)+shape;}   // BindGlyph's index: the left hand's shapes 8 on
+constexpr int GlyphHandCell=215;
+constexpr MenuBounds GlyphHandBounds{.025f,.025f,.255f,.18f};
 // Motions (spell_motion.h): the MOTIONS box, lower right on the Spells and Equipment pages of a hero with
 // motions (the left claw box's mirror: the Sorceress, the Paladin, the Druid), and the MOTIONS page's
 // cards, one per motion skill of the class (spellmotion::PageOf), two columns of seven: pressed, a card
@@ -443,6 +458,7 @@ inline int WheelCell(float u,float v,int previous=-1,MenuPage page=MenuPage::Spe
         return -1;
     }
     if((QuickControls(page)||page==MenuPage::Glyphs)&&GlyphsBounds.Contains(u,v))return GlyphsCell;
+    if(page==MenuPage::Glyphs&&GlyphHandBounds.Contains(u,v))return GlyphHandCell;
     if(page==MenuPage::Map)return -1; // no invisible spells behind the map
     if(page==MenuPage::Developer) {
         if(developer&&devPage>=0&&devPage<dev::PageCount) {
@@ -510,9 +526,10 @@ struct Input {
     bool physicsThrows=false;
     struct Tossed {uint64_t id=0;bool landed=false;Vec p{};Quat q{0,0,0,1};} tossed{};
     Vec carry{}; // the player's own world velocity (Carry), zero when unknown
-    // Glyph casting's settings as they stand ([glyphs]): each shape's skill (-1 none) and the slot that draws.
-    std::array<int,GlyphShapes> glyphSkills{-1,-1,-1,-1,-1,-1,-1,-1};
-    int glyphDraw=-1;
+    // Glyph casting's settings as they stand ([glyphs]): each hand's skill on each shape (-1 none; the left's:
+    // the right hand's) and each hand's slot that draws (-1 none).
+    GlyphSets glyphSkills=NoGlyphs;
+    std::array<int,2> glyphDraw{-1,-1};
     int motionsOff=0;   // the hero's class's motions turned off ([motions] off for the Sorceress; spellmotion::Bit)
 };
 struct Output {
@@ -548,11 +565,12 @@ struct Output {
     std::array<int,skillcategories::Count> editCategoryCounts{};
     std::array<Skill,8> editOptions{};
     std::array<QuickItem,8> itemOptions{};
-    // Glyph casting: the GLYPHS page is open; the shape whose skill the picker is choosing (-1 none);
-    // the settings as Input gave them, for the painter.
+    // Glyph casting: the GLYPHS page is open; the hand whose set it shows (right = 0); the shape whose skill
+    // the picker is choosing (-1 none); the settings as Input gave them, for the painter.
     bool glyphs=false;
-    int glyphEdit=-1,glyphDraw=-1;
-    std::array<int,GlyphShapes> glyphSkills{-1,-1,-1,-1,-1,-1,-1,-1};
+    int glyphHand=0,glyphEdit=-1;
+    std::array<int,2> glyphDraw{-1,-1};
+    GlyphSets glyphSkills=NoGlyphs;
     // Motions: the MOTIONS page is open; the box shows (the hero's class has motions: spellmotion::PageOf);
     // the motions turned off, as Input gave them.
     bool motions=false,motionsBox=false;
@@ -581,6 +599,7 @@ class Engine {
     bool glyphs=false;   // the GLYPHS page
     bool motions=false;  // the MOTIONS page
     int glyphEdit=-1;    // the shape the skill picker chooses for, -1 none
+    int glyphHand=0;     // the hand whose set the GLYPHS page shows (right = 0): the wheel's own when opened
     bool spent=false,consumed=false;
     Owner owner[2]{Owner::Combat,Owner::Combat};
     int bottle=-1,bottleHand=-1,holster=-1,holsterHand=-1,pendingHand=0;
@@ -614,14 +633,14 @@ class Engine {
     // Each wheel hand keeps its own page (Spells / Equipment / Map / Developer and its page) and
     // tree filter, for this game: slot = wheelHand+1 (0: the combined wheel). pageHand is the slot
     // loaded into the fields above; a closed wheel (wheelHand -1) changes nothing.
-    struct HandMenu {bool utility=false,map=false,developer=false;int devPage=0,filter=skillcategories::All,filterClass=-1;bool glyphs=false,motions=false;};
+    struct HandMenu {bool utility=false,map=false,developer=false;int devPage=0,filter=skillcategories::All,filterClass=-1;bool glyphs=false,motions=false;int glyphHand=0;};
     std::array<HandMenu,3> handMenus{};
     int pageHand=-2;
     uint64_t joined=0;   // the last non-zero session (mapzoom::NewGame: a new one is a new game)
-    void StoreHand(){if(pageHand>=0&&pageHand<int(handMenus.size()))handMenus[pageHand]={utility,map,developer,devPage,filter,filterClass,glyphs,motions};}
+    void StoreHand(){if(pageHand>=0&&pageHand<int(handMenus.size()))handMenus[pageHand]={utility,map,developer,devPage,filter,filterClass,glyphs,motions,glyphHand};}
     void LoadHand(int slot){
         pageHand=std::clamp(slot,0,int(handMenus.size())-1);const auto& h=handMenus[pageHand];
-        utility=h.utility;map=h.map;developer=h.developer;devPage=h.devPage;filter=h.filter;filterClass=h.filterClass;glyphs=h.glyphs;motions=h.motions;
+        utility=h.utility;map=h.map;developer=h.developer;devPage=h.devPage;filter=h.filter;filterClass=h.filterClass;glyphs=h.glyphs;motions=h.motions;glyphHand=h.glyphHand;
     }
     const Skill& Choice(int index)const{return choices[choiceIndices[index]];}
     void FilterSkills(int category) {
@@ -873,9 +892,13 @@ public:
                     if(in.leftStrikes>=0){out.toggleLeftStrikes=true;out.feedback=1;}else out.feedback=3;
                     out.feedbackHand=in.wheelHand>=0?1-in.wheelHand:0;rearm=true;
                 } else if(!editor&&in.hover==GlyphsCell&&(QuickControls(Page())||glyphs)) {
-                    // Glyph casting's page, and back.
+                    // Glyph casting's page, and back; it opens on the wheel's own hand's set.
                     glyphs=!glyphs;utility=map=developer=motions=false;out.utility=out.map=false;out.glyphs=glyphs;glyphEdit=-1;
+                    if(glyphs)glyphHand=in.wheelHand==1?1:0;
                     out.feedback=1;out.feedbackHand=in.wheelHand>=0?1-in.wheelHand:0;rearm=true;
+                } else if(glyphs&&!editor&&in.hover==GlyphHandCell) {
+                    // The hand box: the other hand's set (each hand draws its own).
+                    glyphHand=1-glyphHand;out.feedback=1;out.feedbackHand=in.wheelHand>=0?1-in.wheelHand:0;rearm=true;
                 } else if(!editor&&in.hover==MotionsCell&&QuickControls(Page())&&spellmotion::HasMotions(in.snapshot.skillClass)) {
                     // The MOTIONS page (back: SPELLS, the first footer tab).
                     motions=true;glyphs=utility=map=developer=false;out.utility=out.map=false;glyphEdit=-1;
@@ -918,8 +941,8 @@ public:
                     else if(in.hover==10)editPage=std::min(std::max(0,(choiceCount-1)/8),editPage+1);
                     else if(in.hover==8||(in.hover>=0&&in.hover<8&&editPage*8+in.hover<choiceCount)) {
                         const auto skill=in.hover==8?Skill{}:Choice(editPage*8+in.hover);
-                        if(glyphEdit>=0) {   // the GLYPHS page: that shape's skill (CLEAR: none)
-                            if(fresh&&request(Action::BindGlyph,glyphEdit)){pending.skill=skill.id;pending.skillOwner=skill.owner;out.request=pending;}
+                        if(glyphEdit>=0) {   // the GLYPHS page: that shape's skill for the hand shown (CLEAR: none; the left's: the right hand's)
+                            if(fresh&&request(Action::BindGlyph,GlyphIndex(glyphHand,glyphEdit))){pending.skill=skill.id;pending.skillOwner=skill.owner;out.request=pending;}
                             else out.feedback=3;
                         } else if(skill.id==GlyphDrawId) {   // this button draws glyphs; the transport clears its game skill
                             if(fresh&&in.snapshot.bindingsEditable&&request(Action::BindGlyphDraw,editSlot)) {
@@ -1074,7 +1097,7 @@ public:
         out.editor=editor;out.editSlot=editSlot;out.editPage=editPage;out.editPages=std::max(1,(choiceCount+7)/8);
         if(editor==3)for(int i=0;i<8&&editPage*8+i<choiceCount;++i){out.itemOptions[i]=itemChoices[editPage*8+i];++out.editCount;}
         out.editCategory=editCategory;out.editClass=editClass;out.editCategoryCounts=categoryCounts;
-        out.glyphs=out.wheel&&glyphs;out.glyphEdit=glyphEdit;out.glyphDraw=in.glyphDraw;out.glyphSkills=in.glyphSkills;   // the page as the clicks left it
+        out.glyphs=out.wheel&&glyphs;out.glyphHand=glyphHand;out.glyphEdit=glyphEdit;out.glyphDraw=in.glyphDraw;out.glyphSkills=in.glyphSkills;   // the page as the clicks left it
         out.motions=out.wheel&&motions;out.motionsBox=spellmotion::HasMotions(in.snapshot.skillClass);out.motionsOff=in.motionsOff;
         if(editor==2)for(int i=0;i<8&&editPage*8+i<choiceCount;++i){out.editOptions[i]=Choice(editPage*8+i);++out.editCount;}
         out.block=out.block||rearm||stowed||pending.action!=Action::None;

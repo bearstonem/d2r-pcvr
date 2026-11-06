@@ -704,6 +704,9 @@ inline constexpr Override Overrides[]={
     {.id="glyphs.draw_slot",.page=NotInMenu},{.id="glyphs.circle",.page=NotInMenu},{.id="glyphs.triangle",.page=NotInMenu},
     {.id="glyphs.square",.page=NotInMenu},{.id="glyphs.lightning",.page=NotInMenu},{.id="glyphs.spiral",.page=NotInMenu},
     {.id="glyphs.v",.page=NotInMenu},{.id="glyphs.star",.page=NotInMenu},{.id="glyphs.wave",.page=NotInMenu},
+    {.id="glyphs.second_draw_slot",.page=NotInMenu},{.id="glyphs.left_circle",.page=NotInMenu},{.id="glyphs.left_triangle",.page=NotInMenu},
+    {.id="glyphs.left_square",.page=NotInMenu},{.id="glyphs.left_lightning",.page=NotInMenu},{.id="glyphs.left_spiral",.page=NotInMenu},
+    {.id="glyphs.left_v",.page=NotInMenu},{.id="glyphs.left_star",.page=NotInMenu},{.id="glyphs.left_wave",.page=NotInMenu},
     // Motions: edited on the wheel's MOTIONS page.
     {.id="motions.off",.page=NotInMenu},{.id="motions.paladin_off",.page=NotInMenu},{.id="motions.druid_off",.page=NotInMenu},
     {.id="motions.amazon_off",.page=NotInMenu},{.id="motions.necromancer_off",.page=NotInMenu},
