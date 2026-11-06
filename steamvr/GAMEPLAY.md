@@ -2444,13 +2444,18 @@ raised above the head, held; Teleport, the right arm pointed where you want to l
 left hand from the right hand up to the right shoulder; Shiver Armor, both fists shaken, held at
 least 25 cm apart (a tester, 2026-11-05: Static Field's rub "reads as shaking": fists shaken any
 closer are a rub, and its count starts over); Chilling
-Armor, a hug, held. The owner's picks from the list of her spells without one (2026-11-05), each to
+Armor, a hug, held (each hand on the other side, close to the body, up to 12 cm under the eyes; the
+owner's hugs held a hand 17 cm under them where 18 was the top, and crossed close to the body they
+could cast Energy Shield: that is the hug's now). The owner's picks from the list of her spells without one (2026-11-05), each to
 a spot of its own (`motions_sorceress.h`): Fire Wall, the right hand swept sideways across in front
 of the chest (the Necromancer's Bone Wall sweep; the wall 5 cells away where the sweep's middle
 heads); Meteor, the right fist raised overhead and thrown down and forward fast (where the arm
 then points from the shoulder: 20 cells with it level, 4 at 50 degrees below; a throw that waits
 overhead for Thunder Storm's hold is Thunder Storm); Blizzard, both arms raised overhead and pulled
-down in front (8 cells straight ahead; watched before Frost Nova); Hydra, the left arm swept up fast
+down in front (8 cells straight ahead; watched before Frost Nova). Meteor and Blizzard land on the
+highlighted monster instead when there is one (owner, 2026-11-05: "the meteor has to land on a
+selected target if there's one", "also do the same thing with Blizzard"; `aimrules::MotionOnTarget`,
+the casting button's pick as the Aim rules take it: its hand's, the other's, the eyes'). Hydra, the left arm swept up fast
 in front, toward its spot (the Necromancer's left-arm golem raise; 4 cells away where the arm
 heads; an arm raised straight up is Thunder Storm's). The MOTIONS page holds 14 cards. Thresholds in `spellmotion::Tuning`; `spell-motion-test` performs each at three
 headings and checks that no other spell's motion, the motion without the gate, or a slow version

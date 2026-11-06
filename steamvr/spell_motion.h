@@ -392,6 +392,14 @@ public:
         return dt>1e-4?(b.l[h]-a.l[h])*float(1/dt):math::Vec{};
     }
     bool Still(int h)const{return Len(Velocity(h))<tuning.stillSpeed;}
+    // Chilling Armor's hug: each hand on the other side, at the shoulders or the chest, close to the body (not up
+    // in front: Energy Shield). Up to 12 cm under the eyes (the owner's hugs, 2026-11-05, held a hand 17 cm under
+    // them, where 18 was the top; a guard 8 cm under them, crossed close to the face, stays Energy Shield).
+    static bool HugPose(const Sample& n) {
+        const auto& r=n.l[0];const auto& l=n.l[1];
+        return r.x>=-.40f&&r.x<=-.02f&&l.x<=.40f&&l.x>=.02f&&r.y>=-.60f&&r.y<=-.12f&&l.y>=-.60f&&l.y<=-.12f&&
+            Forward(r)>=-.25f&&Forward(r)<=.15f&&Forward(l)>=-.25f&&Forward(l)<=.15f;
+    }
     // A pose held: true once it has been kept (and kept still) for seconds (holdSeconds when not given).
     bool Held(bool pose,double now,double seconds=-1) {
         if(!pose){poseSince=-1;return false;}
@@ -436,7 +444,9 @@ private:
             return rub>=t.rubPath&&parted>=0&&apart>=t.snapApart;
         }
         case Motion::CrossGuard: {
-            // Crossed or not: the owner's guard held the controllers 12-22 cm apart at the face.
+            // Crossed or not: the owner's guard held the controllers 12-22 cm apart at the face. Crossed close to
+            // the body is the hug (Chilling Armor's; the owner's hugs, 2026-11-05, cast this instead).
+            if(HugPose(n))return Held(false,n.t);
             bool pose=Apart(n)<=t.guardApart;
             for(int h=0;h<2;++h){const auto& l=n.l[h];pose=pose&&l.y>=-.30f&&l.y<=.20f&&Forward(l)>=0&&Forward(l)<=.60f&&std::fabs(l.x)<=.30f&&Still(h);}
             return Held(pose,n.t);
@@ -521,12 +531,7 @@ private:
             else if(n.t-outLost>t.aimLost){aimingSince=steadySince=outLost=-1;}
             return false;
         }
-        case Motion::Hug: {
-            const auto& r=n.l[0];const auto& l=n.l[1];
-            const bool pose=r.x>=-.40f&&r.x<=-.02f&&l.x<=.40f&&l.x>=.02f&&r.y>=-.60f&&r.y<=-.18f&&l.y>=-.60f&&l.y<=-.18f&&
-                Forward(r)>=-.25f&&Forward(r)<=.15f&&Forward(l)>=-.25f&&Forward(l)<=.15f;   // at the shoulders, not up in front (Energy Shield)
-            return Held(pose,n.t);
-        }
+        case Motion::Hug:return Held(HugPose(n),n.t);
         default:return m>Motion::Punch&&m<Motion::End&&ClassDone(*this,m);
         }
     }

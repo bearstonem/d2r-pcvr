@@ -141,6 +141,15 @@ int main() {
     }
     Check(spellmotion::For(36)==Motion::None&&spellmotion::For(117)==Motion::None,
         "Fire Bolt and a Paladin skill have no motion: their glyph casts as before");
+    {   // the owner's hugs (2026-11-05): held 1.9 s, the left hand 17 cm under the eyes, behind them; none cast
+        const auto hug=[](Sim& s){s.Move({-.13f,-.22f,-.10f},{.13f,-.17f,.08f},.45f);s.Hold(.6f);};
+        {Sim s(Motion::Hug);s.Trigger(true);hug(s);Check(s.casts==1,"Chilling Armor: the owner's hug casts");}
+        {Sim s(Motion::CrossGuard);s.Trigger(true);hug(s);Check(s.casts==0,"Energy Shield: the hug is not its guard");}
+        {Sim s(Motion::CrossGuard);s.Trigger(true);s.Move({-.10f,-.15f,-.05f},{.10f,-.15f,-.05f},.45f);s.Hold(.6f);
+         Check(s.casts==0,"Energy Shield: crossed at the chest close to the body is the hug's");}
+        {Sim s(Motion::Hug);s.Trigger(true);s.Move({-.10f,-.15f,-.05f},{.10f,-.15f,-.05f},.45f);s.Hold(.6f);
+         Check(s.casts==1,"Chilling Armor: crossed at the chest close to the body casts");}
+    }
     {   // the owner's picks (2026-11-05): ground spells and a summon, each to its spot
         {Sim s(Motion::FireWall);s.Trigger(true);FireWall(s);
          Check(s.casts==1&&s.land==spellmotion::Land::Spot&&std::fabs(s.spot.ahead-spellmotion::sorceress::tuning.fireWallAhead)<.2f,"Fire Wall: the wall ahead, where the sweep's middle heads");}
