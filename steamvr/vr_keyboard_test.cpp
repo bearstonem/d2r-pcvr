@@ -2,14 +2,15 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <utility>
 using namespace framevr;
 static void Check(bool ok,const char* message){if(!ok){std::fprintf(stderr,"FAIL: %s\n",message);std::exit(1);}}
-// The surface u, v of a point given in key units from the keyboard's top left.
-static void At(keyboard::Spot s,float width,float height,float col,float row,float& u,float& v) {
-    const float unit=s.height/keyboard::Rows;
-    const float x=s.x-s.width*.5f+col*unit,y=s.y+s.height*.5f-row*unit;
-    u=x/width+.5f;v=.5f-y/height;
+// Where a ray from `eye` through key units (col, row) of the board would hit it.
+static math::Vec OnBoard(const keyboard::Board& b,float col,float row) {
+    const float unit=b.height/keyboard::Rows;
+    return b.position+math::Rotate(b.orientation,{col*unit-b.width*.5f,b.height*.5f-row*unit,0});
 }
+static bool Near(math::Vec a,math::Vec b){const auto d=a-b;return math::Dot(d,d)<1e-8f;}
 static int Find(char ch){for(int i=0;i<keyboard::KeyCount;++i)if(keyboard::Keys[i].action==keyboard::Action::Char&&keyboard::Keys[i].ch==ch)return i;return -1;}
 static int Find(keyboard::Action a){for(int i=0;i<keyboard::KeyCount;++i)if(keyboard::Keys[i].action==a)return i;return -1;}
 int main(){
@@ -27,33 +28,42 @@ int main(){
         Check(r.w>0&&r.h>0&&r.x>=0&&r.y>=0&&r.x+r.w<=TexelWidth&&r.y+r.h<=TexelHeight,"every key's picture inside the keyboard's");
     }
 
-    // On the menu surface: inside the band, above its lower half (the name box, OK and Exit).
-    const float width=2.0f,height=1.125f;   // a 16:9 surface: the band is all of it
-    const Spot s=Place(width,height);
-    Check(s.width>0&&s.height>0&&std::fabs(s.width/s.height-Columns/Rows)<1e-4f,"the quad has the picture's aspect");
+    // Under the menu, out of the game's picture: tilted toward the player, facing up to the eyes.
+    const math::Vec menu{0,1.6f,-1.5f};const math::Quat facing{0,0,0,1};   // a panel straight ahead, facing the player
+    for(auto size:{std::pair{2.0f,1.125f},std::pair{1.125f,1.125f}}) {    // 16:9, and a square eye target's panel
+        const float width=size.first,height=size.second;
+        const Board b=Place(menu,facing,width,height);
+        Check(b.width>0&&b.height>0&&std::fabs(b.width/b.height-Columns/Rows)<1e-4f,"the quad has the picture's aspect");
+        Check(std::fabs(b.width-WidthOfWorkspace*2.0f)<1e-4f,"the same size on a wide or a square panel (the 16:9 workspace's width)");
+        const auto top=OnBoard(b,Columns*.5f,0),bottom=OnBoard(b,Columns*.5f,Rows);
+        Check(top.y<menu.y-height*.5f&&top.y>menu.y-height*.5f-.1f,"its top edge just under the panel's bottom edge");
+        Check(std::fabs(top.z-menu.z)<1e-4f,"hinged in the panel's plane");
+        Check(bottom.y<top.y&&bottom.z>top.z,"its lower edge lower and nearer the player: a keyboard on a desk");
+        const auto normal=math::Rotate(b.orientation,{0,0,1});
+        Check(normal.y>0&&normal.z>0&&std::fabs(std::acos(normal.z)*180/3.14159265f-TiltDegrees)<.01f,"facing up toward the eyes, tilted Tilt");
+        Check(std::fabs(OnBoard(b,0,0).x+b.width*.5f)<1e-4f,"centred under the menu");
+        // The laser, through the board's own intersection: each key's middle hits it.
+        const math::Vec eye{0,1.7f,0};
+        for(int i=0;i<KeyCount;++i) {
+            const auto at=OnBoard(b,Keys[i].col+Keys[i].span*.5f,Keys[i].row+.5f);
+            math::PanelHit hit{};
+            Check(math::IntersectPanel(eye,math::Normalized(at-eye),b.position,b.orientation,b.width,b.height,hit),"the laser reaches the board from the eyes");
+            Check(KeyAt(hit.u,hit.v)==i,"a key's middle hits that key");
+            Check(Near(hit.point,at),"where the laser says it hit");
+            const Spot k=KeySpot(b,i);
+            Check(Near(b.position+math::Rotate(b.orientation,{k.x,k.y,0}),at),"the lit copy lies over the key it lights");
+            Check(k.width>0&&k.height>0&&k.height<b.height/Rows,"the lit copy is the key's size, not a whole row");
+        }
+        Check(!Place(menu,facing,0,1).width&&!Place(menu,facing,1,0).width,"no panel, no keyboard");
+    }
+    Check(KeyAt(.1f,.5f/Rows)==-1,"the gap between Q and W hits nothing (no press on the wrong letter)");
+    Check(KeyAt(.2f/Columns,1.5f/Rows)==-1,"the empty half key left of A hits nothing");
+    Check(KeyAt(.05f,.125f)==Find('q')&&KeyAt(.95f,.875f)==Find(Action::Enter),"the corners: Q and Enter");
     Check(std::fabs(float(TexelWidth)/TexelHeight-Columns/Rows)<1e-4f,"the picture has the board's aspect");
-    Check(s.x-s.width*.5f>-width*.5f&&s.x+s.width*.5f<width*.5f,"inside the band left to right");
-    Check(s.y+s.height*.5f<height*.5f&&s.y-s.height*.5f>0,"inside the band's upper half");
-    Check(!Place(0,1).width&&!Place(1,0).width,"no surface, no keyboard");
-
-    // The laser: the middle of each key hits it; the gaps and outside hit nothing.
-    for(int i=0;i<KeyCount;++i) {
-        float u,v;At(s,width,height,Keys[i].col+Keys[i].span*.5f,Keys[i].row+.5f,u,v);
-        Check(Hit(s,width,height,u,v)==i,"a key's middle hits that key");
-        const Spot k=KeySpot(s,i);
-        Check(std::fabs(k.x-((u-.5f)*width))<1e-4f&&std::fabs(k.y-((.5f-v)*height))<1e-4f,"the lit copy lies over the key it lights");
-        Check(k.width>0&&k.height>0&&k.height<s.height/Rows,"the lit copy is the key's size, not a whole row");
-    }
-    {
-        float u,v;At(s,width,height,1,.5f,u,v);   // the seam between Q and W
-        Check(Hit(s,width,height,u,v)==-1,"the gap between two keys hits nothing (no press on the wrong letter)");
-        At(s,width,height,0.2f,1.5f,u,v);          // left of A: the row starts half a key in
-        Check(Hit(s,width,height,u,v)==-1,"the empty half key left of A hits nothing");
-        At(s,width,height,-.5f,1,u,v);Check(Hit(s,width,height,u,v)==-1,"left of the board: nothing");
-        At(s,width,height,5,-.5f,u,v);Check(Hit(s,width,height,u,v)==-1,"above the board: nothing");
-        At(s,width,height,5,Rows+.5f,u,v);Check(Hit(s,width,height,u,v)==-1,"below the board: nothing");
-        Check(Hit({},width,height,.5f,.5f)==-1,"no keyboard placed: nothing");
-    }
+    // Labels: small letters, capitals while Shift waits; other keys their names.
+    Check(Label(Find('k'),false)==L"k"&&Label(Find('k'),true)==L"K","a letter's key shows it small, a capital with Shift");
+    Check(Label(Find('-'),true)==L"-"&&Label(Find('_'),false)==L"_","marks the same either way");
+    Check(Label(Find(Action::Enter),true)==L"Enter"&&Label(-1,false).empty(),"other keys their name");
 
     // Typing: lower case, Shift once for a capital, Backspace, Enter, Close.
     Typist t;
@@ -78,7 +88,12 @@ int main(){
     Check(t.Press(-1).send==Send::None&&t.Press(KeyCount).send==Send::None,"no key: nothing");
 
     // The picture: every key painted, the gaps between them clear.
-    const auto px=PaintKeys(false),lit=PaintKeys(true);
+    const auto px=PaintKeys(false),lit=PaintKeys(true),caps=PaintKeys(false,true);
+    {
+        const Rect r=KeyTexelRect(Find(Action::Shift)),q=KeyTexelRect(Find('q'));
+        const size_t shift=(size_t(r.y+2)*TexelWidth+r.x+r.w/2)*4,letter=(size_t(q.y+2)*TexelWidth+q.x+q.w/2)*4;   // their rims
+        Check(caps[shift]>px[shift]&&caps[letter]==px[letter],"with capitals the waiting Shift is lit, nothing else");
+    }
     Check(px.size()==size_t(TexelWidth)*TexelHeight*4&&lit.size()==px.size(),"one picture the keyboard's size, lit or not");
     for(int i=0;i<KeyCount;++i) {
         const Rect r=KeyTexelRect(i);
@@ -87,5 +102,38 @@ int main(){
         Check(lit[middle]+lit[middle+1]+lit[middle+2]>=px[middle]+px[middle+1]+px[middle+2],"the lit copy is no darker");
     }
     Check(px[3]==0&&px[(size_t(KeyTexels)*TexelWidth+KeyTexels/4)*4+3]==0,"the gaps and the empty half key are clear");
+    // The name box, from the game's UI messages as the 2026-11-06 log has them.
+    {
+        NameBox box;
+        Check(!box.Shown(),"no character creation: no keyboard");
+        box.Message("PanelManager","OpenPanel","CharacterSelectPanel");
+        box.Message("CharacterCreate","Select","Barbarian");
+        Check(!box.Shown(),"the character list, or a stray Select outside creation: no keyboard");
+        box.Message("PanelManager","OpenExclusivePanel","CharacterCreatePanel");
+        box.Message("PanelManager","OpenPanel","CandidateListPanel");
+        Check(!box.Shown(),"at the campfire before a hero is picked: no name box, no keyboard");
+        box.Message("CharacterCreate","Hover","Assassin");box.Message("CharacterCreate","Unhover","Assassin");
+        Check(!box.Shown(),"a hero only hovered: no keyboard");
+        const auto e0=box.Epoch();
+        box.Message("CharacterCreate","Select","Necromancer");
+        Check(box.Shown()&&box.Epoch()!=e0,"a hero picked: the name box is up, the keyboard shows");
+        const auto e1=box.Epoch();
+        box.Message("InputMessage","MouseMove","");box.Message("CharacterCreate","Hover","Paladin");
+        Check(box.Shown()&&box.Epoch()==e1,"pointing about keeps it, and a closed keyboard stays closed");
+        box.Message("CharacterCreate","Select","Barbarian");box.Message("CharacterCreate","Unselect","Necromancer");
+        Check(box.Shown()&&box.Epoch()!=e1,"another hero (Select before the old one's Unselect): still shown, a closed keyboard back");
+        box.Message("CharacterCreate","Unselect","Barbarian");
+        Check(!box.Shown(),"the hero put back: the name box goes, the keyboard with it");
+        box.Message("CharacterCreate","Select","Sorceress");
+        Check(box.Shown(),"picked again");
+        box.Message("FrontEndNavigation","ToCharacterSelect","");box.Message("PanelManager","UnloadPanel","CharacterCreatePanel");
+        Check(!box.Shown(),"back to the list: gone");
+        box.Message("CharacterCreate","Select","Sorceress");
+        Check(!box.Shown(),"a late Select after the panel went: still gone");
+        box.Message("PanelManager","OpenExclusivePanel","CharacterCreatePanel");
+        Check(!box.Shown(),"creation opened again starts with no hero picked");
+        box.Message("CharacterCreate","Select","Amazon");box.Message("PanelManager","UnloadAll","");
+        Check(!box.Shown(),"every panel unloaded (a game starting): gone");
+    }
     std::puts("VR keyboard layout, laser hits, typing and picture passed");
 }

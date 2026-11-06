@@ -2,19 +2,50 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <string>
+#include <string_view>
 #include <vector>
+#include "frame_math.h"
 #include "respec_button.h"
 
 // The VR keyboard: letters for the game's text boxes - a new character's name
 // first - without taking the headset off. D2R shows no on-screen keyboard of
 // its own there (tested 2026-11-05: the name box does nothing under native
-// controller navigation in VR). A stamped panel on the menu surface like Reset
-// Skills & Stats (respec_button.h): one picture of every key, a lit copy of it
-// cropped to the key under the laser, and the laser's hit in the surface's
-// u, v. Its letters go in through SendInput tagged KeyboardKeyTag
+// controller navigation in VR). Its own quad hinged under the menu, tilted
+// toward the player like a keyboard on a desk (Board): one picture of every
+// key, small letters or, with Shift, capitals; a lit copy cropped to the key
+// under the laser, which hits the board itself. Its letters go in through
+// SendInput tagged KeyboardKeyTag
 // (panel_input_mode.h), so TypedKeys lets the keyboard layout in and the box
 // takes them like letters from a real keyboard.
 namespace framevr::keyboard {
+
+// When the name box is on screen: character creation (CharacterCreatePanel)
+// with a hero picked. The game's UI messages say both (2026-11-06 log, Quest 3):
+// PanelManager opens / unloads CharacterCreatePanel; CharacterCreate Select
+// names the hero clicked, and switching heroes sends Select for the new one
+// BEFORE Unselect for the old. Fed every UI message (vr/gamestate.cpp).
+// epoch counts each time the box comes up anew, so Close lasts only until then.
+class NameBox {
+    bool panel=false;std::string hero;uint32_t shownAt=0;
+public:
+    void Message(std::string_view target,std::string_view command,std::string_view text) {
+        const bool before=Shown();
+        if(target=="PanelManager") {
+            if(text=="CharacterCreatePanel") {
+                if(command=="OpenPanel"||command=="OpenExclusivePanel")panel=true;
+                else if(command=="ClosePanel"||command=="UnloadPanel")panel=false;
+                hero.clear();
+            } else if(command=="UnloadAll"||command=="CloseAll"){panel=false;hero.clear();}
+        } else if(target=="CharacterCreate"&&panel) {
+            if(command=="Select"&&!text.empty()){if(!hero.empty()&&hero!=text)++shownAt;hero=text;}   // another hero: anew
+            else if(command=="Unselect"&&text==hero)hero.clear();
+        }
+        if(Shown()&&!before)++shownAt;
+    }
+    bool Shown() const{return panel&&!hero.empty();}
+    uint32_t Epoch() const{return shownAt;}
+};
 
 // What a key does. Char types its letter; Shift makes the next letter a
 // capital (once); Close hides the keyboard until the text box goes away.
@@ -58,38 +89,50 @@ inline Rect KeyTexelRect(int i) {
             int(std::lround(k.span*KeyTexels))-2*Pad,KeyTexels-2*Pad};
 }
 
-// Where it sits: the upper middle of the menu's 16:9 band (the band
-// respec_button.h measures), over the character creation scene's sky, clear of
-// the name box and the OK / Exit buttons along the bottom. A key unit is
-// KeyHeight of the band: a little taller than the Advanced Stats button
-// (6.2%, about 2 cm at arm's length), so a key is easy to hit with the laser.
-constexpr float KeyHeight=.075f,CenterX=.5f,CenterY=.27f;
-struct Spot {float x=0,y=0,width=0,height=0;};   // centre from the surface's centre (y up), size; metres
-inline Spot Place(float width,float height) {
+// Where it sits: under the menu, out of the game's picture (owner 2026-11-06:
+// over the heroes it hid their names, and the picture's sides are cut at some
+// aspect ratios, so a spot on it is not the same for every headset). Its top
+// edge is Gap below the panel's bottom edge, the board tilted Tilt toward the
+// player, its lower edge nearer, facing up to the eyes. Sizes are fractions of
+// the 16:9 workspace's width (panels::Fit): the same on a wide or a square
+// panel, and growing with the menu distance, so a key stays as easy to hit.
+constexpr float WidthOfWorkspace=.5f,GapOfWorkspace=.02f,TiltDegrees=30;
+struct Board {math::Vec position{};math::Quat orientation{0,0,0,1};float width=0,height=0;};
+inline Board Place(math::Vec surface,math::Quat facing,float width,float height) {
     if(!(width>0)||!(height>0))return {};
-    const float band=std::min(height,width*9.f/16.f),bandWidth=band*16.f/9.f;
-    const float unit=KeyHeight*band;
-    return {(CenterX-.5f)*bandWidth,height*.5f-CenterY*band,unit*Columns,unit*Rows};
+    const float workspace=std::max(width,height*16.f/9.f);
+    const float w=WidthOfWorkspace*workspace,h=w*Rows/Columns,t=TiltDegrees*3.14159265f/180;
+    const math::Vec up{0,std::cos(t),-std::sin(t)};   // the board's up: its top edge away from the player
+    const math::Vec top{0,-height*.5f-GapOfWorkspace*workspace,0};
+    const math::Quat tilt{-std::sin(t*.5f),0,0,std::cos(t*.5f)};   // about the panel's x axis
+    return {surface+math::Rotate(facing,top-up*(h*.5f)),math::Multiply(facing,tilt),w,h};
 }
-// The key under the laser's hit on the surface (u, v from its top left, 0-1),
-// or -1: off the keyboard, or in the gap between two keys.
-inline int Hit(Spot s,float width,float height,float u,float v) {
-    if(!(s.width>0)||!(s.height>0))return -1;
-    const float x=(u-.5f)*width-(s.x-s.width*.5f),y=(s.y+s.height*.5f)-(.5f-v)*height;   // from the keyboard's top left
-    const float unit=s.height/Rows,col=x/unit,row=y/unit,pad=float(Pad)/KeyTexels;
+// The key at the laser's hit on the board (u, v from its top left, 0-1: the
+// board's own math::IntersectPanel), or -1: in the gap between two keys.
+inline int KeyAt(float u,float v) {
+    const float col=u*Columns,row=v*Rows,pad=float(Pad)/KeyTexels;
     for(int i=0;i<KeyCount;++i) {
         const Key& k=Keys[i];
         if(col>=k.col+pad&&col<k.col+k.span-pad&&row>=k.row+pad&&row<k.row+1-pad)return i;
     }
     return -1;
 }
-// A key's middle as a quad on the surface (its centre from the surface's
-// centre, metres, y up), for the lit copy laid over it.
-inline Spot KeySpot(Spot s,int i) {
-    if(i<0||i>=KeyCount||!(s.height>0))return {};
+// A key's lit copy on the board: its centre from the board's centre (x right,
+// y up, metres) and its size.
+struct Spot {float x=0,y=0,width=0,height=0;};
+inline Spot KeySpot(const Board& b,int i) {
+    if(i<0||i>=KeyCount||!(b.height>0))return {};
     const Key& k=Keys[i];
-    const float unit=s.height/Rows,pad=float(Pad)/KeyTexels*unit;
-    return {s.x-s.width*.5f+(k.col+k.span*.5f)*unit,s.y+s.height*.5f-(k.row+.5f)*unit,k.span*unit-2*pad,unit-2*pad};
+    const float unit=b.height/Rows,pad=float(Pad)/KeyTexels*unit;
+    return {(k.col+k.span*.5f)*unit-b.width*.5f,b.height*.5f-(k.row+.5f)*unit,k.span*unit-2*pad,unit-2*pad};
+}
+// What a key shows: a letter small, or a capital while Shift waits (Typist);
+// the other keys their name.
+inline std::wstring Label(int i,bool capitals) {
+    if(i<0||i>=KeyCount)return {};
+    const Key& k=Keys[i];
+    if(k.action!=Action::Char)return k.label;
+    return std::wstring(1,wchar_t(capitals&&k.ch>='a'&&k.ch<='z'?k.ch-'a'+'A':k.ch));
 }
 
 // What a press sends: a character (ch), Backspace or Enter (key), or nothing
@@ -120,13 +163,14 @@ public:
 };
 
 // The picture: one stone plaque per key (Reset Skills & Stats' face), lit or
-// not, premultiplied RGBA, TexelWidth x TexelHeight. Labels are stamped over
-// each key on Windows (transport.cpp, GDI), as on that button.
-inline std::vector<uint8_t> PaintKeys(bool lit) {
+// not, premultiplied RGBA, TexelWidth x TexelHeight. Labels (Label) are stamped
+// over each key on Windows (transport.cpp, GDI), as on that button.
+// With capitals the Shift key is lit in both, so the waiting Shift shows.
+inline std::vector<uint8_t> PaintKeys(bool lit,bool capitals=false) {
     std::vector<uint8_t> px(size_t(TexelWidth)*TexelHeight*4,0);
     for(int i=0;i<KeyCount;++i) {
         const Rect r=KeyTexelRect(i);
-        const auto face=respecbutton::PaintFace(r.w,r.h,lit);
+        const auto face=respecbutton::PaintFace(r.w,r.h,lit||(capitals&&Keys[i].action==Action::Shift));
         for(int y=0;y<r.h;++y)
             std::copy_n(&face[size_t(y)*r.w*4],size_t(r.w)*4,&px[(size_t(r.y+y)*TexelWidth+r.x)*4]);
     }
