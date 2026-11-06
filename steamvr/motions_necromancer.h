@@ -5,11 +5,14 @@
 // +X right, +Y up from the eyes, forward -Z; hand 0 the right). Both grips are held while they are watched
 // (the transport's gate); a motion that completes casts its card's skill. Include spell_motion.h, not this.
 //
-// Only the controllers' positions count: no palm, finger or fist. So the table's "clench" (Amplify Damage)
-// became a punch (the owner's, 2026-11-05; first a short sharp yank back), its "fling open" (Corpse Explosion) a jab forward, and Lower Resist's "palm
-// down" a chop down, each from the right hand held out still at the corpse or monster (the pointing
-// start), so it ends pointing where the right hand's own ray aims the cast. Golem goes to a spot ahead
-// (Aim, LandAt); the rest have no way of their own.
+// Only the controllers' positions count: no palm, finger or fist. So the table's "clench" (Amplify Damage),
+// "fling open" (Corpse Explosion) and "palm down" (Lower Resist) are punches: the right fist, both fists
+// together, the left fist (the owner's, 2026-11-05, in the headset; first a yank back, a jab forward and a
+// chop down, each from the right hand held out still at the monster, a start that was itself a punch:
+// "Corpse explosion does not work ... It also right now interferes with the amplified damage ... lower
+// resist ... does not work. It actually accidentally triggers amplified damage again"). The golems go to
+// a spot along the arm raised (Aim, LandAt); Lower Resist along the left arm; the rest have no way of
+// their own (the right hand's ray).
 //
 // A tester's first pass (2026-11-05): "big issues with summoning skeletons and golem. I only got the
 // skeleton one to work once and the golem one I could never get right. Also, any motions that require a
@@ -23,23 +26,15 @@ struct Tuning {
     // N1 Bone Armor: each fist on the other side of the chest (the right this far left of the left),
     // between these heights, at most armorNear ahead of the eyes, held armorHold s.
     float armorCross=.04f,armorHigh=-.12f,armorLow=-.60f,armorNear=.30f,armorApart=.35f,armorHold=.40f;
-    // The pointing start (N3, N5, N6): the right hand at least pointFrom ahead, held still (every step
-    // under pointStill m/s) for pointHold s.
-    // up to pointHigh above the eyes (the owner chopped from a hand raised over eye level, 2026-11-05).
-    float pointFrom=.30f,pointHold=.15f,pointStill=.35f,pointHigh=.25f;
-    float jab=.12f,jabWindow=.20f;     // N3 Corpse Explosion: then this far forward within the window
     // N5 Amplify Damage, a punch with the right fist (owner, 2026-11-05, in the headset: "Amplified damage could
-    // be more of a punch. Punch with one hand"): from drawn in (at most punchFrom ahead, punchLow to punchHigh)
-    // out to punchReach ahead, punchTravel forward within punchWindow, mostly forward, at punchSpeed or faster.
-    // Corpse Explosion's jab starts from the arm already held out (Pointing), so the two keep apart; the punch
-    // ends with the arm out where its ray aims the curse.
+    // be more of a punch. Punch with one hand"), and N6 Lower Resist the same with the left: from drawn in (at
+    // most punchFrom ahead, punchLow to punchHigh) out to punchReach ahead, punchTravel forward within
+    // punchWindow, mostly forward, at punchSpeed or faster, the other fist left where it was (forward
+    // punchOther at most over pairWindow). N3 Corpse Explosion: both fists from drawn in together, each out to
+    // pairReach and pairTravel forward within pairWindow, mostly forward, at punchSpeed or faster, ending at
+    // most pairApart apart (Poison Nova flings them wide). Its lesser reach casts it before a lone fist would.
     float punchFrom=.25f,punchLow=-.65f,punchHigh=.10f,punchReach=.42f,punchTravel=.22f,punchWindow=.25f,punchSpeed=1.5f;
-    // N6 Lower Resist: then this far down, its fall at least as large as its move back toward the body (the
-    // owner's chops arc down and in, 2026-11-05: 16-19 cm down, coming in as far; Amplify Damage's yank is
-    // mostly back, at most 0.6 down for its pull, so the two keep apart).
-    // The chop at chopSpeed or faster at its fastest: the arm let down after pointing is no chop (the owner's
-    // were 7-8 m/s).
-    float chop=.15f,chopWindow=.30f,chopSpeed=1.8f;
+    float punchOther=.08f,pairReach=.38f,pairTravel=.18f,pairWindow=.35f,pairApart=.60f;
     // The summons by raised arms (owner, 2026-11-05, in the headset: Raise Skeleton "was really difficult to
     // execute honestly ... from ... around the hip level or wherever, if you have a fast motion, kind of like
     // with both arms ... motioning upwards, should basically raise the skeleton", then "right arm, just right
@@ -50,11 +45,14 @@ struct Tuning {
     // riseUpright times as far as it moves across, past riseTop (the eyes) within riseWindow, riseSpeed or
     // faster at their fastest, the two within riseTogether s of each other. It casts as they pass riseTop: no stop.
     float riseFrom=-.45f,riseTop=.02f,riseMin=.35f,riseWindow=.6f,riseSpeed=1.5f,riseUpright=1.2f,riseTogether=.25f;
-    // N4 Golem (the right arm) and N4b (the left): that arm swept up the same way but past armTop (over the
-    // head), ending beside the head (armNear ahead at most: Lower Resist points up high out in front), the
-    // other arm left down (risen otherStill at most, under otherBelow). Raise Skeleton, both arms, casts
-    // lower, before a lone arm would. It stands golemAhead cells ahead.
-    float armTop=.15f,armNear=.30f,otherStill=.12f,otherBelow=-.25f,golemAhead=4;
+    // N4 Golem (the right arm) and N4b (the left): that arm swept up the same way in front of the body, past
+    // armTop and armUpright times as far up as across, the other arm left down (risen otherStill at most,
+    // under otherBelow). Raise Skeleton, both arms, casts lower, before a lone arm would. The golem stands
+    // golemAhead cells away where the arm heads (from its shoulder; straight ahead for an arm raised overhead).
+    // The owner, 2026-11-05: "it shouldn't be raising our arm fast beside our head, it's more like in our
+    // front of us ... Kind of like a rise motion, but instead of two hands, we're doing it with one hand, in
+    // front of us, kind of pointing at whatever area we're raising from" (it had to end beside the head).
+    float armTop=.08f,armUpright=1.0f,otherStill=.12f,otherBelow=-.25f,golemAhead=4;
     // N7 Poison Nova: hands together at the chest, then flung novaApart apart, each novaSide out on its
     // own side, at any height up to novaHigh (the owner's flings, 2026-11-05: 130-160 cm wide at shoulder
     // height; it once had to end below the chest), within novaWindow and at least flingSpeed fast.
@@ -65,7 +63,7 @@ struct Tuning {
 };
 inline constexpr Tuning tuning{};
 // The order they are watched in: the first to complete in a frame casts. Raise Skeleton (both arms) before
-// the golems (one arm each); the punch and the three pointing motions end apart.
+// the golems (one arm each), Corpse Explosion (both fists) before the punches of one.
 constexpr Motion Order[]={Motion::BoneArmor,Motion::BonePrison,Motion::RaiseSkeleton,Motion::Golem,Motion::GolemLeft,
     Motion::PoisonNova,Motion::CorpseExplosion,Motion::AmplifyDamage,Motion::LowerResist};
 // How to do each, on the MOTIONS page and in the log (what the controllers' positions can tell: no palms or
@@ -74,11 +72,11 @@ inline const char* Cue(Motion m) {
     switch(m) {
     case Motion::BoneArmor:return "cross both fists on the chest and hold";
     case Motion::RaiseSkeleton:return "sweep both arms up fast from the hips, past your face";
-    case Motion::CorpseExplosion:return "hold the right hand out at a corpse, then jab it forward";
-    case Motion::Golem:return "sweep the right arm up fast beside your head (your strongest golem)";
-    case Motion::GolemLeft:return "sweep the left arm up fast beside your head (your next golem)";
+    case Motion::CorpseExplosion:return "punch both fists out together at a corpse";
+    case Motion::Golem:return "sweep the right arm up fast in front of you, toward its spot (your strongest golem)";
+    case Motion::GolemLeft:return "sweep the left arm up fast in front of you, toward its spot (your next golem)";
     case Motion::AmplifyDamage:return "punch the right fist out at a monster";
-    case Motion::LowerResist:return "hold the right hand out at a monster, then chop it down";
+    case Motion::LowerResist:return "punch the left fist out at a monster";
     case Motion::PoisonNova:return "hands together at the chest, then fling them out wide";
     case Motion::BonePrison:return "hold both hands apart in front, then bring them together round a monster";
     default:return "no motion";
@@ -100,13 +98,37 @@ inline float PeakSpeed(const std::vector<Sample>& s,size_t i,int h) {
     for(size_t k=i+1;k<s.size();++k)for(int g=0;g<2;++g)if(h<0||g==h)most=std::max(most,Speed(s[k-1],s[k],g));
     return most;
 }
-// The right hand held out still at a corpse or a monster: where the pointing motions begin.
-inline bool Pointing(const std::vector<Sample>& s,size_t i) {
-    const auto& r=s[i].l[0];
-    return Engine::Forward(r)>=tuning.pointFrom&&r.y>=-.60f&&r.y<=tuning.pointHigh&&std::fabs(r.x)<=.45f&&
-        StillBefore(s,i,0,tuning.pointHold,tuning.pointStill);
+// Arm k's heading from its shoulder, level and head-local (unit), or zero for an arm raised straight up.
+inline math::Vec ArmHeading(math::Vec fist,int k) {
+    const math::Vec shoulder{k?-.17f:.17f,-.22f,.05f};
+    const float x=fist.x-shoulder.x,z=fist.z-shoulder.z,level=std::hypot(x,z);
+    return level>=.20f?math::Vec{x/level,0,z/level}:math::Vec{};
 }
-// N4, N4b: arm k swept up fast from low past armTop, ending beside the head, the other arm left down.
+// Fist k drawn in (where a punch starts) at sample a.
+inline bool DrawnIn(const Sample& a,int k) {
+    const auto& o=a.l[k];
+    return Engine::Forward(o)<=tuning.punchFrom&&o.y>=tuning.punchLow&&o.y<=tuning.punchHigh;
+}
+// Fist k from sample a to the newest, n: out to reach, travel forward or more, mostly forward.
+inline bool PunchedOut(const Sample& a,const Sample& n,int k,float reach,float travel) {
+    const auto& o=a.l[k];const auto& c=n.l[k];const float forward=Engine::Forward(c)-Engine::Forward(o);
+    return Engine::Forward(c)>=reach&&forward>=travel&&std::fabs(c.y-o.y)<=.6f*forward&&std::fabs(c.x-o.x)<=.6f*forward;
+}
+// N5, N6: fist k punched out, the other left where it was.
+inline bool Punch(Engine& e,const std::vector<Sample>& s,int k) {
+    const auto& t=tuning;const auto& n=s.back();
+    float least=Engine::Forward(n.l[1-k]);
+    for(size_t i=s.size()-1;i-->0&&n.t-s[i].t<=t.pairWindow;)least=std::min(least,Engine::Forward(s[i].l[1-k]));
+    if(Engine::Forward(n.l[1-k])-least>t.punchOther)return false;   // both out: Corpse Explosion's
+    for(size_t i=s.size()-1;i-->0&&n.t-s[i].t<=t.punchWindow;) {
+        if(!DrawnIn(s[i],k))continue;
+        const float forward=Engine::Forward(n.l[k])-Engine::Forward(s[i].l[k]);
+        if(forward>=.05f)e.Toward(forward/t.punchTravel);
+        if(PunchedOut(s[i],n,k,t.punchReach,t.punchTravel)&&PeakSpeed(s,i,k)>=t.punchSpeed)return true;
+    }
+    return false;
+}
+// N4, N4b: arm k swept up fast from low past armTop, the other arm left down.
 inline bool ArmUp(Engine& e,const std::vector<Sample>& s,int k) {
     const auto& t=tuning;const auto& n=s.back();const auto& c=n.l[k];
     for(size_t i=s.size()-1;i-->0&&n.t-s[i].t<=t.riseWindow;) {
@@ -115,23 +137,13 @@ inline bool ArmUp(Engine& e,const std::vector<Sample>& s,int k) {
         if(n.l[1-k].y-s[i].l[1-k].y>t.otherStill||n.l[1-k].y>t.otherBelow)return false;   // both up: Raise Skeleton's
         const float lift=c.y-a.y;
         if(lift>=.06f)e.Toward(lift/(t.armTop-a.y));
-        return c.y>=t.armTop&&Engine::Forward(c)<=t.armNear&&lift>=t.riseMin&&lift>=t.riseUpright*std::hypot(c.x-a.x,c.z-a.z)&&
+        return c.y>=t.armTop&&lift>=t.riseMin&&lift>=t.armUpright*std::hypot(c.x-a.x,c.z-a.z)&&
             PeakSpeed(s,i,k)>=t.riseSpeed;
     }
     return false;
 }
-// A pointing motion: from a pointing start no more than window s ago, does end hold for the start and the newest?
-// The hand pointing now is the first part done (Engine::Toward).
-template<class End> bool FromPoint(Engine& e,const std::vector<Sample>& s,double window,End end) {
-    const auto& n=s.back();
-    if(Pointing(s,s.size()-1))e.Toward(0);
-    for(size_t i=s.size()-1;i-->0&&n.t-s[i].t<=window;)
-        if(Pointing(s,i)&&end(s[i],i))return true;
-    return false;
-}
 }
 inline bool Done(Engine& e,Motion m) {
-    using detail::FromPoint;
     const auto& s=e.History();
     if(s.empty())return false;
     const auto& n=s.back();
@@ -160,32 +172,28 @@ inline bool Done(Engine& e,Motion m) {
         }
         return false;
     }
-    case Motion::CorpseExplosion:
-        return FromPoint(e,s,t.jabWindow,[&](const Sample& a,size_t){
-            const auto& c=n.l[0];const auto& o=a.l[0];const float forward=F(c)-F(o);
-            if(forward>=.03f)e.Toward(forward/t.jab);
-            return forward>=t.jab&&std::fabs(c.y-o.y)<=.6f*forward&&std::fabs(c.x-o.x)<=.6f*forward;});
-    case Motion::AmplifyDamage: {   // a punch with the right fist
-        const auto& c=n.l[0];
-        for(size_t i=s.size()-1;i-->0&&n.t-s[i].t<=t.punchWindow;) {
-            const auto& o=s[i].l[0];
-            if(F(o)>t.punchFrom||o.y<t.punchLow||o.y>t.punchHigh)continue;
-            const float forward=F(c)-F(o);
-            if(forward>=.05f)e.Toward(forward/t.punchTravel);
-            if(F(c)>=t.punchReach&&forward>=t.punchTravel&&std::fabs(c.y-o.y)<=.6f*forward&&std::fabs(c.x-o.x)<=.6f*forward&&
-               detail::PeakSpeed(s,i,0)>=t.punchSpeed)return true;
+    case Motion::CorpseExplosion:   // both fists punched out together
+        for(size_t i=s.size()-1;i-->0&&n.t-s[i].t<=t.pairWindow;) {
+            if(!detail::DrawnIn(s[i],0)||!detail::DrawnIn(s[i],1))continue;
+            const float forward=std::min(F(n.l[0])-F(s[i].l[0]),F(n.l[1])-F(s[i].l[1]));
+            if(forward>=.05f)e.Toward(forward/t.pairTravel);
+            if(Engine::Apart(n)<=t.pairApart&&detail::PunchedOut(s[i],n,0,t.pairReach,t.pairTravel)&&detail::PunchedOut(s[i],n,1,t.pairReach,t.pairTravel)&&
+               detail::PeakSpeed(s,i,0)>=t.punchSpeed&&detail::PeakSpeed(s,i,1)>=t.punchSpeed)return true;
         }
         return false;
-    }
-    case Motion::LowerResist:
-        return FromPoint(e,s,t.chopWindow,[&](const Sample& a,size_t i){
-            const auto& c=n.l[0];const auto& o=a.l[0];const float down=o.y-c.y;
-            if(down>=.04f)e.Toward(down/t.chop);
-            return down>=t.chop&&std::fabs(F(c)-F(o))<=down&&std::fabs(c.x-o.x)<=.6f*down&&detail::PeakSpeed(s,i,0)>=t.chopSpeed;});
-    case Motion::Golem:case Motion::GolemLeft:   // one arm swept up beside the head
-        if(!detail::ArmUp(e,s,m==Motion::Golem?0:1))return false;
-        e.Aim({0,0,-1});e.LandAt(t.golemAhead,0);
+    case Motion::AmplifyDamage:return detail::Punch(e,s,0);   // the right fist: the right hand's ray aims it
+    case Motion::LowerResist:   // the left fist, along the left arm
+        if(!detail::Punch(e,s,1))return false;
+        e.Aim(detail::ArmHeading(n.l[1],1));
         return true;
+    case Motion::Golem:case Motion::GolemLeft: {   // one arm swept up in front, toward the golem's spot
+        const int k=m==Motion::Golem?0:1;
+        if(!detail::ArmUp(e,s,k))return false;
+        auto way=detail::ArmHeading(n.l[k],k);
+        if(-way.z<.3f)way={0,0,-1};   // overhead, or heading off behind: straight ahead
+        e.Aim(way);e.LandAt(t.golemAhead*-way.z,t.golemAhead*way.x);
+        return true;
+    }
     case Motion::PoisonNova: {
         const bool end=Engine::Apart(n)>=t.novaApart&&n.l[0].x>=t.novaSide&&n.l[1].x<=-t.novaSide&&n.l[0].y<=t.novaHigh&&n.l[1].y<=t.novaHigh;
         for(size_t i=s.size()-1;i-->0&&n.t-s[i].t<=t.novaWindow;) {

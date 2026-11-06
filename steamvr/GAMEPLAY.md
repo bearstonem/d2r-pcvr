@@ -2371,16 +2371,19 @@ there.
   then up past the head, fast (arms only, so seated too); Find Item, the right hand held out at the
   corpse a moment, then snatched back to the shoulder.
 - Necromancer: Bone Armor, both fists crossed on the chest, held; Raise Skeleton, both arms swept up
-  fast from the hips past the face, together (no stop); Golem, the right arm swept up fast beside the
-  head (the strongest golem learned), and a second card, the left arm the same (the next one down);
-  Corpse Explosion, the right hand held out at a corpse, then jabbed forward; Amplify Damage, a punch
-  with the right fist; Lower Resist, the right hand held out at a monster (up to over the eyes), then
-  chopped down; Poison Nova, hands together at the chest, then flung out wide; Bone Prison, both hands
+  fast from the hips past the face, together (no stop); Golem, the right arm swept up fast the same way
+  in front of you (the strongest golem learned), standing 4 cells away where the arm heads, and a
+  second card, the left arm the same (the next one down); Corpse Explosion, both fists punched out
+  together; Amplify Damage, a punch with the right fist; Lower Resist, a punch with the left (along the
+  left arm); Poison Nova, hands together at the chest, then flung out wide; Bone Prison, both hands
   apart in front, then brought together round a monster. The owner's headset session (2026-11-05) made
   the summons arm raises ("right arm, just right arm rising up to raise golem, and then left arm raising
-  up to raise different kind of golem, and then both arms raising up to raise skeleton"), Amplify Damage
-  a punch ("Punch with one hand") and Poison Nova any height; Golem had been a slam from overhead and
-  Raise Skeleton a lift that had to stop at the chest.
+  up to raise different kind of golem, and then both arms raising up to raise skeleton"; "in front of
+  us ... kind of pointing at whatever area we're raising from"), the curses and Corpse Explosion
+  punches ("Punch with one hand"; the right hand held out still at the monster first, then jabbed or
+  chopped, was itself a punch and cast Amplify Damage) and Poison Nova any height; Golem had been a
+  slam from overhead, then a raise beside the head, and Raise Skeleton a lift that had to stop at the
+  chest.
 - Assassin: Burst of Speed, both arms pumped fast as in a sprint, two swings each; Fade, both hands
   drawn down in front of the face, from the eyes to the chin; Cloak of Shadows, both arms swept across from wide at the shoulders
   until they cross; Venom, the crossed wrists flicked apart fast; Blade Shield, the right hand circled
@@ -2393,8 +2396,8 @@ and Golem never, Find Item, Slow Missiles and Decoy never, Burst of Speed and Fa
 and the Valkyrie "didnt spawn her where I pointed. Was off to the side" (she went along the arm's
 line from the shoulder, levelled, far off). Nothing now asks for a slow move or a hand by the floor:
 the slow lift, the press to the floor, the slow drag and the reach down are a fast lift that stops,
-a slam from overhead, a chop and a snatch back; the point at a monster before Corpse Explosion,
-Amplify Damage and Lower Resist is held 0.15 s (was 0.25); Slow Missiles' stop is 0.15 s (was a
+a slam from overhead, a chop and a snatch back (since punches); the point at a monster before Corpse
+Explosion, Amplify Damage and Lower Resist was held 0.15 s (was 0.25); Slow Missiles' stop is 0.15 s (was a
 0.35 s hold below the shoulder); Decoy has Shadow Warrior's 0.6 s push (was a 0.35 s sweep); Burst
 of Speed's pumps may stay in front of the hips and as low as them; Fade starts at the eyes with the
 hands up to 45 cm apart.
