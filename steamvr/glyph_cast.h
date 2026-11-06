@@ -2,18 +2,21 @@
 // Glyph casting (glyph_recognizer.h, glyph_trail.h): the stroke while the "Draw glyph" button is held,
 // and the cast once it is recognised.
 //
-// Stroke: while held, the drawing hand's path is kept on the upright plane facing the player as the
-// stroke began (a point each time the hand has moved StepMetres). Letting go recognises it; a hand that
+// Stroke: while held, the drawing hand's path is kept (a point each time the hand has moved StepMetres),
+// in the room and, for its trail, on the upright plane facing the player as the stroke began. Letting go
+// flattens the room path onto the plane it was drawn in (glyphs::Flatten) and recognises it; a hand that
 // stops being tracked, or a menu, wheel or other use of the hands, cancels it.
 //
 // Cast: the skill the player put on that shape is cast through a native button press, so mana, cast
 // rate, the buff and its sound stay the game's. In order (Plan):
-//   1. the skill is on one of the ten hand-button slots: that slot is pressed (as Holy Shield's sign);
+//   1. the skill is on one of the ten hand-button slots: that slot is pressed (as Holy Shield's sign;
+//      Town Portal's slot reads as the scroll or the tome it will use, 219 or 220);
 //   2. the game's spare right-trigger skill record (record 5, which no hand button reaches and which the
 //      mod never presses otherwise) already holds it: RT is pressed;
 //   3. else it is put on that record first (the UI thread, nativeui) and RT pressed once the binding
 //      reads back; ParkWaitSeconds without it, the cast is dropped.
 // Value-only: steamvr/glyph_cast_test.cpp.
+#include "controller_bindings.h"
 #include "glyph_recognizer.h"
 #include "skill_slots.h"
 #include <array>
@@ -43,6 +46,8 @@ struct StrokeOutput {
     bool drawing = false;
     glyphs::Result result;   // with Recognised / Refused
     float seconds = 0;       // how long the stroke took
+    bool ownPlane = false;   // flattened onto the plane it was drawn in (else the one facing the player)
+    float planeDegrees = 0;  // that plane's turn from facing the player
 };
 
 class Stroke {
@@ -50,10 +55,14 @@ class Stroke {
     double began = 0;
     glyphs::Plane plane;
     std::vector<glyphs::Point> points;
+    std::vector<glyphs::Spot> room;
+    glyphs::Cloud flat;
 public:
     // The stroke so far (or the last one, while it fades), relative to where it began; the plane it lies in.
     const std::vector<glyphs::Point>& Points() const { return points; }
     const glyphs::Plane& Where() const { return plane; }
+    // The last stroke as it was recognised: metres on the plane it was drawn in, from its first point.
+    const glyphs::Cloud& Flattened() const { return flat; }
     bool Drawing() const { return drawing; }
     StrokeOutput Step(const StrokeInput& in) {
         StrokeOutput out;
@@ -69,6 +78,8 @@ public:
                 plane.originX = in.x; plane.originY = in.y; plane.originZ = in.z;
                 plane.rightX = len > 1e-4f ? in.rightX / len : 1; plane.rightZ = len > 1e-4f ? in.rightZ / len : 0;
                 points.assign(1, glyphs::Point{0, 0});
+                room.assign(1, glyphs::Spot{in.x, in.y, in.z});
+                flat.clear();
                 began = in.time; drawing = true; out.event = Event::Began;
             }
             out.drawing = drawing;
@@ -77,13 +88,18 @@ public:
         if (in.held) {
             const auto p = plane.Project(in.x, in.y, in.z);
             if (points.size() < MaxPoints && glyphs::Distance(p, points.back()) >= StepMetres) points.push_back(p);
+            const auto& last = room.back();
+            if (room.size() < MaxPoints && std::hypot(in.x - last.x, in.y - last.y, in.z - last.z) >= StepMetres) room.push_back({in.x, in.y, in.z});
             out.drawing = true;
             return out;
         }
         // Let go: recognise.
         drawing = false;
         out.seconds = float(in.time - began);
-        out.result = glyphs::Recognize(points, out.seconds);
+        auto flattened = glyphs::Flatten(room, plane.rightX, plane.rightZ);
+        flat = std::move(flattened.stroke);
+        out.ownPlane = flattened.own; out.planeDegrees = flattened.degrees;
+        out.result = glyphs::Recognize(flat, out.seconds);
         out.event = out.result.shape == glyphs::Shape::None ? Event::Refused : Event::Recognised;
         return out;
     }
@@ -104,7 +120,7 @@ struct Plan { How how = How::None; int slot = -1; };
 inline Plan Dispatch(int skill, int owner, const std::array<Slot, skills::Count>& slots, int recordSkill, int recordOwner) {
     if (skill < 0) return {};
     for (int i = 0; i < skills::Count; ++i)
-        if (slots[size_t(i)].known && slots[size_t(i)].id == skill && slots[size_t(i)].owner == owner) return {How::Slot, i};
+        if (slots[size_t(i)].known && interaction::CatalogSkillId(slots[size_t(i)].id) == skill && slots[size_t(i)].owner == owner) return {How::Slot, i};
     if (recordSkill == skill && recordOwner == owner) return {How::Record, GlyphRecord};
     return {How::Park, GlyphRecord};
 }

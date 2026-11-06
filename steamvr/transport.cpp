@@ -4194,7 +4194,7 @@ void Input() {
             const int skill=stroke.event==glyphcast::Event::Recognised?interactionInput.glyphSkills[size_t(r.shape)]:-1;
             const auto known=interaction::GlyphSkill(quickSnapshot,skill);
             const char* refused=stroke.event==glyphcast::Event::Refused?r.why:skill<0?"no skill on it (the wheel's GLYPHS page)":
-                !known.known?"not this hero's skill":!known.available?"the skill is unavailable now":glyphCast.Busy()?"the last glyph is still casting":nullptr;
+                !known.known?(skill==359?"no Town Portal scroll or tome":"not this hero's skill"):!known.available?"the skill is unavailable now":glyphCast.Busy()?"the last glyph is still casting":nullptr;
             glyphcast::Plan plan;
             if(!refused) {
                 std::array<glyphcast::Slot,skills::Count> slots{};
@@ -4204,21 +4204,30 @@ void Input() {
                 if(plan.how==glyphcast::How::Park&&!record)refused="the right trigger's skill record is unknown (a custom controller layout?)";
                 else if(plan.how==glyphcast::How::Park&&!interactionstate::Park(interactionInput.session,skill,-1))refused="the last skill change is still running";
             }
-            char line[320];
+            char line[360],plane[48];
+            if(stroke.ownPlane)std::snprintf(plane,sizeof plane,"its own plane, %.0f deg from facing",stroke.planeDegrees);
+            else std::snprintf(plane,sizeof plane,"the plane facing you");
             if(refused) {
                 glyphLook=glyphtrail::Look::Refused;
-                std::snprintf(line,sizeof line,"Frame glyph: %s%s, %s (score %.2f, next %.2f, corners %d, %.1f s)",
+                std::snprintf(line,sizeof line,"Frame glyph: %s%s, %s (score %.2f, next %.2f, corners %d, %.1f s, %s)",
                     stroke.event==glyphcast::Event::Recognised?"the ":"not recognised, nearest the ",glyphs::Name(stroke.event==glyphcast::Event::Recognised?r.shape:r.nearest),
-                    refused,r.score,r.second,r.corners,stroke.seconds);
+                    refused,r.score,r.second,r.corners,stroke.seconds,plane);
                 MotionPulse(hand,haptics::Category::Interaction,.25f,100000000);
             } else {
                 glyphCast.Begin(plan,skill,-1,now);glyphLook=glyphtrail::ElementLook(skill);
-                std::snprintf(line,sizeof line,"Frame glyph: the %s -> %s (skill %d) via %s (score %.2f, next %.2f, corners %d, %.1f s)",
+                std::snprintf(line,sizeof line,"Frame glyph: the %s -> %s (skill %d) via %s (score %.2f, next %.2f, corners %d, %.1f s, %s)",
                     glyphs::Name(r.shape),known.name,skill,plan.how==glyphcast::How::Slot?"its hand slot":plan.how==glyphcast::How::Record?"the right trigger":
-                    "the right trigger, put on it first",r.score,r.second,r.corners,stroke.seconds);
+                    "the right trigger, put on it first",r.score,r.second,r.corners,stroke.seconds,plane);
                 MotionPulse(hand,haptics::Category::Spell,.6f,60000000);
             }
             Say(line);
+            // A stroke not recognised, as drawn (24 points, cm on its plane), to tune the shapes by.
+            if(stroke.event==glyphcast::Event::Refused&&glyphStroke.Flattened().size()>=4) {
+                const auto path=glyphs::Resample(glyphStroke.Flattened(),24);
+                std::string drawn="Frame glyph: the stroke, cm:";
+                for(const auto& p:path){char at[24];std::snprintf(at,sizeof at," %.0f,%.0f",p.x*100,p.y*100);drawn+=at;}
+                Say(drawn.c_str());
+            }
         }
         glyphPressRt=false;
         if(!quickFresh||!motionInput.active)glyphCast.Cancel();

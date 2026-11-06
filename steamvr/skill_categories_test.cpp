@@ -94,15 +94,16 @@ int main(){
         s.in.reply={r.sequence,r.session,Result::Applied};s.Step();
         Check(s.out.editor==0,"applied: back on the hand wheel");
     }
-    {   // the GLYPHS page: a shape's skill, from the hero's own skills that need no target
+    {   // the GLYPHS page: a shape's skill, from the hero's own skills that need no target, and Town Portal
         Sim s;s.in.snapshot.catalog[2].directed=true;   // 96 needs a target
+        s.Add(359);s.in.snapshot.catalog[size_t(s.in.snapshot.skillCount-1)].directed=true;   // Town Portal, even were its row read as aimed
         s.in.wheel=true;s.Step();
         s.Click(GlyphsCell);Check(s.out.glyphs&&Page(s.out)==MenuPage::Glyphs&&s.out.feedback==1,"the GLYPHS box opens the page");
         Check(WheelCell(.85f,.1f,-1,MenuPage::Glyphs,0)==GlyphsCell&&WheelCell(.1f,.1f,-1,MenuPage::Glyphs,0)!=QuickUseCell,"only the GLYPHS box on its page");
         s.Click(2);Check(s.out.editor==2&&s.out.glyphEdit==2&&s.out.editSlot==-1,"a shape opens the skill picker for it, not a button's");
         bool clean=true;
         for(int i=0;i<s.out.editCount;++i){const auto& k=s.out.editOptions[size_t(i)];clean=clean&&k.id!=357&&k.id!=96&&k.owner==-1&&k.id!=GlyphDrawId;}
-        Check(clean&&s.out.editCategoryCounts[categories::All]==14,"no Interact, no targeted skill, no item charges, no Draw glyph");
+        Check(clean&&s.out.editCategoryCounts[categories::All]==15,"the 14 untargeted skills and Town Portal: no Interact, no targeted skill, no item charges, no Draw glyph");
         const int chosen=s.out.editOptions[1].id;
         auto r=s.Click(1).request;
         Check(r.action==Action::BindGlyph&&r.index==2&&r.skill==chosen&&r.skillOwner==-1,"choosing: the square's skill");
