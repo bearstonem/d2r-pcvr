@@ -58,9 +58,12 @@ struct Tuning {
     // fistsApart apart, wider than Howl's start (howlTogether), which may be at the face too.
     float cryFistIn=.08f,cryFistOut=.40f,shoulderLow=-.46f,shoulderHigh=.20f,fistsApart=.32f,hipBelow=-.50f,cryFall=.26f,cryBack=.35f;
     double cryWindow=.6;
-    // Leap: both arms back and down (y at most backLow, forward at most backBehind), then both above the
-    // eyes by leapAbove, at least leapApart apart (not a two-handed grip), risen leapRise within leapWindow s.
-    float backLow=-.50f,backBehind=-.08f,leapAbove=.10f,leapApart=.22f,leapRise=.60f;double leapWindow=.6;
+    // Leap: both arms back and down (y at most backLow, forward at most backBehind), then both up past leapAbove
+    // (shoulder height), at least leapApart apart (not a two-handed grip), risen leapRise within leapWindow s.
+    // It cast as the hands passed over the head (leapAbove .10, leapRise .60) until the owner felt the game's
+    // own take-off crouch as a stop before the jump (2026-11-05: the hero ran at full speed up to the cast, then
+    // stood 0.17 s): cast at the shoulders, the crouch overlaps the rest of the swing.
+    float backLow=-.50f,backBehind=-.08f,leapAbove=-.15f,leapApart=.22f,leapRise=.38f;double leapWindow=.6;
     float swingSpeed=1.5f;    // m/s: the leap's swing, each arm at its fastest
     // Leap lands leapAhead cells away the way the arms swung (straight ahead, where you face, if straight up).
     // Its way alone went nowhere: a placed skill takes a spot (the owner, 2026-11-05: "it goes to where the
