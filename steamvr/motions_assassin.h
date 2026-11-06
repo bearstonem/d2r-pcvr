@@ -49,8 +49,10 @@ struct Tuning {
     float faceSide=.26f,faceNear=.02f,faceFar=.50f,fadeApart=.45f;
     float fadeFrom=-.08f,fadeTo=-.20f,fadeDrop=.14f,fadeWindow=1.f;
     // Cloak of Shadows: each hand cloakWide out on its own side at shoulder height (cloakHigh or higher),
-    // then swept cloakSweep across, past the middle by cloakCross onto the other side, within cloakWindow s.
-    float cloakWide=.22f,cloakHigh=-.45f,cloakCross=.08f,cloakSweep=.30f,cloakWindow=.9f;
+    // then swept cloakSweep across, past the middle by cloakCross onto the other side, within cloakWindow s, ending
+    // in front of the body or against it (cloakNear ahead or more). Two of the owner's nine (2026-11-05) missed:
+    // the left hand crossed tight to the chest (5 cm ahead was the least) or the sweep took longer than 0.9 s.
+    float cloakWide=.22f,cloakHigh=-.45f,cloakCross=.08f,cloakSweep=.30f,cloakWindow=1.2f,cloakNear=-.05f;
     // Venom: the wrists crossed in front (the right hand left of the left, venomClose apart or less), then
     // flicked venomFlick apart, each venomSide out on its own side, within venomWindow s.
     float venomClose=.25f,venomFlick=.45f,venomSide=.15f,venomWindow=.22f;
@@ -180,7 +182,7 @@ inline bool Done(Engine& e,Motion m) {
         return false;
     }
     case Motion::CloakOfShadows: {
-        const auto front=[&](math::Vec p){return Ahead(p)>=.05f&&Ahead(p)<=.55f&&p.y>=-.65f&&p.y<=-.05f;};
+        const auto front=[&](math::Vec p){return Ahead(p)>=t.cloakNear&&Ahead(p)<=.55f&&p.y>=-.65f&&p.y<=-.05f;};
         const bool end=r.x<=-t.cloakCross&&l.x>=t.cloakCross&&front(r)&&front(l);
         const auto recent=within(t.cloakWindow);
         for(const auto& s:h) {
