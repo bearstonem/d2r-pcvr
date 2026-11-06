@@ -338,7 +338,8 @@ std::vector<Item> g_items = {
     Needs(L"camera", L"neck_model", 1, Slider(L"camera", L"neck_up_cm", L"Eyes above the neck pivot, cm", 0, 25, 1, 10)),
     Needs(L"camera", L"neck_model", 1, Slider(L"camera", L"neck_forward_cm", L"Eyes in front of the neck pivot, cm", 0, 25, 1, 9)),
     Toggle(L"camera", L"follow_jump", L"Camera rises when the hero jumps", 1,
-           L"The camera goes up when the animation lifts the hero (the barbarian's Leap); the held upper body goes with it."),
+           L"The camera goes up when the game lifts the hero (the barbarian's Leap, up its whole arc) or the animation raises "
+           L"his hips; the held upper body goes with it."),
     Needs(L"camera", L"follow_jump", 1, Slider(L"camera", L"jump_from", L"Jump threshold (hip rise)", 0, 1.5f, 0.05f, 0.3f,
            L"Hip rise still taken for the stride's bob, not a jump. Above twice this the camera follows it whole.")),
 #endif
