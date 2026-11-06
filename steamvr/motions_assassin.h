@@ -61,10 +61,13 @@ struct Tuning {
     // widest), ahead of the eyes by circleFront all along, within circleWindow s.
     float circleTurns=1.8f,circleRadius=.07f,circleRound=.35f,circleFront=.10f,circleWindow=1.5f;
     // Shadow Warrior: both hands at the chest (within chestSide of the middle, chestApart apart, chestLow
-    // to chestHigh, chestNear to chestFar ahead), then pushed pushSide or more to the same side, the leading
-    // hand pushOut out and the other past the middle, mostly sideways, within pushWindow s.
-    float chestSide=.22f,chestApart=.30f,chestLow=-.50f,chestHigh=-.10f,chestNear=0,chestFar=.40f;
-    float pushSide=.30f,pushOut=.25f,pushWindow=.6f;
+    // to chestHigh, chestNear to chestFar ahead), then pushed to the same side, the leading hand pushSide or more and
+    // the trailing one pushTrail or more (it starts across the body and goes less far), the leading
+    // hand pushOut out and the other up to trailShort short of the middle, sideways at least pushSideways times
+    // as far as forward or back, within pushWindow s. As the Amazon's Decoy (the same push): the owner's pushes
+    // (2026-11-05) missed with the trailing hand 1-8 cm short of the middle (past it was needed).
+    float chestSide=.22f,chestApart=.45f,chestLow=-.50f,chestHigh=-.10f,chestNear=0,chestFar=.40f;
+    float pushSide=.22f,pushTrail=.08f,pushOut=.25f,pushWindow=.6f,trailShort=.08f,pushSideways=.8f;
     // Mind Blast: each hand beside its temple (templeSide to templeWide out, templeLow to templeHigh,
     // templeNear to templeFar ahead), then both pushed blastOut ahead, each blastTravel forward, mostly
     // forward, within blastWindow s.
@@ -219,12 +222,14 @@ inline bool Done(Engine& e,Motion m) {
             const auto& lead=side>0?r:l;const auto& trail=side>0?l:r;
             for(const auto& s:h) {
                 if(!recent(s)||!chest(s.l[0])||!chest(s.l[1])||Engine::Apart(s)>t.chestApart)continue;
-                bool pushed=true;float least=1e9f;math::Vec way{};
-                for(int k=0;k<2;++k){const auto d=n.l[k]-s.l[k];least=std::min(least,d.x*float(side));
-                    pushed=pushed&&d.x*float(side)>=1.2f*std::fabs(d.z)&&std::fabs(d.y)<=.25f;way=way+d*.5f;}
-                if(!pushed||least<.06f)continue;
-                e.Toward(least/t.pushSide);
-                if(least>=t.pushSide&&lead.x*float(side)>=t.pushOut&&trail.x*float(side)>=.02f){e.Aim({way.x,0,way.z});return true;}
+                bool pushed=true;math::Vec way{};
+                const int li=side>0?0:1;   // the leading hand's index
+                const float led=(n.l[li].x-s.l[li].x)*float(side),trailed=(n.l[1-li].x-s.l[1-li].x)*float(side);
+                for(int k=0;k<2;++k){const auto d=n.l[k]-s.l[k];
+                    pushed=pushed&&d.x*float(side)>=t.pushSideways*std::fabs(d.z)&&std::fabs(d.y)<=.25f;way=way+d*.5f;}
+                if(!pushed||led<.06f||trailed<.03f)continue;
+                e.Toward(led/t.pushSide);
+                if(led>=t.pushSide&&trailed>=t.pushTrail&&lead.x*float(side)>=t.pushOut&&trail.x*float(side)>=-t.trailShort){e.Aim({way.x,0,way.z});return true;}
             }
         }
         return false;

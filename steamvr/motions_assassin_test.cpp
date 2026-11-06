@@ -100,6 +100,10 @@ int main() {
      Check(s.casts==1,"Fade: from the eyes to the chin, the hands 28 cm apart, casts");}
     // Done again after its wait, it casts again.
     {Sim s(Motion::Venom);Venom(s);s.Hold(.8f);Venom(s);Check(s.casts==2,"Venom: again after the wait, again");}
+    {   // the owner's Shadow Warrior pushes (2026-11-05): the trailing hand 1-8 cm short of the middle
+        Sim push(Motion::ShadowWarrior);push.Move({.15f,-.33f,-.22f},{-.15f,-.32f,-.20f},.35f);push.Hold(.1f);push.Move({.40f,-.40f,-.30f},{-.04f,-.37f,-.24f},.3f);push.Hold(.2f);
+        Check(push.casts==1,"Shadow Warrior: pushed right, the left hand 4 cm short of the middle, casts");
+    }
     std::puts("motions-assassin-test: ok");
     return 0;
 }
