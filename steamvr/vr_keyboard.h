@@ -21,7 +21,7 @@
 namespace framevr::keyboard {
 
 // When the name box is on screen: character creation (CharacterCreatePanel)
-// with a hero picked. The game's UI messages say both (2026-11-06 log, Quest 3):
+// with a hero picked. The game's UI messages say both (2026-11-06 log):
 // PanelManager opens / unloads CharacterCreatePanel; CharacterCreate Select
 // names the hero clicked, and switching heroes sends Select for the new one
 // BEFORE Unselect for the old. Fed every UI message (vr/gamestate.cpp).
