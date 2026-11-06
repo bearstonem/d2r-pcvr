@@ -108,7 +108,9 @@ Quest left X/Y correspond to Index left A/B; right A/B labels are the same.
 | Recenter position, keep view direction | PC F13 (native OpenXR, gameplay only) |
 
 F13 resets the tracked position, including height, without resetting view direction.
-It skips open menus, calibration and item dragging. This is a recenter shortcut,
+It skips open menus, calibration, item dragging and held grips. Release both grips
+before recentering so a two-handed weapon's combat state is not interrupted.
+This is a recenter shortcut,
 not room-scale movement of the game actor; the world can still shift in position.
 
 Editing consumes combat inputs but never pauses the game or zeros locomotion.

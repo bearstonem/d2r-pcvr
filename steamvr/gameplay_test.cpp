@@ -26,6 +26,19 @@ struct Sim {
 };
 int main() {
     {
+        Input in;
+        Check(GripsReleased(in),"released grips permit recentering");
+        for(int hand=0;hand<2;++hand) {
+            for(float grip:{1.f,.6f,.4f,-1.f,std::numeric_limits<float>::quiet_NaN()}) {
+                in.grip[hand]=grip;
+                Check(!GripsReleased(in),"held, latched or unknown grip defers recentering");
+            }
+            in.grip[hand]=.39f;
+            Check(GripsReleased(in),"support-grip release permits recentering again");
+            in.grip[hand]=0;
+        }
+    }
+    {
         Sim s;s.in.weapon=Weapon::Crossbow;s.Step(2);s.in.trigger=1;s.Step();
         Check(s.out.attack,"crossbow trigger requests a basic attack");
         auto native=s.out;
