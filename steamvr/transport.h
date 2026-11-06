@@ -93,6 +93,10 @@ bool NativeAimOwnership(); // hand casting or wheel: preserve locomotion, suppre
 bool NativeSkillCasting(); // any active trigger/quick cast; retain native locomotion input
 bool DirectedSpellActive(); // fresh native assignment, actually casting (wheel or quick shortcut)
 bool SpellGripsArmed();   // both grips cast a learned motion spell (spell_motion.h): the left grip takes the staff only alone
+// Both grips held for the motions now, or let go under 0.4 s ago (a motion's cast still pressing): vrcam's Loot
+// pick hands the game no item then, or the cast's press picked up the item pointed at (owner, 2026-11-05: "when
+// you use both grip buttons near loot, it tries to pick them up").
+bool SpellGripsHeld();
 bool BowSkillActive();   // a bow or crossbow skill is being cast from a button (bow ready)
 int GroundSpellSkill();   // a ground skill (spellaim::GroundTarget) being cast that lands where it is aimed: its id, or -1
 int NativeCastSkill(); // current fresh native cast id, -1 when idle/blocked/stale

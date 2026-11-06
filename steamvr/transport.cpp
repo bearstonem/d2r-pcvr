@@ -266,6 +266,7 @@ double motionBuzzAt=-1;      // the warmer/colder buzz's last pulse (spellmotion
 double spellGripSince=-1;   // a grip held for them (-1 none), and whether that hold cast
 bool spellGripCast=false;
 std::atomic<bool> spellGripsArmed{false};   // a motion of the hero's class learned and on, Weapon skill gestures on (vrcam: the staff's left grip)
+std::atomic<uint64_t> spellGripsHeldAt{0};  // both grips last held with those armed (ms): Loot pick hands the game nothing then (SpellGripsHeld)
 spellmotion::Gate spellGate;   // every class's motions' gate: both grips held, the hands free
 // The cast a glyph or a motion is pressing (glyph_cast.h), for the aim queries (NativeCastSkill,
 // PointSpellSkill, CastButtonHand...). Through the right trigger's record it has no hand slot, so they
@@ -4147,6 +4148,7 @@ void Input() {
     // The gestures' detectors watch the frame the grips open too (gate.watch): Fist of the Heavens may end on the fist opening.
     const auto gate=spellGate.Step(motionInput.grip,motionHands);
     const bool gripHeld=gate.held,motionGate=gate.open,motionWatch=gate.watch;
+    if(gripHeld&&motionAny&&motionGestures)spellGripsHeldAt.store(GetTickCount64());
     const bool motionCooling=spellFreeAt>=0&&motionNow-spellFreeAt<1.;
     // The grip hold: a light tick as it begins; let go without a cast, one line (the Sorceress's: what the hands did).
     if(motionGate&&spellGripSince<0) {
@@ -4170,6 +4172,18 @@ void Input() {
             }
             else std::snprintf(line,sizeof line,"Frame spell motion: grips let go without a motion after %.1f s",heldFor);
             Say(line);
+        }
+        // Teleport's circle given up: how near its punch came (owner's session 2026-11-05: punches that did not count)
+        if(!gripHeld&&motionClass==1) {
+            const auto& tuning=spellFree[size_t(int(spellmotion::Motion::Punch)-1)].tuning;
+            const auto& p=spellFree[size_t(int(spellmotion::Motion::Punch)-1)].Stats();
+            if(p.punchAimed) {
+                char line[300];
+                std::snprintf(line,sizeof line,"Frame spell motion: Teleport's circle given up - the fist %.0f cm ahead at its farthest (a punch reaches %.0f), "
+                    "its longest stretch forward %.0f cm in %.2f s (needs %.0f), %.0f%% off straight (at most 67%%)",
+                    p.punchFarthest*100,tuning.punchReach*100,p.punchTravel*100,tuning.punchWindow,tuning.punchTravel*100,p.punchOff*100);
+                Say(line);
+            }
         }
     }
     const auto motionName=[&](int skill){const auto& k=interaction::GlyphSkill(quickSnapshot,skill);return std::string(k.name[0]?k.name:spellmotion::SpellName(skill));};
@@ -6689,6 +6703,7 @@ int NativeCastSkill() {
     return skill.known&&skill.available?skill.id:-1;
 }
 bool SpellGripsArmed(){return spellGripsArmed.load();}
+bool SpellGripsHeld(){const auto at=spellGripsHeldAt.load(),now=GetTickCount64();return at&&now>=at&&now-at<400;}
 bool DirectedSpellActive() {
     std::lock_guard lock(mutex);
     const int slot=motionOutput.skill;

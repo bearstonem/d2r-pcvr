@@ -138,10 +138,12 @@ int main() {
     {Sim s(Motion::Punch);s.Trigger(true);s.MoveR({.15f,-.32f,-.12f},.35f);s.Hold(.1f);s.MoveR({.15f,.20f,-.50f},.2f);
      Check(s.casts==0,"Teleport: an uppercut is not a punch");}
     for(float heading:{-2.f,1.f}){Sim s(Motion::Punch,heading);s.Trigger(true);Teleport(s);
-     Check(s.casts==1&&s.aim.z<-.25f&&std::fabs(s.aim.x)<.1f&&std::fabs(s.aim.y)<.1f,"Teleport: it goes the way of the punch, head-local (straight ahead at any heading)");}
+     Check(s.casts==1&&s.aim.z<-.2f&&std::fabs(s.aim.x)<.1f&&std::fabs(s.aim.y)<.1f,"Teleport: it goes the way of the punch, head-local (straight ahead at any heading)");}
     {Sim s(Motion::Punch);s.Trigger(true);s.MoveR({.05f,-.32f,-.12f},.35f);s.Hold(.1f);s.MoveR({.25f,-.30f,-.58f},.2f);
-     Check(s.casts==1&&s.aim.x>.1f&&s.aim.z<-.25f,"Teleport: a punch out to the right goes right of ahead");}
+     Check(s.casts==1&&s.aim.x>.05f&&s.aim.z<-.2f,"Teleport: a punch out to the right goes right of ahead");}
     {Sim s(Motion::Punch);s.Trigger(true);Teleport(s);Check(s.casts==1&&!s.landing,"Teleport: a punch with no fast pull first casts as before, along the punch");}
+    {Sim s(Motion::Punch);s.Trigger(true);s.MoveR({.18f,-.38f,-.05f},.35f);s.Hold(.1f);s.MoveR({.15f,-.30f,-.38f},.12f);s.Hold(.3f);
+     Check(s.casts==1,"Teleport: a fast punch that stops 38 cm out casts (the owner's, 2026-11-05: 37 and 40 cm)");}
     // Aimed first (owner, 2026-11-05): the fist pulled in fast shows the landing, nudged, then the punch.
     {
         const auto pulled=[](Sim& s){s.MoveR({.15f,-.32f,-.45f},.5f);s.Hold(.2f);s.MoveR({.15f,-.32f,-.12f},.18f);};

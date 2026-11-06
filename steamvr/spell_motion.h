@@ -244,8 +244,9 @@ struct Tuning {
     // Teleport, the Paladin's Charge punch (charge_gesture.h): the right hand drawn in (at most punchFrom
     // ahead of the eyes, hip to brow), then punched straight out to punchReach ahead, punchTravel
     // forward within punchWindow, at least 1.5 times as far forward as up, down or sideways.
-    // The cast goes the way of the punch (Output::aim).
-    float punchFrom=.30f,punchReach=.45f,punchTravel=.25f,punchWindow=.20f;
+    // The cast goes the way of the punch (Output::aim). Reach 45 cm until the owner's session (2026-11-05):
+    // fast punches (3.9 and 4.0 m/s) that stopped 37 and 40 cm ahead of the eyes never cast.
+    float punchFrom=.30f,punchReach=.35f,punchTravel=.25f,punchWindow=.20f;
     // Teleport aimed first (owner, 2026-11-05: "One fast pull of the hand ... that shows the target circle
     // we are facing and a push out of our hand that initiates the teleport. And in between we can even do
     // slight adjustments"): the right fist pulled in fast, drawTravel back toward the eyes within
@@ -298,6 +299,10 @@ struct Output {
     // while it showed, so it lands there.
     bool aiming=false,landing=false;
     math::Vec adjust{};
+    // Teleport's circle shown this hold, for the log when it is given up (Stats): how near a punch came - the
+    // fist's farthest ahead, the longest stretch forward within punchWindow and how far off straight it went
+    // (the larger of its rise and its drift over its forward travel).
+    bool punchAimed=false;float punchFarthest=0,punchTravel=0,punchOff=0;
     // How near the watched motion is to casting, for the controllers' warmer/colder buzz (a tester,
     // 2026-11-05: "continuous vibration as you get closer to the 2nd part of the sequence"): 0 nothing
     // begun, Begun once its first part is done (the hands together, a fist at the mouth, a pose taken),
@@ -476,6 +481,14 @@ private:
                     const float back=Forward(a)-Forward(c);
                     if(n.t-s.t<=t.drawWindow&&back>=t.drawTravel&&std::fabs(c.y-a.y)<=back&&std::fabs(c.x-a.x)<=back){drawnAt=n.t;anchored=false;break;}
                 }
+            if(drawnAt>=0) {   // how near a punch comes, for the log if the circle is given up
+                stats.punchAimed=true;stats.punchFarthest=std::max(stats.punchFarthest,Forward(c));
+                for(const auto& s:samples) {
+                    const auto& a=s.l[0];const float forward=Forward(c)-Forward(a);
+                    if(n.t-s.t<=t.punchWindow&&forward>stats.punchTravel)
+                        {stats.punchTravel=forward;stats.punchOff=std::max(std::fabs(c.y-a.y),std::fabs(c.x-a.x))/std::max(forward,.01f);}
+                }
+            }
             if(drawnAt>=0&&Len(Velocity(0))<t.aimStill) {
                 if(!anchored){anchored=true;anchor=c;}
                 settled=c;

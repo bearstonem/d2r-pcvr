@@ -4959,6 +4959,8 @@ uintptr_t HandItem() {
 uintptr_t Selected() {
     bool between = false;
     if (!On(&between)) return 0;
+    // Both grips held for the motions (or a moment after): a motion's cast press is no pick-up.
+    if (framevr::SpellGripsHeld()) return 0;
     TellThread("the Interact skill's target", 0);
     const uintptr_t handed = Handed(g_pick.load(), false);
     if (handed && between) {   // asked between headset frames (A's press): once a second at most
