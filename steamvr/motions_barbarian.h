@@ -39,9 +39,12 @@ struct Tuning {
     // beatSpeed or faster toward the body; two beats beatGap to beatWindow s apart.
     float chestLeft=-.22f,chestRight=.18f,chestLow=-.62f,chestHigh=-.22f,chestIn=.16f,chestOut=.26f,beatSpeed=.8f;
     double beatGap=.15,beatWindow=1.2;
-    // Howl: both hands at the chest, at most howlTogether apart, then each out on its own side howlSide and
-    // howlApart apart, no lower than howlLow, within howlWindow s.
-    float howlTogether=.30f,howlSide=.40f,howlApart=.80f,howlLow=-.70f;double howlWindow=.7;
+    // Howl: both hands together in front, at most howlTogether apart, from the chest up to the face (howlFrom
+    // below the eyes to howlTop over them), then each out on its own side howlSide and howlApart apart, no lower
+    // than howlLow, within howlWindow s. The owner's flings (2026-11-05) began with the hands together at the
+    // face, 11-20 cm under the eyes to 13-22 over them, and missed: the start had to be at the chest (18 cm
+    // under the eyes or lower). Shout, from the mouth too, ends with the fists pushed forward together.
+    float howlTogether=.30f,howlSide=.40f,howlApart=.80f,howlLow=-.70f,howlFrom=-.62f,howlTop=.22f;double howlWindow=.7;
     float flingSpeed=1.2f;    // m/s: Howl's and Battle Cry's hands each at least this fast at their fastest
     // Battle Cry: both fists up by the shoulders (|x| in [cryFistIn, cryFistOut] on their own side, y in
     // [shoulderLow, shoulderHigh], at least fistsApart apart), then both pulled down past hipBelow, each
@@ -72,7 +75,7 @@ inline const char* Cue(Motion m) {
     case Motion::Shout:return "both fists to the mouth a moment, then push them out forward together";
     case Motion::BattleCommand:return "beat the right fist on the chest twice";
     case Motion::WarCry:return "right fist to the mouth a moment, then thrust it forward and down at the ground ahead";
-    case Motion::Howl:return "fling both arms wide from the chest";
+    case Motion::Howl:return "hands together at the chest or face, then fling both arms out wide";
     case Motion::BattleCry:return "both fists up by the shoulders, pulled down hard to the hips";
     case Motion::Leap:return "swing both arms down behind, then up past the head, fast, as for a jump";
     case Motion::FindItem:return "hold the right hand out at a corpse a moment, then snatch it back to the shoulder";
@@ -180,7 +183,7 @@ inline bool Done(Engine& e,Motion m) {
             const auto& s=h[i];
             if(n.t-s.t>t.howlWindow)continue;
             bool chest=Len(s.l[0]-s.l[1])<=t.howlTogether;
-            for(int k=0;k<2;++k){const auto& c=s.l[k];chest=chest&&std::fabs(c.x)<=.22f&&c.y>=-.62f&&c.y<=-.18f&&Forward(c)>=-.10f&&Forward(c)<=.35f;}
+            for(int k=0;k<2;++k){const auto& c=s.l[k];chest=chest&&std::fabs(c.x)<=.22f&&c.y>=t.howlFrom&&c.y<=t.howlTop&&Forward(c)>=-.10f&&Forward(c)<=.35f;}
             if(!chest)continue;
             e.Toward((Len(r-l)-t.howlTogether)/(t.howlApart-t.howlTogether));
             if(end&&Peak(h,int(i),1)>=t.flingSpeed&&Peak(h,int(i),2)>=t.flingSpeed)return true;

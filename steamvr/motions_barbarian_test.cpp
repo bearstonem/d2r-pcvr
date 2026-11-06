@@ -119,6 +119,12 @@ int main() {
         Sim mouth(Motion::FindItem);mouth.MoveR({.20f,-.45f,-.45f},.35f);mouth.Hold(.25f);mouth.MoveR({.02f,-.12f,-.18f},.25f);mouth.Hold(.3f);
         Check(mouth.casts==0,"Find Item: snatched back to the mouth (a warcry's start) is none");
     }
+    {   // the owner's Howls (2026-11-05): the hands together at the face, flung out 1.1 m apart at eye level
+        Sim face(Motion::Howl);face.Move({.07f,.05f,-.25f},{-.07f,.05f,-.25f},.35f);face.Hold(.1f);face.Move({.50f,.05f,-.28f},{-.50f,.0f,-.32f},.25f);face.Hold(.2f);
+        Check(face.casts==1,"Howl: flung wide from the hands together at the face casts");
+        Sim shout(Motion::Howl);shout.Move({.07f,-.08f,-.10f},{-.07f,-.08f,-.10f},.35f);shout.Hold(.2f);shout.Move({.08f,-.10f,-.55f},{-.08f,-.10f,-.55f},.2f);shout.Hold(.2f);
+        Check(shout.casts==0,"Howl: both fists pushed forward together from the mouth (Shout) is no Howl");
+    }
     std::puts("motions-barbarian-test: ok");
     return 0;
 }
