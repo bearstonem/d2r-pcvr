@@ -1057,6 +1057,9 @@ void LoadSettings() {
     // Bone Armor grafted onto both forearms (steamvr/bone_graft.h); missing keys: the defaults.
     // On, the hero's own spinning orbit is never shown (any view, menus too).
     billboards::ConfigureBoneArmorHidden(IniB(L"render",L"bone_armor_graft",true));
+    // Native Sorceress armor states carry authored ice grafts on both forearms.
+    framevr::ConfigureFrozenArmorGraft(IniB(L"render",L"frozen_armor_graft",true));
+    billboards::ConfigureFrozenArmorHidden(IniB(L"render",L"frozen_armor_hide_native",true));
     framevr::ConfigureBoneGraft(IniB(L"render",L"bone_armor_graft",true),IniF(L"render",L"bone_armor_graft_size",1.f),
         IniF(L"render",L"bone_armor_graft_out",.05f),IniF(L"render",L"bone_armor_graft_spread",40.f),IniF(L"render",L"bone_armor_graft_along",.5f),
         IniF(L"render",L"bone_armor_graft_width",.5f));
@@ -10140,7 +10143,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
 #ifdef D2RVR_NATIVE_OPENXR
         const bool ownDepth=g_enabled.load()&&g_inWorld.load()&&framevr::Active()&&
             (FogWanted()||g_set.skyOn.load()||g_arcaneSky.load()||CeilWanted()||TableKeyWanted()||OutlineWanted()||RingWanted()||BeamWanted());
-        const bool turnDepth=g_enabled.load()&&g_inWorld.load()&&framevr::Active()&&framevr::TurnDepthWanted();
+        const bool turnDepth=g_enabled.load()&&g_inWorld.load()&&framevr::Active()&&(framevr::TurnDepthWanted()||framevr::IceArmorDepthWanted());
         framevr::scenedepth::Bind(rt,cl,ownDepth,turnDepth,stereoreplay::RightEffects(),s);
         SetBool(rt,"OwnDepth",ownDepth);
 #else

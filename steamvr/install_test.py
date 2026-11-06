@@ -157,6 +157,9 @@ class InstallationTests(unittest.TestCase):
                 self.assertEqual((potion_dir / 'hp1.pvr').read_bytes(), b'local potion fixture')
                 self.assertTrue((potion_dir / 'rvl.pvr').is_file())
                 self.assertTrue((potion_dir / 'arw.pvr').is_file())
+                for name in ('ic1.pvr', 'ic2.pvr', 'ic3.pvr'):
+                    self.assertEqual((potion_dir / name).read_bytes(),
+                                     (install.ROOT / 'steamvr/assets/ice-armor' / name).read_bytes())
                 self.assertEqual((mod_plugins / 'd2r_vr_spell_sprites' / install.SPELL_SPRITES).read_bytes(), b'local sprite fixture')
                 self.assertEqual((mod_plugins / 'd2r_vr_props/props.bin').read_bytes(), b'local prop fixture')
                 for name, data in arcane.items():

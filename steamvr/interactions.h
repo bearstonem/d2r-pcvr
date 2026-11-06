@@ -285,6 +285,7 @@ struct Snapshot {
     Mercenary merc;
     companions::Roster companions;
     effects::Status effects;
+    uint64_t effectsAt=0; // original game-thread sample time; never renewed by UI snapshots
 };
 // A glyph shape's skill as the hero has it (the catalog's own entry); an id the hero lacks is kept, unknown.
 inline Skill GlyphSkill(const Snapshot& s,int id) {
