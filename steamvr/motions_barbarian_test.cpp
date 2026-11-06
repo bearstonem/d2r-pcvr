@@ -133,6 +133,10 @@ int main() {
         Sim howl(Motion::BattleCry);howl.Move({.07f,.05f,-.25f},{-.07f,.05f,-.25f},.35f);howl.Hold(.1f);howl.Move({.50f,.05f,-.28f},{-.50f,.0f,-.32f},.25f);howl.Hold(.2f);
         Check(howl.casts==0,"Battle Cry: the owner's Howl, flung wide at eye level, is not its pull");
     }
+    {   // Leap to a spot (the owner, 2026-11-05: it went the way the hero last walked)
+        Sim leap(Motion::Leap);Leap(leap);
+        Check(leap.casts==1&&leap.land==spellmotion::Land::Spot&&leap.spot.ahead>8&&std::fabs(leap.spot.right)<3,"Leap: lands ahead, where you face");
+    }
     std::puts("motions-barbarian-test: ok");
     return 0;
 }

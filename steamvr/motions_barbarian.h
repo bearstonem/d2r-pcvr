@@ -59,6 +59,10 @@ struct Tuning {
     // eyes by leapAbove, at least leapApart apart (not a two-handed grip), risen leapRise within leapWindow s.
     float backLow=-.50f,backBehind=-.08f,leapAbove=.10f,leapApart=.22f,leapRise=.60f;double leapWindow=.6;
     float swingSpeed=1.5f;    // m/s: the leap's swing, each arm at its fastest
+    // Leap lands leapAhead cells away the way the arms swung (straight ahead, where you face, if straight up).
+    // Its way alone went nowhere: a placed skill takes a spot (the owner, 2026-11-05: "it goes to where the
+    // character was last moving ... Not where we're facing or not where our arms are ending up").
+    float leapAhead=10;
     // Find Item: the right hand held out at the corpse (pointOut ahead or more, y in [pointLow, pointHigh],
     // |x| at most pointSide), resting dwellSeconds, then snatched back to the right shoulder (forward at most
     // snatchTo, y in [shoulderMin, shoulderMax], x in [shoulderIn, shoulderOut]), snatchBack or more toward
@@ -221,8 +225,10 @@ inline bool Done(Engine& e,Motion m) {
             if(!end||r.y-a.y<t.leapRise||l.y-b.y<t.leapRise||Peak(h,int(i),1)<t.swingSpeed||Peak(h,int(i),2)<t.swingSpeed)continue;
             // the way the arms swung, level; straight ahead if they swung straight up
             math::Vec way=((r-a)+(l-b))*.5f;way.y=0;
-            if(Forward(way)<.05f)way={0,0,-1};
-            e.Aim(way);
+            const float level=Len(way);
+            way=Forward(way)<.05f||level<1e-3f?math::Vec{0,0,-1}:way*(1/level);
+            if(-way.z<.3f)way={0,0,-1};   // off to the side or behind: where you face
+            e.Aim(way);e.LandAt(t.leapAhead*-way.z,t.leapAhead*way.x);
             return true;
         }
         return false;
