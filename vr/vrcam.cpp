@@ -45,6 +45,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -212,6 +213,7 @@ struct Settings {
     std::atomic<bool>  heightAuto{true};    // first person: the eyes at the hero's own (each class its height); height unused
     std::atomic<float> eyeOffset{0.0f};     // added to that, world units
     std::atomic<bool>  followJump{true};    // the camera goes up when the animation lifts the hero (Leap)
+    std::atomic<float> leapGlideCm{60.0f};  // a Leap cast while running: how far ahead of the halted hero the view may glide (leapglide), cm; 0 off
     std::atomic<float> jumpFrom{0.3f};      // hip rise (model units) still taken for the stride's bob
     std::atomic<float> pitch{-60.0f};       // camera pitch relative to the game's own (deg); -60 = level, more negative = higher
     std::atomic<int>   renderPoolMb{64};
@@ -1114,6 +1116,7 @@ void LoadSettings() {
     g_set.eyeOffset.store(std::clamp(IniF(L"camera", L"eye_offset", 0.0f), -5.0f, 5.0f));
     g_set.followJump.store(IniB(L"camera", L"follow_jump", true));
     g_set.jumpFrom.store(std::clamp(IniF(L"camera", L"jump_from", 0.3f), 0.0f, 3.0f));
+    g_set.leapGlideCm.store(std::clamp(IniF(L"camera", L"leap_glide_cm", 60.0f), 0.0f, 150.0f));
     g_set.pitch.store(std::clamp(IniF(L"camera", L"pitch", -60.0f), -150.0f, 60.0f));
     g_set.renderPoolMb.store(std::clamp((int)IniF(L"render", L"render_pool_mb", 64.0f), 0, 4096));
     g_set.entityPoolMb.store(std::clamp((int)IniF(L"render", L"entity_pool_mb", 280.0f), 0, 4096));
@@ -1788,6 +1791,81 @@ float JumpLift() {
     if (ThirdPerson() || !g_set.followJump.load() || !skel::HeroEye(&eye, &lift)) return 0.0f;
     return lift * g_heroScale.load();
 }
+
+// Leap's take-off glide (owner, 2026-11-06: "Leap still feels like it stops before jumping ... It's not a smooth
+// motion from running to jumping"). Running into a Leap, the game holds the hero still for about 0.17 s - its
+// take-off crouch, with the cast reaching it within 20 ms - and the first-person view stopped dead with him.
+// From a Leap cast while running ([camera] leap_glide_cm, 0 off) the view's anchor keeps the run's velocity,
+// easing it away over Ease s, at most leap_glide_cm ahead of the hero; once he moves again (half the run's
+// speed), or after For s, it melts back onto him over Rejoin s. Only the view moves: the hero, his path, the
+// hands' tracking and the aim keep the game's position (g_lookAt).
+float UserEyeHeightM();
+namespace leapglide {
+std::atomic<ULONGLONG> g_cast{0};   // NativeSpellAim: the last Leap cast (GetTickCount64)
+constexpr double Ease = 0.12, Rejoin = 0.08, For = 0.6;
+struct State {
+    bool have = false, on = false, rejoining = false;
+    double at = 0, t0 = 0;
+    float hx = 0, hz = 0, vx = 0, vz = 0;     // the hero last view, and his smoothed velocity (world units a second)
+    float cx = 0, cz = 0, cvx = 0, cvz = 0;   // the anchor and its velocity while gliding
+    float run = 0;                            // the run's speed as the glide began
+    float most = 0;                           // the farthest ahead this glide, cm (for the log)
+    ULONGLONG cast = 0;
+};
+State g_s;   // the view thread's
+// The view's anchor for the hero at L (world units; y is L's).
+void Anchor(const float L[3], float out[3]) {
+    out[0] = L[0]; out[1] = L[1]; out[2] = L[2];
+    auto& s = g_s;
+    const double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    if (!s.have) { s.have = true; s.at = now; s.hx = L[0]; s.hz = L[2]; return; }
+    const double dt = now - s.at;
+    if (dt < 1e-3) { if (s.on) { out[0] = s.cx; out[2] = s.cz; } return; }   // the other eye of this pair
+    if (dt > 0.25) { s.vx = s.vz = 0; s.on = false; }                         // a gap (a menu, a load): forget
+    else {
+        const float a = float(std::min(1.0, dt / 0.06));
+        s.vx += ((L[0] - s.hx) / float(dt) - s.vx) * a;
+        s.vz += ((L[2] - s.hz) / float(dt) - s.vz) * a;
+    }
+    s.at = now; s.hx = L[0]; s.hz = L[2];
+    const float cm = g_set.leapGlideCm.load();
+    const ULONGLONG cast = g_cast.load();
+    if (cast != s.cast) {
+        s.cast = cast;
+        const float run = std::hypot(s.vx, s.vz);
+        if (!s.on && cm > 0 && GetTickCount64() - cast < 300 && run > 2.0f && !ThirdPerson()) {
+            s.on = true; s.rejoining = false; s.t0 = now; s.run = run; s.most = 0;
+            s.cx = L[0]; s.cz = L[2]; s.cvx = s.vx; s.cvz = s.vz;
+        }
+    }
+    if (!s.on) return;
+    const float upm = std::max(1.0f, ScaleHeight()) / UserEyeHeightM();
+    const float cap = cm * 0.01f * upm;
+    float ox = 0, oz = 0;
+    if (!s.rejoining) {
+        const float k = float(std::exp(-dt / Ease));   // the run's velocity eased away
+        s.cvx *= k; s.cvz *= k;
+        s.cx += s.cvx * float(dt); s.cz += s.cvz * float(dt);
+        ox = s.cx - L[0]; oz = s.cz - L[2];
+        const float o = std::hypot(ox, oz);
+        if (o > cap && o > 1e-4f) { ox *= cap / o; oz *= cap / o; }
+        if (std::hypot(s.vx, s.vz) > 0.5f * s.run || now - s.t0 > For) s.rejoining = true;   // moving again
+    } else {
+        ox = s.cx - L[0]; oz = s.cz - L[2];
+        const float k = float(std::exp(-dt / Rejoin));
+        ox *= k; oz *= k;
+        if (std::hypot(ox, oz) < 0.005f * upm) {
+            s.on = false;
+            LogF("vrcam: Leap's take-off glide - the view ran on up to %.0f cm ahead of the hero, rejoined after %.2f s (run %.1f units/s)",
+                 s.most, now - s.t0, s.run);
+            return;
+        }
+    }
+    s.cx = L[0] + ox; s.cz = L[2] + oz;
+    s.most = std::max(s.most, std::hypot(ox, oz) / upm * 100.0f);
+    out[0] = s.cx; out[2] = s.cz;
+}
+}  // namespace leapglide
 
 std::atomic<float> g_eyeWorld[3];   // the camera in the world (third person: its pivot), last view rebuild - the hands hang off it
 // F3: our camera over the game's ground, for the mouse pointer laid on it (FloorPointerTick) - the eyes this
@@ -2646,6 +2724,9 @@ bool VrViewInner(const d2rcam::WorldView& in, float out[16]) {
     if (!g_enabled.load() || !in.lookAtValid) return false;
     const float* G = in.gameView;   // row-major, v * M: column i is the game camera's axis i in the world
     const float* L = in.lookAt;
+    float glide[3];   // the view's anchor: the hero, or ahead of him through Leap's take-off (leapglide)
+    leapglide::Anchor(L, glide);
+    const float* A = TableView() || TopPersp() ? L : glide;
     const float gameForward[3] = {-G[2], -G[6], -G[10]};
     billboards::SetGameForward(gameForward);   // auras keep its lift (vr/overlay_view.h)
     V3 fwd, ahead, right, up, eye, hang;
@@ -2673,7 +2754,7 @@ bool VrViewInner(const d2rcam::WorldView& in, float out[16]) {
     up = up0 * cosf(roll) + right * sinf(roll);
 
     // The eye point: the hero's eyes, moved along where we look, flattened on the ground.
-    const V3 pivot = V3{L[0], L[1] + ViewHeight() + JumpLift(), L[2]} + right * g_set.camSide.load() + ahead * g_set.camForward.load();
+    const V3 pivot = V3{A[0], A[1] + ViewHeight() + JumpLift(), A[2]} + right * g_set.camSide.load() + ahead * g_set.camForward.load();
     // Neck model: the head turns about the top of the neck - over the body's
     // middle, below and behind the eyes - not about the eyes. Level, the eyes
     // sit in front of the neck; looking down they go forward and down with the
@@ -2710,14 +2791,14 @@ bool VrViewInner(const d2rcam::WorldView& in, float out[16]) {
             (g_headHeld.load() ? g_heldYaw.load() : g_mouseYaw.load() + g_turnYaw.load()) * 0.0174532925f;
         const float recenter = g_recenter.load() * 0.0174532925f;
         float center[16];
-        framevr::View(center, L, ViewHeight() + JumpLift(), UserEyeHeightM(), baseHeading, recenter, -1, mapNorth, ScaleHeight() + JumpLift());
+        framevr::View(center, A, ViewHeight() + JumpLift(), UserEyeHeightM(), baseHeading, recenter, -1, mapNorth, ScaleHeight() + JumpLift());
         eye = {-center[12]*center[0]-center[13]*center[1]-center[14]*center[2],
                -center[12]*center[4]-center[13]*center[5]-center[14]*center[6],
                -center[12]*center[8]-center[13]*center[9]-center[14]*center[10]};
         hang = eye;
         const float centerPosition[3]={eye.x,eye.y,eye.z};
         billboards::SetCenter(centerPosition);
-        framevr::View(view, L, ViewHeight() + JumpLift(), UserEyeHeightM(), baseHeading, recenter, g_eye.load(), mapNorth, ScaleHeight() + JumpLift());
+        framevr::View(view, A, ViewHeight() + JumpLift(), UserEyeHeightM(), baseHeading, recenter, g_eye.load(), mapNorth, ScaleHeight() + JumpLift());
         if ((g_eye.load() & 1) == 0) stereoreplay::SetLeftView(view, framevr::ReplayShift());   // the replay's right eye: this one moved along its x
         fwd = {-center[2], -center[6], -center[10]};
         const float horizontal = std::hypot(fwd.x, fwd.z);
@@ -3985,6 +4066,7 @@ bool UpstreamSpellAim(float playerX,float playerY,framevr::spellaim::Cast& cast)
 bool NativeSpellAim(float playerX,float playerY,framevr::spellaim::Cast& cast) {
     g_note={};
     const auto c=aimtargets::Now();
+    if(c.skill==132)leapglide::g_cast.store(GetTickCount64());   // Leap: the view glides through its take-off
     // A thrown trap first; then the aim rules only with this kind of cast's Aim
     // option On; Off, as before them.
     const bool directed=TossAim(c.skill,playerX,playerY,cast)||
