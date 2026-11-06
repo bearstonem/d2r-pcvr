@@ -325,12 +325,12 @@ struct Output {
     Land land=Land::None;Spot spot{};
 };
 // A spot for an arm pointing along way (head-local), in cells ahead of the eyes' heading and to its right:
-// far with the arm level (or up), easing to near at steepDeg below.
-inline Spot SpotAlong(math::Vec way,float far,float near,float steepDeg) {
+// farCells with the arm level (or up), easing to nearCells at steepDeg below.
+inline Spot SpotAlong(math::Vec way,float farCells,float nearCells,float steepDeg) {
     const float level=std::hypot(way.x,way.z);
-    if(!(level>1e-4f)||!std::isfinite(way.y))return {near,0};
+    if(!(level>1e-4f)||!std::isfinite(way.y))return {nearCells,0};
     const float below=std::atan2(-way.y,level)*57.2957795f;
-    const float f=std::clamp(below/steepDeg,0.f,1.f),cells=far+(near-far)*f;
+    const float f=std::clamp(below/steepDeg,0.f,1.f),cells=farCells+(nearCells-farCells)*f;
     return {cells*(-way.z/level),cells*(way.x/level)};
 }
 // Teleport's landing (Output::point): pointFar level, pointNear at pointSteepDeg below. Meteor's: its own.
