@@ -30,8 +30,8 @@ class Assets:
         self.files = {}
         for name, missile, use in sprites.TEXTURES:
             path = f'data/hd/vfx/textures/{name}.texture'
-            self.files[path] = native(31 if use == 'gradient' else 63, mips=2)
-        for missile in {missile for _, missile, _ in sprites.TEXTURES}:
+            self.files[path] = native({'gradient': 31, 'mask': 63, 'distortion': 65}[use], mips=2)
+        for missile in {missile for _, missile, _ in sprites.TEXTURES if missile is not None}:
             particle = f'data/hd/vfx/particles/missiles/{missile}/effect.particles'
             self.files[f'data/hd/missiles/{missile}.json'] = json.dumps(
                 {'dependencies': {'particles': [{'path': particle}]}}).encode()
@@ -51,6 +51,7 @@ class Assets:
 class SpellSpriteTests(unittest.TestCase):
     def test_texture_formats_and_mips(self):
         self.assertEqual(sprites.texture(native(63), 'mask'), (4, 4, 80, [bytes([1]) * 8]))
+        self.assertEqual(sprites.texture(native(65), 'distortion'), (4, 4, 83, [bytes([1]) * 16]))
         self.assertEqual(sprites.texture(native(61), 'mask')[2], 77)
         width, height, fmt, mips = sprites.texture(native(31, 8, 4, 2), 'gradient')
         self.assertEqual((width, height, fmt, [len(m) for m in mips]), (8, 4, 29, [128, 32]))
@@ -86,6 +87,22 @@ class SpellSpriteTests(unittest.TestCase):
                 assets.build_hash = 'patched-game'
                 sprites.prepare('game', folder)
                 self.assertGreater(assets.reads, reads, 'a game update rebuilds the cache')
+
+    def test_version_two_textures(self):
+        names = [name for name, _, _ in sprites.TEXTURES]
+        self.assertEqual(sprites.VERSION, 2)
+        self.assertEqual(len(names), 21, 'the 11 spell textures, then the 10 of version 2, in the slots of spell_sprites.h')
+        self.assertEqual(names[11], 'mask/t_fx_fireflipbook_64x64')
+        self.assertEqual(sprites.TEXTURES[-1], ('distortion/T_FX_gaussian_distortion_strong', 'firebolt', 'distortion'))
+
+    def test_a_texture_no_spell_names_is_still_read(self):
+        with tempfile.TemporaryDirectory() as folder:
+            assets = Assets()
+            del assets.files['data/hd/vfx/textures/energy/t_fx_lighting_flipbook_01.texture']
+            with patch.object(sprites, 'open_assets', return_value=assets):
+                with self.assertRaises(KeyError):
+                    sprites.prepare('game', folder)
+            self.assertFalse((Path(folder) / sprites.FILE).exists(), 'a texture gone from the game: nothing written')
 
     def test_textures_must_belong_to_their_spell(self):
         with tempfile.TemporaryDirectory() as folder:

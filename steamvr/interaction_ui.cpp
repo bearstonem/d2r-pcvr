@@ -211,7 +211,7 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
         return RGB(int(c.r*255),int(c.g*255),int(c.b*255));
     };
     const int sectors=fiveSectors?5:8;
-    for(int i=0;!o.developer&&!o.map&&o.editor<2&&i<sectors;++i) {
+    for(int i=0;!o.developer&&!o.map&&!o.motions&&o.editor<2&&i<sectors;++i) {
         const int slot=fiveSectors?skills::HandSlot(o.wheelHand,i):i;
         if(o.utility&&i==2)continue; // Native tabbed menu retains journal access.
         const float sector=2*Pi/sectors;
@@ -225,18 +225,21 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
         }
         char label[120]{};RECT box{x-51,y-64,x+51,y+31};
         if(o.glyphs&&!o.utility) {
-            // The GLYPHS page: each shape, drawn, and the skill drawing it casts.
+            // The GLYPHS page: each shape, drawn, and the skill drawing it with the hand shown casts.
             const auto shape=glyphs::Shape(i);
-            const auto skill=GlyphSkill(s,o.glyphSkills[size_t(i)]);
+            const auto skill=GlyphSkill(s,GlyphCasts(o.glyphSkills,o.glyphHand,i));
             const bool set=skill.id>=0,have=set&&skill.known;
+            const bool follows=GlyphFollows(o.glyphSkills,o.glyphHand,i);   // a left shape with none of its own: the right hand's, dimmed
             // Eight wedges are closer than the hand wheel's five: the name small over the shape, the skill under it.
             box={x-30,y-44,x+30,y+12};
-            glyph(shape,box,!set?RGB(118,110,96):element(skill.id),4);
-            if(have)icon(icons::Get("s"+std::to_string(skill.id)),{box.right-6,box.bottom-24,box.right+22,box.bottom+4},skill.available);
-            std::snprintf(label,sizeof label,"%s",!set?"No skill":have?skill.name:"Another hero's");
-            SetTextColor(dc,have?RGB(235,218,181):RGB(148,137,117));
+            const COLORREF colour=!set?RGB(118,110,96):element(skill.id);
+            glyph(shape,box,follows?RGB((GetRValue(colour)+118)/2,(GetGValue(colour)+110)/2,(GetBValue(colour)+96)/2):colour,follows?3:4);
+            if(have)icon(icons::Get("s"+std::to_string(skill.id)),{box.right-6,box.bottom-24,box.right+22,box.bottom+4},skill.available&&!follows);
+            std::snprintf(label,sizeof label,"%s",!set?"No skill":have?skill.name:skill.id==359?"Town Portal":"Another hero's");
+            SetTextColor(dc,have&&!follows?RGB(235,218,181):RGB(148,137,117));
             auto previous=SelectObject(dc,skillFont);
-            text(label,{x-63,y+14,x+63,y+52});
+            if(follows){SelectObject(dc,shortcutFont);text("RIGHT HAND'S",{x-63,y+14,x+63,y+30});SelectObject(dc,skillFont);}
+            text(label,follows?RECT{x-63,y+30,x+63,y+68}:RECT{x-63,y+14,x+63,y+52});
             char name[32];std::snprintf(name,sizeof name,"%s",glyphs::Name(shape));
             for(char* c=name;*c;++c)*c=char(std::toupper(static_cast<unsigned char>(*c)));
             SetTextColor(dc,RGB(235,205,151));SelectObject(dc,shortcutFont);
@@ -247,7 +250,7 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
         if(!o.utility) {
             box={x-37,y-43,x+37,y+28};
             const auto& skill=s.skills[slot];
-            const bool draws=handWheel&&slot==o.glyphDraw;   // this button draws glyphs (glyph_cast.h)
+            const bool draws=handWheel&&slot==o.glyphDraw[size_t(o.wheelHand)];   // this button draws this hand's glyphs (glyph_cast.h)
             if(draws)glyph(glyphs::Shape::Star,{box.left+8,box.top+4,box.right-8,box.bottom-4},element(-1),3);
             else if(skill.known&&skill.id>=0)icon(icons::Get("s"+std::to_string(skill.id)),box,skill.available);
             if(draws)std::snprintf(label,sizeof label,"Draw glyph");
@@ -271,7 +274,7 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
             if(b.known&&b.count)icon(icons::Get(b.Next()),box);
             std::snprintf(label,sizeof label,"%s%s%d",b.known?(b.count?PotionName(PotionType(b.Next().code)):"Empty"):"Unknown",b.known&&b.count?" x":"\nSlot ",b.known&&b.count?b.count:i-3);
         }
-        SetTextColor(dc,(!o.utility&&s.skills[slot].known&&!s.skills[slot].available&&!(handWheel&&slot==o.glyphDraw))?RGB(148,137,117):RGB(235,218,181));
+        SetTextColor(dc,(!o.utility&&s.skills[slot].known&&!s.skills[slot].available&&!(handWheel&&slot==o.glyphDraw[size_t(o.wheelHand)]))?RGB(148,137,117):RGB(235,218,181));
         if(o.utility)text(label,{x-76,y+35,x+76,y+86});
         if(!o.utility) {
             auto previous=SelectObject(dc,skillFont);
@@ -378,7 +381,7 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
         frame({20,28,748,681});
         char title[120];std::snprintf(title,sizeof title,"CHOOSE SKILL  /  %s",handWheel?labels.Slot(o.editSlot).c_str():skills::NativeLabel(o.editSlot));
         if(o.glyphEdit>=0) {
-            std::snprintf(title,sizeof title,"CHOOSE SKILL  /  %s GLYPH",glyphs::Name(glyphs::Shape(o.glyphEdit)));
+            std::snprintf(title,sizeof title,"CHOOSE SKILL  /  %s HAND  /  %s GLYPH",o.glyphHand?"LEFT":"RIGHT",glyphs::Name(glyphs::Shape(o.glyphEdit)));
             for(char* c=title;*c;++c)*c=char(std::toupper(static_cast<unsigned char>(*c)));
         }
         text(title,{38,47,730,88});
@@ -436,14 +439,16 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
             std::string details;
             if(o.glyphEdit>=0) {   // a glyph's skill (glyph_cast.h)
                 text("CAST BY A GLYPH",{box.left+10,box.top+38,box.right-10,box.top+56});
-                details=std::string("Hold your Draw glyph button and draw the ")+glyphs::Name(glyphs::Shape(o.glyphEdit))+
+                details=std::string("Hold your ")+(o.glyphHand?"left":"right")+" hand's Draw glyph button and draw the "+glyphs::Name(glyphs::Shape(o.glyphEdit))+
                     " in the air; let go and it casts this skill, with its own mana, cast speed and effect. "
-                    "The glyph glows in the skill's colour where you drew it and fades.";
+                    "The glyph glows in the skill's colour where you drew it and fades."+
+                    (o.glyphHand?" Cleared, the left hand's shape casts the right hand's skill.":"");
             } else if(skill.id==GlyphDrawId) {
                 text(trigger?"ON THIS TRIGGER":"ON THIS BUTTON",{box.left+10,box.top+38,box.right-10,box.top+56});
                 details="Hold it and draw a shape in the air: circle, triangle, square, lightning bolt, spiral, V, star or wave. "
-                        "Let go and the skill you put on that shape is cast. Choose the shapes' skills on the GLYPHS page "
-                        "(the box at the upper right of the wheel). This button casts nothing else.";
+                        "Let go and the skill this hand has on that shape is cast. Each hand can have its own Draw glyph button "
+                        "and its own skills on the shapes: choose them on the GLYPHS page (the box at the upper right of the wheel). "
+                        "This button casts nothing else.";
             } else {
                 text(skillusage::Gesture(skill.id,o.editSlot)?"GESTURE ON THIS TRIGGER":trigger?"ON THIS TRIGGER":"ON THIS BUTTON",{box.left+10,box.top+38,box.right-10,box.top+56});
                 details=skillusage::Details(skill.id,o.editSlot);
@@ -453,8 +458,40 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
             SelectObject(dc,font);
         }
         if(!o.editCount)text(o.glyphEdit>=0?"No skills that need no target":"No active skills available",{56,249,712,430});
+    } else if(o.motions) {
+        // Motions (spell_motion.h): each of the class's motion skills, how to do it, and whether it is on;
+        // pressed, a card turns it on or off. A skill the hero has no points in is shown dimmed.
+        frame({20,28,748,681});
+        text("MOTIONS",{38,34,730,62});
+        SelectObject(dc,shortcutFont);SetTextColor(dc,RGB(232,196,119));
+        const auto motions=spellmotion::PageOf(s.skillClass);
+        text(s.skillClass==1?"Hold both grips and do a spell's motion to cast it: no button needed.":
+            "Hold both grips and do a skill's motion to cast it: no button needed.",{38,62,730,80});
+        text(s.skillClass==1?"Point at a spell and press the trigger to turn its motion on or off.":
+            "Point at a skill and press the trigger to turn its motion on or off.",{38,79,730,97});
+        for(int i=0;i<motions.count&&i<MotionCards;++i) {
+            const int id=motions.skills[i];
+            const auto skill=GlyphSkill(s,id);
+            const bool have=skill.known,on=spellmotion::On(s.skillClass,id,o.motionsOff);
+            const auto b=MotionCardBounds(i);
+            const int x=int(768*b.left),y=int(768*b.top),right=int(768*b.right),bottom=int(768*b.bottom);
+            frame({x,y,right,bottom},o.hover==MotionCardCell(i));
+            const bool haveIcon=icon(icons::Get("s"+std::to_string(id)),{x+9,y+9,x+67,y+67},have&&on);
+            if(!haveIcon)fill({x+12,y+12,x+64,y+64},RGB(48,40,28));
+            SelectObject(dc,font);SetTextColor(dc,have?RGB(235,218,181):RGB(148,137,117));
+            const char* family=spellmotion::CardName(id);
+            paragraph(family?family:have?skill.name:spellmotion::SpellName(id),{x+76,y+5,right-78,y+27});
+            const RECT chip{right-72,y+6,right-9,y+26};
+            fill(chip,on?RGB(100,74,29):RGB(48,40,28));
+            SelectObject(dc,shortcutFont);SetTextColor(dc,on?RGB(235,218,181):RGB(148,137,117));text(on?"ON":"OFF",chip);
+            char cue[160];std::snprintf(cue,sizeof cue,"%s%s",spellmotion::CueOf(id),have?".":" (no points yet).");
+            cue[0]=char(std::toupper(static_cast<unsigned char>(cue[0])));
+            SetTextColor(dc,RGB(169,151,118));paragraph(cue,{x+76,y+28,right-8,bottom-2});
+        }
+        SetTextColor(dc,RGB(235,218,181));SelectObject(dc,font);
     } else if(o.glyphs&&!o.utility) {
-        text("GLYPHS",{290,305,478,345});
+        text(o.glyphHand?"LEFT HAND":"RIGHT HAND",{290,300,478,334});   // the set shown
+        SelectObject(dc,shortcutFont);text("GLYPHS",{290,332,478,350});SelectObject(dc,font);
         text("CLOSE",{301,356,467,398});
     } else if(handWheel&&!o.utility) {
         text(o.wheelHand?"LEFT HAND":"RIGHT HAND",{290,305,478,345});
@@ -487,6 +524,18 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
             SelectObject(dc,skillFont);text(o.leftStrikes==1?"Right trigger skill":"Own trigger skill",{claw.left+6,claw.top+23,claw.right-6,claw.bottom-22});
             SelectObject(dc,shortcutFont);text("Click to toggle",{claw.left+6,claw.bottom-22,claw.right-6,claw.bottom-5});SelectObject(dc,font);
         }
+        if(o.motionsBox) {   // Motions (spell_motion.h): how many are on, and the way to the MOTIONS page
+            const auto m=MotionsBounds;
+            RECT box{LONG(m.left*768),LONG(m.top*768),LONG(m.right*768),LONG(m.bottom*768)};
+            frame(box,o.hover==MotionsCell);
+            int have=0,on=0;
+            const auto motions=spellmotion::PageOf(s.skillClass);
+            for(int i=0;i<motions.count;++i)if(GlyphSkill(s,motions.skills[i]).known){++have;if(spellmotion::On(s.skillClass,motions.skills[i],o.motionsOff))++on;}
+            SelectObject(dc,shortcutFont);text("MOTIONS",{box.left+6,box.top+5,box.right-6,box.top+22});
+            char line[48];if(have)std::snprintf(line,sizeof line,"%d of %d on",on,have);else std::snprintf(line,sizeof line,"None learned yet");
+            SelectObject(dc,skillFont);text(line,{box.left+6,box.top+23,box.right-6,box.bottom-22});
+            SelectObject(dc,shortcutFont);text("Click: motions",{box.left+6,box.bottom-22,box.right-6,box.bottom-5});SelectObject(dc,font);
+        }
     }
     if(QuickControls(Page(o))||Page(o)==MenuPage::Glyphs) {   // glyph casting's page (glyph_cast.h), and back
         const auto g=GlyphsBounds;
@@ -496,16 +545,28 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
         glyph(glyphs::Shape::Star,{box.left+10,box.top+30,box.left+54,box.bottom-26},element(-1),2);
         SelectObject(dc,skillFont);
         char line[96];
+        const int draw=handWheel?o.glyphDraw[size_t(o.wheelHand)]:o.glyphDraw[0]>=0?o.glyphDraw[0]:o.glyphDraw[1];   // this hand's button
         if(o.glyphs)std::snprintf(line,sizeof line,"Back to spells");
-        else if(o.glyphDraw>=0)std::snprintf(line,sizeof line,"Draw: %s",labels.Slot(o.glyphDraw).c_str());
+        else if(draw>=0)std::snprintf(line,sizeof line,"Draw: %s",labels.Slot(draw).c_str());
         else std::snprintf(line,sizeof line,"No Draw glyph button");
         text(line,{box.left+58,box.top+26,box.right-8,box.bottom-26});
         SelectObject(dc,shortcutFont);text(o.glyphs?"Click to go back":"Click: shapes",{box.left+6,box.bottom-23,box.right-6,box.bottom-5});SelectObject(dc,font);
     }
+    if(Page(o)==MenuPage::Glyphs) {   // the hand box: whose set the GLYPHS page shows, its Draw glyph button, and the way to the other's
+        const auto h=GlyphHandBounds;
+        RECT box{LONG(h.left*768),LONG(h.top*768),LONG(h.right*768),LONG(h.bottom*768)};
+        frame(box,o.hover==GlyphHandCell);
+        SelectObject(dc,shortcutFont);text("SHAPES OF THE",{box.left+6,box.top+6,box.right-6,box.top+24});
+        SelectObject(dc,skillFont);text(o.glyphHand?"Left hand":"Right hand",{box.left+8,box.top+26,box.right-8,box.top+50});
+        const int draw=o.glyphDraw[size_t(o.glyphHand)];
+        SelectObject(dc,shortcutFont);
+        text(draw>=0?("Draw: "+labels.Slot(draw)).c_str():"No Draw glyph button",{box.left+6,box.bottom-46,box.right-6,box.bottom-26});
+        text(o.glyphHand?"Click: the right hand's":"Click: the left hand's",{box.left+6,box.bottom-23,box.right-6,box.bottom-5});SelectObject(dc,font);
+    }
     // The skill pointed at and the slot it is (or would be) on: how it works there
     // (skill_usage.h), under the picker, the slot chooser and the hand wheel.
     const char* usage=[&]()->const char* {
-        if(o.developer||o.map||o.utility||o.glyphs||o.editor>=2)return "";   // the picker shows a card instead
+        if(o.developer||o.map||o.utility||o.glyphs||o.motions||o.editor>=2)return "";   // the picker shows a card instead
         if(o.hover<0||o.hover>=(handWheel?5:8))return "";
         const int slot=handWheel?skills::HandSlot(o.wheelHand,o.hover):o.hover;
         return s.skills[slot].known?skillusage::Line(s.skills[slot].id,slot):"";
@@ -513,7 +574,7 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
     if(o.editor) {
         char hint[120];std::snprintf(hint,sizeof hint,"Set %s  /  %s",s.activeSet==2?"II":"I",
             o.result==Result::Pending?"Saving...":o.result==Result::Applied?"Assigned":o.result==Result::Refused?"Changed or unavailable; choose the slot again":handWheel?"Click stick to close":"Hold Left Y while editing");
-        if(o.glyphEdit>=0)std::snprintf(hint,sizeof hint,"The %s  /  %s",glyphs::Name(glyphs::Shape(o.glyphEdit)),
+        if(o.glyphEdit>=0)std::snprintf(hint,sizeof hint,"The %s hand's %s  /  %s",o.glyphHand?"left":"right",glyphs::Name(glyphs::Shape(o.glyphEdit)),
             o.result==Result::Pending?"Saving...":o.result==Result::Refused?"Not saved; choose again":"Select to assign; BACK keeps it");
         if(o.editor==3)std::snprintf(hint,sizeof hint,"Page %d  /  %s",o.editPage+1,
             o.result==Result::Pending?"Saving...":o.result==Result::Refused?"Item changed or unavailable. Reopen the picker.":"Select to assign; BACK leaves your slot unchanged.");
@@ -521,7 +582,7 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
         if(usage[0]&&o.result!=Result::Pending&&o.result!=Result::Refused){SelectObject(dc,shortcutFont);text(usage,{35,639,733,678});SelectObject(dc,font);}
         else text(hint,{35,639,733,678});
     }
-    const char* footer[5]={(o.utility||o.map||o.developer||o.glyphs)?"SPELLS":"EQUIPMENT","MAP","VR SETTINGS",handWheel?"INVENTORY":"EDIT SKILLS","DEV"};
+    const char* footer[5]={(o.utility||o.map||o.developer||o.glyphs||o.motions)?"SPELLS":"EQUIPMENT","MAP","VR SETTINGS",handWheel?"INVENTORY":"EDIT SKILLS","DEV"};
     if(o.editor==1){footer[0]="BACK";footer[1]="";footer[2]="DONE";}
     if(o.editor>=2){footer[0]="PREVIOUS";footer[1]="NEXT";footer[2]="BACK";}
     fill({20,686,749,745},RGB(18,16,14));
@@ -534,11 +595,23 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
     }
     if(o.glyphs&&!o.developer&&!o.editor&&!o.utility&&!o.map) {
         const auto prior=SelectObject(dc,shortcutFont);SetTextColor(dc,RGB(232,196,119));
-        text("Point at a shape and press the trigger to choose its skill.",{38,639,730,662});
-        text(o.glyphDraw>=0?"Then hold Draw glyph and draw it in the air; let go to cast.":"Put Draw glyph on a button first: click a hand slot, then Draw glyph.",{38,662,730,685});
+        text(o.glyphHand?"Point at a shape and press the trigger to choose the left hand's skill on it; dimmed: the right hand's.":
+            "Point at a shape and press the trigger to choose the right hand's skill on it.",{38,639,730,662});
+        const int draw=o.glyphDraw[size_t(o.glyphHand)];
+        char line[128];
+        if(draw>=0)std::snprintf(line,sizeof line,"Then hold Draw glyph (%s) and draw it in the air; let go to cast.",labels.Slot(draw).c_str());
+        else std::snprintf(line,sizeof line,"Put Draw glyph on a %s hand button first: on its wheel click a slot, then Draw glyph.",o.glyphHand?"left":"right");
+        text(line,{38,662,730,685});
         SelectObject(dc,prior);
     }
-    if(!o.developer&&!o.editor&&!o.utility&&!o.map&&!o.glyphs) {
+    if(o.motions&&!o.developer&&!o.editor&&!o.map) {
+        const auto prior=SelectObject(dc,shortcutFont);SetTextColor(dc,RGB(232,196,119));
+        text(o.result==Result::Pending?"Saving...":o.result==Result::Refused?"Not saved; press it again.":
+            "A motion that is off still casts from a button its skill is on.",{38,639,730,662});
+        text("Both grips never grab a potion, a holster or a shoulder; one alone still does.",{38,662,730,685});
+        SelectObject(dc,prior);
+    }
+    if(!o.developer&&!o.editor&&!o.utility&&!o.map&&!o.glyphs&&!o.motions) {
         char active[120];if(handWheel)std::snprintf(active,sizeof active,"Other hand: point + trigger to assign. Click this stick to close.");
         else std::snprintf(active,sizeof active,"ACTIVE: %s",o.cue.known?o.cue.name:"Unknown skill");
         const auto prior=SelectObject(dc,skillFont);SetTextColor(dc,RGB(232,196,119));

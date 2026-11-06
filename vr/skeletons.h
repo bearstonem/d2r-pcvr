@@ -59,6 +59,9 @@ struct Input {
     // it through the other hand); the left is free, and its grip puts it on the
     // staff, sliding along it with the controller.
     bool staffFreeLeft = false;
+    // Both grips cast a spell's motion (the transport, spell_motion.h): the left grip takes the staff
+    // only alone (crossbow::SoloSupportLatched).
+    bool soloStaffGrip = false;
     // [hands] fist: a hand holding nothing closes into a fist with its grip
     // and relaxes when it is let go. handFree: holds nothing (vrcam's word,
     // from the game's hand slots); the left on a staff is not free.
