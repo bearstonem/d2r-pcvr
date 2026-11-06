@@ -1,0 +1,116 @@
+#include "spell_motion.h"
+#include "motion_sim.h"
+#include <cmath>
+#include <cstdio>
+#include <string>
+using namespace framevr;
+using spellmotion::Motion;
+using motionsim::Check;
+using motionsim::Sim;
+using motionsim::RestR;
+using motionsim::RestL;
+
+// The Barbarian's motions (motions_barbarian.h), done well from the resting pose. Head-local points
+// (+X right, +Y up from the eyes, -Z forward); hands {right, left}.
+static void BattleOrders(Sim& s){s.MoveR({.03f,-.12f,-.18f},.35f);s.Hold(.2f);s.MoveR({.08f,.30f,-.10f},.25f);}
+static void Shout(Sim& s){s.Move({.07f,-.12f,-.18f},{-.07f,-.12f,-.18f},.4f);s.Hold(.2f);s.Move({.10f,-.15f,-.58f},{-.10f,-.15f,-.58f},.25f);}
+static void BattleCommand(Sim& s) {
+    s.MoveR({.02f,-.42f,-.42f},.3f);
+    for(int i=0;i<2;++i){s.MoveR({.02f,-.42f,-.10f},.14f);s.Hold(.05f);s.MoveR({.02f,-.42f,-.40f},.18f);}
+}
+static void WarCry(Sim& s){s.MoveR({.03f,-.12f,-.18f},.35f);s.Hold(.2f);s.MoveR({.10f,-.35f,-.62f},.25f);}
+static void Howl(Sim& s){s.Move({.08f,-.40f,-.20f},{-.08f,-.40f,-.20f},.35f);s.Move({.62f,-.35f,-.15f},{-.62f,-.35f,-.15f},.3f);}
+static void BattleCry(Sim& s){s.Move({.22f,-.18f,-.05f},{-.22f,-.18f,-.05f},.4f);s.Hold(.1f);s.Move({.24f,-.82f,-.05f},{-.24f,-.82f,-.05f},.3f);}
+static void Leap(Sim& s){s.Move({.22f,-.65f,.22f},{-.22f,-.65f,.22f},.4f);s.Move({.22f,.30f,-.15f},{-.22f,.30f,-.15f},.35f);}
+static void FindItem(Sim& s){s.MoveR({.25f,-1.15f,-.30f},.7f);s.Hold(.25f);s.MoveR({.25f,-.55f,-.20f},.5f);}
+// Slow, lazy versions: the same shapes over far longer.
+static void SlowBattleOrders(Sim& s){s.MoveR({.03f,-.12f,-.18f},.35f);s.Hold(.2f);s.MoveR({.08f,.30f,-.10f},1.2f);}
+static void SlowShout(Sim& s){s.Move({.07f,-.12f,-.18f},{-.07f,-.12f,-.18f},.4f);s.Hold(.2f);s.Move({.10f,-.15f,-.58f},{-.10f,-.15f,-.58f},1.2f);}
+static void SlowBattleCommand(Sim& s) {
+    s.MoveR({.02f,-.42f,-.42f},.3f);
+    for(int i=0;i<2;++i){s.MoveR({.02f,-.42f,-.10f},1.1f);s.Hold(.05f);s.MoveR({.02f,-.42f,-.40f},.5f);}
+}
+static void SlowWarCry(Sim& s){s.MoveR({.03f,-.12f,-.18f},.35f);s.Hold(.2f);s.MoveR({.10f,-.35f,-.62f},1.2f);}
+static void SlowHowl(Sim& s){s.Move({.08f,-.40f,-.20f},{-.08f,-.40f,-.20f},.35f);s.Move({.62f,-.35f,-.15f},{-.62f,-.35f,-.15f},1.5f);}
+static void SlowBattleCry(Sim& s){s.Move({.22f,-.18f,-.05f},{-.22f,-.18f,-.05f},.4f);s.Hold(.1f);s.Move({.24f,-.82f,-.05f},{-.24f,-.82f,-.05f},1.5f);}
+static void SlowLeap(Sim& s){s.Move({.22f,-.65f,.22f},{-.22f,-.65f,.22f},.6f);s.Move({.22f,.30f,-.15f},{-.22f,.30f,-.15f},1.5f);}
+static void SlowFindItem(Sim& s){s.MoveR({.25f,-1.15f,-.30f},.7f);s.Hold(.25f);s.MoveR({.25f,-.55f,-.20f},1.8f);}
+// Not motions: what a Barbarian's hands do all the time.
+static void Walk(Sim& s) {
+    s.Move({.25f,-.72f,-.05f},{-.25f,-.72f,-.05f},.3f);
+    s.Drive(3.f,[](float t,math::Vec& r,math::Vec& l){const float sw=.18f*std::sin(6.2832f*t);r={.25f,-.72f+.03f*std::fabs(sw),sw};l={-.25f,-.72f+.03f*std::fabs(sw),-sw};});
+}
+static void BeltPotion(Sim& s){s.MoveR({.22f,-.85f,.02f},.4f);s.Hold(.3f);s.MoveR({.18f,-.30f,-.25f},.4f);s.Hold(.2f);s.MoveR(RestR,.4f);}
+static void OverheadChop(Sim& s){s.MoveR({.15f,.25f,.05f},.35f);s.Hold(.05f);s.MoveR({.10f,-.55f,-.45f},.18f);s.Hold(.3f);s.MoveR(RestR,.4f);}
+static void Slash(Sim& s){s.MoveR({-.35f,-.35f,-.35f},.3f);s.MoveR({.55f,-.40f,-.30f},.2f);s.Hold(.3f);s.MoveR(RestR,.4f);}
+static void TwoHandedChop(Sim& s) {
+    s.Move({.06f,.28f,.0f},{-.06f,.28f,.0f},.4f);s.Hold(.05f);s.Move({.06f,-.70f,-.40f},{-.06f,-.70f,-.40f},.2f);s.Hold(.3f);
+    s.Move({.06f,.28f,.0f},{-.06f,.28f,.0f},.4f);s.Move({.06f,-1.05f,-.35f},{-.06f,-1.05f,-.35f},.22f);s.Hold(.25f);s.Move({.06f,-.5f,-.3f},{-.06f,-.5f,-.3f},.4f);
+}
+static void ShortSwings(Sim& s){for(int i=0;i<3;++i){OverheadChop(s);Slash(s);}}
+
+int main() {
+    using Do=void(*)(Sim&);
+    const struct {Motion motion;Do perform,slow;int skill;bool aimed;const char* name;} all[]={
+        {Motion::BattleOrders,BattleOrders,SlowBattleOrders,149,false,"Battle Orders"},{Motion::Shout,Shout,SlowShout,138,false,"Shout"},
+        {Motion::BattleCommand,BattleCommand,SlowBattleCommand,155,false,"Battle Command"},{Motion::WarCry,WarCry,SlowWarCry,154,false,"War Cry"},
+        {Motion::Howl,Howl,SlowHowl,130,false,"Howl"},{Motion::BattleCry,BattleCry,SlowBattleCry,146,false,"Battle Cry"},
+        {Motion::Leap,Leap,SlowLeap,132,true,"Leap"},{Motion::FindItem,FindItem,SlowFindItem,142,false,"Find Item"}};
+    const struct {Do perform;const char* name;} never[]={
+        {[](Sim& s){s.Hold(2.f);},"resting"},{Walk,"a walking arm swing"},{BeltPotion,"a reach to the belt"},
+        {OverheadChop,"an overhead chop"},{Slash,"a horizontal slash"},{TwoHandedChop,"a two-handed chop"},{ShortSwings,"a run of swings"}};
+    for(const auto& m:all) {
+        const std::string label=std::string(m.name)+": ";
+        Check(spellmotion::For(m.skill)==m.motion&&std::string(spellmotion::Cue(m.motion))!="no motion",(label+"its skill has the motion and a cue").c_str());
+        Check(std::count(std::begin(spellmotion::barbarian::Order),std::end(spellmotion::barbarian::Order),m.motion)==1,(label+"watched once").c_str());
+        for(float heading:{-2.f,0.f,2.f}) {
+            Sim s(m.motion,heading);m.perform(s);s.Hold(.5f);
+            Check(s.casts==1,(label+"done well, it casts once, at any heading").c_str());
+            const bool aim=std::fabs(s.aim.x)+std::fabs(s.aim.y)+std::fabs(s.aim.z)>0;
+            Check(aim==m.aimed,(label+(m.aimed?"it aims":"it leaves the aim to the hand")).c_str());
+            if(m.aimed)Check(-s.aim.z>.05f&&s.aim.y==0,(label+"aimed ahead and level").c_str());
+        }
+        {Sim s(m.motion);s.in.active=false;m.perform(s);Check(s.casts==0,(label+"with the gate closed, nothing").c_str());}
+        {Sim s(m.motion);m.slow(s);s.Hold(.5f);Check(s.casts==0,(label+"slow and lazy, nothing").c_str());}
+        for(const auto& o:all)if(o.motion!=m.motion) {
+            Sim s(m.motion);o.perform(s);s.Hold(.5f);
+            Check(s.casts==0,(label+"another motion ("+o.name+") does not cast it").c_str());
+        }
+        for(const auto& x:never) {
+            Sim s(m.motion);x.perform(s);s.Hold(.3f);
+            Check(s.casts==0,(label+x.name+" casts nothing").c_str());
+        }
+    }
+    {   // Leap: the swing's way, here a little to the right of ahead
+        Sim s(Motion::Leap);s.Move({.10f,-.65f,.22f},{-.34f,-.65f,.22f},.4f);s.Move({.34f,.30f,-.15f},{-.10f,.30f,-.15f},.35f);
+        Check(s.casts==1&&s.aim.x>.05f&&-s.aim.z>.05f,"Leap: it goes the way the arms swung");
+        Sim up(Motion::Leap);up.Move({.22f,-.65f,.05f},{-.22f,-.65f,.05f},.4f);up.Hold(.1f);
+        up.Move({.22f,-.70f,.10f},{-.22f,-.70f,.10f},.15f);up.Move({.22f,.30f,.12f},{-.22f,.30f,.12f},.35f);
+        Check(up.casts==1&&std::fabs(up.aim.x)<1e-6f&&up.aim.z==-1,"Leap: swung straight up, straight ahead");
+    }
+    {   // Battle Command: one beat alone is not two; two beats too far apart are not either
+        Sim one(Motion::BattleCommand);one.MoveR({.02f,-.42f,-.42f},.3f);one.MoveR({.02f,-.42f,-.10f},.14f);one.Hold(1.f);
+        Check(one.casts==0,"Battle Command: one beat is not a command");
+        Sim apart(Motion::BattleCommand);apart.MoveR({.02f,-.42f,-.42f},.3f);
+        apart.MoveR({.02f,-.42f,-.10f},.14f);apart.MoveR({.02f,-.42f,-.40f},.18f);apart.Hold(1.2f);apart.MoveR({.02f,-.42f,-.10f},.14f);apart.Hold(.3f);
+        Check(apart.casts==0,"Battle Command: beats more than beatWindow apart are not");
+        Sim lean(Motion::BattleCommand);lean.MoveR({.02f,-.42f,-.10f},.6f);lean.Hold(1.f);
+        Check(lean.casts==0,"Battle Command: a fist laid on the chest is no beat");
+    }
+    {   // the warcries' wind-up: a fist swung past the mouth without stopping starts none
+        for(const auto m:{Motion::BattleOrders,Motion::WarCry}) {
+            Sim s(m);s.MoveR({.03f,-.12f,-.18f},.18f);s.MoveR(m==Motion::WarCry?math::Vec{.10f,-.35f,-.62f}:math::Vec{.08f,.30f,-.10f},.2f);s.Hold(.3f);
+            Check(s.casts==0,"a fist swung through the mouth, no rest there: no warcry");
+        }
+        Sim both(Motion::BattleOrders);both.Move({.03f,-.12f,-.18f},RestL,.35f);both.Hold(.2f);both.Move({.08f,.30f,-.10f},{-.2f,.25f,-.1f},.25f);
+        Check(both.casts==0,"Battle Orders: both hands up is no Battle Orders");
+    }
+    {   // the order: Shout before War Cry, Leap before Battle Orders
+        const auto& o=spellmotion::barbarian::Order;
+        const auto at=[&](Motion m){return std::find(std::begin(o),std::end(o),m)-std::begin(o);};
+        Check(at(Motion::Shout)<at(Motion::WarCry)&&at(Motion::Leap)<at(Motion::BattleOrders),"Shout before War Cry, Leap before Battle Orders");
+        Check(spellmotion::OrderOf(4).count==8&&spellmotion::PageOf(4).count==8,"the Barbarian's page: eight cards, each watched");
+    }
+    std::puts("motions-barbarian-test: ok");
+    return 0;
+}

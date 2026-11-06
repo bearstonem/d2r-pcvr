@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
+#include <initializer_list>
 #include <string>
 using namespace framevr;
 using spellmotion::Motion;
@@ -81,12 +82,29 @@ int main() {
     }
     {   // Every class's page (owner, 2026-11-04: "Both grips, like Sorceress"): the Sorceress's bits as saved
         // since 2026-11-03, the Paladin's and the Druid's by card; a name and a cue on every card.
-        Check(spellmotion::PageOf(1).count==spellmotion::MotionCount&&spellmotion::PageOf(3).count==4&&spellmotion::PageOf(5).count==2,
+        Check(spellmotion::PageOf(1).count==spellmotion::SorceressCount&&spellmotion::PageOf(3).count==4&&spellmotion::PageOf(5).count==2,
               "the Sorceress's 10, the Paladin's 4, the Druid's 2");
-        for(int c:{0,2,4,6,7,-1})Check(!spellmotion::HasMotions(c)&&spellmotion::PageOf(c).count==0,"no motions for the other classes yet");
+        Check(spellmotion::PageOf(0).count==4&&spellmotion::PageOf(4).count==8&&spellmotion::PageOf(2).count==8&&spellmotion::PageOf(6).count==7,
+              "the Amazon's 4, the Barbarian's 8, the Necromancer's 8, the Assassin's 7 (the owner's table)");
+        for(int c:{7,-1})Check(!spellmotion::HasMotions(c)&&spellmotion::PageOf(c).count==0,"no motions for the Warlock or an unknown class");
+        for(int c:{0,2,4,6}) {   // their cards' motions are the engine's, each watched in the class's order exactly once
+            const auto page=spellmotion::PageOf(c);const auto order=spellmotion::OrderOf(c);
+            Check(page.count<=spellmotion::MaxCards&&order.count==page.count,"a watcher per card");
+            for(int i=0;i<page.count;++i) {
+                const auto m=spellmotion::For(page.skills[i]);
+                Check(m>spellmotion::Motion::Punch&&std::count(order.motions,order.motions+order.count,m)==1,"each card's motion watched once");
+            }
+        }
+        {   // a family's card casts its strongest learned skill
+            const auto known=[](std::initializer_list<int> ids){return [ids](int id){return std::find(ids.begin(),ids.end(),id)!=ids.end();};};
+            Check(spellmotion::CastSkillOf(75,known({75}))==75&&spellmotion::CastSkillOf(75,known({75,85}))==85&&spellmotion::CastSkillOf(75,known({75,85,94}))==94,
+                  "the golems: Clay, then Blood, then Fire");
+            Check(spellmotion::CastSkillOf(268,known({268}))==268&&spellmotion::CastSkillOf(268,known({268,279}))==279&&spellmotion::CastSkillOf(149,known({}))==149,
+                  "the shadows; any other card its own skill");
+        }
         for(const int id:spellmotion::PageSkills)Check(spellmotion::Bit(1,id)==spellmotion::Bit(id)&&spellmotion::On(1,id,0)&&!spellmotion::On(1,id,1<<spellmotion::Bit(id)),
               "the Sorceress's bits are her motions' as before");
-        for(int c:{1,3,5}) {
+        for(int c:{0,1,2,3,4,5,6}) {
             const auto page=spellmotion::PageOf(c);
             for(int i=0;i<page.count;++i) {
                 const int id=page.skills[i];

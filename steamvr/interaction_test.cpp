@@ -152,9 +152,9 @@ int main(){
             c.in.trigger=0;c.Step(3);c.in.hover=9;c.in.trigger=1;c.Step();
             Check(!c.out.motions&&Page(c.out)==MenuPage::Spells,"SPELLS goes back");
         }
-        for(int skillClass:{0,2,4,6}) {
+        for(int skillClass:{7,-1}) {
             Sim c;c.in.wheel=true;c.in.snapshot.skillClass=skillClass;c.Step(3);c.in.hover=MotionsCell;c.in.trigger=1;c.Step();
-            Check(!c.out.motionsBox&&!c.out.motions,"the Amazon, the Necromancer, the Barbarian and the Assassin: no motions yet, no box");
+            Check(!c.out.motionsBox&&!c.out.motions,"the Warlock and an unknown class: no motions, no box");
         }
     }
 

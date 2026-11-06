@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <array>
 #include <iterator>
 #include <vector>
 
@@ -21,11 +22,24 @@
 // heavens_gesture.h, shapeshift_gesture.h) take the same gate and their own MOTIONS page (owner,
 // 2026-11-04: "Both grips, like Sorceress"); their detectors stay their own (PageOf).
 //
+// The Amazon's, the Barbarian's, the Necromancer's and the Assassin's (owner, 2026-11-04: "also have
+// multiple agents implement the motions", the table at claude.ai/artifact/MLr2xB4qEMTf8pzaTRKQ9T, codes
+// A1-A4, B1-B8, N1-N8 with N6 Lower Resist, S1-S7) take the Sorceress's engine and gate: one watcher per
+// motion, each class's detectors in its own header (motions_amazon.h, motions_barbarian.h,
+// motions_necromancer.h, motions_assassin.h; ClassDone at the end of this file).
+//
 // Head-local frame as holycross (+X right, +Y up from the eyes, forward -Z, the head's yaw only); hand
 // 0 is the right. Value-only: steamvr/spell_motion_test.cpp.
 namespace framevr::spellmotion {
-enum class Motion {None,FlingOut,PushDown,RubSnap,CrossGuard,ArmUp,MatchStrike,ForearmSweep,Shake,Hug,Punch};
-constexpr int MotionCount=int(Motion::Punch);   // the motions, 1..MotionCount
+enum class Motion {None,FlingOut,PushDown,RubSnap,CrossGuard,ArmUp,MatchStrike,ForearmSweep,Shake,Hug,Punch,
+    InnerSight,SlowMissiles,Decoy,Valkyrie,                                                       // Amazon A1-A4
+    BattleOrders,Shout,BattleCommand,WarCry,Howl,BattleCry,Leap,FindItem,                         // Barbarian B1-B8
+    BoneArmor,RaiseSkeleton,CorpseExplosion,Golem,AmplifyDamage,LowerResist,PoisonNova,BonePrison,// Necromancer N1-N8
+    BurstOfSpeed,Fade,CloakOfShadows,Venom,BladeShield,ShadowWarrior,MindBlast,                   // Assassin S1-S7
+    End};
+constexpr int SorceressCount=int(Motion::Punch);   // the Sorceress's, 1..SorceressCount ([motions] off: her bits)
+constexpr int MotionCount=int(Motion::End)-1;      // every class's, 1..MotionCount (a watcher each)
+constexpr int MaxCards=10;                         // a MOTIONS page's cards (interaction::MotionCards), one bit each
 inline Motion For(int skill) {
     switch(skill) {
     case 48:return Motion::FlingOut;      // Nova
@@ -38,15 +52,23 @@ inline Motion For(int skill) {
     case 50:return Motion::Shake;         // Shiver Armor
     case 60:return Motion::Hug;           // Chilling Armor
     case 54:return Motion::Punch;         // Teleport (owner: "as a motion similar to Paladin's Charge")
+    case 8:return Motion::InnerSight;case 17:return Motion::SlowMissiles;case 28:return Motion::Decoy;case 32:return Motion::Valkyrie;
+    case 149:return Motion::BattleOrders;case 138:return Motion::Shout;case 155:return Motion::BattleCommand;case 154:return Motion::WarCry;
+    case 130:return Motion::Howl;case 146:return Motion::BattleCry;case 132:return Motion::Leap;case 142:return Motion::FindItem;
+    case 68:return Motion::BoneArmor;case 70:return Motion::RaiseSkeleton;case 74:return Motion::CorpseExplosion;
+    case 75:case 85:case 94:return Motion::Golem;   // the card is Clay Golem's; it casts the strongest learned (CastSkillOf)
+    case 66:return Motion::AmplifyDamage;case 91:return Motion::LowerResist;case 92:return Motion::PoisonNova;case 88:return Motion::BonePrison;
+    case 258:return Motion::BurstOfSpeed;case 267:return Motion::Fade;case 264:return Motion::CloakOfShadows;case 278:return Motion::Venom;
+    case 277:return Motion::BladeShield;case 268:case 279:return Motion::ShadowWarrior;case 273:return Motion::MindBlast;
     default:return Motion::None;
     }
 }
 // The MOTIONS page (the wheel; owner 2026-11-03: "a place where you can see the motion spells that are
 // active"): the motion spells in the order it shows them (skill ids, the trees' order), each with its
 // bit in [motions] off (the motion's number - 1), set to turn it off.
-constexpr int PageSkills[MotionCount]={40,42,44,46,48,50,54,57,58,60};
-inline int Bit(int skill){const int m=int(For(skill));return m>0?m-1:-1;}
-inline int OffMask(float value){return std::isfinite(value)?std::clamp(int(std::lround(value)),0,(1<<MotionCount)-1):0;}
+constexpr int PageSkills[SorceressCount]={40,42,44,46,48,50,54,57,58,60};
+inline int Bit(int skill){const int m=int(For(skill));return m>0&&m<=SorceressCount?m-1:-1;}
+inline int OffMask(float value){return std::isfinite(value)?std::clamp(int(std::lround(value)),0,(1<<MaxCards)-1):0;}
 inline bool On(int skill,int off){const int b=Bit(skill);return b>=0&&!((off>>b)&1);}
 // Every class's MOTIONS page (owner, 2026-11-04: "Both grips, like Sorceress" for the Paladin's and the
 // Druid's gestures as well): its skills in card order, each turned off by a bit of the class's own
@@ -54,12 +76,21 @@ inline bool On(int skill,int off){const int b=Bit(skill);return b>=0&&!((off>>b)
 // another class's is its card's. skillClass as the game's: 1 Sorceress, 3 Paladin, 5 Druid.
 constexpr int PaladinSkills[]={107,112,117,121};   // Charge, Blessed Hammer, Holy Shield, Fist of the Heavens
 constexpr int DruidSkills[]={223,228};             // Werewolf, Werebear
+// The table's order (owner, 2026-11-04): A1-A4, B1-B8, N1-N8 (N4 the golems' card, N6 Lower Resist), S1-S7.
+constexpr int AmazonSkills[]={8,17,28,32};
+constexpr int BarbarianSkills[]={149,138,155,154,130,146,132,142};
+constexpr int NecromancerSkills[]={68,70,74,75,66,91,92,88};
+constexpr int AssassinSkills[]={258,267,264,278,277,268,273};
 struct Page {const int* skills=nullptr;int count=0;};
 inline Page PageOf(int skillClass) {
     switch(skillClass) {
-    case 1:return {PageSkills,MotionCount};
+    case 0:return {AmazonSkills,int(std::size(AmazonSkills))};
+    case 1:return {PageSkills,SorceressCount};
+    case 2:return {NecromancerSkills,int(std::size(NecromancerSkills))};
     case 3:return {PaladinSkills,int(std::size(PaladinSkills))};
+    case 4:return {BarbarianSkills,int(std::size(BarbarianSkills))};
     case 5:return {DruidSkills,int(std::size(DruidSkills))};
+    case 6:return {AssassinSkills,int(std::size(AssassinSkills))};
     default:return {};
     }
 }
@@ -78,9 +109,33 @@ inline const char* SpellName(int skill) {
     case 48:return "Nova";case 50:return "Shiver Armor";case 54:return "Teleport";case 57:return "Thunder Storm";
     case 58:return "Energy Shield";case 60:return "Chilling Armor";
     case 107:return "Charge";case 112:return "Blessed Hammer";case 117:return "Holy Shield";case 121:return "Fist of the Heavens";
-    case 223:return "Werewolf";case 228:return "Werebear";default:return "";
+    case 223:return "Werewolf";case 228:return "Werebear";
+    case 8:return "Inner Sight";case 17:return "Slow Missiles";case 28:return "Decoy";case 32:return "Valkyrie";
+    case 149:return "Battle Orders";case 138:return "Shout";case 155:return "Battle Command";case 154:return "War Cry";
+    case 130:return "Howl";case 146:return "Battle Cry";case 132:return "Leap";case 142:return "Find Item";
+    case 68:return "Bone Armor";case 70:return "Raise Skeleton";case 74:return "Corpse Explosion";case 75:return "Clay Golem";
+    case 85:return "Blood Golem";case 94:return "Fire Golem";case 66:return "Amplify Damage";case 91:return "Lower Resist";
+    case 92:return "Poison Nova";case 88:return "Bone Prison";
+    case 258:return "Burst of Speed";case 267:return "Fade";case 264:return "Cloak of Shadows";case 278:return "Venom";
+    case 277:return "Blade Shield";case 268:return "Shadow Warrior";case 279:return "Shadow Master";case 273:return "Mind Blast";
+    default:return "";
     }
 }
+// A card that stands for a family (the table's N4 and S6): its name on the MOTIONS page; nullptr, the skill's.
+inline const char* CardName(int skill) {
+    switch(skill){case 75:return "Golem";case 268:return "Shadow Warrior / Master";default:return nullptr;}
+}
+// The skill a card casts: the strongest of its family learned (known(id): the hero has the skill). The golems
+// Fire, then Blood, then Clay (Iron Golem takes an item, so it stays on its button); Shadow Master once learned.
+template<class Known> int CastSkillOf(int skill,Known known) {
+    switch(skill) {
+    case 75:return known(94)?94:known(85)?85:75;
+    case 268:return known(279)?279:268;
+    default:return skill;
+    }
+}
+// The Amazon's, Barbarian's, Necromancer's and Assassin's cues (their headers; defined at the end of this file).
+inline const char* ClassCue(Motion m);
 // How to do it: on the MOTIONS page and in the log.
 inline const char* Cue(Motion m) {
     switch(m) {
@@ -94,7 +149,7 @@ inline const char* Cue(Motion m) {
     case Motion::Shake:return "shake both fists";
     case Motion::Hug:return "hug yourself, each hand on the other shoulder";
     case Motion::Punch:return "draw the right fist in, then punch it straight out where you want to land";
-    default:return "no motion";
+    default:return m>Motion::Punch&&m<Motion::End?ClassCue(m):"no motion";
     }
 }
 // A page skill's cue: the Sorceress's by her motion, the Paladin's and the Druid's by their gesture.
@@ -216,8 +271,12 @@ struct Output {
     // from where it began to where it ended); zero for the rest.
     math::Vec aim{};
 };
+// The hands at one frame, head-local: l[0] the right, l[1] the left.
+struct Sample {double t=0;math::Vec l[2]{};};
+class Engine;
+// The Amazon's, Barbarian's, Necromancer's and Assassin's detectors (defined at the end of this file).
+inline bool ClassDone(Engine& e,Motion m);
 class Engine {
-    struct Sample {double t=0;math::Vec l[2]{};};
     std::vector<Sample> samples;
     uint64_t session=0,epoch=0;
     bool watching=false,wasHeld=false;
@@ -230,15 +289,22 @@ class Engine {
     std::vector<double> turns[2][3];
     Output stats;
     static bool Finite(math::Vec v){return std::isfinite(v.x)&&std::isfinite(v.y)&&std::isfinite(v.z);}
-    static float Len(math::Vec v){return std::sqrt(math::Dot(v,v));}
-    static float Apart(const Sample& s){return Len(s.l[0]-s.l[1]);}
-    static float Forward(math::Vec l){return -l.z;}
     void Clear() {
-        samples.clear();poseSince=-1;rub=0;parted=-1;aimed={};
+        samples.clear();poseSince=-1;rub=0;parted=-1;aimed={};scratch={};
         for(auto& h:swing)for(auto& a:h)a={};
         for(auto& h:turns)for(auto& a:h)a.clear();
     }
     void Stop(){watching=false;casts=0;Clear();}
+public:
+    // For a class's detector (motions_<class>.h, through ClassDone): the hands' history (head-local, the
+    // newest last, history seconds of it), these helpers, a scratch store cleared with the hold and after
+    // each cast, and Aim for a cast that goes somewhere (a spot: Output::aim, head-local).
+    const std::vector<Sample>& History()const{return samples;}
+    std::array<double,8> scratch{};
+    void Aim(math::Vec way){aimed=way;}
+    static float Len(math::Vec v){return std::sqrt(math::Dot(v,v));}
+    static float Apart(const Sample& s){return Len(s.l[0]-s.l[1]);}
+    static float Forward(math::Vec l){return -l.z;}
     // The hand's velocity over the last few samples (m/s), zero until there are some.
     math::Vec Velocity(int h)const {
         if(samples.size()<3)return {};
@@ -247,12 +313,13 @@ class Engine {
         return dt>1e-4?(b.l[h]-a.l[h])*float(1/dt):math::Vec{};
     }
     bool Still(int h)const{return Len(Velocity(h))<tuning.stillSpeed;}
-    // A pose held: true once it has been kept (and kept still) for holdSeconds.
-    bool Held(bool pose,double now) {
+    // A pose held: true once it has been kept (and kept still) for seconds (holdSeconds when not given).
+    bool Held(bool pose,double now,double seconds=-1) {
         if(!pose){poseSince=-1;return false;}
         if(poseSince<0)poseSince=now;
-        return now-poseSince>=tuning.holdSeconds;
+        return now-poseSince>=(seconds>=0?seconds:tuning.holdSeconds);
     }
+private:
     bool Done(Motion m) {
         const auto& n=samples.back();
         const auto& t=tuning;
@@ -342,7 +409,7 @@ class Engine {
                 Forward(r)>=-.25f&&Forward(r)<=.15f&&Forward(l)>=-.25f&&Forward(l)<=.15f;   // at the shoulders, not up in front (Energy Shield)
             return Held(pose,n.t);
         }
-        default:return false;
+        default:return m>Motion::Punch&&m<Motion::End&&ClassDone(*this,m);
         }
     }
 public:
@@ -396,4 +463,40 @@ public:
         return out;
     }
 };
+}
+// The classes' detectors. Each header includes this one; include spell_motion.h, never those directly.
+#include "motions_amazon.h"
+#include "motions_barbarian.h"
+#include "motions_necromancer.h"
+#include "motions_assassin.h"
+namespace framevr::spellmotion {
+inline bool ClassDone(Engine& e,Motion m) {
+    if(m>=Motion::InnerSight&&m<=Motion::Valkyrie)return amazon::Done(e,m);
+    if(m>=Motion::BattleOrders&&m<=Motion::FindItem)return barbarian::Done(e,m);
+    if(m>=Motion::BoneArmor&&m<=Motion::BonePrison)return necromancer::Done(e,m);
+    if(m>=Motion::BurstOfSpeed&&m<=Motion::MindBlast)return assassin::Done(e,m);
+    return false;
+}
+inline const char* ClassCue(Motion m) {
+    if(m>=Motion::InnerSight&&m<=Motion::Valkyrie)return amazon::Cue(m);
+    if(m>=Motion::BattleOrders&&m<=Motion::FindItem)return barbarian::Cue(m);
+    if(m>=Motion::BoneArmor&&m<=Motion::BonePrison)return necromancer::Cue(m);
+    if(m>=Motion::BurstOfSpeed&&m<=Motion::MindBlast)return assassin::Cue(m);
+    return "no motion";
+}
+// The order a class's motions are watched in: the first to complete in a frame casts. The Sorceress's
+// Static Field before Nova (its snap apart is as wide as a fling); the other classes' their header's Order.
+constexpr Motion SorceressOrder[]={Motion::RubSnap,Motion::FlingOut,Motion::PushDown,Motion::CrossGuard,Motion::ArmUp,
+    Motion::MatchStrike,Motion::ForearmSweep,Motion::Shake,Motion::Hug,Motion::Punch};
+struct Watched {const Motion* motions=nullptr;int count=0;};
+inline Watched OrderOf(int skillClass) {
+    switch(skillClass) {
+    case 0:return {amazon::Order,int(std::size(amazon::Order))};
+    case 1:return {SorceressOrder,int(std::size(SorceressOrder))};
+    case 2:return {necromancer::Order,int(std::size(necromancer::Order))};
+    case 4:return {barbarian::Order,int(std::size(barbarian::Order))};
+    case 6:return {assassin::Order,int(std::size(assassin::Order))};
+    default:return {};   // the Paladin's and the Druid's gestures have their own detectors
+    }
+}
 }
