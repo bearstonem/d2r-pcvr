@@ -128,6 +128,10 @@ int main() {
     {   // the owner's Battle Cries (2026-11-05): from by the head down to the hips, ending 61-67 cm under the eyes, wide
         Sim pull(Motion::BattleCry);pull.Move({.25f,.08f,-.10f},{-.25f,.06f,-.10f},.35f);pull.Hold(.1f);pull.Move({.50f,-.64f,.07f},{-.45f,-.62f,.0f},.25f);pull.Hold(.2f);
         Check(pull.casts==1,"Battle Cry: fists from by the head pulled down to 62-64 cm under the eyes casts");
+        Sim chest(Motion::BattleCry);chest.Move({.21f,-.41f,-.15f},{-.21f,-.41f,-.10f},.35f);chest.Hold(.1f);chest.Move({.39f,-.72f,.30f},{-.41f,-.68f,.22f},.2f);chest.Hold(.2f);
+        Check(chest.casts==1,"Battle Cry: from the chest, 41 cm under the eyes, pulled down 27-31 cm, casts");
+        Sim lower(Motion::BattleCry);lower.Move({.21f,-.30f,-.15f},{-.21f,-.30f,-.10f},.35f);lower.Hold(.1f);lower.Move({.06f,-.70f,-.40f},{-.06f,-.70f,-.40f},.2f);lower.Hold(.2f);
+        Check(lower.casts==0,"Battle Cry: the fists brought down together in front (a two-handed weapon) are no pull");
         Sim back(Motion::BattleCry);back.Move({.25f,.08f,-.10f},{-.25f,.06f,-.10f},.35f);back.Hold(.1f);back.Move({.43f,-.68f,.31f},{-.49f,-.66f,.07f},.25f);back.Hold(.2f);
         Check(back.casts==1,"Battle Cry: pulled down and back, 31 cm behind the eyes, casts");
         Sim howl(Motion::BattleCry);howl.Move({.07f,.05f,-.25f},{-.07f,.05f,-.25f},.35f);howl.Hold(.1f);howl.Move({.50f,.05f,-.28f},{-.50f,.0f,-.32f},.25f);howl.Hold(.2f);
