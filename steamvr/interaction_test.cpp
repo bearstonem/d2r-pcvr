@@ -115,6 +115,28 @@ int main(){
         for(auto page:{MenuPage::Map,MenuPage::Developer,MenuPage::EditSlots,MenuPage::EditSkills,MenuPage::EditItems})
             Check(WheelCell(.1f,.77f,-1,page,1,false,0,true)!=LeftStrikesCell,"the left claw box never intercepts another page");
     }
+    {   // Motions: the lower-right box opens the MOTIONS page; a card turns its motion on or off
+        for(auto page:{MenuPage::Spells,MenuPage::Equipment})for(int hand:{-1,0,1}) {
+            Check(WheelCell(.87f,.77f,-1,page,hand,false,0,false,true)==MotionsCell,"the MOTIONS box shares hit and paint bounds");
+            Check(WheelCell(.87f,.77f,-1,page,hand,false,0,false,false)!=MotionsCell,"no box without motion spells");
+        }
+        for(int i=0;i<MotionCards;++i){const auto b=MotionCardBounds(i);
+            Check(WheelCell((b.left+b.right)/2,(b.top+b.bottom)/2,-1,MenuPage::Motions,0)==MotionCardCell(i),"each card shares hit and paint bounds");}
+        Check(WheelCell(.5f,.45f,-1,MenuPage::Motions,0)!=8&&WheelCell(.5f,.03f,-1,MenuPage::Motions,0)==-1,"no wheel behind the MOTIONS page");
+        Check(WheelCell(.1f,.93f,-1,MenuPage::Motions,0)==9,"its footer: SPELLS goes back");
+        Sim s;s.in.wheel=true;s.in.snapshot.skillClass=1;s.Step(3);
+        Check(s.out.motionsBox,"a Sorceress has the box");
+        s.in.hover=MotionsCell;s.in.trigger=1;s.Step();
+        Check(s.out.motions&&Page(s.out)==MenuPage::Motions,"the box opens the page");
+        s.in.trigger=0;s.Step(3);s.in.hover=MotionCardCell(4);s.in.trigger=1;s.Step();
+        Check(s.out.request.action==Action::ToggleMotion&&s.out.request.index==framevr::spellmotion::Bit(framevr::spellmotion::PageSkills[4]),"a card asks to turn its motion over");
+        s.in.trigger=0;s.in.reply={s.out.request.sequence,s.out.request.session,Result::Applied};s.Step();s.in.reply={};
+        Check(s.out.motions&&s.out.result==Result::Applied,"saved, the page stays open");
+        s.Step(3);s.in.hover=9;s.in.trigger=1;s.Step();
+        Check(!s.out.motions&&Page(s.out)==MenuPage::Spells,"SPELLS goes back");
+        Sim other;other.in.wheel=true;other.Step(3);other.in.hover=MotionsCell;other.in.trigger=1;other.Step();
+        Check(!other.out.motionsBox&&!other.out.motions,"another class: no box, no page");
+    }
 
     {
         Sim s;s.in.wheel=true;s.Step(3);s.in.hover=13;s.in.trigger=1;s.Step();

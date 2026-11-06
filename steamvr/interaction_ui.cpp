@@ -211,7 +211,7 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
         return RGB(int(c.r*255),int(c.g*255),int(c.b*255));
     };
     const int sectors=fiveSectors?5:8;
-    for(int i=0;!o.developer&&!o.map&&o.editor<2&&i<sectors;++i) {
+    for(int i=0;!o.developer&&!o.map&&!o.motions&&o.editor<2&&i<sectors;++i) {
         const int slot=fiveSectors?skills::HandSlot(o.wheelHand,i):i;
         if(o.utility&&i==2)continue; // Native tabbed menu retains journal access.
         const float sector=2*Pi/sectors;
@@ -453,6 +453,33 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
             SelectObject(dc,font);
         }
         if(!o.editCount)text(o.glyphEdit>=0?"No skills that need no target":"No active skills available",{56,249,712,430});
+    } else if(o.motions) {
+        // Motions (spell_motion.h): each motion spell, how to do it, and whether it is on; pressed, a card
+        // turns it on or off. A spell the hero has no points in is shown dimmed.
+        frame({20,28,748,681});
+        text("MOTIONS",{38,34,730,62});
+        SelectObject(dc,shortcutFont);SetTextColor(dc,RGB(232,196,119));
+        text("Hold both grips and do a spell's motion to cast it: no button needed.",{38,62,730,80});
+        text("Point at a spell and press the trigger to turn its motion on or off.",{38,79,730,97});
+        for(int i=0;i<MotionCards;++i) {
+            const int id=spellmotion::PageSkills[i];
+            const auto skill=GlyphSkill(s,id);
+            const bool have=skill.known,on=spellmotion::On(id,o.motionsOff);
+            const auto b=MotionCardBounds(i);
+            const int x=int(768*b.left),y=int(768*b.top),right=int(768*b.right),bottom=int(768*b.bottom);
+            frame({x,y,right,bottom},o.hover==MotionCardCell(i));
+            const bool haveIcon=icon(icons::Get("s"+std::to_string(id)),{x+9,y+12,x+67,y+70},have&&on);
+            if(!haveIcon)fill({x+12,y+15,x+64,y+67},RGB(48,40,28));
+            SelectObject(dc,font);SetTextColor(dc,have?RGB(235,218,181):RGB(148,137,117));
+            paragraph(have?skill.name:spellmotion::SpellName(id),{x+76,y+8,right-78,y+34});
+            const RECT chip{right-72,y+9,right-9,y+31};
+            fill(chip,on?RGB(100,74,29):RGB(48,40,28));
+            SelectObject(dc,shortcutFont);SetTextColor(dc,on?RGB(235,218,181):RGB(148,137,117));text(on?"ON":"OFF",chip);
+            char cue[160];std::snprintf(cue,sizeof cue,"%s%s",spellmotion::Cue(spellmotion::For(id)),have?".":" (no points yet).");
+            cue[0]=char(std::toupper(static_cast<unsigned char>(cue[0])));
+            SetTextColor(dc,RGB(169,151,118));paragraph(cue,{x+76,y+36,right-8,bottom-4});
+        }
+        SetTextColor(dc,RGB(235,218,181));SelectObject(dc,font);
     } else if(o.glyphs&&!o.utility) {
         text("GLYPHS",{290,305,478,345});
         text("CLOSE",{301,356,467,398});
@@ -487,6 +514,17 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
             SelectObject(dc,skillFont);text(o.leftStrikes==1?"Right trigger skill":"Own trigger skill",{claw.left+6,claw.top+23,claw.right-6,claw.bottom-22});
             SelectObject(dc,shortcutFont);text("Click to toggle",{claw.left+6,claw.bottom-22,claw.right-6,claw.bottom-5});SelectObject(dc,font);
         }
+        if(o.motionsBox) {   // Motions (spell_motion.h): how many are on, and the way to the MOTIONS page
+            const auto m=MotionsBounds;
+            RECT box{LONG(m.left*768),LONG(m.top*768),LONG(m.right*768),LONG(m.bottom*768)};
+            frame(box,o.hover==MotionsCell);
+            int have=0,on=0;
+            for(const int id:spellmotion::PageSkills)if(GlyphSkill(s,id).known){++have;if(spellmotion::On(id,o.motionsOff))++on;}
+            SelectObject(dc,shortcutFont);text("MOTIONS",{box.left+6,box.top+5,box.right-6,box.top+22});
+            char line[48];if(have)std::snprintf(line,sizeof line,"%d of %d on",on,have);else std::snprintf(line,sizeof line,"None learned yet");
+            SelectObject(dc,skillFont);text(line,{box.left+6,box.top+23,box.right-6,box.bottom-22});
+            SelectObject(dc,shortcutFont);text("Click: motions",{box.left+6,box.bottom-22,box.right-6,box.bottom-5});SelectObject(dc,font);
+        }
     }
     if(QuickControls(Page(o))||Page(o)==MenuPage::Glyphs) {   // glyph casting's page (glyph_cast.h), and back
         const auto g=GlyphsBounds;
@@ -505,7 +543,7 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
     // The skill pointed at and the slot it is (or would be) on: how it works there
     // (skill_usage.h), under the picker, the slot chooser and the hand wheel.
     const char* usage=[&]()->const char* {
-        if(o.developer||o.map||o.utility||o.glyphs||o.editor>=2)return "";   // the picker shows a card instead
+        if(o.developer||o.map||o.utility||o.glyphs||o.motions||o.editor>=2)return "";   // the picker shows a card instead
         if(o.hover<0||o.hover>=(handWheel?5:8))return "";
         const int slot=handWheel?skills::HandSlot(o.wheelHand,o.hover):o.hover;
         return s.skills[slot].known?skillusage::Line(s.skills[slot].id,slot):"";
@@ -521,7 +559,7 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
         if(usage[0]&&o.result!=Result::Pending&&o.result!=Result::Refused){SelectObject(dc,shortcutFont);text(usage,{35,639,733,678});SelectObject(dc,font);}
         else text(hint,{35,639,733,678});
     }
-    const char* footer[5]={(o.utility||o.map||o.developer||o.glyphs)?"SPELLS":"EQUIPMENT","MAP","VR SETTINGS",handWheel?"INVENTORY":"EDIT SKILLS","DEV"};
+    const char* footer[5]={(o.utility||o.map||o.developer||o.glyphs||o.motions)?"SPELLS":"EQUIPMENT","MAP","VR SETTINGS",handWheel?"INVENTORY":"EDIT SKILLS","DEV"};
     if(o.editor==1){footer[0]="BACK";footer[1]="";footer[2]="DONE";}
     if(o.editor>=2){footer[0]="PREVIOUS";footer[1]="NEXT";footer[2]="BACK";}
     fill({20,686,749,745},RGB(18,16,14));
@@ -538,7 +576,14 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
         text(o.glyphDraw>=0?"Then hold Draw glyph and draw it in the air; let go to cast.":"Put Draw glyph on a button first: click a hand slot, then Draw glyph.",{38,662,730,685});
         SelectObject(dc,prior);
     }
-    if(!o.developer&&!o.editor&&!o.utility&&!o.map&&!o.glyphs) {
+    if(o.motions&&!o.developer&&!o.editor&&!o.map) {
+        const auto prior=SelectObject(dc,shortcutFont);SetTextColor(dc,RGB(232,196,119));
+        text(o.result==Result::Pending?"Saving...":o.result==Result::Refused?"Not saved; press it again.":
+            "A motion that is off still casts from a button its spell is on.",{38,639,730,662});
+        text("Both grips never grab a potion, a holster or a shoulder; one alone still does.",{38,662,730,685});
+        SelectObject(dc,prior);
+    }
+    if(!o.developer&&!o.editor&&!o.utility&&!o.map&&!o.glyphs&&!o.motions) {
         char active[120];if(handWheel)std::snprintf(active,sizeof active,"Other hand: point + trigger to assign. Click this stick to close.");
         else std::snprintf(active,sizeof active,"ACTIVE: %s",o.cue.known?o.cue.name:"Unknown skill");
         const auto prior=SelectObject(dc,skillFont);SetTextColor(dc,RGB(232,196,119));

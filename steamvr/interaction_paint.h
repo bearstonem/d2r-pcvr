@@ -14,6 +14,8 @@ struct PaintContext {
     bool utility=false,map=false,fresh=false,editable=false,equipmentKnown=false,beltKnown=false;
     bool glyphs=false;int glyphEdit=-1,glyphDraw=-1;
     std::array<Skill,GlyphShapes> glyphSkills{};
+    bool motions=false,motionsBox=false;int motionsOff=0;
+    std::array<Skill,MotionCards> motionSkills{};
     std::array<Skill,skills::Count> skills{};
     std::array<Skill,8> options{};
     std::array<std::array<Item,2>,2> sets{};
@@ -36,6 +38,8 @@ inline PaintContext Context(const Snapshot& s,const Output& o,bool fresh,const c
     c.quick=s.quick;c.itemOptions=o.itemOptions;c.skills=s.skills;c.options=o.editOptions;c.sets=s.sets;c.belt=s.belt;c.cue=o.cue;c.leftCue=o.leftCue;c.location=s.location;c.companions=s.companions;c.effects=s.effects;c.leftStrikes=o.leftStrikes;
     c.glyphs=o.glyphs;c.glyphEdit=o.glyphEdit;c.glyphDraw=o.glyphDraw;
     for(int i=0;i<GlyphShapes;++i)c.glyphSkills[size_t(i)]=GlyphSkill(s,o.glyphSkills[size_t(i)]);
+    c.motions=o.motions;c.motionsBox=o.motionsBox;c.motionsOff=o.motionsOff;
+    for(int i=0;i<MotionCards;++i)c.motionSkills[size_t(i)]=GlyphSkill(s,spellmotion::PageSkills[i]);
     return c;
 }
 inline bool LocationImageCurrent(const PaintContext& painted,const Snapshot& snapshot) {

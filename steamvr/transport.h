@@ -92,10 +92,13 @@ bool CrossbowAiming();
 bool NativeAimOwnership(); // hand casting or wheel: preserve locomotion, suppress legacy aim modes
 bool NativeSkillCasting(); // any active trigger/quick cast; retain native locomotion input
 bool DirectedSpellActive(); // fresh native assignment, actually casting (wheel or quick shortcut)
+bool SpellGripsArmed();   // both grips cast a learned motion spell (spell_motion.h): the left grip takes the staff only alone
 bool BowSkillActive();   // a bow or crossbow skill is being cast from a button (bow ready)
 int GroundSpellSkill();   // a ground skill (spellaim::GroundTarget) being cast that lands where it is aimed: its id, or -1
 int NativeCastSkill(); // current fresh native cast id, -1 when idle/blocked/stale
 bool GameplayRay(float origin[3],float direction[3]);
+bool MotionCastRay(float origin[3],float direction[3]);   // a motion's cast with a way (Teleport's punch), live: from the right hand along it, as GameplayRay
+bool RecordCastLive();      // a glyph's or motion's press of the right trigger's record, now or within 150 ms (lock-free)
 // Aim rules: each hand's own aim in GameplayRay's frame - the controller's
 // pointer, or the bow's forward for the left hand holding a bow.
 bool HandAimRay(int hand,float origin[3],float direction[3]);

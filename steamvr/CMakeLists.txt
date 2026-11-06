@@ -197,6 +197,7 @@ add_executable(tactical-chord-test tactical_chord_test.cpp)   # the mercenary co
 add_executable(glyph-recognizer-test glyph_recognizer_test.cpp)   # glyph casting: the eight shapes ($P, corners, build)
 add_executable(glyph-trail-test glyph_trail_test.cpp)   # glyph casting: the trail's painting
 add_executable(glyph-cast-test glyph_cast_test.cpp)   # glyph casting: the stroke and the cast
+add_executable(spell-motion-test spell_motion_test.cpp)   # a glyph readies a spell, its motion casts it
 add_executable(guard-strain-test guard_strain_test.cpp)
 add_executable(heartbeat-test heartbeat_test.cpp)
 add_executable(run-speed-test run_speed_test.cpp)
@@ -369,7 +370,7 @@ set_tests_properties(light-bounds-test PROPERTIES TIMEOUT 30)
 foreach(test_target IN ITEMS memory-test biome-list-test hook-metrics-test active-keys-test resource-descriptions-test latest-worker-test haptic-pulse-test thread-stats-test
     gameplay-test weapon-skills-test quick-cast-test hand-controls-test elemental-hands-test skill-pad-test interact-press-test sewer-interaction-test notice-card-test mod-layout-test spell-aim-test bow-pose-test crossbow-pose-test body-tracking-test shapeshift-form-test head-shadow-test shield-steady-test body-calibration-test shoulder-swap-test blood-screen-test
     portal-billboard-test shrine-trace-test shrine-placement-test overlay-view-test bone-armor-height-test composition-layers-test projectile-rules-test environment-cutaway-test roof-materials-test stereo-prop-physics-test dropped-bottles-test props-test limb-rig-test limb-physics-test leather-menu-test stats-button-test menu-drop-test arcane-decay-test respec-button-test
-    combat-rules-test strike-skills-test zeal-light-test skill-usage-test shield-guard-test shapeshift-gesture-test guard-strain-test heartbeat-test run-speed-test logging-test melee-contact-test melee-weapon-test breakables-test offline-difficulty-test enemy-sight-test attack-speed-test world-coordinates-test bow-flight-test bow-laser-test spell-cast-test spell-aim-assist-test hammer-gesture-test charge-gesture-test tactical-chord-test glyph-recognizer-test glyph-trail-test glyph-cast-test cross-gesture-test heavens-gesture-test bone-graft-test
+    combat-rules-test strike-skills-test zeal-light-test skill-usage-test shield-guard-test shapeshift-gesture-test guard-strain-test heartbeat-test run-speed-test logging-test melee-contact-test melee-weapon-test breakables-test offline-difficulty-test enemy-sight-test attack-speed-test world-coordinates-test bow-flight-test bow-laser-test spell-cast-test spell-aim-assist-test hammer-gesture-test charge-gesture-test tactical-chord-test glyph-recognizer-test glyph-trail-test glyph-cast-test spell-motion-test cross-gesture-test heavens-gesture-test bone-graft-test
     interaction-test dev-scenarios-test native-belt-test wrist-hud-test map-zoom-test navigation-info-test companions-test active-effects-test dropped-item-labels-test stick-gestures-test show-items-command-test native-hud-test render-resolution-test render-pointer-test scene-depth-test game-device-only-test controller-bindings-test journal-test native-panels-test talk-stop-test loot-beams-test
     vr-settings-test vr-settings-layout-test vr-settings-pointer-test vr-settings-store-test controller-labels-test math-test deferred-draw-test monster-bars-test loot-aim-test telegraph-test aim-reach-test aim-rules-test target-cone-test gaze-test window-focus-test callback-ticket-test local-player-test shield-block-test trigger-melee-test companion-ai-test torch-light-test frame-generation-test turn-capture-test panel-atlas-test far-objects-test)
   # These fixtures use assert for their checks, including in Release builds.
@@ -388,6 +389,7 @@ add_test(NAME interaction-developer-tab-test COMMAND interaction-preview "${CMAK
 add_test(NAME sewer-prompt-art-test COMMAND interaction-preview "${CMAKE_CURRENT_BINARY_DIR}/sewer-prompt.png" --sewer-prompt-check)
 add_test(NAME skill-card-fit-test COMMAND interaction-preview "${CMAKE_CURRENT_BINARY_DIR}/skill-editor.png" --editor-check)
 add_test(NAME interaction-glyphs-test COMMAND interaction-preview "${CMAKE_CURRENT_BINARY_DIR}/glyphs-preview.png" --glyphs-check)
+add_test(NAME interaction-motions-test COMMAND interaction-preview "${CMAKE_CURRENT_BINARY_DIR}/motions-preview.png" --motions-check)
 set_tests_properties(sewer-prompt-art-test PROPERTIES TIMEOUT 10)
 add_test(NAME notice-card-art-test COMMAND interaction-preview "${CMAKE_CURRENT_BINARY_DIR}/notice-cards.png" --notice-card-check)
 set_tests_properties(notice-card-art-test PROPERTIES TIMEOUT 10)

@@ -1,0 +1,333 @@
+#pragma once
+#include "frame_math.h"
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <vector>
+
+// Spells cast by their motion (owner, 2026-11-03). Every Sorceress spell with a motion, unless the
+// wheel's MOTIONS page turned it off, casts by it while both grips are held (owner: "we are tracking
+// motion all the time so it gets triggered in unwanted situations", "what about holding both grips to
+// cast?"): no button or glyph needed. The transport runs one watcher per motion (free: watched while
+// active, the grips' hold) and casts the first to complete as a glyph casts (glyph_cast.h), so mana,
+// cast rate and the spell stay native. Held, the motion again casts again.
+//
+// The first prototype readied a glyph's spell on the right trigger instead (Input::held, a gate
+// pressed fresh, with a drop logged on its release: the tests still use it); the MOTIONS page retired
+// that ("I don't want this to get over complicated").
+//
+// Head-local frame as holycross (+X right, +Y up from the eyes, forward -Z, the head's yaw only); hand
+// 0 is the right. Value-only: steamvr/spell_motion_test.cpp.
+namespace framevr::spellmotion {
+enum class Motion {None,FlingOut,PushDown,RubSnap,CrossGuard,ArmUp,MatchStrike,ForearmSweep,Shake,Hug,Punch};
+constexpr int MotionCount=int(Motion::Punch);   // the motions, 1..MotionCount
+inline Motion For(int skill) {
+    switch(skill) {
+    case 48:return Motion::FlingOut;      // Nova
+    case 44:return Motion::PushDown;      // Frost Nova
+    case 42:return Motion::RubSnap;       // Static Field
+    case 58:return Motion::CrossGuard;    // Energy Shield
+    case 57:return Motion::ArmUp;         // Thunder Storm
+    case 46:return Motion::MatchStrike;   // Blaze
+    case 40:return Motion::ForearmSweep;  // Frozen Armor
+    case 50:return Motion::Shake;         // Shiver Armor
+    case 60:return Motion::Hug;           // Chilling Armor
+    case 54:return Motion::Punch;         // Teleport (owner: "as a motion similar to Paladin's Charge")
+    default:return Motion::None;
+    }
+}
+// The MOTIONS page (the wheel; owner 2026-11-03: "a place where you can see the motion spells that are
+// active"): the motion spells in the order it shows them (skill ids, the trees' order), each with its
+// bit in [motions] off (the motion's number - 1), set to turn it off.
+constexpr int PageSkills[MotionCount]={40,42,44,46,48,50,54,57,58,60};
+inline int Bit(int skill){const int m=int(For(skill));return m>0?m-1:-1;}
+inline int OffMask(float value){return std::isfinite(value)?std::clamp(int(std::lround(value)),0,(1<<MotionCount)-1):0;}
+inline bool On(int skill,int off){const int b=Bit(skill);return b>=0&&!((off>>b)&1);}
+// Its name, for a hero without the spell (the catalog has none then).
+inline const char* SpellName(int skill) {
+    switch(skill) {
+    case 40:return "Frozen Armor";case 42:return "Static Field";case 44:return "Frost Nova";case 46:return "Blaze";
+    case 48:return "Nova";case 50:return "Shiver Armor";case 54:return "Teleport";case 57:return "Thunder Storm";
+    case 58:return "Energy Shield";case 60:return "Chilling Armor";default:return "";
+    }
+}
+// How to do it: on the MOTIONS page and in the log.
+inline const char* Cue(Motion m) {
+    switch(m) {
+    case Motion::FlingOut:return "bring the hands together, then fling both arms out wide";
+    case Motion::PushDown:return "push both hands down toward the floor";
+    case Motion::RubSnap:return "rub the palms together, then snap them apart";
+    case Motion::CrossGuard:return "both hands up at the face, close together (crossed or not), and hold";
+    case Motion::ArmUp:return "raise one arm straight up and hold";
+    case Motion::MatchStrike:return "strike one hand down the thigh, hip to knee";
+    case Motion::ForearmSweep:return "sweep the left hand from the right hand up to the right shoulder";
+    case Motion::Shake:return "shake both fists";
+    case Motion::Hug:return "hug yourself, each hand on the other shoulder";
+    case Motion::Punch:return "draw the right fist in, then punch it straight out where you want to land";
+    default:return "no motion";
+    }
+}
+// While both grips cast spells (owner, 2026-11-03: "when both grips are held you should prevent
+// actions like grabbing potions or grabbing above the shoulder"): a grip counts for a grab only
+// alone - held SoloSeconds with the other free - and then until it is let go; pressed with the
+// other, or while the other is held, never until it is let go. Held above .6, let go below .35, so a
+// squeeze that dips mid-motion is not a new press (the grabs take a grip's press: a dip and back at
+// the belt or a shoulder took a potion or swapped weapons).
+struct SoloGrips {
+    static constexpr double SoloSeconds=.1;
+    bool held[2]{},solo[2]{};
+    double since[2]{-1,-1};   // when pressed alone; -2 pressed with the other (never, until let go)
+    void Reset(){*this=SoloGrips{};}
+    void Step(double now,const float grip[2]) {
+        for(int h=0;h<2;++h)held[h]=std::isfinite(grip[h])&&grip[h]>(held[h]?.35f:.6f);
+        for(int h=0;h<2;++h) {
+            if(!held[h]){solo[h]=false;since[h]=-1;continue;}
+            if(solo[h])continue;
+            if(held[1-h]){since[h]=-2;continue;}
+            if(since[h]==-1)since[h]=now;
+            if(since[h]>=0&&now-since[h]>=SoloSeconds)solo[h]=true;
+        }
+    }
+};
+struct Tuning {
+    // Tuned on the owner's first session (2026-11-03): Nova flings that reached 78 and 89 cm, Frost
+    // Nova pushes begun at the chest and ending at the sides, and an Energy Shield held 12-22 cm apart
+    // at the face that never cast.
+    float together=.30f;      // m: Nova starts with the hands this close...
+    float flingApart=.75f;    // ...and ends with them this far apart,
+    float flingSide=.25f;     // each this far out on its own side,
+    float flingWindow=.8f;    // s after they were together
+    float pushDrop=.20f;      // m: Frost Nova: both hands this much lower than
+    float pushWindow=.5f;     // s ago (a push, not lowering the arms),
+    float pushBelow=-.40f;    // m: ending this far below the eyes, not behind the back
+    float rubClose=.18f;      // m: Static Field: controllers this close are palms together;
+    float rubPath=.15f;       // m of their rubbing charges it,
+    float snapApart=.45f;     // m: then the hands this far apart
+    float snapWindow=.5f;     // s after they parted
+    float guardApart=.35f;    // m: Energy Shield: both hands up at the face, this close (crossed or not)
+    float holdSeconds=.35f;   // a held pose (Energy Shield, Thunder Storm, Chilling Armor)
+    float stillSpeed=.8f;     // m/s: a held pose moves slower than this
+    float raiseAbove=.22f;    // m above the eyes: Thunder Storm's raised hand
+    float strikeDrop=.22f;    // m: Blaze: one hand this much lower than
+    float strikeWindow=.25f;  // s ago (a strike),
+    float strikeFrom=-.40f;   // m: starting below this (the hip, not the chest)
+    float sweepAt=.20f;       // m: Frozen Armor: the left hand this near the right hand,
+    float sweepTo=.22f;       // m: then this near the right shoulder,
+    float sweepWindow=1.2f;   // s later
+    float shakeSpeed=.35f;    // m/s: Shiver Armor: a swing faster than this, then back,
+    int shakeTurns=3;         // this many times with each hand
+    float shakeWindow=.9f;    // s
+    // Teleport, the Paladin's Charge punch (charge_gesture.h): the right hand drawn in (at most punchFrom
+    // ahead of the eyes, hip to brow), then punched straight out to punchReach ahead, punchTravel
+    // forward within punchWindow, at least 1.5 times as far forward as up, down or sideways.
+    // The cast goes the way of the punch (Output::aim).
+    float punchFrom=.30f,punchReach=.45f,punchTravel=.25f,punchWindow=.20f;
+    float cooldown=.6f;       // s after a cast
+    float history=1.5f;       // s of the hands kept
+};
+struct Input {
+    double time=0;
+    uint64_t session=0,epoch=0;
+    bool active=false;            // a spell with a motion readied, the hands free for it (no wheel, menu, bottle)
+    bool held=false;              // the right trigger
+    bool free=false;              // no trigger: watched whenever active, and never dropped (a spell on a slot)
+    Motion motion=Motion::None;
+    math::Vec head{};math::Quat headRotation{0,0,0,1};
+    math::Vec hand[2]{};          // world frame; 0 right, 1 left
+    bool tracked[2]{};
+};
+struct Output {
+    bool began=false;             // the trigger pressed: watching
+    bool cast=false;              // the motion completed
+    const char* dropped=nullptr;  // let go, or stopped, without it (for the log)
+    float seconds=0;              // held so far
+    // Over the hold, for tuning: the hands least and most apart, the highest and lowest hand from the
+    // eyes, the fastest hand, each hand's biggest fall within pushWindow, and where the hands were last
+    // (head-local: x right, y up, z back) (m, m/s).
+    float apartMin=0,apartMax=0,top=0,low=0,fastest=0,fall[2]{};
+    math::Vec end[2]{};
+    // With a cast that goes somewhere (Teleport): the way the motion went, head-local as end (the punch,
+    // from where it began to where it ended); zero for the rest.
+    math::Vec aim{};
+};
+class Engine {
+    struct Sample {double t=0;math::Vec l[2]{};};
+    std::vector<Sample> samples;
+    uint64_t session=0,epoch=0;
+    bool watching=false,wasHeld=false;
+    int casts=0;                  // in this hold
+    double since=0,last=0,castAt=-1,poseSince=-1;
+    float rub=0;double parted=-1; // Static Field
+    math::Vec aimed{};            // Teleport: the punch Done found
+    struct Swing {int sign=0;float peak=0;};
+    Swing swing[2][3]{};          // Shiver Armor: each hand's last swing on each axis
+    std::vector<double> turns[2][3];
+    Output stats;
+    static bool Finite(math::Vec v){return std::isfinite(v.x)&&std::isfinite(v.y)&&std::isfinite(v.z);}
+    static float Len(math::Vec v){return std::sqrt(math::Dot(v,v));}
+    static float Apart(const Sample& s){return Len(s.l[0]-s.l[1]);}
+    static float Forward(math::Vec l){return -l.z;}
+    void Clear() {
+        samples.clear();poseSince=-1;rub=0;parted=-1;aimed={};
+        for(auto& h:swing)for(auto& a:h)a={};
+        for(auto& h:turns)for(auto& a:h)a.clear();
+    }
+    void Stop(){watching=false;casts=0;Clear();}
+    // The hand's velocity over the last few samples (m/s), zero until there are some.
+    math::Vec Velocity(int h)const {
+        if(samples.size()<3)return {};
+        const auto& a=samples[samples.size()-3];const auto& b=samples.back();
+        const double dt=b.t-a.t;
+        return dt>1e-4?(b.l[h]-a.l[h])*float(1/dt):math::Vec{};
+    }
+    bool Still(int h)const{return Len(Velocity(h))<tuning.stillSpeed;}
+    // A pose held: true once it has been kept (and kept still) for holdSeconds.
+    bool Held(bool pose,double now) {
+        if(!pose){poseSince=-1;return false;}
+        if(poseSince<0)poseSince=now;
+        return now-poseSince>=tuning.holdSeconds;
+    }
+    bool Done(Motion m) {
+        const auto& n=samples.back();
+        const auto& t=tuning;
+        switch(m) {
+        case Motion::FlingOut: {
+            if(Apart(n)<t.flingApart||n.l[0].x<t.flingSide||n.l[1].x>-t.flingSide)return false;
+            for(const auto& s:samples)
+                if(n.t-s.t<=t.flingWindow&&Apart(s)<=t.together&&Forward(s.l[0])>-.1f&&Forward(s.l[1])>-.1f)return true;
+            return false;
+        }
+        case Motion::PushDown: {
+            if(n.l[0].y>t.pushBelow||n.l[1].y>t.pushBelow||Forward(n.l[0])<-.25f||Forward(n.l[1])<-.25f)return false;
+            for(const auto& s:samples)
+                if(n.t-s.t<=t.pushWindow&&s.l[0].y-n.l[0].y>=t.pushDrop&&s.l[1].y-n.l[1].y>=t.pushDrop)return true;
+            return false;
+        }
+        case Motion::RubSnap: {
+            const float apart=Apart(n);
+            if(samples.size()>=2) {
+                const auto& p=samples[samples.size()-2];
+                if(apart<=t.rubClose&&Apart(p)<=t.rubClose)rub+=Len((n.l[0]-n.l[1])-(p.l[0]-p.l[1]));
+            }
+            if(apart<=t.rubClose)parted=-1;
+            else if(parted<0&&rub>0)parted=n.t;
+            if(parted>=0&&n.t-parted>t.snapWindow){rub=0;parted=-1;}   // apart too long: the charge is lost
+            return rub>=t.rubPath&&parted>=0&&apart>=t.snapApart;
+        }
+        case Motion::CrossGuard: {
+            // Crossed or not: the owner's guard held the controllers 12-22 cm apart at the face.
+            bool pose=Apart(n)<=t.guardApart;
+            for(int h=0;h<2;++h){const auto& l=n.l[h];pose=pose&&l.y>=-.30f&&l.y<=.20f&&Forward(l)>=0&&Forward(l)<=.60f&&std::fabs(l.x)<=.30f&&Still(h);}
+            return Held(pose,n.t);
+        }
+        case Motion::ArmUp: {
+            bool pose=false;
+            for(int h=0;h<2;++h){const auto& l=n.l[h];pose=pose||(l.y>=t.raiseAbove&&std::fabs(l.x)<=.55f&&Forward(l)>=-.35f&&Forward(l)<=.60f&&Still(h));}
+            return Held(pose,n.t);
+        }
+        case Motion::MatchStrike: {
+            for(int h=0;h<2;++h) {
+                const auto& c=n.l[h];
+                if(Forward(c)>.20f||Forward(c)<-.35f||std::fabs(c.x)<.15f)continue;   // at the side, not in front
+                for(const auto& s:samples)
+                    if(n.t-s.t<=t.strikeWindow&&s.l[h].y<=t.strikeFrom&&s.l[h].y-c.y>=t.strikeDrop&&std::fabs(s.l[h].x-c.x)<=.20f)return true;
+            }
+            return false;
+        }
+        case Motion::ForearmSweep: {
+            const math::Vec shoulder{.17f,-.22f,.05f};
+            // The right arm held out on its own side (a hug has it across the chest).
+            if(Len(n.l[1]-shoulder)>t.sweepTo||Len(n.l[0]-shoulder)<.30f||n.l[0].x<.10f)return false;
+            for(const auto& s:samples)if(n.t-s.t<=t.sweepWindow&&Apart(s)<=t.sweepAt)return true;
+            return false;
+        }
+        case Motion::Shake: {
+            if(samples.size()<3)return false;
+            int most[2]{};
+            for(int h=0;h<2;++h) {
+                const auto v=Velocity(h);const float axis[3]={v.x,v.y,v.z};
+                for(int a=0;a<3;++a) {
+                    auto& w=swing[h][a];auto& times=turns[h][a];
+                    const int sign=axis[a]>0?1:axis[a]<0?-1:0;
+                    if(sign&&w.sign&&sign!=w.sign){if(w.peak>=t.shakeSpeed)times.push_back(n.t);w.peak=0;}
+                    if(sign)w.sign=sign;
+                    w.peak=std::max(w.peak,std::fabs(axis[a]));
+                    times.erase(std::remove_if(times.begin(),times.end(),[&](double at){return n.t-at>t.shakeWindow;}),times.end());
+                    most[h]=std::max(most[h],int(times.size()));
+                }
+            }
+            const bool front=Forward(n.l[0])>-.10f&&Forward(n.l[1])>-.10f&&n.l[0].y>-.90f&&n.l[1].y>-.90f;
+            return front&&most[0]>=t.shakeTurns&&most[1]>=t.shakeTurns;
+        }
+        case Motion::Punch: {
+            const auto& c=n.l[0];
+            if(Forward(c)<t.punchReach)return false;
+            for(const auto& s:samples) {
+                const auto& a=s.l[0];
+                const float forward=Forward(c)-Forward(a);
+                if(n.t-s.t<=t.punchWindow&&Forward(a)<=t.punchFrom&&a.y>=-.70f&&a.y<=.10f&&forward>=t.punchTravel&&
+                   std::fabs(c.y-a.y)*1.5f<=forward&&std::fabs(c.x-a.x)*1.5f<=forward){aimed=c-a;return true;}
+            }
+            return false;
+        }
+        case Motion::Hug: {
+            const auto& r=n.l[0];const auto& l=n.l[1];
+            const bool pose=r.x>=-.40f&&r.x<=-.02f&&l.x<=.40f&&l.x>=.02f&&r.y>=-.60f&&r.y<=-.18f&&l.y>=-.60f&&l.y<=-.18f&&
+                Forward(r)>=-.25f&&Forward(r)<=.15f&&Forward(l)>=-.25f&&Forward(l)<=.15f;   // at the shoulders, not up in front (Energy Shield)
+            return Held(pose,n.t);
+        }
+        default:return false;
+        }
+    }
+public:
+    Tuning tuning;
+    void Reset(){const auto keep=tuning;*this=Engine{};tuning=keep;}
+    bool Watching()const{return watching;}
+    // The figures of the hold being watched, or of the last one (until the next begins).
+    const Output& Stats()const{return stats;}
+    Output Step(const Input& in) {
+        Output out;
+        // A reset forgets the hold: a trigger still held must be pressed again.
+        if(!std::isfinite(in.time)||!Finite(in.head)){Reset();wasHeld=in.held;return out;}
+        if(in.session!=session||in.epoch!=epoch){Reset();session=in.session;epoch=in.epoch;wasHeld=in.held;}
+        const double dt=in.time-last;
+        const bool continuous=last>0&&dt>0&&dt<=.15;
+        last=in.time;
+        const bool pressed=in.held&&!wasHeld;
+        wasHeld=in.held;
+        const bool ready=in.active&&in.motion!=Motion::None&&in.tracked[0]&&in.tracked[1]&&Finite(in.hand[0])&&Finite(in.hand[1]);
+        if(watching&&(!(in.free||in.held)||!ready||!continuous)) {
+            if(!casts&&!in.free) {   // a hold that cast at least once was not dropped
+                out=stats;out.seconds=float(in.time-since);
+                out.dropped=!in.held?"let go without the motion":!continuous?"frame gap":"hands busy, untracked or input inactive";
+            }
+            Stop();return out;
+        }
+        if(!watching) {
+            if(!(in.free||pressed)||!ready)return out;   // only a fresh press watches: a trigger held as the spell was readied does not
+            watching=true;since=in.time;casts=0;Clear();
+            stats={};stats.apartMin=1e9f;stats.top=-1e9f;stats.low=1e9f;
+            out.began=!in.free;
+        }
+        const auto inverse=math::Conjugate(math::Yaw(math::Heading(in.headRotation)));
+        Sample s;s.t=in.time;
+        for(int h=0;h<2;++h)s.l[h]=math::Rotate(inverse,in.hand[h]-in.head);
+        samples.push_back(s);
+        samples.erase(samples.begin(),std::find_if(samples.begin(),samples.end(),[&](const Sample& x){return in.time-x.t<=tuning.history;}));
+        const float apart=Apart(s);
+        stats.apartMin=std::min(stats.apartMin,apart);stats.apartMax=std::max(stats.apartMax,apart);
+        for(int h=0;h<2;++h) {
+            stats.top=std::max(stats.top,s.l[h].y);stats.low=std::min(stats.low,s.l[h].y);stats.fastest=std::max(stats.fastest,Len(Velocity(h)));
+            for(const auto& x:samples)if(in.time-x.t<=tuning.pushWindow)stats.fall[h]=std::max(stats.fall[h],x.l[h].y-s.l[h].y);
+            stats.end[h]=s.l[h];
+        }
+        out.seconds=float(in.time-since);
+        if(castAt>=0&&in.time-castAt<tuning.cooldown)return out;
+        if(Done(in.motion)) {
+            const auto seconds=out.seconds;out=stats;out.seconds=seconds;out.cast=true;out.aim=aimed;
+            castAt=in.time;++casts;Clear();   // the motion again, from its start, casts again
+        }
+        return out;
+    }
+};
+}

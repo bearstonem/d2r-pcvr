@@ -119,6 +119,26 @@ int main(int argc,char** argv) {
         if(!SavePng(argv[1],gallery,width,height))return 113;
         std::puts("Skill category art: all eight classes fit; four picker layouts rendered");return 0;
     }
+    if(argc>2&&!std::strcmp(argv[2],"--motions-check")) {
+        // Motions (spell_motion.h): the hand wheel with the MOTIONS box, and the MOTIONS page with Nova
+        // turned off, Teleport not learned and a card pointed at.
+        if(argc>3){wchar_t path[32768]{};MultiByteToWideChar(CP_UTF8,0,argv[3],-1,path,32768);icons::Directory(path);}
+        Snapshot s;s.activeSet=1;s.bindingsEditable=true;s.skillClass=1;
+        const int ids[]={40,42,44,46,48,50,57,58,60};
+        for(const int id:ids){auto& k=s.catalog[s.skillCount++];k.id=id;k.level=8;k.known=k.available=true;std::snprintf(k.name,sizeof k.name,"%s",framevr::spellmotion::SpellName(id));}
+        for(int i=0;i<framevr::skills::Count;++i){auto& k=s.skills[size_t(i)];k=s.catalog[size_t(i%9)];}
+        icons::Prefetch(s);if(!icons::Wait(10000))return 120;
+        constexpr int width=1536,height=768;std::vector<uint8_t> gallery(width*height*4);
+        for(int tile=0;tile<2;++tile) {
+            Output o;o.wheel=true;o.wheelHand=0;o.motionsBox=true;o.motionsOff=1<<framevr::spellmotion::Bit(48);
+            if(tile==0)o.hover=MotionsCell;
+            else {o.motions=true;o.hover=MotionCardCell(2);}
+            const auto pixels=Paint(s,o,-1);if(pixels.size()!=1024*1024*4)return 121;
+            for(int y=0;y<768;++y)std::memcpy(&gallery[(y*width+tile*768)*4],&pixels[y*1024*4],768*4);
+        }
+        if(!SavePng(argv[1],gallery,width,height))return 122;
+        std::puts("Motions art: the hand wheel's MOTIONS box and the MOTIONS page rendered");return 0;
+    }
     if(argc>2&&!std::strcmp(argv[2],"--glyphs-check")) {
         // Glyph casting: the hand wheel with a Draw glyph button and the GLYPHS box, the GLYPHS page, the
         // button picker's Draw glyph card and a shape's skill picker.

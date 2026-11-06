@@ -2304,6 +2304,48 @@ assignment, read back) and the press follows the read-back, or nothing is cast a
 0.6 s. The snapshot carries the record (`glyphRecord/Skill/Owner`; -1 when a custom layout
 gives a hand button that record).
 
+Motions (`steamvr/spell_motion.h`; owner, 2026-11-03). With **Weapon skill gestures** on, every
+Sorceress spell that has a motion casts by it while both grips are held, both triggers free: no
+button or glyph needed. The wheel's MOTIONS page (the box at the lower right of the Spells and
+Equipment pages, a Sorceress's only) lists them with how to do each, and a press on one turns its
+motion on or off (`[motions] off`, one bit each, `spellmotion::Bit`; 0, all on); a spell with no
+points shows dimmed. A motion that is off still casts from a button its spell is on. One watcher
+per motion that is on and learned, active only while both grips are held (held above 0.6, let go
+below 0.35, so a squeeze that dips mid-motion keeps it), and not while a trigger, bottle, holster,
+bow, wheel or menu has the hands. The first to complete casts as a glyph does: the skill's hand slot
+when it is on one, else the right-trigger record (put there first; about 25 ms in the owner's
+session). Static Field before Nova (its snap apart is as wide as a fling); then all of them wait a
+second, still held or not. Grips let go after 0.3 s without a cast log what the hands did.
+
+Both grips never grab: a grip takes a belt bottle, a holster, the shoulder swap or the
+over-the-shoulder menu only alone, held 0.1 s with the other free (`spellmotion::SoloGrips`), and
+the left grip takes a staff only alone (`crossbow::SoloSupportLatched`: pressed at the shaft and
+held 0.12 s with the right grip free; the right grip held lets it go). The owner's path there: the
+first prototype readied a glyph's spell on the right trigger ("draw the glyph to activate the
+spell, then do its motion with the trigger"); then spells on a button cast by their motion alone;
+"we are tracking motion all the time so it gets triggered in unwanted situations" brought the
+grips ("what about holding both grips to cast?"), the staff and grab rules followed, and the
+MOTIONS page ("a place where you can see the motion spells that are active", "I don't want this to
+get over complicated") retired the readied spell: buttons press, motions take both grips, glyphs
+draw. A glyph whose skill has a motion casts it at once, as any glyph.
+
+The motions: Nova, the hands together then flung out wide; Frost Nova, both hands pushed down
+past the chest; Static Field, the palms rubbed together then snapped apart; Energy Shield, both
+hands up at the face within 35 cm (the forearms crossed or not), held; Thunder Storm, one arm
+raised above the head, held; Teleport, the right fist drawn in and punched straight out where you
+want to land (as the Paladin's Charge); Blaze, one hand struck down the thigh; Frozen Armor, the
+left hand from the right hand up to the right shoulder; Shiver Armor, both fists shaken; Chilling
+Armor, a hug, held. Thresholds in `spellmotion::Tuning`; `spell-motion-test` performs each at three
+headings and checks that no other spell's motion, the motion without the gate, or a slow version
+casts it. Logs: `Frame spell motion:` (each cast and the way it went, each grip hold let go
+without a motion with how far apart the hands went, the highest and lowest hand, the fastest,
+each hand's biggest fall in 0.5 s and where the hands ended, for tuning; each MOTIONS page change).
+Tuned on the owner's first session (2026-11-03: Nova 28 of 36, Frost Nova 27 of 42, Static Field 16
+of 20, Energy Shield 0 of 10): Nova's fling 75 cm wide (was 90), Frost Nova's push 20 cm (was 25)
+ending 40 cm below the eyes (was 50) and allowed out to the sides, Energy Shield's hands no longer
+crossed and no longer 15 cm out from the face. Tests: `interaction-test` (the box and the cards'
+hit bounds, the page's clicks), `interaction-motions-test` (its art).
+
 Trail (`steamvr/glyph_trail.h`): a 512 x 512 straight-alpha picture, 1 m a side, in the
 shared atlas (`panelatlas::Glyph`, beside VR Settings), shown as a room-space quad in the
 drawing plane with the stroke's start in the middle. A worker paints it, keeping each
