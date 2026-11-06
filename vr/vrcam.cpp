@@ -10342,6 +10342,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
             const auto marks = Current().Get();
             const auto now = GetTickCount64();
             const float shear = framevr::coordinates::GroundShear;
+            float tele[4] = {};   // Teleport's landing, for its pillar (TelePos): the first shown
             for (int k = 0; k < MaxMarks; ++k) {
                 const auto& mark = marks[k];
                 const auto draw = Sample(mark, now);
@@ -10352,13 +10353,18 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
                 char n[16];
                 snprintf(n, sizeof n, "RingPos%d", k); SetFloats(rt, n, ring, 4);
                 snprintf(n, sizeof n, "RingFill%d", k); SetFloat(rt, n, draw.fill);
-                // rgb its element's color (fire orange, cold blue, lightning yellow, other green, warning red), w its radius
-                static const float kElement[5][3] = {{1.0f, 0.45f, 0.05f}, {0.3f, 0.7f, 1.0f}, {1.0f, 0.92f, 0.35f}, {0.25f, 1.0f, 0.4f}, {1.0f, 0.05f, 0.05f}};
-                const int el = mark.element >= 0 && mark.element < 5 ? mark.element : 0;
+                // rgb its element's color (fire orange, cold blue, lightning yellow, other green, warning red, Teleport's
+                // arcane violet), w its radius
+                static const float kElement[6][3] = {{1.0f, 0.45f, 0.05f}, {0.3f, 0.7f, 1.0f}, {1.0f, 0.92f, 0.35f}, {0.25f, 1.0f, 0.4f}, {1.0f, 0.05f, 0.05f},
+                                                     {0.62f, 0.55f, 1.0f}};
+                const int el = mark.element >= 0 && mark.element < 6 ? mark.element : 0;
                 const float col[4] = {kElement[el][0], kElement[el][1], kElement[el][2], mark.radius * 2.0f};
                 snprintf(n, sizeof n, "RingCol%d", k); SetFloats(rt, n, col, 4);
-                // a strip: its direction (grid x/y are world x/z) and half-length in world units; 0 = a circle
-                const float dir[4] = {mark.dirX, mark.dirY, mark.halfLength * 2.0f, 0.0f};
+                // a strip: its direction (grid x/y are world x/z) and half-length in world units; 0 = a circle; w 1:
+                // Teleport's sigil (D2R_DepthFog.fx TeleportSigil)
+                const bool teleport = mark.skill == TeleportMark;
+                const float dir[4] = {mark.dirX, mark.dirY, mark.halfLength * 2.0f, teleport ? 1.0f : 0.0f};
+                if (teleport && draw.on && tele[3] <= 0.0f) { tele[0] = ring[0]; tele[1] = ring[1]; tele[2] = ring[2]; tele[3] = ring[3]; }
                 snprintf(n, sizeof n, "RingDir%d", k); SetFloats(rt, n, dir, 4);
             }
             // Paint only the floor within this height of it (meters), so a circle does not
@@ -10366,7 +10372,14 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
             // 2026-10-20, like the rest of the look (D2R_DepthFog.fx, kCircle*).
             constexpr float kCircleHeightM = 0.15f;
             SetFloat(rt, "RingFloorTol", kCircleHeightM * std::max(1.0f, ScaleHeight()) / UserEyeHeightM());
+            // Teleport's pillar: 0.12 m core, 3 m tall at the player's scale
+            const float upm = std::max(1.0f, ScaleHeight()) / UserEyeHeightM();
+            SetBool(rt, "TeleOn", tele[3] > 0.0f);
+            SetFloats(rt, "TelePos", tele, 4);
+            const float teleShape[2] = {0.12f * upm, 3.0f * upm};
+            SetFloats(rt, "TeleShape", teleShape, 2);
         }
+        else SetBool(rt, "TeleOn", false);
         if (beams) {   // loot beams: each item's cell on the hero's floor, in its label colour
             namespace lb = framevr::lootbeams;
             const float upm = std::max(1.0f, ScaleHeight()) / UserEyeHeightM();   // world units per metre

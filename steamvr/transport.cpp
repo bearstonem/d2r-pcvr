@@ -4462,7 +4462,8 @@ void Input() {
             float landX=0,landY=0;
             const bool landKnown=(teleportAiming||doneLanding)&&TeleportCell(doneLanding?donePoint:teleportPoint,punchTuning,landX,landY);
             if(teleportAiming&&landKnown&&done<0) {
-                telegraph::Current().Place(landX,landY,GetTickCount64(),250,int(spellaim::Cold),1.5f,0,0,0,telegraph::TeleportMark);
+                // Teleport's own sigil and pillar (vrcam, D2R_DepthFog.fx TeleportSigil): element 5, 2 cells round
+                telegraph::Current().Place(landX,landY,GetTickCount64(),250,5,2.0f,0,0,0,telegraph::TeleportMark);
                 if(!teleportShown) {
                     const auto spot=spellmotion::PointSpot(teleportPoint,punchTuning);
                     char line[160];std::snprintf(line,sizeof line,"Frame spell motion: Teleport pointed - its landing shown %.0f cells ahead, %+.0f across",spot.ahead,spot.right);

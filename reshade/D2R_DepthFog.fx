@@ -1983,10 +1983,36 @@ static const float kCircleOuterOpacity = 0.20;  // outer glow opacity
 // to the rim over the cast's time (a Guild Wars 2 style tell). up (FacingUp)
 // keeps the paint on the floor: a monster's legs, a wall or a rock side inside
 // the circle stay unpainted. The color is added as light.
+// Teleport's landing (dir.w 1; owner, 2026-11-05: "make the teleportation circle indicator, the target ring
+// more awesome looking and more noticeable"): an arcane sigil rather than a spell's area - a white-hot outer
+// rim, an inner rim, twelve dashes turning between them, a ring of light rising out from the centre again and
+// again, a pulsing core and light spilling past the rim. TeleLight raises a pillar over it.
+float3 TeleportSigil(float3 c, float2 q, float r, float4 ring, float4 col, float up)
+{
+    if (r > 1.45) return c;
+    const float t = Timer * 0.001;
+    const float ang = atan2(q.y, q.x) / 6.2831853;
+    const float outer = 1.0 - smoothstep(0.035, 0.065, abs(r - 1.0));
+    const float inner = 1.0 - smoothstep(0.02, 0.04, abs(r - 0.70));
+    const float band = 1.0 - smoothstep(0.03, 0.05, abs(r - 0.85));
+    const float dashes = band * smoothstep(0.35, 0.45, frac(ang * 12.0 + t * 0.30)) * (1.0 - smoothstep(0.75, 0.85, frac(ang * 12.0 + t * 0.30)));
+    const float runes = (1.0 - smoothstep(0.015, 0.03, abs(r - 0.42))) * step(0.5, frac(ang * 6.0 - t * 0.45));
+    const float wave = frac(t * 1.1);
+    const float ripple = step(r, 1.0) * exp(-abs(r - wave) * 22.0) * (1.0 - wave);
+    const float core = exp(-r * r * 16.0) * (0.75 + 0.25 * sin(t * 7.0));
+    const float halo = step(1.0, r) * exp(-(r - 1.0) * 7.0);
+    const float disc = step(r, 1.0) * 0.14;
+    const float pulse = 0.85 + 0.15 * sin(t * 4.0);
+    const float a = saturate(1.2 * outer + 0.8 * inner + 0.9 * dashes + 0.7 * runes + 0.7 * ripple + 0.9 * core + 0.55 * halo + disc) *
+                    pulse * ring.w * smoothstep(0.55, 0.8, up);
+    const float3 tint = lerp(col.rgb, float3(1.0, 1.0, 1.0), saturate(0.55 * outer + 0.7 * core + 0.4 * ripple));   // white-hot rims and heart
+    return saturate(c + tint * a * 1.35);
+}
 float3 RingTint(float3 c, float3 p, float4 ring, float fill, float4 col, float4 dir, float up)
 {
     if (ring.w <= 0.0 || abs(p.y - ring.y) > RingFloorTol) return c;
     float2 q = p.xz - ring.xz;
+    if (dir.w > 0.5) return TeleportSigil(c, q, length(q) / max(col.w, 1e-3), ring, col, up);
     if (dir.z > 0.0) q -= dir.xy * clamp(dot(q, dir.xy), -dir.z, dir.z);
     const float r = length(q) / max(col.w, 1e-3);
     if (r > 1.1 + kCircleOuterSize) return c;
@@ -2073,6 +2099,30 @@ float3 BeamLight(float3 e, float3 dir, float tSurf, float3 p, float ok, float4 b
     }
     return light * b.w * BeamShape.w;
 }
+// Teleport's pillar over its sigil (vrcam: TelePos xyz the landing on the hero's floor relative to the hero, w its
+// strength; TeleCol rgb its colour; TeleShape core radius and height in world units): narrower and shorter than a
+// loot beam, brightest at its foot, light spiralling up it. Like the beams, only in front of what the eye sees.
+uniform bool TeleOn < hidden = true; > = false;
+uniform float4 TelePos < hidden = true; > = float4(0.0, 0.0, 0.0, 0.0);
+uniform float4 TeleCol < hidden = true; > = float4(0.62, 0.55, 1.0, 0.0);
+uniform float2 TeleShape < hidden = true; > = float2(0.6, 14.0);
+float3 TeleLight(float3 e, float3 dir, float tSurf)
+{
+    if (TelePos.w <= 0.0) return 0.0;
+    const float2 dxz = dir.xz;
+    const float t = dot(TelePos.xz - e.xz, dxz) / max(dot(dxz, dxz), 1e-6);
+    if (t <= 0.0) return 0.0;
+    const float h = (e.y + t * dir.y - TelePos.y) / max(TeleShape.y, 1e-3);   // 0 the floor, 1 the top
+    const float3 at = e + t * dir;
+    const float2 off = at.xz - TelePos.xz;
+    const float d = length(off) / max(TeleShape.x * lerp(1.0, 0.45, saturate(h)), 1e-3);
+    const float front = smoothstep(-1.0, 0.5, tSurf - t);
+    const float along = smoothstep(0.0, 0.02, h) * (1.0 - smoothstep(0.15, 1.0, h));
+    const float spiral = 0.7 + 0.3 * sin(h * 40.0 + atan2(off.y, off.x) * 2.0 - Timer * 0.009);
+    const float core = exp(-d * d), halo = exp(-d * d / 6.0);
+    const float a = along * front * spiral * (1.0 - 0.5 * saturate(h));
+    return (TeleCol.rgb * (0.7 * core + 0.3 * halo) + core * core * 0.25) * a * TelePos.w;
+}
 float3 Beams(float3 c, float2 uv, int eye, float3 p, float ok)
 {
     float3 e, dir;
@@ -2086,6 +2136,7 @@ float3 Beams(float3 c, float2 uv, int eye, float3 p, float ok)
     light += BeamLight(e, dir, tSurf, p, ok, BeamPos5, BeamCol5);
     light += BeamLight(e, dir, tSurf, p, ok, BeamPos6, BeamCol6);
     light += BeamLight(e, dir, tSurf, p, ok, BeamPos7, BeamCol7);
+    if (TeleOn) light += TeleLight(e, dir, tSurf);
     // Not over the game's interface left in the picture (names, labels, chat), as the fog.
     if (UiMaskOn && !UiMaskOff) light *= saturate(tex2Dlod(GameLayerSmp, float4(uv, 0, 0)).a);
     return saturate(c + light);
@@ -2093,10 +2144,10 @@ float3 Beams(float3 c, float2 uv, int eye, float3 p, float ok)
 float3 Outline(float2 uv, int eye)
 {
     float3 c = tex2D(FogColorSmp, uv).rgb;
-    if (!OutlineOn && !RingOn && !BeamOn) return c;
+    if (!OutlineOn && !RingOn && !BeamOn && !TeleOn) return c;
     float ok;
     const float3 p = OutlineWorld(uv, eye, ok);
-    if (BeamOn) c = Beams(c, uv, eye, p, ok);   // over the sky as well
+    if (BeamOn || TeleOn) c = Beams(c, uv, eye, p, ok);   // over the sky as well
     if (ok <= 0.0) return c;
     if (RingOn) {
         const float up = FacingUp(uv, eye, p, 3.0);   // two more depth taps, only while a circle shows
