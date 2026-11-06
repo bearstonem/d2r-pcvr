@@ -35,6 +35,7 @@
 #include <atomic>
 #include <cstring>
 #include <cstdio>
+#include <cmath>
 #ifdef D2RVR_NATIVE_OPENXR
 #include "../../steamvr/logging.h"
 #include "../../steamvr/memory.h"
@@ -98,6 +99,15 @@ std::atomic<ProjFn> g_projFn { nullptr };
 std::atomic<FrameFn> g_frameFn { nullptr };
 std::atomic<RayFn>  g_rayFn { nullptr };
 std::atomic<ULONGLONG> g_lastSync { 0 };
+std::atomic<bool> g_useActive { false };   // SetUseActiveCamera
+// SetMirrorGameCamera: while a menu scene's own camera is driven (the campfire), the game camera
+// object takes the same pose for the frame - parts of the scene (its sky, its clouds) may be drawn
+// from that camera, and they stood still on the screen as the head turned. The game's own pose
+// goes back for its tick (HandBackPoseForTick), as for the driven camera.
+std::atomic<bool> g_mirrorGame { false };
+struct Mirror { void* cam = nullptr; float pos[3] {}, quat[4] {}, wrotePos[3] {}, wroteQuat[4] {}; bool wrote = false; };
+Mirror g_mirror;
+std::atomic<float> g_pickTurn { 0.0f };      // SetActivePickTurn, radians about the world's up
 
 // ---- Per-frame snapshot ----------------------------------------------------
 // Written only by the frame sync (game main thread), read by the hooks and
@@ -135,6 +145,8 @@ struct Tracked {
 	float writtenQuat[4]  = {};
 	float gamePos[3]      = {};
 	float gameQuat[4]     = {};
+	bool  turnedForTick   = false;   // SetActivePickTurn: the game's quaternion turned for its tick
+	float tickQuat[4]     = {};
 };
 Tracked g_t;
 
@@ -210,6 +222,7 @@ void PublishNone() {
 }
 
 void Apply(void* cam, const WorldView& in, bool hadView, bool hadProj);
+void RestoreMirror();
 
 // The frame sync, run right after the game's camera follow.
 void SyncFrame() {
@@ -217,6 +230,10 @@ void SyncFrame() {
 	void* renderer = g_getRenderer();
 	void* cam      = g_getGameCamera(renderer);
 	void* active   = cam != nullptr ? g_getActiveCamera(renderer) : nullptr;
+	// A menu scene's own camera (the campfire): driven in place of the game camera when asked.
+	if (g_useActive.load(std::memory_order_relaxed) && active != nullptr) {
+		cam = active;
+	}
 	// What the lazy rebuilds were told last frame; when we stop overriding, the
 	// matrices are marked dirty only after the new frame is published, so a
 	// rebuild in between cannot put our old matrices back.
@@ -248,7 +265,9 @@ void SyncFrame() {
 	if (!g_t.wrotePose || !Same(pos, g_t.writtenPos, 3)) {
 		std::memcpy(g_t.gamePos, pos, sizeof(g_t.gamePos));
 	}
-	if (!g_t.wrotePose || !Same(quat, g_t.writtenQuat, 4)) {
+	const bool turned = g_t.turnedForTick && Same(quat, g_t.tickQuat, 4);   // still our turn for the tick: not the game's
+	g_t.turnedForTick = false;
+	if (!turned && (!g_t.wrotePose || !Same(quat, g_t.writtenQuat, 4))) {
 		std::memcpy(g_t.gameQuat, quat, sizeof(g_t.gameQuat));
 	}
 
@@ -267,6 +286,26 @@ void SyncFrame() {
 		frameFn();
 	}
 	Apply(cam, in, hadView, hadProj);
+	{	// the campfire's game camera: our pose for the frame (SetMirrorGameCamera)
+		void* game = g_getGameCamera(renderer);
+		if (g_mirrorGame.load(std::memory_order_relaxed) && g_useActive.load(std::memory_order_relaxed) &&
+		    game != nullptr && game != cam && g_t.wrotePose) {
+			Mirror& m = g_mirror;
+			if (m.cam != game) { m = Mirror {}; m.cam = game; }
+			if (!m.wrote) {
+				std::memcpy(m.pos, Fp(game, camf::Pos), sizeof(m.pos));
+				std::memcpy(m.quat, Fp(game, camf::Quat), sizeof(m.quat));
+			}
+			std::memcpy(Fp(game, camf::Pos), g_t.writtenPos, sizeof(g_t.writtenPos));
+			std::memcpy(Fp(game, camf::Quat), g_t.writtenQuat, sizeof(g_t.writtenQuat));
+			std::memcpy(m.wrotePos, g_t.writtenPos, sizeof(m.wrotePos));
+			std::memcpy(m.wroteQuat, g_t.writtenQuat, sizeof(m.wroteQuat));
+			At<uint8_t>(game, camf::ViewDirty) = 1;
+			m.wrote = true;
+		} else {
+			RestoreMirror();
+		}
+	}
 }
 
 // 3. Runs the callbacks on `in` and puts their matrices into the camera.
@@ -335,7 +374,16 @@ void Apply(void* cam, const WorldView& in, bool hadView, bool hadProj) {
 // The follow derives next frame's camera offset from the camera's own
 // quaternion (0x7BC3C0 reads +0x12C), so it must run on the game's pose or it
 // would chase ours. Hand the game its pose for the duration of its tick.
+void RestoreMirror() {
+	Mirror& m = g_mirror;
+	if (!m.wrote || m.cam == nullptr) return;
+	if (Same(Fp(m.cam, camf::Pos), m.wrotePos, 3)) std::memcpy(Fp(m.cam, camf::Pos), m.pos, sizeof(m.pos));
+	if (Same(Fp(m.cam, camf::Quat), m.wroteQuat, 4)) std::memcpy(Fp(m.cam, camf::Quat), m.quat, sizeof(m.quat));
+	At<uint8_t>(m.cam, camf::ViewDirty) = 1;
+	m.wrote = false;
+}
 void HandBackPoseForTick() {
+	RestoreMirror();
 	void* cam = g_t.cam;
 	if (cam == nullptr || !g_t.wrotePose) {
 		return;
@@ -345,6 +393,18 @@ void HandBackPoseForTick() {
 	}
 	if (Same(Fp(cam, camf::Quat), g_t.writtenQuat, 4)) {
 		std::memcpy(Fp(cam, camf::Quat), g_t.gameQuat, sizeof(g_t.gameQuat));
+		// SetActivePickTurn: a menu scene's camera turned about the world's up for the tick, toward what
+		// the hand points at - the character screen finds the hero under the pointer on this camera's
+		// picture, which the pointer cannot leave: the heroes at its ends were out of reach.
+		const float a = g_pickTurn.load(std::memory_order_relaxed);
+		if (g_useActive.load(std::memory_order_relaxed) && a != 0.0f) {
+			const float s = std::sin(0.5f * a), c = std::cos(0.5f * a);   // (0, s, 0, c) * q
+			const float* q = g_t.gameQuat;
+			const float t[4] = { c * q[0] + s * q[2], c * q[1] + s * q[3], c * q[2] - s * q[0], c * q[3] - s * q[1] };
+			std::memcpy(Fp(cam, camf::Quat), t, sizeof(t));
+			std::memcpy(g_t.tickQuat, t, sizeof(t));
+			g_t.turnedForTick = true;
+		}
 	}
 	At<uint8_t>(cam, camf::ViewDirty) = 1;   // a GetView in between rebuilds, and the hook keeps ours
 	g_t.wrotePose = false;
@@ -386,6 +446,28 @@ const float* __fastcall HookGetProjection(void* cam) {
 	return result;
 }
 
+// Diagnostics while a menu scene's camera is driven (the campfire's pick): who asks for a ray
+// from which camera, at which pixel, and what it got - a few lines a second.
+void TraceScreenToRay(void* cam, const float* px, const float* origin, const float* dir, const char* how, uintptr_t ret) {
+#ifdef D2RVR_NATIVE_OPENXR
+	if (!g_useActive.load(std::memory_order_relaxed) || px == nullptr) return;
+	static ULONGLONG second = 0; static int lines = 0;
+	const ULONGLONG now = GetTickCount64();
+	if (now - second >= 1000) { second = now; lines = 0; }
+	if (++lines > 4) return;
+	const Frame& f = Current();
+	char line[300];
+	std::snprintf(line, sizeof line, "campfire ray: %s, cam %s (%p), px %.1f %.1f of %.0fx%.0f, fov %.1f aspect %.0fx%.0f, from %.2f %.2f %.2f along %.3f %.3f %.3f, caller +0x%llx",
+	              how, cam == f.cam ? "driven" : "OTHER", cam, px[0], px[1],
+	              cam ? At<float>(cam, camf::ViewportW) : 0.0f, cam ? At<float>(cam, camf::ViewportH) : 0.0f,
+	              cam ? At<float>(cam, camf::FovDeg) : 0.0f, cam ? At<float>(cam, camf::AspectW) : 0.0f, cam ? At<float>(cam, camf::AspectH) : 0.0f,
+	              origin[0], origin[1], origin[2], dir[0], dir[1], dir[2], (unsigned long long)ret);
+	framevr::logging::Write(line);
+#else
+	(void)cam; (void)px; (void)origin; (void)dir; (void)how; (void)ret;
+#endif
+}
+
 void __fastcall HookScreenToRay(void* cam, const float* px, float* origin, float* dir) {
 	const ScreenToRayFn original = Orig(o_screenToRay);
 	if (original == nullptr) {   // never expected; leave a harmless ray
@@ -394,9 +476,11 @@ void __fastcall HookScreenToRay(void* cam, const float* px, float* origin, float
 		dir[1] = -1.0f;
 		return;
 	}
+	const uintptr_t caller = reinterpret_cast<uintptr_t>(_ReturnAddress()) - g_base;
 	const Frame& f = Current();
 	if (cam == nullptr || cam != f.cam || !(f.ourView || f.ourProj) || px == nullptr) {
 		original(cam, px, origin, dir);
+		TraceScreenToRay(cam, px, origin, dir, "game's own", caller);
 		return;
 	}
 	const uintptr_t ret = reinterpret_cast<uintptr_t>(_ReturnAddress()) - g_base;
@@ -410,13 +494,17 @@ void __fastcall HookScreenToRay(void* cam, const float* px, float* origin, float
 		return;
 	}
 	if (const RayFn rayFn = g_rayFn.load(std::memory_order_relaxed); rayFn != nullptr && rayFn(origin, dir)) {
+		TraceScreenToRay(cam, px, origin, dir, "hand's", caller);
 		return;
 	}
 	const float vpW = At<float>(cam, camf::ViewportW);
 	const float vpH = At<float>(cam, camf::ViewportH);
 	if (!m4::RayThrough(f.invView, f.proj, vpW, vpH, px[0], px[1], origin, dir)) {
 		original(cam, px, origin, dir);
+		TraceScreenToRay(cam, px, origin, dir, "game's own (ours failed)", caller);
+		return;
 	}
+	TraceScreenToRay(cam, px, origin, dir, "ours", caller);
 }
 
 void __fastcall HookReleaseCamera(void* cam) {
@@ -680,6 +768,10 @@ bool LookAtNow(float out[3]) {
 	std::memcpy(out, Fp(cam, camf::LookAt), 3 * sizeof(float));
 	return true;
 }
+
+void SetUseActiveCamera(bool on) { g_useActive.store(on, std::memory_order_relaxed); }
+void SetMirrorGameCamera(bool on) { g_mirrorGame.store(on, std::memory_order_relaxed); }
+void SetActivePickTurn(float radians) { g_pickTurn.store(radians, std::memory_order_relaxed); }
 
 bool InWorld() {
 	if (!g_cameraHooks.load() || Current().cam == nullptr) {

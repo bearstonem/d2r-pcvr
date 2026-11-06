@@ -92,6 +92,7 @@
 #include "stats_button.h"
 #include "menu_drop.h"
 #include "respec_button.h"
+#include "vr_keyboard.h"
 #include "native_panels.h"
 #include "npc_dialogue.h"
 #include "native_hud.h"
@@ -121,7 +122,7 @@
 #include "toss.h"
 #include "aim_reach.h"
 
-namespace gamestate {uint32_t WeaponType();uint32_t HandsKey();uint32_t WeaponSet();uint32_t WeaponClass();uint32_t TwoHanded();uint64_t LocalPlayer();uint32_t MenuEpoch();}
+namespace gamestate {bool MenuOpen();uint32_t WeaponType();uint32_t HandsKey();uint32_t WeaponSet();uint32_t WeaponClass();uint32_t TwoHanded();uint64_t LocalPlayer();uint32_t MenuEpoch();}
 namespace gamecmd {void RequestPotion(int slot);void CancelPotion();}
 namespace gamestate {void MenuMap(bool wanted);uint32_t QuestNotices();bool NoticePanelOpen();bool NoticeText(int kind,char* out,uint32_t size);}
 namespace gamestate {bool LeftShield();bool RightThrowingPotion();uint32_t RightThrowingPotionCode();framevr::dualwield::Equipment MeleeEquipment();}
@@ -728,6 +729,13 @@ std::atomic<bool> captureRequested{false};
 bool capturePair=false;
 uint32_t captureEyes=0,captureSerial=0;
 std::recursive_mutex mutex;
+std::atomic<bool> rightPickHeld{false};   // RightPickHeld
+std::atomic<bool> campfirePointer{false};std::atomic<float> campfirePointerM{4.f};   // SetCampfirePointer
+std::atomic<float> campfireMenuWidth{1.1f},campfireMenuDistance{1.0f},campfireMenuDrop{.9f};   // SetCampfireMenu
+std::atomic<bool> campfireMenuHit{false};   // the laser on the campfire's menu board (MenuPointer)
+// The board's capture failed at this campfire: the menu stays as the game draws it until the
+// scene is left (never the session-wide fallback below, which would take the in-game boards too).
+std::atomic<bool> campfireBoardFailed{false};
 DeferredWindowFocus windowFocus;
 XrInstance instance=XR_NULL_HANDLE;
 XrSystemId system=XR_NULL_SYSTEM_ID;
@@ -956,6 +964,15 @@ bool respecArtReady=false,respecShown=false,respecLit=false;
 statsbutton::Press respecPress;
 respecbutton::Button respecButton;
 respecbutton::Face respecFace=respecbutton::Face::Reset;
+// The VR keyboard for character creation's name box (vr_keyboard.h), its own board hinged under
+// the menu: its keys painted into the static image, small and with capitals; shown, the key under
+// the laser, and the laser's dot on it, this frame (MenuPointer); a pull on a key types it
+// (SendKeyboard). Close hides it until the box comes up anew (KeyboardEpoch).
+bool keyboardArtReady=false,keyboardShown=false,keyboardClosed=false,keyboardPointer=false;
+int keyboardLit=-1;
+uint32_t keyboardClosedEpoch=0;
+statsbutton::Press keyboardPress;
+keyboard::Typist keyboardTypist;
 leather::Holder leatherHolder;
 leather::Back leatherBack;   // Right B the game leaves unanswered closes the leather's menu
 leather::Art leatherArt=leather::PlaceholderArt();
@@ -1155,6 +1172,7 @@ void CancelShieldCast() {
     if(shieldCast.issued)shieldCast.cancelled=true;else shieldCast={};
 }
 void ClearInput() {
+    rightPickHeld.store(false);   // the campfire's click let go: the headset off its head no longer reads it
     settingsPointer.Reset();settingsCard.Reset();settingsPressed={};settingsPopoverWatch.Reset();
     controllerRumbleLease.Update(0,false);
     hapticPulses.Cancel();
@@ -1857,8 +1875,30 @@ bool SetupStatic(DXGI_FORMAT eyeFormat) {
         ok=face(int(respecbutton::Face::Confirm),true,RespecLitConfirm)&&ok;
         return ok;
     }();
+    // The VR keyboard: every key on its stone with its label, plain and lit, small letters and
+    // capitals (vr_keyboard.h).
+    const bool keyboardPainted=[&]{
+        bool ok=true;
+        for(int picture=0;picture<4&&ok;++picture) {
+            const bool lit=picture&1,capitals=picture>=2;
+            auto board=keyboard::PaintKeys(lit,capitals);
+            for(int i=0;i<keyboard::KeyCount&&ok;++i) {
+                const auto r=keyboard::KeyTexelRect(i);
+                std::vector<uint8_t> face(size_t(r.w)*r.h*4);
+                for(int y=0;y<r.h;++y)std::memcpy(&face[size_t(y)*r.w*4],&board[(size_t(r.y+y)*keyboard::TexelWidth+r.x)*4],size_t(r.w)*4);
+                const auto text=RespecLabel(keyboard::Label(i,capitals).c_str(),r.w,r.h);
+                if(text.empty()){ok=false;break;}
+                respecbutton::Stamp(face,text,r.w,r.h,lit||(capitals&&keyboard::Keys[i].action==keyboard::Action::Shift));
+                for(int y=0;y<r.h;++y)std::memcpy(&board[(size_t(r.y+y)*keyboard::TexelWidth+r.x)*4],&face[size_t(y)*r.w*4],size_t(r.w)*4);
+            }
+            ok=ok&&put(board,capitals?(lit?KeyboardCapsLit:KeyboardCaps):(lit?KeyboardLit:Keyboard));
+        }
+        return ok;
+    }();
     if(!UploadAtlas(staticChain,eyeFormat,StaticWidth,StaticHeight,pixels))return false;
     statsIconReady=statsPainted;
+    keyboardArtReady=keyboardPainted;
+    if(!keyboardPainted)Say("Frame panels: the VR keyboard could not be painted; it stays hidden");
     respecArtReady=respecPainted;
     if(!respecPainted)Say("Frame panels: Reset Skills & Stats could not be painted; the button stays hidden");
     if(!statsPainted)Say("Frame panels: the Advanced Stats button could not be painted; the menu button alone opens it");
@@ -2023,6 +2063,8 @@ panels::Size UiSurfaceSize() {
     if(journalMode)return {uiSize,uiSize*(uiCrop[2]>0?float(uiCrop[3])/uiCrop[2]:1.3f)};
     // On the leather: its 16:9 menu band (the canvas is cropped to that band, CopyUi).
     if(leatherMode){const auto sheet=leather::Measure(leatherArt,leatherMenuWidth.load());return {sheet.menuWidth,sheet.menuHeight};}
+    // The campfire's menu board: the menu's lower strip only (hud's workspace band), its own width.
+    if(campfirePointer.load()&&uiCrop[2]>0&&uiCrop[3]>0){const float w=campfireMenuWidth.load();return {w,w*float(uiCrop[3])/float(uiCrop[2])};}
     return panels::Fit(uiCrop[2]>0?unsigned(uiCrop[2]):0,uiCrop[3]>0?unsigned(uiCrop[3]):0);
 }
 XrPosef UiSurfacePose() {
@@ -2033,10 +2075,37 @@ XrPosef UiSurfacePose() {
     }
     return pose;
 }
+// A VR keyboard key to the game as a real keyboard's would arrive: the key the game window's
+// own Windows layout puts the character on (a German Z is not on the US Z's scan code), its
+// scan code (the game reads keys by scan code, SendShift), Shift round it when the layout wants
+// it, all tagged KeyboardKeyTag - typing, so TypedKeys lets the game's keyboard layout in and
+// the name box takes the letter.
+bool SendKeyboard(const keyboard::Output& out) {
+    const HKL layout=GetKeyboardLayout(gameWindow?GetWindowThreadProcessId(gameWindow,nullptr):0);
+    WORD vk=0;bool shift=false;
+    if(out.send==keyboard::Send::Char) {
+        const SHORT k=VkKeyScanExW(out.ch,layout);
+        if(k==-1||(HIBYTE(k)&6))return false;   // not on this layout, or only with Ctrl / Alt
+        vk=LOBYTE(k);shift=(HIBYTE(k)&1)!=0;
+    } else if(out.send==keyboard::Send::Backspace)vk=VK_BACK;
+    else if(out.send==keyboard::Send::Enter)vk=VK_RETURN;
+    else return false;
+    const WORD scan=WORD(MapVirtualKeyExW(vk,MAPVK_VK_TO_VSC,layout)),shiftScan=WORD(MapVirtualKeyExW(VK_LSHIFT,MAPVK_VK_TO_VSC,layout));
+    if(!scan||(shift&&!shiftScan))return false;
+    INPUT in[4]{};UINT n=0;
+    const auto key=[&](WORD code,bool up) {
+        INPUT& i=in[n++];i.type=INPUT_KEYBOARD;i.ki.wScan=code;
+        i.ki.dwFlags=KEYEVENTF_SCANCODE|(up?KEYEVENTF_KEYUP:0);i.ki.dwExtraInfo=panels::KeyboardKeyTag;
+    };
+    if(shift)key(shiftScan,false);
+    key(scan,false);key(scan,true);
+    if(shift)key(shiftScan,true);
+    return SendInput(n,in,sizeof(INPUT))==n;
+}
 void MenuPointer(const menus::Pad& controls) {
     nativeMenuPad={};
-    pointerVisible=pointerHit=false;
-    if(settingsModel.open||bodyCalibration.Active()||calibrationRelease.blocked){panelinput::ItemHover(false);menuDrop.Reset();respecShown=false;respecButton.Hide();return;}
+    pointerVisible=pointerHit=keyboardPointer=false;
+    if(settingsModel.open||bodyCalibration.Active()||calibrationRelease.blocked){panelinput::ItemHover(false);menuDrop.Reset();respecShown=false;respecButton.Hide();keyboardShown=false;keyboardLit=-1;return;}
     const bool spatialReady=spatialMode&&SurfacePlaced()&&uiCrop[2]>0;
     const bool uiActive=(panelMode&&menuPlaced)||spatialReady;
     const auto surfacePose=spatialMode?UiSurfacePose():menuPose;
@@ -2059,6 +2128,43 @@ void MenuPointer(const menus::Pad& controls) {
         if(pointerHit) {
             const auto point=hit.point+math::Rotate(Q(surfacePose.orientation),{0,0,.006f});
             dotPose=surfacePose;dotPose.position={point.x,point.y,point.z};
+        }
+    }
+    // The VR keyboard for character creation's name box (vr_keyboard.h): its own board hinged under
+    // the menu, out of the game's picture. The laser hits the board itself; on it (keys or the gaps
+    // between them) the laser is the keyboard's - no game cursor, no button under it, no game
+    // trigger - and a pull on a key types it into the box. Close hides it until the box comes up
+    // anew (another hero picked, or creation opened again).
+    const uint32_t keyboardEpoch=gamestate::KeyboardEpoch();
+    if(keyboardClosed&&keyboardEpoch!=keyboardClosedEpoch)keyboardClosed=false;
+    // The campfire's menu board: the keyboard comes up only once the name box itself is pulled on
+    // (the middle of the board's strip, where the game puts the box), not as soon as a hero is
+    // picked - the heroes stay in reach of the laser until the name is wanted.
+    static bool campfireKeyboardOpen=false;
+    if(!campfirePointer.load()||!gamestate::KeyboardShown())campfireKeyboardOpen=false;
+    else if(pressed&&!triggerWasDown&&pointerHit&&hit.u>.36f&&hit.u<.64f){campfireKeyboardOpen=true;keyboardClosed=false;}
+    const bool keyboardWas=keyboardShown;
+    keyboardShown=keyboardArtReady&&uiActive&&!journalMode&&!leatherMode&&gamestate::KeyboardShown()&&!keyboardClosed&&
+        (!campfirePointer.load()||campfireKeyboardOpen);
+    if(keyboardShown!=keyboardWas) {
+        keyboardTypist.Reset();keyboardPress.Reset();
+        Say(keyboardShown?"Frame panels: VR keyboard shown (the name box is up)":"Frame panels: VR keyboard hidden");
+    }
+    bool onKeyboard=false;keyboardLit=-1;
+    if(keyboardShown&&aimTracked&&!(mouseDown||rightMouseDown)) {
+        const auto board=keyboard::Place(V(surfacePose.position),Q(surfacePose.orientation),surface.width,surface.height);
+        const auto ray=V(aim.pose.position),direction=math::Rotate(Q(aim.pose.orientation),{0,0,-1});
+        math::PanelHit on{};
+        if(math::IntersectPanel(ray,direction,board.position,board.orientation,board.width,board.height,on)&&(!pointerHit||on.distance<hit.distance)) {
+            onKeyboard=keyboardPointer=true;pointerHit=false;   // the menu's laser hit is not this one
+            keyboardLit=keyboard::KeyAt(on.u,on.v);
+            beamLength=on.distance;
+            const auto mid=ray+direction*(beamLength*.5f);
+            const auto rot=math::BeamOrientation(direction,V(head.position)-mid);
+            beamPose.position={mid.x,mid.y,mid.z};beamPose.orientation={rot.x,rot.y,rot.z,rot.w};
+            const auto point=on.point+math::Rotate(board.orientation,{0,0,.006f});
+            dotPose.position={point.x,point.y,point.z};
+            dotPose.orientation={board.orientation.x,board.orientation.y,board.orientation.z,board.orientation.w};
         }
     }
     // The Advanced Stats button below the tabbed menu's hint row (stats_button.h): the laser
@@ -2096,7 +2202,22 @@ void MenuPointer(const menus::Pad& controls) {
             if(!respec::Request()){respecButton.Refused();Say("Frame panels: Reset Skills & Stats refused (not an offline game, or a reset already running)");}
         } else if(respecButton.Confirming())Say("Frame panels: Reset Skills & Stats - Confirm? shown");
     }
-    const bool onButton=onStats||onRespec;   // a stamped button: no game cursor, no game trigger
+    // A pull on a VR keyboard key (the board under the menu, above).
+    if(keyboardPress.Step(onKeyboard&&uiActive,pressed,GetTickCount64())&&keyboardLit>=0) {
+        const auto typed=keyboardTypist.Press(keyboardLit);
+        if(typed.close) {
+            keyboardClosed=true;keyboardClosedEpoch=keyboardEpoch;
+            Say("Frame panels: VR keyboard closed until the name box comes up anew");
+        } else if(typed.send!=keyboard::Send::None) {
+            if(!focused)Say("Frame panels: VR keyboard key not sent - the game window is not focused");
+            else if(!SendKeyboard(typed))Say("Frame panels: VR keyboard key could not be sent (not on this keyboard layout, or SendInput refused)");
+            else {
+                static bool told=false;
+                if(!told){told=true;Say("Frame panels: VR keyboard typing into the game");}
+            }
+        }
+    }
+    const bool onButton=onStats||onRespec||onKeyboard;   // a stamped button: no game cursor, no game trigger
     // An item on the game's cursor and a trigger pull begun off the menu's art (past or on the
     // hide, or the band's see-through margins): the pad's X, the controller menu's own Drop for
     // the item held (menu_drop.h). The tabbed menu (and its cube) only; never without an item on
@@ -2127,21 +2248,23 @@ void MenuPointer(const menus::Pad& controls) {
     // navigation" / "laser navigation" every second while walking and turning), hiding it.
     menus::Pad navigation=controls;
     if(leatherMode&&leatherShown.load())navigation.lx=navigation.ly=navigation.rx=navigation.ry=0;
-    if(onButton||statsPress.Held()||respecPress.Held()||dropOwns)navigation.rt=0;   // a button's or the drop's trigger is never the game's RT
+    if(onButton||statsPress.Held()||respecPress.Held()||keyboardPress.Held()||dropOwns)navigation.rt=0;   // a button's or the drop's trigger is never the game's RT
     nativeMenuPad=menuNavigation.Step(uiActive&&focused,navigation,pointerHit&&!onButton,hit.u,hit.v,mouseDown||rightMouseDown);
     if(statsPress.Held())nativeMenuPad.buttons|=menus::Back;   // View: Advanced Stats (Start closes the menu)
     if(menuDrop.Down())nativeMenuPad.buttons|=menus::X;   // X: the controller menu's Drop for the item on the cursor
     if(wasNative!=menuNavigation.Native()&&uiActive&&focused)
         Say(menuNavigation.Native()?"Frame panels: native controller navigation":"Frame panels: laser navigation");
     const bool laser=!menuNavigation.Native();
-    if(!laser){panelinput::UseController();pointerVisible=pointerHit=false;}
+    if(!laser){panelinput::UseController();pointerVisible=pointerHit=keyboardPointer=false;}
     // The handheld journal has its own left-grip placement; the leather is strapped to the left hand.
     const bool grip=aimTracked&&laser&&!journalMode&&!leatherMode&&(controls.buttons&menus::RightBumper);
     const bool grabbing=GrabPanel(spatialMode?uiPose:menuPose,spatialMode?uiBase:menuBase,menuOffset,
         grip,pointerHit,pressed||mouseDown||rightMouseDown,aim.pose,
         panels::MenuDistance(int(vrsettings::Read().values[settings::MenuDistance]),!spatialMode));
     const bool active=uiActive&&focused&&aimTracked&&laser;
-    if(active)panelinput::OwnPointer();
+    // The campfire: the board owns the game's pointer only while the laser is on it - owned, a
+    // pointer event no menu takes never reaches the scene, and the heroes could not be picked.
+    if(active&&(!campfirePointer.load()||pointerHit))panelinput::OwnPointer();
     if(active&&pointerHit&&!onButton&&!dropOwns) {
         RECT client{};
         if(GetClientRect(gameWindow,&client)) {
@@ -2174,6 +2297,7 @@ void MenuPointer(const menus::Pad& controls) {
     if(drop.check)Say(gamestate::CursorItemHeld()?"Frame panels: the item is still on the cursor after X (the game did not drop it)":
                                                 "Frame panels: the item left the cursor - dropped");
     triggerWasDown=pressed;cancelWasDown=(controls.buttons&menus::B)!=0;
+    campfireMenuHit.store(campfirePointer.load()&&spatialMode&&(pointerHit||keyboardPointer));
 }
 
 void SampleGaze() {
@@ -3256,6 +3380,7 @@ void Input() {
     const double chordTime=double(GetTickCount64())/1000.0;
     physical.lt=g_tacticalChord[1].Withholds(chordTime,Float(squeeze,1),Float(trigger,1))?0:uint8_t(std::clamp(Float(trigger,1),0.f,1.f)*255);
     physical.rt=g_tacticalChord[0].Withholds(chordTime,Float(squeeze,0),Float(trigger,0))?0:uint8_t(std::clamp(Float(trigger,0),0.f,1.f)*255);
+    rightPickHeld.store(Float(trigger,0)>.55f||(physical.buttons&menus::A)!=0);
     const auto physicalLeft=Stick(1),physicalRight=Stick(0);
     const auto axis=[](float value){return int16_t(std::clamp(value,-1.f,1.f)*32767.f);};
     physical.lx=axis(physicalLeft.x);physical.ly=axis(physicalLeft.y);
@@ -3764,6 +3889,11 @@ void Input() {
     // Arrow path line color (VR Settings > Targets > Arrow path line); Off keeps the last.
     if(const float hue=hudSettings.values[settings::BowLaser];hue>=0&&hue!=bowLaserHue&&!bowLaserAtlasPending&&atlasUploads.size()<3) {
         if(UploadShared(panelatlas::BowLaser,bowlaser::Paint(hue),&bowLaserAtlasPending))bowLaserHue=hue;
+    }
+    // The campfire's pointer draws with the same beam: with the arrow path line Off it had
+    // no atlas yet - an ember's orange then.
+    else if(campfirePointer.load()&&bowLaserHue<0&&!bowLaserAtlasPending&&atlasUploads.size()<3) {
+        if(UploadShared(panelatlas::BowLaser,bowlaser::Paint(.07f),&bowLaserAtlasPending))bowLaserHue=.07f;
     }
     // Guard strain light (Unleashed shield): blocks strain the guard, light
     // creeps in from the rim; it drains with the shield lowered, or raised with
@@ -5205,11 +5335,16 @@ bool Begin() {
     const bool opaque=spatial&&gamestate::OpaqueMenuOpen()&&!sheet;
     if(opaque!=opaqueMenuMode)Say(opaque?"Frame panels: shared black menu background":"Frame panels: spatial background restored");
     leatherMode=sheet;leatherShown=sheet&&leatherWorld.load();
-    uiworld::ShowWorldBehindMenu(leatherShown.load());   // the game's stencil hole behind its menu, filled
+    // The game's stencil hole behind its menu, filled - on the leather, and at the campfire: its
+    // menu's boxes cut dark holes into the scene there (where the board's strip is drawn by the game).
+    uiworld::ShowWorldBehindMenu(leatherShown.load()||campfirePointer.load());
     spatialMode=spatial;journalMode=book;npcChoicesMode=npc;opaqueMenuMode=opaque;upperBandMenuMode=spatial&&gamestate::UpperBandMenuOpen();uiEye.copied=false;
     mapEye.copied=false;hud::MapFrame();
-    hud::UiFrame(spatialMode,!journalMode,0);
-    const bool panel=wantsPanel&&wantsPanel()&&!spatialMode;
+    // The campfire draws no pair (no BeginEye): this frame begins at the present, after the menu
+    // was drawn and copied - the copy is kept (-1), not dropped as a new pair's would be.
+    hud::UiFrame(spatialMode,!journalMode,campfirePointer.load()?-1:0);
+    // A world with no menu open (the campfire: the board wanted, or not to be had) is never the flat panel.
+    const bool panel=wantsPanel&&wantsPanel()&&!spatialMode&&!campfirePointer.load()&&!(inWorld&&inWorld()&&!gamestate::MenuOpen());
     if(panel!=panelMode){ReleasePanelInput();panelMouse.Suspend();panelMode=panel;menuPlaced=false;Say(panel?"Frame OpenXR: flat menu panel active":"Frame OpenXR: stereo gameplay active");}
     for(auto& e:eyes)e.copied=false;
     for(auto& w:viewWorld)w.ok=false;
@@ -5253,6 +5388,13 @@ bool Begin() {
         if(distancePreset!=previousDistance){workspacePlaced=menuPlaced=false;previousDistance=distancePreset;menuOffset={};}
         if(spatialMode&&!journalMode&&!leatherMode&&panels::CanAnchor(workspacePlaced,render,state==XR_SESSION_STATE_FOCUSED,motionHeadTracked)) {
             uiBase=panels::AtEyeLevel(V(head.position),Q(head.orientation),panels::MenuDistance(distancePreset));
+            if(campfirePointer.load()) {   // the campfire: low before you, between you and the heroes, tilted up to the eyes
+                const float distance=campfireMenuDistance.load(),drop=campfireMenuDrop.load();
+                uiBase=panels::AtEyeLevel(V(head.position),Q(head.orientation),distance);
+                uiBase.position.y-=drop;
+                uiBase.orientation=math::Multiply(uiBase.orientation,panels::Pitch(-std::atan2(drop,distance)));
+                menuOffset={};
+            }
             uiPose=Placed(uiBase,menuOffset);
             uiSize=panels::Width;workspacePlaced=true;
         }
@@ -5834,7 +5976,9 @@ bool CopyUi(reshade::api::command_queue* rq) {
     uint32_t w=0,h=0;int32_t crop[4]{};
     auto* src=reinterpret_cast<ID3D12Resource*>(hud::UiTexture(w,h,crop));
     if(!src||!w||!h){
-        if(++uiMissingFrames>12){uiSupported=false;Say("Frame panels: UI capture unavailable; falling back to native menu");}
+        if(campfirePointer.load()) {
+            if(++uiMissingFrames>90&&!campfireBoardFailed.exchange(true))Say("Frame panels: campfire - the menu's picture not captured; it stays as the game draws it here");
+        } else if(++uiMissingFrames>12){uiSupported=false;Say("Frame panels: UI capture unavailable; falling back to native menu");}
         return true;
     }
     uiMissingFrames=0;
@@ -5915,14 +6059,32 @@ void Capture(reshade::api::command_queue* rq,reshade::api::swapchain* swap) {
         if(afrHandle)afr=static_cast<FlatVRAfrEye*>(MapViewOfFile(afrHandle,FILE_MAP_READ,0,0,sizeof(FlatVRAfrEye)));
     }
     const bool stereo=afr&&afr->version==FLATVR_AFR_EYE_VERSION&&afr->enabled&&(!(wantsPanel&&wantsPanel())||SpatialMenu());
-    if(!Begin()||!render||!valid) {if(!stereo)EndPair();return;}
+    // A frame the runtime does not want drawn (the headset taken off: SYNCHRONIZED) still has to
+    // end, or it stays open and no later frame begins - the session never came back to FOCUSED
+    // (the campfire, where no pair ends it: only the menu's board on SteamVR's background).
+    if(!Begin()||!render||!valid) {if(!stereo||!pairDrawing)EndPair();return;}
     const uint32_t eye=stereo?((afr->eye^afr->swap)&1u):0u;
     mirrorMono=stereo&&vrsettings::Read().values[settings::DesktopOneEye]>.5f;
     // The map and menu surfaces are copied once a frame: from the left eye's
     // pass, or by turns from whichever eye this frame draws.
     const bool shared=eye==0||(pairDrawing&&turnFrame);
     if(shared&&!CopyMap(rq)) {mapSupported=false;mapEye.copied=false;Say("Frame menu map: copy unavailable; optional map suspended");}
-    if((shared&&!CopyUi(rq))||!Copy(src,eyes[eye],rq)){failed=true;EndPair();ClearInput();return;}
+    // The campfire: a copy refused this frame (the headset taken off and put back on) is this frame's
+    // loss, not the session's - failed stays off for good, and the scene never came back (only the
+    // menu's board, over SteamVR's own background).
+    const bool uiCopied=!shared||CopyUi(rq);
+    if(!uiCopied&&campfirePointer.load()){
+        uiEye.copied=false;
+        static ULONGLONG told=0;if(GetTickCount64()-told>2000){told=GetTickCount64();Say("Frame panels: campfire - the menu's copy refused this frame; retried on the next");}
+    }
+    if((!uiCopied&&!campfirePointer.load())||!Copy(src,eyes[eye],rq)){
+        if(campfirePointer.load()){
+            static ULONGLONG told=0;if(GetTickCount64()-told>2000){told=GetTickCount64();Say("Frame OpenXR: campfire - an eye's copy refused this frame; retried on the next");}
+            EndPair();return;
+        }
+        Say("Frame OpenXR: an eye's or the menu's copy failed; the headset stays off until the game window is recreated");
+        failed=true;EndPair();ClearInput();return;
+    }
     if(!stereo) {
         PlaceMainMenu();
         EndPair();
@@ -5985,8 +6147,12 @@ void Register(LogFn log,PanelFn panel,PanelFn world,PanelFn toggle) {
     resolution::Register(log);
     registered=true;Say("Frame OpenXR: registered D3D12 capture; awaiting game Present");
 }
-bool SpatialMenu(){return uiSupported.load()&&uiworld::Ready()&&hud::LayerFound()&&inWorld&&inWorld()&&wantsPanel&&wantsPanel();}
+bool SpatialMenu(){return uiSupported.load()&&!(campfirePointer.load()&&campfireBoardFailed.load())&&uiworld::Ready()&&hud::LayerFound()&&inWorld&&inWorld()&&wantsPanel&&wantsPanel();}
 bool Active() {std::lock_guard lock(mutex);return frame&&valid&&render&&!failed&&!panelMode;}
+bool RightPickHeld(){return rightPickHeld.load();}
+void SetCampfirePointer(bool on,float metres){campfirePointer.store(on);campfirePointerM.store(metres);if(!on){campfireMenuHit.store(false);campfireBoardFailed.store(false);}}
+void SetCampfireMenu(float width,float distance,float drop){campfireMenuWidth.store(width);campfireMenuDistance.store(distance);campfireMenuDrop.store(drop);}
+bool CampfireMenuHit(){return campfireMenuHit.load();}
 bool VrGameplay(uint64_t now) {const auto at=vrGameplayAt.load();return at&&now>=at&&now-at<=1500;}
 void PublishSewerPrompt(const sewerprompt::Target& target) {
     std::lock_guard lock(sewerPromptMutex);sewerPrompt=target;
@@ -6451,6 +6617,19 @@ void EndPair() {
             bowLaserShown=count>before;bowLaserLength=path.length;bowLaserFloor=path.floor;
         }
     }
+    // The campfire (vrcam SetCampfirePointer): the right hand's pointer, the beam fading out
+    // along its aim and a dot where the game's pointer is (what the trigger picks) - there is
+    // no body there to show that the hand points at all.
+    if(!bowLaserShown&&campfirePointer.load()&&!campfireMenuHit.load()&&layer&&!panelMode&&!settingsModel.open&&bowLaserImageReady&&handAimTracked[0]) {
+        const auto start=handAim[0].p,direction=math::Normalized(math::Rotate(handAim[0].q,{0,0,-1}));
+        const float length=std::clamp(campfirePointerM.load(),.3f,30.f);
+        const auto mid=start+direction*(length*.5f),end=start+direction*length;
+        const auto orient=math::BeamOrientation(direction,V(head.position)-mid);
+        using namespace bowlaser;
+        motionQuad(bowLaser,XrPose({mid,orient}),.004f,length,At(panelatlas::BowLaser,XrRect2Di{{0,SteadyY},{AtlasWidth,SteadyHeight}}),sharedChain);
+        const float dot=std::clamp(.012f*length,.03f,.12f);   // the same size to the eye, near or far
+        motionQuad(bowLaserEnd,XrPose({end,Q(head.orientation)}),dot,dot,At(panelatlas::BowLaser,{{0,DotY},{DotSize,DotSize}}),sharedChain);
+    }
     static bool bowLaserWasShown=false;static ULONGLONG bowLaserReportAt=0;
     if(bowLaserShown&&!bowLaserWasShown&&GetTickCount64()>=bowLaserReportAt) {
         char message[96];std::snprintf(message,sizeof message,"Frame bow laser: shown (length %.1f m%s)",bowLaserLength,bowLaserFloor?", floor":"");
@@ -6499,6 +6678,27 @@ void EndPair() {
         motionQuad(respecQuad,XrPose({p,q}),spot.width,spot.height,Rect(panelatlas::Respec(picture)),staticChain);
         respecQuad.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;   // premultiplied (SetupStatic)
     }
+    // The VR keyboard on its own board under character creation's screen - the flat menu panel or
+    // the spatial surface, as MenuPointer aims at it - small letters, or capitals while Shift waits,
+    // and the key under the laser lit a hair in front of it.
+    XrCompositionLayerQuad keyboardQuad{XR_TYPE_COMPOSITION_LAYER_QUAD},keyboardLitQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    if(layer&&keyboardShown&&staticChain&&!settingsModel.open&&!bodyCalibration.Active()&&
+       (spatialMode?book.subImage.swapchain!=XR_NULL_HANDLE:menuPlaced)) {
+        const auto size=spatialMode?UiSurfaceSize():panels::Fit(width,height,panelWidth);
+        const auto at=spatialMode?UiSurfacePose():menuPose;
+        const auto board=keyboard::Place(V(at.position),Q(at.orientation),size.width,size.height);
+        const bool capitals=keyboardTypist.Shifted();
+        const XrPosef boardPose{{board.orientation.x,board.orientation.y,board.orientation.z,board.orientation.w},{board.position.x,board.position.y,board.position.z}};
+        motionQuad(keyboardQuad,boardPose,board.width,board.height,Rect(capitals?panelatlas::KeyboardCaps:panelatlas::Keyboard),staticChain);
+        keyboardQuad.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;   // premultiplied (SetupStatic)
+        if(keyboardLit>=0&&keyboardQuad.subImage.swapchain) {
+            const auto key=keyboard::KeySpot(board,keyboardLit);const auto r=keyboard::KeyTexelRect(keyboardLit);
+            const auto lit=capitals?panelatlas::KeyboardCapsLit:panelatlas::KeyboardLit;
+            motionQuad(keyboardLitQuad,XrPose({board.position+math::Rotate(board.orientation,{key.x,key.y,.002f}),board.orientation}),key.width,key.height,
+                {{lit.x+r.x,lit.y+r.y},{r.w,r.h}},staticChain);
+            keyboardLitQuad.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+        }
+    }
     XrCompositionLayerQuad settingsPanel{XR_TYPE_COMPOSITION_LAYER_QUAD};
     if(layer&&(settingsModel.open||bodyCalibration.Active())&&settingsImageReady){
         // The help card is inside the panel: its region is the panel, Width wide.
@@ -6513,11 +6713,12 @@ void EndPair() {
         motionQuad(glyphQuad,pose,glyphtrail::Side,glyphtrail::Side,Rect(panelatlas::Glyph),sharedChain);
     }
     XrCompositionLayerQuad laser{XR_TYPE_COMPOSITION_LAYER_QUAD},dot{XR_TYPE_COMPOSITION_LAYER_QUAD};
-    if(layer&&(settingsModel.open||panelMode||spatialMode||(interactionVisible&&interactionOutput.wheel))&&pointerChain&&pointerVisible) {
+    if(layer&&(settingsModel.open||panelMode||spatialMode||(interactionVisible&&interactionOutput.wheel))&&pointerChain&&pointerVisible&&
+       (settingsModel.open||!campfirePointer.load()||pointerHit||keyboardPointer)) {   // the campfire: off the board the ember beam points at the heroes
         // The pointer needs the same finite-pose checks and normalization as
         // every other optional layer: one bad laser must not hide the menu.
         motionQuad(laser,beamPose,.003f,beamLength,At(panelatlas::Pointer,{{0,0},{64,32}}),pointerChain);
-        if(pointerHit)motionQuad(dot,dotPose,.018f,.018f,At(panelatlas::Pointer,{{0,32},{64,64}}),pointerChain);
+        if(pointerHit||keyboardPointer)motionQuad(dot,dotPose,.018f,.018f,At(panelatlas::Pointer,{{0,32},{64,64}}),pointerChain);
     }
     // Head-locked blood: VIEW space, with a bounded angular size so large render
     // frusta cannot push the rim out of sight. It goes directly above
@@ -6826,9 +7027,13 @@ bool GameplayRay(float outOrigin[3],float outDirection[3]) {
 // its model).
 bool HandAimRay(int hand,float outOrigin[3],float outDirection[3]) {
     std::lock_guard lock(mutex);
-    if(hand<0||hand>1||!motionControls.load()||!motionInput.active||GetTickCount64()-motionAt>150)return false;
+    // The campfire: the hand's own aim even with the menu's board up (the board takes the motion
+    // layer off; without this the pointer at the heroes fell back to another hand source, off by a hero or three).
+    const bool campfire=campfirePointer.load()&&handAimTracked[hand>=0&&hand<2?hand:0]&&GetTickCount64()-handAimAt<150;
+    if(hand<0||hand>1||!motionControls.load()||(!campfire&&(!motionInput.active||GetTickCount64()-motionAt>150)))return false;
     math::Vec p,d;
-    if(hand==1&&motionInput.weapon==gameplay::Weapon::Bow&&motionInput.tracked[1]){p=motionInput.hand[1].p;d=gameplay::BowForward(motionInput.hand[1]);}
+    if(campfire){p=handAim[hand].p;d=math::Rotate(handAim[hand].q,{0,0,-1});}
+    else if(hand==1&&motionInput.weapon==gameplay::Weapon::Bow&&motionInput.tracked[1]){p=motionInput.hand[1].p;d=gameplay::BowForward(motionInput.hand[1]);}
     else if(handAimTracked[hand]){p=handAim[hand].p;d=math::Rotate(handAim[hand].q,{0,0,-1});}
     else return false;
     const auto undo=math::Conjugate(math::Yaw(math::Heading(Q(head.orientation))));
@@ -7111,8 +7316,13 @@ bool BowPreviewPose(bowflight::Shot& pose,bool& visible) {
     if(!bowflight::Allowed(bowPreviewPose,gate,GetTickCount64()))return false;
     pose=bowPreviewPose;visible=bowPreviewVisible;return true;
 }
-bool View(float out[16],const float hero[3],float eyeHeight,float userEyeHeight,float bodyHeading,float recenterYaw,int eye,float mapNorth,float scaleHeight) {
-    std::lock_guard lock(mutex);if(!Active())return false;
+bool View(float out[16],const float hero[3],float eyeHeight,float userEyeHeight,float bodyHeading,float recenterYaw,int eye,float mapNorth,float scaleHeight,bool stale) {
+    std::lock_guard lock(mutex);
+    if(!Active()) {   // stale: the last poses, while no headset frame is open
+        if(!stale||!valid||!render||failed||panelMode)return false;
+        const auto& o=(eye<0?head:views[eye&1].pose).orientation;
+        if(o.x==0&&o.y==0&&o.z==0&&o.w==0)return false;
+    }
     if(std::fabs(recenterYaw-lastRecenter)>.001f){origin=V(head.position);lastRecenter=recenterYaw;}
     const float upm=(scaleHeight>0?scaleHeight:eyeHeight)/std::max(userEyeHeight,.5f);
     const auto base=math::Yaw(bodyHeading-recenterYaw);
@@ -7184,8 +7394,13 @@ bool View(float out[16],const float hero[3],float eyeHeight,float userEyeHeight,
     }
     math::View(position,turn,out);return true;
 }
-bool Projection(float out[16],float nearWorld,int eye) {
-    std::lock_guard lock(mutex);if(!Active())return false;
+bool Projection(float out[16],float nearWorld,int eye,bool stale) {
+    std::lock_guard lock(mutex);
+    if(!Active()) {   // stale: the last field of view, while no headset frame is open
+        if(!stale||!valid||!render||failed||panelMode)return false;
+        const auto& f=views[eye&1].fov;
+        if(f.angleLeft==0&&f.angleRight==0)return false;
+    }
     viewWorld[eye&1].nearPlane=nearWorld;
     const auto& f=views[eye&1].fov;
     math::Projection(f.angleLeft,f.angleRight,f.angleDown,f.angleUp,nearWorld,out);return true;

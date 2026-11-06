@@ -81,7 +81,7 @@ namespace effectstate { bool HolyShield(uint64_t session); }   // active_effects
 namespace uitrace { void Register(bool diagnostic); bool Enabled(); bool Arm(const std::wstring& path); void SetSkip(uint64_t pipe); void SetSkipShaders(const uint64_t* hashes, int n); }
 #include "game_hud_shared.h"
 namespace memdiff { void Step(uintptr_t base, const std::wstring& outPath, void (*log)(const char*)); void Reset(void (*log)(const char*)); }
-namespace hud { void Register(); void SetHide(int mode); void SetInterfaceScale(float s); void SetMenuOpen(bool open); void SetMapMode(int mode); bool LayerFound(); void SetLogger(void (*log)(const char*)); void SetLook(const FlatVRGameHudLook& look); void SetMapCorner(int corner); bool ToggleMapShown();
+namespace hud { void SetWorkspaceBand(float top, float bottom); void Register(); void SetHide(int mode); void SetInterfaceScale(float s); void SetMenuOpen(bool open); void SetMapMode(int mode); bool LayerFound(); void SetLogger(void (*log)(const char*)); void SetLook(const FlatVRGameHudLook& look); void SetMapCorner(int corner); bool ToggleMapShown();
                 void SetPointer(uint32_t mode); void SetPointerDepth(float base, float tilt, float curve, float topScale); int Anchor(int panel); void SetForearm(int panel, bool valid, const float elbow[3], const float wrist[3], const float across[3]);
                 void SetClassicView(bool on); void SetPictureZoom(float bar, float map); bool PictureWanted(); void SetPictureReady(bool ready);
                 bool PictureNow(int i, float box[4], uint64_t* srv); void SetPictureBarMoved(bool moved); void SetPictureBarOffset(float x, float y); void SetPictureMapMoved(bool moved); void SetPictureMapOffset(float x, float y);
@@ -311,7 +311,32 @@ struct Settings {
     std::atomic<float> lightNight{65.0f};
     std::atomic<float> nightBright{0.25f};  // [sky] night_brightness: the sky and the fog at full night, times their day brightness
     std::atomic<bool>  skyAlways{false};    // whatever the biome (testing): caves get a sky too
-    std::atomic<bool>  campfireTest{false}; // [campfire] test: character creation's campfire scene in stereo (a first look)
+    std::atomic<bool>  campfireOn{false};    // [campfire] enabled: character creation's campfire scene in stereo, round you
+    std::atomic<float> campfireEye{6.0f};    // [campfire] eye: the eye height the scene's scale is taken from, world units (~0.24 m each)
+    std::atomic<float> campfireUp{2.5f};     // [campfire] up: the eyes above the game camera, world units
+    std::atomic<float> campfireForward{3.0f};// [campfire] forward: the eyes ahead of the game camera, toward the fire, world units
+    // [campfire] effects: D2R_DepthFog.fx in the scene (0 by default). Its two techniques go by turns with the eyes,
+    // switched for the eye guessed next; the campfire's eyes are not the gameplay's turns and the guess failed now
+    // and then - no technique at all: the sky's band, the hills and the floor's edges darkened for a frame. The flat
+    // character screen has none of the mod's effects anyway: without them it looks as the game draws it.
+    std::atomic<bool>  campfireEffects{false};
+    // [campfire] night, night_start, night_end: the mod's distance fog, black, over what lies far off
+    // round the fire (the game's backdrop, its clouds, the floor's end behind you) - from the depth
+    // alone, so both eyes alike (one technique, no per-eye switching: that flickered here).
+    std::atomic<bool>  campfireNight{false};
+    std::atomic<bool>  campfireSkyCam{false};
+    std::atomic<bool>  campfireSky{true};      // [campfire] sky: our sky (Act 5's) over the campfire's void - above the scene's band of mountains   // [campfire] sky_cam: the game camera object takes the head's pose too (its clouds)
+    std::atomic<float> campfireNightStart{45.0f}, campfireNightEnd{110.0f};
+    std::atomic<float> campfirePointerX{0.0f};// [campfire] pointer_x / pointer_y: the game's pointer moved off the dot, parts of the
+    std::atomic<float> campfirePointerY{0.0f};//   window (+ right / + up): what the scene reads under it sat a little aside
+    std::atomic<float> campfirePickLift{5.5f};   // [campfire] pick_lift: the pointer this much above the dot, world units - the game
+                                                 //   finds a hero from his middle up (his box sits high), the dot anywhere on him picks him
+    std::atomic<bool>  campfirePickTurn{false};   // [campfire] pick_turn: the scene camera turned toward the hand for the pick (the heroes at the ends)
+    std::atomic<bool>  campfirePointerFit{true}; // [campfire] pointer_fit: the scene's picture fitted in the window (CampfirePointer)
+    std::atomic<bool>  campfireMenuBoard{true}; // [campfire] menu_board: the menu's lower strip as a board in the scene, not over the eyes
+    std::atomic<float> campfireMenuWidth{1.1f}, campfireMenuDistance{1.0f}, campfireMenuDrop{0.9f};   // [campfire] menu_width, menu_distance, menu_drop (metres)
+    std::atomic<float> campfireMenuTop{0.78f};  // [campfire] menu_top: where the strip begins, a share of the game's menu band from its top
+    std::atomic<float> campfirePickDist{22.0f};// [campfire] pick_distance: how far along the hand's ray the pointer is put, world units
     std::atomic<bool>  skyHidePanels{true}; // no sky while a side panel shifts the picture
     std::atomic<bool>  skyRims{true};       // [sky] cover_rims: the sky over the dark rim round things against it (SkyOverRims)
     std::atomic<bool>  fogCaves{false};     // [fog] caves: opt-in added indoor fog; native lighting/effects remain
@@ -1394,7 +1419,32 @@ void LoadSettings() {
     g_set.lightNight.store(std::clamp(IniF(L"sky", L"light_night", 65.0f), 0.0f, 254.0f));
     g_set.nightBright.store(std::clamp(IniF(L"sky", L"night_brightness", 0.25f), 0.0f, 1.0f));
     g_set.skyAlways.store(IniB(L"sky", L"always", false));
-    g_set.campfireTest.store(IniB(L"campfire", L"test", false));
+    {   // [campfire]
+        const bool on = IniB(L"campfire", L"enabled", false);
+        static int told = -1;
+        if (int(on) != told) { told = int(on); LogF("vrcam: [campfire] enabled=%d", int(on)); }
+        g_set.campfireOn.store(on);
+        g_set.campfireEye.store(std::clamp(IniF(L"campfire", L"eye", 6.0f), 1.0f, 40.0f));
+        g_set.campfireUp.store(std::clamp(IniF(L"campfire", L"up", 2.5f), -40.0f, 40.0f));
+        g_set.campfireForward.store(std::clamp(IniF(L"campfire", L"forward", 3.0f), -200.0f, 200.0f));
+        g_set.campfirePickDist.store(std::clamp(IniF(L"campfire", L"pick_distance", 22.0f), 1.0f, 200.0f));
+        g_set.campfireEffects.store(IniB(L"campfire", L"effects", false));
+        g_set.campfireNight.store(IniB(L"campfire", L"night", false));
+        g_set.campfireSkyCam.store(IniB(L"campfire", L"sky_cam", false));
+        g_set.campfireSky.store(IniB(L"campfire", L"sky", true));
+        g_set.campfireNightStart.store(std::clamp(IniF(L"campfire", L"night_start", 45.0f), 0.0f, 2000.0f));
+        g_set.campfireNightEnd.store(std::clamp(IniF(L"campfire", L"night_end", 110.0f), 1.0f, 4000.0f));
+        g_set.campfirePointerX.store(std::clamp(IniF(L"campfire", L"pointer_x", 0.0f), -0.5f, 0.5f));
+        g_set.campfirePointerY.store(std::clamp(IniF(L"campfire", L"pointer_y", 0.0f), -0.5f, 0.5f));
+        g_set.campfirePointerFit.store(IniB(L"campfire", L"pointer_fit", true));
+        g_set.campfirePickTurn.store(IniB(L"campfire", L"pick_turn", false));
+        g_set.campfirePickLift.store(std::clamp(IniF(L"campfire", L"pick_lift", 5.5f), -20.0f, 20.0f));
+        g_set.campfireMenuBoard.store(IniB(L"campfire", L"menu_board", true));
+        g_set.campfireMenuWidth.store(std::clamp(IniF(L"campfire", L"menu_width", 1.1f), 0.3f, 3.0f));
+        g_set.campfireMenuDistance.store(std::clamp(IniF(L"campfire", L"menu_distance", 1.0f), 0.4f, 3.0f));
+        g_set.campfireMenuDrop.store(std::clamp(IniF(L"campfire", L"menu_drop", 0.9f), -0.5f, 1.5f));
+        g_set.campfireMenuTop.store(std::clamp(IniF(L"campfire", L"menu_top", 0.78f), 0.0f, 0.98f));
+    }
     g_set.skyHidePanels.store(IniB(L"sky", L"hide_with_panels", true));
     {   // as the By turns switches: only a change of the ini's own value overrides DEV's
         static int read = -1;
@@ -2395,7 +2445,10 @@ V3 Facing(float heading, float down) {
 }
 
 namespace prevscan { void FrameDone(); }
-void VrFrame() { prevscan::FrameDone(); AfrNextFrame(); }
+void CampfirePick();
+extern std::atomic<bool> g_campfire;
+// The campfire's pick each frame (its click is two steps 20 ms apart).
+void VrFrame() { prevscan::FrameDone(); AfrNextFrame(); CampfirePick(); }   // out of the scene it only lets a held click go
 
 // The game's view from above, per eye: orthographic, so moving the camera
 // aside would only slide the picture. Each eye's view is turned instead, half
@@ -2799,6 +2852,102 @@ void Tick() {
 
 bool VrViewInner(const d2rcam::WorldView& in, float out[16]);
 extern std::atomic<bool> g_inWorld;
+extern std::atomic<bool> g_campfire;
+std::atomic<bool> g_campfireArrived{false};   // set as the campfire scene begins: CampfireView faces the fire
+// The campfire's scene drawn round you (CampfireView faced the fire): only then the menu's board
+// is asked for - before it, the scene still loading, the menu's picture is not to be had.
+std::atomic<bool> g_campfireShown{false};
+// The scene camera's own view and projection (the game's, not ours), for CampfirePointer.
+SRWLOCK g_campfireGameLock = SRWLOCK_INIT;
+float g_campfireGameView[16], g_campfireGameProj[16];
+float g_campfireCanvas = 1.0f;   // the scene's picture (the pointer's area), w/h: the viewport, not the camera's proportions
+bool g_campfireGameOk = false;
+#ifdef D2RVR_NATIVE_OPENXR
+// The campfire ([campfire] enabled): the scene has no hero of ours - the head stands where the
+// game's own camera stands (plus [campfire] up and forward), facing as it faces, and
+// turns and moves with the headset; each eye from the headset's own pose.
+bool CampfireView(const d2rcam::WorldView& in, float out[16]) {
+    AcquireSRWLockExclusive(&g_campfireGameLock);
+    memcpy(g_campfireGameView, in.gameView, sizeof g_campfireGameView);
+    memcpy(g_campfireGameProj, in.gameProj, sizeof g_campfireGameProj);
+    g_campfireCanvas = in.viewportW > 0.0f && in.viewportH > 0.0f ? in.viewportW / in.viewportH : 1.0f;
+    g_campfireGameOk = true;
+    ReleaseSRWLockExclusive(&g_campfireGameLock);
+    const float* G = in.gameView;   // row-major, v * M
+    const V3 cam = {-G[12]*G[0]-G[13]*G[1]-G[14]*G[2],
+                    -G[12]*G[4]-G[13]*G[5]-G[14]*G[6],
+                    -G[12]*G[8]-G[13]*G[9]-G[14]*G[10]};
+    const V3 gameFwd = {-G[2], -G[6], -G[10]};
+    const float mapNorth = atan2f(-gameFwd.x, -gameFwd.z);
+    const float flat = std::hypot(gameFwd.x, gameFwd.z);
+    const V3 ahead = flat > 1e-5f ? V3{gameFwd.x/flat, 0.0f, gameFwd.z/flat} : V3{0.0f, 0.0f, -1.0f};
+    const float eyeH = g_set.campfireEye.load();
+    const V3 at = cam + ahead * g_set.campfireForward.load() + V3{0.0f, g_set.campfireUp.load(), 0.0f};
+    const float ground[3] = {at.x, at.y - eyeH, at.z};   // "the hero": the point under the eyes
+    // Facing the fire on arrival, whichever way the head was turned (a recentre or a turn
+    // from the game no longer carried over: back from a game the scene began behind you).
+    // Taken once on each arrival, from the head as it is then; it also puts the eyes'
+    // origin at the head, so you stand where the game's camera stood.
+    static float facing = 0.0f;
+    if (g_campfireArrived.exchange(false)) {
+        float level[16];
+        if (framevr::View(level, ground, eyeH, UserEyeHeightM(), mapNorth, 0.0f, -1, mapNorth, eyeH, true)) {
+            const float heading = atan2f(level[2], level[10]);   // the head's forward (-z) on the ground
+            float turn = heading - mapNorth;
+            while (turn > 3.14159265f) turn -= 6.2831853f;
+            while (turn < -3.14159265f) turn += 6.2831853f;
+            facing = turn;
+            g_campfireShown.store(true);
+            LogF("vrcam: campfire - facing the fire (the head was turned %.0f deg from it)", turn * 57.2957795f);
+        } else {
+            g_campfireArrived.store(true);   // no head yet: next frame
+        }
+    }
+    const float recenter = facing;
+    float center[16];
+    if (!framevr::View(center, ground, eyeH, UserEyeHeightM(), mapNorth, recenter, -1, mapNorth, eyeH, true)) return false;
+    float view[16];
+    // stale: the camera ticks for the left eye after the headset's pair ended, before its
+    // next frame begins (no DrawGameScreen opens it here) - the last poses then.
+    if (!framevr::View(view, ground, eyeH, UserEyeHeightM(), mapNorth, recenter, g_eye.load(), mapNorth, eyeH, true)) return false;
+    {   // What the hands' rays hang off (as VrViewInner leaves it): the head's centre in the
+        // world and its right and ahead on the ground - HandRay, for pointing at the heroes.
+        const V3 head = {-center[12]*center[0]-center[13]*center[1]-center[14]*center[2],
+                         -center[12]*center[4]-center[13]*center[5]-center[14]*center[6],
+                         -center[12]*center[8]-center[13]*center[9]-center[14]*center[10]};
+        const V3 f = {-center[2], -center[6], -center[10]};
+        const float h = std::hypot(f.x, f.z);
+        const V3 a = h > 1e-5f ? V3{f.x/h, 0.0f, f.z/h} : ahead;
+        g_eyeWorld[0].store(head.x); g_eyeWorld[1].store(head.y); g_eyeWorld[2].store(head.z);
+        for (int i = 0; i < 3; ++i) g_eyeFromLook[i].store(0.0f);
+        g_eyeOk.store(true);
+        StickFrame sf{};
+        sf.camR[0] = -a.z; sf.camR[1] = 0.0f; sf.camR[2] = a.x;
+        sf.camF[0] = a.x;  sf.camF[1] = 0.0f; sf.camF[2] = a.z;
+        sf.scrR[0] = G[0]; sf.scrR[1] = G[4]; sf.scrR[2] = G[8];
+        sf.scrU[0] = G[1]; sf.scrU[1] = G[5]; sf.scrU[2] = G[9];
+        sf.mirX = in.gameProj[0] < 0.0f ? -1.0f : 1.0f;
+        sf.mirY = in.gameProj[5] < 0.0f ? -1.0f : 1.0f;
+        sf.valid = true;
+        AcquireSRWLockExclusive(&g_stickLock); g_stickFrame = sf; ReleaseSRWLockExclusive(&g_stickLock);
+    }
+    {   // This eye's camera as VrViewInner leaves it (the sky, the fog, CampfirePointer read it).
+        const V3 camPos = {-view[12]*view[0]-view[13]*view[1]-view[14]*view[2],
+                           -view[12]*view[4]-view[13]*view[5]-view[14]*view[6],
+                           -view[12]*view[8]-view[13]*view[9]-view[14]*view[10]};
+        AcquireSRWLockExclusive(&g_skyLock);
+        SkyView& sv = g_skyView[g_eye.load() & 1];
+        for (int i = 0; i < 3; ++i) { sv.axes[i] = view[i*4]; sv.axes[3 + i] = view[i*4 + 1]; sv.axes[6 + i] = view[i*4 + 2]; }
+        sv.eyeRel[0] = camPos.x - ground[0]; sv.eyeRel[1] = camPos.y - ground[1]; sv.eyeRel[2] = camPos.z - ground[2];
+        memcpy(sv.hero, ground, sizeof sv.hero);
+        sv.axes_ok = true;
+        ReleaseSRWLockExclusive(&g_skyLock);
+    }
+    g_viewBuilds.fetch_add(1);
+    memcpy(out, view, sizeof view);
+    return true;
+}
+#endif
 bool VrView(const d2rcam::WorldView& in, float out[16]) {
     FRAME_PROFILE(View);
     prevscan::Watch();
@@ -2821,6 +2970,7 @@ bool VrViewInner(const d2rcam::WorldView& in, float out[16]) {
     // The menus (the character screen's 3D scene too: it has a hero point) keep the game's camera.
     if (!g_inWorld.load()) return false;
 #ifdef D2RVR_NATIVE_OPENXR
+    if (g_campfire.load()) return CampfireView(in, out);
     if(gamestate::MenuOpen()&&!framevr::SpatialMenu())return false; // ordinary flat UI panel
 #endif
     if (TopStereoOn()) return TopStereoView(in, out);
@@ -3024,7 +3174,7 @@ bool VrProjInner(const d2rcam::WorldView& in, float M[16]) {
     // First person in full body with the head kept whole for its shadow ([arms] hide_head and head_shadow, as PushArms
     // decides): nothing nearer than the cut at this head pitch is drawn, so the head is not seen from inside
     // (steamvr/head_shadow.h). Not in a shapeshift form: its head shrinks as before.
-    if (!ThirdPerson() && !Overhead()) {
+    if (!ThirdPerson() && !Overhead() && !g_campfire.load()) {   // the campfire: no head of ours to cut away
         const bool keep = g_set.headShadow.load() && g_set.hideHead.load() && FullBody() && !ShapeFormNow();
         if (keep || headshadow::Holding()) {
             const D2RVR_Shared* sh = g_shared;
@@ -3048,7 +3198,7 @@ bool VrProjInner(const d2rcam::WorldView& in, float M[16]) {
         M[8] += g_eye.load() == 0 ? shift : -shift;
     }
 #ifdef D2RVR_NATIVE_OPENXR
-    if (!ThirdPerson() && !Overhead() && framevr::Projection(M, nearZ, g_eye.load()) && (g_eye.load() & 1) == 0)
+    if (!ThirdPerson() && !Overhead() && framevr::Projection(M, nearZ, g_eye.load(), g_campfire.load()) && (g_eye.load() & 1) == 0)
         stereoreplay::SetProjection(M[0], framevr::ReplayProjShift());
     g_projSx.store(M[0]); g_projSy.store(M[5]);
 #endif
@@ -3489,6 +3639,121 @@ void SendKeysMouse(bool down) {
         if (g_aimStage == 2) SendLeftButton(false);
         if (g_aimStage >= 1) SendShift(false);
         g_aimStage = 0;
+    }
+}
+
+// The campfire: the right hand points (the game's pointer follows it, CampfirePointer), A or
+// the right trigger clicks - the hero under the pointer stands up. VrRay has the hand's ray too.
+// Game thread, each frame (VrFrame): the controllers come from the headset's input (the pad sees nothing here).
+extern HWND g_gameWnd;
+// The game's pointer onto the point `dist` along the ray, as the scene's OWN camera sees it:
+// the character screen finds the hero under the pointer in its update, where d2rcam hands
+// the camera its own pose back (HandBackPoseForTick) - placed by the headset's view, the
+// pick went the other way as the head turned, and the heroes sat under the clouds.
+bool CampfirePointer(const float o[3], const float d[3], POINT* where) {
+    if (!g_gameWnd || !GameFocused()) return false;
+    float V[16], P[16];
+    AcquireSRWLockShared(&g_campfireGameLock);
+    const bool ok = g_campfireGameOk;
+    const float canvas = g_campfireCanvas;
+    memcpy(V, g_campfireGameView, sizeof V); memcpy(P, g_campfireGameProj, sizeof P);
+    ReleaseSRWLockShared(&g_campfireGameLock);
+    if (!ok) return false;
+    const float t = g_set.campfirePickDist.load();
+    const float w[3] = {o[0] + d[0] * t, o[1] + d[1] * t + g_set.campfirePickLift.load(), o[2] + d[2] * t};
+    // The scene camera turned about the world's up toward the dot for the game's next tick (d2rcam
+    // SetActivePickTurn), and the pointer placed on the turned camera's picture: the pointer cannot
+    // leave that picture, and turned so, the dot lies near its middle - every hero in reach.
+    {
+        float cam[3];
+        for (int k = 0; k < 3; ++k) cam[k] = -(V[12] * V[4 * k] + V[13] * V[4 * k + 1] + V[14] * V[4 * k + 2]);
+        const float fx = -V[2], fz = -V[10], tx = w[0] - cam[0], tz = w[2] - cam[2];
+        float a = 0.0f;
+        if (g_set.campfirePickTurn.load() && std::hypot(fx, fz) > 1e-4f && std::hypot(tx, tz) > 1e-4f) {
+            a = atan2f(tx, tz) - atan2f(fx, fz);
+            while (a > 3.14159265f) a -= 6.2831853f;
+            while (a < -3.14159265f) a += 6.2831853f;
+            a = std::clamp(a, -1.3f, 1.3f);
+        }
+        d2rcam::SetActivePickTurn(a);
+        if (a != 0.0f) {   // V with the camera's axes turned by a about +y, about the camera's place
+            const float ca = cosf(a), sa = sinf(a);
+            for (int i = 0; i < 3; ++i) {
+                const float x = V[i], z = V[8 + i];
+                V[i] = x * ca + z * sa;
+                V[8 + i] = -x * sa + z * ca;
+                V[12 + i] = -(cam[0] * V[i] + cam[1] * V[4 + i] + cam[2] * V[8 + i]);
+            }
+        }
+    }
+    float e[4], c[4];   // row vectors: the eye's, then the clip's
+    for (int j = 0; j < 4; ++j) e[j] = w[0] * V[j] + w[1] * V[4 + j] + w[2] * V[8 + j] + V[12 + j];
+    for (int j = 0; j < 4; ++j) c[j] = e[0] * P[j] + e[1] * P[4 + j] + e[2] * P[8 + j] + e[3] * P[12 + j];
+    if (c[3] < 0.01f) return false;   // behind the camera
+    const float nx = c[0] / c[3], ny = c[1] / c[3];
+    // Past the picture's edge too: the outer heroes (the Amazon, the Druid) stand beside the
+    // headset-shaped picture, in the window's side bars - the game's pick reads the pointer
+    // there as well. Only the window's own edge holds the pointer back (below).
+    if (std::fabs(nx) > 8.0f || std::fabs(ny) > 8.0f) return false;
+    RECT rc{};
+    if (!GetClientRect(g_gameWnd, &rc) || rc.right <= 0 || rc.bottom <= 0) return false;
+    // The scene's picture (the viewport: the headset eye's proportions) fitted whole in the
+    // window, bars beside or above it - how the game reads its pointer back: stretched over the
+    // whole window, the pick drifted out to the next hero the further from the middle. From the
+    // proportions alone, so every headset's eyes fit it ([campfire] pointer_fit 0: stretched).
+    float x0 = 0.0f, y0 = 0.0f, pw = float(rc.right), ph = float(rc.bottom);
+    if (g_set.campfirePointerFit.load() && canvas > 0.0f) {
+        const float scene = canvas, window = float(rc.right) / float(rc.bottom);
+        if (window > scene) { pw = ph * scene; x0 = 0.5f * (float(rc.right) - pw); }
+        else                { ph = pw / scene; y0 = 0.5f * (float(rc.bottom) - ph); }
+    }
+    POINT p{ LONG(x0 + (nx * 0.5f + 0.5f + g_set.campfirePointerX.load()) * pw),
+             LONG(y0 + (0.5f - ny * 0.5f - g_set.campfirePointerY.load()) * ph) };
+    p.x = std::clamp<LONG>(p.x, 0, rc.right - 1);
+    p.y = std::clamp<LONG>(p.y, 0, rc.bottom - 1);
+    {   // what the pointer is placed by, now and then: window, the scene camera's proportions, the point
+        static ULONGLONG told = 0;
+        if (GetTickCount64() - told > 3000) {
+            told = GetTickCount64();
+            LogF("vrcam: campfire pointer - window %ldx%ld, picture w/h %.3f, camera w/h %.3f, at %.3f %.3f -> %ld %ld",
+                 rc.right, rc.bottom, canvas, P[0] != 0.0f ? P[5] / P[0] : 0.0f, nx, ny, p.x, p.y);
+        }
+    }
+    if (!ClientToScreen(g_gameWnd, &p)) return false;
+    *where = p;
+    return true;
+}
+
+void CampfirePick() {
+    static bool down = false; static int stage = 0; static ULONGLONG at = 0;
+#ifdef D2RVR_NATIVE_OPENXR
+    // Each frame, not only on the timer: the transport knows the campfire from its first frame
+    // (its menu board, and never the flat menu panel there).
+    framevr::SetCampfirePointer(g_campfire.load(), g_set.campfirePickDist.load() * UserEyeHeightM() / std::max(1.0f, g_set.campfireEye.load()));
+    // The laser on the menu's board: the board moves the game's pointer and clicks (transport MenuPointer).
+    const bool board = g_campfire.load() && framevr::CampfireMenuHit();
+    const bool held = g_campfire.load() && !board && framevr::RightPickHeld();
+#else
+    const bool held = false;
+#endif
+    float o[3], d[3];
+    // Pointing is enough for the game to show which hero is under the pointer (its own hover).
+    static bool toldPointer = false;
+    POINT where{};
+    if (g_campfire.load() && !board && HandRay(o, d, false, 0) && CampfirePointer(o, d, &where)) {
+        SetCursorPos(where.x, where.y);
+        if (!toldPointer) { toldPointer = true; LogF("vrcam: campfire pick - the pointer follows the right hand (%ld, %ld)", where.x, where.y); }
+    }
+    if (held && HandRay(o, d, false, 0)) {
+        for (int i = 0; i < 3; ++i) { g_aimO[i].store(o[i]); g_aimD[i].store(d[i]); }
+        g_aimRay.store(true);
+        g_aimRayUntil.store(GetTickCount64() + 200);
+        if (!down && GameFocused()) { down = true; stage = 1; at = GetTickCount64(); }
+        if (down && stage == 1 && GetTickCount64() - at >= 20) { SendLeftButton(true); stage = 2; }   // the ray is in before the click
+    }
+    if (!held && down) {
+        if (stage == 2) SendLeftButton(false);
+        down = false; stage = 0;
     }
 }
 
@@ -4629,6 +4894,7 @@ void TurnStick(XINPUT_STATE* s, bool fromBodyWalk) {
     // moves its cursor on the screen, so turning it by the camera's yaw sent the
     // cursor the wrong way, and the right stick is the menu's too.
     if (gamestate::MenuOpen()) { if (own) g_rightX.store(0.0f); return; }
+    if (g_campfire.load()) return;   // the campfire: the pad moves nothing (CampfirePick clicks)
     AimByMouse(s);
     AimByTurn(s);
     const bool aimed = BowStick(s);
@@ -6443,7 +6709,8 @@ bool FrameTimeFound() {
 
 // Without the frame time held, the second pass would play the frame's
 // animation and particles a second time: the pair is drawn only with it.
-bool PairWanted() { return g_h.blit && AfrOn() && g_set.pairPerTick.load() && g_inWorld.load() && FrameTimeFound()
+// The campfire: the menus never call DrawGameScreen, so its eyes go by turns, a frame each.
+bool PairWanted() { return g_h.blit && AfrOn() && g_set.pairPerTick.load() && g_inWorld.load() && !g_campfire.load() && FrameTimeFound()
 #ifdef D2RVR_NATIVE_OPENXR
     && (!gamestate::MenuOpen()||framevr::SpatialMenu())
 #endif
@@ -6662,6 +6929,30 @@ uintptr_t DrawTurn(int a, bool continued) {
 }
 #endif
 
+extern std::atomic<bool> g_campfire;
+// Timer thread: the campfire scene's own camera driven while it is on (the menus have no game camera ticking).
+void CampfireTick() {
+    if (!g_campfire.load()) d2rcam::SetActivePickTurn(0.0f);   // CampfirePointer sets it in the scene
+    d2rcam::SetUseActiveCamera(g_campfire.load());
+    d2rcam::SetMirrorGameCamera(g_campfire.load() && g_set.campfireSkyCam.load());
+#ifdef D2RVR_NATIVE_OPENXR
+    // The beam and its dot from the right hand, to where the pointer is put ([campfire]
+    // pick_distance, world units, in metres by the scene's scale).
+    framevr::SetCampfirePointer(g_campfire.load(), g_set.campfirePickDist.load() * UserEyeHeightM() / std::max(1.0f, g_set.campfireEye.load()));
+    // The menu (name, Create, Back, the checkboxes) on a board in the scene ([campfire] menu_board):
+    // the game draws its menu in its 16:9 band at the top of each eye's picture, over the eyes and
+    // turning with the head; the native-menu board takes that band's lower strip into the scene.
+    framevr::SetCampfireMenu(g_set.campfireMenuWidth.load(), g_set.campfireMenuDistance.load(), g_set.campfireMenuDrop.load());
+    {
+        AcquireSRWLockShared(&g_campfireGameLock);
+        const float canvas = g_campfireCanvas;
+        ReleaseSRWLockShared(&g_campfireGameLock);
+        const float band = std::clamp(canvas * 9.0f / 16.0f, 0.1f, 1.0f);   // the band's height, a share of the eye's
+        const bool board = g_campfire.load() && g_set.campfireMenuBoard.load();
+        hud::SetWorkspaceBand(board ? band * g_set.campfireMenuTop.load() : -1.0f, board ? band : 1.0f);
+    }
+#endif
+}
 uintptr_t HookDrawGameScreen(int a) {
     static thread_local int depth = 0;
     static bool told = false, toldWhy = false;
@@ -8362,7 +8653,8 @@ void PushArms() {
     }
     // third person, the game on the floor and F1 in perspective: the whole hero as the game
     // animates him, head included (on the floor he stood headless, 2026-10-05)
-    const bool own = on && !ThirdPerson() && !Overhead()
+    // The campfire: the heroes round the fire are none of them ours - no arms, turn or hidden head on them
+    const bool own = on && !ThirdPerson() && !Overhead() && !g_campfire.load()
 #ifdef D2RVR_NATIVE_OPENXR
         && (!gamestate::MenuOpen()||framevr::SpatialMenu())
 #endif
@@ -8601,6 +8893,7 @@ std::atomic<int> g_skyPalette{-1};   // kPalettes index while the sky shows, els
 std::atomic<bool> g_arcaneSky{false}; // native Arcane backdrop replacement, not added outdoor sky
 std::atomic<int> g_fogAct{0};        // the area's act for the fog colour, caves too; 0 = unknown
 std::atomic<bool> g_underground{false};   // in the world, off the outdoor list: the fog takes [fog] color_caves
+std::atomic<bool> g_campfire{false};  // [campfire] enabled and its scene up: taken for a world (SkyTick)
 std::atomic<bool> g_inWorld{false};  // a game area is loaded: not the main menu (its own "frontend" biome), not before any
 std::atomic<bool> g_ceilBiome{false};   // the area's biome is on [ceiling] biomes
 // [ceiling] game_ceiling: the area's kind of the game's ceiling (-1: none - not on game_ceiling_biomes, or no model of
@@ -9519,6 +9812,17 @@ int Lights(Light* out) {
 }
 }  // namespace worldobj
 
+// The campfire under our sky ([campfire] sky, [sky] enabled): its void - over the player, above the
+// scene's band of mountains - gets Act 5's sky, menus or not; fog and the rest stay off there.
+bool CampfireSky() {
+    return g_campfire.load() && g_set.campfireSky.load() && g_set.skyOn.load() && g_enabled.load();
+}
+// Act 5's palette (Harrogath's): the campfire is its west gate.
+int CampfireSkyPalette() {
+    for (int i = 0; i < (int)std::size(kPalettes); ++i) if (!strcmp(kPalettes[i].part, "expansion")) return i;
+    return kDefaultPalette;
+}
+
 bool WorldMenuBlocksEffects() {
 #ifdef D2RVR_NATIVE_OPENXR
     // The leather keeps the world round it (leather_world), so its effects too.
@@ -9545,10 +9849,17 @@ void SkyTick() {
         // taken for a world it got the first person's stereo, HUD shift and hidden heads).
         const bool world = !biome.empty() && biome.find("frontend") == std::string::npos &&
                            biome.rfind("ui_", 0) != 0;
-        // [campfire] test=1: the campfire scene taken for a world, only for its stereo and
-        // camera - a first look at how it holds up close; no act, fog, sky or ceiling of its own.
-        const bool campfire = g_set.campfireTest.load() && biome == "ui_characterselectscreen";
-        if (campfire) LogF("vrcam: campfire test - '%s' in stereo as a world", biome.c_str());
+        // [campfire] enabled: character creation's campfire scene taken for a world, for its
+        // stereo and camera only (CampfireView); no act, fog, sky or ceiling of its own.
+        const bool campfire = g_set.campfireOn.load() && biome.rfind("ui_characterselect", 0) == 0;
+        if (campfire) LogF("vrcam: campfire - '%s' in stereo, round you", biome.c_str());
+        if (campfire && !g_campfire.load()) g_campfireArrived.store(true);
+        if (!campfire) g_campfireShown.store(false);
+        g_campfire.store(campfire);
+#ifdef D2RVR_NATIVE_OPENXR
+        // The transport knows the campfire at once (never its flat menu panel, nor its menus' fallback for the session).
+        framevr::SetCampfirePointer(campfire, g_set.campfirePickDist.load() * UserEyeHeightM() / std::max(1.0f, g_set.campfireEye.load()));
+#endif
         g_inWorld.store(world || campfire);
         g_fogAct.store(world ? ActOfBiome(biome) : 0);
         g_underground.store(world && !IsOutdoorBiome(biome));
@@ -9602,7 +9913,7 @@ void SkyTick() {
     else if (TopPersp()) why = "the view from above";
     else if (palette < 0) why = "not outdoors";
     else if (WorldMenuBlocksEffects()) why = "a menu hides the world backdrop";
-    g_skyPalette.store(why ? -1 : palette);
+    g_skyPalette.store(CampfireSky() ? CampfireSkyPalette() : why ? -1 : palette);
     // Arcane's native weather effect is a flat set of cards. Setup replaces
     // only that effect; its native star maps now use the same world-space ray
     // in both eyes. Unlike added outdoor sky, this is part of the level itself.
@@ -9698,8 +10009,11 @@ int __cdecl HookCreate(void* cmdList, int feature, void* params, NgxHandle** out
 int __cdecl HookEval(void* cmdList, const NgxHandle* h, const void* params, void* callback) {
     if (h && g_set.dlssPerEye.load() && AfrOn()) {
         // the eye this frame draws: a pair per game frame sets it for each pass;
-        // by turns, the one after the eye presented last
-        const int eye = PairWanted() ? (g_eye.load() & 1) : (g_fxEye ^ 1);
+        // by turns, the one after the eye presented last. The campfire: its camera
+        // sets the eye at the start of each frame (eyes by turns without a pair), as the
+        // headset's copy reads it - the guess from the last present mixed the eyes'
+        // DLSS histories, the sky and the far edges flickered.
+        const int eye = PairWanted() || g_campfire.load() ? (g_eye.load() & 1) : (g_fxEye ^ 1);
         if (eye == 1) {
             NgxHandle* twin = TwinOf(h);
             if (!twin && !TriedBefore(h)) twin = MakeTwin(cmdList, h, const_cast<void*>(params), "at the first evaluation");
@@ -9947,7 +10261,8 @@ void OnFinishEffects(reshade::api::effect_runtime* rt, reshade::api::command_lis
     if (!g_tech[0].handle) { hud::SetPictureReady(false); return; }
     // Off while a menu is open: the fog lies over the whole picture, the
     // inventory and trade panels included, and darkened them.
-    const bool want = FogWanted() || g_skyPalette.load() >= 0 || g_arcaneSky.load() || CeilWanted() || HudWanted() || StampWanted() || hud::PictureWanted() || TableKeyWanted() || PhantomWanted() || BoneAxesWanted() || ShieldDebugWanted() || OutlineWanted() || RingWanted() || BeamWanted();
+    const bool campfireNight = g_campfire.load() && !g_set.campfireEffects.load() && g_set.campfireNight.load() && FogWanted();
+    const bool want = campfireNight || CampfireSky() || !(g_campfire.load() && !g_set.campfireEffects.load()) && (FogWanted() || g_skyPalette.load() >= 0 || g_arcaneSky.load() || CeilWanted() || HudWanted() || StampWanted() || hud::PictureWanted() || TableKeyWanted() || PhantomWanted() || BoneAxesWanted() || ShieldDebugWanted() || OutlineWanted() || RingWanted() || BeamWanted());
     // The toolbar and the map are taken out of the game's picture to be drawn
     // back at their own size only while this effect runs, and is new enough to.
     {
@@ -9966,7 +10281,8 @@ void OnFinishEffects(reshade::api::effect_runtime* rt, reshade::api::command_lis
     }
     // AFR: frames alternate, the next present is the other eye's. An older
     // shader without the right eye's technique keeps the left one for both.
-    const int next = AfrOn() && g_tech[1].handle ? g_fxEye ^ 1 : 0;
+    // The campfire's night alone: one technique for both eyes (it reads the depth alone).
+    const int next = campfireNight ? 0 : AfrOn() && g_tech[1].handle ? g_fxEye ^ 1 : 0;
     for (int k = 0; k < 2; ++k) {   // the next eye's first: the effect never has none on in between
         const int e = next ^ k;
         if (!g_tech[e].handle) continue;
@@ -10148,7 +10464,10 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
         float s[2];
         renderscale::Frame(rt, s);
 #ifdef D2RVR_NATIVE_OPENXR
-        const bool ownDepth=g_enabled.load()&&g_inWorld.load()&&framevr::Active()&&
+        // The campfire's night: every present, not only those that find a headset frame open (there
+        // the eyes go by turns, a frame each - every other picture had no depth, and no night).
+        const bool campfireNight=g_campfire.load()&&!g_set.campfireEffects.load()&&g_set.campfireNight.load()&&FogWanted();
+        const bool ownDepth=g_enabled.load()&&g_inWorld.load()&&(framevr::Active()||campfireNight||CampfireSky())&&
             (FogWanted()||g_set.skyOn.load()||g_arcaneSky.load()||CeilWanted()||TableKeyWanted()||OutlineWanted()||RingWanted()||BeamWanted());
         const bool turnDepth=g_enabled.load()&&g_inWorld.load()&&framevr::Active()&&framevr::TurnDepthWanted();
         framevr::scenedepth::Bind(rt,cl,ownDepth,turnDepth,stereoreplay::RightEffects(),s);
@@ -10245,6 +10564,8 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
     // A pair per game frame presents from inside its own pass, on this thread,
     // after the pass set its eye: no race, the picture is the eye just set.
     if (PairWanted()) eye = g_eye.load() & 1;
+    // The campfire: the eye the headset's copy of this very frame reads.
+    else if (g_campfire.load() && AfrOn() && g_afrBlock) eye = (int)((g_afrBlock->eye ^ g_afrBlock->swap) & 1u);
     else if (AfrOn() && g_afrBlock) {
         static int e = 0, samples = 0, disagree = 0;
         e ^= 1;
@@ -10272,6 +10593,19 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
     SetBool(rt, "SkyOn", sky);
     SetBool(rt, "ArcaneSkyOn", sky && arcane);
     SetBool(rt, "SkyOverRims", g_set.skyRims.load());
+    if (g_campfire.load() && !g_set.campfireEffects.load()) {   // the campfire's night: black fog, nothing else of the sky
+        static const float kNight[3] = {0.0f, 0.0f, 0.0f};
+        const float start = g_set.campfireNightStart.load();
+        SetBool(rt, "FogOn", g_set.campfireNight.load() && FogWanted());
+        SetFloat(rt, "FogStart", start);
+        SetFloat(rt, "FogEnd", std::max(start + 1.0f, g_set.campfireNightEnd.load()));
+        SetFloat(rt, "FogStrength", 1.0f);
+        SetFloat(rt, "FogCurve", 1.0f);
+        SetBool(rt, "FogFixed", true);
+        SetFloats(rt, "FogColor", kNight, 3);
+        SetBool(rt, "SkyOn", sky && CampfireSky());
+        SetBool(rt, "ArcaneSkyOn", false);
+    }
     {   // camera and eye projection setup for depth fog and dynamic lighting
 
 
@@ -10888,7 +11222,7 @@ void TryRegister() {
     dlssmv::SetLogger(&Log);
     hud::Register();       // the interface's own layer: [hud] hide
 #ifdef D2RVR_NATIVE_OPENXR
-    framevr::Register(&Log, +[](){return gamestate::MenuOpen()||!g_inWorld.load();}, +[](){return g_inWorld.load();}, &gamestate::ToggleMenus);
+    framevr::Register(&Log, +[](){return gamestate::MenuOpen()||!g_inWorld.load()||(g_campfire.load()&&g_campfireShown.load()&&g_set.campfireMenuBoard.load());}, +[](){return g_inWorld.load();}, &gamestate::ToggleMenus);
 #endif
     g_registered = true;
     Log("vrcam: joined ReShade - the fog and the sky follow d2r_pcvr.ini [fog] [sky]");
@@ -11253,6 +11587,7 @@ DWORD WINAPI UpdateThread(void*) {
                 toldWorld = world;
                 Log(world ? "vrcam: the game's world camera is up" : "vrcam: no world camera (menu)");
             }
+            CampfireTick();
         }
     }
     if (timer) CloseHandle(timer);

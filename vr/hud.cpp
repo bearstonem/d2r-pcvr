@@ -93,6 +93,8 @@ std::atomic<bool> g_nativeSession{false}; // panel visibility spans menus, eye g
 std::atomic<float> g_uiScale{1.0f};
 std::atomic<bool> g_menu{false};   // the main menu, or a panel (inventory, trade...) open: nothing is hidden then   // the game's interface size, 0.5..1
 std::atomic<uint64_t> g_layer{0};   // the interface's resource, learnt from its clear
+// The workspace's band, shares of the layer's height (the campfire: the menu's lower strip); top < 0 = all of it.
+std::atomic<float> g_bandTop{-1.0f}, g_bandBottom{1.0f};
 std::atomic<int> g_mapMode{0};     // [hud] map: 0 in the picture, 1 in its own texture
 std::atomic<bool> g_menuMap{false};
 bool mapCaptured=false;
@@ -390,6 +392,9 @@ struct Labels { resource tex{}; resource_view srv{}; uint32_t w = 0, h = 0; bool
 Labels g_lab;
 std::atomic<bool> uiActive{false},workspaceActive{false};
 bool uiCaptured=false;
+// While the native menu is wanted on a board: how often the interface's layer was cleared, how
+// often a pass on it ended, and how often it was copied for the board (UiFrame logs them).
+std::atomic<uint32_t> g_diagClears{0},g_diagEnds{0},g_diagCopies{0};
 std::atomic<int> uiEye{0};
 int32_t uiCrop[4]{};
 
@@ -578,7 +583,22 @@ bool OnMapDrawIndexed(command_list* cl, uint32_t, uint32_t, uint32_t, int32_t, u
 
 bool OnClear(command_list* cl, resource_view rtv, const float c[4], uint32_t, const rect*) {
     device* dev = cl->get_device();
+    if (uiActive.load()) {   // the board wanted: which large targets are cleared, and to what (the first few)
+        static std::atomic<int> told{0};
+        if (told.load() < 16) {
+            const resource r = dev->get_resource_from_view(rtv);
+            const resource_desc d = dev->get_resource_desc(r);
+            if (d.type == resource_type::texture_2d && d.texture.width >= 640 && told.fetch_add(1) < 16) {
+                char line[200];
+                snprintf(line, sizeof line, "hud: board wanted - a clear of %ux%u format %u to %.2f %.2f %.2f %.2f (the layer: %s)",
+                         d.texture.width, d.texture.height, unsigned(d.texture.format), c[0], c[1], c[2], c[3],
+                         r.handle == g_layer.load() ? "yes" : "no");
+                Log(line);
+            }
+        }
+    }
     if (!IsLayerClear(dev, rtv, c)) return false;
+    ++g_diagClears;
     g_frameMap.store(MapNow());
     if (const auto window = framevr::resolution::WindowClient()) { g_windowW.store(window.w); g_windowH.store(window.h); }
     {   // the map's view, re-read now and then
@@ -650,16 +670,20 @@ void OnBind(command_list* cl, uint32_t count, const resource_view* rtvs, resourc
         const auto layerResource=framevr::resources::Resolve(dev,layerRtv);
         const auto layerDescription=framevr::resources::Describe(dev,layerResource);
         if(uiActive.load()) {
+            ++g_diagEnds;
             const auto tex=layerResource;const auto desc=layerDescription;
             int32_t native[4]{};
             if(workspaceActive.load()||gamestate::JournalRect(native)) {
-                const auto region=workspaceActive.load()?framevr::journal::Rect{0,0,int(desc.texture.width),int(desc.texture.height)}:
+                const int bandTop=g_bandTop.load()<0.0f?0:std::clamp(int(g_bandTop.load()*float(desc.texture.height)),0,int(desc.texture.height)-2);
+                const int bandBottom=g_bandTop.load()<0.0f?int(desc.texture.height):
+                    std::clamp(int(g_bandBottom.load()*float(desc.texture.height)),bandTop+2,int(desc.texture.height));
+                const auto region=workspaceActive.load()?framevr::journal::Rect{0,bandTop,int(desc.texture.width),bandBottom-bandTop}:
                     framevr::journal::Crop({native[0],native[1],native[2],native[3]},desc.texture.width,desc.texture.height,g_uiScale.load());
                 const rect crop{region.x,region.y,region.x+region.w,region.y+region.h};
                 if(crop.right>crop.left&&crop.bottom>crop.top) {
-                    if(uiEye.load()==0&&CopyLayer(cl,tex,desc.texture.width,desc.texture.height)) {
+                    if(uiEye.load()<=0&&CopyLayer(cl,tex,desc.texture.width,desc.texture.height)) {
                         uiCrop[0]=crop.left;uiCrop[1]=crop.top;uiCrop[2]=crop.right-crop.left;uiCrop[3]=crop.bottom-crop.top;
-                        uiCaptured=true;
+                        uiCaptured=true;++g_diagCopies;
                     }
                     if(uiCaptured) {
                         g_lab.on=false;g_pic.on[kBar]=g_pic.on[kMap]=false;
@@ -738,6 +762,15 @@ void UiFrame(bool active,bool workspace,int eye){
     g_taken=false;
     if(!active||eye==0)uiCaptured=false;
     uiActive=active;workspaceActive=workspace;uiEye=eye;
+    if(active) {   // what the board's capture saw, each second
+        static ULONGLONG at=0;const ULONGLONG now=GetTickCount64();
+        if(now-at>1000) {
+            at=now;char line[200];
+            snprintf(line,sizeof line,"hud: board capture - layer clears %u, passes on it ended %u, copies %u, layer %s",
+                     g_diagClears.exchange(0),g_diagEnds.exchange(0),g_diagCopies.exchange(0),g_layer.load()?"known":"not known");
+            Log(line);
+        }
+    }
 #ifdef D2RVR_NATIVE_OPENXR
     framevr::uiworld::SetActive(active);
 #endif
@@ -772,6 +805,7 @@ void SetMenuOpen(bool open) { g_menu.store(open); }
 void SetMapMode(int mode) { g_mapMode.store(mode); }
 void SetInterfaceScale(float s) { g_uiScale.store(std::clamp(s, 0.3f, 1.0f)); }
 bool LayerFound() { return g_layer.load() != 0; }
+void SetWorkspaceBand(float top, float bottom) { g_bandTop.store(top); g_bandBottom.store(bottom); }
 void SetLogger(void (*log)(const char*)) { g_log = log; }
 void SetMapCorner(int corner) { g_mapCorner.store(std::clamp(corner, 0, 2)); }
 

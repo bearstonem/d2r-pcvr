@@ -592,6 +592,24 @@ desktop focus loss releases the injected mouse button; release the trigger
 before starting again. Pressing or releasing Left Grip during a drag will
 not convert it into a context-click.
 
+### VR keyboard (character names)
+
+D2R shows no on-screen keyboard for the character name, so the mod adds one.
+When you pick a hero on the character creation screen, a keyboard appears
+under the menu, tilted toward you. Point the laser at a key and pull the right
+trigger to type it into the name box.
+
+| Key | Effect |
+| --- | --- |
+| Letters, `-`, `_` | Type the character (letters are small) |
+| Shift | The next letter is a capital (the keys show capitals while it waits) |
+| Back | Delete the last character |
+| Enter | Confirm, as the keyboard's Enter does |
+| Close | Hide the keyboard until you pick another hero or reopen character creation |
+
+The keys follow your Windows keyboard layout, so a letter types the same
+character on any layout. A physical keyboard keeps working alongside it.
+
 ### Native menu prompts
 
 | Game's displayed input | Quest control | Steam Frame control |
