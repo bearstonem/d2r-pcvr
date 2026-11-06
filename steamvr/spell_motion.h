@@ -148,7 +148,7 @@ inline const char* Cue(Motion m) {
     case Motion::ForearmSweep:return "sweep the left hand from the right hand up to the right shoulder";
     case Motion::Shake:return "shake both fists hard, held well apart (not rubbed together)";
     case Motion::Hug:return "hug yourself, each hand on the other shoulder";
-    case Motion::Punch:return "pull the right fist in fast to show where you land, then punch it straight out";
+    case Motion::Punch:return "point the right arm where you want to land, then yank the fist back to your shoulder";
     default:return m>Motion::Punch&&m<Motion::End?ClassCue(m):"no motion";
     }
 }
@@ -241,29 +241,25 @@ struct Tuning {
     // m: and the fists at least this far apart throughout: Static Field's rub has them together (a tester,
     // 2026-11-05: "This was getting confused with static field ... Rubbing reads as shaking")
     float shakeApart=.25f;
-    // Teleport, the Paladin's Charge punch (charge_gesture.h): the right hand drawn in (at most punchFrom
-    // ahead of the eyes, hip to brow), then punched straight out to punchReach ahead, punchTravel
-    // forward within punchWindow, at least 1.5 times as far forward as up, down or sideways.
-    // The cast goes the way of the punch (Output::aim). Reach 45 cm until the owner's session (2026-11-05):
-    // fast punches (3.9 and 4.0 m/s) that stopped 37 and 40 cm ahead of the eyes never cast.
-    float punchFrom=.30f,punchReach=.35f,punchTravel=.25f,punchWindow=.20f;
-    // Teleport aimed first (owner, 2026-11-05: "One fast pull of the hand ... that shows the target circle
-    // we are facing and a push out of our hand that initiates the teleport. And in between we can even do
-    // slight adjustments"): the right fist pulled in fast, drawTravel back toward the eyes within
-    // drawWindow and ending drawn in as the punch begins, shows where it lands (Output::aiming), aimCells
-    // ahead of the eyes' heading. Held there, the fist moved forward or back takes it farther or nearer
-    // and moved sideways takes it across, aimCellsPerMetre (at most aimOut forward, aimBack back, aimSide
-    // across, never nearer than aimNear); only while it moves slower than aimStill, so a punch never moves it. The
-    // punch then casts there (Output::landing), from up to aimOut further out than punchFrom. Shown at
-    // most aimSeconds without a punch.
-    float drawTravel=.16f,drawWindow=.25f;
-    float aimCells=20.f,aimCellsPerMetre=100.f,aimOut=.15f,aimBack=.12f,aimSide=.20f,aimNear=4.f,aimSeconds=8.f;
-    float aimStill=.40f;      // m/s: the fist held still for its landing (slower than a punch's start)
+    // Teleport by point and pull (owner, 2026-11-05, in the headset: "I do definitely like the targeting aspect
+    // of it, but I want to be able to use that targeting better ... With our arm kind of tucked into us. It's hard
+    // to aim where you want to go"). Until then a fast pull of the fist showed the circle and a punch landed there;
+    // the circle also came up as the arm came back after a teleport and at the start of Frost Nova and Blaze.
+    // Now the right arm held out ahead (the fist pointOut ahead of the eyes or more, pointArm from the shoulder or
+    // more, not pointing up past pointUp of its length) and steady (slower than pointSteady) for pointHold shows
+    // where it lands (Output::aiming, Output::point: the shoulder-to-fist line, head-local): along the arm's
+    // heading, pointFar cells with the arm level, nearer as it points down (evenly by its angle), pointNear at pointSteepDeg below
+    // level (PointSpot). It follows the arm while the arm stays out and steady. The fist yanked back toward the
+    // shoulder, yankBack or more within yankWindow, mostly back (rising, falling or drifting at most 0.7 as far), from where it pointed, casts there
+    // (Output::landing). The arm drawn in or let down without a yank for aimLost, or aimSeconds, gives it up.
+    float pointOut=.30f,pointArm=.38f,pointUp=.30f,pointSteady=.60f,pointHold=.15f;
+    float pointFar=32.f,pointNear=6.f,pointSteepDeg=50.f;
+    float yankBack=.18f,yankWindow=.25f,aimLost=.6f,aimSeconds=8.f;
     float cooldown=.6f;       // s after a cast
     float history=1.5f;       // s of the hands kept
 };
-// A spot on the floor, in cells ahead of the eyes' heading and to its right: Teleport's landing for a
-// fist moved by adjust (Output::adjust, TeleportSpot), or a summon's (Output::spot).
+// A spot on the floor, in cells ahead of the eyes' heading and to its right: Teleport's landing for an
+// arm pointing (Output::point, PointSpot), or a summon's (Output::spot).
 struct Spot {float ahead=0,right=0;};
 // Where a cast goes besides its way: nowhere of its own (the way, else the right hand's ray), a Spot
 // (Decoy, Golem), or where the right hand's pointer meets the floor (Valkyrie: "it didn't spawn her where
@@ -291,18 +287,16 @@ struct Output {
     // (head-local: x right, y up, z back) (m, m/s).
     float apartMin=0,apartMax=0,top=0,low=0,fastest=0,fall[2]{};
     math::Vec end[2]{};
-    // With a cast that goes somewhere (Teleport): the way the motion went, head-local as end (the punch,
-    // from where it began to where it ended); zero for the rest.
+    // With a cast that goes somewhere (Teleport): the way the motion went, head-local as end (Teleport's: the
+    // arm it pointed with); zero for the rest.
     math::Vec aim{};
-    // Teleport drawn in fast (Tuning::drawTravel): its landing shown, where TeleportSpot puts it for
-    // adjust (the still fist's move since it settled, head-local). With cast, landing: the punch came
-    // while it showed, so it lands there.
+    // Teleport pointed at (Tuning::pointOut...): its landing shown, where PointSpot puts it for point (the
+    // shoulder-to-fist line, head-local). With cast, landing: the yank came while it showed, so it lands there.
     bool aiming=false,landing=false;
-    math::Vec adjust{};
-    // Teleport's circle shown this hold, for the log when it is given up (Stats): how near a punch came - the
-    // fist's farthest ahead, the longest stretch forward within punchWindow and how far off straight it went
-    // (the larger of its rise and its drift over its forward travel).
-    bool punchAimed=false;float punchFarthest=0,punchTravel=0,punchOff=0;
+    math::Vec point{};
+    // Teleport's circle shown this hold, for the log when it is given up (Stats): the longest pull back within
+    // yankWindow from where the arm pointed.
+    bool pointAimed=false;float yankBest=0;
     // How near the watched motion is to casting, for the controllers' warmer/colder buzz (a tester,
     // 2026-11-05: "continuous vibration as you get closer to the 2nd part of the sequence"): 0 nothing
     // begun, Begun once its first part is done (the hands together, a fist at the mouth, a pose taken),
@@ -311,9 +305,14 @@ struct Output {
     // With cast: a summon that goes to a spot of its own (Engine::LandAt, LandPointed), not along aim.
     Land land=Land::None;Spot spot{};
 };
-inline Spot TeleportSpot(math::Vec adjust,const Tuning& t) {
-    const float out=std::clamp(-adjust.z,-t.aimBack,t.aimOut),across=std::clamp(adjust.x,-t.aimSide,t.aimSide);
-    return {std::max(t.aimNear,t.aimCells+out*t.aimCellsPerMetre),across*t.aimCellsPerMetre};
+// Teleport's landing for an arm pointing along way (Output::point, head-local), in cells ahead of the eyes'
+// heading and to its right: pointFar with the arm level (or up), easing to pointNear at pointSteepDeg below.
+inline Spot PointSpot(math::Vec way,const Tuning& t) {
+    const float level=std::hypot(way.x,way.z);
+    if(!(level>1e-4f)||!std::isfinite(way.y))return {t.pointNear,0};
+    const float below=std::atan2(-way.y,level)*57.2957795f;
+    const float f=std::clamp(below/t.pointSteepDeg,0.f,1.f),cells=t.pointFar+(t.pointNear-t.pointFar)*f;
+    return {cells*(-way.z/level),cells*(way.x/level)};
 }
 // The hands at one frame, head-local: l[0] the right, l[1] the left.
 struct Sample {double t=0;math::Vec l[2]{};};
@@ -327,10 +326,10 @@ class Engine {
     int casts=0;                  // in this hold
     double since=0,last=0,castAt=-1,poseSince=-1;
     float rub=0;double parted=-1; // Static Field
-    math::Vec aimed{};            // Teleport: the punch Done found
-    // Teleport drawn in: since when (-1: not), the fist where it first held still after (anchored) and
-    // where it last held still; landed: the punch came while it showed.
-    double drawnAt=-1;bool anchored=false,landed=false;math::Vec anchor{},settled{};
+    math::Vec aimed{};            // Teleport: the arm Done found pointing
+    // Teleport pointed at: since when (-1: not), the arm out and steady since, the arm in or down since (-1: not),
+    // where it last pointed; landed: the yank came while it showed.
+    double aimingSince=-1,steadySince=-1,outLost=-1;bool landed=false;math::Vec pointWay{};
     float progress=0;             // this frame's (Output::progress), the most any part of Done reported
     Land land=Land::None;Spot spot{};   // a summon's spot (LandAt, LandPointed)
     struct Swing {int sign=0;float peak=0;};
@@ -340,7 +339,7 @@ class Engine {
     static bool Finite(math::Vec v){return std::isfinite(v.x)&&std::isfinite(v.y)&&std::isfinite(v.z);}
     void Clear() {
         samples.clear();poseSince=-1;rub=0;parted=-1;aimed={};scratch={};land=Land::None;spot={};
-        drawnAt=-1;anchored=landed=false;anchor=settled={};
+        aimingSince=steadySince=outLost=-1;landed=false;pointWay={};
         for(auto& h:swing)for(auto& a:h)a={};
         for(auto& h:turns)for(auto& a:h)a.clear();
     }
@@ -471,36 +470,28 @@ private:
             if(front&&std::min(most[0],most[1])>=1)Toward(float(std::min(most[0],most[1]))/float(t.shakeTurns));
             return front&&most[0]>=t.shakeTurns&&most[1]>=t.shakeTurns;
         }
-        case Motion::Punch: {
+        case Motion::Punch: {   // Teleport: point and pull
             const auto& c=n.l[0];
-            const bool drawn=Forward(c)<=t.punchFrom&&c.y>=-.70f&&c.y<=.10f;
-            if(drawnAt>=0&&n.t-drawnAt>t.aimSeconds){drawnAt=-1;anchored=false;}   // shown long enough: given up
-            if(drawnAt<0&&drawn)
-                for(const auto& s:samples) {   // pulled in fast, mostly toward the eyes
-                    const auto& a=s.l[0];
-                    const float back=Forward(a)-Forward(c);
-                    if(n.t-s.t<=t.drawWindow&&back>=t.drawTravel&&std::fabs(c.y-a.y)<=back&&std::fabs(c.x-a.x)<=back){drawnAt=n.t;anchored=false;break;}
-                }
-            if(drawnAt>=0) {   // how near a punch comes, for the log if the circle is given up
-                stats.punchAimed=true;stats.punchFarthest=std::max(stats.punchFarthest,Forward(c));
-                for(const auto& s:samples) {
-                    const auto& a=s.l[0];const float forward=Forward(c)-Forward(a);
-                    if(n.t-s.t<=t.punchWindow&&forward>stats.punchTravel)
-                        {stats.punchTravel=forward;stats.punchOff=std::max(std::fabs(c.y-a.y),std::fabs(c.x-a.x))/std::max(forward,.01f);}
-                }
+            const math::Vec shoulder{.17f,-.22f,.05f};
+            const auto way=c-shoulder;const float arm=Len(way);
+            const bool out=Forward(c)>=t.pointOut&&arm>=t.pointArm&&way.y<=t.pointUp*arm;
+            // shown long enough: given up, not shown again until the arm has come in (steadySince -2)
+            if(aimingSince>=0&&n.t-aimingSince>t.aimSeconds){aimingSince=-1;steadySince=-2;}
+            if(out&&Len(Velocity(0))<t.pointSteady) {   // held out steady: aimed, and following the arm
+                if(steadySince==-1)steadySince=n.t;
+                if(steadySince>=0&&n.t-steadySince>=t.pointHold){if(aimingSince<0)aimingSince=n.t;pointWay=way;}
+            } else if(!out||steadySince!=-2)steadySince=-1;
+            if(aimingSince<0)return false;
+            stats.pointAimed=true;
+            for(const auto& s:samples) {   // yanked back toward the shoulder from where it pointed
+                const auto& a=s.l[0];const float back=Forward(a)-Forward(c);
+                if(n.t-s.t>t.yankWindow||Forward(a)<t.pointOut-.05f)continue;
+                stats.yankBest=std::max(stats.yankBest,back);
+                if(back>=t.yankBack&&std::fabs(c.y-a.y)<=.7f*back&&std::fabs(c.x-a.x)<=.7f*back){aimed=pointWay;landed=true;return true;}
             }
-            if(drawnAt>=0&&Len(Velocity(0))<t.aimStill) {
-                if(!anchored){anchored=true;anchor=c;}
-                settled=c;
-            }
-            if(Forward(c)<t.punchReach)return false;
-            const float from=t.punchFrom+(drawnAt>=0?t.aimOut:0.f);
-            for(const auto& s:samples) {
-                const auto& a=s.l[0];
-                const float forward=Forward(c)-Forward(a);
-                if(n.t-s.t<=t.punchWindow&&Forward(a)<=from&&a.y>=-.70f&&a.y<=.10f&&forward>=t.punchTravel&&
-                   std::fabs(c.y-a.y)*1.5f<=forward&&std::fabs(c.x-a.x)*1.5f<=forward){aimed=c-a;landed=drawnAt>=0;return true;}
-            }
+            if(out)outLost=-1;   // drawn in or let down without a yank: given up a moment later
+            else if(outLost<0)outLost=n.t;
+            else if(n.t-outLost>t.aimLost){aimingSince=steadySince=outLost=-1;}
             return false;
         }
         case Motion::Hug: {
@@ -559,13 +550,13 @@ public:
         progress=0;
         if(Done(in.motion)) {
             const auto seconds=out.seconds;out=stats;out.seconds=seconds;out.cast=true;out.aim=aimed;
-            out.landing=landed;out.adjust=landed&&anchored?settled-anchor:math::Vec{};
+            out.landing=landed;out.point=landed?pointWay:math::Vec{};
             out.land=land;out.spot=spot;
             castAt=in.time;++casts;Clear();   // the motion again, from its start, casts again
         }
         else {
             out.progress=progress;
-            if(drawnAt>=0){out.aiming=true;out.adjust=anchored?settled-anchor:math::Vec{};}
+            if(aimingSince>=0){out.aiming=true;out.point=pointWay;}
         }
         return out;
     }

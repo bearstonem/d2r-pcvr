@@ -673,9 +673,9 @@ bool SpotCell(spellmotion::Spot spot,float& x,float& y) {
     const float metres=2.f/stageWorld.upm;   // a cell (toss::Cell)
     return FloorCell(interactionInput.head.p+math::Rotate(math::Yaw(math::Heading(interactionInput.head.q)),math::Vec{spot.right*metres,0,-spot.ahead*metres}),x,y);
 }
-// Where Teleport lands for the fist's adjust (spellmotion::TeleportSpot), in grid cells.
-bool TeleportCell(math::Vec adjust,const spellmotion::Tuning& tuning,float& x,float& y) {
-    return SpotCell(spellmotion::TeleportSpot(adjust,tuning),x,y);
+// Where Teleport lands for the arm pointing along point (spellmotion::PointSpot), in grid cells.
+bool TeleportCell(math::Vec point,const spellmotion::Tuning& tuning,float& x,float& y) {
+    return SpotCell(spellmotion::PointSpot(point,tuning),x,y);
 }
 // Where the right hand's pointer meets the floor, in grid cells within the game's reach (Valkyrie's
 // spellmotion::Land::Pointed). A pointer level or up, or meeting the floor beyond PointedCells: that far
@@ -4173,15 +4173,14 @@ void Input() {
             else std::snprintf(line,sizeof line,"Frame spell motion: grips let go without a motion after %.1f s",heldFor);
             Say(line);
         }
-        // Teleport's circle given up: how near its punch came (owner's session 2026-11-05: punches that did not count)
+        // Teleport's circle given up: how near its yank came (owner's session 2026-11-05: Teleports that did not count)
         if(!gripHeld&&motionClass==1) {
             const auto& tuning=spellFree[size_t(int(spellmotion::Motion::Punch)-1)].tuning;
             const auto& p=spellFree[size_t(int(spellmotion::Motion::Punch)-1)].Stats();
-            if(p.punchAimed) {
-                char line[300];
-                std::snprintf(line,sizeof line,"Frame spell motion: Teleport's circle given up - the fist %.0f cm ahead at its farthest (a punch reaches %.0f), "
-                    "its longest stretch forward %.0f cm in %.2f s (needs %.0f), %.0f%% off straight (at most 67%%)",
-                    p.punchFarthest*100,tuning.punchReach*100,p.punchTravel*100,tuning.punchWindow,tuning.punchTravel*100,p.punchOff*100);
+            if(p.pointAimed) {
+                char line[200];
+                std::snprintf(line,sizeof line,"Frame spell motion: Teleport's circle given up - its longest pull back %.0f cm in %.2f s (a yank needs %.0f)",
+                    p.yankBest*100,tuning.yankWindow,tuning.yankBack*100);
                 Say(line);
             }
         }
@@ -4426,7 +4425,7 @@ void Input() {
             {const auto page=spellmotion::PageOf(motionClass);
              for(int i=0;i<page.count;++i)if(const int id=page.skills[i],m=int(spellmotion::For(id));m>0&&motionOn(id))skillOf[m]=id;}
             int done=-1;math::Vec doneAim{};
-            bool doneLanding=false,teleportAiming=false;math::Vec doneAdjust{},teleportAdjust{};
+            bool doneLanding=false,teleportAiming=false;math::Vec donePoint{},teleportPoint{};
             spellmotion::Land doneLand=spellmotion::Land::None;spellmotion::Spot doneSpot{};
             float progress=0;   // the nearest any watched motion is to casting (Output::progress)
             for(int i=0;i<order.count;++i) {
@@ -4438,8 +4437,8 @@ void Input() {
                 freeIn.head=interactionInput.head.p;freeIn.headRotation=interactionInput.head.q;
                 for(int h=0;h<2;++h){freeIn.hand[h]=interactionInput.hand[h].p;freeIn.tracked[h]=interactionInput.tracked[h];}
                 const auto watched=spellFree[size_t(m-1)].Step(freeIn);
-                if(watched.cast&&done<0){done=m;doneAim=watched.aim;doneLanding=watched.landing;doneAdjust=watched.adjust;doneLand=watched.land;doneSpot=watched.spot;}
-                if(watched.aiming){teleportAiming=true;teleportAdjust=watched.adjust;}
+                if(watched.cast&&done<0){done=m;doneAim=watched.aim;doneLanding=watched.landing;donePoint=watched.point;doneLand=watched.land;doneSpot=watched.spot;}
+                if(watched.aiming){teleportAiming=true;teleportPoint=watched.point;}
                 progress=std::max(progress,watched.progress);
             }
             // Warmer/colder (a tester, 2026-11-05: "have the controllers do a simulation with continuous
@@ -4456,17 +4455,17 @@ void Input() {
                 }
             }
             else motionBuzzAt=-1;
-            // Teleport's fist drawn in: a circle where it lands, placed again every frame (it fades a moment
-            // after the last), gone with the punch or the grips let go. The punch then lands there, its way
+            // Teleport pointed at: a circle where it lands, placed again every frame as the arm moves (it fades a
+            // moment after the last), gone with the yank or the grips let go. The yank then lands there, its way
             // toward it too (MotionCastRay).
             const auto& punchTuning=spellFree[size_t(int(spellmotion::Motion::Punch)-1)].tuning;
             float landX=0,landY=0;
-            const bool landKnown=(teleportAiming||doneLanding)&&TeleportCell(doneLanding?doneAdjust:teleportAdjust,punchTuning,landX,landY);
+            const bool landKnown=(teleportAiming||doneLanding)&&TeleportCell(doneLanding?donePoint:teleportPoint,punchTuning,landX,landY);
             if(teleportAiming&&landKnown&&done<0) {
                 telegraph::Current().Place(landX,landY,GetTickCount64(),250,int(spellaim::Cold),1.5f,0,0,0,telegraph::TeleportMark);
                 if(!teleportShown) {
-                    const auto spot=spellmotion::TeleportSpot(teleportAdjust,punchTuning);
-                    char line[160];std::snprintf(line,sizeof line,"Frame spell motion: Teleport's fist drawn in - its landing shown %.0f cells ahead, %+.0f across",spot.ahead,spot.right);
+                    const auto spot=spellmotion::PointSpot(teleportPoint,punchTuning);
+                    char line[160];std::snprintf(line,sizeof line,"Frame spell motion: Teleport pointed - its landing shown %.0f cells ahead, %+.0f across",spot.ahead,spot.right);
                     Say(line);
                 }
                 teleportShown=true;
@@ -4475,7 +4474,7 @@ void Input() {
             if(done>0) {
                 for(auto& e:spellFree)e.Reset();
                 const int skill=spellmotion::CastSkillOf(skillOf[done],[&](int id){return interaction::GlyphSkill(quickSnapshot,id).known;});
-                const auto spot=spellmotion::TeleportSpot(doneAdjust,punchTuning);
+                const auto spot=spellmotion::PointSpot(donePoint,punchTuning);
                 if(doneLanding&&landKnown)doneAim={spot.right,0,-spot.ahead};
                 // A summon on a spot of its own: Decoy and the golems ahead (spellmotion::Engine::LandAt), the
                 // Valkyrie where the right hand points (LandPointed); its way toward it too.

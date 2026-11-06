@@ -2427,8 +2427,7 @@ draw. A glyph whose skill has a motion casts it at once, as any glyph.
 The motions: Nova, the hands together then flung out wide; Frost Nova, both hands pushed down
 past the chest (to the waist, not the floor); Static Field, the palms rubbed together then snapped apart; Energy Shield, both
 hands up at the face within 35 cm (the forearms crossed or not), held; Thunder Storm, one arm
-raised above the head, held; Teleport, the right fist drawn in and punched straight out where you
-want to land (as the Paladin's Charge); Blaze, one hand struck down the thigh; Frozen Armor, the
+raised above the head, held; Teleport, the right arm pointed where you want to land and the fist yanked back; Blaze, one hand struck down the thigh; Frozen Armor, the
 left hand from the right hand up to the right shoulder; Shiver Armor, both fists shaken, held at
 least 25 cm apart (a tester, 2026-11-05: Static Field's rub "reads as shaking": fists shaken any
 closer are a rub, and its count starts over); Chilling
@@ -2443,18 +2442,21 @@ ending 40 cm below the eyes (was 50) and allowed out to the sides, Energy Shield
 crossed and no longer 15 cm out from the face. Tests: `interaction-test` (the box and the cards'
 hit bounds, the page's clicks), `interaction-motions-test` (its art).
 
-Teleport aimed first (owner, 2026-11-05: "One fast pull of the hand ... that shows the target circle
-we are facing and a push out of our hand that initiates the teleport. And in between we can even do
-slight adjustments to the circle"). The right fist pulled in fast (16 cm toward the eyes within
-0.25 s, ending drawn in) shows a circle where Teleport lands, 20 cells ahead of where the eyes face,
-in the landing circles' cold blue (`telegraph::TeleportMark`), whatever the Aim options. Held there,
-the fist moved slowly forward or back takes it a cell farther or nearer per centimetre (15 cm out at
-most, 12 back, never nearer than 4 cells) and sideways a cell across per centimetre (20 at most);
-turning the head turns it with the eyes. The punch then lands there (`MotionLanding`, the cast's
-point within the game's reach, logged `Frame motion aim:`), on the landing as it was before the punch
-began: the fist counts only while slower than 0.4 m/s. A punch with no fast pull first casts as before,
-along the punch. Letting the grips go, any other motion's cast or 8 s without a punch takes the circle
-away. Thresholds in `spellmotion::Tuning` (draw*, aim*); `spell-motion-test` and `telegraph-test`.
+Teleport by point and pull (owner, 2026-11-05, in the headset: "I do definitely like the targeting
+aspect of it, but I want to be able to use that targeting better ... With our arm kind of tucked into
+us. It's hard to aim where you want to go"). The same day's first version, a fast pull of the fist
+showing the circle and a punch landing there, missed punches that stopped short and showed the circle
+as the arm came back after a teleport and at the start of Frost Nova and Blaze. Now the right arm held
+out ahead (the fist 30 cm ahead of the eyes or more and 38 cm from the shoulder, not pointing up) and
+steady for 0.15 s shows a circle where Teleport lands, in the landing circles' cold blue
+(`telegraph::TeleportMark`), whatever the Aim options: along the arm's heading (the line from the
+shoulder through the fist), 32 cells away with the arm level, nearer evenly as it points down, 6 cells
+at 50 degrees below (`spellmotion::PointSpot`). It follows the arm while the arm stays out and steady.
+The fist yanked back toward the shoulder (18 cm within 0.25 s, mostly back) lands there
+(`MotionLanding`, the cast's point within the game's reach, logged `Frame motion aim:`). The arm drawn
+in or let down without a yank for 0.6 s, letting the grips go, any other motion's cast or 8 s takes the
+circle away; a circle given up logs its longest pull back. Thresholds in `spellmotion::Tuning`
+(point*, yank*, aim*); `spell-motion-test` and `telegraph-test`.
 
 Trail (`steamvr/glyph_trail.h`): a 512 x 512 straight-alpha picture, 1 m a side, in the
 shared atlas (`panelatlas::Glyph`, beside VR Settings), shown as a room-space quad in the
