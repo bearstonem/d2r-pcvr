@@ -88,7 +88,9 @@ int main() {
         Check(hs::CutLiveMs >= 100 && hs::CutLiveMs <= 1000, "the hold spans several frames and stays short");
     }
     {   // The tuned values: level, up and down, and the span
-        Check(hs::LevelCm == 11 && hs::UpCm == 13 && hs::DownCm == 3, "the headset-tuned cuts: 11 cm level, 13 up, 3 down");
+        Check(hs::LevelCm == 11 && hs::UpCm == 22 && hs::DownCm == 3, "the headset-tuned cuts: 11 cm level, 22 up (13 showed the helm from inside), 3 down");
+        Check(hs::CleanCut(26, hs::UpCm) == 26 && hs::CleanCut(99, hs::UpCm) == hs::MaxCutCm && hs::CleanCut(-4, hs::UpCm) == 0 &&
+              hs::CleanCut(nan, hs::UpCm) == hs::UpCm && hs::CleanCut(inf, hs::UpCm) == hs::UpCm, "an ini cut: kept within 0..40 cm, a non-number the default");
         Check(hs::PitchSpanDeg > 0 && hs::PitchSpanDeg < 90, "the span is a real head pitch, short of straight up");
         Check(hs::PitchCut(0) == hs::LevelCm && hs::PitchCut(90) == hs::UpCm && hs::PitchCut(-90) == hs::DownCm, "the defaults: level, straight up, straight down");
     }

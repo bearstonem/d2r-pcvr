@@ -96,6 +96,7 @@ int main() {
     Check(ElementColour(149) == War && ElementColour(68) == Bone && ElementColour(278) == Poison, "warcries, bone, venom");
     Check(ElementColour(99) == Holy && ElementColour(102) == Fire && ElementColour(114) == Cold, "paladin auras by element, others holy");
     Check(ElementColour(9999) == Drawing, "an unknown skill: pale arcane");
+    Check(ElementColour(359) == Magic && ElementColour(220) == Magic && ElementColour(219) == Magic, "Town Portal: arcane, as Teleport");
     Check(ElementColour(87) == Curse && ElementColour(85) == Curse && ElementColour(70) == Bone && ElementColour(90) == Steel, "necromancer: curses, blood, bone, iron");
     Check(ElementColour(98) == War && ElementColour(123) == Magic && ElementColour(109) == Nature && ElementColour(119) == Holy, "paladin auras: might, conviction, cleansing, sanctuary");
     Check(ElementColour(264) == Shadow && ElementColour(277) == Steel && ElementColour(271) == Lightning && ElementColour(262) == Fire, "assassin: shadow, blades, traps");

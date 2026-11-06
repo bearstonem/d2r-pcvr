@@ -24,7 +24,7 @@ namespace framevr::settings {
 enum class View : uint8_t { Presets, Body, Combat, Aim, Targets, Shield, Wrist, Interface, Survival, World, Vibration, Performance, Guide, WhatsNew, More, Count };
 enum Key { Motion, Seated, Dominant, Snap, TurnSpeed, Waist, BeltForward,
            Foveation, Sky, Fog, Ceiling, DrawDistance, ObjectDistance,
-           EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, VitalsTilt, HapticStrength, HapticMelee, HapticBowDraw, HapticBowRelease, HapticSpell, HapticInteraction, HapticAlert, HapticShortMelee, BloodVisor, BloodWipe, MeleeThrustSpeed, LootLabelSize, CompanionCounts, StrainVignette, OfflinePlayers, ShieldBashSpeed, DesktopOneEye, MapTopDown, MapRotate, FoveationStrength, StereoRendering, DeferGpuWait, TargetHighlight, HeartbeatStart, SpellLock, StaffPoint, LandingCircles, GroundAim, AimHighlights, HighlightRight, HighlightLeft, ElementalHands, EnemySight, BowLaser, ThrowLift, BottlePhysics, PropPhysics, CompanionAi, ShieldGrip, ShieldOut, ShieldUp, ShieldFollow, ShieldRoll, AimFollowsView, CompanionTactical, LeftHandStrikes, TorchFlame, FrameGeneration, FrameGenPreset, FrameGenScale, RunSpeed, RunWalkToggle, BodyPhysics, BigObjectDistance, FogDistance, LeatherMenu, LootBeamUnique, LootBeamSet, LootBeamRare, LootBeamRunes, LootBeamBrightness, CeilingTorches, ArcaneDecay, ArcaneFade, ManaThreshold, ArcaneIntensity, GlyphDraw, GlyphCircle, GlyphTriangle, GlyphSquare, GlyphLightning, GlyphSpiral, GlyphV, GlyphStar, GlyphWave, LootPick, Count };
+           EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, VitalsTilt, HapticStrength, HapticMelee, HapticBowDraw, HapticBowRelease, HapticSpell, HapticInteraction, HapticAlert, HapticShortMelee, BloodVisor, BloodWipe, MeleeThrustSpeed, LootLabelSize, CompanionCounts, StrainVignette, OfflinePlayers, ShieldBashSpeed, DesktopOneEye, MapTopDown, MapRotate, FoveationStrength, StereoRendering, DeferGpuWait, TargetHighlight, HeartbeatStart, SpellLock, StaffPoint, LandingCircles, GroundAim, AimHighlights, HighlightRight, HighlightLeft, ElementalHands, EnemySight, BowLaser, ThrowLift, BottlePhysics, PropPhysics, CompanionAi, ShieldGrip, ShieldOut, ShieldUp, ShieldFollow, ShieldRoll, AimFollowsView, CompanionTactical, LeftHandStrikes, TorchFlame, FrameGeneration, FrameGenPreset, FrameGenScale, RunSpeed, RunWalkToggle, BodyPhysics, BigObjectDistance, FogDistance, LeatherMenu, LootBeamUnique, LootBeamSet, LootBeamRare, LootBeamRunes, LootBeamBrightness, CeilingTorches, ArcaneDecay, ArcaneFade, ManaThreshold, ArcaneIntensity, GlyphDraw, GlyphCircle, GlyphTriangle, GlyphSquare, GlyphLightning, GlyphSpiral, GlyphV, GlyphStar, GlyphWave, LootPick, MotionsOff, MotionsPaladinOff, MotionsDruidOff, MotionsAmazonOff, MotionsNecromancerOff, MotionsBarbarianOff, MotionsAssassinOff, GlyphDrawSecond, GlyphLeftCircle, GlyphLeftTriangle, GlyphLeftSquare, GlyphLeftLightning, GlyphLeftSpiral, GlyphLeftV, GlyphLeftStar, GlyphLeftWave, Count };
 // One bit per setting, 128 wide: two words, since MSVC has no 128-bit integer.
 struct ChangeMask {
     static constexpr int Bits=128;
@@ -198,11 +198,35 @@ inline constexpr std::array<Definition,Count> Definitions{{
     // Loot pick (loot_aim.h): 0 Off, A takes the game's nearest item; 1 On, the item you point at. VR Settings > Interface.
     // On by default (owner 2026-11-01, after headset play: "let's make it so it is on by default").
     {"Loot pick", "A picks up the item you point at, not the nearest", L"interactions",L"loot_pick",1,0,1,1},
+    // Motions (spell_motion.h; owner 2026-11-03): the spells the wheel's MOTIONS page turned off, one bit
+    // each (spellmotion::Bit); 0, every motion on. Not in VR Settings: the wheel is its editor.
+    {"Motions off", "The motion spells turned off on the MOTIONS page (one bit each)", L"motions",L"off",0,0,1023,1},
+    // The Paladin's and the Druid's (owner 2026-11-04): one bit per MOTIONS card (spellmotion::PageOf).
+    {"Paladin motions off", "The Paladin's motions turned off on the MOTIONS page (one bit each)", L"motions",L"paladin_off",0,0,1023,1},
+    {"Druid motions off", "The Druid's motions turned off on the MOTIONS page (one bit each)", L"motions",L"druid_off",0,0,1023,1},
+    // The Amazon's, the Necromancer's, the Barbarian's and the Assassin's (owner 2026-11-04): one bit per card.
+    {"Amazon motions off", "The Amazon's motions turned off on the MOTIONS page (one bit each)", L"motions",L"amazon_off",0,0,1023,1},
+    {"Necromancer motions off", "The Necromancer's motions turned off on the MOTIONS page (one bit each)", L"motions",L"necromancer_off",0,0,1023,1},
+    {"Barbarian motions off", "The Barbarian's motions turned off on the MOTIONS page (one bit each)", L"motions",L"barbarian_off",0,0,1023,1},
+    {"Assassin motions off", "The Assassin's motions turned off on the MOTIONS page (one bit each)", L"motions",L"assassin_off",0,0,1023,1},
+    // Each hand its own glyphs (owner 2026-11-05: "expand the glyphs where left and the right hand glyphs can be
+    // different sets"): a second Draw glyph button, on the other hand from draw_slot (either key either hand:
+    // glyphcast::DrawSlots), and the left hand's skill on each shape, -1 none of its own: it casts the right
+    // hand's. circle ... wave above stay the right hand's, so a profile saved before reads as it did.
+    {"Second Draw glyph button", "The other hand's button that draws glyphs; -1 none", L"glyphs",L"second_draw_slot",-1,-1,9,1},
+    {"Left circle glyph", "The skill a circle drawn with the left hand casts; -1 the right hand's", L"glyphs",L"left_circle",-1,-1,4095,1},
+    {"Left triangle glyph", "The skill a triangle drawn with the left hand casts; -1 the right hand's", L"glyphs",L"left_triangle",-1,-1,4095,1},
+    {"Left square glyph", "The skill a square drawn with the left hand casts; -1 the right hand's", L"glyphs",L"left_square",-1,-1,4095,1},
+    {"Left lightning glyph", "The skill a lightning bolt drawn with the left hand casts; -1 the right hand's", L"glyphs",L"left_lightning",-1,-1,4095,1},
+    {"Left spiral glyph", "The skill a spiral drawn with the left hand casts; -1 the right hand's", L"glyphs",L"left_spiral",-1,-1,4095,1},
+    {"Left V glyph", "The skill a V drawn with the left hand casts; -1 the right hand's", L"glyphs",L"left_v",-1,-1,4095,1},
+    {"Left star glyph", "The skill a star drawn with the left hand casts; -1 the right hand's", L"glyphs",L"left_star",-1,-1,4095,1},
+    {"Left wave glyph", "The skill a wave drawn with the left hand casts; -1 the right hand's", L"glyphs",L"left_wave",-1,-1,4095,1},
 }};
 using Values=std::array<float,Count>;
-// The setting holding the skill on glyph shape i (glyph_recognizer.h order).
-inline Key GlyphKey(int shape){return Key(GlyphCircle+shape);}
-static_assert(GlyphWave-GlyphCircle==7,"one key per glyph shape, in the recognizer's order");
+// The setting holding the skill on glyph shape i (glyph_recognizer.h order): the right hand's (0), or the left's (1).
+inline Key GlyphKey(int shape,int hand=0){return Key((hand==1?GlyphLeftCircle:GlyphCircle)+shape);}
+static_assert(GlyphWave-GlyphCircle==7&&GlyphLeftWave-GlyphLeftCircle==7,"one key per glyph shape and hand, in the recognizer's order");
 inline bool HapticKey(Key key){return key>=HapticStrength&&key<=HapticAlert;}
 // An outline's color per source (right hand, left hand; the eyes take the hand that would cast): 0 By range, else its hue.
 inline bool HighlightKey(Key key){return key==HighlightRight||key==HighlightLeft;}

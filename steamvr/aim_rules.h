@@ -81,6 +81,10 @@ inline bool MonsterSwitch(Use use,bool bow,const Switches& s) {
 // Cells short of the target, toward the caster: Bone Wall rises in front of the
 // monster, Bone Prison (and every other skill) on it (Jeff, 2026-10-20).
 inline float FrontOfTarget(int skill){return skill==78?3.f:0.f;}
+// A motion's cast that lands on the highlighted monster when there is one, rather than where the motion
+// pointed (owner, 2026-11-05: "the meteor has to land on a selected target if there's one. You know how we
+// highlight the monster?", then "You need to also do the same thing with Blizzard"): Meteor, Blizzard.
+inline bool MotionOnTarget(int skill){return skill==56||skill==59;}
 // Skills the game should be handed the monster itself, when there is one: seekers
 // home in on it (Guided Arrow, Bone Spirit), Attract and Taunt need a unit, and
 // the traveling attacks (Charge, Leap Attack, Dragon Flight) fight it. With no

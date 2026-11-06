@@ -94,15 +94,16 @@ int main(){
         s.in.reply={r.sequence,r.session,Result::Applied};s.Step();
         Check(s.out.editor==0,"applied: back on the hand wheel");
     }
-    {   // the GLYPHS page: a shape's skill, from the hero's own skills that need no target
+    {   // the GLYPHS page: a shape's skill, from the hero's own skills that need no target, and Town Portal
         Sim s;s.in.snapshot.catalog[2].directed=true;   // 96 needs a target
+        s.Add(359);s.in.snapshot.catalog[size_t(s.in.snapshot.skillCount-1)].directed=true;   // Town Portal, even were its row read as aimed
         s.in.wheel=true;s.Step();
         s.Click(GlyphsCell);Check(s.out.glyphs&&Page(s.out)==MenuPage::Glyphs&&s.out.feedback==1,"the GLYPHS box opens the page");
         Check(WheelCell(.85f,.1f,-1,MenuPage::Glyphs,0)==GlyphsCell&&WheelCell(.1f,.1f,-1,MenuPage::Glyphs,0)!=QuickUseCell,"only the GLYPHS box on its page");
         s.Click(2);Check(s.out.editor==2&&s.out.glyphEdit==2&&s.out.editSlot==-1,"a shape opens the skill picker for it, not a button's");
         bool clean=true;
         for(int i=0;i<s.out.editCount;++i){const auto& k=s.out.editOptions[size_t(i)];clean=clean&&k.id!=357&&k.id!=96&&k.owner==-1&&k.id!=GlyphDrawId;}
-        Check(clean&&s.out.editCategoryCounts[categories::All]==14,"no Interact, no targeted skill, no item charges, no Draw glyph");
+        Check(clean&&s.out.editCategoryCounts[categories::All]==15,"the 14 untargeted skills and Town Portal: no Interact, no targeted skill, no item charges, no Draw glyph");
         const int chosen=s.out.editOptions[1].id;
         auto r=s.Click(1).request;
         Check(r.action==Action::BindGlyph&&r.index==2&&r.skill==chosen&&r.skillOwner==-1,"choosing: the square's skill");
@@ -117,8 +118,49 @@ int main(){
         s.Click(4);s.in.snapshot.bindingBank=0;s.Step();Check(s.out.editor==2&&s.out.glyphEdit==4,"nor closes a shape's picker");
         s.Click(11);s.Click(9);Check(!s.out.glyphs&&!s.out.utility&&Page(s.out)==MenuPage::Spells,"SPELLS leaves it");
         s.Click(GlyphsCell);s.Click(GlyphsCell);Check(!s.out.glyphs,"the box goes back too");
-        auto c=Context(s.in.snapshot,s.out,true);auto changed=s.out;changed.glyphSkills[0]=99;
+        auto c=Context(s.in.snapshot,s.out,true);auto changed=s.out;changed.glyphSkills[0][0]=99;
         Check(c!=Context(s.in.snapshot,changed,true),"a shape's skill repaints the page");
+    }
+    {   // Each hand its own set (owner, 2026-11-05): a left shape with none of its own casts the right hand's;
+        // the page opens on the wheel's own hand's set and its hand box shows the other's.
+        const GlyphSets sets{{{40,149,-1,57,-1,-1,-1,-1},{54,-1,42,-1,-1,-1,-1,-1}}};
+        Check(GlyphCasts(sets,0,0)==40&&GlyphCasts(sets,1,0)==54&&GlyphCasts(sets,1,2)==42&&GlyphCasts(sets,0,2)==-1,"each hand casts its own");
+        Check(GlyphCasts(sets,1,1)==149&&GlyphCasts(sets,1,3)==57&&GlyphFollows(sets,1,1)&&!GlyphFollows(sets,0,1)&&!GlyphFollows(sets,1,0),
+              "a left shape with none of its own: the right hand's");
+        Check(GlyphCasts(sets,1,4)==-1&&!GlyphFollows(sets,1,4)&&GlyphCasts(sets,1,8)==-1&&GlyphCasts(sets,0,-1)==-1&&!GlyphFollows(sets,1,8),"neither has one: none");
+        Check(GlyphIndex(0,3)==3&&GlyphIndex(1,3)==11,"BindGlyph's index: the left hand's shapes 8 on");
+        const auto h=GlyphHandBounds;const float u=(h.left+h.right)/2,v=(h.top+h.bottom)/2;
+        Check(WheelCell(u,v,-1,MenuPage::Glyphs,1)==GlyphHandCell&&WheelCell(u,v,-1,MenuPage::Spells,1)==QuickUseCell&&WheelCell(u,v,-1,MenuPage::Motions,1)!=GlyphHandCell,
+              "the hand box on the GLYPHS page only, in QUICK USE's corner");
+        for(int hand:{0,1}) {
+            Sim s(hand);s.in.glyphSkills=sets;s.in.wheel=true;s.Step();
+            s.Click(GlyphsCell);Check(s.out.glyphs&&s.out.glyphHand==hand,"the page opens on the wheel's own hand's set");
+            s.Click(GlyphHandCell);Check(s.out.glyphs&&s.out.glyphHand==1-hand&&s.out.feedback==1&&s.out.request.action==Action::None,"the hand box: the other hand's set, nothing saved");
+            s.Click(GlyphHandCell);Check(s.out.glyphHand==hand,"and back");
+        }
+        Sim s(0);s.in.glyphSkills=sets;s.in.glyphDraw={framevr::skills::HandSlot(0,1),framevr::skills::HandSlot(1,0)};s.in.wheel=true;s.Step();
+        s.Click(GlyphsCell);s.Click(GlyphHandCell);   // the right hand's wheel showing the left hand's set
+        s.Click(2);Check(s.out.editor==2&&s.out.glyphEdit==2&&s.out.glyphHand==1,"a left shape's picker");
+        const int chosen=s.out.editOptions[1].id;auto r=s.Click(1).request;
+        Check(r.action==Action::BindGlyph&&r.index==GlyphIndex(1,2)&&r.skill==chosen&&r.skillOwner==-1,"choosing: the left hand's square");
+        s.in.reply={r.sequence,r.session,Result::Applied};s.Step();
+        Check(s.out.editor==0&&s.out.glyphs&&s.out.glyphHand==1,"applied: back on the left hand's set");
+        s.Click(1);r=s.Click(8).request;
+        Check(r.action==Action::BindGlyph&&r.index==GlyphIndex(1,1)&&r.skill==-1,"CLEAR GLYPH: the left hand's triangle has none of its own (the right hand's again)");
+        s.in.reply={r.sequence,r.session,Result::Applied};s.Step();
+        s.in.wheel=false;s.Step();s.in.wheel=true;s.Step();
+        Check(s.out.glyphs&&s.out.glyphHand==1,"closed and reopened: the same page and set");
+        s.in.wheelHand=1;s.in.trigger=0;s.Step();Check(!s.out.glyphs,"the left hand's wheel keeps its own page");
+        s.Click(GlyphsCell);Check(s.out.glyphs&&s.out.glyphHand==1,"its GLYPHS page: its own hand's set");
+        s.Click(GlyphHandCell);Check(s.out.glyphHand==0,"switched to the right hand's there");
+        s.in.wheelHand=0;s.in.trigger=0;s.Step();Check(s.out.glyphs&&s.out.glyphHand==1,"the right hand's wheel: the left set it was left on");
+        // The page repaints for the set shown, and for a right hand's skill a left shape casts.
+        auto c=Context(s.in.snapshot,s.out,true);auto changed=s.out;changed.glyphHand=0;
+        Check(c!=Context(s.in.snapshot,changed,true),"the other hand's set repaints");
+        Check(c.glyphSkills[0].id==54&&c.glyphSkills[1].id==149&&c.glyphSkills[4].id==-1&&c.glyphFollows==((1u<<1)|(1u<<3)),"the left set as painted: its own, the right hand's (dimmed), none");
+        changed=s.out;changed.glyphSkills[0][1]=58;Check(c!=Context(s.in.snapshot,changed,true),"the right hand's skill a left shape casts repaints");
+        changed=s.out;changed.glyphSkills[0][0]=58;Check(c==Context(s.in.snapshot,changed,true),"one the left has its own of does not");
+        changed=s.out;changed.glyphDraw[1]=framevr::skills::HandSlot(1,2);Check(c!=Context(s.in.snapshot,changed,true),"a hand's Draw glyph button repaints");
     }
     std::puts("Skill categories: native classes, filtering, paging, exact assignments, cancellation and paint invalidation passed");
 }
