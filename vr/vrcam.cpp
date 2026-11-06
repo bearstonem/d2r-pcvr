@@ -311,6 +311,7 @@ struct Settings {
     std::atomic<float> lightNight{65.0f};
     std::atomic<float> nightBright{0.25f};  // [sky] night_brightness: the sky and the fog at full night, times their day brightness
     std::atomic<bool>  skyAlways{false};    // whatever the biome (testing): caves get a sky too
+    std::atomic<bool>  campfireTest{false}; // [campfire] test: character creation's campfire scene in stereo (a first look)
     std::atomic<bool>  skyHidePanels{true}; // no sky while a side panel shifts the picture
     std::atomic<bool>  skyRims{true};       // [sky] cover_rims: the sky over the dark rim round things against it (SkyOverRims)
     std::atomic<bool>  fogCaves{false};     // [fog] caves: opt-in added indoor fog; native lighting/effects remain
@@ -1393,6 +1394,7 @@ void LoadSettings() {
     g_set.lightNight.store(std::clamp(IniF(L"sky", L"light_night", 65.0f), 0.0f, 254.0f));
     g_set.nightBright.store(std::clamp(IniF(L"sky", L"night_brightness", 0.25f), 0.0f, 1.0f));
     g_set.skyAlways.store(IniB(L"sky", L"always", false));
+    g_set.campfireTest.store(IniB(L"campfire", L"test", false));
     g_set.skyHidePanels.store(IniB(L"sky", L"hide_with_panels", true));
     {   // as the By turns switches: only a change of the ini's own value overrides DEV's
         static int read = -1;
@@ -9543,7 +9545,11 @@ void SkyTick() {
         // taken for a world it got the first person's stereo, HUD shift and hidden heads).
         const bool world = !biome.empty() && biome.find("frontend") == std::string::npos &&
                            biome.rfind("ui_", 0) != 0;
-        g_inWorld.store(world);
+        // [campfire] test=1: the campfire scene taken for a world, only for its stereo and
+        // camera - a first look at how it holds up close; no act, fog, sky or ceiling of its own.
+        const bool campfire = g_set.campfireTest.load() && biome == "ui_characterselectscreen";
+        if (campfire) LogF("vrcam: campfire test - '%s' in stereo as a world", biome.c_str());
+        g_inWorld.store(world || campfire);
         g_fogAct.store(world ? ActOfBiome(biome) : 0);
         g_underground.store(world && !IsOutdoorBiome(biome));
         g_ceilBiome.store(world && IsCeilingBiome(biome));
