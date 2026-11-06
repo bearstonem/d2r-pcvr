@@ -67,11 +67,11 @@ struct Tuning {
     float swingSpeed=1.5f;    // m/s: the leap's swing, each arm at its fastest
     // Leap lands leapAhead cells away the way the arms swung (straight ahead, where you face, if straight up).
     // Its way alone went nowhere: a placed skill takes a spot (the owner, 2026-11-05: "it goes to where the
-    // character was last moving ... Not where we're facing or not where our arms are ending up"). 30 cells, not
-    // 10: the hero landed on the 10-cell spot every time (owner, 2026-11-06: "the leaps themselves are way too
-    // short"), and on a 20-cell one too ("It still felt a little bit short. Maybe we'll go like 30 cells"); a
-    // spot past the skill's own reach is the game's to cut short, as a far click on a monitor.
-    float leapAhead=30;
+    // character was last moving ... Not where we're facing or not where our arms are ending up"). 25 cells, the
+    // game's own reach (owner, 2026-11-06: "the leaps themselves are way too short"): sent 10 and 20 the hero
+    // landed on the spot (9.5, 19.6 cells, 0 of 30 refused); sent 30 he went 21-26 (24 on average, his Leap's
+    // limit), and 4 of 17 never left the ground - a spot that far is more often one the game will not take.
+    float leapAhead=25;
     // Find Item: the right hand held out at the corpse (pointOut ahead or more, y in [pointLow, pointHigh],
     // |x| at most pointSide), resting dwellSeconds, then snatched back to the right shoulder (forward at most
     // snatchTo, y in [shoulderMin, shoulderMax], x in [shoulderIn, shoulderOut]), snatchBack or more toward
