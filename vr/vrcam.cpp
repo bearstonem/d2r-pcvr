@@ -212,7 +212,7 @@ struct Settings {
     std::atomic<float> height{8.0f};        // pivot above the ground look-at point (world units)
     std::atomic<bool>  heightAuto{true};    // first person: the eyes at the hero's own (each class its height); height unused
     std::atomic<float> eyeOffset{0.0f};     // added to that, world units
-    std::atomic<bool>  followJump{true};    // the camera goes up when the animation lifts the hero (Leap)
+    std::atomic<bool>  followJump{true};    // the camera goes up when the game lifts the hero (Leap's arc) or his hips rise
     std::atomic<float> leapGlideCm{60.0f};  // a Leap cast while running: how far ahead of the halted hero the view may glide (leapglide), cm; 0 off
     std::atomic<float> jumpFrom{0.3f};      // hip rise (model units) still taken for the stride's bob
     std::atomic<float> pitch{-60.0f};       // camera pitch relative to the game's own (deg); -60 = level, more negative = higher
@@ -1784,12 +1784,34 @@ float ScaleHeight() {
         return std::max(1.0f, (scaleEye > 0.0f ? scaleEye : eye) * g_heroScale.load() + g_set.eyeOffset.load());
     return g_set.height.load();
 }
+// Leap's arc (owner, 2026-11-06: "we don't seem to get much elevation off the ground"): the game
+// lifts the hero's whole model through a Leap - its matrix up to ~15 units (3.5 m) above the
+// look-at at the top - while his hips crouch, so the hips' lift below never saw it and the camera
+// stayed on the ground. HeroMatrixNow notes the matrix's rise each pose (g_unitRise); the camera
+// takes it from kRiseFrom, easing in to the whole rise by twice that ([camera] follow_jump).
+// The eye in the model leaves the rise out again (YawFromMatrix), so the held upper body and the
+// hands stay on the camera up there.
+constexpr float kRiseFrom = 0.3f;              // world units of matrix rise taken as the ground's, not a jump
+std::atomic<float> g_unitRise{0.0f};           // the hero's model matrix above the look-at at the last pose
+std::atomic<ULONGLONG> g_unitRiseAt{0};
+std::atomic<float> g_viewRise{0.0f};           // the rise the last view rebuild lifted the camera by
+float FollowedRise(float rise) {
+    if (ThirdPerson() || Overhead() || !g_set.followJump.load() || !(rise > kRiseFrom)) return 0.0f;   // the board stays put
+    const float t = std::clamp((rise - kRiseFrom) / kRiseFrom, 0.0f, 1.0f);
+    return std::min(rise, 30.0f) * t * t * (3.0f - 2.0f * t);
+}
+// The rise the camera takes now (0 when no pose has noted one lately: a menu, a load).
+float LeapRise() {
+    if (GetTickCount64() - g_unitRiseAt.load() > 100) return 0.0f;
+    return FollowedRise(g_unitRise.load());
+}
 // How far a jump lifts the eyes now, world units: on top of ViewHeight in the
-// view only - the world's scale must not change in mid-air.
-float JumpLift() {
+// view only - the world's scale must not change in mid-air. The hips' lift and
+// the game's rise of the unit (rise: LeapRise, taken once for the rebuild).
+float JumpLift(float rise) {
     float eye = 0.0f, lift = 0.0f;
-    if (ThirdPerson() || !g_set.followJump.load() || !skel::HeroEye(&eye, &lift)) return 0.0f;
-    return lift * g_heroScale.load();
+    if (ThirdPerson() || !g_set.followJump.load()) return 0.0f;
+    return (skel::HeroEye(&eye, &lift) ? lift * g_heroScale.load() : 0.0f) + rise;
 }
 
 // Leap's take-off glide (owner, 2026-11-06: "Leap still feels like it stops before jumping ... It's not a smooth
@@ -1798,7 +1820,9 @@ float JumpLift() {
 // From a Leap cast while running ([camera] leap_glide_cm, 0 off) the view's anchor keeps the run's velocity,
 // easing it away over Ease s, at most leap_glide_cm ahead of the hero; once he moves again (half the run's
 // speed), or after For s, it melts back onto him over Rejoin s. Only the view moves: the hero, his path, the
-// hands' tracking and the aim keep the game's position (g_lookAt).
+// hands' tracking and the aim keep the game's position (g_lookAt). The lead is kept from the hero, not as a
+// place in the world: a rejoin held still while he ran on trailed him by his speed times Rejoin (half a metre)
+// for as long as he ran (first headset run: "rejoined after 35.32 s").
 float UserEyeHeightM();
 namespace leapglide {
 std::atomic<ULONGLONG> g_cast{0};   // NativeSpellAim: the last Leap cast (GetTickCount64)
@@ -1807,7 +1831,7 @@ struct State {
     bool have = false, on = false, rejoining = false;
     double at = 0, t0 = 0;
     float hx = 0, hz = 0, vx = 0, vz = 0;     // the hero last view, and his smoothed velocity (world units a second)
-    float cx = 0, cz = 0, cvx = 0, cvz = 0;   // the anchor and its velocity while gliding
+    float ox = 0, oz = 0, cvx = 0, cvz = 0;   // the anchor less the hero, and the anchor's velocity while gliding
     float run = 0;                            // the run's speed as the glide began
     float most = 0;                           // the farthest ahead this glide, cm (for the log)
     ULONGLONG cast = 0;
@@ -1820,12 +1844,13 @@ void Anchor(const float L[3], float out[3]) {
     const double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
     if (!s.have) { s.have = true; s.at = now; s.hx = L[0]; s.hz = L[2]; return; }
     const double dt = now - s.at;
-    if (dt < 1e-3) { if (s.on) { out[0] = s.cx; out[2] = s.cz; } return; }   // the other eye of this pair
+    if (dt < 1e-3) { if (s.on) { out[0] = L[0] + s.ox; out[2] = L[2] + s.oz; } return; }   // the other eye of this pair
+    const float dx = L[0] - s.hx, dz = L[2] - s.hz;                          // the hero's step since the last view
     if (dt > 0.25) { s.vx = s.vz = 0; s.on = false; }                         // a gap (a menu, a load): forget
     else {
         const float a = float(std::min(1.0, dt / 0.06));
-        s.vx += ((L[0] - s.hx) / float(dt) - s.vx) * a;
-        s.vz += ((L[2] - s.hz) / float(dt) - s.vz) * a;
+        s.vx += (dx / float(dt) - s.vx) * a;
+        s.vz += (dz / float(dt) - s.vz) * a;
     }
     s.at = now; s.hx = L[0]; s.hz = L[2];
     const float cm = g_set.leapGlideCm.load();
@@ -1835,35 +1860,32 @@ void Anchor(const float L[3], float out[3]) {
         const float run = std::hypot(s.vx, s.vz);
         if (!s.on && cm > 0 && GetTickCount64() - cast < 300 && run > 2.0f && !ThirdPerson()) {
             s.on = true; s.rejoining = false; s.t0 = now; s.run = run; s.most = 0;
-            s.cx = L[0]; s.cz = L[2]; s.cvx = s.vx; s.cvz = s.vz;
+            s.ox = s.oz = 0; s.cvx = s.vx; s.cvz = s.vz;
+            return;
         }
     }
     if (!s.on) return;
     const float upm = std::max(1.0f, ScaleHeight()) / UserEyeHeightM();
     const float cap = cm * 0.01f * upm;
-    float ox = 0, oz = 0;
     if (!s.rejoining) {
         const float k = float(std::exp(-dt / Ease));   // the run's velocity eased away
         s.cvx *= k; s.cvz *= k;
-        s.cx += s.cvx * float(dt); s.cz += s.cvz * float(dt);
-        ox = s.cx - L[0]; oz = s.cz - L[2];
-        const float o = std::hypot(ox, oz);
-        if (o > cap && o > 1e-4f) { ox *= cap / o; oz *= cap / o; }
+        s.ox += s.cvx * float(dt) - dx; s.oz += s.cvz * float(dt) - dz;   // the anchor ran on while the hero stepped
+        const float o = std::hypot(s.ox, s.oz);
+        if (o > cap && o > 1e-4f) { s.ox *= cap / o; s.oz *= cap / o; }
         if (std::hypot(s.vx, s.vz) > 0.5f * s.run || now - s.t0 > For) s.rejoining = true;   // moving again
     } else {
-        ox = s.cx - L[0]; oz = s.cz - L[2];
-        const float k = float(std::exp(-dt / Rejoin));
-        ox *= k; oz *= k;
-        if (std::hypot(ox, oz) < 0.005f * upm) {
+        const float k = float(std::exp(-dt / Rejoin));   // the lead shrinks onto the hero, wherever he goes
+        s.ox *= k; s.oz *= k;
+        if (std::hypot(s.ox, s.oz) < 0.005f * upm || now - s.t0 > For + 1.0) {
             s.on = false;
             LogF("vrcam: Leap's take-off glide - the view ran on up to %.0f cm ahead of the hero, rejoined after %.2f s (run %.1f units/s)",
                  s.most, now - s.t0, s.run);
             return;
         }
     }
-    s.cx = L[0] + ox; s.cz = L[2] + oz;
-    s.most = std::max(s.most, std::hypot(ox, oz) / upm * 100.0f);
-    out[0] = s.cx; out[2] = s.cz;
+    s.most = std::max(s.most, std::hypot(s.ox, s.oz) / upm * 100.0f);
+    out[0] = L[0] + s.ox; out[2] = L[2] + s.oz;
 }
 }  // namespace leapglide
 
@@ -2727,6 +2749,7 @@ bool VrViewInner(const d2rcam::WorldView& in, float out[16]) {
     float glide[3];   // the view's anchor: the hero, or ahead of him through Leap's take-off (leapglide)
     leapglide::Anchor(L, glide);
     const float* A = TableView() || TopPersp() ? L : glide;
+    const float rise = LeapRise();   // the game's lift of the hero (Leap's arc), the same for the whole rebuild
     const float gameForward[3] = {-G[2], -G[6], -G[10]};
     billboards::SetGameForward(gameForward);   // auras keep its lift (vr/overlay_view.h)
     V3 fwd, ahead, right, up, eye, hang;
@@ -2754,7 +2777,7 @@ bool VrViewInner(const d2rcam::WorldView& in, float out[16]) {
     up = up0 * cosf(roll) + right * sinf(roll);
 
     // The eye point: the hero's eyes, moved along where we look, flattened on the ground.
-    const V3 pivot = V3{A[0], A[1] + ViewHeight() + JumpLift(), A[2]} + right * g_set.camSide.load() + ahead * g_set.camForward.load();
+    const V3 pivot = V3{A[0], A[1] + ViewHeight() + JumpLift(rise), A[2]} + right * g_set.camSide.load() + ahead * g_set.camForward.load();
     // Neck model: the head turns about the top of the neck - over the body's
     // middle, below and behind the eyes - not about the eyes. Level, the eyes
     // sit in front of the neck; looking down they go forward and down with the
@@ -2791,14 +2814,14 @@ bool VrViewInner(const d2rcam::WorldView& in, float out[16]) {
             (g_headHeld.load() ? g_heldYaw.load() : g_mouseYaw.load() + g_turnYaw.load()) * 0.0174532925f;
         const float recenter = g_recenter.load() * 0.0174532925f;
         float center[16];
-        framevr::View(center, A, ViewHeight() + JumpLift(), UserEyeHeightM(), baseHeading, recenter, -1, mapNorth, ScaleHeight() + JumpLift());
+        framevr::View(center, A, ViewHeight() + JumpLift(rise), UserEyeHeightM(), baseHeading, recenter, -1, mapNorth, ScaleHeight() + JumpLift(rise));
         eye = {-center[12]*center[0]-center[13]*center[1]-center[14]*center[2],
                -center[12]*center[4]-center[13]*center[5]-center[14]*center[6],
                -center[12]*center[8]-center[13]*center[9]-center[14]*center[10]};
         hang = eye;
         const float centerPosition[3]={eye.x,eye.y,eye.z};
         billboards::SetCenter(centerPosition);
-        framevr::View(view, A, ViewHeight() + JumpLift(), UserEyeHeightM(), baseHeading, recenter, g_eye.load(), mapNorth, ScaleHeight() + JumpLift());
+        framevr::View(view, A, ViewHeight() + JumpLift(rise), UserEyeHeightM(), baseHeading, recenter, g_eye.load(), mapNorth, ScaleHeight() + JumpLift(rise));
         if ((g_eye.load() & 1) == 0) stereoreplay::SetLeftView(view, framevr::ReplayShift());   // the replay's right eye: this one moved along its x
         fwd = {-center[2], -center[6], -center[10]};
         const float horizontal = std::hypot(fwd.x, fwd.z);
@@ -2812,6 +2835,7 @@ bool VrViewInner(const d2rcam::WorldView& in, float out[16]) {
     const float hangA[3] = {hang.x, hang.y, hang.z};
     for (int i = 0; i < 3; ++i) g_eyeWorld[i].store(hangA[i]);
     for (int i = 0; i < 3; ++i) g_eyeFromLook[i].store(hangA[i] - L[i]);
+    g_viewRise.store(rise);
     g_eyeOk.store(true);
 
     V3 camPos = eye;   // this eye's camera, for the table's bounds
@@ -7735,6 +7759,9 @@ bool YawFromMatrix(const float* m, float* out, float* eyeModel, bool* eyeOk, flo
         float eye[3] = {g_eyeWorld[0].load(), g_eyeWorld[1].load(), g_eyeWorld[2].load()}, look[3];
         if (LookAtNow(look))
             for (int i = 0; i < 3; ++i) eye[i] = look[i] + g_eyeFromLook[i].load();
+        // Up a Leap the camera rose with the model: the eye in it is the standing one. Its
+        // last rebuild's rise for the one noted at this pose, which m carries (HeroMatrixNow).
+        eye[1] += LeapRise() - g_viewRise.load();
         const float d[3] = {eye[0] - m[12], eye[1] - m[13], eye[2] - m[14]};
         for (int r = 0; r < 3; ++r) {
             const float l2 = m[r*4]*m[r*4] + m[r*4+1]*m[r*4+1] + m[r*4+2]*m[r*4+2];
@@ -7795,7 +7822,9 @@ void DiagPose(float yawInModel) {
 // ways). Whichever, it is made this frame's: the translation is the camera's
 // look-at (exactly the hero's position, and already this frame's), and a
 // matrix whose translation is not on it yet is a frame old, so its yaw gets
-// the last step it turned by.
+// the last step it turned by. Its height above the look-at is the game's lift
+// of the hero (Leap's arc): noted for the camera (g_unitRise), and the part
+// the camera follows is kept.
 void HeroMatrixNow(uintptr_t at, float* m) {
     static SRWLOCK lock = SRWLOCK_INIT;
     static uintptr_t lastAt = 0;
@@ -7820,7 +7849,11 @@ void HeroMatrixNow(uintptr_t at, float* m) {
             m[r*4] = x * c + z * sn; m[r*4 + 2] = -x * sn + z * c;
         }
     }
-    if (off < 2.0f) { m[12] = look[0]; m[13] = look[1]; m[14] = look[2]; }
+    if (off < 2.0f) {
+        const float rise = m[13] - look[1];
+        g_unitRise.store(std::isfinite(rise) ? rise : 0.0f); g_unitRiseAt.store(GetTickCount64());
+        m[12] = look[0]; m[13] = look[1] + FollowedRise(rise); m[14] = look[2];
+    }
 }
 
 // The matrix to read at this pose: the structural one resolved now (its array moves when it
@@ -7855,13 +7888,21 @@ bool FreshYawInModel(float* yawInModel, float* eyeModel, bool* eyeOk) {
     {   // Diagnostics for the jump: does the game lift the unit itself (matrix
         // above the look-at), or only the animation (the hips, skel::HeroEye)?
         static ULONGLONG told = 0;
+        static float top = 0.0f, topCam = 0.0f;   // this jump's highest rise, and what the camera took of it
         float eye = 0.0f, lift = 0.0f, rawLift = 0.0f;
-        const float unitLift = raw[13] - m[13];
+        const float unitLift = GetTickCount64() - g_unitRiseAt.load() < 100 ? g_unitRise.load() : 0.0f;   // HeroMatrixNow noted it
         if (skel::HeroEye(&eye, &lift, &rawLift) && (rawLift > 0.6f || fabsf(unitLift) > 0.3f) && GetTickCount64() - told > 500) {
             told = GetTickCount64();
             LogF("vrcam: jump - hips %.2f above standing (camera up %.2f units), model matrix %.2f above the look-at",
-                 rawLift, lift * g_heroScale.load(), unitLift);
+                 rawLift, JumpLift(LeapRise()), unitLift);
         }
+        if (unitLift > top) { top = unitLift; topCam = JumpLift(LeapRise()); }
+        else if (unitLift < kRiseFrom && top > 2.0f) {
+            LogF("vrcam: Leap's arc - the hero rose %.1f units (%.0f cm), the camera with him %.1f", top,
+                 top / std::max(0.1f, std::max(1.0f, ScaleHeight()) / UserEyeHeightM()) * 100.0f, topCam);
+            top = topCam = 0.0f;
+        }
+        else if (unitLift < kRiseFrom) top = topCam = 0.0f;
     }
     if (!YawFromMatrix(m, &yaw, eyeModel, eyeOk, rows)) {
         flog::Line("P,%u,%.4f,%d,%p,%.3f,%.3f,%.3f,,,,,,,,noview", flog::Pass(), flog::Dt(), g_eye.load() & 1, (void*)at,
