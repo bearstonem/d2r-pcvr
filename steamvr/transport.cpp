@@ -78,6 +78,7 @@
 #include "../vr/wall_cells.h"
 #include "../vr/prop_scan.h"
 #include "elemental_hands_renderer.h"
+#include "elemental_particles.h"
 #include "../vr/companion_ai.h"
 #include "telegraph.h"
 #include "tactical_chord.h"
@@ -905,6 +906,10 @@ std::atomic<ULONGLONG> bodyStrikeAt[2]{};   // a weapon's contact the game count
 elements::Renderer elementalRenderer;
 elements::State elementalState;
 elements::Scene elementalScene;
+elements::Effects elementalEffects;   // the hands' particles, stepped once a frame into elementalScene.drawn
+// Each spell hand's element (elements::Element), opacity and when (ms; 0 none), for its light on the world
+// (vrcam, another thread: ElementalHandLight).
+std::atomic<int> elementalLightElement[2]{};std::atomic<float> elementalLightOpacity[2]{};std::atomic<uint64_t> elementalLightAt[2]{};
 panels::MouseGate panelMouse;
 menus::ReleaseGate menuControls;
 menus::Navigation menuNavigation;
@@ -1166,7 +1171,7 @@ void ClearInput() {
     interactions.Reset();interactionOutput={};interactionstate::Cancel();skel::SetInteractionHidden(0);
     potionScene={};if(droppedBottles)droppedBottles->Reset();
     if(bodyWorld)bodyWorld->Reset();   // the hook eases the bodies' last answers out
-    elementalState.Reset();elementalScene={};
+    elementalState.Reset();elementalScene={};elementalEffects.Reset();
     journalPlacement.LoseTracking();
     meleePoses.Clear();offhandPoses.Clear();CancelShieldCast();
     bowNeedsWorld=bowHasShot=leftNeedsWorld=leftHasShot=false;
@@ -4796,7 +4801,6 @@ void Input() {
     elements::Input elementalInput;
     elementalInput.context={interactionInput.session,(meleeEpoch<<32)|bowWorldEpoch,motionInput.skillContext,motionInput.equipment};
     elementalInput.at=interactionInput.at;
-    elementalInput.enabled=hudSettings.values[settings::ElementalHands]>.5f;
     elementalInput.active=motionInput.active&&!interactionOutput.wheel&&!interactionOutput.stowed&&!journalMode;
     elementalInput.head=interactionInput.head;
     for(int h=0;h<2;++h) {
@@ -4844,6 +4848,17 @@ void Input() {
                 elementalScene.at = interactionInput.at;
                 if(elementalScene.time==0.0f)elementalScene.time=float(interactionInput.at%60000)/1000.f;
             }
+        }
+    }
+    // The hands' particles (elemental_particles.h): once a frame, the torch's flame with them.
+    elementalEffects.Step(elementalScene);
+    {   // and their light, a torch's own aside
+        const auto now=GetTickCount64();const bool current=elements::Current(elementalScene,gamestate::LocalPlayer(),now);
+        for(int h=0;h<2;++h) {
+            const auto& hand=elementalScene.hands[size_t(h)];
+            const bool lit=current&&hand.element!=elements::Element::None&&hand.opacity>0&&hand.skill!=torch::TorchSkill;
+            elementalLightElement[h].store(lit?int(hand.element):0);elementalLightOpacity[h].store(lit?hand.opacity:0.f);
+            elementalLightAt[h].store(lit?now:0);
         }
     }
     if(interactionInput.active||leatherHudVitals) {   // the HUD held with the menu repaints its vitals too
@@ -6685,6 +6700,13 @@ bool MotionCastRay(float outOrigin[3],float outDirection[3]) {
     outDirection[0]=r.x;outDirection[1]=r.y;outDirection[2]=r.z;
     return std::isfinite(o.x+o.y+o.z+r.x+r.y+r.z);
 }
+bool ElementalHandLight(int hand,int& element,float& opacity) {
+    if(hand<0||hand>1)return false;
+    const auto at=elementalLightAt[hand].load(),now=GetTickCount64();
+    if(!at||now<at||now-at>150)return false;
+    element=elementalLightElement[hand].load();opacity=elementalLightOpacity[hand].load();
+    return element>0&&opacity>0;
+}
 bool SpellSelected() {
     std::lock_guard lock(mutex);
     return (motionControls.load()&&motionInput.active&&!motionOutput.block&&motionOutput.rayValid&&
@@ -6995,7 +7017,7 @@ void SetBowWorldEpoch(uint32_t epoch) {
     std::lock_guard lock(mutex);
     if(bowWorldEpoch==epoch)return;
     bowWorldEpoch=epoch;bowNeedsWorld=bowHasShot=leftNeedsWorld=leftHasShot=false;CancelShieldCast();
-    elementalState.Reset();elementalScene={};
+    elementalState.Reset();elementalScene={};elementalEffects.Reset();
     if(motionInput.weapon==gameplay::Weapon::Bow||motionInput.weapon==gameplay::Weapon::Javelin){motion.Cancel();motionOutput={};}
 }
 uint64_t BowRenderTime(){return bowRenderTime.load();}
@@ -7143,7 +7165,7 @@ void Shutdown(bool preserveResolution) {
     // when ordinary frame submission uses queue ordering without a CPU wait.
     if(fence&&!WaitGpu())failed=true;
     if(uiEye.chain&&pDestroySwapchain)pDestroySwapchain(uiEye.chain);uiEye={};journalMode=spatialMode=workspacePlaced=leatherMode=false;leatherShown=false;uiworld::ShowWorldBehindMenu(false);hud::UiFrame(false,false,0);uiSupported=false;uiBlit={};potionModels.Reset();potionScene={};
-    elementalRenderer.Reset();elementalState.Reset();elementalScene={};
+    elementalRenderer.Reset();elementalState.Reset();elementalScene={};elementalEffects.Reset();
     if(mapEye.chain&&pDestroySwapchain)pDestroySwapchain(mapEye.chain);mapEye={};mapSupported=false;mapBlit={};gamestate::MenuMap(false);hud::MenuMapCapture(false);
     settingsModel.Close();settingsOpen=false;settingsInputGate.Suspend();settingsPainted={};settingsAtlasPending=settingsImageReady=false;
     settingsPaintRequest=0;settingsRequested={};

@@ -1,7 +1,9 @@
-// D3D12 WARP readback fixture for the procedural aura and the sprite looks,
-// with a synthetic sprite cache. No game, headset or assets required.
+// D3D12 WARP readback fixture for the procedural aura and the particle looks
+// (elemental_particles.h), with a synthetic sprite cache. No game, headset or
+// assets required.
 // elemental-hands-render-test [preview.ppm [sprite cache folder]]
 #include "elemental_hands_renderer.h"
+#include "elemental_particles.h"
 #include "spell_sprites.h"
 #include <dxgi1_4.h>
 #include <d3d12sdklayers.h>
@@ -23,10 +25,11 @@ std::filesystem::path WriteCache() {
     std::filesystem::create_directories(folder);
     std::vector<uint8_t> d;
     auto put=[&](uint32_t v){d.insert(d.end(),reinterpret_cast<uint8_t*>(&v),reinterpret_cast<uint8_t*>(&v)+4);};
-    put(0x31505353);put(1);put(elements::sprites::Count);
+    put(0x31505353);put(elements::sprites::Version);put(elements::sprites::Count);
     for(unsigned i=0;i<elements::sprites::Count;++i) {
-        const bool ramp=elements::sprites::Ramp(i);
-        const uint32_t format=ramp?29:i==elements::sprites::FrozenOrb?77:80;
+        namespace sp=elements::sprites;
+        const bool ramp=sp::Ramp(i);
+        const uint32_t format=ramp?29:i==sp::Distortion?83:i==sp::FrozenOrb||i==sp::Flakes||i==sp::IceCaustic?77:80;
         put(i);put(8);put(8);put(format);put(1);
         put(uint32_t(elements::sprites::MipBytes(format,8,8)));
         for(unsigned texel=0;texel<(ramp?64u:4u);++texel) {
@@ -35,8 +38,10 @@ std::filesystem::path WriteCache() {
                 const uint8_t rgba[4]={uint8_t(warm?255:40),uint8_t(warm?96:120),uint8_t(warm?16:255),255};
                 d.insert(d.end(),rgba,rgba+4);
             } else {
-                const uint8_t block[8]={255,255,0,0,0,0,0,0},colour[8]={255,255,255,255,0,0,0,0};
-                d.insert(d.end(),block,block+8);
+                // BC4: full; BC3: full alpha and white; BC5: the middle (no distortion)
+                const uint8_t block[8]={255,255,0,0,0,0,0,0},colour[8]={255,255,255,255,0,0,0,0},middle[8]={128,128,0,0,0,0,0,0};
+                if(format==83){d.insert(d.end(),middle,middle+8);d.insert(d.end(),middle,middle+8);}
+                else d.insert(d.end(),block,block+8);
                 if(format==77)d.insert(d.end(),colour,colour+8);
             }
         }
@@ -93,8 +98,13 @@ public:
         device->GetCopyableFootprints(&tex,0,1,0,&footprint,nullptr,nullptr,&bytes);
         D3D12_RESOURCE_DESC buffer{};buffer.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER;buffer.Width=bytes;
         buffer.Height=buffer.DepthOrArraySize=buffer.MipLevels=1;buffer.SampleDesc.Count=1;buffer.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-        elements::Scene scene;scene.time=shot.time;
-        scene.hands[0]={{{0,-.04f,-shot.distance},math::Yaw(.4f)},shot.element,shot.opacity,shot.pulse,shot.skill};
+        // The effects run a second up to the shot (a steady stream, with a burst where it cast), the hand held still.
+        elements::Scene scene;elements::Effects effects;
+        for(int frame=-90;frame<=0;++frame) {
+            scene.at=uint64_t(100000+int(shot.time*1000)+frame*11);scene.time=shot.time+float(frame)*.011f;
+            scene.hands[0]={{{0,-.04f,-shot.distance},math::Yaw(.4f)},shot.element,shot.opacity,frame>-8?shot.pulse:0,shot.skill};
+            effects.Step(scene);
+        }
         for(unsigned eye=0;eye<2;++eye) {
             heap.Type=D3D12_HEAP_TYPE_DEFAULT;
             Check(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&tex,D3D12_RESOURCE_STATE_RENDER_TARGET,nullptr,IID_PPV_ARGS(&targets[eye])),"target");
@@ -106,6 +116,7 @@ public:
             Require(!renderer.Render(list.Get(),targets[eye].Get(),2,view,{-.65f,.65f,-.5f,.5f},scene),"invalid eye must not render");
             Require(!renderer.Render(list.Get(),targets[eye].Get(),eye,view,{0,0,-.5f,.5f},scene),"invalid projection must not render");
             Require(renderer.Render(list.Get(),targets[eye].Get(),eye,view,{-.65f,.65f,-.5f,.5f},scene)==(shot.opacity>0),"render visibility");
+            if(renderer.Sprites())Require(shot.opacity<=0||scene.count>0,"the effects drew particles");
             D3D12_RESOURCE_BARRIER barrier{};barrier.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
             barrier.Transition={targets[eye].Get(),D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_COPY_SOURCE};
             list->ResourceBarrier(1,&barrier);heap.Type=D3D12_HEAP_TYPE_READBACK;

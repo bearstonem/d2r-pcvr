@@ -147,6 +147,7 @@ target_link_libraries(weapon-skills-test PRIVATE minhook)
 add_executable(quick-cast-test quick_cast_test.cpp)
 add_executable(hand-controls-test hand_controls_test.cpp)
 add_executable(elemental-hands-test elemental_hands_test.cpp)
+add_executable(elemental-particles-test elemental_particles_test.cpp)
 add_executable(elemental-hands-render-test elemental_hands_render_test.cpp elemental_hands_renderer.cpp)
 target_link_libraries(elemental-hands-render-test PRIVATE d3d12 dxgi framevr-runtime)
 add_executable(skill-pad-test skill_pad_test.cpp)
@@ -372,7 +373,7 @@ set_tests_properties(arcane-sky-test PROPERTIES TIMEOUT 30)
 add_test(NAME light-bounds-test COMMAND light-bounds-test)
 set_tests_properties(light-bounds-test PROPERTIES TIMEOUT 30)
 foreach(test_target IN ITEMS memory-test biome-list-test hook-metrics-test active-keys-test resource-descriptions-test latest-worker-test haptic-pulse-test thread-stats-test
-    gameplay-test weapon-skills-test quick-cast-test hand-controls-test elemental-hands-test skill-pad-test interact-press-test sewer-interaction-test notice-card-test mod-layout-test spell-aim-test bow-pose-test crossbow-pose-test body-tracking-test shapeshift-form-test head-shadow-test shield-steady-test body-calibration-test shoulder-swap-test blood-screen-test
+    gameplay-test weapon-skills-test quick-cast-test hand-controls-test elemental-hands-test elemental-particles-test skill-pad-test interact-press-test sewer-interaction-test notice-card-test mod-layout-test spell-aim-test bow-pose-test crossbow-pose-test body-tracking-test shapeshift-form-test head-shadow-test shield-steady-test body-calibration-test shoulder-swap-test blood-screen-test
     portal-billboard-test shrine-trace-test shrine-placement-test overlay-view-test bone-armor-height-test composition-layers-test projectile-rules-test environment-cutaway-test roof-materials-test stereo-prop-physics-test dropped-bottles-test props-test limb-rig-test limb-physics-test leather-menu-test stats-button-test menu-drop-test arcane-decay-test respec-button-test
     combat-rules-test strike-skills-test zeal-light-test skill-usage-test shield-guard-test shapeshift-gesture-test guard-strain-test heartbeat-test run-speed-test logging-test melee-contact-test melee-weapon-test breakables-test offline-difficulty-test enemy-sight-test attack-speed-test world-coordinates-test bow-flight-test bow-laser-test spell-cast-test spell-aim-assist-test hammer-gesture-test charge-gesture-test tactical-chord-test glyph-recognizer-test glyph-trail-test glyph-cast-test spell-motion-test motions-amazon-test motions-barbarian-test motions-necromancer-test motions-assassin-test cross-gesture-test heavens-gesture-test bone-graft-test
     interaction-test dev-scenarios-test native-belt-test wrist-hud-test map-zoom-test navigation-info-test companions-test active-effects-test dropped-item-labels-test stick-gestures-test show-items-command-test native-hud-test render-resolution-test render-pointer-test scene-depth-test game-device-only-test controller-bindings-test journal-test native-panels-test talk-stop-test loot-beams-test
