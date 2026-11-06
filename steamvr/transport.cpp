@@ -32,7 +32,9 @@
 #include "../vr/bow.h"
 #include "../vr/crossbow.h"
 #include "../vr/melee.h"
+#include "../vr/billboards.h"
 #include "frame_math.h"
+#include "armor_graft.h"
 #include "composition_layers.h"
 #include "swapchain_format.h"
 #include "input.h"
@@ -876,6 +878,9 @@ potions::Models potionModels;
 potions::Scene potionScene;
 // Bone Armor grafted onto both forearms (bone_graft.h): [render] bone_armor_graft.
 std::atomic<bool> boneGraftOn{true};
+std::atomic<bool> frozenArmorGraftOn{true};
+armorgraft::Source armorGraftSource=armorgraft::Source::None;
+uint64_t armorGraftSession=0;
 std::mutex boneGraftMutex;bonegraft::Settings boneGraftSettings;
 bonegraft::Arms boneGraftLayers;
 std::array<bonegraft::Falling,6> boneFalling{};
@@ -3186,11 +3191,34 @@ void StepBodies() {
 // pose with the drawn arm's shape (skel::ForearmOnController); one off each arm
 // per third of the absorb pool, thrown out and falling. Also tells the effect
 // hook (billboards) to hide the hero's own floor orbit while the grafts carry it.
+std::atomic<uint64_t> armorDepthUntil{0};
 void BoneGraftTick(bool show) {
     const auto& snap=interactionInput.snapshot;
+    const auto selected=armorgraft::Select(snap,interactionInput.session,interactionInput.at,
+        potionModels.Bones()>0||potionModels.IcePieces()>0,
+        boneGraftOn.load()&&potionModels.Bones()>0,frozenArmorGraftOn.load()&&potionModels.IcePieces()>0);
+    billboards::SetFrozenArmorGraftActive(selected.source==armorgraft::Source::Frozen);
+    armorDepthUntil.store(selected.source==armorgraft::Source::Frozen&&show?GetTickCount64()+500:0,std::memory_order_relaxed);
     const bool fresh=interaction::Fresh(snap,interactionInput.session,interactionInput.at);
-    const bool ready=boneGraftOn.load()&&potionModels.Bones()>0&&fresh;
-    const int layers=ready?bonegraft::Layers(snap.boneArmor,snap.boneArmorMax):0;
+    const bool ready=((boneGraftOn.load()&&potionModels.Bones()>0)||(frozenArmorGraftOn.load()&&potionModels.IcePieces()>0))&&fresh;
+    const int layers=selected.layers;
+    if(selected.source!=armorGraftSource||snap.session!=armorGraftSession) {
+        // Changing effect/character or removing Frozen Armor cannot leave falling
+        // fragments from the previous effect on screen. Bone-pool hits still use
+        // the unchanged layer animation below while Bone Armor remains active.
+        if(armorGraftSource==armorgraft::Source::Frozen)
+            Say("Frame ice armor: native state inactive/unavailable or source changed; grafts cleared");
+        if(selected.source==armorgraft::Source::Frozen)
+            Say("Frame ice armor: native Frozen/Shiver/Chilling Armor active; three ice grafts per forearm; native overlay hidden while grafts are active");
+        // Preserve Bone Armor's final depletion animation when no Frozen graft
+        // was involved. Reset only when switching into/out of the ice armor
+        // or changing the owning session.
+        if(selected.source==armorgraft::Source::Frozen||armorGraftSource==armorgraft::Source::Frozen||snap.session!=armorGraftSession) {
+            boneGraftLayers.Reset();for(auto& f:boneFalling)f.live=false;
+            for(auto& arm:boneLastShown)for(auto& shown:arm)shown=false;
+        }
+        armorGraftSource=selected.source;armorGraftSession=snap.session;
+    }
     bonegraft::Settings settings;{std::lock_guard lock(boneGraftMutex);settings=boneGraftSettings;}
     const double now=motionInput.time;const float dt=float(now-boneGraftTime);boneGraftTime=now;
     if(!ready){boneGraftLayers.Reset();for(auto& f:boneFalling)f.live=false;return;}
@@ -3213,11 +3241,13 @@ void BoneGraftTick(bool show) {
         if(placed[side][i]){boneLastPiece[side][i]=piece[side][i];boneLastShown[side][i]=bonegraft::Shown(i,layers);}
         if(placed[side][i]&&bonegraft::Shown(i,layers)) {
             const auto& p=piece[side][i];
-            potions::AddBone(potionScene,p.pose,i,p.length,p.width,p.armA,p.armB,p.armR);   // hidden behind its own forearm
+            if(selected.source==armorgraft::Source::Frozen)
+                potions::AddIce(potionScene,p.pose,i,p.length*1.15f,p.width*1.12f,p.armA,p.armB,p.armR,side==1);
+            else potions::AddBone(potionScene,p.pose,i,p.length,p.width,p.armA,p.armB,p.armR);
         }
     }
     for(auto& f:boneFalling)if(bonegraft::Step(f,dt)&&show)potions::AddBone(potionScene,f.pose,f.code,bonegraft::FallLength(f),bonegraft::FallWidth(f));
-    if(layers>0&&!boneGraftReported.exchange(true)) {
+    if(selected.source==armorgraft::Source::Bone&&layers>0&&!boneGraftReported.exchange(true)) {
         char line[240];std::snprintf(line,sizeof line,"Frame bone armor: grafted on both forearms (%u pieces cached), wrist to elbow x%.2f, %.2f thick, %.3f m out, %.0f deg apart, left mirrored; the hero's floor orbit hidden",
             potionModels.Bones(),settings.size,settings.width,settings.out,settings.spread);
         Say(line);
@@ -5300,6 +5330,24 @@ bool KeepDepth(ID3D12GraphicsCommandList* list,int eye) {
     kept.format=DXGI_FORMAT(latest.format);kept.scale[0]=latest.scale[0];kept.scale[1]=latest.scale[1];
     return true;
 }
+// The depth copy and its source eye travel together. In By turns use the
+// other eye drawn THIS frame, never this eye's stale depth after a head turn.
+potions::SceneDepth ArmorSceneDepth(unsigned source) {
+    if(!IceArmorDepthWanted()||source>1||!turnDepths[source].ok||!viewWorld[source].ok||
+       !stageWorld.valid||!(stageWorld.upm>=1&&stageWorld.upm<=12))return {};
+    potions::SceneDepth d;d.resource=turnDepths[source].texture.Get();d.format=turnDepths[source].format;
+    d.scale[0]=turnDepths[source].scale[0];d.scale[1]=turnDepths[source].scale[1];
+    d.nearMetres=viewWorld[source].nearPlane/stageWorld.upm;
+    const auto& v=views[source];d.view={V(v.pose.position),Q(v.pose.orientation)};
+    d.fov={v.fov.angleLeft,v.fov.angleRight,v.fov.angleDown,v.fov.angleUp};
+    static bool reported=false;
+    if(!reported&&d.nearMetres>0&&d.nearMetres<1){
+        reported=true;char line[256];std::snprintf(line,sizeof line,
+            "Frame ice armor depth: native scene depth active; near=%.5f m, scale=%.3f %.3f, format=%u; current source eye %u, other eye reprojects this source in By turns",
+            d.nearMetres,d.scale[0],d.scale[1],unsigned(d.format),source);Say(line);
+    }
+    return d;
+}
 // By turns: this present's effects layer (the game's own targets, as
 // effectslayer last saw them) into the eye's effects blocks, while the
 // turns keep the eye's own picture where the effects are.
@@ -5457,7 +5505,7 @@ bool TurnEye(int i) {
     // smeared (owner, 2026-10-19). The eye's copy fence was waited above.
     if(turned&&interactionInput.active&&potionModels.Ready())
         potionModels.Render(e.commands.Get(),image,unsigned(i),{V(now.pose.position),Q(now.pose.orientation)},
-            {now.fov.angleLeft,now.fov.angleRight,now.fov.angleDown,now.fov.angleUp},potionScene);
+            {now.fov.angleLeft,now.fov.angleRight,now.fov.angleDown,now.fov.angleUp},potionScene,eyes[i^1].copied?ArmorSceneDepth(unsigned(i^1)):potions::SceneDepth{});
     // The elemental hands likewise: Copy draws them after the image is kept.
     if(turned&&!panelMode&&!spatialMode&&!settingsModel.open&&interactionInput.active&&
        elements::Current(elementalScene,gamestate::LocalPlayer(),GetTickCount64()))
@@ -5656,9 +5704,9 @@ bool Copy(ID3D12Resource* src,Eye& e,reshade::api::command_queue* rq) {
     // drawn lays its own over (TurnEye) instead of moving these with the
     // depth behind them.
     turnKept[eye]=keepTurns&&KeepTurn(e.commands.Get(),src,int(eye),D3D12_RESOURCE_STATE_COPY_SOURCE);
-    turnDepths[eye].ok=keepDepth&&turnKept[eye]&&KeepDepth(e.commands.Get(),int(eye));
+    turnDepths[eye].ok=((keepDepth&&turnKept[eye])||IceArmorDepthWanted())&&KeepDepth(e.commands.Get(),int(eye));
     // and where the game's effects were in it (TurnDepth::keepEffects)
-    if(turnDepths[eye].ok)KeepEffects(e.commands.Get(),int(eye));else turnWarp.ForgetEffects(int(eye));
+    if(keepDepth&&turnDepths[eye].ok)KeepEffects(e.commands.Get(),int(eye));else turnWarp.ForgetEffects(int(eye));
     // By turns the game's interface was taken out of its picture: laid back as
     // the game lays it, before the headset and the window get the picture.
     uint32_t layerWidth=0,layerHeight=0;
@@ -5689,7 +5737,7 @@ bool Copy(ID3D12Resource* src,Eye& e,reshade::api::command_queue* rq) {
     if(!panelMode&&interactionInput.active&&potionModels.Ready()) {
         const auto& v=views[eye];
         potionModels.Render(e.commands.Get(),dest,eye,{V(v.pose.position),Q(v.pose.orientation)},
-            {v.fov.angleLeft,v.fov.angleRight,v.fov.angleDown,v.fov.angleUp},potionScene);
+            {v.fov.angleLeft,v.fov.angleRight,v.fov.angleDown,v.fov.angleUp},potionScene,ArmorSceneDepth(eye));
     }
     if(!panelMode&&!spatialMode&&!settingsModel.open&&interactionInput.active&&
        elements::Current(elementalScene,gamestate::LocalPlayer(),GetTickCount64())) {
@@ -6080,6 +6128,7 @@ float ReplayProjShift() {
     return .5f*(off(views[0].fov)-off(views[1].fov));
 }
 bool TurnDepthWanted() {return StereoRendering()==1;}
+bool IceArmorDepthWanted(){const auto until=armorDepthUntil.load(std::memory_order_relaxed);return until&&GetTickCount64()<=until;}
 bool TurnDepthReady() {
     std::lock_guard lock(mutex);
     return turnWarp.DepthReady()&&turnDepths[0].ok&&turnDepths[1].ok&&lastEyes[0].world.ok&&lastEyes[1].world.ok;
@@ -6941,6 +6990,7 @@ void ConfigureGuardStrain(float perBlock,float resetSeconds,float clear,float br
 void ConfigureGuardStrainRecover(float seconds) {
     strainRecoverSeconds=std::isfinite(seconds)?std::clamp(seconds,0.f,30.f):1.5f;
 }
+void ConfigureFrozenArmorGraft(bool on) {frozenArmorGraftOn=on;}
 void ConfigureBoneGraft(bool on,float size,float out,float spread,float along,float width) {
     boneGraftOn=on;
     std::lock_guard lock(boneGraftMutex);boneGraftSettings=bonegraft::Clamp({size,out,spread,along,width});
