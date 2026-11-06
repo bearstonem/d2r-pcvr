@@ -1177,6 +1177,7 @@ struct StaffHold {
     bool on = false;        // the hand holds the staff: pressed while near it, and not let go since
     float t = 0.0f;
     LONGLONG last = 0;
+    double pending = -1;    // soloStaffGrip: when the left grip was pressed at the shaft
     // for vrcam's aim
     float dir[3] = {};
     float gap = 0.0f;
@@ -1211,7 +1212,8 @@ void FromModel(V3 o, float c, float s, float out[3]) {
 // inReach: the left hand is close enough to the staff to take it. A grip pressed
 // far from it takes nothing until pressed again near it. A crossbow's support
 // grip may also engage by entering range while Grip is already held.
-float StaffEase(float grip, bool inReach, bool crossbow=false, bool tracked=true, uint32_t weapon=0, uint32_t generation=0) {
+float StaffEase(float grip, bool inReach, bool crossbow=false, bool tracked=true, uint32_t weapon=0, uint32_t generation=0,
+                float rightGrip=-1.0f, bool solo=false) {
     LARGE_INTEGER f, now;
     QueryPerformanceFrequency(&f); QueryPerformanceCounter(&now);
     AcquireSRWLockExclusive(&g_staffLock);
@@ -1227,6 +1229,8 @@ float StaffEase(float grip, bool inReach, bool crossbow=false, bool tracked=true
     {
         const bool pressed = grip < 0.0f || grip > 0.6f ? true : grip < 0.4f ? false : g_staff.pressed;
         if (grip < 0.0f) g_staff.on = true;   // legacy bridge without grip input
+        else if (solo) g_staff.on = framevr::crossbow::SoloSupportLatched(pressed,g_staff.pressed,g_staff.on,inReach,rightGrip > 0.6f,
+                                                                         (double)now.QuadPart / (double)f.QuadPart,g_staff.pending);
         else g_staff.on = framevr::crossbow::SupportLatched(pressed,g_staff.pressed,g_staff.on,inReach,crossbow);
         g_staff.pressed = pressed;
     }
@@ -1888,7 +1892,7 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
                 inReach = Len(Sub(C, Add(origin, Scale(axis, t)))) <= in.staffGrabM * upm;
             }
             const float e = gun ? StaffEase(in.grip[1],inReach,true,(in.handsValid&2u)!=0,uint32_t(in.weaponType),HeroGen())
-                               : (in.handsValid & 2u) ? StaffEase(in.grip[1], inReach) : 1.0f;
+                               : (in.handsValid & 2u) ? StaffEase(in.grip[1], inReach, false, true, 0, 0, in.grip[0], in.soloStaffGrip) : 1.0f;
             leftOnStaff = e >= 0.5f;
             // Held in both hands, the staff is held between them: it runs from
             // the right fist through the left controller, and the right wrist's

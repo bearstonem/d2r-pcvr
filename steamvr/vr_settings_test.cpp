@@ -786,6 +786,16 @@ int main(int argc,char** argv){
         Check(Normalize(LeftHandStrikes,2)==0&&Normalize(LeftHandStrikes,1)==1&&Normalize(LeftHandStrikes,-1)==0,"the retired Basic attack (2) reads Own trigger skill");
         Check(!content::RowOf(LeftHandStrikes),"left-hand strikes on no settings page");
     }
+    {   // Glyph casting, each hand its own set (owner 2026-11-05): the second Draw glyph button and the left hand's
+        // shapes beside the one set saved before (the right hand's), edited on the wheel only; -1 when missing.
+        Check(Defaults()[GlyphDrawSecond]==-1&&std::wstring(Definitions[GlyphDrawSecond].section)==L"glyphs"&&
+              std::wstring(Definitions[GlyphDrawSecond].key)==L"second_draw_slot"&&!content::RowOf(GlyphDrawSecond),"the second Draw glyph button: [glyphs] second_draw_slot, none");
+        for(int i=0;i<8;++i)
+            Check(GlyphKey(i)==Key(GlyphCircle+i)&&GlyphKey(i,0)==GlyphKey(i)&&Defaults()[GlyphKey(i,1)]==-1&&std::wstring(Definitions[GlyphKey(i,1)].section)==L"glyphs"&&
+                  std::wstring(Definitions[GlyphKey(i,1)].key)==L"left_"+std::wstring(Definitions[GlyphKey(i)].key)&&!content::RowOf(GlyphKey(i,1)),
+                  "each left shape: [glyphs] left_<shape>, -1 (the right hand's), on no settings page");
+        Check(Normalize(GlyphLeftStar,-7)==-1&&Normalize(GlyphLeftStar,58.4f)==58&&Normalize(GlyphDrawSecond,12)==9,"read as the right hand's keys are");
+    }
     {   // Frame generation's settings (main's #313), as on main.
         Check(Defaults()[FrameGeneration]==0&&Defaults()[FrameGenPreset]==1&&Defaults()[FrameGenScale]==2,"off by default; NVIDIA Medium at 50% to start");
         Check(Normalize(FrameGeneration,3)==0&&Normalize(FrameGeneration,1.5f)==0&&Normalize(FrameGenScale,-1)==2&&Normalize(FrameGenPreset,2)==2,

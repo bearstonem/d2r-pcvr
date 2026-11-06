@@ -86,5 +86,14 @@ int main() {
         previewBoard.ClearSkill(-2);
         Check(Showing(previewBoard.Get(), 1020) == 0, "ClearSkill(-2) immediately clears preview mark");
     }
+    // Teleport's landing (TeleportMark) beside the companion's command: each its own one mark
+    {
+        Board both;
+        Check(both.Place(10,10,1000,250,3,1.5f,0,0,0,CompanionMark)&&both.Place(30,10,1000,250,1,1.5f,0,0,0,TeleportMark),"both previews place");
+        Check(both.Place(31,11,1011,250,1,1.5f,0,0,0,TeleportMark)&&Showing(both.Get(),1020)==2,"Teleport's moves in place, the companion's stays");
+        Check(SkillOn(both.Get(),TeleportMark,1020)&&[&]{for(const auto& k:both.Get())if(k.skill==TeleportMark)return k.x==31;return false;}(),"Teleport's at its new place");
+        both.ClearSkill(TeleportMark);
+        Check(!SkillOn(both.Get(),TeleportMark,1020)&&SkillOn(both.Get(),CompanionMark,1020),"Teleport's gone, the companion's kept");
+    }
     std::puts("Landing circle: timing, several casts, burst matching and reuse passed");
 }
