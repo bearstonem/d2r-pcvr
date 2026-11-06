@@ -7,8 +7,9 @@
 // flattens the room path onto the plane it was drawn in (glyphs::Flatten) and recognises it; a hand that
 // stops being tracked, or a menu, wheel or other use of the hands, cancels it.
 //
-// Cast: the skill the player put on that shape is cast through a native button press, so mana, cast
-// rate, the buff and its sound stay the game's. In order (Plan):
+// Cast: the skill the player put on that shape, for the hand that drew it (each hand its own set:
+// interaction::GlyphCasts), is cast through a native button press, so mana, cast rate, the buff and its
+// sound stay the game's. In order (Plan):
 //   1. the skill is on one of the ten hand-button slots: that slot is pressed (as Holy Shield's sign;
 //      Town Portal's slot reads as the scroll or the tome it will use, 219 or 220);
 //   2. the game's spare right-trigger skill record (record 5, which no hand button reaches and which the
@@ -112,6 +113,29 @@ inline int DrawSlot(float value) {
     return slot >= 0 && slot < skills::Count ? int(slot) : -1;
 }
 inline int SkillOf(float value) { return std::isfinite(value) && value >= 0 ? int(std::lround(value)) : -1; }
+
+// Each hand draws its own glyphs (owner, 2026-11-05: "left and the right hand glyphs can be different sets"),
+// so each may have a Draw glyph button: [glyphs] draw_slot (the only one before, on either hand) and
+// second_draw_slot, each a slot of either hand. Per hand (right = 0), -1 none; two on one hand (an INI
+// edited by hand): draw_slot's.
+inline std::array<int, 2> DrawSlots(float first, float second) {
+    std::array<int, 2> out{-1, -1};
+    for (const float value : {first, second})
+        if (const int slot = DrawSlot(value); slot >= 0 && out[size_t(skills::Hand(slot))] < 0) out[size_t(skills::Hand(slot))] = slot;
+    return out;
+}
+// The key (0 draw_slot, 1 second_draw_slot) a Draw glyph put on slot takes: the one on its hand already
+// (moving that hand's button), else draw_slot when it is free, else the second; the other hand's stays.
+inline int DrawKeyFor(float first, float second, int slot) {
+    const int a = DrawSlot(first), b = DrawSlot(second), hand = skills::Hand(slot);
+    if (a >= 0 && skills::Hand(a) == hand) return 0;
+    if (b >= 0 && skills::Hand(b) == hand) return 1;
+    return a < 0 ? 0 : 1;
+}
+// The key holding slot (0 draw_slot, 1 second_draw_slot), -1 neither: a game skill put there stops it drawing.
+inline int DrawKeyHolding(float first, float second, int slot) {
+    return slot < 0 ? -1 : DrawSlot(first) == slot ? 0 : DrawSlot(second) == slot ? 1 : -1;
+}
 
 // What a hand slot holds, as the snapshot has it.
 struct Slot { int id = -1, owner = -1; bool known = false, available = false; };
