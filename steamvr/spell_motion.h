@@ -32,15 +32,16 @@
 // 0 is the right. Value-only: steamvr/spell_motion_test.cpp.
 namespace framevr::spellmotion {
 enum class Motion {None,FlingOut,PushDown,RubSnap,CrossGuard,ArmUp,MatchStrike,ForearmSweep,Shake,Hug,Punch,
+    FireWall,Meteor,Blizzard,Hydra,                                                               // Sorceress (2026-11-05)
     InnerSight,SlowMissiles,Decoy,Valkyrie,                                                       // Amazon A1-A4
     BattleOrders,Shout,BattleCommand,WarCry,Howl,BattleCry,Leap,FindItem,                         // Barbarian B1-B8
     BoneArmor,RaiseSkeleton,CorpseExplosion,Golem,AmplifyDamage,LowerResist,PoisonNova,BonePrison,GolemLeft,// Necromancer N1-N8, N4b
     BoneWall,PoisonExplosion,RaiseMage,                                                           // Necromancer N9-N11
     BurstOfSpeed,Fade,CloakOfShadows,Venom,BladeShield,ShadowWarrior,MindBlast,                   // Assassin S1-S7
     End};
-constexpr int SorceressCount=int(Motion::Punch);   // the Sorceress's, 1..SorceressCount ([motions] off: her bits)
+constexpr int SorceressCount=int(Motion::Hydra);   // the Sorceress's, 1..SorceressCount ([motions] off: her bits)
 constexpr int MotionCount=int(Motion::End)-1;      // every class's, 1..MotionCount (a watcher each)
-constexpr int MaxCards=12;                         // a MOTIONS page's cards (interaction::MotionCards), one bit each
+constexpr int MaxCards=14;                         // a MOTIONS page's cards (interaction::MotionCards), one bit each
 inline Motion For(int skill) {
     switch(skill) {
     case 48:return Motion::FlingOut;      // Nova
@@ -53,6 +54,7 @@ inline Motion For(int skill) {
     case 50:return Motion::Shake;         // Shiver Armor
     case 60:return Motion::Hug;           // Chilling Armor
     case 54:return Motion::Punch;         // Teleport (owner: "as a motion similar to Paladin's Charge")
+    case 51:return Motion::FireWall;case 56:return Motion::Meteor;case 59:return Motion::Blizzard;case 62:return Motion::Hydra;
     case 8:return Motion::InnerSight;case 17:return Motion::SlowMissiles;case 28:return Motion::Decoy;case 32:return Motion::Valkyrie;
     case 149:return Motion::BattleOrders;case 138:return Motion::Shout;case 155:return Motion::BattleCommand;case 154:return Motion::WarCry;
     case 130:return Motion::Howl;case 146:return Motion::BattleCry;case 132:return Motion::Leap;case 142:return Motion::FindItem;
@@ -69,7 +71,7 @@ inline Motion For(int skill) {
 // The MOTIONS page (the wheel; owner 2026-11-03: "a place where you can see the motion spells that are
 // active"): the motion spells in the order it shows them (skill ids, the trees' order), each with its
 // bit in [motions] off (the motion's number - 1), set to turn it off.
-constexpr int PageSkills[SorceressCount]={40,42,44,46,48,50,54,57,58,60};
+constexpr int PageSkills[SorceressCount]={40,42,44,46,48,50,51,54,56,57,58,59,60,62};   // Fire Wall, Meteor, Blizzard, Hydra since 2026-11-05
 inline int Bit(int skill){const int m=int(For(skill));return m>0&&m<=SorceressCount?m-1:-1;}
 inline int OffMask(float value){return std::isfinite(value)?std::clamp(int(std::lround(value)),0,(1<<MaxCards)-1):0;}
 inline bool On(int skill,int off){const int b=Bit(skill);return b>=0&&!((off>>b)&1);}
@@ -111,7 +113,8 @@ inline const char* SpellName(int skill) {
     switch(skill) {
     case 40:return "Frozen Armor";case 42:return "Static Field";case 44:return "Frost Nova";case 46:return "Blaze";
     case 48:return "Nova";case 50:return "Shiver Armor";case 54:return "Teleport";case 57:return "Thunder Storm";
-    case 58:return "Energy Shield";case 60:return "Chilling Armor";
+    case 58:return "Energy Shield";case 60:return "Chilling Armor";case 51:return "Fire Wall";case 56:return "Meteor";
+    case 59:return "Blizzard";case 62:return "Hydra";
     case 107:return "Charge";case 112:return "Blessed Hammer";case 117:return "Holy Shield";case 121:return "Fist of the Heavens";
     case 223:return "Werewolf";case 228:return "Werebear";
     case 8:return "Inner Sight";case 17:return "Slow Missiles";case 28:return "Decoy";case 32:return "Valkyrie";
@@ -321,15 +324,17 @@ struct Output {
     // With cast: a summon that goes to a spot of its own (Engine::LandAt, LandPointed), not along aim.
     Land land=Land::None;Spot spot{};
 };
-// Teleport's landing for an arm pointing along way (Output::point, head-local), in cells ahead of the eyes'
-// heading and to its right: pointFar with the arm level (or up), easing to pointNear at pointSteepDeg below.
-inline Spot PointSpot(math::Vec way,const Tuning& t) {
+// A spot for an arm pointing along way (head-local), in cells ahead of the eyes' heading and to its right:
+// far with the arm level (or up), easing to near at steepDeg below.
+inline Spot SpotAlong(math::Vec way,float far,float near,float steepDeg) {
     const float level=std::hypot(way.x,way.z);
-    if(!(level>1e-4f)||!std::isfinite(way.y))return {t.pointNear,0};
+    if(!(level>1e-4f)||!std::isfinite(way.y))return {near,0};
     const float below=std::atan2(-way.y,level)*57.2957795f;
-    const float f=std::clamp(below/t.pointSteepDeg,0.f,1.f),cells=t.pointFar+(t.pointNear-t.pointFar)*f;
+    const float f=std::clamp(below/steepDeg,0.f,1.f),cells=far+(near-far)*f;
     return {cells*(-way.z/level),cells*(way.x/level)};
 }
+// Teleport's landing (Output::point): pointFar level, pointNear at pointSteepDeg below. Meteor's: its own.
+inline Spot PointSpot(math::Vec way,const Tuning& t){return SpotAlong(way,t.pointFar,t.pointNear,t.pointSteepDeg);}
 // The hands at one frame, head-local: l[0] the right, l[1] the left.
 struct Sample {double t=0;math::Vec l[2]{};};
 class Engine;
@@ -588,9 +593,11 @@ public:
 #include "motions_amazon.h"
 #include "motions_barbarian.h"
 #include "motions_necromancer.h"
+#include "motions_sorceress.h"
 #include "motions_assassin.h"
 namespace framevr::spellmotion {
 inline bool ClassDone(Engine& e,Motion m) {
+    if(m>=Motion::FireWall&&m<=Motion::Hydra)return sorceress::Done(e,m);
     if(m>=Motion::InnerSight&&m<=Motion::Valkyrie)return amazon::Done(e,m);
     if(m>=Motion::BattleOrders&&m<=Motion::FindItem)return barbarian::Done(e,m);
     if(m>=Motion::BoneArmor&&m<=Motion::RaiseMage)return necromancer::Done(e,m);
@@ -598,6 +605,7 @@ inline bool ClassDone(Engine& e,Motion m) {
     return false;
 }
 inline const char* ClassCue(Motion m) {
+    if(m>=Motion::FireWall&&m<=Motion::Hydra)return sorceress::Cue(m);
     if(m>=Motion::InnerSight&&m<=Motion::Valkyrie)return amazon::Cue(m);
     if(m>=Motion::BattleOrders&&m<=Motion::FindItem)return barbarian::Cue(m);
     if(m>=Motion::BoneArmor&&m<=Motion::RaiseMage)return necromancer::Cue(m);
@@ -605,9 +613,12 @@ inline const char* ClassCue(Motion m) {
     return "no motion";
 }
 // The order a class's motions are watched in: the first to complete in a frame casts. The Sorceress's
-// Static Field before Nova (its snap apart is as wide as a fling); the other classes' their header's Order.
-constexpr Motion SorceressOrder[]={Motion::RubSnap,Motion::FlingOut,Motion::PushDown,Motion::CrossGuard,Motion::ArmUp,
-    Motion::MatchStrike,Motion::ForearmSweep,Motion::Shake,Motion::Hug,Motion::Punch};
+// Static Field before Nova (its snap apart is as wide as a fling), Blizzard before Frost Nova (a pull from
+// overhead to the waist is Blizzard's), Hydra and Meteor before Thunder Storm (each passes an arm overhead);
+// the other classes' their header's Order.
+constexpr Motion SorceressOrder[]={Motion::RubSnap,Motion::Blizzard,Motion::FlingOut,Motion::PushDown,Motion::CrossGuard,
+    Motion::Hydra,Motion::Meteor,Motion::ArmUp,Motion::MatchStrike,Motion::ForearmSweep,Motion::Shake,Motion::Hug,Motion::Punch,
+    Motion::FireWall};
 struct Watched {const Motion* motions=nullptr;int count=0;};
 inline Watched OrderOf(int skillClass) {
     switch(skillClass) {

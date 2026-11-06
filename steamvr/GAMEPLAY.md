@@ -2444,7 +2444,15 @@ raised above the head, held; Teleport, the right arm pointed where you want to l
 left hand from the right hand up to the right shoulder; Shiver Armor, both fists shaken, held at
 least 25 cm apart (a tester, 2026-11-05: Static Field's rub "reads as shaking": fists shaken any
 closer are a rub, and its count starts over); Chilling
-Armor, a hug, held. Thresholds in `spellmotion::Tuning`; `spell-motion-test` performs each at three
+Armor, a hug, held. The owner's picks from the list of her spells without one (2026-11-05), each to
+a spot of its own (`motions_sorceress.h`): Fire Wall, the right hand swept sideways across in front
+of the chest (the Necromancer's Bone Wall sweep; the wall 5 cells away where the sweep's middle
+heads); Meteor, the right fist raised overhead and thrown down and forward fast (where the arm
+then points from the shoulder: 20 cells with it level, 4 at 50 degrees below; a throw that waits
+overhead for Thunder Storm's hold is Thunder Storm); Blizzard, both arms raised overhead and pulled
+down in front (8 cells straight ahead; watched before Frost Nova); Hydra, the left arm swept up fast
+in front, toward its spot (the Necromancer's left-arm golem raise; 4 cells away where the arm
+heads; an arm raised straight up is Thunder Storm's). The MOTIONS page holds 14 cards. Thresholds in `spellmotion::Tuning`; `spell-motion-test` performs each at three
 headings and checks that no other spell's motion, the motion without the gate, or a slow version
 casts it. Logs: `Frame spell motion:` (each cast and the way it went, each grip hold let go
 without a motion with how far apart the hands went, the highest and lowest hand, the fastest,

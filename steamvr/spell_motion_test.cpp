@@ -17,6 +17,7 @@ struct Sim {
     int casts=0,drops=0,began=0;std::string lastDrop;
     math::Vec aim{};   // the last cast's way
     bool landing=false;math::Vec point{};   // the last cast's: Teleport on its shown landing, and the arm that pointed it
+    spellmotion::Land land=spellmotion::Land::None;spellmotion::Spot spot{};   // the last cast's spot of its own
     float frame=1/90.f;
     Sim(Motion m,float heading=0){yaw=math::Yaw(heading);in.time=1;in.session=3;in.epoch=1;in.active=true;in.motion=m;
         in.tracked[0]=in.tracked[1]=true;in.head=head;in.headRotation=yaw;Place(0,RestR);Place(1,RestL);Step();}
@@ -37,7 +38,7 @@ struct Sim {
     }
     void Hold(float s){for(int i=0;i<int(s/frame);++i)Step();}
     void Trigger(bool down){in.held=down;Step();}
-    void Step(){in.time+=frame;out=g.Step(in);if(out.cast){++casts;aim=out.aim;landing=out.landing;point=out.point;}if(out.began)++began;if(out.dropped){++drops;lastDrop=out.dropped;}}
+    void Step(){in.time+=frame;out=g.Step(in);if(out.cast){++casts;aim=out.aim;landing=out.landing;point=out.point;land=out.land;spot=out.spot;}if(out.began)++began;if(out.dropped){++drops;lastDrop=out.dropped;}}
 };
 // The motions, done well, from the resting pose; the trigger is the caller's.
 static void Nova(Sim& s){s.Move({.08f,-.40f,-.30f},{-.08f,-.40f,-.30f},.35f);s.Move({.62f,-.35f,-.15f},{-.62f,-.35f,-.15f},.25f);}
@@ -57,6 +58,10 @@ static void ShiverArmor(Sim& s) {
 }
 static void Hug(Sim& s){s.Move({-.18f,-.32f,-.05f},{.18f,-.32f,-.05f},.45f);s.Hold(.5f);}
 static void Teleport(Sim& s){s.MoveR({.20f,-.32f,-.45f},.35f);s.Hold(.25f);s.MoveR({.19f,-.26f,-.20f},.15f);}
+static void FireWall(Sim& s){s.MoveR({-.20f,-.30f,-.40f},.35f);s.Hold(.1f);s.MoveR({.24f,-.30f,-.40f},.2f);s.Hold(.2f);}
+static void Meteor(Sim& s){s.MoveR({.15f,.35f,-.05f},.3f);s.MoveR({.18f,-.40f,-.40f},.2f);s.Hold(.1f);}
+static void Blizzard(Sim& s){s.Move({.15f,.30f,-.10f},{-.15f,.30f,-.10f},.3f);s.Move({.20f,-.30f,-.35f},{-.20f,-.30f,-.35f},.25f);s.Hold(.2f);}
+static void Hydra(Sim& s){s.MoveL({-.165f,.12f,-.45f},.3f);s.Hold(.2f);}
 
 int main() {
     using Do=void(*)(Sim&);
@@ -64,7 +69,8 @@ int main() {
         {Motion::FlingOut,Nova,48,"Nova"},{Motion::PushDown,FrostNova,44,"Frost Nova"},{Motion::RubSnap,StaticField,42,"Static Field"},
         {Motion::CrossGuard,EnergyShield,58,"Energy Shield"},{Motion::ArmUp,ThunderStorm,57,"Thunder Storm"},{Motion::MatchStrike,Blaze,46,"Blaze"},
         {Motion::ForearmSweep,FrozenArmor,40,"Frozen Armor"},{Motion::Shake,ShiverArmor,50,"Shiver Armor"},{Motion::Hug,Hug,60,"Chilling Armor"},
-        {Motion::Punch,Teleport,54,"Teleport"}};
+        {Motion::Punch,Teleport,54,"Teleport"},{Motion::FireWall,FireWall,51,"Fire Wall"},{Motion::Meteor,Meteor,56,"Meteor"},
+        {Motion::Blizzard,Blizzard,59,"Blizzard"},{Motion::Hydra,Hydra,62,"Hydra"}};
     for(const auto& m:all) {
         std::string label=std::string(m.name)+": ";
         Check(spellmotion::For(m.skill)==m.motion&&std::string(spellmotion::Cue(m.motion))!="no motion",(label+"its skill has the motion and a cue").c_str());
@@ -83,8 +89,8 @@ int main() {
     }
     {   // Every class's page (owner, 2026-11-04: "Both grips, like Sorceress"): the Sorceress's bits as saved
         // since 2026-11-03, the Paladin's and the Druid's by card; a name and a cue on every card.
-        Check(spellmotion::PageOf(1).count==spellmotion::SorceressCount&&spellmotion::PageOf(3).count==4&&spellmotion::PageOf(5).count==2,
-              "the Sorceress's 10, the Paladin's 4, the Druid's 2");
+        Check(spellmotion::PageOf(1).count==spellmotion::SorceressCount&&spellmotion::SorceressCount==14&&spellmotion::PageOf(3).count==4&&spellmotion::PageOf(5).count==2,
+              "the Sorceress's 14, the Paladin's 4, the Druid's 2");
         Check(spellmotion::PageOf(0).count==4&&spellmotion::PageOf(4).count==8&&spellmotion::PageOf(2).count==12&&spellmotion::PageOf(6).count==7,
               "the Amazon's 4, the Barbarian's 8, the Necromancer's 12 (the table's, the left arm's golem, Bone Wall, Poison Explosion, Raise Skeletal Mage), the Assassin's 7");
         for(int c:{7,-1})Check(!spellmotion::HasMotions(c)&&spellmotion::PageOf(c).count==0,"no motions for the Warlock or an unknown class");
@@ -135,6 +141,36 @@ int main() {
     }
     Check(spellmotion::For(36)==Motion::None&&spellmotion::For(117)==Motion::None,
         "Fire Bolt and a Paladin skill have no motion: their glyph casts as before");
+    {   // the owner's picks (2026-11-05): ground spells and a summon, each to its spot
+        {Sim s(Motion::FireWall);s.Trigger(true);FireWall(s);
+         Check(s.casts==1&&s.land==spellmotion::Land::Spot&&std::fabs(s.spot.ahead-spellmotion::sorceress::tuning.fireWallAhead)<.2f,"Fire Wall: the wall ahead, where the sweep's middle heads");}
+        {Sim s(Motion::Meteor);s.Trigger(true);Meteor(s);
+         Check(s.casts==1&&s.land==spellmotion::Land::Spot&&s.spot.ahead>4&&s.spot.ahead<16&&std::fabs(s.spot.right)<1.5f,"Meteor: thrown down ahead, it lands along the arm, nearer than level");}
+        {Sim s(Motion::Meteor);s.Trigger(true);s.MoveR({.15f,.35f,-.05f},.3f);s.MoveR({.45f,-.40f,-.30f},.2f);s.Hold(.1f);
+         Check(s.casts==1&&s.spot.right>2,"Meteor: thrown to the front right, it lands to the right");}
+        {Sim s(Motion::Meteor);s.Trigger(true);s.MoveR({.15f,.35f,-.05f},.3f);s.MoveR({.18f,-.40f,-.40f},.8f);s.Hold(.1f);
+         Check(s.casts==0,"Meteor: the arm lowered slowly from overhead casts nothing");}
+        {Sim s(Motion::Meteor);s.Trigger(true);s.MoveR({.15f,.35f,-.05f},.3f);s.MoveR({.18f,-.62f,-.30f},.2f);s.Hold(.1f);
+         Check(s.casts==1&&s.spot.ahead<10,"Meteor: thrown down steeply, it lands near");}
+        {Sim s(Motion::Meteor);s.Trigger(true);s.MoveR({.15f,.35f,-.05f},.3f);s.MoveR({.18f,-.22f,-.50f},.2f);s.Hold(.1f);
+         Check(s.casts==1&&s.spot.ahead>17,"Meteor: thrown out level, it lands far");}
+        {Sim s(Motion::Meteor);s.Trigger(true);s.MoveR({.15f,.35f,-.05f},.3f);s.MoveR({.18f,-.40f,-.40f},1.6f);s.Hold(.1f);
+         Check(s.casts==0,"Meteor: the arm lowered slowly from overhead casts nothing");}
+        {Sim s(Motion::Meteor);s.Trigger(true);Blizzard(s);Check(s.casts==0,"Meteor: both arms pulled down is Blizzard's");}
+        {Sim s(Motion::ArmUp);s.Trigger(true);Meteor(s);Check(s.casts==0,"Thunder Storm: the arm thrown down without its hold is Meteor's");}
+        {Sim s(Motion::Blizzard);s.Trigger(true);Blizzard(s);
+         Check(s.casts==1&&s.land==spellmotion::Land::Spot&&s.spot.ahead==spellmotion::sorceress::tuning.blizzardAhead&&s.spot.right==0,"Blizzard: straight ahead");}
+        {Sim s(Motion::Blizzard);s.Trigger(true);s.Move({.15f,.30f,-.10f},{-.15f,.30f,-.10f},.3f);s.Move({.20f,-.30f,-.35f},{-.20f,-.30f,-.35f},1.2f);
+         Check(s.casts==0,"Blizzard: the arms lowered slowly cast nothing");}
+        {Sim s(Motion::PushDown);s.Trigger(true);s.Move({.15f,.30f,-.10f},{-.15f,.30f,-.10f},.3f);s.Move({.20f,-.50f,-.35f},{-.20f,-.50f,-.35f},.3f);
+         Check(s.casts==1,"Frost Nova, watched alone, still takes a push to the waist (Blizzard is watched before it)");}
+        {Sim s(Motion::Hydra);s.Trigger(true);s.MoveL({-.45f,.10f,-.40f},.3f);s.Hold(.2f);
+         Check(s.casts==1&&s.spot.right<-1&&s.spot.ahead>1,"Hydra: swept up toward the front left, it stands there");}
+        {Sim s(Motion::Hydra);s.Trigger(true);s.MoveL({-.15f,.40f,-.05f},.4f);s.Hold(.5f);
+         Check(s.casts==0,"Hydra: the left arm raised straight up (Thunder Storm) casts nothing");}
+        {Sim s(Motion::Hydra);s.Trigger(true);s.Move({.165f,.12f,-.45f},{-.165f,.12f,-.45f},.3f);
+         Check(s.casts==0,"Hydra: both arms swept up casts nothing");}
+    }
     // Point and pull (owner, 2026-11-05, in the headset: "I want to be able to use that targeting better ... With our
     // arm kind of tucked into us. It's hard to aim where you want to go").
     {

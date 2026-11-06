@@ -376,15 +376,15 @@ constexpr MenuBounds GlyphsBounds{.745f,.025f,.975f,.18f};
 constexpr int GlyphShapes=8;
 // Motions (spell_motion.h): the MOTIONS box, lower right on the Spells and Equipment pages of a hero with
 // motions (the left claw box's mirror: the Sorceress, the Paladin, the Druid), and the MOTIONS page's
-// cards, one per motion skill of the class (spellmotion::PageOf), two columns of six: pressed, a card
+// cards, one per motion skill of the class (spellmotion::PageOf), two columns of seven: pressed, a card
 // turns its motion on or off.
 constexpr int MotionsCell=216;
 constexpr MenuBounds MotionsBounds{.765f,.72f,.975f,.82f};
-constexpr int MotionCards=12;   // the Necromancer's 12 (2026-11-05; ten before)
+constexpr int MotionCards=14;   // the Sorceress's 14 (2026-11-05; ten, then the Necromancer's 12)
 constexpr int MotionCardCell(int card){return 240+card;}
 inline MenuBounds MotionCardBounds(int card){
-    const float x=.05f+(card%2)*.46f,y=.125f+(card/2)*.125f;
-    return {x,y,x+.44f,y+.115f};
+    const float x=.05f+(card%2)*.46f,y=.125f+(card/2)*.107f;
+    return {x,y,x+.44f,y+.099f};
 }
 // Druid: the left claw's strike skill, [gameplay] left_hand_strikes. Lower left,
 // above the ACTIVE line (y 637) and clear of the hand wheel's 216-degree label.

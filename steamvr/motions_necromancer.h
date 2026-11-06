@@ -170,6 +170,28 @@ inline bool BothUp(Engine& e,const std::vector<Sample>& s,float& apart) {
     }
     return false;
 }
+// N9 Bone Wall, and the Sorceress's Fire Wall (motions_sorceress.h): the right hand swept across in front of
+// the chest, either way, the left left where it was; the wall stands ahead cells away where the sweep's
+// middle heads from the eyes.
+inline bool SideSweep(Engine& e,const std::vector<Sample>& s,float ahead) {
+    const auto& t=tuning;const auto& n=s.back();const auto& c=n.l[0];
+    const auto front=[&](math::Vec h){return Engine::Forward(h)>=t.wallFront&&h.y>=t.wallLow&&h.y<=t.wallHigh;};
+    if(!front(c))return false;
+    for(size_t i=s.size()-1;i-->0&&n.t-s[i].t<=t.wallWindow;) {
+        const auto& a=s[i].l[0];
+        if(!front(a))break;   // in front of the chest all along: none from before it left
+        const float across=std::fabs(c.x-a.x);
+        if(across>=.05f)e.Toward(across/t.wallSweep);
+        if(across<t.wallSweep||std::fabs(c.y-a.y)>.5f*across||std::fabs(Engine::Forward(c)-Engine::Forward(a))>.5f*across||
+           Engine::Len(n.l[1]-s[i].l[1])>t.wallOther||PeakSpeed(s,i,0)<t.wallSpeed)continue;
+        const float mx=(a.x+c.x)/2,mz=(a.z+c.z)/2,level=std::hypot(mx,mz);
+        math::Vec way=level>=.15f?math::Vec{mx/level,0,mz/level}:math::Vec{0,0,-1};
+        if(-way.z<.3f)way={0,0,-1};
+        e.Aim(way);e.LandAt(ahead*-way.z,ahead*way.x);
+        return true;
+    }
+    return false;
+}
 // N4, N4b: arm k swept up fast from low past armTop, the other arm left down.
 inline bool ArmUp(Engine& e,const std::vector<Sample>& s,int k) {
     const auto& t=tuning;const auto& n=s.back();const auto& c=n.l[k];
@@ -202,25 +224,7 @@ inline bool Done(Engine& e,Motion m) {
         float apart=0;
         return detail::BothUp(e,s,apart)&&(apart>=t.mageApart)==(m==Motion::RaiseMage);
     }
-    case Motion::BoneWall: {   // the right hand swept across in front of the chest, either way
-        const auto& c=n.l[0];
-        const auto front=[&](math::Vec h){return F(h)>=t.wallFront&&h.y>=t.wallLow&&h.y<=t.wallHigh;};
-        if(!front(c))return false;
-        for(size_t i=s.size()-1;i-->0&&n.t-s[i].t<=t.wallWindow;) {
-            const auto& a=s[i].l[0];
-            if(!front(a))break;   // in front of the chest all along: none from before it left
-            const float across=std::fabs(c.x-a.x);
-            if(across>=.05f)e.Toward(across/t.wallSweep);
-            if(across<t.wallSweep||std::fabs(c.y-a.y)>.5f*across||std::fabs(F(c)-F(a))>.5f*across||
-               Engine::Len(n.l[1]-s[i].l[1])>t.wallOther||detail::PeakSpeed(s,i,0)<t.wallSpeed)continue;
-            const float mx=(a.x+c.x)/2,mz=(a.z+c.z)/2,level=std::hypot(mx,mz);
-            math::Vec way=level>=.15f?math::Vec{mx/level,0,mz/level}:math::Vec{0,0,-1};
-            if(-way.z<.3f)way={0,0,-1};
-            e.Aim(way);e.LandAt(t.wallAhead*-way.z,t.wallAhead*way.x);
-            return true;
-        }
-        return false;
-    }
+    case Motion::BoneWall:return detail::SideSweep(e,s,t.wallAhead);
     case Motion::PoisonExplosion: {   // both fists pushed down in front, from the chest
         for(size_t i=s.size()-1;i-->0&&n.t-s[i].t<=t.pushWindow;) {
             const auto& a=s[i];
