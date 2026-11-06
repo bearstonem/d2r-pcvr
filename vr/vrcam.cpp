@@ -148,6 +148,9 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "stereo_replay.h"
 #include "dlss_depth.h"
 #include "billboards.h"
+#include "engine_units.h"
+#include "../shared/game_ceiling.h"
+#include "../shared/ceiling_measures.h"
 #ifdef D2RVR_NATIVE_OPENXR
 #include "panel_input.h"
 #include "native_belt.h"
@@ -329,6 +332,9 @@ struct Settings {
     std::atomic<float> ceilWet{0.35f};      // [ceiling] wet: how much the rock shines, like the walls
     std::atomic<float> ceilDetail{0.8f};    // [ceiling] detail: world units the picture's light parts stand out of the rock
     std::atomic<float> ceilContrast{1.6f};  // [ceiling] contrast: the picture's fine detail times this
+    std::atomic<bool>  gameCeiling{true};      // [ceiling] game_ceiling: in VR F4 the ceiling is the game's own lit model (vr/engine_units.cpp)
+    std::atomic<bool>  gameCeilingWall{false}; // [ceiling] game_ceiling_wall: the game's ceiling's rim bent down to the floor (caves)
+    std::atomic<bool>  ceilFromWalls{true};    // [ceiling] height_from_walls: an area with no height_<biome> of its own rests it on its walls' top
     std::atomic<bool>  torchEnabled{true};       // [torch] enabled: 1H club with fire lights the dungeon in VR
     std::atomic<bool>  spellHandLight{true};     // [torch] spell_hands: a Sorceress's spell hands light it too (elements::HandLight)
     std::atomic<float> torchRadius{18.0f};       // [torch] radius: world units of light reach (28 looked too intense in the headset)
@@ -496,6 +502,18 @@ std::vector<std::string> g_noFogBiomes;
 char g_biome[96] = "";                  // last name the game set, bare (no folder, no extension), lower case
 std::atomic<uint32_t> g_biomeGen{0};    // bumped by every SetCurrentBiome
 
+// The area's floor for its ceiling, the shader's vault and the game's slab alike (gameceiling::Floor): the lowest
+// the hero has stood since the area changed - on a ledge the ceiling rose with him (the user, 2026-10-07).
+SRWLOCK g_floorLock = SRWLOCK_INIT;
+float g_floorY = 0.0f;
+unsigned g_floorGen = ~0u;
+float AreaFloor(float heroY) {
+    AcquireSRWLockExclusive(&g_floorLock);
+    const float f = std::isfinite(heroY) ? gameceiling::Floor(&g_floorY, &g_floorGen, g_biomeGen.load(), heroY) : g_floorY;
+    ReleaseSRWLockExclusive(&g_floorLock);
+    return f;
+}
+
 void LoadOutdoorBiomes() {
     wchar_t buf[1024];
     GetPrivateProfileStringW(L"sky", L"outdoor", L"act1_outdoors,act1_tristram,act1_court,act2_outdoors,act2_town,act3_jungle,act3_docktown,act3_kurast,act3_travincal_outdoors,act4_mesa,act4_lava,act4_diab,expansion_town,expansion_siege,expansion_mountaintop,expansion_ruins,expansion_ruins_snow,expansion_wildtemple_tempenter",
@@ -532,6 +550,11 @@ struct CeilVaultCfg { bool dome = false; float domeRadius = 30.0f, domeMax = 30.
                       float texSize = 0.0f, reliefPic = 0.0f; };
 struct CeilBiomeCfg { std::string biome; float height, bright, light, relief, wet, detail, contrast; CeilVaultCfg vault; int slot = 0; };
 std::vector<CeilBiomeCfg> g_ceilBiomeCfg;   // under g_biomeLock
+// [ceiling] game_ceiling_biomes: the areas whose ceiling the game draws in VR F4 (shared/game_ceiling.h: every area
+// with a kind of its own by default); and those areas' own height_<biome>, the ones set (gameceiling::HeightOf: a
+// height set wins, else the area's walls' top). Under g_biomeLock.
+std::vector<std::string> g_gameCeilBiomes;
+std::vector<std::pair<std::string, float>> g_gameCeilOwn;
 
 void LoadCeilingBiomes() {
     wchar_t buf[1024];
@@ -544,6 +567,16 @@ void LoadCeilingBiomes() {
             cur.clear();
             if (!*p) break;
         } else if (*p != L' ' && *p != L'\t' && *p < 128) cur += (char)towlower(*p);
+    }
+    const std::string allGame = gameceiling::AllBiomes();
+    wchar_t gameBuf[1024];
+    GetPrivateProfileStringW(L"ceiling", L"game_ceiling_biomes", std::wstring(allGame.begin(), allGame.end()).c_str(), gameBuf, (DWORD)std::size(gameBuf), g_iniPath);
+    const std::vector<std::string> gameList = framevr::biomes::Parse(gameBuf);
+    std::vector<std::pair<std::string, float>> own;
+    for (const gameceiling::BiomeKind& b : gameceiling::kBiomeKinds) {
+        const std::string name = b.biome;
+        const float h = IniF(L"ceiling", (L"height_" + std::wstring(name.begin(), name.end())).c_str(), 0.0f);
+        if (h > 0.0f) own.emplace_back(name, std::clamp(h, 1.0f, 500.0f));
     }
     std::vector<CeilBiomeCfg> cfg;
     for (const std::string& b : list) {
@@ -564,8 +597,10 @@ void LoadCeilingBiomes() {
         v.reliefPic = std::clamp(IniF(L"ceiling", (L"relief_pic_" + w).c_str(), 0.0f), -1.0f, 2.0f);
     }
     AcquireSRWLockExclusive(&g_biomeLock);
-    const bool same = g_ceilBiomes == list;
+    const bool same = g_ceilBiomes == list && g_gameCeilBiomes == gameList && g_gameCeilOwn == own;
     g_ceilBiomes = list;
+    g_gameCeilBiomes = gameList;
+    g_gameCeilOwn = own;
     for (CeilBiomeCfg& c : cfg)   // the picture's slot kept until LoadCeilingTextures looks again: no flicker on a reload
         for (const CeilBiomeCfg& old : g_ceilBiomeCfg) if (old.biome == c.biome) c.slot = old.slot;
     g_ceilBiomeCfg = cfg;
@@ -603,6 +638,21 @@ bool IsCeilingBiome(const std::string& biome) {
     for (const std::string& b : g_ceilBiomes) if (b == biome) { on = true; break; }
     ReleaseSRWLockShared(&g_biomeLock);
     return on;
+}
+bool IsGameCeilingBiome(const std::string& biome) {
+    bool on = false;
+    AcquireSRWLockShared(&g_biomeLock);
+    for (const std::string& b : g_gameCeilBiomes) if (b == biome) { on = true; break; }
+    ReleaseSRWLockShared(&g_biomeLock);
+    return on;
+}
+// The area's own height_<biome> for the game's ceiling, 0 when not set
+float OwnCeilingHeight(const std::string& biome) {
+    float h = 0.0f;
+    AcquireSRWLockShared(&g_biomeLock);
+    for (const auto& o : g_gameCeilOwn) if (o.first == biome) { h = o.second; break; }
+    ReleaseSRWLockShared(&g_biomeLock);
+    return h;
 }
 
 // Starting palettes, by eye; picked by a part of the biome's name.
@@ -1364,6 +1414,9 @@ void LoadSettings() {
     g_set.ceilWet.store(std::clamp(IniF(L"ceiling", L"wet", 0.35f), 0.0f, 3.0f));
     g_set.ceilDetail.store(std::clamp(IniF(L"ceiling", L"detail", 0.8f), 0.0f, 10.0f));
     g_set.ceilContrast.store(std::clamp(IniF(L"ceiling", L"contrast", 1.6f), 0.0f, 5.0f));
+    g_set.gameCeiling.store(IniB(L"ceiling", L"game_ceiling", true));
+    g_set.gameCeilingWall.store(IniB(L"ceiling", L"game_ceiling_wall", false));
+    g_set.ceilFromWalls.store(IniB(L"ceiling", L"height_from_walls", true));
     g_set.torchEnabled.store(IniB(L"torch", L"enabled", true));
     g_set.spellHandLight.store(IniB(L"torch", L"spell_hands", true));
     g_set.torchRadius.store(std::clamp(IniF(L"torch", L"radius", 18.0f), 5.0f, 60.0f));
@@ -8407,6 +8460,25 @@ std::atomic<int> g_fogAct{0};        // the area's act for the fog colour, caves
 std::atomic<bool> g_underground{false};   // in the world, off the outdoor list: the fog takes [fog] color_caves
 std::atomic<bool> g_inWorld{false};  // a game area is loaded: not the main menu (its own "frontend" biome), not before any
 std::atomic<bool> g_ceilBiome{false};   // the area's biome is on [ceiling] biomes
+// [ceiling] game_ceiling: the area's kind of the game's ceiling (-1: none - not on game_ceiling_biomes, or no model of
+// its own), its walls' top as the installer measured it (0: not measured) and its own height_<biome> (0: not set)
+std::atomic<int> g_gameCeilKind{-1};
+std::atomic<float> g_wallsTopHere{0.0f}, g_ownHeightHere{0.0f};
+// A file of the mod's data as text (at most 1 MiB), from its .mpq folder (PluginContext::modDirectory): "" none
+std::string ModDataText(const char* rel) {
+    if (!g_ctx || !g_ctx->modDirectory) return std::string();
+    std::wstring path = g_ctx->modDirectory;
+    path += L"\\";
+    for (const char* c = rel; *c; ++c) path += *c == '/' ? L'\\' : (wchar_t)(unsigned char)*c;
+    std::string text;
+    if (FILE* f = _wfopen(path.c_str(), L"rb")) {
+        char buf[4096];
+        size_t n;
+        while ((n = fread(buf, 1, sizeof buf, f)) > 0 && text.size() < (1u << 20)) text.append(buf, n);
+        fclose(f);
+    }
+    return text;
+}
 std::atomic<bool> g_noFogArea{false};   // the area's biome is on [fog] no_fog_areas
 
 // The game's own day and night (2026-10-05). The game draws a debug line with
@@ -8907,7 +8979,7 @@ void Tick() {
 // x to x and y to z; an object's (static path +0x10/+0x14) found a tiki torch where one
 // stood. What gives light and how far is the game's Objects table (gamestate::ObjectLight).
 // The hero unit is the one the attack hook last worked on: hit once in an area.
-namespace fx { bool CeilWanted(); }
+namespace fx { bool CeilWanted(); bool GameCeilingByGame(); }
 namespace worldobj {
 template <class T> bool Rd(uintptr_t a, T* out) { return a > 0x10000 && env::SafeRead((const void*)a, out, sizeof(T)); }
 
@@ -9089,7 +9161,8 @@ void Gather() {
     last = GetTickCount64();
     // [ceiling] torches=0: no lights wanted, so no scan of the game's memory either - on a
     // weak PC its read of all the game's heap every 1.5 s was suspected of VR dropouts (0.142)
-    const bool want = fx::CeilWanted() && g_set.ceilTorches.load();
+    // (none where the game draws the ceiling: its own torches, fires and spells light it as they light the walls)
+    const bool want = fx::CeilWanted() && g_set.ceilTorches.load() && !(fx::GameCeilingByGame() && engineunits::CeilingShown());
     g_heroWanted.store(want);
     if (!want) { g_known.store(false); return; }
     float L[3];
@@ -9334,12 +9407,27 @@ void SkyTick() {
         g_underground.store(world && !IsOutdoorBiome(biome));
         g_ceilBiome.store(world && IsCeilingBiome(biome));
         g_noFogArea.store(world && IsNoFogBiome(biome));
+        // [ceiling] game_ceiling: the area's kind of the game's ceiling when on game_ceiling_biomes, else none; its walls'
+        // top (the installer's measures.txt) and its own height
+        const int kind = world && IsGameCeilingBiome(biome) ? gameceiling::KindOf(biome) : -1;
+        g_gameCeilKind.store(kind);
+        g_ownHeightHere.store(world ? OwnCeilingHeight(biome) : 0.0f);
+        {
+            ceilmeasure::Measures ms;
+            const bool have = kind >= 0 && ceilmeasure::Parse(ModDataText(ceilmeasure::kFile), &ms);
+            g_wallsTopHere.store(have ? ceilmeasure::WallsTopOf(ms, biome) : 0.0f);
+        }
+        engineunits::WorldSeen(world);   // (a menu after a game was left: our units may be placed again in the next one)
         static std::string told = "?";   // no biome name has a question mark
         if (biome != told) {
             told = biome;
-            LogF("vrcam: biome '%s' - %s%s%s", biome.empty() ? "(none yet)" : biome.c_str(),
+            char game[200] = "";
+            if (kind >= 0)
+                snprintf(game, sizeof game, ", the game's '%s' ceiling in VR F4 ([ceiling] game_ceiling%s; walls' top %.1f, own height %.1f)",
+                         gameceiling::kKinds[kind].name, g_set.gameCeiling.load() ? "" : "=0: not now", g_wallsTopHere.load(), g_ownHeightHere.load());
+            LogF("vrcam: biome '%s' - %s%s%s%s", biome.empty() ? "(none yet)" : biome.c_str(),
                  palette >= 0 ? kPalettes[palette].part : "no sky here (not in [sky] outdoor)",
-                 g_ceilBiome.load() ? ", a cave ceiling ([ceiling] biomes)" : "",
+                 g_ceilBiome.load() ? ", a cave ceiling ([ceiling] biomes)" : "", game,
                  g_noFogArea.load() ? ", no added fog ([fog] no_fog_areas)" : "");
         }
     }
@@ -9598,6 +9686,42 @@ bool TableKeyWanted() { return TableView() && g_inWorld.load() && !gamestate::Me
 bool CeilWanted() {
     return g_set.ceilOn.load() && g_enabled.load() && !ThirdPerson() && g_inWorld.load() && g_ceilBiome.load() &&
            !WorldMenuBlocksEffects();
+}
+// [ceiling] game_ceiling (vr/engine_units.cpp): a ceiling of the game's wanted here - [ceiling] enabled, first person,
+// the area on game_ceiling_biomes with a kind of its own, no menu - and the view it is drawn in: VR first person (F4)
+// with the VR camera on. Flat F3 keeps the shader's vault.
+bool GameCeilWanted() {
+    return g_set.ceilOn.load() && g_enabled.load() && !ThirdPerson() && g_inWorld.load() && g_gameCeilKind.load() >= 0 &&
+           !WorldMenuBlocksEffects();
+}
+bool GameCeilView() { return FullBody() && g_enabled.load() && !ThirdPerson(); }
+// The ceiling is the game's here, laid or still loading: the shader draws none. Not once the area's kind is given up
+// on (its files not made or refused, its placings run out), or the engine units are not ready (their hooks not in,
+// the game's functions not where 3.3.93787 has them): the shader's vault then, with the area's own settings.
+bool GameCeilingByGame() {
+    const int kind = g_gameCeilKind.load(std::memory_order_relaxed);
+    return gameceiling::ByGame(g_set.gameCeiling.load(), GameCeilView(), GameCeilWanted() && kind >= 0, engineunits::GivenUp(kind),
+                               !engineunits::Ready());
+}
+// What vr/engine_units.cpp lays, asked on the game's render thread each frame its registry may be changed
+void GameCeilingInputs(engineunits::CeilingIn* c) {
+    c->ticked = g_set.gameCeiling.load();
+    c->f4 = GameCeilView();
+    c->wanted = GameCeilWanted();
+    c->heroOk = g_eyeOk.load();
+    c->wallTick = g_set.gameCeilingWall.load();
+    c->kind = g_gameCeilKind.load();
+    for (int i = 0; i < 3; ++i) c->hero[i] = g_heroPosNow[i];
+    c->floorY = AreaFloor(c->hero[1]);
+    c->tileWorld = gameceiling::TileWorld(g_set.ceilScale.load());
+    const float own = g_ownHeightHere.load(), walls = g_wallsTopHere.load();
+    const bool fromWalls = g_set.ceilFromWalls.load();
+    c->height = gameceiling::HeightOf(own, fromWalls, walls, c->kind >= 0 && c->kind < gameceiling::kKindCount ? gameceiling::kKinds[c->kind].relief : 0.0f,
+                                      c->tileWorld / gameceiling::kTile);
+    c->heightFrom = own > 0.0f ? "the area's height_<biome>"
+                    : fromWalls && walls > 0.0f ? "on the area's walls' top - the game's own pieces, [ceiling] height_from_walls"
+                                                : "no height of its own, its walls not measured";
+    c->reach = gameceiling::WallReach(c->height, g_set.ceilFloor.load());
 }
 
 // The pictures of each act as the shader's preprocessor definitions; only what
@@ -10014,10 +10138,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
             // Heights over the area's floor, not the hero's feet: on a ledge the ceiling rose with
             // him (the user, 2026-10-07). The floor: the lowest the hero has stood since the area
             // changed; everything the shader measures (the ceiling, its height map) follows it.
-            static float floorY = 0.0f;
-            static uint32_t floorGen = ~0u;
-            if (floorGen != g_biomeGen.load()) { floorGen = g_biomeGen.load(); floorY = sv[0].hero[1]; }
-            floorY = std::min(floorY, sv[0].hero[1]);
+            const float floorY = AreaFloor(sv[0].hero[1]);   // (the game's slab stands on the same floor)
             for (int e = 0; e < 2; ++e) {
                 char n[16];
                 snprintf(n, sizeof n, "SkyProj%d", e); SetFloats(rt, n, sv[e].proj, 4);
@@ -10202,7 +10323,20 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
                          sv[0].hero[0], sv[0].hero[1], sv[0].hero[2], sv[0].eyeRel[0], sv[0].eyeRel[1], sv[0].eyeRel[2]);
                 }
             }
-        bool ceil = !sky && CeilWanted();
+        // [ceiling] game_ceiling: the game's from the area's first frame, laid or still loading - never the shader's
+        // vault for a moment in between
+        const int who = gameceiling::Drawer(sky, CeilWanted(), GameCeilingByGame(), engineunits::CeilingShown());
+        {   // who draws it, each change
+            static int toldWho = -1;
+            if (who != toldWho) {
+                static const char* const kWho[] = {"none wanted here", "the shader's vault",
+                                                   "the game's ([ceiling] game_ceiling) - its slab not laid yet: nothing drawn meanwhile",
+                                                   "the game's ([ceiling] game_ceiling) - its slab laid"};
+                LogF("vrcam: dungeon ceiling drawn by: %s", kWho[who]);
+                toldWho = who;
+            }
+        }
+        bool ceil = who == 1;
         for (const SkyView& v : sv) ceil = ceil && v.proj_ok && v.axes_ok && v.proj[0] != 0.0f && v.proj[1] != 0.0f;
         SetBool(rt, "CeilOn", ceil);
         if (ceil) {
@@ -10953,6 +11087,8 @@ DWORD WINAPI UpdateThread(void*) {
             ReportXInputUse();
             fx::TryRegister();
             InstallBiomeHook();
+            // [ceiling] game_ceiling: the engine units' hooks, only with the VR platform and the setting on
+            engineunits::Install(g_set.platform.load() == 1 && g_set.gameCeiling.load() && g_set.ceilOn.load());
             InstallLabelHooks();
             InstallKeyMoveHook();
             InstallStickHook();
@@ -11132,6 +11268,7 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
     // Every game address this build has, before any hook rewrites the bytes it is found by.
     d2rsig::SetShiftTest(GetPrivateProfileIntW(L"debug", L"sig_shift_test", 0, g_iniPath));
     d2rsig::Resolve(ctx);
+    engineunits::Init(&Log, &fx::GameCeilingInputs, ctx->modDirectory);
 
 #ifdef D2RVR_NATIVE_OPENXR
     roofmaterials::Install(&Log, +[]() { return g_set.platform.load() == 1; });
