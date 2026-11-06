@@ -138,6 +138,20 @@ int main() {
         {Sim drop(Motion::PoisonExplosion);RaiseSkeleton(drop);drop.Move({.18f,-.62f,-.30f},{-.18f,-.62f,-.30f},.25f);drop.Hold(.2f);
          Check(drop.casts==0,"Poison Explosion: the arms let down in front after Raise Skeleton are no push");}
         {Sim fling(Motion::PoisonExplosion);PoisonNova(fling);Check(fling.casts==0,"Poison Explosion: Poison Nova's fling is no push");}
+        {   // the owner's first pushes (2026-11-05): 42-44 cm from the chin, 30 from the eyes, 17-20 cm coming in to 9 cm ahead
+            Sim chin(Motion::PoisonExplosion);chin.Move({.17f,-.04f,-.30f},{-.14f,-.04f,-.30f},.35f);chin.Hold(.1f);
+            chin.Move({.17f,-.47f,-.25f},{-.14f,-.48f,-.27f},.15f);chin.Hold(.2f);
+            Check(chin.casts==1,"Poison Explosion: pushed 43 cm down from the chin casts");
+            Sim eyes(Motion::PoisonExplosion);eyes.Move({.18f,.02f,-.28f},{-.17f,.02f,-.27f},.35f);eyes.Hold(.1f);
+            eyes.Move({.18f,-.30f,-.26f},{-.17f,-.30f,-.25f},.15f);eyes.Hold(.2f);
+            Check(eyes.casts==1,"Poison Explosion: pushed 32 cm down from the eyes casts");
+            Sim short_(Motion::PoisonExplosion);short_.Move({.21f,-.27f,-.20f},{-.15f,-.25f,-.24f},.35f);short_.Hold(.1f);
+            short_.Move({.21f,-.45f,-.09f},{-.15f,-.45f,-.15f},.12f);short_.Hold(.2f);
+            Check(short_.casts==1,"Poison Explosion: pushed 18-20 cm down, coming in to 9 cm ahead, casts");
+            Sim lowered(Motion::PoisonExplosion);lowered.Move({.17f,-.20f,-.30f},{-.14f,-.20f,-.30f},.35f);lowered.Hold(.1f);
+            lowered.Move({.17f,-.40f,-.28f},{-.14f,-.40f,-.28f},.4f);lowered.Hold(.2f);
+            Check(lowered.casts==0,"Poison Explosion: the fists lowered at an easy pace cast nothing");
+        }
         {Sim high(Motion::Golem);high.MoveR({.22f,.28f,-.05f},.3f);high.Hold(.2f);
          Check(high.casts==1&&high.spot.ahead==spellmotion::necromancer::tuning.golemAhead&&high.spot.right==0,"Golem: swept up overhead, straight ahead");}
     }

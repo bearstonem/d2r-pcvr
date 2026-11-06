@@ -65,10 +65,13 @@ struct Tuning {
     float wallSweep=.40f,wallWindow=.40f,wallFront=.20f,wallLow=-.60f,wallHigh=.05f,wallSpeed=1.5f,wallOther=.15f,wallAhead=4;
     // N10 Poison Explosion, "push both fists down in front of you, from chest to waist, at a corpse": both
     // fists in front (pushFront ahead or more) and at the chest (pushFrom to pushTop) pushed down pushFall
-    // or more each within pushWindow, mostly down, at punchSpeed or faster, at most pairApart apart, neither
-    // over pushTop for pushQuiet s before (arms let down after Raise Skeleton are no push). Along the right
-    // hand's ray, as Corpse Explosion.
-    float pushFront=.15f,pushFrom=-.42f,pushTop=-.05f,pushFall=.22f,pushWindow=.35f,pushQuiet=.5f;
+    // or more each within pushWindow, mostly down (coming in or out at most 0.8 as far), at pushSpeed or
+    // faster, ending pushEnd ahead or more and at most pairApart apart, neither over pushQuietTop for
+    // pushQuiet s before (arms let down after Raise Skeleton are no push). Along the right hand's ray, as
+    // Corpse Explosion. The owner's first pushes (2026-11-05) missed: 30-44 cm from the chin and the eyes (it
+    // had to start under -.05 with nothing over it for pushQuiet), and 17-20 cm ending 9 cm ahead (pushFall
+    // .22, pushEnd .15).
+    float pushFront=.15f,pushFrom=-.42f,pushTop=.02f,pushQuietTop=.08f,pushFall=.15f,pushEnd=.05f,pushSpeed=1.8f,pushWindow=.35f,pushQuiet=.5f;
     // N11 Raise Skeletal Mage, "the Raise Skeleton sweep with your hands spread wide in a V": Raise
     // Skeleton's sweep with the hands mageApart or more apart as they pass riseTop; narrower is Raise Skeleton.
     float mageApart=.80f;
@@ -223,14 +226,14 @@ inline bool Done(Engine& e,Motion m) {
             bool chest=true;
             for(const auto& h:a.l)chest=chest&&F(h)>=t.pushFront&&h.y>=t.pushFrom&&h.y<=t.pushTop;
             if(!chest)continue;
-            bool quiet=true;   // neither over pushTop for pushQuiet s before
-            for(size_t j=i+1;j-->0&&a.t-s[j].t<=t.pushQuiet&&quiet;)quiet=s[j].l[0].y<=t.pushTop&&s[j].l[1].y<=t.pushTop;
+            bool quiet=true;   // neither over pushQuietTop for pushQuiet s before
+            for(size_t j=i+1;j-->0&&a.t-s[j].t<=t.pushQuiet&&quiet;)quiet=s[j].l[0].y<=t.pushQuietTop&&s[j].l[1].y<=t.pushQuietTop;
             if(!quiet)return false;
             const float fall=std::min(a.l[0].y-n.l[0].y,a.l[1].y-n.l[1].y);
             if(fall>=.05f)e.Toward(fall/t.pushFall);
             bool down=fall>=t.pushFall&&Engine::Apart(n)<=t.pairApart;
             for(int k=0;k<2&&down;++k){const float f=a.l[k].y-n.l[k].y;
-                down=F(n.l[k])>=t.pushFront&&std::fabs(F(n.l[k])-F(a.l[k]))<=.6f*f&&std::fabs(n.l[k].x-a.l[k].x)<=.6f*f&&detail::PeakSpeed(s,i,k)>=t.punchSpeed;}
+                down=F(n.l[k])>=t.pushEnd&&std::fabs(F(n.l[k])-F(a.l[k]))<=.8f*f&&std::fabs(n.l[k].x-a.l[k].x)<=.6f*f&&detail::PeakSpeed(s,i,k)>=t.pushSpeed;}
             if(down)return true;
         }
         return false;

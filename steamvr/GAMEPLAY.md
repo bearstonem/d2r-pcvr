@@ -2378,7 +2378,8 @@ there.
   left arm); Poison Nova, hands together at the chest, then flung out wide; Bone Prison, both hands
   apart in front, then brought together round a monster; Bone Wall, the right hand swept sideways
   across in front of the chest (the wall 4 cells away where the sweep's middle heads); Poison
-  Explosion, both fists pushed down in front from the chest to the waist, at a corpse; Raise
+  Explosion, both fists pushed down in front from the chest (up to the chin) to the waist, 15 cm or
+  more, at a corpse (not the arms let down from past the eyes); Raise
   Skeletal Mage, Raise Skeleton's sweep with the hands spread wide in a V (80 cm apart or more as
   they pass the eyes; narrower is Raise Skeleton). The last three the owner picked from the list of
   the Necromancer's skills without one (2026-11-05). The owner's headset session (2026-11-05) made
