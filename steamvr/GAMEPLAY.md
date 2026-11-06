@@ -2376,7 +2376,12 @@ there.
   second card, the left arm the same (the next one down); Corpse Explosion, both fists punched out
   together; Amplify Damage, a punch with the right fist; Lower Resist, a punch with the left (along the
   left arm); Poison Nova, hands together at the chest, then flung out wide; Bone Prison, both hands
-  apart in front, then brought together round a monster. The owner's headset session (2026-11-05) made
+  apart in front, then brought together round a monster; Bone Wall, the right hand swept sideways
+  across in front of the chest (the wall 4 cells away where the sweep's middle heads); Poison
+  Explosion, both fists pushed down in front from the chest to the waist, at a corpse; Raise
+  Skeletal Mage, Raise Skeleton's sweep with the hands spread wide in a V (80 cm apart or more as
+  they pass the eyes; narrower is Raise Skeleton). The last three the owner picked from the list of
+  the Necromancer's skills without one (2026-11-05). The owner's headset session (2026-11-05) made
   the summons arm raises ("right arm, just right arm rising up to raise golem, and then left arm raising
   up to raise different kind of golem, and then both arms raising up to raise skeleton"; "in front of
   us ... kind of pointing at whatever area we're raising from"), the curses and Corpse Explosion

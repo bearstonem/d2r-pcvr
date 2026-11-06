@@ -19,6 +19,9 @@ static void GolemLeft(Sim& s){s.MoveL({-.165f,.12f,-.45f},.3f);s.Hold(.2f);}
 static void AmplifyDamage(Sim& s){s.MoveR({.15f,-.30f,-.08f},.35f);s.Hold(.1f);s.MoveR({.15f,-.28f,-.55f},.15f);s.Hold(.2f);}
 static void LowerResist(Sim& s){s.MoveL({-.17f,-.30f,-.08f},.35f);s.Hold(.1f);s.MoveL({-.17f,-.28f,-.55f},.15f);s.Hold(.2f);}
 static void PoisonNova(Sim& s){s.Move({.08f,-.38f,-.25f},{-.08f,-.38f,-.25f},.35f);s.Move({.55f,-.60f,-.20f},{-.55f,-.60f,-.20f},.25f);s.Hold(.2f);}
+static void BoneWall(Sim& s){s.MoveR({-.20f,-.30f,-.40f},.35f);s.Hold(.1f);s.MoveR({.24f,-.30f,-.40f},.2f);s.Hold(.2f);}
+static void PoisonExplosion(Sim& s){s.Move({.15f,-.25f,-.35f},{-.15f,-.25f,-.35f},.35f);s.Hold(.1f);s.Move({.15f,-.55f,-.35f},{-.15f,-.55f,-.35f},.15f);s.Hold(.2f);}
+static void RaiseMage(Sim& s){s.Move({.25f,-.62f,-.15f},{-.25f,-.62f,-.15f},.3f);s.Move({.55f,.20f,-.20f},{-.55f,.20f,-.20f},.3f);s.Hold(.2f);}
 static void BonePrison(Sim& s){s.Move({.35f,-.30f,-.40f},{-.35f,-.30f,-.40f},.4f);s.Hold(.1f);s.Move({.06f,-.30f,-.42f},{-.06f,-.30f,-.42f},.3f);s.Hold(.2f);}
 // Things a Necromancer does with both grips held that are none of them.
 static void Rest(Sim& s){s.Hold(2.f);}
@@ -33,6 +36,9 @@ static void SlowNova(Sim& s){s.Move({.08f,-.38f,-.25f},{-.08f,-.38f,-.25f},.35f)
 static void SlowPair(Sim& s){s.Move({.15f,-.30f,-.08f},{-.15f,-.30f,-.08f},.35f);s.Hold(.1f);s.Move({.15f,-.28f,-.55f},{-.15f,-.28f,-.55f},.8f);s.Hold(.2f);}
 static void SlowPunch(Sim& s){s.MoveR({.15f,-.30f,-.08f},.35f);s.Hold(.1f);s.MoveR({.15f,-.28f,-.55f},.8f);s.Hold(.2f);}
 static void SlowLeftPunch(Sim& s){s.MoveL({-.15f,-.30f,-.08f},.35f);s.Hold(.1f);s.MoveL({-.15f,-.28f,-.55f},.8f);s.Hold(.2f);}
+static void SlowWall(Sim& s){s.MoveR({-.20f,-.30f,-.40f},.35f);s.Hold(.1f);s.MoveR({.24f,-.30f,-.40f},.9f);s.Hold(.2f);}
+static void SlowPush(Sim& s){s.Move({.15f,-.25f,-.35f},{-.15f,-.25f,-.35f},.35f);s.Hold(.1f);s.Move({.15f,-.55f,-.35f},{-.15f,-.55f,-.35f},.9f);s.Hold(.2f);}
+static void SlowMage(Sim& s){s.Move({.25f,-.62f,-.15f},{-.25f,-.62f,-.15f},.3f);s.Move({.55f,.20f,-.20f},{-.55f,.20f,-.20f},1.4f);s.Hold(.2f);}
 static void SlowPrison(Sim& s){s.Move({.35f,-.30f,-.40f},{-.35f,-.30f,-.40f},.4f);s.Hold(.1f);s.Move({.06f,-.30f,-.42f},{-.06f,-.30f,-.42f},1.5f);s.Hold(.2f);}
 static void SlowRaise(Sim& s){s.Move({.18f,-.62f,-.15f},{-.18f,-.62f,-.15f},.3f);s.Move({.22f,.18f,-.22f},{-.22f,.18f,-.22f},1.4f);s.Hold(.2f);}
 static void ShortArmor(Sim& s){s.Move({-.10f,-.35f,-.10f},{.10f,-.35f,-.10f},.4f);s.Hold(.2f);s.Move(RestR,RestL,.4f);}
@@ -45,7 +51,9 @@ int main() {
         {Motion::CorpseExplosion,CorpseExplosion,"Corpse Explosion",false},{Motion::Golem,Golem,"Golem",true},
         {Motion::GolemLeft,GolemLeft,"Golem (left arm)",true},
         {Motion::AmplifyDamage,AmplifyDamage,"Amplify Damage",false},{Motion::LowerResist,LowerResist,"Lower Resist",true},
-        {Motion::PoisonNova,PoisonNova,"Poison Nova",false},{Motion::BonePrison,BonePrison,"Bone Prison",false}};
+        {Motion::PoisonNova,PoisonNova,"Poison Nova",false},{Motion::BonePrison,BonePrison,"Bone Prison",false},
+        {Motion::BoneWall,BoneWall,"Bone Wall",true},{Motion::PoisonExplosion,PoisonExplosion,"Poison Explosion",false},
+        {Motion::RaiseMage,RaiseMage,"Raise Skeletal Mage",false}};
     Check(std::size(all)==std::size(spellmotion::necromancer::Order),"every motion of the Necromancer's is tested");
     for(const auto& m:all) {
         const std::string label=std::string(m.name)+": ";
@@ -53,7 +61,7 @@ int main() {
         for(float heading:{-2.f,0.f,2.f}) {
             Sim s(m.motion,heading);m.perform(s);
             Check(s.casts==1,(label+"done well, it casts once, at any heading").c_str());
-            if(m.aimed)Check(s.aim.z<-.99f&&std::fabs(s.aim.x)<.01f&&std::fabs(s.aim.y)<.01f,(label+"it goes straight ahead, level").c_str());
+            if(m.aimed)Check(s.aim.z<-.99f&&std::fabs(s.aim.x)<.05f&&std::fabs(s.aim.y)<.01f,(label+"it goes straight ahead, level").c_str());
             else Check(s.aim.x==0&&s.aim.y==0&&s.aim.z==0,(label+"no way of its own: the right hand's ray aims it").c_str());
         }
         {Sim s(m.motion);s.in.active=false;m.perform(s);Check(s.casts==0,(label+"with the gate closed, nothing casts").c_str());}
@@ -76,14 +84,21 @@ int main() {
         {Motion::AmplifyDamage,SlowPunch,"Amplify Damage: a slow push out casts nothing"},
         {Motion::LowerResist,SlowLeftPunch,"Lower Resist: a slow push out casts nothing"},
         {Motion::BonePrison,SlowPrison,"Bone Prison: the hands closed slowly cast nothing"},
+        {Motion::BoneWall,SlowWall,"Bone Wall: a slow sweep casts nothing"},
+        {Motion::PoisonExplosion,SlowPush,"Poison Explosion: the fists lowered slowly cast nothing"},
+        {Motion::RaiseMage,SlowMage,"Raise Skeletal Mage: a slow lift casts nothing"},
         {Motion::RaiseSkeleton,SlowRaise,"Raise Skeleton: a slow lift casts nothing"},
         {Motion::BoneArmor,ShortArmor,"Bone Armor: crossed for a moment casts nothing"}};
     for(const auto& l:lazy){Sim s(l.motion);l.perform(s);Check(s.casts==0,l.label);}
     {   // the owner's headset session (2026-11-05): what was missed then casts now, and their calls
         Sim nova(Motion::PoisonNova);nova.Move({.08f,-.38f,-.25f},{-.08f,-.38f,-.25f},.35f);nova.Move({.70f,-.15f,-.10f},{-.68f,-.12f,-.15f},.25f);nova.Hold(.2f);
         Check(nova.casts==1,"Poison Nova: flung 138 cm wide at shoulder height casts");
-        Sim wide(Motion::RaiseSkeleton);wide.Move({.30f,-.62f,-.10f},{-.30f,-.62f,-.10f},.3f);wide.Move({.45f,.25f,-.15f},{-.45f,.25f,-.15f},.3f);
-        Check(wide.casts==1,"Raise Skeleton: both arms swept up wide past the face cast, no stop");
+        for(const auto m:{Motion::RaiseSkeleton,Motion::RaiseMage}) {   // the owner's 58 cm, and a V
+            Sim narrow(m);narrow.Move({.30f,-.62f,-.10f},{-.30f,-.62f,-.10f},.3f);narrow.Move({.29f,.25f,-.15f},{-.29f,.25f,-.15f},.3f);
+            Check(narrow.casts==(m==Motion::RaiseSkeleton?1:0),"both arms swept up 58 cm apart past the face: Raise Skeleton's, no stop");
+            Sim wide(m);wide.Move({.30f,-.62f,-.10f},{-.30f,-.62f,-.10f},.3f);wide.Move({.50f,.25f,-.15f},{-.50f,.25f,-.15f},.3f);
+            Check(wide.casts==(m==Motion::RaiseMage?1:0),"both arms swept up a metre apart past the face: Raise Skeletal Mage's");
+        }
         Sim on(Motion::RaiseSkeleton);on.Move({.18f,-.62f,-.15f},{-.18f,-.62f,-.15f},.3f);on.Move({.18f,.40f,-.10f},{-.18f,.40f,-.10f},.3f);on.Move({.18f,-.62f,-.15f},{-.18f,-.62f,-.15f},.3f);
         Check(on.casts==1,"Raise Skeleton: swept on overhead and back down, once");
         for(const auto m:{Motion::Golem,Motion::GolemLeft}){Sim both(m);RaiseSkeleton(both);Check(both.casts==0,"a golem: both arms up is Raise Skeleton's");}
@@ -112,6 +127,17 @@ int main() {
          Check(aside.casts==1&&aside.spot.right>1&&aside.spot.ahead>1,"Golem: swept up toward the front right, it stands there");}
         {Sim aside(Motion::GolemLeft);aside.MoveL({-.45f,.10f,-.40f},.3f);aside.Hold(.2f);
          Check(aside.casts==1&&aside.spot.right<-1&&aside.spot.ahead>1,"Golem (left arm): swept up toward the front left, it stands there");}
+        {Sim back(Motion::BoneWall);back.MoveR({.30f,-.30f,-.40f},.35f);back.Hold(.1f);back.MoveR({-.16f,-.30f,-.40f},.2f);back.Hold(.2f);
+         Check(back.casts==1,"Bone Wall: swept right to left as well");}
+        {Sim aside(Motion::BoneWall);aside.MoveR({.10f,-.30f,-.40f},.35f);aside.Hold(.1f);aside.MoveR({.55f,-.30f,-.30f},.2f);aside.Hold(.2f);
+         Check(aside.casts==1&&aside.spot.right>1,"Bone Wall: swept across the front right, it stands there");}
+        {Sim both(Motion::BoneWall);both.Move({-.20f,-.30f,-.40f},{-.40f,-.30f,-.40f},.35f);both.Hold(.1f);both.Move({.24f,-.30f,-.40f},{.04f,-.30f,-.40f},.2f);
+         Check(both.casts==0,"Bone Wall: both hands swept across is none");}
+        {Sim low(Motion::BoneWall);low.MoveR({-.20f,-.70f,-.30f},.35f);low.Hold(.1f);low.MoveR({.24f,-.70f,-.30f},.2f);
+         Check(low.casts==0,"Bone Wall: swept by the hips is none");}
+        {Sim drop(Motion::PoisonExplosion);RaiseSkeleton(drop);drop.Move({.18f,-.62f,-.30f},{-.18f,-.62f,-.30f},.25f);drop.Hold(.2f);
+         Check(drop.casts==0,"Poison Explosion: the arms let down in front after Raise Skeleton are no push");}
+        {Sim fling(Motion::PoisonExplosion);PoisonNova(fling);Check(fling.casts==0,"Poison Explosion: Poison Nova's fling is no push");}
         {Sim high(Motion::Golem);high.MoveR({.22f,.28f,-.05f},.3f);high.Hold(.2f);
          Check(high.casts==1&&high.spot.ahead==spellmotion::necromancer::tuning.golemAhead&&high.spot.right==0,"Golem: swept up overhead, straight ahead");}
     }

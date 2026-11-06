@@ -35,11 +35,12 @@ enum class Motion {None,FlingOut,PushDown,RubSnap,CrossGuard,ArmUp,MatchStrike,F
     InnerSight,SlowMissiles,Decoy,Valkyrie,                                                       // Amazon A1-A4
     BattleOrders,Shout,BattleCommand,WarCry,Howl,BattleCry,Leap,FindItem,                         // Barbarian B1-B8
     BoneArmor,RaiseSkeleton,CorpseExplosion,Golem,AmplifyDamage,LowerResist,PoisonNova,BonePrison,GolemLeft,// Necromancer N1-N8, N4b
+    BoneWall,PoisonExplosion,RaiseMage,                                                           // Necromancer N9-N11
     BurstOfSpeed,Fade,CloakOfShadows,Venom,BladeShield,ShadowWarrior,MindBlast,                   // Assassin S1-S7
     End};
 constexpr int SorceressCount=int(Motion::Punch);   // the Sorceress's, 1..SorceressCount ([motions] off: her bits)
 constexpr int MotionCount=int(Motion::End)-1;      // every class's, 1..MotionCount (a watcher each)
-constexpr int MaxCards=10;                         // a MOTIONS page's cards (interaction::MotionCards), one bit each
+constexpr int MaxCards=12;                         // a MOTIONS page's cards (interaction::MotionCards), one bit each
 inline Motion For(int skill) {
     switch(skill) {
     case 48:return Motion::FlingOut;      // Nova
@@ -59,6 +60,7 @@ inline Motion For(int skill) {
     case 75:case 94:return Motion::Golem;   // the right arm's card is Clay Golem's; it casts the strongest learned (CastSkillOf)
     case 85:return Motion::GolemLeft;       // the left arm's is Blood Golem's; it casts the next strongest
     case 66:return Motion::AmplifyDamage;case 91:return Motion::LowerResist;case 92:return Motion::PoisonNova;case 88:return Motion::BonePrison;
+    case 78:return Motion::BoneWall;case 83:return Motion::PoisonExplosion;case 80:return Motion::RaiseMage;
     case 258:return Motion::BurstOfSpeed;case 267:return Motion::Fade;case 264:return Motion::CloakOfShadows;case 278:return Motion::Venom;
     case 277:return Motion::BladeShield;case 268:case 279:return Motion::ShadowWarrior;case 273:return Motion::MindBlast;
     default:return Motion::None;
@@ -80,7 +82,8 @@ constexpr int DruidSkills[]={223,228};             // Werewolf, Werebear
 // The table's order (owner, 2026-11-04): A1-A4, B1-B8, N1-N8 (N4 the golems' card, N6 Lower Resist), S1-S7.
 constexpr int AmazonSkills[]={8,17,28,32};
 constexpr int BarbarianSkills[]={149,138,155,154,130,146,132,142};
-constexpr int NecromancerSkills[]={68,70,74,75,66,91,92,88,85};   // 85: the left arm's golem (owner, 2026-11-05), after the table's
+// 85: the left arm's golem, then Bone Wall, Poison Explosion and Raise Skeletal Mage (owner, 2026-11-05), after the table's
+constexpr int NecromancerSkills[]={68,70,74,75,66,91,92,88,85,78,83,80};
 constexpr int AssassinSkills[]={258,267,264,278,277,268,273};
 struct Page {const int* skills=nullptr;int count=0;};
 inline Page PageOf(int skillClass) {
@@ -116,7 +119,8 @@ inline const char* SpellName(int skill) {
     case 130:return "Howl";case 146:return "Battle Cry";case 132:return "Leap";case 142:return "Find Item";
     case 68:return "Bone Armor";case 70:return "Raise Skeleton";case 74:return "Corpse Explosion";case 75:return "Clay Golem";
     case 85:return "Blood Golem";case 94:return "Fire Golem";case 66:return "Amplify Damage";case 91:return "Lower Resist";
-    case 92:return "Poison Nova";case 88:return "Bone Prison";
+    case 92:return "Poison Nova";case 88:return "Bone Prison";case 78:return "Bone Wall";case 83:return "Poison Explosion";
+    case 80:return "Raise Skeletal Mage";
     case 258:return "Burst of Speed";case 267:return "Fade";case 264:return "Cloak of Shadows";case 278:return "Venom";
     case 277:return "Blade Shield";case 268:return "Shadow Warrior";case 279:return "Shadow Master";case 273:return "Mind Blast";
     default:return "";
@@ -579,14 +583,14 @@ namespace framevr::spellmotion {
 inline bool ClassDone(Engine& e,Motion m) {
     if(m>=Motion::InnerSight&&m<=Motion::Valkyrie)return amazon::Done(e,m);
     if(m>=Motion::BattleOrders&&m<=Motion::FindItem)return barbarian::Done(e,m);
-    if(m>=Motion::BoneArmor&&m<=Motion::GolemLeft)return necromancer::Done(e,m);
+    if(m>=Motion::BoneArmor&&m<=Motion::RaiseMage)return necromancer::Done(e,m);
     if(m>=Motion::BurstOfSpeed&&m<=Motion::MindBlast)return assassin::Done(e,m);
     return false;
 }
 inline const char* ClassCue(Motion m) {
     if(m>=Motion::InnerSight&&m<=Motion::Valkyrie)return amazon::Cue(m);
     if(m>=Motion::BattleOrders&&m<=Motion::FindItem)return barbarian::Cue(m);
-    if(m>=Motion::BoneArmor&&m<=Motion::GolemLeft)return necromancer::Cue(m);
+    if(m>=Motion::BoneArmor&&m<=Motion::RaiseMage)return necromancer::Cue(m);
     if(m>=Motion::BurstOfSpeed&&m<=Motion::MindBlast)return assassin::Cue(m);
     return "no motion";
 }

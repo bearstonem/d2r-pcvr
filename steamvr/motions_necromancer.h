@@ -57,6 +57,21 @@ struct Tuning {
     // own side, at any height up to novaHigh (the owner's flings, 2026-11-05: 130-160 cm wide at shoulder
     // height; it once had to end below the chest), within novaWindow and at least flingSpeed fast.
     float novaTogether=.30f,novaApart=.75f,novaSide=.25f,novaHigh=.10f,novaWindow=.8f,flingSpeed=1.5f;
+    // The owner's additions (2026-11-05, from the list of the Necromancer's skills without one):
+    // N9 Bone Wall, "sweep your right hand sideways across in front of your chest, as if drawing the wall":
+    // the right hand wallSweep or more across within wallWindow, either way, mostly sideways, wallFront
+    // ahead or more and wallLow to wallHigh the whole way, at wallSpeed or faster, the left hand moved
+    // wallOther at most. The wall stands wallAhead cells away where the sweep's middle heads from the eyes.
+    float wallSweep=.40f,wallWindow=.40f,wallFront=.20f,wallLow=-.60f,wallHigh=.05f,wallSpeed=1.5f,wallOther=.15f,wallAhead=4;
+    // N10 Poison Explosion, "push both fists down in front of you, from chest to waist, at a corpse": both
+    // fists in front (pushFront ahead or more) and at the chest (pushFrom to pushTop) pushed down pushFall
+    // or more each within pushWindow, mostly down, at punchSpeed or faster, at most pairApart apart, neither
+    // over pushTop for pushQuiet s before (arms let down after Raise Skeleton are no push). Along the right
+    // hand's ray, as Corpse Explosion.
+    float pushFront=.15f,pushFrom=-.42f,pushTop=-.05f,pushFall=.22f,pushWindow=.35f,pushQuiet=.5f;
+    // N11 Raise Skeletal Mage, "the Raise Skeleton sweep with your hands spread wide in a V": Raise
+    // Skeleton's sweep with the hands mageApart or more apart as they pass riseTop; narrower is Raise Skeleton.
+    float mageApart=.80f;
     // N8 Bone Prison: both hands out in front prisonApart apart, then brought within prisonTogether,
     // each in by prisonIn, within prisonWindow and at least closeSpeed fast.
     float prisonApart=.55f,prisonTogether=.20f,prisonFront=.30f,prisonIn=.15f,prisonWindow=.9f,closeSpeed=1.0f;
@@ -64,8 +79,9 @@ struct Tuning {
 inline constexpr Tuning tuning{};
 // The order they are watched in: the first to complete in a frame casts. Raise Skeleton (both arms) before
 // the golems (one arm each), Corpse Explosion (both fists) before the punches of one.
-constexpr Motion Order[]={Motion::BoneArmor,Motion::BonePrison,Motion::RaiseSkeleton,Motion::Golem,Motion::GolemLeft,
-    Motion::PoisonNova,Motion::CorpseExplosion,Motion::AmplifyDamage,Motion::LowerResist};
+constexpr Motion Order[]={Motion::BoneArmor,Motion::BonePrison,Motion::RaiseSkeleton,Motion::RaiseMage,Motion::Golem,
+    Motion::GolemLeft,Motion::PoisonNova,Motion::CorpseExplosion,Motion::AmplifyDamage,Motion::LowerResist,Motion::BoneWall,
+    Motion::PoisonExplosion};
 // How to do each, on the MOTIONS page and in the log (what the controllers' positions can tell: no palms or
 // fingers, both grips held).
 inline const char* Cue(Motion m) {
@@ -79,6 +95,9 @@ inline const char* Cue(Motion m) {
     case Motion::LowerResist:return "punch the left fist out at a monster";
     case Motion::PoisonNova:return "hands together at the chest, then fling them out wide";
     case Motion::BonePrison:return "hold both hands apart in front, then bring them together round a monster";
+    case Motion::BoneWall:return "sweep the right hand sideways across in front of your chest, drawing the wall";
+    case Motion::PoisonExplosion:return "push both fists down in front of you, from the chest to the waist, at a corpse";
+    case Motion::RaiseMage:return "sweep both arms up fast from the hips, spread wide in a V";
     default:return "no motion";
     }
 }
@@ -128,6 +147,25 @@ inline bool Punch(Engine& e,const std::vector<Sample>& s,int k) {
     }
     return false;
 }
+// N2, N11: both arms swept up fast from the hips past riseTop, together; apart: how far apart as they did.
+inline bool BothUp(Engine& e,const std::vector<Sample>& s,float& apart) {
+    const auto& t=tuning;const auto& n=s.back();
+    // from the latest moment both hands were low
+    for(size_t i=s.size()-1;i-->0&&n.t-s[i].t<=t.riseWindow;) {
+        const auto& a=s[i];
+        if(a.l[0].y>t.riseFrom||a.l[1].y>t.riseFrom||a.l[0].y<-1.1f||a.l[1].y<-1.1f)continue;
+        const float lift=std::min(n.l[0].y-a.l[0].y,n.l[1].y-a.l[1].y);
+        if(lift>=.06f)e.Toward(lift/(t.riseTop-std::min(a.l[0].y,a.l[1].y)));
+        bool up=lift>=t.riseMin;
+        for(int k=0;k<2;++k)up=up&&n.l[k].y>=t.riseTop&&n.l[k].y-a.l[k].y>=t.riseUpright*std::hypot(n.l[k].x-a.l[k].x,n.l[k].z-a.l[k].z);
+        if(!up)return false;
+        double past[2]={-1,-1};   // when each first passed riseTop: together, not one arm and then the other
+        for(size_t j=i;j<s.size();++j)for(int k=0;k<2;++k)if(past[k]<0&&s[j].l[k].y>=t.riseTop)past[k]=s[j].t;
+        apart=Engine::Apart(n);
+        return std::fabs(past[0]-past[1])<=t.riseTogether&&PeakSpeed(s,i,0)>=t.riseSpeed&&PeakSpeed(s,i,1)>=t.riseSpeed;
+    }
+    return false;
+}
 // N4, N4b: arm k swept up fast from low past armTop, the other arm left down.
 inline bool ArmUp(Engine& e,const std::vector<Sample>& s,int k) {
     const auto& t=tuning;const auto& n=s.back();const auto& c=n.l[k];
@@ -156,19 +194,44 @@ inline bool Done(Engine& e,Motion m) {
         for(const auto& h:n.l)pose=pose&&h.y>=t.armorLow&&h.y<=t.armorHigh&&F(h)>=-.20f&&F(h)<=t.armorNear;
         return e.Held(pose&&e.Still(0)&&e.Still(1),n.t,t.armorHold);
     }
-    case Motion::RaiseSkeleton: {
-        // from the latest moment both hands were low, swept up fast past riseTop
-        for(size_t i=s.size()-1;i-->0&&n.t-s[i].t<=t.riseWindow;) {
+    case Motion::RaiseSkeleton:case Motion::RaiseMage: {   // both arms up: narrow the skeleton, a wide V the mage
+        float apart=0;
+        return detail::BothUp(e,s,apart)&&(apart>=t.mageApart)==(m==Motion::RaiseMage);
+    }
+    case Motion::BoneWall: {   // the right hand swept across in front of the chest, either way
+        const auto& c=n.l[0];
+        const auto front=[&](math::Vec h){return F(h)>=t.wallFront&&h.y>=t.wallLow&&h.y<=t.wallHigh;};
+        if(!front(c))return false;
+        for(size_t i=s.size()-1;i-->0&&n.t-s[i].t<=t.wallWindow;) {
+            const auto& a=s[i].l[0];
+            if(!front(a))break;   // in front of the chest all along: none from before it left
+            const float across=std::fabs(c.x-a.x);
+            if(across>=.05f)e.Toward(across/t.wallSweep);
+            if(across<t.wallSweep||std::fabs(c.y-a.y)>.5f*across||std::fabs(F(c)-F(a))>.5f*across||
+               Engine::Len(n.l[1]-s[i].l[1])>t.wallOther||detail::PeakSpeed(s,i,0)<t.wallSpeed)continue;
+            const float mx=(a.x+c.x)/2,mz=(a.z+c.z)/2,level=std::hypot(mx,mz);
+            math::Vec way=level>=.15f?math::Vec{mx/level,0,mz/level}:math::Vec{0,0,-1};
+            if(-way.z<.3f)way={0,0,-1};
+            e.Aim(way);e.LandAt(t.wallAhead*-way.z,t.wallAhead*way.x);
+            return true;
+        }
+        return false;
+    }
+    case Motion::PoisonExplosion: {   // both fists pushed down in front, from the chest
+        for(size_t i=s.size()-1;i-->0&&n.t-s[i].t<=t.pushWindow;) {
             const auto& a=s[i];
-            if(a.l[0].y>t.riseFrom||a.l[1].y>t.riseFrom||a.l[0].y<-1.1f||a.l[1].y<-1.1f)continue;
-            const float lift=std::min(n.l[0].y-a.l[0].y,n.l[1].y-a.l[1].y);
-            if(lift>=.06f)e.Toward(lift/(t.riseTop-std::min(a.l[0].y,a.l[1].y)));
-            bool up=lift>=t.riseMin;
-            for(int k=0;k<2;++k)up=up&&n.l[k].y>=t.riseTop&&n.l[k].y-a.l[k].y>=t.riseUpright*std::hypot(n.l[k].x-a.l[k].x,n.l[k].z-a.l[k].z);
-            if(!up)return false;
-            double past[2]={-1,-1};   // when each first passed riseTop: together, not one arm and then the other
-            for(size_t j=i;j<s.size();++j)for(int k=0;k<2;++k)if(past[k]<0&&s[j].l[k].y>=t.riseTop)past[k]=s[j].t;
-            return std::fabs(past[0]-past[1])<=t.riseTogether&&detail::PeakSpeed(s,i,0)>=t.riseSpeed&&detail::PeakSpeed(s,i,1)>=t.riseSpeed;
+            bool chest=true;
+            for(const auto& h:a.l)chest=chest&&F(h)>=t.pushFront&&h.y>=t.pushFrom&&h.y<=t.pushTop;
+            if(!chest)continue;
+            bool quiet=true;   // neither over pushTop for pushQuiet s before
+            for(size_t j=i+1;j-->0&&a.t-s[j].t<=t.pushQuiet&&quiet;)quiet=s[j].l[0].y<=t.pushTop&&s[j].l[1].y<=t.pushTop;
+            if(!quiet)return false;
+            const float fall=std::min(a.l[0].y-n.l[0].y,a.l[1].y-n.l[1].y);
+            if(fall>=.05f)e.Toward(fall/t.pushFall);
+            bool down=fall>=t.pushFall&&Engine::Apart(n)<=t.pairApart;
+            for(int k=0;k<2&&down;++k){const float f=a.l[k].y-n.l[k].y;
+                down=F(n.l[k])>=t.pushFront&&std::fabs(F(n.l[k])-F(a.l[k]))<=.6f*f&&std::fabs(n.l[k].x-a.l[k].x)<=.6f*f&&detail::PeakSpeed(s,i,k)>=t.punchSpeed;}
+            if(down)return true;
         }
         return false;
     }
