@@ -3990,20 +3990,31 @@ bool TossAim(int skill,float playerX,float playerY,framevr::spellaim::Cast& cast
     return true;
 }
 // Teleport punched while its landing showed (spell_motion.h, the transport's
-// circle): there, whatever the Aim options, never past the game's reach.
+// circle), or a motion's spot (a summon, a wall, Meteor, Blizzard): there,
+// whatever the Aim options, never past the game's reach. Meteor and Blizzard
+// go to the highlighted monster instead when there is one
+// (aimrules::MotionOnTarget): the casting button's pick - its hand's, the
+// other's, the eyes' (aimtargets::Resolve).
 bool MotionAim(int skill,float playerX,float playerY,framevr::spellaim::Cast& cast) {
     float x=0,y=0;
     if(!g_spellAimReady.load()||!g_enabled.load()||gamestate::MenuOpen()||!framevr::MotionLanding(skill,x,y))return false;
+    const char* by="motion";
+    if(framevr::aimrules::MotionOnTarget(skill)) {
+        const auto c=aimtargets::Now();
+        float mx=0,my=0,md=0;int source=-1;uint32_t id=0;
+        if(aimtargets::Resolve(c.button,c.bow,c.use,mx,my,md,&source,&id)){x=mx;y=my;by=aimtargets::SourceName(source);g_note.source=source;g_note.id=id;}
+    }
     float dx=x-playerX,dy=y-playerY;
     const float wanted=std::hypot(dx,dy);
     if(wanted<framevr::spellaim::GroundMinDistance&&wanted>.001f){dx*=framevr::spellaim::GroundMinDistance/wanted;dy*=framevr::spellaim::GroundMinDistance/wanted;}
     if(!framevr::aimreach::Clamp(dx,dy))return false;
     cast.x=playerX+dx;cast.y=playerY+dy;cast.directed=cast.contactPoint=true;
-    g_note.by="motion";g_note.distance=std::hypot(dx,dy);
+    g_note.by=by;g_note.distance=std::hypot(dx,dy);
     static ULONGLONG lastLog=0;
     if(GetTickCount64()-lastLog>250) {
         lastLog=GetTickCount64();
-        LogF("Frame motion aim: skill %d on the landing shown, %.1f cells (shown %.1f from here)",skill,g_note.distance,wanted);
+        if(g_note.id)LogF("Frame motion aim: skill %d on the highlighted monster %u (%s), %.1f cells",skill,g_note.id,by,g_note.distance);
+        else LogF("Frame motion aim: skill %d on the landing shown, %.1f cells (shown %.1f from here)",skill,g_note.distance,wanted);
     }
     return true;
 }
