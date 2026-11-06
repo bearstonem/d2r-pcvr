@@ -16,6 +16,8 @@ struct Sim {
     math::Quat yaw{0,0,0,1};math::Vec head{0,1.7f,0};
     int casts=0,drops=0,began=0;std::string lastDrop;
     math::Vec aim{};   // the last cast's way
+    bool landing=false;math::Vec point{};   // the last cast's: Teleport on its shown landing, and the arm that pointed it
+    spellmotion::Land land=spellmotion::Land::None;spellmotion::Spot spot{};   // the last cast's spot of its own
     float frame=1/90.f;
     Sim(Motion m,float heading=0){yaw=math::Yaw(heading);in.time=1;in.session=3;in.epoch=1;in.active=true;in.motion=m;
         in.tracked[0]=in.tracked[1]=true;in.head=head;in.headRotation=yaw;Place(0,RestR);Place(1,RestL);Step();}
@@ -36,7 +38,7 @@ struct Sim {
     }
     void Hold(float s){for(int i=0;i<int(s/frame);++i)Step();}
     void Trigger(bool down){in.held=down;Step();}
-    void Step(){in.time+=frame;out=g.Step(in);if(out.cast){++casts;aim=out.aim;}if(out.began)++began;if(out.dropped){++drops;lastDrop=out.dropped;}}
+    void Step(){in.time+=frame;out=g.Step(in);if(out.cast){++casts;aim=out.aim;landing=out.landing;point=out.point;land=out.land;spot=out.spot;}if(out.began)++began;if(out.dropped){++drops;lastDrop=out.dropped;}}
 };
 // The motions, done well, from the resting pose; the trigger is the caller's.
 static void Nova(Sim& s){s.Move({.08f,-.40f,-.30f},{-.08f,-.40f,-.30f},.35f);s.Move({.62f,-.35f,-.15f},{-.62f,-.35f,-.15f},.25f);}
@@ -51,11 +53,15 @@ static void ThunderStorm(Sim& s){s.MoveR({.15f,.40f,-.10f},.45f);s.Hold(.5f);}
 static void Blaze(Sim& s){s.MoveR({.24f,-.55f,0},.3f);s.MoveR({.24f,-.95f,0},.2f);}
 static void FrozenArmor(Sim& s){s.Move({.45f,-.35f,-.35f},{.32f,-.35f,-.32f},.45f);s.MoveL({.17f,-.24f,.05f},.45f);}
 static void ShiverArmor(Sim& s) {
-    s.Move({.15f,-.40f,-.30f},{-.15f,-.40f,-.30f},.35f);
+    s.Move({.18f,-.40f,-.30f},{-.18f,-.40f,-.30f},.35f);
     s.Drive(1.f,[](float t,math::Vec& r,math::Vec& l){const float y=-.40f+.06f*std::sin(t*6.2832f*4);r.y=l.y=y;});
 }
 static void Hug(Sim& s){s.Move({-.18f,-.32f,-.05f},{.18f,-.32f,-.05f},.45f);s.Hold(.5f);}
-static void Teleport(Sim& s){s.MoveR({.15f,-.32f,-.12f},.35f);s.Hold(.1f);s.MoveR({.17f,-.28f,-.62f},.2f);}
+static void Teleport(Sim& s){s.MoveR({.20f,-.32f,-.45f},.35f);s.Hold(.25f);s.MoveR({.19f,-.26f,-.20f},.15f);}
+static void FireWall(Sim& s){s.MoveR({-.20f,-.30f,-.40f},.35f);s.Hold(.1f);s.MoveR({.24f,-.30f,-.40f},.2f);s.Hold(.2f);}
+static void Meteor(Sim& s){s.MoveR({.15f,.35f,-.05f},.3f);s.MoveR({.18f,-.40f,-.40f},.2f);s.Hold(.1f);}
+static void Blizzard(Sim& s){s.Move({.15f,.30f,-.10f},{-.15f,.30f,-.10f},.3f);s.Move({.20f,-.30f,-.35f},{-.20f,-.30f,-.35f},.25f);s.Hold(.2f);}
+static void Hydra(Sim& s){s.MoveL({-.165f,.12f,-.45f},.3f);s.Hold(.2f);}
 
 int main() {
     using Do=void(*)(Sim&);
@@ -63,7 +69,8 @@ int main() {
         {Motion::FlingOut,Nova,48,"Nova"},{Motion::PushDown,FrostNova,44,"Frost Nova"},{Motion::RubSnap,StaticField,42,"Static Field"},
         {Motion::CrossGuard,EnergyShield,58,"Energy Shield"},{Motion::ArmUp,ThunderStorm,57,"Thunder Storm"},{Motion::MatchStrike,Blaze,46,"Blaze"},
         {Motion::ForearmSweep,FrozenArmor,40,"Frozen Armor"},{Motion::Shake,ShiverArmor,50,"Shiver Armor"},{Motion::Hug,Hug,60,"Chilling Armor"},
-        {Motion::Punch,Teleport,54,"Teleport"}};
+        {Motion::Punch,Teleport,54,"Teleport"},{Motion::FireWall,FireWall,51,"Fire Wall"},{Motion::Meteor,Meteor,56,"Meteor"},
+        {Motion::Blizzard,Blizzard,59,"Blizzard"},{Motion::Hydra,Hydra,62,"Hydra"}};
     for(const auto& m:all) {
         std::string label=std::string(m.name)+": ";
         Check(spellmotion::For(m.skill)==m.motion&&std::string(spellmotion::Cue(m.motion))!="no motion",(label+"its skill has the motion and a cue").c_str());
@@ -82,10 +89,10 @@ int main() {
     }
     {   // Every class's page (owner, 2026-11-04: "Both grips, like Sorceress"): the Sorceress's bits as saved
         // since 2026-11-03, the Paladin's and the Druid's by card; a name and a cue on every card.
-        Check(spellmotion::PageOf(1).count==spellmotion::SorceressCount&&spellmotion::PageOf(3).count==4&&spellmotion::PageOf(5).count==2,
-              "the Sorceress's 10, the Paladin's 4, the Druid's 2");
-        Check(spellmotion::PageOf(0).count==4&&spellmotion::PageOf(4).count==8&&spellmotion::PageOf(2).count==8&&spellmotion::PageOf(6).count==7,
-              "the Amazon's 4, the Barbarian's 8, the Necromancer's 8, the Assassin's 7 (the owner's table)");
+        Check(spellmotion::PageOf(1).count==spellmotion::SorceressCount&&spellmotion::SorceressCount==14&&spellmotion::PageOf(3).count==4&&spellmotion::PageOf(5).count==2,
+              "the Sorceress's 14, the Paladin's 4, the Druid's 2");
+        Check(spellmotion::PageOf(0).count==4&&spellmotion::PageOf(4).count==8&&spellmotion::PageOf(2).count==12&&spellmotion::PageOf(6).count==7,
+              "the Amazon's 4, the Barbarian's 8, the Necromancer's 12 (the table's, the left arm's golem, Bone Wall, Poison Explosion, Raise Skeletal Mage), the Assassin's 7");
         for(int c:{7,-1})Check(!spellmotion::HasMotions(c)&&spellmotion::PageOf(c).count==0,"no motions for the Warlock or an unknown class");
         for(int c:{0,2,4,6}) {   // their cards' motions are the engine's, each watched in the class's order exactly once
             const auto page=spellmotion::PageOf(c);const auto order=spellmotion::OrderOf(c);
@@ -98,7 +105,9 @@ int main() {
         {   // a family's card casts its strongest learned skill
             const auto known=[](std::initializer_list<int> ids){return [ids](int id){return std::find(ids.begin(),ids.end(),id)!=ids.end();};};
             Check(spellmotion::CastSkillOf(75,known({75}))==75&&spellmotion::CastSkillOf(75,known({75,85}))==85&&spellmotion::CastSkillOf(75,known({75,85,94}))==94,
-                  "the golems: Clay, then Blood, then Fire");
+                  "the right arm's golem: the strongest learned, Fire, then Blood, then Clay");
+            Check(spellmotion::CastSkillOf(85,known({75,85,94}))==85&&spellmotion::CastSkillOf(85,known({75,94}))==75&&spellmotion::CastSkillOf(85,known({75,85}))==75&&
+                  spellmotion::CastSkillOf(85,known({85}))==85,"the left arm's golem: the next one down, else the only one");
             Check(spellmotion::CastSkillOf(268,known({268}))==268&&spellmotion::CastSkillOf(268,known({268,279}))==279&&spellmotion::CastSkillOf(149,known({}))==149,
                   "the shadows; any other card its own skill");
         }
@@ -132,14 +141,95 @@ int main() {
     }
     Check(spellmotion::For(36)==Motion::None&&spellmotion::For(117)==Motion::None,
         "Fire Bolt and a Paladin skill have no motion: their glyph casts as before");
-    {Sim s(Motion::Punch);s.Trigger(true);s.MoveR({.15f,-.32f,-.12f},.35f);s.Hold(.1f);s.MoveR({.17f,-.28f,-.62f},.9f);
-     Check(s.casts==0,"Teleport: the arm pushed out slowly casts nothing");}
-    {Sim s(Motion::Punch);s.Trigger(true);s.MoveR({.15f,-.32f,-.12f},.35f);s.Hold(.1f);s.MoveR({.15f,.20f,-.50f},.2f);
-     Check(s.casts==0,"Teleport: an uppercut is not a punch");}
-    for(float heading:{-2.f,1.f}){Sim s(Motion::Punch,heading);s.Trigger(true);Teleport(s);
-     Check(s.casts==1&&s.aim.z<-.25f&&std::fabs(s.aim.x)<.1f&&std::fabs(s.aim.y)<.1f,"Teleport: it goes the way of the punch, head-local (straight ahead at any heading)");}
-    {Sim s(Motion::Punch);s.Trigger(true);s.MoveR({.05f,-.32f,-.12f},.35f);s.Hold(.1f);s.MoveR({.25f,-.30f,-.58f},.2f);
-     Check(s.casts==1&&s.aim.x>.1f&&s.aim.z<-.25f,"Teleport: a punch out to the right goes right of ahead");}
+    {   // the owner's hugs (2026-11-05): held 1.9 s, the left hand 17 cm under the eyes, behind them; none cast
+        const auto hug=[](Sim& s){s.Move({-.13f,-.22f,-.10f},{.13f,-.17f,.08f},.45f);s.Hold(.6f);};
+        {Sim s(Motion::Hug);s.Trigger(true);hug(s);Check(s.casts==1,"Chilling Armor: the owner's hug casts");}
+        {Sim s(Motion::CrossGuard);s.Trigger(true);hug(s);Check(s.casts==0,"Energy Shield: the hug is not its guard");}
+        {Sim s(Motion::CrossGuard);s.Trigger(true);s.Move({-.10f,-.15f,-.05f},{.10f,-.15f,-.05f},.45f);s.Hold(.6f);
+         Check(s.casts==0,"Energy Shield: crossed at the chest close to the body is the hug's");}
+        {Sim s(Motion::Hug);s.Trigger(true);s.Move({-.10f,-.15f,-.05f},{.10f,-.15f,-.05f},.45f);s.Hold(.6f);
+         Check(s.casts==1,"Chilling Armor: crossed at the chest close to the body casts");}
+    }
+    {   // the owner's picks (2026-11-05): ground spells and a summon, each to its spot
+        {Sim s(Motion::FireWall);s.Trigger(true);FireWall(s);
+         Check(s.casts==1&&s.land==spellmotion::Land::Spot&&std::fabs(s.spot.ahead-spellmotion::sorceress::tuning.fireWallAhead)<.2f,"Fire Wall: the wall ahead, where the sweep's middle heads");}
+        {Sim s(Motion::Meteor);s.Trigger(true);Meteor(s);
+         Check(s.casts==1&&s.land==spellmotion::Land::Spot&&s.spot.ahead>4&&s.spot.ahead<16&&std::fabs(s.spot.right)<1.5f,"Meteor: thrown down ahead, it lands along the arm, nearer than level");}
+        {Sim s(Motion::Meteor);s.Trigger(true);s.MoveR({.15f,.35f,-.05f},.3f);s.MoveR({.45f,-.40f,-.30f},.2f);s.Hold(.1f);
+         Check(s.casts==1&&s.spot.right>2,"Meteor: thrown to the front right, it lands to the right");}
+        {Sim s(Motion::Meteor);s.Trigger(true);s.MoveR({.15f,.35f,-.05f},.3f);s.MoveR({.18f,-.40f,-.40f},.8f);s.Hold(.1f);
+         Check(s.casts==0,"Meteor: the arm lowered slowly from overhead casts nothing");}
+        {Sim s(Motion::Meteor);s.Trigger(true);s.MoveR({.15f,.35f,-.05f},.3f);s.MoveR({.18f,-.62f,-.30f},.2f);s.Hold(.1f);
+         Check(s.casts==1&&s.spot.ahead<10,"Meteor: thrown down steeply, it lands near");}
+        {Sim s(Motion::Meteor);s.Trigger(true);s.MoveR({.15f,.35f,-.05f},.3f);s.MoveR({.18f,-.22f,-.50f},.2f);s.Hold(.1f);
+         Check(s.casts==1&&s.spot.ahead>17,"Meteor: thrown out level, it lands far");}
+        {Sim s(Motion::Meteor);s.Trigger(true);s.MoveR({.15f,.35f,-.05f},.3f);s.MoveR({.18f,-.40f,-.40f},1.6f);s.Hold(.1f);
+         Check(s.casts==0,"Meteor: the arm lowered slowly from overhead casts nothing");}
+        {Sim s(Motion::Meteor);s.Trigger(true);Blizzard(s);Check(s.casts==0,"Meteor: both arms pulled down is Blizzard's");}
+        {Sim s(Motion::ArmUp);s.Trigger(true);Meteor(s);Check(s.casts==0,"Thunder Storm: the arm thrown down without its hold is Meteor's");}
+        {Sim s(Motion::Blizzard);s.Trigger(true);Blizzard(s);
+         Check(s.casts==1&&s.land==spellmotion::Land::Spot&&s.spot.ahead==spellmotion::sorceress::tuning.blizzardAhead&&s.spot.right==0,"Blizzard: straight ahead");}
+        {Sim s(Motion::Blizzard);s.Trigger(true);s.Move({.15f,.30f,-.10f},{-.15f,.30f,-.10f},.3f);s.Move({.20f,-.30f,-.35f},{-.20f,-.30f,-.35f},1.2f);
+         Check(s.casts==0,"Blizzard: the arms lowered slowly cast nothing");}
+        {Sim s(Motion::PushDown);s.Trigger(true);s.Move({.15f,.30f,-.10f},{-.15f,.30f,-.10f},.3f);s.Move({.20f,-.50f,-.35f},{-.20f,-.50f,-.35f},.3f);
+         Check(s.casts==1,"Frost Nova, watched alone, still takes a push to the waist (Blizzard is watched before it)");}
+        {Sim s(Motion::Hydra);s.Trigger(true);s.MoveL({-.45f,.10f,-.40f},.3f);s.Hold(.2f);
+         Check(s.casts==1&&s.spot.right<-1&&s.spot.ahead>1,"Hydra: swept up toward the front left, it stands there");}
+        {Sim s(Motion::Hydra);s.Trigger(true);s.MoveL({-.15f,.40f,-.05f},.4f);s.Hold(.5f);
+         Check(s.casts==0,"Hydra: the left arm raised straight up (Thunder Storm) casts nothing");}
+        {Sim s(Motion::Hydra);s.Trigger(true);s.Move({.165f,.12f,-.45f},{-.165f,.12f,-.45f},.3f);
+         Check(s.casts==0,"Hydra: both arms swept up casts nothing");}
+    }
+    // Point and pull (owner, 2026-11-05, in the headset: "I want to be able to use that targeting better ... With our
+    // arm kind of tucked into us. It's hard to aim where you want to go").
+    {
+        const auto point=[](Sim& s,math::Vec at){s.MoveR(at,.35f);s.Hold(.25f);};
+        const auto near=[](float a,float b,float within){return std::fabs(a-b)<=within;};
+        const spellmotion::Tuning t{};
+        {Sim s(Motion::Punch);s.Trigger(true);point(s,{.17f,-.22f,-.50f});
+         Check(s.out.aiming&&s.casts==0,"Teleport: the arm held out shows its landing, casting nothing");
+         const auto spot=spellmotion::PointSpot(s.out.point,s.g.tuning);
+         Check(near(spot.ahead,t.pointFar,1.5f)&&near(spot.right,0,1.5f),"Teleport: the arm level points to the far landing, straight ahead");
+         s.MoveR({.17f,-.20f,-.22f},.15f);
+         Check(s.casts==1&&s.landing&&!s.out.aiming,"Teleport: the yank back casts on the landing shown");}
+        for(float heading:{-2.f,1.f}){Sim s(Motion::Punch,heading);s.Trigger(true);point(s,{.17f,-.55f,-.40f});
+         const auto spot=spellmotion::PointSpot(s.out.point,s.g.tuning);
+         Check(s.out.aiming&&spot.ahead<t.pointFar*.6f&&spot.ahead>t.pointNear&&near(spot.right,0,1.5f),"Teleport: pointed down, nearer, head-local at any heading");}
+        {Sim s(Motion::Punch);s.Trigger(true);point(s,{.50f,-.30f,-.40f});
+         const auto spot=spellmotion::PointSpot(s.out.point,s.g.tuning);
+         Check(s.out.aiming&&spot.right>8&&spot.ahead>8,"Teleport: pointed ahead and to the right, it lands ahead and to the right");}
+        {Sim s(Motion::Punch);s.Trigger(true);point(s,{.17f,-.22f,-.50f});s.MoveR({.40f,-.22f,-.40f},.8f);s.Hold(.25f);
+         Check(s.out.aiming&&spellmotion::PointSpot(s.out.point,s.g.tuning).right>5,"Teleport: the circle follows the arm moved steadily");}
+        {Sim s(Motion::Punch);s.Trigger(true);s.MoveR({.17f,-.22f,-.50f},.35f);s.MoveR({.17f,-.20f,-.22f},.15f);s.Hold(.3f);
+         Check(s.casts==0,"Teleport: swung out and straight back, never held out: nothing");}
+        {Sim s(Motion::Punch);s.Trigger(true);point(s,{.17f,-.22f,-.50f});s.MoveR(RestR,1.f);s.Hold(1.f);
+         Check(s.casts==0&&!s.out.aiming,"Teleport: the arm let down slowly: no cast, and the circle goes");}
+        {Sim s(Motion::Punch);s.Trigger(true);s.MoveR({.15f,.40f,-.15f},.4f);s.Hold(.4f);
+         Check(!s.out.aiming,"Teleport: an arm raised overhead (Thunder Storm) points nowhere");}
+        // the right arm alone (owner, 2026-11-05: "When we raise both arms, the circle shouldn't be drawn")
+        {Sim s(Motion::Punch);s.Trigger(true);s.Move({.17f,-.22f,-.50f},{-.12f,-.25f,-.45f},.35f);s.Hold(.4f);
+         Check(!s.out.aiming,"Teleport: both arms out in front show no circle");}
+        {Sim s(Motion::Punch);s.Trigger(true);s.MoveL({-.20f,.10f,-.10f},.3f);point(s,{.17f,-.22f,-.50f});
+         Check(!s.out.aiming,"Teleport: the right arm out with the left raised high shows no circle");}
+        {Sim s(Motion::Punch);s.Trigger(true);point(s,{.17f,-.22f,-.50f});s.MoveL({-.15f,-.28f,-.40f},.2f);
+         Check(!s.out.aiming,"Teleport: the left arm raised in front takes the circle away at once");
+         s.MoveR({.17f,-.20f,-.22f},.15f);s.Hold(.2f);Check(s.casts==0,"Teleport: and the yank then casts nothing");
+         s.MoveL(RestL,.3f);s.MoveR({.17f,-.22f,-.50f},.3f);s.Hold(.25f);
+         Check(s.out.aiming,"Teleport: the left let down again and the right held out, it shows again");}
+        {Sim s(Motion::Punch);s.Trigger(true);s.MoveL({-.15f,-.38f,-.10f},.3f);point(s,{.17f,-.22f,-.50f});
+         Check(s.out.aiming,"Teleport: the left hand resting at the chest (not out in front) leaves the circle");}
+        {Sim s(Motion::Punch);s.Trigger(true);point(s,{.17f,-.22f,-.50f});s.in.active=false;s.Step();s.in.active=true;s.Hold(.1f);
+         Check(!s.out.aiming,"Teleport: the grips let go, the landing goes");}
+        {Sim s(Motion::Punch);s.Trigger(true);point(s,{.17f,-.22f,-.50f});s.Hold(t.aimSeconds+.5f);
+         Check(!s.out.aiming,"Teleport: shown aimSeconds with no yank, it goes");}
+        {Sim s(Motion::Punch);s.Trigger(true);point(s,{.17f,-.22f,-.50f});s.MoveR({.17f,-.20f,-.22f},.15f);s.Hold(1.f);point(s,{.17f,-.22f,-.50f});
+         Check(s.casts==1&&s.out.aiming,"Teleport: after a cast, the arm out again shows a new landing");s.MoveR({.17f,-.20f,-.22f},.15f);
+         Check(s.casts==2,"Teleport: and the yank lands again");}
+        Check(near(spellmotion::PointSpot({0,0,-1},t).ahead,t.pointFar,.01f)&&near(spellmotion::PointSpot({0,-1,-.001f},t).ahead,t.pointNear,.1f)&&
+              near(spellmotion::PointSpot({0,.5f,-1},t).ahead,t.pointFar,.01f)&&near(spellmotion::PointSpot({1,0,0},t).right,t.pointFar,.01f)&&
+              near(spellmotion::PointSpot({0,0,0},t).ahead,t.pointNear,.01f),
+              "Teleport: level or up the far landing, straight down the near one, pointed right it lands right, nowhere the near one");
+    }
     {Sim s(Motion::FlingOut);s.Trigger(true);Nova(s);Check(s.casts==1&&math::Dot(s.aim,s.aim)==0,"Nova: no way to go");}
     {Sim s(Motion::FlingOut);s.Trigger(true);Nova(s);s.Move(RestR,RestL,.4f);s.Hold(.4f);Nova(s);
      Check(s.casts==2,"still held, Nova again from the start casts again");s.Trigger(false);Check(s.drops==0,"a hold that cast is not dropped");}
@@ -173,6 +263,32 @@ int main() {
     {Sim s(Motion::Shake);s.Trigger(true);s.Move({.15f,-.40f,-.30f},{-.15f,-.40f,-.30f},.35f);
      s.Drive(1.f,[](float t,math::Vec& r,math::Vec&){r.y=-.40f+.06f*std::sin(t*6.2832f*4);});
      Check(s.casts==0,"Shiver Armor: one fist shaken casts nothing");}
+    {   // Shiver Armor apart from Static Field (a tester, 2026-11-05: "Rubbing reads as shaking"): both palms rubbed
+        // together shake nothing, and still charge Static Field; fists shaken close together are a rub, not a shake.
+        const auto rub=[](Sim& s){s.Move({.045f,-.45f,-.30f},{-.045f,-.45f,-.30f},.35f);
+            s.Drive(1.f,[](float t,math::Vec& r,math::Vec& l){const float w=.05f*std::sin(t*6.2832f*4);r.z=-.30f+w;l.z=-.30f-w;r.y=l.y=-.45f+.03f*w;});};
+        {Sim s(Motion::Shake);s.in.free=true;rub(s);Check(s.casts==0,"Shiver Armor: both palms rubbed together shake nothing");}
+        {Sim s(Motion::RubSnap);s.in.free=true;rub(s);s.Move({.38f,-.45f,-.25f},{-.38f,-.45f,-.25f},.15f);
+         Check(s.casts==1,"Static Field: both palms rubbed, then snapped apart, casts");}
+        {Sim s(Motion::Shake);s.in.free=true;s.Move({.08f,-.40f,-.30f},{-.08f,-.40f,-.30f},.35f);
+         s.Drive(1.f,[](float t,math::Vec& r,math::Vec& l){const float y=-.40f+.06f*std::sin(t*6.2832f*4);r.y=l.y=y;});
+         Check(s.casts==0,"Shiver Armor: fists shaken 16 cm apart cast nothing (held well apart)");}
+    }
+    {   // The warmer/colder buzz (Output::progress): nothing at rest, Begun once the first part is done, rising to the cast
+        {Sim s(Motion::FlingOut);s.in.free=true;s.Hold(.5f);Check(s.out.progress==0,"progress: resting, none");
+         s.Move({.08f,-.40f,-.30f},{-.08f,-.40f,-.30f},.35f);
+         Check(std::fabs(s.out.progress-spellmotion::Begun)<.02f,"progress: Nova's hands together, Begun");
+         s.Move({.25f,-.37f,-.24f},{-.25f,-.37f,-.24f},.12f);
+         const float mid=s.out.progress;
+         Check(mid>spellmotion::Begun+.1f&&mid<1,"progress: halfway through the fling, warmer");
+         s.Move({.62f,-.35f,-.15f},{-.62f,-.35f,-.15f},.12f);
+         Check(s.casts==1&&s.out.progress==0,"progress: cast, and none on the cast's frame");}
+        {Sim s(Motion::CrossGuard);s.in.free=true;s.Move({-.10f,-.12f,-.30f},{.10f,-.12f,-.30f},.4f);s.Hold(.15f);
+         Check(s.out.progress>spellmotion::Begun&&s.out.progress<1&&s.casts==0,"progress: Energy Shield's guard held part of the time");}
+        {Sim s(Motion::Shake);s.in.free=true;s.Move({.18f,-.40f,-.30f},{-.18f,-.40f,-.30f},.35f);
+         s.Drive(.25f,[](float t,math::Vec& r,math::Vec& l){const float y=-.40f+.06f*std::sin(t*6.2832f*4);r.y=l.y=y;});
+         Check(s.casts==0&&s.out.progress>spellmotion::Begun,"progress: Shiver Armor shaken a little, warmer");}
+    }
     {Sim s(Motion::FlingOut);s.Trigger(true);s.in.motion=Motion::FlingOut;s.Trigger(true);s.in.active=false;s.Step();s.in.active=true;Nova(s);
      Check(s.casts==0,"made inactive while held: the trigger must be pressed again");s.Trigger(false);s.Trigger(true);Nova(s);Check(s.casts==1,"pressed again, it casts");}
     {Sim s(Motion::FlingOut);s.Trigger(true);s.Move({.08f,-.40f,-.30f},{-.08f,-.40f,-.30f},.35f);s.in.session=4;s.Move({.62f,-.35f,-.15f},{-.62f,-.35f,-.15f},.25f);

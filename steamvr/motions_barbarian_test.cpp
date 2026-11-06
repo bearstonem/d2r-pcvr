@@ -22,7 +22,7 @@ static void WarCry(Sim& s){s.MoveR({.03f,-.12f,-.18f},.35f);s.Hold(.2f);s.MoveR(
 static void Howl(Sim& s){s.Move({.08f,-.40f,-.20f},{-.08f,-.40f,-.20f},.35f);s.Move({.62f,-.35f,-.15f},{-.62f,-.35f,-.15f},.3f);}
 static void BattleCry(Sim& s){s.Move({.22f,-.18f,-.05f},{-.22f,-.18f,-.05f},.4f);s.Hold(.1f);s.Move({.24f,-.82f,-.05f},{-.24f,-.82f,-.05f},.3f);}
 static void Leap(Sim& s){s.Move({.22f,-.65f,.22f},{-.22f,-.65f,.22f},.4f);s.Move({.22f,.30f,-.15f},{-.22f,.30f,-.15f},.35f);}
-static void FindItem(Sim& s){s.MoveR({.25f,-1.15f,-.30f},.7f);s.Hold(.25f);s.MoveR({.25f,-.55f,-.20f},.5f);}
+static void FindItem(Sim& s){s.MoveR({.20f,-.45f,-.45f},.35f);s.Hold(.25f);s.MoveR({.17f,-.18f,-.05f},.25f);}
 // Slow, lazy versions: the same shapes over far longer.
 static void SlowBattleOrders(Sim& s){s.MoveR({.03f,-.12f,-.18f},.35f);s.Hold(.2f);s.MoveR({.08f,.30f,-.10f},1.2f);}
 static void SlowShout(Sim& s){s.Move({.07f,-.12f,-.18f},{-.07f,-.12f,-.18f},.4f);s.Hold(.2f);s.Move({.10f,-.15f,-.58f},{-.10f,-.15f,-.58f},1.2f);}
@@ -34,7 +34,7 @@ static void SlowWarCry(Sim& s){s.MoveR({.03f,-.12f,-.18f},.35f);s.Hold(.2f);s.Mo
 static void SlowHowl(Sim& s){s.Move({.08f,-.40f,-.20f},{-.08f,-.40f,-.20f},.35f);s.Move({.62f,-.35f,-.15f},{-.62f,-.35f,-.15f},1.5f);}
 static void SlowBattleCry(Sim& s){s.Move({.22f,-.18f,-.05f},{-.22f,-.18f,-.05f},.4f);s.Hold(.1f);s.Move({.24f,-.82f,-.05f},{-.24f,-.82f,-.05f},1.5f);}
 static void SlowLeap(Sim& s){s.Move({.22f,-.65f,.22f},{-.22f,-.65f,.22f},.6f);s.Move({.22f,.30f,-.15f},{-.22f,.30f,-.15f},1.5f);}
-static void SlowFindItem(Sim& s){s.MoveR({.25f,-1.15f,-.30f},.7f);s.Hold(.25f);s.MoveR({.25f,-.55f,-.20f},1.8f);}
+static void SlowFindItem(Sim& s){s.MoveR({.20f,-.45f,-.45f},.35f);s.Hold(.25f);s.MoveR({.17f,-.18f,-.05f},1.f);}
 // Not motions: what a Barbarian's hands do all the time.
 static void Walk(Sim& s) {
     s.Move({.25f,-.72f,-.05f},{-.25f,-.72f,-.05f},.3f);
@@ -110,6 +110,38 @@ int main() {
         const auto at=[&](Motion m){return std::find(std::begin(o),std::end(o),m)-std::begin(o);};
         Check(at(Motion::Shout)<at(Motion::WarCry)&&at(Motion::Leap)<at(Motion::BattleOrders),"Shout before War Cry, Leap before Battle Orders");
         Check(spellmotion::OrderOf(4).count==8&&spellmotion::PageOf(4).count==8,"the Barbarian's page: eight cards, each watched");
+    }
+    {   // Find Item: nothing low (a tester, 2026-11-05: "Please no floor stuff"); drawn back with no rest out first, or to the mouth, none
+        Sim s(Motion::FindItem);FindItem(s);
+        Check(s.casts==1&&s.g.Stats().low>-.65f,"Find Item: cast with the hands never below the waist");
+        Sim quick(Motion::FindItem);quick.MoveR({.20f,-.45f,-.45f},.2f);quick.MoveR({.17f,-.18f,-.05f},.2f);quick.Hold(.3f);
+        Check(quick.casts==0,"Find Item: a jab out and straight back, no rest at the corpse, is none");
+        Sim mouth(Motion::FindItem);mouth.MoveR({.20f,-.45f,-.45f},.35f);mouth.Hold(.25f);mouth.MoveR({.02f,-.12f,-.18f},.25f);mouth.Hold(.3f);
+        Check(mouth.casts==0,"Find Item: snatched back to the mouth (a warcry's start) is none");
+    }
+    {   // the owner's Howls (2026-11-05): the hands together at the face, flung out 1.1 m apart at eye level
+        Sim face(Motion::Howl);face.Move({.07f,.05f,-.25f},{-.07f,.05f,-.25f},.35f);face.Hold(.1f);face.Move({.50f,.05f,-.28f},{-.50f,.0f,-.32f},.25f);face.Hold(.2f);
+        Check(face.casts==1,"Howl: flung wide from the hands together at the face casts");
+        Sim shout(Motion::Howl);shout.Move({.07f,-.08f,-.10f},{-.07f,-.08f,-.10f},.35f);shout.Hold(.2f);shout.Move({.08f,-.10f,-.55f},{-.08f,-.10f,-.55f},.2f);shout.Hold(.2f);
+        Check(shout.casts==0,"Howl: both fists pushed forward together from the mouth (Shout) is no Howl");
+    }
+    {   // the owner's Battle Cries (2026-11-05): from by the head down to the hips, ending 61-67 cm under the eyes, wide
+        Sim pull(Motion::BattleCry);pull.Move({.25f,.08f,-.10f},{-.25f,.06f,-.10f},.35f);pull.Hold(.1f);pull.Move({.50f,-.64f,.07f},{-.45f,-.62f,.0f},.25f);pull.Hold(.2f);
+        Check(pull.casts==1,"Battle Cry: fists from by the head pulled down to 62-64 cm under the eyes casts");
+        Sim chest(Motion::BattleCry);chest.Move({.21f,-.41f,-.15f},{-.21f,-.41f,-.10f},.35f);chest.Hold(.1f);chest.Move({.39f,-.72f,.30f},{-.41f,-.68f,.22f},.2f);chest.Hold(.2f);
+        Check(chest.casts==1,"Battle Cry: from the chest, 41 cm under the eyes, pulled down 27-31 cm, casts");
+        Sim lower(Motion::BattleCry);lower.Move({.21f,-.30f,-.15f},{-.21f,-.30f,-.10f},.35f);lower.Hold(.1f);lower.Move({.06f,-.70f,-.40f},{-.06f,-.70f,-.40f},.2f);lower.Hold(.2f);
+        Check(lower.casts==0,"Battle Cry: the fists brought down together in front (a two-handed weapon) are no pull");
+        Sim back(Motion::BattleCry);back.Move({.25f,.08f,-.10f},{-.25f,.06f,-.10f},.35f);back.Hold(.1f);back.Move({.43f,-.68f,.31f},{-.49f,-.66f,.07f},.25f);back.Hold(.2f);
+        Check(back.casts==1,"Battle Cry: pulled down and back, 31 cm behind the eyes, casts");
+        Sim howl(Motion::BattleCry);howl.Move({.07f,.05f,-.25f},{-.07f,.05f,-.25f},.35f);howl.Hold(.1f);howl.Move({.50f,.05f,-.28f},{-.50f,.0f,-.32f},.25f);howl.Hold(.2f);
+        Check(howl.casts==0,"Battle Cry: the owner's Howl, flung wide at eye level, is not its pull");
+    }
+    {   // Leap to a spot (the owner, 2026-11-05: it went the way the hero last walked)
+        Sim leap(Motion::Leap);Leap(leap);
+        Check(leap.casts==1&&leap.land==spellmotion::Land::Spot&&leap.spot.ahead>23&&std::fabs(leap.spot.right)<4,"Leap: lands far ahead (25 cells), where you face");
+        Sim early(Motion::Leap);early.Move({.22f,-.65f,.22f},{-.22f,-.65f,.22f},.4f);early.Move({.22f,-.10f,-.20f},{-.22f,-.10f,-.20f},.25f);
+        Check(early.casts==1,"Leap: casts as the arms swing up past the shoulders, before they are overhead (the game's take-off crouch overlaps the swing)");
     }
     std::puts("motions-barbarian-test: ok");
     return 0;

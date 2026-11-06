@@ -471,17 +471,17 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
             const auto b=MotionCardBounds(i);
             const int x=int(768*b.left),y=int(768*b.top),right=int(768*b.right),bottom=int(768*b.bottom);
             frame({x,y,right,bottom},o.hover==MotionCardCell(i));
-            const bool haveIcon=icon(icons::Get("s"+std::to_string(id)),{x+9,y+12,x+67,y+70},have&&on);
-            if(!haveIcon)fill({x+12,y+15,x+64,y+67},RGB(48,40,28));
+            const bool haveIcon=icon(icons::Get("s"+std::to_string(id)),{x+9,y+9,x+67,y+67},have&&on);
+            if(!haveIcon)fill({x+12,y+12,x+64,y+64},RGB(48,40,28));
             SelectObject(dc,font);SetTextColor(dc,have?RGB(235,218,181):RGB(148,137,117));
             const char* family=spellmotion::CardName(id);
-            paragraph(family?family:have?skill.name:spellmotion::SpellName(id),{x+76,y+8,right-78,y+34});
-            const RECT chip{right-72,y+9,right-9,y+31};
+            paragraph(family?family:have?skill.name:spellmotion::SpellName(id),{x+76,y+5,right-78,y+27});
+            const RECT chip{right-72,y+6,right-9,y+26};
             fill(chip,on?RGB(100,74,29):RGB(48,40,28));
             SelectObject(dc,shortcutFont);SetTextColor(dc,on?RGB(235,218,181):RGB(148,137,117));text(on?"ON":"OFF",chip);
             char cue[160];std::snprintf(cue,sizeof cue,"%s%s",spellmotion::CueOf(id),have?".":" (no points yet).");
             cue[0]=char(std::toupper(static_cast<unsigned char>(cue[0])));
-            SetTextColor(dc,RGB(169,151,118));paragraph(cue,{x+76,y+36,right-8,bottom-4});
+            SetTextColor(dc,RGB(169,151,118));paragraph(cue,{x+76,y+28,right-8,bottom-2});
         }
         SetTextColor(dc,RGB(235,218,181));SelectObject(dc,font);
     } else if(o.glyphs&&!o.utility) {

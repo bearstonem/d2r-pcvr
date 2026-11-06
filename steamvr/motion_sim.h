@@ -17,6 +17,7 @@ struct Sim {
     math::Quat yaw{0,0,0,1};math::Vec head{0,1.7f,0};
     int casts=0;
     math::Vec aim{};   // the last cast's way (head-local)
+    spellmotion::Land land=spellmotion::Land::None;spellmotion::Spot spot{};   // the last cast's spot
     float frame=1/90.f;
     explicit Sim(spellmotion::Motion m,float heading=0){yaw=math::Yaw(heading);in.time=1;in.session=3;in.epoch=1;in.active=true;in.free=true;in.motion=m;
         in.tracked[0]=in.tracked[1]=true;in.head=head;in.headRotation=yaw;Place(0,RestR);Place(1,RestL);Step();}
@@ -36,6 +37,6 @@ struct Sim {
         for(int i=1;i<=int(seconds/frame);++i){math::Vec r=Local(0),l=Local(1);f(i*frame,r,l);Place(0,r);Place(1,l);Step();}
     }
     void Hold(float s){for(int i=0;i<int(s/frame);++i)Step();}
-    void Step(){in.time+=frame;out=g.Step(in);if(out.cast){++casts;aim=out.aim;}}
+    void Step(){in.time+=frame;out=g.Step(in);if(out.cast){++casts;aim=out.aim;land=out.land;spot=out.spot;}}
 };
 }

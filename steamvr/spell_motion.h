@@ -32,14 +32,16 @@
 // 0 is the right. Value-only: steamvr/spell_motion_test.cpp.
 namespace framevr::spellmotion {
 enum class Motion {None,FlingOut,PushDown,RubSnap,CrossGuard,ArmUp,MatchStrike,ForearmSweep,Shake,Hug,Punch,
+    FireWall,Meteor,Blizzard,Hydra,                                                               // Sorceress (2026-11-05)
     InnerSight,SlowMissiles,Decoy,Valkyrie,                                                       // Amazon A1-A4
     BattleOrders,Shout,BattleCommand,WarCry,Howl,BattleCry,Leap,FindItem,                         // Barbarian B1-B8
-    BoneArmor,RaiseSkeleton,CorpseExplosion,Golem,AmplifyDamage,LowerResist,PoisonNova,BonePrison,// Necromancer N1-N8
+    BoneArmor,RaiseSkeleton,CorpseExplosion,Golem,AmplifyDamage,LowerResist,PoisonNova,BonePrison,GolemLeft,// Necromancer N1-N8, N4b
+    BoneWall,PoisonExplosion,RaiseMage,                                                           // Necromancer N9-N11
     BurstOfSpeed,Fade,CloakOfShadows,Venom,BladeShield,ShadowWarrior,MindBlast,                   // Assassin S1-S7
     End};
-constexpr int SorceressCount=int(Motion::Punch);   // the Sorceress's, 1..SorceressCount ([motions] off: her bits)
+constexpr int SorceressCount=int(Motion::Hydra);   // the Sorceress's, 1..SorceressCount ([motions] off: her bits)
 constexpr int MotionCount=int(Motion::End)-1;      // every class's, 1..MotionCount (a watcher each)
-constexpr int MaxCards=10;                         // a MOTIONS page's cards (interaction::MotionCards), one bit each
+constexpr int MaxCards=14;                         // a MOTIONS page's cards (interaction::MotionCards), one bit each
 inline Motion For(int skill) {
     switch(skill) {
     case 48:return Motion::FlingOut;      // Nova
@@ -52,12 +54,15 @@ inline Motion For(int skill) {
     case 50:return Motion::Shake;         // Shiver Armor
     case 60:return Motion::Hug;           // Chilling Armor
     case 54:return Motion::Punch;         // Teleport (owner: "as a motion similar to Paladin's Charge")
+    case 51:return Motion::FireWall;case 56:return Motion::Meteor;case 59:return Motion::Blizzard;case 62:return Motion::Hydra;
     case 8:return Motion::InnerSight;case 17:return Motion::SlowMissiles;case 28:return Motion::Decoy;case 32:return Motion::Valkyrie;
     case 149:return Motion::BattleOrders;case 138:return Motion::Shout;case 155:return Motion::BattleCommand;case 154:return Motion::WarCry;
     case 130:return Motion::Howl;case 146:return Motion::BattleCry;case 132:return Motion::Leap;case 142:return Motion::FindItem;
     case 68:return Motion::BoneArmor;case 70:return Motion::RaiseSkeleton;case 74:return Motion::CorpseExplosion;
-    case 75:case 85:case 94:return Motion::Golem;   // the card is Clay Golem's; it casts the strongest learned (CastSkillOf)
+    case 75:case 94:return Motion::Golem;   // the right arm's card is Clay Golem's; it casts the strongest learned (CastSkillOf)
+    case 85:return Motion::GolemLeft;       // the left arm's is Blood Golem's; it casts the next strongest
     case 66:return Motion::AmplifyDamage;case 91:return Motion::LowerResist;case 92:return Motion::PoisonNova;case 88:return Motion::BonePrison;
+    case 78:return Motion::BoneWall;case 83:return Motion::PoisonExplosion;case 80:return Motion::RaiseMage;
     case 258:return Motion::BurstOfSpeed;case 267:return Motion::Fade;case 264:return Motion::CloakOfShadows;case 278:return Motion::Venom;
     case 277:return Motion::BladeShield;case 268:case 279:return Motion::ShadowWarrior;case 273:return Motion::MindBlast;
     default:return Motion::None;
@@ -66,7 +71,7 @@ inline Motion For(int skill) {
 // The MOTIONS page (the wheel; owner 2026-11-03: "a place where you can see the motion spells that are
 // active"): the motion spells in the order it shows them (skill ids, the trees' order), each with its
 // bit in [motions] off (the motion's number - 1), set to turn it off.
-constexpr int PageSkills[SorceressCount]={40,42,44,46,48,50,54,57,58,60};
+constexpr int PageSkills[SorceressCount]={40,42,44,46,48,50,51,54,56,57,58,59,60,62};   // Fire Wall, Meteor, Blizzard, Hydra since 2026-11-05
 inline int Bit(int skill){const int m=int(For(skill));return m>0&&m<=SorceressCount?m-1:-1;}
 inline int OffMask(float value){return std::isfinite(value)?std::clamp(int(std::lround(value)),0,(1<<MaxCards)-1):0;}
 inline bool On(int skill,int off){const int b=Bit(skill);return b>=0&&!((off>>b)&1);}
@@ -79,7 +84,8 @@ constexpr int DruidSkills[]={223,228};             // Werewolf, Werebear
 // The table's order (owner, 2026-11-04): A1-A4, B1-B8, N1-N8 (N4 the golems' card, N6 Lower Resist), S1-S7.
 constexpr int AmazonSkills[]={8,17,28,32};
 constexpr int BarbarianSkills[]={149,138,155,154,130,146,132,142};
-constexpr int NecromancerSkills[]={68,70,74,75,66,91,92,88};
+// 85: the left arm's golem, then Bone Wall, Poison Explosion and Raise Skeletal Mage (owner, 2026-11-05), after the table's
+constexpr int NecromancerSkills[]={68,70,74,75,66,91,92,88,85,78,83,80};
 constexpr int AssassinSkills[]={258,267,264,278,277,268,273};
 struct Page {const int* skills=nullptr;int count=0;};
 inline Page PageOf(int skillClass) {
@@ -107,7 +113,8 @@ inline const char* SpellName(int skill) {
     switch(skill) {
     case 40:return "Frozen Armor";case 42:return "Static Field";case 44:return "Frost Nova";case 46:return "Blaze";
     case 48:return "Nova";case 50:return "Shiver Armor";case 54:return "Teleport";case 57:return "Thunder Storm";
-    case 58:return "Energy Shield";case 60:return "Chilling Armor";
+    case 58:return "Energy Shield";case 60:return "Chilling Armor";case 51:return "Fire Wall";case 56:return "Meteor";
+    case 59:return "Blizzard";case 62:return "Hydra";
     case 107:return "Charge";case 112:return "Blessed Hammer";case 117:return "Holy Shield";case 121:return "Fist of the Heavens";
     case 223:return "Werewolf";case 228:return "Werebear";
     case 8:return "Inner Sight";case 17:return "Slow Missiles";case 28:return "Decoy";case 32:return "Valkyrie";
@@ -115,7 +122,8 @@ inline const char* SpellName(int skill) {
     case 130:return "Howl";case 146:return "Battle Cry";case 132:return "Leap";case 142:return "Find Item";
     case 68:return "Bone Armor";case 70:return "Raise Skeleton";case 74:return "Corpse Explosion";case 75:return "Clay Golem";
     case 85:return "Blood Golem";case 94:return "Fire Golem";case 66:return "Amplify Damage";case 91:return "Lower Resist";
-    case 92:return "Poison Nova";case 88:return "Bone Prison";
+    case 92:return "Poison Nova";case 88:return "Bone Prison";case 78:return "Bone Wall";case 83:return "Poison Explosion";
+    case 80:return "Raise Skeletal Mage";
     case 258:return "Burst of Speed";case 267:return "Fade";case 264:return "Cloak of Shadows";case 278:return "Venom";
     case 277:return "Blade Shield";case 268:return "Shadow Warrior";case 279:return "Shadow Master";case 273:return "Mind Blast";
     default:return "";
@@ -123,13 +131,18 @@ inline const char* SpellName(int skill) {
 }
 // A card that stands for a family (the table's N4 and S6): its name on the MOTIONS page; nullptr, the skill's.
 inline const char* CardName(int skill) {
-    switch(skill){case 75:return "Golem";case 268:return "Shadow Warrior / Master";default:return nullptr;}
+    switch(skill){case 75:return "Golem (right arm)";case 85:return "Golem (left arm)";case 268:return "Shadow Warrior / Master";default:return nullptr;}
 }
 // The skill a card casts: the strongest of its family learned (known(id): the hero has the skill). The golems
 // Fire, then Blood, then Clay (Iron Golem takes an item, so it stays on its button); Shadow Master once learned.
 template<class Known> int CastSkillOf(int skill,Known known) {
     switch(skill) {
-    case 75:return known(94)?94:known(85)?85:75;
+    case 75:case 85: {   // the right arm's: the strongest golem learned; the left arm's: the next one down (else the strongest)
+        int learned[3],n=0;
+        for(const int id:{94,85,75})if(known(id))learned[n++]=id;
+        if(!n)return skill;
+        return skill==85&&n>1?learned[1]:learned[0];
+    }
     case 268:return known(279)?279:268;
     default:return skill;
     }
@@ -140,15 +153,15 @@ inline const char* ClassCue(Motion m);
 inline const char* Cue(Motion m) {
     switch(m) {
     case Motion::FlingOut:return "bring the hands together, then fling both arms out wide";
-    case Motion::PushDown:return "push both hands down toward the floor";
+    case Motion::PushDown:return "push both hands down hard in front of you, to the waist";
     case Motion::RubSnap:return "rub the palms together, then snap them apart";
     case Motion::CrossGuard:return "both hands up at the face, close together (crossed or not), and hold";
     case Motion::ArmUp:return "raise one arm straight up and hold";
     case Motion::MatchStrike:return "strike one hand down the thigh, hip to knee";
     case Motion::ForearmSweep:return "sweep the left hand from the right hand up to the right shoulder";
-    case Motion::Shake:return "shake both fists";
+    case Motion::Shake:return "shake both fists hard, held well apart (not rubbed together)";
     case Motion::Hug:return "hug yourself, each hand on the other shoulder";
-    case Motion::Punch:return "draw the right fist in, then punch it straight out where you want to land";
+    case Motion::Punch:return "point the right arm where you want to land, then yank the fist back to your shoulder";
     default:return m>Motion::Punch&&m<Motion::End?ClassCue(m):"no motion";
     }
 }
@@ -222,7 +235,8 @@ struct Tuning {
     float pushWindow=.5f;     // s ago (a push, not lowering the arms),
     float pushBelow=-.40f;    // m: ending this far below the eyes, not behind the back
     float rubClose=.18f;      // m: Static Field: controllers this close are palms together;
-    float rubPath=.15f;       // m of their rubbing charges it,
+    float rubPath=.15f;       // m of their rubbing charges it (leaking rubLeak m a second: the owner's two hands
+    float rubLeak=.12f;       // held together to point charged it by their wobble and a yank cast it, 2026-11-05),
     float snapApart=.45f;     // m: then the hands this far apart
     float snapWindow=.5f;     // s after they parted
     float guardApart=.35f;    // m: Energy Shield: both hands up at the face, this close (crossed or not)
@@ -238,14 +252,39 @@ struct Tuning {
     float shakeSpeed=.35f;    // m/s: Shiver Armor: a swing faster than this, then back,
     int shakeTurns=3;         // this many times with each hand
     float shakeWindow=.9f;    // s
-    // Teleport, the Paladin's Charge punch (charge_gesture.h): the right hand drawn in (at most punchFrom
-    // ahead of the eyes, hip to brow), then punched straight out to punchReach ahead, punchTravel
-    // forward within punchWindow, at least 1.5 times as far forward as up, down or sideways.
-    // The cast goes the way of the punch (Output::aim).
-    float punchFrom=.30f,punchReach=.45f,punchTravel=.25f,punchWindow=.20f;
+    // m: and the fists at least this far apart throughout: Static Field's rub has them together (a tester,
+    // 2026-11-05: "This was getting confused with static field ... Rubbing reads as shaking")
+    float shakeApart=.25f;
+    // Teleport by point and pull (owner, 2026-11-05, in the headset: "I do definitely like the targeting aspect
+    // of it, but I want to be able to use that targeting better ... With our arm kind of tucked into us. It's hard
+    // to aim where you want to go"). Until then a fast pull of the fist showed the circle and a punch landed there;
+    // the circle also came up as the arm came back after a teleport and at the start of Frost Nova and Blaze.
+    // Now the right arm held out ahead (the fist pointOut ahead of the eyes or more, pointArm from the shoulder or
+    // more, not pointing up past pointUp of its length) and steady (slower than pointSteady) for pointHold shows
+    // where it lands (Output::aiming, Output::point: the shoulder-to-fist line, head-local): along the arm's
+    // heading, pointFar cells with the arm level, nearer as it points down (evenly by its angle), pointNear at pointSteepDeg below
+    // level (PointSpot). It follows the arm while the arm stays out and steady. The fist yanked back toward the
+    // shoulder, yankBack or more within yankWindow, mostly back (rising, falling or drifting at most 0.7 as far), from where it pointed, casts there
+    // (Output::landing). The arm drawn in or let down without a yank for aimLost, or aimSeconds, gives it up.
+    float pointOut=.30f,pointArm=.38f,pointUp=.30f,pointSteady=.60f,pointHold=.15f;
+    // The right arm alone (owner, 2026-11-05, in the headset: "it should only be showing that circle if one arm
+    // is raised. When we raise both arms, the circle shouldn't be drawn for teleport"): the left hand out in
+    // front (pointOtherAhead or more) at the chest or higher (over pointOtherLow), or up past pointOtherHigh
+    // anywhere, shows none and takes one shown away at once (the yank then casts nothing).
+    float pointOtherAhead=.25f,pointOtherLow=-.45f,pointOtherHigh=-.15f;
+    float pointFar=32.f,pointNear=6.f,pointSteepDeg=50.f;
+    float yankBack=.18f,yankWindow=.25f,aimLost=.6f,aimSeconds=8.f;
     float cooldown=.6f;       // s after a cast
     float history=1.5f;       // s of the hands kept
 };
+// A spot on the floor, in cells ahead of the eyes' heading and to its right: Teleport's landing for an
+// arm pointing (Output::point, PointSpot), or a summon's (Output::spot).
+struct Spot {float ahead=0,right=0;};
+// Where a cast goes besides its way: nowhere of its own (the way, else the right hand's ray), a Spot
+// (Decoy, Golem), or where the right hand's pointer meets the floor (Valkyrie: "it didn't spawn her where
+// I pointed", 2026-11-05).
+enum class Land {None,Spot,Pointed};
+constexpr float Begun=.25f;   // Output::progress once a motion's first part is done
 struct Input {
     double time=0;
     uint64_t session=0,epoch=0;
@@ -267,10 +306,35 @@ struct Output {
     // (head-local: x right, y up, z back) (m, m/s).
     float apartMin=0,apartMax=0,top=0,low=0,fastest=0,fall[2]{};
     math::Vec end[2]{};
-    // With a cast that goes somewhere (Teleport): the way the motion went, head-local as end (the punch,
-    // from where it began to where it ended); zero for the rest.
+    // With a cast that goes somewhere (Teleport): the way the motion went, head-local as end (Teleport's: the
+    // arm it pointed with); zero for the rest.
     math::Vec aim{};
+    // Teleport pointed at (Tuning::pointOut...): its landing shown, where PointSpot puts it for point (the
+    // shoulder-to-fist line, head-local). With cast, landing: the yank came while it showed, so it lands there.
+    bool aiming=false,landing=false;
+    math::Vec point{};
+    // Teleport's circle shown this hold, for the log when it is given up (Stats): the longest pull back within
+    // yankWindow from where the arm pointed.
+    bool pointAimed=false;float yankBest=0;
+    // How near the watched motion is to casting, for the controllers' warmer/colder buzz (a tester,
+    // 2026-11-05: "continuous vibration as you get closer to the 2nd part of the sequence"): 0 nothing
+    // begun, Begun once its first part is done (the hands together, a fist at the mouth, a pose taken),
+    // rising to 1 as the second nears its end. Zero on the cast's frame and while cooling down.
+    float progress=0;
+    // With cast: a summon that goes to a spot of its own (Engine::LandAt, LandPointed), not along aim.
+    Land land=Land::None;Spot spot{};
 };
+// A spot for an arm pointing along way (head-local), in cells ahead of the eyes' heading and to its right:
+// farCells with the arm level (or up), easing to nearCells at steepDeg below.
+inline Spot SpotAlong(math::Vec way,float farCells,float nearCells,float steepDeg) {
+    const float level=std::hypot(way.x,way.z);
+    if(!(level>1e-4f)||!std::isfinite(way.y))return {nearCells,0};
+    const float below=std::atan2(-way.y,level)*57.2957795f;
+    const float f=std::clamp(below/steepDeg,0.f,1.f),cells=farCells+(nearCells-farCells)*f;
+    return {cells*(-way.z/level),cells*(way.x/level)};
+}
+// Teleport's landing (Output::point): pointFar level, pointNear at pointSteepDeg below. Meteor's: its own.
+inline Spot PointSpot(math::Vec way,const Tuning& t){return SpotAlong(way,t.pointFar,t.pointNear,t.pointSteepDeg);}
 // The hands at one frame, head-local: l[0] the right, l[1] the left.
 struct Sample {double t=0;math::Vec l[2]{};};
 class Engine;
@@ -283,14 +347,20 @@ class Engine {
     int casts=0;                  // in this hold
     double since=0,last=0,castAt=-1,poseSince=-1;
     float rub=0;double parted=-1; // Static Field
-    math::Vec aimed{};            // Teleport: the punch Done found
+    math::Vec aimed{};            // Teleport: the arm Done found pointing
+    // Teleport pointed at: since when (-1: not), the arm out and steady since, the arm in or down since (-1: not),
+    // where it last pointed; landed: the yank came while it showed.
+    double aimingSince=-1,steadySince=-1,outLost=-1;bool landed=false;math::Vec pointWay{};
+    float progress=0;             // this frame's (Output::progress), the most any part of Done reported
+    Land land=Land::None;Spot spot{};   // a summon's spot (LandAt, LandPointed)
     struct Swing {int sign=0;float peak=0;};
     Swing swing[2][3]{};          // Shiver Armor: each hand's last swing on each axis
     std::vector<double> turns[2][3];
     Output stats;
     static bool Finite(math::Vec v){return std::isfinite(v.x)&&std::isfinite(v.y)&&std::isfinite(v.z);}
     void Clear() {
-        samples.clear();poseSince=-1;rub=0;parted=-1;aimed={};scratch={};
+        samples.clear();poseSince=-1;rub=0;parted=-1;aimed={};scratch={};land=Land::None;spot={};
+        aimingSince=steadySince=outLost=-1;landed=false;pointWay={};
         for(auto& h:swing)for(auto& a:h)a={};
         for(auto& h:turns)for(auto& a:h)a.clear();
     }
@@ -302,6 +372,15 @@ public:
     const std::vector<Sample>& History()const{return samples;}
     std::array<double,8> scratch{};
     void Aim(math::Vec way){aimed=way;}
+    // A summon's spot: cells ahead of the eyes' heading and to its right, or where the right hand points.
+    void LandAt(float ahead,float right){land=Land::Spot;spot={ahead,right};}
+    void LandPointed(){land=Land::Pointed;spot={};}
+    // The motion's first part is done and its second this fraction of the way (0..1) to its end
+    // (Output::progress: Begun to 1). Several reports in a frame keep the most.
+    void Toward(float fraction) {
+        if(!std::isfinite(fraction))return;
+        progress=std::max(progress,Begun+(1-Begun)*std::clamp(fraction,0.f,1.f));
+    }
     static float Len(math::Vec v){return std::sqrt(math::Dot(v,v));}
     static float Apart(const Sample& s){return Len(s.l[0]-s.l[1]);}
     static float Forward(math::Vec l){return -l.z;}
@@ -313,11 +392,21 @@ public:
         return dt>1e-4?(b.l[h]-a.l[h])*float(1/dt):math::Vec{};
     }
     bool Still(int h)const{return Len(Velocity(h))<tuning.stillSpeed;}
+    // Chilling Armor's hug: each hand on the other side, at the shoulders or the chest, close to the body (not up
+    // in front: Energy Shield). Up to 12 cm under the eyes (the owner's hugs, 2026-11-05, held a hand 17 cm under
+    // them, where 18 was the top; a guard 8 cm under them, crossed close to the face, stays Energy Shield).
+    static bool HugPose(const Sample& n) {
+        const auto& r=n.l[0];const auto& l=n.l[1];
+        return r.x>=-.40f&&r.x<=-.02f&&l.x<=.40f&&l.x>=.02f&&r.y>=-.60f&&r.y<=-.12f&&l.y>=-.60f&&l.y<=-.12f&&
+            Forward(r)>=-.25f&&Forward(r)<=.15f&&Forward(l)>=-.25f&&Forward(l)<=.15f;
+    }
     // A pose held: true once it has been kept (and kept still) for seconds (holdSeconds when not given).
     bool Held(bool pose,double now,double seconds=-1) {
         if(!pose){poseSince=-1;return false;}
         if(poseSince<0)poseSince=now;
-        return now-poseSince>=(seconds>=0?seconds:tuning.holdSeconds);
+        const double need=seconds>=0?seconds:tuning.holdSeconds;
+        Toward(need>0?float((now-poseSince)/need):1.f);   // the pose taken: warmer as it is held
+        return now-poseSince>=need;
     }
 private:
     bool Done(Motion m) {
@@ -325,12 +414,17 @@ private:
         const auto& t=tuning;
         switch(m) {
         case Motion::FlingOut: {
-            if(Apart(n)<t.flingApart||n.l[0].x<t.flingSide||n.l[1].x>-t.flingSide)return false;
+            bool together=false;
             for(const auto& s:samples)
-                if(n.t-s.t<=t.flingWindow&&Apart(s)<=t.together&&Forward(s.l[0])>-.1f&&Forward(s.l[1])>-.1f)return true;
-            return false;
+                if(n.t-s.t<=t.flingWindow&&Apart(s)<=t.together&&Forward(s.l[0])>-.1f&&Forward(s.l[1])>-.1f){together=true;break;}
+            if(!together)return false;
+            Toward((Apart(n)-t.together)/(t.flingApart-t.together));
+            return Apart(n)>=t.flingApart&&n.l[0].x>=t.flingSide&&n.l[1].x<=-t.flingSide;
         }
         case Motion::PushDown: {
+            float fall[2]{};   // each hand's biggest fall within the window, for the buzz
+            for(const auto& s:samples)if(n.t-s.t<=t.pushWindow)for(int h=0;h<2;++h)fall[h]=std::max(fall[h],s.l[h].y-n.l[h].y);
+            if(std::min(fall[0],fall[1])>=.06f)Toward(std::min(fall[0],fall[1])/t.pushDrop);
             if(n.l[0].y>t.pushBelow||n.l[1].y>t.pushBelow||Forward(n.l[0])<-.25f||Forward(n.l[1])<-.25f)return false;
             for(const auto& s:samples)
                 if(n.t-s.t<=t.pushWindow&&s.l[0].y-n.l[0].y>=t.pushDrop&&s.l[1].y-n.l[1].y>=t.pushDrop)return true;
@@ -341,14 +435,18 @@ private:
             if(samples.size()>=2) {
                 const auto& p=samples[samples.size()-2];
                 if(apart<=t.rubClose&&Apart(p)<=t.rubClose)rub+=Len((n.l[0]-n.l[1])-(p.l[0]-p.l[1]));
+                rub=std::max(0.f,rub-t.rubLeak*float(n.t-p.t));
             }
             if(apart<=t.rubClose)parted=-1;
             else if(parted<0&&rub>0)parted=n.t;
             if(parted>=0&&n.t-parted>t.snapWindow){rub=0;parted=-1;}   // apart too long: the charge is lost
+            if(rub>=.03f)Toward(.7f*std::min(rub/t.rubPath,1.f)+(parted>=0?.3f*(apart-t.rubClose)/(t.snapApart-t.rubClose):0.f));
             return rub>=t.rubPath&&parted>=0&&apart>=t.snapApart;
         }
         case Motion::CrossGuard: {
-            // Crossed or not: the owner's guard held the controllers 12-22 cm apart at the face.
+            // Crossed or not: the owner's guard held the controllers 12-22 cm apart at the face. Crossed close to
+            // the body is the hug (Chilling Armor's; the owner's hugs, 2026-11-05, cast this instead).
+            if(HugPose(n))return Held(false,n.t);
             bool pose=Apart(n)<=t.guardApart;
             for(int h=0;h<2;++h){const auto& l=n.l[h];pose=pose&&l.y>=-.30f&&l.y<=.20f&&Forward(l)>=0&&Forward(l)<=.60f&&std::fabs(l.x)<=.30f&&Still(h);}
             return Held(pose,n.t);
@@ -362,20 +460,31 @@ private:
             for(int h=0;h<2;++h) {
                 const auto& c=n.l[h];
                 if(Forward(c)>.20f||Forward(c)<-.35f||std::fabs(c.x)<.15f)continue;   // at the side, not in front
-                for(const auto& s:samples)
-                    if(n.t-s.t<=t.strikeWindow&&s.l[h].y<=t.strikeFrom&&s.l[h].y-c.y>=t.strikeDrop&&std::fabs(s.l[h].x-c.x)<=.20f)return true;
+                for(const auto& s:samples) {
+                    if(n.t-s.t>t.strikeWindow||s.l[h].y>t.strikeFrom||std::fabs(s.l[h].x-c.x)>.20f)continue;
+                    if(s.l[h].y-c.y>=.05f)Toward((s.l[h].y-c.y)/t.strikeDrop);
+                    if(s.l[h].y-c.y>=t.strikeDrop)return true;
+                }
             }
             return false;
         }
         case Motion::ForearmSweep: {
             const math::Vec shoulder{.17f,-.22f,.05f};
             // The right arm held out on its own side (a hug has it across the chest).
-            if(Len(n.l[1]-shoulder)>t.sweepTo||Len(n.l[0]-shoulder)<.30f||n.l[0].x<.10f)return false;
-            for(const auto& s:samples)if(n.t-s.t<=t.sweepWindow&&Apart(s)<=t.sweepAt)return true;
-            return false;
+            if(Len(n.l[0]-shoulder)<.30f||n.l[0].x<.10f)return false;
+            bool met=false;
+            for(const auto& s:samples)if(n.t-s.t<=t.sweepWindow&&Apart(s)<=t.sweepAt){met=true;break;}
+            if(!met)return false;
+            Toward(1-(Len(n.l[1]-shoulder)-t.sweepTo)/.30f);
+            return Len(n.l[1]-shoulder)<=t.sweepTo;
         }
         case Motion::Shake: {
             if(samples.size()<3)return false;
+            if(Apart(n)<t.shakeApart) {   // together: rubbing, never shaking
+                for(auto& h:swing)for(auto& a:h)a={};
+                for(auto& h:turns)for(auto& a:h)a.clear();
+                return false;
+            }
             int most[2]{};
             for(int h=0;h<2;++h) {
                 const auto v=Velocity(h);const float axis[3]={v.x,v.y,v.z};
@@ -390,25 +499,39 @@ private:
                 }
             }
             const bool front=Forward(n.l[0])>-.10f&&Forward(n.l[1])>-.10f&&n.l[0].y>-.90f&&n.l[1].y>-.90f;
+            if(front&&std::min(most[0],most[1])>=1)Toward(float(std::min(most[0],most[1]))/float(t.shakeTurns));
             return front&&most[0]>=t.shakeTurns&&most[1]>=t.shakeTurns;
         }
-        case Motion::Punch: {
+        case Motion::Punch: {   // Teleport: point and pull
             const auto& c=n.l[0];
-            if(Forward(c)<t.punchReach)return false;
-            for(const auto& s:samples) {
-                const auto& a=s.l[0];
-                const float forward=Forward(c)-Forward(a);
-                if(n.t-s.t<=t.punchWindow&&Forward(a)<=t.punchFrom&&a.y>=-.70f&&a.y<=.10f&&forward>=t.punchTravel&&
-                   std::fabs(c.y-a.y)*1.5f<=forward&&std::fabs(c.x-a.x)*1.5f<=forward){aimed=c-a;return true;}
+            const math::Vec shoulder{.17f,-.22f,.05f};
+            const auto way=c-shoulder;const float arm=Len(way);
+            const bool out=Forward(c)>=t.pointOut&&arm>=t.pointArm&&way.y<=t.pointUp*arm;
+            // shown long enough: given up, not shown again until the arm has come in (steadySince -2)
+            if(aimingSince>=0&&n.t-aimingSince>t.aimSeconds){aimingSince=-1;steadySince=-2;}
+            const auto& l=n.l[1];   // the left arm raised too: none
+            if((Forward(l)>=t.pointOtherAhead&&l.y>=t.pointOtherLow)||l.y>=t.pointOtherHigh) {
+                aimingSince=outLost=-1;if(steadySince!=-2)steadySince=-1;
+                return false;
             }
+            if(out&&Len(Velocity(0))<t.pointSteady) {   // held out steady: aimed, and following the arm
+                if(steadySince==-1)steadySince=n.t;
+                if(steadySince>=0&&n.t-steadySince>=t.pointHold){if(aimingSince<0)aimingSince=n.t;pointWay=way;}
+            } else if(!out||steadySince!=-2)steadySince=-1;
+            if(aimingSince<0)return false;
+            stats.pointAimed=true;
+            for(const auto& s:samples) {   // yanked back toward the shoulder from where it pointed
+                const auto& a=s.l[0];const float back=Forward(a)-Forward(c);
+                if(n.t-s.t>t.yankWindow||Forward(a)<t.pointOut-.05f)continue;
+                stats.yankBest=std::max(stats.yankBest,back);
+                if(back>=t.yankBack&&std::fabs(c.y-a.y)<=.7f*back&&std::fabs(c.x-a.x)<=.7f*back){aimed=pointWay;landed=true;return true;}
+            }
+            if(out)outLost=-1;   // drawn in or let down without a yank: given up a moment later
+            else if(outLost<0)outLost=n.t;
+            else if(n.t-outLost>t.aimLost){aimingSince=steadySince=outLost=-1;}
             return false;
         }
-        case Motion::Hug: {
-            const auto& r=n.l[0];const auto& l=n.l[1];
-            const bool pose=r.x>=-.40f&&r.x<=-.02f&&l.x<=.40f&&l.x>=.02f&&r.y>=-.60f&&r.y<=-.18f&&l.y>=-.60f&&l.y<=-.18f&&
-                Forward(r)>=-.25f&&Forward(r)<=.15f&&Forward(l)>=-.25f&&Forward(l)<=.15f;   // at the shoulders, not up in front (Energy Shield)
-            return Held(pose,n.t);
-        }
+        case Motion::Hug:return Held(HugPose(n),n.t);
         default:return m>Motion::Punch&&m<Motion::End&&ClassDone(*this,m);
         }
     }
@@ -456,9 +579,16 @@ public:
         }
         out.seconds=float(in.time-since);
         if(castAt>=0&&in.time-castAt<tuning.cooldown)return out;
+        progress=0;
         if(Done(in.motion)) {
             const auto seconds=out.seconds;out=stats;out.seconds=seconds;out.cast=true;out.aim=aimed;
+            out.landing=landed;out.point=landed?pointWay:math::Vec{};
+            out.land=land;out.spot=spot;
             castAt=in.time;++casts;Clear();   // the motion again, from its start, casts again
+        }
+        else {
+            out.progress=progress;
+            if(aimingSince>=0){out.aiming=true;out.point=pointWay;}
         }
         return out;
     }
@@ -468,26 +598,32 @@ public:
 #include "motions_amazon.h"
 #include "motions_barbarian.h"
 #include "motions_necromancer.h"
+#include "motions_sorceress.h"
 #include "motions_assassin.h"
 namespace framevr::spellmotion {
 inline bool ClassDone(Engine& e,Motion m) {
+    if(m>=Motion::FireWall&&m<=Motion::Hydra)return sorceress::Done(e,m);
     if(m>=Motion::InnerSight&&m<=Motion::Valkyrie)return amazon::Done(e,m);
     if(m>=Motion::BattleOrders&&m<=Motion::FindItem)return barbarian::Done(e,m);
-    if(m>=Motion::BoneArmor&&m<=Motion::BonePrison)return necromancer::Done(e,m);
+    if(m>=Motion::BoneArmor&&m<=Motion::RaiseMage)return necromancer::Done(e,m);
     if(m>=Motion::BurstOfSpeed&&m<=Motion::MindBlast)return assassin::Done(e,m);
     return false;
 }
 inline const char* ClassCue(Motion m) {
+    if(m>=Motion::FireWall&&m<=Motion::Hydra)return sorceress::Cue(m);
     if(m>=Motion::InnerSight&&m<=Motion::Valkyrie)return amazon::Cue(m);
     if(m>=Motion::BattleOrders&&m<=Motion::FindItem)return barbarian::Cue(m);
-    if(m>=Motion::BoneArmor&&m<=Motion::BonePrison)return necromancer::Cue(m);
+    if(m>=Motion::BoneArmor&&m<=Motion::RaiseMage)return necromancer::Cue(m);
     if(m>=Motion::BurstOfSpeed&&m<=Motion::MindBlast)return assassin::Cue(m);
     return "no motion";
 }
 // The order a class's motions are watched in: the first to complete in a frame casts. The Sorceress's
-// Static Field before Nova (its snap apart is as wide as a fling); the other classes' their header's Order.
-constexpr Motion SorceressOrder[]={Motion::RubSnap,Motion::FlingOut,Motion::PushDown,Motion::CrossGuard,Motion::ArmUp,
-    Motion::MatchStrike,Motion::ForearmSweep,Motion::Shake,Motion::Hug,Motion::Punch};
+// Static Field before Nova (its snap apart is as wide as a fling), Blizzard before Frost Nova (a pull from
+// overhead to the waist is Blizzard's), Hydra and Meteor before Thunder Storm (each passes an arm overhead);
+// the other classes' their header's Order.
+constexpr Motion SorceressOrder[]={Motion::RubSnap,Motion::Blizzard,Motion::FlingOut,Motion::PushDown,Motion::CrossGuard,
+    Motion::Hydra,Motion::Meteor,Motion::ArmUp,Motion::MatchStrike,Motion::ForearmSweep,Motion::Shake,Motion::Hug,Motion::Punch,
+    Motion::FireWall};
 struct Watched {const Motion* motions=nullptr;int count=0;};
 inline Watched OrderOf(int skillClass) {
     switch(skillClass) {

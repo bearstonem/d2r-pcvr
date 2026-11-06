@@ -3989,6 +3989,35 @@ bool TossAim(int skill,float playerX,float playerY,framevr::spellaim::Cast& cast
     }
     return true;
 }
+// Teleport punched while its landing showed (spell_motion.h, the transport's
+// circle), or a motion's spot (a summon, a wall, Meteor, Blizzard): there,
+// whatever the Aim options, never past the game's reach. Meteor and Blizzard
+// go to the highlighted monster instead when there is one
+// (aimrules::MotionOnTarget): the casting button's pick - its hand's, the
+// other's, the eyes' (aimtargets::Resolve).
+bool MotionAim(int skill,float playerX,float playerY,framevr::spellaim::Cast& cast) {
+    float x=0,y=0;int landed=-1;   // the landing's skill: the game's later queries of the cast ask with -1
+    if(!g_spellAimReady.load()||!g_enabled.load()||gamestate::MenuOpen()||!framevr::MotionLanding(skill,x,y,&landed))return false;
+    const char* by="motion";
+    if(framevr::aimrules::MotionOnTarget(landed)) {
+        const auto c=aimtargets::Now();
+        float mx=0,my=0,md=0;int source=-1;uint32_t id=0;
+        if(aimtargets::Resolve(c.button,c.bow,c.use,mx,my,md,&source,&id)){x=mx;y=my;by=aimtargets::SourceName(source);g_note.source=source;g_note.id=id;}
+    }
+    float dx=x-playerX,dy=y-playerY;
+    const float wanted=std::hypot(dx,dy);
+    if(wanted<framevr::spellaim::GroundMinDistance&&wanted>.001f){dx*=framevr::spellaim::GroundMinDistance/wanted;dy*=framevr::spellaim::GroundMinDistance/wanted;}
+    if(!framevr::aimreach::Clamp(dx,dy))return false;
+    cast.x=playerX+dx;cast.y=playerY+dy;cast.directed=cast.contactPoint=true;
+    g_note.by=by;g_note.distance=std::hypot(dx,dy);
+    static ULONGLONG lastLog=0;
+    if(GetTickCount64()-lastLog>250) {
+        lastLog=GetTickCount64();
+        if(g_note.id)LogF("Frame motion aim: skill %d on the highlighted monster %u (%s), %.1f cells",skill,g_note.id,by,g_note.distance);
+        else LogF("Frame motion aim: skill %d on the landing shown, %.1f cells (shown %.1f from here)",skill,g_note.distance,wanted);
+    }
+    return true;
+}
 // Telemetry: "Frame aim cast:" - every cast the aim rules see, at most one line
 // per skill per 250 ms: the rule, the button, the target and where it came
 // from, a unit hand-off, and the point or heading sent to the game.
@@ -3996,9 +4025,9 @@ bool UpstreamSpellAim(float playerX,float playerY,framevr::spellaim::Cast& cast)
 bool NativeSpellAim(float playerX,float playerY,framevr::spellaim::Cast& cast) {
     g_note={};
     const auto c=aimtargets::Now();
-    // A thrown trap first; then the aim rules only with this kind of cast's Aim
-    // option On; Off, as before them.
-    const bool directed=TossAim(c.skill,playerX,playerY,cast)||
+    // Teleport on its shown landing or a thrown trap first; then the aim rules
+    // only with this kind of cast's Aim option On; Off, as before them.
+    const bool directed=MotionAim(c.skill,playerX,playerY,cast)||TossAim(c.skill,playerX,playerY,cast)||
         (aimtargets::RulesOn(c)?NativeSpellAimDecide(playerX,playerY,cast):UpstreamSpellAim(playerX,playerY,cast));
     static ULONGLONG told=0;static int toldSkill=-2;
     if(c.skill>=0&&(c.skill!=toldSkill||GetTickCount64()-told>250)) {
@@ -4941,6 +4970,8 @@ uintptr_t HandItem() {
 uintptr_t Selected() {
     bool between = false;
     if (!On(&between)) return 0;
+    // Both grips held for the motions (or a moment after): a motion's cast press is no pick-up.
+    if (framevr::SpellGripsHeld()) return 0;
     TellThread("the Interact skill's target", 0);
     const uintptr_t handed = Handed(g_pick.load(), false);
     if (handed && between) {   // asked between headset frames (A's press): once a second at most
@@ -9528,9 +9559,12 @@ bool OutlineWanted() {
 bool RingWanted() {
     const bool tacticalActive = companionai::IsTacticalCommandsEnabled() &&
         (companionai::GetActiveTacticalOrder().type == framevr::companionai::TacticalOrderType::MoveAndHold);
+    // Teleport's landing while its fist is drawn in shows whatever the Aim options (its motion is the aim).
+    const auto marks = framevr::telegraph::Current().Get();
+    const auto now = GetTickCount64();
     return g_enabled.load() && g_inWorld.load() && !gamestate::MenuOpen() &&
-        (AimOn(framevr::settings::LandingCircles) || tacticalActive) &&
-        framevr::telegraph::AnyOn(framevr::telegraph::Current().Get(), GetTickCount64());
+        (((AimOn(framevr::settings::LandingCircles) || tacticalActive) && framevr::telegraph::AnyOn(marks, now)) ||
+         framevr::telegraph::SkillOn(marks, framevr::telegraph::TeleportMark, now));
 }
 // Loot beams (same pass): while a Rare, Set or Unique item or a high rune lies near the hero.
 bool BeamWanted() {
@@ -10319,6 +10353,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
             const auto marks = Current().Get();
             const auto now = GetTickCount64();
             const float shear = framevr::coordinates::GroundShear;
+            float tele[4] = {};   // Teleport's landing, for its pillar (TelePos): the first shown
             for (int k = 0; k < MaxMarks; ++k) {
                 const auto& mark = marks[k];
                 const auto draw = Sample(mark, now);
@@ -10329,13 +10364,18 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
                 char n[16];
                 snprintf(n, sizeof n, "RingPos%d", k); SetFloats(rt, n, ring, 4);
                 snprintf(n, sizeof n, "RingFill%d", k); SetFloat(rt, n, draw.fill);
-                // rgb its element's color (fire orange, cold blue, lightning yellow, other green, warning red), w its radius
-                static const float kElement[5][3] = {{1.0f, 0.45f, 0.05f}, {0.3f, 0.7f, 1.0f}, {1.0f, 0.92f, 0.35f}, {0.25f, 1.0f, 0.4f}, {1.0f, 0.05f, 0.05f}};
-                const int el = mark.element >= 0 && mark.element < 5 ? mark.element : 0;
+                // rgb its element's color (fire orange, cold blue, lightning yellow, other green, warning red, Teleport's
+                // arcane violet), w its radius
+                static const float kElement[6][3] = {{1.0f, 0.45f, 0.05f}, {0.3f, 0.7f, 1.0f}, {1.0f, 0.92f, 0.35f}, {0.25f, 1.0f, 0.4f}, {1.0f, 0.05f, 0.05f},
+                                                     {0.62f, 0.55f, 1.0f}};
+                const int el = mark.element >= 0 && mark.element < 6 ? mark.element : 0;
                 const float col[4] = {kElement[el][0], kElement[el][1], kElement[el][2], mark.radius * 2.0f};
                 snprintf(n, sizeof n, "RingCol%d", k); SetFloats(rt, n, col, 4);
-                // a strip: its direction (grid x/y are world x/z) and half-length in world units; 0 = a circle
-                const float dir[4] = {mark.dirX, mark.dirY, mark.halfLength * 2.0f, 0.0f};
+                // a strip: its direction (grid x/y are world x/z) and half-length in world units; 0 = a circle; w 1:
+                // Teleport's sigil (D2R_DepthFog.fx TeleportSigil)
+                const bool teleport = mark.skill == TeleportMark;
+                const float dir[4] = {mark.dirX, mark.dirY, mark.halfLength * 2.0f, teleport ? 1.0f : 0.0f};
+                if (teleport && draw.on && tele[3] <= 0.0f) { tele[0] = ring[0]; tele[1] = ring[1]; tele[2] = ring[2]; tele[3] = ring[3]; }
                 snprintf(n, sizeof n, "RingDir%d", k); SetFloats(rt, n, dir, 4);
             }
             // Paint only the floor within this height of it (meters), so a circle does not
@@ -10343,7 +10383,14 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
             // 2026-10-20, like the rest of the look (D2R_DepthFog.fx, kCircle*).
             constexpr float kCircleHeightM = 0.15f;
             SetFloat(rt, "RingFloorTol", kCircleHeightM * std::max(1.0f, ScaleHeight()) / UserEyeHeightM());
+            // Teleport's pillar: 0.12 m core, 3 m tall at the player's scale
+            const float upm = std::max(1.0f, ScaleHeight()) / UserEyeHeightM();
+            SetBool(rt, "TeleOn", tele[3] > 0.0f);
+            SetFloats(rt, "TelePos", tele, 4);
+            const float teleShape[2] = {0.12f * upm, 3.0f * upm};
+            SetFloats(rt, "TeleShape", teleShape, 2);
         }
+        else SetBool(rt, "TeleOn", false);
         if (beams) {   // loot beams: each item's cell on the hero's floor, in its label colour
             namespace lb = framevr::lootbeams;
             const float upm = std::max(1.0f, ScaleHeight()) / UserEyeHeightM();   // world units per metre
