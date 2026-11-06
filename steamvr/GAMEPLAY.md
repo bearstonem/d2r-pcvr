@@ -2290,7 +2290,8 @@ assignment, read back) and the press follows the read-back by 0.15 s, or nothing
 after 0.6 s without it. Pressed at once (22-32 ms after the read-back), every Raise Skeleton
 put on the record in the owner's session (2026-11-05) failed ("I can't use that yet") and the
 next, on the record already, cast: the game finds the trigger skill's target (a corpse) a
-moment after the skill is put there. The snapshot carries the record (`glyphRecord/Skill/Owner`; -1 when a custom layout
+moment after the skill is put there. Teleport and Leap, which go where the mod lands them, press at the
+read-back: the owner felt the pause before a Leap while running. The snapshot carries the record (`glyphRecord/Skill/Owner`; -1 when a custom layout
 gives a hand button that record).
 
 Trail (`steamvr/glyph_trail.h`): a 512 x 512 straight-alpha picture, 1 m a side, in the

@@ -79,6 +79,14 @@ int main() {
         c.Step(5.47, 138, -1);
         Check(c.state == Cast::State::Done && !c.Step(5.48, 138, -1).rt, "released after PressSeconds");
     }
+    {   // Leap and Teleport, landed by the mod, press as soon as the record reads back
+        for (const int id : {132, 54}) {
+            Cast c; c.Begin({How::Park, GlyphRecord}, id, -1, 2.0);
+            Check(!c.Step(2.05, 155, -1).rt && c.Step(2.1, id, -1).rt, "Leap and Teleport: pressed at the read-back, no settle");
+        }
+        Cast raise; raise.Begin({How::Park, GlyphRecord}, 70, -1, 2.0);
+        Check(!raise.Step(2.1, 70, -1).rt, "Raise Skeleton still settles first");
+    }
     {   // a read-back just before ParkWaitSeconds still settles and presses
         Cast c; c.Begin({How::Park, GlyphRecord}, 138, -1, 1.0);
         c.Step(1.3, -1, -1); c.Step(1.55, 138, -1); c.Step(1.65, 138, -1);
