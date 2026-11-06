@@ -2136,8 +2136,17 @@ float3 Beams(float3 c, float2 uv, int eye, float3 p, float ok)
     light += BeamLight(e, dir, tSurf, p, ok, BeamPos5, BeamCol5);
     light += BeamLight(e, dir, tSurf, p, ok, BeamPos6, BeamCol6);
     light += BeamLight(e, dir, tSurf, p, ok, BeamPos7, BeamCol7);
-    if (TeleOn) light += TeleLight(e, dir, tSurf);
     // Not over the game's interface left in the picture (names, labels, chat), as the fog.
+    if (UiMaskOn && !UiMaskOff) light *= saturate(tex2Dlod(GameLayerSmp, float4(uv, 0, 0)).a);
+    return saturate(c + light);
+}
+// Teleport's pillar, its own pass beside the beams (loot-beams-shader-test compiles Beams alone).
+float3 TelePillar(float3 c, float2 uv, int eye, float3 p, float ok)
+{
+    float3 e, dir;
+    BeamRay(uv, eye, e, dir);
+    const float tSurf = ok > 0.0 ? dot(p - e, dir) / max(dot(dir, dir), 1e-6) : 1e7;
+    float3 light = TeleLight(e, dir, tSurf);
     if (UiMaskOn && !UiMaskOff) light *= saturate(tex2Dlod(GameLayerSmp, float4(uv, 0, 0)).a);
     return saturate(c + light);
 }
@@ -2147,7 +2156,8 @@ float3 Outline(float2 uv, int eye)
     if (!OutlineOn && !RingOn && !BeamOn && !TeleOn) return c;
     float ok;
     const float3 p = OutlineWorld(uv, eye, ok);
-    if (BeamOn || TeleOn) c = Beams(c, uv, eye, p, ok);   // over the sky as well
+    if (BeamOn) c = Beams(c, uv, eye, p, ok);   // over the sky as well
+    if (TeleOn) c = TelePillar(c, uv, eye, p, ok);
     if (ok <= 0.0) return c;
     if (RingOn) {
         const float up = FacingUp(uv, eye, p, 3.0);   // two more depth taps, only while a circle shows
