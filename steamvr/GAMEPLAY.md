@@ -2446,7 +2446,11 @@ least 25 cm apart (a tester, 2026-11-05: Static Field's rub "reads as shaking": 
 closer are a rub, and its count starts over); Chilling
 Armor, a hug, held (each hand on the other side, close to the body, up to 12 cm under the eyes; the
 owner's hugs held a hand 17 cm under them where 18 was the top, and crossed close to the body they
-could cast Energy Shield: that is the hug's now). The owner's picks from the list of her spells without one (2026-11-05), each to
+could cast Energy Shield: that is the hug's now). Every class's motions measure the hands in the reference body's units (owner, 2026-11-05): the hands, relative to
+the eyes, are divided by the calibrated controller span over 1.46 m (VR Settings' body calibration; the owner's
+span, on which the distances were tuned), capped at 0.8-1.2 and 1 with no calibration (`spellmotion::BodyScale`,
+`Input::bodyScale`). A reach, a push or a hand past the eyes asks the same of every body; times are unchanged, and
+the hold log ends with the scale. The owner's picks from the list of her spells without one (2026-11-05), each to
 a spot of its own (`motions_sorceress.h`): Fire Wall, the right hand swept sideways across in front
 of the chest (the Necromancer's Bone Wall sweep; the wall 5 cells away where the sweep's middle
 heads); Meteor, the right fist raised overhead and thrown down and forward fast (where the arm

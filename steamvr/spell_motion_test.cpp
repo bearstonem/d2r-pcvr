@@ -21,17 +21,18 @@ struct Sim {
     float frame=1/90.f;
     Sim(Motion m,float heading=0){yaw=math::Yaw(heading);in.time=1;in.session=3;in.epoch=1;in.active=true;in.motion=m;
         in.tracked[0]=in.tracked[1]=true;in.head=head;in.headRotation=yaw;Place(0,RestR);Place(1,RestL);Step();}
-    void Place(int h,math::Vec p){in.hand[h]=head+math::Rotate(yaw,p);}
+    float body=1;   // the player's size: every point the reference body's, times this (and in.bodyScale, when told)
+    void Place(int h,math::Vec p){in.hand[h]=head+math::Rotate(yaw,p*body);}
     static float Ease(float t){return t*t*t*(10+t*(-15+6*t));}
     // Both hands to their points together (a hand given as itself stays).
     void Move(math::Vec r,math::Vec l,float seconds) {
-        const math::Vec a[2]={in.hand[0],in.hand[1]},b[2]={head+math::Rotate(yaw,r),head+math::Rotate(yaw,l)};
+        const math::Vec a[2]={in.hand[0],in.hand[1]},b[2]={head+math::Rotate(yaw,r*body),head+math::Rotate(yaw,l*body)};
         const int steps=std::max(1,int(seconds/frame));
         for(int i=1;i<=steps;++i){for(int h=0;h<2;++h)in.hand[h]=a[h]+(b[h]-a[h])*Ease(float(i)/steps);Step();}
     }
     void MoveR(math::Vec r,float seconds){Move(r,Local(1),seconds);}
     void MoveL(math::Vec l,float seconds){Move(Local(0),l,seconds);}
-    math::Vec Local(int h)const{return math::Rotate(math::Conjugate(yaw),in.hand[h]-head);}
+    math::Vec Local(int h)const{return math::Rotate(math::Conjugate(yaw),in.hand[h]-head)*(1/body);}
     // Each hand where f puts it at t seconds in.
     void Drive(float seconds,const std::function<void(float,math::Vec&,math::Vec&)>& f) {
         for(int i=1;i<=int(seconds/frame);++i){math::Vec r=Local(0),l=Local(1);f(i*frame,r,l);Place(0,r);Place(1,l);Step();}
@@ -141,6 +142,27 @@ int main() {
     }
     Check(spellmotion::For(36)==Motion::None&&spellmotion::For(117)==Motion::None,
         "Fire Bolt and a Paladin skill have no motion: their glyph casts as before");
+    {   // a body of another size (owner, 2026-11-05: calibration to make the motions "more accurate"): its hands
+        // in the reference body's units by the calibrated span, capped at 0.8-1.2
+        Check(spellmotion::BodyScale(spellmotion::ReferenceSpan)==1&&spellmotion::BodyScale(0)==1&&spellmotion::BodyScale(std::nanf(""))==1&&
+              spellmotion::BodyScale(1.75f)>1.19f&&spellmotion::BodyScale(1.75f)<1.2f+1e-6f&&spellmotion::BodyScale(3.f)==spellmotion::MaxBodyScale&&
+              spellmotion::BodyScale(.5f)==spellmotion::MinBodyScale,"the body scale: the reference span 1, none calibrated 1, capped at 0.8-1.2");
+        for(const float body:{.8f,1.2f}) {
+            const auto told=[&](Sim& s){s.body=body;s.in.bodyScale=body;s.Place(0,RestR);s.Place(1,RestL);s.Step();};
+            {Sim s(Motion::Punch);told(s);s.Trigger(true);Teleport(s);Check(s.casts==1,"Teleport: a smaller or larger body, its scale told, casts");}
+            {Sim s(Motion::FlingOut);told(s);s.Trigger(true);Nova(s);Check(s.casts==1,"Nova: a smaller or larger body, its scale told, casts");}
+            {Sim s(Motion::Meteor);told(s);s.Trigger(true);Meteor(s);
+             Check(s.casts==1&&s.spot.ahead>4&&s.spot.ahead<16,"Meteor: a smaller or larger body lands as the reference body's throw");}
+        }
+        {   // a small body's arm held out: untold, short of the reference reach; told, it points
+            Sim untold(Motion::Punch);untold.body=.8f;untold.Place(0,RestR);untold.Place(1,RestL);untold.Step();untold.Trigger(true);
+            untold.MoveR({.17f,-.22f,-.40f},.35f);untold.Hold(.25f);
+            Check(!untold.out.aiming,"Teleport: a small body's arm out, its scale not told, is short of the reach");
+            Sim told(Motion::Punch);told.body=.8f;told.in.bodyScale=.8f;told.Place(0,RestR);told.Place(1,RestL);told.Step();told.Trigger(true);
+            told.MoveR({.17f,-.22f,-.40f},.35f);told.Hold(.25f);
+            Check(told.out.aiming,"Teleport: the same arm, its scale told, points");
+        }
+    }
     {   // the owner's hugs (2026-11-05): held 1.9 s, the left hand 17 cm under the eyes, behind them; none cast
         const auto hug=[](Sim& s){s.Move({-.13f,-.22f,-.10f},{.13f,-.17f,.08f},.45f);s.Hold(.6f);};
         {Sim s(Motion::Hug);s.Trigger(true);hug(s);Check(s.casts==1,"Chilling Armor: the owner's hug casts");}
