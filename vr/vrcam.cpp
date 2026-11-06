@@ -37,6 +37,7 @@
 #include "../steamvr/arm_pointing.h"
 #include "../steamvr/aim_reach.h"
 #include "../steamvr/torch_light.h"
+#include "../steamvr/elemental_hands.h"
 #include "../steamvr/leather_menu.h"
 #include "../steamvr/head_shadow.h"
 #include <tlhelp32.h>
@@ -329,6 +330,7 @@ struct Settings {
     std::atomic<float> ceilDetail{0.8f};    // [ceiling] detail: world units the picture's light parts stand out of the rock
     std::atomic<float> ceilContrast{1.6f};  // [ceiling] contrast: the picture's fine detail times this
     std::atomic<bool>  torchEnabled{true};       // [torch] enabled: 1H club with fire lights the dungeon in VR
+    std::atomic<bool>  spellHandLight{true};     // [torch] spell_hands: a Sorceress's spell hands light it too (elements::HandLight)
     std::atomic<float> torchRadius{18.0f};       // [torch] radius: world units of light reach (28 looked too intense in the headset)
     std::atomic<bool>  torchFlicker{true};       // [torch] flicker: organic turbulent flame flicker
     std::atomic<float> torchWarmth{0.65f};       // [torch] warmth: color warmth toward fire orange
@@ -1363,6 +1365,7 @@ void LoadSettings() {
     g_set.ceilDetail.store(std::clamp(IniF(L"ceiling", L"detail", 0.8f), 0.0f, 10.0f));
     g_set.ceilContrast.store(std::clamp(IniF(L"ceiling", L"contrast", 1.6f), 0.0f, 5.0f));
     g_set.torchEnabled.store(IniB(L"torch", L"enabled", true));
+    g_set.spellHandLight.store(IniB(L"torch", L"spell_hands", true));
     g_set.torchRadius.store(std::clamp(IniF(L"torch", L"radius", 18.0f), 5.0f, 60.0f));
     g_set.torchFlicker.store(IniB(L"torch", L"flicker", true));
     g_set.torchWarmth.store(std::clamp(IniF(L"torch", L"warmth", 0.65f), 0.0f, 1.0f));
@@ -10087,6 +10090,33 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
                     }
                 }
 
+                // A Sorceress's spell hands light the dungeon as a torch does, each by its element ([torch]
+                // spell_hands; elemental_hands.h HandLight), at the fist, a held torch's hand aside.
+                bool anySpell = false;
+#ifdef D2RVR_NATIVE_OPENXR
+                if (g_set.spellHandLight.load()) {
+                    const D2RVR_Shared* sh = g_shared;
+                    AcquireSRWLockShared(&g_stickLock); const StickFrame f = g_stickFrame; ReleaseSRWLockShared(&g_stickLock);
+                    for (int h = 0; h < 2 && outIndex < worldobj::kMaxLights; ++h) {
+                        int element = 0; float opacity = 0;
+                        if (torchActive[h] || !framevr::ElementalHandLight(h, element, opacity)) continue;
+                        if (!f.valid || !sh || sh->version != D2RVR_SHARED_VERSION || !sh->headValid || !(sh->handsValid & (1u << h))) continue;
+                        const auto light = framevr::elements::HandLight(framevr::elements::Element(element), opacity, GetTickCount64(), h);
+                        if (!(light.strength > 0)) continue;
+                        const float* p = (h == 0) ? sh->rightHand : sh->leftHand;
+                        const float headM = UserEyeHeightM();
+                        const float upm = std::max(1.0f, ViewHeight()) / (headM > 0.1f ? headM : 1.75f);
+                        const float dw[3] = {(p[0] * f.camR[0] - p[2] * f.camF[0]) * upm, p[1] * upm, (p[0] * f.camR[2] - p[2] * f.camF[2]) * upm};
+                        pos[outIndex * 4 + 0] = sv[0].eyeRel[0] + dw[0];
+                        pos[outIndex * 4 + 1] = (sv[0].hero[1] - floorY) + sv[0].eyeRel[1] + dw[1];
+                        pos[outIndex * 4 + 2] = sv[0].eyeRel[2] + dw[2];
+                        pos[outIndex * 4 + 3] = framevr::torch::ComputeShaderLightRadius(light.radius, g_set.ceilTorchRadius.load());
+                        for (int c = 0; c < 3; ++c) col[outIndex * 4 + c] = light.rgb[c];
+                        col[outIndex * 4 + 3] = light.strength;
+                        ++outIndex; anySpell = true;
+                    }
+                }
+#endif
                 // Fill remaining slots with world/monster lights
                 const int remainingSlots = worldobj::kMaxLights - outIndex;
                 const int copyCount = std::min(n, remainingSlots);
@@ -10102,8 +10132,8 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
                     col[outIndex * 4 + 3] = std::clamp((reach - d) / (0.25f * reach), 0.0f, 1.0f) * (l[i].monster ? g_set.ceilMonsterBright.load() : 1.0f);
                 }
 
-                SetBool(rt, "CeilTorches", g_set.ceilTorches.load() || anyTorch);
-                SetBool(rt, "GameLightsOn", worldobj::g_known.load() || anyTorch);
+                SetBool(rt, "CeilTorches", g_set.ceilTorches.load() || anyTorch || anySpell);
+                SetBool(rt, "GameLightsOn", worldobj::g_known.load() || anyTorch || anySpell);
                 SetFloat(rt, "CeilTorchBright", g_set.ceilTorchBright.load());
                 SetFloat(rt, "CeilTorchRadius", g_set.ceilTorchRadius.load());
                 SetFloat(rt, "CeilTorchWarm", g_set.ceilTorchWarm.load());

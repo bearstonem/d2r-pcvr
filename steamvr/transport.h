@@ -85,6 +85,9 @@ bool LeatherMenuWorld();   // also: the left stick walks while the leather is ou
 void PublishSewerPrompt(const sewerprompt::Target&); // Values only; XR follows no game pointers.
 // Current motion-combat aim in the existing head-yaw-relative hand frame.
 bool SettingsOpen();
+// A Sorceress's spell hand lit (elements::Element, its opacity), fresh within 150 ms: vrcam lays its light
+// among the game's lights (elements::HandLight), as a held torch's.
+bool ElementalHandLight(int hand,int& element,float& opacity);
 bool OwnsControllerRumble(); // lock-free; VR input owns feedback instead of gamepad motors
 bool SpellSelected();
 bool LeftHandAiming();

@@ -1,6 +1,7 @@
 #pragma once
 #include "interactions.h"
 #include <algorithm>
+#include <cmath>
 
 namespace framevr::elements {
 enum class Element { None, Fire, Cold, Lightning };
@@ -53,12 +54,62 @@ struct Hand {
     float opacity=0,pulse=0;
     int skill=-1;
 };
+// One particle as the renderer draws it (its StructuredBuffer element, 64 bytes), in the room (XR stage
+// metres): the effects' simulation (elemental_particles.h) writes them, both eyes draw the same.
+enum Kind : uint32_t {
+    Flame,   // a flame from the game's fire flipbook (frame: its first of 64), upright
+    Ember,   // a hot spark, drawn along its velocity
+    Glow,    // a soft glow (frame: the ramp - 0 flame, 1 lightning, 2 ice, 3 frost)
+    Smoke,   // a dark smoke puff (frame: of 4), alpha-blended
+    Arc,     // a short lightning arc along v (frame: of 8)
+    Bolt,    // a longer lightning bolt along v (frame: of 8)
+    Spark,   // an electric spark, drawn along its velocity
+    Mist,    // a cold mist wisp (frame: of 4), alpha-blended
+    Flake,   // a snowflake (frame: of 4)
+    Chunk,   // an ice chunk (frame: of 4)
+    Orb,     // the Frozen Orb's spinning shards
+    Flare,   // a star flare (frame: the ramp, as Glow)
+    Core,    // a fireball's churning core
+    Plasma,  // Charged Bolt's own flash, two layers turning: the lightning ball under its arcs
+    KindCount
+};
+struct Particle {
+    math::Vec p{};float size=0;   // where, and the quad's half height (m)
+    math::Vec v{};float life=0;   // its velocity, or for Arc and Bolt its axis (m/s); age over lifetime, 0..1
+    float aspect=1,rotation=0;    // width over height; the quad's turn (rad)
+    float intensity=1,blend=0;    // brightness; 0 adds light, 1 covers what is behind (smoke, mist)
+    uint32_t kind=Flame,frame=0;
+    float seed=0,stretch=0;       // stretch: seconds of v the quad is drawn along (0: facing the eye)
+};
+static_assert(sizeof(Particle)==64,"the renderer's StructuredBuffer stride");
+constexpr unsigned MaxDrawn=320;   // both hands' particles, the most drawn in one pass
 struct Scene {
     std::array<Hand,2> hands{};
     uint64_t session=0,at=0;
     float time=0; // frozen once for the entire stereo pair
+    std::array<Particle,MaxDrawn> drawn{};unsigned count=0;   // the effects' particles this frame (elemental_particles.h)
     bool Visible()const {return hands[0].opacity>0||hands[1].opacity>0;}
 };
+// A spell hand's light on the world (vrcam lays it among the game's lights, as the held torch's; [torch]
+// spell_hands): its element's colour, how strong (0..1: fire flickers, lightning crackles, frost stays
+// even) and how far it reaches (world units, as [torch] radius). opacity: the hand's (Hand::opacity).
+struct Light {float rgb[3]{};float strength=0,radius=0;};
+inline Light HandLight(Element element,float opacity,uint64_t ms,int hand) {
+    Light l;
+    const float o=std::isfinite(opacity)?std::clamp(opacity,0.f,1.f):0.f,t=float(ms%600000)/1000.f,seed=float(hand)*1.7f;
+    auto colour=[&](float r,float g,float b){l.rgb[0]=r;l.rgb[1]=g;l.rgb[2]=b;};
+    switch(element) {
+    case Element::Fire:colour(1,.55f,.22f);l.radius=11;
+        l.strength=o*(.80f+.12f*std::sin(t*9.1f+seed)*std::sin(t*5.3f+seed*2)+.06f*std::sin(t*23.9f+seed));break;
+    case Element::Lightning: {   // a new brightness every 40 ms
+        const float k=std::floor(t*25)+seed*13,crackle=.5f+.5f*std::sin(k*12.9898f);
+        colour(.55f,.70f,1);l.radius=10;l.strength=o*(.30f+.65f*crackle*crackle);break;
+    }
+    case Element::Cold:colour(.45f,.78f,1);l.radius=8;l.strength=o*(.45f+.05f*std::sin(t*1.7f+seed));break;
+    default:break;
+    }
+    return l;
+}
 inline bool Current(const Scene& scene,uint64_t session,uint64_t now) {
     return session&&scene.session==session&&now>=scene.at&&now-scene.at<=150&&scene.Visible();
 }

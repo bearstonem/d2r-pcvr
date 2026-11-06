@@ -10,9 +10,10 @@ static void Check(bool value,const char* message){if(!value){std::fprintf(stderr
 static std::vector<uint8_t> Cache(int corrupt=0) {
     std::vector<uint8_t> d;
     auto put=[&](uint32_t v){d.insert(d.end(),reinterpret_cast<uint8_t*>(&v),reinterpret_cast<uint8_t*>(&v)+4);};
-    put(0x31505353);put(1);put(sprites::Count);
+    put(0x31505353);put(corrupt==8?1:sprites::Version);put(sprites::Count);
     for(unsigned i=0;i<sprites::Count;++i) {
-        const uint32_t format=sprites::Ramp(i)?29:i==sprites::FrozenOrb?77:80,width=corrupt==3&&i==sprites::SoftFlame?6:8;
+        const uint32_t format=sprites::Ramp(i)?29:i==sprites::Distortion?83:i==sprites::FrozenOrb||i==sprites::Flakes?77:80,
+            width=corrupt==3&&i==sprites::SoftFlame?6:8;
         put(corrupt==1&&i==sprites::Flash?5:i);put(width);put(4);put(corrupt==2&&i==sprites::FlameRamp?80:format);put(2);
         for(uint32_t m=0;m<2;++m) {
             const auto bytes=uint32_t(sprites::MipBytes(format,std::max(1u,width>>m),std::max(1u,4u>>m)))+(corrupt==4&&m==1?1:0);
@@ -54,12 +55,23 @@ int main() {
           SpellLook(45,Element::Cold)==Look::IceBlast&&SpellLook(999,Element::Fire)==Look::Torch,"each hand spell shows its own effect");
     Check(SpellLook(51,Element::Fire)==Look::FireBolt&&SpellLook(49,Element::Lightning)==Look::ChargedBolt&&
           SpellLook(44,Element::Cold)==Look::IceBolt&&SpellLook(64,Element::Cold)==Look::IceBlast,"other skills take their element's look");
+    {   // a spell hand's light: its element's colour, fire flickering and lightning crackling, frost even; none without
+        const auto fire=HandLight(Element::Fire,1,1000,0),cold=HandLight(Element::Cold,1,1000,0);
+        Check(fire.rgb[0]>fire.rgb[2]&&cold.rgb[2]>cold.rgb[0]&&fire.radius>cold.radius&&cold.strength>.3f,"fire orange and farther, frost cyan");
+        float lo=1,hi=0,clo=1,chi=0;
+        for(uint64_t ms=0;ms<2000;ms+=7){const float s=HandLight(Element::Lightning,1,ms,1).strength;lo=std::min(lo,s);hi=std::max(hi,s);
+            const float c=HandLight(Element::Cold,1,ms,1).strength;clo=std::min(clo,c);chi=std::max(chi,c);}
+        Check(hi-lo>.4f&&chi-clo<.15f,"lightning crackles, frost stays even");
+        Check(HandLight(Element::Fire,.5f,1000,0).strength<fire.strength&&HandLight(Element::None,1,1000,0).strength==0&&
+              HandLight(Element::Fire,std::numeric_limits<float>::quiet_NaN(),1000,0).strength==0,"dimmed with the hand, none without a spell or with a bad opacity");
+    }
     {
         const auto textures=sprites::Parse(Cache());
         Check(textures.size()==sprites::Count&&textures[sprites::FlameRamp].format==29&&textures[sprites::FrozenOrb].format==77&&
+              textures[sprites::Distortion].format==83&&textures[sprites::Distortion].mips[0].size()==32&&
               textures[sprites::Flash].format==80&&textures[sprites::Flash].mips.size()==2&&textures[sprites::Flash].mips[1].size()==8,
               "spell sprite cache parses");
-        for(int corrupt=1;corrupt<8;++corrupt) {
+        for(int corrupt=1;corrupt<9;++corrupt) {   // 8: a version 1 cache (an older install)
             bool rejected=false;
             try{sprites::Parse(Cache(corrupt));}catch(const std::exception&){rejected=true;}
             Check(rejected,"malformed spell sprite cache rejected");
