@@ -85,8 +85,8 @@ int main() {
         // since 2026-11-03, the Paladin's and the Druid's by card; a name and a cue on every card.
         Check(spellmotion::PageOf(1).count==spellmotion::SorceressCount&&spellmotion::PageOf(3).count==4&&spellmotion::PageOf(5).count==2,
               "the Sorceress's 10, the Paladin's 4, the Druid's 2");
-        Check(spellmotion::PageOf(0).count==4&&spellmotion::PageOf(4).count==8&&spellmotion::PageOf(2).count==8&&spellmotion::PageOf(6).count==7,
-              "the Amazon's 4, the Barbarian's 8, the Necromancer's 8, the Assassin's 7 (the owner's table)");
+        Check(spellmotion::PageOf(0).count==4&&spellmotion::PageOf(4).count==8&&spellmotion::PageOf(2).count==9&&spellmotion::PageOf(6).count==7,
+              "the Amazon's 4, the Barbarian's 8, the Necromancer's 9 (the table's and the left arm's golem), the Assassin's 7");
         for(int c:{7,-1})Check(!spellmotion::HasMotions(c)&&spellmotion::PageOf(c).count==0,"no motions for the Warlock or an unknown class");
         for(int c:{0,2,4,6}) {   // their cards' motions are the engine's, each watched in the class's order exactly once
             const auto page=spellmotion::PageOf(c);const auto order=spellmotion::OrderOf(c);
@@ -99,7 +99,9 @@ int main() {
         {   // a family's card casts its strongest learned skill
             const auto known=[](std::initializer_list<int> ids){return [ids](int id){return std::find(ids.begin(),ids.end(),id)!=ids.end();};};
             Check(spellmotion::CastSkillOf(75,known({75}))==75&&spellmotion::CastSkillOf(75,known({75,85}))==85&&spellmotion::CastSkillOf(75,known({75,85,94}))==94,
-                  "the golems: Clay, then Blood, then Fire");
+                  "the right arm's golem: the strongest learned, Fire, then Blood, then Clay");
+            Check(spellmotion::CastSkillOf(85,known({75,85,94}))==85&&spellmotion::CastSkillOf(85,known({75,94}))==75&&spellmotion::CastSkillOf(85,known({75,85}))==75&&
+                  spellmotion::CastSkillOf(85,known({85}))==85,"the left arm's golem: the next one down, else the only one");
             Check(spellmotion::CastSkillOf(268,known({268}))==268&&spellmotion::CastSkillOf(268,known({268,279}))==279&&spellmotion::CastSkillOf(149,known({}))==149,
                   "the shadows; any other card its own skill");
         }

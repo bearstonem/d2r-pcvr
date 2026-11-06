@@ -2370,13 +2370,17 @@ there.
   Battle Cry, both fists at the shoulders pulled hard to the hips; Leap, both arms swung down behind
   then up past the head, fast (arms only, so seated too); Find Item, the right hand held out at the
   corpse a moment, then snatched back to the shoulder.
-- Necromancer: Bone Armor, both fists crossed on the chest, held; Raise Skeleton, both hands lifted
-  fast from the hips to the chest, and stopped there; Corpse Explosion, the right hand held out at a
-  corpse, then jabbed forward; Golem, both fists raised over the head, then slammed down in front;
-  Amplify Damage, the right hand held out at a monster, then yanked back; Lower Resist, the same,
-  chopped down; Poison Nova, hands
-  together at the chest, then flung out low and wide; Bone Prison, both hands apart in front, then
-  brought together round a monster.
+- Necromancer: Bone Armor, both fists crossed on the chest, held; Raise Skeleton, both arms swept up
+  fast from the hips past the face, together (no stop); Golem, the right arm swept up fast beside the
+  head (the strongest golem learned), and a second card, the left arm the same (the next one down);
+  Corpse Explosion, the right hand held out at a corpse, then jabbed forward; Amplify Damage, a punch
+  with the right fist; Lower Resist, the right hand held out at a monster (up to over the eyes), then
+  chopped down; Poison Nova, hands together at the chest, then flung out wide; Bone Prison, both hands
+  apart in front, then brought together round a monster. The owner's headset session (2026-11-05) made
+  the summons arm raises ("right arm, just right arm rising up to raise golem, and then left arm raising
+  up to raise different kind of golem, and then both arms raising up to raise skeleton"), Amplify Damage
+  a punch ("Punch with one hand") and Poison Nova any height; Golem had been a slam from overhead and
+  Raise Skeleton a lift that had to stop at the chest.
 - Assassin: Burst of Speed, both arms pumped fast as in a sprint, two swings each; Fade, both hands
   drawn down in front of the face, from the eyes to the chin; Cloak of Shadows, both arms swept across from wide at the shoulders
   until they cross; Venom, the crossed wrists flicked apart fast; Blade Shield, the right hand circled

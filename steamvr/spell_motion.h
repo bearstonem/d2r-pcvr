@@ -34,7 +34,7 @@ namespace framevr::spellmotion {
 enum class Motion {None,FlingOut,PushDown,RubSnap,CrossGuard,ArmUp,MatchStrike,ForearmSweep,Shake,Hug,Punch,
     InnerSight,SlowMissiles,Decoy,Valkyrie,                                                       // Amazon A1-A4
     BattleOrders,Shout,BattleCommand,WarCry,Howl,BattleCry,Leap,FindItem,                         // Barbarian B1-B8
-    BoneArmor,RaiseSkeleton,CorpseExplosion,Golem,AmplifyDamage,LowerResist,PoisonNova,BonePrison,// Necromancer N1-N8
+    BoneArmor,RaiseSkeleton,CorpseExplosion,Golem,AmplifyDamage,LowerResist,PoisonNova,BonePrison,GolemLeft,// Necromancer N1-N8, N4b
     BurstOfSpeed,Fade,CloakOfShadows,Venom,BladeShield,ShadowWarrior,MindBlast,                   // Assassin S1-S7
     End};
 constexpr int SorceressCount=int(Motion::Punch);   // the Sorceress's, 1..SorceressCount ([motions] off: her bits)
@@ -56,7 +56,8 @@ inline Motion For(int skill) {
     case 149:return Motion::BattleOrders;case 138:return Motion::Shout;case 155:return Motion::BattleCommand;case 154:return Motion::WarCry;
     case 130:return Motion::Howl;case 146:return Motion::BattleCry;case 132:return Motion::Leap;case 142:return Motion::FindItem;
     case 68:return Motion::BoneArmor;case 70:return Motion::RaiseSkeleton;case 74:return Motion::CorpseExplosion;
-    case 75:case 85:case 94:return Motion::Golem;   // the card is Clay Golem's; it casts the strongest learned (CastSkillOf)
+    case 75:case 94:return Motion::Golem;   // the right arm's card is Clay Golem's; it casts the strongest learned (CastSkillOf)
+    case 85:return Motion::GolemLeft;       // the left arm's is Blood Golem's; it casts the next strongest
     case 66:return Motion::AmplifyDamage;case 91:return Motion::LowerResist;case 92:return Motion::PoisonNova;case 88:return Motion::BonePrison;
     case 258:return Motion::BurstOfSpeed;case 267:return Motion::Fade;case 264:return Motion::CloakOfShadows;case 278:return Motion::Venom;
     case 277:return Motion::BladeShield;case 268:case 279:return Motion::ShadowWarrior;case 273:return Motion::MindBlast;
@@ -79,7 +80,7 @@ constexpr int DruidSkills[]={223,228};             // Werewolf, Werebear
 // The table's order (owner, 2026-11-04): A1-A4, B1-B8, N1-N8 (N4 the golems' card, N6 Lower Resist), S1-S7.
 constexpr int AmazonSkills[]={8,17,28,32};
 constexpr int BarbarianSkills[]={149,138,155,154,130,146,132,142};
-constexpr int NecromancerSkills[]={68,70,74,75,66,91,92,88};
+constexpr int NecromancerSkills[]={68,70,74,75,66,91,92,88,85};   // 85: the left arm's golem (owner, 2026-11-05), after the table's
 constexpr int AssassinSkills[]={258,267,264,278,277,268,273};
 struct Page {const int* skills=nullptr;int count=0;};
 inline Page PageOf(int skillClass) {
@@ -123,13 +124,18 @@ inline const char* SpellName(int skill) {
 }
 // A card that stands for a family (the table's N4 and S6): its name on the MOTIONS page; nullptr, the skill's.
 inline const char* CardName(int skill) {
-    switch(skill){case 75:return "Golem";case 268:return "Shadow Warrior / Master";default:return nullptr;}
+    switch(skill){case 75:return "Golem (right arm)";case 85:return "Golem (left arm)";case 268:return "Shadow Warrior / Master";default:return nullptr;}
 }
 // The skill a card casts: the strongest of its family learned (known(id): the hero has the skill). The golems
 // Fire, then Blood, then Clay (Iron Golem takes an item, so it stays on its button); Shadow Master once learned.
 template<class Known> int CastSkillOf(int skill,Known known) {
     switch(skill) {
-    case 75:return known(94)?94:known(85)?85:75;
+    case 75:case 85: {   // the right arm's: the strongest golem learned; the left arm's: the next one down (else the strongest)
+        int learned[3],n=0;
+        for(const int id:{94,85,75})if(known(id))learned[n++]=id;
+        if(!n)return skill;
+        return skill==85&&n>1?learned[1]:learned[0];
+    }
     case 268:return known(279)?279:268;
     default:return skill;
     }
@@ -573,14 +579,14 @@ namespace framevr::spellmotion {
 inline bool ClassDone(Engine& e,Motion m) {
     if(m>=Motion::InnerSight&&m<=Motion::Valkyrie)return amazon::Done(e,m);
     if(m>=Motion::BattleOrders&&m<=Motion::FindItem)return barbarian::Done(e,m);
-    if(m>=Motion::BoneArmor&&m<=Motion::BonePrison)return necromancer::Done(e,m);
+    if(m>=Motion::BoneArmor&&m<=Motion::GolemLeft)return necromancer::Done(e,m);
     if(m>=Motion::BurstOfSpeed&&m<=Motion::MindBlast)return assassin::Done(e,m);
     return false;
 }
 inline const char* ClassCue(Motion m) {
     if(m>=Motion::InnerSight&&m<=Motion::Valkyrie)return amazon::Cue(m);
     if(m>=Motion::BattleOrders&&m<=Motion::FindItem)return barbarian::Cue(m);
-    if(m>=Motion::BoneArmor&&m<=Motion::BonePrison)return necromancer::Cue(m);
+    if(m>=Motion::BoneArmor&&m<=Motion::GolemLeft)return necromancer::Cue(m);
     if(m>=Motion::BurstOfSpeed&&m<=Motion::MindBlast)return assassin::Cue(m);
     return "no motion";
 }
