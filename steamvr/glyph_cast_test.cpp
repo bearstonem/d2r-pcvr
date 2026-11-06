@@ -77,13 +77,36 @@ int main() {
         Check(Dispatch(359, -1, portal, -1, -1).slot == 6, "Town Portal on a button (a scroll): that button");
         Check(Dispatch(359, -1, slots, 359, -1).how == How::Record && Dispatch(359, -1, slots, 70, -1).how == How::Park, "else the right trigger's record, as any skill");
     }
-    {   // a park waits for the record, then presses RT for PressSeconds
+    {   // a park waits for the record and ParkSettleSeconds more, then presses RT for PressSeconds
         Cast c; c.Begin(Dispatch(138, -1, slots, 155, -1), 138, -1, 5.0);
         Check(c.state == Cast::State::Waiting && !c.Step(5.1, 155, -1).rt, "waiting: no press yet");
-        Check(c.Step(5.2, 138, -1).rt, "the record holds it: RT pressed");
-        Check(c.Step(5.25, 138, -1).rt, "still pressed");
-        c.Step(5.32, 138, -1);
-        Check(c.state == Cast::State::Done && !c.Step(5.31, 138, -1).rt, "released after PressSeconds");
+        Check(!c.Step(5.2, 138, -1).rt && c.state == Cast::State::Waiting, "the record holds it: not pressed at once");
+        Check(!c.Step(5.3, 138, -1).rt, "nor 100 ms after the read-back (the game's target for it is not found yet)");
+        Check(c.Step(5.36, 138, -1).rt, "ParkSettleSeconds after the read-back: RT pressed");
+        Check(c.Step(5.41, 138, -1).rt, "still pressed");
+        c.Step(5.47, 138, -1);
+        Check(c.state == Cast::State::Done && !c.Step(5.48, 138, -1).rt, "released after PressSeconds");
+    }
+    {   // Leap and Teleport, landed by the mod, press as soon as the record reads back
+        for (const int id : {132, 54}) {
+            Cast c; c.Begin({How::Park, GlyphRecord}, id, -1, 2.0);
+            Check(!c.Step(2.05, 155, -1).rt && c.Step(2.1, id, -1).rt, "Leap and Teleport: pressed at the read-back, no settle");
+        }
+        Cast raise; raise.Begin({How::Park, GlyphRecord}, 70, -1, 2.0);
+        Check(!raise.Step(2.1, 70, -1).rt, "Raise Skeleton still settles first");
+    }
+    {   // a read-back just before ParkWaitSeconds still settles and presses
+        Cast c; c.Begin({How::Park, GlyphRecord}, 138, -1, 1.0);
+        c.Step(1.3, -1, -1); c.Step(1.55, 138, -1); c.Step(1.65, 138, -1);
+        Check(c.state == Cast::State::Waiting && c.Step(1.71, 138, -1).rt, "read back at 0.55 s: pressed at 0.71 s");
+    }
+    {   // the record losing it while settling waits again, still within ParkWaitSeconds
+        Cast c; c.Begin({How::Park, GlyphRecord}, 138, -1, 1.0);
+        c.Step(1.1, 138, -1); c.Step(1.2, 155, -1);
+        Check(!c.Step(1.3, 138, -1).rt && !c.Step(1.4, 138, -1).rt && c.Step(1.46, 138, -1).rt, "settled again from the second read-back");
+        Cast late; late.Begin({How::Park, GlyphRecord}, 138, -1, 1.0);
+        late.Step(1.5, 138, -1); late.Step(1.62, 155, -1);
+        Check(late.state == Cast::State::TimedOut, "lost after ParkWaitSeconds: timed out");
     }
     {   // a park that never reads back times out
         Cast c; c.Begin({How::Park, GlyphRecord}, 138, -1, 1.0);

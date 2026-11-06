@@ -2336,8 +2336,12 @@ with LT: two of the six records no hand button reaches (a lookup-only probe of e
 bit, 2026-11-01), and the mod never presses the game's right trigger otherwise in Motion
 combat. When record 5 already holds the skill, the right trigger is pressed for 100 ms;
 else the UI thread puts it there with the game's own setter (`nativeui::Park`, as a wheel
-assignment, read back) and the press follows the read-back, or nothing is cast after
-0.6 s. The snapshot carries the record (`glyphRecord/Skill/Owner`; -1 when a custom layout
+assignment, read back) and the press follows the read-back by 0.15 s, or nothing is cast
+after 0.6 s without it. Pressed at once (22-32 ms after the read-back), every Raise Skeleton
+put on the record in the owner's session (2026-11-05) failed ("I can't use that yet") and the
+next, on the record already, cast: the game finds the trigger skill's target (a corpse) a
+moment after the skill is put there. Teleport and Leap, which go where the mod lands them, press at the
+read-back: the owner felt the pause before a Leap while running. The snapshot carries the record (`glyphRecord/Skill/Owner`; -1 when a custom layout
 gives a hand button that record).
 
 Motions (`steamvr/spell_motion.h`; owner, 2026-11-03). With **Weapon skill gestures** on, every
