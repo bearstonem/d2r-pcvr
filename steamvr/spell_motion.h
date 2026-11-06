@@ -285,6 +285,14 @@ struct Spot {float ahead=0,right=0;};
 // I pointed", 2026-11-05).
 enum class Land {None,Spot,Pointed};
 constexpr float Begun=.25f;   // Output::progress once a motion's first part is done
+// The body every motion's distances were tuned on (the owner's, 2026-11-03..05: VR Settings' controller span
+// 1.447-1.469 m between the grips in a T-pose, eye height 1.66 m). Another player's hands are measured in
+// this body's units (Input::bodyScale), so a reach, a push or a hand "past the eyes" asks the same of every
+// body; times are unchanged. The owner, 2026-11-05: calibration to make the motions "more accurate".
+constexpr float ReferenceSpan=1.46f;
+constexpr float MinBodyScale=.8f,MaxBodyScale=1.2f;   // a mistaken calibration cannot make the motions absurd
+// The calibrated controller span as a body scale (1: none calibrated).
+inline float BodyScale(float span){return std::isfinite(span)&&span>0?std::clamp(span/ReferenceSpan,MinBodyScale,MaxBodyScale):1.f;}
 struct Input {
     double time=0;
     uint64_t session=0,epoch=0;
@@ -295,6 +303,7 @@ struct Input {
     math::Vec head{};math::Quat headRotation{0,0,0,1};
     math::Vec hand[2]{};          // world frame; 0 right, 1 left
     bool tracked[2]{};
+    float bodyScale=1;            // the player's size against the reference body (BodyScale): hands are divided by it
 };
 struct Output {
     bool began=false;             // the trigger pressed: watching
@@ -567,7 +576,8 @@ public:
         }
         const auto inverse=math::Conjugate(math::Yaw(math::Heading(in.headRotation)));
         Sample s;s.t=in.time;
-        for(int h=0;h<2;++h)s.l[h]=math::Rotate(inverse,in.hand[h]-in.head);
+        const float body=std::isfinite(in.bodyScale)?std::clamp(in.bodyScale,MinBodyScale,MaxBodyScale):1.f;
+        for(int h=0;h<2;++h)s.l[h]=math::Rotate(inverse,in.hand[h]-in.head)*(1/body);   // in the reference body's units
         samples.push_back(s);
         samples.erase(samples.begin(),std::find_if(samples.begin(),samples.end(),[&](const Sample& x){return in.time-x.t<=tuning.history;}));
         const float apart=Apart(s);

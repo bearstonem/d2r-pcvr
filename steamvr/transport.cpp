@@ -4150,6 +4150,8 @@ void Input() {
     const bool gripHeld=gate.held,motionGate=gate.open,motionWatch=gate.watch;
     if(gripHeld&&motionAny&&motionGestures)spellGripsHeldAt.store(GetTickCount64());
     const bool motionCooling=spellFreeAt>=0&&motionNow-spellFreeAt<1.;
+    // Every class's motions in the reference body's units: the calibrated controller span (spellmotion::BodyScale).
+    const float motionBody=calibration::Stored(gestureSettings)?spellmotion::BodyScale(gestureSettings[settings::ArmSpan]):1.f;
     // The grip hold: a light tick as it begins; let go without a cast, one line (the Sorceress's: what the hands did).
     if(motionGate&&spellGripSince<0) {
         spellGripSince=motionNow;spellGripCast=false;
@@ -4166,9 +4168,9 @@ void Input() {
                 const auto& w=spellFree[size_t(first-1)].Stats();
                 std::snprintf(line,sizeof line,
                     "Frame spell motion: grips let go without a motion after %.1f s (hands apart %.0f-%.0f cm, highest %.0f / lowest %.0f cm from the eyes, fastest %.1f m/s; "
-                    "biggest fall in 0.5 s: right %.0f, left %.0f cm; last at right %+.0f,%+.0f,%+.0f left %+.0f,%+.0f,%+.0f cm right,up,forward of the eyes)",
+                    "biggest fall in 0.5 s: right %.0f, left %.0f cm; last at right %+.0f,%+.0f,%+.0f left %+.0f,%+.0f,%+.0f cm right,up,forward of the eyes; body scale %.2f)",
                     heldFor,w.apartMin*100,w.apartMax*100,w.top*100,w.low*100,w.fastest,w.fall[0]*100,w.fall[1]*100,
-                    w.end[0].x*100,w.end[0].y*100,-w.end[0].z*100,w.end[1].x*100,w.end[1].y*100,-w.end[1].z*100);
+                    w.end[0].x*100,w.end[0].y*100,-w.end[0].z*100,w.end[1].x*100,w.end[1].y*100,-w.end[1].z*100,motionBody);
             }
             else std::snprintf(line,sizeof line,"Frame spell motion: grips let go without a motion after %.1f s",heldFor);
             Say(line);
@@ -4436,6 +4438,7 @@ void Input() {
                 freeIn.free=true;freeIn.motion=motion;freeIn.active=motionGate&&!motionCooling&&skillOf[m]>=0;
                 freeIn.head=interactionInput.head.p;freeIn.headRotation=interactionInput.head.q;
                 for(int h=0;h<2;++h){freeIn.hand[h]=interactionInput.hand[h].p;freeIn.tracked[h]=interactionInput.tracked[h];}
+                freeIn.bodyScale=motionBody;
                 const auto watched=spellFree[size_t(m-1)].Step(freeIn);
                 if(watched.cast&&done<0){done=m;doneAim=watched.aim;doneLanding=watched.landing;donePoint=watched.point;doneLand=watched.land;doneSpot=watched.spot;}
                 if(watched.aiming){teleportAiming=true;teleportPoint=watched.point;}
