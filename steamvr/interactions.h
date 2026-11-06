@@ -375,8 +375,9 @@ constexpr int GlyphsCell=214,GlyphDrawId=9000;
 constexpr MenuBounds GlyphsBounds{.745f,.025f,.975f,.18f};
 constexpr int GlyphShapes=8;
 // Motions (spell_motion.h): the MOTIONS box, lower right on the Spells and Equipment pages of a hero with
-// motion spells (the left claw box's mirror), and the MOTIONS page's cards, one per motion spell
-// (spellmotion::PageSkills), two columns of five: pressed, a card turns its motion on or off.
+// motions (the left claw box's mirror: the Sorceress, the Paladin, the Druid), and the MOTIONS page's
+// cards, one per motion skill of the class (spellmotion::PageOf), two columns of five: pressed, a card
+// turns its motion on or off.
 constexpr int MotionsCell=216;
 constexpr MenuBounds MotionsBounds{.765f,.72f,.975f,.82f};
 constexpr int MotionCards=10;
@@ -500,7 +501,7 @@ struct Input {
     Pose head{},hand[2]{};
     Vec handVelocity[2]{}; bool velocityKnown[2]{}; // runtime-reported room-space m/s at the pose time
     float trigger=0,leftTrigger=0,grip[2]{};
-    bool spellGrips=false;   // both grips cast spells (spell_motion.h): a grip grabs only alone (SoloGrips)
+    bool spellGrips=false;   // both grips cast motions (spell_motion.h): a grip grabs only alone (SoloGrips)
     int hover=-1,wheelHand=-1;
     Snapshot snapshot{};
     Reply reply{};
@@ -512,7 +513,7 @@ struct Input {
     // Glyph casting's settings as they stand ([glyphs]): each shape's skill (-1 none) and the slot that draws.
     std::array<int,GlyphShapes> glyphSkills{-1,-1,-1,-1,-1,-1,-1,-1};
     int glyphDraw=-1;
-    int motionsOff=0;   // [motions] off: the motion spells turned off (spellmotion::Bit)
+    int motionsOff=0;   // the hero's class's motions turned off ([motions] off for the Sorceress; spellmotion::Bit)
 };
 struct Output {
     bool developer=false;
@@ -552,8 +553,8 @@ struct Output {
     bool glyphs=false;
     int glyphEdit=-1,glyphDraw=-1;
     std::array<int,GlyphShapes> glyphSkills{-1,-1,-1,-1,-1,-1,-1,-1};
-    // Motions: the MOTIONS page is open; the box shows (the hero has motion spells: the Sorceress); the
-    // motions turned off, as Input gave them.
+    // Motions: the MOTIONS page is open; the box shows (the hero's class has motions: spellmotion::PageOf);
+    // the motions turned off, as Input gave them.
     bool motions=false,motionsBox=false;
     int motionsOff=0;
 };
@@ -875,13 +876,14 @@ public:
                     // Glyph casting's page, and back.
                     glyphs=!glyphs;utility=map=developer=motions=false;out.utility=out.map=false;out.glyphs=glyphs;glyphEdit=-1;
                     out.feedback=1;out.feedbackHand=in.wheelHand>=0?1-in.wheelHand:0;rearm=true;
-                } else if(!editor&&in.hover==MotionsCell&&QuickControls(Page())&&in.snapshot.skillClass==1) {
+                } else if(!editor&&in.hover==MotionsCell&&QuickControls(Page())&&spellmotion::HasMotions(in.snapshot.skillClass)) {
                     // The MOTIONS page (back: SPELLS, the first footer tab).
                     motions=true;glyphs=utility=map=developer=false;out.utility=out.map=false;glyphEdit=-1;
                     out.feedback=1;out.feedbackHand=in.wheelHand>=0?1-in.wheelHand:0;rearm=true;
                 } else if(motions&&!editor&&in.hover>=MotionCardCell(0)&&in.hover<MotionCardCell(MotionCards)) {
                     // A card: its motion on or off (a local setting, saved by the transport).
-                    const int bit=spellmotion::Bit(spellmotion::PageSkills[in.hover-MotionCardCell(0)]);
+                    const auto page=spellmotion::PageOf(in.snapshot.skillClass);const int card=in.hover-MotionCardCell(0);
+                    const int bit=card<page.count?spellmotion::Bit(in.snapshot.skillClass,page.skills[card]):-1;
                     if(bit>=0&&request(Action::ToggleMotion,bit))pendingHand=in.wheelHand>=0?1-in.wheelHand:0;else out.feedback=3;
                     rearm=true;
                 } else if(editor==3) {
@@ -1073,7 +1075,7 @@ public:
         if(editor==3)for(int i=0;i<8&&editPage*8+i<choiceCount;++i){out.itemOptions[i]=itemChoices[editPage*8+i];++out.editCount;}
         out.editCategory=editCategory;out.editClass=editClass;out.editCategoryCounts=categoryCounts;
         out.glyphs=out.wheel&&glyphs;out.glyphEdit=glyphEdit;out.glyphDraw=in.glyphDraw;out.glyphSkills=in.glyphSkills;   // the page as the clicks left it
-        out.motions=out.wheel&&motions;out.motionsBox=in.snapshot.skillClass==1;out.motionsOff=in.motionsOff;
+        out.motions=out.wheel&&motions;out.motionsBox=spellmotion::HasMotions(in.snapshot.skillClass);out.motionsOff=in.motionsOff;
         if(editor==2)for(int i=0;i<8&&editPage*8+i<choiceCount;++i){out.editOptions[i]=Choice(editPage*8+i);++out.editCount;}
         out.block=out.block||rearm||stowed||pending.action!=Action::None;
         for(int h=0;h<2;++h)out.owner[h]=rearm?Owner::Rearm:owner[h];

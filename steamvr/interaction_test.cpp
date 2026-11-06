@@ -136,6 +136,26 @@ int main(){
         Check(!s.out.motions&&Page(s.out)==MenuPage::Spells,"SPELLS goes back");
         Sim other;other.in.wheel=true;other.Step(3);other.in.hover=MotionsCell;other.in.trigger=1;other.Step();
         Check(!other.out.motionsBox&&!other.out.motions,"another class: no box, no page");
+        // The Paladin's and the Druid's own pages (owner, 2026-11-04): a card's bit is the card's.
+        for(int skillClass:{3,5}) {
+            namespace sm=framevr::spellmotion;
+            const auto motions=sm::PageOf(skillClass);
+            Sim c;c.in.wheel=true;c.in.snapshot.skillClass=skillClass;c.Step(3);
+            Check(c.out.motionsBox,"the Paladin and the Druid have the box");
+            c.in.hover=MotionsCell;c.in.trigger=1;c.Step();
+            Check(c.out.motions&&Page(c.out)==MenuPage::Motions,"their box opens the page");
+            c.in.trigger=0;c.Step(3);c.in.hover=MotionCardCell(motions.count-1);c.in.trigger=1;c.Step();
+            Check(c.out.request.action==Action::ToggleMotion&&c.out.request.index==motions.count-1,"a card turns its own bit over");
+            c.in.trigger=0;c.in.reply={c.out.request.sequence,c.out.request.session,Result::Applied};c.Step();c.in.reply={};
+            c.Step(3);c.in.hover=MotionCardCell(motions.count);c.in.trigger=1;c.Step();
+            Check(c.out.request.action==Action::None&&c.out.feedback==3,"past the class's cards: nothing to turn over");
+            c.in.trigger=0;c.Step(3);c.in.hover=9;c.in.trigger=1;c.Step();
+            Check(!c.out.motions&&Page(c.out)==MenuPage::Spells,"SPELLS goes back");
+        }
+        for(int skillClass:{0,2,4,6}) {
+            Sim c;c.in.wheel=true;c.in.snapshot.skillClass=skillClass;c.Step(3);c.in.hover=MotionsCell;c.in.trigger=1;c.Step();
+            Check(!c.out.motionsBox&&!c.out.motions,"the Amazon, the Necromancer, the Barbarian and the Assassin: no motions yet, no box");
+        }
     }
 
     {

@@ -80,17 +80,17 @@ inline const char* Line(int skill,int slot) {
             return at.right?"Gesture: press to hold the trap or bomb, throw it and let go; it lands where the arc meets the floor. A quick press casts where you point.":
                             "Press to cast it, aimed by this hand. On the right trigger you can throw it to place it.";
         case Kind::Pump:
-            return "Gesture: hold the grip and punch either fist up past your head to cast it, one hammer a punch. Pressing still casts it.";
+            return "Gesture: hold both grips and punch either fist up past your head to cast it, one hammer a punch. Pressing still casts it.";
         case Kind::Punch:
-            return "Gesture: hold the grip on your weapon hand and punch it straight out at a monster to charge it. Pressing still casts it.";
+            return "Gesture: hold both grips and punch your weapon hand straight out at a monster to charge it. Pressing still casts it.";
         case Kind::Cross:
-            return "Gesture: make the sign of the cross with either hand: forehead, chest, then one shoulder and the other. Pressing still casts it.";
+            return "Gesture: hold both grips and make the sign of the cross with either hand: forehead, chest, then one shoulder and the other. Pressing still casts it.";
         case Kind::Call:
-            return "Gesture: weapon arm straight and fist held, raise it 45 degrees, then bring it down to stop level with your shoulder at a monster. Pressing still casts it.";
+            return "Gesture: hold both grips, weapon arm straight, raise it 45 degrees, then bring it down to stop level with your shoulder at a monster. Pressing still casts it.";
         case Kind::Shape:
             return skill==weaponskills::Werewolf?
-                "Gesture: cross your arms over your chest, bow, then wrench upright flinging both arms up and out. Again to change back. Pressing still casts it.":
-                "Gesture: hold both hands above your head a moment, then slam them down together. Again to change back. Pressing still casts it.";
+                "Gesture: hold both grips, cross your arms over your chest, bow, then wrench upright flinging both arms up and out. Again to change back.":
+                "Gesture: hold both grips, raise both hands above your head a moment, then slam them down together. Again to change back.";
         case Kind::Native:break;
     }
     return at.trigger?"Press the trigger to cast it, aimed by this hand.":"Press the button to cast it, aimed by this hand.";
@@ -164,29 +164,29 @@ inline std::string Details(int skill,int slot) {
                             "within the skill's reach. A quick press casts where you point; holding the trigger still casts natively.":
                             "Press to cast it natively, aimed by this hand. On the right trigger you can throw it by hand to place it where it lands.";
         case Kind::Pump:
-            return "Gesture with either hand, from any slot: make a fist (hold the grip, trigger free) below your head and punch it straight up past "
+            return "Gesture with either hand, from any slot or none (the MOTIONS page): hold both grips, triggers free, a fist below your head, and punch it straight up past "
                    "your head. Each punch casts one hammer, with the skill's own mana and spiral; punching faster than your cast rate does nothing more. "
                    "Bring the fist back down to punch again: a fist held up high never repeats. Pressing this slot still casts it natively.";
         case Kind::Punch:
-            return "Gesture with the weapon hand, from any slot: make a fist (hold the grip, trigger free) drawn back near your body and punch it "
+            return "Gesture with the weapon hand, from any slot or none (the MOTIONS page): hold both grips, triggers free, the fist drawn back near your body, and punch it "
                    "straight out, extending the arm. You charge the monster the hand points at, or the spot, with the skill's own mana and hit. "
                    "Draw the fist back in to punch again. A monster already within weapon reach also takes the thrust. Pressing this slot still casts it natively.";
         case Kind::Cross:
-            return "Gesture with either hand, from any slot, trigger free: make the sign of the cross. Touch your forehead, then your chest, then one "
+            return "Gesture with either hand, from any slot or none (the MOTIONS page), both grips held and triggers free: make the sign of the cross. Touch your forehead, then your chest, then one "
                    "shoulder and the other (left then right, or right then left), pausing briefly at each; a swing through the same places never counts. "
                    "It casts Holy Shield with its own mana, duration and glow. Pressing this slot still casts it natively.";
         case Kind::Call:
-            return "Gesture with the weapon hand, from any slot: make a fist (hold the grip, trigger free), hold the arm straight out raised about "
+            return "Gesture with the weapon hand, from any slot or none (the MOTIONS page): hold both grips, triggers free, the arm straight out raised about "
                    "45 degrees (the fist a little above your forehead), then bring the straight arm down to stop level with your shoulder. The bolt "
                    "falls on the monster your arm points at; with none there, on the game's own pick. A chop that carries on down or bends the elbow "
                    "never calls it. Mana, cast rate and the bolt stay native. Pressing this slot still casts it natively.";
         case Kind::Shape:
             return std::string(skill==weaponskills::Werewolf?
-                "Gesture, from any slot: cross both arms over your chest (each hand on the opposite side), bow forward over them, then wrench upright "
+                "Gesture, from any slot or none (the MOTIONS page), both grips held: cross both arms over your chest (each hand on the opposite side), bow forward over them, then wrench upright "
                 "while flinging both arms up and out.":
-                "Gesture, from any slot: raise both hands above your head, hold them there a moment, then slam them down together to waist height or lower.")+
-                " Performing it again in form changes you back. The skill's own mana and transformation stay native; hands must be free (trigger "
-                "released, nothing held). Pressing this slot still casts it natively.";
+                "Gesture, from any slot or none (the MOTIONS page), both grips held: raise both hands above your head, hold them there a moment, then slam them down together to waist height or lower.")+
+                " Performing it again in form changes you back. The skill's own mana and transformation stay native; triggers released, nothing "
+                "held. Pressing this slot still casts it natively.";
         case Kind::Native:break;
     }
     return std::string(at.trigger?"Press the trigger":"Press the button")+" to cast it natively, aimed by this hand: at the monster you point at, or where you point.";
