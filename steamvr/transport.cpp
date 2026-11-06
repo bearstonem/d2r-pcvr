@@ -5735,6 +5735,16 @@ void Recenter() {
     if(panelMode)menuPlaced=false;
     Say("Frame OpenXR: headset position recentered");
 }
+bool RecenterPosition() {
+    std::lock_guard lock(mutex);
+    if(!frame||!valid||!render||failed||panelMode||spatialMode||
+       !inWorld||!inWorld()||(wantsPanel&&wantsPanel())||
+       settingsModel.open||settingsOpen.load()||bodyCalibration.Active()||
+       interactionOutput.wheel||!motionInput.active||GetTickCount64()-motionAt>150||
+       gamestate::CursorItemHeld()||mouseDown||rightMouseDown||panelinput::BlocksWorld())return false;
+    Recenter();
+    return true;
+}
 bool TakeWorldRecenter() {
     std::lock_guard lock(mutex);const bool take=worldRecenter;worldRecenter=false;return take;
 }
