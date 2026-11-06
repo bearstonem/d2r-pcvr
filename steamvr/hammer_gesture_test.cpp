@@ -1,4 +1,5 @@
 #include "hammer_gesture.h"
+#include "spell_motion.h"
 #include <cstdio>
 #include <cstdlib>
 #include <initializer_list>
@@ -9,6 +10,8 @@ static void Check(bool b,const char* label){if(!b){std::fprintf(stderr,"FAIL: %s
 // Hands are {right, left}. The controllers move between keyframes at 50 Hz,
 // so velocities come from the motion.
 struct Sim {
+    // The motions' gate (spell_motion.h, owner 2026-11-04: "Both grips, like Sorceress"): gated, in.active is it.
+    bool gated=false;spellmotion::Gate gate;float grips[2]{};
     hammerpump::Engine g;hammerpump::Input in;hammerpump::Output out;
     math::Quat yaw{0,0,0,1};math::Vec head{0,1.7f,0};
     int casts=0,lastHand=-1,drops=0;std::string lastDrop;
@@ -28,7 +31,7 @@ struct Sim {
         for(int i=1;i<=steps;++i){const float t=Ease(float(i)/steps);in.hand[0]=a0+(a1-a0)*t;in.hand[1]=b0+(b1-b0)*t;Step();}
     }
     void Hold(float seconds){for(int i=0;i<int(seconds/frame);++i)Step();}
-    void Step(){in.time+=frame;out=g.Step(in);if(out.cast>=0){++casts;lastHand=out.cast;}if(out.dropped){++drops;lastDrop=out.dropped;}}
+    void Step(){in.time+=frame;if(gated)in.active=gate.Step(grips,true).watch;out=g.Step(in);if(out.cast>=0){++casts;lastHand=out.cast;}if(out.dropped){++drops;lastDrop=out.dropped;}}
     // Right fist from the shoulder straight up past the head.
     void Pump(int hand=0,float seconds=.2f,float from=-.3f,float to=.2f) {
         const math::Vec rest[2]{{.25f,-.55f,-.2f},{-.25f,-.55f,-.2f}};
@@ -42,6 +45,11 @@ struct Sim {
     void Lower(int hand=0){const math::Vec r=hand?math::Vec{.25f,-.55f,-.2f}:math::Vec{.2f,-.3f,-.2f},l=hand?math::Vec{-.2f,-.3f,-.2f}:math::Vec{-.25f,-.55f,-.2f};Move(r,l,.25f);}
 };
 int main(){
+    {   // Under the motions' gate (both grips, owner 2026-11-04): the old fist alone (one grip) no longer pumps.
+        Sim one;one.gated=true;one.grips[0]=1;one.Pump();Check(one.casts==0,"gated, one grip (the old fist) no longer pumps");
+        Sim both;both.gated=true;both.grips[0]=both.grips[1]=1;both.Pump();Check(both.casts==1,"gated, both grips held: the pump casts");
+        Sim left;left.gated=true;left.grips[0]=left.grips[1]=1;left.Pump(1);Check(left.casts==1&&left.lastHand==1,"gated, either fist pumps");
+    }
     for(float heading:{-2.f,0.f,2.f}) {
         Sim s(heading);s.Pump();
         Check(s.casts==1&&s.lastHand==0,"a right fist punched up past the head casts once at any heading");

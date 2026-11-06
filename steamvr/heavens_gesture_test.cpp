@@ -1,4 +1,5 @@
 #include "heavens_gesture.h"
+#include "spell_motion.h"
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -13,6 +14,8 @@ static math::Vec Arm(float elevationDeg,float reach,float yawDeg=0) {
     return {.18f+reach*std::cos(e)*std::sin(y),-.22f+reach*std::sin(e),.06f-reach*std::cos(e)*std::cos(y)};
 }
 struct Sim {
+    // The motions' gate (spell_motion.h, owner 2026-11-04: "Both grips, like Sorceress"): gated, in.active is it.
+    bool gated=false;spellmotion::Gate gate;float grips[2]{};
     heavensfist::Engine g;heavensfist::Input in;heavensfist::Output out;
     math::Quat yaw{0,0,0,1};math::Vec head{0,1.7f,0};
     int casts=0,drops=0;std::string lastDrop;float frame=1/90.f;
@@ -26,11 +29,18 @@ struct Sim {
     void Sweep(float from,float to,float s,float reach=.6f,float yawDeg=0){const int n=std::max(1,int(s/frame));
         for(int i=1;i<=n;++i){Place(Arm(from+(to-from)*Ease(float(i)/n),reach,yawDeg));Step();}}
     void Hold(float s){for(int i=0;i<int(s/frame);++i)Step();}
-    void Step(){in.time+=frame;out=g.Step(in);if(out.cast)++casts;if(out.dropped){++drops;lastDrop=out.dropped;}}
+    void Step(){in.time+=frame;if(gated)in.active=gate.Step(grips,true).watch;out=g.Step(in);if(out.cast)++casts;if(out.dropped){++drops;lastDrop=out.dropped;}}
     // Raise the straight arm to 45 degrees, pause, bring it down to level, pause.
     void Call(float down=.35f,float to=0,float reach=.6f,float from=45){in.grip=1;Move(Arm(from,reach),.4f);Hold(.15f);Sweep(from,to,down,reach);Hold(.2f);}
 };
 int main(){
+    {   // Under the motions' gate (both grips, owner 2026-11-04): the weapon hand's fist alone no longer calls.
+        Sim one;one.gated=true;one.grips[0]=1;one.Call();Check(one.casts==0,"gated, the weapon hand's grip alone no longer calls");
+        Sim both;both.gated=true;both.grips[0]=both.grips[1]=1;both.Call();Check(both.casts==1,"gated, both grips held: the call casts");
+        Sim open;open.gated=true;open.grips[0]=open.grips[1]=1;open.in.grip=1;open.Move(Arm(45,.6f),.4f);open.Hold(.15f);open.Sweep(45,-40,.3f);
+        open.grips[0]=open.grips[1]=0;open.in.grip=0;open.Step();open.Hold(.2f);
+        Check(open.casts==1,"gated, opening both fists at the end of a fast sweep still casts (the frame the grips open)");
+    }
     for(float h:{-2.f,0.f,2.f}){Sim s(h);s.Call();Check(s.casts==1,"straight arm from 45 degrees down to the shoulder casts, at any heading");}
     {Sim s;s.Call(.2f);Check(s.casts==1,"a quick call casts");}
     {Sim s;s.Call(.6f);Check(s.casts==1,"a deliberate call casts");}

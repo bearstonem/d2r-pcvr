@@ -1177,6 +1177,7 @@ struct StaffHold {
     bool on = false;        // the hand holds the staff: pressed while near it, and not let go since
     float t = 0.0f;
     LONGLONG last = 0;
+    double pending = -1;    // soloStaffGrip: when the left grip was pressed at the shaft
     // for vrcam's aim
     float dir[3] = {};
     float gap = 0.0f;
@@ -1211,7 +1212,8 @@ void FromModel(V3 o, float c, float s, float out[3]) {
 // inReach: the left hand is close enough to the staff to take it. A grip pressed
 // far from it takes nothing until pressed again near it. A crossbow's support
 // grip may also engage by entering range while Grip is already held.
-float StaffEase(float grip, bool inReach, bool crossbow=false, bool tracked=true, uint32_t weapon=0, uint32_t generation=0) {
+float StaffEase(float grip, bool inReach, bool crossbow=false, bool tracked=true, uint32_t weapon=0, uint32_t generation=0,
+                float rightGrip=-1.0f, bool solo=false) {
     LARGE_INTEGER f, now;
     QueryPerformanceFrequency(&f); QueryPerformanceCounter(&now);
     AcquireSRWLockExclusive(&g_staffLock);
@@ -1227,6 +1229,8 @@ float StaffEase(float grip, bool inReach, bool crossbow=false, bool tracked=true
     {
         const bool pressed = grip < 0.0f || grip > 0.6f ? true : grip < 0.4f ? false : g_staff.pressed;
         if (grip < 0.0f) g_staff.on = true;   // legacy bridge without grip input
+        else if (solo) g_staff.on = framevr::crossbow::SoloSupportLatched(pressed,g_staff.pressed,g_staff.on,inReach,rightGrip > 0.6f,
+                                                                         (double)now.QuadPart / (double)f.QuadPart,g_staff.pending);
         else g_staff.on = framevr::crossbow::SupportLatched(pressed,g_staff.pressed,g_staff.on,inReach,crossbow);
         g_staff.pressed = pressed;
     }
@@ -1888,7 +1892,7 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
                 inReach = Len(Sub(C, Add(origin, Scale(axis, t)))) <= in.staffGrabM * upm;
             }
             const float e = gun ? StaffEase(in.grip[1],inReach,true,(in.handsValid&2u)!=0,uint32_t(in.weaponType),HeroGen())
-                               : (in.handsValid & 2u) ? StaffEase(in.grip[1], inReach) : 1.0f;
+                               : (in.handsValid & 2u) ? StaffEase(in.grip[1], inReach, false, true, 0, 0, in.grip[0], in.soloStaffGrip) : 1.0f;
             leftOnStaff = e >= 0.5f;
             // Held in both hands, the staff is held between them: it runs from
             // the right fist through the left controller, and the right wrist's
@@ -3967,6 +3971,50 @@ bool HeroTransform(HeroXform* out, const char** why) {
     out->parent = 0xFFFFFFFFu;
     Get(out->comp + 0xC0, &out->parent);
     return true;
+}
+
+// The game-drawn ceiling's units (vr/engine_units.cpp; these two adapted from natpoh/diablo2-vr-port, MIT, see
+// THIRD_PARTY.md): any entity's TransformComponent, and the model instance its ModelComponent holds once the
+// game has made it. type_seq<ModelComponent> (0x1DBE40) gives the model storage's place in the registry, as
+// the other two; looked for at most twice a second.
+constexpr uint64_t RVA_TYPE_SEQ_MODEL = 0x1DBE40;
+constexpr uint32_t kModelCompSize = 0x88;   // ModelComponent: its model instance at +0
+uintptr_t g_ms = 0, g_vtM = 0;              // the model storage and its vtable then (under ecs::g_lock)
+ULONGLONG g_modelLook = 0;
+
+bool EntityTransform(uint32_t entity, uintptr_t* comp) {
+    AcquireSRWLockExclusive(&ecs::g_lock);
+    struct Unlock { ~Unlock() { ReleaseSRWLockExclusive(&ecs::g_lock); } } unlock;
+    if (!ecs::IsStorage(ecs::g_xs, ecs::g_vtX) || !ecs::IsStorage(ecs::g_ss, ecs::g_vtS)) {
+        const ULONGLONG now = GetTickCount64();
+        if (now - ecs::g_lastStorageLook < 500) return false;
+        ecs::g_lastStorageLook = now;
+        if (!ecs::FindStorages()) return false;
+        ecs::g_cachedSelf = 0;
+    }
+    uint32_t i = 0; uintptr_t cb = 0;
+    if (!ecs::Dense(ecs::g_xs, entity, &i) || !Get(ecs::g_xs + 0x38, &cb) || !cb) return false;
+    *comp = cb + (uintptr_t)i * kTransformSize;
+    return true;
+}
+
+uintptr_t EntityModelInstance(uint32_t entity) {
+    AcquireSRWLockExclusive(&ecs::g_lock);
+    struct Unlock { ~Unlock() { ReleaseSRWLockExclusive(&ecs::g_lock); } } unlock;
+    if (!ecs::IsStorage(g_ms, g_vtM)) {
+        const ULONGLONG now = GetTickCount64();
+        if (now - g_modelLook < 500) return 0;
+        g_modelLook = now;
+        g_ms = g_vtM = 0;
+        const uintptr_t reg = d2rsig::Addr(RVA_ECS_REGISTRY), seq = d2rsig::Addr(RVA_TYPE_SEQ_MODEL);
+        uintptr_t b = 0, e = 0, st = 0, vt = 0;
+        if (!reg || !seq || !Get(reg, &b) || !Get(reg + 8, &e) || e <= b || (e - b) % 0x28 || (e - b) / 0x28 > 4096) return 0;
+        const uint32_t ix = (uint32_t)((int (*)())seq)();
+        if (ix >= (e - b) / 0x28 || !Get(b + ix * 0x28 + 0x20, &st) || !st || !Get(st, &vt) || !vt) return 0;
+        g_ms = st; g_vtM = vt;
+    }
+    uint32_t i = 0; uintptr_t cb = 0, inst = 0;
+    return ecs::Dense(g_ms, entity, &i) && Get(g_ms + 0x38, &cb) && cb && Get(cb + (uintptr_t)i * kModelCompSize, &inst) ? inst : 0;
 }
 
 void SetFresh(FreshFn fn) { g_fresh.store(fn); }

@@ -376,7 +376,7 @@ std::vector<Item> g_items = {
     Toggle(L"arms", L"hide_head", L"Hide the hero's head and neck", 0,
            L"Hides the hero's head and neck from your eyes, for a camera right at the eyes: looking down shows the chest. "
            L"In F4 his shadow keeps the head: instead, nothing nearer than about 11 cm in front of your eyes is drawn "
-           L"(13 looking up, 3 looking down). [arms] head_shadow=0: the head shrinks away, the shadow headless. "
+           L"(22 looking up, 3 looking down: [arms] head_cut_level, head_cut_up, head_cut_down). [arms] head_shadow=0: the head shrinks away, the shadow headless. "
            L"Keep \"Camera ahead / behind\" at 0 then - moved ahead, the camera leaves the hands out of reach."),
     Needs(L"arms", L"mode", 2, Slider(L"arms", L"scale", L"Arm length (scale)", 0.3f, 3, 0.05f, 1, L"Arm reach on top of the hero-to-your-height ratio.")),
     Needs(L"arms", L"mode", 2, Slider(L"arms", L"up", L"Hands up (+) / down (-), cm", -40, 40, 1, 0)),
