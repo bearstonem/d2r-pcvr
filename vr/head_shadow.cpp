@@ -28,6 +28,7 @@ constexpr uint64_t SummaryMs = 10000;   // the debug summary's period
 
 hs::Handshake g_hand;
 std::atomic<bool> g_trace{false};       // [debug] head_shadow
+std::atomic<float> g_level{hs::LevelCm}, g_up{hs::UpCm}, g_down{hs::DownCm};   // [arms] head_cut_*
 
 // The state line (pose thread) and the debug summary's counts (both threads), under g_lock; short holds.
 SRWLOCK g_lock = SRWLOCK_INIT;
@@ -45,6 +46,11 @@ uint64_t g_nextSummary = 0;
 
 namespace headshadow {
 void SetTrace(bool on) { g_trace.store(on, std::memory_order_relaxed); }
+void SetCuts(float levelCm, float upCm, float downCm) {
+    g_level.store(hs::CleanCut(levelCm, hs::LevelCm), std::memory_order_relaxed);
+    g_up.store(hs::CleanCut(upCm, hs::UpCm), std::memory_order_relaxed);
+    g_down.store(hs::CleanCut(downCm, hs::DownCm), std::memory_order_relaxed);
+}
 bool Holding() { return g_hand.Holding(GetTickCount64()); }
 
 bool HideHead(bool form, const float* bones, const char* inNeck, int count, const float* eye, float unitsPerCm) {
@@ -57,7 +63,8 @@ bool HideHead(bool form, const float* bones, const char* inNeck, int count, cons
     bool tell = false;
     if (w != hs::Why::Form && g_state.Step(w, now)) {
         std::snprintf(line, sizeof line, "Frame head shadow: %s (cut %.0f cm level, %.0f up, %.0f down; %d changes since the last line)",
-                      hs::WhyName(w), hs::LevelCm, hs::UpCm, hs::DownCm, g_state.changes);
+                      hs::WhyName(w), g_level.load(std::memory_order_relaxed), g_up.load(std::memory_order_relaxed),
+                      g_down.load(std::memory_order_relaxed), g_state.changes);
         g_state.changes = 0; tell = true;
     }
     bool measure = false;
@@ -79,7 +86,8 @@ bool HideHead(bool form, const float* bones, const char* inNeck, int count, cons
 
 float EyeNear(float nearZ, bool on, float unitsPerMetre, float pitchDeg) {
     const uint64_t now = GetTickCount64();
-    const float cut = hs::PitchCut(pitchDeg);
+    const float cut = hs::PitchCut(pitchDeg, g_level.load(std::memory_order_relaxed), g_up.load(std::memory_order_relaxed),
+                                   g_down.load(std::memory_order_relaxed));
     const hs::Handshake::Near r = g_hand.Eye(nearZ, on, cut, unitsPerMetre, now);
     if (!g_trace.load(std::memory_order_relaxed)) return r.nearZ;
     Window s{};
