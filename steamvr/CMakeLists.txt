@@ -566,3 +566,10 @@ target_compile_options(quick-items-test PRIVATE -UNDEBUG)
 
 add_test(NAME monster-immunity-shader-test COMMAND monster-immunity-shader-test "${ROOT}/reshade/D2R_Immunity.fxh")
 set_tests_properties(monster-immunity-shader-test PROPERTIES TIMEOUT 30)
+
+foreach(armor_test armor-graft frozen-armor-overlay)
+    string(REPLACE "-" "_" armor_source ${armor_test})
+    add_executable(${armor_test}-test ${armor_source}_test.cpp)
+    target_compile_options(${armor_test}-test PRIVATE -UNDEBUG)
+    add_test(NAME ${armor_test}-test COMMAND ${armor_test}-test)
+endforeach()

@@ -109,7 +109,7 @@ Snapshot Collect() {
     nativeui::Capture(s);
     quickitems::Capture(s);
     devscenarios::Capture(s);
-    {std::lock_guard lock(mutex);if(mercSession==s.session&&s.at>=mercAt&&s.at-mercAt<=MercMaxAge){s.merc=merc;s.companions=companions;s.effects=effects;s.cooldowns=cooldowns;}}
+    {std::lock_guard lock(mutex);if(mercSession==s.session&&s.at>=mercAt&&s.at-mercAt<=MercMaxAge){s.merc=merc;s.companions=companions;s.effects=effects;s.effectsAt=mercAt;s.cooldowns=cooldowns;}}
     if(s.companions.known) {
         for(unsigned i=0;i<s.skillCount&&i<s.catalog.size();++i)
             if(s.catalog[i].known&&s.catalog[i].available)
