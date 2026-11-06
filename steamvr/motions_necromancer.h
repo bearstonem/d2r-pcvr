@@ -70,8 +70,9 @@ struct Tuning {
     // pushQuiet s before (arms let down after Raise Skeleton are no push). Along the right hand's ray, as
     // Corpse Explosion. The owner's first pushes (2026-11-05) missed: 30-44 cm from the chin and the eyes (it
     // had to start under -.05 with nothing over it for pushQuiet), and 17-20 cm ending 9 cm ahead (pushFall
-    // .22, pushEnd .15).
-    float pushFront=.15f,pushFrom=-.42f,pushTop=.02f,pushQuietTop=.08f,pushFall=.15f,pushEnd=.05f,pushSpeed=1.8f,pushWindow=.35f,pushQuiet=.5f;
+    // .22, pushEnd .15), and 58-80 cm pushes from the eyes to the hips ended against the body (16 cm back
+    // to 20 ahead).
+    float pushFront=.15f,pushFrom=-.42f,pushTop=.02f,pushQuietTop=.08f,pushFall=.15f,pushEnd=-.20f,pushSpeed=1.8f,pushWindow=.35f,pushQuiet=.5f;
     // N11 Raise Skeletal Mage, "the Raise Skeleton sweep with your hands spread wide in a V": Raise
     // Skeleton's sweep with the hands mageApart or more apart as they pass riseTop; narrower is Raise Skeleton.
     float mageApart=.80f;

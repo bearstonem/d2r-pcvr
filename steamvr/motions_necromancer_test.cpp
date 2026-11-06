@@ -145,6 +145,9 @@ int main() {
             Sim eyes(Motion::PoisonExplosion);eyes.Move({.18f,.02f,-.28f},{-.17f,.02f,-.27f},.35f);eyes.Hold(.1f);
             eyes.Move({.18f,-.30f,-.26f},{-.17f,-.30f,-.25f},.15f);eyes.Hold(.2f);
             Check(eyes.casts==1,"Poison Explosion: pushed 32 cm down from the eyes casts");
+            Sim hips(Motion::PoisonExplosion);hips.Move({.28f,.04f,-.25f},{-.28f,.04f,-.22f},.35f);hips.Hold(.1f);
+            hips.Move({.30f,-.70f,.08f},{-.28f,-.68f,.0f},.2f);hips.Hold(.2f);
+            Check(hips.casts==1,"Poison Explosion: pushed 72 cm from the eyes to the hips, against the body, casts");
             Sim short_(Motion::PoisonExplosion);short_.Move({.21f,-.27f,-.20f},{-.15f,-.25f,-.24f},.35f);short_.Hold(.1f);
             short_.Move({.21f,-.45f,-.09f},{-.15f,-.45f,-.15f},.12f);short_.Hold(.2f);
             Check(short_.casts==1,"Poison Explosion: pushed 18-20 cm down, coming in to 9 cm ahead, casts");
