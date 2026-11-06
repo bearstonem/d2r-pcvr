@@ -6813,11 +6813,11 @@ bool TossTarget(int skill,float& x,float& y) {
     if(t.skill<0||now<t.at||now-t.at>700||t.session!=gamestate::LocalPlayer()||(skill>=0&&skill!=t.skill))return false;
     x=t.x;y=t.y;return true;
 }
-bool MotionLanding(int skill,float& x,float& y) {
+bool MotionLanding(int skill,float& x,float& y,int* landed) {
     std::lock_guard lock(mutex);
     const auto now=GetTickCount64();const auto& l=motionLanding;
     if(l.skill<0||now<l.at||now-l.at>700||l.session!=gamestate::LocalPlayer()||(skill>=0&&skill!=l.skill))return false;
-    x=l.x;y=l.y;return true;
+    x=l.x;y=l.y;if(landed)*landed=l.skill;return true;
 }
 int AimRulesSkill() {
     std::lock_guard lock(mutex);

@@ -3996,10 +3996,10 @@ bool TossAim(int skill,float playerX,float playerY,framevr::spellaim::Cast& cast
 // (aimrules::MotionOnTarget): the casting button's pick - its hand's, the
 // other's, the eyes' (aimtargets::Resolve).
 bool MotionAim(int skill,float playerX,float playerY,framevr::spellaim::Cast& cast) {
-    float x=0,y=0;
-    if(!g_spellAimReady.load()||!g_enabled.load()||gamestate::MenuOpen()||!framevr::MotionLanding(skill,x,y))return false;
+    float x=0,y=0;int landed=-1;   // the landing's skill: the game's later queries of the cast ask with -1
+    if(!g_spellAimReady.load()||!g_enabled.load()||gamestate::MenuOpen()||!framevr::MotionLanding(skill,x,y,&landed))return false;
     const char* by="motion";
-    if(framevr::aimrules::MotionOnTarget(skill)) {
+    if(framevr::aimrules::MotionOnTarget(landed)) {
         const auto c=aimtargets::Now();
         float mx=0,my=0,md=0;int source=-1;uint32_t id=0;
         if(aimtargets::Resolve(c.button,c.bow,c.use,mx,my,md,&source,&id)){x=mx;y=my;by=aimtargets::SourceName(source);g_note.source=source;g_note.id=id;}
