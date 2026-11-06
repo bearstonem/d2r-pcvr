@@ -20,7 +20,7 @@ constexpr Motion Order[]={Motion::BurstOfSpeed,Motion::Fade,Motion::CloakOfShado
 // fingers, both grips held).
 inline const char* Cue(Motion m) {
     switch(m) {
-    case Motion::BurstOfSpeed:return "pump both arms fast as in a sprint, each hand back past the hip, three swings each";
+    case Motion::BurstOfSpeed:return "pump both arms fast as in a sprint, two swings each";
     case Motion::Fade:return "draw both hands down in front of the face, brow to chin";
     case Motion::CloakOfShadows:return "open both arms wide at the shoulders, then sweep them across the front until they cross";
     case Motion::Venom:return "cross the wrists in front, then flick them apart fast";
