@@ -139,7 +139,7 @@ int main() {
     }
     {   // Leap to a spot (the owner, 2026-11-05: it went the way the hero last walked)
         Sim leap(Motion::Leap);Leap(leap);
-        Check(leap.casts==1&&leap.land==spellmotion::Land::Spot&&leap.spot.ahead>18&&std::fabs(leap.spot.right)<3,"Leap: lands far ahead (20 cells), where you face");
+        Check(leap.casts==1&&leap.land==spellmotion::Land::Spot&&leap.spot.ahead>28&&std::fabs(leap.spot.right)<4,"Leap: lands far ahead (30 cells), where you face");
         Sim early(Motion::Leap);early.Move({.22f,-.65f,.22f},{-.22f,-.65f,.22f},.4f);early.Move({.22f,-.10f,-.20f},{-.22f,-.10f,-.20f},.25f);
         Check(early.casts==1,"Leap: casts as the arms swing up past the shoulders, before they are overhead (the game's take-off crouch overlaps the swing)");
     }
