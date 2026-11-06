@@ -1375,9 +1375,17 @@ void LoadSettings() {
         const bool keep = IniB(L"arms", L"head_shadow", true), hide = g_set.hideHead.load(), trace = IniB(L"debug", L"head_shadow", false);
         g_set.headShadow.store(keep);
         headshadow::SetTrace(trace);
-        if (const int now = int(keep) | int(hide) << 1 | int(trace) << 2; now != told) {
-            told = now;
-            LogF("Frame head shadow: [arms] head_shadow=%d, hide_head=%d, [debug] head_shadow=%d (%s)", int(keep), int(hide), int(trace),
+        namespace hs = framevr::headshadow;
+        const float level = hs::CleanCut(IniF(L"arms", L"head_cut_level", hs::LevelCm), hs::LevelCm),
+                    up = hs::CleanCut(IniF(L"arms", L"head_cut_up", hs::UpCm), hs::UpCm),
+                    down = hs::CleanCut(IniF(L"arms", L"head_cut_down", hs::DownCm), hs::DownCm);
+        headshadow::SetCuts(level, up, down);
+        static float toldCuts[3] = {-1, -1, -1};
+        if (const int now = int(keep) | int(hide) << 1 | int(trace) << 2;
+            now != told || level != toldCuts[0] || up != toldCuts[1] || down != toldCuts[2]) {
+            told = now; toldCuts[0] = level; toldCuts[1] = up; toldCuts[2] = down;
+            LogF("Frame head shadow: [arms] head_shadow=%d, hide_head=%d, [debug] head_shadow=%d, cut %.0f cm level, %.0f up, %.0f down (%s)",
+                 int(keep), int(hide), int(trace), level, up, down,
                  !hide ? "the head is not hidden: nothing changes" : keep ? "full-body first person keeps the head whole for its shadow; the eye views cut it"
                                                                          : "the hidden head shrinks to the neck, its shadow headless");
         }
