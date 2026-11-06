@@ -38,14 +38,15 @@ struct Tuning {
     // N4 Golem: both fists overhead (golemHigh above the eyes or more), then slammed down within golemWindow,
     // each golemFall or more, to golemLow or below, in front of the body or by its sides (the owner's slam
     // ended at the sides, 2026-11-05), at slamSpeed or faster at their fastest. It stands golemAhead cells ahead.
-    float golemHigh=.08f,golemFall=.40f,golemLow=-.28f,golemWindow=.6f,slamSpeed=1.2f,golemAhead=4;
+    float golemHigh=.15f,golemFall=.40f,golemLow=-.28f,golemWindow=.6f,slamSpeed=1.2f,golemAhead=4;
     // N2 Raise Skeleton: both hands low (riseFrom or below: at rest by the hips), then lifted fast, riseMin
     // or more each, to the chest (riseTo to riseTop) within riseWindow, riseSpeed or faster at their
     // fastest, and stopped there (both still): a lift on overhead passes the chest without stopping. Each
     // rises riseUpright times as far as it moves across, and they end at most riseApart apart, side by side (the
     // right hand riseCross or less left of the left: crossed is Bone Armor). The owner's headset session
-    // (2026-11-05) widened them: lifts ended 58 cm apart, at eye level, the hands overlapping a centimetre.
-    float riseFrom=-.48f,riseTo=-.36f,riseTop=.05f,riseMin=.18f,riseWindow=.7f,riseSpeed=1.0f,riseUpright=1.5f,riseApart=.70f,riseCross=.03f;
+    // (2026-11-05) widened them: lifts ended 58 cm apart, up to 7 cm over the eyes, the hands overlapping a
+    // centimetre; Golem's fists, raised 25-40 cm over the eyes then, start at golemHigh, above riseTop.
+    float riseFrom=-.48f,riseTo=-.36f,riseTop=.12f,riseMin=.18f,riseWindow=.7f,riseSpeed=1.0f,riseUpright=1.5f,riseApart=.70f,riseCross=.03f;
     // N7 Poison Nova: hands together at the chest, then flung novaApart apart, each novaSide out on its
     // own side, at any height up to novaHigh (the owner's flings, 2026-11-05: 130-160 cm wide at shoulder
     // height; it once had to end below the chest), within novaWindow and at least flingSpeed fast.
