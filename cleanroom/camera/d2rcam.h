@@ -69,6 +69,7 @@ void SetFrameCallback(FrameFn frame);
 void SetUseActiveCamera(bool on);
 // The campfire: the game camera object takes the driven camera's pose for each frame (its sky and clouds).
 void SetMirrorGameCamera(bool on);
+void SetSyncActiveFields(bool on);   // testing: the driven camera's fov/aspect fields from our projection
 // While it is driven, the game's own pose for its tick turned this much about the world's up
 // (radians, + from its forward toward its left... as a yaw about +y): the character screen finds
 // the hero under the pointer on that camera's picture (no ray), so it is turned toward where the

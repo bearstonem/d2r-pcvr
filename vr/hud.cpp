@@ -95,6 +95,7 @@ std::atomic<bool> g_menu{false};   // the main menu, or a panel (inventory, trad
 std::atomic<uint64_t> g_layer{0};   // the interface's resource, learnt from its clear
 // The workspace's band, shares of the layer's height (the campfire: the menu's lower strip); top < 0 = all of it.
 std::atomic<float> g_bandTop{-1.0f}, g_bandBottom{1.0f};
+std::atomic<bool> g_boardClear{true};   // the campfire's layer emptied once the board has its copy
 std::atomic<int> g_mapMode{0};     // [hud] map: 0 in the picture, 1 in its own texture
 std::atomic<bool> g_menuMap{false};
 bool mapCaptured=false;
@@ -693,6 +694,11 @@ void OnBind(command_list* cl, uint32_t count, const resource_view* rtvs, resourc
                         // eyes while this UI is submitted as one XR layer.
                         // Avoid clearing a shared/cached source beneath the
                         // native compositor between its two eye passes.
+                        // The campfire (its band set; no eye pairs there): once copied for the board, the layer
+                        // is emptied. Left in, its covered parts (the name box, the buttons, the captions: alpha 0)
+                        // still darkened the scene where they stood on the flat screen - right-angled dark
+                        // blocks over the heroes' faces, fixed to the eyes (owner 2026-11-07).
+                        if(g_bandTop.load()>=0.0f&&g_boardClear.load())cl->clear_render_target_view(layerRtv,kEmpty);
                         Untrack(it);
                         if(now.handle){const auto d=framevr::resources::Describe(dev,framevr::resources::Resolve(dev,now));Track(cl,Drawing{now,false,d.texture.width,d.texture.height});}
                         return;
@@ -806,6 +812,7 @@ void SetMapMode(int mode) { g_mapMode.store(mode); }
 void SetInterfaceScale(float s) { g_uiScale.store(std::clamp(s, 0.3f, 1.0f)); }
 bool LayerFound() { return g_layer.load() != 0; }
 void SetWorkspaceBand(float top, float bottom) { g_bandTop.store(top); g_bandBottom.store(bottom); }
+void SetBoardClear(bool on) { g_boardClear.store(on); }
 void SetLogger(void (*log)(const char*)) { g_log = log; }
 void SetMapCorner(int corner) { g_mapCorner.store(std::clamp(corner, 0, 2)); }
 

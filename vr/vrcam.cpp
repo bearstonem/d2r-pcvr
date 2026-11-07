@@ -81,7 +81,7 @@ namespace effectstate { bool HolyShield(uint64_t session); }   // active_effects
 namespace uitrace { void Register(bool diagnostic); bool Enabled(); bool Arm(const std::wstring& path); void SetSkip(uint64_t pipe); void SetSkipShaders(const uint64_t* hashes, int n); }
 #include "game_hud_shared.h"
 namespace memdiff { void Step(uintptr_t base, const std::wstring& outPath, void (*log)(const char*)); void Reset(void (*log)(const char*)); }
-namespace hud { void SetWorkspaceBand(float top, float bottom); void Register(); void SetHide(int mode); void SetInterfaceScale(float s); void SetMenuOpen(bool open); void SetMapMode(int mode); bool LayerFound(); void SetLogger(void (*log)(const char*)); void SetLook(const FlatVRGameHudLook& look); void SetMapCorner(int corner); bool ToggleMapShown();
+namespace hud { void SetWorkspaceBand(float top, float bottom); void SetBoardClear(bool on); void Register(); void SetHide(int mode); void SetInterfaceScale(float s); void SetMenuOpen(bool open); void SetMapMode(int mode); bool LayerFound(); void SetLogger(void (*log)(const char*)); void SetLook(const FlatVRGameHudLook& look); void SetMapCorner(int corner); bool ToggleMapShown();
                 void SetPointer(uint32_t mode); void SetPointerDepth(float base, float tilt, float curve, float topScale); int Anchor(int panel); void SetForearm(int panel, bool valid, const float elbow[3], const float wrist[3], const float across[3]);
                 void SetClassicView(bool on); void SetPictureZoom(float bar, float map); bool PictureWanted(); void SetPictureReady(bool ready);
                 bool PictureNow(int i, float box[4], uint64_t* srv); void SetPictureBarMoved(bool moved); void SetPictureBarOffset(float x, float y); void SetPictureMapMoved(bool moved); void SetPictureMapOffset(float x, float y);
@@ -325,6 +325,8 @@ struct Settings {
     // alone, so both eyes alike (one technique, no per-eye switching: that flickered here).
     std::atomic<bool>  campfireNight{false};
     std::atomic<bool>  campfireSkyCam{false};
+    std::atomic<bool>  campfireCamFields{false}; // [campfire] cam_fields (testing): the scene camera's fov/aspect fields from ours
+    std::atomic<bool>  campfireBoardClear{true}; // [campfire] board_clear: the flat interface emptied once the board has it
     std::atomic<bool>  campfireSky{true};      // [campfire] sky: our sky (Act 5's) over the campfire's void - above the scene's band of mountains   // [campfire] sky_cam: the game camera object takes the head's pose too (its clouds)
     std::atomic<float> campfireNightStart{45.0f}, campfireNightEnd{110.0f};
     std::atomic<float> campfirePointerX{0.0f};// [campfire] pointer_x / pointer_y: the game's pointer moved off the dot, parts of the
@@ -1394,11 +1396,11 @@ void LoadSettings() {
         if (skip != toldSkip) { toldSkip = skip; LogF("vrcam: [debug] skip_pipeline %llx", (unsigned long long)skip); }
         // [render] skip_shaders: the game's passes left out for good, by their pixel shader (Ctrl+F10's "ps"),
         // space-separated hex. Empty = none; the default is filled in once one is confirmed.
-        wchar_t ss[512];
+        wchar_t ss[1024];
         GetPrivateProfileStringW(L"render", L"skip_shaders", L"", ss, (DWORD)std::size(ss), g_iniPath);
-        uint64_t hs[8];
+        uint64_t hs[32];
         int nh = 0;
-        for (const wchar_t* q = ss; *q && nh < 8;) {
+        for (const wchar_t* q = ss; *q && nh < 32;) {
             wchar_t* end = nullptr;
             const uint64_t h = wcstoull(q, &end, 16);
             if (end == q) { ++q; continue; }
@@ -1432,6 +1434,8 @@ void LoadSettings() {
         g_set.campfireNight.store(IniB(L"campfire", L"night", false));
         g_set.campfireSkyCam.store(IniB(L"campfire", L"sky_cam", false));
         g_set.campfireSky.store(IniB(L"campfire", L"sky", true));
+        g_set.campfireBoardClear.store(IniB(L"campfire", L"board_clear", true));
+        g_set.campfireCamFields.store(IniB(L"campfire", L"cam_fields", false));
         g_set.campfireNightStart.store(std::clamp(IniF(L"campfire", L"night_start", 45.0f), 0.0f, 2000.0f));
         g_set.campfireNightEnd.store(std::clamp(IniF(L"campfire", L"night_end", 110.0f), 1.0f, 4000.0f));
         g_set.campfirePointerX.store(std::clamp(IniF(L"campfire", L"pointer_x", 0.0f), -0.5f, 0.5f));
@@ -6935,6 +6939,7 @@ void CampfireTick() {
     if (!g_campfire.load()) d2rcam::SetActivePickTurn(0.0f);   // CampfirePointer sets it in the scene
     d2rcam::SetUseActiveCamera(g_campfire.load());
     d2rcam::SetMirrorGameCamera(g_campfire.load() && g_set.campfireSkyCam.load());
+    d2rcam::SetSyncActiveFields(g_campfire.load() && g_set.campfireCamFields.load());
 #ifdef D2RVR_NATIVE_OPENXR
     // The beam and its dot from the right hand, to where the pointer is put ([campfire]
     // pick_distance, world units, in metres by the scene's scale).
@@ -6950,6 +6955,7 @@ void CampfireTick() {
         const float band = std::clamp(canvas * 9.0f / 16.0f, 0.1f, 1.0f);   // the band's height, a share of the eye's
         const bool board = g_campfire.load() && g_set.campfireMenuBoard.load();
         hud::SetWorkspaceBand(board ? band * g_set.campfireMenuTop.load() : -1.0f, board ? band : 1.0f);
+        hud::SetBoardClear(g_set.campfireBoardClear.load());
     }
 #endif
 }

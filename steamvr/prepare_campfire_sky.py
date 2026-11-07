@@ -101,6 +101,7 @@ WALLS = 'expansion_town_walls'
 TOWN_DEPENDENCIES = ()
 # What of a town entity is copied: where it stands and what it shows. Physics bodies, walls that fade
 # round the hero (WallTransparency, FadeTarget) stay in the town; cloth and ragdolls (skeletons) whole.
+TOWN_SHADOWS = False
 KEPT_COMPONENTS = ('TransformDefinitionComponent', 'ModelDefinitionComponent', 'ModelPlatformTierComponent',
                    'ModelVariationDefinitionComponent')
 ANIMATED = ('SkeletonDefinitionComponent', 'PhysicsClothDefinitionComponent', 'PhysicsPartialRagdollDefinitionComponent')
@@ -188,6 +189,12 @@ def with_harrogath_behind(preset, town, at, turn_deg, near=14.0, far=400.0, grou
         # the picture only: no bodies, no fading walls (the town fades its walls round the hero - here
         # that cut squares round the heroes' faces, owner 2026-11-06)
         e['components'] = [c for c in e.get('components', []) if c.get('type') in KEPT_COMPONENTS]
+        if not TOWN_SHADOWS:
+            # the town in the picture, not in the lights' shadow maps (owner 2026-11-07: dark blocks on
+            # the heroes' faces and pauldrons came with the town)
+            for c in e['components']:
+                if c.get('type') == 'ModelDefinitionComponent':
+                    c['shadowMask'] = 0
         model = next((c.get('filename', '') for c in comps if c.get('type') == 'ModelDefinitionComponent'), '')
         spin = (flip_wall and WALLS in str(model).lower()
                 and abs(float(tr['position'].get('x', 0.0)) - WALL_LINE_X) < 4.0)
@@ -252,6 +259,8 @@ SKY_WIDEN = 1.02
 SKY_RADIUS = 1.1547 * 172.8617   # model units, times the band's own scale
 SKY_TOP = 0.8466 * 172.8617      # the band's top edge above its origin, model units
 CAP_FACE = 1.0                   # -1 turns the cap the other way up
+POINTS = False                   # --spots-as-points (testing)
+SPOT_SPECULAR = None             # --spot-specular X (testing)
 
 
 def sky_centre(sky):
@@ -376,6 +385,39 @@ def without_clouds(preset):
     return result, removed
 
 
+def without_light_shadows(preset):
+    """The scene's lights kept, their shadows not: the three shadow-casting spot lights round the heroes
+    (fill_spot99_01/02, rim_spot_98_02) fit their shadow maps to the menu's fixed camera, and seen from
+    the headset they cut dark blocks into the heroes' faces that came and went with the head (owner
+    2026-11-06: gone with the spot lights taken out - and the Necromancer's hair with them)."""
+    turned = []
+    for e in preset.get('entities', []):
+        for c in e.get('components', []) if isinstance(e, dict) else []:
+            if 'Light' in str(c.get('type', '')) and c.get('shadowCaster') is not False:
+                # point lights carry no shadowCaster at all - written out so they cast none either
+                # (owner 2026-11-07: blocks stayed with the spots' shadows off)
+                c['shadowCaster'] = False
+                turned.append(f'{e.get("name")} (shadow off)')
+    return preset, turned
+
+
+def spots_as_points(preset):
+    """The scene's spot lights turned into point lights of the same colour, power and reach (testing: the
+    spot lights' shading cut screen-aligned dark blocks into the heroes' faces in the headset)."""
+    turned = []
+    for e in preset.get('entities', []):
+        for i, c in enumerate(e.get('components', []) if isinstance(e, dict) else []):
+            if c.get('type') != 'SpotLightDefinitionComponent':
+                continue
+            e['components'][i] = {
+                'type': 'PointLightDefinitionComponent', 'name': str(c.get('name', '')).replace('Spot', 'Point'),
+                'color': c.get('color'), 'power': c.get('power'), 'radius': c.get('distance'),
+                'attenuation': c.get('attenuation'), 'lightMask': c.get('lightMask'), 'isLocalLight': c.get('isLocalLight'),
+                'diffuseContribution': c.get('diffuseContribution'), 'specularContribution': c.get('specularContribution')}
+            turned.append(f'{e.get("name")} (as a point light)')
+    return preset, turned
+
+
 def without(preset, names):
     """The scene's own entities whose names hold any of `names` (lower case) taken out too."""
     if not names:
@@ -389,7 +431,7 @@ def without(preset, names):
 
 
 def generate(assets, mod_name='D2R-PCVR', surround=True, town_at=TOWN_AT_GATE, town_turn=0.0, ground=True, sky_turns=SKY_TURNS,
-             flip_wall=True, cap=False, clutter=False, drop=()):
+             flip_wall=True, cap=False, clutter=False, drop=(), shadows_off=True):
     if mod_name not in ('D2R-PCVR', 'pcvr-dev'):
         raise ValueError('Unsupported destination mod')
     raw = assets.read(PRESET)
@@ -400,6 +442,18 @@ def generate(assets, mod_name='D2R-PCVR', surround=True, town_at=TOWN_AT_GATE, t
         raise ValueError('Campfire preset changed: no cloud effect found; native preset retained')
     result, dropped = without(result, drop)
     removed = removed + dropped
+    if shadows_off:
+        result, turned = without_light_shadows(result)
+        removed = removed + turned
+    if POINTS:
+        result, turned = spots_as_points(result)
+        removed = removed + turned
+    if SPOT_SPECULAR is not None:
+        for e in result.get('entities', []):
+            for c in e.get('components', []) if isinstance(e, dict) else []:
+                if c.get('type') == 'SpotLightDefinitionComponent':
+                    c['specularContribution'] = SPOT_SPECULAR
+        removed = removed + [f'spot lights specular x{SPOT_SPECULAR}']
     if surround and town_at is not None:
         town = json.loads(assets.read(TOWN))
         result, placed = with_harrogath_behind(result, town, town_at, town_turn, ground=ground, flip_wall=flip_wall, clutter=clutter)
@@ -421,10 +475,10 @@ def generate(assets, mod_name='D2R-PCVR', surround=True, town_at=TOWN_AT_GATE, t
 
 
 def prepare(game, mod_name='D2R-PCVR', casclib=None, surround=True, town_at=TOWN_AT_GATE, town_turn=0.0, ground=True,
-            sky_turns=SKY_TURNS, flip_wall=True, cap=False, clutter=False, drop=()):
+            sky_turns=SKY_TURNS, flip_wall=True, cap=False, clutter=False, drop=(), shadows_off=True):
     """Return a complete payload; the installer's transaction performs writes."""
     with open_assets(Path(game), casclib) as assets:
-        return generate(assets, mod_name, surround, town_at, town_turn, ground, sky_turns, flip_wall, cap, clutter, drop)
+        return generate(assets, mod_name, surround, town_at, town_turn, ground, sky_turns, flip_wall, cap, clutter, drop, shadows_off)
 
 
 def check_existing(mod, payload):
@@ -469,15 +523,22 @@ def main():
     ap.add_argument('--cap-flip', action='store_true', help='the sky over the player turned the other way up')
     ap.add_argument('--drop', nargs='*', default=[], metavar='NAME',
                     help="the scene's own entities whose names hold NAME taken out too (testing)")
+    ap.add_argument('--light-shadows', action='store_true', help="the scene's spot lights keep their shadows")
+    ap.add_argument('--spots-as-points', action='store_true', help="the scene's spot lights as point lights (testing)")
+    ap.add_argument('--spot-specular', type=float, default=None, help="the spot lights' specular share (testing)")
+    ap.add_argument('--town-shadows', action='store_true', help="the town's models cast shadows too (testing)")
     ap.add_argument('--clutter', action='store_true', help="the town's grass, snow piles and small props too")
     ap.add_argument('--sky', nargs='*', type=float, default=list(SKY_TURNS), metavar='DEG',
                     help='turns (degrees) of the copies of the sky round the fire; --sky alone: none')
     args = ap.parse_args()
-    global CAP_FACE
+    global CAP_FACE, POINTS, SPOT_SPECULAR, TOWN_SHADOWS
+    TOWN_SHADOWS = args.town_shadows
     CAP_FACE = -1.0 if args.cap_flip else 1.0
+    POINTS = args.spots_as_points
+    SPOT_SPECULAR = args.spot_specular
     payload = prepare(args.game, args.mod, args.casclib, not args.no_surround,
                       None if args.mirror else tuple(args.town), args.turn, not args.no_ground,
-                      tuple(args.sky), not args.no_wall_flip, args.cap, args.clutter, tuple(args.drop))
+                      tuple(args.sky), not args.no_wall_flip, args.cap, args.clutter, tuple(args.drop), not args.light_shadows)
     record = json.loads(payload[RECEIPT])
     print(f'{PRESET}: taking out {record["removed_entities"]}')
     if not args.write:

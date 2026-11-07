@@ -219,7 +219,7 @@ void OnScissor(command_list* cl, uint32_t, uint32_t count, const rect* rects) {
 // (thread-local: a list records on one thread), and the draws on it are skipped until another bind.
 std::mutex g_hashLock;
 std::unordered_map<uint64_t, uint64_t> g_psHash;   // pipeline -> its pixel shader's hash
-constexpr int kSkipMax = 8;
+constexpr int kSkipMax = 32;   // 2026-11-07: the interface's shaders at once
 std::atomic<uint64_t> g_skipHash[kSkipMax];        // the shaders to skip (0 = empty)
 std::atomic<uint64_t> g_skipHandle[64];            // pipelines made of them (0 = empty)
 std::atomic<int> g_skipHandles{0};
@@ -319,7 +319,7 @@ bool OnDraw(command_list* cl, uint32_t vertices, uint32_t instances, uint32_t, u
     Pending& p = g_pending[cl];
     ++p.draws;
     p.pipe = pipe;
-    if (p.watch) { char b[160]; snprintf(b, sizeof b, "      draw %u vertices x %u instances, pipe %llx ps %016llx", vertices, instances,
+    { char b[160]; snprintf(b, sizeof b, "      draw %u vertices x %u instances, pipe %llx ps %016llx", vertices, instances,
                                          (unsigned long long)pipe, (unsigned long long)PsHash(pipe)); Line(cl, b); }
     return false;
 }
@@ -333,7 +333,7 @@ bool OnDrawIndexed(command_list* cl, uint32_t indices, uint32_t instances, uint3
     Pending& p = g_pending[cl];
     ++p.draws;
     p.pipe = pipe;
-    if (p.watch) { char b[160]; snprintf(b, sizeof b, "      draw indexed %u indices x %u instances, pipe %llx ps %016llx", indices, instances,
+    { char b[160]; snprintf(b, sizeof b, "      draw indexed %u indices x %u instances, pipe %llx ps %016llx", indices, instances,
                                          (unsigned long long)pipe, (unsigned long long)PsHash(pipe)); Line(cl, b); }
     return false;
 }

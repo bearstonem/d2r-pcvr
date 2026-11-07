@@ -105,6 +105,13 @@ std::atomic<bool> g_useActive { false };   // SetUseActiveCamera
 // from that camera, and they stood still on the screen as the head turned. The game's own pose
 // goes back for its tick (HandBackPoseForTick), as for the driven camera.
 std::atomic<bool> g_mirrorGame { false };
+// SetSyncActiveFields (testing, 2026-11-07): the driven scene camera's own fov and aspect fields set
+// from our projection too, for whatever the engine still works out from the fields (the campfire's
+// lighting showed right-angled dark rows fixed to the eyes). Put back when it stops.
+std::atomic<bool> g_syncFields { false };
+struct Fields { void* cam = nullptr; float fov = 0, w = 0, h = 0, wroteFov = 0, wroteW = 0; bool wrote = false; };
+Fields g_fields;
+void RestoreFields();
 struct Mirror { void* cam = nullptr; float pos[3] {}, quat[4] {}, wrotePos[3] {}, wroteQuat[4] {}; bool wrote = false; };
 Mirror g_mirror;
 std::atomic<float> g_pickTurn { 0.0f };      // SetActivePickTurn, radians about the world's up
@@ -161,6 +168,14 @@ T& At(void* base, size_t offset) {
 
 float* Fp(void* cam, size_t offset) {
 	return reinterpret_cast<float*>(static_cast<uint8_t*>(cam) + offset);
+}
+
+void RestoreFields() {
+	Fields& f = g_fields;
+	if (!f.wrote || f.cam == nullptr) { f = Fields {}; return; }
+	if (At<float>(f.cam, camf::FovDeg) == f.wroteFov) At<float>(f.cam, camf::FovDeg) = f.fov;
+	if (At<float>(f.cam, camf::AspectW) == f.wroteW) At<float>(f.cam, camf::AspectW) = f.w;
+	f = Fields {};
 }
 
 // The loader writes the trampoline pointer itself (raw overload below), but a
@@ -360,6 +375,19 @@ void Apply(void* cam, const WorldView& in, bool hadView, bool hadProj) {
 		}
 		std::memcpy(Fp(cam, camf::Proj), proj, sizeof(proj));
 		std::memcpy(f.proj, proj, sizeof(proj));
+		if (g_syncFields.load(std::memory_order_relaxed) && g_useActive.load(std::memory_order_relaxed) &&
+		    proj[0] > 0.01f && proj[5] > 0.01f) {
+			Fields& fd = g_fields;
+			if (fd.cam != cam) { RestoreFields(); fd.cam = cam; }
+			if (!fd.wrote) { fd.fov = At<float>(cam, camf::FovDeg); fd.w = At<float>(cam, camf::AspectW); fd.h = At<float>(cam, camf::AspectH); }
+			const float fov = 2.0f * std::atan(1.0f / proj[5]) * 180.0f / 3.14159265358979f;
+			const float w = fd.h * proj[5] / proj[0];
+			At<float>(cam, camf::FovDeg) = fov;
+			At<float>(cam, camf::AspectW) = w;
+			fd.wroteFov = fov; fd.wroteW = w; fd.wrote = true;
+		} else if (g_fields.wrote) {
+			RestoreFields();
+		}
 	} else {
 		std::memcpy(f.proj, in.gameProj, sizeof(f.proj));
 	}
@@ -771,6 +799,7 @@ bool LookAtNow(float out[3]) {
 
 void SetUseActiveCamera(bool on) { g_useActive.store(on, std::memory_order_relaxed); }
 void SetMirrorGameCamera(bool on) { g_mirrorGame.store(on, std::memory_order_relaxed); }
+void SetSyncActiveFields(bool on) { g_syncFields.store(on, std::memory_order_relaxed); }
 void SetActivePickTurn(float radians) { g_pickTurn.store(radians, std::memory_order_relaxed); }
 
 bool InWorld() {
