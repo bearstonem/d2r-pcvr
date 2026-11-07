@@ -19,6 +19,8 @@ Swing and Frenzy and combat walk.
     Blizzard, Hydra and Teleport. For Teleport, point the right arm where you want
     to land, a circle shows there, then yank the fist back to your shoulder.
     Meteor and Blizzard land on the highlighted monster when there is one.
+    Frost Nova is a hard push down and Energy Shield a guard held half a second,
+    so handling a two-handed staff with both grips doesn't set them off.
   - **Paladin and Druid:** their gestures (Charge, Blessed Hammer, Holy Shield,
     Fist of the Heavens, Werewolf and Werebear) now take both grips too, like
     every other class's motions, and have a MOTIONS page each.
@@ -76,7 +78,8 @@ Swing and Frenzy and combat walk.
   Leap Attack does the same.
 - **Spell glow on the Sorceress's hands:** It is now always on and has left the
   menu. The flames, lightning and frost are made from the game's own spell effects,
-  and each glowing hand lights the dungeon around it.
+  and each glowing hand lights the dungeon around it. **VR Settings > World >
+  Spell hand light** sets how bright that light is: 40% by default, Off for none.
 - **The first cast of a skill:** A skill a glyph or motion puts on the right
   trigger now waits a moment for the game to take it. Before, Raise Skeleton and
   others could fail on the first try after another skill.
@@ -95,7 +98,8 @@ New settings start at their defaults on an update too:
 - Combat walk is on.
 - The game-drawn ceilings are on. Setup makes them while installing, which takes
   about two and a half minutes the first time and again after a game update.
-- The Sorceress's hand glow is always on, and its VR Settings switch is gone.
+- The Sorceress's hand glow is always on, and its VR Settings switch is gone. Its
+  light on the dungeon starts at 40%: VR Settings > World > Spell hand light.
 
 Close the game and fully exit Steam before updating. Closing D2R VR Launcher
 also avoids file locks. Update / repair preserves settings, calibration and saves.
@@ -153,12 +157,13 @@ Installer failures are recorded separately in
 The release build passed **182 native checks**. **280 of 285 Python checks**
 passed on Windows: the 4 session checks need Linux's `/proc`, and 1
 symbolic-link check was skipped because this Windows session cannot create
-symbolic links. The in-headset What's new page and all 2175 VR Settings help
+symbolic links. The in-headset What's new page and all 2183 VR Settings help
 cards were rendered and checked for fit.
 
 Tested in a headset with offline characters before merging, by the owner:
 - **Motions:**
-  - All 14 of the Sorceress's.
+  - All 14 of the Sorceress's, and 13 of them again with a two-handed staff
+    after Frost Nova and Energy Shield were made deliberate.
   - The Barbarian's, including about 40 Leap Attacks and 10 Whirlwinds.
   - The Amazon's 4 and the Assassin's 7.
   - The Necromancer's, after its redesign.
@@ -182,7 +187,7 @@ Not yet tried in a headset:
   - The golem cards' names.
   - Cloak of Shadows and Shadow Warrior since they were loosened.
   - The body scale for players of another size.
-- **The hand glow:** its look and the hand light have not been reviewed.
+- **The hand glow:** its look, and the Spell hand light setting.
 
 No new headset session is claimed for the version and release-notes update
 itself.
@@ -260,7 +265,7 @@ credits: ChuckRibbits; tig3rmast3r (OFXR Bridge); Sergious (dungeon ceilings).
 - Strike skills on a trigger are tagged CAST ON STRIKE, not GESTURE.
 - Dungeon ceilings are drawn by the game itself, lit by its torches, in its fog.
 - First person: the view rises with Leap's arc and glides through its take-off.
-- Sorceress: the hand glow is always on, made from the game's own spell effects.
+- Sorceress: hand glow always on; World > Spell hand light sets its light (40%).
 - Fixed: mercenary commands could stop working for a whole session.
 - Fixed: a skill's first cast by glyph or motion could fail after another skill.
 PCVR_IN_HEADSET_NOTES -->
