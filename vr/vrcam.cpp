@@ -6196,14 +6196,18 @@ LRESULT CALLBACK GameWndProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
     LRESULT resolutionResult=0;
     if(framevr::resolution::Handle(h,msg,w,l,g_gameWndProc,resolutionResult))return resolutionResult;
     if(framevr::HandleWindowFocusMessage(h,msg,w,l))return 0;
+    // F13 belongs to PCVR; do not let it switch native menus to keyboard input.
+    if((msg==WM_KEYDOWN||msg==WM_KEYUP||msg==WM_SYSKEYDOWN||msg==WM_SYSKEYUP)&&w==VK_F13)return 0;
     // A real key (not one the mod sent) lets the game take its keyboard layout, so
     // text boxes take what is typed. Raw input may come before the key's message.
     if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) panelinput::Typed(uintptr_t(GetMessageExtraInfo()));
     else if (msg == WM_INPUT) {
         RAWINPUT raw{};UINT size = sizeof raw;
         if (GetRawInputData((HRAWINPUT)l, RID_INPUT, &raw, &size, sizeof(RAWINPUTHEADER)) != (UINT)-1 &&
-            raw.header.dwType == RIM_TYPEKEYBOARD && !(raw.data.keyboard.Flags & RI_KEY_BREAK))
-            panelinput::Typed(uintptr_t(raw.data.keyboard.ExtraInformation));
+            raw.header.dwType == RIM_TYPEKEYBOARD) {
+            if(raw.data.keyboard.VKey==VK_F13)return 0;
+            if(!(raw.data.keyboard.Flags&RI_KEY_BREAK))panelinput::Typed(uintptr_t(raw.data.keyboard.ExtraInformation));
+        }
     }
 #endif
     // F1..F3 (F4 in VR) pick the view: the game, which has skills on them, never sees them.
@@ -10986,7 +10990,7 @@ DWORD WINAPI UpdateThread(void*) {
     LogF("vrcam: 1 ms update timer (%s)", highRes ? "high resolution" : "plain - may run at the system's timer resolution");
     Key f12{VK_F12}, f11{VK_F11}, f10{VK_F10}, f9{VK_F9};
 #ifdef D2RVR_NATIVE_OPENXR
-    Key f8{VK_F8};
+    Key f8{VK_F8}, f13{VK_F13};
 #endif
     Key fView[5] = {{VK_F1}, {VK_F2}, {VK_F3}, {VK_F4}, {VK_F5}};   // the views, as on the Home page
     ULONGLONG nextState = 0, nextSlow = 0;
@@ -11023,6 +11027,13 @@ DWORD WINAPI UpdateThread(void*) {
             if (fView[k].Pressed(focus) && k < ViewCount()) SetView(k + 1);
         if (f11.Pressed(focus)) Recenter();
 #ifdef D2RVR_NATIVE_OPENXR
+        if(f13.Pressed(focus)&&framevr::RecenterPosition()) {
+#if D2RVR_FIRST_PERSON
+            skel::ResetGrip();
+#endif
+            g_gen.fetch_add(1);
+            Log("vrcam: position recentered, view direction preserved (F13)");
+        }
         if (f8.Pressed(focus)) framevr::RequestStereoCapture();
 #endif
         if (f10.Pressed(focus)) {

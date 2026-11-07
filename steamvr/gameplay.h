@@ -66,6 +66,10 @@ struct Input {
     uint64_t skillContext=0;
     bool selectedAvailable=false,shieldEquipped=false;
 };
+inline bool GripsReleased(const Input& in) {
+    for(float grip:in.grip)if(!std::isfinite(grip)||grip<0||grip>=.4f)return false;
+    return true;
+}
 struct Output {
     bool attack=false, block=false, palette=false, bowDrawing=false, rayValid=false;
     bool bowReady=false, bowInReach=false, bowCharged=false;

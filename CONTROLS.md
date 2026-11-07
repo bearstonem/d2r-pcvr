@@ -105,6 +105,13 @@ Quest left X/Y correspond to Index left A/B; right A/B labels are the same.
 | Wrist health / mana / XP | Look at the back of the left wrist |
 | Wipe blood off the visor | Scrub either hand side to side in front of your face, trigger released. About six strokes clear a full visor. **Survival > Wipe blood by hand** turns this off |
 | Recenter / stereo capture | PC F11 / F8 |
+| Recenter position, keep view direction | PC F13 (native OpenXR, gameplay only) |
+
+F13 resets the tracked position, including height, without resetting view direction.
+It skips open menus, calibration, item dragging and held grips. Release both grips
+before recentering so a two-handed weapon's combat state is not interrupted.
+This is a recenter shortcut,
+not room-scale movement of the game actor; the world can still shift in position.
 
 Editing consumes combat inputs but never pauses the game or zeros locomotion.
 Selection clicks do not cast. Release buttons and triggers after closing before
