@@ -402,7 +402,7 @@ inline MenuBounds MotionCardBounds(int card){
     const float x=.05f+(card%2)*.46f,y=.125f+(card/2)*.107f;
     return {x,y,x+.44f,y+.099f};
 }
-// Druid: the left claw's strike skill, [gameplay] left_hand_strikes. Lower left,
+// Druid or dual wield: the left claw's or blade's strike skill, [gameplay] left_hand_strikes. Lower left,
 // above the ACTIVE line (y 637) and clear of the hand wheel's 216-degree label.
 constexpr MenuBounds LeftStrikesBounds{.025f,.72f,.235f,.82f};
 inline bool QuickControls(MenuPage page){return page==MenuPage::Spells||page==MenuPage::Equipment;}
@@ -508,7 +508,7 @@ struct Input {
     bool active=false,tracked[2]{},wheel=false,cancel=false,reservedLeft=false,spell=false,quickCast=false;
     bool leatherReach=false; // [interactions] leather_menu: the left hand over the left shoulder opens the tabbed menu (leather_menu.h)
     bool gaitToggle=false;   // the game's run / walk toggle is the other way than the hero should go (Movement speed's WALK or a run stop, or the stick's switch): send it
-    int leftStrikes=-1;   // Druid: [gameplay] left_hand_strikes for the wheel's box (0 own trigger, 1 same as right); -1 hides it
+    int leftStrikes=-1;   // Druid or dual wield: [gameplay] left_hand_strikes for the wheel's box (0 own trigger, 1 same as right); -1 hides it
     vitals::Location navigationLocation=vitals::Location::Wrist;
     vitals::Location vitalsLocation=vitals::Location::Wrist;
     float vitalsTilt=0;
