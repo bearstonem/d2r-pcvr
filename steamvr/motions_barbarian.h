@@ -85,8 +85,10 @@ struct Tuning {
     // the left, both between tLow and tHigh (the shoulders to the eyes) and within tLevel of each other, their
     // middle within tDepth of the eyes - held tHold s; it whirls whirlAhead cells ahead. The frame turns with the
     // head, so each hand's own depth is not asked: a T held looking aside put one hand 46 cm behind the eyes and
-    // the other 38 in front, and it was let go (owner, 2026-11-06). A T the hands were flung into from together
-    // (Howl's fling, which ends wide at eye level) within howlWindow is none.
+    // the other 38 in front, and it was let go (owner, 2026-11-06). Howl's fling ends wide at eye level, much as
+    // a T: Howl is watched first and casts on the fling, and every watcher then starts over, so a T is only one
+    // held after it (a first rule refusing a T the hands were flung into from together also refused the owner's
+    // T spread from the hands together, with Howl not cast).
     float tSide=.60f,tApart=1.0f,tLow=-.45f,tHigh=.10f,tLevel=.25f,tDepth=.30f;double tHold=.30;
     float whirlAhead=10;
     float swingSpeed=1.5f;    // m/s: the leap's swing, each arm at its fastest
@@ -306,13 +308,6 @@ inline bool Done(Engine& e,Motion m) {
                 std::fabs(a.y-b.y)<=t.tLevel&&std::hypot(mid.x,mid.z)<=t.tDepth;
         };
         if(!e.Held(tee(n),n.t,t.tHold))return false;
-        // the T's start, and the hands together just before it: Howl's fling, not a T
-        size_t begun=h.size()-1;
-        while(begun>0&&tee(h[begun-1]))--begun;
-        for(size_t i=begun;i-->0;) {
-            if(h[begun].t-h[i].t>t.howlWindow)break;
-            if(Len(h[i].l[0]-h[i].l[1])<=t.howlTogether)return false;
-        }
         e.Aim({0,0,-1});e.LandAt(t.whirlAhead,0);
         return true;
     }

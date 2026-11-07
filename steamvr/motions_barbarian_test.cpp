@@ -80,6 +80,7 @@ int main() {
         {Sim s(m.motion);m.slow(s);s.Hold(.5f);Check(s.casts==0,(label+"slow and lazy, nothing").c_str());}
         for(const auto& o:all)if(o.motion!=m.motion) {
             if(m.motion==Motion::Leap&&o.motion==Motion::LeapAttack)continue;   // its deeper swing is Leap's too: the order (below)
+            if(m.motion==Motion::Whirlwind&&o.motion==Motion::Howl)continue;    // Howl's fling held wide is a T too: the order (below)
             Sim s(m.motion);o.perform(s);s.Hold(.5f);
             Check(s.casts==0,(label+"another motion ("+o.name+") does not cast it").c_str());
         }
@@ -183,8 +184,11 @@ int main() {
         Check(aside.casts==1,"Whirlwind: the owner's T held looking aside (one hand 46 cm behind the eyes, the other 38 in front) casts");
         Sim tilt(Motion::Whirlwind);tilt.Move({.70f,.05f,-.05f},{-.70f,-.40f,-.05f},.45f);tilt.Hold(.5f);
         Check(tilt.casts==0,"Whirlwind: one arm up and one down is no T");
-        Sim howl(Motion::Whirlwind);Howl(howl);howl.Hold(.6f);
-        Check(howl.casts==0,"Whirlwind: Howl's fling, held wide afterwards, is no T");
+        Sim howl(Motion::Whirlwind),howled(Motion::Howl);Howl(howl);Howl(howled);howl.Hold(.6f);howled.Hold(.6f);
+        Check(howled.casts==1&&howled.castTime+.2<howl.castTime&&spellmotion::barbarian::Order[6]==Motion::Howl&&spellmotion::barbarian::Order[9]==Motion::Whirlwind,
+              "Whirlwind: Howl's fling held wide casts Howl first (watched first), then every watcher starts over");
+        Sim spread(Motion::Whirlwind);spread.Move({.10f,-.30f,-.20f},{-.10f,-.30f,-.20f},.35f);spread.Move({.66f,-.25f,-.05f},{-.66f,-.25f,-.05f},.4f);spread.Hold(.5f);
+        Check(spread.casts==1,"Whirlwind: a T spread from the hands together in front casts (the owner's, 2026-11-06)");
         Sim face(Motion::Whirlwind);face.Move({.07f,.05f,-.25f},{-.07f,.05f,-.25f},.35f);face.Hold(.1f);face.Move({.55f,.0f,-.05f},{-.55f,.0f,-.05f},.25f);face.Hold(1.5f);
         Check(face.casts==1,"Whirlwind: a T held well after the hands parted casts");
     }
