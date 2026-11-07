@@ -155,15 +155,15 @@ int main() {
         Sim sides(Motion::Leap),sidesDeep(Motion::LeapAttack);
         for(Sim* s:{&sides,&sidesDeep}){s->Move({.22f,-.65f,.0f},{-.22f,-.65f,.0f},.4f);s->Move({.22f,.30f,-.15f},{-.22f,.30f,-.15f},.35f);s->Hold(.3f);}
         Check(sides.casts==1&&sidesDeep.casts==0,"Leap: from the hands down by the sides (level with the eyes) - no Leap Attack");
-        Sim near(Motion::Leap);near.Move({.22f,-.65f,-.11f},{-.22f,-.65f,-.11f},.4f);near.Move({.22f,.30f,-.15f},{-.22f,.30f,-.15f},.35f);near.Hold(.3f);
-        Check(near.casts==1,"Leap: from the hands low, 11 cm in front of the eyes (the owner's missed swings, 2026-11-06)");
+        Sim near(Motion::Leap);near.Move({.22f,-.65f,-.04f},{-.22f,-.65f,-.04f},.4f);near.Move({.22f,.30f,-.15f},{-.22f,.30f,-.15f},.35f);near.Hold(.3f);
+        Check(near.casts==1,"Leap: from the hands low, 4 cm in front of the eyes");
         Sim front(Motion::Leap);front.Move({.22f,-.65f,-.30f},{-.22f,-.65f,-.30f},.4f);front.Move({.22f,.30f,-.30f},{-.22f,.30f,-.30f},.35f);front.Hold(.3f);
         Check(front.casts==0,"Leap: the hands raised out in front (30 cm) are not its swing");
         Sim shallow(Motion::LeapAttack);shallow.Move({.22f,-.65f,.20f},{-.22f,-.65f,.20f},.4f);shallow.Move({.22f,.30f,-.15f},{-.22f,.30f,-.15f},.35f);shallow.Hold(.3f);
         Check(shallow.casts==0,"Leap Attack: 20 cm back is a Leap, not Leap Attack");
         Sim owner(Motion::LeapAttack),ownerLeap(Motion::Leap);   // the owner's Leap, 2026-11-06: 21 cm back
         for(Sim* s:{&owner,&ownerLeap}){s->Move({.22f,-.65f,.30f},{-.22f,-.65f,.30f},.4f);s->Move({.22f,.30f,-.15f},{-.22f,.30f,-.15f},.35f);s->Hold(.3f);}
-        Check(owner.casts==0&&ownerLeap.casts==1,"Leap Attack: 30 cm back is still a Leap (the line at 35)");
+        Check(owner.casts==1&&ownerLeap.casts==1,"Leap Attack: 30 cm back is one (the line at 30), and the order casts it before Leap");
         Sim one(Motion::LeapAttack);one.Move({.22f,-.65f,.42f},{-.22f,-.65f,.0f},.45f);one.Move({.22f,.30f,-.15f},{-.22f,.30f,-.15f},.4f);one.Hold(.3f);
         Check(one.casts==0,"Leap Attack: both arms back, not one");
     }

@@ -69,14 +69,14 @@ struct Tuning {
     // own take-off crouch as a stop before the jump (2026-11-05: the hero ran at full speed up to the cast, then
     // stood 0.17 s): cast at the shoulders, the crouch overlaps the rest of the swing.
     // The start was 8 cm behind the eyes until Leap Attack took the deeper swing (owner, 2026-11-06: "adjust the
-    // regular leap to be easier to do, where the leap attack is a harder one"): now up to 15 cm in front of them,
-    // where the controllers rest - the owner's swings up from low often never reached the eyes' line (2026-11-06:
-    // let go without a cast, the hands at most 11 cm in front, a Leap a second later) - and Leap Attack's from
-    // deepBehind, both arms pulled back, within deepWindow s.
-    float backLow=-.50f,backBehind=.15f,leapAbove=-.15f,leapApart=.22f,leapRise=.38f;double leapWindow=.6;
-    // deepBehind was 25 cm; the owner's first Leap Attacks (2026-11-06) began 40-80 cm behind the eyes (15 of them) and a Leap
-    // 21: 35 leaves Leap the slack asked for and Leap Attack's swings well past it.
-    float deepBehind=-.35f;double deepWindow=.8;
+    // regular leap to be easier to do, where the leap attack is a harder one"): now up to 5 cm in front of them
+    // (the owner's swings up from low sometimes never reached the eyes' line, 2026-11-06; 15 in front took the
+    // controllers' resting place, and both hands lifted from it for a two-handed chop leapt) - and Leap Attack's
+    // from deepBehind, both arms pulled back, within deepWindow s.
+    float backLow=-.50f,backBehind=.05f,leapAbove=-.15f,leapApart=.22f,leapRise=.38f;double leapWindow=.6;
+    // deepBehind was 25 cm; the owner's first Leap Attacks (2026-11-06, about 30) began 28-85 cm behind the eyes,
+    // most past 45, and the Leaps 15-21: 30 leaves Leap the slack asked for and Leap Attack's swings past it.
+    float deepBehind=-.30f;double deepWindow=.8;
     float swingSpeed=1.5f;    // m/s: the leap's swing, each arm at its fastest
     // Leap lands leapAhead cells away the way the arms swung (straight ahead, where you face, if straight up).
     // Its way alone went nowhere: a placed skill takes a spot (the owner, 2026-11-05: "it goes to where the
