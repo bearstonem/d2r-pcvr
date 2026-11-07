@@ -4208,7 +4208,7 @@ bool UpstreamSpellAim(float playerX,float playerY,framevr::spellaim::Cast& cast)
 bool NativeSpellAim(float playerX,float playerY,framevr::spellaim::Cast& cast) {
     g_note={};
     const auto c=aimtargets::Now();
-    if(c.skill==132)leapglide::g_cast.store(GetTickCount64());   // Leap: the view glides through its take-off
+    if(c.skill==132||c.skill==143)leapglide::g_cast.store(GetTickCount64());   // Leap, Leap Attack: the view glides through the take-off
     // Teleport on its shown landing or a thrown trap first; then the aim rules
     // only with this kind of cast's Aim option On; Off, as before them.
     const bool directed=MotionAim(c.skill,playerX,playerY,cast)||TossAim(c.skill,playerX,playerY,cast)||
