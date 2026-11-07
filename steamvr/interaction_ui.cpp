@@ -471,16 +471,18 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
             "Point at a skill and press the trigger to turn its motion on or off.",{38,79,730,97});
         for(int i=0;i<motions.count&&i<MotionCards;++i) {
             const int id=motions.skills[i];
-            const auto skill=GlyphSkill(s,id);
+            // a family's card (the golems, the shadows): the one it casts now (spellmotion::Family)
+            const int shown=spellmotion::Family(id)?spellmotion::CastSkillOf(id,[&](int k){return GlyphSkill(s,k).known;}):id;
+            const auto skill=GlyphSkill(s,shown);
             const bool have=skill.known,on=spellmotion::On(s.skillClass,id,o.motionsOff);
             const auto b=MotionCardBounds(i);
             const int x=int(768*b.left),y=int(768*b.top),right=int(768*b.right),bottom=int(768*b.bottom);
             frame({x,y,right,bottom},o.hover==MotionCardCell(i));
-            const bool haveIcon=icon(icons::Get("s"+std::to_string(id)),{x+9,y+9,x+67,y+67},have&&on);
+            const bool haveIcon=icon(icons::Get("s"+std::to_string(shown)),{x+9,y+9,x+67,y+67},have&&on);
             if(!haveIcon)fill({x+12,y+12,x+64,y+64},RGB(48,40,28));
             SelectObject(dc,font);SetTextColor(dc,have?RGB(235,218,181):RGB(148,137,117));
-            const char* family=spellmotion::CardName(id);
-            paragraph(family?family:have?skill.name:spellmotion::SpellName(id),{x+76,y+5,right-78,y+27});
+            char title[96];std::snprintf(title,sizeof title,"%s%s",have?skill.name:spellmotion::SpellName(shown),spellmotion::CardArm(id));
+            paragraph(title,{x+76,y+5,right-78,y+27});
             const RECT chip{right-72,y+6,right-9,y+26};
             fill(chip,on?RGB(100,74,29):RGB(48,40,28));
             SelectObject(dc,shortcutFont);SetTextColor(dc,on?RGB(235,218,181):RGB(148,137,117));text(on?"ON":"OFF",chip);

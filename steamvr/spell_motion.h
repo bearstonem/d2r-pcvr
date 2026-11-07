@@ -131,10 +131,12 @@ inline const char* SpellName(int skill) {
     default:return "";
     }
 }
-// A card that stands for a family (the table's N4 and S6): its name on the MOTIONS page; nullptr, the skill's.
-inline const char* CardName(int skill) {
-    switch(skill){case 75:return "Golem (right arm)";case 85:return "Golem (left arm)";case 268:return "Shadow Warrior / Master";default:return nullptr;}
-}
+// A card that stands for a family (the table's N4 and S6): the MOTIONS page names it, and shows its icon, by
+// the skill it casts now (CastSkillOf), the golems with their arm. Both golems' cards read "Golem (... arm)"
+// until the owner, 2026-11-06: "clearly label the different kinds of golems ... One is a blood golem, the
+// other one is a fire golem".
+inline bool Family(int skill){return skill==75||skill==85||skill==268;}
+inline const char* CardArm(int skill){return skill==75?" (right arm)":skill==85?" (left arm)":"";}
 // The skill a card casts: the strongest of its family learned (known(id): the hero has the skill). The golems
 // Fire, then Blood, then Clay (Iron Golem takes an item, so it stays on its button); Shadow Master once learned.
 template<class Known> int CastSkillOf(int skill,Known known) {

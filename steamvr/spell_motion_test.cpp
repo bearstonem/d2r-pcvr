@@ -120,8 +120,19 @@ int main() {
                 const int id=page.skills[i];
                 if(c!=1)Check(spellmotion::Bit(c,id)==i,"another class's bit is its card's");
                 Check(spellmotion::SpellName(id)[0]&&std::string(spellmotion::CueOf(id))!="no motion","every card has a name and a cue");
+                Check(spellmotion::Family(id)==(id==75||id==85||id==268),"the families' cards: the golems' two and the shadows'");
                 Check(!spellmotion::On(c,id,1<<spellmotion::Bit(c,id))&&spellmotion::On(c,id,~(1<<spellmotion::Bit(c,id))&1023)==true,"its bit alone turns it off");
             }
+        }
+        {   // the golems' cards say which golem each arm raises (owner, 2026-11-06: "One is a blood golem, the other one is a fire golem")
+            const auto all=[](int){return true;};
+            const auto clay=[](int id){return id==75;};
+            const auto title=[](int card,int casts){return std::string(spellmotion::SpellName(casts))+spellmotion::CardArm(card);};
+            Check(title(75,spellmotion::CastSkillOf(75,all))=="Fire Golem (right arm)"&&title(85,spellmotion::CastSkillOf(85,all))=="Blood Golem (left arm)",
+                  "all three golems learned: Fire Golem (right arm), Blood Golem (left arm)");
+            Check(title(75,spellmotion::CastSkillOf(75,clay))=="Clay Golem (right arm)"&&title(85,spellmotion::CastSkillOf(85,clay))=="Clay Golem (left arm)",
+                  "Clay Golem alone: both arms raise it, and both cards say so");
+            Check(std::string(spellmotion::SpellName(spellmotion::CastSkillOf(268,all)))=="Shadow Master"&&*spellmotion::CardArm(268)==0,"the shadows' card: Shadow Master once learned, no arm");
         }
         Check(spellmotion::Bit(3,48)==-1&&!spellmotion::On(3,48,0)&&spellmotion::Bit(1,107)==-1,"a skill is on its own class's page only");
     }
