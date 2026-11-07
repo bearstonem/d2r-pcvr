@@ -4180,9 +4180,9 @@ void Input() {
             if(first>0) {
                 const auto& w=spellFree[size_t(first-1)].Stats();
                 std::snprintf(line,sizeof line,
-                    "Frame spell motion: grips let go without a motion after %.1f s (hands apart %.0f-%.0f cm, highest %.0f / lowest %.0f cm from the eyes, fastest %.1f m/s; "
-                    "biggest fall in 0.5 s: right %.0f, left %.0f cm; last at right %+.0f,%+.0f,%+.0f left %+.0f,%+.0f,%+.0f cm right,up,forward of the eyes; body scale %.2f)",
-                    heldFor,w.apartMin*100,w.apartMax*100,w.top*100,w.low*100,w.fastest,w.fall[0]*100,w.fall[1]*100,
+                    "Frame spell motion: grips let go without a motion after %.1f s (hands apart %.0f-%.0f cm, highest %.0f / lowest %.0f cm from the eyes, fastest %.1f m/s, "
+                    "back to %.0f cm behind the eyes; biggest fall in 0.5 s: right %.0f, left %.0f cm; last at right %+.0f,%+.0f,%+.0f left %+.0f,%+.0f,%+.0f cm right,up,forward of the eyes; body scale %.2f)",
+                    heldFor,w.apartMin*100,w.apartMax*100,w.top*100,w.low*100,w.fastest,w.behind*100,w.fall[0]*100,w.fall[1]*100,
                     w.end[0].x*100,w.end[0].y*100,-w.end[0].z*100,w.end[1].x*100,w.end[1].y*100,-w.end[1].z*100,motionBody);
             }
             else std::snprintf(line,sizeof line,"Frame spell motion: grips let go without a motion after %.1f s",heldFor);
@@ -4445,7 +4445,7 @@ void Input() {
             int skillOf[spellmotion::MotionCount+1];for(auto& k:skillOf)k=-1;
             {const auto page=spellmotion::PageOf(motionClass);
              for(int i=0;i<page.count;++i)if(const int id=page.skills[i],m=int(spellmotion::For(id));m>0&&motionOn(id))skillOf[m]=id;}
-            int done=-1;math::Vec doneAim{};
+            int done=-1;math::Vec doneAim{};float doneBehind=0;
             bool doneLanding=false,teleportAiming=false;math::Vec donePoint{},teleportPoint{};
             spellmotion::Land doneLand=spellmotion::Land::None;spellmotion::Spot doneSpot{};
             float progress=0;   // the nearest any watched motion is to casting (Output::progress)
@@ -4459,7 +4459,7 @@ void Input() {
                 for(int h=0;h<2;++h){freeIn.hand[h]=interactionInput.hand[h].p;freeIn.tracked[h]=interactionInput.tracked[h];}
                 freeIn.bodyScale=motionBody;
                 const auto watched=spellFree[size_t(m-1)].Step(freeIn);
-                if(watched.cast&&done<0){done=m;doneAim=watched.aim;doneLanding=watched.landing;donePoint=watched.point;doneLand=watched.land;doneSpot=watched.spot;}
+                if(watched.cast&&done<0){done=m;doneAim=watched.aim;doneLanding=watched.landing;donePoint=watched.point;doneLand=watched.land;doneSpot=watched.spot;doneBehind=watched.behind;}
                 if(watched.aiming){teleportAiming=true;teleportPoint=watched.point;}
                 progress=std::max(progress,watched.progress);
             }
@@ -4506,6 +4506,14 @@ void Input() {
                     doneLand==spellmotion::Land::Pointed&&PointedCell(summonX,summonY,pointed));
                 if(summonKnown)doneAim=doneLand==spellmotion::Land::Spot?math::Vec{doneSpot.right,0,-doneSpot.ahead}:pointed;
                 const bool cast=motionCast(skill,doneAim,true);
+                if(cast&&(done==int(spellmotion::Motion::Leap)||done==int(spellmotion::Motion::LeapAttack))) {
+                    // How deep the wind-up went, for the line between the two (barbarian::Tuning backBehind, deepBehind).
+                    const auto& bt=spellmotion::barbarian::tuning;
+                    char line[200];
+                    std::snprintf(line,sizeof line,"Frame spell motion: %s - the hands went back to %.0f cm behind the eyes (Leap from %.0f, Leap Attack from %.0f)",
+                        motionName(skill).c_str(),doneBehind*100,-bt.backBehind*100,-bt.deepBehind*100);
+                    Say(line);
+                }
                 if(cast&&doneLand!=spellmotion::Land::None&&!doneLanding) {
                     char line[200];
                     if(summonKnown) {

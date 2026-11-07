@@ -22,6 +22,7 @@ static void WarCry(Sim& s){s.MoveR({.03f,-.12f,-.18f},.35f);s.Hold(.2f);s.MoveR(
 static void Howl(Sim& s){s.Move({.08f,-.40f,-.20f},{-.08f,-.40f,-.20f},.35f);s.Move({.62f,-.35f,-.15f},{-.62f,-.35f,-.15f},.3f);}
 static void BattleCry(Sim& s){s.Move({.22f,-.18f,-.05f},{-.22f,-.18f,-.05f},.4f);s.Hold(.1f);s.Move({.24f,-.82f,-.05f},{-.24f,-.82f,-.05f},.3f);}
 static void Leap(Sim& s){s.Move({.22f,-.65f,.22f},{-.22f,-.65f,.22f},.4f);s.Move({.22f,.30f,-.15f},{-.22f,.30f,-.15f},.35f);}
+static void LeapAttack(Sim& s){s.Move({.22f,-.65f,.42f},{-.22f,-.65f,.42f},.45f);s.Move({.22f,.30f,-.15f},{-.22f,.30f,-.15f},.4f);}
 static void FindItem(Sim& s){s.MoveR({.20f,-.45f,-.45f},.35f);s.Hold(.25f);s.MoveR({.17f,-.18f,-.05f},.25f);}
 // Slow, lazy versions: the same shapes over far longer.
 static void SlowBattleOrders(Sim& s){s.MoveR({.03f,-.12f,-.18f},.35f);s.Hold(.2f);s.MoveR({.08f,.30f,-.10f},1.2f);}
@@ -34,6 +35,7 @@ static void SlowWarCry(Sim& s){s.MoveR({.03f,-.12f,-.18f},.35f);s.Hold(.2f);s.Mo
 static void SlowHowl(Sim& s){s.Move({.08f,-.40f,-.20f},{-.08f,-.40f,-.20f},.35f);s.Move({.62f,-.35f,-.15f},{-.62f,-.35f,-.15f},1.5f);}
 static void SlowBattleCry(Sim& s){s.Move({.22f,-.18f,-.05f},{-.22f,-.18f,-.05f},.4f);s.Hold(.1f);s.Move({.24f,-.82f,-.05f},{-.24f,-.82f,-.05f},1.5f);}
 static void SlowLeap(Sim& s){s.Move({.22f,-.65f,.22f},{-.22f,-.65f,.22f},.6f);s.Move({.22f,.30f,-.15f},{-.22f,.30f,-.15f},1.5f);}
+static void SlowLeapAttack(Sim& s){s.Move({.22f,-.65f,.42f},{-.22f,-.65f,.42f},.6f);s.Move({.22f,.30f,-.15f},{-.22f,.30f,-.15f},1.5f);}
 static void SlowFindItem(Sim& s){s.MoveR({.20f,-.45f,-.45f},.35f);s.Hold(.25f);s.MoveR({.17f,-.18f,-.05f},1.f);}
 // Not motions: what a Barbarian's hands do all the time.
 static void Walk(Sim& s) {
@@ -55,7 +57,8 @@ int main() {
         {Motion::BattleOrders,BattleOrders,SlowBattleOrders,149,false,"Battle Orders"},{Motion::Shout,Shout,SlowShout,138,false,"Shout"},
         {Motion::BattleCommand,BattleCommand,SlowBattleCommand,155,false,"Battle Command"},{Motion::WarCry,WarCry,SlowWarCry,154,false,"War Cry"},
         {Motion::Howl,Howl,SlowHowl,130,false,"Howl"},{Motion::BattleCry,BattleCry,SlowBattleCry,146,false,"Battle Cry"},
-        {Motion::Leap,Leap,SlowLeap,132,true,"Leap"},{Motion::FindItem,FindItem,SlowFindItem,142,false,"Find Item"}};
+        {Motion::Leap,Leap,SlowLeap,132,true,"Leap"},{Motion::FindItem,FindItem,SlowFindItem,142,false,"Find Item"},
+        {Motion::LeapAttack,LeapAttack,SlowLeapAttack,143,true,"Leap Attack"}};
     const struct {Do perform;const char* name;} never[]={
         {[](Sim& s){s.Hold(2.f);},"resting"},{Walk,"a walking arm swing"},{BeltPotion,"a reach to the belt"},
         {OverheadChop,"an overhead chop"},{Slash,"a horizontal slash"},{TwoHandedChop,"a two-handed chop"},{ShortSwings,"a run of swings"}};
@@ -73,6 +76,7 @@ int main() {
         {Sim s(m.motion);s.in.active=false;m.perform(s);Check(s.casts==0,(label+"with the gate closed, nothing").c_str());}
         {Sim s(m.motion);m.slow(s);s.Hold(.5f);Check(s.casts==0,(label+"slow and lazy, nothing").c_str());}
         for(const auto& o:all)if(o.motion!=m.motion) {
+            if(m.motion==Motion::Leap&&o.motion==Motion::LeapAttack)continue;   // its deeper swing is Leap's too: the order (below)
             Sim s(m.motion);o.perform(s);s.Hold(.5f);
             Check(s.casts==0,(label+"another motion ("+o.name+") does not cast it").c_str());
         }
@@ -109,7 +113,8 @@ int main() {
         const auto& o=spellmotion::barbarian::Order;
         const auto at=[&](Motion m){return std::find(std::begin(o),std::end(o),m)-std::begin(o);};
         Check(at(Motion::Shout)<at(Motion::WarCry)&&at(Motion::Leap)<at(Motion::BattleOrders),"Shout before War Cry, Leap before Battle Orders");
-        Check(spellmotion::OrderOf(4).count==8&&spellmotion::PageOf(4).count==8,"the Barbarian's page: eight cards, each watched");
+        Check(at(Motion::LeapAttack)<at(Motion::Leap),"Leap Attack before Leap");
+        Check(spellmotion::OrderOf(4).count==9&&spellmotion::PageOf(4).count==9,"the Barbarian's page: nine cards, each watched");
     }
     {   // Find Item: nothing low (a tester, 2026-11-05: "Please no floor stuff"); drawn back with no rest out first, or to the mouth, none
         Sim s(Motion::FindItem);FindItem(s);
@@ -142,6 +147,20 @@ int main() {
         Check(leap.casts==1&&leap.land==spellmotion::Land::Spot&&leap.spot.ahead>23&&std::fabs(leap.spot.right)<4,"Leap: lands far ahead (25 cells), where you face");
         Sim early(Motion::Leap);early.Move({.22f,-.65f,.22f},{-.22f,-.65f,.22f},.4f);early.Move({.22f,-.10f,-.20f},{-.22f,-.10f,-.20f},.25f);
         Check(early.casts==1,"Leap: casts as the arms swing up past the shoulders, before they are overhead (the game's take-off crouch overlaps the swing)");
+    }
+    {   // Leap Attack: Leap's swing from the arms pulled further back (owner, 2026-11-06), and Leap made easier for it
+        Sim deep(Motion::LeapAttack),leap(Motion::Leap);LeapAttack(deep);LeapAttack(leap);
+        Check(deep.casts==1&&leap.casts==1&&deep.castTime<=leap.castTime,"Leap Attack: its swing completes no later than Leap's, so the order casts it");
+        Check(deep.land==spellmotion::Land::None&&-deep.aim.z>.9f,"Leap Attack: no spot, aimed ahead (the aim rules give it the monster)");
+        Sim sides(Motion::Leap),sidesDeep(Motion::LeapAttack);
+        for(Sim* s:{&sides,&sidesDeep}){s->Move({.22f,-.65f,.0f},{-.22f,-.65f,.0f},.4f);s->Move({.22f,.30f,-.15f},{-.22f,.30f,-.15f},.35f);s->Hold(.3f);}
+        Check(sides.casts==1&&sidesDeep.casts==0,"Leap: from the hands down by the sides (level with the eyes) - no Leap Attack");
+        Sim front(Motion::Leap);front.Move({.22f,-.65f,-.08f},{-.22f,-.65f,-.08f},.4f);front.Move({.22f,.30f,-.15f},{-.22f,.30f,-.15f},.35f);front.Hold(.3f);
+        Check(front.casts==0,"Leap: hands held in front at the start are not its swing");
+        Sim shallow(Motion::LeapAttack);shallow.Move({.22f,-.65f,.20f},{-.22f,-.65f,.20f},.4f);shallow.Move({.22f,.30f,-.15f},{-.22f,.30f,-.15f},.35f);shallow.Hold(.3f);
+        Check(shallow.casts==0,"Leap Attack: 20 cm back is a Leap, not Leap Attack");
+        Sim one(Motion::LeapAttack);one.Move({.22f,-.65f,.42f},{-.22f,-.65f,.0f},.45f);one.Move({.22f,.30f,-.15f},{-.22f,.30f,-.15f},.4f);one.Hold(.3f);
+        Check(one.casts==0,"Leap Attack: both arms back, not one");
     }
     std::puts("motions-barbarian-test: ok");
     return 0;

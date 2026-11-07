@@ -2398,9 +2398,10 @@ there.
 - Barbarian: Battle Orders, the right fist at the mouth a moment, then thrust straight up; War Cry,
   the same, thrust forward and down; Shout, both fists at the mouth, pushed out forward together;
   Battle Command, the right fist beaten on the chest twice; Howl, both arms flung wide from the chest;
-  Battle Cry, both fists at the shoulders pulled hard to the hips; Leap, both arms swung down behind
-  then up past the head, fast (arms only, so seated too); Find Item, the right hand held out at the
-  corpse a moment, then snatched back to the shoulder.
+  Battle Cry, both fists at the shoulders pulled hard to the hips; Leap, both arms swung down by the
+  sides then up past the head, fast (arms only, so seated too); Leap Attack, the same swing from both
+  arms pulled well back (25 cm behind the eyes), at the monster that way; Find Item, the right hand
+  held out at the corpse a moment, then snatched back to the shoulder.
 - Necromancer: Bone Armor, both fists crossed on the chest, held; Raise Skeleton, both arms swept up
   fast from the hips past the face, together (no stop); Golem, the right arm swept up fast the same way
   in front of you (the strongest golem learned), standing 4 cells away where the arm heads, and a

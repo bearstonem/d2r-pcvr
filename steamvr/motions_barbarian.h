@@ -1,7 +1,7 @@
 #pragma once
 #include "spell_motion.h"
 
-// The Barbarian's motions (B1-B8, owner 2026-11-04), detected on spellmotion::Engine's history (head-local:
+// The Barbarian's motions (B1-B8, owner 2026-11-04; B9 Leap Attack, 2026-11-06), detected on spellmotion::Engine's history (head-local:
 // +X right, +Y up from the eyes, forward -Z; hand 0 the right). Both grips are held while they are watched
 // (the transport's gate); a motion that completes casts its card's skill. Include spell_motion.h, not this.
 // Value-only: steamvr/motions_barbarian_test.cpp.
@@ -17,6 +17,11 @@
 // Find Item reached down to the floor and rested there until a tester's first pass (2026-11-05: "Find Item
 // never worked for me. Also, we're all getting old man... Please no floor stuff"): now the right hand is
 // held out at the corpse a moment, then snatched back to the shoulder, quick, with nothing low.
+//
+// Leap Attack is Leap's swing from deeper (owner, 2026-11-06: "What if you do it a more deep set one like you
+// pull your arms further back behind you and then do the same motion"), and Leap was made easier to leave it
+// the room ("not everybody is flexible enough to go even further than what the current leap is"). It aims
+// along the swing and lands on no spot: the aim rules hand the game the monster that way (aimrules::WantsUnit).
 namespace framevr::spellmotion::barbarian {
 struct Tuning {
     // The mouth (a fist at it: the controller just in front): |x| <= mouthSide, y in [mouthLow, mouthHigh],
@@ -63,7 +68,11 @@ struct Tuning {
     // It cast as the hands passed over the head (leapAbove .10, leapRise .60) until the owner felt the game's
     // own take-off crouch as a stop before the jump (2026-11-05: the hero ran at full speed up to the cast, then
     // stood 0.17 s): cast at the shoulders, the crouch overlaps the rest of the swing.
-    float backLow=-.50f,backBehind=-.08f,leapAbove=-.15f,leapApart=.22f,leapRise=.38f;double leapWindow=.6;
+    // The start was 8 cm behind the eyes until Leap Attack took the deeper swing (owner, 2026-11-06: "adjust the
+    // regular leap to be easier to do, where the leap attack is a harder one"): now level with them (the hands
+    // down by the sides), and Leap Attack's from deepBehind, both arms pulled back, within deepWindow s.
+    float backLow=-.50f,backBehind=0.f,leapAbove=-.15f,leapApart=.22f,leapRise=.38f;double leapWindow=.6;
+    float deepBehind=-.25f;double deepWindow=.8;
     float swingSpeed=1.5f;    // m/s: the leap's swing, each arm at its fastest
     // Leap lands leapAhead cells away the way the arms swung (straight ahead, where you face, if straight up).
     // Its way alone went nowhere: a placed skill takes a spot (the owner, 2026-11-05: "it goes to where the
@@ -82,8 +91,10 @@ struct Tuning {
 };
 inline Tuning tuning;
 // The order they are watched in: the first to complete in a frame casts. Shout before War Cry (both hands
-// at the mouth, not one); Leap before Battle Orders (both arms up, not one).
-constexpr Motion Order[]={Motion::Shout,Motion::WarCry,Motion::Leap,Motion::BattleOrders,Motion::BattleCommand,Motion::Howl,Motion::BattleCry,Motion::FindItem};
+// at the mouth, not one); Leap before Battle Orders (both arms up, not one); Leap Attack before Leap (its deeper
+// swing passes through Leap's start too).
+constexpr Motion Order[]={Motion::Shout,Motion::WarCry,Motion::LeapAttack,Motion::Leap,Motion::BattleOrders,Motion::BattleCommand,Motion::Howl,
+    Motion::BattleCry,Motion::FindItem};
 // How to do each, on the MOTIONS page and in the log (what the controllers' positions can tell: no palms or
 // fingers, both grips held).
 inline const char* Cue(Motion m) {
@@ -94,7 +105,8 @@ inline const char* Cue(Motion m) {
     case Motion::WarCry:return "right fist to the mouth a moment, then thrust it forward and down at the ground ahead";
     case Motion::Howl:return "hands together at the chest or face, then fling both arms out wide";
     case Motion::BattleCry:return "both fists up by the shoulders, pulled down hard to the hips";
-    case Motion::Leap:return "swing both arms down behind, then up past the head, fast, as for a jump";
+    case Motion::Leap:return "swing both arms down by your sides, then up past the head, fast, as for a jump";
+    case Motion::LeapAttack:return "pull both arms far back behind you, then swing them up past the head, fast";
     case Motion::FindItem:return "hold the right hand out at a corpse a moment, then snatch it back to the shoulder";
     default:return "no motion";
     }
@@ -114,6 +126,31 @@ inline float Peak(const std::vector<Sample>& h,int i,int mask) {
         for(int k=0;k<2;++k)if((mask>>k)&1)most=std::max(most,Len(h[j].l[k]-h[j-1].l[k])/float(dt));
     }
     return most;
+}
+// Leap's and Leap Attack's swing: both arms back (forward at most `behind`) and down, then both up past
+// leapAbove, at least leapApart apart, risen leapRise within `window` s, each at swingSpeed at its fastest.
+// way: the way the arms swung, level; straight ahead (where you face) if they swung straight up, or to the
+// side or behind.
+inline bool Swing(Engine& e,float behind,double window,math::Vec& way) {
+    const auto& h=e.History();
+    const auto& n=h.back();
+    const auto& t=tuning;
+    const auto& r=n.l[0];const auto& l=n.l[1];
+    const bool end=r.y>=t.leapAbove&&l.y>=t.leapAbove&&Len(r-l)>=t.leapApart&&Forward(r)>=-.20f&&Forward(l)>=-.20f;
+    for(size_t i=0;i<h.size();++i) {
+        const auto& s=h[i];
+        if(n.t-s.t>window)continue;
+        const auto& a=s.l[0];const auto& b=s.l[1];
+        if(a.y>t.backLow||b.y>t.backLow||Forward(a)>behind||Forward(b)>behind)continue;
+        e.Toward(std::min(r.y-a.y,l.y-b.y)/t.leapRise);
+        if(!end||r.y-a.y<t.leapRise||l.y-b.y<t.leapRise||Peak(h,int(i),1)<t.swingSpeed||Peak(h,int(i),2)<t.swingSpeed)continue;
+        way=((r-a)+(l-b))*.5f;way.y=0;
+        const float level=Len(way);
+        way=Forward(way)<.05f||level<1e-3f?math::Vec{0,0,-1}:way*(1/level);
+        if(-way.z<.3f)way={0,0,-1};   // off to the side or behind: where you face
+        return true;
+    }
+    return false;
 }
 // The samples, newest first, that end a dwell: `seconds` of samples (back from it) all in the zone and the
 // hands in `mask` (bit 0 the right, bit 1 the left) within dwellStill of where they are at its end; at most
@@ -224,23 +261,17 @@ inline bool Done(Engine& e,Motion m) {
         return false;
     }
     case Motion::Leap: {
-        const bool end=r.y>=t.leapAbove&&l.y>=t.leapAbove&&Len(r-l)>=t.leapApart&&Forward(r)>=-.20f&&Forward(l)>=-.20f;
-        for(size_t i=0;i<h.size();++i) {
-            const auto& s=h[i];
-            if(n.t-s.t>t.leapWindow)continue;
-            const auto& a=s.l[0];const auto& b=s.l[1];
-            if(a.y>t.backLow||b.y>t.backLow||Forward(a)>t.backBehind||Forward(b)>t.backBehind)continue;
-            e.Toward(std::min(r.y-a.y,l.y-b.y)/t.leapRise);
-            if(!end||r.y-a.y<t.leapRise||l.y-b.y<t.leapRise||Peak(h,int(i),1)<t.swingSpeed||Peak(h,int(i),2)<t.swingSpeed)continue;
-            // the way the arms swung, level; straight ahead if they swung straight up
-            math::Vec way=((r-a)+(l-b))*.5f;way.y=0;
-            const float level=Len(way);
-            way=Forward(way)<.05f||level<1e-3f?math::Vec{0,0,-1}:way*(1/level);
-            if(-way.z<.3f)way={0,0,-1};   // off to the side or behind: where you face
-            e.Aim(way);e.LandAt(t.leapAhead*-way.z,t.leapAhead*way.x);
-            return true;
-        }
-        return false;
+        math::Vec way{};
+        if(!Swing(e,t.backBehind,t.leapWindow,way))return false;
+        e.Aim(way);e.LandAt(t.leapAhead*-way.z,t.leapAhead*way.x);
+        return true;
+    }
+    case Motion::LeapAttack: {
+        // no spot: the aim rules hand the game the monster along the swing (aimrules::WantsUnit)
+        math::Vec way{};
+        if(!Swing(e,t.deepBehind,t.deepWindow,way))return false;
+        e.Aim(way);
+        return true;
     }
     case Motion::FindItem: {
         // the right hand held out at the corpse a moment (its ray aims the cast), then snatched back to the shoulder
