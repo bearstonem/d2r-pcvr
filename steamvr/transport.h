@@ -120,6 +120,8 @@ bool HandSpellHeld(int hand); // that hand's physical spell button is held
 // with the monster the weapon arm points at (0: the game's own pick) after
 // handing it to the game's target query. The slot is pressed after the answer.
 bool HeavensArmed();
+// The T cross is being held: the monsters near are wanted for its guard (body_calibration_gesture.h).
+bool TCrossWantsTargets();
 uint32_t HeavensRequest();
 void HeavensResolved(uint32_t request,uint32_t monster);
 int PointSpellSkill();       // the cast skill when the aim rules place it at a point, else -1

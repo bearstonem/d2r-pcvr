@@ -84,6 +84,7 @@
 #include "tactical_chord.h"
 #include "../vr/target_lock.h" 
 #include "vr_settings_ui.h"
+#include "body_calibration_gesture.h"
 #include "vr_settings_pointer.h"
 #include "frame_generation.h"
 #include "../vr/settings_menu.h"
@@ -452,6 +453,9 @@ uint64_t sharedFence=0;bool sharedDirty=false;
 settings::Model settingsModel;
 calibration::Flow bodyCalibration;
 calibration::ReleaseGate calibrationRelease;
+calibration::TCrossGesture tCross;   // the T cross opens the prompt with no menu
+std::atomic<bool> tCrossScan{false};  // ...held: vrcam keeps the monsters near fresh for its guard
+bool tCrossAnswered=false,tCrossHostile=false;double tCrossHostileAt=0;
 bool calibrationPrompted=false,floorSpace=false;
 uint64_t calibrationSession=0;
 int calibrationPaintKey=-1;
@@ -1169,6 +1173,7 @@ void ClearInput() {
     statsPress.Reset();statsShown=statsLit=false;menuDrop.Reset();
     handControls.Suspend();
     bodyCalibration.Suspend();
+    tCross.Reset();tCrossScan=false;tCrossAnswered=tCrossHostile=false;
     settingsInputGate.Suspend();
     ++meleeEpoch;motion.Cancel();motionOutput={};motionAt=0;gamecmd::CancelPotion();
     interactions.Reset();interactionOutput={};interactionstate::Cancel();skel::SetInteractionHidden(0);
@@ -2411,6 +2416,53 @@ int TakeSettingsPicture() {
     }
     return uploaded?1:0;
 }
+// One frame of the T cross (body_calibration_gesture.h). Runs where the first-load prompt
+// opens, so the prompt owns this frame's input the same way. The hands are last frame's
+// (motionInput fills further down Input). Hands too close for a T cross, or switched off, it
+// reads nothing else; hands wide, four action reads.
+void TCrossStep(const settings::Snapshot& config,const menus::Pad& physical,bool nativeUi) {
+    calibration::TCrossInput in;
+    in.on=calibrationPrompted&&config.ready&&config.values[settings::TCrossCalibrate]>.5f&&inWorld&&inWorld();
+    in.calibrating=bodyCalibration.Active()||calibrationRelease.blocked;
+    auto& s=in.pose;s.time=motionInput.time;s.floor=floorSpace;s.headTracked=motionHeadTracked;s.head=V(head.position);s.rotation=Q(head.orientation);
+    for(int i=0;i<2;++i){s.handTracked[i]=motionInput.tracked[i];s.hand[i]=motionInput.hand[i].p;}
+    if(in.on&&!in.calibrating&&calibration::TCrossHandsWide(s)){
+        for(int i=0;i<2;++i){s.trigger[i]=Float(trigger,i);in.grip[i]=Float(squeeze,i);}
+        in.seated=config.values[settings::Seated]>.5f;
+        in.menu=nativeUi||settingsModel.open||interactionOutput.wheel||interactionOutput.settings||interactionOutput.inventory;
+        in.buttons=physical.buttons&(menus::A|menus::B|menus::X|menus::Y|menus::Start|menus::LeftStick|menus::RightStick);
+        in.stick=std::max(std::hypot(float(physical.lx),float(physical.ly)),std::hypot(float(physical.rx),float(physical.ry)))/32767.f;
+        in.holding=interactionOutput.bottleHand>=0||motionOutput.bowDrawing||motionOutput.tossHeld||glyphStroke.Drawing()||
+            gameplay::CastingSkill(motionInput,motionOutput,GetTickCount64()-motionAt);
+        if(tCrossScan.load()&&s.time>=tCrossHostileAt){
+            const auto targets=targetlock::Get();tCrossHostileAt=s.time+.1;
+            calibration::TCrossReadScan(in,targets.at,GetTickCount64(),targets.targets,targets.count,targets.heroX,targets.heroY);
+            tCrossAnswered=in.scanAnswered;tCrossHostile=in.hostile;
+        }
+    }
+    in.scanAnswered=tCrossAnswered;in.hostile=tCrossHostile;   // past the gate too: a controller's blink keeps the hold's grace
+    const auto out=tCross.Step(in);
+    if(tCrossScan.load(std::memory_order_relaxed)!=out.scan)tCrossScan=out.scan;
+    if(!out.scan)tCrossAnswered=tCrossHostile=false;
+    if(out.refused!=calibration::TCrossRefusal::None){
+        char line[120];std::snprintf(line,sizeof line,"Frame body calibration: T cross not opened: %s",calibration::TCrossRefusalName(out.refused));Say(line);
+    }
+    if(out.unguarded){   // a game you joined: the pose does not occur in normal play, so it stays on
+        static bool told=false;
+        if(!told){told=true;Say("Frame body calibration: the monster guard is unavailable (no monster list to read); monsters do not block the T cross");}
+    }
+    if(out.lost!=calibration::TCrossLoss::None){
+        char line[120];std::snprintf(line,sizeof line,"Frame body calibration: T cross hold lost after %.1f s: %s",out.lostAfter,calibration::TCrossLossName(out.lost));Say(line);
+    }
+    // A pulse replaces the last one on its hand (haptic_pulse.h): one timer each, nothing piles up.
+    if(out.stop)hapticPulses.Cancel();
+    if(out.pulse)for(int hand=0;hand<2;++hand)MotionPulse(hand,haptics::Category::Interaction,calibration::TCrossBuzzStrength,XrDuration(calibration::TCrossBuzzMs)*1000000);
+    if(out.open){
+        Say("Frame body calibration: T cross held; opening the prompt");
+        OpenBodyCalibration();   // it cancels the haptics, so the distinct buzz comes after it
+        for(int hand=0;hand<2;++hand)MotionPulse(hand,haptics::Category::Interaction,calibration::TCrossOpenStrength,XrDuration(calibration::TCrossOpenMs)*1000000);
+    }
+}
 void CalibrationInput() {
     if(!bodyCalibration.Active())return;
     if(!inWorld||!inWorld()||calibrationSession!=gamestate::LocalPlayer()){
@@ -2446,6 +2498,7 @@ void CalibrationInput() {
     const auto now=GetTickCount64();
     if(key!=calibrationPaintKey&&now>=settingsPaintAt&&!settingsPaintRequest&&settingsPaintGuard.CanRequest()){
         SettingsPaintJob job;job.model=settingsModel;job.input.calibration=settings::CalibrationOf(bodyCalibration);
+        {const auto config=vrsettings::Read().values;job.input.calibration.anyTime=calibration::TCrossAvailable(config,floorSpace);}
         settingsPaintRequest=settingsPainter.Submit(std::move(job));calibrationRequestedKey=key;settingsPaintAt=now+100;
         if(!settingsPaintRequest&&settingsPaintGuard.Failed(true)){SettingsPaintFailed("background painter unavailable");return;}
     }
@@ -3231,7 +3284,8 @@ void Input() {
     if(!tracking.data) return;
     if(!valid||state!=XR_SESSION_STATE_FOCUSED) {gazeStability.Reset();ClearInput();return; }
     if(motionControls.load())vrGameplayAt.store(GetTickCount64());
-    hapticPulses.Configure(settings::HapticLevels(vrsettings::Read().values));
+    const auto frameConfig=vrsettings::Read();
+    hapticPulses.Configure(settings::HapticLevels(frameConfig.values));
     XrActiveActionSet active{actionSet,XR_NULL_PATH};
     XrActionsSyncInfo si{XR_TYPE_ACTIONS_SYNC_INFO};si.countActiveActionSets=1;si.activeActionSets=&active;
     if(pSyncActions(session,&si)!=XR_SUCCESS) {gazeStability.Reset();ClearInput();return;}
@@ -3272,6 +3326,7 @@ void Input() {
         const auto config=vrsettings::Read();
         if(config.ready&&config.result!=settings::Result::Saving){calibrationPrompted=true;if(!calibration::Stored(config.values))OpenBodyCalibration();}
     }
+    TCrossStep(frameConfig,physical,nativeUi);
     const bool gripMenuPressed=leftMenuButton.Update((controls.buttons&menus::LeftStick)!=0,
         (controls.buttons&menus::LeftBumper)?1.f:0.f);
     // Keep the entire modified click out of wheels and native sort/map actions,
@@ -6864,6 +6919,7 @@ bool HandSpellHeld(int hand) {
     return hand>=0&&hand<2&&motionControls.load()&&handOutput.spells[hand]>=0;
 }
 bool HeavensArmed(){return heavensArmed.load();}
+bool TCrossWantsTargets(){return tCrossScan.load();}
 uint32_t HeavensRequest() {
     std::lock_guard lock(mutex);
     return heavensPending&&heavensAnswered!=heavensRequest&&GetTickCount64()-heavensAskedAt<=HeavensWaitMs?heavensRequest:0;
@@ -7206,7 +7262,7 @@ void Shutdown(bool preserveResolution) {
     if(mapEye.chain&&pDestroySwapchain)pDestroySwapchain(mapEye.chain);mapEye={};mapSupported=false;mapBlit={};gamestate::MenuMap(false);hud::MenuMapCapture(false);
     settingsModel.Close();settingsOpen=false;settingsInputGate.Suspend();settingsPainted={};settingsAtlasPending=settingsImageReady=false;
     settingsPaintRequest=0;settingsRequested={};
-    bodyCalibration.Cancel();calibrationRelease={};calibrationPrompted=floorSpace=false;calibrationSession=0;calibrationPaintKey=calibrationRequestedKey=-1;
+    bodyCalibration.Cancel();tCross.Reset();tCrossScan=false;tCrossAnswered=tCrossHostile=false;calibrationRelease={};calibrationPrompted=floorSpace=false;calibrationSession=0;calibrationPaintKey=calibrationRequestedKey=-1;
     if(sharedChain&&pDestroySwapchain)pDestroySwapchain(sharedChain);sharedChain=XR_NULL_HANDLE;
     sharedImages.clear();sharedMaster.Reset();sharedCommands.Reset();sharedAllocator.Reset();sharedFence=0;sharedDirty=false;
     atlasUploads.clear();atlasStagingFree.clear();interactionPaintKey=~0ull;interactionPrefetchSession=0;interactionPrefetchRevision=~0u;interactions.Reset();interactionstate::Cancel();

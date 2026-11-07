@@ -101,6 +101,8 @@ void Calibration(Painter& p,const Layout& l){
                 break;}
             case Role::CalibProgress:p.Bar(r,e.fill,-1,{});break;
             case Role::CalibNote:p.TextFit(e.text,TextStyle::Value,r,Color::Quiet,Align::Center,true);break;
+            case Role::CalibFigure:p.TCrossFigure(r,Color::Gold);break;
+            case Role::CalibTip:p.TextFit(e.text,TextStyle::Strong,r,Color::Gold,Align::Center,true);break;
             default:break;
         }
     }
@@ -438,7 +440,9 @@ std::vector<PreviewShot> PreviewShots(){
     {Setup x=base(View::Body,-1);calibration::Flow f;f.Begin();f.phase=calibration::Phase::Hold;f.hint=calibration::Hint::Arms;f.progress=.55f;
      x.in.calibration=CalibrationOf(f);add("calibration",x);
      x.in.calibration.hint=int(calibration::Hint::Saved);x.in.calibration.progress=1;x.in.calibration.measured=true;
-     x.in.calibration.eyeHeight=1.68f;x.in.calibration.armSpan=1.52f;add("calibration-saved",x);}
+     x.in.calibration.eyeHeight=1.68f;x.in.calibration.armSpan=1.52f;add("calibration-saved",x);
+     x.in.calibration=CalibrationOf(f);x.in.calibration.hint=int(calibration::Hint::Floor);x.in.calibration.progress=0;x.in.calibration.anyTime=false;add("calibration-floor",x);
+     x.in.calibration.hint=int(calibration::Hint::Pose);add("calibration-no-t-cross",x);}
     return shots;
 }
 }

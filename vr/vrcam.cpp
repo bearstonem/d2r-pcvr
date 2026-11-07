@@ -4003,7 +4003,7 @@ bool Wanted() {
 }
 void Tick() {
     const bool wanted = Wanted();
-    targetlock::Pump(wanted);
+    targetlock::Pump(wanted || framevr::TCrossWantsTargets());   // the outline and locks stay on Wanted()
     static bool toldLegacy = false;   // once a session: the old single outline color still serves a hand
     if (!toldLegacy && vrsettings::LegacyHighlightUsed()) {
         toldLegacy = true;

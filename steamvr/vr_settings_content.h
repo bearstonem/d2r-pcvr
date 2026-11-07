@@ -406,6 +406,10 @@ inline constexpr Override Overrides[]={
     // Body: Potion belt
     {.id="interactions.seated",.page=View::Body,.section="Potion belt",.kind=RowKind::Toggle,.label="Seated play",
      .help="Raises the potion belt so you can reach it sitting down. Your body measurements still come from standing."},
+    // The T cross's switch rides on Seated play's row (Body keeps 8 rows): it does nothing seated, and is left out then.
+    {.id="interactions.t_cross_calibrate",.page=View::Body,.section="Potion belt",.kind=RowKind::Toggle,.label="T cross to calibrate",
+     .help="Hold a T cross for 2 seconds, nothing pressed: the controllers buzz while you hold it, then Calibrate body opens. No menu needed. Off in Seated play.",
+     .beside=true,.besideLabel="T cross"},
     {.id="interactions.waist_below_eyes",.page=View::Body,.section="Potion belt",.kind=RowKind::Slider,.label="Belt below eyes",
      .help="How far below your eyes the potion belt sits when standing. Lower numbers raise the belt.",
      .format={.unit="cm",.iniScale=.01f}},
@@ -776,7 +780,7 @@ inline constexpr ContentTool ToolTable[]={
     {Kind::Apply,"Apply","Saves and uses your changes. Until you press it, changes are only a draft. Your other settings and calibration stay as they are."},
     {Kind::Close,"Close","Back to the game. If some changes are not applied, Close asks first."},
     {Kind::Recenter,"Set eye height","Sets your eye height for where you stand or sit now. Your body measurements stay saved."},
-    {Kind::Calibrate,"Calibrate body","Measures your standing eye height and arm span in a T-pose. Apply or discard changes first. Hold both triggers when asked; Right B cancels."},
+    {Kind::Calibrate,"Calibrate body","Measures your standing eye height and arm span in a T cross. Apply or discard changes first. Hold both triggers when asked; Right B cancels."},
     {Kind::ResetPage,"Reset page","Sets every row you can see on this page back to its default. Nothing is saved until you press Apply."},
     {Kind::UndoReset,"Undo reset","Puts back the values this page had before you pressed Reset page. It goes away after 6 seconds."},
     // The confirm row; the layout may print the count ("Discard 3 changes").
