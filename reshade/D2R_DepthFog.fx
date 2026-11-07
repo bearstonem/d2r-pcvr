@@ -329,6 +329,10 @@ texture2D SkyBand5Tex < source = D2R_SKY_ACT5; > { Width = 1536; Height = 1024; 
 sampler2D SkyBand5Smp { Texture = SkyBand5Tex; AddressU = WRAP; AddressV = CLAMP; };
 texture2D SkyCap5Tex < source = D2R_SKYCAP_ACT5; > { Width = 1024; Height = 1024; Format = RGBA8; };
 sampler2D SkyCap5Smp { Texture = SkyCap5Tex; AddressU = WRAP; AddressV = WRAP; };
+// How many times the panorama goes round the circle (2: each copy 180 degrees, sharper, less stretched).
+#ifndef D2R_PANO_WRAPS
+ #define D2R_PANO_WRAPS 2
+#endif
 #ifndef D2R_SKY_PANO
  #define D2R_SKY_PANO "D2R_Sky_ours/D2R_Sky_act1.png"
 #endif
@@ -435,11 +439,15 @@ float3 PaintedSky(float3 dir)
 {
     if (SkyPano) {
         const float pel = degrees(asin(clamp(dir.y, -1.0, 1.0)));
-        const float pu = atan2(dir.x, dir.z) / 6.2831853 + SkyPanoYaw / 360.0;
+        const float pu = (atan2(dir.x, dir.z) / 6.2831853 + SkyPanoYaw / 360.0) * D2R_PANO_WRAPS;
         const float pv = (SkyPanoHigh - pel) / max(SkyPanoHigh - SkyPanoLow, 1.0);
         const float3 pc = tex2Dlod(SkyPanoSmp, float4(pu, saturate(pv), 0, 0)).rgb;
-        const float3 top = tex2Dlod(SkyPanoSmp, float4(pu, 0.02, 0, 7)).rgb;
-        return lerp(pc, top, smoothstep(SkyPanoHigh - 4.0, SkyPanoHigh + 18.0, pel));
+        // over the picture's top: one colour, its top row's average all round (not a per-direction
+        // colour, which pinched into a cone overhead)
+        float3 top = 0.0;
+        [unroll] for (int k = 0; k < 8; ++k) top += tex2Dlod(SkyPanoSmp, float4((k + 0.5) / 8.0, 0.04, 0, 6)).rgb;
+        top /= 8.0;
+        return lerp(pc, top, smoothstep(SkyPanoHigh - 6.0, SkyPanoHigh + 12.0, pel));
     }
     const float el = degrees(asin(clamp(dir.y, -1.0, 1.0)));
     // two turns round the circle, drifting slowly so the clouds move
