@@ -338,8 +338,8 @@ struct Settings {
     std::atomic<bool>  campfireMenuBoard{true}; // [campfire] menu_board: the menu's lower strip as a board in the scene, not over the eyes
     std::atomic<float> campfireMenuWidth{1.1f}, campfireMenuDistance{1.0f}, campfireMenuDrop{0.9f};   // [campfire] menu_width, menu_distance, menu_drop (metres)
     std::atomic<bool>  campfireCaption{true};   // [campfire] caption: the picked hero's class and words on a board over the heroes
-    std::atomic<float> campfireCaptionRect[4]{{0.25f},{0.0f},{0.75f},{0.25f}};   // [campfire] caption_left/top/right/bottom: shares of the menu band
-    std::atomic<float> campfireCaptionWidth{3.0f}, campfireCaptionDistance{5.5f}, campfireCaptionRise{1.0f};   // [campfire] caption_width/distance/rise (metres)
+    std::atomic<float> campfireCaptionRect[4]{{0.25f},{0.0f},{0.75f},{0.33f}};   // [campfire] caption_left/top/right/bottom: shares of the menu band
+    std::atomic<float> campfireCaptionWidth{3.0f}, campfireCaptionDistance{6.5f}, campfireCaptionRise{2.0f};   // [campfire] caption_width/distance/rise (metres)
     std::atomic<float> campfireMenuTop{0.78f};  // [campfire] menu_top: where the strip begins, a share of the game's menu band from its top
     std::atomic<float> campfirePickDist{22.0f};// [campfire] pick_distance: how far along the hand's ray the pointer is put, world units
     std::atomic<bool>  skyHidePanels{true}; // no sky while a side panel shifts the picture
@@ -1430,7 +1430,7 @@ void LoadSettings() {
         if (int(on) != told) { told = int(on); LogF("vrcam: [campfire] enabled=%d", int(on)); }
         g_set.campfireOn.store(on);
         g_set.campfireEye.store(std::clamp(IniF(L"campfire", L"eye", 6.0f), 1.0f, 40.0f));
-        g_set.campfireUp.store(std::clamp(IniF(L"campfire", L"up", 2.5f), -40.0f, 40.0f));
+        g_set.campfireUp.store(std::clamp(IniF(L"campfire", L"up", 2.25f), -40.0f, 40.0f));
         g_set.campfireForward.store(std::clamp(IniF(L"campfire", L"forward", 3.0f), -200.0f, 200.0f));
         g_set.campfirePickDist.store(std::clamp(IniF(L"campfire", L"pick_distance", 22.0f), 1.0f, 200.0f));
         g_set.campfireEffects.store(IniB(L"campfire", L"effects", false));
@@ -1455,10 +1455,10 @@ void LoadSettings() {
         g_set.campfireCaptionRect[0].store(std::clamp(IniF(L"campfire", L"caption_left", 0.25f), 0.0f, 1.0f));
         g_set.campfireCaptionRect[1].store(std::clamp(IniF(L"campfire", L"caption_top", 0.0f), 0.0f, 1.0f));
         g_set.campfireCaptionRect[2].store(std::clamp(IniF(L"campfire", L"caption_right", 0.75f), 0.0f, 1.0f));
-        g_set.campfireCaptionRect[3].store(std::clamp(IniF(L"campfire", L"caption_bottom", 0.25f), 0.0f, 1.0f));
+        g_set.campfireCaptionRect[3].store(std::clamp(IniF(L"campfire", L"caption_bottom", 0.33f), 0.0f, 1.0f));
         g_set.campfireCaptionWidth.store(std::clamp(IniF(L"campfire", L"caption_width", 3.0f), 0.2f, 20.0f));
-        g_set.campfireCaptionDistance.store(std::clamp(IniF(L"campfire", L"caption_distance", 5.5f), 0.5f, 30.0f));
-        g_set.campfireCaptionRise.store(std::clamp(IniF(L"campfire", L"caption_rise", 1.0f), -3.0f, 10.0f));
+        g_set.campfireCaptionDistance.store(std::clamp(IniF(L"campfire", L"caption_distance", 6.5f), 0.5f, 30.0f));
+        g_set.campfireCaptionRise.store(std::clamp(IniF(L"campfire", L"caption_rise", 2.0f), -3.0f, 10.0f));
     }
     g_set.skyHidePanels.store(IniB(L"sky", L"hide_with_panels", true));
     {   // as the By turns switches: only a change of the ini's own value overrides DEV's
