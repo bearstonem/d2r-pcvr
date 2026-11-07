@@ -49,7 +49,7 @@ static void StaticField(Sim& s) {
     s.Drive(.6f,[](float t,math::Vec& r,math::Vec&){r.z=-.30f+.05f*std::sin(t*6.2832f*4);});   // four rubs
     s.Move({.38f,-.45f,-.25f},{-.38f,-.45f,-.25f},.15f);
 }
-static void EnergyShield(Sim& s){s.Move({-.10f,-.12f,-.30f},{.10f,-.12f,-.30f},.4f);s.Hold(.5f);}
+static void EnergyShield(Sim& s){s.Move({-.10f,-.12f,-.30f},{.10f,-.12f,-.30f},.4f);s.Hold(.7f);}
 static void ThunderStorm(Sim& s){s.MoveR({.15f,.40f,-.10f},.45f);s.Hold(.5f);}
 static void Blaze(Sim& s){s.MoveR({.24f,-.55f,0},.3f);s.MoveR({.24f,-.95f,0},.2f);}
 static void FrozenArmor(Sim& s){s.Move({.45f,-.35f,-.35f},{.32f,-.35f,-.32f},.45f);s.MoveL({.17f,-.24f,.05f},.45f);}
@@ -277,12 +277,21 @@ int main() {
      Check(s.casts==1,"Nova: a fling 80 cm wide casts (78 and 89 cm were missed)");}
     {Sim s(Motion::PushDown);s.Trigger(true);s.Move({.15f,-.36f,-.25f},{-.15f,-.36f,-.25f},.35f);s.Move({.30f,-.62f,.12f},{-.30f,-.62f,.12f},.3f);
      Check(s.casts==1,"Frost Nova: pushed down from the chest to the sides casts");}
-    {Sim s(Motion::CrossGuard);s.Trigger(true);s.Move({-.07f,-.08f,-.08f},{.07f,-.08f,-.08f},.4f);s.Hold(.5f);
+    {Sim s(Motion::CrossGuard);s.Trigger(true);s.Move({-.07f,-.08f,-.08f},{.07f,-.08f,-.08f},.4f);s.Hold(.7f);
      Check(s.casts==1,"Energy Shield: the guard held 14 cm apart close to the face casts");}
     {Sim s(Motion::RubSnap);s.Trigger(true);s.Move({.045f,-.45f,-.30f},{-.045f,-.45f,-.30f},.35f);s.Hold(.4f);s.Move({.38f,-.45f,-.25f},{-.38f,-.45f,-.25f},.15f);
      Check(s.casts==0,"Static Field: palms together, no rubbing, then apart, casts nothing");}
-    {Sim s(Motion::CrossGuard);s.Trigger(true);s.Move({.10f,-.12f,-.30f},{-.10f,-.12f,-.30f},.4f);s.Hold(.6f);
+    {Sim s(Motion::CrossGuard);s.Trigger(true);s.Move({.10f,-.12f,-.30f},{-.10f,-.12f,-.30f},.4f);s.Hold(.7f);
      Check(s.casts==1,"Energy Shield: hands up before the face, not crossed, casts too");}
+    // A two-handed staff handled with both grips held (owner, 2026-11-06: "I'm accidentally triggering everything")
+    {Sim s(Motion::PushDown);s.Trigger(true);s.Move({.15f,-.35f,-.30f},{-.15f,-.35f,-.30f},.35f);s.Move({.15f,-.78f,-.30f},{-.15f,-.78f,-.30f},.6f);s.Hold(.3f);
+     Check(s.casts==0,"Frost Nova: a staff lowered from the chest to the waist in 0.6 s casts nothing");}
+    {Sim s(Motion::PushDown);s.Trigger(true);s.Move({.15f,-.35f,-.30f},{-.15f,-.35f,-.30f},.35f);s.Move({.15f,-.57f,-.30f},{-.15f,-.57f,-.30f},.2f);s.Hold(.3f);
+     Check(s.casts==0,"Frost Nova: a push of 22 cm casts nothing");}
+    {Sim s(Motion::CrossGuard);s.Trigger(true);s.Move({.10f,-.12f,-.30f},{-.10f,-.12f,-.30f},.4f);s.Hold(.25f);s.Move(RestR,RestL,.4f);s.Hold(.3f);
+     Check(s.casts==0,"Energy Shield: the guard held under half a second casts nothing");}
+    {Sim s(Motion::CrossGuard);s.Trigger(true);s.Move({.16f,-.12f,-.30f},{-.17f,-.12f,-.30f},.4f);s.Hold(.8f);
+     Check(s.casts==0,"Energy Shield: hands 33 cm apart at the face (a staff's grip) cast nothing");}
     {Sim s(Motion::CrossGuard);s.Trigger(true);s.Move({.30f,-.12f,-.30f},{-.30f,-.12f,-.30f},.4f);s.Hold(.6f);
      Check(s.casts==0,"Energy Shield: hands 60 cm apart at the face cast nothing");}
     {Sim s(Motion::CrossGuard);s.Trigger(true);s.Move({-.10f,-.12f,-.30f},{.10f,-.12f,-.30f},.4f);s.Hold(.2f);s.Move(RestR,RestL,.4f);
