@@ -339,6 +339,7 @@ struct Settings {
     std::atomic<bool>  ceilFromWalls{true};    // [ceiling] height_from_walls: an area with no height_<biome> of its own rests it on its walls' top
     std::atomic<bool>  torchEnabled{true};       // [torch] enabled: 1H club with fire lights the dungeon in VR
     std::atomic<bool>  spellHandLight{true};     // [torch] spell_hands: a Sorceress's spell hands light it too (elements::HandLight)
+    std::atomic<float> spellHandPct{40.0f};      // [torch] spell_hands_pct: how bright, 0..100 (VR Settings > World > Spell hand light)
     std::atomic<float> torchRadius{18.0f};       // [torch] radius: world units of light reach (28 looked too intense in the headset)
     std::atomic<bool>  torchFlicker{true};       // [torch] flicker: organic turbulent flame flicker
     std::atomic<float> torchWarmth{0.65f};       // [torch] warmth: color warmth toward fire orange
@@ -1424,6 +1425,7 @@ void LoadSettings() {
     g_set.ceilFromWalls.store(IniB(L"ceiling", L"height_from_walls", true));
     g_set.torchEnabled.store(IniB(L"torch", L"enabled", true));
     g_set.spellHandLight.store(IniB(L"torch", L"spell_hands", true));
+    g_set.spellHandPct.store(std::clamp(IniF(L"torch", L"spell_hands_pct", 40.0f), 0.0f, 100.0f));
     g_set.torchRadius.store(std::clamp(IniF(L"torch", L"radius", 18.0f), 5.0f, 60.0f));
     g_set.torchFlicker.store(IniB(L"torch", L"flicker", true));
     g_set.torchWarmth.store(std::clamp(IniF(L"torch", L"warmth", 0.65f), 0.0f, 1.0f));
@@ -10408,7 +10410,10 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
                 // spell_hands; elemental_hands.h HandLight), at the fist, a held torch's hand aside.
                 bool anySpell = false;
 #ifdef D2RVR_NATIVE_OPENXR
-                if (g_set.spellHandLight.load()) {
+                // At spell_hands_pct of its strength (owner, 2026-11-06: full, it lit the hero's face and left the
+                // dark beyond darker by contrast).
+                const float spellHandPct = g_set.spellHandPct.load();
+                if (g_set.spellHandLight.load() && spellHandPct > 0.0f) {
                     const D2RVR_Shared* sh = g_shared;
                     AcquireSRWLockShared(&g_stickLock); const StickFrame f = g_stickFrame; ReleaseSRWLockShared(&g_stickLock);
                     for (int h = 0; h < 2 && outIndex < worldobj::kMaxLights; ++h) {
@@ -10426,7 +10431,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
                         pos[outIndex * 4 + 2] = sv[0].eyeRel[2] + dw[2];
                         pos[outIndex * 4 + 3] = framevr::torch::ComputeShaderLightRadius(light.radius, g_set.ceilTorchRadius.load());
                         for (int c = 0; c < 3; ++c) col[outIndex * 4 + c] = light.rgb[c];
-                        col[outIndex * 4 + 3] = light.strength;
+                        col[outIndex * 4 + 3] = light.strength * spellHandPct / 100.0f;
                         ++outIndex; anySpell = true;
                     }
                 }

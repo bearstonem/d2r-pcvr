@@ -236,15 +236,21 @@ struct Tuning {
     float flingApart=.75f;    // ...and ends with them this far apart,
     float flingSide=.25f;     // each this far out on its own side,
     float flingWindow=.8f;    // s after they were together
-    float pushDrop=.20f;      // m: Frost Nova: both hands this much lower than
+    float pushDrop=.25f;      // m: Frost Nova: both hands this much lower than
     float pushWindow=.5f;     // s ago (a push, not lowering the arms),
-    float pushBelow=-.40f;    // m: ending this far below the eyes, not behind the back
+    float pushBelow=-.40f;    // m: ending this far below the eyes, not behind the back,
+    float pushSpeed=1.4f;     // m/s: each hand at least this fast on the way (pushed hard, not lowered)
+    // The owner with a two-handed staff (2026-11-06: "everything feels way too sensitive for the motions. I'm
+    // accidentally triggering everything"): handling the staff with both grips held lowered it as a push and
+    // raised it as a guard. Frost Nova then took 20 cm at any speed and Energy Shield a 35 cm guard held
+    // 0.35 s; the owner's own pushes (2026-11-03) fell 26 cm in 0.3 s, about 1.6 m/s.
     float rubClose=.18f;      // m: Static Field: controllers this close are palms together;
     float rubPath=.15f;       // m of their rubbing charges it (leaking rubLeak m a second: the owner's two hands
     float rubLeak=.12f;       // held together to point charged it by their wobble and a yank cast it, 2026-11-05),
     float snapApart=.45f;     // m: then the hands this far apart
     float snapWindow=.5f;     // s after they parted
-    float guardApart=.35f;    // m: Energy Shield: both hands up at the face, this close (crossed or not)
+    float guardApart=.30f;    // m: Energy Shield: both hands up at the face, this close (crossed or not),
+    float guardHold=.50f;     // s held (a staff's two hands sit wider; a guard is held, not passed)
     float holdSeconds=.35f;   // a held pose (Energy Shield, Thunder Storm, Chilling Armor)
     float stillSpeed=.8f;     // m/s: a held pose moves slower than this
     float raiseAbove=.22f;    // m above the eyes: Thunder Storm's raised hand
@@ -407,6 +413,15 @@ public:
         return dt>1e-4?(b.l[h]-a.l[h])*float(1/dt):math::Vec{};
     }
     bool Still(int h)const{return Len(Velocity(h))<tuning.stillSpeed;}
+    // The fastest hand h moved (m/s) from sample i to the newest.
+    float PeakSpeed(size_t i,int h)const {
+        float most=0;
+        for(size_t j=i+1;j<samples.size();++j) {
+            const double dt=samples[j].t-samples[j-1].t;
+            if(dt>1e-4)most=std::max(most,Len(samples[j].l[h]-samples[j-1].l[h])/float(dt));
+        }
+        return most;
+    }
     // Chilling Armor's hug: each hand on the other side, at the shoulders or the chest, close to the body (not up
     // in front: Energy Shield). Up to 12 cm under the eyes (the owner's hugs, 2026-11-05, held a hand 17 cm under
     // them, where 18 was the top; a guard 8 cm under them, crossed close to the face, stays Energy Shield).
@@ -441,8 +456,11 @@ private:
             for(const auto& s:samples)if(n.t-s.t<=t.pushWindow)for(int h=0;h<2;++h)fall[h]=std::max(fall[h],s.l[h].y-n.l[h].y);
             if(std::min(fall[0],fall[1])>=.06f)Toward(std::min(fall[0],fall[1])/t.pushDrop);
             if(n.l[0].y>t.pushBelow||n.l[1].y>t.pushBelow||Forward(n.l[0])<-.25f||Forward(n.l[1])<-.25f)return false;
-            for(const auto& s:samples)
-                if(n.t-s.t<=t.pushWindow&&s.l[0].y-n.l[0].y>=t.pushDrop&&s.l[1].y-n.l[1].y>=t.pushDrop)return true;
+            for(size_t i=0;i<samples.size();++i) {
+                const auto& s=samples[i];
+                if(n.t-s.t<=t.pushWindow&&s.l[0].y-n.l[0].y>=t.pushDrop&&s.l[1].y-n.l[1].y>=t.pushDrop&&
+                   PeakSpeed(i,0)>=t.pushSpeed&&PeakSpeed(i,1)>=t.pushSpeed)return true;
+            }
             return false;
         }
         case Motion::RubSnap: {
@@ -464,7 +482,7 @@ private:
             if(HugPose(n))return Held(false,n.t);
             bool pose=Apart(n)<=t.guardApart;
             for(int h=0;h<2;++h){const auto& l=n.l[h];pose=pose&&l.y>=-.30f&&l.y<=.20f&&Forward(l)>=0&&Forward(l)<=.60f&&std::fabs(l.x)<=.30f&&Still(h);}
-            return Held(pose,n.t);
+            return Held(pose,n.t,t.guardHold);
         }
         case Motion::ArmUp: {
             bool pose=false;
