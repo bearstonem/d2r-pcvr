@@ -3734,6 +3734,14 @@ void CampfirePick() {
     // Each frame, not only on the timer: the transport knows the campfire from its first frame
     // (its menu board, and never the flat menu panel there).
     framevr::SetCampfirePointer(g_campfire.load(), g_set.campfirePickDist.load() * UserEyeHeightM() / std::max(1.0f, g_set.campfireEye.load()));
+    // The campfire goes by eyes in turns (AFR), never through the transport's BeginEye, which switches the
+    // light grid's corrected depth scan on for the world: here it is switched on for the scene itself. Without
+    // it the native scan's rectangular tiles lost their lights - dark screen-aligned blocks over the heroes.
+    {
+        static bool lit = false;
+        if (g_campfire.load()) { framevr::lightbounds::SetActive(true); lit = true; }
+        else if (lit) { framevr::lightbounds::SetActive(false); lit = false; }
+    }
     // The laser on the menu's board: the board moves the game's pointer and clicks (transport MenuPointer).
     const bool board = g_campfire.load() && framevr::CampfireMenuHit();
     const bool held = g_campfire.load() && !board && framevr::RightPickHeld();
