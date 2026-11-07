@@ -75,8 +75,18 @@ void DeviceDestroyed(device* dev) {
     }
     ours=true;for(auto p:pending)dev->destroy_pipeline(p);ours=false;
 }
+std::atomic<bool> reportedOff{false};
 void Bind(command_list* commands,pipeline_stage stages,pipeline original) {
-    if(ours||!active.load(std::memory_order_relaxed)||uint32_t(stages&pipeline_stage::compute_shader)==0)return;
+    if(ours||uint32_t(stages&pipeline_stage::compute_shader)==0)return;
+    if(!active.load(std::memory_order_relaxed)) {
+        // Diagnostics (campfire squares): the native light-bin depth scan bound while the correction is off.
+        if(!reportedOff.load(std::memory_order_relaxed)) {
+            bool known=false;auto* dev=commands->get_device();
+            {std::lock_guard lock(mutex);for(const auto& entry:copies)if(entry.owner==dev&&entry.original.handle==original.handle){known=true;break;}}
+            if(known&&!reportedOff.exchange(true)&&logger)logger("VR light bounds: native depth scan bound while the correction is OFF");
+        }
+        return;
+    }
     static thread_local GenerationCache<Copy> cache;
     Copy found{};const auto version=generation.load(std::memory_order_acquire);auto* dev=commands->get_device();
     if(!cache.Get(original.handle,version,found)) {
@@ -96,5 +106,8 @@ void Register(void (*log)(const char*)) {
     reshade::register_event<reshade::addon_event::destroy_device>(&d2rvr::D3D12Only<&DeviceDestroyed>::Call);
     reshade::register_event<reshade::addon_event::bind_pipeline>(&d2rvr::D3D12Only<&Bind>::Call);
 }
-void SetActive(bool on){active.store(on,std::memory_order_relaxed);}
+void SetActive(bool on){
+    if(active.exchange(on,std::memory_order_relaxed)!=on&&logger)
+        logger(on?"VR light bounds: correction switched ON":"VR light bounds: correction switched OFF");
+}
 }
