@@ -340,6 +340,8 @@ struct Settings {
     std::atomic<bool>  campfireCaption{true};   // [campfire] caption: the picked hero's class and words on a board over the heroes
     std::atomic<float> campfireCaptionRect[4]{{0.25f},{0.0f},{0.75f},{0.33f}};   // [campfire] caption_left/top/right/bottom: shares of the menu band
     std::atomic<float> campfireCaptionWidth{3.0f}, campfireCaptionDistance{6.5f}, campfireCaptionRise{2.0f};   // [campfire] caption_width/distance/rise (metres)
+    std::atomic<bool>  campfirePano{true};      // [campfire] panorama: one picture round the scene (pano_file), in the void
+    std::atomic<float> campfirePanoYaw{0.0f}, campfirePanoLow{-10.0f}, campfirePanoHigh{40.0f}, campfirePanoBright{1.0f};   // [campfire] pano_yaw/low/high/brightness
     std::atomic<float> campfireMenuTop{0.78f};  // [campfire] menu_top: where the strip begins, a share of the game's menu band from its top
     std::atomic<float> campfirePickDist{22.0f};// [campfire] pick_distance: how far along the hand's ray the pointer is put, world units
     std::atomic<bool>  skyHidePanels{true}; // no sky while a side panel shifts the picture
@@ -711,6 +713,7 @@ const char* const kActDefs[7] = {"", "ACT1", "ACT2", "ACT3", "ACT4", "ACT5", "SN
 struct SkyAct { float bright; std::string band, cap; bool bandOk, capOk; float fog[3]; bool fogSet;
                 std::string nightBand, nightCap; bool nightOk; };   // [sky] night_<act> / night_cap_<act>: the night picture (gen_night_sky.py)
 SRWLOCK g_skyCfgLock = SRWLOCK_INIT;
+std::string g_campfirePanoFile = "D2R_Sky_ours/D2R_Campfire_Pano.png";   // [campfire] pano_file (under g_skyCfgLock)
 SkyAct g_skyAct[7];
 // [fog] color_caves: one colour for every area off the outdoor list - caves,
 // dungeons, crypts, towers. Empty = the act's own colour, as before.
@@ -1452,6 +1455,17 @@ void LoadSettings() {
         g_set.campfireMenuDrop.store(std::clamp(IniF(L"campfire", L"menu_drop", 0.9f), -0.5f, 1.5f));
         g_set.campfireMenuTop.store(std::clamp(IniF(L"campfire", L"menu_top", 0.78f), 0.0f, 0.98f));
         g_set.campfireCaption.store(IniB(L"campfire", L"caption", true));
+        g_set.campfirePano.store(IniB(L"campfire", L"panorama", true));
+        g_set.campfirePanoYaw.store(std::clamp(IniF(L"campfire", L"pano_yaw", 0.0f), -360.0f, 360.0f));
+        g_set.campfirePanoLow.store(std::clamp(IniF(L"campfire", L"pano_low", -10.0f), -90.0f, 89.0f));
+        g_set.campfirePanoHigh.store(std::clamp(IniF(L"campfire", L"pano_high", 40.0f), -89.0f, 90.0f));
+        g_set.campfirePanoBright.store(std::clamp(IniF(L"campfire", L"pano_brightness", 1.0f), 0.0f, 4.0f));
+        {
+            wchar_t f[260] = {};
+            GetPrivateProfileStringW(L"campfire", L"pano_file", L"D2R_Sky_ours/D2R_Campfire_Pano.png", f, 260, g_iniPath);
+            const std::wstring w(f);
+            AcquireSRWLockExclusive(&g_skyCfgLock); g_campfirePanoFile.assign(w.begin(), w.end()); ReleaseSRWLockExclusive(&g_skyCfgLock);
+        }
         g_set.campfireCaptionRect[0].store(std::clamp(IniF(L"campfire", L"caption_left", 0.25f), 0.0f, 1.0f));
         g_set.campfireCaptionRect[1].store(std::clamp(IniF(L"campfire", L"caption_top", 0.0f), 0.0f, 1.0f));
         g_set.campfireCaptionRect[2].store(std::clamp(IniF(L"campfire", L"caption_right", 0.75f), 0.0f, 1.0f));
@@ -10247,6 +10261,17 @@ bool ApplySkyPictures(reshade::api::effect_runtime* rt) {
             set = true;
         }
     }
+    {   // the campfire's panorama ([campfire] pano_file), its own slot
+        AcquireSRWLockShared(&g_skyCfgLock); const std::string file = g_campfirePanoFile; ReleaseSRWLockShared(&g_skyCfgLock);
+        const std::string want = "\"" + file + "\"";
+        char have[1024] = {};
+        size_t size = sizeof have;
+        if (!(rt->get_preprocessor_definition_for_effect("D2R_DepthFog.fx", "D2R_SKY_PANO", have, &size) && want == have)) {
+            rt->set_preprocessor_definition_for_effect("D2R_DepthFog.fx", "D2R_SKY_PANO", want.c_str());
+            LogF("vrcam: campfire panorama D2R_SKY_PANO = %s", want.c_str());
+            set = true;
+        }
+    }
     {   // Empty slots use no source image; the existing procedural stone path
         // handles biomes without an installed texture. Do not request a missing
         // default file: ReShade treats that as a failed effect reload.
@@ -11196,6 +11221,16 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
     SetFloat(rt, "SkyNightMix", act.nightOk && act.bandOk ? 1.0f - DayNightK() : 0.0f);
     SetFloat(rt, "SkyDrift", g_set.skyDrift.load() ? 1.0f : 0.0f);
     SetFloat(rt, "SkyBrightness", act.nightOk && act.bandOk ? act.bright : act.bright * DayNightMul());
+    // The campfire's panorama ([campfire] panorama): one picture round the scene, sky and mountains, in its own slot.
+    const bool pano = CampfireSky() && g_set.campfirePano.load();
+    SetBool(rt, "SkyPano", pano);
+    if (pano) {
+        SetFloat(rt, "SkyTex", 5.0f);   // painted (PaintedSky), whatever act 5's own pictures are
+        SetFloat(rt, "SkyBrightness", g_set.campfirePanoBright.load());
+        SetFloat(rt, "SkyPanoYaw", g_set.campfirePanoYaw.load());
+        SetFloat(rt, "SkyPanoLow", g_set.campfirePanoLow.load());
+        SetFloat(rt, "SkyPanoHigh", g_set.campfirePanoHigh.load());
+    }
 }
 
 // ReShade may load after us; tried twice a second until it is there.

@@ -157,6 +157,13 @@ uniform float SkyStars < hidden = true; > = 0.0;
 uniform float SkyBrightness < hidden = true; > = 1.0;
 uniform float SkyTex < hidden = true; > = 0.0;        // 0 = drawn here, 1..6 = painted: act 1-5, act 5 snow
 uniform bool SkyCapOn < hidden = true; > = true;       // the painted sky has its zenith picture
+// One panorama round the viewer instead of the band and cap (the campfire, [campfire] panorama):
+// once round the circle, turned by SkyPanoYaw degrees, its bottom row at SkyPanoLow degrees and its top
+// row at SkyPanoHigh; above that it fades into its own top row, blurred. No drift: mountains stand still.
+uniform bool SkyPano < hidden = true; > = false;
+uniform float SkyPanoYaw < hidden = true; > = 0.0;
+uniform float SkyPanoLow < hidden = true; > = -10.0;
+uniform float SkyPanoHigh < hidden = true; > = 40.0;
 uniform float Timer < source = "timer"; >;
 
 // The cave ceiling (docs/plan_cave_ceiling.md), set by vrcam ([ceiling]) in the
@@ -322,6 +329,11 @@ texture2D SkyBand5Tex < source = D2R_SKY_ACT5; > { Width = 1536; Height = 1024; 
 sampler2D SkyBand5Smp { Texture = SkyBand5Tex; AddressU = WRAP; AddressV = CLAMP; };
 texture2D SkyCap5Tex < source = D2R_SKYCAP_ACT5; > { Width = 1024; Height = 1024; Format = RGBA8; };
 sampler2D SkyCap5Smp { Texture = SkyCap5Tex; AddressU = WRAP; AddressV = WRAP; };
+#ifndef D2R_SKY_PANO
+ #define D2R_SKY_PANO "D2R_Sky_ours/D2R_Sky_act1.png"
+#endif
+texture2D SkyPanoTex < source = D2R_SKY_PANO; > { Width = 4096; Height = 1366; Format = RGBA8; MipLevels = 12; };
+sampler2D SkyPanoSmp { Texture = SkyPanoTex; AddressU = WRAP; AddressV = CLAMP; };
 texture2D SkyBand6Tex < source = D2R_SKY_SNOW; > { Width = 1536; Height = 1024; Format = RGBA8; };
 sampler2D SkyBand6Smp { Texture = SkyBand6Tex; AddressU = WRAP; AddressV = CLAMP; };
 texture2D SkyCap6Tex < source = D2R_SKYCAP_SNOW; > { Width = 1024; Height = 1024; Format = RGBA8; };
@@ -421,6 +433,14 @@ float3 CapAt(int slot, float4 t, bool night)
 
 float3 PaintedSky(float3 dir)
 {
+    if (SkyPano) {
+        const float pel = degrees(asin(clamp(dir.y, -1.0, 1.0)));
+        const float pu = atan2(dir.x, dir.z) / 6.2831853 + SkyPanoYaw / 360.0;
+        const float pv = (SkyPanoHigh - pel) / max(SkyPanoHigh - SkyPanoLow, 1.0);
+        const float3 pc = tex2Dlod(SkyPanoSmp, float4(pu, saturate(pv), 0, 0)).rgb;
+        const float3 top = tex2Dlod(SkyPanoSmp, float4(pu, 0.02, 0, 7)).rgb;
+        return lerp(pc, top, smoothstep(SkyPanoHigh - 4.0, SkyPanoHigh + 18.0, pel));
+    }
     const float el = degrees(asin(clamp(dir.y, -1.0, 1.0)));
     // two turns round the circle, drifting slowly so the clouds move
     const float u = atan2(dir.x, dir.z) / 3.14159265 + Timer * 0.000001 * SkyDrift;
