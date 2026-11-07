@@ -138,6 +138,8 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
     auto oldFont=SelectObject(dc,font);SetBkMode(dc,TRANSPARENT);SetTextColor(dc,RGB(238,235,220));
     auto fill=[&](RECT r,COLORREF c){auto b=CreateSolidBrush(c);FillRect(dc,&r,b);DeleteObject(b);};
     auto text=[&](const char* t,RECT r){wchar_t w[256]{};MultiByteToWideChar(CP_UTF8,0,t,-1,w,256);DrawTextW(dc,w,-1,&r,DT_CENTER|DT_VCENTER|DT_WORDBREAK|DT_NOPREFIX);};
+    // a label's width in the font selected now: the chips and tags that hold CAST ON STRIKE size to it
+    auto width=[&](const char* t){wchar_t w[256]{};const int n=MultiByteToWideChar(CP_UTF8,0,t,-1,w,256);SIZE size{};if(n>1)GetTextExtentPoint32W(dc,w,n-1,&size);return int(size.cx);};
     auto paragraph=[&](const std::string& t,RECT r){wchar_t w[1024]{};MultiByteToWideChar(CP_UTF8,0,t.c_str(),-1,w,1024);DrawTextW(dc,w,-1,&r,DT_LEFT|DT_TOP|DT_WORDBREAK|DT_NOPREFIX);};
     auto polygon=[&](POINT* p,int n,COLORREF c){auto b=CreateSolidBrush(c);auto was=SelectObject(dc,b);auto pen=SelectObject(dc,GetStockObject(NULL_PEN));Polygon(dc,p,n);SelectObject(dc,pen);SelectObject(dc,was);DeleteObject(b);};
     const bool handWheel=o.wheelHand>=0;
@@ -256,13 +258,22 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
             if(draws)std::snprintf(label,sizeof label,"Draw glyph");
             else if(o.editor)std::snprintf(label,sizeof label,"%d. %s",i+1,skill.known?skill.name:"Unknown");
             else std::snprintf(label,sizeof label,"%s",skill.known?skill.name:"Unknown");
+            if(handWheel&&i==0&&skill.id<0&&!draws)std::snprintf(label,sizeof label,"Cast On Strike");
             if(!o.editor&&(handWheel?i==0:i==selection)) {
                 const auto pen=CreatePen(PS_SOLID,3,RGB(230,190,96));
                 const auto oldPen=SelectObject(dc,pen),oldBrush=SelectObject(dc,GetStockObject(HOLLOW_BRUSH));
                 RoundRect(dc,box.left-5,box.top-5,box.right+5,box.bottom+5,10,10);
                 SelectObject(dc,oldBrush);SelectObject(dc,oldPen);DeleteObject(pen);
-                fill({x-34,y+12,x+34,y+28},RGB(100,74,29));
-                const auto prior=SelectObject(dc,shortcutFont);text(handWheel?((o.wheelHand==1?o.leftCue.gesture:o.cue.gesture)?"GESTURE":"PRIMARY"):"ACTIVE",{x-34,y+12,x+34,y+28});SelectObject(dc,prior);
+                // the selected slot's tag: CAST ON STRIKE (a landed swing or shield bash casts it), GESTURE, PRIMARY
+                const auto& cue=o.wheelHand==1?o.leftCue:o.cue;
+                const bool strike=handWheel&&cue.gesture&&cue.strike;
+                const char* tag=handWheel?(strike?"CAST ON STRIKE":cue.gesture?"GESTURE":"PRIMARY"):"ACTIVE";
+                if(handWheel&&!cue.gesture)tag=nullptr;   // PRIMARY lives in the slot's header box
+                if(tag){
+                const auto prior=SelectObject(dc,shortcutFont);
+                const int half=std::max(34,(width(tag)+14)/2);   // one line, wider than the icon if the tag needs it
+                fill({x-half,y+64,x+half,y+80},RGB(100,74,29));   // above the trigger name
+                text(tag,{x-half,y+64,x+half,y+80});SelectObject(dc,prior);}
             }
         } else if(i<4) {
             const char* utility[]={"Weapon I","Weapon II","",o.stowed?"Draw weapons":"Stow weapons"};
@@ -283,9 +294,9 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
             fill({x-75,y-77,x+75,y-48},RGB(24,20,16));
             SetTextColor(dc,RGB(235,205,151));
             SelectObject(dc,shortcutFont);
-            text(handWheel?labels.Button(o.wheelHand,i).c_str():skills::NativeLabel(i),{x-73,y-77,x+73,y-48});
+            text(handWheel?(i==0?"Primary":labels.Button(o.wheelHand,i).c_str()):skills::NativeLabel(i),{x-73,y-77,x+73,y-48});
             SetTextColor(dc,RGB(206,191,159));
-            text(labels.Slot(slot).c_str(),{x-85,y+68,x+85,y+105});
+            text(labels.Slot(slot).c_str(),handWheel&&i==0?RECT{x-85,y+84,x+85,y+104}:RECT{x-85,y+68,x+85,y+105});
             SelectObject(dc,previous);
         }
     }
@@ -414,15 +425,17 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
             else if(skill.owner==-1)std::snprintf(detail,sizeof detail,"Level %d",skill.level);
             else std::snprintf(detail,sizeof detail,"Item-granted skill");
             SelectObject(dc,shortcutFont);SetTextColor(dc,RGB(169,151,118));
-            // Gesture skills (skill_usage.h): GESTURE from this slot, ON TRIGGER where a trigger makes one.
+            // Gesture and Cast On Strike skills (skill_usage.h): a GESTURE / CAST ON STRIKE chip when the slot
+            // being edited runs the skill by motion. Other slots show no chip (Cal, 2026-11-03: no ON TRIGGER).
             const bool glyphPick=o.glyphEdit>=0||draw;
-            const bool here=!glyphPick&&skillusage::Gesture(skill.id,o.editSlot);
-            const bool trigger=!glyphPick&&(here||skillusage::Gesture(skill.id,skills::TriggerSlot(0))||skillusage::Gesture(skill.id,skills::TriggerSlot(1)));
-            text(detail,{x+85,y+63,trigger?right-106:right-8,bottom-4});
-            if(trigger) {
-                const RECT chip{right-102,bottom-27,right-8,bottom-7};
-                fill(chip,here?RGB(100,74,29):RGB(48,40,28));SetTextColor(dc,here?RGB(235,218,181):RGB(169,151,118));
-                text(here?"GESTURE":"ON TRIGGER",chip);
+            const bool here=!glyphPick&&skillusage::ByMotion(skill.id,o.editSlot);
+            const char* chipText=skillusage::CastOnStrike(skill.id,o.editSlot)?"CAST ON STRIKE":"GESTURE";
+            const int chipWidth=here?std::max(94,width(chipText)+14):0;   // one line: CAST ON STRIKE is wider than the old 94 px
+            text(detail,{x+85,y+63,here?right-12-chipWidth:right-8,bottom-4});
+            if(here) {
+                const RECT chip{right-8-chipWidth,bottom-27,right-8,bottom-7};
+                fill(chip,RGB(100,74,29));SetTextColor(dc,RGB(235,218,181));
+                text(chipText,chip);
             }
             SetTextColor(dc,RGB(235,218,181));SelectObject(dc,font);
         }
@@ -450,7 +463,8 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
                         "and its own skills on the shapes: choose them on the GLYPHS page (the box at the upper right of the wheel). "
                         "This button casts nothing else.";
             } else {
-                text(skillusage::Gesture(skill.id,o.editSlot)?"GESTURE ON THIS TRIGGER":trigger?"ON THIS TRIGGER":"ON THIS BUTTON",{box.left+10,box.top+38,box.right-10,box.top+56});
+                text(skillusage::CastOnStrike(skill.id,o.editSlot)?"CAST ON STRIKE ON THIS TRIGGER":skillusage::Gesture(skill.id,o.editSlot)?"GESTURE ON THIS TRIGGER":
+                     trigger?"ON THIS TRIGGER":"ON THIS BUTTON",{box.left+10,box.top+38,box.right-10,box.top+56});
                 details=skillusage::Details(skill.id,o.editSlot);
             }
             SelectObject(dc,cardFont);SetTextColor(dc,RGB(235,218,181));
@@ -619,7 +633,7 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
         const auto prior=SelectObject(dc,skillFont);SetTextColor(dc,RGB(232,196,119));
         if(handWheel&&usage[0]){SelectObject(dc,shortcutFont);text(usage,{38,639,730,685});}   // the slot pointed at
         else {
-            if(handWheel){SelectObject(dc,shortcutFont);text("Top trigger slot: compatible skills also power weapon gestures.",{38,639,730,662});}
+            if(handWheel){SelectObject(dc,shortcutFont);text("Trigger slot: Cast On Strike skills cast when your swing lands.",{38,639,730,662});}
             text(active,handWheel?RECT{38,662,730,685}:RECT{150,648,618,681});
         }
         SelectObject(dc,prior);

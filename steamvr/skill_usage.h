@@ -54,15 +54,15 @@ inline const char* Line(int skill,int slot) {
             if(!at.right)break;
             return "Gesture: throw by hand. A javelin or throwing weapon flies along your throw; a gas or oil potion flies as a bottle and bursts where it shatters.";
         case Kind::Strike:
-            if(!at.trigger)return "Press to cast it, aimed by this hand. On a trigger it is a gesture: a swing that lands casts it.";
-            return at.left?"Gesture with a second weapon or claw: a full-cycle swing of the left hand that lands casts it; quicker swings stay weaker basic attacks.":
-                           "Gesture: a full-cycle swing that lands casts it on what you hit; quicker swings stay weaker basic attacks. Holding the trigger still casts it.";
+            if(!at.trigger)return "Press to cast it, aimed by this hand. On a trigger it is Cast On Strike: a swing that lands casts it.";
+            return at.left?"Cast On Strike with a second weapon or claw: a full-cycle swing of the left hand that lands casts it; quicker swings stay weaker basic attacks.":
+                           "Cast On Strike: a full-cycle swing that lands casts it on what you hit; quicker swings stay weaker basic attacks. Holding the trigger still casts it.";
         case Kind::Sequence:
-            if(!at.trigger)return "Press to cast it, aimed by this hand. On a trigger it is a gesture: a swing that lands casts it; its other hits land by themselves.";
-            if(at.left)return "Gesture with a second weapon or claw: a full-cycle swing of the left hand that lands casts it, as on the right trigger.";
-            return "Gesture: a full-cycle swing that lands casts it; its other hits then land by themselves. Swings while it runs stay basic attacks.";
+            if(!at.trigger)return "Press to cast it, aimed by this hand. On a trigger it is Cast On Strike: a swing that lands casts it; its other hits land by themselves.";
+            if(at.left)return "Cast On Strike with a second weapon or claw: a full-cycle swing of the left hand that lands casts it, as on the right trigger.";
+            return "Cast On Strike: a full-cycle swing that lands casts it; its other hits then land by themselves. Swings while it runs stay basic attacks.";
         case Kind::Smite:
-            return at.left?"Gesture with a shield: bash or thrust the shield into a monster to cast it. Without a shield, press to cast.":
+            return at.left?"Cast On Strike with a shield: bash or thrust the shield into a monster to cast it. Without a shield, press to cast.":
                            "Press to cast it at what this hand points at. On the left trigger with a shield, a shield bash casts it.";
         case Kind::Bow:case Kind::Quiver:
             if(at.trigger)return "Gesture with a bow: draw the string and release to fire it. Without a bow, press to cast.";
@@ -122,16 +122,16 @@ inline std::string Details(int skill,int slot) {
                    "with Bottle physics on the potion leaves your hand as a real bottle, and the game's own cloud or blast starts where it "
                    "shatters on the floor, a wall, a table or a prop, within the game's reach. A quick press or a still hold throws as the game does.";
         case Kind::Strike: {
-            if(!at.trigger)return "Press to cast it natively, aimed by this hand. On a trigger it becomes a gesture: a swing that lands casts it on the monster you hit, with the skill's own mana, damage and effects.";
-            std::string text=at.left?"Gesture, with a second weapon of a dual-wield pair or the other claw in a form. ":"Gesture with a melee weapon or claws. ";
+            if(!at.trigger)return "Press to cast it natively, aimed by this hand. On a trigger it becomes Cast On Strike: a swing that lands casts it on the monster you hit, with the skill's own mana, damage and effects.";
+            std::string text=at.left?"Cast On Strike, with a second weapon of a dual-wield pair or the other claw in a form. ":"Cast On Strike with a melee weapon or claws. ";
             text+="A full-cycle swing that lands casts it on the monster you hit, with the skill's own mana, damage and effects. Quicker swings stay basic attacks, with less damage and no on-hit effects.";
             text+=refused;
             if(at.right)text+=" Holding the trigger still casts it natively.";
             return text;
         }
         case Kind::Sequence: {
-            if(!at.trigger)return "Press to cast it natively, aimed by this hand. On a trigger it becomes a gesture: a swing that lands casts it on the monster you hit, and its other hits land by themselves.";
-            std::string text=at.left?"Gesture, with a second weapon or the other claw, as on the right trigger. ":"Gesture with a melee weapon or claws. ";
+            if(!at.trigger)return "Press to cast it natively, aimed by this hand. On a trigger it becomes Cast On Strike: a swing that lands casts it on the monster you hit, and its other hits land by themselves.";
+            std::string text=at.left?"Cast On Strike, with a second weapon or the other claw, as on the right trigger. ":"Cast On Strike with a melee weapon or claws. ";
             text+="A full-cycle swing that lands casts it on the monster you hit: its mana once and hit 1. Its other hits then land by themselves "
                   "at the skill's own pace, moving on to monsters nearby within reach, while you keep moving. Swings while it runs, and quicker "
                   "swings, stay basic attacks, with less damage and no on-hit effects.";
@@ -140,7 +140,7 @@ inline std::string Details(int skill,int slot) {
             return text;
         }
         case Kind::Smite:
-            return at.left?"Gesture with a shield: swing or thrust the shield through a monster to cast Smite on it, with its stun and damage; keep the right trigger released. "
+            return at.left?"Cast On Strike with a shield: swing or thrust the shield through a monster to cast Smite on it, with its stun and damage; keep the right trigger released. "
                            "Without a shield, the left trigger casts it at what you point at.":
                            "Press to cast it at what this hand points at. On the left trigger with a shield equipped, swinging or thrusting the shield into a monster casts it.";
         case Kind::Bow:case Kind::Quiver:
@@ -191,9 +191,19 @@ inline std::string Details(int skill,int slot) {
     }
     return std::string(at.trigger?"Press the trigger":"Press the button")+" to cast it natively, aimed by this hand: at the monster you point at, or where you point.";
 }
-// A gesture from this slot with the right equipment.
+// A gesture from this slot with the right equipment: a body motion that casts it (the sign of
+// the cross, a shapeshift, a hammer punch), a bow draw or a throw.
 inline bool Gesture(int skill,int slot) {
     const char* text=Line(skill,slot);
     return text[0]=='G'&&text[1]=='e'&&text[2]=='s';
 }
+// Cast On Strike from this slot (Cal, 2026-11-03: "a better identifier" than Gesture for the
+// melee strike skills, Fury/Zeal, Double Swing/Frenzy and the shield's Smite): a landed swing
+// or shield bash casts it. Like a gesture it needs a trigger slot.
+inline bool CastOnStrike(int skill,int slot) {
+    const char* text=Line(skill,slot);
+    return std::string(text).rfind("Cast On Strike",0)==0;
+}
+// Either: the slot's skill is cast by a motion, not by pressing.
+inline bool ByMotion(int skill,int slot) {return Gesture(skill,slot)||CastOnStrike(skill,slot);}
 }
