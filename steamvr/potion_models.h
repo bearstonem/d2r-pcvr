@@ -25,7 +25,7 @@ public:
     float Radius(uint32_t code) const; // widest horizontal extent of that model, metres; 0 unknown
     unsigned Tosses() const; // thrown trap models loaded (toss::Model codes; #224)
     unsigned Bones() const;  // Bone Armor pieces loaded (bn1..bn3; bone_graft.h)
-    unsigned IcePieces() const; // original translucent plates, built in (optional ic1..ic3 overrides)
+    unsigned IcePieces() const; // authored ic1..ic3 assets loaded; 0 when missing or invalid
     void Reset();
     // Caller waited the eye's copy fence before reusing its RTV/depth resource.
     bool Render(ID3D12GraphicsCommandList*,ID3D12Resource*,unsigned eye,
