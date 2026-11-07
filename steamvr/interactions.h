@@ -323,7 +323,7 @@ inline bool Fresh(const Snapshot& s,uint64_t session,uint64_t now) {
 }
 // BindGlyph / BindGlyphDraw: glyph casting's wheel settings (index: the shape, the left hand's 8 on
 // (GlyphIndex) / the hand slot), answered by the transport, which saves them; no game command.
-enum class Action { None, Potion, Equip, Quest, Map, Character, Skills, BindSkill, Developer, FeedMerc, BindItem, UseItem, RunWalk, BindGlyph, BindGlyphDraw, ToggleMotion };
+enum class Action { None, Potion, Equip, Quest, Map, Character, Skills, BindSkill, Developer, FeedMerc, BindItem, UseItem, BindGlyph, BindGlyphDraw, ToggleMotion };
 enum class Result { None, Pending, Applied, Refused, Cancelled, Dispatched, KitRefused, DebugUpdated, TurnsUpdated, SharpUpdated, FillUpdated, RimsUpdated, SkyRimsUpdated, BodiesUpdated };
 struct Request {
     Action action=Action::None;
@@ -507,7 +507,6 @@ struct Input {
     uint64_t session=0,epoch=0,at=0; // at shares the native snapshot's monotonic clock
     bool active=false,tracked[2]{},wheel=false,cancel=false,reservedLeft=false,spell=false,quickCast=false;
     bool leatherReach=false; // [interactions] leather_menu: the left hand over the left shoulder opens the tabbed menu (leather_menu.h)
-    bool gaitToggle=false;   // the game's run / walk toggle is the other way than the hero should go (Movement speed's WALK or a run stop, or the stick's switch): send it
     int leftStrikes=-1;   // Druid or dual wield: [gameplay] left_hand_strikes for the wheel's box (0 own trigger, 1 same as right); -1 hides it
     vitals::Location navigationLocation=vitals::Location::Wrist;
     vitals::Location vitalsLocation=vitals::Location::Wrist;
@@ -856,9 +855,6 @@ public:
         sheet.allowed=!wheel&&!in.quickCast&&!in.cancel&&!rearm&&bottle<0&&holster<0&&pending.action==Action::None;
         const auto reached=leatherReach.Step(sheet);out.block=out.block||reached.block;
         if(reached.open){out.inventory=true;out.feedback=1;out.feedbackHand=leather::Hand;}
-        // VR Settings > Movement speed: WALK walks, every other stop runs. When the game's
-        // toggle is the other way, its own run / walk command (no tick).
-        if(in.gaitToggle&&fresh&&request(Action::RunWalk,0))pendingHand=0;
         if(wheel) {
             out.wheel=true;out.utility=utility;out.map=map;out.glyphs=glyphs;out.hover=in.hover;out.block=true;out.leftStrikes=in.leftStrikes;
             owner[0]=owner[1]=Owner::Wheel;

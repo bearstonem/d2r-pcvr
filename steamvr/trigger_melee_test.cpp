@@ -34,6 +34,7 @@ uint32_t NativeTrigger(uintptr_t,int,uintptr_t,uintptr_t,uintptr_t){++nativeEven
 uint64_t NativeApplyDamage(uintptr_t,uintptr_t,uintptr_t,int,uintptr_t){return 0;}
 }
 namespace gamestate {uint64_t LocalPlayer(){return fixture::session;}int32_t LeftDurability(){return -1;}}
+namespace projectiles {void CombatWalk(int){}}
 namespace d2rsig {
 uint64_t Rva(uint64_t rva){return rva;}
 uintptr_t Addr(uint64_t rva){return rva?fixture::imageBase+rva:0;}

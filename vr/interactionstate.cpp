@@ -52,6 +52,8 @@ bool scheduled=false;
 // Glyph casting's park (Park): its own slot.
 struct Parking {uint64_t session=0;int skill=-1,owner=-1;} parking;
 bool parkScheduled=false;
+// The run / walk toggle (ToggleRunWalk): its own slot.
+uint64_t toggleSession=0;bool toggleScheduled=false;
 template<class T>const T* Service(const PluginContext* c) {const T* p=nullptr;return c->QueryService(&p)==ServiceQueryResult::Success?p:nullptr;}
 Item Copy(const Items::ItemInfo& i, uint32_t fireDamage = 0) {
     return {i.handle, i.runtimeId, i.code, uint32_t(i.quality), i.qualityRecordId, i.socketedItemCount, 0, fireDamage};
@@ -196,11 +198,10 @@ void __cdecl Apply(const PluginContext*,void*) noexcept {
         Publish(Collect()); // refresh wheel and any duplicates cleared by D2R
         return;
     }
-    if(r.action==Action::BindItem||r.action==Action::UseItem||r.action==Action::RunWalk) {
+    if(r.action==Action::BindItem||r.action==Action::UseItem) {
         {std::lock_guard lock(mutex);valid=valid&&epoch==cancelEpoch;}
         // Native item use may open/pump UI. Never hold the snapshot lock here.
-        const bool accepted=valid&&(r.action==Action::RunWalk?gamecmd::ExecuteUiCommand(0x23):
-            r.action==Action::BindItem?quickitems::Assign(r,s):quickitems::Use(r,s));
+        const bool accepted=valid&&(r.action==Action::BindItem?quickitems::Assign(r,s):quickitems::Use(r,s));
         {std::lock_guard lock(mutex);if(epoch==cancelEpoch)
             reply={r.sequence,r.session,accepted?(r.action==Action::UseItem?Result::Dispatched:Result::Applied):Result::Refused};}
         Publish(Collect());return;
@@ -225,6 +226,13 @@ void __cdecl Apply(const PluginContext*,void*) noexcept {
         waiting=r;issuedAt=now;reply={r.sequence,r.session,Result::Pending};
     } else reply={r.sequence,r.session,accepted?Result::Applied:Result::Refused};
     framevr::logging::Write(accepted?"Frame interactions: native action accepted; item/set changes require confirmation":"Frame interactions: stale or refused native action discarded");
+}
+void __cdecl ApplyRunWalk(const PluginContext*,void*) noexcept {
+    uint64_t session=0;
+    {std::lock_guard lock(mutex);session=toggleSession;toggleSession=0;toggleScheduled=false;}
+    if(!session)return;
+    const auto s=Read();
+    if(framevr::interaction::Fresh(s,session,GetTickCount64())&&!gamestate::MenuOpen())gamecmd::ExecuteUiCommand(0x23);
 }
 void __cdecl ApplyPark(const PluginContext*,void*) noexcept {
     Parking p;
@@ -312,6 +320,12 @@ void Request(const framevr::interaction::Request& r) {
     }
 }
 void Cancel(){devscenarios::Cancel();std::lock_guard lock(mutex);++cancelEpoch;queued={};waiting={};reply={};}
+bool ToggleRunWalk(uint64_t session) {
+    if(!threads||!threads->runOnUiThread||!session)return false;
+    {std::lock_guard lock(mutex);if(toggleScheduled)return false;toggleSession=session;toggleScheduled=true;}
+    if(threads->runOnUiThread(context,&ApplyRunWalk,nullptr)==D2RL::Threads::Result::Success)return true;
+    std::lock_guard lock(mutex);toggleSession=0;toggleScheduled=false;return false;
+}
 bool Park(uint64_t session,int skill,int owner) {
     if(!threads||!threads->runOnUiThread||skill<0)return false;
     {std::lock_guard lock(mutex);if(parkScheduled)return false;parking={session,skill,owner};parkScheduled=true;}

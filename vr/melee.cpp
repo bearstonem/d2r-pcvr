@@ -1127,6 +1127,7 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                         if(strike!=StrikeOutcome::Basic&&!contact.resolved){
                             contact.resolved=true;contact.accepted=strike==StrikeOutcome::Cast;
                         }
+                        if(contact.resolved)projectiles::CombatWalk(2);   // combat walk: a strike that fired
                         // A form's attack voice (growl, or Rabies/Hunger's bite) on each stroke that
                         // natively is one attack (strike_skills.h FormVoice); the animation that plays it is skipped.
                         // A cast's later hits (Sequence) are the same native attack: silent.
@@ -1542,6 +1543,7 @@ void __cdecl SequenceHit(const D2RL::PluginContext*,void*) noexcept {
     const auto since=now-(sequence.DueAt()-sequence.Gap());
     if(!SequenceStrike(local.game,player,sequence.Skill(),sequence.Owner(),target)){sequence.End();++sequenceRefused;finish();return;}
     const int ordinal=sequence.Hit(now,target);++sequenceHits;
+    projectiles::CombatWalk(2);   // combat walk: Fury / Zeal's later hits
     if(trace.load()) {
         char line[200];snprintf(line,sizeof line,"Frame melee trace: sequence skill=%d hit %d/%d target=%u after %llu ms (pace %llu ms)%s",
             sequence.Skill(),ordinal,sequence.Total(),target,(unsigned long long)since,(unsigned long long)sequence.Gap(),

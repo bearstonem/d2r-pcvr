@@ -14,5 +14,11 @@ void Request(const framevr::interaction::Request&);
 // Glyph casting (glyph_cast.h): put a skill on the right trigger's record, on the UI thread; apart from
 // Request's one slot so a cast never waits on the wheel. False while the previous one is scheduled.
 bool Park(uint64_t session,int skill,int owner);
+// The game's run / walk toggle (UI command 0x23; Movement speed and the combat walk, run_speed.h
+// GaitSync): its own slot on the UI thread, apart from Request's, so a toggle never holds back a
+// potion, holster draw, merc toss or quick-use item, never blocks motion input while it is in flight
+// and never buzzes. Refused (on the UI thread) with a menu open or a stale snapshot. False while
+// the previous one is still scheduled.
+bool ToggleRunWalk(uint64_t session);
 void Cancel();
 }
