@@ -1407,11 +1407,15 @@ void __cdecl SequenceHit(const D2RL::PluginContext*,void*) noexcept {
     }
     finish();
 }
-bool HirelingVitals(uint32_t hint,float& health,float& maxHealth,uint32_t& classId,uint32_t& unitId) {
+bool HirelingVitals(uint32_t hint,float& health,float& maxHealth,uint32_t& classId,uint32_t& unitId,const char** why) {
     health=maxHealth=0;classId=unitId=0;
+    const char* unused=nullptr;const char*& reason=why?*why:unused;reason=nullptr;
     const bool statReady=d2rsig::Check(nativeui::abi::StatRva,nativeui::abi::StatSig,sizeof nativeui::abi::StatSig);
     uintptr_t game=0,self=0;uint32_t mode=0;Vec selfPos{};
-    if(!statReady||!LocalServer(game,self)||!Read(self+0xc,mode)||mode==0||mode==17||!Position(self,selfPos))return false;
+    if(!statReady){reason="the stat reader did not check out";return false;}
+    if(!LocalServer(game,self)){reason="no local server";return false;}
+    if(!Read(self+0xc,mode)||mode==0||mode==17){reason="the hero dead or unread";return false;}
+    if(!Position(self,selfPos)){reason="the hero's position unread";return false;}
     // Known hireling: one direct lookup. Otherwise (first sample, death,
     // rehire) walk for it, at most once a second while none is found.
     // Offline the only live, non-hostile hireling is the player's own; the
@@ -1424,19 +1428,34 @@ bool HirelingVitals(uint32_t hint,float& health,float& maxHealth,uint32_t& class
         static uint64_t walkedAt=0;const auto now=GetTickCount64();
         if(now-walkedAt<1000)return false;
         walkedAt=now;float bestDistance=-1;
+        unsigned friendly=0;uint32_t seen[6]{};
         if(!EachFriendly(game,self,[&](uintptr_t unit,uint32_t id,Vec pos){
+            if(friendly<6)seen[friendly]=id;++friendly;
             const float d=std::hypot(pos.x-selfPos.x,pos.z-selfPos.z);uint32_t header[3]{};
             if(IsHireling(id)&&(bestDistance<0||d<bestDistance)&&Read(unit,header)){bestDistance=d;best=unit;unitId=header[2];}
-        })||!best){cachedHirelingId=0;return false;}
+        })){cachedHirelingId=0;reason="the monster list unread";return false;}
+        if(!best){
+            cachedHirelingId=0;reason="no hireling among the friendly monsters";
+            static uint64_t toldAt=0;   // the classes the walk saw, for a hireling class not in HirelingClasses
+            if(now-toldAt>10000){
+                toldAt=now;char line[200];
+                snprintf(line,sizeof line,"Frame companion AI: no hireling among %u friendly monsters (classes %u %u %u %u %u %u)",
+                         friendly,seen[0],seen[1],seen[2],seen[3],seen[4],seen[5]);
+                framevr::logging::Write(line);
+            }
+            return false;
+        }
         walkedAt=0; // found: later samples use the direct lookup
         cachedHirelingId=unitId;
     }
     uint32_t header[2]{};
-    if(!Read(best,header))return false;
+    if(!Read(best,header)){reason="the hireling unread";return false;}
     classId=header[1];
     auto stat=reinterpret_cast<int(*)(uintptr_t,int,int)>(d2rsig::Addr(nativeui::abi::StatRva));
     health=stat(best,6,0)/256.f;maxHealth=stat(best,7,0)/256.f; // life, max life (8.8 fixed point)
-    return maxHealth>0&&health>=0&&health<=maxHealth*2&&maxHealth<1000000;
+    const bool sane=maxHealth>0&&health>=0&&health<=maxHealth*2&&maxHealth<1000000;
+    if(!sane)reason="its life out of range";
+    return sane;
 }
 bool HirelingState(uint32_t unitId,int state,bool on) {
     uintptr_t game=0,self=0;
