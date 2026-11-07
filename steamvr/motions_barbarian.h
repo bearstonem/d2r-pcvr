@@ -129,22 +129,30 @@ inline float Peak(const std::vector<Sample>& h,int i,int mask) {
 }
 // Leap's and Leap Attack's swing: both arms back (forward at most `behind`) and down, then both up past
 // leapAbove, at least leapApart apart, risen leapRise within `window` s, each at swingSpeed at its fastest.
-// way: the way the arms swung, level; straight ahead (where you face) if they swung straight up, or to the
-// side or behind.
+// way: the way the arms swung, level, from the deepest start (the back-swing's bottom: with the start level
+// with the eyes, the first one in reach came before the arms went back, and the way from it was up, not on);
+// straight ahead (where you face) if they swung straight up, or to the side or behind.
 inline bool Swing(Engine& e,float behind,double window,math::Vec& way) {
     const auto& h=e.History();
     const auto& n=h.back();
     const auto& t=tuning;
     const auto& r=n.l[0];const auto& l=n.l[1];
     const bool end=r.y>=t.leapAbove&&l.y>=t.leapAbove&&Len(r-l)>=t.leapApart&&Forward(r)>=-.20f&&Forward(l)>=-.20f;
+    const auto start=[&](const Sample& s) {
+        const auto& a=s.l[0];const auto& b=s.l[1];
+        return n.t-s.t<=window&&a.y<=t.backLow&&b.y<=t.backLow&&Forward(a)<=behind&&Forward(b)<=behind;
+    };
     for(size_t i=0;i<h.size();++i) {
         const auto& s=h[i];
-        if(n.t-s.t>window)continue;
+        if(!start(s))continue;
         const auto& a=s.l[0];const auto& b=s.l[1];
-        if(a.y>t.backLow||b.y>t.backLow||Forward(a)>behind||Forward(b)>behind)continue;
         e.Toward(std::min(r.y-a.y,l.y-b.y)/t.leapRise);
         if(!end||r.y-a.y<t.leapRise||l.y-b.y<t.leapRise||Peak(h,int(i),1)<t.swingSpeed||Peak(h,int(i),2)<t.swingSpeed)continue;
-        way=((r-a)+(l-b))*.5f;way.y=0;
+        size_t deepest=i;
+        for(size_t j=i+1;j<h.size();++j)
+            if(start(h[j])&&h[j].l[0].z+h[j].l[1].z>h[deepest].l[0].z+h[deepest].l[1].z)deepest=j;
+        const auto& d=h[deepest];
+        way=((r-d.l[0])+(l-d.l[1]))*.5f;way.y=0;
         const float level=Len(way);
         way=Forward(way)<.05f||level<1e-3f?math::Vec{0,0,-1}:way*(1/level);
         if(-way.z<.3f)way={0,0,-1};   // off to the side or behind: where you face
