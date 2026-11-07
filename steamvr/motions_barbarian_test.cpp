@@ -173,8 +173,8 @@ int main() {
     {   // Whirlwind: a T held a moment (owner, 2026-11-06), whirling ahead
         Sim s(Motion::Whirlwind);Whirlwind(s);
         Check(s.casts==1&&s.land==spellmotion::Land::Spot&&s.spot.ahead>9&&std::fabs(s.spot.right)<1,"Whirlwind: lands 10 cells ahead, where you face");
-        Sim brief(Motion::Whirlwind);brief.Move({.75f,-.28f,-.05f},{-.75f,-.28f,-.05f},.45f);brief.Hold(.15f);brief.Move(RestR,RestL,.4f);brief.Hold(.3f);
-        Check(brief.casts==0,"Whirlwind: a T held under 0.3 s is none");
+        Sim brief(Motion::Whirlwind);brief.Move({.75f,-.28f,-.05f},{-.75f,-.28f,-.05f},.3f);brief.Move(RestR,RestL,.3f);brief.Hold(.3f);
+        Check(brief.casts==0,"Whirlwind: the arms swept through a T and straight back down, no stop, is none");
         Sim front(Motion::Whirlwind);front.Move({.55f,-.28f,-.50f},{-.55f,-.28f,-.50f},.45f);front.Hold(.5f);
         Check(front.casts==0,"Whirlwind: the arms out wide but forward is no T");
         Sim up(Motion::Whirlwind);up.Move({.60f,.35f,-.05f},{-.60f,.35f,-.05f},.45f);up.Hold(.5f);
