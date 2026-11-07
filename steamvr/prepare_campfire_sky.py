@@ -115,6 +115,29 @@ CLUTTER = ('snowprops', 'grass', 'weeds', 'corn_stalks', 'shrubs', 'bushes', '/g
            'hanging_props', 'decorations', 'cottage_props', 'furniture', 'chests', 'lights', 'cloth')
 
 
+# The town's own wall (its walls folder) where it runs on into the scene's built half: there the scene's
+# wall stands only in places (its gate, two lengths of wall) and the town's was all taken out with the half -
+# holes in the wall left of the gate and behind the player (owner 2026-11-07). Its pieces come back unless
+# one of the scene's own walls or its gate stands within WALL_FILL_CLEAR of them (no wall twice).
+WALL_FILL_CLEAR = 10.0
+WALL_FILL = True                 # --no-wall-fill: the town's wall out of the whole scene half, as before
+
+
+def scene_walls(preset):
+    """Where the scene's own walls and gate stand, (x, z) from the fire."""
+    out = []
+    for e in preset.get('entities', []):
+        comps = e.get('components', []) if isinstance(e, dict) else []
+        model = str(next((c.get('filename', '') for c in comps if c.get('type') == 'ModelDefinitionComponent'), '')).lower()
+        name = model.rsplit('/', 1)[-1]
+        if 'wall' not in name and 'gate' not in name:
+            continue
+        tr = next((c for c in comps if c.get('type') == 'TransformDefinitionComponent' and isinstance(c.get('position'), dict)), None)
+        if tr is not None:
+            out.append((float(tr['position'].get('x', 0.0)) - FIRE[0], float(tr['position'].get('z', 0.0)) - FIRE[1]))
+    return out
+
+
 def in_scene_half(dx, dz):
     a = math.degrees(math.atan2(dz, dx))
     return SCENE_SECTOR[0] <= a <= SCENE_SECTOR[1]
@@ -151,7 +174,8 @@ def town_ground(town, at, turn_deg, ids):
         dict(copy.deepcopy(model), name=f'town_ground{MIRROR}_ModelDefinitionComponent', shadowMask=0)]}
 
 
-def with_harrogath_behind(preset, town, at, turn_deg, near=14.0, far=400.0, ground=True, flip_wall=True, clutter=False):
+def with_harrogath_behind(preset, town, at, turn_deg, near=14.0, far=400.0, ground=True, flip_wall=True, clutter=False,
+                          wall_fill=True):
     """Harrogath's own houses, walls and props round the player: the town preset moved so that its
     point `at` (x, z) lies on the fire, turned by `turn_deg` about it, and only what lands outside the
     scene's own built half, between `near` and `far` from the fire. Models only, as above."""
@@ -164,6 +188,7 @@ def with_harrogath_behind(preset, town, at, turn_deg, near=14.0, far=400.0, grou
     ct, st = math.cos(t), math.sin(t)
     qy = (0.0, math.sin(t * 0.5), 0.0, math.cos(t * 0.5))
     added = 0
+    own_walls = scene_walls(preset) if wall_fill else []
     for source in town.get('entities', []):
         comps = source.get('components', []) if isinstance(source, dict) else []
         kinds = {str(c.get('type', '')) for c in comps}
@@ -180,8 +205,13 @@ def with_harrogath_behind(preset, town, at, turn_deg, near=14.0, far=400.0, grou
         z = float(tr['position'].get('z', 0.0)) - at[1]
         dx, dz = ct * x + st * z, -st * x + ct * z   # turned about +y
         d = math.hypot(dx, dz)
-        if d < near or d > far or in_scene_half(dx, dz) or beside_heroes(dx, dz):
+        if d < near or d > far or beside_heroes(dx, dz):
             continue
+        if in_scene_half(dx, dz):
+            model_name = str(next((c.get('filename', '') for c in comps if c.get('type') == 'ModelDefinitionComponent'), '')).lower()
+            if not (wall_fill and WALLS in model_name and
+                    all(math.hypot(dx - wx, dz - wz) >= WALL_FILL_CLEAR for wx, wz in own_walls)):
+                continue
         if any(k in kinds for k in ANIMATED):
             continue
         e = copy.deepcopy(source)
@@ -456,7 +486,8 @@ def generate(assets, mod_name='D2R-PCVR', surround=True, town_at=TOWN_AT_GATE, t
         removed = removed + [f'spot lights specular x{SPOT_SPECULAR}']
     if surround and town_at is not None:
         town = json.loads(assets.read(TOWN))
-        result, placed = with_harrogath_behind(result, town, town_at, town_turn, ground=ground, flip_wall=flip_wall, clutter=clutter)
+        result, placed = with_harrogath_behind(result, town, town_at, town_turn, ground=ground, flip_wall=flip_wall, clutter=clutter,
+                                               wall_fill=WALL_FILL)
         removed = removed + [f'+{placed} Harrogath models round the player (town point {town_at}, turned {town_turn})']
     elif surround:
         result, mirrored = with_town_behind(result)
@@ -527,12 +558,14 @@ def main():
     ap.add_argument('--spots-as-points', action='store_true', help="the scene's spot lights as point lights (testing)")
     ap.add_argument('--spot-specular', type=float, default=None, help="the spot lights' specular share (testing)")
     ap.add_argument('--town-shadows', action='store_true', help="the town's models cast shadows too (testing)")
+    ap.add_argument('--no-wall-fill', action='store_true', help="the town's wall out of the scene's whole half (holes by the gate)")
     ap.add_argument('--clutter', action='store_true', help="the town's grass, snow piles and small props too")
     ap.add_argument('--sky', nargs='*', type=float, default=list(SKY_TURNS), metavar='DEG',
                     help='turns (degrees) of the copies of the sky round the fire; --sky alone: none')
     args = ap.parse_args()
-    global CAP_FACE, POINTS, SPOT_SPECULAR, TOWN_SHADOWS
+    global CAP_FACE, POINTS, SPOT_SPECULAR, TOWN_SHADOWS, WALL_FILL
     TOWN_SHADOWS = args.town_shadows
+    WALL_FILL = not args.no_wall_fill
     CAP_FACE = -1.0 if args.cap_flip else 1.0
     POINTS = args.spots_as_points
     SPOT_SPECULAR = args.spot_specular
