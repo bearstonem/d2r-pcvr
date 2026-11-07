@@ -623,6 +623,11 @@ inline constexpr Override Overrides[]={
     // (the owner; [interactions] elemental_hands is ignored).
     {.id="torch.flame",.page=View::World,.section="Things that move and glow",.kind=RowKind::Toggle,.label="Torch flame",
      .help="A one-handed club with fire damage is a torch that lights the dark around you. This shows or hides its flame; the light stays either way."},
+    // Spell hand light (owner, 2026-11-06: "too bright ... it makes the surrounding area even darker looking in
+    // contrast ... at least make it adjustable"): [torch] spell_hands_pct, 40% by default (it was full).
+    {.id="torch.spell_hands_pct",.page=View::World,.section="Things that move and glow",.kind=RowKind::Slider,.label="Spell hand light",
+     .help="How brightly the spells in a Sorceress's hands light the dark around you. Lower it if the light dazzles; Off and they only glow.",
+     .format={.unit="%"},FRAMEVR_NAMES(OffAtZero),.classes=Sorceress},
 
     // Vibration: Strength (Feel it: haptics::PreviewLabel names each test)
     {.id="haptics.strength",.page=View::Vibration,.section="Strength",.kind=RowKind::Slider,.label="Overall vibration",
