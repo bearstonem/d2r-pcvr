@@ -22,6 +22,7 @@ static void WarCry(Sim& s){s.MoveR({.03f,-.12f,-.18f},.35f);s.Hold(.2f);s.MoveR(
 static void Howl(Sim& s){s.Move({.08f,-.40f,-.20f},{-.08f,-.40f,-.20f},.35f);s.Move({.62f,-.35f,-.15f},{-.62f,-.35f,-.15f},.3f);}
 static void BattleCry(Sim& s){s.Move({.22f,-.18f,-.05f},{-.22f,-.18f,-.05f},.4f);s.Hold(.1f);s.Move({.24f,-.82f,-.05f},{-.24f,-.82f,-.05f},.3f);}
 static void Leap(Sim& s){s.Move({.22f,-.65f,.22f},{-.22f,-.65f,.22f},.4f);s.Move({.22f,.30f,-.15f},{-.22f,.30f,-.15f},.35f);}
+static void Whirlwind(Sim& s){s.Move({.75f,-.28f,-.05f},{-.75f,-.28f,-.05f},.45f);s.Hold(.45f);}
 static void LeapAttack(Sim& s){s.Move({.22f,-.65f,.42f},{-.22f,-.65f,.42f},.45f);s.Move({.22f,.30f,-.15f},{-.22f,.30f,-.15f},.4f);}
 static void FindItem(Sim& s){s.MoveR({.20f,-.45f,-.45f},.35f);s.Hold(.25f);s.MoveR({.17f,-.18f,-.05f},.25f);}
 // Slow, lazy versions: the same shapes over far longer.
@@ -35,6 +36,8 @@ static void SlowWarCry(Sim& s){s.MoveR({.03f,-.12f,-.18f},.35f);s.Hold(.2f);s.Mo
 static void SlowHowl(Sim& s){s.Move({.08f,-.40f,-.20f},{-.08f,-.40f,-.20f},.35f);s.Move({.62f,-.35f,-.15f},{-.62f,-.35f,-.15f},1.5f);}
 static void SlowBattleCry(Sim& s){s.Move({.22f,-.18f,-.05f},{-.22f,-.18f,-.05f},.4f);s.Hold(.1f);s.Move({.24f,-.82f,-.05f},{-.24f,-.82f,-.05f},1.5f);}
 static void SlowLeap(Sim& s){s.Move({.22f,-.65f,.22f},{-.22f,-.65f,.22f},.6f);s.Move({.22f,.30f,-.15f},{-.22f,.30f,-.15f},1.5f);}
+// Whirlwind's lazy T: the arms only half out
+static void SlowWhirlwind(Sim& s){s.Move({.40f,-.30f,-.10f},{-.40f,-.30f,-.10f},.45f);s.Hold(.6f);}
 static void SlowLeapAttack(Sim& s){s.Move({.22f,-.65f,.42f},{-.22f,-.65f,.42f},.6f);s.Move({.22f,.30f,-.15f},{-.22f,.30f,-.15f},1.5f);}
 static void SlowFindItem(Sim& s){s.MoveR({.20f,-.45f,-.45f},.35f);s.Hold(.25f);s.MoveR({.17f,-.18f,-.05f},1.f);}
 // Not motions: what a Barbarian's hands do all the time.
@@ -58,7 +61,7 @@ int main() {
         {Motion::BattleCommand,BattleCommand,SlowBattleCommand,155,false,"Battle Command"},{Motion::WarCry,WarCry,SlowWarCry,154,false,"War Cry"},
         {Motion::Howl,Howl,SlowHowl,130,false,"Howl"},{Motion::BattleCry,BattleCry,SlowBattleCry,146,false,"Battle Cry"},
         {Motion::Leap,Leap,SlowLeap,132,true,"Leap"},{Motion::FindItem,FindItem,SlowFindItem,142,false,"Find Item"},
-        {Motion::LeapAttack,LeapAttack,SlowLeapAttack,143,true,"Leap Attack"}};
+        {Motion::LeapAttack,LeapAttack,SlowLeapAttack,143,true,"Leap Attack"},{Motion::Whirlwind,Whirlwind,SlowWhirlwind,151,true,"Whirlwind"}};
     const struct {Do perform;const char* name;} never[]={
         {[](Sim& s){s.Hold(2.f);},"resting"},{Walk,"a walking arm swing"},{BeltPotion,"a reach to the belt"},
         {OverheadChop,"an overhead chop"},{Slash,"a horizontal slash"},{TwoHandedChop,"a two-handed chop"},{ShortSwings,"a run of swings"}};
@@ -114,7 +117,7 @@ int main() {
         const auto at=[&](Motion m){return std::find(std::begin(o),std::end(o),m)-std::begin(o);};
         Check(at(Motion::Shout)<at(Motion::WarCry)&&at(Motion::Leap)<at(Motion::BattleOrders),"Shout before War Cry, Leap before Battle Orders");
         Check(at(Motion::LeapAttack)<at(Motion::Leap),"Leap Attack before Leap");
-        Check(spellmotion::OrderOf(4).count==9&&spellmotion::PageOf(4).count==9,"the Barbarian's page: nine cards, each watched");
+        Check(spellmotion::OrderOf(4).count==10&&spellmotion::PageOf(4).count==10,"the Barbarian's page: ten cards, each watched");
     }
     {   // Find Item: nothing low (a tester, 2026-11-05: "Please no floor stuff"); drawn back with no rest out first, or to the mouth, none
         Sim s(Motion::FindItem);FindItem(s);
@@ -166,6 +169,20 @@ int main() {
         Check(owner.casts==1&&ownerLeap.casts==1,"Leap Attack: 30 cm back is one (the line at 30), and the order casts it before Leap");
         Sim one(Motion::LeapAttack);one.Move({.22f,-.65f,.42f},{-.22f,-.65f,.0f},.45f);one.Move({.22f,.30f,-.15f},{-.22f,.30f,-.15f},.4f);one.Hold(.3f);
         Check(one.casts==0,"Leap Attack: both arms back, not one");
+    }
+    {   // Whirlwind: a T held a moment (owner, 2026-11-06), whirling ahead
+        Sim s(Motion::Whirlwind);Whirlwind(s);
+        Check(s.casts==1&&s.land==spellmotion::Land::Spot&&s.spot.ahead>9&&std::fabs(s.spot.right)<1,"Whirlwind: lands 10 cells ahead, where you face");
+        Sim brief(Motion::Whirlwind);brief.Move({.75f,-.28f,-.05f},{-.75f,-.28f,-.05f},.45f);brief.Hold(.15f);brief.Move(RestR,RestL,.4f);brief.Hold(.3f);
+        Check(brief.casts==0,"Whirlwind: a T held under 0.3 s is none");
+        Sim front(Motion::Whirlwind);front.Move({.55f,-.28f,-.50f},{-.55f,-.28f,-.50f},.45f);front.Hold(.5f);
+        Check(front.casts==0,"Whirlwind: the arms out wide but forward is no T");
+        Sim up(Motion::Whirlwind);up.Move({.60f,.35f,-.05f},{-.60f,.35f,-.05f},.45f);up.Hold(.5f);
+        Check(up.casts==0,"Whirlwind: the arms raised high in a V is no T");
+        Sim howl(Motion::Whirlwind);Howl(howl);howl.Hold(.6f);
+        Check(howl.casts==0,"Whirlwind: Howl's fling, held wide afterwards, is no T");
+        Sim face(Motion::Whirlwind);face.Move({.07f,.05f,-.25f},{-.07f,.05f,-.25f},.35f);face.Hold(.1f);face.Move({.55f,.0f,-.05f},{-.55f,.0f,-.05f},.25f);face.Hold(1.5f);
+        Check(face.casts==1,"Whirlwind: a T held well after the hands parted casts");
     }
     std::puts("motions-barbarian-test: ok");
     return 0;

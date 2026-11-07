@@ -1,7 +1,7 @@
 #pragma once
 #include "spell_motion.h"
 
-// The Barbarian's motions (B1-B8, owner 2026-11-04; B9 Leap Attack, 2026-11-06), detected on spellmotion::Engine's history (head-local:
+// The Barbarian's motions (B1-B8, owner 2026-11-04; B9 Leap Attack and B10 Whirlwind, 2026-11-06), detected on spellmotion::Engine's history (head-local:
 // +X right, +Y up from the eyes, forward -Z; hand 0 the right). Both grips are held while they are watched
 // (the transport's gate); a motion that completes casts its card's skill. Include spell_motion.h, not this.
 // Value-only: steamvr/motions_barbarian_test.cpp.
@@ -22,6 +22,10 @@
 // pull your arms further back behind you and then do the same motion"), and Leap was made easier to leave it
 // the room ("not everybody is flexible enough to go even further than what the current leap is"). It aims
 // along the swing and lands on no spot: the aim rules hand the game the monster that way (aimrules::WantsUnit).
+//
+// Whirlwind is a T held a moment (owner, 2026-11-06: "Where you basically get on T-pose (Again like all other
+// motion controls with the grip buttons on each hand hold) Which then triggers whirlwind"); it whirls ahead,
+// where you face. Body calibration's own T (#423) is held with nothing pressed, so the two never meet.
 namespace framevr::spellmotion::barbarian {
 struct Tuning {
     // The mouth (a fist at it: the controller just in front): |x| <= mouthSide, y in [mouthLow, mouthHigh],
@@ -77,6 +81,12 @@ struct Tuning {
     // deepBehind was 25 cm; the owner's first Leap Attacks (2026-11-06, about 30) began 28-85 cm behind the eyes,
     // most past 45, and the Leaps 15-21: 30 leaves Leap the slack asked for and Leap Attack's swings past it.
     float deepBehind=-.30f;double deepWindow=.8;
+    // Whirlwind: a T - each hand out on its own side tSide or more, at least tApart apart, between tLow and tHigh
+    // (the shoulders to the eyes), within tDepth ahead or behind - held tHold s; it whirls whirlAhead cells ahead.
+    // A T the hands were flung into from together (Howl's fling, which ends wide at eye level) within howlWindow
+    // is none.
+    float tSide=.45f,tApart=1.0f,tLow=-.45f,tHigh=.10f,tDepth=.30f;double tHold=.30;
+    float whirlAhead=10;
     float swingSpeed=1.5f;    // m/s: the leap's swing, each arm at its fastest
     // Leap lands leapAhead cells away the way the arms swung (straight ahead, where you face, if straight up).
     // Its way alone went nowhere: a placed skill takes a spot (the owner, 2026-11-05: "it goes to where the
@@ -98,7 +108,7 @@ inline Tuning tuning;
 // at the mouth, not one); Leap before Battle Orders (both arms up, not one); Leap Attack before Leap (its deeper
 // swing passes through Leap's start too).
 constexpr Motion Order[]={Motion::Shout,Motion::WarCry,Motion::LeapAttack,Motion::Leap,Motion::BattleOrders,Motion::BattleCommand,Motion::Howl,
-    Motion::BattleCry,Motion::FindItem};
+    Motion::BattleCry,Motion::FindItem,Motion::Whirlwind};
 // How to do each, on the MOTIONS page and in the log (what the controllers' positions can tell: no palms or
 // fingers, both grips held).
 inline const char* Cue(Motion m) {
@@ -111,6 +121,7 @@ inline const char* Cue(Motion m) {
     case Motion::BattleCry:return "both fists up by the shoulders, pulled down hard to the hips";
     case Motion::Leap:return "swing both arms down by your sides, then up past the head, fast, as for a jump";
     case Motion::LeapAttack:return "pull both arms far back behind you, then swing them up past the head, fast";
+    case Motion::Whirlwind:return "hold both arms straight out to the sides, a T, a moment: whirl ahead";
     case Motion::FindItem:return "hold the right hand out at a corpse a moment, then snatch it back to the shoulder";
     default:return "no motion";
     }
@@ -283,6 +294,23 @@ inline bool Done(Engine& e,Motion m) {
         math::Vec way{};
         if(!Swing(e,t.deepBehind,t.deepWindow,way))return false;
         e.Aim(way);
+        return true;
+    }
+    case Motion::Whirlwind: {
+        const auto tee=[&](const Sample& s) {
+            const auto& a=s.l[0];const auto& b=s.l[1];
+            return a.x>=t.tSide&&b.x<=-t.tSide&&Len(a-b)>=t.tApart&&a.y>=t.tLow&&a.y<=t.tHigh&&b.y>=t.tLow&&b.y<=t.tHigh&&
+                std::fabs(Forward(a))<=t.tDepth&&std::fabs(Forward(b))<=t.tDepth;
+        };
+        if(!e.Held(tee(n),n.t,t.tHold))return false;
+        // the T's start, and the hands together just before it: Howl's fling, not a T
+        size_t begun=h.size()-1;
+        while(begun>0&&tee(h[begun-1]))--begun;
+        for(size_t i=begun;i-->0;) {
+            if(h[begun].t-h[i].t>t.howlWindow)break;
+            if(Len(h[i].l[0]-h[i].l[1])<=t.howlTogether)return false;
+        }
+        e.Aim({0,0,-1});e.LandAt(t.whirlAhead,0);
         return true;
     }
     case Motion::FindItem: {

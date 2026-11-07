@@ -37,8 +37,8 @@ constexpr double ParkWaitSeconds = .6;
 constexpr double ParkSettleSeconds = .15;
 // Teleport and Leap go where the mod lands them, never to a target the game finds, and a pause before them is
 // felt (owner, 2026-11-05: "if we're like running ... and then we do the motion, there's like a pause before it
-// starts jumping"): pressed as soon as the record reads back.
-inline bool SettleFree(int skill) { return skill == 54 || skill == 132; }
+// starts jumping"): pressed as soon as the record reads back. Whirlwind too (its motion lands it ahead).
+inline bool SettleFree(int skill) { return skill == 54 || skill == 132 || skill == 151; }
 constexpr double PressSeconds = .1;       // RT held this long (the game polls the pad at about 50 ms)
 constexpr double SlotPressSeconds = .065; // a hand slot's press, as weaponskills::Pulse (LT slots longer)
 
