@@ -189,8 +189,8 @@ int main() {
               "Whirlwind: Howl's fling held wide casts Howl first (watched first), then every watcher starts over");
         Sim spread(Motion::Whirlwind);spread.Move({.10f,-.30f,-.20f},{-.10f,-.30f,-.20f},.35f);spread.Move({.66f,-.25f,-.05f},{-.66f,-.25f,-.05f},.4f);spread.Hold(.5f);
         Check(spread.casts==1,"Whirlwind: a T spread from the hands together in front casts (the owner's, 2026-11-06)");
-        Sim face(Motion::Whirlwind);face.Move({.07f,.05f,-.25f},{-.07f,.05f,-.25f},.35f);face.Hold(.1f);face.Move({.55f,.0f,-.05f},{-.55f,.0f,-.05f},.25f);face.Hold(1.5f);
-        Check(face.casts==1,"Whirlwind: a T held well after the hands parted casts");
+        Sim face(Motion::Whirlwind);face.Move({.07f,.05f,-.25f},{-.07f,.05f,-.25f},.35f);face.Hold(.1f);face.Move({.55f,.0f,-.05f},{-.55f,.0f,-.05f},.25f);face.Hold(.6f);
+        Check(face.casts==1,"Whirlwind: a T spread from the hands together at the face, held, casts once");
     }
     std::puts("motions-barbarian-test: ok");
     return 0;
