@@ -729,8 +729,8 @@ void EnsureServerMoveInstalled() noexcept {
     }
 }
 
-// Owning game thread. Why a tick did not reach the mercenary, logged when it changes and every 10 s while
-// it lasts, and once when it is found: from 2026-11-03 every grip + trigger on the mercenary logged
+// Owning game thread. Why a tick did not reach the mercenary, logged when it changes and every minute while
+// it lasts (a hero with no mercenary says so for the whole game), and once when it is found: from 2026-11-03 every grip + trigger on the mercenary logged
 // "mercenary not found" with nothing to say which step failed. why null and no unit: a walk not due yet.
 void NoteTick(const char* why, uint32_t unitId = 0, uint32_t classId = 0) noexcept {
     static const char* last = nullptr;
@@ -738,7 +738,7 @@ void NoteTick(const char* why, uint32_t unitId = 0, uint32_t classId = 0) noexce
     if (!why && !unitId) return;
     const char* key = unitId ? "found" : why;
     const uint64_t now = GetTickCount64();
-    if (key == last && (unitId || now - toldAt < 10000)) return;
+    if (key == last && (unitId || now - toldAt < 60000)) return;
     last = key;
     toldAt = now;
     char line[200];
@@ -785,6 +785,9 @@ void __cdecl CompanionGameThreadTick(const PluginContext*, void*) noexcept {
     const char* why = nullptr;
     if (!melee::HirelingVitals(g_lastHirelingId.load(), health, maxHealth, classId, unitId, &why) || !unitId) {
         NoteTick(why);
+        // Not alive by that id: forget it. Kept, the last game's id (the Paladin's mercenary, unit 1) named a
+        // town NPC of the next game, whose moves and combat target the hooks then took for the mercenary's.
+        if (why) g_lastHirelingId.store(0, std::memory_order_relaxed);
         g_watchdog.Reset();
         InvalidateTacticalContextOnMissingUnit(playerRoom);
         return;

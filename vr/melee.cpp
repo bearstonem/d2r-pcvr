@@ -1437,7 +1437,7 @@ bool HirelingVitals(uint32_t hint,float& health,float& maxHealth,uint32_t& class
         if(!best){
             cachedHirelingId=0;reason="no hireling among the friendly monsters";
             static uint64_t toldAt=0;   // the classes the walk saw, for a hireling class not in HirelingClasses
-            if(now-toldAt>10000){
+            if(now-toldAt>60000){
                 toldAt=now;char line[200];
                 snprintf(line,sizeof line,"Frame companion AI: no hireling among %u friendly monsters (classes %u %u %u %u %u %u)",
                          friendly,seen[0],seen[1],seen[2],seen[3],seen[4],seen[5]);
