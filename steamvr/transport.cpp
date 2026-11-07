@@ -64,6 +64,7 @@
 #include "wrist_compass.h"
 #include "panel_atlas.h"
 #include "map_zoom.h"
+#include "floating_map.h"
 #include "wrist_full_map.h"
 #include "interaction_paint.h"
 #include "latest_worker.h"
@@ -795,6 +796,12 @@ bool swapchainsShort=false,releaseUiChain=false;
 mapzoom::Gesture mapZoom;
 bool wristMapShown=false,wristMapLooked=false,menuMapShown=false;
 math::Vec wristMapCenter{},menuMapCenter{};
+// Floating map (floating_map.h): floatMapWant, capture the map for the pulled copy; floatMapPointed, the right laser
+// points at a map with a copy out, so the stick zooms it as a look would; both false each frame before its step.
+// floatMapWrist / floatMapWristMs: the wrist map quad as last drawn, where a copy is pulled from and put away at.
+bool floatMapWant=false,floatMapPointed=false;
+bool wristMapLookedOnly=false;   // wristMapLooked from the look alone (its hold to LookOut), before floatMapPointed is ORed in
+interaction::Pose floatMapWrist{};uint64_t floatMapWristMs=0;
 mapzoom::View mapZoomView=mapzoom::View::None;   // the map the stick zoomed last frame, for the log
 uint64_t mapZoomLogAt=0;
 bool mapZoomLogged=false;
@@ -1162,7 +1169,7 @@ void ClearInput() {
     lootlabels::display.Clear();
     rightStickGestures.Reset();
     meleeImpactAt[0]=meleeImpactAt[1]=shieldImpactAt=parryMissAt=0;
-    wristHeading.Reset();compassFrame=false;mapZoom.Reset();wristMapLooked=false;
+    wristHeading.Reset();compassFrame=false;mapZoom.Reset();wristMapLooked=wristMapLookedOnly=false;floatMapWant=floatMapPointed=false;
     panelinput::WorldInput(false);
     gamestate::MenuMap(false);
     menuControls.Suspend();menuNavigation.Reset();nativeMenuPad={};laserClick={};panelinput::UseController();
@@ -3408,6 +3415,22 @@ void Input() {
     }
     handAimAt=GetTickCount64();
     const auto bindingSnapshot=interactionstate::Read();
+    {   // Floating map: before the right stick's gestures, the map zoom and the hands' skills read the grips and the stick
+        floatMapWant=floatMapPointed=false;
+        const bool gameplay=motionInput.active&&!interactionOutput.wheel&&!interactionOutput.settings&&
+            interaction::Fresh(bindingSnapshot,gamestate::LocalPlayer(),GetTickCount64());
+        floatmap::InputFrame f{motionInput.time,GetTickCount64(),gamestate::LocalPlayer(),gameplay,
+            interactionOutput.owner[0]==interaction::Owner::Combat&&interactionOutput.bottleHand!=0&&!motionOutput.bowDrawing,
+            interactionOutput.owner[1]==interaction::Owner::Combat&&interactionOutput.bottleHand!=1&&!motionOutput.bowDrawing,
+            interactionOutput.nearBelt>=0||interactionOutput.nearHolster>=0,
+            motionInput.head.p,motionInput.head.q,motionHeadTracked,
+            {motionInput.hand[0].p,motionInput.hand[1].p},{motionInput.tracked[0],motionInput.tracked[1]},motionInput.hand[0].q,
+            handAim[0].p,handAim[0].q,handAimTracked[0],handAim[1].p,handAim[1].q,handAimTracked[1],
+            floatMapWrist.p,floatMapWrist.q,floatMapWristMs,interaction::WristMapSize,
+            motionInput.grip[0],motionInput.grip[1],controls.rx,controls.ry,floatMapWant,floatMapPointed,
+            +[](int h,float s){MotionPulse(h,haptics::Category::Interaction,s,25000000);},&Say};
+        floatmap::StepFrame(f);
+    }
     uint64_t bindingContext=bindingSnapshot.session^(uint64_t(bindingSnapshot.bindingBank+1)<<48)^(meleeEpoch<<16)^motionInput.equipment;
     uint64_t bindingLayout=0;
     for(const auto& skill:bindingSnapshot.skills)bindingLayout=(bindingLayout^uint32_t(skill.id+2)^uint32_t(skill.owner)^
@@ -3891,8 +3914,9 @@ void Input() {
         const auto view=mapzoom::Target(
             wristMapShown&&mapSupported&&interaction::NavigationWanted(interactionInput,interactionOutput,interactionInput.at),
             menuMapShown&&mapSupported&&interaction::MenuMapWanted(interactionInput,interactionOutput,interactionInput.at));
-        wristMapLooked=mapzoom::LookedAt(view,mapZoomView,wristMapLooked,interactionInput.head.p,interactionInput.head.q,
+        wristMapLookedOnly=mapzoom::LookedAt(view,mapZoomView,wristMapLookedOnly,interactionInput.head.p,interactionInput.head.q,
             wristMapCenter,menuMapCenter);
+        wristMapLooked=wristMapLookedOnly||floatMapPointed;   // a map pointed at with a floating copy out zooms too
         mapZoomView=view;
         mapzoom::Input in;in.time=interactionInput.time;in.looking=MinimapLooked();
         in.stick=controls.ry/32767.f;in.x=controls.rx/32767.f;
@@ -3909,7 +3933,8 @@ void Input() {
         // One line a gesture: a start at most every half second, and its stop.
         const uint64_t tick=GetTickCount64();
         if(zoom.started&&tick>=mapZoomLogAt){
-            char line[96];std::snprintf(line,sizeof line,"Frame map zoom: start at %.2fx (%s) on the %s",zoom.zoom,in.stick>0?"in":"out",mapzoom::Name(view));Say(line);
+            char line[96];std::snprintf(line,sizeof line,"Frame map zoom: start at %.2fx (%s) on the %s",zoom.zoom,in.stick>0?"in":"out",
+                floatMapPointed&&!wristMapLookedOnly?"floating map":mapzoom::Name(view));Say(line);
             mapZoomLogAt=tick+500;mapZoomLogged=true;
         }
         if(zoom.stopped&&mapZoomLogged){
@@ -3921,7 +3946,7 @@ void Input() {
             mapZoomLogged=false;
         }
     }
-    gamestate::MenuMap(mapSupported&&interaction::MapWanted(interactionInput,interactionOutput,interactionInput.at));
+    gamestate::MenuMap(mapSupported&&(interaction::MapWanted(interactionInput,interactionOutput,interactionInput.at)||floatMapWant));
     if(interactionOutput.inventory&&toggleMenus)toggleMenus();
     if(handOutput.wheel>=0&&!interactionOutput.wheel){handControls.Close();handOutput={};}
     if(interactionOutput.cancelPending)interactionstate::Cancel();
@@ -5747,7 +5772,7 @@ bool Copy(ID3D12Resource* src,Eye& e,reshade::api::command_queue* rq) {
     e.copied=true;return true;
 }
 bool CopyMap(reshade::api::command_queue* rq) {
-    if(!mapSupported||mapEye.copied||!interaction::MapWanted(interactionInput,interactionOutput,GetTickCount64()))return true;
+    if(!mapSupported||mapEye.copied||!(interaction::MapWanted(interactionInput,interactionOutput,GetTickCount64())||floatMapWant))return true;
     if(swapchainsShort&&spatialMode)return true;   // the native menus' panel may need its surface: no map while they are open
     uint32_t w=0,h=0;
     bool fullMap=false;float drawnZoom=0;   // Map view = Full map: the share is the full map's box, drawn at that game zoom
@@ -6334,7 +6359,7 @@ void EndPair() {
             const float footer=interaction::CompanionSpace(companionRows);
             if(mapEye.copied){
                 const auto mapPanel=interaction::NavigationMapPanel(interactionInput.hand[1],interactionInput.head,palm,withVitals,footer);
-                wristMapShown=true;wristMapCenter=mapPanel.p;
+                wristMapShown=true;wristMapCenter=mapPanel.p;floatMapWrist=mapPanel;floatMapWristMs=GetTickCount64();
                 motionQuad(wristMap,interactionPose(mapPanel),
                     interaction::WristMapSize,interaction::WristMapSize,{{0,0},{int32_t(mapSide),int32_t(mapSide)}},mapEye.chain);
             }
@@ -6354,6 +6379,9 @@ void EndPair() {
                 {{0,0},{companions::Width,wriststatus::UsedHeight(interactionInput.snapshot.companions,interactionInput.snapshot.effects)}},companionChain);
         }
     }
+    // Floating map: the copy belongs here in the draw order (over the wrist panels, under everything below); this layer
+    // is its anchor. Pointer, not index: blood, strain and Arcane Decay insert below the HUD later and shift indices.
+    const XrCompositionLayerBaseHeader* floatMapAnchor=count?layers[count-1]:nullptr;
     const bool weaponSkillIndicators=vrsettings::Read().values[settings::WeaponSkillIndicators]>.5f;
     if(weaponSkillIndicators&&gameplayVisible&&!interactionOutput.wheel&&!interactionOutput.stowed&&interactionOutput.bottle<0&&
        interactionPaintValid&&interactionPaintContext.cue==interactionOutput.cue&&interactionChain) {
@@ -6594,6 +6622,16 @@ void EndPair() {
             Say(line);failReportAt=now+2000;
         }
     }
+    // Floating map: the pulled copy is added last, only while a content slot is free, so a full layer budget drops only
+    // the copy, never another layer; then it is moved back to its place just above floatMapAnchor (the wrist panels), so
+    // the bow laser, skill cues, notices and HUD vitals still draw over it.
+    XrCompositionLayerQuad floatMapQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    struct FloatMapDraw {decltype(motionQuad)* quad;XrCompositionLayerQuad* layer;};FloatMapDraw floatMapDraw{&motionQuad,&floatMapQuad};
+    floatmap::DrawFrame({interactionVisible&&!interactionOutput.wheel,mapEye.copied,GetTickCount64(),&floatMapDraw,
+        +[](void* c,math::Vec p,math::Quat q,float side){const auto& d=*static_cast<FloatMapDraw*>(c);
+            (*d.quad)(*d.layer,XrPose({p,q}),side,side,{{0,0},{int32_t(mapSide),int32_t(mapSide)}},mapEye.chain);},&Say});
+    if(count&&layers[count-1]==reinterpret_cast<const XrCompositionLayerBaseHeader*>(&floatMapQuad)&&floatMapAnchor)
+        for(uint32_t i=0;i+1<count;++i)if(layers[i]==floatMapAnchor){std::rotate(layers.data()+i+1,layers.data()+count-1,layers.data()+count);break;}
     XrCompositionLayerQuad winePadding{XR_TYPE_COMPOSITION_LAYER_QUAD};
     if(padQuads&&composition::PrependQuadPadding(layers.data(),count,capacity,winePadding,headSpace,pointerChain,{panelatlas::Pointer.x,panelatlas::Pointer.y+32})) {
         static bool reported=false;
