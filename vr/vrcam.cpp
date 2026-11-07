@@ -337,6 +337,9 @@ struct Settings {
     std::atomic<bool>  campfirePointerFit{true}; // [campfire] pointer_fit: the scene's picture fitted in the window (CampfirePointer)
     std::atomic<bool>  campfireMenuBoard{true}; // [campfire] menu_board: the menu's lower strip as a board in the scene, not over the eyes
     std::atomic<float> campfireMenuWidth{1.1f}, campfireMenuDistance{1.0f}, campfireMenuDrop{0.9f};   // [campfire] menu_width, menu_distance, menu_drop (metres)
+    std::atomic<bool>  campfireCaption{true};   // [campfire] caption: the picked hero's class and words on a board over the heroes
+    std::atomic<float> campfireCaptionRect[4]{{0.25f},{0.0f},{0.75f},{0.25f}};   // [campfire] caption_left/top/right/bottom: shares of the menu band
+    std::atomic<float> campfireCaptionWidth{3.0f}, campfireCaptionDistance{5.5f}, campfireCaptionRise{1.0f};   // [campfire] caption_width/distance/rise (metres)
     std::atomic<float> campfireMenuTop{0.78f};  // [campfire] menu_top: where the strip begins, a share of the game's menu band from its top
     std::atomic<float> campfirePickDist{22.0f};// [campfire] pick_distance: how far along the hand's ray the pointer is put, world units
     std::atomic<bool>  skyHidePanels{true}; // no sky while a side panel shifts the picture
@@ -1448,6 +1451,14 @@ void LoadSettings() {
         g_set.campfireMenuDistance.store(std::clamp(IniF(L"campfire", L"menu_distance", 1.0f), 0.4f, 3.0f));
         g_set.campfireMenuDrop.store(std::clamp(IniF(L"campfire", L"menu_drop", 0.9f), -0.5f, 1.5f));
         g_set.campfireMenuTop.store(std::clamp(IniF(L"campfire", L"menu_top", 0.78f), 0.0f, 0.98f));
+        g_set.campfireCaption.store(IniB(L"campfire", L"caption", true));
+        g_set.campfireCaptionRect[0].store(std::clamp(IniF(L"campfire", L"caption_left", 0.25f), 0.0f, 1.0f));
+        g_set.campfireCaptionRect[1].store(std::clamp(IniF(L"campfire", L"caption_top", 0.0f), 0.0f, 1.0f));
+        g_set.campfireCaptionRect[2].store(std::clamp(IniF(L"campfire", L"caption_right", 0.75f), 0.0f, 1.0f));
+        g_set.campfireCaptionRect[3].store(std::clamp(IniF(L"campfire", L"caption_bottom", 0.25f), 0.0f, 1.0f));
+        g_set.campfireCaptionWidth.store(std::clamp(IniF(L"campfire", L"caption_width", 3.0f), 0.2f, 20.0f));
+        g_set.campfireCaptionDistance.store(std::clamp(IniF(L"campfire", L"caption_distance", 5.5f), 0.5f, 30.0f));
+        g_set.campfireCaptionRise.store(std::clamp(IniF(L"campfire", L"caption_rise", 1.0f), -3.0f, 10.0f));
     }
     g_set.skyHidePanels.store(IniB(L"sky", L"hide_with_panels", true));
     {   // as the By turns switches: only a change of the ini's own value overrides DEV's
@@ -6953,6 +6964,11 @@ void CampfireTick() {
     // the game draws its menu in its 16:9 band at the top of each eye's picture, over the eyes and
     // turning with the head; the native-menu board takes that band's lower strip into the scene.
     framevr::SetCampfireMenu(g_set.campfireMenuWidth.load(), g_set.campfireMenuDistance.load(), g_set.campfireMenuDrop.load());
+    {   // the caption over the heroes ([campfire] caption...)
+        const float rect[4] = { g_set.campfireCaptionRect[0].load(), g_set.campfireCaptionRect[1].load(), g_set.campfireCaptionRect[2].load(), g_set.campfireCaptionRect[3].load() };
+        framevr::SetCampfireCaption(g_campfire.load() && g_set.campfireMenuBoard.load() && g_set.campfireCaption.load(), rect,
+            g_set.campfireCaptionWidth.load(), g_set.campfireCaptionDistance.load(), g_set.campfireCaptionRise.load());
+    }
     {
         AcquireSRWLockShared(&g_campfireGameLock);
         const float canvas = g_campfireCanvas;

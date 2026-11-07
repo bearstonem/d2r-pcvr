@@ -121,6 +121,10 @@ void SetCampfirePointer(bool on, float metres);
 // The campfire's menu (name, Create, Back, the checkboxes) as a board in the scene: its width,
 // how far ahead of the eyes and how far below them it stands when the scene begins (metres).
 void SetCampfireMenu(float width, float distance, float drop);
+// The campfire's caption: the part of the game's menu band (shares of it: left, top, right, bottom) where the
+// game writes the picked hero's class and words, on a board of its own above the heroes (width, distance
+// ahead and rise over the eyes, metres). on=false: none.
+void SetCampfireCaption(bool on, const float rect[4], float width, float distance, float rise);
 // Any thread: the laser is on the campfire's menu board this frame - the game's pointer is the board's.
 bool CampfireMenuHit();
 // Paladin Fist of the Heavens gesture (heavens_gesture.h). Armed: the skill is

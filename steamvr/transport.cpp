@@ -732,6 +732,8 @@ std::recursive_mutex mutex;
 std::atomic<bool> rightPickHeld{false};   // RightPickHeld
 std::atomic<bool> campfirePointer{false};std::atomic<float> campfirePointerM{4.f};   // SetCampfirePointer
 std::atomic<float> campfireMenuWidth{1.1f},campfireMenuDistance{1.0f},campfireMenuDrop{.9f};   // SetCampfireMenu
+std::atomic<bool> campfireCaption{false};std::atomic<float> campfireCaptionRect[4]{{0.f},{0.f},{1.f},{.2f}};   // SetCampfireCaption
+std::atomic<float> campfireCaptionWidth{3.f},campfireCaptionDistance{5.5f},campfireCaptionRise{1.f};
 std::atomic<bool> campfireMenuHit{false};   // the laser on the campfire's menu board (MenuPointer)
 // The board's capture failed at this campfire: the menu stays as the game draws it until the
 // scene is left (never the session-wide fallback below, which would take the in-game boards too).
@@ -1041,7 +1043,7 @@ float beamLength=0;
 // keeps its own free grab, relative to where you face when it opens.
 panels::Grab panelGrab;
 panels::Offset menuOffset,settingsOffset;
-panels::Placement uiBase{},menuBase{},settingsBase{};
+panels::Placement uiBase{},menuBase{},settingsBase{},captionBase{};
 
 math::Quat Q(XrQuaternionf q) { return {q.x,q.y,q.z,q.w}; }
 math::Vec V(XrVector3f p) { return {p.x,p.y,p.z}; }
@@ -5394,6 +5396,9 @@ bool Begin() {
                 uiBase.position.y-=drop;
                 uiBase.orientation=math::Multiply(uiBase.orientation,panels::Pitch(-std::atan2(drop,distance)));
                 menuOffset={};
+                // The caption's board: further ahead, over the heroes, upright and facing you.
+                captionBase=panels::AtEyeLevel(V(head.position),Q(head.orientation),campfireCaptionDistance.load());
+                captionBase.position.y+=campfireCaptionRise.load();
             }
             uiPose=Placed(uiBase,menuOffset);
             uiSize=panels::Width;workspacePlaced=true;
@@ -6152,6 +6157,10 @@ bool Active() {std::lock_guard lock(mutex);return frame&&valid&&render&&!failed&
 bool RightPickHeld(){return rightPickHeld.load();}
 void SetCampfirePointer(bool on,float metres){campfirePointer.store(on);campfirePointerM.store(metres);if(!on){campfireMenuHit.store(false);campfireBoardFailed.store(false);}}
 void SetCampfireMenu(float width,float distance,float drop){campfireMenuWidth.store(width);campfireMenuDistance.store(distance);campfireMenuDrop.store(drop);}
+void SetCampfireCaption(bool on,const float rect[4],float width,float distance,float rise){
+    for(int i=0;i<4;++i)campfireCaptionRect[i].store(rect[i]);
+    campfireCaptionWidth.store(width);campfireCaptionDistance.store(distance);campfireCaptionRise.store(rise);campfireCaption.store(on);
+}
 bool CampfireMenuHit(){return campfireMenuHit.load();}
 bool VrGameplay(uint64_t now) {const auto at=vrGameplayAt.load();return at&&now>=at&&now-at<=1500;}
 void PublishSewerPrompt(const sewerprompt::Target& target) {
@@ -6649,6 +6658,23 @@ void EndPair() {
         motionQuad(book,UiSurfacePose(),size.width,size.height,
             {{uiCrop[0],uiCrop[1]},{uiCrop[2],uiCrop[3]}},uiEye.chain);
         book.layerFlags=opaqueMenuMode?0:XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+    }
+    // The campfire's caption (SetCampfireCaption): the picked hero's class and words, which the game writes in
+    // its menu band above the board's strip, on a board of its own over the heroes - from the same copied picture.
+    XrCompositionLayerQuad caption{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    if(book.subImage.swapchain&&campfirePointer.load()&&campfireCaption.load()) {
+        const float bandBottom=float(uiCrop[1]+uiCrop[3]);   // the band runs from the picture's top to the strip's end
+        const float l=std::clamp(campfireCaptionRect[0].load(),0.f,1.f),t=std::clamp(campfireCaptionRect[1].load(),0.f,1.f);
+        const float r=std::clamp(campfireCaptionRect[2].load(),0.f,1.f),b=std::clamp(campfireCaptionRect[3].load(),0.f,1.f);
+        const int x0=uiCrop[0]+int(l*float(uiCrop[2])),x1=uiCrop[0]+int(r*float(uiCrop[2]));
+        const int y0=int(t*bandBottom),y1=int(b*bandBottom);
+        if(x1-x0>=2&&y1-y0>=2) {
+            const float w=campfireCaptionWidth.load(),h=w*float(y1-y0)/float(x1-x0);
+            const auto q=captionBase.orientation;
+            motionQuad(caption,XrPosef{{q.x,q.y,q.z,q.w},{captionBase.position.x,captionBase.position.y,captionBase.position.z}},w,h,
+                {{x0,y0},{x1-x0,y1-y0}},uiEye.chain);
+            caption.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+        }
     }
     // The Advanced Stats button, a hair in front of the menu below its hint row (MenuPointer).
     XrCompositionLayerQuad statsQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
