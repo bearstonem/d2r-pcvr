@@ -6231,7 +6231,9 @@ void BeginEye(int eye) {
     hud::TakeInterface(Active()&&keepDepth&&!layersFailed&&turnWarp.InterfaceReady()&&
         RenderTargetCompatible(format,UnormView(turnFormat))&&TypelessFamily(turnFormat)!=DXGI_FORMAT_UNKNOWN);
     hud::NativeGameplay(nativehud::Gameplay(Active(),inWorld&&inWorld(),wantsPanel&&wantsPanel(),spatialMode));
-    lightbounds::SetActive(Active()&&inWorld&&inWorld());
+    // The campfire scene (character creation in stereo) is no world, yet the game lights it through the same
+    // light grid: without the corrected depth scan its rectangular tiles darkened the heroes' faces.
+    lightbounds::SetActive(Active()&&((inWorld&&inWorld())||campfirePointer.load()));
     d2rcam::SetStereoUiEye(Active()?(eye&1):-1);
     d2rcam::TraceStereoLabels(capturePair?eye:-1);
     if(!Active()){foveation::EndWorld();return;}
