@@ -106,6 +106,7 @@ static const GoldenRow Golden[]={
     {"interactions.prop_physics",View(9),1,content::RowKind::Toggle,"Knock over small props",0,0},
     {"interactions.body_physics",View(9),1,content::RowKind::Toggle,"Pushable bodies",0,0},   // main's #361
     {"torch.flame",View(9),1,content::RowKind::Toggle,"Torch flame",0,0},
+    {"torch.spell_hands_pct",View(9),1,content::RowKind::Slider,"Spell hand light",0,1},   // a Sorceress's (2026-11-06)
     {"haptics.strength",View(10),0,content::RowKind::Slider,"Overall vibration",0,1},
     {"haptics.melee",View(10),0,content::RowKind::Slider,"Melee hits",0,1},
     {"haptics.short_melee",View(10),0,content::RowKind::Toggle,"Short melee taps",0,0},
