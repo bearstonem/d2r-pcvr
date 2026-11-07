@@ -313,7 +313,7 @@ struct Settings {
     std::atomic<bool>  skyAlways{false};    // whatever the biome (testing): caves get a sky too
     std::atomic<bool>  campfireOn{false};    // [campfire] enabled: character creation's campfire scene in stereo, round you
     std::atomic<float> campfireEye{6.0f};    // [campfire] eye: the eye height the scene's scale is taken from, world units (~0.24 m each)
-    std::atomic<float> campfireUp{2.5f};     // [campfire] up: the eyes above the game camera, world units
+    std::atomic<float> campfireUp{2.25f};     // [campfire] up: the eyes above the game camera, world units
     std::atomic<float> campfireForward{3.0f};// [campfire] forward: the eyes ahead of the game camera, toward the fire, world units
     // [campfire] effects: D2R_DepthFog.fx in the scene (0 by default). Its two techniques go by turns with the eyes,
     // switched for the eye guessed next; the campfire's eyes are not the gameplay's turns and the guess failed now
