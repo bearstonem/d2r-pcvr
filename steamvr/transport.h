@@ -85,6 +85,9 @@ bool LeatherMenuWorld();   // also: the left stick walks while the leather is ou
 void PublishSewerPrompt(const sewerprompt::Target&); // Values only; XR follows no game pointers.
 // Current motion-combat aim in the existing head-yaw-relative hand frame.
 bool SettingsOpen();
+// A Sorceress's spell hand lit (elements::Element, its opacity), fresh within 150 ms: vrcam lays its light
+// among the game's lights (elements::HandLight), as a held torch's.
+bool ElementalHandLight(int hand,int& element,float& opacity);
 bool OwnsControllerRumble(); // lock-free; VR input owns feedback instead of gamepad motors
 bool SpellSelected();
 bool LeftHandAiming();
@@ -92,10 +95,17 @@ bool CrossbowAiming();
 bool NativeAimOwnership(); // hand casting or wheel: preserve locomotion, suppress legacy aim modes
 bool NativeSkillCasting(); // any active trigger/quick cast; retain native locomotion input
 bool DirectedSpellActive(); // fresh native assignment, actually casting (wheel or quick shortcut)
+bool SpellGripsArmed();   // both grips cast a learned motion spell (spell_motion.h): the left grip takes the staff only alone
+// Both grips held for the motions now, or let go under 0.4 s ago (a motion's cast still pressing): vrcam's Loot
+// pick hands the game no item then, or the cast's press picked up the item pointed at (owner, 2026-11-05: "when
+// you use both grip buttons near loot, it tries to pick them up").
+bool SpellGripsHeld();
 bool BowSkillActive();   // a bow or crossbow skill is being cast from a button (bow ready)
 int GroundSpellSkill();   // a ground skill (spellaim::GroundTarget) being cast that lands where it is aimed: its id, or -1
 int NativeCastSkill(); // current fresh native cast id, -1 when idle/blocked/stale
 bool GameplayRay(float origin[3],float direction[3]);
+bool MotionCastRay(float origin[3],float direction[3]);   // a motion's cast with a way (Teleport's punch), live: from the right hand along it, as GameplayRay
+bool RecordCastLive();      // a glyph's or motion's press of the right trigger's record, now or within 150 ms (lock-free)
 // Aim rules: each hand's own aim in GameplayRay's frame - the controller's
 // pointer, or the bow's forward for the left hand holding a bow.
 bool HandAimRay(int hand,float origin[3],float direction[3]);
@@ -119,6 +129,9 @@ int AimRulesSkill();         // the cast skill (any), -1 none; with its game "di
 // A trap or bomb thrown to place (#224): where its arc landed, in grid cells,
 // for that skill's cast (skill -1: any) just after the throw.
 bool TossTarget(int skill,float& x,float& y);
+// Teleport punched while its landing showed (spell_motion.h Output::landing): that landing, in grid
+// cells, for that skill's cast (skill -1: any) just after the punch.
+bool MotionLanding(int skill,float& x,float& y,int* landed=nullptr);   // landed: the landing's own skill (a query of skill -1 takes any)
 bool AimRulesDirected();
 bool MeleeSample(uint32_t poseStamp,melee::Sample& sample,int hand=0);
 // The posed melee capsule (world metres) that also pushes dropped bottles:

@@ -15,6 +15,13 @@ void StickFullRun(bool on);
 // 1 walking (modes 2, 6), 2 running (3), 0 never seen; at = its GetTickCount64;
 // tired = its stamina was below a quarter (the game then walks whatever its toggle says).
 int ObservedGait(uint64_t& at,bool* tired=nullptr);
+// Combat walk ([gameplay] combat_walk_ms, Cal 2026-11-02): an enemy hit on the
+// local hero (one that would have hit), or the hero's landed strike, cast or shot,
+// puts the game's run / walk toggle on walk until combat_walk_ms passes with none;
+// then Movement speed's own setting again. 0 = off. Source: 1 struck, 2 strike, 3 shot.
+void ConfigureCombatWalk(int ms);
+void CombatWalk(int source);   // any thread
+bool CombatWalking(uint64_t now,int* source=nullptr);
 void Install();
 void Report();
 bool Ready();

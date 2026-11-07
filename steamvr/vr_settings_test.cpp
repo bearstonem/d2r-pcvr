@@ -87,17 +87,17 @@ int main(int argc,char** argv){
     }
     Snapshot s;s.ready=true;
     {Model effects;effects.Open(s);
-        Check(s.values[ElementalHands]==0,"experimental hand effects default off");
-        effects.Click(Step(ElementalHands));const auto request=effects.Click({Kind::Apply});
-        Check(request.changed==(ChangeMask{1}<<ElementalHands)&&request.values[ElementalHands]==1,"the elemental toggle saves alone");
+        Check(s.values[HapticShortMelee]==0,"Short melee taps default off");
+        effects.Click(Step(HapticShortMelee));const auto request=effects.Click({Kind::Apply});
+        Check(request.changed==(ChangeMask{1}<<HapticShortMelee)&&request.values[HapticShortMelee]==1,"a toggle saves alone");
         auto external=request.base;external[Motion]=1;
         Check(!Conflict(external,request.base,request.changed),"its edit tolerates unrelated setting changes");
-        external[ElementalHands]=1;Check(Conflict(external,request.base,request.changed),"its conflicts are detected");
+        external[HapticShortMelee]=1;Check(Conflict(external,request.base,request.changed),"its conflicts are detected");
     }
     {
         for(Key k:{StereoRendering,RenderResolution,DrawDistance,ObjectDistance,BigObjectDistance,Foveation,FoveationStrength})
             Check(PageOf(k)==View::Performance,"everything that changes the frame rate is on the Performance page, Big objects too");
-        for(Key k:{Sky,Fog,FogDistance,Ceiling,ElementalHands,BottlePhysics,PropPhysics,BodyPhysics,TorchFlame})
+        for(Key k:{Sky,Fog,FogDistance,Ceiling,BottlePhysics,PropPhysics,BodyPhysics,TorchFlame})
             Check(PageOf(k)==View::World,"the World page keeps the mod's effects, with the fog's distance, bottle, prop and body physics and the torch flame");
         // main's pairs (PairOf) are side halves: Fog distance on Distance fog's row, Big objects on Scenery distance's
         Check(content::RowOf(FogDistance)->beside&&content::RowOf(BigObjectDistance)->beside&&!content::RowOf(Fog)->beside&&!content::RowOf(ObjectDistance)->beside,
@@ -499,7 +499,6 @@ int main(int argc,char** argv){
     }
     {   // Rows follow the character: another class's or weapon's are left out; unknown (the menus) shows them all
         const auto v=Defaults();
-        Check(RowShown(ElementalHands,v,{})&&RowShown(ElementalHands,v,{heroclass::Sorceress})&&!RowShown(ElementalHands,v,{heroclass::Amazon}),"elemental hands: the Sorceress's");
         for(int k:{int(heroclass::Sorceress),int(heroclass::Assassin),int(heroclass::Druid),int(heroclass::Necromancer)})
             Check(RowShown(GroundAim,v,{k}),"ground skills for the classes that have them");
         for(int k:{int(heroclass::Amazon),int(heroclass::Barbarian),int(heroclass::Paladin)})Check(!RowShown(GroundAim,v,{k}),"none for those that do not");
@@ -786,6 +785,16 @@ int main(int argc,char** argv){
               "left-hand strikes: own trigger skill by default");
         Check(Normalize(LeftHandStrikes,2)==0&&Normalize(LeftHandStrikes,1)==1&&Normalize(LeftHandStrikes,-1)==0,"the retired Basic attack (2) reads Own trigger skill");
         Check(!content::RowOf(LeftHandStrikes),"left-hand strikes on no settings page");
+    }
+    {   // Glyph casting, each hand its own set (owner 2026-11-05): the second Draw glyph button and the left hand's
+        // shapes beside the one set saved before (the right hand's), edited on the wheel only; -1 when missing.
+        Check(Defaults()[GlyphDrawSecond]==-1&&std::wstring(Definitions[GlyphDrawSecond].section)==L"glyphs"&&
+              std::wstring(Definitions[GlyphDrawSecond].key)==L"second_draw_slot"&&!content::RowOf(GlyphDrawSecond),"the second Draw glyph button: [glyphs] second_draw_slot, none");
+        for(int i=0;i<8;++i)
+            Check(GlyphKey(i)==Key(GlyphCircle+i)&&GlyphKey(i,0)==GlyphKey(i)&&Defaults()[GlyphKey(i,1)]==-1&&std::wstring(Definitions[GlyphKey(i,1)].section)==L"glyphs"&&
+                  std::wstring(Definitions[GlyphKey(i,1)].key)==L"left_"+std::wstring(Definitions[GlyphKey(i)].key)&&!content::RowOf(GlyphKey(i,1)),
+                  "each left shape: [glyphs] left_<shape>, -1 (the right hand's), on no settings page");
+        Check(Normalize(GlyphLeftStar,-7)==-1&&Normalize(GlyphLeftStar,58.4f)==58&&Normalize(GlyphDrawSecond,12)==9,"read as the right hand's keys are");
     }
     {   // Frame generation's settings (main's #313), as on main.
         Check(Defaults()[FrameGeneration]==0&&Defaults()[FrameGenPreset]==1&&Defaults()[FrameGenScale]==2,"off by default; NVIDIA Medium at 50% to start");

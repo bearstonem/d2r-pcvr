@@ -1,4 +1,5 @@
 #include "cross_gesture.h"
+#include "spell_motion.h"
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -9,6 +10,8 @@ static void Check(bool b,const char* label){if(!b){std::fprintf(stderr,"FAIL: %s
 // moving hand travels between points with minimum-jerk easing at 90 Hz.
 static const math::Vec Rest{.25f,-.6f,-.15f},Forehead{0,.06f,-.12f},Chest{0,-.42f,-.12f},LeftShoulder{-.2f,-.28f,-.05f},RightShoulder{.2f,-.28f,-.05f};
 struct Sim {
+    // The motions' gate (spell_motion.h, owner 2026-11-04: "Both grips, like Sorceress"): gated, in.active is it.
+    bool gated=false;spellmotion::Gate gate;float grips[2]{};
     holycross::Engine g;holycross::Input in;holycross::Output out;
     math::Quat yaw{0,0,0,1};math::Vec head{0,1.7f,0};
     int casts=0,lastHand=-1,drops=0;std::string lastDrop;
@@ -23,7 +26,7 @@ struct Sim {
         for(int i=1;i<=steps;++i){in.hand[h]=a+(b-a)*Ease(float(i)/steps);Step();}
     }
     void Hold(float s){for(int i=0;i<int(s/frame);++i)Step();}
-    void Step(){in.time+=frame;out=g.Step(in);if(out.cast>=0){++casts;lastHand=out.cast;}if(out.dropped){++drops;lastDrop=out.dropped;}}
+    void Step(){in.time+=frame;if(gated)in.active=gate.Step(grips,true).watch;out=g.Step(in);if(out.cast>=0){++casts;lastHand=out.cast;}if(out.dropped){++drops;lastDrop=out.dropped;}}
     // The sign at a deliberate pace: each move ~0.35 s, a short touch at each point.
     void Sign(int h=0,bool rightFirst=false,float move=.35f,float touch=.08f) {
         const math::Vec a=rightFirst?RightShoulder:LeftShoulder,b=rightFirst?LeftShoulder:RightShoulder;
@@ -32,6 +35,11 @@ struct Sim {
     }
 };
 int main(){
+    {   // Under the motions' gate (both grips, owner 2026-11-04): a sign with no grip, as before, no longer casts.
+        Sim none;none.gated=true;none.Sign();Check(none.casts==0,"gated, a sign with no grip no longer casts");
+        Sim one;one.gated=true;one.grips[1]=1;one.Sign();Check(one.casts==0,"gated, one grip is not enough");
+        Sim both;both.gated=true;both.grips[0]=both.grips[1]=1;both.Sign();Check(both.casts==1,"gated, both grips held: the sign casts");
+    }
     for(float heading:{-2.f,0.f,2.f}){Sim s(heading);s.Sign();Check(s.casts==1&&s.lastHand==0,"forehead, chest, left, right casts at any heading");}
     {Sim s;s.Sign(0,true);Check(s.casts==1,"right shoulder before left (Orthodox) casts too");}
     {Sim s;s.Sign(1);Check(s.casts==1&&s.lastHand==1,"the left hand can sign");}

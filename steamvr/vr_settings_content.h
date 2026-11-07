@@ -23,8 +23,8 @@
 //   spelling, one vocabulary across pages.
 // - Every help sentence is true of the code (vr_settings_help.h holds the long
 //   form); where a draft said more than the code does, the code wins.
-// - Presets leave out StereoRendering, DeferGpuWait, ElementalHands,
-//   CompanionAi and the calibration keys (the owner's calls).
+// - Presets leave out StereoRendering, DeferGpuWait, CompanionAi and the
+//   calibration keys (the owner's calls).
 // The checks at the end of this file enforce these at compile time.
 #include "vr_settings.h"
 #include "vr_settings_draw.h"
@@ -623,11 +623,15 @@ inline constexpr Override Overrides[]={
      .help="Cups, vases, books and stools tumble when your weapon, hand or shield hits them. Just for looks."},
     {.id="interactions.body_physics",.page=View::World,.section="Things that move and glow",.kind=RowKind::Toggle,.label="Pushable bodies",
      .help="Your weapon, shield or fist pushes aside the limbs of monsters and townsfolk it meets, and they spring back. Just for looks. Motion combat in first person."},
-    {.id="interactions.elemental_hands",.page=View::World,.section="Things that move and glow",.kind=RowKind::Toggle,.label="Spell glow on hands",
-     .help="A Sorceress's hands show flames, sparks or frost from their trigger spell, and flare as it casts.",
-     .warn="May show through walls and weapons",.classes=Sorceress},
+    // Spell glow on hands left the page and the settings on 2026-11-04: always on for a Sorceress
+    // (the owner; [interactions] elemental_hands is ignored).
     {.id="torch.flame",.page=View::World,.section="Things that move and glow",.kind=RowKind::Toggle,.label="Torch flame",
      .help="A one-handed club with fire damage is a torch that lights the dark around you. This shows or hides its flame; the light stays either way."},
+    // Spell hand light (owner, 2026-11-06: "too bright ... it makes the surrounding area even darker looking in
+    // contrast ... at least make it adjustable"): [torch] spell_hands_pct, 40% by default (it was full).
+    {.id="torch.spell_hands_pct",.page=View::World,.section="Things that move and glow",.kind=RowKind::Slider,.label="Spell hand light",
+     .help="How brightly the spells in a Sorceress's hands light the dark around you. Lower it if the light dazzles; Off and they only glow.",
+     .format={.unit="%"},FRAMEVR_NAMES(OffAtZero),.classes=Sorceress},
 
     // Vibration: Strength (Feel it: haptics::PreviewLabel names each test)
     {.id="haptics.strength",.page=View::Vibration,.section="Strength",.kind=RowKind::Slider,.label="Overall vibration",
@@ -708,13 +712,20 @@ inline constexpr Override Overrides[]={
     {.id="glyphs.draw_slot",.page=NotInMenu},{.id="glyphs.circle",.page=NotInMenu},{.id="glyphs.triangle",.page=NotInMenu},
     {.id="glyphs.square",.page=NotInMenu},{.id="glyphs.lightning",.page=NotInMenu},{.id="glyphs.spiral",.page=NotInMenu},
     {.id="glyphs.v",.page=NotInMenu},{.id="glyphs.star",.page=NotInMenu},{.id="glyphs.wave",.page=NotInMenu},
+    {.id="glyphs.second_draw_slot",.page=NotInMenu},{.id="glyphs.left_circle",.page=NotInMenu},{.id="glyphs.left_triangle",.page=NotInMenu},
+    {.id="glyphs.left_square",.page=NotInMenu},{.id="glyphs.left_lightning",.page=NotInMenu},{.id="glyphs.left_spiral",.page=NotInMenu},
+    {.id="glyphs.left_v",.page=NotInMenu},{.id="glyphs.left_star",.page=NotInMenu},{.id="glyphs.left_wave",.page=NotInMenu},
+    // Motions: edited on the wheel's MOTIONS page.
+    {.id="motions.off",.page=NotInMenu},{.id="motions.paladin_off",.page=NotInMenu},{.id="motions.druid_off",.page=NotInMenu},
+    {.id="motions.amazon_off",.page=NotInMenu},{.id="motions.necromancer_off",.page=NotInMenu},
+    {.id="motions.barbarian_off",.page=NotInMenu},{.id="motions.assassin_off",.page=NotInMenu},
 };
 #undef FRAMEVR_OPTIONS
 #undef FRAMEVR_NAMES
 
 // ---- presets (ini ids and units; only the settings listed change) ----
 // Left out of the presets: StereoRendering (Comfort, Smooth frames), DeferGpuWait
-// (Smooth frames), ElementalHands and CompanionAi (Classic, Full VR), and the
+// (Smooth frames), CompanionAi (Classic, Full VR), and the
 // PR-only LootPick / MenuPointer.
 
 inline constexpr PresetSetting ComfortValues[]={
@@ -1242,7 +1253,7 @@ constexpr bool OrderOk(){
 }
 // Presets: each id once, never the owner's excluded settings.
 constexpr bool PresetsOk(){
-    constexpr const char* excluded[]={"stereo.rendering","render.defer_gpu_wait","interactions.elemental_hands","gameplay.companion_ai",
+    constexpr const char* excluded[]={"stereo.rendering","render.defer_gpu_wait","gameplay.companion_ai",
                                       "calibration.eye_height_m","calibration.arm_span_m","calibration.version"};
     for(const auto& p:PresetSpecs)for(int i=0;i<p.count;++i){
         for(const char* x:excluded)if(SameText(p.values[i].id,x))return false;

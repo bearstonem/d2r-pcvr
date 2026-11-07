@@ -58,10 +58,10 @@ Quest left X/Y correspond to Index left A/B; right A/B labels are the same.
 | Open or close a hand wheel | Click that hand's thumbstick; it stays open without holding, and reopens on that hand's last page (Map or Equipment; **SPELLS** goes back), and its skill editor on the last tree you picked, until a new game |
 | Switch to the other wheel | Click the other thumbstick |
 | Assign a button | Opposite hand's laser + trigger: select a wedge, then a skill |
-| Cast a buff by drawing a glyph | Hold your **Draw glyph** button, draw a shape in the air and let go: the skill on that shape is cast. See [Glyph casting](#glyph-casting) |
+| Cast a buff by drawing a glyph | Hold your **Draw glyph** button, draw a shape in the air and let go: the skill that hand has on that shape is cast. See [Glyph casting](#glyph-casting) |
 | Use an inventory item | Either wheel > **QUICK USE**: point with the opposite hand and briefly click its trigger; use happens on release |
 | Assign / change quick-use item | Hold the trigger over **QUICK USE** for 0.65 seconds, then select a carried scroll, tome or other usable item. An empty slot also opens the picker on a short click. **CLEAR SLOT** removes the assignment |
-| Walk / run speed | VR Settings > **Body** > **Movement speed** (Hands and moving), then Apply: **Walk**; **Base run** (your class's run with no speed bonus); **Run 10%…90%** of the way up; **Full run** (the default, the full speed your gear and skills give). Saved to `[gameplay] run_speed_pct`; the game's own run / walk toggle is kept in line with it. Movement skills keep their own speed, and it never runs faster than the game. With **Stick toggle** beside it on (Off by default; `[gameplay] run_walk_toggle`), push the **right stick up** to switch between walking and that run (from Walk, the full run) |
+| Walk / run speed | VR Settings > **Body** > **Movement speed** (Hands and moving), then Apply: **Walk**; **Base run** (your class's run with no speed bonus); **Run 10%…90%** of the way up; **Full run** (the default, the full speed your gear and skills give). Saved to `[gameplay] run_speed_pct`; the game's own run / walk toggle is kept in line with it. Movement skills keep their own speed, and it never runs faster than the game. While fighting you walk: being hit, landing a strike, or a spell, arrow or throw leaving your hand switches to walking until half a second after the last one (`[gameplay] combat_walk_ms`, 0 = off). With **Stick toggle** beside it on (Off by default; `[gameplay] run_walk_toggle`), push the **right stick up** to switch between walking and that run (from Walk, the full run) |
 | Finish editing | Click the wheel hand's stick again, or select CLOSE in its center |
 | Inventory / character / skills / journal | Reach the **left hand over the left shoulder** and grip; or Left Grip + left stick click; or either wheel > INVENTORY. However it opens, the tabbed menu comes up on a leather sheet strapped to your left hand, with the world still around you; the right laser works on it as before, the left stick still walks and the right stick turns, an item picked up and clicked outside the menu drops to the ground, life / mana show above it, and closing the menu (Right B, its close button, or reaching back over the left shoulder and gripping) puts the leather away. Native tabs retain their controls. **VR Settings > Interface > Hold menu** sets it: **Leather**, **Menu only** (held by its left edge, no hide) or **Off** (in front of you instead, without the shoulder reach). With Dominant hand = Left the left shoulder stays the weapon swap; use the other two |
 | VR settings / body calibration | Either wheel → VR SETTINGS |
@@ -342,12 +342,20 @@ target: armors, warcries, auras, Energy Shield, summons and the like.
 1. Choose the button that draws: open a hand's wheel, select one of its
    wedges and pick **Draw glyph** (last under **General / Items**). That button
    now draws and casts nothing else; its game skill is cleared. Putting a skill
-   back on it, or **CLEAR SLOT**, stops it drawing.
+   back on it, or **CLEAR SLOT**, stops it drawing. Each hand can have its own
+   Draw glyph button: put one on the other hand's wheel too to draw with both.
 2. Give the shapes their skills: the wheel's **GLYPHS** box (upper right, on the
    spells and equipment pages) opens a page of eight shapes: circle, triangle,
    square, lightning bolt, spiral, V, star and wave. Select a shape, then the
    skill it casts; the list holds your hero's own skills that need no target.
-   **CLEAR GLYPH** takes its skill off; **BACK** keeps it.
+   **CLEAR GLYPH** takes its skill off; **BACK** keeps it. Each hand has its own
+   eight, so the same shape can cast one skill drawn with the right hand and
+   another drawn with the left: the page opens on the hand whose wheel you
+   opened, and the box at its upper left (**SHAPES OF THE** right or left hand)
+   shows the other hand's when clicked. A
+   left-hand shape without a skill of its own casts the right hand's (shown
+   dimmed, under RIGHT HAND'S); **CLEAR GLYPH** on a left shape gives it back
+   the right hand's.
 3. In play, hold the Draw glyph button and draw the shape in front of you, like
    writing on a window: one stroke, at least about 12 cm across, in under four
    seconds. Where you start and which way round you go don't matter; the
@@ -386,8 +394,11 @@ way the game assigns any skill; like every assignment the game saves it with
 the character and weapon set, and a skill you had on RT in a plain controller
 layout is replaced. The shapes are shared by all your characters: a shape whose
 skill your hero lacks shows **Another hero's** and casts nothing. Settings:
-`[glyphs]` in the profile INI (`draw_slot`, and one skill id per shape), edited
-from the wheel only.
+`[glyphs]` in the profile INI (`draw_slot` and `second_draw_slot`, one a hand;
+one skill id per shape for the right hand, and `left_circle` ... `left_wave`
+for the left, where -1 casts the right hand's), edited from the wheel only.
+Shapes given skills before each hand had its own set are the right hand's, and
+the left hand's until a left shape gets its own.
 
 ## Weapon skill gestures
 
@@ -419,7 +430,12 @@ says how: **Shield swing / thrust** (Smite with a shield), **Draw & release**
 where you point.
 Pointing at a skill in the skill picker (**EDIT SKILLS**), or at a slot in a
 hand wheel, shows a line under it saying how that skill works from that slot:
-the gesture on a trigger, or what its button does.
+the gesture on a trigger, or what its button does. Skills a landed swing or shield
+bash casts (melee strike skills, Fury and Zeal, Double Swing and Frenzy, Smite with a shield) are
+tagged **CAST ON STRIKE**; body gestures (Holy Shield's sign of
+the cross, the shapeshifts, Blessed Hammer, Charge, Fist of the Heavens), bow draws
+and throws keep **GESTURE**. Both need a trigger slot, except the body gestures,
+which work from any slot.
 
 **Bow quiver.** With a bow, a face button assigned to Magic Arrow, Fire Arrow,
 Cold Arrow, Exploding Arrow, Ice Arrow, Immolation Arrow or Freezing Arrow loads

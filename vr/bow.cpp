@@ -522,6 +522,7 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
             ThrowWeapon(game,player,shot.hand);
         } else reinterpret_cast<int(*)(uintptr_t,uintptr_t,int,int)>(d2rsig::Addr(AttackRva))(game,player,0,1);
         if(!launch.created)++refused;
+        else projectiles::CombatWalk(3);   // combat walk: a cast, shot or throw that left the hand
         if(crossbow)crossbowCadence.Landed(shot.session,fireAt,launch.created?crossbowCycle:100);
         if(crossbow&&launch.created){++crossbowFired;crossbowCycleMs=crossbowCycle;}
         {

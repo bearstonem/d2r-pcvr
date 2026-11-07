@@ -421,8 +421,11 @@ void Publish(const props::Poses& poses) {
     std::lock_guard lock(poseMutex);
     pending=poses;
 }
+thread_local int ownTransforms=0;
+OwnTransforms::OwnTransforms(){++ownTransforms;}
+OwnTransforms::~OwnTransforms(){--ownTransforms;}
 void Transformed() {
-    if(!active.load(std::memory_order_relaxed))return;
+    if(ownTransforms||!active.load(std::memory_order_relaxed))return;
     const uint64_t at=framevr::BowRenderTime();
     if(!at||at==passAt.load(std::memory_order_relaxed)||passing.exchange(true,std::memory_order_acquire))return;
     if(passAt.load(std::memory_order_relaxed)!=at){passAt=at;Pass();}
