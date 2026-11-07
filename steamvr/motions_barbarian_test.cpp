@@ -179,6 +179,10 @@ int main() {
         Check(front.casts==0,"Whirlwind: the arms out wide but forward is no T");
         Sim up(Motion::Whirlwind);up.Move({.60f,.35f,-.05f},{-.60f,.35f,-.05f},.45f);up.Hold(.5f);
         Check(up.casts==0,"Whirlwind: the arms raised high in a V is no T");
+        Sim aside(Motion::Whirlwind);aside.Move({.66f,-.11f,.46f},{-.48f,-.09f,-.38f},.45f);aside.Hold(.45f);
+        Check(aside.casts==1,"Whirlwind: the owner's T held looking aside (one hand 46 cm behind the eyes, the other 38 in front) casts");
+        Sim tilt(Motion::Whirlwind);tilt.Move({.70f,.05f,-.05f},{-.70f,-.40f,-.05f},.45f);tilt.Hold(.5f);
+        Check(tilt.casts==0,"Whirlwind: one arm up and one down is no T");
         Sim howl(Motion::Whirlwind);Howl(howl);howl.Hold(.6f);
         Check(howl.casts==0,"Whirlwind: Howl's fling, held wide afterwards, is no T");
         Sim face(Motion::Whirlwind);face.Move({.07f,.05f,-.25f},{-.07f,.05f,-.25f},.35f);face.Hold(.1f);face.Move({.55f,.0f,-.05f},{-.55f,.0f,-.05f},.25f);face.Hold(1.5f);

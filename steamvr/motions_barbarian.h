@@ -81,11 +81,13 @@ struct Tuning {
     // deepBehind was 25 cm; the owner's first Leap Attacks (2026-11-06, about 30) began 28-85 cm behind the eyes,
     // most past 45, and the Leaps 15-21: 30 leaves Leap the slack asked for and Leap Attack's swings past it.
     float deepBehind=-.30f;double deepWindow=.8;
-    // Whirlwind: a T - each hand out on its own side tSide or more, at least tApart apart, between tLow and tHigh
-    // (the shoulders to the eyes), within tDepth ahead or behind - held tHold s; it whirls whirlAhead cells ahead.
-    // A T the hands were flung into from together (Howl's fling, which ends wide at eye level) within howlWindow
-    // is none.
-    float tSide=.45f,tApart=1.0f,tLow=-.45f,tHigh=.10f,tDepth=.30f;double tHold=.30;
+    // Whirlwind: a T - the hands at least tApart apart across (level), the right one tSide or more to the right of
+    // the left, both between tLow and tHigh (the shoulders to the eyes) and within tLevel of each other, their
+    // middle within tDepth of the eyes - held tHold s; it whirls whirlAhead cells ahead. The frame turns with the
+    // head, so each hand's own depth is not asked: a T held looking aside put one hand 46 cm behind the eyes and
+    // the other 38 in front, and it was let go (owner, 2026-11-06). A T the hands were flung into from together
+    // (Howl's fling, which ends wide at eye level) within howlWindow is none.
+    float tSide=.60f,tApart=1.0f,tLow=-.45f,tHigh=.10f,tLevel=.25f,tDepth=.30f;double tHold=.30;
     float whirlAhead=10;
     float swingSpeed=1.5f;    // m/s: the leap's swing, each arm at its fastest
     // Leap lands leapAhead cells away the way the arms swung (straight ahead, where you face, if straight up).
@@ -299,8 +301,9 @@ inline bool Done(Engine& e,Motion m) {
     case Motion::Whirlwind: {
         const auto tee=[&](const Sample& s) {
             const auto& a=s.l[0];const auto& b=s.l[1];
-            return a.x>=t.tSide&&b.x<=-t.tSide&&Len(a-b)>=t.tApart&&a.y>=t.tLow&&a.y<=t.tHigh&&b.y>=t.tLow&&b.y<=t.tHigh&&
-                std::fabs(Forward(a))<=t.tDepth&&std::fabs(Forward(b))<=t.tDepth;
+            const math::Vec mid=(a+b)*.5f;
+            return std::hypot(a.x-b.x,a.z-b.z)>=t.tApart&&a.x-b.x>=t.tSide&&a.y>=t.tLow&&a.y<=t.tHigh&&b.y>=t.tLow&&b.y<=t.tHigh&&
+                std::fabs(a.y-b.y)<=t.tLevel&&std::hypot(mid.x,mid.z)<=t.tDepth;
         };
         if(!e.Held(tee(n),n.t,t.tHold))return false;
         // the T's start, and the hands together just before it: Howl's fling, not a T
