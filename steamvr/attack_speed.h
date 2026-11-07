@@ -101,6 +101,30 @@ inline int DualFrames(int classId,Weapon weapon,int ias,int attackRate,int ownWs
     return Frames(classId,weapon,ias,DualWsm(ownWsm,otherWsm),SkillSpeed(attackRate,ownWsm));
 }
 inline uint32_t Milliseconds(int frames) {return frames>0?uint32_t(frames)*1000u/FramesPerSecond:0;}
+// A Barbarian's dual-wield sequence (Skills.txt seqnum 11): one Double Swing or Frenzy cast
+// swings both weapons; 20 frames at the Barbarian's 256 animation speed, timed on the RIGHT
+// (primary) weapon with the averaged WSM and skill speed. Double Swing's start (68, 434290)
+// also puts +50 attack rate (stat 68, on a stat list of its own) on the hero for its cast,
+// which is why it is quicker than Frenzy; Frenzy's charges add theirs to stat 68 as they
+// build. Fits Cal's native Baal measurement (2026-11-03, a 20 IAS -30 WSM Phase Blade in the
+// right hand, 40 IAS axe left): Double Swing 436-447 ms (11 frames); Frenzy ~600 ms (15)
+// ramping to 472-483 ms (12). attackRate: the hero's stat 68 WITHOUT Double Swing's bonus.
+inline constexpr int DualSequence=20,DoubleSwingSpeed=50;
+inline int DualSequenceFrames(int ias,int attackRate,int ownWsm,int otherWsm,bool doubleSwing) {
+    const int percent=std::clamp(100+Eias(ias)-DualWsm(ownWsm,otherWsm)+SkillSpeed(attackRate,ownWsm)+(doubleSwing?DoubleSwingSpeed:0),15,175);
+    const int rate=256*percent/100;
+    return rate>0?(DualSequence*256+rate-1)/rate-1:0;
+}
+// Unleashed dual wield, the shared beat (Cal, 2026-11-03): natively a dual wielder's basic
+// attacks alternate weapons, so the attack rhythm runs at the two weapons' cycles on average.
+// In VR either blade may take the beat (any order, the player's favourite weapon included),
+// so the beat is timed on that average whichever blade lands it: the faster weapon can't speed
+// it past native. An unknown cycle (0) leaves the other; both unknown, 0.
+inline uint32_t DualBeatMs(uint32_t right,uint32_t left) {
+    if(!right)return left;
+    if(!left)return right;
+    return (right+left+1)/2;
+}
 // One attack per cycle, on the authoritative game thread. A native-resolved
 // attack starts the cycle whether its roll hit or missed, as the native swing
 // animation would; geometric whiffs and refused contacts never do.

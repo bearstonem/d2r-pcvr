@@ -12,10 +12,13 @@ casting.
   share one attack cycle (Cal, 2026-10-30, as a shapeshift form's claws do): a
   full-cycle hit with either blade starts the next cycle, so two blades earn one
   full hit (on-hit effects, strike skills) per cycle, as one native attack rhythm.
-  Each stroke is timed as native times a dual-wield attack (2026-10-30): both
-  weapons at their averaged WSM, with the swinging weapon's IAS (read with that
-  weapon merged; the other weapon's IAS does not count). Both blades can strike
-  the same creature, including in the same input batch.
+  Each weapon is timed as native times a dual-wield attack (2026-10-30): both
+  weapons at their averaged WSM, with that weapon's own IAS (read with it merged;
+  the other weapon's IAS does not count). Natively the attacks alternate weapons,
+  so the shared beat is the two weapons' cycles on average (2026-11-03), whichever
+  blade lands it: swing in any order and favour either weapon (its procs land on
+  the beats it takes), but the faster weapon can't speed the beat past native.
+  Both blades can strike the same creature, including in the same input batch.
 - A strike skill (Bash, Stun, Concentrate, Berserk) cast from either blade
   swings the primary weapon, the rendered right one, as native single-weapon
   skills do; basic attacks swing the blade that struck.

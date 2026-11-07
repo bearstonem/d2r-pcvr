@@ -1237,9 +1237,9 @@ and trigger/button melee were:
     counts as one of the stroke's creatures.
   - **On-hit effects** come only from a full-cycle stroke (the breakpoint, a
     full cycle after the latest full-cycle attack on the one shared clock: both
-    blades when dual wielding (2026-10-30; each stroke is timed as native times
-    a dual-wield attack: the two weapons' averaged WSM, with the swinging
-    weapon's own IAS) and a shapeshift form's two claws),
+    blades when dual wielding (2026-10-30; the beat is the two weapons' native
+    dual-wield cycles on average, 2026-11-03, whichever blade lands it) and a
+    shapeshift form's two claws),
     and only on the first creature that stroke lands on.
     That covers life and mana leech, Life Tap's heal (a Life-Tapped monster
     heals you only from such a stroke), critical and deadly strike, crushing blow,
@@ -1282,6 +1282,28 @@ and trigger/button melee were:
     swings the blade that struck. Developer
     builds log `Frame melee skills:` (armed contacts, casts, refusals by
     reason) and add `strike=<skill> cast|basic_strike` to `melee_trace` lines.
+  - **Double Swing and Frenzy** (Cal, 2026-11-03; `strike_skills.h` `DualCast`):
+    dual strike skills, with a weapon in each hand. One cast is one swing of
+    each blade. A full-cycle stroke with either blade casts it on the creature
+    it struck (mana, use check and start function once) and lands hit 1 with
+    that blade's weapon. The other blade's first landed contact before the
+    cast's beat ends lands hit 2 with its weapon, on whatever it struck: whole,
+    with its on-hit effects, no second mana. No second contact in time: hit 2
+    is forfeited, so a cast never lands more than native. Natively the do
+    functions (70, 9) pick hit 2's creature themselves from the animation
+    sequence; here each blade's contact runs only the part after the target
+    choice (Double Swing `567070` + the melee resolve `44B2B0`; Frenzy the
+    resolve and, on a hit, its speed state `566D60`), under that blade's
+    weapon. The beat while one is armed is the skill's own cast: the 20-frame
+    dual-wield sequence timed on the right-arm weapon, Double Swing with the
+    +50 attack rate its start gives it (Frenzy's charges add theirs as they
+    build), which fits Cal's native Baal measurement (2026-11-03: 436-447 ms
+    and 600 ms ramping to 472-483 ms with a 20 IAS Phase Blade and a 40 IAS
+    axe). With no native sequence to end it, that +50 outlives our cast by up
+    to a second; for 1.2 s after one each arm keeps its earlier attack rate,
+    so it never times a swing. `melee_trace` tags the
+    hits `cast 1/2` and `cast 2/2`; developer builds log `Frame dual strikes:`
+    (casts, hit 2 by the other blade, forfeited, not run).
   - **Fury and Zeal** (Cal, 2026-10-25; replaces the swing flurry; rev2
     without the native mode, which rooted the hero): the casting stroke runs
     the skill's start and one do 13 hit (count 1) on the struck creature.
@@ -1425,10 +1447,14 @@ Dual wield (2026-10-30, `attack_speed.h` `DualFrames`): native D2 merges the
 swinging weapon's stat lists before timing the attack, so each stroke reads the
 hero's item IAS and attackrate under that weapon's own scope (the other
 weapon's IAS does not count), and both weapons run at their averaged WSM (D2R
-2.4's fix of the old left-arm offset). The log reports `Frame dual wield speed:`
-per arm when its inputs change, and `native speed strokes=`/`unknown=` on
-`Frame dual wield:`; an unknown read keeps the per-arm cycle with the averaged
-WSM. Double Swing, Frenzy and Double Throw sequences are not read yet. An unknown class or weapon class (including
+2.4's fix of the old left-arm offset). Natively the attacks alternate weapons, so
+the shared beat both blades are on is the two weapons' cycles on average
+(2026-11-03, `DualBeatMs`), whichever blade lands it: swing in any order and
+favour either weapon, but never faster than native dual wield. The log reports
+`Frame dual wield speed:` per arm and `Frame dual wield beat:` (both arms and the
+shared beat) when their inputs change, and `native speed strokes=`/`unknown=` on
+`Frame dual wield:`; an unknown read keeps the UI thread's per-arm cycles (averaged
+WSM), averaged the same way. Double Swing, Frenzy and Double Throw sequences are not read yet. An unknown class or weapon class (including
 classes outside the original seven) leaves the cycle unknown, which does not
 gate hits. Unleashed restores unlimited free-swing contacts. The log
 reports the cycle inputs (`Frame melee attack speed:`) and refused contacts
@@ -1609,6 +1635,25 @@ for while in knockback now sets Neutral instead (`knockback_to_neutral=` in the
 applied live. Developer builds log `Frame flinch:` counts and, once per distinct
 call chain (at most 8 a session), a `Frame flinch probe:` line naming the game code
 that asked for the flinch.
+
+**Combat walk (Cal, 2026-11-02):** with no flinch and no cast animation holding the
+hero (hand spells, arrows, throws and physical strikes never enter one), players could
+fight while moving at full speed. Instead, the game's run / walk toggle goes to walk
+while fighting: when a monster's hit or missile damages the hero (not one the
+would-have-hit gate counts as a miss: the scope set at the forced hit check), when a
+physical stroke lands a strike (any resolved contact, strike-skill casts and Fury /
+Zeal's later hits included; a swing that touches nothing never counts), and when a
+hand spell, arrow, bolt, javelin or throw leaves the hand. Movement speed's own setting
+returns `[gameplay] combat_walk_ms` (default 500; 0 = off; applied live) after the last
+of them. Button, wheel and gesture skills are not counted: they play the game's own
+animation, which already stops the hero. The toggle is the game's own (UI command 0x23),
+kept in line by the same `GaitSync` as Movement speed (`run_speed.h`), so it changes at
+most once a second: a single exchange runs again about a second after the walk began.
+It is sent on its own UI-thread slot (`interactionstate::ToggleRunWalk`), never through
+the interaction engine's request slot, which would block motion input while in flight,
+refuse a holster draw, merc toss or quick-use item in that window, and buzz the right
+hand on every toggle. Developer builds log `Frame combat walk: on - struck | strike |
+cast / shot` and `off`; release builds log Movement speed's own toggles only.
 
 **Incoming defense (Unleashed):** every monster melee attack and projectile aimed at
 the local player lands - its to-hit roll always succeeds, so only the raised shield

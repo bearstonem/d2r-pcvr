@@ -126,7 +126,7 @@ namespace gamecmd {void RequestPotion(int slot);void CancelPotion();}
 namespace gamestate {void MenuMap(bool wanted);uint32_t QuestNotices();bool NoticePanelOpen();bool NoticeText(int kind,char* out,uint32_t size);}
 namespace gamestate {bool LeftShield();bool RightThrowingPotion();uint32_t RightThrowingPotionCode();framevr::dualwield::Equipment MeleeEquipment();}
 namespace combat {float GameVolume();}
-namespace projectiles {int ObservedGait(uint64_t& at,bool* tired);void StickFullRun(bool on);}
+namespace projectiles {int ObservedGait(uint64_t& at,bool* tired);void StickFullRun(bool on);bool CombatWalking(uint64_t now,int* source);}
 
 namespace framevr {
 using Microsoft::WRL::ComPtr;
@@ -321,6 +321,9 @@ uint64_t leftStrikesSequence=0,leftStrikesAt=0;float leftStrikesWanted=0;
 runspeed::GaitSync gaitSync;
 runspeed::StickToggle stickToggle;
 bool movementWalks=false;   // the hero should walk (this step): Movement speed's WALK, or the stick's switch
+bool combatWalks=false;     // the combat walk ([gameplay] combat_walk_ms, run_speed.h): a hit, strike, cast or shot keeps the toggle on walk
+uint64_t combatWalkSeenAt=0;   // the combat walk was last on: toggles within CombatToggleQuietMs of it are its own
+constexpr uint64_t CombatToggleQuietMs=3000;
 bool noticeAtlasPending=false,noticeImageReady=false;
 // Guard strain light: soft white at the rim, directly beneath the blood. Fed by
 // the game thread's blocks and the guard tick; painted small in the background.
@@ -3511,7 +3514,10 @@ void Input() {
     interactionInput.criticalAlerts=hudSettings.values[settings::CriticalAlerts]>.5f;
     if(leftStrikesSequence&&((hudSettings.sequence==leftStrikesSequence&&hudSettings.result!=settings::Result::Saving)||interactionInput.at-leftStrikesAt>2000))
         leftStrikesSequence=0;   // saved, refused, or overtaken by another save: the profile's value again
-    interactionInput.leftStrikes=hudSettings.ready&&bindingSnapshot.skillClass==settings::heroclass::Druid?
+    // The wheel's left-hand strikes box: a Druid (claws in form) or a dual wielder (Barbarian or
+    // Assassin with a weapon in each hand: Double Swing / Frenzy on the right trigger, both blades).
+    interactionInput.leftStrikes=hudSettings.ready&&(bindingSnapshot.skillClass==settings::heroclass::Druid||
+                                 dualwield::Eligible(skel::HeroClass(),gamestate::MeleeEquipment()))?
         int(leftStrikesSequence?leftStrikesWanted:hudSettings.values[settings::LeftHandStrikes]):-1;
     interactionInput.glyphDraw=glyphDrawSlots;
     for(int h=0;h<2;++h)for(int i=0;i<glyphs::ShapeCount;++i)interactionInput.glyphSkills[size_t(h)][size_t(i)]=glyphcast::SkillOf(glyphValues[settings::GlyphKey(i,h)]);
@@ -3528,7 +3534,33 @@ void Input() {
             Say(movementWalks?"Frame right stick: up - walk (Stick toggle)":"Frame right stick: up - run (Stick toggle)");
             MotionPulse(0,haptics::Category::Interaction,.45f,45000000);
         }
-        interactionInput.gaitToggle=gaitSync.Step(interactionInput.session,gait,seenAt,stick,movementWalks,hudSettings.ready,GetTickCount64(),tired);
+        {   // The combat walk (Cal, 2026-11-02): walk while fighting, then Movement speed again.
+            int source=0;const auto now=GetTickCount64();
+            combatWalks=projectiles::CombatWalking(now,&source);
+#ifdef D2RVR_DEVELOPER
+            static bool was=false;
+            if(combatWalks&&!was)Say(source==1?"Frame combat walk: on - struck":source==2?"Frame combat walk: on - strike":"Frame combat walk: on - cast / shot");
+            else if(!combatWalks&&was)Say("Frame combat walk: off - back to Movement speed");
+            was=combatWalks;
+#endif
+            if(combatWalks)combatWalkSeenAt=now;
+            movementWalks=movementWalks||combatWalks;
+        }
+        // The game's own run / walk toggle, on its own UI-thread slot (interactionstate::ToggleRunWalk):
+        // never through the interaction engine's request slot, which blocked motion input while in
+        // flight, refused a holster draw / merc toss / quick-use item in that window and buzzed the
+        // right hand on every toggle - all frequent once the combat walk toggles in every fight.
+        if(gaitSync.Step(interactionInput.session,gait,seenAt,stick,movementWalks,hudSettings.ready,GetTickCount64(),tired)&&
+           interactionstate::ToggleRunWalk(interactionInput.session)) {
+            const auto now=GetTickCount64();
+            gaitSync.Sent(movementWalks,now);
+            const char* line=movementWalks?"Frame movement: game toggle on run, walking wanted - run / walk toggled":
+                                           "Frame movement: game toggle on walk, running wanted - run / walk toggled";
+#ifndef D2RVR_DEVELOPER
+            if(now-combatWalkSeenAt>CombatToggleQuietMs)   // release builds: Movement speed's own toggles only, not the combat walk's
+#endif
+            Say(line);
+        }
     }
     interactionInput.leftCasting=handOutput.spells[1]>=0||(handOutput.slot>=0&&handOutput.hand==1);
     interactionInput.leftTrigger=controls.lt/255.f;
@@ -3596,10 +3628,6 @@ void Input() {
             leftStrikesSequence=request.sequence;leftStrikesAt=interactionInput.at;leftStrikesWanted=request.values[settings::LeftHandStrikes];
             Say(leftStrikesWanted>.5f?"Frame wheel: left claw strikes = right trigger skill":"Frame wheel: left claw strikes = own trigger skill");
         } else interactionOutput.feedback=3;   // a save is still running: refuse, never queue a second flip
-    }
-    if(interactionInput.gaitToggle&&interactionOutput.request.action==interaction::Action::RunWalk) {
-        gaitSync.Sent(movementWalks,GetTickCount64());
-        Say(movementWalks?"Frame movement: game toggle on run, walking wanted - run / walk toggled":"Frame movement: game toggle on walk, running wanted - run / walk toggled");
     }
     StepDroppedBottles();
     StepBodies();

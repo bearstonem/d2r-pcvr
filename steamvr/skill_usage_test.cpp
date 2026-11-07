@@ -18,6 +18,7 @@ int main() {
     Check(CastOnStrike(strikeskills::Bash,rightTrigger)&&CastOnStrike(strikeskills::Bash,leftTrigger)&&!CastOnStrike(strikeskills::Bash,rightFace)&&
           !Gesture(strikeskills::Bash,rightTrigger)&&ByMotion(strikeskills::Bash,rightTrigger)&&
           CastOnStrike(strikeskills::Fury,rightTrigger)&&CastOnStrike(strikeskills::Zeal,leftTrigger)&&
+          CastOnStrike(strikeskills::Frenzy,rightTrigger)&&CastOnStrike(strikeskills::DoubleSwing,leftTrigger)&&
           !CastOnStrike(weaponskills::HolyShield,rightTrigger)&&!CastOnStrike(weaponskills::Strafe,rightTrigger),
           "a strike skill is Cast On Strike on either trigger, a press on a face button");
     Check(Has(Line(strikeskills::Bash,rightTrigger),"full-cycle")&&Has(Details(strikeskills::Bash,rightTrigger),"no on-hit effects")&&

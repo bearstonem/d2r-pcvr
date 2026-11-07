@@ -136,7 +136,7 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"Tactical commands", "Point & hold gestures, command beacon and priority targeting for your mercenary", L"gameplay",L"companion_tactical_commands",1,0,1,1},
     // Melee skill strikes (strike_skills.h): which skill the left claw's strikes cast.
     // Set from the skill wheel's lower-left box (Druid), not a VR Settings row.
-    {"Left-hand strikes", "Druid: the left claw casts its own trigger skill or the right trigger's", L"gameplay",L"left_hand_strikes",0,0,1,1},
+    {"Left-hand strikes", "Druid or dual wield: the left claw or blade casts its own trigger skill or the right trigger's", L"gameplay",L"left_hand_strikes",0,0,1,1},
     {"Torch flame", "The flame on a torch club's head; its light stays either way", L"torch",L"flame",1,0,1,1},
     // OFXR Bridge (frame_generation.h): 0 Off, 1 FidelityFX, 2 NVIDIA; on or off at the next start.
     {"Frame generation", "Experimental, with Both eyes; turning it on reloads VR", L"render",L"frame_generation",0,0,2,1},
