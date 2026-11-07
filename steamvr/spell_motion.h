@@ -316,7 +316,7 @@ struct Output {
     // eyes, the fastest hand, each hand's biggest fall within pushWindow, and where the hands were last
     // (head-local: x right, y up, z back) (m, m/s).
     float apartMin=0,apartMax=0,top=0,low=0,fastest=0,fall[2]{};
-    float behind=0;               // the farthest either hand went behind the eyes (m; Leap's and Leap Attack's wind-up)
+    float behind[2]{};            // the farthest each hand went behind the eyes (m; Leap's and Leap Attack's wind-up)
     math::Vec end[2]{};
     // With a cast that goes somewhere (Teleport): the way the motion went, head-local as end (Teleport's: the
     // arm it pointed with); zero for the rest.
@@ -574,7 +574,7 @@ public:
         if(!watching) {
             if(!(in.free||pressed)||!ready)return out;   // only a fresh press watches: a trigger held as the spell was readied does not
             watching=true;since=in.time;casts=0;Clear();
-            stats={};stats.apartMin=1e9f;stats.top=-1e9f;stats.low=1e9f;stats.behind=-1e9f;
+            stats={};stats.apartMin=1e9f;stats.top=-1e9f;stats.low=1e9f;stats.behind[0]=stats.behind[1]=-1e9f;
             out.began=!in.free;
         }
         const auto inverse=math::Conjugate(math::Yaw(math::Heading(in.headRotation)));
@@ -587,7 +587,7 @@ public:
         stats.apartMin=std::min(stats.apartMin,apart);stats.apartMax=std::max(stats.apartMax,apart);
         for(int h=0;h<2;++h) {
             stats.top=std::max(stats.top,s.l[h].y);stats.low=std::min(stats.low,s.l[h].y);stats.fastest=std::max(stats.fastest,Len(Velocity(h)));
-            stats.behind=std::max(stats.behind,s.l[h].z);
+            stats.behind[h]=std::max(stats.behind[h],s.l[h].z);
             for(const auto& x:samples)if(in.time-x.t<=tuning.pushWindow)stats.fall[h]=std::max(stats.fall[h],x.l[h].y-s.l[h].y);
             stats.end[h]=s.l[h];
         }
