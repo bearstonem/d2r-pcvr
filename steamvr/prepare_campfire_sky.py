@@ -495,6 +495,48 @@ def with_marks(preset, names, step=20.0):
 MARKS = ()                      # --mark NAME... (testing)
 UI_WALLS = False                # --ui-walls
 SPIN = ()                       # --spin NAME...: entities turned half round about their own place
+GROUND_TURNS = ()               # --ground-turns DEG...: copies of the scene's own ground turned about the fire
+GROUND_SINK = 0.06              # the copies a hair under the scene's own ground, so that it wins where both lie
+
+
+def with_ground_round(preset, turns):
+    """The scene's own ground (its ui_groundplane terrain pieces) copied round the fire by `turns` degrees:
+    the floor the player stands on, where the scene ended in the town's own ground."""
+    entities = preset['entities']
+    sources = [e for e in entities if isinstance(e, dict) and 'ui_groundplane' in json.dumps(e.get('components', [])).lower()
+               and MIRROR not in str(e.get('name', ''))]
+    ids = {int(e.get('id', 0)) for e in entities if isinstance(e, dict)}
+    made = 0
+    for turn in turns:
+        t = math.radians(turn)
+        ct, st = math.cos(t), math.sin(t)
+        qy = (0.0, math.sin(t * 0.5), 0.0, math.cos(t * 0.5))
+        for src in sources:
+            e = copy.deepcopy(src)
+            e['name'] = f'{src.get("name")}_ground{int(turn)}{MIRROR}'
+            new = (int(src.get('id', 0)) * 2654435761 + int(turn) * 0x9E3779B9 + 7) & 0xFFFFFFFF
+            while new in ids or new == 0:
+                new = (new + 0x01000193) & 0xFFFFFFFF
+            ids.add(new); e['id'] = new
+            for c in e.get('components', []):
+                if c.get('type') != 'TransformDefinitionComponent' or not isinstance(c.get('position'), dict):
+                    continue
+                p = c['position']
+                x, z = float(p.get('x', 0.0)) - FIRE[0], float(p.get('z', 0.0)) - FIRE[1]
+                p['x'] = FIRE[0] + ct * x + st * z
+                p['z'] = FIRE[1] - st * x + ct * z
+                p['y'] = float(p.get('y', 0.0)) - GROUND_SINK
+                q = c.get('orientation')
+                if isinstance(q, dict):   # qy * q
+                    x0, y0, z0, w0 = (float(q.get(k, 0.0)) for k in 'xyzw')
+                    bx, by, bz, bw = qy
+                    q['x'] = bw * x0 + bx * w0 + by * z0 - bz * y0
+                    q['y'] = bw * y0 - bx * z0 + by * w0 + bz * x0
+                    q['z'] = bw * z0 + bx * y0 - by * x0 + bz * w0
+                    q['w'] = bw * w0 - bx * x0 - by * y0 - bz * z0
+            entities.append(e)
+            made += 1
+    return preset, [f'+{made} copies of the scene ground turned {list(turns)}']
 
 
 def with_spins(preset, names):
@@ -614,6 +656,9 @@ def generate(assets, mod_name='D2R-PCVR', surround=True, town_at=TOWN_AT_GATE, t
     if surround and UI_WALLS:
         result, walls = with_ui_walls(result)
         removed = removed + walls
+    if GROUND_TURNS:
+        result, grounds = with_ground_round(result, GROUND_TURNS)
+        removed = removed + grounds
     if SPIN:
         result, spun = with_spins(result, SPIN)
         removed = removed + spun
@@ -681,6 +726,8 @@ def main():
     ap.add_argument('--spot-specular', type=float, default=None, help="the spot lights' specular share (testing)")
     ap.add_argument('--town-shadows', action='store_true', help="the town's models cast shadows too (testing)")
     ap.add_argument('--no-wall-fill', action='store_true', help="the town's wall out of the scene's whole half (holes by the gate)")
+    ap.add_argument('--ground-turns', nargs='*', type=float, default=[], metavar='DEG',
+                    help="copies of the scene's own ground turned about the fire, degrees")
     ap.add_argument('--spin', nargs='*', default=[], metavar='NAME', help='entities turned 180 degrees where they stand')
     ap.add_argument('--ui-walls', action='store_true', help="the square's walls as the scene's own ui_wall01 (the gate's brick and stone)")
     ap.add_argument('--ui-wall-length', type=float, default=None, help='ui_wall01 length, world units (testing)')
@@ -700,8 +747,9 @@ def main():
     WALL_FILL = not args.no_wall_fill
     global MARKS, FLIP_SIDE, FLIP_FAR, UI_WALLS, UI_WALL_LENGTH, UI_WALL_FAR_YAW
     UI_WALLS = args.ui_walls
-    global SPIN
+    global SPIN, GROUND_TURNS
     SPIN = tuple(args.spin)
+    GROUND_TURNS = tuple(args.ground_turns)
     if args.ui_wall_length is not None: UI_WALL_LENGTH = args.ui_wall_length
     if args.ui_wall_far_yaw is not None: UI_WALL_FAR_YAW = args.ui_wall_far_yaw
     FLIP_FAR = args.flip_far_wall
