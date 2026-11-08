@@ -426,6 +426,11 @@ inline constexpr Override Overrides[]={
     {.id="gameplay.melee_thrust_speed",.page=View::Combat,.section="Melee",.kind=RowKind::Slider,.label="Stab speed to hit",
      .help="How fast a forward stab along the blade must move to strike. Pull back before you stab again.",
      .format={.unit="m/s",.decimals=2}},
+    // Melee reach (Discord, 2026-11-08: hits "not registering because my body is desynchronized just slightly ...
+    // needlessly tight"): [gameplay] melee_reach_cm pads each monster's body for weapon and fist contacts. 0 by default.
+    {.id="gameplay.melee_reach_cm",.page=View::Combat,.section="Melee",.kind=RowKind::Slider,.label="Melee reach",
+     .help="A weapon or fist that passes this close beside a monster still hits it. Raise it if near misses don't count. Walls still block.",
+     .format={.unit="cm"}},
     // Combat: Skills and throws
     {.id="gameplay.skill_gestures",.page=View::Combat,.section="Skills and throws",.kind=RowKind::Toggle,.label="Skills on your moves",
      .help="A trigger skill powers your real move: melee skills on a landed strike, Smite on a bash, arrow skills on a release. Off, every swing is plain."},

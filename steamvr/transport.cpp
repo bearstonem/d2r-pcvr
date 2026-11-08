@@ -4957,6 +4957,7 @@ void Input() {
         sample.minWeaponSpeed=gestureSettings[settings::MeleeHitSpeed];
         sample.minThrustSpeed=gestureSettings[settings::MeleeThrustSpeed];
         sample.minShieldBashSpeed=gestureSettings[settings::ShieldBashSpeed];
+        sample.reach=gestureSettings[settings::MeleeReach]*.01f;   // VR Settings > Combat > Melee reach, cm
         const auto weapons=gamestate::MeleeEquipment();
         // A shapeshift form strikes with both claws; its weapon is a stat without a visual.
         const bool claws=InShapeForm();

@@ -45,6 +45,7 @@ static const GoldenRow Golden[]={
     {"gameplay.motion_controls",View(2),0,content::RowKind::Toggle,"Motion combat",0,0},
     {"gameplay.melee_hit_speed",View(2),0,content::RowKind::Stepper,"Swing speed to hit",0,0},
     {"gameplay.melee_thrust_speed",View(2),0,content::RowKind::Slider,"Stab speed to hit",0,0},
+    {"gameplay.melee_reach_cm",View(2),0,content::RowKind::Slider,"Melee reach",0,0},   // Discord, 2026-11-08
     {"gameplay.skill_gestures",View(2),1,content::RowKind::Toggle,"Skills on your moves",0,0},
     {"interactions.weapon_skill_indicators",View(2),1,content::RowKind::Toggle,"Skill icons on weapons",0,0},
     {"gameplay.throw_lift_deg",View(2),1,content::RowKind::Stepper,"Thrown weapon lift",0,1},
