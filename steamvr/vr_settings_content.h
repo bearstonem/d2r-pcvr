@@ -363,6 +363,7 @@ inline constexpr Option FrameGenScaleOptions[]={
 };
 
 inline constexpr ValueName OffAtZero[]={{0,"Off"}};
+inline constexpr ValueName WalkNames[]={{0,"Look"},{1,"Controller"}};   // walk_direction.h: where you look, or where the left controller points
 inline constexpr ValueName LeatherNames[]={{0,"Off"},{1,"Leather"},{2,"Menu only"}};   // leather::Style; owner 2026-10-29: "Hold Menu > Off/Leather/Menu Only"
 inline constexpr ValueName ByRangeAtZero[]={{0,"By range"}};
 inline constexpr ValueName LaserOffName[]={{LaserOff,"Off"}};
@@ -386,6 +387,11 @@ inline constexpr Override Overrides[]={
     {.id="interactions.dominant_hand",.page=View::Body,.section="Hands and moving",.kind=RowKind::Choice,.label="Dominant hand",
      .help="The hand that swaps weapon sets when you reach over a shoulder and grip. Your weapon and shield hands in the game stay the same.",
      FRAMEVR_OPTIONS(DominantOptions)},
+    // Walk direction (owner, 2026-11-08: "moving where the controller points versus where you look, that should be a
+    // setting"): the right half of Dominant hand's row (Body holds 8). [stick] walk_direction.
+    {.id="stick.walk_direction",.page=View::Body,.section="Hands and moving",.kind=RowKind::Stepper,.label="Walk direction",
+     .help="Look: the left stick walks where you look. Controller: where the left controller points, so you can look around while you walk.",
+     FRAMEVR_NAMES(WalkNames),.beside=true,.besideLabel="Walk"},
     {.id="turn.smooth",.page=View::Body,.section="Hands and moving",.kind=RowKind::Toggle,.label="Smooth turning",
      .help="On turns you smoothly with the right stick. Off turns you in steps, which many players find easier on the stomach.",
      .warnWhen={.5f,"Can cause motion sickness"}},
