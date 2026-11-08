@@ -165,6 +165,11 @@ PAVE_SKIP = ()
 # edge towards the map's right (smaller z) DROP lower and the other edge where it was - their ends bent
 # down to the ground beside the tower (D5-D6), not the whole floor tipped.
 PAVE_TILT = ()
+# --pave-hole X0:X1:Z0:Z1: the fire's own ground (its gravel squares) kept clear of the road: the rows over it
+# are laid without their half-step, their pieces starting at X1 and on (towards the bottom of the map) only,
+# so that no piece of a row reaches into it and every row beside it stays whole (owner 2026-11-08: the
+# whole left and bottom of the town in the road's stones, the fire's squares as they are).
+PAVE_HOLE = None
 # --move NAME:DX:DY:DZ: an entity (the town's too, NAME_pcvr_behind) moved; --lift X:Z:R:DY: everything
 # but the ground within R of (X, Z) from the fire raised by DY (the well and what leans on it, standing in
 # the new road's swells - owner 2026-11-08).
@@ -185,6 +190,9 @@ def with_pave(preset):
     z = z0
     while z < z1:
         x = x0 - (PAVE_STEP[0] / 2 if row % 2 else 0.0)
+        holed = PAVE_HOLE is not None and min(z + 31.0, PAVE_HOLE[3]) - max(z, PAVE_HOLE[2]) > 2.0
+        if holed:
+            x = PAVE_HOLE[1]
         col = 0
         while x < x1:
             hit = any(x <= px_ < x + 114.0 and z <= pz_ < z + 31.0 for px_, pz_ in PAVE_SKIP)
@@ -974,6 +982,8 @@ def main():
     ap.add_argument('--ui-walls', action='store_true', help="the square's walls as the scene's own ui_wall01 (the gate's brick and stone)")
     ap.add_argument('--ui-wall-length', type=float, default=None, help='ui_wall01 length, world units (testing)')
     ap.add_argument('--ui-wall-far-yaw', type=float, default=None, help='ui_wall01 turn on the north line, degrees')
+    ap.add_argument('--pave-hole', default=None, metavar='@X0:X1:Z0:Z1', help='a rectangle the road keeps clear of')
+    ap.add_argument('--pave-z0', type=float, default=None, help='where the road\'s rows start (z)')
     ap.add_argument('--pave-skip', nargs='+', default=None, metavar='@X:Z', help='no road piece over these points (@ in front, for a minus)')
     ap.add_argument('--pave-tilt', nargs='+', default=None, metavar='A1:B2:DROP', help="road pieces tipped, their right edge DROP lower")
     ap.add_argument('--move', nargs='+', default=None, metavar='NAME:DX:DY:DZ', help='entities moved, exact names')
@@ -1000,6 +1010,11 @@ def main():
         PAVE_SKIP = tuple(tuple(float(v) for v in t.lstrip('@').split(':')) for t in args.pave_skip)
     if args.pave_tilt:
         PAVE_TILT = tuple((parse_cell(t.split(':')[0]), parse_cell(t.split(':')[1]), float(t.split(':')[2])) for t in args.pave_tilt)
+    global PAVE_HOLE, PAVE_AREA
+    if args.pave_hole:
+        PAVE_HOLE = tuple(float(v) for v in args.pave_hole.lstrip('@').split(':'))
+    if args.pave_z0 is not None:
+        PAVE_AREA = (PAVE_AREA[0], PAVE_AREA[1], args.pave_z0, PAVE_AREA[3])
     MOVES = tuple(args.move or ())
     LIFTS = tuple(t.lstrip('@') for t in (args.lift or ()))
     TOWN_BIOME = args.town_biome
