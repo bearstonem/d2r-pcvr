@@ -150,6 +150,48 @@ HIDE = ()
 # painted by blend layers whose textures its biome names; under the scene's own biome the same layers came
 # out as one terracotta all over (owner 2026-11-08: "tej terakoty w grze nie ma praktycznie w ogóle").
 TOWN_BIOME = False
+# --pave: the town's flat ground under copies of the scene's road to the gate (terrain_characterCreate01,
+# "gładkie kamienie", with its own gentle swells - owner 2026-11-08), laid as bricks over the whole map
+# (x, z from the fire), a little under the road itself so that the road and its two copies by the wall win.
+PAVE = False
+PAVE_AREA = (-205.0, 225.0, -210.0, 240.0)
+PAVE_STEP = (100.0, 26.0)        # along its length (x) and across (z); the piece is about 114 x 31
+PAVE_HULL = (-29.0, 83.0)        # the piece's near corner from its origin (x, z)
+PAVE_DY = (-0.03, -0.05, -0.07)
+
+
+def with_pave(preset):
+    entities = preset['entities']
+    src = next((e for e in entities if isinstance(e, dict) and str(e.get('name', '')).lower() == 'terrain_charactercreate01_01'), None)
+    if src is None:
+        return preset, ['pave: road not found']
+    ids = {int(e.get('id', 0)) for e in entities if isinstance(e, dict)}
+    x0, x1, z0, z1 = PAVE_AREA
+    n = 0
+    row = 0
+    z = z0
+    while z < z1:
+        x = x0 - (PAVE_STEP[0] / 2 if row % 2 else 0.0)
+        col = 0
+        while x < x1:
+            e = copy.deepcopy(src)
+            e['name'] = f'{src.get("name")}_pave{n:03d}'
+            new = (int(src.get('id', 0)) * 2654435761 + (n + 1) * 0x9E3779B1) & 0xFFFFFFFF
+            while new in ids or new == 0:
+                new = (new + 0x01000193) & 0xFFFFFFFF
+            ids.add(new); e['id'] = new
+            for c in e.get('components', []):
+                if c.get('type') == 'TransformDefinitionComponent' and isinstance(c.get('position'), dict):
+                    p = c['position']
+                    p['x'] = FIRE[0] + x - PAVE_HULL[0]
+                    p['z'] = FIRE[1] + z - PAVE_HULL[1]
+                    p['y'] = float(p.get('y', 0.0)) + PAVE_DY[(row + col) % len(PAVE_DY)]
+            entities.append(e)
+            n += 1; col += 1
+            x += PAVE_STEP[0]
+        row += 1
+        z += PAVE_STEP[1]
+    return preset, [f'+{n} pieces of the road over the town ground']
 
 
 def grid_cell(dx, dz):
@@ -781,6 +823,9 @@ def generate(assets, mod_name='D2R-PCVR', surround=True, town_at=TOWN_AT_GATE, t
     if SPIN:
         result, spun = with_spins(result, SPIN)
         removed = removed + spun
+    if PAVE:
+        result, paved = with_pave(result)
+        removed = removed + paved
     if TOWN_BIOME and surround:
         town_biome = json.loads(assets.read(TOWN)).get('biomeFilename')
         if town_biome:
@@ -864,6 +909,7 @@ def main():
     ap.add_argument('--ui-walls', action='store_true', help="the square's walls as the scene's own ui_wall01 (the gate's brick and stone)")
     ap.add_argument('--ui-wall-length', type=float, default=None, help='ui_wall01 length, world units (testing)')
     ap.add_argument('--ui-wall-far-yaw', type=float, default=None, help='ui_wall01 turn on the north line, degrees')
+    ap.add_argument('--pave', action='store_true', help="the town ground under copies of the road to the gate")
     ap.add_argument('--town-biome', action='store_true', help="the scene under Harrogath's biome (its ground's textures)")
     ap.add_argument('--hide', nargs='+', default=None, metavar='NAME', help='entities taken out last, exact names')
     ap.add_argument('--town-keep', nargs='+', default=None, metavar='A1:B2',
@@ -878,7 +924,8 @@ def main():
     ap.add_argument('--sky', nargs='*', type=float, default=list(SKY_TURNS), metavar='DEG',
                     help='turns (degrees) of the copies of the sky round the fire; --sky alone: none')
     args = ap.parse_args()
-    global CAP_FACE, POINTS, SPOT_SPECULAR, TOWN_SHADOWS, WALL_FILL, TOWN_KEEP, HIDE, TOWN_BIOME
+    global CAP_FACE, POINTS, SPOT_SPECULAR, TOWN_SHADOWS, WALL_FILL, TOWN_KEEP, HIDE, TOWN_BIOME, PAVE
+    PAVE = args.pave
     TOWN_BIOME = args.town_biome
     if args.hide:
         HIDE = tuple(args.hide)
