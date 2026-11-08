@@ -460,6 +460,35 @@ def without(preset, names):
     return preset, removed
 
 
+def with_marks(preset, names, step=20.0):
+    """Testing: which model is which in the headset. The k-th of `names` (an entity name, or a part of
+    one) gets k copies of itself floating one over the other, `step` world units apart - count them."""
+    ids = {int(e.get('id', 0)) for e in preset['entities'] if isinstance(e, dict)}
+    marked = []
+    for k, name in enumerate(names, 1):
+        src = next((e for e in preset['entities'] if isinstance(e, dict) and name.lower() in str(e.get('name', '')).lower()), None)
+        if src is None:
+            marked.append(f'{name}: not found')
+            continue
+        for j in range(1, k + 1):
+            e = copy.deepcopy(src)
+            e['name'] = f'{src.get("name")}_mark{j}'
+            new = (int(src.get('id', 0)) * 2246822519 + j * 0x9E3779B9) & 0xFFFFFFFF
+            while new in ids or new == 0:
+                new = (new + 0x01000193) & 0xFFFFFFFF
+            ids.add(new)
+            e['id'] = new
+            for c in e.get('components', []):
+                if c.get('type') == 'TransformDefinitionComponent' and isinstance(c.get('position'), dict):
+                    c['position']['y'] = float(c['position'].get('y', 0.0)) + step * j
+            preset['entities'].append(e)
+        marked.append(f'{src.get("name")}: {k} copies over it')
+    return preset, marked
+
+
+MARKS = ()                      # --mark NAME... (testing)
+
+
 def generate(assets, mod_name='D2R-PCVR', surround=True, town_at=TOWN_AT_GATE, town_turn=0.0, ground=True, sky_turns=SKY_TURNS,
              flip_wall=True, cap=False, clutter=False, drop=(), shadows_off=True):
     if mod_name not in ('D2R-PCVR', 'pcvr-dev'):
@@ -498,6 +527,9 @@ def generate(assets, mod_name='D2R-PCVR', surround=True, town_at=TOWN_AT_GATE, t
     if surround and cap:
         result, capped = with_sky_cap(result)
         removed = removed + [f'+{capped} sky over the player']
+    if MARKS:
+        result, marked = with_marks(result, MARKS)
+        removed = removed + marked
     output = {f'{mod_name}.mpq/' + PRESET: (json.dumps(result, ensure_ascii=False, indent=2) + '\n').encode('utf-8')}
     record = {'version': 1, 'build': getattr(assets, 'build_hash', ''), 'removed_entities': removed,
               'sha256': {name: digest(data) for name, data in output.items()}}
@@ -559,6 +591,8 @@ def main():
     ap.add_argument('--spot-specular', type=float, default=None, help="the spot lights' specular share (testing)")
     ap.add_argument('--town-shadows', action='store_true', help="the town's models cast shadows too (testing)")
     ap.add_argument('--no-wall-fill', action='store_true', help="the town's wall out of the scene's whole half (holes by the gate)")
+    ap.add_argument('--mark', nargs='*', default=[], metavar='NAME',
+                    help="testing: the k-th named entity gets k copies floating over it, to tell models apart")
     ap.add_argument('--clutter', action='store_true', help="the town's grass, snow piles and small props too")
     ap.add_argument('--sky', nargs='*', type=float, default=list(SKY_TURNS), metavar='DEG',
                     help='turns (degrees) of the copies of the sky round the fire; --sky alone: none')
@@ -566,6 +600,8 @@ def main():
     global CAP_FACE, POINTS, SPOT_SPECULAR, TOWN_SHADOWS, WALL_FILL
     TOWN_SHADOWS = args.town_shadows
     WALL_FILL = not args.no_wall_fill
+    global MARKS
+    MARKS = tuple(args.mark)
     CAP_FACE = -1.0 if args.cap_flip else 1.0
     POINTS = args.spots_as_points
     SPOT_SPECULAR = args.spot_specular
