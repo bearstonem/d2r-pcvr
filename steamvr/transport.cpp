@@ -5737,8 +5737,8 @@ void Recenter() {
 }
 bool RecenterPosition() {
     std::lock_guard lock(mutex);
-    // Recentring cancels combat; do not interrupt a held support grip.
-    if(!gameplay::GripsReleased(motionInput))return false;
+    // Recentring cancels combat; preserve a held support grip or bow draw/release.
+    if(!gameplay::CanRecenter(motionInput,motionOutput))return false;
     if(!frame||!valid||!render||failed||panelMode||spatialMode||
        !inWorld||!inWorld()||(wantsPanel&&wantsPanel())||
        settingsModel.open||settingsOpen.load()||bodyCalibration.Active()||

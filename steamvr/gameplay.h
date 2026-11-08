@@ -92,6 +92,9 @@ struct Output {
     bool tossHeld=false,tossRelease=false;
     Vec tossOrigin{},tossVelocity{};
 };
+inline bool CanRecenter(const Input& in,const Output& out) {
+    return GripsReleased(in)&&!out.bowDrawing&&!out.bowRelease&&!out.nativeBowRelease;
+}
 inline Vec BowForward(Pose hand) {
     // Match the existing bow grip convention: knuckles point through the bow,
     // with controller forward as a fallback when the knuckles point vertically.
