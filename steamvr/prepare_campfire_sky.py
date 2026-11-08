@@ -158,6 +158,19 @@ PAVE_AREA = (-205.0, 225.0, -210.0, 240.0)
 PAVE_STEP = (100.0, 26.0)        # along its length (x) and across (z); the piece is about 114 x 31
 PAVE_HULL = (-29.0, 83.0)        # the piece's near corner from its origin (x, z)
 PAVE_DY = (-0.03, -0.05, -0.07)
+# --pave-skip X:Z ...: no road piece over these points (the fire's own pebbles; owner 2026-11-08: "ta
+# tekstura, na której stoję, zasłania ognisko ... tak samo 1 na północ ... oraz jedna na południe").
+PAVE_SKIP = ()
+# --pave-tilt A1:B2:DROP: the pieces whose middle lies in those cells tipped about their own length, the
+# edge towards the map's right (smaller z) DROP lower and the other edge where it was - their ends bent
+# down to the ground beside the tower (D5-D6), not the whole floor tipped.
+PAVE_TILT = ()
+# --move NAME:DX:DY:DZ: an entity (the town's too, NAME_pcvr_behind) moved; --lift X:Z:R:DY: everything
+# but the ground within R of (X, Z) from the fire raised by DY (the well and what leans on it, standing in
+# the new road's swells - owner 2026-11-08).
+MOVES = ()
+LIFTS = ()
+FLOORS = ('terrain_charactercreate', 'ui_skirt_mud', 'ui_rock_pile', 'town_ground')
 
 
 def with_pave(preset):
@@ -174,6 +187,10 @@ def with_pave(preset):
         x = x0 - (PAVE_STEP[0] / 2 if row % 2 else 0.0)
         col = 0
         while x < x1:
+            hit = any(x <= px_ < x + 114.0 and z <= pz_ < z + 31.0 for px_, pz_ in PAVE_SKIP)
+            if hit:
+                x += PAVE_STEP[0]; col += 1
+                continue
             e = copy.deepcopy(src)
             e['name'] = f'{src.get("name")}_pave{n:03d}'
             new = (int(src.get('id', 0)) * 2654435761 + (n + 1) * 0x9E3779B1) & 0xFFFFFFFF
@@ -186,6 +203,26 @@ def with_pave(preset):
                     p['x'] = FIRE[0] + x - PAVE_HULL[0]
                     p['z'] = FIRE[1] + z - PAVE_HULL[1]
                     p['y'] = float(p.get('y', 0.0)) + PAVE_DY[(row + col) % len(PAVE_DY)]
+                    for (a, b, drop) in PAVE_TILT:
+                        # the cells' x, z (columns run to smaller z, rows to larger x), and the piece over
+                        # them by 10 or more each way
+                        cz1, cz0 = 200.0 - 40.0 * a[0], 200.0 - 40.0 * (b[0] + 1)
+                        cx0, cx1 = (a[1] - 1) * 40.0 - 200.0, b[1] * 40.0 - 200.0
+                        ox = min(x + 114.0, cx1) - max(x, cx0)
+                        oz = min(z + 31.0, cz1) - max(z, cz0)
+                        if ox >= 10.0 and oz >= 10.0:
+                            # about local x through the origin (the piece lies at local z 83..114 from
+                            # it): the near edge (83) DROP lower, the far edge (114) put back where it was
+                            th = math.asin(max(-1.0, min(1.0, -drop / 31.0)))
+                            p['y'] -= (PAVE_HULL[1] + 31.0) * drop / 31.0
+                            h = th / 2
+                            q = c.setdefault('orientation', {'x': 0.0, 'y': 0.0, 'z': 0.0, 'w': 1.0})
+                            x0_, y0_, z0_, w0_ = (float(q.get(k, 0.0)) for k in 'xyzw')
+                            bx, bw = math.sin(h), math.cos(h)
+                            q['x'] = bw * x0_ + bx * w0_
+                            q['y'] = bw * y0_ - bx * z0_
+                            q['z'] = bw * z0_ + bx * y0_
+                            q['w'] = bw * w0_ - bx * x0_
             entities.append(e)
             n += 1; col += 1
             x += PAVE_STEP[0]
@@ -831,6 +868,30 @@ def generate(assets, mod_name='D2R-PCVR', surround=True, town_at=TOWN_AT_GATE, t
         if town_biome:
             removed = removed + [f'biome {result.get("biomeFilename")} -> {town_biome}']
             result['biomeFilename'] = town_biome
+    if MOVES or LIFTS:
+        for e in result['entities']:
+            if not isinstance(e, dict):
+                continue
+            name = str(e.get('name', '')).lower()
+            tr = next((c for c in e.get('components', []) if c.get('type') == 'TransformDefinitionComponent'
+                       and isinstance(c.get('position'), dict)), None)
+            if tr is None:
+                continue
+            p = tr['position']
+            for spec in MOVES:
+                n_, dx, dy, dz = spec.split(':')
+                if name == n_.lower():
+                    p['x'] = float(p.get('x', 0.0)) + float(dx)
+                    p['y'] = float(p.get('y', 0.0)) + float(dy)
+                    p['z'] = float(p.get('z', 0.0)) + float(dz)
+                    removed = removed + [f'moved: {spec}']
+            if any(f in name for f in FLOORS):
+                continue
+            for spec in LIFTS:
+                lx, lz, r, dy = (float(v) for v in spec.split(':'))
+                if math.hypot(float(p.get('x', 0.0)) - FIRE[0] - lx, float(p.get('z', 0.0)) - FIRE[1] - lz) <= r:
+                    p['y'] = float(p.get('y', 0.0)) + dy
+                    removed = removed + [f'lifted {dy}: {e.get("name")}']
     if HIDE:
         names = {n.lower() for n in HIDE}
         gone = [e.get('name') for e in result['entities'] if isinstance(e, dict) and str(e.get('name', '')).lower() in names]
@@ -909,6 +970,10 @@ def main():
     ap.add_argument('--ui-walls', action='store_true', help="the square's walls as the scene's own ui_wall01 (the gate's brick and stone)")
     ap.add_argument('--ui-wall-length', type=float, default=None, help='ui_wall01 length, world units (testing)')
     ap.add_argument('--ui-wall-far-yaw', type=float, default=None, help='ui_wall01 turn on the north line, degrees')
+    ap.add_argument('--pave-skip', nargs='+', default=None, metavar='@X:Z', help='no road piece over these points (@ in front, for a minus)')
+    ap.add_argument('--pave-tilt', nargs='+', default=None, metavar='A1:B2:DROP', help="road pieces tipped, their right edge DROP lower")
+    ap.add_argument('--move', nargs='+', default=None, metavar='NAME:DX:DY:DZ', help='entities moved, exact names')
+    ap.add_argument('--lift', nargs='+', default=None, metavar='X:Z:R:DY', help='all but the ground within R of a point raised')
     ap.add_argument('--pave', action='store_true', help="the town ground under copies of the road to the gate")
     ap.add_argument('--town-biome', action='store_true', help="the scene under Harrogath's biome (its ground's textures)")
     ap.add_argument('--hide', nargs='+', default=None, metavar='NAME', help='entities taken out last, exact names')
@@ -926,6 +991,13 @@ def main():
     args = ap.parse_args()
     global CAP_FACE, POINTS, SPOT_SPECULAR, TOWN_SHADOWS, WALL_FILL, TOWN_KEEP, HIDE, TOWN_BIOME, PAVE
     PAVE = args.pave
+    global PAVE_SKIP, PAVE_TILT, MOVES, LIFTS
+    if args.pave_skip:
+        PAVE_SKIP = tuple(tuple(float(v) for v in t.lstrip('@').split(':')) for t in args.pave_skip)
+    if args.pave_tilt:
+        PAVE_TILT = tuple((parse_cell(t.split(':')[0]), parse_cell(t.split(':')[1]), float(t.split(':')[2])) for t in args.pave_tilt)
+    MOVES = tuple(args.move or ())
+    LIFTS = tuple(t.lstrip('@') for t in (args.lift or ()))
     TOWN_BIOME = args.town_biome
     if args.hide:
         HIDE = tuple(args.hide)
