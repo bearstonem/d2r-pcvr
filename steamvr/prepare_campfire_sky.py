@@ -138,6 +138,33 @@ def scene_walls(preset):
     return out
 
 
+# --town-keep A1:B2 ...: rectangles of the owner's grid map (columns A-J, rows 1-10, 40 units a cell,
+# screen right = -z, screen down = +x from the fire) where the town's own pieces stay even inside the
+# scene's built half - Harrogath's raised yard with its stairs (structure09_platform) and the house on it
+# (owner 2026-11-08: "brakuje górki. Całego terenu ze schodami").
+TOWN_KEEP = ()
+# --hide NAME...: entities taken out last, by their exact name - the town's pieces too (NAME_pcvr_behind):
+# the town wall's corner at B4, whose unfinished back faced the player once its wall was turned (2026-11-08).
+HIDE = ()
+
+
+def grid_cell(dx, dz):
+    return (200.0 - dz) / 40.0, (dx + 200.0) / 40.0 + 1.0
+
+
+def in_town_keep(dx, dz):
+    c, r = grid_cell(dx, dz)
+    for a, b in TOWN_KEEP:
+        if a[0] <= c < b[0] + 1 and a[1] <= r < b[1] + 1:
+            return True
+    return False
+
+
+def parse_cell(text):
+    text = text.strip().upper()
+    return 'ABCDEFGHIJ'.index(text[0]), int(text[1:])
+
+
 def in_scene_half(dx, dz):
     a = math.degrees(math.atan2(dz, dx))
     return SCENE_SECTOR[0] <= a <= SCENE_SECTOR[1]
@@ -207,7 +234,7 @@ def with_harrogath_behind(preset, town, at, turn_deg, near=14.0, far=400.0, grou
         d = math.hypot(dx, dz)
         if d < near or d > far or beside_heroes(dx, dz):
             continue
-        if in_scene_half(dx, dz):
+        if in_scene_half(dx, dz) and not (in_town_keep(dx, dz) and WALLS not in str(next((c.get('filename', '') for c in comps if c.get('type') == 'ModelDefinitionComponent'), '')).lower()):
             model_name = str(next((c.get('filename', '') for c in comps if c.get('type') == 'ModelDefinitionComponent'), '')).lower()
             if not (wall_fill and WALLS in model_name and
                     all(math.hypot(dx - wx, dz - wz) >= WALL_FILL_CLEAR for wx, wz in own_walls)):
@@ -750,6 +777,11 @@ def generate(assets, mod_name='D2R-PCVR', surround=True, town_at=TOWN_AT_GATE, t
     if SPIN:
         result, spun = with_spins(result, SPIN)
         removed = removed + spun
+    if HIDE:
+        names = {n.lower() for n in HIDE}
+        gone = [e.get('name') for e in result['entities'] if isinstance(e, dict) and str(e.get('name', '')).lower() in names]
+        result['entities'] = [e for e in result['entities'] if not (isinstance(e, dict) and str(e.get('name', '')).lower() in names)]
+        removed = removed + [f'hidden: {n}' for n in gone]
     if MARKS:
         result, marked = with_marks(result, MARKS)
         removed = removed + marked
@@ -823,6 +855,9 @@ def main():
     ap.add_argument('--ui-walls', action='store_true', help="the square's walls as the scene's own ui_wall01 (the gate's brick and stone)")
     ap.add_argument('--ui-wall-length', type=float, default=None, help='ui_wall01 length, world units (testing)')
     ap.add_argument('--ui-wall-far-yaw', type=float, default=None, help='ui_wall01 turn on the north line, degrees')
+    ap.add_argument('--hide', nargs='+', default=None, metavar='NAME', help='entities taken out last, exact names')
+    ap.add_argument('--town-keep', nargs='+', default=None, metavar='A1:B2',
+                    help="grid rectangles (owner's map) where the town's own pieces stay inside the scene half")
     ap.add_argument('--far-wall-shift', type=float, default=None, help='the turned far wall moved along x, world units')
     ap.add_argument('--flip-far-wall', action='store_true', help="the town's north wall across the square turned round too")
     ap.add_argument('--wall-flip-side', choices=['all', 'north', 'south'], default='all',
@@ -833,7 +868,11 @@ def main():
     ap.add_argument('--sky', nargs='*', type=float, default=list(SKY_TURNS), metavar='DEG',
                     help='turns (degrees) of the copies of the sky round the fire; --sky alone: none')
     args = ap.parse_args()
-    global CAP_FACE, POINTS, SPOT_SPECULAR, TOWN_SHADOWS, WALL_FILL
+    global CAP_FACE, POINTS, SPOT_SPECULAR, TOWN_SHADOWS, WALL_FILL, TOWN_KEEP, HIDE
+    if args.hide:
+        HIDE = tuple(args.hide)
+    if args.town_keep:
+        TOWN_KEEP = tuple(tuple(parse_cell(p) for p in r.split(':')) for r in args.town_keep)
     TOWN_SHADOWS = args.town_shadows
     WALL_FILL = not args.no_wall_fill
     global MARKS, FLIP_SIDE, FLIP_FAR, UI_WALLS, UI_WALL_LENGTH, UI_WALL_FAR_YAW
