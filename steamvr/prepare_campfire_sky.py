@@ -233,6 +233,7 @@ def with_harrogath_behind(preset, town, at, turn_deg, near=14.0, far=400.0, grou
         # fire), turned too - so that its columned face, like the west wall's, is the one seen
         # (only its straight lengths: an end, corner or crenellation turned about its own origin leaves its place)
         spin = spin or (FLIP_FAR and WALLS in str(model).lower() and dz > 120.0 and 'segment' in str(model).lower())
+        far = FLIP_FAR and WALLS in str(model).lower() and dz > 120.0 and 'segment' in str(model).lower()
         new = (int(e.get('id', 0)) * 2246822519 + 0x27D4EB2F) & 0xFFFFFFFF
         while new in ids or new == 0:
             new = (new + 0x01000193) & 0xFFFFFFFF
@@ -241,7 +242,7 @@ def with_harrogath_behind(preset, town, at, turn_deg, near=14.0, far=400.0, grou
         for c in e.get('components', []):
             if c.get('type') != 'TransformDefinitionComponent':
                 continue
-            c['position']['x'] = FIRE[0] + dx
+            c['position']['x'] = FIRE[0] + dx + (FAR_SHIFT if far else 0.0)
             c['position']['z'] = FIRE[1] + dz
             q = c.get('orientation')
             if isinstance(q, dict) and spin:   # half a turn about its own +y first
@@ -568,6 +569,7 @@ def with_ui_walls(preset):
 
 
 FLIP_FAR = False                # --flip-far-wall
+FAR_SHIFT = 0.0                 # --far-wall-shift X: the turned far wall moved along x (its pieces turn about one end)
 FLIP_SIDE = 'all'               # --wall-flip-side north|south: only that part of the west wall turned
 
 
@@ -683,6 +685,7 @@ def main():
     ap.add_argument('--ui-walls', action='store_true', help="the square's walls as the scene's own ui_wall01 (the gate's brick and stone)")
     ap.add_argument('--ui-wall-length', type=float, default=None, help='ui_wall01 length, world units (testing)')
     ap.add_argument('--ui-wall-far-yaw', type=float, default=None, help='ui_wall01 turn on the north line, degrees')
+    ap.add_argument('--far-wall-shift', type=float, default=None, help='the turned far wall moved along x, world units')
     ap.add_argument('--flip-far-wall', action='store_true', help="the town's north wall across the square turned round too")
     ap.add_argument('--wall-flip-side', choices=['all', 'north', 'south'], default='all',
                     help="the west wall turned only north of the gate (z > 0 from the fire) or only south of it")
@@ -702,6 +705,8 @@ def main():
     if args.ui_wall_length is not None: UI_WALL_LENGTH = args.ui_wall_length
     if args.ui_wall_far_yaw is not None: UI_WALL_FAR_YAW = args.ui_wall_far_yaw
     FLIP_FAR = args.flip_far_wall
+    global FAR_SHIFT
+    if args.far_wall_shift is not None: FAR_SHIFT = args.far_wall_shift
     MARKS = tuple(args.mark)
     FLIP_SIDE = args.wall_flip_side
     CAP_FACE = -1.0 if args.cap_flip else 1.0
