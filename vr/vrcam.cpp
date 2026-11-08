@@ -341,7 +341,7 @@ struct Settings {
     std::atomic<float> campfireCaptionRect[4]{{0.25f},{0.0f},{0.75f},{0.33f}};   // [campfire] caption_left/top/right/bottom: shares of the menu band
     std::atomic<float> campfireCaptionWidth{3.0f}, campfireCaptionDistance{6.5f}, campfireCaptionRise{2.0f};   // [campfire] caption_width/distance/rise (metres)
     std::atomic<bool>  campfirePano{true};      // [campfire] panorama: one picture round the scene (pano_file), in the void
-    std::atomic<float> campfirePanoYaw{0.0f}, campfirePanoLow{-10.0f}, campfirePanoHigh{40.0f}, campfirePanoBright{1.0f};   // [campfire] pano_yaw/low/high/brightness
+    std::atomic<float> campfirePanoYaw{0.0f}, campfirePanoLow{-90.0f}, campfirePanoHigh{90.0f}, campfirePanoBright{1.0f};   // [campfire] pano_yaw/low/high/brightness
     std::atomic<float> campfireMenuTop{0.78f};  // [campfire] menu_top: where the strip begins, a share of the game's menu band from its top
     std::atomic<float> campfirePickDist{22.0f};// [campfire] pick_distance: how far along the hand's ray the pointer is put, world units
     std::atomic<bool>  skyHidePanels{true}; // no sky while a side panel shifts the picture
@@ -1457,8 +1457,8 @@ void LoadSettings() {
         g_set.campfireCaption.store(IniB(L"campfire", L"caption", true));
         g_set.campfirePano.store(IniB(L"campfire", L"panorama", true));
         g_set.campfirePanoYaw.store(std::clamp(IniF(L"campfire", L"pano_yaw", 0.0f), -360.0f, 360.0f));
-        g_set.campfirePanoLow.store(std::clamp(IniF(L"campfire", L"pano_low", -10.0f), -90.0f, 89.0f));
-        g_set.campfirePanoHigh.store(std::clamp(IniF(L"campfire", L"pano_high", 40.0f), -89.0f, 90.0f));
+        g_set.campfirePanoLow.store(std::clamp(IniF(L"campfire", L"pano_low", -90.0f), -90.0f, 89.0f));
+        g_set.campfirePanoHigh.store(std::clamp(IniF(L"campfire", L"pano_high", 90.0f), -89.0f, 90.0f));
         g_set.campfirePanoBright.store(std::clamp(IniF(L"campfire", L"pano_brightness", 1.0f), 0.0f, 4.0f));
         {
             wchar_t f[260] = {};

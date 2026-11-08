@@ -329,14 +329,14 @@ texture2D SkyBand5Tex < source = D2R_SKY_ACT5; > { Width = 1536; Height = 1024; 
 sampler2D SkyBand5Smp { Texture = SkyBand5Tex; AddressU = WRAP; AddressV = CLAMP; };
 texture2D SkyCap5Tex < source = D2R_SKYCAP_ACT5; > { Width = 1024; Height = 1024; Format = RGBA8; };
 sampler2D SkyCap5Smp { Texture = SkyCap5Tex; AddressU = WRAP; AddressV = WRAP; };
-// How many times the panorama goes round the circle (2: each copy 180 degrees, sharper, less stretched).
+// How many times the panorama goes round the circle (1: a whole 360-degree equirectangular picture, 2:1).
 #ifndef D2R_PANO_WRAPS
- #define D2R_PANO_WRAPS 2
+ #define D2R_PANO_WRAPS 1
 #endif
 #ifndef D2R_SKY_PANO
  #define D2R_SKY_PANO "D2R_Sky_ours/D2R_Sky_act1.png"
 #endif
-texture2D SkyPanoTex < source = D2R_SKY_PANO; > { Width = 4096; Height = 1366; Format = RGBA8; MipLevels = 12; };
+texture2D SkyPanoTex < source = D2R_SKY_PANO; > { Width = 8192; Height = 4096; Format = RGBA8; MipLevels = 14; };
 sampler2D SkyPanoSmp { Texture = SkyPanoTex; AddressU = WRAP; AddressV = CLAMP; };
 texture2D SkyBand6Tex < source = D2R_SKY_SNOW; > { Width = 1536; Height = 1024; Format = RGBA8; };
 sampler2D SkyBand6Smp { Texture = SkyBand6Tex; AddressU = WRAP; AddressV = CLAMP; };
