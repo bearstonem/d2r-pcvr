@@ -614,7 +614,7 @@ COPIES = ()                     # --copy NAME:DX:DZ / --copy-at NAME:X:Z:DY
 
 def with_copies(preset, specs):
     """Copies of entities: NAME:DX:DZ moved by (DX, DZ) from the original; @NAME:X:Z:DY with their origin
-    at (X, Z) from the fire and DY over the original's height. (Rocks lengthened, a patch of ground.)"""
+    at (X, Z) from the fire and DY over the original's height (then :YAW, :SCALE). (Rocks lengthened, a patch of ground.)"""
     entities = preset['entities']
     ids = {int(e.get('id', 0)) for e in entities if isinstance(e, dict)}
     done = []
@@ -647,6 +647,10 @@ def with_copies(preset, specs):
                         q['y'] = bw * y0 - bx * z0 + by * w0 + bz * x0
                         q['z'] = bw * z0 + bx * y0 - by * x0 + bz * w0
                         q['w'] = bw * w0 - bx * x0 - by * y0 - bz * z0
+                    if len(nums) > 4:   # :SCALE - the copy made SCALE times its size, about its origin
+                        sc = c.setdefault('scale', {'x': 1.0, 'y': 1.0, 'z': 1.0})
+                        for k in 'xyz':
+                            sc[k] = float(sc.get(k, 1.0)) * nums[4]
                 else:
                     p['x'] = float(p.get('x', 0.0)) + nums[0]
                     p['z'] = float(p.get('z', 0.0)) + nums[1]
