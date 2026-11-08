@@ -39,7 +39,13 @@ def outline(data):
     points, top = [], -1e9
     for mesh in g.array(g.root['Meshes']):
         for v in g.array(g.reference(mesh['PrimaryVertexData'])['Vertices']):
-            x, y, z = g.scalar(v['Position'])[:3]
+            pos = g.scalar(v['Position'])
+            x, y, z = pos[:3]
+            if len(pos) > 3 and abs(x) <= 1.0001 and abs(z) <= 1.0001:
+                # D2R packs a position as int16 / 32767 times VertexScale, and the scale's log2 / 13 in the
+                # fourth component (granny_write: _w) - unpacked here into model units
+                s = 2.0 ** (pos[3] * 13.0)
+                x, y, z = x * s, y * s, z * s
             points.append((round(x, 2), round(z, 2)))
             top = max(top, y)
     return hull(points), round(top, 2)
