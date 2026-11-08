@@ -491,6 +491,64 @@ def with_marks(preset, names, step=20.0):
 
 
 MARKS = ()                      # --mark NAME... (testing)
+UI_WALLS = False                # --ui-walls
+UI_WALL_LENGTH = 26.8           # ui_wall01's length along its line, world units (from the scene's own row)
+UI_WALL_FAR_YAW = -90.0         # its turn on the north line, degrees (its face toward the fire)
+
+
+def with_ui_walls(preset):
+    """The town's west and north walls round the square as the scene's own brick-and-stone wall
+    (ui_wall01, the gate's set) instead of the town's columned pieces: those taken out, copies of the
+    scene's own ui_wall01 laid end to end where they stood."""
+    entities = preset['entities']
+    src = next((e for e in entities if isinstance(e, dict) and e.get('name') == 'ui_wall01_01'), None)
+    if src is None:
+        return preset, ['ui_wall01_01 not found: town walls kept']
+    def where(e):
+        tr = next((c for c in e.get('components', []) if c.get('type') == 'TransformDefinitionComponent'
+                   and isinstance(c.get('position'), dict)), None)
+        return (float(tr['position']['x']) - FIRE[0], float(tr['position']['z']) - FIRE[1]) if tr else None
+    def town_wall(e):
+        if not isinstance(e, dict) or MIRROR not in str(e.get('name', '')):
+            return False
+        model = str(next((c.get('filename', '') for c in e.get('components', []) if c.get('type') == 'ModelDefinitionComponent'), '')).lower()
+        at = where(e)
+        if WALLS not in model or at is None:
+            return False
+        x, z = at
+        return (abs(x + 59.0) < 5.0 and -130.0 < z < 125.0) or (z > 120.0 and x < 150.0)
+    taken = sum(1 for e in entities if town_wall(e))
+    preset['entities'] = entities = [e for e in entities if not town_wall(e)]
+    ids = {int(e.get('id', 0)) for e in entities if isinstance(e, dict)}
+    sx, sz = where(src)
+    L = UI_WALL_LENGTH
+    spots = []   # (x, z, yaw) from the fire
+    z = -16.4 + 11.0 + L / 2           # north of the gate (its half width ~11)
+    while z - L / 2 < 132.0:
+        spots.append((sx, z, None)); z += L
+    for z in (-50.0, -96.8 - L / 4 - L / 2):   # between the stone fence and the scene's own wall, and past its half wall
+        spots.append((sx, z, None))
+    x = -59.0 + L / 2
+    while x + L / 2 <= 150.0:
+        spots.append((x, 137.0, UI_WALL_FAR_YAW)); x += L
+    for k, (x, z, yaw) in enumerate(spots):
+        e = copy.deepcopy(src)
+        e['name'] = f'ui_wall01_pcvr_{k:02d}'
+        new = (0x51A11000 + k * 0x01000193) & 0xFFFFFFFF
+        while new in ids or new == 0:
+            new = (new + 0x01000193) & 0xFFFFFFFF
+        ids.add(new); e['id'] = new
+        for c in e.get('components', []):
+            if c.get('type') == 'TransformDefinitionComponent':
+                c['position']['x'] = FIRE[0] + x
+                c['position']['z'] = FIRE[1] + z
+                if yaw is not None:
+                    h = math.radians(yaw) / 2
+                    c['orientation'] = {'x': 0.0, 'y': math.sin(h), 'z': 0.0, 'w': math.cos(h)}
+        entities.append(e)
+    return preset, [f'-{taken} town wall pieces, +{len(spots)} ui_wall01 round the square']
+
+
 FLIP_FAR = False                # --flip-far-wall
 FLIP_SIDE = 'all'               # --wall-flip-side north|south: only that part of the west wall turned
 
@@ -533,6 +591,9 @@ def generate(assets, mod_name='D2R-PCVR', surround=True, town_at=TOWN_AT_GATE, t
     if surround and cap:
         result, capped = with_sky_cap(result)
         removed = removed + [f'+{capped} sky over the player']
+    if surround and UI_WALLS:
+        result, walls = with_ui_walls(result)
+        removed = removed + walls
     if MARKS:
         result, marked = with_marks(result, MARKS)
         removed = removed + marked
@@ -597,6 +658,9 @@ def main():
     ap.add_argument('--spot-specular', type=float, default=None, help="the spot lights' specular share (testing)")
     ap.add_argument('--town-shadows', action='store_true', help="the town's models cast shadows too (testing)")
     ap.add_argument('--no-wall-fill', action='store_true', help="the town's wall out of the scene's whole half (holes by the gate)")
+    ap.add_argument('--ui-walls', action='store_true', help="the square's walls as the scene's own ui_wall01 (the gate's brick and stone)")
+    ap.add_argument('--ui-wall-length', type=float, default=None, help='ui_wall01 length, world units (testing)')
+    ap.add_argument('--ui-wall-far-yaw', type=float, default=None, help='ui_wall01 turn on the north line, degrees')
     ap.add_argument('--flip-far-wall', action='store_true', help="the town's north wall across the square turned round too")
     ap.add_argument('--wall-flip-side', choices=['all', 'north', 'south'], default='all',
                     help="the west wall turned only north of the gate (z > 0 from the fire) or only south of it")
@@ -609,7 +673,10 @@ def main():
     global CAP_FACE, POINTS, SPOT_SPECULAR, TOWN_SHADOWS, WALL_FILL
     TOWN_SHADOWS = args.town_shadows
     WALL_FILL = not args.no_wall_fill
-    global MARKS, FLIP_SIDE, FLIP_FAR
+    global MARKS, FLIP_SIDE, FLIP_FAR, UI_WALLS, UI_WALL_LENGTH, UI_WALL_FAR_YAW
+    UI_WALLS = args.ui_walls
+    if args.ui_wall_length is not None: UI_WALL_LENGTH = args.ui_wall_length
+    if args.ui_wall_far_yaw is not None: UI_WALL_FAR_YAW = args.ui_wall_far_yaw
     FLIP_FAR = args.flip_far_wall
     MARKS = tuple(args.mark)
     FLIP_SIDE = args.wall_flip_side
