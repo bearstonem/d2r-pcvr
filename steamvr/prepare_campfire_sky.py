@@ -499,6 +499,43 @@ GROUND_TURNS = ()               # --ground-turns DEG...: copies of the scene's o
 GROUND_SINK = 0.06              # the copies a hair under the scene's own ground, so that it wins where both lie
 
 
+COPIES = ()                     # --copy NAME:DX:DZ / --copy-at NAME:X:Z:DY
+
+
+def with_copies(preset, specs):
+    """Copies of entities: NAME:DX:DZ moved by (DX, DZ) from the original; @NAME:X:Z:DY with their origin
+    at (X, Z) from the fire and DY over the original's height. (Rocks lengthened, a patch of ground.)"""
+    entities = preset['entities']
+    ids = {int(e.get('id', 0)) for e in entities if isinstance(e, dict)}
+    done = []
+    for k, spec in enumerate(specs):
+        at = spec.startswith('@')
+        parts = spec.lstrip('@').split(':')
+        name, nums = parts[0], [float(v) for v in parts[1:]]
+        src = next((e for e in entities if isinstance(e, dict) and str(e.get('name', '')).lower() == name.lower()), None)
+        if src is None:
+            done.append(f'{spec}: not found')
+            continue
+        e = copy.deepcopy(src)
+        e['name'] = f'{src.get("name")}_copy{k:02d}'
+        new = (int(src.get('id', 0)) * 2246822519 + (k + 1) * 0x85EBCA6B) & 0xFFFFFFFF
+        while new in ids or new == 0:
+            new = (new + 0x01000193) & 0xFFFFFFFF
+        ids.add(new); e['id'] = new
+        for c in e.get('components', []):
+            if c.get('type') == 'TransformDefinitionComponent' and isinstance(c.get('position'), dict):
+                p = c['position']
+                if at:
+                    p['x'], p['z'] = FIRE[0] + nums[0], FIRE[1] + nums[1]
+                    p['y'] = float(p.get('y', 0.0)) + (nums[2] if len(nums) > 2 else 0.0)
+                else:
+                    p['x'] = float(p.get('x', 0.0)) + nums[0]
+                    p['z'] = float(p.get('z', 0.0)) + nums[1]
+        entities.append(e)
+        done.append(f'{spec}: copied')
+    return preset, done
+
+
 def with_ground_round(preset, turns):
     """The scene's own ground (its ui_groundplane terrain pieces) copied round the fire by `turns` degrees:
     the floor the player stands on, where the scene ended in the town's own ground."""
@@ -543,15 +580,24 @@ def with_spins(preset, names):
     """Entities (by name or part of one) turned 180 degrees about their own vertical axis, where they stand:
     the town's models built for its own camera show the player their other side."""
     done = []
-    for name in names:
-        hit = [e for e in preset['entities'] if isinstance(e, dict) and name.lower() in str(e.get('name', '')).lower()]
+    for spec in names:
+        name, _, deg = spec.partition(':')
+        deg = float(deg) if deg else 180.0   # NAME[:DEG], about +y (on the map: + counterclockwise)
+        h = math.radians(deg) / 2
+        bx, by, bz, bw = 0.0, math.sin(h), 0.0, math.cos(h)
+        hit = [e for e in preset['entities'] if isinstance(e, dict) and name.lower() == str(e.get('name', '')).lower()]
+        if not hit:
+            hit = [e for e in preset['entities'] if isinstance(e, dict) and name.lower() in str(e.get('name', '')).lower()]
         for e in hit:
             for c in e.get('components', []):
                 q = c.get('orientation') if c.get('type') == 'TransformDefinitionComponent' else None
-                if isinstance(q, dict):
+                if isinstance(q, dict):   # qy * q
                     x0, y0, z0, w0 = (float(q.get(k, 0.0)) for k in 'xyzw')
-                    q['x'], q['y'], q['z'], q['w'] = -z0, w0, x0, -y0   # (0, 1, 0, 0) * q
-        done.append(f'{name}: {len(hit)} turned 180')
+                    q['x'] = bw * x0 + bx * w0 + by * z0 - bz * y0
+                    q['y'] = bw * y0 - bx * z0 + by * w0 + bz * x0
+                    q['z'] = bw * z0 + bx * y0 - by * x0 + bz * w0
+                    q['w'] = bw * w0 - bx * x0 - by * y0 - bz * z0
+        done.append(f'{name}: {len(hit)} turned {deg:g}')
     return preset, done
 UI_WALL_LENGTH = 26.8           # ui_wall01's length along its line, world units (from the scene's own row)
 UI_WALL_FAR_YAW = -90.0         # its turn on the north line, degrees (its face toward the fire)
@@ -656,6 +702,9 @@ def generate(assets, mod_name='D2R-PCVR', surround=True, town_at=TOWN_AT_GATE, t
     if surround and UI_WALLS:
         result, walls = with_ui_walls(result)
         removed = removed + walls
+    if COPIES:
+        result, copied = with_copies(result, COPIES)
+        removed = removed + copied
     if GROUND_TURNS:
         result, grounds = with_ground_round(result, GROUND_TURNS)
         removed = removed + grounds
@@ -726,6 +775,8 @@ def main():
     ap.add_argument('--spot-specular', type=float, default=None, help="the spot lights' specular share (testing)")
     ap.add_argument('--town-shadows', action='store_true', help="the town's models cast shadows too (testing)")
     ap.add_argument('--no-wall-fill', action='store_true', help="the town's wall out of the scene's whole half (holes by the gate)")
+    ap.add_argument('--copy', nargs='*', default=[], metavar='SPEC',
+                    help='copies: NAME:DX:DZ (moved from the original) or @NAME:X:Z:DY (origin at X, Z from the fire)')
     ap.add_argument('--ground-turns', nargs='*', type=float, default=[], metavar='DEG',
                     help="copies of the scene's own ground turned about the fire, degrees")
     ap.add_argument('--spin', nargs='*', default=[], metavar='NAME', help='entities turned 180 degrees where they stand')
@@ -747,7 +798,8 @@ def main():
     WALL_FILL = not args.no_wall_fill
     global MARKS, FLIP_SIDE, FLIP_FAR, UI_WALLS, UI_WALL_LENGTH, UI_WALL_FAR_YAW
     UI_WALLS = args.ui_walls
-    global SPIN, GROUND_TURNS
+    global SPIN, GROUND_TURNS, COPIES
+    COPIES = tuple(args.copy)
     SPIN = tuple(args.spin)
     GROUND_TURNS = tuple(args.ground_turns)
     if args.ui_wall_length is not None: UI_WALL_LENGTH = args.ui_wall_length
