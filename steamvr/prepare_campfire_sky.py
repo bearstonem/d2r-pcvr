@@ -231,7 +231,8 @@ def with_harrogath_behind(preset, town, at, turn_deg, near=14.0, far=400.0, grou
                 and (FLIP_SIDE == 'all' or (FLIP_SIDE == 'north') == (dz > 0.0)))
         # --flip-far-wall: the town's north wall, across the square from the gate (z over 120 from the
         # fire), turned too - so that its columned face, like the west wall's, is the one seen
-        spin = spin or (FLIP_FAR and WALLS in str(model).lower() and dz > 120.0)
+        # (only its straight lengths: an end, corner or crenellation turned about its own origin leaves its place)
+        spin = spin or (FLIP_FAR and WALLS in str(model).lower() and dz > 120.0 and 'segment' in str(model).lower())
         new = (int(e.get('id', 0)) * 2246822519 + 0x27D4EB2F) & 0xFFFFFFFF
         while new in ids or new == 0:
             new = (new + 0x01000193) & 0xFFFFFFFF
