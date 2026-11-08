@@ -61,6 +61,7 @@
 #include "guard_strain.h"
 #include "guard_strain_paint.h"
 #include "heartbeat.h"
+#include "campfire_audio.h"
 #include "wrist_compass.h"
 #include "panel_atlas.h"
 #include "map_zoom.h"
@@ -433,6 +434,11 @@ void PlayGuardBreak() {
     breakStream.Reap();
     if(!breakStream.Queue(source->rate,source->channels,std::move(pcm)))Say("Frame guard break: sound did not play");
 }
+// The campfire's own sound (campfire_audio.h): the fire's roar and crackle while the character
+// screen's scene is up, and a whoosh with a flurry of crackles at a click on the fire. Its own
+// stream, kept ~150 ms ahead, a short buffer at a time so the click is heard at once.
+HeartStream fireStream;fireaudio::Synth fireSynth;
+std::atomic<bool> fireOn{false};std::atomic<float> fireAmbient{.5f},fireBurstGain{1.f};std::atomic<uint32_t> fireBursts{0};uint32_t fireBurstsSeen=0;
 XrSwapchain interactionChain=XR_NULL_HANDLE;
 XrSwapchain companionChain=XR_NULL_HANDLE;
 bool companionAtlasPending=false,companionPaintValid=false;
@@ -3966,6 +3972,19 @@ void Input() {
     // the current one ends, at the loudness and tempo of the 10 % step of life below
     // VR Settings > Survival > Heartbeat starts at. Above it, Off, dead or stale vitals:
     // the last beat finishes, then silence.
+    {   // the campfire's sound (SetCampfireFire, CampfireBurst)
+        fireStream.Reap();
+        if(fireOn.load()) {
+            const uint32_t bursts=fireBursts.load();
+            if(bursts!=fireBurstsSeen){fireBurstsSeen=bursts;fireSynth.Burst();}
+            const float gain=combat::GameVolume();
+            for(int k=0;k<4&&fireStream.Remaining()<uint64_t(fireaudio::Rate*.15);++k) {
+                std::vector<int16_t> pcm;
+                fireSynth.Render(pcm,fireaudio::Rate/25,fireAmbient.load()*gain,fireBurstGain.load()*gain);
+                if(!fireStream.Queue(fireaudio::Rate,1,std::move(pcm)))break;
+            }
+        } else if(fireStream.Remaining()==0) fireStream.Stop();
+    }
     {
         heartStream.Reap();breakStream.Reap();   // breakStream: the guard-break bone snap
         heartbeat::Tuning heart;std::shared_ptr<const heartbeat::Pcm> source;const char* sourceName=nullptr;
@@ -6162,6 +6181,8 @@ void SetCampfireCaption(bool on,const float rect[4],float width,float distance,f
     campfireCaptionWidth.store(width);campfireCaptionDistance.store(distance);campfireCaptionRise.store(rise);campfireCaption.store(on);
 }
 bool CampfireMenuHit(){return campfireMenuHit.load();}
+void SetCampfireFire(bool on,float ambient,float burst){fireAmbient.store(ambient);fireBurstGain.store(burst);fireOn.store(on);}
+void CampfireBurst(){fireBursts.fetch_add(1);}
 bool VrGameplay(uint64_t now) {const auto at=vrGameplayAt.load();return at&&now>=at&&now-at<=1500;}
 void PublishSewerPrompt(const sewerprompt::Target& target) {
     std::lock_guard lock(sewerPromptMutex);sewerPrompt=target;

@@ -127,6 +127,10 @@ void SetCampfireMenu(float width, float distance, float drop);
 void SetCampfireCaption(bool on, const float rect[4], float width, float distance, float rise);
 // Any thread: the laser is on the campfire's menu board this frame - the game's pointer is the board's.
 bool CampfireMenuHit();
+// Any thread: the campfire's own sound (campfire_audio.h) on while the scene is up - the fire's roar and
+// crackle at `ambient`, a click's whoosh at `burst` (0..1, times the game's volume); CampfireBurst: a click on the fire.
+void SetCampfireFire(bool on, float ambient, float burst);
+void CampfireBurst();
 // Paladin Fist of the Heavens gesture (heavens_gesture.h). Armed: the skill is
 // on a slot and gestures are on (vrcam keeps the monster scan running).
 // Request: a call waiting for its target (its number, 0 none); vrcam answers
