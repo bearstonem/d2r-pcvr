@@ -42,6 +42,7 @@
 #include "window_focus.h"
 #include "panel_input_mode.h"
 #include "gameplay.h"
+#include "room_steps.h"
 #include "strike_skills.h"
 #include "bow_laser.h"
 #include "hand_controls.h"
@@ -740,6 +741,13 @@ std::array<XrView,2> views{{{XR_TYPE_VIEW},{XR_TYPE_VIEW}}};
 XrPosef head{};
 math::Vec origin{};
 bool haveOrigin=false;
+// Walk with your steps (room_steps.h; VR Settings > Body, beside Seated play): the step the hero walks
+// after, this input frame's push and follow, and the hero where the last head view saw him (world units).
+roomsteps::Chase roomChase;
+roomsteps::Output roomOut;
+math::Vec roomHero{};bool roomHeroKnown=false;double roomHeroAt=0;
+struct RoomStepStats {double from=0,pauseSaid=0;float walked=0,followed=0;unsigned pushed=0,jumps=0;bool on=false,walking=false;
+                      roomsteps::Pause pause=roomsteps::Pause::Off;} roomStats;
 GripStickButton leftMenuButton;
 stickgestures::Gestures rightStickGestures;   // right stick up: run / walk (Movement speed's Stick toggle); down: loot labels
 MenuTriggerGate menuTriggerGate;
@@ -5063,6 +5071,45 @@ void Input() {
             reportAt=GetTickCount64()+5000;
         }
     }
+    {   // Walk with your steps (room_steps.h): toward the player's real step while the left stick is idle.
+        const auto config=vrsettings::Read().values;
+        roomsteps::Input in;in.time=Milliseconds()/1000.0;
+        in.on=config[settings::RoomSteps]>.5f&&config[settings::Seated]<.5f&&motionControls.load()&&gameplayChain;
+        in.tracked=valid&&motionHeadTracked;in.eye=V(head.position);in.head=Q(head.orientation);in.origin=origin;
+        for(int h=0;h<2;++h){in.hand[h]=motionInput.hand[h].p;in.handTracked[h]=motionInput.tracked[h];}
+        in.menu=panelMode||spatialMode||settingsOwned||settingsChord||bodyCalibration.Active()||interactionOutput.wheel||
+                interactionOutput.settings||(leatherMode&&leatherShown.load());
+        in.stick=float(controls.lx)*controls.lx+float(controls.ly)*controls.ly>(.2f*32767)*(.2f*32767);
+        in.grip=motionInput.grip[0]>.6f||motionInput.grip[1]>.6f;
+        in.trigger=motionInput.trigger>.3f||motionInput.leftTrigger>.3f;
+        in.bow=motionOutput.bowDrawing;
+        in.cast=NativeSkillCasting();
+        roomOut=roomChase.Step(in);
+        auto& st=roomStats;
+        if(in.on!=st.on){st.on=in.on;Say(in.on?"Frame room steps: on - the hero walks after your real steps":"Frame room steps: off");}
+        if(roomOut.push!=st.walking) {
+            st.walking=roomOut.push;char line[200];
+            if(roomOut.push)std::snprintf(line,sizeof line,"Frame room steps: walking after your step, %.2f m from the hero (stick %.2f, %.2f)",roomOut.offset,roomOut.x,roomOut.y);
+            else std::snprintf(line,sizeof line,"Frame room steps: stopped %.2f m from the hero (%s)",roomOut.offset,roomOut.pause==roomsteps::Pause::None?"caught up":roomsteps::PauseName(roomOut.pause));
+            Say(line);
+        }
+        // Why a step owed is not walked, at most every 2 s.
+        if(in.on&&roomOut.pause!=st.pause&&roomOut.pause!=roomsteps::Pause::None&&roomOut.offset>=roomsteps::StartMetres&&in.time-st.pauseSaid>=2) {
+            char line[160];std::snprintf(line,sizeof line,"Frame room steps: paused (%s), %.2f m from the hero",roomsteps::PauseName(roomOut.pause),roomOut.offset);
+            Say(line);st.pauseSaid=in.time;
+        }
+        st.pause=roomOut.pause;
+        if(roomOut.push)++st.pushed;
+        if(st.from<=0)st.from=in.time;
+        if(in.time-st.from>=1) {
+            if(st.pushed||st.followed>0||st.jumps) {
+                char line[240];std::snprintf(line,sizeof line,"Frame room steps: last %.1f s: pushed %u frames, the hero walked %.2f m, the origin followed %.2f m, jumps %u; now %.2f m from the hero, pause %s",
+                    in.time-st.from,st.pushed,st.walked,st.followed,st.jumps,roomOut.offset,roomsteps::PauseName(roomOut.pause));
+                Say(line);
+            }
+            st.from=in.time;st.pushed=st.jumps=0;st.walked=st.followed=0;
+        }
+    }
     ++s.counter;
     auto& p=*pad.data;p.writer_pid=GetCurrentProcessId();p.buttons=0;
     // Right A goes only through semantic interact; a raw A bypasses its
@@ -5070,6 +5117,8 @@ void Input() {
     p.buttons=menus::WorldButtons(controls);
     if(!dualBindings&&leftMenuButton.PlainPressed())p.buttons|=XINPUT_GAMEPAD_LEFT_THUMB;
     p.thumb_lx=controls.lx;p.thumb_ly=controls.ly;p.thumb_rx=controls.rx;p.thumb_ry=controls.ry;
+    // Walk with your steps: a partly pushed stick toward the step (only ever with the real stick idle: Pause::Stick).
+    if(roomOut.push){p.thumb_lx=int16_t(std::clamp(roomOut.x,-1.f,1.f)*32767);p.thumb_ly=int16_t(std::clamp(roomOut.y,-1.f,1.f)*32767);}
     p.left_trigger=controls.lt;
     const float rightTrigger=controls.rt/255.f;
     const bool attackAllowed=menuTriggerGate.Update(rightTrigger>.1f,panelMode||spatialMode||settingsOwned||settingsChord||inventoryPressed||menuPressed);
@@ -7118,6 +7167,24 @@ bool View(float out[16],const float hero[3],float eyeHeight,float userEyeHeight,
     const auto base=math::Yaw(bodyHeading-recenterYaw);
     if(eye<0)compassFrame=wristHeading.Update(gamestate::LocalPlayer(),motionHeadTracked,
         Q(head.orientation),bodyHeading-recenterYaw,mapNorth);
+    if(eye<0) {   // Walk with your steps (room_steps.h): while the hero walks after the step, the origin follows him,
+                  // so the camera stays at the real head. A jump (teleport, waypoint, Leap) is not followed.
+        const math::Vec now{hero[0],hero[1],hero[2]};const double at=Milliseconds()/1000.0;
+        if(roomHeroKnown&&roomOut.follow&&at>roomHeroAt&&at-roomHeroAt<.25) {
+            const math::Vec moved{now.x-roomHero.x,0,now.z-roomHero.z};
+            const float metres=std::sqrt(moved.x*moved.x+moved.z*moved.z)/upm;
+            if(metres>roomsteps::MaxHeroSpeed*float(std::max(at-roomHeroAt,1/90.))) {
+                ++roomStats.jumps;
+                char line[200];std::snprintf(line,sizeof line,"Frame room steps: the hero moved %.2f m in %.0f ms (a teleport, waypoint or leap): the origin stays",metres,(at-roomHeroAt)*1000);
+                Say(line);
+            } else if(metres>0) {
+                const auto shift=roomsteps::Shift(moved,base,upm);
+                origin=origin+shift;roomChase.Shifted(shift);
+                roomStats.walked+=metres;roomStats.followed+=std::sqrt(shift.x*shift.x+shift.z*shift.z);
+            }
+        }
+        roomHero=now;roomHeroKnown=true;roomHeroAt=at;
+    }
     if(eye<0)stageWorld={true,origin,{hero[0],hero[1],hero[2]},base,upm,eyeHeight,GetTickCount64()};
     const auto resolveBow=[&](bowflight::Shot shot) {
         const auto offset=math::Rotate(base,shot.origin-origin);
