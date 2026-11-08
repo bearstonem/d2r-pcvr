@@ -447,7 +447,9 @@ float3 PaintedSky(float3 dir)
         float3 top = 0.0;
         [unroll] for (int k = 0; k < 8; ++k) top += tex2Dlod(SkyPanoSmp, float4((k + 0.5) / 8.0, 0.04, 0, 6)).rgb;
         top /= 8.0;
-        return lerp(pc, top, smoothstep(SkyPanoHigh - 6.0, SkyPanoHigh + 12.0, pel));
+        // near the zenith (or the picture's top, if lower) into that one colour: a picture's pole pinches
+        const float edge = min(SkyPanoHigh, 90.0);
+        return lerp(pc, top, smoothstep(edge - 25.0, edge - 3.0, pel));
     }
     const float el = degrees(asin(clamp(dir.y, -1.0, 1.0)));
     // two turns round the circle, drifting slowly so the clouds move
