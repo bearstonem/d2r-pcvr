@@ -1,4 +1,5 @@
 #include "charge_gesture.h"
+#include "spell_motion.h"
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -7,6 +8,8 @@ static void Check(bool b,const char* label){if(!b){std::fprintf(stderr,"FAIL: %s
 // Body frame (yaw-local: +X right, +Y up, -Z forward) relative to the head.
 // The weapon hand moves between keyframes at 50 Hz, so velocity comes from motion.
 struct Sim {
+    // The motions' gate (spell_motion.h, owner 2026-11-04: "Both grips, like Sorceress"): gated, in.active is it.
+    bool gated=false;spellmotion::Gate gate;float grips[2]{};
     chargepunch::Engine g;chargepunch::Input in;chargepunch::Output out;
     math::Quat yaw{0,0,0,1};math::Vec head{0,1.7f,0};
     int casts=0,drops=0;std::string lastDrop;
@@ -25,13 +28,17 @@ struct Sim {
         for(int i=1;i<=steps;++i){in.hand=a+(b-a)*Ease(float(i)/steps);Step();}
     }
     void Hold(float seconds){for(int i=0;i<int(seconds/frame);++i)Step();}
-    void Step(){in.time+=frame;out=g.Step(in);if(out.cast)++casts;if(out.dropped){++drops;lastDrop=out.dropped;}}
+    void Step(){in.time+=frame;if(gated)in.active=gate.Step(grips,true).watch;out=g.Step(in);if(out.cast)++casts;if(out.dropped){++drops;lastDrop=out.dropped;}}
     // Fist drawn back at the right shoulder, then punched straight out ahead.
     void Punch(float seconds=.15f,math::Vec from={.2f,-.25f,-.15f},math::Vec to={.15f,-.2f,-.62f}) {
         in.grip=1;Move(from,.25f);Hold(.1f);Move(to,seconds);Hold(.1f);
     }
 };
 int main(){
+    {   // Under the motions' gate (both grips, owner 2026-11-04): the weapon hand's grip alone no longer charges.
+        Sim one;one.gated=true;one.grips[0]=1;one.Punch();Check(one.casts==0,"gated, the weapon hand's grip alone no longer charges");
+        Sim both;both.gated=true;both.grips[0]=both.grips[1]=1;both.Punch();Check(both.casts==1,"gated, both grips held: the punch charges");
+    }
     for(float heading:{-2.f,0.f,2.f}){Sim s(heading);s.Punch();Check(s.casts==1,"a fist punched straight out ahead casts Charge at any heading");}
     {Sim s;s.Punch();s.Hold(1);Check(s.casts==1,"an arm held out never repeats");
      s.Punch();Check(s.casts==2,"drawing the fist back in loads the next punch");}

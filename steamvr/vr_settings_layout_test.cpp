@@ -124,8 +124,8 @@ static const GoldenRow Golden[]={
     {"fog.end",View::Environment,0,content::RowKind::Slider,"Fog distance",0,0},   // main's #366, drawn inside Distance fog's row
     {"ceiling.enabled",View::Environment,0,content::RowKind::Toggle,"Dungeon ceilings",0,0},
     {"ceiling.torches",View::Environment,0,content::RowKind::Toggle,"Dungeon torchlight",0,0},   // the game's own lights, drawn inside Dungeon ceilings' row
-    {"interactions.elemental_hands",View::Environment,1,content::RowKind::Toggle,"Spell glow on hands",0,0},
     {"torch.flame",View::Environment,1,content::RowKind::Toggle,"Torch flame",0,0},
+    {"torch.spell_hands_pct",View::Environment,1,content::RowKind::Slider,"Spell hand light",0,1},   // a Sorceress's (2026-11-06)
 };
 
 static bool PopoverLayer(L::Role r){return r==L::Role::PopoverDim||r==L::Role::Popover||r==L::Role::PopoverTitle||r==L::Role::PopoverOption||r==L::Role::PopoverHint||r==L::Role::ColorDot||r==L::Role::PopoverLabel||r==L::Role::PopoverSwitch;}
@@ -412,10 +412,10 @@ int main(int argc,char** argv){
         L::Press(m,on->hit,0);Check(m.Get()[SpellLock]==3,"On sets spells and keeps bow skills");
         L::Press(m,{Kind::Default,SpellLock},0);Check(m.Get()[SpellLock]==2,"Default turns spells off, bow skills kept");
         // Presets never touch the owner's keys, calibration or rows hidden for the class.
-        m.Set(StereoRendering,1);m.Set(CompanionAi,1);m.Set(ElementalHands,0);
+        m.Set(StereoRendering,1);m.Set(CompanionAi,1);
         for(size_t p=0;p<tables.presetCount;++p){
             L::ApplyPreset(m,int(p));   // the preset logic, while presets are off (content::PresetsReady)
-            Check(m.Get()[StereoRendering]==1&&m.Get()[CompanionAi]==1&&m.Get()[ElementalHands]==0&&m.Get()[DeferGpuWait]==0&&m.Get()[EyeHeight]==m.Applied()[EyeHeight]&&m.Get()[ArmSpan]==m.Applied()[ArmSpan],
+            Check(m.Get()[StereoRendering]==1&&m.Get()[CompanionAi]==1&&m.Get()[DeferGpuWait]==0&&m.Get()[EyeHeight]==m.Applied()[EyeHeight]&&m.Get()[ArmSpan]==m.Applied()[ArmSpan],
                   std::string("preset leaves the owner's keys and calibration: ")+tables.presets[p].name);
             Check(m.Get()[GroundAim]==0&&m.Get()[LandingCircles]==Defaults()[LandingCircles]&&m.Get()[BowLaser]==Defaults()[BowLaser]&&m.Get()[StaffPoint]==Defaults()[StaffPoint],
                   std::string("and the Paladin's hidden rows: ")+tables.presets[p].name);
@@ -910,17 +910,17 @@ int main(int argc,char** argv){
             const auto l=L::Build(x,{},{});for(const auto& e:l.elements)if(e.key==RunSpeed&&e.role==L::Role::Value)return e.text;return "?";};
         Check(value(-10)=="Walk"&&value(0)=="Base run"&&value(40)=="Run 40%"&&value(100)=="Full run","value labels read Walk, Base run, Run N%, Full run");
     }
-    {   // Every override's warn line reaches its row, and draws: Motion combat, Spell glow on hands, Frame generation.
+    {   // Every override's warn line reaches its row, and draws: Motion combat, Frame generation.
         int warned=0;
         for(const auto& o:content::Overrides)if(o.warn){
             const int k=content::KeyOfId(o.id);if(k<0)continue;++warned;
             Check(tables.Row(Key(k))&&tables.Row(Key(k))->warn==o.warn,std::string("the warn line reaches its row: ")+o.id);
         }
-        Check(warned>=4,"the overrides carry warn lines");
+        Check(warned>=3,"the overrides carry warn lines");
         Values v=Defaults();v[StereoRendering]=0;   // Both eyes: Frame generation is not locked
         Model m;m.Open(Ready(v));m.SetContext({heroclass::Sorceress});
         auto sub=[&](View view,Key k){L::Press(m,{Kind::Open,int(view),-1},0);const auto* e=FindRole(L::Build(m,m.context,{}),L::Role::Label,k);return e?std::make_pair(e->sub,e->Has(L::Warn)):std::make_pair(std::string(),false);};
-        for(auto [view,k]:{std::pair{View::Combat,Motion},std::pair{View::Environment,ElementalHands},std::pair{View::Frames,FrameGeneration}}){
+        for(auto [view,k]:{std::pair{View::Combat,Motion},std::pair{View::Frames,FrameGeneration}}){
             const auto [text,warn]=sub(view,k);
             Check(text==tables.Row(k)->warn&&warn,std::string("its warn line draws, amber: ")+tables.Row(k)->label);
         }

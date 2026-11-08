@@ -43,6 +43,20 @@ test are adapted from Sergious / BodyWalkVR
 `47a258c971c6a3be030769acba39764fcc1f6067` (MIT, copyright 2026 BodyWalkVR).
 Game snapshots used for optional local allocator tests are not distributed.
 
+The game-drawn dungeon ceiling is adapted, with its author's permission, from
+Sergious / BodyWalkVR's
+[`natpoh/diablo2-vr-port`](https://github.com/natpoh/diablo2-vr-port) at
+`91cb1e85466c730652eecb665f5355e92b56d1dc` (MIT, copyright 2026 natpoh): the
+ceiling's tables and measures (`shared/game_ceiling.h`, `shared/ceiling_measures.h`),
+its placing and letting go in the game (`vr/engine_units.*`, `vr/engine_held_units.h`,
+the hook-vouch and TypeSeqModel entries in `cleanroom/sigscan/`), its tests
+(`steamvr/game_ceiling_test.cpp`) and the installer's slab maker, ported to Python
+(`steamvr/granny_write.py`, `steamvr/prepare_game_ceiling.py`). The source's own
+Granny remesher and pybg3's BitKnit2 decoder (MIT, copyright 2024 Mackenzie Straight)
+are kept in `third_party/natpoh_ceiling/` with their licenses for a test that checks
+the port writes the same bytes; neither is built into the mod. The slab's models and
+units are made by Setup from the player's own game files and are never distributed.
+
 | Component | Source / version | Notice |
 |---|---|---|
 | MinHook (compiled into plugin) | Vendored `third_party/minhook` | `third_party/minhook/LICENSE.txt`, BSD 2-clause |

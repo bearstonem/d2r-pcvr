@@ -59,6 +59,9 @@ struct Input {
     // it through the other hand); the left is free, and its grip puts it on the
     // staff, sliding along it with the controller.
     bool staffFreeLeft = false;
+    // Both grips cast a spell's motion (the transport, spell_motion.h): the left grip takes the staff
+    // only alone (crossbow::SoloSupportLatched).
+    bool soloStaffGrip = false;
     // [hands] fist: a hand holding nothing closes into a fist with its grip
     // and relaxes when it is let go. handFree: holds nothing (vrcam's word,
     // from the game's hand slots); the left on a staff is not free.
@@ -233,6 +236,10 @@ void TrackHero(bool on);
 bool HeroTransform(HeroXform* out, const char** why = nullptr);
 // Bumped whenever the hero's SkeletonInstance changes: a weapon swap rebuilds his model.
 uint32_t HeroGen();
+// Any entity's TransformComponent (its layout as HeroXform's comp), and the model instance its ModelComponent
+// holds (0: none, or not made yet) - the game-drawn ceiling's units (vr/engine_units.cpp).
+bool EntityTransform(uint32_t entity, uintptr_t* comp);
+uintptr_t EntityModelInstance(uint32_t entity);
 void** OrigSlot();
 void* Detour();
 

@@ -1246,9 +1246,9 @@ and trigger/button melee were:
     counts as one of the stroke's creatures.
   - **On-hit effects** come only from a full-cycle stroke (the breakpoint, a
     full cycle after the latest full-cycle attack on the one shared clock: both
-    blades when dual wielding (2026-10-30; each stroke is timed as native times
-    a dual-wield attack: the two weapons' averaged WSM, with the swinging
-    weapon's own IAS) and a shapeshift form's two claws),
+    blades when dual wielding (2026-10-30; the beat is the two weapons' native
+    dual-wield cycles on average, 2026-11-03, whichever blade lands it) and a
+    shapeshift form's two claws),
     and only on the first creature that stroke lands on.
     That covers life and mana leech, Life Tap's heal (a Life-Tapped monster
     heals you only from such a stroke), critical and deadly strike, crushing blow,
@@ -1291,6 +1291,28 @@ and trigger/button melee were:
     swings the blade that struck. Developer
     builds log `Frame melee skills:` (armed contacts, casts, refusals by
     reason) and add `strike=<skill> cast|basic_strike` to `melee_trace` lines.
+  - **Double Swing and Frenzy** (Cal, 2026-11-03; `strike_skills.h` `DualCast`):
+    dual strike skills, with a weapon in each hand. One cast is one swing of
+    each blade. A full-cycle stroke with either blade casts it on the creature
+    it struck (mana, use check and start function once) and lands hit 1 with
+    that blade's weapon. The other blade's first landed contact before the
+    cast's beat ends lands hit 2 with its weapon, on whatever it struck: whole,
+    with its on-hit effects, no second mana. No second contact in time: hit 2
+    is forfeited, so a cast never lands more than native. Natively the do
+    functions (70, 9) pick hit 2's creature themselves from the animation
+    sequence; here each blade's contact runs only the part after the target
+    choice (Double Swing `567070` + the melee resolve `44B2B0`; Frenzy the
+    resolve and, on a hit, its speed state `566D60`), under that blade's
+    weapon. The beat while one is armed is the skill's own cast: the 20-frame
+    dual-wield sequence timed on the right-arm weapon, Double Swing with the
+    +50 attack rate its start gives it (Frenzy's charges add theirs as they
+    build), which fits Cal's native Baal measurement (2026-11-03: 436-447 ms
+    and 600 ms ramping to 472-483 ms with a 20 IAS Phase Blade and a 40 IAS
+    axe). With no native sequence to end it, that +50 outlives our cast by up
+    to a second; for 1.2 s after one each arm keeps its earlier attack rate,
+    so it never times a swing. `melee_trace` tags the
+    hits `cast 1/2` and `cast 2/2`; developer builds log `Frame dual strikes:`
+    (casts, hit 2 by the other blade, forfeited, not run).
   - **Fury and Zeal** (Cal, 2026-10-25; replaces the swing flurry; rev2
     without the native mode, which rooted the hero): the casting stroke runs
     the skill's start and one do 13 hit (count 1) on the struck creature.
@@ -1434,10 +1456,14 @@ Dual wield (2026-10-30, `attack_speed.h` `DualFrames`): native D2 merges the
 swinging weapon's stat lists before timing the attack, so each stroke reads the
 hero's item IAS and attackrate under that weapon's own scope (the other
 weapon's IAS does not count), and both weapons run at their averaged WSM (D2R
-2.4's fix of the old left-arm offset). The log reports `Frame dual wield speed:`
-per arm when its inputs change, and `native speed strokes=`/`unknown=` on
-`Frame dual wield:`; an unknown read keeps the per-arm cycle with the averaged
-WSM. Double Swing, Frenzy and Double Throw sequences are not read yet. An unknown class or weapon class (including
+2.4's fix of the old left-arm offset). Natively the attacks alternate weapons, so
+the shared beat both blades are on is the two weapons' cycles on average
+(2026-11-03, `DualBeatMs`), whichever blade lands it: swing in any order and
+favour either weapon, but never faster than native dual wield. The log reports
+`Frame dual wield speed:` per arm and `Frame dual wield beat:` (both arms and the
+shared beat) when their inputs change, and `native speed strokes=`/`unknown=` on
+`Frame dual wield:`; an unknown read keeps the UI thread's per-arm cycles (averaged
+WSM), averaged the same way. Double Swing, Frenzy and Double Throw sequences are not read yet. An unknown class or weapon class (including
 classes outside the original seven) leaves the cycle unknown, which does not
 gate hits. Unleashed restores unlimited free-swing contacts. The log
 reports the cycle inputs (`Frame melee attack speed:`) and refused contacts
@@ -1618,6 +1644,25 @@ for while in knockback now sets Neutral instead (`knockback_to_neutral=` in the
 applied live. Developer builds log `Frame flinch:` counts and, once per distinct
 call chain (at most 8 a session), a `Frame flinch probe:` line naming the game code
 that asked for the flinch.
+
+**Combat walk (Cal, 2026-11-02):** with no flinch and no cast animation holding the
+hero (hand spells, arrows, throws and physical strikes never enter one), players could
+fight while moving at full speed. Instead, the game's run / walk toggle goes to walk
+while fighting: when a monster's hit or missile damages the hero (not one the
+would-have-hit gate counts as a miss: the scope set at the forced hit check), when a
+physical stroke lands a strike (any resolved contact, strike-skill casts and Fury /
+Zeal's later hits included; a swing that touches nothing never counts), and when a
+hand spell, arrow, bolt, javelin or throw leaves the hand. Movement speed's own setting
+returns `[gameplay] combat_walk_ms` (default 500; 0 = off; applied live) after the last
+of them. Button, wheel and gesture skills are not counted: they play the game's own
+animation, which already stops the hero. The toggle is the game's own (UI command 0x23),
+kept in line by the same `GaitSync` as Movement speed (`run_speed.h`), so it changes at
+most once a second: a single exchange runs again about a second after the walk began.
+It is sent on its own UI-thread slot (`interactionstate::ToggleRunWalk`), never through
+the interaction engine's request slot, which would block motion input while in flight,
+refuse a holster draw, merc toss or quick-use item in that window, and buzz the right
+hand on every toggle. Developer builds log `Frame combat walk: on - struck | strike |
+cast / shot` and `off`; release builds log Movement speed's own toggles only.
 
 **Incoming defense (Unleashed):** every monster melee attack and projectile aimed at
 the local player lands - its to-hit roll always succeeds, so only the raised shield
@@ -2118,9 +2163,10 @@ Arrow/spell live verification remains open.
 
 ### Druid shapeshift gestures
 
-A Druid changes form by performing the transformation, in either melee rules
-mode, while **VR Settings > Gameplay > Combat > Skills on your moves** is on (as the other
-gesture skills):
+A Druid changes form by performing the transformation with both grips held, in
+either melee rules mode, while **VR Settings > Gameplay > Combat > Skills on your moves** is
+on (as the other gesture skills; the motions' gate since 2026-11-04, see Motions
+under Glyph casting):
 
 - **Werewolf:** cross both arms over your chest (each hand on the opposite side),
   bow forward over them, then wrench upright while flinging both arms up and
@@ -2128,63 +2174,67 @@ gesture skills):
 - **Werebear:** hold both hands above your head for a moment, then slam them
   down together to waist height or lower.
 
-The gesture presses the controller button the shape skill is assigned to, so the
-skill must be on one of the ten slots; the native cast, mana, cooldown and the
-transformation itself stay native. Performing the gesture again while
+The gesture presses the controller button the shape skill is assigned to, or on
+no button casts through the right trigger's record; the native cast, mana,
+cooldown and the transformation itself stay native. Each form has its card on
+the Druid's MOTIONS page. Performing the gesture again while
 transformed casts the skill again, which returns you to human form; a 1.5 s
 cooldown after each cast stops one sloppy performance from casting twice. A
 performance is ignored while a hand is busy (trigger squeezed, bottle held, bow
-drawn, face wipe), while menus or the wheel are open, and without the skill on a
-button (the log says which skill was not assigned). Both controllers pulse once
+drawn, face wipe), while menus or the wheel are open, without both grips held,
+and with its card off. Both controllers pulse once
 when the cast is issued. Thresholds live in `shapeshift::Tuning`
 (`steamvr/shapeshift_gesture.h`); `shapeshift-gesture-test` walks both
 performances, lazy and partial versions, loot stooping and overhead swings.
 The skill picker and the hand wheel tag Werewolf and Werebear GESTURE on any
-slot, and the hand cue reads "Cross, bow, fling open" / "Hands high, slam
+slot, and the hand cue reads "Both grips, bow, fling" / "Both grips, slam
 down" while Weapon skill gestures is on.
 
 ### Paladin Blessed Hammer fist pump
 
-A Paladin casts Blessed Hammer by punching a fist up to the sky, while
-**VR Settings > Gameplay > Combat > Skills on your moves** is on:
+A Paladin casts Blessed Hammer by punching a fist up to the sky with both grips
+held (the motions' gate since 2026-11-04), while **VR Settings > Gameplay > Combat > Skills
+on your moves** is on:
 
-- Make a fist (hold the grip, trigger free) with either hand somewhere below
-  your head, then punch it straight up so it ends above your head.
+- Hold both grips (triggers free) and, with either fist somewhere below your
+  head, punch it straight up so it ends above your head.
 - One pump casts one hammer. Bring the fist back down below your head to load
   the next pump; a fist held up high never repeats.
 - The punch counts from where it began (the bottom of the wind-up), so an
   ordinary accelerating punch from the shoulder or hip qualifies: at least
   25 cm of rise, ending above your head.
 - The skill picker and the hand wheel tag Blessed Hammer GESTURE on any slot
-  ("Punch up to cast").
+  ("Both grips, punch up").
 
-The pump presses the controller button Blessed Hammer is assigned to, so the
-skill must be on one of the ten slots (the trigger still casts it as before);
+The pump presses the controller button Blessed Hammer is assigned to, or on no
+button casts through the right trigger's record (the trigger still casts it as
+before); pumps never wait the motions' second;
 mana, cast rate and the hammer's spiral stay native, and a pump faster than the
 game's cast rate is a press the game ignores, as with the button. The hammer's
 heading comes from the usual aim rules (the outlined monster, else where you
 point or look). A pump is ignored while that hand is busy (trigger squeezed,
 bottle or other held item, bow drawn, face wipe) and while menus or the wheel
 are open. The punching hand gets a short pulse when the cast is issued. The log
-(`Frame hammer:`) has the first cast and a running count every 25, a line for
-each abandoned punch (why), and a line when the skill is unavailable.
+has a `Frame spell motion:` line per cast and `Frame hammer:` lines for each
+abandoned punch (why) and when the skill is unavailable.
 Thresholds live in `hammerpump::Tuning` (`steamvr/hammer_gesture.h`);
 `hammer-gesture-test` covers both hands, holding high, re-loading, open hands,
 slow raises, stalled and forward punches.
 
 ### Paladin Charge punch
 
-A Paladin casts Charge by punching straight out with the weapon hand, while
-**VR Settings > Gameplay > Combat > Skills on your moves** is on:
+A Paladin casts Charge by punching straight out with the weapon hand with both
+grips held (the motions' gate since 2026-11-04), while **VR Settings > Gameplay > Combat >
+Skills on your moves** is on:
 
-- Make a fist with the weapon hand (hold the grip, trigger free), drawn back
-  near your body, then punch it straight out ahead, extending the arm.
+- Hold both grips (triggers free), draw the weapon-hand fist back near your
+  body, then punch it straight out ahead, extending the arm.
 - One punch casts once. Draw the fist back in to load the next; an arm held
   out never repeats.
 - The punch counts from the most drawn-back point, so an ordinary accelerating
   punch qualifies: at least 20 cm of travel, ending with the arm extended.
-- The skill picker and the hand wheel tag Charge GESTURE on any slot ("Punch
-  out to charge").
+- The skill picker and the hand wheel tag Charge GESTURE on any slot ("Both
+  grips, punch out").
 - Physical melee contacts pause while a Charge is in flight (however it was
   cast), from the press until the hero leaves the rush (mode 18, at most 4 s).
   A swing or the punch itself touching a monster mid-rush used to land a basic
@@ -2192,53 +2242,56 @@ A Paladin casts Charge by punching straight out with the weapon hand, while
   has one `Frame charge: melee contacts held N ms during the charge` line per
   Charge.
 
-The punch presses the controller button Charge is assigned to (the skill must be
-on one of the ten slots; the trigger still casts it as before). The aim rules
+The punch presses the controller button Charge is assigned to, or on no button
+casts through the right trigger's record, the right hand's cast for the aim (the
+trigger still casts it as before). The aim rules
 hand Charge the monster the weapon hand points at, else the spot it points to;
 the rush, mana and hit stay native. "Extended" scales with the calibrated arm
 span (28 % of it, 0.38-0.60 m ahead of the head; 0.45 m without calibration).
 The weapon hand is the right hand. A punch is ignored while that hand is busy
 (trigger squeezed, bottle or other held item, bow drawn, face wipe) and while
 menus or the wheel are open. The weapon hand gets a short pulse when the cast
-is issued. The log (`Frame charge:`) has the first cast and a running count
-every 25, a line for each abandoned punch (why), and a line when the skill is
-unavailable. Thresholds live in `chargepunch::Tuning`
+is issued. The log has a `Frame spell motion:` line per cast and `Frame charge:`
+lines for each abandoned punch (why) and when the skill is unavailable. Thresholds live in `chargepunch::Tuning`
 (`steamvr/charge_gesture.h`); `charge-gesture-test` covers headings, holding
 out, re-loading, open and busy hands, slow reaches, half punches, the hammer's
 upward punch, chops, slashes, jabs from an extended arm, and arm-span scaling.
 
 ### Paladin Holy Shield sign of the cross
 
-A Paladin casts Holy Shield by making the sign of the cross, while **VR
-Settings > VR > Weapon skill gestures** is on:
+A Paladin casts Holy Shield by making the sign of the cross with both grips held
+(the motions' gate since 2026-11-04), while **VR Settings > VR > Weapon skill
+gestures** is on:
 
-- With either hand, trigger free, touch your forehead, then your chest, then
-  one shoulder and the other (left then right, or right then left).
+- Holding both grips (triggers free), with either hand touch your forehead, then
+  your chest, then one shoulder and the other (left then right, or right then
+  left).
 - Each touch is a brief pause: the hand slows below 1 m/s inside the spot.
   A swing through the same places never counts, nor does a face wipe.
 - Up to 1 s between touches; one sign casts once, with a 1.5 s cooldown.
 
-The sign presses the controller button Holy Shield is assigned to (the skill
-must be on one of the ten slots; pressing still casts it). Mana, duration and
+The sign presses the controller button Holy Shield is assigned to, or on no
+button casts through the right trigger's record (pressing still casts it). Mana, duration and
 the shield's glow stay native. The spots are head-relative boxes in
 `holycross::Tuning` (`steamvr/cross_gesture.h`); `cross-gesture-test` covers
 both shoulder orders, either hand, a flowing sign, the cooldown, wrong orders,
 a face wipe, fast swings through the spots and a session reset. The skill
-picker tags Holy Shield GESTURE on any slot ("Sign of the cross"). The log
-(`Frame holy shield:`) has a line per cast, per sign abandoned after the chest
-touch, and when the skill is unavailable.
+picker tags Holy Shield GESTURE on any slot ("Both grips, sign a cross"). The log
+has a `Frame spell motion:` line per cast and `Frame holy shield:` lines per sign
+abandoned after the chest touch and when the skill is unavailable.
 
 ### Paladin Fist of the Heavens call
 
-A Paladin calls Fist of the Heavens with the weapon (right) arm, while **VR
-Settings > VR > Weapon skill gestures** is on:
+A Paladin calls Fist of the Heavens with the weapon (right) arm with both grips
+held (the motions' gate since 2026-11-04), while **VR Settings > VR > Weapon
+skill gestures** is on:
 
-- Make a fist (hold the grip, trigger free) and hold the arm straight out in
+- Hold both grips (triggers free) and hold the weapon arm straight out in
   front, raised about 45 degrees: the fist a little above your forehead. No
   need to rest there: reaching the pose loads the call.
 - Bring the straight arm down, pivoting at the shoulder, and stop it about level
-  with your shoulder. The stop casts, or opening the fist at the end of the
-  swing.
+  with your shoulder. The stop casts, or opening the fists at the end of the
+  swing (the gate watches the frame the grips open).
 - The bolt falls on the monster the arm points at (the hands' 30-degree cone,
   within the game's reach), whatever the Aim options; with none there, the
   nearest monster in sight within 75 degrees of the arm; with none of those,
@@ -2256,37 +2309,79 @@ reaching 0.9 m/s, and stop between 14 degrees above and 55 below level (slower t
 for 40 ms), or open the fist there once it has. Where a call ends varies by player: Cal's
 stopped near -25, the owner's at -36..-47 (2026-11-01). Carrying on past 65 degrees below
 level is a chop, and a bent elbow drops it. One call casts once; raise the arm again for the next. The
-call presses the slot the skill is on; mana, cast rate and the bolt stay
-native, and pressing the slot still casts it. While the skill is on a slot the
-monster scan runs (vrcam answers the call: `HeavensRequest` /
-`HeavensResolved`, then the slot is pressed, at most 120 ms later), and the
+call presses the slot the skill is on, or on no button casts through the right
+trigger's record; mana, cast rate and the bolt stay native, and pressing the slot
+still casts it. While the skill is learned and its card on, the monster scan runs
+(vrcam answers the call: `HeavensRequest` / `HeavensResolved`, then the slot or
+the record is pressed, at most 120 ms later), and the
 pointed monster is handed to the game's target query for 500 ms (`RulesUnit`).
 Thresholds: `heavensfist::Tuning` (`steamvr/heavens_gesture.h`);
 `heavens-gesture-test`. Logs: `Frame heavens:` (the first casts, every 25th,
 any cast without an answer, abandoned calls with their angles) and
 `Frame heavens aim:` (per call: handed or the game's pick). The skill picker
-tags it GESTURE ("Raise, bring down").
+tags it GESTURE ("Both grips, raise, drop").
 
 ### Glyph casting
 
 A hand button bound to **Draw glyph** (the hand wheel's button picker) draws: while it is
-held, the drawing hand's aim point is kept as a stroke on the upright plane facing the
-player as it began (a point every 6 mm, at most 800); letting go recognises it
-(`steamvr/glyph_recognizer.h`) and casts the skill the player put on that shape on the
-wheel's GLYPHS page (`[glyphs] circle ... wave`, skill ids; `draw_slot`, 0-9 or -1). The
+held, the drawing hand's aim point is kept as a stroke in the room (a point every 6 mm, at
+most 800), and for its trail on the upright plane facing the player as it began; letting
+go flattens it onto the plane it was drawn in (`glyphs::Flatten`: the best fit through its
+points, up as near the room's up as that plane allows, away from the player on one lying
+nearly flat; a path deeper than half its next extent, or a line, stays on the facing
+plane), recognises it (`steamvr/glyph_recognizer.h`) and casts the skill the player put on
+that shape for that hand on the wheel's GLYPHS page (`[glyphs] circle ... wave`, skill ids; `draw_slot`,
+0-9 or -1; each hand its own set, below). Its picker offers the hero's skills that need no target and Town Portal (359,
+the game's shortcut: a scroll if there is one, else the tome; a hand slot holding it reads
+as 219 or 220), not Interact. The
 press is never a native cast (the transport drops it from the hand slots and from the
 physical spells). A wheel, a held bottle, a native menu, a grip change on a face button or
 lost tracking cancels the stroke; the button still held but no longer the press is a
 cancel, not a release.
 
+Each hand its own set (owner, 2026-11-05: "expand the glyphs where left and the right hand glyphs
+can be different sets. That way doubling the amount of glyphs we can draw and assign spells to").
+Each hand may have a Draw glyph button: `draw_slot` (the only one before, on either hand) and
+`second_draw_slot`, each a slot of either hand, one a hand (`glyphcast::DrawSlots`; two on one hand,
+as only an INI edited by hand has, draw `draw_slot`'s). Draw glyph picked on a hand's button takes the
+key already on that hand, else a free one (`glyphcast::DrawKeyFor`), so the other hand's stays; a game
+skill put on either stops that one drawing (`DrawKeyHolding`). The shapes: `circle ... wave` stay the
+right hand's, `left_circle ... left_wave` are the left's, -1 none of its own: then the left hand's
+shape casts the right hand's (`interaction::GlyphCasts`; 16 skills when every left shape has its own).
+Nothing is rewritten: a profile saved with the one set reads as before, and a Draw glyph button already
+on the left keeps casting the same skills until a left shape is given its own. One stroke at a time:
+its hand is latched as it begins (the other hand's button is not the press meanwhile, as any second
+cast). The GLYPHS page shows one hand's set, the wheel's own when opened; its hand box ("SHAPES OF THE
+Right hand", upper left where QUICK USE is on the Spells page; `GlyphHandCell`) shows the other's, with
+that hand's Draw glyph button, and each wheel keeps the set
+it was left on. The centre names the hand; a left shape casting the right hand's shows that skill
+dimmed under RIGHT HAND'S; CLEAR GLYPH on a left shape gives it back the right hand's. The picker's
+title, card and hint name the hand (`BindGlyph`'s index: the shape, the left hand's 8 on,
+`interaction::GlyphIndex`). Logs: each `Frame glyph:` cast or refusal names the hand (and "the right
+hand's" for a left shape casting it); each save names the hand and the key. Tests: `glyph-cast-test`
+(the two buttons: a saved one on either hand, one a hand, the key a pick takes and a skill clears),
+`skill-categories-test` (the lookup by hand and the fallback, the hand box, a left shape's request, the
+set kept per wheel, what repaints), `vr-settings-test` (the keys, -1 when missing),
+`vr-settings-store-test` (a one-set profile with its button on the left reads as saved; a save writes
+its one key), `interaction-glyphs-test` (the left hand's set and a left shape's picker drawn).
+Headset play has not tried it yet.
+
 Recognition: $P point clouds (32 points, direction and start free, upright) against
-procedural templates, gated by sharp corners (45-degree turns) and each shape's build
-(closed shapes end near their start; the V and the wave run one way across, the bolt one
-way down). Refused: smaller than 12 cm, shorter than 25 cm of path, flatter than 1:5,
-held over 4 s, a match score over 2.0, or two shapes within 0.14 of each other.
-`glyph-recognizer-test` draws each shape 42 ways (wobble, stretch, turn, start, either way
-round, uneven speed) over six seeds: 98-99% recognised, none as another shape, at most 3%
-of random scribbles cast.
+procedural templates. The stroke is compared as drawn and mirrored left to right (a bolt
+zigzagging either way, a wave starting up or down, a spiral either way round), each turned
+0, 10 and 20 degrees either way, and brought up to 1.4 times towards each shape's
+proportions (a square drawn as a rectangle, or seen from an angle); never turned far, so a
+V is not a caret. Gated by sharp corners (45-degree turns; a wave may have 3 to 7, two
+swells or three and a half) and each shape's build (closed shapes end near their start;
+the V and the wave run one way across, the bolt one way down). Refused: smaller than 12 cm,
+shorter than 25 cm of path, flatter than 1:5, held over 4 s, a match score over 1.8, or two
+shapes within 0.14 of each other. `glyph-recognizer-test` draws each shape 54 ways (wobble,
+stretch, turn, start, backwards, mirrored, uneven speed), then 40 more in each of the four
+directions (as drawn, backwards, mirrored, both) started anywhere, turned up to 0.3 rad and
+.75 to 1.35 as wide: over twelve seeds at least 95% recognised in every direction (431-432
+of the 432 fixed drawings), none as another shape, at most 4.5% of random scribbles cast.
+It also draws shapes in the room on planes turned 60 degrees, tilted back 60 degrees or
+lying nearly flat, with the arm's arc, and flattens them.
 
 Cast (`steamvr/glyph_cast.h`): the skill's own hand slot when it is on one (pressed as Holy
 Shield's sign does: 65 ms, 180 ms for an LT slot); else the game's right-trigger record.
@@ -2295,9 +2390,193 @@ with LT: two of the six records no hand button reaches (a lookup-only probe of e
 bit, 2026-11-01), and the mod never presses the game's right trigger otherwise in Motion
 combat. When record 5 already holds the skill, the right trigger is pressed for 100 ms;
 else the UI thread puts it there with the game's own setter (`nativeui::Park`, as a wheel
-assignment, read back) and the press follows the read-back, or nothing is cast after
-0.6 s. The snapshot carries the record (`glyphRecord/Skill/Owner`; -1 when a custom layout
+assignment, read back) and the press follows the read-back by 0.15 s, or nothing is cast
+after 0.6 s without it. Pressed at once (22-32 ms after the read-back), every Raise Skeleton
+put on the record in the owner's session (2026-11-05) failed ("I can't use that yet") and the
+next, on the record already, cast: the game finds the trigger skill's target (a corpse) a
+moment after the skill is put there. Teleport and Leap, which go where the mod lands them, press at the
+read-back: the owner felt the pause before a Leap while running. The snapshot carries the record (`glyphRecord/Skill/Owner`; -1 when a custom layout
 gives a hand button that record).
+
+Motions (`steamvr/spell_motion.h`; owner, 2026-11-03). With **Weapon skill gestures** on, every
+Sorceress spell that has a motion casts by it while both grips are held, both triggers free: no
+button or glyph needed. The wheel's MOTIONS page (the box at the lower right of the Spells and
+Equipment pages; each class with motions has its own, below) lists them with how to do each, and a press on one turns its
+motion on or off (`[motions] off`, one bit each, `spellmotion::Bit`; 0, all on); a spell with no
+points shows dimmed. A motion that is off still casts from a button its spell is on. One watcher
+per motion that is on and learned, active only while both grips are held (held above 0.6, let go
+below 0.35, so a squeeze that dips mid-motion keeps it), and not while a trigger, bottle, holster,
+bow, wheel or menu has the hands. The first to complete casts as a glyph does: the skill's hand slot
+when it is on one, else the right-trigger record (put there first; about 25 ms in the owner's
+session). Static Field before Nova (its snap apart is as wide as a fling); then all of them wait a
+second, still held or not. Grips let go after 0.3 s without a cast log what the hands did.
+
+Every class with motions (owner, 2026-11-04: "Both grips, like Sorceress"). The Paladin's gestures
+(Charge, Blessed Hammer, Holy Shield, Fist of the Heavens) and the Druid's (Werewolf, Werebear) take
+the same gate (`spellmotion::Gate`: both grips held, the hands free, Weapon skill gestures on) and
+their own MOTIONS page (the same box, `spellmotion::PageOf`; `[motions] paladin_off` and
+`[motions] druid_off`, one bit a card; the Sorceress's `[motions] off` keeps her bits). Each gesture
+keeps its own detector and tuning; one grip, or none, no longer casts any of them. They watch the
+frame the grips open as well (`Gate::State::watch`), so Fist of the Heavens still ends on the fists
+opening. No button needed: on a slot the gesture presses it as before, else it casts through the right
+trigger's record (Fist of the Heavens after its monster hand-off; Charge's melee contacts held as for
+the slot). Then every motion waits a second, except Blessed Hammer's pumps (one hammer a punch, as fast
+as the cast rate, and they never start the wait). Each cast logs one `Frame spell motion:` line.
+Tests: `spell-motion-test` (the pages, the gate), each gesture's test (gated: one grip or none never
+casts, both do), `interaction-test` (the Paladin's and the Druid's pages; no box for the Warlock or an unknown class),
+`interaction-motions-test` (the Paladin's page drawn).
+
+The Amazon's, the Barbarian's, the Necromancer's and the Assassin's motions (owner, 2026-11-04: "also
+have multiple agents implement the motions", from the drafted table: codes A1-A4, B1-B8, N1-N8
+with Lower Resist as N6, S1-S7) run on the Sorceress's engine and gate, a watcher each, in their class's
+order (`spellmotion::OrderOf`). Each class's detectors, tuning and cues are in its own header
+(`motions_amazon.h`, `motions_barbarian.h`, `motions_necromancer.h`, `motions_assassin.h`, reached
+through `spellmotion::ClassDone`/`ClassCue`), and each class has its own MOTIONS page and setting
+(`[motions] amazon_off`, `barbarian_off`, `necromancer_off`, `assassin_off`, one bit a card). The
+controllers give positions only, so a fist, a palm or an open hand in the table became a path of the
+hand, and the cards say so. A family's card casts the strongest skill of it learned
+(`spellmotion::CastSkillOf`): the golems' (Fire, then Blood, then Clay; Iron Golem takes an item and
+stays on its button), and Shadow Warrior's (Shadow Master once learned). A cast that goes somewhere
+aims along the motion (Leap, Shadow Warrior to the side pushed); a summon stands on a spot of its own,
+sent as the cast's point (`spellmotion::Land`, the transport's `SpotCell` and `PointedCell`, vrcam
+`MotionAim`): Decoy 3 cells ahead and 6 to the side pushed, the golems 4 cells ahead, the Valkyrie
+where the right hand's pointer meets the floor (14 cells along it when it points level or up),
+logged as "Frame spell motion: <skill> on its spot" or "where the right hand points". One that takes
+a monster or a corpse leaves the aim to the right hand's own ray, so the motion ends with it pointing
+there.
+
+- Amazon: Inner Sight, one hand at the brow, then swept out forward; Slow Missiles, the right hand
+  pushed straight out (chest to eye level) and stopped there a moment, like "halt!"; Decoy, both hands
+  from the chest pushed together to one side; Valkyrie, the right fist raised high, then brought down
+  to point at the floor where she lands.
+- Barbarian: Battle Orders, the right fist at the mouth a moment, then thrust straight up; War Cry,
+  the same, thrust forward and down; Shout, both fists at the mouth, pushed out forward together;
+  Battle Command, the right fist beaten on the chest twice; Howl, both arms flung wide from the chest;
+  Battle Cry, both fists at the shoulders pulled hard to the hips; Leap, both arms swung down by the
+  sides then up past the head, fast (arms only, so seated too); Leap Attack, the same swing from both
+  arms pulled well back (30 cm behind the eyes), at the monster that way; Find Item, the right hand
+  held out at the corpse a moment, then snatched back to the shoulder; Whirlwind, both arms held
+  straight out to the sides (a T) a moment, whirling 10 cells ahead.
+- Necromancer: Bone Armor, both fists crossed on the chest, held; Raise Skeleton, both arms swept up
+  fast from the hips past the face, together (no stop); Golem, the right arm swept up fast the same way
+  in front of you (the strongest golem learned), standing 4 cells away where the arm heads, and a
+  second card, the left arm the same (the next one down); Corpse Explosion, both fists punched out
+  together; Amplify Damage, a punch with the right fist; Lower Resist, a punch with the left (along the
+  left arm); Poison Nova, hands together at the chest, then flung out wide; Bone Prison, both hands
+  apart in front, then brought together round a monster; Bone Wall, the right hand swept sideways
+  across in front of the chest (the wall 4 cells away where the sweep's middle heads); Poison
+  Explosion, both fists pushed down in front from the chest (up to the chin) to the waist, 15 cm or
+  more, at a corpse (not the arms let down from past the eyes); Raise
+  Skeletal Mage, Raise Skeleton's sweep with the hands spread wide in a V (80 cm apart or more as
+  they pass the eyes; narrower is Raise Skeleton). The last three the owner picked from the list of
+  the Necromancer's skills without one (2026-11-05). The owner's headset session (2026-11-05) made
+  the summons arm raises ("right arm, just right arm rising up to raise golem, and then left arm raising
+  up to raise different kind of golem, and then both arms raising up to raise skeleton"; "in front of
+  us ... kind of pointing at whatever area we're raising from"), the curses and Corpse Explosion
+  punches ("Punch with one hand"; the right hand held out still at the monster first, then jabbed or
+  chopped, was itself a punch and cast Amplify Damage) and Poison Nova any height; Golem had been a
+  slam from overhead, then a raise beside the head, and Raise Skeleton a lift that had to stop at the
+  chest.
+- Assassin: Burst of Speed, both arms pumped fast as in a sprint, two swings each; Fade, both hands
+  drawn down in front of the face, from the eyes to the chin; Cloak of Shadows, both arms swept across from wide at the shoulders
+  until they cross; Venom, the crossed wrists flicked apart fast; Blade Shield, the right hand circled
+  in front twice; Shadow Warrior, both hands from the chest pushed together to one side; Mind Blast,
+  both hands at the temples, pushed straight forward.
+
+A tester's first pass (2026-11-05) changed them: "All motions should be quick and repeatable
+sequences that don't need you to move slow", "Please no floor stuff", Raise Skeleton worked once
+and Golem never, Find Item, Slow Missiles and Decoy never, Burst of Speed and Fade did not register,
+and the Valkyrie "didnt spawn her where I pointed. Was off to the side" (she went along the arm's
+line from the shoulder, levelled, far off). Nothing now asks for a slow move or a hand by the floor:
+the slow lift, the press to the floor, the slow drag and the reach down are a fast lift that stops,
+a slam from overhead, a chop and a snatch back (since punches); the point at a monster before Corpse
+Explosion, Amplify Damage and Lower Resist was held 0.15 s (was 0.25); Slow Missiles' stop is 0.15 s (was a
+0.35 s hold below the shoulder); Decoy has Shadow Warrior's 0.6 s push (was a 0.35 s sweep); Burst
+of Speed's pumps may stay in front of the hips and as low as them; Fade starts at the eyes with the
+hands up to 45 cm apart.
+
+Warmer or colder (the tester: "maybe we can have the controllers do a simulation with continuous
+vibration as you get closer to the 2nd part of the sequence. Think of 'am I getting warmer or
+colder'"). Each detector tells how near its motion is to casting (`spellmotion::Output::progress`,
+`Engine::Toward`): nothing until its first part is done (the hands together, a fist at the mouth or
+overhead, the right hand pointing still, a pose taken), then `Begun` rising to 1 as the second part
+nears its end, and lower again when the hands go the wrong way. While the grips are held and no
+motion has just cast, both controllers hum from that, a 70 ms pulse every 50 ms, from 6% to 36% as
+it nears the cast; Haptics' Spell strength in VR Settings scales it. The Paladin's and the Druid's
+gestures (their own detectors) and Teleport's punch do not hum.
+
+Every threshold is from simulated hands until a headset session tunes it. Tests: one per class
+(`motions-amazon-test`, `-barbarian-test`, `-necromancer-test`, `-assassin-test`, on `motion_sim.h`):
+each motion at three headings and its aim, no other motion of the class casting it, nothing with the
+gate closed, slow versions, and the class's everyday moves (resting, walking arm swing, a reach to the
+belt, and its own attacks: a Barbarian's chops and slashes, an Assassin's claw jabs and trap throw, a
+Necromancer's wand flick) casting nothing.
+
+Both grips never grab: a grip takes a belt bottle, a holster, the shoulder swap or the
+over-the-shoulder menu only alone, held 0.1 s with the other free (`spellmotion::SoloGrips`), and
+the left grip takes a staff only alone (`crossbow::SoloSupportLatched`: pressed at the shaft and
+held 0.12 s with the right grip free; the right grip held lets it go). The owner's path there: the
+first prototype readied a glyph's spell on the right trigger ("draw the glyph to activate the
+spell, then do its motion with the trigger"); then spells on a button cast by their motion alone;
+"we are tracking motion all the time so it gets triggered in unwanted situations" brought the
+grips ("what about holding both grips to cast?"), the staff and grab rules followed, and the
+MOTIONS page ("a place where you can see the motion spells that are active", "I don't want this to
+get over complicated") retired the readied spell: buttons press, motions take both grips, glyphs
+draw. A glyph whose skill has a motion casts it at once, as any glyph.
+
+The motions: Nova, the hands together then flung out wide; Frost Nova, both hands pushed down
+past the chest (to the waist, not the floor); Static Field, the palms rubbed together then snapped apart; Energy Shield, both
+hands up at the face within 35 cm (the forearms crossed or not), held; Thunder Storm, one arm
+raised above the head, held; Teleport, the right arm pointed where you want to land and the fist yanked back; Blaze, one hand struck down the thigh; Frozen Armor, the
+left hand from the right hand up to the right shoulder; Shiver Armor, both fists shaken, held at
+least 25 cm apart (a tester, 2026-11-05: Static Field's rub "reads as shaking": fists shaken any
+closer are a rub, and its count starts over); Chilling
+Armor, a hug, held (each hand on the other side, close to the body, up to 12 cm under the eyes; the
+owner's hugs held a hand 17 cm under them where 18 was the top, and crossed close to the body they
+could cast Energy Shield: that is the hug's now). Every class's motions measure the hands in the reference body's units (owner, 2026-11-05): the hands, relative to
+the eyes, are divided by the calibrated controller span over 1.46 m (VR Settings' body calibration; the owner's
+span, on which the distances were tuned), capped at 0.8-1.2 and 1 with no calibration (`spellmotion::BodyScale`,
+`Input::bodyScale`). A reach, a push or a hand past the eyes asks the same of every body; times are unchanged, and
+the hold log ends with the scale. The owner's picks from the list of her spells without one (2026-11-05), each to
+a spot of its own (`motions_sorceress.h`): Fire Wall, the right hand swept sideways across in front
+of the chest (the Necromancer's Bone Wall sweep; the wall 5 cells away where the sweep's middle
+heads); Meteor, the right fist raised overhead and thrown down and forward fast (where the arm
+then points from the shoulder: 20 cells with it level, 4 at 50 degrees below; a throw that waits
+overhead for Thunder Storm's hold is Thunder Storm); Blizzard, both arms raised overhead and pulled
+down in front (8 cells straight ahead; watched before Frost Nova). Meteor and Blizzard land on the
+highlighted monster instead when there is one (owner, 2026-11-05: "the meteor has to land on a
+selected target if there's one", "also do the same thing with Blizzard"; `aimrules::MotionOnTarget`,
+the casting button's pick as the Aim rules take it: its hand's, the other's, the eyes'). Hydra, the left arm swept up fast
+in front, toward its spot (the Necromancer's left-arm golem raise; 4 cells away where the arm
+heads; an arm raised straight up is Thunder Storm's). The MOTIONS page holds 14 cards. Thresholds in `spellmotion::Tuning`; `spell-motion-test` performs each at three
+headings and checks that no other spell's motion, the motion without the gate, or a slow version
+casts it. Logs: `Frame spell motion:` (each cast and the way it went, each grip hold let go
+without a motion with how far apart the hands went, the highest and lowest hand, the fastest,
+each hand's biggest fall in 0.5 s and where the hands ended, for tuning; each MOTIONS page change).
+Tuned on the owner's first session (2026-11-03: Nova 28 of 36, Frost Nova 27 of 42, Static Field 16
+of 20, Energy Shield 0 of 10): Nova's fling 75 cm wide (was 90), Frost Nova's push 20 cm (was 25)
+ending 40 cm below the eyes (was 50) and allowed out to the sides, Energy Shield's hands no longer
+crossed and no longer 15 cm out from the face. Tests: `interaction-test` (the box and the cards'
+hit bounds, the page's clicks), `interaction-motions-test` (its art).
+
+Teleport by point and pull (owner, 2026-11-05, in the headset: "I do definitely like the targeting
+aspect of it, but I want to be able to use that targeting better ... With our arm kind of tucked into
+us. It's hard to aim where you want to go"). The same day's first version, a fast pull of the fist
+showing the circle and a punch landing there, missed punches that stopped short and showed the circle
+as the arm came back after a teleport and at the start of Frost Nova and Blaze. Now the right arm held
+out ahead (the fist 30 cm ahead of the eyes or more and 38 cm from the shoulder, not pointing up) and
+steady for 0.15 s, the left arm not raised too (out in front at the chest or higher, or up past the
+chin: owner, 2026-11-05, "When we raise both arms, the circle shouldn't be drawn for teleport"), shows
+where Teleport lands: an arcane violet sigil with a pillar of light over it (`telegraph::TeleportMark`,
+`D2R_DepthFog.fx` TeleportSigil and TelePillar), whatever the Aim options; the left arm raised takes it
+away at once. It goes along the arm's heading (the line from the
+shoulder through the fist), 32 cells away with the arm level, nearer evenly as it points down, 6 cells
+at 50 degrees below (`spellmotion::PointSpot`). It follows the arm while the arm stays out and steady.
+The fist yanked back toward the shoulder (18 cm within 0.25 s, mostly back) lands there
+(`MotionLanding`, the cast's point within the game's reach, logged `Frame motion aim:`). The arm drawn
+in or let down without a yank for 0.6 s, letting the grips go, any other motion's cast or 8 s takes the
+circle away; a circle given up logs its longest pull back. Thresholds in `spellmotion::Tuning`
+(point*, yank*, aim*); `spell-motion-test` and `telegraph-test`.
 
 Trail (`steamvr/glyph_trail.h`): a 512 x 512 straight-alpha picture, 1 m a side, in the
 shared atlas (`panelatlas::Glyph`, beside VR Settings), shown as a room-space quad in the
@@ -2312,8 +2591,9 @@ tree), from 45% of it the exit; refused, grey ash over 0.8 s. Each look is a pal
 some of: a smear carried up or down off the line through scrolling noise (flames, mist,
 rays, smoke), particles (embers, ice shards, sparks, drops, bubbles, motes, spores, chips,
 blades), arcs re-jittered 24 times a second, echoes of the line by distance, and its exit
-(burning edge, cracking cells, flicker, noise dissolve). Logs: `Frame glyph:` (each glyph with its score, the next shape's, corners and
-time, and the way it cast or why not; each record change). Tests: `glyph-trail-test`,
+(burning edge, cracking cells, flicker, noise dissolve). Logs: `Frame glyph:` (each glyph with its score, the next shape's, corners,
+time and the plane it was flattened onto, and the way it cast or why not; a refused
+stroke's 24 points in cm; each record change). Tests: `glyph-trail-test`,
 `glyph-cast-test`, the picker and GLYPHS page in `skill-categories-test`, and the art in
 `interaction-glyphs-test`.
 

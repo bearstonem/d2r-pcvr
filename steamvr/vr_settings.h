@@ -27,7 +27,7 @@ enum class View : uint8_t { Presets, Combat, Targeting, Shield, Monsters, Physic
 constexpr int MaxRailGroups=8;
 enum Key { Motion, Seated, Dominant, Snap, TurnSpeed, Waist, BeltForward,
            Foveation, Sky, Fog, Ceiling, DrawDistance, ObjectDistance,
-           EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, VitalsTilt, HapticStrength, HapticMelee, HapticBowDraw, HapticBowRelease, HapticSpell, HapticInteraction, HapticAlert, HapticShortMelee, BloodVisor, BloodWipe, MeleeThrustSpeed, LootLabelSize, CompanionCounts, StrainVignette, OfflinePlayers, ShieldBashSpeed, DesktopOneEye, MapTopDown, MapRotate, FoveationStrength, StereoRendering, DeferGpuWait, TargetHighlight, HeartbeatStart, SpellLock, StaffPoint, LandingCircles, GroundAim, AimHighlights, HighlightRight, HighlightLeft, ElementalHands, EnemySight, BowLaser, ThrowLift, BottlePhysics, PropPhysics, CompanionAi, ShieldGrip, ShieldOut, ShieldUp, ShieldFollow, ShieldRoll, AimFollowsView, CompanionTactical, LeftHandStrikes, TorchFlame, FrameGeneration, FrameGenPreset, FrameGenScale, RunSpeed, RunWalkToggle, BodyPhysics, BigObjectDistance, FogDistance, LeatherMenu, LootBeamUnique, LootBeamSet, LootBeamRare, LootBeamRunes, LootBeamBrightness, CeilingTorches, ArcaneDecay, ArcaneFade, ManaThreshold, ArcaneIntensity, GlyphDraw, GlyphCircle, GlyphTriangle, GlyphSquare, GlyphLightning, GlyphSpiral, GlyphV, GlyphStar, GlyphWave, LootPick, Count };
+           EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, VitalsTilt, HapticStrength, HapticMelee, HapticBowDraw, HapticBowRelease, HapticSpell, HapticInteraction, HapticAlert, HapticShortMelee, BloodVisor, BloodWipe, MeleeThrustSpeed, LootLabelSize, CompanionCounts, StrainVignette, OfflinePlayers, ShieldBashSpeed, DesktopOneEye, MapTopDown, MapRotate, FoveationStrength, StereoRendering, DeferGpuWait, TargetHighlight, HeartbeatStart, SpellLock, StaffPoint, LandingCircles, GroundAim, AimHighlights, HighlightRight, HighlightLeft, EnemySight, BowLaser, ThrowLift, BottlePhysics, PropPhysics, CompanionAi, ShieldGrip, ShieldOut, ShieldUp, ShieldFollow, ShieldRoll, AimFollowsView, CompanionTactical, LeftHandStrikes, TorchFlame, FrameGeneration, FrameGenPreset, FrameGenScale, RunSpeed, RunWalkToggle, BodyPhysics, BigObjectDistance, FogDistance, LeatherMenu, LootBeamUnique, LootBeamSet, LootBeamRare, LootBeamRunes, LootBeamBrightness, CeilingTorches, ArcaneDecay, ArcaneFade, ManaThreshold, ArcaneIntensity, GlyphDraw, GlyphCircle, GlyphTriangle, GlyphSquare, GlyphLightning, GlyphSpiral, GlyphV, GlyphStar, GlyphWave, LootPick, MotionsOff, MotionsPaladinOff, MotionsDruidOff, MotionsAmazonOff, MotionsNecromancerOff, MotionsBarbarianOff, MotionsAssassinOff, GlyphDrawSecond, GlyphLeftCircle, GlyphLeftTriangle, GlyphLeftSquare, GlyphLeftLightning, GlyphLeftSpiral, GlyphLeftV, GlyphLeftStar, GlyphLeftWave, SpellHandLight, Count };
 // One bit per setting, 128 wide: two words, since MSVC has no 128-bit integer.
 struct ChangeMask {
     static constexpr int Bits=128;
@@ -121,7 +121,6 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"Monster highlights", "Dominant hand: its monster only. Both hands: each hand's own", L"gameplay",L"aim_highlights",1,0,1,1},
     {"Right hand color", "The right hand's monster: By range, or one color", L"gameplay",L"highlight_right_hue",45,0,360,15},
     {"Left hand color", "The left hand's monster: By range, or one color", L"gameplay",L"highlight_left_hue",210,0,360,15},
-    {"Elemental hand effects", "Sorceress: fire, frost and lightning around each hand (experimental)", L"interactions",L"elemental_hands",0,0,1,1},
     {"Enemy sight distance", "Offline monster detection range; 100% is game default", L"gameplay",L"enemy_sight_pct",enemysight::DefaultPercent,enemysight::MinPercent,enemysight::MaxPercent,enemysight::StepPercent},
     // Off (LaserOff, below), else the line's hue; steps wrap through Off.
     {"Bow path laser", "A faint line along a drawn arrow's flight: Off or its color", L"bow",L"path_laser_hue",-15,-15,345,15},
@@ -140,7 +139,7 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"Tactical commands", "Point & hold gestures, command beacon and priority targeting for your mercenary", L"gameplay",L"companion_tactical_commands",1,0,1,1},
     // Melee skill strikes (strike_skills.h): which skill the left claw's strikes cast.
     // Set from the skill wheel's lower-left box (Druid), not a VR Settings row.
-    {"Left-hand strikes", "Druid: the left claw casts its own trigger skill or the right trigger's", L"gameplay",L"left_hand_strikes",0,0,1,1},
+    {"Left-hand strikes", "Druid or dual wield: the left claw or blade casts its own trigger skill or the right trigger's", L"gameplay",L"left_hand_strikes",0,0,1,1},
     {"Torch flame", "The flame on a torch club's head; its light stays either way", L"torch",L"flame",1,0,1,1},
     // OFXR Bridge (frame_generation.h): 0 Off, 1 FidelityFX, 2 NVIDIA; on or off at the next start.
     {"Frame generation", "Experimental, with Both eyes; turning it on reloads VR", L"render",L"frame_generation",0,0,2,1},
@@ -201,11 +200,37 @@ inline constexpr std::array<Definition,Count> Definitions{{
     // Loot pick (loot_aim.h): 0 Off, A takes the game's nearest item; 1 On, the item you point at. VR Settings > Interface > Labels.
     // On by default (owner 2026-11-01, after headset play: "let's make it so it is on by default").
     {"Loot pick", "A picks up the item you point at, not the nearest", L"interactions",L"loot_pick",1,0,1,1},
+    // Motions (spell_motion.h; owner 2026-11-03): the spells the wheel's MOTIONS page turned off, one bit
+    // each (spellmotion::Bit); 0, every motion on. Not in VR Settings: the wheel is its editor.
+    {"Motions off", "The motion spells turned off on the MOTIONS page (one bit each)", L"motions",L"off",0,0,1023,1},
+    // The Paladin's and the Druid's (owner 2026-11-04): one bit per MOTIONS card (spellmotion::PageOf).
+    {"Paladin motions off", "The Paladin's motions turned off on the MOTIONS page (one bit each)", L"motions",L"paladin_off",0,0,1023,1},
+    {"Druid motions off", "The Druid's motions turned off on the MOTIONS page (one bit each)", L"motions",L"druid_off",0,0,1023,1},
+    // The Amazon's, the Necromancer's, the Barbarian's and the Assassin's (owner 2026-11-04): one bit per card.
+    {"Amazon motions off", "The Amazon's motions turned off on the MOTIONS page (one bit each)", L"motions",L"amazon_off",0,0,1023,1},
+    {"Necromancer motions off", "The Necromancer's motions turned off on the MOTIONS page (one bit each)", L"motions",L"necromancer_off",0,0,1023,1},
+    {"Barbarian motions off", "The Barbarian's motions turned off on the MOTIONS page (one bit each)", L"motions",L"barbarian_off",0,0,1023,1},
+    {"Assassin motions off", "The Assassin's motions turned off on the MOTIONS page (one bit each)", L"motions",L"assassin_off",0,0,1023,1},
+    // Each hand its own glyphs (owner 2026-11-05: "expand the glyphs where left and the right hand glyphs can be
+    // different sets"): a second Draw glyph button, on the other hand from draw_slot (either key either hand:
+    // glyphcast::DrawSlots), and the left hand's skill on each shape, -1 none of its own: it casts the right
+    // hand's. circle ... wave above stay the right hand's, so a profile saved before reads as it did.
+    {"Second Draw glyph button", "The other hand's button that draws glyphs; -1 none", L"glyphs",L"second_draw_slot",-1,-1,9,1},
+    {"Left circle glyph", "The skill a circle drawn with the left hand casts; -1 the right hand's", L"glyphs",L"left_circle",-1,-1,4095,1},
+    {"Left triangle glyph", "The skill a triangle drawn with the left hand casts; -1 the right hand's", L"glyphs",L"left_triangle",-1,-1,4095,1},
+    {"Left square glyph", "The skill a square drawn with the left hand casts; -1 the right hand's", L"glyphs",L"left_square",-1,-1,4095,1},
+    {"Left lightning glyph", "The skill a lightning bolt drawn with the left hand casts; -1 the right hand's", L"glyphs",L"left_lightning",-1,-1,4095,1},
+    {"Left spiral glyph", "The skill a spiral drawn with the left hand casts; -1 the right hand's", L"glyphs",L"left_spiral",-1,-1,4095,1},
+    {"Left V glyph", "The skill a V drawn with the left hand casts; -1 the right hand's", L"glyphs",L"left_v",-1,-1,4095,1},
+    {"Left star glyph", "The skill a star drawn with the left hand casts; -1 the right hand's", L"glyphs",L"left_star",-1,-1,4095,1},
+    {"Left wave glyph", "The skill a wave drawn with the left hand casts; -1 the right hand's", L"glyphs",L"left_wave",-1,-1,4095,1},
+    // How bright a Sorceress's spell hands light the dark ([torch] spell_hands, elements::HandLight); 0 none.
+    {"Spell hand light", "Sorceress: how bright the spells in her hands light the dark around you; Off for none", L"torch",L"spell_hands_pct",40,0,100,10},
 }};
 using Values=std::array<float,Count>;
-// The setting holding the skill on glyph shape i (glyph_recognizer.h order).
-inline Key GlyphKey(int shape){return Key(GlyphCircle+shape);}
-static_assert(GlyphWave-GlyphCircle==7,"one key per glyph shape, in the recognizer's order");
+// The setting holding the skill on glyph shape i (glyph_recognizer.h order): the right hand's (0), or the left's (1).
+inline Key GlyphKey(int shape,int hand=0){return Key((hand==1?GlyphLeftCircle:GlyphCircle)+shape);}
+static_assert(GlyphWave-GlyphCircle==7&&GlyphLeftWave-GlyphLeftCircle==7,"one key per glyph shape and hand, in the recognizer's order");
 inline bool HapticKey(Key key){return key>=HapticStrength&&key<=HapticAlert;}
 // An outline's color per source (right hand, left hand; the eyes take the hand that would cast): 0 By range, else its hue.
 inline bool HighlightKey(Key key){return key==HighlightRight||key==HighlightLeft;}
@@ -442,7 +467,6 @@ inline bool RowForClass(Key key,const Context& c){
         case BowLaser:return c.heroClass<0||c.heroClass==heroclass::Amazon||c.bow;
         case ThrowLift:return c.heroClass<0||c.heroClass==heroclass::Amazon||c.heroClass==heroclass::Barbarian||c.heroClass==heroclass::Assassin||c.thrown;
         case StaffPoint:return c.heroClass<0||c.staff||c.heroClass==heroclass::Sorceress||c.heroClass==heroclass::Druid;
-        case ElementalHands:return ClassIs(c,heroclass::Sorceress);
         default:return true;
     }
 }

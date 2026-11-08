@@ -1348,7 +1348,7 @@ void SheetIcons(Painter& p){
     // labels: plain + changed, warn sub, locked sub, comfort sub
     ControlState ch;ch.changed=true;ControlState lk;lk.locked=true;
     p.Row({330,ty+70,600,80},true);p.Label({350,ty+70,580,80},"Shield roll","",ch);
-    p.Row({330,ty+150,600,84},false);p.Label({350,ty+150,580,84},"Spell glow on hands","May show through walls and weapons",{},Icon::Warning,Color::Warn);
+    p.Row({330,ty+150,600,84},false);p.Label({350,ty+150,580,84},"Frame generation","Experimental: on reloads VR",{},Icon::Warning,Color::Warn);
     p.Row({330,ty+234,600,84},false);p.Label({350,ty+234,580,84},"Aim with your view","Needs Monster outline (Targets) or 2 more",lk);
     p.Pill({950,ty+90,280,44},"Recommended: On",Color::Quiet);p.Pill({950,ty+150,140,44},"PR only",Color::Magic);
     p.Pill({950,ty+210,280,50},"Mono audio is on",Color::Changed,Icon::Warning);

@@ -1,103 +1,105 @@
-# D2R VR Unleashed v0.3.31 - Windows preview
+# D2R VR Unleashed v0.3.32 - Windows preview
 
-This update lets you cast by drawing glyphs in the air, adds Paladin gestures,
-loot beams and a pick-up that takes the item you point at, gives your mercenary
-tactical commands, and makes Unleashed melee fairer.
+This update lets every class cast its skills with body motions, has the game draw
+dungeon ceilings itself, lifts the view with Leap, and brings dual-wield Double
+Swing and Frenzy and combat walk.
 
 ## Gameplay and combat
 
-- **Glyph casting:** Put **Draw glyph** on a hand button: open a hand's wheel,
-  select a button and pick **Draw glyph**, last under **General / Items**. Then
-  give shapes their skills on the wheel's new **GLYPHS** page (the box at the
-  upper right): circle, triangle, square, lightning bolt, spiral, V, star and
-  wave. Hold the button, draw the shape in the air in front of you and let go:
-  the skill on that shape is cast with its own mana, cast rate and effect. It is
-  meant for buffs, auras and other skills that need no target. The glyph hangs
-  where you drew it in its skill's element: flames and embers, ice shards that
-  crack, crackling lightning, dripping poison, rising holy light, a crimson curse,
-  shadow, spinning steel and more. Then it leaves in its own way.
-- **Paladin gestures - contributed by ChuckRibbits:** Make the sign of the cross
-  (forehead, chest, one shoulder, the other) with either hand to cast **Holy
-  Shield**. For **Fist of the Heavens**, make a fist with your arm straight and
-  raised, then bring it down to stop about level with your shoulder. The bolt
-  falls on the monster your arm points at. Both need the skill on one of your
-  buttons. Werewolf and Werebear now carry the wheel's GESTURE tag, and skills
-  that lock onto a monster (Charge, Leap Attack and others) now find it reliably.
-- **Mercenary tactical commands - contributed by Mcklem:** Point at your
-  mercenary, or the ground at its feet, hold **Grip** and pull **Trigger**, aim
-  and let go:
-  - at the ground, it walks there and holds;
-  - at a monster, it focuses it;
-  - on the mercenary itself, it holds its place, or regroups if it was holding.
+- **Motion casting for every class:** Hold both grips and do a skill's motion to
+  cast it, with no button needed. Each class with motions has a **MOTIONS** page:
+  the MOTIONS box at the lower right of the wheel's Spells and Equipment pages
+  opens it. Its cards show each motion and an ON/OFF switch, and a skill you have
+  no points in is dimmed. The motions are quick strokes and short holds with the
+  hands above the waist, measured against your calibrated body, and both
+  controllers hum warmer as a motion nears its cast. They need **Weapon skill
+  gestures** on, as it is by default.
+  - **Sorceress (14):** Nova, Frost Nova, Static Field, Energy Shield, Thunder
+    Storm, Blaze, Frozen Armor, Shiver Armor, Chilling Armor, Fire Wall, Meteor,
+    Blizzard, Hydra and Teleport. For Teleport, point the right arm where you want
+    to land, a circle shows there, then yank the fist back to your shoulder.
+    Meteor and Blizzard land on the highlighted monster when there is one.
+    Frost Nova is a hard push down and Energy Shield a guard held half a second,
+    so handling a two-handed staff with both grips doesn't set them off.
+  - **Paladin and Druid:** their gestures (Charge, Blessed Hammer, Holy Shield,
+    Fist of the Heavens, Werewolf and Werebear) now take both grips too, like
+    every other class's motions, and have a MOTIONS page each.
+  - **Amazon (4):** Inner Sight, Slow Missiles, Decoy and Valkyrie.
+  - **Barbarian (10):** Battle Orders, Shout, Battle Command, War Cry, Howl,
+    Battle Cry, Find Item, Leap, Leap Attack and Whirlwind. Leap is a fast swing
+    of both arms up and lands 25 cells ahead, the way your arms swung. Leap
+    Attack is the same swing started with both arms pulled well back, and goes for
+    the monster that way. Whirlwind is a T held a moment, and whirls ahead.
+  - **Necromancer (12):** Bone Armor, Raise Skeleton, Raise Skeletal Mage,
+    Corpse Explosion, Amplify Damage, Lower Resist, Poison Nova, Bone Prison, Bone
+    Wall, Poison Explosion and two golem cards: the right arm raises your
+    strongest golem and the left arm the next one, and each card names it.
+  - **Assassin (7):** Burst of Speed, Fade, Cloak of Shadows, Venom, Blade Shield,
+    Shadow Warrior (Shadow Master once learned) and Mind Blast.
 
-  Grip first or both at once both work, the trigger casts nothing while you do,
-  and a monster nearer your aim keeps the trigger an attack. The mercenary also
-  fights from the spot you send it to, and when badly hurt falls back beside you,
-  ready for a thrown potion.
-  **VR Settings > Gameplay > Monsters > Tactical commands** turns the commands off.
-- **A fairer Unleashed attack cycle - contributed by ChuckRibbits:**
-  - Swings between beats never delay your next full hit; dual wielders share one
-    cycle.
-  - Dual wield swings at native D2R speed, and strike skills from either blade
-    swing the primary weapon.
-  - Life Tap, monster flinches, Thorns, Iron Maiden, weapon wear and poison now
-    follow the stroke: in-between strokes no longer heal you through Life Tap or
-    stun-lock monsters.
-- **Loot pick, on by default - contributed by beadlebytes:** With several items
-  on the floor, hold your dominant hand out and point at one: **A** picks it up
-  instead of the item nearest your feet. Its name shows with a thin rim in its
-  rarity color within reach, or red when too far, where A takes nothing and
-  doesn't walk there. Pointing at no item, doors, chests and NPCs work as before.
-  The switch is on **VR Settings > Interface > Labels**, beside Loot name size.
+  While a motion skill is on, holding both grips never grabs a belt potion, a
+  holster, the shoulder swap, the over-the-shoulder menu or a staff: those take
+  one grip held alone.
+- **Glyphs, any way you draw them:** A glyph is now recognized whichever way you
+  draw it: mirrored, tilted or on any plane in front of you. Town Portal can go
+  on a glyph, using a scroll or tome. Each hand also has its own set of eight
+  shapes on the GLYPHS page. A left-hand shape with no skill of its own casts
+  the right hand's.
+- **Double Swing and Frenzy for dual wielders - contributed by ChuckRibbits:** On
+  a trigger, a full swing that lands casts the skill with that blade, and your
+  other blade's next hit is its second swing. A dual wielder's attack beat now runs
+  at the two weapons' native average speed. The wheel's LEFT HAND STRIKES box
+  shows for dual wielders too.
+- **Combat walk - contributed by ChuckRibbits:** While you fight, the hero walks.
+  That means being struck, landing a strike, or casting or shooting from the hand.
+  Your Movement speed returns about a second after the last of these.
+  `[gameplay] combat_walk_ms=0` in `d2r_pcvr.ini` turns it off.
+- **Mercenary commands work again:** Grip + Trigger on your mercenary could stop
+  working for a whole session: the mercenary was never found and the trigger cast
+  your skill instead.
 
 ## Controls and interface
 
-- **Loot beams - contributed by ChuckRibbits:** Colored pillars of light rise over
-  unique (gold), set (green) and rare (yellow) items and runes Vex and up
-  (orange) lying near you; walls and hills hide them. **VR Settings > Interface > Labels >
-  Loot beams** sets their brightness, and its **Filter** chooses which kinds.
-- **The held menu - contributed by ChuckRibbits:** While you hold the tabbed
-  menu, the right stick turns you, and pulling the trigger off the menu drops
-  the item you picked up. Life, mana and XP show above the menu. Reach back over
-  your left shoulder and grip to put it away.
-- **Reset Skills & Stats - contributed by ChuckRibbits:** A button on the tabbed
-  menu's Character page, in offline games, resets every stat and skill point
-  with the game's own reset. It is free and unlimited, asks for confirmation
-  and needs one free inventory square.
-- **Talking to NPCs - contributed by ChuckRibbits:** Pressing A on an NPC while
-  walking stops you first, so the conversation opens with you standing.
-- **Arcane Decay - contributed by Mcklem:** A spectral blue vignette grows at the
-  edge of your view as your mana runs low. **VR Settings > Interface > Warnings > Low mana** turns it
-  on or off, sets the mana level it starts below (50%) and its strength, and fades it in and out.
+- **Cast On Strike - contributed by ChuckRibbits:** In the skill picker and on
+  both hand wheels, skills a landed swing or shield bash casts are tagged **CAST
+  ON STRIKE**. These are the melee strike skills, Fury and Zeal, Double Swing and
+  Frenzy, and Smite with a shield. **Gesture** is kept for body gestures, bow draws
+  and throws. The trigger slot's header reads **Primary**.
 
 ## Visuals and stability
 
-- **Save and Exit crash - contributed by ChuckRibbits:** Save and Exit could
-  crash the game from the held menu. The menu no longer shows the minimap beside
-  it, which caused the crash.
-- **Your shadow has a head - contributed by beadlebytes:** In first person your
-  shadow now keeps its head and helm; the eye views hide the head instead.
-- **Dungeon torchlight:** **Torches**, beside Dungeon ceilings in **VR Settings >
-  Performance**, lets the game's own torches and braziers light the dungeon
-  around them. It is off by default because finding them costs CPU.
-- **Pushable bodies cost less:** Only bodies within 3 meters are pushed. With
-  frame generation on, turning Pushable bodies off no longer gains 10-15 frames
-  a second.
+- **Dungeon ceilings the game draws:** In VR first person a dungeon's ceiling is
+  now a model the game draws itself, in the area's own rock, stone or beams. It is
+  lit by the game's torches, fires and spells and fogged by its fog. Setup makes it
+  from your own game files. The shader's ceiling stays as the fallback.
+- **The view through Leap:** In first person the view now rises with the hero
+  through Leap's whole arc, up to 3.8 m, and both eyes stay matched. Running into
+  a Leap, it glides on through the take-off crouch instead of stopping dead.
+  Leap Attack does the same.
+- **Spell glow on the Sorceress's hands:** It is now always on and has left the
+  menu. The flames, lightning and frost are made from the game's own spell effects,
+  and each glowing hand lights the dungeon around it. **VR Settings > World >
+  Spell hand light** sets how bright that light is: 40% by default, Off for none.
+- **The first cast of a skill:** A skill a glyph or motion puts on the right
+  trigger now waits a moment for the game to take it. Before, Raise Skeleton and
+  others could fail on the first try after another skill.
+- **Looking up:** The head kept for your shadow is now cut farther ahead when you
+  look up, against the warped circle seen above you in places like the Den of
+  Evil. `[arms] head_cut_level`, `head_cut_up` and `head_cut_down` set the cuts.
 
 ## Updating
 
-Download **D2R-PCVR-Setup-0.3.31.exe** for graphical installation, or
+Download **D2R-PCVR-Setup-0.3.32.exe** for graphical installation, or
 **d2r-pcvr-windows.zip** for portable setup. Existing users should choose
 **Update / repair and keep calibration and video settings**.
 
-New settings start at their defaults on an update too: Loot pick, Loot beams,
-Arcane Decay and Tactical commands are on, and Dungeon torchlight is off.
-Mercenary commands now take Grip + Trigger; the open-palm hold is gone.
-
-Updating from v0.3.28 or earlier: v0.3.29's new defaults come with a full
-install: Terrain distance 6 rings, Big objects 600, Fog distance 600 and a
-gentler fog. **Update / repair keeps your saved values**, so set them in VR
-Settings > Performance and World to try them.
+New settings start at their defaults on an update too:
+- Every class's motions are on; turn any off on its MOTIONS page.
+- Combat walk is on.
+- The game-drawn ceilings are on. Setup makes them while installing, which takes
+  about two and a half minutes the first time and again after a game update.
+- The Sorceress's hand glow is always on, and its VR Settings switch is gone. Its
+  light on the dungeon starts at 40%: VR Settings > World > Spell hand light.
 
 Close the game and fully exit Steam before updating. Closing D2R VR Launcher
 also avoids file locks. Update / repair preserves settings, calibration and saves.
@@ -117,7 +119,7 @@ portable setup remain available; Authentic is a separate optional mod.
 1. Install and start the original Diablo II: Resurrected through Steam or
    Battle.net once. Complete its account prompts, create or select an offline
    character, then fully exit the game.
-2. Download **D2R-PCVR-Setup-0.3.31.exe** from the assets below. Fully exit
+2. Download **D2R-PCVR-Setup-0.3.32.exe** from the assets below. Fully exit
    Steam using **Steam > Exit**, then run Setup and choose **Full install with
    recommended settings**. Follow the wizard to select your game copy, headset
    and connection; the shared launcher is included.
@@ -152,36 +154,58 @@ Installer failures are recorded separately in
 
 ## Verification and known issues
 
-The release build passed **174 native checks**. **263 of 269 Python checks**
-passed on Windows: the 5 session checks need Linux's `/proc`, and 1
+The release build passed **182 native checks**. **280 of 285 Python checks**
+passed on Windows: the 4 session checks need Linux's `/proc`, and 1
 symbolic-link check was skipped because this Windows session cannot create
-symbolic links. The in-headset What's new pages and the Interface page of VR
-Settings were rendered and checked for fit.
+symbolic links. The in-headset What's new page and all 2183 VR Settings help
+cards were rendered and checked for fit.
 
-Every change was tested in a headset with offline characters before it was
-merged, by the owner or its contributor:
-- **Glyph casting** on a Paladin: auras cast through the button they sat on and
-  through the hidden right-trigger slot, and the elemental trails.
-- **Mercenary commands:** moves, holds and a monster focus started by Grip +
-  Trigger, with no skill cast at the mercenary.
-- **Loot pick:** the pointed items were picked up, and items past reach showed
-  a red rim.
-- **Paladin gestures:** Holy Shield and Fist of the Heavens.
-- **Unleashed and other contributions:** the attack cycle, dual wield, loot beams,
-  Reset Skills & Stats, the held menu, NPC talk, the shadow's head and Arcane
-  Decay.
-- **Dungeon torchlight and the pushable-bodies radius:** the radius cut the
-  bodies' cost from 17-61 ms to under 5 ms each second.
+Tested in a headset with offline characters before merging, by the owner:
+- **Motions:**
+  - All 14 of the Sorceress's, and 13 of them again with a two-handed staff
+    after Frost Nova and Energy Shield were made deliberate.
+  - The Barbarian's, including about 40 Leap Attacks and 10 Whirlwinds.
+  - The Amazon's 4 and the Assassin's 7.
+  - The Necromancer's, after its redesign.
+  - The first-cast wait after another skill.
+- **Glyphs:** each hand's own set.
+- **Dual wield and combat walk:** Double Swing, Frenzy and the shared beat on a
+  dual-wielding Barbarian, and the combat walk toggling in fights.
+- **Dungeon ceilings:** the cave ceiling placed, shown and put away, and leaving
+  the game cleanly.
+- **The view through Leap:** the arc, the stereo and the take-off glide.
+- **Mercenary commands:** the mercenary found again at once, then commands and a
+  monster focus.
+
+Not yet tried in a headset:
+- **Town Portal on a glyph.**
+- **The ceilings:** the other 14 areas' look, torchlight on the rock, and the
+  Battle.net read path.
+- **Motions:**
+  - The latest Whirlwind T, read whichever way you look.
+  - Leap Attack at a monster handed over by the aim rules.
+  - The golem cards' names.
+  - Cloak of Shadows and Shadow Warrior since they were loosened.
+  - The body scale for players of another size.
+- **The hand glow:** its look, and the Spell hand light setting.
 
 No new headset session is claimed for the version and release-notes update
 itself.
 
 Known issues:
+- **Frenzy and Double Swing on two triggers:** an open Frenzy cast takes your
+  other blade's next hit as its second swing, so alternating blades leaves Double
+  Swing almost no swing to start from. Put one of them on a trigger.
+- **Motions:** both grips must already be held when a motion starts. Squeezing
+  them partway through a swing misses its start.
+- **Ceilings:** a pit or a two-level cave gets one ceiling at one height. The
+  barracks' beams and the domed vaults are not drawn by the game yet.
 - **Glyph casting:** the shapes are shared by all your characters, so a shape
-  whose skill your hero lacks casts nothing. The Warlock's glyphs take their
-  look from the skill's tree. A shape's skill uses the game's right-trigger
-  slot when it is on none of your buttons, replacing what a plain controller
-  layout had there.
+  whose skill your hero lacks casts nothing. A shape's skill uses the game's
+  right-trigger slot when it is on none of your buttons, replacing what a plain
+  controller layout had there. Motions do the same.
+- **Sorceress hand glow:** it is drawn over the picture, so it can show through
+  your weapon or a wall.
 - **Virtual Desktop freezes:** the game freezes for about a tenth of a second
   every so often under Virtual Desktop, with or without frame generation. This is
   being investigated.
@@ -191,25 +215,18 @@ Known issues:
   artifacts around moving monsters and during fast head turns. Frame counters
   count only the frames the game draws, and a menu stops the generated frames
   while it is open.
-- **Throwing potions:** the burst follows the game's short throw animation, and
-  only right-hand potions are thrown by hand for now.
 - **By turns:** it still renders each eye on alternate frames. Small bits of
   texture can still flicker along some edges, and transparent effects and wispy
   hair without useful depth may keep artifacts.
-- **Sorceress elemental hands:** they are drawn over the picture, so they can show
-  through your weapon or a wall.
 - **Not retested:** the latest rendering changes have not been retested on other
   GPU vendors. Battle.net remains experimental.
 
 ## Special thanks
 
-Thanks to **ChuckRibbits** for the Paladin's Holy Shield and Fist of the
-Heavens, loot beams, the fixed Unleashed attack cycle and native dual wield,
-Reset Skills & Stats, the held menu, NPC talk and the Save and Exit fix. Thanks
-to **beadlebytes** for Loot pick and the shadow's head. Thanks to **Mcklem** for
-the mercenary's tactical commands and AI, and for Arcane Decay. Thanks to
-**tig3rmast3r** for OFXR Bridge, and to everyone testing, reporting bugs and
-helping improve the mod!
+Thanks to **ChuckRibbits** for Double Swing and Frenzy for dual wielders, combat
+walk and the Cast On Strike labels. Thanks to **Sergious** for the game-drawn
+dungeon ceilings, adapted with permission. Thanks to **tig3rmast3r** for OFXR
+Bridge, and to everyone testing, reporting bugs and helping improve the mod!
 
 D2R VR Unleashed is a mod by **monkeylashes**, with contributions from the
 community. From v0.3.29 its source is under the Mozilla Public License 2.0;
@@ -217,34 +234,38 @@ releases up to 0.3.28 stay available under the MIT license.
 
 ## Downloads and links
 
-- [Windows installer, portable ZIP and checksums](https://github.com/bearstonem/d2r-pcvr/releases/tag/v0.3.31-windows-preview)
-- [Installation instructions](https://github.com/bearstonem/d2r-pcvr/blob/v0.3.31-windows-preview/INSTALL-WINDOWS.md)
-- [Controls](https://github.com/bearstonem/d2r-pcvr/blob/v0.3.31-windows-preview/CONTROLS.md)
-- [Full source comparison](https://github.com/bearstonem/d2r-pcvr/compare/v0.3.30-windows-preview...v0.3.31-windows-preview)
+- [Windows installer, portable ZIP and checksums](https://github.com/bearstonem/d2r-pcvr/releases/tag/v0.3.32-windows-preview)
+- [Installation instructions](https://github.com/bearstonem/d2r-pcvr/blob/v0.3.32-windows-preview/INSTALL-WINDOWS.md)
+- [Controls](https://github.com/bearstonem/d2r-pcvr/blob/v0.3.32-windows-preview/CONTROLS.md)
+- [Full source comparison](https://github.com/bearstonem/d2r-pcvr/compare/v0.3.31-windows-preview...v0.3.32-windows-preview)
 - [Project on GitHub](https://github.com/bearstonem/d2r-pcvr)
 - [Discord](https://discord.gg/DmbFfJAnnm)
 - [Support](https://ko-fi.com/bearstonem)
 
 <!-- PCVR_IN_HEADSET_NOTES
-release: v0.3.31-windows-preview
-credits: ChuckRibbits; beadlebytes; Mcklem; tig3rmast3r (OFXR Bridge); Sergious.
-- Glyph casting: hold Draw glyph, draw a shape in the air and let go to cast its skill.
-- Wheel > GLYPHS: give eight shapes a buff or aura; put Draw glyph on a hand button.
-- Glyphs glow in their element: flames, ice, lightning, holy light, curses, shadow, steel.
-- Paladin: the sign of the cross casts Holy Shield.
-- Paladin: raise a straight arm with a fist and bring it down for Fist of the Heavens.
-- Mercenary: point at it, hold Grip, pull Trigger, aim and let go to move it or focus a foe.
-- Loot pick (on): hold your arm out and point at an item; A picks that one, not the nearest.
-- Loot beams: colored pillars over unique, set and rare items and high runes.
-- Interface > Labels > Loot beams sets their brightness; Filter chooses which kinds.
-- Unleashed: extra swings never delay your next full hit; dual wield shares one cycle.
-- Dual wield swings at native speed; in-between strokes no longer stun-lock or heal.
-- Character page: Reset Skills & Stats, free and unlimited offline, with a confirmation.
-- Held menu: turn with the stick, drop items off the menu, put it away over your shoulder.
-- Arcane Decay: a blue vignette at the edge of your view when mana runs low.
-- A on an NPC while walking stops you, so the conversation opens with you standing.
-- Your shadow keeps its head in first person.
-- Graphics > Environment > Dungeon torchlight: the game's torches light dungeons (off, costs CPU).
-- Pushable bodies only push bodies within 3 m: no fps loss with frame generation.
-- Fixed: Save and Exit no longer crashes from the held menu.
+release: v0.3.32-windows-preview
+credits: ChuckRibbits; tig3rmast3r (OFXR Bridge); Sergious (dungeon ceilings).
+- Motions: hold both grips and do a skill's motion to cast it, with no button needed.
+- Each class's MOTIONS page (Spells page, lower right) turns its motions on or off.
+- The controllers hum warmer as a motion nears its cast.
+- Sorceress: 14 motions. Teleport: point where to land, then yank the fist back.
+- Sorceress: Meteor and Blizzard land on the highlighted monster.
+- Paladin and Druid gestures now take both grips too.
+- Amazon: Inner Sight, Slow Missiles, Decoy and Valkyrie by motion.
+- Barbarian: the warcries, Find Item, Leap, Leap Attack and Whirlwind by motion.
+- Leap: swing both arms up fast; it lands 25 cells ahead, the way your arms swing.
+- Leap Attack: the same swing from your arms pulled far back. Whirlwind: hold a T.
+- Necromancer: 12 motions; each golem card names the golem that arm raises.
+- Assassin: seven motions, from Burst of Speed to Mind Blast.
+- Glyphs: recognized whichever way you draw them; Town Portal can go on a glyph.
+- Glyphs: each hand has its own set of eight shapes.
+- Dual wield: Double Swing and Frenzy cast from your swings, one of each blade.
+- Dual wield: the attack beat runs at your two weapons' native average speed.
+- Combat walk: you walk while fighting; your run returns a moment after.
+- Strike skills on a trigger are tagged CAST ON STRIKE, not GESTURE.
+- Dungeon ceilings are drawn by the game itself, lit by its torches, in its fog.
+- First person: the view rises with Leap's arc and glides through its take-off.
+- Sorceress: hand glow always on; World > Spell hand light sets its light (40%).
+- Fixed: mercenary commands could stop working for a whole session.
+- Fixed: a skill's first cast by glyph or motion could fail after another skill.
 PCVR_IN_HEADSET_NOTES -->

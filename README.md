@@ -77,7 +77,7 @@ This is a PCVR mod: the game runs on your Windows PC and streams to the headset.
 ## In the game
 
 - First-person VR with your character's body, hands and equipment.
-- Optional experimental [Sorceress elemental hand effects](docs/elemental_hands.md), enabled under VR Settings > Graphics > Environment > Spell glow on hands.
+- [Sorceress elemental hand effects](docs/elemental_hands.md): her hands show flames, sparks or frost from their trigger spell.
 - Optional experimental frame generation under **VR Settings > Graphics > Frames > Frame generation**, through
   [OFXR Bridge](https://github.com/tig3rmast3r/OFXR-Bridge) by tig3rmast3r, which
   Setup downloads on native Windows. Off by default; turning it on restarts the VR session
