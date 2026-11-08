@@ -227,7 +227,8 @@ def with_harrogath_behind(preset, town, at, turn_deg, near=14.0, far=400.0, grou
                     c['shadowMask'] = 0
         model = next((c.get('filename', '') for c in comps if c.get('type') == 'ModelDefinitionComponent'), '')
         spin = (flip_wall and WALLS in str(model).lower()
-                and abs(float(tr['position'].get('x', 0.0)) - WALL_LINE_X) < 4.0)
+                and abs(float(tr['position'].get('x', 0.0)) - WALL_LINE_X) < 4.0
+                and (FLIP_SIDE == 'all' or (FLIP_SIDE == 'north') == (dz > 0.0)))
         new = (int(e.get('id', 0)) * 2246822519 + 0x27D4EB2F) & 0xFFFFFFFF
         while new in ids or new == 0:
             new = (new + 0x01000193) & 0xFFFFFFFF
@@ -487,6 +488,7 @@ def with_marks(preset, names, step=20.0):
 
 
 MARKS = ()                      # --mark NAME... (testing)
+FLIP_SIDE = 'all'               # --wall-flip-side north|south: only that part of the west wall turned
 
 
 def generate(assets, mod_name='D2R-PCVR', surround=True, town_at=TOWN_AT_GATE, town_turn=0.0, ground=True, sky_turns=SKY_TURNS,
@@ -591,6 +593,8 @@ def main():
     ap.add_argument('--spot-specular', type=float, default=None, help="the spot lights' specular share (testing)")
     ap.add_argument('--town-shadows', action='store_true', help="the town's models cast shadows too (testing)")
     ap.add_argument('--no-wall-fill', action='store_true', help="the town's wall out of the scene's whole half (holes by the gate)")
+    ap.add_argument('--wall-flip-side', choices=['all', 'north', 'south'], default='all',
+                    help="the west wall turned only north of the gate (z > 0 from the fire) or only south of it")
     ap.add_argument('--mark', nargs='*', default=[], metavar='NAME',
                     help="testing: the k-th named entity gets k copies floating over it, to tell models apart")
     ap.add_argument('--clutter', action='store_true', help="the town's grass, snow piles and small props too")
@@ -600,8 +604,9 @@ def main():
     global CAP_FACE, POINTS, SPOT_SPECULAR, TOWN_SHADOWS, WALL_FILL
     TOWN_SHADOWS = args.town_shadows
     WALL_FILL = not args.no_wall_fill
-    global MARKS
+    global MARKS, FLIP_SIDE
     MARKS = tuple(args.mark)
+    FLIP_SIDE = args.wall_flip_side
     CAP_FACE = -1.0 if args.cap_flip else 1.0
     POINTS = args.spots_as_points
     SPOT_SPECULAR = args.spot_specular
