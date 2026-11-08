@@ -344,8 +344,8 @@ struct Settings {
     // and a click's whoosh; sparks: a burst of sparks out of the fire at a click on it (the shader's Sparks);
     // fire_x/y/z: where the fire burns in the scene (world units, the preset's rogue_bonfire01); fire_pick_radius.
     std::atomic<bool>  campfireFireSound{true}, campfireSparks{true};
-    std::atomic<float> campfireFireVolume{0.35f}, campfireFireBurst{1.0f}, campfireFireX{1060.67f}, campfireFireY{0.3f},
-                       campfireFireZ{123.94f}, campfireFirePick{2.2f};
+    std::atomic<float> campfireFireVolume{0.9f}, campfireFireBurst{2.0f}, campfireFireX{1060.67f}, campfireFireY{0.3f},
+                       campfireFireZ{123.94f}, campfireFirePick{2.5f};
     std::atomic<bool>  campfirePano{false};      // [campfire] panorama: one picture round the scene (pano_file), in the void
     std::atomic<float> campfirePanoYaw{0.0f}, campfirePanoLow{-90.0f}, campfirePanoHigh{90.0f}, campfirePanoBright{1.0f};   // [campfire] pano_yaw/low/high/brightness
     std::atomic<float> campfireMenuTop{0.78f};  // [campfire] menu_top: where the strip begins, a share of the game's menu band from its top
@@ -1464,12 +1464,12 @@ void LoadSettings() {
         g_set.campfirePano.store(IniB(L"campfire", L"panorama", false));
         g_set.campfireFireSound.store(IniB(L"campfire", L"fire_sound", true));
         g_set.campfireSparks.store(IniB(L"campfire", L"sparks", true));
-        g_set.campfireFireVolume.store(std::clamp(IniF(L"campfire", L"fire_volume", 0.35f), 0.0f, 2.0f));
-        g_set.campfireFireBurst.store(std::clamp(IniF(L"campfire", L"fire_burst_volume", 1.0f), 0.0f, 2.0f));
+        g_set.campfireFireVolume.store(std::clamp(IniF(L"campfire", L"fire_volume", 0.9f), 0.0f, 4.0f));
+        g_set.campfireFireBurst.store(std::clamp(IniF(L"campfire", L"fire_burst_volume", 2.0f), 0.0f, 6.0f));
         g_set.campfireFireX.store(IniF(L"campfire", L"fire_x", 1060.67f));
         g_set.campfireFireY.store(IniF(L"campfire", L"fire_y", 0.3f));
         g_set.campfireFireZ.store(IniF(L"campfire", L"fire_z", 123.94f));
-        g_set.campfireFirePick.store(std::clamp(IniF(L"campfire", L"fire_pick_radius", 2.2f), 0.5f, 30.0f));
+        g_set.campfireFirePick.store(std::clamp(IniF(L"campfire", L"fire_pick_radius", 2.5f), 0.5f, 30.0f));
         g_set.campfirePanoYaw.store(std::clamp(IniF(L"campfire", L"pano_yaw", 0.0f), -360.0f, 360.0f));
         g_set.campfirePanoLow.store(std::clamp(IniF(L"campfire", L"pano_low", -90.0f), -90.0f, 89.0f));
         g_set.campfirePanoHigh.store(std::clamp(IniF(L"campfire", L"pano_high", 90.0f), -89.0f, 90.0f));
@@ -3767,27 +3767,25 @@ bool CampfirePointer(const float o[3], const float d[3], POINT* where) {
     return true;
 }
 
-// The campfire's fire under the ray: the ray passes within [campfire] fire_pick_radius of the fire's
-// low middle (its logs and the flames' foot, up to 4 units over [campfire] fire_y), and ahead of the hand.
+// The campfire's fire under the ray: where the ray comes down to the logs' height ([campfire] fire_y
+// and one unit over it) lies within [campfire] fire_pick_radius of the fire, ahead of the hand. A ray
+// at a hero behind the fire (the Barbarian, the Paladin) passes over the fire and comes down far
+// beyond it - theirs (owner 2026-11-08: the fire took their clicks).
 std::atomic<ULONGLONG> g_sparkAt{0};
 bool CampfireFireHit(const float o[3], const float d[3]) {
     const float F[3] = {g_set.campfireFireX.load(), g_set.campfireFireY.load(), g_set.campfireFireZ.load()};
-    const float dl = std::sqrt(d[0]*d[0] + d[1]*d[1] + d[2]*d[2]);
-    if (!(dl > 1e-6f)) return false;
-    float best = 1e9f, bestT = 0.0f;
-    for (int k = 0; k <= 4; ++k) {   // the fire as a short upright segment
-        const float p[3] = {F[0] - o[0], F[1] + float(k) - o[1], F[2] - o[2]};
-        const float t = (p[0]*d[0] + p[1]*d[1] + p[2]*d[2]) / dl;
-        const float c[3] = {p[0] - d[0] / dl * t, p[1] - d[1] / dl * t, p[2] - d[2] / dl * t};
-        const float dist = std::sqrt(c[0]*c[0] + c[1]*c[1] + c[2]*c[2]);
-        if (dist < best) { best = dist; bestT = t; }
-    }
+    const float h = F[1] + 1.0f;
+    if (!(d[1] < -1e-4f)) return false;   // not pointing down: not at the fire
+    const float t = (h - o[1]) / d[1];
+    if (!(t > 0.0f)) return false;
+    const float x = o[0] + d[0] * t - F[0], z = o[2] + d[2] * t - F[2];
+    const float dist = std::sqrt(x * x + z * z);
     static ULONGLONG told = 0;
     if (GetTickCount64() - told > 1500) {
         told = GetTickCount64();
-        LogF("vrcam: campfire - a click %.1f units from the fire (%.1f along the ray; radius %.1f)", best, bestT, g_set.campfireFirePick.load());
+        LogF("vrcam: campfire - a click comes down %.1f units from the fire (radius %.1f)", dist, g_set.campfireFirePick.load());
     }
-    return bestT > 0.0f && best <= g_set.campfireFirePick.load();
+    return dist <= g_set.campfireFirePick.load();
 }
 void CampfirePick() {
     static bool down = false; static int stage = 0; static ULONGLONG at = 0;
