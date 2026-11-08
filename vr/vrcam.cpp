@@ -345,7 +345,7 @@ struct Settings {
     // fire_x/y/z: where the fire burns in the scene (world units, the preset's rogue_bonfire01); fire_pick_radius.
     std::atomic<bool>  campfireFireSound{true}, campfireSparks{true};
     std::atomic<float> campfireFireVolume{0.35f}, campfireFireBurst{1.0f}, campfireFireX{1060.67f}, campfireFireY{0.3f},
-                       campfireFireZ{123.94f}, campfireFirePick{4.5f};
+                       campfireFireZ{123.94f}, campfireFirePick{2.2f};
     std::atomic<bool>  campfirePano{false};      // [campfire] panorama: one picture round the scene (pano_file), in the void
     std::atomic<float> campfirePanoYaw{0.0f}, campfirePanoLow{-90.0f}, campfirePanoHigh{90.0f}, campfirePanoBright{1.0f};   // [campfire] pano_yaw/low/high/brightness
     std::atomic<float> campfireMenuTop{0.78f};  // [campfire] menu_top: where the strip begins, a share of the game's menu band from its top
@@ -1469,7 +1469,7 @@ void LoadSettings() {
         g_set.campfireFireX.store(IniF(L"campfire", L"fire_x", 1060.67f));
         g_set.campfireFireY.store(IniF(L"campfire", L"fire_y", 0.3f));
         g_set.campfireFireZ.store(IniF(L"campfire", L"fire_z", 123.94f));
-        g_set.campfireFirePick.store(std::clamp(IniF(L"campfire", L"fire_pick_radius", 4.5f), 0.5f, 30.0f));
+        g_set.campfireFirePick.store(std::clamp(IniF(L"campfire", L"fire_pick_radius", 2.2f), 0.5f, 30.0f));
         g_set.campfirePanoYaw.store(std::clamp(IniF(L"campfire", L"pano_yaw", 0.0f), -360.0f, 360.0f));
         g_set.campfirePanoLow.store(std::clamp(IniF(L"campfire", L"pano_low", -90.0f), -90.0f, 89.0f));
         g_set.campfirePanoHigh.store(std::clamp(IniF(L"campfire", L"pano_high", 90.0f), -89.0f, 90.0f));

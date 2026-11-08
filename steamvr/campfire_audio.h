@@ -37,9 +37,10 @@ struct Synth {
 
             // crackles: on average ~5 a second, many more just after a click
             const double t=burstT;
-            const float boost=t<2.5?float(std::exp(-t/0.6))*14.f:0.f;
+            // a pine cone in the fire: it catches over half a second, crackles hard, then settles over ~3 s
+            const float boost=t<3.5?float((t/0.6)*std::exp(1.0-t/0.6))*16.f:0.f;
             if(clicksLeft<=0&&Uniform()<(7.f+boost*3.f)/Rate) {
-                clicksLeft=1+int(Uniform()*4);clickGap=0;const float u=Uniform();clickAmp=.05f+.45f*u*u*u;
+                clicksLeft=1+int(Uniform()*4);clickGap=0;const float u=Uniform();clickAmp=(.05f+.45f*u*u*u)*(1.f+boost*.04f);
             }
             if(clicksLeft>0&&--clickGap<=0) {
                 clickEnv=clickAmp*(.5f+.5f*Uniform());clickDecay=.80f+.15f*Uniform();
@@ -54,13 +55,14 @@ struct Synth {
 
             float amb=(s+click*.9f+popS*.5f)*ambient;
 
-            // the whoosh: noise whose brightness rises then falls, over about a second and a half
+            // the cone landing: a soft low thump, then a muffled "fwoomp" of the flames taking it - no hiss
             float wh=0;
-            if(t<2.0) {
-                const float env=float((1.0-std::exp(-t/.03))*std::exp(-t/.22));
-                const float bright=.02f+.25f*float(std::exp(-t/.35));
-                whooshLp+=bright*(n-whooshLp);whooshLp2+=bright*.6f*(whooshLp-whooshLp2);
-                wh=(whooshLp*1.4f+whooshLp2*.8f)*env*.45f+click*.7f*float(std::exp(-t/.8));
+            if(t<3.0) {
+                const float thump=t<.3?float(std::sin(6.2831853*72.0*t)*std::exp(-t/.07))*.3f:0.f;
+                const float env=float((1.0-std::exp(-t/.12))*std::exp(-t/.7));
+                const float bright=.004f+.012f*float(std::exp(-t/.5));
+                whooshLp+=bright*(n-whooshLp);whooshLp2+=bright*(whooshLp-whooshLp2);
+                wh=thump+whooshLp2*env*3.f;
             }
             burstT+=1.0/Rate;
             const float v=amb+wh*burstGain;

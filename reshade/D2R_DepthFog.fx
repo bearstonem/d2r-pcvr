@@ -2238,12 +2238,12 @@ float3 Sparks(float3 c, float2 uv, int eye, float ok, float3 p)
             if (s > 0.0 && d < best) { best = d; depth = s; }
         }
         if (depth <= 0.0 || depth > scene + 0.5) continue;   // behind something
-        const float size = 0.0022 * (0.6 + SparkHash(float(i) + 71.0));
+        const float size = 0.0012 * (0.6 + SparkHash(float(i) + 71.0));
         const float flick = 0.75 + 0.25 * sin(t * 40.0 + float(i) * 3.1);
         const float g = exp(-(best * best) / (size * size)) * life * flick;
         // white-hot when young, orange, then a deep red ember
         const float3 hot = lerp(float3(1.0, 0.25, 0.05), lerp(float3(1.0, 0.6, 0.15), float3(1.0, 0.95, 0.75), saturate(life * 2.0 - 1.0)), saturate(life * 1.6));
-        glow += hot * g * 2.2;
+        glow += hot * g * 3.0;
     }
     return c + glow;
 }
