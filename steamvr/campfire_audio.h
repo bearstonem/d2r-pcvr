@@ -33,13 +33,13 @@ struct Synth {
             roarLow+=.012f*(n-roarLow);roarMid+=.09f*(n-roarMid);roarMid2+=.03f*(roarMid-roarMid2);
             if(--flickerLeft<=0){flickerLeft=int(Rate*(.05f+.25f*Uniform()));flickerTo=.35f+.65f*Uniform();}
             flicker+=.0004f*(flickerTo-flicker);
-            float s=(roarLow*3.2f+(roarMid-roarMid2)*.9f)*flicker*.22f;
+            float s=(roarLow*1.6f+(roarMid-roarMid2)*.35f)*flicker*.06f;   // only a breath of the flames: the crackle carries it
 
             // crackles: on average ~5 a second, many more just after a click
             const double t=burstT;
             const float boost=t<2.5?float(std::exp(-t/0.6))*14.f:0.f;
-            if(clicksLeft<=0&&Uniform()<(5.f+boost*3.f)/Rate) {
-                clicksLeft=1+int(Uniform()*5);clickGap=0;clickAmp=.18f+.55f*Uniform()*Uniform();
+            if(clicksLeft<=0&&Uniform()<(7.f+boost*3.f)/Rate) {
+                clicksLeft=1+int(Uniform()*4);clickGap=0;const float u=Uniform();clickAmp=.05f+.45f*u*u*u;
             }
             if(clicksLeft>0&&--clickGap<=0) {
                 clickEnv=clickAmp*(.5f+.5f*Uniform());clickDecay=.80f+.15f*Uniform();
@@ -57,10 +57,10 @@ struct Synth {
             // the whoosh: noise whose brightness rises then falls, over about a second and a half
             float wh=0;
             if(t<2.0) {
-                const float env=float((1.0-std::exp(-t/.04))*std::exp(-t/.45));
+                const float env=float((1.0-std::exp(-t/.03))*std::exp(-t/.22));
                 const float bright=.02f+.25f*float(std::exp(-t/.35));
                 whooshLp+=bright*(n-whooshLp);whooshLp2+=bright*.6f*(whooshLp-whooshLp2);
-                wh=(whooshLp*2.2f+whooshLp2*1.5f)*env*.9f+click*.6f*float(std::exp(-t/.8));
+                wh=(whooshLp*1.4f+whooshLp2*.8f)*env*.45f+click*.7f*float(std::exp(-t/.8));
             }
             burstT+=1.0/Rate;
             const float v=amb+wh*burstGain;

@@ -344,7 +344,7 @@ struct Settings {
     // and a click's whoosh; sparks: a burst of sparks out of the fire at a click on it (the shader's Sparks);
     // fire_x/y/z: where the fire burns in the scene (world units, the preset's rogue_bonfire01); fire_pick_radius.
     std::atomic<bool>  campfireFireSound{true}, campfireSparks{true};
-    std::atomic<float> campfireFireVolume{0.55f}, campfireFireBurst{1.0f}, campfireFireX{1060.67f}, campfireFireY{0.3f},
+    std::atomic<float> campfireFireVolume{0.35f}, campfireFireBurst{1.0f}, campfireFireX{1060.67f}, campfireFireY{0.3f},
                        campfireFireZ{123.94f}, campfireFirePick{4.5f};
     std::atomic<bool>  campfirePano{false};      // [campfire] panorama: one picture round the scene (pano_file), in the void
     std::atomic<float> campfirePanoYaw{0.0f}, campfirePanoLow{-90.0f}, campfirePanoHigh{90.0f}, campfirePanoBright{1.0f};   // [campfire] pano_yaw/low/high/brightness
@@ -1464,7 +1464,7 @@ void LoadSettings() {
         g_set.campfirePano.store(IniB(L"campfire", L"panorama", false));
         g_set.campfireFireSound.store(IniB(L"campfire", L"fire_sound", true));
         g_set.campfireSparks.store(IniB(L"campfire", L"sparks", true));
-        g_set.campfireFireVolume.store(std::clamp(IniF(L"campfire", L"fire_volume", 0.55f), 0.0f, 2.0f));
+        g_set.campfireFireVolume.store(std::clamp(IniF(L"campfire", L"fire_volume", 0.35f), 0.0f, 2.0f));
         g_set.campfireFireBurst.store(std::clamp(IniF(L"campfire", L"fire_burst_volume", 1.0f), 0.0f, 2.0f));
         g_set.campfireFireX.store(IniF(L"campfire", L"fire_x", 1060.67f));
         g_set.campfireFireY.store(IniF(L"campfire", L"fire_y", 0.3f));
