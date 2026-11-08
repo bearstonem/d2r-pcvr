@@ -146,6 +146,10 @@ TOWN_KEEP = ()
 # --hide NAME...: entities taken out last, by their exact name - the town's pieces too (NAME_pcvr_behind):
 # the town wall's corner at B4, whose unfinished back faced the player once its wall was turned (2026-11-08).
 HIDE = ()
+# --town-biome: the scene takes Harrogath's biome (expansion_town). The town's ground (terrain.model) is
+# painted by blend layers whose textures its biome names; under the scene's own biome the same layers came
+# out as one terracotta all over (owner 2026-11-08: "tej terakoty w grze nie ma praktycznie w ogóle").
+TOWN_BIOME = False
 
 
 def grid_cell(dx, dz):
@@ -777,6 +781,11 @@ def generate(assets, mod_name='D2R-PCVR', surround=True, town_at=TOWN_AT_GATE, t
     if SPIN:
         result, spun = with_spins(result, SPIN)
         removed = removed + spun
+    if TOWN_BIOME and surround:
+        town_biome = json.loads(assets.read(TOWN)).get('biomeFilename')
+        if town_biome:
+            removed = removed + [f'biome {result.get("biomeFilename")} -> {town_biome}']
+            result['biomeFilename'] = town_biome
     if HIDE:
         names = {n.lower() for n in HIDE}
         gone = [e.get('name') for e in result['entities'] if isinstance(e, dict) and str(e.get('name', '')).lower() in names]
@@ -855,6 +864,7 @@ def main():
     ap.add_argument('--ui-walls', action='store_true', help="the square's walls as the scene's own ui_wall01 (the gate's brick and stone)")
     ap.add_argument('--ui-wall-length', type=float, default=None, help='ui_wall01 length, world units (testing)')
     ap.add_argument('--ui-wall-far-yaw', type=float, default=None, help='ui_wall01 turn on the north line, degrees')
+    ap.add_argument('--town-biome', action='store_true', help="the scene under Harrogath's biome (its ground's textures)")
     ap.add_argument('--hide', nargs='+', default=None, metavar='NAME', help='entities taken out last, exact names')
     ap.add_argument('--town-keep', nargs='+', default=None, metavar='A1:B2',
                     help="grid rectangles (owner's map) where the town's own pieces stay inside the scene half")
@@ -868,7 +878,8 @@ def main():
     ap.add_argument('--sky', nargs='*', type=float, default=list(SKY_TURNS), metavar='DEG',
                     help='turns (degrees) of the copies of the sky round the fire; --sky alone: none')
     args = ap.parse_args()
-    global CAP_FACE, POINTS, SPOT_SPECULAR, TOWN_SHADOWS, WALL_FILL, TOWN_KEEP, HIDE
+    global CAP_FACE, POINTS, SPOT_SPECULAR, TOWN_SHADOWS, WALL_FILL, TOWN_KEEP, HIDE, TOWN_BIOME
+    TOWN_BIOME = args.town_biome
     if args.hide:
         HIDE = tuple(args.hide)
     if args.town_keep:
