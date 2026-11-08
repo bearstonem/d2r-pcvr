@@ -16,7 +16,6 @@ struct Synth {
     float roarLow=0,roarMid=0,roarMid2=0,flicker=.6f,flickerTo=.6f;int flickerLeft=0;
     // crackles: a few clicks in a row, each a short decaying burst of bright noise
     int clicksLeft=0,clickGap=0;float clickAmp=0,clickEnv=0,clickDecay=.9f,clickHp=0;
-    float pop=0,popPhase=0,popFreq=0;   // a low pop now and then (a knot bursting)
     float burst=0;double burstT=99;     // the whoosh, seconds since the click
     float whooshLp=0,whooshLp2=0,burstLevel=1;
 
@@ -51,10 +50,7 @@ struct Synth {
             clickHp+=.35f*(raw-clickHp);
             const float click=raw-clickHp;   // high-passed: a dry, sharp crack
 
-            if(pop<=.001f&&Uniform()<(.4f+boost*.3f*burstLevel)/Rate){pop=.35f+.4f*Uniform();popFreq=70.f+90.f*Uniform();popPhase=0;}
-            popPhase+=6.2831853f*popFreq/Rate;const float popS=pop*std::sin(popPhase);pop*=.9985f;
-
-            float amb=(s+click*.9f+popS*.5f)*ambient;
+            float amb=(s+click*.9f)*ambient;   // (no low pops: they thudded like a little drum)
 
             // a click: no whoosh of its own - only the fire's own crackle, a great deal of it at once (boost)
             const float wh=0.f;
