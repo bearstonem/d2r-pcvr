@@ -492,6 +492,23 @@ def with_marks(preset, names, step=20.0):
 
 MARKS = ()                      # --mark NAME... (testing)
 UI_WALLS = False                # --ui-walls
+SPIN = ()                       # --spin NAME...: entities turned half round about their own place
+
+
+def with_spins(preset, names):
+    """Entities (by name or part of one) turned 180 degrees about their own vertical axis, where they stand:
+    the town's models built for its own camera show the player their other side."""
+    done = []
+    for name in names:
+        hit = [e for e in preset['entities'] if isinstance(e, dict) and name.lower() in str(e.get('name', '')).lower()]
+        for e in hit:
+            for c in e.get('components', []):
+                q = c.get('orientation') if c.get('type') == 'TransformDefinitionComponent' else None
+                if isinstance(q, dict):
+                    x0, y0, z0, w0 = (float(q.get(k, 0.0)) for k in 'xyzw')
+                    q['x'], q['y'], q['z'], q['w'] = -z0, w0, x0, -y0   # (0, 1, 0, 0) * q
+        done.append(f'{name}: {len(hit)} turned 180')
+    return preset, done
 UI_WALL_LENGTH = 26.8           # ui_wall01's length along its line, world units (from the scene's own row)
 UI_WALL_FAR_YAW = -90.0         # its turn on the north line, degrees (its face toward the fire)
 
@@ -594,6 +611,9 @@ def generate(assets, mod_name='D2R-PCVR', surround=True, town_at=TOWN_AT_GATE, t
     if surround and UI_WALLS:
         result, walls = with_ui_walls(result)
         removed = removed + walls
+    if SPIN:
+        result, spun = with_spins(result, SPIN)
+        removed = removed + spun
     if MARKS:
         result, marked = with_marks(result, MARKS)
         removed = removed + marked
@@ -658,6 +678,7 @@ def main():
     ap.add_argument('--spot-specular', type=float, default=None, help="the spot lights' specular share (testing)")
     ap.add_argument('--town-shadows', action='store_true', help="the town's models cast shadows too (testing)")
     ap.add_argument('--no-wall-fill', action='store_true', help="the town's wall out of the scene's whole half (holes by the gate)")
+    ap.add_argument('--spin', nargs='*', default=[], metavar='NAME', help='entities turned 180 degrees where they stand')
     ap.add_argument('--ui-walls', action='store_true', help="the square's walls as the scene's own ui_wall01 (the gate's brick and stone)")
     ap.add_argument('--ui-wall-length', type=float, default=None, help='ui_wall01 length, world units (testing)')
     ap.add_argument('--ui-wall-far-yaw', type=float, default=None, help='ui_wall01 turn on the north line, degrees')
@@ -675,6 +696,8 @@ def main():
     WALL_FILL = not args.no_wall_fill
     global MARKS, FLIP_SIDE, FLIP_FAR, UI_WALLS, UI_WALL_LENGTH, UI_WALL_FAR_YAW
     UI_WALLS = args.ui_walls
+    global SPIN
+    SPIN = tuple(args.spin)
     if args.ui_wall_length is not None: UI_WALL_LENGTH = args.ui_wall_length
     if args.ui_wall_far_yaw is not None: UI_WALL_FAR_YAW = args.ui_wall_far_yaw
     FLIP_FAR = args.flip_far_wall
