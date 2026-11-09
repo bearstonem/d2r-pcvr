@@ -37,6 +37,7 @@
 #include "../steamvr/arm_pointing.h"
 #include "../steamvr/aim_reach.h"
 #include "../steamvr/torch_light.h"
+#include "../steamvr/light_radius.h"
 #include "../steamvr/elemental_hands.h"
 #include "../steamvr/leather_menu.h"
 #include "../steamvr/head_shadow.h"
@@ -346,6 +347,13 @@ struct Settings {
     std::atomic<float> torchRadius{18.0f};       // [torch] radius: world units of light reach (28 looked too intense in the headset)
     std::atomic<bool>  torchFlicker{true};       // [torch] flicker: organic turbulent flame flicker
     std::atomic<float> torchWarmth{0.65f};       // [torch] warmth: color warmth toward fire orange
+    // The hero's Light Radius in VR (#440, light_radius.h): it widens the vault's light and the hero light.
+    std::atomic<bool>  heroLight{true};          // [light] hero_light: a modest light of ours round the hero in dungeons the vault does not roof
+    std::atomic<float> heroLightStrength{0.25f}; // [light] hero_strength
+    std::atomic<float> heroLightReach{20.0f};    // [light] hero_reach: world units, with no Light Radius gear
+    std::atomic<float> lightRadiusBase{0.0f};    // [light] radius_base: what stat 89 reads with no Light Radius gear
+    std::atomic<float> lightRadiusPoints{10.0f}; // [light] radius_points: the hero's own light in the stat's points
+    std::atomic<float> lightRadiusBoost{150.0f}; // [light] radius_boost_pct (VR Settings > Graphics > Environment > Light Radius boost)
     std::atomic<int>   armsMode{0};        // 0 game animation, 1 test pose (arms ahead), 2 controllers
     std::atomic<bool>  hideHead{false};     // hide the hero's head from the eyes (first person): shrunk, or cut (headShadow)
     std::atomic<bool>  headShadow{true};    // [arms] head_shadow: the hidden head stays whole for its shadow, the eye views cut it (head_shadow.h)
@@ -1449,6 +1457,13 @@ void LoadSettings() {
     g_set.torchRadius.store(std::clamp(IniF(L"torch", L"radius", 18.0f), 5.0f, 60.0f));
     g_set.torchFlicker.store(IniB(L"torch", L"flicker", true));
     g_set.torchWarmth.store(std::clamp(IniF(L"torch", L"warmth", 0.65f), 0.0f, 1.0f));
+    g_set.heroLight.store(IniB(L"light", L"hero_light", true));
+    g_set.heroLightStrength.store(std::clamp(IniF(L"light", L"hero_strength", 0.25f), 0.0f, 2.0f));
+    g_set.heroLightReach.store(std::clamp(IniF(L"light", L"hero_reach", 20.0f), 5.0f, 80.0f));
+    g_set.lightRadiusBase.store(std::clamp(IniF(L"light", L"radius_base", 0.0f), -50.0f, 100.0f));
+    g_set.lightRadiusPoints.store(std::clamp(IniF(L"light", L"radius_points", 10.0f), 1.0f, 100.0f));
+    g_set.lightRadiusBoost.store(std::clamp(IniF(L"light", L"radius_boost_pct", 150.0f),
+                                            framevr::lightradius::MinBoostPct, framevr::lightradius::MaxBoostPct));
     LoadCeilingBiomes();
     LoadCeilingTextures();
     g_set.armsMode.store(std::clamp((int)IniF(L"arms", L"mode", 0.0f), 0, 2));
@@ -9948,6 +9963,40 @@ bool CeilWanted() {
     return g_set.ceilOn.load() && g_enabled.load() && !ThirdPerson() && g_inWorld.load() && g_ceilBiome.load() &&
            !WorldMenuBlocksEffects();
 }
+// The hero light (D2R_Lights.fxh HeroLight, #440): in every dungeon, first person, no menu; drawn where the shader's
+// vault is not (its own light is over the hero there). The effect also runs for it where nothing else wanted it -
+// a dungeon off [ceiling] biomes, such as the Tal Rasha tombs, with the fog off in caves.
+bool HeroLightWanted() {
+    return g_set.heroLight.load() && g_set.heroLightStrength.load() > 0.0f && g_enabled.load() && !ThirdPerson() &&
+           g_inWorld.load() && g_underground.load() && !WorldMenuBlocksEffects();
+}
+// How far the hero's light reaches against no Light Radius gear (light_radius.h): 1 until his stat 89 is read.
+// Logged at each change.
+float HeroLightScale() {
+    int stat = 0;
+    bool known = false;
+#ifdef D2RVR_NATIVE_OPENXR
+    known = interactionstate::LightRadius(gamestate::LocalPlayer(), stat);
+#endif
+    framevr::lightradius::Tuning t;
+    t.base = g_set.lightRadiusBase.load();
+    t.points = g_set.lightRadiusPoints.load();
+    t.boostPct = g_set.lightRadiusBoost.load();
+    const float scale = framevr::lightradius::Scale(stat, known, t);
+    static int toldStat = INT_MIN;
+    static float toldScale = -1.0f;
+    const int now = known ? stat : INT_MIN + 1;
+    if (now != toldStat || std::fabs(scale - toldScale) > 1e-4f) {
+        toldStat = now; toldScale = scale;
+        if (known)
+            LogF("vrcam: hero Light Radius (stat 89) %d: the vault's light over him and the hero light reach x%.2f (the hero light %.0f units; "
+                 "[light] radius_base %.0f, radius_points %.0f, radius_boost_pct %.0f)",
+                 stat, scale, g_set.heroLightReach.load() * scale, t.base, t.points, t.boostPct);
+        else
+            LogF("vrcam: hero Light Radius not read yet: his dungeon light at its tuned reach");
+    }
+    return scale;
+}
 // [ceiling] game_ceiling (vr/engine_units.cpp): a ceiling of the game's wanted here - [ceiling] enabled, first person,
 // the area on game_ceiling_biomes with a kind of its own, no menu - and the view it is drawn in: VR first person (F4)
 // with the VR camera on. Flat F3 keeps the shader's vault.
@@ -10062,7 +10111,7 @@ void OnFinishEffects(reshade::api::effect_runtime* rt, reshade::api::command_lis
     if (!g_tech[0].handle) { hud::SetPictureReady(false); return; }
     // Off while a menu is open: the fog lies over the whole picture, the
     // inventory and trade panels included, and darkened them.
-    const bool want = FogWanted() || g_skyPalette.load() >= 0 || g_arcaneSky.load() || CeilWanted() || HudWanted() || StampWanted() || hud::PictureWanted() || TableKeyWanted() || PhantomWanted() || BoneAxesWanted() || ShieldDebugWanted() || OutlineWanted() || RingWanted() || BeamWanted();
+    const bool want = FogWanted() || g_skyPalette.load() >= 0 || g_arcaneSky.load() || CeilWanted() || HudWanted() || StampWanted() || hud::PictureWanted() || TableKeyWanted() || PhantomWanted() || BoneAxesWanted() || ShieldDebugWanted() || OutlineWanted() || RingWanted() || BeamWanted() || HeroLightWanted();
     // The toolbar and the map are taken out of the game's picture to be drawn
     // back at their own size only while this effect runs, and is new enough to.
     {
@@ -10604,6 +10653,26 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
         bool ceil = who == 1;
         for (const SkyView& v : sv) ceil = ceil && v.proj_ok && v.axes_ok && v.proj[0] != 0.0f && v.proj[1] != 0.0f;
         SetBool(rt, "CeilOn", ceil);
+        // The hero's Light Radius (#440, light_radius.h): it widens the vault's light over him (below) and the hero
+        // light, ours, at his shoulder wherever the vault is not drawn - the game's ceiling, or none.
+        const float heroScale = HeroLightScale();
+        const bool heroLight = HeroLightWanted() && !ceil && sv[0].proj_ok && sv[0].axes_ok;
+        SetBool(rt, "HeroLightOn", heroLight);
+        {   // each change
+            static int told = -1;
+            if (int(heroLight) != told) {
+                told = int(heroLight);
+                LogF("vrcam: hero light %s", heroLight ? "on (a dungeon, first person, the vault not drawn)" : "off");
+            }
+        }
+        if (heroLight) {
+            const auto at = framevr::lightradius::HeroLightAt(0.5f * (sv[0].eyeRel[0] + sv[1].eyeRel[0]), 0.5f * (sv[0].eyeRel[1] + sv[1].eyeRel[1]),
+                                                              0.5f * (sv[0].eyeRel[2] + sv[1].eyeRel[2]), sv[0].hero[1] - floorY);
+            const float place[3] = {at.x, at.y, at.z};
+            SetFloats(rt, "HeroLightPos", place, 3);
+            SetFloat(rt, "HeroLightRadius", g_set.heroLightReach.load() * heroScale);
+            SetFloat(rt, "HeroLightStrength", g_set.heroLightStrength.load());
+        }
         if (ceil) {
 
             float height, bright, light, relief;
@@ -10614,7 +10683,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
             SetFloat(rt, "CeilBrightness", bright);
             SetFloat(rt, "CeilRelief", relief);
             SetFloat(rt, "CeilTexSlot", (float)slot);
-            SetFloat(rt, "CeilLightRadius", light);
+            SetFloat(rt, "CeilLightRadius", light * heroScale);   // by his Light Radius (#440)
             SetFloat(rt, "CeilHalo", g_set.ceilHalo.load());
             SetFloat(rt, "CeilWallDist", g_set.ceilWall.load());
             SetFloat(rt, "CeilFloorDepth", g_set.ceilFloor.load());

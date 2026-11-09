@@ -100,6 +100,8 @@ target_include_directories(companion-ai-test PRIVATE ${ROOT}/cleanroom/sigscan $
 target_link_libraries(companion-ai-test PRIVATE framevr-runtime)
 add_executable(torch-light-test torch_light_test.cpp)
 target_link_libraries(torch-light-test PRIVATE framevr-runtime)
+add_executable(light-radius-test light_radius_test.cpp)
+target_link_libraries(light-radius-test PRIVATE framevr-runtime)
 add_executable(frame-generation-test frame_generation_test.cpp)
 target_include_directories(d2rl-pcvr PRIVATE ${ROOT}/shared ${ROOT}/external/flatvr ${ROOT}/external/bodywalk ${ROOT}/external/reshade/include ${CMAKE_CURRENT_SOURCE_DIR} ${OPENXR_SDK}/include)
 target_link_libraries(d2rl-pcvr PRIVATE d2rcam minhook user32 gdi32 framevr-runtime)
@@ -267,6 +269,8 @@ add_executable(arcane-sky-test arcane_sky_test.cpp)
 target_link_libraries(arcane-sky-test PRIVATE d3d11 d3dcompiler framevr-runtime)
 add_executable(sky-band-test sky_band_test.cpp)
 target_link_libraries(sky-band-test PRIVATE d3d11 d3dcompiler windowscodecs ole32 framevr-runtime)
+add_executable(hero-light-test hero_light_test.cpp)
+target_link_libraries(hero-light-test PRIVATE d3d11 d3dcompiler framevr-runtime)
 add_executable(scene-depth-test scene_depth_test.cpp)
 add_executable(game-device-only-test game_device_only_test.cpp)
 target_include_directories(scene-depth-test PRIVATE ${ROOT}/external/reshade/include)
@@ -378,6 +382,8 @@ add_test(NAME arcane-sky-test COMMAND arcane-sky-test "${ROOT}/reshade/D2R_Depth
 set_tests_properties(arcane-sky-test PROPERTIES TIMEOUT 30)
 add_test(NAME sky-band-test COMMAND sky-band-test "${ROOT}/reshade/D2R_DepthFog.fx")
 set_tests_properties(sky-band-test PROPERTIES TIMEOUT 60)
+add_test(NAME hero-light-test COMMAND hero-light-test "${ROOT}/reshade/D2R_DepthFog.fx")
+set_tests_properties(hero-light-test PROPERTIES TIMEOUT 30)
 add_test(NAME light-bounds-test COMMAND light-bounds-test)
 set_tests_properties(light-bounds-test PROPERTIES TIMEOUT 30)
 foreach(test_target IN ITEMS memory-test biome-list-test hook-metrics-test active-keys-test resource-descriptions-test latest-worker-test haptic-pulse-test thread-stats-test
@@ -385,7 +391,7 @@ foreach(test_target IN ITEMS memory-test biome-list-test hook-metrics-test activ
     portal-billboard-test shrine-trace-test shrine-placement-test overlay-view-test bone-armor-height-test composition-layers-test projectile-rules-test environment-cutaway-test roof-materials-test game-ceiling-test stereo-prop-physics-test dropped-bottles-test props-test limb-rig-test limb-physics-test leather-menu-test stats-button-test menu-drop-test arcane-decay-test respec-button-test
     combat-rules-test strike-skills-test zeal-light-test skill-usage-test shield-guard-test guard-strain-test heartbeat-test run-speed-test room-scale-test room-steps-test walk-direction-test logging-test melee-contact-test melee-weapon-test breakables-test offline-difficulty-test enemy-sight-test attack-speed-test world-coordinates-test bow-flight-test bow-laser-test spell-cast-test spell-aim-assist-test tactical-chord-test glyph-recognizer-test glyph-trail-test glyph-cast-test spell-motion-test motions-amazon-test motions-barbarian-test motions-necromancer-test motions-assassin-test motions-paladin-test motions-druid-test bone-graft-test
     interaction-test dev-scenarios-test native-belt-test wrist-hud-test map-zoom-test navigation-info-test companions-test active-effects-test dropped-item-labels-test stick-gestures-test show-items-command-test native-hud-test render-resolution-test render-pointer-test scene-depth-test game-device-only-test controller-bindings-test journal-test native-panels-test talk-stop-test room-stitch-test ceiling-top-test loot-beams-test
-    vr-settings-test vr-settings-layout-test vr-settings-pointer-test vr-settings-store-test controller-labels-test math-test deferred-draw-test monster-bars-test loot-aim-test telegraph-test aim-reach-test aim-rules-test target-cone-test gaze-test window-focus-test callback-ticket-test local-player-test shield-block-test trigger-melee-test companion-ai-test torch-light-test frame-generation-test turn-capture-test panel-atlas-test far-objects-test)
+    vr-settings-test vr-settings-layout-test vr-settings-pointer-test vr-settings-store-test controller-labels-test math-test deferred-draw-test monster-bars-test loot-aim-test telegraph-test aim-reach-test aim-rules-test target-cone-test gaze-test window-focus-test callback-ticket-test local-player-test shield-block-test trigger-melee-test companion-ai-test torch-light-test light-radius-test frame-generation-test turn-capture-test panel-atlas-test far-objects-test)
   # These fixtures use assert for their checks, including in Release builds.
   if(MSVC)
     target_compile_options(${test_target} PRIVATE /UNDEBUG)

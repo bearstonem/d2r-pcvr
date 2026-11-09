@@ -129,6 +129,29 @@ float3 SceneLight(float3 p, float3 nrm)
 }
 float3 SceneLight(float3 p) { return SceneLight(p, float3(0.0, 1.0, 0.0)); }
 
+// The hero's own light in dungeons whose ceiling the game draws (#440: Light Radius "doesnt seem to expand
+// the light radius at all"). The game's light round him is left as it is; this modest one of ours reaches
+// HeroLightRadius, which vrcam scales by his Light Radius (steamvr/light_radius.h), so a +Light Radius item
+// or skill widens it. At his shoulder (HeroLightPos: less the hero / over the area's floor, as GameLightPos).
+// None within kHeroLightNear units of the eye, full from twice that: a hand light at full strength lit the
+// hero's own face (owner, 2026-11-06).
+uniform bool HeroLightOn < hidden = true; > = false;
+uniform float3 HeroLightPos < hidden = true; > = float3(0.0, 5.2, 0.0);
+uniform float HeroLightRadius < hidden = true; > = 20.0;    // [light] hero_reach x Light Radius: Falloff's 1 here, gone at twice
+uniform float HeroLightStrength < hidden = true; > = 0.25; // [light] hero_strength
+static const float kHeroLightNear = 4.0;
+static const float3 kHeroLightColour = float3(1.0, 0.88, 0.70);   // a lamp's warm white, not a torch's orange
+float3 HeroLight(float3 p, float3 nrm, float3 eyeP)
+{
+    const float3 dv = HeroLightPos - p;
+    const float dist = length(dv);
+    const float rad = max(HeroLightRadius, 1.0);
+    if (dist >= rad * 2.0) return 0.0;
+    const float3 l = dv / max(dist, 1e-3);
+    const float fromEye = smoothstep(kHeroLightNear, kHeroLightNear * 2.0, length(p - eyeP));
+    return kHeroLightColour * (Falloff(dist / rad) * HeroLightStrength * fromEye * (0.35 + 0.65 * saturate(dot(nrm, l))));
+}
+
 // ---- The torches' light: finding fire, placing it, keeping it --------------------------
 
 // How much a colour looks like fire: bright, red well over blue.
