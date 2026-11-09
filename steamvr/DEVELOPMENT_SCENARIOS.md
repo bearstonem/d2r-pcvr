@@ -239,7 +239,7 @@ no saved setting.
 ## Pushable bodies
 
 **DEV > Bodies** tunes how monsters and townsfolk react to your weapon
-(VR Settings > World > Pushable bodies). Each button shows a value; each
+(VR Settings > Gameplay > Physics > Pushable bodies). Each button shows a value; each
 press steps it to the next and saves it as `[bodies] <key>` in the dev
 INI, so it stays across restarts. Bodies being pushed let go when a value
 changes; push one again to feel it. **Bodies: defaults** puts every value

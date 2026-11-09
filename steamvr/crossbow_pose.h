@@ -62,6 +62,19 @@ inline bool RenderedGeometry(const Mat& boltInItem,const Mat& itemWorld,const Ma
 inline bool SupportLatched(bool held,bool pressedBefore,bool latched,bool inReach,bool crossbow) {
     return held&&(latched||((crossbow||!pressedBefore)&&inReach));
 }
+// A staff's left hand while both grips cast a spell's motion (spell_motion.h; owner 2026-11-03: both
+// grips "holds the staff with both hands which I like but ... make it so these don't accidently start
+// holding the staff"): the left grip alone takes it. Pressed at the shaft, it takes it once held
+// SoloGripWait with the right grip still free; the right grip held lets it go. pending: when the left
+// grip was pressed there (-1 none).
+constexpr double SoloGripWait=.12;
+inline bool SoloSupportLatched(bool held,bool pressedBefore,bool latched,bool inReach,bool otherHeld,double now,double& pending) {
+    if(otherHeld||!held){pending=-1;return false;}
+    if(latched)return true;
+    if(!pressedBefore&&inReach)pending=now;
+    if(pending>=0&&now-pending>=SoloGripWait){pending=-1;return true;}
+    return false;
+}
 // Controller placement overwrites the animated hand-to-hand position. The
 // old close-palm gate could reject every idle pose after a shield-set swap.
 inline bool GripCaptureAllowed(float palmGap,bool controllerPlaced,float mountScale=1.f) {

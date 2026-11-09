@@ -49,6 +49,14 @@ inline bool Touches(Blade before,Blade after,Body body) {
     }
     return false;
 }
+// Melee reach: a monster's body grown by `reach` metres every way, so a blade or
+// fist passing that close beside it still touches. Clamped to 0..0.5 m; the shield
+// keeps the body as measured (a raised guard near a monster must not bash).
+inline Body Reach(Body body,float reach,bool shield) {
+    if(shield||!std::isfinite(reach))return body;
+    body.radius+=std::clamp(reach,0.f,.5f);
+    return body;
+}
 struct Sample {
     double time=0;
     bool active=false;
@@ -63,6 +71,7 @@ struct Sample {
     float minWeaponSpeed=12.f;
     float minThrustSpeed=2.f;
     float minShieldBashSpeed=2.f;
+    float reach=0; // metres of padding on a monster's body for this hand's weapon or fist ([gameplay] melee_reach_cm)
     Vec thrustAxis{}; // posed base-to-tip axis in absolute tracking space
     int skillSlot=-1,skillOwner=-1;
     uint64_t skillContext=0;

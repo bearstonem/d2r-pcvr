@@ -17,6 +17,12 @@ static Hit Step(Key key,int delta=1){return {Kind::Change,key,delta};}
 static View PageOf(Key key){const auto* r=content::RowOf(key);return r?r->page:View::Count;}
 static_assert((ChangeMask{1}<<64)==ChangeMask(0,1)&&(ChangeMask{1}<<127)==ChangeMask(0,uint64_t{1}<<63),"shifts cross into the high word");
 static_assert((ChangeMask(0,1)>>64)==ChangeMask{1}&&(ChangeMask{3}<<63)==ChangeMask(uint64_t{1}<<63,1),"shifts carry between words");
+// 256 wide since 2026-11-08: bits reach the third and fourth words and come back.
+static_assert(ChangeMask::Bits==256&&Count<=ChangeMask::Bits,"room for every setting");
+static_assert(((ChangeMask{1}<<200)>>200)==ChangeMask{1}&&((ChangeMask{5}<<190)>>190)==ChangeMask{5},"shifts reach the upper words and back");
+static_assert(bool(ChangeMask{1}<<255)&&!(ChangeMask{1}<<256)&&!((ChangeMask{1}<<255)<<1),"the last bit is kept and nothing beyond it");
+static_assert(((ChangeMask{1}<<130)&(ChangeMask{1}<<130|ChangeMask{1}<<3))==(ChangeMask{1}<<130)&&~~(ChangeMask{1}<<199)==(ChangeMask{1}<<199),"and, or and not cover every word");
+static_assert((SupportedChanges>>(Count-1))==ChangeMask{1}&&!(SupportedChanges>>Count),"SupportedChanges holds exactly the settings that exist");
 // The menu's non-fatal report (docs/VR_SETTINGS_MENU.md): settings with no words yet,
 // orphan overrides and preset entries, name-count mismatches, a non-empty More
 // page. Printed on every run; --tidy prints only it. Never fails the test.
@@ -74,7 +80,7 @@ int main(int argc,char** argv){
         notes.morePage=1;notes.lastPage=View::Combat;notes.Close();notes.Open(none);
         Check(notes.morePage==1&&notes.lastPage==View::Combat&&notes.view==View::WhatsNew,"reopening keeps the More page and the page Guide returns to");
         notes.Close();notes.StartOver();notes.Open(none);
-        Check(notes.view==View::Guide&&notes.notesPage==0&&notes.morePage==0&&notes.lastPage==View::Body,"a new game starts over on the Guide, page 1");
+        Check(notes.view==View::Guide&&notes.notesPage==0&&notes.morePage==0&&notes.lastPage==View::Combat,"a new game starts over on the Guide, page 1");
         // (pressing What's new while on it goes back to the page, so the view must be elsewhere first: the StartOver Guide)
         notes.SetNotesPages(1);layout::Press(notes,{Kind::Open,int(View::WhatsNew),-1},0);layout::Press(notes,next,0);Check(notes.notesPage==0,"one page: nothing to turn");
         in.notes.lineCount=NotesPerPage;const auto one=layout::Build(notes,notes.context,in);
@@ -87,18 +93,20 @@ int main(int argc,char** argv){
     }
     Snapshot s;s.ready=true;
     {Model effects;effects.Open(s);
-        Check(s.values[ElementalHands]==0,"experimental hand effects default off");
-        effects.Click(Step(ElementalHands));const auto request=effects.Click({Kind::Apply});
-        Check(request.changed==(ChangeMask{1}<<ElementalHands)&&request.values[ElementalHands]==1,"the elemental toggle saves alone");
+        Check(s.values[HapticShortMelee]==0,"Short melee taps default off");
+        effects.Click(Step(HapticShortMelee));const auto request=effects.Click({Kind::Apply});
+        Check(request.changed==(ChangeMask{1}<<HapticShortMelee)&&request.values[HapticShortMelee]==1,"a toggle saves alone");
         auto external=request.base;external[Motion]=1;
         Check(!Conflict(external,request.base,request.changed),"its edit tolerates unrelated setting changes");
-        external[ElementalHands]=1;Check(Conflict(external,request.base,request.changed),"its conflicts are detected");
+        external[HapticShortMelee]=1;Check(Conflict(external,request.base,request.changed),"its conflicts are detected");
     }
     {
         for(Key k:{StereoRendering,RenderResolution,DrawDistance,ObjectDistance,BigObjectDistance,Foveation,FoveationStrength})
-            Check(PageOf(k)==View::Performance,"everything that changes the frame rate is on the Performance page, Big objects too");
-        for(Key k:{Sky,Fog,FogDistance,Ceiling,ElementalHands,BottlePhysics,PropPhysics,BodyPhysics,TorchFlame})
-            Check(PageOf(k)==View::World,"the World page keeps the mod's effects, with the fog's distance, bottle, prop and body physics and the torch flame");
+            Check(PageOf(k)==View::Performance,"the image and draw distance settings are on the Performance page, Big objects too");
+        for(Key k:{Sky,Fog,FogDistance,Ceiling,CeilingTorches,TorchFlame,SpellHandLight})
+            Check(PageOf(k)==View::Environment,"the Environment page keeps the mod's effects, with the fog's distance, the torch flame and the spell hand light");
+        for(Key k:{BottlePhysics,PropPhysics,BodyPhysics})
+            Check(PageOf(k)==View::Physics,"bottle, prop and body physics are on the Physics page");
         // main's pairs (PairOf) are side halves: Fog distance on Distance fog's row, Big objects on Scenery distance's
         Check(content::RowOf(FogDistance)->beside&&content::RowOf(BigObjectDistance)->beside&&!content::RowOf(Fog)->beside&&!content::RowOf(ObjectDistance)->beside,
               "the fog's distance and big objects share their partners' rows");
@@ -154,7 +162,7 @@ int main(int argc,char** argv){
             layout::Press(fog,Step(FogDistance),0);
             Check(fog.Get()[FogDistance]==700,"no change to the distance while the fog is off");
             Check(layout::KeyVisible(FogDistance,on,{})&&!layout::KeyVisible(FogDistance,off,{}),"its box shows beside Distance fog while the fog is on");
-            Model list;list.Open(fogged);layout::Press(list,{Kind::Open,int(View::World),-1},0);layout::Press(list,{Kind::Popover,FogDistance},0);
+            Model list;list.Open(fogged);layout::Press(list,{Kind::Open,int(View::Environment),-1},0);layout::Press(list,{Kind::Popover,FogDistance},0);
             int listed=0;for(const auto& e:layout::Build(list,list.context,{}).elements)listed+=e.role==layout::Role::PopoverOption&&e.key==FogDistance;
             const auto built=layout::Build(list,list.context,{});   // Find points into it: kept for the check
             const auto* box=layout::Find(built,{Kind::Popover,FogDistance});
@@ -215,7 +223,7 @@ int main(int argc,char** argv){
         Check(code("{\"Anti Aliasing\": 3, \"VSync\": 0}")==2&&code("{\"Anti Aliasing\": 2}")==2&&code("{\"Anti Aliasing\":0}")==2,"every anti-aliasing but FXAA is warned about");
         Check(code("{\"Anti Aliasing\" :\r\n 2,\"VSync\"\t: 1}")==3,"spacing around the colon");
         Check(code("{}")==0&&code("")==0&&code("{\"VSync Mode\": 1, \"My Anti Aliasing\": 3, \"VSync\": \"x\"}")==0,"missing, other or malformed keys are not warned about");
-        {   // ...and what the Perf page shows of them: how much the game draws
+        {   // ...and what the readout shows of them: how much the game draws
             const auto game=ParseGameVideo(R"({"Shadow Quality": 4, "Character Detail": 5, "Ambient Occlusion Quality": 2, "Atmospherics Quality": 3,)"
                                            R"( "Light Quality": 2, "Texture Quality": 4, "Resolution Scale": 100, "NVIDIA DLSS": 0})");
             Check(game.shadows==4&&game.characterDetail==5&&game.ambientOcclusion==2&&game.atmospherics==3&&game.lights==2&&
@@ -237,7 +245,7 @@ int main(int argc,char** argv){
         Check(ModSettingsFile(saved,L"C:\\D2R\\d2rloader\\plugins\\d2rl-pcvr.dll").empty()&&ModSettingsFile(saved,L"C:\\D2R\\mods\\x\\other\\a.dll").empty()&&
               ModSettingsFile(L"",L"C:\\D2R\\mods\\x\\d2rloader\\plugins\\a.dll").empty(),"no mod folder: the unmodded game's file");
     }
-    {   // The Perf page's numbers: the last second's frames against the headset's frame
+    {   // The readout's numbers: the last second's frames against the headset's frame
         PerformanceReadout r{true,true,52,11.1f,1.0f,7.0f,9.4f,1.5f};
         Check(std::abs(r.CpuMs()-11.9f)<.001f,"the CPU's part: game, drawing and the mod's own work, not the headset wait");
         Check(PerformanceLine(r)=="Now: 52 fps \xc2\xb7 drawing 9.4 ms (one eye) \xc2\xb7 game 1.0 \xc2\xb7 VR 1.5 \xc2\xb7 headset wait 7.0","the readout line");
@@ -499,7 +507,6 @@ int main(int argc,char** argv){
     }
     {   // Rows follow the character: another class's or weapon's are left out; unknown (the menus) shows them all
         const auto v=Defaults();
-        Check(RowShown(ElementalHands,v,{})&&RowShown(ElementalHands,v,{heroclass::Sorceress})&&!RowShown(ElementalHands,v,{heroclass::Amazon}),"elemental hands: the Sorceress's");
         for(int k:{int(heroclass::Sorceress),int(heroclass::Assassin),int(heroclass::Druid),int(heroclass::Necromancer)})
             Check(RowShown(GroundAim,v,{k}),"ground skills for the classes that have them");
         for(int k:{int(heroclass::Amazon),int(heroclass::Barbarian),int(heroclass::Paladin)})Check(!RowShown(GroundAim,v,{k}),"none for those that do not");
@@ -564,7 +571,7 @@ int main(int argc,char** argv){
         Check(companion.Click({Kind::Apply}).changed==(ChangeMask{1}<<CompanionAi),"companion AI saves only its own setting");
     }
     {Model tactical;tactical.Open(s);
-        Check(s.values[CompanionTactical]==1&&PageOf(CompanionTactical)==View::Survival,"companion tactical defaults to Enabled (1) on the Survival page");
+        Check(s.values[CompanionTactical]==1&&PageOf(CompanionTactical)==View::Monsters,"companion tactical defaults to Enabled (1) on the Monsters page");
         Check(Normalize(CompanionTactical,NAN)==1&&Normalize(CompanionTactical,0)==0&&Normalize(CompanionTactical,1)==1&&Normalize(CompanionTactical,2)==1,"companion tactical normalizes to binary choice");
         Check(std::wstring_view(Definitions[CompanionTactical].section)==L"gameplay"&&std::wstring_view(Definitions[CompanionTactical].key)==L"companion_tactical_commands","companion tactical writes to [gameplay] companion_tactical_commands");
         tactical.Click(Step(CompanionTactical));
@@ -575,7 +582,7 @@ int main(int argc,char** argv){
         Check(tactical.Click({Kind::Apply}).changed==(ChangeMask{1}<<CompanionTactical),"companion tactical saves only its own setting");
     }
     {   // Dungeon torchlight (owner 2026-11-01): the game's own lights, beside Dungeon ceilings
-        Check(s.values[CeilingTorches]==0&&PageOf(CeilingTorches)==View::World,"dungeon torchlight is off by default, on the World page");
+        Check(s.values[CeilingTorches]==0&&PageOf(CeilingTorches)==View::Environment,"dungeon torchlight is off by default, on the Environment page");
         Check(std::wstring_view(Definitions[CeilingTorches].section)==L"ceiling"&&std::wstring_view(Definitions[CeilingTorches].key)==L"torches","dungeon torchlight writes [ceiling] torches");
         Check(Normalize(CeilingTorches,NAN)==0&&Normalize(CeilingTorches,1)==1&&Normalize(CeilingTorches,2)==1,"dungeon torchlight is On or Off");
         auto v=s.values;v[Ceiling]=0;Check(!RowEnabled(v,CeilingTorches)&&!RowShown(CeilingTorches,v,{}),"hidden without dungeon ceilings");
@@ -756,7 +763,7 @@ int main(int argc,char** argv){
     Check(m.Get()[CompanionCounts]==0&&m.Get()[NavigationLocation]==0,"companion toggle is independent of map placement");
     Check(m.Click({Kind::Apply}).changed==(ChangeMask{1}<<CompanionCounts),"companion toggle uses its own high change-mask bit");
     {   // The interfaces hold together: content, Press, the pointer and the color tokens.
-        Check(content::PageOf(View::Aim).id==View::Aim&&!content::PageOf(View::Guide).settings,"one page per view, in View order");
+        Check(content::PageOf(View::Targeting).id==View::Targeting&&!content::PageOf(View::Guide).settings,"one page per view, in View order");
         const auto* row=content::RowOf(ProjectileAimAssist);
         Check(row&&content::ValueText(*row,2)=="Strong","the sample row names its options");
         Model redesign;s.ready=true;s.values=Defaults();redesign.Open(s);
@@ -787,6 +794,16 @@ int main(int argc,char** argv){
         Check(Normalize(LeftHandStrikes,2)==0&&Normalize(LeftHandStrikes,1)==1&&Normalize(LeftHandStrikes,-1)==0,"the retired Basic attack (2) reads Own trigger skill");
         Check(!content::RowOf(LeftHandStrikes),"left-hand strikes on no settings page");
     }
+    {   // Glyph casting, each hand its own set (owner 2026-11-05): the second Draw glyph button and the left hand's
+        // shapes beside the one set saved before (the right hand's), edited on the wheel only; -1 when missing.
+        Check(Defaults()[GlyphDrawSecond]==-1&&std::wstring(Definitions[GlyphDrawSecond].section)==L"glyphs"&&
+              std::wstring(Definitions[GlyphDrawSecond].key)==L"second_draw_slot"&&!content::RowOf(GlyphDrawSecond),"the second Draw glyph button: [glyphs] second_draw_slot, none");
+        for(int i=0;i<8;++i)
+            Check(GlyphKey(i)==Key(GlyphCircle+i)&&GlyphKey(i,0)==GlyphKey(i)&&Defaults()[GlyphKey(i,1)]==-1&&std::wstring(Definitions[GlyphKey(i,1)].section)==L"glyphs"&&
+                  std::wstring(Definitions[GlyphKey(i,1)].key)==L"left_"+std::wstring(Definitions[GlyphKey(i)].key)&&!content::RowOf(GlyphKey(i,1)),
+                  "each left shape: [glyphs] left_<shape>, -1 (the right hand's), on no settings page");
+        Check(Normalize(GlyphLeftStar,-7)==-1&&Normalize(GlyphLeftStar,58.4f)==58&&Normalize(GlyphDrawSecond,12)==9,"read as the right hand's keys are");
+    }
     {   // Frame generation's settings (main's #313), as on main.
         Check(Defaults()[FrameGeneration]==0&&Defaults()[FrameGenPreset]==1&&Defaults()[FrameGenScale]==2,"off by default; NVIDIA Medium at 50% to start");
         Check(Normalize(FrameGeneration,3)==0&&Normalize(FrameGeneration,1.5f)==0&&Normalize(FrameGenScale,-1)==2&&Normalize(FrameGenPreset,2)==2,
@@ -794,9 +811,11 @@ int main(int argc,char** argv){
         Check(std::wstring(Definitions[FrameGeneration].key)==L"frame_generation"&&std::wstring(Definitions[FrameGeneration].section)==L"render"&&
               std::wstring(Definitions[FrameGenPreset].key)==L"frame_generation_preset"&&std::wstring(Definitions[FrameGenScale].key)==L"frame_generation_scale",
               "frame generation's INI keys");
-        auto nvidia=Defaults();nvidia[FrameGeneration]=2;nvidia[StereoRendering]=0;auto fidelity=Defaults();fidelity[FrameGeneration]=1;fidelity[StereoRendering]=0;   // Both eyes: By turns hides them all
+        auto nvidia=Defaults();nvidia[FrameGeneration]=2;nvidia[StereoRendering]=0;auto fidelity=Defaults();fidelity[FrameGeneration]=1;fidelity[StereoRendering]=0;   // Both eyes: By turns grays them all
         auto turnsNvidia=nvidia;turnsNvidia[StereoRendering]=1;
-        Check(!RowShown(FrameGeneration,turnsNvidia,{})&&!RowShown(FrameGenPreset,turnsNvidia,{})&&!RowShown(FrameGenScale,turnsNvidia,{}),"By turns hides Frame generation and NVIDIA's rows");
+        Check(RowShown(FrameGeneration,turnsNvidia,{})&&RowShown(FrameGenPreset,turnsNvidia,{})&&RowShown(FrameGenScale,turnsNvidia,{}),"By turns still shows Frame generation and NVIDIA's rows");
+        Check(!RowEnabled(turnsNvidia,FrameGeneration)&&!RowEnabled(turnsNvidia,FrameGenPreset)&&!RowEnabled(turnsNvidia,FrameGenScale),"and grays them");
+        Check(RowEnabled(nvidia,FrameGeneration)&&RowEnabled(nvidia,FrameGenPreset)&&RowEnabled(nvidia,FrameGenScale),"Both eyes makes them live");
         Check(RowShown(FrameGenPreset,nvidia,{})&&RowShown(FrameGenScale,nvidia,{})&&!RowShown(FrameGenPreset,fidelity,{})&&!RowShown(FrameGenScale,fidelity,{}),
               "NVIDIA's quality and scale only with NVIDIA");
         Check(HelpText(FrameGeneration)[0]&&content::RowOf(FrameGeneration)&&content::RowOf(FrameGeneration)->help[0],"frame generation's help reads");
@@ -814,7 +833,7 @@ int main(int argc,char** argv){
         Check(Changed(a,b)==(ChangeMask{1}<<RunSpeed)&&RunSpeed<ChangeMask::Bits,"run speed has its own change bit");
         Check(Defaults()[RunWalkToggle]==0&&std::wstring(Definitions[RunWalkToggle].section)==L"gameplay"&&std::wstring(Definitions[RunWalkToggle].key)==L"run_walk_toggle"&&
               HelpText(RunWalkToggle)[0]!=0&&RunWalkToggle<ChangeMask::Bits,"the stick toggle: off by default, explained, its own change bit");
-        Check(PageOf(RunSpeed)==View::Body&&PageOf(RunWalkToggle)==View::Body,"both live on Body");
+        Check(PageOf(RunSpeed)==View::Moving&&PageOf(RunWalkToggle)==View::Hands,"Movement speed on Moving, Stick toggle on Hands");
         Model m;m.Open(s);
         for(int i=0;i<20;++i)m.Click(Step(RunSpeed,-1));
         Check(m.Get()[RunSpeed]==-10,"the bottom is Walk");
@@ -842,11 +861,11 @@ int main(int argc,char** argv){
             {.id="gameplay.no_such_setting",.page=View::Combat,.section="Melee",.label="Gone"},
             {.id="interactions.map_top_down",.page=View::Wrist,.section="Map",.label="Map view",.options=twoNames,.optionCount=3},
             {.id="gameplay.melee_hit_speed",.page=View::Combat,.section="Melee",.kind=content::RowKind::Toggle},
-            {.id="gameplay.target_outline_pct",.page=View::Targets,.names=farWord,.nameCount=2},
-            {.id="gameplay.target_outline_pct",.page=View::Targets,.label="Twice"},
-            {.id="sky.enabled",.page=View::World,.section="Sky and dungeons"},
+            {.id="gameplay.target_outline_pct",.page=View::Outlines,.names=farWord,.nameCount=2},
+            {.id="gameplay.target_outline_pct",.page=View::Outlines,.label="Twice"},
+            {.id="sky.enabled",.page=View::Environment,.section="Sky and dungeons"},
             {.id="fog.enabled",.page=content::NotInMenu},
-            {.id="calibration.eye_height_m",.page=View::Body,.section="Measurements"},   // no long help upstream: its detail
+            {.id="calibration.eye_height_m",.page=View::Body,.section="Play space"},   // no long help upstream: its detail
         };
         static constexpr content::PresetSetting gone[]={{"gameplay.no_such_setting",1},{"sky.enabled",1},{"gameplay.target_outline_pct",900}};
         static constexpr content::PresetSpec specs[]={{"test","Test",draw::Icon::Comfort,"A test preset.",gone,3}};
@@ -875,7 +894,7 @@ int main(int argc,char** argv){
               std::wstring(Definitions[LeatherMenu].key)==L"leather_menu"&&HelpText(LeatherMenu)[0]!=0&&
               LeatherMenu<ChangeMask::Bits,"leather menu: on as its INI default, [interactions] leather_menu, explained, its own change bit");
         const auto* leather=content::RowOf(LeatherMenu);
-        Check(leather&&leather->beside&&leather->page==View::Interface&&PageOf(MenuDistance)==View::Interface&&
+        Check(leather&&leather->beside&&leather->page==View::Menus&&PageOf(MenuDistance)==View::Menus&&
               std::strcmp(content::RowOf(MenuDistance)->label,"Menu distance")==0,"Menu distance shares its row with the leather menu");
         Check(leather->kind==content::RowKind::Stepper&&leather->nameCount==3&&Definitions[LeatherMenu].max==2&&
               content::ValueText(*leather,0)=="Off"&&content::ValueText(*leather,1)=="Leather"&&content::ValueText(*leather,2)=="Menu only","Hold menu: Off / Leather / Menu only, a named stepper beside Menu distance");
@@ -892,9 +911,9 @@ int main(int argc,char** argv){
               std::wstring(Definitions[LootPick].key)==L"loot_pick"&&Definitions[LootPick].max==1&&HelpText(LootPick)[0]!=0&&
               LootPick<ChangeMask::Bits,"loot pick: On by default, [interactions] loot_pick Off / On, explained, its own change bit");
         const auto* loot=content::RowOf(LootPick);
-        Check(loot&&loot->beside&&loot->page==View::Interface&&loot->kind==content::RowKind::Toggle&&std::strcmp(loot->label,"Loot pick")==0&&
-              PageOf(LootLabelSize)==View::Interface&&loot->section==content::RowOf(LootLabelSize)->section&&loot->classes==content::AllClasses,
-              "Loot pick: a switch beside Loot name size on its row (Interface holds 8 rows), every class");
+        Check(loot&&loot->beside&&loot->page==View::Labels&&loot->kind==content::RowKind::Toggle&&std::strcmp(loot->label,"Loot pick")==0&&
+              PageOf(LootLabelSize)==View::Labels&&loot->section==content::RowOf(LootLabelSize)->section&&loot->classes==content::AllClasses,
+              "Loot pick: a switch beside Loot name size on its row, every class");
         for(int c=-1;c<=heroclass::Assassin;++c)Check(RowShown(LootPick,s.values,{c}),"every class, and the title screen, see Loot pick");
         Model m;m.Open(s);
         layout::Press(m,{Kind::Set,LootPick,0,0},0);Check(m.Get()[LootPick]==0,"the switch turns the loot pick Off");
@@ -904,10 +923,10 @@ int main(int argc,char** argv){
               "only 0 reads Off; On, the retired 2 (On with glow), or anything else reads On, the default");
     }
     {
-        Model m;m.Open(s);m.view=View::Survival;
+        Model m;m.Open(s);m.view=View::Body;
         const auto* row=content::RowOf(ClickToDrink);
-        Check(Defaults()[ClickToDrink]==0&&row&&row->page==View::Survival&&row->kind==content::RowKind::Toggle,
-              "click to drink defaults off on Survival");
+        Check(Defaults()[ClickToDrink]==0&&row&&row->page==View::Body&&row->kind==content::RowKind::Toggle,
+              "click to drink defaults off on Body (Comfort)");
         m.Click(Step(ClickToDrink));
         Check(m.Get()[ClickToDrink]==1,"click to drink toggles on");
         layout::ApplyPreset(m,0);

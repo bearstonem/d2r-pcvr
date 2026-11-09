@@ -18,7 +18,7 @@ struct Shown {
     float strength=1.0f;   // the brightness slider (lootbeams::Strength): the shader's BeamShape.w
 };
 // [loot] beams (on: the master switch, not in the menu), rune_min (26 = Vex). Which
-// rarities (VR Settings > Interface > Loot beams: [loot] beams_unique, beams_set,
+// rarities (VR Settings > Interface > Labels > Loot beams: [loot] beams_unique, beams_set,
 // beams_rare, beams_runes) is read live on each scan.
 void Init(const D2RL::PluginContext* ctx,bool on,const framevr::lootbeams::Wanted& wanted);
 // vrcam's update thread: posts the scan to the game thread at most every 250 ms.

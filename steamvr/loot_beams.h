@@ -61,7 +61,7 @@ inline constexpr uintptr_t ServerItemTable=0x5c6*8;
 inline constexpr size_t MaxBeams=8;           // D2R_DepthFog.fx draws BeamPos0..7
 inline constexpr int RangeCells=60;           // farther than this from the hero, no beam
 struct Lying {uint32_t id=0;int x=0,y=0;Beam beam=Beam::None;};
-// VR Settings > Interface > Loot beams' slider ([loot] beams_brightness, 10% to 100%) as the
+// VR Settings > Interface > Labels > Loot beams' slider ([loot] beams_brightness, 10% to 100%) as the
 // beams' strength (D2R_DepthFog.fx BeamShape.w: the pillar and its floor glow alike). An
 // out-of-range ini value is held to the slider's ends; never 0, which the filter is for.
 inline constexpr float Strength(float percent) {

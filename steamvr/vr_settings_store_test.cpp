@@ -14,14 +14,14 @@ int main(){
     Check(WritePrivateProfileStringW(L"custom",L"keep",L"12345",name),"write unrelated key");
     Check(WritePrivateProfileStringW(L"render",L"rings",L"6",name),"write existing setting");
     vrsettings::Poll(name);auto before=vrsettings::Read();
-    Check(before.values[ElementalHands]==0,"missing elemental setting defaults off");
+    Check(before.values[HapticShortMelee]==0,"a missing toggle takes its default (Off)");
     for(int enabled:{1,0}) {
-        Model effects;effects.Open(vrsettings::Read());effects.Click({Kind::Change,ElementalHands,1});
+        Model effects;effects.Open(vrsettings::Read());effects.Click({Kind::Change,HapticShortMelee,1});
         auto request=effects.Click({Kind::Apply});auto malformed=request;malformed.changed|=ChangeMask{1}<<(ChangeMask::Bits-1);
         Check(!vrsettings::Submit(malformed),"unsupported high change bits rejected");
-        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"elemental setting saves through its own mask bit");
-        Check(vrsettings::Read().values[ElementalHands]==enabled&&Int(path,L"interactions",L"elemental_hands")==enabled&&
-            Int(path,L"custom",L"keep")==12345,"elemental opt-in/out round trips and preserves unrelated keys");
+        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"a toggle saves through its own mask bit");
+        Check(vrsettings::Read().values[HapticShortMelee]==enabled&&Int(path,L"haptics",L"short_melee")==enabled&&
+            Int(path,L"custom",L"keep")==12345,"its on/off round trips and preserves unrelated keys");
     }
     Check(before.values[MapTopDown]==0&&before.values[MapRotate]==0,"missing map preferences retain the existing view");
     Check(WritePrivateProfileStringW(L"interactions",L"map_top_down",L"1",name)&&
@@ -422,6 +422,31 @@ int main(){
     vrsettings::Poll(name);Check(vrsettings::Read().values[LootPick]==1,"an unknown loot_pick reads On, the default");
     Check(WritePrivateProfileStringW(L"interactions",L"loot_pick",nullptr,name),"remove the loot pick");
     vrsettings::Poll(name);
+    // Glyph casting, each hand its own set (owner 2026-11-05): a profile saved with the one set, its Draw glyph
+    // button on the left hand, reads as it did (circle ... wave the right hand's, every left shape -1: the right
+    // hand's); the wheel's saves write one key each and nothing rewrites the rest.
+    Check(WritePrivateProfileStringW(L"glyphs",L"draw_slot",L"6",name)&&WritePrivateProfileStringW(L"glyphs",L"circle",L"40",name)&&
+          WritePrivateProfileStringW(L"glyphs",L"star",L"58",name),"write a one-set glyph profile");
+    vrsettings::Poll(name);
+    {
+        const auto saved=vrsettings::Read();
+        Check(saved.values[GlyphDraw]==6&&saved.values[GlyphDrawSecond]==-1&&saved.values[GlyphKey(0)]==40&&saved.values[GlyphKey(6)]==58&&saved.values[GlyphKey(1)]==-1,
+              "the one set and its Draw glyph button read as saved");
+        bool none=true;for(int i=0;i<8;++i)none=none&&saved.values[GlyphKey(i,1)]==-1;
+        Check(none,"no left keys: every left shape the right hand's");
+        const Key keys[]={GlyphKey(0,1),GlyphDrawSecond,GlyphKey(0,1)};const float wanted[]={54,1,-1};
+        for(int i=0;i<3;++i) {   // the left circle's own skill, the right hand's Draw glyph button, the left circle cleared
+            const auto current=vrsettings::Read();auto values=current.values;values[keys[i]]=wanted[i];
+            const Request request{current.values,values,Changed(current.values,values),current.sequence+1};
+            Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"save one glyph key as the wheel does");
+            const auto after=vrsettings::Read();
+            Check(after.values[keys[i]]==wanted[i]&&Changed(after.values,current.values)==(ChangeMask{1}<<keys[i]),"it survives reload, alone");
+        }
+        auto text=[&](const wchar_t* key){wchar_t t[32]{};GetPrivateProfileStringW(L"glyphs",key,L"(none)",t,32,path.c_str());return std::wstring(t);};
+        Check(text(L"left_circle")==L"-1"&&Int(path,L"glyphs",L"second_draw_slot")==1&&Int(path,L"glyphs",L"draw_slot")==6&&
+              Int(path,L"glyphs",L"circle")==40&&Int(path,L"glyphs",L"star")==58,"the saved set and button untouched");
+        Check(text(L"left_star")==L"(none)"&&text(L"triangle")==L"(none)"&&Int(path,L"custom",L"keep")==12345,"no other key written");
+    }
     Check(vrsettings::Read().values[ClickToDrink]==0,"missing click to drink preserves gesture-only drinking");
     for(int choice:{1,0}) {
         model.Open(vrsettings::Read());model.Click({Kind::Change,ClickToDrink,choice?1:-1});request=model.Click({Kind::Apply});
