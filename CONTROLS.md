@@ -106,6 +106,7 @@ Quest left X/Y correspond to Index left A/B; right A/B labels are the same.
 | Wipe blood off the visor | Scrub either hand side to side in front of your face, trigger released. About six strokes clear a full visor. **Survival > Wipe blood by hand** turns this off |
 | Recenter / stereo capture | PC F11 / F8 |
 | Walk where the controller points | **VR Settings > Body > Walk direction** (beside Dominant hand): **Look** (default) walks where you look; **Controller** walks where the left controller points |
+| Room-scale | **VR Settings > Body > Room follows you** (beside Seated play; On by default): as you move in your room your hero's spot follows you, so monsters attack where you stand. Grips, triggers, swings, casting, the left stick and menus pause it |
 
 Editing consumes combat inputs but never pauses the game or zeros locomotion.
 Selection clicks do not cast. Release buttons and triggers after closing before

@@ -40,6 +40,7 @@ static const GoldenRow Golden[]={
     {"gameplay.run_speed_pct",View(1),0,content::RowKind::Slider,"Movement speed",0,12},   // main's #308: Walk, Base run, Run 10..90%, Full run
     {"gameplay.run_walk_toggle",View(1),0,content::RowKind::Toggle,"Stick toggle",0,0},   // drawn inside Movement speed's row
     {"interactions.seated",View(1),1,content::RowKind::Toggle,"Seated play",0,0},
+    {"gameplay.room_steps",View(1),1,content::RowKind::Toggle,"Room follows you",0,0},   // drawn inside Seated play's row (2026-11-08)
     {"interactions.waist_below_eyes",View(1),1,content::RowKind::Slider,"Belt below eyes",0,0},
     {"interactions.belt_forward",View(1),1,content::RowKind::Slider,"Belt forward reach",0,0},
     {"calibration.version",View(1),2,content::RowKind::Button,"Height and arm span",0,0},
