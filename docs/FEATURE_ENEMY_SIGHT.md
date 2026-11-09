@@ -2,7 +2,7 @@
 
 ## 1. Functional Overview
 
-This feature adds a real-time slider to the in-game menu under **VR Settings -> Combat -> Enemy sight distance** (persisted in `d2r_pcvr.ini` under `[gameplay] enemy_sight_pct`) that scales the distance at which hostile monsters detect, wake up, and engage the player in **Offline VR mode**:
+This feature adds a real-time slider to the in-game menu under **VR Settings -> Gameplay -> Monsters -> Monster sight range** (persisted in `d2r_pcvr.ini` under `[gameplay] enemy_sight_pct`) that scales the distance at which hostile monsters detect, wake up, and engage the player in **Offline VR mode**:
 
 - **Range:** `100%` (native baseline game value) to `300%` (three times native distance), in steps of `10%`.
 - **Default value:** `100% (Default)`, which preserves the exact unmodded behavior of *Diablo II: Resurrected*.

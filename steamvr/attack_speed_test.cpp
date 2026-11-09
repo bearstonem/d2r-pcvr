@@ -78,6 +78,15 @@ int main(){
         Check(DualFrames(4,Weapon::OneHandSwing,0,150,-30,0)==Frames(4,Weapon::OneHandSwing,0,-15,20),"skill speed carries through");
         // Only the swinging weapon's IAS counts: the item IAS read under its own scope.
         Check(DualFrames(4,Weapon::OneHandSwing,60,130,-30,0)<DualFrames(4,Weapon::OneHandSwing,0,130,-30,0),"the swinging weapon's IAS speeds its stroke");
+        // The shared beat: the average of the two blades' cycles (Cal's Phase Blade 480 ms + Berserker Axe 440 ms)
+        Check(DualBeatMs(480,440)==460&&DualBeatMs(440,480)==460,"the beat is the two cycles' average, either order");
+        Check(DualBeatMs(480,441)==461&&DualBeatMs(400,400)==400,"rounded to the nearest ms; a matched pair keeps its cycle");
+        // The dual-wield sequence (Double Swing, Frenzy): Cal's Baal measurement, right-hand Phase Blade (20 IAS, -30 WSM, no buffs)
+        Check(DualSequenceFrames(20,130,-30,0,true)==11,"Double Swing (its own +50): 11 frames, 440 ms (measured 436-447)");
+        Check(DualSequenceFrames(20,130,-30,0,false)==15,"Frenzy unramped: 15 frames, 600 ms (measured ~600)");
+        Check(DualSequenceFrames(20,155,-30,0,false)==12,"Frenzy's charges (skill speed +25) bring it to 12 frames, 480 ms (measured 472-483)");
+        Check(DualSequenceFrames(20,180,-30,0,true)==11,"Double Swing's bonus counted again never goes past the 175 % cap (a stale +50 read)");
+        Check(DualBeatMs(0,440)==440&&DualBeatMs(480,0)==480&&DualBeatMs(0,0)==0,"an unknown arm leaves the other; both unknown, unknown");
     }
     // An off-hand blade keeps the same skill speed with its own WSM.
     Check(Frames(4,Weapon::OneHandSwing,0,20,SkillSpeed(130-0,0))==Frames(4,Weapon::OneHandSwing,0,20,30),"off-hand: its own WSM, the main hand's skill speed");

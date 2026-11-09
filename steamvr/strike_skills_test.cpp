@@ -10,7 +10,10 @@ int main() {
     for(int s:{PowerStrike,Impale,ChargedStrike,LightningStrike,PoisonDagger,Sacrifice,Vengeance,Conversion,Bash,Stun,Concentrate,Berserk})
         Check(Known(s)&&!MultiHit(s),"the single-hit weapon skills strike");
     Check(Known(Zeal)&&MultiHit(Zeal)&&Matches(Zeal,37,13)&&!Matches(Zeal,37,2),"Zeal strikes as a multi-hit skill, on Fury's functions");
-    for(int s:{0,10,97,107,133,147,151,254})Check(!Known(s),"Attack, Jab, Smite, Charge, Double Swing, Frenzy, Whirlwind and Tiger Strike do not (yet)");
+    for(int s:{0,10,97,107,151,254})Check(!Known(s),"Attack, Jab, Smite, Charge, Whirlwind and Tiger Strike do not (yet)");
+    Check(Known(DoubleSwing)&&Known(Frenzy)&&DualStrike(DoubleSwing)&&DualStrike(Frenzy)&&!MultiHit(Frenzy)&&!DualStrike(Bash)&&!DualStrike(Fury),
+          "Double Swing and Frenzy strike as dual strike skills");
+    Check(Matches(DoubleSwing,68,70)&&Matches(Frenzy,67,9)&&!Matches(Frenzy,67,2),"their own start and do rows");
     Check(Matches(Maul,56,120)&&Matches(FeralRage,56,120)&&Matches(Rabies,57,121)&&Matches(FireClaws,58,2)&&Matches(Hunger,0,122)&&Matches(Fury,37,13),
           "each skill's compiled start/do functions");
     Check(!Matches(Fury,9,13)&&!Matches(Fury,37,2),"Fury with another start or do is refused");
@@ -27,7 +30,7 @@ int main() {
     Check(Armed(true,false,true,true,true,Maul)==-1&&Armed(true,true,false,true,true,Maul)==-1&&
           Armed(true,true,true,false,true,Maul)==-1&&Armed(true,true,true,true,false,Maul)==-1,"stale, unknown, unavailable or unconfirmed: basic strikes");
     Check(Armed(true,true,true,true,true,Bash)==Bash,"a weapon skill arms the hand too");
-    Check(Armed(true,true,true,true,true,147)==-1,"a skill not in the list: basic strikes");
+    Check(Armed(true,true,true,true,true,151)==-1&&Armed(true,true,true,true,true,Frenzy)==Frenzy,"a skill not in the list (Whirlwind): basic strikes; Frenzy arms");
     Check(FromUseState(0)==Refusal::None&&FromUseState(1)==Refusal::Mana&&FromUseState(2)==Refusal::Weapon&&
           FromUseState(4)==Refusal::Form&&FromUseState(8)==Refusal::Delay,"native use states");
     for(int s:{3,5,6,7,9,-1})Check(FromUseState(s)==Refusal::Other,"other use states");
@@ -69,6 +72,22 @@ int main() {
         Check(!q.Open(s)&&!q.Lapse(s,2),"ended: nothing left to lapse");
         q.Begin(s,Fury,0,wolf,5,360,9000,9);
         Check(q.Lapse(9,wolf)&&!q.Open(s),"a new game ends it");
+    }
+    {   // Dual strike skills: one cast = one swing of each blade (Cal, 2026-11-03, decision A)
+        DualCast c;const uint64_t s=5;
+        Check(!c.Open(s,1000)&&!c.Second(s,1,1000),"nothing open before a cast");
+        c.Begin(s,Frenzy,0,1000,540);
+        Check(c.Open(s,1000)&&c.Skill()==Frenzy&&c.Blade()==0,"the right blade opened it");
+        Check(!c.Second(s,0,1100)&&c.Open(s,1100),"the same blade never lands hit 2");
+        Check(c.Second(s,1,1150)&&!c.Open(s,1150),"the other blade's contact lands hit 2 and closes it");
+        Check(!c.Second(s,1,1200)&&!c.Forfeit(s,2000),"only one hit 2; nothing to forfeit after it");
+        c.Begin(s,DoubleSwing,1,3000,540);
+        Check(!c.Second(s,0,3540)&&!c.Open(s,3540),"the beat over: too late");
+        Check(c.Forfeit(s,3540)&&!c.Forfeit(s,3600),"forfeited once");
+        c.Begin(s,DoubleSwing,1,4000,540);
+        Check(!c.Second(9,0,4100)&&!c.Forfeit(s,4100),"another game never claims it; still open");
+        c.End();Check(!c.Open(s,4100),"ended");
+        c.Begin(s,Frenzy,0,5000,0);Check(c.Open(s,5499)&&!c.Open(s,5500),"an unknown cast length: half a second");
     }
     if(failures)return EXIT_FAILURE;
     std::printf("strike skills ok\n");return EXIT_SUCCESS;

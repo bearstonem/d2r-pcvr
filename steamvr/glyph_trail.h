@@ -62,8 +62,9 @@ inline Colour ElementColour(int skill) {
     // Poison: Poison / Plague Javelin; Poison Dagger, Poison Explosion, Poison Nova; Poison Creeper; Venom
     case 15: case 25: case 73: case 83: case 92: case 222: case 278: return Poison;
     // Magic: Magic Arrow, Inner Sight, Slow Missiles, Decoy, Valkyrie; Telekinesis, Teleport, Energy
-    // Shield; Meditation, Conviction; Psychic Hammer
-    case 6: case 8: case 17: case 28: case 32: case 43: case 54: case 58: case 120: case 123: case 253: return Magic;
+    // Shield; Meditation, Conviction; Psychic Hammer; Town Portal (the scroll, the tome, the shortcut)
+    case 6: case 8: case 17: case 28: case 32: case 43: case 54: case 58: case 120: case 123: case 253:
+    case 219: case 220: case 359: return Magic;
     // Warcries and battle: Might, Thorns; Howl, Find Potion, Taunt, Shout, Find Item, Battle Cry, Battle
     // Orders, Grim Ward, War Cry, Battle Command
     case 98: case 103: case 130: case 131: case 137: case 138: case 142: case 146: case 149: case 150: case 154: case 155: return War;

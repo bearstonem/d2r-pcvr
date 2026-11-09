@@ -52,6 +52,7 @@ def main():
               'steamvr/game_install.py', 'steamvr/casc_assets.py']
     paths += ['steamvr/prepare_potions.py', 'steamvr/potion_assets.py', 'steamvr/bone_pieces.py', 'steamvr/prepare_spell_sprites.py', 'steamvr/vendor/bitknit.py',
               'steamvr/prepare_arcane_sky.py', 'steamvr/prepare_monster_immunity.py', 'steamvr/prepare_sewer_backdrop.py', 'steamvr/prepare_kurast_dock.py',
+              'steamvr/prepare_game_ceiling.py', 'steamvr/granny_write.py',
               'steamvr/prepare_props.py', 'steamvr/prepare_leather.py']
     files = {path: ROOT / path for path in paths}
     for folder, pattern in [('reshade/sky', '*.png'), ('steamvr/licenses', '*.txt')]:
