@@ -5,10 +5,10 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
+import re
 import subprocess
 import zipfile
 from release_notes import read_notes, validate_package
-from game_install import STEAM_VERSION, STEAM_VERSIONS, BATTLENET_VERSION
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -41,7 +41,7 @@ def main():
              'steamvr/uninstall_windows.py',
              'steamvr/setup_windows.py', 'steamvr/steam_config.py', 'steamvr/hdr_check.py',
              'THIRD_PARTY.md', 'LICENSE', 'NOTICE', 'd2r_pcvr.ini', 'vrmod-manifest.json', 'launcher_icon.png',
-             'reshade/D2R_DepthFog.fx', 'third_party/minhook/LICENSE.txt',
+             'third_party/minhook/LICENSE.txt',
              'external/reshade/LICENSE.md', 'steamvr/install.py', 'steamvr/mod_identity.py',
              'steamvr/launch_windows.py']
     if args.platform == 'linux-proton':
@@ -55,9 +55,15 @@ def main():
               'steamvr/prepare_game_ceiling.py', 'steamvr/granny_write.py',
               'steamvr/prepare_props.py', 'steamvr/prepare_leather.py']
     files = {path: ROOT / path for path in paths}
-    for folder, pattern in [('reshade/sky', '*.png'), ('steamvr/licenses', '*.txt')]:
+    # every shader file: D2R_DepthFog.fx and each D2R_*.fxh it includes, by pattern, so a new header is never left out
+    for folder, pattern in [('reshade', 'D2R_*.fx'), ('reshade', 'D2R_*.fxh'), ('reshade/sky', '*.png'), ('steamvr/licenses', '*.txt')]:
         for path in sorted((ROOT / folder).glob(pattern)):
             files[path.relative_to(ROOT).as_posix()] = path
+    if 'reshade/D2R_DepthFog.fx' not in files:
+        raise SystemExit('reshade/D2R_DepthFog.fx is missing from the source')
+    wanted = set(re.findall(r'^\s*#\s*include\s+"(D2R_[^"]+)"', (ROOT / 'reshade/D2R_DepthFog.fx').read_text(encoding='utf-8-sig'), re.M))
+    if any('reshade/' + name not in files for name in wanted):
+        raise SystemExit('reshade/D2R_DepthFog.fx includes a header that is missing from the source')
     files['bin/d2rl-pcvr.dll'] = args.build / 'd2rl-pcvr.dll'
     if args.platform == 'linux-proton':
         files['bin/openxr-probe.exe'] = args.build / 'openxr-probe.exe'
@@ -75,13 +81,13 @@ def main():
         except ValueError as error:
             raise SystemExit(str(error))
     hashes = {name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in files.items()}
-    manifest = {'source_commit': commit, 'game_version': STEAM_VERSION,
+    manifest = {'source_commit': commit,
                 'created_utc': datetime.now(timezone.utc).isoformat(),
                 'release_tag': args.release_tag,
                 'release_notes': release_summary,
                 'platform': args.platform,
-                'storefronts': {'steam': {'version': STEAM_VERSION, 'versions': list(STEAM_VERSIONS), 'status': 'verified'},
-                               **({'battlenet': {'version': BATTLENET_VERSION, 'status': 'experimental'}} if args.casclib else {})},
+                'storefronts': {'steam': {'status': 'verified'},
+                               **({'battlenet': {'status': 'experimental'}} if args.casclib else {})},
                 'installation_guide': 'INSTALL-WINDOWS.md' if args.platform == 'native-windows' else 'INSTALL-LINUX.md',
                 'variant': args.variant,
                 'plugin_source_commit': plugin_commit,

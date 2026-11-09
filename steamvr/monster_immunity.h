@@ -7,7 +7,7 @@
 #include "world_coordinates.h"
 
 namespace framevr::immunity {
-// Order shared with D2R_DepthFog.fx: physical, magic, fire, lightning, cold, poison.
+// Order shared with D2R_Immunity.fxh: physical, magic, fire, lightning, cold, poison.
 inline constexpr std::array<int,6> Stats{36,37,39,41,43,45};
 inline constexpr size_t MaxMonsters=24;
 inline constexpr float RangeCells=32.0f;
