@@ -79,6 +79,13 @@ target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/breakables.cpp ${ROOT}/vr/offline_di
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/respec.cpp)   # Reset Skills & Stats (respec_button.h)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/target_lock.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/loot_beam_scan.cpp)   # loot beams: the items on the floor that get one
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/monster_immunity.cpp)
+add_executable(monster-immunity-test monster_immunity_test.cpp)
+target_compile_options(monster-immunity-test PRIVATE -UNDEBUG)
+add_executable(monster-immunity-runtime-test monster_immunity_runtime_test.cpp)
+target_include_directories(monster-immunity-runtime-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${ROOT}/cleanroom/sigscan ${D2RL_SDK}/include)
+target_link_libraries(monster-immunity-runtime-test PRIVATE framevr-runtime)
+target_compile_options(monster-immunity-runtime-test PRIVATE -UNDEBUG)
 add_executable(map-sigs-test map_sigs_test.cpp)   # Map view = Full map: the patterns at their sites
 target_include_directories(map-sigs-test PRIVATE ${ROOT}/cleanroom/sigscan)
 add_executable(far-objects-test far_objects_test.cpp)   # big objects drawn farther: the reach, the setting, the game's test
@@ -263,6 +270,8 @@ add_executable(depth-fog-test depth_fog_test.cpp)
 target_link_libraries(depth-fog-test PRIVATE d3d11 d3dcompiler framevr-runtime)
 add_executable(shield-debug-shader-test shield_debug_shader_test.cpp)
 target_link_libraries(shield-debug-shader-test PRIVATE d3d11 d3dcompiler framevr-runtime)
+add_executable(monster-immunity-shader-test monster_immunity_shader_test.cpp)
+target_link_libraries(monster-immunity-shader-test PRIVATE d3d11 d3dcompiler framevr-runtime)
 add_executable(loot-beams-shader-test loot_beams_shader_test.cpp)
 target_link_libraries(loot-beams-shader-test PRIVATE d3d11 d3dcompiler framevr-runtime)
 add_executable(arcane-sky-test arcane_sky_test.cpp)
@@ -453,5 +462,10 @@ target_include_directories(respec-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${D2R
 target_link_libraries(respec-test PRIVATE framevr-runtime)
 target_compile_options(respec-test PRIVATE -UNDEBUG)
 add_test(NAME respec-test COMMAND respec-test)
+add_test(NAME monster-immunity-test COMMAND monster-immunity-test)
+add_test(NAME monster-immunity-runtime-test COMMAND monster-immunity-runtime-test)
 
 target_compile_options(quick-items-test PRIVATE -UNDEBUG)
+
+add_test(NAME monster-immunity-shader-test COMMAND monster-immunity-shader-test "${ROOT}/reshade/D2R_Immunity.fxh")
+set_tests_properties(monster-immunity-shader-test PROPERTIES TIMEOUT 30)
