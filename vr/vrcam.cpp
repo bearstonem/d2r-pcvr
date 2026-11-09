@@ -41,6 +41,7 @@
 #include "../steamvr/elemental_hands.h"
 #include "../steamvr/leather_menu.h"
 #include "../steamvr/head_shadow.h"
+#include "../steamvr/head_skip.h"
 #include <tlhelp32.h>
 #include <intrin.h>
 #include <xinput.h>
@@ -1495,6 +1496,11 @@ void LoadSettings() {
                                                                          : "the hidden head shrinks to the neck, its shadow headless");
         }
     }
+#ifdef D2RVR_NATIVE_OPENXR
+    // [arms] head_skip_draws: with the head kept for its shadow, the helm is left out of the eye views' draws and kept in
+    // the shadow's (steamvr/head_skip.h); [debug] head_skip: its line every second while armed (0: every 10 s)
+    headskip::Configure(IniB(L"arms", L"head_skip_draws", true), IniB(L"debug", L"head_skip", true));
+#endif
     g_set.armScale.store(std::clamp(IniF(L"arms", L"scale", 1.0f), 0.3f, 3.0f));
     g_set.poseOrderLog.store(IniB(L"debug", L"pose_order", false));
     g_set.frameLog.store(IniB(L"debug", L"frame_log", false));
@@ -3071,6 +3077,14 @@ bool VrProjInner(const d2rcam::WorldView& in, float M[16]) {
         const D2RVR_Shared* sh = g_shared;
         const float pitch = sh && sh->version == D2RVR_SHARED_VERSION && sh->headValid && sh->pitchValid ? sh->headPitchDeg : NAN;
         nearZ = headshadow::EyeNear(nearZ, keep, std::max(1.0f, ScaleHeight()) / UserEyeHeightM(), pitch);
+    }
+#endif
+#if D2RVR_FIRST_PERSON && defined(D2RVR_NATIVE_OPENXR)
+    {   // The hero's helm left out of this eye pass's draws and kept in its shadow's (steamvr/head_skip.h), armed while the
+        // head is kept for its shadow as above; the head itself keeps the cut.
+        const bool keepHead = !ThirdPerson() && !Overhead() && g_set.headShadow.load() && g_set.hideHead.load() && FullBody() && !ShapeFormNow();
+        const float eyeWorld[3] = {g_eyeWorld[0].load(), g_eyeWorld[1].load(), g_eyeWorld[2].load()};
+        headskip::EyePass(keepHead && g_eyeOk.load(), g_eye.load() & 1, eyeWorld, std::max(1.0f, ScaleHeight()) / UserEyeHeightM());
     }
 #endif
     g_lastNear.store(nearZ);
@@ -11482,6 +11496,8 @@ DWORD WINAPI UpdateThread(void*) {
             companionai::Tick(compFx, compFy);
             companionai::Report();
             roofcutaway::Tick();
+            headskip::Install(g_set.platform.load() == 1 && g_inWorld.load() && d2rcam::InWorld());   // the helm out of the eye views
+            headskip::Report();
             roofmaterials::Install(&Log, +[]() { return g_set.platform.load() == 1; });
             propphysics::Tick();
             projectiles::Install();
