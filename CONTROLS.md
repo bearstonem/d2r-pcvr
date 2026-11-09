@@ -434,7 +434,11 @@ bash casts (melee strike skills, Fury and Zeal, Double Swing and Frenzy, Smite w
 tagged **CAST ON STRIKE**; body gestures (Holy Shield's sign of
 the cross, the shapeshifts, Blessed Hammer, Charge, Fist of the Heavens), bow draws
 and throws keep **GESTURE**. Both need a trigger slot, except the body gestures,
-which work from any slot.
+which work from any slot. The body gestures are the Paladin's and the Druid's
+motions: do them with both grips held, as every class's motions. Both
+controllers hum once a motion's first part is done, stronger as it nears its
+cast, and pulse together when it casts; each motion has its card on the class's
+**MOTIONS** page (the wheel), where it can be turned off.
 
 **Bow quiver.** With a bow, a face button assigned to Magic Arrow, Fire Arrow,
 Cold Arrow, Exploding Arrow, Ice Arrow, Immolation Arrow or Freezing Arrow loads
