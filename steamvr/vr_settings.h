@@ -25,20 +25,33 @@ enum class View : uint8_t { Presets, Body, Combat, Aim, Targets, Shield, Wrist, 
 enum Key { Motion, Seated, Dominant, Snap, TurnSpeed, Waist, BeltForward,
            Foveation, Sky, Fog, Ceiling, DrawDistance, ObjectDistance,
            EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, VitalsTilt, HapticStrength, HapticMelee, HapticBowDraw, HapticBowRelease, HapticSpell, HapticInteraction, HapticAlert, HapticShortMelee, BloodVisor, BloodWipe, MeleeThrustSpeed, LootLabelSize, CompanionCounts, StrainVignette, OfflinePlayers, ShieldBashSpeed, DesktopOneEye, MapTopDown, MapRotate, FoveationStrength, StereoRendering, DeferGpuWait, TargetHighlight, HeartbeatStart, SpellLock, StaffPoint, LandingCircles, GroundAim, AimHighlights, HighlightRight, HighlightLeft, EnemySight, BowLaser, ThrowLift, BottlePhysics, PropPhysics, CompanionAi, ShieldGrip, ShieldOut, ShieldUp, ShieldFollow, ShieldRoll, AimFollowsView, CompanionTactical, LeftHandStrikes, TorchFlame, FrameGeneration, FrameGenPreset, FrameGenScale, RunSpeed, RunWalkToggle, BodyPhysics, BigObjectDistance, FogDistance, LeatherMenu, LootBeamUnique, LootBeamSet, LootBeamRare, LootBeamRunes, LootBeamBrightness, CeilingTorches, ArcaneDecay, ArcaneFade, ManaThreshold, ArcaneIntensity, GlyphDraw, GlyphCircle, GlyphTriangle, GlyphSquare, GlyphLightning, GlyphSpiral, GlyphV, GlyphStar, GlyphWave, LootPick, MotionsOff, MotionsPaladinOff, MotionsDruidOff, MotionsAmazonOff, MotionsNecromancerOff, MotionsBarbarianOff, MotionsAssassinOff, GlyphDrawSecond, GlyphLeftCircle, GlyphLeftTriangle, GlyphLeftSquare, GlyphLeftLightning, GlyphLeftSpiral, GlyphLeftV, GlyphLeftStar, GlyphLeftWave, SpellHandLight, MeleeReach, Count };
-// One bit per setting, 128 wide: two words, since MSVC has no 128-bit integer.
+// One bit per setting, 256 wide: four words, since MSVC has no wider integer.
+// (128 until 2026-11-08, when 126 were in use and more rows were coming.)
 struct ChangeMask {
-    static constexpr int Bits=128;
-    uint64_t low=0,high=0;
-    constexpr ChangeMask(uint64_t bits=0):low(bits){}
-    constexpr ChangeMask(uint64_t lowBits,uint64_t highBits):low(lowBits),high(highBits){}
-    constexpr explicit operator bool()const{return (low|high)!=0;}
+    static constexpr int Words=4,Bits=Words*64;
+    std::array<uint64_t,Words> word{};   // bit k in word[k/64], least significant first
+    constexpr ChangeMask(uint64_t bits=0):word{bits}{}
+    constexpr ChangeMask(uint64_t lowBits,uint64_t highBits):word{lowBits,highBits}{}   // the first two words
+    constexpr explicit operator bool()const{for(const auto w:word)if(w)return true;return false;}
     constexpr bool operator==(const ChangeMask&)const=default;
-    constexpr ChangeMask operator~()const{return {~low,~high};}
-    constexpr ChangeMask operator&(ChangeMask o)const{return {low&o.low,high&o.high};}
-    constexpr ChangeMask operator|(ChangeMask o)const{return {low|o.low,high|o.high};}
-    constexpr ChangeMask& operator|=(ChangeMask o){low|=o.low;high|=o.high;return *this;}
-    constexpr ChangeMask operator<<(int n)const{return n<=0?*this:n>=Bits?ChangeMask{}:n>=64?ChangeMask{0,low<<(n-64)}:ChangeMask{low<<n,high<<n|low>>(64-n)};}
-    constexpr ChangeMask operator>>(int n)const{return n<=0?*this:n>=Bits?ChangeMask{}:n>=64?ChangeMask{high>>(n-64),0}:ChangeMask{low>>n|high<<(64-n),high>>n};}
+    constexpr ChangeMask operator~()const{ChangeMask r;for(int i=0;i<Words;++i)r.word[i]=~word[i];return r;}
+    constexpr ChangeMask operator&(ChangeMask o)const{for(int i=0;i<Words;++i)o.word[i]&=word[i];return o;}
+    constexpr ChangeMask operator|(ChangeMask o)const{for(int i=0;i<Words;++i)o.word[i]|=word[i];return o;}
+    constexpr ChangeMask& operator|=(ChangeMask o){for(int i=0;i<Words;++i)word[i]|=o.word[i];return *this;}
+    constexpr ChangeMask operator<<(int n)const{
+        if(n<=0)return *this;
+        ChangeMask r;if(n>=Bits)return r;
+        const int s=n/64,b=n%64;
+        for(int i=Words-1;i>=s;--i)r.word[i]=(word[i-s]<<b)|(b&&i-s>0?word[i-s-1]>>(64-b):0);
+        return r;
+    }
+    constexpr ChangeMask operator>>(int n)const{
+        if(n<=0)return *this;
+        ChangeMask r;if(n>=Bits)return r;
+        const int s=n/64,b=n%64;
+        for(int i=0;i+s<Words;++i)r.word[i]=(word[i+s]>>b)|(b&&i+s+1<Words?word[i+s+1]<<(64-b):0);
+        return r;
+    }
 };
 static_assert(Count<=ChangeMask::Bits,"settings change mask capacity");
 constexpr ChangeMask SupportedChanges=~ChangeMask{0}>>(ChangeMask::Bits-Count);
