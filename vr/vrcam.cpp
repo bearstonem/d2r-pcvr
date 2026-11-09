@@ -37,6 +37,7 @@
 #include "../steamvr/arm_pointing.h"
 #include "../steamvr/aim_reach.h"
 #include "../steamvr/torch_light.h"
+#include "../steamvr/light_radius.h"
 #include "../steamvr/elemental_hands.h"
 #include "../steamvr/leather_menu.h"
 #include "../steamvr/head_shadow.h"
@@ -137,6 +138,9 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "target_lock.h"
 #include "bow.h"
 #include "loot_beam_scan.h"
+#include "monster_immunity.h"
+#include "monster_position_signatures.h"
+#include "../steamvr/monster_position.h"
 #include "wall_cells.h"
 #include "prop_scan.h"
 #include "crossbow.h"
@@ -347,6 +351,13 @@ struct Settings {
     std::atomic<float> torchRadius{18.0f};       // [torch] radius: world units of light reach (28 looked too intense in the headset)
     std::atomic<bool>  torchFlicker{true};       // [torch] flicker: organic turbulent flame flicker
     std::atomic<float> torchWarmth{0.65f};       // [torch] warmth: color warmth toward fire orange
+    // The hero's Light Radius in VR (#440, light_radius.h): it widens the vault's light and the hero light.
+    std::atomic<bool>  heroLight{true};          // [light] hero_light: a modest light of ours round the hero in dungeons the vault does not roof
+    std::atomic<float> heroLightStrength{0.25f}; // [light] hero_strength
+    std::atomic<float> heroLightReach{20.0f};    // [light] hero_reach: world units, with no Light Radius gear
+    std::atomic<float> lightRadiusBase{0.0f};    // [light] radius_base: what stat 89 reads with no Light Radius gear
+    std::atomic<float> lightRadiusPoints{10.0f}; // [light] radius_points: the hero's own light in the stat's points
+    std::atomic<float> lightRadiusBoost{150.0f}; // [light] radius_boost_pct (VR Settings > Graphics > Environment > Light Radius boost)
     std::atomic<int>   armsMode{0};        // 0 game animation, 1 test pose (arms ahead), 2 controllers
     std::atomic<bool>  hideHead{false};     // hide the hero's head from the eyes (first person): shrunk, or cut (headShadow)
     std::atomic<bool>  headShadow{true};    // [arms] head_shadow: the hidden head stays whole for its shadow, the eye views cut it (head_shadow.h)
@@ -706,6 +717,7 @@ SkyAct g_skyAct[7];
 struct CaveFog { float rgb[3]; bool set; };
 CaveFog g_caveFog{};
 std::atomic<uint32_t> g_skyCfgGen{0};   // bumped when a picture name changes
+std::atomic<bool> g_immunityTextureReady{false};
 std::atomic<bool> g_arcaneSkyReady{false}; // locally prepared native star/cloud maps
 
 std::string Utf8(const wchar_t* w) {
@@ -828,6 +840,8 @@ void LoadCeilingTextures() {
 }
 
 void LoadSkyActs() {
+    const bool immunityTexture = SkyFileExists(L"PCVR_Immunity/feral_glow.png");
+    if (g_immunityTextureReady.exchange(immunityTexture) != immunityTexture) g_skyCfgGen.fetch_add(1);
     const bool arcane = SkyFileExists(L"PCVR_Arcane/stars.png") && SkyFileExists(L"PCVR_Arcane/clouds.png") &&
         GetFileAttributesW((ReShadeDir() + L"..\\pcvr-arcane-sky.json").c_str()) != INVALID_FILE_ATTRIBUTES;
     if (g_arcaneSkyReady.exchange(arcane) != arcane) g_skyCfgGen.fetch_add(1);
@@ -1450,6 +1464,13 @@ void LoadSettings() {
     g_set.torchRadius.store(std::clamp(IniF(L"torch", L"radius", 18.0f), 5.0f, 60.0f));
     g_set.torchFlicker.store(IniB(L"torch", L"flicker", true));
     g_set.torchWarmth.store(std::clamp(IniF(L"torch", L"warmth", 0.65f), 0.0f, 1.0f));
+    g_set.heroLight.store(IniB(L"light", L"hero_light", true));
+    g_set.heroLightStrength.store(std::clamp(IniF(L"light", L"hero_strength", 0.25f), 0.0f, 2.0f));
+    g_set.heroLightReach.store(std::clamp(IniF(L"light", L"hero_reach", 20.0f), 5.0f, 80.0f));
+    g_set.lightRadiusBase.store(std::clamp(IniF(L"light", L"radius_base", 0.0f), -50.0f, 100.0f));
+    g_set.lightRadiusPoints.store(std::clamp(IniF(L"light", L"radius_points", 10.0f), 1.0f, 100.0f));
+    g_set.lightRadiusBoost.store(std::clamp(IniF(L"light", L"radius_boost_pct", 150.0f),
+                                            framevr::lightradius::MinBoostPct, framevr::lightradius::MaxBoostPct));
     LoadCeilingBiomes();
     LoadCeilingTextures();
     g_set.armsMode.store(std::clamp((int)IniF(L"arms", L"mode", 0.0f), 0, 2));
@@ -9648,6 +9669,29 @@ int Lights(Light* out) {
     ReleaseSRWLockShared(&g_lock);
     return n;
 }
+// Owning game thread only. Exact client ID, never the nearest monster's height.
+bool MonsterPosition(uint32_t id,float out[3]) {
+    using namespace monsterimmunity::abi;
+    if(!d2rsig::Check(ContextRva,ContextSig,sizeof ContextSig)||
+       !d2rsig::Check(ContextLayoutRva,ContextLayoutSig,sizeof ContextLayoutSig)||
+       !d2rsig::Check(ManagerLayoutRva,ManagerLayoutSig,sizeof ManagerLayoutSig)||
+       !d2rsig::Check(ManagerBucketsRva,ManagerBucketsSig,sizeof ManagerBucketsSig)||
+       !d2rsig::Check(ModelLayoutRva,ModelLayoutSig,sizeof ModelLayoutSig)||
+       !d2rsig::Check(UnitKeyRva,UnitKeySig,sizeof UnitKeySig)||
+       !d2rsig::Check(RootLayoutRva,RootLayoutSig,sizeof RootLayoutSig)||
+       !d2rsig::Check(TransformTypeRva,TransformTypeSig,sizeof TransformTypeSig)||
+       !d2rsig::Check(TransformLayoutRva,TransformLayoutSig,sizeof TransformLayoutSig))return false;
+    const auto unit=ClientMonster(id);
+    const auto typeSequence=d2rsig::Addr(TransformTypeRva);
+    if(!unit||!typeSequence)return false;
+    const auto context=reinterpret_cast<uintptr_t(*)()>(d2rsig::Addr(ContextRva))();
+    uintptr_t manager=0;
+    if(!context||!Rd(context+0x20,&manager))return false;
+    const auto type=reinterpret_cast<uint32_t(*)()>(typeSequence)();
+    return framevr::immunity::RenderedPosition(manager,d2rsig::Addr(0x2677170),type,unit,
+        [](uintptr_t address,auto& value){return Rd(address,&value);},out);
+}
+
 }  // namespace worldobj
 
 bool WorldMenuBlocksEffects() {
@@ -9944,6 +9988,11 @@ bool BeamWanted() {
     return g_enabled.load() && g_inWorld.load() && !gamestate::MenuOpen() && lootscan::Latest(GetTickCount64()).count > 0;
 }
 
+bool ImmunityWanted() {
+    return g_enabled.load() && g_inWorld.load() && !gamestate::MenuOpen() &&
+        monsterimmunity::Latest(GetTickCount64()).count > 0;
+}
+
 // The frame stamp strip (D2R_DepthFog.fx PS_Stamp): whenever the camera turns
 // with the head, so that FlatVR can place its screen at the pose of the frame.
 bool StampWanted() { return g_enabled.load() && g_afrBlock && g_set.stamps.load() && g_set.stampPixels.load(); }
@@ -9960,6 +10009,40 @@ bool TableKeyWanted() { return TableView() && g_inWorld.load() && !gamestate::Me
 bool CeilWanted() {
     return g_set.ceilOn.load() && g_enabled.load() && !ThirdPerson() && g_inWorld.load() && g_ceilBiome.load() &&
            !WorldMenuBlocksEffects();
+}
+// The hero light (D2R_Lights.fxh HeroLight, #440): in every dungeon, first person, no menu; drawn where the shader's
+// vault is not (its own light is over the hero there). The effect also runs for it where nothing else wanted it -
+// a dungeon off [ceiling] biomes, such as the Tal Rasha tombs, with the fog off in caves.
+bool HeroLightWanted() {
+    return g_set.heroLight.load() && g_set.heroLightStrength.load() > 0.0f && g_enabled.load() && !ThirdPerson() &&
+           g_inWorld.load() && g_underground.load() && !WorldMenuBlocksEffects();
+}
+// How far the hero's light reaches against no Light Radius gear (light_radius.h): 1 until his stat 89 is read.
+// Logged at each change.
+float HeroLightScale() {
+    int stat = 0;
+    bool known = false;
+#ifdef D2RVR_NATIVE_OPENXR
+    known = interactionstate::LightRadius(gamestate::LocalPlayer(), stat);
+#endif
+    framevr::lightradius::Tuning t;
+    t.base = g_set.lightRadiusBase.load();
+    t.points = g_set.lightRadiusPoints.load();
+    t.boostPct = g_set.lightRadiusBoost.load();
+    const float scale = framevr::lightradius::Scale(stat, known, t);
+    static int toldStat = INT_MIN;
+    static float toldScale = -1.0f;
+    const int now = known ? stat : INT_MIN + 1;
+    if (now != toldStat || std::fabs(scale - toldScale) > 1e-4f) {
+        toldStat = now; toldScale = scale;
+        if (known)
+            LogF("vrcam: hero Light Radius (stat 89) %d: the vault's light over him and the hero light reach x%.2f (the hero light %.0f units; "
+                 "[light] radius_base %.0f, radius_points %.0f, radius_boost_pct %.0f)",
+                 stat, scale, g_set.heroLightReach.load() * scale, t.base, t.points, t.boostPct);
+        else
+            LogF("vrcam: hero Light Radius not read yet: his dungeon light at its tuned reach");
+    }
+    return scale;
 }
 // [ceiling] game_ceiling (vr/engine_units.cpp): a ceiling of the game's wanted here - [ceiling] enabled, first person,
 // the area on game_ceiling_biomes with a kind of its own, no menu - and the view it is drawn in: VR first person (F4)
@@ -10013,6 +10096,14 @@ bool ApplySkyPictures(reshade::api::effect_runtime* rt) {
         char have[16] = {}; size_t size = sizeof have;
         if (!rt->get_preprocessor_definition_for_effect("D2R_DepthFog.fx", "D2R_ARCANE_SKY_CACHE", have, &size) || strcmp(have, want)) {
             rt->set_preprocessor_definition_for_effect("D2R_DepthFog.fx", "D2R_ARCANE_SKY_CACHE", want);
+            set = true;
+        }
+    }
+    {
+        const char* want = g_immunityTextureReady.load() ? "1" : "0";
+        char have[16] = {}; size_t size = sizeof have;
+        if (!rt->get_preprocessor_definition_for_effect("D2R_DepthFog.fx", "D2R_IMMUNITY_TEXTURE", have, &size) || strcmp(have, want)) {
+            rt->set_preprocessor_definition_for_effect("D2R_DepthFog.fx", "D2R_IMMUNITY_TEXTURE", want);
             set = true;
         }
     }
@@ -10075,7 +10166,7 @@ void OnFinishEffects(reshade::api::effect_runtime* rt, reshade::api::command_lis
     if (!g_tech[0].handle) { hud::SetPictureReady(false); return; }
     // Off while a menu is open: the fog lies over the whole picture, the
     // inventory and trade panels included, and darkened them.
-    const bool want = FogWanted() || g_skyPalette.load() >= 0 || g_arcaneSky.load() || CeilWanted() || HudWanted() || StampWanted() || hud::PictureWanted() || TableKeyWanted() || PhantomWanted() || BoneAxesWanted() || ShieldDebugWanted() || OutlineWanted() || RingWanted() || BeamWanted();
+    const bool want = FogWanted() || g_skyPalette.load() >= 0 || g_arcaneSky.load() || CeilWanted() || HudWanted() || StampWanted() || hud::PictureWanted() || TableKeyWanted() || PhantomWanted() || BoneAxesWanted() || ShieldDebugWanted() || OutlineWanted() || RingWanted() || BeamWanted() || HeroLightWanted() || ImmunityWanted();
     // The toolbar and the map are taken out of the game's picture to be drawn
     // back at their own size only while this effect runs, and is new enough to.
     {
@@ -10277,7 +10368,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
         renderscale::Frame(rt, s);
 #ifdef D2RVR_NATIVE_OPENXR
         const bool ownDepth=g_enabled.load()&&g_inWorld.load()&&framevr::Active()&&
-            (FogWanted()||g_set.skyOn.load()||g_arcaneSky.load()||CeilWanted()||TableKeyWanted()||OutlineWanted()||RingWanted()||BeamWanted());
+            (FogWanted()||g_set.skyOn.load()||g_arcaneSky.load()||CeilWanted()||TableKeyWanted()||OutlineWanted()||RingWanted()||BeamWanted()||ImmunityWanted());
         const bool turnDepth=g_enabled.load()&&g_inWorld.load()&&framevr::Active()&&framevr::TurnDepthWanted();
         framevr::scenedepth::Bind(rt,cl,ownDepth,turnDepth,stereoreplay::RightEffects(),s);
         SetBool(rt,"OwnDepth",ownDepth);
@@ -10617,6 +10708,26 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
         bool ceil = who == 1;
         for (const SkyView& v : sv) ceil = ceil && v.proj_ok && v.axes_ok && v.proj[0] != 0.0f && v.proj[1] != 0.0f;
         SetBool(rt, "CeilOn", ceil);
+        // The hero's Light Radius (#440, light_radius.h): it widens the vault's light over him (below) and the hero
+        // light, ours, at his shoulder wherever the vault is not drawn - the game's ceiling, or none.
+        const float heroScale = HeroLightScale();
+        const bool heroLight = HeroLightWanted() && !ceil && sv[0].proj_ok && sv[0].axes_ok;
+        SetBool(rt, "HeroLightOn", heroLight);
+        {   // each change
+            static int told = -1;
+            if (int(heroLight) != told) {
+                told = int(heroLight);
+                LogF("vrcam: hero light %s", heroLight ? "on (a dungeon, first person, the vault not drawn)" : "off");
+            }
+        }
+        if (heroLight) {
+            const auto at = framevr::lightradius::HeroLightAt(0.5f * (sv[0].eyeRel[0] + sv[1].eyeRel[0]), 0.5f * (sv[0].eyeRel[1] + sv[1].eyeRel[1]),
+                                                              0.5f * (sv[0].eyeRel[2] + sv[1].eyeRel[2]), sv[0].hero[1] - floorY);
+            const float place[3] = {at.x, at.y, at.z};
+            SetFloats(rt, "HeroLightPos", place, 3);
+            SetFloat(rt, "HeroLightRadius", g_set.heroLightReach.load() * heroScale);
+            SetFloat(rt, "HeroLightStrength", g_set.heroLightStrength.load());
+        }
         if (ceil) {
 
             float height, bright, light, relief;
@@ -10627,7 +10738,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
             SetFloat(rt, "CeilBrightness", bright);
             SetFloat(rt, "CeilRelief", relief);
             SetFloat(rt, "CeilTexSlot", (float)slot);
-            SetFloat(rt, "CeilLightRadius", light);
+            SetFloat(rt, "CeilLightRadius", light * heroScale);   // by his Light Radius (#440)
             SetFloat(rt, "CeilHalo", g_set.ceilHalo.load());
             SetFloat(rt, "CeilWallDist", g_set.ceilWall.load());
             SetFloat(rt, "CeilFloorDepth", g_set.ceilFloor.load());
@@ -10784,8 +10895,34 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
         SetBool(rt, "OutlineOn", count > 0);
         SetBool(rt, "RingOn", rings);
         SetBool(rt, "BeamOn", beams);
+        const auto immunity = monsterimmunity::Latest(GetTickCount64());
+        const bool immunityOn = ImmunityWanted() && view && immunity.count > 0;
+        SetBool(rt, "ImmunityOn", immunityOn);
+        float immunityPos[framevr::immunity::MaxMonsters][4] = {};
+        float immunityPhase[framevr::immunity::MaxMonsters] = {};
+        if (immunityOn) {
+            const uint64_t now = GetTickCount64();
+            for (size_t i = 0; i < immunity.count; ++i) {
+                const auto& monster = immunity.monsters[i];
+                const auto foot = framevr::immunity::FootPosition(monster, immunity, now,
+                    {sv[0].hero[0],sv[0].hero[1],sv[0].hero[2]});
+                immunityPos[i][0] = foot.x;
+                immunityPos[i][1] = foot.y;
+                immunityPos[i][2] = foot.z;
+                immunityPos[i][3] = float(monster.mask);
+                immunityPhase[i] = float(monster.id % 997u) * 0.063f;
+            }
+        }
+        SetFloats(rt, "ImmunityPos", immunityPos[0], framevr::immunity::MaxMonsters * 4);
+        // A float4 per phase avoids scalar-array cbuffer padding in ReShade.
+        float phases[framevr::immunity::MaxMonsters][4] = {};
+        for (size_t i = 0; i < framevr::immunity::MaxMonsters; ++i) phases[i][0] = immunityPhase[i];
+        SetFloats(rt, "ImmunityPhase", phases[0], framevr::immunity::MaxMonsters * 4);
+        const float immunityUpm = std::max(1.0f, ScaleHeight()) / UserEyeHeightM();
+        const float immunityShape[4] = {.65f * immunityUpm, .65f * immunityUpm, .16f * immunityUpm, .8f};
+        SetFloats(rt, "ImmunityShape", immunityShape, 4);
         float mob[2][4] = {};
-        if (count > 0 || rings || beams) {
+        if (count > 0 || rings || beams || immunityOn) {
             for (int e = 0; e < 2; ++e) {
                 const SkyView& s = sv[e].axes_ok && sv[e].proj_ok ? sv[e] : sv[0];
                 char n[16];
@@ -11222,7 +11359,7 @@ DWORD WINAPI UpdateThread(void*) {
         }
         hud::SetLabels(LabelsWanted());
         // the fog leaves the interface alone; the floor's key never takes its text for the void
-        hud::SetUiMask((fx::FogWanted() || fx::TableKeyWanted()) && !LabelsWanted());
+        hud::SetUiMask((fx::FogWanted() || fx::TableKeyWanted() || fx::ImmunityWanted()) && !LabelsWanted());
         SkyTick();
         flog::Tick(g_set.frameLog.load());
         gamecmd::Tick();   // skills, potions, Alt... held in BodyWalk: pressed on the UI thread
@@ -11233,6 +11370,7 @@ DWORD WINAPI UpdateThread(void*) {
 #endif
         lootscan::Tick(nowMs);      // loot beams: the beam-worthy items lying near the hero
         roomstitchvr::Tick(nowMs);  // rooms built to meet the way toward the hero: the hero's room, the hook
+        monsterimmunity::Tick(nowMs, g_enabled.load() && g_inWorld.load() && !gamestate::MenuOpen());
 #endif
 #ifdef D2RVR_NATIVE_OPENXR
         mobaim::Tick();    // the aim rules' targets: each hand's held out, and the one looked at
@@ -11389,6 +11527,10 @@ DWORD WINAPI UpdateThread(void*) {
 }
 
 }  // namespace
+
+namespace monsterimmunity {
+bool ReadPosition(uint32_t id,float out[3]) {return worldobj::MonsterPosition(id,out);}
+}
 
 namespace d2rcam {
 // DEV > Character > Sky over rims switches [sky] cover_rims for the session.
@@ -11591,6 +11733,7 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
         wanted.highRune = std::clamp(int(IniF(L"loot", L"rune_min", float(framevr::lootbeams::DefaultHighRune))),
                                      framevr::lootbeams::FirstRune, framevr::lootbeams::LastRune + 1);   // 34 = no runes
         lootscan::Init(ctx, IniB(L"loot", L"beams", true), wanted);
+        monsterimmunity::Init(ctx);
     }
 #endif
     if (HANDLE h = CreateThread(nullptr, 0, UpdateThread, nullptr, 0, &g_updateThreadId)) CloseHandle(h);

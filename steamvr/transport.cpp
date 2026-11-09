@@ -6334,8 +6334,15 @@ void EndPair() {
     XrCompositionLayerQuad book{XR_TYPE_COMPOSITION_LAYER_QUAD};
     if(layer&&!settingsModel.open&&!bodyCalibration.Active()&&spatialMode&&SurfacePlaced()&&uiEye.copied&&uiCrop[2]>0) {
         const auto size=UiSurfaceSize();
-        motionQuad(book,UiSurfacePose(),size.width,size.height,
-            {{uiCrop[0],uiCrop[1]},{uiCrop[2],uiCrop[3]}},uiEye.chain);
+        auto pose=UiSurfacePose();float height=size.height;XrRect2Di shown{{uiCrop[0],uiCrop[1]},{uiCrop[2],uiCrop[3]}};
+        // On the leather the canvas below the band too, so a tooltip running past it shows on
+        // (leather::WithFoot); the band itself stays where the laser finds it.
+        if(leatherMode&&!journalMode) {
+            const auto foot=leather::WithFoot({uiCrop[0],uiCrop[1],uiCrop[2],uiCrop[3]},int(uiHeight),size.height);
+            const auto p=V(pose.position)+math::Rotate(Q(pose.orientation),{0,-foot.drop,0});
+            pose.position={p.x,p.y,p.z};height=foot.height;shown.extent.height=foot.rect.h;
+        }
+        motionQuad(book,pose,size.width,height,shown,uiEye.chain);
         book.layerFlags=opaqueMenuMode?0:XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
     }
     // The Advanced Stats button, a hair in front of the menu below its hint row (MenuPointer).
