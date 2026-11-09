@@ -67,7 +67,7 @@ public:
     }
     bool Pending()const{return used!=0;}
     uint64_t Reserve(const Flight& flight,int missile,uint64_t now) {
-        if(!SkillArrow(flight.shot)||!flight.shot.session||!QuiverImpactMissile(flight.shot.missile,missile))return 0;
+        if(!OwnMissile(flight.shot)||!flight.shot.session||!QuiverImpactMissile(flight.shot.missile,missile))return 0;
         for(size_t i=0;i<effects.size();++i)if(!effects[i].ticket) {
             auto& e=effects[i];e={};e.ticket=++serial;e.session=flight.shot.session;
             e.expires=now+5000;e.missile=uint32_t(missile);

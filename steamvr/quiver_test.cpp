@@ -149,6 +149,41 @@ int main() {
         Check(!SkillArrow(spell),"hand spells are not quiver arrows");
     }
     {
+        // #432: Witherstring (Fires Magic Arrows) and Raven Claw (Fires
+        // Explosive Arrows) make the bow's basic attack name magicarrow 27 or
+        // explodingarrow 41, not arrow 0. A drawn release was refused before
+        // the native attack, so nothing fired; it now flies the item's missile.
+        Check(BasicLaunchMissile(Kind::Arrow,0)==-1,"a plain bow flies the basic arrow");
+        Check(BasicLaunchMissile(Kind::Arrow,27)==27&&BasicLaunchMissile(Kind::Arrow,41)==41,"an item's magic or explosive arrow flies");
+        Check(BasicLaunchMissile(Kind::Arrow,31)==RefusedMissile&&BasicLaunchMissile(Kind::Arrow,-1)==RefusedMissile&&
+              BasicLaunchMissile(Kind::Arrow,12)==RefusedMissile,"a bolt, no bow in hand, or another missile is refused");
+        Check(BasicLaunchMissile(Kind::Javelin,0)==RefusedMissile&&BasicLaunchMissile(Kind::Spell,27)==RefusedMissile,"throws and spells never fly one");
+        const Gate gate{true,11,7,1000,42};
+        for(int missile:{27,41}) {
+            auto s=Release();s.missile=missile;
+            Check(ItemArrow(s)&&OwnMissile(s)&&!SkillArrow(s)&&!SkillRelease(s),"an item arrow is a basic arrow with a missile of its own");
+            Check(MissileId(s)==uint32_t(missile)&&Valid(s)&&Allowed(s,gate,1100),"it names the item's missile and is a valid release");
+            Check(ProjectileLength(s)==ArrowLength&&Near(FlightSpeed(s,4608),FlightSpeed(Release(),4608)),"with the basic arrow's length and draw speed");
+            // It looks as the quiver arrow of the same missile: Magic Arrow (6), Exploding Arrow (16).
+            auto quiver=s;quiver.skill=missile==27?6:16;
+            Check(SkillArrow(quiver)&&!ItemArrow(quiver)&&Valid(quiver)&&MissileId(quiver)==MissileId(s),"the quiver arrow flies the same missile");
+            Flight a,b;a.shot=s;b.shot=quiver;a.distance=b.distance=2;a.alive=b.alive=true;a.updatedAt=b.updatedAt=10;
+            float item[16],skill[16];QuiverMatrix(a,10,item);QuiverMatrix(b,10,skill);
+            for(int i=0;i<16;++i)Check(Near(item[i],skill[i]),"and is placed as that quiver arrow's root");
+            // It lands as one too: its native hit effect is placed at the contact.
+            ImpactVisuals impacts;a.Contact({100,1.4f,98});
+            Check(impacts.Reserve(a,missile==27?204:42,10)!=0,"its native hit effect is placed at the contact");
+        }
+        ImpactVisuals impacts;Flight plain;plain.shot=Release();plain.Contact({100,1.4f,98});
+        Check(impacts.Reserve(plain,42,10)==0,"negative control: a plain arrow never claims an explosion");
+        auto stale=Release();stale.missile=12;
+        Check(!ItemArrow(stale)&&MissileId(stale)==0,"a stale quiver missile never renames the basic arrow");
+        auto spell=Release();spell.kind=Kind::Spell;spell.missile=27;
+        Check(!ItemArrow(spell),"hand spells are not item arrows");
+        auto thrown=Release();thrown.kind=Kind::Javelin;thrown.missile=41;
+        Check(!ItemArrow(thrown)&&MissileId(thrown)==1,"nor are throws");
+    }
+    {
         // The root-bound model must land exactly where a basic arrow mesh is.
         for(int missile:{12,27,40,41,85,87})for(Vec d:{Vec{0,0,-1},Vec{.6f,.3f,-.74f},Vec{-.2f,-.5f,.84f},Vec{0,.97f,.24f}}) {
             auto s=Release();s.skill=7;s.missile=missile;s.direction=math::Normalized(d);

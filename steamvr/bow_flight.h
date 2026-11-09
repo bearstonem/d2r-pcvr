@@ -76,11 +76,34 @@ inline bool SkillArrow(const Shot& s){return s.kind==Kind::Arrow&&s.skill>=0;}
 inline bool SkillJavelin(const Shot& s){return s.kind==Kind::Javelin&&s.skill>=0&&!DoubleThrow(s);}
 // A physical release carrying a skill: a quiver arrow or a javelin skill.
 inline bool SkillRelease(const Shot& s){return SkillArrow(s)||SkillJavelin(s);}
+// An item-fired basic arrow (#432). Fires Magic Arrows (item_magicarrow, stat
+// 157) and Fires Explosive Arrows or Bolts (item_explosivearrow, 158) replace
+// a bow's or crossbow's basic missile: the game's own query (bow_signatures.h
+// MissileType) names magicarrow 27 or explodingarrow 41 instead of arrow 0 or
+// bolt 31, and its basic attack shoots that. A hand release flies it as a
+// basic arrow (no skill, no mana); it looks and lands as the quiver arrow of
+// the same missile (Magic Arrow, Exploding Arrow), with the game's own damage
+// and explosion. Shot::missile names it; -1 is the plain arrow or bolt.
+inline bool ItemMissile(int missile){return missile==27||missile==41;}
+inline bool ItemArrow(const Shot& s){return (s.kind==Kind::Arrow||s.kind==Kind::Crossbow)&&s.skill<0&&ItemMissile(s.missile);}
+// A bow or crossbow release flying a missile of its own, a quiver or an item
+// arrow: its visual root carries the model and particles, its native missile
+// follows the flight to the contact, and its native hit effects play there.
+inline bool OwnMissile(const Shot& s){return SkillArrow(s)||ItemArrow(s);}
+// What a basic bow or crossbow release flies, from the native query for the
+// weapon in hand (-1 when none is held): -1 for the plain arrow or bolt, an
+// item's missile, or RefusedMissile for anything else.
+inline constexpr int RefusedMissile=-2;
+inline int BasicLaunchMissile(Kind kind,int native) {
+    if(kind!=Kind::Arrow&&kind!=Kind::Crossbow)return RefusedMissile;
+    if(native==(kind==Kind::Crossbow?31:0))return -1;
+    return ItemMissile(native)?native:RefusedMissile;
+}
 // Lightning Bolt and Lightning Fury have no mesh (lightning_javelin
 // particles): like spells they follow their root. Poison and Plague Javelin
 // fly the javelin model, as a basic throw does.
 inline bool ParticleJavelin(int missile){return missile==205||missile==206;}
-inline uint32_t MissileId(const Shot& s){return s.kind==Kind::Spell||SkillRelease(s)?uint32_t(s.missile):s.kind==Kind::Javelin?ThrownId(s):uint32_t(s.kind);}
+inline uint32_t MissileId(const Shot& s){return s.kind==Kind::Spell||SkillRelease(s)||ItemArrow(s)?uint32_t(s.missile):s.kind==Kind::Javelin?ThrownId(s):uint32_t(s.kind);}
 inline bool BasicMissile(uint32_t id){return id<=1||id==31;}
 // What the client allocator returned for one of our visual requests. Only the
 // requested missile is kept; any other live missile unit we created is still a
@@ -357,7 +380,8 @@ inline void ArrowMatrix(const Flight& f,uint64_t now,float out[16]) {
     const Vec forward=f.shot.direction;
     const Vec guide=std::fabs(forward.y)<.95f?Vec{0,1,0}:Vec{1,0,0};
     const Vec right=math::Normalized(math::Cross(guide,forward)),up=math::Cross(forward,right);
-    const bool bolt=f.shot.kind==Kind::Crossbow;
+    // An item's explosive bolt is the exploding arrow's model, at bolt length.
+    const bool bolt=f.shot.kind==Kind::Crossbow&&!ItemArrow(f.shot);
     const float modelTail=bolt?-.69698172f:-.98391676f;
     const float modelLength=(bolt?.69698172f:1.f)-modelTail;
     const float scale=ProjectileLength(f.shot)*f.shot.unitsPerMetre/modelLength;
@@ -387,7 +411,7 @@ inline void SpellMatrix(const Flight& f,uint64_t now,float out[16]) {
     out[13]=p.y-out[5]*height-out[9]*ahead;
     out[14]=p.z-out[6]*height-out[10]*ahead;out[15]=1;
 }
-// Quiver arrows bind their unit root: fire_arrow, ice_arrow and safe_arrow
+// Quiver (and item) arrows bind their unit root: fire_arrow, ice_arrow and safe_arrow
 // hang arrow.model (scale 1, identity orientation) and their particles 5 units
 // above it, the fire model also .35 behind. Place the root so the model lands
 // exactly where ArrowMatrix puts a basic arrow; particles keep their offsets.

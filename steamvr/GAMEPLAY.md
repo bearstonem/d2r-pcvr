@@ -1828,10 +1828,18 @@ criticals, leech, procs, immunity and pierce. Piercing cannot damage the same
 creature twice. Native lifetime remains in charge; there is no damage multiplier
 for drawing farther. Both eyes share the same flying-arrow transform per pair.
 
-This first physical path supports **ordinary basic arrows**, not elemental,
-explosive, magic or guided missile variants. A bow that converts its basic attack
-to a special missile is currently refused before ammo is spent; use its assigned
-native skill through the palette instead. Selected arrow skills gain the candidate
+This physical path supports **basic arrows**, including a bow whose item
+changes its basic attack's missile (#432): **Fires Magic Arrows** (Witherstring)
+or **Fires Explosive Arrows** (Raven Claw). The game's basic attack names that
+missile (magicarrow or explodingarrow) and a drawn arrow flies it as a basic
+arrow: no skill or mana, the game's own damage, and its explosion at the contact.
+It looks and lands as the Magic or Exploding Arrow quiver arrow does; the nocked
+arrow on the string stays the plain arrow. The first such shot for a character
+logs `Frame physical projectiles: bow basic attack fires item missile 27 (Fires
+Magic Arrows) level N; the hand release flies it`. A basic release whose bow names
+any other missile is refused before ammo is spent and logs `Frame physical
+projectiles: bow release refused: ...` with the missile, at most once a second.
+Selected arrow skills gain the candidate
 draw/release adapter above; their flight remains native. Other skills/spells
 retain their existing controls, costs, timings and collision behavior.
 
@@ -1868,7 +1876,11 @@ including upward/downward aim. Their native missile still supplies damage,
 ammunition, lifetime and trigger attack cadence; no second attack or client
 projectile is created. Both eyes share the corrected current/previous mesh
 transforms. The support palm keeps the controller's wrist angle when gripping
-from underneath or above. Special missile skills and unrecognized/stale rigs
+from underneath or above. A crossbow with **Fires Explosive Bolts** (Demon
+Machine) fires the same way: its basic attack names explodingarrow, which the
+physical bolt flies, drawn as the exploding arrow's model at the bolt's length,
+with the game's explosion at the contact (logged once as `... crossbow basic
+attack fires item missile 41 (Fires Explosive Bolts) ...`). Special missile skills and unrecognized/stale rigs
 retain their native release behavior. The physical collision limitations below
 also apply to basic crossbow bolts.
 
@@ -2237,6 +2249,12 @@ For the next headset pass, use the existing bow character **outside town**:
    and normal behavior on an empty quiver. Fired arrows may finish after a menu opens.
 5. Try repeated draws, a weapon swap, leaving/re-entering the game, then a few
    melee swings. Check stereo, lighting and frame pacing for regressions.
+6. Item-fired arrows (#432): draw and release with Witherstring (Fires Magic
+   Arrows) and Raven Claw (Fires Explosive Arrows), and fire Demon Machine
+   (Fires Explosive Bolts) with the regular attack. Each shot should fly from the
+   hand, spend one arrow or bolt, show the magic or exploding model, and explode
+   at the monster or wall it hits. Check the `fires item missile` line, and that
+   `refused=` stays 0 in the `Frame physical projectiles` summary.
 
 ## Deterministic player hits (2026-10-09)
 
