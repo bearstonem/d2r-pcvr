@@ -1,5 +1,5 @@
 #pragma once
-// Room follows you (VR Settings > Body, beside Seated play; [gameplay] room_steps, on by default since 2026-11-08).
+// Room follows you (VR Settings > Comfort > Body, beside Seated play; [gameplay] room_steps, on by default since 2026-11-08).
 //
 // The hero never moves with the headset: the camera is the hero plus the tracked head's offset
 // from the tracking origin (transport.cpp View), 1:1 and unbounded, so a real step leaves the

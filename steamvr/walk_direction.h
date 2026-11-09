@@ -1,5 +1,5 @@
 #pragma once
-// Walk direction (VR Settings > Body, beside Dominant hand; [stick] walk_direction): the left stick walks
+// Walk direction (VR Settings > Controls > Hands, beside Dominant hand; [stick] walk_direction): the left stick walks
 // where you look (0, the default) or where the left controller points (1). Owner, 2026-11-08: "moving where
 // the controller points versus where you look, that should be a setting".
 //

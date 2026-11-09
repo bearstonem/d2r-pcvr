@@ -32,103 +32,103 @@ static const char* ViewName(View v){return framevr::settings::content::PageOf(v)
 // (Choice), and main's frame generation settings arrived.
 struct GoldenRow {const char* id;View page;int section;content::RowKind kind;const char* label;int options,names;};
 static const GoldenRow Golden[]={
-    {"interactions.dominant_hand",View(1),0,content::RowKind::Choice,"Dominant hand",2,0},
-    {"stick.walk_direction",View(1),0,content::RowKind::Stepper,"Walk direction",0,2},   // drawn inside Dominant hand's row (2026-11-08)
-    {"turn.smooth",View(1),0,content::RowKind::Toggle,"Smooth turning",0,0},
-    {"turn.snap",View(1),0,content::RowKind::Stepper,"Snap turn angle",0,0},
-    {"turn.speed",View(1),0,content::RowKind::Slider,"Smooth turn speed",0,0},
-    {"gameplay.run_speed_pct",View(1),0,content::RowKind::Slider,"Movement speed",0,12},   // main's #308: Walk, Base run, Run 10..90%, Full run
-    {"gameplay.run_walk_toggle",View(1),0,content::RowKind::Toggle,"Stick toggle",0,0},   // drawn inside Movement speed's row
-    {"interactions.seated",View(1),1,content::RowKind::Toggle,"Seated play",0,0},
-    {"gameplay.room_steps",View(1),1,content::RowKind::Toggle,"Room follows you",0,0},   // drawn inside Seated play's row (2026-11-08)
-    {"interactions.waist_below_eyes",View(1),1,content::RowKind::Slider,"Belt below eyes",0,0},
-    {"interactions.belt_forward",View(1),1,content::RowKind::Slider,"Belt forward reach",0,0},
-    {"calibration.version",View(1),2,content::RowKind::Button,"Height and arm span",0,0},
-    {"gameplay.motion_controls",View(2),0,content::RowKind::Toggle,"Motion combat",0,0},
-    {"gameplay.melee_hit_speed",View(2),0,content::RowKind::Stepper,"Swing speed to hit",0,0},
-    {"gameplay.melee_thrust_speed",View(2),0,content::RowKind::Slider,"Stab speed to hit",0,0},
-    {"gameplay.melee_reach_cm",View(2),0,content::RowKind::Slider,"Melee reach",0,0},   // Discord, 2026-11-08
-    {"gameplay.skill_gestures",View(2),1,content::RowKind::Toggle,"Skills on your moves",0,0},
-    {"interactions.weapon_skill_indicators",View(2),1,content::RowKind::Toggle,"Skill icons on weapons",0,0},
-    {"gameplay.throw_lift_deg",View(2),1,content::RowKind::Stepper,"Thrown weapon lift",0,1},
-    {"gameplay.spell_lock",View(3),0,content::RowKind::Choice,"Skills go to the aimed monster",4,0},
-    {"gameplay.projectile_aim_assist",View(3),0,content::RowKind::Choice,"Spell aim assist",3,0},
-    {"gameplay.planar_spell_aim",View(3),0,content::RowKind::Toggle,"Keep spell shots level",0,0},
-    {"gameplay.staff_point",View(3),0,content::RowKind::Toggle,"Aim staff along arm",0,0},
-    {"gameplay.aim_follows_view",View(3),0,content::RowKind::Toggle,"Aim with your view",0,0},
-    {"gameplay.ground_aim",View(3),1,content::RowKind::Choice,"Ground skill aim",3,0},
-    {"gameplay.landing_circles",View(3),1,content::RowKind::Toggle,"Landing circles",0,0},
-    {"gameplay.target_outline_pct",View(4),0,content::RowKind::Slider,"Monster outline",0,1},
-    {"gameplay.aim_highlights",View(4),0,content::RowKind::Choice,"Outlines shown",2,0},
-    {"gameplay.highlight_left_hue",View(4),0,content::RowKind::Swatch,"Left hand outline color",0,1},
-    {"gameplay.highlight_right_hue",View(4),0,content::RowKind::Swatch,"Right hand outline color",0,1},
-    {"bow.path_laser_hue",View(4),1,content::RowKind::Swatch,"Arrow path line",0,1},
-    {"gameplay.shield_bash_speed",View(5),0,content::RowKind::Slider,"Bash speed to hit",0,0},
-    {"gameplay.guard_strain_vignette",View(5),0,content::RowKind::Toggle,"Guard strain shadow",0,0},
-    {"gameplay.shield_grip_cm",View(5),1,content::RowKind::Slider,"Shield along forearm",0,0},
-    {"gameplay.shield_out_cm",View(5),1,content::RowKind::Slider,"Shield out from arm",0,0},
-    {"gameplay.shield_up_cm",View(5),1,content::RowKind::Slider,"Shield across forearm",0,0},
-    {"gameplay.shield_follow_pct",View(5),1,content::RowKind::Slider,"Shield wrist turn",0,2},
-    {"gameplay.shield_roll_deg",View(5),1,content::RowKind::Slider,"Shield roll",0,0},
-    {"interactions.vitals_location",View(6),0,content::RowKind::Choice,"Life and mana",4,0},
-    {"interactions.vitals_tilt",View(6),0,content::RowKind::Slider,"Life and mana tilt",0,0},
-    {"interactions.navigation_location",View(6),1,content::RowKind::Choice,"Map and compass",4,0},
-    {"interactions.map_top_down",View(6),1,content::RowKind::Choice,"Map view",4,0},
-    {"interactions.map_rotate",View(6),1,content::RowKind::Toggle,"Turn map with you",0,0},
-    {"interactions.companion_counts",View(6),1,content::RowKind::Toggle,"Buffs and companions",0,0},
-    {"hud.menu_distance",View(7),0,content::RowKind::Choice,"Menu distance",3,0},
-    {"interactions.leather_menu",View(7),0,content::RowKind::Stepper,"Hold menu",0,3},   // main's #360, drawn inside Menu distance's row; Off / On / Menu only (2026-10-29)
-    {"hud.tooltip_timing",View(7),0,content::RowKind::Choice,"Item details delay",3,0},
-    {"interactions.controller_labels",View(7),0,content::RowKind::Choice,"Button names",5,0},
-    {"hud.labels_size",View(7),1,content::RowKind::Slider,"Loot name size",0,0},
-    {"interactions.loot_pick",View(7),1,content::RowKind::Toggle,"Loot pick",0,0},   // #257: Loot pick, Off / On
-    {"hud.ordinary_mob_bars",View(7),1,content::RowKind::Toggle,"Weak monster bars",0,0},
-    {"loot.beams_brightness",View(7),1,content::RowKind::Filter,"Loot beams",0,0},   // loot beams: one row, its brightness slider
-    {"loot.beams_unique",View(7),1,content::RowKind::Toggle,"Unique",0,0},           // (2026-11-01) and a Filter button whose
-    {"loot.beams_set",View(7),1,content::RowKind::Toggle,"Set",0,0},                 // card holds Unique, Set, Rare and Runes
-    {"loot.beams_rare",View(7),1,content::RowKind::Toggle,"Rare",0,0},               // (inFilter: no rows of their own)
-    {"loot.beams_runes",View(7),1,content::RowKind::Toggle,"Runes",0,0},
-    {"hud.arcane_decay",View(7),2,content::RowKind::Toggle,"Arcane Decay",0,0},
-    {"hud.arcane_fade",View(7),2,content::RowKind::Toggle,"Fade animation",0,0},
-    {"hud.mana_threshold_pct",View(7),2,content::RowKind::Slider,"Starts below",0,0},
-    {"hud.arcane_intensity_pct",View(7),2,content::RowKind::Slider,"Effect intensity",0,0},
-    {"interactions.critical_alerts",View(8),0,content::RowKind::Toggle,"Low life and mana alert",0,0},
-    {"gameplay.low_life_heart_start",View(8),0,content::RowKind::Stepper,"Heartbeat starts at",0,1},
-    {"hud.blood_visor",View(8),0,content::RowKind::Toggle,"Blood on visor",0,0},
-    {"hud.blood_wipe",View(8),0,content::RowKind::Toggle,"Wipe blood by hand",0,0},
-    {"gameplay.offline_players",View(8),1,content::RowKind::Stepper,"Offline difficulty",0,2},
-    {"gameplay.enemy_sight_pct",View(8),1,content::RowKind::Slider,"Monster sight range",0,0},
-    {"gameplay.companion_ai",View(8),1,content::RowKind::Toggle,"Smarter mercenary",0,0},
-    {"gameplay.companion_tactical_commands",View(8),1,content::RowKind::Toggle,"Tactical commands",0,0},
-    {"sky.enabled",View(9),0,content::RowKind::Toggle,"Outdoor sky",0,0},
-    {"fog.enabled",View(9),0,content::RowKind::Toggle,"Distance fog",0,0},
-    {"fog.end",View(9),0,content::RowKind::Slider,"Fog distance",0,0},   // main's #366, drawn inside Distance fog's row
-    {"ceiling.enabled",View(9),0,content::RowKind::Toggle,"Dungeon ceilings",0,0},
-    {"ceiling.torches",View(9),0,content::RowKind::Toggle,"Dungeon torchlight",0,0},   // the game's own lights, drawn inside Dungeon ceilings' row
-    {"interactions.bottle_physics",View(9),1,content::RowKind::Toggle,"Roll and break bottles",0,0},
-    {"interactions.prop_physics",View(9),1,content::RowKind::Toggle,"Knock over small props",0,0},
-    {"interactions.body_physics",View(9),1,content::RowKind::Toggle,"Pushable bodies",0,0},   // main's #361
-    {"torch.flame",View(9),1,content::RowKind::Toggle,"Torch flame",0,0},
-    {"torch.spell_hands_pct",View(9),1,content::RowKind::Slider,"Spell hand light",0,1},   // a Sorceress's (2026-11-06)
-    {"haptics.strength",View(10),0,content::RowKind::Slider,"Overall vibration",0,1},
-    {"haptics.melee",View(10),0,content::RowKind::Slider,"Melee hits",0,1},
-    {"haptics.short_melee",View(10),0,content::RowKind::Toggle,"Short melee taps",0,0},
-    {"haptics.bow_draw",View(10),0,content::RowKind::Slider,"Bow draw",0,1},
-    {"haptics.bow_release",View(10),0,content::RowKind::Slider,"Bow and throw release",0,1},
-    {"haptics.spells",View(10),0,content::RowKind::Slider,"Spell casts",0,1},
-    {"haptics.interactions",View(10),0,content::RowKind::Slider,"Loot, potions and menus",0,1},
-    {"haptics.alerts",View(10),0,content::RowKind::Slider,"Low life and mana alerts",0,1},
-    {"stereo.rendering",View(11),0,content::RowKind::Choice,"Eyes drawn per frame",2,0},
-    {"render.vr_resolution",View(11),0,content::RowKind::Choice,"Render resolution",7,0},
-    {"render.fixed_foveation",View(11),0,content::RowKind::Choice,"Lower detail at edges",3,0},
-    {"render.foveation_strength",View(11),0,content::RowKind::Choice,"Edge detail reduction",4,0},
-    {"render.frame_generation",View(11),0,content::RowKind::Choice,"Frame generation",3,0},   // main's #313, in Image; its NVIDIA rows on More (no page)
-    {"render.rings",View(11),1,content::RowKind::Stepper,"Terrain distance",0,0},
-    {"render.model_radius",View(11),1,content::RowKind::Slider,"Scenery distance",0,0},
-    {"render.big_radius",View(11),1,content::RowKind::Slider,"Big objects",0,1},   // main's #366, drawn inside Scenery distance's row
-    {"render.defer_gpu_wait",View(11),1,content::RowKind::Offer,"Defer GPU wait",0,0},
-    {"render.frame_generation_preset",View(14),0,content::RowKind::Choice,"NVIDIA flow quality",3,0},
-    {"render.frame_generation_scale",View(14),0,content::RowKind::Choice,"NVIDIA flow scale",3,0},
+    {"gameplay.motion_controls",View::Combat,0,content::RowKind::Toggle,"Motion combat",0,0},
+    {"gameplay.melee_hit_speed",View::Combat,0,content::RowKind::Stepper,"Swing speed to hit",0,0},
+    {"gameplay.melee_thrust_speed",View::Combat,0,content::RowKind::Slider,"Stab speed to hit",0,0},
+    {"gameplay.melee_reach_cm",View::Combat,0,content::RowKind::Slider,"Melee reach",0,0},   // Discord, 2026-11-08
+    {"gameplay.skill_gestures",View::Combat,1,content::RowKind::Toggle,"Skills on your moves",0,0},
+    {"interactions.weapon_skill_indicators",View::Combat,1,content::RowKind::Toggle,"Skill icons on weapons",0,0},
+    {"gameplay.throw_lift_deg",View::Combat,1,content::RowKind::Stepper,"Thrown weapon lift",0,1},
+    {"gameplay.spell_lock",View::Targeting,0,content::RowKind::Choice,"Skills go to the aimed monster",4,0},
+    {"gameplay.projectile_aim_assist",View::Targeting,0,content::RowKind::Choice,"Spell aim assist",3,0},
+    {"gameplay.planar_spell_aim",View::Targeting,1,content::RowKind::Toggle,"Keep spell shots level",0,0},
+    {"gameplay.staff_point",View::Targeting,1,content::RowKind::Toggle,"Aim staff along arm",0,0},
+    {"gameplay.aim_follows_view",View::Targeting,1,content::RowKind::Toggle,"Aim with your view",0,0},
+    {"bow.path_laser_hue",View::Targeting,1,content::RowKind::Swatch,"Arrow path line",0,1},
+    {"gameplay.ground_aim",View::Targeting,2,content::RowKind::Choice,"Ground skill aim",3,0},
+    {"gameplay.landing_circles",View::Targeting,2,content::RowKind::Toggle,"Landing circles",0,0},
+    {"gameplay.shield_bash_speed",View::Shield,0,content::RowKind::Slider,"Bash speed to hit",0,0},
+    {"gameplay.guard_strain_vignette",View::Shield,0,content::RowKind::Toggle,"Guard strain shadow",0,0},
+    {"gameplay.shield_grip_cm",View::Shield,1,content::RowKind::Slider,"Shield along forearm",0,0},
+    {"gameplay.shield_out_cm",View::Shield,1,content::RowKind::Slider,"Shield out from arm",0,0},
+    {"gameplay.shield_up_cm",View::Shield,1,content::RowKind::Slider,"Shield across forearm",0,0},
+    {"gameplay.shield_follow_pct",View::Shield,1,content::RowKind::Slider,"Shield wrist turn",0,2},
+    {"gameplay.shield_roll_deg",View::Shield,1,content::RowKind::Slider,"Shield roll",0,0},
+    {"gameplay.offline_players",View::Monsters,0,content::RowKind::Stepper,"Offline difficulty",0,2},
+    {"gameplay.enemy_sight_pct",View::Monsters,0,content::RowKind::Slider,"Monster sight range",0,0},
+    {"gameplay.companion_ai",View::Monsters,1,content::RowKind::Toggle,"Smarter mercenary",0,0},
+    {"gameplay.companion_tactical_commands",View::Monsters,1,content::RowKind::Toggle,"Tactical commands",0,0},
+    {"interactions.bottle_physics",View::Physics,0,content::RowKind::Toggle,"Roll and break bottles",0,0},
+    {"interactions.prop_physics",View::Physics,0,content::RowKind::Toggle,"Knock over small props",0,0},
+    {"interactions.body_physics",View::Physics,0,content::RowKind::Toggle,"Pushable bodies",0,0},   // main's #361
+    {"turn.smooth",View::Moving,0,content::RowKind::Toggle,"Smooth turning",0,0},
+    {"turn.snap",View::Moving,0,content::RowKind::Stepper,"Snap turn angle",0,0},
+    {"turn.speed",View::Moving,0,content::RowKind::Slider,"Smooth turn speed",0,0},
+    {"gameplay.run_speed_pct",View::Moving,1,content::RowKind::Slider,"Movement speed",0,12},   // main's #308: Walk, Base run, Run 10..90%, Full run
+    {"interactions.seated",View::Body,0,content::RowKind::Toggle,"Seated play",0,0},
+    {"gameplay.room_steps",View::Body,0,content::RowKind::Toggle,"Room follows you",0,0},   // drawn inside Seated play's row (2026-11-08)
+    {"calibration.version",View::Body,0,content::RowKind::Button,"Height and arm span",0,0},
+    {"interactions.waist_below_eyes",View::Body,1,content::RowKind::Slider,"Belt below eyes",0,0},
+    {"interactions.belt_forward",View::Body,1,content::RowKind::Slider,"Belt forward reach",0,0},
+    {"interactions.dominant_hand",View::Hands,0,content::RowKind::Choice,"Dominant hand",2,0},
+    {"stick.walk_direction",View::Hands,0,content::RowKind::Stepper,"Walk direction",0,2},   // drawn inside Dominant hand's row (2026-11-08)
+    {"gameplay.run_walk_toggle",View::Hands,0,content::RowKind::Toggle,"Stick toggle",0,0},   // a row of its own
+    {"interactions.controller_labels",View::Hands,0,content::RowKind::Choice,"Button names",5,0},
+    {"haptics.strength",View::Vibration,0,content::RowKind::Slider,"Overall vibration",0,1},
+    {"haptics.melee",View::Vibration,0,content::RowKind::Slider,"Melee hits",0,1},
+    {"haptics.short_melee",View::Vibration,0,content::RowKind::Toggle,"Short melee taps",0,0},
+    {"haptics.bow_draw",View::Vibration,0,content::RowKind::Slider,"Bow draw",0,1},
+    {"haptics.bow_release",View::Vibration,0,content::RowKind::Slider,"Bow and throw release",0,1},
+    {"haptics.spells",View::Vibration,0,content::RowKind::Slider,"Spell casts",0,1},
+    {"haptics.interactions",View::Vibration,0,content::RowKind::Slider,"Loot, potions and menus",0,1},
+    {"haptics.alerts",View::Vibration,0,content::RowKind::Slider,"Low life and mana alerts",0,1},
+    {"interactions.vitals_location",View::Wrist,0,content::RowKind::Choice,"Life and mana",4,0},
+    {"interactions.vitals_tilt",View::Wrist,0,content::RowKind::Slider,"Life and mana tilt",0,0},
+    {"interactions.navigation_location",View::Wrist,1,content::RowKind::Choice,"Map and compass",4,0},
+    {"interactions.map_top_down",View::Wrist,1,content::RowKind::Choice,"Map view",4,0},
+    {"interactions.map_rotate",View::Wrist,1,content::RowKind::Toggle,"Turn map with you",0,0},
+    {"interactions.companion_counts",View::Wrist,1,content::RowKind::Toggle,"Buffs and companions",0,0},
+    {"hud.menu_distance",View::Menus,0,content::RowKind::Choice,"Menu distance",3,0},
+    {"interactions.leather_menu",View::Menus,0,content::RowKind::Stepper,"Hold menu",0,3},   // main's #360, drawn inside Menu distance's row; Off / On / Menu only (2026-10-29)
+    {"hud.tooltip_timing",View::Menus,0,content::RowKind::Choice,"Item details delay",3,0},
+    {"hud.labels_size",View::Labels,0,content::RowKind::Slider,"Loot name size",0,0},
+    {"interactions.loot_pick",View::Labels,0,content::RowKind::Toggle,"Loot pick",0,0},   // #257: Loot pick, Off / On
+    {"hud.ordinary_mob_bars",View::Labels,0,content::RowKind::Toggle,"Weak monster bars",0,0},
+    {"loot.beams_brightness",View::Labels,1,content::RowKind::Filter,"Loot beams",0,0},   // loot beams: one row, its brightness slider
+    {"loot.beams_unique",View::Labels,1,content::RowKind::Toggle,"Unique",0,0},           // (2026-11-01) and a Filter button whose
+    {"loot.beams_set",View::Labels,1,content::RowKind::Toggle,"Set",0,0},                 // card holds Unique, Set, Rare and Runes
+    {"loot.beams_rare",View::Labels,1,content::RowKind::Toggle,"Rare",0,0},               // (inFilter: no rows of their own)
+    {"loot.beams_runes",View::Labels,1,content::RowKind::Toggle,"Runes",0,0},
+    {"gameplay.target_outline_pct",View::Outlines,0,content::RowKind::Slider,"Monster outline",0,1},
+    {"gameplay.aim_highlights",View::Outlines,0,content::RowKind::Choice,"Outlines shown",2,0},
+    {"gameplay.highlight_left_hue",View::Outlines,0,content::RowKind::Swatch,"Left hand outline color",0,1},
+    {"gameplay.highlight_right_hue",View::Outlines,0,content::RowKind::Swatch,"Right hand outline color",0,1},
+    {"interactions.critical_alerts",View::Warnings,0,content::RowKind::Toggle,"Low life and mana alert",0,0},
+    {"gameplay.low_life_heart_start",View::Warnings,0,content::RowKind::Stepper,"Heartbeat starts at",0,1},
+    {"hud.blood_visor",View::Warnings,0,content::RowKind::Toggle,"Blood on visor",0,0},
+    {"hud.blood_wipe",View::Warnings,0,content::RowKind::Toggle,"Wipe blood by hand",0,0},
+    {"hud.arcane_decay",View::Warnings,1,content::RowKind::Toggle,"Arcane Decay",0,0},
+    {"hud.arcane_fade",View::Warnings,1,content::RowKind::Toggle,"Fade animation",0,0},
+    {"hud.mana_threshold_pct",View::Warnings,1,content::RowKind::Slider,"Starts below",0,0},
+    {"hud.arcane_intensity_pct",View::Warnings,1,content::RowKind::Slider,"Effect intensity",0,0},
+    {"stereo.rendering",View::Performance,0,content::RowKind::Choice,"Eyes drawn per frame",2,0},
+    {"render.vr_resolution",View::Performance,0,content::RowKind::Choice,"Render resolution",7,0},
+    {"render.fixed_foveation",View::Performance,0,content::RowKind::Choice,"Lower detail at edges",3,0},
+    {"render.foveation_strength",View::Performance,0,content::RowKind::Choice,"Edge detail reduction",4,0},
+    {"render.rings",View::Performance,1,content::RowKind::Stepper,"Terrain distance",0,0},
+    {"render.model_radius",View::Performance,1,content::RowKind::Slider,"Scenery distance",0,0},
+    {"render.big_radius",View::Performance,1,content::RowKind::Slider,"Big objects",0,1},   // main's #366, drawn inside Scenery distance's row
+    {"render.frame_generation",View::Frames,0,content::RowKind::Choice,"Frame generation",3,0},   // main's #313
+    {"render.frame_generation_preset",View::Frames,0,content::RowKind::Choice,"NVIDIA flow quality",3,0},
+    {"render.frame_generation_scale",View::Frames,0,content::RowKind::Choice,"NVIDIA flow scale",3,0},
+    {"render.defer_gpu_wait",View::Frames,0,content::RowKind::Offer,"Defer GPU wait",0,0},
+    {"sky.enabled",View::Environment,0,content::RowKind::Toggle,"Outdoor sky",0,0},
+    {"fog.enabled",View::Environment,0,content::RowKind::Toggle,"Distance fog",0,0},
+    {"fog.end",View::Environment,0,content::RowKind::Slider,"Fog distance",0,0},   // main's #366, drawn inside Distance fog's row
+    {"ceiling.enabled",View::Environment,0,content::RowKind::Toggle,"Dungeon ceilings",0,0},
+    {"ceiling.torches",View::Environment,0,content::RowKind::Toggle,"Dungeon torchlight",0,0},   // the game's own lights, drawn inside Dungeon ceilings' row
+    {"torch.flame",View::Environment,1,content::RowKind::Toggle,"Torch flame",0,0},
+    {"torch.spell_hands_pct",View::Environment,1,content::RowKind::Slider,"Spell hand light",0,1},   // a Sorceress's (2026-11-06)
 };
 
 static bool PopoverLayer(L::Role r){return r==L::Role::PopoverDim||r==L::Role::Popover||r==L::Role::PopoverTitle||r==L::Role::PopoverOption||r==L::Role::PopoverHint||r==L::Role::ColorDot||r==L::Role::PopoverLabel||r==L::Role::PopoverSwitch;}
@@ -214,6 +214,42 @@ int main(int argc,char** argv){
         }
         for(size_t i=0;i<tables.rowCount;++i)Check(content::PageOf(tables.rows[i].page).settings,"rows live on settings pages");
     }
+    // ---- the idle card: the page's intro when the page did not draw it, then a sentence that stands alone ----
+    for(int view=0;view<int(View::Count);++view)if(content::PageOf(View(view)).settings&&View(view)!=View::More){
+        Model m;m.Open(Ready());L::Press(m,{Kind::Open,view,-1},0);
+        const auto l=L::Build(m,{},{});const auto* text=FindRole(l,L::Role::CardText);
+        const std::string what="A setting's help shows here, with Undo and Default when they apply.",intro=content::PageOf(View(view)).intro;
+        Check(text&&text->text==(FindRole(l,L::Role::Intro)?what:intro+" "+what),std::string("the idle card reads whole: ")+ViewName(View(view)));
+    }
+    // ---- the map: no row lost, none left to More, the names and the owner's pairs ----
+    {
+        Check(tables.rowCount==97,"97 settings on the menu, each one row");   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08)
+        for(size_t i=0;i<tables.rowCount;++i)Check(!tables.rows[i].fallback&&tables.rows[i].page!=View::More,std::string("every setting has its page: ")+tables.rows[i].label);
+        Check(content::Menu().report.empty(),"the tidy report is empty");
+        struct Want {content::Group group;const char* name;std::vector<const char*> pages;};
+        const std::vector<Want> rail={
+            {content::Group::Gameplay,"Gameplay",{"Combat","Targeting","Shield","Monsters","Physics"}},
+            {content::Group::Comfort,"Comfort",{"Moving","Body"}},
+            {content::Group::Controls,"Controls",{"Hands","Vibration"}},
+            {content::Group::Interface,"Interface",{"Wrist","Menus","Labels","Outlines","Warnings"}},
+            {content::Group::Graphics,"Graphics",{"Performance","Frames","Environment"}}};
+        Check(std::size(content::GroupTable)==rail.size(),"five groups");
+        for(size_t g=0;g<rail.size()&&g<std::size(content::GroupTable);++g){
+            Check(content::GroupTable[g].id==rail[g].group&&std::string(content::GroupTable[g].name)==rail[g].name,std::string("group in order: ")+rail[g].name);
+            std::vector<std::string> names;for(const auto& p:content::PageTable)if(p.group==rail[g].group)names.push_back(p.name);
+            Check(names==std::vector<std::string>(rail[g].pages.begin(),rail[g].pages.end()),std::string("its pages in order: ")+rail[g].name);
+        }
+        // A pair the owner placed stays a pair: the switch right after its row, on it.
+        const auto besideOf=[&](Key k){for(size_t i=1;i<tables.rowCount;++i)if(tables.rows[i].key==k&&tables.rows[i].beside)return int(tables.rows[i-1].key);return -1;};
+        Check(besideOf(LeatherMenu)==MenuDistance,"Hold menu beside Menu distance");
+        Check(besideOf(FogDistance)==Fog,"Fog distance beside Distance fog");
+        Check(besideOf(CeilingTorches)==Ceiling,"Dungeon torchlight beside Dungeon ceilings");
+        Check(besideOf(CompanionTactical)==CompanionAi,"Commands beside Smarter mercenary");
+        Check(besideOf(LootPick)==LootLabelSize,"Loot pick beside Loot name size");
+        Check(L::FilterOf(LootBeamBrightness).count==4,"Loot beams with its 4 filter switches");
+        int readouts=0;for(int v=0;v<int(View::Count);++v)if(L::HasReadout(View(v)))++readouts;
+        Check(readouts==2&&L::HasReadout(View::Performance)&&L::HasReadout(View::Frames),"the frame times on Performance and Frames, nowhere else");
+    }
     // ---- golden: the merged rows equal the table they replaced ----
     {
         Check(tables.rowCount==std::size(Golden),"as many rows as before");
@@ -243,6 +279,7 @@ int main(int argc,char** argv){
         for(int view=0;view<int(View::Count);++view){
             const int n=L::CountRows(View(view),v,c);
             Check(n<=L::MaxViewRows,std::string("at most 8 rows: ")+ViewName(View(view)));
+            if(View(view)==View::More)Check(n==0,"More shows nothing in the real menu, every class and state");
             Check(!(RowShown(Snap,v,c)&&RowShown(TurnSpeed,v,c)),"Snap turn angle and Smooth turn speed are never shown together (the compile-time count relies on it)");
             if(content::PageOf(View(view)).settings&&View(view)!=View::More)Check(n>=1,std::string("a settings page shows rows: ")+ViewName(View(view)));
         }
@@ -251,8 +288,8 @@ int main(int argc,char** argv){
     {
         Values v=state(0b0100'0101);v[GroundAim]=2;
         Check(L::CountRows(View::Vibration,v,{})==8&&L::CountRows(View::Shield,v,{})==7,"Vibration holds 8 rows; Shield 7 (one guard strain switch since main's #310)");
-        Check(L::RowsOf(View::Targets,v,{}).count==5,"Targets: the outline, both hand colors as their own rows, and the arrow path line");
-        bool right=false;const auto rows=L::RowsOf(View::Targets,v,{});
+        Check(L::RowsOf(View::Outlines,v,{}).count==4,"Outlines: the outline, which hands, and both hand colors as their own rows");
+        bool right=false;const auto rows=L::RowsOf(View::Outlines,v,{});
         for(int i=0;i<rows.count;++i)if(rows.keys[size_t(i)]==HighlightRight)right=true;
         Check(right&&RowShown(HighlightRight,v,{}),"the right hand's color has its own row");
         v[TargetHighlight]=0;Check(!RowShown(HighlightRight,v,{})&&!RowShown(HighlightLeft,v,{}),"and both hand colors go with the outline");
@@ -295,7 +332,7 @@ int main(int argc,char** argv){
                 const auto layout=L::Build(m,m.context,in);CheckLayout(layout,where);
                 if(content::PageOf(View(view)).settings&&view!=int(View::Performance))Check(FindRole(layout,L::Role::PendingEntry)||FindRole(layout,L::Role::ChangeLine),where+": the idle card lists what is not applied");
                 for(const auto& e:layout.elements){
-                    if(e.role==L::Role::Row||e.role==L::Role::Tab||e.role==L::Role::PresetCard){
+                    if(e.role==L::Role::Row||e.role==L::Role::Tab||e.role==L::Role::GroupTab||e.role==L::Role::PresetCard){
                         L::LayoutInput p;p.card=e.help;p.hover=e.hit;CheckLayout(L::Build(m,m.context,p),where+" card "+std::to_string(e.help));
                     }
                 }
@@ -328,14 +365,14 @@ int main(int argc,char** argv){
     // ---- presses ----
     {
         Model m;Snapshot snap=Ready();m.Open(snap);
-        Check(m.view==View::Guide&&m.lastPage==View::Body,"the panel opens on the Controller guide");
+        Check(m.view==View::Guide&&m.lastPage==View::Combat,"the panel opens on the Controller guide");
         auto guide=L::Build(m,{},{});CheckLayout(guide,"guide");
         Check(CountRole(guide,L::Role::GuideLine)>=16,"the guide lists both hands");
         Check(!FindRole(guide,L::Role::FooterResetPage)&&!FindRole(guide,L::Role::FooterApply)&&FindRole(guide,L::Role::FooterClose),"the guide's footer: Close only");
         L::Press(m,{Kind::Open,int(View::Shield),-1},0);Check(m.view==View::Shield&&m.lastPage==View::Shield,"a tab opens its page");
         L::Press(m,{Kind::Open,int(View::Guide),-1},0);L::Press(m,{Kind::Open,int(View::Guide),-1},0);
         Check(m.view==View::Shield,"the Guide link again returns to the page");
-        L::Press(m,{Kind::Open,int(View::Targets),TargetHighlight},0);Check(m.view==View::Targets&&m.focusKey==TargetHighlight,"Open points the card at its row");
+        L::Press(m,{Kind::Open,int(View::Outlines),TargetHighlight},0);Check(m.view==View::Outlines&&m.focusKey==TargetHighlight,"Open points the card at its row");
         // Set and its rules.
         L::Press(m,{Kind::Set,ProjectileAimAssist,0,1},0);
         Check(m.Get()[ProjectileAimAssist]==1&&m.Applied()[ProjectileAimAssist]==2&&m.Dirty(),"Set changes the draft only");
@@ -370,7 +407,7 @@ int main(int argc,char** argv){
     }
     {   // Spells go to the aimed monster: a Paladin keeps the saved bow bit.
         Values v=Defaults();v[SpellLock]=2;Model m;m.Open(Ready(v));m.SetContext({heroclass::Paladin});
-        L::Press(m,{Kind::Open,int(View::Aim),-1},0);
+        L::Press(m,{Kind::Open,int(View::Targeting),-1},0);
         const auto aim=L::Build(m,m.context,{});CheckLayout(aim,"aim paladin");
         int chips=0;const L::Element* on=nullptr;
         for(const auto& e:aim.elements)if(e.role==L::Role::Chip&&e.key==SpellLock){++chips;if(e.text=="On")on=&e;}
@@ -416,6 +453,100 @@ int main(int argc,char** argv){
             for(const auto& e:L::Build(x,{},{}).elements)Check(e.hit.kind!=Kind::Preset,std::string("no preset card on ")+ViewName(View(v)));
         }
     }
+    {   // The rail (docs/VR_SETTINGS_MENU.md): Presets, a row per group, the open group's pages under it.
+        using content::Group;
+        const int groups=int(std::size(content::GroupTable));
+        auto railOf=[](const L::Layout& l){std::vector<const L::Element*> list;for(const auto& e:l.elements)if(e.role==L::Role::Tab||e.role==L::Role::GroupTab)list.push_back(&e);return list;};
+        auto pagesOf=[](Group g){std::vector<View> list;for(const auto& p:content::PageTable)if(p.group==g)list.push_back(p.id);return list;};
+        auto groupHit=[](Group g){return Hit{Kind::OpenGroup,int(g),-1};};
+        auto at=[](const L::Layout& l,const L::Element* e){return L::HitTest(l,float(e->rect.x+e->rect.w/2),float(e->rect.y+e->rect.h/2));};
+        for(int gi=0;gi<groups;++gi){
+            const auto& g=content::GroupTable[size_t(gi)];const auto pages=pagesOf(g.id);
+            const std::string name=std::string("rail, ")+g.name+" open";
+            Model m;m.Open(Ready());
+            L::Press(m,groupHit(g.id),0);
+            Check(m.view==pages.front(),name+": a fresh group opens its first page");
+            for(View page:pages){
+                L::Press(m,{Kind::Open,int(page),-1},0);
+                const auto l=L::Build(m,{},{});CheckLayout(l,name+" on "+ViewName(page));   // 64 px targets, 12 px apart
+                const auto rail=railOf(l);
+                Check(int(rail.size())==1+groups+int(pages.size()),name+": Presets, every group row and the open group's pages");
+                for(size_t i=0;i<rail.size();++i)
+                    Check(rail[i]->rect==Rect{L::RailX,L::TabY+int(i)*L::TabPitch,L::RailW,L::TabH},name+": one pitch apart, top down");
+                Check(rail[0]->hit==Hit{Kind::Open,int(View::Presets),-1}&&!rail[0]->Has(L::Enabled),name+": Presets heads the rail, still grayed out");
+                size_t row=1;
+                for(int k=0;k<groups;++k){
+                    const auto* e=rail[row++];const Group id=content::GroupTable[size_t(k)].id;
+                    Check(e->role==L::Role::GroupTab&&e->hit==groupHit(id)&&e->Has(L::Enabled)&&at(l,e)==e->hit,name+": the group rows in order, each pressable");
+                    Check(e->Has(L::Selected)==(k==gi),name+": only the open group is Selected");
+                    // A group row's place depends only on which group is open: the rows above it sit where they sit
+                    // with nothing open, the rows below move down by its pages.
+                    Check(e->rect.y==L::TabY+(1+k+(k>gi?int(pages.size()):0))*L::TabPitch,name+": the rows above the open group never move");
+                    if(k!=gi)continue;
+                    for(size_t p=0;p<pages.size();++p){
+                        const auto* t=rail[row++];
+                        Check(t->role==L::Role::Tab&&t->hit==Hit{Kind::Open,int(pages[p]),-1}&&t->option==(p+1==pages.size()?2:1),name+": its pages under it, indented, the last marked");
+                        Check(t->Has(L::Selected)==(pages[p]==page)&&t->Has(L::Enabled),name+": the page shown is Selected");
+                    }
+                }
+                for(int other=0;other<groups;++other){   // every group's card fits, open or not
+                    L::LayoutInput in;in.card=HelpGroupFirst+int(content::GroupTable[size_t(other)].id);
+                    const auto c=L::Build(m,{},in);CheckLayout(c,name+" card of "+content::GroupTable[size_t(other)].name);
+                    Check(FindRole(c,L::Role::CardTitle)->text==content::GroupTable[size_t(other)].name&&FindRole(c,L::Role::CardText)&&
+                          FindRole(c,L::Role::CardText)->text.find(content::PageOf(pagesOf(content::GroupTable[size_t(other)].id).back()).name)!=std::string::npos,
+                          name+": a group's card names it and lists its pages");
+                }
+            }
+        }
+        // Every rail page in 2 presses or fewer, from every view: its tab when its group is open, else its group's row, then its tab.
+        for(int from=0;from<int(View::Count);++from)for(const auto& p:content::PageTable){
+            if(!content::GroupOf(p.group))continue;
+            Model m;m.Open(Ready());L::Press(m,{Kind::Open,int(View::Shield),-1},0);L::Press(m,{Kind::Open,int(View::Menus),-1},0);
+            m.view=View(from);
+            int presses=0;
+            while(m.view!=p.id&&presses<3){
+                const auto l=L::Build(m,{},{});
+                const L::Element* tab=nullptr;for(const auto& e:l.elements)if(e.role==L::Role::Tab&&e.hit==Hit{Kind::Open,int(p.id),-1})tab=&e;
+                const L::Element* press=tab?tab:L::Find(l,groupHit(p.group));
+                Check(press!=nullptr,std::string("a way to ")+p.name);
+                L::Press(m,at(l,press),0);++presses;
+            }
+            Check(m.view==p.id&&presses<=2,std::string(p.name)+" in 2 presses or fewer from "+ViewName(View(from)));
+        }
+        {   // Last-page memory (in memory only, #352) and the open group's row.
+            Model m;m.Open(Ready());
+            L::Press(m,{Kind::Open,int(View::Shield),-1},0);
+            L::Press(m,groupHit(Group::Interface),0);Check(m.view==View::Wrist,"a fresh group opens its first page");
+            L::Press(m,{Kind::Open,int(View::Menus),-1},0);
+            L::Press(m,groupHit(Group::Gameplay),0);Check(m.view==View::Shield,"a group opens the page last opened in it");
+            L::Press(m,groupHit(Group::Interface),0);Check(m.view==View::Menus,"each group keeps its own");
+            const uint64_t before=m.revision;L::Press(m,groupHit(Group::Interface),0);Check(m.view==View::Menus&&m.revision==before,"pressing the open group stays put");
+            L::Press(m,{Kind::Open,int(View::Guide),-1},0);
+            {const auto l=L::Build(m,{},{});const auto* row=L::Find(l,groupHit(Group::Interface));
+             Check(row&&row->Has(L::Selected)&&L::Find(l,{Kind::Open,int(View::Menus),-1}),"the Guide keeps the last page's group open: the rail holds still");}
+            L::Press(m,groupHit(Group::Interface),0);Check(m.view==View::Menus,"and its row opens that page again");
+            L::Press(m,{Kind::Open,int(View::Targeting),SpellLock},0);L::Press(m,groupHit(Group::Graphics),0);L::Press(m,groupHit(Group::Gameplay),0);
+            Check(m.view==View::Targeting,"a page opened any way (a pending entry) is its group's last page");
+            m.Close();m.Open(Ready());L::Press(m,groupHit(Group::Graphics),0);L::Press(m,groupHit(Group::Gameplay),0);
+            Check(m.view==View::Targeting,"kept while the panel closes and opens");
+            m.Close();m.StartOver();m.Open(Ready());L::Press(m,groupHit(Group::Gameplay),0);
+            Check(m.view==View::Combat,"StartOver (a new game): every group back to its first page");
+            for(int bad:{int(Group::Tools),int(Group::Header),-1,MaxRailGroups,99})L::Press(m,{Kind::OpenGroup,bad,-1},0);
+            Check(m.view==View::Combat,"no group row, no press: Tools, Header, out of range");
+        }
+        {   // The changed mark: a group row shows any change on its pages, open or closed.
+            Model m;m.Open(Ready());L::Press(m,{Kind::Open,int(View::Wrist),-1},0);m.Set(ShieldRoll,90);
+            auto l=L::Build(m,{},{});CheckLayout(l,"rail, a change on Shield");
+            Check(L::Find(l,groupHit(Group::Gameplay))->Has(L::Changed)&&!L::Find(l,groupHit(Group::Interface))->Has(L::Changed),"a closed group's row shows its pages' change");
+            L::LayoutInput in;in.card=HelpGroupFirst+int(Group::Gameplay);
+            const auto c=L::Build(m,{},in);CheckLayout(c,"Gameplay's card with a change");
+            Check(FindRole(c,L::Role::CardState)&&FindRole(c,L::Role::CardState)->text=="1 not applied","its card counts what is not applied");
+            Check(FindRole(c,L::Role::CardText)->text=="Its pages: Combat, Targeting, Shield, Monsters and Physics. Press to open Combat.","its card names its pages and the page a press opens");
+            L::Press(m,groupHit(Group::Gameplay),0);l=L::Build(m,{},{});
+            Check(L::Find(l,groupHit(Group::Gameplay))->Has(L::Changed)&&L::Find(l,{Kind::Open,int(View::Shield),-1})->Has(L::Changed)&&
+                  !L::Find(l,{Kind::Open,int(View::Combat),-1})->Has(L::Changed),"open: the row and the changed page");
+        }
+    }
     {   // Reset page and Undo reset, with their guards.
         Model m;m.Open(Ready());L::Press(m,{Kind::Open,int(View::Shield),-1},0);
         auto shield=L::Build(m,{},{});Check(!FindRole(shield,L::Role::FooterResetPage)->Has(L::Enabled),"Reset page is off while every row is at its default");
@@ -437,9 +568,9 @@ int main(int argc,char** argv){
         L::Press(m,{Kind::Close},31000);L::Press(m,{Kind::ConfirmClose},31100);Check(m.open,"Discard waits 300 ms");
         L::Press(m,{Kind::ConfirmClose},31400);Check(!m.open&&!m.Dirty(),"Discard drops the draft and closes");
         // Open resets the redesign's transient state but keeps the view (#352); StartOver goes to the Guide.
-        m.Open(Ready());m.view=View::World;m.confirmClose=true;m.undoResetUntil=9;m.focusKey=3;m.pickedPreset=1;m.closeWhenSaved=true;m.resetKeys=ChangeMask{1};
+        m.Open(Ready());m.view=View::Environment;m.confirmClose=true;m.undoResetUntil=9;m.focusKey=3;m.pickedPreset=1;m.closeWhenSaved=true;m.resetKeys=ChangeMask{1};
         m.Open(Ready());
-        Check(m.view==View::World&&!m.confirmClose&&m.undoResetUntil==0&&m.focusKey==-1&&m.pickedPreset==-1&&!m.closeWhenSaved&&!m.resetKeys,"Open resets every new field");
+        Check(m.view==View::Environment&&!m.confirmClose&&m.undoResetUntil==0&&m.focusKey==-1&&m.pickedPreset==-1&&!m.closeWhenSaved&&!m.resetKeys,"Open resets every new field");
         L::Press(m,{Kind::Close},0);Check(!m.open,"Close without a draft closes at once");
     }
     {   // Calibrate is off while a draft waits; offline difficulty locks without its adapter.
@@ -451,7 +582,7 @@ int main(int argc,char** argv){
         m.Set(Dominant,1);body=L::Build(m,{},{});
         for(const auto& e:body.elements)if(e.hit.kind==Kind::Calibrate)calibrate=&e;
         Check(!calibrate->Has(L::Enabled)&&FindRole(body,L::Role::Label,BodyCalibration)->sub=="Apply or discard first","Calibrate is disabled while Dirty, with the reason");
-        L::Press(m,{Kind::Open,int(View::Survival),-1},0);
+        L::Press(m,{Kind::Open,int(View::Monsters),-1},0);
         // As main: without the adapter the row shows the notice and stays editable (never locked).
         m.Discard();
         const auto survival=L::Build(m,{},{});CheckLayout(survival,"survival without the adapter");
@@ -474,7 +605,7 @@ int main(int argc,char** argv){
         L::LayoutInput notes;notes.notes={"D2R VR Unleashed / v0.3.24","A mod by monkeylashes","https://github.com/bearstonem/d2r-pcvr","beadlebytes; ChuckRibbits; Sergious.",lines,8};
         L::Press(m,{Kind::Open,int(View::WhatsNew),-1},0);
         const auto news=L::Build(m,{},notes);CheckLayout(news,"what's new");Check(CountRole(news,L::Role::NotesText)>=10,"What's new lists its lines");
-        Snapshot off=Ready();off.ready=false;m.Open(off);L::Press(m,{Kind::Open,int(View::World),-1},0);
+        Snapshot off=Ready();off.ready=false;m.Open(off);L::Press(m,{Kind::Open,int(View::Environment),-1},0);
         L::LayoutInput mono;mono.monoAudio=true;
         const auto world=L::Build(m,{},mono);CheckLayout(world,"not ready");
         Check(FindRole(world,L::Role::Warning)&&FindRole(world,L::Role::StatusStrip),"mono warning and the unavailable strip");
@@ -529,7 +660,7 @@ int main(int argc,char** argv){
             // slider and a Filter button; the card holds four switches, each flipping its own
             // setting, and stays open between presses.
             const Key B=LootBeamBrightness;
-            Model f;f.Open(Ready());L::Press(f,{Kind::Open,int(View::Interface),-1},0);
+            Model f;f.Open(Ready());L::Press(f,{Kind::Open,int(View::Labels),-1},0);
             const auto page=L::Build(f,{},{});CheckLayout(page,"interface: loot beams row");
             int rows=0;for(const auto& e:page.elements)if(e.role==L::Role::Row&&(e.key==B||e.key==LootBeamUnique||e.key==LootBeamSet||e.key==LootBeamRare||e.key==LootBeamRunes))++rows;
             Check(rows==1&&FindRole(page,L::Role::Row,B),"Loot beams: one row, the brightness slider's");
@@ -543,7 +674,7 @@ int main(int argc,char** argv){
             L::Press(f,{Kind::Change,B,-1},10);Check(f.Get()[B]==90,"- lowers the brightness a step (10%)");
             for(int i=0;i<12;++i)L::Press(f,{Kind::Change,B,-1},20);Check(f.Get()[B]==10,"and stops at 10%");
             L::Press(f,{Kind::Undo,B},30);Check(f.Get()[B]==100&&!f.Dirty(),"Undo: back to 100%");
-            const auto keys=L::RowsOf(View::Interface,f.Get(),{});bool all[5]={};
+            const auto keys=L::RowsOf(View::Labels,f.Get(),{});bool all[5]={};
             for(int i=0;i<keys.count;++i){const Key k=keys.keys[size_t(i)];if(k==B)all[4]=true;for(int b=0;b<4;++b)if(k==LootBeamUnique+b)all[b]=true;}
             Check(all[0]&&all[1]&&all[2]&&all[3]&&all[4],"the page's keys hold all five (Reset page resets them)");
             L::Press(f,button->hit,1000);Check(f.popoverKey==B,"Filter opens the card");
@@ -581,24 +712,24 @@ int main(int argc,char** argv){
             const auto closed=L::Build(f,{},{});
             const auto* summary=FindRole(closed,L::Role::Label,B);
             Check(summary&&summary->sub=="Set, Runes"&&summary->Has(L::Changed),"the row: what shows now, marked changed");
-            Check(L::ChangedCount(f,View::Interface,{})==3,"three changes on the page");
+            Check(L::ChangedCount(f,View::Labels,{})==3,"three changes on the page");
             L::Press(f,button->hit,2000);L::Press(f,{Kind::Set,LootBeamSet,0,0},2400);L::Press(f,{Kind::Set,LootBeamRunes,0,0},2500);
             L::Press(f,{Kind::Close},2600);Check(f.popoverKey<0&&f.open,"Right B closes the card first");
             const auto none=L::Build(f,{},{});
             Check(FindRole(none,L::Role::Label,B)->sub=="Off: none","all four Off: none");
             L::Press(f,{Kind::ResetPage},3000);
             Check(f.Get()[B]==100&&f.Get()[LootBeamUnique]==1&&f.Get()[LootBeamSet]==1&&f.Get()[LootBeamRare]==1&&f.Get()[LootBeamRunes]==1,"Reset page: 100%, all four On");
-            Model g;g.Open(Ready());L::Press(g,{Kind::Open,int(View::Interface),-1},0);L::Press(g,{Kind::Popover,B},100);
+            Model g;g.Open(Ready());L::Press(g,{Kind::Open,int(View::Labels),-1},0);L::Press(g,{Kind::Popover,B},100);
             L::Press(g,{Kind::Set,ProjectileAimAssist,0,1},500);Check(g.popoverKey<0&&g.Get()[ProjectileAimAssist]!=1,"a setting outside the card only closes it");
         }
         // A grid: 9 named choices in two columns (a made-up list for Offline difficulty).
         static constexpr content::Option nine[]={{0,"Game's setting","a"},{1,"1 player","b"},{2,"2 players","c"},{3,"3 players","d"},{4,"4 players","e"},
                                                   {5,"5 players","f"},{6,"6 players","g"},{7,"7 players","h"},{8,"8 players","i"}};
-        static constexpr content::Override grid[]={{.id="gameplay.offline_players",.page=View::Survival,.section="Offline monsters",.options=nine,.optionCount=9},
+        static constexpr content::Override grid[]={{.id="gameplay.offline_players",.page=View::Monsters,.section="Offline difficulty",.options=nine,.optionCount=9},
                                                    {.id="gameplay.shield_grip_cm",.page=View::Shield,.section="Fit on the arm",.options=nine,.optionCount=9}};
         static const content::MenuData gridMenu=content::BuildMenu(grid,std::size(grid),nullptr,0);
         const L::Tables gt=L::TablesOf(gridMenu);
-        Model g;g.Open(Ready());L::Press(g,{Kind::Open,int(View::Survival),-1},0,gt);
+        Model g;g.Open(Ready());L::Press(g,{Kind::Open,int(View::Monsters),-1},0,gt);
         Check(L::ControlOf(*gt.Row(OfflinePlayers),Defaults(),{})==L::Control::Popover,"9 choices: a popover");
         L::Press(g,{Kind::Popover,OfflinePlayers},0,gt);L::LayoutInput gi;gi.nowMs=500;
         const auto gl=L::Build(g,{},gi,{},gt);CheckLayout(gl,"popover grid");
@@ -623,48 +754,109 @@ int main(int argc,char** argv){
             }
         }
     }
-    {   // Frame generation (main's #313): a row in Performance > Image; NVIDIA's quality and scale on More, only while NVIDIA is chosen.
-        Check(tables.Row(FrameGeneration)&&tables.Row(FrameGeneration)->page==View::Performance&&std::string(tables.Section(View::Performance,tables.Row(FrameGeneration)->section))=="Image",
-              "frame generation sits in Performance > Image");
-        Check(tables.Row(FrameGenPreset)->page==View::More&&tables.Row(FrameGenScale)->page==View::More&&tables.Row(FrameGenPreset)->fallback&&std::string(tables.Row(FrameGenPreset)->label)=="NVIDIA flow quality",
-              "NVIDIA's quality and scale: our words, on More (Performance is full)");
-        Values off=Defaults();Check(L::CountRows(View::More,off,{})==0,"More stays hidden while frame generation is Off or FidelityFX");
-        Values nvidia=Defaults();nvidia[FrameGeneration]=2;nvidia[StereoRendering]=0;   // frame generation runs with Both eyes only
-        Check(L::CountRows(View::More,nvidia,{})==2,"NVIDIA brings its two rows to More");
-        {   // By turns (#343, owner 2026-10-25): the Frame generation row, its status line and NVIDIA's two rows are left out, not locked
-            Values turns=nvidia;turns[StereoRendering]=1;
-            Check(!RowShown(FrameGeneration,turns,{})&&!RowShown(FrameGenPreset,turns,{})&&!RowShown(FrameGenScale,turns,{}),"By turns hides Frame generation and NVIDIA's rows");
-            Check(L::CountRows(View::More,turns,{})==0&&!L::KeyVisible(FrameGeneration,turns,{})&&!L::KeyVisible(FrameGenPreset,turns,{}),"and More has nothing to show");
-            Check(L::CountRows(View::Performance,turns,{})+1==L::CountRows(View::Performance,nvidia,{}),"Performance has exactly one row fewer");
-            Values fidelity=Defaults();fidelity[StereoRendering]=0;fidelity[FrameGeneration]=1;
-            Check(RowShown(FrameGeneration,fidelity,{})&&!RowShown(FrameGenPreset,fidelity,{}),"Both eyes shows Frame generation; NVIDIA's rows only with NVIDIA");
-            Model hid;hid.Open(Ready(turns));L::Press(hid,{Kind::Open,int(View::Performance),-1},0);
-            L::LayoutInput inTurns;inTurns.frameGen={framevr::framegen::State::NeedsBothEyes,1,1,2,1,1,0,0,0};   // no card: the pointer cannot point at a row that is not drawn
-            const auto hidden=L::Build(hid,{},inTurns);CheckLayout(hidden,"performance, by turns, frame generation hidden");
-            std::string anyFg;for(const auto& e:hidden.elements)if(e.key==FrameGeneration||e.key==FrameGenPreset||e.key==FrameGenScale)anyFg+=" role"+std::to_string(int(e.role))+" '"+e.text+"'";
-            Check(anyFg.empty()&&!FindRole(hidden,L::Role::Label,FrameGeneration),"offending:"+anyFg+" "+"no Frame generation row, chip, status line or orphan header is drawn");
-            Check(std::string(HelpText(FrameGeneration)).find("Both eyes")!=std::string::npos,"its help still tells how to get it: Both eyes");
+    {   // Frames: the live Eyes control on top, frame generation under it, grayed while By turns is on.
+        const auto* fg=tables.Row(FrameGeneration);
+        Check(fg&&fg->page==View::Frames&&std::string(tables.Section(View::Frames,fg->section))=="Frame generation","frame generation sits in Frames");
+        for(Key k:{FrameGenPreset,FrameGenScale})Check(tables.Row(k)->page==View::Frames&&tables.Row(k)->section==fg->section&&!tables.Row(k)->fallback,"NVIDIA's quality and scale: our words, under it");
+        Check(tables.Row(DeferGpuWait)->page==View::Frames,"Defer GPU wait's row is on Frames");
+        // One setting on two pages: one row in the tables, one key.
+        int eyesRows=0;for(size_t i=0;i<tables.rowCount;++i)if(tables.rows[i].key==StereoRendering)++eyesRows;
+        Check(eyesRows==1&&tables.Row(StereoRendering)->page==View::Performance&&tables.Row(StereoRendering)->alsoOn==View::Frames,"Eyes drawn per frame: one row, drawn on Performance and on Frames");
+        int shared=0;for(size_t i=0;i<tables.rowCount;++i)if(tables.rows[i].alsoOn!=View::Count)++shared;
+        Check(shared==1,"it is the only row on two pages");
+        Check(L::CountRows(View::Performance,Defaults(),{})<=L::MaxViewRows,"Performance stays within 8 rows");
+        // Every state: the control first, and the rows gray or live with their reason. NVIDIA's rows follow the mode alone.
+        for(float stereo:{0.f,1.f})for(float mode:{0.f,1.f,2.f})for(float defer:{0.f,1.f}){
+            Values v=Defaults();v[StereoRendering]=stereo;v[FrameGeneration]=mode;v[DeferGpuWait]=defer;
+            const auto rows=L::RowsOf(View::Frames,v,{});
+            Check(rows.count>=1&&rows.keys[0]==StereoRendering,"Frames always shows at least the control, first");
+            Check(RowShown(FrameGeneration,v,{}),"Frame generation never hides");
+            Check(RowShown(FrameGenPreset,v,{})==(mode==2.f)&&RowShown(FrameGenScale,v,{})==(mode==2.f),"NVIDIA's rows only with the NVIDIA mode");
+            for(Key k:{FrameGeneration,FrameGenPreset,FrameGenScale})Check(RowEnabled(v,k)==(stereo==0.f),"gray by turns, live with Both eyes");
+            Check(L::CountRows(View::Frames,v,{})==(mode==2.f?4:2)+(defer==0.f?1:0),"the control, its rows and the offer's row");
+            Model x;x.Open(Ready(v));L::Press(x,{Kind::Open,int(View::Frames),-1},0);
+            for(int card:{-1,int(FrameGeneration),int(StereoRendering)}){
+                L::LayoutInput in;in.card=card;in.frameGen={framevr::framegen::State::Active,1,1,2,1,1,0,0,0};
+                const auto l=L::Build(x,{},in);CheckLayout(l,"frames, every state");
+                const auto* reason=FindRole(l,L::Role::Reason);
+                Check(reason&&reason->text==(stereo==1.f?"Off while One by turns is on: pick Both to use these.":"Available while Both is on."),"the reason line reads true in each state, at every card");
+                Check(!FindRole(l,L::Role::Intro),"no intro on Frames: its rows stay put");
+                const auto* eyes=FindRole(l,L::Role::Label,StereoRendering);const auto* gen=FindRole(l,L::Role::Label,FrameGeneration);
+                Check(eyes&&gen&&reason&&eyes->rect.y<reason->rect.y&&reason->rect.y<gen->rect.y,"the control, then the line, then the rows");
+                Check(gen&&gen->Has(L::Locked)==(stereo==1.f)&&(stereo==0.f||gen->sub=="Needs Both"),"a gray row says what it needs");
+                Check(!eyes||!eyes->Has(L::Locked),"the control itself is never gray");
+                Check(CountRole(l,L::Role::ReadoutBox)==1&&(defer==0.f)==(FindRole(l,L::Role::Button,DeferGpuWait)!=nullptr),"the readout fits under them, with the offer while it is Off");
+            }
         }
-        Check(L::CountRows(View::Performance,nvidia,{})<=L::MaxViewRows,"Performance stays within 8 rows");
-        Model m;m.Open(Ready(nvidia));L::Press(m,{Kind::Open,int(View::Performance),-1},0);
+        // The rows stay put: the Frame generation row and the control above it do not move when NVIDIA's rows come or go.
+        for(float stereo:{0.f,1.f})for(float defer:{0.f,1.f})for(int card:{-1,int(FrameGeneration)}){
+            const auto rowY=[&](float mode,Key k){
+                Values v=Defaults();v[StereoRendering]=stereo;v[FrameGeneration]=mode;v[DeferGpuWait]=defer;
+                Model x;x.Open(Ready(v));L::Press(x,{Kind::Open,int(View::Frames),-1},0);
+                L::LayoutInput in;in.card=card;
+                const auto* e=FindRole(L::Build(x,{},in),L::Role::Label,k);return e?e->rect.y:-1;};
+            Check(rowY(0,FrameGeneration)>0&&rowY(0,FrameGeneration)==rowY(2,FrameGeneration),"the Frame generation row's y is the same with and without the NVIDIA rows");
+            Check(rowY(0,StereoRendering)>0&&rowY(0,StereoRendering)==rowY(2,StereoRendering),"and the control's");
+        }
+        {   // The intro's words stay on the card.
+            Model x;x.Open(Ready());L::Press(x,{Kind::Open,int(View::Frames),-1},0);
+            const auto l=L::Build(x,{},{});const auto* text=FindRole(l,L::Role::CardText);
+            Check(text&&text->text.find(content::PageOf(View::Frames).intro)!=std::string::npos,"the idle card keeps the intro's text");
+        }
+        // Pressing it on either page changes the same value, and both pages show it at once.
+        const auto chosen=[](Model x,View view){L::Press(x,{Kind::Open,int(view),-1},0);for(const auto& e:L::Build(x,{},{}).elements)if(e.key==StereoRendering&&e.hit.kind==Kind::Set&&e.Has(L::Selected))return e.hit.value;return -1.f;};
+        Model two;two.Open(Ready());L::Press(two,{Kind::Open,int(View::Frames),-1},0);
+        Check(chosen(two,View::Frames)==1&&chosen(two,View::Performance)==1,"By turns on both pages");
+        L::Press(two,{Kind::Set,StereoRendering,0,0},0);
+        Check(two.Get()[StereoRendering]==0&&chosen(two,View::Frames)==0&&chosen(two,View::Performance)==0,"a press on Frames: Both eyes on both pages");
+        Check(L::ChangedCount(two,View::Frames,{})==1&&L::ChangedCount(two,View::Performance,{})==1,"each page says it is not applied");
+        {L::LayoutInput in;in.card=HelpGroupFirst+int(content::Group::Graphics);
+         L::Press(two,{Kind::Open,int(View::Combat),-1},0);
+         const auto c=L::Build(two,{},in);Check(FindRole(c,L::Role::CardState)&&FindRole(c,L::Role::CardState)->text=="1 not applied","Graphics' card counts the one setting once");}
+        L::Press(two,{Kind::Open,int(View::Performance),-1},0);L::Press(two,{Kind::Set,StereoRendering,0,1},0);
+        Check(two.Get()[StereoRendering]==1&&chosen(two,View::Frames)==1&&chosen(two,View::Performance)==1,"a press on Performance: By turns on both pages");
+        // A press on a gray row changes nothing; the same press with Both eyes does.
+        Model t;t.Open(Ready());L::Press(t,{Kind::Open,int(View::Frames),-1},0);
+        {const auto gray=L::Build(t,{},{});bool anyLive=false;int drawn=0;
+         for(const auto& e:gray.elements)if(e.key==FrameGeneration&&e.hit.kind!=Kind::None){++drawn;anyLive=anyLive||e.Has(L::Enabled);}
+         Check(drawn>0&&!anyLive,"by turns no control on the gray row is live");}
+        L::Press(t,{Kind::Set,FrameGeneration,0,1},0);Check(t.Get()[FrameGeneration]==0,"by turns a press on it changes nothing");
+        L::Press(t,{Kind::Change,FrameGeneration,1},0);Check(t.Get()[FrameGeneration]==0,"nor does a step");
+        L::Press(t,{Kind::Default,FrameGeneration},0);Check(!t.Dirty(),"nor Default");
+        {L::LayoutInput in;in.card=FrameGeneration;const auto c=L::Build(t,{},in);
+         Check(FindRole(c,L::Role::CardState)&&FindRole(c,L::Role::CardState)->text=="Locked. Now: Off","its card says it is locked and what it holds");
+         Check(std::string(HelpText(FrameGeneration)).find("Eyes drawn per frame: Both")!=std::string::npos,"its help tells how to get it, in the chip's word");}
+        L::Press(t,{Kind::Set,StereoRendering,0,0},0);
+        Check(!FindRole(L::Build(t,{},{}),L::Role::Label,FrameGeneration)->Has(L::Locked),"with Both eyes the row is live");
+        L::Press(t,{Kind::Set,FrameGeneration,0,1},0);Check(t.Get()[FrameGeneration]==1,"and turns on");
+        L::Press(t,{Kind::Set,StereoRendering,0,1},0);
+        Check(t.Get()[FrameGeneration]==1&&FindRole(L::Build(t,{},{}),L::Role::Label,FrameGeneration)->Has(L::Locked),"back to By turns it grays and keeps its value");
+        // Reset page on Frames resets the rows too, though it also takes the control back to By turns.
+        {Model r;r.Open(Ready());L::Press(r,{Kind::Open,int(View::Frames),-1},0);
+         L::Press(r,{Kind::Set,StereoRendering,0,0},0);L::Press(r,{Kind::Set,FrameGeneration,0,2},0);L::Press(r,{Kind::Set,FrameGenScale,0,1},0);
+         L::Press(r,{Kind::ResetPage},0);
+         Check(r.Get()[StereoRendering]==1&&r.Get()[FrameGeneration]==0&&r.Get()[FrameGenScale]==Definitions[FrameGenScale].defaultValue,"Reset page: the rows and the control");}
+        // Its status with Both eyes.
+        Values nvidia=Defaults();nvidia[FrameGeneration]=2;nvidia[StereoRendering]=0;
+        Check(L::CountRows(View::More,nvidia,{})==0,"NVIDIA's rows left More");
+        Model m;m.Open(Ready(nvidia));L::Press(m,{Kind::Open,int(View::Frames),-1},0);
         L::LayoutInput in;in.frameGen={framevr::framegen::State::Active,1,1,2,1,1,0,0,0};in.card=FrameGeneration;
-        const auto perf=L::Build(m,{},in);CheckLayout(perf,"performance, frame generation active");
+        const auto perf=L::Build(m,{},in);CheckLayout(perf,"frames, frame generation active");
         Check(FindRole(perf,L::Role::Label,FrameGeneration)->sub=="Now: active"&&!FindRole(perf,L::Role::Label,FrameGeneration)->Has(L::Warn),
               "its row says what OFXR Bridge is doing");
         {L::LayoutInput paused=in;paused.frameGen.state=framevr::framegen::State::NeedsBothEyes;const auto p=L::Build(m,{},paused);CheckLayout(p,"frame generation paused");
-         Check(FindRole(p,L::Role::Label,FrameGeneration)->sub=="Now: needs both eyes"&&FindRole(p,L::Role::Label,FrameGeneration)->Has(L::Warn),"by turns it is paused, in amber (#316)");}
-        // By turns the row is gone, so it shows only with Both eyes; switching the eyes brings it back.
-        Model t;t.Open(Ready());L::Press(t,{Kind::Open,int(View::Performance),-1},0);
-        Check(t.Get()[StereoRendering]==1&&!FindRole(L::Build(t,{},{}),L::Role::Label,FrameGeneration),"by turns there is no Frame generation row to press");
-        L::Press(t,{Kind::Set,StereoRendering,0,0},0);
-        Check(FindRole(L::Build(t,{},{}),L::Role::Label,FrameGeneration)&&!FindRole(L::Build(t,{},{}),L::Role::Label,FrameGeneration)->Has(L::Locked),"with Both eyes the row returns, not locked");
-        L::Press(t,{Kind::Set,FrameGeneration,0,1},0);
-        Check(t.Get()[FrameGeneration]==1,"with Both eyes it turns on");
-        L::Press(t,{Kind::Set,StereoRendering,0,1},0);
-        Check(!FindRole(L::Build(t,{},{}),L::Role::Label,FrameGeneration),"back to By turns the row goes again, with no orphan");
+         Check(FindRole(p,L::Role::Label,FrameGeneration)->sub=="Now: needs Both"&&FindRole(p,L::Role::Label,FrameGeneration)->Has(L::Warn),"the applied By turns pauses it, in amber (#316), while the draft is Both eyes");}
         Check(FindRole(perf,L::Role::CardState)&&FindRole(perf,L::Role::CardState)->text=="Active, OFXR Bridge NVIDIA Medium, 50% scale","its card has main's status line");
-        const auto band=L::Build(m,{},{});bool link=false;for(const auto& e:band.elements)if(e.hit.kind==Kind::Open&&e.hit.index==int(View::More)&&e.text=="2 more")link=true;
-        Check(link,"the band links More with NVIDIA's two rows");
+    }
+    {   // Defer GPU wait: its row on Frames, its button on both readouts; a press from Performance marks Frames.
+        Model d;d.Open(Ready());
+        for(View view:{View::Performance,View::Frames}){
+            L::Press(d,{Kind::Open,int(view),-1},0);const auto l=L::Build(d,{},{});CheckLayout(l,"the Defer button");
+            const auto* b=FindRole(l,L::Role::Button,DeferGpuWait);Check(b&&b->Has(L::Enabled),"both readouts offer it while it is Off");
+        }
+        L::Press(d,{Kind::Open,int(View::Performance),-1},0);L::Press(d,{Kind::Set,DeferGpuWait,0,1},0);
+        Check(d.Get()[DeferGpuWait]==1&&L::ChangedCount(d,View::Frames,{})==1&&L::ChangedCount(d,View::Performance,{})==0,"a press on Performance counts on Frames, its row's page");
+        for(View view:{View::Performance,View::Frames}){L::Press(d,{Kind::Open,int(view),-1},0);Check(!FindRole(L::Build(d,{},{}),L::Role::Button,DeferGpuWait),"and neither offers it once it is On");}
     }
     {   // Main's frame generation text and readout note (#313, #343), with the Virtual Desktop sentence
         const char* fgHelp=HelpText(FrameGeneration);const std::string vd="With Virtual Desktop, set its SSW to Disabled.";
@@ -674,11 +866,11 @@ int main(int argc,char** argv){
         (void)fgHelp;
         // while frame generation is active the readout gives way to the note (main's FrameGenPerformanceNote); otherwise the numbers
         Values both=Defaults();both[StereoRendering]=0;both[FrameGeneration]=1;
-        Model m;m.Open(Ready(both));L::Press(m,{Kind::Open,int(View::Performance),-1},0);
+        Model m;m.Open(Ready(both));L::Press(m,{Kind::Open,int(View::Frames),-1},0);
         const auto readoutText=[&](const L::Layout& l){std::string all;for(const auto& e:l.elements)if(e.role==L::Role::Readout)all+=e.text+"\n";return all;};
         L::LayoutInput active;active.frameGen={framevr::framegen::State::Active,1,1,2,1,1,0,0,0};
         active.performance=PerformanceReadout{true,true,52,11.1f,1.0f,7.0f,9.4f,1.5f};
-        const auto with=L::Build(m,{},active);CheckLayout(with,"performance, frame generation active, readout note");
+        const auto with=L::Build(m,{},active);CheckLayout(with,"frames, frame generation active, readout note");
         const std::string noteText=readoutText(with);
         Check(noteText.find(FrameGenPerformanceNote[0])!=std::string::npos&&noteText.find(FrameGenPerformanceNote[1])!=std::string::npos,"active: the readout shows the two note lines");
         Check(noteText.find("52 fps")==std::string::npos&&noteText.find("headset wait")==std::string::npos,"active: and none of the menu's own numbers");
@@ -689,42 +881,35 @@ int main(int argc,char** argv){
         for(const char* line:FrameGenPerformanceNote)Check(std::string(line).size()<=90,"each note line fits the readout's width");
     }
     {   // #352: the panel reopens where it was closed; a kept view with nothing to show falls back (SettleView)
-        Values nvidia=Defaults();nvidia[FrameGeneration]=2;nvidia[StereoRendering]=0;
-        Model m;m.Open(Ready(nvidia));L::Press(m,{Kind::Open,int(View::More),-1},0);
-        Check(m.view==View::More,"More opens while NVIDIA has rows there");
-        m.Close();m.Open(Ready(nvidia));L::SettleView(m);
+        const L::Tables moreRows=L::TablesOf(content::FallbackDemo());   // the real menu's More is empty: the safety net's rows
+        Model m;m.Open(Ready());L::Press(m,{Kind::Open,int(View::More),-1},0,moreRows);
+        Check(m.view==View::More,"More opens while it has rows");
+        m.Close();m.Open(Ready());L::SettleView(m,moreRows);
         Check(m.view==View::More&&m.morePage==0,"reopened with rows: still More");
-        m.morePage=5;L::SettleView(m);Check(m.view==View::More&&m.morePage==0,"a kept More page past the last clamps to the last");
-        m.Close();m.Open(Ready());L::SettleView(m);   // NVIDIA no longer chosen: More has no rows
+        m.morePage=5;L::SettleView(m,moreRows);Check(m.view==View::More&&m.morePage==L::MorePages(m.Get(),{},moreRows)-1,"a kept More page past the last clamps to the last");
+        m.morePage=0;m.Close();m.Open(Ready());L::SettleView(m);   // the real menu: More has no rows
         Check(m.view==View::Guide&&m.morePage==0,"a kept More with no rows falls to the Guide");
-        Model by;by.Open(Ready(nvidia));L::Press(by,{Kind::Open,int(View::More),-1},0);by.Close();
-        Values turns=nvidia;turns[StereoRendering]=1;by.Open(Ready(turns));L::SettleView(by);
-        Check(by.view==View::Guide,"By turns empties More too: back to the Guide");
         Model keep;keep.Open(Ready());L::Press(keep,{Kind::Open,int(View::Combat),-1},0);keep.Close();keep.Open(Ready());L::SettleView(keep);
         Check(keep.view==View::Combat,"a page with rows is kept");
         keep.Close();keep.StartOver();keep.Open(Ready());L::SettleView(keep);
-        Check(keep.view==View::Guide&&keep.lastPage==View::Body&&keep.morePage==0&&keep.notesPage==0,"StartOver (a new game): the Guide, page 1");
+        Check(keep.view==View::Guide&&keep.lastPage==View::Combat&&keep.morePage==0&&keep.notesPage==0,"StartOver (a new game): the Guide, page 1");
         Model pre;pre.Open(Ready());pre.view=View::Presets;L::SettleView(pre);
         Check(pre.view==View::Guide,"Presets, unavailable, fall to the Guide");
     }
-    {   // Movement speed and Stick toggle (main's #308, our rows): two adjacent full rows on one page, Body, with room to spare
+    {   // Movement speed on Moving; Stick toggle, which changes what the stick does, a full row on Hands.
         const auto* speed=tables.Row(RunSpeed);const auto* toggle=tables.Row(RunWalkToggle);
-        Check(speed&&toggle&&speed->page==View::Body&&toggle->page==View::Body&&!speed->fallback&&!toggle->fallback,"both rows are on the Body page, not the More fallback");
-        Check(speed&&toggle&&speed->section==toggle->section,"in one section");
+        Check(speed&&toggle&&speed->page==View::Moving&&toggle->page==View::Hands&&!speed->fallback&&!toggle->fallback&&!toggle->beside,"Movement speed on Moving, Stick toggle its own row on Hands");
         for(const auto& c:contexts)for(bool seated:{false,true}){
             Values v=Defaults();v[Seated]=seated;
-            Check(L::CountRows(View::Body,v,c)<=L::MaxViewRows&&L::KeyVisible(RunSpeed,v,c)&&L::KeyVisible(RunWalkToggle,v,c),"Body keeps both settings within 8 rows for every class");
+            Check(L::CountRows(View::Moving,v,c)<=L::MaxViewRows&&L::CountRows(View::Hands,v,c)==3&&L::KeyVisible(RunSpeed,v,c)&&L::KeyVisible(RunWalkToggle,v,c),"both show for every class");
         }
-        Model b;b.Open(Ready());L::Press(b,{Kind::Open,int(View::Body),-1},0);
-        const auto page=L::Build(b,{},{});CheckLayout(page,"body with movement rows");
-        const auto* label=FindRole(page,L::Role::Label,RunSpeed);Check(label!=nullptr,"Movement speed is drawn");
-        // the designer's shape: the toggle is a Value in Movement speed's row, 16 px or more after the + button, never a slab of its own
-        const auto* tog=FindRole(page,L::Role::Value,RunWalkToggle);const auto* plus=FindRole(page,L::Role::StepPlus,RunSpeed);
-        Check(tog&&plus&&tog->hit==Hit{Kind::Set,RunWalkToggle,0,1.f}&&tog->rect.x-(plus->rect.x+plus->rect.w)>=16,"Stick toggle: a press sets it, 16 px or more from the + button");
-        b.Set(RunWalkToggle,1);
-        const auto* on=FindRole(L::Build(b,{},{}),L::Role::Value,RunWalkToggle);Check(on&&on->hit==Hit{Kind::Set,RunWalkToggle,0,0.f},"and a press when On sets it Off");
+        Model b;b.Open(Ready());L::Press(b,{Kind::Open,int(View::Hands),-1},0);
+        const auto page=L::Build(b,{},{});CheckLayout(page,"hands with the stick toggle");
+        Check(FindRole(page,L::Role::Row,RunWalkToggle)!=nullptr,"Stick toggle is a row of its own");
+        const L::Element* tog=nullptr;for(const auto& e:page.elements)if(e.key==RunWalkToggle&&e.hit.kind==Kind::Set)tog=&e;
+        Check(tog&&tog->hit==Hit{Kind::Set,RunWalkToggle,0,1.f},"a press sets it");
         // the value labels: Walk, Base run, Run N%, Full run (main's ValueLabel)
-        const auto value=[&](float v)->std::string{Model x;x.Open(Ready());x.Set(RunSpeed,v);L::Press(x,{Kind::Open,int(View::Body),-1},0);
+        const auto value=[&](float v)->std::string{Model x;x.Open(Ready());x.Set(RunSpeed,v);L::Press(x,{Kind::Open,int(View::Moving),-1},0);
             const auto l=L::Build(x,{},{});for(const auto& e:l.elements)if(e.key==RunSpeed&&e.role==L::Role::Value)return e.text;return "?";};
         Check(value(-10)=="Walk"&&value(0)=="Base run"&&value(40)=="Run 40%"&&value(100)=="Full run","value labels read Walk, Base run, Run N%, Full run");
     }
@@ -738,7 +923,7 @@ int main(int argc,char** argv){
         Values v=Defaults();v[StereoRendering]=0;   // Both eyes: Frame generation is not locked
         Model m;m.Open(Ready(v));m.SetContext({heroclass::Sorceress});
         auto sub=[&](View view,Key k){L::Press(m,{Kind::Open,int(view),-1},0);const auto* e=FindRole(L::Build(m,m.context,{}),L::Role::Label,k);return e?std::make_pair(e->sub,e->Has(L::Warn)):std::make_pair(std::string(),false);};
-        for(auto [view,k]:{std::pair{View::Combat,Motion},std::pair{View::Performance,FrameGeneration}}){
+        for(auto [view,k]:{std::pair{View::Combat,Motion},std::pair{View::Frames,FrameGeneration}}){
             const auto [text,warn]=sub(view,k);
             Check(text==tables.Row(k)->warn&&warn,std::string("its warn line draws, amber: ")+tables.Row(k)->label);
         }
@@ -777,7 +962,7 @@ int main(int argc,char** argv){
     }
     {   // Warn lines come from the data (an override's warnWhen), not from Key checks in the layout.
         Values v=Defaults();v[SmoothTurn]=1;v[TurnSpeed]=160;v[StereoRendering]=1;
-        Model m;m.Open(Ready(v));L::Press(m,{Kind::Open,int(View::Body),-1},0);
+        Model m;m.Open(Ready(v));L::Press(m,{Kind::Open,int(View::Moving),-1},0);
         const auto body=L::Build(m,{},{});
         Check(FindRole(body,L::Role::Label,SmoothTurn)->sub=="Can cause motion sickness"&&FindRole(body,L::Role::Label,SmoothTurn)->Has(L::Warn)&&
               FindRole(body,L::Role::Label,TurnSpeed)->sub=="Fast turns are harder on the stomach","warn lines above their thresholds");
@@ -787,8 +972,8 @@ int main(int argc,char** argv){
         Check(tables.Row(SmoothTurn)->warnWhen.text&&tables.Row(StereoRendering)->warnWhen.above==.5f,"they are the overrides' data");
     }
     {   // The color grid (docs/VR_SETTINGS_MENU.md): By range a chip, 24 hues as dots, 6 a row in hue order, two presses to any color.
-        Values v=Defaults();v[TargetHighlight]=60;Model m;m.Open(Ready(v));L::Press(m,{Kind::Open,int(View::Targets),-1},0);
-        const auto page=L::Build(m,{},{});CheckLayout(page,"targets");
+        Values v=Defaults();v[TargetHighlight]=60;Model m;m.Open(Ready(v));L::Press(m,{Kind::Open,int(View::Outlines),-1},0);
+        const auto page=L::Build(m,{},{});CheckLayout(page,"outlines");
         const L::Element* face=nullptr;for(const auto& e:page.elements)if(e.role==L::Role::Value&&e.key==HighlightRight)face=&e;
         Check(face&&face->hit==Hit{Kind::Popover,HighlightRight}&&face->text==content::HueNameOf(m.Get()[HighlightRight])&&face->hue==m.Get()[HighlightRight]&&face->sub.empty(),
               "a color's value: its dot and name (no \"n of m\"); a press opens the grid");
@@ -816,7 +1001,7 @@ int main(int argc,char** argv){
         L::Press(m,azure->hit,1500);Check(m.Get()[HighlightRight]==210&&m.popoverKey<0,"one press picks the color and closes: two presses in all");
         L::Press(m,face->hit,2000);L::Press(m,byRange->hit,2400);Check(m.Get()[HighlightRight]==0,"By range is one press away too");
         // The arrow path line: Off as the chip, 0-345 as dots.
-        Values a=Defaults();Model bow;bow.Open(Ready(a));bow.SetContext({heroclass::Amazon});L::Press(bow,{Kind::Open,int(View::Targets),-1},0);
+        Values a=Defaults();Model bow;bow.Open(Ready(a));bow.SetContext({heroclass::Amazon});L::Press(bow,{Kind::Open,int(View::Targeting),-1},0);
         L::Press(bow,{Kind::Popover,BowLaser},0);L::LayoutInput bi;bi.nowMs=400;const auto laser=L::Build(bow,bow.context,bi);CheckLayout(laser,"arrow path grid");
         int laserDots=0;const L::Element* off=nullptr;for(const auto& e:laser.elements){if(e.role==L::Role::ColorDot)++laserDots;if(e.role==L::Role::PopoverOption)off=&e;}
         Check(laserDots==24&&off&&off->text=="Off"&&off->hit.value==LaserOff&&off->Has(L::Selected),"the arrow path line: Off a chip (chosen by default), 24 hues");
@@ -824,8 +1009,8 @@ int main(int argc,char** argv){
     {   // The fallback (docs/VR_SETTINGS_MENU.md): settings with no override still show, with upstream's words.
         const auto& demo=content::FallbackDemo();const L::Tables t=L::TablesOf(demo);
         auto rowOf=[&](Key k)->const content::ContentRow*{return t.Row(k);};
-        Check(rowOf(TorchFlame)&&rowOf(TorchFlame)->page==View::World&&rowOf(TorchFlame)->fallback&&
-              std::string(t.Section(View::World,rowOf(TorchFlame)->section))=="New","an unsorted [torch] setting: World's New section, at the bottom");
+        Check(rowOf(TorchFlame)&&rowOf(TorchFlame)->page==View::Environment&&rowOf(TorchFlame)->fallback&&
+              std::string(t.Section(View::Environment,rowOf(TorchFlame)->section))=="New","an unsorted [torch] setting: Environment's New section, at the bottom");
         Check(rowOf(DrawDistance)&&rowOf(DrawDistance)->page==View::Performance&&std::string(t.Section(View::Performance,rowOf(DrawDistance)->section))=="New",
               "[render]: Performance's New section");
         for(Key k:{ShieldGrip,ShieldOut,ShieldUp,ShieldFollow,ShieldRoll,CompanionAi,EnemySight,OfflinePlayers,HeartbeatStart,MapTopDown})
@@ -838,7 +1023,7 @@ int main(int argc,char** argv){
         Check(rowOf(MapTopDown)->kind==content::RowKind::Slider&&rowOf(MapTopDown)->optionCount==0&&content::ValueText(*rowOf(MapTopDown),2)=="2",
               "named choices with no names: an honest number control");
         Check(rowOf(CompanionAi)->kind==content::RowKind::Toggle&&rowOf(OfflinePlayers)->kind==content::RowKind::Slider,"the control comes from the data");
-        bool moreReported=false;for(const auto& l:demo.report)if(l.find("the More page is not empty: 12 settings")!=std::string::npos)moreReported=true;
+        bool moreReported=false;for(const auto& l:demo.report)if(l.find("the More page is not empty: 10 settings")!=std::string::npos)moreReported=true;
         Check(moreReported,"the report says More is not empty");
         // More: a header view with a band link while it has rows, 8 rows a page.
         Model m;m.Open(Ready());
@@ -873,7 +1058,7 @@ int main(int argc,char** argv){
         const auto cut=L::Build(w,{},{},wide,t);int cuts=0;
         for(const auto& e:cut.elements)if(e.role==L::Role::Label&&e.text.size()>3&&e.text.compare(e.text.size()-3,3,"...")==0){++cuts;Check(40.f*float(e.text.size())<=float(e.rect.w),"a cut label fits its room");}
         Check(cuts>0,"a fallback label too wide for its row ends in ...");
-        L::Press(w,{Kind::Open,int(View::Aim),-1},0,t);
+        L::Press(w,{Kind::Open,int(View::Targeting),-1},0,t);
         for(const auto& e:L::Build(w,{},{},wide,t).elements)if(e.role==L::Role::Label)Check(e.text.size()<3||e.text.compare(e.text.size()-3,3,"...")!=0,"our own labels are never cut");
     }
     std::printf("VR settings layout tests passed: %d checks, %d panels built\n",checks,built);
