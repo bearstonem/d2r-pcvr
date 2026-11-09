@@ -18,6 +18,7 @@
 #include "native_ui_signatures.h"
 #include "spells.h"
 #include "melee.h"
+#include "breakables.h"
 #include "prop_scan.h"
 #include "melee_weapon.h"
 #include "combat.h"
@@ -381,8 +382,21 @@ int Collision(uintptr_t game,uintptr_t unit) {
         }
     }
     std::sort(touches.begin(),touches.begin()+n,[](const Touch& x,const Touch& y){return x.fraction<y.fraction;});
+    breakables::ArrowContact breakableHit{};
+    const bool hasBreakable=!holy&&breakables::ArrowHit(game,from,to,a.flight.shot.unitsPerMetre,a.flight.shot.player.y,stop,breakableHit);
     for(size_t i=0;i<n;++i) {
         const auto& t=touches[i];
+        if(hasBreakable&&breakableHit.fraction<t.fraction) {
+            const auto contactPoint=from+(to-from)*breakableHit.fraction;
+            a.flight.distance=advance(breakableHit.fraction);
+            a.flight.alive=false;
+            a.flight.Contact(contactPoint);
+            a.flight.updatedAt=GetTickCount64();
+            MoveSpell(a,contactPoint);
+            breakables::OperateArrow(game,player,breakableHit.unit,breakableHit.id);
+            Store(slot,a);
+            return End(slot,a,game,unit);
+        }
         uint32_t mode=0;
         // A preceding hit/proc can kill or remove another candidate.
         if(melee::ServerUnit(game,1,t.id)!=t.unit||!Read(t.unit+0xc,mode)||mode==0||mode==12)continue;
@@ -409,6 +423,17 @@ int Collision(uintptr_t game,uintptr_t unit) {
             a.flight.Contact(from+(to-from)*t.fraction);
             a.flight.updatedAt=GetTickCount64();Store(slot,a);return 2;
         }
+    }
+    if(hasBreakable) {
+        const auto contactPoint=from+(to-from)*breakableHit.fraction;
+        a.flight.distance=advance(breakableHit.fraction);
+        a.flight.alive=false;
+        a.flight.Contact(contactPoint);
+        a.flight.updatedAt=GetTickCount64();
+        MoveSpell(a,contactPoint);
+        breakables::OperateArrow(game,player,breakableHit.unit,breakableHit.id);
+        Store(slot,a);
+        return End(slot,a,game,unit);
     }
     a.flight.distance=advance(stop);a.flight.updatedAt=GetTickCount64();
     if(stop<1)a.flight.Contact(from+(to-from)*stop);

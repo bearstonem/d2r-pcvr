@@ -140,4 +140,21 @@ int main() {
      std::thread thread([&]{assert(kick()==7);});thread.join();assert(kicks==4);}
     assert(kick()==7&&kicks==5&&!physical.player);
     assert(StartMode(G(),P(),123,8,2,41,3,4)==7&&kicks==6); // ordinary hooked calls forward all arguments
+
+    // Arrow flight tests against breakable containers
+    Reset();
+    ArrowContact contact{};
+    assert(ArrowHit(G(),{48.f,.5f,50.f},{52.f,.5f,50.f},4.f,0.f,1.f,contact));
+    assert(contact.unit==O()&&contact.id==41&&contact.fraction>.5f&&contact.fraction<.6f);
+    assert(!ArrowHit(G(),{48.f,.5f,50.f},{52.f,.5f,50.f},4.f,0.f,.5f,contact)); // stop fraction occludes
+    assert(!ArrowHit(G(),{48.f,3.f,50.f},{52.f,3.f,50.f},4.f,0.f,1.f,contact)); // arrow too high
+    assert(!ArrowHit(G(),{48.f,.5f,55.f},{52.f,.5f,55.f},4.f,0.f,1.f,contact)); // arrow off to the side
+    Reset(0);assert(!ArrowHit(G(),{48.f,.5f,50.f},{52.f,.5f,50.f},4.f,0.f,1.f,contact));
+    Reset(5);assert(ArrowHit(G(),{48.f,.5f,50.f},{52.f,.5f,50.f},4.f,0.f,1.f,contact));
+    assert(OperateArrow(G(),P(),contact.unit,contact.id));
+    assert(operations==1&&kicks==0&&pulses[0]==1);
+    assert(!ArrowHit(G(),{48.f,.5f,50.f},{52.f,.5f,50.f},4.f,0.f,1.f,contact)); // already broken
+    Reset(3);accept=false;
+    assert(ArrowHit(G(),{48.f,.5f,50.f},{52.f,.5f,50.f},4.f,0.f,1.f,contact));
+    assert(!OperateArrow(G(),P(),contact.unit,contact.id));
 }
