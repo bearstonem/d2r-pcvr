@@ -353,6 +353,8 @@ add_executable(telegraph-test telegraph_test.cpp)
 add_executable(aim-rules-test aim_rules_test.cpp)
 add_executable(target-cone-test target_cone_test.cpp)
 add_executable(gaze-test gaze_test.cpp)
+add_executable(gaze-aim-test gaze_aim_test.cpp)   # Aim with your eyes: the source, the blink fallback, the pick's hysteresis
+add_test(NAME gaze-aim-test COMMAND gaze-aim-test) # Check() exits on failure; needs no -UNDEBUG
 add_executable(window-focus-test window_focus_test.cpp)
 add_executable(callback-ticket-test callback_ticket_test.cpp)
 add_executable(local-player-test local_player_test.cpp ${ROOT}/vr/combat.cpp)

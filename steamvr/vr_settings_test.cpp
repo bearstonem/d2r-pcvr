@@ -505,6 +505,31 @@ int main(int argc,char** argv){
         m.Click(Step(AimFollowsView));Check(m.Get()[AimFollowsView]==1,"its toggle turns it On");
         Check(m.Click({Kind::Apply}).changed==(ChangeMask{1}<<AimFollowsView),"Apply saves only it");
     }
+    {   // Aim with your eyes: On by default, beside Aim with your view, only on a headset with eye tracking
+        const auto& d=Definitions[AimWithEyes];
+        Check(std::wstring(d.section)==L"gameplay"&&std::wstring(d.key)==L"aim_with_eyes"&&d.defaultValue==1&&d.min==0&&d.max==1&&d.step==1&&
+              Defaults()[AimWithEyes]==1&&AimWithEyes<ChangeMask::Bits,"[gameplay] aim_with_eyes: On or Off, On by default, its own change bit");
+        Check(AimWithEyes>RoomSteps,"appended after the keys before it (saved profiles keep their order)");
+        Context tracker;tracker.eyeTracker=true;
+        auto v=Defaults();
+        Check(!RowShown(AimWithEyes,v,tracker),"left out while nothing takes the aimed monster, as Aim with your view");
+        v[TargetHighlight]=50;
+        Check(RowShown(AimWithEyes,v,tracker)&&RowShown(AimFollowsView,v,tracker),"with an eye tracker: beside Aim with your view");
+        Check(!RowShown(AimWithEyes,v,{})&&RowShown(AimFollowsView,v,{}),"without one: Aim with your view alone");
+        for(const Key k:{SpellLock,GroundAim}){
+            auto w=Defaults();w[k]=k==GroundAim?2.f:1.f;
+            Check(RowShown(AimWithEyes,w,tracker)&&!RowShown(AimWithEyes,w,{}),"Skills go to the aimed monster or Ground skills on Aimed monster bring it, with a tracker");
+        }
+        Check(std::string(HelpText(AimWithEyes)).size()<450&&std::strstr(HelpText(AimWithEyes),"blink")&&std::strstr(HelpText(AimWithEyes),"On by default"),
+              "its help says what a blink and lost tracking do, and fits the card");
+        const auto* row=content::RowOf(AimWithEyes);
+        Check(row&&row->beside&&row->kind==content::RowKind::Toggle&&row->page==View::Targeting&&std::string(row->besideLabel)=="Eyes","a toggle drawn inside Aim with your view's row");
+        Model m;auto on=s;on.values[TargetHighlight]=50;m.Open(on);m.SetContext(tracker);
+        Check(layout::KeyVisible(AimWithEyes,m.Get(),m.context),"the panel shows it on a headset with eye tracking");
+        m.Click(Step(AimWithEyes));Check(m.Get()[AimWithEyes]==0,"its toggle turns it Off");
+        Check(m.Click({Kind::Apply}).changed==(ChangeMask{1}<<AimWithEyes),"Apply saves only it");
+        Check(Normalize(AimWithEyes,NAN)==1&&Normalize(AimWithEyes,7)==1&&Normalize(AimWithEyes,0)==0,"a malformed value reads On, the default");
+    }
     {   // Rows follow the character: another class's or weapon's are left out; unknown (the menus) shows them all
         const auto v=Defaults();
         for(int k:{int(heroclass::Sorceress),int(heroclass::Assassin),int(heroclass::Druid),int(heroclass::Necromancer)})

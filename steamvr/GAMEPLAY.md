@@ -567,7 +567,7 @@ sets the page's rows back to their defaults, with **Undo reset** for 6 seconds.
 |---|---|
 | Presets | Coming in a later update: the tab is grayed out and its card says so. Each preset will set only the rows it lists |
 | Gameplay > Combat | Motion combat, swing and stab speed to hit, skills on your moves (melee skills on a landed strike, Smite on a bash, arrow skills on a release), skill icons on weapons and thrown weapon lift |
-| Gameplay > Targeting | Whether skills go to the aimed monster, spell aim assist, keeping spell shots level, aiming a staff along the arm, aiming with your view (the eyes' 17-degree tunnel, the hands within 30 degrees of your head, a raised hand aiming alone), the arrow path line, where ground skills land (the game's aim, where you point or the aimed monster) and landing circles. Every option that changes how a cast aims is Off (Game's aim) by default, except Spell aim assist (Strong) |
+| Gameplay > Targeting | Whether skills go to the aimed monster, spell aim assist, keeping spell shots level, aiming a staff along the arm, aiming with your view (the eyes' 17-degree tunnel, the hands within 30 degrees of your head, a raised hand aiming alone) with **Eyes** (Aim with your eyes) beside it on a headset that shares eye tracking, the arrow path line, where ground skills land (the game's aim, where you point or the aimed monster) and landing circles. Every option that changes how a cast aims is Off (Game's aim) by default, except Spell aim assist (Strong) |
 | Gameplay > Shield | Bash speed to hit, the guard strain shadow (On or Off), and where a held shield sits on the forearm: along, out and across (all 0 by default), wrist turn and roll |
 | Gameplay > Monsters | Offline difficulty, monster sight range and the smarter mercenary with **Commands** beside it |
 | Gameplay > Physics | Rolling bottles, knockable props and pushable bodies |
@@ -604,7 +604,8 @@ row's choice also stay hidden until they do:
 - Outlines shown and both hands' outline colors while Monster outline is Off;
 - Landing circles while Ground skill aim is Game's aim;
 - Aim with your view until the outline, Skills go to the aimed monster or
-  Ground skill aim on Monster is on;
+  Ground skill aim on Monster is on, and Aim with your eyes beside it only on
+  a headset that shares eye tracking;
 - Edge detail reduction while Lower detail at edges is Off;
 - the snap angle or smooth turn speed of the turning mode not chosen;
 - the standing belt drop while seated;
@@ -2226,6 +2227,61 @@ the inventory (see DEVELOPMENT_SCENARIOS.md); drop them.
 | `beams_brightness` | `100` | The VR Settings slider, `10` to `100` (%). |
 | `beams` | `1` | `0` = no loot beams at all (read at start; not in the menu). |
 | `rune_min` | `26` | The lowest rune with a beam: 26 = Vex, 20 = Lem (read at start; not in the menu). |
+
+## Aim with your eyes
+
+On a headset whose OpenXR runtime shares eye tracking (`XR_EXT_eye_gaze_interaction`,
+the same binding Lower detail at edges = Eye tracked uses; the Steam Frame on
+SteamVR does), **VR Settings > Gameplay > Targeting > Aim with your eyes** (the
+**Eyes** switch beside Aim with your view, On by default, `[gameplay]
+aim_with_eyes`) makes "the one you look at" the monster your eyes are on rather
+than the one your head faces. That is the aim rules' third source
+(`aimrules::Eyes`): the outline while no hand points, the last choice of every
+cast's order after the button's hand and the other hand, and a cast's free aim
+with no monster and no hand held out. The hands' picks, and Aim with your view's
+30 degrees round the head for them, are unchanged. The row shows only while a
+tracker is bound (and, like Aim with your view, once something uses the aimed
+monster); without one the setting does nothing.
+
+How the pick is made (`steamvr/gaze_aim.h`, `vr/vrcam.cpp` `eyegaze`):
+
+- Each frame the runtime's gaze pose is located in the same space and at the same
+  display time as the eye views, turned into the left eye's view, and turned back
+  into the world through the left eye's camera, the way the head's own view
+  (`HeadGaze`) is. A sample counts while it is valid and tracked and, when the
+  runtime stamps it, under 100 ms old.
+- Each monster's body is an upright line from 0.2 m to 1.5 m above its floor spot
+  (the outline's spot), at the player's scale. A monster is off the gaze by the
+  angle to its nearest point, plus a quarter of how far above or below its middle
+  the gaze crosses it, so of two on one line of sight the one looked at nearer its
+  middle wins. Monsters behind walls or past the game's cast reach are skipped, as
+  for the head's picks.
+- Caught within 6 degrees, kept while within 10, and another takes over only
+  when 2 degrees nearer. Any change waits until it has been the choice for
+  100 ms, so a glance across the screen does not light each monster it passes;
+  a pick that dies or leaves sight gives way at once.
+- A blink or a dropped sample keeps the pick for up to 350 ms. Longer, the head's
+  view picks as before (Aim with your view's 17 / 30 degree tunnel, or the 30-degree
+  cone) until samples have come for 150 ms again.
+
+Cost: nothing while the setting, the tracker or a use is missing, or a menu is
+open. Otherwise one `xrGetActionStatePose` and one `xrLocateSpace` a frame (the
+same as eye-tracked foveation, whose samples it shares when both are on) and an
+angle for each of at most 64 monsters on vrcam's update thread.
+
+Log lines (`d2r-vr-frame.log`):
+
+- `Frame aim eyes: gaze targeting on - ...` when it starts, and `... off - <why>`
+  when it stops: the setting Off, no eye gaze extension, no tracker, nothing using
+  the aimed monster, or tracking lost for 350 ms (`waiting` when samples have not
+  come for a second after a start). At most one line a second, with the changes
+  between counted.
+- `Frame target lock: eyes on monster id N ... - by gaze, 1.2 deg off it` (or
+  `held through a blink`, or `by the head's view (no usable gaze)`) when the eyes'
+  pick changes, at most once a second.
+- `Frame aim eyes: 10 s: gaze 97%, held through blinks 2%, head 1% of N picks`.
+- `Frame gaze: samples usable=... ; for Aim with your eyes only` every 5 s, the
+  runtime's sample states (the foveation line, now also while only aiming reads them).
 
 ## Cancellation and performance
 

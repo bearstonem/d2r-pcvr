@@ -468,6 +468,11 @@ inline constexpr Override Overrides[]={
      .classes=Sorceress|Druid|WithStaff},
     {.id="gameplay.aim_follows_view",.page=View::Targeting,.section="Aiming",.kind=RowKind::Toggle,.label="Aim with your view",
      .help="Only monsters in front of your face can be aimed at. A hand held out and pointing still picks its own monster."},
+    // Aim with your eyes (gaze_aim.h; owner 2026-11-08): the right half of Aim with your view's row, shown only on a
+    // headset that shares eye tracking (RowShown: Context::eyeTracker).
+    {.id="gameplay.aim_with_eyes",.page=View::Targeting,.section="Aiming",.kind=RowKind::Toggle,.label="Aim with your eyes",
+     .help="The monster you look at is aimed at by where your eyes look, not your head. A blink keeps it; if tracking is lost, your head aims.",
+     .beside=true,.besideLabel="Eyes"},
     {.id="bow.path_laser_hue",.page=View::Targeting,.section="Aiming",.kind=RowKind::Swatch,.label="Arrow path line",
      .help="At full draw, a faint line shows the arrow's flight, up to 15 m, through walls. Not for crossbows, Multiple Shot, Guided Arrow or Strafe.",
      .format={.hueNames=true},FRAMEVR_NAMES(LaserOffName),.classes=Amazon|WithBow,.wraps=true},

@@ -36,6 +36,7 @@
 #include "../steamvr/loot_aim.h"
 #include "../steamvr/arm_pointing.h"
 #include "../steamvr/aim_reach.h"
+#include "../steamvr/gaze_aim.h"
 #include "../steamvr/torch_light.h"
 #include "../steamvr/light_radius.h"
 #include "../steamvr/elemental_hands.h"
@@ -3295,7 +3296,7 @@ constexpr framevr::settings::Key keys[] = {framevr::settings::TargetHighlight,
                                            framevr::settings::StaffPoint,
                                            framevr::settings::LandingCircles, framevr::settings::AimHighlights,
                                            framevr::settings::Dominant, framevr::settings::AimFollowsView,
-                                           framevr::settings::LootPick};
+                                           framevr::settings::LootPick, framevr::settings::AimWithEyes};
 constexpr int KeyCount = int(std::size(keys));
 void Refresh() {
     const ULONGLONG now = GetTickCount64();
@@ -3777,6 +3778,138 @@ bool HeadHeading(float& gx, float& gy) {
     gx = forward[0]; gy = forward[2];   // native OpenXR: world x/z are the grid's x/y
     return true;
 }
+// VR Settings > Gameplay > Targeting > Aim with your eyes (beside Aim with your view; gaze_aim.h): with an eye
+// tracker the eyes' pick and the casts' "where you look" go by the gaze instead of the head. Tick runs on vrcam's
+// update thread (mobaim::Tick), before aimtargets::Tick takes the pick; Line serves any thread.
+namespace eyegaze {
+namespace ga = framevr::gazeaim;
+ga::Fallback g_fallback;   // the update thread's
+ga::Picker g_picker;
+std::atomic<int> g_ray{int(ga::Ray::Head)};            // this tick's ga::Ray
+std::atomic<float> g_local[3]{0.0f, 0.0f, -1.0f};      // the last usable gaze, in the left eye's view
+std::atomic<bool> g_wanted{false};                      // gaze samples asked for (the option, a tracker, a use)
+// Gaze aiming's state for its log line: on, or why not.
+enum class State { On, Option, NoExtension, NoTracker, Idle, Waiting, Lost, Count };
+const char* StateText(State s) {
+    switch (s) {
+    case State::On: return "on - the monster you look at is the eyes' pick (caught within 6 deg of the gaze, kept to 10, another 2 deg nearer takes over after 100 ms; a blink under 350 ms keeps it)";
+    case State::Option: return "off - Aim with your eyes is Off; the head's view picks";
+    case State::NoExtension: return "off - no eye tracking: the OpenXR runtime offers no XR_EXT_eye_gaze_interaction; the head's view picks";
+    case State::NoTracker: return "off - no eye tracker: the runtime has the eye gaze extension but no usable tracker; the head's view picks";
+    case State::Idle: return "off - nothing uses the eyes' monster (Monster outline, Skills go to the aimed monster and Ground skill aim all Off)";
+    case State::Waiting: return "waiting - no usable gaze samples yet (eyes not seen or tracker idle); the head's view picks";
+    case State::Lost: return "off - eye tracking lost (no usable gaze for 350 ms); the head's view picks until the eyes are seen again";
+    default: return "?";
+    }
+}
+// The update thread, once a tick. needed: something takes the eyes' monster or "where you look" (the outline
+// or an Aim option); paused: a menu is open (no samples, no change logged).
+void Tick(bool needed, bool paused) {
+    const int support = framevr::GazeAimSupport();
+    const bool option = AimOn(framevr::settings::AimWithEyes);
+    const bool wanted = needed && option && support == 2 && !paused;
+    g_wanted.store(wanted);
+    framevr::WantGazeAim(wanted);
+    const ULONGLONG now = GetTickCount64();
+    float local[3] = {};
+    uint64_t at = 0;
+    // a sample counts while the transport keeps sampling: none for 100 ms (a stalled frame, unfocused) is lost
+    const bool valid = wanted && framevr::GazeAimLocal(local, at) && now - at <= 100;
+    if (valid) for (int i = 0; i < 3; ++i) g_local[i].store(local[i]);
+    const auto ray = g_fallback.Step(wanted, valid, now);
+    g_ray.store(int(ray));
+    if (ray != ga::Ray::Gaze) g_picker.Reset();   // a change waiting from before a blink or the head starts over
+    static bool seen = false;   // the gaze has picked since samples were last asked for: losing it now is news
+    if (!wanted) seen = false; else if (g_fallback.On()) seen = true;
+    if (paused || support < 0) return;   // a menu, or no OpenXR session yet: nothing to tell
+    // Telemetry: "Frame aim eyes:" when gaze aiming starts or stops, and why (at most once a second; a wait for
+    // samples under a second, after a start or a menu, is no news)
+    static State told = State::Count, last = State::Count;
+    static ULONGLONG toldAt = 0, waitingSince = 0;
+    static bool waiting = false;
+    static int changes = 0;
+    State state = !option ? State::Option : support == 0 ? State::NoExtension : support == 1 ? State::NoTracker :
+                  !needed ? State::Idle : g_fallback.On() ? State::On : seen ? State::Lost : State::Waiting;
+    if (state != State::Waiting) waiting = false;
+    else {
+        if (!waiting) { waiting = true; waitingSince = now; }
+        if (now - waitingSince < 1000) state = told;   // as last told
+    }
+    if (state != last) ++changes;
+    last = state;
+    if (state != told && now - toldAt >= 1000) {
+        LogF("Frame aim eyes: gaze targeting %s%s", StateText(state),
+             changes > 1 ? (std::string(" (") + std::to_string(changes) + " changes since the last line)").c_str() : "");
+        told = state; toldAt = now; changes = 0;
+    }
+    // Telemetry: every 10 s while wanted, how the eyes' pick went: by gaze, held through blinks, by the head
+    static uint32_t ticks[3] = {};
+    static ULONGLONG reportAt = 0;
+    if (!wanted) { ticks[0] = ticks[1] = ticks[2] = 0; reportAt = now + 10000; return; }
+    ++ticks[int(ray)];
+    if (now >= reportAt) {
+        const uint32_t all = ticks[0] + ticks[1] + ticks[2];
+        if (all) LogF("Frame aim eyes: 10 s: gaze %.0f%%, held through blinks %.0f%%, head %.0f%% of %u picks",
+                      100.0 * ticks[int(ga::Ray::Gaze)] / all, 100.0 * ticks[int(ga::Ray::Held)] / all, 100.0 * ticks[int(ga::Ray::Head)] / all, all);
+        ticks[0] = ticks[1] = ticks[2] = 0; reportAt = now + 10000;
+    }
+}
+// Any thread: this tick's line for the eyes' pick.
+ga::Ray Now() { return ga::Ray(g_ray.load()); }
+// The eyes' line by gaze (Ray Gaze, or Held through a blink: the last gaze), in render-world units: eye from
+// between the eyes, relative to the hero (hero: his render position, the floor at hero[1]); dir unit. False
+// while the head's view serves (HeadGaze) or with no camera yet.
+bool Line(float eye[3], float dir[3], float hero[3]) {
+    if (Now() == ga::Ray::Head) return false;
+    AcquireSRWLockShared(&g_skyLock); const SkyView s0 = g_skyView[0], s1 = g_skyView[1]; ReleaseSRWLockShared(&g_skyLock);
+    ga::Vec w;
+    if (!s0.axes_ok || !ga::ToWorld(s0.axes, {g_local[0].load(), g_local[1].load(), g_local[2].load()}, w)) return false;
+    for (int i = 0; i < 3; ++i) {
+        eye[i] = s1.axes_ok ? 0.5f * (s0.eyeRel[i] + s1.eyeRel[i]) : s0.eyeRel[i];
+        hero[i] = s0.hero[i];
+    }
+    dir[0] = w.x; dir[1] = w.y; dir[2] = w.z;
+    return std::isfinite(eye[0] + eye[1] + eye[2] + hero[0] + hero[1] + hero[2]);
+}
+// The eyes' pick by gaze: index into s (-1 none) and its degrees off the gaze (ga::DegreesOff), or false when
+// the head's view picks this tick. Held through a blink: the pick stays while it is in sight and reach.
+bool Pick(const targetlock::Snapshot& s, uint32_t current, int& index, float& off) {
+    index = -1; off = -1.0f;
+    const auto ray = Now();
+    if (ray == ga::Ray::Head) return false;
+    const auto usable = [&](const framevr::targetcone::Target& t) { return t.clear && framevr::aimreach::Within(t.x - s.heroX, t.y - s.heroY); };
+    if (ray == ga::Ray::Held) {
+        for (int i = 0; i < s.count && i < framevr::targetcone::MaxTargets; ++i) if (current && s.targets[i].id == current && usable(s.targets[i])) index = i;
+        return true;
+    }
+    float eye[3], dir[3], hero[3];
+    if (!Line(eye, dir, hero)) return false;
+    const float upm = std::max(1.0f, ScaleHeight()) / UserEyeHeightM();   // world units a metre
+    const float floor = hero[1], shear = framevr::coordinates::GroundShear;
+    ga::Candidate c[framevr::targetcone::MaxTargets];
+    int n = 0;
+    for (int i = 0; i < s.count && i < framevr::targetcone::MaxTargets; ++i) {
+        const auto& t = s.targets[i];
+        if (!usable(t)) continue;   // a wall between, or past the game's reach: as the head's picks
+        // its floor spot as the outline places it (render = grid*2 + floor x shear), relative to the hero
+        const ga::Vec base{t.x * 2.0f + floor * shear - hero[0], 0.0f, t.y * 2.0f + floor * shear - hero[2]};
+        c[n++] = {t.id, ga::DegreesOff({eye[0], eye[1], eye[2]}, {dir[0], dir[1], dir[2]}, base, ga::BodyLowM * upm, ga::BodyHighM * upm)};
+    }
+    const uint32_t id = g_picker.Step(c, n, current, GetTickCount64());
+    for (int i = 0; id && i < s.count && i < framevr::targetcone::MaxTargets; ++i) if (s.targets[i].id == id) index = i;
+    for (int k = 0; id && k < n; ++k) if (c[k].id == id) off = c[k].angle;
+    return true;
+}
+// The note the target lock line adds for the eyes: how this pick was made, while gaze aiming is asked for.
+const char* Note(char* out, size_t size, float off) {
+    if (!g_wanted.load()) return "";
+    const auto ray = Now();
+    if (ray == ga::Ray::Gaze && off >= 0.0f) snprintf(out, size, " - by gaze, %.1f deg off it", off);
+    else if (ray == ga::Ray::Held) snprintf(out, size, " - by gaze, held through a blink");
+    else snprintf(out, size, " - by the head's view (no usable gaze)");
+    return out;
+}
+}
 
 // The aim rules (aimrules: one table of how each skill uses the aimed monster).
 // A target for each hand while that arm is held out (armpointing: horizontal
@@ -3809,15 +3942,15 @@ std::atomic<uint32_t> g_held[2]{};   // the target a held button took, 0 none
 std::atomic<int> g_heldSource[2]{};
 const char* SourceName(int source) { return source == 0 ? "right hand" : source == 1 ? "left hand" : source == 99 ? "tactical priority" : "eyes"; }
 bool Pointing(int hand) { return hand >= 0 && hand < 2 && g_pointing[hand].load(); }
-void Store(int k, const targetlock::Snapshot* s, int i) {
+void Store(int k, const targetlock::Snapshot* s, int i, const char* note = "") {
     if (!s || i < 0) { g_pick[k].id.store(0); return; }
     const auto& t = s->targets[i];
     if (t.id != g_pick[k].id.load()) {
         static ULONGLONG lastLog[3] = {};
         if (GetTickCount64() - lastLog[k] > 1000) {
             lastLog[k] = GetTickCount64();
-            LogF("Frame target lock: %s on monster id %u at %.1f %.1f, %.1f cells (%d hostile near)", SourceName(k), t.id, t.x, t.y,
-                 std::hypot(t.x - s->heroX, t.y - s->heroY), s->count);
+            LogF("Frame target lock: %s on monster id %u at %.1f %.1f, %.1f cells (%d hostile near)%s", SourceName(k), t.id, t.x, t.y,
+                 std::hypot(t.x - s->heroX, t.y - s->heroY), s->count, note);
         }
     }
     g_pick[k].id.store(t.id); g_pick[k].at.store(GetTickCount64());
@@ -3874,12 +4007,15 @@ void Tick(const targetlock::Snapshot* s) {
             i = framevr::targetcone::Pick(hs->targets, hs->count, hs->heroX, hs->heroY, d[0], d[2], g_pick[h].id.load());
         Store(h, s, i);
     }
-    float gx = 0, gy = 0;
+    float gx = 0, gy = 0, off = -1.0f;
     int eyes = -1;   // Aim follows your view: caught in the 17-degree tunnel, kept to 30 (Telemetry: "Frame target lock: eyes")
-    if (s && HeadHeading(gx, gy))
+    // Aim with your eyes: the monster nearest the gaze (eyegaze::Pick), else the head's view as before
+    const bool gazed = s && eyegaze::Pick(*s, g_pick[2].id.load(), eyes, off);
+    if (!gazed && s && HeadHeading(gx, gy))
         eyes = follows ? framevr::targetcone::PickTunnel(s->targets, s->count, s->heroX, s->heroY, gx, gy, g_pick[2].id.load())
                        : framevr::targetcone::Pick(s->targets, s->count, s->heroX, s->heroY, gx, gy, g_pick[2].id.load());
-    Store(framevr::aimrules::Eyes, s, eyes);
+    char note[64];
+    Store(framevr::aimrules::Eyes, s, eyes, eyegaze::Note(note, sizeof note, off));
 }
 // The hand the outline puts first (and the only one under Dominant hand): the
 // bow hand is the main hand while a bow is out, so a monster both hands are on
@@ -3998,13 +4134,16 @@ int ShownTargets(Shown out[2]) {
     return n;
 }
 // No target: where the button's arm points, else the other arm, else the eyes
-// (3D, so a lazy bolt follows the head). forceGround tilts it down as HandRay does.
+// (3D, so a lazy bolt follows the head; with Aim with your eyes, the gaze).
+// forceGround tilts it down as HandRay does.
 bool FreeAimRay(int button, bool bow, float* o, float* d, bool forceGround, const char** how = nullptr) {
     const int first = bow || button == 1 ? 1 : 0;
     for (const int h : {first, 1 - first})
         if (Pointing(h) && HandRay(o, d, forceGround, h)) { if (how) *how = SourceName(h); return true; }
-    float eye[3], f[3];
-    if (!HeadGaze(eye, f)) return false;
+    float eye[3], f[3], hero[3];
+    const bool gazed = eyegaze::Line(eye, f, hero);   // Aim with your eyes: where the eyes look
+    if (gazed) for (int i = 0; i < 3; ++i) eye[i] += hero[i];
+    else if (!HeadGaze(eye, f)) return false;
     const float horizontal = std::hypot(f[0], f[2]);
     if (forceGround) {
         if (horizontal < 1e-3f) return false;
@@ -4013,7 +4152,7 @@ bool FreeAimRay(int button, bool bow, float* o, float* d, bool forceGround, cons
     const float length = std::sqrt(f[0] * f[0] + f[1] * f[1] + f[2] * f[2]);
     if (!std::isfinite(length) || length < 1e-3f) return false;
     for (int i = 0; i < 3; ++i) { o[i] = eye[i]; d[i] = f[i] / length; }
-    if (how) *how = "eyes";
+    if (how) *how = gazed ? "eyes' gaze" : "eyes";
     return true;
 }
 // The cast now: its button's hand, a bow skill, its skill and rule.
@@ -4087,6 +4226,10 @@ void Tick() {
         rested = resting;
         LogF("Frame aim rules: %s", resting ? "Skills go to the aimed monster, Ground skills and the outline Off - no arm tracking or hand-offs" : "an Aim option or the outline On - arms tracked");
     }
+    // Aim with your eyes: gaze samples only while the outline or an Aim option takes the eyes' monster or ray
+    // (not for the tactical commands alone); none out of the world or with a menu open.
+    eyegaze::Tick(TargetHighlightOn() || framevr::aimrules::Any(aimtargets::Options()),
+                  !g_enabled.load() || !g_inWorld.load() || gamestate::MenuOpen());
     if (resting) { aimtargets::Reset(); return; }
     const auto s = targetlock::Get();
     const bool fresh = wanted && !gamestate::MenuOpen() && s.at && GetTickCount64() - s.at <= 500;
