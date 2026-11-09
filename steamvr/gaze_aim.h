@@ -67,7 +67,9 @@ inline float DegreesOff(Vec eye,Vec dir,Vec floor,float low,float high){
 // it has been the choice for DwellMs: a glance's jump crosses the monsters between in 20-60 ms, and
 // the outline does not flash on each. A pick that died, or left sight or reach, gives way at once.
 constexpr float CatchDeg=6.f,KeepDeg=10.f,SwitchDeg=2.f;
-constexpr uint64_t DwellMs=100;
+// With no monster picked there is nothing to flash away from: the first one looked at is taken at once
+// (owner, 2026-11-09: "speed up the game's target acquisition"; 100 ms for every change before).
+constexpr uint64_t DwellMs=70;
 struct Candidate {uint32_t id=0;float angle=180;};   // in sight and in the game's reach; degrees off the gaze (DegreesOff)
 class Picker {
     bool waiting=false;uint32_t pending=0;uint64_t since=0;
@@ -87,6 +89,7 @@ public:
         if(!current||c[held].angle>KeepDeg)want=bestId;   // nothing, or the eyes left it: the nearest caught, or none
         else if(best>=0&&bestId!=current&&c[best].angle+SwitchDeg<c[held].angle)want=bestId;   // a clearly nearer one
         if(want==current){Reset();return current;}
+        if(!current){Reset();return want;}   // from nothing: at once
         if(!waiting||pending!=want){waiting=true;pending=want;since=now;}
         if(now-since<DwellMs)return current;
         Reset();return want;

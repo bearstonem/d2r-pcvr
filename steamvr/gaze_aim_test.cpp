@@ -68,9 +68,8 @@ int main(){
     {
         Picker p;uint64_t t=1000;
         Candidate one[]={{7,3.f}};
-        Check(p.Step(one,1,0,t)==0,"a first look waits for the dwell");
-        Check(p.Step(one,1,0,t+DwellMs-1)==0,"still waiting just before it");
-        Check(p.Step(one,1,0,t+DwellMs)==7,"then takes the monster looked at");
+        Check(p.Step(one,1,0,t)==7,"with nothing picked, the monster looked at is taken at once");
+        Check(DwellMs>60&&DwellMs<=80,"a change waits longer than a glance's 20-60 ms crossing, and no more than 80 ms");
         Candidate far[]={{7,CatchDeg+1}};
         Check(p.Step(far,1,0,t)==0&&p.Step(far,1,0,t+500)==0,"outside the catch cone: nothing");
         // kept within KeepDeg against one only a little nearer: two close monsters do not trade the pick

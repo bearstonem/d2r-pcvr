@@ -2287,9 +2287,16 @@ How the pick is made (`steamvr/gaze_aim.h`, `vr/vrcam.cpp` `eyegaze`):
   middle wins. Monsters behind walls or past the game's cast reach are skipped, as
   for the head's picks.
 - Caught within 6 degrees, kept while within 10, and another takes over only
-  when 2 degrees nearer. Any change waits until it has been the choice for
-  100 ms, so a glance across the screen does not light each monster it passes;
+  when 2 degrees nearer. With nothing picked, the first monster looked at is
+  taken at once; a change from one monster to another, or to none, waits until
+  it has been the choice for 70 ms (100 ms for every change before 2026-11-09),
+  so a glance across the screen does not light each monster it passes;
   a pick that dies or leaves sight gives way at once.
+- The monsters every pick chooses among (eyes, view and hands) are read from
+  the game every game update, 40 ms, while a hostile monster is near (every
+  100 ms before 2026-11-09, and still while none is), so a pick follows a
+  monster that moves or comes into view sooner. `Frame target lock: N scans in
+  10 s ... ms a second` reports what the reading costs.
 - A blink or a dropped sample keeps the pick for up to 350 ms. Longer, the head's
   view picks as before (Aim with your view's 17 / 30 degree tunnel, or the 30-degree
   cone) until samples have come for 150 ms again.
