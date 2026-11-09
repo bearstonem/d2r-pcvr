@@ -65,12 +65,14 @@ bool IsLocalOwner(uintptr_t owner) {
     uint32_t id=~0u,type=~0u,ownerId=~0u;
     return combat::LocalPlayerId(id)&&Read(owner,type)&&Read(owner+8,ownerId)&&SamePlayer(0,id,type,ownerId);
 }
-// Basic arrows, and a quiver arrow inside its own game-thread launch, share
-// the configured arrow speed. Native skill casts elsewhere keep theirs.
+// Basic arrows, a quiver arrow inside its own game-thread launch, and the
+// hero's own bow-skill arrows however they are cast (BowSkillArrow: Multiple
+// Shot's fan, Guided Arrow, Strafe's volley, ...) share the configured arrow
+// speed. Other native skill casts keep theirs.
 uint32_t LocalArrowParams(uintptr_t params) {
     uint32_t missile=~0u;uintptr_t owner=0;
     if(!enabled.load()||!Read(params+0x20,missile)||!Read(params+8,owner)||!IsLocalOwner(owner))return ~0u;
-    return missile==0||(missile&&missile==bowvr::QuiverLaunchMissile())?missile:~0u;
+    return missile==0||(missile&&missile==bowvr::QuiverLaunchMissile())||BowSkillArrow(missile)?missile:~0u;
 }
 
 // Scope is on the game's actual creation thread, on BOTH client and server.

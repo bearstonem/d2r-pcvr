@@ -2169,6 +2169,15 @@ reduce speed by up to 30%. Native velocity changes such as Slow Missiles are
 read on each tick. This mapping intentionally replaces the older slow native
 travel speed; `motion_controls=0` restores legacy controls and flight.
 
+The bow skills' own arrows take the same `arrow_speed` however they are cast
+(owner, 2026-11-08: Guided Arrow and Multiple Shot "are moving very slowly like
+the base game arrows ... they should all move like that"): Multiple Shot's fan,
+Guided Arrow, Strafe's volley, and Magic, Fire, Cold, Ice, Exploding,
+Immolation and Freezing Arrow cast by their button. Their flight stays the
+game's own (the fan, the homing, the volley's targets); only the speed it is
+created with changes. Crossbow bolts keep the game's speed, as the basic bolt
+does. The `Frame bow flight:` line counts the arrows sped up.
+
 The former ownership check treated the SDK's opaque player handle as a native
 unit pointer. It now uses the validated local native player id, including id
 zero, and checks owner type/id. That defect could prevent earlier speed and
