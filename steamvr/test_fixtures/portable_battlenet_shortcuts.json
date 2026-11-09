@@ -1,0 +1,48 @@
+{
+  "source_commit": "9683da9744e6a78153c02b95672c167aca6068f1",
+  "generator": "steamvr/steam_config.py:update_shortcuts",
+  "shortcuts": {
+    "0": {
+      "appid": 2629899298,
+      "appname": "Diablo II: Resurrected VR (Battle.net) - SteamVR",
+      "Exe": "\"C:\\Users\\Player\\Downloads\\D2R PCVR\\deps\\python\\python.exe\"",
+      "StartDir": "\"C:\\Users\\Player\\Downloads\\D2R PCVR\\steamvr\"",
+      "icon": "D:\\Games\\Diablo II Resurrected\\D2R.exe",
+      "ShortcutPath": "",
+      "LaunchOptions": "\"C:\\Users\\Player\\Downloads\\D2R PCVR\\steamvr\\launch_windows.py\" \"--battlenet-game=D:\\Games\\Diablo II Resurrected\" --experimental-battlenet --frame-vr \"--frame-openxr-runtime=C:\\Program Files (x86)\\Steam\\steamapps\\common\\SteamVR\\steamxr_win64.json\"",
+      "IsHidden": 0,
+      "AllowDesktopConfig": 0,
+      "AllowOverlay": 0,
+      "OpenVR": 1,
+      "Devkit": 0,
+      "DevkitGameID": "",
+      "DevkitOverrideAppID": 0,
+      "FlatpakAppID": "",
+      "LastPlayTime": 0,
+      "tags": {
+        "0": "D2R PCVR"
+      }
+    },
+    "1": {
+      "appid": 3614137152,
+      "appname": "Diablo II: Resurrected VR (Battle.net) - Virtual Desktop",
+      "Exe": "\"C:\\Users\\Player\\Downloads\\D2R PCVR\\deps\\python\\python.exe\"",
+      "StartDir": "\"C:\\Users\\Player\\Downloads\\D2R PCVR\\steamvr\"",
+      "icon": "D:\\Games\\Diablo II Resurrected\\D2R.exe",
+      "ShortcutPath": "",
+      "LaunchOptions": "\"C:\\Users\\Player\\Downloads\\D2R PCVR\\steamvr\\launch_windows.py\" \"--battlenet-game=D:\\Games\\Diablo II Resurrected\" --experimental-battlenet --frame-vr --frame-vdxr",
+      "IsHidden": 0,
+      "AllowDesktopConfig": 0,
+      "AllowOverlay": 0,
+      "OpenVR": 0,
+      "Devkit": 0,
+      "DevkitGameID": "",
+      "DevkitOverrideAppID": 0,
+      "FlatpakAppID": "",
+      "LastPlayTime": 0,
+      "tags": {
+        "0": "D2R PCVR"
+      }
+    }
+  }
+}

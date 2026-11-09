@@ -102,7 +102,8 @@ def launch_helper_roots(game, accounts, steam_game):
             for entry in entries.values():
                 if not isinstance(entry, dict) or not isinstance(entry.get('icon'), str):
                     continue
-                if Path(entry['icon']).resolve() != (game / 'D2R.exe').resolve():
+                if (Path(entry['icon']).resolve() != (game / 'D2R.exe').resolve()
+                        and Path(entry['icon']).resolve() != (profile / 'config/grid' / f"{entry.get('appid')}_icon.png").resolve()):
                     continue
                 parts = command_arguments(entry.get('LaunchOptions'))
                 games = [part.split('=', 1)[1] for part in parts
@@ -364,6 +365,14 @@ def install_selected(values, root):
     originals = {}
     for path in (selection['profile'] / 'config/localconfig.vdf', selection['profile'] / 'config/shortcuts.vdf', game / install.RECORD):
         originals[path] = path.read_bytes() if path.is_file() else None
+    routing = {} if selection['store'] == 'steam' else {
+        'store': 'battlenet', 'python': Path(sys.executable).resolve(),
+        'wrapper': root / 'steamvr/launch_windows.py', 'runtime': selection['runtime']}
+    preview = steam_config.update_shortcuts(originals[selection['profile'] / 'config/shortcuts.vdf'],
+        selection['steam'], game, selection['connections'], **routing)
+    _, artwork = steam_config.artwork_updates(preview, selection['profile'], selection['steam'], game,
+        selection['connections'], root / 'artwork', **routing)
+    originals.update({path: path.read_bytes() if path.is_file() else None for path in artwork})
     backups = root / 'setup-backups/game'
     before = set(backups.glob('*/manifest.json'))
     atomic_json(root / STATE, state)

@@ -3,6 +3,7 @@ import contextlib
 import io
 import hashlib
 import json
+import shutil
 import os
 from pathlib import Path
 import subprocess
@@ -163,6 +164,7 @@ class SteamSetupTests(unittest.TestCase):
         for quest, battlenet_in_package in ((True, False), (False, False), (True, True), (False, True)):
             with self.subTest(quest=quest, battlenet_in_package=battlenet_in_package), tempfile.TemporaryDirectory() as temp:
                 root = Path(temp)
+                shutil.copytree(Path(__file__).resolve().parent.parent / "artwork", root / "artwork")
                 steam = root / 'steam'
                 game = root / 'game'
                 saves = root / 'saves'
