@@ -44,6 +44,7 @@ static const GoldenRow Golden[]={
     {"gameplay.planar_spell_aim",View::Targeting,1,content::RowKind::Toggle,"Keep spell shots level",0,0},
     {"gameplay.staff_point",View::Targeting,1,content::RowKind::Toggle,"Aim staff along arm",0,0},
     {"gameplay.aim_follows_view",View::Targeting,1,content::RowKind::Toggle,"Aim with your view",0,0},
+    {"gameplay.aim_with_eyes",View::Targeting,1,content::RowKind::Toggle,"Aim with your eyes",0,0},   // drawn inside Aim with your view's row, eye trackers only (2026-11-08)
     {"bow.path_laser_hue",View::Targeting,1,content::RowKind::Swatch,"Arrow path line",0,1},
     {"gameplay.ground_aim",View::Targeting,2,content::RowKind::Choice,"Ground skill aim",3,0},
     {"gameplay.landing_circles",View::Targeting,2,content::RowKind::Toggle,"Landing circles",0,0},
@@ -223,7 +224,7 @@ int main(int argc,char** argv){
     }
     // ---- the map: no row lost, none left to More, the names and the owner's pairs ----
     {
-        Check(tables.rowCount==97,"97 settings on the menu, each one row");   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08)
+        Check(tables.rowCount==98,"98 settings on the menu, each one row");   // 94 in #419, + Melee reach, Walk direction, Room follows you, Aim with your eyes (2026-11-08)
         for(size_t i=0;i<tables.rowCount;++i)Check(!tables.rows[i].fallback&&tables.rows[i].page!=View::More,std::string("every setting has its page: ")+tables.rows[i].label);
         Check(content::Menu().report.empty(),"the tidy report is empty");
         struct Want {content::Group group;const char* name;std::vector<const char*> pages;};
@@ -246,6 +247,7 @@ int main(int argc,char** argv){
         Check(besideOf(CeilingTorches)==Ceiling,"Dungeon torchlight beside Dungeon ceilings");
         Check(besideOf(CompanionTactical)==CompanionAi,"Commands beside Smarter mercenary");
         Check(besideOf(LootPick)==LootLabelSize,"Loot pick beside Loot name size");
+        Check(besideOf(AimWithEyes)==AimFollowsView,"Eyes beside Aim with your view");
         Check(L::FilterOf(LootBeamBrightness).count==4,"Loot beams with its 4 filter switches");
         int readouts=0;for(int v=0;v<int(View::Count);++v)if(L::HasReadout(View(v)))++readouts;
         Check(readouts==2&&L::HasReadout(View::Performance)&&L::HasReadout(View::Frames),"the frame times on Performance and Frames, nowhere else");
@@ -266,6 +268,7 @@ int main(int argc,char** argv){
     for(int c=-1;c<=6;++c)contexts.push_back({c});
     contexts.push_back({heroclass::Paladin,true});contexts.push_back({heroclass::Assassin,false,true});contexts.push_back({heroclass::Sorceress,false,false,true});
     contexts.push_back({heroclass::Barbarian,true,true,true});
+    contexts.push_back({-1,false,false,false,true});contexts.push_back({heroclass::Amazon,true,false,false,true});   // a headset with eye tracking: Eyes beside Aim with your view
     auto state=[](int bits){
         Values v=Defaults();
         v[SmoothTurn]=float(bits&1);v[Seated]=float((bits>>1)&1);v[TargetHighlight]=(bits>>2)&1?60.f:0.f;

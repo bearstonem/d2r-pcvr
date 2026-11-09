@@ -110,6 +110,7 @@
 #include "foveation.h"
 #include "effects_layer.h"
 #include "gaze.h"
+#include "gaze_aim.h"
 #include "d2rcam.h"
 #include "profile.h"
 #include "../vr/skeletons.h"
@@ -700,6 +701,12 @@ XrAction gazeAction=XR_NULL_HANDLE;
 XrSpace gazeSpace=XR_NULL_HANDLE;
 std::array<gaze::UV,2> gazeCenters{};
 gaze::Stability gazeStability;
+// Aim with your eyes (gaze_aim.h): vrcam's update thread asks for samples while the option needs them
+// (WantGazeAim), with eye-tracked foveation on or off; the last one is kept for it here.
+std::atomic<bool> gazeAimWanted{false};
+std::atomic<int> gazeAimSupport{-1};   // GazeAimSupport: -1 no session yet, 0 no extension, 1 no tracker, 2 bound
+struct GazeAimSampled {bool valid=false;math::Vec local{0,0,-1};ULONGLONG at=0;};
+std::mutex gazeAimMutex;GazeAimSampled gazeAimSampled;
 double Milliseconds() {
     static const double scale=[](){LARGE_INTEGER f{};QueryPerformanceFrequency(&f);return 1000.0/double(f.QuadPart);}();
     LARGE_INTEGER t{};QueryPerformanceCounter(&t);return double(t.QuadPart)*scale;
@@ -1380,7 +1387,8 @@ bool LoadFunctions() {
         Say("Frame OpenXR: runtime does not expose XR_KHR_D3D12_enable");return false;
     }
     // Bind the optional capability at session creation so the in-headset
-    // toggle can enable it later. Samples are read only while eyeTracking is on.
+    // toggle can enable it later. Samples are read only while eyeTracking is on or Aim with your eyes
+    // wants them (gazeAimWanted).
     gazeExtension=supports(XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME);
     frameControllerExtension=supports(controllers::FrameExtension);
     std::vector<const char*> enabled{XR_KHR_D3D12_ENABLE_EXTENSION_NAME};
@@ -1500,6 +1508,7 @@ bool SetupActions() {
         XrActionSpaceCreateInfo gi{XR_TYPE_ACTION_SPACE_CREATE_INFO};gi.action=gazeAction;gi.poseInActionSpace.orientation.w=1;
         gazeReady=Check(pCreateActionSpace(session,&gi,&gazeSpace),"create gaze space");
     }
+    gazeAimSupport.store(!gazeExtension?0:gazeReady&&gazeSpace?2:1);
     return true;
 }
 bool WaitGpu();
@@ -2168,9 +2177,18 @@ void MenuPointer(const menus::Pad& controls) {
     triggerWasDown=pressed;cancelWasDown=(controls.buttons&menus::B)!=0;
 }
 
+// Aim with your eyes: this frame's gaze for vrcam (GazeAimLocal), in the left eye's view.
+void PublishGazeAim(bool valid,math::Vec local) {
+    std::lock_guard lock(gazeAimMutex);
+    gazeAimSampled.valid=valid;
+    if(valid){gazeAimSampled.local=local;gazeAimSampled.at=GetTickCount64();}
+}
 void SampleGaze() {
     gazeValid=false;
-    if(!eyeTracking.load()||!render||panelMode){gazeStability.Reset();return;}
+    // Foveation's eye tracking, or Aim with your eyes (gaze_aim.h), which reads them with foveation Fixed or Off too.
+    const bool foveate=eyeTracking.load(),aim=gazeAimWanted.load();
+    bool aimValid=false;math::Vec aimLocal{0,0,-1};
+    if(!(foveate||aim)||!render||panelMode){gazeStability.Reset();PublishGazeAim(false,aimLocal);return;}
     // These diagnostics report only validity/age categories, never gaze poses,
     // coordinates, fixation targets or a recorded gaze trajectory.
     enum {Unavailable,Inactive,Untracked,Untimed,Stale,Outside,Recovering,Usable,Count};
@@ -2184,28 +2202,39 @@ void SampleGaze() {
             constexpr auto needed=XR_SPACE_LOCATION_POSITION_VALID_BIT|XR_SPACE_LOCATION_ORIENTATION_VALID_BIT|
                 XR_SPACE_LOCATION_POSITION_TRACKED_BIT|XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT;
             if(XR_SUCCEEDED(pLocateSpace(gazeSpace,space,frameState.predictedDisplayTime,&loc))&&(loc.locationFlags&needed)==needed) {
+                // The gaze and the views are located in the same space at the same display time: the
+                // gaze in the left eye's view is what vrcam's left-eye camera axes turn into the world.
+                if(aim&&gazeaim::Usable(true,frameState.predictedDisplayTime,sample.time)) {
+                    aimLocal=math::Rotate(math::Conjugate(Q(views[0].pose.orientation)),math::Rotate(Q(loc.pose.orientation),{0,0,-1}));
+                    aimValid=std::isfinite(aimLocal.x+aimLocal.y+aimLocal.z);
+                }
                 status=sample.time?Stale:Untimed;
                 if(gaze::Fresh(frameState.predictedDisplayTime,sample.time)) {
-                    bool projected=true;
-                    for(unsigned i=0;i<2;++i) {
-                        const auto& f=views[i].fov;
-                        projected&=gaze::Project(Q(loc.pose.orientation),Q(views[i].pose.orientation),
-                            {f.angleLeft,f.angleRight,f.angleDown,f.angleUp},gazeCenters[i]);
+                    if(!foveate)status=Usable;   // aiming only: no foveation centres
+                    else {
+                        bool projected=true;
+                        for(unsigned i=0;i<2;++i) {
+                            const auto& f=views[i].fov;
+                            projected&=gaze::Project(Q(loc.pose.orientation),Q(views[i].pose.orientation),
+                                {f.angleLeft,f.angleRight,f.angleDown,f.angleUp},gazeCenters[i]);
+                        }
+                        status=projected?Recovering:Outside;
+                        gazeValid=gazeStability.Update(projected,gazeCenters);
+                        if(gazeValid)status=Usable;
                     }
-                    status=projected?Recovering:Outside;
-                    gazeValid=gazeStability.Update(projected,gazeCenters);
-                    if(gazeValid)status=Usable;
                 }
             }
         }
     }
+    PublishGazeAim(aimValid,aimLocal);
     if(status!=Recovering&&status!=Usable)gazeStability.Reset();
     static std::array<uint32_t,Count> counts{};static ULONGLONG reportAt=0;
     ++counts[status];const auto now=GetTickCount64();
     if(now>=reportAt) {
         char line[300];std::snprintf(line,sizeof line,
-            "Frame gaze: samples usable=%u recovery/jump=%u unavailable=%u inactive=%u untracked=%u untimed=%u stale=%u outside=%u; invalid uses full quality",
-            counts[Usable],counts[Recovering],counts[Unavailable],counts[Inactive],counts[Untracked],counts[Untimed],counts[Stale],counts[Outside]);
+            "Frame gaze: samples usable=%u recovery/jump=%u unavailable=%u inactive=%u untracked=%u untimed=%u stale=%u outside=%u; %s",
+            counts[Usable],counts[Recovering],counts[Unavailable],counts[Inactive],counts[Untracked],counts[Untimed],counts[Stale],counts[Outside],
+            foveate?(aim?"invalid uses full quality; aiming too":"invalid uses full quality"):"for Aim with your eyes only (foveation not eye tracked)");
         Say(line);counts={};reportAt=now+5000;
     }
 }
@@ -2499,6 +2528,7 @@ void SettingsPointer(bool grip) {
         const auto weapon=gamestate::WeaponType();
         context.bow=weapon==D2RVR_TYPE_BOW;context.staff=weapon==D2RVR_TYPE_STAFF;
         context.thrown=weapon==D2RVR_TYPE_JAVELIN||weapon==D2RVR_TYPE_THROWING||gamestate::RightThrowingPotion();   // a throwing potion's toss is lifted too
+        context.eyeTracker=gazeReady&&gazeSpace;   // Aim with your eyes shows only with one
         settingsModel.SetContext(context);settings::layout::SettleView(settingsModel);
     }
     const auto previousView=settingsModel.view;
@@ -5925,6 +5955,13 @@ void ConfigureTurnsSharp(bool on) {
     if(read.exchange(on?1:0)!=(on?1:0))SetTurnsSharp(on);
 }
 void ConfigureEyeTracking(bool on) {eyeTracking.store(on);}
+void WantGazeAim(bool wanted) {gazeAimWanted.store(wanted);}
+int GazeAimSupport() {return gazeAimSupport.load();}
+bool GazeAimLocal(float local[3],uint64_t& at) {
+    std::lock_guard lock(gazeAimMutex);
+    local[0]=gazeAimSampled.local.x;local[1]=gazeAimSampled.local.y;local[2]=gazeAimSampled.local.z;at=gazeAimSampled.at;
+    return gazeAimSampled.valid;
+}
 void BeginEye(int eye) {
     hud::UiFrame(spatialMode,!journalMode,eye);
     std::lock_guard lock(mutex);
@@ -7172,6 +7209,7 @@ void Shutdown(bool preserveResolution) {
     if(leftAimSpace&&pDestroySpace)pDestroySpace(leftAimSpace);leftAimSpace=XR_NULL_HANDLE;
     if(gazeSpace&&pDestroySpace)pDestroySpace(gazeSpace);gazeSpace=XR_NULL_HANDLE;
     gazeAction=XR_NULL_HANDLE;gazeReady=gazeValid=gazeExtension=gazeSupported=false;gazeStability.Reset();
+    gazeAimSupport.store(-1);PublishGazeAim(false,{0,0,-1});
     detectedControllers={};controllerLabels={};controllerProfilesDirty=true;frameControllerExtension=false;
     for(auto& e:eyes){if(e.chain&&pDestroySwapchain)pDestroySwapchain(e.chain);e={};}
     mirrorSupported=mirrorMono=false;
