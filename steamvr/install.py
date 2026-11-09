@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 from pathlib import PurePosixPath
 import shutil
+import ssl
 import subprocess
 import tempfile
 import urllib.request
@@ -206,6 +207,39 @@ def dependency_checksum_error(source, expected, actual):
         'No game files changed.')
 
 
+USER_AGENT = 'D2R-PCVR-installer/0.1'
+
+
+def windows_download(url, max_bytes, python_error):
+    """Download through Windows' own curl after Python rejected the certificate.
+
+    Windows installs many trusted roots only when a Windows connection first
+    needs them (GitHub's release downloads need ISRG Root X1), while Python
+    only reads the roots already installed. Windows' check also fetches a
+    missing root, so later downloads work in Python too. The certificate is
+    still verified, and the caller still requires the pinned SHA-256.
+    """
+    curl = Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32/curl.exe'
+    reason = f'certificate not trusted by Python ({python_error.verify_message})'
+    if not curl.is_file():
+        raise OSError(f'{reason}; Windows curl not found to retry')
+    print(f'{reason}; retrying through Windows')
+    with tempfile.TemporaryDirectory(prefix='d2r-pcvr-download-') as temporary:
+        target = Path(temporary) / 'download'
+        # Give up after 60 s without progress, as urlopen's timeout does.
+        result = subprocess.run(
+            [str(curl), '--fail', '--location', '--silent', '--show-error', '--connect-timeout', '60',
+             '--speed-limit', '1', '--speed-time', '60', '--max-filesize', str(max_bytes),
+             '--user-agent', USER_AGENT, '--output', str(target), url],
+            capture_output=True, text=True, errors='replace', creationflags=0x08000000)
+        if result.returncode or not target.is_file():
+            # One line: curl's first names the error, the rest are advice.
+            detail = result.stderr.strip().split('\n')[0].strip() or f'curl exit code {result.returncode}'
+            raise OSError(f'{reason}; the Windows download failed too: {detail}')
+        with target.open('rb') as downloaded:
+            return downloaded.read(max_bytes + 1)
+
+
 def download_verified(url, path, digest, max_bytes=100 * 1024 * 1024):
     expected = (digest,) if isinstance(digest, str) else tuple(digest)
     cached = read_dependency(path, missing_ok=True)
@@ -213,9 +247,14 @@ def download_verified(url, path, digest, max_bytes=100 * 1024 * 1024):
         print(f'Using verified cached dependency: {path.name}')
         return
     print(f'Downloading {url}')
-    request = urllib.request.Request(url, headers={'User-Agent': 'D2R-PCVR-installer/0.1'})
-    with urllib.request.urlopen(request, timeout=60) as response:
-        data = response.read(max_bytes + 1)
+    request = urllib.request.Request(url, headers={'User-Agent': USER_AGENT})
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            data = response.read(max_bytes + 1)
+    except urllib.error.URLError as error:
+        if os.name != 'nt' or not isinstance(error.reason, ssl.SSLCertVerificationError):
+            raise
+        data = windows_download(url, max_bytes, error.reason)
     received = hashlib.sha256(data).hexdigest()
     if received not in expected:
         raise dependency_checksum_error(url, expected, received)
