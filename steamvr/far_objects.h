@@ -1,5 +1,5 @@
 #pragma once
-// Big objects drawn farther ([render] big_radius; VR Settings > Performance > Big objects, under Scenery distance).
+// Big objects drawn farther ([render] big_radius; VR Settings > Graphics > Performance > Big objects, under Scenery distance).
 // The game puts every model - houses, props, units - on standby, undrawn, once its box is farther
 // from the hero across the ground than the object draw distance (the AssetStandbySystem's test,
 // cleanroom/drawdist). On the horizon a tree or a house still stands out where a stone or a tuft of

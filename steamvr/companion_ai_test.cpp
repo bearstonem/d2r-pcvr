@@ -215,8 +215,9 @@ uintptr_t ServerUnit(uintptr_t game, int type, uint32_t id) {
     (void)game; (void)type; (void)id;
     return g_testServerUnit ? g_testServerUnit : 0x40000;
 }
-bool HirelingVitals(uint32_t hint, float& health, float& maxHealth, uint32_t& classId, uint32_t& unitId) {
+bool HirelingVitals(uint32_t hint, float& health, float& maxHealth, uint32_t& classId, uint32_t& unitId, const char** why) {
     (void)hint;
+    if (why) *why = nullptr;
     health = 100.0f;
     maxHealth = 100.0f;
     classId = 271;
