@@ -2002,6 +2002,41 @@ than 2 units from the player, and, when they change (at most every 5 s), the
 form rig frames posed ahead of the state sample, left to the game (not
 standing, another rig taken) and grafted without the neck anchor.
 
+## The head kept for its shadow
+
+In full-body first person (F4) the hero keeps his head and helm, so his shadow
+has a head; the eye views instead draw nothing nearer than a cut in front of
+your eyes: 11 cm looking level, easing to 22 cm looking up and 3 cm looking
+down (`[arms] head_cut_level`, `head_cut_up`, `head_cut_down`). The design and
+its thread handshake are in `steamvr/head_shadow.h`; `[arms] head_shadow=0`
+shrinks the head to the neck as before, and shapeshift forms always do.
+
+- **Helms that reach past the cut hide the head.** A Druid pelt is an animal's
+  head worn over the hero's: looking level its snout and teeth stood in front
+  of your face (#429, the dev Druid's Jalal's Mane). A deeper cut would also
+  cut what you bring to your face (the bow's nock at the cheek, a potion at the
+  mouth, a warcry's fist), so with a pelt on the head shrinks as before and the
+  eye does not cut at all; only the shadow loses its head while it is worn.
+  `[arms] head_hide_helms` lists the helms: item codes (`dr1`, `ba3`) and the
+  words `pelts`, `barbarian` and `none`; absent, the 15 pelts `dr1`-`drf`.
+  Barbarian helms keep the cut unless listed.
+- **The near never jumps.** Switching the cut on or off moves the near clip
+  2.6 times (`[camera] near` 0.2 as installed, about 4 cm, to 11 cm; 5 times
+  looking up). The depth fog reads one `NearPlane` that can be a pass behind,
+  so a jump put one frame's cave fog or ceiling that far off: a black flash,
+  for example at a shapeshift. The near now moves at most 15 %
+  from one eye pass to the next, except up at once when a kept head needs it;
+  the head is kept only once the near stands at the cut.
+
+Log lines (`Frame head shadow:`): the choice once it has lasted a second, with
+the helm and the cut at the current pitch (`head kept for its shadow; helm
+'uap'; the eye's cut 11 cm at pitch +2 deg ...`, `head hidden and no cut: the
+helm reaches past the cut ...; helm 'dra' (Totemic Mask)`); a near that still
+jumped over 15 % between passes, at most once a second; `[arms]
+head_hide_helms=...` when the settings load. `[debug] head_shadow=1` adds a
+line every second (poses, passes at the cut, held, eased, jumps, near, pitch,
+cut range, helm, head bones' reach).
+
 ## Head-relative sound
 
 Monsters, NPCs, objects and other positioned sounds now come from where they

@@ -19,18 +19,41 @@
 // hero's head stays upright while yours tips back, so looking up sees through its crown and the helm on it. Up is 22 cm
 // now. [arms] head_cut_level, head_cut_up and head_cut_down (ini only) set the three (CleanCut), read live.
 //
+// Helms that reach past the cut (2026-11-08: #429, a Druid's dev caster gear, "its snout is visible to the player"; on
+// Discord "the teeth hover in front of your face ... Also causes black flickering at times"): a Druid pelt is an
+// animal's head worn over the hero's, its snout or beak well ahead of the face, so looking level the teeth stood in the
+// view past 11 cm. A deeper cut for them would also cut what you bring to your face (the bow's nock at the cheek, a
+// potion at the mouth, a warcry's fist, a shield held up), and the eye views cannot tell the helm from the head (one
+// skeleton, the same bones in the shadow pass). So with such a helm the head shrinks as before (Why::Helm) and the eye
+// does not cut at all: only the shadow loses its head, while that helm is worn. Which helms: [arms] head_hide_helms
+// (ParseHelms), item codes and the words pelts, barbarian and none; absent, the 15 Druid pelts dr1-drf (Pelts: in the HD
+// art all are animal heads; Totemic Mask, the dev gear's Jalal's Mane, wears Spirit Mask's). The Barbarian helms (horns,
+// jaws, fangs) keep the cut until a headset shows them past it: no report yet with the dev Barbarian's Slayer Guard.
+//
+// The cut moves the near from [camera] near (0.2 world units as installed, about 4 cm) to the cut, 2.6 times level and 5
+// looking up, when it switches on or off (a shapeshift, a helm, F4). Readers a pass behind see the other pass's near: the
+// depth fog's one NearPlane uniform, which ReShade rewrites at each present before the GPU has run the last pass's
+// effects (vrcam g_tech). That far off, depth turns into distances 2.6-5 times too far or near, and a cave's fog (dark)
+// or ceiling covers that pass for a frame - a black flash. So the eye's near moves at most StepRatio from one pass
+// to the next (NearEase): down always (a cut kept a few passes longer only hides more), up too unless a kept head needs
+// the cut at once (a pose kept it within CutLiveMs). The pitch moves the cut less than that a pass (8 % at 200 deg/s
+// and 90 passes a second, 13 % at 300). The pose only keeps the head once the near has reached the cut (atCut), so
+// easing up delays keeping the head (17 passes at most from 0.05), never the cut it needs.
+//
 // Order between the pose thread and the render thread (Handshake): a pose keeps the head only while the eye's cut is live
 // (raised within CutLiveMs), and the eye holds the last cut for CutLiveMs after the last pose that kept the head. So a pose
 // with the head never meets an eye view without the cut, whichever thread runs first, as long as a pose is drawn within
-// CutLiveMs of being posed (frames faster than four a second), including when head_shadow is switched off live. A
-// shapeshift form keeps the old shrink, and the eye does not cut there.
+// CutLiveMs of being posed (frames faster than four a second), including when head_shadow is switched off live or a helm
+// that hides the head is put on. A shapeshift form keeps the old shrink, and the eye does not cut there.
 //
 // This header is pure (no game, no Windows): steamvr/head_shadow_test.cpp. The game side is vr/head_shadow.cpp.
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 
 namespace framevr::headshadow {
 
@@ -45,14 +68,111 @@ constexpr uint64_t CutLiveMs = 250;    // the cut counts as live this long after
 inline bool Live(uint64_t at, uint64_t now) { return at != 0 && (now <= at || now - at <= CutLiveMs); }
 
 // Why this pose kept or hid the head (the log names it).
-enum class Why : int { Kept, Form, NoCut };
+enum class Why : int { Kept, Form, NoCut, Helm };
 inline const char* WhyName(Why w) {
     switch (w) {
     case Why::Kept: return "head kept for its shadow";
     case Why::Form: return "head hidden: a shapeshift form's rig";
     case Why::NoCut: return "head hidden: the eye's cut is not live yet";
+    case Why::Helm: return "head hidden and no cut: the helm reaches past the cut ([arms] head_hide_helms)";
     }
     return "?";
+}
+
+// An item code as the game keeps it (Items::ItemInfo::code, gamestate CodeText): its letters from the low byte up, a
+// three-letter code padded with a space ("dr1 ").
+constexpr uint32_t ItemCode(char a, char b, char c) {
+    return uint32_t(uint8_t(a)) | uint32_t(uint8_t(b)) << 8 | uint32_t(uint8_t(c)) << 16 | uint32_t(uint8_t(' ')) << 24;
+}
+constexpr uint32_t ItemCode(const char (&code)[4]) { return ItemCode(code[0], code[1], code[2]); }
+// The letters of a code for the log ("dr1"), into out; "" for 0.
+inline const char* CodeLetters(uint32_t code, char (&out)[5]) {
+    for (int i = 0; i < 4; ++i) {
+        const char ch = char((code >> (8 * i)) & 0xFF);
+        out[i] = ch >= 33 && ch <= 126 ? ch : (ch == ' ' || ch == 0 ? 0 : '?');
+    }
+    out[4] = 0;
+    for (int i = 0; i < 4; ++i) if (!out[i]) { for (int j = i; j < 4; ++j) out[j] = 0; break; }
+    return out;
+}
+
+struct NamedHelm { uint32_t code; const char* name; };
+// The Druid pelts (armor.txt type pelt; normal, exceptional, elite): an animal's head worn over the hero's.
+inline constexpr NamedHelm Pelts[] = {
+    {ItemCode("dr1"), "Wolf Head"},    {ItemCode("dr2"), "Hawk Helm"},        {ItemCode("dr3"), "Antlers"},
+    {ItemCode("dr4"), "Falcon Mask"},  {ItemCode("dr5"), "Spirit Mask"},      {ItemCode("dr6"), "Alpha Helm"},
+    {ItemCode("dr7"), "Griffon Headress"}, {ItemCode("dr8"), "Hunter's Guise"}, {ItemCode("dr9"), "Sacred Feathers"},
+    {ItemCode("dra"), "Totemic Mask"}, {ItemCode("drb"), "Blood Spirit"},     {ItemCode("drc"), "Sun Spirit"},
+    {ItemCode("drd"), "Earth Spirit"}, {ItemCode("dre"), "Sky Spirit"},       {ItemCode("drf"), "Dream Spirit"}};
+// The Barbarian helms (type phlm): horns, jaws and fangs. Not hidden by default ([arms] head_hide_helms=barbarian).
+inline constexpr NamedHelm BarbarianHelms[] = {
+    {ItemCode("ba1"), "Jawbone Cap"},   {ItemCode("ba2"), "Fanged Helm"},    {ItemCode("ba3"), "Horned Helm"},
+    {ItemCode("ba4"), "Assault Helmet"}, {ItemCode("ba5"), "Avenger Guard"}, {ItemCode("ba6"), "Jawbone Visor"},
+    {ItemCode("ba7"), "Lion Helm"},     {ItemCode("ba8"), "Rage Mask"},      {ItemCode("ba9"), "Savage Helmet"},
+    {ItemCode("baa"), "Slayer Guard"},  {ItemCode("bab"), "Carnage Helm"},   {ItemCode("bac"), "Fury Visor"},
+    {ItemCode("bad"), "Destroyer Helm"}, {ItemCode("bae"), "Conqueror Crown"}, {ItemCode("baf"), "Guardian Crown"}};
+// The base name of a class helm, for the log; nullptr for any other.
+inline const char* HelmName(uint32_t code) {
+    for (const NamedHelm& h : Pelts) if (h.code == code) return h.name;
+    for (const NamedHelm& h : BarbarianHelms) if (h.code == code) return h.name;
+    return nullptr;
+}
+
+// The helms that hide the head (the shrink, no cut) instead of keeping it behind the cut.
+struct HelmList {
+    static constexpr int Max = 48;
+    uint32_t codes[Max]{};
+    int count = 0;
+    bool Has(uint32_t code) const {
+        for (int i = 0; code && i < count; ++i) if (codes[i] == code) return true;
+        return false;
+    }
+    // False: the list is full.
+    bool Add(uint32_t code) {
+        if (!code || Has(code)) return true;
+        if (count >= Max) return false;
+        codes[count++] = code;
+        return true;
+    }
+    template <size_t N> bool AddAll(const NamedHelm (&helms)[N]) {
+        bool all = true;
+        for (const NamedHelm& h : helms) all = Add(h.code) && all;
+        return all;
+    }
+};
+inline HelmList DefaultHelms() { HelmList l; l.AddAll(Pelts); return l; }
+// [arms] head_hide_helms: item codes (dr1, ba3: three letters or digits) and the words pelts (the 15 Druid pelts),
+// barbarian (the 15 Barbarian helms) and none, split by spaces, commas or semicolons, in any case. Nothing (the key
+// absent or empty): the default, the pelts. none alone: no helm hides the head. bad: the words not understood, or past
+// HelmList::Max.
+inline HelmList ParseHelms(const char* text, int* bad = nullptr) {
+    auto sep = [](char ch) { return ch == ' ' || ch == ',' || ch == ';' || ch == '\t' || ch == '\r' || ch == '\n'; };
+    HelmList l;
+    int rejected = 0;
+    bool any = false;
+    for (const char* p = text ? text : ""; *p;) {
+        if (sep(*p)) { ++p; continue; }
+        char w[12] = {};
+        int n = 0;
+        bool tooLong = false;
+        for (; *p && !sep(*p); ++p) {
+            if (n < int(sizeof w) - 1) w[n++] = char(std::tolower(static_cast<unsigned char>(*p)));
+            else tooLong = true;
+        }
+        any = true;
+        const std::string_view word(w, size_t(n));
+        bool alnum = n == 3;
+        for (int i = 0; alnum && i < 3; ++i) alnum = std::isalnum(static_cast<unsigned char>(w[i])) != 0;
+        if (tooLong) ++rejected;
+        else if (word == "none") {}
+        else if (word == "pelts" || word == "pelt") { if (!l.AddAll(Pelts)) ++rejected; }
+        else if (word == "barbarian" || word == "phlm") { if (!l.AddAll(BarbarianHelms)) ++rejected; }
+        else if (alnum) { if (!l.Add(ItemCode(w[0], w[1], w[2]))) ++rejected; }
+        else ++rejected;
+    }
+    if (!any) l = DefaultHelms();
+    if (bad) *bad = rejected;
+    return l;
 }
 
 // How far along toward the end value, 0 (level) to 1 (at or past spanDeg): smoothstep of |pitch| / span.
@@ -87,56 +207,115 @@ inline float RaisedNear(float nearZ, float cutCm, float unitsPerMetre) {
     return std::isfinite(cut) && cut > nearZ ? cut : nearZ;
 }
 
+// The eye's near from one pass to the next (the render thread's own; see the top). Up to StepRatio either way, up at
+// once when upFree; the first pass, or one after a gap of over GapMs (a load, a menu), takes what it wants.
+struct NearEase {
+    static constexpr float StepRatio = 1.15f;   // a pass's near within 15 % of the last's
+    static constexpr uint64_t GapMs = 250;
+    float last = 0;        // the near the last pass drew with (0: none)
+    uint64_t lastAt = 0;   // its ms
+    float Step(float want, uint64_t now, bool upFree) {
+        if (!(want > 0) || !std::isfinite(want)) { last = 0; lastAt = 0; return want; }
+        float out = want;
+        const bool fresh = last > 0 && lastAt != 0 && (now <= lastAt || now - lastAt <= GapMs);
+        if (fresh) {
+            if (want < last / StepRatio) out = last / StepRatio;
+            else if (!upFree && want > last * StepRatio) out = last * StepRatio;
+        }
+        last = out;
+        lastAt = now;
+        return out;
+    }
+};
+
 // The two threads' meeting point. Pose: the skeleton hook's thread, each hero pose that would shrink the head with
-// head_shadow on. Eye: the render thread, each first-person eye projection while the head may be kept or Holding.
+// head_shadow on. Eye: the render thread, each first-person eye projection (vrcam VrProjInner).
 struct Handshake {
     std::atomic<uint64_t> cutAt{0};   // ms the eye's near last stood at the cut (0: never)
     std::atomic<uint64_t> keptAt{0};  // ms a pose last kept the head (0: never)
     std::atomic<float> heldNear{0};   // the last cut's near (world units), held while Holding
-    // form: a shapeshift form's rig. Kept: skip the shrink this pose (stamped before the pose is written).
-    Why Pose(bool form, uint64_t now) {
+    NearEase ease;                    // the render thread's only
+    // form: a shapeshift form's rig. helm: a helm that hides the head ([arms] head_hide_helms). Kept: skip the shrink
+    // this pose (stamped before the pose is written).
+    Why Pose(bool form, uint64_t now, bool helm = false) {
         if (form) return Why::Form;
+        if (helm) return Why::Helm;
         if (!Live(cutAt.load(std::memory_order_acquire), now)) return Why::NoCut;
         keptAt.store(now, std::memory_order_release);
         return Why::Kept;
     }
     // A pose kept the head within CutLiveMs: the eye must keep the cut even with the head no longer to be kept.
     bool Holding(uint64_t now) const { return Live(keptAt.load(std::memory_order_acquire), now); }
-    struct Near { float nearZ; bool atCut, held; };
-    // on: the head may be kept (head_shadow, hide_head, full body, no form). cutCm: the cut at this pitch.
+    // nearZ: the configured near this pass. atCut: the near drawn is at least this pitch's cut (the pose may keep the
+    // head); held: the hold supplied it; eased: NearEase moved it off what the pass wanted.
+    struct Near { float nearZ; bool atCut, held, eased; };
+    // on: the head may be kept (head_shadow, hide_head, full body, no form, no helm that hides it). cutCm: the cut at
+    // this pitch.
     Near Eye(float nearZ, bool on, float cutCm, float unitsPerMetre, uint64_t now) {
-        Near r{nearZ, false, false};
-        if (on && cutCm > 0 && unitsPerMetre > 0 && std::isfinite(unitsPerMetre)) {
-            r.nearZ = RaisedNear(nearZ, cutCm, unitsPerMetre);   // at least the cut ([camera] near may already be past it)
+        Near r{nearZ, false, false, false};
+        const bool cutting = on && cutCm > 0 && unitsPerMetre > 0 && std::isfinite(unitsPerMetre);
+        float want = cutting ? RaisedNear(nearZ, cutCm, unitsPerMetre) : nearZ;   // ([camera] near may already be past it)
+        // The hold: a pose kept the head within CutLiveMs and this pass does not cut (switched off, a form or a helm
+        // begun, or no scale this pass): keep the last cut until the shrunk head is back.
+        const bool holding = Holding(now);
+        if (!cutting && holding) {
+            const float last = heldNear.load(std::memory_order_relaxed);
+            if (last > want) { want = last; r.held = true; }
+        }
+        r.nearZ = ease.Step(want, now, holding);
+        r.eased = r.nearZ != want;
+        if (cutting && r.nearZ >= want) {   // at the cut, not still easing up to it
             r.atCut = true;
             heldNear.store(r.nearZ, std::memory_order_relaxed);
             cutAt.store(now, std::memory_order_release);
-        }
-        // The hold: a pose kept the head within CutLiveMs (switched off, a form begun, or no scale this pass): keep the
-        // last cut until the shrunk head is back.
-        if (Holding(now)) {
-            const float last = heldNear.load(std::memory_order_relaxed);
-            if (last > r.nearZ) { r.nearZ = last; r.held = true; }
         }
         return r;
     }
 };
 
 // The state line: a state is told once it has lasted SettleMs, so a short gap (an area load's first poses before the
-// first projection) says nothing. changes: the transitions seen since the last line.
+// first projection) says nothing. A new helm is a new state (the line names the helm the choice was made with).
+// changes: the transitions seen since the last line.
 struct StateLine {
     static constexpr uint64_t SettleMs = 1000;
     Why told = Why::Kept, seen = Why::Kept;
+    uint32_t toldHelm = 0, seenHelm = 0;
     bool any = false, seenAny = false;
     uint64_t seenAt = 0;
     int changes = 0;
-    // True: say the line for `seen` now (changes: how many transitions were folded into it).
-    bool Step(Why w, uint64_t now) {
-        if (!seenAny || w != seen) { if (seenAny) ++changes; seen = w; seenAt = now; seenAny = true; }
-        if ((any && seen == told) || now < seenAt || now - seenAt < SettleMs) return false;
-        told = seen; any = true;
+    // True: say the line for `seen` now (changes: how many transitions were folded into it). helm: the helm's item code
+    // (0: none).
+    bool Step(Why w, uint64_t now, uint32_t helm = 0) {
+        if (!seenAny || w != seen || helm != seenHelm) {
+            if (seenAny) ++changes;
+            seen = w; seenHelm = helm; seenAt = now; seenAny = true;
+        }
+        if ((any && seen == told && seenHelm == toldHelm) || now < seenAt || now - seenAt < SettleMs) return false;
+        told = seen; toldHelm = seenHelm; any = true;
         return true;
     }
+};
+
+// The near from pass to pass, for the log: a jump past NearEase::StepRatio (a pass after a gap, or up at once for a
+// kept head) puts a reader a pass behind off by as much. gap: the passes are over NearEase::GapMs apart (not a jump).
+struct NearWatch {
+    float last = 0;
+    uint64_t lastAt = 0;
+    int jumps = 0;            // since the last Take
+    float from = 0, to = 0;   // the largest of them
+    bool Pass(float nearZ, uint64_t now) {
+        const float was = last;
+        const bool fresh = was > 0 && lastAt != 0 && (now <= lastAt || now - lastAt <= NearEase::GapMs);
+        last = nearZ; lastAt = now;
+        if (!fresh || !(nearZ > 0) || !std::isfinite(nearZ) || !std::isfinite(was)) return false;
+        const float ratio = nearZ > was ? nearZ / was : was / nearZ;
+        if (!(ratio > NearEase::StepRatio * 1.0001f)) return false;
+        const float largest = from > 0 && to > 0 ? std::max(from / to, to / from) : 0;
+        if (ratio > largest) { from = was; to = nearZ; }
+        ++jumps;
+        return true;
+    }
+    void Take() { jumps = 0; from = to = 0; }
 };
 
 // How far the head's bones reach from the eye, for the debug summary: the nearest and farthest bone flagged in inNeck
@@ -163,16 +342,20 @@ inline Reach HeadReach(const float* bones, const char* inNeck, int count, const 
 
 // The game side (vr/head_shadow.cpp). Not used by the pure test.
 namespace headshadow {
-// [debug] head_shadow: the 10 s summary line (off by default).
+// [debug] head_shadow: the once-a-second summary line (off by default).
 void SetTrace(bool on);
 // [arms] head_cut_level, head_cut_up, head_cut_down: the cuts in cm (CleanCut'ed), for every eye pass from now.
 void SetCuts(float levelCm, float upCm, float downCm);
+// [arms] head_hide_helms (ParseHelms; nullptr or "": the pelts). Returns how many helms hide the head; bad: the words
+// not understood.
+int SetHelms(const char* text, int* bad);
 // PoseBody, just before the head shrink, only when it would shrink the head with head_shadow on in full body. form: a
 // shapeshift form's rig. bones .. unitsPerCm: the pose, for the debug summary's reach only. Returns the new hide: false
 // when the head stays whole this pose.
 bool HideHead(bool form, const float* bones, const char* inNeck, int count, const float* eye, float unitsPerCm);
-// VrProjInner, each first-person eye projection, when on or Holding(). on: the head may be kept. Returns the near clip
-// to draw with.
+// VrProjInner, every first-person eye projection, the head kept or not (the ease and the hold run on each). on: the
+// head may be kept (full body, head_shadow, hide_head, no form; the helm is checked here). Returns the near clip to
+// draw with.
 float EyeNear(float nearZ, bool on, float unitsPerMetre, float pitchDeg);
 bool Holding();
 }  // namespace headshadow
