@@ -457,6 +457,38 @@ bool NotInBuild(uint64_t rva) {
 }
 
 namespace {
+// The functions hooked here, with the bytes the hook proved were at the entry before it patched them. A hook
+// rewrites a function's first bytes, so a later check of them by another feature that calls the function
+// would fail on our own patch: the bow's hook on the renderer's world-matrix function (0xE3A8C0) and the
+// game-drawn ceiling's calls to it (vr/engine_units.cpp; the vouch adapted from natpoh/diablo2-vr-port's
+// sigscan, MIT, see THIRD_PARTY.md). Check answers true for a function hooked here when the bytes asked
+// about are the ones the hook had proven.
+struct HookedEntry {
+	uint64_t             rva;        // the key the caller used, as in Hook and Check
+	std::vector<uint8_t> expected;
+};
+std::mutex               g_hookLock;
+std::vector<HookedEntry> g_hooked;
+
+void NoteHooked(uint64_t rva, const void* expected, uint32_t size) {
+	const auto* e = static_cast<const uint8_t*>(expected);
+	std::lock_guard<std::mutex> lock(g_hookLock);
+	for (HookedEntry& h : g_hooked) {
+		if (h.rva == rva) {
+			if (h.expected.size() < size) h.expected.assign(e, e + size);   // the longer proof stands
+			return;
+		}
+	}
+	g_hooked.push_back({ rva, std::vector<uint8_t>(e, e + size) });
+}
+
+bool WasHookedWith(uint64_t rva, const void* expected, uint32_t size) {
+	std::lock_guard<std::mutex> lock(g_hookLock);
+	for (const HookedEntry& h : g_hooked)
+		if (h.rva == rva) return size <= h.expected.size() && std::memcmp(h.expected.data(), expected, size) == 0;
+	return false;
+}
+
 // Not where 3.3.93787 has it: the loader's own checks would compare the old bytes.
 bool Moved(int i) { return g_e[i].searched.load() || g_e[i].rva.load() != kSigs[i].rva; }
 
@@ -477,14 +509,15 @@ bool CheckMoved(int i, const void* expected, uint32_t size) {
 
 bool Check(uint64_t rva, const void* expected, uint32_t size) {
 	if (g_ctx == nullptr) return false;
+	if (WasHookedWith(rva, expected, size)) return true;   // our own hook is what is there: the bytes it replaced were these
 	const int i = Index(rva);
 	if (i < 0 || !g_resolved.load()) return g_ctx->CheckExpectedBytes(rva, expected, size);
 	if (!Rva(rva)) return false;
 	return Moved(i) ? CheckMoved(i, expected, size) : g_ctx->CheckExpectedBytes(rva, expected, size);
 }
 
-bool Hook(uint64_t rva, const void* expected, uint32_t size, void* detour, void** original) {
-	if (g_ctx == nullptr) return false;
+namespace {
+bool HookAt(uint64_t rva, const void* expected, uint32_t size, void* detour, void** original) {
 	const int i = Index(rva);
 	if (i < 0 || !g_resolved.load()) return g_ctx->InstallInlineHook(rva, expected, size, detour, original);
 	const uint64_t at = Rva(rva);
@@ -493,6 +526,15 @@ bool Hook(uint64_t rva, const void* expected, uint32_t size, void* detour, void*
 	std::vector<uint8_t> live(size);
 	if (!CheckMoved(i, expected, size) || !ReadLive(live.data(), at, size)) return false;
 	return g_ctx->InstallInlineHook(at, live.data(), size, detour, original);
+}
+}   // namespace
+
+bool Hook(uint64_t rva, const void* expected, uint32_t size, void* detour, void** original) {
+	if (g_ctx == nullptr) return false;
+	if (WasHookedWith(rva, expected, size)) return false;   // hooked here already: a patch on a patch is never asked for
+	const bool ok = HookAt(rva, expected, size, detour, original);
+	if (ok) NoteHooked(rva, expected, size);
+	return ok;
 }
 
 bool Patch(uint64_t rva, const void* expected, uint32_t expectedSize, const void* bytes, uint32_t size) {

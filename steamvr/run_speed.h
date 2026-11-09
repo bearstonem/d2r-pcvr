@@ -3,7 +3,7 @@
 #include <cmath>
 #include <cstdint>
 
-// Movement speed (VR Settings > Body > Movement speed; [gameplay] run_speed_pct, Cal
+// Movement speed (VR Settings > Comfort > Moving > Movement speed; [gameplay] run_speed_pct, Cal
 // 2026-10-25; first a skill-wheel slider, which replaced RUN / WALK). Its lowest
 // stop, Walk (-10), walks; every stop above runs - Base run (0), then 10% of the
 // way to the gear's full run speed per stop, up to Full run (100). The plugin keeps the game's own run /
@@ -95,7 +95,7 @@ struct GaitSync {
     }
     void Sent(bool wantWalk,uint64_t now){state=wantWalk?Walk:Run;toggledAt=now;fullWalkSince=0;}
 };
-// Right stick up with Movement speed's Stick toggle on ([gameplay] run_walk_toggle, off by
+// Right stick up with the Stick toggle on ([gameplay] run_walk_toggle, off by
 // default; owner 2026-10-25: "bring the toggle back and put an option to enable/disable",
 // "with it being disabled by default"): each push switches between walking and Movement
 // speed's run - from Walk, the full run, as the game's own toggle ran. A new character,
@@ -112,6 +112,19 @@ struct StickToggle {
     // Running though Movement speed is on Walk: at the full run (Scaled would give BASE RUN).
     bool FullRun()const{return switched&&Walks(percent);}
 };
+// Combat walk ([gameplay] combat_walk_ms, Cal 2026-11-02): an enemy hit that would have hit
+// the hero, or the hero's landed strike, cast or shot, puts the game's run / walk toggle on walk
+// until windowMs passes with no new one; then Movement speed's own setting again. GaitSync sends
+// the toggle (one a second at most, CooldownMs), so a single exchange runs again about a second
+// after the walk began, however short the window. windowMs 0 = off. Times in ms.
+constexpr int CombatWalkDefaultMs=500,CombatWalkMaxMs=60000;
+inline int NormalizeCombatWalkMs(float value) {
+    if(!std::isfinite(value))return CombatWalkDefaultMs;
+    return std::clamp(int(std::lround(value)),0,CombatWalkMaxMs);
+}
+inline bool CombatWalking(uint64_t lastEvent,uint64_t now,int windowMs) {
+    return windowMs>0&&lastEvent&&now>=lastEvent&&now-lastEvent<uint64_t(windowMs);
+}
 // The velocity the slider gives a native run velocity. Never above native, never below the base.
 inline int Scaled(int native,int velocityPercent,int percent) {
     percent=std::clamp(percent,0,MaxPercent);   // WALK while still running (until the toggle lands): BASE RUN

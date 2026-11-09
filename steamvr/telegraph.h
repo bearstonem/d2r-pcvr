@@ -23,6 +23,9 @@ inline constexpr float ShockWebCells=6.f;    // Shock Web's ~9 bombs land 2-8 ce
 inline constexpr float MatchCells=12.f;       // a burst farther than this from every circle ends the oldest
 inline constexpr uint64_t MinFlightMs=250,LateMs=1500,FadeMs=350,ThrowMs=280;
 inline constexpr int MaxMarks=6;              // D2R_DepthFog.fx draws RingPos0..5
+// Previews placed again every frame, each kept in its own one mark (Board::Place): the companion's
+// command and Teleport's landing while its fist is drawn in (spell_motion.h).
+inline constexpr int CompanionMark=-2,TeleportMark=-3;
 struct Mark {
     float x=0,y=0;            // target cell
     uint64_t cast=0,flight=0; // ms; flight is the expected time to land
@@ -106,6 +109,10 @@ inline bool AnyOn(const Marks& marks,uint64_t now) {
     for(const auto& m:marks)if(Sample(m,now).on)return true;
     return false;
 }
+inline bool SkillOn(const Marks& marks,int skill,uint64_t now) {
+    for(const auto& m:marks)if(m.skill==skill&&Sample(m,now).on)return true;
+    return false;
+}
 class Board {
     std::mutex mutex;
     Marks marks{};
@@ -117,13 +124,13 @@ public:
     static constexpr uint64_t RepeatMs=350;
     bool Place(float x,float y,uint64_t now,uint64_t showMs,int element,float radius,float dirX=0,float dirY=0,float halfLength=0,int skill=-1) {
         std::lock_guard lock(mutex);
-        if (skill == -2) {
+        if (skill <= CompanionMark) {   // a preview: its one mark moved
             for (auto& m : marks) {
-                if (m.skill == -2) {
+                if (m.skill == skill) {
                     showMs = std::max<uint64_t>(showMs, MinFlightMs);
                     const float d = std::hypot(dirX, dirY);
                     if (!(halfLength > 0 && d > 1e-4f)) dirX = dirY = halfLength = 0; else { dirX /= d; dirY /= d; }
-                    m = {x, y, now, showMs, now + showMs, ++sequence, element, radius, dirX, dirY, halfLength, -2};
+                    m = {x, y, now, showMs, now + showMs, ++sequence, element, radius, dirX, dirY, halfLength, skill};
                     return true;
                 }
             }

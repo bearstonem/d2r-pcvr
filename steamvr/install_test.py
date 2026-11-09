@@ -740,7 +740,7 @@ class RenameMigrationTests(unittest.TestCase):
 
 
 class FrameGenerationTests(unittest.TestCase):
-    """OFXR Bridge (VR Settings > Performance > Frame generation): optional, pinned,
+    """OFXR Bridge (VR Settings > Graphics > Frames > Frame generation): optional, pinned,
     and only its layer, licenses and our manifest reach the game folder."""
 
     @staticmethod
