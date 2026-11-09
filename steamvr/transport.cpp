@@ -42,6 +42,7 @@
 #include "window_focus.h"
 #include "panel_input_mode.h"
 #include "gameplay.h"
+#include "walk_direction.h"
 #include "strike_skills.h"
 #include "bow_laser.h"
 #include "hand_controls.h"
@@ -212,6 +213,8 @@ skills::HandControls handControls;
 skills::HandOutput handOutput;
 gameplay::Pose handAim[2]{};
 bool handAimTracked[2]{};
+walkdir::Pointing leftPointing;   // Walk direction (walk_direction.h): the left controller's heading, kept while it points down
+int walkDirectionSaid=-1;
 int castHand=0;
 controllers::Labels detectedControllers{},controllerLabels{};
 bool controllerProfilesDirty=true,frameControllerExtension=false;
@@ -5066,13 +5069,26 @@ void Input() {
             reportAt=GetTickCount64()+5000;
         }
     }
+    // Walk direction (walk_direction.h; VR Settings > Body, beside Dominant hand): the left stick walks where you look,
+    // or turned here by the left controller's heading against the head's, where it points.
+    int16_t walkLx=controls.lx,walkLy=controls.ly;
+    {
+        const int mode=vrsettings::Read().values[settings::WalkDirection]>.5f?walkdir::Controller:walkdir::Look;
+        if(mode!=walkDirectionSaid){walkDirectionSaid=mode;Say(mode==walkdir::Controller?"Frame walk direction: the left stick walks where the left controller points":"Frame walk direction: the left stick walks where you look");}
+        const bool pointing=leftPointing.Update(handAim[1].q,handAimTracked[1]);
+        if(mode==walkdir::Controller&&pointing&&motionHeadTracked&&(controls.lx||controls.ly)) {
+            float x=controls.lx/32767.f,y=controls.ly/32767.f;
+            walkdir::ToView(x,y,leftPointing.heading,math::Heading(Q(head.orientation)));
+            walkLx=int16_t(std::clamp(x,-1.f,1.f)*32767);walkLy=int16_t(std::clamp(y,-1.f,1.f)*32767);
+        }
+    }
     ++s.counter;
     auto& p=*pad.data;p.writer_pid=GetCurrentProcessId();p.buttons=0;
     // Right A goes only through semantic interact; a raw A bypasses its
     // no-target guard and accidentally attacks when pointing at empty space.
     p.buttons=menus::WorldButtons(controls);
     if(!dualBindings&&leftMenuButton.PlainPressed())p.buttons|=XINPUT_GAMEPAD_LEFT_THUMB;
-    p.thumb_lx=controls.lx;p.thumb_ly=controls.ly;p.thumb_rx=controls.rx;p.thumb_ry=controls.ry;
+    p.thumb_lx=walkLx;p.thumb_ly=walkLy;p.thumb_rx=controls.rx;p.thumb_ry=controls.ry;
     p.left_trigger=controls.lt;
     const float rightTrigger=controls.rt/255.f;
     const bool attackAllowed=menuTriggerGate.Update(rightTrigger>.1f,panelMode||spatialMode||settingsOwned||settingsChord||inventoryPressed||menuPressed);
@@ -5111,7 +5127,7 @@ void Input() {
         // thumbstick to act as the menu cursor"): it goes to BodyWalk's walk, which vrcam
         // feeds into the game's walk (DirectWalkNow), and never to the menu's cursor.
         // The right stick's left / right turns there too: vrcam takes it for the turn, as in play.
-        if(leatherMode&&leatherShown.load()&&!settingsOwned&&!settingsChord){p.thumb_lx=controls.lx;p.thumb_ly=controls.ly;p.thumb_rx=controls.rx;p.thumb_ry=0;}
+        if(leatherMode&&leatherShown.load()&&!settingsOwned&&!settingsChord){p.thumb_lx=walkLx;p.thumb_ly=walkLy;p.thumb_rx=controls.rx;p.thumb_ry=0;}
     }
     p.reserved[0]=uint32_t(settingsOwned||settingsChord?menus::Mode::Blocked:nativeUi?menus::Mode::Native:menus::Mode::World);
     p.reserved[1]=inputEpoch;
