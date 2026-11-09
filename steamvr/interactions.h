@@ -13,6 +13,7 @@
 #include "navigation_info.h"
 #include "companions.h"
 #include "active_effects.h"
+#include "skill_cooldowns.h"
 #include "torch_light.h"
 #include "map_zoom.h"
 #include <array>
@@ -188,6 +189,11 @@ inline Vec Spin(Quat from,Quat to,float dt) {
 inline bool Throwable(Potion type) {
     return type==Potion::Health||type==Potion::Rejuvenation||type==Potion::Antidote||type==Potion::Thawing;
 }
+// A negative distance means there is no live hireling. Assistance only
+// removes the landing-distance requirement; native potion-use rules remain.
+inline bool MercThrowAccepted(float distance,bool mercPotionAutoaimEnabled) {
+    return std::isfinite(distance)&&distance>=0&&(mercPotionAutoaimEnabled||distance<=1.5f);
+}
 inline double LandingTime(Vec p,Vec v,float floor) {
     const double drop=double(p.y)-floor;
     if(!std::isfinite(drop)||drop<=0||!std::isfinite(v.y))return -1;
@@ -278,6 +284,9 @@ struct Snapshot {
     // Bone Armor's absorb pool and its maximum (ItemStatCost 132 / 133, 8.8 fixed
     // point; developer capture 2026-10-26): the forearm grafts (bone_graft.h).
     int boneArmor=0,boneArmorMax=0;
+    // The hero's Light Radius (ItemStatCost 89, item_lightradius; #440): how far the mod's own dungeon
+    // light reaches (light_radius.h). Known with the vitals.
+    int lightRadius=0;bool lightRadiusKnown=false;
     wrist::Experience experience;
     navigation::Location location;
     bool actionKnown=false;
@@ -285,6 +294,7 @@ struct Snapshot {
     Mercenary merc;
     companions::Roster companions;
     effects::Status effects;
+    cooldowns::Board cooldowns;   // the skills the server's use check blocks for a delay (skill_cooldowns.h)
 };
 // A glyph shape's skill as the hero has it (the catalog's own entry); an id the hero lacks is kept, unknown.
 inline Skill GlyphSkill(const Snapshot& s,int id) {
@@ -517,6 +527,8 @@ struct Input {
     Pose head{},hand[2]{};
     Vec handVelocity[2]{}; bool velocityKnown[2]{}; // runtime-reported room-space m/s at the pose time
     float trigger=0,leftTrigger=0,grip[2]{};
+    bool clickToDrink=false;
+    float bottleTrigger[2]{}; // raw right/left triggers, independent of wheel pointer mapping
     bool spellGrips=false;   // both grips cast motions (spell_motion.h): a grip grabs only alone (SoloGrips)
     int hover=-1,wheelHand=-1;
     Snapshot snapshot{};
@@ -575,6 +587,8 @@ struct Output {
     // the motions turned off, as Input gave them.
     bool motions=false,motionsBox=false;
     int motionsOff=0;
+    // Skill cooldowns: the wrist's icons between the orbs (skill_cooldowns.h Tracker), set by the transport.
+    cooldowns::Icons cooldowns{};
 };
 inline MenuPage Page(const Output& out) {
     return out.developer?MenuPage::Developer:out.editor==3?MenuPage::EditItems:out.editor==2?MenuPage::EditSkills:out.editor?MenuPage::EditSlots:out.map?MenuPage::Map:out.motions?MenuPage::Motions:out.glyphs?MenuPage::Glyphs:out.utility?MenuPage::Equipment:MenuPage::Spells;
@@ -596,6 +610,7 @@ class Engine {
     uint64_t session=0,epoch=0,sequence=0;
     double lastTime=0,drinkStart=0,pendingAt=0,resultAt=0,criticalUntil=0,criticalAgain=0;
     bool primed=false,triggerWas=false,gripWas[2]{},wheelLatch=false,utility=false,map=false,rearm=true,stowed=false;
+    bool bottleTriggerWas[2]{};
     bool glyphs=false;   // the GLYPHS page
     bool motions=false;  // the MOTIONS page
     int glyphEdit=-1;    // the shape the skill picker chooses for, -1 none
@@ -770,6 +785,8 @@ public:
         out.navigationPalm=palm&&vitals::Palm(in.navigationLocation);
         out.navigation=out.navigationPalm||(out.wrist&&vitals::Wrist(in.navigationLocation));
         const bool trigger=in.trigger>(triggerWas?.2f:.55f);
+        const bool bottleTriggers[2]={in.bottleTrigger[0]>(bottleTriggerWas[0]?.2f:.55f),
+                                      in.bottleTrigger[1]>(bottleTriggerWas[1]?.2f:.55f)};
         // Both grips cast spells: a grip grabs (a bottle, a holster, a shoulder) only alone.
         if(in.spellGrips)soloGrips.Step(in.time,in.grip);else soloGrips.Reset();
         const bool grips[2]={in.spellGrips?soloGrips.solo[0]:in.grip[0]>.6f,in.spellGrips?soloGrips.solo[1]:in.grip[1]>.6f};
@@ -785,6 +802,7 @@ public:
             if(mapzoom::NewGame(joined,in.session)){handMenus={};const int slot=pageHand;pageHand=-2;LoadHand(slot<0?0:slot);}
             session=in.session;epoch=in.epoch;lastTime=in.time;
             triggerWas=trigger;gripWas[0]=grips[0];gripWas[1]=grips[1];
+            for(int h=0;h<2;++h)bottleTriggerWas[h]=bottleTriggers[h];
             body=Valid(in.head)?UprightBody(in.head,body.q):Pose{};out.block=true;out.stowed=stowed;out.cancelPending=true;return out;
         }
         lastTime=in.time;
@@ -794,12 +812,14 @@ public:
         // transport) is not a hand, so a close and reopen on the same hand keeps everything.
         if(in.wheel&&in.wheelHand+1!=pageHand){StoreHand();LoadHand(in.wheelHand+1);}
         const bool triggerEdge=trigger&&!triggerWas&&!handChanged;
+        const bool bottleClicks[2]={bottleTriggers[0]&&!bottleTriggerWas[0],bottleTriggers[1]&&!bottleTriggerWas[1]};
+        for(int h=0;h<2;++h)bottleTriggerWas[h]=bottleTriggers[h];
         const bool edges[2]={grips[0]&&!gripWas[0],grips[1]&&!gripWas[1]};
         triggerWas=trigger;gripWas[0]=grips[0];gripWas[1]=grips[1];
         // A plain close keeps the page for the next open (Map and Developer too); the editors close.
         if(!in.wheel){quickPressed=false;wheelLatch=false;editor=0;editSlot=-1;glyphEdit=-1;}
         if(!in.snapshot.developer)developer=false;
-        if(!trigger&&!grips[0]&&!grips[1])rearm=false;
+        if(!trigger&&!grips[0]&&!grips[1]&&(!in.clickToDrink||(!bottleTriggers[0]&&!bottleTriggers[1])))rearm=false;
         if(in.cancel) {quickPressed=false;Drop();flight={};rearm=true;wheelLatch=true;pending={};out.cancelPending=true;editor=0;map=developer=glyphs=motions=false;devPage=0;editSlot=-1;glyphEdit=-1;}   // the cancel input, as before (transport has sent none since the per-hand wheels)
         if(pending.action!=Action::None) {
             if(in.reply.sequence==pending.sequence&&in.reply.session==session&&in.reply.result!=Result::Pending) {
@@ -1058,7 +1078,11 @@ public:
             else if(!grips[bottleHand]||(!spent&&(!fresh||!SameBelt(in.snapshot,held)))) {if(!grips[bottleHand])Discard(in,out);Drop();rearm=true;}
             else {
                 out.bottle=bottle;out.bottleHand=bottleHand;out.bottleItem=held.item;out.bottleEmpty=consumed;owner[bottleHand]=Owner::Bottle;
-                if(!spent&&potions::AtMouth(in.hand[bottleHand].p,in.hand[bottleHand].q,in.head.p,in.head.q,drinkStart!=0)) {
+                const bool clickToDrinkRequested=in.clickToDrink&&bottleClicks[bottleHand]&&!edges[bottleHand];
+                if(!spent&&clickToDrinkRequested) {
+                    if(request(Action::Potion,bottle,held.item,held.revision)){spent=true;pendingHand=bottleHand;}
+                    drinkStart=0;
+                } else if(!spent&&potions::AtMouth(in.hand[bottleHand].p,in.hand[bottleHand].q,in.head.p,in.head.q,drinkStart!=0)) {
                     if(!drinkStart)drinkStart=in.time;
                     if(in.time-drinkStart>=.25&&request(Action::Potion,bottle,held.item,held.revision)){spent=true;pendingHand=bottleHand;}
                 } else drinkStart=0;

@@ -63,6 +63,7 @@ endif()
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/dlss_depth.cpp ${ROOT}/vr/crossbow.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/billboards.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/head_shadow.cpp)   # the head kept for its shadow, the eye's cut (head_shadow.h)
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/head_skip.cpp)   # the helm left out of the eye views' draws, kept in the shadow (head_skip.h)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/stereo_replay.cpp ${ROOT}/vr/ecl_hook.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/spatial_audio.cpp)   # head-relative sound
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/roof_materials.cpp)
@@ -73,12 +74,19 @@ target_sources(d2rl-pcvr PRIVATE potion_models.cpp)
 target_sources(d2rl-pcvr PRIVATE dropped_bottles.cpp limb_physics.cpp ${ROOT}/vr/wall_cells.cpp ${ROOT}/vr/prop_scan.cpp)
 target_link_libraries(d2rl-pcvr PRIVATE box3d)
 target_sources(d2rl-pcvr PRIVATE elemental_hands_renderer.cpp)
-target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/settings_menu.cpp ${CMAKE_CURRENT_SOURCE_DIR}/vr_settings_ui.cpp ${ROOT}/vr/native_ui.cpp ${CMAKE_CURRENT_SOURCE_DIR}/interaction_ui.cpp ${ROOT}/vr/interactionstate.cpp ${ROOT}/vr/bow.cpp ${ROOT}/vr/projectiles.cpp ${ROOT}/vr/combat.cpp ${ROOT}/vr/melee.cpp ${CMAKE_CURRENT_SOURCE_DIR}/transport.cpp ${CMAKE_CURRENT_SOURCE_DIR}/foveation.cpp ${CMAKE_CURRENT_SOURCE_DIR}/effects_layer.cpp ${CMAKE_CURRENT_SOURCE_DIR}/logging.cpp ${CMAKE_CURRENT_SOURCE_DIR}/profile.cpp)
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/settings_menu.cpp ${CMAKE_CURRENT_SOURCE_DIR}/vr_settings_ui.cpp ${ROOT}/vr/native_ui.cpp ${CMAKE_CURRENT_SOURCE_DIR}/interaction_ui.cpp ${ROOT}/vr/interactionstate.cpp ${ROOT}/vr/bow.cpp ${ROOT}/vr/projectiles.cpp ${ROOT}/vr/combat.cpp ${ROOT}/vr/melee.cpp ${CMAKE_CURRENT_SOURCE_DIR}/transport.cpp ${CMAKE_CURRENT_SOURCE_DIR}/floating_map_frame.cpp ${CMAKE_CURRENT_SOURCE_DIR}/foveation.cpp ${CMAKE_CURRENT_SOURCE_DIR}/effects_layer.cpp ${CMAKE_CURRENT_SOURCE_DIR}/logging.cpp ${CMAKE_CURRENT_SOURCE_DIR}/profile.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/native_belt.cpp ${ROOT}/vr/quick_items.cpp ${ROOT}/vr/melee_weapon.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/breakables.cpp ${ROOT}/vr/offline_difficulty.cpp ${ROOT}/vr/enemy_sight.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/respec.cpp)   # Reset Skills & Stats (respec_button.h)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/target_lock.cpp ${ROOT}/vr/summon_range.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/loot_beam_scan.cpp)   # loot beams: the items on the floor that get one
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/monster_immunity.cpp)
+add_executable(monster-immunity-test monster_immunity_test.cpp)
+target_compile_options(monster-immunity-test PRIVATE -UNDEBUG)
+add_executable(monster-immunity-runtime-test monster_immunity_runtime_test.cpp)
+target_include_directories(monster-immunity-runtime-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${ROOT}/cleanroom/sigscan ${D2RL_SDK}/include)
+target_link_libraries(monster-immunity-runtime-test PRIVATE framevr-runtime)
+target_compile_options(monster-immunity-runtime-test PRIVATE -UNDEBUG)
 add_executable(map-sigs-test map_sigs_test.cpp)   # Map view = Full map: the patterns at their sites
 target_include_directories(map-sigs-test PRIVATE ${ROOT}/cleanroom/sigscan)
 add_executable(far-objects-test far_objects_test.cpp)   # big objects drawn farther: the reach, the setting, the game's test
@@ -90,6 +98,9 @@ add_executable(enemy-sight-test enemy_sight_test.cpp)
 target_include_directories(enemy-sight-test PRIVATE ${ROOT}/cleanroom/sigscan ${CMAKE_CURRENT_SOURCE_DIR} ${D2RL_SDK}/include)
 target_link_libraries(enemy-sight-test PRIVATE framevr-runtime)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/companions.cpp ${ROOT}/vr/active_effects.cpp companion_ui.cpp)
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/skill_cooldowns.cpp)   # wrist skill cooldowns: the server's delay timers (skill_cooldowns.h)
+add_executable(skill-cooldowns-test skill_cooldowns_test.cpp)   # wrist skill cooldowns: timers, board, places, sweep, ticks
+target_link_libraries(skill-cooldowns-test PRIVATE framevr-runtime)
 add_executable(companions-test companions_test.cpp)
 add_executable(active-effects-test active_effects_test.cpp)
 target_link_libraries(active-effects-test PRIVATE framevr-runtime)
@@ -100,6 +111,8 @@ target_include_directories(companion-ai-test PRIVATE ${ROOT}/cleanroom/sigscan $
 target_link_libraries(companion-ai-test PRIVATE framevr-runtime)
 add_executable(torch-light-test torch_light_test.cpp)
 target_link_libraries(torch-light-test PRIVATE framevr-runtime)
+add_executable(light-radius-test light_radius_test.cpp)
+target_link_libraries(light-radius-test PRIVATE framevr-runtime)
 add_executable(frame-generation-test frame_generation_test.cpp)
 target_include_directories(d2rl-pcvr PRIVATE ${ROOT}/shared ${ROOT}/external/flatvr ${ROOT}/external/bodywalk ${ROOT}/external/reshade/include ${CMAKE_CURRENT_SOURCE_DIR} ${OPENXR_SDK}/include)
 target_link_libraries(d2rl-pcvr PRIVATE d2rcam minhook user32 gdi32 framevr-runtime)
@@ -164,12 +177,15 @@ add_executable(body-tracking-test body_tracking_test.cpp)
 add_executable(shield-steady-test shield_steady_test.cpp)
 add_executable(shapeshift-form-test shapeshift_form_test.cpp)
 add_executable(head-shadow-test head_shadow_test.cpp)   # the head kept for its shadow: the decision, the cut by pitch, the near
+add_executable(head-skip-test head_skip_test.cpp)   # the helm left out of the eye views: which models, whose, the bookkeeping
 add_executable(body-calibration-test body_calibration_test.cpp)
 add_executable(shoulder-swap-test shoulder_swap_test.cpp)
 add_executable(leather-menu-test leather_menu_test.cpp)
+add_executable(stash-buttons-test stash_buttons_test.cpp)
 add_executable(stats-button-test stats_button_test.cpp)
 add_executable(menu-drop-test menu_drop_test.cpp)
 add_executable(respec-button-test respec_button_test.cpp)
+add_executable(vr-keyboard-test vr_keyboard_test.cpp)
 add_executable(blood-screen-test blood_screen_test.cpp)
 add_executable(arcane-decay-test arcane_decay_test.cpp)
 add_executable(portal-billboard-test portal_billboard_test.cpp)
@@ -178,6 +194,7 @@ add_executable(shrine-trace-test shrine_trace_test.cpp)
 add_executable(shrine-placement-test shrine_placement_test.cpp)
 add_executable(overlay-view-test overlay_view_test.cpp)
 add_executable(talk-stop-test talk_stop_test.cpp)
+add_executable(sheet-walk-test sheet_walk_test.cpp)
 add_executable(room-stitch-test room_stitch_test.cpp)
 add_executable(ceiling-top-test ceiling_top_test.cpp)
 add_executable(bone-armor-height-test bone_armor_height_test.cpp)
@@ -216,6 +233,8 @@ target_include_directories(openxr-probe PRIVATE ${OPENXR_SDK}/include)
 target_link_libraries(openxr-probe PRIVATE d3d12 dxgi framevr-runtime)
 
 add_executable(melee-contact-test melee_contact_test.cpp)
+add_executable(bow-bash-test bow_bash_test.cpp)   # Bow bash (#443): the bow's capsule, the waits, act bosses, its strokes
+add_executable(weapon-heft-test weapon_heft_test.cpp)   # Weapon heft (#443): weights, the stroke needed, the committed hand travel
 add_executable(walk-direction-test walk_direction_test.cpp)   # Walk direction: the stick turned to where the left controller points
 add_executable(room-scale-test room_scale_test.cpp)   # room-scale: a turn pivots at the head
 add_executable(room-steps-test room_steps_test.cpp)   # Room follows you: the neck, the dead zone, pauses, walls, the origin follow
@@ -245,6 +264,7 @@ target_include_directories(dev-scenarios-test PRIVATE ${D2RL_SDK}/include)
 target_link_libraries(dev-scenarios-test PRIVATE framevr-runtime)
 add_executable(wrist-hud-test wrist_hud_test.cpp)
 add_executable(map-zoom-test map_zoom_test.cpp)
+add_executable(floating-map-test floating_map_test.cpp)   # Floating map: pull, grab, point, two-hand size, put away, never pulled
 add_executable(navigation-info-test navigation_info_test.cpp)
 add_executable(dropped-item-labels-test dropped_item_labels_test.cpp)
 add_executable(stick-gestures-test stick_gestures_test.cpp)
@@ -261,10 +281,16 @@ add_executable(depth-fog-test depth_fog_test.cpp)
 target_link_libraries(depth-fog-test PRIVATE d3d11 d3dcompiler framevr-runtime)
 add_executable(shield-debug-shader-test shield_debug_shader_test.cpp)
 target_link_libraries(shield-debug-shader-test PRIVATE d3d11 d3dcompiler framevr-runtime)
+add_executable(monster-immunity-shader-test monster_immunity_shader_test.cpp)
+target_link_libraries(monster-immunity-shader-test PRIVATE d3d11 d3dcompiler framevr-runtime)
 add_executable(loot-beams-shader-test loot_beams_shader_test.cpp)
 target_link_libraries(loot-beams-shader-test PRIVATE d3d11 d3dcompiler framevr-runtime)
 add_executable(arcane-sky-test arcane_sky_test.cpp)
 target_link_libraries(arcane-sky-test PRIVATE d3d11 d3dcompiler framevr-runtime)
+add_executable(sky-band-test sky_band_test.cpp)
+target_link_libraries(sky-band-test PRIVATE d3d11 d3dcompiler windowscodecs ole32 framevr-runtime)
+add_executable(hero-light-test hero_light_test.cpp)
+target_link_libraries(hero-light-test PRIVATE d3d11 d3dcompiler framevr-runtime)
 add_executable(scene-depth-test scene_depth_test.cpp)
 add_executable(game-device-only-test game_device_only_test.cpp)
 target_include_directories(scene-depth-test PRIVATE ${ROOT}/external/reshade/include)
@@ -333,6 +359,8 @@ add_executable(telegraph-test telegraph_test.cpp)
 add_executable(aim-rules-test aim_rules_test.cpp)
 add_executable(target-cone-test target_cone_test.cpp)
 add_executable(gaze-test gaze_test.cpp)
+add_executable(gaze-aim-test gaze_aim_test.cpp)   # Aim with your eyes: the source, the blink fallback, the pick's hysteresis
+add_test(NAME gaze-aim-test COMMAND gaze-aim-test) # Check() exits on failure; needs no -UNDEBUG
 add_executable(window-focus-test window_focus_test.cpp)
 add_executable(summon-range-test summon_range_test.cpp)
 target_include_directories(summon-range-test PRIVATE ${D2RL_SDK}/include)
@@ -382,14 +410,18 @@ add_test(NAME loot-beams-shader-test COMMAND loot-beams-shader-test "${ROOT}/res
 set_tests_properties(loot-beams-shader-test PROPERTIES TIMEOUT 30)
 add_test(NAME arcane-sky-test COMMAND arcane-sky-test "${ROOT}/reshade/D2R_DepthFog.fx")
 set_tests_properties(arcane-sky-test PROPERTIES TIMEOUT 30)
+add_test(NAME sky-band-test COMMAND sky-band-test "${ROOT}/reshade/D2R_DepthFog.fx")
+set_tests_properties(sky-band-test PROPERTIES TIMEOUT 60)
+add_test(NAME hero-light-test COMMAND hero-light-test "${ROOT}/reshade/D2R_DepthFog.fx")
+set_tests_properties(hero-light-test PROPERTIES TIMEOUT 30)
 add_test(NAME light-bounds-test COMMAND light-bounds-test)
 set_tests_properties(light-bounds-test PROPERTIES TIMEOUT 30)
 foreach(test_target IN ITEMS memory-test biome-list-test hook-metrics-test active-keys-test resource-descriptions-test latest-worker-test haptic-pulse-test thread-stats-test
-    gameplay-test weapon-skills-test quick-cast-test hand-controls-test elemental-hands-test elemental-particles-test skill-pad-test interact-press-test sewer-interaction-test notice-card-test mod-layout-test spell-aim-test bow-pose-test crossbow-pose-test body-tracking-test shapeshift-form-test head-shadow-test shield-steady-test body-calibration-test shoulder-swap-test blood-screen-test
-    portal-billboard-test shrine-trace-test shrine-placement-test overlay-view-test bone-armor-height-test composition-layers-test projectile-rules-test environment-cutaway-test roof-materials-test game-ceiling-test stereo-prop-physics-test dropped-bottles-test props-test limb-rig-test limb-physics-test leather-menu-test stats-button-test menu-drop-test arcane-decay-test respec-button-test
-    combat-rules-test strike-skills-test zeal-light-test skill-usage-test shield-guard-test guard-strain-test heartbeat-test run-speed-test room-scale-test room-steps-test walk-direction-test logging-test melee-contact-test melee-weapon-test breakables-test offline-difficulty-test enemy-sight-test attack-speed-test world-coordinates-test bow-flight-test bow-laser-test spell-cast-test spell-aim-assist-test tactical-chord-test glyph-recognizer-test glyph-trail-test glyph-cast-test spell-motion-test motions-amazon-test motions-barbarian-test motions-necromancer-test motions-assassin-test motions-paladin-test motions-druid-test bone-graft-test
-    interaction-test dev-scenarios-test native-belt-test wrist-hud-test map-zoom-test navigation-info-test companions-test active-effects-test dropped-item-labels-test stick-gestures-test show-items-command-test native-hud-test render-resolution-test render-pointer-test scene-depth-test game-device-only-test controller-bindings-test journal-test native-panels-test talk-stop-test room-stitch-test ceiling-top-test loot-beams-test
-    vr-settings-test vr-settings-layout-test vr-settings-pointer-test vr-settings-store-test controller-labels-test math-test deferred-draw-test monster-bars-test loot-aim-test telegraph-test aim-reach-test aim-rules-test target-cone-test gaze-test window-focus-test callback-ticket-test local-player-test shield-block-test trigger-melee-test companion-ai-test torch-light-test frame-generation-test turn-capture-test panel-atlas-test far-objects-test)
+    gameplay-test weapon-skills-test quick-cast-test hand-controls-test elemental-hands-test elemental-particles-test skill-pad-test interact-press-test sewer-interaction-test notice-card-test mod-layout-test spell-aim-test bow-pose-test crossbow-pose-test body-tracking-test shapeshift-form-test head-shadow-test head-skip-test shield-steady-test body-calibration-test shoulder-swap-test blood-screen-test
+    portal-billboard-test shrine-trace-test shrine-placement-test overlay-view-test bone-armor-height-test composition-layers-test projectile-rules-test environment-cutaway-test roof-materials-test game-ceiling-test stereo-prop-physics-test dropped-bottles-test props-test limb-rig-test limb-physics-test leather-menu-test stash-buttons-test stats-button-test menu-drop-test arcane-decay-test respec-button-test vr-keyboard-test
+    combat-rules-test strike-skills-test zeal-light-test skill-usage-test shield-guard-test guard-strain-test heartbeat-test run-speed-test room-scale-test room-steps-test walk-direction-test logging-test melee-contact-test bow-bash-test weapon-heft-test melee-weapon-test breakables-test offline-difficulty-test enemy-sight-test attack-speed-test world-coordinates-test bow-flight-test bow-laser-test spell-cast-test spell-aim-assist-test tactical-chord-test glyph-recognizer-test glyph-trail-test glyph-cast-test spell-motion-test motions-amazon-test motions-barbarian-test motions-necromancer-test motions-assassin-test motions-paladin-test motions-druid-test bone-graft-test
+    interaction-test dev-scenarios-test native-belt-test wrist-hud-test map-zoom-test floating-map-test navigation-info-test companions-test active-effects-test skill-cooldowns-test dropped-item-labels-test stick-gestures-test show-items-command-test native-hud-test render-resolution-test render-pointer-test scene-depth-test game-device-only-test controller-bindings-test journal-test native-panels-test talk-stop-test sheet-walk-test room-stitch-test ceiling-top-test loot-beams-test
+    vr-settings-test vr-settings-layout-test vr-settings-pointer-test vr-settings-store-test controller-labels-test math-test deferred-draw-test monster-bars-test loot-aim-test telegraph-test aim-reach-test aim-rules-test target-cone-test gaze-test window-focus-test callback-ticket-test local-player-test shield-block-test trigger-melee-test companion-ai-test torch-light-test light-radius-test frame-generation-test turn-capture-test panel-atlas-test far-objects-test)
   # These fixtures use assert for their checks, including in Release builds.
   if(MSVC)
     target_compile_options(${test_target} PRIVATE /UNDEBUG)
@@ -436,6 +468,7 @@ add_test(NAME vr-settings-worker-paint-test COMMAND vr-settings-preview --worker
 add_test(NAME companions-art-test COMMAND interaction-preview "${CMAKE_CURRENT_BINARY_DIR}/companions-preview.png" --companions-check)
 
 add_test(NAME active-effects-art-test COMMAND interaction-preview "${CMAKE_CURRENT_BINARY_DIR}/active-effects-preview.png" --effects-check)
+add_test(NAME skill-cooldowns-art-test COMMAND interaction-preview "${CMAKE_CURRENT_BINARY_DIR}/skill-cooldowns-preview.png" --cooldowns-check)
 add_test(NAME skill-categories-test COMMAND skill-categories-test)
 add_test(NAME skill-categories-art-test COMMAND interaction-preview "${CMAKE_CURRENT_BINARY_DIR}/skill-categories-preview.png" --categories-check)
 
@@ -451,5 +484,10 @@ target_include_directories(respec-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${D2R
 target_link_libraries(respec-test PRIVATE framevr-runtime)
 target_compile_options(respec-test PRIVATE -UNDEBUG)
 add_test(NAME respec-test COMMAND respec-test)
+add_test(NAME monster-immunity-test COMMAND monster-immunity-test)
+add_test(NAME monster-immunity-runtime-test COMMAND monster-immunity-runtime-test)
 
 target_compile_options(quick-items-test PRIVATE -UNDEBUG)
+
+add_test(NAME monster-immunity-shader-test COMMAND monster-immunity-shader-test "${ROOT}/reshade/D2R_Immunity.fxh")
+set_tests_properties(monster-immunity-shader-test PROPERTIES TIMEOUT 30)

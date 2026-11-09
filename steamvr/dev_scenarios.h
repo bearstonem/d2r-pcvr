@@ -42,8 +42,14 @@ inline int BodyKnob(int choice){return choice>=BodyKnobChoice&&choice<BodyResetC
 // Loot beam test (owner, 2026-10-31): one item for each beam rule, to drop on
 // the floor (LootBeamKit below).
 inline constexpr int LootBeamsChoice=BodyResetChoice+1;
+// Tal Rasha's Tomb (owner, 2026-11-08, to test #466's joined dungeon rooms there): its first tomb, level 66.
+inline constexpr int TalRashaTombChoice=LootBeamsChoice+1;
+// Item-fired bows (owner, 2026-11-08, to test #432): the three uniques whose basic attack fires another
+// missile - Witherstring (Fires Magic Arrows), Raven Claw (Fires Explosive Arrows), Demon Machine (a
+// crossbow, Fires Explosive Bolts) - with arrows and bolts (ItemBowUniques below).
+inline constexpr int ItemBowsChoice=TalRashaTombChoice+1;
 inline constexpr int PageSize=14;
-inline constexpr std::array<Choice,LootBeamsChoice+1> Choices{{
+inline constexpr std::array<Choice,ItemBowsChoice+1> Choices{{
     {"Level 90", "All class skills rank 20 / test attributes", nullptr},
     {"Primary gear", "Class-specific unique equipment", nullptr},
     {"Alternate gear", "Equipment for the other class abilities", nullptr},
@@ -59,7 +65,7 @@ inline constexpr std::array<Choice,LootBeamsChoice+1> Choices{{
     // Use the level's native arrival point for the boss arena, rather than
     // the explicit Tyrael platform coordinates above. No quest commands.
     {"Duriel - Act II", "Boss-room entrance / rendering", "goto 73"},
-    {"Crossbow + bolts", "Equip both; assign Attack to Right Trigger", nullptr},
+    {"Crossbow + bolts", "Equip both; Right Trigger fires bolts", nullptr},
     {"Blood Moor", "Act I combat / crossbow test", "goto 2"},
     {"Bow + arrows", "Windforce / 250 arrows", nullptr},
     {"Small shield", "Pelta Lunata buckler / compare shield reach", nullptr},
@@ -111,6 +117,9 @@ inline constexpr std::array<Choice,LootBeamsChoice+1> Choices{{
     {"Ease back", "When the physics lets a body go, how long it eases back", nullptr},
     {"Bodies: defaults", "Every value above back to its default", nullptr},
     {"Loot beam test", "Unique, set, rare, magic, white, 5 runes / drop them", nullptr},
+    // Its stairs and ledges are where dungeon rooms stood a step apart over void (room stitch).
+    {"Tal Rasha's Tomb", "Act II / stairs, ledges, joined rooms", "goto 66"},
+    {"Item-fired bows", "Witherstring, Raven Claw, Demon Machine / arrows, bolts", nullptr},
 }};
 static_assert(limbs::Knobs==10,"one BODIES choice per knob");
 // Stable action IDs are independent of their presentation order.
@@ -125,9 +134,9 @@ inline constexpr const char* PageHelp[]={
     "Each press steps a value and saves it in the dev INI's [bodies]. Then push a body to feel it."
 };
 inline constexpr std::array<std::array<int,PageSize>,PageCount> Pages{{
-    {{Level10Choice,Level30Choice,Level60Choice,0,HealChoice,UnlockQuestsChoice,ThrowingPotionsChoice,TurnsRimsChoice,SkyRimsChoice,LootBeamsChoice,-1,-1,-1,-1}},
+    {{Level10Choice,Level30Choice,Level60Choice,0,HealChoice,UnlockQuestsChoice,ThrowingPotionsChoice,TurnsRimsChoice,SkyRimsChoice,LootBeamsChoice,ItemBowsChoice,-1,-1,-1}},
     {{StarterPrimaryChoice,StarterAlternateChoice,1,2,CrossbowChoice,BowChoice,SmallShieldChoice,DebugDrawsChoice,TurnsKeepOwnChoice,ThrowingChoice,PotionsChoice,TurnsSharpChoice,TurnsFillChoice,TorchChoice}},
-    {{4,11,14,15,16,5,3,8,9,-1,-1,-1,-1,-1}},
+    {{4,11,14,15,16,5,3,TalRashaTombChoice,8,9,-1,-1,-1,-1}},
     {{17,UpperKurastChoice,KurastSewersChoice,18,19,26,27,-1,-1,-1,-1,-1,-1,-1}},
     {{6,7,20,21,22,23,24,25,-1,-1,-1,-1,-1,-1}},
     {{BodyKnobChoice,BodyKnobChoice+1,BodyKnobChoice+2,BodyKnobChoice+3,BodyKnobChoice+4,BodyKnobChoice+5,BodyKnobChoice+6,
@@ -258,6 +267,10 @@ inline constexpr std::array<KitItem,10> LootBeamKit{{
     {"r25",KitQuality::Normal,1,true},{"r27",KitQuality::Normal,1,true},{"r28",KitQuality::Normal,1,true},
     {"r29",KitQuality::Normal,1,true}
 }};
+// The item-fired bows kit's forced UniqueItems rows (zero-based, the table's *ID column; D2R 3.3's own
+// uniqueitems.txt, read 2026-11-08): Witherstring (hbw) 60, Raven Claw (index "Rimeraven", lbw) 61,
+// Demon Machine (8rx) 199 - the "Expansion" line between them is not a row.
+inline constexpr std::array<uint32_t,3> ItemBowUniques{60,61,199};
 // Native unique generation selects eligible unique rows and random stat rolls.
 // nullptr skips an off-hand item for a two-handed staff/maul.
 inline std::array<const char*,10> Kit(int cls,int choice){
@@ -271,6 +284,8 @@ inline std::array<const char*,10> Kit(int cls,int choice){
     // Leave equipped items and bindings alone; the player equips both pieces.
     if(ValidClass(cls)&&choice==CrossbowChoice)return {"lxb","cqv"};
     if(ValidClass(cls)&&choice==BowChoice)return {"6lw","aqv"};
+    // Hunter's Bow, Long Bow and Chu-Ko-Nu as the three uniques (ItemBowUniques), arrows and bolts. 26 cells.
+    if(ValidClass(cls)&&choice==ItemBowsChoice)return {"hbw","lbw","8rx","aqv","cqv"};
     // Keep this separate: the Paladin's full kit already occupies 37 cells.
     // Adding a 2x2 buckler would exceed the 40-cell inventory even when empty.
     if(ValidClass(cls)&&choice==SmallShieldChoice)return {"buc"};
@@ -304,6 +319,6 @@ inline bool ValidChoice(int choice){return choice>=0&&choice<int(Choices.size())
 inline bool StarterKit(int choice){return choice==StarterPrimaryChoice||choice==StarterAlternateChoice;}
 // Normal quality at item level 1, usable at once; the other kits roll uniques at 99.
 inline bool NormalKit(int choice){return StarterKit(choice)||choice==ThrowingChoice||choice==PotionsChoice||choice==TorchChoice||choice==ThrowingPotionsChoice||choice==LootBeamsChoice;}
-inline bool IsKit(int choice){return choice==1||choice==2||choice==CrossbowChoice||choice==BowChoice||choice==SmallShieldChoice||NormalKit(choice);}
+inline bool IsKit(int choice){return choice==1||choice==2||choice==CrossbowChoice||choice==BowChoice||choice==SmallShieldChoice||choice==ItemBowsChoice||NormalKit(choice);}
 inline bool Isolated(std::string_view mod,std::string_view metadata){return mod==Mod&&metadata==ModInfo;}
 }

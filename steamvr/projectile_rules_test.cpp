@@ -47,6 +47,10 @@ int main() {
     assert(ScaledVelocity(24<<8,2)==48<<8);
     assert(ScaledVelocity(12<<8,2)==24<<8);
     assert(ScaledVelocity(0,2)==0);
+    // The bow skills' own arrows take the arrow speed however they are cast (owner, 2026-11-08):
+    // Multiple Shot 213, Guided Arrow 86, Strafe 682 and the single-arrow skills; bolts and spells do not.
+    for(uint32_t m:{12u,27u,28u,40u,41u,85u,86u,87u,213u,682u})assert(BowSkillArrow(m));
+    for(uint32_t m:{0u,31u,214u,683u,42u,88u,89u,55u,58u,59u,83u,196u})assert(!BowSkillArrow(m));
     assert(ScaledVelocity(-1,2)==-1);
     assert(ScaledVelocity(6000,1)==6000);
     assert(ScaledVelocity(6000,std::numeric_limits<float>::quiet_NaN())==6000);

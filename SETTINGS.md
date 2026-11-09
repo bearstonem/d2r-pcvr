@@ -146,6 +146,16 @@ The toolbar while the game lies on your floor, and the item labels.
 - **Act 1 - Act 5** - per act (Act 5 twice: ruins and snow): brightness, the sky
   panorama and zenith pictures (your own work too: *...* picks one, *x* goes
   back to ours), the fog colour.
+- **Painting your own sky** - sky only, day and night pictures alike:
+  - **Panorama:** one picture once round you, 3:1 (3072 x 1024). Its bottom
+    edge is 8 degrees under the horizon and its top 65 degrees up; its left and right edges
+    meet, so they must continue each other. A landmark painted in it is seen
+    once. Above 40 degrees it fades into the zenith picture.
+  - **Zenith:** a square picture (1024 x 1024) of the sky straight overhead,
+    tiling on all four edges.
+  - Pictures of another size are stretched to these. A 3:2 panorama made for
+    older versions (where it went twice round) now goes round once, stretched;
+    lay it twice side by side for its old look.
 
 ## Weapon Adjust
 

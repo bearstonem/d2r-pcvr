@@ -33,7 +33,7 @@ Tell us what works, what doesn't and what you would like to see.
 > Entertainment.
 
 It is a [D2RLoader](https://d2rloader.net) plugin (`d2rl-vrcam.dll`), a ReShade
-effect (`D2R_DepthFog.fx`) and, for the headset, a BodyWalk plugin
+effect (`D2R_DepthFog.fx`, one file per feature in the `reshade/D2R_*.fxh` headers it includes) and, for the headset, a BodyWalk plugin
 (`d2r_bridge.dll`) that hands the head to the game; FlatVR (in BodyWalk) shows the
 picture in the headset. Without a headset it plays flat on a monitor with mouse
 and keyboard (F1 the game's camera, F2 third person, F3 first person).

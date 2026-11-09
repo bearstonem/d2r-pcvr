@@ -66,12 +66,14 @@ bool IsLocalOwner(uintptr_t owner) {
     uint32_t id=~0u,type=~0u,ownerId=~0u;
     return combat::LocalPlayerId(id)&&Read(owner,type)&&Read(owner+8,ownerId)&&SamePlayer(0,id,type,ownerId);
 }
-// Basic arrows, and a quiver arrow inside its own game-thread launch, share
-// the configured arrow speed. Native skill casts elsewhere keep theirs.
+// Basic arrows, a quiver arrow inside its own game-thread launch, and the
+// hero's own bow-skill arrows however they are cast (BowSkillArrow: Multiple
+// Shot's fan, Guided Arrow, Strafe's volley, ...) share the configured arrow
+// speed. Other native skill casts keep theirs.
 uint32_t LocalArrowParams(uintptr_t params) {
     uint32_t missile=~0u;uintptr_t owner=0;
     if(!enabled.load()||!Read(params+0x20,missile)||!Read(params+8,owner)||!IsLocalOwner(owner))return ~0u;
-    return missile==0||(missile&&missile==bowvr::QuiverLaunchMissile())?missile:~0u;
+    return missile==0||(missile&&missile==bowvr::QuiverLaunchMissile())||BowSkillArrow(missile)?missile:~0u;
 }
 
 // Scope is on the game's actual creation thread, on BOTH client and server.
@@ -171,6 +173,10 @@ uintptr_t Client(uintptr_t params,int flags) {
     crossbowvr::BeginClient(crossbow?&bolt:nullptr);
     Scope scope(params,0);const auto unit=bowvr::ImpactVisual(params,flags,originalClient);
     if(crossbow&&unit)bowvr::CrossbowClient(unit,bolt.flight);
+    // The client's own Multiple Shot fan: flat, until the server's flies a drawn release.
+    uint32_t missile=0;uintptr_t owner=0;
+    if(unit&&enabled.load()&&Read(params+0x20,missile)&&framevr::bowflight::FanMissile(int(missile))&&Read(params+8,owner)&&IsLocalOwner(owner))
+        bowvr::WatchFan(unit);
     crossbowvr::EndClient();ReportSpell(params,0,unit);return unit;
 }
 uintptr_t Server(uintptr_t game,uintptr_t params) {
@@ -188,6 +194,7 @@ uintptr_t Server(uintptr_t game,uintptr_t params) {
     }
     Scope scope(params,1);const auto unit=originalServer(game,params);
     if(crossbow)crossbowvr::ServerDone(bolt,unit&&bowvr::AdoptCrossbow(game,unit,bolt.flight));
+    if(unit&&enabled.load())bowvr::AdoptFan(game,params,unit);   // a drawn Multiple Shot's fan
     ReportSpell(params,1,unit);
     Telegraph(params,unit);
     flightWatch=outer;

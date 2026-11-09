@@ -76,11 +76,59 @@ inline bool SkillArrow(const Shot& s){return s.kind==Kind::Arrow&&s.skill>=0;}
 inline bool SkillJavelin(const Shot& s){return s.kind==Kind::Javelin&&s.skill>=0&&!DoubleThrow(s);}
 // A physical release carrying a skill: a quiver arrow or a javelin skill.
 inline bool SkillRelease(const Shot& s){return SkillArrow(s)||SkillJavelin(s);}
+// An item-fired basic arrow (#432). Fires Magic Arrows (item_magicarrow, stat
+// 157) and Fires Explosive Arrows or Bolts (item_explosivearrow, 158) replace
+// a bow's or crossbow's basic missile: the game's own query (bow_signatures.h
+// MissileType) names magicarrow 27 or explodingarrow 41 instead of arrow 0 or
+// bolt 31, and its basic attack shoots that. A hand release flies it as a
+// basic arrow (no skill, no mana); it looks and lands as the quiver arrow of
+// the same missile (Magic Arrow, Exploding Arrow), with the game's own damage
+// and explosion. Shot::missile names it; -1 is the plain arrow or bolt.
+inline bool ItemMissile(int missile){return missile==27||missile==41;}
+inline bool ItemArrow(const Shot& s){return (s.kind==Kind::Arrow||s.kind==Kind::Crossbow)&&s.skill<0&&ItemMissile(s.missile);}
+// A bow or crossbow release flying a missile of its own, a quiver or an item
+// arrow: its visual root carries the model and particles, its native missile
+// follows the flight to the contact, and its native hit effects play there.
+inline bool OwnMissile(const Shot& s){return SkillArrow(s)||ItemArrow(s);}
+// What a basic bow or crossbow release flies, from the native query for the
+// weapon in hand (-1 when none is held): -1 for the plain arrow or bolt, an
+// item's missile, or RefusedMissile for anything else.
+inline constexpr int RefusedMissile=-2;
+inline int BasicLaunchMissile(Kind kind,int native) {
+    if(kind!=Kind::Arrow&&kind!=Kind::Crossbow)return RefusedMissile;
+    if(native==(kind==Kind::Crossbow?31:0))return -1;
+    return ItemMissile(native)?native:RefusedMissile;
+}
+// Multiple Shot's fan arrow (multipleshotarrow 213), adopted from the game's
+// own creation (FanVolley). Missiles.txt gives it the basic arrow's shape
+// (pSrvDoFunc 1, no hit function, pierce) and its HD definition is the basic
+// arrow's (missiles.json: multipleshotarrow -> arrow), so it flies, hits and
+// draws as a basic arrow does; the game made it and paid for the skill. The
+// skill takes 213 even with an item's arrows on the bow (its server function
+// reads srvmissilea before the bow's basic missile).
+inline constexpr int MultipleShot=12; // Skills.txt
+inline bool FanMissile(int missile){return missile==213;}
+inline bool FanArrow(const Shot& s){return s.kind==Kind::Arrow&&s.skill<0&&FanMissile(s.missile);}
+// A fan arrow's direction: the game's heading for it (horizontal, any length)
+// at the release's pitch. The fan keeps the game's spread and rises or falls
+// with the aim. No usable heading: the release's own.
+inline Vec FanDirection(Vec release,Vec heading) {
+    const float flat=std::hypot(heading.x,heading.z),own=std::hypot(release.x,release.z);
+    const Vec h=flat>1e-4f?Vec{heading.x/flat,0,heading.z/flat}:own>1e-4f?Vec{release.x/own,0,release.z/own}:Vec{0,0,-1};
+    const float s=std::clamp(release.y,-1.f,1.f),c=std::sqrt(std::max(0.f,1-s*s));
+    if(!(flat>1e-4f)&&!(own>1e-4f))return {0,s<0?-1.f:1.f,0};
+    return {h.x*c,s,h.z*c};
+}
+// Signed degrees from the release's heading to another heading, about the vertical.
+inline float HeadingDegrees(Vec release,Vec heading) {
+    const float cross=release.z*heading.x-release.x*heading.z,dot=release.x*heading.x+release.z*heading.z;
+    return std::atan2(cross,dot)*(180.f/3.14159265f);
+}
 // Lightning Bolt and Lightning Fury have no mesh (lightning_javelin
 // particles): like spells they follow their root. Poison and Plague Javelin
 // fly the javelin model, as a basic throw does.
 inline bool ParticleJavelin(int missile){return missile==205||missile==206;}
-inline uint32_t MissileId(const Shot& s){return s.kind==Kind::Spell||SkillRelease(s)?uint32_t(s.missile):s.kind==Kind::Javelin?ThrownId(s):uint32_t(s.kind);}
+inline uint32_t MissileId(const Shot& s){return s.kind==Kind::Spell||SkillRelease(s)||ItemArrow(s)||FanArrow(s)?uint32_t(s.missile):s.kind==Kind::Javelin?ThrownId(s):uint32_t(s.kind);}
 inline bool BasicMissile(uint32_t id){return id<=1||id==31;}
 // What the client allocator returned for one of our visual requests. Only the
 // requested missile is kept; any other live missile unit we created is still a
@@ -141,6 +189,68 @@ public:
         if(!Allowed(s,g,now))return false;
         if(session==s.session&&s.sequence<=sequence)return false;
         session=s.session;sequence=s.sequence;return true;
+    }
+};
+// Multiple Shot from a hand draw. The release still presses the skill
+// natively (gameplay.h nativeBowRelease): the game pays the mana, plays the
+// attack and makes its fan, as many arrows and as spread as the skill's level
+// gives. Armed with the release's pose, this adopts that fan: the local
+// multipleshotarrows the server makes in one tick, within Window ms of the
+// release. Each keeps the game's heading for it and takes the release's
+// pitch, origin and draw (FanDirection), then flies the basic arrow's physical
+// path. The client's own flat fan, made from the same animation, is retired
+// once the server's fan is adopted; unadopted, both stay the game's.
+// The caller serializes; no game pointer is dereferenced here.
+class FanVolley {
+public:
+    static constexpr uint64_t Window=1200;   // release to the attack frame, slow bows included
+    static constexpr uint64_t Burst=150;     // the client makes its fan in one frame
+    static constexpr unsigned Most=64;       // arrows per volley (Multiple Shot reaches 24)
+    static constexpr float MaxStep=3;        // metres the hero may move before the fan
+    Shot pose{};
+    uint64_t armedAt=0,adoptedAt=0,clientAt=0;
+    uint32_t fanTick=0;
+    unsigned adopted=0,refused=0,watched=0,retired=0;
+    float left=0,right=0;
+    bool armed=false,reported=false;
+    void Arm(const Shot& release,uint64_t now){*this={};pose=release;armedAt=now;armed=true;}
+    void Clear(){*this={};}
+    bool Fresh(uint64_t session,uint64_t now) const {
+        return armed&&session==pose.session&&now>=armedAt&&now-armedAt<=Window;
+    }
+    // A local multipleshotarrow the server made at tick, the hero now at
+    // hero (render metres): one of this release's fan?
+    bool Accepts(uint64_t session,uint32_t tick,uint64_t now,Vec hero) const {
+        return Fresh(session,now)&&adopted<Most&&(!adopted||tick==fanTick)&&
+            std::hypot(hero.x-pose.player.x,hero.z-pose.player.z)<=MaxStep;
+    }
+    // Its flight. heading: the game's for it (grid world, any length). A step
+    // the hero took since the release carries the origin along.
+    Shot Adopt(uint32_t tick,Vec heading,Vec hero,uint64_t now) {
+        if(!adopted){fanTick=tick;adoptedAt=now;}
+        Shot s=pose;s.member=int(adopted++);
+        const Vec step{hero.x-pose.player.x,0,hero.z-pose.player.z};
+        s.origin=pose.origin+step;s.player=pose.player+step;
+        s.direction=FanDirection(pose.direction,heading);
+        const float angle=HeadingDegrees(pose.direction,s.direction);
+        if(adopted==1)left=right=angle;else {left=std::min(left,angle);right=std::max(right,angle);}
+        return s;
+    }
+    // The client's flat fan for this release, made in one burst: watch its
+    // arrows. The caller retires each once the server's fan is adopted.
+    bool Watch(uint64_t session,uint64_t now) {
+        if(!Fresh(session,now)||watched>=Most||(watched&&(now<clientAt||now-clientAt>Burst)))return false;
+        if(!watched)clientAt=now;
+        ++watched;return true;
+    }
+    float PitchDegrees() const {return std::asin(std::clamp(pose.direction.y,-1.f,1.f))*(180.f/3.14159265f);}
+    // One line per armed release: its fan once complete, or none in time.
+    enum class Outcome {None,Adopted,Missed};
+    Outcome Report(uint64_t now) {
+        if(reported||!armedAt||now<armedAt)return Outcome::None;
+        if(adopted){if(now<adoptedAt||now-adoptedAt<Burst)return Outcome::None;reported=true;return Outcome::Adopted;}
+        if(now-armedAt<=Window)return Outcome::None;
+        reported=true;return Outcome::Missed;
     }
 };
 
@@ -357,7 +467,8 @@ inline void ArrowMatrix(const Flight& f,uint64_t now,float out[16]) {
     const Vec forward=f.shot.direction;
     const Vec guide=std::fabs(forward.y)<.95f?Vec{0,1,0}:Vec{1,0,0};
     const Vec right=math::Normalized(math::Cross(guide,forward)),up=math::Cross(forward,right);
-    const bool bolt=f.shot.kind==Kind::Crossbow;
+    // An item's explosive bolt is the exploding arrow's model, at bolt length.
+    const bool bolt=f.shot.kind==Kind::Crossbow&&!ItemArrow(f.shot);
     const float modelTail=bolt?-.69698172f:-.98391676f;
     const float modelLength=(bolt?.69698172f:1.f)-modelTail;
     const float scale=ProjectileLength(f.shot)*f.shot.unitsPerMetre/modelLength;
@@ -387,7 +498,7 @@ inline void SpellMatrix(const Flight& f,uint64_t now,float out[16]) {
     out[13]=p.y-out[5]*height-out[9]*ahead;
     out[14]=p.z-out[6]*height-out[10]*ahead;out[15]=1;
 }
-// Quiver arrows bind their unit root: fire_arrow, ice_arrow and safe_arrow
+// Quiver (and item) arrows bind their unit root: fire_arrow, ice_arrow and safe_arrow
 // hang arrow.model (scale 1, identity orientation) and their particles 5 units
 // above it, the fire model also .35 behind. Place the root so the model lands
 // exactly where ArrowMatrix puts a basic arrow; particles keep their offsets.

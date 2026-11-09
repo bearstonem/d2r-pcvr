@@ -33,6 +33,9 @@ int main() {
           "Smite: a shield gesture on the left trigger");
     Check(Gesture(weaponskills::Strafe,rightTrigger)&&Gesture(weaponskills::Strafe,leftTrigger)&&!Gesture(weaponskills::Strafe,leftFace),"arrow skills: draw and release on a trigger");
     Check(Has(Line(7,rightFace),"loads it into every following arrow")&&Has(Details(7,rightFace),"Press again"),"a quiver arrow skill on a face button loads the quiver");
+    Check(Has(Line(12,rightFace),"every following draw and release fires it")&&Has(Details(12,leftFace),"Multiple Shot's fan")&&
+          Has(Line(26,leftFace),"press again for basic arrows")&&!Has(Line(22,rightFace),"natively"),
+          "#364: Multiple Shot, Guided Arrow and Strafe on a face button load into the draw too");
     Check(Gesture(15,rightTrigger)&&!Gesture(15,leftTrigger)&&Has(Line(15,leftFace),"following throw"),"javelin skills: the right trigger's throw, or loaded");
     Check(Gesture(weaponskills::DoubleThrow,rightTrigger)&&!Gesture(weaponskills::DoubleThrow,leftTrigger),"Double Throw on the right trigger");
     Check(Gesture(251,rightTrigger)&&!Gesture(251,leftTrigger)&&!Gesture(251,rightFace),"traps and bombs are thrown from the right trigger only");

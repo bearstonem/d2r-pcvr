@@ -760,8 +760,49 @@ int main(){
         s.in.trigger=0;s.in.wheel=false;Check(s.Step().block,"swap blocks until confirmed");
         s.in.reply={r.sequence,10,Result::Applied};Check(s.Step().result==Result::Applied,"confirmed swap feedback");
     }
-    {
-        Sim s;s.in.hand[0].p=s.out.belt[0].p;s.Step();s.in.grip[0]=1;
+    // Optional trigger drinking uses the holding hand and the exact grabbed item.
+    for(int hand=0;hand<2;++hand)for(bool enabled:{false,true}) {
+        Sim s;s.in.clickToDrink=enabled;s.in.hand[hand].p=s.out.belt[0].p;s.Step();s.in.grip[hand]=1;
+        Check(s.Step().bottle==0,"either hand grabs flask without consuming");
+        s.in.bottleTrigger[1-hand]=1;
+        Check(s.Step().request.action==Action::None,"other hand trigger cannot drink flask");
+        s.in.bottleTrigger[hand]=1;auto o=s.Step();
+        Check((o.request.action==Action::Potion)==enabled,"trigger drinking is opt-in");
+        if(enabled) {
+            const auto r=o.request;
+            Check(r.item.handle==42&&r.index==0&&r.revision==4&&o.block&&!o.bottleEmpty,"click requests exact potion and waits for confirmation");
+            s.in.reply={r.sequence,10,Result::Applied};s.Step();
+            Check(s.out.bottleEmpty&&s.out.feedbackHand==hand,"confirmed click empties flask with feedback on holding hand");
+            for(int i=0;i<30;++i)Check(s.Step().request.action==Action::None,"held trigger drinks once per grab");
+            s.in.bottleTrigger[hand]=0;s.Step();s.in.bottleTrigger[hand]=1;
+            Check(s.Step().request.action==Action::None,"second click cannot drink empty flask");
+            s.in.grip[hand]=0;s.Step();s.Step();
+            Check(s.out.block,"held drinking trigger stays blocked after dropping flask");
+            s.in.bottleTrigger[0]=s.in.bottleTrigger[1]=0;s.Step();
+            Check(!s.out.block,"release rearms combat after click drinking");
+        }
+    }
+    for(int hand=0;hand<2;++hand) {
+        Sim s;s.in.clickToDrink=true;s.in.bottleTrigger[hand]=1;s.Step();
+        s.in.hand[hand].p=s.out.belt[0].p;s.Step();s.in.grip[hand]=1;s.Step();
+        Check(s.Step(4).request.action==Action::None,"trigger held before grabbing cannot drink");
+        s.in.bottleTrigger[hand]=0;s.Step();s.in.bottleTrigger[hand]=1;
+        const auto r=s.Step().request;Check(r.action==Action::Potion,"fresh click after grab can drink");
+        s.in.reply={r.sequence,10,Result::Refused};s.Step();
+        s.in.bottleTrigger[hand]=0;s.Step();s.in.bottleTrigger[hand]=1;
+        Check(s.Step().request.action==Action::None&&!s.out.bottleEmpty,"refused click never retries within the grab");
+    }
+    for(int change=0;change<4;++change) {
+        Sim s;s.in.clickToDrink=true;s.in.hand[0].p=s.out.belt[0].p;s.Step();s.in.grip[0]=1;s.Step();
+        if(change==0)++s.in.snapshot.belt[0].revision;
+        if(change==1)s.in.snapshot.belt[0].items[0].handle++;
+        if(change==2)s.in.tracked[0]=false;
+        if(change==3)++s.in.session;
+        s.in.bottleTrigger[0]=1;
+        Check(s.Step().request.action==Action::None,"changed item/session or lost tracking cancels click drinking");
+    }
+    for(bool enabled:{false,true}) {
+        Sim s;s.in.clickToDrink=enabled;s.in.hand[0].p=s.out.belt[0].p;s.Step();s.in.grip[0]=1;
         Check(s.Step().bottle==0&&s.out.request.action==Action::None,"physical bottle grab is non-consuming");
         s.in.hand[0].q=math::Multiply({0,0,-.70710678f,.70710678f},{.70710678f,0,0,.70710678f});
         // Neck touches the mouth with the right hand outside the face.
@@ -1123,6 +1164,13 @@ int main(){
         Stage st{true,{.3f,1.6f,-.2f},{12.f,1.7f,-40.f},math::Yaw(2.1f)};
         const Vec world{15.f,.4f,-37.f};const auto back=st.World(st.Room(world));
         Check(std::fabs(back.x-world.x)<1e-4f&&std::fabs(back.y-world.y)<1e-4f&&std::fabs(back.z-world.z)<1e-4f,"stage room/world mapping is invertible");
+    }
+    for(bool mercPotionAutoaimEnabled:{false,true}) {
+        Check(MercThrowAccepted(0,mercPotionAutoaimEnabled)&&MercThrowAccepted(1.5f,mercPotionAutoaimEnabled),"landing at the merc feeds with either policy");
+        Check(MercThrowAccepted(1.51f,mercPotionAutoaimEnabled)==mercPotionAutoaimEnabled&&MercThrowAccepted(100,mercPotionAutoaimEnabled)==mercPotionAutoaimEnabled,
+              "ground, wall and distant misses feed only with assistance");
+        Check(!MercThrowAccepted(-1,mercPotionAutoaimEnabled)&&!MercThrowAccepted(NAN,mercPotionAutoaimEnabled)&&!MercThrowAccepted(INFINITY,mercPotionAutoaimEnabled),
+              "assistance cannot feed an absent, dead or invalid hireling");
     }
     std::puts("Interaction ownership, wheel, holster, item identity and confirmation tests passed");
 }
