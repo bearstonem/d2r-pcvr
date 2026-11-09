@@ -3063,14 +3063,14 @@ bool VrProjInner(const d2rcam::WorldView& in, float M[16]) {
 #if D2RVR_FIRST_PERSON
     // First person in full body with the head kept whole for its shadow ([arms] hide_head and head_shadow, as PushArms
     // decides): nothing nearer than the cut at this head pitch is drawn, so the head is not seen from inside
-    // (steamvr/head_shadow.h). Not in a shapeshift form: its head shrinks as before.
+    // (steamvr/head_shadow.h). Not in a shapeshift form: its head shrinks as before. Every first-person pass goes
+    // through EyeNear, kept or not: the near moves at most 15 % a pass (a reader a pass behind, the depth fog's
+    // NearPlane, stays within that).
     if (!ThirdPerson() && !Overhead()) {
         const bool keep = g_set.headShadow.load() && g_set.hideHead.load() && FullBody() && !ShapeFormNow();
-        if (keep || headshadow::Holding()) {
-            const D2RVR_Shared* sh = g_shared;
-            const float pitch = sh && sh->version == D2RVR_SHARED_VERSION && sh->headValid && sh->pitchValid ? sh->headPitchDeg : NAN;
-            nearZ = headshadow::EyeNear(nearZ, keep, std::max(1.0f, ScaleHeight()) / UserEyeHeightM(), pitch);
-        }
+        const D2RVR_Shared* sh = g_shared;
+        const float pitch = sh && sh->version == D2RVR_SHARED_VERSION && sh->headValid && sh->pitchValid ? sh->headPitchDeg : NAN;
+        nearZ = headshadow::EyeNear(nearZ, keep, std::max(1.0f, ScaleHeight()) / UserEyeHeightM(), pitch);
     }
 #endif
     g_lastNear.store(nearZ);

@@ -2009,6 +2009,37 @@ than 2 units from the player, and, when they change (at most every 5 s), the
 form rig frames posed ahead of the state sample, left to the game (not
 standing, another rig taken) and grafted without the neck anchor.
 
+## The head kept for its shadow
+
+In full-body first person (F4) the hero keeps his head and helm, so his shadow
+has a head; the eye views instead draw nothing nearer than a cut in front of
+your eyes: 11 cm looking level, easing to 22 cm looking up and 3 cm looking
+down (`[arms] head_cut_level`, `head_cut_up`, `head_cut_down`). The design and
+its thread handshake are in `steamvr/head_shadow.h`; `[arms] head_shadow=0`
+shrinks the head to the neck as before, and shapeshift forms always do.
+
+- **Open: helms that reach past the cut.** A Druid pelt is an animal's head
+  worn over the hero's: looking level its snout and teeth still stand in front
+  of your face (#429, the dev Druid's Jalal's Mane). A deeper cut would also
+  cut what you bring to your face (the bow's nock at the cheek, a potion at the
+  mouth, a warcry's fist), and shrinking the head while a pelt is worn was
+  tried and refused (it reads as the head just removed). Pending: leaving the
+  head and helm out of the eye views' draws only, keeping them in the shadow.
+- **The near never jumps.** Switching the cut on or off moves the near clip
+  2.6 times (`[camera] near` 0.2 as installed, about 4 cm, to 11 cm; 5 times
+  looking up). The depth fog reads one `NearPlane` that can be a pass behind,
+  so a jump put one frame's cave fog or ceiling that far off: a black flash,
+  for example at a shapeshift. The near now moves at most 15 %
+  from one eye pass to the next, except up at once when a kept head needs it;
+  the head is kept only once the near stands at the cut.
+
+Log lines (`Frame head shadow:`): the choice once it has lasted a second, with
+the cut at the current pitch (`head kept for its shadow; the eye's cut 11 cm at
+pitch +2 deg (11 level, 22 up, 3 down); ...`); a near that still jumped over
+15 % between passes, at most once a second. `[debug] head_shadow=1` adds a
+line every second (poses, passes at the cut, held, eased, jumps, near, pitch,
+cut range, head bones' reach).
+
 ## Head-relative sound
 
 Monsters, NPCs, objects and other positioned sounds now come from where they
