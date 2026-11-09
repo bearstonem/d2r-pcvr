@@ -2897,7 +2897,7 @@ draw. A glyph whose skill has a motion casts it at once, as any glyph.
 The motions: Nova, the hands together then flung out wide; Frost Nova, both hands pushed down
 past the chest (to the waist, not the floor); Static Field, the palms rubbed together then snapped apart; Energy Shield, both
 hands up at the face within 35 cm (the forearms crossed or not), held; Thunder Storm, one arm
-raised above the head, held; Teleport, the right arm pointed where you want to land and the fist yanked back; Blaze, one hand struck down the thigh; Frozen Armor, the
+raised above the head, held; Teleport, the right arm held out, the controller's arc pointed where you want to land, and the fist yanked back; Blaze, one hand struck down the thigh; Frozen Armor, the
 left hand from the right hand up to the right shoulder; Shiver Armor, both fists shaken, held at
 least 25 cm apart (a tester, 2026-11-05: Static Field's rub "reads as shaking": fists shaken any
 closer are a rub, and its count starts over); Chilling
@@ -2939,9 +2939,17 @@ steady for 0.15 s, the left arm not raised too (out in front at the chest or hig
 chin: owner, 2026-11-05, "When we raise both arms, the circle shouldn't be drawn for teleport"), shows
 where Teleport lands: an arcane violet sigil with a pillar of light over it (`telegraph::TeleportMark`,
 `D2R_DepthFog.fx` TeleportSigil and TelePillar), whatever the Aim options; the left arm raised takes it
-away at once. It goes along the arm's heading (the line from the
-shoulder through the fist), 32 cells away with the arm level, nearer evenly as it points down, 6 cells
-at 50 degrees below (`spellmotion::PointSpot`). It follows the arm while the arm stays out and steady.
+away at once. Where it lands is the right controller's own pointing, along an arc (owner,
+2026-11-09: "we need to be able to pick how far we want to teleport easily, as well as pointing the
+direction we want to teleport", then "combine it with the awesome ring ... where the arc would land"):
+a violet ribbon thrown from the controller (`teleport_arc.h`, `D2R_TeleportArc.fxh`), its heading the
+way and its tilt the distance, landing where it meets the floor, on the sigil. Held level at chest
+height it lands about 12 cells ahead, tilted up 45 degrees or more at the farthest, 32 cells, and
+pointed down nearer, to 2 cells; the far end changes slowest, for the finest control there. Behind a
+wall or a monster the ribbon dims to a third. It follows the controller while the arm stays out and
+steady, and holds still through the yank. Without a tracked controller or a known floor, the arm's own
+heading as before: the line from the shoulder through the fist, 32 cells away with the arm level, nearer
+evenly as it points down, 6 cells at 50 degrees below (`spellmotion::PointSpot`).
 The fist yanked back toward the shoulder (18 cm within 0.25 s, mostly back) lands there
 (`MotionLanding`, the cast's point within the game's reach, logged `Frame motion aim:`). The arm drawn
 in or let down without a yank for 0.6 s, letting the grips go, any other motion's cast or 8 s takes the

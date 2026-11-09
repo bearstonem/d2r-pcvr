@@ -126,6 +126,7 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "native_panels.h"
 #include "spell_aim.h"
 #include "telegraph.h"
+#include "teleport_arc.h"
 #include "aim_rules.h"
 #include "skill_pad.h"
 #include "spell_aim_signatures.h"
@@ -10180,6 +10181,11 @@ bool BeamWanted() {
     return g_enabled.load() && g_inWorld.load() && !gamestate::MenuOpen() && lootscan::Latest(GetTickCount64()).count > 0;
 }
 
+// Teleport's arc (D2R_TeleportArc.fxh; teleport_arc.h): while the Sorceress aims Teleport with the controller.
+bool TeleportArcWanted() {
+    return g_enabled.load() && g_inWorld.load() && !gamestate::MenuOpen() &&
+        framevr::teleportarc::Shown(framevr::teleportarc::Current().Get(), GetTickCount64());
+}
 bool ImmunityWanted() {
     return g_enabled.load() && g_inWorld.load() && !gamestate::MenuOpen() &&
         monsterimmunity::Latest(GetTickCount64()).count > 0;
@@ -10358,7 +10364,7 @@ void OnFinishEffects(reshade::api::effect_runtime* rt, reshade::api::command_lis
     if (!g_tech[0].handle) { hud::SetPictureReady(false); return; }
     // Off while a menu is open: the fog lies over the whole picture, the
     // inventory and trade panels included, and darkened them.
-    const bool want = FogWanted() || g_skyPalette.load() >= 0 || g_arcaneSky.load() || CeilWanted() || HudWanted() || StampWanted() || hud::PictureWanted() || TableKeyWanted() || PhantomWanted() || BoneAxesWanted() || ShieldDebugWanted() || OutlineWanted() || RingWanted() || BeamWanted() || HeroLightWanted() || ImmunityWanted();
+    const bool want = FogWanted() || g_skyPalette.load() >= 0 || g_arcaneSky.load() || CeilWanted() || HudWanted() || StampWanted() || hud::PictureWanted() || TableKeyWanted() || PhantomWanted() || BoneAxesWanted() || ShieldDebugWanted() || OutlineWanted() || RingWanted() || BeamWanted() || HeroLightWanted() || ImmunityWanted() || TeleportArcWanted();
     // The toolbar and the map are taken out of the game's picture to be drawn
     // back at their own size only while this effect runs, and is new enough to.
     {
@@ -11113,6 +11119,22 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
         const float immunityUpm = std::max(1.0f, ScaleHeight()) / UserEyeHeightM();
         const float immunityShape[4] = {.65f * immunityUpm, .65f * immunityUpm, .16f * immunityUpm, .8f};
         SetFloats(rt, "ImmunityShape", immunityShape, 4);
+        {   // Teleport's arc: its points relative to the hero in render units (transport ShowTeleportArc), w how far
+            // along (0 the hand, 1 the landing); a ribbon 3 cm wide at the player's scale.
+            const auto arc = framevr::teleportarc::Current().Get();
+            const bool arcOn = view && TeleportArcWanted();
+            SetBool(rt, "ArcOn", arcOn);
+            float arcPts[framevr::teleportarc::Points][4] = {};
+            if (arcOn)
+                for (int i = 0; i < framevr::teleportarc::Points; ++i) {
+                    arcPts[i][0] = arc.points[size_t(i)].x; arcPts[i][1] = arc.points[size_t(i)].y; arcPts[i][2] = arc.points[size_t(i)].z;
+                    arcPts[i][3] = float(i) / float(framevr::teleportarc::Points - 1);
+                }
+            SetFloats(rt, "ArcPts", arcPts[0], framevr::teleportarc::Points * 4);
+            const float arcUpm = std::max(1.0f, ScaleHeight()) / UserEyeHeightM();
+            const float arcShape[4] = {.015f * arcUpm, 1.0f, 0.0f, 0.0f};
+            SetFloats(rt, "ArcShape", arcShape, 4);
+        }
         float mob[2][4] = {};
         if (count > 0 || rings || beams || immunityOn) {
             for (int e = 0; e < 2; ++e) {

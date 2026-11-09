@@ -81,6 +81,7 @@
 #include "elemental_particles.h"
 #include "../vr/companion_ai.h"
 #include "telegraph.h"
+#include "teleport_arc.h"
 #include "tactical_chord.h"
 #include "../vr/target_lock.h" 
 #include "vr_settings_ui.h"
@@ -706,6 +707,28 @@ bool PointedCell(float& x,float& y,math::Vec& way) {
     const math::Vec flat{d.x/level,0,d.z/level};
     way=math::Rotate(math::Conjugate(math::Yaw(math::Heading(interactionInput.head.q))),flat);
     return FloorCell(math::Vec{o.x+flat.x*along,interactionInput.floor,o.z+flat.z*along},x,y);
+}
+// Teleport's arc (teleport_arc.h; owner, 2026-11-09): thrown from the right controller while the aim is up, and the
+// arm's pointing (Output::point) it was thrown for: it follows the controller while the engine follows the arm (steady),
+// so the yank's own swing never moves it. Its landing is the sigil's and the cast's.
+teleportarc::Arc teleportArc;math::Vec teleportArcPoint{};
+constexpr float TeleportArcNearCells=2.f;
+// The arc's landing in grid cells, and its way, head-local and level, in cells (as Output::aim's Spot).
+bool ArcCell(const teleportarc::Arc& arc,float& x,float& y,math::Vec& way) {
+    if(!arc.ok||!(stageWorld.upm>=1&&stageWorld.upm<=12))return false;
+    way=math::Rotate(math::Conjugate(math::Yaw(math::Heading(interactionInput.head.q))),arc.way)*(arc.distance*stageWorld.upm*.5f);
+    return FloorCell(arc.land,x,y);
+}
+// The arc to the shader (vrcam -> D2R_TeleportArc.fxh): each point relative to the hero in render units, as the bow's
+// shots are placed (resolveBow): eye height up, plus the room offset from the view's origin turned into the world.
+void ShowTeleportArc(const teleportarc::Arc& arc) {
+    if(!arc.ok||!stageWorld.valid||!(stageWorld.upm>=1&&stageWorld.upm<=12))return;
+    std::array<math::Vec,teleportarc::Points> points{};
+    for(size_t i=0;i<points.size();++i) {
+        const auto o=math::Rotate(stageWorld.base,arc.points[i]-stageWorld.origin);
+        points[i]={o.x*stageWorld.upm,stageWorld.eyeHeight+o.y*stageWorld.upm,o.z*stageWorld.upm};
+    }
+    teleportarc::Current().Place(points,GetTickCount64());
 }
 bool crossbowFire=false;
 uint64_t crossbowActivation=0,crossbowTakenAt=0;
@@ -4694,19 +4717,36 @@ void Input() {
             // moment after the last), gone with the yank or the grips let go. The yank then lands there, its way
             // toward it too (MotionCastRay).
             const auto& punchTuning=spellFree[size_t(int(spellmotion::Motion::Punch)-1)].tuning;
-            float landX=0,landY=0;
-            const bool landKnown=(teleportAiming||doneLanding)&&TeleportCell(doneLanding?donePoint:teleportPoint,punchTuning,landX,landY);
+            // The arc (teleport_arc.h): thrown again while the engine follows the arm, kept through the yank; without a
+            // tracked controller or a known floor, the arm's own PointSpot as before.
+            if(teleportAiming&&handAimTracked[0]&&interactionInput.floorKnown&&stageWorld.valid&&stageWorld.upm>=1&&stageWorld.upm<=12&&
+               !(teleportArc.ok&&teleportPoint==teleportArcPoint)) {
+                const float cell=2.f/stageWorld.upm;   // m a cell (toss::Cell)
+                const auto arc=teleportarc::Compute(handAim[0].p,math::Rotate(handAim[0].q,math::Vec{0,0,-1}),interactionInput.floor,
+                    TeleportArcNearCells*cell,punchTuning.pointFar*cell);
+                if(arc.ok){teleportArc=arc;teleportArcPoint=teleportPoint;}
+            }
+            if(!teleportAiming&&!doneLanding)teleportArc={};
+            float landX=0,landY=0;math::Vec arcWay{};
+            const bool arcKnown=(teleportAiming||doneLanding)&&ArcCell(teleportArc,landX,landY,arcWay);
+            const bool landKnown=arcKnown||((teleportAiming||doneLanding)&&TeleportCell(doneLanding?donePoint:teleportPoint,punchTuning,landX,landY));
             if(teleportAiming&&landKnown&&done<0) {
                 // Teleport's own sigil and pillar (vrcam, D2R_DepthFog.fx TeleportSigil): element 5, 2 cells round
                 telegraph::Current().Place(landX,landY,GetTickCount64(),250,5,2.0f,0,0,0,telegraph::TeleportMark);
+                if(arcKnown)ShowTeleportArc(teleportArc);
                 if(!teleportShown) {
-                    const auto spot=spellmotion::PointSpot(teleportPoint,punchTuning);
-                    char line[160];std::snprintf(line,sizeof line,"Frame spell motion: Teleport pointed - its landing shown %.0f cells ahead, %+.0f across",spot.ahead,spot.right);
+                    char line[160];
+                    if(arcKnown)std::snprintf(line,sizeof line,"Frame spell motion: Teleport aimed by the controller - its arc lands %.0f cells away (cell %.1f,%.1f)",
+                        std::hypot(arcWay.x,arcWay.z),landX,landY);
+                    else {
+                        const auto spot=spellmotion::PointSpot(teleportPoint,punchTuning);
+                        std::snprintf(line,sizeof line,"Frame spell motion: Teleport pointed - its landing shown %.0f cells ahead, %+.0f across",spot.ahead,spot.right);
+                    }
                     Say(line);
                 }
                 teleportShown=true;
             }
-            else if(teleportShown){telegraph::Current().ClearSkill(telegraph::TeleportMark);teleportShown=false;}
+            else if(teleportShown){telegraph::Current().ClearSkill(telegraph::TeleportMark);teleportarc::Current().Clear();teleportShown=false;}
             if(done>0) {
                 const auto doneMotion=spellmotion::Motion(done);
                 const bool rapid=spellmotion::Rapid(doneMotion);
@@ -4714,7 +4754,7 @@ void Input() {
                 // and the shapeshifts' 1.5 s, spellmotion::ClassRest). A Blessed Hammer pump leaves them be.
                 if(!rapid)for(size_t k=0;k<spellFree.size();++k)if(int(k)!=done-1)spellFree[k].Reset();
                 const int skill=spellmotion::CastSkillOf(skillOf[done],[&](int id){return interaction::GlyphSkill(quickSnapshot,id).known;});
-                const auto spot=spellmotion::PointSpot(donePoint,punchTuning);
+                const auto spot=arcKnown?spellmotion::Spot{-arcWay.z,arcWay.x}:spellmotion::PointSpot(donePoint,punchTuning);
                 if(doneLanding&&landKnown)doneAim={spot.right,0,-spot.ahead};
                 // A summon on a spot of its own: Decoy and the golems ahead (spellmotion::Engine::LandAt), the
                 // Valkyrie where the right hand points (LandPointed); its way toward it too.
@@ -7618,7 +7658,8 @@ void Shutdown(bool preserveResolution) {
     arcaneController.Reset();arcaneOutput={};arcanePaintKey=~0ull;arcanePaintSession=0;arcanePaintAt=0;arcaneAtlasPending=arcaneImageReady=false;
     glyphStroke={};glyphHand=-1;glyphCast={};glyphPaintKey=glyphShownStroke=0;glyphBeganAt=0;glyphEndedAt=-1;glyphPaintAt=0;glyphLook=glyphtrail::Look::Drawing;glyphPressRt=glyphTrailShown=false;glyphAtlasPending=glyphImageReady=false;
     glyphPress={};glyphRecordAt.store(0);
-    motionLanding={};if(teleportShown){telegraph::Current().ClearSkill(telegraph::TeleportMark);teleportShown=false;}
+    motionLanding={};teleportArc={};teleportarc::Current().Clear();
+    if(teleportShown){telegraph::Current().ClearSkill(telegraph::TeleportMark);teleportShown=false;}
     spellTrigger=0;for(auto& e:spellFree)e.Reset();spellFreeAt=-1;spellGripSince=-1;spellGripCast=false;spellGripsArmed.store(false);spellGate.Reset();
     bowLaserHue=-1;bowLaserAtlasPending=bowLaserImageReady=false;
     noticeWatch={};noticeCards.Clear();noticeCard={};noticePaintRequest=noticeRequestedSequence=noticePaintedSequence=0;noticeAtlasPending=noticeImageReady=false;
