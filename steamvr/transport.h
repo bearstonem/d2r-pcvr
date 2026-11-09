@@ -75,7 +75,7 @@ void ConfigureBottlePhysics(bool on); // [interactions] bottle_physics: emptied 
 void ConfigurePropPhysics(bool on);   // [interactions] prop_physics: weapons knock the level's small props about
 void ConfigureBodyPhysics(bool on);   // [interactions] body_physics: weapons push monsters' and townsfolk's limbs aside
 bool BodyPhysics();                   // on, with physical melee
-// [interactions] leather_menu (VR Settings > Interface, beside Menu distance), leather_menu_width (m), leather_tilt (degrees),
+// [interactions] leather_menu (VR Settings > Interface > Menus, beside Menu distance), leather_menu_width (m), leather_tilt (degrees),
 // leather_world, leather_backdrop: the tabbed menu on a leather sheet strapped to the left hand
 // (leather_menu.h); backdrop keeps the game's translucent dim under the menu on the hide.
 void ConfigureLeatherMenu(bool on,float menuWidth,float tilt,bool world,bool backdrop=false,bool hide=true);   // hide false: Menu only
@@ -131,11 +131,11 @@ bool CampfireMenuHit();
 // crackle at `ambient`, a click's whoosh at `burst` (0..1, times the game's volume); CampfireBurst: a click on the fire.
 void SetCampfireFire(bool on, float ambient, float burst);
 void CampfireBurst();
-// Paladin Fist of the Heavens gesture (heavens_gesture.h). Armed: the skill is
-// on a slot and gestures are on (vrcam keeps the monster scan running).
+// Paladin Fist of the Heavens motion (motions_paladin.h). Armed: the skill is
+// learned, its card on and gestures on (vrcam keeps the monster scan running).
 // Request: a call waiting for its target (its number, 0 none); vrcam answers
 // with the monster the weapon arm points at (0: the game's own pick) after
-// handing it to the game's target query. The slot is pressed after the answer.
+// handing it to the game's target query. The cast is pressed after the answer.
 bool HeavensArmed();
 uint32_t HeavensRequest();
 void HeavensResolved(uint32_t request,uint32_t monster);
@@ -201,7 +201,7 @@ struct FrameTiming {
     uint32_t pipelines=0,layers=0;bool gpuValid=false;   // layers: composition layers the last xrEndFrame sent
 };
 FrameTiming LastTiming();
-// One headset frame as the render thread measured it, for VR Settings > Performance:
+// One headset frame as the render thread measured it, for the readout on VR Settings > Graphics > Performance and Frames:
 // the runtime's wait (xrWaitFrame), the game's drawing (one eye by turns, both
 // in a pair), the mod's own work around it without that wait, and the
 // headset's frame (budgetMs). periodMs is the time since the last frame ended
@@ -214,7 +214,7 @@ void Shutdown(bool preserveResolution=false);
 // its own x, and placed so.
 void BeginPair(bool byTurns=false,bool replay=false);
 void BeginEye(int eye);
-// VR Settings > Performance > Eyes drawn per frame: 0 both eyes, 1 by turns (the eye not
+// VR Settings > Graphics > Performance > Eyes drawn per frame: 0 both eyes, 1 by turns (the eye not
 // drawn turned and moved with the scene's depth; the default). Replay (2) is
 // no longer a choice (vr_settings.h).
 int StereoRendering();

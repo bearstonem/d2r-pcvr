@@ -114,5 +114,5 @@ La palma abierta levantada durante `400 ms` también emitía `DefensiveHold`. Se
 | **Ruptura de Correa (40)** | `RegroupLeash` | `2939`/`2940` (90%) o `2947`/`2948` (10% despedida) | `3173`/`3174` (90%) o `3181`/`3182` (10% despedida) | `3095`/`3096` (90%) o `3103`/`3104` (10% despedida) | `3017`/`3018` (90%) o `3025`/`3026` (10% despedida) |
 | **Salud Crítica (`< 50%`)** | `Distress` | `2937` / `2938` | `3171` / `3172` | `3093` / `3094` | `3015` / `3016` |
 
-- **Ajuste en INI:** `[gameplay] companion_tactical_commands=1` en `d2r_pcvr.ini` (también configurable en vivo desde el menú VR en **Combat -> Tactical Commands**).
+- **Ajuste en INI:** `[gameplay] companion_tactical_commands=1` en `d2r_pcvr.ini` (también configurable en vivo desde el menú VR en **Gameplay -> Monsters -> Tactical commands**).
 

@@ -106,7 +106,7 @@ int main(){
         for(int i=0;i<100;++i)allowed+=log.Allow();
         assert(allowed==AuraIconHider::MaxLines);log.Restart();assert(log.Allow());
     }
-    {   // the HUD > Companions & effects gate: hidden only while that row is On in VR
+    {   // the Interface > Wrist > Buffs and companions gate: hidden only while that row is On in VR
         using Act=AuraIconHider::Act;
         static_assert(AuraIconHider::Want(true,true)&&!AuraIconHider::Want(true,false)&&
                       !AuraIconHider::Want(false,true)&&!AuraIconHider::Want(false,false));
