@@ -1122,16 +1122,20 @@ down or turning your head is not a step) against the hero's spot. Past 20 cm,
 held 100 ms, it pushes the left stick partly toward you, so the game's own walk
 moves the hero and its collision stops him at walls and monsters. While he
 walks, `View` moves the tracking origin by exactly the distance he covered, so
-the camera stays at your real head and the hero catches up underneath. The push
-ends inside 7 cm; the origin keeps following for 300 ms while he stops on the
-game's grid. Walking 0.6 s without coming 3 cm closer is a wall: the push stops
-until you step 15 cm elsewhere. The hero's position is never written.
+the camera stays at your real head and the hero catches up underneath. He covers
+about 4 m/s, so the push ends early by the distance he will coast (closing speed
+x 50 ms, at most 15 cm) and otherwise inside 7 cm; the origin keeps following for
+300 ms while he stops on the game's grid. Pushed 0.6 s while he walks under 3 cm
+is a wall: the push stops until you step 15 cm elsewhere. A jump of more than
+0.75 m in one view (teleport, waypoint, Leap) is never followed: the view is
+built twice a pair, back to back, so speed per wall-clock time misjudged walking.
+The hero's position is never written.
 
 Paused, with no push and no origin follow: a grip or trigger held, the bow
 drawn, a native cast, a hand moving faster than 1.2 m/s (a swing, for 0.4 s),
 the real left stick, a menu, wheel, the held menu or VR Settings, and Seated
 play. A head moving faster than 1.5 m/s (a lunge) starts nothing. A hero moving
-faster than 4 m/s (a teleport, waypoint or Leap) is not followed. F11, Calibrate
+more than 0.75 m in one view (a teleport, waypoint or Leap) is not followed. F11, Calibrate
 body and a world load re-anchor it where your head is.
 
 Log lines: `Frame room steps: on`, `walking after your step, N m from the hero`,

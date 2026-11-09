@@ -27,15 +27,23 @@ using math::Vec;using math::Quat;
 constexpr float StartMetres=.20f;     // the neck this far from the hero starts a walk
 constexpr float StopMetres=.07f;      // and this near ends it
 constexpr double HoldSeconds=.10;     // the offset held past StartMetres this long first
-constexpr double BlockedSeconds=.6;   // walking this long without closing BlockedMetres: a wall - stop pushing
+constexpr double BlockedSeconds=.6;   // pushed this long while the hero walked under BlockedMetres: a wall - stop pushing
 constexpr float BlockedMetres=.03f;
 constexpr float UnblockMetres=.15f;   // then a step this much elsewhere tries again
+// The hero covers 0.1-0.2 m a game frame (about 4 m/s, 2026-11-08 log) and stops on the game's grid after
+// the stick lets go: the push ends early by the distance he will coast, so he glides in under you.
+constexpr double CoastSeconds=.05;
+constexpr float MaxCoastMetres=.15f;
+constexpr double RateSeconds=.08;     // the closing speed measured over this window
 constexpr double TailSeconds=.30;     // after the push ends, the origin follows the hero this long (he stops on a grid)
 constexpr float Push=.55f;            // stick length: past the game's dead zone (.316), short of a run (.95)
 constexpr float SwingSpeed=1.2f;      // a hand faster than this, m/s, is a swing: pause
 constexpr double SwingSeconds=.4;     // and stay paused this long after it
 constexpr float LungeSpeed=1.5f;      // the head faster than this, m/s, starts nothing
-constexpr float MaxHeroSpeed=4.f;     // the hero faster than this, m/s, is a jump, a leap or a teleport: not followed
+// The hero farther than this in one head view, m, is a jump, a leap or a teleport: not followed. By distance,
+// not speed: the head view is built twice a pair, back to back, and walking moved him 0.1-0.2 m between
+// them in under a millisecond (2026-11-08 log: every walking frame taken for a jump at the old 4 m/s).
+constexpr float MaxHeroStep=.75f;
 // The neck from the eyes, in the head's own frame: below and behind them.
 inline constexpr Vec EyeToNeck{0,-.10f,.08f};
 
@@ -117,20 +125,24 @@ public:
             if(Horizontal(offset-blockedAt)<UnblockMetres&&out.offset>StopMetres){out.blocked=true;return out;}
             blocked=false;
         }
+        if(in.time-rateAt>=RateSeconds||rateAt<=0) {   // how fast the gap closes, m/s (positive closing)
+            closing=rateAt>0?float((rateOffset-out.offset)/(in.time-rateAt)):0.f;rateOffset=out.offset;rateAt=in.time;
+        }
         if(walking) {
-            if(out.offset<=StopMetres){walking=false;tailUntil=in.time+TailSeconds;}
-            else if(out.offset<checkOffset-BlockedMetres){checkOffset=out.offset;checkAt=in.time;}
+            const float coast=std::min(MaxCoastMetres,std::max(0.f,closing)*float(CoastSeconds));
+            if(out.offset<=StopMetres+coast){walking=false;tailUntil=in.time+TailSeconds;}
+            else if(heroMoved>=BlockedMetres){heroMoved=0;checkAt=in.time;}   // the hero walks (the origin followed him)
             else if(in.time-checkAt>=BlockedSeconds){walking=false;blocked=true;blockedAt=offset;tailUntil=in.time+TailSeconds;out.blocked=true;}
         } else if(out.offset>=StartMetres&&headSpeed<=LungeSpeed) {
             if(farSince<0)farSince=in.time;
-            if(in.time-farSince>=HoldSeconds){walking=true;farSince=-1;checkOffset=out.offset;checkAt=in.time;}
+            if(in.time-farSince>=HoldSeconds){walking=true;farSince=-1;heroMoved=0;checkAt=in.time;}
         } else farSince=-1;
         if(walking){out.push=true;StickToward(offset,in.head,out.x,out.y);}
         out.follow=walking||in.time<tailUntil;
         return out;
     }
     // The origin moved by d with the hero (transport View): the reference neck moves with it.
-    void Shifted(Vec d){origin=origin+d;reference=reference+d;}
+    void Shifted(Vec d){origin=origin+d;reference=reference+d;heroMoved+=Horizontal(d);}
     // The room turned about the head (room_scale.h TurnAboutHead): the origin is now `to`, and the anchored
     // neck turns with the room by `rel` (the stage's turn, as tracking space sees it), so a turn is no step.
     void Turned(Vec to,Quat rel){if(!known)return;reference=to+math::Rotate(rel,reference-origin);origin=to;}
@@ -141,6 +153,6 @@ private:
     void Anchor(const Input& in){origin=in.origin;reference=Neck(in.eye,in.head);known=true;walking=false;blocked=false;farSince=-1;tailUntil=0;}
     bool known=false,walking=false,blocked=false,eyeKnown=false,handKnown[2]{};
     Vec origin{},reference{},eye{},hand[2]{},blockedAt{};
-    double lastTime=0,farSince=-1,tailUntil=0,swingUntil=0,checkAt=0;float checkOffset=0;
+    double lastTime=0,farSince=-1,tailUntil=0,swingUntil=0,checkAt=0,rateAt=0;float heroMoved=0,rateOffset=0,closing=0;
 };
 }

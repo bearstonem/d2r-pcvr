@@ -7173,7 +7173,7 @@ bool View(float out[16],const float hero[3],float eyeHeight,float userEyeHeight,
         if(roomHeroKnown&&roomOut.follow&&at>roomHeroAt&&at-roomHeroAt<.25) {
             const math::Vec moved{now.x-roomHero.x,0,now.z-roomHero.z};
             const float metres=std::sqrt(moved.x*moved.x+moved.z*moved.z)/upm;
-            if(metres>roomsteps::MaxHeroSpeed*float(std::max(at-roomHeroAt,1/90.))) {
+            if(metres>roomsteps::MaxHeroStep) {
                 ++roomStats.jumps;
                 char line[200];std::snprintf(line,sizeof line,"Frame room steps: the hero moved %.2f m in %.0f ms (a teleport, waypoint or leap): the origin stays",metres,(at-roomHeroAt)*1000);
                 Say(line);

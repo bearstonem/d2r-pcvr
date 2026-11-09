@@ -59,9 +59,9 @@ int main(){
         s.Move({0,0,between-StopMetres+.02f});s.Step();Check(!s.out.push&&s.out.follow,"stops inside StopMetres, the origin still follows");
         s.Run(TailSeconds+.02);Check(!s.out.push&&!s.out.follow,"the tail ends");
     }
-    {   // A wall: walking without coming closer for BlockedSeconds stops the push; a step elsewhere tries again.
+    {   // A wall: pushed BlockedSeconds while the hero does not walk stops the push; a step elsewhere tries again.
         Sim s;s.Move({0,0,-.5f});s.Run(HoldSeconds+.05);Check(s.out.push,"walking");
-        s.Run(BlockedSeconds+.05);Check(!s.out.push&&s.out.blocked,"no closer for BlockedSeconds: blocked, not pushed");
+        s.Run(BlockedSeconds+.05);Check(!s.out.push&&s.out.blocked,"the hero did not walk for BlockedSeconds: blocked, not pushed");
         s.Run(1);Check(!s.out.push&&s.out.blocked,"still blocked while you stay");
         s.Move({.3f,0,0});s.Run(HoldSeconds+.05);Check(s.out.push&&!s.out.blocked,"a step elsewhere walks again");
         Sim c;c.Move({0,0,-.5f});c.Run(HoldSeconds+.05);
@@ -109,6 +109,13 @@ int main(){
         Check(Len(after-before)<1e-3f,"the camera stays where the head is");
         Check(s.out.offset<.01f&&!s.out.push&&s.out.follow,"the step is paid off and the push ends; the origin still follows");
         Check(Len(Shift({1,5,1},base,0))==0&&Shift({0,9,0},base,upm).y==0,"no shift without a scale, and never up or down");
+    }
+    {   // A fast hero coasts: the push ends early by what he will coast, at most MaxCoastMetres.
+        Sim s;s.Move({0,0,-.6f});s.Run(HoldSeconds+.05);Check(s.out.push,"walking");
+        bool stoppedEarly=false;float at=0;
+        for(int i=0;i<90&&s.out.push;++i){s.in.origin=s.in.origin+Vec{0,0,-.045f};s.chase.Shifted({0,0,-.045f});s.Step();   // 4 m/s
+            if(!s.out.push){stoppedEarly=s.out.offset>StopMetres+.02f;at=s.out.offset;}}
+        Check(stoppedEarly&&at<=StopMetres+MaxCoastMetres+.05f,"at 4 m/s the push ends before StopMetres, by no more than the coast");
     }
     {   // The room turned about the head (room_scale.h): the owed step turns with the room; standing at the centre, a turn owes none.
         const auto turnAboutHead=[](Vec origin,Vec head,Quat was,Quat now){
