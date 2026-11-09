@@ -593,6 +593,10 @@ inline constexpr Override Overrides[]={
      .format={.unit="%"},FRAMEVR_NAMES(OffAtZero)},
     {.id="haptics.short_melee",.page=View::Vibration,.section="Strength",.kind=RowKind::Toggle,.label="Short melee taps",
      .help="On uses very short, sharp taps for hits. Some controllers barely feel them: leave it Off if hits feel weak."},
+    // Richer haptics: what a strike feels like by what it struck (haptic_impact.h), in Short melee taps' row: the page's 8 rows are taken.
+    {.id="haptics.hit_patterns",.page=View::Vibration,.section="Strength",.kind=RowKind::Toggle,.label="Hit feel by target",
+     .help="A hit feels like what you struck: a thud for flesh, clicks for bone, a shiver for spirits, a crack and crumble for pots, a ring for a parry. Off: one tap.",
+     .beside=true,.besideLabel="By target"},
     {.id="haptics.bow_draw",.page=View::Vibration,.section="Strength",.kind=RowKind::Slider,.label="Bow draw",
      .help="Nocking an arrow, pulling the string and reaching full draw.",
      .format={.unit="%"},FRAMEVR_NAMES(OffAtZero)},
@@ -686,6 +690,10 @@ inline constexpr Override Overrides[]={
     {.id="gameplay.low_life_heart_start",.page=View::Warnings,.section="Low life",.kind=RowKind::Stepper,.label="Heartbeat starts at",
      .help="The life level where a heartbeat starts. It grows louder and faster with every 10% you lose. Off silences it.",
      .format={.unit="%"},FRAMEVR_NAMES(OffAtZero)},
+    // Richer haptics: the same heart felt in both controllers (haptic_heartbeat.h), in the heartbeat's own row.
+    {.id="haptics.heartbeat",.page=View::Warnings,.section="Low life",.kind=RowKind::Toggle,.label="Felt heartbeat",
+     .help="Both controllers beat like a heart while the heartbeat sounds, faster and harder as life drops. Vibration > Low life and mana alerts sets its strength.",
+     .beside=true,.besideLabel="Felt"},
     {.id="hud.blood_visor",.page=View::Warnings,.section="Low life",.kind=RowKind::Toggle,.label="Blood on visor",
      .help="Blood splashes the edges of your view as life drops below 60%, 40% and 20%. Healing back up fades it."},
     {.id="hud.blood_wipe",.page=View::Warnings,.section="Low life",.kind=RowKind::Toggle,.label="Wipe blood by hand",

@@ -12,7 +12,7 @@ std::array<uint8_t,0x168> row{};
 uintptr_t objectData=0;
 bool signatures=false,hookOk=false,wall=false,live=true,allowedNow=true,accept=true,kill=false,removeOther=false,weaponOk=true;
 unsigned checks=0,installs=0,operations=0,kicks=0,lineCalls=0;
-int pulses[2]{};
+int pulses[2]{},surfaces[2]{};   // taps, and how many were told they struck a container
 uint64_t failGuard=0;
 uintptr_t G(){return reinterpret_cast<uintptr_t>(game.data());}
 uintptr_t P(){return reinterpret_cast<uintptr_t>(player.data());}
@@ -60,7 +60,7 @@ void Reset(uint8_t operation=3) {
     Put(G(),0x546*8,O());
     row[0xe8]=row[0x85]=1;row[0x15e]=operation;
     Put(reinterpret_cast<uintptr_t>(row.data()),0x90,1);Put(reinterpret_cast<uintptr_t>(row.data()),0x94,1);
-    wall=kill=removeOther=false;live=allowedNow=accept=weaponOk=true;operations=kicks=lineCalls=0;pulses[0]=pulses[1]=0;attempted={};
+    wall=kill=removeOther=false;live=allowedNow=accept=weaponOk=true;operations=kicks=lineCalls=0;pulses[0]=pulses[1]=surfaces[0]=surfaces[1]=0;attempted={};
 }
 void Swing(const Strike& r){Apply(G(),P(),{&r,1},&Allowed);}
 }
@@ -78,7 +78,8 @@ uintptr_t Addr(uint64_t rva) {
 }
 }
 namespace framevr::logging {void Write(const char*){}}
-namespace framevr {void MeleeImpact(int hand){assert(hand==0||hand==1);++pulses[hand];}}
+namespace framevr {void MeleeImpact(int hand){assert(hand==0||hand==1);++pulses[hand];}
+void ImpactSurface(int hand,int surface,uint32_t){assert(hand==0||hand==1);assert(surface==int(haptics::Surface::Container));++surfaces[hand];}}
 namespace melee {
 bool LocalServer(uintptr_t& g,uintptr_t& p){g=G();p=P();return live;}
 uintptr_t ServerUnit(uintptr_t g,int type,uint32_t id){assert(g==G()&&type==2);return id==41?O():id==42?Q():0;}
@@ -98,6 +99,7 @@ int main() {
 
     for(uint8_t op:{3,5,7}) {
         Reset(op);Swing(r);assert(operations==1&&pulses[0]==1&&pulses[1]==0&&kicks==0);
+        assert(surfaces[0]==1&&surfaces[1]==0);   // each tap is told it struck a container (haptic_impact.h)
         Swing(r);assert(operations==1); // already broken / continuing blade contact
     }
     for(uint8_t op:{0,1,2,4,8,15,19,23,25,49,53,68,255}) {
@@ -123,7 +125,7 @@ int main() {
     Swing(r);assert(!operations);r=StrikeAt(); // swinging above a pot does not smash it
     Reset();accept=false;Swing(r);Swing(r);assert(operations==1&&!pulses[0]); // refusal once per stroke
     r.sweep.stroke++;Swing(r);assert(operations==2);r=StrikeAt();
-    Reset();auto left=StrikeAt(1);Swing(left);assert(operations==1&&pulses[1]==1&&!pulses[0]);
+    Reset();auto left=StrikeAt(1);Swing(left);assert(operations==1&&pulses[1]==1&&!pulses[0]&&surfaces[1]==1&&!surfaces[0]);
     Reset();weaponOk=false;Swing(left);assert(!operations);
     Reset();Strike both[]={r,left};Apply(G(),P(),both,&Allowed);assert(operations==1); // no double loot
     Reset();Put(O(),0x158,Q());Swing(r);assert(operations==2&&pulses[0]==2); // one sweep may smash both pots

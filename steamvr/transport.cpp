@@ -69,6 +69,8 @@
 #include "latest_worker.h"
 #include "haptic_pulse.h"
 #include "haptic_actions.h"
+#include "haptic_impact.h"
+#include "haptic_heartbeat.h"
 #include "xinput_rumble.h"
 #include "interaction_icons.h"
 #include "potion_models.h"
@@ -716,6 +718,9 @@ bowflight::Shot spellReadyShot[2]{};
 bool spellHasShot[2]{};
 uint64_t spellResolvedAt[2]{};
 std::atomic<ULONGLONG> meleeImpactAt[2]{},shieldImpactAt{0},parryMissAt{0};
+// What the pending impact struck (haptics::Surface): the weapon hands' next MeleeImpact, and the shield's block or parry.
+std::atomic<int> meleeImpactSurface[2]{},shieldImpactSurface{int(haptics::Surface::Block)};
+std::atomic<uint32_t> meleeImpactFlags[2]{};   // the struck monster's MonStats flags, for the log
 XrSwapchain gameplayChain=XR_NULL_HANDLE;
 std::mutex sewerPromptMutex;
 sewerprompt::Target sewerPrompt;
@@ -1047,6 +1052,9 @@ haptics::Actions hapticActions;
 haptics::Pulses hapticPulses;
 haptics::CastEvents spellHaptics;
 haptics::RumbleLease controllerRumbleLease;
+haptics::Sequencer hapticSequences;      // multi-pulse patterns: surface impacts, the bow's snap (haptic_impact.h)
+haptics::Heartbeat hapticHeart;          // the felt low-life heartbeat (haptic_heartbeat.h)
+heartbeat::Level hapticHeartLevel;double hapticHeartAt=0;
 XrAction primary=XR_NULL_HANDLE, secondary=XR_NULL_HANDLE, stickClick=XR_NULL_HANDLE, menu=XR_NULL_HANDLE;
 XrPath hands[2]{}; // right, left, matching the existing wire format.
 XrSpace handSpaces[2]{};
@@ -1205,7 +1213,7 @@ void CancelShieldCast() {
 void ClearInput() {
     settingsPointer.Reset();settingsCard.Reset();settingsPressed={};settingsPopoverWatch.Reset();
     controllerRumbleLease.Update(0,false);
-    hapticPulses.Cancel();
+    hapticPulses.Cancel();hapticSequences.Clear();hapticHeart.Reset();
     spellHaptics.Clear();
     lootlabels::display.Clear();
     rightStickGestures.Reset();
@@ -2466,23 +2474,60 @@ void MotionPattern(haptics::Category category,const haptics::Pattern& pattern,co
         if(sample.milliseconds>0)MotionPulse(hand,category,sample.amplitude,XrDuration(sample.milliseconds)*1000000,sample.frequency,preview);
     }
 }
+// Plays each pattern step that has come due (haptic_impact.h). Every frame, and right after a Play.
+void PumpHapticSequences() {
+    const auto now=GetTickCount64();
+    for(int hand=0;hand<2;++hand) {
+        haptics::Sequencer::Out out;
+        if(hapticSequences.Due(hand,now,out))
+            MotionPulse(hand,out.category,out.sample.amplitude,XrDuration(out.sample.milliseconds)*1000000,out.sample.frequency,out.preview?&out.levels:nullptr);
+    }
+}
+// A bow's release: a crack in both hands and the string settling in the bow hand, by how far it was drawn.
+void BowSnapFeedback(float draw,const haptics::Strengths* preview=nullptr) {
+    const auto now=GetTickCount64();
+    for(int hand=0;hand<2;++hand)hapticSequences.Play(hand,haptics::BowSnap(draw,hand),now,1,preview);
+    PumpHapticSequences();
+    if(preview)return;
+    static ULONGLONG toldAt=0;
+    if(now>=toldAt) {
+        const auto right=haptics::BowSnap(draw,0),left=haptics::BowSnap(draw,1);
+        char line[200];std::snprintf(line,sizeof line,"Frame haptics bow: release snap draw=%.2f string_hand=%.2f/%dms bow_hand=%.2f/%dms then %.2f/%dms",
+            draw,right.steps[0].sample.amplitude,right.steps[0].sample.milliseconds,left.steps[0].sample.amplitude,left.steps[0].sample.milliseconds,
+            left.steps[1].sample.amplitude,left.steps[1].sample.milliseconds);
+        Say(line);toldAt=now+1000;
+    }
+}
 void MotionFeedback(const gameplay::Output& out) {
-    static double lastPull=0;static float previousDraw=0;
+    static double lastPull=0;static float previousDraw=0;static double lastHold=0;static ULONGLONG pullToldAt=0;
     if(out.leftFeedback)MotionPulse(1,haptics::MotionCategory(out.leftFeedback,false,true),out.leftFeedback==2?.65f:.45f,45000000);
     const unsigned event=out.feedback;
     if(event) {
         const auto category=haptics::MotionCategory(event,out.bowReady,out.javelinReady);
-        if(event==2&&(out.bowReady||out.javelinReady))MotionPattern(category,haptics::Release(out.bowReady));
+        if(event==2&&out.bowReady)BowSnapFeedback(out.draw);
+        else if(event==2&&out.javelinReady)MotionPattern(category,haptics::Release(false));
         else {
             MotionPulse(0,category,event==6?.12f:event==4?.2f:event==2||event==3?.65f:.45f,event==4||event==6?20000000:45000000);
             if(out.bowReady&&(event==1||event==5))MotionPulse(1,category,.25f,35000000);
         }
         lastPull=motionInput.time;previousDraw=out.draw;
-    } else if(out.bowDrawing&&motionInput.time-lastPull>.07&&std::fabs(out.draw-previousDraw)>.018f) {
-        // A light ratchet felt while pulling, rather than only the native
-        // attack rumble after release. No repeated buzz while held still.
-        MotionPattern(haptics::Category::BowDraw,haptics::BowPull(out.draw));
-        lastPull=motionInput.time;previousDraw=out.draw;
+    } else if(out.bowDrawing&&motionInput.time-lastPull>.07&&std::fabs(out.draw-previousDraw)>haptics::BowTickStep(out.draw)) {
+        // A ratchet felt while pulling, rather than only the native attack rumble
+        // after release: stronger, longer, higher and closer together as the
+        // string tightens (haptic_strength.h BowPull, BowTickStep).
+        const auto pull=haptics::BowPull(out.draw);
+        MotionPattern(haptics::Category::BowDraw,pull);
+        lastPull=lastHold=motionInput.time;previousDraw=out.draw;
+        if(const auto now=GetTickCount64();now>=pullToldAt) {
+            char line[160];std::snprintf(line,sizeof line,"Frame haptics bow: pull draw=%.2f string_hand=%.2f/%dms/%.0fHz bow_hand=%.2f/%dms",
+                out.draw,pull[0].amplitude,pull[0].milliseconds,pull[0].frequency,pull[1].amplitude,pull[1].milliseconds);
+            Say(line);pullToldAt=now+1000;
+        }
+    } else if(out.bowDrawing&&motionInput.time-lastPull>.07&&motionInput.time-lastHold>=haptics::BowHoldInterval(out.draw)) {
+        // Held still from half draw: no buzz, a faint tremor of the strained string hand.
+        if(const auto hold=haptics::BowHold(out.draw);hold.milliseconds>0)
+            MotionPulse(0,haptics::Category::BowDraw,hold.amplitude,XrDuration(hold.milliseconds)*1000000,hold.frequency);
+        lastHold=motionInput.time;
     }
     if(!out.bowDrawing)previousDraw=0;
 }
@@ -2514,7 +2559,7 @@ gameplay::MeleeStyle MotionMeleeStyle() {
 }
 void ResetSettingsInput() {
     settingsPointer.Reset();settingsCard.Reset();settingsPressed={};settingsPopoverWatch.Reset();
-    hapticPulses.Cancel();
+    hapticPulses.Cancel();hapticSequences.Clear();hapticHeart.Reset();
     spellHaptics.Clear();
     panelinput::WorldInput(false);
     gamestate::MenuMap(false);
@@ -2710,6 +2755,7 @@ void SettingsPress(const settings::Hit& hit,uint64_t ms,const char* how=nullptr)
         if(!settingsModel.CanTestHaptics(hit.index))return;
         const auto levels=settings::HapticLevels(settingsModel.Get());
         const auto category=haptics::Category(hit.index);
+        if(category==haptics::Category::BowRelease&&hit.delta==1){BowSnapFeedback(1,&levels);return;}   // Bow: the full-draw snap
         MotionPattern(category,haptics::Preview(category,hit.delta-1,settingsModel.Get()[settings::HapticShortMelee]>.5f),&levels);
         return;
     }
@@ -4148,6 +4194,35 @@ void Input() {
                 }
             }
         } else if(heartPlaying&&!heartStream.Remaining()){heartPlaying=false;Say("Frame low-life heartbeat: stopped");}
+        // The same heart, felt (haptic_heartbeat.h; VR Settings > Interface > Warnings > Felt heartbeat): a
+        // lub-dub in both controllers at the audible beat's level and tempo, so the same life starts both and a wiped
+        // visor quiets both. Its own level, since the sound can be Off (start 0: the default start) or silent (volume
+        // 0). Not in a menu, the settings or a panel, not dead, not with life unknown: it stops at once.
+        {
+            const int start=int(hudSettings.values[settings::HeartbeatStart]);
+            const bool alive=lifeKnown&&vitals.health>0&&vitals.maxHealth>0;
+            const float felt=alive?heartbeat::LifeLevel(vitals.health,vitals.maxHealth,start>0?start:int(haptics::HeartDefaultStart)):0.f;
+            const float feltLevel=hapticHeartLevel.Step(heartHush.On()?0.f:felt,hapticHeartAt>0?interactionInput.time-hapticHeartAt:0,heart.fadeSeconds);
+            hapticHeartAt=interactionInput.time;
+            const bool allowed=hudSettings.values[settings::HapticHeartbeat]>.5f&&alive&&!panelMode&&!spatialMode&&!settingsModel.open&&
+                !bodyCalibration.Active()&&inWorld&&inWorld();
+            if(!alive)hapticHeartLevel.Reset();
+            const bool was=hapticHeart.Beating();
+            const float bpm=heartbeat::Bpm(feltLevel,heart);
+            const auto pulse=hapticHeart.Step(interactionInput.time,feltLevel,bpm,allowed);
+            if(pulse.beat)for(int h=0;h<2;++h)
+                MotionPulse(h,haptics::Category::Alert,pulse.sample.amplitude,XrDuration(pulse.sample.milliseconds)*1000000,pulse.sample.frequency);
+            static ULONGLONG heartToldAt=0;
+            if(hapticHeart.Beating()!=was||(pulse.beat==1&&GetTickCount64()>=heartToldAt)) {
+                char line[200];
+                if(hapticHeart.Beating())snprintf(line,sizeof line,"Frame haptics heartbeat: %s life=%.0f%% level=%.2f bpm=%.0f lub=%.2f/%dms dub=%.2f/%dms",
+                    was?"beating":"started",vitals.maxHealth>0?100*vitals.health/vitals.maxHealth:-1.f,feltLevel,bpm,
+                    haptics::HeartLub(feltLevel).amplitude,haptics::HeartLub(feltLevel).milliseconds,haptics::HeartDub(feltLevel).amplitude,haptics::HeartDub(feltLevel).milliseconds);
+                else snprintf(line,sizeof line,"Frame haptics heartbeat: stopped (%s)",
+                    hudSettings.values[settings::HapticHeartbeat]<=.5f?"Off":!lifeKnown?"life unknown":!alive?"dead":feltLevel<=0?"life recovered or visor wiped":"menu");
+                Say(line);heartToldAt=GetTickCount64()+5000;
+            }
+        }
     }
     // Bounded diagnostics distinguish gesture misses from native refusal.
     static ULONGLONG potionReportAt=0;
@@ -5219,10 +5294,31 @@ void Input() {
                 shield?"shield":"weapon",hand==0?"right":"left",impact.milliseconds,impact.frequency,sent);Say(line);reportAt[hand]=now+1000;
         }
     };
-    for(int hand=0;hand<2;++hand)if(const auto at=meleeImpactAt[hand].exchange(0);at&&motionInput.active&&GetTickCount64()-at<150)
-        impactPulse(hand);
+    // What was struck shapes the tap (haptic_impact.h; VR Settings > Controls > Vibration > Hit feel by target).
+    // Flesh and a block keep the single tap above; the others play a short pattern on the same path, so Melee
+    // hits and Overall vibration scale every step. Off: the single tap for everything.
+    auto surfacePulse=[&](int hand,haptics::Surface surface,uint32_t flags){
+        const bool shield=surface==haptics::Surface::Block||surface==haptics::Surface::Parry;
+        const bool patterns=gestureSettings[settings::HapticSurfaces]>.5f;
+        const bool single=!patterns||surface==haptics::Surface::Flesh||surface==haptics::Surface::Block;
+        const auto pattern=haptics::ImpactPattern(surface,shield?1:hand,gestureSettings[settings::HapticShortMelee]>.5f);
+        if(single)impactPulse(hand,shield);
+        else {hapticSequences.Play(hand,pattern,GetTickCount64());PumpHapticSequences();}
+        static ULONGLONG toldAt[haptics::SurfaceCount]{};const auto now=GetTickCount64();
+        if(int(surface)>=0&&int(surface)<haptics::SurfaceCount&&now>=toldAt[int(surface)]) {
+            char line[220];std::snprintf(line,sizeof line,"Frame haptics impact: surface=%s hand=%s pattern=%s steps=%d length_ms=%d first=%.2f/%dms/%.0fHz monster_flags=0x%x",
+                haptics::SurfaceName(surface),hand==0?"right":"left",single?"single tap":"sequence",single?1:pattern.count,
+                single?pattern.steps[0].sample.milliseconds:pattern.Length(),pattern.steps[0].sample.amplitude,pattern.steps[0].sample.milliseconds,pattern.steps[0].sample.frequency,flags);
+            Say(line);toldAt[int(surface)]=now+1000;
+        }
+    };
+    for(int hand=0;hand<2;++hand)if(const auto at=meleeImpactAt[hand].exchange(0);at&&motionInput.active&&GetTickCount64()-at<150) {
+        const int surface=meleeImpactSurface[hand].exchange(int(haptics::Surface::Flesh));
+        surfacePulse(hand,surface>=0&&surface<haptics::SurfaceCount?haptics::Surface(surface):haptics::Surface::Flesh,meleeImpactFlags[hand].exchange(0));
+    }
     if(const auto at=shieldImpactAt.exchange(0);at&&motionInput.active&&GetTickCount64()-at<150)
-        impactPulse(1,true);
+        surfacePulse(1,shieldImpactSurface.exchange(int(haptics::Surface::Block))==int(haptics::Surface::Parry)?haptics::Surface::Parry:haptics::Surface::Block,0);
+    PumpHapticSequences();
     // A parry swing that missed: a soft, dull buzz on the shield hand, unlike a
     // block's sharp tap. Scaled by the Melee haptic strength setting.
     if(const auto at=parryMissAt.exchange(0);at&&motionInput.active&&GetTickCount64()-at<150)
@@ -7310,10 +7406,12 @@ bool ShieldAim(float& x,float& y) {
 void FinishShieldSkill(bool accepted) {
     std::lock_guard lock(mutex);shieldCast={};shieldPulse.Cancel();
     shieldFeedbackAt=GetTickCount64();shieldRefused=!accepted;
-    if(accepted)shieldImpactAt=shieldFeedbackAt;
+    if(accepted){shieldImpactSurface=int(haptics::Surface::Block);shieldImpactAt=shieldFeedbackAt;}
 }
 void MeleeImpact(int hand) {if(hand>=0&&hand<2)meleeImpactAt[hand]=bodyStrikeAt[hand]=GetTickCount64();}
+void ImpactSurface(int hand,int surface,uint32_t flags) {if(hand>=0&&hand<2){meleeImpactSurface[hand]=surface;meleeImpactFlags[hand]=flags;}}
 void ShieldGuardImpact(bool parry,float weight) {
+    shieldImpactSurface=int(parry?haptics::Surface::Parry:haptics::Surface::Block);
     shieldImpactAt=GetTickCount64();
     if(parry){guardParryEvents.fetch_add(1);return;}
     guardBlockWeight.fetch_add(unsigned(std::clamp(std::isfinite(weight)?weight:1.f,0.f,16.f)*1000.f+.5f));

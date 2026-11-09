@@ -416,6 +416,18 @@ int main(){
         Check(saved.values[TCrossCalibrate]==enabled&&Int(path,L"interactions",L"t_cross_calibrate")==enabled&&
               Changed(saved.values,current.values)==(ChangeMask{1}<<TCrossCalibrate)&&Int(path,L"custom",L"keep")==12345,"the T cross switch survives reload and touches nothing else");
     }
+    // Richer haptics: both On when missing (the default), saved as [haptics] hit_patterns and heartbeat, touching nothing else.
+    for(const auto& [key,name2]:{std::pair<Key,const wchar_t*>{HapticSurfaces,L"hit_patterns"},{HapticHeartbeat,L"heartbeat"}}) {
+        Check(vrsettings::Read().values[key]==1&&Int(path,L"haptics",name2)==-999,"a profile without the haptic feel key reads On");
+        for(int enabled:{0,1}) {
+            const auto current=vrsettings::Read();
+            model.Open(current);model.Click({Kind::Change,key,enabled?1:-1});request=model.Click({Kind::Apply});
+            Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"save a haptic feel switch");
+            const auto saved=vrsettings::Read();
+            Check(saved.values[key]==enabled&&Int(path,L"haptics",name2)==enabled&&
+                  Changed(saved.values,current.values)==(ChangeMask{1}<<key)&&Int(path,L"custom",L"keep")==12345,"a haptic feel switch survives reload and touches nothing else");
+        }
+    }
     // Loot pick (#257): On when missing (the default), On and Off saved as [interactions] loot_pick; only 0 reads Off.
     Check(vrsettings::Read().values[LootPick]==1&&Int(path,L"interactions",L"loot_pick")==-999,"a profile without loot_pick reads On");
     for(int enabled:{0,1}) {

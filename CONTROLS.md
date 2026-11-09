@@ -304,7 +304,16 @@ picks the life where a quiet heartbeat begins. Every 10% of life you lose below
 that, it gets louder and faster, at full strength below 10%. Healing winds it
 down beat by beat. Wiping the visor clean fades it out too, until the next hit
 brings it back. It plays in Classic and Unleashed; `[gameplay]
-low_life_heartbeat` sets its loudness (200%, 0 = off).
+low_life_heartbeat` sets its loudness (200%, 0 = off). **Felt** in the same row (On by
+default) beats it in both controllers too, a lub-dub that quickens and strengthens as
+life drops and stops in menus and when you die; **Controls > Vibration > Low life and
+mana alerts** sets its strength.
+
+**Hit feel:** with **Controls > Vibration > By target** On (the default, in the Short
+melee taps row), a hit feels like what you struck: one thud for flesh, three clicks for
+skeletons, zombies and mummies, a soft shiver for ghosts, a crack and crumble for pots
+and barrels, two ringing taps for a parry. A bow's string ticks harder and faster the
+further you draw it, trembles faintly when held, and snaps on release.
 
 ## Hand skill layouts
 

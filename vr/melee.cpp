@@ -39,6 +39,7 @@
 #include "../steamvr/strike_skills.h"
 #include "../steamvr/bow_bash.h"
 #include "../steamvr/weapon_heft.h"
+#include "../steamvr/haptic_impact.h"
 namespace gamestate {uint64_t LocalPlayer();bool MenuOpen();uint32_t HandsKey();uint32_t WeaponSet();
     int32_t LeftDurability();bool RestoreLeftDurability(const D2RL::PluginContext*,int32_t);}
 namespace melee {
@@ -915,8 +916,16 @@ uint32_t DualCycle(uintptr_t player,const framevr::dualwield::Equipment& weapons
 }
 // Every weapon contact with a hostile creature feels struck: one tap per
 // stroke and creature, whether native then lands, misses or refuses it.
+// What it is made of shapes the tap (haptic_impact.h MonsterSurface): the monster's MonStats flags, read as
+// MonsterFlags below reads them. Unread: 0, flesh.
+void FeelSurface(int hand,uint32_t target) {
+    uintptr_t game=0,self=0,data=0,stats=0;uint32_t flags=0;
+    if(LocalServer(game,self))
+        if(const auto unit=ServerUnit(game,1,target);!unit||!Read(unit+0x10,data)||data<0x10000||!Read(data,stats)||stats<0x10000||!Read(stats+0x3c,flags))flags=0;
+    framevr::ImpactSurface(hand,int(framevr::haptics::MonsterSurface(flags)),flags);
+}
 void Feel(const Request& r,uint32_t target) {
-    if(hands[r.sample.handIndex].felt.Insert(r.session,r.sweep.stroke,target))framevr::MeleeImpact(r.sample.handIndex);
+    if(hands[r.sample.handIndex].felt.Insert(r.session,r.sweep.stroke,target)){FeelSurface(r.sample.handIndex,target);framevr::MeleeImpact(r.sample.handIndex);}
 }
 // Bow bash (bow_bash.h, #443): a stroke of the bow, its string not drawn, touched this hostile monster
 // with nothing in between. Once per stroke and monster: a tap in the bow hand, then the stagger - the
