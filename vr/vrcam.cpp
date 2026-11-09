@@ -3785,7 +3785,17 @@ bool CampfireFireHit(const float o[3], const float d[3]) {
         told = GetTickCount64();
         LogF("vrcam: campfire - a click comes down %.1f units from the fire (radius %.1f)", dist, g_set.campfireFirePick.load());
     }
-    return dist <= g_set.campfireFirePick.load();
+    if (dist <= g_set.campfireFirePick.load()) return true;
+    // or straight at the burning logs: the ray passing within 1.5 units of them (their foot to 1.5 over it),
+    // low enough that a ray at a hero standing behind the fire keeps clear (owner 2026-11-09: the wood too)
+    const float dl = std::sqrt(d[0]*d[0] + d[1]*d[1] + d[2]*d[2]);
+    for (int k = 0; k <= 3; ++k) {
+        const float p[3] = {F[0] - o[0], F[1] + 0.5f * float(k) - o[1], F[2] - o[2]};
+        const float tt = (p[0]*d[0] + p[1]*d[1] + p[2]*d[2]) / dl;
+        const float c[3] = {p[0] - d[0] / dl * tt, p[1] - d[1] / dl * tt, p[2] - d[2] / dl * tt};
+        if (tt > 0.0f && std::sqrt(c[0]*c[0] + c[1]*c[1] + c[2]*c[2]) <= 1.5f) return true;
+    }
+    return false;
 }
 void CampfirePick() {
     static bool down = false; static int stage = 0; static ULONGLONG at = 0;
