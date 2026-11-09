@@ -8358,6 +8358,8 @@ void PushArms() {
         skel::SetHeroPos(hero[0], hero[1], hero[2]);
         memcpy(g_heroPosNow, hero, sizeof hero);
     }
+    // Room-scale: where the drawn body stands when you have stepped away from the hero's spot (first person).
+    skel::SetEyeGround(g_eyeWorld[0].load(), g_eyeWorld[2].load(), on && g_eyeOk.load() && !ThirdPerson() && !Overhead());
     // third person, the game on the floor and F1 in perspective: the whole hero as the game
     // animates him, head included (on the floor he stood headless, 2026-10-05)
     const bool own = on && !ThirdPerson() && !Overhead()

@@ -222,6 +222,9 @@ void ShieldRendered(uint32_t entity,uintptr_t component,uintptr_t matrix);
 void PoseYaws(float out[3]);
 bool Dump(const wchar_t* outPath);
 void SetHeroPos(float x, float y, float z);
+// Room-scale: the point on the ground under the camera's eyes (world units), where the drawn body
+// stands when you have stepped away from the hero's spot; valid false when there is none.
+void SetEyeGround(float x, float z, bool valid);
 
 // The hero's TransformComponent in the renderer's ECS (skeletons.cpp, docs/doll_binding.md):
 // from the SkeletonInstance the hook identifies as the hero, through its entity, with no memory

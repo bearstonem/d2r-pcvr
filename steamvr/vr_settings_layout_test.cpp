@@ -35,6 +35,7 @@ static const GoldenRow Golden[]={
     {"gameplay.motion_controls",View::Combat,0,content::RowKind::Toggle,"Motion combat",0,0},
     {"gameplay.melee_hit_speed",View::Combat,0,content::RowKind::Stepper,"Swing speed to hit",0,0},
     {"gameplay.melee_thrust_speed",View::Combat,0,content::RowKind::Slider,"Stab speed to hit",0,0},
+    {"gameplay.melee_reach_cm",View::Combat,0,content::RowKind::Slider,"Melee reach",0,0},   // Discord, 2026-11-08
     {"gameplay.skill_gestures",View::Combat,1,content::RowKind::Toggle,"Skills on your moves",0,0},
     {"interactions.weapon_skill_indicators",View::Combat,1,content::RowKind::Toggle,"Skill icons on weapons",0,0},
     {"gameplay.throw_lift_deg",View::Combat,1,content::RowKind::Stepper,"Thrown weapon lift",0,1},
@@ -65,10 +66,12 @@ static const GoldenRow Golden[]={
     {"turn.speed",View::Moving,0,content::RowKind::Slider,"Smooth turn speed",0,0},
     {"gameplay.run_speed_pct",View::Moving,1,content::RowKind::Slider,"Movement speed",0,12},   // main's #308: Walk, Base run, Run 10..90%, Full run
     {"interactions.seated",View::Body,0,content::RowKind::Toggle,"Seated play",0,0},
+    {"gameplay.room_steps",View::Body,0,content::RowKind::Toggle,"Room follows you",0,0},   // drawn inside Seated play's row (2026-11-08)
     {"calibration.version",View::Body,0,content::RowKind::Button,"Height and arm span",0,0},
     {"interactions.waist_below_eyes",View::Body,1,content::RowKind::Slider,"Belt below eyes",0,0},
     {"interactions.belt_forward",View::Body,1,content::RowKind::Slider,"Belt forward reach",0,0},
     {"interactions.dominant_hand",View::Hands,0,content::RowKind::Choice,"Dominant hand",2,0},
+    {"stick.walk_direction",View::Hands,0,content::RowKind::Stepper,"Walk direction",0,2},   // drawn inside Dominant hand's row (2026-11-08)
     {"gameplay.run_walk_toggle",View::Hands,0,content::RowKind::Toggle,"Stick toggle",0,0},   // a row of its own
     {"interactions.controller_labels",View::Hands,0,content::RowKind::Choice,"Button names",5,0},
     {"haptics.strength",View::Vibration,0,content::RowKind::Slider,"Overall vibration",0,1},
@@ -220,7 +223,7 @@ int main(int argc,char** argv){
     }
     // ---- the map: no row lost, none left to More, the names and the owner's pairs ----
     {
-        Check(tables.rowCount==94,"94 settings on the menu, each one row");
+        Check(tables.rowCount==97,"97 settings on the menu, each one row");   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08)
         for(size_t i=0;i<tables.rowCount;++i)Check(!tables.rows[i].fallback&&tables.rows[i].page!=View::More,std::string("every setting has its page: ")+tables.rows[i].label);
         Check(content::Menu().report.empty(),"the tidy report is empty");
         struct Want {content::Group group;const char* name;std::vector<const char*> pages;};

@@ -403,6 +403,7 @@ inline constexpr Option FrameGenScaleOptions[]={
 };
 
 inline constexpr ValueName OffAtZero[]={{0,"Off"}};
+inline constexpr ValueName WalkNames[]={{0,"Look"},{1,"Controller"}};   // walk_direction.h: where you look, or where the left controller points
 inline constexpr ValueName LeatherNames[]={{0,"Off"},{1,"Leather"},{2,"Menu only"}};   // leather::Style; owner 2026-10-29: "Hold Menu > Off/Leather/Menu Only"
 inline constexpr ValueName ByRangeAtZero[]={{0,"By range"}};
 inline constexpr ValueName LaserOffName[]={{LaserOff,"Off"}};
@@ -432,6 +433,11 @@ inline constexpr Override Overrides[]={
     {.id="gameplay.melee_thrust_speed",.page=View::Combat,.section="Melee",.kind=RowKind::Slider,.label="Stab speed to hit",
      .help="How fast a forward stab along the blade must move to strike. Pull back before you stab again.",
      .format={.unit="m/s",.decimals=2}},
+    // Melee reach (Discord, 2026-11-08: hits "not registering because my body is desynchronized just slightly ...
+    // needlessly tight"): [gameplay] melee_reach_cm pads each monster's body for weapon and fist contacts. 0 by default.
+    {.id="gameplay.melee_reach_cm",.page=View::Combat,.section="Melee",.kind=RowKind::Slider,.label="Melee reach",
+     .help="A weapon or fist that passes this close beside a monster still hits it. Raise it if near misses don't count. Walls still block.",
+     .format={.unit="cm"}},
     // Combat: Skills and throws
     {.id="gameplay.skill_gestures",.page=View::Combat,.section="Skills and throws",.kind=RowKind::Toggle,.label="Skills on your moves",
      .help="A trigger skill powers your real move: melee skills on a landed strike, Smite on a bash, arrow skills on a release. Off, every swing is plain."},
@@ -525,6 +531,11 @@ inline constexpr Override Overrides[]={
     // Body: Play space
     {.id="interactions.seated",.page=View::Body,.section="Play space",.kind=RowKind::Toggle,.label="Seated play",
      .help="Raises the potion belt so you can reach it sitting down. Your body measurements still come from standing."},
+    // Room follows you (room_steps.h; Discord, 2026-11-04: "my character's feet stay anchored near the calibration
+    // point while my body follows the headset"): the right half of Seated play's row, shown while it is off (RowShown).
+    {.id="gameplay.room_steps",.page=View::Body,.section="Play space",.kind=RowKind::Toggle,.label="Room follows you",
+     .help="Your hero's spot follows you as you move in your room, so monsters attack where you stand. Walls stop it. Off: it stays where you calibrated.",
+     .beside=true,.besideLabel="Follow"},
     {.id="calibration.version",.page=View::Body,.section="Play space",.kind=RowKind::Button,.label="Height and arm span",
      .help="Stand straight, then hold your arms out in a T. Measures your eye height and arm span so the world and your arms fit you."},
     // Body: Potion belt
@@ -538,6 +549,11 @@ inline constexpr Override Overrides[]={
     {.id="interactions.dominant_hand",.page=View::Hands,.section="Hands and buttons",.kind=RowKind::Choice,.label="Dominant hand",
      .help="The hand that swaps weapon sets when you reach over a shoulder and grip. Your weapon and shield hands in the game stay the same.",
      FRAMEVR_OPTIONS(DominantOptions)},
+    // Walk direction (owner, 2026-11-08: "moving where the controller points versus where you look, that should be a
+    // setting"): the right half of Dominant hand's row. [stick] walk_direction.
+    {.id="stick.walk_direction",.page=View::Hands,.section="Hands and buttons",.kind=RowKind::Stepper,.label="Walk direction",
+     .help="Look: the left stick walks where you look. Controller: where the left controller points, so you can look around while you walk.",
+     FRAMEVR_NAMES(WalkNames),.beside=true,.besideLabel="Walk"},
     {.id="gameplay.run_walk_toggle",.page=View::Hands,.section="Hands and buttons",.kind=RowKind::Toggle,.label="Stick toggle",
      .help="On: right stick up switches between walking and the run set in Comfort > Moving (from Walk, the full run). Not with a wheel open or looking at the wrist map."},
     {.id="interactions.controller_labels",.page=View::Hands,.section="Hands and buttons",.kind=RowKind::Choice,.label="Button names",
