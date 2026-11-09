@@ -438,6 +438,13 @@ inline constexpr Override Overrides[]={
     {.id="gameplay.melee_reach_cm",.page=View::Combat,.section="Melee",.kind=RowKind::Slider,.label="Melee reach",
      .help="A weapon or fist that passes this close beside a monster still hits it. Raise it if near misses don't count. Walls still block.",
      .format={.unit="cm"}},
+    // Weapon heft and Bow bash (#443; Discord #ideas, 2026-11-04): one row, the page's last free one (8 at most).
+    // [gameplay] weapon_heft and bow_bash, both Off by default.
+    {.id="gameplay.weapon_heft",.page=View::Combat,.section="Melee",.kind=RowKind::Toggle,.label="Weapon heft",
+     .help="Heavy weapons need a long stroke of your arm for a full hit; a quick flick lands lighter. Daggers, claws and fists still hit fully with a flick."},
+    {.id="gameplay.bow_bash",.page=View::Combat,.section="Melee",.kind=RowKind::Toggle,.label="Bow bash",
+     .help="Swing your bow, string not drawn, into a monster to stagger it while you step back and aim. No damage; every 1.5 s at most, never act bosses.",
+     .beside=true,.besideLabel="Bow bash"},
     // Combat: Skills and throws
     {.id="gameplay.skill_gestures",.page=View::Combat,.section="Skills and throws",.kind=RowKind::Toggle,.label="Skills on your moves",
      .help="A trigger skill powers your real move: melee skills on a landed strike, Smite on a bash, arrow skills on a release. Off, every swing is plain."},

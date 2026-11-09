@@ -1466,6 +1466,7 @@ bool LocalPlayerUnit(uintptr_t& unit) {
        !Read(player.unit,header)||header[0]!=0||header[2]!=player.id)return false;
     unit=player.unit;return true;
 }
+bool ActBoss(uintptr_t unit){return AttackerRank(unit)==framevr::strain::Rank::PrimeEvil;}
 bool UnitStat(uintptr_t unit,int stat,int& value) {
     if(unit<0x10000||!d2rsig::Check(GetStatRva,GetStatSig,sizeof GetStatSig))return false;
     value=reinterpret_cast<GetStatFn>(d2rsig::Addr(GetStatRva))(unit,stat,0);return true;

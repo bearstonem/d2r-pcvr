@@ -89,6 +89,7 @@ Quest left X/Y correspond to Index left A/B; right A/B labels are the same.
 | Increase offline difficulty | **VR Settings > Gameplay > Monsters > Offline difficulty**: Game's setting or Players 1-8; higher counts make monsters tougher and increase rewards |
 | Bow draw | Right trigger near the left-hand bow string; draw and release |
 | See where a drawn arrow will fly | At full draw a faint line runs from the arrow's tip along its straight flight, with a brighter dot where it would reach the floor; otherwise it fades out at 15 m. It does not stop at walls or monsters. Basic arrows and Magic, Fire, Cold, Ice, Exploding, Immolation and Freezing Arrow; not Multiple Shot, Guided Arrow, Strafe or crossbows. **VR Settings > Gameplay > Targeting > Arrow path line** chooses Off or its color, 15 degrees at a time around the color wheel (Off by default; the first step is red 0°); stepping past 345° goes to Off and on to 0°, in either direction |
+| Bash with the bow | With **VR Settings > Gameplay > Combat > Bow bash** On (Off by default), swing the bow in your left hand into a monster, the string not drawn and both triggers released: it staggers, so you can step back and draw. It deals no damage and spends no arrow; your bow hand feels each contact. One bash every 1.5 s, the same monster every 3 s; act bosses never stagger. Any class with a bow; not crossbows yet |
 | Fire a crossbow | Equip bolts and assign **Attack** to Right Trigger; aim and fire while moving. |
 | Support a crossbow | Hold Left Grip near the stock; release to free the hand. After a shoulder swap, release the swap grip before grabbing the stock again |
 | Javelin, throwing knife or axe throw | Right trigger on Attack, Throw or nothing; hold the trigger, throw, release |
@@ -150,6 +151,13 @@ stabs. The old `attack_speed` INI key does not select Classic; choose it here.
 **Gameplay > Combat > Melee reach** (0 to 50 cm, 0 by default) lets a weapon or fist that
 passes that close beside a monster still hit it. Walls still block, and shield
 bash is unchanged.
+**Gameplay > Combat > Weapon heft** (Off by default) gives weapons weight: a heavy
+weapon needs a long, committed stroke of your hand before it meets the monster to
+hit fully, and a shorter one lands lighter, never below 30%. A great maul needs
+about 40 cm of hand travel, a two-handed sword 32, a crystal sword 16 and a long
+sword 12; faster weapons need less. Daggers, claws, wands, orbs, thrown weapons and
+fists hit fully with a flick. Turning the wrist or drifting the hand slowly does
+not count. Each hit is still one game attack, and the weapon never lags your hand.
 
 **Unleashed swing damage:** every stroke that connects lands, but how hard it
 hits depends on your character. Your attack rating against the monster's

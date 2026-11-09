@@ -1350,6 +1350,29 @@ and trigger/button melee were:
     the game resolves them, which follows the blade frame to frame but not
     within a single frame. A riposte is still a clean hit (no falloff) and
     counts as one of the stroke's creatures.
+  - **Weapon heft** (#443; VR Settings > Gameplay > Combat > Weapon heft,
+    `[gameplay] weapon_heft`, 0 by default): a heavy weapon needs a long stroke of
+    the hand before it meets the monster for a full hit (`weapon_heft.h`). Monsters
+    have no physical bodies and every hit must stay one native attack, so weight is
+    a rule, not a physics weapon, and the drawn weapon never lags the hand. A
+    weapon's weight (0..1) is its kind - one-handed swords, axes, maces and scepters
+    0.40, two-handed ones 0.80 (in one hand or both), spears, polearms and staves
+    0.70 - plus 1% per point of WSM, at most 20 either way; daggers, claws, wands,
+    orbs, thrown weapons and fists weigh nothing and always hit whole. It needs
+    weight x 40 cm of the hand's brisk travel (steps at 1 m/s or faster, tracking
+    space) since the stroke's path began - after a pause, a reversal or a reset
+    (`melee_contact.h` `Sweep::travel`) - so turning the wrist or drifting the hand
+    slowly adds nothing. A shorter stroke's damage is x travel / need, at least 30%,
+    measured at each contact and multiplied into the same share as recovery and
+    cleave (a great maul needs 40 cm, a two-handed sword 32, a crystal sword 16, a
+    long sword 12). Only how hard the contact lands changes (a strike skill cast
+    on it included, as with cleave); on-hit effects and the attack cycle are as
+    without it. A riposte stays clean. When dual wielding, each blade
+    uses its own weapon; the left blade's two-handed flag is not known, so it
+    weighs as one-handed. The log's `Frame weapon heft:` line (twice a second while
+    it judges contacts) gives contacts, full and lighter ones, the mean and lowest
+    share and the current weapon's need; `[debug] melee_trace=1` adds
+    `heft=` and the hand's travel to each traced contact.
   - **On-hit effects** come only from a full-cycle stroke (the breakpoint, a
     full cycle after the latest full-cycle attack on the one shared clock: both
     blades when dual wielding (2026-10-30; the beat is the two weapons' native
@@ -1576,6 +1599,35 @@ reports the cycle inputs (`Frame melee attack speed:`) and refused contacts
 (`too_soon`, `extra_targets` in `Frame melee:`). `[debug] melee_trace=1` adds one
 `Frame melee trace:` line per native attack and per refused stroke, with the
 time since the previous landed hit; landed hits are never closer than `cycle`.
+
+### Bow bash
+
+**VR Settings > Gameplay > Combat > Bow bash** (#443; `[gameplay] bow_bash`, 0
+by default; beside Weapon heft) lets the bow itself push a monster back: swing
+the bow in your left hand into it, the string not drawn and both triggers
+released, and it staggers so you can step back and aim. The game's basic attack
+with a bow fires an arrow, so there is no native melee attack to borrow; the
+bash uses the same native hit recovery a perfect parry gives (below: the game's
+GetHit event handler, a mode change), so it deals **no damage**, spends no arrow
+and gives no experience or loot. Any class with a bow; crossbows are not
+included yet.
+
+- The bow is a capsule on the left weapon attachment: its grip at the
+  attachment's origin, its limbs 55 cm each way along the attachment's +Y (about
+  1.1 m tip to tip, 6 cm thick; `bow_bash.h`). The left hand's melee engine
+  sweeps it with the usual stroke rules: Swing speed to hit and Melee reach
+  apply, walls block, and only hostile monsters count.
+- One bash every 1.5 s, whichever monster; the same monster again after 3 s; act
+  bosses (MonStats primeevil, as the parry gate reads it) never stagger. A
+  monster already in its hit recovery, or one the game cannot stagger (no GetHit
+  mode, such as Griswold), is refused. Only a landed stagger starts a wait.
+- Each stroke judges each monster it touches once: a tap in the bow hand, then
+  one log line, `Frame bow bash: staggered monster ...` or `Frame bow bash:
+  refused monster ...: <reason>` (with the time left for a wait). `bow_up` on
+  that line is the bow's limb axis against straight up: near 1 for a bow held
+  upright, which checks the capsule's axis in a headset.
+- Drawing the string, a held trigger, a menu or the wheel ends the bash lane;
+  a stroke sampled just before drawing is dropped.
 
 ### Physical shield blocking, parry and riposte (Unleashed)
 

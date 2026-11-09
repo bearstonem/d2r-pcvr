@@ -136,6 +136,7 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "dev_scenarios.h"
 #include "../steamvr/shield_debug.h"
 #include "melee.h"
+#include "../steamvr/bow_bash.h"
 #include "target_lock.h"
 #include "bow.h"
 #include "loot_beam_scan.h"
@@ -8410,13 +8411,28 @@ void BowTick() {
 void MeleeContactHand(int hand) {
     framevr::melee::Sample sample;
     skel::MeleeWeaponPose pose;
+    // Bow bash (bow_bash.h): a bow sits on the left weapon attachment, the off hand's pose, which names
+    // no melee weapon; its lane runs only while the input thread marks the string not drawn (bowBash).
+    const bool bow=hand==1&&gamestate::WeaponType()==D2RVR_TYPE_BOW;
     if(!g_enabled.load()||!g_inWorld.load()||ThirdPerson()||Overhead()||!g_eyeOk.load()||
-       gamestate::MenuOpen()||!skel::MeleeWeapon(pose,hand)||!pose.weaponType||pose.worldEpoch!=g_meleeTurnEpoch.load()||
-       !framevr::MeleeSample(pose.poseStamp,sample,hand)) {
+       gamestate::MenuOpen()||!skel::MeleeWeapon(pose,hand)||(!pose.weaponType&&!bow)||pose.worldEpoch!=g_meleeTurnEpoch.load()||
+       !framevr::MeleeSample(pose.poseStamp,sample,hand)||sample.bowBash!=bow) {
         melee::CancelWeapon(hand);framevr::BottleWeapon(hand,nullptr);return;
     }
     const float upm=std::max(1.f,ScaleHeight())/UserEyeHeightM();
     using framevr::math::Vec;
+    if(bow) {
+        uintptr_t nativeHero=0;
+        if(!combat::LocalPlayerUnit(nativeHero)){melee::CancelWeapon(hand);framevr::BottleWeapon(hand,nullptr);return;}
+        combat::ObserveLocalPlayer(nativeHero);
+        sample.epoch=(sample.epoch<<32)|pose.worldEpoch;
+        sample.unitsPerMetre=upm;sample.player={pose.player[0]/upm,pose.player[1]/upm,pose.player[2]/upm};
+        // The bow's grip is the attachment's origin; its limbs run both ways along the attachment's +Y.
+        sample.blade=framevr::bowbash::Blade({pose.origin[0]/upm,pose.origin[1]/upm,pose.origin[2]/upm},{pose.axis[0],pose.axis[1],pose.axis[2]});
+        sample.thrustAxis=framevr::melee::TrackingThrustAxis({pose.gripAxis[0],pose.gripAxis[1],pose.gripAxis[2]},sample.hand.q);
+        framevr::BottleWeapon(hand,&sample.blade);melee::Submit(sample);
+        return;
+    }
     // Conservative category-sized collision capsules on the final posed
     // attachment (+Y is blade/shaft, -Y is hilt). Mesh-specific bounds remain
     // a refinement; no class-specific animation or targeting is involved.
