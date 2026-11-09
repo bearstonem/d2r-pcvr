@@ -20,10 +20,10 @@ struct Input {
     bool legsUnder = false;     // with lockUpper: pelvis and legs kept under that body - no lunge ahead, no hip turn
     bool wrist = false;         // mode 2: the hands turn with the controllers, not only follow the forearm
     bool forearmTwist = false;  // the forearm takes a share of the wrist's twist about its own axis (sleeves, bracers)
-    float shieldGripCm = 0.0f;  // VR Settings > Shield > Shield along forearm: the shield moved up the forearm toward the elbow, so the hand reaches its grip
+    float shieldGripCm = 0.0f;  // VR Settings > Gameplay > Shield > Shield along forearm: the shield moved up the forearm toward the elbow, so the hand reaches its grip
     float shieldOutCm = 0.0f, shieldUpCm = 0.0f;  // and out from the arm, and toward the thumb (cm, scaled by the model's forearm)
-    float shieldFollowPct = 100.0f;  // VR Settings > Shield > Shield wrist turn: 0 strapped to the forearm, 100 turns with the wrist
-    float shieldRollDeg = 0.0f;      // VR Settings > Shield > Shield roll: the shield turned about the forearm, + toward the little finger
+    float shieldFollowPct = 100.0f;  // VR Settings > Gameplay > Shield > Shield wrist turn: 0 strapped to the forearm, 100 turns with the wrist
+    float shieldRollDeg = 0.0f;      // VR Settings > Gameplay > Shield > Shield roll: the shield turned about the forearm, + toward the little finger
     bool shieldTrace = false;   // [debug] shield_trace: log the held shield's pose chain (5 Hz, and at once on a jump)
     float wristDeg[3] = {};     // pitch, yaw, roll on top, in the controller's own axes (mirrored for the left)
     float scale = 1.0f;         // arm reach on top of the hero/user height ratio
@@ -59,6 +59,9 @@ struct Input {
     // it through the other hand); the left is free, and its grip puts it on the
     // staff, sliding along it with the controller.
     bool staffFreeLeft = false;
+    // Both grips cast a spell's motion (the transport, spell_motion.h): the left grip takes the staff
+    // only alone (crossbow::SoloSupportLatched).
+    bool soloStaffGrip = false;
     // [hands] fist: a hand holding nothing closes into a fist with its grip
     // and relaxes when it is let go. handFree: holds nothing (vrcam's word,
     // from the game's hand slots); the left on a staff is not free.
@@ -219,6 +222,9 @@ void ShieldRendered(uint32_t entity,uintptr_t component,uintptr_t matrix);
 void PoseYaws(float out[3]);
 bool Dump(const wchar_t* outPath);
 void SetHeroPos(float x, float y, float z);
+// Room-scale: the point on the ground under the camera's eyes (world units), where the drawn body
+// stands when you have stepped away from the hero's spot; valid false when there is none.
+void SetEyeGround(float x, float z, bool valid);
 
 // The hero's TransformComponent in the renderer's ECS (skeletons.cpp, docs/doll_binding.md):
 // from the SkeletonInstance the hook identifies as the hero, through its entity, with no memory
@@ -233,6 +239,10 @@ void TrackHero(bool on);
 bool HeroTransform(HeroXform* out, const char** why = nullptr);
 // Bumped whenever the hero's SkeletonInstance changes: a weapon swap rebuilds his model.
 uint32_t HeroGen();
+// Any entity's TransformComponent (its layout as HeroXform's comp), and the model instance its ModelComponent
+// holds (0: none, or not made yet) - the game-drawn ceiling's units (vr/engine_units.cpp).
+bool EntityTransform(uint32_t entity, uintptr_t* comp);
+uintptr_t EntityModelInstance(uint32_t entity);
 void** OrigSlot();
 void* Detour();
 

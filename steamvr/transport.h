@@ -75,7 +75,7 @@ void ConfigureBottlePhysics(bool on); // [interactions] bottle_physics: emptied 
 void ConfigurePropPhysics(bool on);   // [interactions] prop_physics: weapons knock the level's small props about
 void ConfigureBodyPhysics(bool on);   // [interactions] body_physics: weapons push monsters' and townsfolk's limbs aside
 bool BodyPhysics();                   // on, with physical melee
-// [interactions] leather_menu (VR Settings > Interface, beside Menu distance), leather_menu_width (m), leather_tilt (degrees),
+// [interactions] leather_menu (VR Settings > Interface > Menus, beside Menu distance), leather_menu_width (m), leather_tilt (degrees),
 // leather_world, leather_backdrop: the tabbed menu on a leather sheet strapped to the left hand
 // (leather_menu.h); backdrop keeps the game's translucent dim under the menu on the hide.
 void ConfigureLeatherMenu(bool on,float menuWidth,float tilt,bool world,bool backdrop=false,bool hide=true);   // hide false: Menu only
@@ -85,6 +85,9 @@ bool LeatherMenuWorld();   // also: the left stick walks while the leather is ou
 void PublishSewerPrompt(const sewerprompt::Target&); // Values only; XR follows no game pointers.
 // Current motion-combat aim in the existing head-yaw-relative hand frame.
 bool SettingsOpen();
+// A Sorceress's spell hand lit (elements::Element, its opacity), fresh within 150 ms: vrcam lays its light
+// among the game's lights (elements::HandLight), as a held torch's.
+bool ElementalHandLight(int hand,int& element,float& opacity);
 bool OwnsControllerRumble(); // lock-free; VR input owns feedback instead of gamepad motors
 bool SpellSelected();
 bool LeftHandAiming();
@@ -92,10 +95,17 @@ bool CrossbowAiming();
 bool NativeAimOwnership(); // hand casting or wheel: preserve locomotion, suppress legacy aim modes
 bool NativeSkillCasting(); // any active trigger/quick cast; retain native locomotion input
 bool DirectedSpellActive(); // fresh native assignment, actually casting (wheel or quick shortcut)
+bool SpellGripsArmed();   // both grips cast a learned motion spell (spell_motion.h): the left grip takes the staff only alone
+// Both grips held for the motions now, or let go under 0.4 s ago (a motion's cast still pressing): vrcam's Loot
+// pick hands the game no item then, or the cast's press picked up the item pointed at (owner, 2026-11-05: "when
+// you use both grip buttons near loot, it tries to pick them up").
+bool SpellGripsHeld();
 bool BowSkillActive();   // a bow or crossbow skill is being cast from a button (bow ready)
 int GroundSpellSkill();   // a ground skill (spellaim::GroundTarget) being cast that lands where it is aimed: its id, or -1
 int NativeCastSkill(); // current fresh native cast id, -1 when idle/blocked/stale
 bool GameplayRay(float origin[3],float direction[3]);
+bool MotionCastRay(float origin[3],float direction[3]);   // a motion's cast with a way (Teleport's punch), live: from the right hand along it, as GameplayRay
+bool RecordCastLive();      // a glyph's or motion's press of the right trigger's record, now or within 150 ms (lock-free)
 // Aim rules: each hand's own aim in GameplayRay's frame - the controller's
 // pointer, or the bow's forward for the left hand holding a bow.
 bool HandAimRay(int hand,float origin[3],float direction[3]);
@@ -104,11 +114,11 @@ bool HandAimRay(int hand,float origin[3],float direction[3]);
 bool LootHandRay(int hand,float origin[3],float direction[3],uint32_t* gate);
 int CastButtonHand();        // the hand whose button holds a native cast now, -1 none
 bool HandSpellHeld(int hand); // that hand's physical spell button is held
-// Paladin Fist of the Heavens gesture (heavens_gesture.h). Armed: the skill is
-// on a slot and gestures are on (vrcam keeps the monster scan running).
+// Paladin Fist of the Heavens motion (motions_paladin.h). Armed: the skill is
+// learned, its card on and gestures on (vrcam keeps the monster scan running).
 // Request: a call waiting for its target (its number, 0 none); vrcam answers
 // with the monster the weapon arm points at (0: the game's own pick) after
-// handing it to the game's target query. The slot is pressed after the answer.
+// handing it to the game's target query. The cast is pressed after the answer.
 bool HeavensArmed();
 uint32_t HeavensRequest();
 void HeavensResolved(uint32_t request,uint32_t monster);
@@ -117,6 +127,9 @@ int AimRulesSkill();         // the cast skill (any), -1 none; with its game "di
 // A trap or bomb thrown to place (#224): where its arc landed, in grid cells,
 // for that skill's cast (skill -1: any) just after the throw.
 bool TossTarget(int skill,float& x,float& y);
+// Teleport punched while its landing showed (spell_motion.h Output::landing): that landing, in grid
+// cells, for that skill's cast (skill -1: any) just after the punch.
+bool MotionLanding(int skill,float& x,float& y,int* landed=nullptr);   // landed: the landing's own skill (a query of skill -1 takes any)
 bool AimRulesDirected();
 bool MeleeSample(uint32_t poseStamp,melee::Sample& sample,int hand=0);
 // The posed melee capsule (world metres) that also pushes dropped bottles:
@@ -171,7 +184,7 @@ struct FrameTiming {
     uint32_t pipelines=0,layers=0;bool gpuValid=false;   // layers: composition layers the last xrEndFrame sent
 };
 FrameTiming LastTiming();
-// One headset frame as the render thread measured it, for VR Settings > Performance:
+// One headset frame as the render thread measured it, for the readout on VR Settings > Graphics > Performance and Frames:
 // the runtime's wait (xrWaitFrame), the game's drawing (one eye by turns, both
 // in a pair), the mod's own work around it without that wait, and the
 // headset's frame (budgetMs). periodMs is the time since the last frame ended
@@ -184,7 +197,7 @@ void Shutdown(bool preserveResolution=false);
 // its own x, and placed so.
 void BeginPair(bool byTurns=false,bool replay=false);
 void BeginEye(int eye);
-// VR Settings > Performance > Eyes drawn per frame: 0 both eyes, 1 by turns (the eye not
+// VR Settings > Graphics > Performance > Eyes drawn per frame: 0 both eyes, 1 by turns (the eye not
 // drawn turned and moved with the scene's depth; the default). Replay (2) is
 // no longer a choice (vr_settings.h).
 int StereoRendering();

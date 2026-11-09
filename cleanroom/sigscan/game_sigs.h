@@ -150,6 +150,10 @@ inline constexpr Sig kSigs[] = {
     {"TypeSeqTransform", 0x20B8F0, Kind::Ref, "E8 ?? ?? ?? ?? 0F 10 44 24 20 89 03 48 8B C3 C7 43 04 8B 52 7F 3C 0F 11 43 08", 0x2011FE, 0, 1, 5, 0, "48 83 EC 28 65 48 8B 04 25 58 00 00 00", nullptr, "first-person body", "The body's skeleton"},
     // entt type_seq<SkeletonComponent>::value()
     {"TypeSeqSkeleton", 0x67DE50, Kind::Ref, "E8 ?? ?? ?? ?? 0F 10 44 24 20 89 03 48 8B C3 C7 43 04 B2 89 98 67 0F 11 43 08", 0x6688AE, 0, 1, 5, 0, "48 83 EC 28 65 48 8B 04 25 58 00 00 00", nullptr, "first-person body", "The body's skeleton"},
+    // Added by hand (2026-11-04, the game-drawn ceiling, vr/engine_units.cpp; the entry adapted from natpoh/diablo2-vr-port's
+    // game_sigs.h, MIT, see THIRD_PARTY.md; its pattern checked at its site in a 3.3.93787 .text snapshot).
+    // entt type_seq<ModelComponent>::value(): whether a placed unit got its model
+    {"TypeSeqModel", 0x1DBE40, Kind::Ref, "E8 ?? ?? ?? ?? 0F 10 44 24 20 89 03 48 8B C3 C7 43 04 68 22 59 18 0F 11 43 08", 0x1CCF6E, 0, 1, 5, 0, "48 83 EC 28 65 48 8B 04 25 58 00 00 00", nullptr, "the game-drawn ceiling", "The body's skeleton"},
     // TlsfAllocator 'Renderer Pool' (12 MB), read by its alloc
     {"RendererPool", 0x2810FF0, Kind::Ref, "48 8D 0D ?? ?? ?? ?? FF 50 08 48 8B D8 48 85 C0 75 13", 0xF6F082, 0, 3, 7, 0, nullptr, nullptr, "bigger renderer pool", "Memory pools"},
     // TlsfAllocator 'Entity System Pool' (70 MB), its getter's static

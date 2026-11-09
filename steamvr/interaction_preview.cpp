@@ -119,9 +119,36 @@ int main(int argc,char** argv) {
         if(!SavePng(argv[1],gallery,width,height))return 113;
         std::puts("Skill category art: all eight classes fit; four picker layouts rendered");return 0;
     }
+    if(argc>2&&!std::strcmp(argv[2],"--motions-check")) {
+        // Motions (spell_motion.h): the hand wheel with the MOTIONS box, the MOTIONS page with Nova turned
+        // off, Teleport not learned and a card pointed at, and the Paladin's page (Blessed Hammer off, Fist
+        // of the Heavens not learned).
+        if(argc>3){wchar_t path[32768]{};MultiByteToWideChar(CP_UTF8,0,argv[3],-1,path,32768);icons::Directory(path);}
+        Snapshot s;s.activeSet=1;s.bindingsEditable=true;s.skillClass=1;
+        const int ids[]={40,42,44,46,48,50,57,58,60};
+        for(const int id:ids){auto& k=s.catalog[s.skillCount++];k.id=id;k.level=8;k.known=k.available=true;std::snprintf(k.name,sizeof k.name,"%s",framevr::spellmotion::SpellName(id));}
+        for(int i=0;i<framevr::skills::Count;++i){auto& k=s.skills[size_t(i)];k=s.catalog[size_t(i%9)];}
+        icons::Prefetch(s);if(!icons::Wait(10000))return 120;
+        Snapshot paladin;paladin.activeSet=1;paladin.bindingsEditable=true;paladin.skillClass=3;
+        for(const int id:{107,112,117}){auto& k=paladin.catalog[paladin.skillCount++];k.id=id;k.level=8;k.known=k.available=true;std::snprintf(k.name,sizeof k.name,"%s",framevr::spellmotion::SpellName(id));}
+        for(int i=0;i<framevr::skills::Count;++i){auto& k=paladin.skills[size_t(i)];k=paladin.catalog[size_t(i%3)];}
+        icons::Prefetch(paladin);if(!icons::Wait(10000))return 120;
+        constexpr int width=2304,height=768;std::vector<uint8_t> gallery(width*height*4);
+        for(int tile=0;tile<3;++tile) {
+            Output o;o.wheel=true;o.wheelHand=0;o.motionsBox=true;o.motionsOff=1<<framevr::spellmotion::Bit(48);
+            if(tile==0)o.hover=MotionsCell;
+            else if(tile==1){o.motions=true;o.hover=MotionCardCell(2);}
+            else {o.motions=true;o.hover=MotionCardCell(0);o.motionsOff=1<<framevr::spellmotion::Bit(3,112);}
+            const auto pixels=Paint(tile==2?paladin:s,o,-1);if(pixels.size()!=1024*1024*4)return 121;
+            for(int y=0;y<768;++y)std::memcpy(&gallery[(y*width+tile*768)*4],&pixels[y*1024*4],768*4);
+        }
+        if(!SavePng(argv[1],gallery,width,height))return 122;
+        std::puts("Motions art: the hand wheel's MOTIONS box, the Sorceress's MOTIONS page and the Paladin's rendered");return 0;
+    }
     if(argc>2&&!std::strcmp(argv[2],"--glyphs-check")) {
         // Glyph casting: the hand wheel with a Draw glyph button and the GLYPHS box, the GLYPHS page, the
-        // button picker's Draw glyph card and a shape's skill picker.
+        // button picker's Draw glyph card and a shape's skill picker; then the left hand's set (its own skills,
+        // the right hand's dimmed, the hand box pointed at) on the left wheel and a left shape's picker.
         if(argc>3){wchar_t path[32768]{};MultiByteToWideChar(CP_UTF8,0,argv[3],-1,path,32768);icons::Directory(path);}
         Snapshot s;s.activeSet=1;s.bindingsEditable=true;s.skillClass=1;
         const int ids[]={40,149,57,42,58,54};
@@ -129,23 +156,24 @@ int main(int argc,char** argv) {
         for(int i=0;i<6;++i){auto& k=s.catalog[s.skillCount++];k.id=ids[i];k.level=12;k.known=k.available=true;std::snprintf(k.name,sizeof k.name,"%s",names[i]);}
         for(int i=0;i<framevr::skills::Count;++i){auto& k=s.skills[size_t(i)];k=s.catalog[size_t(i%6)];}
         icons::Prefetch(s);if(!icons::Wait(10000))return 110;
-        constexpr int width=1536,height=1536;std::vector<uint8_t> gallery(width*height*4);
-        for(int tile=0;tile<4;++tile) {
-            Output o;o.wheel=true;o.wheelHand=0;o.glyphDraw=framevr::skills::HandSlot(0,1);
-            o.glyphSkills={40,149,-1,57,-1,9999,58,-1};
+        constexpr int width=2304,height=1536;std::vector<uint8_t> gallery(width*height*4);
+        for(int tile=0;tile<6;++tile) {
+            Output o;o.wheel=true;o.wheelHand=tile>=4?1:0;o.glyphDraw={framevr::skills::HandSlot(0,1),tile>=4?framevr::skills::HandSlot(1,0):-1};
+            o.glyphSkills={{{40,149,-1,57,-1,9999,58,-1},{54,-1,42,-1,-1,-1,-1,-1}}};
             if(tile==0)o.hover=GlyphsCell;
             if(tile==1){o.glyphs=true;o.hover=1;}
-            if(tile>=2) {
+            if(tile==4){o.glyphs=true;o.glyphHand=1;o.hover=GlyphHandCell;}
+            if(tile==2||tile==3||tile==5) {
                 o.editor=2;o.editClass=1;o.editCategory=framevr::skillcategories::All;o.editCount=tile==2?7:6;o.editPages=1;o.hover=tile==2?6:1;
-                o.editSlot=tile==2?framevr::skills::HandSlot(0,2):-1;o.glyphEdit=tile==3?2:-1;o.glyphs=tile==3;
+                o.editSlot=tile==2?framevr::skills::HandSlot(0,2):-1;o.glyphEdit=tile==3?2:tile==5?0:-1;o.glyphs=tile!=2;o.glyphHand=tile==5;
                 for(int i=0;i<6;++i)o.editOptions[size_t(i)]=s.catalog[size_t(i)];
                 if(tile==2){auto& d=o.editOptions[6];d.id=GlyphDrawId;d.known=d.available=true;std::snprintf(d.name,sizeof d.name,"Draw glyph");}
             }
             const auto pixels=Paint(s,o,-1);if(pixels.size()!=1024*1024*4)return 111;
-            for(int y=0;y<768;++y)std::memcpy(&gallery[(((tile/2)*768+y)*width+(tile%2)*768)*4],&pixels[y*1024*4],768*4);
+            for(int y=0;y<768;++y)std::memcpy(&gallery[(((tile/3)*768+y)*width+(tile%3)*768)*4],&pixels[y*1024*4],768*4);
         }
         if(!SavePng(argv[1],gallery,width,height))return 112;
-        std::puts("Glyph casting art: hand wheel, GLYPHS page, Draw glyph card and a shape's picker rendered");return 0;
+        std::puts("Glyph casting art: hand wheel, GLYPHS page, Draw glyph card, a shape's picker, the left hand's set and a left shape's picker rendered");return 0;
     }
     if(argc>2&&!std::strcmp(argv[2],"--effects-check")) {
         using namespace framevr;

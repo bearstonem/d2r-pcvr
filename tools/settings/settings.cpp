@@ -338,7 +338,8 @@ std::vector<Item> g_items = {
     Needs(L"camera", L"neck_model", 1, Slider(L"camera", L"neck_up_cm", L"Eyes above the neck pivot, cm", 0, 25, 1, 10)),
     Needs(L"camera", L"neck_model", 1, Slider(L"camera", L"neck_forward_cm", L"Eyes in front of the neck pivot, cm", 0, 25, 1, 9)),
     Toggle(L"camera", L"follow_jump", L"Camera rises when the hero jumps", 1,
-           L"The camera goes up when the animation lifts the hero (the barbarian's Leap); the held upper body goes with it."),
+           L"The camera goes up when the game lifts the hero (the barbarian's Leap, up its whole arc) or the animation raises "
+           L"his hips; the held upper body goes with it."),
     Needs(L"camera", L"follow_jump", 1, Slider(L"camera", L"jump_from", L"Jump threshold (hip rise)", 0, 1.5f, 0.05f, 0.3f,
            L"Hip rise still taken for the stride's bob, not a jump. Above twice this the camera follows it whole.")),
 #endif
@@ -375,7 +376,7 @@ std::vector<Item> g_items = {
     Toggle(L"arms", L"hide_head", L"Hide the hero's head and neck", 0,
            L"Hides the hero's head and neck from your eyes, for a camera right at the eyes: looking down shows the chest. "
            L"In F4 his shadow keeps the head: instead, nothing nearer than about 11 cm in front of your eyes is drawn "
-           L"(13 looking up, 3 looking down). [arms] head_shadow=0: the head shrinks away, the shadow headless. "
+           L"(22 looking up, 3 looking down: [arms] head_cut_level, head_cut_up, head_cut_down). [arms] head_shadow=0: the head shrinks away, the shadow headless. "
            L"Keep \"Camera ahead / behind\" at 0 then - moved ahead, the camera leaves the hands out of reach."),
     Needs(L"arms", L"mode", 2, Slider(L"arms", L"scale", L"Arm length (scale)", 0.3f, 3, 0.05f, 1, L"Arm reach on top of the hero-to-your-height ratio.")),
     Needs(L"arms", L"mode", 2, Slider(L"arms", L"up", L"Hands up (+) / down (-), cm", -40, 40, 1, 0)),

@@ -345,6 +345,13 @@ void Configure(bool motionControls,float multiplier,bool directRelease) {
 void ConfigureRunSpeed(int percent){runSpeed=framevr::runspeed::NormalizePercent(float(percent));}
 void StickFullRun(bool on){stickFullRun=on;}
 int ObservedGait(uint64_t& at,bool* tired){const uint64_t v=gaitSeen.load();at=v>>3;if(tired)*tired=(v&4)!=0;return int(v&3);}
+std::atomic<int> combatWalkMs{framevr::runspeed::CombatWalkDefaultMs},combatWalkSource{0};std::atomic<uint64_t> combatWalkAt{0};
+void ConfigureCombatWalk(int ms){combatWalkMs=std::clamp(ms,0,framevr::runspeed::CombatWalkMaxMs);}
+void CombatWalk(int source){if(combatWalkMs.load(std::memory_order_relaxed)>0){combatWalkSource=source;combatWalkAt=GetTickCount64();}}
+bool CombatWalking(uint64_t now,int* source) {
+    if(source)*source=combatWalkSource.load();
+    return framevr::runspeed::CombatWalking(combatWalkAt.load(),now,combatWalkMs.load());
+}
 void Install() {
     const bool summonMageSpeedEnabled=summonrange::AggroFactor()>1;
     if(!enabled.load()&&!summonMageSpeedEnabled)return;

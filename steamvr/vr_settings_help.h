@@ -7,13 +7,13 @@ namespace framevr::settings {
 // layout::HelpAt). The card is inside the panel.
 constexpr int NoHelp=-1,HelpApply=Count,HelpClose=Count+1,HelpRecenter=Count+2,HelpCalibrate=Count+3,HelpMonoAudio=Count+4,
               HelpPerformance=Count+5;   // the Performance readout
-// The menu's own subjects after those; HelpLast ends the range. Tabs and presets take one
-// id each: HelpTabFirst + View, HelpPresetFirst + content::PresetSpecs index (their words
-// come from the content tables).
+// The menu's own subjects after those; HelpLast ends the range. Tabs, presets and rail groups
+// take one id each: HelpTabFirst + View, HelpPresetFirst + content::PresetSpecs index,
+// HelpGroupFirst + content::Group (their words come from the content tables).
 constexpr int HelpResetPage=HelpPerformance+1,HelpUndoReset=HelpPerformance+2,HelpGuide=HelpPerformance+3,HelpWhatsNew=HelpPerformance+4,
               HelpPresets=HelpPerformance+5,HelpDiscard=HelpPerformance+6,HelpKeepEditing=HelpPerformance+7,HelpApplyClose=HelpPerformance+8,
               HelpPending=HelpPerformance+9,HelpTabFirst=HelpPerformance+10,HelpPresetFirst=HelpTabFirst+int(View::Count),
-              MaxPresets=8,HelpLast=HelpPresetFirst+MaxPresets-1;
+              MaxPresets=8,HelpGroupFirst=HelpPresetFirst+MaxPresets,HelpLast=HelpGroupFirst+MaxRailGroups-1;
 // Close asks before it drops a draft (main's Close discarded it).
 inline constexpr const char* CloseAsksHelp="Back to the game. If some changes are not applied, Close asks first. Right B does the same as Close.";
 inline const char* HelpTitle(int id) {
@@ -56,7 +56,7 @@ inline const char* HelpText(int id) {
         case ProjectileAimAssist:return "Help for aiming supported hand spells. Bows and crossbows are always aimed by you alone.";
         case VitalsLocation:return "Where health and mana appear on your left hand.";
         case VitalsTilt:return "Rotates the health and mana display relative to your hand. Positive values tilt its top toward you; negative values tilt it away. The minimap and compass keep their own angle.";
-        case CriticalAlerts:return "Shows a brief warning and vibrates when health or mana is low. Adjust its vibration under Vibration > Low life and mana alerts. Turning this Off disables the warning, including its vibration.";
+        case CriticalAlerts:return "Shows a brief warning and vibrates when health or mana is low. Adjust its vibration under Controls > Vibration > Low life and mana alerts. Turning this Off disables the warning, including its vibration.";
         case NavigationLocation:return "Where the minimap and compass appear on your left hand. Independent of health and mana.";
         case MapTopDown:return "The wrist minimap's view. The gold arrow shows your facing direction. Full map and Full top-down show the game's full map instead of its corner map: look at it and push the right stick up to zoom in a lot, down to zoom back out. Apply saves your choice.";
         case MapRotate:return "In Top-down and Full top-down views, Off keeps north at the top and turns the arrow with you. On rotates the map so your facing direction stays at the top. This has no effect in the isometric views; your choice is kept for the next time you use Top-down. Apply saves it.";
@@ -105,7 +105,7 @@ inline const char* HelpText(int id) {
         case HapticBowRelease:return "Strength of feedback when releasing a physical arrow or throwing a javelin. Feel it plays it on the release action's controllers. Overall strength also affects the result.";
         case HapticSpell:return "Strength of the brief vibration after a supported hand spell successfully casts. The casting hand vibrates once per cast or volley. Feel it tests each controller at the strength shown here.";
         case HapticInteraction:return "Strength of feedback for interactions such as loot, potion handling and menu actions. Feel it tests each controller at the strength shown here before Apply.";
-        case HapticAlert:return "Strength of low-health and low-mana warning vibration on the left controller. Actual warnings also require Survival > Low life and mana alert to be On. Feel it plays it even when warnings are off.";
+        case HapticAlert:return "Strength of low-health and low-mana warning vibration on the left controller. Actual warnings also require Interface > Warnings > Low life and mana alert to be On. Feel it plays it even when warnings are off.";
         case BloodVisor:return "Shows peripheral blood splatters as life falls below 60%, 40% and 20%. Healing back above each threshold fades that layer. Face wipe gesture lets you clear splatters by hand.";
         case BloodWipe:return "With blood on the visor, move either hand side to side in front of your face with that hand's trigger released. Successful wipes remove blood with vibration. This does not restore health.";
         case ArcaneDecay:return "Subtle spectral visual warning around the screen edges when mana falls below the configured percentage. Dark gothic Diablo atmosphere without obstructing central vision.";
@@ -113,13 +113,16 @@ inline const char* HelpText(int id) {
         case ManaThreshold:return "Mana percentage below which Arcane Decay activates (5% to 90%, default 50%). Uses a 3 percentage point hysteresis to prevent flickering.";
         case ArcaneIntensity:return "Maximum opacity and brightness scaling of the spectral vignette, mist, and filaments (0% to 100%, default 100%).";
         case SummonRangeMultiplier:return "Multiplies summon target search and owner-follow ranges together. Mercenaries and attack reach stay native. Apply, then restart the game.";
-        case ElementalHands:return "A Sorceress's hands each show a small copy of their trigger skill's look, made from the spell's own effects in your game: flames, lightning flashes or ice, switching while you hold a spell shortcut. Supported hand spells flare it as they cast; the spells you cast are unchanged. Experimental: it is drawn over the picture, so it can show through your weapon or a wall. Other classes see nothing.";
         case BottlePhysics:return "A bottle you have drunk from falls from your open hand, bounces and rolls, and weapons, fists and the shield knock it about. A potion thrown at your mercenary flies as a real bottle and breaks where it first hits; a thrown trap, bomb, gas or oil potion lands where its arc first hits, stopping at walls and tables. Off: emptied bottles vanish and throws use a simple arc to the floor. Healing the mercenary works either way.";
+        case MeleeReach:return "Extra room around each monster for your weapon and fist hits. A swing that passes this close beside a monster still strikes it, forgiving near misses and a body that has drifted from where you calibrated. 0 (the default): only a touch counts. Walls still block hits, and shield bash is unchanged.";
+        case WalkDirection:return "Look (the default): pushing the left stick ahead walks where you are looking. Controller: it walks where the left controller points, so you can look around while you walk. Either way the stick's sides walk sideways from that direction.";
+        case RoomSteps:return "On (the default): as you move in your room, your hero's spot in the game follows you, so monsters, your mercenary and spells meet you where you stand and your legs stay under you. The game's own walk moves it, so walls stop it, and your view never moves on its own. A grip or trigger, the bow, casting, swinging, the left stick and menus pause it. Off: it stays where you calibrated.";
+        case SpellHandLight:return "How brightly the spells in a Sorceress's hands light the dark around you. Lower it if the light dazzles; Off and they only glow.";
         case TorchFlame:return "A one-handed club with fire damage is a torch: it lights the dark round you from its head. This shows or hides the flame drawn on it; the light stays either way.";
         case PropPhysics:return "The level's small things near you (cups, plates, vases, books, skulls, stools, barrels and more) stay put until a weapon, hand, shield or bottle reaches them. Then they fall and roll, and stay where they land until the area loads again. Purely visual. Shelves and tables are approximate: something pushed off a shelf's back can fall through it.";
         case BodyPhysics:return "Your weapon, shield or fist pushes the monsters, mercenaries and townsfolk it meets: the struck arm or head swings away at its joint, the body leans or is shoved back a little, then springs back into the game's own animation. Purely visual: where a monster stands, its hits and your attacks are unchanged. First person with Motion combat only.";
-        case HelpPerformance:return "The last second of headset frames. Drawing: the game preparing one eye (By turns) or both; it grows with what is in view, draw distances and shadows, hardly with resolution. Game: its update between frames. VR: the mod's own work. Headset wait: the runtime holding the frame for the next refresh. Past the headset's frame (11.1 ms at 90 Hz), late frames wait a whole refresh: up to half the frame rate.";
-        case FrameGeneration:return "OFXR Bridge, an experimental OpenXR layer by tig3rmast3r, has the game draw every other frame and makes the rest from the motion between them. It needs Stereo rendering: Both eyes, and pauses by turns. Turning it on restarts the VR session, a moment of black. With Virtual Desktop, set its SSW to Disabled.";
+        case HelpPerformance:return "The last second of headset frames. Drawing: the game preparing one eye (One by turns) or both; it grows with what is in view, draw distances and shadows, hardly with resolution. Game: its update between frames. VR: the mod's own work. Headset wait: the runtime holding the frame for the next refresh. Past the headset's frame (11.1 ms at 90 Hz), late frames wait a whole refresh: up to half the frame rate.";
+        case FrameGeneration:return "OFXR Bridge, an experimental OpenXR layer by tig3rmast3r, has the game draw every other frame and makes the rest from the motion between them. It needs Eyes drawn per frame: Both, and pauses on One by turns. Turning it on restarts the VR session, a moment of black. With Virtual Desktop, set its SSW to Disabled.";
         case FrameGenPreset:return "How carefully NVIDIA's optical flow looks for the motion between two frames. Medium is the suggested start; OFXR marks Fast as a test setting. Changes apply while you play.";
         case FrameGenScale:return "The size NVIDIA's optical flow works at, of each eye's image. 50% is the suggested start; 100% usually costs more than it gains. Changes apply while you play.";
         case HelpApply:return "Saves your pending changes and applies them. Your other saved settings and calibration are preserved. Changes stay as a draft until you press Apply.";

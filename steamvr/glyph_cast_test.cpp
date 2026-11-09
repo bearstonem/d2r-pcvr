@@ -69,13 +69,44 @@ int main() {
     Check(Dispatch(138, -1, slots, 155, -1).how == How::Park, "else: put it on the record");
     Check(Dispatch(-1, -1, slots, -1, -1).how == How::None, "no skill on the glyph: nothing");
     Check(Dispatch(149, 3, slots, -1, -1).how == How::Park, "an item's skill (another owner) is not the class skill");
-    {   // a park waits for the record, then presses RT for PressSeconds
+    {   // Town Portal (359): its slot reads as the tome (220) or a scroll (219) it will use
+        auto portal = slots;
+        portal[6] = {220, -1, true, true};
+        Check(Dispatch(359, -1, portal, -1, -1).how == How::Slot && Dispatch(359, -1, portal, -1, -1).slot == 6, "Town Portal on a button (the tome): that button");
+        portal[6] = {219, -1, true, true};
+        Check(Dispatch(359, -1, portal, -1, -1).slot == 6, "Town Portal on a button (a scroll): that button");
+        Check(Dispatch(359, -1, slots, 359, -1).how == How::Record && Dispatch(359, -1, slots, 70, -1).how == How::Park, "else the right trigger's record, as any skill");
+    }
+    {   // a park waits for the record and ParkSettleSeconds more, then presses RT for PressSeconds
         Cast c; c.Begin(Dispatch(138, -1, slots, 155, -1), 138, -1, 5.0);
         Check(c.state == Cast::State::Waiting && !c.Step(5.1, 155, -1).rt, "waiting: no press yet");
-        Check(c.Step(5.2, 138, -1).rt, "the record holds it: RT pressed");
-        Check(c.Step(5.25, 138, -1).rt, "still pressed");
-        c.Step(5.32, 138, -1);
-        Check(c.state == Cast::State::Done && !c.Step(5.31, 138, -1).rt, "released after PressSeconds");
+        Check(!c.Step(5.2, 138, -1).rt && c.state == Cast::State::Waiting, "the record holds it: not pressed at once");
+        Check(!c.Step(5.3, 138, -1).rt, "nor 100 ms after the read-back (the game's target for it is not found yet)");
+        Check(c.Step(5.36, 138, -1).rt, "ParkSettleSeconds after the read-back: RT pressed");
+        Check(c.Step(5.41, 138, -1).rt, "still pressed");
+        c.Step(5.47, 138, -1);
+        Check(c.state == Cast::State::Done && !c.Step(5.48, 138, -1).rt, "released after PressSeconds");
+    }
+    {   // Leap and Teleport, landed by the mod, press as soon as the record reads back
+        for (const int id : {132, 54}) {
+            Cast c; c.Begin({How::Park, GlyphRecord}, id, -1, 2.0);
+            Check(!c.Step(2.05, 155, -1).rt && c.Step(2.1, id, -1).rt, "Leap and Teleport: pressed at the read-back, no settle");
+        }
+        Cast raise; raise.Begin({How::Park, GlyphRecord}, 70, -1, 2.0);
+        Check(!raise.Step(2.1, 70, -1).rt, "Raise Skeleton still settles first");
+    }
+    {   // a read-back just before ParkWaitSeconds still settles and presses
+        Cast c; c.Begin({How::Park, GlyphRecord}, 138, -1, 1.0);
+        c.Step(1.3, -1, -1); c.Step(1.55, 138, -1); c.Step(1.65, 138, -1);
+        Check(c.state == Cast::State::Waiting && c.Step(1.71, 138, -1).rt, "read back at 0.55 s: pressed at 0.71 s");
+    }
+    {   // the record losing it while settling waits again, still within ParkWaitSeconds
+        Cast c; c.Begin({How::Park, GlyphRecord}, 138, -1, 1.0);
+        c.Step(1.1, 138, -1); c.Step(1.2, 155, -1);
+        Check(!c.Step(1.3, 138, -1).rt && !c.Step(1.4, 138, -1).rt && c.Step(1.46, 138, -1).rt, "settled again from the second read-back");
+        Cast late; late.Begin({How::Park, GlyphRecord}, 138, -1, 1.0);
+        late.Step(1.5, 138, -1); late.Step(1.62, 155, -1);
+        Check(late.state == Cast::State::TimedOut, "lost after ParkWaitSeconds: timed out");
     }
     {   // a park that never reads back times out
         Cast c; c.Begin({How::Park, GlyphRecord}, 138, -1, 1.0);
@@ -98,6 +129,21 @@ int main() {
     }
     Check(DrawSlot(3) == 3 && DrawSlot(-1) == -1 && DrawSlot(10) == -1 && DrawSlot(std::nanf("")) == -1, "the draw slot setting");
     Check(SkillOf(149) == 149 && SkillOf(-1) == -1, "a shape's skill setting");
+    {   // each hand its own Draw glyph button (owner, 2026-11-05): draw_slot and second_draw_slot, either key either hand
+        using Slots = std::array<int, 2>;
+        const int right = skills::HandSlot(0, 1), right2 = skills::HandSlot(0, 2), left = skills::HandSlot(1, 0), left2 = skills::HandSlot(1, 3);
+        Check(DrawSlots(float(right), -1) == Slots{right, -1} && DrawSlots(-1, -1) == Slots{-1, -1}, "one button, as saved before: its hand draws");
+        Check(DrawSlots(float(left), -1) == Slots{-1, left}, "a draw_slot saved on the left hand stays the left hand's");
+        Check(DrawSlots(float(left), float(right)) == Slots{right, left} && DrawSlots(float(right), float(left)) == Slots{right, left}, "one a hand, from either key");
+        Check(DrawSlots(float(right), float(right2)) == Slots{right, -1} && DrawSlots(std::nanf(""), float(left)) == Slots{-1, left}, "two on one hand: draw_slot's; an unreadable key: none");
+        Check(DrawKeyFor(-1, -1, right) == 0 && DrawKeyFor(-1, -1, left) == 0, "the first: draw_slot");
+        Check(DrawKeyFor(float(left), -1, right) == 1 && DrawKeyFor(float(right), -1, left) == 1, "the other hand: the second, the first hand's stays");
+        Check(DrawKeyFor(float(right), float(left), right2) == 0 && DrawKeyFor(float(right), float(left), left2) == 1 && DrawKeyFor(-1, float(left), left2) == 1,
+              "a hand's button moved: the key already on that hand");
+        Check(DrawKeyFor(-1, float(left), right) == 0 && DrawKeyFor(float(right), float(right2), left) == 1, "else a free key; two on one hand (edited): the second makes room");
+        Check(DrawKeyHolding(float(right), float(left), left) == 1 && DrawKeyHolding(float(right), float(left), right) == 0 &&
+              DrawKeyHolding(float(right), float(left), right2) == -1 && DrawKeyHolding(-1, -1, -1) == -1, "the key a game skill put on a Draw glyph button clears");
+    }
     if (failures) { std::fprintf(stderr, "%d failures\n", failures); return 1; }
     std::puts("glyph-cast-test: ok");
     return 0;
