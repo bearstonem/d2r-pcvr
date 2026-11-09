@@ -244,6 +244,7 @@ void RequestStereoCapture();
 void EndPair();
 void ResetHeight();
 void Recenter();
+bool RecenterPosition();
 bool TakeWorldRecenter();
 bool Active();
 // Any thread: a focused VR session with motion controls ran input recently.

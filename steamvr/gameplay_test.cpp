@@ -26,6 +26,34 @@ struct Sim {
 };
 int main() {
     {
+        Sim s;s.Nock();
+        Check(GripsReleased(s.in)&&!CanRecenter(s.in,s.out),"nocked arrow blocks recentering without a support grip");
+        s.Move({0,1.3f,0},10);s.Step(550);
+        Check(s.out.bowCharged&&!CanRecenter(s.in,s.out),"held draw survives an automatic recenter interval");
+        s.in.trigger=0;s.Step();
+        Check(s.out.bowRelease&&!CanRecenter(s.in,s.out),"release frame keeps the arrow request intact");
+        Check(CanRecenter(s.in,s.Step()),"completed release permits recentering again");
+        s.Nock();s.in.cancel=true;s.Step();
+        Check(!s.out.bowRelease&&CanRecenter(s.in,s.out),"cancelled draw permits recentering without shooting");
+        s.out.nativeBowRelease=true;
+        Check(!CanRecenter(s.in,s.out),"native bow release also blocks recentering");
+        s.out={};s.in.grip[1]=.6f;
+        Check(!CanRecenter(s.in,s.out),"support grip still blocks recentering");
+    }
+    {
+        Input in;
+        Check(GripsReleased(in),"released grips permit recentering");
+        for(int hand=0;hand<2;++hand) {
+            for(float grip:{1.f,.6f,.4f,-1.f,std::numeric_limits<float>::quiet_NaN()}) {
+                in.grip[hand]=grip;
+                Check(!GripsReleased(in),"held, latched or unknown grip defers recentering");
+            }
+            in.grip[hand]=.39f;
+            Check(GripsReleased(in),"support-grip release permits recentering again");
+            in.grip[hand]=0;
+        }
+    }
+    {
         Sim s;s.in.weapon=Weapon::Crossbow;s.Step(2);s.in.trigger=1;s.Step();
         Check(s.out.attack,"crossbow trigger requests a basic attack");
         auto native=s.out;

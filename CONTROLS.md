@@ -109,6 +109,13 @@ Quest left X/Y correspond to Index left A/B; right A/B labels are the same.
 | Recenter / stereo capture | PC F11 / F8 |
 | Walk where the controller points | **VR Settings > Controls > Hands > Walk direction** (beside Dominant hand): **Look** (default) walks where you look; **Controller** walks where the left controller points |
 | Room-scale | **VR Settings > Comfort > Body > Room follows you** (beside Seated play; On by default): as you move in your room your hero's spot follows you, so monsters attack where you stand. Grips, triggers, swings, casting, the left stick and menus pause it |
+| Recenter position, keep view direction | PC F13 (native OpenXR, gameplay only) |
+
+F13 resets the tracked position, including height, without resetting view direction.
+It skips open menus, calibration, item dragging and held grips. Release both grips
+before recentering so a two-handed weapon's combat state is not interrupted.
+This is a recenter shortcut,
+not room-scale movement of the game actor; the world can still shift in position.
 
 Editing consumes combat inputs but never pauses the game or zeros locomotion.
 Selection clicks do not cast. Release buttons and triggers after closing before
