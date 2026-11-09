@@ -55,12 +55,19 @@ public:
 // laser's Ctrl / Shift, flat aiming's Shift) carry this in dwExtraInfo, so the
 // game window can tell them from the player's own keyboard.
 inline constexpr uintptr_t InjectedKeyTag=0x50435652'4b455953ull;   // "PCVRKEYS"
+// Letters from the mod's own VR keyboard panel carry this instead. They ARE
+// typing: TypedKeys lets the game's keyboard layout in for them, so a name box
+// takes them like letters from a real keyboard, while the mod can still tell
+// them apart from both the player's keyboard and its own control keys.
+inline constexpr uintptr_t KeyboardKeyTag=0x50435652'54595045ull;   // "PCVRTYPE"
 // A key pressed on a real keyboard lets the game take its keyboard layout for a
 // moment although the laser holds the controller layout (InputModeLease):
 // text boxes - D2RLoader's Host Game and Browse Games, any name or password -
 // take typed letters only there (owner 2026-10-25: nothing could be typed into
 // the co-op boxes, "even using the keyboard"). Once the game has switched, the
 // laser no longer holds anything back; the thumbstick brings the controller back.
+// The VR keyboard's letters (KeyboardKeyTag) count as typing; only the mod's
+// control keys (InjectedKeyTag) do not.
 class TypedKeys {
     InputModeLease lease;
 public:

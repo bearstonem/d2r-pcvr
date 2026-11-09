@@ -10,6 +10,8 @@ does not move anything, it only darkens and turns to moonlight.
 reshade/sky/D2R_SkyNight_<act>.png and D2R_SkyCapNight_<act>.png (our pictures,
 shipped by the installer); --install copies them into the game's
 reshade-shaders/Textures/D2R_Sky_ours. The raw drawings stay in extracted/raw_night.
+The model edits the day band's first half (the 1536 px picture gen_sky.py laid
+twice side by side), and the night band is laid twice the same way.
 """
 import argparse
 import base64
@@ -103,7 +105,11 @@ def one(act, redo):
     band_raw, cap_raw = RAW / f"{act}_band.png", RAW / f"{act}_cap.png"
     band = SKY / f"D2R_SkyNight_{act}.png"
     if redo or not band_raw.exists():
-        s = edit(day, NIGHT[act] + RULES, gen_sky.SIZE, band_raw)
+        # the model's own picture: the first of the day band's two halves (gen_sky.round_once)
+        im = Image.open(day)
+        half = RAW / f"{act}_day.png"
+        im.crop((0, 0, im.width // 2, im.height)).save(half)
+        s = edit(half, NIGHT[act] + RULES, gen_sky.SIZE, band_raw)
         print(f"{act}: night band drawn in {s:.0f} s", flush=True)
     a = gen_sky.seamless_x(np.asarray(Image.open(band_raw).convert("RGB"), np.float32))
     Image.fromarray(a.clip(0, 255).astype(np.uint8)).save(band)
@@ -114,6 +120,8 @@ def one(act, redo):
     build_cap(cap_raw, band, cap)
     grade(band, act)
     grade(cap, act)
+    graded = np.asarray(Image.open(band).convert("RGB"))
+    Image.fromarray(gen_sky.round_once(graded)).save(band)   # once round the circle, as the day band
     return f"{act}: {band.name} + D2R_SkyCapNight_{act}.png"
 
 

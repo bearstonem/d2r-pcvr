@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "fx_source.h"
 using Microsoft::WRL::ComPtr;
 static void Check(HRESULT hr,const char* what) {
     if(FAILED(hr)) throw std::runtime_error(what);
@@ -55,8 +56,7 @@ static const float3 PhantomA=0,PhantomB=0,BoneO=0,BoneX=0,BoneY=0,BoneZ=0;
 )hlsl";
 int main(int argc,char** argv) {try {
     if(argc!=2)throw std::runtime_error("expected D2R_DepthFog.fx path");
-    std::ifstream file(argv[1]);if(!file)throw std::runtime_error("cannot read production shader");
-    const std::string source{std::istreambuf_iterator<char>(file),{}};
+    const std::string source=fxsource::ReadWithIncludes(argv[1]);   // the effect with its feature headers pasted in (ShieldDebug lives in D2R_Debug.fxh)
     std::string shader=Fixture;
     for(const char* name:{"float3 PhantomPixel(","float PhantomAhead(","float3 Segment(","float3 ShieldDebug(","float3 Phantom("})shader+=Function(source,name);
     shader+=R"hlsl(

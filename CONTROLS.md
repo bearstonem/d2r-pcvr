@@ -83,7 +83,8 @@ Quest left X/Y correspond to Index left A/B; right A/B labels are the same.
 | Holy Bolt | Aim with either casting controller, including up/down with Gameplay > Targeting > Keep spell shots level Off. Light assists at launch; Strong also adds gentle homing toward undead/demons. Directly aim at your mercenary to heal; native damage/healing rules apply |
 | See which monsters you are aiming at | **VR Settings > Interface > Outlines > Monster outline** (Off by default; 10-100% sets its brightness) draws a thin, steady outline round each hand's monster: a hand held out picks the monster it points at; with no hand on one, the monster you look at is outlined. **Outlines shown**: Both hands (default) outlines each hand's monster, Main hand only that hand's (**Controls > Hands > Dominant hand**; the bow hand while a bow is out, whose color also wins when both hands are on one monster). **Left hand outline color** and **Right hand outline color** each choose By range (red near, orange mid-range, yellow far) or one hue (press the color to see all 24 and By range at once; one press picks; < and > still step through them); gold and blue by default. The monster you look at takes the color of the hand that would cast at it: the left (bow) hand with a bow equipped, else your dominant hand. A button you hold keeps showing the monster its cast took. Walls in between rule a monster out. A guide only: it does not change how skills aim |
 | Send skills to that monster | **VR Settings > Gameplay > Targeting > Skills go to the aimed monster** (Off by default; Spells, Bow skills or Both. A class without bow skills sees it as **Spells go to the aimed monster**, On or Off): a spell takes the monster of the hand whose button casts it (arm held out in front of you, along where it points, at least a tenth of your Controller span: 15 cm on a 1.5 m span; a hand pointing within 45 degrees of straight down, or hanging at your side, is resting), else the other hand's, else the one you look at, and keeps it until you let go or it walks out of the game's reach. Bolts and Lightning fly at it; curses and Corpse Explosion land on it; Guided Arrow, Bone Spirit, Charge, Leap Attack, Dragon Flight, Attract and Taunt are handed the monster itself; Teleport, Leap, golems and raises go where you point. With no monster, a spell goes where its hand's arm points, else the other arm, else where you look. Only monsters within the game's own cast reach count (50 cells on either axis, less a margin). Off, spells aim along the casting hand as before. With Bow skills or Both, bow skills take the bow hand's monster first, aimed from the bow hand. The Warlock's skills are left out for now: they keep the hand aim they had before these settings |
-| Keep the aim on what you face | **VR Settings > Gameplay > Targeting > Aim with your view** (Off by default; shown once Monster outline, Skills go to the aimed monster or Ground skill aim on Monster is on): the monster you look at must come within 17 degrees of where your head faces, and stays yours while it is within 30, until another comes within 17; a hand picks only monsters within 30 degrees of where your head faces. A casting hand (the bow hand for a bow skill) held out and pointing aims alone: its cast takes its own monster, else goes where it points, never the other hand's or the one you look at, and while the hand whose color the one you look at takes points, that monster is not outlined. A lowered hand still takes the other hand's, then the one you look at. The melee attack skills (Charge, Leap Attack, Dragon Flight, Whirlwind) from a raised hand take its own monster, else the other hand's while that one is outlined (Outlines shown on Both hands, or the other hand is the dominant one), never the one you look at; lowered, they try all three like any cast |
+| Keep the aim on what you face | **VR Settings > Gameplay > Targeting > Aim with your view** (Off by default; shown once Monster outline, Skills go to the aimed monster or Ground skill aim on Monster is on): the monster you look at must come within 17 degrees of where your head faces, and stays yours while it is within 30, until another comes within 17 (with **Aim with your eyes** on a headset with eye tracking, where your eyes look picks it instead, below); a hand picks only monsters within 30 degrees of where your head faces. A casting hand (the bow hand for a bow skill) held out and pointing aims alone: its cast takes its own monster, else goes where it points, never the other hand's or the one you look at, and while the hand whose color the one you look at takes points, that monster is not outlined. A lowered hand still takes the other hand's, then the one you look at. The melee attack skills (Charge, Leap Attack, Dragon Flight, Whirlwind) from a raised hand take its own monster, else the other hand's while that one is outlined (Outlines shown on Both hands, or the other hand is the dominant one), never the one you look at; lowered, they try all three like any cast |
+| Aim with your eyes | **VR Settings > Gameplay > Targeting > Aim with your eyes** (**Eyes**, beside Aim with your view; On by default; shown only on a headset that shares eye tracking, such as a Steam Frame through SteamVR, once Monster outline, Skills go to the aimed monster or Ground skill aim on Monster is on): "the one you look at" is the monster your eyes are on, not the one your head faces. It is outlined while no hand points, and skills take it after your hands' monsters; with no monster and no hand held out, a cast goes where your eyes look. A monster within about 6 degrees of where you look is taken (look at its middle when one stands behind another), and it stays yours while your eyes are within about 10 degrees of it, until you look at another for a tenth of a second; a quick glance across others never takes them. A blink keeps it; with tracking lost for a third of a second, your head's view picks again (17 / 30 degrees with Aim with your view on) until your eyes are seen again. Your hands pick as before. Off: your head's view, as before. Eye-tracked foveation does not need to be on |
 | Cast with a staff | **VR Settings > Gameplay > Targeting > Aim staff along arm** (Off by default): an upright staff casts along your arm, shoulder through hand; leveled out like a wand, it casts from its top. The Warlock's skills keep the staff's own aim |
 | Aim ground skills | **VR Settings > Gameplay > Targeting > Ground skill aim** sets where Fire Blast, Shock Web and the other traps (Blade Sentinel, Mind Blast...), Blizzard, Meteor, Fire Wall, Hydra, Fissure, Volcano, Bone Wall and Bone Prison land. **Game's aim** (default): the game's own aim, as before. **Pointed**: on the floor where the casting hand points, held out or not (else the other arm, else where you look); aimed at the horizon or above, as far as the game lets a skill be cast (45 cells along an axis, more diagonally). **Monster**: on the monster the casting hand, the other hand or your eyes aim at, else where you point |
 | See where a ground skill will hit | **VR Settings > Gameplay > Targeting > Landing circles** (default On; with Ground skill aim on Pointed or Monster): once the game accepts the cast, a circle in the element's color fills from the center outward until the skill lands (a bomb over its flight, timed by the game's own missile, Meteor over its fall, Blizzard while the ice falls); Fire Wall shows as a strip across your aim. It paints the floor only, not monsters' legs or walls |
@@ -91,7 +92,8 @@ Quest left X/Y correspond to Index left A/B; right A/B labels are the same.
 | Increase offline difficulty | **VR Settings > Gameplay > Monsters > Offline difficulty**: Game's setting or Players 1-8; higher counts make monsters tougher and increase rewards |
 | Bow draw | Right trigger near the left-hand bow string; draw and release |
 | See where a drawn arrow will fly | At full draw a faint line runs from the arrow's tip along its straight flight, with a brighter dot where it would reach the floor; otherwise it fades out at 15 m. It does not stop at walls or monsters. Basic arrows and Magic, Fire, Cold, Ice, Exploding, Immolation and Freezing Arrow; not Multiple Shot, Guided Arrow, Strafe or crossbows. **VR Settings > Gameplay > Targeting > Arrow path line** chooses Off or its color, 15 degrees at a time around the color wheel (Off by default; the first step is red 0°); stepping past 345° goes to Off and on to 0°, in either direction |
-| Fire a crossbow | Equip bolts and assign **Attack** to Right Trigger; aim and fire while moving. |
+| Bash with the bow | With **VR Settings > Gameplay > Combat > Bow bash** On (Off by default), swing the bow in your left hand into a monster, the string not drawn and both triggers released: it staggers, so you can step back and draw. It deals no damage and spends no arrow; your bow hand feels each contact. One bash every 1.5 s, the same monster every 3 s; act bosses never stagger. Any class with a bow; not crossbows yet |
+| Fire a crossbow | Equip bolts and pull Right Trigger; aim and fire while moving. With a crossbow in the hands the right trigger is **Attack** whatever skill its slot holds, and the wrist cue says **Attack, Crossbow: pull trigger**. The slot keeps its skill: take the crossbow off and the trigger casts it again. A bow skill there (Multiple Shot, Strafe, Guided Arrow, the elemental arrows) stays, and the game fires it from the crossbow. Other skills cast from the face buttons as usual |
 | Support a crossbow | Hold Left Grip near the stock; release to free the hand. After a shoulder swap, release the swap grip before grabbing the stock again |
 | Javelin, throwing knife or axe throw | Right trigger on Attack, Throw or nothing; hold the trigger, throw, release |
 | Cancel a physical attack / draw | Open either wheel, then release the held controls |
@@ -109,6 +111,13 @@ Quest left X/Y correspond to Index left A/B; right A/B labels are the same.
 | Recenter / stereo capture | PC F11 / F8 |
 | Walk where the controller points | **VR Settings > Controls > Hands > Walk direction** (beside Dominant hand): **Look** (default) walks where you look; **Controller** walks where the left controller points |
 | Room-scale | **VR Settings > Comfort > Body > Room follows you** (beside Seated play; On by default): as you move in your room your hero's spot follows you, so monsters attack where you stand. Grips, triggers, swings, casting, the left stick and menus pause it |
+| Recenter position, keep view direction | PC F13 (native OpenXR, gameplay only) |
+
+F13 resets the tracked position, including height, without resetting view direction.
+It skips open menus, calibration, item dragging and held grips. Release both grips
+before recentering so a two-handed weapon's combat state is not interrupted.
+This is a recenter shortcut,
+not room-scale movement of the game actor; the world can still shift in position.
 
 Editing consumes combat inputs but never pauses the game or zeros locomotion.
 Selection clicks do not cast. Release buttons and triggers after closing before
@@ -152,6 +161,13 @@ stabs. The old `attack_speed` INI key does not select Classic; choose it here.
 **Gameplay > Combat > Melee reach** (0 to 50 cm, 0 by default) lets a weapon or fist that
 passes that close beside a monster still hit it. Walls still block, and shield
 bash is unchanged.
+**Gameplay > Combat > Weapon heft** (Off by default) gives weapons weight: a heavy
+weapon needs a long, committed stroke of your hand before it meets the monster to
+hit fully, and a shorter one lands lighter, never below 30%. A great maul needs
+about 40 cm of hand travel, a two-handed sword 32, a crystal sword 16 and a long
+sword 12; faster weapons need less. Daggers, claws, wands, orbs, thrown weapons and
+fists hit fully with a flick. Turning the wrist or drifting the hand slowly does
+not count. Each hit is still one game attack, and the weapon never lags your hand.
 
 **Unleashed swing damage:** every stroke that connects lands, but how hard it
 hits depends on your character. Your attack rating against the monster's
@@ -455,8 +471,11 @@ press the same button again for basic arrows, or another arrow skill's button
 to swap. The skill's own mana cost, damage and impact effects apply to each
 shot. If the game refuses it (usually not enough mana), the drawn arrow flies as
 a basic arrow and the character's mana warning plays. With nothing loaded, a
-supported arrow skill on left trigger uses the same physical release. Multiple
-Shot, Guided Arrow and Strafe keep their native behavior. Set
+supported arrow skill on left trigger uses the same physical release.
+A face button assigned to Multiple Shot, Guided Arrow or Strafe loads it the
+same way: every following draw and release fires it, through that button, as
+the game does, so Multiple Shot keeps its fan, Guided Arrow its homing and
+Strafe its volley. Press the button again for basic arrows. Set
 `[bow] quiver=0` to restore native buttons for these skills.
 The selected skill also changes the nocked arrow's model and particles. Set
 `[bow] quiver_preview=0` to keep the basic nocked model while still firing skill
@@ -602,6 +621,24 @@ the trigger ends the drag at the last valid pointer position. Tracking or
 desktop focus loss releases the injected mouse button; release the trigger
 before starting again. Pressing or releasing Left Grip during a drag will
 not convert it into a context-click.
+
+### VR keyboard (character names)
+
+D2R shows no on-screen keyboard for the character name, so the mod adds one.
+When you pick a hero on the character creation screen, a keyboard appears
+under the menu, tilted toward you. Point the laser at a key and pull the right
+trigger to type it into the name box.
+
+| Key | Effect |
+| --- | --- |
+| Letters, `-`, `_` | Type the character (letters are small) |
+| Shift | The next letter is a capital (the keys show capitals while it waits) |
+| Back | Delete the last character |
+| Enter | Confirm, as the keyboard's Enter does |
+| Close | Hide the keyboard until you pick another hero or reopen character creation |
+
+The keys follow your Windows keyboard layout, so a letter types the same
+character on any layout. A physical keyboard keeps working alongside it.
 
 ### Native menu prompts
 
