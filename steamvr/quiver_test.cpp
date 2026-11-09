@@ -111,7 +111,21 @@ int main() {
         q.Step(5,-1,-1,-1,-1,true);
         auto fresh=[&](int slot,int skill,int missile,bool eligible){q.Step(5,-1,-1,-1,-1,true);return q.Step(5,slot,skill,-1,missile,eligible);};
         r=fresh(2,36,58,true);Check(!r.consumed&&q.Current().skill==7,"non-arrow skill casts natively, quiver kept");
-        r=fresh(2,12,-1,true);Check(!r.consumed,"Multiple Shot keeps its native button");
+        // #364: Multiple Shot, Guided Arrow and Strafe load too, never as physical arrows: the
+        // release presses the face button they came from (Slot), so the game keeps the fan.
+        for(int id:{12,22,26})Check(weaponskills::NativeLoad(id)&&weaponskills::Bow(id)&&!weaponskills::Loadable(id,-1,false),"native bow skills load, never the arrow path");
+        for(int id:{0,6,7,15,36,97})Check(!weaponskills::NativeLoad(id),"basic, quiver, javelin and other skills are not native loads");
+        r=fresh(2,12,-1,true);
+        Check(r.consumed&&r.change==Quiver::Change::Loaded&&q.Current()==weaponskills::Loaded{12,-1,-1}&&q.Slot()==2,"Multiple Shot's face button loads it, from slot 2");
+        r=fresh(2,12,-1,true);Check(r.consumed&&r.change==Quiver::Change::Unloaded&&!q.Current().Active()&&q.Slot()==-1,"its button again: basic arrows");
+        r=fresh(4,26,-1,true);Check(r.change==Quiver::Change::Loaded&&q.Slot()==4,"Strafe loads from its own slot");
+        r=fresh(3,7,12,true);Check(r.change==Quiver::Change::Loaded&&q.Current().skill==7&&q.Slot()==3,"a quiver arrow swaps it out");
+        r=fresh(2,22,-1,false);Check(!r.consumed&&q.Current().skill==7,"without a ready bow Guided Arrow casts natively");
+        r=fresh(2,22,-1,true);Check(r.consumed&&q.Current().skill==22&&q.Slot()==2,"with one it loads");
+        q.Step(5,-1,-1,-1,-1,true,true);
+        r=q.Step(5,3,12,-1,-1,true,true);Check(!r.consumed&&q.Current().skill==22,"a javelin in hand never loads Multiple Shot");
+        q.Step(5,-1,-1,-1,-1,true);q.Step(5,2,22,-1,-1,true);q.Step(5,-1,-1,-1,-1,true);
+        q.Step(5,3,7,-1,12,true);q.Step(5,-1,-1,-1,-1,true);
         r=fresh(3,7,59,true);Check(!r.consumed,"unexpected missile id is not loaded");
         r=fresh(3,11,40,false);Check(!r.consumed&&q.Current().skill==7,"without a ready bow the button casts natively");
         r=q.Step(5,3,11,-1,40,true);Check(!r.consumed&&q.Current().skill==7,"a native press stays native when the bow becomes ready");

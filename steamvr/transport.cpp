@@ -608,6 +608,7 @@ ULONGLONG chargeIssuedAt=0,chargeContactsHeldAt=0;
 std::atomic<bool> quiverEnabled{true},quiverPreview{true};
 weaponskills::Quiver quiver;
 weaponskills::Loaded quiverArrow{}; // the skill the next release carries, if any
+weaponskills::Loaded nativeArrow{}; // a loaded Multiple Shot, Guided Arrow or Strafe: the release presses its face button (#364)
 int quiverReportedSlot=-1; // one diagnostic line per face-button press
 uint64_t shieldFeedbackAt=0,cueChangedAt=0,volleyRequestedAt=0;
 bool shieldRefused=false;
@@ -4028,12 +4029,20 @@ void Input() {
         if(step.consumed&&requested>=0&&requested!=skills::TriggerSlot(0)&&skills::Hand(requested)==press.hand){requested=-1;handOutput.interact=false;}
         if(step.change!=weaponskills::Quiver::Change::None)
             MotionPulse(press.hand,haptics::Category::Interaction,step.change==weaponskills::Quiver::Change::Loaded?.45f:.25f,35000000);
-        quiverArrow={};
+        quiverArrow={};nativeArrow={};
         if(bow) {
             // A loaded skill wins; otherwise a quiver skill on the left trigger
             // (the bow's gesture skill) uses the same physical release.
             const auto& loaded=quiver.Current();
+            // #364: a loaded Multiple Shot, Guided Arrow or Strafe - each draw and release
+            // presses the face button it came from, as the left trigger's bow skill does,
+            // while that button still holds it.
+            const int from=quiver.Slot();
+            const auto& on=quickSnapshot.skills[from>=0&&from<skills::Count?from:0];
+            const bool native=loaded.Active()&&weaponskills::NativeLoad(loaded.skill)&&from>=0&&from<skills::Count&&
+                on.known&&on.available&&on.motion&&on.id==loaded.skill&&on.owner==loaded.owner;
             if(loaded.Active()&&weaponskills::Loadable(loaded.skill,loaded.missile,false))quiverArrow=loaded;
+            else if(native){nativeArrow=loaded;motionInput.bowSlot=from;motionInput.bowSkill=loaded.skill;motionInput.bowOwner=loaded.owner;}
             else if(shieldSkill.known&&shieldSkill.available&&weaponskills::QuiverSkill(shieldSkill.id)&&weaponskills::QuiverMissile(shieldSkill.missile))
                 quiverArrow={shieldSkill.id,shieldSkill.owner,shieldSkill.missile};
         } else if(thrown) {
@@ -4537,6 +4546,11 @@ void Input() {
         }
     }
     if(motionOutput.nativeBowRelease&&motionInput.bowSkill==weaponskills::Strafe)volleyRequestedAt=motionAt;
+    if(motionOutput.nativeBowRelease&&nativeArrow.Active()) {
+        char line[160];std::snprintf(line,sizeof line,"Frame bow quiver: release presses loaded skill=%d natively via slot %d",
+            nativeArrow.skill,motionInput.bowSlot);
+        Say(line);
+    }
     // Gesture skills on a trigger are labelled GESTURE on the hand wheel and
     // say how in the hand's cue, as Smite on a shield and arrow skills on a bow
     // do: a strike skill (strike_skills.h) casts with the hand's landed strikes
@@ -4582,11 +4596,13 @@ void Input() {
         }
     };
     if(cue.available&&!cue.temporary)if(const char* how=paladinGesture(cue.id)){cue.gesture=true;std::snprintf(cue.hint,sizeof cue.hint,"%s",how);}
-    if(quiverArrow.Active()&&!cue.temporary&&(motionInput.weapon==gameplay::Weapon::Bow||motionInput.weapon==gameplay::Weapon::Javelin)) {
+    // The arrow the next release carries: a quiver skill's, or a loaded native bow skill's (#364).
+    const auto& carried=quiverArrow.Active()?quiverArrow:nativeArrow;
+    if(carried.Active()&&!cue.temporary&&(motionInput.weapon==gameplay::Weapon::Bow||motionInput.weapon==gameplay::Weapon::Javelin)) {
         const bool javelin=motionInput.weapon==gameplay::Weapon::Javelin;
         const char* name=nullptr;
-        for(const auto& skill:quickSnapshot.skills)if(skill.known&&skill.id==quiverArrow.skill&&skill.owner==quiverArrow.owner){name=skill.name;break;}
-        cue.id=quiverArrow.skill;cue.owner=quiverArrow.owner;cue.known=cue.available=true;
+        for(const auto& skill:quickSnapshot.skills)if(skill.known&&skill.id==carried.skill&&skill.owner==carried.owner){name=skill.name;break;}
+        cue.id=carried.skill;cue.owner=carried.owner;cue.known=cue.available=true;
         std::snprintf(cue.name,sizeof cue.name,"%s",name?name:javelin?"Javelin skill":"Skill arrow");
         std::snprintf(cue.hint,sizeof cue.hint,"%s",javelin?(quiver.Current().Active()?"Loaded: throw":"Throw"):
             quiver.Current().Active()?"Loaded: draw & release":"Draw & release");
@@ -6597,7 +6613,7 @@ void ConfigureQuiver(bool enabled,bool preview) {
     std::lock_guard lock(mutex);
     quiverPreview=preview;
     if(quiverEnabled.exchange(enabled)!=enabled) {
-        quiver.Clear();quiverArrow={};
+        quiver.Clear();quiverArrow={};nativeArrow={};
         Say(enabled?"Frame bow quiver: arrow skills load physical arrows":"Frame bow quiver: disabled; arrow skills use native buttons");
     }
 }
