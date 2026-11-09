@@ -32,6 +32,8 @@ const ItemService* items=nullptr;
 const ThreadService* threads=nullptr;
 std::mutex mutex;
 Snapshot snapshot;
+// The hero's Light Radius as last read (LightRadius): kept through captures that could not read it.
+uint64_t lightSession=0;int lightValue=0;
 Reply reply;
 framevr::interaction::Request queued,waiting;
 bool tossHit=false; // FeedMerc: the game thread accepted the landing for a live hireling
@@ -153,6 +155,7 @@ void Publish(Snapshot s) {
     }
     if(changed)++s.revision;
     snapshot=s;
+    if(s.lightRadiusKnown){lightSession=s.session;lightValue=s.lightRadius;}
     if(waiting.action!=Action::None) {
         Result result=Result::Pending;
         if(waiting.session!=s.session)result=Result::Cancelled;
@@ -290,6 +293,12 @@ framevr::interaction::Snapshot Read(){std::lock_guard lock(mutex);return snapsho
 int CurrentLevel(uint64_t session,uint64_t now) {
     std::lock_guard lock(mutex);
     return framevr::interaction::Fresh(snapshot,session,now)?snapshot.location.level:0;
+}
+bool LightRadius(uint64_t session,int& value) {
+    std::lock_guard lock(mutex);
+    if(!session||lightSession!=session)return false;
+    value=lightValue;
+    return true;
 }
 int ShapeForm(uint64_t session,uint64_t now) {
     // The rig the game draws as the hero, while one is drawn: the state sample trails the swap

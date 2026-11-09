@@ -265,6 +265,8 @@ void __cdecl Gear(const PluginContext*,void* callbackToken) noexcept {
                 spec.itemLevel=30;
             }
         }
+        // Item-fired bows (#432): the three named uniques, forced by their UniqueItems rows.
+        if(r.index==framevr::dev::ItemBowsChoice&&i<framevr::dev::ItemBowUniques.size())spec.qualityRecordId=framevr::dev::ItemBowUniques[i];
         if(r.index==framevr::dev::LootBeamsChoice&&i<framevr::dev::LootBeamKit.size()) {
             using framevr::dev::KitQuality;
             const auto& item=framevr::dev::LootBeamKit[i];

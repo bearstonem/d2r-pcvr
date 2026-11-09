@@ -37,6 +37,8 @@
 #include "../steamvr/world_coordinates.h"
 #include "../steamvr/attack_speed.h"
 #include "../steamvr/strike_skills.h"
+#include "../steamvr/bow_bash.h"
+#include "../steamvr/weapon_heft.h"
 namespace gamestate {uint64_t LocalPlayer();bool MenuOpen();uint32_t HandsKey();uint32_t WeaponSet();
     int32_t LeftDurability();bool RestoreLeftDurability(const D2RL::PluginContext*,int32_t);}
 namespace melee {
@@ -261,7 +263,8 @@ bool Allowed(const Request& r) {
     int why=-1;
     if(!now.active||r.session!=inputSession||r.session!=gamestate::LocalPlayer())why=StaleInactive;
     else if(r.sample.epoch!=now.epoch)why=StaleEpoch;
-    else if(r.sample.equipment!=now.equipment||r.sample.claws!=now.claws||r.sample.minWeaponSpeed!=now.minWeaponSpeed||r.sample.minShieldBashSpeed!=now.minShieldBashSpeed||r.sample.weapons.id[0]!=now.weapons.id[0]||r.sample.weapons.id[1]!=now.weapons.id[1])why=StaleEquipment;
+    else if(r.sample.equipment!=now.equipment||r.sample.claws!=now.claws||r.sample.minWeaponSpeed!=now.minWeaponSpeed||r.sample.minShieldBashSpeed!=now.minShieldBashSpeed||r.sample.weapons.id[0]!=now.weapons.id[0]||r.sample.weapons.id[1]!=now.weapons.id[1]||
+            r.sample.bowBash!=now.bowBash)why=StaleEquipment;   // a bow bash swung, then the string drawn: dropped
     else if(r.sample.skillSlot!=now.skillSlot||r.sample.skillOwner!=now.skillOwner||r.sample.skillContext!=now.skillContext||r.sample.strikeSkill!=now.strikeSkill)why=StaleSkill;
     else if(age>150)why=StaleAge;
     else if(gamestate::MenuOpen())why=StaleMenu;
@@ -829,14 +832,19 @@ void TraceRefusal(int kind,const Request& r,uint32_t target) {
 // sinceFull/full: the fixed cycle (combat_rules.h FixedCycle): ms since the latest full-cycle
 // attack and whether this stroke was one (-1: not decided here, e.g. Classic or a later creature).
 void TraceHit(const Request& r,uint32_t target,const char* outcome,uint64_t since,uint32_t cycle,bool onHit,const char* skill="basic",
-              uint64_t sinceFull=UINT64_MAX,int full=-1) {
+              uint64_t sinceFull=UINT64_MAX,int full=-1,float heft=1) {
     if(!trace.load())return;
-    char line[380];snprintf(line,sizeof line,"Frame melee trace: hand=%s stroke=%llu target=%u %s since_last_landed=%lld ms since_full=%lld ms full=%d cycle=%u ms %s=%.1f m/s onhit=%d would_hit=%d strike=%d %s",
+    char line[440];snprintf(line,sizeof line,"Frame melee trace: hand=%s stroke=%llu target=%u %s since_last_landed=%lld ms since_full=%lld ms full=%d cycle=%u ms %s=%.1f m/s onhit=%d would_hit=%d strike=%d %s heft=%.2f (hand %.2f of %.2f m)",
         r.sample.handIndex?"left":"right",(unsigned long long)r.sweep.stroke,target,outcome,since==UINT64_MAX?-1LL:(long long)since,
         sinceFull==UINT64_MAX?-1LL:(long long)sinceFull,full,cycle,r.sweep.thrust?"thrust":"swing",r.sweep.speed,int(onHit),
-        combat::LastSwingWouldHit(),r.sample.strikeSkill,skill);
+        combat::LastSwingWouldHit(),r.sample.strikeSkill,skill,heft,r.sweep.travel,r.sample.heft);
     framevr::logging::Write(line);
 }
+// Weapon heft (weapon_heft.h), game thread: contacts it judged, those it lightened, their summed share
+// (x1000) and the lightest, and the latest need; reported and cleared twice a second (Report).
+std::atomic<unsigned> heftContacts{0},heftLighter{0},heftShareSum{0},heftLowest{1000},heftNeedMm{0};
+// Bow bash (bow_bash.h), game thread only: landed bashes, and each stroke's monsters already judged.
+framevr::bowbash::Board bashBoard;HitSet bashJudged;
 // Dual wield (Cal, 2026-10-30): a stroke's native cycle. Native D2 merges the swinging
 // weapon's stat lists into the hero before it times the attack (D2MOO
 // UNITS_UpdateAttackAnimRateAndVelocity), so item IAS and attackrate are read here under
@@ -910,6 +918,37 @@ uint32_t DualCycle(uintptr_t player,const framevr::dualwield::Equipment& weapons
 void Feel(const Request& r,uint32_t target) {
     if(hands[r.sample.handIndex].felt.Insert(r.session,r.sweep.stroke,target))framevr::MeleeImpact(r.sample.handIndex);
 }
+// Bow bash (bow_bash.h, #443): a stroke of the bow, its string not drawn, touched this hostile monster
+// with nothing in between. Once per stroke and monster: a tap in the bow hand, then the stagger - the
+// game's own hit recovery, as a parry gives (Parry above: a mode change, no damage, no attack, no arrow,
+// experience or loot) - or why not, one log line either way. Game thread (Apply).
+void BowBash(const Request& r,uintptr_t game,uintptr_t unit,uint32_t classId,uint32_t id) {
+    if(!bashJudged.Insert(r.session,r.sweep.stroke,id))return;
+    framevr::MeleeImpact(r.sample.handIndex);
+    using framevr::bowbash::Verdict;
+    const auto now=GetTickCount64();
+    uint32_t mode=0;Read(unit+0xc,mode);   // 3: GetHit, already recovering
+    auto verdict=bashBoard.Judge(r.session,id,now,combat::ActBoss(unit),mode==3);
+    const uint64_t wait=verdict==Verdict::TooSoon?bashBoard.Wait(r.session,now):verdict==Verdict::SameMonster?bashBoard.WaitFor(r.session,id,now):0;
+    if(verdict==Verdict::Stagger) {
+        // 445E60 refuses dying monsters and those with no GetHit mode in MonStats2 (Griswold and the like).
+        const uintptr_t event[2]{0,unit};
+        if(parryReady.load()&&reinterpret_cast<HitRecoveryFn>(d2rsig::Addr(HitRecoveryRva))(game,event))bashBoard.Landed(r.session,id,now);
+        else verdict=Verdict::Refused;
+    }
+    // The bow's limb axis against straight up (world y): near 1 for a bow held upright (bow_bash.h Blade).
+    const auto limbs=r.sweep.after.tip-r.sweep.after.base;const float span=Length(limbs);
+    const float up=span>1e-4f?std::fabs(limbs.y)/span:0.f;
+    char line[300],left[40]="";
+    if(wait)snprintf(left,sizeof left," (%llu ms left)",(unsigned long long)wait);
+    if(verdict==Verdict::Stagger)
+        snprintf(line,sizeof line,"Frame bow bash: staggered monster %u (class %u, mode %u) swing=%.1f m/s bow_up=%.2f; no damage; next bash in %llu ms, this monster in %llu ms",
+            id,classId,mode,r.sweep.speed,up,(unsigned long long)framevr::bowbash::CooldownMs,(unsigned long long)framevr::bowbash::SameMonsterMs);
+    else
+        snprintf(line,sizeof line,"Frame bow bash: refused monster %u (class %u, mode %u) swing=%.1f m/s bow_up=%.2f: %s%s%s",id,classId,mode,r.sweep.speed,up,
+            framevr::bowbash::Reason(verdict),verdict==Verdict::Refused&&!parryReady.load()?" (native hit recovery not verified)":"",left);
+    framevr::logging::Write(line);
+}
 void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
     std::array<Request,24> batch;size_t n=0;
     {std::lock_guard lock(queueMutex);
@@ -967,6 +1006,8 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                         ++intersections;
                         if(!reinterpret_cast<int(*)(uintptr_t,uintptr_t,uintptr_t)>(d2rsig::Addr(RelationRva))(local.game,player,unit))continue;
                         if(reinterpret_cast<int(*)(uintptr_t,uintptr_t,int)>(d2rsig::Addr(LineRva))(player,unit,0x804)!=0){++walls;continue;}
+                        // A bow's swing (bow_bash.h): the stagger alone; no native attack, recovery or cleave state.
+                        if(r.sample.bowBash){BowBash(r,local.game,unit,header[1],header[2]);continue;}
                         if(r.sample.shield) {
                             if(!smiteReady.load()||shieldHits.Contains(r.session,r.sweep.stroke,UINT32_MAX))continue;
                             if(framevr::RequestShieldSkill(r.sample,header[2],pos*.5f)) {
@@ -1067,7 +1108,15 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                             if(state.cleaveSession!=r.session||state.cleaveStroke!=r.sweep.stroke){state.cleaveSession=r.session;state.cleaveStroke=r.sweep.stroke;state.cleaveLanded=0;}
                             cleave=combat::CleaveFactor(state.cleaveLanded,step,cleaveFloor.load(std::memory_order_relaxed));cleaveTracked=true;
                         }
-                        const float swingRecoverySaved=combat::SwingRecovery(recovery*cleave);
+                        // Weapon heft (weapon_heft.h, Unleashed): a heavy weapon meeting the monster before the hand
+                        // travelled the stroke it needs lands lighter, measured at this contact. Still one native attack.
+                        float heft=1;
+                        if(r.sample.heft>0&&!attackSpeed.load()) {
+                            heft=framevr::heft::Factor(r.sweep.travel,r.sample.heft);
+                            ++heftContacts;heftShareSum+=unsigned(heft*1000+.5f);heftNeedMm=unsigned(r.sample.heft*1000+.5f);
+                            if(heft<1){++heftLighter;if(const unsigned v=unsigned(heft*1000+.5f);v<heftLowest.load())heftLowest=v;}
+                        }
+                        const float swingRecoverySaved=combat::SwingRecovery(recovery*cleave*heft);
                         const bool swingFirstSaved=combat::SwingFirst(attackSpeed.load()||strokeStart);   // weapon wear: the stroke's first creature only
                         // Unleashed on-hit gate (Cal, 2026-10-21): on-hit effects only on a full-cycle
                         // stroke's first landed contact; a riposte has earned them. Classic: native.
@@ -1165,7 +1214,7 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                             else snprintf(tag,sizeof tag,"%s",strike==StrikeOutcome::Cast?"cast":strike==StrikeOutcome::StartRefused?"cast_start_refused":
                                           strikeSkill<0?"basic":"basic_strike");
                             TraceHit(r,header[2],contact.accepted?"LANDED":contact.resolved?"MISSED (roll)":"native rejected",since,cycle,effects,tag,
-                                     sinceFull,!attackSpeed.load()&&strokeStart?int(strokeFull):-1);
+                                     sinceFull,!attackSpeed.load()&&strokeStart?int(strokeFull):-1,heft);
                         }
                         contact=saved;
                         if(!dual&&!claws)break; // Both blades (or claws) may strike this creature in the same batch.
@@ -1819,6 +1868,13 @@ void Report() {
 #else
         (void)gh;(void)bl;(void)kb;(void)ke;
 #endif
+    }
+    // Weapon heft: how much of a full hit the heavy weapons' contacts landed (each bash logs its own line).
+    if(const auto hc=heftContacts.exchange(0);hc) {
+        const auto lighter=heftLighter.exchange(0),sum=heftShareSum.exchange(0),lowest=heftLowest.exchange(1000);
+        char line[240];snprintf(line,sizeof line,"Frame weapon heft: contacts=%u full=%u lighter=%u mean share=%.2f lowest=%.2f; this weapon needs %.2f m of hand travel",
+            hc,hc-std::min(hc,lighter),lighter,sum/1000.f/float(hc),lowest/1000.f,heftNeedMm.load()/1000.f);
+        framevr::logging::Write(line);
     }
     const auto ss=shieldSweeps.exchange(0),sr=shieldRequests.exchange(0),sa=shieldAccepted.exchange(0),sf=shieldRejected.exchange(0);
     if(ss||sr||sa||sf) {

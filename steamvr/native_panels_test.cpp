@@ -213,6 +213,10 @@ int main(){
     Check(typed.Key(100,0)&&typed.Active(100)&&typed.Active(399),"a real key lets the keyboard layout in");
     Check(!typed.Active(400),"for a moment only: the laser's next clicks keep the controller layout again");
     Check(typed.Key(500,0x1234)&&typed.Active(799),"another program's extra information is still a real key");
+    Check(panels::KeyboardKeyTag!=panels::InjectedKeyTag,"the VR keyboard's letters are told apart from the mod's control keys");
+    Check(typed.Key(900,panels::KeyboardKeyTag)&&typed.Active(900)&&typed.Active(1199),
+        "a letter from the VR keyboard lets the keyboard layout in, so a name box takes it");
+    Check(!typed.Active(1200),"the VR keyboard holds the keyboard layout only while letters keep coming");
     panels::ItemTooltipHover hover;
     Check(!hover.Active(100),"desktop starts without immediate tooltip or automatic comparison ownership");
     hover.Update(100,true,true,false);
