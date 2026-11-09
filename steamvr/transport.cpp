@@ -601,6 +601,7 @@ uint32_t heavensRequest=0,heavensAnswered=0,heavensMonster=0,heavensCasts=0;
 float heavensFrom=0,heavensAt=0;   // the last call's start and stop elevation (degrees), for the log
 ULONGLONG heavensAskedAt=0;
 std::atomic<bool> heavensArmed{false};
+std::atomic<bool> seekerArrowReady{false};   // SeekerArrowReady: a ready bow whose skill is Guided Arrow
 constexpr ULONGLONG HeavensWaitMs=120;
 // A Charge in flight (any cast path): no physical melee contacts until it ends.
 ULONGLONG chargeIssuedAt=0,chargeContactsHeldAt=0;
@@ -4078,6 +4079,7 @@ void Input() {
     const uint32_t potionCode=motionInput.potion?gamestate::RightThrowingPotionCode():0u;
     const bool potionBottle=potionCode&&bottlePhysics.load()&&potionModels.Radius(potionCode)>0;
     motionOutput=motion.Step(motionInput);motionAt=GetTickCount64();
+    seekerArrowReady.store(motionInput.active&&motionOutput.bowReady&&aimrules::AlwaysHomes(motionInput.bowSkill));
     if(motionOutput.tossHeld)tossLanding={};   // a new trap in hand: nothing placed yet
     const auto& tossStage=interactionInput.stage;
     const bool tossWorld=interactionInput.floorKnown&&tossStage.known&&stageWorld.upm>=1&&stageWorld.upm<=12;
@@ -6772,6 +6774,7 @@ bool HandSpellHeld(int hand) {
     return hand>=0&&hand<2&&motionControls.load()&&handOutput.spells[hand]>=0;
 }
 bool HeavensArmed(){return heavensArmed.load();}
+bool SeekerArrowReady(){return seekerArrowReady.load();}
 uint32_t HeavensRequest() {
     std::lock_guard lock(mutex);
     return heavensPending&&heavensAnswered!=heavensRequest&&GetTickCount64()-heavensAskedAt<=HeavensWaitMs?heavensRequest:0;

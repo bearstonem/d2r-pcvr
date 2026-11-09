@@ -589,7 +589,10 @@ for. Another class's rows are left out:
 
 **Skills go to the aimed monster** offers Spells, Bow skills or Both to an
 Amazon. Other classes see **Spells go to the aimed monster**, On or Off, and
-keep the Amazon's bow skills choice. Rows that only matter with another
+keep the Amazon's bow skills choice. Guided Arrow is handed the aimed monster
+whatever this says, Off included, so it homes on it (owner, 2026-11-08: "that's
+the whole point of this skill"); with no monster aimed it flies as before. The
+target scan runs while a bow is ready with Guided Arrow as its skill. Rows that only matter with another
 row's choice also stay hidden until they do:
 - Outlines shown and both hands' outline colors while Monster outline is Off;
 - Landing circles while Ground skill aim is Game's aim;
