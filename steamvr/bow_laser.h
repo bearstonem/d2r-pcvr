@@ -30,7 +30,7 @@ inline Path Trace(Vec tail,Vec direction,bool floorKnown,float floorY) {
     }
     p.end=p.start+direction*p.length;return p;
 }
-// Its own small RGBA atlas in the chosen hue (VR Settings > Targets > Arrow path
+// Its own small RGBA atlas in the chosen hue (VR Settings > Gameplay > Targeting > Arrow path
 // line), lightened a little: a steady faint beam (to the floor), a beam
 // fading out toward its far end, and a brighter end dot. A beam quad's top
 // edge is its far end.

@@ -58,37 +58,37 @@ Quest left X/Y correspond to Index left A/B; right A/B labels are the same.
 | Open or close a hand wheel | Click that hand's thumbstick; it stays open without holding, and reopens on that hand's last page (Map or Equipment; **SPELLS** goes back), and its skill editor on the last tree you picked, until a new game |
 | Switch to the other wheel | Click the other thumbstick |
 | Assign a button | Opposite hand's laser + trigger: select a wedge, then a skill |
-| Cast a buff by drawing a glyph | Hold your **Draw glyph** button, draw a shape in the air and let go: the skill on that shape is cast. See [Glyph casting](#glyph-casting) |
+| Cast a buff by drawing a glyph | Hold your **Draw glyph** button, draw a shape in the air and let go: the skill that hand has on that shape is cast. See [Glyph casting](#glyph-casting) |
 | Use an inventory item | Either wheel > **QUICK USE**: point with the opposite hand and briefly click its trigger; use happens on release |
 | Assign / change quick-use item | Hold the trigger over **QUICK USE** for 0.65 seconds, then select a carried scroll, tome or other usable item. An empty slot also opens the picker on a short click. **CLEAR SLOT** removes the assignment |
-| Walk / run speed | VR Settings > **Body** > **Movement speed** (Hands and moving), then Apply: **Walk**; **Base run** (your class's run with no speed bonus); **Run 10%…90%** of the way up; **Full run** (the default, the full speed your gear and skills give). Saved to `[gameplay] run_speed_pct`; the game's own run / walk toggle is kept in line with it. Movement skills keep their own speed, and it never runs faster than the game. With **Stick toggle** beside it on (Off by default; `[gameplay] run_walk_toggle`), push the **right stick up** to switch between walking and that run (from Walk, the full run) |
+| Walk / run speed | VR Settings > **Comfort > Moving** > **Movement speed**, then Apply: **Walk**; **Base run** (your class's run with no speed bonus); **Run 10%…90%** of the way up; **Full run** (the default, the full speed your gear and skills give). Saved to `[gameplay] run_speed_pct`; the game's own run / walk toggle is kept in line with it. Movement skills keep their own speed, and it never runs faster than the game. While fighting you walk: being hit, landing a strike, or a spell, arrow or throw leaving your hand switches to walking until half a second after the last one (`[gameplay] combat_walk_ms`, 0 = off). With **Stick toggle** (**Controls > Hands**) on (Off by default; `[gameplay] run_walk_toggle`), push the **right stick up** to switch between walking and that run (from Walk, the full run) |
 | Finish editing | Click the wheel hand's stick again, or select CLOSE in its center |
-| Inventory / character / skills / journal | Reach the **left hand over the left shoulder** and grip; or Left Grip + left stick click; or either wheel > INVENTORY. However it opens, the tabbed menu comes up on a leather sheet strapped to your left hand, with the world still around you; the right laser works on it as before, the left stick still walks and the right stick turns, an item picked up and clicked outside the menu drops to the ground, life / mana show above it, and closing the menu (Right B, its close button, or reaching back over the left shoulder and gripping) puts the leather away. Native tabs retain their controls. **VR Settings > Interface > Hold menu** sets it: **Leather**, **Menu only** (held by its left edge, no hide) or **Off** (in front of you instead, without the shoulder reach). With Dominant hand = Left the left shoulder stays the weapon swap; use the other two |
+| Inventory / character / skills / journal | Reach the **left hand over the left shoulder** and grip; or Left Grip + left stick click; or either wheel > INVENTORY. However it opens, the tabbed menu comes up on a leather sheet strapped to your left hand, with the world still around you; the right laser works on it as before, the left stick still walks and the right stick turns, an item picked up and clicked outside the menu drops to the ground, life / mana show above it, and closing the menu (Right B, its close button, or reaching back over the left shoulder and gripping) puts the leather away. Native tabs retain their controls. **VR Settings > Interface > Menus > Hold menu** sets it: **Leather**, **Menu only** (held by its left edge, no hide) or **Off** (in front of you instead, without the shoulder reach). With Dominant hand = Left the left shoulder stays the weapon swap; use the other two |
 | VR settings / body calibration | Either wheel → VR SETTINGS |
 | Explain a VR setting | Point the right-hand laser at its label or controls for about half a second. Help appears beside the panel and disappears when you point away; no click needed |
 | Minimap | Either wheel → MAP; movement remains available |
 | Zoom the minimap | Look at the wrist / palm map or the wheel's MAP tab and push the right stick up to zoom in, down to zoom out; down until it stops shows the whole map. While you look at it, right stick up / down does nothing else (no run / walk toggle, no loot labels); left / right still turns, except during a zoom push |
-| Reset height | VR Settings > Body > Height and arm span > **Set eye height** |
-| Adjust controller vibration | **VR Settings > Vibration**: overall vibration plus separate melee, bow draw, bow/throw release, spell, loot/potion/menu and low life/mana alert strengths. **Feel it** on a row's help card tests it on that action's hands; **Apply** saves |
+| Reset height | VR Settings > Comfort > Body > Height and arm span > **Set eye height** |
+| Adjust controller vibration | **VR Settings > Controls > Vibration**: overall vibration plus separate melee, bow draw, bow/throw release, spell, loot/potion/menu and low life/mana alert strengths. **Feel it** on a row's help card tests it on that action's hands; **Apply** saves |
 | Hold to show all nearby loot labels (Alt) | Hold the **right stick down** during gameplay, outside wheels and while not looking at the wrist map. Labels stay shown while it is held; let go to restore normal drop/hover labels. Uses the native Alt range, independently of where you aim. A mostly vertical push never turns you. Also listed in **VR Settings > Guide** |
-| Interact / pick up / talk | Right A by default; requires an aimed interactable. One press acts on one target: press again for each item, including loot a chest just dropped. With **VR Settings > Interface > Loot pick** on, point at an item (arm out) to choose which one |
+| Interact / pick up / talk | Right A by default; requires an aimed interactable. One press acts on one target: press again for each item, including loot a chest just dropped. With **VR Settings > Interface > Labels > Loot pick** on, point at an item (arm out) to choose which one |
 | Free melee swing / thrust | Move the equipped weapon through an enemy |
 | Physical dual wield | Equip two supported melee weapons on a Barbarian or two claws on an Assassin; release both triggers and swing or thrust with either hand. Active skills retain their button bindings |
 | Break pots / barrels | Swing a held melee weapon through them with its trigger released. Either Barbarian weapon or Assassin claw works; ordinary button interaction/kicking remains available |
-| Choose motion thresholds | **VR Settings > Combat**: Swing speed to hit and Stab speed to hit |
-| Bone Spear | Assign either hand's trigger or shortcut; aim with that controller and hold to repeat while moving. **Aim > Spell aim assist** applies to Bone Spear too; Strong adds gentle homing |
-| Bone Wall / Bone Prison | Aim with the casting controller: the wall or prison lands where its ray meets the floor (six cells ahead when level). With **VR Settings > Aim > Ground skill aim** on Monster, Bone Prison lands on the aimed monster and Bone Wall rises 3 cells in front of it. Native placement rules still apply |
-| Holy Bolt | Aim with either casting controller, including up/down with Aim > Keep spell shots level Off. Light assists at launch; Strong also adds gentle homing toward undead/demons. Directly aim at your mercenary to heal; native damage/healing rules apply |
-| See which monsters you are aiming at | **VR Settings > Targets > Monster outline** (Off by default; 10-100% sets its brightness) draws a thin, steady outline round each hand's monster: a hand held out picks the monster it points at; with no hand on one, the monster you look at is outlined. **Outlines shown**: Both hands (default) outlines each hand's monster, Main hand only that hand's (**Body > Dominant hand**; the bow hand while a bow is out, whose color also wins when both hands are on one monster). **Left hand outline color** and **Right hand outline color** each choose By range (red near, orange mid-range, yellow far) or one hue (press the color to see all 24 and By range at once; one press picks; < and > still step through them); gold and blue by default. The monster you look at takes the color of the hand that would cast at it: the left (bow) hand with a bow equipped, else your dominant hand. A button you hold keeps showing the monster its cast took. Walls in between rule a monster out. A guide only: it does not change how skills aim |
-| Send skills to that monster | **VR Settings > Aim > Skills go to the aimed monster** (Off by default; Spells, Bow skills or Both. A class without bow skills sees it as **Spells go to the aimed monster**, On or Off): a spell takes the monster of the hand whose button casts it (arm held out in front of you, along where it points, at least a tenth of your Controller span: 15 cm on a 1.5 m span; a hand pointing within 45 degrees of straight down, or hanging at your side, is resting), else the other hand's, else the one you look at, and keeps it until you let go or it walks out of the game's reach. Bolts and Lightning fly at it; curses and Corpse Explosion land on it; Guided Arrow, Bone Spirit, Charge, Leap Attack, Dragon Flight, Attract and Taunt are handed the monster itself; Teleport, Leap, golems and raises go where you point. With no monster, a spell goes where its hand's arm points, else the other arm, else where you look. Only monsters within the game's own cast reach count (50 cells on either axis, less a margin). Off, spells aim along the casting hand as before. With Bow skills or Both, bow skills take the bow hand's monster first, aimed from the bow hand. The Warlock's skills are left out for now: they keep the hand aim they had before these settings |
-| Keep the aim on what you face | **VR Settings > Aim > Aim with your view** (Off by default; shown once Monster outline, Skills go to the aimed monster or Ground skill aim on Monster is on): the monster you look at must come within 17 degrees of where your head faces, and stays yours while it is within 30, until another comes within 17; a hand picks only monsters within 30 degrees of where your head faces. A casting hand (the bow hand for a bow skill) held out and pointing aims alone: its cast takes its own monster, else goes where it points, never the other hand's or the one you look at, and while the hand whose color the one you look at takes points, that monster is not outlined. A lowered hand still takes the other hand's, then the one you look at. The melee attack skills (Charge, Leap Attack, Dragon Flight, Whirlwind) from a raised hand take its own monster, else the other hand's while that one is outlined (Outlines shown on Both hands, or the other hand is the dominant one), never the one you look at; lowered, they try all three like any cast |
-| Cast with a staff | **VR Settings > Aim > Aim staff along arm** (Off by default): an upright staff casts along your arm, shoulder through hand; leveled out like a wand, it casts from its top. The Warlock's skills keep the staff's own aim |
-| Aim ground skills | **VR Settings > Aim > Ground skill aim** sets where Fire Blast, Shock Web and the other traps (Blade Sentinel, Mind Blast...), Blizzard, Meteor, Fire Wall, Hydra, Fissure, Volcano, Bone Wall and Bone Prison land. **Game's aim** (default): the game's own aim, as before. **Pointed**: on the floor where the casting hand points, held out or not (else the other arm, else where you look); aimed at the horizon or above, as far as the game lets a skill be cast (45 cells along an axis, more diagonally). **Monster**: on the monster the casting hand, the other hand or your eyes aim at, else where you point |
-| See where a ground skill will hit | **VR Settings > Aim > Landing circles** (default On; with Ground skill aim on Pointed or Monster): once the game accepts the cast, a circle in the element's color fills from the center outward until the skill lands (a bomb over its flight, timed by the game's own missile, Meteor over its fall, Blizzard while the ice falls); Fire Wall shows as a strip across your aim. It paints the floor only, not monsters' legs or walls |
-| Seat a held shield on your arm | **VR Settings > Shield**: Shield along forearm slides the shield up the forearm so your fingers reach its grip strap; Shield out from arm and Shield across forearm move it away from and across the forearm. In centimeters (along -10 to 40, out and across -30 to 30), all 0 by default (the original position when Shield wrist turn is 100%); about 3 / 2 / 2 suits a buckler, large shields need more. The shield blocks where it is shown. Shield wrist turn sets how much it turns with your wrist (0% strapped to the forearm; 100% with the hand; default 50%, 10% steps), and Shield roll turns it about the forearm (default 0, -180 to +180 in 5° steps, + toward the little finger) |
-| Increase offline difficulty | **VR Settings > Survival > Offline difficulty**: Game's setting or Players 1-8; higher counts make monsters tougher and increase rewards |
+| Choose motion thresholds | **VR Settings > Gameplay > Combat**: Swing speed to hit and Stab speed to hit |
+| Bone Spear | Assign either hand's trigger or shortcut; aim with that controller and hold to repeat while moving. **Gameplay > Targeting > Spell aim assist** applies to Bone Spear too; Strong adds gentle homing |
+| Bone Wall / Bone Prison | Aim with the casting controller: the wall or prison lands where its ray meets the floor (six cells ahead when level). With **VR Settings > Gameplay > Targeting > Ground skill aim** on Monster, Bone Prison lands on the aimed monster and Bone Wall rises 3 cells in front of it. Native placement rules still apply |
+| Holy Bolt | Aim with either casting controller, including up/down with Gameplay > Targeting > Keep spell shots level Off. Light assists at launch; Strong also adds gentle homing toward undead/demons. Directly aim at your mercenary to heal; native damage/healing rules apply |
+| See which monsters you are aiming at | **VR Settings > Interface > Outlines > Monster outline** (Off by default; 10-100% sets its brightness) draws a thin, steady outline round each hand's monster: a hand held out picks the monster it points at; with no hand on one, the monster you look at is outlined. **Outlines shown**: Both hands (default) outlines each hand's monster, Main hand only that hand's (**Controls > Hands > Dominant hand**; the bow hand while a bow is out, whose color also wins when both hands are on one monster). **Left hand outline color** and **Right hand outline color** each choose By range (red near, orange mid-range, yellow far) or one hue (press the color to see all 24 and By range at once; one press picks; < and > still step through them); gold and blue by default. The monster you look at takes the color of the hand that would cast at it: the left (bow) hand with a bow equipped, else your dominant hand. A button you hold keeps showing the monster its cast took. Walls in between rule a monster out. A guide only: it does not change how skills aim |
+| Send skills to that monster | **VR Settings > Gameplay > Targeting > Skills go to the aimed monster** (Off by default; Spells, Bow skills or Both. A class without bow skills sees it as **Spells go to the aimed monster**, On or Off): a spell takes the monster of the hand whose button casts it (arm held out in front of you, along where it points, at least a tenth of your Controller span: 15 cm on a 1.5 m span; a hand pointing within 45 degrees of straight down, or hanging at your side, is resting), else the other hand's, else the one you look at, and keeps it until you let go or it walks out of the game's reach. Bolts and Lightning fly at it; curses and Corpse Explosion land on it; Guided Arrow, Bone Spirit, Charge, Leap Attack, Dragon Flight, Attract and Taunt are handed the monster itself; Teleport, Leap, golems and raises go where you point. With no monster, a spell goes where its hand's arm points, else the other arm, else where you look. Only monsters within the game's own cast reach count (50 cells on either axis, less a margin). Off, spells aim along the casting hand as before. With Bow skills or Both, bow skills take the bow hand's monster first, aimed from the bow hand. The Warlock's skills are left out for now: they keep the hand aim they had before these settings |
+| Keep the aim on what you face | **VR Settings > Gameplay > Targeting > Aim with your view** (Off by default; shown once Monster outline, Skills go to the aimed monster or Ground skill aim on Monster is on): the monster you look at must come within 17 degrees of where your head faces, and stays yours while it is within 30, until another comes within 17; a hand picks only monsters within 30 degrees of where your head faces. A casting hand (the bow hand for a bow skill) held out and pointing aims alone: its cast takes its own monster, else goes where it points, never the other hand's or the one you look at, and while the hand whose color the one you look at takes points, that monster is not outlined. A lowered hand still takes the other hand's, then the one you look at. The melee attack skills (Charge, Leap Attack, Dragon Flight, Whirlwind) from a raised hand take its own monster, else the other hand's while that one is outlined (Outlines shown on Both hands, or the other hand is the dominant one), never the one you look at; lowered, they try all three like any cast |
+| Cast with a staff | **VR Settings > Gameplay > Targeting > Aim staff along arm** (Off by default): an upright staff casts along your arm, shoulder through hand; leveled out like a wand, it casts from its top. The Warlock's skills keep the staff's own aim |
+| Aim ground skills | **VR Settings > Gameplay > Targeting > Ground skill aim** sets where Fire Blast, Shock Web and the other traps (Blade Sentinel, Mind Blast...), Blizzard, Meteor, Fire Wall, Hydra, Fissure, Volcano, Bone Wall and Bone Prison land. **Game's aim** (default): the game's own aim, as before. **Pointed**: on the floor where the casting hand points, held out or not (else the other arm, else where you look); aimed at the horizon or above, as far as the game lets a skill be cast (45 cells along an axis, more diagonally). **Monster**: on the monster the casting hand, the other hand or your eyes aim at, else where you point |
+| See where a ground skill will hit | **VR Settings > Gameplay > Targeting > Landing circles** (default On; with Ground skill aim on Pointed or Monster): once the game accepts the cast, a circle in the element's color fills from the center outward until the skill lands (a bomb over its flight, timed by the game's own missile, Meteor over its fall, Blizzard while the ice falls); Fire Wall shows as a strip across your aim. It paints the floor only, not monsters' legs or walls |
+| Seat a held shield on your arm | **VR Settings > Gameplay > Shield**: Shield along forearm slides the shield up the forearm so your fingers reach its grip strap; Shield out from arm and Shield across forearm move it away from and across the forearm. In centimeters (along -10 to 40, out and across -30 to 30), all 0 by default (the original position when Shield wrist turn is 100%); about 3 / 2 / 2 suits a buckler, large shields need more. The shield blocks where it is shown. Shield wrist turn sets how much it turns with your wrist (0% strapped to the forearm; 100% with the hand; default 50%, 10% steps), and Shield roll turns it about the forearm (default 0, -180 to +180 in 5° steps, + toward the little finger) |
+| Increase offline difficulty | **VR Settings > Gameplay > Monsters > Offline difficulty**: Game's setting or Players 1-8; higher counts make monsters tougher and increase rewards |
 | Bow draw | Right trigger near the left-hand bow string; draw and release |
-| See where a drawn arrow will fly | At full draw a faint line runs from the arrow's tip along its straight flight, with a brighter dot where it would reach the floor; otherwise it fades out at 15 m. It does not stop at walls or monsters. Basic arrows and Magic, Fire, Cold, Ice, Exploding, Immolation and Freezing Arrow; not Multiple Shot, Guided Arrow, Strafe or crossbows. **VR Settings > Targets > Arrow path line** chooses Off or its color, 15 degrees at a time around the color wheel (Off by default; the first step is red 0°); stepping past 345° goes to Off and on to 0°, in either direction |
+| See where a drawn arrow will fly | At full draw a faint line runs from the arrow's tip along its straight flight, with a brighter dot where it would reach the floor; otherwise it fades out at 15 m. It does not stop at walls or monsters. Basic arrows and Magic, Fire, Cold, Ice, Exploding, Immolation and Freezing Arrow; not Multiple Shot, Guided Arrow, Strafe or crossbows. **VR Settings > Gameplay > Targeting > Arrow path line** chooses Off or its color, 15 degrees at a time around the color wheel (Off by default; the first step is red 0°); stepping past 345° goes to Off and on to 0°, in either direction |
 | Fire a crossbow | Equip bolts and assign **Attack** to Right Trigger; aim and fire while moving. |
 | Support a crossbow | Hold Left Grip near the stock; release to free the hand. After a shoulder swap, release the swap grip before grabbing the stock again |
 | Javelin, throwing knife or axe throw | Right trigger on Attack, Throw or nothing; hold the trigger, throw, release |
@@ -99,12 +99,14 @@ Quest left X/Y correspond to Index left A/B; right A/B labels are the same.
 | Drop the empty bottle | Open your hand after drinking; it falls, bounces and rolls on the floor (visual only). Swing a weapon or shield into it to knock it away |
 | Knock over cups, plates, vases, stools | Swing a weapon, punch or block into the level's small props; they fall and roll where they land until the area reloads (visual only) |
 | Heal your mercenary | Toss a held Health, Rejuvenation, Antidote or Thawing bottle so it lands near its feet; with bottle physics it flies as a real body and breaks where it first hits. A miss keeps the potion |
-| Command your mercenary (offline) | Point at it (with the controller, or your hand in line with it) with **Grip** held and pull **Trigger**: grip first or both at once, either way; the trigger casts nothing while you do. Aim, and let go: at the ground it walks there and holds; at a monster it focuses it; still on the mercenary it holds its place, or regroups if it was holding. Grip alone does nothing to it. **VR Settings > Survival > Tactical commands** turns this off |
+| Command your mercenary (offline) | Point at it (with the controller, or your hand in line with it) with **Grip** held and pull **Trigger**: grip first or both at once, either way; the trigger casts nothing while you do. Aim, and let go: at the ground it walks there and holds; at a monster it focuses it; still on the mercenary it holds its place, or regroups if it was holding. Grip alone does nothing to it. **VR Settings > Gameplay > Monsters > Tactical commands** turns this off |
 | Quick potion | Wheel → EQUIPMENT → potion, using opposite laser + trigger |
 | Grab wheel potion | Wheel → EQUIPMENT → potion, using the pointing hand's grip |
 | Wrist health / mana / XP | Look at the back of the left wrist |
-| Wipe blood off the visor | Scrub either hand side to side in front of your face, trigger released. About six strokes clear a full visor. **Survival > Wipe blood by hand** turns this off |
+| Wipe blood off the visor | Scrub either hand side to side in front of your face, trigger released. About six strokes clear a full visor. **Interface > Warnings > Wipe blood by hand** turns this off |
 | Recenter / stereo capture | PC F11 / F8 |
+| Walk where the controller points | **VR Settings > Controls > Hands > Walk direction** (beside Dominant hand): **Look** (default) walks where you look; **Controller** walks where the left controller points |
+| Room-scale | **VR Settings > Comfort > Body > Room follows you** (beside Seated play; On by default): as you move in your room your hero's spot follows you, so monsters attack where you stand. Grips, triggers, swings, casting, the left stick and menus pause it |
 | Recenter position, keep view direction | PC F13 (native OpenXR, gameplay only) |
 
 F13 resets the tracked position, including height, without resetting view direction.
@@ -123,9 +125,9 @@ does not wait for an item to come into range. Release and press again for each
 new target. A release during an inventory/NPC menu rearms interaction; holding
 the button through a menu or game-session change cannot reuse the old target.
 
-**VR Settings > Interface > Loot pick** (On by default): with several items on
+**VR Settings > Interface > Labels > Loot pick** (On by default): with several items on
 the floor, Interact takes the one you point at, not the nearest. Hold your
-dominant hand (**Body > Dominant hand**) out and point at the item: its name
+dominant hand (**Controls > Hands > Dominant hand**) out and point at the item: its name
 shows, even far away, with a thin pulsing rim. Within the pick-up reach (4 cells)
 the rim is in the item's rarity color and the name grows; farther, the rim is red
 and A takes nothing, not the nearest item either, and does not walk there. With
@@ -143,15 +145,18 @@ help card: it plays that action on its hands at the strength shown, before
 Apply.
 **Short melee taps** defaults Off: weapon impacts last 90 ms and shield impacts
 45 ms at the controller's preferred frequency. On selects the earlier 10 ms /
-180 Hz pulse. **Survival > Low life and mana alert** must also be enabled for
+180 Hz pulse. **Interface > Warnings > Low life and mana alert** must also be enabled for
 automatic resource warnings.
 
 Melee is **Unleashed**: physical strokes can hit each creature they reach
 once, without hit rolls or an attack-speed cooldown, and need deliberate
 motion. The Classic rules are gone; `[gameplay] melee_rules` is ignored.
-**Combat > Stab speed to hit** is separate from swing speed: 2 m/s by default, adjustable
+**Gameplay > Combat > Stab speed to hit** is separate from swing speed: 2 m/s by default, adjustable
 from 0.75 to 10 m/s in 0.25 m/s steps. Push along the blade and pull back between
 stabs. The old `attack_speed` INI key does not select Classic; choose it here.
+**Gameplay > Combat > Melee reach** (0 to 50 cm, 0 by default) lets a weapon or fist that
+passes that close beside a monster still hit it. Walls still block, and shield
+bash is unchanged.
 
 **Unleashed swing damage:** every stroke that connects lands, but how hard it
 hits depends on your character. Your attack rating against the monster's
@@ -224,7 +229,7 @@ and the other absorb skills soak and drain at the original game's average rate.
   no hit has reached your shield for a moment, even held up, and is gone about
   3 seconds after the last hit; lowering the shield starts the fade at once.
   About 10 normal-monster blocks reach full strain (an act boss: about 3).
-  **Shield > Guard strain shadow** turns the shadow Off (strain, guard breaks
+  **Gameplay > Shield > Guard strain shadow** turns the shadow Off (strain, guard breaks
   and chip damage still apply).
 - **Guard break:** the guard breaks with a bone snap, and while it is broken
   blocked hits leak a **chip**: part of their physical damage gets through,
@@ -232,18 +237,18 @@ and the other absorb skills soak and drain at the original game's average rate.
   and its effects land in full, so resistances still matter. It recovers as
   the strain fades: let hits stop or lower the shield.
 
-**Interface > Loot name size** adjusts dropped-item text and its darker backing from
+**Interface > Labels > Loot name size** adjusts dropped-item text and its darker backing from
 20% to 150% in five-point steps. The original size is 45%; Apply saves the choice
 to `[hud] labels_size`. Existing explicit sizes are preserved on update.
 
-**Wrist > Buffs and companions** (default On) adds summon icons and live counts below
+**Interface > Wrist > Buffs and companions** (default On) adds summon icons and live counts below
 the left-hand minimap. Necromancers see skeletons, skeletal mages, golem and
 revives as those skills become available; other classes use their own summon
 groups. Item-granted summons also qualify. A hired mercenary has its own count.
 Counts come from your summon roster, including companions outside your view.
 Used/available groups stay visible at zero, with the zero highlighted. The row
-follows **Minimap & Compass** wrist/palm placement and hides with navigation;
-turning off Companions & effects preserves the map and compass. Unknown or stale
+follows **Map and compass** wrist/palm placement and hides with navigation;
+turning off Buffs and companions preserves the map and compass. Unknown or stale
 rosters are hidden during loading rather than presented as a lost army.
 
 The same display shows **effects currently on your character**: active buffs,
@@ -259,11 +264,11 @@ The display is bounded to three effect rows. If more than 21 effects overlap,
 the final cell shows how many additional effects are active. Existing
 `[interactions] companion_counts` preferences also control this expanded row.
 
-**Survival > Blood on visor** (default On) splashes blood around the edge of the
+**Interface > Warnings > Blood on visor** (default On) splashes blood around the edge of the
 view as life drops below 60%, 40% and 20%; large splats drip slowly, then dry.
 Healing back above a band, from any source, fades that band's blood out over
 about a second. Changing maximum life alone (Battle Orders, Oak Sage, +life gear)
-neither splashes nor fades. With **Survival > Wipe blood by hand** On (the default),
+neither splashes nor fades. With **Interface > Warnings > Wipe blood by hand** On (the default),
 scrubbing a hand side to side in front of the face wipes blood
 at any time: each stroke ticks the controller and smears some splats away. While
 you are still hurt, the visor then stays clean until the next hit splashes it
@@ -271,7 +276,7 @@ again. The centre of the view always stays clear. While a hand is scrubbing it
 does not attack; a held potion, squeezed trigger or bow draw never counts as
 wiping.
 
-**Low-life heartbeat:** **Combat > Heartbeat starts at** (default 60%, or Off)
+**Low-life heartbeat:** **Interface > Warnings > Heartbeat starts at** (default 60%, or Off)
 picks the life where a quiet heartbeat begins. Every 10% of life you lose below
 that, it gets louder and faster, at full strength below 10%. Healing winds it
 down beat by beat. Wiping the visor clean fades it out too, until the next hit
@@ -296,7 +301,7 @@ mana costs apply to each cast, and walking remains available without entering
 the original casting animation. See [hand projectile spells](docs/hand_projectile_spells.md)
 for the experimental adapter's scope and offline testing checklist.
 
-**VR Settings > Aim > Keep spell shots level** defaults to Off for new or
+**VR Settings > Gameplay > Targeting > Keep spell shots level** defaults to Off for new or
 missing settings, allowing up/down aiming of straight projectile spells. Turn
 it On and Apply to keep those spells level; Charged Bolt keeps its native planar
 spread. Existing saved preferences are retained, and changes apply to new casts.
@@ -348,12 +353,20 @@ target: armors, warcries, auras, Energy Shield, summons and the like.
 1. Choose the button that draws: open a hand's wheel, select one of its
    wedges and pick **Draw glyph** (last under **General / Items**). That button
    now draws and casts nothing else; its game skill is cleared. Putting a skill
-   back on it, or **CLEAR SLOT**, stops it drawing.
+   back on it, or **CLEAR SLOT**, stops it drawing. Each hand can have its own
+   Draw glyph button: put one on the other hand's wheel too to draw with both.
 2. Give the shapes their skills: the wheel's **GLYPHS** box (upper right, on the
    spells and equipment pages) opens a page of eight shapes: circle, triangle,
    square, lightning bolt, spiral, V, star and wave. Select a shape, then the
    skill it casts; the list holds your hero's own skills that need no target.
-   **CLEAR GLYPH** takes its skill off; **BACK** keeps it.
+   **CLEAR GLYPH** takes its skill off; **BACK** keeps it. Each hand has its own
+   eight, so the same shape can cast one skill drawn with the right hand and
+   another drawn with the left: the page opens on the hand whose wheel you
+   opened, and the box at its upper left (**SHAPES OF THE** right or left hand)
+   shows the other hand's when clicked. A
+   left-hand shape without a skill of its own casts the right hand's (shown
+   dimmed, under RIGHT HAND'S); **CLEAR GLYPH** on a left shape gives it back
+   the right hand's.
 3. In play, hold the Draw glyph button and draw the shape in front of you, like
    writing on a window: one stroke, at least about 12 cm across, in under four
    seconds. Where you start and which way round you go don't matter; the
@@ -392,19 +405,22 @@ way the game assigns any skill; like every assignment the game saves it with
 the character and weapon set, and a skill you had on RT in a plain controller
 layout is replaced. The shapes are shared by all your characters: a shape whose
 skill your hero lacks shows **Another hero's** and casts nothing. Settings:
-`[glyphs]` in the profile INI (`draw_slot`, and one skill id per shape), edited
-from the wheel only.
+`[glyphs]` in the profile INI (`draw_slot` and `second_draw_slot`, one a hand;
+one skill id per shape for the right hand, and `left_circle` ... `left_wave`
+for the left, where -1 casts the right hand's), edited from the wheel only.
+Shapes given skills before each hand had its own set are the right hand's, and
+the left hand's until a left shape gets its own.
 
 ## Weapon skill gestures
 
 Active skill icons and name panels beside the weapons are **off by default**.
 Review assignments by opening either hand's wheel. To restore the weapon
-indicators, open **VR Settings > Combat > Skill icons on weapons**, turn it
+indicators, open **VR Settings > Gameplay > Combat > Skill icons on weapons**, turn it
 **On**, and press **Apply**. This changes both hands' visual indicators only;
 assigned spells and weapon skill gestures keep working. The saved preference
 is `[interactions] weapon_skill_indicators=0` (hidden) or `1` (shown).
 
-**VR Settings > Shield > Bash speed to hit** adjusts physical bash/Smite
+**VR Settings > Gameplay > Shield > Bash speed to hit** adjusts physical bash/Smite
 independently of weapon swings: default 2 m/s, range 0.75-10 m/s in 0.25 m/s
 steps. Move the hand at least 12 cm in a deliberate stroke. Wrist rotation alone
 does not attack, and contact still requires the selected speed. Blocking, parries
@@ -425,7 +441,16 @@ says how: **Shield swing / thrust** (Smite with a shield), **Draw & release**
 where you point.
 Pointing at a skill in the skill picker (**EDIT SKILLS**), or at a slot in a
 hand wheel, shows a line under it saying how that skill works from that slot:
-the gesture on a trigger, or what its button does.
+the gesture on a trigger, or what its button does. Skills a landed swing or shield
+bash casts (melee strike skills, Fury and Zeal, Double Swing and Frenzy, Smite with a shield) are
+tagged **CAST ON STRIKE**; body gestures (Holy Shield's sign of
+the cross, the shapeshifts, Blessed Hammer, Charge, Fist of the Heavens), bow draws
+and throws keep **GESTURE**. Both need a trigger slot, except the body gestures,
+which work from any slot. The body gestures are the Paladin's and the Druid's
+motions: do them with both grips held, as every class's motions. Both
+controllers hum once a motion's first part is done, stronger as it nears its
+cast, and pulse together when it casts; each motion has its card on the class's
+**MOTIONS** page (the wheel), where it can be turned off.
 
 **Bow quiver.** With a bow, a face button assigned to Magic Arrow, Fire Arrow,
 Cold Arrow, Exploding Arrow, Ice Arrow, Immolation Arrow or Freezing Arrow loads
@@ -471,7 +496,7 @@ lands, within the skill's own reach. A quick press still casts where you point
 holding the trigger still for a moment casts natively as before, repeating
 while held. Start the throw right after pressing; a slow reach casts nothing.
 The models are the game's own, cached from your installed game by the
-installer. **Combat > Skills on your moves** Off turns this off.
+installer. **Gameplay > Combat > Skills on your moves** Off turns this off.
 
 **Throwing potions.** Equip a stack of gas or oil potions (Rancid, Choking or
 Strangling Gas; Oil, Exploding or Fulminating Potion) in the right hand, with
@@ -480,14 +505,14 @@ Attack or Throw on the right trigger. Press the trigger, throw and let go. With
 until it first touches the floor, a wall, a table or a prop; it shatters there,
 and the game's own cloud or blast starts at that spot, within its reach. Off,
 the game's own Throw lands the potion where your arc meets the floor. Running
-carries the throw either way, and **Combat > Thrown weapon lift** raises it like any throw. A quick press or
+carries the throw either way, and **Gameplay > Combat > Thrown weapon lift** raises it like any throw. A quick press or
 a still hold throws as it did before. A potion in hand is never swung as a
-melee weapon. **Combat > Skills on your moves** Off turns this off.
+melee weapon. **Gameplay > Combat > Skills on your moves** Off turns this off.
 
 Face-button skills never replace gesture skills. Ordinary melee swings remain
 basic attacks for skills without a supported physical adapter; assigning a
 spell does not cast it on every swing. Physical skill gestures can be disabled
-under **VR Settings > Combat > Skills on your moves** (on by default), retaining
+under **VR Settings > Gameplay > Combat > Skills on your moves** (on by default), retaining
 button casting and basic physical attacks. This implementation supports the
 existing Smite and bow adapters, and melee skill strikes (below).
 
@@ -520,7 +545,7 @@ plays the character's mana warning). In Werewolf and Werebear form each
 strike that is one native attack (a full-cycle stroke in Unleashed, every
 paced strike in Classic) plays the form's growl as the native attack would
 (85% / 80% of the time), and Rabies and Hunger their bite. Holding the trigger still casts the
-skill natively. **Combat > Skills on your moves** Off keeps strikes basic.
+skill natively. **Gameplay > Combat > Skills on your moves** Off keeps strikes basic.
 
 **Fury and Zeal: one swing, all the hits.** The full-cycle swing that lands
 with werewolf **Fury** or the Paladin's **Zeal** (the rule above) casts it on
@@ -650,7 +675,7 @@ The minimap has a narrow bronze bevel and inset corner details. The full native
 map is fitted inside the frame so edge markers remain visible.
 
 A gold arrow sits on the game's blue hero marker and points the way you face.
-Change its view under **VR Settings > Wrist**, then press **Apply**:
+Change its view under **VR Settings > Interface > Wrist**, then press **Apply**:
 
 - **Map view: Isometric / Top-down / Full map / Full top-down.** Top-down flattens the
   game's slanted map into a plan, so rooms are square and the arrow matches your real

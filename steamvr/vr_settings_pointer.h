@@ -32,9 +32,13 @@ namespace framevr::settings::pointer {
 // - Only elements with a hit are targets: a label or row slab never is.
 // - A trigger already held when the filter starts (or after Reset) must be
 //   released first: opening the panel or changing views never presses.
+// - Rail guard: after the rail's rows move (a group opened: GuardRail), its rows
+//   take no new press for RailGuardMs. A row other than the one pressed can have
+//   slid under a laser that has not moved, and players pull twice. The rest of
+//   the panel did not move and stays live.
 class PointerFilter {
 public:
-    static constexpr uint64_t LockMs=90,RepeatDelayMs=400;
+    static constexpr uint64_t LockMs=90,RepeatDelayMs=400,RailGuardMs=300;
     static constexpr int RepeatPerSecond=8;
     static constexpr uint64_t RepeatMs=1000/RepeatPerSecond;
     static constexpr float HysteresisPx=10,ReleaseSlopPx=24,DragStartPx=16,DragStepPx=24,DragTurnUnits=.5f;
@@ -71,6 +75,7 @@ public:
         Hit click{};     // this frame's press for layout::Press (Kind::None: none)
         bool blocked=false;   // a press landed on a locked element (play the blocked sound)
         bool held=false;      // click came from a hold-repeat or a drag (the element was already pressed)
+        int railIgnoredMs=-1; // a press on a rail row was ignored, this long after the rail moved; -1 none
     };
     // One frame: onPanel false when the laser misses the panel or tracking is
     // lost (that cancels a press); x, y canvas pixels; down the trigger state
@@ -92,7 +97,9 @@ public:
                 Hit target=Locked(ms);
                 const layout::Element* e=layout::Find(layout,target);
                 if(!e){target=hover;e=layout::Find(layout,target);}
-                if(e){
+                if(e&&ms<railGuardUntil&&(e->role==layout::Role::Tab||e->role==layout::Role::GroupTab))
+                    out.railIgnoredMs=int(RailGuardMs-(railGuardUntil-ms));   // silent: no blocked buzz, nothing is locked
+                else if(e){
                     if(!e->Has(layout::Enabled))out.blocked=true;
                     else{pressed=target;pressedRect=e->HitBox();pressedAt=lastRepeat=ms;pressX=x;pressY=y;dragSent=dragUnit=0;dragging=repeated=false;
                         dragCoarse=std::max(1,e->dragCoarse);dragIndex=e->dragSteps>0?e->dragIndex:-1;dragSteps=e->dragSteps;}
@@ -137,7 +144,9 @@ public:
     }
     // Opening, closing or a view change: forget the hover, press and history.
     // A trigger still held must be released before the next press.
-    void Reset(){*this=PointerFilter{};}
+    void Reset(){const uint64_t guard=railGuardUntil;*this=PointerFilter{};railGuardUntil=guard;}
+    // The rail's rows just moved (layout::OpenGroup changed).
+    void GuardRail(uint64_t ms){railGuardUntil=ms+RailGuardMs;}
     const Hit& Pressed()const{return pressed;}
 private:
     struct Past {uint64_t ms=0;Hit hit{};bool used=false;};
@@ -145,7 +154,7 @@ private:
     int head=0;
     Hit hover{},pressed{};
     Rect pressedRect{0,0,0,0};
-    uint64_t pressedAt=0,lastRepeat=0;
+    uint64_t pressedAt=0,lastRepeat=0,railGuardUntil=0;
     float pressX=0,pressY=0;
     int dragSent=0,dragUnit=0;              // steps sent since the drag's base; the drag unit now
     int dragCoarse=1,dragIndex=-1,dragSteps=0;   // the pressed value's Element::drag* (dragIndex: the base, moved to an end it reaches)

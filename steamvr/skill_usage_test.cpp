@@ -15,17 +15,21 @@ int main() {
     }
     Check(fits,"every skill and slot has a line and a card text that fit");
     Check(!Line(-1,rightTrigger)[0]&&!Line(126,-1)[0]&&!Line(126,skills::Count)[0]&&Details(-1,rightTrigger).empty(),"no skill or no slot: nothing");
-    Check(Gesture(strikeskills::Bash,rightTrigger)&&Gesture(strikeskills::Bash,leftTrigger)&&!Gesture(strikeskills::Bash,rightFace),
-          "a strike skill is a gesture on either trigger, a press on a face button");
+    Check(CastOnStrike(strikeskills::Bash,rightTrigger)&&CastOnStrike(strikeskills::Bash,leftTrigger)&&!CastOnStrike(strikeskills::Bash,rightFace)&&
+          !Gesture(strikeskills::Bash,rightTrigger)&&ByMotion(strikeskills::Bash,rightTrigger)&&
+          CastOnStrike(strikeskills::Fury,rightTrigger)&&CastOnStrike(strikeskills::Zeal,leftTrigger)&&
+          CastOnStrike(strikeskills::Frenzy,rightTrigger)&&CastOnStrike(strikeskills::DoubleSwing,leftTrigger)&&
+          !CastOnStrike(weaponskills::HolyShield,rightTrigger)&&!CastOnStrike(weaponskills::Strafe,rightTrigger),
+          "a strike skill is Cast On Strike on either trigger, a press on a face button");
     Check(Has(Line(strikeskills::Bash,rightTrigger),"full-cycle")&&Has(Details(strikeskills::Bash,rightTrigger),"no on-hit effects")&&
           Has(Details(strikeskills::Bash,rightTrigger),"basic attack"),"a strike: the full-cycle rule, what quicker swings lose, when a swing stays basic");
     Check(Has(Line(strikeskills::Zeal,rightTrigger),"land by themselves")&&Has(Line(strikeskills::Fury,rightTrigger),"basic attacks")&&
           Has(Details(strikeskills::Fury,rightTrigger),"moving on to monsters nearby")&&Has(Details(strikeskills::Zeal,rightTrigger),"keep moving")&&
           Has(Details(strikeskills::Zeal,rightTrigger),"Swings while it runs"),
           "Fury and Zeal: one swing casts, the other hits land by themselves while you move, swings meanwhile stay basic");
-    Check(Has(Line(strikeskills::Bash,rightFace),"On a trigger it is a gesture")&&Has(Details(strikeskills::Zeal,rightFace),"On a trigger it becomes a gesture"),
-          "a face button points to the trigger gesture");
-    Check(Gesture(weaponskills::Smite,leftTrigger)&&!Gesture(weaponskills::Smite,rightTrigger)&&Has(Details(weaponskills::Smite,leftTrigger),"shield"),
+    Check(Has(Line(strikeskills::Bash,rightFace),"On a trigger it is Cast On Strike")&&Has(Details(strikeskills::Zeal,rightFace),"On a trigger it becomes Cast On Strike"),
+          "a face button points to Cast On Strike on a trigger");
+    Check(CastOnStrike(weaponskills::Smite,leftTrigger)&&!CastOnStrike(weaponskills::Smite,rightTrigger)&&Has(Details(weaponskills::Smite,leftTrigger),"shield"),
           "Smite: a shield gesture on the left trigger");
     Check(Gesture(weaponskills::Strafe,rightTrigger)&&Gesture(weaponskills::Strafe,leftTrigger)&&!Gesture(weaponskills::Strafe,leftFace),"arrow skills: draw and release on a trigger");
     Check(Has(Line(7,rightFace),"loads it into every following arrow")&&Has(Details(7,rightFace),"Press again"),"a quiver arrow skill on a face button loads the quiver");

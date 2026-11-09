@@ -5,16 +5,21 @@
 #include <stdexcept>
 #include <vector>
 
-// The hand spells' own effect textures, cached from the installed game by
-// prepare_spell_sprites.py (sprites.ssp). Slots follow its TEXTURES order.
+// The hand spells' effect textures, cached from the installed game by
+// prepare_spell_sprites.py (sprites.ssp, version 2). Slots follow its TEXTURES order: the spells' own
+// eleven, then the game's fire flipbook (8x8), smoke and wisp atlases (2x2), lightning arc and bolt
+// flipbooks (4x2), snowflakes and ice chunks (2 columns x 4 rows), an ice caustic, a glow dot, a star
+// flare and Fire Bolt's flame distortion (two channels).
 namespace framevr::elements::sprites {
 enum Slot : unsigned {
     FirePlate, FireballPlate, SoftFlame, FlameRamp, Flash, Glow, LightningRamp,
-    Glint, IceRamp, FrozenOrb, FrostRamp, Count
+    Glint, IceRamp, FrozenOrb, FrostRamp,
+    FireFlipbook, Smoke, Wisp, Arcs, Bolts, Flakes, IceCaustic, Dot, Star, Distortion, Count
 };
+constexpr uint32_t Version=2;
 inline bool Ramp(unsigned slot) {return slot==FlameRamp||slot==LightningRamp||slot==IceRamp||slot==FrostRamp;}
 struct Texture {
-    uint32_t width=0,height=0,format=0; // DXGI: BC4_UNORM 80, BC3_UNORM 77, R8G8B8A8_UNORM_SRGB 29
+    uint32_t width=0,height=0,format=0; // DXGI: BC4_UNORM 80, BC3_UNORM 77, BC5_UNORM 83, R8G8B8A8_UNORM_SRGB 29
     std::vector<std::vector<uint8_t>> mips;
 };
 inline uint64_t MipBytes(uint32_t format,uint32_t width,uint32_t height) {
@@ -27,12 +32,13 @@ inline std::vector<Texture> Parse(const std::vector<uint8_t>& data) {
         std::memcpy(out,data.data()+offset,bytes);offset+=bytes;
     };
     uint32_t header[3];read(header,sizeof header);
-    if(header[0]!=0x31505353||header[1]!=1||header[2]!=Count)throw std::runtime_error("unsupported spell sprite cache");
+    if(header[0]!=0x31505353||header[1]!=Version||header[2]!=Count)
+        throw std::runtime_error(header[0]==0x31505353&&header[1]<Version?"spell sprite cache from an older install; Update / repair prepares it again":"unsupported spell sprite cache");
     std::vector<Texture> result(Count);
     for(unsigned i=0;i<Count;++i) {
         uint32_t fields[5];read(fields,sizeof fields);
         auto& t=result[i];t.width=fields[1];t.height=fields[2];t.format=fields[3];
-        const bool format=Ramp(i)?t.format==29:t.format==80||t.format==77;
+        const bool format=Ramp(i)?t.format==29:i==Distortion?t.format==83:t.format==80||t.format==77;
         // Block-compressed textures need whole blocks at their top level.
         if(fields[0]!=i||!format||t.width<4||t.height<4||t.width>2048||t.height>2048||
            (t.format!=29&&(t.width%4||t.height%4))||!fields[4]||fields[4]>14)

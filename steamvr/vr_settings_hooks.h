@@ -17,8 +17,15 @@ inline bool ShowsDetectedControllers(Key k){return k==ControllerLabels;}
 // Frame generation: what OFXR Bridge is doing (main's Perf status line) on its row and card.
 inline bool ShowsFrameGenStatus(Key k){return k==FrameGeneration;}
 // Why a row RowEnabled locks is locked.
-// Frame generation no longer has a lock (#343: By turns leaves its rows out); a row locked for another reason says this.
-inline const char* LockedReason(Key){return "Not available now";}
+inline const char* LockedReason(Key k){return FrameGenRow(k)?"Needs Both":"Not available now";}
+// One line a page shows above its rows, or nullptr, naming the chips by their words. Frames: why
+// its rows are gray, or that they are not. It shows in both states, so pressing Eyes drawn per
+// frame moves no row under the laser. A page with this line draws no intro (its card keeps the
+// text): rows that come and go below would otherwise take the intro's room and move the rows above.
+inline const char* PageReason(View v,const Values& values){
+    if(v!=View::Frames)return nullptr;
+    return values[StereoRendering]>=.5f?"Off while One by turns is on: pick Both to use these.":"Available while Both is on.";
+}
 // The guide's button names: Button names' choice.
 inline controllers::Choice ButtonNames(const Values& v){return controllers::Choice(int(v[ControllerLabels]));}
 // Skills go to the aimed monster: a class without bow skills sees Off / On,
@@ -31,9 +38,9 @@ inline float ClassValue(Key k,float value,float current,const Context& c){
 // path line's wheel through Off (... 345, Off, 0 ...).
 inline bool ModelSteps(Key k){return k==SpellLock||k==BowLaser;}
 // Presets never set these: the owner's calls (stereo rendering, the GPU wait,
-// elemental hands, the smarter mercenary) and calibration's own keys.
+// the smarter mercenary) and calibration's own keys.
 inline bool PresetSkips(Key k){
-    return k==StereoRendering||k==DeferGpuWait||k==ElementalHands||k==CompanionAi||k==EyeHeight||k==ArmSpan||k==BodyCalibration;
+    return k==StereoRendering||k==DeferGpuWait||k==CompanionAi||k==EyeHeight||k==ArmSpan||k==BodyCalibration;
 }
 // A preset card lists these first, in the comfort color: they change how the
 // game feels on the stomach.

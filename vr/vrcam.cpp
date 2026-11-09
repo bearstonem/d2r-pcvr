@@ -37,6 +37,7 @@
 #include "../steamvr/arm_pointing.h"
 #include "../steamvr/aim_reach.h"
 #include "../steamvr/torch_light.h"
+#include "../steamvr/elemental_hands.h"
 #include "../steamvr/leather_menu.h"
 #include "../steamvr/head_shadow.h"
 #include <tlhelp32.h>
@@ -45,6 +46,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -147,6 +149,9 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "stereo_replay.h"
 #include "dlss_depth.h"
 #include "billboards.h"
+#include "engine_units.h"
+#include "../shared/game_ceiling.h"
+#include "../shared/ceiling_measures.h"
 #ifdef D2RVR_NATIVE_OPENXR
 #include "panel_input.h"
 #include "native_belt.h"
@@ -154,6 +159,8 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "../steamvr/panel_input_mode.h"
 #include "pad_mirror_shared.h"
 #include "../steamvr/talk_stop.h"
+#include "../steamvr/room_stitch.h"
+#include "../steamvr/ceiling_top.h"
 namespace gamestate {uint32_t TalkOpens();}   // NPC conversations opened (talk_stop.h)
 
 #pragma intrinsic(_ReturnAddress)
@@ -211,7 +218,8 @@ struct Settings {
     std::atomic<float> height{8.0f};        // pivot above the ground look-at point (world units)
     std::atomic<bool>  heightAuto{true};    // first person: the eyes at the hero's own (each class its height); height unused
     std::atomic<float> eyeOffset{0.0f};     // added to that, world units
-    std::atomic<bool>  followJump{true};    // the camera goes up when the animation lifts the hero (Leap)
+    std::atomic<bool>  followJump{true};    // the camera goes up when the game lifts the hero (Leap's arc) or his hips rise
+    std::atomic<float> leapGlideCm{60.0f};  // a Leap cast while running: how far ahead of the halted hero the view may glide (leapglide), cm; 0 off
     std::atomic<float> jumpFrom{0.3f};      // hip rise (model units) still taken for the stride's bob
     std::atomic<float> pitch{-60.0f};       // camera pitch relative to the game's own (deg); -60 = level, more negative = higher
     std::atomic<int>   renderPoolMb{64};
@@ -219,6 +227,7 @@ struct Settings {
     std::atomic<int>   rings{int(framevr::settings::Definitions[framevr::settings::DrawDistance].defaultValue)};
     std::atomic<float> modelRadius{framevr::settings::Definitions[framevr::settings::ObjectDistance].defaultValue};
     std::atomic<float> bigRadius{framevr::settings::Definitions[framevr::settings::BigObjectDistance].defaultValue};
+    std::atomic<bool>  roomStitch{true};    // [render] room_stitch: rooms built to meet the way toward the hero (roomstitchvr)
     std::atomic<int>   hudMap{0};           // [hud] map: 0 in the picture, 1 out of it, into its own texture
     // Per view since the Home page (2026-10-05): [hud_top], [hud_third], [hud_floor], [hud_inside]
     // - the Interface tab of each view - falling back to [hud] where unset.
@@ -233,7 +242,7 @@ struct Settings {
     std::atomic<float> labelsAlphaFloor{0.5f};   // labels_alpha: their dark box, 1 = as the game draws it, 0 = none
     std::atomic<float> labelsSizeFloor{1.0f};    // labels_size, %: the names and their box smaller (needs the game's label code, LabelHooks)
     std::atomic<bool>  labelsNativeFloor{true};  // labels_native (not on the settings page): 0 = never the game's code, the box faded as a picture
-    // [interactions] loot_pick_reach_cells (INI only): native VR's loot pick (VR Settings > Interface > Loot pick)
+    // [interactions] loot_pick_reach_cells (INI only): native VR's loot pick (VR Settings > Interface > Labels > Loot pick)
     std::atomic<float> lootPickReach{framevr::lootaim::DefaultPickupCells};   // loot_pick_reach_cells: farther, A takes no item (0 = any distance)
     // The same two for the other views (2026-10-06): [hud_top] F1, [hud_third] F2, [hud] F4 - the game's own by default.
     std::atomic<float> labelsAlphaTop{1.0f}, labelsAlphaThird{1.0f}, labelsAlphaBody{1.0f};
@@ -328,7 +337,12 @@ struct Settings {
     std::atomic<float> ceilWet{0.35f};      // [ceiling] wet: how much the rock shines, like the walls
     std::atomic<float> ceilDetail{0.8f};    // [ceiling] detail: world units the picture's light parts stand out of the rock
     std::atomic<float> ceilContrast{1.6f};  // [ceiling] contrast: the picture's fine detail times this
+    std::atomic<bool>  gameCeiling{true};      // [ceiling] game_ceiling: in VR F4 the ceiling is the game's own lit model (vr/engine_units.cpp)
+    std::atomic<bool>  gameCeilingWall{false}; // [ceiling] game_ceiling_wall: the game's ceiling's rim bent down to the floor (caves)
+    std::atomic<bool>  ceilFromWalls{true};    // [ceiling] height_from_walls: an area with no height_<biome> of its own rests it on its walls' top
     std::atomic<bool>  torchEnabled{true};       // [torch] enabled: 1H club with fire lights the dungeon in VR
+    std::atomic<bool>  spellHandLight{true};     // [torch] spell_hands: a Sorceress's spell hands light it too (elements::HandLight)
+    std::atomic<float> spellHandPct{40.0f};      // [torch] spell_hands_pct: how bright, 0..100 (VR Settings > Graphics > Environment > Spell hand light)
     std::atomic<float> torchRadius{18.0f};       // [torch] radius: world units of light reach (28 looked too intense in the headset)
     std::atomic<bool>  torchFlicker{true};       // [torch] flicker: organic turbulent flame flicker
     std::atomic<float> torchWarmth{0.65f};       // [torch] warmth: color warmth toward fire orange
@@ -494,6 +508,34 @@ std::vector<std::string> g_noFogBiomes;
 char g_biome[96] = "";                  // last name the game set, bare (no folder, no extension), lower case
 std::atomic<uint32_t> g_biomeGen{0};    // bumped by every SetCurrentBiome
 
+// The area's floor for its ceiling, the shader's vault and the game's slab alike (gameceiling::Floor): the lowest
+// the hero has stood since the area changed - on a ledge the ceiling rose with him (the user, 2026-10-07).
+SRWLOCK g_floorLock = SRWLOCK_INIT;
+float g_floorY = 0.0f;
+unsigned g_floorGen = ~0u;
+float AreaFloor(float heroY) {
+    AcquireSRWLockExclusive(&g_floorLock);
+    const float f = std::isfinite(heroY) ? gameceiling::Floor(&g_floorY, &g_floorGen, g_biomeGen.load(), heroY) : g_floorY;
+    ReleaseSRWLockExclusive(&g_floorLock);
+    return f;
+}
+// The ceiling's top over the level's highest floor (steamvr/ceiling_top.h; owner, 2026-11-07: up the stairs the ceiling
+// stayed low until he walked on): how far above AreaFloor the ceiling's height is to be measured from. Everything else
+// the ceiling measures (its lights, the stone under the floor, the rim's reach down) stays on AreaFloor.
+namespace roomstitchvr { uintptr_t HeroLevel(); bool HighestFloor(uintptr_t level, float& top); }
+framevr::ceilingtop::Top g_ceilTop;   // under g_floorLock
+float CeilingLift(float heroY) {
+    if (!std::isfinite(heroY)) return 0.0f;
+    const uintptr_t level = roomstitchvr::HeroLevel();
+    float built = 0.0f;
+    const bool have = roomstitchvr::HighestFloor(level, built);
+    const double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    AcquireSRWLockExclusive(&g_floorLock);
+    const float top = g_ceilTop.Step(now, g_biomeGen.load(), level, heroY, have, built);
+    ReleaseSRWLockExclusive(&g_floorLock);
+    return std::max(0.0f, top - AreaFloor(heroY));
+}
+
 void LoadOutdoorBiomes() {
     wchar_t buf[1024];
     GetPrivateProfileStringW(L"sky", L"outdoor", L"act1_outdoors,act1_tristram,act1_court,act2_outdoors,act2_town,act3_jungle,act3_docktown,act3_kurast,act3_travincal_outdoors,act4_mesa,act4_lava,act4_diab,expansion_town,expansion_siege,expansion_mountaintop,expansion_ruins,expansion_ruins_snow,expansion_wildtemple_tempenter",
@@ -530,6 +572,11 @@ struct CeilVaultCfg { bool dome = false; float domeRadius = 30.0f, domeMax = 30.
                       float texSize = 0.0f, reliefPic = 0.0f; };
 struct CeilBiomeCfg { std::string biome; float height, bright, light, relief, wet, detail, contrast; CeilVaultCfg vault; int slot = 0; };
 std::vector<CeilBiomeCfg> g_ceilBiomeCfg;   // under g_biomeLock
+// [ceiling] game_ceiling_biomes: the areas whose ceiling the game draws in VR F4 (shared/game_ceiling.h: every area
+// with a kind of its own by default); and those areas' own height_<biome>, the ones set (gameceiling::HeightOf: a
+// height set wins, else the area's walls' top). Under g_biomeLock.
+std::vector<std::string> g_gameCeilBiomes;
+std::vector<std::pair<std::string, float>> g_gameCeilOwn;
 
 void LoadCeilingBiomes() {
     wchar_t buf[1024];
@@ -542,6 +589,16 @@ void LoadCeilingBiomes() {
             cur.clear();
             if (!*p) break;
         } else if (*p != L' ' && *p != L'\t' && *p < 128) cur += (char)towlower(*p);
+    }
+    const std::string allGame = gameceiling::AllBiomes();
+    wchar_t gameBuf[1024];
+    GetPrivateProfileStringW(L"ceiling", L"game_ceiling_biomes", std::wstring(allGame.begin(), allGame.end()).c_str(), gameBuf, (DWORD)std::size(gameBuf), g_iniPath);
+    const std::vector<std::string> gameList = framevr::biomes::Parse(gameBuf);
+    std::vector<std::pair<std::string, float>> own;
+    for (const gameceiling::BiomeKind& b : gameceiling::kBiomeKinds) {
+        const std::string name = b.biome;
+        const float h = IniF(L"ceiling", (L"height_" + std::wstring(name.begin(), name.end())).c_str(), 0.0f);
+        if (h > 0.0f) own.emplace_back(name, std::clamp(h, 1.0f, 500.0f));
     }
     std::vector<CeilBiomeCfg> cfg;
     for (const std::string& b : list) {
@@ -562,8 +619,10 @@ void LoadCeilingBiomes() {
         v.reliefPic = std::clamp(IniF(L"ceiling", (L"relief_pic_" + w).c_str(), 0.0f), -1.0f, 2.0f);
     }
     AcquireSRWLockExclusive(&g_biomeLock);
-    const bool same = g_ceilBiomes == list;
+    const bool same = g_ceilBiomes == list && g_gameCeilBiomes == gameList && g_gameCeilOwn == own;
     g_ceilBiomes = list;
+    g_gameCeilBiomes = gameList;
+    g_gameCeilOwn = own;
     for (CeilBiomeCfg& c : cfg)   // the picture's slot kept until LoadCeilingTextures looks again: no flicker on a reload
         for (const CeilBiomeCfg& old : g_ceilBiomeCfg) if (old.biome == c.biome) c.slot = old.slot;
     g_ceilBiomeCfg = cfg;
@@ -601,6 +660,21 @@ bool IsCeilingBiome(const std::string& biome) {
     for (const std::string& b : g_ceilBiomes) if (b == biome) { on = true; break; }
     ReleaseSRWLockShared(&g_biomeLock);
     return on;
+}
+bool IsGameCeilingBiome(const std::string& biome) {
+    bool on = false;
+    AcquireSRWLockShared(&g_biomeLock);
+    for (const std::string& b : g_gameCeilBiomes) if (b == biome) { on = true; break; }
+    ReleaseSRWLockShared(&g_biomeLock);
+    return on;
+}
+// The area's own height_<biome> for the game's ceiling, 0 when not set
+float OwnCeilingHeight(const std::string& biome) {
+    float h = 0.0f;
+    AcquireSRWLockShared(&g_biomeLock);
+    for (const auto& o : g_gameCeilOwn) if (o.first == biome) { h = o.second; break; }
+    ReleaseSRWLockShared(&g_biomeLock);
+    return h;
 }
 
 // Starting palettes, by eye; picked by a part of the biome's name.
@@ -902,8 +976,10 @@ void LoadSettings() {
             IniB(L"interactions",L"leather_backdrop",false),style==framevr::leather::Style::Hide);
     }
     projectiles::Configure(IniB(L"gameplay",L"motion_controls",false),IniF(L"gameplay",L"arrow_speed",2.f),IniB(L"gameplay",L"arrow_direct_release",true));
-    // Movement speed (VR Settings > Body): % of the way from the no-gear base run speed to the gear's (-10 walks).
+    // Movement speed (VR Settings > Comfort > Moving): % of the way from the no-gear base run speed to the gear's (-10 walks).
     projectiles::ConfigureRunSpeed(framevr::runspeed::NormalizePercent(IniF(L"gameplay",L"run_speed_pct",100)));
+    // Combat walk: ms the run / walk toggle stays on walk after a hit, strike, cast or shot (0 = off).
+    projectiles::ConfigureCombatWalk(framevr::runspeed::NormalizeCombatWalkMs(IniF(L"gameplay",L"combat_walk_ms",framevr::runspeed::CombatWalkDefaultMs)));
     bowvr::Configure(IniB(L"gameplay",L"motion_controls",false));
     combat::Configure(IniB(L"gameplay",L"motion_controls",false)&&IniB(L"gameplay",L"contact_hits",true));
     // Melee is Unleashed only (the owner, 2026-10-23): every weapon contact
@@ -984,7 +1060,7 @@ void LoadSettings() {
     // 0 = none, strain still runs). The rim is black only, drawn denser by
     // guard_strain_dark_density (2.5; 1 = the plain curve): over D2's dark scenes a
     // dark rim hides far less than its opacity suggests.
-    // guard_strain_vignette 0 (VR Settings > Shield > Guard strain shadow: Off) hides
+    // guard_strain_vignette 0 (VR Settings > Gameplay > Shield > Guard strain shadow: Off) hides
     // it; strain still runs. Missing: the old Guard strain color Off (guard_strain_dark 2) stays Off.
     const bool strainShown=std::lround(IniF(L"gameplay",L"guard_strain_vignette",
                                             std::lround(IniF(L"gameplay",L"guard_strain_dark",0))==2?0.f:1.f))!=0;
@@ -1006,7 +1082,7 @@ void LoadSettings() {
     framevr::ConfigureBoneGraft(IniB(L"render",L"bone_armor_graft",true),IniF(L"render",L"bone_armor_graft_size",1.f),
         IniF(L"render",L"bone_armor_graft_out",.05f),IniF(L"render",L"bone_armor_graft_spread",40.f),IniF(L"render",L"bone_armor_graft_along",.5f),
         IniF(L"render",L"bone_armor_graft_width",.5f));
-    {   // Low-life heartbeat (start: VR Settings > Survival, [gameplay] low_life_heart_start): % on top of
+    {   // Low-life heartbeat (start: VR Settings > Interface > Warnings, [gameplay] low_life_heart_start): % on top of
         // the game's Master x Combat volume (0 = off), tempo range, wind-down time from full, and
         // an optional one-beat 16-bit PCM WAV (next to this ini unless a full path). The old
         // guard_strain_heart* keys are still read when the low_life_heart* key is absent.
@@ -1114,11 +1190,13 @@ void LoadSettings() {
     g_set.eyeOffset.store(std::clamp(IniF(L"camera", L"eye_offset", 0.0f), -5.0f, 5.0f));
     g_set.followJump.store(IniB(L"camera", L"follow_jump", true));
     g_set.jumpFrom.store(std::clamp(IniF(L"camera", L"jump_from", 0.3f), 0.0f, 3.0f));
+    g_set.leapGlideCm.store(std::clamp(IniF(L"camera", L"leap_glide_cm", 60.0f), 0.0f, 150.0f));
     g_set.pitch.store(std::clamp(IniF(L"camera", L"pitch", -60.0f), -150.0f, 60.0f));
     g_set.renderPoolMb.store(std::clamp((int)IniF(L"render", L"render_pool_mb", 64.0f), 0, 4096));
     g_set.entityPoolMb.store(std::clamp((int)IniF(L"render", L"entity_pool_mb", 280.0f), 0, 4096));
     g_set.rings.store(std::clamp((int)IniF(L"render", L"rings", framevr::settings::Definitions[framevr::settings::DrawDistance].defaultValue), 1, 8));
     g_set.modelRadius.store(std::clamp(IniF(L"render", L"model_radius", framevr::settings::Definitions[framevr::settings::ObjectDistance].defaultValue), 10.0f, 10000.0f));
+    g_set.roomStitch.store(IniB(L"render", L"room_stitch", true));
     g_set.bigRadius.store(farobjects::Normalize(IniF(L"render", L"big_radius", framevr::settings::Definitions[framevr::settings::BigObjectDistance].defaultValue)));
     g_set.mouseLook.store(IniB(L"input", L"mouse_look", false));
     g_set.hudHide.store(std::clamp((int)IniF(L"hud", L"hide", 0.0f), 0, 2));
@@ -1362,7 +1440,12 @@ void LoadSettings() {
     g_set.ceilWet.store(std::clamp(IniF(L"ceiling", L"wet", 0.35f), 0.0f, 3.0f));
     g_set.ceilDetail.store(std::clamp(IniF(L"ceiling", L"detail", 0.8f), 0.0f, 10.0f));
     g_set.ceilContrast.store(std::clamp(IniF(L"ceiling", L"contrast", 1.6f), 0.0f, 5.0f));
+    g_set.gameCeiling.store(IniB(L"ceiling", L"game_ceiling", true));
+    g_set.gameCeilingWall.store(IniB(L"ceiling", L"game_ceiling_wall", false));
+    g_set.ceilFromWalls.store(IniB(L"ceiling", L"height_from_walls", true));
     g_set.torchEnabled.store(IniB(L"torch", L"enabled", true));
+    g_set.spellHandLight.store(IniB(L"torch", L"spell_hands", true));
+    g_set.spellHandPct.store(std::clamp(IniF(L"torch", L"spell_hands_pct", 40.0f), 0.0f, 100.0f));
     g_set.torchRadius.store(std::clamp(IniF(L"torch", L"radius", 18.0f), 5.0f, 60.0f));
     g_set.torchFlicker.store(IniB(L"torch", L"flicker", true));
     g_set.torchWarmth.store(std::clamp(IniF(L"torch", L"warmth", 0.65f), 0.0f, 1.0f));
@@ -1375,9 +1458,17 @@ void LoadSettings() {
         const bool keep = IniB(L"arms", L"head_shadow", true), hide = g_set.hideHead.load(), trace = IniB(L"debug", L"head_shadow", false);
         g_set.headShadow.store(keep);
         headshadow::SetTrace(trace);
-        if (const int now = int(keep) | int(hide) << 1 | int(trace) << 2; now != told) {
-            told = now;
-            LogF("Frame head shadow: [arms] head_shadow=%d, hide_head=%d, [debug] head_shadow=%d (%s)", int(keep), int(hide), int(trace),
+        namespace hs = framevr::headshadow;
+        const float level = hs::CleanCut(IniF(L"arms", L"head_cut_level", hs::LevelCm), hs::LevelCm),
+                    up = hs::CleanCut(IniF(L"arms", L"head_cut_up", hs::UpCm), hs::UpCm),
+                    down = hs::CleanCut(IniF(L"arms", L"head_cut_down", hs::DownCm), hs::DownCm);
+        headshadow::SetCuts(level, up, down);
+        static float toldCuts[3] = {-1, -1, -1};
+        if (const int now = int(keep) | int(hide) << 1 | int(trace) << 2;
+            now != told || level != toldCuts[0] || up != toldCuts[1] || down != toldCuts[2]) {
+            told = now; toldCuts[0] = level; toldCuts[1] = up; toldCuts[2] = down;
+            LogF("Frame head shadow: [arms] head_shadow=%d, hide_head=%d, [debug] head_shadow=%d, cut %.0f cm level, %.0f up, %.0f down (%s)",
+                 int(keep), int(hide), int(trace), level, up, down,
                  !hide ? "the head is not hidden: nothing changes" : keep ? "full-body first person keeps the head whole for its shadow; the eye views cut it"
                                                                          : "the hidden head shrinks to the neck, its shadow headless");
         }
@@ -1781,13 +1872,115 @@ float ScaleHeight() {
         return std::max(1.0f, (scaleEye > 0.0f ? scaleEye : eye) * g_heroScale.load() + g_set.eyeOffset.load());
     return g_set.height.load();
 }
-// How far a jump lifts the eyes now, world units: on top of ViewHeight in the
-// view only - the world's scale must not change in mid-air.
-float JumpLift() {
-    float eye = 0.0f, lift = 0.0f;
-    if (ThirdPerson() || !g_set.followJump.load() || !skel::HeroEye(&eye, &lift)) return 0.0f;
-    return lift * g_heroScale.load();
+// Leap's arc (owner, 2026-11-06: "we don't seem to get much elevation off the ground"): the game
+// lifts the hero's whole model through a Leap - its matrix up to ~15 units (3.5 m) above the
+// look-at at the top - while his hips crouch, so the hips' lift below never saw it and the camera
+// stayed on the ground. HeroMatrixNow notes the matrix's rise each pose (g_unitRise); the camera
+// takes it from kRiseFrom, easing in to the whole rise by twice that ([camera] follow_jump).
+// The eye in the model leaves the rise out again (YawFromMatrix), so the held upper body and the
+// hands stay on the camera up there.
+constexpr float kRiseFrom = 0.3f;              // world units of matrix rise taken as the ground's, not a jump
+std::atomic<float> g_unitRise{0.0f};           // the hero's model matrix above the look-at at the last pose
+std::atomic<ULONGLONG> g_unitRiseAt{0};
+std::atomic<float> g_viewRise{0.0f};           // the rise the last view rebuild lifted the camera by
+float FollowedRise(float rise) {
+    if (ThirdPerson() || Overhead() || !g_set.followJump.load() || !(rise > kRiseFrom)) return 0.0f;   // the board stays put
+    const float t = std::clamp((rise - kRiseFrom) / kRiseFrom, 0.0f, 1.0f);
+    return std::min(rise, 30.0f) * t * t * (3.0f - 2.0f * t);
 }
+// The rise the camera takes now (0 when no pose has noted one lately: a menu, a load).
+float LeapRise() {
+    if (GetTickCount64() - g_unitRiseAt.load() > 100) return 0.0f;
+    return FollowedRise(g_unitRise.load());
+}
+// How far a jump lifts the eyes now, world units: on top of ViewHeight in the
+// view only - the world's scale must not change in mid-air. The hips' lift and
+// the game's rise of the unit (rise: LeapRise, taken once for the rebuild).
+float JumpLift(float rise) {
+    float eye = 0.0f, lift = 0.0f;
+    if (ThirdPerson() || !g_set.followJump.load()) return 0.0f;
+    return (skel::HeroEye(&eye, &lift) ? lift * g_heroScale.load() : 0.0f) + rise;
+}
+
+// Leap's take-off glide (owner, 2026-11-06: "Leap still feels like it stops before jumping ... It's not a smooth
+// motion from running to jumping"). Running into a Leap, the game holds the hero still for about 0.17 s - its
+// take-off crouch, with the cast reaching it within 20 ms - and the first-person view stopped dead with him.
+// From a Leap cast while running ([camera] leap_glide_cm, 0 off) the view's anchor goes on along the run, never
+// slower than the hero and easing off over Ease s once he slows, at most leap_glide_cm ahead of him; once he
+// has stopped and moves again (half the run's speed), or after For s, it melts back onto him over Rejoin s. Only the view moves: the hero, his path, the
+// hands' tracking and the aim keep the game's position (g_lookAt). The lead is kept from the hero, not as a
+// place in the world: a rejoin held still while he ran on trailed him by his speed times Rejoin (half a metre)
+// for as long as he ran (first headset run: "rejoined after 35.32 s"). And the easing waits for him to slow: the
+// cast reaches the game after the motion and he runs on a moment first - eased from the cast, the view had
+// slowed before he did and fell behind, so it rejoined as he leapt with 5-20 cm of lead (second run).
+float UserEyeHeightM();
+namespace leapglide {
+std::atomic<ULONGLONG> g_cast{0};   // NativeSpellAim: the last Leap cast (GetTickCount64)
+constexpr double Ease = 0.12, Rejoin = 0.08, For = 0.6;
+struct State {
+    bool have = false, on = false, rejoining = false, stopped = false;
+    double at = 0, t0 = 0;
+    float hx = 0, hz = 0, vx = 0, vz = 0;     // the hero last view, and his smoothed velocity (world units a second)
+    float ux = 0, uz = 0, speed = 0, lead = 0;   // the run's way, and the anchor's speed and lead along it while gliding
+    float ox = 0, oz = 0;                        // the anchor less the hero (the lead along the run, as it rejoins)
+    float run = 0;                            // the run's speed as the glide began
+    float most = 0;                           // the farthest ahead this glide, cm (for the log)
+    ULONGLONG cast = 0;
+};
+State g_s;   // the view thread's
+// The view's anchor for the hero at L (world units; y is L's).
+void Anchor(const float L[3], float out[3]) {
+    out[0] = L[0]; out[1] = L[1]; out[2] = L[2];
+    auto& s = g_s;
+    const double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    if (!s.have) { s.have = true; s.at = now; s.hx = L[0]; s.hz = L[2]; return; }
+    const double dt = now - s.at;
+    if (dt < 1e-3) { if (s.on) { out[0] = L[0] + s.ox; out[2] = L[2] + s.oz; } return; }   // the other eye of this pair
+    const float dx = L[0] - s.hx, dz = L[2] - s.hz;                          // the hero's step since the last view
+    if (dt > 0.25) { s.vx = s.vz = 0; s.on = false; }                         // a gap (a menu, a load): forget
+    else {
+        const float a = float(std::min(1.0, dt / 0.06));
+        s.vx += (dx / float(dt) - s.vx) * a;
+        s.vz += (dz / float(dt) - s.vz) * a;
+    }
+    s.at = now; s.hx = L[0]; s.hz = L[2];
+    const float cm = g_set.leapGlideCm.load();
+    const ULONGLONG cast = g_cast.load();
+    if (cast != s.cast) {
+        s.cast = cast;
+        const float run = std::hypot(s.vx, s.vz);
+        if (!s.on && cm > 0 && GetTickCount64() - cast < 300 && run > 2.0f && !ThirdPerson()) {
+            s.on = true; s.rejoining = s.stopped = false; s.t0 = now; s.run = run; s.most = 0;
+            s.ux = s.vx / run; s.uz = s.vz / run; s.speed = run; s.lead = 0; s.ox = s.oz = 0;
+            return;
+        }
+    }
+    if (!s.on) return;
+    const float upm = std::max(1.0f, ScaleHeight()) / UserEyeHeightM();
+    const float cap = cm * 0.01f * upm;
+    const float moving = std::hypot(s.vx, s.vz);
+    if (!s.rejoining) {
+        // The anchor's speed along the run: the hero's while he keeps it up, eased away once he slows.
+        const float along = (dx * s.ux + dz * s.uz) / float(dt);
+        s.speed = std::max(along, s.speed * float(std::exp(-dt / Ease)));
+        s.lead = std::clamp(s.lead + (s.speed - along) * float(dt), 0.0f, cap);
+        s.ox = s.ux * s.lead; s.oz = s.uz * s.lead;
+        if (moving < 0.3f * s.run) s.stopped = true;   // the take-off's halt
+        if ((s.stopped && moving > 0.5f * s.run) || now - s.t0 > For) s.rejoining = true;   // away again
+    } else {
+        const float k = float(std::exp(-dt / Rejoin));   // the lead shrinks onto the hero, wherever he goes
+        s.ox *= k; s.oz *= k;
+        if (std::hypot(s.ox, s.oz) < 0.005f * upm || now - s.t0 > For + 1.0) {
+            s.on = false;
+            LogF("vrcam: Leap's take-off glide - the view ran on up to %.0f cm ahead of the hero, rejoined after %.2f s (run %.1f units/s)",
+                 s.most, now - s.t0, s.run);
+            return;
+        }
+    }
+    s.most = std::max(s.most, std::hypot(s.ox, s.oz) / upm * 100.0f);
+    out[0] = L[0] + s.ox; out[2] = L[2] + s.oz;
+}
+}  // namespace leapglide
 
 std::atomic<float> g_eyeWorld[3];   // the camera in the world (third person: its pivot), last view rebuild - the hands hang off it
 // F3: our camera over the game's ground, for the mouse pointer laid on it (FloorPointerTick) - the eyes this
@@ -1814,6 +2007,12 @@ bool GameFocused();
 
 bool AfrOn();
 extern std::atomic<int> g_eye;
+// The rise the camera takes for this eye (LeapRise): a right eye takes its pair's left one, so both eyes
+// stand at one height - Leap's arc climbs ~0.5 units a frame, and a read a frame apart left the eyes at
+// two heights (owner, 2026-11-06: "left eye, right eye, not meshing well together during the leap").
+std::atomic<float> g_pairRise{0.0f};
+bool RightOfPair() { return AfrOn() && (g_eye.load() & 1) != 0; }
+float CameraRise() { return RightOfPair() ? g_pairRise.load() : LeapRise(); }
 // Each eye's last four view stamps, newest at g_stampHistAt: the one written
 // into a presented frame is [stereo] pipeline_depth views back - the engine
 // may present a frame one or two of its eye's views after it was built, which
@@ -2646,6 +2845,11 @@ bool VrViewInner(const d2rcam::WorldView& in, float out[16]) {
     if (!g_enabled.load() || !in.lookAtValid) return false;
     const float* G = in.gameView;   // row-major, v * M: column i is the game camera's axis i in the world
     const float* L = in.lookAt;
+    float glide[3];   // the view's anchor: the hero, or ahead of him through Leap's take-off (leapglide)
+    leapglide::Anchor(L, glide);
+    const float* A = TableView() || TopPersp() ? L : glide;
+    const float rise = CameraRise();   // the game's lift of the hero (Leap's arc), the same for the whole rebuild
+    if (!RightOfPair()) g_pairRise.store(rise);
     const float gameForward[3] = {-G[2], -G[6], -G[10]};
     billboards::SetGameForward(gameForward);   // auras keep its lift (vr/overlay_view.h)
     V3 fwd, ahead, right, up, eye, hang;
@@ -2673,7 +2877,7 @@ bool VrViewInner(const d2rcam::WorldView& in, float out[16]) {
     up = up0 * cosf(roll) + right * sinf(roll);
 
     // The eye point: the hero's eyes, moved along where we look, flattened on the ground.
-    const V3 pivot = V3{L[0], L[1] + ViewHeight() + JumpLift(), L[2]} + right * g_set.camSide.load() + ahead * g_set.camForward.load();
+    const V3 pivot = V3{A[0], A[1] + ViewHeight() + JumpLift(rise), A[2]} + right * g_set.camSide.load() + ahead * g_set.camForward.load();
     // Neck model: the head turns about the top of the neck - over the body's
     // middle, below and behind the eyes - not about the eyes. Level, the eyes
     // sit in front of the neck; looking down they go forward and down with the
@@ -2710,14 +2914,16 @@ bool VrViewInner(const d2rcam::WorldView& in, float out[16]) {
             (g_headHeld.load() ? g_heldYaw.load() : g_mouseYaw.load() + g_turnYaw.load()) * 0.0174532925f;
         const float recenter = g_recenter.load() * 0.0174532925f;
         float center[16];
-        framevr::View(center, L, ViewHeight() + JumpLift(), UserEyeHeightM(), baseHeading, recenter, -1, mapNorth, ScaleHeight() + JumpLift());
+        // The world's scale is the standing one in mid-air (ScaleHeight, no JumpLift): taken with the jump, Leap's
+        // ~10-unit arc more than doubled it - the eyes' gap and the head's offset in the room with it.
+        framevr::View(center, A, ViewHeight() + JumpLift(rise), UserEyeHeightM(), baseHeading, recenter, -1, mapNorth, ScaleHeight());
         eye = {-center[12]*center[0]-center[13]*center[1]-center[14]*center[2],
                -center[12]*center[4]-center[13]*center[5]-center[14]*center[6],
                -center[12]*center[8]-center[13]*center[9]-center[14]*center[10]};
         hang = eye;
         const float centerPosition[3]={eye.x,eye.y,eye.z};
         billboards::SetCenter(centerPosition);
-        framevr::View(view, L, ViewHeight() + JumpLift(), UserEyeHeightM(), baseHeading, recenter, g_eye.load(), mapNorth, ScaleHeight() + JumpLift());
+        framevr::View(view, A, ViewHeight() + JumpLift(rise), UserEyeHeightM(), baseHeading, recenter, g_eye.load(), mapNorth, ScaleHeight());
         if ((g_eye.load() & 1) == 0) stereoreplay::SetLeftView(view, framevr::ReplayShift());   // the replay's right eye: this one moved along its x
         fwd = {-center[2], -center[6], -center[10]};
         const float horizontal = std::hypot(fwd.x, fwd.z);
@@ -2731,6 +2937,7 @@ bool VrViewInner(const d2rcam::WorldView& in, float out[16]) {
     const float hangA[3] = {hang.x, hang.y, hang.z};
     for (int i = 0; i < 3; ++i) g_eyeWorld[i].store(hangA[i]);
     for (int i = 0; i < 3; ++i) g_eyeFromLook[i].store(hangA[i] - L[i]);
+    g_viewRise.store(rise);
     g_eyeOk.store(true);
 
     V3 camPos = eye;   // this eye's camera, for the table's bounds
@@ -3044,8 +3251,8 @@ namespace aimsettings {
 std::atomic<ULONGLONG> at{0};
 std::atomic<uint32_t> bits{0};
 std::atomic<float> hue[2]{45.0f, 210.0f};   // the outline colors: right hand, left hand (0 = By range)
-std::atomic<float> spanM{1.6f};   // the calibrated controller span (arm_span_m; Body > Height and arm span), set with or without Body calibration
-std::atomic<int> ground{0};       // VR Settings > Aim > Ground skill aim: 0 the game's aim, 1 where you point, 2 the aimed monster
+std::atomic<float> spanM{1.6f};   // the calibrated controller span (arm_span_m; Comfort > Body > Height and arm span), set with or without Body calibration
+std::atomic<int> ground{0};       // VR Settings > Gameplay > Targeting > Ground skill aim: 0 the game's aim, 1 where you point, 2 the aimed monster
 std::atomic<int> lock{0};         // Skills go to the aimed monster: bits 1 spells, 2 bow skills
 constexpr framevr::settings::Key keys[] = {framevr::settings::TargetHighlight,
                                            framevr::settings::StaffPoint,
@@ -3076,18 +3283,18 @@ bool AimOn(framevr::settings::Key key) {
 int GroundAimMode() { aimsettings::Refresh(); return aimsettings::ground.load(); }
 bool SpellsLocked() { aimsettings::Refresh(); return (aimsettings::lock.load() & 1) != 0; }
 bool BowSkillsLocked() { aimsettings::Refresh(); return (aimsettings::lock.load() & 2) != 0; }
-// VR Settings > Interface > Loot pick (On by default): A takes the item you point at (lootaimvr).
+// VR Settings > Interface > Labels > Loot pick (On by default): A takes the item you point at (lootaimvr).
 bool LootPickOn() { return AimOn(framevr::settings::LootPick); }
-// VR Settings > Aim > Aim with your view (Off by default): the eyes' tunnel,
+// VR Settings > Gameplay > Targeting > Aim with your view (Off by default): the eyes' tunnel,
 // the hands' wedge and a raised hand aiming alone (aimtargets).
 bool FollowsView() { return AimOn(framevr::settings::AimFollowsView); }
 // How far a hand is held out from the head before it points, cm: the arm counts as
 // pointing once held out a tenth of the player's span (Jeff: 15 cm on a 1.5 m span).
 float AimArmOutCm() { aimsettings::Refresh(); return framevr::armpointing::ArmOutCm(aimsettings::spanM.load()); }
-// VR Settings > Targets > Right / Left hand outline color: the color of a source's outline
+// VR Settings > Interface > Outlines > Right / Left hand outline color: the color of a source's outline
 // (aimrules::Source), 0 = By range. The eyes have no color of their own: their
 // monster is shown in the color of the hand that would cast at it - the bow hand
-// (left) while a bow is the equipped weapon, else VR Settings > Body > Dominant hand.
+// (left) while a bow is the equipped weapon, else VR Settings > Controls > Hands > Dominant hand.
 float OutlineHue(int source) {
     aimsettings::Refresh();
     if (source == framevr::aimrules::Eyes)
@@ -3121,12 +3328,16 @@ bool HandRay(float* o, float* d,bool forceGround=true,int forHand=-1) {
 #ifdef D2RVR_NATIVE_OPENXR
     // forHand -1: the casting hand (GameplayRay); 0 or 1: that hand (the aim rules).
     const bool left=forHand>=0?forHand==1:framevr::LeftHandAiming();
+    // A motion that aims its cast (Teleport's punch, spell_motion.h): along the punch, not the fist's
+    // pointer or a staff's shaft (owner, 2026-11-04).
+    float motionOrigin[3],motionDirection[3];
+    const bool way=!left&&framevr::MotionCastRay(motionOrigin,motionDirection);
     // The menu aim pose can differ greatly from the weapon's shaft. Use the
     // final posed weapon in its captured WORLD frame, not a bone from one
     // frame combined with a newer headset yaw from another.
     const auto castingType=HeldType();
     const bool staffByHand=StaffByHand();
-    if(g_eyeOk.load()&&!framevr::spellaim::TrackedAim(framevr::NativeCastSkill())&&!left&&(forHand==0||framevr::SpellSelected())&&!staffByHand&&
+    if(!way&&g_eyeOk.load()&&!framevr::spellaim::TrackedAim(framevr::NativeCastSkill())&&!left&&(forHand==0||framevr::SpellSelected())&&!staffByHand&&
        (castingType==D2RVR_TYPE_WAND||castingType==D2RVR_TYPE_STAFF||castingType==D2RVR_TYPE_SCEPTER||castingType==D2RVR_TYPE_ORB)) {
         skel::MeleeWeaponPose pose;
         if(skel::MeleeWeapon(pose)&&pose.weaponType==castingType&&pose.worldEpoch==g_meleeTurnEpoch.load()) {
@@ -3141,12 +3352,11 @@ bool HandRay(float* o, float* d,bool forceGround=true,int forHand=-1) {
         // casting hand and remains usable when the render pose is unavailable.
     }
     framevr::crossbow::Pose crossbow;
-    if(castingType==D2RVR_TYPE_CROSSBOW&&framevr::CrossbowAiming()&&skel::CrossbowPose(crossbow)&&
+    if(!way&&castingType==D2RVR_TYPE_CROSSBOW&&framevr::CrossbowAiming()&&skel::CrossbowPose(crossbow)&&
        framevr::crossbow::Fresh(crossbow,GetTickCount64(),gamestate::LocalPlayer(),gamestate::HandsKey()^(gamestate::WeaponSet()<<30),g_meleeTurnEpoch.load())) {
         o[0]=crossbow.muzzle.x;o[1]=crossbow.muzzle.y;o[2]=crossbow.muzzle.z;
         d[0]=crossbow.direction.x;d[1]=crossbow.direction.y;d[2]=crossbow.direction.z;return true;
     }
-    float motionOrigin[3],motionDirection[3];
     // An upright staff or an empty hand: along the arm, from the casting hand's
     // shoulder through the hand, so a bent wrist, knuckles to the side or a
     // hand overhead all aim where the arm reaches. The empty hand's own pointer
@@ -3156,8 +3366,8 @@ bool HandRay(float* o, float* d,bool forceGround=true,int forHand=-1) {
     // empty hand's arm line is the rules' only (forHand): with their Aim
     // options Off it casts along its own pointer, as before (#159 review).
     const bool arm=(staffByHand&&(forHand>=0||framevr::SpellSelected()))||(castingType==D2RVR_TYPE_UNARMED&&forHand>=0);
-    if(g_eyeOk.load()&&(forHand>=0?framevr::HandAimRay(forHand,motionOrigin,motionDirection):framevr::GameplayRay(motionOrigin,motionDirection))) {
-        if(arm) {
+    if(g_eyeOk.load()&&(way||(forHand>=0?framevr::HandAimRay(forHand,motionOrigin,motionDirection):framevr::GameplayRay(motionOrigin,motionDirection)))) {
+        if(arm&&!way) {
             const float a[3]={motionOrigin[0]-(left?-.17f:.17f),motionOrigin[1]+.22f,motionOrigin[2]};
             const float al=std::sqrt(a[0]*a[0]+a[1]*a[1]+a[2]*a[2]);
             if(al>.15f)for(int i=0;i<3;++i)motionDirection[i]=a[i]/al;
@@ -3448,7 +3658,15 @@ bool HandGridDir(float* gx, float* gy) {
 
 // A skill button is down (A, B, X, Y, RB), no menu: the attack or spell it casts goes along the hand.
 std::atomic<bool> g_skillHeld{false};
-bool AimByVector() { return g_enabled.load() && g_set.bowMode.load() == 4 && (g_aHeld.load() || g_skillHeld.load()); }
+// A glyph's or motion's press of the right trigger's record (glyph_cast.h) too: no button above shows it.
+bool RecordCastHeld() {
+#ifdef D2RVR_NATIVE_OPENXR
+    return framevr::RecordCastLive();
+#else
+    return false;
+#endif
+}
+bool AimByVector() { return g_enabled.load() && g_set.bowMode.load() == 4 && (g_aHeld.load() || g_skillHeld.load() || RecordCastHeld()); }
 
 #ifdef D2RVR_NATIVE_OPENXR
 using SpellControllerTargetFn=uintptr_t(*)(uintptr_t,int);
@@ -3495,7 +3713,7 @@ int HookSpellCommand(framevr::spellaim::NativeCommand* command) {
     return result;
 }
 
-// Monster outline strength (VR Settings > Targets, 0 = Off), read by the update and
+// Monster outline strength (VR Settings > Interface > Outlines, 0 = Off), read by the update and
 // render threads: one settings snapshot every 200 ms, not one per frame.
 float TargetOutlineStrength() {
     static std::atomic<ULONGLONG> at{0};
@@ -3686,7 +3904,7 @@ bool Resolve(int button, bool bow, framevr::aimrules::Use use, float& x, float& 
         }
     return false;
 }
-// The outlines to draw: Both hands (VR Settings > Targets > Outlines shown)
+// The outlines to draw: Both hands (VR Settings > Interface > Outlines > Outlines shown)
 // the right hand's monster and the left's - a held button's own while it is
 // held - and with neither, the eyes'; Dominant hand that hand's, else the
 // eyes'. How many (0-2). The render thread.
@@ -3772,7 +3990,7 @@ Cast Now() {
     c.use = framevr::aimrules::Of(c.skill, framevr::AimRulesDirected());
     return c;
 }
-// VR Settings > Aim: the options for each kind of cast (aimrules::Switches).
+// VR Settings > Gameplay > Targeting: the options for each kind of cast (aimrules::Switches).
 framevr::aimrules::Switches Options() {
     return {SpellsLocked(), BowSkillsLocked(), GroundAimMode()};
 }
@@ -3835,7 +4053,7 @@ void Tick() {
     const auto s = targetlock::Get();
     const bool fresh = wanted && !gamestate::MenuOpen() && s.at && GetTickCount64() - s.at <= 500;
     aimtargets::Tick(fresh ? &s : nullptr);
-    // A Fist of the Heavens call (heavens_gesture.h): the monster nearest the
+    // A Fist of the Heavens call (motions_paladin.h): the monster nearest the
     // weapon arm's line, in the same cone and reach as the hands' picks, is
     // handed to the game's target query for the skill (RulesUnit). None: no
     // hand-off, the game picks its own target. Whatever the Aim options.
@@ -3978,6 +4196,35 @@ bool TossAim(int skill,float playerX,float playerY,framevr::spellaim::Cast& cast
     }
     return true;
 }
+// Teleport punched while its landing showed (spell_motion.h, the transport's
+// circle), or a motion's spot (a summon, a wall, Meteor, Blizzard): there,
+// whatever the Aim options, never past the game's reach. Meteor and Blizzard
+// go to the highlighted monster instead when there is one
+// (aimrules::MotionOnTarget): the casting button's pick - its hand's, the
+// other's, the eyes' (aimtargets::Resolve).
+bool MotionAim(int skill,float playerX,float playerY,framevr::spellaim::Cast& cast) {
+    float x=0,y=0;int landed=-1;   // the landing's skill: the game's later queries of the cast ask with -1
+    if(!g_spellAimReady.load()||!g_enabled.load()||gamestate::MenuOpen()||!framevr::MotionLanding(skill,x,y,&landed))return false;
+    const char* by="motion";
+    if(framevr::aimrules::MotionOnTarget(landed)) {
+        const auto c=aimtargets::Now();
+        float mx=0,my=0,md=0;int source=-1;uint32_t id=0;
+        if(aimtargets::Resolve(c.button,c.bow,c.use,mx,my,md,&source,&id)){x=mx;y=my;by=aimtargets::SourceName(source);g_note.source=source;g_note.id=id;}
+    }
+    float dx=x-playerX,dy=y-playerY;
+    const float wanted=std::hypot(dx,dy);
+    if(wanted<framevr::spellaim::GroundMinDistance&&wanted>.001f){dx*=framevr::spellaim::GroundMinDistance/wanted;dy*=framevr::spellaim::GroundMinDistance/wanted;}
+    if(!framevr::aimreach::Clamp(dx,dy))return false;
+    cast.x=playerX+dx;cast.y=playerY+dy;cast.directed=cast.contactPoint=true;
+    g_note.by=by;g_note.distance=std::hypot(dx,dy);
+    static ULONGLONG lastLog=0;
+    if(GetTickCount64()-lastLog>250) {
+        lastLog=GetTickCount64();
+        if(g_note.id)LogF("Frame motion aim: skill %d on the highlighted monster %u (%s), %.1f cells",skill,g_note.id,by,g_note.distance);
+        else LogF("Frame motion aim: skill %d on the landing shown, %.1f cells (shown %.1f from here)",skill,g_note.distance,wanted);
+    }
+    return true;
+}
 // Telemetry: "Frame aim cast:" - every cast the aim rules see, at most one line
 // per skill per 250 ms: the rule, the button, the target and where it came
 // from, a unit hand-off, and the point or heading sent to the game.
@@ -3985,9 +4232,10 @@ bool UpstreamSpellAim(float playerX,float playerY,framevr::spellaim::Cast& cast)
 bool NativeSpellAim(float playerX,float playerY,framevr::spellaim::Cast& cast) {
     g_note={};
     const auto c=aimtargets::Now();
-    // A thrown trap first; then the aim rules only with this kind of cast's Aim
-    // option On; Off, as before them.
-    const bool directed=TossAim(c.skill,playerX,playerY,cast)||
+    if(c.skill==132||c.skill==143)leapglide::g_cast.store(GetTickCount64());   // Leap, Leap Attack: the view glides through the take-off
+    // Teleport on its shown landing or a thrown trap first; then the aim rules
+    // only with this kind of cast's Aim option On; Off, as before them.
+    const bool directed=MotionAim(c.skill,playerX,playerY,cast)||TossAim(c.skill,playerX,playerY,cast)||
         (aimtargets::RulesOn(c)?NativeSpellAimDecide(playerX,playerY,cast):UpstreamSpellAim(playerX,playerY,cast));
     static ULONGLONG told=0;static int toldSkill=-2;
     if(c.skill>=0&&(c.skill!=toldSkill||GetTickCount64()-told>250)) {
@@ -4615,7 +4863,7 @@ void ApplyActions(XINPUT_STATE* s) {
 }
 
 #ifdef D2RVR_NATIVE_OPENXR
-// Loot pick (VR Settings > Interface > Loot pick): the dropped item Interact
+// Loot pick (VR Settings > Interface > Labels > Loot pick): the dropped item Interact
 // takes is the one the player points at with the dominant hand held out, not
 // the game's nearest (lootaim). Chosen on the game thread from InteractTarget,
 // which runs every world frame; the room walk runs every 100 ms.
@@ -4774,11 +5022,11 @@ void TellThread(const char* hook, int slot) {
     LogF("Frame loot aim: threads - %s runs on thread %lu", hook, GetCurrentThreadId());
 }
 
-// The pointing hand: VR Settings > Body > Dominant hand (0 right, 1 left).
+// The pointing hand: VR Settings > Controls > Hands > Dominant hand (0 right, 1 left).
 int PointingHand() {
     const int hand = AimOn(framevr::settings::Dominant) ? 1 : 0;
     static int told = -1;
-    if (hand != told) { told = hand; LogF("Frame loot aim source: the %s hand points (VR Settings > Body > Dominant hand)", hand ? "left" : "right"); }
+    if (hand != told) { told = hand; LogF("Frame loot aim source: the %s hand points (VR Settings > Controls > Hands > Dominant hand)", hand ? "left" : "right"); }
     return hand;
 }
 // "Frame loot aim source:" once a second at most per hand while it keeps pointing with the motion layer off.
@@ -4930,6 +5178,8 @@ uintptr_t HandItem() {
 uintptr_t Selected() {
     bool between = false;
     if (!On(&between)) return 0;
+    // Both grips held for the motions (or a moment after): a motion's cast press is no pick-up.
+    if (framevr::SpellGripsHeld()) return 0;
     TellThread("the Interact skill's target", 0);
     const uintptr_t handed = Handed(g_pick.load(), false);
     if (handed && between) {   // asked between headset frames (A's press): once a second at most
@@ -5421,7 +5671,7 @@ uint64_t HookMapClick(void* unit, int type, int x, int y, uint64_t flags) {
        framevr::spellaim::ControllerPoint(cast,px,py,tx,ty)) {
         g_spellCommand={reinterpret_cast<uintptr_t>(unit),tx,ty};
         x=tx;y=ty;
-        // Every ground skill the mod places (VR Settings > Aim > Ground skill aim
+        // Every ground skill the mod places (VR Settings > Gameplay > Targeting > Ground skill aim
         // not Game's aim), Fire Blast included: a circle at the cast point, in the
         // element's color, once the game accepts the cast (HookSpellCommand).
         const int skill=GroundAimMode()>0?framevr::GroundSpellSkill():-1;
@@ -5546,6 +5796,104 @@ void Tick(ULONGLONG now) {
     if (!g_queued.exchange(true) && !gamestate::RunOnUi(&Click)) g_queued.store(false);
 }
 }
+
+// Rooms built to meet the way toward the hero (steamvr/room_stitch.h; owner, 2026-11-07: dungeon sections
+// "at higher and lower points than their adjacent tileset ... the next room high above them or below them,
+// with a black void inbetween"). The game's room-height pick (0x6A2A40) is hooked: the same four candidates,
+// the built neighbour nearest the hero's room wins. Our copy of the game's own pick is checked against the
+// game's answer every time; where they differ the game's answer stands (and the log says so once).
+namespace roomstitchvr {
+namespace rs = framevr::roomstitch;
+using HeightFn = float(__fastcall*)(void* layer, void* room, const float* edges);
+HeightFn volatile o_height = nullptr;
+std::atomic<bool> g_in{false};
+ULONGLONG g_tryAt = 0, g_reportAt = 0;
+std::atomic<uintptr_t> g_heroRoom{0};
+std::atomic<int> g_hx{0}, g_hy{0};
+std::atomic<bool> g_heroKnown{false};
+std::atomic<uint32_t> g_built{0}, g_moved{0}, g_disagree{0};
+std::atomic<uint32_t> g_lines{0};
+std::atomic<ULONGLONG> g_linesAt{0};
+template <class T> bool Rd(uintptr_t a, T& out) { return a >= 0x10000 && framevr::ReadMemory(&out, (const void*)a, sizeof(T)); }
+framevr::ceilingtop::LevelFloors g_floors;   // under g_floorsLock: each built room's border floors, by level
+SRWLOCK g_floorsLock = SRWLOCK_INIT;
+std::atomic<uintptr_t> g_heroLevel{0};
+uintptr_t HeroLevel() { return g_heroLevel.load(); }
+bool HighestFloor(uintptr_t level, float& top) {
+    AcquireSRWLockShared(&g_floorsLock);
+    const bool ok = g_floors.Highest(level, top);
+    ReleaseSRWLockShared(&g_floorsLock);
+    return ok;
+}
+float Pick(void* layer, void* room, const float* edges);
+// The game's room-height pick, hooked: the stitch's pick, and the built room's floors kept for the ceiling.
+float __fastcall Height(void* layer, void* room, const float* edges) {
+    const float h = Pick(layer, room, edges);
+    uintptr_t level = 0;
+    if (edges && Rd((uintptr_t)room + 0x90, level) && level >= 0x10000) {   // DRLG room -> its level (game_layout drlgroom::Level)
+        AcquireSRWLockExclusive(&g_floorsLock);
+        g_floors.Add(level, h, edges);
+        ReleaseSRWLockExclusive(&g_floorsLock);
+    }
+    return h;
+}
+float Pick(void* layer, void* room, const float* edges) {
+    HeightFn original = o_height;
+    for (int i = 0; !original && i < (1 << 20); ++i) { YieldProcessor(); original = o_height; }   // the trampoline lands after the detour
+    const float game = original ? original(layer, room, edges) : 0.0f;
+    if (!original || !g_set.roomStitch.load() || !edges) return game;
+    rs::Candidate c[4];
+    const auto read = [](uintptr_t a, auto& v) { return Rd(a, v); };
+    if (!rs::Candidates((uintptr_t)layer, (uintptr_t)room, edges, read, c)) return game;
+    const uintptr_t hero = g_heroRoom.load();
+    const int theirs = rs::GameChoice(c, hero);
+    if (std::fabs(rs::HeightOf(c, theirs) - game) > 0.01f) {   // our copy of the game's pick is off (a stale hero room, a layout change)
+        if (g_disagree.fetch_add(1) == 0)
+            LogF("vrcam: room stitch - the game picked height %.2f, our copy of its pick %.2f; the game's stands where they differ", game, rs::HeightOf(c, theirs));
+        return game;
+    }
+    const int ours = rs::Choice(c, hero, g_heroKnown.load(), g_hx.load(), g_hy.load());
+    const float h = rs::HeightOf(c, ours);
+    g_built.fetch_add(1);
+    if (ours == theirs || std::fabs(h - game) < 0.01f) return game;
+    g_moved.fetch_add(1);
+#ifdef D2RVR_DEVELOPER
+    const ULONGLONG now = GetTickCount64();
+    if (now - g_linesAt.load() >= 1000) { g_linesAt.store(now); g_lines.store(0); }
+    if (g_lines.fetch_add(1) < 10) {
+        int32_t x = 0, y = 0; Rd((uintptr_t)room + rs::PosX, x); Rd((uintptr_t)room + rs::PosY, y);
+        LogF("vrcam: room stitch - room %llX at (%d, %d): height %.2f from its %s neighbour (nearest the hero) instead of %.2f from its %s; "
+             "%.2f moved along the line of sight", (unsigned long long)(uintptr_t)room, x, y, h, rs::DirName(ours), game, rs::DirName(theirs), h - game);
+    }
+#endif
+    return h;
+}
+// The 1 ms timer: the hero's room (path +0x20, its DRLG room +0x18) for the pick; the hook goes in.
+void Tick(ULONGLONG now) {
+    static ULONGLONG next = 0;
+    if (now < next) return;
+    next = now + 50;
+    if (!g_in.load() && now - g_tryAt >= 500) {
+        g_tryAt = now;
+        if (Matches(rs::FindRva, rs::FindSig, sizeof rs::FindSig) && Matches(rs::HeightRva, rs::HeightSig, sizeof rs::HeightSig) &&
+            d2rsig::Hook(rs::HeightRva, rs::HeightSig, sizeof rs::HeightSig, reinterpret_cast<void*>(&Height),
+                         reinterpret_cast<void**>(const_cast<HeightFn*>(&o_height)))) {
+            g_in.store(true);
+            Log("vrcam: room stitch - in: each room built meets the built neighbour nearest the hero's room ([render] room_stitch)");
+        }
+    }
+    uintptr_t hero = 0, path = 0, room = 0, drlg = 0; int32_t x = 0, y = 0;
+    const bool known = g_inWorld.load() && SewerInteractionLayoutReady() && combat::LocalPlayerUnit(hero) && Rd(hero + 0x38, path) &&
+                       Rd(path + 0x20, room) && Rd(room + 0x18, drlg) && drlg >= 0x10000 && Rd(drlg + rs::PosX, x) && Rd(drlg + rs::PosY, y);
+    uintptr_t level = 0;
+    if (known) { g_heroRoom.store(drlg); g_hx.store(x); g_hy.store(y); if (Rd(drlg + 0x90, level)) g_heroLevel.store(level); }
+    g_heroKnown.store(known);
+    if (now - g_reportAt >= 60000 && g_moved.load()) {
+        g_reportAt = now;
+        LogF("vrcam: room stitch - %u of %u rooms built met the way toward the hero instead of the game's pick", g_moved.load(), g_built.load());
+    }
+}
+}  // namespace roomstitchvr
 
 // Developer builds: how far the hero goes after a conversation opens (talk_stop.h Watch),
 // the evidence for the stop at the press (talkhold, beside ApplyActions).
@@ -6315,7 +6663,7 @@ std::string BusyThreads(double spanUs) {
 
 void Recenter();
 #ifdef D2RVR_NATIVE_OPENXR
-// Eyes by turns (VR Settings > Performance > Eyes drawn per frame): one pass a game frame,
+// Eyes by turns (VR Settings > Graphics > Performance > Eyes drawn per frame): one pass a game frame,
 // the eyes in turn. The headset gets this eye fresh and the other as it was
 // last drawn, at the pose it was drawn with - the runtime turns it to the head.
 // Half the CPU work a headset frame, each eye at half the rate, and the eyes a
@@ -6368,7 +6716,7 @@ void WarnGpuWait() {
     if (framevr::GpuWaitDeferred()) { told = false; return; }
     if (told) return;
     told = true;
-    Say("Each frame waits for the GPU ([render] defer_gpu_wait=0), about half the frame rate - VR Settings > Performance > Defer GPU wait turns it on");
+    Say("Each frame waits for the GPU ([render] defer_gpu_wait=0), about half the frame rate - VR Settings > Graphics > Frames > Defer GPU wait turns it on");
 }
 bool TurnsWanted() {
     if (framevr::StereoRendering() != 1) return false;
@@ -7657,6 +8005,9 @@ bool YawFromMatrix(const float* m, float* out, float* eyeModel, bool* eyeOk, flo
         float eye[3] = {g_eyeWorld[0].load(), g_eyeWorld[1].load(), g_eyeWorld[2].load()}, look[3];
         if (LookAtNow(look))
             for (int i = 0; i < 3; ++i) eye[i] = look[i] + g_eyeFromLook[i].load();
+        // Up a Leap the camera rose with the model: the eye in it is the standing one. Its
+        // last rebuild's rise for the one this eye's camera takes (CameraRise), m the pose's.
+        eye[1] += CameraRise() - g_viewRise.load();
         const float d[3] = {eye[0] - m[12], eye[1] - m[13], eye[2] - m[14]};
         for (int r = 0; r < 3; ++r) {
             const float l2 = m[r*4]*m[r*4] + m[r*4+1]*m[r*4+1] + m[r*4+2]*m[r*4+2];
@@ -7717,7 +8068,9 @@ void DiagPose(float yawInModel) {
 // ways). Whichever, it is made this frame's: the translation is the camera's
 // look-at (exactly the hero's position, and already this frame's), and a
 // matrix whose translation is not on it yet is a frame old, so its yaw gets
-// the last step it turned by.
+// the last step it turned by. Its height above the look-at is the game's lift
+// of the hero (Leap's arc): noted for the camera (g_unitRise), and the part
+// the camera follows is kept.
 void HeroMatrixNow(uintptr_t at, float* m) {
     static SRWLOCK lock = SRWLOCK_INIT;
     static uintptr_t lastAt = 0;
@@ -7742,7 +8095,11 @@ void HeroMatrixNow(uintptr_t at, float* m) {
             m[r*4] = x * c + z * sn; m[r*4 + 2] = -x * sn + z * c;
         }
     }
-    if (off < 2.0f) { m[12] = look[0]; m[13] = look[1]; m[14] = look[2]; }
+    if (off < 2.0f) {
+        const float rise = m[13] - look[1];
+        g_unitRise.store(std::isfinite(rise) ? rise : 0.0f); g_unitRiseAt.store(GetTickCount64());
+        m[12] = look[0]; m[13] = look[1] + FollowedRise(rise); m[14] = look[2];
+    }
 }
 
 // The matrix to read at this pose: the structural one resolved now (its array moves when it
@@ -7777,13 +8134,21 @@ bool FreshYawInModel(float* yawInModel, float* eyeModel, bool* eyeOk) {
     {   // Diagnostics for the jump: does the game lift the unit itself (matrix
         // above the look-at), or only the animation (the hips, skel::HeroEye)?
         static ULONGLONG told = 0;
+        static float top = 0.0f, topCam = 0.0f;   // this jump's highest rise, and what the camera took of it
         float eye = 0.0f, lift = 0.0f, rawLift = 0.0f;
-        const float unitLift = raw[13] - m[13];
+        const float unitLift = GetTickCount64() - g_unitRiseAt.load() < 100 ? g_unitRise.load() : 0.0f;   // HeroMatrixNow noted it
         if (skel::HeroEye(&eye, &lift, &rawLift) && (rawLift > 0.6f || fabsf(unitLift) > 0.3f) && GetTickCount64() - told > 500) {
             told = GetTickCount64();
             LogF("vrcam: jump - hips %.2f above standing (camera up %.2f units), model matrix %.2f above the look-at",
-                 rawLift, lift * g_heroScale.load(), unitLift);
+                 rawLift, JumpLift(LeapRise()), unitLift);
         }
+        if (unitLift > top) { top = unitLift; topCam = JumpLift(LeapRise()); }
+        else if (unitLift < kRiseFrom && top > 2.0f) {
+            LogF("vrcam: Leap's arc - the hero rose %.1f units (%.0f cm), the camera with him %.1f", top,
+                 top / std::max(0.1f, std::max(1.0f, ScaleHeight()) / UserEyeHeightM()) * 100.0f, topCam);
+            top = topCam = 0.0f;
+        }
+        else if (unitLift < kRiseFrom) top = topCam = 0.0f;
     }
     if (!YawFromMatrix(m, &yaw, eyeModel, eyeOk, rows)) {
         flog::Line("P,%u,%.4f,%d,%p,%.3f,%.3f,%.3f,,,,,,,,noview", flog::Pass(), flog::Dt(), g_eye.load() & 1, (void*)at,
@@ -8115,6 +8480,8 @@ void PushArms() {
         skel::SetHeroPos(hero[0], hero[1], hero[2]);
         memcpy(g_heroPosNow, hero, sizeof hero);
     }
+    // Room-scale: where the drawn body stands when you have stepped away from the hero's spot (first person).
+    skel::SetEyeGround(g_eyeWorld[0].load(), g_eyeWorld[2].load(), on && g_eyeOk.load() && !ThirdPerson() && !Overhead());
     // third person, the game on the floor and F1 in perspective: the whole hero as the game
     // animates him, head included (on the floor he stood headless, 2026-10-05)
     const bool own = on && !ThirdPerson() && !Overhead()
@@ -8167,6 +8534,7 @@ void PushArms() {
     // spears, polearms and two-handed swords have only this way (the old one turned the
     // weapon through both hands as the animation holds them)
     in.staffFreeLeft = g_set.staffFreeLeft.load() || likeStaff;
+    in.soloStaffGrip = framevr::SpellGripsArmed();
     // [hands] fist: a hand whose slot holds nothing is free. Bows and crossbows
     // keep the animation's hands (the drawing hand holds the string); a staff
     // sits in the right slot, and the left is free only in staff_free_left
@@ -8299,7 +8667,7 @@ void PushArms() {
 #ifdef D2RVR_NATIVE_OPENXR
     in.forearmTwist = in.wrist;   // a hand turned by the controller turns its forearm too
     in.shieldTrace = g_set.shieldTrace.load();
-    {// VR Settings > Shield: one settings snapshot every 200 ms, not one per frame
+    {// VR Settings > Gameplay > Shield: one settings snapshot every 200 ms, not one per frame
      static float grip = 0, out = 0, up = 0, follow = skel::shield::kFollowDefaultPct, roll = 0;
      static ULONGLONG readAt = 0; const ULONGLONG now = GetTickCount64();
      if (!readAt || now - readAt > 200) {
@@ -8357,6 +8725,25 @@ std::atomic<int> g_fogAct{0};        // the area's act for the fog colour, caves
 std::atomic<bool> g_underground{false};   // in the world, off the outdoor list: the fog takes [fog] color_caves
 std::atomic<bool> g_inWorld{false};  // a game area is loaded: not the main menu (its own "frontend" biome), not before any
 std::atomic<bool> g_ceilBiome{false};   // the area's biome is on [ceiling] biomes
+// [ceiling] game_ceiling: the area's kind of the game's ceiling (-1: none - not on game_ceiling_biomes, or no model of
+// its own), its walls' top as the installer measured it (0: not measured) and its own height_<biome> (0: not set)
+std::atomic<int> g_gameCeilKind{-1};
+std::atomic<float> g_wallsTopHere{0.0f}, g_ownHeightHere{0.0f};
+// A file of the mod's data as text (at most 1 MiB), from its .mpq folder (PluginContext::modDirectory): "" none
+std::string ModDataText(const char* rel) {
+    if (!g_ctx || !g_ctx->modDirectory) return std::string();
+    std::wstring path = g_ctx->modDirectory;
+    path += L"\\";
+    for (const char* c = rel; *c; ++c) path += *c == '/' ? L'\\' : (wchar_t)(unsigned char)*c;
+    std::string text;
+    if (FILE* f = _wfopen(path.c_str(), L"rb")) {
+        char buf[4096];
+        size_t n;
+        while ((n = fread(buf, 1, sizeof buf, f)) > 0 && text.size() < (1u << 20)) text.append(buf, n);
+        fclose(f);
+    }
+    return text;
+}
 std::atomic<bool> g_noFogArea{false};   // the area's biome is on [fog] no_fog_areas
 
 // The game's own day and night (2026-10-05). The game draws a debug line with
@@ -8857,7 +9244,7 @@ void Tick() {
 // x to x and y to z; an object's (static path +0x10/+0x14) found a tiki torch where one
 // stood. What gives light and how far is the game's Objects table (gamestate::ObjectLight).
 // The hero unit is the one the attack hook last worked on: hit once in an area.
-namespace fx { bool CeilWanted(); }
+namespace fx { bool CeilWanted(); bool GameCeilingByGame(); }
 namespace worldobj {
 template <class T> bool Rd(uintptr_t a, T* out) { return a > 0x10000 && env::SafeRead((const void*)a, out, sizeof(T)); }
 
@@ -9039,7 +9426,8 @@ void Gather() {
     last = GetTickCount64();
     // [ceiling] torches=0: no lights wanted, so no scan of the game's memory either - on a
     // weak PC its read of all the game's heap every 1.5 s was suspected of VR dropouts (0.142)
-    const bool want = fx::CeilWanted() && g_set.ceilTorches.load();
+    // (none where the game draws the ceiling: its own torches, fires and spells light it as they light the walls)
+    const bool want = fx::CeilWanted() && g_set.ceilTorches.load() && !(fx::GameCeilingByGame() && engineunits::CeilingShown());
     g_heroWanted.store(want);
     if (!want) { g_known.store(false); return; }
     float L[3];
@@ -9284,12 +9672,27 @@ void SkyTick() {
         g_underground.store(world && !IsOutdoorBiome(biome));
         g_ceilBiome.store(world && IsCeilingBiome(biome));
         g_noFogArea.store(world && IsNoFogBiome(biome));
+        // [ceiling] game_ceiling: the area's kind of the game's ceiling when on game_ceiling_biomes, else none; its walls'
+        // top (the installer's measures.txt) and its own height
+        const int kind = world && IsGameCeilingBiome(biome) ? gameceiling::KindOf(biome) : -1;
+        g_gameCeilKind.store(kind);
+        g_ownHeightHere.store(world ? OwnCeilingHeight(biome) : 0.0f);
+        {
+            ceilmeasure::Measures ms;
+            const bool have = kind >= 0 && ceilmeasure::Parse(ModDataText(ceilmeasure::kFile), &ms);
+            g_wallsTopHere.store(have ? ceilmeasure::WallsTopOf(ms, biome) : 0.0f);
+        }
+        engineunits::WorldSeen(world);   // (a menu after a game was left: our units may be placed again in the next one)
         static std::string told = "?";   // no biome name has a question mark
         if (biome != told) {
             told = biome;
-            LogF("vrcam: biome '%s' - %s%s%s", biome.empty() ? "(none yet)" : biome.c_str(),
+            char game[200] = "";
+            if (kind >= 0)
+                snprintf(game, sizeof game, ", the game's '%s' ceiling in VR F4 ([ceiling] game_ceiling%s; walls' top %.1f, own height %.1f)",
+                         gameceiling::kKinds[kind].name, g_set.gameCeiling.load() ? "" : "=0: not now", g_wallsTopHere.load(), g_ownHeightHere.load());
+            LogF("vrcam: biome '%s' - %s%s%s%s", biome.empty() ? "(none yet)" : biome.c_str(),
                  palette >= 0 ? kPalettes[palette].part : "no sky here (not in [sky] outdoor)",
-                 g_ceilBiome.load() ? ", a cave ceiling ([ceiling] biomes)" : "",
+                 g_ceilBiome.load() ? ", a cave ceiling ([ceiling] biomes)" : "", game,
                  g_noFogArea.load() ? ", no added fog ([fog] no_fog_areas)" : "");
         }
     }
@@ -9520,9 +9923,12 @@ bool OutlineWanted() {
 bool RingWanted() {
     const bool tacticalActive = companionai::IsTacticalCommandsEnabled() &&
         (companionai::GetActiveTacticalOrder().type == framevr::companionai::TacticalOrderType::MoveAndHold);
+    // Teleport's landing while its fist is drawn in shows whatever the Aim options (its motion is the aim).
+    const auto marks = framevr::telegraph::Current().Get();
+    const auto now = GetTickCount64();
     return g_enabled.load() && g_inWorld.load() && !gamestate::MenuOpen() &&
-        (AimOn(framevr::settings::LandingCircles) || tacticalActive) &&
-        framevr::telegraph::AnyOn(framevr::telegraph::Current().Get(), GetTickCount64());
+        (((AimOn(framevr::settings::LandingCircles) || tacticalActive) && framevr::telegraph::AnyOn(marks, now)) ||
+         framevr::telegraph::SkillOn(marks, framevr::telegraph::TeleportMark, now));
 }
 // Loot beams (same pass): while a Rare, Set or Unique item or a high rune lies near the hero.
 bool BeamWanted() {
@@ -9545,6 +9951,43 @@ bool TableKeyWanted() { return TableView() && g_inWorld.load() && !gamestate::Me
 bool CeilWanted() {
     return g_set.ceilOn.load() && g_enabled.load() && !ThirdPerson() && g_inWorld.load() && g_ceilBiome.load() &&
            !WorldMenuBlocksEffects();
+}
+// [ceiling] game_ceiling (vr/engine_units.cpp): a ceiling of the game's wanted here - [ceiling] enabled, first person,
+// the area on game_ceiling_biomes with a kind of its own, no menu - and the view it is drawn in: VR first person (F4)
+// with the VR camera on. Flat F3 keeps the shader's vault.
+bool GameCeilWanted() {
+    return g_set.ceilOn.load() && g_enabled.load() && !ThirdPerson() && g_inWorld.load() && g_gameCeilKind.load() >= 0 &&
+           !WorldMenuBlocksEffects();
+}
+bool GameCeilView() { return FullBody() && g_enabled.load() && !ThirdPerson(); }
+// The ceiling is the game's here, laid or still loading: the shader draws none. Not once the area's kind is given up
+// on (its files not made or refused, its placings run out), or the engine units are not ready (their hooks not in,
+// the game's functions not where 3.3.93787 has them): the shader's vault then, with the area's own settings.
+bool GameCeilingByGame() {
+    const int kind = g_gameCeilKind.load(std::memory_order_relaxed);
+    return gameceiling::ByGame(g_set.gameCeiling.load(), GameCeilView(), GameCeilWanted() && kind >= 0, engineunits::GivenUp(kind),
+                               !engineunits::Ready());
+}
+// What vr/engine_units.cpp lays, asked on the game's render thread each frame its registry may be changed
+void GameCeilingInputs(engineunits::CeilingIn* c) {
+    c->ticked = g_set.gameCeiling.load();
+    c->f4 = GameCeilView();
+    c->wanted = GameCeilWanted();
+    c->heroOk = g_eyeOk.load();
+    c->wallTick = g_set.gameCeilingWall.load();
+    c->kind = g_gameCeilKind.load();
+    for (int i = 0; i < 3; ++i) c->hero[i] = g_heroPosNow[i];
+    c->floorY = AreaFloor(c->hero[1]);
+    c->tileWorld = gameceiling::TileWorld(g_set.ceilScale.load());
+    const float own = g_ownHeightHere.load(), walls = g_wallsTopHere.load();
+    const bool fromWalls = g_set.ceilFromWalls.load();
+    c->height = gameceiling::HeightOf(own, fromWalls, walls, c->kind >= 0 && c->kind < gameceiling::kKindCount ? gameceiling::kKinds[c->kind].relief : 0.0f,
+                                      c->tileWorld / gameceiling::kTile);
+    c->heightFrom = own > 0.0f ? "the area's height_<biome>"
+                    : fromWalls && walls > 0.0f ? "on the area's walls' top - the game's own pieces, [ceiling] height_from_walls"
+                                                : "no height of its own, its walls not measured";
+    c->height += CeilingLift(c->hero[1]);   // its top over the level's highest floor, not the lowest he has stood on
+    c->reach = gameceiling::WallReach(c->height, g_set.ceilFloor.load());
 }
 
 // The pictures of each act as the shader's preprocessor definitions; only what
@@ -9961,10 +10404,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
             // Heights over the area's floor, not the hero's feet: on a ledge the ceiling rose with
             // him (the user, 2026-10-07). The floor: the lowest the hero has stood since the area
             // changed; everything the shader measures (the ceiling, its height map) follows it.
-            static float floorY = 0.0f;
-            static uint32_t floorGen = ~0u;
-            if (floorGen != g_biomeGen.load()) { floorGen = g_biomeGen.load(); floorY = sv[0].hero[1]; }
-            floorY = std::min(floorY, sv[0].hero[1]);
+            const float floorY = AreaFloor(sv[0].hero[1]);   // (the game's slab stands on the same floor)
             for (int e = 0; e < 2; ++e) {
                 char n[16];
                 snprintf(n, sizeof n, "SkyProj%d", e); SetFloats(rt, n, sv[e].proj, 4);
@@ -10091,6 +10531,36 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
                     }
                 }
 
+                // A Sorceress's spell hands light the dungeon as a torch does, each by its element ([torch]
+                // spell_hands; elemental_hands.h HandLight), at the fist, a held torch's hand aside.
+                bool anySpell = false;
+#ifdef D2RVR_NATIVE_OPENXR
+                // At spell_hands_pct of its strength (owner, 2026-11-06: full, it lit the hero's face and left the
+                // dark beyond darker by contrast).
+                const float spellHandPct = g_set.spellHandPct.load();
+                if (g_set.spellHandLight.load() && spellHandPct > 0.0f) {
+                    const D2RVR_Shared* sh = g_shared;
+                    AcquireSRWLockShared(&g_stickLock); const StickFrame f = g_stickFrame; ReleaseSRWLockShared(&g_stickLock);
+                    for (int h = 0; h < 2 && outIndex < worldobj::kMaxLights; ++h) {
+                        int element = 0; float opacity = 0;
+                        if (torchActive[h] || !framevr::ElementalHandLight(h, element, opacity)) continue;
+                        if (!f.valid || !sh || sh->version != D2RVR_SHARED_VERSION || !sh->headValid || !(sh->handsValid & (1u << h))) continue;
+                        const auto light = framevr::elements::HandLight(framevr::elements::Element(element), opacity, GetTickCount64(), h);
+                        if (!(light.strength > 0)) continue;
+                        const float* p = (h == 0) ? sh->rightHand : sh->leftHand;
+                        const float headM = UserEyeHeightM();
+                        const float upm = std::max(1.0f, ViewHeight()) / (headM > 0.1f ? headM : 1.75f);
+                        const float dw[3] = {(p[0] * f.camR[0] - p[2] * f.camF[0]) * upm, p[1] * upm, (p[0] * f.camR[2] - p[2] * f.camF[2]) * upm};
+                        pos[outIndex * 4 + 0] = sv[0].eyeRel[0] + dw[0];
+                        pos[outIndex * 4 + 1] = (sv[0].hero[1] - floorY) + sv[0].eyeRel[1] + dw[1];
+                        pos[outIndex * 4 + 2] = sv[0].eyeRel[2] + dw[2];
+                        pos[outIndex * 4 + 3] = framevr::torch::ComputeShaderLightRadius(light.radius, g_set.ceilTorchRadius.load());
+                        for (int c = 0; c < 3; ++c) col[outIndex * 4 + c] = light.rgb[c];
+                        col[outIndex * 4 + 3] = light.strength * spellHandPct / 100.0f;
+                        ++outIndex; anySpell = true;
+                    }
+                }
+#endif
                 // Fill remaining slots with world/monster lights
                 const int remainingSlots = worldobj::kMaxLights - outIndex;
                 const int copyCount = std::min(n, remainingSlots);
@@ -10106,8 +10576,8 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
                     col[outIndex * 4 + 3] = std::clamp((reach - d) / (0.25f * reach), 0.0f, 1.0f) * (l[i].monster ? g_set.ceilMonsterBright.load() : 1.0f);
                 }
 
-                SetBool(rt, "CeilTorches", g_set.ceilTorches.load() || anyTorch);
-                SetBool(rt, "GameLightsOn", worldobj::g_known.load() || anyTorch);
+                SetBool(rt, "CeilTorches", g_set.ceilTorches.load() || anyTorch || anySpell);
+                SetBool(rt, "GameLightsOn", worldobj::g_known.load() || anyTorch || anySpell);
                 SetFloat(rt, "CeilTorchBright", g_set.ceilTorchBright.load());
                 SetFloat(rt, "CeilTorchRadius", g_set.ceilTorchRadius.load());
                 SetFloat(rt, "CeilTorchWarm", g_set.ceilTorchWarm.load());
@@ -10122,7 +10592,20 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
                          sv[0].hero[0], sv[0].hero[1], sv[0].hero[2], sv[0].eyeRel[0], sv[0].eyeRel[1], sv[0].eyeRel[2]);
                 }
             }
-        bool ceil = !sky && CeilWanted();
+        // [ceiling] game_ceiling: the game's from the area's first frame, laid or still loading - never the shader's
+        // vault for a moment in between
+        const int who = gameceiling::Drawer(sky, CeilWanted(), GameCeilingByGame(), engineunits::CeilingShown());
+        {   // who draws it, each change
+            static int toldWho = -1;
+            if (who != toldWho) {
+                static const char* const kWho[] = {"none wanted here", "the shader's vault",
+                                                   "the game's ([ceiling] game_ceiling) - its slab not laid yet: nothing drawn meanwhile",
+                                                   "the game's ([ceiling] game_ceiling) - its slab laid"};
+                LogF("vrcam: dungeon ceiling drawn by: %s", kWho[who]);
+                toldWho = who;
+            }
+        }
+        bool ceil = who == 1;
         for (const SkyView& v : sv) ceil = ceil && v.proj_ok && v.axes_ok && v.proj[0] != 0.0f && v.proj[1] != 0.0f;
         SetBool(rt, "CeilOn", ceil);
         if (ceil) {
@@ -10130,7 +10613,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
             float height, bright, light, relief;
             int slot;
             CeilingNow(&height, &bright, &light, &relief, &slot);
-            SetFloat(rt, "CeilHeight", height);
+            SetFloat(rt, "CeilHeight", height + CeilingLift(sv[0].hero[1]));   // over the level's highest floor
             SetFloat(rt, "CeilScale", scale);
             SetFloat(rt, "CeilBrightness", bright);
             SetFloat(rt, "CeilRelief", relief);
@@ -10280,7 +10763,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
         // that shape's edge. xyz centre relative to the hero, w strength;
         // shape = radius, lowest and highest height (world units). Up to two
         // (aimtargets::ShownTargets: each hand's, else the eyes'), each in its
-        // own source's color (VR Settings > Targets; the eyes take the casting hand's).
+        // own source's color (VR Settings > Interface > Outlines; the eyes take the casting hand's).
         SkyView sv[2];
         AcquireSRWLockShared(&g_skyLock); sv[0] = g_skyView[0]; sv[1] = g_skyView[1]; ReleaseSRWLockShared(&g_skyLock);
         aimtargets::Shown shown[2];
@@ -10311,6 +10794,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
             const auto marks = Current().Get();
             const auto now = GetTickCount64();
             const float shear = framevr::coordinates::GroundShear;
+            float tele[4] = {};   // Teleport's landing, for its pillar (TelePos): the first shown
             for (int k = 0; k < MaxMarks; ++k) {
                 const auto& mark = marks[k];
                 const auto draw = Sample(mark, now);
@@ -10321,13 +10805,18 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
                 char n[16];
                 snprintf(n, sizeof n, "RingPos%d", k); SetFloats(rt, n, ring, 4);
                 snprintf(n, sizeof n, "RingFill%d", k); SetFloat(rt, n, draw.fill);
-                // rgb its element's color (fire orange, cold blue, lightning yellow, other green, warning red), w its radius
-                static const float kElement[5][3] = {{1.0f, 0.45f, 0.05f}, {0.3f, 0.7f, 1.0f}, {1.0f, 0.92f, 0.35f}, {0.25f, 1.0f, 0.4f}, {1.0f, 0.05f, 0.05f}};
-                const int el = mark.element >= 0 && mark.element < 5 ? mark.element : 0;
+                // rgb its element's color (fire orange, cold blue, lightning yellow, other green, warning red, Teleport's
+                // arcane violet), w its radius
+                static const float kElement[6][3] = {{1.0f, 0.45f, 0.05f}, {0.3f, 0.7f, 1.0f}, {1.0f, 0.92f, 0.35f}, {0.25f, 1.0f, 0.4f}, {1.0f, 0.05f, 0.05f},
+                                                     {0.62f, 0.55f, 1.0f}};
+                const int el = mark.element >= 0 && mark.element < 6 ? mark.element : 0;
                 const float col[4] = {kElement[el][0], kElement[el][1], kElement[el][2], mark.radius * 2.0f};
                 snprintf(n, sizeof n, "RingCol%d", k); SetFloats(rt, n, col, 4);
-                // a strip: its direction (grid x/y are world x/z) and half-length in world units; 0 = a circle
-                const float dir[4] = {mark.dirX, mark.dirY, mark.halfLength * 2.0f, 0.0f};
+                // a strip: its direction (grid x/y are world x/z) and half-length in world units; 0 = a circle; w 1:
+                // Teleport's sigil (D2R_DepthFog.fx TeleportSigil)
+                const bool teleport = mark.skill == TeleportMark;
+                const float dir[4] = {mark.dirX, mark.dirY, mark.halfLength * 2.0f, teleport ? 1.0f : 0.0f};
+                if (teleport && draw.on && tele[3] <= 0.0f) { tele[0] = ring[0]; tele[1] = ring[1]; tele[2] = ring[2]; tele[3] = ring[3]; }
                 snprintf(n, sizeof n, "RingDir%d", k); SetFloats(rt, n, dir, 4);
             }
             // Paint only the floor within this height of it (meters), so a circle does not
@@ -10335,7 +10824,14 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
             // 2026-10-20, like the rest of the look (D2R_DepthFog.fx, kCircle*).
             constexpr float kCircleHeightM = 0.15f;
             SetFloat(rt, "RingFloorTol", kCircleHeightM * std::max(1.0f, ScaleHeight()) / UserEyeHeightM());
+            // Teleport's pillar: 0.12 m core, 3 m tall at the player's scale
+            const float upm = std::max(1.0f, ScaleHeight()) / UserEyeHeightM();
+            SetBool(rt, "TeleOn", tele[3] > 0.0f);
+            SetFloats(rt, "TelePos", tele, 4);
+            const float teleShape[2] = {0.12f * upm, 3.0f * upm};
+            SetFloats(rt, "TeleShape", teleShape, 2);
         }
+        else SetBool(rt, "TeleOn", false);
         if (beams) {   // loot beams: each item's cell on the hero's floor, in its label colour
             namespace lb = framevr::lootbeams;
             const float upm = std::max(1.0f, ScaleHeight()) / UserEyeHeightM();   // world units per metre
@@ -10370,7 +10866,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
             std::copy(std::begin(nextIds), std::end(nextIds), ids);
             std::copy(std::begin(nextSince), std::end(nextSince), since);
             // core radius 0.18 m, 12 m tall, a floor glow of 0.7 m; painted within 0.3 m of the floor;
-            // w the brightness slider (VR Settings > Interface > Loot beams, 10% to 100%)
+            // w the brightness slider (VR Settings > Interface > Labels > Loot beams, 10% to 100%)
             const float shape[4] = {0.18f * upm, 12.0f * upm, 0.7f * upm, loot.strength};
             SetFloats(rt, "BeamShape", shape, 4);
             SetFloat(rt, "BeamFloorTol", 0.3f * upm);
@@ -10734,6 +11230,7 @@ DWORD WINAPI UpdateThread(void*) {
         talkstop::Tick(nowMs);      // how far the hero goes after a conversation opens (log)
 #endif
         lootscan::Tick(nowMs);      // loot beams: the beam-worthy items lying near the hero
+        roomstitchvr::Tick(nowMs);  // rooms built to meet the way toward the hero: the hero's room, the hook
 #endif
 #ifdef D2RVR_NATIVE_OPENXR
         mobaim::Tick();    // the aim rules' targets: each hand's held out, and the one looked at
@@ -10867,6 +11364,8 @@ DWORD WINAPI UpdateThread(void*) {
             ReportXInputUse();
             fx::TryRegister();
             InstallBiomeHook();
+            // [ceiling] game_ceiling: the engine units' hooks, only with the VR platform and the setting on
+            engineunits::Install(g_set.platform.load() == 1 && g_set.gameCeiling.load() && g_set.ceilOn.load());
             InstallLabelHooks();
             InstallKeyMoveHook();
             InstallStickHook();
@@ -11046,6 +11545,7 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
     // Every game address this build has, before any hook rewrites the bytes it is found by.
     d2rsig::SetShiftTest(GetPrivateProfileIntW(L"debug", L"sig_shift_test", 0, g_iniPath));
     d2rsig::Resolve(ctx);
+    engineunits::Init(&Log, &fx::GameCeilingInputs, ctx->modDirectory);
 
 #ifdef D2RVR_NATIVE_OPENXR
     roofmaterials::Install(&Log, +[]() { return g_set.platform.load() == 1; });
