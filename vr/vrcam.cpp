@@ -97,7 +97,7 @@ namespace hud { void SetWorkspaceBand(float top, float bottom); void SetBoardCle
 #include "mat4.h"
 namespace gamecmd { void Init(const D2RL::PluginContext* ctx); void Tick(); }   // the game's key commands from BodyWalk (gamecmd.cpp)
 namespace spatialaudio { void SetLogger(void (*log)(const char*)); void SetViewYaw(float (*yaw)()); void Configure(bool headFollow, bool listenerTurn, float forwardSign, float depthScale); void Poll(); }   // head-relative sound (spatial_audio.cpp)
-namespace gamestate { bool ToggleMenus(); bool PhantomHover(); }
+namespace gamestate { bool ToggleMenus(); }
 namespace gamestate { uint32_t MenuEpoch(); }
 namespace gamestate { void Init(const D2RL::PluginContext* ctx); void Tick(); uint32_t WeaponClass(); uint32_t WeaponSet(); uint32_t WeaponType(); uint32_t HandsHeld(); uint32_t TwoHanded(); uint32_t WeaponHand(); uint32_t HandsKey(); bool MenuOpen(); int ObjectLight(uint32_t txt, uint32_t mode, float rgb[3]); uint64_t LocalPlayer(); void SetViewMode(uint32_t mode); bool AutoMapOpen(); bool SetAutoMap(bool open); void PollPlate(); bool PlateRect(int32_t out[4]); }
 namespace gamestate {bool LeftShield();}
@@ -515,6 +515,7 @@ struct Settings {
 stereoreplay::Settings g_replaySettings;
 
 wchar_t g_iniPath[MAX_PATH];
+float g_campfireAvoid[4] = {0, 0, 0, 0};   // [campfire] pick_avoid (CampfirePointer)
 FILETIME g_iniTime{};
 
 float IniF(const wchar_t* sec, const wchar_t* key, float def) {
@@ -1469,6 +1470,13 @@ void LoadSettings() {
         g_set.campfireFireX.store(IniF(L"campfire", L"fire_x", 1060.67f));
         g_set.campfireFireY.store(IniF(L"campfire", L"fire_y", 0.3f));
         g_set.campfireFireZ.store(IniF(L"campfire", L"fire_z", 123.94f));
+        {
+            wchar_t buf[96] = {};
+            GetPrivateProfileStringW(L"campfire", L"pick_avoid", L"", buf, 96, g_iniPath);
+            float a[4] = {0, 0, 0, 0};
+            if (swscanf_s(buf, L"%f,%f,%f,%f", &a[0], &a[1], &a[2], &a[3]) != 4) a[0] = a[1] = a[2] = a[3] = 0;
+            for (int i = 0; i < 4; ++i) g_campfireAvoid[i] = a[i];
+        }
         g_set.campfireFirePick.store(std::clamp(IniF(L"campfire", L"fire_pick_radius", 2.5f), 0.5f, 30.0f));
         g_set.campfirePanoYaw.store(std::clamp(IniF(L"campfire", L"pano_yaw", 0.0f), -360.0f, 360.0f));
         g_set.campfirePanoLow.store(std::clamp(IniF(L"campfire", L"pano_low", -90.0f), -90.0f, 89.0f));
@@ -3762,17 +3770,13 @@ bool CampfirePointer(const float o[3], const float d[3], POINT* where) {
                  rc.right, rc.bottom, canvas, P[0] != 0.0f ? P[5] / P[0] : 0.0f, nx, ny, p.x, p.y);
         }
     }
-    {   // Spots where the game hovers a hero the scene has not got (gamestate PhantomHover - the Warlock's
-        // hot spot on the ground before the Barbarian): learned as the pointer finds them, kept off after.
-        static POINT spots[16]; static int nSpots = 0;
-        const long r = std::max(40L, rc.bottom / 14);
-        if (gamestate::PhantomHover() && nSpots < 16) {
-            bool known = false;
-            for (int i = 0; i < nSpots; ++i) known |= std::labs(spots[i].x - p.x) < r / 2 && std::labs(spots[i].y - p.y) < r / 2;
-            if (!known) { spots[nSpots++] = p; LogF("vrcam: campfire - a phantom hero's spot at %ld %ld: the pointer keeps off it", p.x, p.y); }
+    {   // [campfire] pick_avoid = x0,y0,x1,y1 (0..1 of the window): a 2D control of the character screen
+        // (the Hardcore box) whose hot spot lies under the scene - the pointer is kept off it (2026-11-09).
+        const float* A = g_campfireAvoid;
+        if (A[2] > A[0] && A[3] > A[1]) {
+            const float fx = float(p.x) / float(std::max(1L, rc.right)), fy = float(p.y) / float(std::max(1L, rc.bottom));
+            if (fx >= A[0] && fx <= A[2] && fy >= A[1] && fy <= A[3]) { p.x = rc.right / 2; p.y = 1; }
         }
-        for (int i = 0; i < nSpots; ++i)
-            if (std::labs(spots[i].x - p.x) < r && std::labs(spots[i].y - p.y) < r) { p.x = rc.right / 2; p.y = 1; break; }
     }
     if (!ClientToScreen(g_gameWnd, &p)) return false;
     *where = p;

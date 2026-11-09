@@ -339,10 +339,7 @@ std::atomic<bool> g_respecButton{false};  // its Character page alone: Reset Ski
 // shows; the epoch changes each time it comes up anew. The box is read on the UI message thread.
 framevr::keyboard::NameBox g_nameBox;
 std::atomic<bool> g_keyboard{false};
-// The character screen hovering a hero who is not in the campfire scene (Warlock, a class this
-// scene has no model for): its hot spot is still there on the ground between the fire and the
-// Barbarian, and lit up a stray emblem (owner 2026-11-09). vrcam keeps the pointer off it.
-std::atomic<bool> g_phantomHover{false};
+
 std::atomic<uint32_t> g_keyboardEpoch{0};
 std::atomic<uint32_t> g_panelChanges{0};   // every panel opened or closed (leather::Back)
 std::atomic<bool> g_npcChoices{false};
@@ -900,10 +897,6 @@ SharedEvents::UiMessageAction __cdecl OnUiMessage(const PluginContext* ctx, cons
         snprintf(b, sizeof b, "gamestate: ui message '%s' '%s' text '%.80s'", target, command, text);
         Log(b);
     }
-    if (!strcmp(target, "CharacterCreate")) {
-        if (!strcmp(command, "Hover")) g_phantomHover.store(!_stricmp(text, "Warlock"));
-        else if (!strcmp(command, "Unhover")) g_phantomHover.store(false);
-    }
     g_nameBox.Message(target, command, text);
     if (g_keyboard.exchange(g_nameBox.Shown()) != g_nameBox.Shown())
         Log(g_nameBox.Shown() ? "gamestate: name box up (a hero picked) - VR keyboard shown" : "gamestate: name box gone - VR keyboard hidden");
@@ -1161,7 +1154,6 @@ bool RespecButtonShown(){return false;}   // the reset engine is in the native O
 #endif
 uint32_t PanelChanges(){return g_panelChanges.load();}
 bool KeyboardShown(){return g_keyboard.load();}
-bool PhantomHover(){return g_phantomHover.load();}
 uint32_t KeyboardEpoch(){return g_keyboardEpoch.load();}
 bool NpcChoicesOnly(){return g_npcChoices.load();}
 void ReadNpcChoicesRect() {
