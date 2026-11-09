@@ -99,6 +99,7 @@ FILE* g_out = nullptr;
 std::atomic<uint64_t> g_calls{0};
 
 float g_heroPos[3] = {};   // the world camera's look-at, from vrcam
+float g_eyeGround[2] = {};bool g_eyeGroundOk = false;   // under the eyes (SetEyeGround), same lock
 
 // The hero's world placement is applied at draw time, not in the pose. Look for
 // it near the SkeletonInstance: in it, in what it points at, and one more hop -
@@ -421,15 +422,25 @@ std::atomic<ULONGLONG> g_rigPosedAt[3] = {};
 // reported their legs left behind when they stepped. Per pose: asked for, done, refused as too far.
 std::atomic<unsigned> g_neckPoses{0},g_neckApplied{0},g_neckFar{0};
 std::atomic<float> g_neckFarthest{0};   // the largest move this window, in eye heights
+// Why the hero's pose had no body under the neck, by the hook's exits (Arms), per pose.
+enum NeckWhy {WhyNoPosition,WhyNotStanding,WhyInactive,WhyNotAsked,WhyNoFacing,WhyNoEye,WhyNoHands,WhyNoFrame,WhyNoBind,WhyCount};
+std::atomic<unsigned> g_neckWhy[WhyCount]{};
+std::atomic<float> g_neckApart{1e9f};   // the nearest a refused rig stood to the hero point (the hero's own, stepped away), world units
 void ReportNeckFollow() {
     static std::atomic<uint64_t> nextAt{0};
     auto before=nextAt.load();const auto now=GetTickCount64();
     if(now<before||!nextAt.compare_exchange_strong(before,now+5000))return;
     const unsigned poses=g_neckPoses.exchange(0),applied=g_neckApplied.exchange(0),tooFar=g_neckFar.exchange(0);
-    const float farthest=g_neckFarthest.exchange(0);
-    if(!poses||(!tooFar&&farthest<.1f&&applied==poses))return;   // standing at the room's centre: nothing to say
-    char line[240];std::snprintf(line,sizeof line,"Frame room body: last 5 s the body stood under your neck in %u of %u poses "
-        "(farthest %.2f eye heights from where the game poses it), %u refused as over 3 eye heights",applied,poses,farthest,tooFar);
+    const float farthest=g_neckFarthest.exchange(0),apart=g_neckApart.exchange(1e9f);
+    unsigned why[WhyCount],missed=0;for(int i=0;i<WhyCount;++i)missed+=why[i]=g_neckWhy[i].exchange(0);
+    missed-=why[WhyNotStanding]+why[WhyNoPosition];   // other rigs (not the local hero) leave by these too: shown, not counted as the hero's
+    if(!missed&&apart>12.f&&(!poses||(!tooFar&&farthest<.1f&&applied==poses)))return;   // standing at the room's centre: nothing to say
+    char line[420];std::snprintf(line,sizeof line,"Frame room body: last 5 s the body stood under your neck in %u of %u poses "
+        "(farthest %.2f eye heights from where the game poses it), %u refused as over 3 eye heights; hero poses without it: "
+        "inactive %u, not asked %u, no facing %u, no eye %u, no hands %u, no frame %u, no bind %u; rigs not standing at the hero's spot %u "
+        "(the nearest %.2f units from the hero point)",
+        applied,poses,farthest,tooFar,why[WhyInactive],why[WhyNotAsked],why[WhyNoFacing],why[WhyNoEye],why[WhyNoHands],why[WhyNoFrame],
+        why[WhyNoBind],why[WhyNotStanding]+why[WhyNoPosition],apart<1e8f?apart:-1.f);
     framevr::logging::Write(line);
 }
 #ifdef D2RVR_DEVELOPER
@@ -1540,6 +1551,7 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
     }
 #if D2RVR_FIRST_PERSON
     if(in.followTrackedNeck)++g_neckPoses;
+    if(in.followTrackedNeck&&!(in.haveEye&&in.haveYaw&&h.bindOk&&h.head>=0&&h.eyeY>0))++g_neckWhy[WhyNoBind];
     if(in.followTrackedNeck&&in.haveEye&&in.haveYaw&&h.bindOk&&h.head>=0&&h.eyeY>0) {
         const int neck=h.neck>=0?h.neck:h.head;
         const V3 bindNeck=Pos(h.bind[neck]);
@@ -3125,8 +3137,9 @@ void PoseMotionBow(uintptr_t self) {
 
 void Arms(uintptr_t self) {
     Input in;
-    float playerPosition[3];
-    AcquireSRWLockShared(&g_inLock); in = g_in;memcpy(playerPosition,g_heroPos,sizeof playerPosition); ReleaseSRWLockShared(&g_inLock);
+    float playerPosition[3],eyeGround[2];bool eyeGroundOk;
+    AcquireSRWLockShared(&g_inLock); in = g_in;memcpy(playerPosition,g_heroPos,sizeof playerPosition);
+    memcpy(eyeGround,g_eyeGround,sizeof eyeGround);eyeGroundOk=g_eyeGroundOk; ReleaseSRWLockShared(&g_inLock);
     // The hero is looked for even while nothing is done to him: his SkeletonInstance is what
     // vrcam's facing is found from (HeroTransform), and that is needed before the body can turn.
     const bool active = !(in.mode == 0 && !in.hideHead && !in.lockUpper && !(in.bodyTurn > 0 && in.haveYaw));
@@ -3168,8 +3181,16 @@ void Arms(uintptr_t self) {
     float position[3],head[16];uintptr_t pose=0,matrices=0;
     if(hero.head<0||size_t(hero.head)>=hero.bind.size()||stand<0||size_t(stand)>=hero.bind.size()||!ecs::CandidatePosition(self,position)||
        !Get(self+0x20,&pose)||!Get(pose+4,&matrices)||
-       !SafeCopy(head,reinterpret_cast<const void*>(matrices+uintptr_t(stand)*64),sizeof head))return;
-    if(!framevr::LocalStandingBody(position[0],position[2],playerPosition[0],playerPosition[2],head[13],hero.bind[stand].m[13])) {
+       !SafeCopy(head,reinterpret_cast<const void*>(matrices+uintptr_t(stand)*64),sizeof head)){++g_neckWhy[WhyNoPosition];return;}
+    // Standing at the hero's spot, or under your eyes: stepped away in the room the drawn body stands
+    // under you, and past 3 units (about 0.7 m) it was refused and left to the game, the legs back at the
+    // room's centre (owner, 2026-11-08: "my legs are staying attached to the center of the room").
+    if(!framevr::LocalStandingBodyInRoom(position[0],position[2],playerPosition[0],playerPosition[2],eyeGroundOk,eyeGround[0],eyeGround[1],
+                                         head[13],hero.bind[stand].m[13])) {
+        ++g_neckWhy[WhyNotStanding];
+        const float apart=std::hypot(position[0]-playerPosition[0],position[2]-playerPosition[2]);
+        for(float was=g_neckApart.load();apart<was&&!g_neckApart.compare_exchange_weak(was,apart);){}
+        ReportNeckFollow();
 #ifdef D2RVR_DEVELOPER
         if(hero.form&&std::hypot(position[0]-playerPosition[0],position[2]-playerPosition[2])<=2.0f)++g_formUnstanding;
 #endif
@@ -3177,7 +3198,8 @@ void Arms(uintptr_t self) {
     }
     // and standing where the player does, not merely near: a summon can share the rig
     if(hero.form) {
-        const float apart=std::hypot(position[0]-playerPosition[0],position[2]-playerPosition[2]);
+        float apart=std::hypot(position[0]-playerPosition[0],position[2]-playerPosition[2]);
+        if(eyeGroundOk)apart=std::min(apart,std::hypot(position[0]-eyeGround[0],position[2]-eyeGround[1]));   // room-scale, as above
 #ifdef D2RVR_DEVELOPER
         static std::atomic<uint64_t> toldAt{0};
         if(apart>2.0f&&GetTickCount64()-toldAt.load()>5000) {
@@ -3211,24 +3233,27 @@ void Arms(uintptr_t self) {
     else g_rigPosedAt[0].store(GetTickCount64());
 #endif
     NoteHero(self);
-    if (!active) return;
+    if (!active) {++g_neckWhy[WhyInactive];ReportNeckFollow();return;}
+    int why=in.followTrackedNeck?-1:WhyNotAsked;   // the first reason the body is not put under the neck this pose
     // The facing of this very frame, not of the last 10 ms tick - the hero only.
     if (in.haveYaw) if (const FreshFn f = g_fresh.load()) {
         float yaw = 0.0f, eye[3] = {}; bool eyeOk = false;
         if (f(&yaw, eye, &eyeOk)) {
             in.yawInModel = yaw;
             if (eyeOk) { memcpy(in.eyeModel, eye, sizeof eye); in.haveEye = true; }
-            else in.followTrackedNeck=false;
+            else {if(why<0&&in.followTrackedNeck)why=WhyNoEye;in.followTrackedNeck=false;}
         }
-        else in.followTrackedNeck=false;
+        else {if(why<0&&in.followTrackedNeck)why=WhyNoFacing;in.followTrackedNeck=false;}
     }
     if (in.mode == 2 || in.followTrackedNeck)
-        if (const FreshHandsFn f = g_freshHands.load()) if(!f(&in))in.followTrackedNeck=false;
+        if (const FreshHandsFn f = g_freshHands.load()) if(!f(&in)){if(why<0&&in.followTrackedNeck)why=WhyNoHands;in.followTrackedNeck=false;}
 #ifdef D2RVR_NATIVE_OPENXR
     // Resolve frame availability here, after refreshing this pose's eye/head
     // sample. A timer tick between pairs must not disable just one eye's body.
+    if(why<0&&in.followTrackedNeck&&!framevr::Active())why=WhyNoFrame;
     in.followTrackedNeck = in.followTrackedNeck && framevr::Active();
 #endif
+    if(why>=0)++g_neckWhy[why];
     // A form standing still: its legs and tail are held (the idle sways). Once per pair.
     float legHold = 1.0f;
     if (hero.form) {
@@ -4042,6 +4067,9 @@ uintptr_t EntityModelInstance(uint32_t entity) {
 void SetFresh(FreshFn fn) { g_fresh.store(fn); }
 void SetFreshHands(FreshHandsFn fn) { g_freshHands.store(fn); }
 
+void SetEyeGround(float x, float z, bool valid) {
+    AcquireSRWLockExclusive(&g_inLock);g_eyeGround[0]=x;g_eyeGround[1]=z;g_eyeGroundOk=valid;ReleaseSRWLockExclusive(&g_inLock);
+}
 void SetHeroPos(float x, float y, float z) {
     AcquireSRWLockExclusive(&g_inLock);g_heroPos[0]=x;g_heroPos[1]=y;g_heroPos[2]=z;ReleaseSRWLockExclusive(&g_inLock);
 }
