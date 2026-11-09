@@ -77,7 +77,7 @@ A critical finding from live runtime analysis in `D2R.exe` (`3.3.93787 / 3.3.938
 ## 4. Gesture Recognition & Disambiguation (`steamvr/transport.cpp`)
 
 ### 4.1. Select Companion First: Grip, Trigger, Aim & Release (`Grip` on Companion -> `Trigger` -> Aim -> Release)
-To prevent accidental tactical commands when using the Grip button for belt potions, weapon holsters, world interactions or the Paladin's grip gestures (Fist of the Heavens, the Blessed Hammer pump and the Charge punch all close the grip with the trigger free), every tactical order takes **Grip + Trigger** and must **begin by pointing at the companion first** ([`steamvr/tactical_chord.h`](../steamvr/tactical_chord.h), `tactical-chord-test`):
+To prevent accidental tactical commands when using the Grip button for belt potions, weapon holsters, world interactions or the Paladin's grip gestures (Fist of the Heavens, the Blessed Hammer pump and the Charge punch: both grips held, the triggers free), every tactical order takes **Grip + Trigger** and must **begin by pointing at the companion first** ([`steamvr/tactical_chord.h`](../steamvr/tactical_chord.h), `tactical-chord-test`):
 - **Step 1 — Arm (`Grip` held on the Companion):**
   - Evaluated every frame the hand may command, along the sightline through the hand (3D vertical cylinder, `cylinder3D` in sheared `coordinates::RenderGround` world metres, radius `0.95m`, height `[-0.45m, 2.00m]`, or ground foot radius `<= 3.5` sub-tiles) **or** the hand's own laser (the cylinder, or where it meets the floor within `3.5` sub-tiles of the companion's feet): a controller held low and pointed at the companion, or at the ground by its feet, missed the sightline alone. Either ray within `10` degrees of the companion's body (a metre up) also counts: far away a small aim error passes the cylinder by. A monster nearer the ray than the companion (by the same measure) keeps the trigger an attack.
   - The grip may close before or after the hand comes onto the companion; the hand stays on it for `0.25 s` after the ray leaves (`GraceSeconds`). A trigger already pulled for an attack keeps its trigger.
@@ -115,4 +115,4 @@ An upright open palm held for `400 ms` used to issue `DefensiveHold` as well. It
 | **Leash Break Auto-Cancel** | `RegroupLeash` | `2939`/`2940` (90%) or `2947`/`2948` (10% farewell) | `3173`/`3174` (90%) or `3181`/`3182` (10% farewell) | `3095`/`3096` (90%) or `3103`/`3104` (10% farewell) | `3017`/`3018` (90%) or `3025`/`3026` (10% farewell) |
 | **Critical HP (`< 50%`)** | `Distress` | `2937` / `2938` | `3171` / `3172` | `3093` / `3094` | `3015` / `3016` |
 
-- **INI Setting:** `[gameplay] companion_tactical_commands=1` in `d2r_pcvr.ini` (also toggleable live in the in-VR Settings menu under **Combat -> Tactical Commands**).
+- **INI Setting:** `[gameplay] companion_tactical_commands=1` in `d2r_pcvr.ini` (also toggleable live in the in-VR Settings menu under **Gameplay -> Monsters -> Tactical commands**).

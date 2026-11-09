@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Cache the Sorceress hand spells' own effect textures from the installed game.
+"""Cache the Sorceress hand spells' effect textures from the installed game.
 
-Elemental hand effects draw a few small sprites around each hand with the
-textures the game's own Fire Bolt, Fireball, Charged Bolt, Ice Bolt and Ice
-Blast effects use. They are read locally from the user's installation and
-stay there, never in the mod's release. Native BC payloads are kept as they
-are for direct GPU sampling.
+Elemental hand effects are small particle effects around each hand, drawn
+with the textures the game's own Fire Bolt, Fireball, Charged Bolt, Ice Bolt
+and Ice Blast effects use, and since version 2 more of the game's effect
+textures: its fire flipbook, smoke and wisp atlases, lightning arc and bolt
+flipbooks, snowflakes, an ice caustic, glows and a flame distortion. They are read locally from the user's installation and stay
+there, never in the mod's release. Native BC payloads are kept as they are
+for direct GPU sampling.
 """
 import argparse
 import hashlib
@@ -15,11 +17,13 @@ import struct
 from pathlib import Path
 from game_assets import open_assets
 
-VERSION = 1
+VERSION = 2
 MAGIC = 0x31505353  # 'SSP1'
 FILE = 'sprites.ssp'
-# The renderer's texture slots, in order: each texture, the spell effect that
-# names it (checked against that effect's own particle file) and its use.
+# The renderer's texture slots, in order (steamvr/spell_sprites.h): each
+# texture, the spell effect that names it (checked against that effect's own
+# particle file; None: a texture of the game's that no spell names, only read)
+# and its use.
 TEXTURES = (
     ('pyro/T_FX_fire_plate_med_04', 'firebolt', 'mask'),
     ('pyro/T_FX_fire_plate_med_03', 'fireball', 'mask'),
@@ -32,10 +36,20 @@ TEXTURES = (
     ('gradient/T_FX_IceBolt_gradient', 'ice_bolt', 'gradient'),
     ('geo/T_FX_FrozenOrb', 'ice_blast', 'mask'),
     ('gradient/T_FX_bluegreen_white_gradient_02', 'ice_blast', 'gradient'),
+    ('mask/t_fx_fireflipbook_64x64', None, 'mask'),               # 8x8 frames of flame
+    ('volumetric/t_fx_vol_smoke_atlas_4x4', None, 'mask'),        # 2x2 smoke puffs
+    ('volumetric/t_fx_vol_smoke_wispy_atlas_4x4', None, 'mask'),  # 2x2 smoke wisps
+    ('energy/t_fx_lighting_flipbook_01', None, 'mask'),           # 4x2 arcs
+    ('energy/t_fx_lighting_flipbook_02', None, 'mask'),           # 4x2 bolts
+    ('particulate/t_fx_snowflake_atlas_4x2_alphachannel', None, 'mask'),   # 2x4: flakes, ice chunks
+    ('geo/t_fx_geo_ice', None, 'mask'),                           # an ice caustic
+    ('light/t_fx_light_dot_glow', None, 'mask'),
+    ('light/t_fx_glow_flare_01', None, 'mask'),                   # a star flare
+    ('distortion/T_FX_gaussian_distortion_strong', 'firebolt', 'distortion'),
 )
 # D2R texture formats to DXGI: BC4 masks, BC3 read as linear masks, RGBA8
-# colour ramps (sRGB, decoded during sampling).
-FORMATS = {'mask': {63: 80, 61: 77, 62: 77}, 'gradient': {31: 29}}
+# colour ramps (sRGB, decoded during sampling), BC5 two-channel distortion.
+FORMATS = {'mask': {63: 80, 61: 77, 62: 77}, 'gradient': {31: 29}, 'distortion': {65: 83}}
 
 
 def texture(data, use):
@@ -58,7 +72,7 @@ def texture(data, use):
             raise ValueError('Truncated sprite mip table')
         size, relative = struct.unpack_from('<II', data, 36 + level * 8)
         w, h = max(1, width >> level), max(1, height >> level)
-        expected = w * h * 4 if fmt == 31 else ((w + 3) // 4) * ((h + 3) // 4) * (8 if fmt == 63 else 16)
+        expected = w * h * 4 if fmt == 31 else ((w + 3) // 4) * ((h + 3) // 4) * (8 if fmt == 63 else 16)   # BC5 (65): 16
         offset = 40 + level * 8 + relative
         if size != expected or offset < 36 + mips * 8 or offset + size > len(data):
             raise ValueError('Invalid sprite texture mip')
@@ -97,10 +111,11 @@ def prepare(game, destination=None, force=False, casclib=None):
         effects, textures, sources = {}, [], []
         for name, missile, use in TEXTURES:
             path = f'data/hd/vfx/textures/{name}.texture'
-            if missile not in effects:
-                effects[missile] = particles(assets, missile)
-            if path.lower().encode() not in effects[missile]:
-                raise ValueError(f'{missile} no longer uses {path}')
+            if missile is not None:
+                if missile not in effects:
+                    effects[missile] = particles(assets, missile)
+                if path.lower().encode() not in effects[missile]:
+                    raise ValueError(f'{missile} no longer uses {path}')
             textures.append(texture(assets.read(path), use))
             sources.append(path)
         # Decode/validate every texture before replacing the live cache.

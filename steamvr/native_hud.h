@@ -20,7 +20,7 @@ struct VisibilityOverride {
 };
 // The aura icon at the screen's top left is the game's own root panel
 // PaladinAuraPanel, apart from HUDPanel. Active auras already show on the
-// wrist (Companions & effects), so in a VR session, menus included, while
+// wrist (Buffs and companions), so in a VR session, menus included, while
 // that HUD row is On (Want), it is
 // hidden by visibility, the panel's own switch (no screen box is cleared:
 // portraits share that corner), on every UI step, as HUDPanel and
@@ -39,7 +39,7 @@ struct AuraIconHider {
     bool busy=false;                 // inside our own visibility call
     uint64_t releaseSince=0;
     bool Hidden()const{return visibility.hidden;}
-    // Hidden only in a VR session with HUD > Companions & effects On.
+    // Hidden only in a VR session with Interface > Wrist > Buffs and companions On.
     static constexpr bool Want(bool session,bool wristEffects){return session&&wristEffects;}
     // want: Want(). aura: an aura state on the local
     // player now (1), none (0) or no fresh sample (-1). set(visible): the

@@ -21,24 +21,40 @@ namespace framevr::settings {
 // vr_settings_content.h). Presets heads the rail; Guide and WhatsNew open from
 // the page band, not the rail; More (rows no override placed yet, the menu data
 // rules) too, and only while it has rows.
-enum class View : uint8_t { Presets, Body, Combat, Aim, Targets, Shield, Wrist, Interface, Survival, World, Vibration, Performance, Guide, WhatsNew, More, Count };
+enum class View : uint8_t { Presets, Combat, Targeting, Shield, Monsters, Physics, Moving, Body, Hands, Vibration, Wrist, Menus, Labels, Outlines, Warnings, Performance, Frames, Environment, Guide, WhatsNew, More, Count };
+// The rail's groups (content::Group, content::GroupTable) number below this, so the model
+// can remember a page per group and the help card has an id per group.
+constexpr int MaxRailGroups=8;
 enum Key { Motion, Seated, Dominant, Snap, TurnSpeed, Waist, BeltForward,
            Foveation, Sky, Fog, Ceiling, DrawDistance, ObjectDistance,
-           EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, VitalsTilt, HapticStrength, HapticMelee, HapticBowDraw, HapticBowRelease, HapticSpell, HapticInteraction, HapticAlert, HapticShortMelee, BloodVisor, BloodWipe, MeleeThrustSpeed, LootLabelSize, CompanionCounts, StrainVignette, OfflinePlayers, ShieldBashSpeed, DesktopOneEye, MapTopDown, MapRotate, FoveationStrength, StereoRendering, DeferGpuWait, TargetHighlight, HeartbeatStart, SpellLock, StaffPoint, LandingCircles, GroundAim, AimHighlights, HighlightRight, HighlightLeft, ElementalHands, EnemySight, BowLaser, ThrowLift, BottlePhysics, PropPhysics, CompanionAi, ShieldGrip, ShieldOut, ShieldUp, ShieldFollow, ShieldRoll, AimFollowsView, CompanionTactical, LeftHandStrikes, TorchFlame, FrameGeneration, FrameGenPreset, FrameGenScale, RunSpeed, RunWalkToggle, BodyPhysics, BigObjectDistance, FogDistance, LeatherMenu, LootBeamUnique, LootBeamSet, LootBeamRare, LootBeamRunes, LootBeamBrightness, CeilingTorches, ArcaneDecay, ArcaneFade, ManaThreshold, ArcaneIntensity, GlyphDraw, GlyphCircle, GlyphTriangle, GlyphSquare, GlyphLightning, GlyphSpiral, GlyphV, GlyphStar, GlyphWave, LootPick, MercPotionAssist, Count };
-// One bit per setting, 128 wide: two words, since MSVC has no 128-bit integer.
+           EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, VitalsTilt, HapticStrength, HapticMelee, HapticBowDraw, HapticBowRelease, HapticSpell, HapticInteraction, HapticAlert, HapticShortMelee, BloodVisor, BloodWipe, MeleeThrustSpeed, LootLabelSize, CompanionCounts, StrainVignette, OfflinePlayers, ShieldBashSpeed, DesktopOneEye, MapTopDown, MapRotate, FoveationStrength, StereoRendering, DeferGpuWait, TargetHighlight, HeartbeatStart, SpellLock, StaffPoint, LandingCircles, GroundAim, AimHighlights, HighlightRight, HighlightLeft, EnemySight, BowLaser, ThrowLift, BottlePhysics, PropPhysics, CompanionAi, ShieldGrip, ShieldOut, ShieldUp, ShieldFollow, ShieldRoll, AimFollowsView, CompanionTactical, LeftHandStrikes, TorchFlame, FrameGeneration, FrameGenPreset, FrameGenScale, RunSpeed, RunWalkToggle, BodyPhysics, BigObjectDistance, FogDistance, LeatherMenu, LootBeamUnique, LootBeamSet, LootBeamRare, LootBeamRunes, LootBeamBrightness, CeilingTorches, ArcaneDecay, ArcaneFade, ManaThreshold, ArcaneIntensity, GlyphDraw, GlyphCircle, GlyphTriangle, GlyphSquare, GlyphLightning, GlyphSpiral, GlyphV, GlyphStar, GlyphWave, LootPick, MotionsOff, MotionsPaladinOff, MotionsDruidOff, MotionsAmazonOff, MotionsNecromancerOff, MotionsBarbarianOff, MotionsAssassinOff, GlyphDrawSecond, GlyphLeftCircle, GlyphLeftTriangle, GlyphLeftSquare, GlyphLeftLightning, GlyphLeftSpiral, GlyphLeftV, GlyphLeftStar, GlyphLeftWave, SpellHandLight, MeleeReach, WalkDirection, RoomSteps, MercPotionAssist, Count };
+// One bit per setting, 256 wide: four words, since MSVC has no wider integer.
+// (128 until 2026-11-08, when 126 were in use and more rows were coming.)
 struct ChangeMask {
-    static constexpr int Bits=128;
-    uint64_t low=0,high=0;
-    constexpr ChangeMask(uint64_t bits=0):low(bits){}
-    constexpr ChangeMask(uint64_t lowBits,uint64_t highBits):low(lowBits),high(highBits){}
-    constexpr explicit operator bool()const{return (low|high)!=0;}
+    static constexpr int Words=4,Bits=Words*64;
+    std::array<uint64_t,Words> word{};   // bit k in word[k/64], least significant first
+    constexpr ChangeMask(uint64_t bits=0):word{bits}{}
+    constexpr ChangeMask(uint64_t lowBits,uint64_t highBits):word{lowBits,highBits}{}   // the first two words
+    constexpr explicit operator bool()const{for(const auto w:word)if(w)return true;return false;}
     constexpr bool operator==(const ChangeMask&)const=default;
-    constexpr ChangeMask operator~()const{return {~low,~high};}
-    constexpr ChangeMask operator&(ChangeMask o)const{return {low&o.low,high&o.high};}
-    constexpr ChangeMask operator|(ChangeMask o)const{return {low|o.low,high|o.high};}
-    constexpr ChangeMask& operator|=(ChangeMask o){low|=o.low;high|=o.high;return *this;}
-    constexpr ChangeMask operator<<(int n)const{return n<=0?*this:n>=Bits?ChangeMask{}:n>=64?ChangeMask{0,low<<(n-64)}:ChangeMask{low<<n,high<<n|low>>(64-n)};}
-    constexpr ChangeMask operator>>(int n)const{return n<=0?*this:n>=Bits?ChangeMask{}:n>=64?ChangeMask{high>>(n-64),0}:ChangeMask{low>>n|high<<(64-n),high>>n};}
+    constexpr ChangeMask operator~()const{ChangeMask r;for(int i=0;i<Words;++i)r.word[i]=~word[i];return r;}
+    constexpr ChangeMask operator&(ChangeMask o)const{for(int i=0;i<Words;++i)o.word[i]&=word[i];return o;}
+    constexpr ChangeMask operator|(ChangeMask o)const{for(int i=0;i<Words;++i)o.word[i]|=word[i];return o;}
+    constexpr ChangeMask& operator|=(ChangeMask o){for(int i=0;i<Words;++i)word[i]|=o.word[i];return *this;}
+    constexpr ChangeMask operator<<(int n)const{
+        if(n<=0)return *this;
+        ChangeMask r;if(n>=Bits)return r;
+        const int s=n/64,b=n%64;
+        for(int i=Words-1;i>=s;--i)r.word[i]=(word[i-s]<<b)|(b&&i-s>0?word[i-s-1]>>(64-b):0);
+        return r;
+    }
+    constexpr ChangeMask operator>>(int n)const{
+        if(n<=0)return *this;
+        ChangeMask r;if(n>=Bits)return r;
+        const int s=n/64,b=n%64;
+        for(int i=0;i+s<Words;++i)r.word[i]=(word[i+s]>>b)|(b&&i+s+1<Words?word[i+s+1]<<(64-b):0);
+        return r;
+    }
 };
 static_assert(Count<=ChangeMask::Bits,"settings change mask capacity");
 constexpr ChangeMask SupportedChanges=~ChangeMask{0}>>(ChangeMask::Bits-Count);
@@ -118,7 +134,6 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"Monster highlights", "Dominant hand: its monster only. Both hands: each hand's own", L"gameplay",L"aim_highlights",1,0,1,1},
     {"Right hand color", "The right hand's monster: By range, or one color", L"gameplay",L"highlight_right_hue",45,0,360,15},
     {"Left hand color", "The left hand's monster: By range, or one color", L"gameplay",L"highlight_left_hue",210,0,360,15},
-    {"Elemental hand effects", "Sorceress: fire, frost and lightning around each hand (experimental)", L"interactions",L"elemental_hands",0,0,1,1},
     {"Enemy sight distance", "Offline monster detection range; 100% is game default", L"gameplay",L"enemy_sight_pct",enemysight::DefaultPercent,enemysight::MinPercent,enemysight::MaxPercent,enemysight::StepPercent},
     // Off (LaserOff, below), else the line's hue; steps wrap through Off.
     {"Bow path laser", "A faint line along a drawn arrow's flight: Off or its color", L"bow",L"path_laser_hue",-15,-15,345,15},
@@ -137,7 +152,7 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"Tactical commands", "Point & hold gestures, command beacon and priority targeting for your mercenary", L"gameplay",L"companion_tactical_commands",1,0,1,1},
     // Melee skill strikes (strike_skills.h): which skill the left claw's strikes cast.
     // Set from the skill wheel's lower-left box (Druid), not a VR Settings row.
-    {"Left-hand strikes", "Druid: the left claw casts its own trigger skill or the right trigger's", L"gameplay",L"left_hand_strikes",0,0,1,1},
+    {"Left-hand strikes", "Druid or dual wield: the left claw or blade casts its own trigger skill or the right trigger's", L"gameplay",L"left_hand_strikes",0,0,1,1},
     {"Torch flame", "The flame on a torch club's head; its light stays either way", L"torch",L"flame",1,0,1,1},
     // OFXR Bridge (frame_generation.h): 0 Off, 1 FidelityFX, 2 NVIDIA; on or off at the next start.
     {"Frame generation", "Experimental, with Both eyes; turning it on reloads VR", L"render",L"frame_generation",0,0,2,1},
@@ -145,9 +160,9 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"NVIDIA flow quality", "Slow, Medium or Fast optical flow", L"render",L"frame_generation_preset",1,0,2,1},
     {"NVIDIA flow scale", "The size the optical flow works at", L"render",L"frame_generation_scale",2,0,2,1},
     // Movement speed (run_speed.h): -10 Walk, 0 Base run (the no-gear run), 100 Full run (the gear's).
-    // VR Settings > Body > Movement speed (Cal 2026-10-25; it was a skill-wheel slider, which replaced RUN / WALK).
+    // VR Settings > Comfort > Moving > Movement speed (Cal 2026-10-25; it was a skill-wheel slider, which replaced RUN / WALK).
     {"Movement speed", "Walk, or run from your class's no-gear speed up to your gear's full speed", L"gameplay",L"run_speed_pct",runspeed::DefaultPercent,runspeed::MinPercent,runspeed::MaxPercent,runspeed::StepPercent},
-    // Right stick up switches walk / run (runspeed::StickToggle), beside Movement speed on its row;
+    // Right stick up switches walk / run (runspeed::StickToggle), a row of its own on Controls > Hands;
     // off by default (owner 2026-10-25).
     {"Stick toggle", "Right stick up switches between walking and running", L"gameplay",L"run_walk_toggle",0,0,1,1},
     // Monsters' and townsfolk's limbs pushed aside by weapons (limb_rig.h); drawn only.
@@ -159,13 +174,13 @@ inline constexpr std::array<Definition,Count> Definitions{{
     // same haze close by, see-through to Big objects' 600. Start and curve stay INI-only.
     {"Fog distance", "Where the fog is complete; farther shows more of the distance", L"fog",L"end",600,100,1200,50},
     // The tabbed menu on the hide in the left hand (leather_menu.h), or in front of you as before;
-    // VR Settings > Interface, beside Menu distance on its row (owner 2026-10-28: "a toggle in VR Settings
+    // VR Settings > Interface > Menus, beside Menu distance on its row (owner 2026-10-28: "a toggle in VR Settings
     // so people can opt out and just use the normal full screen menu"); 2 Menu only: the menu held without the hide
     // (owner 2026-10-29: "in case players dont like the hide"; leather::Style).
     {"Hold menu", "The tabbed menu held in your left hand, on a hide (Leather) or alone (Menu only); Off: in front of you", L"interactions",L"leather_menu",1,0,2,1},
     // Loot beams (vr/loot_beam_scan.cpp): which rarities get a beam on the floor; all Off, none
     // (owner 2026-10-31: "a VR setting that acts as a filter for what rarities to show, or can
-    // be turned off altogether"). VR Settings > Interface > Loot beams: its brightness slider, and
+    // be turned off altogether"). VR Settings > Interface > Labels > Loot beams: its brightness slider, and
     // its Filter card of the four (owner 2026-11-01: a slider "so players can decrease the
     // current vibrancy of the beam", 10% to 100%; 100% the beam as first tuned).
     {"Unique beams", "A gold beam over unique items lying near you", L"loot",L"beams_unique",1,0,1,1},
@@ -175,7 +190,7 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"Loot beam brightness", "How bright the loot beams and their floor glow are; 100% is full", L"loot",L"beams_brightness",100,10,100,10},
     // Dungeon torchlight (owner 2026-11-01: "this should be a setting"): the game's own torches, braziers and lit
     // objects light the dungeon round them (vrcam worldobj::Gather, the shader's game lights); beside Dungeon
-    // ceilings (Performance is full). Off by default since 0.142: finding them reads the game's memory every 1.5 s
+    // ceilings. Off by default since 0.142: finding them reads the game's memory every 1.5 s
     // (VR dropouts on a weak PC).
     {"Dungeon torchlight", "The game's own torches light the dungeon around them; finding them costs CPU", L"ceiling",L"torches",0,0,1,1},
     {"Arcane Decay", "Spectral peripheral warning when mana is depleted", L"hud",L"arcane_decay",1,0,1,1},
@@ -195,15 +210,49 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"V glyph", "The skill a drawn V casts", L"glyphs",L"v",-1,-1,4095,1},
     {"Star glyph", "The skill a drawn star casts", L"glyphs",L"star",-1,-1,4095,1},
     {"Wave glyph", "The skill a drawn wave casts", L"glyphs",L"wave",-1,-1,4095,1},
-    // Loot pick (loot_aim.h): 0 Off, A takes the game's nearest item; 1 On, the item you point at. VR Settings > Interface.
+    // Loot pick (loot_aim.h): 0 Off, A takes the game's nearest item; 1 On, the item you point at. VR Settings > Interface > Labels.
     // On by default (owner 2026-11-01, after headset play: "let's make it so it is on by default").
     {"Loot pick", "A picks up the item you point at, not the nearest", L"interactions",L"loot_pick",1,0,1,1},
+    // Motions (spell_motion.h; owner 2026-11-03): the spells the wheel's MOTIONS page turned off, one bit
+    // each (spellmotion::Bit); 0, every motion on. Not in VR Settings: the wheel is its editor.
+    {"Motions off", "The motion spells turned off on the MOTIONS page (one bit each)", L"motions",L"off",0,0,1023,1},
+    // The Paladin's and the Druid's (owner 2026-11-04): one bit per MOTIONS card (spellmotion::PageOf).
+    {"Paladin motions off", "The Paladin's motions turned off on the MOTIONS page (one bit each)", L"motions",L"paladin_off",0,0,1023,1},
+    {"Druid motions off", "The Druid's motions turned off on the MOTIONS page (one bit each)", L"motions",L"druid_off",0,0,1023,1},
+    // The Amazon's, the Necromancer's, the Barbarian's and the Assassin's (owner 2026-11-04): one bit per card.
+    {"Amazon motions off", "The Amazon's motions turned off on the MOTIONS page (one bit each)", L"motions",L"amazon_off",0,0,1023,1},
+    {"Necromancer motions off", "The Necromancer's motions turned off on the MOTIONS page (one bit each)", L"motions",L"necromancer_off",0,0,1023,1},
+    {"Barbarian motions off", "The Barbarian's motions turned off on the MOTIONS page (one bit each)", L"motions",L"barbarian_off",0,0,1023,1},
+    {"Assassin motions off", "The Assassin's motions turned off on the MOTIONS page (one bit each)", L"motions",L"assassin_off",0,0,1023,1},
+    // Each hand its own glyphs (owner 2026-11-05: "expand the glyphs where left and the right hand glyphs can be
+    // different sets"): a second Draw glyph button, on the other hand from draw_slot (either key either hand:
+    // glyphcast::DrawSlots), and the left hand's skill on each shape, -1 none of its own: it casts the right
+    // hand's. circle ... wave above stay the right hand's, so a profile saved before reads as it did.
+    {"Second Draw glyph button", "The other hand's button that draws glyphs; -1 none", L"glyphs",L"second_draw_slot",-1,-1,9,1},
+    {"Left circle glyph", "The skill a circle drawn with the left hand casts; -1 the right hand's", L"glyphs",L"left_circle",-1,-1,4095,1},
+    {"Left triangle glyph", "The skill a triangle drawn with the left hand casts; -1 the right hand's", L"glyphs",L"left_triangle",-1,-1,4095,1},
+    {"Left square glyph", "The skill a square drawn with the left hand casts; -1 the right hand's", L"glyphs",L"left_square",-1,-1,4095,1},
+    {"Left lightning glyph", "The skill a lightning bolt drawn with the left hand casts; -1 the right hand's", L"glyphs",L"left_lightning",-1,-1,4095,1},
+    {"Left spiral glyph", "The skill a spiral drawn with the left hand casts; -1 the right hand's", L"glyphs",L"left_spiral",-1,-1,4095,1},
+    {"Left V glyph", "The skill a V drawn with the left hand casts; -1 the right hand's", L"glyphs",L"left_v",-1,-1,4095,1},
+    {"Left star glyph", "The skill a star drawn with the left hand casts; -1 the right hand's", L"glyphs",L"left_star",-1,-1,4095,1},
+    {"Left wave glyph", "The skill a wave drawn with the left hand casts; -1 the right hand's", L"glyphs",L"left_wave",-1,-1,4095,1},
+    // How bright a Sorceress's spell hands light the dark ([torch] spell_hands, elements::HandLight); 0 none.
+    {"Spell hand light", "Sorceress: how bright the spells in her hands light the dark around you; Off for none", L"torch",L"spell_hands_pct",40,0,100,10},
+    // Padding on every monster's body for weapon and fist contacts (melee_contact.h Reach, vr/melee.cpp); 0 = as measured.
+    {"Melee reach", "A weapon or fist this close beside a monster still hits; walls still block", L"gameplay",L"melee_reach_cm",0,0,50,5},
+    // Walk direction (walk_direction.h; owner 2026-11-08): the left stick walks where you look (0) or where the
+    // left controller points (1). Beside Dominant hand.
+    {"Walk direction", "The left stick walks where you look, or where the left controller points", L"stick",L"walk_direction",0,0,1,1},
+    // Room follows you (room_steps.h; Discord, 2026-11-04 and 11-08; owner 2026-11-08: "the room center becomes where
+    // we physically move"): the hero's spot follows you in your room. On by default; beside Seated play, which turns it off.
+    {"Room follows you", "The hero's spot follows you as you move in your room; Off: it stays where you calibrated", L"gameplay",L"room_steps",1,0,1,1},
     {"Merc potion throw autoaim", "Missed potion throws still give the potion to your living mercenary", L"gameplay",L"merc_potion_assist",0,0,1,1},
 }};
 using Values=std::array<float,Count>;
-// The setting holding the skill on glyph shape i (glyph_recognizer.h order).
-inline Key GlyphKey(int shape){return Key(GlyphCircle+shape);}
-static_assert(GlyphWave-GlyphCircle==7,"one key per glyph shape, in the recognizer's order");
+// The setting holding the skill on glyph shape i (glyph_recognizer.h order): the right hand's (0), or the left's (1).
+inline Key GlyphKey(int shape,int hand=0){return Key((hand==1?GlyphLeftCircle:GlyphCircle)+shape);}
+static_assert(GlyphWave-GlyphCircle==7&&GlyphLeftWave-GlyphLeftCircle==7,"one key per glyph shape and hand, in the recognizer's order");
 inline bool HapticKey(Key key){return key>=HapticStrength&&key<=HapticAlert;}
 // An outline's color per source (right hand, left hand; the eyes take the hand that would cast): 0 By range, else its hue.
 inline bool HighlightKey(Key key){return key==HighlightRight||key==HighlightLeft;}
@@ -299,7 +348,7 @@ inline constexpr const char* DeferWarning="Each frame waits for the GPU: about h
 // Settings.json (Saved Games\Diablo II Resurrected, written when its options
 // close): Vertical Sync holds each frame to the monitor's refresh, and
 // anti-aliasing other than FXAA ("Anti Aliasing": 1) blurs (TAA builds each
-// frame from the ones before it) or costs more. The Performance page warns about
+// frame from the ones before it) or costs more. The readout warns about
 // each; a key the file lacks is not warned about. It also shows the options
 // that set how much the game draws (-1: not in the file), beside the frame
 // times they change.
@@ -334,7 +383,7 @@ inline GameVideo ParseGameVideo(std::string_view json) {
     game.resolutionScale=GameSetting(json,"Resolution Scale");game.dlss=GameSetting(json,"NVIDIA DLSS");
     return game;
 }
-// The game's options above as one line for the Performance page; empty when the file
+// The game's options above as one line for the readout; empty when the file
 // has none of them. The numbers are the game's own, 0 its lowest.
 inline std::string GameVideoLine(const GameVideo& g) {
     std::string line;
@@ -348,7 +397,7 @@ inline std::string GameVideoLine(const GameVideo& g) {
     if(g.dlss>=0)line+=std::string(line.empty()?"":" \xc2\xb7 ")+(g.dlss>0?"DLSS on":"DLSS off");
     return line.empty()?line:"Game: "+line;
 }
-// What the Performance page reports of the last second's frames, as the render
+// What the readout reports of the last second's frames, as the render
 // thread measured them: the game's update between frames, the wait for the
 // headset (xrWaitFrame), the game's drawing (one eye a frame by turns, both
 // with Both eyes) and the mod's own work around it (input, copies, submit).
@@ -402,9 +451,12 @@ inline const char* GameVideoWarning(GameVideo game) {
            game.vsync?"Game Options > Video: turn Vertical Sync off":
            game.antiAliasing?"Game Options > Video: set Anti-Aliasing to FXAA":nullptr;
 }
+// Frame generation's own rows: they run with Both eyes only (frame_generation.h).
+constexpr bool FrameGenRow(Key key){return key==FrameGeneration||key==FrameGenPreset||key==FrameGenScale;}
 // Strength only applies while foveated rendering is selected; Off greys it out.
 inline bool RowEnabled(const Values& values,Key key){
     if(key==DeferGpuWait)return DeferOffered(values);   // the button only turns it on
+    if(FrameGenRow(key))return values[StereoRendering]<.5f;
     if(key==AimHighlights||HighlightKey(key))return values[TargetHighlight]>0;   // only while the monster outline shows
     if(key==LandingCircles)return values[GroundAim]>.5f;   // only while the mod places ground skills
     if(key==FogDistance)return values[Fog]>.5f;   // only while the added fog is on
@@ -437,12 +489,12 @@ inline bool RowForClass(Key key,const Context& c){
         case BowLaser:return c.heroClass<0||c.heroClass==heroclass::Amazon||c.bow;
         case ThrowLift:return c.heroClass<0||c.heroClass==heroclass::Amazon||c.heroClass==heroclass::Barbarian||c.heroClass==heroclass::Assassin||c.thrown;
         case StaffPoint:return c.heroClass<0||c.staff||c.heroClass==heroclass::Sorceress||c.heroClass==heroclass::Druid;
-        case ElementalHands:return ClassIs(c,heroclass::Sorceress);
         default:return true;
     }
 }
 // A row that cannot apply is left out rather than grayed: one that only
-// matters with another row's choice, or for another class or weapon.
+// matters with another row's choice, or for another class or weapon. Frame
+// generation's are the exception: Frames grays them and says why (RowEnabled).
 // Each hand's color has its own row (HighlightLeft, HighlightRight).
 inline bool RowShown(Key key,const Values& v,const Context& c){
     if(!RowForClass(key,c))return false;
@@ -458,10 +510,9 @@ inline bool RowShown(Key key,const Values& v,const Context& c){
         case CompanionTactical:return v[CompanionAi]>.5f;
         case FogDistance:return v[Fog]>.5f;   // beside Distance fog while the fog is on (main greyed it; RowEnabled)
         case CeilingTorches:return v[Ceiling]>.5f;   // beside Dungeon ceilings while they are on (a greyed half has no room for its lock)
-        // Frame generation runs with Both eyes only (frame_generation.h): By turns leaves its rows out,
-        // with its status line (owner, 2026-10-25), and NVIDIA's rows on More with them.
-        case FrameGeneration:return v[StereoRendering]<.5f;
-        case FrameGenPreset:case FrameGenScale:return v[StereoRendering]<.5f&&framegen::Read(v[FrameGeneration],0,0).mode==framegen::Mode::Nvidia;   // with its scale
+        case RoomSteps:return v[Seated]<.5f;   // beside Seated play while it is off (sitting, there are no steps)
+        // NVIDIA's rows follow the NVIDIA mode alone: By turns grays them with Frame generation (RowEnabled).
+        case FrameGenPreset:case FrameGenScale:return framegen::Read(v[FrameGeneration],0,0).mode==framegen::Mode::Nvidia;
         default:return true;
     }
 }
@@ -496,9 +547,11 @@ inline float LockStep(float value,int delta,const Context& c){
 //   Card         inside the help card but on none of its buttons: swallows the press
 //   Popover      index Key: open its list (a named list too long for chips) on the press's release
 //   PopoverClose the dimmed panel around an open popover: close it without a change (the press goes no further)
+//   OpenGroup    index content::Group: a rail group's row; opens the page last opened in that group (its
+//                first when fresh); the group of the page shown: nothing
 enum class Kind { None, Change, Apply, Close, Recenter, Calibrate, TestHaptics, NotesPage,
                   Open, Set, Undo, Default, Preset, ResetPage, UndoReset, ConfirmClose, KeepEditing, ApplyClose, Card,
-                  Popover, PopoverClose };
+                  Popover, PopoverClose, OpenGroup };
 // What's new pages its release lines (2026-10-23: a long list since the last
 // release): NotesPerPage a page, at most NotesMaxLines (release_notes.py
 // MAX_LINES). Previous / Next and the page number sit under the lines, shown
@@ -525,7 +578,8 @@ public:
     uint64_t undoResetAt=0;         // when Reset page was pressed: Undo reset ignores presses for UndoResetGuardMs
     Values beforeReset{};           // the draft from before Reset page, for Undo reset
     ChangeMask resetKeys=0;         // the rows Reset page changed (Undo reset puts back only these)
-    View lastPage=View::Body;       // the settings page Guide / What's new return to when pressed again
+    View lastPage=View::Combat;     // the settings page Guide / What's new return to when pressed again
+    std::array<View,MaxRailGroups> groupPage{};   // per rail group (content::Group): the page last opened there, which its row opens; Presets (in no group): none yet
     int focusKey=-1;                // Open's delta: the Key the card should point at on arrival (-1: none); the pointer layer reads and clears it
     int pickedPreset=-1;            // the preset last pressed (content::PresetSpecs index), for "Edited" on Presets
     bool closeWhenSaved=false;      // Apply and close: close once this save lands as Saved
@@ -552,14 +606,15 @@ public:
     // Feel it: on the Vibration view.
     bool CanTestHaptics(int category)const{return open&&ready&&!Busy()&&view==View::Vibration&&category>=0&&category<haptics::CategoryCount;}
     // The panel reopens on the view, What's new page and More page it was closed on, however it was closed (Right B too),
-    // in memory only (menus-remember, #352). StartOver (a new game) goes back to the Guide, page 1. A kept view with
-    // nothing to show any more (More once NVIDIA is no longer chosen) falls back: layout::SettleView.
+    // and each rail group keeps its last page, in memory only (menus-remember, #352). StartOver (a new game) goes back
+    // to the Guide, page 1, and every group to its first page. A kept view with
+    // nothing to show any more (More once it has no rows) falls back: layout::SettleView.
     void Open(const Snapshot& s){
         open=true;base=draft=s.values;ready=s.ready;offlineDifficultyAvailable=s.offlineDifficultyAvailable;result=s.result;serial=std::max(serial,s.sequence);pending=s.result==Result::Saving?s.sequence:0;
         confirmClose=false;confirmAt=0;undoResetUntil=undoResetAt=0;beforeReset={};resetKeys=0;focusKey=-1;pickedPreset=-1;closeWhenSaved=false;popoverKey=-1;popoverAt=0;
         ++revision;
     }
-    void StartOver(){view=View::Guide;lastPage=View::Body;notesPage=0;morePage=0;++revision;}
+    void StartOver(){view=View::Guide;lastPage=View::Combat;groupPage={};notesPage=0;morePage=0;++revision;}
     void Close(){open=false;confirmClose=false;undoResetUntil=0;closeWhenSaved=false;popoverKey=-1;++revision;}
     void Observe(const Snapshot& s){
         if(!open)return;

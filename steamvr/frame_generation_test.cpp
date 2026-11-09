@@ -58,7 +58,7 @@ int main() {
     assert(Line(r)=="Frame generation: active, OFXR Bridge NVIDIA Medium, 50% scale"&&!Warning(r));
     // By turns: the loaded layer steps aside (each eye would get a quarter of the frames).
     r=Classify(Start::Loaded,true,on,&s,false);
-    assert(r.state==State::NeedsBothEyes&&Warning(r)&&Line(r)=="Frame generation: paused; it needs Stereo rendering: Both eyes");
+    assert(r.state==State::NeedsBothEyes&&Warning(r)&&Line(r)=="Frame generation: paused; it needs Eyes drawn per frame: Both");
     assert(Classify(Start::NotAsked,true,on,nullptr,false).state==State::NeedsBothEyes);
     assert(Classify(Start::NotAsked,false,on,nullptr,false).state==State::NotInstalled);   // what blocks it first
     assert(Classify(Start::Loaded,true,off,&s,false).state==State::Paused&&Classify(Start::NotAsked,true,off,nullptr,false).state==State::Off);
@@ -73,7 +73,7 @@ int main() {
     assert(Classify(Start::Loaded,true,off,&s).state==State::Paused);   // stays loaded until a restart
     assert(Classify(Start::NoControl,true,on,nullptr).state==State::NoControl);
 
-    // Every state has a line that fits the Perf page, and a log name.
+    // Every state has a line that fits the readout, and a log name.
     for(int i=0;i<=int(State::NeedsBothEyes);++i){
         Readout each;each.state=State(i);each.backend=1;each.errors=1;
         const auto line=Line(each);

@@ -1,6 +1,6 @@
 # Offline difficulty scaling
 
-**VR Settings > Survival > Offline difficulty** offers **Game's setting** and
+**VR Settings > Gameplay > Monsters > Offline difficulty** offers **Game's setting** and
 **Players 1** through **Players 8**. Press Apply to save the choice.
 
 Game's setting leaves Diablo II's existing offline difficulty scaling in charge.
@@ -16,7 +16,7 @@ session. Monster stats are set when the game creates them: enemies already
 spawned keep their existing stats, including those created before you reach
 them. For all monsters to use the new value, choose **Save and Exit**, then
 start a new game with the same character. There is no need to close the game
-application or restart VR. The Survival page and its help card explain this limit;
+application or restart VR. The Monsters page and its help card explain this limit;
 the save confirmation does not promise immediate rescaling of existing enemies.
 
 This works with every class and either melee rules mode. It is independent of
@@ -49,7 +49,7 @@ monster scaling and treasure-class formulas consume the overridden count.
 The `0x543029` monster-scaling call and `0x440a7d` drop-count call both reach
 this accessor; the monster-count helper at `0x509430` also falls back to it.
 
-If a signature or hook is unavailable, native behavior remains and the Survival
+If a signature or hook is unavailable, native behavior remains and the Monsters
 page reports that scaling is unavailable. Installation retries after code
 decryption. Logs distinguish adapter readiness from observed native uses of
 each selected count. Runtime availability updates never discard pending edits.

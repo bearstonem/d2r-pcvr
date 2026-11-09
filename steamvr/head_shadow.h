@@ -14,7 +14,10 @@
 // The cut follows head pitch: level, it is LevelCm; it eases (smoothstep) toward UpCm looking up and DownCm looking down
 // and reaches them at PitchSpanDeg. The parts of the head and helm in front of the eyes fall inside it; the three values
 // were tuned in the headset (a Paladin, helm on and off) so nothing of the head shows at any pitch, and looking down the
-// small cut keeps the top of the chest.
+// small cut keeps the top of the chest. Looking up, 13 cm was short for a tester (2026-11-05, the Den of Evil: "when I
+// look up, a warped image in a circle begins to appear in my vision ... Gets bigger the more you lift your head"): the
+// hero's head stays upright while yours tips back, so looking up sees through its crown and the helm on it. Up is 22 cm
+// now. [arms] head_cut_level, head_cut_up and head_cut_down (ini only) set the three (CleanCut), read live.
 //
 // Order between the pose thread and the render thread (Handshake): a pose keeps the head only while the eye's cut is live
 // (raised within CutLiveMs), and the eye holds the last cut for CutLiveMs after the last pose that kept the head. So a pose
@@ -23,6 +26,7 @@
 // shapeshift form keeps the old shrink, and the eye does not cut there.
 //
 // This header is pure (no game, no Windows): steamvr/head_shadow_test.cpp. The game side is vr/head_shadow.cpp.
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstddef>
@@ -31,7 +35,7 @@
 namespace framevr::headshadow {
 
 constexpr float LevelCm = 11.f;        // the cut looking level, cm at the player's scale
-constexpr float UpCm = 13.f;           // looking up (the end value, reached at PitchSpanDeg)
+constexpr float UpCm = 22.f;           // looking up (the end value, reached at PitchSpanDeg); 13 until 2026-11-05
 constexpr float DownCm = 3.f;          // looking down
 constexpr float PitchSpanDeg = 60.f;   // about as far as a head turns up or down from level
 constexpr uint64_t CutLiveMs = 250;    // the cut counts as live this long after it was last raised, and is held this long
@@ -70,6 +74,10 @@ inline float PitchCut(float pitchDeg, float levelCm = LevelCm, float upCm = UpCm
     const float end = clean(pitchDeg > 0 ? upCm : downCm);
     return w >= 1 ? end : level + (end - level) * w;
 }
+
+// A cut from the ini, cm: within 0..MaxCutCm, or the default when it is not a number.
+constexpr float MaxCutCm = 40.f;
+inline float CleanCut(float cm, float fallback) { return std::isfinite(cm) ? std::clamp(cm, 0.f, MaxCutCm) : fallback; }
 
 // The eye's near clip in world units: never nearer than the configured one, at least cutCm at the player's scale.
 // unitsPerMetre: world units per metre of the player (vrcam ScaleHeight / UserEyeHeightM). 0 or a bad scale: unchanged.
@@ -157,6 +165,8 @@ inline Reach HeadReach(const float* bones, const char* inNeck, int count, const 
 namespace headshadow {
 // [debug] head_shadow: the 10 s summary line (off by default).
 void SetTrace(bool on);
+// [arms] head_cut_level, head_cut_up, head_cut_down: the cuts in cm (CleanCut'ed), for every eye pass from now.
+void SetCuts(float levelCm, float upCm, float downCm);
 // PoseBody, just before the head shrink, only when it would shrink the head with head_shadow on in full body. form: a
 // shapeshift form's rig. bones .. unitsPerCm: the pose, for the debug summary's reach only. Returns the new hide: false
 // when the head stays whole this pose.

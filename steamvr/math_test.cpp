@@ -112,6 +112,12 @@ int main() {
     expect(!framevr::LocalStandingBody(100,200,100,200,.5f,6)); // corpse at respawn
     expect(!framevr::LocalStandingBody(110,200,100,200,6,6)); // another player rig
     expect(!framevr::LocalStandingBody(100,200,100,200,6,NAN));
+    // room-scale: stepped 4 units (about a metre) away, the hero's body stands under the eyes
+    expect(!framevr::LocalStandingBody(104,200,100,200,6,6));
+    expect(framevr::LocalStandingBodyInRoom(104,200,100,200,true,104.2f,200.1f,6,6));
+    expect(!framevr::LocalStandingBodyInRoom(104,200,100,200,false,104.2f,200.1f,6,6)); // no eye point: as before
+    expect(!framevr::LocalStandingBodyInRoom(104,200,100,200,true,104.2f,200.1f,.5f,6)); // a corpse still is not
+    expect(!framevr::LocalStandingBodyInRoom(110,200,100,200,true,104,200,6,6)); // another rig, near neither
     // Fixed foveation preserves the optical center, whole boundary tiles,
     // asymmetric eye centers, and the unscaled area outside a scene viewport.
     expect(framevr::FixedRate(31,31,16,0,0,1024,1024,.5f,.5f,.55f)==0);
