@@ -41,7 +41,7 @@ static bool SavePng(const char* path,const std::vector<uint8_t>& rgba,int width,
 static int DrawSheetPreview(const char* out){
     const auto sheet=draw::DrawSheet(50);
     if(!sheet.error.empty()||sheet.rgba.empty()){std::fprintf(stderr,"Draw sheet failed: %s\n",sheet.error.c_str());return 40;}
-    std::printf("Draw sheet: first page %.1f ms (painter, fonts, icons, panel cache); full Aim page repaint %.2f ms average over 50; whole sheet (4 canvases) %.1f ms\n",sheet.firstMs,sheet.repaintMs,sheet.sheetMs);
+    std::printf("Draw sheet: first page %.1f ms (painter, fonts, icons, panel cache); full Targeting page repaint %.2f ms average over 50; whole sheet (4 canvases) %.1f ms\n",sheet.firstMs,sheet.repaintMs,sheet.sheetMs);
     if(!SavePng(out,sheet.rgba,sheet.width,sheet.height)){std::fprintf(stderr,"Could not write %s\n",out);return 41;}
     std::printf("Wrote %s (%d x %d)\n",out,sheet.width,sheet.height);return 0;
 }
@@ -70,7 +70,7 @@ static Setup Base(View v,int hero,const Values& values=AllRows(false),bool adapt
     x.m.Open(s);x.m.SetNotesPages(ReleaseNotesPages());x.m.SetContext({hero,hero==heroclass::Amazon,hero==heroclass::Sorceress,false});x.m.view=v;
     x.in.nowMs=100000;x.in.detected={{framevr::controllers::Layout::Touch,framevr::controllers::Layout::Touch}};
     // transport.cpp: the Performance view shows render_resolution's Describe (its widest), the others the foveation status.
-    x.in.runtimeStatus=v==View::Performance?"VR source: 8192 x 8192 per eye (desktop fallback)":"Foveated shading available. Eye tracking unavailable on this headset/runtime.";
+    x.in.runtimeStatus=L::HasReadout(v)?"VR source: 8192 x 8192 per eye (desktop fallback)":"Foveated shading available. Eye tracking unavailable on this headset/runtime.";
     x.in.performance={true,true,90,11.1f,3.4f,2.6f,4.1f,.9f};
     return x;
 }
@@ -87,6 +87,19 @@ static int PagesCheck(){
         if(picture.pixels[(size_t(Height/2)*Width+Width/2)*4+3]!=255)Fail(where+": the panel is not opaque");
         Report(where,FitProblems(picture.layout));
     };
+    // The rail with each group open and every group holding a change: its name, chevron and changed dot fit, open or closed.
+    for(const auto& open:C::GroupTable){
+        View first=View::Count;for(const auto& p:C::PageTable)if(p.group==open.id&&first==View::Count)first=p.id;
+        Setup x=Base(first,-1);
+        for(const auto& g:C::GroupTable)for(const auto& r:C::Menu().rows)if(C::PageOf(r.page).group==g.id&&r.kind!=C::RowKind::Button&&r.kind!=C::RowKind::Offer&&L::KeyVisible(r.key,x.m.Get(),x.m.context)){
+            const auto& d=Definitions[r.key];x.m.Set(r.key,Normalize(r.key,d.defaultValue==d.min?d.min+d.step*2:d.min));
+            break;
+        }
+        const std::string where=std::string("rail, ")+open.name+" open, a change in every group";
+        paint(x,where);
+        int marked=0;for(const auto& e:L::Build(x.m,x.m.context,x.in).elements)if(e.role==L::Role::GroupTab&&e.Has(L::Changed))++marked;
+        if(marked!=int(std::size(C::GroupTable)))Fail(where+": "+std::to_string(marked)+" group rows marked changed");
+    }
     for(int hero:Classes)for(int v=0;v<int(View::Count);++v){
         const std::string where=std::string(ViewName(v))+", "+ClassName(hero);
         paint(Base(View(v),hero),where);
@@ -130,12 +143,23 @@ static int PagesCheck(){
         }
     }
     {   // frame generation's status on its row and card, every state, NVIDIA and FidelityFX, by turns or not
-        for(int state=0;state<=int(framevr::framegen::State::NeedsBothEyes);++state)for(int mode:{1,2})for(int hero:Classes){
-            Values v=AllRows(false);v[FrameGeneration]=float(mode);
-            Setup x=Base(View::Performance,hero,v);x.in.card=FrameGeneration;
+        for(int state=0;state<=int(framevr::framegen::State::NeedsBothEyes);++state)for(int mode:{1,2})for(int stereo:{0,1})for(int hero:Classes){
+            Values v=AllRows(false);v[FrameGeneration]=float(mode);v[StereoRendering]=float(stereo);
+            Setup x=Base(View::Frames,hero,v);x.in.card=FrameGeneration;
             x.in.frameGen={framevr::framegen::State(state),mode==2?1:0,1,2,1,1,0,1,-1};
             const auto picture=PaintPage(x.m,x.in);++pages;
             Report(std::string("frame generation ")+framevr::framegen::StateName(framevr::framegen::State(state))+", "+ClassName(hero),FitProblems(picture.layout));
+        }
+    }
+    {   // Frames at its tallest: all four rows, the reason line, the Defer button, a video warning and the note
+        for(int stereo:{0,1})for(int card:{-1,int(FrameGeneration),int(FrameGenScale)}){
+            Values v=AllRows(false);v[FrameGeneration]=2;v[StereoRendering]=float(stereo);v[DeferGpuWait]=0;
+            Setup x=Base(View::Frames,-1,v);x.in.game={true,true};x.in.frameGen={framevr::framegen::State::Active,1,1,2,1,1,0,1,-1};
+            if(card>=0)x.in.card=card;
+            const auto picture=PaintPage(x.m,x.in);++pages;
+            Report(std::string("Frames at its tallest, eyes ")+std::to_string(stereo)+", card "+std::to_string(card),FitProblems(picture.layout));
+            bool reason=false;for(const auto& e:picture.layout.elements)if(e.role==L::Role::Reason)reason=true;
+            if(!reason)Fail("Frames at its tallest: no reason line");
         }
     }
     {   // the fallback rows (content::FallbackDemo): every view, both More pages, with and without the Mono audio warning
@@ -190,7 +214,39 @@ static std::string Expected(Key k,bool adapter){
 }
 static const L::Element* FindRole(const L::Layout& l,L::Role role){for(const auto& e:l.elements)if(e.role==role)return &e;return nullptr;}
 static int CountRole(const L::Layout& l,L::Role role){int n=0;for(const auto& e:l.elements)if(e.role==role)++n;return n;}
+// Every page under a group fits the rail at its full 32 px, so none needs Tab's step down to 30 px.
+static void PageNamesFit(){
+    draw::Painter p;
+    if(!p.Ready())Fail("painter: "+p.Error());
+    constexpr float Size=32,Room=172;
+    const char* widest="";float most=0;
+    for(const auto& page:C::PageTable)if(page.settings&&page.group!=C::Group::Tools&&page.group!=C::Group::Header){
+        const float w=p.Measure(page.name,draw::TextStyle::Strong,1e6f,false,0,Size).width;
+        if(w>most){most=w;widest=page.name;}
+        if(w>Room+.5f)Fail(std::string("rail page name too wide at 32 px: ")+page.name);
+    }
+    std::printf("rail: widest page name %s, %.1f of %.0f px at %.0f px\n",widest,most,Room,Size);
+}
 static int FitCheck(){
+    PageNamesFit();
+    // A gray chosen chip: a word with room keeps the padlock; "NVIDIA", "Medium" and "50%" drop it, and stay inside the chip.
+    {
+        draw::Painter p;
+        for(float mode:{0.f,2.f}){
+        Values v=AllRows(false);v[StereoRendering]=1;v[FrameGeneration]=mode;
+        Setup x=Base(View::Frames,-1,v);
+        const auto l=MeasuredLayout(x.m,x.in);
+        int seen=0;
+        for(const auto& e:l.elements)if(e.role==L::Role::Chip&&e.Has(L::Locked)&&e.Has(L::Selected)){
+            ++seen;
+            const float w=p.Measure(e.text,draw::TextStyle::Value,1e6f,false,0,0).width;
+            const bool wide=e.text=="NVIDIA"||e.text=="Medium"||e.text=="50%";
+            if(draw::ChipPadlockFits(w,float(e.rect.w))==wide)Fail("gray chip "+e.text+": the padlock should "+(wide?"drop":"stay"));
+            if(w>float(e.rect.w)-16)Fail("gray chip "+e.text+": the word does not fit");
+        }
+        if(seen!=(mode==2.f?3:1))Fail("gray chips: saw "+std::to_string(seen)+" chosen");
+        }
+    }
     int cards=0;
     auto check=[&](const Setup& x,const std::string& where)->L::Layout{
         auto l=MeasuredLayout(x.m,x.in);++cards;
@@ -224,7 +280,8 @@ static int FitCheck(){
                 x.m.Set(k,Normalize(k,d.defaultValue==d.min?d.min+d.step*2:d.min));x.in.card=k;
                 if(!x.m.Dirty())continue;
                 const auto l=check(x,where+", changed");whole(l,Expected(k,true),where+", changed");
-                const int want=(HapticCategory(k)>=0?framevr::haptics::PreviewCount(framevr::haptics::Category(HapticCategory(k))):0)+1+(L::Same(x.m.Get()[k],d.defaultValue)?0:1);
+                // A locked row's card says so and has no buttons (Frames' rows while By turns is on; below with Both eyes).
+                const int want=L::LockReason(x.m,k)?0:(HapticCategory(k)>=0?framevr::haptics::PreviewCount(framevr::haptics::Category(HapticCategory(k))):0)+1+(L::Same(x.m.Get()[k],d.defaultValue)?0:1);
                 if(CountRole(l,L::Role::CardButton)!=want)Fail(where+", changed: the card shows "+std::to_string(CountRole(l,L::Role::CardButton))+" of its "+std::to_string(want)+" buttons");
             }
             for(const auto& e:idle.elements){   // each option pointed: its hint
@@ -233,13 +290,25 @@ static int FitCheck(){
             }
         }
         {Setup x=Base(View(v),hero,values);x.in.card=HelpTabFirst+v;check(x,page+" tab card");}
+        for(const auto& g:C::GroupTable){   // every rail group's card from here: open or closed, its last page remembered or not
+            Setup x=Base(View(v),hero,values);x.in.card=HelpGroupFirst+int(g.id);check(x,page+" "+g.name+" group card");
+            for(const auto& p:C::PageTable)if(p.group==g.id)x.m.groupPage[size_t(g.id)]=p.id;   // its last page
+            x.m.Set(ShieldRoll,90);check(x,page+" "+g.name+" group card, remembered, changed");
+        }
         {Setup x=Base(View(v),hero,values);x.in.card=HelpResetPage;check(x,page+" Reset page card");}
     }
     {   // offline difficulty without its adapter: main's notice, whole
-        Setup x=Base(View::Survival,-1,AllRows(false),false);x.in.card=OfflinePlayers;
+        Setup x=Base(View::Monsters,-1,AllRows(false),false);x.in.card=OfflinePlayers;
         whole(check(x,"offline difficulty without the adapter"),Expected(OfflinePlayers,false),"offline difficulty without the adapter");
     }
     const auto& t=L::ContentTables();
+    for(int hero:Classes)for(Key k:{FrameGeneration,FrameGenPreset,FrameGenScale}){   // Frames' rows live, with Both eyes: changed, Undo and Default
+        Values v=AllRows(false);v[StereoRendering]=0;v[FrameGeneration]=2;
+        Setup x=Base(View::Frames,hero,v);const auto& d=Definitions[k];
+        x.m.Set(k,k==FrameGeneration?1.f:Normalize(k,d.defaultValue==d.min?d.min+d.step*2:d.min));x.in.card=k;
+        const auto l=check(x,std::string("Frames with Both eyes / ")+Definitions[k].label+", changed");
+        if(CountRole(l,L::Role::CardButton)!=2)Fail(std::string("Frames with Both eyes / ")+Definitions[k].label+": the card shows "+std::to_string(CountRole(l,L::Role::CardButton))+" of its 2 buttons");
+    }
     for(int hero:Classes)for(size_t p=0;p<t.presetCount;++p){   // presets from the defaults and from changed settings
         Setup x=Base(View::Presets,hero,Defaults());x.in.card=HelpPresetFirst+int(p);check(x,std::string("preset ")+t.presets[p].name+", "+ClassName(hero));
         Setup y=Base(View::Presets,hero,AllRows(true));y.in.card=HelpPresetFirst+int(p);check(y,std::string("preset ")+t.presets[p].name+" from changed settings, "+ClassName(hero));

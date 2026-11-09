@@ -18,18 +18,21 @@
 // pressed fresh, with a drop logged on its release: the tests still use it); the MOTIONS page retired
 // that ("I don't want this to get over complicated").
 //
-// The Paladin's and the Druid's gestures (hammer_gesture.h, charge_gesture.h, cross_gesture.h,
-// heavens_gesture.h, shapeshift_gesture.h) take the same gate and their own MOTIONS page (owner,
-// 2026-11-04: "Both grips, like Sorceress"); their detectors stay their own (PageOf).
+// The Paladin's and the Druid's gestures took the same gate and their own MOTIONS page (owner,
+// 2026-11-04: "Both grips, like Sorceress") on detectors of their own until the owner, 2026-11-08
+// ("Sorceress' motion gestures produce haptic feedback through vibrations but paladin motions do not ...
+// We should migrate those older detectors"): now they are watchers on this engine too, their tuning
+// unchanged (motions_paladin.h, motions_druid.h).
 //
 // The Amazon's, the Barbarian's, the Necromancer's and the Assassin's (owner, 2026-11-04: "also have
 // multiple agents implement the motions", the table at claude.ai/artifact/MLr2xB4qEMTf8pzaTRKQ9T, codes
 // A1-A4, B1-B8, N1-N8 with N6 Lower Resist, S1-S7) take the Sorceress's engine and gate: one watcher per
 // motion, each class's detectors in its own header (motions_amazon.h, motions_barbarian.h,
-// motions_necromancer.h, motions_assassin.h; ClassDone at the end of this file).
+// motions_necromancer.h, motions_assassin.h, motions_paladin.h, motions_druid.h; ClassDone at the end of
+// this file).
 //
-// Head-local frame as holycross (+X right, +Y up from the eyes, forward -Z, the head's yaw only); hand
-// 0 is the right. Value-only: steamvr/spell_motion_test.cpp.
+// Head-local frame (+X right, +Y up from the eyes, forward -Z, the head's yaw only); hand 0 is the right.
+// Value-only: steamvr/spell_motion_test.cpp.
 namespace framevr::spellmotion {
 enum class Motion {None,FlingOut,PushDown,RubSnap,CrossGuard,ArmUp,MatchStrike,ForearmSweep,Shake,Hug,Punch,
     FireWall,Meteor,Blizzard,Hydra,                                                               // Sorceress (2026-11-05)
@@ -38,6 +41,8 @@ enum class Motion {None,FlingOut,PushDown,RubSnap,CrossGuard,ArmUp,MatchStrike,F
     BoneArmor,RaiseSkeleton,CorpseExplosion,Golem,AmplifyDamage,LowerResist,PoisonNova,BonePrison,GolemLeft,// Necromancer N1-N8, N4b
     BoneWall,PoisonExplosion,RaiseMage,                                                           // Necromancer N9-N11
     BurstOfSpeed,Fade,CloakOfShadows,Venom,BladeShield,ShadowWarrior,MindBlast,                   // Assassin S1-S7
+    Charge,BlessedHammer,HolyShield,FistOfHeavens,                                                // Paladin (2026-11-08)
+    Werewolf,Werebear,                                                                            // Druid (2026-11-08)
     End};
 constexpr int SorceressCount=int(Motion::Hydra);   // the Sorceress's, 1..SorceressCount ([motions] off: her bits)
 constexpr int MotionCount=int(Motion::End)-1;      // every class's, 1..MotionCount (a watcher each)
@@ -66,6 +71,8 @@ inline Motion For(int skill) {
     case 78:return Motion::BoneWall;case 83:return Motion::PoisonExplosion;case 80:return Motion::RaiseMage;
     case 258:return Motion::BurstOfSpeed;case 267:return Motion::Fade;case 264:return Motion::CloakOfShadows;case 278:return Motion::Venom;
     case 277:return Motion::BladeShield;case 268:case 279:return Motion::ShadowWarrior;case 273:return Motion::MindBlast;
+    case 107:return Motion::Charge;case 112:return Motion::BlessedHammer;case 117:return Motion::HolyShield;case 121:return Motion::FistOfHeavens;
+    case 223:return Motion::Werewolf;case 228:return Motion::Werebear;
     default:return Motion::None;
     }
 }
@@ -152,7 +159,7 @@ template<class Known> int CastSkillOf(int skill,Known known) {
     default:return skill;
     }
 }
-// The Amazon's, Barbarian's, Necromancer's and Assassin's cues (their headers; defined at the end of this file).
+// The other classes' cues, and the Sorceress's last four (their headers; defined at the end of this file).
 inline const char* ClassCue(Motion m);
 // How to do it: on the MOTIONS page and in the log.
 inline const char* Cue(Motion m) {
@@ -170,18 +177,8 @@ inline const char* Cue(Motion m) {
     default:return m>Motion::Punch&&m<Motion::End?ClassCue(m):"no motion";
     }
 }
-// A page skill's cue: the Sorceress's by her motion, the Paladin's and the Druid's by their gesture.
-inline const char* CueOf(int skill) {
-    switch(skill) {
-    case 107:return "draw the right fist in, then punch it straight out at a monster";
-    case 112:return "punch a fist from below your head up past it, one hammer a punch";
-    case 117:return "make the sign of the cross: forehead, chest, one shoulder, the other";
-    case 121:return "raise the right arm straight, then bring it down level with the shoulder";
-    case 223:return "cross the arms on the chest, bow, then straighten up flinging them out";
-    case 228:return "raise both hands overhead, hold, then slam them down together";
-    default:return Cue(For(skill));
-    }
-}
+// A page skill's cue: its motion's (every class's, the Paladin's and the Druid's too since 2026-11-08).
+inline const char* CueOf(int skill){return Cue(For(skill));}
 // The grips' hold every class's motions take (owner, 2026-11-03: "what about holding both grips to
 // cast?"): both held above .6, let go below .35, so a squeeze that dips mid-motion keeps it.
 struct GripGate {
@@ -315,6 +312,12 @@ struct Input {
     math::Vec hand[2]{};          // world frame; 0 right, 1 left
     bool tracked[2]{};
     float bodyScale=1;            // the player's size against the reference body (BodyScale): hands are divided by it
+    // For the Paladin's and the Druid's detectors (motions_paladin.h, motions_druid.h), as their own engines took
+    // them: the grips as pulled (a fist), each hand's velocity from the runtime (world, m/s) when it gives one,
+    // and the calibrated controller span (m; 0 none).
+    float grip[2]{1,1};
+    math::Vec handVelocity[2]{};bool velocityKnown[2]{};
+    float armSpan=0;
 };
 struct Output {
     bool began=false;             // the trigger pressed: watching
@@ -344,6 +347,11 @@ struct Output {
     float progress=0;
     // With cast: a summon that goes to a spot of its own (Engine::LandAt, LandPointed), not along aim.
     Land land=Land::None;Spot spot{};
+    // The Paladin's and the Druid's own log lines (DropLine): a gesture given up partway this frame (why, nullptr
+    // none; its hand, 0 right, 1 left, -1 the motion's; its class's figures), and with cast its figures (Fist of
+    // the Heavens: from and to, degrees). Engine::Abandon, CastFigures.
+    const char* abandoned=nullptr;int abandonedHand=-1;float abandonedFigures[3]{};
+    float castFigures[2]{};
 };
 // A spot for an arm pointing along way (head-local), in cells ahead of the eyes' heading and to its right:
 // farCells with the arm level (or up), easing to nearCells at steepDeg below.
@@ -356,11 +364,16 @@ inline Spot SpotAlong(math::Vec way,float farCells,float nearCells,float steepDe
 }
 // Teleport's landing (Output::point): pointFar level, pointNear at pointSteepDeg below. Meteor's: its own.
 inline Spot PointSpot(math::Vec way,const Tuning& t){return SpotAlong(way,t.pointFar,t.pointNear,t.pointSteepDeg);}
-// The hands at one frame, head-local: l[0] the right, l[1] the left.
-struct Sample {double t=0;math::Vec l[2]{};};
+// The hands at one frame, head-local: l[0] the right, l[1] the left; w as given (world frame).
+struct Sample {double t=0;math::Vec l[2]{},w[2]{};};
 class Engine;
-// The Amazon's, Barbarian's, Necromancer's and Assassin's detectors (defined at the end of this file).
+// The other classes' detectors, and the Sorceress's last four (defined at the end of this file).
 inline bool ClassDone(Engine& e,Motion m);
+// A motion's own rest after it casts (s; below zero: Tuning::cooldown), and its detector told the watch stopped
+// (a hand busy, the grips let go, a frame gap) before its history goes (the Paladin's and the Druid's log what
+// they had begun: Engine::Abandon). Defined at the end of this file.
+inline float ClassRest(Motion m);
+inline void ClassStopped(Engine& e,Motion m,const char* why);
 class Engine {
     std::vector<Sample> samples;
     uint64_t session=0,epoch=0;
@@ -378,6 +391,10 @@ class Engine {
     Swing swing[2][3]{};          // Shiver Armor: each hand's last swing on each axis
     std::vector<double> turns[2][3];
     Output stats;
+    Input current;float body=1;       // this frame's input, and the body scale its hands were divided by
+    Motion watched=Motion::None;      // the motion this hold watches
+    struct Abandoned {const char* why=nullptr;int hand=-1;float figures[3]{};} abandon;   // this frame's (Abandon)
+    float castFigures[2]{};bool keep=false;   // this frame's (CastFigures, KeepAfterCast)
     static bool Finite(math::Vec v){return std::isfinite(v.x)&&std::isfinite(v.y)&&std::isfinite(v.z);}
     void Clear() {
         samples.clear();poseSince=-1;rub=0;parted=-1;aimed={};scratch={};land=Land::None;spot={};
@@ -386,6 +403,10 @@ class Engine {
         for(auto& h:turns)for(auto& a:h)a.clear();
     }
     void Stop(){watching=false;casts=0;Clear();}
+    void Report(Output& out)const {
+        out.abandoned=abandon.why;out.abandonedHand=abandon.hand;
+        for(int i=0;i<3;++i)out.abandonedFigures[i]=abandon.figures[i];
+    }
 public:
     // For a class's detector (motions_<class>.h, through ClassDone): the hands' history (head-local, the
     // newest last, history seconds of it), these helpers, a scratch store cleared with the hold and after
@@ -396,6 +417,17 @@ public:
     // A summon's spot: cells ahead of the eyes' heading and to its right, or where the right hand points.
     void LandAt(float ahead,float right){land=Land::Spot;spot={ahead,right};}
     void LandPointed(){land=Land::Pointed;spot={};}
+    // For the Paladin's and the Druid's detectors: this frame's input as given (world head and hands, the grips,
+    // the runtime's velocities, the arm span), and the body scale the history's hands were divided by (a hand's
+    // metres: l * Body()).
+    const Input& Current()const{return current;}
+    float Body()const{return body;}
+    // A gesture given up partway, for its log line (Output::abandoned; the first in a frame is kept), and a cast's
+    // figures (Output::castFigures).
+    void Abandon(const char* why,int hand,float a=0,float b=0,float c=0){if(!abandon.why)abandon={why,hand,{a,b,c}};}
+    void CastFigures(float a,float b){castFigures[0]=a;castFigures[1]=b;}
+    // The cast this frame leaves the history and scratch as they are (Blessed Hammer: the other fist's pump goes on).
+    void KeepAfterCast(){keep=true;}
     // The motion's first part is done and its second this fraction of the way (0..1) to its end
     // (Output::progress: Begun to 1). Several reports in a frame keep the most.
     void Toward(float fraction) {
@@ -579,6 +611,7 @@ public:
         // A reset forgets the hold: a trigger still held must be pressed again.
         if(!std::isfinite(in.time)||!Finite(in.head)){Reset();wasHeld=in.held;return out;}
         if(in.session!=session||in.epoch!=epoch){Reset();session=in.session;epoch=in.epoch;wasHeld=in.held;}
+        current=in;abandon={};castFigures[0]=castFigures[1]=0;keep=false;
         const double dt=in.time-last;
         const bool continuous=last>0&&dt>0&&dt<=.15;
         last=in.time;
@@ -586,22 +619,24 @@ public:
         wasHeld=in.held;
         const bool ready=in.active&&in.motion!=Motion::None&&in.tracked[0]&&in.tracked[1]&&Finite(in.hand[0])&&Finite(in.hand[1]);
         if(watching&&(!(in.free||in.held)||!ready||!continuous)) {
+            const char* why=!(in.free||in.held)?"let go without the motion":!continuous?"frame gap":"hand busy, untracked or input inactive";
             if(!casts&&!in.free) {   // a hold that cast at least once was not dropped
                 out=stats;out.seconds=float(in.time-since);
                 out.dropped=!in.held?"let go without the motion":!continuous?"frame gap":"hands busy, untracked or input inactive";
             }
+            ClassStopped(*this,watched,why);Report(out);
             Stop();return out;
         }
         if(!watching) {
             if(!(in.free||pressed)||!ready)return out;   // only a fresh press watches: a trigger held as the spell was readied does not
-            watching=true;since=in.time;casts=0;Clear();
+            watching=true;since=in.time;casts=0;Clear();watched=in.motion;
             stats={};stats.apartMin=1e9f;stats.top=-1e9f;stats.low=1e9f;stats.behind[0]=stats.behind[1]=-1e9f;
             out.began=!in.free;
         }
         const auto inverse=math::Conjugate(math::Yaw(math::Heading(in.headRotation)));
         Sample s;s.t=in.time;
-        const float body=std::isfinite(in.bodyScale)?std::clamp(in.bodyScale,MinBodyScale,MaxBodyScale):1.f;
-        for(int h=0;h<2;++h)s.l[h]=math::Rotate(inverse,in.hand[h]-in.head)*(1/body);   // in the reference body's units
+        body=std::isfinite(in.bodyScale)?std::clamp(in.bodyScale,MinBodyScale,MaxBodyScale):1.f;
+        for(int h=0;h<2;++h){s.l[h]=math::Rotate(inverse,in.hand[h]-in.head)*(1/body);s.w[h]=in.hand[h];}   // in the reference body's units
         samples.push_back(s);
         samples.erase(samples.begin(),std::find_if(samples.begin(),samples.end(),[&](const Sample& x){return in.time-x.t<=tuning.history;}));
         const float apart=Apart(s);
@@ -613,18 +648,22 @@ public:
             stats.end[h]=s.l[h];
         }
         out.seconds=float(in.time-since);
-        if(castAt>=0&&in.time-castAt<tuning.cooldown)return out;
+        const float rest=ClassRest(in.motion);
+        if(castAt>=0&&in.time-castAt<(rest>=0?rest:tuning.cooldown))return out;
         progress=0;
         if(Done(in.motion)) {
             const auto seconds=out.seconds;out=stats;out.seconds=seconds;out.cast=true;out.aim=aimed;
             out.landing=landed;out.point=landed?pointWay:math::Vec{};
             out.land=land;out.spot=spot;
-            castAt=in.time;++casts;Clear();   // the motion again, from its start, casts again
+            out.castFigures[0]=castFigures[0];out.castFigures[1]=castFigures[1];
+            castAt=in.time;++casts;
+            if(!keep)Clear();   // the motion again, from its start, casts again
         }
         else {
             out.progress=progress;
             if(aimingSince>=0){out.aiming=true;out.point=pointWay;}
         }
+        Report(out);
         return out;
     }
 };
@@ -635,13 +674,19 @@ public:
 #include "motions_necromancer.h"
 #include "motions_sorceress.h"
 #include "motions_assassin.h"
+#include "motions_paladin.h"
+#include "motions_druid.h"
 namespace framevr::spellmotion {
+inline bool Paladin(Motion m){return m>=Motion::Charge&&m<=Motion::FistOfHeavens;}
+inline bool Druid(Motion m){return m==Motion::Werewolf||m==Motion::Werebear;}
 inline bool ClassDone(Engine& e,Motion m) {
     if(m>=Motion::FireWall&&m<=Motion::Hydra)return sorceress::Done(e,m);
     if(m>=Motion::InnerSight&&m<=Motion::Valkyrie)return amazon::Done(e,m);
     if(m>=Motion::BattleOrders&&m<=Motion::Whirlwind)return barbarian::Done(e,m);
     if(m>=Motion::BoneArmor&&m<=Motion::RaiseMage)return necromancer::Done(e,m);
     if(m>=Motion::BurstOfSpeed&&m<=Motion::MindBlast)return assassin::Done(e,m);
+    if(Paladin(m))return paladin::Done(e,m);
+    if(Druid(m))return druid::Done(e,m);
     return false;
 }
 inline const char* ClassCue(Motion m) {
@@ -650,8 +695,29 @@ inline const char* ClassCue(Motion m) {
     if(m>=Motion::BattleOrders&&m<=Motion::Whirlwind)return barbarian::Cue(m);
     if(m>=Motion::BoneArmor&&m<=Motion::RaiseMage)return necromancer::Cue(m);
     if(m>=Motion::BurstOfSpeed&&m<=Motion::MindBlast)return assassin::Cue(m);
+    if(Paladin(m))return paladin::Cue(m);
+    if(Druid(m))return druid::Cue(m);
     return "no motion";
 }
+inline float ClassRest(Motion m){return Paladin(m)?paladin::Rest(m):Druid(m)?druid::Rest(m):-1.f;}
+inline void ClassStopped(Engine& e,Motion m,const char* why) {
+    if(Paladin(m))paladin::Stopped(e,m,why);
+    else if(Druid(m))druid::Stopped(e,m,why);
+}
+// The line a watcher's Output::abandoned logs (the Paladin's Frame hammer:, charge:, holy shield: and heavens:, the
+// Druid's Frame shapeshift:, as their own engines' were), false for none.
+inline bool DropLine(Motion m,const Output& o,char* line,size_t size) {
+    if(!o.abandoned||!line||!size)return false;
+    if(Paladin(m))return paladin::DropLine(m,o,line,size);
+    if(Druid(m))return druid::DropLine(m,o,line,size);
+    return false;
+}
+// Blessed Hammer's pumps (owner, as their own engine's: one hammer a punch, as fast as the cast rate): never the
+// second's wait after a cast, start none, and leave the other watchers be (the transport).
+inline bool Rapid(Motion m){return m==Motion::BlessedHammer;}
+// The Paladin's and the Druid's are watched the frame the grips open too (Gate::State::watch): Fist of the Heavens
+// may end on the fists opening, as their own engines were.
+inline bool WatchesOpening(Motion m){return Paladin(m)||Druid(m);}
 // The order a class's motions are watched in: the first to complete in a frame casts. The Sorceress's
 // Static Field before Nova (its snap apart is as wide as a fling), Blizzard before Frost Nova (a pull from
 // overhead to the waist is Blizzard's), Hydra and Meteor before Thunder Storm (each passes an arm overhead);
@@ -665,9 +731,11 @@ inline Watched OrderOf(int skillClass) {
     case 0:return {amazon::Order,int(std::size(amazon::Order))};
     case 1:return {SorceressOrder,int(std::size(SorceressOrder))};
     case 2:return {necromancer::Order,int(std::size(necromancer::Order))};
+    case 3:return {paladin::Order,int(std::size(paladin::Order))};
     case 4:return {barbarian::Order,int(std::size(barbarian::Order))};
+    case 5:return {druid::Order,int(std::size(druid::Order))};
     case 6:return {assassin::Order,int(std::size(assassin::Order))};
-    default:return {};   // the Paladin's and the Druid's gestures have their own detectors
+    default:return {};
     }
 }
 }

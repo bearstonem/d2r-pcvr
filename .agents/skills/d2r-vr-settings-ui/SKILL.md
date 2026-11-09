@@ -41,8 +41,12 @@ counts. Some settings have no row: set by Calibrate body, set from the hand whee
 1. **`vr_settings.h`:** add the `Key` before `Count` and its `Definitions` entry at the same index. Give custom snapping (Off plus a range, percent steps) a branch in `Normalize()`; a key whose stepping is not `Normalize(v + delta * step)` gets a branch in `Model::Click()`, and must handle a drag's `delta` of several steps. Hide with `RowShown()`, lock with `RowEnabled()` (and give the lock words in `hooks::LockedReason`).
 2. **`vr_settings_content.h`:** add an override at its spot in page and section order. Never restate a default, min, max or step. A page shows at most 8 rows (a `.beside` setting takes none); when a page is full, move a row or put the setting `.beside` its partner: a toggle flips in its box, a number's box opens the list of its steps, and `.besideLabel` is the short word in that box. Without an override a setting still shows, on its owner page by INI section or on **More**.
 3. **`vr_settings_help.h`:** a long help `case` for the card when the override's help is not enough.
-4. **`d2r_pcvr.ini`:** document the key under its section, naming the menu page (`VR Settings > World > Fog distance`).
+4. **`d2r_pcvr.ini`:** document the key under its section, naming the menu page (`VR Settings > Graphics > Environment > Fog distance`).
 5. **Runtime:** read the normalized value from the settings snapshot where it is used.
+
+### The rail
+
+The rail is Presets, then a row per group (`GroupTable` in `vr_settings_content.h`: Gameplay, Comfort, Controls, Interface, Graphics); the open group's pages hang under its row. A page joins a group by its `PageTable` line's `.group`; never add rail code for a page. A group's row opens the page last opened there (`Model::groupPage`, memory only, reset by `StartOver`). `GroupsOk()` stops the build when the rail would pass 12 rows. Rules and the add-a-page steps: [`docs/VR_SETTINGS_MENU.md`](../../../docs/VR_SETTINGS_MENU.md#the-rail).
 
 ---
 
@@ -50,7 +54,7 @@ counts. Some settings have no row: set by Calibrate body, set from the hand whee
 
 - Resolve conflicts in `vr_settings.h` toward the data model: page catalogs, `PairOf`, `ValueLabel` and fixed rects are gone. Carry a new setting from the other side as an override, not as layout code.
 - [`steamvr/vr_settings_test.cpp`](../../../steamvr/vr_settings_test.cpp): defaults, INI keys, `Normalize`, the page (`content::RowOf(key)->page`), stepping through `layout::Press(model, {Kind::Change, key, delta}, 0)`, locks, and `Apply`'s `ChangeMask` isolation.
-- [`steamvr/vr_settings_layout_test.cpp`](../../../steamvr/vr_settings_layout_test.cpp): every setting reachable once, at most 8 rows for every class and state, no overlaps, full-row hit targets.
+- [`steamvr/vr_settings_layout_test.cpp`](../../../steamvr/vr_settings_layout_test.cpp): every setting reachable once, at most 8 rows for every class and state, no overlaps, full-row hit targets; the rail's rows for every open group, every page in 2 presses or fewer, last-page memory.
 - `vr-settings-test --tidy` lists settings without words, orphan overrides and a non-empty More page.
 - Render the pages and look at them: `vr-settings-preview --pages <folder>`.
 

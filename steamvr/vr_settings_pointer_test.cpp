@@ -323,11 +323,93 @@ static void PopoverTests(){
     Check(!w.Step(9000,true,true,100,900,{0,0,0,0},row),"before its picture shows (no card yet): no close");
 }
 
+// The rail on the real layout: a group row's press opens it on release; the rows
+// below it move, and a quick second press (within the pre-trigger lock) stays
+// with the row it locked, never the page that slid under the laser.
+static void RailTests(){
+    using content::Group;
+    const auto row=[](Group g){return Hit{Kind::OpenGroup,int(g),-1};};
+    const auto tab=[](View v){return Hit{Kind::Open,int(v),-1};};
+    const Hit comfort=row(Group::Comfort),graphics=row(Group::Graphics);
+    Model m;Snapshot s;s.ready=true;m.Open(s);
+    L::Press(m,tab(View::Body),0);L::Press(m,tab(View::Shield),0);   // Gameplay open; Comfort remembers Body
+    P::PointerFilter f;uint64_t ms=1000;
+    auto layout=L::Build(m,{},{});
+    const L::Element* pressedRow=L::Find(layout,comfort);
+    Check(pressedRow&&!L::Find(layout,tab(View::Moving)),"Gameplay open: Comfort's row, its pages hidden");
+    Check(pressedRow&&pressedRow->rect.y==L::TabY+7*L::TabPitch,"Comfort sits under Gameplay's 5 pages");
+    const float x=float(pressedRow->rect.x+pressedRow->rect.w/2),y=float(pressedRow->rect.y+pressedRow->rect.h/2);
+    for(int i=0;i<10;++i){f.Step(layout,ms,true,x,y,false);ms+=11;}
+    f.Step(layout,ms,true,x,y,true);ms+=11;
+    auto out=f.Step(layout,ms,true,x,y,false);ms+=11;
+    Check(out.click==comfort,"a press on a group row clicks it on release");
+    const auto openBefore=L::OpenGroup(m);
+    L::Press(m,out.click,ms);layout=L::Build(m,{},{});
+    Check(m.view==View::Body,"and opens its last page");
+    Check(L::OpenGroup(m)!=openBefore,"the open group changed: transport guards the rail (GuardRail)");
+    f.GuardRail(ms);
+    Check(L::HitTest(layout,x,y)==graphics,"Gameplay closed: the rows moved up, Graphics slid under the laser");
+    // At once: the rail guard ignores the press, whichever row is under the laser: the release clicks nothing.
+    f.Step(layout,ms,true,x,y,false);ms+=11;
+    f.Step(layout,ms,true,x,y,true);ms+=11;
+    for(int i=0;i<3;++i){f.Step(layout,ms,true,x,y,true);ms+=11;}
+    out=f.Step(layout,ms,true,x,y,false);ms+=11;
+    Check(out.click.kind==Kind::None&&m.view==View::Body,"a press right after the group opens takes nothing: the guard stops it");
+    // Settled on it, still inside the rail guard: a second pull takes nothing.
+    for(int i=0;i<10;++i){f.Step(layout,ms,true,x,y,false);ms+=11;}
+    {auto down=f.Step(layout,ms,true,x,y,true);ms+=11;auto up=f.Step(layout,ms,true,x,y,false);ms+=11;
+     Check(down.railIgnoredMs>=0&&down.railIgnoredMs<int(P::PointerFilter::RailGuardMs)&&!down.blocked&&up.click.kind==Kind::None,"a second pull inside the guard is ignored, silently");}
+    // Settled past the guard: the row under the laser takes the next press.
+    for(int i=0;i<25;++i){f.Step(layout,ms,true,x,y,false);ms+=11;}
+    f.Step(layout,ms,true,x,y,true);ms+=11;out=f.Step(layout,ms,true,x,y,false);ms+=11;
+    Check(out.click==graphics,"once settled past the guard, the row under the laser takes the press");
+    // Pressing the open group again stays put.
+    const auto before=m.revision;L::Press(m,comfort,ms);
+    Check(m.view==View::Body&&m.revision==before,"pressing the open group again changes nothing");
+    // Moving between pages of the open group moves no row: no guard.
+    {const auto open=L::OpenGroup(m);L::Press(m,tab(View::Moving),ms);Check(L::OpenGroup(m)==open,"a page of the open group leaves the open group as it is");}
+    // Interface, from Gameplay open: its last page lands under the laser.
+    {Model n;n.Open(s);L::Press(n,tab(View::Shield),0);
+     const auto a=L::Build(n,{},{});const auto* r=L::Find(a,row(Group::Interface));
+     Check(r&&r->rect.y==L::TabY+9*L::TabPitch,"Interface's row with Gameplay open");
+     const float ix=float(r->rect.x+r->rect.w/2),iy=float(r->rect.y+r->rect.h/2);
+     L::Press(n,row(Group::Interface),0);
+     Check(L::HitTest(L::Build(n,{},{}),ix,iy)==tab(View::Warnings),"Interface's last page slides under the laser: the guard covers it");}
+    // The guard is for rail rows only, its edge is RailGuardMs, and a view change's Reset keeps it.
+    {layout=L::Build(m,{},{});P::PointerFilter g;uint64_t t=5000;g.GuardRail(t);g.Reset();
+     const L::Element* close=nullptr;for(const auto& e:layout.elements)if(e.role==L::Role::FooterClose)close=&e;
+     const L::Element* page=L::Find(layout,tab(View::Body));
+     Check(close&&page&&close->Has(L::Enabled),"a footer button and a page row to press");
+     auto tap=[&](const L::Element* e){const float ex=float(e->rect.x+e->rect.w/2),ey=float(e->rect.y+e->rect.h/2);
+         for(int i=0;i<10;++i){g.Step(layout,t,true,ex,ey,false);t+=11;}
+         auto down=g.Step(layout,t,true,ex,ey,true);t+=11;auto up=g.Step(layout,t,true,ex,ey,false);t+=11;up.railIgnoredMs=down.railIgnoredMs;return up;};
+     auto a=tap(close);Check(a.click==close->hit&&a.railIgnoredMs<0,"inside the guard the footer still takes its press");
+     auto b=tap(page);Check(b.click.kind==Kind::None&&b.railIgnoredMs>=0,"inside the guard a page row takes none");
+     while(t<5000+P::PointerFilter::RailGuardMs)t+=11;
+     auto d=tap(page);Check(d.click==page->hit&&d.railIgnoredMs<0,"past the guard it does");}
+}
+
+// A press on a Frames row that By turns grays: the laser's locked buzz (Output::blocked), and no click.
+static void GrayRowTests(){
+    Model m;Snapshot s;s.ready=true;m.Open(s);L::Press(m,Hit{Kind::Open,int(View::Frames),-1},0);
+    const auto layout=L::Build(m,{},{});
+    const L::Element* control=nullptr;
+    for(const auto& e:layout.elements)if(e.key==FrameGeneration&&e.hit.kind!=Kind::None&&e.hit.value==1.f)control=&e;
+    Check(control&&!control->Has(L::Enabled)&&control->Has(L::Locked),"by turns the row's control is drawn, locked");
+    const float x=float(control->rect.x+control->rect.w/2),y=float(control->rect.y+control->rect.h/2);
+    P::PointerFilter f;uint64_t ms=1000;
+    for(int i=0;i<10;++i){f.Step(layout,ms,true,x,y,false);ms+=11;}
+    const auto down=f.Step(layout,ms,true,x,y,true);ms+=11;const auto up=f.Step(layout,ms,true,x,y,false);
+    Check(down.blocked&&up.click.kind==Kind::None,"a press on it buzzes and clicks nothing");
+}
+
 int main(){
     PointerTests();
     CardTests();
     DragTests();
     PopoverTests();
+    RailTests();
+    GrayRowTests();
     std::printf("VR settings pointer tests passed (%d checks)\n",checks);
     return 0;
 }

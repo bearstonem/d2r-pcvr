@@ -367,7 +367,7 @@ struct MenuBounds {
     float left,top,right,bottom;
     bool Contains(float u,float v) const {return u>left&&u<right&&v>top&&v<bottom;}
 };
-constexpr int QuickUseCell=210,LeftStrikesCell=212;   // 211 was RUN / WALK, 213 the movement slider (now VR Settings > Body > Movement speed)
+constexpr int QuickUseCell=210,LeftStrikesCell=212;   // 211 was RUN / WALK, 213 the movement slider (now VR Settings > Comfort > Moving > Movement speed)
 constexpr double QuickEditHold=.65;
 constexpr MenuBounds QuickUseBounds{.025f,.025f,.255f,.18f};
 // Glyph casting (glyph_cast.h): the GLYPHS box, upper right on the Spells and Equipment pages and on the
