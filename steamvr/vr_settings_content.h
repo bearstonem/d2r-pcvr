@@ -438,6 +438,13 @@ inline constexpr Override Overrides[]={
     {.id="gameplay.melee_reach_cm",.page=View::Combat,.section="Melee",.kind=RowKind::Slider,.label="Melee reach",
      .help="A weapon or fist that passes this close beside a monster still hits it. Raise it if near misses don't count. Walls still block.",
      .format={.unit="cm"}},
+    // Weapon heft and Bow bash (#443; Discord #ideas, 2026-11-04): one row, the page's last free one (8 at most).
+    // [gameplay] weapon_heft and bow_bash, both Off by default.
+    {.id="gameplay.weapon_heft",.page=View::Combat,.section="Melee",.kind=RowKind::Toggle,.label="Weapon heft",
+     .help="Heavy weapons need a long stroke of your arm for a full hit; a quick flick lands lighter. Daggers, claws and fists still hit fully with a flick."},
+    {.id="gameplay.bow_bash",.page=View::Combat,.section="Melee",.kind=RowKind::Toggle,.label="Bow bash",
+     .help="Swing your bow, string not drawn, into a monster to stagger it while you step back and aim. No damage; every 1.5 s at most, never act bosses.",
+     .beside=true,.besideLabel="Bow bash"},
     // Combat: Skills and throws
     {.id="gameplay.skill_gestures",.page=View::Combat,.section="Skills and throws",.kind=RowKind::Toggle,.label="Skills on your moves",
      .help="A trigger skill powers your real move: melee skills on a landed strike, Smite on a bash, arrow skills on a release. Off, every swing is plain."},
@@ -461,6 +468,11 @@ inline constexpr Override Overrides[]={
      .classes=Sorceress|Druid|WithStaff},
     {.id="gameplay.aim_follows_view",.page=View::Targeting,.section="Aiming",.kind=RowKind::Toggle,.label="Aim with your view",
      .help="Only monsters in front of your face can be aimed at. A hand held out and pointing still picks its own monster."},
+    // Aim with your eyes (gaze_aim.h; owner 2026-11-08): the right half of Aim with your view's row, shown only on a
+    // headset that shares eye tracking (RowShown: Context::eyeTracker).
+    {.id="gameplay.aim_with_eyes",.page=View::Targeting,.section="Aiming",.kind=RowKind::Toggle,.label="Aim with your eyes",
+     .help="The monster you look at is aimed at by where your eyes look, not your head. A blink keeps it; if tracking is lost, your head aims.",
+     .beside=true,.besideLabel="Eyes"},
     {.id="bow.path_laser_hue",.page=View::Targeting,.section="Aiming",.kind=RowKind::Swatch,.label="Arrow path line",
      .help="At full draw, a faint line shows the arrow's flight, up to 15 m, through walls. Not for crossbows, Multiple Shot, Guided Arrow or Strafe.",
      .format={.hueNames=true},FRAMEVR_NAMES(LaserOffName),.classes=Amazon|WithBow,.wraps=true},
@@ -506,6 +518,9 @@ inline constexpr Override Overrides[]={
     {.id="gameplay.companion_tactical_commands",.page=View::Monsters,.section="Mercenary",.kind=RowKind::Toggle,.label="Tactical commands",
      .help="Point at your mercenary, hold Grip and pull Trigger, aim and let go: hold ground, prioritize monsters, or regroup.",
      .beside=true,.besideLabel="Commands"},
+    // Mercenary potion assistance, independent of class and outline settings (#424, RobinHeggelund).
+    {.id="gameplay.merc_potion_assist",.page=View::Monsters,.section="Mercenary",.kind=RowKind::Toggle,.label="Merc potion throw autoaim",
+     .help="On: thrown potions feed your living mercenary wherever they land. Off: land within 1.5 m of its feet; misses keep the potion. Slow releases return it."},
     // Physics: Props
     {.id="interactions.bottle_physics",.page=View::Physics,.section="Props",.kind=RowKind::Toggle,.label="Roll and break bottles",
      .help="Empty bottles drop and roll. Potions thrown at your mercenary break where they hit; thrown traps and gas or oil potions stop at walls."},
@@ -743,6 +758,11 @@ inline constexpr Override Overrides[]={
     {.id="torch.spell_hands_pct",.page=View::Environment,.section="Glow",.kind=RowKind::Slider,.label="Spell hand light",
      .help="How brightly the spells in a Sorceress's hands light the dark around you. Lower it if the light dazzles; Off and they only glow.",
      .format={.unit="%"},FRAMEVR_NAMES(OffAtZero),.classes=Sorceress},
+    // Light Radius boost (#440: "if it did it could even be buffed a bit for the sake of VR"): [light]
+    // radius_boost_pct, how much each Light Radius point widens the mod's dungeon light (light_radius.h).
+    {.id="light.radius_boost_pct",.page=View::Environment,.section="Glow",.kind=RowKind::Slider,.label="Light Radius boost",
+     .help="How much +Light Radius items and skills widen your light in dungeons. 100% is about the game's own amount; more is easier to see in VR.",
+     .format={.unit="%"}},
     // Settings with an ini key but no row: set by Calibrate body, legacy, the
     // ini only on main ([render] desktop_one_eye), or the skill wheel's Left
     // claw strikes box ([gameplay] left_hand_strikes).

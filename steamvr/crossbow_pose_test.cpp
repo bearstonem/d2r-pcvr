@@ -131,6 +131,22 @@ int main() {
         assert(Near(Position(visual)+Vector(visual,{0,0,BoltTip}),muzzle+line.direction*8));
         const Mat frozen=visual;p.muzzle.x+=30;ArrowMatrix(flight,100,visual.m);
         assert(std::memcmp(&frozen,&visual,sizeof visual)==0);
+        {
+            // #432: Fires Explosive Bolts (Demon Machine) makes the basic
+            // attack name explodingarrow 41, not bolt 31. The physical bolt
+            // flies it, drawn as the exploding arrow's model at bolt length.
+            assert(BasicLaunchMissile(Kind::Crossbow,31)==-1&&BasicLaunchMissile(Kind::Crossbow,41)==41);
+            assert(BasicLaunchMissile(Kind::Crossbow,0)==RefusedMissile&&BasicLaunchMissile(Kind::Crossbow,-1)==RefusedMissile);
+            Flight item;item.shot=launch.flight;item.shot.missile=41;item.updatedAt=100;item.speed=20;item.alive=true;
+            assert(ItemArrow(item.shot)&&OwnMissile(item.shot)&&!SkillRelease(item.shot)&&MissileId(item.shot)==41);
+            assert(Valid(item.shot)&&Allowed(item.shot,{true,7,3,100,42,false},100));
+            assert(ProjectileLength(item.shot)==launch.flight.boltLength);
+            Flight plain=flight;plain.distance=0;
+            Mat model,bolt;ArrowMatrix(item,100,model.m);ArrowMatrix(plain,100,bolt.m);
+            assert(Near(Position(model)+Vector(model,{0,0,1}),muzzle)); // the arrow model's tip at the muzzle
+            assert(Near(Position(model)+Vector(model,{0,0,-.98391676f}),Position(bolt)+Vector(bolt,{0,0,-BoltTip}))); // its tail at the bolt's
+            assert(!Near(Position(model)+Vector(model,{0,0,BoltTip}),muzzle)); // negative control: not placed as the bolt mesh
+        }
         float t=0;const Vec start=Tip(launch.flight,0),target=start+line.direction;
         assert(CapsuleEntry(start,start+line.direction*2,target,target,.1f,t)&&t<1);
         assert(Fresh(p,150,7,42,3)&&!Fresh(p,201,7,42,3)&&!Fresh(p,99,7,42,3));

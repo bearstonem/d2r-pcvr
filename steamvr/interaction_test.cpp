@@ -1165,5 +1165,12 @@ int main(){
         const Vec world{15.f,.4f,-37.f};const auto back=st.World(st.Room(world));
         Check(std::fabs(back.x-world.x)<1e-4f&&std::fabs(back.y-world.y)<1e-4f&&std::fabs(back.z-world.z)<1e-4f,"stage room/world mapping is invertible");
     }
+    for(bool mercPotionAutoaimEnabled:{false,true}) {
+        Check(MercThrowAccepted(0,mercPotionAutoaimEnabled)&&MercThrowAccepted(1.5f,mercPotionAutoaimEnabled),"landing at the merc feeds with either policy");
+        Check(MercThrowAccepted(1.51f,mercPotionAutoaimEnabled)==mercPotionAutoaimEnabled&&MercThrowAccepted(100,mercPotionAutoaimEnabled)==mercPotionAutoaimEnabled,
+              "ground, wall and distant misses feed only with assistance");
+        Check(!MercThrowAccepted(-1,mercPotionAutoaimEnabled)&&!MercThrowAccepted(NAN,mercPotionAutoaimEnabled)&&!MercThrowAccepted(INFINITY,mercPotionAutoaimEnabled),
+              "assistance cannot feed an absent, dead or invalid hireling");
+    }
     std::puts("Interaction ownership, wheel, holster, item identity and confirmation tests passed");
 }

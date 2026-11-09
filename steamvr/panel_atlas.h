@@ -5,6 +5,8 @@
 #include "glyph_trail.h"
 #include "guard_strain.h"
 #include "notice_card.h"
+#include "stash_buttons.h"
+#include "vr_keyboard.h"
 #include "vr_settings_draw.h"
 #include "vr_settings_help.h"
 #include "wrist_compass.h"
@@ -43,7 +45,17 @@ constexpr Region StatsLit{Stats.x,Stats.y+Stats.h+Gap,StatsSize,StatsSize};
 constexpr int RespecWidth=320,RespecHeight=64,RespecPictures=8;
 constexpr int RespecLitReset=6,RespecLitConfirm=7;
 constexpr Region Respec(int i){return {Stats.x+StatsSize+Gap,Leather.y+i*(RespecHeight+Gap),RespecWidth,RespecHeight};}
-constexpr int StaticWidth=1536,StaticHeight=Leather.y+Leather.h;
+// Under the leather: the VR keyboard (vr_keyboard.h), every key plain, then
+// every key lit beside it; the lit quad crops the one key under the laser.
+// Under those the same with capitals, while Shift waits (its key lit).
+constexpr Region Keyboard{0,Leather.y+Leather.h+Gap,keyboard::TexelWidth,keyboard::TexelHeight};
+constexpr Region KeyboardLit{Keyboard.x+Keyboard.w+Gap,Keyboard.y,keyboard::TexelWidth,keyboard::TexelHeight};
+constexpr Region KeyboardCaps{0,Keyboard.y+Keyboard.h+Gap,keyboard::TexelWidth,keyboard::TexelHeight};
+constexpr Region KeyboardCapsLit{KeyboardLit.x,KeyboardCaps.y,keyboard::TexelWidth,keyboard::TexelHeight};
+// Stash navigation plaques (stash_buttons.h): right of the lit keyboard, from where the respec
+// faces' column ends down (that column is wider than the gap the keyboard leaves beside it).
+constexpr Region Stash(int i){return {KeyboardLit.x+KeyboardLit.w+Gap,Leather.y+RespecPictures*(RespecHeight+Gap)+i*(stashbuttons::Height+Gap),stashbuttons::Width,stashbuttons::Height};}
+constexpr int StaticWidth=1536,StaticHeight=KeyboardCaps.y+KeyboardCaps.h>Stash(3).y+Stash(3).h+Gap?KeyboardCaps.y+KeyboardCaps.h:Stash(3).y+Stash(3).h+Gap;
 // Dynamic: VR Settings (its help card inside the panel) across the top, the
 // glyph trail beside it, the blood visor under them, then the strain light, the
 // quest card and the bow laser beside it.

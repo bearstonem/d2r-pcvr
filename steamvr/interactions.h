@@ -188,6 +188,11 @@ inline Vec Spin(Quat from,Quat to,float dt) {
 inline bool Throwable(Potion type) {
     return type==Potion::Health||type==Potion::Rejuvenation||type==Potion::Antidote||type==Potion::Thawing;
 }
+// A negative distance means there is no live hireling. Assistance only
+// removes the landing-distance requirement; native potion-use rules remain.
+inline bool MercThrowAccepted(float distance,bool mercPotionAutoaimEnabled) {
+    return std::isfinite(distance)&&distance>=0&&(mercPotionAutoaimEnabled||distance<=1.5f);
+}
 inline double LandingTime(Vec p,Vec v,float floor) {
     const double drop=double(p.y)-floor;
     if(!std::isfinite(drop)||drop<=0||!std::isfinite(v.y))return -1;
@@ -278,6 +283,9 @@ struct Snapshot {
     // Bone Armor's absorb pool and its maximum (ItemStatCost 132 / 133, 8.8 fixed
     // point; developer capture 2026-10-26): the forearm grafts (bone_graft.h).
     int boneArmor=0,boneArmorMax=0;
+    // The hero's Light Radius (ItemStatCost 89, item_lightradius; #440): how far the mod's own dungeon
+    // light reaches (light_radius.h). Known with the vitals.
+    int lightRadius=0;bool lightRadiusKnown=false;
     wrist::Experience experience;
     navigation::Location location;
     bool actionKnown=false;

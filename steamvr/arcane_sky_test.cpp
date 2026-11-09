@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "fx_source.h"
 using Microsoft::WRL::ComPtr;
 static void Check(HRESULT hr,const char* what) {if(FAILED(hr))throw std::runtime_error(what);}
 static std::string Function(const std::string& source,const char* signature) {
@@ -26,7 +27,7 @@ static std::string Function(const std::string& source,const char* signature) {
 }
 int main(int argc,char** argv) {try {
     if(argc!=2)throw std::runtime_error("shader path required");
-    std::ifstream inputFile(argv[1]);const std::string source{std::istreambuf_iterator<char>(inputFile),{}};
+    const std::string source=fxsource::ReadWithIncludes(argv[1]);   // the effect with its feature headers pasted in (the Arcane sky lives in D2R_Sky.fxh)
     std::string shader=R"hlsl(
 Texture2D<float4> ArcaneStarsSmp : register(t0);
 Texture2D<float4> ArcaneCloudsSmp : register(t1);

@@ -85,6 +85,9 @@ void ConfigureButtonRules(bool unleashed);
 bool ParryArmed();
 uint64_t EarlyParry(uintptr_t monster,uintptr_t player,uint64_t attackAt,uint64_t opensAt,const char* trigger);
 void ConfirmParry(uint64_t swing);
+// One of the five act bosses (MonStats primeevil, as the parry gate reads it): never parried or bow-bashed.
+// Game thread, a server monster unit; unreadable is false.
+bool ActBoss(uintptr_t unit);
 // A riposte is a clean hit: no attack-rating or recovery penalty.
 // [gameplay] riposte_bonus (% extra damage on top, default 0), riposte_ms, riposte_sound_file (empty:
 // the built-in sound; else a WAV, next to the ini unless a full path).

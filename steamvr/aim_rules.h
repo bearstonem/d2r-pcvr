@@ -94,6 +94,11 @@ inline bool MotionOnTarget(int skill){return skill==56||skill==59;}
 inline bool WantsUnit(int skill){
     switch(skill){case 22: case 93: case 86: case 137: case 107: case 143: case 275: return true;default: return false;}
 }
+// Guided Arrow is handed the aimed monster even with VR Settings > Gameplay > Targeting > "Skills go to
+// the aimed monster" Off (owner, 2026-11-08: it "is not actually following and hitting monsters it just
+// goes pretty much straight" with the option Off - "make it always home even with that setting off since
+// that's the whole point of this skill"). With no aimed monster it flies as before.
+inline bool AlwaysHomes(int skill){return skill==22;}
 // The monster handed to the game for a unit skill answers the game's target
 // queries for this long after the cast (RulesUnit).
 inline constexpr unsigned long long HandOffMs=500;

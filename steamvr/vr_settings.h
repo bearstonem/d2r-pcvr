@@ -27,7 +27,7 @@ enum class View : uint8_t { Presets, Combat, Targeting, Shield, Monsters, Physic
 constexpr int MaxRailGroups=8;
 enum Key { Motion, Seated, Dominant, Snap, TurnSpeed, Waist, BeltForward,
            Foveation, Sky, Fog, Ceiling, DrawDistance, ObjectDistance,
-           EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, VitalsTilt, HapticStrength, HapticMelee, HapticBowDraw, HapticBowRelease, HapticSpell, HapticInteraction, HapticAlert, HapticShortMelee, BloodVisor, BloodWipe, MeleeThrustSpeed, LootLabelSize, CompanionCounts, StrainVignette, OfflinePlayers, ShieldBashSpeed, DesktopOneEye, MapTopDown, MapRotate, FoveationStrength, StereoRendering, DeferGpuWait, TargetHighlight, HeartbeatStart, SpellLock, StaffPoint, LandingCircles, GroundAim, AimHighlights, HighlightRight, HighlightLeft, EnemySight, BowLaser, ThrowLift, BottlePhysics, PropPhysics, CompanionAi, ShieldGrip, ShieldOut, ShieldUp, ShieldFollow, ShieldRoll, AimFollowsView, CompanionTactical, LeftHandStrikes, TorchFlame, FrameGeneration, FrameGenPreset, FrameGenScale, RunSpeed, RunWalkToggle, BodyPhysics, BigObjectDistance, FogDistance, LeatherMenu, LootBeamUnique, LootBeamSet, LootBeamRare, LootBeamRunes, LootBeamBrightness, CeilingTorches, ArcaneDecay, ArcaneFade, ManaThreshold, ArcaneIntensity, GlyphDraw, GlyphCircle, GlyphTriangle, GlyphSquare, GlyphLightning, GlyphSpiral, GlyphV, GlyphStar, GlyphWave, LootPick, MotionsOff, MotionsPaladinOff, MotionsDruidOff, MotionsAmazonOff, MotionsNecromancerOff, MotionsBarbarianOff, MotionsAssassinOff, GlyphDrawSecond, GlyphLeftCircle, GlyphLeftTriangle, GlyphLeftSquare, GlyphLeftLightning, GlyphLeftSpiral, GlyphLeftV, GlyphLeftStar, GlyphLeftWave, SpellHandLight, MeleeReach, WalkDirection, RoomSteps, ClickToDrink, Count };
+           EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, VitalsTilt, HapticStrength, HapticMelee, HapticBowDraw, HapticBowRelease, HapticSpell, HapticInteraction, HapticAlert, HapticShortMelee, BloodVisor, BloodWipe, MeleeThrustSpeed, LootLabelSize, CompanionCounts, StrainVignette, OfflinePlayers, ShieldBashSpeed, DesktopOneEye, MapTopDown, MapRotate, FoveationStrength, StereoRendering, DeferGpuWait, TargetHighlight, HeartbeatStart, SpellLock, StaffPoint, LandingCircles, GroundAim, AimHighlights, HighlightRight, HighlightLeft, EnemySight, BowLaser, ThrowLift, BottlePhysics, PropPhysics, CompanionAi, ShieldGrip, ShieldOut, ShieldUp, ShieldFollow, ShieldRoll, AimFollowsView, CompanionTactical, LeftHandStrikes, TorchFlame, FrameGeneration, FrameGenPreset, FrameGenScale, RunSpeed, RunWalkToggle, BodyPhysics, BigObjectDistance, FogDistance, LeatherMenu, LootBeamUnique, LootBeamSet, LootBeamRare, LootBeamRunes, LootBeamBrightness, CeilingTorches, ArcaneDecay, ArcaneFade, ManaThreshold, ArcaneIntensity, GlyphDraw, GlyphCircle, GlyphTriangle, GlyphSquare, GlyphLightning, GlyphSpiral, GlyphV, GlyphStar, GlyphWave, LootPick, MotionsOff, MotionsPaladinOff, MotionsDruidOff, MotionsAmazonOff, MotionsNecromancerOff, MotionsBarbarianOff, MotionsAssassinOff, GlyphDrawSecond, GlyphLeftCircle, GlyphLeftTriangle, GlyphLeftSquare, GlyphLeftLightning, GlyphLeftSpiral, GlyphLeftV, GlyphLeftStar, GlyphLeftWave, SpellHandLight, MeleeReach, WalkDirection, RoomSteps, LightRadiusBoost, WeaponHeft, BowBash, AimWithEyes, MercPotionAssist, ClickToDrink, Count };
 // One bit per setting, 256 wide: four words, since MSVC has no wider integer.
 // (128 until 2026-11-08, when 126 were in use and more rows were coming.)
 struct ChangeMask {
@@ -247,6 +247,20 @@ inline constexpr std::array<Definition,Count> Definitions{{
     // Room follows you (room_steps.h; Discord, 2026-11-04 and 11-08; owner 2026-11-08: "the room center becomes where
     // we physically move"): the hero's spot follows you in your room. On by default; beside Seated play, which turns it off.
     {"Room follows you", "The hero's spot follows you as you move in your room; Off: it stays where you calibrated", L"gameplay",L"room_steps",1,0,1,1},
+    // Light Radius boost (#440, light_radius.h): how much each point of the hero's Light Radius widens the mod's
+    // dungeon light in VR, 100% about the game's own share; 150% by default.
+    {"Light Radius boost", "How much more +Light Radius items and skills widen your light in dungeons; 100% about the game's own", L"light",L"radius_boost_pct",150,100,300,25},
+    // Weapon heft (weapon_heft.h; #443, Discord #ideas 2026-11-04: "weapon weight - like in blade and sorcery"): a heavy
+    // weapon needs a longer stroke of the hand for a full hit, a short one lands lighter (never below 30%). Off by default.
+    {"Weapon heft", "Heavy weapons need a long stroke for a full hit; daggers still hit with a flick", L"gameplay",L"weapon_heft",0,0,1,1},
+    // Bow bash (bow_bash.h; #443): the bow swung into a monster, its string not drawn, staggers it (a parry's native hit
+    // recovery) with no damage; 1.5 s between bashes, 3 s per monster, never act bosses. Beside Weapon heft. Off by default.
+    {"Bow bash", "Swing your bow into a monster to stagger it; no damage", L"gameplay",L"bow_bash",0,0,1,1},
+    // Aim with your eyes (gaze_aim.h; owner 2026-11-08: "the monster we look at is the one we target ... for supported
+    // headsets"): the eyes' pick by where the eyes look, not the head. On by default; its toggle shows beside Aim
+    // with your view only with an eye tracker (Context::eyeTracker), and without one it does nothing.
+    {"Aim with your eyes", "Eye tracking: the monster you look at, not where your head points", L"gameplay",L"aim_with_eyes",1,0,1,1},
+    {"Merc potion throw autoaim", "Missed potion throws still give the potion to your living mercenary", L"gameplay",L"merc_potion_assist",0,0,1,1},
     {"Click to drink", "While holding a flask, press that hand's trigger to drink; mouth gesture still works", L"interactions",L"click_to_drink",0,0,1,1},
 }};
 using Values=std::array<float,Count>;
@@ -465,9 +479,10 @@ inline bool RowEnabled(const Values& values,Key key){
 }
 // The character the panel is open for: rows for another class, or for a
 // weapon not in hand, are left out. An unknown class (-1: the title and
-// character screens) shows every row.
+// character screens) shows every row. eyeTracker: the headset shares eye
+// tracking (an XR_EXT_eye_gaze_interaction tracker bound), for Aim with your eyes.
 namespace heroclass {enum {Amazon=0,Sorceress=1,Necromancer=2,Paladin=3,Barbarian=4,Druid=5,Assassin=6};}
-struct Context {int heroClass=-1;bool bow=false,staff=false,thrown=false;bool operator==(const Context&)const=default;};
+struct Context {int heroClass=-1;bool bow=false,staff=false,thrown=false,eyeTracker=false;bool operator==(const Context&)const=default;};
 inline bool ClassIs(const Context& c,int heroClass){return c.heroClass<0||c.heroClass==heroClass;}
 // Bow skills are the Amazon's.
 inline bool BowSkillClass(const Context& c){return ClassIs(c,heroclass::Amazon);}
@@ -501,6 +516,7 @@ inline bool RowShown(Key key,const Values& v,const Context& c){
     switch(key){
         case AimHighlights:case HighlightLeft:case HighlightRight:return v[TargetHighlight]>0;   // the outline's own rows
         case AimFollowsView:return AimedMonsterUsed(v);
+        case AimWithEyes:return c.eyeTracker&&AimedMonsterUsed(v);   // beside Aim with your view, on headsets with eye tracking
         case LandingCircles:return v[GroundAim]>.5f;     // ground skills the mod places
         case FoveationStrength:return v[Foveation]>.5f;
         case Snap:return !SmoothTurning(v[Snap],v[SmoothTurn]);
