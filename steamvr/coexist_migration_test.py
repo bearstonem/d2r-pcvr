@@ -49,6 +49,8 @@ class CoexistMigrationTests(unittest.TestCase):
             self.assertIn(str(game / 'custom-textures'), cfg['GENERAL']['TextureSearchPaths'])
             self.assertIn(str(game / 'reshade-shaders/Textures'), cfg['GENERAL']['TextureSearchPaths'])
             self.assertEqual((effect / 'D2R_Frame_ReShade.ini').read_bytes(), old_preset)
+            for shader in sorted(p.name for pattern in ('D2R_*.fx', 'D2R_*.fxh') for p in (install.ROOT / 'reshade').glob(pattern) if p.name != 'D2R_DepthFog.fx'):   # a stock install never had the feature headers; they arrive beside the effect
+                self.assertTrue((effect / 'reshade-shaders/Shaders' / shader).exists(), shader)
             self.assertEqual((effect / 'reshade-shaders/Textures/my-custom.png').read_bytes(), b'fixture image')
             for name in ('ReShade.ini', 'D2R_Frame_ReShade.ini', 'ReShade64.dll', 'reshade-shaders/Textures/my-custom.png'):
                 self.assertFalse((game / name).exists(), name)
@@ -65,6 +67,9 @@ class CoexistMigrationTests(unittest.TestCase):
             self.assertEqual((game / 'D2R_Frame_ReShade.ini').read_bytes(), old_preset)
             self.assertEqual((game / 'reshade-shaders/Shaders/D2R_DepthFog.fx').read_bytes(), b'old stock shader')
             self.assertFalse((effect / 'reshade-shaders/Shaders/D2R_DepthFog.fx').exists())
+            for shader in sorted(p.name for pattern in ('D2R_*.fx', 'D2R_*.fxh') for p in (install.ROOT / 'reshade').glob(pattern) if p.name != 'D2R_DepthFog.fx'):
+                self.assertFalse((effect / 'reshade-shaders/Shaders' / shader).exists(), shader)
+                self.assertFalse((game / 'reshade-shaders/Shaders' / shader).exists(), shader)
             self.assertEqual((saves / 'Friend.d2s').read_bytes(), b'progress')
 
     def test_unrelated_root_configuration_is_not_adopted_or_deleted(self):

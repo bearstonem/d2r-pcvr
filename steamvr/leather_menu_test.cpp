@@ -128,6 +128,23 @@ int main(){
         b=leather::Band(3072,3072);Check(b.x==0&&b.y==0&&b.w==3072&&b.h==1728,"the cube from the inventory: the same upper band (2026-10-29 capture)");
         b=leather::Band(0,100);Check(b.w==0&&b.h==0,"no canvas, no band");
     }
+    // Below the band, down to the canvas's foot: a tooltip running past the band shows on.
+    {
+        const float bandHeight=.57f*9/16;
+        auto f=leather::WithFoot(leather::Band(3072,3072),3072,bandHeight);
+        Check(f.rect.x==0&&f.rect.y==0&&f.rect.w==3072&&f.rect.h==3072,"square canvas: the band and all below it");
+        Check(Near(f.height,bandHeight*3072/1728)&&Near(f.drop,(f.height-bandHeight)*.5f),"the same metres per pixel, centre lowered by half the foot");
+        Check(Near(f.height*.5f-f.drop,bandHeight*.5f),"the band's top stays where it was");
+        f=leather::WithFoot(leather::Band(2560,2560),2560,.3f);
+        Check(f.rect.h==2560&&Near(f.height,.3f*2560/1440),"a 2560 canvas too");
+        f=leather::WithFoot(leather::Band(1920,1080),1080,bandHeight);
+        Check(f.rect.h==1080&&Near(f.height,bandHeight)&&f.drop==0,"16:9: nothing below");
+        f=leather::WithFoot(leather::Band(2560,1080),1080,bandHeight);
+        Check(f.rect.x==320&&f.rect.h==1080&&f.drop==0,"wide: nothing below");
+        f=leather::WithFoot({0,0,0,0},3072,bandHeight);Check(f.rect.h==0&&f.drop==0,"no band: nothing");
+        f=leather::WithFoot(leather::Band(3072,3072),3072,NAN);Check(f.rect.h==1728&&f.drop==0,"a bad height: the band alone");
+        f=leather::WithFoot(leather::Band(3072,3072),1000,bandHeight);Check(f.rect.h==1728&&f.drop==0,"a canvas shorter than the band: the band alone");
+    }
 
     // The strap: the fist at the middle of the menu's left edge, the face as the quest log's.
     for(const auto& art:{hide,stand})for(float yaw:{-2.f,0.f,1.f})for(float tilt:{0.f,30.f}) {

@@ -131,6 +131,9 @@ bool HandSpellHeld(int hand); // that hand's physical spell button is held
 // handing it to the game's target query. The cast is pressed after the answer.
 bool HeavensArmed();
 uint32_t HeavensRequest();
+// A bow is ready with Guided Arrow as the bow's skill (aimrules::AlwaysHomes): the target scan runs so a
+// release can hand the game the aimed monster, whatever VR Settings > Gameplay > Targeting says.
+bool SeekerArrowReady();
 void HeavensResolved(uint32_t request,uint32_t monster);
 int PointSpellSkill();       // the cast skill when the aim rules place it at a point, else -1
 int AimRulesSkill();         // the cast skill (any), -1 none; with its game "directed" flag

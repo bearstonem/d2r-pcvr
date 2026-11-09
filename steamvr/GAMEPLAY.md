@@ -171,7 +171,7 @@ not generate melee velocity. The layout currently assumes a right-handed player.
 | Selected Smite with a shield | Swing or thrust the left shield through an enemy; keep right trigger released |
 | Cast without opening the wheel | Each hand casts its own skills, aimed with that hand: trigger, two face buttons, and same-hand grip + face button for two more ([hand skill layouts](../CONTROLS.md#hand-skill-layouts)) |
 | Melee swing / thrust | Swing the equipped melee weapon through a creature, including with a skill selected; no grip, trigger, or preselected target |
-| Button attack / crossbow | Weapon combat mode, right trigger; native crossbow firing |
+| Button attack / crossbow | Weapon combat mode, right trigger; with a crossbow the right trigger is Attack whatever its slot holds, except a bow skill (below) |
 | Nock bow | Bow equipped: bring right hand to string and hold right trigger; no left grip required |
 | Draw and shoot | Pull string hand back at least 12 cm (28 cm total separation), then release trigger |
 | Throw a javelin, throwing knife or axe | Any javelin, throwing knife or throwing axe equipped in WEAPON mode, right trigger bound to Attack, Throw or nothing: hold right trigger, make a deliberate throwing motion, release to throw along the hand's motion. The game's own Throw fires the weapon's own missile and consumes its quantity; a knife flies point first, an axe tumbles end over end. With a javelin, Poison Javelin, Lightning Bolt, Plague Javelin or Lightning Fury on the right trigger (or loaded from a face button, like the bow quiver) rides the throw: the skill's own mana, damage and effects. A Barbarian with a throwing weapon in each hand and Double Throw on the right trigger (or loaded) throws with both hands: the left trigger throws the left weapon, and each throw is one native Double Throw of that hand's weapon. Trigger-free jabs and swings stay available |
@@ -434,7 +434,11 @@ its pages open and nothing on the cursor, closes the menu (the log:
 control work on it as on the room panel, Left Grip + Right Trigger included
 (the left grip is free while the sheet is strapped on). The **left stick walks** and the
 **right stick turns** while the menu is held (Leather or Menu only), as in
-play (neither moves the menu's controller cursor); the right laser and the face buttons
+play (neither moves the menu's controller cursor). Under the menu the walk is the game's own
+walk toward a point a few cells ahead; letting go of the stick stops the hero at once, on the
+next cell on his way, also when the menu shuts as you let go, and a stop the game did not take
+is sent again (log: `vrcam: walking with the tabbed menu on the leather: stick let go - the hero
+went on ... cells`); the right laser and the face buttons
 work the menu (the right stick is all turning while it is held). An item picked
 up with the laser (a click, as ever) and then **clicked outside the menu** - a trigger pull off
 the menu's art, on or past the hide - drops to the ground, as in flat D2R: the mod presses the
@@ -444,9 +448,12 @@ above the menu (unless its VR Settings location is Off); the minimap does not (t
 is never kept open under a menu). Nothing else is drawn over it: quest and level-up cards wait until it
 closes, and the wrist and palm displays themselves are hidden while a menu is open, as before.
 
-Only the menu's 16:9 band is on the hide, on the middle of its body, and the
+The menu's 16:9 band is on the hide, on the middle of its body, and the
 game's translucent dim under the menu is taken out of it, so the hide shows
-round the menu's own art, as is the panel's faint black drop shadow. The hide
+round the menu's own art, as is the panel's faint black drop shadow. Below
+the band the rest of the game's canvas is shown too, clear but for what runs
+past the menu's foot: the tooltip of a skill or item low on the menu (with a
+skill's synergies) carries on over the hide instead of being cut off at the band. The hide
 itself goes to the headset premultiplied: nothing of its rectangle shows round
 it. The game also leaves the world unpainted behind its opaque menu panel (one
 draw stamps the panel's rectangle into the scene's stencil); while the leather
@@ -589,7 +596,10 @@ for. Another class's rows are left out:
 
 **Skills go to the aimed monster** offers Spells, Bow skills or Both to an
 Amazon. Other classes see **Spells go to the aimed monster**, On or Off, and
-keep the Amazon's bow skills choice. Rows that only matter with another
+keep the Amazon's bow skills choice. Guided Arrow is handed the aimed monster
+whatever this says, Off included, so it homes on it (owner, 2026-11-08: "that's
+the whole point of this skill"); with no monster aimed it flies as before. The
+target scan runs while a bow is ready with Guided Arrow as its skill. Rows that only matter with another
 row's choice also stay hidden until they do:
 - Outlines shown and both hands' outline colors while Monster outline is Off;
 - Landing circles while Ground skill aim is Game's aim;
@@ -977,17 +987,40 @@ Shot, Exploding Arrow, Ice Arrow, Guided Arrow, Strafe, Immolation Arrow and
 Freezing Arrow**. One deliberate draw/release sends one short native skill-button
 press. Multiple Shot keeps the game's fan, Strafe keeps its automatic targeting,
 volley count and sequence, and elemental/Guided arrows keep native effects and
-homing. Drawing farther does not multiply damage or arrow count. A fresh trigger
+homing. On a face button, Multiple Shot, Guided Arrow and Strafe load like the
+quiver's arrow skills (#364): the press casts nothing, every following draw and
+release sends that button's native press, and pressing it again returns to basic
+arrows. Drawing farther does not multiply damage or arrow count. A fresh trigger
 press away from the string keeps point-and-trigger casting; moving into the
 string while that press is held cannot also nock an arrow. Quick casting remains
 point-and-trigger. Unknown skills and crossbows retain their native fallback.
 
-Selected bow skills retain **native animation, ground-plane flight and collision**.
-The ordinary basic-arrow 3D path described below does not yet handle these special
-missiles. Draw/release is implemented as their input adapter, not a new 3D volley
-simulation. Native mana, ammunition, charges and attack cadence remain in charge;
-a rejected input cannot also fire a basic arrow. Strafe's busy cue follows an
-observed native sequence after a physical release; it does not estimate readiness.
+Selected bow skills retain **native animation**, mana, ammunition, charges and
+attack cadence; a rejected input cannot also fire a basic arrow. Strafe's busy cue
+follows an observed native sequence after a physical release; it does not
+estimate readiness.
+
+**Multiple Shot's fan follows the draw's up/down aim** (owner, 2026-11-08: "it
+just goes straight planar"). The release still presses the skill natively, so the
+game pays one mana cost, plays the attack and makes its fan of `multipleshotarrow`
+missiles, as many and as spread as the skill level gives. The release's pose is
+armed (`bow_flight.h` `FanVolley`): the local fan the server makes in one tick,
+within 1.2 s of the release, is adopted into the basic arrow's physical flight.
+Each arrow keeps the game's heading for it, takes the release's pitch, origin
+and draw, and then flies, hits and stops as a basic arrow does: swept 3D bodies,
+walls and the launch floor, one native hit per monster per arrow (several arrows
+of a close fan can each hit one monster, as natively), the game's damage. Its
+HD definition is the basic arrow's, so it draws as one. The client's own flat
+fan, made by the same animation, is retired once the server's fan is adopted; a
+release that is refused or finds no fan leaves the game's fan as it was. The
+skill takes `multipleshotarrow` even with an item's magic or explosive arrows on
+the bow. Each drawn volley logs `Frame bow volley: N fan arrows adopted, pitch P
+deg, spread S deg (L to R from the release), T ms after the release; the client's
+flat fan retired R of W, refused F`, or `Frame bow volley: no fan within 1200 ms
+of the release ...`. Multiple Shot cast by a trigger press away from the string,
+Strafe, Guided Arrow and the crossbow's `multipleshotbolt` keep the game's flat
+flight. The flights' monster lookup walks the game's monster list once per server
+tick for all of them, rather than once per arrow.
 
 The equipped left shield now follows its authored bind-pose relationship to the
 tracked wrist, including wrist rotation, instead of an attack/walk animation's
@@ -1318,6 +1351,29 @@ and trigger/button melee were:
     the game resolves them, which follows the blade frame to frame but not
     within a single frame. A riposte is still a clean hit (no falloff) and
     counts as one of the stroke's creatures.
+  - **Weapon heft** (#443; VR Settings > Gameplay > Combat > Weapon heft,
+    `[gameplay] weapon_heft`, 0 by default): a heavy weapon needs a long stroke of
+    the hand before it meets the monster for a full hit (`weapon_heft.h`). Monsters
+    have no physical bodies and every hit must stay one native attack, so weight is
+    a rule, not a physics weapon, and the drawn weapon never lags the hand. A
+    weapon's weight (0..1) is its kind - one-handed swords, axes, maces and scepters
+    0.40, two-handed ones 0.80 (in one hand or both), spears, polearms and staves
+    0.70 - plus 1% per point of WSM, at most 20 either way; daggers, claws, wands,
+    orbs, thrown weapons and fists weigh nothing and always hit whole. It needs
+    weight x 40 cm of the hand's brisk travel (steps at 1 m/s or faster, tracking
+    space) since the stroke's path began - after a pause, a reversal or a reset
+    (`melee_contact.h` `Sweep::travel`) - so turning the wrist or drifting the hand
+    slowly adds nothing. A shorter stroke's damage is x travel / need, at least 30%,
+    measured at each contact and multiplied into the same share as recovery and
+    cleave (a great maul needs 40 cm, a two-handed sword 32, a crystal sword 16, a
+    long sword 12). Only how hard the contact lands changes (a strike skill cast
+    on it included, as with cleave); on-hit effects and the attack cycle are as
+    without it. A riposte stays clean. When dual wielding, each blade
+    uses its own weapon; the left blade's two-handed flag is not known, so it
+    weighs as one-handed. The log's `Frame weapon heft:` line (twice a second while
+    it judges contacts) gives contacts, full and lighter ones, the mean and lowest
+    share and the current weapon's need; `[debug] melee_trace=1` adds
+    `heft=` and the hand's travel to each traced contact.
   - **On-hit effects** come only from a full-cycle stroke (the breakpoint, a
     full cycle after the latest full-cycle attack on the one shared clock: both
     blades when dual wielding (2026-10-30; the beat is the two weapons' native
@@ -1544,6 +1600,35 @@ reports the cycle inputs (`Frame melee attack speed:`) and refused contacts
 (`too_soon`, `extra_targets` in `Frame melee:`). `[debug] melee_trace=1` adds one
 `Frame melee trace:` line per native attack and per refused stroke, with the
 time since the previous landed hit; landed hits are never closer than `cycle`.
+
+### Bow bash
+
+**VR Settings > Gameplay > Combat > Bow bash** (#443; `[gameplay] bow_bash`, 0
+by default; beside Weapon heft) lets the bow itself push a monster back: swing
+the bow in your left hand into it, the string not drawn and both triggers
+released, and it staggers so you can step back and aim. The game's basic attack
+with a bow fires an arrow, so there is no native melee attack to borrow; the
+bash uses the same native hit recovery a perfect parry gives (below: the game's
+GetHit event handler, a mode change), so it deals **no damage**, spends no arrow
+and gives no experience or loot. Any class with a bow; crossbows are not
+included yet.
+
+- The bow is a capsule on the left weapon attachment: its grip at the
+  attachment's origin, its limbs 55 cm each way along the attachment's +Y (about
+  1.1 m tip to tip, 6 cm thick; `bow_bash.h`). The left hand's melee engine
+  sweeps it with the usual stroke rules: Swing speed to hit and Melee reach
+  apply, walls block, and only hostile monsters count.
+- One bash every 1.5 s, whichever monster; the same monster again after 3 s; act
+  bosses (MonStats primeevil, as the parry gate reads it) never stagger. A
+  monster already in its hit recovery, or one the game cannot stagger (no GetHit
+  mode, such as Griswold), is refused. Only a landed stagger starts a wait.
+- Each stroke judges each monster it touches once: a tap in the bow hand, then
+  one log line, `Frame bow bash: staggered monster ...` or `Frame bow bash:
+  refused monster ...: <reason>` (with the time left for a wait). `bow_up` on
+  that line is the bow's limb axis against straight up: near 1 for a bow held
+  upright, which checks the capsule's axis in a headset.
+- Drawing the string, a held trigger, a menu or the wheel ends the bash lane;
+  a stroke sampled just before drawing is dropped.
 
 ### Physical shield blocking, parry and riposte (Unleashed)
 
@@ -1822,10 +1907,18 @@ criticals, leech, procs, immunity and pierce. Piercing cannot damage the same
 creature twice. Native lifetime remains in charge; there is no damage multiplier
 for drawing farther. Both eyes share the same flying-arrow transform per pair.
 
-This first physical path supports **ordinary basic arrows**, not elemental,
-explosive, magic or guided missile variants. A bow that converts its basic attack
-to a special missile is currently refused before ammo is spent; use its assigned
-native skill through the palette instead. Selected arrow skills gain the candidate
+This physical path supports **basic arrows**, including a bow whose item
+changes its basic attack's missile (#432): **Fires Magic Arrows** (Witherstring)
+or **Fires Explosive Arrows** (Raven Claw). The game's basic attack names that
+missile (magicarrow or explodingarrow) and a drawn arrow flies it as a basic
+arrow: no skill or mana, the game's own damage, and its explosion at the contact.
+It looks and lands as the Magic or Exploding Arrow quiver arrow does; the nocked
+arrow on the string stays the plain arrow. The first such shot for a character
+logs `Frame physical projectiles: bow basic attack fires item missile 27 (Fires
+Magic Arrows) level N; the hand release flies it`. A basic release whose bow names
+any other missile is refused before ammo is spent and logs `Frame physical
+projectiles: bow release refused: ...` with the missile, at most once a second.
+Selected arrow skills gain the candidate
 draw/release adapter above; their flight remains native. Other skills/spells
 retain their existing controls, costs, timings and collision behavior.
 
@@ -1862,9 +1955,35 @@ including upward/downward aim. Their native missile still supplies damage,
 ammunition, lifetime and trigger attack cadence; no second attack or client
 projectile is created. Both eyes share the corrected current/previous mesh
 transforms. The support palm keeps the controller's wrist angle when gripping
-from underneath or above. Special missile skills and unrecognized/stale rigs
+from underneath or above. A crossbow with **Fires Explosive Bolts** (Demon
+Machine) fires the same way: its basic attack names explodingarrow, which the
+physical bolt flies, drawn as the exploding arrow's model at the bolt's length,
+with the game's explosion at the contact (logged once as `... crossbow basic
+attack fires item missile 41 (Fires Explosive Bolts) ...`). Special missile skills and unrecognized/stale rigs
 retain their native release behavior. The physical collision limitations below
 also apply to basic crossbow bolts.
+
+**The crossbow's right trigger is Attack** (owner, 2026-11-08). With motion
+controls on and a crossbow in the hands, the right trigger fires the crossbow
+whatever skill its slot holds: the physical bolt above, or the game's own
+Attack while the physical bolt is not ready (no captured rig yet). The empty
+slot and Attack already did this; a spell, trap, Interact or any other skill
+there now gives way while the crossbow is held, and is not cast as a hand spell
+either. This is a runtime
+override, not a binding change: the slot's saved assignment (the game keeps it
+in the character) is never written, the wheel still shows it, and taking the
+crossbow off (or swapping weapons, or a shapeshift) makes the trigger cast it
+again, so a crash cannot leave a changed binding behind. A bow skill the hero
+has on that slot (Magic, Fire, Cold, Ice, Exploding, Immolation, Freezing and
+Guided Arrow, Multiple Shot, Strafe) stays: the game fires it from the crossbow
+natively, as before. The wrist cue reads **Attack, Crossbow: pull trigger**
+while the trigger attacks. A Draw glyph button on the right trigger keeps drawing
+(it holds no game skill). `gameplay::CrossbowAttack` decides; the log says
+`Frame crossbow: right trigger fires the crossbow (slot holds skill N; its
+binding is untouched)` as it starts, `Frame crossbow: crossbow off, right
+trigger back to skill N` (or `motion controls off` / `slot changed`) as it ends,
+and `Frame crossbow: right trigger keeps skill N, a bow skill the game fires from
+the crossbow` for a bow skill.
 
 Crossbow support is a held grip: release **Left Grip** to free the support hand.
 After a shoulder weapon swap, release the swap grip before grabbing the stock.
@@ -2002,6 +2121,37 @@ shoulders, rig eye, legs, fingers); `VR body pose:` adds `form`, `scale` and
 than 2 units from the player, and, when they change (at most every 5 s), the
 form rig frames posed ahead of the state sample, left to the game (not
 standing, another rig taken) and grafted without the neck anchor.
+
+## The head kept for its shadow
+
+In full-body first person (F4) the hero keeps his head and helm, so his shadow
+has a head; the eye views instead draw nothing nearer than a cut in front of
+your eyes: 11 cm looking level, easing to 22 cm looking up and 3 cm looking
+down (`[arms] head_cut_level`, `head_cut_up`, `head_cut_down`). The design and
+its thread handshake are in `steamvr/head_shadow.h`; `[arms] head_shadow=0`
+shrinks the head to the neck as before, and shapeshift forms always do.
+
+- **Open: helms that reach past the cut.** A Druid pelt is an animal's head
+  worn over the hero's: looking level its snout and teeth still stand in front
+  of your face (#429, the dev Druid's Jalal's Mane). A deeper cut would also
+  cut what you bring to your face (the bow's nock at the cheek, a potion at the
+  mouth, a warcry's fist), and shrinking the head while a pelt is worn was
+  tried and refused (it reads as the head just removed). Pending: leaving the
+  head and helm out of the eye views' draws only, keeping them in the shadow.
+- **The near never jumps.** Switching the cut on or off moves the near clip
+  2.6 times (`[camera] near` 0.2 as installed, about 4 cm, to 11 cm; 5 times
+  looking up). The depth fog reads one `NearPlane` that can be a pass behind,
+  so a jump put one frame's cave fog or ceiling that far off: a black flash,
+  for example at a shapeshift. The near now moves at most 15 %
+  from one eye pass to the next, except up at once when a kept head needs it;
+  the head is kept only once the near stands at the cut.
+
+Log lines (`Frame head shadow:`): the choice once it has lasted a second, with
+the cut at the current pitch (`head kept for its shadow; the eye's cut 11 cm at
+pitch +2 deg (11 level, 22 up, 3 down); ...`); a near that still jumped over
+15 % between passes, at most once a second. `[debug] head_shadow=1` adds a
+line every second (poses, passes at the cut, held, eased, jumps, near, pitch,
+cut range, head bones' reach).
 
 ## Head-relative sound
 
@@ -2225,6 +2375,15 @@ reduce speed by up to 30%. Native velocity changes such as Slow Missiles are
 read on each tick. This mapping intentionally replaces the older slow native
 travel speed; `motion_controls=0` restores legacy controls and flight.
 
+The bow skills' own arrows take the same `arrow_speed` however they are cast
+(owner, 2026-11-08: Guided Arrow and Multiple Shot "are moving very slowly like
+the base game arrows ... they should all move like that"): Multiple Shot's fan,
+Guided Arrow, Strafe's volley, and Magic, Fire, Cold, Ice, Exploding,
+Immolation and Freezing Arrow cast by their button. Their flight stays the
+game's own (the fan, the homing, the volley's targets); only the speed it is
+created with changes. Crossbow bolts keep the game's speed, as the basic bolt
+does. The `Frame bow flight:` line counts the arrows sped up.
+
 The former ownership check treated the SDK's opaque player handle as a native
 unit pointer. It now uses the validated local native player id, including id
 zero, and checks owner type/id. That defect could prevent earlier speed and
@@ -2255,6 +2414,18 @@ For the next headset pass, use the existing bow character **outside town**:
    and normal behavior on an empty quiver. Fired arrows may finish after a menu opens.
 5. Try repeated draws, a weapon swap, leaving/re-entering the game, then a few
    melee swings. Check stereo, lighting and frame pacing for regressions.
+6. Item-fired arrows (#432): draw and release with Witherstring (Fires Magic
+   Arrows) and Raven Claw (Fires Explosive Arrows), and fire Demon Machine
+   (Fires Explosive Bolts) with the regular attack. Each shot should fly from the
+   hand, spend one arrow or bolt, show the magic or exploding model, and explode
+   at the monster or wall it hits. Check the `fires item missile` line, and that
+   `refused=` stays 0 in the `Frame physical projectiles` summary.
+7. Drawn Multiple Shot: shoot down a slope, up at a ledge and level into a pack.
+   The whole fan should rise or fall with the draw, keep the game's spread and
+   count, cost one cast's mana, and hit or miss in 3D as basic arrows do; no flat
+   duplicate fan should fly along the ground. Each volley logs `Frame bow volley:
+   N fan arrows adopted, pitch P deg ...`; watch frame pacing with several volleys
+   in the air in a dense area.
 
 ## Deterministic player hits (2026-10-09)
 
