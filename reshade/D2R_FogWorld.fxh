@@ -162,7 +162,7 @@ float3 DepthFogWorld(float4 pos, float2 uv, int eye)
         if (SkyOn && !FogFixed) fogColour = (SkyTex > 0.5 ? PaintedSky(fogDir) : SkyGradient(fogDir.y)) * SkyBrightness + dither;
     }
     float3 litColour = colour;
-    if (GameLightsOn && d > 1e-6) {
+    if ((GameLightsOn || HeroLightOn) && d > 1e-6) {
         const float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
         const float4 sp = eye == 0 ? SkyProj0 : SkyProj1;
         if (sp.x != 0.0 && sp.y != 0.0) {
@@ -180,7 +180,8 @@ float3 DepthFogWorld(float4 pos, float2 uv, int eye)
             float3 N = (nLen > 1e-5) ? (nrm / nLen) : float3(0.0, 1.0, 0.0);
             if (dot(N, off) > 0.0) N = -N;
 
-            const float3 lit = SceneLight(worldP, N);
+            float3 lit = GameLightsOn ? SceneLight(worldP, N) : float3(0.0, 0.0, 0.0);
+            if (HeroLightOn) lit += HeroLight(worldP, N, eP);   // the hero's own, by his Light Radius
             litColour += colour * lit * 1.2 + lit * 0.05;
         }
     }

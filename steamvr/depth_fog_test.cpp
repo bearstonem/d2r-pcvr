@@ -61,7 +61,8 @@ static const float3 CamBack0=float3(0,0,1), CamBack1=float3(0,0,1);
 static const float3 CeilEye0=0, CeilEye1=0;
 static const float2 CeilHero0=0, CeilHero1=0;
 static const float CeilScale=10, CeilHeight=20, CeilHalo=1, HudTop=0, SkyTex=0, SkyBrightness=1;
-static const bool GameLightsOn=false;
+static const bool GameLightsOn=false, HeroLightOn=false;
+float3 HeroLight(float3 p, float3 nrm, float3 eyeP) { return 0; }
 static const float CeilTorchBright=1, CeilTorchRadius=20, CeilTorchWarm=0.45;
 float3 SceneLight(float3 p) { return 0; }
 float3 SceneLight(float3 p, float3 nrm) { return 0; }
