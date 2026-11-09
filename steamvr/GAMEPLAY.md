@@ -988,12 +988,32 @@ press away from the string keeps point-and-trigger casting; moving into the
 string while that press is held cannot also nock an arrow. Quick casting remains
 point-and-trigger. Unknown skills and crossbows retain their native fallback.
 
-Selected bow skills retain **native animation, ground-plane flight and collision**.
-The ordinary basic-arrow 3D path described below does not yet handle these special
-missiles. Draw/release is implemented as their input adapter, not a new 3D volley
-simulation. Native mana, ammunition, charges and attack cadence remain in charge;
-a rejected input cannot also fire a basic arrow. Strafe's busy cue follows an
-observed native sequence after a physical release; it does not estimate readiness.
+Selected bow skills retain **native animation**, mana, ammunition, charges and
+attack cadence; a rejected input cannot also fire a basic arrow. Strafe's busy cue
+follows an observed native sequence after a physical release; it does not
+estimate readiness.
+
+**Multiple Shot's fan follows the draw's up/down aim** (owner, 2026-11-08: "it
+just goes straight planar"). The release still presses the skill natively, so the
+game pays one mana cost, plays the attack and makes its fan of `multipleshotarrow`
+missiles, as many and as spread as the skill level gives. The release's pose is
+armed (`bow_flight.h` `FanVolley`): the local fan the server makes in one tick,
+within 1.2 s of the release, is adopted into the basic arrow's physical flight.
+Each arrow keeps the game's heading for it, takes the release's pitch, origin
+and draw, and then flies, hits and stops as a basic arrow does: swept 3D bodies,
+walls and the launch floor, one native hit per monster per arrow (several arrows
+of a close fan can each hit one monster, as natively), the game's damage. Its
+HD definition is the basic arrow's, so it draws as one. The client's own flat
+fan, made by the same animation, is retired once the server's fan is adopted; a
+release that is refused or finds no fan leaves the game's fan as it was. The
+skill takes `multipleshotarrow` even with an item's magic or explosive arrows on
+the bow. Each drawn volley logs `Frame bow volley: N fan arrows adopted, pitch P
+deg, spread S deg (L to R from the release), T ms after the release; the client's
+flat fan retired R of W, refused F`, or `Frame bow volley: no fan within 1200 ms
+of the release ...`. Multiple Shot cast by a trigger press away from the string,
+Strafe, Guided Arrow and the crossbow's `multipleshotbolt` keep the game's flat
+flight. The flights' monster lookup walks the game's monster list once per server
+tick for all of them, rather than once per arrow.
 
 The equipped left shield now follows its authored bind-pose relationship to the
 tracked wrist, including wrist rotation, instead of an attack/walk animation's
@@ -2255,6 +2275,12 @@ For the next headset pass, use the existing bow character **outside town**:
    hand, spend one arrow or bolt, show the magic or exploding model, and explode
    at the monster or wall it hits. Check the `fires item missile` line, and that
    `refused=` stays 0 in the `Frame physical projectiles` summary.
+7. Drawn Multiple Shot: shoot down a slope, up at a ledge and level into a pack.
+   The whole fan should rise or fall with the draw, keep the game's spread and
+   count, cost one cast's mana, and hit or miss in 3D as basic arrows do; no flat
+   duplicate fan should fly along the ground. Each volley logs `Frame bow volley:
+   N fan arrows adopted, pitch P deg ...`; watch frame pacing with several volleys
+   in the air in a dense area.
 
 ## Deterministic player hits (2026-10-09)
 

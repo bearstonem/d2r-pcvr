@@ -55,6 +55,14 @@ int SpellParams(uintptr_t game,uintptr_t params,std::array<uint8_t,0x98>& adjust
 void Created(uintptr_t game,uintptr_t params,uintptr_t unit);
 bool AdoptCrossbow(uintptr_t game,uintptr_t unit,const framevr::bowflight::Shot& shot);
 void CrossbowClient(uintptr_t unit,const framevr::bowflight::Shot& shot);
+// Multiple Shot from a draw (bow_flight.h FanVolley). ArmFan: the release's
+// resolved pose (any thread). AdoptFan: game thread, after the server made a
+// missile; adopts the local fan arrows into the physical flight. WatchFan: UI
+// thread, after the client made a local multipleshotarrow; the client's own
+// flat fan is retired once the server's is adopted.
+void ArmFan(const framevr::bowflight::Shot& release);
+void AdoptFan(uintptr_t game,uintptr_t params,uintptr_t unit);
+void WatchFan(uintptr_t unit);
 bool Visual(uint32_t entity,uintptr_t unit,bool hasReleasePoint,bool isRoot);
 bool OwnsVisual(uintptr_t unit);
 // A gas or oil potion thrown as a physical bottle (#292): the transport

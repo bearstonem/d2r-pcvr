@@ -166,6 +166,10 @@ uintptr_t Client(uintptr_t params,int flags) {
     crossbowvr::BeginClient(crossbow?&bolt:nullptr);
     Scope scope(params,0);const auto unit=bowvr::ImpactVisual(params,flags,originalClient);
     if(crossbow&&unit)bowvr::CrossbowClient(unit,bolt.flight);
+    // The client's own Multiple Shot fan: flat, until the server's flies a drawn release.
+    uint32_t missile=0;uintptr_t owner=0;
+    if(unit&&enabled.load()&&Read(params+0x20,missile)&&framevr::bowflight::FanMissile(int(missile))&&Read(params+8,owner)&&IsLocalOwner(owner))
+        bowvr::WatchFan(unit);
     crossbowvr::EndClient();ReportSpell(params,0,unit);return unit;
 }
 uintptr_t Server(uintptr_t game,uintptr_t params) {
@@ -183,6 +187,7 @@ uintptr_t Server(uintptr_t game,uintptr_t params) {
     }
     Scope scope(params,1);const auto unit=originalServer(game,params);
     if(crossbow)crossbowvr::ServerDone(bolt,unit&&bowvr::AdoptCrossbow(game,unit,bolt.flight));
+    if(unit&&enabled.load())bowvr::AdoptFan(game,params,unit);   // a drawn Multiple Shot's fan
     ReportSpell(params,1,unit);
     Telegraph(params,unit);
     flightWatch=outer;

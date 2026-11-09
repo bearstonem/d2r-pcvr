@@ -131,10 +131,19 @@ thread_local uint64_t previewCreatingSession=0;
 thread_local uint32_t previewCreatingMissile=0;
 thread_local const Flight* finishingImpact=nullptr;
 thread_local uint64_t creatingImpact=0;
+// Multiple Shot from a draw (FanVolley): the armed release and its fan. The
+// client's own flat fan is watched until the server's is adopted, then retired.
+FanVolley fan; // mutex
+struct FanClient {uintptr_t unit=0;uint32_t id=0;};
+std::array<FanClient,FanVolley::Most> fanClients{}; // mutex
+std::atomic<bool> fanArmed{false};
+std::atomic<unsigned> fanWatched{0};
+thread_local bool creatingFanVisual=false; // UI: our visual of an adopted fan arrow
 int MissileSound(int sound,uintptr_t unit,int a,int b,bool c) {
     // The nocked model is not a fired projectile. Suppress only its creation
     // scope's travel sound; genuine releases and other game audio pass through.
-    if(previewCreatingSession)return 0;
+    // An adopted fan arrow's visual: the game's own fan already sounded.
+    if(previewCreatingSession||creatingFanVisual)return 0;
     return originalMissileSound(sound,unit,a,b,c);
 }
 template<class T> bool Read(uintptr_t p,T& out) {
@@ -252,6 +261,35 @@ void Guide(Arrow& a,uintptr_t game,uintptr_t player) {
     }
     if(!a.homing.active)++assistStats[a.flight.shot.hand].lost;
 }
+// The live monsters, walked once per server tick and shared by every flight
+// stepping in it: a Multiple Shot fan steps 20-odd arrows a tick, and each
+// walk reads every monster's header, link and position. Game thread only.
+// Only ids and positions are trusted from it; a unit is re-found by id before
+// any native call, and the hit itself re-reads the monster's mode.
+struct MonsterList {
+    struct Unit {uintptr_t unit=0;uint32_t classId=0,id=0;Vec position{};};
+    uintptr_t game=0;uint32_t tick=0;bool cached=false,ok=false;
+    size_t count=0;
+    std::array<Unit,4096> units{};
+};
+MonsterList monsterList;
+const MonsterList& Monsters(uintptr_t game) {
+    auto& list=monsterList;uint32_t tick=0;
+    const bool timed=Read(game+0x170,tick);
+    if(timed&&list.cached&&list.game==game&&list.tick==tick)return list;
+    list.game=game;list.tick=tick;list.cached=timed;list.count=0;
+    uintptr_t buckets[128]{};unsigned visited=0;
+    list.ok=Read(game+0x4c6*8,buckets);
+    if(!list.ok)return list;
+    for(auto target:buckets)for(unsigned chain=0;target&&chain<256&&visited++<4096;++chain) {
+        uintptr_t next=0;uint32_t h[4]{};Vec position{};
+        if(!Read(target+0x158,next)||!Read(target,h))break;
+        if(h[0]==1&&h[3]!=0&&h[3]!=12&&list.count<list.units.size()&&Position(target,position))
+            list.units[list.count++]={target,h[1],h[2],position};
+        target=next;
+    }
+    return list;
+}
 int Collision(uintptr_t game,uintptr_t unit) {
     if(!serverCount.load(std::memory_order_relaxed))return originalCollision(game,unit);
     uint32_t header[3]{};Arrow a;size_t slot=arrows.size();
@@ -319,31 +357,28 @@ int Collision(uintptr_t game,uintptr_t unit) {
         if(allowed)++holyAllowed;else ++holyRejected;
         return allowed;
     };
-    uintptr_t buckets[128]{};unsigned visited=0;
-    if(!Read(game+0x4c6*8,buckets))return End(slot,a,game,unit);
-    for(auto target:buckets)for(unsigned chain=0;target&&chain<256&&visited++<4096;++chain) {
-        uintptr_t next=0;uint32_t h[4]{};
-        if(!Read(target+0x158,next)||!Read(target,h))break;
-        if(h[0]==1&&h[3]!=0&&h[3]!=12&&!a.flight.Seen(h[2])) {
-            Vec bottom{},top{};float radius=0,fraction=0;
-            Vec position{};
-            // The largest capsule radius below is <2m. Reject distant units
-            // before any monster-table lookup or detailed intersection work.
-            const bool positioned=Position(target,position);
-            const auto ground=RenderGround(a.flight.shot,position);
-            const bool nearby=positioned&&ground.x>=std::min(from.x,to.x)-2&&
-                ground.x<=std::max(from.x,to.x)+2&&ground.z>=std::min(from.z,to.z)-2&&ground.z<=std::max(from.z,to.z)+2;
-            if(nearby&&Body(target,h[1],a.flight.shot,bottom,top,radius)&&CapsuleEntry(from,to,bottom,top,radius,fraction)&&
-               fraction<stop&&canTouch(target)) {
-                const Touch touch{fraction,target,h[2]};
-                if(n<touches.size())touches[n++]=touch;
-                else {
-                    auto worst=std::max_element(touches.begin(),touches.end(),[](const Touch& x,const Touch& y){return x.fraction<y.fraction;});
-                    if(fraction<worst->fraction)*worst=touch;
-                }
+    const auto& monsters=Monsters(game);
+    if(!monsters.ok)return End(slot,a,game,unit);
+    for(size_t m=0;m<monsters.count;++m) {
+        const auto& c=monsters.units[m];
+        if(a.flight.Seen(c.id))continue;
+        Vec bottom{},top{};float radius=0,fraction=0;
+        // The largest capsule radius below is <2m. Reject distant units
+        // before any monster-table lookup or detailed intersection work.
+        const auto ground=RenderGround(a.flight.shot,c.position);
+        const bool nearby=ground.x>=std::min(from.x,to.x)-2&&
+            ground.x<=std::max(from.x,to.x)+2&&ground.z>=std::min(from.z,to.z)-2&&ground.z<=std::max(from.z,to.z)+2;
+        // The tick's list is shared by every flight: re-find the unit by id
+        // before reading its body or asking the game about it.
+        if(nearby&&melee::ServerUnit(game,1,c.id)==c.unit&&Body(c.unit,c.classId,a.flight.shot,bottom,top,radius)&&
+           CapsuleEntry(from,to,bottom,top,radius,fraction)&&fraction<stop&&canTouch(c.unit)) {
+            const Touch touch{fraction,c.unit,c.id};
+            if(n<touches.size())touches[n++]=touch;
+            else {
+                auto worst=std::max_element(touches.begin(),touches.end(),[](const Touch& x,const Touch& y){return x.fraction<y.fraction;});
+                if(fraction<worst->fraction)*worst=touch;
             }
         }
-        target=next;
     }
     std::sort(touches.begin(),touches.begin()+n,[](const Touch& x,const Touch& y){return x.fraction<y.fraction;});
     for(size_t i=0;i<n;++i) {
@@ -689,8 +724,9 @@ void __cdecl Present(const D2RL::PluginContext*,void* token) noexcept {
         VisualParams(visualShot,spell?0:a.flight.distance,hero,params);
         const auto saved=creatingVisual;const auto savedSession=visualSession,savedSequence=visualSequence;
         creatingVisual=int(i);visualSession=a.flight.shot.session;visualSequence=a.flight.shot.sequence;
+        const bool savedFan=creatingFanVisual;creatingFanVisual=FanArrow(a.flight.shot);
         const auto client=projectiles::CreateVisual(reinterpret_cast<uintptr_t>(params.data()));
-        creatingVisual=saved;visualSession=savedSession;visualSequence=savedSequence;
+        creatingVisual=saved;visualSession=savedSession;visualSequence=savedSequence;creatingFanVisual=savedFan;
         uint32_t header[3]{};
         const bool readable=client&&Read(client,header);
         const bool validClient=CreatedClient(readable,header,MissileId(a.flight.shot),true)==ClientUse::Keep;
@@ -918,6 +954,7 @@ void ClientTick(uintptr_t unit,float dt) {
     if(retirement) {
         originalClientKill(unit); // the same native phase that retires fired arrows
         {std::lock_guard lock(mutex);clientRetirements.Finish(retirement);Recount();}
+        if(FanMissile(int(header[1])))return; // the client's flat fan, counted in its volley line
         char line[144];snprintf(line,sizeof line,"Frame bow preview: client-tick retirement finished missile=%u id=%u",header[1],header[2]);
         framevr::logging::Write(line);
         return;
@@ -938,7 +975,7 @@ void ClientKill(uintptr_t unit) {
     if(timedCount.load(std::memory_order_relaxed))ForgetTimed(unit);   // ended natively (level change, unload)
     if(stagedCount.load(std::memory_order_relaxed))ForgetStaged(unit,true);
     if(!clientCount.load(std::memory_order_relaxed)&&!previewClient.load(std::memory_order_relaxed)&&
-       !impactClients.load(std::memory_order_relaxed)){originalClientKill(unit);return;}
+       !impactClients.load(std::memory_order_relaxed)&&!fanWatched.load(std::memory_order_relaxed)){originalClientKill(unit);return;}
     uint64_t retirement=0;
     {
         std::lock_guard lock(mutex);
@@ -949,6 +986,7 @@ void ClientKill(uintptr_t unit) {
         uint32_t header[3]{};
         if(Read(unit,header))retirement=clientRetirements.Begin(unit,header);
         for(auto& a:UsedArrows())if(a.client==unit){a.client=0;a.visualBinding.Clear();}
+        if(fanWatched.load(std::memory_order_relaxed))for(auto& f:fanClients)if(f.unit==unit){f={};fanWatched.fetch_sub(1);}
         impactVisuals.Forget(unit);
         Recount();
     }
@@ -1369,6 +1407,80 @@ void CrossbowClient(uintptr_t unit,const Shot& shot) {
         if(!a.client||a.client==unit){a.client=unit;a.clientId=h[2];++visuals;Recount();}return;
     }
 }
+// One line per drawn Multiple Shot: its fan adopted, or none in time.
+static void ReportFan(const FanVolley& v,FanVolley::Outcome outcome) {
+    char line[320];
+    if(outcome==FanVolley::Outcome::Adopted)
+        snprintf(line,sizeof line,"Frame bow volley: %u fan arrows adopted, pitch %.1f deg, spread %.1f deg (%.1f to %.1f from the release), "
+            "%llu ms after the release; the client's flat fan retired %u of %u, refused %u",v.adopted,v.PitchDegrees(),v.right-v.left,v.left,v.right,
+            static_cast<unsigned long long>(v.adoptedAt-v.armedAt),v.retired,v.watched,v.refused);
+    else snprintf(line,sizeof line,"Frame bow volley: no fan within %llu ms of the release (pitch %.1f deg; refused %u, client arrows seen %u); the game's fan stays flat",
+            static_cast<unsigned long long>(FanVolley::Window),v.PitchDegrees(),v.refused,v.watched);
+    framevr::logging::Write(line);
+}
+void ArmFan(const Shot& release) {
+    FanVolley done;auto outcome=FanVolley::Outcome::None;
+    {
+        std::lock_guard lock(mutex);
+        if(fan.armedAt&&!fan.reported){done=fan;outcome=fan.adopted?FanVolley::Outcome::Adopted:FanVolley::Outcome::Missed;}
+        // An earlier fan's unretired client arrows: the game's, as they were.
+        fan.Arm(release,GetTickCount64());fanClients={};fanWatched=0;fanArmed=true;
+    }
+    if(outcome!=FanVolley::Outcome::None)ReportFan(done,outcome);
+}
+// Game thread, from the server's missile creation: a local multipleshotarrow
+// of the armed release joins the physical flight with that release's pose.
+void AdoptFan(uintptr_t game,uintptr_t params,uintptr_t unit) {
+    if(!fanArmed.load(std::memory_order_relaxed)||!unit||!enabled.load()||!ready.load())return;
+    uint32_t h[3]{},tick=0;uintptr_t owner=0,path=0,localGame=0,player=0;int velocity=0,target[2]{};
+    if(!Read(unit,h)||h[0]!=3||!FanMissile(int(h[1]))||!Read(params+8,owner)||!melee::LocalServer(localGame,player)||
+       localGame!=game||owner!=player||!Read(params+0x2c,target)||!Read(unit+0x38,path)||!Read(path+0xa0,velocity)||
+       !Read(game+0x170,tick))return;
+    Vec start{},hero{};
+    if(!Position(unit,start)||!Position(player,hero))return;
+    const auto room=reinterpret_cast<uintptr_t(*)(uintptr_t)>(d2rsig::Addr(RoomRva))(unit);
+    const uint64_t now=GetTickCount64(),session=gamestate::LocalPlayer();
+    // The game's heading for this arrow: from where it starts to its target cell.
+    const Vec heading{2.f*target[0]-start.x,0,2.f*target[1]-start.z};
+    std::lock_guard lock(mutex);
+    if(current.session!=session)return;
+    const auto heroAt=RenderGround(fan.pose,hero);
+    if(!fan.Accepts(session,tick,now,heroAt)) {
+        if(fan.Fresh(session,now)&&!fan.reported)++fan.refused;
+        return;
+    }
+    Arrow a;a.game=game;a.server=unit;a.serverId=h[2];a.room=room;
+    a.flight.shot=fan.pose;
+    a.flight.speed=FlightSpeed(fan.pose,velocity);
+    size_t free=arrows.size();
+    for(size_t i=0;i<arrows.size();++i)if(!arrows[i].flight.alive&&!arrows[i].client&&!arrows[i].creating&&!arrows[i].reserved){free=i;break;}
+    if(!room||a.flight.speed<=0||free==arrows.size()){++fan.refused;return;}
+    const bool first=!fan.adopted;
+    a.flight.shot=fan.Adopt(tick,heading,heroAt,now);
+    a.flight.alive=true;a.flight.updatedAt=now;
+    arrows[free]=a;usedSlots.store(std::max(usedSlots.load(),free+1));
+    ++spawned;
+    if(first) {
+        // The server's fan flies the release now: the client's flat one goes.
+        for(auto& f:fanClients)if(f.unit){clientRetirements.Request(f.unit,f.id,213,now);++fan.retired;f={};}
+        fanWatched=0;
+    }
+    Recount();
+    lastLatency=unsigned(now-fan.pose.at);lastSpeedCm=unsigned(a.flight.speed*100);
+}
+// UI thread, from the client's missile creation: a local multipleshotarrow the
+// game made itself (not our visual) while a drawn Multiple Shot is armed.
+void WatchFan(uintptr_t unit) {
+    if(!fanArmed.load(std::memory_order_relaxed)||creatingVisual>=0||previewCreatingSession||!unit)return;
+    uint32_t h[3]{};
+    if(!Read(unit,h)||h[0]!=3||!FanMissile(int(h[1])))return;
+    const uint64_t now=GetTickCount64(),session=gamestate::LocalPlayer();
+    std::lock_guard lock(mutex);
+    if(!fan.Watch(session,now))return;
+    if(fan.adopted){clientRetirements.Request(unit,h[2],h[1],now);++fan.retired;}
+    else for(auto& f:fanClients)if(!f.unit){f={unit,h[2]};++fanWatched;break;}
+    Recount();
+}
 // The spell lock (vrcam BowTick) aimed this cast 1 m above the locked
 // monster's floor; aim it at the middle of the same body capsule the flight
 // hits (Body), from the same origin. Not found: the 1 m aim stays.
@@ -1580,7 +1692,7 @@ bool OwnsVisual(uintptr_t unit) {
        (preview.active&&previewCreatingSession==current.session&&previewCreatingMissile==h[1])))return true;
     for(size_t i=0;i<usedSlots.load(std::memory_order_relaxed);++i) {
         const auto& a=arrows[i];
-        if((a.flight.shot.kind==Kind::Spell||SkillRelease(a.flight.shot)||ItemArrow(a.flight.shot))&&a.flight.shot.sequence&&a.flight.shot.session==current.session&&
+        if((a.flight.shot.kind==Kind::Spell||SkillRelease(a.flight.shot)||ItemArrow(a.flight.shot)||FanArrow(a.flight.shot))&&a.flight.shot.sequence&&a.flight.shot.session==current.session&&
            h[1]==MissileId(a.flight.shot)&&((a.client==unit&&a.clientId==h[2])||
            (creatingVisual==int(i)&&a.flight.shot.sequence==visualSequence&&a.flight.shot.session==visualSession)))return true;
     }
@@ -1631,6 +1743,15 @@ void Report() {
         framevr::logging::Write(line);
     }
     crossbowvr::Report();
+    if(fanArmed.load(std::memory_order_relaxed)) {
+        FanVolley done;auto outcome=FanVolley::Outcome::None;
+        {
+            std::lock_guard lock(mutex);
+            outcome=fan.Report(GetTickCount64());
+            if(outcome!=FanVolley::Outcome::None){done=fan;fanArmed=false;}
+        }
+        if(outcome!=FanVolley::Outcome::None)ReportFan(done,outcome);
+    }
     if(const auto count=crossbowFired.exchange(0)) {
         char line[128];snprintf(line,sizeof line,"Frame crossbow free fire: native shots=%u, last cycle=%u ms",count,crossbowCycleMs.load());
         framevr::logging::Write(line);
