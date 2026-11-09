@@ -159,6 +159,7 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "../steamvr/panel_input_mode.h"
 #include "pad_mirror_shared.h"
 #include "../steamvr/talk_stop.h"
+#include "../steamvr/sheet_walk.h"
 #include "../steamvr/room_stitch.h"
 #include "../steamvr/ceiling_top.h"
 namespace gamestate {uint32_t TalkOpens();}   // NPC conversations opened (talk_stop.h)
@@ -5734,66 +5735,78 @@ void InstallMapClickHook() {
 // able to walk while this menu is open"). Under its menu the game runs no controller
 // walk (rev5: HookStickGet's walk call never came), so the left stick is turned into
 // what a held left click on bare ground does: a walk toward a point (MapClick, type 0
-// then 1 held, no Stand Still; inside it 0x101EF0), a few cells ahead along the stick
-// on the game's screen (isometric: screen right = grid +x -y, screen up = grid -x -y).
-// On the UI thread, ten times a second; never with a unit under the game's pointer (that
-// click would attack or talk); a release clicks the hero's own cell, so he stops.
+// then 1 held, no Stand Still; inside it 0x101EF0) a few cells ahead along the stick
+// on the game's screen. When, where, and the stop at the let-go: steamvr/sheet_walk.h,
+// stepped on the 1 ms timer; the clicks go on the UI thread. A walk click never with a
+// unit under the game's pointer (that click would attack or talk); nor a stop.
 namespace leatherwalk {
-std::atomic<int> g_state{0};   // 0 idle, 1 walking (the next click is a hold), 2 stop due
-std::atomic<uint64_t> g_target{0};   // grid x << 32 | grid y
+namespace sw = framevr::sheetwalk;
+sw::Walker g_walker;                 // the 1 ms timer's only
+std::atomic<uint64_t> g_post{0};     // the click due on the UI thread (Pack), 0 none: the newest wins
 std::atomic<bool> g_queued{false};
-std::atomic<uint32_t> g_sent{0},g_refused{0};
+std::atomic<uint32_t> g_sent{0},g_refused{0},g_stops{0};
+uint64_t Pack(const sw::Click& c) {
+    if (c.kind == sw::Kind::None) return 0;
+    return (uint64_t(c.kind) << 40) | (uint64_t(c.held) << 32) | (uint64_t(uint16_t(c.x)) << 16) | uint16_t(c.y);
+}
 void __cdecl Click(const D2RL::PluginContext*, void*) noexcept {
     g_queued.store(false);
-    if (g_mapClick.load() != 1 || !OrigMapClick || !gamestate::MenuOpen() || !framevr::LeatherMenuWorld()) return;
+    const uint64_t post = g_post.exchange(0);
+    if (!post || g_mapClick.load() != 1 || !OrigMapClick || !g_inWorld.load()) return;
+    const auto kind = sw::Kind((post >> 40) & 0xFF);
+    const bool held = ((post >> 32) & 1) != 0;
+    const int x = int((post >> 16) & 0xFFFF), y = int(post & 0xFFFF);
+    // A walk only under the held menu; a stop also just after it closed (let go as it shut).
+    if (kind == sw::Kind::Walk && (!gamestate::MenuOpen() || !framevr::LeatherMenuWorld())) return;
     uintptr_t hero = 0;
     if (!combat::LocalPlayerUnit(hero) || !hero) return;
     const int idx = ((ClientIndexFn)d2rsig::Addr(RVA_CLIENT_INDEX))(reinterpret_cast<void*>(hero));
     if (idx < 0 || idx >= 8) return;
-    const int state = g_state.load();
-    float px = 0, py = 0;
-    if (!SpellPlayerPosition(reinterpret_cast<void*>(hero), px, py)) return;
-    int x = int(px), y = int(py), type = 0;
-    if (state == 2) { g_state.store(0); }   // stop: a click on his own cell
-    else {
-        if (((HoverUnitFn)d2rsig::Addr(RVA_HOVER_UNIT))(idx)) {   // a unit there: no attack, no talk
-            if (g_refused.fetch_add(1) == 0) Log("vrcam: walking with the tabbed menu on the leather: a unit is under the game's pointer - no walk click");
-            return;
-        }
-        const uint64_t t = g_target.load(); x = int(t >> 32); y = int(uint32_t(t));
-        type = state == 1 ? 1 : 0;
-        g_state.store(1);
-    }
-    OrigMapClick(reinterpret_cast<void*>(hero), type, x, y, 0x100);   // high byte: run
-    if (g_sent.fetch_add(1) == 0) LogF("vrcam: walking with the tabbed menu on the leather: walk click %d,%d (hero %.1f,%.1f)", x, y, px, py);
-}
-// The 1 ms timer: the stick from BodyWalk's report, as the game's screen sees it.
-void Tick(ULONGLONG now) {
-    static ULONGLONG next = 0;
-    if (now < next) return;
-    next = now + 100;
-    const bool active = g_enabled.load() && g_inWorld.load() && gamestate::MenuOpen() && framevr::LeatherMenuWorld() && g_mapClick.load() == 1;
-    BWPadMirror m{};
-    const bool read = active && PadMirrorRead(&m);
-    const float lx = read ? float(m.thumb_lx) : 0.f, ly = read ? float(m.thumb_ly) : 0.f;
-    const bool pushed = lx * lx + ly * ly > 10349.0f * 10349.0f;
-    if (!pushed) {
-        if (g_state.load() == 1) { g_state.store(2); if (!g_queued.exchange(true) && !gamestate::RunOnUi(&Click)) g_queued.store(false); }
+    if (((HoverUnitFn)d2rsig::Addr(RVA_HOVER_UNIT))(idx)) {   // a unit there: no attack, no talk
+        if (g_refused.fetch_add(1) == 0)
+            LogF("vrcam: walking with the tabbed menu on the leather: a unit is under the game's pointer - no %s click", kind == sw::Kind::Stop ? "stop" : "walk");
         return;
     }
-    uintptr_t hero = 0; float px = 0, py = 0;
-    if (!combat::LocalPlayerUnit(hero) || !SpellPlayerPosition(reinterpret_cast<void*>(hero), px, py)) return;
-    float sx = std::clamp(lx / 32767.0f, -1.0f, 1.0f), sy = std::clamp(ly / 32767.0f, -1.0f, 1.0f);
-    ViewStickToGame(&sx, &sy);
-    const float l = sqrtf(sx * sx + sy * sy);
-    if (l < 1e-4f) return;
-    const float reach = 5.0f * std::min(l, 1.0f) + 1.0f;   // cells ahead: more with a fuller push
-    const float gx = (sx - sy) / l * 0.70710678f, gy = (-sx - sy) / l * 0.70710678f;
-    const int tx = int(px + gx * reach), ty = int(py + gy * reach);
-    if (tx < 1 || ty < 1 || tx > 65534 || ty > 65534) return;
-    g_target.store((uint64_t(uint32_t(tx)) << 32) | uint32_t(ty));
-    if (g_state.load() == 2) g_state.store(0);
-    if (!g_queued.exchange(true) && !gamestate::RunOnUi(&Click)) g_queued.store(false);
+    OrigMapClick(reinterpret_cast<void*>(hero), held ? 1 : 0, x, y, 0x100);   // high byte: run
+    float px = 0, py = 0;
+    if (kind == sw::Kind::Walk && g_sent.fetch_add(1) == 0 && SpellPlayerPosition(reinterpret_cast<void*>(hero), px, py))
+        LogF("vrcam: walking with the tabbed menu on the leather: walk click %d,%d (hero %.1f,%.1f)", x, y, px, py);
+}
+// The 1 ms timer: BodyWalk's stick (its report) as the game's screen sees it, and the hero.
+void Tick(ULONGLONG now) {
+    const bool world = g_enabled.load() && g_inWorld.load() && g_mapClick.load() == 1;
+    const bool held = world && gamestate::MenuOpen() && framevr::LeatherMenuWorld();
+    if (!held && !g_walker.Busy()) return;   // nothing to walk, nothing to stop
+    sw::Input in;
+    in.now = now; in.world = world; in.held = held;
+    BWPadMirror m{};
+    if (world && PadMirrorRead(&m)) {
+        const float lx = float(m.thumb_lx), ly = float(m.thumb_ly);
+        in.pushed = lx * lx + ly * ly > 10349.0f * 10349.0f;   // the game's own dead zone
+        if (in.pushed) {
+            float sx = std::clamp(lx / 32767.0f, -1.0f, 1.0f), sy = std::clamp(ly / 32767.0f, -1.0f, 1.0f);
+            ViewStickToGame(&sx, &sy);
+            in.sx = sx; in.sy = sy;
+        }
+    }
+    uintptr_t hero = 0;
+    if (world && (in.pushed || g_walker.Busy()) && combat::LocalPlayerUnit(hero) && hero)
+        in.hero = SpellPlayerPosition(reinterpret_cast<void*>(hero), in.px, in.py);
+    const auto out = g_walker.Step(in);
+    if (out.click.kind != sw::Kind::None) g_post.store(Pack(out.click));
+    if (g_post.load() && !g_queued.exchange(true) && !gamestate::RunOnUi(&Click)) g_queued.store(false);
+    // Each let-go, how far the hero went on (the first 12 of a session, then one a minute).
+    static ULONGLONG toldAt = 0;
+    if (out.repeated && g_stops.load() < 12)
+        LogF("vrcam: walking with the tabbed menu on the leather: the hero walked on after the stop - stop sent again");
+    if (out.settled.due) {
+        const uint32_t n = g_stops.fetch_add(1);
+        if (n < 12 || now - toldAt >= 60000) {
+            toldAt = now;
+            LogF("vrcam: walking with the tabbed menu on the leather: stick let go - the hero went on %.1f cells, standing after %llu ms (%d repeat stops%s)",
+                 out.settled.cells, (unsigned long long)out.settled.ms, out.settled.repeats, out.settled.moving ? ", still walking" : "");
+        }
+    }
 }
 }
 

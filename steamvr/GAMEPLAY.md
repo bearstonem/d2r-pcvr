@@ -434,7 +434,11 @@ its pages open and nothing on the cursor, closes the menu (the log:
 control work on it as on the room panel, Left Grip + Right Trigger included
 (the left grip is free while the sheet is strapped on). The **left stick walks** and the
 **right stick turns** while the menu is held (Leather or Menu only), as in
-play (neither moves the menu's controller cursor); the right laser and the face buttons
+play (neither moves the menu's controller cursor). Under the menu the walk is the game's own
+walk toward a point a few cells ahead; letting go of the stick stops the hero at once, on the
+next cell on his way, also when the menu shuts as you let go, and a stop the game did not take
+is sent again (log: `vrcam: walking with the tabbed menu on the leather: stick let go - the hero
+went on ... cells`); the right laser and the face buttons
 work the menu (the right stick is all turning while it is held). An item picked
 up with the laser (a click, as ever) and then **clicked outside the menu** - a trigger pull off
 the menu's art, on or past the hide - drops to the ground, as in flat D2R: the mod presses the
