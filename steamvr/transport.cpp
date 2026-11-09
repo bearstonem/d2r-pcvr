@@ -5086,11 +5086,11 @@ void Input() {
         in.cast=NativeSkillCasting();
         roomOut=roomChase.Step(in);
         auto& st=roomStats;
-        if(in.on!=st.on){st.on=in.on;Say(in.on?"Frame room steps: on - the hero walks after your real steps":"Frame room steps: off");}
+        if(in.on!=st.on){st.on=in.on;Say(in.on?"Frame room steps: on - the hero's spot follows you in your room":"Frame room steps: off");}
         if(roomOut.push!=st.walking) {
             st.walking=roomOut.push;char line[200];
             if(roomOut.push)std::snprintf(line,sizeof line,"Frame room steps: walking after your step, %.2f m from the hero (stick %.2f, %.2f)",roomOut.offset,roomOut.x,roomOut.y);
-            else std::snprintf(line,sizeof line,"Frame room steps: stopped %.2f m from the hero (%s)",roomOut.offset,roomOut.pause==roomsteps::Pause::None?"caught up":roomsteps::PauseName(roomOut.pause));
+            else std::snprintf(line,sizeof line,"Frame room steps: stopped %.2f m from the hero (%s)",roomOut.offset,roomOut.blocked?"blocked: the hero cannot come closer":roomOut.pause==roomsteps::Pause::None?"caught up":roomsteps::PauseName(roomOut.pause));
             Say(line);
         }
         // Why a step owed is not walked, at most every 2 s.

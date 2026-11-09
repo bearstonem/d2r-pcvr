@@ -30,9 +30,9 @@ int main(){
         s.in.head=math::Multiply(math::Yaw(0),Pitch(-1.05f));s.in.eye=neck-math::Rotate(s.in.head,EyeToNeck);s.Run(.5);
         Check(s.out.offset<.01f&&!s.out.push,"looking down 60 degrees is not a step");
     }
-    {   // A 40 cm step ahead walks ahead after the hold; the stick is partly pushed, never a run.
-        Sim s;s.Move({0,0,-.40f});s.Step();
-        Check(Near(s.out.offset,.40f)&&!s.out.push,"the step is measured, nothing pushed before the hold");
+    {   // A step just past StartMetres walks ahead after the hold; the stick is partly pushed, never a run.
+        Sim s;s.Move({0,0,-(StartMetres+.05f)});s.Step();
+        Check(Near(s.out.offset,StartMetres+.05f)&&!s.out.push,"the step is measured, nothing pushed before the hold");
         s.Run(HoldSeconds+.02);
         Check(s.out.push&&Near(s.out.x,0)&&Near(s.out.y,Push)&&s.out.follow,"after the hold: ahead, partly pushed, the origin follows");
         Check(Push>.316f&&Push<.95f,"past the game's dead zone, short of a run");
@@ -54,9 +54,19 @@ int main(){
     }
     {   // Hysteresis and the tail: walking holds down to StopMetres, then the origin follows TailSeconds more.
         Sim s;s.Move({0,0,-.5f});s.Run(.3);Check(s.out.push,"walking");
-        s.Move({0,0,.3f});s.Step();Check(s.out.push&&Near(s.out.offset,.2f),"still walking at 20 cm (between stop and start)");
-        s.Move({0,0,.1f});s.Step();Check(!s.out.push&&s.out.follow,"stops inside StopMetres, the origin still follows");
+        const float between=(StartMetres+StopMetres)*.5f;
+        s.Move({0,0,.5f-between});s.Step();Check(s.out.push&&Near(s.out.offset,between),"still walking between stop and start");
+        s.Move({0,0,between-StopMetres+.02f});s.Step();Check(!s.out.push&&s.out.follow,"stops inside StopMetres, the origin still follows");
         s.Run(TailSeconds+.02);Check(!s.out.push&&!s.out.follow,"the tail ends");
+    }
+    {   // A wall: walking without coming closer for BlockedSeconds stops the push; a step elsewhere tries again.
+        Sim s;s.Move({0,0,-.5f});s.Run(HoldSeconds+.05);Check(s.out.push,"walking");
+        s.Run(BlockedSeconds+.05);Check(!s.out.push&&s.out.blocked,"no closer for BlockedSeconds: blocked, not pushed");
+        s.Run(1);Check(!s.out.push&&s.out.blocked,"still blocked while you stay");
+        s.Move({.3f,0,0});s.Run(HoldSeconds+.05);Check(s.out.push&&!s.out.blocked,"a step elsewhere walks again");
+        Sim c;c.Move({0,0,-.5f});c.Run(HoldSeconds+.05);
+        for(int i=0;i<90;++i){c.in.origin=c.in.origin+Vec{0,0,-.004f};c.chase.Shifted({0,0,-.004f});c.Step();}   // the hero catching up
+        Check(!c.out.blocked,"a hero coming closer is not blocked");
     }
     {   // Pauses: a grip, a trigger, the bow, a cast, a menu or the real stick stop the push and the follow at once.
         bool Input::*gates[]={&Input::grip,&Input::trigger,&Input::bow,&Input::cast,&Input::menu,&Input::stick};

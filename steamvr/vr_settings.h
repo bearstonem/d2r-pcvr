@@ -223,9 +223,9 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"Left wave glyph", "The skill a wave drawn with the left hand casts; -1 the right hand's", L"glyphs",L"left_wave",-1,-1,4095,1},
     // How bright a Sorceress's spell hands light the dark ([torch] spell_hands, elements::HandLight); 0 none.
     {"Spell hand light", "Sorceress: how bright the spells in her hands light the dark around you; Off for none", L"torch",L"spell_hands_pct",40,0,100,10},
-    // Walk with your steps (room_steps.h; Discord, 2026-11-04 and 11-08): the hero walks after the player's real
-    // steps. Off by default; beside Seated play, which turns it off.
-    {"Walk with your steps", "The hero walks after your real steps; Off: he stays where you calibrated", L"gameplay",L"room_steps",0,0,1,1},
+    // Room follows you (room_steps.h; Discord, 2026-11-04 and 11-08; owner 2026-11-08: "the room center becomes where
+    // we physically move"): the hero's spot follows you in your room. On by default; beside Seated play, which turns it off.
+    {"Room follows you", "The hero's spot follows you as you move in your room; Off: it stays where you calibrated", L"gameplay",L"room_steps",1,0,1,1},
 }};
 using Values=std::array<float,Count>;
 // The setting holding the skill on glyph shape i (glyph_recognizer.h order): the right hand's (0), or the left's (1).

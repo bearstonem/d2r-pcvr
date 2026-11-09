@@ -1,5 +1,5 @@
 #pragma once
-// Walk with your steps (VR Settings > Body, beside Seated play; [gameplay] room_steps, off by default).
+// Room follows you (VR Settings > Body, beside Seated play; [gameplay] room_steps, on by default since 2026-11-08).
 //
 // The hero never moves with the headset: the camera is the hero plus the tracked head's offset
 // from the tracking origin (transport.cpp View), 1:1 and unbounded, so a real step leaves the
@@ -22,9 +22,14 @@
 namespace framevr::roomsteps {
 using math::Vec;using math::Quat;
 
-constexpr float StartMetres=.35f;     // the neck this far from the hero starts a walk
-constexpr float StopMetres=.12f;      // and this near ends it
-constexpr double HoldSeconds=.15;     // the offset held past StartMetres this long first
+// Owner, 2026-11-08: "the room center becomes where we physically move" - so monsters attack where you stand,
+// and the game's hero (with his legs) stays under you: a small dead zone, a short hold.
+constexpr float StartMetres=.20f;     // the neck this far from the hero starts a walk
+constexpr float StopMetres=.07f;      // and this near ends it
+constexpr double HoldSeconds=.10;     // the offset held past StartMetres this long first
+constexpr double BlockedSeconds=.6;   // walking this long without closing BlockedMetres: a wall - stop pushing
+constexpr float BlockedMetres=.03f;
+constexpr float UnblockMetres=.15f;   // then a step this much elsewhere tries again
 constexpr double TailSeconds=.30;     // after the push ends, the origin follows the hero this long (he stops on a grid)
 constexpr float Push=.55f;            // stick length: past the game's dead zone (.316), short of a run (.95)
 constexpr float SwingSpeed=1.2f;      // a hand faster than this, m/s, is a swing: pause
@@ -78,6 +83,7 @@ struct Output {
     bool follow=false;               // the origin follows the hero this frame (Shift)
     float offset=0;                  // the neck's distance from the hero, m
     Pause pause=Pause::None;
+    bool blocked=false;              // the hero could not come closer (a wall): not pushed until you step elsewhere
 };
 
 class Chase {
@@ -107,11 +113,17 @@ public:
             walking=false;farSince=-1;tailUntil=0;   // a pause also ends the follow: Leap and Teleport are not steps
             return out;
         }
+        if(blocked) {   // the hero met a wall: wait for a step elsewhere
+            if(Horizontal(offset-blockedAt)<UnblockMetres&&out.offset>StopMetres){out.blocked=true;return out;}
+            blocked=false;
+        }
         if(walking) {
             if(out.offset<=StopMetres){walking=false;tailUntil=in.time+TailSeconds;}
+            else if(out.offset<checkOffset-BlockedMetres){checkOffset=out.offset;checkAt=in.time;}
+            else if(in.time-checkAt>=BlockedSeconds){walking=false;blocked=true;blockedAt=offset;tailUntil=in.time+TailSeconds;out.blocked=true;}
         } else if(out.offset>=StartMetres&&headSpeed<=LungeSpeed) {
             if(farSince<0)farSince=in.time;
-            if(in.time-farSince>=HoldSeconds){walking=true;farSince=-1;}
+            if(in.time-farSince>=HoldSeconds){walking=true;farSince=-1;checkOffset=out.offset;checkAt=in.time;}
         } else farSince=-1;
         if(walking){out.push=true;StickToward(offset,in.head,out.x,out.y);}
         out.follow=walking||in.time<tailUntil;
@@ -123,9 +135,9 @@ public:
     bool Walking()const{return walking;}
 private:
     static bool Same(Vec a,Vec b){return Len(a-b)<1e-4f;}
-    void Anchor(const Input& in){origin=in.origin;reference=Neck(in.eye,in.head);known=true;walking=false;farSince=-1;tailUntil=0;}
-    bool known=false,walking=false,eyeKnown=false,handKnown[2]{};
-    Vec origin{},reference{},eye{},hand[2]{};
-    double lastTime=0,farSince=-1,tailUntil=0,swingUntil=0;
+    void Anchor(const Input& in){origin=in.origin;reference=Neck(in.eye,in.head);known=true;walking=false;blocked=false;farSince=-1;tailUntil=0;}
+    bool known=false,walking=false,blocked=false,eyeKnown=false,handKnown[2]{};
+    Vec origin{},reference{},eye{},hand[2]{},blockedAt{};
+    double lastTime=0,farSince=-1,tailUntil=0,swingUntil=0,checkAt=0;float checkOffset=0;
 };
 }

@@ -1107,23 +1107,25 @@ town:
    restoration. Recheck ordinary 3D arrows, free sword swings, inventory and frame
    pacing. Repeat shield-fit checks with several shield shapes.
 
-## Walk with your steps
+## Room follows you
 
-**VR Settings > Body > Walk with your steps** (`[gameplay] room_steps`, Off by
-default; the right half of Seated play's row, hidden while Seated play is on)
-lets the hero follow your real steps. Without it the hero never moves with the
-headset: the camera is the hero plus your head's offset from the tracking
-origin, so a step leaves the hero's body behind until F11 or Calibrate body.
+**VR Settings > Body > Room follows you** (`[gameplay] room_steps`, On by
+default since 2026-11-08; the right half of Seated play's row, hidden while
+Seated play is on) is room-scale: as you move in your room, your hero's spot in
+the game follows you, so monsters, your mercenary and spells meet you where you
+stand. Without it the hero never moved with the headset: the camera is the hero
+plus your head's offset from the tracking origin, so a step left the game's
+hero, and every monster's target, at the room's centre.
 
 `steamvr/room_steps.h` measures your neck (the eyes turn about it, so looking
-down or turning your head is not a step) against where the hero stands. Past
-35 cm, held 150 ms, it pushes the left stick partly toward the step, so the
-game's own walk moves the hero and its collision stops him at walls and
-monsters. While he walks, `View` moves the tracking origin by exactly the
-distance he covered, so the camera stays at your real head and the hero catches
-up underneath. The push ends inside 12 cm; the origin keeps following for
-300 ms while the hero stops on the game's grid. The hero's position is never
-written.
+down or turning your head is not a step) against the hero's spot. Past 20 cm,
+held 100 ms, it pushes the left stick partly toward you, so the game's own walk
+moves the hero and its collision stops him at walls and monsters. While he
+walks, `View` moves the tracking origin by exactly the distance he covered, so
+the camera stays at your real head and the hero catches up underneath. The push
+ends inside 7 cm; the origin keeps following for 300 ms while he stops on the
+game's grid. Walking 0.6 s without coming 3 cm closer is a wall: the push stops
+until you step 15 cm elsewhere. The hero's position is never written.
 
 Paused, with no push and no origin follow: a grip or trigger held, the bow
 drawn, a native cast, a hand moving faster than 1.2 m/s (a swing, for 0.4 s),
@@ -1133,10 +1135,9 @@ faster than 4 m/s (a teleport, waypoint or Leap) is not followed. F11, Calibrate
 body and a world load re-anchor it where your head is.
 
 Log lines: `Frame room steps: on`, `walking after your step, N m from the hero`,
-`stopped N m from the hero (caught up | <pause>)`, `paused (<why>)` (at most
-every 2 s while a step is owed), a one-second summary while it works (frames
-pushed, metres walked and followed, jumps), and `the hero moved N m in N ms ...
-the origin stays` for a jump.
+`stopped N m from the hero (caught up | blocked | <pause>)`, `paused (<why>)`
+(at most every 2 s while a step is owed), a one-second summary while it works,
+and `the hero moved N m in N ms ... the origin stays` for a jump.
 
 ## What is physical and what is still native
 
