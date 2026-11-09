@@ -483,8 +483,8 @@ inline bool RowShown(Key key,const Values& v,const Context& c){
         case BloodWipe:return v[BloodVisor]>.5f;
         case CompanionTactical:return v[CompanionAi]>.5f;
         case FogDistance:return v[Fog]>.5f;   // beside Distance fog while the fog is on (main greyed it; RowEnabled)
-        case CeilingTorches:return v[Ceiling]>.5f;
-        case RoomSteps:return v[Seated]<.5f;   // beside Seated play while it is off (sitting, there are no steps)   // beside Dungeon ceilings while they are on (a greyed half has no room for its lock)
+        case CeilingTorches:return v[Ceiling]>.5f;   // beside Dungeon ceilings while they are on (a greyed half has no room for its lock)
+        case RoomSteps:return v[Seated]<.5f;   // beside Seated play while it is off (sitting, there are no steps)
         // Frame generation runs with Both eyes only (frame_generation.h): By turns leaves its rows out,
         // with its status line (owner, 2026-10-25), and NVIDIA's rows on More with them.
         case FrameGeneration:return v[StereoRendering]<.5f;
