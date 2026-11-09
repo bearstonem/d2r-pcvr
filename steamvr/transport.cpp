@@ -619,6 +619,10 @@ uint64_t bowSequence=0;
 bowflight::Shot bowPending{},bowReadyShot{},bowPreviewPose{};
 bool bowPreviewVisible=false;
 bool bowNeedsWorld=false,bowHasShot=false;
+// Multiple Shot from a draw: the release's pose, lent to the fan the game
+// makes for it (bowvr::ArmFan). Allowed() refuses a stale one.
+bowflight::Shot fanPending{};
+bool fanNeedsWorld=false;
 // Double Throw (#224): the left hand's own release, beside the right's.
 bowflight::Shot throwLeftPending{},throwLeftReady{};
 bool leftNeedsWorld=false,leftHasShot=false,leftThrowArmed=false;
@@ -4820,6 +4824,15 @@ void Input() {
         bowPending.epoch=(meleeEpoch<<32)|bowWorldEpoch;bowPending.sequence=++bowSequence;
         bowNeedsWorld=true;
     }
+    // A drawn Multiple Shot: the game makes the fan, which then flies this
+    // release's pose, pitch included (bowvr::ArmFan, bow_flight.h FanVolley).
+    if(motionOutput.nativeBowRelease&&motionOutput.nativeBowSkill==bowflight::MultipleShot&&motionInput.weapon==gameplay::Weapon::Bow) {
+        auto& p=fanPending;p={};p.missile=213;
+        p.origin=motionInput.hand[0].p;p.direction=motionOutput.releaseDirection;p.draw=motionOutput.draw;
+        p.at=GetTickCount64();p.stamp=s.sampleStamp;p.session=gamestate::LocalPlayer();p.equipment=motionInput.equipment;
+        p.epoch=(meleeEpoch<<32)|bowWorldEpoch;p.sequence=++bowSequence;
+        fanNeedsWorld=true;
+    }
     if(motionOutput.leftRelease&&leftThrowArmed) {
         // Double Throw: the left hand throws its own weapon (the launch
         // scopes the native weapon selector to it).
@@ -7113,6 +7126,12 @@ bool View(float out[16],const float hero[3],float eyeHeight,float userEyeHeight,
                 shot.skill,shot.missile,int(bowflight::Valid(shot)));
             Say(line);
         }
+    }
+    if(fanNeedsWorld) {
+        fanNeedsWorld=false;
+        const auto shot=resolveBow(fanPending);
+        if(bowflight::Allowed(shot,releaseGate,GetTickCount64()))bowvr::ArmFan(shot);
+        else Say("Frame bow volley: release refused (stale, menu or tracking); the game's fan stays flat");
     }
     const auto& pose=eye<0?head:views[eye&1].pose;
     const auto offset=math::Rotate(base,V(pose.position)-origin)*upm;

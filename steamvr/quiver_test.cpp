@@ -184,6 +184,74 @@ int main() {
         Check(!ItemArrow(thrown)&&MissileId(thrown)==1,"nor are throws");
     }
     {
+        // Owner, 2026-11-08: Multiple Shot "is also not really going where we
+        // aim in terms of up or down, it just goes straight planar". The game
+        // makes its fan on the ground plane; a drawn release lends it its pitch.
+        auto release=Release();release.missile=213;
+        const float pitch=.5f;release.direction=math::Normalized(Vec{0,std::tan(pitch),-1});
+        Check(FanArrow(release)&&!SkillRelease(release)&&!OwnMissile(release)&&!ItemArrow(release),"a fan arrow is a basic arrow of the fan's missile");
+        Check(MissileId(release)==213&&Valid(release)&&ProjectileLength(release)==ArrowLength,"named 213, a valid release, the arrow's length");
+        auto skill=release;skill.skill=12;Check(!FanArrow(skill),"never a skill the bow casts itself");
+        auto plain=Release();Check(!FanArrow(plain)&&MissileId(plain)==0,"basic arrows unchanged");
+        // Its HD definition is the basic arrow's: placed exactly as one.
+        Flight fanFlight,basic;fanFlight.shot=release;basic.shot=release;basic.shot.missile=-1;
+        fanFlight.distance=basic.distance=3;fanFlight.alive=basic.alive=true;fanFlight.updatedAt=basic.updatedAt=10;
+        float fm[16],bm[16];ArrowMatrix(fanFlight,10,fm);ArrowMatrix(basic,10,bm);
+        for(int i=0;i<16;++i)Check(Near(fm[i],bm[i]),"a fan arrow draws as the basic arrow");
+        // The game's heading for each arrow, at the release's pitch.
+        for(Vec heading:{Vec{0,0,-8},Vec{3,0,-8},Vec{-5,0,-2},Vec{1,0,0},Vec{-.2f,0,.7f}}) {
+            const auto d=FanDirection(release.direction,heading);
+            const float flat=std::hypot(heading.x,heading.z),own=std::hypot(d.x,d.z);
+            Check(Near(Length(d),1)&&Near(d.y,release.direction.y),"unit length, the release's pitch");
+            Check(Near(d.x/own,heading.x/flat)&&Near(d.z/own,heading.z/flat),"the game's heading for it");
+            Check(!Near(Vec{heading.x/flat,0,heading.z/flat}.y,d.y),"negative control: the game's own arrow is flat");
+        }
+        auto level=Release();
+        const auto flat=FanDirection(level.direction,{3,0,-4});
+        Check(Near(flat.x,.6f)&&Near(flat.y,0)&&Near(flat.z,-.8f),"a level release keeps the game's fan exactly");
+        Check(Length(FanDirection(release.direction,{})-release.direction)<.0005f,"no heading: the release's own");
+        Check(Near(FanDirection({0,1,0},{}).y,1)&&Near(FanDirection({0,-1,0},{0,0,1}).y,-1),"straight up or down stays so");
+        Check(Near(HeadingDegrees({0,0,-1},{1,0,-1}),-45)||Near(HeadingDegrees({0,0,-1},{1,0,-1}),45),"heading angle in degrees");
+        Check(Near(HeadingDegrees({0,0,-1},{1,0,-1}),-HeadingDegrees({0,0,-1},{-1,0,-1})),"signed about the release");
+
+        // The armed release adopts one server tick of local fan arrows.
+        const Vec hero=release.player;
+        FanVolley v;
+        Check(!v.Accepts(11,5,1000,hero)&&!v.Fresh(11,1000),"nothing armed, nothing adopted");
+        v.Arm(release,1000);
+        Check(!v.Accepts(12,5,1100,hero),"another character's game");
+        Check(!v.Accepts(11,5,999,hero)&&!v.Accepts(11,5,1000+FanVolley::Window+1,hero),"only within the window after the release");
+        Check(!v.Accepts(11,5,1100,hero+Vec{FanVolley::MaxStep+.5f,0,0}),"a teleport since the release refuses");
+        Check(v.Report(1100)==FanVolley::Outcome::None,"no line before the fan");
+        for(int i=0;i<21;++i) {
+            const float a=(i-10)*.05f;
+            Check(v.Accepts(11,5,1160,hero+Vec{.2f,0,0}),"the fan of one tick");
+            const auto s=v.Adopt(5,Vec{std::sin(a),0,-std::cos(a)}*40,hero+Vec{.2f,0,0},1160);
+            Check(FanArrow(s)&&Valid(s)&&s.member==i&&s.sequence==release.sequence&&s.session==release.session,"each arrow its own member of the release");
+            Check(Near(s.direction.y,release.direction.y)&&Near(s.draw,release.draw),"each at the release's pitch and draw");
+            Check(Near(s.origin.x,release.origin.x+.2f)&&Near(s.player.x,release.player.x+.2f)&&Near(s.origin.y,release.origin.y),
+                  "a step since the release carries the origin");
+        }
+        Check(!v.Accepts(11,6,1200,hero),"a later tick is not this fan");
+        Check(v.adopted==21&&Near(v.right-v.left,1.f*(180.f/3.14159265f))&&Near(v.PitchDegrees(),pitch*(180.f/3.14159265f)),
+              "spread and pitch for the volley line");
+        Check(v.Report(1200)==FanVolley::Outcome::None,"the fan line waits for the burst");
+        Check(v.Report(1160+FanVolley::Burst)==FanVolley::Outcome::Adopted&&v.Report(1400)==FanVolley::Outcome::None,"one line per volley");
+        FanVolley capped;capped.Arm(release,1000);
+        for(unsigned i=0;i<FanVolley::Most;++i){Check(capped.Accepts(11,5,1100,hero),"up to Most");capped.Adopt(5,{0,0,-1},hero,1100);}
+        Check(!capped.Accepts(11,5,1100,hero),"no more than Most");
+        // The client's own flat fan: one burst while armed.
+        FanVolley w;
+        Check(!w.Watch(11,1100),"nothing armed: the game's own");
+        w.Arm(release,1000);
+        Check(!w.Watch(12,1100),"another character's");
+        Check(w.Watch(11,1150)&&w.Watch(11,1151)&&w.Watch(11,1150+FanVolley::Burst),"its burst");
+        Check(!w.Watch(11,1151+FanVolley::Burst)&&w.watched==3,"a later client arrow is not this fan");
+        FanVolley missed;missed.Arm(release,1000);
+        Check(missed.Report(1000+FanVolley::Window)==FanVolley::Outcome::None,"waits the whole window");
+        Check(missed.Report(1001+FanVolley::Window)==FanVolley::Outcome::Missed&&missed.Report(5000)==FanVolley::Outcome::None,"no fan: said once");
+    }
+    {
         // The root-bound model must land exactly where a basic arrow mesh is.
         for(int missile:{12,27,40,41,85,87})for(Vec d:{Vec{0,0,-1},Vec{.6f,.3f,-.74f},Vec{-.2f,-.5f,.84f},Vec{0,.97f,.24f}}) {
             auto s=Release();s.skill=7;s.missile=missile;s.direction=math::Normalized(d);
