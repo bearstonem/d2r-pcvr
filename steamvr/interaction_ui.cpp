@@ -371,7 +371,7 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
         const RECT content{LONG(MapContent.left*768),LONG(MapContent.top*768),LONG(MapContent.right*768),LONG(MapContent.bottom*768)};
         frame({content.left-4,content.top-4,content.right+4,content.bottom+4});
         text("Waiting for map...",content);
-        SelectObject(dc,shortcutFont);text("Zoom: right stick up / down.  Hand map + compass: VR Settings > Wrist",{38,650,730,677});SelectObject(dc,font);
+        SelectObject(dc,shortcutFont);text("Zoom: right stick up / down.  Hand map + compass: VR Settings > Interface > Wrist",{38,650,730,677});SelectObject(dc,font);
     } else if(o.editor==3) {
         frame({20,28,748,681});
         text("QUICK USE / INVENTORY",{38,47,730,88});

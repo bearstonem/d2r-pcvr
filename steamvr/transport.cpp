@@ -42,6 +42,9 @@
 #include "window_focus.h"
 #include "panel_input_mode.h"
 #include "gameplay.h"
+#include "walk_direction.h"
+#include "room_scale.h"
+#include "room_steps.h"
 #include "strike_skills.h"
 #include "bow_laser.h"
 #include "hand_controls.h"
@@ -53,11 +56,6 @@
 #include "glyph_trail.h"
 #include "spell_motion.h"
 #include "blood_screen.h"
-#include "shapeshift_gesture.h"
-#include "hammer_gesture.h"
-#include "charge_gesture.h"
-#include "cross_gesture.h"
-#include "heavens_gesture.h"
 #include "guard_strain.h"
 #include "guard_strain_paint.h"
 #include "heartbeat.h"
@@ -213,6 +211,8 @@ skills::HandControls handControls;
 skills::HandOutput handOutput;
 gameplay::Pose handAim[2]{};
 bool handAimTracked[2]{};
+walkdir::Pointing leftPointing;   // Walk direction (walk_direction.h): the left controller's heading, kept while it points down
+int walkDirectionSaid=-1;
 int castHand=0;
 controllers::Labels detectedControllers{},controllerLabels{};
 bool controllerProfilesDirty=true,frameControllerExtension=false;
@@ -315,9 +315,9 @@ void TellPlayer(const std::string& text) {
 // The skill wheel's Left claw strikes box saves [gameplay] left_hand_strikes
 // itself; until the save lands (Poll, about 0.5 s) the box shows the choice made.
 uint64_t leftStrikesSequence=0,leftStrikesAt=0;float leftStrikesWanted=0;
-// VR Settings > Body > Movement speed ([gameplay] run_speed_pct): its WALK stop walks and every
+// VR Settings > Comfort > Moving > Movement speed ([gameplay] run_speed_pct): its WALK stop walks and every
 // other stop runs. The game's run / walk toggle is kept in line with it from the gait the
-// plugin sees and the stick (runspeed::GaitSync). With its Stick toggle on, right stick up
+// plugin sees and the stick (runspeed::GaitSync). With the Stick toggle on, right stick up
 // switches between walking and that run (runspeed::StickToggle).
 runspeed::GaitSync gaitSync;
 runspeed::StickToggle stickToggle;
@@ -473,7 +473,7 @@ settings::Hit settingsPressed;
 bool settingsTriggerDown=false;
 // The menu clock (ms) for the pointer, the card and the model's guards.
 uint64_t MenuMs();
-// The game's own video options for the Performance page's warnings and line, re-read at most
+// The game's own video options for the readout's warnings and line, re-read at most
 // every 2 s while VR Settings is open and only when the game has saved them:
 // the mod's own Settings.json (settings::ModSettingsFile), or the unmodded
 // game's while the mod has none yet.
@@ -532,7 +532,7 @@ struct SettingsPicture {
     int status=-1,game=-1;
     bool confirmArmed=false,undoArmed=false;int undoDrain=-1;
     bool popoverArmed=false;   // an open popover's options take presses (Model::PopoverGuardMs after it opened)
-    uint64_t performance=0;settings::GameVideo gameVideo{};framegen::Readout frameGen{};   // the Perf view's
+    uint64_t performance=0;settings::GameVideo gameVideo{};framegen::Readout frameGen{};   // the readout pages'
     bool operator==(const SettingsPicture&)const=default;
 };
 settings::layout::Layout settingsLayout;   // the layout of the picture shown
@@ -540,7 +540,7 @@ SettingsPicture settingsPainted;     // what the picture shown has
 SettingsPicture settingsRequested;   // what the outstanding settings request paints
 int calibrationRequestedKey=-1;      // the same for calibration
 settings::PaintGuard settingsPaintGuard;   // a failed picture closes the panel; no requests until the next open
-// The Performance page's numbers: each second's frames as NoteFrame gets them.
+// The readout's numbers: each second's frames as NoteFrame gets them.
 struct PerformanceWindow {double game=0,wait=0,draw=0,vr=0,period=0,budget=0;uint32_t frames=0,periods=0,turns=0,budgets=0;ULONGLONG since=0,last=0;} performanceWindow;
 double performanceBudget=0;   // the headset's frame, from the last frame that had one
 settings::PerformanceReadout performance;
@@ -550,6 +550,8 @@ XrPosef settingsPose{};
 constexpr float settingsWidth=.95f,settingsHeight=settingsWidth*settings::Height/settings::Width;
 DXGI_FORMAT atlasFormat=DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
 uint32_t layerLimit=16;
+// What each place in the submitted layer list showed last (composition::StablePlaces).
+std::array<composition::Place,composition::MaxPlaces> placesKept{};uint32_t placesKeptCount=0;
 uint64_t interactionPaintKey=~0ull;
 uint64_t interactionRequestedKey=~0ull,interactionPaintRequest=0;
 interaction::PaintContext interactionPaintContext{},interactionRequestedContext{};
@@ -592,35 +594,15 @@ struct ShieldCast {
 };
 ShieldCast shieldCast;
 weaponskills::Pulse shieldPulse;
-// [shapeshift] Druid gestures pulse whichever slot holds Werewolf / Werebear.
-shapeshift::Engine shapeshiftGesture;
-weaponskills::Pulse shapePulse;
-int shapeSlot=-1,shapeId=-1,shapeOwner=-1;
-// [hammer] Paladin Blessed Hammer fist pump pulses whichever slot holds it.
-hammerpump::Engine hammerGesture;
-weaponskills::Pulse hammerPulse;
-int hammerSlot=-1,hammerOwner=-1;
-uint32_t hammerCasts=0;
-// [holy shield] Paladin sign of the cross pulses whichever slot holds Holy Shield.
-holycross::Engine crossGesture;
-weaponskills::Pulse crossPulse;
-int crossSlot=-1,crossOwner=-1;
-// [fist of the heavens] the call waits up to HeavensWaitMs for vrcam to hand the
-// game the monster the arm points at, then presses the slot.
-heavensfist::Engine heavensGesture;
-weaponskills::Pulse heavensPulse;
-int heavensSlot=-1,heavensOwner=-1,heavensPendingSlot=-1;   // the slot a waiting call presses, -1 the right trigger's record
+// The Paladin's and the Druid's motions are watchers on spellmotion's engine (spellFree, motions_paladin.h and
+// motions_druid.h since 2026-11-08). Fist of the Heavens' call waits up to HeavensWaitMs for vrcam to hand the
+// game the monster the arm points at, then casts (motionCast).
 bool heavensPending=false;
 uint32_t heavensRequest=0,heavensAnswered=0,heavensMonster=0,heavensCasts=0;
 float heavensFrom=0,heavensAt=0;   // the last call's start and stop elevation (degrees), for the log
 ULONGLONG heavensAskedAt=0;
 std::atomic<bool> heavensArmed{false};
 constexpr ULONGLONG HeavensWaitMs=120;
-// [charge] Paladin Charge punch pulses whichever slot holds Charge.
-chargepunch::Engine chargeGesture;
-weaponskills::Pulse chargePulse;
-int chargeSlot=-1,chargeOwner=-1;
-uint32_t chargeCasts=0;
 // A Charge in flight (any cast path): no physical melee contacts until it ends.
 ULONGLONG chargeIssuedAt=0,chargeContactsHeldAt=0;
 // [bow] quiver: face-button arrow skills load the following physical arrows.
@@ -741,8 +723,18 @@ std::array<XrView,2> views{{{XR_TYPE_VIEW},{XR_TYPE_VIEW}}};
 XrPosef head{};
 math::Vec origin{};
 bool haveOrigin=false;
+// Room-scale (room_scale.h): the stage's turn at the last head view, so a turn pivots at the head; and when
+// the room's offset was last written to the log.
+math::Quat turnBase{0,0,0,1};bool turnBaseKnown=false;double roomSaidAt=0;
+// Room follows you (room_steps.h; VR Settings > Comfort > Body, beside Seated play): the step the hero walks
+// after, this input frame's push and follow, and the hero where the last head view saw him (world units).
+roomsteps::Chase roomChase;
+roomsteps::Output roomOut;
+math::Vec roomHero{};bool roomHeroKnown=false;double roomHeroAt=0;
+struct RoomStepStats {double from=0,pauseSaid=0;float walked=0,followed=0;unsigned pushed=0,jumps=0;bool on=false,walking=false;
+                      roomsteps::Pause pause=roomsteps::Pause::Off;} roomStats;
 GripStickButton leftMenuButton;
-stickgestures::Gestures rightStickGestures;   // right stick up: run / walk (Movement speed's Stick toggle); down: loot labels
+stickgestures::Gestures rightStickGestures;   // right stick up: run / walk (the Stick toggle); down: loot labels
 MenuTriggerGate menuTriggerGate;
 PressEdge inventoryButton,menuButton;
 float lastRecenter=0;
@@ -769,7 +761,7 @@ std::array<Eye,2> eyes;
 Eye uiEye;
 Eye mapEye;
 // The wrist map's view: Isometric (the game's) or Top-down, and on the
-// top-down map whether it turns with you. Configured under VR Settings > Wrist.
+// top-down map whether it turns with you. Configured under VR Settings > Interface > Wrist.
 bool MapTopDownOn(){return settings::MapViewTopDown(vrsettings::Read().values[settings::MapTopDown]);}
 // Map view = Full map / Full top-down: the wrist shows the game's full map (wrist_full_map.h)
 bool MapFullOn(){return settings::MapViewFull(vrsettings::Read().values[settings::MapTopDown]);}
@@ -1297,9 +1289,9 @@ framegen::Start FrameGenAttach() {
     FrameGenAsk(FrameGenWanted(),false);
     return framegen::Start::Loaded;
 }
-// What the Perf page and the log say of frame generation. The layer is asked
+// What the readout and the log say of frame generation. The layer is asked
 // at most twice a second; each change is logged. predictedHz: a second's
-// runtime-predicted rate (NoteFrame), 0 from the Perf page.
+// runtime-predicted rate (NoteFrame), 0 from the readout.
 framegen::Readout FrameGenNow(ULONGLONG now,float predictedHz=0) {
     std::lock_guard lock(frameGenMutex);
     if(predictedHz>0&&runtimeVdxr.load())frameGenHalving.Note(predictedHz);
@@ -2517,6 +2509,7 @@ void SettingsPointer(bool grip) {
         settingsModel.SetContext(context);settings::layout::SettleView(settingsModel);
     }
     const auto previousView=settingsModel.view;
+    const auto previousGroup=settings::layout::OpenGroup(settingsModel);
     float canvasX=-1,canvasY=-1;
     XrSpaceLocation aim{XR_TYPE_SPACE_LOCATION};
     const auto needed=XR_SPACE_LOCATION_POSITION_VALID_BIT|XR_SPACE_LOCATION_ORIENTATION_VALID_BIT|
@@ -2539,6 +2532,10 @@ void SettingsPointer(bool grip) {
     const auto pointed=settingsPointer.Step(settingsLayout,ms,onPanel,canvasX,canvasY,settingsTriggerDown);
     settingsHover=pointed.hover;settingsPressed=pointed.pressed;
     settingsCard.Step(ms,onPanel?settings::layout::HelpAt(settingsLayout,canvasX,canvasY):settings::NoHelp,canvasX,canvasY,onPanel,settingsLayout.card);
+    if(pointed.railIgnoredMs>=0){
+        char message[96];std::snprintf(message,sizeof message,"Frame VR settings: rail press ignored, %d ms after the rail moved",pointed.railIgnoredMs);
+        Say(message);   // one per trigger pull
+    }
     if(pointed.blocked){
         MotionPulse(1,haptics::Category::Interaction,.2f,15000000);
         static ULONGLONG reportAt=0;const auto now=GetTickCount64();
@@ -2560,6 +2557,7 @@ void SettingsPointer(bool grip) {
     if(!settingsModel.open)return;
     // A new view starts with a fresh pointer and card; Open's focus key points
     // the card at the row it named (with the card buttons' guard).
+    if(settings::layout::OpenGroup(settingsModel)!=previousGroup)settingsPointer.GuardRail(ms);
     if(settingsModel.view!=previousView){settingsPointer.Reset();settingsCard.Reset();settingsCard.Focus(settings::NoHelp,ms);settingsHover=settingsPressed={};}
     if(settingsModel.focusKey>=0){settingsCard.Focus(settingsModel.focusKey,ms);settingsModel.focusKey=-1;}
     // An open popover closes when the laser stays off it and its row (or off the panel).
@@ -2579,8 +2577,8 @@ void SettingsPointer(bool grip) {
     // One request at a time, at most every 100 ms as when it was painted here.
     // Each picture is shown when done, even if the pointer moved on meanwhile:
     // the painted state names what it shows, and the next request catches up.
-    // The Perf view repaints with each second's numbers; the others never for them.
-    const bool performanceView=settingsModel.view==settings::View::Performance;
+    // The readout pages repaint with each second's numbers; the others never for them.
+    const bool readoutView=settings::layout::HasReadout(settingsModel.view);
     const bool fresh=performance.valid&&now-performanceAt<=2000;
     SettingsPicture wanted;
     wanted.revision=settingsModel.revision;wanted.hover=settingsHover;wanted.pressed=settingsPressed;
@@ -2591,16 +2589,16 @@ void SettingsPointer(bool grip) {
     wanted.undoArmed=undoing&&ms>=settingsModel.undoResetAt+settings::Model::UndoResetGuardMs;
     wanted.undoDrain=undoing?int((settingsModel.undoResetUntil-ms)/100):-1;
     wanted.popoverArmed=settingsModel.popoverKey>=0&&ms>=settingsModel.popoverAt+settings::Model::PopoverGuardMs;
-    wanted.performance=performanceView&&fresh?performanceSerial:0;
-    wanted.gameVideo=performanceView?game:settings::GameVideo{};
-    wanted.frameGen=performanceView?FrameGenNow(now):framegen::Readout{};   // what OFXR Bridge is doing, under the frame times
+    wanted.performance=readoutView&&fresh?performanceSerial:0;
+    wanted.gameVideo=readoutView?game:settings::GameVideo{};
+    wanted.frameGen=readoutView?FrameGenNow(now):framegen::Readout{};   // what OFXR Bridge is doing, under the frame times
     if(!(wanted==settingsPainted)&&now>=settingsPaintAt&&!settingsPaintRequest&&settingsPaintGuard.CanRequest()){
         char resolutionStatus[160];resolution::Describe(resolutionStatus,sizeof resolutionStatus,{width,height});
         SettingsPaintJob job;job.model=settingsModel;
         auto& in=job.input;
         in.hover=settingsHover;in.pressed=settingsPressed;in.card=wanted.card;in.cardArmed=wanted.cardArmed;in.nowMs=ms;
         in.monoAudio=monoAudio;in.game=game;in.performance=fresh?performance:settings::PerformanceReadout{};in.frameGen=wanted.frameGen;
-        in.runtimeStatus=performanceView?resolutionStatus:descriptions[status];in.detected=detectedControllers;
+        in.runtimeStatus=readoutView?resolutionStatus:descriptions[status];in.detected=detectedControllers;
         settingsPaintRequest=settingsPainter.Submit(std::move(job));
         settingsRequested=wanted;settingsPaintAt=now+100;
         if(!settingsPaintRequest&&settingsPaintGuard.Failed(true)){SettingsPaintFailed("background painter unavailable");return;}
@@ -3453,7 +3451,7 @@ void Input() {
     handInput.occupied=interactionOutput.bottle>=0||interactionOutput.owner[0]==interaction::Owner::Holster||interactionOutput.owner[1]==interaction::Owner::Holster;
     const auto lootNow=GetTickCount64(),lootSession=gamestate::LocalPlayer();
     const bool lootWorld=motionHeadTracked&&!nativeUi&&!settingsOwned&&!settingsChord&&inWorld&&inWorld()&&lootSession;
-    // Right stick up switches run / walk with Movement speed's Stick toggle on (owned
+    // Right stick up switches run / walk with the Stick toggle on (owned
     // either way, so it never turns); down, held, shows the loot labels
     // (Show items, Alt). Not while a wheel is open, nor while the wrist map is
     // looked at: its zoom has the stick then (map_zoom.h). A vertical push turns nothing.
@@ -3521,7 +3519,7 @@ void Input() {
     interactionInput.quickCast=handOutput.slot>=0||handOutput.spells[0]>=0||handOutput.spells[1]>=0;
     interactionInput.wheelHand=handOutput.wheel;
     interactionInput.leatherReach=leatherOn.load();
-    // Right stick up switches running / walking only with Movement speed's Stick toggle on
+    // Right stick up switches running / walking only with the Stick toggle on
     // (below, off by default). The push is owned either way, so it never snap-turns.
     interactionInput.reservedLeft=(controls.buttons&menus::LeftStick)!=0;interactionInput.trigger=handOutput.wheel==0?controls.lt/255.f:controls.rt/255.f;interactionInput.hover=motionInput.hover;
     const auto hudSettings=vrsettings::Read();
@@ -3784,7 +3782,7 @@ void Input() {
             }
         }
     }
-    // Arrow path line color (VR Settings > Targets > Arrow path line); Off keeps the last.
+    // Arrow path line color (VR Settings > Gameplay > Targeting > Arrow path line); Off keeps the last.
     if(const float hue=hudSettings.values[settings::BowLaser];hue>=0&&hue!=bowLaserHue&&!bowLaserAtlasPending&&atlasUploads.size()<3) {
         if(UploadShared(panelatlas::BowLaser,bowlaser::Paint(hue),&bowLaserAtlasPending))bowLaserHue=hue;
     }
@@ -3855,7 +3853,7 @@ void Input() {
     }
     // Low-life heartbeat (Classic and Unleashed): queue the next beat ~80 ms before
     // the current one ends, at the loudness and tempo of the 10 % step of life below
-    // VR Settings > Survival > Heartbeat starts at. Above it, Off, dead or stale vitals:
+    // VR Settings > Interface > Warnings > Heartbeat starts at. Above it, Off, dead or stale vitals:
     // the last beat finishes, then silence.
     {
         heartStream.Reap();breakStream.Reap();   // breakStream: the guard-break bone snap
@@ -4155,7 +4153,7 @@ void Input() {
     // Bow skills leave the bow: the arrow is in the left hand's model, so the
     // target, the lock and the shot follow the bow whichever button casts. A
     // drawn string (or the shot just loosed) keeps its own line. Only with VR
-    // Settings > Aim > Bow skills go to the aimed monster: Off, a bow skill
+    // Settings > Gameplay > Targeting > Skills go to the aimed monster: Off, a bow skill
     // aims along its button's hand, as before the aim rules (#159 review).
     if(settings::LockBowSkills(gestureSettings[settings::SpellLock])&&motionInput.weapon==gameplay::Weapon::Bow&&motionOutput.skill>=0&&motionInput.tracked[1]&&
        weaponskills::Bow(quickSnapshot.skills[motionOutput.skill].id)&&gameplay::Length(motionOutput.rayOrigin-motionInput.hand[1].p)>.05f) {
@@ -4206,12 +4204,14 @@ void Input() {
     {const auto page=spellmotion::PageOf(motionClass);for(int i=0;i<page.count;++i)motionAny=motionAny||motionOn(page.skills[i]);}
     const bool motionGestures=gestureSettings[settings::SkillGestures]>.5f;
     spellGripsArmed.store(motionAny&&motionGestures);
+    heavensArmed=motionOn(weaponskills::FistOfHeavens)&&motionGestures;   // vrcam keeps the monster scan for its call
     const bool motionHands=motionAny&&motionGestures&&motionControls.load()&&gameplayChain&&motionInput.active&&quickFresh&&
         !motionOutput.block&&!motionInput.quickCast&&!motionOutput.bowDrawing&&!panelMode&&!spatialMode&&!settingsOwned&&
         !interactionOutput.wheel&&!interactionOutput.settings&&interactionOutput.bottleHand<0&&!glyphStroke.Drawing()&&
         interactionOutput.owner[0]==interaction::Owner::Combat&&interactionOutput.owner[1]==interaction::Owner::Combat&&
         !bloodOutput.block[0]&&!bloodOutput.block[1]&&spellTrigger<=.3f&&handInput.trigger[1]<=.3f;
-    // The gestures' detectors watch the frame the grips open too (gate.watch): Fist of the Heavens may end on the fist opening.
+    // The Paladin's and the Druid's watch the frame the grips open too (gate.watch, spellmotion::WatchesOpening): Fist of
+    // the Heavens may end on the fist opening.
     const auto gate=spellGate.Step(motionInput.grip,motionHands);
     const bool gripHeld=gate.held,motionGate=gate.open,motionWatch=gate.watch;
     if(gripHeld&&motionAny&&motionGestures)spellGripsHeldAt.store(GetTickCount64());
@@ -4288,133 +4288,6 @@ void Input() {
         Say(line);
         return !refused;
     };
-    // A gesture's own slot press (its pulse, as before): the same line.
-    const auto motionSlotCast=[&](int skill,bool wait) {
-        if(wait)spellFreeAt=motionNow;
-        spellGripCast=true;
-        char line[160];std::snprintf(line,sizeof line,"Frame spell motion: %s cast by its motion with both grips held, via its hand slot",motionName(skill).c_str());
-        Say(line);
-    };
-    // Druid shapeshift gestures, under the motions' gate. The performance casts the shape skill through
-    // its own slot's button, or with none the right trigger's record; the game owns the transformation,
-    // mana and the return to human form (the same skill cast again).
-    {
-        shapeshift::Input in;
-        in.time=interactionInput.time;in.session=interactionInput.session;in.epoch=interactionInput.epoch;
-        in.active=motionWatch&&!motionCooling&&(motionOn(weaponskills::Werewolf)||motionOn(weaponskills::Werebear));
-        in.head=interactionInput.head.p;in.headRotation=interactionInput.head.q;
-        for(int h=0;h<2;++h) {
-            in.hand[h]=interactionInput.hand[h].p;in.tracked[h]=interactionInput.tracked[h];
-            in.handVelocity[h]=interactionInput.handVelocity[h];in.velocityKnown[h]=interactionInput.velocityKnown[h];
-            in.busy[h]=interactionOutput.bottleHand==h||handInput.trigger[h]>.3f||(h==0&&motionOutput.bowDrawing)||bloodOutput.block[h];
-        }
-        const auto shape=shapeshiftGesture.Step(in);
-        if(shape.dropped) {
-            char line[160];std::snprintf(line,sizeof line,"Frame shapeshift: dropped at %s: %s",shape.stage,shape.dropped);Say(line);
-        }
-        if(shape.cast!=shapeshift::Form::None&&motionOn(shape.cast==shapeshift::Form::Werewolf?weaponskills::Werewolf:weaponskills::Werebear)) {
-            const int wanted=shape.cast==shapeshift::Form::Werewolf?weaponskills::Werewolf:weaponskills::Werebear;
-            int slot=-1;
-            for(int i=0;i<skills::Count;++i)if(quickSnapshot.skills[i].known&&quickSnapshot.skills[i].id==wanted){slot=i;break;}
-            char line[160];
-            if(slot<0)motionCast(wanted,{},true);   // on no button: the right trigger's record
-            else if(!quickSnapshot.skills[slot].available) {
-                std::snprintf(line,sizeof line,"Frame shapeshift: %s gesture, skill unavailable on slot %d",shape.cast==shapeshift::Form::Werewolf?"Werewolf":"Werebear",slot);Say(line);
-            }
-            // Alternate-bank slots need the modifier prepared first: hold like Smite.
-            else if(shapePulse.Start(slot,wanted,quickSnapshot.skills[slot].owner,motionInput.skillContext,motionInput.time,skills::Alternate(slot)?.180:.065)) {
-                shapeSlot=slot;shapeId=wanted;shapeOwner=quickSnapshot.skills[slot].owner;
-                MotionPulse(0,haptics::Category::Spell,.6f,60000000);MotionPulse(1,haptics::Category::Spell,.6f,60000000);
-                motionSlotCast(wanted,true);
-            }
-        }
-        if(shapeSlot>=0) {
-            const int pulse=shapePulse.Get(shapeSlot,shapeId,shapeOwner,motionInput.skillContext,motionInput.time);
-            if(pulse<0)shapeSlot=shapeId=shapeOwner=-1;
-            else if(motionOutput.skill<0&&quickFresh&&quickSnapshot.skills[pulse].available)motionOutput.skill=pulse;
-        }
-    }
-    // Paladin Blessed Hammer fist pump, under the motions' gate (both grips held, so the fist is
-    // closed): a fist punched up past the head casts one hammer through the slot Blessed Hammer is on,
-    // or with none the right trigger's record; mana, cast rate and the hammer stay native. Not held by
-    // the second's wait: one hammer a punch.
-    {
-        int slot=-1;
-        if(quickFresh)for(int i=0;i<skills::Count;++i)if(quickSnapshot.skills[i].known&&quickSnapshot.skills[i].id==weaponskills::BlessedHammer){slot=i;break;}
-        hammerpump::Input in;
-        in.time=interactionInput.time;in.session=interactionInput.session;in.epoch=interactionInput.epoch;
-        in.active=motionWatch&&motionOn(weaponskills::BlessedHammer);
-        in.head=interactionInput.head.p;in.headRotation=interactionInput.head.q;
-        for(int h=0;h<2;++h) {
-            in.hand[h]=interactionInput.hand[h].p;in.tracked[h]=interactionInput.tracked[h];in.grip[h]=motionInput.grip[h];
-            in.handVelocity[h]=interactionInput.handVelocity[h];in.velocityKnown[h]=interactionInput.velocityKnown[h];
-            in.busy[h]=interactionOutput.bottleHand==h||interactionOutput.owner[h]!=interaction::Owner::Combat||
-                handInput.trigger[h]>.3f||(h==0&&motionOutput.bowDrawing)||bloodOutput.block[h];
-        }
-        const auto pump=hammerGesture.Step(in);
-        if(pump.dropped) {
-            char line[192];std::snprintf(line,sizeof line,"Frame hammer: %s fist pump dropped: %s (rose %.0f cm)",pump.droppedHand?"left":"right",pump.dropped,pump.travel*100);Say(line);
-        }
-        if(pump.cast>=0&&slot<0)motionCast(weaponskills::BlessedHammer,{},false);
-        else if(pump.cast>=0) {
-            const char* hand=pump.cast?"left":"right";
-            char line[160];line[0]=0;
-            if(!quickSnapshot.skills[slot].available)std::snprintf(line,sizeof line,"Frame hammer: %s fist pump, skill unavailable on slot %d",hand,slot);
-            // Alternate-bank slots need the modifier prepared first: hold like Smite.
-            else if(hammerPulse.Start(slot,weaponskills::BlessedHammer,quickSnapshot.skills[slot].owner,motionInput.skillContext,motionInput.time,skills::Alternate(slot)?.180:.065)) {
-                hammerSlot=slot;hammerOwner=quickSnapshot.skills[slot].owner;
-                MotionPulse(pump.cast,haptics::Category::Spell,.5f,40000000);
-                ++hammerCasts;motionSlotCast(weaponskills::BlessedHammer,false);
-            }
-            else std::snprintf(line,sizeof line,"Frame hammer: %s fist pump dropped: the previous press is still held",hand);
-            if(line[0])Say(line);
-        }
-        if(hammerSlot>=0) {
-            const int pulse=hammerPulse.Get(hammerSlot,weaponskills::BlessedHammer,hammerOwner,motionInput.skillContext,motionInput.time);
-            if(pulse<0)hammerSlot=hammerOwner=-1;
-            else if(motionOutput.skill<0&&quickFresh&&quickSnapshot.skills[pulse].available)motionOutput.skill=pulse;
-        }
-    }
-    // Paladin Holy Shield, under the motions' gate: the sign of the cross (forehead, chest, one shoulder,
-    // the other) with either hand, trigger free, casts Holy Shield through the slot it is on, or with
-    // none the right trigger's record; mana, the buff and its glow stay native.
-    {
-        int slot=-1;
-        if(quickFresh)for(int i=0;i<skills::Count;++i)if(quickSnapshot.skills[i].known&&quickSnapshot.skills[i].id==weaponskills::HolyShield){slot=i;break;}
-        holycross::Input in;
-        in.time=interactionInput.time;in.session=interactionInput.session;in.epoch=interactionInput.epoch;
-        in.active=motionWatch&&!motionCooling&&motionOn(weaponskills::HolyShield);
-        in.head=interactionInput.head.p;in.headRotation=interactionInput.head.q;
-        for(int h=0;h<2;++h) {
-            in.hand[h]=interactionInput.hand[h].p;in.tracked[h]=interactionInput.tracked[h];
-            in.handVelocity[h]=interactionInput.handVelocity[h];in.velocityKnown[h]=interactionInput.velocityKnown[h];
-            in.busy[h]=interactionOutput.bottleHand==h||interactionOutput.owner[h]!=interaction::Owner::Combat||
-                handInput.trigger[h]>.3f||(h==0&&motionOutput.bowDrawing)||bloodOutput.block[h];
-        }
-        const auto sign=crossGesture.Step(in);
-        if(sign.dropped) {
-            char line[160];std::snprintf(line,sizeof line,"Frame holy shield: %s hand sign dropped after %d of 4 touches: %s",sign.droppedHand?"left":"right",sign.reached,sign.dropped);Say(line);
-        }
-        if(sign.cast>=0&&slot<0)motionCast(weaponskills::HolyShield,{},true);
-        else if(sign.cast>=0) {
-            const char* hand=sign.cast?"left":"right";
-            char line[160];line[0]=0;
-            if(!quickSnapshot.skills[slot].available)std::snprintf(line,sizeof line,"Frame holy shield: %s hand sign, skill unavailable on slot %d",hand,slot);
-            // Alternate-bank slots need the modifier prepared first: hold like Smite.
-            else if(crossPulse.Start(slot,weaponskills::HolyShield,quickSnapshot.skills[slot].owner,motionInput.skillContext,motionInput.time,skills::Alternate(slot)?.180:.065)) {
-                crossSlot=slot;crossOwner=quickSnapshot.skills[slot].owner;
-                MotionPulse(sign.cast,haptics::Category::Spell,.6f,60000000);
-                motionSlotCast(weaponskills::HolyShield,true);
-            }
-            else std::snprintf(line,sizeof line,"Frame holy shield: %s hand sign dropped: the previous press is still held",hand);
-            if(line[0])Say(line);
-        }
-        if(crossSlot>=0) {
-            const int pulse=crossPulse.Get(crossSlot,weaponskills::HolyShield,crossOwner,motionInput.skillContext,motionInput.time);
-            if(pulse<0)crossSlot=crossOwner=-1;
-            else if(motionOutput.skill<0&&quickFresh&&quickSnapshot.skills[pulse].available)motionOutput.skill=pulse;
-        }
-    }
     // Glyph casting (glyph_cast.h): while a hand's Draw glyph button is held its path is a stroke on
     // the upright plane facing the player; let go, it is recognised and the skill that hand has on that
     // shape (each hand its own set; a left shape with none, the right hand's: interaction::GlyphCasts) is
@@ -4488,33 +4361,42 @@ void Input() {
                 Say(drawn.c_str());
             }
         }
-        // The motions on spellmotion's engine (spell_motion.h): the Sorceress's, and the Amazon's,
-        // Necromancer's, Barbarian's and Assassin's (motions_<class>.h); every one of the class's whose card
-        // is on, under the motions' gate (above). The first to complete casts (motionCast) its card's skill,
-        // the strongest learned of a family (CastSkillOf: the golems, the shadows), in the class's order
-        // (OrderOf: Static Field before Nova). Then every watcher starts over a second later.
+        // The motions on spellmotion's engine (spell_motion.h): every class's (motions_<class>.h; the Paladin's
+        // and the Druid's since 2026-11-08), every one of the class's whose card is on, under the motions' gate
+        // (above). The first to complete casts (motionCast) its card's skill, the strongest learned of a family
+        // (CastSkillOf: the golems, the shadows), in the class's order (OrderOf: Static Field before Nova). Then
+        // every watcher starts over a second later, but after Blessed Hammer's pumps (spellmotion::Rapid: one
+        // hammer a punch, as fast as the cast rate, as its own engine was).
         {
             const auto order=spellmotion::OrderOf(motionClass);
             int skillOf[spellmotion::MotionCount+1];for(auto& k:skillOf)k=-1;
             {const auto page=spellmotion::PageOf(motionClass);
              for(int i=0;i<page.count;++i)if(const int id=page.skills[i],m=int(spellmotion::For(id));m>0&&motionOn(id))skillOf[m]=id;}
-            int done=-1;math::Vec doneAim{};float doneBehind[2]{};
+            int done=-1;math::Vec doneAim{};float doneBehind[2]{},doneFigures[2]{};
             bool doneLanding=false,teleportAiming=false;math::Vec donePoint{},teleportPoint{};
             spellmotion::Land doneLand=spellmotion::Land::None;spellmotion::Spot doneSpot{};
             float progress=0;   // the nearest any watched motion is to casting (Output::progress)
+            const float motionSpan=calibration::Stored(gestureSettings)?gestureSettings[settings::ArmSpan]:0;
             for(int i=0;i<order.count;++i) {
                 const auto motion=order.motions[i];
                 const int m=int(motion);
                 spellmotion::Input freeIn;
                 freeIn.time=now;freeIn.session=interactionInput.session;freeIn.epoch=interactionInput.epoch;
-                freeIn.free=true;freeIn.motion=motion;freeIn.active=motionGate&&!motionCooling&&skillOf[m]>=0;
+                freeIn.free=true;freeIn.motion=motion;
+                freeIn.active=(spellmotion::WatchesOpening(motion)?motionWatch:motionGate)&&(spellmotion::Rapid(motion)||!motionCooling)&&skillOf[m]>=0;
                 freeIn.head=interactionInput.head.p;freeIn.headRotation=interactionInput.head.q;
-                for(int h=0;h<2;++h){freeIn.hand[h]=interactionInput.hand[h].p;freeIn.tracked[h]=interactionInput.tracked[h];}
-                freeIn.bodyScale=motionBody;
+                for(int h=0;h<2;++h) {
+                    freeIn.hand[h]=interactionInput.hand[h].p;freeIn.tracked[h]=interactionInput.tracked[h];freeIn.grip[h]=motionInput.grip[h];
+                    freeIn.handVelocity[h]=interactionInput.handVelocity[h];freeIn.velocityKnown[h]=interactionInput.velocityKnown[h];
+                }
+                freeIn.bodyScale=motionBody;freeIn.armSpan=motionSpan;
                 const auto watched=spellFree[size_t(m-1)].Step(freeIn);
-                if(watched.cast&&done<0){done=m;doneAim=watched.aim;doneLanding=watched.landing;donePoint=watched.point;doneLand=watched.land;doneSpot=watched.spot;doneBehind[0]=watched.behind[0];doneBehind[1]=watched.behind[1];}
+                if(watched.cast&&done<0){done=m;doneAim=watched.aim;doneLanding=watched.landing;donePoint=watched.point;doneLand=watched.land;doneSpot=watched.spot;doneBehind[0]=watched.behind[0];doneBehind[1]=watched.behind[1];
+                    doneFigures[0]=watched.castFigures[0];doneFigures[1]=watched.castFigures[1];}
                 if(watched.aiming){teleportAiming=true;teleportPoint=watched.point;}
                 progress=std::max(progress,watched.progress);
+                // the Paladin's and the Druid's gestures given up partway: Frame hammer:, charge:, holy shield:, heavens:, shapeshift:
+                if(char line[200];spellmotion::DropLine(motion,watched,line,sizeof line))Say(line);
             }
             // Warmer/colder (a tester, 2026-11-05: "have the controllers do a simulation with continuous
             // vibration as you get closer to the 2nd part of the sequence ... SO people can feel the
@@ -4548,7 +4430,11 @@ void Input() {
             }
             else if(teleportShown){telegraph::Current().ClearSkill(telegraph::TeleportMark);teleportShown=false;}
             if(done>0) {
-                for(auto& e:spellFree)e.Reset();
+                const auto doneMotion=spellmotion::Motion(done);
+                const bool rapid=spellmotion::Rapid(doneMotion);
+                // Every other watcher starts over; the one that cast already has, keeping its own rest (Holy Shield's
+                // and the shapeshifts' 1.5 s, spellmotion::ClassRest). A Blessed Hammer pump leaves them be.
+                if(!rapid)for(size_t k=0;k<spellFree.size();++k)if(int(k)!=done-1)spellFree[k].Reset();
                 const int skill=spellmotion::CastSkillOf(skillOf[done],[&](int id){return interaction::GlyphSkill(quickSnapshot,id).known;});
                 const auto spot=spellmotion::PointSpot(donePoint,punchTuning);
                 if(doneLanding&&landKnown)doneAim={spot.right,0,-spot.ahead};
@@ -4558,7 +4444,14 @@ void Input() {
                 const bool summonKnown=!doneLanding&&(doneLand==spellmotion::Land::Spot?SpotCell(doneSpot,summonX,summonY):
                     doneLand==spellmotion::Land::Pointed&&PointedCell(summonX,summonY,pointed));
                 if(summonKnown)doneAim=doneLand==spellmotion::Land::Spot?math::Vec{doneSpot.right,0,-doneSpot.ahead}:pointed;
-                const bool cast=motionCast(skill,doneAim,true);
+                bool cast=false;
+                if(doneMotion==spellmotion::Motion::FistOfHeavens&&interaction::GlyphSkill(quickSnapshot,skill).available) {
+                    // Fist of the Heavens' call: the monster the arm points at first (vrcam answers HeavensRequest), then
+                    // the cast (below), at most HeavensWaitMs later. Every motion waits its second from now.
+                    spellFreeAt=motionNow;spellGripCast=true;heavensPending=true;heavensAskedAt=motionAt;
+                    heavensFrom=doneFigures[0];heavensAt=doneFigures[1];heavensRequest=heavensRequest+1?heavensRequest+1:1;
+                }
+                else cast=motionCast(skill,doneAim,!rapid);
                 if(cast&&(done==int(spellmotion::Motion::Leap)||done==int(spellmotion::Motion::LeapAttack))) {
                     // How deep the wind-up went, for the line between the two (barbarian::Tuning backBehind, deepBehind).
                     const auto& bt=spellmotion::barbarian::tuning;
@@ -4587,6 +4480,26 @@ void Input() {
                     }
                     else std::snprintf(line,sizeof line,"Frame spell motion: Teleport's landing unknown (no room floor yet) - along the punch");
                     Say(line);
+                }
+            }
+            // Fist of the Heavens' call, answered (vrcam handed the game the monster the arm points at, or none) or
+            // waited out: cast through its hand slot or the right trigger's record, the monster handed as for either.
+            // The log: the first casts, every 25th and any without an answer through a slot, every one by the record.
+            if(heavensPending&&(heavensAnswered==heavensRequest||motionAt-heavensAskedAt>HeavensWaitMs)) {
+                heavensPending=false;
+                const bool answered=heavensAnswered==heavensRequest;
+                heavensAnswered=heavensRequest;
+                if(quickFresh&&motionCast(weaponskills::FistOfHeavens,{},true)) {
+                    ++heavensCasts;
+                    const bool slot=glyphCast.Way()==glyphcast::How::Slot;
+                    if(!slot||heavensCasts<=10||heavensCasts%25==0||!answered) {
+                        char line[224];
+                        std::snprintf(line,sizeof line,"Frame heavens: call cast via %s at %s, from %.0f to %.0f deg (%u since launch)",
+                            slot?"its hand slot":"the right trigger's record",
+                            !answered?"the game's pick (no answer from the aim)":heavensMonster?"the monster the arm points at":"the game's pick (no monster where the arm points)",
+                            heavensFrom,heavensAt,heavensCasts);
+                        Say(line);
+                    }
                 }
             }
         }
@@ -4626,107 +4539,6 @@ void Input() {
             }
         }
         glyphTrailShown=trail&&glyphImageReady&&glyphPaintKey&&glyphShownStroke==glyphStrokeId;
-    }
-    // Paladin Fist of the Heavens, under the motions' gate: the weapon arm straight, raised ~45 degrees,
-    // brought down to stop level with the shoulder (the fist closed, trigger free). The monster the arm
-    // points at is handed to the game (vrcam answers HeavensRequest), else the game picks; then the
-    // slot is pressed, or with none the right trigger's record. Mana, cast rate and the bolt stay native.
-    {
-        constexpr int weaponHand=0;
-        int slot=-1;
-        if(quickFresh)for(int i=0;i<skills::Count;++i)if(quickSnapshot.skills[i].known&&quickSnapshot.skills[i].id==weaponskills::FistOfHeavens){slot=i;break;}
-        heavensfist::Input in;
-        in.time=interactionInput.time;in.session=interactionInput.session;in.epoch=interactionInput.epoch;
-        in.active=motionWatch&&!motionCooling&&motionOn(weaponskills::FistOfHeavens);
-        heavensArmed=motionOn(weaponskills::FistOfHeavens)&&motionGestures;
-        in.head=interactionInput.head.p;in.headRotation=interactionInput.head.q;
-        in.hand=interactionInput.hand[weaponHand].p;in.tracked=interactionInput.tracked[weaponHand];in.grip=motionInput.grip[weaponHand];
-        in.handVelocity=interactionInput.handVelocity[weaponHand];in.velocityKnown=interactionInput.velocityKnown[weaponHand];
-        in.armSpan=calibration::Stored(gestureSettings)?gestureSettings[settings::ArmSpan]:0;
-        in.busy=interactionOutput.bottleHand==weaponHand||interactionOutput.owner[weaponHand]!=interaction::Owner::Combat||
-            handInput.trigger[weaponHand]>.3f||motionOutput.bowDrawing||bloodOutput.block[weaponHand];
-        const auto call=heavensGesture.Step(in);
-        if(call.dropped) {
-            char line[192];std::snprintf(line,sizeof line,"Frame heavens: call dropped: %s (from %.0f to %.0f deg)",call.dropped,call.from,call.at);Say(line);
-        }
-        if(call.cast) {
-            if(slot>=0&&!quickSnapshot.skills[slot].available){char line[128];std::snprintf(line,sizeof line,"Frame heavens: call, skill unavailable on slot %d",slot);Say(line);}
-            else {spellFreeAt=motionNow;spellGripCast=true;heavensPending=true;heavensPendingSlot=slot;heavensAskedAt=motionAt;heavensFrom=call.from;heavensAt=call.at;heavensRequest=heavensRequest+1?heavensRequest+1:1;}
-        }
-        if(heavensPending&&(heavensAnswered==heavensRequest||motionAt-heavensAskedAt>HeavensWaitMs)) {
-            const int at=heavensPendingSlot;heavensPendingSlot=-1;heavensPending=false;
-            const bool answered=heavensAnswered==heavensRequest;
-            char line[192];line[0]=0;
-            if(at<0) {   // on no button: the right trigger's record, the monster handed as for the slot
-                if(quickFresh&&motionCast(weaponskills::FistOfHeavens,{},true)) {
-                    ++heavensCasts;
-                    std::snprintf(line,sizeof line,"Frame heavens: call cast via the right trigger's record at %s, from %.0f to %.0f deg (%u since launch)",
-                        !answered?"the game's pick (no answer from the aim)":heavensMonster?"the monster the arm points at":"the game's pick (no monster where the arm points)",
-                        heavensFrom,heavensAt,heavensCasts);
-                }
-            }
-            else if(at<skills::Count&&quickFresh&&quickSnapshot.skills[at].id==weaponskills::FistOfHeavens&&
-               heavensPulse.Start(at,weaponskills::FistOfHeavens,quickSnapshot.skills[at].owner,motionInput.skillContext,motionInput.time,skills::Alternate(at)?.180:.065)) {
-                heavensSlot=at;heavensOwner=quickSnapshot.skills[at].owner;
-                MotionPulse(weaponHand,haptics::Category::Spell,.6f,60000000);
-                motionSlotCast(weaponskills::FistOfHeavens,true);
-                ++heavensCasts;
-                if(heavensCasts<=10||heavensCasts%25==0||!answered)
-                    std::snprintf(line,sizeof line,"Frame heavens: call cast via slot %d at %s, from %.0f to %.0f deg (%u since launch)",at,
-                        !answered?"the game's pick (no answer from the aim)":heavensMonster?"the monster the arm points at":"the game's pick (no monster where the arm points)",
-                        heavensFrom,heavensAt,heavensCasts);
-                else line[0]=0;
-            }
-            else std::snprintf(line,sizeof line,"Frame heavens: call dropped: the previous press is still held");
-            if(line[0])Say(line);
-            heavensAnswered=heavensRequest;
-        }
-        if(heavensSlot>=0) {
-            const int pulse=heavensPulse.Get(heavensSlot,weaponskills::FistOfHeavens,heavensOwner,motionInput.skillContext,motionInput.time);
-            if(pulse<0)heavensSlot=heavensOwner=-1;
-            else if(motionOutput.skill<0&&quickFresh&&quickSnapshot.skills[pulse].available)motionOutput.skill=pulse;
-        }
-    }
-    // Paladin Charge punch, under the motions' gate: a weapon-hand fist drawn in and punched straight
-    // out, arm extended, casts Charge through the slot it is on, or with none the right trigger's record
-    // (the right hand's cast for the aim); the aim rules hand it the monster that hand points at, and
-    // the rush, mana and hit stay native. The weapon hand is the right (0) until left-handed play exists.
-    {
-        constexpr int weaponHand=0;
-        int slot=-1;
-        if(quickFresh)for(int i=0;i<skills::Count;++i)if(quickSnapshot.skills[i].known&&quickSnapshot.skills[i].id==weaponskills::Charge){slot=i;break;}
-        chargepunch::Input in;
-        in.time=interactionInput.time;in.session=interactionInput.session;in.epoch=interactionInput.epoch;
-        in.active=motionWatch&&!motionCooling&&motionOn(weaponskills::Charge);
-        in.head=interactionInput.head.p;in.headRotation=interactionInput.head.q;
-        in.hand=interactionInput.hand[weaponHand].p;in.tracked=interactionInput.tracked[weaponHand];in.grip=motionInput.grip[weaponHand];
-        in.handVelocity=interactionInput.handVelocity[weaponHand];in.velocityKnown=interactionInput.velocityKnown[weaponHand];
-        in.armSpan=calibration::Stored(gestureSettings)?gestureSettings[settings::ArmSpan]:0;
-        in.busy=interactionOutput.bottleHand==weaponHand||interactionOutput.owner[weaponHand]!=interaction::Owner::Combat||
-            handInput.trigger[weaponHand]>.3f||motionOutput.bowDrawing||bloodOutput.block[weaponHand];
-        const auto punch=chargeGesture.Step(in);
-        if(punch.dropped) {
-            char line[192];std::snprintf(line,sizeof line,"Frame charge: punch dropped: %s (moved %.0f cm, out to %.0f cm, extended at %.0f cm)",
-                punch.dropped,punch.travel*100,punch.reach*100,chargeGesture.tuning.Extended(in.armSpan)*100);Say(line);
-        }
-        if(punch.cast&&slot<0)motionCast(weaponskills::Charge,{},true);
-        else if(punch.cast) {
-            char line[160];line[0]=0;
-            if(!quickSnapshot.skills[slot].available)std::snprintf(line,sizeof line,"Frame charge: punch, skill unavailable on slot %d",slot);
-            // Alternate-bank slots need the modifier prepared first: hold like Smite.
-            else if(chargePulse.Start(slot,weaponskills::Charge,quickSnapshot.skills[slot].owner,motionInput.skillContext,motionInput.time,skills::Alternate(slot)?.180:.065)) {
-                chargeSlot=slot;chargeOwner=quickSnapshot.skills[slot].owner;
-                MotionPulse(weaponHand,haptics::Category::Spell,.6f,50000000);
-                ++chargeCasts;motionSlotCast(weaponskills::Charge,true);
-            }
-            else std::snprintf(line,sizeof line,"Frame charge: punch dropped: the previous press is still held");
-            if(line[0])Say(line);
-        }
-        if(chargeSlot>=0) {
-            const int pulse=chargePulse.Get(chargeSlot,weaponskills::Charge,chargeOwner,motionInput.skillContext,motionInput.time);
-            if(pulse<0)chargeSlot=chargeOwner=-1;
-            else if(motionOutput.skill<0&&quickFresh&&quickSnapshot.skills[pulse].available)motionOutput.skill=pulse;
-        }
     }
     // No physical melee contacts while a Charge is in flight (Cal's
     // 2026-10-27 test: the punch that cast Charge landed a basic attack on a
@@ -4872,7 +4684,7 @@ void Input() {
         elementalInput.activation[h]=handOutput.activation[h];
     }
     elementalScene=elementalState.Step(elementalInput,interactionInput.snapshot);
-    // A torch club's flame (VR Settings > World > Torch flame); its light is
+    // A torch club's flame (VR Settings > Graphics > Environment > Torch flame); its light is
     // vrcam's and stays either way.
     const bool torchFlame=hudSettings.values[settings::TorchFlame]>.5f;
     for(int h=0;h<2&&torchFlame;++h) {
@@ -4982,6 +4794,7 @@ void Input() {
         sample.minWeaponSpeed=gestureSettings[settings::MeleeHitSpeed];
         sample.minThrustSpeed=gestureSettings[settings::MeleeThrustSpeed];
         sample.minShieldBashSpeed=gestureSettings[settings::ShieldBashSpeed];
+        sample.reach=gestureSettings[settings::MeleeReach]*.01f;   // VR Settings > Gameplay > Combat > Melee reach, cm
         const auto weapons=gamestate::MeleeEquipment();
         // A shapeshift form strikes with both claws; its weapon is a stat without a visual.
         const bool claws=InShapeForm();
@@ -5088,13 +4901,67 @@ void Input() {
             reportAt=GetTickCount64()+5000;
         }
     }
+    // Walk direction (walk_direction.h; VR Settings > Controls > Hands, beside Dominant hand): the left stick walks where you look,
+    // or turned here by the left controller's heading against the head's, where it points.
+    int16_t walkLx=controls.lx,walkLy=controls.ly;
+    {
+        const int mode=vrsettings::Read().values[settings::WalkDirection]>.5f?walkdir::Controller:walkdir::Look;
+        if(mode!=walkDirectionSaid){walkDirectionSaid=mode;Say(mode==walkdir::Controller?"Frame walk direction: the left stick walks where the left controller points":"Frame walk direction: the left stick walks where you look");}
+        const bool pointing=leftPointing.Update(handAim[1].q,handAimTracked[1]);
+        if(mode==walkdir::Controller&&pointing&&motionHeadTracked&&(controls.lx||controls.ly)) {
+            float x=controls.lx/32767.f,y=controls.ly/32767.f;
+            walkdir::ToView(x,y,leftPointing.heading,math::Heading(Q(head.orientation)));
+            walkLx=int16_t(std::clamp(x,-1.f,1.f)*32767);walkLy=int16_t(std::clamp(y,-1.f,1.f)*32767);
+        }
+    }
+    {   // Room follows you (room_steps.h): toward the player's real step while the left stick is idle.
+        const auto config=vrsettings::Read().values;
+        roomsteps::Input in;in.time=Milliseconds()/1000.0;
+        in.on=config[settings::RoomSteps]>.5f&&config[settings::Seated]<.5f&&motionControls.load()&&gameplayChain;
+        in.tracked=valid&&motionHeadTracked;in.eye=V(head.position);in.head=Q(head.orientation);in.origin=origin;
+        for(int h=0;h<2;++h){in.hand[h]=motionInput.hand[h].p;in.handTracked[h]=motionInput.tracked[h];}
+        in.menu=panelMode||spatialMode||settingsOwned||settingsChord||bodyCalibration.Active()||interactionOutput.wheel||
+                interactionOutput.settings||(leatherMode&&leatherShown.load());
+        in.stick=float(controls.lx)*controls.lx+float(controls.ly)*controls.ly>(.2f*32767)*(.2f*32767);
+        in.grip=motionInput.grip[0]>.6f||motionInput.grip[1]>.6f;
+        in.trigger=motionInput.trigger>.3f||motionInput.leftTrigger>.3f;
+        in.bow=motionOutput.bowDrawing;
+        in.cast=NativeSkillCasting();
+        roomOut=roomChase.Step(in);
+        auto& st=roomStats;
+        if(in.on!=st.on){st.on=in.on;Say(in.on?"Frame room steps: on - the hero's spot follows you in your room":"Frame room steps: off");}
+        if(roomOut.push!=st.walking) {
+            st.walking=roomOut.push;char line[200];
+            if(roomOut.push)std::snprintf(line,sizeof line,"Frame room steps: walking after your step, %.2f m from the hero (stick %.2f, %.2f)",roomOut.offset,roomOut.x,roomOut.y);
+            else std::snprintf(line,sizeof line,"Frame room steps: stopped %.2f m from the hero (%s)",roomOut.offset,roomOut.blocked?"blocked: the hero cannot come closer":roomOut.pause==roomsteps::Pause::None?"caught up":roomsteps::PauseName(roomOut.pause));
+            Say(line);
+        }
+        // Why a step owed is not walked, at most every 2 s.
+        if(in.on&&roomOut.pause!=st.pause&&roomOut.pause!=roomsteps::Pause::None&&roomOut.offset>=roomsteps::StartMetres&&in.time-st.pauseSaid>=2) {
+            char line[160];std::snprintf(line,sizeof line,"Frame room steps: paused (%s), %.2f m from the hero",roomsteps::PauseName(roomOut.pause),roomOut.offset);
+            Say(line);st.pauseSaid=in.time;
+        }
+        st.pause=roomOut.pause;
+        if(roomOut.push)++st.pushed;
+        if(st.from<=0)st.from=in.time;
+        if(in.time-st.from>=1) {
+            if(st.pushed||st.followed>0||st.jumps) {
+                char line[240];std::snprintf(line,sizeof line,"Frame room steps: last %.1f s: pushed %u frames, the hero walked %.2f m, the origin followed %.2f m, jumps %u; now %.2f m from the hero, pause %s",
+                    in.time-st.from,st.pushed,st.walked,st.followed,st.jumps,roomOut.offset,roomsteps::PauseName(roomOut.pause));
+                Say(line);
+            }
+            st.from=in.time;st.pushed=st.jumps=0;st.walked=st.followed=0;
+        }
+    }
     ++s.counter;
     auto& p=*pad.data;p.writer_pid=GetCurrentProcessId();p.buttons=0;
     // Right A goes only through semantic interact; a raw A bypasses its
     // no-target guard and accidentally attacks when pointing at empty space.
     p.buttons=menus::WorldButtons(controls);
     if(!dualBindings&&leftMenuButton.PlainPressed())p.buttons|=XINPUT_GAMEPAD_LEFT_THUMB;
-    p.thumb_lx=controls.lx;p.thumb_ly=controls.ly;p.thumb_rx=controls.rx;p.thumb_ry=controls.ry;
+    p.thumb_lx=walkLx;p.thumb_ly=walkLy;p.thumb_rx=controls.rx;p.thumb_ry=controls.ry;
+    // Room follows you: a partly pushed stick toward you (only ever with the real stick idle: Pause::Stick).
+    if(roomOut.push){p.thumb_lx=int16_t(std::clamp(roomOut.x,-1.f,1.f)*32767);p.thumb_ly=int16_t(std::clamp(roomOut.y,-1.f,1.f)*32767);}
     p.left_trigger=controls.lt;
     const float rightTrigger=controls.rt/255.f;
     const bool attackAllowed=menuTriggerGate.Update(rightTrigger>.1f,panelMode||spatialMode||settingsOwned||settingsChord||inventoryPressed||menuPressed);
@@ -5133,7 +5000,7 @@ void Input() {
         // thumbstick to act as the menu cursor"): it goes to BodyWalk's walk, which vrcam
         // feeds into the game's walk (DirectWalkNow), and never to the menu's cursor.
         // The right stick's left / right turns there too: vrcam takes it for the turn, as in play.
-        if(leatherMode&&leatherShown.load()&&!settingsOwned&&!settingsChord){p.thumb_lx=controls.lx;p.thumb_ly=controls.ly;p.thumb_rx=controls.rx;p.thumb_ry=0;}
+        if(leatherMode&&leatherShown.load()&&!settingsOwned&&!settingsChord){p.thumb_lx=walkLx;p.thumb_ly=walkLy;p.thumb_rx=controls.rx;p.thumb_ry=0;}
     }
     p.reserved[0]=uint32_t(settingsOwned||settingsChord?menus::Mode::Blocked:nativeUi?menus::Mode::Native:menus::Mode::World);
     p.reserved[1]=inputEpoch;
@@ -6637,8 +6504,49 @@ void EndPair() {
         static bool reported=false;
         if(!reported){Say("Frame OpenXR: transparent quad prefix prevents Wine mixed-layer allocation overlap");reported=true;}
     }
+    // Each layer at a place whose SteamVR copy has its size, stand-ins between.
+    std::array<XrCompositionLayerQuad,composition::MaxPlaces> standIns{};uint32_t standInCount=0;
+    if(!padQuads&&headSpace&&pointerChain&&count) {
+        std::array<composition::Place,composition::MaxPlaces> want{};
+        for(uint32_t i=0;i<count;++i)want[i]=composition::PlaceOf(layers[i]);
+        std::array<uint8_t,composition::MaxPlaces> place{};
+        if(const uint32_t total=composition::StablePlaces(want.data(),count,placesKept.data(),placesKeptCount,capacity,place.data())) {
+            std::array<const XrCompositionLayerBaseHeader*,32> placed{};
+            for(uint32_t i=0;i<count;++i)placed[place[i]]=layers[i];
+            for(uint32_t j=0;j<total;++j)if(!placed[j]) {
+                const bool same=j<placesKeptCount&&placesKept[j].standIn;
+                auto& q=standIns[j];q={XR_TYPE_COMPOSITION_LAYER_QUAD};
+                q.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+                q.space=headSpace;q.eyeVisibility=XR_EYE_VISIBILITY_BOTH;
+                q.pose.orientation.w=1;q.pose.position.z=1;q.size={.001f,.001f};   // a millimetre, behind the head
+                q.subImage.swapchain=same?placesKept[j].chain:pointerChain;
+                q.subImage.imageRect=same?placesKept[j].rect:XrRect2Di{{panelatlas::Pointer.x,panelatlas::Pointer.y+32},{1,1}};
+                placed[j]=reinterpret_cast<const XrCompositionLayerBaseHeader*>(&q);++standInCount;
+            }
+            layers=placed;count=total;
+        }
+    }
     ei.layerCount=count;ei.layers=count?layers.data():nullptr;
     const double start=Milliseconds();const auto submitted=pEndFrame(session,&ei);Check(submitted,"end frame");
+    if(XR_SUCCEEDED(submitted)) {
+        static uint32_t remade=0,most=0,standInsMost=0;static ULONGLONG reportAt=0;
+        for(uint32_t j=0;j<count;++j) {
+            auto p=composition::PlaceOf(layers[j]);
+            p.standIn=p.type==XR_TYPE_COMPOSITION_LAYER_QUAD&&p.chain&&
+                (p.chain==interactionChain||p.chain==companionChain||p.chain==staticChain||p.chain==sharedChain);
+            if(j>=placesKeptCount||!composition::SameSize(placesKept[j],p))++remade;
+            placesKept[j]=p;
+        }
+        placesKeptCount=std::max(placesKeptCount,count);most=std::max(most,count);standInsMost=std::max(standInsMost,standInCount);
+        if(const auto now=GetTickCount64();now>=reportAt) {
+            if(reportAt) {
+                char line[200];std::snprintf(line,sizeof line,"Frame layers: ten seconds: %u copies made or remade by SteamVR (a place shown at a new size), most layers %u, most stand-ins %u",
+                    remade,most,standInsMost);
+                Say(line);
+            }
+            remade=most=standInsMost=0;reportAt=now+10000;
+        }
+    }
     if(interactionInput.active) {
         static ULONGLONG reportAt=0;const auto now=GetTickCount64();
         if(now>=reportAt) {
@@ -7151,11 +7059,44 @@ bool BowPreviewPose(bowflight::Shot& pose,bool& visible) {
 }
 bool View(float out[16],const float hero[3],float eyeHeight,float userEyeHeight,float bodyHeading,float recenterYaw,int eye,float mapNorth,float scaleHeight) {
     std::lock_guard lock(mutex);if(!Active())return false;
-    if(std::fabs(recenterYaw-lastRecenter)>.001f){origin=V(head.position);lastRecenter=recenterYaw;}
+    bool recentered=false;   // F11's yaw: the origin is put back under the head (the room follow re-anchors), not turned
+    if(std::fabs(recenterYaw-lastRecenter)>.001f){origin=V(head.position);lastRecenter=recenterYaw;recentered=true;}
     const float upm=(scaleHeight>0?scaleHeight:eyeHeight)/std::max(userEyeHeight,.5f);
     const auto base=math::Yaw(bodyHeading-recenterYaw);
     if(eye<0)compassFrame=wristHeading.Update(gamestate::LocalPlayer(),motionHeadTracked,
         Q(head.orientation),bodyHeading-recenterYaw,mapNorth);
+    if(eye<0) {   // Room-scale: a snap or smooth turn turns the room about your head (it swung you round the hero's spot)
+        if(turnBaseKnown&&haveOrigin&&!recentered) {   // and the room's follow anchor turns with the room (a turn is no step)
+            const auto turned=roomscale::TurnAboutHead(origin,V(head.position),turnBase,base);
+            roomChase.Turned(turned,math::Multiply(math::Conjugate(base),turnBase));origin=turned;
+        }
+        turnBase=base;turnBaseKnown=true;
+        const float apart=roomscale::Apart(V(head.position),origin);
+        const double now=Milliseconds()/1000.0;
+        if(apart>.25f&&now-roomSaidAt>=5) {
+            roomSaidAt=now;char line[200];
+            std::snprintf(line,sizeof line,"Frame room: you stand %.2f m from the hero's spot (the room's centre); turns pivot at your head",apart);
+            Say(line);
+        }
+    }
+    if(eye<0) {   // Room follows you (room_steps.h): while the hero walks after your step, the origin follows him,
+                  // so the camera stays at the real head. A jump (teleport, waypoint, Leap) is not followed.
+        const math::Vec now{hero[0],hero[1],hero[2]};const double at=Milliseconds()/1000.0;
+        if(roomHeroKnown&&roomOut.follow&&at>roomHeroAt&&at-roomHeroAt<.25) {
+            const math::Vec moved{now.x-roomHero.x,0,now.z-roomHero.z};
+            const float metres=std::sqrt(moved.x*moved.x+moved.z*moved.z)/upm;
+            if(metres>roomsteps::MaxHeroStep) {
+                ++roomStats.jumps;
+                char line[200];std::snprintf(line,sizeof line,"Frame room steps: the hero moved %.2f m in %.0f ms (a teleport, waypoint or leap): the origin stays",metres,(at-roomHeroAt)*1000);
+                Say(line);
+            } else if(metres>0) {
+                const auto shift=roomsteps::Shift(moved,base,upm);
+                origin=origin+shift;roomChase.Shifted(shift);
+                roomStats.walked+=metres;roomStats.followed+=std::sqrt(shift.x*shift.x+shift.z*shift.z);
+            }
+        }
+        roomHero=now;roomHeroKnown=true;roomHeroAt=at;
+    }
     if(eye<0)stageWorld={true,origin,{hero[0],hero[1],hero[2]},base,upm,eyeHeight,GetTickCount64()};
     const auto resolveBow=[&](bowflight::Shot shot) {
         const auto offset=math::Rotate(base,shot.origin-origin);
@@ -7273,7 +7214,7 @@ void Shutdown(bool preserveResolution) {
     for(auto& e:eyes){if(e.chain&&pDestroySwapchain)pDestroySwapchain(e.chain);e={};}
     mirrorSupported=mirrorMono=false;
     turnFrame=keepTurns=keepDepth=false;lastEyes={};viewBase={{{0,0,0,1},{0,0,0,1}}};viewWorld={};turnDepths={};turnCounts={};turnImages={};turnKept={};turnImagesFailed=turnWarpTried=false;turnWarp={};
-    turnLayers={};layerKept={};turnTarget.Reset();layersFailed=false;
+    turnLayers={};layerKept={};turnTarget.Reset();layersFailed=false;placesKept={};placesKeptCount=0;
     turnCapture.left=0;turnCapture.buffer.Reset();turnCapture.size=0;turnCapture.list.Reset();turnCapture.allocator.Reset();
     for(auto& s:handSpaces){if(s&&pDestroySpace)pDestroySpace(s);s=XR_NULL_HANDLE;}
     if(headSpace&&pDestroySpace)pDestroySpace(headSpace);if(space&&pDestroySpace)pDestroySpace(space);

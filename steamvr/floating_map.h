@@ -12,7 +12,7 @@
 // wrist, the floating map goes away"; 2026-11-03: "it should grab just from pointing at the direction".
 //  - Right Grip with the right controller pointing at the raised wrist map (or roughly at it, within PointDeg past
 //    its edge; or the right hand on it) pulls out a copy there and holds it. The wrist keeps its own map: both quads
-//    draw the one map picture (transport's mapEye), so the copy is always what VR Settings > Wrist > Map view shows.
+//    draw the one map picture (transport's mapEye), so the copy is always what VR Settings > Interface > Wrist > Map view shows.
 //  - Held, the copy follows the controller 1:1 in position, yaw, pitch and roll (its pose is kept in the controller's
 //    frame); the right stick forward / back pushes it along the laser or pulls it in (0.25 to 3 m). Let go: it stays
 //    there in the room, turned to face you (FaceMe). Point at it again to grab it: anywhere on it, or within PointMargin

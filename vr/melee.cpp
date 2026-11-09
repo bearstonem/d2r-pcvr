@@ -961,7 +961,9 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                             continue;
                         }
                         if(!BodyFor(unit,header[1],r.sample.unitsPerMetre,r.sample.player.y,body)){++bodyMissing;continue;}
-                        if(!Touches(r.sweep.before,r.sweep.after,body))continue;
+                        // Melee reach pads the body for weapons and fists (not the shield); native
+                        // line collision below still refuses a hit through a wall.
+                        if(!Touches(r.sweep.before,r.sweep.after,framevr::melee::Reach(body,r.sample.reach,r.sample.shield)))continue;
                         ++intersections;
                         if(!reinterpret_cast<int(*)(uintptr_t,uintptr_t,uintptr_t)>(d2rsig::Addr(RelationRva))(local.game,player,unit))continue;
                         if(reinterpret_cast<int(*)(uintptr_t,uintptr_t,int)>(d2rsig::Addr(LineRva))(player,unit,0x804)!=0){++walls;continue;}

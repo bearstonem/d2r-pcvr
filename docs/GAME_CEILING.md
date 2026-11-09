@@ -40,6 +40,14 @@ and instance placer, then lays it each frame with its top over the area's floor
 and its middle on the whole tile nearest the hero. Height: `height_<biome>`, else
 the measured walls' top (`height_from_walls`), else `height`.
 
+The height is measured from the highest floor of the hero's level, not the
+floor he stands on (`steamvr/ceiling_top.h`). Every room the game builds there
+reports its border floors through the room-height hook (`steamvr/room_stitch.h`).
+The top is taken whole for 2 s after entering a level, eased up if a higher
+room is built later, and never lowered, so climbing stairs leaves the ceiling
+where it is. The shader's vault takes the same top. Its lights, the stone under
+the floor and the rim's bottom still measure from the lowest floor he has stood on.
+
 It needs two hooks: the registry's set-mutable (`0x912C90`) and the world's
 teardown (`0xD72610`), which lets our units go when a game is left. Nothing is
 placed until the teardown hook is in. Each of the five new functions is checked
@@ -59,7 +67,7 @@ unit without exactly one root leaves that kind to the shader, and the log says w
 
 ## Known gaps
 
-- Pits and two-level caves: one slab at one height.
+- Pits and two-level caves: one slab at one height, over the level's highest floor.
 - The barracks' beams and the domed vaults are not ported.
 - The Battle.net (CascLib) read path is untested.
 - The five new functions are found by address and prologue only, with no
