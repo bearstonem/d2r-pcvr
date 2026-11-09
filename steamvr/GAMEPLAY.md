@@ -444,9 +444,12 @@ above the menu (unless its VR Settings location is Off); the minimap does not (t
 is never kept open under a menu). Nothing else is drawn over it: quest and level-up cards wait until it
 closes, and the wrist and palm displays themselves are hidden while a menu is open, as before.
 
-Only the menu's 16:9 band is on the hide, on the middle of its body, and the
+The menu's 16:9 band is on the hide, on the middle of its body, and the
 game's translucent dim under the menu is taken out of it, so the hide shows
-round the menu's own art, as is the panel's faint black drop shadow. The hide
+round the menu's own art, as is the panel's faint black drop shadow. Below
+the band the rest of the game's canvas is shown too, clear but for what runs
+past the menu's foot: the tooltip of a skill or item low on the menu (with a
+skill's synergies) carries on over the hide instead of being cut off at the band. The hide
 itself goes to the headset premultiplied: nothing of its rectangle shows round
 it. The game also leaves the world unpainted behind its opaque menu panel (one
 draw stamps the panel's rectangle into the scene's stencil); while the leather
