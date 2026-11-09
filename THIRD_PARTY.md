@@ -4,7 +4,7 @@ D2R PCVR is an independently developed mod that adds VR support and motion
 interactions on top of the original Diablo II: Resurrected. It is not a
 standalone game. You must purchase and install your own legitimate copy of
 the game; this Windows preview supports the Steam edition and experimental
-Battle.net installations on the documented game builds.
+Battle.net installations.
 
 No Blizzard game executables, models, textures, audio or other game assets
 are distributed in this repository, graphical installer or release ZIP. Required native artwork

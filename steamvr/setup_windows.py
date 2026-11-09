@@ -13,7 +13,7 @@ import sys
 import install
 import mod_identity
 import steam_config
-from game_install import validate_game, battlenet_location, STEAM_VERSION, BATTLENET_VERSION
+from game_install import validate_game, battlenet_location
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -282,11 +282,11 @@ def main():
     print('Keep this extracted mod folder in a permanent location; Steam will use it to launch.')
     store = 'steam'
     if battlenet_available:
-        store = ['steam', 'battlenet'][choose('Which game installation?', [f'Steam ({STEAM_VERSION})', f'Battle.net ({BATTLENET_VERSION}, experimental)'])]
+        store = ['steam', 'battlenet'][choose('Which game installation?', ['Steam', 'Battle.net (experimental)'])]
         if store == 'battlenet':
             print('Battle.net compatibility is under validation. Use a local OFFLINE character.')
     else:
-        print(f'This package supports the Steam edition ({STEAM_VERSION}) only.')
+        print('This package supports the Steam edition only.')
     headset = ['Steam Frame', 'Quest 3', 'Quest 2', 'Other SteamVR headset'][choose('Which headset will you use?', ['Steam Frame', 'Quest 3', 'Quest 2', 'Other SteamVR headset'])]
     connections = ['steamvr']
     if headset in ('Quest 2', 'Quest 3'):

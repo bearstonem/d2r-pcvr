@@ -8,7 +8,6 @@ from pathlib import Path
 import subprocess
 import zipfile
 from release_notes import read_notes, validate_package
-from game_install import STEAM_VERSION, STEAM_VERSIONS, BATTLENET_VERSION
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -75,13 +74,13 @@ def main():
         except ValueError as error:
             raise SystemExit(str(error))
     hashes = {name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in files.items()}
-    manifest = {'source_commit': commit, 'game_version': STEAM_VERSION,
+    manifest = {'source_commit': commit,
                 'created_utc': datetime.now(timezone.utc).isoformat(),
                 'release_tag': args.release_tag,
                 'release_notes': release_summary,
                 'platform': args.platform,
-                'storefronts': {'steam': {'version': STEAM_VERSION, 'versions': list(STEAM_VERSIONS), 'status': 'verified'},
-                               **({'battlenet': {'version': BATTLENET_VERSION, 'status': 'experimental'}} if args.casclib else {})},
+                'storefronts': {'steam': {'status': 'verified'},
+                               **({'battlenet': {'status': 'experimental'}} if args.casclib else {})},
                 'installation_guide': 'INSTALL-WINDOWS.md' if args.platform == 'native-windows' else 'INSTALL-LINUX.md',
                 'variant': args.variant,
                 'plugin_source_commit': plugin_commit,

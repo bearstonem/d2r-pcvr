@@ -17,11 +17,16 @@ import setup_windows as setup
 import steam_config as steam
 
 
+def exe(version):
+    """A D2R.exe fixture whose version resource names `version`."""
+    return b'MZ' + b'\0\0'.join(['FileVersion'.encode('utf-16-le'), version.encode('utf-16-le'), b''])
+
+
 class BattleNetTests(unittest.TestCase):
     def game(self, root, store='battlenet', version='3.3.93847'):
         path = root / store
         path.mkdir()
-        (path / 'D2R.exe').write_bytes(version.encode('utf-16-le'))
+        (path / 'D2R.exe').write_bytes(exe(version))
         (path / 'D2RLoader.exe').write_bytes(b'fixture loader')
         if store == 'steam':
             (path / 'Data').mkdir()
@@ -30,7 +35,7 @@ class BattleNetTests(unittest.TestCase):
             (path / '.build.info').write_text('fixture local build config')
         return path
 
-    def test_store_version_and_experimental_gates(self):
+    def test_store_and_experimental_gates(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             bnet = self.game(root)
@@ -41,23 +46,21 @@ class BattleNetTests(unittest.TestCase):
             self.assertEqual(game_install.validate_game(bnet, experimental_battlenet=True), ('battlenet', '3.3.93847'))
             with self.assertRaisesRegex(ValueError, 'selected'):
                 game_install.validate_game(bnet, 'steam', True)
-            (bnet / 'D2R.exe').write_bytes('3.3.99999'.encode('utf-16-le'))
-            with self.assertRaisesRegex(ValueError, 'does not match'):
+            (bnet / 'D2R.exe').unlink()
+            with self.assertRaisesRegex(ValueError, 'D2R.exe was not found'):
                 game_install.validate_game(bnet, experimental_battlenet=True)
 
-    def test_steam_accepts_the_new_build_and_the_previous_one(self):
+    def test_no_game_build_is_refused(self):
+        # A game update does not by itself break the mod; the plugin checks the
+        # code it hooks by its bytes. Setup records the version for bug reports.
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            stock = self.game(root, 'steam', '3.3.94995')
-            self.assertEqual(game_install.STEAM_VERSION, '3.3.94995')
-            self.assertEqual(game_install.validate_game(stock), ('steam', '3.3.94995'))
-            (stock / 'D2R.exe').write_bytes('3.3.93787'.encode('utf-16-le'))
-            self.assertEqual(game_install.validate_game(stock), ('steam', '3.3.93787'))
-            # Another build is refused, naming the one found in the version resource.
-            resource = b'\0\0'.join(['FileVersion'.encode('utf-16-le'), '3.3.99999'.encode('utf-16-le'), b''])
-            (stock / 'D2R.exe').write_bytes(b'MZ' + resource)
-            with self.assertRaisesRegex(ValueError, r'3\.3\.94995 or 3\.3\.93787; your game is 3\.3\.99999\. Your game version does not match'):
-                game_install.validate_game(stock)
+            stock = self.game(root, 'steam', '3.4.99999')
+            bnet = self.game(root, 'battlenet', '3.4.99998')
+            self.assertEqual(game_install.validate_game(stock), ('steam', '3.4.99999'))
+            self.assertEqual(game_install.validate_game(bnet, experimental_battlenet=True), ('battlenet', '3.4.99998'))
+            (stock / 'D2R.exe').write_bytes(b'MZ')
+            self.assertEqual(game_install.validate_game(stock), ('steam', 'unknown'))
             self.assertEqual(game_install.file_version(b'MZ'), None)
 
     def test_asset_reader_selection_and_cache_invalidation(self):
