@@ -552,6 +552,8 @@ XrPosef settingsPose{};
 constexpr float settingsWidth=.95f,settingsHeight=settingsWidth*settings::Height/settings::Width;
 DXGI_FORMAT atlasFormat=DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
 uint32_t layerLimit=16;
+// What each place in the submitted layer list showed last (composition::StablePlaces).
+std::array<composition::Place,composition::MaxPlaces> placesKept{};uint32_t placesKeptCount=0;
 uint64_t interactionPaintKey=~0ull;
 uint64_t interactionRequestedKey=~0ull,interactionPaintRequest=0;
 interaction::PaintContext interactionPaintContext{},interactionRequestedContext{};
@@ -4960,6 +4962,7 @@ void Input() {
         sample.minWeaponSpeed=gestureSettings[settings::MeleeHitSpeed];
         sample.minThrustSpeed=gestureSettings[settings::MeleeThrustSpeed];
         sample.minShieldBashSpeed=gestureSettings[settings::ShieldBashSpeed];
+        sample.reach=gestureSettings[settings::MeleeReach]*.01f;   // VR Settings > Combat > Melee reach, cm
         const auto weapons=gamestate::MeleeEquipment();
         // A shapeshift form strikes with both claws; its weapon is a stat without a visual.
         const bool claws=InShapeForm();
@@ -6615,8 +6618,49 @@ void EndPair() {
         static bool reported=false;
         if(!reported){Say("Frame OpenXR: transparent quad prefix prevents Wine mixed-layer allocation overlap");reported=true;}
     }
+    // Each layer at a place whose SteamVR copy has its size, stand-ins between.
+    std::array<XrCompositionLayerQuad,composition::MaxPlaces> standIns{};uint32_t standInCount=0;
+    if(!padQuads&&headSpace&&pointerChain&&count) {
+        std::array<composition::Place,composition::MaxPlaces> want{};
+        for(uint32_t i=0;i<count;++i)want[i]=composition::PlaceOf(layers[i]);
+        std::array<uint8_t,composition::MaxPlaces> place{};
+        if(const uint32_t total=composition::StablePlaces(want.data(),count,placesKept.data(),placesKeptCount,capacity,place.data())) {
+            std::array<const XrCompositionLayerBaseHeader*,32> placed{};
+            for(uint32_t i=0;i<count;++i)placed[place[i]]=layers[i];
+            for(uint32_t j=0;j<total;++j)if(!placed[j]) {
+                const bool same=j<placesKeptCount&&placesKept[j].standIn;
+                auto& q=standIns[j];q={XR_TYPE_COMPOSITION_LAYER_QUAD};
+                q.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+                q.space=headSpace;q.eyeVisibility=XR_EYE_VISIBILITY_BOTH;
+                q.pose.orientation.w=1;q.pose.position.z=1;q.size={.001f,.001f};   // a millimetre, behind the head
+                q.subImage.swapchain=same?placesKept[j].chain:pointerChain;
+                q.subImage.imageRect=same?placesKept[j].rect:XrRect2Di{{panelatlas::Pointer.x,panelatlas::Pointer.y+32},{1,1}};
+                placed[j]=reinterpret_cast<const XrCompositionLayerBaseHeader*>(&q);++standInCount;
+            }
+            layers=placed;count=total;
+        }
+    }
     ei.layerCount=count;ei.layers=count?layers.data():nullptr;
     const double start=Milliseconds();const auto submitted=pEndFrame(session,&ei);Check(submitted,"end frame");
+    if(XR_SUCCEEDED(submitted)) {
+        static uint32_t remade=0,most=0,standInsMost=0;static ULONGLONG reportAt=0;
+        for(uint32_t j=0;j<count;++j) {
+            auto p=composition::PlaceOf(layers[j]);
+            p.standIn=p.type==XR_TYPE_COMPOSITION_LAYER_QUAD&&p.chain&&
+                (p.chain==interactionChain||p.chain==companionChain||p.chain==staticChain||p.chain==sharedChain);
+            if(j>=placesKeptCount||!composition::SameSize(placesKept[j],p))++remade;
+            placesKept[j]=p;
+        }
+        placesKeptCount=std::max(placesKeptCount,count);most=std::max(most,count);standInsMost=std::max(standInsMost,standInCount);
+        if(const auto now=GetTickCount64();now>=reportAt) {
+            if(reportAt) {
+                char line[200];std::snprintf(line,sizeof line,"Frame layers: ten seconds: %u copies made or remade by SteamVR (a place shown at a new size), most layers %u, most stand-ins %u",
+                    remade,most,standInsMost);
+                Say(line);
+            }
+            remade=most=standInsMost=0;reportAt=now+10000;
+        }
+    }
     if(interactionInput.active) {
         static ULONGLONG reportAt=0;const auto now=GetTickCount64();
         if(now>=reportAt) {
@@ -7251,7 +7295,7 @@ void Shutdown(bool preserveResolution) {
     for(auto& e:eyes){if(e.chain&&pDestroySwapchain)pDestroySwapchain(e.chain);e={};}
     mirrorSupported=mirrorMono=false;
     turnFrame=keepTurns=keepDepth=false;lastEyes={};viewBase={{{0,0,0,1},{0,0,0,1}}};viewWorld={};turnDepths={};turnCounts={};turnImages={};turnKept={};turnImagesFailed=turnWarpTried=false;turnWarp={};
-    turnLayers={};layerKept={};turnTarget.Reset();layersFailed=false;
+    turnLayers={};layerKept={};turnTarget.Reset();layersFailed=false;placesKept={};placesKeptCount=0;
     turnCapture.left=0;turnCapture.buffer.Reset();turnCapture.size=0;turnCapture.list.Reset();turnCapture.allocator.Reset();
     for(auto& s:handSpaces){if(s&&pDestroySpace)pDestroySpace(s);s=XR_NULL_HANDLE;}
     if(headSpace&&pDestroySpace)pDestroySpace(headSpace);if(space&&pDestroySpace)pDestroySpace(space);

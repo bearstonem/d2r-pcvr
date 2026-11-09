@@ -17,6 +17,12 @@ static Hit Step(Key key,int delta=1){return {Kind::Change,key,delta};}
 static View PageOf(Key key){const auto* r=content::RowOf(key);return r?r->page:View::Count;}
 static_assert((ChangeMask{1}<<64)==ChangeMask(0,1)&&(ChangeMask{1}<<127)==ChangeMask(0,uint64_t{1}<<63),"shifts cross into the high word");
 static_assert((ChangeMask(0,1)>>64)==ChangeMask{1}&&(ChangeMask{3}<<63)==ChangeMask(uint64_t{1}<<63,1),"shifts carry between words");
+// 256 wide since 2026-11-08: bits reach the third and fourth words and come back.
+static_assert(ChangeMask::Bits==256&&Count<=ChangeMask::Bits,"room for every setting");
+static_assert(((ChangeMask{1}<<200)>>200)==ChangeMask{1}&&((ChangeMask{5}<<190)>>190)==ChangeMask{5},"shifts reach the upper words and back");
+static_assert(bool(ChangeMask{1}<<255)&&!(ChangeMask{1}<<256)&&!((ChangeMask{1}<<255)<<1),"the last bit is kept and nothing beyond it");
+static_assert(((ChangeMask{1}<<130)&(ChangeMask{1}<<130|ChangeMask{1}<<3))==(ChangeMask{1}<<130)&&~~(ChangeMask{1}<<199)==(ChangeMask{1}<<199),"and, or and not cover every word");
+static_assert((SupportedChanges>>(Count-1))==ChangeMask{1}&&!(SupportedChanges>>Count),"SupportedChanges holds exactly the settings that exist");
 // The menu's non-fatal report (docs/VR_SETTINGS_MENU.md): settings with no words yet,
 // orphan overrides and preset entries, name-count mismatches, a non-empty More
 // page. Printed on every run; --tidy prints only it. Never fails the test.

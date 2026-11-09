@@ -146,6 +146,9 @@ motion. The Classic rules are gone; `[gameplay] melee_rules` is ignored.
 **Combat > Stab speed to hit** is separate from swing speed: 2 m/s by default, adjustable
 from 0.75 to 10 m/s in 0.25 m/s steps. Push along the blade and pull back between
 stabs. The old `attack_speed` INI key does not select Classic; choose it here.
+**Combat > Melee reach** (0 to 50 cm, 0 by default) lets a weapon or fist that
+passes that close beside a monster still hit it. Walls still block, and shield
+bash is unchanged.
 
 **Unleashed swing damage:** every stroke that connects lands, but how hard it
 hits depends on your character. Your attack rating against the monster's
