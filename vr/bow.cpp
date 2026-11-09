@@ -209,10 +209,10 @@ int End(size_t slot,Arrow& a,uintptr_t game,uintptr_t unit) {
     reinterpret_cast<int(*)(uintptr_t,uintptr_t,uintptr_t,int)>(d2rsig::Addr(HitRva))(game,unit,0,1);
     return 2;
 }
-// Spells and quiver arrows keep their native server missile at the physical
+// Spells, quiver and item arrows keep their native server missile at the physical
 // contact, so splash, explosions and secondary missiles start at the impact.
 bool MoveSpell(Arrow& a,Vec point) {
-    if(a.flight.shot.kind!=Kind::Spell&&!SkillRelease(a.flight.shot))return true;
+    if(a.flight.shot.kind!=Kind::Spell&&!SkillRelease(a.flight.shot)&&!ItemArrow(a.flight.shot))return true;
     const auto grid=GridPoint(a.flight.shot,point)*a.flight.shot.unitsPerMetre;
     const int x=int(grid.x*.5f),y=int(grid.z*.5f);
     const auto room=reinterpret_cast<uintptr_t(*)(uintptr_t,int,int)>(d2rsig::Addr(RoomPointRva))(a.room,x,y);
@@ -408,6 +408,29 @@ void ThrowWeapon(uintptr_t game,uintptr_t player,int hand) {
     if(hand==1)spellvr::ThrowLeft(game,player);
     else reinterpret_cast<int(*)(uintptr_t,uintptr_t,int,int)>(d2rsig::Addr(ThrowRva))(game,player,2,1);
 }
+// Game thread only. Why a basic bow or crossbow release was refused before the
+// native attack (#432), at most one line a second.
+void ReportRefusedMissile(Kind kind,bool held,int native) {
+    static uint64_t at=0;const auto now=GetTickCount64();
+    if(at&&now>=at&&now-at<1000)return;
+    at=now;
+    const bool crossbow=kind==Kind::Crossbow;
+    char line[224];snprintf(line,sizeof line,"Frame physical projectiles: %s release refused: weapon held=%d, its basic attack names missile %d "
+        "(flies %d, or an item's magic 27 / explosive 41)",crossbow?"crossbow":"bow",int(held),native,crossbow?31:0);
+    framevr::logging::Write(line);
+}
+// Game thread only. Once per character and item missile: a basic release
+// flies the item's missile (Fires Magic Arrows / Explosive Arrows or Bolts).
+void ReportItemMissile(const Shot& shot,int level) {
+    static uint64_t session=0;static int told=-1;
+    const int key=int(shot.kind)*1000+shot.missile;
+    if(session==shot.session&&told==key)return;
+    session=shot.session;told=key;
+    const bool crossbow=shot.kind==Kind::Crossbow;
+    char line[208];snprintf(line,sizeof line,"Frame physical projectiles: %s basic attack fires item missile %d (%s) level %d; the hand release flies it",
+        crossbow?"crossbow":"bow",shot.missile,shot.missile==27?"Fires Magic Arrows":crossbow?"Fires Explosive Bolts":"Fires Explosive Arrows",level);
+    framevr::logging::Write(line);
+}
 void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
     std::array<Shot,4> batch;size_t n=0;
     {std::lock_guard lock(mutex);
@@ -465,11 +488,23 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
             shot.skill=shot.owner=-1;shot.level=0;doubleThrow=false;++quiverRefused;
         }
         if(javelin&&shot.hand!=0&&(shot.hand!=1||!thrown||!spellvr::ThrowReady())){++refused;++throwRefused;continue;}
-        if(!spell&&(javelin?gamestate::WeaponType()!=D2RVR_TYPE_JAVELIN&&gamestate::WeaponType()!=D2RVR_TYPE_THROWING:crossbow?
-           (gamestate::WeaponType()!=D2RVR_TYPE_CROSSBOW||
-            reinterpret_cast<int(*)(uintptr_t,int*)>(d2rsig::Addr(MissileTypeRva))(player,&level)!=31):
-           (!reinterpret_cast<int(*)(uintptr_t)>(d2rsig::Addr(IsBowRva))(player)||
-            reinterpret_cast<int(*)(uintptr_t,int*)>(d2rsig::Addr(MissileTypeRva))(player,&level)!=0))) {++refused;continue;}
+        if(javelin&&gamestate::WeaponType()!=D2RVR_TYPE_JAVELIN&&gamestate::WeaponType()!=D2RVR_TYPE_THROWING){++refused;continue;}
+        // The basic attack's own missile for the bow or crossbow in hand: the
+        // arrow or bolt, or an item's (#432) that the native attack below
+        // names to Shoot. A basic release flies it; a quiver arrow keeps its
+        // skill's missile and falls back to it.
+        int item=-1;
+        if(!spell&&!javelin) {
+            const bool held=crossbow?gamestate::WeaponType()==D2RVR_TYPE_CROSSBOW:
+                reinterpret_cast<int(*)(uintptr_t)>(d2rsig::Addr(IsBowRva))(player)!=0;
+            const int native=held?reinterpret_cast<int(*)(uintptr_t,int*)>(d2rsig::Addr(MissileTypeRva))(player,&level):-1;
+            item=BasicLaunchMissile(shot.kind,native);
+            if(item==RefusedMissile){++refused;ReportRefusedMissile(shot.kind,held,native);continue;}
+            if(!quiverArrow) {
+                shot.missile=item;
+                if(ItemArrow(shot))ReportItemMissile(shot,level);
+            }
+        }
         Launch next;next.shot=shot;next.game=game;next.player=player;
         const unsigned required=spell?framevr::spellcast::LaunchCapacity(shot.skill):1;
         {
@@ -512,7 +547,8 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                 // Refused (usually mana): the native warning plays, and the
                 // drawn arrow flies as a basic attack instead of a dud.
                 ++quiverFallbacks;
-                launch.shot.skill=launch.shot.owner=launch.shot.missile=-1;launch.shot.level=0;
+                launch.shot.skill=launch.shot.owner=-1;launch.shot.level=0;
+                launch.shot.missile=item;   // the bow's own basic missile: an item's, else none
                 // ... and a javelin as a basic throw of the weapon in hand.
                 if(javelin)reinterpret_cast<int(*)(uintptr_t,uintptr_t,int,int)>(d2rsig::Addr(ThrowRva))(game,player,2,1);
                 else reinterpret_cast<int(*)(uintptr_t,uintptr_t,int,int)>(d2rsig::Addr(AttackRva))(game,player,0,1);
@@ -873,7 +909,7 @@ void ClientTick(uintptr_t unit,float dt) {
         }
         for(size_t i=0;!retirement&&i<usedSlots.load(std::memory_order_relaxed);++i)if(arrows[i].client==unit&&arrows[i].clientId==header[2]) {
             slot=i;alive=arrows[i].flight.alive&&arrows[i].flight.shot.session==current.session&&enabled.load();
-            spellEnd=!alive&&(arrows[i].flight.shot.kind==Kind::Spell||SkillRelease(arrows[i].flight.shot))&&
+            spellEnd=!alive&&(arrows[i].flight.shot.kind==Kind::Spell||SkillRelease(arrows[i].flight.shot)||ItemArrow(arrows[i].flight.shot))&&
                 arrows[i].flight.shot.session==current.session&&enabled.load();
             if(spellEnd)ended=arrows[i].flight;
             if(!alive){arrows[i].client=0;arrows[i].visualBinding.Clear();Recount();}break;
@@ -890,7 +926,7 @@ void ClientTick(uintptr_t unit,float dt) {
     if(slot==arrows.size()){originalClientTick(unit,dt);return;}
     if(!alive) {
         const auto saved=finishingImpact;
-        finishingImpact=spellEnd&&SkillArrow(ended.shot)?&ended:nullptr;
+        finishingImpact=spellEnd&&OwnMissile(ended.shot)?&ended:nullptr;
         const bool finished=spellEnd&&spellvr::FinishVisual(unit,ended);
         finishingImpact=saved;
         if(!finished)originalClientKill(unit);
@@ -986,7 +1022,7 @@ uintptr_t Transform(uintptr_t out,uint32_t entity,uintptr_t component) {
                 if(a.flight.shot.kind==Kind::Spell||(SkillJavelin(a.flight.shot)&&ParticleJavelin(a.flight.shot.missile))) {
                     if(!Read(out,a.rendered))continue;
                     SpellMatrix(a.flight,at,a.rendered.data());
-                } else if(SkillArrow(a.flight.shot))QuiverMatrix(a.flight,at,a.rendered.data());
+                } else if(OwnMissile(a.flight.shot))QuiverMatrix(a.flight,at,a.rendered.data());
                 else ArrowMatrix(a.flight,at,a.rendered.data());
                 if(a.previous[15]!=1)a.previous=a.rendered;
                 a.renderAt=at;
@@ -1042,7 +1078,10 @@ bool PreviewReady() {
 }
 bool MotionReady(){return enabled.load()&&ready.load();}
 bool DirectCrossbow(){return launch.slot>=0&&launch.shot.kind==Kind::Crossbow;}
-uint32_t QuiverLaunchMissile(){return launch.slot>=0&&SkillRelease(launch.shot)?MissileId(launch.shot):0;}
+// A bow's item arrow is its basic arrow: it shares the arrow speed. Bolts keep theirs.
+uint32_t QuiverLaunchMissile(){
+    return launch.slot>=0&&(SkillRelease(launch.shot)||(ItemArrow(launch.shot)&&launch.shot.kind==Kind::Arrow))?MissileId(launch.shot):0;
+}
 void SetCrossbowCycle(uint64_t session,uint32_t equipment,uint32_t milliseconds) {
     std::lock_guard lock(mutex);crossbowRate={session,GetTickCount64(),equipment,milliseconds};
 }
@@ -1498,7 +1537,7 @@ bool Visual(uint32_t entity,uintptr_t unit,bool hasReleasePoint,bool isRoot) {
             (creatingVisual==int(i)&&a.flight.shot.session==visualSession&&a.flight.shot.sequence==visualSequence)||
             (crossbow&&a.flight.shot.kind==Kind::Crossbow&&a.flight.shot.session==crossbow->session&&a.flight.shot.sequence==crossbow->sequence))) {
             const bool wasBound=a.visualBinding.Bound();
-            const bool rooted=a.flight.shot.kind==Kind::Spell||SkillArrow(a.flight.shot)||(SkillJavelin(a.flight.shot)&&ParticleJavelin(a.flight.shot.missile));
+            const bool rooted=a.flight.shot.kind==Kind::Spell||OwnMissile(a.flight.shot)||(SkillJavelin(a.flight.shot)&&ParticleJavelin(a.flight.shot.missile));
             const bool bound=rooted?a.visualBinding.BindRoot(entity,isRoot):a.visualBinding.Bind(entity,hasReleasePoint);
             // Descendant release components still need removal even though
             // only the root owns the spell transform.
@@ -1541,7 +1580,7 @@ bool OwnsVisual(uintptr_t unit) {
        (preview.active&&previewCreatingSession==current.session&&previewCreatingMissile==h[1])))return true;
     for(size_t i=0;i<usedSlots.load(std::memory_order_relaxed);++i) {
         const auto& a=arrows[i];
-        if((a.flight.shot.kind==Kind::Spell||SkillRelease(a.flight.shot))&&a.flight.shot.sequence&&a.flight.shot.session==current.session&&
+        if((a.flight.shot.kind==Kind::Spell||SkillRelease(a.flight.shot)||ItemArrow(a.flight.shot))&&a.flight.shot.sequence&&a.flight.shot.session==current.session&&
            h[1]==MissileId(a.flight.shot)&&((a.client==unit&&a.clientId==h[2])||
            (creatingVisual==int(i)&&a.flight.shot.sequence==visualSequence&&a.flight.shot.session==visualSession)))return true;
     }

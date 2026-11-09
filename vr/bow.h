@@ -17,7 +17,7 @@ bool PreviewReady(); // lock-free; native mesh replaced the tracked draw guide
 void PublishPreviewPose(const framevr::bowflight::Shot& pose,const framevr::bowflight::Gate& gate,bool visible,uint64_t frame);
 bool MotionReady();
 bool DirectCrossbow(); // current game-thread launch already owns this bolt
-uint32_t QuiverLaunchMissile(); // game-thread launch's quiver missile id, 0 otherwise
+uint32_t QuiverLaunchMissile(); // game-thread launch's quiver (or bow item, #432) missile id, 0 otherwise
 void SetCrossbowCycle(uint64_t session,uint32_t equipment,uint32_t milliseconds);
 bool SpellReady();
 // UI thread: one native sound (sounds.txt row) at the local client player,
