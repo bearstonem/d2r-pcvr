@@ -273,6 +273,8 @@ public:
     // Ornaments the controls use, for D's own spots.
     void Gem(float cx,float cy,float radius=12.f);       // a faceted crimson gem in a bronze bezel
     void DefaultMark(float cx,float y);                  // the bronze triangle hanging from y
+    // Body calibration: the outline of a person standing in a T cross, filling the square in r.
+    void TCrossFigure(RectF r,Color c);
 private:
     struct Impl;
     std::unique_ptr<Impl> impl;

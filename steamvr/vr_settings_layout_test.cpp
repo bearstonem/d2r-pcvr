@@ -73,6 +73,7 @@ static const GoldenRow Golden[]={
     {"interactions.seated",View::Body,0,content::RowKind::Toggle,"Seated play",0,0},
     {"gameplay.room_steps",View::Body,0,content::RowKind::Toggle,"Room follows you",0,0},   // drawn inside Seated play's row (2026-11-08)
     {"calibration.version",View::Body,0,content::RowKind::Button,"Height and arm span",0,0},
+    {"interactions.t_cross_calibrate",View::Body,0,content::RowKind::Toggle,"T cross to calibrate",0,0},   // #423
     {"interactions.waist_below_eyes",View::Body,1,content::RowKind::Slider,"Belt below eyes",0,0},
     {"interactions.belt_forward",View::Body,1,content::RowKind::Slider,"Belt forward reach",0,0},
     {"interactions.click_to_drink",View::Body,1,content::RowKind::Toggle,"Click to drink",0,0},   // #425
@@ -231,7 +232,7 @@ int main(int argc,char** argv){
     }
     // ---- the map: no row lost, none left to More, the names and the owner's pairs ----
     {
-        Check(tables.rowCount==105,"105 settings on the menu, each one row");   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424), Click to drink (#425), Skill cooldowns (2026-11-09), + Summon range (#426)
+        Check(tables.rowCount==106,"106 settings on the menu, each one row");   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424), Click to drink (#425), Skill cooldowns (2026-11-09), + Summon range (#426), T cross to calibrate (#423)
         for(size_t i=0;i<tables.rowCount;++i)Check(!tables.rows[i].fallback&&tables.rows[i].page!=View::More,std::string("every setting has its page: ")+tables.rows[i].label);
         Check(content::Menu().report.empty(),"the tidy report is empty");
         struct Want {content::Group group;const char* name;std::vector<const char*> pages;};
@@ -623,6 +624,17 @@ int main(int argc,char** argv){
         L::LayoutInput in;in.calibration.active=true;in.calibration.progress=.5f;
         const auto calib=L::Build(m,{},in);CheckLayout(calib,"calibration");
         Check(!FindRole(calib,L::Role::Tab)&&L::HitTest(calib,640,512).kind==Kind::None,"calibration replaces the panel and blocks presses");
+        {   // The T cross: the figure beside the steps, on the canvas and over nothing; the line only when the T cross can open this.
+            const auto* figure=FindRole(calib,L::Role::CalibFigure);const auto* tip=FindRole(calib,L::Role::CalibTip);
+            Check(figure&&figure->rect.w==figure->rect.h&&figure->rect.w>=300,"a square figure, big enough to read in the headset");
+            Check(figure->rect.x>=0&&figure->rect.y>=0&&figure->rect.x+figure->rect.w<=1280&&figure->rect.y+figure->rect.h<=1024,"the figure stays on the canvas");
+            for(const auto& e:calib.elements)if(&e!=figure&&!e.text.empty())
+                Check(e.rect.x>=figure->rect.x+figure->rect.w||e.rect.x+e.rect.w<=figure->rect.x||e.rect.y>=figure->rect.y+figure->rect.h||e.rect.y+e.rect.h<=figure->rect.y,
+                      std::string("the figure covers no text: ")+e.text);
+            Check(tip&&tip->text.find("T cross at any time")!=std::string::npos,"the prompt says the T cross works at any time");
+            L::LayoutInput off=in;off.calibration.anyTime=false;const auto noTip=L::Build(m,{},off);CheckLayout(noTip,"calibration, no T cross");
+            Check(!FindRole(noTip,L::Role::CalibTip)&&FindRole(noTip,L::Role::CalibFigure),"T cross off or seated: the figure stays, the promise goes");
+        }
         static const char* const lines[]={"More natural shield wrists","Guard strain edge: Pale glow, Dark edge or Off","Grab a menu with right grip to move it","Performance settings in one place",
             "Menus and wrist maps fixed at high resolutions","Cleaner One by turns view","Smoother frames","Scenery distance now starts at 210"};
         L::LayoutInput notes;notes.notes={"D2R VR Unleashed / v0.3.24","A mod by monkeylashes","https://github.com/bearstonem/d2r-pcvr","beadlebytes; ChuckRibbits; Sergious.",lines,8};

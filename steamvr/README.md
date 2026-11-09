@@ -38,7 +38,7 @@ FlatVR are not required by this build.
   rendered VR coordinates for the player guard and enemy contact volumes. Captured
   cave regressions and teleport/miss checks pass. The owner reports "it all works"
   after the offline retest; logs confirm native cave contacts and normal exit.
-- First-load and settings-menu T-pose calibration save standing eye height and
+- First-load and settings-menu T cross calibration save standing eye height and
   controller span, fitting per-rig arm proportions with physical controller
   scale. Dominant-hand grip over either shoulder requests the opposite native
   weapon set; hip anchors are removed. See [BODY_CALIBRATION.md](BODY_CALIBRATION.md).

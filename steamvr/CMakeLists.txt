@@ -179,6 +179,7 @@ add_executable(shapeshift-form-test shapeshift_form_test.cpp)
 add_executable(head-shadow-test head_shadow_test.cpp)   # the head kept for its shadow: the decision, the cut by pitch, the near
 add_executable(head-skip-test head_skip_test.cpp)   # the helm left out of the eye views: which models, whose, the bookkeeping
 add_executable(body-calibration-test body_calibration_test.cpp)
+add_executable(body-calibration-gesture-test body_calibration_gesture_test.cpp)
 add_executable(shoulder-swap-test shoulder_swap_test.cpp)
 add_executable(leather-menu-test leather_menu_test.cpp)
 add_executable(stash-buttons-test stash_buttons_test.cpp)
@@ -414,6 +415,8 @@ add_test(NAME sky-band-test COMMAND sky-band-test "${ROOT}/reshade/D2R_DepthFog.
 set_tests_properties(sky-band-test PROPERTIES TIMEOUT 60)
 add_test(NAME hero-light-test COMMAND hero-light-test "${ROOT}/reshade/D2R_DepthFog.fx")
 set_tests_properties(hero-light-test PROPERTIES TIMEOUT 30)
+add_test(NAME body-calibration-gesture-test COMMAND body-calibration-gesture-test "${ROOT}/steamvr/transport.cpp" "${ROOT}/vr/vrcam.cpp")
+set_tests_properties(body-calibration-gesture-test PROPERTIES TIMEOUT 30)
 add_test(NAME light-bounds-test COMMAND light-bounds-test)
 set_tests_properties(light-bounds-test PROPERTIES TIMEOUT 30)
 foreach(test_target IN ITEMS memory-test biome-list-test hook-metrics-test active-keys-test resource-descriptions-test latest-worker-test haptic-pulse-test thread-stats-test

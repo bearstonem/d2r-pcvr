@@ -556,6 +556,10 @@ inline constexpr Override Overrides[]={
      .beside=true,.besideLabel="Follow"},
     {.id="calibration.version",.page=View::Body,.section="Play space",.kind=RowKind::Button,.label="Height and arm span",
      .help="Stand straight, then hold your arms out in a T. Measures your eye height and arm span so the world and your arms fit you."},
+    // T cross to calibrate (#423, beadlebytes): its own row under Height and arm span, the calibration it opens
+    // (Room follows you has Seated play's right half). It does nothing seated, and is left out then.
+    {.id="interactions.t_cross_calibrate",.page=View::Body,.section="Play space",.kind=RowKind::Toggle,.label="T cross to calibrate",
+     .help="Hold a T cross for 2 seconds, nothing pressed: the controllers buzz while you hold it, then Calibrate body opens. No menu needed. Off in Seated play."},
     // Body: Potion belt
     {.id="interactions.waist_below_eyes",.page=View::Body,.section="Potion belt",.kind=RowKind::Slider,.label="Belt below eyes",
      .help="How far below your eyes the potion belt sits when standing. Lower numbers raise the belt.",
@@ -849,7 +853,7 @@ inline constexpr ContentTool ToolTable[]={
     {Kind::Apply,"Apply","Saves and uses your changes. Until you press it, changes are only a draft. Your other settings and calibration stay as they are."},
     {Kind::Close,"Close","Back to the game. If some changes are not applied, Close asks first."},
     {Kind::Recenter,"Set eye height","Sets your eye height for where you stand or sit now. Your body measurements stay saved."},
-    {Kind::Calibrate,"Calibrate body","Measures your standing eye height and arm span in a T-pose. Apply or discard changes first. Hold both triggers when asked; Right B cancels."},
+    {Kind::Calibrate,"Calibrate body","Measures your standing eye height and arm span in a T cross. Apply or discard changes first. Hold both triggers when asked; Right B cancels."},
     {Kind::ResetPage,"Reset page","Sets every row you can see on this page back to its default. Nothing is saved until you press Apply."},
     {Kind::UndoReset,"Undo reset","Puts back the values this page had before you pressed Reset page. It goes away after 6 seconds."},
     // The confirm row; the layout may print the count ("Discard 3 changes").

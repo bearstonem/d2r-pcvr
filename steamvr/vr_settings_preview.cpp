@@ -173,10 +173,13 @@ static int PagesCheck(){
             Report(where,FitProblems(picture.layout));
         }
     }
-    {   // body calibration, both phases
+    {   // body calibration: every hint (tracking, posture, floor, save problems...), with and without the T cross line, measured or not
         Setup x=Base(View::Body,-1);framevr::calibration::Flow f;f.Begin();f.phase=framevr::calibration::Phase::Hold;f.hint=framevr::calibration::Hint::Arms;f.progress=.55f;
         x.in.calibration=CalibrationOf(f);paint(x,"calibration");
-        x.in.calibration.hint=int(framevr::calibration::Hint::Saved);x.in.calibration.measured=true;x.in.calibration.eyeHeight=2.3f;x.in.calibration.armSpan=2.6f;paint(x,"calibration saved");
+        for(int hint=0;hint<=int(framevr::calibration::Hint::Conflict);++hint)for(bool anyTime:{true,false})for(bool measured:{false,true}){
+            x.in.calibration.hint=hint;x.in.calibration.anyTime=anyTime;x.in.calibration.measured=measured;x.in.calibration.eyeHeight=2.3f;x.in.calibration.armSpan=2.6f;
+            paint(x,"calibration, hint "+std::to_string(hint)+(anyTime?", T cross line":"")+(measured?", measured":""));
+        }
     }
     {   // the longest release (NotesMaxLines lines): every page fits above the card with Previous / Next,
         // and Next walks to the last page, ready or not (paging needs no settings)

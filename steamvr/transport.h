@@ -130,6 +130,8 @@ bool HandSpellHeld(int hand); // that hand's physical spell button is held
 // with the monster the weapon arm points at (0: the game's own pick) after
 // handing it to the game's target query. The cast is pressed after the answer.
 bool HeavensArmed();
+// The T cross is being held: the monsters near are wanted for its guard (body_calibration_gesture.h).
+bool TCrossWantsTargets();
 uint32_t HeavensRequest();
 // A bow is ready with Guided Arrow as the bow's skill (aimrules::AlwaysHomes): the target scan runs so a
 // release can hand the game the aimed monster, whatever VR Settings > Gameplay > Targeting says.

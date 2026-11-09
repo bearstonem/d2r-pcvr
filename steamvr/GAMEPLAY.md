@@ -185,6 +185,7 @@ not generate melee velocity. The layout currently assumes a right-handed player.
 | Quick potion | Left Y → **EQUIPMENT / BELT** → trigger a potion wedge; grip on a potion wedge instead grabs it into the right hand |
 | Swap weapon sets | Reach the swap hand over either shoulder and press its grip; right hand by default, selectable in VR Settings > Controls > Hands > Dominant hand. Hip anchors are removed |
 | Seated weapon selection | Utility wheel → **Weapon I** or **Weapon II** |
+| Recalibrate body and eye height | Stand in a **T cross**, nothing pressed and no potion in hand, for 2 seconds: both controllers buzz while you hold it, then the calibration prompt opens ([BODY_CALIBRATION.md](BODY_CALIBRATION.md)). Not in Seated play. Vibration off: the prompt opening is the only cue |
 | Stow/draw | Utility wheel → **Stow weapons** / **Draw weapons**; native equipped stats stay unchanged |
 | Health/mana | Check the back of your left wrist, or choose **Palm** in **VR Settings > Interface > Wrist > Life and mana** and hold your left palm upward in front of you briefly. No button required; automatic alerts are off by default |
 | Show all nearby loot labels (Alt) | Hold the **right stick down** to hold the native Show Items action; let go to restore normal drop/hover labels. Push it **up** to toggle running / walking. Neither while you look at the wrist / palm map, or point the right controller at a floating map: they zoom it instead. Listed in **VR Settings > Guide** |
@@ -600,7 +601,7 @@ sets the page's rows back to their defaults, with **Undo reset** for 6 seconds.
 | Gameplay > Monsters | Offline difficulty, monster sight range and the smarter mercenary with **Commands** beside it |
 | Gameplay > Physics | Rolling bottles, knockable props and pushable bodies |
 | Comfort > Moving | Smooth turning with its snap angle or turn speed, and movement speed |
-| Comfort > Body | Seated play, **Height and arm span** (**Calibrate body**, **Set eye height**), and the belt's height and reach |
+| Comfort > Body | Seated play, **Height and arm span** (**Calibrate body**, **Set eye height**) with the **T cross to calibrate** switch under it (standing only), and the belt's height and reach |
 | Controls > Hands | Dominant hand, **Stick toggle** and button names |
 | Controls > Vibration | Overall vibration and separate melee, short melee taps, bow draw, bow/throw release, spell, loot/potion/menu and alert strengths; **Feel it** on a row's card |
 | Interface > Wrist | Life and mana location and tilt, skill cooldowns between the orbs, map and compass location, map view (Isometric, Top-down, Full map or Full top-down), turning the map with you, buffs and companions |
@@ -938,6 +939,7 @@ Optional live configuration (metres below/forward/from the estimated torso):
 ```ini
 [interactions]
 seated=0
+t_cross_calibrate=1
 navigation_location=0
 vitals_location=0
 vitals_tilt=0

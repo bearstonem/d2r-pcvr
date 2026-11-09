@@ -406,6 +406,16 @@ int main(){
         Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"save companion count preference");
         Check(vrsettings::Read().values[CompanionCounts]==enabled&&Int(path,L"interactions",L"companion_counts")==enabled&&Int(path,L"custom",L"keep")==12345,"companion preference survives reload without touching other settings");
     }
+    // The T cross: On when missing (the default), saved as [interactions] t_cross_calibrate, touching nothing else.
+    Check(vrsettings::Read().values[TCrossCalibrate]==1&&Int(path,L"interactions",L"t_cross_calibrate")==-999,"a profile without the key reads On");
+    for(int enabled:{0,1}) {
+        const auto current=vrsettings::Read();
+        model.Open(current);model.Click({Kind::Change,TCrossCalibrate,enabled?1:-1});request=model.Click({Kind::Apply});
+        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"save the T cross switch");
+        const auto saved=vrsettings::Read();
+        Check(saved.values[TCrossCalibrate]==enabled&&Int(path,L"interactions",L"t_cross_calibrate")==enabled&&
+              Changed(saved.values,current.values)==(ChangeMask{1}<<TCrossCalibrate)&&Int(path,L"custom",L"keep")==12345,"the T cross switch survives reload and touches nothing else");
+    }
     // Loot pick (#257): On when missing (the default), On and Off saved as [interactions] loot_pick; only 0 reads Off.
     Check(vrsettings::Read().values[LootPick]==1&&Int(path,L"interactions",L"loot_pick")==-999,"a profile without loot_pick reads On");
     for(int enabled:{0,1}) {
