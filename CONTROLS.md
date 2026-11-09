@@ -275,6 +275,17 @@ The display is bounded to three effect rows. If more than 21 effects overlap,
 the final cell shows how many additional effects are active. Existing
 `[interactions] companion_counts` preferences also control this expanded row.
 
+**Interface > Wrist > Skill cooldowns** (default On, an idea from Vin) shows up to three
+dimmed skill icons between the life and mana orbs while those skills recharge after a
+cast: Frozen Orb 1 s, Blizzard 1.8 s, Meteor 1.2 s, Fist of the Heavens 0.4 s, Volcano
+4 s and every other skill with a delay. Each icon's color sweeps back clockwise from the
+top as its delay runs out, and the icon goes when the skill is ready. Only skills you can
+cast in VR show: on a hand button, a glyph or a motion. A glyph or motion cast of a skill
+that is still recharging is refused with the refusal buzz and a grey trail instead of the
+cast's, and a light tick on that hand follows once the skill is ready. The times are the
+game's own, read from your offline game's server; a game hosted by another player shows
+none. Saved as `[interactions] skill_cooldowns`.
+
 **Interface > Warnings > Blood on visor** (default On) splashes blood around the edge of the
 view as life drops below 60%, 40% and 20%; large splats drip slowly, then dry.
 Healing back above a band, from any source, fades that band's blood out over

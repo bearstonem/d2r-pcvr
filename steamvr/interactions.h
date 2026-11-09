@@ -13,6 +13,7 @@
 #include "navigation_info.h"
 #include "companions.h"
 #include "active_effects.h"
+#include "skill_cooldowns.h"
 #include "torch_light.h"
 #include "map_zoom.h"
 #include <array>
@@ -293,6 +294,7 @@ struct Snapshot {
     Mercenary merc;
     companions::Roster companions;
     effects::Status effects;
+    cooldowns::Board cooldowns;   // the skills the server's use check blocks for a delay (skill_cooldowns.h)
 };
 // A glyph shape's skill as the hero has it (the catalog's own entry); an id the hero lacks is kept, unknown.
 inline Skill GlyphSkill(const Snapshot& s,int id) {
@@ -585,6 +587,8 @@ struct Output {
     // the motions turned off, as Input gave them.
     bool motions=false,motionsBox=false;
     int motionsOff=0;
+    // Skill cooldowns: the wrist's icons between the orbs (skill_cooldowns.h Tracker), set by the transport.
+    cooldowns::Icons cooldowns{};
 };
 inline MenuPage Page(const Output& out) {
     return out.developer?MenuPage::Developer:out.editor==3?MenuPage::EditItems:out.editor==2?MenuPage::EditSkills:out.editor?MenuPage::EditSlots:out.map?MenuPage::Map:out.motions?MenuPage::Motions:out.glyphs?MenuPage::Glyphs:out.utility?MenuPage::Equipment:MenuPage::Spells;

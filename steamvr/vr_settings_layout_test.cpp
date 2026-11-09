@@ -89,6 +89,7 @@ static const GoldenRow Golden[]={
     {"haptics.alerts",View::Vibration,0,content::RowKind::Slider,"Low life and mana alerts",0,1},
     {"interactions.vitals_location",View::Wrist,0,content::RowKind::Choice,"Life and mana",4,0},
     {"interactions.vitals_tilt",View::Wrist,0,content::RowKind::Slider,"Life and mana tilt",0,0},
+    {"interactions.skill_cooldowns",View::Wrist,0,content::RowKind::Toggle,"Skill cooldowns",0,0},   // wrist skill cooldowns (2026-11-09)
     {"interactions.navigation_location",View::Wrist,1,content::RowKind::Choice,"Map and compass",4,0},
     {"interactions.map_top_down",View::Wrist,1,content::RowKind::Choice,"Map view",4,0},
     {"interactions.map_rotate",View::Wrist,1,content::RowKind::Toggle,"Turn map with you",0,0},
@@ -229,7 +230,7 @@ int main(int argc,char** argv){
     }
     // ---- the map: no row lost, none left to More, the names and the owner's pairs ----
     {
-        Check(tables.rowCount==103,"103 settings on the menu, each one row");   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424), Click to drink (#425)
+        Check(tables.rowCount==104,"104 settings on the menu, each one row");   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424), Click to drink (#425), Skill cooldowns (2026-11-09)
         for(size_t i=0;i<tables.rowCount;++i)Check(!tables.rows[i].fallback&&tables.rows[i].page!=View::More,std::string("every setting has its page: ")+tables.rows[i].label);
         Check(content::Menu().report.empty(),"the tidy report is empty");
         struct Want {content::Group group;const char* name;std::vector<const char*> pages;};

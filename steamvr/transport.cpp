@@ -54,6 +54,7 @@
 #include "arcane_decay.h"
 #include "glyph_cast.h"
 #include "glyph_trail.h"
+#include "skill_cooldowns.h"
 #include "spell_motion.h"
 #include "blood_screen.h"
 #include "guard_strain.h"
@@ -264,6 +265,17 @@ double glyphBeganAt=0,glyphEndedAt=-1,glyphPaintAt=0;   // the stroke's start an
 bool glyphPressRt=false,glyphTrailShown=false;
 glyphtrail::Look glyphLook=glyphtrail::Look::Drawing;   // the trail's look: drawing, refused or the skill's element
 bool glyphAtlasPending=false,glyphImageReady=false;
+// Wrist skill cooldowns (skill_cooldowns.h): the icons between the orbs, and the ticks owed to casts refused meanwhile.
+cooldowns::Tracker cooldownTracker;
+cooldowns::ReadyTicks cooldownTicks;
+uint64_t cooldownSession=0;
+// "still recharging (0.6 s left)", for a refused cast's log line; nullptr while the skill is ready (or Skill cooldowns is Off).
+const char* CooldownRefusal(bool on,const interaction::Snapshot& s,int skill,uint64_t now,char (&why)[64]) {
+    const uint64_t left=on?(cooldowns::Cooling(s.cooldowns,skill,now)?s.cooldowns.Left(skill,now):0):0;
+    if(!left)return nullptr;
+    std::snprintf(why,sizeof why,"the skill is still recharging (%.1f s left)",double(left)/1000.0);
+    return why;
+}
 // Motions (spell_motion.h): the right trigger as pulled (both triggers are free for a motion); a watcher
 // per motion, and the last cast by one (every watcher waits a second after one).
 float spellTrigger=0;
@@ -4403,6 +4415,9 @@ void Input() {
     const int motionsKey=MotionsKey(motionClass);
     const int motionsOff=motionsKey>=0?spellmotion::OffMask(glyphValues[motionsKey]):0;
     const auto motionOn=[&](int id){return quickFresh&&spellmotion::On(motionClass,id,motionsOff)&&interaction::GlyphSkill(quickSnapshot,id).known;};
+    // Skill cooldowns (VR Settings > Interface > Wrist): glyph and motion casts of a skill still recharging are refused.
+    const bool cooldownsOn=gestureSettings[settings::SkillCooldowns]>.5f;
+    if(interactionInput.session!=cooldownSession||!cooldownsOn){cooldownTicks.Clear();cooldownSession=interactionInput.session;}
     bool motionAny=false;
     {const auto page=spellmotion::PageOf(motionClass);for(int i=0;i<page.count;++i)motionAny=motionAny||motionOn(page.skills[i]);}
     const bool motionGestures=gestureSettings[settings::SkillGestures]>.5f;
@@ -4464,7 +4479,9 @@ void Input() {
         if(wait)spellFreeAt=motionNow;
         spellGripCast=true;
         const auto known=interaction::GlyphSkill(quickSnapshot,skill);
-        const char* refused=!known.available?"the skill is unavailable now":glyphCast.Busy()?"the last cast is still pressing":nullptr;
+        char recharging[64];const char* cooling=CooldownRefusal(cooldownsOn,quickSnapshot,skill,GetTickCount64(),recharging);
+        const char* refused=!known.available?"the skill is unavailable now":cooling?cooling:glyphCast.Busy()?"the last cast is still pressing":nullptr;
+        if(refused&&refused==cooling)cooldownTicks.Refused(skill,0,GetTickCount64());   // a tick on the right hand once it is ready
         glyphcast::Plan plan;
         if(!refused) {
             std::array<glyphcast::Slot,skills::Count> slots{};
@@ -4527,8 +4544,11 @@ void Input() {
             const bool follows=recognised&&interaction::GlyphFollows(interactionInput.glyphSkills,hand,int(r.shape));   // a left shape with none of its own
             const char* whose=hand==1?"left":"right";
             const auto known=interaction::GlyphSkill(quickSnapshot,skill);
+            char recharging[64];const char* cooling=recognised?CooldownRefusal(cooldownsOn,quickSnapshot,skill,GetTickCount64(),recharging):nullptr;
             const char* refused=stroke.event==glyphcast::Event::Refused?r.why:skill<0?"no skill on it (the wheel's GLYPHS page)":
-                !known.known?(skill==359?"no Town Portal scroll or tome":"not this hero's skill"):!known.available?"the skill is unavailable now":glyphCast.Busy()?"the last glyph is still casting":nullptr;
+                !known.known?(skill==359?"no Town Portal scroll or tome":"not this hero's skill"):!known.available?"the skill is unavailable now":
+                cooling?cooling:glyphCast.Busy()?"the last glyph is still casting":nullptr;
+            if(refused&&refused==cooling)cooldownTicks.Refused(skill,hand,GetTickCount64());   // a tick on the drawing hand once it is ready
             glyphcast::Plan plan;
             if(!refused) {
                 std::array<glyphcast::Slot,skills::Count> slots{};
@@ -4648,7 +4668,8 @@ void Input() {
                     doneLand==spellmotion::Land::Pointed&&PointedCell(summonX,summonY,pointed));
                 if(summonKnown)doneAim=doneLand==spellmotion::Land::Spot?math::Vec{doneSpot.right,0,-doneSpot.ahead}:pointed;
                 bool cast=false;
-                if(doneMotion==spellmotion::Motion::FistOfHeavens&&interaction::GlyphSkill(quickSnapshot,skill).available) {
+                if(doneMotion==spellmotion::Motion::FistOfHeavens&&interaction::GlyphSkill(quickSnapshot,skill).available&&
+                   !(cooldownsOn&&cooldowns::Cooling(quickSnapshot.cooldowns,skill,GetTickCount64()))) {
                     // Fist of the Heavens' call: the monster the arm points at first (vrcam answers HeavensRequest), then
                     // the cast (below), at most HeavensWaitMs later. Every motion waits its second from now.
                     spellFreeAt=motionNow;spellGripCast=true;heavensPending=true;heavensAskedAt=motionAt;
@@ -4705,6 +4726,14 @@ void Input() {
                     }
                 }
             }
+        }
+        // A skill whose glyph or motion cast was refused while it recharged: a light tick on that hand as it is ready.
+        for(const auto& due:cooldownTicks.Step(quickSnapshot.cooldowns,GetTickCount64())) {
+            if(due.skill<0)break;
+            MotionPulse(due.hand,haptics::Category::Interaction,.2f,15000000);
+            char line[160];std::snprintf(line,sizeof line,"Frame skill cooldowns: %s ready - a tick on the %s hand (refused %.1f s before)",
+                motionName(due.skill).c_str(),due.hand?"left":"right",double(GetTickCount64()-due.since)/1000.0);
+            Say(line);
         }
         glyphPressRt=false;
         if(!quickFresh||!motionInput.active)glyphCast.Cancel();
@@ -4949,6 +4978,29 @@ void Input() {
             elementalLightElement[h].store(lit?int(hand.element):0);elementalLightOpacity[h].store(lit?hand.opacity:0.f);
             elementalLightAt[h].store(lit?now:0);
         }
+    }
+    {   // Skill cooldowns: the icons between the orbs (skill_cooldowns.h), only skills the player casts in VR - a hand slot,
+        // a glyph of either hand or a motion that is on (the skill its card casts now).
+        const auto now=GetTickCount64();
+        const auto& snapshot=interactionInput.snapshot;
+        const bool on=vrsettings::Read().values[settings::SkillCooldowns]>.5f&&
+            interaction::Fresh(snapshot,interactionInput.session,interactionInput.at)&&snapshot.cooldowns.known;
+        if(on) {
+            std::array<int,64> reach{};size_t n=0;
+            const auto add=[&](int id){if(id>=0&&n<reach.size()&&std::find(reach.begin(),reach.begin()+n,id)==reach.begin()+n)reach[n++]=id;};
+            for(const auto& k:snapshot.skills)if(k.known)add(k.id);
+            for(const auto& set:interactionInput.glyphSkills)for(const int id:set)add(id);
+            const int heroClass=snapshot.skillClass;
+            const auto page=spellmotion::PageOf(heroClass);
+            for(int i=0;i<page.count;++i) {
+                const int card=page.skills[i];
+                if(!spellmotion::On(heroClass,card,interactionInput.motionsOff))continue;
+                add(card);add(spellmotion::CastSkillOf(card,[&](int id){return interaction::GlyphSkill(snapshot,id).known;}));
+            }
+            cooldownTracker.Update(interactionInput.session,snapshot.cooldowns,now,
+                [&](int skill){return std::find(reach.begin(),reach.begin()+n,skill)!=reach.begin()+n;});
+            interactionOutput.cooldowns=cooldownTracker.Shown(now);
+        } else {cooldownTracker.Reset();interactionOutput.cooldowns={};}
     }
     if(interactionInput.active||leatherHudVitals) {   // the HUD held with the menu repaints its vitals too
         const bool snapshotFresh=interaction::Fresh(interactionInput.snapshot,interactionInput.session,interactionInput.at);

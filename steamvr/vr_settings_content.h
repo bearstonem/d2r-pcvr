@@ -608,6 +608,8 @@ inline constexpr Override Overrides[]={
     {.id="interactions.vitals_tilt",.page=View::Wrist,.section="Life and mana",.kind=RowKind::Slider,.label="Life and mana tilt",
      .help="Tilts the health and mana display on your hand; + tips its top toward you. The minimap keeps its own angle.",
      .format={.unit=Degrees,.sign=true}},
+    {.id="interactions.skill_cooldowns",.page=View::Wrist,.section="Life and mana",.kind=RowKind::Toggle,.label="Skill cooldowns",
+     .help="Dimmed icons of up to three recharging skills between the orbs, filling back with color. A glyph or motion cast of one is refused; a tick says it is ready."},
     // Wrist: Map
     {.id="interactions.navigation_location",.page=View::Wrist,.section="Map",.kind=RowKind::Choice,.label="Map and compass",
      .help="Which left-hand gesture shows the minimap and compass, separately from health and mana.",
