@@ -983,7 +983,10 @@ Shot, Exploding Arrow, Ice Arrow, Guided Arrow, Strafe, Immolation Arrow and
 Freezing Arrow**. One deliberate draw/release sends one short native skill-button
 press. Multiple Shot keeps the game's fan, Strafe keeps its automatic targeting,
 volley count and sequence, and elemental/Guided arrows keep native effects and
-homing. Drawing farther does not multiply damage or arrow count. A fresh trigger
+homing. On a face button, Multiple Shot, Guided Arrow and Strafe load like the
+quiver's arrow skills (#364): the press casts nothing, every following draw and
+release sends that button's native press, and pressing it again returns to basic
+arrows. Drawing farther does not multiply damage or arrow count. A fresh trigger
 press away from the string keeps point-and-trigger casting; moving into the
 string while that press is held cannot also nock an arrow. Quick casting remains
 point-and-trigger. Unknown skills and crossbows retain their native fallback.
