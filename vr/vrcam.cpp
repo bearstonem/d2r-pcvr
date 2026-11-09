@@ -4033,7 +4033,7 @@ void Tick() {
     const auto s = targetlock::Get();
     const bool fresh = wanted && !gamestate::MenuOpen() && s.at && GetTickCount64() - s.at <= 500;
     aimtargets::Tick(fresh ? &s : nullptr);
-    // A Fist of the Heavens call (heavens_gesture.h): the monster nearest the
+    // A Fist of the Heavens call (motions_paladin.h): the monster nearest the
     // weapon arm's line, in the same cone and reach as the hands' picks, is
     // handed to the game's target query for the skill (RulesUnit). None: no
     // hand-off, the game picks its own target. Whatever the Aim options.

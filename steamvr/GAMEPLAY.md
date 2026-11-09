@@ -2242,10 +2242,18 @@ transformed casts the skill again, which returns you to human form; a 1.5 s
 cooldown after each cast stops one sloppy performance from casting twice. A
 performance is ignored while a hand is busy (trigger squeezed, bottle held, bow
 drawn, face wipe), while menus or the wheel are open, without both grips held,
-and with its card off. Both controllers pulse once
-when the cast is issued. Thresholds live in `shapeshift::Tuning`
-(`steamvr/shapeshift_gesture.h`); `shapeshift-gesture-test` walks both
-performances, lazy and partial versions, loot stooping and overhead swings.
+and with its card off. As every class's motions (since 2026-11-08, on the
+motions' engine: see Motions under Glyph casting), both controllers hum once the
+first part is done (the arms crossed, or the hands overhead), stronger as the
+performance nears its cast, and pulse together when the cast is issued; it casts
+through the same press as the other motions (`motionCast`). Each form's watcher
+runs the whole performance, so one form's stance in progress keeps the other from
+starting, as before. The log has a `Frame spell motion:` line per cast and
+`Frame shapeshift: dropped at <stage>: <why>` lines for each performance given
+up. Thresholds live in `spellmotion::druid::Tuning` (`steamvr/motions_druid.h`,
+unchanged from the gesture's own engine); `motions-druid-test` walks both
+performances, lazy and partial versions, loot stooping and overhead swings, and
+the hum rising before each cast.
 The skill picker and the hand wheel tag Werewolf and Werebear GESTURE on any
 slot, and the hand cue reads "Both grips, bow, fling" / "Both grips, slam
 down" while Weapon skill gestures is on.
@@ -2274,12 +2282,18 @@ game's cast rate is a press the game ignores, as with the button. The hammer's
 heading comes from the usual aim rules (the outlined monster, else where you
 point or look). A pump is ignored while that hand is busy (trigger squeezed,
 bottle or other held item, bow drawn, face wipe) and while menus or the wheel
-are open. The punching hand gets a short pulse when the cast is issued. The log
-has a `Frame spell motion:` line per cast and `Frame hammer:` lines for each
-abandoned punch (why) and when the skill is unavailable.
-Thresholds live in `hammerpump::Tuning` (`steamvr/hammer_gesture.h`);
-`hammer-gesture-test` covers both hands, holding high, re-loading, open hands,
-slow raises, stalled and forward punches.
+are open. As every class's motions (since 2026-11-08, on the motions' engine),
+both controllers hum while a fist punches up, stronger as it nears the top, and
+pulse together when the cast is issued; a fist resting below the head does not
+hum. Each fist pumps on its own: one fist's hammer leaves the other's punch going,
+and a pump starts no wait and leaves the other motions' watchers be. The log has a
+`Frame spell motion:` line per cast (including one that was not cast: the skill
+unavailable, or the last press still held) and `Frame hammer:` lines for each
+abandoned punch (why).
+Thresholds live in `spellmotion::paladin::HammerTuning` (`steamvr/motions_paladin.h`,
+unchanged from the gesture's own engine); `motions-paladin-test` covers both hands,
+holding high, re-loading, open hands, slow raises, stalled and forward punches,
+two fists a moment apart, and the hum.
 
 ### Paladin Charge punch
 
@@ -2310,12 +2324,17 @@ the rush, mana and hit stay native. "Extended" scales with the calibrated arm
 span (28 % of it, 0.38-0.60 m ahead of the head; 0.45 m without calibration).
 The weapon hand is the right hand. A punch is ignored while that hand is busy
 (trigger squeezed, bottle or other held item, bow drawn, face wipe) and while
-menus or the wheel are open. The weapon hand gets a short pulse when the cast
-is issued. The log has a `Frame spell motion:` line per cast and `Frame charge:`
-lines for each abandoned punch (why) and when the skill is unavailable. Thresholds live in `chargepunch::Tuning`
-(`steamvr/charge_gesture.h`); `charge-gesture-test` covers headings, holding
-out, re-loading, open and busy hands, slow reaches, half punches, the hammer's
-upward punch, chops, slashes, jabs from an extended arm, and arm-span scaling.
+menus or the wheel are open. As every class's motions (since 2026-11-08, on the
+motions' engine), both controllers hum while the fist punches out, stronger as the
+arm nears full extension, and pulse together when the cast is issued; a fist
+resting drawn back does not hum. The log has a `Frame spell motion:` line per cast
+(including one that was not cast: the skill unavailable, or the last press still
+held) and `Frame charge:` lines for each abandoned punch (why). Thresholds live in
+`spellmotion::paladin::ChargeTuning` (`steamvr/motions_paladin.h`, unchanged; its
+distances are the hands' own metres, the extension following the arm span, not the
+motions' body scale); `motions-paladin-test` covers headings, holding out,
+re-loading, open and busy hands, slow reaches, half punches, the hammer's upward
+punch, chops, slashes, jabs from an extended arm, arm-span scaling and the hum.
 
 ### Paladin Holy Shield sign of the cross
 
@@ -2332,13 +2351,16 @@ gestures** is on:
 
 The sign presses the controller button Holy Shield is assigned to, or on no
 button casts through the right trigger's record (pressing still casts it). Mana, duration and
-the shield's glow stay native. The spots are head-relative boxes in
-`holycross::Tuning` (`steamvr/cross_gesture.h`); `cross-gesture-test` covers
-both shoulder orders, either hand, a flowing sign, the cooldown, wrong orders,
-a face wipe, fast swings through the spots and a session reset. The skill
-picker tags Holy Shield GESTURE on any slot ("Both grips, sign a cross"). The log
-has a `Frame spell motion:` line per cast and `Frame holy shield:` lines per sign
-abandoned after the chest touch and when the skill is unavailable.
+the shield's glow stay native. As every class's motions (since 2026-11-08, on the
+motions' engine), both controllers hum from the forehead's touch, stronger at each
+touch after it, and pulse together when the cast is issued. The spots are
+head-relative boxes in `spellmotion::paladin::CrossTuning` (`steamvr/motions_paladin.h`,
+unchanged); `motions-paladin-test` covers both shoulder orders, either hand, a
+flowing sign, the cooldown, wrong orders, a face wipe, fast swings through the
+spots, a session reset and the hum. The skill picker tags Holy Shield GESTURE on
+any slot ("Both grips, sign a cross"). The log has a `Frame spell motion:` line per
+cast (including one that was not cast: the skill unavailable, or the last press
+still held) and `Frame holy shield:` lines per sign abandoned after the chest touch.
 
 ### Paladin Fist of the Heavens call
 
@@ -2375,11 +2397,16 @@ still casts it. While the skill is learned and its card on, the monster scan run
 (vrcam answers the call: `HeavensRequest` / `HeavensResolved`, then the slot or
 the record is pressed, at most 120 ms later), and the
 pointed monster is handed to the game's target query for 500 ms (`RulesUnit`).
-Thresholds: `heavensfist::Tuning` (`steamvr/heavens_gesture.h`);
-`heavens-gesture-test`. Logs: `Frame heavens:` (the first casts, every 25th,
-any cast without an answer, abandoned calls with their angles) and
-`Frame heavens aim:` (per call: handed or the game's pick). The skill picker
-tags it GESTURE ("Both grips, raise, drop").
+As every class's motions (since 2026-11-08, on the motions' engine), both
+controllers hum from the raised straight arm, stronger as it comes down toward the
+shoulder's level, and pulse together when the cast is issued (after the hand-off).
+Thresholds: `spellmotion::paladin::HeavensTuning` (`steamvr/motions_paladin.h`,
+unchanged; the hands' own metres, the reach following the arm span);
+`motions-paladin-test`. Logs: `Frame heavens:` (through a slot the first casts,
+every 25th and any cast without an answer, through the right trigger's record
+every one, saying which; abandoned calls with their angles), `Frame heavens aim:`
+(per call: handed or the game's pick) and `Frame spell motion:` (per cast, or why
+it was not). The skill picker tags it GESTURE ("Both grips, raise, drop").
 
 ### Glyph casting
 
@@ -2475,16 +2502,27 @@ Every class with motions (owner, 2026-11-04: "Both grips, like Sorceress"). The 
 (Charge, Blessed Hammer, Holy Shield, Fist of the Heavens) and the Druid's (Werewolf, Werebear) take
 the same gate (`spellmotion::Gate`: both grips held, the hands free, Weapon skill gestures on) and
 their own MOTIONS page (the same box, `spellmotion::PageOf`; `[motions] paladin_off` and
-`[motions] druid_off`, one bit a card; the Sorceress's `[motions] off` keeps her bits). Each gesture
-keeps its own detector and tuning; one grip, or none, no longer casts any of them. They watch the
-frame the grips open as well (`Gate::State::watch`), so Fist of the Heavens still ends on the fists
-opening. No button needed: on a slot the gesture presses it as before, else it casts through the right
-trigger's record (Fist of the Heavens after its monster hand-off; Charge's melee contacts held as for
-the slot). Then every motion waits a second, except Blessed Hammer's pumps (one hammer a punch, as fast
-as the cast rate, and they never start the wait). Each cast logs one `Frame spell motion:` line.
-Tests: `spell-motion-test` (the pages, the gate), each gesture's test (gated: one grip or none never
-casts, both do), `interaction-test` (the Paladin's and the Druid's pages; no box for the Warlock or an unknown class),
-`interaction-motions-test` (the Paladin's page drawn).
+`[motions] druid_off`, one bit a card; the Sorceress's `[motions] off` keeps her bits); one grip, or
+none, casts none of them. Until 2026-11-08 each ran its own detector; the owner, in the headset:
+"Sorceress' motion gestures produce haptic feedback through vibrations but paladin motions do not ...
+We should migrate those older detectors". Now they are watchers on the same engine, in their class's
+order (`spellmotion::OrderOf`: Holy Shield, Fist of the Heavens, Charge, Blessed Hammer; Werewolf,
+Werebear), with their geometry, thresholds and timing unchanged (`motions_paladin.h`, `motions_druid.h`:
+the hands' own metres rather than the body scale, the runtime's hand velocity when it gives one, the
+grips as pulled for a fist, each gesture's own rest after its cast: `spellmotion::ClassRest`). So they
+hum warmer/colder as the others do (`Output::progress`), cast through `motionCast` (both controllers
+pulse; its hand slot, else the right trigger's record: Fist of the Heavens after its monster hand-off,
+Charge's melee contacts held however it was pressed), and every other watcher starts over after one of
+them casts. They watch the frame the grips open as well (`spellmotion::WatchesOpening`,
+`Gate::State::watch`), so Fist of the Heavens still ends on the fists opening. Then every motion waits a
+second, except Blessed Hammer's pumps (`spellmotion::Rapid`: one hammer a punch, as fast as the cast
+rate; they never start the wait and leave the other watchers be). Each cast logs one `Frame spell motion:`
+line, and each gesture given up partway its old line (`spellmotion::DropLine`: `Frame hammer:`,
+`Frame charge:`, `Frame holy shield:`, `Frame heavens:`, `Frame shapeshift:`). Tests: `spell-motion-test`
+(the pages, the gate, every class's cards watched), `motions-paladin-test` and `motions-druid-test` (their
+own engines' tests on the watchers, gated: one grip or none never casts, both do; and the hum rising before
+each cast), `interaction-test` (the Paladin's and the Druid's pages; no box for the Warlock or an unknown
+class), `interaction-motions-test` (the Paladin's page drawn).
 
 The Amazon's, the Barbarian's, the Necromancer's and the Assassin's motions (owner, 2026-11-04: "also
 have multiple agents implement the motions", from the drafted table: codes A1-A4, B1-B8, N1-N8
@@ -2563,7 +2601,9 @@ overhead, the right hand pointing still, a pose taken), then `Begun` rising to 1
 nears its end, and lower again when the hands go the wrong way. While the grips are held and no
 motion has just cast, both controllers hum from that, a 70 ms pulse every 50 ms, from 6% to 36% as
 it nears the cast; Haptics' Spell strength in VR Settings scales it. The Paladin's and the Druid's
-gestures (their own detectors) and Teleport's punch do not hum.
+gestures hum too since 2026-11-08 (the owner: "paladin motions do not"): from the fist punching (Charge,
+Blessed Hammer), the forehead's touch (Holy Shield), the straight arm raised (Fist of the Heavens), the
+arms crossed (Werewolf) or the hands overhead (Werebear). Teleport's punch does not hum.
 
 Every threshold is from simulated hands until a headset session tunes it. Tests: one per class
 (`motions-amazon-test`, `-barbarian-test`, `-necromancer-test`, `-assassin-test`, on `motion_sim.h`):

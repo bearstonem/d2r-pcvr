@@ -190,11 +190,6 @@ add_executable(zeal-light-test zeal_light_test.cpp)
 add_executable(loot-beams-test loot_beams_test.cpp)
 add_executable(skill-usage-test skill_usage_test.cpp)
 add_executable(shield-guard-test shield_guard_test.cpp)
-add_executable(shapeshift-gesture-test shapeshift_gesture_test.cpp)
-add_executable(hammer-gesture-test hammer_gesture_test.cpp)
-add_executable(charge-gesture-test charge_gesture_test.cpp)
-add_executable(cross-gesture-test cross_gesture_test.cpp)
-add_executable(heavens-gesture-test heavens_gesture_test.cpp)
 add_executable(tactical-chord-test tactical_chord_test.cpp)   # the mercenary commands: Grip + Trigger
 add_executable(glyph-recognizer-test glyph_recognizer_test.cpp)   # glyph casting: the eight shapes ($P, corners, build)
 add_executable(glyph-trail-test glyph_trail_test.cpp)   # glyph casting: the trail's painting
@@ -204,6 +199,8 @@ add_executable(motions-amazon-test motions_amazon_test.cpp)
 add_executable(motions-barbarian-test motions_barbarian_test.cpp)
 add_executable(motions-necromancer-test motions_necromancer_test.cpp)
 add_executable(motions-assassin-test motions_assassin_test.cpp)   # a glyph readies a spell, its motion casts it
+add_executable(motions-paladin-test motions_paladin_test.cpp)   # Charge, Blessed Hammer, Holy Shield, Fist of the Heavens
+add_executable(motions-druid-test motions_druid_test.cpp)   # Werewolf, Werebear
 add_executable(guard-strain-test guard_strain_test.cpp)
 add_executable(heartbeat-test heartbeat_test.cpp)
 add_executable(run-speed-test run_speed_test.cpp)
@@ -380,7 +377,7 @@ set_tests_properties(light-bounds-test PROPERTIES TIMEOUT 30)
 foreach(test_target IN ITEMS memory-test biome-list-test hook-metrics-test active-keys-test resource-descriptions-test latest-worker-test haptic-pulse-test thread-stats-test
     gameplay-test weapon-skills-test quick-cast-test hand-controls-test elemental-hands-test elemental-particles-test skill-pad-test interact-press-test sewer-interaction-test notice-card-test mod-layout-test spell-aim-test bow-pose-test crossbow-pose-test body-tracking-test shapeshift-form-test head-shadow-test shield-steady-test body-calibration-test shoulder-swap-test blood-screen-test
     portal-billboard-test shrine-trace-test shrine-placement-test overlay-view-test bone-armor-height-test composition-layers-test projectile-rules-test environment-cutaway-test roof-materials-test game-ceiling-test stereo-prop-physics-test dropped-bottles-test props-test limb-rig-test limb-physics-test leather-menu-test stats-button-test menu-drop-test arcane-decay-test respec-button-test
-    combat-rules-test strike-skills-test zeal-light-test skill-usage-test shield-guard-test shapeshift-gesture-test guard-strain-test heartbeat-test run-speed-test room-scale-test room-steps-test walk-direction-test logging-test melee-contact-test melee-weapon-test breakables-test offline-difficulty-test enemy-sight-test attack-speed-test world-coordinates-test bow-flight-test bow-laser-test spell-cast-test spell-aim-assist-test hammer-gesture-test charge-gesture-test tactical-chord-test glyph-recognizer-test glyph-trail-test glyph-cast-test spell-motion-test motions-amazon-test motions-barbarian-test motions-necromancer-test motions-assassin-test cross-gesture-test heavens-gesture-test bone-graft-test
+    combat-rules-test strike-skills-test zeal-light-test skill-usage-test shield-guard-test guard-strain-test heartbeat-test run-speed-test room-scale-test room-steps-test walk-direction-test logging-test melee-contact-test melee-weapon-test breakables-test offline-difficulty-test enemy-sight-test attack-speed-test world-coordinates-test bow-flight-test bow-laser-test spell-cast-test spell-aim-assist-test tactical-chord-test glyph-recognizer-test glyph-trail-test glyph-cast-test spell-motion-test motions-amazon-test motions-barbarian-test motions-necromancer-test motions-assassin-test motions-paladin-test motions-druid-test bone-graft-test
     interaction-test dev-scenarios-test native-belt-test wrist-hud-test map-zoom-test navigation-info-test companions-test active-effects-test dropped-item-labels-test stick-gestures-test show-items-command-test native-hud-test render-resolution-test render-pointer-test scene-depth-test game-device-only-test controller-bindings-test journal-test native-panels-test talk-stop-test loot-beams-test
     vr-settings-test vr-settings-layout-test vr-settings-pointer-test vr-settings-store-test controller-labels-test math-test deferred-draw-test monster-bars-test loot-aim-test telegraph-test aim-reach-test aim-rules-test target-cone-test gaze-test window-focus-test callback-ticket-test local-player-test shield-block-test trigger-melee-test companion-ai-test torch-light-test frame-generation-test turn-capture-test panel-atlas-test far-objects-test)
   # These fixtures use assert for their checks, including in Release builds.

@@ -95,7 +95,7 @@ int main() {
         Check(spellmotion::PageOf(0).count==4&&spellmotion::PageOf(4).count==10&&spellmotion::PageOf(2).count==12&&spellmotion::PageOf(6).count==7,
               "the Amazon's 4, the Barbarian's 10 (Leap Attack and Whirlwind after the table's), the Necromancer's 12 (the table's, the left arm's golem, Bone Wall, Poison Explosion, Raise Skeletal Mage), the Assassin's 7");
         for(int c:{7,-1})Check(!spellmotion::HasMotions(c)&&spellmotion::PageOf(c).count==0,"no motions for the Warlock or an unknown class");
-        for(int c:{0,2,4,6}) {   // their cards' motions are the engine's, each watched in the class's order exactly once
+        for(int c:{0,2,3,4,5,6}) {   // their cards' motions are the engine's (the Paladin's and the Druid's since 2026-11-08), each watched in the class's order exactly once
             const auto page=spellmotion::PageOf(c);const auto order=spellmotion::OrderOf(c);
             Check(page.count<=spellmotion::MaxCards&&order.count==page.count,"a watcher per card");
             for(int i=0;i<page.count;++i) {
@@ -151,8 +151,8 @@ int main() {
         st=gate.Step(none,true);Check(!st.open&&st.watch&&!st.held,"the frame the grips open is still watched (a gesture may end on it)");
         st=gate.Step(none,true);Check(!st.open&&!st.watch,"then not");
     }
-    Check(spellmotion::For(36)==Motion::None&&spellmotion::For(117)==Motion::None,
-        "Fire Bolt and a Paladin skill have no motion: their glyph casts as before");
+    Check(spellmotion::For(36)==Motion::None&&spellmotion::For(101)==Motion::None&&spellmotion::For(117)==Motion::HolyShield,
+        "Fire Bolt and Holy Bolt have no motion: their glyph casts as before (Holy Shield's sign is a motion since 2026-11-08)");
     {   // a body of another size (owner, 2026-11-05: calibration to make the motions "more accurate"): its hands
         // in the reference body's units by the calibrated span, capped at 0.8-1.2
         Check(spellmotion::BodyScale(spellmotion::ReferenceSpan)==1&&spellmotion::BodyScale(0)==1&&spellmotion::BodyScale(std::nanf(""))==1&&
