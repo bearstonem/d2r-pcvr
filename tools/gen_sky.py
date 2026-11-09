@@ -5,11 +5,13 @@
     python gen_sky.py act1 --install  # and copy into the game's reshade-shaders\\Textures
     python gen_sky.py act1 --edit norain   # redraw the raw picture with a fix from EDITS (old one kept as act1_vN.png)
 
-The picture is a band around the viewer: its bottom edge is a little under the
-horizon, its top about 70 degrees up; the shader fades from its top rows into
-their average colour toward the zenith and wraps it twice around the circle
-(1536 px for 360 degrees would be too soft in a headset). Left and right edges
-are blended so the wrap has no seam.
+The picture is a band around the viewer: its bottom edge 8 degrees under the
+horizon, its top 65 degrees up; above 40 degrees the shader hands over to the
+zenith picture (the cap). The shader's band goes once round the circle at
+3072x1024 (3:1), so a painted landmark is seen once. The model draws 1536x1024,
+too soft for 360 degrees in a headset, so its picture is laid twice side by side
+(round_once): the look of the old band wrapped twice. Left and right edges are
+blended so the wrap has no seam.
 
 The key comes the way fractal_game's bestiary scripts take it: OPENAI_API_KEY,
 else C:\\wsl\\unity_add_walk\\fractal_game\\key.conf.
@@ -185,9 +187,14 @@ def seamless_x(a):
     return a * (1 - k) + b * k
 
 
+def round_once(a):
+    """The shader's band goes once round the circle (3072 px): a 1536 px picture laid twice side by side."""
+    return np.concatenate([a, a], 1)
+
+
 def build(name, raw):
     a = np.asarray(Image.open(raw).convert("RGB"), np.float32)
-    a = seamless_x(a)
+    a = round_once(seamless_x(a))
     out = OUT / f"D2R_Sky_{name}.png"
     Image.fromarray(a.clip(0, 255).astype(np.uint8)).save(out)
     top = a[:24].reshape(-1, 3).mean(0) / 255.0

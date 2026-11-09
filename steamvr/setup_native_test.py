@@ -399,16 +399,15 @@ class NativeSetupTests(unittest.TestCase):
                         selected = native.validate_choices({**values, 'headset': 'Quest 3', 'connections': 'steamvr,vdxr'}, app)
                         self.assertEqual(selected['connections'], ['steamvr', 'vdxr'])
 
-    def test_rejects_wrong_game_build_and_missing_battlenet_payload_before_writes(self):
+    def test_rejects_missing_battlenet_payload_but_no_game_build_before_writes(self):
         with tempfile.TemporaryDirectory() as directory:
             app, game, client, saves, profile, values = self.fixture(Path(directory), 'battlenet')
             with patch.object(setup, 'verify_release', return_value={'sha256': {}}):
                 with self.assertRaisesRegex(ValueError, 'does not include Battle.net'):
                     native.validate_choices(values, app)
-            self.put(game / 'D2R.exe', b'new unsupported version')
+            self.put(game / 'D2R.exe', b'a game build this release never saw')
             with patch.object(setup, 'verify_release', return_value={'sha256': {'bin/CascLib.dll': 'fixture'}}):
-                with self.assertRaisesRegex(ValueError, 'does not match'):
-                    native.validate_choices(values, app)
+                self.assertEqual(native.validate_choices(values, app)['version'], 'unknown')
             self.assertEqual(list(app.iterdir()), [])
 
     def test_utf8_and_utf16_choices_preserve_unicode_and_spaces(self):

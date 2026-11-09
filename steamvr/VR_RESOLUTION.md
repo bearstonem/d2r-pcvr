@@ -77,8 +77,8 @@ sky or fog across nearby scenery. The private channel requires a matching
 color target, a current-eye binding and a known resource state. It clears
 stale/destroyed resources and suppresses depth effects if no suitable source
 is available. Desktop rendering retains ReShade's normal depth channel.
-Update both `d2rl-pcvr.dll` and `reshade-shaders/Shaders/D2R_DepthFog.fx`
-together when testing this fix.
+Update `d2rl-pcvr.dll` and the shader (`reshade-shaders/Shaders/D2R_DepthFog.fx` and every
+`D2R_*.fxh` beside it) together when testing this fix.
 
 Native inventory/character workspaces and the main menu fit inside their
 original widescreen-sized VR surfaces. Square and portrait render targets

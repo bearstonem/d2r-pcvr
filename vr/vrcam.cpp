@@ -37,9 +37,11 @@
 #include "../steamvr/arm_pointing.h"
 #include "../steamvr/aim_reach.h"
 #include "../steamvr/torch_light.h"
+#include "../steamvr/light_radius.h"
 #include "../steamvr/elemental_hands.h"
 #include "../steamvr/leather_menu.h"
 #include "../steamvr/head_shadow.h"
+#include "../steamvr/head_skip.h"
 #include <tlhelp32.h>
 #include <intrin.h>
 #include <xinput.h>
@@ -138,6 +140,9 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "target_lock.h"
 #include "bow.h"
 #include "loot_beam_scan.h"
+#include "monster_immunity.h"
+#include "monster_position_signatures.h"
+#include "../steamvr/monster_position.h"
 #include "wall_cells.h"
 #include "prop_scan.h"
 #include "crossbow.h"
@@ -160,6 +165,7 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "../steamvr/panel_input_mode.h"
 #include "pad_mirror_shared.h"
 #include "../steamvr/talk_stop.h"
+#include "../steamvr/sheet_walk.h"
 #include "../steamvr/room_stitch.h"
 #include "../steamvr/ceiling_top.h"
 namespace gamestate {uint32_t TalkOpens();}   // NPC conversations opened (talk_stop.h)
@@ -347,6 +353,13 @@ struct Settings {
     std::atomic<float> torchRadius{18.0f};       // [torch] radius: world units of light reach (28 looked too intense in the headset)
     std::atomic<bool>  torchFlicker{true};       // [torch] flicker: organic turbulent flame flicker
     std::atomic<float> torchWarmth{0.65f};       // [torch] warmth: color warmth toward fire orange
+    // The hero's Light Radius in VR (#440, light_radius.h): it widens the vault's light and the hero light.
+    std::atomic<bool>  heroLight{true};          // [light] hero_light: a modest light of ours round the hero in dungeons the vault does not roof
+    std::atomic<float> heroLightStrength{0.25f}; // [light] hero_strength
+    std::atomic<float> heroLightReach{20.0f};    // [light] hero_reach: world units, with no Light Radius gear
+    std::atomic<float> lightRadiusBase{0.0f};    // [light] radius_base: what stat 89 reads with no Light Radius gear
+    std::atomic<float> lightRadiusPoints{10.0f}; // [light] radius_points: the hero's own light in the stat's points
+    std::atomic<float> lightRadiusBoost{150.0f}; // [light] radius_boost_pct (VR Settings > Graphics > Environment > Light Radius boost)
     std::atomic<int>   armsMode{0};        // 0 game animation, 1 test pose (arms ahead), 2 controllers
     std::atomic<bool>  hideHead{false};     // hide the hero's head from the eyes (first person): shrunk, or cut (headShadow)
     std::atomic<bool>  headShadow{true};    // [arms] head_shadow: the hidden head stays whole for its shadow, the eye views cut it (head_shadow.h)
@@ -706,6 +719,7 @@ SkyAct g_skyAct[7];
 struct CaveFog { float rgb[3]; bool set; };
 CaveFog g_caveFog{};
 std::atomic<uint32_t> g_skyCfgGen{0};   // bumped when a picture name changes
+std::atomic<bool> g_immunityTextureReady{false};
 std::atomic<bool> g_arcaneSkyReady{false}; // locally prepared native star/cloud maps
 
 std::string Utf8(const wchar_t* w) {
@@ -828,6 +842,8 @@ void LoadCeilingTextures() {
 }
 
 void LoadSkyActs() {
+    const bool immunityTexture = SkyFileExists(L"PCVR_Immunity/feral_glow.png");
+    if (g_immunityTextureReady.exchange(immunityTexture) != immunityTexture) g_skyCfgGen.fetch_add(1);
     const bool arcane = SkyFileExists(L"PCVR_Arcane/stars.png") && SkyFileExists(L"PCVR_Arcane/clouds.png") &&
         GetFileAttributesW((ReShadeDir() + L"..\\pcvr-arcane-sky.json").c_str()) != INVALID_FILE_ATTRIBUTES;
     if (g_arcaneSkyReady.exchange(arcane) != arcane) g_skyCfgGen.fetch_add(1);
@@ -1450,6 +1466,13 @@ void LoadSettings() {
     g_set.torchRadius.store(std::clamp(IniF(L"torch", L"radius", 18.0f), 5.0f, 60.0f));
     g_set.torchFlicker.store(IniB(L"torch", L"flicker", true));
     g_set.torchWarmth.store(std::clamp(IniF(L"torch", L"warmth", 0.65f), 0.0f, 1.0f));
+    g_set.heroLight.store(IniB(L"light", L"hero_light", true));
+    g_set.heroLightStrength.store(std::clamp(IniF(L"light", L"hero_strength", 0.25f), 0.0f, 2.0f));
+    g_set.heroLightReach.store(std::clamp(IniF(L"light", L"hero_reach", 20.0f), 5.0f, 80.0f));
+    g_set.lightRadiusBase.store(std::clamp(IniF(L"light", L"radius_base", 0.0f), -50.0f, 100.0f));
+    g_set.lightRadiusPoints.store(std::clamp(IniF(L"light", L"radius_points", 10.0f), 1.0f, 100.0f));
+    g_set.lightRadiusBoost.store(std::clamp(IniF(L"light", L"radius_boost_pct", 150.0f),
+                                            framevr::lightradius::MinBoostPct, framevr::lightradius::MaxBoostPct));
     LoadCeilingBiomes();
     LoadCeilingTextures();
     g_set.armsMode.store(std::clamp((int)IniF(L"arms", L"mode", 0.0f), 0, 2));
@@ -1474,6 +1497,11 @@ void LoadSettings() {
                                                                          : "the hidden head shrinks to the neck, its shadow headless");
         }
     }
+#ifdef D2RVR_NATIVE_OPENXR
+    // [arms] head_skip_draws: with the head kept for its shadow, the helm is left out of the eye views' draws and kept in
+    // the shadow's (steamvr/head_skip.h); [debug] head_skip: its line every second while armed (0: every 10 s)
+    headskip::Configure(IniB(L"arms", L"head_skip_draws", true), IniB(L"debug", L"head_skip", true));
+#endif
     g_set.armScale.store(std::clamp(IniF(L"arms", L"scale", 1.0f), 0.3f, 3.0f));
     g_set.poseOrderLog.store(IniB(L"debug", L"pose_order", false));
     g_set.frameLog.store(IniB(L"debug", L"frame_log", false));
@@ -3042,14 +3070,22 @@ bool VrProjInner(const d2rcam::WorldView& in, float M[16]) {
 #if D2RVR_FIRST_PERSON
     // First person in full body with the head kept whole for its shadow ([arms] hide_head and head_shadow, as PushArms
     // decides): nothing nearer than the cut at this head pitch is drawn, so the head is not seen from inside
-    // (steamvr/head_shadow.h). Not in a shapeshift form: its head shrinks as before.
+    // (steamvr/head_shadow.h). Not in a shapeshift form: its head shrinks as before. Every first-person pass goes
+    // through EyeNear, kept or not: the near moves at most 15 % a pass (a reader a pass behind, the depth fog's
+    // NearPlane, stays within that).
     if (!ThirdPerson() && !Overhead()) {
         const bool keep = g_set.headShadow.load() && g_set.hideHead.load() && FullBody() && !ShapeFormNow();
-        if (keep || headshadow::Holding()) {
-            const D2RVR_Shared* sh = g_shared;
-            const float pitch = sh && sh->version == D2RVR_SHARED_VERSION && sh->headValid && sh->pitchValid ? sh->headPitchDeg : NAN;
-            nearZ = headshadow::EyeNear(nearZ, keep, std::max(1.0f, ScaleHeight()) / UserEyeHeightM(), pitch);
-        }
+        const D2RVR_Shared* sh = g_shared;
+        const float pitch = sh && sh->version == D2RVR_SHARED_VERSION && sh->headValid && sh->pitchValid ? sh->headPitchDeg : NAN;
+        nearZ = headshadow::EyeNear(nearZ, keep, std::max(1.0f, ScaleHeight()) / UserEyeHeightM(), pitch);
+    }
+#endif
+#if D2RVR_FIRST_PERSON && defined(D2RVR_NATIVE_OPENXR)
+    {   // The hero's helm left out of this eye pass's draws and kept in its shadow's (steamvr/head_skip.h), armed while the
+        // head is kept for its shadow as above; the head itself keeps the cut.
+        const bool keepHead = !ThirdPerson() && !Overhead() && g_set.headShadow.load() && g_set.hideHead.load() && FullBody() && !ShapeFormNow();
+        const float eyeWorld[3] = {g_eyeWorld[0].load(), g_eyeWorld[1].load(), g_eyeWorld[2].load()};
+        headskip::EyePass(keepHead && g_eyeOk.load(), g_eye.load() & 1, eyeWorld, std::max(1.0f, ScaleHeight()) / UserEyeHeightM());
     }
 #endif
     g_lastNear.store(nearZ);
@@ -4020,7 +4056,8 @@ bool Wanted() {
     const bool tacticalActive = companionai::IsTacticalCommandsEnabled();
     return g_enabled.load() && g_inWorld.load() &&
         (TargetHighlightOn() || SpellsLocked() || BowSkillsLocked() ||
-         GroundAimMode() == 2 || tacticalActive || framevr::HeavensArmed());
+         GroundAimMode() == 2 || tacticalActive || framevr::HeavensArmed() ||
+         framevr::SeekerArrowReady());   // Guided Arrow homes on the aimed monster whatever the Aim options (aimrules::AlwaysHomes)
 }
 void Tick() {
     const bool wanted = Wanted();
@@ -4230,14 +4267,38 @@ bool MotionAim(int skill,float playerX,float playerY,framevr::spellaim::Cast& ca
 // per skill per 250 ms: the rule, the button, the target and where it came
 // from, a unit hand-off, and the point or heading sent to the game.
 bool UpstreamSpellAim(float playerX,float playerY,framevr::spellaim::Cast& cast);
+// Hands the game the aimed monster for a unit skill (aimrules::WantsUnit) when the target scan has
+// one: its target queries answer with it (RulesUnit). False, and any earlier hand-off dropped, when
+// there is none.
+bool HandOffUnit(const aimtargets::Cast& c) {
+    float mx=0,my=0,md=0;uint32_t id=0;
+    if(aimtargets::Resolve(c.button,c.bow,c.use,mx,my,md,&g_note.source,&id)&&worldobj::ClientMonster(id,mx,my)) {
+        // the button that cast it, while it is held: letting go drops the hand-off (aimtargets::Tick)
+        const bool pressed=framevr::CastButtonHand()==c.button||framevr::HandSpellHeld(c.button);
+        g_unitId.store(id);g_unitX.store(mx);g_unitY.store(my);g_unitButton.store(pressed?c.button:-1);g_unitAt.store(GetTickCount64());g_unitSkill.store(c.skill);
+        g_note.unit="handed";g_note.id=id;g_note.distance=md;g_note.by="unit";
+        return true;
+    }
+    if(id)g_note.unit="not found";
+    // Nothing handed this time: the game's target queries must not keep
+    // answering with the last hand-off's monster for up to 500 ms.
+    if(const int was=g_unitSkill.exchange(-1);!id&&framevr::aimrules::HandOffLive(was,g_unitAt.load(),GetTickCount64()))
+        g_note.unit="none (last hand-off dropped)";
+    return false;
+}
 bool NativeSpellAim(float playerX,float playerY,framevr::spellaim::Cast& cast) {
     g_note={};
     const auto c=aimtargets::Now();
     if(c.skill==132||c.skill==143)leapglide::g_cast.store(GetTickCount64());   // Leap, Leap Attack: the view glides through the take-off
     // Teleport on its shown landing or a thrown trap first; then the aim rules
-    // only with this kind of cast's Aim option On; Off, as before them.
-    const bool directed=MotionAim(c.skill,playerX,playerY,cast)||TossAim(c.skill,playerX,playerY,cast)||
-        (aimtargets::RulesOn(c)?NativeSpellAimDecide(playerX,playerY,cast):UpstreamSpellAim(playerX,playerY,cast));
+    // only with this kind of cast's Aim option On; Off, as before them - except
+    // Guided Arrow, handed the aimed monster whatever the option (aimrules::AlwaysHomes).
+    bool directed=MotionAim(c.skill,playerX,playerY,cast)||TossAim(c.skill,playerX,playerY,cast);
+    if(!directed) {
+        if(aimtargets::RulesOn(c))directed=NativeSpellAimDecide(playerX,playerY,cast);
+        else if(c.skill>=0&&framevr::aimrules::AlwaysHomes(c.skill)&&HandOffUnit(c)){g_note.by="unit (Guided Arrow always homes)";cast.directed=false;}
+        else directed=UpstreamSpellAim(playerX,playerY,cast);
+    }
     static ULONGLONG told=0;static int toldSkill=-2;
     if(c.skill>=0&&(c.skill!=toldSkill||GetTickCount64()-told>250)) {
         told=GetTickCount64();toldSkill=c.skill;
@@ -4278,23 +4339,9 @@ bool NativeSpellAimDecide(float playerX,float playerY,framevr::spellaim::Cast& c
             HandRay(o,d)&&framevr::spellaim::Horizontal({d[0],d[1],d[2]},cast.x,cast.y);
         return cast.directed;
     }
-    float mx=0,my=0,md=0;uint32_t id=0;
     // Only when the game's own unit is found here (the game thread): otherwise
     // the rule's heading or spot below (Guided Arrow flew into a wall).
-    if(c.skill>=0&&framevr::aimrules::WantsUnit(c.skill)&&aimtargets::SwitchOn(c)) {
-        if(aimtargets::Resolve(c.button,c.bow,c.use,mx,my,md,&g_note.source,&id)&&worldobj::ClientMonster(id,mx,my)) {
-            // the button that cast it, while it is held: letting go drops the hand-off (aimtargets::Tick)
-            const bool pressed=framevr::CastButtonHand()==c.button||framevr::HandSpellHeld(c.button);
-            g_unitId.store(id);g_unitX.store(mx);g_unitY.store(my);g_unitButton.store(pressed?c.button:-1);g_unitAt.store(GetTickCount64());g_unitSkill.store(c.skill);
-            g_note.unit="handed";g_note.id=id;g_note.distance=md;g_note.by="unit";
-            cast.directed=false;return false;
-        }
-        if(id)g_note.unit="not found";
-        // Nothing handed this time: the game's target queries must not keep
-        // answering with the last hand-off's monster for up to 500 ms.
-        if(const int was=g_unitSkill.exchange(-1);!id&&framevr::aimrules::HandOffLive(was,g_unitAt.load(),GetTickCount64()))
-            g_note.unit="none (last hand-off dropped)";
-    }
+    if(c.skill>=0&&framevr::aimrules::WantsUnit(c.skill)&&aimtargets::SwitchOn(c)&&HandOffUnit(c)){cast.directed=false;return false;}
     // Placed skills (ground skills - Bone Wall and Prison too - curses,
     // Teleport...): the point; the rest a heading.
     cast.directed=DirectedSpellAim(cast.x,cast.y);
@@ -5735,66 +5782,78 @@ void InstallMapClickHook() {
 // able to walk while this menu is open"). Under its menu the game runs no controller
 // walk (rev5: HookStickGet's walk call never came), so the left stick is turned into
 // what a held left click on bare ground does: a walk toward a point (MapClick, type 0
-// then 1 held, no Stand Still; inside it 0x101EF0), a few cells ahead along the stick
-// on the game's screen (isometric: screen right = grid +x -y, screen up = grid -x -y).
-// On the UI thread, ten times a second; never with a unit under the game's pointer (that
-// click would attack or talk); a release clicks the hero's own cell, so he stops.
+// then 1 held, no Stand Still; inside it 0x101EF0) a few cells ahead along the stick
+// on the game's screen. When, where, and the stop at the let-go: steamvr/sheet_walk.h,
+// stepped on the 1 ms timer; the clicks go on the UI thread. A walk click never with a
+// unit under the game's pointer (that click would attack or talk); nor a stop.
 namespace leatherwalk {
-std::atomic<int> g_state{0};   // 0 idle, 1 walking (the next click is a hold), 2 stop due
-std::atomic<uint64_t> g_target{0};   // grid x << 32 | grid y
+namespace sw = framevr::sheetwalk;
+sw::Walker g_walker;                 // the 1 ms timer's only
+std::atomic<uint64_t> g_post{0};     // the click due on the UI thread (Pack), 0 none: the newest wins
 std::atomic<bool> g_queued{false};
-std::atomic<uint32_t> g_sent{0},g_refused{0};
+std::atomic<uint32_t> g_sent{0},g_refused{0},g_stops{0};
+uint64_t Pack(const sw::Click& c) {
+    if (c.kind == sw::Kind::None) return 0;
+    return (uint64_t(c.kind) << 40) | (uint64_t(c.held) << 32) | (uint64_t(uint16_t(c.x)) << 16) | uint16_t(c.y);
+}
 void __cdecl Click(const D2RL::PluginContext*, void*) noexcept {
     g_queued.store(false);
-    if (g_mapClick.load() != 1 || !OrigMapClick || !gamestate::MenuOpen() || !framevr::LeatherMenuWorld()) return;
+    const uint64_t post = g_post.exchange(0);
+    if (!post || g_mapClick.load() != 1 || !OrigMapClick || !g_inWorld.load()) return;
+    const auto kind = sw::Kind((post >> 40) & 0xFF);
+    const bool held = ((post >> 32) & 1) != 0;
+    const int x = int((post >> 16) & 0xFFFF), y = int(post & 0xFFFF);
+    // A walk only under the held menu; a stop also just after it closed (let go as it shut).
+    if (kind == sw::Kind::Walk && (!gamestate::MenuOpen() || !framevr::LeatherMenuWorld())) return;
     uintptr_t hero = 0;
     if (!combat::LocalPlayerUnit(hero) || !hero) return;
     const int idx = ((ClientIndexFn)d2rsig::Addr(RVA_CLIENT_INDEX))(reinterpret_cast<void*>(hero));
     if (idx < 0 || idx >= 8) return;
-    const int state = g_state.load();
-    float px = 0, py = 0;
-    if (!SpellPlayerPosition(reinterpret_cast<void*>(hero), px, py)) return;
-    int x = int(px), y = int(py), type = 0;
-    if (state == 2) { g_state.store(0); }   // stop: a click on his own cell
-    else {
-        if (((HoverUnitFn)d2rsig::Addr(RVA_HOVER_UNIT))(idx)) {   // a unit there: no attack, no talk
-            if (g_refused.fetch_add(1) == 0) Log("vrcam: walking with the tabbed menu on the leather: a unit is under the game's pointer - no walk click");
-            return;
-        }
-        const uint64_t t = g_target.load(); x = int(t >> 32); y = int(uint32_t(t));
-        type = state == 1 ? 1 : 0;
-        g_state.store(1);
-    }
-    OrigMapClick(reinterpret_cast<void*>(hero), type, x, y, 0x100);   // high byte: run
-    if (g_sent.fetch_add(1) == 0) LogF("vrcam: walking with the tabbed menu on the leather: walk click %d,%d (hero %.1f,%.1f)", x, y, px, py);
-}
-// The 1 ms timer: the stick from BodyWalk's report, as the game's screen sees it.
-void Tick(ULONGLONG now) {
-    static ULONGLONG next = 0;
-    if (now < next) return;
-    next = now + 100;
-    const bool active = g_enabled.load() && g_inWorld.load() && gamestate::MenuOpen() && framevr::LeatherMenuWorld() && g_mapClick.load() == 1;
-    BWPadMirror m{};
-    const bool read = active && PadMirrorRead(&m);
-    const float lx = read ? float(m.thumb_lx) : 0.f, ly = read ? float(m.thumb_ly) : 0.f;
-    const bool pushed = lx * lx + ly * ly > 10349.0f * 10349.0f;
-    if (!pushed) {
-        if (g_state.load() == 1) { g_state.store(2); if (!g_queued.exchange(true) && !gamestate::RunOnUi(&Click)) g_queued.store(false); }
+    if (((HoverUnitFn)d2rsig::Addr(RVA_HOVER_UNIT))(idx)) {   // a unit there: no attack, no talk
+        if (g_refused.fetch_add(1) == 0)
+            LogF("vrcam: walking with the tabbed menu on the leather: a unit is under the game's pointer - no %s click", kind == sw::Kind::Stop ? "stop" : "walk");
         return;
     }
-    uintptr_t hero = 0; float px = 0, py = 0;
-    if (!combat::LocalPlayerUnit(hero) || !SpellPlayerPosition(reinterpret_cast<void*>(hero), px, py)) return;
-    float sx = std::clamp(lx / 32767.0f, -1.0f, 1.0f), sy = std::clamp(ly / 32767.0f, -1.0f, 1.0f);
-    ViewStickToGame(&sx, &sy);
-    const float l = sqrtf(sx * sx + sy * sy);
-    if (l < 1e-4f) return;
-    const float reach = 5.0f * std::min(l, 1.0f) + 1.0f;   // cells ahead: more with a fuller push
-    const float gx = (sx - sy) / l * 0.70710678f, gy = (-sx - sy) / l * 0.70710678f;
-    const int tx = int(px + gx * reach), ty = int(py + gy * reach);
-    if (tx < 1 || ty < 1 || tx > 65534 || ty > 65534) return;
-    g_target.store((uint64_t(uint32_t(tx)) << 32) | uint32_t(ty));
-    if (g_state.load() == 2) g_state.store(0);
-    if (!g_queued.exchange(true) && !gamestate::RunOnUi(&Click)) g_queued.store(false);
+    OrigMapClick(reinterpret_cast<void*>(hero), held ? 1 : 0, x, y, 0x100);   // high byte: run
+    float px = 0, py = 0;
+    if (kind == sw::Kind::Walk && g_sent.fetch_add(1) == 0 && SpellPlayerPosition(reinterpret_cast<void*>(hero), px, py))
+        LogF("vrcam: walking with the tabbed menu on the leather: walk click %d,%d (hero %.1f,%.1f)", x, y, px, py);
+}
+// The 1 ms timer: BodyWalk's stick (its report) as the game's screen sees it, and the hero.
+void Tick(ULONGLONG now) {
+    const bool world = g_enabled.load() && g_inWorld.load() && g_mapClick.load() == 1;
+    const bool held = world && gamestate::MenuOpen() && framevr::LeatherMenuWorld();
+    if (!held && !g_walker.Busy()) return;   // nothing to walk, nothing to stop
+    sw::Input in;
+    in.now = now; in.world = world; in.held = held;
+    BWPadMirror m{};
+    if (world && PadMirrorRead(&m)) {
+        const float lx = float(m.thumb_lx), ly = float(m.thumb_ly);
+        in.pushed = lx * lx + ly * ly > 10349.0f * 10349.0f;   // the game's own dead zone
+        if (in.pushed) {
+            float sx = std::clamp(lx / 32767.0f, -1.0f, 1.0f), sy = std::clamp(ly / 32767.0f, -1.0f, 1.0f);
+            ViewStickToGame(&sx, &sy);
+            in.sx = sx; in.sy = sy;
+        }
+    }
+    uintptr_t hero = 0;
+    if (world && (in.pushed || g_walker.Busy()) && combat::LocalPlayerUnit(hero) && hero)
+        in.hero = SpellPlayerPosition(reinterpret_cast<void*>(hero), in.px, in.py);
+    const auto out = g_walker.Step(in);
+    if (out.click.kind != sw::Kind::None) g_post.store(Pack(out.click));
+    if (g_post.load() && !g_queued.exchange(true) && !gamestate::RunOnUi(&Click)) g_queued.store(false);
+    // Each let-go, how far the hero went on (the first 12 of a session, then one a minute).
+    static ULONGLONG toldAt = 0;
+    if (out.repeated && g_stops.load() < 12)
+        LogF("vrcam: walking with the tabbed menu on the leather: the hero walked on after the stop - stop sent again");
+    if (out.settled.due) {
+        const uint32_t n = g_stops.fetch_add(1);
+        if (n < 12 || now - toldAt >= 60000) {
+            toldAt = now;
+            LogF("vrcam: walking with the tabbed menu on the leather: stick let go - the hero went on %.1f cells, standing after %llu ms (%d repeat stops%s)",
+                 out.settled.cells, (unsigned long long)out.settled.ms, out.settled.repeats, out.settled.moving ? ", still walking" : "");
+        }
+    }
 }
 }
 
@@ -9651,6 +9710,29 @@ int Lights(Light* out) {
     ReleaseSRWLockShared(&g_lock);
     return n;
 }
+// Owning game thread only. Exact client ID, never the nearest monster's height.
+bool MonsterPosition(uint32_t id,float out[3]) {
+    using namespace monsterimmunity::abi;
+    if(!d2rsig::Check(ContextRva,ContextSig,sizeof ContextSig)||
+       !d2rsig::Check(ContextLayoutRva,ContextLayoutSig,sizeof ContextLayoutSig)||
+       !d2rsig::Check(ManagerLayoutRva,ManagerLayoutSig,sizeof ManagerLayoutSig)||
+       !d2rsig::Check(ManagerBucketsRva,ManagerBucketsSig,sizeof ManagerBucketsSig)||
+       !d2rsig::Check(ModelLayoutRva,ModelLayoutSig,sizeof ModelLayoutSig)||
+       !d2rsig::Check(UnitKeyRva,UnitKeySig,sizeof UnitKeySig)||
+       !d2rsig::Check(RootLayoutRva,RootLayoutSig,sizeof RootLayoutSig)||
+       !d2rsig::Check(TransformTypeRva,TransformTypeSig,sizeof TransformTypeSig)||
+       !d2rsig::Check(TransformLayoutRva,TransformLayoutSig,sizeof TransformLayoutSig))return false;
+    const auto unit=ClientMonster(id);
+    const auto typeSequence=d2rsig::Addr(TransformTypeRva);
+    if(!unit||!typeSequence)return false;
+    const auto context=reinterpret_cast<uintptr_t(*)()>(d2rsig::Addr(ContextRva))();
+    uintptr_t manager=0;
+    if(!context||!Rd(context+0x20,&manager))return false;
+    const auto type=reinterpret_cast<uint32_t(*)()>(typeSequence)();
+    return framevr::immunity::RenderedPosition(manager,d2rsig::Addr(0x2677170),type,unit,
+        [](uintptr_t address,auto& value){return Rd(address,&value);},out);
+}
+
 }  // namespace worldobj
 
 bool WorldMenuBlocksEffects() {
@@ -9947,6 +10029,11 @@ bool BeamWanted() {
     return g_enabled.load() && g_inWorld.load() && !gamestate::MenuOpen() && lootscan::Latest(GetTickCount64()).count > 0;
 }
 
+bool ImmunityWanted() {
+    return g_enabled.load() && g_inWorld.load() && !gamestate::MenuOpen() &&
+        monsterimmunity::Latest(GetTickCount64()).count > 0;
+}
+
 // The frame stamp strip (D2R_DepthFog.fx PS_Stamp): whenever the camera turns
 // with the head, so that FlatVR can place its screen at the pose of the frame.
 bool StampWanted() { return g_enabled.load() && g_afrBlock && g_set.stamps.load() && g_set.stampPixels.load(); }
@@ -9963,6 +10050,40 @@ bool TableKeyWanted() { return TableView() && g_inWorld.load() && !gamestate::Me
 bool CeilWanted() {
     return g_set.ceilOn.load() && g_enabled.load() && !ThirdPerson() && g_inWorld.load() && g_ceilBiome.load() &&
            !WorldMenuBlocksEffects();
+}
+// The hero light (D2R_Lights.fxh HeroLight, #440): in every dungeon, first person, no menu; drawn where the shader's
+// vault is not (its own light is over the hero there). The effect also runs for it where nothing else wanted it -
+// a dungeon off [ceiling] biomes, such as the Tal Rasha tombs, with the fog off in caves.
+bool HeroLightWanted() {
+    return g_set.heroLight.load() && g_set.heroLightStrength.load() > 0.0f && g_enabled.load() && !ThirdPerson() &&
+           g_inWorld.load() && g_underground.load() && !WorldMenuBlocksEffects();
+}
+// How far the hero's light reaches against no Light Radius gear (light_radius.h): 1 until his stat 89 is read.
+// Logged at each change.
+float HeroLightScale() {
+    int stat = 0;
+    bool known = false;
+#ifdef D2RVR_NATIVE_OPENXR
+    known = interactionstate::LightRadius(gamestate::LocalPlayer(), stat);
+#endif
+    framevr::lightradius::Tuning t;
+    t.base = g_set.lightRadiusBase.load();
+    t.points = g_set.lightRadiusPoints.load();
+    t.boostPct = g_set.lightRadiusBoost.load();
+    const float scale = framevr::lightradius::Scale(stat, known, t);
+    static int toldStat = INT_MIN;
+    static float toldScale = -1.0f;
+    const int now = known ? stat : INT_MIN + 1;
+    if (now != toldStat || std::fabs(scale - toldScale) > 1e-4f) {
+        toldStat = now; toldScale = scale;
+        if (known)
+            LogF("vrcam: hero Light Radius (stat 89) %d: the vault's light over him and the hero light reach x%.2f (the hero light %.0f units; "
+                 "[light] radius_base %.0f, radius_points %.0f, radius_boost_pct %.0f)",
+                 stat, scale, g_set.heroLightReach.load() * scale, t.base, t.points, t.boostPct);
+        else
+            LogF("vrcam: hero Light Radius not read yet: his dungeon light at its tuned reach");
+    }
+    return scale;
 }
 // [ceiling] game_ceiling (vr/engine_units.cpp): a ceiling of the game's wanted here - [ceiling] enabled, first person,
 // the area on game_ceiling_biomes with a kind of its own, no menu - and the view it is drawn in: VR first person (F4)
@@ -10016,6 +10137,14 @@ bool ApplySkyPictures(reshade::api::effect_runtime* rt) {
         char have[16] = {}; size_t size = sizeof have;
         if (!rt->get_preprocessor_definition_for_effect("D2R_DepthFog.fx", "D2R_ARCANE_SKY_CACHE", have, &size) || strcmp(have, want)) {
             rt->set_preprocessor_definition_for_effect("D2R_DepthFog.fx", "D2R_ARCANE_SKY_CACHE", want);
+            set = true;
+        }
+    }
+    {
+        const char* want = g_immunityTextureReady.load() ? "1" : "0";
+        char have[16] = {}; size_t size = sizeof have;
+        if (!rt->get_preprocessor_definition_for_effect("D2R_DepthFog.fx", "D2R_IMMUNITY_TEXTURE", have, &size) || strcmp(have, want)) {
+            rt->set_preprocessor_definition_for_effect("D2R_DepthFog.fx", "D2R_IMMUNITY_TEXTURE", want);
             set = true;
         }
     }
@@ -10078,7 +10207,7 @@ void OnFinishEffects(reshade::api::effect_runtime* rt, reshade::api::command_lis
     if (!g_tech[0].handle) { hud::SetPictureReady(false); return; }
     // Off while a menu is open: the fog lies over the whole picture, the
     // inventory and trade panels included, and darkened them.
-    const bool want = FogWanted() || g_skyPalette.load() >= 0 || g_arcaneSky.load() || CeilWanted() || HudWanted() || StampWanted() || hud::PictureWanted() || TableKeyWanted() || PhantomWanted() || BoneAxesWanted() || ShieldDebugWanted() || OutlineWanted() || RingWanted() || BeamWanted();
+    const bool want = FogWanted() || g_skyPalette.load() >= 0 || g_arcaneSky.load() || CeilWanted() || HudWanted() || StampWanted() || hud::PictureWanted() || TableKeyWanted() || PhantomWanted() || BoneAxesWanted() || ShieldDebugWanted() || OutlineWanted() || RingWanted() || BeamWanted() || HeroLightWanted() || ImmunityWanted();
     // The toolbar and the map are taken out of the game's picture to be drawn
     // back at their own size only while this effect runs, and is new enough to.
     {
@@ -10280,7 +10409,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
         renderscale::Frame(rt, s);
 #ifdef D2RVR_NATIVE_OPENXR
         const bool ownDepth=g_enabled.load()&&g_inWorld.load()&&framevr::Active()&&
-            (FogWanted()||g_set.skyOn.load()||g_arcaneSky.load()||CeilWanted()||TableKeyWanted()||OutlineWanted()||RingWanted()||BeamWanted());
+            (FogWanted()||g_set.skyOn.load()||g_arcaneSky.load()||CeilWanted()||TableKeyWanted()||OutlineWanted()||RingWanted()||BeamWanted()||ImmunityWanted());
         const bool turnDepth=g_enabled.load()&&g_inWorld.load()&&framevr::Active()&&framevr::TurnDepthWanted();
         framevr::scenedepth::Bind(rt,cl,ownDepth,turnDepth,stereoreplay::RightEffects(),s);
         SetBool(rt,"OwnDepth",ownDepth);
@@ -10620,6 +10749,26 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
         bool ceil = who == 1;
         for (const SkyView& v : sv) ceil = ceil && v.proj_ok && v.axes_ok && v.proj[0] != 0.0f && v.proj[1] != 0.0f;
         SetBool(rt, "CeilOn", ceil);
+        // The hero's Light Radius (#440, light_radius.h): it widens the vault's light over him (below) and the hero
+        // light, ours, at his shoulder wherever the vault is not drawn - the game's ceiling, or none.
+        const float heroScale = HeroLightScale();
+        const bool heroLight = HeroLightWanted() && !ceil && sv[0].proj_ok && sv[0].axes_ok;
+        SetBool(rt, "HeroLightOn", heroLight);
+        {   // each change
+            static int told = -1;
+            if (int(heroLight) != told) {
+                told = int(heroLight);
+                LogF("vrcam: hero light %s", heroLight ? "on (a dungeon, first person, the vault not drawn)" : "off");
+            }
+        }
+        if (heroLight) {
+            const auto at = framevr::lightradius::HeroLightAt(0.5f * (sv[0].eyeRel[0] + sv[1].eyeRel[0]), 0.5f * (sv[0].eyeRel[1] + sv[1].eyeRel[1]),
+                                                              0.5f * (sv[0].eyeRel[2] + sv[1].eyeRel[2]), sv[0].hero[1] - floorY);
+            const float place[3] = {at.x, at.y, at.z};
+            SetFloats(rt, "HeroLightPos", place, 3);
+            SetFloat(rt, "HeroLightRadius", g_set.heroLightReach.load() * heroScale);
+            SetFloat(rt, "HeroLightStrength", g_set.heroLightStrength.load());
+        }
         if (ceil) {
 
             float height, bright, light, relief;
@@ -10630,7 +10779,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
             SetFloat(rt, "CeilBrightness", bright);
             SetFloat(rt, "CeilRelief", relief);
             SetFloat(rt, "CeilTexSlot", (float)slot);
-            SetFloat(rt, "CeilLightRadius", light);
+            SetFloat(rt, "CeilLightRadius", light * heroScale);   // by his Light Radius (#440)
             SetFloat(rt, "CeilHalo", g_set.ceilHalo.load());
             SetFloat(rt, "CeilWallDist", g_set.ceilWall.load());
             SetFloat(rt, "CeilFloorDepth", g_set.ceilFloor.load());
@@ -10787,8 +10936,34 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
         SetBool(rt, "OutlineOn", count > 0);
         SetBool(rt, "RingOn", rings);
         SetBool(rt, "BeamOn", beams);
+        const auto immunity = monsterimmunity::Latest(GetTickCount64());
+        const bool immunityOn = ImmunityWanted() && view && immunity.count > 0;
+        SetBool(rt, "ImmunityOn", immunityOn);
+        float immunityPos[framevr::immunity::MaxMonsters][4] = {};
+        float immunityPhase[framevr::immunity::MaxMonsters] = {};
+        if (immunityOn) {
+            const uint64_t now = GetTickCount64();
+            for (size_t i = 0; i < immunity.count; ++i) {
+                const auto& monster = immunity.monsters[i];
+                const auto foot = framevr::immunity::FootPosition(monster, immunity, now,
+                    {sv[0].hero[0],sv[0].hero[1],sv[0].hero[2]});
+                immunityPos[i][0] = foot.x;
+                immunityPos[i][1] = foot.y;
+                immunityPos[i][2] = foot.z;
+                immunityPos[i][3] = float(monster.mask);
+                immunityPhase[i] = float(monster.id % 997u) * 0.063f;
+            }
+        }
+        SetFloats(rt, "ImmunityPos", immunityPos[0], framevr::immunity::MaxMonsters * 4);
+        // A float4 per phase avoids scalar-array cbuffer padding in ReShade.
+        float phases[framevr::immunity::MaxMonsters][4] = {};
+        for (size_t i = 0; i < framevr::immunity::MaxMonsters; ++i) phases[i][0] = immunityPhase[i];
+        SetFloats(rt, "ImmunityPhase", phases[0], framevr::immunity::MaxMonsters * 4);
+        const float immunityUpm = std::max(1.0f, ScaleHeight()) / UserEyeHeightM();
+        const float immunityShape[4] = {.65f * immunityUpm, .65f * immunityUpm, .16f * immunityUpm, .8f};
+        SetFloats(rt, "ImmunityShape", immunityShape, 4);
         float mob[2][4] = {};
-        if (count > 0 || rings || beams) {
+        if (count > 0 || rings || beams || immunityOn) {
             for (int e = 0; e < 2; ++e) {
                 const SkyView& s = sv[e].axes_ok && sv[e].proj_ok ? sv[e] : sv[0];
                 char n[16];
@@ -11225,7 +11400,7 @@ DWORD WINAPI UpdateThread(void*) {
         }
         hud::SetLabels(LabelsWanted());
         // the fog leaves the interface alone; the floor's key never takes its text for the void
-        hud::SetUiMask((fx::FogWanted() || fx::TableKeyWanted()) && !LabelsWanted());
+        hud::SetUiMask((fx::FogWanted() || fx::TableKeyWanted() || fx::ImmunityWanted()) && !LabelsWanted());
         SkyTick();
         flog::Tick(g_set.frameLog.load());
         gamecmd::Tick();   // skills, potions, Alt... held in BodyWalk: pressed on the UI thread
@@ -11236,6 +11411,7 @@ DWORD WINAPI UpdateThread(void*) {
 #endif
         lootscan::Tick(nowMs);      // loot beams: the beam-worthy items lying near the hero
         roomstitchvr::Tick(nowMs);  // rooms built to meet the way toward the hero: the hero's room, the hook
+        monsterimmunity::Tick(nowMs, g_enabled.load() && g_inWorld.load() && !gamestate::MenuOpen());
 #endif
 #ifdef D2RVR_NATIVE_OPENXR
         mobaim::Tick();    // the aim rules' targets: each hand's held out, and the one looked at
@@ -11347,6 +11523,8 @@ DWORD WINAPI UpdateThread(void*) {
             companionai::Tick(compFx, compFy);
             companionai::Report();
             roofcutaway::Tick();
+            headskip::Install(g_set.platform.load() == 1 && g_inWorld.load() && d2rcam::InWorld());   // the helm out of the eye views
+            headskip::Report();
             roofmaterials::Install(&Log, +[]() { return g_set.platform.load() == 1; });
             propphysics::Tick();
             projectiles::Install();
@@ -11392,6 +11570,10 @@ DWORD WINAPI UpdateThread(void*) {
 }
 
 }  // namespace
+
+namespace monsterimmunity {
+bool ReadPosition(uint32_t id,float out[3]) {return worldobj::MonsterPosition(id,out);}
+}
 
 namespace d2rcam {
 // DEV > Character > Sky over rims switches [sky] cover_rims for the session.
@@ -11594,6 +11776,7 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
         wanted.highRune = std::clamp(int(IniF(L"loot", L"rune_min", float(framevr::lootbeams::DefaultHighRune))),
                                      framevr::lootbeams::FirstRune, framevr::lootbeams::LastRune + 1);   // 34 = no runes
         lootscan::Init(ctx, IniB(L"loot", L"beams", true), wanted);
+        monsterimmunity::Init(ctx);
     }
 #endif
     if (HANDLE h = CreateThread(nullptr, 0, UpdateThread, nullptr, 0, &g_updateThreadId)) CloseHandle(h);

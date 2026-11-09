@@ -461,8 +461,11 @@ press the same button again for basic arrows, or another arrow skill's button
 to swap. The skill's own mana cost, damage and impact effects apply to each
 shot. If the game refuses it (usually not enough mana), the drawn arrow flies as
 a basic arrow and the character's mana warning plays. With nothing loaded, a
-supported arrow skill on left trigger uses the same physical release. Multiple
-Shot, Guided Arrow and Strafe keep their native behavior. Set
+supported arrow skill on left trigger uses the same physical release.
+A face button assigned to Multiple Shot, Guided Arrow or Strafe loads it the
+same way: every following draw and release fires it, through that button, as
+the game does, so Multiple Shot keeps its fan, Guided Arrow its homing and
+Strafe its volley. Press the button again for basic arrows. Set
 `[bow] quiver=0` to restore native buttons for these skills.
 The selected skill also changes the nocked arrow's model and particles. Set
 `[bow] quiver_preview=0` to keep the basic nocked model while still firing skill
