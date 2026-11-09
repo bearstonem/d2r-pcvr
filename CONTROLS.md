@@ -318,7 +318,7 @@ low_life_heartbeat` sets its loudness (200%, 0 = off).
 
 There is no left-trigger modifier layer. Each hand aims its own spells. Face
 shortcuts do not change either trigger assignment. On a Sorceress, Fire Bolt,
-Fireball, Ice Bolt, Ice Blast and Charged Bolt can fire from both hands simultaneously,
+Fireball, Ice Bolt, Ice Blast, Lightning, Charged Bolt and Chain Lightning can fire from both hands simultaneously,
 each with independent aim and its own Faster Cast Rate timing. Hold the input to repeat. Native
 mana costs apply to each cast, and walking remains available without entering
 the original casting animation. See [hand projectile spells](docs/hand_projectile_spells.md)
@@ -332,7 +332,7 @@ spread. Existing saved preferences are retained, and changes apply to new casts.
 **Spell aim assist** on the same page defaults to Strong for new or missing
 settings; existing saved choices are retained. Off disables assistance. Light corrects nearby
 misses at launch; Strong adds gentle homing toward the enemy selected at launch
-for straight hand spells. Charged Bolt remains launch-only. This does not affect
+for straight hand spells. Charged Bolt and Chain Lightning remain launch-only. This does not affect
 bows, thrown weapons or other native spells, and does not guarantee a hit.
 
 Other skills retain native repeat behavior, delays and animation restrictions.
