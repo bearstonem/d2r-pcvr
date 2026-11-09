@@ -110,5 +110,19 @@ int main(){
         Check(s.out.offset<.01f&&!s.out.push&&s.out.follow,"the step is paid off and the push ends; the origin still follows");
         Check(Len(Shift({1,5,1},base,0))==0&&Shift({0,9,0},base,upm).y==0,"no shift without a scale, and never up or down");
     }
+    {   // The room turned about the head (room_scale.h): the owed step turns with the room; standing at the centre, a turn owes none.
+        const auto turnAboutHead=[](Vec origin,Vec head,Quat was,Quat now){
+            const Vec d=head-origin;const Vec t=math::Rotate(math::Multiply(math::Conjugate(now),was),Vec{d.x,0,d.z});
+            return Vec{head.x-t.x,origin.y,head.z-t.z};};
+        const Quat was=math::Yaw(.4f),now=math::Yaw(.4f-1.5707963f);const Quat rel=math::Multiply(math::Conjugate(now),was);
+        Sim s;s.Step();const Vec o=turnAboutHead(s.in.origin,s.in.eye,was,now);
+        s.chase.Turned(o,rel);s.in.origin=o;s.Run(.5);
+        // The turn pivots at the eyes and the neck sits behind them: it swings a little round the hero
+        // (under 2 x 8 cm), never as far as a step.
+        Check(s.out.offset<2*EyeToNeck.z+.01f&&s.out.offset<StartMetres&&!s.out.push,"at the centre a turn is not a step");
+        Sim w;w.Move({.4f,0,0});w.Step();const float owed=w.out.offset;
+        const Vec o2=turnAboutHead(w.in.origin,w.in.eye,was,now);w.chase.Turned(o2,rel);w.in.origin=o2;w.Step();
+        Check(std::fabs(w.out.offset-owed)<2*EyeToNeck.z+.01f&&w.out.offset>StartMetres,"a step owed stays owed after a turn (give or take the neck's swing)");
+    }
     std::puts("room-steps-test: ok");
 }

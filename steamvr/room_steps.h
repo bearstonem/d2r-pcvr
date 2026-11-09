@@ -131,6 +131,9 @@ public:
     }
     // The origin moved by d with the hero (transport View): the reference neck moves with it.
     void Shifted(Vec d){origin=origin+d;reference=reference+d;}
+    // The room turned about the head (room_scale.h TurnAboutHead): the origin is now `to`, and the anchored
+    // neck turns with the room by `rel` (the stage's turn, as tracking space sees it), so a turn is no step.
+    void Turned(Vec to,Quat rel){if(!known)return;reference=to+math::Rotate(rel,reference-origin);origin=to;}
     void Reset(){*this=Chase{};}
     bool Walking()const{return walking;}
 private:
