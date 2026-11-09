@@ -1390,7 +1390,6 @@ uintptr_t ServerUnit(uintptr_t game,int type,uint32_t id) {
 // Thrown potions. Vanilla hireling.txt classes: roguehire, act2hire, act3hire,
 // act5hire1/2. Offline, the only live, non-hostile one is the player's own.
 constexpr uint32_t HirelingClasses[]={271,338,359,560,561};
-constexpr float HirelingFeetRadius=1.5f; // metres from the hireling's ground position
 bool IsHireling(uint32_t classId) {
     return std::find(std::begin(HirelingClasses),std::end(HirelingClasses),classId)!=std::end(HirelingClasses);
 }
@@ -1412,7 +1411,7 @@ template<class F> bool EachFriendly(uintptr_t game,uintptr_t self,F f) {
     }
     return true;
 }
-bool NearHireling(Vec world,Vec player,float upm,float& distance,uint32_t& classId) {
+bool NearHireling(Vec world,Vec player,float upm,float& distance,uint32_t& classId,bool mercPotionAutoaimEnabled) {
     distance=-1;classId=0;
     uintptr_t game=0,self=0;uint32_t mode=0;Vec selfPos{};
     if(!LocalServer(game,self)||!Read(self+0xc,mode)||mode==0||mode==17||!Position(self,selfPos)||
@@ -1426,7 +1425,7 @@ bool NearHireling(Vec world,Vec player,float upm,float& distance,uint32_t& class
         else if(friendly<0||d<friendly){friendly=d;friendlyClass=id;}
     }))return false;
     if(distance<0)classId=friendlyClass; // log the nearest friendly class when no hireling class matched
-    return distance>=0&&distance<=HirelingFeetRadius;
+    return framevr::interaction::MercThrowAccepted(distance,mercPotionAutoaimEnabled);
 }
 // 3.3.93787 native unit effects, the same calls monster AI uses on itself:
 // STATES_ToggleState(unit,state,on) and UNITS_SetOverlay(unit,overlay,0).

@@ -518,6 +518,9 @@ inline constexpr Override Overrides[]={
     {.id="gameplay.companion_tactical_commands",.page=View::Monsters,.section="Mercenary",.kind=RowKind::Toggle,.label="Tactical commands",
      .help="Point at your mercenary, hold Grip and pull Trigger, aim and let go: hold ground, prioritize monsters, or regroup.",
      .beside=true,.besideLabel="Commands"},
+    // Mercenary potion assistance, independent of class and outline settings (#424, RobinHeggelund).
+    {.id="gameplay.merc_potion_assist",.page=View::Monsters,.section="Mercenary",.kind=RowKind::Toggle,.label="Merc potion throw autoaim",
+     .help="On: thrown potions feed your living mercenary wherever they land. Off: land within 1.5 m of its feet; misses keep the potion. Slow releases return it."},
     // Physics: Props
     {.id="interactions.bottle_physics",.page=View::Physics,.section="Props",.kind=RowKind::Toggle,.label="Roll and break bottles",
      .help="Empty bottles drop and roll. Potions thrown at your mercenary break where they hit; thrown traps and gas or oil potions stop at walls."},

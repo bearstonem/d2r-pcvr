@@ -61,6 +61,7 @@ static const GoldenRow Golden[]={
     {"gameplay.enemy_sight_pct",View::Monsters,0,content::RowKind::Slider,"Monster sight range",0,0},
     {"gameplay.companion_ai",View::Monsters,1,content::RowKind::Toggle,"Smarter mercenary",0,0},
     {"gameplay.companion_tactical_commands",View::Monsters,1,content::RowKind::Toggle,"Tactical commands",0,0},
+    {"gameplay.merc_potion_assist",View::Monsters,1,content::RowKind::Toggle,"Merc potion throw autoaim",0,0},   // #424
     {"interactions.bottle_physics",View::Physics,0,content::RowKind::Toggle,"Roll and break bottles",0,0},
     {"interactions.prop_physics",View::Physics,0,content::RowKind::Toggle,"Knock over small props",0,0},
     {"interactions.body_physics",View::Physics,0,content::RowKind::Toggle,"Pushable bodies",0,0},   // main's #361
@@ -227,7 +228,7 @@ int main(int argc,char** argv){
     }
     // ---- the map: no row lost, none left to More, the names and the owner's pairs ----
     {
-        Check(tables.rowCount==101,"101 settings on the menu, each one row");   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08)
+        Check(tables.rowCount==102,"102 settings on the menu, each one row");   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424)
         for(size_t i=0;i<tables.rowCount;++i)Check(!tables.rows[i].fallback&&tables.rows[i].page!=View::More,std::string("every setting has its page: ")+tables.rows[i].label);
         Check(content::Menu().report.empty(),"the tidy report is empty");
         struct Want {content::Group group;const char* name;std::vector<const char*> pages;};
@@ -297,6 +298,7 @@ int main(int argc,char** argv){
         Values v=state(0b0100'0101);v[GroundAim]=2;
         Check(L::CountRows(View::Vibration,v,{})==8&&L::CountRows(View::Shield,v,{})==7,"Vibration holds 8 rows; Shield 7 (one guard strain switch since main's #310)");
         Check(L::RowsOf(View::Outlines,v,{}).count==4,"Outlines: the outline, which hands, and both hand colors as their own rows");
+        Check(L::CountRows(View::Monsters,v,{})<=8,"Monsters: difficulty, the mercenary and merc potion throw autoaim fit on eight rows");   // #424 (on Aim, ==8, before the menu groups)
         bool right=false;const auto rows=L::RowsOf(View::Outlines,v,{});
         for(int i=0;i<rows.count;++i)if(rows.keys[size_t(i)]==HighlightRight)right=true;
         Check(right&&RowShown(HighlightRight,v,{}),"the right hand's color has its own row");
