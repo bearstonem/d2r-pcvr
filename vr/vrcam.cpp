@@ -159,6 +159,8 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "../steamvr/panel_input_mode.h"
 #include "pad_mirror_shared.h"
 #include "../steamvr/talk_stop.h"
+#include "../steamvr/room_stitch.h"
+#include "../steamvr/ceiling_top.h"
 namespace gamestate {uint32_t TalkOpens();}   // NPC conversations opened (talk_stop.h)
 
 #pragma intrinsic(_ReturnAddress)
@@ -225,6 +227,7 @@ struct Settings {
     std::atomic<int>   rings{int(framevr::settings::Definitions[framevr::settings::DrawDistance].defaultValue)};
     std::atomic<float> modelRadius{framevr::settings::Definitions[framevr::settings::ObjectDistance].defaultValue};
     std::atomic<float> bigRadius{framevr::settings::Definitions[framevr::settings::BigObjectDistance].defaultValue};
+    std::atomic<bool>  roomStitch{true};    // [render] room_stitch: rooms built to meet the way toward the hero (roomstitchvr)
     std::atomic<int>   hudMap{0};           // [hud] map: 0 in the picture, 1 out of it, into its own texture
     // Per view since the Home page (2026-10-05): [hud_top], [hud_third], [hud_floor], [hud_inside]
     // - the Interface tab of each view - falling back to [hud] where unset.
@@ -515,6 +518,22 @@ float AreaFloor(float heroY) {
     const float f = std::isfinite(heroY) ? gameceiling::Floor(&g_floorY, &g_floorGen, g_biomeGen.load(), heroY) : g_floorY;
     ReleaseSRWLockExclusive(&g_floorLock);
     return f;
+}
+// The ceiling's top over the level's highest floor (steamvr/ceiling_top.h; owner, 2026-11-07: up the stairs the ceiling
+// stayed low until he walked on): how far above AreaFloor the ceiling's height is to be measured from. Everything else
+// the ceiling measures (its lights, the stone under the floor, the rim's reach down) stays on AreaFloor.
+namespace roomstitchvr { uintptr_t HeroLevel(); bool HighestFloor(uintptr_t level, float& top); }
+framevr::ceilingtop::Top g_ceilTop;   // under g_floorLock
+float CeilingLift(float heroY) {
+    if (!std::isfinite(heroY)) return 0.0f;
+    const uintptr_t level = roomstitchvr::HeroLevel();
+    float built = 0.0f;
+    const bool have = roomstitchvr::HighestFloor(level, built);
+    const double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    AcquireSRWLockExclusive(&g_floorLock);
+    const float top = g_ceilTop.Step(now, g_biomeGen.load(), level, heroY, have, built);
+    ReleaseSRWLockExclusive(&g_floorLock);
+    return std::max(0.0f, top - AreaFloor(heroY));
 }
 
 void LoadOutdoorBiomes() {
@@ -1177,6 +1196,7 @@ void LoadSettings() {
     g_set.entityPoolMb.store(std::clamp((int)IniF(L"render", L"entity_pool_mb", 280.0f), 0, 4096));
     g_set.rings.store(std::clamp((int)IniF(L"render", L"rings", framevr::settings::Definitions[framevr::settings::DrawDistance].defaultValue), 1, 8));
     g_set.modelRadius.store(std::clamp(IniF(L"render", L"model_radius", framevr::settings::Definitions[framevr::settings::ObjectDistance].defaultValue), 10.0f, 10000.0f));
+    g_set.roomStitch.store(IniB(L"render", L"room_stitch", true));
     g_set.bigRadius.store(farobjects::Normalize(IniF(L"render", L"big_radius", framevr::settings::Definitions[framevr::settings::BigObjectDistance].defaultValue)));
     g_set.mouseLook.store(IniB(L"input", L"mouse_look", false));
     g_set.hudHide.store(std::clamp((int)IniF(L"hud", L"hide", 0.0f), 0, 2));
@@ -5777,6 +5797,104 @@ void Tick(ULONGLONG now) {
 }
 }
 
+// Rooms built to meet the way toward the hero (steamvr/room_stitch.h; owner, 2026-11-07: dungeon sections
+// "at higher and lower points than their adjacent tileset ... the next room high above them or below them,
+// with a black void inbetween"). The game's room-height pick (0x6A2A40) is hooked: the same four candidates,
+// the built neighbour nearest the hero's room wins. Our copy of the game's own pick is checked against the
+// game's answer every time; where they differ the game's answer stands (and the log says so once).
+namespace roomstitchvr {
+namespace rs = framevr::roomstitch;
+using HeightFn = float(__fastcall*)(void* layer, void* room, const float* edges);
+HeightFn volatile o_height = nullptr;
+std::atomic<bool> g_in{false};
+ULONGLONG g_tryAt = 0, g_reportAt = 0;
+std::atomic<uintptr_t> g_heroRoom{0};
+std::atomic<int> g_hx{0}, g_hy{0};
+std::atomic<bool> g_heroKnown{false};
+std::atomic<uint32_t> g_built{0}, g_moved{0}, g_disagree{0};
+std::atomic<uint32_t> g_lines{0};
+std::atomic<ULONGLONG> g_linesAt{0};
+template <class T> bool Rd(uintptr_t a, T& out) { return a >= 0x10000 && framevr::ReadMemory(&out, (const void*)a, sizeof(T)); }
+framevr::ceilingtop::LevelFloors g_floors;   // under g_floorsLock: each built room's border floors, by level
+SRWLOCK g_floorsLock = SRWLOCK_INIT;
+std::atomic<uintptr_t> g_heroLevel{0};
+uintptr_t HeroLevel() { return g_heroLevel.load(); }
+bool HighestFloor(uintptr_t level, float& top) {
+    AcquireSRWLockShared(&g_floorsLock);
+    const bool ok = g_floors.Highest(level, top);
+    ReleaseSRWLockShared(&g_floorsLock);
+    return ok;
+}
+float Pick(void* layer, void* room, const float* edges);
+// The game's room-height pick, hooked: the stitch's pick, and the built room's floors kept for the ceiling.
+float __fastcall Height(void* layer, void* room, const float* edges) {
+    const float h = Pick(layer, room, edges);
+    uintptr_t level = 0;
+    if (edges && Rd((uintptr_t)room + 0x90, level) && level >= 0x10000) {   // DRLG room -> its level (game_layout drlgroom::Level)
+        AcquireSRWLockExclusive(&g_floorsLock);
+        g_floors.Add(level, h, edges);
+        ReleaseSRWLockExclusive(&g_floorsLock);
+    }
+    return h;
+}
+float Pick(void* layer, void* room, const float* edges) {
+    HeightFn original = o_height;
+    for (int i = 0; !original && i < (1 << 20); ++i) { YieldProcessor(); original = o_height; }   // the trampoline lands after the detour
+    const float game = original ? original(layer, room, edges) : 0.0f;
+    if (!original || !g_set.roomStitch.load() || !edges) return game;
+    rs::Candidate c[4];
+    const auto read = [](uintptr_t a, auto& v) { return Rd(a, v); };
+    if (!rs::Candidates((uintptr_t)layer, (uintptr_t)room, edges, read, c)) return game;
+    const uintptr_t hero = g_heroRoom.load();
+    const int theirs = rs::GameChoice(c, hero);
+    if (std::fabs(rs::HeightOf(c, theirs) - game) > 0.01f) {   // our copy of the game's pick is off (a stale hero room, a layout change)
+        if (g_disagree.fetch_add(1) == 0)
+            LogF("vrcam: room stitch - the game picked height %.2f, our copy of its pick %.2f; the game's stands where they differ", game, rs::HeightOf(c, theirs));
+        return game;
+    }
+    const int ours = rs::Choice(c, hero, g_heroKnown.load(), g_hx.load(), g_hy.load());
+    const float h = rs::HeightOf(c, ours);
+    g_built.fetch_add(1);
+    if (ours == theirs || std::fabs(h - game) < 0.01f) return game;
+    g_moved.fetch_add(1);
+#ifdef D2RVR_DEVELOPER
+    const ULONGLONG now = GetTickCount64();
+    if (now - g_linesAt.load() >= 1000) { g_linesAt.store(now); g_lines.store(0); }
+    if (g_lines.fetch_add(1) < 10) {
+        int32_t x = 0, y = 0; Rd((uintptr_t)room + rs::PosX, x); Rd((uintptr_t)room + rs::PosY, y);
+        LogF("vrcam: room stitch - room %llX at (%d, %d): height %.2f from its %s neighbour (nearest the hero) instead of %.2f from its %s; "
+             "%.2f moved along the line of sight", (unsigned long long)(uintptr_t)room, x, y, h, rs::DirName(ours), game, rs::DirName(theirs), h - game);
+    }
+#endif
+    return h;
+}
+// The 1 ms timer: the hero's room (path +0x20, its DRLG room +0x18) for the pick; the hook goes in.
+void Tick(ULONGLONG now) {
+    static ULONGLONG next = 0;
+    if (now < next) return;
+    next = now + 50;
+    if (!g_in.load() && now - g_tryAt >= 500) {
+        g_tryAt = now;
+        if (Matches(rs::FindRva, rs::FindSig, sizeof rs::FindSig) && Matches(rs::HeightRva, rs::HeightSig, sizeof rs::HeightSig) &&
+            d2rsig::Hook(rs::HeightRva, rs::HeightSig, sizeof rs::HeightSig, reinterpret_cast<void*>(&Height),
+                         reinterpret_cast<void**>(const_cast<HeightFn*>(&o_height)))) {
+            g_in.store(true);
+            Log("vrcam: room stitch - in: each room built meets the built neighbour nearest the hero's room ([render] room_stitch)");
+        }
+    }
+    uintptr_t hero = 0, path = 0, room = 0, drlg = 0; int32_t x = 0, y = 0;
+    const bool known = g_inWorld.load() && SewerInteractionLayoutReady() && combat::LocalPlayerUnit(hero) && Rd(hero + 0x38, path) &&
+                       Rd(path + 0x20, room) && Rd(room + 0x18, drlg) && drlg >= 0x10000 && Rd(drlg + rs::PosX, x) && Rd(drlg + rs::PosY, y);
+    uintptr_t level = 0;
+    if (known) { g_heroRoom.store(drlg); g_hx.store(x); g_hy.store(y); if (Rd(drlg + 0x90, level)) g_heroLevel.store(level); }
+    g_heroKnown.store(known);
+    if (now - g_reportAt >= 60000 && g_moved.load()) {
+        g_reportAt = now;
+        LogF("vrcam: room stitch - %u of %u rooms built met the way toward the hero instead of the game's pick", g_moved.load(), g_built.load());
+    }
+}
+}  // namespace roomstitchvr
+
 // Developer builds: how far the hero goes after a conversation opens (talk_stop.h Watch),
 // the evidence for the stop at the press (talkhold, beside ApplyActions).
 #ifdef D2RVR_DEVELOPER
@@ -9864,6 +9982,7 @@ void GameCeilingInputs(engineunits::CeilingIn* c) {
     c->heightFrom = own > 0.0f ? "the area's height_<biome>"
                     : fromWalls && walls > 0.0f ? "on the area's walls' top - the game's own pieces, [ceiling] height_from_walls"
                                                 : "no height of its own, its walls not measured";
+    c->height += CeilingLift(c->hero[1]);   // its top over the level's highest floor, not the lowest he has stood on
     c->reach = gameceiling::WallReach(c->height, g_set.ceilFloor.load());
 }
 
@@ -10490,7 +10609,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
             float height, bright, light, relief;
             int slot;
             CeilingNow(&height, &bright, &light, &relief, &slot);
-            SetFloat(rt, "CeilHeight", height);
+            SetFloat(rt, "CeilHeight", height + CeilingLift(sv[0].hero[1]));   // over the level's highest floor
             SetFloat(rt, "CeilScale", scale);
             SetFloat(rt, "CeilBrightness", bright);
             SetFloat(rt, "CeilRelief", relief);
@@ -11100,6 +11219,7 @@ DWORD WINAPI UpdateThread(void*) {
         talkstop::Tick(nowMs);      // how far the hero goes after a conversation opens (log)
 #endif
         lootscan::Tick(nowMs);      // loot beams: the beam-worthy items lying near the hero
+        roomstitchvr::Tick(nowMs);  // rooms built to meet the way toward the hero: the hero's room, the hook
 #endif
 #ifdef D2RVR_NATIVE_OPENXR
         mobaim::Tick();    // the aim rules' targets: each hand's held out, and the one looked at

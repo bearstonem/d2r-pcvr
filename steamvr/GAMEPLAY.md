@@ -625,6 +625,19 @@ object draw distance. The game builds models only in the rooms it keeps, so
 Terrain draw distance 3 or more is needed for anything to show farther (6 by default). It costs
 frames where there are many big models, in forests and towns.
 
+**Joined dungeon rooms** (`[render] room_stitch`, on by default). D2R gives each
+room its height when it builds it, lined up with one already-built neighbour:
+yours if you stand next to it, otherwise whichever gives the largest height.
+From the game's own camera a room's height is invisible (it slides the room
+along the line of sight). In first person, every border it did not line up
+with was a step, with the next room hanging above or below over a black void.
+Rooms are built up to six rooms out, so that was most of them. Now each room
+lines up with its built neighbour nearest the room you are in, so floors join
+along the way you come. Stairs and slopes inside rooms are untouched, and
+monsters, missiles and items follow on their own. Where a level loops back on
+itself (a drop with no stairs that you can also walk round to), one step
+remains, on the far side of the loop. 0 = the game's own pick.
+
 Added indoor fog defaults to **Off** for new profiles, preserving the game's
 own lighting and effects, including Tyrael's wings. Outdoor fog keeps its
 existing setting. There is currently no indoor-fog toggle in VR Settings.
