@@ -12,7 +12,7 @@
 // How the page painter paints a frame (one call per layout Role; every control draws its own
 // text, icon, state, ring and default mark):
 //   Begin(); Panel();                          stone, frame, gems, cartouche, rail (cached bitmap)
-//   Tab / PageTitle / Sigil / HeaderLink       rail and band
+//   Tab / GroupTab / PageTitle / Sigil / HeaderLink   rail and band
 //   SectionHeading / Row / Label               rows (Row first: the pointed slab and the carved divider)
 //   Socket (Chip) / Toggle / StepButton / ValueBox (Value + its Slider fields) / Swatch / Button
 //   Card + Text / TextFit / Spans / IconText   the help card (CardTitle, Help, Strong styles)
@@ -100,11 +100,12 @@ enum class TextStyle : uint8_t {
     Small,       // Alegreya Sans 500 26 px: "1 of 4", class tags, pills
     Readout,     // Alegreya Sans 500 22 px: the Performance readout lines
     Strong,      // Alegreya Sans 700 30 px: the card's blue property line, old -> new values
+    Group,       // Cinzel 700 28 px, 0.02em: a rail group's name (162 px of room beside its icon and chevron)
     Count
 };
 // The style's font size in px (fit helpers shrink from here).
 constexpr float FontSize(TextStyle s){
-    constexpr float sizes[]={44,30,34,36,30,30,26,22,30};
+    constexpr float sizes[]={44,30,34,36,30,30,26,22,30,28};
     static_assert(sizeof sizes/sizeof sizes[0]==size_t(TextStyle::Count),"one size per text style");
     return sizes[size_t(s)];
 }
@@ -138,6 +139,9 @@ enum class Icon : uint8_t {
 struct ControlState {
     bool pointed=false,pressed=false,chosen=false,locked=false,changed=false,isDefault=false,disabled=false;
 };
+// Whether a locked chip's padlock fits beside its word: a chip is sized for the word alone, and
+// the row's sub line has a padlock too, so a tight chip shows the word only.
+constexpr bool ChipPadlockFits(float wordW,float chipW){return 24+6+wordW<=chipW-16;}
 // A plate for Button: the idle socket, Apply's cast-bronze plate, or Discard's red rim.
 enum class Plate : uint8_t { Socket, Primary, Danger };
 // One run of a Spans line ("Shield roll: 0° → +90°" with the new value orange and bold).
@@ -234,7 +238,13 @@ public:
     void IconAt(Icon icon,RectF r,Color c,float alpha=1.f);
     // A rail tab: icon + name. chosen: the current page's tongue (crimson notch,
     // gold, bold) out to the seam; pointed: slab + ring; changed: the ember on the icon.
-    void Tab(RectF r,Icon icon,std::string_view name,ControlState s);
+    // level 1: a page under its group, its icon (36 px) and name 22 px further in, on
+    // the group's bronze tree line; 2: the group's last page, where the line ends.
+    void Tab(RectF r,Icon icon,std::string_view name,ControlState s,int level=0);
+    // A rail group's row: icon, Cinzel name (Group style) and a chevron, > closed,
+    // v open. chosen: open (gold, a slab fading to the right); pointed: slab + ring;
+    // changed: the ember on the icon (a page in the group has changes).
+    void GroupTab(RectF r,Icon icon,std::string_view name,ControlState s);
     // The band: the page icon and its cast-gold Cinzel title, left-aligned in r.
     void PageTitle(RectF r,Icon icon,std::string_view title);
     // The faint 56 px Horadric sigil (45%) at the band's end. Not pressable.
@@ -274,9 +284,9 @@ private:
 void PremultipliedBgraToStraightRgba(const uint8_t* bgra,size_t pixels,uint8_t* rgba);
 
 // The component sheet for vr-settings-preview --draw-sheet: four 1280 x 1024
-// canvases in a 2 x 2 grid (straight RGBA, 2560 x 2048): an Aim page and a
+// canvases in a 2 x 2 grid (straight RGBA, 2560 x 2048): a Targeting page and a
 // Shield page as the menu draws them, every control in every state,
-// and every icon. repaintMs: the average full Aim-page repaint (Begin to End,
+// and every icon. repaintMs: the average full Targeting page repaint (Begin to End,
 // cached background) over `repaints` frames.
 struct Sheet {
     std::vector<uint8_t> rgba;

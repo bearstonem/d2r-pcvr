@@ -92,7 +92,7 @@ licensed under LGPL-3.0-or-later; it statically links AMD FidelityFX Optical Flo
 layer DLL with its `LICENSE`, `THIRD_PARTY.md` and `licenses/` in
 `mods/D2R-PCVR/d2rloader/plugins/ofxr`, plus a layer manifest and settings file
 that Setup writes; its tray program is not installed. The mod loads the layer
-only while VR Settings > Performance > Frame generation is on. It is not bundled in the
+only while VR Settings > Graphics > Frames > Frame generation is on. It is not bundled in the
 release ZIP, and its archive checksum is pinned in `steamvr/install.py`. If the
 download fails, frame generation is unavailable and the rest of the mod installs.
 

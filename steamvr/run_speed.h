@@ -3,7 +3,7 @@
 #include <cmath>
 #include <cstdint>
 
-// Movement speed (VR Settings > Body > Movement speed; [gameplay] run_speed_pct, Cal
+// Movement speed (VR Settings > Comfort > Moving > Movement speed; [gameplay] run_speed_pct, Cal
 // 2026-10-25; first a skill-wheel slider, which replaced RUN / WALK). Its lowest
 // stop, Walk (-10), walks; every stop above runs - Base run (0), then 10% of the
 // way to the gear's full run speed per stop, up to Full run (100). The plugin keeps the game's own run /
@@ -95,7 +95,7 @@ struct GaitSync {
     }
     void Sent(bool wantWalk,uint64_t now){state=wantWalk?Walk:Run;toggledAt=now;fullWalkSince=0;}
 };
-// Right stick up with Movement speed's Stick toggle on ([gameplay] run_walk_toggle, off by
+// Right stick up with the Stick toggle on ([gameplay] run_walk_toggle, off by
 // default; owner 2026-10-25: "bring the toggle back and put an option to enable/disable",
 // "with it being disabled by default"): each push switches between walking and Movement
 // speed's run - from Walk, the full run, as the game's own toggle ran. A new character,

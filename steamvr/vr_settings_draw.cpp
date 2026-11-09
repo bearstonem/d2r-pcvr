@@ -283,7 +283,8 @@ struct TextStyleSpec { const wchar_t* family; DWRITE_FONT_WEIGHT weight; float e
 constexpr TextStyleSpec StyleSpecs[]={
     {L"Cinzel",DWRITE_FONT_WEIGHT_BOLD,.06f},{L"Cinzel",DWRITE_FONT_WEIGHT_BOLD,.10f},{L"Cinzel",DWRITE_FONT_WEIGHT_BOLD,.02f},
     {L"Alegreya Sans",DWRITE_FONT_WEIGHT_MEDIUM,0},{L"Alegreya Sans",DWRITE_FONT_WEIGHT_MEDIUM,0},{L"Alegreya Sans",DWRITE_FONT_WEIGHT_MEDIUM,0},
-    {L"Alegreya Sans",DWRITE_FONT_WEIGHT_MEDIUM,0},{L"Alegreya Sans",DWRITE_FONT_WEIGHT_MEDIUM,0},{L"Alegreya Sans",DWRITE_FONT_WEIGHT_BOLD,0}};
+    {L"Alegreya Sans",DWRITE_FONT_WEIGHT_MEDIUM,0},{L"Alegreya Sans",DWRITE_FONT_WEIGHT_MEDIUM,0},{L"Alegreya Sans",DWRITE_FONT_WEIGHT_BOLD,0},
+    {L"Cinzel",DWRITE_FONT_WEIGHT_BOLD,.02f}};
 static_assert(sizeof StyleSpecs/sizeof StyleSpecs[0]==size_t(TextStyle::Count),"one spec per text style");
 D2D1_RECT_F R(RectF r){return {r.x,r.y,r.x+r.w,r.y+r.h};}
 }
@@ -871,8 +872,8 @@ void Painter::Socket(RectF r,std::string_view utf8,ControlState s,Icon icon){
     i.Plate(d,s.chosen,off,s.pressed&&!off);
     const uint32_t color=off?(s.chosen?LockedSelText:Rgb(Color::Dim)):Rgb(Color::Text);
     const TextStyle style=s.chosen&&!off?TextStyle::Strong:TextStyle::Value;
-    const Icon lead=s.locked&&s.chosen?Icon::Padlock:icon;
     const RectF box{d.left,d.top,d.right-d.left,d.bottom-d.top-2};
+    const Icon lead=s.locked&&s.chosen?(utf8.empty()||ChipPadlockFits(i.Width(utf8,style),box.w)?Icon::Padlock:Icon::None):icon;
     if(lead!=Icon::None){
         const float is=lead==Icon::Padlock?24.f:32.f,gap=lead==Icon::Padlock?6.f:10.f,tw=utf8.empty()?0:i.Width(utf8,style);
         const float total=is+(utf8.empty()?0:gap+tw);float x=box.x+(box.w-total)/2;
@@ -1014,7 +1015,7 @@ void Painter::TCrossFigure(RectF r,Color c){
     i.rt->DrawGeometry(i.tCross,i.Solid(Rgb(c)),1.5f,i.roundJoin);
     i.rt->SetTransform(old);
 }
-void Painter::Tab(RectF r,Icon icon,std::string_view name,ControlState s){
+void Painter::Tab(RectF r,Icon icon,std::string_view name,ControlState s,int level){
     auto& i=*impl;if(!i.drawing)return;
     D2D1_RECT_F d=R(r);
     if(s.chosen){
@@ -1028,13 +1029,43 @@ void Painter::Tab(RectF r,Icon icon,std::string_view name,ControlState s){
         i.rt->FillRectangle({d.right-8,d.top,d.right,d.bottom},i.Token(Color::Slab));
     }
     if(s.pressed)i.rt->FillRectangle({d.left,d.top,d.right,d.top+6},i.Solid(0,.55f));
+    // A page under its group: the tree line from the 12 px gap above down through the row, ending in a diamond at the last page.
+    const float in=level>0?22.f:0.f,is=level>0?36.f:40.f;
+    if(level>0){
+        const float x=d.left+21,cy=(d.top+d.bottom)/2;
+        i.rt->FillRectangle({x-1,d.top-12,x+1,level==2?cy:d.bottom},i.Token(Color::Bronze));
+        if(level==2)i.FillPolygon({{x,cy-5},{x+5,cy},{x,cy+5},{x-5,cy}},i.Token(Color::Bronze));
+    }
     const bool off=s.disabled||s.locked;
     const uint32_t iconColor=off?Rgb(Color::EdgeOff):s.chosen?Rgb(Color::Gold):s.pointed?Rgb(Color::Quiet):TabIcon;
-    i.DrawIcon(icon,{d.left+16,d.top+(r.h-40)/2,40,40},iconColor);
-    if(s.changed)i.DrawIcon(Icon::Changed,{d.left+40,d.top+6,28,28},Rgb(Color::Changed));
+    i.DrawIcon(icon,{d.left+16+in,d.top+(r.h-is)/2,is,is},iconColor);
+    if(s.changed)i.DrawIcon(Icon::Changed,{d.left+40+in,d.top+6,28,28},Rgb(Color::Changed));
     const uint32_t color=off?Rgb(Color::Dim):s.chosen?Rgb(Color::GoldHi):s.pointed?Rgb(Color::Text):Rgb(Color::Quiet);
-    i.DrawText(name,s.chosen?TextStyle::Strong:TextStyle::Label,{d.left+70,d.top,d.right-d.left-76,r.h},color,Align::Leading,false,34);
+    const TextStyle style=s.chosen?TextStyle::Strong:TextStyle::Label;
+    const float room=d.right-d.left-76-in;
+    float size=level>0?32.f:34.f;   // a page under its group: one size down the column, close to the group's 28 px
+    if(level>0)while(size>30&&i.Width(name,style,size)>room)--size;   // a longer name steps down, to 30 px at most (1.1 deg)
+    i.DrawText(name,style,{d.left+70+in,d.top,room,r.h},color,Align::Leading,false,size);
     if(s.pointed)i.Ring(d,off);
+}
+void Painter::GroupTab(RectF r,Icon icon,std::string_view name,ControlState s){
+    auto& i=*impl;if(!i.drawing)return;
+    D2D1_RECT_F d=R(r);
+    if(s.pointed){
+        auto slab=D2D1::RoundedRect(d,8,8);i.rt->FillRoundedRectangle(slab,i.Token(Color::Slab));
+        i.rt->FillRectangle({d.right-8,d.top,d.right,d.bottom},i.Token(Color::Slab));
+    }else if(s.chosen){   // open: the slab fading out to the right
+        auto open=i.Linear({d.left,0},{d.right,0},{{0,Hex(Rgb(Color::Slab),.75f)},{1,Hex(Rgb(Color::Slab),0)}});
+        i.rt->FillRectangle(d,open);
+    }
+    if(s.chosen)i.rt->FillRectangle({d.left,d.bottom-2,d.right,d.bottom},i.Token(Color::FrameA));   // a dark rule over its pages
+    if(s.pressed)i.rt->FillRectangle({d.left,d.top,d.right,d.top+6},i.Solid(0,.55f));
+    i.DrawIcon(icon,{d.left+16,d.top+(r.h-40)/2,40,40},s.chosen?Rgb(Color::Gold):s.pointed?Rgb(Color::Quiet):Rgb(Color::Bronze));
+    if(s.changed)i.DrawIcon(Icon::Changed,{d.left+30,d.top+6,22,22},Rgb(Color::Changed));   // on the icon's corner, clear of the name
+    const uint32_t color=s.chosen?Rgb(Color::GoldHi):s.pointed?Rgb(Color::Text):Rgb(Color::Section);
+    i.DrawText(name,TextStyle::Group,{d.left+62,d.top,d.right-d.left-108,r.h},color,Align::Leading,false);
+    i.DrawIcon(s.chosen?Icon::ChevronDown:Icon::Chevron,{d.right-40,d.top+(r.h-28)/2,28,28},s.chosen?Rgb(Color::Gold):TabIcon);
+    if(s.pointed)i.Ring(d,false);
 }
 void Painter::PageTitle(RectF r,Icon icon,std::string_view title){
     auto& i=*impl;if(!i.drawing)return;
@@ -1168,14 +1199,18 @@ void Painter::Dot(RectF r,float hue,ControlState s){
 // ---- the component sheet (vr-settings-preview --draw-sheet) ----
 namespace {
 constexpr const char* Deg="\xc2\xb0";
-// The rail as on every shot: Presets, then the 11 pages; `current` is chosen.
+// The rail as on Gameplay's pages: Presets, the groups, Gameplay open with its pages;
+// `current` (an Item's view number here, not a View) is chosen.
 void SheetRail(Painter& p,int current,int changed=-1,int pointed=-1){
-    static const std::pair<Icon,const char*> tabs[]={{Icon::Presets,"Presets"},{Icon::Body,"Body"},{Icon::Combat,"Combat"},{Icon::Aim,"Aim"},
-        {Icon::Targets,"Targets"},{Icon::Shield,"Shield"},{Icon::Wrist,"Wrist"},{Icon::Interface,"Interface"},{Icon::Survival,"Survival"},
-        {Icon::World,"World"},{Icon::Haptics,"Vibration"},{Icon::Performance,"Performance"}};
-    for(int k=0;k<12;++k){
-        ControlState s;s.chosen=k==current;s.changed=k==changed;s.pointed=k==pointed;
-        p.Tab({22,30.f+78*k,254,66},tabs[k].first,tabs[k].second,s);
+    struct Item {Icon icon;const char* name;int view,level;};   // level -1: a group row; view -1: none
+    static const Item items[]={{Icon::Presets,"Presets",0,0},{Icon::Combat,"Gameplay",-1,-1},
+        {Icon::Combat,"Combat",2,1},{Icon::Aim,"Targeting",3,1},{Icon::Shield,"Shield",5,1},{Icon::Survival,"Monsters",4,1},{Icon::World,"Physics",6,2},
+        {Icon::Comfort,"Comfort",-1,-1},{Icon::Controls,"Controls",-1,-1},{Icon::Interface,"Interface",-1,-1},{Icon::Performance,"Graphics",-1,-1}};
+    for(int k=0;k<int(std::size(items));++k){
+        const auto& it=items[k];
+        ControlState s;s.chosen=it.view>=0&&it.view==current;s.changed=it.view>=0&&it.view==changed;s.pointed=it.view>=0&&it.view==pointed;
+        if(it.level<0){s.chosen=k==1;s.changed=k==1&&changed>=2&&changed<=6;p.GroupTab({22,30.f+78*k,254,66},it.icon,it.name,s);}
+        else p.Tab({22,30.f+78*k,254,66},it.icon,it.name,s,it.level);
     }
 }
 void SheetBand(Painter& p,Icon icon,const char* title,int open=-1,int pointed=-1){
@@ -1196,7 +1231,7 @@ void SheetFooter(Painter& p,int changes,bool pointClose=false){
 }
 // pages/04-aim.png
 void SheetAim(Painter& p){
-    p.Panel();SheetRail(p,3);SheetBand(p,Icon::Aim,"Aim");
+    p.Panel();SheetRail(p,3);SheetBand(p,Icon::Aim,"Targeting");
     p.SectionHeading({348,76,880,30},"Spells and skills");
     const float L=328,Wd=920;
     // row 1: a cycler (Skills go to the aimed monster)
@@ -1362,7 +1397,7 @@ Sheet DrawSheet(int repaints){
         for(int y=0;y<CanvasHeight;++y)
             std::memcpy(sheet.rgba.data()+(size_t(oy+y)*sheet.width+ox)*4,rgba.data()+size_t(y)*CanvasWidth*4,size_t(CanvasWidth)*4);
     }
-    // a full menu repaint: the Aim page, background cached, text layouts warm
+    // a full menu repaint: the Targeting page, background cached, text layouts warm
     const auto loop=Clock::now();
     for(int k=0;k<repaints;++k){p.Begin();SheetAim(p);if(p.End().empty()){sheet.error=p.Error();return sheet;}}
     sheet.repaintMs=repaints>0?std::chrono::duration<double,std::milli>(Clock::now()-loop).count()/repaints:0;

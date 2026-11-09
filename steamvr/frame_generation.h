@@ -93,7 +93,7 @@ enum class Start {
 enum class State {Off,Unavailable,NotInstalled,RestartToStart,Failed,Starting,Applying,Active,Bypassed,Paused,Error,NoControl,NeedsBothEyes};
 inline const char* StateName(State s){
     constexpr const char* names[]={"off","unavailable","not installed","loads with a new session","failed","starting","applying",
-                                   "active","bypassed","paused","error","no control","needs both eyes"};
+                                   "active","bypassed","paused","error","no control","needs Both"};
     return names[int(s)];
 }
 struct Readout {
@@ -154,7 +154,7 @@ struct HalvingWatch {
         return halved;
     }
 };
-// The Perf page's line (and the log's): one line, under 90 characters.
+// The readout's line (and the log's): one line, under 90 characters.
 inline std::string Line(const Readout& r){
     char line[160];
     const std::string running=Describe(r.backend,r.preset,r.scale);
@@ -175,11 +175,11 @@ inline std::string Line(const Readout& r){
             if(!r.errors)return "Frame generation: OFXR Bridge does not answer; no status";
             std::snprintf(line,sizeof line,"Frame generation: OFXR Bridge failed (0x%08X); no generated frames",unsigned(r.lastError));return line;
         case State::NoControl:return "Frame generation: OFXR Bridge loaded; this version gives no status";
-        case State::NeedsBothEyes:return "Frame generation: paused; it needs Stereo rendering: Both eyes";
+        case State::NeedsBothEyes:return "Frame generation: paused; it needs Eyes drawn per frame: Both";
     }
     return {};
 }
-// Whether the line is a warning (amber on the Perf page).
+// Whether the line is a warning (amber on the readout).
 inline bool Warning(const Readout& r){
     return r.state==State::Failed||r.state==State::Bypassed||r.state==State::Error||r.state==State::NotInstalled||r.state==State::Unavailable||
            r.state==State::NeedsBothEyes||r.runtimeHalves;

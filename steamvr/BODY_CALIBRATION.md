@@ -25,10 +25,10 @@ stronger buzz comes as the prompt opens. Nothing is saved by the pose:
 saving still needs both triggers held, and Right B cancels. Once open, the prompt
 stays until Right B or a save, even if a monster walks up.
 
-The buzz follows **VR Settings > Vibration > Overall vibration** and **Loot,
+The buzz follows **VR Settings > Controls > Vibration > Overall vibration** and **Loot,
 potions and menus**. With either at 0 there is no buzz, and the prompt opening is
-the only cue. Turn the gesture off with **VR Settings > Body > T cross to calibrate**,
-the "T cross" switch on the Seated play row (`[interactions] t_cross_calibrate`, On by default).
+the only cue. Turn the gesture off with **VR Settings > Comfort > Body > T cross to calibrate**,
+its own row under Height and arm span (`[interactions] t_cross_calibrate`, On by default).
 
 It starts on the prompt's own posture check, then allows more while you hold it:
 16 cm between the hands' heights instead of 9, for example, and more head tilt.
@@ -38,7 +38,7 @@ needs under 0.5 m/s, each measured over a tenth of a second, so swings do not st
 
 It waits, with no buzz and no timer, while any of these is true:
 
-- **Seated play** is on (VR Settings > Body): calibrating asks you to stand, so
+- **Seated play** is on (VR Settings > Comfort > Body): calibrating asks you to stand, so
   the gesture does nothing and its switch is left out of the menu.
 - A menu, VR Settings, or a hand wheel is open, or the prompt itself.
 - A trigger is past 30%, a grip past 55%, or a button is down, or a stick is pushed.

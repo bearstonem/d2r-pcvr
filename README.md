@@ -78,14 +78,14 @@ This is a PCVR mod: the game runs on your Windows PC and streams to the headset.
 
 - First-person VR with your character's body, hands and equipment.
 - [Sorceress elemental hand effects](docs/elemental_hands.md): her hands show flames, sparks or frost from their trigger spell.
-- Optional experimental frame generation under **VR Settings > Performance > Frame generation**, through
+- Optional experimental frame generation under **VR Settings > Graphics > Frames > Frame generation**, through
   [OFXR Bridge](https://github.com/tig3rmast3r/OFXR-Bridge) by tig3rmast3r, which
   Setup downloads on native Windows. Off by default; turning it on restarts the VR session
   for a moment, without restarting the game.
 - Free-swing melee, including with a wheel skill selected, aimed spells, bows and physical javelin, throwing knife and axe throws.
 - Belt potions you can grab and drink, plus wrist health, mana, level and experience progress.
 - A left-hand minimap/compass with current area and act, independent health/mana tilt,
-  and adjustable controller vibration under **VR Settings > Vibration**.
+  and adjustable controller vibration under **VR Settings > Controls > Vibration**.
 - Optional summon icons and live companion counts beneath the hand minimap, adapting to your available summons.
 - A **MAP** tab at the bottom of the spell menu, showing explored areas and native markers.
 - Load supported arrow skills into a physical bow quiver, with the selected
@@ -94,7 +94,7 @@ This is a PCVR mod: the game runs on your Windows PC and streams to the headset.
   through **Left Grip + left secondary → Calibrate body**, and any time you
   stand in a T cross for 2 seconds.
 - Weapon-set swapping: reach your right hand over either shoulder and press
-  its grip. You can change the swap hand in VR Settings > Body > Dominant hand.
+  its grip. You can change the swap hand in VR Settings > Controls > Hands > Dominant hand.
 - Inventory, skills, conversations and Journal through the game menu:
   **Frame Left A / Quest Left X**.
 
@@ -136,9 +136,9 @@ Quest left X/Y correspond to Index left A/B; right A/B labels are the same.
 | VR settings / body calibration | Either wheel → VR SETTINGS |
 | Recalibrate body and eye height, no menu | Stand in a **T cross**, nothing pressed, for 2 seconds: the controllers buzz while you hold it, then the prompt opens. Not in Seated play |
 | Minimap | Either wheel → MAP; movement remains available |
-| Reset height | VR Settings > Body > Height and arm span > **Set eye height** |
-| Adjust controller vibration | **VR Settings > Vibration**; **Feel it** on a row's help card previews it, **Apply** saves |
-| Hold to show nearby loot labels (Alt) | Hold the **right stick down**; let go to restore normal drop/hover labels. With **VR Settings > Body > Stick toggle** on (Off by default), push it **up** to switch between walking and running |
+| Reset height | VR Settings > Comfort > Body > Height and arm span > **Set eye height** |
+| Adjust controller vibration | **VR Settings > Controls > Vibration**; **Feel it** on a row's help card previews it, **Apply** saves |
+| Hold to show nearby loot labels (Alt) | Hold the **right stick down**; let go to restore normal drop/hover labels. With **VR Settings > Controls > Hands > Stick toggle** on (Off by default), push it **up** to switch between walking and running |
 | Interact / pick up / talk | Right A by default; requires an aimed interactable |
 | Free melee swing / thrust | Move the equipped weapon through an enemy |
 | Bow draw | Right trigger near the left-hand bow string; draw and release |
@@ -159,7 +159,7 @@ using them in combat. Menu, tracking, equipment and assignment changes also
 require a fresh press. Only one wheel is open at a time.
 
 Ordinary monsters' health and name bars are hidden by default in VR. To show
-them, open **VR Settings > Interface**, turn **Weak monster bars** On, then **Apply**.
+them, open **VR Settings > Interface > Labels**, turn **Weak monster bars** On, then **Apply**.
 Bosses, champions, uniques and their minions keep their bars with either setting.
 
 ### Hand skill layouts
@@ -181,7 +181,7 @@ mana costs apply to each cast, and walking remains available without entering
 the original casting animation. See [hand projectile spells](docs/hand_projectile_spells.md)
 for the experimental adapter's scope and offline testing checklist.
 
-**VR Settings > Aim > Keep spell shots level** defaults to Off for new or
+**VR Settings > Gameplay > Targeting > Keep spell shots level** defaults to Off for new or
 missing settings, allowing up/down aiming of straight projectile spells. Turn
 it On and Apply to keep those spells level; Charged Bolt keeps its native planar
 spread. Existing saved preferences are retained, and changes apply to new casts.
@@ -230,7 +230,7 @@ away from the string uses the right hand's own assignment.
 Face-button skills never replace gesture skills. Ordinary melee swings remain
 basic attacks for skills without a supported physical adapter; assigning a
 spell does not cast it on every swing. Physical skill gestures can be disabled
-under **VR Settings > Combat > Skills on your moves** (on by default), retaining
+under **VR Settings > Gameplay > Combat > Skills on your moves** (on by default), retaining
 button casting and basic physical attacks. This implementation supports the
 existing Smite and bow adapters and melee skill strikes: a supported melee
 skill on a hand's trigger (Bash, Stun, Charged Strike, Maul and others; see

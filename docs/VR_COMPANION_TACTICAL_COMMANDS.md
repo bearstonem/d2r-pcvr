@@ -115,4 +115,4 @@ An upright open palm held for `400 ms` used to issue `DefensiveHold` as well. It
 | **Leash Break Auto-Cancel** | `RegroupLeash` | `2939`/`2940` (90%) or `2947`/`2948` (10% farewell) | `3173`/`3174` (90%) or `3181`/`3182` (10% farewell) | `3095`/`3096` (90%) or `3103`/`3104` (10% farewell) | `3017`/`3018` (90%) or `3025`/`3026` (10% farewell) |
 | **Critical HP (`< 50%`)** | `Distress` | `2937` / `2938` | `3171` / `3172` | `3093` / `3094` | `3015` / `3016` |
 
-- **INI Setting:** `[gameplay] companion_tactical_commands=1` in `d2r_pcvr.ini` (also toggleable live in the in-VR Settings menu under **Combat -> Tactical Commands**).
+- **INI Setting:** `[gameplay] companion_tactical_commands=1` in `d2r_pcvr.ini` (also toggleable live in the in-VR Settings menu under **Gameplay -> Monsters -> Tactical commands**).

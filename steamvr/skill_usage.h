@@ -31,12 +31,12 @@ inline Kind Classify(int skill) {
     if(ws::JavelinSkill(skill))return Kind::Javelin;
     if(skill==ws::DoubleThrow)return Kind::DoubleThrow;
     if(toss::Skill(skill))return Kind::Toss;
-    // Paladin body gestures (hammer_gesture.h, charge_gesture.h): from any slot.
+    // The Paladin's and the Druid's body gestures (motions_paladin.h, motions_druid.h): from any slot.
     if(skill==ws::BlessedHammer)return Kind::Pump;
     if(skill==ws::Charge)return Kind::Punch;
-    if(skill==ws::HolyShield)return Kind::Cross;            // cross_gesture.h
-    if(skill==ws::FistOfHeavens)return Kind::Call;          // heavens_gesture.h
-    if(skill==ws::Werewolf||skill==ws::Werebear)return Kind::Shape;   // shapeshift_gesture.h
+    if(skill==ws::HolyShield)return Kind::Cross;
+    if(skill==ws::FistOfHeavens)return Kind::Call;
+    if(skill==ws::Werewolf||skill==ws::Werebear)return Kind::Shape;
     return Kind::Native;
 }
 struct Place {bool trigger=false,right=false,left=false;};
