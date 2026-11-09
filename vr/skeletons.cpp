@@ -418,6 +418,13 @@ std::atomic<ULONGLONG> g_formPosedAt{0};   // a form rig was the hero then: the 
 // When each rig was last posed as the hero: [0] a person's (the druid's own), [1] the
 // werewolf's, [2] the werebear's - the one the state sample names, while the game swaps them.
 std::atomic<ULONGLONG> g_rigPosedAt[3] = {};
+// The skeleton file a SkeletonInstance was made from (its file name only), for the log.
+void SkeletonFile(uintptr_t self,char* out,size_t size) {
+    uintptr_t nameObject=0,namePointer=0;
+    std::string s=Get(self,&nameObject)&&nameObject&&Get(nameObject+8,&namePointer)&&namePointer?Str(namePointer):std::string();
+    const auto slash=s.find_last_of('/');if(slash!=std::string::npos)s=s.substr(slash+1);
+    std::snprintf(out,size,"%s",s.empty()?"?":s.c_str());
+}
 // Room-scale (2026-11-08): the body moved under the tracked neck (first person), for the log - players
 // reported their legs left behind when they stepped. Per pose: asked for, done, refused as too far.
 std::atomic<unsigned> g_neckPoses{0},g_neckApplied{0},g_neckFar{0};
@@ -425,7 +432,21 @@ std::atomic<float> g_neckFarthest{0};   // the largest move this window, in eye 
 // Why the hero's pose had no body under the neck, by the hook's exits (Arms), per pose.
 enum NeckWhy {WhyNoPosition,WhyNotStanding,WhyInactive,WhyNotAsked,WhyNoFacing,WhyNoEye,WhyNoHands,WhyNoFrame,WhyNoBind,WhyCount};
 std::atomic<unsigned> g_neckWhy[WhyCount]{};
-std::atomic<float> g_neckApart{1e9f};   // the nearest a refused rig stood to the hero point (the hero's own, stepped away), world units
+std::atomic<float> g_neckApart{1e9f};
+// Room-scale, 2026-11-08 (legs "stretched and still attached to the center"): where the posed body's lowest bone
+// and pelvis end up against the ground under the eyes (eye heights, the window's largest), the hero bodies posed
+// (distinct skeleton instances), and skeletons standing at the hero that are not posed as a body (the legs' own
+// model piece?) - sampled for a moment every 5 s.
+std::atomic<float> g_feetFromEye{-1},g_pelvisFromEye{-1};
+SRWLOCK g_partsLock=SRWLOCK_INIT;
+struct PartSeen {uintptr_t self=0;int bones=0;float atHero=0,atEye=0;char name[56]{};};
+std::array<PartSeen,8> g_parts{};int g_partCount=0;
+std::array<PartSeen,8> g_bodies{};int g_bodyCount=0;
+std::atomic<uint64_t> g_partsUntil{0};
+void NotePart(std::array<PartSeen,8>& list,int& count,const PartSeen& p) {
+    for(int i=0;i<count;++i)if(list[i].self==p.self)return;
+    if(count<int(list.size()))list[count++]=p;
+}   // the nearest a refused rig stood to the hero point (the hero's own, stepped away), world units
 void ReportNeckFollow() {
     static std::atomic<uint64_t> nextAt{0};
     auto before=nextAt.load();const auto now=GetTickCount64();
@@ -442,6 +463,22 @@ void ReportNeckFollow() {
         applied,poses,farthest,tooFar,why[WhyInactive],why[WhyNotAsked],why[WhyNoFacing],why[WhyNoEye],why[WhyNoHands],why[WhyNoFrame],
         why[WhyNoBind],why[WhyNotStanding]+why[WhyNoPosition],apart<1e8f?apart:-1.f);
     framevr::logging::Write(line);
+    {   // the parts: where the posed body's feet went, and what else stands at the hero
+        const float feet=g_feetFromEye.exchange(-1),pelvis=g_pelvisFromEye.exchange(-1);
+        char parts[1400];int k=std::snprintf(parts,sizeof parts,"Frame room parts: lowest bone %.2f and pelvis %.2f eye heights from under your eyes; ",feet,pelvis);
+        AcquireSRWLockExclusive(&g_partsLock);
+        k+=std::snprintf(parts+k,sizeof parts-k,"hero bodies posed %d:",g_bodyCount);
+        for(int i=0;i<g_bodyCount&&k<int(sizeof parts)-80;++i)k+=std::snprintf(parts+k,sizeof parts-k," [%s]",g_bodies[i].name);
+        k+=std::snprintf(parts+k,sizeof parts-k,"; not posed, standing at the hero:");
+        for(int i=0;i<g_partCount&&k<int(sizeof parts)-100;++i)
+            k+=std::snprintf(parts+k,sizeof parts-k," [%s, %d bones, %.2f units from the hero's spot, %.2f from under your eyes]",
+                             g_parts[i].name,g_parts[i].bones,g_parts[i].atHero,g_parts[i].atEye);
+        if(!g_partCount&&k<int(sizeof parts)-8)std::snprintf(parts+k,sizeof parts-k," none");
+        g_partCount=g_bodyCount=0;
+        ReleaseSRWLockExclusive(&g_partsLock);
+        g_partsUntil.store(GetTickCount64()+300);   // the next sample: a moment of every skeleton the game poses
+        framevr::logging::Write(parts);
+    }
 }
 #ifdef D2RVR_DEVELOPER
 // Form rig frames, for the log: taken before the state sample caught up with the swap;
@@ -1580,6 +1617,13 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
                 // Unknown leg chains keep the feet's authored height while
                 // the upper body still follows the tracked neck.
                 if(legs||h.upper[i]||h.inNeck[i])newW[i].m[13]+=shift.y;
+            }
+            {   // room-scale diagnostics: the lowest bone and the pelvis against the ground under the eyes
+                int low=-1;for(int i=0;i<n;++i)if(!h.inNeck[i]&&(low<0||newW[i].m[13]<newW[low].m[13]))low=i;
+                const auto from=[&](int b){return b<0?-1.f:std::hypot(newW[b].m[12]-in.eyeModel[0],newW[b].m[14]-in.eyeModel[2])/h.eyeY;};
+                const float f=from(low),pl=from(h.pelvis);
+                for(float was=g_feetFromEye.load();f>was&&!g_feetFromEye.compare_exchange_weak(was,f);){}
+                for(float was=g_pelvisFromEye.load();pl>was&&!g_pelvisFromEye.compare_exchange_weak(was,pl);){}
             }
             if(legs)for(int side=0;side<2;++side) {
                 const int hip=h.leg[side][0],knee=h.leg[side][1],foot=h.leg[side][2];
@@ -3161,7 +3205,20 @@ void Arms(uintptr_t self) {
         ReleaseSRWLockExclusive(&g_heroLock);
         hero = h;
     }
-    if (hero.count <= 0) return;
+    if (hero.count <= 0) {
+        if (GetTickCount64() < g_partsUntil.load()) {   // room-scale diagnostics: a skeleton not taken as a body, at the hero?
+            float position[3];uintptr_t world=0;int32_t bones=0;
+            if (ecs::CandidatePosition(self, position) && Get(self + 0x20, &world) && Get(world, &bones)) {
+                const float atHero=std::hypot(position[0]-playerPosition[0],position[2]-playerPosition[2]);
+                const float atEye=eyeGroundOk?std::hypot(position[0]-eyeGround[0],position[2]-eyeGround[1]):-1.f;
+                if (atHero < 3.f || (atEye >= 0 && atEye < 3.f)) {
+                    PartSeen seen{self,bones,atHero,atEye};SkeletonFile(self,seen.name,sizeof seen.name);
+                    AcquireSRWLockExclusive(&g_partsLock);NotePart(g_parts,g_partCount,seen);ReleaseSRWLockExclusive(&g_partsLock);
+                }
+            }
+        }
+        return;
+    }
     // A shapeshift form's rig (an enemy model) is the hero's only while the player is in that form -
     // or, as the game swaps the models, once the rig the state sample still names is no longer
     // drawn: the sample trails the swap, and the form's first frames were the game's own beast.
@@ -3233,6 +3290,13 @@ void Arms(uintptr_t self) {
     else g_rigPosedAt[0].store(GetTickCount64());
 #endif
     NoteHero(self);
+    {   // room-scale diagnostics: the distinct hero bodies posed
+        AcquireSRWLockExclusive(&g_partsLock);
+        bool seen=false;for(int i=0;i<g_bodyCount;++i)seen=seen||g_bodies[i].self==self;
+        ReleaseSRWLockExclusive(&g_partsLock);
+        if(!seen){PartSeen body{self,hero.count};SkeletonFile(self,body.name,sizeof body.name);
+                  AcquireSRWLockExclusive(&g_partsLock);NotePart(g_bodies,g_bodyCount,body);ReleaseSRWLockExclusive(&g_partsLock);}
+    }
     if (!active) {++g_neckWhy[WhyInactive];ReportNeckFollow();return;}
     int why=in.followTrackedNeck?-1:WhyNotAsked;   // the first reason the body is not put under the neck this pose
     // The facing of this very frame, not of the last 10 ms tick - the hero only.
