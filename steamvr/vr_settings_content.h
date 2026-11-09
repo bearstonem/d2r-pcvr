@@ -406,6 +406,11 @@ inline constexpr Override Overrides[]={
     // Body: Potion belt
     {.id="interactions.seated",.page=View::Body,.section="Potion belt",.kind=RowKind::Toggle,.label="Seated play",
      .help="Raises the potion belt so you can reach it sitting down. Your body measurements still come from standing."},
+    // Room follows you (room_steps.h; Discord, 2026-11-04: "my character's feet stay anchored near the calibration
+    // point while my body follows the headset"): the right half of Seated play's row, shown while it is off (RowShown).
+    {.id="gameplay.room_steps",.page=View::Body,.section="Potion belt",.kind=RowKind::Toggle,.label="Room follows you",
+     .help="Your hero's spot follows you as you move in your room, so monsters attack where you stand. Walls stop it. Off: it stays where you calibrated.",
+     .beside=true,.besideLabel="Follow"},
     {.id="interactions.waist_below_eyes",.page=View::Body,.section="Potion belt",.kind=RowKind::Slider,.label="Belt below eyes",
      .help="How far below your eyes the potion belt sits when standing. Lower numbers raise the belt.",
      .format={.unit="cm",.iniScale=.01f}},
