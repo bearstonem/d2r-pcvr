@@ -105,6 +105,7 @@ Quest left X/Y correspond to Index left A/B; right A/B labels are the same.
 | Wrist health / mana / XP | Look at the back of the left wrist |
 | Wipe blood off the visor | Scrub either hand side to side in front of your face, trigger released. About six strokes clear a full visor. **Survival > Wipe blood by hand** turns this off |
 | Recenter / stereo capture | PC F11 / F8 |
+| Walk where the controller points | **VR Settings > Body > Walk direction** (beside Dominant hand): **Look** (default) walks where you look; **Controller** walks where the left controller points |
 | Room-scale | **VR Settings > Body > Room follows you** (beside Seated play; On by default): as you move in your room your hero's spot follows you, so monsters attack where you stand. Grips, triggers, swings, casting, the left stick and menus pause it |
 
 Editing consumes combat inputs but never pauses the game or zeros locomotion.
@@ -146,6 +147,9 @@ motion. The Classic rules are gone; `[gameplay] melee_rules` is ignored.
 **Combat > Stab speed to hit** is separate from swing speed: 2 m/s by default, adjustable
 from 0.75 to 10 m/s in 0.25 m/s steps. Push along the blade and pull back between
 stabs. The old `attack_speed` INI key does not select Classic; choose it here.
+**Combat > Melee reach** (0 to 50 cm, 0 by default) lets a weapon or fist that
+passes that close beside a monster still hit it. Walls still block, and shield
+bash is unchanged.
 
 **Unleashed swing damage:** every stroke that connects lands, but how hard it
 hits depends on your character. Your attack rating against the monster's

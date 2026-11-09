@@ -1193,6 +1193,13 @@ Push toward the posed weapon tip for at least 12 cm within 200 ms, with at least
 adjustable under **VR Settings > Combat > Stab speed to hit** from 0.75 to
 10 m/s in 0.25 steps (`[gameplay] melee_thrust_speed`). Apply updates it live
 and cancels the previous stroke without changing the swing-speed preference.
+
+**Melee reach** (VR Settings > Combat, `[gameplay] melee_reach_cm`, 0 to 50 cm
+in steps of 5, default 0) grows each monster's body capsule by that much in
+every direction for weapon and fist contacts (`melee_contact.h` `Reach`), so a
+stroke passing that close beside it still touches. The shield keeps the body as
+measured, so a raised guard near a monster does not bash. Native line collision
+still refuses a hit through a wall. Apply updates it live.
 The axis comes from the final weapon attachment and its matching tracked grip,
 including weapon adjustments and two-hand posing; controller-forward alone is
 not assumed to point along the blade. Contact uses the latest swept capsule,

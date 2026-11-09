@@ -363,6 +363,7 @@ inline constexpr Option FrameGenScaleOptions[]={
 };
 
 inline constexpr ValueName OffAtZero[]={{0,"Off"}};
+inline constexpr ValueName WalkNames[]={{0,"Look"},{1,"Controller"}};   // walk_direction.h: where you look, or where the left controller points
 inline constexpr ValueName LeatherNames[]={{0,"Off"},{1,"Leather"},{2,"Menu only"}};   // leather::Style; owner 2026-10-29: "Hold Menu > Off/Leather/Menu Only"
 inline constexpr ValueName ByRangeAtZero[]={{0,"By range"}};
 inline constexpr ValueName LaserOffName[]={{LaserOff,"Off"}};
@@ -386,6 +387,11 @@ inline constexpr Override Overrides[]={
     {.id="interactions.dominant_hand",.page=View::Body,.section="Hands and moving",.kind=RowKind::Choice,.label="Dominant hand",
      .help="The hand that swaps weapon sets when you reach over a shoulder and grip. Your weapon and shield hands in the game stay the same.",
      FRAMEVR_OPTIONS(DominantOptions)},
+    // Walk direction (owner, 2026-11-08: "moving where the controller points versus where you look, that should be a
+    // setting"): the right half of Dominant hand's row (Body holds 8). [stick] walk_direction.
+    {.id="stick.walk_direction",.page=View::Body,.section="Hands and moving",.kind=RowKind::Stepper,.label="Walk direction",
+     .help="Look: the left stick walks where you look. Controller: where the left controller points, so you can look around while you walk.",
+     FRAMEVR_NAMES(WalkNames),.beside=true,.besideLabel="Walk"},
     {.id="turn.smooth",.page=View::Body,.section="Hands and moving",.kind=RowKind::Toggle,.label="Smooth turning",
      .help="On turns you smoothly with the right stick. Off turns you in steps, which many players find easier on the stomach.",
      .warnWhen={.5f,"Can cause motion sickness"}},
@@ -431,6 +437,11 @@ inline constexpr Override Overrides[]={
     {.id="gameplay.melee_thrust_speed",.page=View::Combat,.section="Melee",.kind=RowKind::Slider,.label="Stab speed to hit",
      .help="How fast a forward stab along the blade must move to strike. Pull back before you stab again.",
      .format={.unit="m/s",.decimals=2}},
+    // Melee reach (Discord, 2026-11-08: hits "not registering because my body is desynchronized just slightly ...
+    // needlessly tight"): [gameplay] melee_reach_cm pads each monster's body for weapon and fist contacts. 0 by default.
+    {.id="gameplay.melee_reach_cm",.page=View::Combat,.section="Melee",.kind=RowKind::Slider,.label="Melee reach",
+     .help="A weapon or fist that passes this close beside a monster still hits it. Raise it if near misses don't count. Walls still block.",
+     .format={.unit="cm"}},
     // Combat: Skills and throws
     {.id="gameplay.skill_gestures",.page=View::Combat,.section="Skills and throws",.kind=RowKind::Toggle,.label="Skills on your moves",
      .help="A trigger skill powers your real move: melee skills on a landed strike, Smite on a bash, arrow skills on a release. Off, every swing is plain."},
