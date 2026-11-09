@@ -20,7 +20,8 @@ native OpenXR preview does not distribute them or use them as runtime dependenci
 The original user reference, `emmericp/D2R-3D`, is a separate checkout.
 
 The private scene-depth channel and D3D12 event filter in
-`steamvr/scene_depth.*`, `vr/game_device_only.h` and `reshade/D2R_DepthFog.fx`
+`steamvr/scene_depth.*`, `vr/game_device_only.h`, `reshade/D2R_DepthFog.fx`
+and the feature headers `reshade/D2R_*.fxh` (the code of that effect, split one file per feature)
 adapt further work from `natpoh/diablo2-vr-port` at
 `4b6284c0766c089139693a504333b9a19201cdd2` (MIT, copyright 2026 BodyWalkVR).
 The native OpenXR adaptation uses current-eye color/depth bindings, tracked

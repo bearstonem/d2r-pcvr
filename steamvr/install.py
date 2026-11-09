@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 from pathlib import PurePosixPath
+import re
 import shutil
 import ssl
 import subprocess
@@ -331,6 +332,17 @@ def default_saves(game):
 
 
 LOADER_CONFIG = Path('d2rloader/config/d2rloader.toml')
+
+
+def reshade_shader_files(root):
+    "The shader files to install: reshade/D2R_*.fx and D2R_*.fxh by pattern (a new header is never left out). Stops if the effect, or a header it includes, is missing."
+    shaders = sorted(p.name for pattern in ('D2R_*.fx', 'D2R_*.fxh') for p in (root / 'reshade').glob(pattern))
+    if 'D2R_DepthFog.fx' not in shaders:
+        raise SystemExit('reshade/D2R_DepthFog.fx is missing from the source')
+    wanted = set(re.findall(r'^\s*#\s*include\s+"(D2R_[^"]+)"', (root / 'reshade/D2R_DepthFog.fx').read_text(encoding='utf-8'), re.M))
+    if wanted - set(shaders):
+        raise SystemExit('reshade/D2R_DepthFog.fx includes ' + ', '.join(sorted(wanted - set(shaders))) + ', which are missing from the source')
+    return shaders
 
 
 def migrate_reshade_paths(content, game):
@@ -734,7 +746,9 @@ def main():
     put_config(mod_identity.RESHADE_DIR / 'D2R_Frame_ReShade.ini', b'Techniques=D2R_DepthFog@D2R_DepthFog.fx\n')
     if frame_generation:
         put_config(OFXR_SETTINGS, OFXR_DEFAULT_SETTINGS)
-    put(mod_identity.RESHADE_DIR / 'reshade-shaders/Shaders/D2R_DepthFog.fx', (ROOT / 'reshade/D2R_DepthFog.fx').read_bytes())
+    # the effect and its feature headers (reshade\D2R_*.fx and D2R_*.fxh), by pattern so a new header is never left out; the effect itself and every header it includes must be there
+    for shader in reshade_shader_files(ROOT):
+        put(mod_identity.RESHADE_DIR / 'reshade-shaders/Shaders' / shader, (ROOT / 'reshade' / shader).read_bytes())
     for texture in (ROOT / 'reshade/sky').glob('*.png'):
         put(mod_identity.RESHADE_DIR / 'D2R_Sky_ours' / texture.name, texture.read_bytes())
         put(mod_identity.RESHADE_DIR / 'reshade-shaders/Textures/D2R_Sky_ours' / texture.name, texture.read_bytes())
