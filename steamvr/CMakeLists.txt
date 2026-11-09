@@ -78,7 +78,7 @@ target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/settings_menu.cpp ${CMAKE_CURRENT_SO
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/native_belt.cpp ${ROOT}/vr/quick_items.cpp ${ROOT}/vr/melee_weapon.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/breakables.cpp ${ROOT}/vr/offline_difficulty.cpp ${ROOT}/vr/enemy_sight.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/respec.cpp)   # Reset Skills & Stats (respec_button.h)
-target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/target_lock.cpp)
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/target_lock.cpp ${ROOT}/vr/summon_range.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/loot_beam_scan.cpp)   # loot beams: the items on the floor that get one
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/monster_immunity.cpp)
 add_executable(monster-immunity-test monster_immunity_test.cpp)
@@ -362,6 +362,14 @@ add_executable(gaze-test gaze_test.cpp)
 add_executable(gaze-aim-test gaze_aim_test.cpp)   # Aim with your eyes: the source, the blink fallback, the pick's hysteresis
 add_test(NAME gaze-aim-test COMMAND gaze-aim-test) # Check() exits on failure; needs no -UNDEBUG
 add_executable(window-focus-test window_focus_test.cpp)
+add_executable(summon-range-test summon_range_test.cpp)
+target_include_directories(summon-range-test PRIVATE ${D2RL_SDK}/include)
+target_link_libraries(summon-range-test PRIVATE framevr-runtime)
+add_test(NAME summon-range-test COMMAND summon-range-test)
+add_executable(summon-range-runtime-test summon_range_runtime_test.cpp ${ROOT}/vr/summon_range.cpp)
+target_include_directories(summon-range-runtime-test PRIVATE ${D2RL_SDK}/include)
+target_link_libraries(summon-range-runtime-test PRIVATE framevr-runtime)
+add_test(NAME summon-range-runtime-test COMMAND summon-range-runtime-test)
 add_executable(callback-ticket-test callback_ticket_test.cpp)
 add_executable(local-player-test local_player_test.cpp ${ROOT}/vr/combat.cpp)
 add_executable(shield-block-test shield_block_test.cpp)

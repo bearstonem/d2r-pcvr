@@ -186,7 +186,7 @@ int main() {
     {
         namespace st = framevr::settings;
         const auto& d = st::Definitions[st::SkillCooldowns];
-        Check(st::SkillCooldowns == st::Count - 1, "appended last");
+        Check(st::SkillCooldowns > st::RoomSteps && st::SkillCooldowns < st::Count, "appended after the keys before it");
         Check(d.defaultValue == 1 && d.min == 0 && d.max == 1 && d.step == 1 && std::wstring(d.section) == L"interactions" &&
               std::wstring(d.key) == L"skill_cooldowns", "[interactions] skill_cooldowns, On by default");
         Check(st::Normalize(st::SkillCooldowns, .4f) == 0 && st::Normalize(st::SkillCooldowns, 7.f) == 1, "a toggle");

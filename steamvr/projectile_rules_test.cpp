@@ -56,5 +56,19 @@ int main() {
     assert(ScaledVelocity(6000,std::numeric_limits<float>::quiet_NaN())==6000);
     assert(ScaledVelocity(6000,4)==6000);
     assert(ScaledVelocity(INT32_MAX,2)==INT32_MAX);
+    assert(ScaledVelocity(14<<8,5,5)==70<<8);
+    assert(ScaledVelocity(7<<8,3,5)==21<<8); // retain native slowing
+    assert(ScaledVelocity(6000,6,5)==6000);
+    constexpr uintptr_t params=0x100,mageOwner=0x200;
+    put(params+8,mageOwner);put(mageOwner,uint32_t(1));put(mageOwner+4,uint32_t(364));
+    for(uint32_t id=208;id<=211;++id){put(params+0x20,id);assert(MageMissile(params,read)==id);}
+    put(params+0x20,uint32_t(207));assert(MageMissile(params,read)==UINT32_MAX);
+    put(params+0x20,uint32_t(212));assert(MageMissile(params,read)==UINT32_MAX);
+    put(params+0x20,uint32_t(208));
+    put(mageOwner+4,uint32_t(359));assert(MageMissile(params,read)==UINT32_MAX); // merc
+    put(mageOwner+4,uint32_t(274));assert(MageMissile(params,read)==UINT32_MAX); // hostile mage
+    put(mageOwner+4,uint32_t(364));put(mageOwner,uint32_t(0));assert(MageMissile(params,read)==UINT32_MAX);
+    put(params+8,uintptr_t(0));assert(MageMissile(params,read)==UINT32_MAX);
+    put(params+8,uintptr_t(0x2000));assert(MageMissile(params,read)==UINT32_MAX);
     puts("Projectile ownership/velocity tests passed");
 }

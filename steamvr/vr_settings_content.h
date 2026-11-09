@@ -230,7 +230,7 @@ inline constexpr ContentPage PageTable[]={
     {View::Combat,"Combat",Group::Gameplay,Icon::Combat,"How your real swings, stabs and throws hit.",true},
     {View::Targeting,"Targeting",Group::Gameplay,Icon::Aim,"Which monster or spot your spells and skills go to. Rows for other classes stay hidden.",true},
     {View::Shield,"Shield",Group::Gameplay,Icon::Shield,"Bash, block and seat a shield on your arm.",true},
-    {View::Monsters,"Monsters",Group::Gameplay,Icon::Survival,"How tough offline monsters are, and your mercenary. Outline and health bars: Interface.",true},
+    {View::Monsters,"Monsters",Group::Gameplay,Icon::Survival,"How tough offline monsters are, your mercenary and your summons. Outline and health bars: Interface.",true},
     {View::Physics,"Physics",Group::Gameplay,Icon::World,"Things your hands and weapons can knock, roll and push.",true},
     {View::Moving,"Moving",Group::Comfort,Icon::Fast,"Turning and how fast you move.",true},
     {View::Body,"Body",Group::Comfort,Icon::Body,"Your height, arm span, play space and potion belt.",true},
@@ -282,7 +282,7 @@ inline constexpr ContentSection SectionTable[]={
     {View::Combat,"Melee"},{View::Combat,"Skills and throws"},
     {View::Targeting,"Target selection"},{View::Targeting,"Aiming"},{View::Targeting,"Ground targeting"},
     {View::Shield,"Bash and block"},{View::Shield,"Fit on the arm"},
-    {View::Monsters,"Offline difficulty"},{View::Monsters,"Mercenary"},
+    {View::Monsters,"Offline difficulty"},{View::Monsters,"Mercenary"},{View::Monsters,"Summons"},
     {View::Physics,"Props"},
     {View::Moving,"Turning"},{View::Moving,"Speed"},
     {View::Body,"Play space"},{View::Body,"Potion belt"},
@@ -521,6 +521,9 @@ inline constexpr Override Overrides[]={
     // Mercenary potion assistance, independent of class and outline settings (#424, RobinHeggelund).
     {.id="gameplay.merc_potion_assist",.page=View::Monsters,.section="Mercenary",.kind=RowKind::Toggle,.label="Merc potion throw autoaim",
      .help="On: thrown potions feed your living mercenary wherever they land. Off: land within 1.5 m of its feet; misses keep the potion. Slow releases return it."},
+    // Monsters: Summons (#426, RobinHeggelund)
+    {.id="gameplay.summon_range_multiplier",.page=View::Monsters,.section="Summons",.kind=RowKind::Slider,.label="Summon range",
+     .help="Multiplies summon target search and owner-follow ranges together. Mercenaries and attack reach stay native. Apply, then restart the game.",.warn="Requires restart",.format={.unit="x",.decimals=2}},
     // Physics: Props
     {.id="interactions.bottle_physics",.page=View::Physics,.section="Props",.kind=RowKind::Toggle,.label="Roll and break bottles",
      .help="Empty bottles drop and roll. Potions thrown at your mercenary break where they hit; thrown traps and gas or oil potions stop at walls."},

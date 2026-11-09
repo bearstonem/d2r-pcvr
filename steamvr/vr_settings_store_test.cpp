@@ -463,6 +463,15 @@ int main(){
         Check(vrsettings::Read().values[ClickToDrink]==choice&&Int(path,L"interactions",L"click_to_drink")==choice&&
               Int(path,L"custom",L"keep")==12345,"click to drink on and off survive reload preserving unrelated settings");
     }
+    Check(vrsettings::Read().values[SummonRangeMultiplier]==1,"missing summon multiplier preserves native ranges");
+    for(float multiplier:{1.25f,5.f,1.f}) {
+        const auto before=vrsettings::Read();
+        model.Open(before);model.Set(SummonRangeMultiplier,multiplier);request=model.Click({Kind::Apply});
+        Check(request.changed==(ChangeMask{1}<<SummonRangeMultiplier),"one setting controls both summon ranges");
+        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"shared summon preference saves");
+        Check(vrsettings::Read().values[SummonRangeMultiplier]==multiplier&&Int(path,L"custom",L"keep")==12345,
+              "shared fractional multiplier survives reload and preserves other settings");
+    }
     model.Open(vrsettings::Read());model.Click({Kind::Change,Motion,-1});request=model.Click({Kind::Apply});
     Check(DeleteFileW(name)&&vrsettings::Submit(request)&&!vrsettings::Poll(name),"missing file fails safely");
     Check(!vrsettings::Read().ready&&vrsettings::Read().result==Result::Failed,"failure status published");

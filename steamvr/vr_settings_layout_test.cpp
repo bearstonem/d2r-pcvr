@@ -62,6 +62,7 @@ static const GoldenRow Golden[]={
     {"gameplay.companion_ai",View::Monsters,1,content::RowKind::Toggle,"Smarter mercenary",0,0},
     {"gameplay.companion_tactical_commands",View::Monsters,1,content::RowKind::Toggle,"Tactical commands",0,0},
     {"gameplay.merc_potion_assist",View::Monsters,1,content::RowKind::Toggle,"Merc potion throw autoaim",0,0},   // #424
+    {"gameplay.summon_range_multiplier",View::Monsters,2,content::RowKind::Slider,"Summon range",0,0},   // #426
     {"interactions.bottle_physics",View::Physics,0,content::RowKind::Toggle,"Roll and break bottles",0,0},
     {"interactions.prop_physics",View::Physics,0,content::RowKind::Toggle,"Knock over small props",0,0},
     {"interactions.body_physics",View::Physics,0,content::RowKind::Toggle,"Pushable bodies",0,0},   // main's #361
@@ -230,7 +231,7 @@ int main(int argc,char** argv){
     }
     // ---- the map: no row lost, none left to More, the names and the owner's pairs ----
     {
-        Check(tables.rowCount==104,"104 settings on the menu, each one row");   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424), Click to drink (#425), Skill cooldowns (2026-11-09)
+        Check(tables.rowCount==105,"105 settings on the menu, each one row");   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424), Click to drink (#425), Skill cooldowns (2026-11-09), + Summon range (#426)
         for(size_t i=0;i<tables.rowCount;++i)Check(!tables.rows[i].fallback&&tables.rows[i].page!=View::More,std::string("every setting has its page: ")+tables.rows[i].label);
         Check(content::Menu().report.empty(),"the tidy report is empty");
         struct Want {content::Group group;const char* name;std::vector<const char*> pages;};

@@ -23,6 +23,9 @@
 #endif
 #include <windows.h>
 #include "pcvr_identity.h"
+#ifdef D2RVR_NATIVE_OPENXR
+#include "summon_range.h"
+#endif
 #include "pcvr_mod_layout.h"
 #include "../steamvr/profile.h"
 #include "../steamvr/resource_descriptions.h"
@@ -1150,6 +1153,7 @@ void LoadSettings() {
 #ifdef D2RVR_NATIVE_OPENXR
     offlinedifficulty::Configure(int(framevr::settings::Normalize(framevr::settings::OfflinePlayers,
         IniF(L"gameplay",L"offline_players",0))),g_set.platform.load()==1);
+    summonrange::Configure(IniF(L"gameplay",L"summon_range_multiplier",1),g_set.platform.load()==1);
     enemysight::Configure(int(framevr::settings::Normalize(framevr::settings::EnemySight,
         IniF(L"gameplay",L"enemy_sight_pct",100))),g_set.platform.load()==1);
     companionai::Configure(int(framevr::settings::Normalize(framevr::settings::CompanionAi,
@@ -11850,6 +11854,8 @@ static bool OtherVrPluginBeside(HMODULE self) {
     return false;
 }
 
+D2RL_PLUGIN_EXPORT void D2RLoaderUnloadPlugin() noexcept;
+
 D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
     if (ctx == nullptr) return true;
     g_ctx = ctx;
@@ -11921,6 +11927,7 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
 #ifdef D2RVR_NATIVE_OPENXR
     enemysight::Init(ctx);
     companionai::Init(ctx);
+    if(!summonrange::Init(ctx)){D2RLoaderUnloadPlugin();g_standDown=true;return false;}
     melee::Init(ctx);
     bowvr::Init(ctx);
     wallcells::Init(ctx);
@@ -11944,6 +11951,7 @@ D2RL_PLUGIN_EXPORT void D2RLoaderUnloadPlugin() noexcept {
 #ifdef D2RVR_NATIVE_OPENXR
     enemysight::Shutdown();
     companionai::Shutdown();
+    summonrange::Shutdown();
     framevr::scenedepth::Shutdown();
 #endif
     g_enabled.store(false);
