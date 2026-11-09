@@ -57,7 +57,7 @@ void __cdecl Scan(const D2RL::PluginContext*,void*) noexcept {
         std::lock_guard lock(shownMutex);shown={};return;
     }
     KnowRunes(game);
-    // VR Settings > Interface > Loot beams: which rarities, read live (Apply takes at the next scan).
+    // VR Settings > Interface > Labels > Loot beams: which rarities, read live (Apply takes at the next scan).
     const auto values=vrsettings::Read().values;
     beams::Wanted want=wanted;   // the rune threshold from [loot] rune_min
     want.unique=values[framevr::settings::LootBeamUnique]>.5f;
@@ -110,7 +110,7 @@ void Init(const D2RL::PluginContext* ctx,bool on,const beams::Wanted& want) {
        !D2RL::HasDataTableServiceField(tables,D2RL::DataTableServiceRequiredSize))tables=nullptr;
     enabled.store(on&&threads&&threads->runOnGameThread);
     char line[160];
-    snprintf(line,sizeof line,"Frame loot beams: %s (runes from r%02d; rarities: VR Settings > Interface)",
+    snprintf(line,sizeof line,"Frame loot beams: %s (runes from r%02d; rarities: VR Settings > Interface > Labels)",
              enabled.load()?"on":on?"off: no game-thread service":"off ([loot] beams=0)",wanted.highRune);
     framevr::logging::Write(line);
 }

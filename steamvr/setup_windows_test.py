@@ -26,7 +26,7 @@ class SteamSetupTests(unittest.TestCase):
             names = ('bin/d2rl-pcvr.dll', 'bin/openxr_loader.dll', 'steamvr/install.py', 'steamvr/mod_identity.py',
                      'steamvr/setup_windows.py', 'steamvr/steam_config.py', 'steamvr/launch_windows.py', 'steamvr/prepare_dev_scenarios.py',
                      'steamvr/game_install.py', 'steamvr/game_assets.py', 'steamvr/casc_assets.py',
-                     'steamvr/prepare_sewer_backdrop.py',
+                     'steamvr/prepare_sewer_backdrop.py', 'steamvr/prepare_game_ceiling.py', 'steamvr/granny_write.py',
                      'Uninstall-Windows.cmd', 'steamvr/uninstall_windows.py')
             hashes = {}
             for name in names:
