@@ -103,7 +103,7 @@ int main(int argc,char** argv){
     {
         for(Key k:{StereoRendering,RenderResolution,DrawDistance,ObjectDistance,BigObjectDistance,Foveation,FoveationStrength})
             Check(PageOf(k)==View::Performance,"the image and draw distance settings are on the Performance page, Big objects too");
-        for(Key k:{Sky,Fog,FogDistance,Ceiling,CeilingTorches,TorchFlame,SpellHandLight,LightRadiusBoost})
+        for(Key k:{Sky,Fog,FogDistance,Ceiling,CeilingTorches,TorchFlame,SpellHandLight,LightRadiusBoost,ReverbEcho})
             Check(PageOf(k)==View::Environment,"the Environment page keeps the mod's effects, with the fog's distance, the torch flame, the spell hand light and the Light Radius boost");
         for(Key k:{BottlePhysics,PropPhysics,BodyPhysics})
             Check(PageOf(k)==View::Physics,"bottle, prop and body physics are on the Physics page");

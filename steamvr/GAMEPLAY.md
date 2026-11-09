@@ -611,7 +611,7 @@ sets the page's rows back to their defaults, with **Undo reset** for 6 seconds.
 | Interface > Warnings | The low life and mana alert, heartbeat, blood on the visor and wiping it, and Arcane Decay's low mana warning with its fade, starting level and strength |
 | Graphics > Performance | Eyes drawn per frame (Both / One by turns, One by turns by default), render resolution (Headset size by default), lower detail at edges (Off / Fixed / Eye tracked) and its edge detail reduction, terrain and scenery distances with **Big objects** beside Scenery distance (600 by default). Under them, the readout: the actual VR source size, a Defer GPU wait button while frames wait for the GPU, warnings while the game's Vertical Sync is on or its anti-aliasing is not FXAA, each second's frame rate and where the frame's time goes, whether the CPU's part fits the headset's frame, and the game's own graphics options |
 | Graphics > Frames | Eyes drawn per frame on top, the same setting as on Performance; frame generation (experimental: Off / FidelityFX / NVIDIA, grayed on One by turns with a line saying why, with what OFXR Bridge is doing under its label), NVIDIA's flow quality and scale while NVIDIA is chosen, and the same readout, where Defer GPU wait has its button |
-| Graphics > Environment | Outdoor sky, distance fog with its **Fog distance** beside it while the fog is on (where it is complete, 100-1200 units, 600 by default), dungeon ceilings with **Torches** (Dungeon torchlight) beside them (the game's own torches and braziers lighting the dungeon around them; Off by default, as finding them scans the game's memory every 1.5 s), the experimental Sorceress spell glow on hands (Off by default) and the torch club's flame (On; its light stays when it is off) |
+| Graphics > Environment | Outdoor sky, distance fog with its **Fog distance** beside it while the fog is on (where it is complete, 100-1200 units, 600 by default), dungeon ceilings with **Torches** (Dungeon torchlight) beside them (the game's own torches and braziers lighting the dungeon around them; Off by default, as finding them scans the game's memory every 1.5 s), the experimental Sorceress spell glow on hands (Off by default) and the torch club's flame (On; its light stays when it is off), and **Echo** (Game's own / More / Strong, More by default): how loud the game's own echo of the place is. |
 | Guide | Left/right controller reference for movement, menus, melee, bow, spells, potions and game menus, in the button names Controls > Hands > Button names chooses |
 | What's new | The last published release's notes, read-only; a long release pages them, 12 lines a page, with **Previous** and **Next** |
 | More | Shown (a band link with a count) only while a setting has no place in the menu yet, such as one added since the menu was last sorted: its own label and help, 8 rows a page. A setting like that whose ini section has an owner page (sky, fog, ceiling and torch: Environment; render and stereo: Performance; haptics: Vibration; hud: Menus; bow: Targeting; turn: Moving; calibration: Body) shows in that page's New section instead, while the page has room |
@@ -2215,6 +2215,48 @@ with the view every 10 ms, so FMOD re-pans everything that is playing.
 | `listener_turn` | `1` | `0` = keep the ground mapping but leave FMOD's listener facing the camera. |
 | `forward_sign` | `-1` | Which screen direction counts as ahead (`-1` = up). |
 | `depth_scale` | `2` | Stretches screen up/down to undo the isometric squash. |
+
+## Echo and footsteps
+
+The game already gives every place its own echo, and plays footsteps by the
+floor you walk on. In a headset the echo is mixed too faint to notice, so the
+plugin raises it.
+
+**Echo** (VR Settings > Graphics > Environment, More by default):
+
+| Echo | |
+|---|---|
+| Game's own | The game's mix, untouched. |
+| More | The echo twice as loud (+6 dB). |
+| Strong | Four times as loud (+12 dB), ringing a quarter longer. |
+
+Each level names a sound environment with its own reverb: a cave rings for
+3.4 s, the Cathedral for 4.3 s, Mephisto's hall for 4.75 s, the open moor for
+a quarter of a second. Every other number stays the game's, so each place
+keeps its character. The echo follows monsters, blows, footsteps, objects,
+items, skills and speech; music and menu sounds never echo. A change of the
+setting is heard at once. On a monitor the game's own mix stays.
+
+- Where the game turns the reverb off, it stays off.
+- The echo never becomes as loud as the sound that made it.
+
+Footsteps are the game's own: your hero's have their own sound channel, the
+hero's walk plays them - by the stick, or following you across your room -
+and the floor's material picks the sound. Their loudness is the Footsteps
+volume in the game's own audio options. Whether they play in first person has
+not been checked in a headset yet; the log line below counts them.
+
+The log says what ran: `Frame audio echo:` with the place's reverb numbers
+each time the game sets them (the game's, and what was sent), and every 10 s
+with sound `Frame audio: N sounds started` with your footsteps, others'
+footsteps and the busiest channels.
+
+`d2r_pcvr.ini`:
+
+| `[audio]` key | Default | |
+|---|---|---|
+| `echo` | `1` | `0` Game's own, `1` More, `2` Strong. Saved by VR Settings. |
+| `sound_log` | `1` | `0` = no count of started sounds in the log (read at start). |
 
 ## Loot beams
 
