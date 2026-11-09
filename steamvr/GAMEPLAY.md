@@ -1107,6 +1107,24 @@ town:
    restoration. Recheck ordinary 3D arrows, free sword swings, inventory and frame
    pacing. Repeat shield-fit checks with several shield shapes.
 
+## Room-scale
+
+You move freely in your room, and the left stick moves the whole room with the
+hero: his spot in the game is the room's centre. The camera is the hero plus
+your head's offset from the tracking origin, 1:1, and the drawn body stands
+under your tracked neck (skeletons.cpp), so a step, a lean or a reach moves you
+and your body without moving the hero. F11 and Calibrate body put the room's
+centre back under you.
+
+A snap or smooth turn turns the room about your head, as in other VR games
+(`steamvr/room_scale.h` TurnAboutHead). Before 2026-11-08 it turned about the
+room's centre, so a step away from it made every turn throw the view sideways.
+
+Log lines: `Frame room: you stand N m from the hero's spot` (every 5 s while
+over 25 cm), and `Frame room body: last 5 s the body stood under your neck in
+N of M poses (farthest N eye heights ...)`, written while you stand away from
+the centre or a pose is refused as over 3 eye heights.
+
 ## What is physical and what is still native
 
 Hand/weapon presentation and input gestures use tracked 6DoF poses. The bow
