@@ -97,7 +97,7 @@ namespace hud { void SetWorkspaceBand(float top, float bottom); void SetBoardCle
 #include "mat4.h"
 namespace gamecmd { void Init(const D2RL::PluginContext* ctx); void Tick(); }   // the game's key commands from BodyWalk (gamecmd.cpp)
 namespace spatialaudio { void SetLogger(void (*log)(const char*)); void SetViewYaw(float (*yaw)()); void Configure(bool headFollow, bool listenerTurn, float forwardSign, float depthScale); void Poll(); }   // head-relative sound (spatial_audio.cpp)
-namespace gamestate { bool ToggleMenus(); }
+namespace gamestate { bool ToggleMenus(); bool PhantomHover(); }
 namespace gamestate { uint32_t MenuEpoch(); }
 namespace gamestate { void Init(const D2RL::PluginContext* ctx); void Tick(); uint32_t WeaponClass(); uint32_t WeaponSet(); uint32_t WeaponType(); uint32_t HandsHeld(); uint32_t TwoHanded(); uint32_t WeaponHand(); uint32_t HandsKey(); bool MenuOpen(); int ObjectLight(uint32_t txt, uint32_t mode, float rgb[3]); uint64_t LocalPlayer(); void SetViewMode(uint32_t mode); bool AutoMapOpen(); bool SetAutoMap(bool open); void PollPlate(); bool PlateRect(int32_t out[4]); }
 namespace gamestate {bool LeftShield();}
@@ -3761,6 +3761,18 @@ bool CampfirePointer(const float o[3], const float d[3], POINT* where) {
             LogF("vrcam: campfire pointer - window %ldx%ld, picture w/h %.3f, camera w/h %.3f, at %.3f %.3f -> %ld %ld",
                  rc.right, rc.bottom, canvas, P[0] != 0.0f ? P[5] / P[0] : 0.0f, nx, ny, p.x, p.y);
         }
+    }
+    {   // Spots where the game hovers a hero the scene has not got (gamestate PhantomHover - the Warlock's
+        // hot spot on the ground before the Barbarian): learned as the pointer finds them, kept off after.
+        static POINT spots[16]; static int nSpots = 0;
+        const long r = std::max(40L, rc.bottom / 14);
+        if (gamestate::PhantomHover() && nSpots < 16) {
+            bool known = false;
+            for (int i = 0; i < nSpots; ++i) known |= std::labs(spots[i].x - p.x) < r / 2 && std::labs(spots[i].y - p.y) < r / 2;
+            if (!known) { spots[nSpots++] = p; LogF("vrcam: campfire - a phantom hero's spot at %ld %ld: the pointer keeps off it", p.x, p.y); }
+        }
+        for (int i = 0; i < nSpots; ++i)
+            if (std::labs(spots[i].x - p.x) < r && std::labs(spots[i].y - p.y) < r) { p.x = rc.right / 2; p.y = 1; break; }
     }
     if (!ClientToScreen(g_gameWnd, &p)) return false;
     *where = p;

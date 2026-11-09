@@ -175,6 +175,38 @@ PAVE_HOLE = None
 # the new road's swells - owner 2026-11-08).
 MOVES = ()
 LIFTS = ()
+# --light X:Z:Y:R:G:B:POWER:RADIUS ...: a point light of its own (from the scene's fire light, its
+# settings replaced): X, Z from the fire, Y the height (owner 2026-11-09: a light in the room behind
+# the slit over the stairs).
+LIGHTS = ()
+LIGHT_TEMPLATE = 'charactercreate_fill_point01_04'
+
+
+def with_lights(preset):
+    entities = preset['entities']
+    src = next((e for e in entities if isinstance(e, dict) and e.get('name') == LIGHT_TEMPLATE), None)
+    if src is None:
+        return preset, ['light: the fire light not found']
+    ids = {int(e.get('id', 0)) for e in entities if isinstance(e, dict)}
+    for k, spec in enumerate(LIGHTS):
+        x, z, y, r, g, b, power, radius = (float(v) for v in spec.lstrip('@').split(':'))
+        e = copy.deepcopy(src)
+        e['name'] = f'pcvr_light{k:02d}'
+        new = (0x51A7E000 + k * 7919) & 0xFFFFFFFF
+        while new in ids:
+            new = (new + 0x01000193) & 0xFFFFFFFF
+        ids.add(new); e['id'] = new
+        for c in e.get('components', []):
+            if c.get('type') == 'TransformDefinitionComponent':
+                c['position'] = {'x': FIRE[0] + x, 'y': y, 'z': FIRE[1] + z}
+            elif c.get('type') == 'PointLightDefinitionComponent':
+                c['color'] = {'x': r, 'y': g, 'z': b}
+                c['power'] = power
+                c['radius'] = radius
+        entities.append(e)
+    return preset, [f'+{len(LIGHTS)} lights']
+
+
 FLOORS = ('terrain_charactercreate', 'ui_skirt_mud', 'ui_rock_pile', 'town_ground')
 
 
@@ -880,6 +912,9 @@ def generate(assets, mod_name='D2R-PCVR', surround=True, town_at=TOWN_AT_GATE, t
         if town_biome:
             removed = removed + [f'biome {result.get("biomeFilename")} -> {town_biome}']
             result['biomeFilename'] = town_biome
+    if LIGHTS:
+        result, lit = with_lights(result)
+        removed = removed + lit
     if MOVES or LIFTS:
         for e in result['entities']:
             if not isinstance(e, dict):
@@ -986,6 +1021,7 @@ def main():
     ap.add_argument('--pave-z0', type=float, default=None, help='where the road\'s rows start (z)')
     ap.add_argument('--pave-skip', nargs='+', default=None, metavar='@X:Z', help='no road piece over these points (@ in front, for a minus)')
     ap.add_argument('--pave-tilt', nargs='+', default=None, metavar='A1:B2:DROP', help="road pieces tipped, their right edge DROP lower")
+    ap.add_argument('--light', nargs='+', default=None, metavar='@X:Z:Y:R:G:B:POWER:RADIUS', help='point lights of its own')
     ap.add_argument('--move', nargs='+', default=None, metavar='NAME:DX:DY:DZ', help='entities moved, exact names')
     ap.add_argument('--lift', nargs='+', default=None, metavar='X:Z:R:DY', help='all but the ground within R of a point raised')
     ap.add_argument('--pave', action='store_true', help="the town ground under copies of the road to the gate")
@@ -1015,6 +1051,8 @@ def main():
         PAVE_HOLE = tuple(float(v) for v in args.pave_hole.lstrip('@').split(':'))
     if args.pave_z0 is not None:
         PAVE_AREA = (PAVE_AREA[0], PAVE_AREA[1], args.pave_z0, PAVE_AREA[3])
+    global LIGHTS
+    LIGHTS = tuple(args.light or ())
     MOVES = tuple(args.move or ())
     LIFTS = tuple(t.lstrip('@') for t in (args.lift or ()))
     TOWN_BIOME = args.town_biome
