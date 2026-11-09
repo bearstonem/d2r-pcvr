@@ -89,7 +89,7 @@ int main(){
         Check(c!=Context(s.in.snapshot,s.out,true),"count changes invalidate paint and old click eligibility");
         for(auto page:{MenuPage::Spells,MenuPage::Equipment}) {
             Check(WheelCell(.1f,.1f,-1,page,1)==QuickUseCell,"quick slot shares hit and paint bounds");
-            // The RUN / WALK box's corner (now VR Settings > Body > Movement speed) holds the GLYPHS box (glyph casting).
+            // The RUN / WALK box's corner (now VR Settings > Comfort > Moving > Movement speed) holds the GLYPHS box (glyph casting).
             Check(WheelCell(.85f,.14f,-1,page,1)==GlyphsCell,"no RUN / WALK box or movement slider on the wheel; the GLYPHS box in its corner");
         }
         for(auto page:{MenuPage::Map,MenuPage::Developer,MenuPage::EditSlots,MenuPage::EditSkills,MenuPage::EditItems})

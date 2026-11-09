@@ -8,7 +8,7 @@
 // Windows dependency, so the tests run it for every view, class and state.
 //
 // settings::Kind and settings::Hit are the click vocabulary: Press below
-// handles Open, Set, Undo, Default, Preset, ResetPage, UndoReset,
+// handles Open, OpenGroup, Set, Undo, Default, Preset, ResetPage, UndoReset,
 // ConfirmClose, KeepEditing, ApplyClose and Card, and passes Change, Apply and
 // Close's plain case to Model::Click (its steps and the save request).
 // Coordinates are canvas pixels (0-1280, 0-1024); the help card is inside
@@ -79,7 +79,8 @@ inline float DragStepPx(float min,float max,float step,float sweepPx){
 // ---- geometry (canvas pixels) ----
 constexpr int Inner=22;                                          // the bronze frame's inner edge
 constexpr Rect PanelInner{Inner,Inner,Width-2*Inner,Height-2*Inner};
-constexpr int RailX=24,RailW=270,TabY=29,TabPitch=78,TabH=66;    // 12 tabs: 29-953
+constexpr int RailX=24,RailW=270,TabY=29,TabPitch=78,TabH=66;    // 12 rows: 29-953
+static_assert(TabY+(content::MaxRailRows-1)*TabPitch+TabH<=Inner+PanelInner.h,"the rail's rows fit inside the frame");
 constexpr int ContentX=328,ContentW=920,ContentRight=ContentX+ContentW;
 constexpr int RowPad=20;                                         // label inset; controls end this far from the slab's right
 // The band's links keep 64 px hit areas (22-86); the title and links are drawn
@@ -94,7 +95,7 @@ constexpr int CardMin=144;                                       // the card spa
 constexpr int PitchRoomy=84,PitchMin=76;
 constexpr int ToggleW=150,StepW=64,StepGap=18,ChipGap=MinGap,ChipMin=96,ChipPad=34;   // ChipPad: both sides of a chip's words
 constexpr int ValueMin=160,ValueMax=300;
-constexpr int PairGap=24;   // a row's control to the toggle beside it (Movement speed | Stick toggle): >= 16 px
+constexpr int PairGap=24;   // a row's control to the toggle beside it (Smarter mercenary | Commands): >= 16 px
 static_assert(PairGap>=16&&PairGap>=MinGap,"the toggle beside a row keeps its own aim");
 constexpr int LabelEmberW=46;                                    // Painter::Label's changed ember after the label (10 + 36)
 constexpr int CardPad=8,CardTitleH=36,CardLineH=33,CardStateH=32,CardColumnW=330,CardColumnPad=14,CardButtonH=64;
@@ -117,8 +118,9 @@ constexpr Rect MoreLink{890,BandY,190,BandH},MoreIcon{1022,BandY,64,BandH},MonoW
 enum class Role : uint8_t {
     None,
     // rail and band
-    Tab,            // a rail tab (Presets and the 11 pages): icon + name; hit Open
-    GroupLine,      // the thin divider between rail groups
+    Tab,            // a rail tab (Presets and the open group's pages): icon + name; hit Open;
+                    // option 1: a page under its group (indented), 2: the group's last page
+    GroupLine,      // the thin divider above each rail group
     PageTitle,      // the band's icon + cast-gold title
     HeaderLink,     // Guide / What's new in the band; hit Open
     Warning,        // the band's Windows Mono audio warning (help HelpMonoAudio)
@@ -136,7 +138,7 @@ enum class Role : uint8_t {
     Button,         // a row action (Calibrate body, Set eye height, Defer GPU wait offer); hit Calibrate / Recenter / Set
     // footer (fixed slots, never move)
     FooterResetPage,  // Reset page; becomes Undo reset (UndoReset) for 6 s in the same slot
-    FooterRecenter,   // unused: Set eye height is a button on Body's Measurements row
+    FooterRecenter,   // unused: Set eye height is a button on Body's Height and arm span row
     FooterClose,      // Close; with a draft: ConfirmClose flow
     FooterApply,      // Apply n changes / No changes
     ConfirmDiscard,   // confirm row: Discard n changes (where Reset page was)
@@ -159,6 +161,7 @@ enum class Role : uint8_t {
     Readout,        // a Performance readout line (frame times, verdict, warnings)
     // appended by A (step 1)
     Intro,          // a view's one-line intro under the band
+    Reason,         // one line above a page's rows: why they are gray, or that they are not (hooks::PageReason)
     ReadoutBox,     // the Performance readout's box (help HelpPerformance)
     ChangeLine,     // an old -> new line on the card (preset preview, confirm close, hidden drafts)
     CalibStep,      // body calibration: one of the three steps
@@ -174,6 +177,8 @@ enum class Role : uint8_t {
     ColorDot,       // a color popover's hue: hit Set, hue the dot's; drawn 46 px in its 66 px cell (its hit box)
     PopoverLabel,   // a Filter card's line: its switch's word (Loot beams: Unique, Set, Rare, Runes)
     PopoverSwitch,  // that line's On / Off pill: hit Set on its own setting, the whole line its hit box; the card stays open
+    // the rail's groups (content::GroupTable)
+    GroupTab,       // a group's row: icon, Cinzel name, chevron; Selected: open (its pages under it); hit OpenGroup
     Count
 };
 
@@ -317,7 +322,7 @@ constexpr int MaxViewRows=8;
 // The rows a view shows now, top to bottom (content order, RowShown and the
 // character applied). Replaces settings::Rows for the new views.
 // A view's rows in order: at most MaxViewRows slabs, each followed by the toggle
-// drawn beside it (ContentRow::beside, Movement speed's Stick toggle) when it has one.
+// drawn beside it (ContentRow::beside, Smarter mercenary's Commands) when it has one.
 struct ViewRows {
     std::array<Key,MaxViewRows*4> keys{};   // slabs, the toggles beside them and the switches in their Filter cards
     int count=0;
@@ -328,10 +333,12 @@ inline bool RowVisible(const content::ContentRow& r,const Values& values,const C
     if(r.kind==content::RowKind::Offer&&values[r.key]>=.5f)return false;
     return RowShown(r.key,values,context)&&content::ForCharacter(r,context);
 }
+// The pages with the frame times under their rows.
+inline bool HasReadout(View v){return v==View::Performance||v==View::Frames;}
 // Every row (slab) the view would show, uncapped (the tests check it stays <= 8);
 // a toggle drawn beside the row before it, or a switch in its Filter card, adds none.
 inline int CountRows(View view,const Values& values,const Context& context,const Tables& t=ContentTables()){
-    int n=0;for(size_t i=0;i<t.rowCount;++i)if(t.rows[i].page==view&&!t.rows[i].beside&&!t.rows[i].inFilter&&RowVisible(t.rows[i],values,context))++n;
+    int n=0;for(size_t i=0;i<t.rowCount;++i)if(content::OnPage(t.rows[i],view)&&!t.rows[i].beside&&!t.rows[i].inFilter&&RowVisible(t.rows[i],values,context))++n;
     return n;
 }
 // skip: the visible slabs before this page of a paged view (More: Model::morePage x MaxViewRows).
@@ -340,7 +347,7 @@ inline ViewRows RowsOf(View view,const Values& values,const Context& context,con
     ViewRows list;int slabs=0;bool took=false;
     for(size_t i=0;i<t.rowCount;++i){
         const auto& r=t.rows[i];
-        if(r.page!=view)continue;
+        if(!content::OnPage(r,view))continue;
         if(r.beside||r.inFilter){if(took&&RowVisible(r,values,context))list.keys[size_t(list.count++)]=r.key;continue;}   // with its slab (Reset page takes them too)
         took=false;
         if(!RowVisible(r,values,context)||skip-->0||slabs>=MaxViewRows)continue;
@@ -356,7 +363,7 @@ inline int MoreSkip(const Model& m,const Tables& t=ContentTables()){
     return m.view==View::More?std::clamp(m.morePage,0,MorePages(m.Get(),m.context,t)-1)*MaxViewRows:0;
 }
 // After Model::Open (the panel reopens where it was closed, #352): a kept view with nothing to show falls
-// back to the first page, the Guide. More once its rows are gone (NVIDIA no longer chosen), Presets while
+// back to the first page, the Guide. More once it has no rows, Presets while
 // they are unavailable; a kept More page past the last one is the last. Also call it after a change that
 // can empty More while it is open.
 inline void SettleView(Model& m,const Tables& t=ContentTables()){
@@ -489,12 +496,13 @@ inline std::vector<ShownOption> ListOf(const content::ContentRow& r,float curren
 }
 
 // Changes not applied, per view: the count of visible rows on a view that
-// differ from the applied values, and one bit per View with any.
-inline int ChangedCount(const Model& m,View view,const Context& c,const Tables& t=ContentTables()){
+// differ from the applied values, and one bit per View with any. A row on two pages counts on
+// both; homeOnly counts it only on its own, for a total across pages.
+inline int ChangedCount(const Model& m,View view,const Context& c,const Tables& t=ContentTables(),bool homeOnly=false){
     int n=0;const ChangeMask changed=settings::Changed(m.Applied(),m.Get());
     for(size_t i=0;i<t.rowCount;++i){
         const auto& r=t.rows[i];
-        if(r.page==view&&r.kind!=content::RowKind::Button&&(changed&(ChangeMask{1}<<r.key))&&(RowVisible(r,m.Get(),c)||r.kind==content::RowKind::Offer))++n;
+        if((homeOnly?r.page==view:content::OnPage(r,view))&&r.kind!=content::RowKind::Button&&(changed&(ChangeMask{1}<<r.key))&&(RowVisible(r,m.Get(),c)||r.kind==content::RowKind::Offer))++n;
     }
     return n;
 }
@@ -502,6 +510,26 @@ inline uint32_t ChangedViews(const Model& m,const Context& c,const Tables& t=Con
     uint32_t mask=0;for(int v=0;v<int(View::Count);++v)if(ChangedCount(m,View(v),c,t))mask|=1u<<v;
     return mask;
 }
+// ---- the rail's groups ----
+// The open group: the shown page's; on Presets, Guide, What's new and More the
+// last page's, so the rail holds still while a band link is open.
+inline content::Group OpenGroup(const Model& m){
+    const content::Group g=content::PageOf(m.view).group;
+    return content::GroupOf(g)?g:content::PageOf(m.lastPage).group;
+}
+// The page a group's row opens: the one last opened in it, else its first.
+inline View GroupPage(const Model& m,content::Group g){
+    const View kept=m.groupPage[size_t(g)];
+    if(content::PageOf(kept).group==g)return kept;
+    for(const auto& p:content::PageTable)if(p.group==g)return p.id;
+    return m.view;
+}
+// One bit per View in the group.
+inline uint32_t GroupViews(content::Group g){
+    uint32_t mask=0;for(const auto& p:content::PageTable)if(p.group==g)mask|=1u<<int(p.id);
+    return mask;
+}
+
 // Every key the draft changed, in Key order.
 inline std::vector<Key> DirtyKeys(const Model& m){
     std::vector<Key> keys;const ChangeMask changed=settings::Changed(m.Applied(),m.Get());
@@ -645,18 +673,30 @@ struct Builder {
     }
     bool Dirty(Key k)const{return !Same(m.Get()[k],m.Applied()[k]);}
 
-    // The rail: Presets and the 11 pages, a thin line between groups.
+    // The rail: Presets, then a row per group (content::GroupTable) with a thin
+    // line above it; the open group's pages hang under its row, indented. Opening
+    // a group moves the rows below the higher of the two groups. A group row carries the changed mark
+    // of any of its pages.
     void Rail(){
         const uint32_t changed=ChangedViews(m,c,t);
-        content::Group group=content::PageOf(View::Presets).group;
-        for(int i=0;i<=int(View::Performance);++i){
-            const View v=View(i);const auto& p=content::PageOf(v);
-            const int y=TabY+i*TabPitch;
-            if(p.group!=group){Add(Role::GroupLine,{RailX+16,y-7,RailW-32,2});group=p.group;}
+        const content::Group open=OpenGroup(m);
+        int y=TabY;
+        auto tab=[&](View v,int level){
+            const int i=int(v);const auto& p=content::PageOf(v);
             // Presets until content::PresetsReady: drawn grayed out, no press; pointing still explains why.
-            const bool open=v!=View::Presets||content::PresetsReady;
-            auto& e=Add(Role::Tab,{RailX,y,RailW,TabH},{Kind::Open,i,-1},HelpTabFirst+i,uint16_t((open?Enabled:0)|(m.view==v?Selected:0)|(changed&(1u<<i)?Changed:0)),p.name);
-            e.icon=p.icon;
+            const bool on=v!=View::Presets||content::PresetsReady;
+            auto& e=Add(Role::Tab,{RailX,y,RailW,TabH},{Kind::Open,i,-1},HelpTabFirst+i,uint16_t((on?Enabled:0)|(m.view==v?Selected:0)|(changed&(1u<<i)?Changed:0)),p.name);
+            e.icon=p.icon;e.option=level;y+=TabPitch;
+        };
+        tab(View::Presets,0);
+        for(const auto& g:content::GroupTable){
+            const uint32_t views=GroupViews(g.id);
+            Add(Role::GroupLine,{RailX+16,y-7,RailW-32,2});
+            auto& e=Add(Role::GroupTab,{RailX,y,RailW,TabH},{Kind::OpenGroup,int(g.id),-1},HelpGroupFirst+int(g.id),
+                uint16_t(Enabled|(g.id==open?Selected:0)|(changed&views?Changed:0)),g.name);
+            e.icon=g.icon;y+=TabPitch;
+            if(g.id!=open)continue;
+            for(const auto& p:content::PageTable)if(p.group==g.id)tab(p.id,(views>>(int(p.id)+1))?1:2);   // 2: the last
         }
     }
     void Band(){
@@ -734,7 +774,7 @@ struct Builder {
         if(r.classes!=content::AllClasses&&c.heroClass<0)return ClassTag(r.classes);
         return {};
     }
-    // The toggle beside a row (main's PairOf: Movement speed | Stick toggle): a value box
+    // The toggle beside a row (main's PairOf: Smarter mercenary | Commands): a value box
     // reading "<word> On" / "<word> Off" that flips on a press, PairGap right of the row's
     // own control, as wide as its longer word. A number beside a row (Scenery distance |
     // Big objects) reads "<word> <value>" and opens the list of its steps (StepsOf), as
@@ -918,24 +958,31 @@ struct Builder {
             if(r->kind==content::RowKind::Offer){offer=r;continue;}
             if(r->beside){if(!rows.empty())rows.back().beside=r;continue;}
             if(r->inFilter)continue;   // a switch in the Filter card of the row before it
-            rows.push_back({r,r->section});
+            rows.push_back({r,r->page==m.view?r->section:-1});   // a row from another page (alsoOn): no section, above the page's own
         }
         int sections=0;for(size_t i=0;i<rows.size();++i)if(i==0||rows[i].section!=rows[i-1].section)if(t.Section(m.view,rows[i].section))++sections;
-        const bool readout=m.view==View::Performance;
+        const bool readout=HasReadout(m.view);
+        // The Defer GPU wait button shows on every readout, whichever page holds its row.
+        if(readout)for(size_t i=0;i<t.rowCount&&!offer;++i)if(t.rows[i].kind==content::RowKind::Offer&&RowVisible(t.rows[i],m.Get(),c))offer=&t.rows[i];
+        const char* reason=hooks::PageReason(m.view,m.Get());
+        const int reasonH=reason?IntroH:0;
+        const int topGap=!rows.empty()&&rows[0].section<0?SectionCompactH:0;   // a first row with no heading stays clear of the band's links
         const int morePages=m.view==View::More?MorePages(m.Get(),c,t):1,pagerH=morePages>1?MinTarget+MinGap:0;
         const int n=int(rows.size()),region=RegionEnd()-ViewTop-pagerH;
         int cardRoom=CardMin;   // the card space rows give way to: enough for the page's longest help
         for(const auto& p:rows){cardRoom=std::max(cardRoom,RowCardNeed(*p.row));if(p.beside)cardRoom=std::max(cardRoom,RowCardNeed(*p.beside));}
         // Rows close up to PitchMin first; a page still short of card room draws its section headings compact.
-        const int sectionH=region-sections*SectionH-(readout?ReadoutHeight(offer)+2:0)-n*PitchMin>=cardRoom?SectionH:SectionCompactH;
-        const int fixed=sections*sectionH+(readout?ReadoutHeight(offer):0);
+        const int sectionH=region-sections*SectionH-(readout?ReadoutHeight(offer)+2:0)-reasonH-topGap-n*PitchMin>=cardRoom?SectionH:SectionCompactH;
+        const int fixed=sections*sectionH+(readout?ReadoutHeight(offer):0)+reasonH+topGap;
         const int pitch=std::clamp(n?(region-cardRoom-fixed)/n:PitchRoomy,PitchMin,PitchRoomy);
         int y=ViewTop;
-        if(n<=6&&region-fixed-n*pitch-IntroH>=200+CardMin/2){Add(Role::Intro,{ContentX,y,ContentW,IntroH},{},NoHelp,0,page.intro);y+=IntroH;}
+        if(!reason&&n<=6&&region-fixed-n*pitch-IntroH>=200+CardMin/2){Add(Role::Intro,{ContentX,y,ContentW,IntroH},{},NoHelp,0,page.intro);y+=IntroH;}
+        y+=topGap;
         const int vw=ValueWidth(rows);
         for(size_t i=0;i<rows.size();++i){
             if(i==0||rows[i].section!=rows[i-1].section)
                 if(const char* title=t.Section(m.view,rows[i].section)){Add(Role::Section,{ContentX,y,ContentW,sectionH},{},NoHelp,0,title);y+=sectionH;}
+            if(reason&&rows[i].section>=0){Add(Role::Reason,{ContentX,y,ContentW,reasonH},{},NoHelp,0,reason);y+=reasonH;reason=nullptr;}
             Row(*rows[i].row,y,pitch,vw,rows[i].beside);y+=pitch;
         }
         if(readout){y+=2;Readout(y,offer);y+=ReadoutHeight(offer);}
@@ -1209,14 +1256,14 @@ struct Builder {
         const auto& p=content::PageOf(m.view);
         bool introShown=false;for(const auto& e:out.elements)if(e.role==Role::Intro)introShown=true;
         switch(m.view){
-            case View::Guide:s.subject=HelpGuide;s.title="Wheels and skills";s.text="Each stick opens its hand's wheel. Point the other hand's laser at a wedge to assign a skill.";s.state="Names follow Interface: Button names";break;
+            case View::Guide:s.subject=HelpGuide;s.title="Wheels and skills";s.text="Each stick opens its hand's wheel. Point the other hand's laser at a wedge to assign a skill.";s.state="Names follow Controls > Hands > Button names";break;
             case View::WhatsNew:s.subject=HelpWhatsNew;s.title="This version";
                 s.text=NotesPages(in.notes.lineCount)>1?"One line per change; Previous and Next turn the pages. Press What's new again to go back to your page.":"One line per change. Press What's new again to go back to your page.";
                 break;
             case View::Presets:s.subject=HelpPresets;s.title="How presets work";s.text="Each sets only the rows it lists, comfort changes first. Pick one; Apply saves it.";break;
             default:{
                 s.subject=HelpTabFirst+int(m.view);s.title="Point at a setting";
-                const std::string what="Its help shows here, with Undo and Default when they apply.";
+                const std::string what="A setting's help shows here, with Undo and Default when they apply.";   // stands alone: it can follow the page's intro
                 s.text=introShown||!p.intro?what:std::string(p.intro)+" "+what;
                 break;
             }
@@ -1229,6 +1276,19 @@ struct Builder {
             const View v=View(id-HelpTabFirst);const auto& p=content::PageOf(v);
             CardSpec s;s.subject=id;s.title=p.name;s.text=v==View::Presets?(content::PresetsReady?HelpText(HelpPresets):content::PresetsLater):p.intro;
             if(const int n=ChangedCount(m,v,c,t)){s.state=std::to_string(n)+" not applied";s.titleFlags=s.stateFlags=Changed;}
+            return s;
+        }
+        if(id>=HelpGroupFirst&&id<HelpGroupFirst+MaxRailGroups)if(const auto* g=content::GroupOf(content::Group(id-HelpGroupFirst))){
+            // Its pages by name ("Combat, Targeting, Shield, Monsters and Physics"), then what a press does.
+            std::vector<const char*> names;int n=0;
+            for(const auto& p:content::PageTable)if(p.group==g->id){names.push_back(p.name);n+=ChangedCount(m,p.id,c,t,true);}
+            std::string list;
+            for(size_t i=0;i<names.size();++i)list+=std::string(i==0?"":i+1==names.size()?" and ":", ")+names[i];
+            CardSpec s;s.subject=id;s.title=g->name;
+            const View to=GroupPage(m,g->id);
+            if(content::PageOf(m.view).group==g->id)s.text=(names.size()==1?"Its page is open under it: ":"Its pages are listed under it: ")+list+".";
+            else s.text=(names.size()==1?"Its page: ":"Its pages: ")+list+". Press to open "+content::PageOf(to).name+(m.groupPage[size_t(g->id)]==to&&names.size()>1?", last used.":".");
+            if(n){s.state=std::to_string(n)+" not applied";s.titleFlags=s.stateFlags=Changed;}
             return s;
         }
         if(id>=HelpPresetFirst&&id<HelpPresetFirst+MaxPresets&&size_t(id-HelpPresetFirst)<t.presetCount)return PresetCardSpec(id-HelpPresetFirst);
@@ -1454,7 +1514,7 @@ struct Builder {
         auto& bar=Add(Role::CalibProgress,{110,663,1060,13});bar.fill=std::clamp(cv.progress,0.f,1.f);
         if(cv.measured)Add(Role::CalibNote,{80,744,1120,55},{},NoHelp,0,Printf("Standing eye height: %.1f cm     Controller span: %.1f cm",double(cv.eyeHeight*100),double(cv.armSpan*100)));
         else Add(Role::CalibNote,{80,744,1120,65},{},NoHelp,0,"Height sets world scale. Controller span fits your character's arms.");
-        Add(Role::CalibNote,{80,846,1120,80},{},NoHelp,0,"Right B: skip / cancel. Reopen any time: VR Settings > Body > Calibrate body.");
+        Add(Role::CalibNote,{80,846,1120,80},{},NoHelp,0,"Right B: skip / cancel. Reopen any time: VR Settings > Comfort > Body > Height and arm span.");
         Add(Role::CalibNote,{80,939,1120,50},{},NoHelp,0,"Controls are blocked. The game world remains live.");
     }
     void Flags(){
@@ -1732,6 +1792,7 @@ inline Request Press(Model& model,const Hit& hit,uint64_t nowMs,const Tables& t=
             if(v==View::Presets&&!content::PresetsReady)return {};   // grayed out until content::PresetsReady
             if(v==model.view&&(v==View::Guide||v==View::WhatsNew))v=model.lastPage;   // the header link again: back to the page
             if(content::PageOf(v).settings)model.lastPage=v;
+            if(const auto g=content::PageOf(v).group;content::GroupOf(g))model.groupPage[size_t(g)]=v;   // its group's row opens it next time
             model.view=v;model.focusKey=hit.delta>=0&&hit.delta<Count?hit.delta:-1;model.popoverKey=-1;
             if(v==View::More){   // More opens on the page that holds the row it was sent to
                 model.morePage=0;int index=0;
@@ -1744,6 +1805,12 @@ inline Request Press(Model& model,const Hit& hit,uint64_t nowMs,const Tables& t=
             }
             ++model.revision;
             return {};
+        }
+        case Kind::OpenGroup:{   // a rail group's row: the page last opened in it (its first when fresh); its own page shown: stays
+            if(hit.index<0||hit.index>=MaxRailGroups||!content::GroupOf(content::Group(hit.index)))return {};
+            const auto g=content::Group(hit.index);
+            if(content::PageOf(model.view).group==g)return {};
+            return Press(model,{Kind::Open,int(GroupPage(model,g)),-1},nowMs,t);
         }
         case Kind::NotesPage:
             if(model.view==View::More){   // the More view's pager; What's new's is Model::Click's
@@ -1778,8 +1845,10 @@ inline Request Press(Model& model,const Hit& hit,uint64_t nowMs,const Tables& t=
             if(Blocked(model)||!content::PageOf(model.view).settings)return {};
             const Values before=model.Get();ChangeMask changed=0;
             const ViewRows rows=RowsOf(model.view,model.Get(),model.context,t,MoreSkip(model,t));
-            for(int i=0;i<rows.count;++i){
+            // A row from another page goes last: Eyes drawn per frame would lock the rows it heads before they reset.
+            for(int pass=0;pass<2;++pass)for(int i=0;i<rows.count;++i){
                 const Key k=rows.keys[size_t(i)];const auto* r=t.Row(k);
+                if((r->page!=model.view)!=(pass==1))continue;
                 if(r->kind==content::RowKind::Button||r->kind==content::RowKind::Offer||!Editable(model,k))continue;
                 if(SetValue(model,k,Definitions[k].defaultValue))changed|=ChangeMask{1}<<k;
             }

@@ -42,6 +42,9 @@
 #include "window_focus.h"
 #include "panel_input_mode.h"
 #include "gameplay.h"
+#include "walk_direction.h"
+#include "room_scale.h"
+#include "room_steps.h"
 #include "strike_skills.h"
 #include "bow_laser.h"
 #include "hand_controls.h"
@@ -207,6 +210,8 @@ skills::HandControls handControls;
 skills::HandOutput handOutput;
 gameplay::Pose handAim[2]{};
 bool handAimTracked[2]{};
+walkdir::Pointing leftPointing;   // Walk direction (walk_direction.h): the left controller's heading, kept while it points down
+int walkDirectionSaid=-1;
 int castHand=0;
 controllers::Labels detectedControllers{},controllerLabels{};
 bool controllerProfilesDirty=true,frameControllerExtension=false;
@@ -309,9 +314,9 @@ void TellPlayer(const std::string& text) {
 // The skill wheel's Left claw strikes box saves [gameplay] left_hand_strikes
 // itself; until the save lands (Poll, about 0.5 s) the box shows the choice made.
 uint64_t leftStrikesSequence=0,leftStrikesAt=0;float leftStrikesWanted=0;
-// VR Settings > Body > Movement speed ([gameplay] run_speed_pct): its WALK stop walks and every
+// VR Settings > Comfort > Moving > Movement speed ([gameplay] run_speed_pct): its WALK stop walks and every
 // other stop runs. The game's run / walk toggle is kept in line with it from the gait the
-// plugin sees and the stick (runspeed::GaitSync). With its Stick toggle on, right stick up
+// plugin sees and the stick (runspeed::GaitSync). With the Stick toggle on, right stick up
 // switches between walking and that run (runspeed::StickToggle).
 runspeed::GaitSync gaitSync;
 runspeed::StickToggle stickToggle;
@@ -467,7 +472,7 @@ settings::Hit settingsPressed;
 bool settingsTriggerDown=false;
 // The menu clock (ms) for the pointer, the card and the model's guards.
 uint64_t MenuMs();
-// The game's own video options for the Performance page's warnings and line, re-read at most
+// The game's own video options for the readout's warnings and line, re-read at most
 // every 2 s while VR Settings is open and only when the game has saved them:
 // the mod's own Settings.json (settings::ModSettingsFile), or the unmodded
 // game's while the mod has none yet.
@@ -526,7 +531,7 @@ struct SettingsPicture {
     int status=-1,game=-1;
     bool confirmArmed=false,undoArmed=false;int undoDrain=-1;
     bool popoverArmed=false;   // an open popover's options take presses (Model::PopoverGuardMs after it opened)
-    uint64_t performance=0;settings::GameVideo gameVideo{};framegen::Readout frameGen{};   // the Perf view's
+    uint64_t performance=0;settings::GameVideo gameVideo{};framegen::Readout frameGen{};   // the readout pages'
     bool operator==(const SettingsPicture&)const=default;
 };
 settings::layout::Layout settingsLayout;   // the layout of the picture shown
@@ -534,7 +539,7 @@ SettingsPicture settingsPainted;     // what the picture shown has
 SettingsPicture settingsRequested;   // what the outstanding settings request paints
 int calibrationRequestedKey=-1;      // the same for calibration
 settings::PaintGuard settingsPaintGuard;   // a failed picture closes the panel; no requests until the next open
-// The Performance page's numbers: each second's frames as NoteFrame gets them.
+// The readout's numbers: each second's frames as NoteFrame gets them.
 struct PerformanceWindow {double game=0,wait=0,draw=0,vr=0,period=0,budget=0;uint32_t frames=0,periods=0,turns=0,budgets=0;ULONGLONG since=0,last=0;} performanceWindow;
 double performanceBudget=0;   // the headset's frame, from the last frame that had one
 settings::PerformanceReadout performance;
@@ -544,6 +549,8 @@ XrPosef settingsPose{};
 constexpr float settingsWidth=.95f,settingsHeight=settingsWidth*settings::Height/settings::Width;
 DXGI_FORMAT atlasFormat=DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
 uint32_t layerLimit=16;
+// What each place in the submitted layer list showed last (composition::StablePlaces).
+std::array<composition::Place,composition::MaxPlaces> placesKept{};uint32_t placesKeptCount=0;
 uint64_t interactionPaintKey=~0ull;
 uint64_t interactionRequestedKey=~0ull,interactionPaintRequest=0;
 interaction::PaintContext interactionPaintContext{},interactionRequestedContext{};
@@ -715,8 +722,18 @@ std::array<XrView,2> views{{{XR_TYPE_VIEW},{XR_TYPE_VIEW}}};
 XrPosef head{};
 math::Vec origin{};
 bool haveOrigin=false;
+// Room-scale (room_scale.h): the stage's turn at the last head view, so a turn pivots at the head; and when
+// the room's offset was last written to the log.
+math::Quat turnBase{0,0,0,1};bool turnBaseKnown=false;double roomSaidAt=0;
+// Room follows you (room_steps.h; VR Settings > Comfort > Body, beside Seated play): the step the hero walks
+// after, this input frame's push and follow, and the hero where the last head view saw him (world units).
+roomsteps::Chase roomChase;
+roomsteps::Output roomOut;
+math::Vec roomHero{};bool roomHeroKnown=false;double roomHeroAt=0;
+struct RoomStepStats {double from=0,pauseSaid=0;float walked=0,followed=0;unsigned pushed=0,jumps=0;bool on=false,walking=false;
+                      roomsteps::Pause pause=roomsteps::Pause::Off;} roomStats;
 GripStickButton leftMenuButton;
-stickgestures::Gestures rightStickGestures;   // right stick up: run / walk (Movement speed's Stick toggle); down: loot labels
+stickgestures::Gestures rightStickGestures;   // right stick up: run / walk (the Stick toggle); down: loot labels
 MenuTriggerGate menuTriggerGate;
 PressEdge inventoryButton,menuButton;
 float lastRecenter=0;
@@ -743,7 +760,7 @@ std::array<Eye,2> eyes;
 Eye uiEye;
 Eye mapEye;
 // The wrist map's view: Isometric (the game's) or Top-down, and on the
-// top-down map whether it turns with you. Configured under VR Settings > Wrist.
+// top-down map whether it turns with you. Configured under VR Settings > Interface > Wrist.
 bool MapTopDownOn(){return settings::MapViewTopDown(vrsettings::Read().values[settings::MapTopDown]);}
 // Map view = Full map / Full top-down: the wrist shows the game's full map (wrist_full_map.h)
 bool MapFullOn(){return settings::MapViewFull(vrsettings::Read().values[settings::MapTopDown]);}
@@ -1265,9 +1282,9 @@ framegen::Start FrameGenAttach() {
     FrameGenAsk(FrameGenWanted(),false);
     return framegen::Start::Loaded;
 }
-// What the Perf page and the log say of frame generation. The layer is asked
+// What the readout and the log say of frame generation. The layer is asked
 // at most twice a second; each change is logged. predictedHz: a second's
-// runtime-predicted rate (NoteFrame), 0 from the Perf page.
+// runtime-predicted rate (NoteFrame), 0 from the readout.
 framegen::Readout FrameGenNow(ULONGLONG now,float predictedHz=0) {
     std::lock_guard lock(frameGenMutex);
     if(predictedHz>0&&runtimeVdxr.load())frameGenHalving.Note(predictedHz);
@@ -2485,6 +2502,7 @@ void SettingsPointer(bool grip) {
         settingsModel.SetContext(context);settings::layout::SettleView(settingsModel);
     }
     const auto previousView=settingsModel.view;
+    const auto previousGroup=settings::layout::OpenGroup(settingsModel);
     float canvasX=-1,canvasY=-1;
     XrSpaceLocation aim{XR_TYPE_SPACE_LOCATION};
     const auto needed=XR_SPACE_LOCATION_POSITION_VALID_BIT|XR_SPACE_LOCATION_ORIENTATION_VALID_BIT|
@@ -2507,6 +2525,10 @@ void SettingsPointer(bool grip) {
     const auto pointed=settingsPointer.Step(settingsLayout,ms,onPanel,canvasX,canvasY,settingsTriggerDown);
     settingsHover=pointed.hover;settingsPressed=pointed.pressed;
     settingsCard.Step(ms,onPanel?settings::layout::HelpAt(settingsLayout,canvasX,canvasY):settings::NoHelp,canvasX,canvasY,onPanel,settingsLayout.card);
+    if(pointed.railIgnoredMs>=0){
+        char message[96];std::snprintf(message,sizeof message,"Frame VR settings: rail press ignored, %d ms after the rail moved",pointed.railIgnoredMs);
+        Say(message);   // one per trigger pull
+    }
     if(pointed.blocked){
         MotionPulse(1,haptics::Category::Interaction,.2f,15000000);
         static ULONGLONG reportAt=0;const auto now=GetTickCount64();
@@ -2528,6 +2550,7 @@ void SettingsPointer(bool grip) {
     if(!settingsModel.open)return;
     // A new view starts with a fresh pointer and card; Open's focus key points
     // the card at the row it named (with the card buttons' guard).
+    if(settings::layout::OpenGroup(settingsModel)!=previousGroup)settingsPointer.GuardRail(ms);
     if(settingsModel.view!=previousView){settingsPointer.Reset();settingsCard.Reset();settingsCard.Focus(settings::NoHelp,ms);settingsHover=settingsPressed={};}
     if(settingsModel.focusKey>=0){settingsCard.Focus(settingsModel.focusKey,ms);settingsModel.focusKey=-1;}
     // An open popover closes when the laser stays off it and its row (or off the panel).
@@ -2547,8 +2570,8 @@ void SettingsPointer(bool grip) {
     // One request at a time, at most every 100 ms as when it was painted here.
     // Each picture is shown when done, even if the pointer moved on meanwhile:
     // the painted state names what it shows, and the next request catches up.
-    // The Perf view repaints with each second's numbers; the others never for them.
-    const bool performanceView=settingsModel.view==settings::View::Performance;
+    // The readout pages repaint with each second's numbers; the others never for them.
+    const bool readoutView=settings::layout::HasReadout(settingsModel.view);
     const bool fresh=performance.valid&&now-performanceAt<=2000;
     SettingsPicture wanted;
     wanted.revision=settingsModel.revision;wanted.hover=settingsHover;wanted.pressed=settingsPressed;
@@ -2559,16 +2582,16 @@ void SettingsPointer(bool grip) {
     wanted.undoArmed=undoing&&ms>=settingsModel.undoResetAt+settings::Model::UndoResetGuardMs;
     wanted.undoDrain=undoing?int((settingsModel.undoResetUntil-ms)/100):-1;
     wanted.popoverArmed=settingsModel.popoverKey>=0&&ms>=settingsModel.popoverAt+settings::Model::PopoverGuardMs;
-    wanted.performance=performanceView&&fresh?performanceSerial:0;
-    wanted.gameVideo=performanceView?game:settings::GameVideo{};
-    wanted.frameGen=performanceView?FrameGenNow(now):framegen::Readout{};   // what OFXR Bridge is doing, under the frame times
+    wanted.performance=readoutView&&fresh?performanceSerial:0;
+    wanted.gameVideo=readoutView?game:settings::GameVideo{};
+    wanted.frameGen=readoutView?FrameGenNow(now):framegen::Readout{};   // what OFXR Bridge is doing, under the frame times
     if(!(wanted==settingsPainted)&&now>=settingsPaintAt&&!settingsPaintRequest&&settingsPaintGuard.CanRequest()){
         char resolutionStatus[160];resolution::Describe(resolutionStatus,sizeof resolutionStatus,{width,height});
         SettingsPaintJob job;job.model=settingsModel;
         auto& in=job.input;
         in.hover=settingsHover;in.pressed=settingsPressed;in.card=wanted.card;in.cardArmed=wanted.cardArmed;in.nowMs=ms;
         in.monoAudio=monoAudio;in.game=game;in.performance=fresh?performance:settings::PerformanceReadout{};in.frameGen=wanted.frameGen;
-        in.runtimeStatus=performanceView?resolutionStatus:descriptions[status];in.detected=detectedControllers;
+        in.runtimeStatus=readoutView?resolutionStatus:descriptions[status];in.detected=detectedControllers;
         settingsPaintRequest=settingsPainter.Submit(std::move(job));
         settingsRequested=wanted;settingsPaintAt=now+100;
         if(!settingsPaintRequest&&settingsPaintGuard.Failed(true)){SettingsPaintFailed("background painter unavailable");return;}
@@ -3405,7 +3428,7 @@ void Input() {
     handInput.occupied=interactionOutput.bottle>=0||interactionOutput.owner[0]==interaction::Owner::Holster||interactionOutput.owner[1]==interaction::Owner::Holster;
     const auto lootNow=GetTickCount64(),lootSession=gamestate::LocalPlayer();
     const bool lootWorld=motionHeadTracked&&!nativeUi&&!settingsOwned&&!settingsChord&&inWorld&&inWorld()&&lootSession;
-    // Right stick up switches run / walk with Movement speed's Stick toggle on (owned
+    // Right stick up switches run / walk with the Stick toggle on (owned
     // either way, so it never turns); down, held, shows the loot labels
     // (Show items, Alt). Not while a wheel is open, nor while the wrist map is
     // looked at: its zoom has the stick then (map_zoom.h). A vertical push turns nothing.
@@ -3473,7 +3496,7 @@ void Input() {
     interactionInput.quickCast=handOutput.slot>=0||handOutput.spells[0]>=0||handOutput.spells[1]>=0;
     interactionInput.wheelHand=handOutput.wheel;
     interactionInput.leatherReach=leatherOn.load();
-    // Right stick up switches running / walking only with Movement speed's Stick toggle on
+    // Right stick up switches running / walking only with the Stick toggle on
     // (below, off by default). The push is owned either way, so it never snap-turns.
     interactionInput.reservedLeft=(controls.buttons&menus::LeftStick)!=0;interactionInput.trigger=handOutput.wheel==0?controls.lt/255.f:controls.rt/255.f;interactionInput.hover=motionInput.hover;
     const auto hudSettings=vrsettings::Read();
@@ -3736,7 +3759,7 @@ void Input() {
             }
         }
     }
-    // Arrow path line color (VR Settings > Targets > Arrow path line); Off keeps the last.
+    // Arrow path line color (VR Settings > Gameplay > Targeting > Arrow path line); Off keeps the last.
     if(const float hue=hudSettings.values[settings::BowLaser];hue>=0&&hue!=bowLaserHue&&!bowLaserAtlasPending&&atlasUploads.size()<3) {
         if(UploadShared(panelatlas::BowLaser,bowlaser::Paint(hue),&bowLaserAtlasPending))bowLaserHue=hue;
     }
@@ -3807,7 +3830,7 @@ void Input() {
     }
     // Low-life heartbeat (Classic and Unleashed): queue the next beat ~80 ms before
     // the current one ends, at the loudness and tempo of the 10 % step of life below
-    // VR Settings > Survival > Heartbeat starts at. Above it, Off, dead or stale vitals:
+    // VR Settings > Interface > Warnings > Heartbeat starts at. Above it, Off, dead or stale vitals:
     // the last beat finishes, then silence.
     {
         heartStream.Reap();breakStream.Reap();   // breakStream: the guard-break bone snap
@@ -4105,7 +4128,7 @@ void Input() {
     // Bow skills leave the bow: the arrow is in the left hand's model, so the
     // target, the lock and the shot follow the bow whichever button casts. A
     // drawn string (or the shot just loosed) keeps its own line. Only with VR
-    // Settings > Aim > Bow skills go to the aimed monster: Off, a bow skill
+    // Settings > Gameplay > Targeting > Skills go to the aimed monster: Off, a bow skill
     // aims along its button's hand, as before the aim rules (#159 review).
     if(settings::LockBowSkills(gestureSettings[settings::SpellLock])&&motionInput.weapon==gameplay::Weapon::Bow&&motionOutput.skill>=0&&motionInput.tracked[1]&&
        weaponskills::Bow(quickSnapshot.skills[motionOutput.skill].id)&&gameplay::Length(motionOutput.rayOrigin-motionInput.hand[1].p)>.05f) {
@@ -4636,7 +4659,7 @@ void Input() {
         elementalInput.activation[h]=handOutput.activation[h];
     }
     elementalScene=elementalState.Step(elementalInput,interactionInput.snapshot);
-    // A torch club's flame (VR Settings > World > Torch flame); its light is
+    // A torch club's flame (VR Settings > Graphics > Environment > Torch flame); its light is
     // vrcam's and stays either way.
     const bool torchFlame=hudSettings.values[settings::TorchFlame]>.5f;
     for(int h=0;h<2&&torchFlame;++h) {
@@ -4746,6 +4769,7 @@ void Input() {
         sample.minWeaponSpeed=gestureSettings[settings::MeleeHitSpeed];
         sample.minThrustSpeed=gestureSettings[settings::MeleeThrustSpeed];
         sample.minShieldBashSpeed=gestureSettings[settings::ShieldBashSpeed];
+        sample.reach=gestureSettings[settings::MeleeReach]*.01f;   // VR Settings > Gameplay > Combat > Melee reach, cm
         const auto weapons=gamestate::MeleeEquipment();
         // A shapeshift form strikes with both claws; its weapon is a stat without a visual.
         const bool claws=InShapeForm();
@@ -4852,13 +4876,67 @@ void Input() {
             reportAt=GetTickCount64()+5000;
         }
     }
+    // Walk direction (walk_direction.h; VR Settings > Controls > Hands, beside Dominant hand): the left stick walks where you look,
+    // or turned here by the left controller's heading against the head's, where it points.
+    int16_t walkLx=controls.lx,walkLy=controls.ly;
+    {
+        const int mode=vrsettings::Read().values[settings::WalkDirection]>.5f?walkdir::Controller:walkdir::Look;
+        if(mode!=walkDirectionSaid){walkDirectionSaid=mode;Say(mode==walkdir::Controller?"Frame walk direction: the left stick walks where the left controller points":"Frame walk direction: the left stick walks where you look");}
+        const bool pointing=leftPointing.Update(handAim[1].q,handAimTracked[1]);
+        if(mode==walkdir::Controller&&pointing&&motionHeadTracked&&(controls.lx||controls.ly)) {
+            float x=controls.lx/32767.f,y=controls.ly/32767.f;
+            walkdir::ToView(x,y,leftPointing.heading,math::Heading(Q(head.orientation)));
+            walkLx=int16_t(std::clamp(x,-1.f,1.f)*32767);walkLy=int16_t(std::clamp(y,-1.f,1.f)*32767);
+        }
+    }
+    {   // Room follows you (room_steps.h): toward the player's real step while the left stick is idle.
+        const auto config=vrsettings::Read().values;
+        roomsteps::Input in;in.time=Milliseconds()/1000.0;
+        in.on=config[settings::RoomSteps]>.5f&&config[settings::Seated]<.5f&&motionControls.load()&&gameplayChain;
+        in.tracked=valid&&motionHeadTracked;in.eye=V(head.position);in.head=Q(head.orientation);in.origin=origin;
+        for(int h=0;h<2;++h){in.hand[h]=motionInput.hand[h].p;in.handTracked[h]=motionInput.tracked[h];}
+        in.menu=panelMode||spatialMode||settingsOwned||settingsChord||bodyCalibration.Active()||interactionOutput.wheel||
+                interactionOutput.settings||(leatherMode&&leatherShown.load());
+        in.stick=float(controls.lx)*controls.lx+float(controls.ly)*controls.ly>(.2f*32767)*(.2f*32767);
+        in.grip=motionInput.grip[0]>.6f||motionInput.grip[1]>.6f;
+        in.trigger=motionInput.trigger>.3f||motionInput.leftTrigger>.3f;
+        in.bow=motionOutput.bowDrawing;
+        in.cast=NativeSkillCasting();
+        roomOut=roomChase.Step(in);
+        auto& st=roomStats;
+        if(in.on!=st.on){st.on=in.on;Say(in.on?"Frame room steps: on - the hero's spot follows you in your room":"Frame room steps: off");}
+        if(roomOut.push!=st.walking) {
+            st.walking=roomOut.push;char line[200];
+            if(roomOut.push)std::snprintf(line,sizeof line,"Frame room steps: walking after your step, %.2f m from the hero (stick %.2f, %.2f)",roomOut.offset,roomOut.x,roomOut.y);
+            else std::snprintf(line,sizeof line,"Frame room steps: stopped %.2f m from the hero (%s)",roomOut.offset,roomOut.blocked?"blocked: the hero cannot come closer":roomOut.pause==roomsteps::Pause::None?"caught up":roomsteps::PauseName(roomOut.pause));
+            Say(line);
+        }
+        // Why a step owed is not walked, at most every 2 s.
+        if(in.on&&roomOut.pause!=st.pause&&roomOut.pause!=roomsteps::Pause::None&&roomOut.offset>=roomsteps::StartMetres&&in.time-st.pauseSaid>=2) {
+            char line[160];std::snprintf(line,sizeof line,"Frame room steps: paused (%s), %.2f m from the hero",roomsteps::PauseName(roomOut.pause),roomOut.offset);
+            Say(line);st.pauseSaid=in.time;
+        }
+        st.pause=roomOut.pause;
+        if(roomOut.push)++st.pushed;
+        if(st.from<=0)st.from=in.time;
+        if(in.time-st.from>=1) {
+            if(st.pushed||st.followed>0||st.jumps) {
+                char line[240];std::snprintf(line,sizeof line,"Frame room steps: last %.1f s: pushed %u frames, the hero walked %.2f m, the origin followed %.2f m, jumps %u; now %.2f m from the hero, pause %s",
+                    in.time-st.from,st.pushed,st.walked,st.followed,st.jumps,roomOut.offset,roomsteps::PauseName(roomOut.pause));
+                Say(line);
+            }
+            st.from=in.time;st.pushed=st.jumps=0;st.walked=st.followed=0;
+        }
+    }
     ++s.counter;
     auto& p=*pad.data;p.writer_pid=GetCurrentProcessId();p.buttons=0;
     // Right A goes only through semantic interact; a raw A bypasses its
     // no-target guard and accidentally attacks when pointing at empty space.
     p.buttons=menus::WorldButtons(controls);
     if(!dualBindings&&leftMenuButton.PlainPressed())p.buttons|=XINPUT_GAMEPAD_LEFT_THUMB;
-    p.thumb_lx=controls.lx;p.thumb_ly=controls.ly;p.thumb_rx=controls.rx;p.thumb_ry=controls.ry;
+    p.thumb_lx=walkLx;p.thumb_ly=walkLy;p.thumb_rx=controls.rx;p.thumb_ry=controls.ry;
+    // Room follows you: a partly pushed stick toward you (only ever with the real stick idle: Pause::Stick).
+    if(roomOut.push){p.thumb_lx=int16_t(std::clamp(roomOut.x,-1.f,1.f)*32767);p.thumb_ly=int16_t(std::clamp(roomOut.y,-1.f,1.f)*32767);}
     p.left_trigger=controls.lt;
     const float rightTrigger=controls.rt/255.f;
     const bool attackAllowed=menuTriggerGate.Update(rightTrigger>.1f,panelMode||spatialMode||settingsOwned||settingsChord||inventoryPressed||menuPressed);
@@ -4897,7 +4975,7 @@ void Input() {
         // thumbstick to act as the menu cursor"): it goes to BodyWalk's walk, which vrcam
         // feeds into the game's walk (DirectWalkNow), and never to the menu's cursor.
         // The right stick's left / right turns there too: vrcam takes it for the turn, as in play.
-        if(leatherMode&&leatherShown.load()&&!settingsOwned&&!settingsChord){p.thumb_lx=controls.lx;p.thumb_ly=controls.ly;p.thumb_rx=controls.rx;p.thumb_ry=0;}
+        if(leatherMode&&leatherShown.load()&&!settingsOwned&&!settingsChord){p.thumb_lx=walkLx;p.thumb_ly=walkLy;p.thumb_rx=controls.rx;p.thumb_ry=0;}
     }
     p.reserved[0]=uint32_t(settingsOwned||settingsChord?menus::Mode::Blocked:nativeUi?menus::Mode::Native:menus::Mode::World);
     p.reserved[1]=inputEpoch;
@@ -6388,8 +6466,49 @@ void EndPair() {
         static bool reported=false;
         if(!reported){Say("Frame OpenXR: transparent quad prefix prevents Wine mixed-layer allocation overlap");reported=true;}
     }
+    // Each layer at a place whose SteamVR copy has its size, stand-ins between.
+    std::array<XrCompositionLayerQuad,composition::MaxPlaces> standIns{};uint32_t standInCount=0;
+    if(!padQuads&&headSpace&&pointerChain&&count) {
+        std::array<composition::Place,composition::MaxPlaces> want{};
+        for(uint32_t i=0;i<count;++i)want[i]=composition::PlaceOf(layers[i]);
+        std::array<uint8_t,composition::MaxPlaces> place{};
+        if(const uint32_t total=composition::StablePlaces(want.data(),count,placesKept.data(),placesKeptCount,capacity,place.data())) {
+            std::array<const XrCompositionLayerBaseHeader*,32> placed{};
+            for(uint32_t i=0;i<count;++i)placed[place[i]]=layers[i];
+            for(uint32_t j=0;j<total;++j)if(!placed[j]) {
+                const bool same=j<placesKeptCount&&placesKept[j].standIn;
+                auto& q=standIns[j];q={XR_TYPE_COMPOSITION_LAYER_QUAD};
+                q.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+                q.space=headSpace;q.eyeVisibility=XR_EYE_VISIBILITY_BOTH;
+                q.pose.orientation.w=1;q.pose.position.z=1;q.size={.001f,.001f};   // a millimetre, behind the head
+                q.subImage.swapchain=same?placesKept[j].chain:pointerChain;
+                q.subImage.imageRect=same?placesKept[j].rect:XrRect2Di{{panelatlas::Pointer.x,panelatlas::Pointer.y+32},{1,1}};
+                placed[j]=reinterpret_cast<const XrCompositionLayerBaseHeader*>(&q);++standInCount;
+            }
+            layers=placed;count=total;
+        }
+    }
     ei.layerCount=count;ei.layers=count?layers.data():nullptr;
     const double start=Milliseconds();const auto submitted=pEndFrame(session,&ei);Check(submitted,"end frame");
+    if(XR_SUCCEEDED(submitted)) {
+        static uint32_t remade=0,most=0,standInsMost=0;static ULONGLONG reportAt=0;
+        for(uint32_t j=0;j<count;++j) {
+            auto p=composition::PlaceOf(layers[j]);
+            p.standIn=p.type==XR_TYPE_COMPOSITION_LAYER_QUAD&&p.chain&&
+                (p.chain==interactionChain||p.chain==companionChain||p.chain==staticChain||p.chain==sharedChain);
+            if(j>=placesKeptCount||!composition::SameSize(placesKept[j],p))++remade;
+            placesKept[j]=p;
+        }
+        placesKeptCount=std::max(placesKeptCount,count);most=std::max(most,count);standInsMost=std::max(standInsMost,standInCount);
+        if(const auto now=GetTickCount64();now>=reportAt) {
+            if(reportAt) {
+                char line[200];std::snprintf(line,sizeof line,"Frame layers: ten seconds: %u copies made or remade by SteamVR (a place shown at a new size), most layers %u, most stand-ins %u",
+                    remade,most,standInsMost);
+                Say(line);
+            }
+            remade=most=standInsMost=0;reportAt=now+10000;
+        }
+    }
     if(interactionInput.active) {
         static ULONGLONG reportAt=0;const auto now=GetTickCount64();
         if(now>=reportAt) {
@@ -6902,11 +7021,44 @@ bool BowPreviewPose(bowflight::Shot& pose,bool& visible) {
 }
 bool View(float out[16],const float hero[3],float eyeHeight,float userEyeHeight,float bodyHeading,float recenterYaw,int eye,float mapNorth,float scaleHeight) {
     std::lock_guard lock(mutex);if(!Active())return false;
-    if(std::fabs(recenterYaw-lastRecenter)>.001f){origin=V(head.position);lastRecenter=recenterYaw;}
+    bool recentered=false;   // F11's yaw: the origin is put back under the head (the room follow re-anchors), not turned
+    if(std::fabs(recenterYaw-lastRecenter)>.001f){origin=V(head.position);lastRecenter=recenterYaw;recentered=true;}
     const float upm=(scaleHeight>0?scaleHeight:eyeHeight)/std::max(userEyeHeight,.5f);
     const auto base=math::Yaw(bodyHeading-recenterYaw);
     if(eye<0)compassFrame=wristHeading.Update(gamestate::LocalPlayer(),motionHeadTracked,
         Q(head.orientation),bodyHeading-recenterYaw,mapNorth);
+    if(eye<0) {   // Room-scale: a snap or smooth turn turns the room about your head (it swung you round the hero's spot)
+        if(turnBaseKnown&&haveOrigin&&!recentered) {   // and the room's follow anchor turns with the room (a turn is no step)
+            const auto turned=roomscale::TurnAboutHead(origin,V(head.position),turnBase,base);
+            roomChase.Turned(turned,math::Multiply(math::Conjugate(base),turnBase));origin=turned;
+        }
+        turnBase=base;turnBaseKnown=true;
+        const float apart=roomscale::Apart(V(head.position),origin);
+        const double now=Milliseconds()/1000.0;
+        if(apart>.25f&&now-roomSaidAt>=5) {
+            roomSaidAt=now;char line[200];
+            std::snprintf(line,sizeof line,"Frame room: you stand %.2f m from the hero's spot (the room's centre); turns pivot at your head",apart);
+            Say(line);
+        }
+    }
+    if(eye<0) {   // Room follows you (room_steps.h): while the hero walks after your step, the origin follows him,
+                  // so the camera stays at the real head. A jump (teleport, waypoint, Leap) is not followed.
+        const math::Vec now{hero[0],hero[1],hero[2]};const double at=Milliseconds()/1000.0;
+        if(roomHeroKnown&&roomOut.follow&&at>roomHeroAt&&at-roomHeroAt<.25) {
+            const math::Vec moved{now.x-roomHero.x,0,now.z-roomHero.z};
+            const float metres=std::sqrt(moved.x*moved.x+moved.z*moved.z)/upm;
+            if(metres>roomsteps::MaxHeroStep) {
+                ++roomStats.jumps;
+                char line[200];std::snprintf(line,sizeof line,"Frame room steps: the hero moved %.2f m in %.0f ms (a teleport, waypoint or leap): the origin stays",metres,(at-roomHeroAt)*1000);
+                Say(line);
+            } else if(metres>0) {
+                const auto shift=roomsteps::Shift(moved,base,upm);
+                origin=origin+shift;roomChase.Shifted(shift);
+                roomStats.walked+=metres;roomStats.followed+=std::sqrt(shift.x*shift.x+shift.z*shift.z);
+            }
+        }
+        roomHero=now;roomHeroKnown=true;roomHeroAt=at;
+    }
     if(eye<0)stageWorld={true,origin,{hero[0],hero[1],hero[2]},base,upm,eyeHeight,GetTickCount64()};
     const auto resolveBow=[&](bowflight::Shot shot) {
         const auto offset=math::Rotate(base,shot.origin-origin);
@@ -7024,7 +7176,7 @@ void Shutdown(bool preserveResolution) {
     for(auto& e:eyes){if(e.chain&&pDestroySwapchain)pDestroySwapchain(e.chain);e={};}
     mirrorSupported=mirrorMono=false;
     turnFrame=keepTurns=keepDepth=false;lastEyes={};viewBase={{{0,0,0,1},{0,0,0,1}}};viewWorld={};turnDepths={};turnCounts={};turnImages={};turnKept={};turnImagesFailed=turnWarpTried=false;turnWarp={};
-    turnLayers={};layerKept={};turnTarget.Reset();layersFailed=false;
+    turnLayers={};layerKept={};turnTarget.Reset();layersFailed=false;placesKept={};placesKeptCount=0;
     turnCapture.left=0;turnCapture.buffer.Reset();turnCapture.size=0;turnCapture.list.Reset();turnCapture.allocator.Reset();
     for(auto& s:handSpaces){if(s&&pDestroySpace)pDestroySpace(s);s=XR_NULL_HANDLE;}
     if(headSpace&&pDestroySpace)pDestroySpace(headSpace);if(space&&pDestroySpace)pDestroySpace(space);
