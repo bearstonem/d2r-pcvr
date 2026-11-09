@@ -1,13 +1,12 @@
-"""Identify local game storage and gate builds before installing any files."""
+"""Identify local game storage before installing any files.
+
+No game build or version is refused here. A game update does not by itself
+break D2RLoader or this plugin: the plugin checks the game code it hooks by its
+bytes when the game starts (cleanroom/sigscan) and leaves a feature off, with a
+log line, when they differ. The version found is only recorded, for bug reports.
+"""
 from pathlib import Path
 import re
-
-# The game builds this release supports, newest first. Setup names the first;
-# the older ones stay accepted for players whose game has not updated yet.
-STEAM_VERSIONS = ('3.3.94995', '3.3.93787')
-BATTLENET_VERSIONS = ('3.3.93847',)
-STEAM_VERSION = STEAM_VERSIONS[0]
-BATTLENET_VERSION = BATTLENET_VERSIONS[0]
 
 
 def storage_config(game):
@@ -26,17 +25,12 @@ def validate_game(game, store='auto', experimental_battlenet=False):
     detected, _ = storage_config(game)
     if store != 'auto' and detected != store:
         raise ValueError(f'This is a {detected} installation, but {store} was selected.')
-    supported = STEAM_VERSIONS if detected == 'steam' else BATTLENET_VERSIONS
     exe = game / 'D2R.exe'
-    data = exe.read_bytes() if exe.is_file() else b''
-    expected = next((v for v in supported if v.encode('utf-16-le') in data), None)
-    if not expected:
-        found = file_version(data)
-        raise ValueError(f'This build requires {detected} D2R {" or ".join(supported)}'
-                         + (f'; your game is {found}.' if found else '.') + ' Your game version does not match.')
+    if not exe.is_file():
+        raise ValueError(f'D2R.exe was not found in {game}. Select the folder that contains it.')
     if detected == 'battlenet' and not experimental_battlenet:
         raise ValueError('Battle.net support is experimental. Use --experimental-battlenet for local offline compatibility testing.')
-    return detected, expected
+    return detected, file_version(exe.read_bytes()) or 'unknown'
 
 
 def file_version(data):

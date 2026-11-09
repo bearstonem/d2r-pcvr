@@ -370,6 +370,9 @@ std::vector<PreviewShot> PreviewShots(){
      Setup y=base(View::Body,-1);y.m.result=Result::Saved;y.in.hover={Kind::Calibrate};y.in.card=HelpCalibrate;add("body-saved-calibrate",y);}
     {Setup x=base(View::Targeting,heroclass::Sorceress);x.in.monoAudio=true;x.in.hover={Kind::Set,ProjectileAimAssist,0,1};x.in.card=ProjectileAimAssist;add("targeting-mono-pointed",x);
      Setup y=base(View::Targeting,-1);y.m.ready=false;add("targeting-unavailable",y);}
+    // A headset with eye tracking, the outline on: Eyes (Aim with your eyes) beside Aim with your view, its card open.
+    {Snapshot s;s.values[TargetHighlight]=60;Setup x=base(View::Targeting,-1,s);Context c=x.m.context;c.eyeTracker=true;x.m.SetContext(c);
+     x.in.card=AimWithEyes;add("targeting-eyes",x);}
     {Snapshot s;s.values[DeferGpuWait]=0;Setup x=base(View::Performance,-1,s);x.in.game={true,true};
      x.in.performance={true,true,52,11.1f,1.0f,7.0f,9.4f,1.5f};add("performance-warnings",x);}
     {Setup x=base(View::Presets,-1);x.in.hover={Kind::Preset,0};x.in.card=HelpPresetFirst;add("presets-pointed",x);}

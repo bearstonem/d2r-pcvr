@@ -1474,7 +1474,10 @@ struct Builder {
         if(const char* status=Status())Add(Role::StatusStrip,{ContentX,StatusY,ContentW,StatusH},{},NoHelp,m.result==Result::Failed||m.result==Result::Conflict?Warn:0,status);
         if(m.confirmClose){
             const bool armed=in.nowMs>=m.confirmAt+Model::ConfirmGuardMs;
-            auto& a=Add(Role::ConfirmDiscard,FooterLeft,{Kind::ConfirmClose},HelpDiscard,uint16_t(armed?Enabled:0),"Discard "+Plural(dirty,"change","changes"));a.icon=draw::Icon::Close;
+            // Three digits do not fit the button (over 100 rows since 2026-11-09): 100 or more reads plain
+            // "Discard changes"; the confirm card above still counts them.
+            auto& a=Add(Role::ConfirmDiscard,FooterLeft,{Kind::ConfirmClose},HelpDiscard,uint16_t(armed?Enabled:0),
+                        dirty<100?"Discard "+Plural(dirty,"change","changes"):std::string("Discard changes"));a.icon=draw::Icon::Close;
             Add(Role::ConfirmKeep,FooterMid,{Kind::KeepEditing},HelpKeepEditing,uint16_t(armed?Enabled:0),"Keep editing");
             auto& c2=Add(Role::ConfirmApply,FooterRight,{Kind::ApplyClose},HelpApplyClose,uint16_t(armed&&!blocked?Enabled:0),"Apply and close");c2.icon=draw::Icon::Check;
             return;

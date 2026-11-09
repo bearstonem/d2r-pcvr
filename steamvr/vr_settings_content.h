@@ -230,7 +230,7 @@ inline constexpr ContentPage PageTable[]={
     {View::Combat,"Combat",Group::Gameplay,Icon::Combat,"How your real swings, stabs and throws hit.",true},
     {View::Targeting,"Targeting",Group::Gameplay,Icon::Aim,"Which monster or spot your spells and skills go to. Rows for other classes stay hidden.",true},
     {View::Shield,"Shield",Group::Gameplay,Icon::Shield,"Bash, block and seat a shield on your arm.",true},
-    {View::Monsters,"Monsters",Group::Gameplay,Icon::Survival,"How tough offline monsters are, and your mercenary. Outline and health bars: Interface.",true},
+    {View::Monsters,"Monsters",Group::Gameplay,Icon::Survival,"How tough offline monsters are, your mercenary and your summons. Outline and health bars: Interface.",true},
     {View::Physics,"Physics",Group::Gameplay,Icon::World,"Things your hands and weapons can knock, roll and push.",true},
     {View::Moving,"Moving",Group::Comfort,Icon::Fast,"Turning and how fast you move.",true},
     {View::Body,"Body",Group::Comfort,Icon::Body,"Your height, arm span, play space and potion belt.",true},
@@ -282,7 +282,7 @@ inline constexpr ContentSection SectionTable[]={
     {View::Combat,"Melee"},{View::Combat,"Skills and throws"},
     {View::Targeting,"Target selection"},{View::Targeting,"Aiming"},{View::Targeting,"Ground targeting"},
     {View::Shield,"Bash and block"},{View::Shield,"Fit on the arm"},
-    {View::Monsters,"Offline difficulty"},{View::Monsters,"Mercenary"},
+    {View::Monsters,"Offline difficulty"},{View::Monsters,"Mercenary"},{View::Monsters,"Summons"},
     {View::Physics,"Props"},
     {View::Moving,"Turning"},{View::Moving,"Speed"},
     {View::Body,"Play space"},{View::Body,"Potion belt"},
@@ -438,6 +438,13 @@ inline constexpr Override Overrides[]={
     {.id="gameplay.melee_reach_cm",.page=View::Combat,.section="Melee",.kind=RowKind::Slider,.label="Melee reach",
      .help="A weapon or fist that passes this close beside a monster still hits it. Raise it if near misses don't count. Walls still block.",
      .format={.unit="cm"}},
+    // Weapon heft and Bow bash (#443; Discord #ideas, 2026-11-04): one row, the page's last free one (8 at most).
+    // [gameplay] weapon_heft and bow_bash, both Off by default.
+    {.id="gameplay.weapon_heft",.page=View::Combat,.section="Melee",.kind=RowKind::Toggle,.label="Weapon heft",
+     .help="Heavy weapons need a long stroke of your arm for a full hit; a quick flick lands lighter. Daggers, claws and fists still hit fully with a flick."},
+    {.id="gameplay.bow_bash",.page=View::Combat,.section="Melee",.kind=RowKind::Toggle,.label="Bow bash",
+     .help="Swing your bow, string not drawn, into a monster to stagger it while you step back and aim. No damage; every 1.5 s at most, never act bosses.",
+     .beside=true,.besideLabel="Bow bash"},
     // Combat: Skills and throws
     {.id="gameplay.skill_gestures",.page=View::Combat,.section="Skills and throws",.kind=RowKind::Toggle,.label="Skills on your moves",
      .help="A trigger skill powers your real move: melee skills on a landed strike, Smite on a bash, arrow skills on a release. Off, every swing is plain."},
@@ -461,6 +468,11 @@ inline constexpr Override Overrides[]={
      .classes=Sorceress|Druid|WithStaff},
     {.id="gameplay.aim_follows_view",.page=View::Targeting,.section="Aiming",.kind=RowKind::Toggle,.label="Aim with your view",
      .help="Only monsters in front of your face can be aimed at. A hand held out and pointing still picks its own monster."},
+    // Aim with your eyes (gaze_aim.h; owner 2026-11-08): the right half of Aim with your view's row, shown only on a
+    // headset that shares eye tracking (RowShown: Context::eyeTracker).
+    {.id="gameplay.aim_with_eyes",.page=View::Targeting,.section="Aiming",.kind=RowKind::Toggle,.label="Aim with your eyes",
+     .help="The monster you look at is aimed at by where your eyes look, not your head. A blink keeps it; if tracking is lost, your head aims.",
+     .beside=true,.besideLabel="Eyes"},
     {.id="bow.path_laser_hue",.page=View::Targeting,.section="Aiming",.kind=RowKind::Swatch,.label="Arrow path line",
      .help="At full draw, a faint line shows the arrow's flight, up to 15 m, through walls. Not for crossbows, Multiple Shot, Guided Arrow or Strafe.",
      .format={.hueNames=true},FRAMEVR_NAMES(LaserOffName),.classes=Amazon|WithBow,.wraps=true},
@@ -495,7 +507,7 @@ inline constexpr Override Overrides[]={
      .format={.unit=Degrees,.sign=true}},
     // Monsters: Offline difficulty
     {.id="gameplay.offline_players",.page=View::Monsters,.section="Offline difficulty",.kind=RowKind::Stepper,.label="Offline difficulty",
-     .help="Monsters as tough as in a game of this many players, with more experience and loot. Applies to monsters that spawn after Apply.",
+     .help="Offline monsters scale for this many players, with more experience and loot.",
      .format={.unit="players"},FRAMEVR_NAMES(OfflinePlayersNames)},
     {.id="gameplay.enemy_sight_pct",.page=View::Monsters,.section="Offline difficulty",.kind=RowKind::Slider,.label="Monster sight range",
      .help="How far away monsters notice you offline. 100% is the game's range; 300% is three times as far.",
@@ -506,6 +518,12 @@ inline constexpr Override Overrides[]={
     {.id="gameplay.companion_tactical_commands",.page=View::Monsters,.section="Mercenary",.kind=RowKind::Toggle,.label="Tactical commands",
      .help="Point at your mercenary, hold Grip and pull Trigger, aim and let go: hold ground, prioritize monsters, or regroup.",
      .beside=true,.besideLabel="Commands"},
+    // Mercenary potion assistance, independent of class and outline settings (#424, RobinHeggelund).
+    {.id="gameplay.merc_potion_assist",.page=View::Monsters,.section="Mercenary",.kind=RowKind::Toggle,.label="Merc potion throw autoaim",
+     .help="On: thrown potions feed your living mercenary wherever they land. Off: land within 1.5 m of its feet; misses keep the potion. Slow releases return it."},
+    // Monsters: Summons (#426, RobinHeggelund)
+    {.id="gameplay.summon_range_multiplier",.page=View::Monsters,.section="Summons",.kind=RowKind::Slider,.label="Summon range",
+     .help="Multiplies summon target search and owner-follow ranges together. Mercenaries and attack reach stay native. Apply, then restart the game.",.warn="Requires restart",.format={.unit="x",.decimals=2}},
     // Physics: Props
     {.id="interactions.bottle_physics",.page=View::Physics,.section="Props",.kind=RowKind::Toggle,.label="Roll and break bottles",
      .help="Empty bottles drop and roll. Potions thrown at your mercenary break where they hit; thrown traps and gas or oil potions stop at walls."},
@@ -549,6 +567,9 @@ inline constexpr Override Overrides[]={
     {.id="interactions.belt_forward",.page=View::Body,.section="Potion belt",.kind=RowKind::Slider,.label="Belt forward reach",
      .help="How far in front of your body the belt sits. Raise it if the belt is too close; lower it if you reach too far.",
      .format={.unit="cm",.iniScale=.01f,.decimals=1}},
+    // Potion drinking by trigger, beside the mouth gesture (#425, RobinHeggelund).
+    {.id="interactions.click_to_drink",.page=View::Body,.section="Potion belt",.kind=RowKind::Toggle,.label="Click to drink",
+     .help="On: hold a flask and press that hand's trigger to drink. The mouth gesture still works. Off: bring the opening to your mouth and tip to drink."},
     // Hands: Hands and buttons
     {.id="interactions.dominant_hand",.page=View::Hands,.section="Hands and buttons",.kind=RowKind::Choice,.label="Dominant hand",
      .help="The hand that swaps weapon sets when you reach over a shoulder and grip. Your weapon and shield hands in the game stay the same.",
@@ -594,6 +615,8 @@ inline constexpr Override Overrides[]={
     {.id="interactions.vitals_tilt",.page=View::Wrist,.section="Life and mana",.kind=RowKind::Slider,.label="Life and mana tilt",
      .help="Tilts the health and mana display on your hand; + tips its top toward you. The minimap keeps its own angle.",
      .format={.unit=Degrees,.sign=true}},
+    {.id="interactions.skill_cooldowns",.page=View::Wrist,.section="Life and mana",.kind=RowKind::Toggle,.label="Skill cooldowns",
+     .help="Dimmed icons of up to three recharging skills between the orbs, filling back with color. A glyph or motion cast of one is refused; a tick says it is ready."},
     // Wrist: Map
     {.id="interactions.navigation_location",.page=View::Wrist,.section="Map",.kind=RowKind::Choice,.label="Map and compass",
      .help="Which left-hand gesture shows the minimap and compass, separately from health and mana.",
@@ -744,6 +767,11 @@ inline constexpr Override Overrides[]={
     {.id="torch.spell_hands_pct",.page=View::Environment,.section="Glow",.kind=RowKind::Slider,.label="Spell hand light",
      .help="How brightly the spells in a Sorceress's hands light the dark around you. Lower it if the light dazzles; Off and they only glow.",
      .format={.unit="%"},FRAMEVR_NAMES(OffAtZero),.classes=Sorceress},
+    // Light Radius boost (#440: "if it did it could even be buffed a bit for the sake of VR"): [light]
+    // radius_boost_pct, how much each Light Radius point widens the mod's dungeon light (light_radius.h).
+    {.id="light.radius_boost_pct",.page=View::Environment,.section="Glow",.kind=RowKind::Slider,.label="Light Radius boost",
+     .help="How much +Light Radius items and skills widen your light in dungeons. 100% is about the game's own amount; more is easier to see in VR.",
+     .format={.unit="%"}},
     // Settings with an ini key but no row: set by Calibrate body, legacy, the
     // ini only on main ([render] desktop_one_eye), or the skill wheel's Left
     // claw strikes box ([gameplay] left_hand_strikes).
@@ -871,7 +899,7 @@ inline constexpr GuideLine GuideTable[]={
 // Under Offline difficulty: the card leads with the note; without the
 // offline scaling adapter, main's notice instead (row and card), and the row
 // stays editable as on main.
-inline constexpr const char* OfflineNote="Difficulty affects new monsters only; existing monsters keep their stats. To apply it throughout the game, Save and Exit, then start a new game with the same character.";
+inline constexpr const char* OfflineNote="Only new monsters change. Save and Exit, then rejoin with the same character to refresh them all.";
 inline constexpr const char* OfflineUnavailable="Offline scaling adapter unavailable. Game difficulty remains unchanged.";
 inline constexpr const char* OfflineUnavailableShort="Offline scaling adapter unavailable";
 // Under Button names: the controllers the headset reports.

@@ -26,6 +26,34 @@ struct Sim {
 };
 int main() {
     {
+        Sim s;s.Nock();
+        Check(GripsReleased(s.in)&&!CanRecenter(s.in,s.out),"nocked arrow blocks recentering without a support grip");
+        s.Move({0,1.3f,0},10);s.Step(550);
+        Check(s.out.bowCharged&&!CanRecenter(s.in,s.out),"held draw survives an automatic recenter interval");
+        s.in.trigger=0;s.Step();
+        Check(s.out.bowRelease&&!CanRecenter(s.in,s.out),"release frame keeps the arrow request intact");
+        Check(CanRecenter(s.in,s.Step()),"completed release permits recentering again");
+        s.Nock();s.in.cancel=true;s.Step();
+        Check(!s.out.bowRelease&&CanRecenter(s.in,s.out),"cancelled draw permits recentering without shooting");
+        s.out.nativeBowRelease=true;
+        Check(!CanRecenter(s.in,s.out),"native bow release also blocks recentering");
+        s.out={};s.in.grip[1]=.6f;
+        Check(!CanRecenter(s.in,s.out),"support grip still blocks recentering");
+    }
+    {
+        Input in;
+        Check(GripsReleased(in),"released grips permit recentering");
+        for(int hand=0;hand<2;++hand) {
+            for(float grip:{1.f,.6f,.4f,-1.f,std::numeric_limits<float>::quiet_NaN()}) {
+                in.grip[hand]=grip;
+                Check(!GripsReleased(in),"held, latched or unknown grip defers recentering");
+            }
+            in.grip[hand]=.39f;
+            Check(GripsReleased(in),"support-grip release permits recentering again");
+            in.grip[hand]=0;
+        }
+    }
+    {
         Sim s;s.in.weapon=Weapon::Crossbow;s.Step(2);s.in.trigger=1;s.Step();
         Check(s.out.attack,"crossbow trigger requests a basic attack");
         auto native=s.out;
@@ -42,6 +70,48 @@ int main() {
         Check(RouteCrossbow(s.in,s.out,true,true,true,0)&&s.out.skill<0,"assigned basic Attack uses independent fire");
         s.in.trigger=0;s.Step();Check(!RouteCrossbow(s.in,s.out,true,true,true,0),"trigger release ends physical firing");
         s.in.trigger=1;s.in.palette=true;s.Step();Check(!RouteCrossbow(s.in,s.out,true,true,true,0),"wheel blocks crossbow firing");
+    }
+    {
+        // A crossbow's right trigger is Attack over the slot's skill (owner, 2026-11-08);
+        // the slot's binding is never written, so taking the crossbow off restores it.
+        constexpr int fireBolt=36,multipleShot=12,interact=357;
+        Check(CrossbowAttack(true,Weapon::Crossbow,true,fireBolt,true),"a crossbow fires over a spell on the right trigger");
+        Check(CrossbowAttack(true,Weapon::Crossbow,true,fireBolt,false),"and over one the hero lacks");
+        Check(CrossbowAttack(true,Weapon::Crossbow,true,interact,true),"and over Interact");
+        Check(!CrossbowAttack(true,Weapon::Crossbow,true,-1,false)&&!CrossbowAttack(true,Weapon::Crossbow,true,weaponskills::Attack,true),
+              "an empty slot or Attack already attacks");
+        for(int bow:{6,7,11,12,16,21,22,26,27,31})
+            Check(!CrossbowAttack(true,Weapon::Crossbow,true,bow,true),"a bow skill the hero has stays on a crossbow's trigger");
+        Check(CrossbowAttack(true,Weapon::Crossbow,true,multipleShot,false),"a bow skill the hero lacks gives way to Attack");
+        Check(!CrossbowAttack(false,Weapon::Crossbow,true,fireBolt,true),"motion controls off keep the slot");
+        Check(!CrossbowAttack(true,Weapon::Crossbow,false,fireBolt,true),"an unknown slot is left as it is (already Attack)");
+        for(auto weapon:{Weapon::Unknown,Weapon::Melee,Weapon::Bow,Weapon::Other,Weapon::Javelin})
+            Check(!CrossbowAttack(true,weapon,true,fireBolt,true),"only a crossbow overrides the slot");
+        Check(TriggerSelection(true,fireBolt,false)==skills::TriggerSlot(0)&&TriggerSelection(true,fireBolt,true)<0&&
+              TriggerSelection(true,-1,false)<0&&TriggerSelection(false,fireBolt,false)<0,"the trigger's selection follows the override");
+        // The transport's routing, frame by frame: Fire Bolt on the right trigger, a crossbow on and off.
+        for(int skill:{fireBolt,multipleShot}) {
+            Sim s;s.in.handBindings=true;
+            const auto route=[&](Weapon weapon,uint32_t equipment) {
+                s.in.trigger=0;s.in.weapon=weapon;s.in.equipment=equipment;
+                const int selection=TriggerSelection(true,skill,CrossbowAttack(true,weapon,true,skill,true));
+                if(s.engine.Selection()!=selection)s.engine.Select(selection);
+                s.Step(2);s.in.trigger=1;return s.Step();
+            };
+            Check(route(Weapon::Melee,1).skill==skills::TriggerSlot(0),"before the crossbow the trigger casts the slot's skill");
+            auto out=route(Weapon::Crossbow,2);
+            if(skill==fireBolt) {
+                Check(out.attack&&out.skill<0,"with a crossbow the trigger is Attack, not Fire Bolt");
+                auto native=out;
+                Check(!RouteCrossbow(s.in,native,true,false,false,-1)&&native.attack,"an unready crossbow keeps the native Attack");
+                Check(RouteCrossbow(s.in,out,true,true,false,-1)&&!out.attack&&out.skill<0,"a ready crossbow fires its physical bolt");
+            } else {
+                Check(!out.attack&&out.skill==skills::TriggerSlot(0),"Multiple Shot stays on a crossbow's trigger");
+                Check(!RouteCrossbow(s.in,out,true,true,true,skill)&&out.skill==skills::TriggerSlot(0),"and fires natively from the crossbow");
+            }
+            out=route(Weapon::Melee,3);
+            Check(!out.attack&&out.skill==skills::TriggerSlot(0),"the crossbow off, the trigger casts the slot's skill again");
+        }
     }
     for(bool quick:{false,true})for(int slot=0;slot<skills::Count;++slot) {
         Sim s;s.engine.Select(slot);s.Step(2);

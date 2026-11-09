@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "fx_source.h"
 using Microsoft::WRL::ComPtr;
 static void Check(HRESULT hr,const char* what) {
     if(FAILED(hr)) throw std::runtime_error(what);
@@ -60,8 +61,7 @@ static const float3 OutlineEye0=0,OutlineEye1=0;
 static const std::array<float,3> Background{.1f,.1f,.1f};
 int main(int argc,char** argv) {try {
     if(argc!=2)throw std::runtime_error("expected D2R_DepthFog.fx path");
-    std::ifstream file(argv[1]);if(!file)throw std::runtime_error("cannot read production shader");
-    const std::string source{std::istreambuf_iterator<char>(file),{}};
+    const std::string source=fxsource::ReadWithIncludes(argv[1]);   // the effect with its feature headers pasted in (Beams lives in D2R_Targeting.fxh)
     std::string shader=Fixture;
     for(const char* name:{"void BeamRay(","float3 BeamLight(","float3 Beams("})shader+=Function(source,name);
     shader+=R"hlsl(

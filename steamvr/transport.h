@@ -68,6 +68,16 @@ void ConfigureTurnsRims(bool on);
 void SetTurnsRims(bool on);
 bool TurnsRims();
 void ConfigureEyeTracking(bool enabled);
+// Aim with your eyes (gaze_aim.h). vrcam's update thread: eye-gaze samples are read each frame
+// while wanted, whether or not foveation is eye tracked (cost while not: none).
+void WantGazeAim(bool wanted);
+// What the headset shares: -1 no OpenXR session yet, 0 the runtime offers no XR_EXT_eye_gaze_interaction,
+// 1 the extension without a usable eye tracker, 2 an eye tracker bound. Any thread.
+int GazeAimSupport();
+// The last gaze sample taken while wanted, as a unit direction in the left eye's view (x right, y up,
+// -z ahead) and its GetTickCount64; false when that frame's sample was unusable (a blink, tracking
+// lost, stale) or none came. Any thread.
+bool GazeAimLocal(float local[3],uint64_t& at);
 void ConfigureGameplay(bool enabled);
 void ConfigureQuiver(bool enabled,bool preview); // [bow] quiver, quiver_preview
 void ConfigureInteractions(bool seated,float waistBelowEyes,float beltForward,int dominantHand);
@@ -123,6 +133,9 @@ bool HeavensArmed();
 // The T cross is being held: the monsters near are wanted for its guard (body_calibration_gesture.h).
 bool TCrossWantsTargets();
 uint32_t HeavensRequest();
+// A bow is ready with Guided Arrow as the bow's skill (aimrules::AlwaysHomes): the target scan runs so a
+// release can hand the game the aimed monster, whatever VR Settings > Gameplay > Targeting says.
+bool SeekerArrowReady();
 void HeavensResolved(uint32_t request,uint32_t monster);
 int PointSpellSkill();       // the cast skill when the aim rules place it at a point, else -1
 int AimRulesSkill();         // the cast skill (any), -1 none; with its game "directed" flag
@@ -233,6 +246,7 @@ void RequestStereoCapture();
 void EndPair();
 void ResetHeight();
 void Recenter();
+bool RecenterPosition();
 bool TakeWorldRecenter();
 bool Active();
 // Any thread: a focused VR session with motion controls ran input recently.

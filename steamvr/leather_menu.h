@@ -165,9 +165,10 @@ inline Size Measure(const Art& art,float menuWidth) {
 
 // The menu's 16:9 band of the UI canvas: the canvas's full width at the top of
 // a taller canvas (the native "upper widescreen band", native_panels.h
-// UpperBand); the full height in the middle of a wider canvas. The sheet shows
-// only this band, so nothing the game draws outside it (a dimmed backdrop, the
-// lower canvas) leaves the leather. The Horadric Cube opened from the inventory
+// UpperBand); the full height in the middle of a wider canvas. The sheet's laser,
+// placement and dim removal (ui_blit Undim) work on this band; the canvas beside a
+// wide band never shows, and below a tall one only what the game draws past the
+// band's foot does (WithFoot). The Horadric Cube opened from the inventory
 // is laid out in the same band as the tabbed menu (owner's capture 2026-10-29:
 // cube and inventory at x 384-2687, y 80-1489 of 3072x3072, as the tabbed menu),
 // though the game closes UISwitcher for it, so the band never follows
@@ -181,6 +182,26 @@ inline Rect Band(int width,int height) {
     }
     const int w=int(int64_t(height)*16/9);
     return {(width-w)/2,0,w,height};
+}
+// The canvas below the band, shown under the menu (a player's video, 2026-11-08: a
+// skill's synergies cut off). The game lays its tooltips out on the whole canvas, so on
+// a tall one the tooltip of a skill or item low on the menu runs on past the band's
+// foot, where the sheet ended it. The menu's quad goes on down to the canvas's foot
+// instead; the band stays where it was, the same size, so the laser, the hide, the
+// HUD and the buttons beside the menu keep it (UiSurfaceSize). Below the band the
+// canvas is clear once the game's dim is out (ui_blit Undim): only what runs past
+// the band shows there. A 16:9 or wider canvas has nothing below its band.
+// rect: the canvas shown; height: the quad's, metres; drop: its centre below the band's.
+struct Foot {Rect rect{};float height=0,drop=0;};
+inline Foot WithFoot(Rect band,int canvasHeight,float bandHeight) {
+    Foot out{band,bandHeight,0};
+    if(band.w<=0||band.h<=0||!std::isfinite(bandHeight)||bandHeight<=0)return out;
+    const int64_t below=int64_t(canvasHeight)-band.y-band.h;
+    if(below<=0)return out;
+    out.rect.h=band.h+int(below);
+    out.height=bandHeight*float(out.rect.h)/float(band.h);
+    out.drop=(out.height-bandHeight)*.5f;
+    return out;
 }
 
 // The gameplay HUD held with the menu (owner 2026-10-29, a tester: "With inventory open

@@ -696,6 +696,42 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
         label("LIFE",s.health,s.maxHealth,{570,954,748,978});
         label("MANA",s.mana,s.maxMana,{789,954,964,978});
         SelectObject(dc,previous);DeleteObject(gothic);SetTextColor(dc,RGB(238,235,220));
+        // Skill cooldowns (skill_cooldowns.h): a recharging skill's icon in the notch between the orbs, in a bronze
+        // ring like the clasp's. Dimmed grey, its color sweeping back clockwise from the top as the delay runs out;
+        // gone once ready. A skill with no cached icon shows its element's color the same way.
+        GdiFlush();
+        for(int place=0;place<cooldowns::MaxShown;++place) {
+            const auto& c=o.cooldowns[size_t(place)];
+            if(c.skill<0||!c.left)continue;
+            const auto image=icons::Get("s"+std::to_string(c.skill));
+            const bool art=image&&image->width&&image->height&&image->rgba.size()>=size_t(image->width)*image->height*4;
+            const auto element=glyphtrail::ElementColour(c.skill);
+            const float cx=512+cooldowns::WristIcon[place].x,cy=768+cooldowns::WristIcon[place].y,r=cooldowns::IconRadius,inner=r-2.2f;
+            const float sweep=2*Pi*(1.f-float(c.left)/cooldowns::Steps);   // the share already recharged, from 12 o'clock
+            const float handX=std::sin(sweep),handY=-std::cos(sweep);       // the sweep's edge, a gold hand
+            auto* dst=static_cast<uint8_t*>(bits);
+            for(int y=int(cy-r)-1;y<=int(cy+r)+1;++y)for(int x=int(cx-r)-1;x<=int(cx+r)+1;++x) {
+                const float dx=x+.5f-cx,dy=y+.5f-cy,d=std::sqrt(dx*dx+dy*dy);
+                if(d>r||x<512||x>=size||y<768||y>=size)continue;
+                auto* px=&dst[(y*size+x)*4];   // BGRA
+                if(d>inner){px[0]=51;px[1]=94;px[2]=122;continue;}   // the ring, RGB(122,94,51)
+                if(dx*handX+dy*handY>0&&std::fabs(dx*handY-dy*handX)<.75f){px[0]=119;px[1]=196;px[2]=232;continue;}   // the hand, RGB(232,196,119)
+                float angle=std::atan2(dx,-dy);if(angle<0)angle+=2*Pi;
+                const bool back=angle<sweep;   // recharged: in color
+                float rgb[3]={18,16,14};       // the dark behind the icon
+                if(art) {
+                    const unsigned ix=std::min(image->width-1,unsigned((dx/inner*.5f+.5f)*image->width));
+                    const unsigned iy=std::min(image->height-1,unsigned((dy/inner*.5f+.5f)*image->height));
+                    const auto* p=&image->rgba[(size_t(iy)*image->width+ix)*4];const float a=p[3]/255.f;
+                    const float grey=(p[0]*.2126f+p[1]*.7152f+p[2]*.0722f)*.32f;
+                    for(int k=0;k<3;++k)rgb[k]=(back?p[k]*.85f:grey)*a+rgb[k]*(1-a);
+                } else {
+                    const float tint[3]={element.r,element.g,element.b};
+                    for(int k=0;k<3;++k)rgb[k]=tint[k]*(back?205.f:60.f);
+                }
+                for(int k=0;k<3;++k)px[2-k]=uint8_t(std::clamp(rgb[k],10.f,255.f));   // never pure black: that reads as the art's clear
+            }
+        }
     } else {
       fill({512,776,1024,1024},RGB(20,28,33));
       if(KnownVital(s.vitalsKnown,s.health,s.maxHealth)&&KnownVital(s.vitalsKnown,s.mana,s.maxMana)){

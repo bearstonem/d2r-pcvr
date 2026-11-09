@@ -40,6 +40,8 @@
 #include "../steamvr/leather_menu.h"
 #include "../steamvr/stats_button.h"
 #include "../steamvr/respec_button.h"
+#include "../steamvr/stash_buttons.h"
+#include "../steamvr/vr_keyboard.h"
 #include "respec.h"
 #include "../steamvr/notice_card.h"
 #include "../steamvr/weapon_skills.h"
@@ -328,12 +330,18 @@ std::atomic<bool> g_journalOnly{false};
 std::atomic<bool> g_opaqueMenu{false};
 std::atomic<bool> g_upperBandMenu{false};
 std::atomic<bool> g_leatherMenu{false};
+std::atomic<bool> g_stashButtons{false};
 std::atomic<bool> g_statsButton{false};   // the tabbed menu alone: its Advanced Stats button (stats_button.h)
 // An item on the game's cursor (the laser picked it up in a menu), read with the hands
 // every 200 ms; when it was read (CursorItemHeld wants it recent).
 std::atomic<bool> g_cursorItem{false};
 std::atomic<uint64_t> g_cursorItemAt{0};
 std::atomic<bool> g_respecButton{false};  // its Character page alone: Reset Skills & Stats (respec_button.h)
+// Character creation with a hero picked: the name box is up, so the VR keyboard (vr_keyboard.h)
+// shows; the epoch changes each time it comes up anew. The box is read on the UI message thread.
+framevr::keyboard::NameBox g_nameBox;
+std::atomic<bool> g_keyboard{false};
+std::atomic<uint32_t> g_keyboardEpoch{0};
 std::atomic<uint32_t> g_panelChanges{0};   // every panel opened or closed (leather::Back)
 std::atomic<bool> g_npcChoices{false};
 std::atomic<uint32_t> g_questNotices{0};   // quest updates while the notification panel is hidden
@@ -890,6 +898,10 @@ SharedEvents::UiMessageAction __cdecl OnUiMessage(const PluginContext* ctx, cons
         snprintf(b, sizeof b, "gamestate: ui message '%s' '%s' text '%.80s'", target, command, text);
         Log(b);
     }
+    g_nameBox.Message(target, command, text);
+    if (g_keyboard.exchange(g_nameBox.Shown()) != g_nameBox.Shown())
+        Log(g_nameBox.Shown() ? "gamestate: name box up (a hero picked) - VR keyboard shown" : "gamestate: name box gone - VR keyboard hidden");
+    g_keyboardEpoch.store(g_nameBox.Epoch());
     if (strcmp(target, "PanelManager") == 0) {
         const bool before = g_menu.load() != 0;
         if (!strcmp(command, "OpenPanel") || !strcmp(command, "OpenExclusivePanel")) { if (*text) g_panels.insert(text); }
@@ -906,6 +918,7 @@ SharedEvents::UiMessageAction __cdecl OnUiMessage(const PluginContext* ctx, cons
             [](const auto& name){return framevr::panels::OpaqueBackground(name);}));
         g_leatherMenu.store(framevr::leather::OnSheet(g_panels));
         g_statsButton.store(framevr::statsbutton::Shown(g_panels));
+        g_stashButtons.store(framevr::stashbuttons::Shown(g_panels));
         g_respecButton.store(framevr::respecbutton::Shown(g_panels));
         bool menu = false;
         for (const std::string& n : g_panels) if (IsMenuPanel(n)) { menu = true; break; }
@@ -1133,6 +1146,7 @@ bool JournalOnly(){return g_journalOnly.load();}
 bool OpaqueMenuOpen(){return g_opaqueMenu.load();}
 bool UpperBandMenuOpen(){return g_upperBandMenu.load();}
 bool LeatherMenuOpen(){return g_leatherMenu.load();}
+bool StashButtonsShown(){return g_stashButtons.load();}
 bool StatsButtonShown(){return g_statsButton.load();}
 bool CursorItemHeld(){return g_cursorItem.load()&&GetTickCount64()-g_cursorItemAt.load()<600;}
 uint64_t CursorItemReadAt(){return g_cursorItemAt.load();}
@@ -1142,6 +1156,8 @@ bool RespecButtonShown(){return g_respecButton.load()&&respec::Available();}
 bool RespecButtonShown(){return false;}   // the reset engine is in the native OpenXR build only
 #endif
 uint32_t PanelChanges(){return g_panelChanges.load();}
+bool KeyboardShown(){return g_keyboard.load();}
+uint32_t KeyboardEpoch(){return g_keyboardEpoch.load();}
 bool NpcChoicesOnly(){return g_npcChoices.load();}
 void ReadNpcChoicesRect() {
     if(!g_npcChoices.load()||!g_widgets||!g_widgets->getWidgetRect||!g_widgets->findPanel)return;

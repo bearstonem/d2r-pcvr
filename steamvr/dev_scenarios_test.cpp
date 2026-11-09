@@ -65,7 +65,9 @@ static Items::Result __cdecl RemoveToken(const PluginContext*,PlayerHandle playe
 static Items::Result __cdecl ItemsCall(const PluginContext*,const Items::Transaction* t,Items::TransactionResult* r) noexcept {
     ++itemCalls;assert(t->player==local&&(t->outputCount==1||t->outputCount==2||(t->outputCount>=5&&t->outputCount<=10)));
     if(t->outputCount==1)assert(t->outputs[0].code==Items::MakeItemCode("buc")||t->outputs[0].code==Items::MakeItemCode("clb"));
-    if(t->outputCount==5){constexpr const char* kit[]={"jav","pil","glv","tkf","tax"};   // the throwing kit
+    if(t->outputCount==5){   // the throwing kit, or the item-fired bows kit (#432)
+        constexpr const char* throwing[]={"jav","pil","glv","tkf","tax"},*bowKit[]={"hbw","lbw","8rx","aqv","cqv"};
+        const auto* kit=t->outputs[0].code==Items::MakeItemCode("hbw")?bowKit:throwing;
         for(unsigned i=0;i<5;++i)assert(t->outputs[i].code==Items::MakeItemCode(kit[i][0],kit[i][1],kit[i][2]));}
     if(t->outputCount==2) {
         const bool bow=t->outputs[0].code==Items::MakeItemCode("6lw");
@@ -83,8 +85,14 @@ static Items::Result __cdecl ItemsCall(const PluginContext*,const Items::Transac
         const bool potions=t->outputCount==10&&t->outputs[0].code==Items::MakeItemCode("hp5"); // the potion kit
         const bool torch=t->outputCount==6&&t->outputs[0].code==Items::MakeItemCode("clb");
         const bool loot=t->outputCount==10&&t->outputs[0].code==Items::MakeItemCode("rin")&&t->outputs[1].code==Items::MakeItemCode("amu");
-        const bool starter=(t->outputCount<9&&t->outputCount>2)||potions;
-        if(loot) {   // the loot beam test kit
+        const bool itemBows=t->outputCount==5&&t->outputs[0].code==Items::MakeItemCode("hbw");
+        const bool starter=((t->outputCount<9&&t->outputCount>2)||potions)&&!itemBows;
+        if(itemBows) {   // #432: Witherstring, Raven Claw and Demon Machine forced by row; arrows and bolts plain
+            constexpr uint32_t rows[]={60,61,199};
+            if(i<3)assert(s.quality==Items::Quality::Unique&&s.qualityRecordId==rows[i]&&s.itemLevel==99&&
+                          s.flags==Items::ItemCreateFlagBit(Items::ItemCreateFlag::AllowDuplicateUnique));
+            else assert(ammo&&s.quality==Items::Quality::Normal&&s.qualityRecordId==Items::RandomQualityRecord);
+        } else if(loot) {   // the loot beam test kit
             constexpr Items::Quality quality[]={Items::Quality::Unique,Items::Quality::Set,Items::Quality::Rare,
                                                Items::Quality::Magic,Items::Quality::Normal,Items::Quality::Normal,Items::Quality::Normal,
                                                Items::Quality::Normal,Items::Quality::Normal,Items::Quality::Normal};
@@ -220,7 +228,7 @@ int main(){
                 assert(commands[start+PreparationCount+i]==expected);
             }
         }
-        for(int choice:{1,2,CrossbowChoice,BowChoice,SmallShieldChoice,StarterPrimaryChoice,StarterAlternateChoice,ThrowingChoice,PotionsChoice,TorchChoice,ThrowingPotionsChoice,LootBeamsChoice}) {
+        for(int choice:{1,2,CrossbowChoice,BowChoice,SmallShieldChoice,StarterPrimaryChoice,StarterAlternateChoice,ThrowingChoice,PotionsChoice,TorchChoice,ThrowingPotionsChoice,LootBeamsChoice,ItemBowsChoice}) {
             const auto commandCount=commands.size();
             devscenarios::Request(Make(choice));assert(tasks.back().game);Run(tasks.size()-1);
             assert(devscenarios::Status().result==Result::Applied&&!tokenLive);
@@ -280,6 +288,7 @@ int main(){
     }
     // The loot beam test kit on HERO, the same for every class.
     assert(IsKit(LootBeamsChoice)&&NormalKit(LootBeamsChoice)&&PageFor(LootBeamsChoice)==0&&SlotFor(LootBeamsChoice)==9);
+    assert(IsKit(ItemBowsChoice)&&!NormalKit(ItemBowsChoice)&&PageFor(ItemBowsChoice)==0&&SlotFor(ItemBowsChoice)==10&&!Choices[ItemBowsChoice].command);   // #432
     for(int cls=0;cls<8;++cls) {
         std::vector<std::string_view> codes;for(const char* code:Kit(cls,LootBeamsChoice))if(code)codes.push_back(code);
         assert((codes==std::vector<std::string_view>{"rin","amu","rin","amu","dgr","r26","r25","r27","r28","r29"}));
@@ -297,7 +306,7 @@ int main(){
 
     // Failed standalone kits clean up only the generated exchange token.
     failItems=true;
-    for(int choice:{CrossbowChoice,BowChoice,SmallShieldChoice,ThrowingChoice,PotionsChoice,TorchChoice,ThrowingPotionsChoice,LootBeamsChoice}) {
+    for(int choice:{CrossbowChoice,BowChoice,SmallShieldChoice,ThrowingChoice,PotionsChoice,TorchChoice,ThrowingPotionsChoice,LootBeamsChoice,ItemBowsChoice}) {
         const auto beforeCleanup=tokenRemoves;
         devscenarios::Request(Make(choice));Run(tasks.size()-1);
         assert(devscenarios::Status().result==Result::KitRefused&&!tokenLive&&tokenRemoves==beforeCleanup+1);

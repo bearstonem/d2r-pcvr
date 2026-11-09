@@ -25,6 +25,7 @@
 #include "spells.h"
 #include "bow.h"
 #include "../steamvr/attack_speed.h"
+#include "../steamvr/light_radius.h"
 namespace gamestate {framevr::dualwield::Equipment MeleeEquipment();void SetMeleeOrder(uint32_t,uint32_t);uint32_t DataBank();bool MenuOpen();int AttackWeapon(int hand=0);int AttackWsm(int hand=0);uint32_t HandsKey();uint32_t WeaponSet();}
 namespace melee {void SetAttackCycle(uint64_t session,uint32_t milliseconds,int hand=0);void SetDualSpeed(uint64_t session,int classId,const int weaponClass[2],const int wsm[2]);}
 namespace interactionstate {int ShapeForm(uint64_t session,uint64_t now);}
@@ -305,6 +306,8 @@ void Capture(framevr::interaction::Snapshot& s) {
     reason=s.vitalsKnown?0:6;
     // Bone Armor's pool (132) and maximum (133): the forearm grafts (steamvr/bone_graft.h).
     s.boneArmor=stat(player,132,0);s.boneArmorMax=stat(player,133,0);
+    // Light Radius (89, items and skills): the reach of the mod's dungeon light round the hero (light_radius.h, #440).
+    s.lightRadius=stat(player,framevr::lightradius::Stat,0);s.lightRadiusKnown=s.vitalsKnown;
     // ItemStatCost IDs verified against this game's own table: level=12,
     // experience=13. Experience rows contain one unsigned threshold per class
     // followed by ExpRatio; row 0 is MaxLvl, row 1 starts character level 1.

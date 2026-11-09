@@ -67,7 +67,8 @@ static Values AllRows(bool smooth){
 }
 static Setup Base(View v,int hero,const Values& values=AllRows(false),bool adapter=true){
     Setup x;Snapshot s;s.values=values;s.ready=true;s.offlineDifficultyAvailable=adapter;
-    x.m.Open(s);x.m.SetNotesPages(ReleaseNotesPages());x.m.SetContext({hero,hero==heroclass::Amazon,hero==heroclass::Sorceress,false});x.m.view=v;
+    // The title screen as a headset with eye tracking (Aim with your eyes beside Aim with your view), the classes without.
+    x.m.Open(s);x.m.SetNotesPages(ReleaseNotesPages());x.m.SetContext({hero,hero==heroclass::Amazon,hero==heroclass::Sorceress,false,hero<0});x.m.view=v;
     x.in.nowMs=100000;x.in.detected={{framevr::controllers::Layout::Touch,framevr::controllers::Layout::Touch}};
     // transport.cpp: the Performance view shows render_resolution's Describe (its widest), the others the foveation status.
     x.in.runtimeStatus=L::HasReadout(v)?"VR source: 8192 x 8192 per eye (desktop fallback)":"Foveated shading available. Eye tracking unavailable on this headset/runtime.";
