@@ -171,7 +171,7 @@ not generate melee velocity. The layout currently assumes a right-handed player.
 | Selected Smite with a shield | Swing or thrust the left shield through an enemy; keep right trigger released |
 | Cast without opening the wheel | Each hand casts its own skills, aimed with that hand: trigger, two face buttons, and same-hand grip + face button for two more ([hand skill layouts](../CONTROLS.md#hand-skill-layouts)) |
 | Melee swing / thrust | Swing the equipped melee weapon through a creature, including with a skill selected; no grip, trigger, or preselected target |
-| Button attack / crossbow | Weapon combat mode, right trigger; native crossbow firing |
+| Button attack / crossbow | Weapon combat mode, right trigger; with a crossbow the right trigger is Attack whatever its slot holds, except a bow skill (below) |
 | Nock bow | Bow equipped: bring right hand to string and hold right trigger; no left grip required |
 | Draw and shoot | Pull string hand back at least 12 cm (28 cm total separation), then release trigger |
 | Throw a javelin, throwing knife or axe | Any javelin, throwing knife or throwing axe equipped in WEAPON mode, right trigger bound to Attack, Throw or nothing: hold right trigger, make a deliberate throwing motion, release to throw along the hand's motion. The game's own Throw fires the weapon's own missile and consumes its quantity; a knife flies point first, an axe tumbles end over end. With a javelin, Poison Javelin, Lightning Bolt, Plague Javelin or Lightning Fury on the right trigger (or loaded from a face button, like the bow quiver) rides the throw: the skill's own mana, damage and effects. A Barbarian with a throwing weapon in each hand and Double Throw on the right trigger (or loaded) throws with both hands: the left trigger throws the left weapon, and each throw is one native Double Throw of that hand's weapon. Trigger-free jabs and swings stay available |
@@ -1961,6 +1961,28 @@ with the game's explosion at the contact (logged once as `... crossbow basic
 attack fires item missile 41 (Fires Explosive Bolts) ...`). Special missile skills and unrecognized/stale rigs
 retain their native release behavior. The physical collision limitations below
 also apply to basic crossbow bolts.
+
+**The crossbow's right trigger is Attack** (owner, 2026-11-08). With motion
+controls on and a crossbow in the hands, the right trigger fires the crossbow
+whatever skill its slot holds: the physical bolt above, or the game's own
+Attack while the physical bolt is not ready (no captured rig yet). The empty
+slot and Attack already did this; a spell, trap, Interact or any other skill
+there now gives way while the crossbow is held, and is not cast as a hand spell
+either. This is a runtime
+override, not a binding change: the slot's saved assignment (the game keeps it
+in the character) is never written, the wheel still shows it, and taking the
+crossbow off (or swapping weapons, or a shapeshift) makes the trigger cast it
+again, so a crash cannot leave a changed binding behind. A bow skill the hero
+has on that slot (Magic, Fire, Cold, Ice, Exploding, Immolation, Freezing and
+Guided Arrow, Multiple Shot, Strafe) stays: the game fires it from the crossbow
+natively, as before. The wrist cue reads **Attack, Crossbow: pull trigger**
+while the trigger attacks. A Draw glyph button on the right trigger keeps drawing
+(it holds no game skill). `gameplay::CrossbowAttack` decides; the log says
+`Frame crossbow: right trigger fires the crossbow (slot holds skill N; its
+binding is untouched)` as it starts, `Frame crossbow: crossbow off, right
+trigger back to skill N` (or `motion controls off` / `slot changed`) as it ends,
+and `Frame crossbow: right trigger keeps skill N, a bow skill the game fires from
+the crossbow` for a bow skill.
 
 Crossbow support is a held grip: release **Left Grip** to free the support hand.
 After a shoulder weapon swap, release the swap grip before grabbing the stock.

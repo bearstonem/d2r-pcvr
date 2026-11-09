@@ -689,6 +689,9 @@ bool PointedCell(float& x,float& y,math::Vec& way) {
 }
 bool crossbowFire=false;
 uint64_t crossbowActivation=0,crossbowTakenAt=0;
+// The crossbow's right trigger as last logged: 0 the slot's own, 1 Attack over the slot's skill
+// (gameplay::CrossbowAttack), 2 the slot's bow skill kept; and that skill.
+int crossbowTriggerMode=0,crossbowTriggerSkill=-1;
 bowflight::Shot spellReadyShot[2]{};
 bool spellHasShot[2]{};
 uint64_t spellResolvedAt[2]{};
@@ -3419,6 +3422,24 @@ void Input() {
         (uint64_t(skill.known)<<40)^(uint64_t(skill.available)<<41)^(uint64_t(skill.motion)<<42)^(uint64_t(skill.physical)<<43))*1099511628211ull;
     skills::HandInput handInput;handInput.time=motionInput.time;handInput.context=bindingContext;
     handInput.layout=bindingLayout;
+    // A crossbow in the hands: the right trigger fires it as Attack, whatever skill its slot holds
+    // (gameplay::CrossbowAttack). Only this frame's routing changes, never the saved binding.
+    const auto& triggerSkill=bindingSnapshot.skills[skills::TriggerSlot(0)];
+    const bool crossbowAttack=gameplay::CrossbowAttack(motionControls.load(),motionInput.weapon,triggerSkill.known,triggerSkill.id,triggerSkill.available);
+    if(interaction::Fresh(bindingSnapshot,gamestate::LocalPlayer(),GetTickCount64())) {
+        const bool kept=!crossbowAttack&&motionControls.load()&&motionInput.weapon==gameplay::Weapon::Crossbow&&
+            triggerSkill.known&&triggerSkill.available&&weaponskills::Bow(triggerSkill.id);
+        const int mode=crossbowAttack?1:kept?2:0;
+        if(mode!=crossbowTriggerMode||(mode&&triggerSkill.id!=crossbowTriggerSkill)) {
+            char line[200];line[0]=0;
+            if(mode==1)std::snprintf(line,sizeof line,"Frame crossbow: right trigger fires the crossbow (slot holds skill %d; its binding is untouched)",triggerSkill.id);
+            else if(mode==2)std::snprintf(line,sizeof line,"Frame crossbow: right trigger keeps skill %d, a bow skill the game fires from the crossbow",triggerSkill.id);
+            else if(crossbowTriggerMode==1)std::snprintf(line,sizeof line,"Frame crossbow: %s, right trigger back to skill %d",
+                motionInput.weapon!=gameplay::Weapon::Crossbow?"crossbow off":!motionControls.load()?"motion controls off":"slot changed",triggerSkill.id);
+            if(line[0])Say(line);
+            crossbowTriggerMode=mode;crossbowTriggerSkill=triggerSkill.id;
+        }
+    }
     if(bowvr::SpellReady()&&interaction::Fresh(bindingSnapshot,gamestate::LocalPlayer(),GetTickCount64()))
         for(int i=0;i<skills::Count;++i)if(bindingSnapshot.skills[i].physical&&bindingSnapshot.skills[i].available)
             handInput.independentSlots|=1u<<i;
@@ -3430,6 +3451,7 @@ void Input() {
     const auto& glyphValues=glyphSaveSequence?glyphWanted:glyphSettings.values;
     const auto glyphDrawSlots=glyphSettings.ready?glyphcast::DrawSlots(glyphValues[settings::GlyphDraw],glyphValues[settings::GlyphDrawSecond]):std::array<int,2>{-1,-1};
     for(const int slot:glyphDrawSlots)if(slot>=0)handInput.independentSlots&=~(1u<<slot);
+    if(crossbowAttack)handInput.independentSlots&=~(1u<<skills::TriggerSlot(0));   // the crossbow's, not a hand spell's
     handInput.layout^=uint64_t(handInput.independentSlots)<<48;
     handInput.active=motionInput.active&&motionInput.tracked[0]&&motionInput.tracked[1]&&handAimTracked[0]&&handAimTracked[1]&&gamestate::LocalPlayer();
     handInput.occupied=interactionOutput.bottle>=0||interactionOutput.owner[0]==interaction::Owner::Holster||interactionOutput.owner[1]==interaction::Owner::Holster;
@@ -3994,7 +4016,7 @@ void Input() {
     const bool quickFresh=interaction::Fresh(quickSnapshot,interactionInput.session,interactionInput.at);
     const auto& rightSkill=quickSnapshot.skills[skills::TriggerSlot(0)];
     const auto gestureSettings=vrsettings::Read().values;
-    const int selected=rightSkill.known&&rightSkill.id>=0?skills::TriggerSlot(0):-1;
+    const int selected=gameplay::TriggerSelection(rightSkill.known,rightSkill.id,crossbowAttack);
     if(motion.Selection()!=selected)motion.Select(selected);
     motionInput.selectedSkill=rightSkill.id;motionInput.selectedOwner=rightSkill.owner;
     motionInput.selectedAvailable=quickFresh&&rightSkill.known&&rightSkill.available&&rightSkill.motion;
@@ -4070,7 +4092,7 @@ void Input() {
     const bool glyphPressed=handOutput.slot>=0&&glyphDrawSlots[size_t(skills::Hand(handOutput.slot))]==handOutput.slot;
     if(glyphPressed){requested=-1;handOutput.interact=false;}
     const bool requestedKnown=requested>=0&&quickFresh&&quickSnapshot.skills[requested].known&&quickSnapshot.skills[requested].available;
-    handOutput.interact=requestedKnown&&quickSnapshot.skills[requested].id==357;
+    handOutput.interact=requestedKnown&&quickSnapshot.skills[requested].id==357&&!(crossbowAttack&&requested==skills::TriggerSlot(0));
     const bool quick=requested>=0&&requested!=skills::TriggerSlot(0);
     motionInput.quickCast=quick||handOutput.interact;
     motionInput.quickSkill=quick&&requestedKnown&&!handOutput.interact?requested:-1;
@@ -4581,10 +4603,15 @@ void Input() {
         if(cue.available&&!cue.temporary&&cue.slot==skills::TriggerSlot(0)&&(motionInput.toss||strikes(skill))) {
             cue.gesture=true;cue.strike=!motionInput.toss;std::snprintf(cue.hint,sizeof cue.hint,"%s",motionInput.toss?"Throw to place":"Swing to strike");
         }
+        if(cue.available&&!cue.temporary&&cue.slot==skills::TriggerSlot(0)&&skill.id==weaponskills::Attack&&motionInput.weapon==gameplay::Weapon::Crossbow)
+            std::snprintf(cue.hint,sizeof cue.hint,"Crossbow: pull trigger");
     } else if(cue.slot<0) {
+        // A crossbow's trigger is Attack (also over the slot's skill: gameplay::CrossbowAttack).
+        const bool crossbow=motionInput.weapon==gameplay::Weapon::Crossbow;
         cue.known=cue.available=true;
-        std::snprintf(cue.name,sizeof cue.name,"%s",motionInput.weapon==gameplay::Weapon::Bow?"Basic Arrow":"Basic Attack");
-        std::snprintf(cue.hint,sizeof cue.hint,"%s",motionInput.weapon==gameplay::Weapon::Bow?"Draw & release":motionInput.weapon==gameplay::Weapon::Javelin?"Swing / throw":"Swing / trigger");
+        std::snprintf(cue.name,sizeof cue.name,"%s",motionInput.weapon==gameplay::Weapon::Bow?"Basic Arrow":crossbow?"Attack":"Basic Attack");
+        std::snprintf(cue.hint,sizeof cue.hint,"%s",motionInput.weapon==gameplay::Weapon::Bow?"Draw & release":motionInput.weapon==gameplay::Weapon::Javelin?"Swing / throw":
+            crossbow?"Crossbow: pull trigger":"Swing / trigger");
     } else {
         std::snprintf(cue.name,sizeof cue.name,"Skill unavailable");std::snprintf(cue.hint,sizeof cue.hint,"Refresh assignments");
     }

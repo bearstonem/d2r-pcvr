@@ -59,7 +59,7 @@ inline constexpr std::array<Choice,LootBeamsChoice+1> Choices{{
     // Use the level's native arrival point for the boss arena, rather than
     // the explicit Tyrael platform coordinates above. No quest commands.
     {"Duriel - Act II", "Boss-room entrance / rendering", "goto 73"},
-    {"Crossbow + bolts", "Equip both; assign Attack to Right Trigger", nullptr},
+    {"Crossbow + bolts", "Equip both; Right Trigger fires bolts", nullptr},
     {"Blood Moor", "Act I combat / crossbow test", "goto 2"},
     {"Bow + arrows", "Windforce / 250 arrows", nullptr},
     {"Small shield", "Pelta Lunata buckler / compare shield reach", nullptr},
