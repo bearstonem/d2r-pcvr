@@ -84,7 +84,9 @@ Open either hand's wheel and choose **DEV**. Its tabs are grouped by purpose:
   hand and throw), **By turns rims**, **Sky over rims** and a **Loot beam test**
   kit (a unique ring, a set amulet, a rare ring, a magic amulet, a white dagger
   and the runes Vex, Gul, Ohm, Lo and Sur: drop them to see each beam, or none;
-  see GAMEPLAY.md, Loot beams) (all on this page as Equipment is full).
+  see GAMEPLAY.md, Loot beams) and an **Item-fired bows** kit (Witherstring, Raven
+  Claw and Demon Machine, whose basic attacks fire magic or exploding arrows and
+  bolts, with arrows and bolts; #432) (all on this page as Equipment is full).
 - **Equipment:** starter primary/alternate gear, class unique primary/alternate
   gear, crossbow + bolts, bow + arrows, a small shield, **Render debug draws**,
   **By turns own picture**, **By turns filter**, **By turns ghosts**, a **Throwing kit** and a **Potion kit** (four Super
