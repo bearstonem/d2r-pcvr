@@ -7,6 +7,8 @@ import io
 import json
 import os
 from pathlib import Path
+import ssl
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -877,6 +879,73 @@ class DependencyDownloadTests(unittest.TestCase):
                 with self.assertRaisesRegex(SystemExit, 'Checksum mismatch'):
                     install.download_verified(self.url, target, self.digest)
             self.assertEqual(target.read_bytes(), b'old, unverified cache')
+
+    @staticmethod
+    def untrusted_certificate():
+        # What urlopen raises when this PC's Windows store lacks the site's root.
+        reason = ssl.SSLCertVerificationError(1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed')
+        reason.verify_message = 'unable to get local issuer certificate'
+        return install.urllib.error.URLError(reason)
+
+    @staticmethod
+    def windows_curl(content=None, code=0, stderr=''):
+        def run(command, **options):
+            if content is not None:
+                Path(command[command.index('--output') + 1]).write_bytes(content)
+            return subprocess.CompletedProcess(command, code, '', stderr)
+        return run
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows certificate fallback')
+    def test_untrusted_certificate_retries_through_windows_with_the_same_pin(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / 'fixture.zip'
+            with patch.object(install.urllib.request, 'urlopen', side_effect=self.untrusted_certificate()), \
+                    patch.object(install.subprocess, 'run', side_effect=self.windows_curl(self.payload)) as run, \
+                    contextlib.redirect_stdout(io.StringIO()) as output:
+                install.download_verified(self.url, target, self.digest)
+            self.assertEqual(target.read_bytes(), self.payload)
+            self.assertIn('unable to get local issuer certificate', output.getvalue())
+            command = run.call_args.args[0]
+            self.assertEqual(Path(command[0]).name.lower(), 'curl.exe')
+            self.assertEqual(Path(command[0]).parent.name.lower(), 'system32')
+            self.assertEqual(command[-1], self.url)
+            # Windows still verifies the certificate.
+            self.assertFalse({'-k', '--insecure', '--ssl-no-revoke'} & set(command))
+            # Other bytes from the Windows path are refused like any download.
+            target.unlink()
+            with patch.object(install.urllib.request, 'urlopen', side_effect=self.untrusted_certificate()), \
+                    patch.object(install.subprocess, 'run', side_effect=self.windows_curl(b'other bytes')), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaisesRegex(SystemExit, 'Checksum mismatch'):
+                    install.download_verified(self.url, target, self.digest)
+            self.assertFalse(target.exists())
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows certificate fallback')
+    def test_failed_windows_retry_reports_both_reasons(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / 'fixture.zip'
+            failure = self.windows_curl(code=60, stderr='curl: (60) schannel: SEC_E_UNTRUSTED_ROOT\n'
+                                        'More details here: https://curl.se/docs/sslcerts.html\n')
+            with patch.object(install.urllib.request, 'urlopen', side_effect=self.untrusted_certificate()), \
+                    patch.object(install.subprocess, 'run', side_effect=failure), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaises(OSError) as caught:
+                    install.download_verified(self.url, target, self.digest)
+            message = str(caught.exception)
+            self.assertIn('unable to get local issuer certificate', message)
+            self.assertIn('SEC_E_UNTRUSTED_ROOT', message)
+            self.assertNotIn('\n', message)
+            self.assertFalse(target.exists())
+
+    def test_other_network_errors_do_not_retry(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / 'fixture.zip'
+            with patch.object(install.urllib.request, 'urlopen', side_effect=install.urllib.error.URLError('offline')), \
+                    patch.object(install.subprocess, 'run') as run, \
+                    contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaisesRegex(install.urllib.error.URLError, 'offline'):
+                    install.download_verified(self.url, target, self.digest)
+            run.assert_not_called()
 
     def test_valid_download_replaces_invalid_cache(self):
         with tempfile.TemporaryDirectory() as temporary:

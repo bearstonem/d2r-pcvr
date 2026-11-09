@@ -82,8 +82,11 @@ uniform float Timer < source = "timer"; >;
 // cap_* (bare names are looked for in reshade-shaders\Textures); a slot with no
 // picture keeps the act 1 files here and is never sampled. Pictures of another
 // size are scaled to the declared one.
-// The band goes round the viewer, wrapped twice round the circle: its bottom
-// edge 8 degrees under the horizon, its top 65 degrees up. Above 40 degrees it
+// The band goes once round the viewer, 3072 x 1024 (3:1), so a painted landmark
+// is seen once: its bottom edge 8 degrees under the horizon, its top 65 degrees
+// up, its left and right edges meeting. Our generated skies are 1536 px pictures
+// laid twice side by side (tools/gen_sky.py), so they look exactly as they did
+// when the band was wrapped twice round the circle. Above 40 degrees it
 // hands over to the cap, a square picture of the clouds seen straight up, laid
 // flat over the viewer (a band's top rows would only pinch into a point there).
 #ifndef D2R_SKY_ACT1
@@ -161,52 +164,52 @@ uniform float Timer < source = "timer"; >;
 #ifndef D2R_SKYCAPN_SNOW
  #define D2R_SKYCAPN_SNOW "D2R_Sky_ours/D2R_SkyCap_act1.png"
 #endif
-texture2D SkyNBand1Tex < source = D2R_SKYN_ACT1; > { Width = 1536; Height = 1024; Format = RGBA8; };
+texture2D SkyNBand1Tex < source = D2R_SKYN_ACT1; > { Width = 3072; Height = 1024; Format = RGBA8; };
 sampler2D SkyNBand1Smp { Texture = SkyNBand1Tex; AddressU = WRAP; AddressV = CLAMP; };
 texture2D SkyNCap1Tex < source = D2R_SKYCAPN_ACT1; > { Width = 1024; Height = 1024; Format = RGBA8; };
 sampler2D SkyNCap1Smp { Texture = SkyNCap1Tex; AddressU = WRAP; AddressV = WRAP; };
-texture2D SkyNBand2Tex < source = D2R_SKYN_ACT2; > { Width = 1536; Height = 1024; Format = RGBA8; };
+texture2D SkyNBand2Tex < source = D2R_SKYN_ACT2; > { Width = 3072; Height = 1024; Format = RGBA8; };
 sampler2D SkyNBand2Smp { Texture = SkyNBand2Tex; AddressU = WRAP; AddressV = CLAMP; };
 texture2D SkyNCap2Tex < source = D2R_SKYCAPN_ACT2; > { Width = 1024; Height = 1024; Format = RGBA8; };
 sampler2D SkyNCap2Smp { Texture = SkyNCap2Tex; AddressU = WRAP; AddressV = WRAP; };
-texture2D SkyNBand3Tex < source = D2R_SKYN_ACT3; > { Width = 1536; Height = 1024; Format = RGBA8; };
+texture2D SkyNBand3Tex < source = D2R_SKYN_ACT3; > { Width = 3072; Height = 1024; Format = RGBA8; };
 sampler2D SkyNBand3Smp { Texture = SkyNBand3Tex; AddressU = WRAP; AddressV = CLAMP; };
 texture2D SkyNCap3Tex < source = D2R_SKYCAPN_ACT3; > { Width = 1024; Height = 1024; Format = RGBA8; };
 sampler2D SkyNCap3Smp { Texture = SkyNCap3Tex; AddressU = WRAP; AddressV = WRAP; };
-texture2D SkyNBand4Tex < source = D2R_SKYN_ACT4; > { Width = 1536; Height = 1024; Format = RGBA8; };
+texture2D SkyNBand4Tex < source = D2R_SKYN_ACT4; > { Width = 3072; Height = 1024; Format = RGBA8; };
 sampler2D SkyNBand4Smp { Texture = SkyNBand4Tex; AddressU = WRAP; AddressV = CLAMP; };
 texture2D SkyNCap4Tex < source = D2R_SKYCAPN_ACT4; > { Width = 1024; Height = 1024; Format = RGBA8; };
 sampler2D SkyNCap4Smp { Texture = SkyNCap4Tex; AddressU = WRAP; AddressV = WRAP; };
-texture2D SkyNBand5Tex < source = D2R_SKYN_ACT5; > { Width = 1536; Height = 1024; Format = RGBA8; };
+texture2D SkyNBand5Tex < source = D2R_SKYN_ACT5; > { Width = 3072; Height = 1024; Format = RGBA8; };
 sampler2D SkyNBand5Smp { Texture = SkyNBand5Tex; AddressU = WRAP; AddressV = CLAMP; };
 texture2D SkyNCap5Tex < source = D2R_SKYCAPN_ACT5; > { Width = 1024; Height = 1024; Format = RGBA8; };
 sampler2D SkyNCap5Smp { Texture = SkyNCap5Tex; AddressU = WRAP; AddressV = WRAP; };
-texture2D SkyNBand6Tex < source = D2R_SKYN_SNOW; > { Width = 1536; Height = 1024; Format = RGBA8; };
+texture2D SkyNBand6Tex < source = D2R_SKYN_SNOW; > { Width = 3072; Height = 1024; Format = RGBA8; };
 sampler2D SkyNBand6Smp { Texture = SkyNBand6Tex; AddressU = WRAP; AddressV = CLAMP; };
 texture2D SkyNCap6Tex < source = D2R_SKYCAPN_SNOW; > { Width = 1024; Height = 1024; Format = RGBA8; };
 sampler2D SkyNCap6Smp { Texture = SkyNCap6Tex; AddressU = WRAP; AddressV = WRAP; };
 
-texture2D SkyBand1Tex < source = D2R_SKY_ACT1; > { Width = 1536; Height = 1024; Format = RGBA8; };
+texture2D SkyBand1Tex < source = D2R_SKY_ACT1; > { Width = 3072; Height = 1024; Format = RGBA8; };
 sampler2D SkyBand1Smp { Texture = SkyBand1Tex; AddressU = WRAP; AddressV = CLAMP; };
 texture2D SkyCap1Tex < source = D2R_SKYCAP_ACT1; > { Width = 1024; Height = 1024; Format = RGBA8; };
 sampler2D SkyCap1Smp { Texture = SkyCap1Tex; AddressU = WRAP; AddressV = WRAP; };
-texture2D SkyBand2Tex < source = D2R_SKY_ACT2; > { Width = 1536; Height = 1024; Format = RGBA8; };
+texture2D SkyBand2Tex < source = D2R_SKY_ACT2; > { Width = 3072; Height = 1024; Format = RGBA8; };
 sampler2D SkyBand2Smp { Texture = SkyBand2Tex; AddressU = WRAP; AddressV = CLAMP; };
 texture2D SkyCap2Tex < source = D2R_SKYCAP_ACT2; > { Width = 1024; Height = 1024; Format = RGBA8; };
 sampler2D SkyCap2Smp { Texture = SkyCap2Tex; AddressU = WRAP; AddressV = WRAP; };
-texture2D SkyBand3Tex < source = D2R_SKY_ACT3; > { Width = 1536; Height = 1024; Format = RGBA8; };
+texture2D SkyBand3Tex < source = D2R_SKY_ACT3; > { Width = 3072; Height = 1024; Format = RGBA8; };
 sampler2D SkyBand3Smp { Texture = SkyBand3Tex; AddressU = WRAP; AddressV = CLAMP; };
 texture2D SkyCap3Tex < source = D2R_SKYCAP_ACT3; > { Width = 1024; Height = 1024; Format = RGBA8; };
 sampler2D SkyCap3Smp { Texture = SkyCap3Tex; AddressU = WRAP; AddressV = WRAP; };
-texture2D SkyBand4Tex < source = D2R_SKY_ACT4; > { Width = 1536; Height = 1024; Format = RGBA8; };
+texture2D SkyBand4Tex < source = D2R_SKY_ACT4; > { Width = 3072; Height = 1024; Format = RGBA8; };
 sampler2D SkyBand4Smp { Texture = SkyBand4Tex; AddressU = WRAP; AddressV = CLAMP; };
 texture2D SkyCap4Tex < source = D2R_SKYCAP_ACT4; > { Width = 1024; Height = 1024; Format = RGBA8; };
 sampler2D SkyCap4Smp { Texture = SkyCap4Tex; AddressU = WRAP; AddressV = WRAP; };
-texture2D SkyBand5Tex < source = D2R_SKY_ACT5; > { Width = 1536; Height = 1024; Format = RGBA8; };
+texture2D SkyBand5Tex < source = D2R_SKY_ACT5; > { Width = 3072; Height = 1024; Format = RGBA8; };
 sampler2D SkyBand5Smp { Texture = SkyBand5Tex; AddressU = WRAP; AddressV = CLAMP; };
 texture2D SkyCap5Tex < source = D2R_SKYCAP_ACT5; > { Width = 1024; Height = 1024; Format = RGBA8; };
 sampler2D SkyCap5Smp { Texture = SkyCap5Tex; AddressU = WRAP; AddressV = WRAP; };
-texture2D SkyBand6Tex < source = D2R_SKY_SNOW; > { Width = 1536; Height = 1024; Format = RGBA8; };
+texture2D SkyBand6Tex < source = D2R_SKY_SNOW; > { Width = 3072; Height = 1024; Format = RGBA8; };
 sampler2D SkyBand6Smp { Texture = SkyBand6Tex; AddressU = WRAP; AddressV = CLAMP; };
 texture2D SkyCap6Tex < source = D2R_SKYCAP_SNOW; > { Width = 1024; Height = 1024; Format = RGBA8; };
 sampler2D SkyCap6Smp { Texture = SkyCap6Tex; AddressU = WRAP; AddressV = WRAP; };
@@ -256,8 +259,10 @@ float3 CapAt(int slot, float4 t, bool night)
 float3 PaintedSky(float3 dir)
 {
     const float el = degrees(asin(clamp(dir.y, -1.0, 1.0)));
-    // two turns round the circle, drifting slowly so the clouds move
-    const float u = atan2(dir.x, dir.z) / 3.14159265 + Timer * 0.000001 * SkyDrift;
+    // once round the circle, drifting slowly so the clouds move; the half (exact in
+    // floats) keeps the drift's old speed and puts a twice-laid picture's texels
+    // where the 1536 px band wrapped twice had them
+    const float u = (atan2(dir.x, dir.z) / 3.14159265 + Timer * 0.000001 * SkyDrift) * 0.5;
     const float v = (65.0 - el) / 73.0;
     const float w = smoothstep(40.0, 62.0, el);
     const int slot = (int)(SkyTex + 0.5);
