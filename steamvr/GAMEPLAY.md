@@ -321,6 +321,16 @@ the original angle and is the default for existing profiles. The panel pivots
 around its center on both Wrist and Palm placements (including Either).
 Navigation keeps its own placement, and low-resource popups continue to face you.
 
+**VR Settings > Interface > Wrist > Skill cooldowns** (On by default; Vin's idea from
+the Discord ideas channel, 2026-11-05) puts up to three dimmed skill icons between the
+orbs while those skills recharge, each one's color sweeping back until it is ready.
+Glyph and motion casts of a recharging skill are refused (the refusal buzz and a grey
+trail), and a light tick on that hand says when it is ready. The game thread reads the
+server's own timers every 200 ms (`steamvr/skill_cooldowns.h`): each skill's own delay
+(Skills.txt `localdelay`, stat 359 per skill in state 185's stat list) and the shared
+delay (`globaldelay`, state 121, the Werewolf and Werebear shapeshifts), with the game's
+use check deciding which skills are blocked. Log lines start `Frame skill cooldowns:`.
+
 **Low health / mana alerts** is a separate toggle, **Off** by default. Leave it
 off for gesture-only vitals. Opting in adds a brief popup near your view and
 left-hand vibration below 25% health or 10% mana in spell mode. Location **Off**
@@ -568,7 +578,7 @@ sets the page's rows back to their defaults, with **Undo reset** for 6 seconds.
 | Comfort > Body | Seated play, **Height and arm span** (**Calibrate body**, **Set eye height**), and the belt's height and reach |
 | Controls > Hands | Dominant hand, **Stick toggle** and button names |
 | Controls > Vibration | Overall vibration and separate melee, short melee taps, bow draw, bow/throw release, spell, loot/potion/menu and alert strengths; **Feel it** on a row's card |
-| Interface > Wrist | Life and mana location and tilt, map and compass location, map view (Isometric, Top-down, Full map or Full top-down), turning the map with you, buffs and companions |
+| Interface > Wrist | Life and mana location and tilt, skill cooldowns between the orbs, map and compass location, map view (Isometric, Top-down, Full map or Full top-down), turning the map with you, buffs and companions |
 | Interface > Menus | Menu distance with **Hold menu** beside it (Leather by default: the tabbed menu on a hide in your left hand; Menu only: no hide; Off) and item details delay |
 | Interface > Labels | Loot name size with **Loot pick** beside it, weak monster bars, and loot beams with their rarity filter |
 | Interface > Outlines | The aimed monster's outline: its strength, which hands show it, and each hand's outline color (By range or one color, shown as a swatch) |
