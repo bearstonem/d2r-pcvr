@@ -13,6 +13,21 @@ struct Sim {
     bool Move(Vec d){sample.hand.p=sample.hand.p+d;sample.blade.base=sample.blade.base+d;sample.blade.tip=sample.blade.tip+d;return Step();}
 };
 int main(){
+    {   // Melee reach (VR Settings > Combat, 2026-11-08): a blade sweeping past 10 cm beside a body
+        // (0.44 m off its axis: 0.30 body + 0.04 blade + 0.10 gap) touches only with enough reach.
+        const Body body{{0,.3f,0},{0,1.5f,0},.3f};
+        const auto pass=[](float x){return std::pair{Blade{{x,1.f,-.5f},{x,1.6f,-.5f}},Blade{{x,1.f,.5f},{x,1.6f,.5f}}};};
+        const auto [before,after]=pass(.44f);
+        Check(!Touches(before,after,body)&&!Touches(before,after,Reach(body,0,false)),"no reach: a near miss misses");
+        Check(!Touches(before,after,Reach(body,.05f,false)),"5 cm of reach is short of a 10 cm miss");
+        Check(Touches(before,after,Reach(body,.15f,false)),"15 cm of reach takes a 10 cm miss");
+        Check(!Touches(before,after,Reach(body,.15f,true)),"the shield keeps the body as measured");
+        Check(Reach(body,-1,false).radius==body.radius&&Reach(body,std::numeric_limits<float>::quiet_NaN(),false).radius==body.radius,
+              "a negative or invalid reach pads nothing");
+        Check(Reach(body,2,false).radius==body.radius+.5f,"reach stops at half a metre");
+        const auto [farBefore,farAfter]=pass(.9f);const auto [nearBefore,nearAfter]=pass(.84f);
+        Check(!Touches(farBefore,farAfter,Reach(body,2,false))&&Touches(nearBefore,nearAfter,Reach(body,2,false)),"the clamp holds in a sweep");
+    }
     {
         Sim right,left;left.sample.handIndex=1;left.Step(8);
         Check(Lane(right.sample)==0&&Lane(left.sample)==2,"weapons use separate pose engines");
