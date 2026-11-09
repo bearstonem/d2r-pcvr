@@ -42,8 +42,10 @@ inline int BodyKnob(int choice){return choice>=BodyKnobChoice&&choice<BodyResetC
 // Loot beam test (owner, 2026-10-31): one item for each beam rule, to drop on
 // the floor (LootBeamKit below).
 inline constexpr int LootBeamsChoice=BodyResetChoice+1;
+// Tal Rasha's Tomb (owner, 2026-11-08, to test #466's joined dungeon rooms there): its first tomb, level 66.
+inline constexpr int TalRashaTombChoice=LootBeamsChoice+1;
 inline constexpr int PageSize=14;
-inline constexpr std::array<Choice,LootBeamsChoice+1> Choices{{
+inline constexpr std::array<Choice,TalRashaTombChoice+1> Choices{{
     {"Level 90", "All class skills rank 20 / test attributes", nullptr},
     {"Primary gear", "Class-specific unique equipment", nullptr},
     {"Alternate gear", "Equipment for the other class abilities", nullptr},
@@ -111,6 +113,8 @@ inline constexpr std::array<Choice,LootBeamsChoice+1> Choices{{
     {"Ease back", "When the physics lets a body go, how long it eases back", nullptr},
     {"Bodies: defaults", "Every value above back to its default", nullptr},
     {"Loot beam test", "Unique, set, rare, magic, white, 5 runes / drop them", nullptr},
+    // Its stairs and ledges are where dungeon rooms stood a step apart over void (room stitch).
+    {"Tal Rasha's Tomb", "Act II / stairs, ledges, joined rooms", "goto 66"},
 }};
 static_assert(limbs::Knobs==10,"one BODIES choice per knob");
 // Stable action IDs are independent of their presentation order.
@@ -127,7 +131,7 @@ inline constexpr const char* PageHelp[]={
 inline constexpr std::array<std::array<int,PageSize>,PageCount> Pages{{
     {{Level10Choice,Level30Choice,Level60Choice,0,HealChoice,UnlockQuestsChoice,ThrowingPotionsChoice,TurnsRimsChoice,SkyRimsChoice,LootBeamsChoice,-1,-1,-1,-1}},
     {{StarterPrimaryChoice,StarterAlternateChoice,1,2,CrossbowChoice,BowChoice,SmallShieldChoice,DebugDrawsChoice,TurnsKeepOwnChoice,ThrowingChoice,PotionsChoice,TurnsSharpChoice,TurnsFillChoice,TorchChoice}},
-    {{4,11,14,15,16,5,3,8,9,-1,-1,-1,-1,-1}},
+    {{4,11,14,15,16,5,3,TalRashaTombChoice,8,9,-1,-1,-1,-1}},
     {{17,UpperKurastChoice,KurastSewersChoice,18,19,26,27,-1,-1,-1,-1,-1,-1,-1}},
     {{6,7,20,21,22,23,24,25,-1,-1,-1,-1,-1,-1}},
     {{BodyKnobChoice,BodyKnobChoice+1,BodyKnobChoice+2,BodyKnobChoice+3,BodyKnobChoice+4,BodyKnobChoice+5,BodyKnobChoice+6,

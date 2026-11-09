@@ -264,7 +264,7 @@ owner's, tuned in the headset.
 
 | Page | Destinations |
 | --- | --- |
-| Act I - II | Rogue Encampment, Blood Moor, Tristram, Cathedral, Andariel's chamber, Lut Gholein, Arcane Sanctuary, Tyrael, Duriel |
+| Act I - II | Rogue Encampment, Blood Moor, Tristram, Cathedral, Andariel's chamber, Lut Gholein, Arcane Sanctuary, Tal Rasha's Tomb (level 66), Tyrael, Duriel |
 | Act III | Kurast Bazaar, Upper Kurast, Kurast Sewers, Travincal, Mephisto's chamber, Spider Forest, Flayer Jungle |
 | Act IV - V | River of Flame, Chaos Sanctuary, Harrogath, Bloody Foothills, Crystalline Passage, Arreat Summit, Throne of Destruction, Worldstone Chamber |
 
