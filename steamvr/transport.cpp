@@ -91,6 +91,7 @@
 #include "menu_drop.h"
 #include "respec_button.h"
 #include "stash_buttons.h"
+#include "vr_keyboard.h"
 #include "native_panels.h"
 #include "npc_dialogue.h"
 #include "native_hud.h"
@@ -971,6 +972,15 @@ bool respecArtReady=false,respecShown=false,respecLit=false;
 statsbutton::Press respecPress;
 respecbutton::Button respecButton;
 respecbutton::Face respecFace=respecbutton::Face::Reset;
+// The VR keyboard for character creation's name box (vr_keyboard.h), its own board hinged under
+// the menu: its keys painted into the static image, small and with capitals; shown, the key under
+// the laser, and the laser's dot on it, this frame (MenuPointer); a pull on a key types it
+// (SendKeyboard). Close hides it until the box comes up anew (KeyboardEpoch).
+bool keyboardArtReady=false,keyboardShown=false,keyboardClosed=false,keyboardPointer=false;
+int keyboardLit=-1;
+uint32_t keyboardClosedEpoch=0;
+statsbutton::Press keyboardPress;
+keyboard::Typist keyboardTypist;
 leather::Holder leatherHolder;
 leather::Back leatherBack;   // Right B the game leaves unanswered closes the leather's menu
 leather::Art leatherArt=leather::PlaceholderArt();
@@ -1885,9 +1895,31 @@ bool SetupStatic(DXGI_FORMAT eyeFormat) {
         respecbutton::Stamp(px,label,stashbuttons::Width,stashbuttons::Height,lit);
         stashPainted=put(px,Stash(i))&&stashPainted;
     }
+    // The VR keyboard: every key on its stone with its label, plain and lit, small letters and
+    // capitals (vr_keyboard.h).
+    const bool keyboardPainted=[&]{
+        bool ok=true;
+        for(int picture=0;picture<4&&ok;++picture) {
+            const bool lit=picture&1,capitals=picture>=2;
+            auto board=keyboard::PaintKeys(lit,capitals);
+            for(int i=0;i<keyboard::KeyCount&&ok;++i) {
+                const auto r=keyboard::KeyTexelRect(i);
+                std::vector<uint8_t> face(size_t(r.w)*r.h*4);
+                for(int y=0;y<r.h;++y)std::memcpy(&face[size_t(y)*r.w*4],&board[(size_t(r.y+y)*keyboard::TexelWidth+r.x)*4],size_t(r.w)*4);
+                const auto text=RespecLabel(keyboard::Label(i,capitals).c_str(),r.w,r.h);
+                if(text.empty()){ok=false;break;}
+                respecbutton::Stamp(face,text,r.w,r.h,lit||(capitals&&keyboard::Keys[i].action==keyboard::Action::Shift));
+                for(int y=0;y<r.h;++y)std::memcpy(&board[(size_t(r.y+y)*keyboard::TexelWidth+r.x)*4],&face[size_t(y)*r.w*4],size_t(r.w)*4);
+            }
+            ok=ok&&put(board,capitals?(lit?KeyboardCapsLit:KeyboardCaps):(lit?KeyboardLit:Keyboard));
+        }
+        return ok;
+    }();
     if(!UploadAtlas(staticChain,eyeFormat,StaticWidth,StaticHeight,pixels))return false;
     stashArtReady=stashPainted;
     statsIconReady=statsPainted;
+    keyboardArtReady=keyboardPainted;
+    if(!keyboardPainted)Say("Frame panels: the VR keyboard could not be painted; it stays hidden");
     respecArtReady=respecPainted;
     if(!respecPainted)Say("Frame panels: Reset Skills & Stats could not be painted; the button stays hidden");
     if(!statsPainted)Say("Frame panels: the Advanced Stats button could not be painted; the menu button alone opens it");
@@ -2062,10 +2094,37 @@ XrPosef UiSurfacePose() {
     }
     return pose;
 }
+// A VR keyboard key to the game as a real keyboard's would arrive: the key the game window's
+// own Windows layout puts the character on (a German Z is not on the US Z's scan code), its
+// scan code (the game reads keys by scan code, SendShift), Shift round it when the layout wants
+// it, all tagged KeyboardKeyTag - typing, so TypedKeys lets the game's keyboard layout in and
+// the name box takes the letter.
+bool SendKeyboard(const keyboard::Output& out) {
+    const HKL layout=GetKeyboardLayout(gameWindow?GetWindowThreadProcessId(gameWindow,nullptr):0);
+    WORD vk=0;bool shift=false;
+    if(out.send==keyboard::Send::Char) {
+        const SHORT k=VkKeyScanExW(out.ch,layout);
+        if(k==-1||(HIBYTE(k)&6))return false;   // not on this layout, or only with Ctrl / Alt
+        vk=LOBYTE(k);shift=(HIBYTE(k)&1)!=0;
+    } else if(out.send==keyboard::Send::Backspace)vk=VK_BACK;
+    else if(out.send==keyboard::Send::Enter)vk=VK_RETURN;
+    else return false;
+    const WORD scan=WORD(MapVirtualKeyExW(vk,MAPVK_VK_TO_VSC,layout)),shiftScan=WORD(MapVirtualKeyExW(VK_LSHIFT,MAPVK_VK_TO_VSC,layout));
+    if(!scan||(shift&&!shiftScan))return false;
+    INPUT in[4]{};UINT n=0;
+    const auto key=[&](WORD code,bool up) {
+        INPUT& i=in[n++];i.type=INPUT_KEYBOARD;i.ki.wScan=code;
+        i.ki.dwFlags=KEYEVENTF_SCANCODE|(up?KEYEVENTF_KEYUP:0);i.ki.dwExtraInfo=panels::KeyboardKeyTag;
+    };
+    if(shift)key(shiftScan,false);
+    key(scan,false);key(scan,true);
+    if(shift)key(shiftScan,true);
+    return SendInput(n,in,sizeof(INPUT))==n;
+}
 void MenuPointer(const menus::Pad& controls) {
     nativeMenuPad={};
-    pointerVisible=pointerHit=false;
-    if(settingsModel.open||bodyCalibration.Active()||calibrationRelease.blocked){panelinput::ItemHover(false);menuDrop.Reset();stashInput.Reset();stashShown=false;stashPad=0;respecShown=false;respecButton.Hide();return;}
+    pointerVisible=pointerHit=keyboardPointer=false;
+    if(settingsModel.open||bodyCalibration.Active()||calibrationRelease.blocked){panelinput::ItemHover(false);menuDrop.Reset();stashInput.Reset();stashShown=false;stashPad=0;respecShown=false;respecButton.Hide();keyboardShown=false;keyboardLit=-1;return;}
     const bool spatialReady=spatialMode&&SurfacePlaced()&&uiCrop[2]>0;
     const bool uiActive=(panelMode&&menuPlaced)||spatialReady;
     const auto surfacePose=spatialMode?UiSurfacePose():menuPose;
@@ -2088,6 +2147,36 @@ void MenuPointer(const menus::Pad& controls) {
         if(pointerHit) {
             const auto point=hit.point+math::Rotate(Q(surfacePose.orientation),{0,0,.006f});
             dotPose=surfacePose;dotPose.position={point.x,point.y,point.z};
+        }
+    }
+    // The VR keyboard for character creation's name box (vr_keyboard.h): its own board hinged under
+    // the menu, out of the game's picture. The laser hits the board itself; on it (keys or the gaps
+    // between them) the laser is the keyboard's - no game cursor, no button under it, no game
+    // trigger - and a pull on a key types it into the box. Close hides it until the box comes up
+    // anew (another hero picked, or creation opened again).
+    const uint32_t keyboardEpoch=gamestate::KeyboardEpoch();
+    if(keyboardClosed&&keyboardEpoch!=keyboardClosedEpoch)keyboardClosed=false;
+    const bool keyboardWas=keyboardShown;
+    keyboardShown=keyboardArtReady&&uiActive&&!journalMode&&!leatherMode&&gamestate::KeyboardShown()&&!keyboardClosed;
+    if(keyboardShown!=keyboardWas) {
+        keyboardTypist.Reset();keyboardPress.Reset();
+        Say(keyboardShown?"Frame panels: VR keyboard shown (the name box is up)":"Frame panels: VR keyboard hidden");
+    }
+    bool onKeyboard=false;keyboardLit=-1;
+    if(keyboardShown&&aimTracked&&!(mouseDown||rightMouseDown)) {
+        const auto board=keyboard::Place(V(surfacePose.position),Q(surfacePose.orientation),surface.width,surface.height);
+        const auto ray=V(aim.pose.position),direction=math::Rotate(Q(aim.pose.orientation),{0,0,-1});
+        math::PanelHit on{};
+        if(math::IntersectPanel(ray,direction,board.position,board.orientation,board.width,board.height,on)&&(!pointerHit||on.distance<hit.distance)) {
+            onKeyboard=keyboardPointer=true;pointerHit=false;   // the menu's laser hit is not this one
+            keyboardLit=keyboard::KeyAt(on.u,on.v);
+            beamLength=on.distance;
+            const auto mid=ray+direction*(beamLength*.5f);
+            const auto rot=math::BeamOrientation(direction,V(head.position)-mid);
+            beamPose.position={mid.x,mid.y,mid.z};beamPose.orientation={rot.x,rot.y,rot.z,rot.w};
+            const auto point=on.point+math::Rotate(board.orientation,{0,0,.006f});
+            dotPose.position={point.x,point.y,point.z};
+            dotPose.orientation={board.orientation.x,board.orientation.y,board.orientation.z,board.orientation.w};
         }
     }
     // The Advanced Stats button below the tabbed menu's hint row (stats_button.h): the laser
@@ -2131,7 +2220,22 @@ void MenuPointer(const menus::Pad& controls) {
         for(int i=0;i<2;++i)
             if(respecbutton::Hit(stashbuttons::Place(surface.width,surface.height,i),surface.width,surface.height,hit.u,hit.v))stashHover=i;
     stashPad=stashInput.Step(stashShown&&uiActive&&focused,stashHover,pressed,respecNow);
-    const bool onButton=onStats||onRespec||stashHover>=0;   // a stamped button: no game cursor, no game trigger
+    // A pull on a VR keyboard key (the board under the menu, above).
+    if(keyboardPress.Step(onKeyboard&&uiActive,pressed,GetTickCount64())&&keyboardLit>=0) {
+        const auto typed=keyboardTypist.Press(keyboardLit);
+        if(typed.close) {
+            keyboardClosed=true;keyboardClosedEpoch=keyboardEpoch;
+            Say("Frame panels: VR keyboard closed until the name box comes up anew");
+        } else if(typed.send!=keyboard::Send::None) {
+            if(!focused)Say("Frame panels: VR keyboard key not sent - the game window is not focused");
+            else if(!SendKeyboard(typed))Say("Frame panels: VR keyboard key could not be sent (not on this keyboard layout, or SendInput refused)");
+            else {
+                static bool told=false;
+                if(!told){told=true;Say("Frame panels: VR keyboard typing into the game");}
+            }
+        }
+    }
+    const bool onButton=onStats||onRespec||stashHover>=0||onKeyboard;   // a stamped button: no game cursor, no game trigger
     // An item on the game's cursor and a trigger pull begun off the menu's art (past or on the
     // hide, or the band's see-through margins): the pad's X, the controller menu's own Drop for
     // the item held (menu_drop.h). The tabbed menu (and its cube) only; never without an item on
@@ -2162,7 +2266,7 @@ void MenuPointer(const menus::Pad& controls) {
     // navigation" / "laser navigation" every second while walking and turning), hiding it.
     menus::Pad navigation=controls;
     if(leatherMode&&leatherShown.load())navigation.lx=navigation.ly=navigation.rx=navigation.ry=0;
-    if(onButton||statsPress.Held()||respecPress.Held()||stashInput.Held()||dropOwns)navigation.rt=0;   // a button's or the drop's trigger is never the game's RT
+    if(onButton||statsPress.Held()||respecPress.Held()||stashInput.Held()||keyboardPress.Held()||dropOwns)navigation.rt=0;   // a button's or the drop's trigger is never the game's RT
     nativeMenuPad=menuNavigation.Step(uiActive&&focused,navigation,pointerHit&&!onButton,hit.u,hit.v,mouseDown||rightMouseDown);
     nativeMenuPad.buttons|=stashPad;
     if(statsPress.Held())nativeMenuPad.buttons|=menus::Back;   // View: Advanced Stats (Start closes the menu)
@@ -2170,7 +2274,7 @@ void MenuPointer(const menus::Pad& controls) {
     if(wasNative!=menuNavigation.Native()&&uiActive&&focused)
         Say(menuNavigation.Native()?"Frame panels: native controller navigation":"Frame panels: laser navigation");
     const bool laser=!menuNavigation.Native();
-    if(!laser){panelinput::UseController();pointerVisible=pointerHit=false;}
+    if(!laser){panelinput::UseController();pointerVisible=pointerHit=keyboardPointer=false;}
     // The handheld journal has its own left-grip placement; the leather is strapped to the left hand.
     const bool grip=aimTracked&&laser&&!journalMode&&!leatherMode&&(controls.buttons&menus::RightBumper);
     const bool grabbing=GrabPanel(spatialMode?uiPose:menuPose,spatialMode?uiBase:menuBase,menuOffset,
@@ -6524,6 +6628,27 @@ void EndPair() {
             stashQuads[i].layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
         }
     }
+    // The VR keyboard on its own board under character creation's screen - the flat menu panel or
+    // the spatial surface, as MenuPointer aims at it - small letters, or capitals while Shift waits,
+    // and the key under the laser lit a hair in front of it.
+    XrCompositionLayerQuad keyboardQuad{XR_TYPE_COMPOSITION_LAYER_QUAD},keyboardLitQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    if(layer&&keyboardShown&&staticChain&&!settingsModel.open&&!bodyCalibration.Active()&&
+       (spatialMode?book.subImage.swapchain!=XR_NULL_HANDLE:menuPlaced)) {
+        const auto size=spatialMode?UiSurfaceSize():panels::Fit(width,height,panelWidth);
+        const auto at=spatialMode?UiSurfacePose():menuPose;
+        const auto board=keyboard::Place(V(at.position),Q(at.orientation),size.width,size.height);
+        const bool capitals=keyboardTypist.Shifted();
+        const XrPosef boardPose{{board.orientation.x,board.orientation.y,board.orientation.z,board.orientation.w},{board.position.x,board.position.y,board.position.z}};
+        motionQuad(keyboardQuad,boardPose,board.width,board.height,Rect(capitals?panelatlas::KeyboardCaps:panelatlas::Keyboard),staticChain);
+        keyboardQuad.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;   // premultiplied (SetupStatic)
+        if(keyboardLit>=0&&keyboardQuad.subImage.swapchain) {
+            const auto key=keyboard::KeySpot(board,keyboardLit);const auto r=keyboard::KeyTexelRect(keyboardLit);
+            const auto lit=capitals?panelatlas::KeyboardCapsLit:panelatlas::KeyboardLit;
+            motionQuad(keyboardLitQuad,XrPose({board.position+math::Rotate(board.orientation,{key.x,key.y,.002f}),board.orientation}),key.width,key.height,
+                {{lit.x+r.x,lit.y+r.y},{r.w,r.h}},staticChain);
+            keyboardLitQuad.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+        }
+    }
     XrCompositionLayerQuad settingsPanel{XR_TYPE_COMPOSITION_LAYER_QUAD};
     if(layer&&(settingsModel.open||bodyCalibration.Active())&&settingsImageReady){
         // The help card is inside the panel: its region is the panel, Width wide.
@@ -6542,7 +6667,7 @@ void EndPair() {
         // The pointer needs the same finite-pose checks and normalization as
         // every other optional layer: one bad laser must not hide the menu.
         motionQuad(laser,beamPose,.003f,beamLength,At(panelatlas::Pointer,{{0,0},{64,32}}),pointerChain);
-        if(pointerHit)motionQuad(dot,dotPose,.018f,.018f,At(panelatlas::Pointer,{{0,32},{64,64}}),pointerChain);
+        if(pointerHit||keyboardPointer)motionQuad(dot,dotPose,.018f,.018f,At(panelatlas::Pointer,{{0,32},{64,64}}),pointerChain);
     }
     // Head-locked blood: VIEW space, with a bounded angular size so large render
     // frusta cannot push the rim out of sight. It goes directly above
