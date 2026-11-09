@@ -403,7 +403,6 @@ std::vector<uint32_t> g_shieldTypes;
 std::vector<uint32_t> g_potionTypes;            // ItemTypes tpot: the throwing potions (RightThrowingPotion)
 std::atomic<bool> g_rightPotion{false};
 std::atomic<uint32_t> g_rightPotionCode{0};   // its item code, for the bottle that flies (#292)
-std::atomic<uint32_t> g_helmCode{0};          // the helm's item code (body location 1; 0: none): head_shadow.h, a pelt hides the head
 std::atomic<uint32_t> g_handsKey{0};          // what is in the two hands, as one number (HandsKey)             // the hand slot the weapon kind came from: 0 right, 1 left              // D2RVR_TWO_HANDED* bits of what is held
 
 constexpr uint32_t Four(const char* s) { return DataTables::MakeFourCC(s[0], s[1], s[2], s[3]); }
@@ -722,20 +721,11 @@ void __cdecl ReadItems(const PluginContext* ctx, void* token) noexcept {
         {std::lock_guard lock(g_meleeEquipmentMutex);g_meleeEquipment={};}
         g_two.store(0);
         g_set.store(0);
-        g_helmCode.store(0);
 #ifdef D2RVR_NATIVE_OPENXR
         interactionstate::Capture();
 #endif
         Publish();
         return;
-    }
-    {   // the helm (body location 1): a Druid pelt reaches past the eye's cut, so it hides the head (head_shadow.h)
-        ItemHandle item = InvalidItemHandle;
-        Items::ItemInfo info{};
-        info.structSize = sizeof info;
-        const bool worn = g_inventory->getEquippedItem(ctx, player, 1, &item) == Inventory::Result::Success && item != InvalidItemHandle &&
-                          g_items->getItemInfo(ctx, item, &info) == Items::Result::Success;
-        g_helmCode.store(worn ? info.code : 0u);
     }
     // Body locations 4/5 are the hands as the game asks for them; 11/12 the
     // other set's. Which set is active - I or II - the SDK does not say, so:
@@ -1092,7 +1082,6 @@ uint32_t RightThrowingPotionCode() {return g_rightPotionCode.load();}
 uint32_t TwoHanded() { return g_two.load(); }
 uint32_t WeaponHand() { return g_from.load(); }
 uint32_t HandsKey() { return g_handsKey.load(); }
-uint32_t HelmCode() { return g_helmCode.load(); }
 framevr::dualwield::Equipment MeleeEquipment(){std::lock_guard lock(g_meleeEquipmentMutex);return g_meleeEquipment;}
 void SetMeleeOrder(uint32_t right,uint32_t left) {
     std::lock_guard lock(g_meleeEquipmentMutex);

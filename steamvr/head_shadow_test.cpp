@@ -1,13 +1,10 @@
 // Head shadow (steamvr/head_shadow.h): the pose and eye handshake (when the head is kept, the eye's near clip, the
-// hold), the helms that hide the head, the near's ease from pass to pass, the state line, the cut by head pitch, the
-// head bones' reach.
+// hold), the near's ease from pass to pass, the state line, the cut by head pitch, the head bones' reach.
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
-#include <string>
-#include <string_view>
 #include "head_shadow.h"
 
 namespace hs = framevr::headshadow;
@@ -17,7 +14,7 @@ static bool Near(float a, float b, float tol = 1e-4f) { return std::fabs(a - b) 
 
 int main() {
     const float nan = std::numeric_limits<float>::quiet_NaN(), inf = std::numeric_limits<float>::infinity();
-    for (int w = 0; w <= int(hs::Why::Helm); ++w) Check(hs::WhyName(hs::Why(w))[0] != '?', "every reason has a name");
+    for (int w = 0; w <= int(hs::Why::NoCut); ++w) Check(hs::WhyName(hs::Why(w))[0] != '?', "every reason has a name");
     // The handshake as vr/head_shadow.cpp drives it: Pose from the skeleton thread, Eye from the render thread.
     // The rule under test: a pose that keeps the head (Kept at time t) is never followed, within CutLiveMs, by an eye
     // pass whose near is below the cut it saw last.
@@ -79,41 +76,37 @@ int main() {
         }
         Check(atCut && neverHeld && smooth && reached, "looking down: down to the down cut, 15 % a pass at most, never the held up cut");
     }
-    {   // a helm that hides the head (vr/head_shadow.cpp passes on && !helm): the pose shrinks it, nothing to hold; the
-        // eye does not cut, so what you bring to the face (a bow's nock, a potion at the mouth) is drawn
-        hs::Handshake h;
-        const auto e = h.Eye(base, false, hs::LevelCm, upm, 1000);
-        Check(!e.atCut && !e.held && Near(e.nearZ, base), "a pelt: the near as configured");
-        Check(h.Pose(false, 1005, true) == hs::Why::Helm && !h.Holding(1005), "a pelt: the pose shrinks the head for the helm and stamps nothing");
-        Check(h.Pose(true, 1006, true) == hs::Why::Form, "in a form, the form's reason first");
-    }
-    for (int eyeFirst = 0; eyeFirst < 2; ++eyeFirst) {   // the cut live, then a pelt put on: whichever thread sees it
-        // first (the other three passes later), a kept head never meets a pass short of the cut
+    for (int eyeFirst = 0; eyeFirst < 2; ++eyeFirst) {   // the cut live, then a shapeshift begun: whichever thread sees it
+        // first (the other three passes later), a kept head never meets a pass short of the cut, and the near then eases
+        // back down to [camera] near
         hs::Handshake h;
         uint64_t t = 1000;
         for (int i = 0; i < 20; ++i, t += 11) { h.Eye(base, true, hs::LevelCm, upm, t); h.Pose(false, t + 5); }
         uint64_t lastKept = t - 11 + 5;
-        bool safe = true, shrunk = false, released = false;
+        float last = cutNear;
+        bool safe = true, shrunk = false, released = false, smooth = true;
         for (int i = 0; i < 80; ++i, t += 11) {
             const bool eyeSees = eyeFirst || i >= 3, poseSees = !eyeFirst || i >= 3;
             const auto e = h.Eye(base, !eyeSees, hs::LevelCm, upm, t);
             if (t <= lastKept + hs::CutLiveMs) safe = safe && e.nearZ >= cutNear * .9999f;
-            const hs::Why w = h.Pose(false, t + 5, poseSees);
+            smooth = smooth && e.nearZ >= last / hs::NearEase::StepRatio * .9999f;
+            last = e.nearZ;
+            const hs::Why w = h.Pose(poseSees, t + 5);
             if (w == hs::Why::Kept) lastKept = t + 5;
-            shrunk = shrunk || w == hs::Why::Helm;
+            shrunk = shrunk || w == hs::Why::Form;
             released = released || Near(e.nearZ, base);
         }
-        Check(safe, eyeFirst ? "a pelt on, the eye first: the cut held while poses still kept the head"
-                             : "a pelt on, the pose first: the cut held for the last kept pose");
-        Check(shrunk && released, "then the head shrunk for the helm and the near back to [camera] near");
+        Check(safe, eyeFirst ? "a form begun, the eye first: the cut held while poses still kept the head"
+                             : "a form begun, the pose first: the cut held for the last kept pose");
+        Check(shrunk && released && smooth, "then the form's shrink, and the near down to [camera] near 15 % a pass");
     }
-    for (const float configured : {.05f, .2f}) {   // the pelt taken off (or the cut switched on): the near eases up to the
-        // cut 15 % a pass; the pose keeps the head only once it is there, so no kept head is drawn short of the cut.
+    for (const float configured : {.05f, .2f}) {   // the cut switched on (a form ended, F4): the near eases up to the cut
+        // 15 % a pass; the pose keeps the head only once it is there, so no kept head is drawn short of the cut.
         // .2: [camera] near as installed; .05: the least VrProjInner takes, ten times short of the cut
         hs::Handshake h;
         const float cut = hs::RaisedNear(configured, hs::LevelCm, upm);
         uint64_t t = 1000;
-        for (int i = 0; i < 5; ++i, t += 11) { h.Eye(configured, false, hs::LevelCm, upm, t); h.Pose(false, t + 5, true); }
+        for (int i = 0; i < 5; ++i, t += 11) { h.Eye(configured, false, hs::LevelCm, upm, t); h.Pose(true, t + 5); }
         float last = configured;
         int shortPasses = 0;
         bool kept = false, keptShort = false, smooth = true;
@@ -162,52 +155,6 @@ int main() {
         Check(!w.Pass(.05f, 1033 + hs::NearEase::GapMs + 1), "after a gap: not a jump");
         w.Take();
         Check(w.jumps == 0 && w.from == 0 && w.to == 0, "taken: counted afresh");
-    }
-    {   // the helms: item codes as the game keeps them, the default list (the Druid pelts), the class helms' names
-        Check(hs::ItemCode("dr1") == (uint32_t('d') | uint32_t('r') << 8 | uint32_t('1') << 16 | uint32_t(' ') << 24),
-              "an item code: the letters from the low byte up, padded with a space (gamestate CodeText)");
-        char letters[5];
-        Check(std::string_view(hs::CodeLetters(hs::ItemCode("dra"), letters)) == "dra" && hs::CodeLetters(0, letters)[0] == 0,
-              "a code's letters for the log");
-        const hs::HelmList d = hs::DefaultHelms();
-        Check(d.count == 15, "the default: the 15 Druid pelts");
-        for (const char* p = "123456789abcdef"; *p; ++p) Check(d.Has(hs::ItemCode('d', 'r', *p)), "every pelt dr1-drf hides the head");
-        Check(d.Has(hs::ItemCode("dra")) && d.Has(hs::ItemCode("dr1")) && d.Has(hs::ItemCode("dr6")) && d.Has(hs::ItemCode("drb")),
-              "the reported ones: Totemic Mask (the dev Druid's Jalal's Mane, #429), Wolf Head, Alpha Helm, Blood Spirit");
-        for (const char* c : {"uap", "cap", "msk", "usk", "ghm", "crn", "ci3", "bhm", "ba1", "ba3", "baa"})
-            Check(!d.Has(hs::ItemCode(c[0], c[1], c[2])), "other helms keep the head behind the cut (caps, masks, crowns, circlets, Barbarian helms)");
-        Check(!d.Has(0), "no helm: the head kept");
-        Check(std::string_view(hs::HelmName(hs::ItemCode("dra"))) == "Totemic Mask" && std::string_view(hs::HelmName(hs::ItemCode("baa"))) == "Slayer Guard" &&
-              hs::HelmName(hs::ItemCode("uap")) == nullptr, "class helms named for the log");
-    }
-    {   // ParseHelms ([arms] head_hide_helms): codes and words, any case; nothing means the pelts, none means no helm
-        int bad = -1;
-        Check(hs::ParseHelms(nullptr, &bad).count == 15 && bad == 0, "the key absent: the pelts");
-        Check(hs::ParseHelms("", &bad).count == 15 && hs::ParseHelms("  , ;", &bad).count == 15, "empty: the pelts");
-        const hs::HelmList none = hs::ParseHelms("none", &bad);
-        Check(none.count == 0 && bad == 0 && !none.Has(hs::ItemCode("dr1")), "none: no helm hides the head");
-        const hs::HelmList mix = hs::ParseHelms("Pelts, BA3;ba5 dr1", &bad);
-        Check(mix.count == 17 && bad == 0 && mix.Has(hs::ItemCode("ba3")) && mix.Has(hs::ItemCode("ba5")) && mix.Has(hs::ItemCode("drf")),
-              "pelts and two Barbarian helms, any case; a code given twice counts once");
-        Check(hs::ParseHelms("barbarian", &bad).count == 15 && hs::ParseHelms("pelts barbarian", &bad).count == 30, "barbarian: the 15 Barbarian helms");
-        const hs::HelmList odd = hs::ParseHelms("dr wolfhead d-1 dr1 averyveryverylongword", &bad);
-        Check(odd.count == 1 && odd.Has(hs::ItemCode("dr1")) && bad == 4, "words not understood are counted and left out");
-        std::string many;
-        for (int i = 0; i < 60; ++i) { char c[8]; std::snprintf(c, sizeof c, "x%02d ", i); many += c; }
-        const hs::HelmList full = hs::ParseHelms(many.c_str(), &bad);
-        Check(full.count == hs::HelmList::Max && bad == 60 - hs::HelmList::Max, "past the list's size: counted as not understood");
-    }
-    {   // StateLine with the helm: a new helm is a new state, told after a second; the same state and helm not again
-        hs::StateLine s;
-        const uint32_t cap = hs::ItemCode("uap"), pelt = hs::ItemCode("dra");
-        Check(!s.Step(hs::Why::Kept, 0, cap) && s.Step(hs::Why::Kept, 1000, cap), "kept with a Shako: told after a second");
-        Check(!s.Step(hs::Why::Kept, 2000, cap), "the same: not again");
-        s.changes = 0;
-        Check(!s.Step(hs::Why::Helm, 3000, pelt) && s.Step(hs::Why::Helm, 4000, pelt) && s.changes == 1, "a pelt put on: hidden for the helm, told after a second");
-        Check(!s.Step(hs::Why::Kept, 5000, 0) && !s.Step(hs::Why::Kept, 5500, 0) && s.Step(hs::Why::Kept, 6000, 0), "taken off: kept with no helm, told");
-        s.changes = 0;
-        Check(!s.Step(hs::Why::Kept, 7000, cap) && !s.Step(hs::Why::Kept, 7400, 0) && !s.Step(hs::Why::Kept, 9000, 0) && s.changes == 2,
-              "a helm on and off within a second: nothing told, the changes counted for the next line");
     }
     {   // [camera] near past the cut: kept, and still counts as the cut
         hs::Handshake h;

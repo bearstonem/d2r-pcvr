@@ -1463,20 +1463,6 @@ void LoadSettings() {
                     up = hs::CleanCut(IniF(L"arms", L"head_cut_up", hs::UpCm), hs::UpCm),
                     down = hs::CleanCut(IniF(L"arms", L"head_cut_down", hs::DownCm), hs::DownCm);
         headshadow::SetCuts(level, up, down);
-        {   // [arms] head_hide_helms: the helms that reach past the cut, so the head shrinks with them (absent: the Druid pelts)
-            wchar_t wide[256] = {};
-            GetPrivateProfileStringW(L"arms", L"head_hide_helms", L"", wide, (DWORD)std::size(wide), g_iniPath);
-            char text[256] = {};
-            for (size_t i = 0; i + 1 < std::size(text) && wide[i]; ++i) text[i] = wide[i] < 128 ? char(wide[i]) : '?';
-            int bad = 0;
-            const int helms = headshadow::SetHelms(text, &bad);
-            static std::string toldHelms = "\x01";
-            if (toldHelms != text) {
-                toldHelms = text;
-                LogF("Frame head shadow: [arms] head_hide_helms=%s: %d helms hide the head (shrunk, no cut, the shadow headless)%s",
-                     text[0] ? text : "(absent: the 15 Druid pelts, dr1-drf)", helms, bad ? "; some words not understood (codes are three letters)" : "");
-            }
-        }
         static float toldCuts[3] = {-1, -1, -1};
         if (const int now = int(keep) | int(hide) << 1 | int(trace) << 2;
             now != told || level != toldCuts[0] || up != toldCuts[1] || down != toldCuts[2]) {
@@ -3055,9 +3041,9 @@ bool VrProjInner(const d2rcam::WorldView& in, float M[16]) {
 #if D2RVR_FIRST_PERSON
     // First person in full body with the head kept whole for its shadow ([arms] hide_head and head_shadow, as PushArms
     // decides): nothing nearer than the cut at this head pitch is drawn, so the head is not seen from inside
-    // (steamvr/head_shadow.h). Not in a shapeshift form, nor with a helm that reaches past the cut (a Druid pelt): the
-    // head shrinks as before. Every first-person pass goes through EyeNear, kept or not: the near moves at most 15 % a
-    // pass (a reader a pass behind, the depth fog's NearPlane, stays within that).
+    // (steamvr/head_shadow.h). Not in a shapeshift form: its head shrinks as before. Every first-person pass goes
+    // through EyeNear, kept or not: the near moves at most 15 % a pass (a reader a pass behind, the depth fog's
+    // NearPlane, stays within that).
     if (!ThirdPerson() && !Overhead()) {
         const bool keep = g_set.headShadow.load() && g_set.hideHead.load() && FullBody() && !ShapeFormNow();
         const D2RVR_Shared* sh = g_shared;

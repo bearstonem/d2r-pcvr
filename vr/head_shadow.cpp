@@ -1,15 +1,15 @@
 // Head shadow, the game side: the hero keeps his head in the first-person pose (so his shadow has one) while the eye
-// views cut everything just in front of the eyes; a helm that reaches past the cut (a Druid pelt) shrinks the head as
-// before instead. The reasoning, the pure math and the threads' handshake: steamvr/head_shadow.h.
+// views cut everything just in front of the eyes. The reasoning, the pure math and the threads' handshake:
+// steamvr/head_shadow.h.
 //   HideHead: the skeleton hook's thread, each hero pose that would shrink the head (vr/skeletons.cpp PoseBody).
 //   EyeNear: the game's render thread, each first-person eye projection (vr/vrcam.cpp VrProjInner).
-// Reads no game memory and calls nothing in the game: the helm is gamestate's (read on the UI thread every 200 ms).
+// Reads no game memory and calls nothing in the game.
 // Log "Frame head shadow:":
-//   - the choice (head kept, or hidden and why), with the helm and the eye's cut at its pitch: once it has lasted a
-//     second and differs from the last one told (a new helm too);
+//   - the choice (head kept, or hidden and why), with the eye's cut at its pitch: once it has lasted a second and
+//     differs from the last one told;
 //   - the eye's near jumping past NearEase::StepRatio between passes: at most once a second, only when it did;
 //   - with [debug] head_shadow=1, every second: poses kept or hidden, eye passes at the cut, held and eased, the near
-//     before and after, the head pitch and the cut's range, the helm, how far the head bones reach.
+//     before and after, the head pitch and the cut's range, how far the head bones reach.
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -24,8 +24,6 @@
 #include "../steamvr/head_shadow.h"
 #include "logging.h"
 
-namespace gamestate { uint32_t HelmCode(); }
-
 namespace {
 namespace hs = framevr::headshadow;
 
@@ -38,23 +36,6 @@ std::atomic<float> g_level{hs::LevelCm}, g_up{hs::UpCm}, g_down{hs::DownCm};   /
 // The last eye pass, for the choice's line: its pitch (NaN: not known) and cut (cm; 0: none; -1: no pass yet).
 std::atomic<float> g_eyePitch{NAN}, g_eyeCut{-1};
 
-// [arms] head_hide_helms: written by the settings, read by both threads; short holds.
-SRWLOCK g_helmLock = SRWLOCK_INIT;
-hs::HelmList g_helms = hs::DefaultHelms();
-bool HelmHides(uint32_t helm) {
-    if (!helm) return false;
-    AcquireSRWLockShared(&g_helmLock);
-    const bool hides = g_helms.Has(helm);
-    ReleaseSRWLockShared(&g_helmLock);
-    return hides;
-}
-// "helm 'dra' (Totemic Mask)", "helm 'uap'", "no helm".
-void HelmText(uint32_t helm, char* out, size_t size) {
-    char letters[5];
-    if (!helm) { std::snprintf(out, size, "no helm"); return; }
-    if (const char* name = hs::HelmName(helm)) std::snprintf(out, size, "helm '%s' (%s)", hs::CodeLetters(helm, letters), name);
-    else std::snprintf(out, size, "helm '%s'", hs::CodeLetters(helm, letters));
-}
 void PitchText(float pitchDeg, char* out, size_t size) {
     if (std::isfinite(pitchDeg)) std::snprintf(out, size, "%+.0f deg", pitchDeg);
     else std::snprintf(out, size, "not known (level cut)");
@@ -72,8 +53,6 @@ struct Window {
     hs::Reach reach;   // the farthest seen this window
     int passes = 0, cutPasses = 0, heldPasses = 0, easedPasses = 0, jumps = 0;
     float nearFrom = 0, nearTo = 0, unitsPerMetre = 0, pitchDeg = 0, cutMin = 0, cutMax = 0;
-    uint32_t helm = 0;
-    bool helmHides = false;
 };
 Window g_window;
 uint64_t g_nextSummary = 0;
@@ -86,36 +65,25 @@ void SetCuts(float levelCm, float upCm, float downCm) {
     g_up.store(hs::CleanCut(upCm, hs::UpCm), std::memory_order_relaxed);
     g_down.store(hs::CleanCut(downCm, hs::DownCm), std::memory_order_relaxed);
 }
-int SetHelms(const char* text, int* bad) {
-    const hs::HelmList list = hs::ParseHelms(text, bad);
-    AcquireSRWLockExclusive(&g_helmLock);
-    g_helms = list;
-    ReleaseSRWLockExclusive(&g_helmLock);
-    return list.count;
-}
 bool Holding() { return g_hand.Holding(GetTickCount64()); }
 
 bool HideHead(bool form, const float* bones, const char* inNeck, int count, const float* eye, float unitsPerCm) {
     const uint64_t now = GetTickCount64();
-    const uint32_t helm = gamestate::HelmCode();
-    const hs::Why w = g_hand.Pose(form, now, HelmHides(helm));
+    const hs::Why w = g_hand.Pose(form, now);
     const bool trace = g_trace.load(std::memory_order_relaxed);
-    char line[320];
+    char line[256];
     AcquireSRWLockExclusive(&g_lock);
     // A shapeshift form is the player's own choice and comes and goes often: the state line does not tell it.
     bool tell = false;
-    if (w != hs::Why::Form && g_state.Step(w, now, helm)) {
-        char worn[64], cut[128], pitch[40];
-        HelmText(helm, worn, sizeof worn);
+    if (w != hs::Why::Form && g_state.Step(w, now)) {
+        char cut[128], pitch[40];
         const float level = g_level.load(std::memory_order_relaxed), up = g_up.load(std::memory_order_relaxed),
                     down = g_down.load(std::memory_order_relaxed), at = g_eyeCut.load(std::memory_order_relaxed);
-        if (w == hs::Why::Helm) std::snprintf(cut, sizeof cut, "the shadow headless while it is worn");
-        else if (at > 0) {
+        if (at > 0) {
             PitchText(g_eyePitch.load(std::memory_order_relaxed), pitch, sizeof pitch);
             std::snprintf(cut, sizeof cut, "the eye's cut %.0f cm at pitch %s (%.0f level, %.0f up, %.0f down)", at, pitch, level, up, down);
         } else std::snprintf(cut, sizeof cut, "cut %.0f cm level, %.0f up, %.0f down", level, up, down);
-        std::snprintf(line, sizeof line, "Frame head shadow: %s; %s; %s; %d changes since the last line", hs::WhyName(w), worn, cut,
-                      g_state.changes);
+        std::snprintf(line, sizeof line, "Frame head shadow: %s; %s; %d changes since the last line", hs::WhyName(w), cut, g_state.changes);
         g_state.changes = 0; tell = true;
     }
     if (trace) {
@@ -135,30 +103,25 @@ bool HideHead(bool form, const float* bones, const char* inNeck, int count, cons
 
 float EyeNear(float nearZ, bool on, float unitsPerMetre, float pitchDeg) {
     const uint64_t now = GetTickCount64();
-    const uint32_t helm = gamestate::HelmCode();
-    const bool helmHides = on && HelmHides(helm);
-    const bool cutting = on && !helmHides;
     const float cut = hs::PitchCut(pitchDeg, g_level.load(std::memory_order_relaxed), g_up.load(std::memory_order_relaxed),
                                    g_down.load(std::memory_order_relaxed));
-    const hs::Handshake::Near r = g_hand.Eye(nearZ, cutting, cut, unitsPerMetre, now);
+    const hs::Handshake::Near r = g_hand.Eye(nearZ, on, cut, unitsPerMetre, now);
     g_eyePitch.store(pitchDeg, std::memory_order_relaxed);
-    g_eyeCut.store(cutting ? cut : 0.f, std::memory_order_relaxed);
+    g_eyeCut.store(on ? cut : 0.f, std::memory_order_relaxed);
     const bool trace = g_trace.load(std::memory_order_relaxed);
-    char jump[400];
+    char jump[320];
     bool tellJump = false, summary = false;
     Window s{};
     AcquireSRWLockExclusive(&g_lock);
     const bool jumped = g_watch.Pass(r.nearZ, now);
     if (g_watch.jumps && now >= g_nextJumpLine) {
-        char worn[64], pitch[40];
-        HelmText(helm, worn, sizeof worn);
+        char pitch[40];
         PitchText(pitchDeg, pitch, sizeof pitch);
         std::snprintf(jump, sizeof jump,
                       "Frame head shadow: the eye's near jumped over %.0f%% between passes %d times since the last line (largest %.3f -> %.3f world "
-                      "units; now %s): a reader a pass behind, the depth fog's one NearPlane, is off by as much for that frame; %s, pitch %s",
+                      "units; now %s): a reader a pass behind, the depth fog's one NearPlane, is off by as much for that frame; pitch %s",
                       (hs::NearEase::StepRatio - 1) * 100, g_watch.jumps, g_watch.from, g_watch.to,
-                      r.atCut ? "at the cut" : r.held ? "on the held cut" : on && helmHides ? "no cut, the helm hides the head" : "no cut",
-                      worn, pitch);
+                      r.atCut ? "at the cut" : r.held ? "on the held cut" : "no cut", pitch);
         g_watch.Take();
         g_nextJumpLine = now + JumpLineMs;
         tellJump = true;
@@ -180,7 +143,6 @@ float EyeNear(float nearZ, bool on, float unitsPerMetre, float pitchDeg) {
         w.nearFrom = nearZ; w.nearTo = r.nearZ; w.unitsPerMetre = unitsPerMetre; w.pitchDeg = pitchDeg;
         w.cutMin = w.passes == 1 ? cut : std::min(w.cutMin, cut);
         w.cutMax = w.passes == 1 ? cut : std::max(w.cutMax, cut);
-        w.helm = helm; w.helmHides = helmHides;
     }
     ReleaseSRWLockExclusive(&g_lock);
     if (tellJump) framevr::logging::Write(jump);
@@ -188,16 +150,14 @@ float EyeNear(float nearZ, bool on, float unitsPerMetre, float pitchDeg) {
     char reach[96];
     if (s.reach.bones) std::snprintf(reach, sizeof reach, "head bones %d reach %.0f..%.0f cm from the eye", s.reach.bones, s.reach.nearCm, s.reach.farCm);
     else std::snprintf(reach, sizeof reach, "head bones' reach not known (no eye point, or the head not posed)");
-    char pitch[40], worn[64];
+    char pitch[40];
     PitchText(s.pitchDeg, pitch, sizeof pitch);
-    HelmText(s.helm, worn, sizeof worn);
-    char text[640];
+    char text[512];
     std::snprintf(text, sizeof text,
                   "Frame head shadow: 1 s: poses %d (head kept %d, hidden %d%s%s); eye passes %d, at the cut %d, held %d, eased %d, jumps %d; "
-                  "near %.3f -> %.3f world units at %.2f units/m; pitch %s, cut %.1f..%.1f cm; %s%s; %s",
+                  "near %.3f -> %.3f world units at %.2f units/m; pitch %s, cut %.1f..%.1f cm; %s",
                   s.poses, s.kept, s.hidden, s.hidden ? ": " : "", s.hidden ? hs::WhyName(s.lastHidden) : "", s.passes, s.cutPasses,
-                  s.heldPasses, s.easedPasses, s.jumps, s.nearFrom, s.nearTo, s.unitsPerMetre, pitch, s.cutMin, s.cutMax, worn,
-                  s.helmHides ? " hides the head" : "", reach);
+                  s.heldPasses, s.easedPasses, s.jumps, s.nearFrom, s.nearTo, s.unitsPerMetre, pitch, s.cutMin, s.cutMax, reach);
     framevr::logging::Write(text);
     return r.nearZ;
 }

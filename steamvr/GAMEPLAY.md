@@ -2011,15 +2011,13 @@ down (`[arms] head_cut_level`, `head_cut_up`, `head_cut_down`). The design and
 its thread handshake are in `steamvr/head_shadow.h`; `[arms] head_shadow=0`
 shrinks the head to the neck as before, and shapeshift forms always do.
 
-- **Helms that reach past the cut hide the head.** A Druid pelt is an animal's
-  head worn over the hero's: looking level its snout and teeth stood in front
+- **Open: helms that reach past the cut.** A Druid pelt is an animal's head
+  worn over the hero's: looking level its snout and teeth still stand in front
   of your face (#429, the dev Druid's Jalal's Mane). A deeper cut would also
   cut what you bring to your face (the bow's nock at the cheek, a potion at the
-  mouth, a warcry's fist), so with a pelt on the head shrinks as before and the
-  eye does not cut at all; only the shadow loses its head while it is worn.
-  `[arms] head_hide_helms` lists the helms: item codes (`dr1`, `ba3`) and the
-  words `pelts`, `barbarian` and `none`; absent, the 15 pelts `dr1`-`drf`.
-  Barbarian helms keep the cut unless listed.
+  mouth, a warcry's fist), and shrinking the head while a pelt is worn was
+  tried and refused (it reads as the head just removed). Pending: leaving the
+  head and helm out of the eye views' draws only, keeping them in the shadow.
 - **The near never jumps.** Switching the cut on or off moves the near clip
   2.6 times (`[camera] near` 0.2 as installed, about 4 cm, to 11 cm; 5 times
   looking up). The depth fog reads one `NearPlane` that can be a pass behind,
@@ -2029,13 +2027,11 @@ shrinks the head to the neck as before, and shapeshift forms always do.
   the head is kept only once the near stands at the cut.
 
 Log lines (`Frame head shadow:`): the choice once it has lasted a second, with
-the helm and the cut at the current pitch (`head kept for its shadow; helm
-'uap'; the eye's cut 11 cm at pitch +2 deg ...`, `head hidden and no cut: the
-helm reaches past the cut ...; helm 'dra' (Totemic Mask)`); a near that still
-jumped over 15 % between passes, at most once a second; `[arms]
-head_hide_helms=...` when the settings load. `[debug] head_shadow=1` adds a
+the cut at the current pitch (`head kept for its shadow; the eye's cut 11 cm at
+pitch +2 deg (11 level, 22 up, 3 down); ...`); a near that still jumped over
+15 % between passes, at most once a second. `[debug] head_shadow=1` adds a
 line every second (poses, passes at the cut, held, eased, jumps, near, pitch,
-cut range, helm, head bones' reach).
+cut range, head bones' reach).
 
 ## Head-relative sound
 
