@@ -157,4 +157,21 @@ int main() {
     Reset(3);accept=false;
     assert(ArrowHit(G(),{48.f,.5f,50.f},{52.f,.5f,50.f},4.f,0.f,1.f,contact));
     assert(!OperateArrow(G(),P(),contact.unit,contact.id));
+
+    // The hero's spell missiles (vr/spell_impacts.cpp): the containers near a point on the grid plane, and one broken
+    // as a weapon breaks it, with no kick and no pulse in a hand.
+    Reset(5);Put(O(),0x158,Q());
+    std::array<Container,4> seen{};
+    assert(Nearby(G(),200,200,10,seen)==2);
+    assert(seen[0].id==41&&seen[0].x==202&&seen[0].z==200&&seen[0].sizeX==1&&seen[0].sizeY==1&&seen[1].id==42);
+    assert(Nearby(G(),200,200,1,seen)==0&&Nearby(G(),200,200,0,seen)==0&&Nearby(G(),200,200,10,{})==0);
+    assert(Nearby(G(),200,200,10,std::span(seen).first(1))==1);
+    assert(OperateMissile(G(),P(),41)&&operations==1&&kicks==0&&!pulses[0]&&!pulses[1]);
+    assert(Nearby(G(),200,200,10,seen)==1&&seen[0].id==42);            // the broken one is no longer listed
+    assert(!OperateMissile(G(),P(),41)&&operations==1);                // nor operated twice
+    assert(!OperateMissile(G(),P(),7)&&!OperateMissile(G(),P(),0)&&!OperateMissile(G(),0,42)&&operations==1);
+    live=false;assert(!OperateMissile(G(),P(),42)&&operations==1);live=true; // not the local hero's game
+    Put(P(),0xc,uint32_t(17));assert(!OperateMissile(G(),P(),42)&&operations==1); // a dead hero breaks nothing
+    Put(P(),0xc,uint32_t(1));accept=false;assert(!OperateMissile(G(),P(),42)&&operations==2); // the game refused
+    Reset(0);assert(Nearby(G(),200,200,10,seen)==0&&!OperateMissile(G(),P(),41)&&!operations); // not a container
 }

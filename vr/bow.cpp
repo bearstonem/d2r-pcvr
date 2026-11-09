@@ -19,6 +19,7 @@
 #include "spells.h"
 #include "melee.h"
 #include "breakables.h"
+#include "spell_impacts.h"
 #include "prop_scan.h"
 #include "melee_weapon.h"
 #include "combat.h"
@@ -291,7 +292,8 @@ const MonsterList& Monsters(uintptr_t game) {
     }
     return list;
 }
-int Collision(uintptr_t game,uintptr_t unit) {
+// One server step of a missile: ours are flown here, the rest stay the game's.
+int Fly(uintptr_t game,uintptr_t unit) {
     if(!serverCount.load(std::memory_order_relaxed))return originalCollision(game,unit);
     uint32_t header[3]{};Arrow a;size_t slot=arrows.size();
     if(!Read(unit,header))return originalCollision(game,unit);
@@ -345,6 +347,7 @@ int Collision(uintptr_t game,uintptr_t unit) {
     const float floor=a.flight.shot.player.y+FloorClearance;
     if(from.y<=floor)stop=0;
     else if(to.y<=floor)stop=std::min(stop,(from.y-floor)/(from.y-to.y));
+    impactvr::Flew(a.flight.shot,from,to,stop); // a spell pushes the props and bottles in its way
     struct Touch {float fraction;uintptr_t unit;uint32_t id;};
     std::array<Touch,64> touches{};size_t n=0;
     const bool holy=a.flight.shot.kind==Kind::Spell&&framevr::holybolt::Skill(a.flight.shot.skill);
@@ -383,7 +386,7 @@ int Collision(uintptr_t game,uintptr_t unit) {
     }
     std::sort(touches.begin(),touches.begin()+n,[](const Touch& x,const Touch& y){return x.fraction<y.fraction;});
     breakables::ArrowContact breakableHit{};
-    const bool hasBreakable=!holy&&breakables::ArrowHit(game,from,to,a.flight.shot.unitsPerMetre,a.flight.shot.player.y,stop,breakableHit);
+    const bool hasBreakable=!holy&&impactvr::Containers(a.flight.shot)&&breakables::ArrowHit(game,from,to,a.flight.shot.unitsPerMetre,a.flight.shot.player.y,stop,breakableHit);
     for(size_t i=0;i<n;++i) {
         const auto& t=touches[i];
         if(hasBreakable&&breakableHit.fraction<t.fraction) {
@@ -440,6 +443,12 @@ int Collision(uintptr_t game,uintptr_t unit) {
     if(!MoveSpell(a,from+(to-from)*std::max(0.f,stop-(stop<1?.0001f:0.f))))return End(slot,a,game,unit);
     if(stop<1){++walls;return End(slot,a,game,unit);}
     Store(slot,a);return 1;
+}
+// The missile update hook. Every server missile steps through here: the hero's spell missiles break the
+// containers and push the props they pass or burst at (spell_impacts.h), whoever flies them.
+int Collision(uintptr_t game,uintptr_t unit) {
+    impactvr::Step step(game,unit);
+    return step.Done(Fly(game,unit));
 }
 uintptr_t Shoot(uintptr_t game,int missile,uintptr_t player,int skill,int level,int extra,
                 int offsetX,int offsetY,int targetX,int targetY,int ammo) {

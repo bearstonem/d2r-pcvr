@@ -149,6 +149,7 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "../steamvr/monster_position.h"
 #include "wall_cells.h"
 #include "prop_scan.h"
+#include "spell_impacts.h"
 #include "crossbow.h"
 #include "memory.h"
 #include "environment_cutaway.h"
@@ -981,6 +982,7 @@ void LoadSettings() {
     framevr::ConfigureBottlePhysics(IniB(L"interactions",L"bottle_physics",true));
     framevr::ConfigurePropPhysics(IniB(L"interactions",L"prop_physics",true));
     framevr::ConfigureBodyPhysics(IniB(L"interactions",L"body_physics",true));
+    impactvr::Configure(IniB(L"interactions",L"spell_impacts",true));   // spells break containers and push props
     g_set.bodyRadius.store(IniF(L"bodies", L"radius", 3.0f));   // clamped 1.5..8 by skel::SetLimbs
     {   // [bodies]: how bodies react (limb_tuning.h), live; DEV > Bodies steps and saves them
         framevr::limbs::Tuning tuning;
