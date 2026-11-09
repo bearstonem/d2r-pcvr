@@ -118,8 +118,9 @@
 #include "aim_rules.h"
 #include "toss.h"
 #include "aim_reach.h"
+#include "weapon_heft.h"
 
-namespace gamestate {uint32_t WeaponType();uint32_t HandsKey();uint32_t WeaponSet();uint32_t WeaponClass();uint32_t TwoHanded();uint64_t LocalPlayer();uint32_t MenuEpoch();}
+namespace gamestate {uint32_t WeaponType();uint32_t HandsKey();uint32_t WeaponSet();uint32_t WeaponClass();uint32_t TwoHanded();uint64_t LocalPlayer();uint32_t MenuEpoch();int AttackWsm(int hand);}
 namespace gamecmd {void RequestPotion(int slot);void CancelPotion();}
 namespace gamestate {void MenuMap(bool wanted);uint32_t QuestNotices();bool NoticePanelOpen();bool NoticeText(int kind,char* out,uint32_t size);}
 namespace gamestate {bool LeftShield();bool RightThrowingPotion();uint32_t RightThrowingPotionCode();framevr::dualwield::Equipment MeleeEquipment();}
@@ -4776,6 +4777,23 @@ void Input() {
         const bool dual=!claws&&dualwield::Eligible(skel::HeroClass(),weapons);
         if(dual)sample.weapons=weapons;
         sample.claws=claws;
+        // Bow bash (bow_bash.h, #443; VR Settings > Combat > Melee, off by default): the bow in the left hand,
+        // its string not drawn, swung into a monster staggers it. The lane also needs both triggers released (below).
+        const bool bowBash=gestureSettings[settings::BowBash]>.5f&&motionInput.active&&!claws&&
+            motionInput.weapon==gameplay::Weapon::Bow&&!motionOutput.bowDrawing&&!motionOutput.block;
+        // Weapon heft (weapon_heft.h, #443; VR Settings > Combat > Melee, off by default): the hand travel this
+        // hand's weapon needs for a full hit, from its kind, two-handed grip and speed (WSM); 0 = whole.
+        const auto heftNeed=[&](int hand)->float {
+            if(gestureSettings[settings::WeaponHeft]<.5f||claws)return 0;
+            const int body=dual?weapons.BodyHand(hand):hand==0?0:-1;   // the inventory arm whose weapon this hand swings
+            if(body<0)return 0;
+            const uint32_t type=dual?weapons.type[body]:gamestate::WeaponType();
+            // TwoHanded() and AttackWsm(0) describe the weapon in hand (when dual wielding, the right arm's);
+            // AttackWsm(1) the left arm's, whose two-handed bit the game state does not keep.
+            const bool twoHanded=(!dual||body==0)&&(gamestate::TwoHanded()&D2RVR_TWO_HANDED)!=0;
+            return heft::Need(heft::Weight(type,twoHanded,gamestate::AttackWsm(dual?body:0)));
+        };
+        sample.heft=heftNeed(0);
         // Melee-skill contact adapter: each hand's strikes carry its own trigger
         // skill when that is a confirmed strike skill (strike_skills.h). The
         // assignment identity rides the sample, so a rebind drops a queued stroke.
@@ -4790,10 +4808,13 @@ void Input() {
         strike(0);
         meleePoses.Push(s.sampleStamp,sample);
         sample.hand=motionInput.hand[1];sample.handIndex=1;
-        sample.active=sample.active&&(dual||claws)&&controls.lt<51&&controls.rt<51;
+        sample.bowBash=bowBash;
+        sample.active=((sample.active&&(dual||claws))||bowBash)&&controls.lt<51&&controls.rt<51;
+        sample.heft=bowBash?0.f:heftNeed(1);
         strike(1);
+        if(bowBash)sample.strikeSkill=-1;   // a bow's swing never casts
         offhandPoses.Push(s.sampleStamp,sample);
-        sample.weapons={};sample.claws=false;sample.strikeSkill=-1;
+        sample.weapons={};sample.claws=false;sample.strikeSkill=-1;sample.bowBash=false;sample.heft=0;
         sample.hand=motionInput.hand[1];sample.shield=true;sample.active=motionInput.active&&motionOutput.shieldContact;
         sample.skillSlot=shieldSlot;sample.skillOwner=shieldSkill.owner;sample.skillContext=motionInput.skillContext;
         shieldPoses.Push(s.sampleStamp,sample);
@@ -6822,10 +6843,13 @@ int PointSpellSkill() {
 }
 bool MeleeSample(uint32_t poseStamp,melee::Sample& sample,int hand) {
     std::lock_guard lock(mutex);
-    if(!motionControls.load()||!motionInput.active||!motionOutput.meleeContact||GetTickCount64()-motionAt>100)return false;
+    if(!motionControls.load()||!motionInput.active||GetTickCount64()-motionAt>100)return false;
     if(hand<0||hand>1||!(hand?offhandPoses:meleePoses).Find(poseStamp,Milliseconds()/1000.,sample))return false;
+    // A bow never makes melee contact; its bash lane (bow_bash.h) runs on the off hand instead.
+    const bool bash=hand==1&&sample.bowBash;
+    if(!motionOutput.meleeContact&&!bash)return false;
     // the off hand strikes with a second weapon - or, in a druid's form, with the left claw
-    if(hand==1&&!sample.claws&&!dualwield::Eligible(skel::HeroClass(),gamestate::MeleeEquipment()))return false;
+    if(hand==1&&!sample.claws&&!bash&&!dualwield::Eligible(skel::HeroClass(),gamestate::MeleeEquipment()))return false;
     return sample.epoch==meleeEpoch&&sample.equipment==motionInput.equipment;
 }
 bool ShieldSample(uint32_t poseStamp,melee::Sample& sample) {

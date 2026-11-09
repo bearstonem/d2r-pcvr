@@ -36,6 +36,8 @@ static const GoldenRow Golden[]={
     {"gameplay.melee_hit_speed",View::Combat,0,content::RowKind::Stepper,"Swing speed to hit",0,0},
     {"gameplay.melee_thrust_speed",View::Combat,0,content::RowKind::Slider,"Stab speed to hit",0,0},
     {"gameplay.melee_reach_cm",View::Combat,0,content::RowKind::Slider,"Melee reach",0,0},   // Discord, 2026-11-08
+    {"gameplay.weapon_heft",View::Combat,0,content::RowKind::Toggle,"Weapon heft",0,0},   // #443
+    {"gameplay.bow_bash",View::Combat,0,content::RowKind::Toggle,"Bow bash",0,0},   // #443, drawn inside Weapon heft's row
     {"gameplay.skill_gestures",View::Combat,1,content::RowKind::Toggle,"Skills on your moves",0,0},
     {"interactions.weapon_skill_indicators",View::Combat,1,content::RowKind::Toggle,"Skill icons on weapons",0,0},
     {"gameplay.throw_lift_deg",View::Combat,1,content::RowKind::Stepper,"Thrown weapon lift",0,1},
@@ -223,7 +225,7 @@ int main(int argc,char** argv){
     }
     // ---- the map: no row lost, none left to More, the names and the owner's pairs ----
     {
-        Check(tables.rowCount==97,"97 settings on the menu, each one row");   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08)
+        Check(tables.rowCount==99,"99 settings on the menu, each one row");   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), + Weapon heft, Bow bash (#443)
         for(size_t i=0;i<tables.rowCount;++i)Check(!tables.rows[i].fallback&&tables.rows[i].page!=View::More,std::string("every setting has its page: ")+tables.rows[i].label);
         Check(content::Menu().report.empty(),"the tidy report is empty");
         struct Want {content::Group group;const char* name;std::vector<const char*> pages;};
@@ -246,6 +248,8 @@ int main(int argc,char** argv){
         Check(besideOf(CeilingTorches)==Ceiling,"Dungeon torchlight beside Dungeon ceilings");
         Check(besideOf(CompanionTactical)==CompanionAi,"Commands beside Smarter mercenary");
         Check(besideOf(LootPick)==LootLabelSize,"Loot pick beside Loot name size");
+        Check(besideOf(BowBash)==WeaponHeft,"Bow bash beside Weapon heft (#443: the Combat page's 8th row holds both)");
+        Check(L::CountRows(View::Combat,Defaults(),{})==8,"Combat holds 8 rows at the title screen, every class's");
         Check(L::FilterOf(LootBeamBrightness).count==4,"Loot beams with its 4 filter switches");
         int readouts=0;for(int v=0;v<int(View::Count);++v)if(L::HasReadout(View(v)))++readouts;
         Check(readouts==2&&L::HasReadout(View::Performance)&&L::HasReadout(View::Frames),"the frame times on Performance and Frames, nowhere else");
