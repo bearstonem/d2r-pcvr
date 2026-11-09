@@ -72,6 +72,10 @@ struct Output {
     bool bowPhysical=false; // a release now is a physical arrow, not a native bow skill
     bool meleeContact=false,bowRelease=false,javelinRelease=false,javelinReady=false;
     bool nativeBowRelease=false,shieldContact=false;
+    // A release this step: the string's line (3D, string hand to bow hand), and
+    // for a native bow skill release the skill it pressed (else -1).
+    Vec releaseDirection{};
+    int nativeBowSkill=-1;
     float meleeSpeed=0;
     int skill=-1, potion=-1, bottle=-1; // potion is a one-shot request, not proof of consumption
     bool swap=false;
@@ -363,9 +367,10 @@ public:
             if(drawing&&released) {
                 if(out.bowCharged&&math::Dot(math::Normalized(line),out.bowForward)>.15f) {
                     shotOrigin=in.hand[1].p;shotDirection=math::Normalized(line);
-                    pulseUntil=in.time+.065;out.feedback=2;
+                    pulseUntil=in.time+.065;out.feedback=2;out.releaseDirection=shotDirection;
                     if(skillBow) {
                         out.nativeBowRelease=skillPulse.Start(bowSlot,bowSkill,bowOwner,in.skillContext,in.time);
+                        if(out.nativeBowRelease)out.nativeBowSkill=bowSkill;
                     } else out.bowRelease=true;
                     shotAimUntil=in.time+.4;
                 }

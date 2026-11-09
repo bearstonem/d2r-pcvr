@@ -133,6 +133,7 @@ PCVR_IN_HEADSET_NOTES -->
         with patch.object(sys, 'argv', argv), patch.object(package.subprocess, 'check_output', side_effect=[b'', 'a'*40, 'a'*40]):
             package.main()
         with zipfile.ZipFile(output) as archive:
+            self.assertIn('d2r-pcvr-preview/steamvr/prepare_monster_immunity.py', archive.namelist())
             manifest = json.loads(archive.read('d2r-pcvr-preview/release-manifest.json'))
             self.assertEqual(manifest['release_notes']['lines'], data['lines'])
             self.assertEqual(manifest['release_notes']['content_marker'], notes.marker(data))

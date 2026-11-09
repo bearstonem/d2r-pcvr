@@ -438,6 +438,13 @@ inline constexpr Override Overrides[]={
     {.id="gameplay.melee_reach_cm",.page=View::Combat,.section="Melee",.kind=RowKind::Slider,.label="Melee reach",
      .help="A weapon or fist that passes this close beside a monster still hits it. Raise it if near misses don't count. Walls still block.",
      .format={.unit="cm"}},
+    // Weapon heft and Bow bash (#443; Discord #ideas, 2026-11-04): one row, the page's last free one (8 at most).
+    // [gameplay] weapon_heft and bow_bash, both Off by default.
+    {.id="gameplay.weapon_heft",.page=View::Combat,.section="Melee",.kind=RowKind::Toggle,.label="Weapon heft",
+     .help="Heavy weapons need a long stroke of your arm for a full hit; a quick flick lands lighter. Daggers, claws and fists still hit fully with a flick."},
+    {.id="gameplay.bow_bash",.page=View::Combat,.section="Melee",.kind=RowKind::Toggle,.label="Bow bash",
+     .help="Swing your bow, string not drawn, into a monster to stagger it while you step back and aim. No damage; every 1.5 s at most, never act bosses.",
+     .beside=true,.besideLabel="Bow bash"},
     // Combat: Skills and throws
     {.id="gameplay.skill_gestures",.page=View::Combat,.section="Skills and throws",.kind=RowKind::Toggle,.label="Skills on your moves",
      .help="A trigger skill powers your real move: melee skills on a landed strike, Smite on a bash, arrow skills on a release. Off, every swing is plain."},
@@ -740,6 +747,11 @@ inline constexpr Override Overrides[]={
     {.id="torch.spell_hands_pct",.page=View::Environment,.section="Glow",.kind=RowKind::Slider,.label="Spell hand light",
      .help="How brightly the spells in a Sorceress's hands light the dark around you. Lower it if the light dazzles; Off and they only glow.",
      .format={.unit="%"},FRAMEVR_NAMES(OffAtZero),.classes=Sorceress},
+    // Light Radius boost (#440: "if it did it could even be buffed a bit for the sake of VR"): [light]
+    // radius_boost_pct, how much each Light Radius point widens the mod's dungeon light (light_radius.h).
+    {.id="light.radius_boost_pct",.page=View::Environment,.section="Glow",.kind=RowKind::Slider,.label="Light Radius boost",
+     .help="How much +Light Radius items and skills widen your light in dungeons. 100% is about the game's own amount; more is easier to see in VR.",
+     .format={.unit="%"}},
     // Settings with an ini key but no row: set by Calibrate body, legacy, the
     // ini only on main ([render] desktop_one_eye), or the skill wheel's Left
     // claw strikes box ([gameplay] left_hand_strikes).

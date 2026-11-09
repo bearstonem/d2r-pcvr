@@ -111,7 +111,21 @@ int main() {
         q.Step(5,-1,-1,-1,-1,true);
         auto fresh=[&](int slot,int skill,int missile,bool eligible){q.Step(5,-1,-1,-1,-1,true);return q.Step(5,slot,skill,-1,missile,eligible);};
         r=fresh(2,36,58,true);Check(!r.consumed&&q.Current().skill==7,"non-arrow skill casts natively, quiver kept");
-        r=fresh(2,12,-1,true);Check(!r.consumed,"Multiple Shot keeps its native button");
+        // #364: Multiple Shot, Guided Arrow and Strafe load too, never as physical arrows: the
+        // release presses the face button they came from (Slot), so the game keeps the fan.
+        for(int id:{12,22,26})Check(weaponskills::NativeLoad(id)&&weaponskills::Bow(id)&&!weaponskills::Loadable(id,-1,false),"native bow skills load, never the arrow path");
+        for(int id:{0,6,7,15,36,97})Check(!weaponskills::NativeLoad(id),"basic, quiver, javelin and other skills are not native loads");
+        r=fresh(2,12,-1,true);
+        Check(r.consumed&&r.change==Quiver::Change::Loaded&&q.Current()==weaponskills::Loaded{12,-1,-1}&&q.Slot()==2,"Multiple Shot's face button loads it, from slot 2");
+        r=fresh(2,12,-1,true);Check(r.consumed&&r.change==Quiver::Change::Unloaded&&!q.Current().Active()&&q.Slot()==-1,"its button again: basic arrows");
+        r=fresh(4,26,-1,true);Check(r.change==Quiver::Change::Loaded&&q.Slot()==4,"Strafe loads from its own slot");
+        r=fresh(3,7,12,true);Check(r.change==Quiver::Change::Loaded&&q.Current().skill==7&&q.Slot()==3,"a quiver arrow swaps it out");
+        r=fresh(2,22,-1,false);Check(!r.consumed&&q.Current().skill==7,"without a ready bow Guided Arrow casts natively");
+        r=fresh(2,22,-1,true);Check(r.consumed&&q.Current().skill==22&&q.Slot()==2,"with one it loads");
+        q.Step(5,-1,-1,-1,-1,true,true);
+        r=q.Step(5,3,12,-1,-1,true,true);Check(!r.consumed&&q.Current().skill==22,"a javelin in hand never loads Multiple Shot");
+        q.Step(5,-1,-1,-1,-1,true);q.Step(5,2,22,-1,-1,true);q.Step(5,-1,-1,-1,-1,true);
+        q.Step(5,3,7,-1,12,true);q.Step(5,-1,-1,-1,-1,true);
         r=fresh(3,7,59,true);Check(!r.consumed,"unexpected missile id is not loaded");
         r=fresh(3,11,40,false);Check(!r.consumed&&q.Current().skill==7,"without a ready bow the button casts natively");
         r=q.Step(5,3,11,-1,40,true);Check(!r.consumed&&q.Current().skill==7,"a native press stays native when the bow becomes ready");
@@ -147,6 +161,109 @@ int main() {
         Check(!SkillArrow(Release())&&MissileId(Release())==0,"basic arrow unchanged");
         auto spell=Release();spell.kind=Kind::Spell;spell.skill=36;spell.missile=58;
         Check(!SkillArrow(spell),"hand spells are not quiver arrows");
+    }
+    {
+        // #432: Witherstring (Fires Magic Arrows) and Raven Claw (Fires
+        // Explosive Arrows) make the bow's basic attack name magicarrow 27 or
+        // explodingarrow 41, not arrow 0. A drawn release was refused before
+        // the native attack, so nothing fired; it now flies the item's missile.
+        Check(BasicLaunchMissile(Kind::Arrow,0)==-1,"a plain bow flies the basic arrow");
+        Check(BasicLaunchMissile(Kind::Arrow,27)==27&&BasicLaunchMissile(Kind::Arrow,41)==41,"an item's magic or explosive arrow flies");
+        Check(BasicLaunchMissile(Kind::Arrow,31)==RefusedMissile&&BasicLaunchMissile(Kind::Arrow,-1)==RefusedMissile&&
+              BasicLaunchMissile(Kind::Arrow,12)==RefusedMissile,"a bolt, no bow in hand, or another missile is refused");
+        Check(BasicLaunchMissile(Kind::Javelin,0)==RefusedMissile&&BasicLaunchMissile(Kind::Spell,27)==RefusedMissile,"throws and spells never fly one");
+        const Gate gate{true,11,7,1000,42};
+        for(int missile:{27,41}) {
+            auto s=Release();s.missile=missile;
+            Check(ItemArrow(s)&&OwnMissile(s)&&!SkillArrow(s)&&!SkillRelease(s),"an item arrow is a basic arrow with a missile of its own");
+            Check(MissileId(s)==uint32_t(missile)&&Valid(s)&&Allowed(s,gate,1100),"it names the item's missile and is a valid release");
+            Check(ProjectileLength(s)==ArrowLength&&Near(FlightSpeed(s,4608),FlightSpeed(Release(),4608)),"with the basic arrow's length and draw speed");
+            // It looks as the quiver arrow of the same missile: Magic Arrow (6), Exploding Arrow (16).
+            auto quiver=s;quiver.skill=missile==27?6:16;
+            Check(SkillArrow(quiver)&&!ItemArrow(quiver)&&Valid(quiver)&&MissileId(quiver)==MissileId(s),"the quiver arrow flies the same missile");
+            Flight a,b;a.shot=s;b.shot=quiver;a.distance=b.distance=2;a.alive=b.alive=true;a.updatedAt=b.updatedAt=10;
+            float item[16],skill[16];QuiverMatrix(a,10,item);QuiverMatrix(b,10,skill);
+            for(int i=0;i<16;++i)Check(Near(item[i],skill[i]),"and is placed as that quiver arrow's root");
+            // It lands as one too: its native hit effect is placed at the contact.
+            ImpactVisuals impacts;a.Contact({100,1.4f,98});
+            Check(impacts.Reserve(a,missile==27?204:42,10)!=0,"its native hit effect is placed at the contact");
+        }
+        ImpactVisuals impacts;Flight plain;plain.shot=Release();plain.Contact({100,1.4f,98});
+        Check(impacts.Reserve(plain,42,10)==0,"negative control: a plain arrow never claims an explosion");
+        auto stale=Release();stale.missile=12;
+        Check(!ItemArrow(stale)&&MissileId(stale)==0,"a stale quiver missile never renames the basic arrow");
+        auto spell=Release();spell.kind=Kind::Spell;spell.missile=27;
+        Check(!ItemArrow(spell),"hand spells are not item arrows");
+        auto thrown=Release();thrown.kind=Kind::Javelin;thrown.missile=41;
+        Check(!ItemArrow(thrown)&&MissileId(thrown)==1,"nor are throws");
+    }
+    {
+        // Owner, 2026-11-08: Multiple Shot "is also not really going where we
+        // aim in terms of up or down, it just goes straight planar". The game
+        // makes its fan on the ground plane; a drawn release lends it its pitch.
+        auto release=Release();release.missile=213;
+        const float pitch=.5f;release.direction=math::Normalized(Vec{0,std::tan(pitch),-1});
+        Check(FanArrow(release)&&!SkillRelease(release)&&!OwnMissile(release)&&!ItemArrow(release),"a fan arrow is a basic arrow of the fan's missile");
+        Check(MissileId(release)==213&&Valid(release)&&ProjectileLength(release)==ArrowLength,"named 213, a valid release, the arrow's length");
+        auto skill=release;skill.skill=12;Check(!FanArrow(skill),"never a skill the bow casts itself");
+        auto plain=Release();Check(!FanArrow(plain)&&MissileId(plain)==0,"basic arrows unchanged");
+        // Its HD definition is the basic arrow's: placed exactly as one.
+        Flight fanFlight,basic;fanFlight.shot=release;basic.shot=release;basic.shot.missile=-1;
+        fanFlight.distance=basic.distance=3;fanFlight.alive=basic.alive=true;fanFlight.updatedAt=basic.updatedAt=10;
+        float fm[16],bm[16];ArrowMatrix(fanFlight,10,fm);ArrowMatrix(basic,10,bm);
+        for(int i=0;i<16;++i)Check(Near(fm[i],bm[i]),"a fan arrow draws as the basic arrow");
+        // The game's heading for each arrow, at the release's pitch.
+        for(Vec heading:{Vec{0,0,-8},Vec{3,0,-8},Vec{-5,0,-2},Vec{1,0,0},Vec{-.2f,0,.7f}}) {
+            const auto d=FanDirection(release.direction,heading);
+            const float flat=std::hypot(heading.x,heading.z),own=std::hypot(d.x,d.z);
+            Check(Near(Length(d),1)&&Near(d.y,release.direction.y),"unit length, the release's pitch");
+            Check(Near(d.x/own,heading.x/flat)&&Near(d.z/own,heading.z/flat),"the game's heading for it");
+            Check(!Near(Vec{heading.x/flat,0,heading.z/flat}.y,d.y),"negative control: the game's own arrow is flat");
+        }
+        auto level=Release();
+        const auto flat=FanDirection(level.direction,{3,0,-4});
+        Check(Near(flat.x,.6f)&&Near(flat.y,0)&&Near(flat.z,-.8f),"a level release keeps the game's fan exactly");
+        Check(Length(FanDirection(release.direction,{})-release.direction)<.0005f,"no heading: the release's own");
+        Check(Near(FanDirection({0,1,0},{}).y,1)&&Near(FanDirection({0,-1,0},{0,0,1}).y,-1),"straight up or down stays so");
+        Check(Near(HeadingDegrees({0,0,-1},{1,0,-1}),-45)||Near(HeadingDegrees({0,0,-1},{1,0,-1}),45),"heading angle in degrees");
+        Check(Near(HeadingDegrees({0,0,-1},{1,0,-1}),-HeadingDegrees({0,0,-1},{-1,0,-1})),"signed about the release");
+
+        // The armed release adopts one server tick of local fan arrows.
+        const Vec hero=release.player;
+        FanVolley v;
+        Check(!v.Accepts(11,5,1000,hero)&&!v.Fresh(11,1000),"nothing armed, nothing adopted");
+        v.Arm(release,1000);
+        Check(!v.Accepts(12,5,1100,hero),"another character's game");
+        Check(!v.Accepts(11,5,999,hero)&&!v.Accepts(11,5,1000+FanVolley::Window+1,hero),"only within the window after the release");
+        Check(!v.Accepts(11,5,1100,hero+Vec{FanVolley::MaxStep+.5f,0,0}),"a teleport since the release refuses");
+        Check(v.Report(1100)==FanVolley::Outcome::None,"no line before the fan");
+        for(int i=0;i<21;++i) {
+            const float a=(i-10)*.05f;
+            Check(v.Accepts(11,5,1160,hero+Vec{.2f,0,0}),"the fan of one tick");
+            const auto s=v.Adopt(5,Vec{std::sin(a),0,-std::cos(a)}*40,hero+Vec{.2f,0,0},1160);
+            Check(FanArrow(s)&&Valid(s)&&s.member==i&&s.sequence==release.sequence&&s.session==release.session,"each arrow its own member of the release");
+            Check(Near(s.direction.y,release.direction.y)&&Near(s.draw,release.draw),"each at the release's pitch and draw");
+            Check(Near(s.origin.x,release.origin.x+.2f)&&Near(s.player.x,release.player.x+.2f)&&Near(s.origin.y,release.origin.y),
+                  "a step since the release carries the origin");
+        }
+        Check(!v.Accepts(11,6,1200,hero),"a later tick is not this fan");
+        Check(v.adopted==21&&Near(v.right-v.left,1.f*(180.f/3.14159265f))&&Near(v.PitchDegrees(),pitch*(180.f/3.14159265f)),
+              "spread and pitch for the volley line");
+        Check(v.Report(1200)==FanVolley::Outcome::None,"the fan line waits for the burst");
+        Check(v.Report(1160+FanVolley::Burst)==FanVolley::Outcome::Adopted&&v.Report(1400)==FanVolley::Outcome::None,"one line per volley");
+        FanVolley capped;capped.Arm(release,1000);
+        for(unsigned i=0;i<FanVolley::Most;++i){Check(capped.Accepts(11,5,1100,hero),"up to Most");capped.Adopt(5,{0,0,-1},hero,1100);}
+        Check(!capped.Accepts(11,5,1100,hero),"no more than Most");
+        // The client's own flat fan: one burst while armed.
+        FanVolley w;
+        Check(!w.Watch(11,1100),"nothing armed: the game's own");
+        w.Arm(release,1000);
+        Check(!w.Watch(12,1100),"another character's");
+        Check(w.Watch(11,1150)&&w.Watch(11,1151)&&w.Watch(11,1150+FanVolley::Burst),"its burst");
+        Check(!w.Watch(11,1151+FanVolley::Burst)&&w.watched==3,"a later client arrow is not this fan");
+        FanVolley missed;missed.Arm(release,1000);
+        Check(missed.Report(1000+FanVolley::Window)==FanVolley::Outcome::None,"waits the whole window");
+        Check(missed.Report(1001+FanVolley::Window)==FanVolley::Outcome::Missed&&missed.Report(5000)==FanVolley::Outcome::None,"no fan: said once");
     }
     {
         // The root-bound model must land exactly where a basic arrow mesh is.
