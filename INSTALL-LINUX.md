@@ -7,8 +7,8 @@ Linux/WiVRn and ALVR/Quest compatibility remain unverified. The current release
 is packaged and tested on native Windows. Do not treat its Windows results as
 a Linux headset test. Keep the extracted package because Steam uses its wrapper.
 
-This is an **offline single-player** preview for the **Steam edition of D2R
-3.3.93787**. Use your own purchased game and offline character. Refresh the
+This is an **offline single-player** preview for the **Steam edition of
+D2R**. Use your own purchased game and offline character. Refresh the
 product license by launching the original game through Steam while connected
 to the internet, then exit before installing. No game files or saves are shipped.
 

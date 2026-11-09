@@ -1,6 +1,7 @@
 #include "tactical_chord.h"
 #include <cstdio>
 #include <cstdlib>
+#include <initializer_list>
 using namespace framevr::tacticalchord;
 static void Check(bool b,const char* label){if(!b){std::fprintf(stderr,"FAIL: %s\n",label);std::exit(1);}}
 
@@ -80,6 +81,22 @@ int main() {
         Check(s.h.triggerOwned,"the trigger pulled for the command is not handed to the game");
         Check(s.Frame(.7f,.6f,true)!=Event::Latched,"back: the held trigger is no new pull");
         Check(s.Frame(.7f,.1f,true)==Event::Armed&&s.h.triggerOwned,"let go with the grip still on the mercenary: armed again");
+    }
+    {   // A held click-to-drink potion takes over an armed or latched command.
+        for(bool latched:{false,true}) {
+            Sim s;s.Frame(.8f,0,true);
+            if(latched)s.Frame(.8f,.8f,true);
+            Check(s.Frame(.8f,.8f,true,false)==Event::Disarmed&&!s.h.Engaged(),
+                  "potion ownership cancels the command without executing it");
+            for(int i=0;i<30;++i)
+                Check(s.Frame(.8f,.8f,true,false)==Event::None&&!s.h.Engaged(),
+                      "aiming a held potion at the mercenary cannot arm or latch commands");
+            Check(s.Frame(.8f,0,true,false)==Event::None&&!s.h.triggerOwned,
+                  "releasing the drinking trigger while holding a potion never orders the mercenary");
+            s.Frame(0,0,true,false); // return the potion, release the hand
+            Check(s.Frame(.8f,0,true)==Event::Armed&&s.Frame(.8f,.8f,true)==Event::Latched&&
+                  s.Frame(.8f,0,true)==Event::Release,"commands work again after returning the potion");
+        }
     }
     {   // Reset clears everything
         Sim s;s.Frame(.7f,0,true);s.h.Reset();

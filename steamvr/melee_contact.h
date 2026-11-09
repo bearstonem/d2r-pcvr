@@ -76,6 +76,10 @@ struct Sample {
     int skillSlot=-1,skillOwner=-1;
     uint64_t skillContext=0;
     int strikeSkill=-1; // weapon lanes: the hand's trigger skill its strikes cast (strike_skills.h), -1 basic
+    // The left lane's bow, its string not drawn (bow_bash.h): a contact staggers the monster, never attacks.
+    bool bowBash=false;
+    // Weapon heft (weapon_heft.h): the hand travel (m) this weapon's stroke needs for a full hit; 0 = any stroke is whole.
+    float heft=0;
 };
 inline int Lane(const Sample& s){return s.shield?1:s.handIndex==1?2:0;}
 // The renderer may finish posing an older input after a newer XR sample has
@@ -103,13 +107,17 @@ public:
                e.sample.weapons.displayed[0]!=current.weapons.displayed[0]||e.sample.weapons.displayed[1]!=current.weapons.displayed[1]||
                e.sample.minShieldBashSpeed!=current.minShieldBashSpeed||
                e.sample.skillSlot!=current.skillSlot||e.sample.skillOwner!=current.skillOwner||e.sample.skillContext!=current.skillContext||
-               e.sample.strikeSkill!=current.strikeSkill||now<e.sample.time||now-e.sample.time>.1)return false;
+               e.sample.strikeSkill!=current.strikeSkill||e.sample.bowBash!=current.bowBash||now<e.sample.time||now-e.sample.time>.1)return false;
             out=e.sample;return true;
         }
         return false;
     }
 };
-struct Sweep {Blade before{},after{};uint64_t stroke=0;float speed=0;bool thrust=false;};
+// travel: the hand's brisk travel in tracking space (m) since this stroke's path began - after a pause,
+// a reversal or a reset - counting only steps at StrokeHandSpeed or faster (weapon_heft.h). A slow drift
+// before a flick, or turning the wrist in place, adds nothing.
+struct Sweep {Blade before{},after{};uint64_t stroke=0;float speed=0;bool thrust=false;float travel=0;};
+inline constexpr float StrokeHandSpeed=1.f;   // m/s at the grip
 // Why the path was restarted (pose resets): a state change (epoch, equipment,
 // skill...), a timing gap, the hand moving or turning too fast for tracking,
 // the player jumping, or the blade jumping further than hand+turn explain.
@@ -145,6 +153,7 @@ class Engine {
     Vec direction{},angularDirection{};
     uint64_t serial=0,stroke=0;
     bool thrustStroke=false;float retreat=0;
+    float handPath=0;   // Sweep::travel: brisk hand travel since the path last restarted
     Diagnostics diagnostics{};
     struct Point {Pose hand;Blade blade;Vec thrustAxis;double time=0;float distance=0;};
     std::array<Point,64> recent{};unsigned next=0,points=0;
@@ -152,7 +161,7 @@ class Engine {
         recent[next]={s.hand,s.blade,s.thrustAxis,s.time,distance};next=(next+1)%recent.size();
         points=std::min(points+1,unsigned(recent.size()));
     }
-    void RestartPath(const Sample& s){next=points=0;Remember(s);}
+    void RestartPath(const Sample& s){next=points=0;handPath=0;Remember(s);}
     static float SwingAngle(const Pose& before,const Blade& beforeBlade,const Sample& after) {
         const float handAngle=gameplay::RotationDistance(before.q,after.hand.q);
         // Reorienting a guard must not power a bash. Count tracked hand travel,
@@ -208,6 +217,7 @@ public:
            in.shield!=previous.shield||in.claws!=previous.claws||in.handIndex!=previous.handIndex||in.weapons.id[0]!=previous.weapons.id[0]||in.weapons.id[1]!=previous.weapons.id[1]||
            in.weapons.displayed[0]!=previous.weapons.displayed[0]||in.weapons.displayed[1]!=previous.weapons.displayed[1]||
            in.minWeaponSpeed!=previous.minWeaponSpeed||in.minThrustSpeed!=previous.minThrustSpeed||in.minShieldBashSpeed!=previous.minShieldBashSpeed||in.skillSlot!=previous.skillSlot||in.skillOwner!=previous.skillOwner||in.skillContext!=previous.skillContext||
+           in.bowBash!=previous.bowBash||
            std::fabs(in.unitsPerMetre-previous.unitsPerMetre)>.05f;
         const bool badTiming=dt<=0||dt>.1,fastHand=handTravel>std::max(.12f,gameplay::MeleeHandTrackingLimit*float(dt)),fastTurn=angle>gameplay::MeleeAngularTrackingLimit*dt;
         const bool jumped=playerTravel>.5f,bladeJump=bladeTravel>std::max(1.2f,handTravel+angle*lever+playerTravel+.1f);
@@ -266,6 +276,7 @@ public:
             stroke=0;RestartPath(was);direction={};angularDirection={};
         }
         Remember(in,distance);
+        if(Length(delta)>=StrokeHandSpeed*float(dt))handPath+=Length(delta);
         const bool beginning=!stroke;
         const float thrustSpeed=forward/float(dt);
         const bool thrust=!in.shield&&forward>=Length(delta)*.85f&&
@@ -284,7 +295,7 @@ public:
         // Motion history arms a stroke; it must not retroactively
         // damage something brushed during the earlier low-energy approach.
         // Keep the latest swept segment so a fast between-frame hit survives.
-        out={was.blade,in.blade,stroke,thrust?thrustSpeed:speed,thrust};return true;
+        out={was.blade,in.blade,stroke,thrust?thrustSpeed:speed,thrust,handPath};return true;
     }
 };
 class HitSet {

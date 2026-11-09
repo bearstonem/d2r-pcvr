@@ -15,6 +15,7 @@
 #include "bow.h"
 #include "companions.h"
 #include "companion_ai.h"
+#include "settings_menu.h"
 #include "active_effects.h"
 #include "skill_cooldowns.h"
 #include "../steamvr/shapeshift_form.h"
@@ -32,9 +33,11 @@ const ItemService* items=nullptr;
 const ThreadService* threads=nullptr;
 std::mutex mutex;
 Snapshot snapshot;
+// The hero's Light Radius as last read (LightRadius): kept through captures that could not read it.
+uint64_t lightSession=0;int lightValue=0;
 Reply reply;
 framevr::interaction::Request queued,waiting;
-bool tossHit=false; // FeedMerc: the game thread found the hireling at the landing point
+bool tossHit=false; // FeedMerc: the game thread accepted the landing for a live hireling
 // Hireling vitals: sampled on the game thread every MercPeriod ms, copied into
 // each snapshot while younger than MercMaxAge.
 constexpr uint64_t MercPeriod=200,MercMaxAge=1000;
@@ -157,6 +160,7 @@ void Publish(Snapshot s) {
     }
     if(changed)++s.revision;
     snapshot=s;
+    if(s.lightRadiusKnown){lightSession=s.session;lightValue=s.lightRadius;}
     if(waiting.action!=Action::None) {
         Result result=Result::Pending;
         if(waiting.session!=s.session)result=Result::Cancelled;
@@ -186,7 +190,7 @@ void __cdecl Apply(const PluginContext*,void*) noexcept {
     {std::lock_guard lock(mutex);scheduled=false;r=queued;queued={};epoch=cancelEpoch;hit=tossHit;tossHit=false;}
     if(r.action==Action::None)return;
     if(r.action==Action::FeedMerc) {
-        // Every landing shatters; only a landing at the hireling's feet feeds.
+        // Every landing shatters; the game thread applies the landing policy.
         if(!bowvr::PlayHeroSound(GlassBreak))
             framevr::logging::Write("Frame potion toss: native glass sound unavailable");
         if(!hit){std::lock_guard lock(mutex);reply={r.sequence,r.session,Result::Refused};return;}
@@ -246,20 +250,20 @@ void __cdecl ApplyPark(const PluginContext*,void*) noexcept {
     const auto s=Read();
     if(!gamestate::MenuOpen()&&nativeui::Park(p.skill,p.owner,s,p.session))Publish(Collect());   // the cast reads the record back at once
 }
-// Game thread: did the thrown bottle land at the local hireling's feet? Every
-// landing continues to the UI thread, which plays the shatter; only a hit then
-// uses the belt item on the mercenary. A miss leaves the belt untouched.
+// Game thread: check the live hireling and the optional landing assistance.
+// Every landing continues to the UI thread for shatter and native belt use.
 void __cdecl AimAtHireling(const PluginContext*,void*) noexcept {
     framevr::interaction::Request r;
     {std::lock_guard lock(mutex);r=queued;if(r.action!=Action::FeedMerc){scheduled=false;return;}} // cancelled
     float distance=-1;uint32_t classId=0;
+    const bool mercPotionAutoaimEnabled=vrsettings::Read().values[framevr::settings::MercPotionAssist]>.5f;
     const bool hit=r.session==gamestate::LocalPlayer()&&
-        melee::NearHireling(r.world,r.player,r.unitsPerMetre,distance,classId);
+        melee::NearHireling(r.world,r.player,r.unitsPerMetre,distance,classId,mercPotionAutoaimEnabled);
     char line[220];
     if(distance<0)std::snprintf(line,sizeof line,"Frame potion toss: no live hireling nearby (nearest friendly class=%u; column=%d type=%s)",
         classId,r.index+1,PotionName(PotionType(r.item.code)));
     else std::snprintf(line,sizeof line,"Frame potion toss: landed %.2f m from the mercenary (class=%u) - %s (column=%d type=%s)",
-        distance,classId,hit?"at its feet":"miss",r.index+1,PotionName(PotionType(r.item.code)));
+        distance,classId,hit?(MercThrowAccepted(distance,false)?"at its feet":"assisted miss"):"miss",r.index+1,PotionName(PotionType(r.item.code)));
     framevr::logging::Write(line);
     {std::lock_guard lock(mutex);tossHit=hit;}
     if(threads->runOnUiThread(context,&Apply,nullptr)==D2RL::Threads::Result::Success)return;
@@ -294,6 +298,12 @@ framevr::interaction::Snapshot Read(){std::lock_guard lock(mutex);return snapsho
 int CurrentLevel(uint64_t session,uint64_t now) {
     std::lock_guard lock(mutex);
     return framevr::interaction::Fresh(snapshot,session,now)?snapshot.location.level:0;
+}
+bool LightRadius(uint64_t session,int& value) {
+    std::lock_guard lock(mutex);
+    if(!session||lightSession!=session)return false;
+    value=lightValue;
+    return true;
 }
 int ShapeForm(uint64_t session,uint64_t now) {
     // The rig the game draws as the hero, while one is drawn: the state sample trails the swap

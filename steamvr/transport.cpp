@@ -63,6 +63,7 @@
 #include "wrist_compass.h"
 #include "panel_atlas.h"
 #include "map_zoom.h"
+#include "floating_map.h"
 #include "wrist_full_map.h"
 #include "interaction_paint.h"
 #include "latest_worker.h"
@@ -91,6 +92,8 @@
 #include "stats_button.h"
 #include "menu_drop.h"
 #include "respec_button.h"
+#include "stash_buttons.h"
+#include "vr_keyboard.h"
 #include "native_panels.h"
 #include "npc_dialogue.h"
 #include "native_hud.h"
@@ -111,6 +114,7 @@
 #include "foveation.h"
 #include "effects_layer.h"
 #include "gaze.h"
+#include "gaze_aim.h"
 #include "d2rcam.h"
 #include "profile.h"
 #include "../vr/skeletons.h"
@@ -119,8 +123,9 @@
 #include "aim_rules.h"
 #include "toss.h"
 #include "aim_reach.h"
+#include "weapon_heft.h"
 
-namespace gamestate {uint32_t WeaponType();uint32_t HandsKey();uint32_t WeaponSet();uint32_t WeaponClass();uint32_t TwoHanded();uint64_t LocalPlayer();uint32_t MenuEpoch();}
+namespace gamestate {uint32_t WeaponType();uint32_t HandsKey();uint32_t WeaponSet();uint32_t WeaponClass();uint32_t TwoHanded();uint64_t LocalPlayer();uint32_t MenuEpoch();int AttackWsm(int hand);}
 namespace gamecmd {void RequestPotion(int slot);void CancelPotion();}
 namespace gamestate {void MenuMap(bool wanted);uint32_t QuestNotices();bool NoticePanelOpen();bool NoticeText(int kind,char* out,uint32_t size);}
 namespace gamestate {bool LeftShield();bool RightThrowingPotion();uint32_t RightThrowingPotionCode();framevr::dualwield::Equipment MeleeEquipment();}
@@ -613,6 +618,7 @@ uint32_t heavensRequest=0,heavensAnswered=0,heavensMonster=0,heavensCasts=0;
 float heavensFrom=0,heavensAt=0;   // the last call's start and stop elevation (degrees), for the log
 ULONGLONG heavensAskedAt=0;
 std::atomic<bool> heavensArmed{false};
+std::atomic<bool> seekerArrowReady{false};   // SeekerArrowReady: a ready bow whose skill is Guided Arrow
 constexpr ULONGLONG HeavensWaitMs=120;
 // A Charge in flight (any cast path): no physical melee contacts until it ends.
 ULONGLONG chargeIssuedAt=0,chargeContactsHeldAt=0;
@@ -620,6 +626,7 @@ ULONGLONG chargeIssuedAt=0,chargeContactsHeldAt=0;
 std::atomic<bool> quiverEnabled{true},quiverPreview{true};
 weaponskills::Quiver quiver;
 weaponskills::Loaded quiverArrow{}; // the skill the next release carries, if any
+weaponskills::Loaded nativeArrow{}; // a loaded Multiple Shot, Guided Arrow or Strafe: the release presses its face button (#364)
 int quiverReportedSlot=-1; // one diagnostic line per face-button press
 uint64_t shieldFeedbackAt=0,cueChangedAt=0,volleyRequestedAt=0;
 bool shieldRefused=false;
@@ -631,6 +638,10 @@ uint64_t bowSequence=0;
 bowflight::Shot bowPending{},bowReadyShot{},bowPreviewPose{};
 bool bowPreviewVisible=false;
 bool bowNeedsWorld=false,bowHasShot=false;
+// Multiple Shot from a draw: the release's pose, lent to the fan the game
+// makes for it (bowvr::ArmFan). Allowed() refuses a stale one.
+bowflight::Shot fanPending{};
+bool fanNeedsWorld=false;
 // Double Throw (#224): the left hand's own release, beside the right's.
 bowflight::Shot throwLeftPending{},throwLeftReady{};
 bool leftNeedsWorld=false,leftHasShot=false,leftThrowArmed=false;
@@ -694,6 +705,9 @@ bool PointedCell(float& x,float& y,math::Vec& way) {
 }
 bool crossbowFire=false;
 uint64_t crossbowActivation=0,crossbowTakenAt=0;
+// The crossbow's right trigger as last logged: 0 the slot's own, 1 Attack over the slot's skill
+// (gameplay::CrossbowAttack), 2 the slot's bow skill kept; and that skill.
+int crossbowTriggerMode=0,crossbowTriggerSkill=-1;
 bowflight::Shot spellReadyShot[2]{};
 bool spellHasShot[2]{};
 uint64_t spellResolvedAt[2]{};
@@ -712,6 +726,12 @@ XrAction gazeAction=XR_NULL_HANDLE;
 XrSpace gazeSpace=XR_NULL_HANDLE;
 std::array<gaze::UV,2> gazeCenters{};
 gaze::Stability gazeStability;
+// Aim with your eyes (gaze_aim.h): vrcam's update thread asks for samples while the option needs them
+// (WantGazeAim), with eye-tracked foveation on or off; the last one is kept for it here.
+std::atomic<bool> gazeAimWanted{false};
+std::atomic<int> gazeAimSupport{-1};   // GazeAimSupport: -1 no session yet, 0 no extension, 1 no tracker, 2 bound
+struct GazeAimSampled {bool valid=false;math::Vec local{0,0,-1};ULONGLONG at=0;};
+std::mutex gazeAimMutex;GazeAimSampled gazeAimSampled;
 double Milliseconds() {
     static const double scale=[](){LARGE_INTEGER f{};QueryPerformanceFrequency(&f);return 1000.0/double(f.QuadPart);}();
     LARGE_INTEGER t{};QueryPerformanceCounter(&t);return double(t.QuadPart)*scale;
@@ -799,6 +819,12 @@ bool swapchainsShort=false,releaseUiChain=false;
 mapzoom::Gesture mapZoom;
 bool wristMapShown=false,wristMapLooked=false,menuMapShown=false;
 math::Vec wristMapCenter{},menuMapCenter{};
+// Floating map (floating_map.h): floatMapWant, capture the map for the pulled copy; floatMapPointed, the right laser
+// points at a map with a copy out, so the stick zooms it as a look would; both false each frame before its step.
+// floatMapWrist / floatMapWristMs: the wrist map quad as last drawn, where a copy is pulled from and put away at.
+bool floatMapWant=false,floatMapPointed=false;
+bool wristMapLookedOnly=false;   // wristMapLooked from the look alone (its hold to LookOut), before floatMapPointed is ORed in
+interaction::Pose floatMapWrist{};uint64_t floatMapWristMs=0;
 mapzoom::View mapZoomView=mapzoom::View::None;   // the map the stick zoomed last frame, for the log
 uint64_t mapZoomLogAt=0;
 bool mapZoomLogged=false;
@@ -953,6 +979,11 @@ std::atomic<bool> leftDominant{false};
 // Save and Exit from the Options tab tore the level down under it (automap.cpp:636 assert,
 // then an access violation on the draw thread).
 bool leatherHudVitals=false;
+// Stash navigation plaques share the Character button's art and pointer path.
+bool stashArtReady=false,stashShown=false;
+int stashHover=-1;
+uint16_t stashPad=0;
+stashbuttons::Input stashInput;
 // Reset Skills & Stats on the Character page (respec_button.h): its faces painted
 // into the static image; shown and lit this frame (MenuPointer); two pulls on it
 // ask vr/respec.cpp for the game's own reset. No game input is sent.
@@ -960,6 +991,15 @@ bool respecArtReady=false,respecShown=false,respecLit=false;
 statsbutton::Press respecPress;
 respecbutton::Button respecButton;
 respecbutton::Face respecFace=respecbutton::Face::Reset;
+// The VR keyboard for character creation's name box (vr_keyboard.h), its own board hinged under
+// the menu: its keys painted into the static image, small and with capitals; shown, the key under
+// the laser, and the laser's dot on it, this frame (MenuPointer); a pull on a key types it
+// (SendKeyboard). Close hides it until the box comes up anew (KeyboardEpoch).
+bool keyboardArtReady=false,keyboardShown=false,keyboardClosed=false,keyboardPointer=false;
+int keyboardLit=-1;
+uint32_t keyboardClosedEpoch=0;
+statsbutton::Press keyboardPress;
+keyboard::Typist keyboardTypist;
 leather::Holder leatherHolder;
 leather::Back leatherBack;   // Right B the game leaves unanswered closes the leather's menu
 leather::Art leatherArt=leather::PlaceholderArt();
@@ -1166,10 +1206,11 @@ void ClearInput() {
     lootlabels::display.Clear();
     rightStickGestures.Reset();
     meleeImpactAt[0]=meleeImpactAt[1]=shieldImpactAt=parryMissAt=0;
-    wristHeading.Reset();compassFrame=false;mapZoom.Reset();wristMapLooked=false;
+    wristHeading.Reset();compassFrame=false;mapZoom.Reset();wristMapLooked=wristMapLookedOnly=false;floatMapWant=floatMapPointed=false;
     panelinput::WorldInput(false);
     gamestate::MenuMap(false);
     menuControls.Suspend();menuNavigation.Reset();nativeMenuPad={};laserClick={};panelinput::UseController();
+    stashInput.Reset();stashShown=false;stashPad=0;
     statsPress.Reset();statsShown=statsLit=false;menuDrop.Reset();
     handControls.Suspend();
     bodyCalibration.Suspend();
@@ -1392,7 +1433,8 @@ bool LoadFunctions() {
         Say("Frame OpenXR: runtime does not expose XR_KHR_D3D12_enable");return false;
     }
     // Bind the optional capability at session creation so the in-headset
-    // toggle can enable it later. Samples are read only while eyeTracking is on.
+    // toggle can enable it later. Samples are read only while eyeTracking is on or Aim with your eyes
+    // wants them (gazeAimWanted).
     gazeExtension=supports(XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME);
     frameControllerExtension=supports(controllers::FrameExtension);
     std::vector<const char*> enabled{XR_KHR_D3D12_ENABLE_EXTENSION_NAME};
@@ -1512,6 +1554,7 @@ bool SetupActions() {
         XrActionSpaceCreateInfo gi{XR_TYPE_ACTION_SPACE_CREATE_INFO};gi.action=gazeAction;gi.poseInActionSpace.orientation.w=1;
         gazeReady=Check(pCreateActionSpace(session,&gi,&gazeSpace),"create gaze space");
     }
+    gazeAimSupport.store(!gazeExtension?0:gazeReady&&gazeSpace?2:1);
     return true;
 }
 bool WaitGpu();
@@ -1709,7 +1752,7 @@ std::vector<uint8_t> PaintPointer() {
 // read-only UI adapter.
 // Reset Skills & Stats' label as coverage (0-255 per texel, w x h): GDI's
 // antialiased Georgia bold (the sewer prompt's face), the largest that fits.
-std::vector<uint8_t> RespecLabel(const wchar_t* text,int w,int h) {
+std::vector<uint8_t> RespecLabel(const wchar_t* text,int w,int h,int maximumFontHeight=0) {
     std::vector<uint8_t> coverage;
     BITMAPINFO info{};info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);
     info.bmiHeader.biWidth=w;info.bmiHeader.biHeight=-h;info.bmiHeader.biPlanes=1;info.bmiHeader.biBitCount=32;
@@ -1719,12 +1762,13 @@ std::vector<uint8_t> RespecLabel(const wchar_t* text,int w,int h) {
     auto old=SelectObject(dc,bitmap);std::memset(bits,0,size_t(w)*h*4);
     SetBkMode(dc,TRANSPARENT);SetTextColor(dc,RGB(255,255,255));
     bool fits=false;
-    for(int px=h*30/64;px>=h/4&&!fits;px-=2) {
+    const int fontScaleHeight=maximumFontHeight>0?std::min(h,maximumFontHeight*64/30):h;
+    for(int px=maximumFontHeight>0?maximumFontHeight:h*30/64;px>=fontScaleHeight/4&&!fits;px-=2) {
         HFONT font=CreateFontW(px,0,0,0,FW_BOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,
             ANTIALIASED_QUALITY,DEFAULT_PITCH,L"Georgia");
         auto before=SelectObject(dc,font);RECT measured{0,0,0,0};
         DrawTextW(dc,text,-1,&measured,DT_CALCRECT|DT_SINGLELINE|DT_NOPREFIX);
-        fits=measured.right<=w-h*7/16||px-2<h/4;   // clear of the rim (respec_button.h)
+        fits=measured.right<=w-fontScaleHeight*7/16||px-2<fontScaleHeight/4;   // keep labels inset without scaling them with a taller face
         if(fits){RECT bounds{0,0,w,h};DrawTextW(dc,text,-1,&bounds,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX);}
         SelectObject(dc,before);DeleteObject(font);
     }
@@ -1861,8 +1905,40 @@ bool SetupStatic(DXGI_FORMAT eyeFormat) {
         ok=face(int(respecbutton::Face::Confirm),true,RespecLitConfirm)&&ok;
         return ok;
     }();
+    bool stashPainted=true;
+    for(int i=0;i<4;++i) {
+        const bool lit=(i%2)!=0;
+        auto px=stashbuttons::PaintFace(stashbuttons::Width,stashbuttons::Height,lit);
+        const auto label=RespecLabel(stashbuttons::Labels[i/2],stashbuttons::Width,stashbuttons::Height,stashbuttons::LabelHeight);
+        if(label.empty()){stashPainted=false;continue;}
+        respecbutton::Stamp(px,label,stashbuttons::Width,stashbuttons::Height,lit);
+        stashPainted=put(px,Stash(i))&&stashPainted;
+    }
+    // The VR keyboard: every key on its stone with its label, plain and lit, small letters and
+    // capitals (vr_keyboard.h).
+    const bool keyboardPainted=[&]{
+        bool ok=true;
+        for(int picture=0;picture<4&&ok;++picture) {
+            const bool lit=picture&1,capitals=picture>=2;
+            auto board=keyboard::PaintKeys(lit,capitals);
+            for(int i=0;i<keyboard::KeyCount&&ok;++i) {
+                const auto r=keyboard::KeyTexelRect(i);
+                std::vector<uint8_t> face(size_t(r.w)*r.h*4);
+                for(int y=0;y<r.h;++y)std::memcpy(&face[size_t(y)*r.w*4],&board[(size_t(r.y+y)*keyboard::TexelWidth+r.x)*4],size_t(r.w)*4);
+                const auto text=RespecLabel(keyboard::Label(i,capitals).c_str(),r.w,r.h);
+                if(text.empty()){ok=false;break;}
+                respecbutton::Stamp(face,text,r.w,r.h,lit||(capitals&&keyboard::Keys[i].action==keyboard::Action::Shift));
+                for(int y=0;y<r.h;++y)std::memcpy(&board[(size_t(r.y+y)*keyboard::TexelWidth+r.x)*4],&face[size_t(y)*r.w*4],size_t(r.w)*4);
+            }
+            ok=ok&&put(board,capitals?(lit?KeyboardCapsLit:KeyboardCaps):(lit?KeyboardLit:Keyboard));
+        }
+        return ok;
+    }();
     if(!UploadAtlas(staticChain,eyeFormat,StaticWidth,StaticHeight,pixels))return false;
+    stashArtReady=stashPainted;
     statsIconReady=statsPainted;
+    keyboardArtReady=keyboardPainted;
+    if(!keyboardPainted)Say("Frame panels: the VR keyboard could not be painted; it stays hidden");
     respecArtReady=respecPainted;
     if(!respecPainted)Say("Frame panels: Reset Skills & Stats could not be painted; the button stays hidden");
     if(!statsPainted)Say("Frame panels: the Advanced Stats button could not be painted; the menu button alone opens it");
@@ -2037,10 +2113,37 @@ XrPosef UiSurfacePose() {
     }
     return pose;
 }
+// A VR keyboard key to the game as a real keyboard's would arrive: the key the game window's
+// own Windows layout puts the character on (a German Z is not on the US Z's scan code), its
+// scan code (the game reads keys by scan code, SendShift), Shift round it when the layout wants
+// it, all tagged KeyboardKeyTag - typing, so TypedKeys lets the game's keyboard layout in and
+// the name box takes the letter.
+bool SendKeyboard(const keyboard::Output& out) {
+    const HKL layout=GetKeyboardLayout(gameWindow?GetWindowThreadProcessId(gameWindow,nullptr):0);
+    WORD vk=0;bool shift=false;
+    if(out.send==keyboard::Send::Char) {
+        const SHORT k=VkKeyScanExW(out.ch,layout);
+        if(k==-1||(HIBYTE(k)&6))return false;   // not on this layout, or only with Ctrl / Alt
+        vk=LOBYTE(k);shift=(HIBYTE(k)&1)!=0;
+    } else if(out.send==keyboard::Send::Backspace)vk=VK_BACK;
+    else if(out.send==keyboard::Send::Enter)vk=VK_RETURN;
+    else return false;
+    const WORD scan=WORD(MapVirtualKeyExW(vk,MAPVK_VK_TO_VSC,layout)),shiftScan=WORD(MapVirtualKeyExW(VK_LSHIFT,MAPVK_VK_TO_VSC,layout));
+    if(!scan||(shift&&!shiftScan))return false;
+    INPUT in[4]{};UINT n=0;
+    const auto key=[&](WORD code,bool up) {
+        INPUT& i=in[n++];i.type=INPUT_KEYBOARD;i.ki.wScan=code;
+        i.ki.dwFlags=KEYEVENTF_SCANCODE|(up?KEYEVENTF_KEYUP:0);i.ki.dwExtraInfo=panels::KeyboardKeyTag;
+    };
+    if(shift)key(shiftScan,false);
+    key(scan,false);key(scan,true);
+    if(shift)key(shiftScan,true);
+    return SendInput(n,in,sizeof(INPUT))==n;
+}
 void MenuPointer(const menus::Pad& controls) {
     nativeMenuPad={};
-    pointerVisible=pointerHit=false;
-    if(settingsModel.open||bodyCalibration.Active()||calibrationRelease.blocked){panelinput::ItemHover(false);menuDrop.Reset();respecShown=false;respecButton.Hide();return;}
+    pointerVisible=pointerHit=keyboardPointer=false;
+    if(settingsModel.open||bodyCalibration.Active()||calibrationRelease.blocked){panelinput::ItemHover(false);menuDrop.Reset();stashInput.Reset();stashShown=false;stashPad=0;respecShown=false;respecButton.Hide();keyboardShown=false;keyboardLit=-1;return;}
     const bool spatialReady=spatialMode&&SurfacePlaced()&&uiCrop[2]>0;
     const bool uiActive=(panelMode&&menuPlaced)||spatialReady;
     const auto surfacePose=spatialMode?UiSurfacePose():menuPose;
@@ -2063,6 +2166,36 @@ void MenuPointer(const menus::Pad& controls) {
         if(pointerHit) {
             const auto point=hit.point+math::Rotate(Q(surfacePose.orientation),{0,0,.006f});
             dotPose=surfacePose;dotPose.position={point.x,point.y,point.z};
+        }
+    }
+    // The VR keyboard for character creation's name box (vr_keyboard.h): its own board hinged under
+    // the menu, out of the game's picture. The laser hits the board itself; on it (keys or the gaps
+    // between them) the laser is the keyboard's - no game cursor, no button under it, no game
+    // trigger - and a pull on a key types it into the box. Close hides it until the box comes up
+    // anew (another hero picked, or creation opened again).
+    const uint32_t keyboardEpoch=gamestate::KeyboardEpoch();
+    if(keyboardClosed&&keyboardEpoch!=keyboardClosedEpoch)keyboardClosed=false;
+    const bool keyboardWas=keyboardShown;
+    keyboardShown=keyboardArtReady&&uiActive&&!journalMode&&!leatherMode&&gamestate::KeyboardShown()&&!keyboardClosed;
+    if(keyboardShown!=keyboardWas) {
+        keyboardTypist.Reset();keyboardPress.Reset();
+        Say(keyboardShown?"Frame panels: VR keyboard shown (the name box is up)":"Frame panels: VR keyboard hidden");
+    }
+    bool onKeyboard=false;keyboardLit=-1;
+    if(keyboardShown&&aimTracked&&!(mouseDown||rightMouseDown)) {
+        const auto board=keyboard::Place(V(surfacePose.position),Q(surfacePose.orientation),surface.width,surface.height);
+        const auto ray=V(aim.pose.position),direction=math::Rotate(Q(aim.pose.orientation),{0,0,-1});
+        math::PanelHit on{};
+        if(math::IntersectPanel(ray,direction,board.position,board.orientation,board.width,board.height,on)&&(!pointerHit||on.distance<hit.distance)) {
+            onKeyboard=keyboardPointer=true;pointerHit=false;   // the menu's laser hit is not this one
+            keyboardLit=keyboard::KeyAt(on.u,on.v);
+            beamLength=on.distance;
+            const auto mid=ray+direction*(beamLength*.5f);
+            const auto rot=math::BeamOrientation(direction,V(head.position)-mid);
+            beamPose.position={mid.x,mid.y,mid.z};beamPose.orientation={rot.x,rot.y,rot.z,rot.w};
+            const auto point=on.point+math::Rotate(board.orientation,{0,0,.006f});
+            dotPose.position={point.x,point.y,point.z};
+            dotPose.orientation={board.orientation.x,board.orientation.y,board.orientation.z,board.orientation.w};
         }
     }
     // The Advanced Stats button below the tabbed menu's hint row (stats_button.h): the laser
@@ -2100,7 +2233,28 @@ void MenuPointer(const menus::Pad& controls) {
             if(!respec::Request()){respecButton.Refused();Say("Frame panels: Reset Skills & Stats refused (not an offline game, or a reset already running)");}
         } else if(respecButton.Confirming())Say("Frame panels: Reset Skills & Stats - Confirm? shown");
     }
-    const bool onButton=onStats||onRespec;   // a stamped button: no game cursor, no game trigger
+    stashShown=stashArtReady&&spatialReady&&!journalMode&&gamestate::StashButtonsShown();
+    stashHover=-1;
+    if(stashShown&&focused&&aimTracked&&pointerHit&&!(mouseDown||rightMouseDown))
+        for(int i=0;i<2;++i)
+            if(respecbutton::Hit(stashbuttons::Place(surface.width,surface.height,i),surface.width,surface.height,hit.u,hit.v))stashHover=i;
+    stashPad=stashInput.Step(stashShown&&uiActive&&focused,stashHover,pressed,respecNow);
+    // A pull on a VR keyboard key (the board under the menu, above).
+    if(keyboardPress.Step(onKeyboard&&uiActive,pressed,GetTickCount64())&&keyboardLit>=0) {
+        const auto typed=keyboardTypist.Press(keyboardLit);
+        if(typed.close) {
+            keyboardClosed=true;keyboardClosedEpoch=keyboardEpoch;
+            Say("Frame panels: VR keyboard closed until the name box comes up anew");
+        } else if(typed.send!=keyboard::Send::None) {
+            if(!focused)Say("Frame panels: VR keyboard key not sent - the game window is not focused");
+            else if(!SendKeyboard(typed))Say("Frame panels: VR keyboard key could not be sent (not on this keyboard layout, or SendInput refused)");
+            else {
+                static bool told=false;
+                if(!told){told=true;Say("Frame panels: VR keyboard typing into the game");}
+            }
+        }
+    }
+    const bool onButton=onStats||onRespec||stashHover>=0||onKeyboard;   // a stamped button: no game cursor, no game trigger
     // An item on the game's cursor and a trigger pull begun off the menu's art (past or on the
     // hide, or the band's see-through margins): the pad's X, the controller menu's own Drop for
     // the item held (menu_drop.h). The tabbed menu (and its cube) only; never without an item on
@@ -2131,14 +2285,15 @@ void MenuPointer(const menus::Pad& controls) {
     // navigation" / "laser navigation" every second while walking and turning), hiding it.
     menus::Pad navigation=controls;
     if(leatherMode&&leatherShown.load())navigation.lx=navigation.ly=navigation.rx=navigation.ry=0;
-    if(onButton||statsPress.Held()||respecPress.Held()||dropOwns)navigation.rt=0;   // a button's or the drop's trigger is never the game's RT
+    if(onButton||statsPress.Held()||respecPress.Held()||stashInput.Held()||keyboardPress.Held()||dropOwns)navigation.rt=0;   // a button's or the drop's trigger is never the game's RT
     nativeMenuPad=menuNavigation.Step(uiActive&&focused,navigation,pointerHit&&!onButton,hit.u,hit.v,mouseDown||rightMouseDown);
+    nativeMenuPad.buttons|=stashPad;
     if(statsPress.Held())nativeMenuPad.buttons|=menus::Back;   // View: Advanced Stats (Start closes the menu)
     if(menuDrop.Down())nativeMenuPad.buttons|=menus::X;   // X: the controller menu's Drop for the item on the cursor
     if(wasNative!=menuNavigation.Native()&&uiActive&&focused)
         Say(menuNavigation.Native()?"Frame panels: native controller navigation":"Frame panels: laser navigation");
     const bool laser=!menuNavigation.Native();
-    if(!laser){panelinput::UseController();pointerVisible=pointerHit=false;}
+    if(!laser){panelinput::UseController();pointerVisible=pointerHit=keyboardPointer=false;}
     // The handheld journal has its own left-grip placement; the leather is strapped to the left hand.
     const bool grip=aimTracked&&laser&&!journalMode&&!leatherMode&&(controls.buttons&menus::RightBumper);
     const bool grabbing=GrabPanel(spatialMode?uiPose:menuPose,spatialMode?uiBase:menuBase,menuOffset,
@@ -2180,9 +2335,18 @@ void MenuPointer(const menus::Pad& controls) {
     triggerWasDown=pressed;cancelWasDown=(controls.buttons&menus::B)!=0;
 }
 
+// Aim with your eyes: this frame's gaze for vrcam (GazeAimLocal), in the left eye's view.
+void PublishGazeAim(bool valid,math::Vec local) {
+    std::lock_guard lock(gazeAimMutex);
+    gazeAimSampled.valid=valid;
+    if(valid){gazeAimSampled.local=local;gazeAimSampled.at=GetTickCount64();}
+}
 void SampleGaze() {
     gazeValid=false;
-    if(!eyeTracking.load()||!render||panelMode){gazeStability.Reset();return;}
+    // Foveation's eye tracking, or Aim with your eyes (gaze_aim.h), which reads them with foveation Fixed or Off too.
+    const bool foveate=eyeTracking.load(),aim=gazeAimWanted.load();
+    bool aimValid=false;math::Vec aimLocal{0,0,-1};
+    if(!(foveate||aim)||!render||panelMode){gazeStability.Reset();PublishGazeAim(false,aimLocal);return;}
     // These diagnostics report only validity/age categories, never gaze poses,
     // coordinates, fixation targets or a recorded gaze trajectory.
     enum {Unavailable,Inactive,Untracked,Untimed,Stale,Outside,Recovering,Usable,Count};
@@ -2196,28 +2360,39 @@ void SampleGaze() {
             constexpr auto needed=XR_SPACE_LOCATION_POSITION_VALID_BIT|XR_SPACE_LOCATION_ORIENTATION_VALID_BIT|
                 XR_SPACE_LOCATION_POSITION_TRACKED_BIT|XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT;
             if(XR_SUCCEEDED(pLocateSpace(gazeSpace,space,frameState.predictedDisplayTime,&loc))&&(loc.locationFlags&needed)==needed) {
+                // The gaze and the views are located in the same space at the same display time: the
+                // gaze in the left eye's view is what vrcam's left-eye camera axes turn into the world.
+                if(aim&&gazeaim::Usable(true,frameState.predictedDisplayTime,sample.time)) {
+                    aimLocal=math::Rotate(math::Conjugate(Q(views[0].pose.orientation)),math::Rotate(Q(loc.pose.orientation),{0,0,-1}));
+                    aimValid=std::isfinite(aimLocal.x+aimLocal.y+aimLocal.z);
+                }
                 status=sample.time?Stale:Untimed;
                 if(gaze::Fresh(frameState.predictedDisplayTime,sample.time)) {
-                    bool projected=true;
-                    for(unsigned i=0;i<2;++i) {
-                        const auto& f=views[i].fov;
-                        projected&=gaze::Project(Q(loc.pose.orientation),Q(views[i].pose.orientation),
-                            {f.angleLeft,f.angleRight,f.angleDown,f.angleUp},gazeCenters[i]);
+                    if(!foveate)status=Usable;   // aiming only: no foveation centres
+                    else {
+                        bool projected=true;
+                        for(unsigned i=0;i<2;++i) {
+                            const auto& f=views[i].fov;
+                            projected&=gaze::Project(Q(loc.pose.orientation),Q(views[i].pose.orientation),
+                                {f.angleLeft,f.angleRight,f.angleDown,f.angleUp},gazeCenters[i]);
+                        }
+                        status=projected?Recovering:Outside;
+                        gazeValid=gazeStability.Update(projected,gazeCenters);
+                        if(gazeValid)status=Usable;
                     }
-                    status=projected?Recovering:Outside;
-                    gazeValid=gazeStability.Update(projected,gazeCenters);
-                    if(gazeValid)status=Usable;
                 }
             }
         }
     }
+    PublishGazeAim(aimValid,aimLocal);
     if(status!=Recovering&&status!=Usable)gazeStability.Reset();
     static std::array<uint32_t,Count> counts{};static ULONGLONG reportAt=0;
     ++counts[status];const auto now=GetTickCount64();
     if(now>=reportAt) {
         char line[300];std::snprintf(line,sizeof line,
-            "Frame gaze: samples usable=%u recovery/jump=%u unavailable=%u inactive=%u untracked=%u untimed=%u stale=%u outside=%u; invalid uses full quality",
-            counts[Usable],counts[Recovering],counts[Unavailable],counts[Inactive],counts[Untracked],counts[Untimed],counts[Stale],counts[Outside]);
+            "Frame gaze: samples usable=%u recovery/jump=%u unavailable=%u inactive=%u untracked=%u untimed=%u stale=%u outside=%u; %s",
+            counts[Usable],counts[Recovering],counts[Unavailable],counts[Inactive],counts[Untracked],counts[Untimed],counts[Stale],counts[Outside],
+            foveate?(aim?"invalid uses full quality; aiming too":"invalid uses full quality"):"for Aim with your eyes only (foveation not eye tracked)");
         Say(line);counts={};reportAt=now+5000;
     }
 }
@@ -2511,6 +2686,7 @@ void SettingsPointer(bool grip) {
         const auto weapon=gamestate::WeaponType();
         context.bow=weapon==D2RVR_TYPE_BOW;context.staff=weapon==D2RVR_TYPE_STAFF;
         context.thrown=weapon==D2RVR_TYPE_JAVELIN||weapon==D2RVR_TYPE_THROWING||gamestate::RightThrowingPotion();   // a throwing potion's toss is lifted too
+        context.eyeTracker=gazeReady&&gazeSpace;   // Aim with your eyes shows only with one
         settingsModel.SetContext(context);settings::layout::SettleView(settingsModel);
     }
     const auto previousView=settingsModel.view;
@@ -2647,7 +2823,8 @@ void StepCompanionTacticalGestures(uint64_t now, float rightTrigger, float leftT
     }
 
     const bool handsBusy = interactionOutput.nearBelt >= 0 || interactionOutput.nearHolster >= 0 ||
-                           interactionOutput.wheel || interactionOutput.settings || motionOutput.bowDrawing;
+                           interactionOutput.wheel || interactionOutput.settings || motionOutput.bowDrawing ||
+                           (interactionInput.clickToDrink && interactionOutput.bottle >= 0);
     if (handsBusy) {
         if (g_tacticalGrabHand >= 0) {
             framevr::telegraph::Current().ClearSkill(-2);
@@ -3354,7 +3531,7 @@ void Input() {
         }
     } else leatherStow.Reset();
     if(!settingsOwned&&!settingsChord)MenuPointer(controls);
-    else {menuDrop.Reset();nativeMenuPad={};menuNavigation.Reset();panelinput::UseController();pointerVisible=pointerHit=false;triggerWasDown=Float(trigger,0)>.2f;cancelWasDown=Bool(secondary,0);}
+    else {stashInput.Reset();stashShown=false;stashPad=0;menuDrop.Reset();nativeMenuPad={};menuNavigation.Reset();panelinput::UseController();pointerVisible=pointerHit=false;triggerWasDown=Float(trigger,0)>.2f;cancelWasDown=Bool(secondary,0);}
     // The native Back went to the game above; one it leaves unanswered closes the menu (leather::Back).
     if(leatherBack.Step(leatherMode&&!settingsOwned&&!settingsChord,(controls.buttons&menus::B)!=0,mouseDown||rightMouseDown,
                         gamestate::PanelChanges(),GetTickCount64())&&gamestate::CloseLeatherMenu())
@@ -3418,12 +3595,46 @@ void Input() {
     }
     handAimAt=GetTickCount64();
     const auto bindingSnapshot=interactionstate::Read();
+    {   // Floating map: before the right stick's gestures, the map zoom and the hands' skills read the grips and the stick
+        floatMapWant=floatMapPointed=false;
+        const bool gameplay=motionInput.active&&!interactionOutput.wheel&&!interactionOutput.settings&&
+            interaction::Fresh(bindingSnapshot,gamestate::LocalPlayer(),GetTickCount64());
+        floatmap::InputFrame f{motionInput.time,GetTickCount64(),gamestate::LocalPlayer(),gameplay,
+            interactionOutput.owner[0]==interaction::Owner::Combat&&interactionOutput.bottleHand!=0&&!motionOutput.bowDrawing,
+            interactionOutput.owner[1]==interaction::Owner::Combat&&interactionOutput.bottleHand!=1&&!motionOutput.bowDrawing,
+            interactionOutput.nearBelt>=0||interactionOutput.nearHolster>=0,
+            motionInput.head.p,motionInput.head.q,motionHeadTracked,
+            {motionInput.hand[0].p,motionInput.hand[1].p},{motionInput.tracked[0],motionInput.tracked[1]},motionInput.hand[0].q,
+            handAim[0].p,handAim[0].q,handAimTracked[0],handAim[1].p,handAim[1].q,handAimTracked[1],
+            floatMapWrist.p,floatMapWrist.q,floatMapWristMs,interaction::WristMapSize,
+            motionInput.grip[0],motionInput.grip[1],controls.rx,controls.ry,floatMapWant,floatMapPointed,
+            +[](int h,float s){MotionPulse(h,haptics::Category::Interaction,s,25000000);},&Say};
+        floatmap::StepFrame(f);
+    }
     uint64_t bindingContext=bindingSnapshot.session^(uint64_t(bindingSnapshot.bindingBank+1)<<48)^(meleeEpoch<<16)^motionInput.equipment;
     uint64_t bindingLayout=0;
     for(const auto& skill:bindingSnapshot.skills)bindingLayout=(bindingLayout^uint32_t(skill.id+2)^uint32_t(skill.owner)^
         (uint64_t(skill.known)<<40)^(uint64_t(skill.available)<<41)^(uint64_t(skill.motion)<<42)^(uint64_t(skill.physical)<<43))*1099511628211ull;
     skills::HandInput handInput;handInput.time=motionInput.time;handInput.context=bindingContext;
     handInput.layout=bindingLayout;
+    // A crossbow in the hands: the right trigger fires it as Attack, whatever skill its slot holds
+    // (gameplay::CrossbowAttack). Only this frame's routing changes, never the saved binding.
+    const auto& triggerSkill=bindingSnapshot.skills[skills::TriggerSlot(0)];
+    const bool crossbowAttack=gameplay::CrossbowAttack(motionControls.load(),motionInput.weapon,triggerSkill.known,triggerSkill.id,triggerSkill.available);
+    if(interaction::Fresh(bindingSnapshot,gamestate::LocalPlayer(),GetTickCount64())) {
+        const bool kept=!crossbowAttack&&motionControls.load()&&motionInput.weapon==gameplay::Weapon::Crossbow&&
+            triggerSkill.known&&triggerSkill.available&&weaponskills::Bow(triggerSkill.id);
+        const int mode=crossbowAttack?1:kept?2:0;
+        if(mode!=crossbowTriggerMode||(mode&&triggerSkill.id!=crossbowTriggerSkill)) {
+            char line[200];line[0]=0;
+            if(mode==1)std::snprintf(line,sizeof line,"Frame crossbow: right trigger fires the crossbow (slot holds skill %d; its binding is untouched)",triggerSkill.id);
+            else if(mode==2)std::snprintf(line,sizeof line,"Frame crossbow: right trigger keeps skill %d, a bow skill the game fires from the crossbow",triggerSkill.id);
+            else if(crossbowTriggerMode==1)std::snprintf(line,sizeof line,"Frame crossbow: %s, right trigger back to skill %d",
+                motionInput.weapon!=gameplay::Weapon::Crossbow?"crossbow off":!motionControls.load()?"motion controls off":"slot changed",triggerSkill.id);
+            if(line[0])Say(line);
+            crossbowTriggerMode=mode;crossbowTriggerSkill=triggerSkill.id;
+        }
+    }
     if(bowvr::SpellReady()&&interaction::Fresh(bindingSnapshot,gamestate::LocalPlayer(),GetTickCount64()))
         for(int i=0;i<skills::Count;++i)if(bindingSnapshot.skills[i].physical&&bindingSnapshot.skills[i].available)
             handInput.independentSlots|=1u<<i;
@@ -3435,6 +3646,7 @@ void Input() {
     const auto& glyphValues=glyphSaveSequence?glyphWanted:glyphSettings.values;
     const auto glyphDrawSlots=glyphSettings.ready?glyphcast::DrawSlots(glyphValues[settings::GlyphDraw],glyphValues[settings::GlyphDrawSecond]):std::array<int,2>{-1,-1};
     for(const int slot:glyphDrawSlots)if(slot>=0)handInput.independentSlots&=~(1u<<slot);
+    if(crossbowAttack)handInput.independentSlots&=~(1u<<skills::TriggerSlot(0));   // the crossbow's, not a hand spell's
     handInput.layout^=uint64_t(handInput.independentSlots)<<48;
     handInput.active=motionInput.active&&motionInput.tracked[0]&&motionInput.tracked[1]&&handAimTracked[0]&&handAimTracked[1]&&gamestate::LocalPlayer();
     handInput.occupied=interactionOutput.bottle>=0||interactionOutput.owner[0]==interaction::Owner::Holster||interactionOutput.owner[1]==interaction::Owner::Holster;
@@ -3512,6 +3724,11 @@ void Input() {
     // (below, off by default). The push is owned either way, so it never snap-turns.
     interactionInput.reservedLeft=(controls.buttons&menus::LeftStick)!=0;interactionInput.trigger=handOutput.wheel==0?controls.lt/255.f:controls.rt/255.f;interactionInput.hover=motionInput.hover;
     const auto hudSettings=vrsettings::Read();
+    interactionInput.clickToDrink=hudSettings.values[settings::ClickToDrink]>.5f;
+    // Drinking owns the raw pull even if a previously armed mercenary chord
+    // withheld it from the game's controls before this frame's bottle update.
+    interactionInput.bottleTrigger[0]=Float(trigger,0);
+    interactionInput.bottleTrigger[1]=Float(trigger,1);
     interactionInput.navigationLocation=vitals::Location(int(hudSettings.values[settings::NavigationLocation]));
     interactionInput.vitalsLocation=vitals::Location(int(hudSettings.values[settings::VitalsLocation]));
     {   // the HUD held with the menu: its life / mana / XP picture
@@ -3901,8 +4118,9 @@ void Input() {
         const auto view=mapzoom::Target(
             wristMapShown&&mapSupported&&interaction::NavigationWanted(interactionInput,interactionOutput,interactionInput.at),
             menuMapShown&&mapSupported&&interaction::MenuMapWanted(interactionInput,interactionOutput,interactionInput.at));
-        wristMapLooked=mapzoom::LookedAt(view,mapZoomView,wristMapLooked,interactionInput.head.p,interactionInput.head.q,
+        wristMapLookedOnly=mapzoom::LookedAt(view,mapZoomView,wristMapLookedOnly,interactionInput.head.p,interactionInput.head.q,
             wristMapCenter,menuMapCenter);
+        wristMapLooked=wristMapLookedOnly||floatMapPointed;   // a map pointed at with a floating copy out zooms too
         mapZoomView=view;
         mapzoom::Input in;in.time=interactionInput.time;in.looking=MinimapLooked();
         in.stick=controls.ry/32767.f;in.x=controls.rx/32767.f;
@@ -3919,7 +4137,8 @@ void Input() {
         // One line a gesture: a start at most every half second, and its stop.
         const uint64_t tick=GetTickCount64();
         if(zoom.started&&tick>=mapZoomLogAt){
-            char line[96];std::snprintf(line,sizeof line,"Frame map zoom: start at %.2fx (%s) on the %s",zoom.zoom,in.stick>0?"in":"out",mapzoom::Name(view));Say(line);
+            char line[96];std::snprintf(line,sizeof line,"Frame map zoom: start at %.2fx (%s) on the %s",zoom.zoom,in.stick>0?"in":"out",
+                floatMapPointed&&!wristMapLookedOnly?"floating map":mapzoom::Name(view));Say(line);
             mapZoomLogAt=tick+500;mapZoomLogged=true;
         }
         if(zoom.stopped&&mapZoomLogged){
@@ -3931,7 +4150,7 @@ void Input() {
             mapZoomLogged=false;
         }
     }
-    gamestate::MenuMap(mapSupported&&interaction::MapWanted(interactionInput,interactionOutput,interactionInput.at));
+    gamestate::MenuMap(mapSupported&&(interaction::MapWanted(interactionInput,interactionOutput,interactionInput.at)||floatMapWant));
     if(interactionOutput.inventory&&toggleMenus)toggleMenus();
     if(handOutput.wheel>=0&&!interactionOutput.wheel){handControls.Close();handOutput={};}
     if(interactionOutput.cancelPending)interactionstate::Cancel();
@@ -3999,7 +4218,7 @@ void Input() {
     const bool quickFresh=interaction::Fresh(quickSnapshot,interactionInput.session,interactionInput.at);
     const auto& rightSkill=quickSnapshot.skills[skills::TriggerSlot(0)];
     const auto gestureSettings=vrsettings::Read().values;
-    const int selected=rightSkill.known&&rightSkill.id>=0?skills::TriggerSlot(0):-1;
+    const int selected=gameplay::TriggerSelection(rightSkill.known,rightSkill.id,crossbowAttack);
     if(motion.Selection()!=selected)motion.Select(selected);
     motionInput.selectedSkill=rightSkill.id;motionInput.selectedOwner=rightSkill.owner;
     motionInput.selectedAvailable=quickFresh&&rightSkill.known&&rightSkill.available&&rightSkill.motion;
@@ -4040,12 +4259,20 @@ void Input() {
         if(step.consumed&&requested>=0&&requested!=skills::TriggerSlot(0)&&skills::Hand(requested)==press.hand){requested=-1;handOutput.interact=false;}
         if(step.change!=weaponskills::Quiver::Change::None)
             MotionPulse(press.hand,haptics::Category::Interaction,step.change==weaponskills::Quiver::Change::Loaded?.45f:.25f,35000000);
-        quiverArrow={};
+        quiverArrow={};nativeArrow={};
         if(bow) {
             // A loaded skill wins; otherwise a quiver skill on the left trigger
             // (the bow's gesture skill) uses the same physical release.
             const auto& loaded=quiver.Current();
+            // #364: a loaded Multiple Shot, Guided Arrow or Strafe - each draw and release
+            // presses the face button it came from, as the left trigger's bow skill does,
+            // while that button still holds it.
+            const int from=quiver.Slot();
+            const auto& on=quickSnapshot.skills[from>=0&&from<skills::Count?from:0];
+            const bool native=loaded.Active()&&weaponskills::NativeLoad(loaded.skill)&&from>=0&&from<skills::Count&&
+                on.known&&on.available&&on.motion&&on.id==loaded.skill&&on.owner==loaded.owner;
             if(loaded.Active()&&weaponskills::Loadable(loaded.skill,loaded.missile,false))quiverArrow=loaded;
+            else if(native){nativeArrow=loaded;motionInput.bowSlot=from;motionInput.bowSkill=loaded.skill;motionInput.bowOwner=loaded.owner;}
             else if(shieldSkill.known&&shieldSkill.available&&weaponskills::QuiverSkill(shieldSkill.id)&&weaponskills::QuiverMissile(shieldSkill.missile))
                 quiverArrow={shieldSkill.id,shieldSkill.owner,shieldSkill.missile};
         } else if(thrown) {
@@ -4067,7 +4294,7 @@ void Input() {
     const bool glyphPressed=handOutput.slot>=0&&glyphDrawSlots[size_t(skills::Hand(handOutput.slot))]==handOutput.slot;
     if(glyphPressed){requested=-1;handOutput.interact=false;}
     const bool requestedKnown=requested>=0&&quickFresh&&quickSnapshot.skills[requested].known&&quickSnapshot.skills[requested].available;
-    handOutput.interact=requestedKnown&&quickSnapshot.skills[requested].id==357;
+    handOutput.interact=requestedKnown&&quickSnapshot.skills[requested].id==357&&!(crossbowAttack&&requested==skills::TriggerSlot(0));
     const bool quick=requested>=0&&requested!=skills::TriggerSlot(0);
     motionInput.quickCast=quick||handOutput.interact;
     motionInput.quickSkill=quick&&requestedKnown&&!handOutput.interact?requested:-1;
@@ -4090,6 +4317,7 @@ void Input() {
     const uint32_t potionCode=motionInput.potion?gamestate::RightThrowingPotionCode():0u;
     const bool potionBottle=potionCode&&bottlePhysics.load()&&potionModels.Radius(potionCode)>0;
     motionOutput=motion.Step(motionInput);motionAt=GetTickCount64();
+    seekerArrowReady.store(motionInput.active&&motionOutput.bowReady&&aimrules::AlwaysHomes(motionInput.bowSkill));
     if(motionOutput.tossHeld)tossLanding={};   // a new trap in hand: nothing placed yet
     const auto& tossStage=interactionInput.stage;
     const bool tossWorld=interactionInput.floorKnown&&tossStage.known&&stageWorld.upm>=1&&stageWorld.upm<=12;
@@ -4566,6 +4794,11 @@ void Input() {
         }
     }
     if(motionOutput.nativeBowRelease&&motionInput.bowSkill==weaponskills::Strafe)volleyRequestedAt=motionAt;
+    if(motionOutput.nativeBowRelease&&nativeArrow.Active()) {
+        char line[160];std::snprintf(line,sizeof line,"Frame bow quiver: release presses loaded skill=%d natively via slot %d",
+            nativeArrow.skill,motionInput.bowSlot);
+        Say(line);
+    }
     // Gesture skills on a trigger are labelled GESTURE on the hand wheel and
     // say how in the hand's cue, as Smite on a shield and arrow skills on a bow
     // do: a strike skill (strike_skills.h) casts with the hand's landed strikes
@@ -4589,10 +4822,15 @@ void Input() {
         if(cue.available&&!cue.temporary&&cue.slot==skills::TriggerSlot(0)&&(motionInput.toss||strikes(skill))) {
             cue.gesture=true;cue.strike=!motionInput.toss;std::snprintf(cue.hint,sizeof cue.hint,"%s",motionInput.toss?"Throw to place":"Swing to strike");
         }
+        if(cue.available&&!cue.temporary&&cue.slot==skills::TriggerSlot(0)&&skill.id==weaponskills::Attack&&motionInput.weapon==gameplay::Weapon::Crossbow)
+            std::snprintf(cue.hint,sizeof cue.hint,"Crossbow: pull trigger");
     } else if(cue.slot<0) {
+        // A crossbow's trigger is Attack (also over the slot's skill: gameplay::CrossbowAttack).
+        const bool crossbow=motionInput.weapon==gameplay::Weapon::Crossbow;
         cue.known=cue.available=true;
-        std::snprintf(cue.name,sizeof cue.name,"%s",motionInput.weapon==gameplay::Weapon::Bow?"Basic Arrow":"Basic Attack");
-        std::snprintf(cue.hint,sizeof cue.hint,"%s",motionInput.weapon==gameplay::Weapon::Bow?"Draw & release":motionInput.weapon==gameplay::Weapon::Javelin?"Swing / throw":"Swing / trigger");
+        std::snprintf(cue.name,sizeof cue.name,"%s",motionInput.weapon==gameplay::Weapon::Bow?"Basic Arrow":crossbow?"Attack":"Basic Attack");
+        std::snprintf(cue.hint,sizeof cue.hint,"%s",motionInput.weapon==gameplay::Weapon::Bow?"Draw & release":motionInput.weapon==gameplay::Weapon::Javelin?"Swing / throw":
+            crossbow?"Crossbow: pull trigger":"Swing / trigger");
     } else {
         std::snprintf(cue.name,sizeof cue.name,"Skill unavailable");std::snprintf(cue.hint,sizeof cue.hint,"Refresh assignments");
     }
@@ -4611,11 +4849,13 @@ void Input() {
         }
     };
     if(cue.available&&!cue.temporary)if(const char* how=paladinGesture(cue.id)){cue.gesture=true;std::snprintf(cue.hint,sizeof cue.hint,"%s",how);}
-    if(quiverArrow.Active()&&!cue.temporary&&(motionInput.weapon==gameplay::Weapon::Bow||motionInput.weapon==gameplay::Weapon::Javelin)) {
+    // The arrow the next release carries: a quiver skill's, or a loaded native bow skill's (#364).
+    const auto& carried=quiverArrow.Active()?quiverArrow:nativeArrow;
+    if(carried.Active()&&!cue.temporary&&(motionInput.weapon==gameplay::Weapon::Bow||motionInput.weapon==gameplay::Weapon::Javelin)) {
         const bool javelin=motionInput.weapon==gameplay::Weapon::Javelin;
         const char* name=nullptr;
-        for(const auto& skill:quickSnapshot.skills)if(skill.known&&skill.id==quiverArrow.skill&&skill.owner==quiverArrow.owner){name=skill.name;break;}
-        cue.id=quiverArrow.skill;cue.owner=quiverArrow.owner;cue.known=cue.available=true;
+        for(const auto& skill:quickSnapshot.skills)if(skill.known&&skill.id==carried.skill&&skill.owner==carried.owner){name=skill.name;break;}
+        cue.id=carried.skill;cue.owner=carried.owner;cue.known=cue.available=true;
         std::snprintf(cue.name,sizeof cue.name,"%s",name?name:javelin?"Javelin skill":"Skill arrow");
         std::snprintf(cue.hint,sizeof cue.hint,"%s",javelin?(quiver.Current().Active()?"Loaded: throw":"Throw"):
             quiver.Current().Active()?"Loaded: draw & release":"Draw & release");
@@ -4828,6 +5068,23 @@ void Input() {
         const bool dual=!claws&&dualwield::Eligible(skel::HeroClass(),weapons);
         if(dual)sample.weapons=weapons;
         sample.claws=claws;
+        // Bow bash (bow_bash.h, #443; VR Settings > Combat > Melee, off by default): the bow in the left hand,
+        // its string not drawn, swung into a monster staggers it. The lane also needs both triggers released (below).
+        const bool bowBash=gestureSettings[settings::BowBash]>.5f&&motionInput.active&&!claws&&
+            motionInput.weapon==gameplay::Weapon::Bow&&!motionOutput.bowDrawing&&!motionOutput.block;
+        // Weapon heft (weapon_heft.h, #443; VR Settings > Combat > Melee, off by default): the hand travel this
+        // hand's weapon needs for a full hit, from its kind, two-handed grip and speed (WSM); 0 = whole.
+        const auto heftNeed=[&](int hand)->float {
+            if(gestureSettings[settings::WeaponHeft]<.5f||claws)return 0;
+            const int body=dual?weapons.BodyHand(hand):hand==0?0:-1;   // the inventory arm whose weapon this hand swings
+            if(body<0)return 0;
+            const uint32_t type=dual?weapons.type[body]:gamestate::WeaponType();
+            // TwoHanded() and AttackWsm(0) describe the weapon in hand (when dual wielding, the right arm's);
+            // AttackWsm(1) the left arm's, whose two-handed bit the game state does not keep.
+            const bool twoHanded=(!dual||body==0)&&(gamestate::TwoHanded()&D2RVR_TWO_HANDED)!=0;
+            return heft::Need(heft::Weight(type,twoHanded,gamestate::AttackWsm(dual?body:0)));
+        };
+        sample.heft=heftNeed(0);
         // Melee-skill contact adapter: each hand's strikes carry its own trigger
         // skill when that is a confirmed strike skill (strike_skills.h). The
         // assignment identity rides the sample, so a rebind drops a queued stroke.
@@ -4842,10 +5099,13 @@ void Input() {
         strike(0);
         meleePoses.Push(s.sampleStamp,sample);
         sample.hand=motionInput.hand[1];sample.handIndex=1;
-        sample.active=sample.active&&(dual||claws)&&controls.lt<51&&controls.rt<51;
+        sample.bowBash=bowBash;
+        sample.active=((sample.active&&(dual||claws))||bowBash)&&controls.lt<51&&controls.rt<51;
+        sample.heft=bowBash?0.f:heftNeed(1);
         strike(1);
+        if(bowBash)sample.strikeSkill=-1;   // a bow's swing never casts
         offhandPoses.Push(s.sampleStamp,sample);
-        sample.weapons={};sample.claws=false;sample.strikeSkill=-1;
+        sample.weapons={};sample.claws=false;sample.strikeSkill=-1;sample.bowBash=false;sample.heft=0;
         sample.hand=motionInput.hand[1];sample.shield=true;sample.active=motionInput.active&&motionOutput.shieldContact;
         sample.skillSlot=shieldSlot;sample.skillOwner=shieldSkill.owner;sample.skillContext=motionInput.skillContext;
         shieldPoses.Push(s.sampleStamp,sample);
@@ -4871,6 +5131,15 @@ void Input() {
         bowPending.session=gamestate::LocalPlayer();bowPending.equipment=motionInput.equipment;
         bowPending.epoch=(meleeEpoch<<32)|bowWorldEpoch;bowPending.sequence=++bowSequence;
         bowNeedsWorld=true;
+    }
+    // A drawn Multiple Shot: the game makes the fan, which then flies this
+    // release's pose, pitch included (bowvr::ArmFan, bow_flight.h FanVolley).
+    if(motionOutput.nativeBowRelease&&motionOutput.nativeBowSkill==bowflight::MultipleShot&&motionInput.weapon==gameplay::Weapon::Bow) {
+        auto& p=fanPending;p={};p.missile=213;
+        p.origin=motionInput.hand[0].p;p.direction=motionOutput.releaseDirection;p.draw=motionOutput.draw;
+        p.at=GetTickCount64();p.stamp=s.sampleStamp;p.session=gamestate::LocalPlayer();p.equipment=motionInput.equipment;
+        p.epoch=(meleeEpoch<<32)|bowWorldEpoch;p.sequence=++bowSequence;
+        fanNeedsWorld=true;
     }
     if(motionOutput.leftRelease&&leftThrowArmed) {
         // Double Throw: the left hand throws its own weapon (the launch
@@ -5666,7 +5935,7 @@ bool Copy(ID3D12Resource* src,Eye& e,reshade::api::command_queue* rq) {
     e.copied=true;return true;
 }
 bool CopyMap(reshade::api::command_queue* rq) {
-    if(!mapSupported||mapEye.copied||!interaction::MapWanted(interactionInput,interactionOutput,GetTickCount64()))return true;
+    if(!mapSupported||mapEye.copied||!(interaction::MapWanted(interactionInput,interactionOutput,GetTickCount64())||floatMapWant))return true;
     if(swapchainsShort&&spatialMode)return true;   // the native menus' panel may need its surface: no map while they are open
     uint32_t w=0,h=0;
     bool fullMap=false;float drawnZoom=0;   // Map view = Full map: the share is the full map's box, drawn at that game zoom
@@ -5977,6 +6246,13 @@ void ConfigureTurnsSharp(bool on) {
     if(read.exchange(on?1:0)!=(on?1:0))SetTurnsSharp(on);
 }
 void ConfigureEyeTracking(bool on) {eyeTracking.store(on);}
+void WantGazeAim(bool wanted) {gazeAimWanted.store(wanted);}
+int GazeAimSupport() {return gazeAimSupport.load();}
+bool GazeAimLocal(float local[3],uint64_t& at) {
+    std::lock_guard lock(gazeAimMutex);
+    local[0]=gazeAimSampled.local.x;local[1]=gazeAimSampled.local.y;local[2]=gazeAimSampled.local.z;at=gazeAimSampled.at;
+    return gazeAimSampled.valid;
+}
 void BeginEye(int eye) {
     hud::UiFrame(spatialMode,!journalMode,eye);
     std::lock_guard lock(mutex);
@@ -6017,6 +6293,18 @@ void Recenter() {
     origin=V(head.position);haveOrigin=true;
     if(panelMode)menuPlaced=false;
     Say("Frame OpenXR: headset position recentered");
+}
+bool RecenterPosition() {
+    std::lock_guard lock(mutex);
+    // Recentring cancels combat; preserve a held support grip or bow draw/release.
+    if(!gameplay::CanRecenter(motionInput,motionOutput))return false;
+    if(!frame||!valid||!render||failed||panelMode||spatialMode||
+       !inWorld||!inWorld()||(wantsPanel&&wantsPanel())||
+       settingsModel.open||settingsOpen.load()||bodyCalibration.Active()||
+       interactionOutput.wheel||!motionInput.active||GetTickCount64()-motionAt>150||
+       gamestate::CursorItemHeld()||mouseDown||rightMouseDown||panelinput::BlocksWorld())return false;
+    Recenter();
+    return true;
 }
 bool TakeWorldRecenter() {
     std::lock_guard lock(mutex);const bool take=worldRecenter;worldRecenter=false;return take;
@@ -6253,7 +6541,7 @@ void EndPair() {
             const float footer=interaction::CompanionSpace(companionRows);
             if(mapEye.copied){
                 const auto mapPanel=interaction::NavigationMapPanel(interactionInput.hand[1],interactionInput.head,palm,withVitals,footer);
-                wristMapShown=true;wristMapCenter=mapPanel.p;
+                wristMapShown=true;wristMapCenter=mapPanel.p;floatMapWrist=mapPanel;floatMapWristMs=GetTickCount64();
                 motionQuad(wristMap,interactionPose(mapPanel),
                     interaction::WristMapSize,interaction::WristMapSize,{{0,0},{int32_t(mapSide),int32_t(mapSide)}},mapEye.chain);
             }
@@ -6273,6 +6561,9 @@ void EndPair() {
                 {{0,0},{companions::Width,wriststatus::UsedHeight(interactionInput.snapshot.companions,interactionInput.snapshot.effects)}},companionChain);
         }
     }
+    // Floating map: the copy belongs here in the draw order (over the wrist panels, under everything below); this layer
+    // is its anchor. Pointer, not index: blood, strain and Arcane Decay insert below the HUD later and shift indices.
+    const XrCompositionLayerBaseHeader* floatMapAnchor=count?layers[count-1]:nullptr;
     const bool weaponSkillIndicators=vrsettings::Read().values[settings::WeaponSkillIndicators]>.5f;
     if(weaponSkillIndicators&&gameplayVisible&&!interactionOutput.wheel&&!interactionOutput.stowed&&interactionOutput.bottle<0&&
        interactionPaintValid&&interactionPaintContext.cue==interactionOutput.cue&&interactionChain) {
@@ -6386,8 +6677,15 @@ void EndPair() {
     XrCompositionLayerQuad book{XR_TYPE_COMPOSITION_LAYER_QUAD};
     if(layer&&!settingsModel.open&&!bodyCalibration.Active()&&spatialMode&&SurfacePlaced()&&uiEye.copied&&uiCrop[2]>0) {
         const auto size=UiSurfaceSize();
-        motionQuad(book,UiSurfacePose(),size.width,size.height,
-            {{uiCrop[0],uiCrop[1]},{uiCrop[2],uiCrop[3]}},uiEye.chain);
+        auto pose=UiSurfacePose();float height=size.height;XrRect2Di shown{{uiCrop[0],uiCrop[1]},{uiCrop[2],uiCrop[3]}};
+        // On the leather the canvas below the band too, so a tooltip running past it shows on
+        // (leather::WithFoot); the band itself stays where the laser finds it.
+        if(leatherMode&&!journalMode) {
+            const auto foot=leather::WithFoot({uiCrop[0],uiCrop[1],uiCrop[2],uiCrop[3]},int(uiHeight),size.height);
+            const auto p=V(pose.position)+math::Rotate(Q(pose.orientation),{0,-foot.drop,0});
+            pose.position={p.x,p.y,p.z};height=foot.height;shown.extent.height=foot.rect.h;
+        }
+        motionQuad(book,pose,size.width,height,shown,uiEye.chain);
         book.layerFlags=opaqueMenuMode?0:XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
     }
     // The Advanced Stats button, a hair in front of the menu below its hint row (MenuPointer).
@@ -6418,6 +6716,37 @@ void EndPair() {
         motionQuad(respecQuad,XrPose({p,q}),spot.width,spot.height,Rect(panelatlas::Respec(picture)),staticChain);
         respecQuad.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;   // premultiplied (SetupStatic)
     }
+    XrCompositionLayerQuad stashQuads[2]={{XR_TYPE_COMPOSITION_LAYER_QUAD},{XR_TYPE_COMPOSITION_LAYER_QUAD}};
+    if(book.subImage.swapchain&&stashShown&&staticChain) {
+        const auto size=UiSurfaceSize();const auto at=UiSurfacePose();const auto q=Q(at.orientation);
+        for(int i=0;i<2;++i) {
+            const auto spot=stashbuttons::Place(size.width,size.height,i);
+            const auto p=V(at.position)+math::Rotate(q,{spot.x,spot.y,.004f});
+            motionQuad(stashQuads[i],XrPose({p,q}),spot.width,spot.height,Rect(panelatlas::Stash(i*2+(stashHover==i))),staticChain);
+            stashQuads[i].layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+        }
+    }
+    // The VR keyboard on its own board under character creation's screen - the flat menu panel or
+    // the spatial surface, as MenuPointer aims at it - small letters, or capitals while Shift waits,
+    // and the key under the laser lit a hair in front of it.
+    XrCompositionLayerQuad keyboardQuad{XR_TYPE_COMPOSITION_LAYER_QUAD},keyboardLitQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    if(layer&&keyboardShown&&staticChain&&!settingsModel.open&&!bodyCalibration.Active()&&
+       (spatialMode?book.subImage.swapchain!=XR_NULL_HANDLE:menuPlaced)) {
+        const auto size=spatialMode?UiSurfaceSize():panels::Fit(width,height,panelWidth);
+        const auto at=spatialMode?UiSurfacePose():menuPose;
+        const auto board=keyboard::Place(V(at.position),Q(at.orientation),size.width,size.height);
+        const bool capitals=keyboardTypist.Shifted();
+        const XrPosef boardPose{{board.orientation.x,board.orientation.y,board.orientation.z,board.orientation.w},{board.position.x,board.position.y,board.position.z}};
+        motionQuad(keyboardQuad,boardPose,board.width,board.height,Rect(capitals?panelatlas::KeyboardCaps:panelatlas::Keyboard),staticChain);
+        keyboardQuad.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;   // premultiplied (SetupStatic)
+        if(keyboardLit>=0&&keyboardQuad.subImage.swapchain) {
+            const auto key=keyboard::KeySpot(board,keyboardLit);const auto r=keyboard::KeyTexelRect(keyboardLit);
+            const auto lit=capitals?panelatlas::KeyboardCapsLit:panelatlas::KeyboardLit;
+            motionQuad(keyboardLitQuad,XrPose({board.position+math::Rotate(board.orientation,{key.x,key.y,.002f}),board.orientation}),key.width,key.height,
+                {{lit.x+r.x,lit.y+r.y},{r.w,r.h}},staticChain);
+            keyboardLitQuad.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+        }
+    }
     XrCompositionLayerQuad settingsPanel{XR_TYPE_COMPOSITION_LAYER_QUAD};
     if(layer&&(settingsModel.open||bodyCalibration.Active())&&settingsImageReady){
         // The help card is inside the panel: its region is the panel, Width wide.
@@ -6436,7 +6765,7 @@ void EndPair() {
         // The pointer needs the same finite-pose checks and normalization as
         // every other optional layer: one bad laser must not hide the menu.
         motionQuad(laser,beamPose,.003f,beamLength,At(panelatlas::Pointer,{{0,0},{64,32}}),pointerChain);
-        if(pointerHit)motionQuad(dot,dotPose,.018f,.018f,At(panelatlas::Pointer,{{0,32},{64,64}}),pointerChain);
+        if(pointerHit||keyboardPointer)motionQuad(dot,dotPose,.018f,.018f,At(panelatlas::Pointer,{{0,32},{64,64}}),pointerChain);
     }
     // Head-locked blood: VIEW space, with a bounded angular size so large render
     // frusta cannot push the rim out of sight. It goes directly above
@@ -6513,6 +6842,16 @@ void EndPair() {
             Say(line);failReportAt=now+2000;
         }
     }
+    // Floating map: the pulled copy is added last, only while a content slot is free, so a full layer budget drops only
+    // the copy, never another layer; then it is moved back to its place just above floatMapAnchor (the wrist panels), so
+    // the bow laser, skill cues, notices and HUD vitals still draw over it.
+    XrCompositionLayerQuad floatMapQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    struct FloatMapDraw {decltype(motionQuad)* quad;XrCompositionLayerQuad* layer;};FloatMapDraw floatMapDraw{&motionQuad,&floatMapQuad};
+    floatmap::DrawFrame({interactionVisible&&!interactionOutput.wheel,mapEye.copied,GetTickCount64(),&floatMapDraw,
+        +[](void* c,math::Vec p,math::Quat q,float side){const auto& d=*static_cast<FloatMapDraw*>(c);
+            (*d.quad)(*d.layer,XrPose({p,q}),side,side,{{0,0},{int32_t(mapSide),int32_t(mapSide)}},mapEye.chain);},&Say});
+    if(count&&layers[count-1]==reinterpret_cast<const XrCompositionLayerBaseHeader*>(&floatMapQuad)&&floatMapAnchor)
+        for(uint32_t i=0;i+1<count;++i)if(layers[i]==floatMapAnchor){std::rotate(layers.data()+i+1,layers.data()+count-1,layers.data()+count);break;}
     XrCompositionLayerQuad winePadding{XR_TYPE_COMPOSITION_LAYER_QUAD};
     if(padQuads&&composition::PrependQuadPadding(layers.data(),count,capacity,winePadding,headSpace,pointerChain,{panelatlas::Pointer.x,panelatlas::Pointer.y+32})) {
         static bool reported=false;
@@ -6649,7 +6988,7 @@ void ConfigureQuiver(bool enabled,bool preview) {
     std::lock_guard lock(mutex);
     quiverPreview=preview;
     if(quiverEnabled.exchange(enabled)!=enabled) {
-        quiver.Clear();quiverArrow={};
+        quiver.Clear();quiverArrow={};nativeArrow={};
         Say(enabled?"Frame bow quiver: arrow skills load physical arrows":"Frame bow quiver: disabled; arrow skills use native buttons");
     }
 }
@@ -6824,6 +7163,7 @@ bool HandSpellHeld(int hand) {
     return hand>=0&&hand<2&&motionControls.load()&&handOutput.spells[hand]>=0;
 }
 bool HeavensArmed(){return heavensArmed.load();}
+bool SeekerArrowReady(){return seekerArrowReady.load();}
 uint32_t HeavensRequest() {
     std::lock_guard lock(mutex);
     return heavensPending&&heavensAnswered!=heavensRequest&&GetTickCount64()-heavensAskedAt<=HeavensWaitMs?heavensRequest:0;
@@ -6874,10 +7214,13 @@ int PointSpellSkill() {
 }
 bool MeleeSample(uint32_t poseStamp,melee::Sample& sample,int hand) {
     std::lock_guard lock(mutex);
-    if(!motionControls.load()||!motionInput.active||!motionOutput.meleeContact||GetTickCount64()-motionAt>100)return false;
+    if(!motionControls.load()||!motionInput.active||GetTickCount64()-motionAt>100)return false;
     if(hand<0||hand>1||!(hand?offhandPoses:meleePoses).Find(poseStamp,Milliseconds()/1000.,sample))return false;
+    // A bow never makes melee contact; its bash lane (bow_bash.h) runs on the off hand instead.
+    const bool bash=hand==1&&sample.bowBash;
+    if(!motionOutput.meleeContact&&!bash)return false;
     // the off hand strikes with a second weapon - or, in a druid's form, with the left claw
-    if(hand==1&&!sample.claws&&!dualwield::Eligible(skel::HeroClass(),gamestate::MeleeEquipment()))return false;
+    if(hand==1&&!sample.claws&&!bash&&!dualwield::Eligible(skel::HeroClass(),gamestate::MeleeEquipment()))return false;
     return sample.epoch==meleeEpoch&&sample.equipment==motionInput.equipment;
 }
 bool ShieldSample(uint32_t poseStamp,melee::Sample& sample) {
@@ -7166,6 +7509,12 @@ bool View(float out[16],const float hero[3],float eyeHeight,float userEyeHeight,
             Say(line);
         }
     }
+    if(fanNeedsWorld) {
+        fanNeedsWorld=false;
+        const auto shot=resolveBow(fanPending);
+        if(bowflight::Allowed(shot,releaseGate,GetTickCount64()))bowvr::ArmFan(shot);
+        else Say("Frame bow volley: release refused (stale, menu or tracking); the game's fan stays flat");
+    }
     const auto& pose=eye<0?head:views[eye&1].pose;
     const auto offset=math::Rotate(base,V(pose.position)-origin)*upm;
     const math::Vec position={hero[0]+offset.x,hero[1]+eyeHeight+offset.y,hero[2]+offset.z};
@@ -7219,11 +7568,12 @@ void Shutdown(bool preserveResolution) {
     noticeWatch={};noticeCards.Clear();noticeCard={};noticePaintRequest=noticeRequestedSequence=noticePaintedSequence=0;noticeAtlasPending=noticeImageReady=false;
     heartStream.Stop();heartPlaying=false;heartLevel.Reset();heartAt=0;heartHush.Reset();heartHealth=-1;
     guardStrain.Reset();strainOutput={};strainPaintKey=~0ull;strainPaintSession=0;strainPaintAt=0;strainAtlasPending=strainImageReady=strainSlotReported=false;
-    if(staticChain&&pDestroySwapchain)pDestroySwapchain(staticChain);staticChain=pointerChain=leatherChain=XR_NULL_HANDLE;statsIconReady=statsShown=statsLit=false;
+    if(staticChain&&pDestroySwapchain)pDestroySwapchain(staticChain);staticChain=pointerChain=leatherChain=XR_NULL_HANDLE;stashArtReady=stashShown=false;stashInput.Reset();stashPad=0;statsIconReady=statsShown=statsLit=false;
     if(aimSpace&&pDestroySpace)pDestroySpace(aimSpace);aimSpace=XR_NULL_HANDLE;
     if(leftAimSpace&&pDestroySpace)pDestroySpace(leftAimSpace);leftAimSpace=XR_NULL_HANDLE;
     if(gazeSpace&&pDestroySpace)pDestroySpace(gazeSpace);gazeSpace=XR_NULL_HANDLE;
     gazeAction=XR_NULL_HANDLE;gazeReady=gazeValid=gazeExtension=gazeSupported=false;gazeStability.Reset();
+    gazeAimSupport.store(-1);PublishGazeAim(false,{0,0,-1});
     detectedControllers={};controllerLabels={};controllerProfilesDirty=true;frameControllerExtension=false;
     for(auto& e:eyes){if(e.chain&&pDestroySwapchain)pDestroySwapchain(e.chain);e={};}
     mirrorSupported=mirrorMono=false;

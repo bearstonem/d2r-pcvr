@@ -36,6 +36,8 @@ static const GoldenRow Golden[]={
     {"gameplay.melee_hit_speed",View::Combat,0,content::RowKind::Stepper,"Swing speed to hit",0,0},
     {"gameplay.melee_thrust_speed",View::Combat,0,content::RowKind::Slider,"Stab speed to hit",0,0},
     {"gameplay.melee_reach_cm",View::Combat,0,content::RowKind::Slider,"Melee reach",0,0},   // Discord, 2026-11-08
+    {"gameplay.weapon_heft",View::Combat,0,content::RowKind::Toggle,"Weapon heft",0,0},   // #443
+    {"gameplay.bow_bash",View::Combat,0,content::RowKind::Toggle,"Bow bash",0,0},   // #443, drawn inside Weapon heft's row
     {"gameplay.skill_gestures",View::Combat,1,content::RowKind::Toggle,"Skills on your moves",0,0},
     {"interactions.weapon_skill_indicators",View::Combat,1,content::RowKind::Toggle,"Skill icons on weapons",0,0},
     {"gameplay.throw_lift_deg",View::Combat,1,content::RowKind::Stepper,"Thrown weapon lift",0,1},
@@ -44,6 +46,7 @@ static const GoldenRow Golden[]={
     {"gameplay.planar_spell_aim",View::Targeting,1,content::RowKind::Toggle,"Keep spell shots level",0,0},
     {"gameplay.staff_point",View::Targeting,1,content::RowKind::Toggle,"Aim staff along arm",0,0},
     {"gameplay.aim_follows_view",View::Targeting,1,content::RowKind::Toggle,"Aim with your view",0,0},
+    {"gameplay.aim_with_eyes",View::Targeting,1,content::RowKind::Toggle,"Aim with your eyes",0,0},   // drawn inside Aim with your view's row, eye trackers only (2026-11-08)
     {"bow.path_laser_hue",View::Targeting,1,content::RowKind::Swatch,"Arrow path line",0,1},
     {"gameplay.ground_aim",View::Targeting,2,content::RowKind::Choice,"Ground skill aim",3,0},
     {"gameplay.landing_circles",View::Targeting,2,content::RowKind::Toggle,"Landing circles",0,0},
@@ -58,6 +61,7 @@ static const GoldenRow Golden[]={
     {"gameplay.enemy_sight_pct",View::Monsters,0,content::RowKind::Slider,"Monster sight range",0,0},
     {"gameplay.companion_ai",View::Monsters,1,content::RowKind::Toggle,"Smarter mercenary",0,0},
     {"gameplay.companion_tactical_commands",View::Monsters,1,content::RowKind::Toggle,"Tactical commands",0,0},
+    {"gameplay.merc_potion_assist",View::Monsters,1,content::RowKind::Toggle,"Merc potion throw autoaim",0,0},   // #424
     {"interactions.bottle_physics",View::Physics,0,content::RowKind::Toggle,"Roll and break bottles",0,0},
     {"interactions.prop_physics",View::Physics,0,content::RowKind::Toggle,"Knock over small props",0,0},
     {"interactions.body_physics",View::Physics,0,content::RowKind::Toggle,"Pushable bodies",0,0},   // main's #361
@@ -70,6 +74,7 @@ static const GoldenRow Golden[]={
     {"calibration.version",View::Body,0,content::RowKind::Button,"Height and arm span",0,0},
     {"interactions.waist_below_eyes",View::Body,1,content::RowKind::Slider,"Belt below eyes",0,0},
     {"interactions.belt_forward",View::Body,1,content::RowKind::Slider,"Belt forward reach",0,0},
+    {"interactions.click_to_drink",View::Body,1,content::RowKind::Toggle,"Click to drink",0,0},   // #425
     {"interactions.dominant_hand",View::Hands,0,content::RowKind::Choice,"Dominant hand",2,0},
     {"stick.walk_direction",View::Hands,0,content::RowKind::Stepper,"Walk direction",0,2},   // drawn inside Dominant hand's row (2026-11-08)
     {"gameplay.run_walk_toggle",View::Hands,0,content::RowKind::Toggle,"Stick toggle",0,0},   // a row of its own
@@ -130,6 +135,7 @@ static const GoldenRow Golden[]={
     {"ceiling.torches",View::Environment,0,content::RowKind::Toggle,"Dungeon torchlight",0,0},   // the game's own lights, drawn inside Dungeon ceilings' row
     {"torch.flame",View::Environment,1,content::RowKind::Toggle,"Torch flame",0,0},
     {"torch.spell_hands_pct",View::Environment,1,content::RowKind::Slider,"Spell hand light",0,1},   // a Sorceress's (2026-11-06)
+    {"light.radius_boost_pct",View::Environment,1,content::RowKind::Slider,"Light Radius boost",0,0},   // #440
 };
 
 static bool PopoverLayer(L::Role r){return r==L::Role::PopoverDim||r==L::Role::Popover||r==L::Role::PopoverTitle||r==L::Role::PopoverOption||r==L::Role::PopoverHint||r==L::Role::ColorDot||r==L::Role::PopoverLabel||r==L::Role::PopoverSwitch;}
@@ -224,7 +230,7 @@ int main(int argc,char** argv){
     }
     // ---- the map: no row lost, none left to More, the names and the owner's pairs ----
     {
-        Check(tables.rowCount==98,"98 settings on the menu, each one row");   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Skill cooldowns (2026-11-09)
+        Check(tables.rowCount==104,"104 settings on the menu, each one row");   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424), Click to drink (#425), Skill cooldowns (2026-11-09)
         for(size_t i=0;i<tables.rowCount;++i)Check(!tables.rows[i].fallback&&tables.rows[i].page!=View::More,std::string("every setting has its page: ")+tables.rows[i].label);
         Check(content::Menu().report.empty(),"the tidy report is empty");
         struct Want {content::Group group;const char* name;std::vector<const char*> pages;};
@@ -247,6 +253,9 @@ int main(int argc,char** argv){
         Check(besideOf(CeilingTorches)==Ceiling,"Dungeon torchlight beside Dungeon ceilings");
         Check(besideOf(CompanionTactical)==CompanionAi,"Commands beside Smarter mercenary");
         Check(besideOf(LootPick)==LootLabelSize,"Loot pick beside Loot name size");
+        Check(besideOf(BowBash)==WeaponHeft,"Bow bash beside Weapon heft (#443: the Combat page's 8th row holds both)");
+        Check(L::CountRows(View::Combat,Defaults(),{})==8,"Combat holds 8 rows at the title screen, every class's");
+        Check(besideOf(AimWithEyes)==AimFollowsView,"Eyes beside Aim with your view");
         Check(L::FilterOf(LootBeamBrightness).count==4,"Loot beams with its 4 filter switches");
         int readouts=0;for(int v=0;v<int(View::Count);++v)if(L::HasReadout(View(v)))++readouts;
         Check(readouts==2&&L::HasReadout(View::Performance)&&L::HasReadout(View::Frames),"the frame times on Performance and Frames, nowhere else");
@@ -267,6 +276,7 @@ int main(int argc,char** argv){
     for(int c=-1;c<=6;++c)contexts.push_back({c});
     contexts.push_back({heroclass::Paladin,true});contexts.push_back({heroclass::Assassin,false,true});contexts.push_back({heroclass::Sorceress,false,false,true});
     contexts.push_back({heroclass::Barbarian,true,true,true});
+    contexts.push_back({-1,false,false,false,true});contexts.push_back({heroclass::Amazon,true,false,false,true});   // a headset with eye tracking: Eyes beside Aim with your view
     auto state=[](int bits){
         Values v=Defaults();
         v[SmoothTurn]=float(bits&1);v[Seated]=float((bits>>1)&1);v[TargetHighlight]=(bits>>2)&1?60.f:0.f;
@@ -285,11 +295,22 @@ int main(int argc,char** argv){
             if(content::PageOf(View(view)).settings&&View(view)!=View::More)Check(n>=1,std::string("a settings page shows rows: ")+ViewName(View(view)));
         }
     }
+    {
+        const auto* drinking=content::RowOf(ClickToDrink);
+        Check(drinking&&!drinking->beside&&drinking->page==View::Body,"Click to drink has its own row on Body");
+        Values v=Defaults();v[Seated]=0;   // standing: Belt below eyes shows too
+        Check(L::CountRows(View::Body,v,{})<=8,"Body fits eight rows with Click to drink, standing");   // #425: Survival, ==8, before the menu groups
+        const auto rows=L::RowsOf(View::Body,v,{});
+        bool found=false;
+        for(int i=0;i<rows.count;++i)if(rows.keys[size_t(i)]==ClickToDrink)found=true;
+        Check(found,"Click to drink appears on Body");
+    }
     // Title screen, everything on: the fullest pages.
     {
         Values v=state(0b0100'0101);v[GroundAim]=2;
         Check(L::CountRows(View::Vibration,v,{})==8&&L::CountRows(View::Shield,v,{})==7,"Vibration holds 8 rows; Shield 7 (one guard strain switch since main's #310)");
         Check(L::RowsOf(View::Outlines,v,{}).count==4,"Outlines: the outline, which hands, and both hand colors as their own rows");
+        Check(L::CountRows(View::Monsters,v,{})<=8,"Monsters: difficulty, the mercenary and merc potion throw autoaim fit on eight rows");   // #424 (on Aim, ==8, before the menu groups)
         bool right=false;const auto rows=L::RowsOf(View::Outlines,v,{});
         for(int i=0;i<rows.count;++i)if(rows.keys[size_t(i)]==HighlightRight)right=true;
         Check(right&&RowShown(HighlightRight,v,{}),"the right hand's color has its own row");
