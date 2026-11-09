@@ -40,6 +40,7 @@
 #include "../steamvr/leather_menu.h"
 #include "../steamvr/stats_button.h"
 #include "../steamvr/respec_button.h"
+#include "../steamvr/stash_buttons.h"
 #include "../steamvr/vr_keyboard.h"
 #include "respec.h"
 #include "../steamvr/notice_card.h"
@@ -329,6 +330,7 @@ std::atomic<bool> g_journalOnly{false};
 std::atomic<bool> g_opaqueMenu{false};
 std::atomic<bool> g_upperBandMenu{false};
 std::atomic<bool> g_leatherMenu{false};
+std::atomic<bool> g_stashButtons{false};
 std::atomic<bool> g_statsButton{false};   // the tabbed menu alone: its Advanced Stats button (stats_button.h)
 // An item on the game's cursor (the laser picked it up in a menu), read with the hands
 // every 200 ms; when it was read (CursorItemHeld wants it recent).
@@ -916,6 +918,7 @@ SharedEvents::UiMessageAction __cdecl OnUiMessage(const PluginContext* ctx, cons
             [](const auto& name){return framevr::panels::OpaqueBackground(name);}));
         g_leatherMenu.store(framevr::leather::OnSheet(g_panels));
         g_statsButton.store(framevr::statsbutton::Shown(g_panels));
+        g_stashButtons.store(framevr::stashbuttons::Shown(g_panels));
         g_respecButton.store(framevr::respecbutton::Shown(g_panels));
         bool menu = false;
         for (const std::string& n : g_panels) if (IsMenuPanel(n)) { menu = true; break; }
@@ -1143,6 +1146,7 @@ bool JournalOnly(){return g_journalOnly.load();}
 bool OpaqueMenuOpen(){return g_opaqueMenu.load();}
 bool UpperBandMenuOpen(){return g_upperBandMenu.load();}
 bool LeatherMenuOpen(){return g_leatherMenu.load();}
+bool StashButtonsShown(){return g_stashButtons.load();}
 bool StatsButtonShown(){return g_statsButton.load();}
 bool CursorItemHeld(){return g_cursorItem.load()&&GetTickCount64()-g_cursorItemAt.load()<600;}
 uint64_t CursorItemReadAt(){return g_cursorItemAt.load();}

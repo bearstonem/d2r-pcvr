@@ -9,7 +9,7 @@ repository, but must also open a pull request. Do not push directly to `main`.
 
 - Search existing issues and pull requests to avoid duplicate work.
 - Open an issue before a large feature, architecture change, new dependency,
-  or change to supported game builds. Small fixes and documentation corrections
+  or change to how the plugin finds game code. Small fixes and documentation corrections
   can go straight to a pull request.
 - Keep discussion respectful and focused on the work. Explain disagreements
   with examples; harassment and personal attacks are not welcome.

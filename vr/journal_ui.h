@@ -7,6 +7,7 @@ bool UpperBandMenuOpen();
 bool LeatherMenuOpen();   // the tabbed menu (or a cube from it) with no world-opened panel: leather_menu.h
 bool CursorItemHeld();    // an item on the game's cursor, read in the last 600 ms (a drop outside the menu)
 uint64_t CursorItemReadAt();   // when CursorItemHeld's value was read (GetTickCount64)
+bool StashButtonsShown(); // VR previous/next stash tabs, stash_buttons.h
 bool StatsButtonShown();  // the tabbed menu alone (not a cube or world panel): its Advanced Stats button, stats_button.h
 bool RespecButtonShown(); // the tabbed menu's Character page alone: Reset Skills & Stats, respec_button.h
 uint32_t PanelChanges();  // counts every panel opened or closed (leather::Back)
