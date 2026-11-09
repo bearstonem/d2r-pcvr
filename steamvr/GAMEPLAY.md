@@ -187,9 +187,11 @@ not generate melee velocity. The layout currently assumes a right-handed player.
 | Seated weapon selection | Utility wheel → **Weapon I** or **Weapon II** |
 | Stow/draw | Utility wheel → **Stow weapons** / **Draw weapons**; native equipped stats stay unchanged |
 | Health/mana | Check the back of your left wrist, or choose **Palm** in **VR Settings > Interface > Wrist > Life and mana** and hold your left palm upward in front of you briefly. No button required; automatic alerts are off by default |
-| Show all nearby loot labels (Alt) | Hold the **right stick down** to hold the native Show Items action; let go to restore normal drop/hover labels. Push it **up** to toggle running / walking. Neither while you look at the wrist / palm map, which they zoom instead. Listed in **VR Settings > Guide** |
+| Show all nearby loot labels (Alt) | Hold the **right stick down** to hold the native Show Items action; let go to restore normal drop/hover labels. Push it **up** to toggle running / walking. Neither while you look at the wrist / palm map, or point the right controller at a floating map: they zoom it instead. Listed in **VR Settings > Guide** |
 | Explored minimap | Hold Left Y ? **MAP** in the bottom tabs; point right laser + trigger. **SPELLS** returns to skills; releasing Left Y closes the menu |
-| Zoom the minimap | Look at the wrist / palm map or the wheel's MAP tab; right stick up zooms in, down zooms out. No run / walk toggle or loot labels meanwhile; left / right still turns, except during a zoom push; looking away returns the stick |
+| Zoom the minimap | Look at the wrist / palm map or the wheel's MAP tab; right stick up zooms in, down zooms out. No run / walk toggle or loot labels meanwhile; left / right still turns, except during a zoom push; looking away returns the stick. Pointing at a floating map zooms it the same way |
+| Floating map | Point the right controller at the raised wrist map (or roughly at it) and squeeze **Right Grip**: a copy of the map comes off the wrist in your hand. Move and turn it any way, push the right stick forward / back to send it out (up to 3 m) or pull it in, then let go: it stays there, facing you. While you hold it, the right stick does not turn you. Grab it again any time by pointing at it. Squeeze both grips (either order) while pointing at it and spread or close your hands to make it bigger or smaller. Let go of it next to the raised wrist map to put it away. It shows while you look toward it; Save and Exit or a new game puts it back on the wrist |
+| Zoom a floating map | Point the right controller anywhere on the floating map and push the right stick up to zoom in, down to zoom out; the area grows and shrinks with the map. The wrist map zooms as before, by looking at it; both show the same picture, so they zoom together |
 | Quest journal | Open the native tabbed game menu with Left X / Frame Left A, then select Journal. The duplicate wheel entry is removed |
 | Journal controls | Right laser + trigger uses native page controls/act tabs; Right B follows native back; Left X performs native X |
 | Inventory drop / sort | Native X (Quest Left X / Frame Left A) / press and hold right stick click; right-stick click no longer swaps in gameplay |
@@ -285,7 +287,23 @@ who has forgotten the control still sees the whole map.
 shows the game's full (Tab) map on the wrist instead of its corner map, in the same
 two views. 1x is the game's widest zoom (0.125); up zooms in to 16x, redrawn by the
 game closer as you go so it stays sharp. It is a screen-sized window around your
-hero, not the whole level, and it is not drawn in your view while the wrist shows it.
+hero, not the whole level, and it is not drawn in your view while the wrist shows it or a floating map is out and you look toward it.
+
+**Floating map:** point the right controller at the raised wrist map (or within about 15 degrees of its edge) and squeeze
+**Right Grip** to pull a copy off the wrist; the wrist keeps its own map, and the copy always shows what
+**Map view** shows. Held, it follows your hand in every direction; the right stick forward / back sends it out (up
+to 3 m) or pulls it in, and does not turn you while you hold it. Let go and it stays there in the room, turned to
+face you. Point at it and squeeze Right Grip to move it again. Both grips within a quarter second, either order,
+with either hand pointing at it, size it: spread your hands to grow it, bring them together to shrink it (10 to
+150 cm); it moves with your hands, keeping its place between them. Bring it back to the raised wrist map (a light
+buzz) and let go to put it away. It shows while you look within about 30 degrees of it. While a copy is out, a
+light buzz tells you when your aim is on a map you can take, and pointing anywhere on the floating map and pushing
+the right stick up / down zooms it (the wrist map zooms as before, by looking at it; both show the same picture).
+Every place you can point at on the floating map grows and shrinks with it: the zoom area is the map itself, and
+a grab takes it a little past its edges: a share of its size, up to about 15 degrees past them. A load
+screen in the same game keeps it where it is; Save and Exit or a new game puts it back on the wrist. With no copy out, the wrist map and the
+stick work as before; a Left Grip pressed while you point at the raised wrist map reaches the game up to a
+quarter second late, in case Right Grip follows.
 
 The label above the compass shows your current **act (I-V)** and **area name**,
 including named dungeon floors. It follows the same wrist/palm placement and

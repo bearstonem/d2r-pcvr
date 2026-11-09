@@ -68,9 +68,11 @@ Quest left X/Y correspond to Index left A/B; right A/B labels are the same.
 | Explain a VR setting | Point the right-hand laser at its label or controls for about half a second. Help appears beside the panel and disappears when you point away; no click needed |
 | Minimap | Either wheel → MAP; movement remains available |
 | Zoom the minimap | Look at the wrist / palm map or the wheel's MAP tab and push the right stick up to zoom in, down to zoom out; down until it stops shows the whole map. While you look at it, right stick up / down does nothing else (no run / walk toggle, no loot labels); left / right still turns, except during a zoom push |
+| Floating map | Point the right controller at the raised wrist map (or roughly at it) and squeeze **Right Grip**: a copy of the map comes off the wrist in your hand. Move and turn it any way, push the right stick forward / back to send it out (up to 3 m) or pull it in, then let go: it stays there, facing you. While you hold it, the right stick does not turn you. Grab it again any time by pointing at it. Squeeze both grips (either order) while pointing at it and spread or close your hands to make it bigger or smaller. Let go of it next to the raised wrist map to put it away. It shows while you look toward it; Save and Exit or a new game puts it back on the wrist |
+| Zoom a floating map | Point the right controller anywhere on the floating map and push the right stick up to zoom in, down to zoom out; the area grows and shrinks with the map. The wrist map zooms as before, by looking at it; both show the same picture, so they zoom together |
 | Reset height | VR Settings > Comfort > Body > Height and arm span > **Set eye height** |
 | Adjust controller vibration | **VR Settings > Controls > Vibration**: overall vibration plus separate melee, bow draw, bow/throw release, spell, loot/potion/menu and low life/mana alert strengths. **Feel it** on a row's help card tests it on that action's hands; **Apply** saves |
-| Hold to show all nearby loot labels (Alt) | Hold the **right stick down** during gameplay, outside wheels and while not looking at the wrist map. Labels stay shown while it is held; let go to restore normal drop/hover labels. Uses the native Alt range, independently of where you aim. A mostly vertical push never turns you. Also listed in **VR Settings > Guide** |
+| Hold to show all nearby loot labels (Alt) | Hold the **right stick down** during gameplay, outside wheels, while not looking at the wrist map, and while not pointing at a floating map. Labels stay shown while it is held; let go to restore normal drop/hover labels. Uses the native Alt range, independently of where you aim. A mostly vertical push never turns you. Also listed in **VR Settings > Guide** |
 | Interact / pick up / talk | Right A by default; requires an aimed interactable. One press acts on one target: press again for each item, including loot a chest just dropped. With **VR Settings > Interface > Labels > Loot pick** on, point at an item (arm out) to choose which one |
 | Free melee swing / thrust | Move the equipped weapon through an enemy |
 | Physical dual wield | Equip two supported melee weapons on a Barbarian or two claws on an Assassin; release both triggers and swing or thrust with either hand. Active skills retain their button bindings |
@@ -734,5 +736,21 @@ With **Full map** or **Full top-down**, 1x is the game's full map at its widest
 right stick zooms in to 16x. The game redraws its map closer as you zoom in, so it
 stays sharp; past 4x a tick marks each whole step. The game's full map is a window
 around your hero the size of its screen: the widest view shows that window, not
-the whole level. While the wrist or palm map shows it, the full map is not drawn in
+the whole level. While the wrist or palm map shows it, or a floating map is out and you look toward it, the full map is not drawn in
 your view; press Tab as usual for the game's own map.
+
+**Floating map:** point the right controller at the raised wrist map (or within about 15 degrees of its edge) and squeeze
+**Right Grip** to pull a copy off the wrist; the wrist keeps its own map, and the copy always shows what
+**Map view** shows. Held, it follows your hand in every direction; the right stick forward / back sends it out (up
+to 3 m) or pulls it in, and does not turn you while you hold it. Let go and it stays there in the room, turned to
+face you. Point at it and squeeze Right Grip to move it again. Both grips within a quarter second, either order,
+with either hand pointing at it, size it: spread your hands to grow it, bring them together to shrink it (10 to
+150 cm); it moves with your hands, keeping its place between them. Bring it back to the raised wrist map (a light
+buzz) and let go to put it away. It shows while you look within about 30 degrees of it. While a copy is out, a
+light buzz tells you when your aim is on a map you can take, and pointing anywhere on the floating map and pushing
+the right stick up / down zooms it (the wrist map zooms as before, by looking at it; both show the same picture).
+Every place you can point at on the floating map grows and shrinks with it: the zoom area is the map itself, and
+a grab takes it a little past its edges: a share of its size, up to about 15 degrees past them. A load
+screen in the same game keeps it where it is; Save and Exit or a new game puts it back on the wrist. With no copy out, the wrist map and the
+stick work as before; a Left Grip pressed while you point at the raised wrist map reaches the game up to a
+quarter second late, in case Right Grip follows.
