@@ -74,6 +74,7 @@ static const GoldenRow Golden[]={
     {"calibration.version",View::Body,0,content::RowKind::Button,"Height and arm span",0,0},
     {"interactions.waist_below_eyes",View::Body,1,content::RowKind::Slider,"Belt below eyes",0,0},
     {"interactions.belt_forward",View::Body,1,content::RowKind::Slider,"Belt forward reach",0,0},
+    {"interactions.click_to_drink",View::Body,1,content::RowKind::Toggle,"Click to drink",0,0},   // #425
     {"interactions.dominant_hand",View::Hands,0,content::RowKind::Choice,"Dominant hand",2,0},
     {"stick.walk_direction",View::Hands,0,content::RowKind::Stepper,"Walk direction",0,2},   // drawn inside Dominant hand's row (2026-11-08)
     {"gameplay.run_walk_toggle",View::Hands,0,content::RowKind::Toggle,"Stick toggle",0,0},   // a row of its own
@@ -228,7 +229,7 @@ int main(int argc,char** argv){
     }
     // ---- the map: no row lost, none left to More, the names and the owner's pairs ----
     {
-        Check(tables.rowCount==102,"102 settings on the menu, each one row");   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424)
+        Check(tables.rowCount==103,"103 settings on the menu, each one row");   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424), Click to drink (#425)
         for(size_t i=0;i<tables.rowCount;++i)Check(!tables.rows[i].fallback&&tables.rows[i].page!=View::More,std::string("every setting has its page: ")+tables.rows[i].label);
         Check(content::Menu().report.empty(),"the tidy report is empty");
         struct Want {content::Group group;const char* name;std::vector<const char*> pages;};
@@ -292,6 +293,16 @@ int main(int argc,char** argv){
             Check(!(RowShown(Snap,v,c)&&RowShown(TurnSpeed,v,c)),"Snap turn angle and Smooth turn speed are never shown together (the compile-time count relies on it)");
             if(content::PageOf(View(view)).settings&&View(view)!=View::More)Check(n>=1,std::string("a settings page shows rows: ")+ViewName(View(view)));
         }
+    }
+    {
+        const auto* drinking=content::RowOf(ClickToDrink);
+        Check(drinking&&!drinking->beside&&drinking->page==View::Body,"Click to drink has its own row on Body");
+        Values v=Defaults();v[Seated]=0;   // standing: Belt below eyes shows too
+        Check(L::CountRows(View::Body,v,{})<=8,"Body fits eight rows with Click to drink, standing");   // #425: Survival, ==8, before the menu groups
+        const auto rows=L::RowsOf(View::Body,v,{});
+        bool found=false;
+        for(int i=0;i<rows.count;++i)if(rows.keys[size_t(i)]==ClickToDrink)found=true;
+        Check(found,"Click to drink appears on Body");
     }
     // Title screen, everything on: the fullest pages.
     {

@@ -961,6 +961,18 @@ int main(int argc,char** argv){
         m.Click(Step(MercPotionAssist));
         Check(m.Get()[MercPotionAssist]==0,"merc potion throw autoaim toggles off");
     }
+    {
+        Model m;m.Open(s);m.view=View::Body;
+        const auto* row=content::RowOf(ClickToDrink);
+        Check(Defaults()[ClickToDrink]==0&&row&&row->page==View::Body&&row->kind==content::RowKind::Toggle,
+              "click to drink defaults off on Body (Comfort)");
+        m.Click(Step(ClickToDrink));
+        Check(m.Get()[ClickToDrink]==1,"click to drink toggles on");
+        layout::ApplyPreset(m,0);
+        Check(m.Get()[ClickToDrink]==1,"presets preserve click to drink");
+        m.Click(Step(ClickToDrink));
+        Check(m.Get()[ClickToDrink]==0,"click to drink toggles off");
+    }
     PrintReport();
     std::puts("VR settings draft, persistence requests, conflicts, row rules and input-gating tests passed");
 }

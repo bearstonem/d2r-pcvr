@@ -2811,7 +2811,8 @@ void StepCompanionTacticalGestures(uint64_t now, float rightTrigger, float leftT
     }
 
     const bool handsBusy = interactionOutput.nearBelt >= 0 || interactionOutput.nearHolster >= 0 ||
-                           interactionOutput.wheel || interactionOutput.settings || motionOutput.bowDrawing;
+                           interactionOutput.wheel || interactionOutput.settings || motionOutput.bowDrawing ||
+                           (interactionInput.clickToDrink && interactionOutput.bottle >= 0);
     if (handsBusy) {
         if (g_tacticalGrabHand >= 0) {
             framevr::telegraph::Current().ClearSkill(-2);
@@ -3711,6 +3712,11 @@ void Input() {
     // (below, off by default). The push is owned either way, so it never snap-turns.
     interactionInput.reservedLeft=(controls.buttons&menus::LeftStick)!=0;interactionInput.trigger=handOutput.wheel==0?controls.lt/255.f:controls.rt/255.f;interactionInput.hover=motionInput.hover;
     const auto hudSettings=vrsettings::Read();
+    interactionInput.clickToDrink=hudSettings.values[settings::ClickToDrink]>.5f;
+    // Drinking owns the raw pull even if a previously armed mercenary chord
+    // withheld it from the game's controls before this frame's bottle update.
+    interactionInput.bottleTrigger[0]=Float(trigger,0);
+    interactionInput.bottleTrigger[1]=Float(trigger,1);
     interactionInput.navigationLocation=vitals::Location(int(hudSettings.values[settings::NavigationLocation]));
     interactionInput.vitalsLocation=vitals::Location(int(hudSettings.values[settings::VitalsLocation]));
     {   // the HUD held with the menu: its life / mana / XP picture

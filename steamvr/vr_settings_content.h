@@ -507,7 +507,7 @@ inline constexpr Override Overrides[]={
      .format={.unit=Degrees,.sign=true}},
     // Monsters: Offline difficulty
     {.id="gameplay.offline_players",.page=View::Monsters,.section="Offline difficulty",.kind=RowKind::Stepper,.label="Offline difficulty",
-     .help="Monsters as tough as in a game of this many players, with more experience and loot. Applies to monsters that spawn after Apply.",
+     .help="Offline monsters scale for this many players, with more experience and loot.",
      .format={.unit="players"},FRAMEVR_NAMES(OfflinePlayersNames)},
     {.id="gameplay.enemy_sight_pct",.page=View::Monsters,.section="Offline difficulty",.kind=RowKind::Slider,.label="Monster sight range",
      .help="How far away monsters notice you offline. 100% is the game's range; 300% is three times as far.",
@@ -560,6 +560,9 @@ inline constexpr Override Overrides[]={
     {.id="interactions.belt_forward",.page=View::Body,.section="Potion belt",.kind=RowKind::Slider,.label="Belt forward reach",
      .help="How far in front of your body the belt sits. Raise it if the belt is too close; lower it if you reach too far.",
      .format={.unit="cm",.iniScale=.01f,.decimals=1}},
+    // Potion drinking by trigger, beside the mouth gesture (#425, RobinHeggelund).
+    {.id="interactions.click_to_drink",.page=View::Body,.section="Potion belt",.kind=RowKind::Toggle,.label="Click to drink",
+     .help="On: hold a flask and press that hand's trigger to drink. The mouth gesture still works. Off: bring the opening to your mouth and tip to drink."},
     // Hands: Hands and buttons
     {.id="interactions.dominant_hand",.page=View::Hands,.section="Hands and buttons",.kind=RowKind::Choice,.label="Dominant hand",
      .help="The hand that swaps weapon sets when you reach over a shoulder and grip. Your weapon and shield hands in the game stay the same.",
@@ -887,7 +890,7 @@ inline constexpr GuideLine GuideTable[]={
 // Under Offline difficulty: the card leads with the note; without the
 // offline scaling adapter, main's notice instead (row and card), and the row
 // stays editable as on main.
-inline constexpr const char* OfflineNote="Difficulty affects new monsters only; existing monsters keep their stats. To apply it throughout the game, Save and Exit, then start a new game with the same character.";
+inline constexpr const char* OfflineNote="Only new monsters change. Save and Exit, then rejoin with the same character to refresh them all.";
 inline constexpr const char* OfflineUnavailable="Offline scaling adapter unavailable. Game difficulty remains unchanged.";
 inline constexpr const char* OfflineUnavailableShort="Offline scaling adapter unavailable";
 // Under Button names: the controllers the headset reports.
