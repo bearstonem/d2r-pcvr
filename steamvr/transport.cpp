@@ -42,6 +42,7 @@
 #include "window_focus.h"
 #include "panel_input_mode.h"
 #include "gameplay.h"
+#include "room_scale.h"
 #include "strike_skills.h"
 #include "bow_laser.h"
 #include "hand_controls.h"
@@ -740,6 +741,9 @@ std::array<XrView,2> views{{{XR_TYPE_VIEW},{XR_TYPE_VIEW}}};
 XrPosef head{};
 math::Vec origin{};
 bool haveOrigin=false;
+// Room-scale (room_scale.h): the stage's turn at the last head view, so a turn pivots at the head; and when
+// the room's offset was last written to the log.
+math::Quat turnBase{0,0,0,1};bool turnBaseKnown=false;double roomSaidAt=0;
 GripStickButton leftMenuButton;
 stickgestures::Gestures rightStickGestures;   // right stick up: run / walk (Movement speed's Stick toggle); down: loot labels
 MenuTriggerGate menuTriggerGate;
@@ -7118,6 +7122,17 @@ bool View(float out[16],const float hero[3],float eyeHeight,float userEyeHeight,
     const auto base=math::Yaw(bodyHeading-recenterYaw);
     if(eye<0)compassFrame=wristHeading.Update(gamestate::LocalPlayer(),motionHeadTracked,
         Q(head.orientation),bodyHeading-recenterYaw,mapNorth);
+    if(eye<0) {   // Room-scale: a snap or smooth turn turns the room about your head (it swung you round the hero's spot)
+        if(turnBaseKnown&&haveOrigin)origin=roomscale::TurnAboutHead(origin,V(head.position),turnBase,base);
+        turnBase=base;turnBaseKnown=true;
+        const float apart=roomscale::Apart(V(head.position),origin);
+        const double now=Milliseconds()/1000.0;
+        if(apart>.25f&&now-roomSaidAt>=5) {
+            roomSaidAt=now;char line[200];
+            std::snprintf(line,sizeof line,"Frame room: you stand %.2f m from the hero's spot (the room's centre); turns pivot at your head",apart);
+            Say(line);
+        }
+    }
     if(eye<0)stageWorld={true,origin,{hero[0],hero[1],hero[2]},base,upm,eyeHeight,GetTickCount64()};
     const auto resolveBow=[&](bowflight::Shot shot) {
         const auto offset=math::Rotate(base,shot.origin-origin);

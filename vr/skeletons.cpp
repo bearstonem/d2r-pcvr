@@ -417,6 +417,21 @@ std::atomic<ULONGLONG> g_formPosedAt{0};   // a form rig was the hero then: the 
 // When each rig was last posed as the hero: [0] a person's (the druid's own), [1] the
 // werewolf's, [2] the werebear's - the one the state sample names, while the game swaps them.
 std::atomic<ULONGLONG> g_rigPosedAt[3] = {};
+// Room-scale (2026-11-08): the body moved under the tracked neck (first person), for the log - players
+// reported their legs left behind when they stepped. Per pose: asked for, done, refused as too far.
+std::atomic<unsigned> g_neckPoses{0},g_neckApplied{0},g_neckFar{0};
+std::atomic<float> g_neckFarthest{0};   // the largest move this window, in eye heights
+void ReportNeckFollow() {
+    static std::atomic<uint64_t> nextAt{0};
+    auto before=nextAt.load();const auto now=GetTickCount64();
+    if(now<before||!nextAt.compare_exchange_strong(before,now+5000))return;
+    const unsigned poses=g_neckPoses.exchange(0),applied=g_neckApplied.exchange(0),tooFar=g_neckFar.exchange(0);
+    const float farthest=g_neckFarthest.exchange(0);
+    if(!poses||(!tooFar&&farthest<.1f&&applied==poses))return;   // standing at the room's centre: nothing to say
+    char line[240];std::snprintf(line,sizeof line,"Frame room body: last 5 s the body stood under your neck in %u of %u poses "
+        "(farthest %.2f eye heights from where the game poses it), %u refused as over 3 eye heights",applied,poses,farthest,tooFar);
+    framevr::logging::Write(line);
+}
 #ifdef D2RVR_DEVELOPER
 // Form rig frames, for the log: taken before the state sample caught up with the swap;
 // left to the game (not standing, another rig taken); grafted without the neck anchor.
@@ -1524,6 +1539,7 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
         for (int i = 0; i < n; ++i) if (in.bodyTurn == 2 || h.upper[i]) newW[i] = Mul(newW[i], T);
     }
 #if D2RVR_FIRST_PERSON
+    if(in.followTrackedNeck)++g_neckPoses;
     if(in.followTrackedNeck&&in.haveEye&&in.haveYaw&&h.bindOk&&h.head>=0&&h.eyeY>0) {
         const int neck=h.neck>=0?h.neck:h.head;
         const V3 bindNeck=Pos(h.bind[neck]);
@@ -1538,8 +1554,13 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
             {toEye.x,toEye.y,toEye.z},
             in.yawInModel,in.headPitch,in.headRoll);
         const V3 shift{target.x-current.x,target.y-current.y,target.z-current.z};
+        if(framevr::body::Finite(target)) {
+            const float eyes=Len(shift)/h.eyeY;
+            for(float was=g_neckFarthest.load();eyes>was&&!g_neckFarthest.compare_exchange_weak(was,eyes);){}
+            if(!(eyes<3.f))++g_neckFar;
+        }
         if(framevr::body::Finite(target)&&Len(shift)<h.eyeY*3.f) {
-            trackedNeckApplied = true;
+            trackedNeckApplied = true;++g_neckApplied;
             const auto before=newW;
             const bool legs=h.leg[0][2]>=0&&h.leg[1][2]>=0;
             for(int i=0;i<n;++i) {
@@ -1565,6 +1586,7 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
             }
         }
     }
+    ReportNeckFollow();
 #ifdef D2RVR_DEVELOPER
     if(graft&&!trackedNeckApplied)++g_formLoose;   // drawn at its rest place, not under the eyes
 #endif
