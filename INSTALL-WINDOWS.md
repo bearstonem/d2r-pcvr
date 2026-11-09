@@ -11,8 +11,11 @@ and licensed third-party components. The installer reads the required
 item/skill icons and potion models from your own installed game and keeps
 them in local caches. Do not redistribute those caches or your game files.
 
-This preview accepts your **Steam copy of Diablo II: Resurrected
-3.3.94995** (or 3.3.93787) or **Battle.net copy of D2R 3.3.93847** (experimental).
+This preview accepts your **Steam copy of Diablo II: Resurrected** or
+**Battle.net copy of D2R** (experimental).
+Setup does not refuse a newer game version: the mod checks the game code it
+hooks each time it starts, and if that code changed, it leaves the feature
+off and says so in its log.
 Use a **local offline character**. For Battle.net, see
 [Battle.net preview packages](#battlenet-preview-packages).
 The game runs on your PC and streams to the headset.
@@ -191,7 +194,7 @@ configuration; keep them private and do not share them with the mod ZIP.
 
 The v0.3.7 ZIP includes **bin/CascLib.dll** and offers both editions in
 **Install-Windows.cmd**. For Battle.net, it requires
-your **purchased Battle.net copy of D2R 3.3.93847** on Windows. Use a local
+your **purchased Battle.net copy of D2R** on Windows. Use a local
 offline character. SteamVR and Virtual Desktop (VDXR) launch options are
 available. Battle.net has been tried with SteamVR; Battle.net with VDXR has not
 yet been confirmed. Battle.net support is still experimental.

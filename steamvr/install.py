@@ -340,7 +340,7 @@ def main():
     ap.add_argument('--backup-dir', type=Path, default=ROOT / 'build-frame/backups')
     ap.add_argument('--download-deps', action='store_true', help='Fetch pinned D2RLoader, ReShade and (Windows) OFXR Bridge from their official sites')
     ap.add_argument('--store', choices=['auto', 'steam', 'battlenet'], default='auto')
-    ap.add_argument('--experimental-battlenet', action='store_true', help='Enable Battle.net 3.3.93847 for local offline compatibility testing')
+    ap.add_argument('--experimental-battlenet', action='store_true', help='Enable Battle.net for local offline compatibility testing')
     ap.add_argument('--casclib', type=Path, default=ROOT / 'bin/CascLib.dll', help='Pinned Unicode x64 CascLib 3.0 for Battle.net asset reading')
     ap.add_argument('--preserve-settings', action='store_true', help='Keep existing calibration, mod/ReShade configuration and video settings when upgrading')
     ap.add_argument('--restore', type=Path, help='Restore the installation snapshot made by this script')
