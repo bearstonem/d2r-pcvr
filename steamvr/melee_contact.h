@@ -80,6 +80,9 @@ struct Sample {
     bool bowBash=false;
     // Weapon heft (weapon_heft.h): the hand travel (m) this weapon's stroke needs for a full hit; 0 = any stroke is whole.
     float heft=0;
+    // Hit reactions (hit_reactions.h): how heavy this hand's weapon swings (weapon_heft.h Weight, 0..1), whatever
+    // Weapon heft is set to, and the reactions switched on (hitreact::Wanted bits; 0 = off).
+    float weight=0;uint8_t reactions=0;
 };
 inline int Lane(const Sample& s){return s.shield?1:s.handIndex==1?2:0;}
 // The renderer may finish posing an older input after a newer XR sample has

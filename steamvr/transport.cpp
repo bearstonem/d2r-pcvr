@@ -125,6 +125,7 @@
 #include "toss.h"
 #include "aim_reach.h"
 #include "weapon_heft.h"
+#include "hit_reactions.h"
 
 namespace gamestate {uint32_t WeaponType();uint32_t HandsKey();uint32_t WeaponSet();uint32_t WeaponClass();uint32_t TwoHanded();uint64_t LocalPlayer();uint32_t MenuEpoch();int AttackWsm(int hand);}
 namespace gamecmd {void RequestPotion(int slot);void CancelPotion();}
@@ -5129,17 +5130,23 @@ void Input() {
             motionInput.weapon==gameplay::Weapon::Bow&&!motionOutput.bowDrawing&&!motionOutput.block;
         // Weapon heft (weapon_heft.h, #443; VR Settings > Combat > Melee, off by default): the hand travel this
         // hand's weapon needs for a full hit, from its kind, two-handed grip and speed (WSM); 0 = whole.
-        const auto heftNeed=[&](int hand)->float {
-            if(gestureSettings[settings::WeaponHeft]<.5f||claws)return 0;
+        // weightOnly: the weapon's weight itself (0..1), for hit reactions, whatever Weapon heft is set to.
+        const auto heftNeed=[&](int hand,bool weightOnly=false)->float {
+            if((!weightOnly&&gestureSettings[settings::WeaponHeft]<.5f)||claws)return 0;
             const int body=dual?weapons.BodyHand(hand):hand==0?0:-1;   // the inventory arm whose weapon this hand swings
             if(body<0)return 0;
             const uint32_t type=dual?weapons.type[body]:gamestate::WeaponType();
             // TwoHanded() and AttackWsm(0) describe the weapon in hand (when dual wielding, the right arm's);
             // AttackWsm(1) the left arm's, whose two-handed bit the game state does not keep.
             const bool twoHanded=(!dual||body==0)&&(gamestate::TwoHanded()&D2RVR_TWO_HANDED)!=0;
-            return heft::Need(heft::Weight(type,twoHanded,gamestate::AttackWsm(dual?body:0)));
+            const float weight=heft::Weight(type,twoHanded,gamestate::AttackWsm(dual?body:0));
+            return weightOnly?weight:heft::Need(weight);
         };
         sample.heft=heftNeed(0);
+        // Hit reactions (hit_reactions.h; VR Settings > Gameplay > Physics > Struck monsters, both on by default).
+        sample.reactions=uint8_t((gestureSettings[settings::HitStagger]>.5f?hitreact::Stagger:0)|
+                                 (gestureSettings[settings::HitKnockback]>.5f?hitreact::Knockback:0));
+        sample.weight=heftNeed(0,true);
         // Melee-skill contact adapter: each hand's strikes carry its own trigger
         // skill when that is a confirmed strike skill (strike_skills.h). The
         // assignment identity rides the sample, so a rebind drops a queued stroke.
@@ -5157,10 +5164,11 @@ void Input() {
         sample.bowBash=bowBash;
         sample.active=((sample.active&&(dual||claws))||bowBash)&&controls.lt<51&&controls.rt<51;
         sample.heft=bowBash?0.f:heftNeed(1);
+        sample.weight=bowBash?0.f:heftNeed(1,true);
         strike(1);
         if(bowBash)sample.strikeSkill=-1;   // a bow's swing never casts
         offhandPoses.Push(s.sampleStamp,sample);
-        sample.weapons={};sample.claws=false;sample.strikeSkill=-1;sample.bowBash=false;sample.heft=0;
+        sample.weapons={};sample.claws=false;sample.strikeSkill=-1;sample.bowBash=false;sample.heft=0;sample.weight=0;sample.reactions=0;
         sample.hand=motionInput.hand[1];sample.shield=true;sample.active=motionInput.active&&motionOutput.shieldContact;
         sample.skillSlot=shieldSlot;sample.skillOwner=shieldSkill.owner;sample.skillContext=motionInput.skillContext;
         shieldPoses.Push(s.sampleStamp,sample);

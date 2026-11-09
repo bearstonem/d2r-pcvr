@@ -169,6 +169,13 @@ about 40 cm of hand travel, a two-handed sword 32, a crystal sword 16 and a long
 sword 12; faster weapons need less. Daggers, claws, wands, orbs, thrown weapons and
 fists hit fully with a flick. Turning the wrist or drifting the hand slowly does
 not count. Each hit is still one game attack, and the weapon never lags your hand.
+**Gameplay > Physics > Struck monsters** (both On by default) makes monsters answer
+your strokes. **Monsters stagger:** a long, committed stroke that lands on the beat
+makes the monster flinch, whatever the damage. **Heavy hits knock back:** a full
+stroke of a two-handed weapon, spear, polearm or staff shoves it back, away from
+you. Neither adds damage. A monster staggers at most every 1.2 seconds and is
+knocked back at most every 2.5; act bosses never react, and uniques and champions
+only stagger.
 
 **Unleashed swing damage:** every stroke that connects lands, but how hard it
 hits depends on your character. Your attack rating against the monster's
