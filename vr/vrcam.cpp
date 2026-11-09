@@ -4055,7 +4055,8 @@ bool Wanted() {
     const bool tacticalActive = companionai::IsTacticalCommandsEnabled();
     return g_enabled.load() && g_inWorld.load() &&
         (TargetHighlightOn() || SpellsLocked() || BowSkillsLocked() ||
-         GroundAimMode() == 2 || tacticalActive || framevr::HeavensArmed());
+         GroundAimMode() == 2 || tacticalActive || framevr::HeavensArmed() ||
+         framevr::SeekerArrowReady());   // Guided Arrow homes on the aimed monster whatever the Aim options (aimrules::AlwaysHomes)
 }
 void Tick() {
     const bool wanted = Wanted();
@@ -4265,14 +4266,38 @@ bool MotionAim(int skill,float playerX,float playerY,framevr::spellaim::Cast& ca
 // per skill per 250 ms: the rule, the button, the target and where it came
 // from, a unit hand-off, and the point or heading sent to the game.
 bool UpstreamSpellAim(float playerX,float playerY,framevr::spellaim::Cast& cast);
+// Hands the game the aimed monster for a unit skill (aimrules::WantsUnit) when the target scan has
+// one: its target queries answer with it (RulesUnit). False, and any earlier hand-off dropped, when
+// there is none.
+bool HandOffUnit(const aimtargets::Cast& c) {
+    float mx=0,my=0,md=0;uint32_t id=0;
+    if(aimtargets::Resolve(c.button,c.bow,c.use,mx,my,md,&g_note.source,&id)&&worldobj::ClientMonster(id,mx,my)) {
+        // the button that cast it, while it is held: letting go drops the hand-off (aimtargets::Tick)
+        const bool pressed=framevr::CastButtonHand()==c.button||framevr::HandSpellHeld(c.button);
+        g_unitId.store(id);g_unitX.store(mx);g_unitY.store(my);g_unitButton.store(pressed?c.button:-1);g_unitAt.store(GetTickCount64());g_unitSkill.store(c.skill);
+        g_note.unit="handed";g_note.id=id;g_note.distance=md;g_note.by="unit";
+        return true;
+    }
+    if(id)g_note.unit="not found";
+    // Nothing handed this time: the game's target queries must not keep
+    // answering with the last hand-off's monster for up to 500 ms.
+    if(const int was=g_unitSkill.exchange(-1);!id&&framevr::aimrules::HandOffLive(was,g_unitAt.load(),GetTickCount64()))
+        g_note.unit="none (last hand-off dropped)";
+    return false;
+}
 bool NativeSpellAim(float playerX,float playerY,framevr::spellaim::Cast& cast) {
     g_note={};
     const auto c=aimtargets::Now();
     if(c.skill==132||c.skill==143)leapglide::g_cast.store(GetTickCount64());   // Leap, Leap Attack: the view glides through the take-off
     // Teleport on its shown landing or a thrown trap first; then the aim rules
-    // only with this kind of cast's Aim option On; Off, as before them.
-    const bool directed=MotionAim(c.skill,playerX,playerY,cast)||TossAim(c.skill,playerX,playerY,cast)||
-        (aimtargets::RulesOn(c)?NativeSpellAimDecide(playerX,playerY,cast):UpstreamSpellAim(playerX,playerY,cast));
+    // only with this kind of cast's Aim option On; Off, as before them - except
+    // Guided Arrow, handed the aimed monster whatever the option (aimrules::AlwaysHomes).
+    bool directed=MotionAim(c.skill,playerX,playerY,cast)||TossAim(c.skill,playerX,playerY,cast);
+    if(!directed) {
+        if(aimtargets::RulesOn(c))directed=NativeSpellAimDecide(playerX,playerY,cast);
+        else if(c.skill>=0&&framevr::aimrules::AlwaysHomes(c.skill)&&HandOffUnit(c)){g_note.by="unit (Guided Arrow always homes)";cast.directed=false;}
+        else directed=UpstreamSpellAim(playerX,playerY,cast);
+    }
     static ULONGLONG told=0;static int toldSkill=-2;
     if(c.skill>=0&&(c.skill!=toldSkill||GetTickCount64()-told>250)) {
         told=GetTickCount64();toldSkill=c.skill;
@@ -4313,23 +4338,9 @@ bool NativeSpellAimDecide(float playerX,float playerY,framevr::spellaim::Cast& c
             HandRay(o,d)&&framevr::spellaim::Horizontal({d[0],d[1],d[2]},cast.x,cast.y);
         return cast.directed;
     }
-    float mx=0,my=0,md=0;uint32_t id=0;
     // Only when the game's own unit is found here (the game thread): otherwise
     // the rule's heading or spot below (Guided Arrow flew into a wall).
-    if(c.skill>=0&&framevr::aimrules::WantsUnit(c.skill)&&aimtargets::SwitchOn(c)) {
-        if(aimtargets::Resolve(c.button,c.bow,c.use,mx,my,md,&g_note.source,&id)&&worldobj::ClientMonster(id,mx,my)) {
-            // the button that cast it, while it is held: letting go drops the hand-off (aimtargets::Tick)
-            const bool pressed=framevr::CastButtonHand()==c.button||framevr::HandSpellHeld(c.button);
-            g_unitId.store(id);g_unitX.store(mx);g_unitY.store(my);g_unitButton.store(pressed?c.button:-1);g_unitAt.store(GetTickCount64());g_unitSkill.store(c.skill);
-            g_note.unit="handed";g_note.id=id;g_note.distance=md;g_note.by="unit";
-            cast.directed=false;return false;
-        }
-        if(id)g_note.unit="not found";
-        // Nothing handed this time: the game's target queries must not keep
-        // answering with the last hand-off's monster for up to 500 ms.
-        if(const int was=g_unitSkill.exchange(-1);!id&&framevr::aimrules::HandOffLive(was,g_unitAt.load(),GetTickCount64()))
-            g_note.unit="none (last hand-off dropped)";
-    }
+    if(c.skill>=0&&framevr::aimrules::WantsUnit(c.skill)&&aimtargets::SwitchOn(c)&&HandOffUnit(c)){cast.directed=false;return false;}
     // Placed skills (ground skills - Bone Wall and Prison too - curses,
     // Teleport...): the point; the rest a heading.
     cast.directed=DirectedSpellAim(cast.x,cast.y);
