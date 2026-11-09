@@ -6,6 +6,9 @@ void Init(const D2RL::PluginContext*);
 void Capture(); // SDK UI thread, after equipment refresh
 framevr::interaction::Snapshot Read();
 int CurrentLevel(uint64_t session,uint64_t now); // Fresh location only; avoids copying inventory/skills in target queries.
+// The hero's Light Radius (stat 89, light_radius.h) as last read for this hero, held while a capture is
+// late so the light never jumps; false before the first read.
+bool LightRadius(uint64_t session,int& value);
 // The druid shapeshift form the player is in (framevr::shapeshift: 1 Werewolf, 2 Werebear;
 // states 139/140, sampled with the hireling every 200 ms); 0 none, not known or stale.
 int ShapeForm(uint64_t session,uint64_t now);

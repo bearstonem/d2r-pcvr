@@ -72,6 +72,10 @@ struct Output {
     bool bowPhysical=false; // a release now is a physical arrow, not a native bow skill
     bool meleeContact=false,bowRelease=false,javelinRelease=false,javelinReady=false;
     bool nativeBowRelease=false,shieldContact=false;
+    // A release this step: the string's line (3D, string hand to bow hand), and
+    // for a native bow skill release the skill it pressed (else -1).
+    Vec releaseDirection{};
+    int nativeBowSkill=-1;
     float meleeSpeed=0;
     int skill=-1, potion=-1, bottle=-1; // potion is a one-shot request, not proof of consumption
     bool swap=false;
@@ -114,6 +118,24 @@ inline bool RouteCrossbow(const Input& in,Output& out,bool rightHand,bool ready,
     if(!ready||!rightHand||!in.active||in.weapon!=Weapon::Crossbow||out.block||!out.rayValid||
        !(out.attack||(out.skill>=0&&skillAvailable&&skillId==0)))return false;
     out.attack=false;out.skill=-1;return true;
+}
+// A crossbow fires with the right trigger (owner, 2026-11-08: "when we equip a
+// crossbow ... the primary on that hand is set to attack", and when it comes
+// off, "restore back whatever was on the primary"). A runtime override, never
+// a binding write: the game saves skill assignments in the character, so the
+// slot keeps its skill (the wheel still shows it), taking the crossbow off is
+// the restore, and a crash cannot leave a changed binding behind. True when
+// the slot's skill gives way to Attack. An empty slot or Attack already
+// attacks; a bow skill the hero has (Multiple Shot, Strafe, Guided Arrow, the
+// elemental arrows) stays, as the game fires it from a crossbow natively.
+inline bool CrossbowAttack(bool motionControls,Weapon weapon,bool known,int skill,bool available) {
+    if(!motionControls||weapon!=Weapon::Crossbow||!known||skill<0||skill==weaponskills::Attack)return false;
+    return !(available&&weaponskills::Bow(skill));
+}
+// The right trigger's selection (Engine::Select): its slot, else none, which
+// presses Attack - an empty or unknown slot, or a crossbow's (CrossbowAttack).
+inline int TriggerSelection(bool known,int skill,bool crossbowAttack) {
+    return known&&skill>=0&&!crossbowAttack?skills::TriggerSlot(0):-1;
 }
 // Raises a direction by degrees (negative lowers it), keeping its heading;
 // never past straight up or down. A throw's hand path dips as it is let go.
@@ -345,9 +367,10 @@ public:
             if(drawing&&released) {
                 if(out.bowCharged&&math::Dot(math::Normalized(line),out.bowForward)>.15f) {
                     shotOrigin=in.hand[1].p;shotDirection=math::Normalized(line);
-                    pulseUntil=in.time+.065;out.feedback=2;
+                    pulseUntil=in.time+.065;out.feedback=2;out.releaseDirection=shotDirection;
                     if(skillBow) {
                         out.nativeBowRelease=skillPulse.Start(bowSlot,bowSkill,bowOwner,in.skillContext,in.time);
+                        if(out.nativeBowRelease)out.nativeBowSkill=bowSkill;
                     } else out.bowRelease=true;
                     shotAimUntil=in.time+.4;
                 }

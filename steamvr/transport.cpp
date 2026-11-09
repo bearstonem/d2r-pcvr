@@ -111,6 +111,7 @@
 #include "foveation.h"
 #include "effects_layer.h"
 #include "gaze.h"
+#include "gaze_aim.h"
 #include "d2rcam.h"
 #include "profile.h"
 #include "../vr/skeletons.h"
@@ -119,8 +120,9 @@
 #include "aim_rules.h"
 #include "toss.h"
 #include "aim_reach.h"
+#include "weapon_heft.h"
 
-namespace gamestate {uint32_t WeaponType();uint32_t HandsKey();uint32_t WeaponSet();uint32_t WeaponClass();uint32_t TwoHanded();uint64_t LocalPlayer();uint32_t MenuEpoch();}
+namespace gamestate {uint32_t WeaponType();uint32_t HandsKey();uint32_t WeaponSet();uint32_t WeaponClass();uint32_t TwoHanded();uint64_t LocalPlayer();uint32_t MenuEpoch();int AttackWsm(int hand);}
 namespace gamecmd {void RequestPotion(int slot);void CancelPotion();}
 namespace gamestate {void MenuMap(bool wanted);uint32_t QuestNotices();bool NoticePanelOpen();bool NoticeText(int kind,char* out,uint32_t size);}
 namespace gamestate {bool LeftShield();bool RightThrowingPotion();uint32_t RightThrowingPotionCode();framevr::dualwield::Equipment MeleeEquipment();}
@@ -602,6 +604,7 @@ uint32_t heavensRequest=0,heavensAnswered=0,heavensMonster=0,heavensCasts=0;
 float heavensFrom=0,heavensAt=0;   // the last call's start and stop elevation (degrees), for the log
 ULONGLONG heavensAskedAt=0;
 std::atomic<bool> heavensArmed{false};
+std::atomic<bool> seekerArrowReady{false};   // SeekerArrowReady: a ready bow whose skill is Guided Arrow
 constexpr ULONGLONG HeavensWaitMs=120;
 // A Charge in flight (any cast path): no physical melee contacts until it ends.
 ULONGLONG chargeIssuedAt=0,chargeContactsHeldAt=0;
@@ -609,6 +612,7 @@ ULONGLONG chargeIssuedAt=0,chargeContactsHeldAt=0;
 std::atomic<bool> quiverEnabled{true},quiverPreview{true};
 weaponskills::Quiver quiver;
 weaponskills::Loaded quiverArrow{}; // the skill the next release carries, if any
+weaponskills::Loaded nativeArrow{}; // a loaded Multiple Shot, Guided Arrow or Strafe: the release presses its face button (#364)
 int quiverReportedSlot=-1; // one diagnostic line per face-button press
 uint64_t shieldFeedbackAt=0,cueChangedAt=0,volleyRequestedAt=0;
 bool shieldRefused=false;
@@ -620,6 +624,10 @@ uint64_t bowSequence=0;
 bowflight::Shot bowPending{},bowReadyShot{},bowPreviewPose{};
 bool bowPreviewVisible=false;
 bool bowNeedsWorld=false,bowHasShot=false;
+// Multiple Shot from a draw: the release's pose, lent to the fan the game
+// makes for it (bowvr::ArmFan). Allowed() refuses a stale one.
+bowflight::Shot fanPending{};
+bool fanNeedsWorld=false;
 // Double Throw (#224): the left hand's own release, beside the right's.
 bowflight::Shot throwLeftPending{},throwLeftReady{};
 bool leftNeedsWorld=false,leftHasShot=false,leftThrowArmed=false;
@@ -683,6 +691,9 @@ bool PointedCell(float& x,float& y,math::Vec& way) {
 }
 bool crossbowFire=false;
 uint64_t crossbowActivation=0,crossbowTakenAt=0;
+// The crossbow's right trigger as last logged: 0 the slot's own, 1 Attack over the slot's skill
+// (gameplay::CrossbowAttack), 2 the slot's bow skill kept; and that skill.
+int crossbowTriggerMode=0,crossbowTriggerSkill=-1;
 bowflight::Shot spellReadyShot[2]{};
 bool spellHasShot[2]{};
 uint64_t spellResolvedAt[2]{};
@@ -701,6 +712,12 @@ XrAction gazeAction=XR_NULL_HANDLE;
 XrSpace gazeSpace=XR_NULL_HANDLE;
 std::array<gaze::UV,2> gazeCenters{};
 gaze::Stability gazeStability;
+// Aim with your eyes (gaze_aim.h): vrcam's update thread asks for samples while the option needs them
+// (WantGazeAim), with eye-tracked foveation on or off; the last one is kept for it here.
+std::atomic<bool> gazeAimWanted{false};
+std::atomic<int> gazeAimSupport{-1};   // GazeAimSupport: -1 no session yet, 0 no extension, 1 no tracker, 2 bound
+struct GazeAimSampled {bool valid=false;math::Vec local{0,0,-1};ULONGLONG at=0;};
+std::mutex gazeAimMutex;GazeAimSampled gazeAimSampled;
 double Milliseconds() {
     static const double scale=[](){LARGE_INTEGER f{};QueryPerformanceFrequency(&f);return 1000.0/double(f.QuadPart);}();
     LARGE_INTEGER t{};QueryPerformanceCounter(&t);return double(t.QuadPart)*scale;
@@ -1387,7 +1404,8 @@ bool LoadFunctions() {
         Say("Frame OpenXR: runtime does not expose XR_KHR_D3D12_enable");return false;
     }
     // Bind the optional capability at session creation so the in-headset
-    // toggle can enable it later. Samples are read only while eyeTracking is on.
+    // toggle can enable it later. Samples are read only while eyeTracking is on or Aim with your eyes
+    // wants them (gazeAimWanted).
     gazeExtension=supports(XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME);
     frameControllerExtension=supports(controllers::FrameExtension);
     std::vector<const char*> enabled{XR_KHR_D3D12_ENABLE_EXTENSION_NAME};
@@ -1507,6 +1525,7 @@ bool SetupActions() {
         XrActionSpaceCreateInfo gi{XR_TYPE_ACTION_SPACE_CREATE_INFO};gi.action=gazeAction;gi.poseInActionSpace.orientation.w=1;
         gazeReady=Check(pCreateActionSpace(session,&gi,&gazeSpace),"create gaze space");
     }
+    gazeAimSupport.store(!gazeExtension?0:gazeReady&&gazeSpace?2:1);
     return true;
 }
 bool WaitGpu();
@@ -2193,9 +2212,18 @@ void MenuPointer(const menus::Pad& controls) {
     triggerWasDown=pressed;cancelWasDown=(controls.buttons&menus::B)!=0;
 }
 
+// Aim with your eyes: this frame's gaze for vrcam (GazeAimLocal), in the left eye's view.
+void PublishGazeAim(bool valid,math::Vec local) {
+    std::lock_guard lock(gazeAimMutex);
+    gazeAimSampled.valid=valid;
+    if(valid){gazeAimSampled.local=local;gazeAimSampled.at=GetTickCount64();}
+}
 void SampleGaze() {
     gazeValid=false;
-    if(!eyeTracking.load()||!render||panelMode){gazeStability.Reset();return;}
+    // Foveation's eye tracking, or Aim with your eyes (gaze_aim.h), which reads them with foveation Fixed or Off too.
+    const bool foveate=eyeTracking.load(),aim=gazeAimWanted.load();
+    bool aimValid=false;math::Vec aimLocal{0,0,-1};
+    if(!(foveate||aim)||!render||panelMode){gazeStability.Reset();PublishGazeAim(false,aimLocal);return;}
     // These diagnostics report only validity/age categories, never gaze poses,
     // coordinates, fixation targets or a recorded gaze trajectory.
     enum {Unavailable,Inactive,Untracked,Untimed,Stale,Outside,Recovering,Usable,Count};
@@ -2209,28 +2237,39 @@ void SampleGaze() {
             constexpr auto needed=XR_SPACE_LOCATION_POSITION_VALID_BIT|XR_SPACE_LOCATION_ORIENTATION_VALID_BIT|
                 XR_SPACE_LOCATION_POSITION_TRACKED_BIT|XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT;
             if(XR_SUCCEEDED(pLocateSpace(gazeSpace,space,frameState.predictedDisplayTime,&loc))&&(loc.locationFlags&needed)==needed) {
+                // The gaze and the views are located in the same space at the same display time: the
+                // gaze in the left eye's view is what vrcam's left-eye camera axes turn into the world.
+                if(aim&&gazeaim::Usable(true,frameState.predictedDisplayTime,sample.time)) {
+                    aimLocal=math::Rotate(math::Conjugate(Q(views[0].pose.orientation)),math::Rotate(Q(loc.pose.orientation),{0,0,-1}));
+                    aimValid=std::isfinite(aimLocal.x+aimLocal.y+aimLocal.z);
+                }
                 status=sample.time?Stale:Untimed;
                 if(gaze::Fresh(frameState.predictedDisplayTime,sample.time)) {
-                    bool projected=true;
-                    for(unsigned i=0;i<2;++i) {
-                        const auto& f=views[i].fov;
-                        projected&=gaze::Project(Q(loc.pose.orientation),Q(views[i].pose.orientation),
-                            {f.angleLeft,f.angleRight,f.angleDown,f.angleUp},gazeCenters[i]);
+                    if(!foveate)status=Usable;   // aiming only: no foveation centres
+                    else {
+                        bool projected=true;
+                        for(unsigned i=0;i<2;++i) {
+                            const auto& f=views[i].fov;
+                            projected&=gaze::Project(Q(loc.pose.orientation),Q(views[i].pose.orientation),
+                                {f.angleLeft,f.angleRight,f.angleDown,f.angleUp},gazeCenters[i]);
+                        }
+                        status=projected?Recovering:Outside;
+                        gazeValid=gazeStability.Update(projected,gazeCenters);
+                        if(gazeValid)status=Usable;
                     }
-                    status=projected?Recovering:Outside;
-                    gazeValid=gazeStability.Update(projected,gazeCenters);
-                    if(gazeValid)status=Usable;
                 }
             }
         }
     }
+    PublishGazeAim(aimValid,aimLocal);
     if(status!=Recovering&&status!=Usable)gazeStability.Reset();
     static std::array<uint32_t,Count> counts{};static ULONGLONG reportAt=0;
     ++counts[status];const auto now=GetTickCount64();
     if(now>=reportAt) {
         char line[300];std::snprintf(line,sizeof line,
-            "Frame gaze: samples usable=%u recovery/jump=%u unavailable=%u inactive=%u untracked=%u untimed=%u stale=%u outside=%u; invalid uses full quality",
-            counts[Usable],counts[Recovering],counts[Unavailable],counts[Inactive],counts[Untracked],counts[Untimed],counts[Stale],counts[Outside]);
+            "Frame gaze: samples usable=%u recovery/jump=%u unavailable=%u inactive=%u untracked=%u untimed=%u stale=%u outside=%u; %s",
+            counts[Usable],counts[Recovering],counts[Unavailable],counts[Inactive],counts[Untracked],counts[Untimed],counts[Stale],counts[Outside],
+            foveate?(aim?"invalid uses full quality; aiming too":"invalid uses full quality"):"for Aim with your eyes only (foveation not eye tracked)");
         Say(line);counts={};reportAt=now+5000;
     }
 }
@@ -2524,6 +2563,7 @@ void SettingsPointer(bool grip) {
         const auto weapon=gamestate::WeaponType();
         context.bow=weapon==D2RVR_TYPE_BOW;context.staff=weapon==D2RVR_TYPE_STAFF;
         context.thrown=weapon==D2RVR_TYPE_JAVELIN||weapon==D2RVR_TYPE_THROWING||gamestate::RightThrowingPotion();   // a throwing potion's toss is lifted too
+        context.eyeTracker=gazeReady&&gazeSpace;   // Aim with your eyes shows only with one
         settingsModel.SetContext(context);settings::layout::SettleView(settingsModel);
     }
     const auto previousView=settingsModel.view;
@@ -3437,6 +3477,24 @@ void Input() {
         (uint64_t(skill.known)<<40)^(uint64_t(skill.available)<<41)^(uint64_t(skill.motion)<<42)^(uint64_t(skill.physical)<<43))*1099511628211ull;
     skills::HandInput handInput;handInput.time=motionInput.time;handInput.context=bindingContext;
     handInput.layout=bindingLayout;
+    // A crossbow in the hands: the right trigger fires it as Attack, whatever skill its slot holds
+    // (gameplay::CrossbowAttack). Only this frame's routing changes, never the saved binding.
+    const auto& triggerSkill=bindingSnapshot.skills[skills::TriggerSlot(0)];
+    const bool crossbowAttack=gameplay::CrossbowAttack(motionControls.load(),motionInput.weapon,triggerSkill.known,triggerSkill.id,triggerSkill.available);
+    if(interaction::Fresh(bindingSnapshot,gamestate::LocalPlayer(),GetTickCount64())) {
+        const bool kept=!crossbowAttack&&motionControls.load()&&motionInput.weapon==gameplay::Weapon::Crossbow&&
+            triggerSkill.known&&triggerSkill.available&&weaponskills::Bow(triggerSkill.id);
+        const int mode=crossbowAttack?1:kept?2:0;
+        if(mode!=crossbowTriggerMode||(mode&&triggerSkill.id!=crossbowTriggerSkill)) {
+            char line[200];line[0]=0;
+            if(mode==1)std::snprintf(line,sizeof line,"Frame crossbow: right trigger fires the crossbow (slot holds skill %d; its binding is untouched)",triggerSkill.id);
+            else if(mode==2)std::snprintf(line,sizeof line,"Frame crossbow: right trigger keeps skill %d, a bow skill the game fires from the crossbow",triggerSkill.id);
+            else if(crossbowTriggerMode==1)std::snprintf(line,sizeof line,"Frame crossbow: %s, right trigger back to skill %d",
+                motionInput.weapon!=gameplay::Weapon::Crossbow?"crossbow off":!motionControls.load()?"motion controls off":"slot changed",triggerSkill.id);
+            if(line[0])Say(line);
+            crossbowTriggerMode=mode;crossbowTriggerSkill=triggerSkill.id;
+        }
+    }
     if(bowvr::SpellReady()&&interaction::Fresh(bindingSnapshot,gamestate::LocalPlayer(),GetTickCount64()))
         for(int i=0;i<skills::Count;++i)if(bindingSnapshot.skills[i].physical&&bindingSnapshot.skills[i].available)
             handInput.independentSlots|=1u<<i;
@@ -3448,6 +3506,7 @@ void Input() {
     const auto& glyphValues=glyphSaveSequence?glyphWanted:glyphSettings.values;
     const auto glyphDrawSlots=glyphSettings.ready?glyphcast::DrawSlots(glyphValues[settings::GlyphDraw],glyphValues[settings::GlyphDrawSecond]):std::array<int,2>{-1,-1};
     for(const int slot:glyphDrawSlots)if(slot>=0)handInput.independentSlots&=~(1u<<slot);
+    if(crossbowAttack)handInput.independentSlots&=~(1u<<skills::TriggerSlot(0));   // the crossbow's, not a hand spell's
     handInput.layout^=uint64_t(handInput.independentSlots)<<48;
     handInput.active=motionInput.active&&motionInput.tracked[0]&&motionInput.tracked[1]&&handAimTracked[0]&&handAimTracked[1]&&gamestate::LocalPlayer();
     handInput.occupied=interactionOutput.bottle>=0||interactionOutput.owner[0]==interaction::Owner::Holster||interactionOutput.owner[1]==interaction::Owner::Holster;
@@ -4012,7 +4071,7 @@ void Input() {
     const bool quickFresh=interaction::Fresh(quickSnapshot,interactionInput.session,interactionInput.at);
     const auto& rightSkill=quickSnapshot.skills[skills::TriggerSlot(0)];
     const auto gestureSettings=vrsettings::Read().values;
-    const int selected=rightSkill.known&&rightSkill.id>=0?skills::TriggerSlot(0):-1;
+    const int selected=gameplay::TriggerSelection(rightSkill.known,rightSkill.id,crossbowAttack);
     if(motion.Selection()!=selected)motion.Select(selected);
     motionInput.selectedSkill=rightSkill.id;motionInput.selectedOwner=rightSkill.owner;
     motionInput.selectedAvailable=quickFresh&&rightSkill.known&&rightSkill.available&&rightSkill.motion;
@@ -4053,12 +4112,20 @@ void Input() {
         if(step.consumed&&requested>=0&&requested!=skills::TriggerSlot(0)&&skills::Hand(requested)==press.hand){requested=-1;handOutput.interact=false;}
         if(step.change!=weaponskills::Quiver::Change::None)
             MotionPulse(press.hand,haptics::Category::Interaction,step.change==weaponskills::Quiver::Change::Loaded?.45f:.25f,35000000);
-        quiverArrow={};
+        quiverArrow={};nativeArrow={};
         if(bow) {
             // A loaded skill wins; otherwise a quiver skill on the left trigger
             // (the bow's gesture skill) uses the same physical release.
             const auto& loaded=quiver.Current();
+            // #364: a loaded Multiple Shot, Guided Arrow or Strafe - each draw and release
+            // presses the face button it came from, as the left trigger's bow skill does,
+            // while that button still holds it.
+            const int from=quiver.Slot();
+            const auto& on=quickSnapshot.skills[from>=0&&from<skills::Count?from:0];
+            const bool native=loaded.Active()&&weaponskills::NativeLoad(loaded.skill)&&from>=0&&from<skills::Count&&
+                on.known&&on.available&&on.motion&&on.id==loaded.skill&&on.owner==loaded.owner;
             if(loaded.Active()&&weaponskills::Loadable(loaded.skill,loaded.missile,false))quiverArrow=loaded;
+            else if(native){nativeArrow=loaded;motionInput.bowSlot=from;motionInput.bowSkill=loaded.skill;motionInput.bowOwner=loaded.owner;}
             else if(shieldSkill.known&&shieldSkill.available&&weaponskills::QuiverSkill(shieldSkill.id)&&weaponskills::QuiverMissile(shieldSkill.missile))
                 quiverArrow={shieldSkill.id,shieldSkill.owner,shieldSkill.missile};
         } else if(thrown) {
@@ -4080,7 +4147,7 @@ void Input() {
     const bool glyphPressed=handOutput.slot>=0&&glyphDrawSlots[size_t(skills::Hand(handOutput.slot))]==handOutput.slot;
     if(glyphPressed){requested=-1;handOutput.interact=false;}
     const bool requestedKnown=requested>=0&&quickFresh&&quickSnapshot.skills[requested].known&&quickSnapshot.skills[requested].available;
-    handOutput.interact=requestedKnown&&quickSnapshot.skills[requested].id==357;
+    handOutput.interact=requestedKnown&&quickSnapshot.skills[requested].id==357&&!(crossbowAttack&&requested==skills::TriggerSlot(0));
     const bool quick=requested>=0&&requested!=skills::TriggerSlot(0);
     motionInput.quickCast=quick||handOutput.interact;
     motionInput.quickSkill=quick&&requestedKnown&&!handOutput.interact?requested:-1;
@@ -4103,6 +4170,7 @@ void Input() {
     const uint32_t potionCode=motionInput.potion?gamestate::RightThrowingPotionCode():0u;
     const bool potionBottle=potionCode&&bottlePhysics.load()&&potionModels.Radius(potionCode)>0;
     motionOutput=motion.Step(motionInput);motionAt=GetTickCount64();
+    seekerArrowReady.store(motionInput.active&&motionOutput.bowReady&&aimrules::AlwaysHomes(motionInput.bowSkill));
     if(motionOutput.tossHeld)tossLanding={};   // a new trap in hand: nothing placed yet
     const auto& tossStage=interactionInput.stage;
     const bool tossWorld=interactionInput.floorKnown&&tossStage.known&&stageWorld.upm>=1&&stageWorld.upm<=12;
@@ -4562,6 +4630,11 @@ void Input() {
         }
     }
     if(motionOutput.nativeBowRelease&&motionInput.bowSkill==weaponskills::Strafe)volleyRequestedAt=motionAt;
+    if(motionOutput.nativeBowRelease&&nativeArrow.Active()) {
+        char line[160];std::snprintf(line,sizeof line,"Frame bow quiver: release presses loaded skill=%d natively via slot %d",
+            nativeArrow.skill,motionInput.bowSlot);
+        Say(line);
+    }
     // Gesture skills on a trigger are labelled GESTURE on the hand wheel and
     // say how in the hand's cue, as Smite on a shield and arrow skills on a bow
     // do: a strike skill (strike_skills.h) casts with the hand's landed strikes
@@ -4585,10 +4658,15 @@ void Input() {
         if(cue.available&&!cue.temporary&&cue.slot==skills::TriggerSlot(0)&&(motionInput.toss||strikes(skill))) {
             cue.gesture=true;cue.strike=!motionInput.toss;std::snprintf(cue.hint,sizeof cue.hint,"%s",motionInput.toss?"Throw to place":"Swing to strike");
         }
+        if(cue.available&&!cue.temporary&&cue.slot==skills::TriggerSlot(0)&&skill.id==weaponskills::Attack&&motionInput.weapon==gameplay::Weapon::Crossbow)
+            std::snprintf(cue.hint,sizeof cue.hint,"Crossbow: pull trigger");
     } else if(cue.slot<0) {
+        // A crossbow's trigger is Attack (also over the slot's skill: gameplay::CrossbowAttack).
+        const bool crossbow=motionInput.weapon==gameplay::Weapon::Crossbow;
         cue.known=cue.available=true;
-        std::snprintf(cue.name,sizeof cue.name,"%s",motionInput.weapon==gameplay::Weapon::Bow?"Basic Arrow":"Basic Attack");
-        std::snprintf(cue.hint,sizeof cue.hint,"%s",motionInput.weapon==gameplay::Weapon::Bow?"Draw & release":motionInput.weapon==gameplay::Weapon::Javelin?"Swing / throw":"Swing / trigger");
+        std::snprintf(cue.name,sizeof cue.name,"%s",motionInput.weapon==gameplay::Weapon::Bow?"Basic Arrow":crossbow?"Attack":"Basic Attack");
+        std::snprintf(cue.hint,sizeof cue.hint,"%s",motionInput.weapon==gameplay::Weapon::Bow?"Draw & release":motionInput.weapon==gameplay::Weapon::Javelin?"Swing / throw":
+            crossbow?"Crossbow: pull trigger":"Swing / trigger");
     } else {
         std::snprintf(cue.name,sizeof cue.name,"Skill unavailable");std::snprintf(cue.hint,sizeof cue.hint,"Refresh assignments");
     }
@@ -4607,11 +4685,13 @@ void Input() {
         }
     };
     if(cue.available&&!cue.temporary)if(const char* how=paladinGesture(cue.id)){cue.gesture=true;std::snprintf(cue.hint,sizeof cue.hint,"%s",how);}
-    if(quiverArrow.Active()&&!cue.temporary&&(motionInput.weapon==gameplay::Weapon::Bow||motionInput.weapon==gameplay::Weapon::Javelin)) {
+    // The arrow the next release carries: a quiver skill's, or a loaded native bow skill's (#364).
+    const auto& carried=quiverArrow.Active()?quiverArrow:nativeArrow;
+    if(carried.Active()&&!cue.temporary&&(motionInput.weapon==gameplay::Weapon::Bow||motionInput.weapon==gameplay::Weapon::Javelin)) {
         const bool javelin=motionInput.weapon==gameplay::Weapon::Javelin;
         const char* name=nullptr;
-        for(const auto& skill:quickSnapshot.skills)if(skill.known&&skill.id==quiverArrow.skill&&skill.owner==quiverArrow.owner){name=skill.name;break;}
-        cue.id=quiverArrow.skill;cue.owner=quiverArrow.owner;cue.known=cue.available=true;
+        for(const auto& skill:quickSnapshot.skills)if(skill.known&&skill.id==carried.skill&&skill.owner==carried.owner){name=skill.name;break;}
+        cue.id=carried.skill;cue.owner=carried.owner;cue.known=cue.available=true;
         std::snprintf(cue.name,sizeof cue.name,"%s",name?name:javelin?"Javelin skill":"Skill arrow");
         std::snprintf(cue.hint,sizeof cue.hint,"%s",javelin?(quiver.Current().Active()?"Loaded: throw":"Throw"):
             quiver.Current().Active()?"Loaded: draw & release":"Draw & release");
@@ -4801,6 +4881,23 @@ void Input() {
         const bool dual=!claws&&dualwield::Eligible(skel::HeroClass(),weapons);
         if(dual)sample.weapons=weapons;
         sample.claws=claws;
+        // Bow bash (bow_bash.h, #443; VR Settings > Combat > Melee, off by default): the bow in the left hand,
+        // its string not drawn, swung into a monster staggers it. The lane also needs both triggers released (below).
+        const bool bowBash=gestureSettings[settings::BowBash]>.5f&&motionInput.active&&!claws&&
+            motionInput.weapon==gameplay::Weapon::Bow&&!motionOutput.bowDrawing&&!motionOutput.block;
+        // Weapon heft (weapon_heft.h, #443; VR Settings > Combat > Melee, off by default): the hand travel this
+        // hand's weapon needs for a full hit, from its kind, two-handed grip and speed (WSM); 0 = whole.
+        const auto heftNeed=[&](int hand)->float {
+            if(gestureSettings[settings::WeaponHeft]<.5f||claws)return 0;
+            const int body=dual?weapons.BodyHand(hand):hand==0?0:-1;   // the inventory arm whose weapon this hand swings
+            if(body<0)return 0;
+            const uint32_t type=dual?weapons.type[body]:gamestate::WeaponType();
+            // TwoHanded() and AttackWsm(0) describe the weapon in hand (when dual wielding, the right arm's);
+            // AttackWsm(1) the left arm's, whose two-handed bit the game state does not keep.
+            const bool twoHanded=(!dual||body==0)&&(gamestate::TwoHanded()&D2RVR_TWO_HANDED)!=0;
+            return heft::Need(heft::Weight(type,twoHanded,gamestate::AttackWsm(dual?body:0)));
+        };
+        sample.heft=heftNeed(0);
         // Melee-skill contact adapter: each hand's strikes carry its own trigger
         // skill when that is a confirmed strike skill (strike_skills.h). The
         // assignment identity rides the sample, so a rebind drops a queued stroke.
@@ -4815,10 +4912,13 @@ void Input() {
         strike(0);
         meleePoses.Push(s.sampleStamp,sample);
         sample.hand=motionInput.hand[1];sample.handIndex=1;
-        sample.active=sample.active&&(dual||claws)&&controls.lt<51&&controls.rt<51;
+        sample.bowBash=bowBash;
+        sample.active=((sample.active&&(dual||claws))||bowBash)&&controls.lt<51&&controls.rt<51;
+        sample.heft=bowBash?0.f:heftNeed(1);
         strike(1);
+        if(bowBash)sample.strikeSkill=-1;   // a bow's swing never casts
         offhandPoses.Push(s.sampleStamp,sample);
-        sample.weapons={};sample.claws=false;sample.strikeSkill=-1;
+        sample.weapons={};sample.claws=false;sample.strikeSkill=-1;sample.bowBash=false;sample.heft=0;
         sample.hand=motionInput.hand[1];sample.shield=true;sample.active=motionInput.active&&motionOutput.shieldContact;
         sample.skillSlot=shieldSlot;sample.skillOwner=shieldSkill.owner;sample.skillContext=motionInput.skillContext;
         shieldPoses.Push(s.sampleStamp,sample);
@@ -4844,6 +4944,15 @@ void Input() {
         bowPending.session=gamestate::LocalPlayer();bowPending.equipment=motionInput.equipment;
         bowPending.epoch=(meleeEpoch<<32)|bowWorldEpoch;bowPending.sequence=++bowSequence;
         bowNeedsWorld=true;
+    }
+    // A drawn Multiple Shot: the game makes the fan, which then flies this
+    // release's pose, pitch included (bowvr::ArmFan, bow_flight.h FanVolley).
+    if(motionOutput.nativeBowRelease&&motionOutput.nativeBowSkill==bowflight::MultipleShot&&motionInput.weapon==gameplay::Weapon::Bow) {
+        auto& p=fanPending;p={};p.missile=213;
+        p.origin=motionInput.hand[0].p;p.direction=motionOutput.releaseDirection;p.draw=motionOutput.draw;
+        p.at=GetTickCount64();p.stamp=s.sampleStamp;p.session=gamestate::LocalPlayer();p.equipment=motionInput.equipment;
+        p.epoch=(meleeEpoch<<32)|bowWorldEpoch;p.sequence=++bowSequence;
+        fanNeedsWorld=true;
     }
     if(motionOutput.leftRelease&&leftThrowArmed) {
         // Double Throw: the left hand throws its own weapon (the launch
@@ -5950,6 +6059,13 @@ void ConfigureTurnsSharp(bool on) {
     if(read.exchange(on?1:0)!=(on?1:0))SetTurnsSharp(on);
 }
 void ConfigureEyeTracking(bool on) {eyeTracking.store(on);}
+void WantGazeAim(bool wanted) {gazeAimWanted.store(wanted);}
+int GazeAimSupport() {return gazeAimSupport.load();}
+bool GazeAimLocal(float local[3],uint64_t& at) {
+    std::lock_guard lock(gazeAimMutex);
+    local[0]=gazeAimSampled.local.x;local[1]=gazeAimSampled.local.y;local[2]=gazeAimSampled.local.z;at=gazeAimSampled.at;
+    return gazeAimSampled.valid;
+}
 void BeginEye(int eye) {
     hud::UiFrame(spatialMode,!journalMode,eye);
     std::lock_guard lock(mutex);
@@ -6359,8 +6475,15 @@ void EndPair() {
     XrCompositionLayerQuad book{XR_TYPE_COMPOSITION_LAYER_QUAD};
     if(layer&&!settingsModel.open&&!bodyCalibration.Active()&&spatialMode&&SurfacePlaced()&&uiEye.copied&&uiCrop[2]>0) {
         const auto size=UiSurfaceSize();
-        motionQuad(book,UiSurfacePose(),size.width,size.height,
-            {{uiCrop[0],uiCrop[1]},{uiCrop[2],uiCrop[3]}},uiEye.chain);
+        auto pose=UiSurfacePose();float height=size.height;XrRect2Di shown{{uiCrop[0],uiCrop[1]},{uiCrop[2],uiCrop[3]}};
+        // On the leather the canvas below the band too, so a tooltip running past it shows on
+        // (leather::WithFoot); the band itself stays where the laser finds it.
+        if(leatherMode&&!journalMode) {
+            const auto foot=leather::WithFoot({uiCrop[0],uiCrop[1],uiCrop[2],uiCrop[3]},int(uiHeight),size.height);
+            const auto p=V(pose.position)+math::Rotate(Q(pose.orientation),{0,-foot.drop,0});
+            pose.position={p.x,p.y,p.z};height=foot.height;shown.extent.height=foot.rect.h;
+        }
+        motionQuad(book,pose,size.width,height,shown,uiEye.chain);
         book.layerFlags=opaqueMenuMode?0:XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
     }
     // The Advanced Stats button, a hair in front of the menu below its hint row (MenuPointer).
@@ -6632,7 +6755,7 @@ void ConfigureQuiver(bool enabled,bool preview) {
     std::lock_guard lock(mutex);
     quiverPreview=preview;
     if(quiverEnabled.exchange(enabled)!=enabled) {
-        quiver.Clear();quiverArrow={};
+        quiver.Clear();quiverArrow={};nativeArrow={};
         Say(enabled?"Frame bow quiver: arrow skills load physical arrows":"Frame bow quiver: disabled; arrow skills use native buttons");
     }
 }
@@ -6807,6 +6930,7 @@ bool HandSpellHeld(int hand) {
     return hand>=0&&hand<2&&motionControls.load()&&handOutput.spells[hand]>=0;
 }
 bool HeavensArmed(){return heavensArmed.load();}
+bool SeekerArrowReady(){return seekerArrowReady.load();}
 uint32_t HeavensRequest() {
     std::lock_guard lock(mutex);
     return heavensPending&&heavensAnswered!=heavensRequest&&GetTickCount64()-heavensAskedAt<=HeavensWaitMs?heavensRequest:0;
@@ -6857,10 +6981,13 @@ int PointSpellSkill() {
 }
 bool MeleeSample(uint32_t poseStamp,melee::Sample& sample,int hand) {
     std::lock_guard lock(mutex);
-    if(!motionControls.load()||!motionInput.active||!motionOutput.meleeContact||GetTickCount64()-motionAt>100)return false;
+    if(!motionControls.load()||!motionInput.active||GetTickCount64()-motionAt>100)return false;
     if(hand<0||hand>1||!(hand?offhandPoses:meleePoses).Find(poseStamp,Milliseconds()/1000.,sample))return false;
+    // A bow never makes melee contact; its bash lane (bow_bash.h) runs on the off hand instead.
+    const bool bash=hand==1&&sample.bowBash;
+    if(!motionOutput.meleeContact&&!bash)return false;
     // the off hand strikes with a second weapon - or, in a druid's form, with the left claw
-    if(hand==1&&!sample.claws&&!dualwield::Eligible(skel::HeroClass(),gamestate::MeleeEquipment()))return false;
+    if(hand==1&&!sample.claws&&!bash&&!dualwield::Eligible(skel::HeroClass(),gamestate::MeleeEquipment()))return false;
     return sample.epoch==meleeEpoch&&sample.equipment==motionInput.equipment;
 }
 bool ShieldSample(uint32_t poseStamp,melee::Sample& sample) {
@@ -7149,6 +7276,12 @@ bool View(float out[16],const float hero[3],float eyeHeight,float userEyeHeight,
             Say(line);
         }
     }
+    if(fanNeedsWorld) {
+        fanNeedsWorld=false;
+        const auto shot=resolveBow(fanPending);
+        if(bowflight::Allowed(shot,releaseGate,GetTickCount64()))bowvr::ArmFan(shot);
+        else Say("Frame bow volley: release refused (stale, menu or tracking); the game's fan stays flat");
+    }
     const auto& pose=eye<0?head:views[eye&1].pose;
     const auto offset=math::Rotate(base,V(pose.position)-origin)*upm;
     const math::Vec position={hero[0]+offset.x,hero[1]+eyeHeight+offset.y,hero[2]+offset.z};
@@ -7207,6 +7340,7 @@ void Shutdown(bool preserveResolution) {
     if(leftAimSpace&&pDestroySpace)pDestroySpace(leftAimSpace);leftAimSpace=XR_NULL_HANDLE;
     if(gazeSpace&&pDestroySpace)pDestroySpace(gazeSpace);gazeSpace=XR_NULL_HANDLE;
     gazeAction=XR_NULL_HANDLE;gazeReady=gazeValid=gazeExtension=gazeSupported=false;gazeStability.Reset();
+    gazeAimSupport.store(-1);PublishGazeAim(false,{0,0,-1});
     detectedControllers={};controllerLabels={};controllerProfilesDirty=true;frameControllerExtension=false;
     for(auto& e:eyes){if(e.chain&&pDestroySwapchain)pDestroySwapchain(e.chain);e={};}
     mirrorSupported=mirrorMono=false;
