@@ -11119,7 +11119,9 @@ void OnReshadePresent(reshade::api::effect_runtime*) {
     if (t - since >= 10e6) {
 #ifdef D2RVR_NATIVE_OPENXR
         const auto f=framevr::foveation::TakeStats();
-        LogF("Frame foveation: %u reduced-shading draws, %u full-quality draws in sample",f.shadedDraws,f.fullDraws);
+        if(framevr::foveation::Counting()||f.shadedDraws||f.fullDraws)
+            LogF("Frame foveation: %u reduced-shading draws, %u full-quality draws in sample",f.shadedDraws,f.fullDraws);
+        else LogF("Frame foveation: off; draws not counted");
         namespace fv=framevr::foveation;
         uint64_t worldDraws=0;for(const auto n:f.world)worldDraws+=n;
         if(worldDraws)

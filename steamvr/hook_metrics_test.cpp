@@ -2,6 +2,7 @@
 #include "generation_cache.h"
 #include "native_lock.h"
 #include "pipeline_set.h"
+#include "foveation_switch.h"
 #include <cstdlib>
 #include <cstdio>
 #include <mutex>
@@ -72,5 +73,30 @@ int main() {
         stop=true;for(auto& t:readers)t.join();
         Check(wrong==0,"recording threads read the set while pipelines are created and destroyed");
     }
-    std::puts("All-thread counters, capture boundaries, generation invalidation, native lock stress and pipeline set passed");
+    {   // Foveation off: draws and binds return on one load; on again without stale command-list state.
+        foveation::TrackingSwitch gate;
+        const auto first=gate.Stamp();
+        Check(gate.On()&&first!=0&&gate.Current(first)&&!gate.Current(0),"on from the start: lists reset now are followed; a list never reset is not");
+        gate.Set(true);Check(gate.Current(first),"the same setting again changes nothing");
+        gate.Set(false);
+        Check(gate.On()&&gate.Current(first),"off: lists in flight are still followed, so their rate image is taken off");
+        for(int i=0;i<foveation::TrackingSwitch::GraceEyes-1;++i)gate.EyePass();
+        Check(gate.On(),"until the grace has passed");
+        gate.Set(true);for(int i=0;i<3*foveation::TrackingSwitch::GraceEyes;++i)gate.EyePass();
+        Check(gate.On()&&gate.Current(first),"on again within the grace: nothing was missed, every list stays current");
+        gate.Set(false);for(int i=0;i<foveation::TrackingSwitch::GraceEyes;++i)gate.EyePass();
+        Check(!gate.On()&&gate.Stamp()==0,"off after the grace: callbacks return early, lists reset meanwhile are unstamped");
+        for(int i=0;i<100;++i)gate.EyePass();gate.Set(false);
+        Check(!gate.On(),"and stays off");
+        gate.Set(true);
+        Check(gate.On()&&!gate.Current(first)&&!gate.Current(0),"on mid-session: a list reset before or during the off time has stale state and waits for its reset");
+        const auto second=gate.Stamp();
+        Check(second!=0&&second!=first&&gate.Current(second),"a list reset after the switch is followed");
+        std::atomic<bool> stop=false;std::atomic<uint64_t> wrong{0};
+        std::thread recorder([&]{uint64_t last=second;while(!stop){const auto stamp=gate.Stamp();if(stamp){if(stamp<last)++wrong;last=stamp;}}});
+        for(int i=0;i<2000;++i){gate.Set(i&1);for(int e=0;e<foveation::TrackingSwitch::GraceEyes;++e)gate.EyePass();}
+        stop=true;recorder.join();gate.Set(true);
+        Check(wrong==0&&gate.On()&&gate.Current(gate.Stamp())&&!gate.Current(second),"switched while lists record: stamps only move on, and it ends on and current");
+    }
+    std::puts("All-thread counters, capture boundaries, generation invalidation, native lock stress, pipeline set and foveation switch passed");
 }
