@@ -86,14 +86,14 @@ int main() {
             // a Barbarian's two-handed sword in one hand is one-handed; with both hands on it, its own kind
             Check(Resolve(true,type,D2RVR_TWO_HANDED|D2RVR_TWO_HANDED_KNOWN).map.left,"two-handed by its table, held in one hand: mirrored");
             const auto two=Resolve(true,type,D2RVR_TWO_HANDED|D2RVR_TWO_HANDS_ON);
-            constexpr bool twoHandsMirrored=false;
+            constexpr bool twoHandsMirrored=true;
             Check(two.kind==Kind::TwoHands&&Mirrors(Kind::TwoHands)==twoHandsMirrored&&two.map.left==twoHandsMirrored&&two.Fallback()==!twoHandsMirrored,
                 "both hands on it: mirrored too (phase 3)");
         }
         // phase 3: the kinds that fell back whole, each with its own switch (Mirrors): mirrored, or the whole
         // mode right-handed while it is equipped - never anything between
         const struct {uint32_t type;Kind kind;bool mirrored;} later[]={{D2RVR_TYPE_BOW,Kind::Bow,true},{D2RVR_TYPE_CROSSBOW,Kind::Crossbow,true},
-            {D2RVR_TYPE_STAFF,Kind::Staff,false},{D2RVR_TYPE_POLEARM,Kind::Polearm,false},{D2RVR_TYPE_SPEAR,Kind::Spear,false}};
+            {D2RVR_TYPE_STAFF,Kind::Staff,true},{D2RVR_TYPE_POLEARM,Kind::Polearm,true},{D2RVR_TYPE_SPEAR,Kind::Spear,true}};
         for(const auto& k:later)for(const uint32_t two:{0u,uint32_t(D2RVR_TWO_HANDS_ON)}) {
             const auto s=Resolve(true,k.type,two);
             Check(s.wanted&&s.kind==k.kind&&Mirrors(k.kind)==k.mirrored&&s.map==Map{k.mirrored}&&s.Fallback()==!k.mirrored&&Name(k.kind)[0]&&HeldLeftHanded(k.kind)[0],
@@ -102,7 +102,16 @@ int main() {
         }
         Check(std::strstr(HeldLeftHanded(Kind::Bow),"RIGHT hand")&&std::strstr(HeldLeftHanded(Kind::Bow),"LEFT hand draws"),"the bow goes to the right hand, the string to the left");
         Check(std::strstr(HeldLeftHanded(Kind::Crossbow),"stock in the LEFT")&&std::strstr(HeldLeftHanded(Kind::Staff),"LEFT hand drives"),"stock and shaft in the left hand");
-        for(const char* kind:{"bow","crossbow"})Check(std::strstr(MirroredKinds,kind)!=nullptr,"the log's list of mirrored kinds names it");
+        for(const char* kind:{"bow","crossbow","staff","spear","polearm","two-handed"})Check(std::strstr(MirroredKinds,kind)!=nullptr,"the log's list of mirrored kinds names it");
+        // ROLE STABILITY: with no kind falling back, the roles depend on the setting alone. Equipping or
+        // putting away any weapon, with any grip bits, never moves a stick, a button or a trigger.
+        for(const bool wanted:{false,true}) {
+            const Map first=Resolve(wanted,D2RVR_TYPE_UNARMED,0).map;
+            for(int t=0;t<D2RVR_TYPE_COUNT;++t)for(uint32_t two=0;two<16;++two) {
+                const auto s=Resolve(wanted,uint32_t(t),two);
+                Check(s.map==first&&s.map.left==wanted&&!s.Fallback(),"the roles are the setting's, whatever is equipped: no flip on a weapon change");
+            }
+        }
         for(int t=0;t<D2RVR_TYPE_COUNT;++t)for(uint32_t two=0;two<16;++two) {
             const auto off=Resolve(false,uint32_t(t),two);
             Check(off.map==Map{}&&!off.wanted&&!off.Fallback()&&off.map.Physical(0)==0&&off.map.Physical(1)==1&&off.map.Bits(1)==1&&off.map.Bits(2)==2,
