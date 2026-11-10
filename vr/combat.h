@@ -105,8 +105,9 @@ framevr::strain::Rank MonsterRank(uintptr_t unit);
 void ConfigureRiposte(float bonus,uint32_t windowMs,float volume,const wchar_t* soundFile);
 // UI thread: one completed shield pose, including its calibrated scale and
 // timestamp. Latest tracking can invalidate it; coverage never follows gaze.
+// claws: the guard is an Assassin's two claws crossed (guard::Crossed), not a shield.
 void PublishGuard(uint64_t session,bool eligible,bool posed,const framevr::guard::Pose& pose,
-                  bool handOk,bool leftShield);
+                  bool handOk,bool leftShield,bool claws=false);
 bool ReadGuardDebug(framevr::guard::Debug& out);
 void Install();
 void Report();

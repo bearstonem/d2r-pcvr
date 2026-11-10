@@ -2648,6 +2648,18 @@ without failures. The final free-swing run recorded 58 physical contacts and
 58 native accepted hits with no rejections; the owner reported "works great."
 Arrow/spell live verification remains open.
 
+
+### Blocking with two claws (Unleashed)
+
+An Assassin with a claw in each hand and no shield blocks by crossing the claws in front of her: the two
+blades within 32 cm of each other, up in front of the body, are a raised guard that covers attacks from
+within 60 degrees of where they are held (judged as a shield without a measured mesh is, above). With
+Weapon Block learned, the game's own block roll takes the verdict as for a shield. Without it the game
+rolls no block, so a covered blow's physical damage is cut to nothing at its life write; elemental damage
+and unblockable attacks still land. With the claws apart the game's own roll stands, so the passive loses
+nothing. The block sound, the controller tap and guard strain are the shield's; the claws do not wear.
+The log notes each change (`Frame guard claws:`).
+
 ### Druid shapeshift gestures
 
 A Druid changes form by performing the transformation with both grips held, in
