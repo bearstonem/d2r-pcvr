@@ -177,6 +177,8 @@ void VS_Fullscreen(in uint id : SV_VertexID, out float4 pos : SV_Position, out f
 //                      labels drawn back (PS_GameHud), the debug lines (PS_Phantom), the table key and the frame stamp.
 //                      Each of those five passes writes the picture back unchanged while its feature is off, which is
 //                      why the smaller sizes can leave them out.
+//                      The frame stamp is in the smaller sizes too, as a pass over its 48 pixels only
+//                      (PS_StampStrip, D2R_Table.fxh): it is on by default in AFR stereo.
 //
 // The passes of a smaller size are the full one's with those left out, in the same order. The full techniques keep
 // their names: an older plugin, and ReShade's preset, know only them.
@@ -247,6 +249,7 @@ technique D2R_DepthFog_Mask <
     pass { VertexShader = VS_TeleportArc; PixelShader = PS_TeleportArc; VertexCount = 90; BlendEnable = true; SrcBlend = ONE; DestBlend = ONE; ColorWriteMask = 7; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_HudStore; RenderTarget = HudPrevTex; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_HudMaskStore; RenderTarget = HudMaskOldTex; }
+    pass { VertexShader = VS_StampStrip; PixelShader = PS_StampStrip; VertexCount = 3; }
 }
 
 technique D2R_DepthFog_Lean <
@@ -275,6 +278,7 @@ technique D2R_DepthFog_Lean <
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_Outline; }
     pass { VertexShader = VS_Immunity; PixelShader = PS_Immunity; VertexCount = 2592; BlendEnable = true; SrcBlend = ONE; DestBlend = ONE; ColorWriteMask = 7; }
     pass { VertexShader = VS_TeleportArc; PixelShader = PS_TeleportArc; VertexCount = 90; BlendEnable = true; SrcBlend = ONE; DestBlend = ONE; ColorWriteMask = 7; }
+    pass { VertexShader = VS_StampStrip; PixelShader = PS_StampStrip; VertexCount = 3; }
 }
 
 technique D2R_DepthFog_R <
@@ -344,6 +348,7 @@ technique D2R_DepthFog_Mask_R <
     pass { VertexShader = VS_TeleportArcR; PixelShader = PS_TeleportArc; VertexCount = 90; BlendEnable = true; SrcBlend = ONE; DestBlend = ONE; ColorWriteMask = 7; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_HudStore; RenderTarget = HudPrevTex; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_HudMaskStore; RenderTarget = HudMaskOldTex; }
+    pass { VertexShader = VS_StampStrip; PixelShader = PS_StampStripR; VertexCount = 3; }
 }
 
 technique D2R_DepthFog_Lean_R <
@@ -372,4 +377,5 @@ technique D2R_DepthFog_Lean_R <
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_OutlineR; }
     pass { VertexShader = VS_ImmunityR; PixelShader = PS_Immunity; VertexCount = 2592; BlendEnable = true; SrcBlend = ONE; DestBlend = ONE; ColorWriteMask = 7; }
     pass { VertexShader = VS_TeleportArcR; PixelShader = PS_TeleportArc; VertexCount = 90; BlendEnable = true; SrcBlend = ONE; DestBlend = ONE; ColorWriteMask = 7; }
+    pass { VertexShader = VS_StampStrip; PixelShader = PS_StampStripR; VertexCount = 3; }
 }

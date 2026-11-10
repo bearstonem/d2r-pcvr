@@ -64,10 +64,11 @@ int main(int argc, char** argv) { try {
     // The rule.
     Require(SizeFor(0) == Lean, "nothing optional wanted is the Lean size");
     Require(SizeFor(Sky) == Mask && SizeFor(ShaderCeiling) == Mask && SizeFor(Sky | ShaderCeiling) == Mask, "the sky and the shader ceiling read the mask");
-    for (const uint32_t use : {uint32_t(HudShift), uint32_t(GamePieces), uint32_t(DebugLines), uint32_t(TableKey), uint32_t(FrameStamp)}) {
+    for (const uint32_t use : {uint32_t(HudShift), uint32_t(GamePieces), uint32_t(DebugLines), uint32_t(TableKey)}) {
         Require(SizeFor(use) == Full, "a pass of its own needs the Full size");
         Require(SizeFor(use | Sky) == Full, "... with the sky too");
     }
+    Require(SizeFor(FrameStamp) == Lean && SizeFor(FrameStamp | Sky) == Mask, "the frame stamp is drawn at every size: it asks for none");
     Require(Available(Lean, true, true) == Lean && Available(Mask, true, true) == Mask && Available(Full, true, true) == Full, "all sizes there");
     Require(Available(Lean, false, false) == Full && Available(Mask, false, false) == Full, "an older effect has only the Full pair");
     Require(Available(Lean, false, true) == Mask && Available(Mask, true, false) == Full, "the next larger size there is");
@@ -103,8 +104,18 @@ int main(int argc, char** argv) { try {
         for (const auto& p : full) { mask += HasAny(p, maskPasses); own += HasAny(p, fullPasses[eye]); }
         Require(mask == 4 && own == 5, "the Full size has each optional pass once");
         // The always-on passes: Lean is Full less the nine, Mask is Full less the five, order kept.
-        const auto maskSize = Without(full, fullPasses[eye]);
-        const auto leanSize = Without(maskSize, maskPasses);
+        // Each smaller size ends with the stamp's own small pass, in place of the Full size's pass over the picture.
+        auto maskSize = Without(full, fullPasses[eye]);
+        auto leanSize = Without(maskSize, maskPasses);
+        for (const int size : {int(Mask), int(Lean)}) {
+            const auto& list = techniques.at(Technique[size][eye]);
+            const std::string strip = std::string("PixelShader = PS_StampStrip") + (eye ? "R;" : ";");
+            Require(!list.empty() && list.back().find("VertexShader = VS_StampStrip;") != std::string::npos && list.back().find(strip) != std::string::npos &&
+                    list.back().find("VertexCount = 3;") != std::string::npos && list.back().find("RenderTarget") == std::string::npos,
+                    std::string(Technique[size][eye]) + " does not end with the stamp strip, three vertices into the picture");
+            (size == Mask ? maskSize : leanSize).push_back(list.back());
+        }
+        Require(!HasAny(full.back(), {"PS_StampStrip"}) && Count(full.back(), "PS_Stamp") == 1, "the Full size keeps its own stamp pass, last");
         Require(techniques.at(Technique[Mask][eye]) == maskSize, std::string(Technique[Mask][eye]) + " is not the full technique less the five feature passes");
         Require(techniques.at(Technique[Lean][eye]) == leanSize, std::string(Technique[Lean][eye]) + " is not the full technique less the nine optional passes");
     }
@@ -140,6 +151,7 @@ int main(int argc, char** argv) { try {
     Require(all.find("if (shift == 0.0 || uv.y < HudTop) return c;") != std::string::npos, "Hud passes through without a shift");
     Require(all.find("if (!TableKeyOn || DepthWidth() < 16) return c;") != std::string::npos, "TableKey passes through when off");
     Require(all.find("if (!StampOn || y != BUFFER_HEIGHT - 1 || i < 0) return c;") != std::string::npos, "Stamp passes through when off");
+    Require(all.find("if (!StampOn || y != BUFFER_HEIGHT - 1 || i < 0) discard;") != std::string::npos, "the stamp strip writes nothing when off or outside its 48 pixels");
     Require(all.find("if (!ShieldDebugOn) return c;") != std::string::npos && all.find("if (PhantomOn) c = Segment(") != std::string::npos &&
             all.find("if (BoneOn) {") != std::string::npos, "Phantom draws only under its three switches");
     Require(all.find("[branch] if (LabelsOn)") != std::string::npos && all.find("[branch] if (GameBarOn) p = ") != std::string::npos &&

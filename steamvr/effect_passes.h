@@ -3,9 +3,12 @@
 // unchanged, four kept a mask of the interface that nothing read. The effect now has three sizes, each a technique
 // per eye, and vrcam keeps on the smallest that draws everything wanted (vr/vrcam.cpp OnFinishEffects):
 //
-//   Lean  22 passes  the world's passes only
-//   Mask  26 passes  + PS_HudCopy, PS_HudMask, PS_HudStore, PS_HudMaskStore: the interface found in the picture
-//   Full  31 passes  + PS_Hud, PS_GameHud, PS_Phantom, PS_TableKey, PS_Stamp: the effect as it always ran
+//   Lean  23 passes  the world's passes, and the frame stamp as a pass over its 48 pixels (PS_StampStrip)
+//   Mask  27 passes  + PS_HudCopy, PS_HudMask, PS_HudStore, PS_HudMaskStore: the interface found in the picture
+//   Full  31 passes  + PS_Hud, PS_GameHud, PS_Phantom, PS_TableKey, and PS_Stamp for the strip: the effect as it always ran
+//
+// The frame stamp is on by default in AFR stereo. While it needed the Full size nothing smaller ever ran there
+// (headset log 2026-11-10: 31 passes an eye throughout), so the smaller sizes draw it themselves.
 //
 // One technique an eye, never several stacked: the order of the passes is the file's own, whatever order ReShade
 // keeps its techniques in. This header is the rule and the names; effect_passes_test.cpp pins the pass lists in
@@ -23,16 +26,17 @@ enum Use : uint32_t {
     GamePieces = 1u << 1,   // PS_GameHud: the toolbar, the map or the labels drawn back into the picture
     DebugLines = 1u << 2,   // PS_Phantom: [debug] phantom_ray, bone_axes, the developer shield guard
     TableKey = 1u << 3,     // PS_TableKey: the game on the table, F5 (reads the mask too)
-    FrameStamp = 1u << 4,   // PS_Stamp: the frame's stamp in the bottom row, for FlatVR
     // These only read the interface mask, in the fog pass (D2R_FogWorld.fxh, the void under SkyOn or CeilOn): the Mask size.
     Sky = 1u << 5,          // the added sky, or Arcane's
-    ShaderCeiling = 1u << 6 // the shader's vault (not the game-drawn ceiling)
+    ShaderCeiling = 1u << 6,// the shader's vault (not the game-drawn ceiling)
+    // Drawn at every size (PS_StampStrip in Lean and Mask, PS_Stamp in Full): named for the log only.
+    FrameStamp = 1u << 4    // the frame's stamp in the bottom row, for FlatVR
 };
-inline constexpr uint32_t FullUses = HudShift | GamePieces | DebugLines | TableKey | FrameStamp;
+inline constexpr uint32_t FullUses = HudShift | GamePieces | DebugLines | TableKey;
 inline constexpr uint32_t MaskUses = Sky | ShaderCeiling;
 
 enum Size { Lean = 0, Mask = 1, Full = 2, SizeCount = 3 };
-inline constexpr int Passes[SizeCount] = {22, 26, 31};
+inline constexpr int Passes[SizeCount] = {23, 27, 31};
 inline constexpr int PassesBefore = 31;   // an eye, before the sizes: every pass, always
 // [size][eye]: the left eye's (and mono), the right eye's. Full keeps the names an older plugin and ReShade's preset know.
 inline constexpr const char* Technique[SizeCount][2] = {
