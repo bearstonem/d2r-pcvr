@@ -1464,6 +1464,27 @@ and trigger/button melee were:
     so a full-cycle stroke at 60% attack rating chance carries them about 60%
     of the time, as natively. `would_hit=1/0` (-1: not gated, e.g. a riposte)
     ends each `melee_trace` contact line.
+  - **Hit reactions** (owner, 2026-11-09; VR Settings > Gameplay > Physics >
+    Struck monsters; `[gameplay] hit_stagger` and `hit_knockback`, both 1 by
+    default; `hit_reactions.h`): the game makes a struck monster flinch only when
+    one hit takes a large share of its life, so most solid strokes drew nothing.
+    A stroke that carries its reactions (the next item: full cycle, would have
+    hit, first creature) now also carries its **force**: how committed the hand's
+    stroke was (its brisk travel, full at 35 cm) x (50% + 50% of the weapon's
+    weight, `weapon_heft.h` Weight, read whatever Weapon heft is set to) x the
+    stroke's damage share. At 0.5 the monster **staggers** (the game's hit
+    recovery): a committed fist, dagger or claw stroke, or 60-70% of a sword's.
+    At 0.8 it is **knocked back** (the game's knockback, away from the hero):
+    only weights of 0.6 and up reach it, so two-handed swords, axes and mauls,
+    spears, polearms and staves. Both are result flags of that stroke's own
+    damage record: no extra damage, attack or roll. The same monster staggers
+    at most every 1.2 s and is knocked back at most every 2.5 s; act bosses never
+    react, uniques and champions only stagger, a monster with no knockback
+    animation only staggers, and a killing blow is left alone. One log line per
+    reaction, `Frame hit reaction: monster ... knocked back|staggered ...`, and
+    at most one a second for a reaction asked for and not taken. Not built: the
+    knockback's direction following the swing (the game pushes away from the
+    hero) and corpses falling along the blow.
   - **Monster reactions and the stroke's share** (Cal, 2026-10-30): a monster
     flinches only when it should. A contact that would have missed, or a stroke
     without on-hit effects (not a full cycle, a cleave follow-up, a trigger hit

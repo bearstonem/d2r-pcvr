@@ -283,7 +283,7 @@ inline constexpr ContentSection SectionTable[]={
     {View::Targeting,"Target selection"},{View::Targeting,"Aiming"},{View::Targeting,"Ground targeting"},
     {View::Shield,"Bash and block"},{View::Shield,"Fit on the arm"},
     {View::Monsters,"Offline difficulty"},{View::Monsters,"Mercenary"},{View::Monsters,"Summons"},
-    {View::Physics,"Props"},{View::Physics,"Monsters and townsfolk"},
+    {View::Physics,"Props"},{View::Physics,"Monsters and townsfolk"},{View::Physics,"Struck monsters"},
     {View::Moving,"Turning"},{View::Moving,"Speed"},
     {View::Body,"Play space"},{View::Body,"Potion belt"},
     {View::Hands,"Hands and buttons"},
@@ -541,6 +541,11 @@ inline constexpr Override Overrides[]={
     // beside Pushable bodies, the other drawn-only change to their poses (Monsters already has its three sections).
     {.id="gameplay.look_at_you",.page=View::Physics,.section="Monsters and townsfolk",.kind=RowKind::Toggle,.label="Heads turn to you",
      .help="Monsters, mercenaries and townsfolk within about 7 m turn their heads to your real head as you move. Just for looks. First person only."},
+    // Physics: Struck monsters (hit_reactions.h; [gameplay] hit_stagger and hit_knockback, both On by default)
+    {.id="gameplay.hit_stagger",.page=View::Physics,.section="Struck monsters",.kind=RowKind::Toggle,.label="Monsters stagger",
+     .help="A long, committed stroke that lands makes the monster flinch, whatever the damage. Each monster at most every 1.2 s; act bosses never."},
+    {.id="gameplay.hit_knockback",.page=View::Physics,.section="Struck monsters",.kind=RowKind::Toggle,.label="Heavy hits knock back",
+     .help="A full stroke of a two-handed weapon, spear, polearm or staff shoves the monster back. Each at most every 2.5 s; never bosses, uniques or champions."},
     // Moving: Turning
     {.id="turn.smooth",.page=View::Moving,.section="Turning",.kind=RowKind::Toggle,.label="Smooth turning",
      .help="On turns you smoothly with the right stick. Off turns you in steps, which many players find easier on the stomach.",
