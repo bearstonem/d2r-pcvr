@@ -250,7 +250,7 @@ inline constexpr ContentSection SectionTable[]={
     {View::Aim,"Spells and skills"},{View::Aim,"Ground skills"},
     {View::Targets,"Monster outline"},{View::Targets,"Bow"},
     {View::Shield,"Bash and block"},{View::Shield,"Fit on the arm"},
-    {View::Wrist,"Life and mana"},{View::Wrist,"Map"},
+    {View::Wrist,"Life and mana"},{View::Wrist,"Map"},{View::Wrist,"Controller menus"},
     {View::Interface,"Game menus"},{View::Interface,"Labels and bars"},{View::Interface,"Mana Warning"},
     {View::Survival,"Low life"},{View::Survival,"Offline monsters"},
     {View::World,"Sky and dungeons"},{View::World,"Things that move and glow"},
@@ -516,6 +516,10 @@ inline constexpr Override Overrides[]={
      .help="On keeps the way you face at the top of the map. Off keeps north at the top and turns the arrow. Top-down views only."},
     {.id="interactions.companion_counts",.page=View::Wrist,.section="Map",.kind=RowKind::Toggle,.label="Buffs and companions",
      .help="Under the minimap: your companion counts, and the buffs, auras and harmful effects on you. Follows the minimap's gesture."},
+
+    {.id="interactions.controller_menu_size",.page=View::Wrist,.section="Controller menus",.kind=RowKind::Slider,.label="Controller menu size",
+     .help="Size of both stick-click menus, including their buttons and map tab. 100% keeps the original size. Apply, then open either hand menu to see the change.",
+     .format={.unit="%"}},
 
     // Interface: Game menus
     {.id="hud.menu_distance",.page=View::Interface,.section="Game menus",.kind=RowKind::Choice,.label="Menu distance",

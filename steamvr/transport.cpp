@@ -708,7 +708,8 @@ XrSwapchain gameplayChain=XR_NULL_HANDLE;
 std::mutex sewerPromptMutex;
 sewerprompt::Target sewerPrompt;
 XrPosef palettePose{};
-constexpr float paletteWidth=.45f,paletteHeight=.45f;
+// Latched together by MotionPointer: the visible menu, hit box and map inset share the same size.
+float paletteWidth=.45f,paletteHeight=.45f;
 ULONGLONG motionAt=0;
 // Loot pick's pointing hand (LootHandRay): why the motion layer is off (lootaim::Gate bits), the skill wheel, the aim poses' age.
 uint32_t lootGate=0;bool lootWheel=false;ULONGLONG handAimAt=0;
@@ -2223,6 +2224,8 @@ void MotionPointer() {
     motionInput.hover=-1;
     if(!motionInput.active||handControls.Wheel()<0||!motionInput.tracked[handControls.Wheel()]||!handAimTracked[1-handControls.Wheel()])return;
     const int hand=handControls.Wheel(),pointer=1-hand;
+    const auto menuSettings=vrsettings::Read();
+    paletteWidth=paletteHeight=settings::ControllerMenuWidth(menuSettings.values[settings::ControllerMenuSize]);
     auto pose=motionInput.hand[hand];
     const auto normal=math::Normalized(motionInput.head.p-pose.p);
     auto right=math::Normalized(math::Cross({0,1,0},normal));
