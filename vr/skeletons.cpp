@@ -686,13 +686,17 @@ std::atomic<float> g_neckApart{1e9f};
 // Room-scale, 2026-11-08 (legs "stretched and still attached to the center"): where the posed body's lowest bone
 // and pelvis end up against the ground under the eyes (eye heights, the window's largest), the hero bodies posed
 // (distinct skeleton instances), and skeletons standing at the hero that are not posed as a body (the legs' own
-// model piece?) - sampled for a moment every 5 s.
+// model piece?) - sampled for a moment every 5 s, in developer builds only: for that moment every skeleton the
+// game poses has its entity looked up (ecs::CandidatePosition, ten guarded reads each), and every 5 s a player
+// stood away from the room's centre that was a burst of them on the pose workers.
 std::atomic<float> g_feetFromEye{-1},g_pelvisFromEye{-1};
 SRWLOCK g_partsLock=SRWLOCK_INIT;
 struct PartSeen {uintptr_t self=0;int bones=0;float atHero=0,atEye=0;char name[56]{};};
 std::array<PartSeen,8> g_parts{};int g_partCount=0;
 std::array<PartSeen,8> g_bodies{};int g_bodyCount=0;
+#ifdef D2RVR_DEVELOPER
 std::atomic<uint64_t> g_partsUntil{0};
+#endif
 void NotePart(std::array<PartSeen,8>& list,int& count,const PartSeen& p) {
     for(int i=0;i<count;++i)if(list[i].self==p.self)return;
     if(count<int(list.size()))list[count++]=p;
@@ -719,14 +723,20 @@ void ReportNeckFollow() {
         AcquireSRWLockExclusive(&g_partsLock);
         k+=std::snprintf(parts+k,sizeof parts-k,"hero bodies posed %d:",g_bodyCount);
         for(int i=0;i<g_bodyCount&&k<int(sizeof parts)-80;++i)k+=std::snprintf(parts+k,sizeof parts-k," [%s]",g_bodies[i].name);
+#ifdef D2RVR_DEVELOPER
         k+=std::snprintf(parts+k,sizeof parts-k,"; not posed, standing at the hero:");
         for(int i=0;i<g_partCount&&k<int(sizeof parts)-100;++i)
             k+=std::snprintf(parts+k,sizeof parts-k," [%s, %d bones, %.2f units from the hero's spot, %.2f from under your eyes]",
                              g_parts[i].name,g_parts[i].bones,g_parts[i].atHero,g_parts[i].atEye);
         if(!g_partCount&&k<int(sizeof parts)-8)std::snprintf(parts+k,sizeof parts-k," none");
+#else
+        if(k<int(sizeof parts)-80)std::snprintf(parts+k,sizeof parts-k,"; what else stands at the hero is sampled in developer builds only");
+#endif
         g_partCount=g_bodyCount=0;
         ReleaseSRWLockExclusive(&g_partsLock);
+#ifdef D2RVR_DEVELOPER
         g_partsUntil.store(GetTickCount64()+300);   // the next sample: a moment of every skeleton the game poses
+#endif
         framevr::logging::Write(parts);
     }
 }
@@ -3903,6 +3913,7 @@ void Arms(Posed& posed) {
         else note.notHeroAt = 0;
     }
     if (!rig) {
+#ifdef D2RVR_DEVELOPER
         if (GetTickCount64() < g_partsUntil.load()) {   // room-scale diagnostics: a skeleton not taken as a body, at the hero?
             float playerPosition[3],eyeGround[2];bool eyeGroundOk;
             AcquireSRWLockShared(&g_inLock);memcpy(playerPosition,g_heroPos,sizeof playerPosition);
@@ -3917,6 +3928,7 @@ void Arms(Posed& posed) {
                 }
             }
         }
+#endif
         return;
     }
     // A hero's rig (a player model, or a form's): only now is the input copied.
