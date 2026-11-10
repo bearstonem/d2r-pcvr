@@ -16,8 +16,10 @@ does not select this mod. This change does not require the shared launcher.
   `d2r_vr_potions` and `d2r_vr_spell_sprites` (generated locally; never
   commit or distribute them)
 - ReShade: `mods/D2R-PCVR/reshade`, with its own `ReShade.ini` and preset
-- Runtime diagnostics: `mods/D2R-PCVR/d2rloader/logs/d2r-vr-frame.log`
-- Launch diagnostics: `d2rloader/logs/pcvr-launch.log`
+- Runtime diagnostics: `mods/D2R-PCVR/d2rloader/logs/d2r-vr-frame.log` (this
+  session) and `d2r-vr-frame.previous.log` (the one before)
+- Launch diagnostics: `d2rloader/logs/pcvr-launch.log` (and
+  `pcvr-launch.previous.log` once it passed 1 MB)
 - Mod metadata: `mods/D2R-PCVR/D2R-PCVR.mpq/modinfo.json`
 
 The metadata specifies `savepath: "../"` to use normal characters. Confirm

@@ -42,6 +42,7 @@
 #include "../steamvr/gaze_aim.h"
 #include "../steamvr/torch_light.h"
 #include "../steamvr/light_radius.h"
+#include "../steamvr/effect_passes.h"
 #include "../steamvr/elemental_hands.h"
 #include "../steamvr/leather_menu.h"
 #include "../steamvr/head_shadow.h"
@@ -65,6 +66,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <shlobj.h>
@@ -10005,7 +10007,13 @@ bool g_registered = false;
 // present, and with a pair per game frame the right eye's present wrote it
 // before the GPU had run the left eye's effect - the left eye drew the right
 // eye's sky. A technique's state is read when its commands are recorded.
-reshade::api::effect_technique g_tech[2]{};
+// In three sizes (steamvr/effect_passes.h): [size][eye], exactly one of the six on while the effect runs - the
+// smallest that draws everything wanted. [Full] is the pair the effect always had; an older .fx has only it.
+namespace fxp = framevr::effectpasses;
+reshade::api::effect_technique g_tech[fxp::SizeCount][2]{};
+// What this frame's uniforms switched on that the Lean size has no pass for (fxp::Use bits; OnBeginEffects), 0 when
+// the effect did not run: with what is wanted now it picks the next frame's size (OnFinishEffects).
+uint32_t g_usesDrawn = 0;
 // The eye of the frame presented last (OnBeginEffects); the next is the other.
 int g_fxEye = 0;
 
@@ -10130,15 +10138,51 @@ void Install() {
 // The views of the toolbar's and the map's copies bound to the effect (hud::PictureNow), 0 = none yet.
 uint64_t g_pieceBound[3] = {};   // the toolbar, the map, the labels' layer
 
-void Forget(reshade::api::effect_runtime*) { g_tech[0] = g_tech[1] = {0}; g_pieceBound[0] = g_pieceBound[1] = g_pieceBound[2] = 0; }
+// The effect's uniforms by name, looked up once per load of the effect: every frame set some 150 of them, each
+// with a search of ReShade's ~200 by name. A handle lives as long as the technique handles above - ReShade
+// invalidates both at reshade_reloaded_effects (Forget) - and belongs to one runtime. Only found uniforms are kept:
+// one an older .fx lacks, or the effect not compiled yet, is looked for again each time, as before.
+struct UniformNameHash {
+    using is_transparent = void;
+    size_t operator()(std::string_view name) const noexcept { return std::hash<std::string_view>{}(name); }
+};
+std::unordered_map<std::string, reshade::api::effect_uniform_variable, UniformNameHash, std::equal_to<>> g_uniforms;
+reshade::api::effect_runtime* g_uniformsOf = nullptr;
+reshade::api::effect_uniform_variable Uniform(reshade::api::effect_runtime* rt, const char* name) {
+    if (rt != g_uniformsOf) { g_uniforms.clear(); g_uniformsOf = rt; }
+    if (const auto found = g_uniforms.find(std::string_view(name)); found != g_uniforms.end()) return found->second;
+    const reshade::api::effect_uniform_variable u = rt->find_uniform_variable("D2R_DepthFog.fx", name);
+    if (u.handle) g_uniforms.emplace(name, u);
+    return u;
+}
+// Once a frame, before the first uniform is set: one real lookup against the kept handle. Should the effect ever
+// have been rebuilt without the reload event, the handles are dropped here instead of being written through.
+void CheckUniforms(reshade::api::effect_runtime* rt) {
+    if (rt != g_uniformsOf || g_uniforms.empty()) return;
+    const auto kept = g_uniforms.find(std::string_view("OwnDepth"));
+    if (kept == g_uniforms.end()) return;
+    if (rt->find_uniform_variable("D2R_DepthFog.fx", "OwnDepth").handle != kept->second.handle) g_uniforms.clear();
+}
+
+void Forget(reshade::api::effect_runtime*) {
+    for (auto& size : g_tech) size[0] = size[1] = {0};
+    g_pieceBound[0] = g_pieceBound[1] = g_pieceBound[2] = 0;
+    g_uniforms.clear();
+}
+// Some size of the effect is on for this frame.
+bool EffectOn(reshade::api::effect_runtime* rt) {
+    for (const auto& size : g_tech)
+        for (const auto& t : size) if (t.handle && rt->get_technique_state(t)) return true;
+    return false;
+}
 
 void SetFloats(reshade::api::effect_runtime* rt, const char* name, const float* v, size_t n) {
-    const reshade::api::effect_uniform_variable u = rt->find_uniform_variable("D2R_DepthFog.fx", name);
+    const reshade::api::effect_uniform_variable u = Uniform(rt, name);
     if (u.handle) rt->set_uniform_value_float(u, v, n);
 }
 void SetFloat(reshade::api::effect_runtime* rt, const char* name, float v) { SetFloats(rt, name, &v, 1); }
 void SetBool(reshade::api::effect_runtime* rt, const char* name, bool v) {
-    const reshade::api::effect_uniform_variable u = rt->find_uniform_variable("D2R_DepthFog.fx", name);
+    const reshade::api::effect_uniform_variable u = Uniform(rt, name);
     if (u.handle) rt->set_uniform_value_bool(u, &v, 1);
 }
 
@@ -10368,12 +10412,13 @@ void OnFinishEffects(reshade::api::effect_runtime* rt, reshade::api::command_lis
     FRAME_PROFILE(EffectsFinish);
     if (const double b = pairtime::g_effBegin.exchange(0.0); b > 0.0) pairtime::g_effSum.store(pairtime::g_effSum.load() + pairtime::UsNow() - b);
     if (ApplySkyPictures(rt)) return;   // the effect reloads with the new pictures
-    if (!g_tech[0].handle) g_tech[0] = rt->find_technique("D2R_DepthFog.fx", "D2R_DepthFog");
-    if (!g_tech[1].handle) g_tech[1] = rt->find_technique("D2R_DepthFog.fx", "D2R_DepthFog_R");
+    for (int s = 0; s < fxp::SizeCount; ++s)
+        for (int e = 0; e < 2; ++e)
+            if (!g_tech[s][e].handle) g_tech[s][e] = rt->find_technique("D2R_DepthFog.fx", fxp::Technique[s][e]);
 #ifdef D2RVR_NATIVE_OPENXR
-    stereoreplay::SetEffects(rt, g_tech[1]);
+    stereoreplay::SetEffects(rt, g_tech[fxp::Full][1]);
 #endif
-    if (!g_tech[0].handle) { hud::SetPictureReady(false); return; }
+    if (!g_tech[fxp::Full][0].handle) { hud::SetPictureReady(false); return; }
     // Off while a menu is open: the fog lies over the whole picture, the
     // inventory and trade panels included, and darkened them.
     const bool want = FogWanted() || g_skyPalette.load() >= 0 || g_arcaneSky.load() || CeilWanted() || HudWanted() || StampWanted() || hud::PictureWanted() || TableKeyWanted() || PhantomWanted() || BoneAxesWanted() || ShieldDebugWanted() || OutlineWanted() || RingWanted() || BeamWanted() || HeroLightWanted() || ImmunityWanted() || TeleportArcWanted();
@@ -10393,14 +10438,41 @@ void OnFinishEffects(reshade::api::effect_runtime* rt, reshade::api::command_lis
             LogF("vrcam: toolbar / labels moved in the picture: %s", kWhy[now]);
         }
     }
+    // The size for the next frame (steamvr/effect_passes.h): what the uniforms just drew with, and what is wanted
+    // now - a feature switched on since takes its passes from the next frame on, as the effect itself does. Every
+    // uniform that makes a left-out pass draw, or the fog pass read the interface mask, is covered by a line here.
+    uint32_t uses = g_usesDrawn;
+    if (HudWanted()) uses |= fxp::HudShift;
+    if (hud::PictureWanted()) uses |= fxp::GamePieces;
+    if (PhantomWanted() || BoneAxesWanted() || ShieldDebugWanted()) uses |= fxp::DebugLines;
+    if (TableKeyWanted()) uses |= fxp::TableKey;
+    if (StampWanted()) uses |= fxp::FrameStamp;
+    if (g_skyPalette.load() >= 0 || g_arcaneSky.load()) uses |= fxp::Sky;
+    if (CeilWanted() && !GameCeilingByGame()) uses |= fxp::ShaderCeiling;
     // AFR: frames alternate, the next present is the other eye's. An older
-    // shader without the right eye's technique keeps the left one for both.
-    const int next = AfrOn() && g_tech[1].handle ? g_fxEye ^ 1 : 0;
-    for (int k = 0; k < 2; ++k) {   // the next eye's first: the effect never has none on in between
-        const int e = next ^ k;
-        if (!g_tech[e].handle) continue;
-        const bool on = want && e == next;
-        if (rt->get_technique_state(g_tech[e]) != on) rt->set_technique_state(g_tech[e], on);
+    // shader without the right eye's technique keeps the left one for both;
+    // one without the smaller sizes keeps the full one.
+    const bool pair = g_tech[fxp::Full][1].handle != 0;
+    const auto have = [&](fxp::Size s) { return g_tech[s][0].handle && (g_tech[s][1].handle || !pair); };
+    const fxp::Size size = fxp::Available(fxp::SizeFor(uses), have(fxp::Lean), have(fxp::Mask));
+    const int next = AfrOn() && pair ? g_fxEye ^ 1 : 0;
+    // the next frame's first: the effect never has none on in between
+    if (want && !rt->get_technique_state(g_tech[size][next])) rt->set_technique_state(g_tech[size][next], true);
+    for (int s = 0; s < fxp::SizeCount; ++s)
+        for (int e = 0; e < 2; ++e) {
+            if (!g_tech[s][e].handle || (want && s == size && e == next)) continue;
+            if (rt->get_technique_state(g_tech[s][e])) rt->set_technique_state(g_tech[s][e], false);
+        }
+    if (want) {   // once, and at each change: what runs
+        static uint32_t told = ~0u;
+        const uint32_t now = uint32_t(size) << 16 | uses;
+        if (now != told) {
+            told = now;
+            char names[200];
+            fxp::Describe(uses, names, sizeof names);
+            LogF("Frame effects: optional passes on: %s; %d passes per eye (was %d)%s", names, fxp::Passes[size], fxp::PassesBefore,
+                 size != fxp::SizeFor(uses) ? " - the installed D2R_DepthFog.fx is older and has no smaller size" : "");
+        }
     }
 }
 
@@ -10573,6 +10645,8 @@ void OnReshadePresent(reshade::api::effect_runtime*) {
 void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list* cl, reshade::api::resource_view, reshade::api::resource_view) {
     FRAME_PROFILE(EffectsSetup);
     pairtime::g_effBegin.store(pairtime::UsNow());
+    g_usesDrawn = 0;
+    CheckUniforms(rt);
     {
         float s[2];
         renderscale::Frame(rt, s);
@@ -10599,8 +10673,9 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
                  on ? "on" : "off", on);
         }
     }
-    if (!g_tech[0].handle) return;
-    if (!rt->get_technique_state(g_tech[0]) && !(g_tech[1].handle && rt->get_technique_state(g_tech[1]))) return;
+    if (!g_tech[fxp::Full][0].handle) return;
+    if (!EffectOn(rt)) return;
+    uint32_t uses = 0;   // fxp::Use bits: what the uniforms below switch on (g_usesDrawn)
     SetFloat(rt, "NearPlane", g_lastNear.load());
     SetFloat(rt, "FogStart", g_underground.load() ? g_set.fogCaveStart.load() : g_set.fogStart.load());
     SetFloat(rt, "FogEnd", g_underground.load() ? g_set.fogCaveEnd.load() : g_set.fogEnd.load());
@@ -10609,6 +10684,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
     SetFloat(rt, "FogBlur", g_set.fogBlur.load());
     SetBool(rt, "FogOn", FogWanted());
     SetBool(rt, "TableKeyOn", TableKeyWanted());
+    if (TableKeyWanted()) uses |= fxp::TableKey;
     SetFloat(rt, "TableFloor", g_set.tableFloor.load());
     if (TableKeyWanted()) {   // the bounds: this eye's ray, and the game's own view to test the ground against
         SkyView sv[2];
@@ -10699,6 +10775,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
     bool sky = pal >= 0 || arcane;
     for (const SkyView& v : sv) sky = sky && v.proj_ok && v.axes_ok && v.proj[0] != 0.0f && v.proj[1] != 0.0f;
     SetBool(rt, "SkyOn", sky);
+    if (sky) uses |= fxp::Sky;
     SetBool(rt, "ArcaneSkyOn", sky && arcane);
     SetBool(rt, "SkyOverRims", g_set.skyRims.load());
     {   // camera and eye projection setup for depth fog and dynamic lighting
@@ -10918,6 +10995,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
         bool ceil = who == 1;
         for (const SkyView& v : sv) ceil = ceil && v.proj_ok && v.axes_ok && v.proj[0] != 0.0f && v.proj[1] != 0.0f;
         SetBool(rt, "CeilOn", ceil);
+        if (ceil) uses |= fxp::ShaderCeiling;
         // The hero's Light Radius (#440, light_radius.h): it widens the vault's light over him (below) and the hero
         // light, ours, at his shoulder wherever the vault is not drawn - the game's ceiling, or none.
         const float heroScale = HeroLightScale();
@@ -10965,7 +11043,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
             SetFloat(rt, "CeilWet", wet);
             SetFloat(rt, "CeilBump", detail);
             SetFloat(rt, "CeilContrast", contrast);
-            if (const reshade::api::effect_uniform_variable u = rt->find_uniform_variable("D2R_DepthFog.fx", "CeilSteps"); u.handle) {
+            if (const reshade::api::effect_uniform_variable u = Uniform(rt, "CeilSteps"); u.handle) {
                 const int steps = g_set.ceilSteps.load();
                 rt->set_uniform_value_int(u, &steps, 1);
             }
@@ -10981,6 +11059,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
             g_pieceBound[2] = srv;
         }
         SetBool(rt, "LabelsOn", on && srv == g_pieceBound[2]);
+        if (on && srv == g_pieceBound[2]) uses |= fxp::GamePieces;
         const bool mask = srv && srv == g_pieceBound[2] && hud::UiMaskNow();
         SetBool(rt, "UiMaskOn", mask);
         if (on) {   // on the floor (or for the plate alone) flat where the game puts them, each eye's own: only faded
@@ -11015,10 +11094,12 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
             g_pieceBound[i] = srv;
         }
         SetBool(rt, i ? "GameMapOn" : "GameBarOn", on && srv == g_pieceBound[i]);
+        if (on && srv == g_pieceBound[i]) uses |= fxp::GamePieces;
         if (on) SetFloats(rt, i ? "GameMapBox" : "GameBarBox", box, 4);
     }
     // the left eye's HUD moves right, the right eye's left: nearer than the screen
     SetFloat(rt, "HudShift", HudWanted() ? g_set.uiShift.load() * 0.005f : 0.0f);
+    if (HudWanted()) uses |= fxp::HudShift;
 #if D2RVR_FIRST_PERSON
     {   // [debug] phantom_ray (or bone_axes): the red line the left hand takes the weapon by -
         // a crossbow's is also where it shoots ("make the phantom's vector", 2026-10-05: the
@@ -11055,6 +11136,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
         const bool ray = PhantomWanted() && xbow && HandRay(o, d);
         const bool grab = PhantomWanted() && !xbow && f.valid && skel::GrabLine(ga, gb);
         SetBool(rt, "PhantomOn", ray || grab);
+        if (ray || grab) uses |= fxp::DebugLines;
         if (ray) {
             const float upm = std::max(1.0f, ScaleHeight()) / UserEyeHeightM();   // world units per metre
             float a[3], b[3];
@@ -11073,6 +11155,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
         float bo[3], bx[3][3];
         const bool bone = BoneAxesWanted() && skel::GunBone(bo, bx);
         SetBool(rt, "BoneOn", bone);
+        if (bone) uses |= fxp::DebugLines;
         if (bone && f.valid) {
             const float upm = std::max(1.0f, ScaleHeight()) / UserEyeHeightM();
             float o[3]; world(bo, o);
@@ -11277,6 +11360,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
         const bool on=ShieldDebugWanted()&&combat::ReadGuardDebug(state)&&
             framevr::guard::DrawDebug(state,camera,GetTickCount64(),draw);
         SetBool(rt,"ShieldDebugOn",on);SetBool(rt,"ShieldDebugHit",on&&draw.hit);
+        if(on)uses|=fxp::DebugLines;
         if(on) {
             const auto vector=[&](const char* name,framevr::guard::Vec v){const float f[]{v.x,v.y,v.z};SetFloats(rt,name,f,3);};
             vector("ShieldDebugCenter",draw.center);vector("ShieldDebugRight",draw.right);vector("ShieldDebugUp",draw.up);
@@ -11289,17 +11373,19 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
     {   // each eye's stamp, into the picture
         const bool on = StampWanted() && g_afrBlock->stamp_magic == FLATVR_AFR_STAMP_MAGIC;
         SetBool(rt, "StampOn", on);
+        if (on) uses |= fxp::FrameStamp;
         if (on) {
             uint32_t v[2];
             for (int e = 0; e < 2; ++e) {
                 const int from = AfrOn() ? e : (eye & 1);
                 v[e] = g_stampHist[from][(g_stampHistAt[from] - g_set.pipelineDepth.load()) & 3];
-                const reshade::api::effect_uniform_variable u = rt->find_uniform_variable("D2R_DepthFog.fx", e ? "FrameStamp1" : "FrameStamp0");
+                const reshade::api::effect_uniform_variable u = Uniform(rt, e ? "FrameStamp1" : "FrameStamp0");
                 if (u.handle) rt->set_uniform_value_uint(u, &v[e], 1);
             }
             flog::Line("R,%u,%d,%u,%u", flog::Pass(), eye & 1, v[0], v[1]);
         }
     }
+    g_usesDrawn = uses;
     if (!sky) return;
     const SkyPalette& p = kPalettes[pal >= 0 ? pal : kDefaultPalette];
     for (int e = 0; e < 2; ++e) {
@@ -11356,8 +11442,10 @@ void TryRegister() {
 #endif
 #ifdef D2RVR_NATIVE_OPENXR
     reshade::register_event<reshade::addon_event::reshade_reloaded_effects>(&d2rvr::D3D12Only<&Forget>::Call);
+    reshade::register_event<reshade::addon_event::destroy_effect_runtime>(&d2rvr::D3D12Only<&Forget>::Call);   // its effects go with it
 #else
     reshade::register_event<reshade::addon_event::reshade_reloaded_effects>(&Forget);
+    reshade::register_event<reshade::addon_event::destroy_effect_runtime>(&Forget);
 #endif
 #ifdef D2RVR_NATIVE_OPENXR
     reshade::register_event<reshade::addon_event::bind_render_targets_and_depth_stencil>(&d2rvr::D3D12Only<&renderscale::OnBind>::Call);

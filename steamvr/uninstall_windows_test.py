@@ -271,8 +271,8 @@ class UninstallTests(unittest.TestCase):
                     patch.object(setup, 'profiles', return_value=[(profile, 'Player')]), \
                     patch.object(setup, 'wait_for_closed', side_effect=lambda: local.write_text(flushed, encoding='utf-8')), \
                     patch.object(setup, 'require_closed'), patch.object(sys, 'argv', ['uninstall_windows.py']), \
-                    patch('builtins.input', side_effect=['1', '2']), contextlib.redirect_stdout(io.StringIO()):
-                uninstall.main()
+                    patch('builtins.input', side_effect=['1', '1', '2']), contextlib.redirect_stdout(io.StringIO()):
+                uninstall.main()   # (the game is in a folder Steam does not list: "still installed", then its folder)
             self.assertEqual(local.read_text(encoding='utf-8'),
                              LOCAL.replace('PLACEHOLDER', '') + '\n// unrelated Steam changes written on exit\n')
 
@@ -289,7 +289,8 @@ class UninstallTests(unittest.TestCase):
                 snapshot = self.snapshot(root / 'setup-backups/game/20260101', game,
                                          [str(uninstall.PLUGIN), str(install.RECORD)], {}, saves, True)
                 install.write_record(game, {'game': str(game), 'snapshots': [str(snapshot)]})
-                answers = ['1' if store == 'steam' else '2', '1', '1' if cancel else '2']
+                # Steam's fixture lists no game, so the wizard first asks whether it is still installed (yes).
+                answers = (['1', '1'] if store == 'steam' else ['2']) + ['1', '1' if cancel else '2']
                 with patch.object(uninstall, 'ROOT', root), patch.object(setup, 'verify_release', return_value={}), \
                         patch.object(setup, 'steam_location', return_value=root / 'steam'), \
                         patch.object(setup, 'battlenet_location', return_value=game), \
@@ -306,6 +307,118 @@ class UninstallTests(unittest.TestCase):
                 if cancel:
                     wait.assert_not_called()
                     self.assertFalse(list((root / 'setup-backups').glob('uninstall-*')))
+
+
+    def gone_fixture(self, root, store='steam'):
+        """A game the launcher has uninstalled: D2R.exe and the archives are gone, the mod's files are not."""
+        game, saves, client = root / 'game', root / 'saves', root / 'steam'
+        plugin = self.write(game / uninstall.PLUGIN, b'mod')
+        own = self.write(game / 'screenshots/mine.png', b'the player\'s own file')
+        character = self.write(saves / 'Friend.d2s', b'current progress')
+        snapshot = self.snapshot(root / 'setup-backups/game/20260101', game,
+                                 [str(uninstall.PLUGIN), str(install.RECORD)], {}, saves, True)
+        install.write_record(game, {'game': str(game), 'snapshots': [str(snapshot)]})
+        self.write(root / 'setup-result.json', json.dumps({'store': store, 'game': str(game)}).encode())
+        profile = client / 'userdata/123'
+        wrapper = '"C:\\Mods\\python.exe" "C:\\Mods\\steamvr\\launch_windows.py" %command%'
+        local = self.write(profile / 'config/localconfig.vdf',
+                           LOCAL.replace('"PLACEHOLDER"', steam.quote(wrapper)).encode())
+        data = steam.encode_binary({'shortcuts': {'0': {'appname': 'Unrelated', 'Exe': 'other.exe'}}})
+        routing = {} if store == 'steam' else dict(store='battlenet', python=Path('C:/Mods/python.exe'),
+                                                   wrapper=Path('C:/Mods/steamvr/launch_windows.py'))
+        shortcuts = self.write(profile / 'config/shortcuts.vdf',
+                               steam.update_shortcuts(data, client, game, ['vdxr'], **routing))
+        return game, saves, client, profile, plugin, own, character, local, shortcuts
+
+    def run_gone_wizard(self, root, client, profile, answers):
+        with patch.object(uninstall, 'ROOT', root), patch.object(setup, 'verify_release', return_value={}), \
+                patch.object(setup, 'steam_location', return_value=client), \
+                patch.object(setup, 'battlenet_location', return_value=None), \
+                patch.object(setup, 'folder', side_effect=[client]), \
+                patch.object(setup, 'profiles', return_value=[(profile, 'Player')]), \
+                patch.object(setup, 'wait_for_closed'), patch.object(setup, 'require_closed'), \
+                patch.object(sys, 'argv', ['uninstall_windows.py']), \
+                patch('builtins.input', side_effect=answers), contextlib.redirect_stdout(io.StringIO()) as output:
+            uninstall.main()
+        return output.getvalue()
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows removal wizard')
+    def test_removal_finishes_when_the_game_was_uninstalled_first(self):
+        # #328: the wizard asked for a folder containing D2R.exe for ever. Edition, "no longer installed",
+        # Enter for the recorded folder, remove.
+        for store, left in (('steam', 'files'), ('battlenet', 'files'), ('steam', 'nothing'), ('steam', 'no backup')):
+            with self.subTest(store=store, left=left), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                game, saves, client, profile, plugin, own, character, local, shortcuts = self.gone_fixture(root, store)
+                if left == 'nothing':
+                    for path in sorted(game.rglob('*'), reverse=True):
+                        path.unlink() if path.is_file() else path.rmdir()
+                    game.rmdir()
+                if left == 'no backup':
+                    for path in sorted((root / 'setup-backups').rglob('*'), reverse=True):
+                        path.unlink() if path.is_file() else path.rmdir()
+                answers = ['1' if store == 'steam' else '2', '2', '', '2']
+                text = self.run_gone_wizard(root, client, profile, answers)
+                self.assertIn('Removal complete.', text)
+                self.assertIn('no longer' if left != 'nothing' else 'no longer exists', text)
+                remaining = steam.decode_binary(shortcuts.read_bytes())['shortcuts']
+                self.assertEqual([item['appname'] for item in remaining.values()], ['Unrelated'])
+                options = steam.text_value(steam.parse_text(local.read_text(encoding='utf-8')), 'UserLocalConfigStore',
+                                           'Software', 'Valve', 'Steam', 'apps', steam.APP_ID, 'LaunchOptions')
+                # The Steam edition's launch options no longer start the helper; Battle.net removal leaves them alone.
+                self.assertEqual(steam.is_vr_launch_options(options), store != 'steam')
+                self.assertEqual(character.read_bytes(), b'current progress')
+                if left == 'nothing':
+                    self.assertFalse(game.exists())   # never made again
+                else:
+                    self.assertEqual(own.read_bytes(), b'the player\'s own file')
+                    # Tracked files go when their backup says what they are; without it the folder is left alone.
+                    self.assertEqual(plugin.exists(), left == 'no backup')
+                    self.assertEqual((game / install.RECORD).exists(), left == 'no backup')
+                    self.assertEqual('were not touched' in text, left == 'no backup')
+                before = {path: path.read_bytes() for path in root.rglob('*') if path.is_file() and 'uninstall-' not in str(path)}
+                text = self.run_gone_wizard(root, client, profile, answers)   # safe to run twice
+                self.assertIn('Removal complete.', text)
+                after = {path: path.read_bytes() for path in root.rglob('*') if path.is_file() and 'uninstall-' not in str(path)}
+                self.assertEqual(after, before)
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows removal wizard')
+    def test_gone_answer_with_the_game_still_there_removes_normally(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            game, saves, client, profile, plugin, own, character, local, shortcuts = self.gone_fixture(root)
+            stock = self.write(game / 'D2R.exe', b'the game is here after all')
+            self.write(game / 'Data/.build.config', b'fixture')
+            # ... "no longer installed", the folder, then the usual video settings question and the confirmation.
+            text = self.run_gone_wizard(root, client, profile, ['1', '2', str(game), '1', '2'])
+            self.assertIn('D2R.exe is still in', text)
+            self.assertIn('Use the original Steam or Battle.net Play button', text)
+            self.assertFalse(plugin.exists())
+            self.assertEqual(stock.read_bytes(), b'the game is here after all')
+            self.assertEqual(own.read_bytes(), b'the player\'s own file')
+
+    def test_leftover_plan_touches_only_tracked_files_and_never_stops_removal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            game, saves, client, profile, plugin, own, character, local, shortcuts = self.gone_fixture(root)
+            self.assertTrue(uninstall.game_gone(game))
+            roots = [root / 'setup-backups/game']
+            updates, note = uninstall.leftover_plan(game, install.read_record(game), roots)
+            self.assertEqual(updates, {game / uninstall.PLUGIN: None, game / install.RECORD: None})
+            self.assertIn('anything else in it is kept', note)
+            # A backup that lists a file outside the mod is refused as ever - and that leaves the folder alone.
+            manifest = root / 'setup-backups/game/20260101/manifest.json'
+            data = json.loads(manifest.read_text())
+            data['installed'].append('screenshots/mine.png')
+            manifest.write_text(json.dumps(data))
+            updates, note = uninstall.leftover_plan(game, install.read_record(game), roots)
+            self.assertEqual(updates, {})
+            self.assertIn('were not touched', note)
+            self.write(game / 'D2R.exe', b'installed')
+            self.assertFalse(uninstall.game_gone(game))
+            self.assertEqual(uninstall.former_game_folder(root, 'steam'), game)
+            self.assertIsNone(uninstall.former_game_folder(root, 'battlenet'))
+            self.assertIsNone(uninstall.former_game_folder(root / 'missing', 'steam'))
 
 
 if __name__ == '__main__':

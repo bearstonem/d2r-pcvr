@@ -26,6 +26,119 @@ BACKUP_ERRORS = (OSError, ValueError, KeyError, TypeError, AttributeError)
 PROBE_BACKUP_ERRORS = BACKUP_ERRORS + (SystemExit,)
 
 
+# What the helper is doing, in the words a failure is reported with (#321:
+# "Setup could not finish: 2" named neither the step nor a file).
+_step = 'starting'
+
+
+def step(name):
+    global _step
+    _step = name
+
+
+class SetupArguments(argparse.ArgumentParser):
+    """Report unreadable options in words. argparse exits with status 2, and
+    that bare number was all the wizard showed (#321)."""
+
+    def error(self, message):
+        raise SystemExit(
+            f'the wizard handed its helper options it could not read ({message}). '
+            'This happens when a folder is given with a backslash at its end, or when Setup is started from the top '
+            'folder of a drive such as D:\\. Move D2R-PCVR-Setup.exe into an ordinary folder such as Downloads, '
+            'remove any backslash from the end of the folders you typed, and run Setup again.')
+
+
+def folder_argument(value):
+    """A folder from the wizard. `"D:\\"` reaches a program as `D:"` (the
+    backslash escapes the quote); a quote cannot be part of a Windows path,
+    so one at the end stands for that lost backslash."""
+    if value.endswith('"'):
+        value = value.rstrip('"') + '\\'
+    return Path(value)
+
+
+def read_json(path, what):
+    """JSON from a named file; a damaged one is reported by its path."""
+    try:
+        return json.loads(Path(path).read_text(encoding='utf-8-sig'))
+    except ValueError as error:
+        raise ValueError(f'{what} could not be read: {path} is damaged or incomplete ({error}).') from error
+
+
+def failure_message(error, doing=None):
+    """One line a player can act on: the step, and the file or folder involved.
+    The exception itself goes to the setup log (failure_detail)."""
+    doing = doing or _step
+    if isinstance(error, OSError) and (error.filename or error.errno is not None):
+        import errno
+        name = str(error.filename) if error.filename else 'a file or folder Setup needs'
+        code, windows = error.errno, getattr(error, 'winerror', None)
+        if windows == 32:
+            text = (f'{name} is open in another program. Close D2R, Steam, D2R VR Launcher and any window '
+                    'showing that file, then run Setup again.')
+        elif code == errno.ENOENT:
+            text = (f'{name} was not found. If Windows Security removed it, see Protection History; '
+                    'otherwise check that the folder still exists, then run Setup again.')
+        elif code in (errno.EACCES, errno.EPERM):
+            text = (f'Windows did not allow {name} to be read or changed. Close programs using it and check '
+                    'Windows Security Protection History (Controlled folder access blocks changes to game and '
+                    'Saved Games folders), then run Setup again.')
+        elif code == errno.ENOSPC:
+            text = f'there is not enough free disk space to write {name}.'
+        else:
+            text = f'Windows reported a problem with {name}: {error.strerror or error}.'
+        if error.filename2:
+            text += f' (The other file involved: {error.filename2}.)'
+    elif isinstance(error, KeyError):
+        text = (f'a setup or backup file is missing its entry {error.args[0]!r}. Keep the installation backups '
+                'and attach the setup logs to a bug report.') if error.args else 'a setup or backup file is incomplete.'
+    else:
+        text = str(error).strip()
+        if not text or text.lstrip('-').isdigit():
+            # Never a bare status: say that nothing better is known.
+            text = (f'the helper stopped with code {text or "unknown"} and gave no reason. '
+                    'Attach the setup logs to a bug report.')
+    return f'Setup could not finish while {doing}: {text}'
+
+
+def failure_detail(error, doing, logs):
+    """Append the exception to the first of `logs` whose folder exists (never
+    creating one), and return that file. None: nowhere to write."""
+    import time
+    import traceback
+    lines = [time.strftime('%Y-%m-%d %H:%M:%S ') + f'Setup helper failed while {doing}',
+             'Options: ' + json.dumps(sys.argv[1:]),
+             *''.join(traceback.format_exception(type(error), error, error.__traceback__)).rstrip().splitlines()]
+    for log in logs:
+        try:
+            if log is None or not Path(log).parent.is_dir():
+                continue
+            with Path(log).open('a', encoding='utf-8') as output:
+                output.write('\n'.join(lines) + '\n')
+            return Path(log)
+        except OSError:
+            continue
+    return None
+
+
+def detail_logs(arguments):
+    """Where a failure's detail is kept: the helper folder's setup-last.log once
+    there is one (beside setup-install.log), else the user's temporary folder -
+    the wizard's own files are deleted when it closes."""
+    import tempfile
+    managed = None
+    for index, value in enumerate(arguments):
+        if value == '--managed-root' and index + 1 < len(arguments):
+            managed = folder_argument(arguments[index + 1])
+        elif value.startswith('--managed-root='):
+            managed = folder_argument(value.split('=', 1)[1])
+    # Installing and removing run from the helper folder itself; the earlier steps run from the wizard's copy.
+    installed = ROOT if any(value.split('=', 1)[0] in ('--install', '--uninstall', '--uninstall-check')
+                            for value in arguments) else None
+    return [folder / 'setup-last.log' for folder in (managed, installed) if folder is not None] + [
+        Path(tempfile.gettempdir()) / 'D2R-PCVR-setup-last.log']
+
+
 def atomic_json(path, value):
     temporary = path.with_suffix('.tmp')
     try:
@@ -37,7 +150,7 @@ def atomic_json(path, value):
 
 def managed_state(root):
     path = root / STATE
-    result = json.loads(path.read_text(encoding='utf-8')) if path.is_file() else {'installations': []}
+    result = read_json(path, 'The record of managed installations') if path.is_file() else {'installations': []}
     if not isinstance(result, dict) or not isinstance(result.get('installations'), list):
         raise ValueError('The managed installation record is invalid. Keep the backups and contact the maintainer.')
     for entry in result['installations']:
@@ -250,7 +363,7 @@ def validate_choices(values, root, managed_root=None):
     _, version = validate_game(game, store, experimental_battlenet=store == 'battlenet')
     if not (saves / 'Settings.json').is_file():
         raise ValueError('Launch the original game once first, finish account prompts, and exit. Then select its Saved Games folder.')
-    json.loads((saves / 'Settings.json').read_text(encoding='utf-8-sig'))
+    read_json(saves / 'Settings.json', "The game's settings file")
     accounts = {profile.name: profile for profile, _ in setup.profiles(steam)}
     profile = accounts.get(values.get('profile'))
     if profile is None:
@@ -350,11 +463,14 @@ def rollback_snapshot(game, saves, snapshot):
 
 
 def install_selected(values, root):
+    step('checking that D2R and Steam are closed')
     setup.require_closed()
+    step('checking the folders and choices you selected')
     selection = validate_choices(values, root)
     game = selection['game']
     state = managed_state(root)
     before_state = json.loads(json.dumps(state))
+    step(f'preserving the installation backups of {game}')
     print('Preserving existing installation backups...', flush=True)
     adopt_backups(game, root, Path(values['backups']).expanduser().resolve() if values.get('backups') else None)
     existing = [entry for entry in state['installations'] if Path(entry['game']).resolve() != game]
@@ -366,6 +482,7 @@ def install_selected(values, root):
         originals[path] = path.read_bytes() if path.is_file() else None
     backups = root / 'setup-backups/game'
     before = set(backups.glob('*/manifest.json'))
+    step(f'recording this installation in {root / STATE}')
     atomic_json(root / STATE, state)
     committed_steam = {}
     def steam_committed():
@@ -373,6 +490,7 @@ def install_selected(values, root):
             if path != game / install.RECORD:
                 committed_steam[path] = path.read_bytes() if path.is_file() else None
     try:
+        step(f'installing the mod into {game} and adding the Steam shortcuts')
         print('Installing the mod and configuring Steam shortcuts...', flush=True)
         result = setup.apply_setup(**selection, root=root, on_steam_configured=steam_committed, hide_console=True)
         entry.update(status='installed', receipt=install.read_record(game))
@@ -400,19 +518,38 @@ def install_selected(values, root):
 
 
 def removal_plan(root):
-    updates = {}
+    """The edits that remove the mod from every managed game copy, and notes
+    for the player about copies whose game was uninstalled first (#328)."""
+    updates, notes = {}, []
     state = managed_state(root)
     for entry in state['installations']:
         game, steam = Path(entry['game']).resolve(), Path(entry['steam']).resolve()
         if game.is_relative_to(root.resolve()) or root.resolve().is_relative_to(game):
             raise ValueError('The managed game path overlaps the helper folder.')
-        record = install.read_record(game) or entry.get('receipt', {})
-        if (game / install.RECORD).exists() or mod_identity.survey(game, [root / 'setup-backups/game']).ours:
+        step(f'reading what the mod installed in {game}')
+        gone = uninstall.game_gone(game)
+        if gone:
+            # Nothing of a game is left to restore or to protect: what the backups list of the mod's own files
+            # goes if it can, and the Steam shortcuts below go either way. Never a reason to stop.
+            try:
+                record = install.read_record(game) if game.is_dir() else {}
+            except (OSError, ValueError, KeyError):
+                record = {}
+            record = record or entry.get('receipt', {})
+            leftovers, note = uninstall.leftover_plan(game, record, [root / 'setup-backups/game'])
+            updates.update(leftovers)
+            notes.append(note)
+        else:
+            record = install.read_record(game) or entry.get('receipt', {})
+        if not gone and ((game / install.RECORD).exists()
+                         or mod_identity.survey(game, [root / 'setup-backups/game']).ours):
             detected, _ = storage_config(game)
-            if detected != entry['store'] or not (game / 'D2R.exe').is_file():
-                raise ValueError('The recorded game folder no longer matches its installation. Keep the backups.')
+            if detected != entry['store']:
+                raise ValueError(f'The recorded game folder {game} now holds a {detected} installation, not the '
+                                 f'{entry["store"]} one the mod was installed into. Keep the backups.')
             chain = uninstall.snapshots(game, record, [root / 'setup-backups/game'])
             updates.update(uninstall.restore_plan(game, chain, restore_video=False))
+        step(f'reading the Steam shortcuts in {steam}')
         for profile, _ in setup.profiles(steam):
             profile_state = record.get('steam_profiles', {}).get(str(profile.resolve()), {})
             # Apply each edition sequentially to the same virtual Steam bytes.
@@ -432,34 +569,41 @@ def removal_plan(root):
                     current['shortcuts'] = {str(i): item for i, item in enumerate(
                         item for item in current['shortcuts'].values() if item not in removed)}
                     updates[path] = steam_config.encode_binary(current)
-    return updates
+    return updates, notes
 
 
 def remove_managed(root):
+    step('checking that D2R and Steam are closed')
     setup.require_closed()
-    updates = removal_plan(root)
+    updates, notes = removal_plan(root)
+    step('removing the mod\'s files and Steam shortcuts')
     uninstall.apply_updates(updates, root / 'setup-backups', setup.require_closed)
+    step(f'clearing the record of managed installations in {root / STATE}')
     atomic_json(root / STATE, {'installations': []})
+    for note in notes:
+        print(note, flush=True)
     print('The VR mod and its matching Steam shortcuts were removed. Characters, shared stash, current video settings and backups were kept.', flush=True)
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    step('reading the options the wizard passed')
+    parser = SetupArguments(description=__doc__)
     action = parser.add_mutually_exclusive_group(required=True)
-    action.add_argument('--probe', type=Path)
-    action.add_argument('--validate', type=Path)
-    action.add_argument('--install', type=Path)
+    action.add_argument('--probe', type=folder_argument)
+    action.add_argument('--validate', type=folder_argument)
+    action.add_argument('--install', type=folder_argument)
     action.add_argument('--uninstall', action='store_true')
     action.add_argument('--uninstall-check', action='store_true')
     action.add_argument('--check', action='store_true')
-    parser.add_argument('--managed-root', type=Path)
-    parser.add_argument('--steam', type=Path, help='Steam folder selected in the graphical wizard (discovery only)')
-    parser.add_argument('--game', type=Path, help='Selected game for read-only backup discovery')
-    parser.add_argument('--source-root', type=Path, help='Installer source folder (probe only)')
-    parser.add_argument('--backup-hint', type=Path, help='Backup folder selected in the wizard (probe only)')
+    parser.add_argument('--managed-root', type=folder_argument)
+    parser.add_argument('--steam', type=folder_argument, help='Steam folder selected in the graphical wizard (discovery only)')
+    parser.add_argument('--game', type=folder_argument, help='Selected game for read-only backup discovery')
+    parser.add_argument('--source-root', type=folder_argument, help='Installer source folder (probe only)')
+    parser.add_argument('--backup-hint', type=folder_argument, help='Backup folder selected in the wizard (probe only)')
     args = parser.parse_args()
     if not args.probe and (args.source_root is not None or args.backup_hint is not None):
         parser.error('--source-root and --backup-hint require --probe')
+    step('checking the installer\'s own files')
     setup.verify_release(ROOT)
     if args.check:
         print('Graphical installer payload verified. No game files were changed.')
@@ -467,27 +611,47 @@ def main():
     if os.name != 'nt':
         raise ValueError('This installer requires Windows.')
     if args.probe:
+        step('looking for Steam, the game and earlier installations' if args.game is None
+             else f'reading the game folder {args.game} and the Steam folder {args.steam}')
         write_probe(args.probe, ROOT, args.steam, args.game, args.managed_root,
                     args.source_root, args.backup_hint)
     elif args.validate:
+        step('checking the folders and choices you selected')
         validate_choices(read_choices(args.validate), ROOT, args.managed_root)
+        step('checking that D2R and Steam are closed')
         setup.require_closed()
         print('Selections verified. Ready to install.')
     elif args.install:
+        step('reading your setup choices')
         install_selected(read_choices(args.install), ROOT)
     elif args.uninstall_check:
+        step('checking that D2R and Steam are closed')
         setup.require_closed()
-        removal_plan(ROOT)
+        step('checking what the mod installed, before removing it')
+        for note in removal_plan(ROOT)[1]:
+            print(note, flush=True)
         print('Ready to remove the VR mod from the managed game installations.')
     else:
         remove_managed(ROOT)
 
 
-if __name__ == '__main__':
+def run():
+    """main() for the wizard: 0, or 1 after one plain last line (the wizard
+    shows the last line it received) with the detail kept in a log."""
     try:
         main()
     except (Exception, SystemExit) as error:
         if isinstance(error, SystemExit) and error.code in (None, 0):
-            raise
-        print(f'Setup could not finish: {error}', file=sys.stderr, flush=True)
-        raise SystemExit(1)
+            return 0
+        doing = _step
+        message = failure_message(error, doing)
+        log = failure_detail(error, doing, detail_logs(sys.argv[1:]))
+        if log is not None:
+            message += f' Technical details were saved in {log}.'
+        print(message, file=sys.stderr, flush=True)
+        return 1
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(run())

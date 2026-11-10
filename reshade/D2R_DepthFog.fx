@@ -165,10 +165,23 @@ void VS_Fullscreen(in uint id : SV_VertexID, out float4 pos : SV_Position, out f
 }
 
 
-// The left eye's frames (and mono). vrcam keeps one of the two on: before
-// each present, the one of the eye that present is for.
+// Three sizes of the one effect, each for the left eye's frames (and mono) and for the right eye's. vrcam keeps exactly
+// one of the six on: before each present, the one of the eye that present is for, at the smallest size that draws
+// everything wanted in it (steamvr/effect_passes.h; its test pins these lists).
+//
+//   D2R_DepthFog_Lean  the world's passes only: fog, sky, ceiling, lights, outlines, circles, beams, immunity, the arc.
+//   D2R_DepthFog_Mask  those and the four that find the interface in the picture (HudCur/HudPrev/HudMask/HudMaskOld).
+//                      The mask is read by the fog pass where the sky or the shader's ceiling fills the void
+//                      (D2R_FogWorld.fxh), by the table key and by the HUD shift - nothing else.
+//   D2R_DepthFog       every pass, as the effect always ran: with the HUD shift ([stereo] ui_near), the toolbar / map /
+//                      labels drawn back (PS_GameHud), the debug lines (PS_Phantom), the table key and the frame stamp.
+//                      Each of those five passes writes the picture back unchanged while its feature is off, which is
+//                      why the smaller sizes can leave them out.
+//
+// The passes of a smaller size are the full one's with those left out, in the same order. The full techniques keep
+// their names: an older plugin, and ReShade's preset, know only them.
 technique D2R_DepthFog <
-    ui_tooltip = "Distance fog and sky for D2R with the vrcam plugin (reads raw reverse-Z depth). Left eye / mono.";
+    ui_tooltip = "Distance fog and sky for D2R with the vrcam plugin (reads raw reverse-Z depth). Left eye / mono. Every pass.";
 >
 {
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_HudCopy; RenderTarget = HudCurTex; }
@@ -202,6 +215,66 @@ technique D2R_DepthFog <
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_HudMaskStore; RenderTarget = HudMaskOldTex; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_TableKey; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_Stamp; }
+}
+
+technique D2R_DepthFog_Mask <
+    ui_tooltip = "The same without the passes of the HUD shift, the toolbar / map / labels, the debug lines, the table key and the frame stamp. Left eye / mono.";
+>
+{
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_HudCopy; RenderTarget = HudCurTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_HudMask; RenderTarget = HudMaskTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_VoidFog; RenderTarget = VoidFogTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_VoidFogBlurH; RenderTarget = VoidFogTmpTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_VoidFogBlurV; RenderTarget = VoidFogTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_Fire; RenderTarget = FireTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_TorchCands; RenderTarget = TorchCandTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_TorchMerge; RenderTarget = TorchTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_TorchStore; RenderTarget = TorchOldTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_VoidGlow8; RenderTarget = VoidGlow8Tex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_VoidGlow32; RenderTarget = VoidGlow32Tex; }
+    pass { ComputeShader = CS_RecordHeights<16, 16>; DispatchSizeX = BUFFER_WIDTH / 16 + 1; DispatchSizeY = BUFFER_HEIGHT / 16 + 1; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_HMapMerge; RenderTarget = HMapTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_HMapStore; RenderTarget = HMapOldTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_SupMerge; RenderTarget = SupTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_SupStore; RenderTarget = SupOldTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_HMapGenStore; RenderTarget = HMapGenTex; }
+    pass { ComputeShader = CS_ClearHeights<8, 8>; DispatchSizeX = 8; DispatchSizeY = 8; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_Peaks; RenderTarget = PeakTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_DomeSeeds; RenderTarget = DomeSeedTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_DepthFog; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_Outline; }
+    pass { VertexShader = VS_Immunity; PixelShader = PS_Immunity; VertexCount = 2592; BlendEnable = true; SrcBlend = ONE; DestBlend = ONE; ColorWriteMask = 7; }
+    pass { VertexShader = VS_TeleportArc; PixelShader = PS_TeleportArc; VertexCount = 90; BlendEnable = true; SrcBlend = ONE; DestBlend = ONE; ColorWriteMask = 7; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_HudStore; RenderTarget = HudPrevTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_HudMaskStore; RenderTarget = HudMaskOldTex; }
+}
+
+technique D2R_DepthFog_Lean <
+    ui_tooltip = "The same without those and without the interface mask: the world's passes only. Left eye / mono.";
+>
+{
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_VoidFog; RenderTarget = VoidFogTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_VoidFogBlurH; RenderTarget = VoidFogTmpTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_VoidFogBlurV; RenderTarget = VoidFogTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_Fire; RenderTarget = FireTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_TorchCands; RenderTarget = TorchCandTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_TorchMerge; RenderTarget = TorchTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_TorchStore; RenderTarget = TorchOldTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_VoidGlow8; RenderTarget = VoidGlow8Tex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_VoidGlow32; RenderTarget = VoidGlow32Tex; }
+    pass { ComputeShader = CS_RecordHeights<16, 16>; DispatchSizeX = BUFFER_WIDTH / 16 + 1; DispatchSizeY = BUFFER_HEIGHT / 16 + 1; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_HMapMerge; RenderTarget = HMapTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_HMapStore; RenderTarget = HMapOldTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_SupMerge; RenderTarget = SupTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_SupStore; RenderTarget = SupOldTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_HMapGenStore; RenderTarget = HMapGenTex; }
+    pass { ComputeShader = CS_ClearHeights<8, 8>; DispatchSizeX = 8; DispatchSizeY = 8; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_Peaks; RenderTarget = PeakTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_DomeSeeds; RenderTarget = DomeSeedTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_DepthFog; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_Outline; }
+    pass { VertexShader = VS_Immunity; PixelShader = PS_Immunity; VertexCount = 2592; BlendEnable = true; SrcBlend = ONE; DestBlend = ONE; ColorWriteMask = 7; }
+    pass { VertexShader = VS_TeleportArc; PixelShader = PS_TeleportArc; VertexCount = 90; BlendEnable = true; SrcBlend = ONE; DestBlend = ONE; ColorWriteMask = 7; }
 }
 
 technique D2R_DepthFog_R <
@@ -239,4 +312,64 @@ technique D2R_DepthFog_R <
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_HudMaskStore; RenderTarget = HudMaskOldTex; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_TableKeyR; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_StampR; }
+}
+
+technique D2R_DepthFog_Mask_R <
+    ui_tooltip = "D2R_DepthFog_Mask for the right eye's frames.";
+>
+{
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_HudCopy; RenderTarget = HudCurTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_HudMask; RenderTarget = HudMaskTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_VoidFog; RenderTarget = VoidFogTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_VoidFogBlurH; RenderTarget = VoidFogTmpTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_VoidFogBlurV; RenderTarget = VoidFogTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_Fire; RenderTarget = FireTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_TorchCandsR; RenderTarget = TorchCandTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_TorchMerge; RenderTarget = TorchTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_TorchStore; RenderTarget = TorchOldTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_VoidGlow8; RenderTarget = VoidGlow8Tex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_VoidGlow32; RenderTarget = VoidGlow32Tex; }
+    pass { ComputeShader = CS_RecordHeightsR<16, 16>; DispatchSizeX = BUFFER_WIDTH / 16 + 1; DispatchSizeY = BUFFER_HEIGHT / 16 + 1; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_HMapMerge; RenderTarget = HMapTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_HMapStore; RenderTarget = HMapOldTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_SupMerge; RenderTarget = SupTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_SupStore; RenderTarget = SupOldTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_HMapGenStore; RenderTarget = HMapGenTex; }
+    pass { ComputeShader = CS_ClearHeights<8, 8>; DispatchSizeX = 8; DispatchSizeY = 8; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_Peaks; RenderTarget = PeakTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_DomeSeeds; RenderTarget = DomeSeedTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_DepthFogR; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_OutlineR; }
+    pass { VertexShader = VS_ImmunityR; PixelShader = PS_Immunity; VertexCount = 2592; BlendEnable = true; SrcBlend = ONE; DestBlend = ONE; ColorWriteMask = 7; }
+    pass { VertexShader = VS_TeleportArcR; PixelShader = PS_TeleportArc; VertexCount = 90; BlendEnable = true; SrcBlend = ONE; DestBlend = ONE; ColorWriteMask = 7; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_HudStore; RenderTarget = HudPrevTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_HudMaskStore; RenderTarget = HudMaskOldTex; }
+}
+
+technique D2R_DepthFog_Lean_R <
+    ui_tooltip = "D2R_DepthFog_Lean for the right eye's frames.";
+>
+{
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_VoidFog; RenderTarget = VoidFogTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_VoidFogBlurH; RenderTarget = VoidFogTmpTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_VoidFogBlurV; RenderTarget = VoidFogTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_Fire; RenderTarget = FireTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_TorchCandsR; RenderTarget = TorchCandTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_TorchMerge; RenderTarget = TorchTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_TorchStore; RenderTarget = TorchOldTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_VoidGlow8; RenderTarget = VoidGlow8Tex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_VoidGlow32; RenderTarget = VoidGlow32Tex; }
+    pass { ComputeShader = CS_RecordHeightsR<16, 16>; DispatchSizeX = BUFFER_WIDTH / 16 + 1; DispatchSizeY = BUFFER_HEIGHT / 16 + 1; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_HMapMerge; RenderTarget = HMapTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_HMapStore; RenderTarget = HMapOldTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_SupMerge; RenderTarget = SupTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_SupStore; RenderTarget = SupOldTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_HMapGenStore; RenderTarget = HMapGenTex; }
+    pass { ComputeShader = CS_ClearHeights<8, 8>; DispatchSizeX = 8; DispatchSizeY = 8; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_Peaks; RenderTarget = PeakTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_DomeSeeds; RenderTarget = DomeSeedTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_DepthFogR; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_OutlineR; }
+    pass { VertexShader = VS_ImmunityR; PixelShader = PS_Immunity; VertexCount = 2592; BlendEnable = true; SrcBlend = ONE; DestBlend = ONE; ColorWriteMask = 7; }
+    pass { VertexShader = VS_TeleportArcR; PixelShader = PS_TeleportArc; VertexCount = 90; BlendEnable = true; SrcBlend = ONE; DestBlend = ONE; ColorWriteMask = 7; }
 }
