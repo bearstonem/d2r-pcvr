@@ -1,4 +1,5 @@
 #include "shoulder_swap.h"
+#include "hand_role.h"
 #include <cstdio>
 #include <cstdlib>
 using namespace framevr;
@@ -32,5 +33,24 @@ int main(){
         if(change==0)++s.in.epoch;if(change==1)++s.in.session;if(change==2)s.in.dominant=1;
         Check(!s.Step().swap,"recenter, session or dominant hand change consumes holds");}
     {Sim s;s.Step(10);s.in.time+=1;s.in.grip=1;Check(!s.Step().swap,"frame hitch cannot replay gesture");}
-    std::puts("Shoulder swap: either shoulder, dominant hand, yaw, seated pose, one press, release and tracking/context guards passed");
+    {   // Left-handed play (hand_role.h): the swap hand is the LEFT hand whatever Dominant hand says, and
+        // stays the left hand when a bow or staff has the roles back to right-handed (it is the gesture that
+        // takes the bow out). The gesture is fed that hand's pose and grip; `dominant` is its role index.
+        using namespace handrole;
+        for(const uint32_t weapon:{uint32_t(D2RVR_TYPE_SWORD),uint32_t(D2RVR_TYPE_BOW)})for(int saved=0;saved<2;++saved){
+            const auto state=Resolve(true,weapon,0);
+            const int physical=Dominant(true,saved),role=state.map.Role(physical);
+            Check(physical==1&&role==(weapon==D2RVR_TYPE_SWORD?0:1),"the left hand: the main hand with a sword, the off hand with a bow");
+            math::Vec hands[2]={{.25f,1.2f,-.3f},{-.23f,1.5f,.14f}};   // physical: the left one is over the left shoulder
+            float grips[2]={0,0};
+            Sim g;g.in.dominant=role;
+            const auto step=[&](int n=1){g.in.hand=hands[state.map.Physical(role)];g.in.grip=grips[state.map.Physical(role)];return g.Step(n);};
+            step(10);grips[0]=1;Check(!step().swap,"the right hand's grip is not the swap's");
+            grips[0]=0;step();grips[1]=1;Check(step().swap,"the left hand's grip over the shoulder swaps");
+        }
+        Check(Dominant(false,0)==0&&Dominant(false,1)==1,"Left-handed off: Dominant hand as it was");
+        Sim a,b;a.in.dominant=0;b.in.dominant=Map{}.Role(Dominant(false,0));
+        for(int i=0;i<12;++i){a.in.grip=b.in.grip=i>9?1.f:0.f;const auto x=a.Step(),y=b.Step();Check(x.swap==y.swap&&x.block==y.block&&x.inReach==y.inReach,"and the gesture unchanged");}
+    }
+    std::puts("Shoulder swap: either shoulder, dominant hand, yaw, seated pose, one press, release, tracking/context guards and the left-handed swap hand passed");
 }

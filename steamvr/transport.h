@@ -80,7 +80,16 @@ int GazeAimSupport();
 bool GazeAimLocal(float local[3],uint64_t& at);
 void ConfigureGameplay(bool enabled);
 void ConfigureQuiver(bool enabled,bool preview); // [bow] quiver, quiver_preview
-void ConfigureInteractions(bool seated,float waistBelowEyes,float beltForward,int dominantHand);
+void ConfigureInteractions(bool seated,float waistBelowEyes,float beltForward,int dominantHand,bool leftHanded=false);
+// Left-handed play (hand_role.h, #307; [interactions] left_handed). Every hand index this header takes
+// or gives is a ROLE: 0 the main hand, 1 the off hand - the right and the left hand unless the roles are
+// mirrored now (the setting on and the equipped weapon one of the kinds mirrored so far). HandSide gives
+// the physical hand (0 right, 1 left: the shared tracking state, the hero's arm bones) playing a role,
+// HandRole the role a physical hand plays. Any thread.
+bool LeftHandedNow();      // the roles are mirrored this frame
+bool LeftHandedWanted();   // the setting, whatever the weapon
+int HandSide(int role);
+int HandRole(int physical);
 void ConfigureBottlePhysics(bool on); // [interactions] bottle_physics: emptied bottles fall into the world
 void ConfigurePropPhysics(bool on);   // [interactions] prop_physics: weapons knock the level's small props about
 void ConfigureBodyPhysics(bool on);   // [interactions] body_physics: weapons push monsters' and townsfolk's limbs aside

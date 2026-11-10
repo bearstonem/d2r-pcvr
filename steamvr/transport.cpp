@@ -48,6 +48,7 @@
 #include "strike_skills.h"
 #include "bow_laser.h"
 #include "hand_controls.h"
+#include "hand_role.h"
 #include "interaction_ui.h"
 #include "sewer_prompt_art.h"
 #include "notice_card_art.h"
@@ -976,6 +977,22 @@ menudrop::Drop menuDrop;
 // (leather::Reach), watched while it is held; off with Dominant hand = Left, as the reach out is.
 leather::Reach leatherStow;
 std::atomic<bool> leftDominant{false};
+// Left-handed play (hand_role.h, #307). Inside this file every hand index is a ROLE (0 main, 1 off):
+// motionInput, handAim, handVelocity, the pad, the engines, MotionPulse. The physical hand (0 right,
+// 1 left) appears only where the hardware or the body does: the OpenXR paths and spaces (hands,
+// handSpaces, aimSpace), the shared tracking state (the arms' IK), a forearm or a palm side, and the
+// interface phase 2 has not mirrored yet (Ui*: the laser, the leather menu, the journal, the wrist HUD).
+// handRoles is the input thread's (under mutex); handRolesLeft is the same map for any thread.
+handrole::State handRoles;
+std::atomic<bool> handRolesLeft{false},leftHandedWanted{false};
+std::atomic<int> dominantSetting{0};
+interaction::Config interactionConfig;bool interactionConfigured=false;   // under mutex; dominant is a role there
+int PhysicalHand(int role){return handrole::Map{handRolesLeft.load(std::memory_order_relaxed)}.Physical(role);}
+int RoleHand(int physical){return PhysicalHand(physical);}
+// The physical hand of an interface side (0 the laser's, 1 the menu's and the wrist HUD's), and that
+// hand's role index for this file's arrays.
+int UiHand(int side,handrole::System system=handrole::System::Laser){return handrole::For(system,handRoles).Physical(side);}
+int UiRole(int side,handrole::System system=handrole::System::Laser){return handRoles.map.Role(UiHand(side,system));}
 // The HUD held with the menu (leather::HudPlaces): its life / mana / XP while the tabbed menu is
 // in the hand with the world kept (Leather or Menu only), unless its VR Settings location is
 // Off. The interaction engine stays off there; only its painter runs for it. No minimap there
@@ -2077,19 +2094,27 @@ void UpdateControllerLabels() {
         controllerProfilesDirty=retry;
     }
     controllerLabels=controllers::Resolve(controllers::Choice(int(vrsettings::Read().values[settings::ControllerLabels])),detectedControllers);
+    controllerLabels.leftMain=handRoles.map.left;   // a slot is named by the controller that casts it
 }
-bool Bool(XrAction action,int hand) {
+// A controller's own input, by PHYSICAL hand (0 right, 1 left).
+bool PhysicalBool(XrAction action,int hand) {
     XrActionStateGetInfo gi{XR_TYPE_ACTION_STATE_GET_INFO};gi.action=action;gi.subactionPath=hands[hand];
     XrActionStateBoolean v{XR_TYPE_ACTION_STATE_BOOLEAN};return XR_SUCCEEDED(pGetActionStateBoolean(session,&gi,&v))&&v.isActive&&v.currentState;
 }
-float Float(XrAction action,int hand) {
+float PhysicalFloat(XrAction action,int hand) {
     XrActionStateGetInfo gi{XR_TYPE_ACTION_STATE_GET_INFO};gi.action=action;gi.subactionPath=hands[hand];
     XrActionStateFloat v{XR_TYPE_ACTION_STATE_FLOAT};return XR_SUCCEEDED(pGetActionStateFloat(session,&gi,&v))&&v.isActive?v.currentState:0;
 }
-XrVector2f Stick(int hand) {
+XrVector2f PhysicalStick(int hand) {
     XrActionStateGetInfo gi{XR_TYPE_ACTION_STATE_GET_INFO};gi.action=stick;gi.subactionPath=hands[hand];
     XrActionStateVector2f v{XR_TYPE_ACTION_STATE_VECTOR2F};if(XR_FAILED(pGetActionStateVector2f(session,&gi,&v))||!v.isActive)return {};return v.currentState;
 }
+// The same by ROLE (0 main, 1 off; hand_role.h): right-handed, the same hand.
+bool Bool(XrAction action,int hand){return PhysicalBool(action,handRoles.map.Physical(hand));}
+float Float(XrAction action,int hand){return PhysicalFloat(action,handRoles.map.Physical(hand));}
+// The interface's, by its own side (0 the laser's hand, 1 the menu's): physical until phase 2 mirrors it.
+float UiFloat(XrAction action,int side){return PhysicalFloat(action,UiHand(side));}
+XrSpace UiAimSpace(){return UiHand(0)?leftAimSpace:aimSpace;}
 bool FocusGameForUi() {
     // Called only for an intentional menu action in a focused XR session.
     // Hovering the laser must not steal focus from another desktop window.
@@ -2159,7 +2184,7 @@ void MenuPointer(const menus::Pad& controls) {
     XrSpaceLocation aim{XR_TYPE_SPACE_LOCATION};
     const auto flags=XR_SPACE_LOCATION_POSITION_VALID_BIT|XR_SPACE_LOCATION_ORIENTATION_VALID_BIT|
         XR_SPACE_LOCATION_POSITION_TRACKED_BIT|XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT;
-    const bool aimTracked=uiActive&&XR_SUCCEEDED(pLocateSpace(aimSpace,space,frameState.predictedDisplayTime,&aim))&&(aim.locationFlags&flags)==flags;
+    const bool aimTracked=uiActive&&XR_SUCCEEDED(pLocateSpace(UiAimSpace(),space,frameState.predictedDisplayTime,&aim))&&(aim.locationFlags&flags)==flags;
     math::PanelHit hit{};
     if(aimTracked) {
         const auto ray=V(aim.pose.position),direction=math::Rotate(Q(aim.pose.orientation),{0,0,-1});
@@ -2424,7 +2449,9 @@ void MotionPointer() {
         dotPose=XrPose({hit.point+math::Rotate(pose.q,{0,0,.003f}),pose.q});
     }
 }
+// hand: a ROLE (0 main, 1 off), as everywhere in this file; the pulse goes to the controller playing it.
 bool MotionPulse(int hand,haptics::Category category,float strength,XrDuration duration,float frequency=XR_FREQUENCY_UNSPECIFIED,const haptics::Strengths* preview=nullptr) {
+    hand=PhysicalHand(hand);
     const auto ai=hapticActions.Info(hand);
     if(!ai.action||!pApplyHapticFeedback||!pStopHapticFeedback||!session||!running)return false;
     hapticPulses.Configure(settings::HapticLevels(vrsettings::Read().values));
@@ -2704,7 +2731,7 @@ bool MonoAudioOn(ULONGLONG now) {
 // (Feel it, Calibrate body, Set eye height), the rest go to layout::Press.
 // how: forwarded to CloseSettings for its log line only ("B").
 void SettingsPress(const settings::Hit& hit,uint64_t ms,const char* how=nullptr) {
-    if(hit.kind==settings::Kind::Recenter){ResetHeight();MotionPulse(1,haptics::Category::Interaction,.4f,35000000);return;}
+    if(hit.kind==settings::Kind::Recenter){ResetHeight();MotionPulse(UiRole(1),haptics::Category::Interaction,.4f,35000000);return;}
     if(hit.kind==settings::Kind::Calibrate){if(settingsModel.CanCalibrate())OpenBodyCalibration();return;}
     if(hit.kind==settings::Kind::TestHaptics){
         if(!settingsModel.CanTestHaptics(hit.index))return;
@@ -2748,7 +2775,7 @@ void SettingsPointer(bool grip) {
     XrSpaceLocation aim{XR_TYPE_SPACE_LOCATION};
     const auto needed=XR_SPACE_LOCATION_POSITION_VALID_BIT|XR_SPACE_LOCATION_ORIENTATION_VALID_BIT|
                       XR_SPACE_LOCATION_POSITION_TRACKED_BIT|XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT;
-    if(motionHeadTracked&&XR_SUCCEEDED(pLocateSpace(aimSpace,space,frameState.predictedDisplayTime,&aim))&&(aim.locationFlags&needed)==needed){
+    if(motionHeadTracked&&XR_SUCCEEDED(pLocateSpace(UiAimSpace(),space,frameState.predictedDisplayTime,&aim))&&(aim.locationFlags&needed)==needed){
         const auto ray=V(aim.pose.position),direction=math::Rotate(Q(aim.pose.orientation),{0,0,-1});math::PanelHit hit;
         pointerHit=math::IntersectPanel(ray,direction,V(settingsPose.position),Q(settingsPose.orientation),settingsWidth,settingsHeight,hit);
         beamLength=pointerHit?hit.distance:1.5f;const auto mid=ray+direction*(beamLength*.5f);
@@ -2756,12 +2783,12 @@ void SettingsPointer(bool grip) {
         if(pointerHit){canvasX=hit.u*settings::Width;canvasY=hit.v*settings::Height;dotPose=settingsPose;
             const auto p=hit.point+math::Rotate(Q(settingsPose.orientation),{0,0,.004f});dotPose.position={p.x,p.y,p.z};}
     }
-    const bool grabbing=GrabPanel(settingsPose,settingsBase,settingsOffset,grip&&pointerVisible,pointerHit,Float(trigger,0)>.2f,aim.pose);
+    const bool grabbing=GrabPanel(settingsPose,settingsBase,settingsOffset,grip&&pointerVisible,pointerHit,UiFloat(trigger,0)>.2f,aim.pose);
     // The laser on the picture shown, in canvas pixels. Grabbing the panel,
     // missing it, or a picture of another view (just switched) is off the
     // panel for the filter, which cancels a press.
     const uint64_t ms=MenuMs();
-    settingsTriggerDown=Float(trigger,0)>(settingsTriggerDown?.20f:.55f);
+    settingsTriggerDown=UiFloat(trigger,0)>(settingsTriggerDown?.20f:.55f);
     const bool onPanel=pointerHit&&!grabbing&&settingsImageReady&&!settingsLayout.elements.empty()&&settingsLayout.view==settingsModel.view;
     const auto pointed=settingsPointer.Step(settingsLayout,ms,onPanel,canvasX,canvasY,settingsTriggerDown);
     settingsHover=pointed.hover;settingsPressed=pointed.pressed;
@@ -2771,7 +2798,7 @@ void SettingsPointer(bool grip) {
         Say(message);   // one per trigger pull
     }
     if(pointed.blocked){
-        MotionPulse(1,haptics::Category::Interaction,.2f,15000000);
+        MotionPulse(UiRole(1),haptics::Category::Interaction,.2f,15000000);
         static ULONGLONG reportAt=0;const auto now=GetTickCount64();
         if(now>=reportAt){Say("Frame VR settings: press on a locked control blocked");reportAt=now+1000;}
     }
@@ -3440,10 +3467,11 @@ void BoneGraftTick(bool show) {
     bool placed[2][bonegraft::Pieces]{};bonegraft::Piece piece[2][bonegraft::Pieces]{};
     for(int side=0;side<2&&show;++side) {
         float wrist[3],elbow[3],palm[3];
-        if(!motionInput.tracked[side]||!skel::ForearmOnController(side,wrist,elbow,palm))continue;
+        const int armSide=PhysicalHand(side);   // the drawn forearm is a physical arm's (0 right), whatever role its hand plays
+        if(!motionInput.tracked[side]||!skel::ForearmOnController(armSide,wrist,elbow,palm))continue;
         const bonegraft::Forearm arm{{wrist[0],wrist[1],wrist[2]},{elbow[0],elbow[1],elbow[2]},{palm[0],palm[1],palm[2]}};
         for(int i=0;i<bonegraft::Pieces;++i)   // the left arm mirrored: the same bones in the same places
-            placed[side][i]=bonegraft::Place(arm,{motionInput.hand[side].p,motionInput.hand[side].q},settings,i,piece[side][i],side==1);
+            placed[side][i]=bonegraft::Place(arm,{motionInput.hand[side].p,motionInput.hand[side].q},settings,i,piece[side][i],armSide==1);
     }
     const uint32_t broken=boneGraftLayers.Update(layers);
     for(int side=0;side<2;++side)for(int i=0;i<bonegraft::Pieces;++i) {
@@ -3466,6 +3494,48 @@ void BoneGraftTick(bool show) {
         Say(line);
     }
 }
+// Left-handed play (hand_role.h): this frame's roles, from the setting and the equipped weapon. A weapon
+// kind that is not mirrored yet plays right-handed whole. A change of roles (the setting saved, or such
+// a weapon taken up or put away) moves every hand index at once: the engines start over as after a
+// tracking loss, and a held trigger, grip, button or stick must be let go before it acts again.
+void UpdateHandRoles() {
+    const bool wanted=leftHandedWanted.load();
+    // No weapon read yet (a loading screen, the title): the kind it last was, so the roles do not flip twice.
+    const uint32_t type=gamestate::WeaponType();
+    static uint32_t lastType=D2RVR_TYPE_UNARMED,lastTwo=0;
+    if(type!=D2RVR_TYPE_UNKNOWN){lastType=type;lastTwo=gamestate::TwoHanded();}
+    const auto next=handrole::Resolve(wanted,lastType,lastTwo);
+    const bool rolesChanged=next.map!=handRoles.map;
+    static handrole::State said;static bool saidOnce=false;static ULONGLONG saidAt=0;
+    const auto now=GetTickCount64();
+    handRoles=next;handRolesLeft.store(next.map.left,std::memory_order_relaxed);
+    {   // the weapon swap's hand in role order (handrole::Dominant): the engine starts over when it moves
+        const int role=next.map.Role(handrole::Dominant(wanted,dominantSetting.load()));
+        if(interactionConfigured&&interactionConfig.dominant!=role) {
+            interactionConfig.dominant=role;interactions.Configure(interactionConfig);interactionstate::Cancel();
+        }
+    }
+    if(rolesChanged) {
+        ++meleeEpoch;motion.Cancel();motionOutput={};motionAt=0;handControls.Suspend();menuControls.Suspend();
+        interactions.Reset();interactionOutput={};interactionstate::Cancel();skel::SetInteractionHidden(0);
+        meleePoses.Clear();offhandPoses.Clear();CancelShieldCast();rightStickGestures.Reset();hapticPulses.Cancel();
+        elementalState.Reset();leftMenuButton={};
+    }
+    // "Frame left-handed:" at each change of the setting, of the roles or of the weapon's kind while on,
+    // and at most once a minute otherwise while on.
+    const bool changed=!saidOnce||!(next==said);
+    if((changed&&(next.wanted||said.wanted||!saidOnce))||(next.wanted&&now-saidAt>=60000)) {
+        char line[480];
+        if(!next.wanted)std::snprintf(line,sizeof line,"Frame left-handed: off - right-handed play (VR Settings > Controls > Hands > Left-handed (experimental); mirrors %s when on)",handrole::MirroredKinds);
+        else if(next.map.left)std::snprintf(line,sizeof line,"Frame left-handed: on - main hand LEFT (weapon, main trigger and its skills, A / B, turn stick), "
+            "off hand RIGHT (shield or second weapon, X / Y, walk stick); mirrored now: %s; still right-handed: %s, the class motions, the menus' laser "
+            "(right hand), the wrist HUD and map and the leather menu (left hand)",handrole::MirroredKinds,handrole::RightHandedKinds);
+        else std::snprintf(line,sizeof line,"Frame left-handed: on, but a %s is equipped - it plays RIGHT-handed whole for now (weapon, triggers, grips, "
+            "buttons and sticks as with the setting off); mirrored now: %s; left-handed again when it is put away",handrole::Name(next.kind),handrole::MirroredKinds);
+        Say(line);saidAt=now;
+    }
+    said=next;saidOnce=true;
+}
 void Input() {
     gazeValid=false;
     if(!tracking.data) return;
@@ -3477,32 +3547,55 @@ void Input() {
     XrActionsSyncInfo si{XR_TYPE_ACTIONS_SYNC_INFO};si.countActiveActionSets=1;si.activeActionSets=&active;
     if(pSyncActions(session,&si)!=XR_SUCCESS) {gazeStability.Reset();ClearInput();return;}
     controllerRumbleLease.Update(GetTickCount64(),motionControls.load());
+    UpdateHandRoles();
     UpdateControllerLabels();
     const bool nativeUi=panelMode||spatialMode;
     const uint32_t inputEpoch=gamestate::MenuEpoch();
+    // The pad, by role: A / B, RT, RB and the right stick are the main hand's, X / Y, LT, LB and the left
+    // stick the off hand's (right-handed: the right and the left controller), in the world and in the
+    // menus alike, so a button means the same everywhere. The menu button is either controller's.
+    const auto& padMap=handRoles.map;
+    const int padHand[2]={padMap.Physical(0),padMap.Physical(1)};
     menus::Pad physical;
-    if(Bool(primary,0))physical.buttons|=menus::A;
-    if(Bool(secondary,0))physical.buttons|=menus::B;
-    if(Bool(primary,1))physical.buttons|=menus::X;
-    if(Bool(secondary,1))physical.buttons|=menus::Y;
-    if(Bool(menu,0)||Bool(menu,1))physical.buttons|=menus::Start;
-    if(Bool(stickClick,1))physical.buttons|=menus::LeftStick;
-    if(Bool(stickClick,0))physical.buttons|=menus::RightStick;
-    if(Float(squeeze,1)>.6f)physical.buttons|=menus::LeftBumper;
-    if(Float(squeeze,0)>.6f)physical.buttons|=menus::RightBumper;
+    if(PhysicalBool(primary,padHand[0]))physical.buttons|=menus::A;
+    if(PhysicalBool(secondary,padHand[0]))physical.buttons|=menus::B;
+    if(PhysicalBool(primary,padHand[1]))physical.buttons|=menus::X;
+    if(PhysicalBool(secondary,padHand[1]))physical.buttons|=menus::Y;
+    if(PhysicalBool(menu,0)||PhysicalBool(menu,1))physical.buttons|=menus::Start;
+    if(PhysicalBool(stickClick,padHand[1]))physical.buttons|=menus::LeftStick;
+    if(PhysicalBool(stickClick,padHand[0]))physical.buttons|=menus::RightStick;
+    if(PhysicalFloat(squeeze,padHand[1])>.6f)physical.buttons|=menus::LeftBumper;
+    if(PhysicalFloat(squeeze,padHand[0])>.6f)physical.buttons|=menus::RightBumper;
     // A hand armed or latched on a mercenary command (tactical_chord.h): its trigger is the command's,
     // never the game's, until let go. Decided here, before this frame's pull is handed on: a pull made
     // with the grip on the mercenary is withheld already, though the step (StepCompanionTacticalGestures,
     // below) latches it only later this frame.
     const double chordTime=double(GetTickCount64())/1000.0;
-    physical.lt=g_tacticalChord[1].Withholds(chordTime,Float(squeeze,1),Float(trigger,1))?0:uint8_t(std::clamp(Float(trigger,1),0.f,1.f)*255);
-    physical.rt=g_tacticalChord[0].Withholds(chordTime,Float(squeeze,0),Float(trigger,0))?0:uint8_t(std::clamp(Float(trigger,0),0.f,1.f)*255);
-    const auto physicalLeft=Stick(1),physicalRight=Stick(0);
+    const auto padTrigger=[&](int side){   // the chords are kept by role, whichever side of the pad the hand is on
+        const int hand=padHand[side];const float pull=PhysicalFloat(trigger,hand);
+        return g_tacticalChord[handRoles.map.Role(hand)].Withholds(chordTime,PhysicalFloat(squeeze,hand),pull)?uint8_t(0):uint8_t(std::clamp(pull,0.f,1.f)*255);
+    };
+    physical.lt=padTrigger(1);
+    physical.rt=padTrigger(0);
+    const auto physicalLeft=PhysicalStick(padHand[1]),physicalRight=PhysicalStick(padHand[0]);
     const auto axis=[](float value){return int16_t(std::clamp(value,-1.f,1.f)*32767.f);};
     physical.lx=axis(physicalLeft.x);physical.ly=axis(physicalLeft.y);
     physical.rx=axis(physicalRight.x);physical.ry=axis(physicalRight.y);
     const bool modUi=settingsModel.open||bodyCalibration.Active()||calibrationRelease.blocked;
     auto controls=menuControls.Step(modUi?menus::Mode::Blocked:nativeUi?menus::Mode::Native:menus::Mode::World,inputEpoch,physical);
+    // The laser's pad (MenuPointer, SettingsPointer): the laser stays on the right controller until phase 2
+    // mirrors the interface (handrole::System::Laser), so there RT and RB are the laser hand's own trigger
+    // and grip (click, grab) and LT and LB the other hand's (Ctrl, the context click), whatever the roles.
+    // The face buttons and sticks stay by role. Right-handed: the same pad.
+    const auto laserPad=[&](menus::Pad p) {
+        if(UiHand(0)==padHand[0])return p;
+        std::swap(p.lt,p.rt);
+        const uint16_t bumpers=p.buttons&(menus::LeftBumper|menus::RightBumper);
+        p.buttons&=~(menus::LeftBumper|menus::RightBumper);
+        if(bumpers&menus::LeftBumper)p.buttons|=menus::RightBumper;
+        if(bumpers&menus::RightBumper)p.buttons|=menus::LeftBumper;
+        return p;
+    };
     SampleGaze();
     for(auto upload=atlasUploads.begin();upload!=atlasUploads.end();) {
         if(fence->GetCompletedValue()<upload->fence){++upload;continue;}
@@ -3556,9 +3649,9 @@ void Input() {
         XrSpaceLocation left{XR_TYPE_SPACE_LOCATION};
         const auto needed=XR_SPACE_LOCATION_POSITION_VALID_BIT|XR_SPACE_LOCATION_ORIENTATION_VALID_BIT|
                           XR_SPACE_LOCATION_POSITION_TRACKED_BIT|XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT;
-        const bool tracked=XR_SUCCEEDED(pLocateSpace(handSpaces[1],space,frameState.predictedDisplayTime,&left))&&(left.locationFlags&needed)==needed;
+        const bool tracked=XR_SUCCEEDED(pLocateSpace(handSpaces[UiHand(1)],space,frameState.predictedDisplayTime,&left))&&(left.locationFlags&needed)==needed;
         uiSize=.46f;
-        journalPlacement.Step({V(left.pose.position),Q(left.pose.orientation)},tracked,Float(squeeze,1)>.6f);
+        journalPlacement.Step({V(left.pose.position),Q(left.pose.orientation)},tracked,UiFloat(squeeze,1)>.6f);
         const auto p=journalPlacement.Get();uiPose=XrPose({p.p,p.q});
     }
     if(leatherMode) {
@@ -3566,7 +3659,7 @@ void Input() {
         XrSpaceLocation hand{XR_TYPE_SPACE_LOCATION};
         const auto needed=XR_SPACE_LOCATION_POSITION_VALID_BIT|XR_SPACE_LOCATION_ORIENTATION_VALID_BIT|
                           XR_SPACE_LOCATION_POSITION_TRACKED_BIT|XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT;
-        const bool tracked=XR_SUCCEEDED(pLocateSpace(handSpaces[leather::Hand],space,frameState.predictedDisplayTime,&hand))&&(hand.locationFlags&needed)==needed;
+        const bool tracked=XR_SUCCEEDED(pLocateSpace(handSpaces[UiHand(leather::Hand)],space,frameState.predictedDisplayTime,&hand))&&(hand.locationFlags&needed)==needed;
         // Menu only: the fist holds the art's left edge, not the band's (leather::MenuArtInset).
         const float width=leatherMenuWidth.load(),inset=leatherHide.load()?0.f:leather::MenuArtInset*width;
         leatherHolder.Step(V(hand.pose.position),Q(hand.pose.orientation),tracked,leatherArt,width,leatherTilt.load(),inset);
@@ -3578,20 +3671,20 @@ void Input() {
         stow.active=!leftDominant.load()&&!settingsOwned&&!settingsChord;stow.tracked=tracked&&motionHeadTracked;
         stow.allowed=!mouseDown&&!rightMouseDown;
         stow.head=V(head.position);stow.hand=V(hand.pose.position);stow.heading=math::Yaw(math::Heading(Q(head.orientation)));
-        stow.grip=Float(squeeze,leather::Hand);
+        stow.grip=UiFloat(squeeze,leather::Hand);
         if(leatherStow.Step(stow).open) {
             const bool queued=gamestate::StowLeatherMenu();
-            MotionPulse(leather::Hand,haptics::Category::Interaction,.25f,35000000);
+            MotionPulse(UiRole(leather::Hand),haptics::Category::Interaction,.25f,35000000);
             Say(queued?"Frame leather: put away over the left shoulder":"Frame leather: put away over the left shoulder - the game's UI thread refused");
         }
     } else leatherStow.Reset();
-    if(!settingsOwned&&!settingsChord)MenuPointer(controls);
-    else {stashInput.Reset();stashShown=false;stashPad=0;menuDrop.Reset();nativeMenuPad={};menuNavigation.Reset();panelinput::UseController();pointerVisible=pointerHit=false;triggerWasDown=Float(trigger,0)>.2f;cancelWasDown=Bool(secondary,0);}
+    if(!settingsOwned&&!settingsChord)MenuPointer(laserPad(controls));
+    else {stashInput.Reset();stashShown=false;stashPad=0;menuDrop.Reset();nativeMenuPad={};menuNavigation.Reset();panelinput::UseController();pointerVisible=pointerHit=false;triggerWasDown=UiFloat(trigger,0)>.2f;cancelWasDown=Bool(secondary,0);}
     // The native Back went to the game above; one it leaves unanswered closes the menu (leather::Back).
     if(leatherBack.Step(leatherMode&&!settingsOwned&&!settingsChord,(controls.buttons&menus::B)!=0,mouseDown||rightMouseDown,
                         gamestate::PanelChanges(),GetTickCount64())&&gamestate::CloseLeatherMenu())
         Say("Frame leather: Right B left the menu open; asking the game to close it");
-    SettingsPointer((controls.buttons&menus::RightBumper)!=0);
+    SettingsPointer((laserPad(controls).buttons&menus::RightBumper)!=0);
     settingsOwned=settingsOwned||bodyCalibration.Active();
     auto& s=*tracking.data;s.version=D2RVR_SHARED_VERSION;s.headValid=1;
     const auto q=Q(head.orientation);
@@ -3603,7 +3696,7 @@ void Input() {
     s.headRollDeg=-std::atan2(right.y,right.x)*kRadToDeg;s.pitchValid=s.rollValid=1;
     s.headHeightM=head.position.y;s.sampleStamp=D2RVRStampNow();s.sampleStampMagic=D2RVR_SAMPLE_STAMP_MAGIC;
     s.roomMagic=D2RVR_ROOM_MAGIC;s.headRoom[0]=head.position.x;s.headRoom[1]=head.position.y;s.headRoom[2]=head.position.z;s.headYawRoomDeg=s.headYawDeg;
-    s.gripMagic=D2RVR_GRIP_MAGIC;s.rightGrip=Float(squeeze,0);s.leftGrip=Float(squeeze,1);s.handsValid=0;
+    s.gripMagic=D2RVR_GRIP_MAGIC;s.rightGrip=PhysicalFloat(squeeze,0);s.leftGrip=PhysicalFloat(squeeze,1);s.handsValid=0;   // the shared state is physical: it drives the arms
     motionInput={};motionInput.time=Milliseconds()/1000.;motionInput.head=MotionPose(head);
     motionInput.active=motionControls.load()&&gameplayChain&&motionHeadTracked&&!panelMode&&!spatialMode&&!settingsOwned&&!settingsChord&&!inventoryPressed&&!menuPressed&&inWorld&&inWorld();
     {   // the same terms, one bit each, for the loot pick's pointing hand (LootHandRay); changes nothing else
@@ -3613,8 +3706,10 @@ void Input() {
             (menuPressed?GateMenu:0)|(inWorld&&inWorld()?0:GateWorld);
     }
     motionInput.handBindings=true;
-    motionInput.grip[0]=(physical.buttons&menus::RightBumper)&&!(controls.buttons&menus::RightBumper)?0:s.rightGrip;
-    motionInput.grip[1]=(physical.buttons&menus::LeftBumper)&&!(controls.buttons&menus::LeftBumper)?0:s.leftGrip;
+    for(int role=0;role<2;++role) {   // a grip the pad's release gate still holds back is not a grip yet
+        const uint16_t bumper=padMap.Role(handRoles.map.Physical(role))==0?menus::RightBumper:menus::LeftBumper;
+        motionInput.grip[role]=(physical.buttons&bumper)&&!(controls.buttons&bumper)?0:Float(squeeze,role);
+    }
     motionInput.cancel=false;
     motionInput.quickCast=false;
     motionInput.trigger=controls.rt/255.f;motionInput.weapon=MotionWeapon();
@@ -3625,14 +3720,16 @@ void Input() {
         XrSpaceVelocity velocity{XR_TYPE_SPACE_VELOCITY};
         XrSpaceLocation loc{XR_TYPE_SPACE_LOCATION,&velocity};
         const XrSpaceLocationFlags required=XR_SPACE_LOCATION_POSITION_VALID_BIT|XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
-        handVelocityKnown[i]=false;
+        // i: the physical hand (0 right), for its space and the shared state; role: its place in this file's arrays.
+        const int role=handRoles.map.Role(i);
+        handVelocityKnown[role]=false;
         if(XR_SUCCEEDED(pLocateSpace(handSpaces[i],space,frameState.predictedDisplayTime,&loc))&&(loc.locationFlags&required)==required) {
             const auto tracked=XR_SPACE_LOCATION_POSITION_TRACKED_BIT|XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT;
-            motionInput.tracked[i]=(loc.locationFlags&tracked)==tracked;
-            motionInput.hand[i]=MotionPose(loc.pose);
+            motionInput.tracked[role]=(loc.locationFlags&tracked)==tracked;
+            motionInput.hand[role]=MotionPose(loc.pose);
             // The runtime's own linear velocity, in the same reference space.
-            handVelocityKnown[i]=(velocity.velocityFlags&XR_SPACE_VELOCITY_LINEAR_VALID_BIT)!=0;
-            if(handVelocityKnown[i])handVelocity[i]=V(velocity.linearVelocity);
+            handVelocityKnown[role]=(velocity.velocityFlags&XR_SPACE_VELOCITY_LINEAR_VALID_BIT)!=0;
+            if(handVelocityKnown[role])handVelocity[role]=V(velocity.linearVelocity);
             s.handsValid|=1u<<i;
             const auto p=math::Rotate(undo,V(loc.pose.position)-V(head.position));
             const auto rot=math::Multiply(undo,Q(loc.pose.orientation));
@@ -3645,7 +3742,7 @@ void Input() {
                         XR_SPACE_LOCATION_POSITION_TRACKED_BIT|XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT;
     for(int h=0;h<2;++h){
         XrSpaceLocation aimed{XR_TYPE_SPACE_LOCATION};
-        handAimTracked[h]=XR_SUCCEEDED(pLocateSpace(h?leftAimSpace:aimSpace,space,frameState.predictedDisplayTime,&aimed))&&(aimed.locationFlags&aimFlags)==aimFlags;
+        handAimTracked[h]=XR_SUCCEEDED(pLocateSpace(handRoles.map.Physical(h)?leftAimSpace:aimSpace,space,frameState.predictedDisplayTime,&aimed))&&(aimed.locationFlags&aimFlags)==aimFlags;
         if(handAimTracked[h])handAim[h]=MotionPose(aimed.pose);
     }
     handAimAt=GetTickCount64();
@@ -3654,16 +3751,19 @@ void Input() {
         floatMapWant=floatMapPointed=false;
         const bool gameplay=motionInput.active&&!interactionOutput.wheel&&!interactionOutput.settings&&
             interaction::Fresh(bindingSnapshot,gamestate::LocalPlayer(),GetTickCount64());
+        // The map is the wrist HUD's (handrole::System::WristHud): its hands are the physical right (R) and
+        // left (L) until the interface is mirrored, wherever this file keeps them. Right-handed: 0 and 1.
+        const int R=UiRole(0,handrole::System::WristHud),L=UiRole(1,handrole::System::WristHud);
         floatmap::InputFrame f{motionInput.time,GetTickCount64(),gamestate::LocalPlayer(),gameplay,
-            interactionOutput.owner[0]==interaction::Owner::Combat&&interactionOutput.bottleHand!=0&&!motionOutput.bowDrawing,
-            interactionOutput.owner[1]==interaction::Owner::Combat&&interactionOutput.bottleHand!=1&&!motionOutput.bowDrawing,
+            interactionOutput.owner[R]==interaction::Owner::Combat&&interactionOutput.bottleHand!=R&&!motionOutput.bowDrawing,
+            interactionOutput.owner[L]==interaction::Owner::Combat&&interactionOutput.bottleHand!=L&&!motionOutput.bowDrawing,
             interactionOutput.nearBelt>=0||interactionOutput.nearHolster>=0,
             motionInput.head.p,motionInput.head.q,motionHeadTracked,
-            {motionInput.hand[0].p,motionInput.hand[1].p},{motionInput.tracked[0],motionInput.tracked[1]},motionInput.hand[0].q,
-            handAim[0].p,handAim[0].q,handAimTracked[0],handAim[1].p,handAim[1].q,handAimTracked[1],
+            {motionInput.hand[R].p,motionInput.hand[L].p},{motionInput.tracked[R],motionInput.tracked[L]},motionInput.hand[R].q,
+            handAim[R].p,handAim[R].q,handAimTracked[R],handAim[L].p,handAim[L].q,handAimTracked[L],
             floatMapWrist.p,floatMapWrist.q,floatMapWristMs,interaction::WristMapSize,
-            motionInput.grip[0],motionInput.grip[1],controls.rx,controls.ry,floatMapWant,floatMapPointed,
-            +[](int h,float s){MotionPulse(h,haptics::Category::Interaction,s,25000000);},&Say};
+            motionInput.grip[R],motionInput.grip[L],controls.rx,controls.ry,floatMapWant,floatMapPointed,
+            +[](int h,float s){MotionPulse(UiRole(h,handrole::System::WristHud),haptics::Category::Interaction,s,25000000);},&Say};
         floatmap::StepFrame(f);
     }
     uint64_t bindingContext=bindingSnapshot.session^(uint64_t(bindingSnapshot.bindingBank+1)<<48)^(meleeEpoch<<16)^motionInput.equipment;
@@ -3774,7 +3874,8 @@ void Input() {
     interactionInput.spell=motion.Selection()>=0;interactionInput.wheel=motionInput.palette;interactionInput.cancel=motionInput.cancel;
     interactionInput.quickCast=handOutput.slot>=0||handOutput.spells[0]>=0||handOutput.spells[1]>=0;
     interactionInput.wheelHand=handOutput.wheel;
-    interactionInput.leatherReach=leatherOn.load();
+    interactionInput.leatherReach=leatherOn.load()&&!leftDominant.load();   // the left shoulder is the weapon swap's then
+    interactionInput.wristHand=UiRole(1,handrole::System::WristHud);   // the wrist HUD and map stay on the left wrist
     // Right stick up switches running / walking only with the Stick toggle on
     // (below, off by default). The push is owned either way, so it never snap-turns.
     interactionInput.reservedLeft=(controls.buttons&menus::LeftStick)!=0;interactionInput.trigger=handOutput.wheel==0?controls.lt/255.f:controls.rt/255.f;interactionInput.hover=motionInput.hover;
@@ -3844,8 +3945,11 @@ void Input() {
             Say(line);
         }
     }
-    interactionInput.leftCasting=handOutput.spells[1]>=0||(handOutput.slot>=0&&handOutput.hand==1);
-    interactionInput.leftTrigger=controls.lt/255.f;
+    {   // the wrist HUD's hand: casting, or its trigger held (right-handed: the left hand, LT)
+        const int w=interactionInput.wristHand;
+        interactionInput.leftCasting=handOutput.spells[w]>=0||(handOutput.slot>=0&&handOutput.hand==w);
+        interactionInput.leftTrigger=(w==1?controls.lt:controls.rt)/255.f;
+    }
     // A thrown bottle lands on the world floor in room space. Without a recent
     // view frame (menus, loading) throwing is off; a release re-belts as before.
     {
@@ -3885,7 +3989,8 @@ void Input() {
             const auto page=interactions.Page();
             const char* name=page==interaction::MenuPage::Map?"Map":page==interaction::MenuPage::Developer?"Developer":
                 page==interaction::MenuPage::Equipment?"Equipment":page==interaction::MenuPage::Spells?"Spells":"editor";
-            const char* hand=interactionOutput.wheelHand==0?"R":interactionOutput.wheelHand==1?"L":"both";
+            const char* hand=interactionOutput.wheelHand==0?"main":interactionOutput.wheelHand==1?"off":"both";
+            if(!handRoles.map.left)hand=interactionOutput.wheelHand==0?"R":interactionOutput.wheelHand==1?"L":"both";   // right-handed: as it always logged
             char line[160];
             if(page==interaction::MenuPage::Developer)std::snprintf(line,sizeof line,"Frame wheel: opened on hand=%s page=Developer %d skill tree=%s",hand,interactions.DeveloperPage()+1,
                 skillcategories::Name(interactions.TreeFilterClass(),interactions.TreeFilter()));
@@ -4663,9 +4768,10 @@ void Input() {
                 freeIn.free=true;freeIn.motion=motion;
                 freeIn.active=(spellmotion::WatchesOpening(motion)?motionWatch:motionGate)&&(spellmotion::Rapid(motion)||!motionCooling)&&skillOf[m]>=0;
                 freeIn.head=interactionInput.head.p;freeIn.headRotation=interactionInput.head.q;
-                for(int h=0;h<2;++h) {
-                    freeIn.hand[h]=interactionInput.hand[h].p;freeIn.tracked[h]=interactionInput.tracked[h];freeIn.grip[h]=motionInput.grip[h];
-                    freeIn.handVelocity[h]=interactionInput.handVelocity[h];freeIn.velocityKnown[h]=interactionInput.velocityKnown[h];
+                for(int h=0;h<2;++h) {   // h: the motion's hand (0 right), r: where this file keeps it (handrole::System::ClassMotions)
+                    const int r=UiRole(h,handrole::System::ClassMotions);
+                    freeIn.hand[h]=interactionInput.hand[r].p;freeIn.tracked[h]=interactionInput.tracked[r];freeIn.grip[h]=motionInput.grip[r];
+                    freeIn.handVelocity[h]=interactionInput.handVelocity[r];freeIn.velocityKnown[h]=interactionInput.velocityKnown[r];
                 }
                 freeIn.bodyScale=motionBody;freeIn.armSpan=motionSpan;
                 const auto watched=spellFree[size_t(m-1)].Step(freeIn);
@@ -4873,7 +4979,7 @@ void Input() {
         const auto& skill=quickSnapshot.skills[cue.slot];cue.id=skill.id;cue.owner=skill.owner;
         cue.known=skill.known;cue.available=skill.known&&skill.available&&skill.id>=0;
         std::snprintf(cue.name,sizeof cue.name,"%s",skill.known?skill.name:"Unknown skill");
-        std::snprintf(cue.hint,sizeof cue.hint,"%s",cue.available?(cue.temporary?"Right hand shortcut":"Right hand: point & trigger"):"Assignment unavailable");
+        std::snprintf(cue.hint,sizeof cue.hint,"%s",cue.available?(cue.temporary?(handRoles.map.left?"Left hand shortcut":"Right hand shortcut"):(handRoles.map.left?"Left hand: point & trigger":"Right hand: point & trigger")):"Assignment unavailable");
         if(cue.available&&!cue.temporary&&cue.slot==skills::TriggerSlot(0)&&(motionInput.toss||strikes(skill))) {
             cue.gesture=true;cue.strike=!motionInput.toss;std::snprintf(cue.hint,sizeof cue.hint,"%s",motionInput.toss?"Throw to place":"Swing to strike");
         }
@@ -4934,7 +5040,7 @@ void Input() {
         ((weaponskills::Bow(leftSkill.id)&&motionInput.weapon==gameplay::Weapon::Bow)||(leftSkill.id==weaponskills::Smite&&motionInput.shieldEquipped)))||leftStrikes);
     leftCue.strike=leftCue.gesture&&(leftStrikes||(leftSkill.id==weaponskills::Smite&&motionInput.shieldEquipped));   // Cast On Strike: a swing or a shield bash
     std::snprintf(leftCue.hint,sizeof leftCue.hint,"%s",leftCue.gesture?(leftStrikes?"Swing to strike":weaponskills::Hint(leftSkill.id,
-        motionInput.weapon==gameplay::Weapon::Bow,motionInput.shieldEquipped)):leftCue.temporary?"Left hand shortcut":"Left hand: point & trigger");
+        motionInput.weapon==gameplay::Weapon::Bow,motionInput.shieldEquipped)):leftCue.temporary?(handRoles.map.left?"Right hand shortcut":"Left hand shortcut"):(handRoles.map.left?"Right hand: point & trigger":"Left hand: point & trigger"));
     if(leftCue.available&&!leftCue.temporary)if(const char* how=paladinGesture(leftCue.id)){leftCue.gesture=true;std::snprintf(leftCue.hint,sizeof leftCue.hint,"%s",how);}
     leftCue.expanded=leftCue.temporary;
     leftCue.busy=shieldCast.issued&&!shieldCast.cancelled;
@@ -4947,7 +5053,7 @@ void Input() {
     panelinput::WorldInput(motionInput.active&&motionInput.tracked[0]&&motionInput.tracked[1]&&motionInput.aimTracked);
     if(!motionInput.active||motionOutput.block||!motionOutput.rayValid)handOutput.interact=false;
     if(motionInput.quickCast&&(motionOutput.block||!motionOutput.rayValid))handControls.Close();
-    const uint32_t hidden=interactionOutput.stowed?3u:(journalMode||leatherMode)?2u:interactionOutput.bottleHand>=0?1u<<interactionOutput.bottleHand:0;
+    const uint32_t hidden=interactionOutput.stowed?3u:(journalMode||leatherMode)?1u<<UiRole(leather::Hand,handrole::System::LeatherMenu):interactionOutput.bottleHand>=0?1u<<interactionOutput.bottleHand:0;
     skel::SetInteractionHidden(hidden);
     potionScene=potions::MakeScene(interactionInput,interactionOutput);
     if(potionFlight.id&&potionFlight.shown)potions::AddThrown(potionScene,potionFlight.pose,potionFlight.code);   // #292
@@ -6574,8 +6680,8 @@ void EndPair() {
         }
         if((interactionOutput.vitals||interactionOutput.critical)&&!interactionOutput.wheel) {
             const bool palm=interactionOutput.palm;
-            const auto panel=interaction::VitalsPanel(interactionInput.hand[1],interactionInput.head,palm,interactionInput.vitalsTilt);
-            auto pose=motionInput.hand[1];pose.p=panel.p;pose.q=panel.q;
+            const auto panel=interaction::VitalsPanel(interactionInput.hand[interactionInput.wristHand],interactionInput.head,palm,interactionInput.vitalsTilt);
+            auto pose=motionInput.hand[interactionInput.wristHand];pose.p=panel.p;pose.q=panel.q;
             if(interactionOutput.critical&&!interactionOutput.vitals){pose.p=V(head.position)+math::Rotate(Q(head.orientation),{-.20f,-.22f,-.55f});pose.q=Q(head.orientation);}
             motionQuad(wrist,XrPose(pose),palm?interaction::PalmWidth:interaction::WristWidth,
                 palm?interaction::PalmHeight:interaction::WristHeight,{{512,768},{512,256}},interactionChain);
@@ -6595,12 +6701,12 @@ void EndPair() {
             const int companionRows=companionsReady?wriststatus::Rows(interactionInput.snapshot.companions,interactionInput.snapshot.effects):0;
             const float footer=interaction::CompanionSpace(companionRows);
             if(mapEye.copied){
-                const auto mapPanel=interaction::NavigationMapPanel(interactionInput.hand[1],interactionInput.head,palm,withVitals,footer);
+                const auto mapPanel=interaction::NavigationMapPanel(interactionInput.hand[interactionInput.wristHand],interactionInput.head,palm,withVitals,footer);
                 wristMapShown=true;wristMapCenter=mapPanel.p;floatMapWrist=mapPanel;floatMapWristMs=GetTickCount64();
                 motionQuad(wristMap,interactionPose(mapPanel),
                     interaction::WristMapSize,interaction::WristMapSize,{{0,0},{int32_t(mapSide),int32_t(mapSide)}},mapEye.chain);
             }
-            auto compassPose=interaction::NavigationCompassPanel(interactionInput.hand[1],interactionInput.head,palm,withVitals,footer);
+            auto compassPose=interaction::NavigationCompassPanel(interactionInput.hand[interactionInput.wristHand],interactionInput.head,palm,withVitals,footer);
             motionQuad(wristCompass,interactionPose(compassPose),interaction::WristCompassWidth,interaction::WristCompassHeight,
                 At(panelatlas::Compass,{{compass::Crop(wristHeading.bearing),0},{compass::Window,compass::StripHeight}}),compassChain);
             constexpr float markerWidth=interaction::WristCompassWidth*compass::MarkerWidth/compass::Window;
@@ -6609,10 +6715,10 @@ void EndPair() {
             motionQuad(compassMarker,interactionPose(compassPose),markerWidth,markerHeight,
                 At(panelatlas::Compass,{{0,compass::StripHeight},{compass::MarkerWidth,compass::MarkerHeight}}),compassChain);
             if(locationReady)motionQuad(navigationInfo,interactionPose(interaction::NavigationInfoPanel(
-                interactionInput.hand[1],interactionInput.head,palm,withVitals,footer)),interaction::NavigationInfoWidth,interaction::NavigationInfoHeight,
+                interactionInput.hand[interactionInput.wristHand],interactionInput.head,palm,withVitals,footer)),interaction::NavigationInfoWidth,interaction::NavigationInfoHeight,
                 {{navigation::AtlasX,navigation::AtlasY},{navigation::Width,navigation::Height}},interactionChain);
             if(companionRows)motionQuad(companionRow,interactionPose(interaction::NavigationCompanionsPanel(
-                interactionInput.hand[1],interactionInput.head,palm,withVitals,companionRows)),interaction::WristMapSize,interaction::CompanionHeight(companionRows),
+                interactionInput.hand[interactionInput.wristHand],interactionInput.head,palm,withVitals,companionRows)),interaction::WristMapSize,interaction::CompanionHeight(companionRows),
                 {{0,0},{companions::Width,wriststatus::UsedHeight(interactionInput.snapshot.companions,interactionInput.snapshot.effects)}},companionChain);
         }
     }
@@ -6958,7 +7064,7 @@ void EndPair() {
     if(interactionInput.active) {
         static ULONGLONG reportAt=0;const auto now=GetTickCount64();
         if(now>=reportAt) {
-            const auto& hand=interactionInput.hand[1];const auto& eye=interactionInput.head;
+            const auto& hand=interactionInput.hand[interactionInput.wristHand];const auto& eye=interactionInput.head;
             const auto toward=eye.p-hand.p;
             const bool poseValid=interaction::Valid(hand)&&interaction::Valid(eye);
             const auto& snapshot=interactionInput.snapshot;
@@ -7047,15 +7153,26 @@ void ConfigureQuiver(bool enabled,bool preview) {
         Say(enabled?"Frame bow quiver: arrow skills load physical arrows":"Frame bow quiver: disabled; arrow skills use native buttons");
     }
 }
-void ConfigureInteractions(bool seated,float waist,float forward,int dominant) {
+void ConfigureInteractions(bool seated,float waist,float forward,int dominant,bool leftHanded) {
+    // Left-handed turns Dominant hand's behaviours to the left hand too (handrole::Dominant).
+    dominant=handrole::Dominant(leftHanded,dominant);
     leftDominant=dominant==1;   // the left shoulder is the weapon swap's then: no reach to open or put away the menu
-    static interaction::Config previous;static bool configured=false;
     interaction::Config c;c.seated=seated;c.waistBelowEyes=std::clamp(waist,.30f,.95f);
-    c.beltForward=std::clamp(forward,.03f,.5f);c.holsters=false;c.dominant=dominant==1?1:0;
-    if(configured&&c.seated==previous.seated&&c.waistBelowEyes==previous.waistBelowEyes&&
+    c.beltForward=std::clamp(forward,.03f,.5f);c.holsters=false;
+    std::lock_guard lock(mutex);
+    leftHandedWanted=leftHanded;dominantSetting=dominant;
+    // The engine takes the swap hand as a role (0 main): the same number right-handed. UpdateHandRoles
+    // moves it when the roles change.
+    c.dominant=handRoles.map.Role(dominant);
+    const auto& previous=interactionConfig;
+    if(interactionConfigured&&c.seated==previous.seated&&c.waistBelowEyes==previous.waistBelowEyes&&
        c.beltForward==previous.beltForward&&c.dominant==previous.dominant)return;
-    std::lock_guard lock(mutex);interactions.Configure(c);interactionstate::Cancel();previous=c;configured=true;
+    interactions.Configure(c);interactionstate::Cancel();interactionConfig=c;interactionConfigured=true;
 }
+bool LeftHandedNow(){return handRolesLeft.load(std::memory_order_relaxed);}
+bool LeftHandedWanted(){return leftHandedWanted.load(std::memory_order_relaxed);}
+int HandSide(int role){return PhysicalHand(role);}
+int HandRole(int physical){return RoleHand(physical);}
 void ConfigureBottlePhysics(bool on){bottlePhysics=on;}
 void ConfigureLeatherMenu(bool on,float menuWidth,float tilt,bool world,bool backdrop,bool hide) {
     leatherOn=on;leatherHide=hide;leatherMenuWidth=leather::NormalizeMenuWidth(menuWidth);leatherTilt=leather::NormalizeTilt(tilt);leatherWorld=world;leatherBackdrop=backdrop;

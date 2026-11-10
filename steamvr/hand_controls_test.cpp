@@ -1,4 +1,5 @@
 #include "hand_controls.h"
+#include "hand_role.h"
 #include "interactions.h"
 #include <cassert>
 #include <cstdio>
@@ -55,5 +56,22 @@ int main(){
         const float angle=b*2*interaction::Pi/5;
         assert(interaction::WheelCell(.5f+.28f*std::sin(angle),.45f-.28f*std::cos(angle),-1,interaction::MenuPage::Spells,h)==b);
     }
-    puts("Hand controls: ten bindings, two toggle wheels, opposite-hand ownership, grip/release and lifecycle gates passed");
+    // Left-handed play (hand_role.h): the engine's hand is a ROLE. Fed in role order, a controller casts the
+    // slots of the role it plays: right-handed exactly as above; left-handed the left controller has the
+    // main hand's saved slots (0, 8, 1, 2, 3) and the right one the off hand's (4, 5, 6, 7, 9).
+    for(const bool leftHanded:{false,true})for(int controller=0;controller<2;++controller)for(int key=0;key<5;++key){
+        const handrole::Map map{leftHanded};
+        float trigger[2]{},grip[2]{};bool face[2][2]{};   // by physical controller, 0 right
+        Sim s;
+        const auto step=[&]{for(int role=0;role<2;++role){const int p=map.Physical(role);s.in.trigger[role]=trigger[p];s.in.grip[role]=grip[p];
+            s.in.face[role][0]=face[p][0];s.in.face[role][1]=face[p][1];}s.Step();};
+        if(key==0)trigger[controller]=1;else{grip[controller]=key>2?1.f:0.f;face[controller][(key-1)%2]=true;}
+        step();
+        const int role=map.Role(controller);
+        assert(s.out.slot==skills::HandSlot(role,key)&&s.out.hand==role);
+        assert(leftHanded?s.out.slot==skills::HandSlot(1-controller,key):s.out.slot==skills::HandSlot(controller,key));
+        assert(map.Physical(s.out.hand)==controller);   // and what it casts comes back to the controller that pressed
+    }
+    assert(skills::TriggerSlot(handrole::Map{true}.Role(1))==skills::TriggerSlot(0));   // the left trigger is the main trigger
+    puts("Hand controls: ten bindings, two toggle wheels, opposite-hand ownership, grip/release, lifecycle gates and left-handed roles passed");
 }

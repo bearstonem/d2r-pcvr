@@ -1172,5 +1172,22 @@ int main(){
         Check(!MercThrowAccepted(-1,mercPotionAutoaimEnabled)&&!MercThrowAccepted(NAN,mercPotionAutoaimEnabled)&&!MercThrowAccepted(INFINITY,mercPotionAutoaimEnabled),
               "assistance cannot feed an absent, dead or invalid hireling");
     }
-    std::puts("Interaction ownership, wheel, holster, item identity and confirmation tests passed");
+    {   // Left-handed play (hand_role.h): the engine's hands are roles. The wrist HUD stays on the LEFT wrist
+        // until the interface is mirrored, and the left hand is then the main hand, index 0 (Input::wristHand).
+        const math::Quat rolled{0,0,-.70710678f,.70710678f};
+        Sim right;right.in.hand[1].p={-.18f,1.35f,-.24f};right.in.hand[1].q=rolled;
+        Check(right.in.wristHand==1&&right.Step().wrist,"right-handed: the left wrist, index 1, as before");
+        Sim left;left.in.wristHand=0;
+        left.in.hand[0].p={-.18f,1.35f,-.24f};left.in.hand[0].q=rolled;left.in.hand[1].p={.25f,1.3f,-.4f};   // the left controller is hand 0
+        Check(left.Step().wrist,"left-handed: the same left wrist, rolled the same way, now the main hand's");
+        left.in.tracked[1]=false;Check(left.Step().wrist,"the right hand's tracking does not matter to it");
+        left.in.tracked[1]=true;left.in.tracked[0]=false;Check(!left.Step().wrist,"the left hand's does");
+        Sim wrong;wrong.in.wristHand=0;wrong.in.hand[1].p={-.18f,1.35f,-.24f};wrong.in.hand[1].q=rolled;
+        Check(!wrong.Step().wrist,"the off hand rolled like a watch shows nothing: the HUD is not on that wrist");
+        // the weapon swap's hand is a role too: the left hand over a shoulder, the main hand left-handed
+        Sim swap;Config c;c.dominant=0;swap.e.Configure(c);swap.Step(4);
+        swap.in.hand[0].p=swap.in.head.p+Vec{-.23f,-.2f,.14f};swap.Step(10);swap.in.grip[0]=1;
+        Check(swap.Step().request.action==Action::Equip&&swap.out.feedbackHand==0,"left-handed the main (left) hand's grip over the left shoulder swaps weapon sets");
+    }
+    std::puts("Interaction ownership, wheel, holster, item identity, confirmation and left-handed wrist / swap hand tests passed");
 }

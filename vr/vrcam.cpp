@@ -117,6 +117,7 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "afr_eye_shared.h"
 #ifdef D2RVR_NATIVE_OPENXR
 #include "transport.h"
+#include "hand_role.h"
 #include "render_resolution.h"
 #include "scene_depth.h"
 #include "light_bounds.h"
@@ -446,6 +447,9 @@ struct Settings {
     std::atomic<int>   staffHand{0}, staffShaftAxis{-2};
     std::atomic<int>   carryAxis{2};
     std::atomic<float> carryCm{40.0f};       // [hands] carry_cm: how far along it
+    // Left-handed play (steamvr/hand_role.h, #307), for comparing in the headset; not on the menu:
+    std::atomic<int>   leftHandedTurnAxis{0};    // [hands] left_handed_turn_axis: the weapon bone's axis turned over in the other hand (0 the flat's, 1..3 x y z)
+    std::atomic<int>   leftHandedShieldTurn{0};  // [hands] left_handed_shield_turn: the shield's arm axis turned over on the right arm (0 along, 1 out, 2 up)
     std::atomic<bool>  bothAttach{true};     // [hands] both_attach: 0 = the other attach bone left alone (for comparing)   // [hands] carry_axis: moving, the game lays a 2H weapon from the right attach bone to the left - the left one put along this axis   // [hands] sword_hilt_axis: the hilt as the sword bone's axis, +-1..3 (x y z); 0 = from the game's grip
     float weaponAdj[D2RVR_TYPE_COUNT][6] = {};
     float weaponLeft[D2RVR_TYPE_COUNT][3] = {};   // (no longer used: one for every two-handed weapon, leftHold)
@@ -977,7 +981,8 @@ void LoadSettings() {
     framevr::ConfigureGameplay(IniB(L"gameplay",L"motion_controls",false));
     framevr::ConfigureQuiver(IniB(L"bow",L"quiver",true),IniB(L"bow",L"quiver_preview",true));
     framevr::ConfigureInteractions(IniB(L"interactions",L"seated",false),IniF(L"interactions",L"waist_below_eyes",.65f),
-        IniF(L"interactions",L"belt_forward",.26f),IniF(L"interactions",L"dominant_hand",0)==1?1:0);
+        IniF(L"interactions",L"belt_forward",.26f),IniF(L"interactions",L"dominant_hand",0)==1?1:0,
+        IniB(L"interactions",L"left_handed",false));   // Left-handed (experimental): steamvr/hand_role.h
     framevr::ConfigureBottlePhysics(IniB(L"interactions",L"bottle_physics",true));
     framevr::ConfigurePropPhysics(IniB(L"interactions",L"prop_physics",true));
     framevr::ConfigureBodyPhysics(IniB(L"interactions",L"body_physics",true));
@@ -1654,6 +1659,8 @@ void LoadSettings() {
     if (g_set.carryAxis.load() == 0) g_set.carryAxis.store(2);
     g_set.carryCm.store(std::clamp(IniF(L"hands", L"carry_cm", 40.0f), 0.0f, 150.0f));
     g_set.bothAttach.store(IniB(L"hands", L"both_attach", true));
+    g_set.leftHandedTurnAxis.store(std::clamp((int)IniF(L"hands", L"left_handed_turn_axis", 0.0f), 0, 3));
+    g_set.leftHandedShieldTurn.store(std::clamp((int)IniF(L"hands", L"left_handed_shield_turn", 0.0f), 0, 2));
     g_set.staffHand.store(IniF(L"hands", L"staff_hand", 0.0f) != 0.0f ? 1 : 0);
     g_set.staffShaftAxis.store(std::clamp((int)IniF(L"hands", L"staff_shaft_axis", -2.0f), -3, 3));
     g_set.spearShaftAxis.store(std::clamp((int)IniF(L"hands", L"spear_shaft_axis", -2.0f), -3, 3));
@@ -3181,6 +3188,12 @@ bool NativeCastOwnsAim() {
     return false;
 #endif
 }
+// Hands here are ROLES, as the transport gives and takes them (steamvr/hand_role.h): 0 the main hand,
+// 1 the off hand - the right and the left unless left-handed play has them mirrored now.
+// The shared tracking state is physical; these read it for a role.
+static uint32_t HandBit(int hand) { return 1u << framevr::HandSide(hand); }
+static const float* HandPosOf(const D2RVR_Shared* sh, int hand) { return framevr::HandSide(hand) == 0 ? sh->rightHand : sh->leftHand; }
+static const float* HandRotOf(const D2RVR_Shared* sh, int hand) { return framevr::HandSide(hand) == 0 ? sh->rightRot : sh->leftRot; }
 bool BowStick(XINPUT_STATE* s) {
     if (g_set.bowMode.load() != 1 || NativeCastOwnsAim()) return false;
     const XINPUT_GAMEPAD& g = s->Gamepad;
@@ -3239,7 +3252,7 @@ int AimHand() {
     const bool thrown = type == D2RVR_TYPE_JAVELIN || type == D2RVR_TYPE_THROWING;   // thrown from the right hand
     const int hand = thrown ? 0 : ranged && g_set.rangedLeft.load() ? 1 : gamestate::WeaponSet() == 2 ? g_set.bowHand2.load() : g_set.bowHand.load();
     const D2RVR_Shared* sh = g_shared;
-    if (sh && sh->version == D2RVR_SHARED_VERSION && !(sh->handsValid & (1u << hand)) && (sh->handsValid & (1u << (hand ^ 1))))
+    if (sh && sh->version == D2RVR_SHARED_VERSION && !(sh->handsValid & HandBit(hand)) && (sh->handsValid & HandBit(hand ^ 1)))
         return hand ^ 1;
     return hand;
 }
@@ -3317,6 +3330,12 @@ void Refresh() {
     at.store(now);
 }
 }
+bool AimOn(framevr::settings::Key key);
+// Dominant hand's hand (the outline's first, the loot pick's pointing hand), as a role: the left hand
+// with Dominant hand = Left or with Left-handed on (handrole::Dominant), whichever role it plays now.
+int DominantRole() {
+    return framevr::HandRole(framevr::handrole::Dominant(framevr::LeftHandedWanted(), AimOn(framevr::settings::Dominant) ? 1 : 0));
+}
 bool AimOn(framevr::settings::Key key) {
     aimsettings::Refresh();
     for (int i = 0; i < aimsettings::KeyCount; ++i) if (aimsettings::keys[i] == key) return (aimsettings::bits.load() >> i) & 1;
@@ -3340,7 +3359,7 @@ float AimArmOutCm() { aimsettings::Refresh(); return framevr::armpointing::ArmOu
 float OutlineHue(int source) {
     aimsettings::Refresh();
     if (source == framevr::aimrules::Eyes)
-        source = HeldType() == D2RVR_TYPE_BOW || AimOn(framevr::settings::Dominant) ? framevr::aimrules::Left : framevr::aimrules::Right;
+        source = HeldType() == D2RVR_TYPE_BOW || DominantRole() == 1 ? framevr::aimrules::Left : framevr::aimrules::Right;
     return aimsettings::hue[std::clamp(source, 0, 1)].load();
 }
 #ifdef D2RVR_NATIVE_OPENXR
@@ -3447,11 +3466,11 @@ bool HandRay(float* o, float* d,bool forceGround=true,int forHand=-1) {
     const D2RVR_Shared* sh = g_shared;
     const bool staff = StaffAim();
     const int hand = forHand >= 0 ? forHand : staff ? 0 : AimHand();
-    if (!sh || sh->version != D2RVR_SHARED_VERSION || !sh->headValid || !(sh->handsValid & (1u << hand)) || !g_eyeOk.load()) return false;
+    if (!sh || sh->version != D2RVR_SHARED_VERSION || !sh->headValid || !(sh->handsValid & HandBit(hand)) || !g_eyeOk.load()) return false;
     AcquireSRWLockShared(&g_stickLock); const StickFrame f = g_stickFrame; ReleaseSRWLockShared(&g_stickLock);
     if (!f.valid) return false;
-    const float* q = hand == 0 ? sh->rightRot : sh->leftRot;
-    const float* p = hand == 0 ? sh->rightHand : sh->leftHand;
+    const float* q = HandRotOf(sh, hand);
+    const float* p = HandPosOf(sh, hand);
     float staffDir[3] = {sh->rightHand[0] - sh->leftHand[0], sh->rightHand[1] - sh->leftHand[1], sh->rightHand[2] - sh->leftHand[2]};
 #if D2RVR_FIRST_PERSON
     if (staff && g_set.staffFreeLeft.load() && ArmsMode() == 2) skel::StaffAxis(staffDir);
@@ -3598,8 +3617,8 @@ void AimByMouse(XINPUT_STATE* s) {
 bool HandStick(float* sx, float* sy) {
     const D2RVR_Shared* sh = g_shared;
     const int hand = AimHand();
-    if (!sh || sh->version != D2RVR_SHARED_VERSION || !sh->headValid || !(sh->handsValid & (1u << hand))) return false;
-    const float* q = hand == 0 ? sh->rightRot : sh->leftRot;
+    if (!sh || sh->version != D2RVR_SHARED_VERSION || !sh->headValid || !(sh->handsValid & HandBit(hand))) return false;
+    const float* q = HandRotOf(sh, hand);
     auto rot = [&](float vx, float vy, float vz, float* r) {   // q v q*
         const float tx = 2 * (q[1]*vz - q[2]*vy), ty = 2 * (q[2]*vx - q[0]*vz), tz = 2 * (q[0]*vy - q[1]*vx);
         r[0] = vx + q[3]*tx + (q[1]*tz - q[2]*ty);
@@ -4024,7 +4043,7 @@ void Tick(const targetlock::Snapshot* s) {
 // The hand the outline puts first (and the only one under Dominant hand): the
 // bow hand is the main hand while a bow is out, so a monster both hands are on
 // shows its color. 0 right, 1 left.
-int OutlineDominant() { return HeldType() == D2RVR_TYPE_BOW || AimOn(framevr::settings::Dominant) ? 1 : 0; }
+int OutlineDominant() { return HeldType() == D2RVR_TYPE_BOW || DominantRole() == 1 ? 1 : 0; }
 // The target for a cast from this button's hand (bow: a bow skill; use: its
 // rule), with where it came from. Any thread.
 bool Resolve(int button, bool bow, framevr::aimrules::Use use, float& x, float& y, float& distance, int* source = nullptr, uint32_t* idOut = nullptr) {
@@ -5219,9 +5238,9 @@ void TellThread(const char* hook, int slot) {
 
 // The pointing hand: VR Settings > Controls > Hands > Dominant hand (0 right, 1 left).
 int PointingHand() {
-    const int hand = AimOn(framevr::settings::Dominant) ? 1 : 0;
+    const int hand = DominantRole();
     static int told = -1;
-    if (hand != told) { told = hand; LogF("Frame loot aim source: the %s hand points (VR Settings > Controls > Hands > Dominant hand)", hand ? "left" : "right"); }
+    if (const int side = framevr::HandSide(hand); side != told) { told = side; LogF("Frame loot aim source: the %s hand points (VR Settings > Controls > Hands > Dominant hand, or Left-handed)", side ? "left" : "right"); }
     return hand;
 }
 // "Frame loot aim source:" once a second at most per hand while it keeps pointing with the motion layer off.
@@ -8662,8 +8681,9 @@ void ShieldGuardTick() {
     // Coverage, height and scale all come from the completed shield pose.
     // Latest tracking may invalidate it, but must not replace its input sample.
     const D2RVR_Shared* sh=g_shared;
-    const bool handOk=sh&&sh->version==D2RVR_SHARED_VERSION&&sh->headValid&&(sh->handsValid&2u);
-    combat::PublishGuard(gamestate::LocalPlayer(),eligible,posed,pose,handOk,true);
+    // The shield is the off hand's: the left arm, or the right one in left-handed play (hand_role.h).
+    const bool handOk=sh&&sh->version==D2RVR_SHARED_VERSION&&sh->headValid&&(sh->handsValid&HandBit(1));
+    combat::PublishGuard(gamestate::LocalPlayer(),eligible,posed,pose,handOk,framevr::HandSide(1)==1);
 }
 #endif
 
@@ -8774,6 +8794,15 @@ void PushArms() {
         const bool rightHolds = in.staff && in.staffFreeLeft;
         for (int side = 0; side < 2; ++side)
             in.handFree[side] = rightHolds ? side == 1 : !(held & (1u << side)) && !ranged && !staffBoth;
+        // Left-handed play (steamvr/hand_role.h): the roles as the input thread has them, for the kinds it
+        // mirrors only - nothing held as a staff, no bow or crossbow, no two hands on one weapon (checked
+        // again here: the two threads read the equipment a frame apart). Each slot's item is in the other
+        // hand, so the free hands are the other way round.
+        in.leftHanded = own && framevr::LeftHandedNow() && !in.staff && !ranged && type != D2RVR_TYPE_CROSSBOW &&
+                        !(gamestate::TwoHanded() & D2RVR_TWO_HANDS_ON);
+        in.leftHandedTurnAxis = g_set.leftHandedTurnAxis.load();
+        in.leftHandedShieldTurn = g_set.leftHandedShieldTurn.load();
+        if (in.leftHanded) std::swap(in.handFree[0], in.handFree[1]);
     }
     {   // staff_free_left: once per staff taken up, what the hook made of it
         static bool told = false;
@@ -10758,11 +10787,11 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
                         }
                         if (!haveTip) {
                             const D2RVR_Shared* sh = g_shared;
-                            if (sh && sh->version == D2RVR_SHARED_VERSION && sh->headValid && (sh->handsValid & (1u << h))) {
+                            if (sh && sh->version == D2RVR_SHARED_VERSION && sh->headValid && (sh->handsValid & HandBit(h))) {
                                 AcquireSRWLockShared(&g_stickLock); const StickFrame f = g_stickFrame; ReleaseSRWLockShared(&g_stickLock);
                                 if (f.valid) {
-                                    const float* p = (h == 0) ? sh->rightHand : sh->leftHand;
-                                    const float* q = (h == 0) ? sh->rightRot : sh->leftRot;
+                                    const float* p = HandPosOf(sh, h);
+                                    const float* q = HandRotOf(sh, h);
                                     const framevr::math::Quat handQ{q[0], q[1], q[2], q[3]};
                                     const framevr::math::Vec tipOffset = framevr::math::Rotate(handQ, framevr::torch::DefaultShaftOffset);
                                     const float handTip[3] = { p[0] + tipOffset.x, p[1] + tipOffset.y, p[2] + tipOffset.z };
@@ -10836,10 +10865,10 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
                     for (int h = 0; h < 2 && outIndex < worldobj::kMaxLights; ++h) {
                         int element = 0; float opacity = 0;
                         if (torchActive[h] || !framevr::ElementalHandLight(h, element, opacity)) continue;
-                        if (!f.valid || !sh || sh->version != D2RVR_SHARED_VERSION || !sh->headValid || !(sh->handsValid & (1u << h))) continue;
+                        if (!f.valid || !sh || sh->version != D2RVR_SHARED_VERSION || !sh->headValid || !(sh->handsValid & HandBit(h))) continue;
                         const auto light = framevr::elements::HandLight(framevr::elements::Element(element), opacity, GetTickCount64(), h);
                         if (!(light.strength > 0)) continue;
-                        const float* p = (h == 0) ? sh->rightHand : sh->leftHand;
+                        const float* p = HandPosOf(sh, h);
                         const float headM = UserEyeHeightM();
                         const float upm = std::max(1.0f, ViewHeight()) / (headM > 0.1f ? headM : 1.75f);
                         const float dw[3] = {(p[0] * f.camR[0] - p[2] * f.camF[0]) * upm, p[1] * upm, (p[0] * f.camR[2] - p[2] * f.camF[2]) * upm};

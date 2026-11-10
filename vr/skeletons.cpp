@@ -52,6 +52,7 @@
 #include "hero_selection.h"
 #include "bow_pose.h"
 #include "shield_pose.h"
+#include "hand_swap_pose.h"
 #include "shield_steady.h"
 #include "dev_scenarios.h"
 #include "../steamvr/shield_surface.h"
@@ -1379,7 +1380,8 @@ void PublishClaws(uintptr_t self, const Hero& h, const Input& in, const std::vec
             const float length = Len(Sub(b, a)), radius = 0.5f * Len(Sub(toWorld(rest(h.ind[side])), toWorld(rest(h.pnk[side]))));
             if (!(length > 0.01f) || !(radius > 0.005f) || !std::isfinite(length + radius + a.x + a.y + a.z + player.x + player.y + player.z)) continue;
             const V3 axis = Scale(Sub(b, a), 1.0f / length);
-            auto& p = out[side];
+            const int lane = in.leftHanded ? side ^ 1 : side;   // the lanes are roles: 0 the main hand's paw (hand_role.h)
+            auto& p = out[lane];
             p.origin[0] = a.x; p.origin[1] = a.y; p.origin[2] = a.z;
             p.axis[0] = axis.x; p.axis[1] = axis.y; p.axis[2] = axis.z;
             p.castingAxis[0] = axis.x; p.castingAxis[1] = axis.y; p.castingAxis[2] = axis.z;
@@ -1392,8 +1394,8 @@ void PublishClaws(uintptr_t self, const Hero& h, const Input& in, const std::vec
             const framevr::math::Quat grip{in.rot[side][0], in.rot[side][1], in.rot[side][2], in.rot[side][3]};
             const auto g = framevr::math::Rotate(framevr::math::Conjugate(grip), {headAxis.x, headAxis.y, headAxis.z});
             p.gripAxis[0] = g.x; p.gripAxis[1] = g.y; p.gripAxis[2] = g.z;
-            ok[side] = true;
-            if (side == 0) { palmAt = palm; axesFrom = h.hand[0]; }
+            ok[lane] = true;
+            if (lane == 0) { palmAt = palm; axesFrom = h.hand[side]; }
         }
     }
     const ULONGLONG at = GetTickCount64();
@@ -1434,6 +1436,8 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
     // grafted under the player in their own view only; elsewhere (third person, a flat
     // menu) the form is the game's, unscaled
     const bool graft = h.form && in.firstPerson && in.lockUpper && h.bindOk;
+    // Left-handed play: the arm (0 right, 1 left) whose hand holds the main weapon, and the shield's arm.
+    const int mainArm = in.leftHanded && in.mode == 2 ? 1 : 0, offArm = mainArm ^ 1;
     uintptr_t world = 0, mats = 0; int32_t n = 0;
     if (!Get(self + 0x20, &world) || !Get(world, &n) || !Get(world + 4, &mats) || n != h.count) return;
     std::vector<Mat> oldW(n);
@@ -1686,7 +1690,7 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
             const Wrist wr = PlanWrist(h, side, baseW, in, c, s);
             // The grip point is the middle of the palm; the wrist bone is half a hand behind it.
             if (wr.ok) T = Sub(T, Scale(wr.point, 0.5f * wr.reach));
-            Reach(h, side, T, turn, c, s, baseW, newW, side==1&&in.leftShield, graft);
+            Reach(h, side, T, turn, c, s, baseW, newW, side==offArm&&in.leftShield, graft);
             if (wr.ok) {
                 ApplyWrist(newW[k], wr);
                 std::vector<char> fromK(n, 0); fromK[k] = 1;
@@ -1762,20 +1766,44 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
     const bool freeStaff = in.staff && in.staffFreeLeft && in.mode == 2 && in.holdGrip && grip.ok && (in.handsValid & 1u) &&
                            h.head >= 0 && h.weapon[staffSide] >= 0;
     // Held weapons sit in that grip, not in this frame's animation (a bow keeps the animation: it draws).
+    // Left-handed (in.leftHanded): each attach bone goes to the OTHER wrist, in the mirror image of its own
+    // grip (handswap::MirrorGrip). That matrix has the wrong handedness to be drawn; it is put right below,
+    // after Weapon Adjust has moved and turned it (the adjustment is then mirrored with it).
+    bool swapped[2] = {false, false};
+    int swapAxis[2] = {0, 0};
     if (in.mode == 2 && in.holdGrip && grip.ok) {
         for (int side = 0; side < 2; ++side) {
-            const int wb = h.weapon[side], k = h.hand[side];
-            if (wb < 0 || k < 0) continue;
+            const int wb = h.weapon[side], own = h.hand[side], k = in.leftHanded ? h.hand[side ^ 1] : own;
+            if (wb < 0 || k < 0 || own < 0) continue;
             // The game hides what leaves the hand (a thrown weapon, a potion)
             // by shrinking its attach bone: that stays the game's.
-            const Mat anim = Mul(oldW[wb], InvAffine(oldW[k]));
+            const Mat anim = Mul(oldW[wb], InvAffine(oldW[own]));
             g_attachSize[side].store(Len({anim.m[0], anim.m[1], anim.m[2]}));
             // bothAttach: the holding hand's bone is the weapon's whatever the game does with it -
             // it shrinks it away while it moves the weapon to the other wrist (a great axe while
             // walking): copied shrunk to the other one, the axe vanished (2026-10-06).
             const bool holder = in.bothAttach && side == (freeStaff ? staffSide : in.weaponSide ? 1 : 0);
-            if (Len({anim.m[0], anim.m[1], anim.m[2]}) < 0.3f && !holder) newW[wb] = Mul(anim, newW[k]);
-            else newW[wb] = freeStaff && side == staffSide ? Mul(InvAffine(grip.inStaff[0]), newW[h.hand[0]]) : Mul(grip.attach[side], newW[k]);
+            Mat seat = grip.attach[side];
+            if (in.leftHanded) {
+                bow::Mat attach, bindOwn, bindOther, mirrored;
+                memcpy(&attach, &grip.attach[side], sizeof attach);
+                memcpy(&bindOwn, &h.bind[own], sizeof bindOwn); memcpy(&bindOther, &h.bind[k], sizeof bindOther);
+                if (h.bindOk && handswap::MirrorGrip(attach, bindOwn, bindOther, mirrored)) {
+                    memcpy(&seat, &mirrored, sizeof seat);
+                    // the axis to turn over: the weapon's flat, from the holding palm in the bind pose
+                    V3 normal{0, 0, 0};
+                    if (const int i = h.ind[side], p = h.pnk[side], m = h.mid[side]; i >= 0 && p >= 0 && m >= 0)
+                        normal = Cross(Sub(Pos(h.bind[i]), Pos(h.bind[p])), Sub(Pos(h.bind[m]), Pos(h.bind[own])));
+                    const bow::Mat attachBind = bow::Multiply(attach, bindOwn);
+                    swapAxis[side] = handswap::TurnAxis(in.leftHandedTurnAxis, handswap::FlatAxis(attachBind, {normal.x, normal.y, normal.z}));
+                } else {
+                    seat = grip.attach[side ^ 1];   // no bind pose: the other wrist's own attach bone, as the game holds it
+                    swapAxis[side] = handswap::TurnAxis(in.leftHandedTurnAxis, 0);
+                }
+                swapped[side] = true;
+            }
+            if (Len({anim.m[0], anim.m[1], anim.m[2]}) < 0.3f && !holder) { newW[wb] = Mul(anim, newW[k]); swapped[side] = false; }
+            else newW[wb] = freeStaff && side == staffSide ? Mul(InvAffine(grip.inStaff[0]), newW[h.hand[0]]) : Mul(seat, newW[k]);
             std::vector<char> fromWeapon(n, 0);
             fromWeapon[wb] = 1;
             Propagate(h, oldW, newW, fromWeapon, wb);
@@ -1868,7 +1896,7 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
             };
             const Mat local = Mul(Mul(turn(0, a[3]), turn(1, a[4])), turn(2, a[5]));
             for (int side = 0; side < 2; ++side) {
-                const int wb = h.weapon[side], holder = freeStaff && side == staffSide ? 0 : side;
+                const int wb = h.weapon[side], holder = freeStaff && side == staffSide ? 0 : in.leftHanded ? side ^ 1 : side;
                 if (wb < 0 || !(in.handsValid & (1u << holder))) continue;
                 if(side==1&&in.leftShield)continue;
                 if (gun && side == staffSide) continue;   // the crossbow's [weapon_crossbow] is the controller's (above)
@@ -1883,6 +1911,31 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
                 fromWeapon[wb] = 1;
                 Propagate(h, oldW, newW, fromWeapon, wb);
             }
+        }
+    }
+
+    // Left-handed: the bones seated at the other wrist are mirror images so far. Each gets the handedness
+    // the game animates it with (an item on a bone of the wrong one is inside out and culled) by one of
+    // its own axes turned over: the item is turned in the hand, not mirrored.
+    for (int side = 0; side < 2; ++side) if (swapped[side]) {
+        const int wb = h.weapon[side];
+        bow::Mat seated, like;
+        memcpy(&seated, &newW[wb], sizeof seated); memcpy(&like, h.bindOk ? &h.bind[wb] : &oldW[wb], sizeof like);
+        const bool turned = handswap::MatchHandedness(seated, like, swapAxis[side]);
+        if (turned) {
+            memcpy(&newW[wb], &seated, sizeof seated);
+            std::vector<char> fromWeapon(n, 0);
+            fromWeapon[wb] = 1;
+            Propagate(h, oldW, newW, fromWeapon, wb);
+        }
+        static int told[2] = {-1, -1};   // once per bone and outcome
+        if (const int now = (turned ? 1 : 0) | (swapAxis[side] << 1) | ((h.cls + 1) << 4); now != told[side]) {
+            told[side] = now;
+            char line[200]; snprintf(line, sizeof line, "Frame left-handed: %s seated on the %s wrist, mirrored grip%s (class %d)",
+                side == 0 ? "R_weapon_attach (main weapon)" : "L_weapon_attach (off hand)", side == 0 ? "left" : "right",
+                turned ? (swapAxis[side] == 2 ? ", its z axis turned over" : swapAxis[side] == 1 ? ", its y axis turned over" : ", its x axis turned over")
+                       : ", already of the bone's handedness - nothing turned", h.cls);
+            framevr::logging::Write(line);
         }
     }
 
@@ -2258,7 +2311,81 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
     // the forearm. The bind relationship follows the final tracked wrist.
     bool shieldFollowed=false;
     struct {int bone=-1,side=1;float heldBack=0,bend=-1;shield::Frame frame;} seatTrace;   // for [debug] shield_trace
-    if(in.mode==2&&in.leftShield&&(in.handsValid&2u)&&h.bindOk&&h.weapon[1]>=0&&h.hand[1]>=0) {
+    if(in.mode==2&&in.leftHanded&&in.leftShield&&(in.handsValid&1u)&&h.bindOk&&h.weapon[1]>=0&&h.hand[0]>=0&&h.hand[1]>=0) {
+        // Left-handed play: the shield on the RIGHT forearm. Its bones (L_weapon_attach under the left
+        // wrist, shield_attach under the left forearm) are authored on the left arm, so each is carried
+        // across in the arms' own frames (joint positions only, as right-handed): the bind frame is the
+        // left arm's, the frame now the right arm's built the same anatomical way, which is its mirror
+        // image; shield::PlaceAcross puts the bone where the mirror has it and turns the shield there
+        // (in.leftHandedShieldTurn), since a mirrored bone cannot be drawn. The same settings apply
+        // (Shield wrist turn, Shield roll, Grip / Out / Up), each meaning the same direction on this arm.
+        // Not built yet on this arm: the wrist's bend stop (StopShieldWrist).
+        const int wb=h.weapon[1],sa=h.shieldAttach;
+        const int bl=h.lwr[1],bk=h.hand[1],bi=h.ind[1],bp=h.pnk[1],bm=h.mid[1];        // the bind pose's arm: the left
+        const int l=h.lwr[0],k=h.hand[0],ki=h.ind[0],kp=h.pnk[0];                      // the arm that carries it now
+        const Mat animated=Mul(oldW[wb],InvAffine(oldW[bk]));
+        const bool joints=bl>=0&&bi>=0&&bp>=0&&bm>=0&&l>=0&&ki>=0&&kp>=0;
+        bool placedAny=false;
+        if(Len({animated.m[0],animated.m[1],animated.m[2]})>=.3f&&joints) {
+            auto bv=[](V3 v){return bow::Vec{v.x,v.y,v.z};};
+            // the shield's side of the forearm, from the bind pose (as StopShieldWrist decides it)
+            int side=1;
+            if(sa>=0) {
+                const V3 back=RotOnly(Cross(Sub(Pos(h.bind[bi]),Pos(h.bind[bp])),Sub(Pos(h.bind[bm]),Pos(h.bind[bk]))),InvAffine(h.bind[bk]));
+                const V3 fb=Norm(Sub(Pos(h.bind[bk]),Pos(h.bind[bl]))),ob=Sub(Pos(h.bind[sa]),Pos(h.bind[bl]));
+                const V3 off=Sub(ob,Scale(fb,Dot(ob,fb)));
+                side=Len(off)>.05f*Len(Sub(Pos(h.bind[bk]),Pos(h.bind[bl])))&&Dot(off,RotOnly(back,h.bind[bk]))<0?-1:1;
+            }
+            const float handed=shield::Handed(bv(Pos(h.bind[bl])),bv(Pos(h.bind[bk])),bv(Pos(h.bind[bi])),bv(Pos(h.bind[bp])),bv(Pos(h.bind[bm])),side);
+            const shield::Frame bindFrame=shield::ArmFrame(bv(Pos(h.bind[bl])),bv(Pos(h.bind[bk])),bv(Pos(h.bind[bi])),bv(Pos(h.bind[bp])),handed);
+            // the right arm, the mirror's way: the opposite turn from Cross(up, along) to out
+            const shield::Frame bindOther=shield::ArmFrame(bv(Pos(h.bind[l])),bv(Pos(h.bind[k])),bv(Pos(h.bind[ki])),bv(Pos(h.bind[kp])),-handed);
+            bow::Mat wristBind,wristNow;
+            memcpy(&wristBind,&h.bind[k],sizeof wristBind);memcpy(&wristNow,&newW[k],sizeof wristNow);
+            const shield::Frame wristFrame=shield::Carry(bindOther,wristBind,wristNow);
+            const shield::Frame strapped=shield::ArmFrame(bv(Pos(newW[l])),bv(Pos(newW[k])),bv(Pos(newW[ki])),bv(Pos(newW[kp])),-handed);
+            const shield::Frame frame=shield::Roll(shield::Blend(strapped,wristFrame,in.shieldFollowPct/shield::kFollowMaxPct),in.shieldRollDeg);
+            const V3 bindRow{h.bind[bk].m[0],h.bind[bk].m[1],h.bind[bk].m[2]},handRow{newW[k].m[0],newW[k].m[1],newW[k].m[2]};
+            auto across=[&](int bone,const shield::Frame& now) {
+                bow::Mat bind,result;memcpy(&bind,&h.bind[bone],sizeof bind);
+                if(!shield::PlaceAcross(bind,bindFrame,bv(Pos(h.bind[bk])),Len(bindRow),now,bv(Pos(newW[k])),Len(handRow),in.leftHandedShieldTurn,result))return false;
+                const auto before=newW;memcpy(&newW[bone],&result,sizeof result);
+                std::vector<char> moved(n,0);moved[bone]=1;Propagate(h,before,newW,moved,bone);
+                return true;
+            };
+            if(bindFrame.ok&&frame.ok&&across(wb,wristFrame.ok?wristFrame:frame)) {
+                placedAny=shieldFollowed=true;
+                if(sa>=0&&sa!=wb&&across(sa,frame)) {
+                    const auto beforeAttach=newW;
+                    const float units=Len(Sub(Pos(newW[k]),Pos(newW[l])));   // this model's forearm, ~0.26 m on an adult
+                    const bow::Vec move=shield::Offset(frame.along,frame.out,frame.up,in.shieldGripCm,in.shieldOutCm,in.shieldUpCm,units/0.26f);
+                    newW[sa].m[12]+=move.x;newW[sa].m[13]+=move.y;newW[sa].m[14]+=move.z;
+                    {   // steadied as on the left arm (shield_steady.h), its own filter
+                        static steady::Filter steadied;static LARGE_INTEGER last{};
+                        static LARGE_INTEGER freq{};if(!freq.QuadPart)QueryPerformanceFrequency(&freq);
+                        LARGE_INTEGER now;QueryPerformanceCounter(&now);
+                        const float dt=last.QuadPart?float(double(now.QuadPart-last.QuadPart)/double(freq.QuadPart)):0.f;
+                        last=now;
+                        bow::Mat m;memcpy(&m,&newW[sa],sizeof m);
+                        steadied.Apply(m,dt,std::max(1e-4f,units)/26.f,steady::Shield);
+                        memcpy(&newW[sa],&m,sizeof m);
+                    }
+                    seatTrace.bone=sa;seatTrace.side=side;seatTrace.frame=frame;
+                    std::vector<char> movedAttach(n,0);movedAttach[sa]=1;Propagate(h,beforeAttach,newW,movedAttach,sa);
+                }
+            }
+        }
+        static int told=-1;   // once per outcome and class
+        if(const int now=(placedAny?1:0)|(joints?2:0)|(in.leftHandedShieldTurn<<2)|((h.cls+1)<<5);now!=told) {
+            told=now;
+            char line[220];snprintf(line,sizeof line,"Frame left-handed: shield %s (class %d%s)",
+                placedAny?(in.leftHandedShieldTurn==2?"on the right forearm, turned over its up axis":in.leftHandedShieldTurn==1?"on the right forearm, turned over its out axis":
+                           "on the right forearm, face out, turned end for end along the arm"):"NOT placed on the right forearm - it stays where the game animates it",
+                h.cls,joints?"":"; the rig has no knuckle joints to build the arm's frame from");
+            framevr::logging::Write(line);
+        }
+    }
+    if(in.mode==2&&!in.leftHanded&&in.leftShield&&(in.handsValid&2u)&&h.bindOk&&h.weapon[1]>=0&&h.hand[1]>=0) {
         const int wb=h.weapon[1],hand=h.hand[1];
         int side=1;const float heldBack=StopShieldWrist(h,newW,&side);   // before the shield takes the hand's turn
         bow::Mat wristBind,shieldBind,wristNow,result;
@@ -2509,7 +2636,8 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
             const auto equipment=gamestate::MeleeEquipment();
             if(framevr::dualwield::Eligible(h.cls,equipment))g.melee.weaponType=equipment.Type(0);
             const V3 headAxis=back(Norm({attachment.m[4],attachment.m[5],attachment.m[6]}));
-            const framevr::math::Quat grip{in.rot[0][0],in.rot[0][1],in.rot[0][2],in.rot[0][3]};
+            const float* holdRot=in.rot[freeStaff?0:mainArm];   // the controller of the hand that holds it
+            const framevr::math::Quat grip{holdRot[0],holdRot[1],holdRot[2],holdRot[3]};
             const auto gripAxis=framevr::math::Rotate(framevr::math::Conjugate(grip),{headAxis.x,headAxis.y,headAxis.z});
             g.melee.gripAxis[0]=gripAxis.x;g.melee.gripAxis[1]=gripAxis.y;g.melee.gripAxis[2]=gripAxis.z;
             const int row=abs(castingAxis)-1;
@@ -2549,7 +2677,7 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
                 offhand.weaponType=weapons.Type(1);
                 const V3 d=Norm({attachment.m[4],attachment.m[5],attachment.m[6]});
                 const V3 headAxis={-(d.x*c-d.z*s),d.y,-(d.x*s+d.z*c)};
-                const framevr::math::Quat grip{in.rot[1][0],in.rot[1][1],in.rot[1][2],in.rot[1][3]};
+                const framevr::math::Quat grip{in.rot[offArm][0],in.rot[offArm][1],in.rot[offArm][2],in.rot[offArm][3]};
                 const auto axisInGrip=framevr::math::Rotate(framevr::math::Conjugate(grip),{headAxis.x,headAxis.y,headAxis.z});
                 offhand.gripAxis[0]=axisInGrip.x;offhand.gripAxis[1]=axisInGrip.y;offhand.gripAxis[2]=axisInGrip.z;
                 const V3 o1 = back(Scale(Sub(Pos(attachment), head), 1.0f / upm));
@@ -2578,7 +2706,7 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
                     const float modelUpm=framevr::body::UnitsPerMetre(h.eyeY>0?h.eyeY:in.eyeModel[1],in.userHeadM,in.scale);
                     framevr::guard::FromAttachment(world.m,model.m,
                         {in.eyeModel[0],in.eyeModel[1],in.eyeModel[2]},
-                        {in.hand[1][0],in.hand[1][1],in.hand[1][2]},modelUpm,at,in.worldEpoch,guardPose);
+                        {in.hand[offArm][0],in.hand[offArm][1],in.hand[offArm][2]},modelUpm,at,in.worldEpoch,guardPose);
                 }
             }
         }
