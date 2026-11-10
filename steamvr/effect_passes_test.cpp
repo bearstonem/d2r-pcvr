@@ -112,7 +112,7 @@ int main(int argc, char** argv) { try {
     {
         auto left = techniques.at(Technique[Full][0]);
         const auto& right = techniques.at(Technique[Full][1]);
-        const char* const kOwn[] = {"PS_TorchCands", "CS_RecordHeights", "PS_DepthFog", "PS_Outline", "VS_Immunity", "VS_TeleportArc",
+        const char* const kOwn[] = {"PS_VoidFog", "PS_TorchCands", "CS_RecordHeights", "PS_DepthFog", "PS_Outline", "VS_Immunity", "VS_TeleportArc",
                                     "PS_Hud", "PS_GameHud", "PS_Phantom", "PS_TableKey", "PS_Stamp"};
         for (auto& p : left)
             for (const char* name : kOwn)

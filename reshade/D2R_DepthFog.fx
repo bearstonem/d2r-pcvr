@@ -283,7 +283,7 @@ technique D2R_DepthFog_R <
 {
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_HudCopy; RenderTarget = HudCurTex; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_HudMask; RenderTarget = HudMaskTex; }
-    pass { VertexShader = VS_Fullscreen; PixelShader = PS_VoidFog; RenderTarget = VoidFogTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_VoidFogR; RenderTarget = VoidFogTex; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_VoidFogBlurH; RenderTarget = VoidFogTmpTex; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_VoidFogBlurV; RenderTarget = VoidFogTex; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_Fire; RenderTarget = FireTex; }
@@ -320,7 +320,7 @@ technique D2R_DepthFog_Mask_R <
 {
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_HudCopy; RenderTarget = HudCurTex; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_HudMask; RenderTarget = HudMaskTex; }
-    pass { VertexShader = VS_Fullscreen; PixelShader = PS_VoidFog; RenderTarget = VoidFogTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_VoidFogR; RenderTarget = VoidFogTex; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_VoidFogBlurH; RenderTarget = VoidFogTmpTex; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_VoidFogBlurV; RenderTarget = VoidFogTex; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_Fire; RenderTarget = FireTex; }
@@ -350,7 +350,7 @@ technique D2R_DepthFog_Lean_R <
     ui_tooltip = "D2R_DepthFog_Lean for the right eye's frames.";
 >
 {
-    pass { VertexShader = VS_Fullscreen; PixelShader = PS_VoidFog; RenderTarget = VoidFogTex; }
+    pass { VertexShader = VS_Fullscreen; PixelShader = PS_VoidFogR; RenderTarget = VoidFogTex; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_VoidFogBlurH; RenderTarget = VoidFogTmpTex; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_VoidFogBlurV; RenderTarget = VoidFogTex; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_Fire; RenderTarget = FireTex; }

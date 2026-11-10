@@ -141,7 +141,7 @@ float3 DepthFogWorld(float4 pos, float2 uv, int eye)
             // the sky's none into the far ground at the horizon, and the foam along the
             // far water's edge stood out of the fog there (2026-10-05).
             float tf = 0.0;
-            if (FogOn && k < 0.999) tf = ParticleFog(uv, duv);
+            if (FogOn && k < 0.999) tf = ParticleFog(uv, duv, eye);
             // Only what is clearly off black: the near-black spill the game leaves round
             // people and trees over the void, added in full, stood as a pale haze round
             // them (2026-10-05). k fades it in over the same 0.03..0.08 as the void test.
@@ -197,7 +197,7 @@ float3 DepthFogWorld(float4 pos, float2 uv, int eye)
         // Without the effect's own depth, leave it at its authored brightness;
         // actual drawn scenery still uses its distance in the path below.
         if (ShowDistance) return 0.0;
-        return fogColour * FogAmount(dFar) + litColour;
+        return fogColour * FogAmount(dFar, FogSlant(uv, eye)) + litColour;
     }
 
     // The depth smeared: the fog of a 3x3 grid FogBlur pixels apart, averaged
@@ -209,13 +209,14 @@ float3 DepthFogWorld(float4 pos, float2 uv, int eye)
     // averaged whole, the far water beside a man got a share of his near-nothing
     // and stood round him as a dark rim FogBlur pixels wide (2026-10-05). The far
     // ground's holes and specks melt as before - their fog is the same.
-    float t = FogAmount(dFar);
+    float t = FogAmount(dFar, FogSlant(uv, eye));
     if (FogBlur >= 0.5) {
         const float t0 = t;
         float sum = 0.0, wsum = 0.0;
         [unroll] for (int y = -1; y <= 1; ++y)
             [unroll] for (int x = -1; x <= 1; ++x) {
-                const float ts = FogAmount(DepthAt(duv + float2(x, y) * px * FogBlur).x);
+                const float2 tap = float2(x, y) * px * FogBlur;   // in the depth's uv; the screen's y runs the other way when upside down
+                const float ts = FogAmount(DepthAt(duv + tap).x, FogSlant(uv + float2(tap.x, UpsideDown ? -tap.y : tap.y), eye));
                 const float w = 1.0 - saturate(abs(ts - t0) * 4.0);
                 sum += ts * w; wsum += w;
             }

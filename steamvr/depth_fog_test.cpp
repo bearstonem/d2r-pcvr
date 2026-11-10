@@ -62,6 +62,8 @@ static const float3 CeilEye0=0, CeilEye1=0;
 static const float2 CeilHero0=0, CeilHero1=0;
 static const float CeilScale=10, CeilHeight=20, CeilHalo=1, HudTop=0, SkyTex=0, SkyBrightness=1;
 static const bool GameLightsOn=false, HeroLightOn=false;
+// The projection unknown: the fog is measured along the view, as these fixtures' expected values were worked out.
+static const float4 FogProj0=0, FogProj1=0;
 float3 HeroLight(float3 p, float3 nrm, float3 eyeP) { return 0; }
 static const float CeilTorchBright=1, CeilTorchRadius=20, CeilTorchWarm=0.45;
 float3 SceneLight(float3 p) { return 0; }
@@ -98,6 +100,7 @@ int main(int argc,char** argv) {try {
     const std::string source=fxsource::ReadWithIncludes(argv[1]);   // the effect with its feature headers (D2R_Sky.fxh, D2R_Fog.fxh ...) pasted in
     std::string shader=Fixture;
     shader+=Function(source,"float FogAt(");
+    if(source.find("float FogSlant(")!=std::string::npos) shader+=Function(source,"float FogSlant(");
     shader+=Function(source,"float FogAmount(");
     // Optional so running against the pre-fix shader demonstrates the regression.
     if(source.find("float ParticleFog(")!=std::string::npos) shader+=Function(source,"float ParticleFog(");

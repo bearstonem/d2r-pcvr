@@ -10728,6 +10728,15 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
     SetFloat(rt, "FogCurve", g_set.fogCurve.load());
     SetFloat(rt, "FogBlur", g_set.fogBlur.load());
     SetBool(rt, "FogOn", FogWanted());
+    if (FogWanted()) {   // each eye's projection: the fog is measured from the eye, not along the view (D2R_Fog.fxh FogSlant)
+        SkyView fv[2];
+        AcquireSRWLockShared(&g_skyLock); fv[0] = g_skyView[0]; fv[1] = g_skyView[1]; ReleaseSRWLockShared(&g_skyLock);
+        static const float unknown[4] = {0, 0, 0, 0};   // the shader then measures as it did
+        for (int e = 0; e < 2; ++e) {
+            const SkyView& v = fv[e].proj_ok ? fv[e] : fv[0];
+            SetFloats(rt, e ? "FogProj1" : "FogProj0", v.proj_ok ? v.proj : unknown, 4);
+        }
+    }
     SetBool(rt, "TableKeyOn", TableKeyWanted());
     if (TableKeyWanted()) uses |= fxp::TableKey;
     SetFloat(rt, "TableFloor", g_set.tableFloor.load());
