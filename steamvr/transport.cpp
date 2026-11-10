@@ -79,6 +79,7 @@
 #include "limb_physics.h"
 #include "../vr/wall_cells.h"
 #include "../vr/prop_scan.h"
+#include "../vr/spell_impacts.h"
 #include "elemental_hands_renderer.h"
 #include "elemental_particles.h"
 #include "../vr/companion_ai.h"
@@ -127,6 +128,7 @@
 #include "toss.h"
 #include "aim_reach.h"
 #include "weapon_heft.h"
+#include "hit_reactions.h"
 
 namespace gamestate {uint32_t WeaponType();uint32_t HandsKey();uint32_t WeaponSet();uint32_t WeaponClass();uint32_t TwoHanded();uint64_t LocalPlayer();uint32_t MenuEpoch();int AttackWsm(int hand);}
 namespace gamecmd {void RequestPotion(int slot);void CancelPotion();}
@@ -3284,6 +3286,33 @@ std::array<bottles::Collider,bottles::Colliders> HeldColliders() {
     }
     return weapons;
 }
+// The hero's spell missiles (vr/spell_impacts.cpp posts where each flew or
+// burst on the game thread) push the props and bottles in their way, in the
+// same world the weapons push them in. The passages are always taken, so
+// none wait for a world; without one (physics off, a menu, no props or
+// bottles near) they are dropped.
+void PushSpells(bottles::World* world,double time,float floor,float upm) {
+    std::array<spellimpacts::Passage,spellimpacts::Mailbox::Most> passages;
+    const unsigned n=impactvr::Take(interactionInput.session,passages);
+    if(!world||!n)return;
+    static ULONGLONG second=0;static unsigned lines=0,skipped=0;
+    for(unsigned i=0;i<n;++i) {
+        const auto& p=passages[i];
+        const auto pushed=world->Push(spellimpacts::ToWorld(p,floor,upm),time);
+        if(!pushed.props&&!pushed.bottles)continue;
+        // At most four lines a second; the next one says how many were not shown.
+        const auto now=GetTickCount64()/1000;
+        if(now!=second){second=now;lines=0;}
+        if(lines>=4){++skipped;continue;}
+        ++lines;
+        const auto* profile=spellimpacts::Of(p.missile);
+        char line[224];std::snprintf(line,sizeof line,"Frame spell impact: %s (missile %u) %s %u props and %u bottles at cell %.0f,%.0f%s",
+            profile?profile->name:"?",p.missile,p.blast?"burst and pushed":p.flat?"passed and pushed":"flew through and pushed",pushed.props,pushed.bottles,
+            p.to.x*.5f,p.to.z*.5f,skipped?" (more not shown)":"");
+        skipped=0;
+        Say(line);
+    }
+}
 void StepDroppedBottles() {
     const auto& in=interactionInput;const auto& out=interactionOutput;
     const bool bottlesOn=bottlePhysics.load(),propsOn=propPhysics.load();
@@ -3348,6 +3377,7 @@ void StepDroppedBottles() {
     // Walls reach the world even while nothing moves in it (a trap in hand).
     bottles::Patch patch;
     if(droppedBottles&&wallcells::Latest(patch))droppedBottles->Walls(patch);
+    PushSpells(droppedBottles&&world&&!droppedBottles->Idle()?droppedBottles.get():nullptr,in.time,floor,upm);
     if(!droppedBottles||droppedBottles->Idle()||!in.stage.known)return; // menus and loading hold them still
     droppedBottles->Weapons(HeldColliders());
     droppedBottles->Advance(in.time,in.stage.anchor);
@@ -3394,6 +3424,7 @@ void StepDroppedBottles() {
     unsigned struck=0,chained=0;
     for(unsigned i=0,n=droppedBottles->Knocks(knocks);i<n;++i) {
         static const char* const by[]{"right hand","left hand","shield"};
+        if(knocks[i].slot==bottles::SpellSlot)continue;   // a spell's: PushSpells logged it
         if(knocks[i].slot<0){++chained;continue;}
         char line[160];++struck;
         std::snprintf(line,sizeof line,"Frame props: knocked a %s (%s, %.1f m/s)",propscan::KindName(knocks[i].kind),by[knocks[i].slot%3],knocks[i].speed);
@@ -5204,17 +5235,23 @@ void Input() {
             motionInput.weapon==gameplay::Weapon::Bow&&!motionOutput.bowDrawing&&!motionOutput.block;
         // Weapon heft (weapon_heft.h, #443; VR Settings > Combat > Melee, off by default): the hand travel this
         // hand's weapon needs for a full hit, from its kind, two-handed grip and speed (WSM); 0 = whole.
-        const auto heftNeed=[&](int hand)->float {
-            if(gestureSettings[settings::WeaponHeft]<.5f||claws)return 0;
+        // weightOnly: the weapon's weight itself (0..1), for hit reactions, whatever Weapon heft is set to.
+        const auto heftNeed=[&](int hand,bool weightOnly=false)->float {
+            if((!weightOnly&&gestureSettings[settings::WeaponHeft]<.5f)||claws)return 0;
             const int body=dual?weapons.BodyHand(hand):hand==0?0:-1;   // the inventory arm whose weapon this hand swings
             if(body<0)return 0;
             const uint32_t type=dual?weapons.type[body]:gamestate::WeaponType();
             // TwoHanded() and AttackWsm(0) describe the weapon in hand (when dual wielding, the right arm's);
             // AttackWsm(1) the left arm's, whose two-handed bit the game state does not keep.
             const bool twoHanded=(!dual||body==0)&&(gamestate::TwoHanded()&D2RVR_TWO_HANDED)!=0;
-            return heft::Need(heft::Weight(type,twoHanded,gamestate::AttackWsm(dual?body:0)));
+            const float weight=heft::Weight(type,twoHanded,gamestate::AttackWsm(dual?body:0));
+            return weightOnly?weight:heft::Need(weight);
         };
         sample.heft=heftNeed(0);
+        // Hit reactions (hit_reactions.h; VR Settings > Gameplay > Physics > Struck monsters, both on by default).
+        sample.reactions=uint8_t((gestureSettings[settings::HitStagger]>.5f?hitreact::Stagger:0)|
+                                 (gestureSettings[settings::HitKnockback]>.5f?hitreact::Knockback:0));
+        sample.weight=heftNeed(0,true);
         // Melee-skill contact adapter: each hand's strikes carry its own trigger
         // skill when that is a confirmed strike skill (strike_skills.h). The
         // assignment identity rides the sample, so a rebind drops a queued stroke.
@@ -5232,10 +5269,11 @@ void Input() {
         sample.bowBash=bowBash;
         sample.active=((sample.active&&(dual||claws))||bowBash)&&controls.lt<51&&controls.rt<51;
         sample.heft=bowBash?0.f:heftNeed(1);
+        sample.weight=bowBash?0.f:heftNeed(1,true);
         strike(1);
         if(bowBash)sample.strikeSkill=-1;   // a bow's swing never casts
         offhandPoses.Push(s.sampleStamp,sample);
-        sample.weapons={};sample.claws=false;sample.strikeSkill=-1;sample.bowBash=false;sample.heft=0;
+        sample.weapons={};sample.claws=false;sample.strikeSkill=-1;sample.bowBash=false;sample.heft=0;sample.weight=0;sample.reactions=0;
         sample.hand=motionInput.hand[1];sample.shield=true;sample.active=motionInput.active&&motionOutput.shieldContact;
         sample.skillSlot=shieldSlot;sample.skillOwner=shieldSkill.owner;sample.skillContext=motionInput.skillContext;
         shieldPoses.Push(s.sampleStamp,sample);

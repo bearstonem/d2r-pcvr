@@ -15,6 +15,7 @@
 #include "haptic_strength.h"
 #include "frame_generation.h"
 #include "run_speed.h"
+#include "world_sound.h"
 
 namespace framevr::settings {
 // The menu's views, in rail order (names, icons, sections and rows:
@@ -27,7 +28,7 @@ enum class View : uint8_t { Presets, Combat, Targeting, Shield, Monsters, Physic
 constexpr int MaxRailGroups=8;
 enum Key { Motion, Seated, Dominant, Snap, TurnSpeed, Waist, BeltForward,
            Foveation, Sky, Fog, Ceiling, DrawDistance, ObjectDistance,
-           EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, VitalsTilt, HapticStrength, HapticMelee, HapticBowDraw, HapticBowRelease, HapticSpell, HapticInteraction, HapticAlert, HapticShortMelee, BloodVisor, BloodWipe, MeleeThrustSpeed, LootLabelSize, CompanionCounts, StrainVignette, OfflinePlayers, ShieldBashSpeed, DesktopOneEye, MapTopDown, MapRotate, FoveationStrength, StereoRendering, DeferGpuWait, TargetHighlight, HeartbeatStart, SpellLock, StaffPoint, LandingCircles, GroundAim, AimHighlights, HighlightRight, HighlightLeft, EnemySight, BowLaser, ThrowLift, BottlePhysics, PropPhysics, CompanionAi, ShieldGrip, ShieldOut, ShieldUp, ShieldFollow, ShieldRoll, AimFollowsView, CompanionTactical, LeftHandStrikes, TorchFlame, FrameGeneration, FrameGenPreset, FrameGenScale, RunSpeed, RunWalkToggle, BodyPhysics, BigObjectDistance, FogDistance, LeatherMenu, LootBeamUnique, LootBeamSet, LootBeamRare, LootBeamRunes, LootBeamBrightness, CeilingTorches, ArcaneDecay, ArcaneFade, ManaThreshold, ArcaneIntensity, GlyphDraw, GlyphCircle, GlyphTriangle, GlyphSquare, GlyphLightning, GlyphSpiral, GlyphV, GlyphStar, GlyphWave, LootPick, MotionsOff, MotionsPaladinOff, MotionsDruidOff, MotionsAmazonOff, MotionsNecromancerOff, MotionsBarbarianOff, MotionsAssassinOff, GlyphDrawSecond, GlyphLeftCircle, GlyphLeftTriangle, GlyphLeftSquare, GlyphLeftLightning, GlyphLeftSpiral, GlyphLeftV, GlyphLeftStar, GlyphLeftWave, SpellHandLight, MeleeReach, WalkDirection, RoomSteps, LightRadiusBoost, WeaponHeft, BowBash, AimWithEyes, MercPotionAssist, ClickToDrink, SkillCooldowns, SummonRangeMultiplier, TCrossCalibrate, HapticSurfaces, HapticHeartbeat, Count };
+           EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, VitalsTilt, HapticStrength, HapticMelee, HapticBowDraw, HapticBowRelease, HapticSpell, HapticInteraction, HapticAlert, HapticShortMelee, BloodVisor, BloodWipe, MeleeThrustSpeed, LootLabelSize, CompanionCounts, StrainVignette, OfflinePlayers, ShieldBashSpeed, DesktopOneEye, MapTopDown, MapRotate, FoveationStrength, StereoRendering, DeferGpuWait, TargetHighlight, HeartbeatStart, SpellLock, StaffPoint, LandingCircles, GroundAim, AimHighlights, HighlightRight, HighlightLeft, EnemySight, BowLaser, ThrowLift, BottlePhysics, PropPhysics, CompanionAi, ShieldGrip, ShieldOut, ShieldUp, ShieldFollow, ShieldRoll, AimFollowsView, CompanionTactical, LeftHandStrikes, TorchFlame, FrameGeneration, FrameGenPreset, FrameGenScale, RunSpeed, RunWalkToggle, BodyPhysics, BigObjectDistance, FogDistance, LeatherMenu, LootBeamUnique, LootBeamSet, LootBeamRare, LootBeamRunes, LootBeamBrightness, CeilingTorches, ArcaneDecay, ArcaneFade, ManaThreshold, ArcaneIntensity, GlyphDraw, GlyphCircle, GlyphTriangle, GlyphSquare, GlyphLightning, GlyphSpiral, GlyphV, GlyphStar, GlyphWave, LootPick, MotionsOff, MotionsPaladinOff, MotionsDruidOff, MotionsAmazonOff, MotionsNecromancerOff, MotionsBarbarianOff, MotionsAssassinOff, GlyphDrawSecond, GlyphLeftCircle, GlyphLeftTriangle, GlyphLeftSquare, GlyphLeftLightning, GlyphLeftSpiral, GlyphLeftV, GlyphLeftStar, GlyphLeftWave, SpellHandLight, MeleeReach, WalkDirection, RoomSteps, LightRadiusBoost, WeaponHeft, BowBash, AimWithEyes, MercPotionAssist, ClickToDrink, SkillCooldowns, SummonRangeMultiplier, TCrossCalibrate, LookAtYou, ReverbEcho, HitStagger, HitKnockback, HapticSurfaces, HapticHeartbeat, Count };
 // One bit per setting, 256 wide: four words, since MSVC has no wider integer.
 // (128 until 2026-11-08, when 126 were in use and more rows were coming.)
 struct ChangeMask {
@@ -269,6 +270,18 @@ inline constexpr std::array<Definition,Count> Definitions{{
     // The T cross opens body calibration with no menu (body_calibration_gesture.h). VR Settings > Comfort > Body, its own row
     // under Height and arm span (Room follows you has Seated play's right half).
     {"T cross to calibrate", "Stand in a T cross for 2 seconds to open body calibration", L"interactions",L"t_cross_calibrate",1,0,1,1},
+    // Heads turn to you (look_at.h; owner 2026-11-09: "NPCs and monsters look at you. Townsfolk turn their heads to your
+    // real head position; monsters track your head rather than the hero spot"): the neck and head of each monster,
+    // mercenary, summon and townsperson near you turned to your eyes in the skeleton hook. Drawn only. On by default.
+    {"Heads turn to you", "Monsters and townsfolk near you turn their heads to your real head", L"gameplay",L"look_at_you",1,0,1,1},
+    // Echo (world_sound.h; owner 2026-11-09: "cave or cathedral reverb would add more presence than any visual change"):
+    // the game's own reverb for the place, raised for the headset. 0 Game's own, 1 More, 2 Strong. Graphics > Environment, with the dungeons' rows.
+    {"Echo", "How loud the game's own cave, crypt and cathedral echo is", L"audio",L"echo",float(worldsound::EchoDefault),0,float(worldsound::EchoCount-1),1},
+    // Hit reactions (hit_reactions.h; owner 2026-11-09: "Monsters that react to where you hit them"): a committed stroke that
+    // lands staggers the monster (the game's hit recovery), a heavy weapon's full stroke knocks it back (the game's knockback),
+    // each monster at most every 1.2 s / 2.5 s; act bosses never, uniques and champions stagger only. Both on by default.
+    {"Monsters stagger", "A committed stroke that lands makes the monster flinch", L"gameplay",L"hit_stagger",1,0,1,1},
+    {"Heavy hits knock back", "A heavy weapon's full stroke shoves the monster back", L"gameplay",L"hit_knockback",1,0,1,1},
     // Richer haptics (haptic_impact.h, haptic_heartbeat.h): Controls > Vibration, in Short melee taps' row, and
     // Interface > Warnings, in Heartbeat starts at's row. Both On by default; Off gives every strike the one tap it
     // had before, and no felt heartbeat.
@@ -317,6 +330,7 @@ inline float Normalize(Key key,float value){
     if(HighlightKey(key))return std::clamp(std::round(value/15)*15,d.min,d.max);   // 0 = By range, else a hue in 15-degree steps
     if(key==EnemySight)return float(enemysight::NormalizePercent(value));
     if(key==RunSpeed)return float(runspeed::NormalizePercent(value));
+    if(key==ReverbEcho)return float(worldsound::NormalizeEcho(value));   // a whole 0 - 2, else More
     if(key==VitalsTilt)return vitals::NormalizeTilt(value);
     if(HapticKey(key))return haptics::NormalizeStrength(value);
     if(key==ManaThreshold||key==ArcaneIntensity)return std::clamp(std::round(value/5.f)*5.f,d.min,d.max);

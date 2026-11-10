@@ -599,7 +599,7 @@ sets the page's rows back to their defaults, with **Undo reset** for 6 seconds.
 | Gameplay > Targeting | Whether skills go to the aimed monster, spell aim assist, keeping spell shots level, aiming a staff along the arm, aiming with your view (the eyes' 17-degree tunnel, the hands within 30 degrees of your head, a raised hand aiming alone) with **Eyes** (Aim with your eyes) beside it on a headset that shares eye tracking, the arrow path line, where ground skills land (the game's aim, where you point or the aimed monster) and landing circles. Every option that changes how a cast aims is Off (Game's aim) by default, except Spell aim assist (Strong) |
 | Gameplay > Shield | Bash speed to hit, the guard strain shadow (On or Off), and where a held shield sits on the forearm: along, out and across (all 0 by default), wrist turn and roll |
 | Gameplay > Monsters | Offline difficulty, monster sight range and the smarter mercenary with **Commands** beside it |
-| Gameplay > Physics | Rolling bottles, knockable props and pushable bodies |
+| Gameplay > Physics | Rolling bottles, knockable props, pushable bodies, and monsters' and townsfolk's heads turning to you |
 | Comfort > Moving | Smooth turning with its snap angle or turn speed, and movement speed |
 | Comfort > Body | Seated play, **Height and arm span** (**Calibrate body**, **Set eye height**) with the **T cross to calibrate** switch under it (standing only), and the belt's height and reach |
 | Controls > Hands | Dominant hand, **Stick toggle** and button names |
@@ -611,7 +611,7 @@ sets the page's rows back to their defaults, with **Undo reset** for 6 seconds.
 | Interface > Warnings | The low life and mana alert, heartbeat, blood on the visor and wiping it, and Arcane Decay's low mana warning with its fade, starting level and strength |
 | Graphics > Performance | Eyes drawn per frame (Both / One by turns, One by turns by default), render resolution (Headset size by default), lower detail at edges (Off / Fixed / Eye tracked) and its edge detail reduction, terrain and scenery distances with **Big objects** beside Scenery distance (600 by default). Under them, the readout: the actual VR source size, a Defer GPU wait button while frames wait for the GPU, warnings while the game's Vertical Sync is on or its anti-aliasing is not FXAA, each second's frame rate and where the frame's time goes, whether the CPU's part fits the headset's frame, and the game's own graphics options |
 | Graphics > Frames | Eyes drawn per frame on top, the same setting as on Performance; frame generation (experimental: Off / FidelityFX / NVIDIA, grayed on One by turns with a line saying why, with what OFXR Bridge is doing under its label), NVIDIA's flow quality and scale while NVIDIA is chosen, and the same readout, where Defer GPU wait has its button |
-| Graphics > Environment | Outdoor sky, distance fog with its **Fog distance** beside it while the fog is on (where it is complete, 100-1200 units, 600 by default), dungeon ceilings with **Torches** (Dungeon torchlight) beside them (the game's own torches and braziers lighting the dungeon around them; Off by default, as finding them scans the game's memory every 1.5 s), the experimental Sorceress spell glow on hands (Off by default) and the torch club's flame (On; its light stays when it is off) |
+| Graphics > Environment | Outdoor sky, distance fog with its **Fog distance** beside it while the fog is on (where it is complete, 100-1200 units, 600 by default), dungeon ceilings with **Torches** (Dungeon torchlight) beside them (the game's own torches and braziers lighting the dungeon around them; Off by default, as finding them scans the game's memory every 1.5 s), the experimental Sorceress spell glow on hands (Off by default) and the torch club's flame (On; its light stays when it is off), and **Echo** (Game's own / More / Strong, More by default): how loud the game's own echo of the place is. |
 | Guide | Left/right controller reference for movement, menus, melee, bow, spells, potions and game menus, in the button names Controls > Hands > Button names chooses |
 | What's new | The last published release's notes, read-only; a long release pages them, 12 lines a page, with **Previous** and **Next** |
 | More | Shown (a band link with a count) only while a setting has no place in the menu yet, such as one added since the menu was last sorted: its own label and help, 8 rows a page. A setting like that whose ini section has an owner page (sky, fog, ceiling and torch: Environment; render and stereo: Performance; haptics: Vibration; hud: Menus; bow: Targeting; turn: Moving; calibration: Body) shows in that page's New section instead, while the page has room |
@@ -916,6 +916,17 @@ visual. VR Settings > Gameplay > Physics > Knock over small props (`[interaction
 props](../docs/KNOCKABLE_PROPS.md). The log notes each weapon knock (`Frame
 props: knocked a cup ...`) and a summary every ten seconds.
 
+**Spells reach objects.** Your own spell missiles break the pots, urns,
+baskets and barrels they pass, as arrows do, and push the small props and
+dropped bottles in their way: along a bolt's flight, outward from a Fire
+Ball's or a Glacial Spike's burst and from a Nova's ring. A spell cast from
+the hand ends at the container it hits, as an arrow does; one the game flies
+(Charged Bolt, Nova, Teeth and the rest) breaks what it crosses and flies on.
+An exploding barrel explodes as when a weapon breaks it. Props move only
+within the 3 m they are known in. `[interactions] spell_impacts=0` turns it
+off; see [spells that reach objects](../docs/SPELL_IMPACTS.md). Not yet
+tested in a headset. The log notes each one (`Frame spell impact: ...`).
+
 **Pushable bodies.** In first person with Motion combat, your weapon, shield
 or fist pushes the monsters, mercenaries and townsfolk it meets. Each
 monster or townsperson within 3 m (`[bodies] radius`, 1.5-8 m) is given a body of capsules, one on each
@@ -939,6 +950,28 @@ then left alone for as long as it would take to come within the radius closing a
 - N limbs of M bones`), the first push each second, and a summary every ten
 seconds, ending with the skeleton hook's cost: its calls for bodies, those beyond
 the radius and its milliseconds a second.
+
+**Heads turn to you.** In first person, each monster, mercenary, summon and
+townsperson within about 7 m turns its head to your real head: where your
+eyes are in the room, standing, crouching or leaning, not the hero's spot on
+the floor. The head (with a third of the turn taken at the neck) goes up to 70
+degrees to either side of where the body faces, 40 up and 30 down, and eases
+there in about a quarter of a second; step behind a body (past about 105
+degrees) or beyond the range and it eases back to the game's animation. A body
+that has fallen over is left alone. The head is found once per model from its
+bones' names (`head_bind_jnt`, `head`, `head_main_00_M_JNT` and the like) and
+its bind matrices; a model with no such bone (a hydra, a bone wall) is left as
+the game poses it. Purely visual: the turn is made in the pose just before it
+is drawn, so who a monster attacks, where it walks and its hit box are
+unchanged, and pushable bodies bend from the turned pose. VR Settings >
+Gameplay > Physics > Heads turn to you (`[gameplay] look_at_you`, On by
+default) turns it off. The log names each model's head once (`Frame look-at:
+<model> - head ..., neck from ..., turns against ...`) and, every ten seconds a
+head was turned in, a summary ending with the hook's own cost (`Frame look-at:
+ten seconds: head turns=... hook N ms a second`).
+Two things are told from the pose alone, with no game unit read: which way a
+model faces (its bind pose is taken to face the model's +z, as the heroes'
+do) and whether it is dying (a body falling over stops being followed).
 
 **Hurt merc.** During VR gameplay the local hireling's life is sampled on the
 game thread every 200 ms with the same native stat call as the wrist vitals.
@@ -983,6 +1016,7 @@ hip_width=0.28
 holsters=1
 bottle_physics=1
 prop_physics=1
+spell_impacts=1
 body_physics=1
 leather_menu=1
 leather_menu_width=0.57
@@ -1463,6 +1497,27 @@ and trigger/button melee were:
     so a full-cycle stroke at 60% attack rating chance carries them about 60%
     of the time, as natively. `would_hit=1/0` (-1: not gated, e.g. a riposte)
     ends each `melee_trace` contact line.
+  - **Hit reactions** (owner, 2026-11-09; VR Settings > Gameplay > Physics >
+    Struck monsters; `[gameplay] hit_stagger` and `hit_knockback`, both 1 by
+    default; `hit_reactions.h`): the game makes a struck monster flinch only when
+    one hit takes a large share of its life, so most solid strokes drew nothing.
+    A stroke that carries its reactions (the next item: full cycle, would have
+    hit, first creature) now also carries its **force**: how committed the hand's
+    stroke was (its brisk travel, full at 35 cm) x (50% + 50% of the weapon's
+    weight, `weapon_heft.h` Weight, read whatever Weapon heft is set to) x the
+    stroke's damage share. At 0.5 the monster **staggers** (the game's hit
+    recovery): a committed fist, dagger or claw stroke, or 60-70% of a sword's.
+    At 0.8 it is **knocked back** (the game's knockback, away from the hero):
+    only weights of 0.6 and up reach it, so two-handed swords, axes and mauls,
+    spears, polearms and staves. Both are result flags of that stroke's own
+    damage record: no extra damage, attack or roll. The same monster staggers
+    at most every 1.2 s and is knocked back at most every 2.5 s; act bosses never
+    react, uniques and champions only stagger, a monster with no knockback
+    animation only staggers, and a killing blow is left alone. One log line per
+    reaction, `Frame hit reaction: monster ... knocked back|staggered ...`, and
+    at most one a second for a reaction asked for and not taken. Not built: the
+    knockback's direction following the swing (the game pushes away from the
+    hero) and corpses falling along the blow.
   - **Monster reactions and the stroke's share** (Cal, 2026-10-30): a monster
     flinches only when it should. A contact that would have missed, or a stroke
     without on-hit effects (not a full cycle, a cleave follow-up, a trigger hit
@@ -2258,6 +2313,48 @@ with the view every 10 ms, so FMOD re-pans everything that is playing.
 | `forward_sign` | `-1` | Which screen direction counts as ahead (`-1` = up). |
 | `depth_scale` | `2` | Stretches screen up/down to undo the isometric squash. |
 
+## Echo and footsteps
+
+The game already gives every place its own echo, and plays footsteps by the
+floor you walk on. In a headset the echo is mixed too faint to notice, so the
+plugin raises it.
+
+**Echo** (VR Settings > Graphics > Environment, More by default):
+
+| Echo | |
+|---|---|
+| Game's own | The game's mix, untouched. |
+| More | The echo twice as loud (+6 dB). |
+| Strong | Four times as loud (+12 dB), ringing a quarter longer. |
+
+Each level names a sound environment with its own reverb: a cave rings for
+3.4 s, the Cathedral for 4.3 s, Mephisto's hall for 4.75 s, the open moor for
+a quarter of a second. Every other number stays the game's, so each place
+keeps its character. The echo follows monsters, blows, footsteps, objects,
+items, skills and speech; music and menu sounds never echo. A change of the
+setting is heard at once. On a monitor the game's own mix stays.
+
+- Where the game turns the reverb off, it stays off.
+- The echo never becomes as loud as the sound that made it.
+
+Footsteps are the game's own: your hero's have their own sound channel, the
+hero's walk plays them - by the stick, or following you across your room -
+and the floor's material picks the sound. Their loudness is the Footsteps
+volume in the game's own audio options. Whether they play in first person has
+not been checked in a headset yet; the log line below counts them.
+
+The log says what ran: `Frame audio echo:` with the place's reverb numbers
+each time the game sets them (the game's, and what was sent), and every 10 s
+with sound `Frame audio: N sounds started` with your footsteps, others'
+footsteps and the busiest channels.
+
+`d2r_pcvr.ini`:
+
+| `[audio]` key | Default | |
+|---|---|---|
+| `echo` | `1` | `0` Game's own, `1` More, `2` Strong. Saved by VR Settings. |
+| `sound_log` | `1` | `0` = no count of started sounds in the log (read at start). |
+
 ## Loot beams
 
 A pillar of light stands over every Rare, Set and Unique item and every high
@@ -2329,9 +2426,16 @@ How the pick is made (`steamvr/gaze_aim.h`, `vr/vrcam.cpp` `eyegaze`):
   middle wins. Monsters behind walls or past the game's cast reach are skipped, as
   for the head's picks.
 - Caught within 6 degrees, kept while within 10, and another takes over only
-  when 2 degrees nearer. Any change waits until it has been the choice for
-  100 ms, so a glance across the screen does not light each monster it passes;
+  when 2 degrees nearer. With nothing picked, the first monster looked at is
+  taken at once; a change from one monster to another, or to none, waits until
+  it has been the choice for 70 ms (100 ms for every change before 2026-11-09),
+  so a glance across the screen does not light each monster it passes;
   a pick that dies or leaves sight gives way at once.
+- The monsters every pick chooses among (eyes, view and hands) are read from
+  the game every game update, 40 ms, while a hostile monster is near (every
+  100 ms before 2026-11-09, and still while none is), so a pick follows a
+  monster that moves or comes into view sooner. `Frame target lock: N scans in
+  10 s ... ms a second` reports what the reading costs.
 - A blink or a dropped sample keeps the pick for up to 350 ms. Longer, the head's
   view picks as before (Aim with your view's 17 / 30 degree tunnel, or the 30-degree
   cone) until samples have come for 150 ms again.
