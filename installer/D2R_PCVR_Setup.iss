@@ -75,9 +75,22 @@ var
   PayloadRoot, ProbeFile, ChoicesFile, LastOutput, PreviousEdition, BackupGame: String;
   SetupFailed, BackendBusy: Boolean;
 
+// One quoted argument for the setup helper. A backslash right before the closing quote would escape it: "D:\" reaches
+// the helper as D:" and swallows the options after it, which stopped setup with "Setup could not finish: 2" when Setup
+// was started from the top folder of a drive or a folder was given with a backslash at its end. Backslashes at the end
+// are therefore doubled, which the helper reads back as the folder itself.
 function Q(const Value: String): String;
+var
+  I: Integer;
+  Tail: String;
 begin
-  Result := '"' + Value + '"';
+  Tail := '';
+  I := Length(Value);
+  while (I > 0) and (Value[I] = '\') do begin
+    Tail := Tail + '\';
+    I := I - 1;
+  end;
+  Result := '"' + Value + Tail + '"';
 end;
 
 function IsSecurityBlock: Boolean;
