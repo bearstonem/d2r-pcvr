@@ -88,7 +88,9 @@ static void Run() {
             else Check(s.aim.x==0&&s.aim.y==0&&s.aim.z==0,(label+"no way of its own: the right hand's ray aims it").c_str());
         }
         {Sim s(m.motion);s.in.active=false;m.perform(s);Check(s.casts==0,(label+"with the gate closed, nothing casts").c_str());}
-        for(const auto& other:all)if(other.motion!=m.motion) {
+        // Apocalypse's snap apart is as wide as Ring of Fire's fling: it is watched first and casts alone (warlock::Order),
+        // as the Sorceress's Static Field before her Nova (spell_motion_test.cpp)
+        for(const auto& other:all)if(other.motion!=m.motion&&!(m.motion==Motion::RingOfFire&&other.motion==Motion::Apocalypse)) {
             Sim s(m.motion);other.perform(s);
             Check(s.casts==0,(label+"another motion ("+other.name+") does not cast it").c_str());
         }

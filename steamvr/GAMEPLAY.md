@@ -3008,20 +3008,26 @@ there.
   in front twice; Shadow Warrior, both hands from the chest pushed together to one side; Mind Blast,
   both hands at the temples, pushed straight forward.
 - Warlock (owner, 2026-11-10: "build the motion controls for the missing classes"; `motions_warlock.h`,
-  `[motions] warlock_off`): twelve of its skills, each on one of the Necromancer's shapes, with that
-  class's detectors, tuning and order (a class watches only its own motions). Which shape follows how
-  the game casts the skill (its `skills.txt`). The demons are summoned on a spot, as golems are: Summon
-  Goatman, the right arm swept up fast in front, toward its spot; Summon Tainted, the left arm; Summon
-  Defiler, both arms (four cells straight ahead). The sigils are laid where the pointer is, as Blizzard
-  and Meteor are (owner: "are they supposed to be targeted? Like Sorcerer's Blizzard?"): Sigil: Lethargy,
-  the right fist punched out, and Sigil: Rancor, both fists, land where the main hand points; Sigil:
-  Death, the right hand swept across the chest, on the spot the sweep draws. The rest have no target.
-  The hexes go on the Warlock's own weapon: Hex: Bane, the left fist punched out; Hex: Purge, both fists
-  pushed down from the chest to the waist; Hex: Siphon, both hands apart in front, brought together.
-  Psychic Ward, both fists crossed on the chest and held; Eldritch Blast, both arms swept up in a wide V;
-  Ring of Fire, hands together at the chest, then flung wide. Its other skills stay on their buttons:
-  those that need a monster, a corpse or the demon under the pointer, the bolt, the weapon's attacks, and
-  Blood Boil, Flame Wave, Apocalypse and Abyss. Not yet done in a headset.
+  `[motions] warlock_off`): sixteen of its skills, each on a shape another class already has: the
+  Necromancer's twelve and four of the Sorceress's own, with those classes' detectors and tuning (a class
+  watches only its own motions). Which shape follows how the game casts the skill (its `skills.txt`).
+  The demons are summoned on a spot, as golems are: Summon Goatman, the right arm swept up fast in front,
+  toward its spot; Summon Tainted, the left arm; Summon Defiler, both arms (four cells straight ahead).
+  The sigils and Abyss are laid where the pointer is, as Blizzard and Meteor are (owner: "are they
+  supposed to be targeted? Like Sorcerer's Blizzard?", "or they could land on targeted monsters like
+  sorceress"): they land on the highlighted monster when there is one (`aimrules::MotionOnTarget`), else
+  where the main hand points - Sigil: Lethargy, the right fist punched out; Sigil: Rancor, both fists
+  pushed down from the chest to the waist; Abyss, both hands apart in front, brought together - or, for
+  Sigil: Death, where the right hand's sweep across the chest draws it. Flame Wave, both fists punched
+  out, rolls along the main hand's ray. The rest have no target. The hexes go on the Warlock's own
+  weapon: Hex: Bane, the left fist punched out; Hex: Purge, both hands up at the face, held; Hex: Siphon,
+  the left hand swept from the right hand up to the right shoulder. Psychic Ward, both fists crossed on
+  the chest and held; Eldritch Blast, both arms swept up in a wide V; Ring of Fire, hands together at the
+  chest, then flung wide; Apocalypse, the palms rubbed together, then snapped apart; Blood Boil, both
+  fists shaken hard, held apart. Sixteen cards are more than a MOTIONS page's fourteen: its page alone
+  has eight lower rows (`interaction::MotionCardsCompact`), its notes in the two lines over them. Its
+  other skills stay on their buttons: those that need a monster, a corpse or the demon under the
+  pointer, the bolt and the weapon's attacks. Not yet done in a headset.
 
 A tester's first pass (2026-11-05) changed them: "All motions should be quick and repeatable
 sequences that don't need you to move slow", "Please no floor stuff", Raise Skeleton worked once

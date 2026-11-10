@@ -478,7 +478,7 @@ inline int WheelCell(float u,float v,int previous=-1,MenuPage page=MenuPage::Spe
         if(motions&&MotionsBounds.Contains(u,v))return MotionsCell;
     }
     if(page==MenuPage::Motions) {   // the cards alone: no wheel behind the page
-        for(int i=0;i<MotionCards;++i)if(MotionCardBounds(i,motionCount).Contains(u,v))return MotionCardCell(i);
+        for(int i=0;i<MotionCards&&i<motionCount;++i)if(MotionCardBounds(i,motionCount).Contains(u,v))return MotionCardCell(i);
         return -1;
     }
     if((QuickControls(page)||page==MenuPage::Glyphs)&&GlyphsBounds.Contains(u,v))return GlyphsCell;
