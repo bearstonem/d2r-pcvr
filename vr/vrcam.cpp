@@ -334,6 +334,7 @@ struct Settings {
     // [campfire] select: the character select screen (the main menu's hero, in the scene of his last act) in stereo
     // too, the whole flat menu on one board before you. Its own place for the eyes and for the board.
     std::atomic<bool>  campfireSelect{false};
+    std::atomic<bool>  selectSky{true};   // [campfire] select_sky: our sky of the hero's act in the scene's void
     std::atomic<float> selectForward{0.0f}, selectUp{0.0f}, selectEye{6.0f}, selectMenuWidth{2.0f}, selectMenuDistance{1.8f}, selectMenuDrop{0.3f};
     std::atomic<bool>  campfireOn{false};    // [campfire] enabled: character creation's campfire scene in stereo, round you
     std::atomic<float> campfireEye{6.0f};    // [campfire] eye: the eye height the scene's scale is taken from, world units (~0.24 m each)
@@ -1504,6 +1505,7 @@ void LoadSettings() {
             static int toldSelect = -1;
             if (int(select) != toldSelect) { toldSelect = int(select); LogF("vrcam: [campfire] select=%d", int(select)); }
             g_set.campfireSelect.store(select);
+            g_set.selectSky.store(IniB(L"campfire", L"select_sky", true));
             g_set.selectForward.store(std::clamp(IniF(L"campfire", L"select_forward", 0.0f), -200.0f, 200.0f));
             g_set.selectUp.store(std::clamp(IniF(L"campfire", L"select_up", 0.0f), -40.0f, 40.0f));
             g_set.selectEye.store(std::clamp(IniF(L"campfire", L"select_eye", 6.0f), 1.0f, 40.0f));
@@ -10388,7 +10390,7 @@ bool MonsterPosition(uint32_t id,float out[3]) {
 // The campfire under our sky ([campfire] sky, [sky] enabled): its void - over the player, above the
 // scene's band of mountains - gets Act 5's sky, menus or not; fog and the rest stay off there.
 bool CampfireSky() {
-    return g_campfire.load() && !g_campfireSelect.load() && g_set.campfireSky.load() && g_set.skyOn.load() && g_enabled.load();
+    return g_campfire.load() && (g_campfireSelect.load() ? g_set.selectSky.load() : g_set.campfireSky.load()) && g_set.skyOn.load() && g_enabled.load();
 }
 // Act 5's palette (Harrogath's): the campfire is its west gate.
 int CampfireSkyPalette() {
@@ -10492,7 +10494,9 @@ void SkyTick() {
     else if (TopPersp()) why = "the view from above";
     else if (palette < 0) why = "not outdoors";
     else if (WorldMenuBlocksEffects()) why = "a menu hides the world backdrop";
-    g_skyPalette.store(CampfireSky() ? CampfireSkyPalette() : why ? -1 : palette);
+    // The character select screen: its hero's act's sky (actN_frontend_biome) round the scene's flat backdrops, in
+    // the void they leave (owner's recording, 2026-11-10: black over and behind the set).
+    g_skyPalette.store(CampfireSky() ? (g_campfireSelect.load() ? SkyPaletteFor(biome, true) : CampfireSkyPalette()) : why ? -1 : palette);
     // Arcane's native weather effect is a flat set of cards. Setup replaces
     // only that effect; its native star maps now use the same world-space ray
     // in both eyes. Unlike added outdoor sky, this is part of the level itself.
