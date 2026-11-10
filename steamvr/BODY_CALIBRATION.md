@@ -1,7 +1,8 @@
 # Body calibration and shoulder weapon swapping
 
-On the first offline character load without a saved calibration, the headset
-shows a body calibration prompt. Stand upright, look straight ahead, and stretch
+Every time a character loads into the game, the headset shows a body calibration
+prompt (not on an act change, and not in Seated play once a measurement is saved).
+Right B closes it and keeps the measurement you already have. Stand upright, look straight ahead, and stretch
 both arms out sideways at shoulder height: a T cross. Release both triggers, then hold
 both for about 1.2 seconds while keeping still. Wait for **Saved**, then release
 the triggers to return to gameplay. Right B skips or cancels before saving.

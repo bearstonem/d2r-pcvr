@@ -3737,9 +3737,18 @@ void Input() {
         if(atlasStagingFree.size()<AtlasStagingKept)atlasStagingFree.push_back(std::move(upload->staging));
         upload=atlasUploads.erase(upload);
     }
-    if(!calibrationPrompted&&!settingsModel.open&&!panelMode&&!spatialMode&&inWorld&&inWorld()){
+    // Every character load opens Calibrate body (owner, 2026-11-10), not only the first with nothing stored.
+    // Back at the menus there is no hero: the next one in a world is a load. An act change keeps its hero, so
+    // it asks nothing. Seated play with a measurement stored is left alone: the prompt asks you to stand.
+    if(calibrationPrompted&&!bodyCalibration.Active()&&!(inWorld&&inWorld())&&!gamestate::LocalPlayer())calibrationPrompted=false;
+    if(!calibrationPrompted&&!settingsModel.open&&!panelMode&&!spatialMode&&inWorld&&inWorld()&&gamestate::LocalPlayer()){
         const auto config=vrsettings::Read();
-        if(config.ready&&config.result!=settings::Result::Saving){calibrationPrompted=true;if(!calibration::Stored(config.values))OpenBodyCalibration();}
+        if(config.ready&&config.result!=settings::Result::Saving){
+            calibrationPrompted=true;
+            const bool stored=calibration::Stored(config.values),seated=config.values[settings::Seated]>.5f;
+            if(!stored||!seated){OpenBodyCalibration();Say(stored?"Frame body calibration: character loaded, prompt opened (Right B keeps the stored measurement)":"Frame body calibration: character loaded with nothing stored, prompt opened");}
+            else Say("Frame body calibration: character loaded, Seated play with a stored measurement: no prompt");
+        }
     }
     TCrossStep(frameConfig,physical,nativeUi);
     const bool gripMenuPressed=leftMenuButton.Update((controls.buttons&menus::LeftStick)!=0,

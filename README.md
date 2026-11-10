@@ -92,7 +92,7 @@ This is a PCVR mod: the game runs on your Windows PC and streams to the headset.
 - A **MAP** tab at the bottom of the spell menu, showing explored areas and native markers.
 - Load supported arrow skills into a physical bow quiver, with the selected
   arrow visible on the string. Selected Paladin Smite works with left-shield contact.
-- Body calibration for your height and arm span, available on first load,
+- Body calibration for your height and arm span, offered each time a character loads,
   through **Left Grip + left secondary → Calibrate body**, and any time you
   stand in a T cross for 2 seconds.
 - Weapon-set swapping: reach your right hand over either shoulder and press
