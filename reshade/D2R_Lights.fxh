@@ -211,7 +211,7 @@ float4 TorchCands(float4 pos, int eye)
     if (below.y > 0.0 && below.y <= 64.0 && below.x > own * 1.1) d = below.x;
     if (d <= 1e-6) return 0.0;
     const float z = NearPlane / d;                      // along the view
-    if (FogOn && z > FogEnd) return 0.0;
+    if (FogOn && z * FogSlant(at, eye) > FogEnd) return 0.0;   // past the fog's end, from the eye
     const float2 ndc = float2(at.x * 2.0 - 1.0, 1.0 - at.y * 2.0);
     const float4 sp = eye == 0 ? SkyProj0 : SkyProj1;
     const float3 v = float3((ndc.x + sp.z) / sp.x, (ndc.y + sp.w) / sp.y, -1.0) * z;
