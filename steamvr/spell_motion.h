@@ -436,7 +436,7 @@ class Engine {
         for(auto& h:swing)for(auto& a:h)a={};
         for(auto& h:turns)for(auto& a:h)a.clear();
     }
-    void Stop(){watching=false;casts=0;Clear();}
+    void Stop(){watching=false;casts=0;spentPose=false;Clear();}
     void Report(Output& out)const {
         out.abandoned=abandon.why;out.abandonedHand=abandon.hand;
         for(int i=0;i<3;++i)out.abandonedFigures[i]=abandon.figures[i];
@@ -451,6 +451,9 @@ public:
     // A summon's spot: cells ahead of the eyes' heading and to its right, or where the right hand points.
     void LandAt(float ahead,float right){land=Land::Spot;spot={ahead,right};}
     void LandPointed(){land=Land::Pointed;spot={};}
+    // A motion that is only a pose held (Whirlwind's T) casts once for the pose: spent with the cast, and free
+    // again once the pose was left. Kept over the cast's Clear, gone with the hold (Stop).
+    bool spentPose=false;
     // For the Paladin's and the Druid's detectors: this frame's input as given (world head and hands, the grips,
     // the runtime's velocities, the arm span), and the body scale the history's hands were divided by (a hand's
     // metres: l * Body()).

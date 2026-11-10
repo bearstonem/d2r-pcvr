@@ -174,6 +174,12 @@ static void Run() {
     {   // Whirlwind: a T held a moment (owner, 2026-11-06), whirling ahead
         Sim s(Motion::Whirlwind);Whirlwind(s);
         Check(s.casts==1&&s.land==spellmotion::Land::Spot&&s.spot.ahead>9&&std::fabs(s.spot.right)<1,"Whirlwind: lands 10 cells ahead, where you face");
+        s.Hold(4);
+        Check(s.casts==1,"Whirlwind: the T held on for four seconds whirls once (it cast again every 0.9 s and emptied the mana)");
+        s.Move(RestR,RestL,.3f);Whirlwind(s);
+        Check(s.casts==2,"Whirlwind: the arms let down and a T again whirls again");
+        s.Move(RestR,RestL,.2f);s.Move({.75f,-.28f,-.05f},{-.75f,-.28f,-.05f},.2f);s.Hold(.6f);
+        Check(s.casts==3,"Whirlwind: let down and back in a T within the rest after a cast still counts as a new T");
         Sim brief(Motion::Whirlwind);brief.Move({.75f,-.28f,-.05f},{-.75f,-.28f,-.05f},.3f);brief.Move(RestR,RestL,.3f);brief.Hold(.3f);
         Check(brief.casts==0,"Whirlwind: the arms swept through a T and straight back down, no stop, is none");
         Sim front(Motion::Whirlwind);front.Move({.55f,-.28f,-.50f},{-.55f,-.28f,-.50f},.45f);front.Hold(.5f);

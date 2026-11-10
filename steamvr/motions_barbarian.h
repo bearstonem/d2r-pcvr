@@ -307,7 +307,15 @@ inline bool Done(Engine& e,Motion m) {
             return std::hypot(a.x-b.x,a.z-b.z)>=t.tApart&&a.x-b.x>=t.tSide&&a.y>=t.tLow&&a.y<=t.tHigh&&b.y>=t.tLow&&b.y<=t.tHigh&&
                 std::fabs(a.y-b.y)<=t.tLevel&&std::hypot(mid.x,mid.z)<=t.tDepth;
         };
+        // One whirl for a T (owner, 2026-11-10: "my mana would run out immediately"): held on, it cast again
+        // every 0.9 s (the rest after a cast, then tHold). The arms leave the T before it counts again - at any
+        // time since the cast, the rest after it too (the history starts over with the cast).
+        if(e.spentPose) {
+            if(std::all_of(h.begin(),h.end(),tee))return false;
+            e.spentPose=false;
+        }
         if(!e.Held(tee(n),n.t,t.tHold))return false;
+        e.spentPose=true;
         e.Aim({0,0,-1});e.LandAt(t.whirlAhead,0);
         return true;
     }
