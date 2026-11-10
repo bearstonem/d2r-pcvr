@@ -66,8 +66,9 @@ static const GoldenRow Golden[]={
     {"interactions.bottle_physics",View::Physics,0,content::RowKind::Toggle,"Roll and break bottles",0,0},
     {"interactions.prop_physics",View::Physics,0,content::RowKind::Toggle,"Knock over small props",0,0},
     {"interactions.body_physics",View::Physics,0,content::RowKind::Toggle,"Pushable bodies",0,0},   // main's #361
-    {"gameplay.hit_stagger",View::Physics,1,content::RowKind::Toggle,"Monsters stagger",0,0},   // hit reactions, 2026-11-09
-    {"gameplay.hit_knockback",View::Physics,1,content::RowKind::Toggle,"Heavy hits knock back",0,0},
+    {"gameplay.look_at_you",View::Physics,1,content::RowKind::Toggle,"Heads turn to you",0,0},   // Monsters and townsfolk (2026-11-09)
+    {"gameplay.hit_stagger",View::Physics,2,content::RowKind::Toggle,"Monsters stagger",0,0},   // hit reactions, 2026-11-09
+    {"gameplay.hit_knockback",View::Physics,2,content::RowKind::Toggle,"Heavy hits knock back",0,0},
     {"turn.smooth",View::Moving,0,content::RowKind::Toggle,"Smooth turning",0,0},
     {"turn.snap",View::Moving,0,content::RowKind::Stepper,"Snap turn angle",0,0},
     {"turn.speed",View::Moving,0,content::RowKind::Slider,"Smooth turn speed",0,0},
@@ -137,6 +138,7 @@ static const GoldenRow Golden[]={
     {"fog.end",View::Environment,0,content::RowKind::Slider,"Fog distance",0,0},   // main's #366, drawn inside Distance fog's row
     {"ceiling.enabled",View::Environment,0,content::RowKind::Toggle,"Dungeon ceilings",0,0},
     {"ceiling.torches",View::Environment,0,content::RowKind::Toggle,"Dungeon torchlight",0,0},   // the game's own lights, drawn inside Dungeon ceilings' row
+    {"audio.echo",View::Environment,0,content::RowKind::Choice,"Echo",3,0},   // world sound: the game's own reverb, raised (2026-11-09)
     {"torch.flame",View::Environment,1,content::RowKind::Toggle,"Torch flame",0,0},
     {"torch.spell_hands_pct",View::Environment,1,content::RowKind::Slider,"Spell hand light",0,1},   // a Sorceress's (2026-11-06)
     {"light.radius_boost_pct",View::Environment,1,content::RowKind::Slider,"Light Radius boost",0,0},   // #440
@@ -234,7 +236,7 @@ int main(int argc,char** argv){
     }
     // ---- the map: no row lost, none left to More, the names and the owner's pairs ----
     {
-        Check(tables.rowCount==108,"108 settings on the menu, each one row");   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424), Click to drink (#425), Skill cooldowns (2026-11-09), + Summon range (#426), T cross to calibrate (#423), + Monsters stagger, Heavy hits knock back (2026-11-09)
+        Check(tables.rowCount==110,"110 settings on the menu, each one row");   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424), Click to drink (#425), Skill cooldowns (2026-11-09), + Summon range (#426), T cross to calibrate (#423), Heads turn to you (2026-11-09), Echo (world sound, 2026-11-09), + Monsters stagger, Heavy hits knock back (hit reactions, 2026-11-09)
         for(size_t i=0;i<tables.rowCount;++i)Check(!tables.rows[i].fallback&&tables.rows[i].page!=View::More,std::string("every setting has its page: ")+tables.rows[i].label);
         Check(content::Menu().report.empty(),"the tidy report is empty");
         struct Want {content::Group group;const char* name;std::vector<const char*> pages;};

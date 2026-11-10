@@ -243,7 +243,7 @@ inline constexpr ContentPage PageTable[]={
     {View::Warnings,"Warnings",Group::Interface,Icon::Survival,"Warnings when your life or mana runs low.",true},
     {View::Performance,"Performance",Group::Graphics,Icon::Performance,"Image detail and how far you see, with the last second's frame times below.",true},
     {View::Frames,"Frames",Group::Graphics,Icon::Fast,"How each frame is made: the eyes drawn, generated frames and the GPU wait.",true},
-    {View::Environment,"Environment",Group::Graphics,Icon::World,"Extra sights the mod adds to the game world. Far objects: Graphics > Performance.",true},
+    {View::Environment,"Environment",Group::Graphics,Icon::World,"Extra sights and sound the mod adds to the game world. Far objects: Graphics > Performance.",true},
     {View::Guide,"Guide",Group::Header,Icon::Controls,"Each stick opens its hand's wheel. Point the other hand's laser at a wedge to assign a skill.",false},
     {View::WhatsNew,"What's new",Group::Header,Icon::Notes,"Changes in this version of the mod.",false},
     // A safety net: settings no override placed whose owner page is full or unknown
@@ -283,7 +283,7 @@ inline constexpr ContentSection SectionTable[]={
     {View::Targeting,"Target selection"},{View::Targeting,"Aiming"},{View::Targeting,"Ground targeting"},
     {View::Shield,"Bash and block"},{View::Shield,"Fit on the arm"},
     {View::Monsters,"Offline difficulty"},{View::Monsters,"Mercenary"},{View::Monsters,"Summons"},
-    {View::Physics,"Props"},{View::Physics,"Struck monsters"},
+    {View::Physics,"Props"},{View::Physics,"Monsters and townsfolk"},{View::Physics,"Struck monsters"},
     {View::Moving,"Turning"},{View::Moving,"Speed"},
     {View::Body,"Play space"},{View::Body,"Potion belt"},
     {View::Hands,"Hands and buttons"},
@@ -348,6 +348,12 @@ inline constexpr Option MenuDistanceOptions[]={
     {0,"Near","Menus 55 cm away, the main menu 70 cm."},
     {1,"Medium","Menus 85 cm away, the main menu 1 m."},
     {2,"Far","Menus 1.15 m away, the main menu 1.3 m."},
+};
+// Echo (world_sound.h): the game's own reverb for the place you stand in, as the game mixes it or louder.
+inline constexpr Option EchoOptions[]={
+    {0,"Game's own","The echo as the game mixes it, made for speakers: faint in a headset."},
+    {1,"More","The game's echo twice as loud: caves, crypts and halls ring around you."},
+    {2,"Strong","Four times as loud, and it rings a quarter longer."},
 };
 inline constexpr Option TooltipOptions[]={
     {0,"Instant","Details show as soon as the laser reaches an item."},
@@ -531,6 +537,10 @@ inline constexpr Override Overrides[]={
      .help="Cups, vases, books and stools tumble when your weapon, hand or shield hits them. Just for looks."},
     {.id="interactions.body_physics",.page=View::Physics,.section="Props",.kind=RowKind::Toggle,.label="Pushable bodies",
      .help="Your weapon, shield or fist pushes aside the limbs of monsters and townsfolk it meets, and they spring back. Just for looks. Motion combat in first person."},
+    // Physics: Monsters and townsfolk. Heads turn to you (look_at.h; owner, 2026-11-09), On by default. On this page
+    // beside Pushable bodies, the other drawn-only change to their poses (Monsters already has its three sections).
+    {.id="gameplay.look_at_you",.page=View::Physics,.section="Monsters and townsfolk",.kind=RowKind::Toggle,.label="Heads turn to you",
+     .help="Monsters, mercenaries and townsfolk within about 7 m turn their heads to your real head as you move. Just for looks. First person only."},
     // Physics: Struck monsters (hit_reactions.h; [gameplay] hit_stagger and hit_knockback, both On by default)
     {.id="gameplay.hit_stagger",.page=View::Physics,.section="Struck monsters",.kind=RowKind::Toggle,.label="Monsters stagger",
      .help="A long, committed stroke that lands makes the monster flinch, whatever the damage. Each monster at most every 1.2 s; act bosses never."},
@@ -763,6 +773,11 @@ inline constexpr Override Overrides[]={
     {.id="ceiling.torches",.page=View::Environment,.section="Sky and dungeons",.kind=RowKind::Toggle,.label="Dungeon torchlight",
      .help="The game's own torches and braziers light the dungeon around them. Finding them scans game memory every 1.5 s: turn it off if dungeons stutter.",
      .beside=true,.besideLabel="Torches"},
+    // Echo (world_sound.h; owner 2026-11-09): the game's own reverb per place, raised for the headset. With the
+    // dungeons' rows: a third section would leave the page no room for the fallback's "New".
+    {.id="audio.echo",.page=View::Environment,.section="Sky and dungeons",.kind=RowKind::Choice,.label="Echo",
+     .help="How loud the game's own echo of the place is: caves, crypts and the Cathedral ring, the open moor barely. It follows every monster, footstep and voice.",
+     FRAMEVR_OPTIONS(EchoOptions)},
     // Environment: Glow. Spell glow on hands left the page and the settings on 2026-11-04: always on for a
     // Sorceress (the owner; [interactions] elemental_hands is ignored).
     {.id="torch.flame",.page=View::Environment,.section="Glow",.kind=RowKind::Toggle,.label="Torch flame",
@@ -963,7 +978,7 @@ inline View OwnerOf(const wchar_t* section){
     if(s==L"calibration")return View::Body;
     if(s==L"bow")return View::Targeting;
     if(s==L"hud")return View::Menus;
-    if(s==L"sky"||s==L"fog"||s==L"ceiling"||s==L"torch")return View::Environment;
+    if(s==L"sky"||s==L"fog"||s==L"ceiling"||s==L"torch"||s==L"audio")return View::Environment;
     if(s==L"haptics")return View::Vibration;
     if(s==L"render"||s==L"stereo")return View::Performance;
     return View::More;   // gameplay, interactions and any new section

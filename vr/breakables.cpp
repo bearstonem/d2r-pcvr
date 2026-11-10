@@ -180,6 +180,31 @@ bool OperateArrow(uintptr_t game,uintptr_t player,uintptr_t unit,uint32_t id) {
     ++refused;
     return false;
 }
+size_t Nearby(uintptr_t game,float x,float z,float reach,std::span<Container> out) {
+    if(!ready.load()||out.empty()||!(reach>0))return 0;
+    uintptr_t buckets[128]{};if(!Read(game+0x546*8,buckets))return 0;
+    size_t count=0;unsigned visited=0;
+    for(uintptr_t unit:buckets)for(unsigned chain=0;unit&&chain<256&&visited++<4096&&count<out.size();++chain) {
+        uintptr_t next=0;if(!Read(unit+0x158,next))break;
+        Object o;
+        if(Inspect(game,unit,o)&&std::hypot(2.f*o.x-x,2.f*o.y-z)<=reach)out[count++]={o.id,2.f*o.x,2.f*o.y,o.sizeX,o.sizeY};
+        unit=next;
+    }
+    return count;
+}
+bool OperateMissile(uintptr_t game,uintptr_t player,uint32_t id) {
+    if(!ready.load()||!game||!player||!id)return false;
+    Vec playerPos{};if(!Player(game,player,playerPos))return false; // the local hero, alive, in this game
+    const auto unit=melee::ServerUnit(game,2,id);
+    Object o;if(!Inspect(game,unit,o)||o.id!=id)return false;
+    {Scope scope(game,player,id);
+     reinterpret_cast<int(*)(uintptr_t,uintptr_t,uintptr_t)>(d2rsig::Addr(OperateRva))(game,player,unit);}
+    uint32_t after[4]{};
+    const auto check=melee::ServerUnit(game,2,id);
+    if(Read(check,after)&&after[0]==2&&after[2]==id&&after[3]!=0)return true; // counted by the caller
+    ++refused;
+    return false;
+}
 void Report() {
     const auto r=broken[0].exchange(0),l=broken[1].exchange(0),p=brokenProjectiles.exchange(0),w=blocked.exchange(0),f=refused.exchange(0);
     if(!r&&!l&&!p&&!w&&!f)return;

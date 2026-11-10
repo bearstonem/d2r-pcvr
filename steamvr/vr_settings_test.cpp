@@ -103,7 +103,7 @@ int main(int argc,char** argv){
     {
         for(Key k:{StereoRendering,RenderResolution,DrawDistance,ObjectDistance,BigObjectDistance,Foveation,FoveationStrength})
             Check(PageOf(k)==View::Performance,"the image and draw distance settings are on the Performance page, Big objects too");
-        for(Key k:{Sky,Fog,FogDistance,Ceiling,CeilingTorches,TorchFlame,SpellHandLight,LightRadiusBoost})
+        for(Key k:{Sky,Fog,FogDistance,Ceiling,CeilingTorches,TorchFlame,SpellHandLight,LightRadiusBoost,ReverbEcho})
             Check(PageOf(k)==View::Environment,"the Environment page keeps the mod's effects, with the fog's distance, the torch flame, the spell hand light and the Light Radius boost");
         for(Key k:{BottlePhysics,PropPhysics,BodyPhysics})
             Check(PageOf(k)==View::Physics,"bottle, prop and body physics are on the Physics page");
@@ -930,6 +930,18 @@ int main(int argc,char** argv){
         Check(m.Click({Kind::Apply}).changed==(ChangeMask{1}<<LeatherMenu),"Apply saves only the leather menu");
         Check(Normalize(LeatherMenu,2)==2&&Normalize(LeatherMenu,.4f)==1&&Normalize(LeatherMenu,7)==1&&Normalize(LeatherMenu,NAN)==1,
               "Off, On or Menu only; an odd INI value or none reads On");
+    }
+    {   // Heads turn to you: On by default, a switch on Physics, every class, saved alone
+        const auto& d=Definitions[LookAtYou];
+        Check(std::wstring(d.section)==L"gameplay"&&std::wstring(d.key)==L"look_at_you"&&d.defaultValue==1&&d.min==0&&d.max==1&&d.step==1&&
+              Defaults()[LookAtYou]==1&&LookAtYou<ChangeMask::Bits&&HelpText(LookAtYou)[0]!=0,"[gameplay] look_at_you: On or Off, On by default, explained, its own change bit");
+        Check(LookAtYou>TCrossCalibrate,"appended after the keys before it (saved profiles keep their order)");
+        const auto* row=content::RowOf(LookAtYou);
+        Check(row&&!row->beside&&row->page==View::Physics&&row->kind==content::RowKind::Toggle,"its own row on Physics");
+        for(int c=-1;c<=heroclass::Assassin+1;++c)Check(RowShown(LookAtYou,Defaults(),{c}),"every class sees it");
+        Check(Normalize(LookAtYou,NAN)==1&&Normalize(LookAtYou,7)==1&&Normalize(LookAtYou,0)==0,"a malformed value reads On, the default");
+        Model t;Snapshot ready;ready.ready=true;t.Open(ready);layout::Press(t,{Kind::Set,LookAtYou,0,0},0);
+        Check(t.Get()[LookAtYou]==0&&t.Click({Kind::Apply}).changed==(ChangeMask{1}<<LookAtYou),"the switch turns it Off, and Apply saves only it");
     }
     {   // The T cross: On by default, a switch on Body, its own row under Height and arm span, saved alone
         Check(Defaults()[TCrossCalibrate]==1&&std::wstring(Definitions[TCrossCalibrate].section)==L"interactions"&&

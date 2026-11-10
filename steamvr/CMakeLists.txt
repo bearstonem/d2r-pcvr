@@ -66,6 +66,9 @@ target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/head_shadow.cpp)   # the head kept f
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/head_skip.cpp)   # the helm left out of the eye views' draws, kept in the shadow (head_skip.h)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/stereo_replay.cpp ${ROOT}/vr/ecl_hook.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/spatial_audio.cpp)   # head-relative sound
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/world_sound.cpp)   # world sound: the game's reverb raised, sounds counted by channel (world_sound.h)
+add_executable(world-sound-test world_sound_test.cpp)   # world sound: the echo arithmetic, the Echo setting, the log text
+target_link_libraries(world-sound-test PRIVATE framevr-runtime)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/roof_materials.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/engine_units.cpp)   # the game-drawn dungeon ceiling (shared/game_ceiling.h)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/panel_input.cpp)
@@ -77,6 +80,7 @@ target_sources(d2rl-pcvr PRIVATE elemental_hands_renderer.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/settings_menu.cpp ${CMAKE_CURRENT_SOURCE_DIR}/vr_settings_ui.cpp ${ROOT}/vr/native_ui.cpp ${CMAKE_CURRENT_SOURCE_DIR}/interaction_ui.cpp ${ROOT}/vr/interactionstate.cpp ${ROOT}/vr/bow.cpp ${ROOT}/vr/projectiles.cpp ${ROOT}/vr/combat.cpp ${ROOT}/vr/melee.cpp ${CMAKE_CURRENT_SOURCE_DIR}/transport.cpp ${CMAKE_CURRENT_SOURCE_DIR}/floating_map_frame.cpp ${CMAKE_CURRENT_SOURCE_DIR}/foveation.cpp ${CMAKE_CURRENT_SOURCE_DIR}/effects_layer.cpp ${CMAKE_CURRENT_SOURCE_DIR}/logging.cpp ${CMAKE_CURRENT_SOURCE_DIR}/profile.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/native_belt.cpp ${ROOT}/vr/quick_items.cpp ${ROOT}/vr/melee_weapon.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/breakables.cpp ${ROOT}/vr/offline_difficulty.cpp ${ROOT}/vr/enemy_sight.cpp)
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/spell_impacts.cpp)   # spells break containers and push props (spell_impacts.h)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/respec.cpp)   # Reset Skills & Stats (respec_button.h)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/target_lock.cpp ${ROOT}/vr/summon_range.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/loot_beam_scan.cpp)   # loot beams: the items on the floor that get one
@@ -259,6 +263,7 @@ add_test(NAME toss-test COMMAND toss-test)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/spells.cpp)
 add_executable(spell-cast-test spell_cast_test.cpp)
 add_executable(spell-aim-assist-test spell_aim_assist_test.cpp)
+add_executable(spell-impacts-test spell_impacts_test.cpp)
 
 add_executable(interaction-test interaction_test.cpp)
 add_executable(dev-scenarios-test dev_scenarios_test.cpp)
@@ -314,6 +319,7 @@ target_link_libraries(dropped-bottles-test PRIVATE box3d framevr-runtime)
 add_executable(props-test props_test.cpp)
 target_link_libraries(props-test PRIVATE framevr-runtime)
 add_executable(limb-rig-test limb_rig_test.cpp)
+add_executable(look-at-test look_at_test.cpp)   # Heads turn to you: the head by name and bind matrix, turn limits, range, the ease
 add_executable(limb-physics-test limb_physics_test.cpp limb_physics.cpp)
 target_link_libraries(limb-physics-test PRIVATE box3d)
 add_executable(potion-models-test potion_models_test.cpp potion_models.cpp)
@@ -421,11 +427,12 @@ set_tests_properties(body-calibration-gesture-test PROPERTIES TIMEOUT 30)
 add_test(NAME light-bounds-test COMMAND light-bounds-test)
 set_tests_properties(light-bounds-test PROPERTIES TIMEOUT 30)
 foreach(test_target IN ITEMS memory-test biome-list-test hook-metrics-test active-keys-test resource-descriptions-test latest-worker-test haptic-pulse-test thread-stats-test
+    spell-impacts-test
     gameplay-test weapon-skills-test quick-cast-test hand-controls-test elemental-hands-test elemental-particles-test skill-pad-test interact-press-test sewer-interaction-test notice-card-test mod-layout-test spell-aim-test bow-pose-test crossbow-pose-test body-tracking-test shapeshift-form-test head-shadow-test head-skip-test shield-steady-test body-calibration-test shoulder-swap-test blood-screen-test
-    portal-billboard-test shrine-trace-test shrine-placement-test overlay-view-test bone-armor-height-test composition-layers-test projectile-rules-test environment-cutaway-test roof-materials-test game-ceiling-test stereo-prop-physics-test dropped-bottles-test props-test limb-rig-test limb-physics-test leather-menu-test stash-buttons-test stats-button-test menu-drop-test arcane-decay-test respec-button-test vr-keyboard-test
+    portal-billboard-test shrine-trace-test shrine-placement-test overlay-view-test bone-armor-height-test composition-layers-test projectile-rules-test environment-cutaway-test roof-materials-test game-ceiling-test stereo-prop-physics-test dropped-bottles-test props-test limb-rig-test look-at-test limb-physics-test leather-menu-test stash-buttons-test stats-button-test menu-drop-test arcane-decay-test respec-button-test vr-keyboard-test
     combat-rules-test strike-skills-test zeal-light-test skill-usage-test shield-guard-test guard-strain-test heartbeat-test run-speed-test room-scale-test room-steps-test walk-direction-test logging-test melee-contact-test bow-bash-test weapon-heft-test hit-reactions-test melee-weapon-test breakables-test offline-difficulty-test enemy-sight-test attack-speed-test world-coordinates-test bow-flight-test bow-laser-test spell-cast-test spell-aim-assist-test tactical-chord-test glyph-recognizer-test glyph-trail-test glyph-cast-test spell-motion-test motions-amazon-test motions-barbarian-test motions-necromancer-test motions-assassin-test motions-paladin-test motions-druid-test bone-graft-test
     interaction-test dev-scenarios-test native-belt-test wrist-hud-test map-zoom-test floating-map-test navigation-info-test companions-test active-effects-test skill-cooldowns-test dropped-item-labels-test stick-gestures-test show-items-command-test native-hud-test render-resolution-test render-pointer-test scene-depth-test game-device-only-test controller-bindings-test journal-test native-panels-test talk-stop-test sheet-walk-test room-stitch-test ceiling-top-test loot-beams-test
-    vr-settings-test vr-settings-layout-test vr-settings-pointer-test vr-settings-store-test controller-labels-test math-test deferred-draw-test monster-bars-test loot-aim-test telegraph-test aim-reach-test aim-rules-test target-cone-test gaze-test window-focus-test callback-ticket-test local-player-test shield-block-test trigger-melee-test companion-ai-test torch-light-test light-radius-test frame-generation-test turn-capture-test panel-atlas-test far-objects-test)
+    vr-settings-test vr-settings-layout-test vr-settings-pointer-test vr-settings-store-test controller-labels-test math-test deferred-draw-test monster-bars-test loot-aim-test telegraph-test aim-reach-test aim-rules-test target-cone-test gaze-test window-focus-test callback-ticket-test local-player-test shield-block-test trigger-melee-test companion-ai-test torch-light-test light-radius-test world-sound-test frame-generation-test turn-capture-test panel-atlas-test far-objects-test)
   # These fixtures use assert for their checks, including in Release builds.
   if(MSVC)
     target_compile_options(${test_target} PRIVATE /UNDEBUG)
