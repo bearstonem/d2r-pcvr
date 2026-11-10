@@ -214,7 +214,7 @@ static void Run() {
         Sim tilt(Motion::Whirlwind);tilt.Move({.70f,.05f,-.05f},{-.70f,-.40f,-.05f},.45f);tilt.Hold(.5f);
         Check(tilt.casts==0,"Whirlwind: one arm up and one down is no T");
         Sim howl(Motion::Whirlwind),howled(Motion::Howl);Howl(howl);Howl(howled);howl.Hold(.6f);howled.Hold(.6f);
-        Check(howled.casts==1&&howled.castTime+.2<howl.castTime&&spellmotion::barbarian::Order[6]==Motion::Howl&&spellmotion::barbarian::Order[9]==Motion::Whirlwind,
+        Check(howled.casts==1&&howled.castTime+.2<howl.castTime&&spellmotion::barbarian::Order[6]==Motion::Howl&&spellmotion::barbarian::Order[12]==Motion::Whirlwind,
               "Whirlwind: Howl's fling held wide casts Howl first (watched first), then every watcher starts over");
         Sim spread(Motion::Whirlwind);spread.Move({.10f,-.30f,-.20f},{-.10f,-.30f,-.20f},.35f);spread.Move({.66f,-.25f,-.05f},{-.66f,-.25f,-.05f},.4f);spread.Hold(.5f);
         Check(spread.casts==1,"Whirlwind: a T spread from the hands together in front casts (the owner's, 2026-11-06)");
