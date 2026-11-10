@@ -3013,6 +3013,7 @@ bool CampfireView(const d2rcam::WorldView& in, float out[16]) {
     // Taken once on each arrival, from the head as it is then; it also puts the eyes'
     // origin at the head, so you stand where the game's camera stood.
     static float facing = 0.0f;
+    framevr::OpenCampfireFrame();   // both eyes at one frame's poses: no eye built from the frame before's
     if (g_campfireArrived.exchange(false)) {
         float level[16];
         if (framevr::View(level, ground, eyeH, UserEyeHeightM(), mapNorth, 0.0f, -1, mapNorth, eyeH, true)) {

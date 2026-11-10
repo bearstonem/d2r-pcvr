@@ -137,6 +137,7 @@ bool HandSpellHeld(int hand); // that hand's physical spell button is held
 bool RightPickHeld();
 // Any thread: the campfire's pointer from the right hand shown, a dot this far along it (metres) - the game's pointer.
 void SetCampfirePointer(bool on, float metres);
+void OpenCampfireFrame();   // the campfire: the headset frame opened before an eye's camera is built
 // The campfire's menu (name, Create, Back, the checkboxes) as a board in the scene: its width,
 // how far ahead of the eyes and how far below them it stands when the scene begins (metres).
 void SetCampfireMenu(float width, float distance, float drop);

@@ -907,6 +907,10 @@ struct EyeWorld {math::Vec at{};math::Quat turn{0,0,0,1};float nearPlane=0;bool 
 // stick, mouse or recentre turn since is turned out as well as the head's.
 struct LastEye {XrPosef pose{};XrFovf fov{};bool ok=false;math::Quat base{0,0,0,1};EyeWorld world{};};
 std::array<LastEye,2> lastEyes{};
+// The campfire (OpenCampfireFrame): which headset frame each eye's camera was built in, against the frame its
+// picture is copied in - they must be the same, or the picture goes at a pose it was not drawn with.
+unsigned frameSerial=0,campfireViewFrame[2]{},campfireSame[2]{},campfireOther[2]{},campfireStale[2]{};
+ULONGLONG campfireToldAt=0;
 std::array<math::Quat,2> viewBase{{{0,0,0,1},{0,0,0,1}}};   // each eye's, as View last built it
 std::array<EyeWorld,2> viewWorld{};   // each eye's this frame
 // While the option is on, each eye's image as shown, kept by Copy (KeepTurn):
@@ -5796,6 +5800,7 @@ void ReplayRight() {
 }
 bool Begin() {
     if(!session||frame) return frame;
+    ++frameSerial;
     Events();if(!running)return false;
     XrFrameWaitInfo wi{XR_TYPE_FRAME_WAIT_INFO};frameState={XR_TYPE_FRAME_STATE};
     timing={};const double waitStart=Milliseconds();
@@ -6582,6 +6587,15 @@ void Capture(reshade::api::command_queue* rq,reshade::api::swapchain* swap) {
         uiEye.copied=false;
         static ULONGLONG told=0;if(GetTickCount64()-told>2000){told=GetTickCount64();Say("Frame panels: campfire - the menu's copy refused this frame; retried on the next");}
     }
+    if(campfirePointer.load()&&stereo) {   // was this eye's camera built in the frame its picture is sent in?
+        ++(campfireViewFrame[eye]==frameSerial?campfireSame:campfireOther)[eye];
+        if(GetTickCount64()-campfireToldAt>5000) {
+            campfireToldAt=GetTickCount64();char line[260];
+            std::snprintf(line,sizeof line,"Frame campfire eyes: five seconds: left %u in its own frame, %u in another, %u built with no frame open; right %u, %u, %u",
+                campfireSame[0],campfireOther[0],campfireStale[0],campfireSame[1],campfireOther[1],campfireStale[1]);
+            Say(line);std::fill_n(campfireSame,2,0u);std::fill_n(campfireOther,2,0u);std::fill_n(campfireStale,2,0u);
+        }
+    }
     if((!uiCopied&&!campfirePointer.load())||!Copy(src,eyes[eye],rq)){
         if(campfirePointer.load()){
             static ULONGLONG told=0;if(GetTickCount64()-told>2000){told=GetTickCount64();Say("Frame OpenXR: campfire - an eye's copy refused this frame; retried on the next");}
@@ -6655,6 +6669,10 @@ void Register(LogFn log,PanelFn panel,PanelFn world,PanelFn toggle) {
 bool SpatialMenu(){return uiSupported.load()&&!(campfirePointer.load()&&campfireBoardFailed.load())&&uiworld::Ready()&&hud::LayerFound()&&inWorld&&inWorld()&&wantsPanel&&wantsPanel();}
 bool Active() {std::lock_guard lock(mutex);return frame&&valid&&render&&!failed&&!panelMode;}
 bool RightPickHeld(){return rightPickHeld.load();}
+// The campfire draws no pair, so nothing opened the headset's frame before an eye's camera was built: the first
+// eye was drawn at the frame before's poses and sent at the new frame's, and jumped with every turn of the head
+// (owner, 2026-11-10). The camera opens the frame itself (vrcam CampfireView), as BeginPair does in play.
+void OpenCampfireFrame(){std::lock_guard lock(mutex);if(session&&running&&!failed&&!panelMode&&!frame)Begin();}
 void SetCampfirePointer(bool on,float metres){campfirePointer.store(on);campfirePointerM.store(metres);if(!on){campfireMenuHit.store(false);campfireBoardFailed.store(false);}}
 void SetCampfireMenu(float width,float distance,float drop){campfireMenuWidth.store(width);campfireMenuDistance.store(distance);campfireMenuDrop.store(drop);}
 void SetCampfireCaption(bool on,const float rect[4],float width,float distance,float rise){
@@ -7957,6 +7975,7 @@ bool View(float out[16],const float hero[3],float eyeHeight,float userEyeHeight,
         const auto& o=(eye<0?head:views[eye&1].pose).orientation;
         if(o.x==0&&o.y==0&&o.z==0&&o.w==0)return false;
     }
+    if(eye>=0&&campfirePointer.load()){campfireViewFrame[eye&1]=frame?frameSerial:0;if(!frame)++campfireStale[eye&1];}
     bool recentered=false;   // F11's yaw: the origin is put back under the head (the room follow re-anchors), not turned
     if(std::fabs(recenterYaw-lastRecenter)>.001f){origin=V(head.position);lastRecenter=recenterYaw;recentered=true;}
     const float upm=(scaleHeight>0?scaleHeight:eyeHeight)/std::max(userEyeHeight,.5f);
