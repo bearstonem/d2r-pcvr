@@ -416,11 +416,14 @@ constexpr MenuBounds GlyphHandBounds{.025f,.025f,.255f,.18f};
 // turns its motion on or off.
 constexpr int MotionsCell=216;
 constexpr MenuBounds MotionsBounds{.765f,.72f,.975f,.82f};
-constexpr int MotionCards=14;   // the Sorceress's 14 (2026-11-05; ten, then the Necromancer's 12)
+constexpr int MotionCards=16;   // the Warlock's 16 (2026-11-10; ten, the Necromancer's 12, then the Sorceress's 14)
 constexpr int MotionCardCell(int card){return 240+card;}
-inline MenuBounds MotionCardBounds(int card){
-    const float x=.05f+(card%2)*.46f,y=.125f+(card/2)*.107f;
-    return {x,y,x+.44f,y+.099f};
+// A page of up to fourteen cards has seven rows; the Warlock's sixteen take eight lower ones in the same space.
+inline bool MotionCardsCompact(int count){return count>14;}
+inline MenuBounds MotionCardBounds(int card,int count=14){
+    const bool compact=MotionCardsCompact(count);
+    const float x=.05f+(card%2)*.46f,y=.125f+(card/2)*(compact?.0945f:.107f);
+    return {x,y,x+.44f,y+(compact?.087f:.099f)};
 }
 // Druid or dual wield: the left claw's or blade's strike skill, [gameplay] left_hand_strikes. Lower left,
 // above the ACTIVE line (y 637) and clear of the hand wheel's 216-degree label.
@@ -466,7 +469,7 @@ inline MenuBounds FooterBounds(int index,MenuPage page,bool developer=false) {
 inline int FooterCell(int index,MenuPage page) {
     constexpr int tabs[]={9,12,10,11,13};return Editing(page)?9+index:tabs[index];
 }
-inline int WheelCell(float u,float v,int previous=-1,MenuPage page=MenuPage::Spells,int hand=-1,bool developer=false,int devPage=0,bool leftStrikes=false,bool motions=false) {
+inline int WheelCell(float u,float v,int previous=-1,MenuPage page=MenuPage::Spells,int hand=-1,bool developer=false,int devPage=0,bool leftStrikes=false,bool motions=false,int motionCount=14) {
     if(!std::isfinite(u)||!std::isfinite(v)||u<0||u>1||v<0||v>1)return -1;
     for(int i=0;i<FooterCount(page,developer);++i)if(FooterBounds(i,page,developer).Contains(u,v))return FooterCell(i,page);
     if(QuickControls(page)) {
@@ -475,7 +478,7 @@ inline int WheelCell(float u,float v,int previous=-1,MenuPage page=MenuPage::Spe
         if(motions&&MotionsBounds.Contains(u,v))return MotionsCell;
     }
     if(page==MenuPage::Motions) {   // the cards alone: no wheel behind the page
-        for(int i=0;i<MotionCards;++i)if(MotionCardBounds(i).Contains(u,v))return MotionCardCell(i);
+        for(int i=0;i<MotionCards;++i)if(MotionCardBounds(i,motionCount).Contains(u,v))return MotionCardCell(i);
         return -1;
     }
     if((QuickControls(page)||page==MenuPage::Glyphs)&&GlyphsBounds.Contains(u,v))return GlyphsCell;

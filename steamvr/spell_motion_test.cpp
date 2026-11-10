@@ -95,7 +95,7 @@ static void Run() {
               "the Sorceress's 14, the Paladin's 4, the Druid's 2");
         Check(spellmotion::PageOf(0).count==4&&spellmotion::PageOf(4).count==10&&spellmotion::PageOf(2).count==12&&spellmotion::PageOf(6).count==7,
               "the Amazon's 4, the Barbarian's 10 (Leap Attack and Whirlwind after the table's), the Necromancer's 12 (the table's, the left arm's golem, Bone Wall, Poison Explosion, Raise Skeletal Mage), the Assassin's 7");
-        Check(spellmotion::PageOf(7).count==12,"the Warlock's 12 (three demons, three hexes, Psychic Ward, Eldritch Blast, Ring of Fire, three sigils)");
+        Check(spellmotion::PageOf(7).count==16&&spellmotion::MaxCards==16,"the Warlock's 16 (three demons, three sigils, Abyss, Flame Wave, three hexes, Psychic Ward, Eldritch Blast, Ring of Fire, Apocalypse, Blood Boil)");
         for(int c:{8,-1})Check(!spellmotion::HasMotions(c)&&spellmotion::PageOf(c).count==0,"no motions for an unknown class");
         for(int c:{0,2,3,4,5,6,7}) {   // their cards' motions are the engine's (the Paladin's and the Druid's since 2026-11-08), each watched in the class's order exactly once
             const auto page=spellmotion::PageOf(c);const auto order=spellmotion::OrderOf(c);

@@ -2528,7 +2528,7 @@ void MotionPointer() {
     const auto mid=ray+direction*(beamLength*.5f);
     beamPose=XrPose({mid,math::BeamOrientation(direction,V(head.position)-mid)});pointerVisible=true;
     if(pointerHit) {
-        motionInput.hover=interaction::WheelCell(hit.u,hit.v,interactionOutput.hover,interactions.Page(),hand,interactionInput.snapshot.developer,interactions.DeveloperPage(),interactionOutput.leftStrikes>=0,interactionOutput.motionsBox);
+        motionInput.hover=interaction::WheelCell(hit.u,hit.v,interactionOutput.hover,interactions.Page(),hand,interactionInput.snapshot.developer,interactions.DeveloperPage(),interactionOutput.leftStrikes>=0,interactionOutput.motionsBox,spellmotion::PageOf(interactionInput.snapshot.skillClass).count);
         dotPose=XrPose({hit.point+math::Rotate(pose.q,{0,0,.003f}),pose.q});
     }
 }

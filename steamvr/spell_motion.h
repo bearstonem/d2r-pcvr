@@ -55,10 +55,11 @@ enum class Motion {None,FlingOut,PushDown,RubSnap,CrossGuard,ArmUp,MatchStrike,F
     Werewolf,Werebear,                                                                            // Druid (2026-11-08)
     SummonGoatman,SummonTainted,SummonDefiler,PsychicWard,RingOfFire,EldritchBlast,               // Warlock (2026-11-10)
     HexBane,HexPurge,HexSiphon,SigilLethargy,SigilRancor,SigilDeath,
+    Abyss,FlameWave,Apocalypse,BloodBoil,
     End};
 constexpr int SorceressCount=int(Motion::Hydra);   // the Sorceress's, 1..SorceressCount ([motions] off: her bits)
 constexpr int MotionCount=int(Motion::End)-1;      // every class's, 1..MotionCount (a watcher each)
-constexpr int MaxCards=14;                         // a MOTIONS page's cards (interaction::MotionCards), one bit each
+constexpr int MaxCards=16;                         // a MOTIONS page's cards (interaction::MotionCards), one bit each
 inline Motion For(int skill) {
     switch(skill) {
     case 48:return Motion::FlingOut;      // Nova
@@ -89,6 +90,7 @@ inline Motion For(int skill) {
     case 387:return Motion::PsychicWard;case 394:return Motion::RingOfFire;case 384:return Motion::EldritchBlast;
     case 385:return Motion::HexBane;case 389:return Motion::HexPurge;case 386:return Motion::HexSiphon;
     case 393:return Motion::SigilLethargy;case 396:return Motion::SigilRancor;case 400:return Motion::SigilDeath;
+    case 402:return Motion::Abyss;case 398:return Motion::FlameWave;case 401:return Motion::Apocalypse;case 380:return Motion::BloodBoil;
     default:return Motion::None;
     }
 }
@@ -114,8 +116,9 @@ constexpr int BarbarianSkills[]={149,138,155,154,130,146,132,142,143,151};
 constexpr int NecromancerSkills[]={68,70,74,75,66,91,92,88,85,78,83,80};
 constexpr int AssassinSkills[]={258,267,264,278,277,268,273};
 // The Warlock's (owner, 2026-11-10; class 7, D2R's own): what goes on a spot first - the demons, then the sigils -
-// then what has no target: the hexes, the ward, the blast and the ring (motions_warlock.h).
-constexpr int WarlockSkills[]={373,376,377,393,396,400,385,389,386,387,384,394};
+// Abyss and Flame Wave - then what has no target: the hexes, the ward, the blast, the ring, Apocalypse and Blood Boil
+// (motions_warlock.h). Sixteen: the one page with more than fourteen cards (interaction::MotionCardBounds).
+constexpr int WarlockSkills[]={373,376,377,393,396,400,402,398,385,389,386,387,384,394,401,380};
 struct Page {const int* skills=nullptr;int count=0;};
 inline Page PageOf(int skillClass) {
     switch(skillClass) {
@@ -159,6 +162,7 @@ inline const char* SpellName(int skill) {
     case 373:return "Summon Goatman";case 376:return "Summon Tainted";case 377:return "Summon Defiler";case 387:return "Psychic Ward";
     case 394:return "Ring of Fire";case 384:return "Eldritch Blast";case 385:return "Hex: Bane";case 389:return "Hex: Purge";
     case 386:return "Hex: Siphon";case 393:return "Sigil: Lethargy";case 396:return "Sigil: Rancor";case 400:return "Sigil: Death";
+    case 402:return "Abyss";case 398:return "Flame Wave";case 401:return "Apocalypse";case 380:return "Blood Boil";
     default:return "";
     }
 }
@@ -475,6 +479,9 @@ public:
     void CastFigures(float a,float b){castFigures[0]=a;castFigures[1]=b;}
     // The cast this frame leaves the history and scratch as they are (Blessed Hammer: the other fist's pump goes on).
     void KeepAfterCast(){keep=true;}
+    // One of the Engine's own motions (the Sorceress's first ten) watched as another class's shape (the Warlock's:
+    // motions_warlock.h), on this watcher's own state.
+    bool Own(Motion m){return m>Motion::None&&m<=Motion::Punch&&Done(m);}
     // The motion's first part is done and its second this fraction of the way (0..1) to its end
     // (Output::progress: Begun to 1). Several reports in a frame keep the most.
     void Toward(float fraction) {
@@ -734,7 +741,7 @@ private:
 #include "motions_druid.h"
 #include "motions_warlock.h"
 namespace framevr::spellmotion {
-inline bool Warlock(Motion m){return m>=Motion::SummonGoatman&&m<=Motion::SigilDeath;}
+inline bool Warlock(Motion m){return m>=Motion::SummonGoatman&&m<=Motion::BloodBoil;}
 inline bool Paladin(Motion m){return m>=Motion::Charge&&m<=Motion::FistOfHeavens;}
 inline bool Druid(Motion m){return m==Motion::Werewolf||m==Motion::Werebear;}
 inline bool ClassDone(Engine& e,Motion m) {

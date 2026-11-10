@@ -227,8 +227,8 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"Necromancer motions off", "The Necromancer's motions turned off on the MOTIONS page (one bit each)", L"motions",L"necromancer_off",0,0,1023,1},
     {"Barbarian motions off", "The Barbarian's motions turned off on the MOTIONS page (one bit each)", L"motions",L"barbarian_off",0,0,1023,1},
     {"Assassin motions off", "The Assassin's motions turned off on the MOTIONS page (one bit each)", L"motions",L"assassin_off",0,0,1023,1},
-    // The Warlock's (owner 2026-11-10): twelve cards, twelve bits.
-    {"Warlock motions off", "The Warlock's motions turned off on the MOTIONS page (one bit each)", L"motions",L"warlock_off",0,0,4095,1},
+    // The Warlock's (owner 2026-11-10): sixteen cards, sixteen bits.
+    {"Warlock motions off", "The Warlock's motions turned off on the MOTIONS page (one bit each)", L"motions",L"warlock_off",0,0,65535,1},
     // Each hand its own glyphs (owner 2026-11-05: "expand the glyphs where left and the right hand glyphs can be
     // different sets"): a second Draw glyph button, on the other hand from draw_slot (either key either hand:
     // glyphcast::DrawSlots), and the left hand's skill on each shape, -1 none of its own: it casts the right
