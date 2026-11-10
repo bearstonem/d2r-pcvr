@@ -1,5 +1,21 @@
 cmake_minimum_required(VERSION 3.28)
 project(d2r_frame LANGUAGES C CXX RC)
+# A build tree can hold empty per-configuration compiler flags in its cache, and
+# keeps them at every later configure: Release then compiles that language with
+# no optimisation and with assertions on. build-frame/windows-native did, for
+# C alone, from 2026-10-10: Box3D and MinHook were built that way in every DLL
+# from that tree. CMake's own flags, worked out again at each configure, go
+# back into such a cache.
+foreach(language C CXX)
+  foreach(configuration DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
+    string(STRIP "${CMAKE_${language}_FLAGS_${configuration}_INIT}" standard)
+    if(standard AND "${CMAKE_${language}_FLAGS_${configuration}}" STREQUAL "")
+      message(STATUS "Build tree without ${language} ${configuration} flags: set to CMake's own, ${standard}")
+      set(CMAKE_${language}_FLAGS_${configuration} "${standard}" CACHE STRING
+        "Flags used by the ${language} compiler during ${configuration} builds." FORCE)
+    endif()
+  endforeach()
+endforeach()
 option(D2RVR_DEV_TOOLS "Include opt-in isolated offline developer tools" ON)
 option(D2RVR_DEVELOPER "Enable developer diagnostics" OFF)
 set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
