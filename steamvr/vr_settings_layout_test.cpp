@@ -79,6 +79,7 @@ static const GoldenRow Golden[]={
     {"interactions.click_to_drink",View::Body,1,content::RowKind::Toggle,"Click to drink",0,0},   // #425
     {"interactions.dominant_hand",View::Hands,0,content::RowKind::Choice,"Dominant hand",2,0},
     {"stick.walk_direction",View::Hands,0,content::RowKind::Stepper,"Walk direction",0,2},   // drawn inside Dominant hand's row (2026-11-08)
+    {"interactions.left_handed",View::Hands,0,content::RowKind::Toggle,"Left-handed (experimental)",0,0},   // #307, a row of its own
     {"gameplay.run_walk_toggle",View::Hands,0,content::RowKind::Toggle,"Stick toggle",0,0},   // a row of its own
     {"interactions.controller_labels",View::Hands,0,content::RowKind::Choice,"Button names",5,0},
     {"haptics.strength",View::Vibration,0,content::RowKind::Slider,"Overall vibration",0,1},
@@ -232,7 +233,7 @@ int main(int argc,char** argv){
     }
     // ---- the map: no row lost, none left to More, the names and the owner's pairs ----
     {
-        Check(tables.rowCount==106,"106 settings on the menu, each one row");   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424), Click to drink (#425), Skill cooldowns (2026-11-09), + Summon range (#426), T cross to calibrate (#423)
+        Check(tables.rowCount==107,"107 settings on the menu, each one row");   // + Left-handed (#307)   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424), Click to drink (#425), Skill cooldowns (2026-11-09), + Summon range (#426), T cross to calibrate (#423)
         for(size_t i=0;i<tables.rowCount;++i)Check(!tables.rows[i].fallback&&tables.rows[i].page!=View::More,std::string("every setting has its page: ")+tables.rows[i].label);
         Check(content::Menu().report.empty(),"the tidy report is empty");
         struct Want {content::Group group;const char* name;std::vector<const char*> pages;};
@@ -936,7 +937,7 @@ int main(int argc,char** argv){
         Check(speed&&toggle&&speed->page==View::Moving&&toggle->page==View::Hands&&!speed->fallback&&!toggle->fallback&&!toggle->beside,"Movement speed on Moving, Stick toggle its own row on Hands");
         for(const auto& c:contexts)for(bool seated:{false,true}){
             Values v=Defaults();v[Seated]=seated;
-            Check(L::CountRows(View::Moving,v,c)<=L::MaxViewRows&&L::CountRows(View::Hands,v,c)==3&&L::KeyVisible(RunSpeed,v,c)&&L::KeyVisible(RunWalkToggle,v,c),"both show for every class");
+            Check(L::CountRows(View::Moving,v,c)<=L::MaxViewRows&&L::CountRows(View::Hands,v,c)==4&&L::KeyVisible(RunSpeed,v,c)&&L::KeyVisible(RunWalkToggle,v,c),"both show for every class");
         }
         Model b;b.Open(Ready());L::Press(b,{Kind::Open,int(View::Hands),-1},0);
         const auto page=L::Build(b,{},{});CheckLayout(page,"hands with the stick toggle");

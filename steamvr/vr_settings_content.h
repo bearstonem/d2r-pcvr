@@ -572,13 +572,16 @@ inline constexpr Override Overrides[]={
      .help="On: hold a flask and press that hand's trigger to drink. The mouth gesture still works. Off: bring the opening to your mouth and tip to drink."},
     // Hands: Hands and buttons
     {.id="interactions.dominant_hand",.page=View::Hands,.section="Hands and buttons",.kind=RowKind::Choice,.label="Dominant hand",
-     .help="The hand that swaps weapon sets when you reach over a shoulder and grip. Your weapon and shield hands in the game stay the same.",
+     .help="The hand that swaps weapon sets when you reach over a shoulder and grip. Your weapon and shield hands stay the same: Left-handed, below, swaps those.",
      FRAMEVR_OPTIONS(DominantOptions)},
     // Walk direction (owner, 2026-11-08: "moving where the controller points versus where you look, that should be a
     // setting"): the right half of Dominant hand's row. [stick] walk_direction.
     {.id="stick.walk_direction",.page=View::Hands,.section="Hands and buttons",.kind=RowKind::Stepper,.label="Walk direction",
      .help="Look: the left stick walks where you look. Controller: where the left controller points, so you can look around while you walk.",
      FRAMEVR_NAMES(WalkNames),.beside=true,.besideLabel="Walk"},
+    // Left-handed play (hand_role.h, #307): a row of its own under Dominant hand. [interactions] left_handed.
+    {.id="interactions.left_handed",.page=View::Hands,.section="Hands and buttons",.kind=RowKind::Toggle,.label="Left-handed (experimental)",
+     .help="On: weapon in the left hand, shield on the right arm; triggers, grips, buttons and sticks swap. Bows, staves and two-handed weapons stay right-handed for now."},
     {.id="gameplay.run_walk_toggle",.page=View::Hands,.section="Hands and buttons",.kind=RowKind::Toggle,.label="Stick toggle",
      .help="On: right stick up switches between walking and the run set in Comfort > Moving (from Walk, the full run). Not with a wheel open or looking at the wrist map."},
     {.id="interactions.controller_labels",.page=View::Hands,.section="Hands and buttons",.kind=RowKind::Choice,.label="Button names",
