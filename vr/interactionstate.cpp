@@ -8,6 +8,7 @@
 #include "skeletons.h"
 #include "logging.h"
 #include "native_ui.h"
+#include "ally_health_state.h"
 #include "native_belt.h"
 #include "quick_items.h"
 #include "dev_scenarios.h"
@@ -116,6 +117,12 @@ void __cdecl SampleMerc(const PluginContext*,void* token) noexcept {
     const auto active=effectstate::Sample(session);
     m.known=session==gamestate::LocalPlayer()&&melee::HirelingVitals(hint,m.health,m.maxHealth,m.classId,m.unitId);
     hint=m.known?m.unitId:0;
+    // This callback already runs on the authoritative game thread. Copy values
+    // only; the UI/XR reader must never dereference these server units.
+    framevr::partyhealth::Report mercReport{};
+    mercReport.session=session;mercReport.at=GetTickCount64();mercReport.unitId=m.unitId;
+    mercReport.health=m.health;mercReport.maxHealth=m.maxHealth;mercReport.known=m.known;
+    allyhealthstate::PublishMerc(mercReport);
     const bool low=MercLow(m);
     // Tint only while low; clear it on recovery, death (the corpse too) or
     // when another unit is the hireling (resurrected/rehired).

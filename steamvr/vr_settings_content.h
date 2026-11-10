@@ -250,7 +250,7 @@ inline constexpr ContentSection SectionTable[]={
     {View::Aim,"Spells and skills"},{View::Aim,"Ground skills"},
     {View::Targets,"Monster outline"},{View::Targets,"Bow"},
     {View::Shield,"Bash and block"},{View::Shield,"Fit on the arm"},
-    {View::Wrist,"Life and mana"},{View::Wrist,"Map"},
+    {View::Wrist,"Life and mana"},{View::Wrist,"Map"},{View::Wrist,"Controller menus"},
     {View::Interface,"Game menus"},{View::Interface,"Labels and bars"},{View::Interface,"Mana Warning"},
     {View::Survival,"Low life"},{View::Survival,"Offline monsters"},
     {View::World,"Sky and dungeons"},{View::World,"Things that move and glow"},
@@ -298,6 +298,10 @@ inline constexpr Option VitalsLocationOptions[]={
     {3,"Off","Not shown on your hand."},
 };
 // map_top_down 0-3 (MapViewTopDown, MapViewFull): the corner minimap or the game's full map.
+inline constexpr Option AllyHealthOptions[]={
+    {0,"Off","Hide ally health bars."},{1,"Wrist","Names and live health beside the wrist map."},
+    {2,"Overhead","Names and live health above located allies."},{3,"Both","Show wrist and overhead bars."},
+};
 inline constexpr Option MapViewOptions[]={
     {0,"Isometric","The game's own slanted minimap, with NPC and exit names."},
     {1,"Top-down","The minimap laid flat like a floor plan. NPC and exit names are hidden."},
@@ -516,6 +520,10 @@ inline constexpr Override Overrides[]={
      .help="On keeps the way you face at the top of the map. Off keeps north at the top and turns the arrow. Top-down views only."},
     {.id="interactions.companion_counts",.page=View::Wrist,.section="Map",.kind=RowKind::Toggle,.label="Buffs and companions",
      .help="Under the minimap: your companion counts, and the buffs, auras and harmful effects on you. Follows the minimap's gesture."},
+
+    {.id="interactions.ally_health_bars",.page=View::Wrist,.section="Controller menus",.kind=RowKind::Choice,.label="Ally health bars",
+     .help="Party and owned mercenary health. Stale data is hidden. Wrist follows the map gesture; overhead needs a current position.",
+     FRAMEVR_OPTIONS(AllyHealthOptions)},
 
     // Interface: Game menus
     {.id="hud.menu_distance",.page=View::Interface,.section="Game menus",.kind=RowKind::Choice,.label="Menu distance",

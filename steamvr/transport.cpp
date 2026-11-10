@@ -48,6 +48,9 @@
 #include "interaction_ui.h"
 #include "sewer_prompt_art.h"
 #include "notice_card_art.h"
+#include "ally_health_art.h"
+#include "ally_health_position.h"
+#include "../vr/ally_health_state.h"
 #include "arcane_decay.h"
 #include "glyph_cast.h"
 #include "glyph_trail.h"
@@ -434,6 +437,14 @@ void PlayGuardBreak() {
 }
 XrSwapchain interactionChain=XR_NULL_HANDLE;
 XrSwapchain companionChain=XR_NULL_HANDLE;
+XrSwapchain allyChain=XR_NULL_HANDLE;
+bool allyAtlasPending=false,allyPaintValid=false;
+uint64_t allyPaintRequest=0,allyPaintAt=0;
+allyhealth::List allyPainted{},allyRequested{},allyCurrent{};
+struct AllyPainted {allyhealth::List source;std::vector<uint8_t> pixels;};
+LatestWorker<allyhealth::List,AllyPainted> allyPainter([](const allyhealth::List& list){
+    AllyPainted result;result.source=list;if(!allyhealth::Paint(list,result.pixels))result.pixels.clear();return result;
+});
 bool companionAtlasPending=false,companionPaintValid=false;
 interaction::PaintContext companionPaintContext{};
 XrSwapchain compassChain=XR_NULL_HANDLE;
@@ -1808,6 +1819,7 @@ leather::Art LoadLeather(std::vector<uint8_t>& rgba,std::wstring& from) {
 // (panelatlas): false if it could not be made. The compass or the gameplay art
 // alone may be missing; their chains then stay none.
 bool SetupStatic(DXGI_FORMAT eyeFormat) {
+    if(!allyPainter.Start())Say("Frame allies: background painter unavailable");
     if(!interactionPainter.Start())Say("Frame UI: background painter unavailable; interaction artwork cannot refresh");
     if(!bloodPainter.Start())Say("Frame blood visor: background painter unavailable; blood stays hidden");
     if(!arcanePainter.Start())Say("Frame arcane decay: background painter unavailable; arcane warning stays hidden");
@@ -4898,6 +4910,24 @@ void Input() {
             elementalLightAt[h].store(lit?now:0);
         }
     }
+    {
+        const auto now=GetTickCount64();
+        const int mode=int(vrsettings::Read().values[settings::AllyHealthBars]);
+        allyCurrent=mode?allyhealthstate::Current(interactionInput.session,now):allyhealth::List{};
+        if(allyCurrent.Current(interactionInput.session,now)&&allyCurrent.count) {
+            AllyPainted painted;
+            if(allyPaintRequest&&!allyAtlasPending&&atlasUploads.size()<2&&allyPainter.Take(allyPaintRequest,painted)) {
+                allyPaintRequest=0;
+                if(painted.source.SameImage(allyCurrent)&&!painted.pixels.empty()) {
+                    allyPaintValid=UploadAtlas(allyChain,atlasFormat,allyhealth::Width,allyhealth::Height,painted.pixels,true,&allyAtlasPending);
+                    if(allyPaintValid)allyPainted=painted.source;
+                }
+            }
+            if(now>=allyPaintAt&&!allyPaintRequest&&(!allyPaintValid||!allyPainted.SameImage(allyCurrent))) {
+                allyRequested=allyCurrent;allyPaintRequest=allyPainter.Submit(allyCurrent);allyPaintAt=now+100;
+            }
+        } else {allyPaintValid=false;allyPaintRequest=0;}
+    }
     if(interactionInput.active||leatherHudVitals) {   // the HUD held with the menu repaints its vitals too
         const bool snapshotFresh=interaction::Fresh(interactionInput.snapshot,interactionInput.session,interactionInput.at);
         if(snapshotFresh&&(interactionPrefetchSession!=interactionInput.session||interactionPrefetchRevision!=interactionInput.snapshot.revision)) {
@@ -6248,6 +6278,10 @@ void EndPair() {
         XrSwapchainImageReleaseInfo release{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
         companionPaintValid=Check(pReleaseSwapchainImage(companionChain,&release),"release companion atlas")&&companionPaintValid;companionAtlasPending=false;
     }
+    if(allyAtlasPending) {
+        XrSwapchainImageReleaseInfo release{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+        allyPaintValid=Check(pReleaseSwapchainImage(allyChain,&release),"release ally atlas")&&allyPaintValid;allyAtlasPending=false;
+    }
     // Tabbed, trade and waypoint menus use the same black background in both eyes.
     // Submit just their shared opaque quad: no different cached world per eye.
     // [interactions] leather_world=0: the leather against the same black (a test fallback).
@@ -6293,7 +6327,10 @@ void EndPair() {
     XrCompositionLayerQuad wrist{XR_TYPE_COMPOSITION_LAYER_QUAD},wristMap{XR_TYPE_COMPOSITION_LAYER_QUAD};
     XrCompositionLayerQuad wristCompass{XR_TYPE_COMPOSITION_LAYER_QUAD},compassMarker{XR_TYPE_COMPOSITION_LAYER_QUAD};
     XrCompositionLayerQuad navigationInfo{XR_TYPE_COMPOSITION_LAYER_QUAD};
-    XrCompositionLayerQuad companionRow{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    XrCompositionLayerQuad companionRow{XR_TYPE_COMPOSITION_LAYER_QUAD},allyWrist{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    std::array<XrCompositionLayerQuad,allyhealth::Capacity> allyOverhead{};
+    const int allyMode=int(vrsettings::Read().values[settings::AllyHealthBars]);
+    const bool alliesReady=allyChain&&allyPaintValid&&allyCurrent.Current(interactionInput.session,GetTickCount64())&&allyCurrent.SameImage(allyPainted);
     if(interactionVisible) {
         if(!potionModels.Ready()&&interactionOutput.bottle>=0&&interactionOutput.bottleHand>=0) {
             auto pose=motionInput.hand[interactionOutput.bottleHand];pose.q=potions::HeldRotation(pose.q);
@@ -6331,7 +6368,10 @@ void EndPair() {
                 companionChain&&count+navigationLayers+uint32_t(locationReady)+1<=contentLimit&&
                 interaction::CompanionImageCurrent(companionPaintContext,interactionInput.snapshot);
             const int companionRows=companionsReady?wriststatus::Rows(interactionInput.snapshot.companions,interactionInput.snapshot.effects):0;
-            const float footer=interaction::CompanionSpace(companionRows);
+            const bool showAllyWrist=alliesReady&&(allyMode&1)&&allyCurrent.count;
+            const float allySpace=showAllyWrist?allyhealth::WristHeight(allyCurrent.count)+.006f:0;
+            const float companionSpace=interaction::CompanionSpace(companionRows);
+            const float footer=companionSpace+allySpace;
             if(mapEye.copied){
                 const auto mapPanel=interaction::NavigationMapPanel(interactionInput.hand[1],interactionInput.head,palm,withVitals,footer);
                 wristMapShown=true;wristMapCenter=mapPanel.p;
@@ -6349,9 +6389,19 @@ void EndPair() {
             if(locationReady)motionQuad(navigationInfo,interactionPose(interaction::NavigationInfoPanel(
                 interactionInput.hand[1],interactionInput.head,palm,withVitals,footer)),interaction::NavigationInfoWidth,interaction::NavigationInfoHeight,
                 {{navigation::AtlasX,navigation::AtlasY},{navigation::Width,navigation::Height}},interactionChain);
-            if(companionRows)motionQuad(companionRow,interactionPose(interaction::NavigationCompanionsPanel(
-                interactionInput.hand[1],interactionInput.head,palm,withVitals,companionRows)),interaction::WristMapSize,interaction::CompanionHeight(companionRows),
-                {{0,0},{companions::Width,wriststatus::UsedHeight(interactionInput.snapshot.companions,interactionInput.snapshot.effects)}},companionChain);
+            if(companionRows){
+                auto row=interaction::NavigationCompanionsPanel(interactionInput.hand[1],interactionInput.head,palm,withVitals,companionRows);
+                if(withVitals)row.p=row.p+math::Rotate(row.q,{0,allySpace,0});
+                motionQuad(companionRow,interactionPose(row),interaction::WristMapSize,interaction::CompanionHeight(companionRows),
+                    {{0,0},{companions::Width,wriststatus::UsedHeight(interactionInput.snapshot.companions,interactionInput.snapshot.effects)}},companionChain);
+            }
+            if(alliesReady&&(allyMode&1)&&allyCurrent.count) {
+                auto at=interaction::NavigationMapPanel(interactionInput.hand[1],interactionInput.head,palm,withVitals,footer);
+                constexpr float width=allyhealth::WristWidth;
+                const float height=allyhealth::WristHeight(allyCurrent.count);
+                at.p=at.p+math::Rotate(at.q,allyhealth::WristOffset(interaction::WristMapSize,companionSpace,allyCurrent.count));
+                motionQuad(allyWrist,interactionPose(at),width,height,{{0,0},{allyhealth::Width,int(allyCurrent.count)*allyhealth::RowHeight}},allyChain);
+            }
         }
     }
     const bool weaponSkillIndicators=vrsettings::Read().values[settings::WeaponSkillIndicators]>.5f;
@@ -6522,6 +6572,20 @@ void EndPair() {
     // Head-locked blood: VIEW space, with a bounded angular size so large render
     // frusta cannot push the rim out of sight. It goes directly above
     // the world and below every HUD quad, and only into a spare layer slot.
+    // Optional ally markers consume only spare layers, after primary controls.
+    const auto allyNow=GetTickCount64();
+    if(alliesReady&&(allyMode&2)&&layer&&!panelMode&&!blackMenu&&!settingsModel.open&&!bodyCalibration.Active()&&
+       stageWorld.valid&&allyNow>=stageWorld.at&&allyNow-stageWorld.at<=250) {
+        for(unsigned i=0;i<allyCurrent.count&&count<contentLimit;++i){
+            math::Vec at;
+            if(!allyhealth::Overhead(allyCurrent.entries[i],stageWorld.origin,stageWorld.hero,stageWorld.base,
+                stageWorld.upm,stageWorld.eyeHeight,V(head.position),at))continue;
+            allyOverhead[i]={XR_TYPE_COMPOSITION_LAYER_QUAD};
+            const float width=allyhealth::OverheadWidth(at,V(head.position));
+            motionQuad(allyOverhead[i],XrPose({at,Q(head.orientation)}),width,width*allyhealth::RowHeight/allyhealth::Width,
+                {{0,int(i)*allyhealth::RowHeight},{allyhealth::Width,allyhealth::RowHeight}},allyChain);
+        }
+    }
     XrCompositionLayerQuad bloodQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
     if(bloodImageReady&&bloodShown&&bloodOutput.visible&&layer&&!panelMode&&!blackMenu&&!settingsModel.open&&
        !bodyCalibration.Active()&&headSpace&&count<contentLimit) {
@@ -7197,7 +7261,7 @@ void Shutdown(bool preserveResolution) {
     if(!preserveResolution)hud::NativeSession(false);
     if(!preserveResolution)resolution::Restore();
     windowFocus.Cancel();
-    EndPair();ClearInput();interactionPainter.Stop();bloodPainter.Stop();arcanePainter.Stop();glyphPainter.Stop();strainPainter.Stop();noticePainter.Stop();settingsPainter.Stop();turnCompiler.Stop();interaction::icons::Shutdown();
+    EndPair();ClearInput();allyPainter.Stop();interactionPainter.Stop();bloodPainter.Stop();arcanePainter.Stop();glyphPainter.Stop();strainPainter.Stop();noticePainter.Stop();settingsPainter.Stop();turnCompiler.Stop();interaction::icons::Shutdown();
     // Completion is mandatory before destroying our commands/resources, even
     // when ordinary frame submission uses queue ordering without a CPU wait.
     if(fence&&!WaitGpu())failed=true;
@@ -7212,6 +7276,8 @@ void Shutdown(bool preserveResolution) {
     atlasUploads.clear();atlasStagingFree.clear();interactionPaintKey=~0ull;interactionPrefetchSession=0;interactionPrefetchRevision=~0u;interactions.Reset();interactionstate::Cancel();
     interactionPaintRequest=0;interactionRequestedKey=~0ull;interactionPaintValid=false;interactionPaintContext={};interactionRequestedContext={};interactionPaintAt=0;
     if(interactionChain&&pDestroySwapchain)pDestroySwapchain(interactionChain);interactionChain=XR_NULL_HANDLE;
+    if(allyChain&&pDestroySwapchain)pDestroySwapchain(allyChain);allyChain=XR_NULL_HANDLE;
+    allyAtlasPending=allyPaintValid=false;allyPaintRequest=allyPaintAt=0;allyPainted={};allyRequested={};
     if(companionChain&&pDestroySwapchain)pDestroySwapchain(companionChain);companionChain=XR_NULL_HANDLE;
     companionAtlasPending=companionPaintValid=false;companionPaintContext={};
     compassChain=XR_NULL_HANDLE;wristHeading.Reset();compassFrame=compassAtlasReady=false;   // staticChain, below

@@ -137,6 +137,7 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "target_lock.h"
 #include "bow.h"
 #include "loot_beam_scan.h"
+#include "party_health_reports.h"
 #include "wall_cells.h"
 #include "prop_scan.h"
 #include "crossbow.h"
@@ -11002,6 +11003,12 @@ DWORD WINAPI UpdateThread(void*) {
         }
         const ULONGLONG nowMs = GetTickCount64();
 #ifdef D2RVR_NATIVE_OPENXR
+        // Health has its own lifecycle, independent of VR pose publication.
+        // Keep this before any desktop-mode early continue when branches combine.
+        {uint32_t unit=0;combat::LocalPlayerId(unit);
+         partyhealthreports::Tick(gamestate::LocalPlayer()!=0,unit,gamestate::LocalPlayer());}
+#endif
+#ifdef D2RVR_NATIVE_OPENXR
         framevr::hookmetrics::Scope inputMeasured(framevr::hookmetrics::InputTick,15);
 #endif
         const bool focus = GameFocused();
@@ -11402,6 +11409,9 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
     g_iniPath[n] = 0;
     wcscat_s(g_iniPath, D2RPCVR_SETTINGS_FILE_W);
 #ifdef D2RVR_NATIVE_OPENXR
+    partyhealthreports::Init(ctx,&Log);
+#endif
+#ifdef D2RVR_NATIVE_OPENXR
     vrsettings::Poll(g_iniPath);
 #endif
     ReloadIfChanged();
@@ -11467,6 +11477,7 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
 D2RL_PLUGIN_EXPORT void D2RLoaderUnloadPlugin() noexcept {
     if (g_standDown) return;   // nothing was started
 #ifdef D2RVR_NATIVE_OPENXR
+    partyhealthreports::Stop();
     enemysight::Shutdown();
     companionai::Shutdown();
     framevr::scenedepth::Shutdown();

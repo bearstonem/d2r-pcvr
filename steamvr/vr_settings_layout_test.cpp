@@ -73,6 +73,7 @@ static const GoldenRow Golden[]={
     {"interactions.map_top_down",View(6),1,content::RowKind::Choice,"Map view",4,0},
     {"interactions.map_rotate",View(6),1,content::RowKind::Toggle,"Turn map with you",0,0},
     {"interactions.companion_counts",View(6),1,content::RowKind::Toggle,"Buffs and companions",0,0},
+    {"interactions.ally_health_bars",View(6),2,content::RowKind::Choice,"Ally health bars",4,0},
     {"hud.menu_distance",View(7),0,content::RowKind::Choice,"Menu distance",3,0},
     {"interactions.leather_menu",View(7),0,content::RowKind::Stepper,"Hold menu",0,3},   // main's #360, drawn inside Menu distance's row; Off / On / Menu only (2026-10-29)
     {"hud.tooltip_timing",View(7),0,content::RowKind::Choice,"Item details delay",3,0},

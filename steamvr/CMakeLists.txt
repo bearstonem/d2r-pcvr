@@ -443,3 +443,25 @@ target_compile_options(respec-test PRIVATE -UNDEBUG)
 add_test(NAME respec-test COMMAND respec-test)
 
 target_compile_options(quick-items-test PRIVATE -UNDEBUG)
+
+add_executable(party-roster-test party_roster_test.cpp)
+target_compile_options(party-roster-test PRIVATE -UNDEBUG)
+add_test(NAME party-roster-test COMMAND party-roster-test)
+
+add_executable(ally-health-art-test ally_health_art_test.cpp)
+target_link_libraries(ally-health-art-test PRIVATE gdi32 user32)
+add_executable(ally-native-test ally_native_test.cpp)
+add_executable(party-health-test party_health_test.cpp)
+add_executable(party-health-wire-test party_health_wire_test.cpp ${ROOT}/vr/party_health_reports.cpp)
+target_include_directories(party-health-wire-test PRIVATE ${D2RL_SDK}/include)
+target_link_libraries(party-health-wire-test PRIVATE framevr-runtime)
+add_executable(ally-health-state-test ally_health_state_test.cpp ${ROOT}/vr/ally_health_state.cpp)
+target_include_directories(ally-health-state-test PRIVATE ${D2RL_SDK}/include ${ROOT}/cleanroom/sigscan ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(ally-health-state-test PRIVATE framevr-runtime)
+foreach(ALLY_TEST ally-health-art-test ally-native-test party-health-test party-health-wire-test ally-health-state-test)
+  target_compile_options(${ALLY_TEST} PRIVATE -UNDEBUG)
+  add_test(NAME ${ALLY_TEST} COMMAND ${ALLY_TEST})
+endforeach()
+
+
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/party_health_reports.cpp ${ROOT}/vr/ally_health_state.cpp)
