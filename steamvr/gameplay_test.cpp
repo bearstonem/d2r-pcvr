@@ -424,7 +424,8 @@ int main() {
                 eq(a.rayOrigin,b.rayOrigin)&&eq(a.rayDirection,b.rayDirection)&&eq(a.nockPoint,b.nockPoint)&&eq(a.bowForward,b.bowForward)&&
                 eq(a.releaseDirection,b.releaseDirection)&&eq(a.leftOrigin,b.leftOrigin)&&eq(a.leftDirection,b.leftDirection);
         };
-        for(const Weapon weapon:{Weapon::Bow,Weapon::Javelin,Weapon::Melee}) {
+        // (phase 3: a crossbow - the main trigger attacks - and a staff, Weapon::Melee with a trigger skill or Other)
+        for(const Weapon weapon:{Weapon::Bow,Weapon::Javelin,Weapon::Melee,Weapon::Crossbow,Weapon::Other}) {
             // the script, by physical controller: the right hand acts, the left holds
             std::vector<Frame> script;Frame f;
             f.hand[0].p=weapon==Weapon::Bow?Vec{0,1.3f,-.4f}:Vec{.25f,1.25f,-.2f};f.hand[1].p=weapon==Weapon::Bow?Vec{0,1.3f,-.5f}:Vec{-.25f,1.25f,-.4f};
@@ -449,10 +450,32 @@ int main() {
                 const Output before=engines[0].Step(in[0]),off=engines[1].Step(in[1]),left=engines[2].Step(in[2]);
                 Check(same(before,off),"the role layer right-handed (Left-handed off) is exactly the engine as it was");
                 Check(same(before,left),"left-handed, the left controller does everything the right one did, and the right the left's");
-                acted=acted||before.bowRelease||before.javelinRelease||before.leftRelease||before.meleeContact;
+                acted=acted||before.bowRelease||before.javelinRelease||before.leftRelease||before.meleeContact||before.attack;
+                // a crossbow's shot: the main trigger's attack is taken for the physical bolt whichever controller is the main hand
+                if(weapon==Weapon::Crossbow) {
+                    Output routed[3]={before,off,left};bool took[3];
+                    for(int i=0;i<3;++i)took[i]=RouteCrossbow(in[i],routed[i],true,true,false,-1);
+                    Check(took[0]==took[1]&&took[0]==took[2]&&took[0]==before.attack&&same(routed[0],routed[2]),"the crossbow fires from the main hand's trigger, left-handed the left one");
+                    Output offHand=left;Check(!RouteCrossbow(in[2],offHand,false,true,false,-1),"never from the support hand's");
+                }
             }
-            Check(acted,"the script really draws, throws or swings");
+            Check(acted,"the script really draws, throws, swings or shoots");
+        }
+        // The bow, hand by hand: left-handed the bow is the RIGHT controller's and the string the LEFT one's.
+        {
+            Engine engine;Input in;in.active=in.tracked[0]=in.tracked[1]=in.aimTracked=true;in.head.p={0,1.65f,0};in.weapon=Weapon::Bow;in.equipment=1;
+            Frame f;f.hand[0].p={.05f,1.3f,-.5f};f.hand[1].p={.05f,1.3f,-.4f};   // physical: the right hand holds the bow out, the left is at its string
+            const handrole::Map lh{true};
+            const auto step=[&](){in.time+=.02;feed(lh,f,in);return engine.Step(in);};
+            step();step();
+            auto o=step();Check(o.bowReady&&o.bowInReach&&o.rayOrigin.x==f.hand[0].p.x&&o.rayOrigin.z==f.hand[0].p.z,"the bow is the right controller's: its nock point is behind the right hand");
+            f.trigger[0]=1;Check(!step().bowDrawing,"the bow hand's own trigger does not grab the string");f.trigger[0]=0;step();
+            f.trigger[1]=1;Check(step().bowDrawing,"the LEFT trigger grabs the string");
+            for(int i=0;i<25;++i){f.hand[1].p.z+=.02f;o=step();Check(o.bowDrawing&&!o.attack,"the left hand draws");}
+            Check(o.bowCharged&&o.draw>.9f,"a full draw by the left hand");
+            f.trigger[1]=0;o=step();
+            Check(o.bowRelease&&o.feedback==2&&o.releaseDirection.z<-.99f&&o.rayOrigin.z==f.hand[0].p.z,"let go by the left hand: the arrow flies from the right hand's bow, along string hand -> bow hand");
         }
     }
-    std::puts("Motion gameplay: gesture, cancellation, input ownership, palette and left-handed role tests passed");
+    std::puts("Motion gameplay: gesture, cancellation, input ownership, palette and left-handed role tests (bow, crossbow, staff, throws, melee) passed");
 }
