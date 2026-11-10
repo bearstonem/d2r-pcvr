@@ -599,7 +599,7 @@ sets the page's rows back to their defaults, with **Undo reset** for 6 seconds.
 | Gameplay > Targeting | Whether skills go to the aimed monster, spell aim assist, keeping spell shots level, aiming a staff along the arm, aiming with your view (the eyes' 17-degree tunnel, the hands within 30 degrees of your head, a raised hand aiming alone) with **Eyes** (Aim with your eyes) beside it on a headset that shares eye tracking, the arrow path line, where ground skills land (the game's aim, where you point or the aimed monster) and landing circles. Every option that changes how a cast aims is Off (Game's aim) by default, except Spell aim assist (Strong) |
 | Gameplay > Shield | Bash speed to hit, the guard strain shadow (On or Off), and where a held shield sits on the forearm: along, out and across (all 0 by default), wrist turn and roll |
 | Gameplay > Monsters | Offline difficulty, monster sight range and the smarter mercenary with **Commands** beside it |
-| Gameplay > Physics | Rolling bottles, knockable props and pushable bodies |
+| Gameplay > Physics | Rolling bottles, knockable props, pushable bodies, and monsters' and townsfolk's heads turning to you |
 | Comfort > Moving | Smooth turning with its snap angle or turn speed, and movement speed |
 | Comfort > Body | Seated play, **Height and arm span** (**Calibrate body**, **Set eye height**) with the **T cross to calibrate** switch under it (standing only), and the belt's height and reach |
 | Controls > Hands | Dominant hand, **Stick toggle** and button names |
@@ -906,6 +906,28 @@ then left alone for as long as it would take to come within the radius closing a
 - N limbs of M bones`), the first push each second, and a summary every ten
 seconds, ending with the skeleton hook's cost: its calls for bodies, those beyond
 the radius and its milliseconds a second.
+
+**Heads turn to you.** In first person, each monster, mercenary, summon and
+townsperson within about 7 m turns its head to your real head: where your
+eyes are in the room, standing, crouching or leaning, not the hero's spot on
+the floor. The head (with a third of the turn taken at the neck) goes up to 70
+degrees to either side of where the body faces, 40 up and 30 down, and eases
+there in about a quarter of a second; step behind a body (past about 105
+degrees) or beyond the range and it eases back to the game's animation. A body
+that has fallen over is left alone. The head is found once per model from its
+bones' names (`head_bind_jnt`, `head`, `head_main_00_M_JNT` and the like) and
+its bind matrices; a model with no such bone (a hydra, a bone wall) is left as
+the game poses it. Purely visual: the turn is made in the pose just before it
+is drawn, so who a monster attacks, where it walks and its hit box are
+unchanged, and pushable bodies bend from the turned pose. VR Settings >
+Gameplay > Physics > Heads turn to you (`[gameplay] look_at_you`, On by
+default) turns it off. The log names each model's head once (`Frame look-at:
+<model> - head ..., neck from ..., turns against ...`) and, every ten seconds a
+head was turned in, a summary ending with the hook's own cost (`Frame look-at:
+ten seconds: head turns=... hook N ms a second`).
+Two things are told from the pose alone, with no game unit read: which way a
+model faces (its bind pose is taken to face the model's +z, as the heroes'
+do) and whether it is dying (a body falling over stops being followed).
 
 **Hurt merc.** During VR gameplay the local hireling's life is sampled on the
 game thread every 200 ms with the same native stat call as the wrist vitals.

@@ -8716,6 +8716,15 @@ void PushArms() {
     // Bodies that give way: in first person with physical melee, the hook
     // posts the monsters and townsfolk within reach of the hero.
     skel::SetLimbs(own && heroPlaced && framevr::BodyPhysics(), hero, std::max(1.f, ScaleHeight()) / UserEyeHeightM(), g_set.bodyRadius.load());
+    {   // Heads turn to you (look_at.h): in first person, monsters and townsfolk look at the player's eyes in the world.
+        // Menus too (not `own`): a townsperson you talk to keeps looking at you while the dialogue is up.
+        static ULONGLONG readAt = 0; static bool wanted = true;   // this timer's thread only
+        if (const ULONGLONG now = GetTickCount64(); !readAt || now - readAt >= 250) {
+            readAt = now; wanted = vrsettings::Read().values[framevr::settings::LookAtYou] > .5f;
+        }
+        const float eye[3] = {g_eyeWorld[0].load(), g_eyeWorld[1].load(), g_eyeWorld[2].load()};
+        skel::SetLookAt(on && !ThirdPerson() && !Overhead() && wanted && g_eyeOk.load(), eye, std::max(1.f, ScaleHeight()) / UserEyeHeightM());
+    }
 #endif
     in.mode = own ? ArmsMode() : 0;
     // From behind the game animates all of him, but he still turns with the
