@@ -883,6 +883,17 @@ visual. VR Settings > Gameplay > Physics > Knock over small props (`[interaction
 props](../docs/KNOCKABLE_PROPS.md). The log notes each weapon knock (`Frame
 props: knocked a cup ...`) and a summary every ten seconds.
 
+**Spells reach objects.** Your own spell missiles break the pots, urns,
+baskets and barrels they pass, as arrows do, and push the small props and
+dropped bottles in their way: along a bolt's flight, outward from a Fire
+Ball's or a Glacial Spike's burst and from a Nova's ring. A spell cast from
+the hand ends at the container it hits, as an arrow does; one the game flies
+(Charged Bolt, Nova, Teeth and the rest) breaks what it crosses and flies on.
+An exploding barrel explodes as when a weapon breaks it. Props move only
+within the 3 m they are known in. `[interactions] spell_impacts=0` turns it
+off; see [spells that reach objects](../docs/SPELL_IMPACTS.md). Not yet
+tested in a headset. The log notes each one (`Frame spell impact: ...`).
+
 **Pushable bodies.** In first person with Motion combat, your weapon, shield
 or fist pushes the monsters, mercenaries and townsfolk it meets. Each
 monster or townsperson within 3 m (`[bodies] radius`, 1.5-8 m) is given a body of capsules, one on each
@@ -972,6 +983,7 @@ hip_width=0.28
 holsters=1
 bottle_physics=1
 prop_physics=1
+spell_impacts=1
 body_physics=1
 leather_menu=1
 leather_menu_width=0.57

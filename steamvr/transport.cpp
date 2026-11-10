@@ -77,6 +77,7 @@
 #include "limb_physics.h"
 #include "../vr/wall_cells.h"
 #include "../vr/prop_scan.h"
+#include "../vr/spell_impacts.h"
 #include "elemental_hands_renderer.h"
 #include "elemental_particles.h"
 #include "../vr/companion_ai.h"
@@ -3238,6 +3239,33 @@ std::array<bottles::Collider,bottles::Colliders> HeldColliders() {
     }
     return weapons;
 }
+// The hero's spell missiles (vr/spell_impacts.cpp posts where each flew or
+// burst on the game thread) push the props and bottles in their way, in the
+// same world the weapons push them in. The passages are always taken, so
+// none wait for a world; without one (physics off, a menu, no props or
+// bottles near) they are dropped.
+void PushSpells(bottles::World* world,double time,float floor,float upm) {
+    std::array<spellimpacts::Passage,spellimpacts::Mailbox::Most> passages;
+    const unsigned n=impactvr::Take(interactionInput.session,passages);
+    if(!world||!n)return;
+    static ULONGLONG second=0;static unsigned lines=0,skipped=0;
+    for(unsigned i=0;i<n;++i) {
+        const auto& p=passages[i];
+        const auto pushed=world->Push(spellimpacts::ToWorld(p,floor,upm),time);
+        if(!pushed.props&&!pushed.bottles)continue;
+        // At most four lines a second; the next one says how many were not shown.
+        const auto now=GetTickCount64()/1000;
+        if(now!=second){second=now;lines=0;}
+        if(lines>=4){++skipped;continue;}
+        ++lines;
+        const auto* profile=spellimpacts::Of(p.missile);
+        char line[224];std::snprintf(line,sizeof line,"Frame spell impact: %s (missile %u) %s %u props and %u bottles at cell %.0f,%.0f%s",
+            profile?profile->name:"?",p.missile,p.blast?"burst and pushed":p.flat?"passed and pushed":"flew through and pushed",pushed.props,pushed.bottles,
+            p.to.x*.5f,p.to.z*.5f,skipped?" (more not shown)":"");
+        skipped=0;
+        Say(line);
+    }
+}
 void StepDroppedBottles() {
     const auto& in=interactionInput;const auto& out=interactionOutput;
     const bool bottlesOn=bottlePhysics.load(),propsOn=propPhysics.load();
@@ -3302,6 +3330,7 @@ void StepDroppedBottles() {
     // Walls reach the world even while nothing moves in it (a trap in hand).
     bottles::Patch patch;
     if(droppedBottles&&wallcells::Latest(patch))droppedBottles->Walls(patch);
+    PushSpells(droppedBottles&&world&&!droppedBottles->Idle()?droppedBottles.get():nullptr,in.time,floor,upm);
     if(!droppedBottles||droppedBottles->Idle()||!in.stage.known)return; // menus and loading hold them still
     droppedBottles->Weapons(HeldColliders());
     droppedBottles->Advance(in.time,in.stage.anchor);
@@ -3348,6 +3377,7 @@ void StepDroppedBottles() {
     unsigned struck=0,chained=0;
     for(unsigned i=0,n=droppedBottles->Knocks(knocks);i<n;++i) {
         static const char* const by[]{"right hand","left hand","shield"};
+        if(knocks[i].slot==bottles::SpellSlot)continue;   // a spell's: PushSpells logged it
         if(knocks[i].slot<0){++chained;continue;}
         char line[160];++struck;
         std::snprintf(line,sizeof line,"Frame props: knocked a %s (%s, %.1f m/s)",propscan::KindName(knocks[i].kind),by[knocks[i].slot%3],knocks[i].speed);

@@ -18,6 +18,7 @@
 #include "melee.h"
 #include "bow.h"
 #include "crossbow.h"
+#include "spell_impacts.h"
 #include "../steamvr/telegraph.h"
 #include "../steamvr/run_speed.h"
 
@@ -199,6 +200,7 @@ uintptr_t Server(uintptr_t game,uintptr_t params) {
     Telegraph(params,unit);
     flightWatch=outer;
     if(unit)bowvr::Created(game,params,unit);
+    if(unit)impactvr::Created(game,params,unit);   // the hero's spell missiles break containers and push props
     return unit;
 }
 // Run speed slider: the local hero's path (path+0x40 = its unit, type 0, id

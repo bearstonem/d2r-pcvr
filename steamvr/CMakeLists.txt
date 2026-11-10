@@ -80,6 +80,7 @@ target_sources(d2rl-pcvr PRIVATE elemental_hands_renderer.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/settings_menu.cpp ${CMAKE_CURRENT_SOURCE_DIR}/vr_settings_ui.cpp ${ROOT}/vr/native_ui.cpp ${CMAKE_CURRENT_SOURCE_DIR}/interaction_ui.cpp ${ROOT}/vr/interactionstate.cpp ${ROOT}/vr/bow.cpp ${ROOT}/vr/projectiles.cpp ${ROOT}/vr/combat.cpp ${ROOT}/vr/melee.cpp ${CMAKE_CURRENT_SOURCE_DIR}/transport.cpp ${CMAKE_CURRENT_SOURCE_DIR}/floating_map_frame.cpp ${CMAKE_CURRENT_SOURCE_DIR}/foveation.cpp ${CMAKE_CURRENT_SOURCE_DIR}/effects_layer.cpp ${CMAKE_CURRENT_SOURCE_DIR}/logging.cpp ${CMAKE_CURRENT_SOURCE_DIR}/profile.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/native_belt.cpp ${ROOT}/vr/quick_items.cpp ${ROOT}/vr/melee_weapon.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/breakables.cpp ${ROOT}/vr/offline_difficulty.cpp ${ROOT}/vr/enemy_sight.cpp)
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/spell_impacts.cpp)   # spells break containers and push props (spell_impacts.h)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/respec.cpp)   # Reset Skills & Stats (respec_button.h)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/target_lock.cpp ${ROOT}/vr/summon_range.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/loot_beam_scan.cpp)   # loot beams: the items on the floor that get one
@@ -261,6 +262,7 @@ add_test(NAME toss-test COMMAND toss-test)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/spells.cpp)
 add_executable(spell-cast-test spell_cast_test.cpp)
 add_executable(spell-aim-assist-test spell_aim_assist_test.cpp)
+add_executable(spell-impacts-test spell_impacts_test.cpp)
 
 add_executable(interaction-test interaction_test.cpp)
 add_executable(dev-scenarios-test dev_scenarios_test.cpp)
@@ -424,6 +426,7 @@ set_tests_properties(body-calibration-gesture-test PROPERTIES TIMEOUT 30)
 add_test(NAME light-bounds-test COMMAND light-bounds-test)
 set_tests_properties(light-bounds-test PROPERTIES TIMEOUT 30)
 foreach(test_target IN ITEMS memory-test biome-list-test hook-metrics-test active-keys-test resource-descriptions-test latest-worker-test haptic-pulse-test thread-stats-test
+    spell-impacts-test
     gameplay-test weapon-skills-test quick-cast-test hand-controls-test elemental-hands-test elemental-particles-test skill-pad-test interact-press-test sewer-interaction-test notice-card-test mod-layout-test spell-aim-test bow-pose-test crossbow-pose-test body-tracking-test shapeshift-form-test head-shadow-test head-skip-test shield-steady-test body-calibration-test shoulder-swap-test blood-screen-test
     portal-billboard-test shrine-trace-test shrine-placement-test overlay-view-test bone-armor-height-test composition-layers-test projectile-rules-test environment-cutaway-test roof-materials-test game-ceiling-test stereo-prop-physics-test dropped-bottles-test props-test limb-rig-test look-at-test limb-physics-test leather-menu-test stash-buttons-test stats-button-test menu-drop-test arcane-decay-test respec-button-test vr-keyboard-test
     combat-rules-test strike-skills-test zeal-light-test skill-usage-test shield-guard-test guard-strain-test heartbeat-test run-speed-test room-scale-test room-steps-test walk-direction-test logging-test melee-contact-test bow-bash-test weapon-heft-test melee-weapon-test breakables-test offline-difficulty-test enemy-sight-test attack-speed-test world-coordinates-test bow-flight-test bow-laser-test spell-cast-test spell-aim-assist-test tactical-chord-test glyph-recognizer-test glyph-trail-test glyph-cast-test spell-motion-test motions-amazon-test motions-barbarian-test motions-necromancer-test motions-assassin-test motions-paladin-test motions-druid-test bone-graft-test
