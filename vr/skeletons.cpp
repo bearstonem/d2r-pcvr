@@ -42,6 +42,8 @@
 #include "../steamvr/guarded_text.h"
 #include "../steamvr/shapeshift_form.h"
 #include "../steamvr/head_shadow.h"
+#include "../steamvr/aged_cache.h"
+#include "../steamvr/ecs_storage.h"
 #include "sigscan.h"
 #include <chrono>
 #include <memory>
@@ -67,9 +69,12 @@ void SetInteractionHidden(unsigned mask){g_interactionHidden=mask&3;}
 
 namespace {
 
+thread_local uint64_t t_guardedReads = 0;   // this thread's guarded reads, for the hook's ten-second line
+
 #pragma optimize("", off)
 bool SafeCopy(void* dst, const void* src, size_t n) noexcept {
 #ifdef D2RVR_NATIVE_OPENXR
+    ++t_guardedReads;
     return framevr::ReadMemory(dst,src,n);
 #else
     __try { memcpy(dst, src, n); return true; } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
@@ -98,6 +103,187 @@ std::atomic<ULONGLONG> g_dumpUntil{0};
 std::set<std::string> g_seen;
 FILE* g_out = nullptr;
 std::atomic<uint64_t> g_calls{0};
+
+// What is remembered of each skeleton instance met (steamvr/aged_cache.h): at most Remembered
+// entries a cache, one not looked up for RememberedFor forgotten at a sweep (a freed instance is
+// not posed again), and at the limit the half looked up longest ago - never everything at once.
+// The hero's rigs are kept longer: learning one checks its bind pose against the pose of that
+// moment, and a druid's own rig is not posed while he is in a form.
+constexpr size_t Remembered = 4096;
+constexpr uint64_t RememberedFor = 30000, HeroRigsFor = 600000, SweepEvery = 2000;
+namespace hookstats {
+enum Cache { HeroRigs, HeroEntities, BowRigs, CrossbowRigs, BodyKinds, HeadKinds, CacheCount };
+}
+
+#ifdef D2RVR_NATIVE_OPENXR
+// ---- The hook's own cost, for a headset log (no profiler) ----
+// Every pose call's time and guarded reads (natively each read is a system call), summed per
+// thread and handed to the shared totals now and then: one "Frame skeleton hook:" line every ten
+// seconds. An identity look-up is what a skeleton costs when it is not remembered, or is checked
+// again: its model's path read, its rig learned, its entity searched for in the registry.
+namespace hookstats {
+constexpr ULONGLONG ReportEvery = 10000;
+constexpr uint64_t FlushNanos = 50'000'000;   // a thread hands its sums over this often
+std::atomic<uint64_t> g_posed{0}, g_nanos{0}, g_reads{0}, g_longest{0};
+std::atomic<uint64_t> g_identified{0}, g_identifyNanos{0};   // never reset: Report and Tell take differences
+std::atomic<uint64_t> g_identifiedTold{0}, g_identifyNanosTold{0};
+std::atomic<ULONGLONG> g_reported{0};
+struct Local { uint64_t calls = 0, nanos = 0, reads = 0, longest = 0, flushed = 0; };
+thread_local Local t_local;
+
+void Longest(std::atomic<uint64_t>& most, uint64_t nanos) {
+    for (uint64_t was = most.load(std::memory_order_relaxed); nanos > was && !most.compare_exchange_weak(was, nanos, std::memory_order_relaxed);) {}
+}
+struct Identifying {
+    uint64_t started = framevr::hookmetrics::Nanos();
+    ~Identifying() {
+        g_identified.fetch_add(1, std::memory_order_relaxed);
+        g_identifyNanos.fetch_add(framevr::hookmetrics::Nanos() - started, std::memory_order_relaxed);
+    }
+};
+void Report(ULONGLONG now) {
+    ULONGLONG last = g_reported.load(std::memory_order_relaxed);
+    if (now - last < ReportEvery || !g_reported.compare_exchange_strong(last, now)) return;
+    const uint64_t posed = g_posed.exchange(0), nanos = g_nanos.exchange(0), reads = g_reads.exchange(0), longest = g_longest.exchange(0);
+    const uint64_t identifiedNow = g_identified.load(), identifyNanosNow = g_identifyNanos.load();
+    const uint64_t identified = identifiedNow - g_identifiedTold.exchange(identifiedNow), identifyNanos = identifyNanosNow - g_identifyNanosTold.exchange(identifyNanosNow);
+    if (!last || !posed) return;   // the first window has no start
+    const double seconds = double(now - last) / 1000.0;
+    char line[320];
+    std::snprintf(line, sizeof line, "Frame skeleton hook: ten seconds: %.0f poses a second, %.2f ms a second, %.0f guarded reads a second "
+        "(%.1f a pose), longest pose %.2f ms; identity look-ups %llu in %.2f ms", double(posed) / seconds, double(nanos) / 1e6 / seconds,
+        double(reads) / seconds, double(reads) / double(posed), double(longest) / 1e6, static_cast<unsigned long long>(identified),
+        double(identifyNanos) / 1e6);
+    framevr::logging::Write(line);
+}
+// A cache forgot many entries at once (a sweep's aged ones, or its older half to make room): a
+// line then, and one a second later with what identifying skeletons again cost meanwhile - to
+// set beside vrcam's "a pair ... longest" hitch lines. Called under the cache's lock: no logging
+// here, Tell writes from a pose call's end.
+constexpr size_t ForgotAtOnce = 256;
+constexpr ULONGLONG ForgotWatch = 1000;
+constexpr const char* CacheNames[CacheCount] = {"hero rigs", "hero entities", "bow rigs", "crossbow rigs", "bodies", "heads"};
+struct Forgotten { ULONGLONG at = 0; size_t dropped[CacheCount] = {}, held = 0, crowded = 0; uint64_t identified = 0, identifyNanos = 0; };
+SRWLOCK g_forgotLock = SRWLOCK_INIT;
+Forgotten g_forgotten;                 // g_forgotLock
+std::atomic<int> g_forgotStage{0};     // 0 nothing; 1 to be told; 2 told, the second after being measured
+std::atomic<uint64_t> g_longestAfter{0};
+void Forgot(Cache cache, const framevr::CacheSweep& swept, ULONGLONG now) {
+    if (swept.Dropped() < ForgotAtOnce && !swept.crowded) return;
+    AcquireSRWLockExclusive(&g_forgotLock);
+    if (!g_forgotStage.load(std::memory_order_relaxed)) {
+        g_forgotten = {};
+        g_forgotten.at = now;
+        g_forgotten.identified = g_identified.load(); g_forgotten.identifyNanos = g_identifyNanos.load();
+        g_longestAfter.store(0, std::memory_order_relaxed);
+        g_forgotStage.store(1, std::memory_order_relaxed);
+    }
+    g_forgotten.dropped[cache] += swept.Dropped(); g_forgotten.held += swept.held; g_forgotten.crowded += swept.crowded;
+    ReleaseSRWLockExclusive(&g_forgotLock);
+}
+void Tell(ULONGLONG now) {
+    if (!g_forgotStage.load(std::memory_order_relaxed)) return;
+    char line[400]; bool write = false;
+    AcquireSRWLockExclusive(&g_forgotLock);
+    const Forgotten& f = g_forgotten;
+    size_t all = 0; for (const size_t n : f.dropped) all += n;
+    if (const int stage = g_forgotStage.load(std::memory_order_relaxed); stage == 1) {
+        int k = std::snprintf(line, sizeof line, "Frame skeleton hook: forgot %zu of %zu remembered skeletons at once (%zu to make room, the rest not posed lately):",
+                              all, f.held, f.crowded);
+        for (int i = 0; i < CacheCount && k < int(sizeof line) - 40; ++i)
+            if (f.dropped[i]) k += std::snprintf(line + k, sizeof line - size_t(k), " %s %zu", CacheNames[i], f.dropped[i]);
+        g_forgotStage.store(2, std::memory_order_relaxed);
+        write = true;
+    } else if (stage == 2 && now - f.at >= ForgotWatch) {
+        std::snprintf(line, sizeof line, "Frame skeleton hook: in the %.1f s after forgetting %zu skeletons: identity look-ups %llu in %.2f ms, longest pose %.2f ms",
+                      double(now - f.at) / 1000.0, all, static_cast<unsigned long long>(g_identified.load() - f.identified),
+                      double(g_identifyNanos.load() - f.identifyNanos) / 1e6, double(g_longestAfter.load()) / 1e6);
+        g_forgotStage.store(0, std::memory_order_relaxed);
+        write = true;
+    }
+    ReleaseSRWLockExclusive(&g_forgotLock);
+    if (write) framevr::logging::Write(line);
+}
+// One pose call, from the game's own pose to the hook's return.
+struct Call {
+    uint64_t started = framevr::hookmetrics::Nanos(), reads = t_guardedReads;
+    ~Call() {
+        const uint64_t ended = framevr::hookmetrics::Nanos(), took = ended - started;
+        auto& l = t_local;
+        ++l.calls; l.nanos += took; l.reads += t_guardedReads - reads;
+        if (took > l.longest) l.longest = took;
+        if (ended - l.flushed < FlushNanos) return;
+        g_calls.fetch_add(l.calls, std::memory_order_relaxed);
+        g_posed.fetch_add(l.calls, std::memory_order_relaxed);
+        g_nanos.fetch_add(l.nanos, std::memory_order_relaxed);
+        g_reads.fetch_add(l.reads, std::memory_order_relaxed);
+        Longest(g_longest, l.longest);
+        if (g_forgotStage.load(std::memory_order_relaxed)) Longest(g_longestAfter, l.longest);
+        l = {}; l.flushed = ended;
+        const ULONGLONG now = GetTickCount64();
+        Tell(now);
+        Report(now);
+    }
+};
+}  // namespace hookstats
+#define SKELETON_IDENTIFYING hookstats::Identifying identifying
+#else
+#define SKELETON_IDENTIFYING
+namespace hookstats { inline void Forgot(Cache, const framevr::CacheSweep&, ULONGLONG) {} }
+#endif
+
+// ---- One pose call: what its helpers read of the skeleton instance, read once ----
+// An instance's first 0x28 bytes hold its name object (+0), its model (+8) and its world pose
+// (+0x20): one guarded read, and the model's skeleton (model +8) a second. Each helper read
+// these field by field for itself before.
+struct Noted;
+struct Posed {
+    uintptr_t self = 0;
+    Noted* note = nullptr;   // this thread's note of the instance (below)
+    int identity = 0;   // 0 not read yet, 1 read, -1 does not read
+    uintptr_t nameObject = 0, model = 0, worldPose = 0, skeleton = 0;
+    // The pose buffer (world pose: the bone count, then its matrices, packed): one read, for
+    // look-at and bodies both. The pose itself is not shared - see the hook.
+    int buffer = 0;
+    uintptr_t matrices = 0; int count = 0;
+    // The entity's placement, for look-at and bodies both (ecs::Placement).
+    int placed = 0;
+    uint32_t placedEntity = 0; float placement[16] = {};
+    explicit Posed(uintptr_t instance);
+};
+bool Identify(Posed& p) {
+    if (!p.identity) {
+        p.identity = -1;
+        uint64_t head[5];
+        if (p.self > 0x10000 && SafeCopy(head, (const void*)p.self, sizeof head)) {
+            p.nameObject = uintptr_t(head[0]); p.model = uintptr_t(head[1]); p.worldPose = uintptr_t(head[4]);
+            if (Get(p.model + 8, &p.skeleton)) p.identity = 1;
+        }
+    }
+    return p.identity > 0;
+}
+// What this thread last found of a skeleton instance, by its address: one look-up a pose, no
+// lock. A note is only as good as what it was taken from, so each carries what it is checked
+// against (below), and a slot is simply overwritten by another instance with the same hash.
+struct Noted {
+    uintptr_t self = 0;
+    // Not the hero's rig (Arms): for this skeleton, while no hero rig was forgotten since
+    // (g_heroesForgot), and for NotedFor - then the shared entry is looked up, and stamped, again.
+    uintptr_t skeleton = 0; uint32_t forgot = 0; ULONGLONG notHeroAt = 0;
+    // Look-at and bodies leave this instance alone until then: what their shared entries said
+    // when last looked up (not a body, re-checked after OtherRecheck; or beyond reach, farUntil).
+    // Those entries do not change before then, so the look-up would say the same.
+    ULONGLONG headsUntil = 0, bodiesUntil = 0;
+    bool bodiesFar = false;   // bodies counts a far body's pose in its ten-second line
+};
+constexpr ULONGLONG NotedFor = 1000;
+thread_local std::array<Noted, 1024> t_noted{};
+Noted& NoteOf(uintptr_t self) {
+    Noted& note = t_noted[size_t(((uint64_t(self) >> 4) * 0x9E3779B97F4A7C15ull) >> 54)];
+    if (note.self != self) { note = {}; note.self = self; }
+    return note;
+}
+Posed::Posed(uintptr_t instance) : self(instance), note(&NoteOf(instance)) {}
 
 float g_heroPos[3] = {};   // the world camera's look-at, from vrcam
 float g_eyeGround[2] = {};bool g_eyeGroundOk = false;   // under the eyes (SetEyeGround), same lock
@@ -503,7 +689,10 @@ void ReportFormFrames() {
 SRWLOCK g_heroLock = SRWLOCK_INIT;
 // Per SkeletonInstance, keyed with its skeleton too: an instance address the
 // game frees and reuses for another model must not keep the old verdict.
-std::map<std::pair<uintptr_t, uintptr_t>, Hero> g_heroes;   // count == 0: not the hero
+// A hero's rig is handed out by pointer and never changed once learned: every pose of his took
+// a copy of its eight vectors (the bind matrices among them) before. Null: not the hero.
+framevr::AgedCache<std::pair<uintptr_t, uintptr_t>, std::shared_ptr<const Hero>, framevr::PairHash> g_heroes{Remembered, HeroRigsFor, SweepEvery};
+std::atomic<uint32_t> g_heroesForgot{0};   // bumped under g_heroLock whenever entries were forgotten: the threads' notes are void then
 
 #if D2RVR_FIRST_PERSON
 // The grip: what the hands hold, relative to the hands, taken from the game's
@@ -531,6 +720,10 @@ Grip g_grip;
 
 SRWLOCK g_inLock = SRWLOCK_INIT;
 Input g_in;
+// Whether anything is done to the hero's pose at all (Arms), kept beside g_in by Set: every
+// skeleton's pose asks, and copied the whole Input under the lock to find out.
+bool InputActive(const Input& in) { return !(in.mode == 0 && !in.hideHead && !in.lockUpper && !(in.bodyTurn > 0 && in.haveYaw)); }
+std::atomic<bool> g_inActive{InputActive(Input{})};
 std::atomic<FreshFn> g_fresh{nullptr};
 std::atomic<FreshHandsFn> g_freshHands{nullptr};
 
@@ -581,13 +774,18 @@ uint32_t g_cachedEntity = 0;
 ULONGLONG g_lastStorageLook = 0;
 const char* g_why = "";                     // why the chain does not read (for vrcam's log)
 #ifdef D2RVR_NATIVE_OPENXR
-std::map<uintptr_t,uint32_t> g_candidateEntities;
+framevr::AgedCache<uintptr_t,uint32_t> g_candidateEntities{Remembered,RememberedFor,SweepEvery};
 #endif
 
 bool IsStorage(uintptr_t st, uintptr_t vtWas) {
     uintptr_t vt = 0;
     return st && vtWas && Get(st, &vt) && vt == vtWas;
 }
+// A storage's header in one guarded read (steamvr/ecs_storage.h), not a read a field.
+using Header = framevr::ecsstorage::Header;
+bool Read(void* out, uint64_t at, size_t size) { return at > 0x10000 && SafeCopy(out, (const void*)uintptr_t(at), size); }
+bool HeaderOf(uintptr_t st, Header* h) { return framevr::ecsstorage::ReadHeader(st, Read, h); }
+bool HeaderOf(uintptr_t st, uintptr_t vtWas, Header* h) { return st && vtWas && HeaderOf(st, h) && h->vtable == vtWas; }   // IsStorage, with the header
 
 bool FindStorages() {
     const uintptr_t reg = d2rsig::Addr(RVA_ECS_REGISTRY);
@@ -607,30 +805,25 @@ bool FindStorages() {
     if (!Get(xs, &vx) || !Get(ss, &vs) || !vx || !vs || vx == vs) { g_why = "the registry's storages do not read"; return false; }
     g_xs = xs; g_ss = ss; g_vtX = vx; g_vtS = vs;
 #ifdef D2RVR_NATIVE_OPENXR
-    g_candidateEntities.clear();
+    g_candidateEntities.Clear();
 #endif
     return true;
 }
 
 // The dense index of entity e in storage st, checked against the packed list.
+bool Dense(const Header& h, uint32_t e, uint32_t* idx) { return framevr::ecsstorage::DenseIndex(h, e, Read, idx); }
 bool Dense(uintptr_t st, uint32_t e, uint32_t* idx) {
-    uintptr_t sb = 0, se = 0, pb = 0, pe = 0, page = 0;
-    if (!Get(st + 0x08, &sb) || !Get(st + 0x10, &se) || se < sb) return false;
-    const uint64_t pi = (e >> 8) & 0xFFF;
-    if (pi >= (se - sb) / 8 || !Get(sb + pi * 8, &page) || !page) return false;
-    uint32_t v = 0;
-    if (!Get(page + (e & 0xFF) * 4, &v)) return false;
-    v &= 0xFFFFF;
-    if (v == 0xFFFFF || !Get(st + 0x20, &pb) || !Get(st + 0x28, &pe) || pe < pb || v >= (pe - pb) / 4) return false;
-    uint32_t back = 0;
-    if (!Get(pb + (uintptr_t)v * 4, &back) || back != e) return false;
-    *idx = v;
-    return true;
+    Header h;
+    return HeaderOf(st, &h) && Dense(h, e, idx);
 }
 
+bool SkeletonOf(const Header& s, uint32_t e, uintptr_t* self) {
+    uint32_t i = 0;
+    return Dense(s, e, &i) && s.components && Get(uintptr_t(s.components) + (uintptr_t)i * kSkeletonCompSize, self);
+}
 bool SkeletonOf(uint32_t e, uintptr_t* self) {
-    uint32_t i = 0; uintptr_t cb = 0;
-    return Dense(g_ss, e, &i) && Get(g_ss + 0x38, &cb) && cb && Get(cb + (uintptr_t)i * kSkeletonCompSize, self);
+    Header s;
+    return HeaderOf(g_ss, &s) && SkeletonOf(s, e, self);
 }
 
 // The entity whose SkeletonComponent holds `self`: one pass over the storage (only for a new instance).
@@ -650,25 +843,30 @@ bool EntityOf(uintptr_t self, uint32_t* e) {
 bool CandidatePosition(uintptr_t self,float position[3]) {
     AcquireSRWLockExclusive(&g_lock);
     struct Unlock {~Unlock(){ReleaseSRWLockExclusive(&g_lock);}} unlock;
-    if(!IsStorage(g_xs,g_vtX)||!IsStorage(g_ss,g_vtS)) {
+    Header x,s;
+    if(!HeaderOf(g_xs,g_vtX,&x)||!HeaderOf(g_ss,g_vtS,&s)) {
         const auto now=GetTickCount64();
         if(now-g_lastStorageLook<500)return false;
-        g_lastStorageLook=now;if(!FindStorages())return false;
+        g_lastStorageLook=now;if(!FindStorages()||!HeaderOf(g_xs,&x)||!HeaderOf(g_ss,&s))return false;
     }
-    auto it=g_candidateEntities.find(self);uintptr_t held=0;uint32_t entity=0;
-    if(it!=g_candidateEntities.end()&&SkeletonOf(it->second,&held)&&held==self)entity=it->second;
+    const auto met=GetTickCount64();
+    const uint32_t* kept=g_candidateEntities.Find(self,met);uintptr_t held=0;uint32_t entity=0;
+    if(kept&&SkeletonOf(s,*kept,&held)&&held==self)entity=*kept;
     else {
+        SKELETON_IDENTIFYING;
         if(!EntityOf(self,&entity))return false;
-        if(g_candidateEntities.size()>4096)g_candidateEntities.clear();
-        g_candidateEntities[self]=entity;
+        framevr::CacheSweep swept;
+        g_candidateEntities.Put(self,entity,met,&swept);
+        hookstats::Forgot(hookstats::HeroEntities,swept,met);
     }
-    uint32_t index=0;uintptr_t components=0;
-    if(!Dense(g_xs,entity,&index)||!Get(g_xs+0x38,&components)||!components)return false;
-    const auto at=components+uintptr_t(index)*kTransformSize;
-    uint32_t parentEntity=0xFFFFFFFFu;if(!Get(at+0xC0,&parentEntity))return false;
+    uint32_t index=0;float t[kTransformSize/4];
+    if(!Dense(x,entity,&index)||!x.components)return false;
+    const auto at=uintptr_t(x.components)+uintptr_t(index)*kTransformSize;
+    if(!Read(t,at,sizeof t))return false;   // the whole component: its parent (+0xC0) and both matrices
+    uint32_t parentEntity=0xFFFFFFFFu;memcpy(&parentEntity,t+48,4);
     // Child transforms have their composed placement in +0x40.
-    const uintptr_t matrix=at+((parentEntity&0xFFFFF)==0xFFFFF?0:0x40);
-    return SafeCopy(position,reinterpret_cast<const void*>(matrix+12*sizeof(float)),3*sizeof(float));
+    memcpy(position,t+((parentEntity&0xFFFFF)==0xFFFFF?0:16)+12,3*sizeof(float));
+    return true;
 }
 // A model's placement this frame (model to world): its TransformComponent's
 // local matrix, or the composed one under a parent. No search; another
@@ -676,9 +874,9 @@ bool CandidatePosition(uintptr_t self,float position[3]) {
 bool Placement(uint32_t entity,float out[16]) {
     AcquireSRWLockShared(&g_lock);
     struct Unlock {~Unlock(){ReleaseSRWLockShared(&g_lock);}} unlock;
-    uint32_t index=0;uintptr_t components=0;float t[kTransformSize/4];
-    if(!IsStorage(g_xs,g_vtX)||!Dense(g_xs,entity,&index)||!Get(g_xs+0x38,&components)||!components||
-       !SafeCopy(t,reinterpret_cast<const void*>(components+uintptr_t(index)*kTransformSize),sizeof t))return false;
+    uint32_t index=0;float t[kTransformSize/4];Header x;
+    if(!HeaderOf(g_xs,g_vtX,&x)||!Dense(x,entity,&index)||!x.components||
+       !SafeCopy(t,reinterpret_cast<const void*>(uintptr_t(x.components)+uintptr_t(index)*kTransformSize),sizeof t))return false;
     uint32_t parent=0;memcpy(&parent,t+48,4);
     memcpy(out,t+((parent&0xFFFFF)==0xFFFFF?0:16),16*sizeof(float));
     for(int i=0;i<16;++i)if(!std::isfinite(out[i]))return false;
@@ -689,13 +887,24 @@ bool Placement(uint32_t entity,float out[16]) {
 bool Owner(uintptr_t self,uint32_t known,uint32_t* entity) {
     AcquireSRWLockShared(&g_lock);
     struct Unlock {~Unlock(){ReleaseSRWLockShared(&g_lock);}} unlock;
-    if(!IsStorage(g_xs,g_vtX)||!IsStorage(g_ss,g_vtS))return false;
+    Header s;
+    if(!IsStorage(g_xs,g_vtX)||!HeaderOf(g_ss,g_vtS,&s))return false;
     uintptr_t held=0;
-    if(known&&SkeletonOf(known,&held)&&held==self){*entity=known;return true;}
+    if(known&&SkeletonOf(s,known,&held)&&held==self){*entity=known;return true;}
     return EntityOf(self,entity);
 }
 #endif
 }  // namespace ecs
+#ifdef D2RVR_NATIVE_OPENXR
+// The entity's placement, read once a pose call. Look-at and bodies each read it before, some
+// microseconds apart; the hook writes no transform, so the second read gave what the first did.
+bool PlacementOf(Posed& p,uint32_t entity,float out[16]) {
+    if(!p.placed||p.placedEntity!=entity){p.placedEntity=entity;p.placed=ecs::Placement(entity,p.placement)?1:-1;}
+    if(p.placed<0)return false;
+    memcpy(out,p.placement,sizeof p.placement);
+    return true;
+}
+#endif
 
 bool Learn(uintptr_t self, Hero* h) {
     uintptr_t modelInst = 0, skel = 0, nameObj = 0, nameP = 0;
@@ -2840,6 +3049,7 @@ void HoldWeaponItem(uintptr_t self) {
 struct MotionBowInput {bool active=false,drawing=false;float draw=0;ULONGLONG at=0;bool anchors=false;bow::Vec stringHand{},bowHand{};uint32_t stamp=0;};
 SRWLOCK g_bowInputLock=SRWLOCK_INIT,g_bowRigLock=SRWLOCK_INIT;
 MotionBowInput g_motionBow;
+std::atomic<bool> g_bowLive{false};   // g_motionBow.active, read without the lock: every skeleton's pose asks (PoseMotionBow)
 std::array<MotionBowInput,16> g_bowHistory{};size_t g_bowHistoryNext=0;
 std::atomic<ULONGLONG> g_bowPosedAt{0};
 std::atomic<ULONGLONG> g_bowAnchoredAt{0};
@@ -2852,10 +3062,10 @@ struct MotionBowRig {
     bool entityKnown=false;
     ULONGLONG lookupAt=0;
 };
-std::map<std::pair<uintptr_t,uintptr_t>,MotionBowRig> g_bowRigs;
+framevr::AgedCache<std::pair<uintptr_t,uintptr_t>,MotionBowRig,framevr::PairHash> g_bowRigs{Remembered,RememberedFor,SweepEvery};
 struct CrossbowRig {uintptr_t bones=0;int cog=-1;Mat relative{};uint32_t entity=0;bool entityKnown=false;ULONGLONG lookupAt=0;};
 SRWLOCK g_crossbowRigLock=SRWLOCK_INIT;
-std::map<std::pair<uintptr_t,uintptr_t>,CrossbowRig> g_crossbowRigs;
+framevr::AgedCache<std::pair<uintptr_t,uintptr_t>,CrossbowRig,framevr::PairHash> g_crossbowRigs{Remembered,RememberedFor,SweepEvery};
 
 // The packed Granny model layout is shared with the skeleton reader above:
 // model MeshBindings +0x54 (count/pointer), mesh BoneBindings +0x30,
@@ -2989,21 +3199,22 @@ void CaptureCrossbow(uintptr_t self) {
     // render workers keep posing meanwhile. Most rigs are not crossbows.
     bool known=false,crossbow=false;
     AcquireSRWLockShared(&g_crossbowRigLock);
-    if(const auto found=rigs.find(key);found!=rigs.end()&&found->second.bones==bones){known=true;crossbow=found->second.cog>=0;}
+    if(const CrossbowRig* found=std::as_const(rigs).Find(key,now);found&&found->bones==bones){known=true;crossbow=found->cog>=0;}
     ReleaseSRWLockShared(&g_crossbowRigLock);
     if(!known) {
+        SKELETON_IDENTIFYING;
         const CrossbowRig learned=LearnCrossbowRig(bones,count);crossbow=learned.cog>=0;
+        framevr::CacheSweep swept;
         AcquireSRWLockExclusive(&g_crossbowRigLock);
-        if(rigs.size()>4096)std::erase_if(rigs,[](const auto& entry){return entry.second.cog<0;});
-        if(rigs.size()>4096)rigs.clear();
-        if(const auto found=rigs.find(key);found==rigs.end()||found->second.bones!=bones)rigs.insert_or_assign(key,learned);
+        if(const CrossbowRig* found=rigs.Find(key,now);!found||found->bones!=bones)rigs.Put(key,learned,now,&swept);
         ReleaseSRWLockExclusive(&g_crossbowRigLock);
+        hookstats::Forgot(hookstats::CrossbowRigs,swept,now);
     }
     if(!crossbow)return;
     AcquireSRWLockExclusive(&g_crossbowRigLock);struct Unlock {SRWLOCK* lock;~Unlock(){ReleaseSRWLockExclusive(lock);}} unlock{&g_crossbowRigLock};
-    const auto it=rigs.find(key);
-    if(it==rigs.end()||it->second.bones!=bones||it->second.cog<0)return;   // dropped meanwhile: learned again on its next pose
-    auto& rig=it->second;
+    CrossbowRig* const kept=rigs.Find(key,now);
+    if(!kept||kept->bones!=bones||kept->cog<0)return;   // dropped meanwhile: learned again on its next pose
+    auto& rig=*kept;
     g_crossbowStages.fetch_or(2);
     // Learn the item even if its skeleton is evaluated before the hero. Static
     // item poses need not be evaluated again after the hero becomes available.
@@ -3046,7 +3257,7 @@ void RefreshCrossbow(uintptr_t hero) {
     if(!attach.crossbow)return;
     std::vector<uintptr_t> items;
     AcquireSRWLockShared(&g_crossbowRigLock);
-    for(const auto& [key,rig]:g_crossbowRigs)if(rig.cog>=0)items.push_back(key.first);
+    g_crossbowRigs.Each([&](const std::pair<uintptr_t,uintptr_t>& key,const CrossbowRig& rig){if(rig.cog>=0)items.push_back(key.first);});
     ReleaseSRWLockShared(&g_crossbowRigLock);
     for(auto item:items)CaptureCrossbow(item);
     AcquireSRWLockShared(&g_gunBoneLock);const auto source=g_crossbowRenderSource;ReleaseSRWLockShared(&g_gunBoneLock);
@@ -3077,6 +3288,7 @@ void RefreshCrossbow(uintptr_t hero) {
 }
 
 void PoseMotionBow(uintptr_t self) {
+    if(!g_bowLive.load(std::memory_order_relaxed))return;   // no bow in play: nothing below would match
     GunBoneOut attach;
     AcquireSRWLockShared(&g_gunBoneLock);attach=g_gunBone;ReleaseSRWLockShared(&g_gunBoneLock);
     MotionBowInput input;bool matched=false;
@@ -3094,8 +3306,9 @@ void PoseMotionBow(uintptr_t self) {
     AcquireSRWLockExclusive(&g_bowRigLock);
     struct Unlock {~Unlock(){ReleaseSRWLockExclusive(&g_bowRigLock);}} unlock;
     const auto key=std::make_pair(self,skeleton);
-    auto it=g_bowRigs.find(key);
-    if(it==g_bowRigs.end()||it->second.bones!=bones) {
+    MotionBowRig* rig=g_bowRigs.Find(key,now);
+    if(!rig||rig->bones!=bones) {
+        SKELETON_IDENTIFYING;
         MotionBowRig learned;learned.bones=bones;
         uintptr_t object=0,name=0;Get(self,&object);Get(object+8,&name);
         const std::string path=Str(name);
@@ -3116,10 +3329,11 @@ void PoseMotionBow(uintptr_t self) {
                   SafeCopy(&inverse,reinterpret_cast<const void*>(at+0x50),sizeof inverse)&&bow::Inverse(inverse,bind[i]);
         }
         if(valid)learned.rig.Learn(bind);
-        if(g_bowRigs.size()>4096)g_bowRigs.clear();
-        it=g_bowRigs.insert_or_assign(key,learned).first;
+        framevr::CacheSweep swept;
+        rig=&g_bowRigs.Put(key,learned,now,&swept);
+        hookstats::Forgot(hookstats::BowRigs,swept,now);
     }
-    auto& held=it->second;
+    auto& held=*rig;
     if(!held.rig.valid&&std::none_of(held.arrows.begin(),held.arrows.end(),[](bool arrow){return arrow;}))return;
     HeroXform hero;
     if(!HeroTransform(&hero))return;
@@ -3180,34 +3394,45 @@ void PoseMotionBow(uintptr_t self) {
 }
 #endif
 
-void Arms(uintptr_t self) {
-    Input in;
-    float playerPosition[3],eyeGround[2];bool eyeGroundOk;
-    AcquireSRWLockShared(&g_inLock); in = g_in;memcpy(playerPosition,g_heroPos,sizeof playerPosition);
-    memcpy(eyeGround,g_eyeGround,sizeof eyeGround);eyeGroundOk=g_eyeGroundOk; ReleaseSRWLockShared(&g_inLock);
+void Arms(Posed& posed) {
+    const uintptr_t self = posed.self;
     // The hero is looked for even while nothing is done to him: his SkeletonInstance is what
     // vrcam's facing is found from (HeroTransform), and that is needed before the body can turn.
-    const bool active = !(in.mode == 0 && !in.hideHead && !in.lockUpper && !(in.bodyTurn > 0 && in.haveYaw));
-    if (!active && !g_trackHero.load()) return;
-    uintptr_t modelInst = 0, skel = 0;
-    if (!Get(self + 0x08, &modelInst) || !Get(modelInst + 0x08, &skel)) return;
+    if (!g_inActive.load(std::memory_order_relaxed) && !g_trackHero.load()) return;
+    if (!Identify(posed)) return;
+    const uintptr_t skel = posed.skeleton;
     const auto key = std::make_pair(self, skel);
-    Hero hero; bool have = false;
-    AcquireSRWLockShared(&g_heroLock);
-    auto it = g_heroes.find(key);
-    if (it != g_heroes.end()) { hero = it->second; have = true; }
-    ReleaseSRWLockShared(&g_heroLock);
-    if (!have) {
-        Hero h;
-        if (!Learn(self, &h)) h.count = 0;
-        AcquireSRWLockExclusive(&g_heroLock);
-        if (g_heroes.size() > 4096) g_heroes.clear();
-        g_heroes[key] = h;
-        ReleaseSRWLockExclusive(&g_heroLock);
-        hero = h;
+    const ULONGLONG met = GetTickCount64();
+    // Nearly every skeleton is not the hero's: this thread's note of that, no lock. The note is
+    // for this skeleton (an instance address the game reuses for another model has another), and
+    // void once any hero rig was forgotten - what it was taken from may be gone.
+    Noted& note = *posed.note;
+    const uint32_t forgot = g_heroesForgot.load(std::memory_order_acquire);
+    std::shared_ptr<const Hero> rig;
+    if (!(note.notHeroAt && note.skeleton == skel && note.forgot == forgot && met - note.notHeroAt < NotedFor)) {
+        bool have = false;
+        AcquireSRWLockShared(&g_heroLock);
+        if (const auto* found = std::as_const(g_heroes).Find(key, met)) { rig = *found; have = true; }
+        ReleaseSRWLockShared(&g_heroLock);
+        if (!have) {
+            SKELETON_IDENTIFYING;
+            auto learned = std::make_shared<Hero>();
+            if (Learn(self, learned.get()) && learned->count > 0) rig = std::move(learned);
+            framevr::CacheSweep swept;
+            AcquireSRWLockExclusive(&g_heroLock);
+            g_heroes.Put(key, rig, met, &swept);
+            if (swept.Dropped()) g_heroesForgot.fetch_add(1, std::memory_order_release);
+            ReleaseSRWLockExclusive(&g_heroLock);
+            hookstats::Forgot(hookstats::HeroRigs, swept, met);
+        }
+        if (!rig) { note.skeleton = skel; note.forgot = forgot; note.notHeroAt = met ? met : 1; }
+        else note.notHeroAt = 0;
     }
-    if (hero.count <= 0) {
+    if (!rig) {
         if (GetTickCount64() < g_partsUntil.load()) {   // room-scale diagnostics: a skeleton not taken as a body, at the hero?
+            float playerPosition[3],eyeGround[2];bool eyeGroundOk;
+            AcquireSRWLockShared(&g_inLock);memcpy(playerPosition,g_heroPos,sizeof playerPosition);
+            memcpy(eyeGround,g_eyeGround,sizeof eyeGround);eyeGroundOk=g_eyeGroundOk;ReleaseSRWLockShared(&g_inLock);
             float position[3];uintptr_t world=0;int32_t bones=0;
             if (ecs::CandidatePosition(self, position) && Get(self + 0x20, &world) && Get(world, &bones)) {
                 const float atHero=std::hypot(position[0]-playerPosition[0],position[2]-playerPosition[2]);
@@ -3220,6 +3445,14 @@ void Arms(uintptr_t self) {
         }
         return;
     }
+    // A hero's rig (a player model, or a form's): only now is the input copied.
+    const Hero& hero = *rig;
+    Input in;
+    float playerPosition[3],eyeGround[2];bool eyeGroundOk;
+    AcquireSRWLockShared(&g_inLock); in = g_in;memcpy(playerPosition,g_heroPos,sizeof playerPosition);
+    memcpy(eyeGround,g_eyeGround,sizeof eyeGround);eyeGroundOk=g_eyeGroundOk; ReleaseSRWLockShared(&g_inLock);
+    const bool active = InputActive(in);
+    if (!active && !g_trackHero.load()) return;   // Set changed it since the look above
     // A shapeshift form's rig (an enemy model) is the hero's only while the player is in that form -
     // or, as the game swaps the models, once the rig the state sample still names is no longer
     // drawn: the sample trails the swap, and the form's first frames were the game's own beast.
@@ -3372,7 +3605,7 @@ uint64_t PathKey(const std::string& path) {
     for (const unsigned char c : path) { h ^= c; h *= 1099511628211ull; }
     return h;
 }
-std::unordered_map<uintptr_t, Known> g_known;
+framevr::AgedCache<uintptr_t, Known> g_known{MaxKnown, RememberedFor, SweepEvery};
 // Each model's limbs, learned once from its bones and meshes; never moved once made.
 // Kept by the model's path: the game makes a model and skeleton for each monster.
 struct Model {
@@ -3387,11 +3620,27 @@ thread_local std::array<float, limbs::MaxBones * 16> t_pose, t_raw;
 thread_local bool t_wrote = false;   // this pose's buffer was written here (looks::After reads the head it left)
 // Each instance's own pose from the game, kept across frames (limbs::GamePose): a body the
 // game does not pose again (a corpse) still holds the pose bent for it last frame.
-struct Kept { limbs::GamePose pose; ULONGLONG seen = 0; };
+// g_keptLock guards the map only; a pose is taken, hashed and written back under its own
+// instance's lock (the one lock for all of them made every worker wait on a 13 KB copy).
+struct Kept { SRWLOCK lock = SRWLOCK_INIT; limbs::GamePose pose; std::atomic<ULONGLONG> seen{0}; };
 SRWLOCK g_keptLock = SRWLOCK_INIT;
-std::unordered_map<uintptr_t, Kept> g_kept;
-ULONGLONG g_keptPruned = 0;
+std::unordered_map<uintptr_t, std::shared_ptr<Kept>> g_kept;
+std::atomic<ULONGLONG> g_keptPruned{0};
 constexpr ULONGLONG KeptFor = 5000;   // ms an instance's kept pose outlives its last sight
+std::shared_ptr<Kept> KeptOf(uintptr_t self, bool make) {
+    std::shared_ptr<Kept> kept;
+    AcquireSRWLockShared(&g_keptLock);
+    if (const auto it = g_kept.find(self); it != g_kept.end()) kept = it->second;
+    ReleaseSRWLockShared(&g_keptLock);
+    if (!kept && make) {
+        AcquireSRWLockExclusive(&g_keptLock);
+        auto& slot = g_kept[self];
+        if (!slot) slot = std::make_shared<Kept>();
+        kept = slot;
+        ReleaseSRWLockExclusive(&g_keptLock);
+    }
+    return kept;
+}
 
 // A model's limbs from its skeleton's bones: every mesh's per-bone boxes when
 // the model has meshes; else (the game's characters load their skeleton from
@@ -3465,43 +3714,64 @@ const Model* ModelOf(uintptr_t self, uint64_t key, uintptr_t model, uintptr_t sk
 // (a corpse is not posed again by the game, so it would keep the bend). raw: the buffer as
 // read this frame when haveRaw, else room to read it into.
 bool Bent(uintptr_t self) {
-    bool bent = false;
-    AcquireSRWLockShared(&g_keptLock);
-    if (const auto it = g_kept.find(self); it != g_kept.end()) bent = it->second.pose.written != 0;
-    ReleaseSRWLockShared(&g_keptLock);
+    const auto kept = KeptOf(self, false);
+    if (!kept) return false;
+    AcquireSRWLockShared(&kept->lock);
+    const bool bent = kept->pose.written != 0;
+    ReleaseSRWLockShared(&kept->lock);
     return bent;
 }
 void PutBack(uintptr_t self, uintptr_t matrices, int count, float* raw, bool haveRaw) {
     if (!Bent(self) || (!haveRaw && !SafeCopy(raw, reinterpret_cast<const void*>(matrices), size_t(count) * 64))) return;
-    AcquireSRWLockExclusive(&g_keptLock);
-    if (const auto it = g_kept.find(self); it != g_kept.end())
-        if (const float* game = it->second.pose.Restore(raw, count))
-            if (SafeWrite(reinterpret_cast<void*>(matrices), game, size_t(count) * 64)) { ++limbs::Shared().restored; t_wrote = true; }
-    ReleaseSRWLockExclusive(&g_keptLock);
+    const auto kept = KeptOf(self, false);
+    if (!kept) return;
+    AcquireSRWLockExclusive(&kept->lock);
+    if (const float* game = kept->pose.Restore(raw, count))
+        if (SafeWrite(reinterpret_cast<void*>(matrices), game, size_t(count) * 64)) { ++limbs::Shared().restored; t_wrote = true; }
+    ReleaseSRWLockExclusive(&kept->lock);
 }
-// A skeleton instance's model, skeleton and pose buffer: false when they do not read.
-bool Buffer(uintptr_t self, uintptr_t& model, uintptr_t& skeleton, uintptr_t& matrices, int& count) {
-    uintptr_t worldPose = 0;
-    return Get(self + 0x08, &model) && Get(model + 0x08, &skeleton) && Get(self + 0x20, &worldPose) && Get(worldPose, &count) &&
-           count >= 2 && count <= limbs::MaxBones && Get(worldPose + 4, &matrices) && matrices;
+// A skeleton instance's model, skeleton and pose buffer: false when they do not read. Read once
+// a pose call (the identity's two reads, shared with Arms, and one for the buffer's header).
+bool Buffer(Posed& p, uintptr_t& model, uintptr_t& skeleton, uintptr_t& matrices, int& count) {
+    if (!p.buffer) {
+        p.buffer = -1;
+        unsigned char head[12];
+        if (Identify(p) && p.worldPose > 0x10000 && SafeCopy(head, reinterpret_cast<const void*>(p.worldPose), sizeof head)) {
+            memcpy(&p.count, head, 4); memcpy(&p.matrices, head + 4, 8);
+            if (p.count >= 2 && p.count <= limbs::MaxBones && p.matrices) p.buffer = 1;
+        }
+    }
+    if (p.buffer < 0) return false;
+    model = p.model; skeleton = p.skeleton; matrices = p.matrices; count = p.count;
+    return true;
 }
 float Away(const float placement[16], const float centre[3]) {
     const float dx = placement[12] - centre[0], dz = placement[14] - centre[2];
     return std::sqrt(dx * dx + dz * dz);
 }
 
-void Limbs(uintptr_t self) {
+void Limbs(Posed& posed) {
+    const uintptr_t self = posed.self;
     if (!g_live.load(std::memory_order_relaxed)) return;
     bool on = false; float centre[3]; float upm = 0, radius = DefaultRadius;
     Known k; bool known = false;
     const ULONGLONG now = GetTickCount64();
+    // Left alone until then, by this thread's note of what the look-up below last said.
+    Noted& note = *posed.note;
+    if (now < note.bodiesUntil) {
+        if (note.bodiesFar && self != g_heroSelf.load(std::memory_order_relaxed)) { auto& b = limbs::Shared(); ++b.calls; ++b.outside; }
+        return;
+    }
     AcquireSRWLockShared(&g_lock);
     on = g_on; memcpy(centre, g_centre, sizeof centre); upm = g_upm; radius = g_radius;
-    if (on) if (const auto it = g_known.find(self); it != g_known.end()) { k = it->second; known = true; }
+    if (on) if (const Known* found = std::as_const(g_known).Find(self, now)) { k = *found; known = true; }
     ReleaseSRWLockShared(&g_lock);
     if (!on || self == g_heroSelf.load(std::memory_order_relaxed)) return;
-    if (known && k.kind == limbs::Kind::None && now - k.at < OtherRecheck) return;   // not a body (an item, a prop, a player)
-    if (known && k.kind != limbs::Kind::None && now < k.farUntil) { auto& b = limbs::Shared(); ++b.calls; ++b.outside; return; }   // far a moment ago (FarFor)
+    if (known && k.kind == limbs::Kind::None && now - k.at < OtherRecheck) { note.bodiesUntil = k.at + OtherRecheck; note.bodiesFar = false; return; }   // not a body (an item, a prop, a player)
+    if (known && k.kind != limbs::Kind::None && now < k.farUntil) {   // far a moment ago (FarFor)
+        note.bodiesUntil = k.farUntil; note.bodiesFar = true;
+        auto& b = limbs::Shared(); ++b.calls; ++b.outside; return;
+    }
     // This hook's own cost, in the ten-second "Frame bodies:" line.
     auto& board = limbs::Shared();
     struct Timed {
@@ -3515,19 +3785,19 @@ void Limbs(uintptr_t self) {
     // read: in a town most bodies are, and each would cost a look-up of its model and entity.
     float placement[16];
     bool placed = false;
-    if (known && k.kind != limbs::Kind::None && k.entity && ecs::Placement(k.entity, placement)) {
+    if (known && k.kind != limbs::Kind::None && k.entity && PlacementOf(posed, k.entity, placement)) {
         placed = true;
         if (const float away = Away(placement, centre); !(away <= reach)) {
             ++board.outside;
             // Left alone for a while; its pose read only when it was bent here (a body pushed, then left).
             if (const ULONGLONG wait = FarFor(away / upm, radius)) {
                 AcquireSRWLockExclusive(&g_lock);
-                if (const auto it = g_known.find(self); it != g_known.end() && it->second.entity == k.entity) it->second.farUntil = now + wait;
+                if (Known* found = g_known.Find(self, now); found && found->entity == k.entity) found->farUntil = now + wait;
                 ReleaseSRWLockExclusive(&g_lock);
             }
             if (Bent(self)) {
                 uintptr_t model = 0, skeleton = 0, matrices = 0; int count = 0;
-                if (Buffer(self, model, skeleton, matrices, count)) PutBack(self, matrices, count, t_raw.data(), false);
+                if (Buffer(posed, model, skeleton, matrices, count)) PutBack(self, matrices, count, t_raw.data(), false);
             }
             return;
         }
@@ -3535,6 +3805,7 @@ void Limbs(uintptr_t self) {
     // What the instance is: its model's path, rechecked now and then (an
     // instance's memory can be another model's later), its entity kept.
     if (!known || now - k.at >= (k.kind == limbs::Kind::None ? OtherRecheck : Recheck)) {
+        SKELETON_IDENTIFYING;
         uintptr_t nameObject = 0, namePointer = 0;
         Known next; next.at = now;
         if (Get(self, &nameObject) && Get(nameObject + 8, &namePointer)) {
@@ -3546,25 +3817,28 @@ void Limbs(uintptr_t self) {
         if (next.kind != limbs::Kind::None && !ecs::Owner(self, known ? k.entity : 0, &next.entity)) next.kind = limbs::Kind::None;
         if (next.entity != k.entity) placed = false;
         k = next;
+        framevr::CacheSweep swept;
         AcquireSRWLockExclusive(&g_lock);
-        if (g_known.size() >= MaxKnown) g_known.clear();
-        g_known[self] = k;
+        g_known.Put(self, k, now, &swept);
         ReleaseSRWLockExclusive(&g_lock);
+        hookstats::Forgot(hookstats::BodyKinds, swept, now);
     }
     if (k.kind == limbs::Kind::None) return;
     uintptr_t model = 0, skeleton = 0, matrices = 0; int count = 0;
-    if (!Buffer(self, model, skeleton, matrices, count)) return;
-    if (now - g_keptPruned > 2000) {
+    if (!Buffer(posed, model, skeleton, matrices, count)) return;
+    if (ULONGLONG pruned = g_keptPruned.load(std::memory_order_relaxed); now > pruned && now - pruned > 2000 && g_keptPruned.compare_exchange_strong(pruned, now)) {
         AcquireSRWLockExclusive(&g_keptLock);
-        g_keptPruned = now;
-        for (auto it = g_kept.begin(); it != g_kept.end();) it = now - it->second.seen > KeptFor ? g_kept.erase(it) : std::next(it);
+        for (auto it = g_kept.begin(); it != g_kept.end();) {   // one seen by a thread whose clock read is later than this one's is not old
+            const ULONGLONG seen = it->second->seen.load(std::memory_order_relaxed);
+            it = now > seen && now - seen > KeptFor ? g_kept.erase(it) : std::next(it);
+        }
         ReleaseSRWLockExclusive(&g_keptLock);
     }
     auto& raw = t_raw;
     bool haveRaw = false;
     // Not bent this frame: a bent pose the game has not posed over goes back to the game's.
     auto putBack = [&] { PutBack(self, matrices, count, raw.data(), haveRaw); };
-    if (!placed && !ecs::Placement(k.entity, placement)) { putBack(); return; }
+    if (!placed && !PlacementOf(posed, k.entity, placement)) { putBack(); return; }
     const float away = Away(placement, centre);
     // Out of reach; or a druid's own form, drawn with a wolf's or bear's model where the player stands.
     if (!(away <= reach)) { ++board.outside; putBack(); return; }
@@ -3573,11 +3847,11 @@ void Limbs(uintptr_t self) {
     haveRaw = true;
     // The game's own pose: what the buffer holds, unless it is the pose bent here last frame.
     auto& pose = t_pose;
-    AcquireSRWLockExclusive(&g_keptLock);
-    auto& kept = g_kept[self];
-    kept.seen = now;
-    const bool posedAgain = kept.pose.Take(raw.data(), count, pose.data());
-    ReleaseSRWLockExclusive(&g_keptLock);
+    const auto kept = KeptOf(self, true);
+    AcquireSRWLockExclusive(&kept->lock);
+    kept->seen.store(now, std::memory_order_relaxed);
+    const bool posedAgain = kept->pose.Take(raw.data(), count, pose.data());
+    ReleaseSRWLockExclusive(&kept->lock);
     if (!posedAgain) ++board.kept;
     const Model* shape = ModelOf(self, k.model, model, skeleton, count, pose.data());
     if (!shape) { putBack(); return; }
@@ -3592,9 +3866,9 @@ void Limbs(uintptr_t self) {
     if (!SafeWrite(reinterpret_cast<void*>(matrices), pose.data(), size_t(count) * 64)) return;
     t_wrote = true;
     ++board.bent;
-    AcquireSRWLockExclusive(&g_keptLock);
-    if (const auto it = g_kept.find(self); it != g_kept.end()) it->second.pose.Wrote(pose.data(), count);
-    ReleaseSRWLockExclusive(&g_keptLock);
+    AcquireSRWLockExclusive(&kept->lock);
+    kept->pose.Wrote(pose.data(), count);
+    ReleaseSRWLockExclusive(&kept->lock);
 }
 }  // namespace bodies
 
@@ -3617,7 +3891,7 @@ std::atomic<bool> g_live{false};   // g_on, read without the lock: most poses st
 bool g_on = false;
 float g_eye[3] = {}, g_upm = 0;
 struct Known { limbs::Kind kind = limbs::Kind::None; uint32_t entity = 0; uint64_t model = 0; ULONGLONG at = 0; ULONGLONG farUntil = 0; bool form = false; };
-std::unordered_map<uintptr_t, Known> g_known;
+framevr::AgedCache<uintptr_t, Known> g_known{MaxKnown, RememberedFor, SweepEvery};
 // Each model's head, learned once from its skeleton; kept by the model's path, never moved once made.
 struct Model { uint64_t key = 0; int bones = 0; std::array<int16_t, lookat::MaxBones> parents{}; lookat::Rig rig; };
 std::vector<std::unique_ptr<Model>> g_models;
@@ -3625,19 +3899,37 @@ std::set<uint64_t> g_unusable;
 // Each instance's head: how far it is turned, the game's pose it was turned from, and the head's
 // matrix as the buffer was left (a pose the game has not posed over still holds it: turned again
 // from the game's own pose, never from the turned one).
+// g_headLock guards the map only. A head's own fields are under its lock: the game's pose (13 KB
+// for a large rig) was copied under the one lock for every head, which made the workers queue.
+// kind, seen and turned are read by the report and the pruning without it.
 struct Head {
+    SRWLOCK lock = SRWLOCK_INIT;
     lookat::Eased eased;
     std::vector<float> game;
     float left[16] = {};
     bool mine = false;
-    limbs::Kind kind = limbs::Kind::None;
-    ULONGLONG seen = 0, turned = 0;
+    std::atomic<limbs::Kind> kind{limbs::Kind::None};
+    std::atomic<ULONGLONG> seen{0}, turned{0};
     std::chrono::steady_clock::time_point at{};
     bool timed = false;
 };
 SRWLOCK g_headLock = SRWLOCK_INIT;
-std::unordered_map<uintptr_t, Head> g_heads;
-ULONGLONG g_pruned = 0;
+std::unordered_map<uintptr_t, std::shared_ptr<Head>> g_heads;
+std::atomic<ULONGLONG> g_pruned{0};
+std::shared_ptr<Head> HeadOf(uintptr_t self, bool make) {
+    std::shared_ptr<Head> head;
+    AcquireSRWLockShared(&g_headLock);
+    if (const auto it = g_heads.find(self); it != g_heads.end()) head = it->second;
+    ReleaseSRWLockShared(&g_headLock);
+    if (!head && make) {
+        AcquireSRWLockExclusive(&g_headLock);
+        auto& slot = g_heads[self];
+        if (!slot) slot = std::make_shared<Head>();
+        head = slot;
+        ReleaseSRWLockExclusive(&g_headLock);
+    }
+    return head;
+}
 std::atomic<ULONGLONG> g_reported{0};
 std::atomic<unsigned> g_turns{0}, g_learned{0}, g_headless{0}, g_refused{0};
 std::atomic<uint64_t> g_micros{0};   // this hook's own cost for bodies not known to be far, since the last report
@@ -3709,7 +4001,8 @@ void Report(ULONGLONG now) {
     if (!turns && !learned && !headless && !refused) return;
     unsigned monsters = 0, townsfolk = 0;
     AcquireSRWLockShared(&g_headLock);
-    for (const auto& [self, h] : g_heads) if (h.turned && now - h.turned < 1000) ++(h.kind == limbs::Kind::Townsfolk ? townsfolk : monsters);
+    for (const auto& [self, h] : g_heads)
+        if (const ULONGLONG turned = h->turned.load(std::memory_order_relaxed); turned && now - turned < 1000) ++(h->kind.load(std::memory_order_relaxed) == limbs::Kind::Townsfolk ? townsfolk : monsters);
     ReleaseSRWLockShared(&g_headLock);
     char line[320];
     std::snprintf(line, sizeof line, "Frame look-at: ten seconds: head turns=%u, turned now: monsters=%u townsfolk=%u; widest %.0f deg, nearest %.1f m; "
@@ -3719,18 +4012,22 @@ void Report(ULONGLONG now) {
 }
 
 // True when this pose's head was turned and the buffer written (After then notes what bodies::Limbs left).
-bool Turn(uintptr_t self) {
+bool Turn(Posed& posed) {
+    const uintptr_t self = posed.self;
     if (!g_live.load(std::memory_order_relaxed)) return false;
     bool on = false; float eye[3]; float upm = 0;
     Known k; bool known = false;
     const ULONGLONG now = GetTickCount64();
+    // Left alone until then, by this thread's note of what the look-up below last said.
+    Noted& note = *posed.note;
+    if (now < note.headsUntil) return false;
     AcquireSRWLockShared(&g_lock);
     on = g_on; memcpy(eye, g_eye, sizeof eye); upm = g_upm;
-    if (on) if (const auto it = g_known.find(self); it != g_known.end()) { k = it->second; known = true; }
+    if (on) if (const Known* found = std::as_const(g_known).Find(self, now)) { k = *found; known = true; }
     ReleaseSRWLockShared(&g_lock);
     if (!on || self == g_heroSelf.load(std::memory_order_relaxed)) return false;
-    if (known && k.kind == limbs::Kind::None && now - k.at < OtherRecheck) return false;   // an item, a prop, a player
-    if (known && k.kind != limbs::Kind::None && now < k.farUntil) return false;            // far a moment ago
+    if (known && k.kind == limbs::Kind::None && now - k.at < OtherRecheck) { note.headsUntil = k.at + OtherRecheck; return false; }   // an item, a prop, a player
+    if (known && k.kind != limbs::Kind::None && now < k.farUntil) { note.headsUntil = k.farUntil; return false; }                     // far a moment ago
     Report(now);
     struct Timed {
         std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
@@ -3742,17 +4039,18 @@ bool Turn(uintptr_t self) {
     auto leave = [&](float away) {
         if (const ULONGLONG wait = bodies::FarFor(away / upm, reachMetres)) {
             AcquireSRWLockExclusive(&g_lock);
-            if (const auto it = g_known.find(self); it != g_known.end() && it->second.entity == k.entity) it->second.farUntil = now + wait;
+            if (Known* found = g_known.Find(self, now); found && found->entity == k.entity) found->farUntil = now + wait;
             ReleaseSRWLockExclusive(&g_lock);
         }
     };
-    if (known && k.kind != limbs::Kind::None && k.entity && ecs::Placement(k.entity, placement)) {
+    if (known && k.kind != limbs::Kind::None && k.entity && PlacementOf(posed, k.entity, placement)) {
         placed = true;
         if (const float away = bodies::Away(placement, eye); !(away <= reach)) { leave(away); return false; }
     }
     // What the instance is: its model's path, rechecked now and then (an instance's memory can
     // be another model's later), its entity kept.
     if (!known || now - k.at >= (k.kind == limbs::Kind::None ? OtherRecheck : Recheck)) {
+        SKELETON_IDENTIFYING;
         uintptr_t nameObject = 0, namePointer = 0;
         Known next; next.at = now;
         if (Get(self, &nameObject) && Get(nameObject + 8, &namePointer)) {
@@ -3764,15 +4062,16 @@ bool Turn(uintptr_t self) {
         if (next.kind != limbs::Kind::None && !ecs::Owner(self, known ? k.entity : 0, &next.entity)) next.kind = limbs::Kind::None;
         if (next.entity != k.entity) placed = false;
         k = next;
+        framevr::CacheSweep swept;
         AcquireSRWLockExclusive(&g_lock);
-        if (g_known.size() >= MaxKnown) g_known.clear();
-        g_known[self] = k;
+        g_known.Put(self, k, now, &swept);
         ReleaseSRWLockExclusive(&g_lock);
+        hookstats::Forgot(hookstats::HeadKinds, swept, now);
     }
     if (k.kind == limbs::Kind::None) return false;
     uintptr_t model = 0, skeleton = 0, matrices = 0; int count = 0;
-    if (!bodies::Buffer(self, model, skeleton, matrices, count)) return false;
-    if (!placed && !ecs::Placement(k.entity, placement)) return false;
+    if (!bodies::Buffer(posed, model, skeleton, matrices, count)) return false;
+    if (!placed && !PlacementOf(posed, k.entity, placement)) return false;
     const float away = bodies::Away(placement, eye);
     if (!(away <= reach)) { leave(away); return false; }
     if (k.form && away < 0.5f * upm) return false;   // a druid's own form, drawn where the player stands
@@ -3784,23 +4083,29 @@ bool Turn(uintptr_t self) {
     const auto clock = std::chrono::steady_clock::now();
     // The game's own pose: what the buffer holds, unless its head is still the one left here.
     lookat::Eased eased; float seconds = 0; bool posedAgain = true;
-    AcquireSRWLockExclusive(&g_headLock);
-    if (now - g_pruned > 2000) {
-        g_pruned = now;
-        for (auto it = g_heads.begin(); it != g_heads.end();) it = now - it->second.seen > KeptFor ? g_heads.erase(it) : std::next(it);
+    if (ULONGLONG pruned = g_pruned.load(std::memory_order_relaxed); now > pruned && now - pruned > 2000 && g_pruned.compare_exchange_strong(pruned, now)) {
+        AcquireSRWLockExclusive(&g_headLock);
+        for (auto it = g_heads.begin(); it != g_heads.end();) {   // one seen by a thread whose clock read is later than this one's is not old
+            const ULONGLONG seen = it->second->seen.load(std::memory_order_relaxed);
+            it = now > seen && now - seen > KeptFor ? g_heads.erase(it) : std::next(it);
+        }
+        ReleaseSRWLockExclusive(&g_headLock);
     }
+    const std::shared_ptr<Head> held = HeadOf(self, true);
+    Head& h = *held;
+    AcquireSRWLockExclusive(&h.lock);
     {
-        auto& h = g_heads[self];
         if (h.mine && h.game.size() == size_t(count) * 16 && !memcmp(h.left, pose.data() + size_t(head) * 16, 64)) {
             std::copy(h.game.begin(), h.game.end(), pose.begin());
             posedAgain = false;
         } else { h.game.assign(pose.begin(), pose.begin() + size_t(count) * 16); h.mine = false; }
         // A head not seen for a while starts from the animation's, not from where it was left.
-        if (h.timed && now - h.seen <= 500) seconds = std::chrono::duration<float>(clock - h.at).count(); else h.eased = {};
-        h.at = clock; h.timed = true; h.seen = now; h.kind = k.kind;
+        const ULONGLONG seen = h.seen.load(std::memory_order_relaxed);
+        if (h.timed && now - seen <= 500) seconds = std::chrono::duration<float>(clock - h.at).count(); else h.eased = {};
+        h.at = clock; h.timed = true; h.seen.store(now, std::memory_order_relaxed); h.kind.store(k.kind, std::memory_order_relaxed);
         eased = h.eased;
     }
-    ReleaseSRWLockExclusive(&g_headLock);
+    ReleaseSRWLockExclusive(&h.lock);
     lookat::Aim aim;
     if (!lookat::Want(shape->rig, pose.data(), count, placement, {eye[0], eye[1], eye[2]}, upm, g_limits, aim)) aim = {};
     lookat::Step(eased, aim, seconds, g_limits);
@@ -3809,17 +4114,16 @@ bool Turn(uintptr_t self) {
     if (!turn && !lookat::Still(eased)) { ++g_refused; eased = {}; }
     bool wrote = false;
     if (turn) wrote = SafeWrite(reinterpret_cast<void*>(matrices), pose.data(), size_t(count) * 64);
-    AcquireSRWLockExclusive(&g_headLock);
-    if (const auto it = g_heads.find(self); it != g_heads.end()) {
-        auto& h = it->second;
+    AcquireSRWLockExclusive(&h.lock);
+    {
         h.eased = eased;
-        if (wrote) { memcpy(h.left, pose.data() + size_t(head) * 16, 64); h.mine = true; h.turned = now; }
+        if (wrote) { memcpy(h.left, pose.data() + size_t(head) * 16, 64); h.mine = true; h.turned.store(now, std::memory_order_relaxed); }
         else if (!posedAgain && h.game.size() == size_t(count) * 16) {
             // Not turned any more, and the buffer still holds the turn: back to the game's pose.
             if (SafeWrite(reinterpret_cast<void*>(matrices), h.game.data(), size_t(count) * 64)) h.mine = false;
         }
     }
-    ReleaseSRWLockExclusive(&g_headLock);
+    ReleaseSRWLockExclusive(&h.lock);
     if (!wrote) return false;
     ++g_turns;
     const float size = std::max(std::fabs(eased.yaw), std::fabs(eased.tilt));
@@ -3832,9 +4136,11 @@ bool Turn(uintptr_t self) {
 void After(uintptr_t self) {
     float left[16];
     if (t_head < 0 || !SafeCopy(left, reinterpret_cast<const void*>(t_matrices + uintptr_t(t_head) * 64), sizeof left)) return;
-    AcquireSRWLockExclusive(&g_headLock);
-    if (const auto it = g_heads.find(self); it != g_heads.end() && it->second.mine) memcpy(it->second.left, left, sizeof left);
-    ReleaseSRWLockExclusive(&g_headLock);
+    const auto head = HeadOf(self, false);
+    if (!head) return;
+    AcquireSRWLockExclusive(&head->lock);
+    if (head->mine) memcpy(head->left, left, sizeof left);
+    ReleaseSRWLockExclusive(&head->lock);
 }
 }  // namespace looks
 #endif
@@ -3872,6 +4178,7 @@ void SetMotionBow(bool active,bool drawing,float draw,const float* stringHand,co
     }
     if(!active){g_bowPosedAt.store(0);g_bowHistory={};g_bowHistoryNext=0;}
     else {g_bowHistory[g_bowHistoryNext]=g_motionBow;g_bowHistoryNext=(g_bowHistoryNext+1)%g_bowHistory.size();}
+    g_bowLive.store(active,std::memory_order_relaxed);
     ReleaseSRWLockExclusive(&g_bowInputLock);
 }
 bool MotionBowPosed() {
@@ -4138,6 +4445,7 @@ void PoseYaws(float out[3]) { for (int i = 0; i < 3; ++i) out[i] = g_poseYaw[i].
 void Set(const Input& in) {
     AcquireSRWLockExclusive(&g_inLock);
     g_in = in;
+    g_inActive.store(InputActive(in), std::memory_order_relaxed);
     ReleaseSRWLockExclusive(&g_inLock);
 }
 
@@ -4147,7 +4455,11 @@ ComputeFn g_orig = nullptr;
 void __cdecl Hook(uintptr_t self, float a, float b, bool c) {
     { FRAME_PROFILE(SkeletonGame); g_orig(self, a, b, c); }
     FRAME_PROFILE(SkeletonMod);
+#ifdef D2RVR_NATIVE_OPENXR
+    hookstats::Call counted;   // adds to g_calls too, per thread and in batches: one counter shared by every worker was a contended line
+#else
     g_calls++;
+#endif
 #if D2RVR_FIRST_PERSON
     // Off: holding the weapon's own skeleton changed nothing (09:50 log: held every frame, the axe still
     // turned) - the turn came from the body's two_hand_weapon_attach. Kept for the next weapon that needs it.
@@ -4157,16 +4469,21 @@ void __cdecl Hook(uintptr_t self, float a, float b, bool c) {
     constexpr bool kHoldWeaponSkeleton = false;
     if (kHoldWeaponSkeleton) HoldWeaponItem(self);
 #endif
-    Arms(self);
+    Posed posed(self);
+    Arms(posed);
 #ifdef D2RVR_NATIVE_OPENXR
     if (const ULONGLONG held = g_crossbowHeldAt.load(std::memory_order_relaxed); held && GetTickCount64() - held <= 100) CaptureCrossbow(self);
     RefreshCrossbow(self);
     RefreshShield(self);
     PoseMotionBow(self);
     // Heads turn to you first: a body pushed aside is bent from the pose with its head already turned.
-    const bool looked = looks::Turn(self);
+    // The two share the instance's identity, pose buffer header and placement (Posed), but not the
+    // pose: Limbs reads the buffer after Turn has written it, as it always did, so what it bends,
+    // keeps as "the game's pose" and hashes is the turned pose - and After still learns from
+    // t_wrote (set at Limbs' two writes) that the head Turn left is no longer the one in the buffer.
+    const bool looked = looks::Turn(posed);
     bodies::t_wrote = false;
-    bodies::Limbs(self);
+    bodies::Limbs(posed);
     if (looked && bodies::t_wrote) looks::After(self);
 #endif
     if (GetTickCount64() < g_dumpUntil.load()) {

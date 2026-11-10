@@ -710,3 +710,28 @@ pipeline creations, measured room discovery and extra VR tiling were zero.
 The remaining game-update cost is unresolved; native room/model activation
 or loading is a follow-up hypothesis, not a demonstrated diagnosis. The
 asynchronous atlas change does not address these larger stalls.
+
+## Skeleton hook cost in the log
+
+The pose hook (`vr/skeletons.cpp`) runs for every skeleton, every pose, on the
+game's worker threads. Its cost can be read from a headset log without a
+profiler:
+
+- `Frame skeleton hook: ten seconds:` poses a second, ms a second across every
+  helper, guarded reads a second and per pose (each read is a system call),
+  the longest single pose, and the identity look-ups (model path read, rig
+  learned, entity searched for) with their total time.
+- `Frame skeleton hook: forgot N of M remembered skeletons at once` when a
+  cache sweep drops 256 or more entries, or any to make room; one second later
+  `in the 1.0 s after forgetting ...` gives the look-ups and the longest pose
+  that followed. Compare their times with the `longest` field of
+  `vrcam: a pair, ms:`.
+- `Frame look-at:` and `Frame bodies:` keep their own `ms a second`; both are
+  included in the hook total.
+
+The remembered skeletons are aged (`steamvr/aged_cache.h`), a registry storage
+is read as one block (`steamvr/ecs_storage.h`), and look-at and bodies share
+one identity, buffer and placement read per pose call. These were built from a
+code review; the gain has not been measured in a headset. The 2026-11-09 16:27
+session before them logged look-at 6-14.6 and bodies 5-8.4 ms a second in
+fights, with a 38-53 ms longest pair in every ten-second window.
