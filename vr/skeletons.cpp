@@ -231,6 +231,44 @@ struct Call {
 namespace hookstats { inline void Forgot(Cache, const framevr::CacheSweep&, ULONGLONG) {} }
 #endif
 
+// ---- One pose call: what its helpers read of the skeleton instance, read once ----
+// An instance's first 0x28 bytes hold its name object (+0), its model (+8) and its world pose
+// (+0x20): one guarded read, and the model's skeleton (model +8) a second. Each helper read
+// these field by field for itself before.
+struct Posed {
+    uintptr_t self = 0;
+    int identity = 0;   // 0 not read yet, 1 read, -1 does not read
+    uintptr_t nameObject = 0, model = 0, worldPose = 0, skeleton = 0;
+    explicit Posed(uintptr_t instance) : self(instance) {}
+};
+bool Identify(Posed& p) {
+    if (!p.identity) {
+        p.identity = -1;
+        uint64_t head[5];
+        if (p.self > 0x10000 && SafeCopy(head, (const void*)p.self, sizeof head)) {
+            p.nameObject = uintptr_t(head[0]); p.model = uintptr_t(head[1]); p.worldPose = uintptr_t(head[4]);
+            if (Get(p.model + 8, &p.skeleton)) p.identity = 1;
+        }
+    }
+    return p.identity > 0;
+}
+// What this thread last found of a skeleton instance, by its address: one look-up a pose, no
+// lock. A note is only as good as what it was taken from, so each carries what it is checked
+// against (below), and a slot is simply overwritten by another instance with the same hash.
+struct Noted {
+    uintptr_t self = 0;
+    // Not the hero's rig (Arms): for this skeleton, while no hero rig was forgotten since
+    // (g_heroesForgot), and for NotedFor - then the shared entry is looked up, and stamped, again.
+    uintptr_t skeleton = 0; uint32_t forgot = 0; ULONGLONG notHeroAt = 0;
+};
+constexpr ULONGLONG NotedFor = 1000;
+thread_local std::array<Noted, 1024> t_noted{};
+Noted& NoteOf(uintptr_t self) {
+    Noted& note = t_noted[size_t(((uint64_t(self) >> 4) * 0x9E3779B97F4A7C15ull) >> 54)];
+    if (note.self != self) { note = {}; note.self = self; }
+    return note;
+}
+
 float g_heroPos[3] = {};   // the world camera's look-at, from vrcam
 float g_eyeGround[2] = {};bool g_eyeGroundOk = false;   // under the eyes (SetEyeGround), same lock
 
@@ -635,7 +673,10 @@ void ReportFormFrames() {
 SRWLOCK g_heroLock = SRWLOCK_INIT;
 // Per SkeletonInstance, keyed with its skeleton too: an instance address the
 // game frees and reuses for another model must not keep the old verdict.
-framevr::AgedCache<std::pair<uintptr_t, uintptr_t>, Hero, framevr::PairHash> g_heroes{Remembered, HeroRigsFor, SweepEvery};   // count == 0: not the hero
+// A hero's rig is handed out by pointer and never changed once learned: every pose of his took
+// a copy of its eight vectors (the bind matrices among them) before. Null: not the hero.
+framevr::AgedCache<std::pair<uintptr_t, uintptr_t>, std::shared_ptr<const Hero>, framevr::PairHash> g_heroes{Remembered, HeroRigsFor, SweepEvery};
+std::atomic<uint32_t> g_heroesForgot{0};   // bumped under g_heroLock whenever entries were forgotten: the threads' notes are void then
 
 #if D2RVR_FIRST_PERSON
 // The grip: what the hands hold, relative to the hands, taken from the game's
@@ -663,6 +704,10 @@ Grip g_grip;
 
 SRWLOCK g_inLock = SRWLOCK_INIT;
 Input g_in;
+// Whether anything is done to the hero's pose at all (Arms), kept beside g_in by Set: every
+// skeleton's pose asks, and copied the whole Input under the lock to find out.
+bool InputActive(const Input& in) { return !(in.mode == 0 && !in.hideHead && !in.lockUpper && !(in.bodyTurn > 0 && in.haveYaw)); }
+std::atomic<bool> g_inActive{InputActive(Input{})};
 std::atomic<FreshFn> g_fresh{nullptr};
 std::atomic<FreshHandsFn> g_freshHands{nullptr};
 
@@ -2975,6 +3020,7 @@ void HoldWeaponItem(uintptr_t self) {
 struct MotionBowInput {bool active=false,drawing=false;float draw=0;ULONGLONG at=0;bool anchors=false;bow::Vec stringHand{},bowHand{};uint32_t stamp=0;};
 SRWLOCK g_bowInputLock=SRWLOCK_INIT,g_bowRigLock=SRWLOCK_INIT;
 MotionBowInput g_motionBow;
+std::atomic<bool> g_bowLive{false};   // g_motionBow.active, read without the lock: every skeleton's pose asks (PoseMotionBow)
 std::array<MotionBowInput,16> g_bowHistory{};size_t g_bowHistoryNext=0;
 std::atomic<ULONGLONG> g_bowPosedAt{0};
 std::atomic<ULONGLONG> g_bowAnchoredAt{0};
@@ -3213,6 +3259,7 @@ void RefreshCrossbow(uintptr_t hero) {
 }
 
 void PoseMotionBow(uintptr_t self) {
+    if(!g_bowLive.load(std::memory_order_relaxed))return;   // no bow in play: nothing below would match
     GunBoneOut attach;
     AcquireSRWLockShared(&g_gunBoneLock);attach=g_gunBone;ReleaseSRWLockShared(&g_gunBoneLock);
     MotionBowInput input;bool matched=false;
@@ -3318,36 +3365,45 @@ void PoseMotionBow(uintptr_t self) {
 }
 #endif
 
-void Arms(uintptr_t self) {
-    Input in;
-    float playerPosition[3],eyeGround[2];bool eyeGroundOk;
-    AcquireSRWLockShared(&g_inLock); in = g_in;memcpy(playerPosition,g_heroPos,sizeof playerPosition);
-    memcpy(eyeGround,g_eyeGround,sizeof eyeGround);eyeGroundOk=g_eyeGroundOk; ReleaseSRWLockShared(&g_inLock);
+void Arms(Posed& posed) {
+    const uintptr_t self = posed.self;
     // The hero is looked for even while nothing is done to him: his SkeletonInstance is what
     // vrcam's facing is found from (HeroTransform), and that is needed before the body can turn.
-    const bool active = !(in.mode == 0 && !in.hideHead && !in.lockUpper && !(in.bodyTurn > 0 && in.haveYaw));
-    if (!active && !g_trackHero.load()) return;
-    uintptr_t modelInst = 0, skel = 0;
-    if (!Get(self + 0x08, &modelInst) || !Get(modelInst + 0x08, &skel)) return;
+    if (!g_inActive.load(std::memory_order_relaxed) && !g_trackHero.load()) return;
+    if (!Identify(posed)) return;
+    const uintptr_t skel = posed.skeleton;
     const auto key = std::make_pair(self, skel);
-    Hero hero; bool have = false;
     const ULONGLONG met = GetTickCount64();
-    AcquireSRWLockShared(&g_heroLock);
-    if (const Hero* found = std::as_const(g_heroes).Find(key, met)) { hero = *found; have = true; }
-    ReleaseSRWLockShared(&g_heroLock);
-    if (!have) {
-        SKELETON_IDENTIFYING;
-        Hero h;
-        if (!Learn(self, &h)) h.count = 0;
-        framevr::CacheSweep swept;
-        AcquireSRWLockExclusive(&g_heroLock);
-        g_heroes.Put(key, h, met, &swept);
-        ReleaseSRWLockExclusive(&g_heroLock);
-        hookstats::Forgot(hookstats::HeroRigs, swept, met);
-        hero = h;
+    // Nearly every skeleton is not the hero's: this thread's note of that, no lock. The note is
+    // for this skeleton (an instance address the game reuses for another model has another), and
+    // void once any hero rig was forgotten - what it was taken from may be gone.
+    Noted& note = NoteOf(self);
+    const uint32_t forgot = g_heroesForgot.load(std::memory_order_acquire);
+    std::shared_ptr<const Hero> rig;
+    if (!(note.notHeroAt && note.skeleton == skel && note.forgot == forgot && met - note.notHeroAt < NotedFor)) {
+        bool have = false;
+        AcquireSRWLockShared(&g_heroLock);
+        if (const auto* found = std::as_const(g_heroes).Find(key, met)) { rig = *found; have = true; }
+        ReleaseSRWLockShared(&g_heroLock);
+        if (!have) {
+            SKELETON_IDENTIFYING;
+            auto learned = std::make_shared<Hero>();
+            if (Learn(self, learned.get()) && learned->count > 0) rig = std::move(learned);
+            framevr::CacheSweep swept;
+            AcquireSRWLockExclusive(&g_heroLock);
+            g_heroes.Put(key, rig, met, &swept);
+            if (swept.Dropped()) g_heroesForgot.fetch_add(1, std::memory_order_release);
+            ReleaseSRWLockExclusive(&g_heroLock);
+            hookstats::Forgot(hookstats::HeroRigs, swept, met);
+        }
+        if (!rig) { note.skeleton = skel; note.forgot = forgot; note.notHeroAt = met ? met : 1; }
+        else note.notHeroAt = 0;
     }
-    if (hero.count <= 0) {
+    if (!rig) {
         if (GetTickCount64() < g_partsUntil.load()) {   // room-scale diagnostics: a skeleton not taken as a body, at the hero?
+            float playerPosition[3],eyeGround[2];bool eyeGroundOk;
+            AcquireSRWLockShared(&g_inLock);memcpy(playerPosition,g_heroPos,sizeof playerPosition);
+            memcpy(eyeGround,g_eyeGround,sizeof eyeGround);eyeGroundOk=g_eyeGroundOk;ReleaseSRWLockShared(&g_inLock);
             float position[3];uintptr_t world=0;int32_t bones=0;
             if (ecs::CandidatePosition(self, position) && Get(self + 0x20, &world) && Get(world, &bones)) {
                 const float atHero=std::hypot(position[0]-playerPosition[0],position[2]-playerPosition[2]);
@@ -3360,6 +3416,14 @@ void Arms(uintptr_t self) {
         }
         return;
     }
+    // A hero's rig (a player model, or a form's): only now is the input copied.
+    const Hero& hero = *rig;
+    Input in;
+    float playerPosition[3],eyeGround[2];bool eyeGroundOk;
+    AcquireSRWLockShared(&g_inLock); in = g_in;memcpy(playerPosition,g_heroPos,sizeof playerPosition);
+    memcpy(eyeGround,g_eyeGround,sizeof eyeGround);eyeGroundOk=g_eyeGroundOk; ReleaseSRWLockShared(&g_inLock);
+    const bool active = InputActive(in);
+    if (!active && !g_trackHero.load()) return;   // Set changed it since the look above
     // A shapeshift form's rig (an enemy model) is the hero's only while the player is in that form -
     // or, as the game swaps the models, once the rig the state sample still names is no longer
     // drawn: the sample trails the swap, and the form's first frames were the game's own beast.
@@ -4016,6 +4080,7 @@ void SetMotionBow(bool active,bool drawing,float draw,const float* stringHand,co
     }
     if(!active){g_bowPosedAt.store(0);g_bowHistory={};g_bowHistoryNext=0;}
     else {g_bowHistory[g_bowHistoryNext]=g_motionBow;g_bowHistoryNext=(g_bowHistoryNext+1)%g_bowHistory.size();}
+    g_bowLive.store(active,std::memory_order_relaxed);
     ReleaseSRWLockExclusive(&g_bowInputLock);
 }
 bool MotionBowPosed() {
@@ -4282,6 +4347,7 @@ void PoseYaws(float out[3]) { for (int i = 0; i < 3; ++i) out[i] = g_poseYaw[i].
 void Set(const Input& in) {
     AcquireSRWLockExclusive(&g_inLock);
     g_in = in;
+    g_inActive.store(InputActive(in), std::memory_order_relaxed);
     ReleaseSRWLockExclusive(&g_inLock);
 }
 
@@ -4305,7 +4371,8 @@ void __cdecl Hook(uintptr_t self, float a, float b, bool c) {
     constexpr bool kHoldWeaponSkeleton = false;
     if (kHoldWeaponSkeleton) HoldWeaponItem(self);
 #endif
-    Arms(self);
+    Posed posed(self);
+    Arms(posed);
 #ifdef D2RVR_NATIVE_OPENXR
     if (const ULONGLONG held = g_crossbowHeldAt.load(std::memory_order_relaxed); held && GetTickCount64() - held <= 100) CaptureCrossbow(self);
     RefreshCrossbow(self);
