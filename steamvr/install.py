@@ -759,7 +759,10 @@ def main():
     put_config(mod_identity.SETTINGS, out.getvalue().encode())
     put(mod_identity.MODINFO, mod_identity.modinfo_bytes())
     # ReShade's paths are relative to its base, the mod's reshade\ folder (the plugin sets it).
-    put_config(mod_identity.RESHADE_DIR / 'ReShade.ini', b'[GENERAL]\nEffectSearchPaths=.\\reshade-shaders\\Shaders\nTextureSearchPaths=.\\reshade-shaders\\Textures\nPresetPath=.\\D2R_Frame_ReShade.ini\n[INPUT]\nKeyOverlay=36,0,0,0\n')
+    # ReShade's Generic Depth add-on watches every draw call to find a depth buffer; in VR the fog and
+    # sky read the mod's own depth, so a new install has it off. An update keeps the player's ReShade.ini,
+    # and d2r_pcvr.ini [render] reshade_depth=1 turns it back on (the plugin edits this list at each start).
+    put_config(mod_identity.RESHADE_DIR / 'ReShade.ini', b'[GENERAL]\nEffectSearchPaths=.\\reshade-shaders\\Shaders\nTextureSearchPaths=.\\reshade-shaders\\Textures\nPresetPath=.\\D2R_Frame_ReShade.ini\n[INPUT]\nKeyOverlay=36,0,0,0\n[ADDON]\nDisabledAddons=Generic Depth\n')
     put_config(mod_identity.RESHADE_DIR / 'D2R_Frame_ReShade.ini', b'Techniques=D2R_DepthFog@D2R_DepthFog.fx\n')
     if frame_generation:
         put_config(OFXR_SETTINGS, OFXR_DEFAULT_SETTINGS)

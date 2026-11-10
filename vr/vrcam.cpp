@@ -12033,7 +12033,7 @@ void TryRegister() {
     // In VR the fog and sky read the mod's own depth (scenedepth); ReShade's,
     // which Generic Depth provides, only outside it.
     if (!vrsettings::ReShadeDepthActive())
-        Log("vrcam: ReShade's Generic Depth add-on is off (d2r_pcvr.ini [render] reshade_depth) - in VR the fog and sky use the mod's own depth; outside VR they have none and stay off");
+        Log("vrcam: ReShade's Generic Depth add-on is off (ReShade.ini [ADDON] DisabledAddons, as new installs ship it; d2r_pcvr.ini [render] reshade_depth=1 turns it on) - in VR the fog and sky use the mod's own depth; outside VR they have none and stay off");
 #else
     // Both read ReShade's depth, which Generic Depth provides (FlatVR's addon
     // only corrects its pick); without it the shader sees no depth and stays off.
@@ -12438,8 +12438,9 @@ bool SaveBodyTuning(int knob, float value) {
 // Generic Depth add-on, written into its ini's [ADDON] DisabledAddons here,
 // before ReShade reads it - it cannot be switched while ReShade runs. In VR the
 // fog and sky read the mod's own depth (scenedepth); the add-on still watches
-// every draw call. Without the key ReShade.ini is left as it is. Returns
-// whether the add-on runs this session.
+// every draw call. Without the key ReShade.ini is left as it is: Setup's new
+// installs write it with the add-on off (steamvr/install.py), updates keep the
+// player's file. Returns whether the add-on runs this session.
 bool SyncReShadeDepth(const std::wstring& ini) {
     namespace addons = framevr::reshadeaddons;
     wchar_t list[1024] = {};
