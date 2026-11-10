@@ -599,7 +599,7 @@ sets the page's rows back to their defaults, with **Undo reset** for 6 seconds.
 | Gameplay > Targeting | Whether skills go to the aimed monster, spell aim assist, keeping spell shots level, aiming a staff along the arm, aiming with your view (the eyes' 17-degree tunnel, the hands within 30 degrees of your head, a raised hand aiming alone) with **Eyes** (Aim with your eyes) beside it on a headset that shares eye tracking, the arrow path line, where ground skills land (the game's aim, where you point or the aimed monster) and landing circles. Every option that changes how a cast aims is Off (Game's aim) by default, except Spell aim assist (Strong) |
 | Gameplay > Shield | Bash speed to hit, the guard strain shadow (On or Off), and where a held shield sits on the forearm: along, out and across (all 0 by default), wrist turn and roll |
 | Gameplay > Monsters | Offline difficulty, monster sight range and the smarter mercenary with **Commands** beside it |
-| Gameplay > Physics | Rolling bottles, knockable props and pushable bodies |
+| Gameplay > Physics | Rolling bottles, knockable props, pushable bodies, and monsters' and townsfolk's heads turning to you |
 | Comfort > Moving | Smooth turning with its snap angle or turn speed, and movement speed |
 | Comfort > Body | Seated play, **Height and arm span** (**Calibrate body**, **Set eye height**) with the **T cross to calibrate** switch under it (standing only), and the belt's height and reach |
 | Controls > Hands | Dominant hand, **Left-handed (experimental)**, **Stick toggle** and button names |
@@ -611,7 +611,7 @@ sets the page's rows back to their defaults, with **Undo reset** for 6 seconds.
 | Interface > Warnings | The low life and mana alert, heartbeat, blood on the visor and wiping it, and Arcane Decay's low mana warning with its fade, starting level and strength |
 | Graphics > Performance | Eyes drawn per frame (Both / One by turns, One by turns by default), render resolution (Headset size by default), lower detail at edges (Off / Fixed / Eye tracked) and its edge detail reduction, terrain and scenery distances with **Big objects** beside Scenery distance (600 by default). Under them, the readout: the actual VR source size, a Defer GPU wait button while frames wait for the GPU, warnings while the game's Vertical Sync is on or its anti-aliasing is not FXAA, each second's frame rate and where the frame's time goes, whether the CPU's part fits the headset's frame, and the game's own graphics options |
 | Graphics > Frames | Eyes drawn per frame on top, the same setting as on Performance; frame generation (experimental: Off / FidelityFX / NVIDIA, grayed on One by turns with a line saying why, with what OFXR Bridge is doing under its label), NVIDIA's flow quality and scale while NVIDIA is chosen, and the same readout, where Defer GPU wait has its button |
-| Graphics > Environment | Outdoor sky, distance fog with its **Fog distance** beside it while the fog is on (where it is complete, 100-1200 units, 600 by default), dungeon ceilings with **Torches** (Dungeon torchlight) beside them (the game's own torches and braziers lighting the dungeon around them; Off by default, as finding them scans the game's memory every 1.5 s), the experimental Sorceress spell glow on hands (Off by default) and the torch club's flame (On; its light stays when it is off) |
+| Graphics > Environment | Outdoor sky, distance fog with its **Fog distance** beside it while the fog is on (where it is complete, 100-1200 units, 600 by default), dungeon ceilings with **Torches** (Dungeon torchlight) beside them (the game's own torches and braziers lighting the dungeon around them; Off by default, as finding them scans the game's memory every 1.5 s), the experimental Sorceress spell glow on hands (Off by default) and the torch club's flame (On; its light stays when it is off), and **Echo** (Game's own / More / Strong, More by default): how loud the game's own echo of the place is. |
 | Guide | Left/right controller reference for movement, menus, melee, bow, spells, potions and game menus, in the button names Controls > Hands > Button names chooses |
 | What's new | The last published release's notes, read-only; a long release pages them, 12 lines a page, with **Previous** and **Next** |
 | More | Shown (a band link with a count) only while a setting has no place in the menu yet, such as one added since the menu was last sorted: its own label and help, 8 rows a page. A setting like that whose ini section has an owner page (sky, fog, ceiling and torch: Environment; render and stereo: Performance; haptics: Vibration; hud: Menus; bow: Targeting; turn: Moving; calibration: Body) shows in that page's New section instead, while the page has room |
@@ -628,7 +628,9 @@ Amazon. Other classes see **Spells go to the aimed monster**, On or Off, and
 keep the Amazon's bow skills choice. Guided Arrow is handed the aimed monster
 whatever this says, Off included, so it homes on it (owner, 2026-11-08: "that's
 the whole point of this skill"); with no monster aimed it flies as before. The
-target scan runs while a bow is ready with Guided Arrow as its skill. Rows that only matter with another
+target scan runs while a bow is ready with Guided Arrow as its skill. Charge too
+(owner, 2026-11-09): it runs to the aimed monster whatever this says, and where
+it is pointed with none aimed; the scan runs while a Paladin plays. Rows that only matter with another
 row's choice also stay hidden until they do:
 - Outlines shown and both hands' outline colors while Monster outline is Off;
 - Landing circles while Ground skill aim is Game's aim;
@@ -712,6 +714,39 @@ another character session. The **Spell casts** setting controls this pulse.
 Settings are stored under `[haptics]` as `strength`, `melee`, `bow_draw`,
 `bow_release`, `spells`, `interactions` and `alerts`; missing strength keys default
 to 100. `[haptics] short_melee=0` selects the longer tap; `1` selects the short tap.
+
+**Hit feel by target** (in the Short melee taps row as **By target**, `[haptics] hit_patterns`,
+On by default) makes a weapon hit feel like what it struck. Each is a short sequence of
+pulses on the usual vibration path, so **Melee hits** and **Overall vibration** scale every
+step, and the rhythm differs as well as the pitch because some controllers ignore pitch:
+
+| Struck | Feel | Pulses (strength / ms / Hz, at ms after contact) |
+| --- | --- | --- |
+| Flesh (any living monster, demons included) | one long thud | 0.95 / 90 (45 on the left hand) |
+| Bone: skeletons, zombies, mummies (the game's low undead) | three short clicks, each weaker | 0.95 / 25 / 240 at 0, 0.55 / 20 / 240 at 45, 0.35 / 20 / 240 at 85 |
+| Spirit: ghosts and wraiths (flying high undead) | a soft swell, nothing solid | 0.22 / 40 / 60 at 0, 0.40 / 60 / 60 at 40, 0.18 / 50 / 60 at 100 |
+| Container: a pot, urn, barrel or crate that breaks | a crack, then a long low crumble | 1.0 / 35 / 170 at 0, 0.40 / 110 / 70 at 45 |
+| Shield block | one tap | 0.95 / 45 |
+| Parry | two sharp ringing taps | 1.0 / 20 / 250 at 0, 0.60 / 35 / 250 at 50 |
+
+The monster's kind comes from the game's own monster record (the undead and flying flags);
+it names no stone or metal, so none is invented, and walls are not felt because weapon
+contact with a wall is not detected. Short melee taps keeps each rhythm with every step cut
+to 10 ms / 180 Hz. Off gives every hit the single tap. The log's `Frame haptics impact:
+surface=...` line (once a second per surface) names what was struck, the pattern and the
+monster's flags.
+
+**Felt heartbeat** (**Interface > Warnings**, in the Heartbeat starts at row as **Felt**,
+`[haptics] heartbeat`, On by default) beats in both controllers with the low-life heartbeat:
+a lub (0.30 strength for 45 ms at the first step, to 0.80 for 60 ms below 10% life) and a
+softer dub (0.20 / 35 ms to 0.55 / 45 ms) about a third of a beat later, at the sound's own
+tempo (77.5 beats a minute at the first step with the default start, 115 below 10%). It starts
+at **Heartbeat starts at** (60% when that is Off), winds down as the sound does, and wiping
+the visor quiets both. It stops at once in a menu, VR Settings or body calibration and when
+you die. **Low life and mana alerts** and **Overall vibration** scale it; a weaker beat
+never cuts a landed melee tap short. The sound keeps its own clock, so the two share a tempo but
+are not locked beat for beat. The log's `Frame haptics heartbeat: started ...` and `stopped
+(...)` lines mark it, with a `beating` line every 5 seconds.
 
 Click **Apply** to save changed values to `mods/D2R-PCVR/d2rloader/plugins/d2r_pcvr.ini` and
 reload them live. Closing without Apply discards pending edits. The first Apply
@@ -883,6 +918,17 @@ visual. VR Settings > Gameplay > Physics > Knock over small props (`[interaction
 props](../docs/KNOCKABLE_PROPS.md). The log notes each weapon knock (`Frame
 props: knocked a cup ...`) and a summary every ten seconds.
 
+**Spells reach objects.** Your own spell missiles break the pots, urns,
+baskets and barrels they pass, as arrows do, and push the small props and
+dropped bottles in their way: along a bolt's flight, outward from a Fire
+Ball's or a Glacial Spike's burst and from a Nova's ring. A spell cast from
+the hand ends at the container it hits, as an arrow does; one the game flies
+(Charged Bolt, Nova, Teeth and the rest) breaks what it crosses and flies on.
+An exploding barrel explodes as when a weapon breaks it. Props move only
+within the 3 m they are known in. `[interactions] spell_impacts=0` turns it
+off; see [spells that reach objects](../docs/SPELL_IMPACTS.md). Not yet
+tested in a headset. The log notes each one (`Frame spell impact: ...`).
+
 **Pushable bodies.** In first person with Motion combat, your weapon, shield
 or fist pushes the monsters, mercenaries and townsfolk it meets. Each
 monster or townsperson within 3 m (`[bodies] radius`, 1.5-8 m) is given a body of capsules, one on each
@@ -906,6 +952,28 @@ then left alone for as long as it would take to come within the radius closing a
 - N limbs of M bones`), the first push each second, and a summary every ten
 seconds, ending with the skeleton hook's cost: its calls for bodies, those beyond
 the radius and its milliseconds a second.
+
+**Heads turn to you.** In first person, each monster, mercenary, summon and
+townsperson within about 7 m turns its head to your real head: where your
+eyes are in the room, standing, crouching or leaning, not the hero's spot on
+the floor. The head (with a third of the turn taken at the neck) goes up to 70
+degrees to either side of where the body faces, 40 up and 30 down, and eases
+there in about a quarter of a second; step behind a body (past about 105
+degrees) or beyond the range and it eases back to the game's animation. A body
+that has fallen over is left alone. The head is found once per model from its
+bones' names (`head_bind_jnt`, `head`, `head_main_00_M_JNT` and the like) and
+its bind matrices; a model with no such bone (a hydra, a bone wall) is left as
+the game poses it. Purely visual: the turn is made in the pose just before it
+is drawn, so who a monster attacks, where it walks and its hit box are
+unchanged, and pushable bodies bend from the turned pose. VR Settings >
+Gameplay > Physics > Heads turn to you (`[gameplay] look_at_you`, On by
+default) turns it off. The log names each model's head once (`Frame look-at:
+<model> - head ..., neck from ..., turns against ...`) and, every ten seconds a
+head was turned in, a summary ending with the hook's own cost (`Frame look-at:
+ten seconds: head turns=... hook N ms a second`).
+Two things are told from the pose alone, with no game unit read: which way a
+model faces (its bind pose is taken to face the model's +z, as the heroes'
+do) and whether it is dying (a body falling over stops being followed).
 
 **Hurt merc.** During VR gameplay the local hireling's life is sampled on the
 game thread every 200 ms with the same native stat call as the wrist vitals.
@@ -950,6 +1018,7 @@ hip_width=0.28
 holsters=1
 bottle_physics=1
 prop_physics=1
+spell_impacts=1
 body_physics=1
 leather_menu=1
 leather_menu_width=0.57
@@ -1430,6 +1499,27 @@ and trigger/button melee were:
     so a full-cycle stroke at 60% attack rating chance carries them about 60%
     of the time, as natively. `would_hit=1/0` (-1: not gated, e.g. a riposte)
     ends each `melee_trace` contact line.
+  - **Hit reactions** (owner, 2026-11-09; VR Settings > Gameplay > Physics >
+    Struck monsters; `[gameplay] hit_stagger` and `hit_knockback`, both 1 by
+    default; `hit_reactions.h`): the game makes a struck monster flinch only when
+    one hit takes a large share of its life, so most solid strokes drew nothing.
+    A stroke that carries its reactions (the next item: full cycle, would have
+    hit, first creature) now also carries its **force**: how committed the hand's
+    stroke was (its brisk travel, full at 35 cm) x (50% + 50% of the weapon's
+    weight, `weapon_heft.h` Weight, read whatever Weapon heft is set to) x the
+    stroke's damage share. At 0.5 the monster **staggers** (the game's hit
+    recovery): a committed fist, dagger or claw stroke, or 60-70% of a sword's.
+    At 0.8 it is **knocked back** (the game's knockback, away from the hero):
+    only weights of 0.6 and up reach it, so two-handed swords, axes and mauls,
+    spears, polearms and staves. Both are result flags of that stroke's own
+    damage record: no extra damage, attack or roll. The same monster staggers
+    at most every 1.2 s and is knocked back at most every 2.5 s; act bosses never
+    react, uniques and champions only stagger, a monster with no knockback
+    animation only staggers, and a killing blow is left alone. One log line per
+    reaction, `Frame hit reaction: monster ... knocked back|staggered ...`, and
+    at most one a second for a reaction asked for and not taken. Not built: the
+    knockback's direction following the swing (the game pushes away from the
+    hero) and corpses falling along the blow.
   - **Monster reactions and the stroke's share** (Cal, 2026-10-30): a monster
     flinches only when it should. A contact that would have missed, or a stroke
     without on-hit effects (not a full cycle, a cleave follow-up, a trigger hit
@@ -2049,8 +2139,17 @@ release now invokes the native missile immediately through the physical-arrow
 path. Held-bow posing matches the controller sample timestamp to the completed
 attachment pose, avoiding a newer hand position being applied to an older rig.
 
-A pull produces light haptic pulses as draw distance changes, plus nock and
-release pulses. Runtime acceptance is logged; that does not prove the user felt
+A pull produces haptic ticks as draw distance changes, plus nock and release
+pulses. The ticks carry the string's tension: from a slack string to full draw the
+string hand's tick grows from 0.18 strength / 20 ms / 70 Hz to 0.75 / 40 ms / 200 Hz
+(the bow hand's from 0.08 / 18 ms to 0.40 / 30 ms), rising faster near full draw, and
+they come closer together (every 2.2% of draw travel down to 1.2%). Held still from
+half draw, the string hand feels a faint tremor (0.05 to 0.15 strength, 15 ms, every
+260 ms down to 140 ms). The release is a snap by how far the bow was drawn: a 20 ms
+crack in the string hand (0.45 to 0.95) and a 25 ms crack in the bow hand (0.50 to
+1.0) followed by 70 ms of the string settling (0.20 to 0.50). **Bow draw** and **Bow
+and throw release** scale them. `Frame haptics bow: pull ...` and `release snap ...`
+log lines (once a second) report what was sent. Runtime acceptance is logged; that does not prove the user felt
 it. The native arrow is hidden until nocked. Unknown rigs retain their native
 string and limb animation; their string does not yet follow the drawing hand.
 The teal V-string overlay is removed for all bow rigs. The nock marker and
@@ -2216,6 +2315,48 @@ with the view every 10 ms, so FMOD re-pans everything that is playing.
 | `forward_sign` | `-1` | Which screen direction counts as ahead (`-1` = up). |
 | `depth_scale` | `2` | Stretches screen up/down to undo the isometric squash. |
 
+## Echo and footsteps
+
+The game already gives every place its own echo, and plays footsteps by the
+floor you walk on. In a headset the echo is mixed too faint to notice, so the
+plugin raises it.
+
+**Echo** (VR Settings > Graphics > Environment, More by default):
+
+| Echo | |
+|---|---|
+| Game's own | The game's mix, untouched. |
+| More | The echo twice as loud (+6 dB). |
+| Strong | Four times as loud (+12 dB), ringing a quarter longer. |
+
+Each level names a sound environment with its own reverb: a cave rings for
+3.4 s, the Cathedral for 4.3 s, Mephisto's hall for 4.75 s, the open moor for
+a quarter of a second. Every other number stays the game's, so each place
+keeps its character. The echo follows monsters, blows, footsteps, objects,
+items, skills and speech; music and menu sounds never echo. A change of the
+setting is heard at once. On a monitor the game's own mix stays.
+
+- Where the game turns the reverb off, it stays off.
+- The echo never becomes as loud as the sound that made it.
+
+Footsteps are the game's own: your hero's have their own sound channel, the
+hero's walk plays them - by the stick, or following you across your room -
+and the floor's material picks the sound. Their loudness is the Footsteps
+volume in the game's own audio options. Whether they play in first person has
+not been checked in a headset yet; the log line below counts them.
+
+The log says what ran: `Frame audio echo:` with the place's reverb numbers
+each time the game sets them (the game's, and what was sent), and every 10 s
+with sound `Frame audio: N sounds started` with your footsteps, others'
+footsteps and the busiest channels.
+
+`d2r_pcvr.ini`:
+
+| `[audio]` key | Default | |
+|---|---|---|
+| `echo` | `1` | `0` Game's own, `1` More, `2` Strong. Saved by VR Settings. |
+| `sound_log` | `1` | `0` = no count of started sounds in the log (read at start). |
+
 ## Loot beams
 
 A pillar of light stands over every Rare, Set and Unique item and every high
@@ -2287,9 +2428,16 @@ How the pick is made (`steamvr/gaze_aim.h`, `vr/vrcam.cpp` `eyegaze`):
   middle wins. Monsters behind walls or past the game's cast reach are skipped, as
   for the head's picks.
 - Caught within 6 degrees, kept while within 10, and another takes over only
-  when 2 degrees nearer. Any change waits until it has been the choice for
-  100 ms, so a glance across the screen does not light each monster it passes;
+  when 2 degrees nearer. With nothing picked, the first monster looked at is
+  taken at once; a change from one monster to another, or to none, waits until
+  it has been the choice for 70 ms (100 ms for every change before 2026-11-09),
+  so a glance across the screen does not light each monster it passes;
   a pick that dies or leaves sight gives way at once.
+- The monsters every pick chooses among (eyes, view and hands) are read from
+  the game every game update, 40 ms, while a hostile monster is near (every
+  100 ms before 2026-11-09, and still while none is), so a pick follows a
+  monster that moves or comes into view sooner. `Frame target lock: N scans in
+  10 s ... ms a second` reports what the reading costs.
 - A blink or a dropped sample keeps the pick for up to 350 ms. Longer, the head's
   view picks as before (Aim with your view's 17 / 30 degree tunnel, or the 30-degree
   cone) until samples have come for 150 ms again.
@@ -2897,7 +3045,7 @@ draw. A glyph whose skill has a motion casts it at once, as any glyph.
 The motions: Nova, the hands together then flung out wide; Frost Nova, both hands pushed down
 past the chest (to the waist, not the floor); Static Field, the palms rubbed together then snapped apart; Energy Shield, both
 hands up at the face within 35 cm (the forearms crossed or not), held; Thunder Storm, one arm
-raised above the head, held; Teleport, the right arm pointed where you want to land and the fist yanked back; Blaze, one hand struck down the thigh; Frozen Armor, the
+raised above the head, held; Teleport, the right arm held out, the controller's arc pointed where you want to land, and the fist yanked back; Blaze, one hand struck down the thigh; Frozen Armor, the
 left hand from the right hand up to the right shoulder; Shiver Armor, both fists shaken, held at
 least 25 cm apart (a tester, 2026-11-05: Static Field's rub "reads as shaking": fists shaken any
 closer are a rub, and its count starts over); Chilling
@@ -2939,9 +3087,17 @@ steady for 0.15 s, the left arm not raised too (out in front at the chest or hig
 chin: owner, 2026-11-05, "When we raise both arms, the circle shouldn't be drawn for teleport"), shows
 where Teleport lands: an arcane violet sigil with a pillar of light over it (`telegraph::TeleportMark`,
 `D2R_DepthFog.fx` TeleportSigil and TelePillar), whatever the Aim options; the left arm raised takes it
-away at once. It goes along the arm's heading (the line from the
-shoulder through the fist), 32 cells away with the arm level, nearer evenly as it points down, 6 cells
-at 50 degrees below (`spellmotion::PointSpot`). It follows the arm while the arm stays out and steady.
+away at once. Where it lands is the right controller's own pointing, along an arc (owner,
+2026-11-09: "we need to be able to pick how far we want to teleport easily, as well as pointing the
+direction we want to teleport", then "combine it with the awesome ring ... where the arc would land"):
+a violet ribbon thrown from the controller (`teleport_arc.h`, `D2R_TeleportArc.fxh`), its heading the
+way and its tilt the distance, landing where it meets the floor, on the sigil. Held level at chest
+height it lands about 12 cells ahead, tilted up 45 degrees or more at the farthest, 32 cells, and
+pointed down nearer, to 2 cells; the far end changes slowest, for the finest control there. Behind a
+wall or a monster the ribbon dims to a third. It follows the controller while the arm stays out and
+steady, and holds still through the yank. Without a tracked controller or a known floor, the arm's own
+heading as before: the line from the shoulder through the fist, 32 cells away with the arm level, nearer
+evenly as it points down, 6 cells at 50 degrees below (`spellmotion::PointSpot`).
 The fist yanked back toward the shoulder (18 cm within 0.25 s, mostly back) lands there
 (`MotionLanding`, the cast's point within the game's reach, logged `Frame motion aim:`). The arm drawn
 in or let down without a yank for 0.6 s, letting the grips go, any other motion's cast or 8 s takes the

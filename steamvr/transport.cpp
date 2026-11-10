@@ -70,6 +70,8 @@
 #include "latest_worker.h"
 #include "haptic_pulse.h"
 #include "haptic_actions.h"
+#include "haptic_impact.h"
+#include "haptic_heartbeat.h"
 #include "xinput_rumble.h"
 #include "interaction_icons.h"
 #include "potion_models.h"
@@ -78,10 +80,12 @@
 #include "limb_physics.h"
 #include "../vr/wall_cells.h"
 #include "../vr/prop_scan.h"
+#include "../vr/spell_impacts.h"
 #include "elemental_hands_renderer.h"
 #include "elemental_particles.h"
 #include "../vr/companion_ai.h"
 #include "telegraph.h"
+#include "teleport_arc.h"
 #include "tactical_chord.h"
 #include "../vr/target_lock.h" 
 #include "vr_settings_ui.h"
@@ -126,6 +130,7 @@
 #include "toss.h"
 #include "aim_reach.h"
 #include "weapon_heft.h"
+#include "hit_reactions.h"
 
 namespace gamestate {uint32_t WeaponType();uint32_t HandsKey();uint32_t WeaponSet();uint32_t WeaponClass();uint32_t TwoHanded();uint64_t LocalPlayer();uint32_t MenuEpoch();int AttackWsm(int hand);}
 namespace gamecmd {void RequestPotion(int slot);void CancelPotion();}
@@ -623,7 +628,7 @@ uint32_t heavensRequest=0,heavensAnswered=0,heavensMonster=0,heavensCasts=0;
 float heavensFrom=0,heavensAt=0;   // the last call's start and stop elevation (degrees), for the log
 ULONGLONG heavensAskedAt=0;
 std::atomic<bool> heavensArmed{false};
-std::atomic<bool> seekerArrowReady{false};   // SeekerArrowReady: a ready bow whose skill is Guided Arrow
+std::atomic<bool> seekerArrowReady{false};   // SeekerArrowReady: a ready bow whose skill is Guided Arrow, or a Paladin (Charge)
 constexpr ULONGLONG HeavensWaitMs=120;
 // A Charge in flight (any cast path): no physical melee contacts until it ends.
 ULONGLONG chargeIssuedAt=0,chargeContactsHeldAt=0;
@@ -708,6 +713,28 @@ bool PointedCell(float& x,float& y,math::Vec& way) {
     way=math::Rotate(math::Conjugate(math::Yaw(math::Heading(interactionInput.head.q))),flat);
     return FloorCell(math::Vec{o.x+flat.x*along,interactionInput.floor,o.z+flat.z*along},x,y);
 }
+// Teleport's arc (teleport_arc.h; owner, 2026-11-09): thrown from the right controller while the aim is up, and the
+// arm's pointing (Output::point) it was thrown for: it follows the controller while the engine follows the arm (steady),
+// so the yank's own swing never moves it. Its landing is the sigil's and the cast's.
+teleportarc::Arc teleportArc;math::Vec teleportArcPoint{};
+constexpr float TeleportArcNearCells=2.f;
+// The arc's landing in grid cells, and its way, head-local and level, in cells (as Output::aim's Spot).
+bool ArcCell(const teleportarc::Arc& arc,float& x,float& y,math::Vec& way) {
+    if(!arc.ok||!(stageWorld.upm>=1&&stageWorld.upm<=12))return false;
+    way=math::Rotate(math::Conjugate(math::Yaw(math::Heading(interactionInput.head.q))),arc.way)*(arc.distance*stageWorld.upm*.5f);
+    return FloorCell(arc.land,x,y);
+}
+// The arc to the shader (vrcam -> D2R_TeleportArc.fxh): each point relative to the hero in render units, as the bow's
+// shots are placed (resolveBow): eye height up, plus the room offset from the view's origin turned into the world.
+void ShowTeleportArc(const teleportarc::Arc& arc) {
+    if(!arc.ok||!stageWorld.valid||!(stageWorld.upm>=1&&stageWorld.upm<=12))return;
+    std::array<math::Vec,teleportarc::Points> points{};
+    for(size_t i=0;i<points.size();++i) {
+        const auto o=math::Rotate(stageWorld.base,arc.points[i]-stageWorld.origin);
+        points[i]={o.x*stageWorld.upm,stageWorld.eyeHeight+o.y*stageWorld.upm,o.z*stageWorld.upm};
+    }
+    teleportarc::Current().Place(points,GetTickCount64());
+}
 bool crossbowFire=false;
 uint64_t crossbowActivation=0,crossbowTakenAt=0;
 // The crossbow's right trigger as last logged: 0 the slot's own, 1 Attack over the slot's skill
@@ -717,6 +744,9 @@ bowflight::Shot spellReadyShot[2]{};
 bool spellHasShot[2]{};
 uint64_t spellResolvedAt[2]{};
 std::atomic<ULONGLONG> meleeImpactAt[2]{},shieldImpactAt{0},parryMissAt{0};
+// What the pending impact struck (haptics::Surface): the weapon hands' next MeleeImpact, and the shield's block or parry.
+std::atomic<int> meleeImpactSurface[2]{},shieldImpactSurface{int(haptics::Surface::Block)};
+std::atomic<uint32_t> meleeImpactFlags[2]{};   // the struck monster's MonStats flags, for the log
 XrSwapchain gameplayChain=XR_NULL_HANDLE;
 std::mutex sewerPromptMutex;
 sewerprompt::Target sewerPrompt;
@@ -1064,6 +1094,9 @@ haptics::Actions hapticActions;
 haptics::Pulses hapticPulses;
 haptics::CastEvents spellHaptics;
 haptics::RumbleLease controllerRumbleLease;
+haptics::Sequencer hapticSequences;      // multi-pulse patterns: surface impacts, the bow's snap (haptic_impact.h)
+haptics::Heartbeat hapticHeart;          // the felt low-life heartbeat (haptic_heartbeat.h)
+heartbeat::Level hapticHeartLevel;double hapticHeartAt=0;
 XrAction primary=XR_NULL_HANDLE, secondary=XR_NULL_HANDLE, stickClick=XR_NULL_HANDLE, menu=XR_NULL_HANDLE;
 XrPath hands[2]{}; // right, left, matching the existing wire format.
 XrSpace handSpaces[2]{};
@@ -1222,7 +1255,7 @@ void CancelShieldCast() {
 void ClearInput() {
     settingsPointer.Reset();settingsCard.Reset();settingsPressed={};settingsPopoverWatch.Reset();
     controllerRumbleLease.Update(0,false);
-    hapticPulses.Cancel();
+    hapticPulses.Cancel();hapticSequences.Clear();hapticHeart.Reset();
     spellHaptics.Clear();
     lootlabels::display.Clear();
     rightStickGestures.Reset();
@@ -1836,9 +1869,8 @@ std::vector<uint8_t> PaintGameplay() {
     POINT feather[]={{540,975},{520,997},{520,1017},{542,1000}};Polygon(dc,feather,4);
     POINT feather2[]={{548,975},{568,997},{568,1017},{546,1000}};Polygon(dc,feather2,4);
     SelectObject(dc,oldBrush);DeleteObject(arrowhead);
-    label(L"Trigger: nock",{576,768,1024,853});
-    label(L"Pull back",{576,853,1024,938});
-    label(L"Release to shoot",{576,938,1024,1024});
+    // (576,768)-(1024,1024) held the bow's "Trigger: nock / Pull back / Release to
+    // shoot" text under the bow until 2026-11-09, when the owner asked for it gone.
     sewerprompt::Paint(dc,sewerprompt::AtlasX,sewerprompt::AtlasY);
     GdiFlush();
     std::vector<uint8_t> rgba(1024*1024*4);const auto* b=static_cast<const uint8_t*>(bits);
@@ -2493,23 +2525,60 @@ void MotionPattern(haptics::Category category,const haptics::Pattern& pattern,co
         if(sample.milliseconds>0)MotionPulse(hand,category,sample.amplitude,XrDuration(sample.milliseconds)*1000000,sample.frequency,preview);
     }
 }
+// Plays each pattern step that has come due (haptic_impact.h). Every frame, and right after a Play.
+void PumpHapticSequences() {
+    const auto now=GetTickCount64();
+    for(int hand=0;hand<2;++hand) {
+        haptics::Sequencer::Out out;
+        if(hapticSequences.Due(hand,now,out))
+            MotionPulse(hand,out.category,out.sample.amplitude,XrDuration(out.sample.milliseconds)*1000000,out.sample.frequency,out.preview?&out.levels:nullptr);
+    }
+}
+// A bow's release: a crack in both hands and the string settling in the bow hand, by how far it was drawn.
+void BowSnapFeedback(float draw,const haptics::Strengths* preview=nullptr) {
+    const auto now=GetTickCount64();
+    for(int hand=0;hand<2;++hand)hapticSequences.Play(hand,haptics::BowSnap(draw,hand),now,1,preview);
+    PumpHapticSequences();
+    if(preview)return;
+    static ULONGLONG toldAt=0;
+    if(now>=toldAt) {
+        const auto right=haptics::BowSnap(draw,0),left=haptics::BowSnap(draw,1);
+        char line[200];std::snprintf(line,sizeof line,"Frame haptics bow: release snap draw=%.2f string_hand=%.2f/%dms bow_hand=%.2f/%dms then %.2f/%dms",
+            draw,right.steps[0].sample.amplitude,right.steps[0].sample.milliseconds,left.steps[0].sample.amplitude,left.steps[0].sample.milliseconds,
+            left.steps[1].sample.amplitude,left.steps[1].sample.milliseconds);
+        Say(line);toldAt=now+1000;
+    }
+}
 void MotionFeedback(const gameplay::Output& out) {
-    static double lastPull=0;static float previousDraw=0;
+    static double lastPull=0;static float previousDraw=0;static double lastHold=0;static ULONGLONG pullToldAt=0;
     if(out.leftFeedback)MotionPulse(1,haptics::MotionCategory(out.leftFeedback,false,true),out.leftFeedback==2?.65f:.45f,45000000);
     const unsigned event=out.feedback;
     if(event) {
         const auto category=haptics::MotionCategory(event,out.bowReady,out.javelinReady);
-        if(event==2&&(out.bowReady||out.javelinReady))MotionPattern(category,haptics::Release(out.bowReady));
+        if(event==2&&out.bowReady)BowSnapFeedback(out.draw);
+        else if(event==2&&out.javelinReady)MotionPattern(category,haptics::Release(false));
         else {
             MotionPulse(0,category,event==6?.12f:event==4?.2f:event==2||event==3?.65f:.45f,event==4||event==6?20000000:45000000);
             if(out.bowReady&&(event==1||event==5))MotionPulse(1,category,.25f,35000000);
         }
         lastPull=motionInput.time;previousDraw=out.draw;
-    } else if(out.bowDrawing&&motionInput.time-lastPull>.07&&std::fabs(out.draw-previousDraw)>.018f) {
-        // A light ratchet felt while pulling, rather than only the native
-        // attack rumble after release. No repeated buzz while held still.
-        MotionPattern(haptics::Category::BowDraw,haptics::BowPull(out.draw));
-        lastPull=motionInput.time;previousDraw=out.draw;
+    } else if(out.bowDrawing&&motionInput.time-lastPull>.07&&std::fabs(out.draw-previousDraw)>haptics::BowTickStep(out.draw)) {
+        // A ratchet felt while pulling, rather than only the native attack rumble
+        // after release: stronger, longer, higher and closer together as the
+        // string tightens (haptic_strength.h BowPull, BowTickStep).
+        const auto pull=haptics::BowPull(out.draw);
+        MotionPattern(haptics::Category::BowDraw,pull);
+        lastPull=lastHold=motionInput.time;previousDraw=out.draw;
+        if(const auto now=GetTickCount64();now>=pullToldAt) {
+            char line[160];std::snprintf(line,sizeof line,"Frame haptics bow: pull draw=%.2f string_hand=%.2f/%dms/%.0fHz bow_hand=%.2f/%dms",
+                out.draw,pull[0].amplitude,pull[0].milliseconds,pull[0].frequency,pull[1].amplitude,pull[1].milliseconds);
+            Say(line);pullToldAt=now+1000;
+        }
+    } else if(out.bowDrawing&&motionInput.time-lastPull>.07&&motionInput.time-lastHold>=haptics::BowHoldInterval(out.draw)) {
+        // Held still from half draw: no buzz, a faint tremor of the strained string hand.
+        if(const auto hold=haptics::BowHold(out.draw);hold.milliseconds>0)
+            MotionPulse(0,haptics::Category::BowDraw,hold.amplitude,XrDuration(hold.milliseconds)*1000000,hold.frequency);
+        lastHold=motionInput.time;
     }
     if(!out.bowDrawing)previousDraw=0;
 }
@@ -2541,7 +2610,7 @@ gameplay::MeleeStyle MotionMeleeStyle() {
 }
 void ResetSettingsInput() {
     settingsPointer.Reset();settingsCard.Reset();settingsPressed={};settingsPopoverWatch.Reset();
-    hapticPulses.Cancel();
+    hapticPulses.Cancel();hapticSequences.Clear();hapticHeart.Reset();
     spellHaptics.Clear();
     panelinput::WorldInput(false);
     gamestate::MenuMap(false);
@@ -2737,6 +2806,7 @@ void SettingsPress(const settings::Hit& hit,uint64_t ms,const char* how=nullptr)
         if(!settingsModel.CanTestHaptics(hit.index))return;
         const auto levels=settings::HapticLevels(settingsModel.Get());
         const auto category=haptics::Category(hit.index);
+        if(category==haptics::Category::BowRelease&&hit.delta==1){BowSnapFeedback(1,&levels);return;}   // Bow: the full-draw snap
         MotionPattern(category,haptics::Preview(category,hit.delta-1,settingsModel.Get()[settings::HapticShortMelee]>.5f),&levels);
         return;
     }
@@ -3265,6 +3335,33 @@ std::array<bottles::Collider,bottles::Colliders> HeldColliders() {
     }
     return weapons;
 }
+// The hero's spell missiles (vr/spell_impacts.cpp posts where each flew or
+// burst on the game thread) push the props and bottles in their way, in the
+// same world the weapons push them in. The passages are always taken, so
+// none wait for a world; without one (physics off, a menu, no props or
+// bottles near) they are dropped.
+void PushSpells(bottles::World* world,double time,float floor,float upm) {
+    std::array<spellimpacts::Passage,spellimpacts::Mailbox::Most> passages;
+    const unsigned n=impactvr::Take(interactionInput.session,passages);
+    if(!world||!n)return;
+    static ULONGLONG second=0;static unsigned lines=0,skipped=0;
+    for(unsigned i=0;i<n;++i) {
+        const auto& p=passages[i];
+        const auto pushed=world->Push(spellimpacts::ToWorld(p,floor,upm),time);
+        if(!pushed.props&&!pushed.bottles)continue;
+        // At most four lines a second; the next one says how many were not shown.
+        const auto now=GetTickCount64()/1000;
+        if(now!=second){second=now;lines=0;}
+        if(lines>=4){++skipped;continue;}
+        ++lines;
+        const auto* profile=spellimpacts::Of(p.missile);
+        char line[224];std::snprintf(line,sizeof line,"Frame spell impact: %s (missile %u) %s %u props and %u bottles at cell %.0f,%.0f%s",
+            profile?profile->name:"?",p.missile,p.blast?"burst and pushed":p.flat?"passed and pushed":"flew through and pushed",pushed.props,pushed.bottles,
+            p.to.x*.5f,p.to.z*.5f,skipped?" (more not shown)":"");
+        skipped=0;
+        Say(line);
+    }
+}
 void StepDroppedBottles() {
     const auto& in=interactionInput;const auto& out=interactionOutput;
     const bool bottlesOn=bottlePhysics.load(),propsOn=propPhysics.load();
@@ -3329,6 +3426,7 @@ void StepDroppedBottles() {
     // Walls reach the world even while nothing moves in it (a trap in hand).
     bottles::Patch patch;
     if(droppedBottles&&wallcells::Latest(patch))droppedBottles->Walls(patch);
+    PushSpells(droppedBottles&&world&&!droppedBottles->Idle()?droppedBottles.get():nullptr,in.time,floor,upm);
     if(!droppedBottles||droppedBottles->Idle()||!in.stage.known)return; // menus and loading hold them still
     droppedBottles->Weapons(HeldColliders());
     droppedBottles->Advance(in.time,in.stage.anchor);
@@ -3375,6 +3473,7 @@ void StepDroppedBottles() {
     unsigned struck=0,chained=0;
     for(unsigned i=0,n=droppedBottles->Knocks(knocks);i<n;++i) {
         static const char* const by[]{"right hand","left hand","shield"};
+        if(knocks[i].slot==bottles::SpellSlot)continue;   // a spell's: PushSpells logged it
         if(knocks[i].slot<0){++chained;continue;}
         char line[160];++struck;
         std::snprintf(line,sizeof line,"Frame props: knocked a %s (%s, %.1f m/s)",propscan::KindName(knocks[i].kind),by[knocks[i].slot%3],knocks[i].speed);
@@ -4253,6 +4352,35 @@ void Input() {
                 }
             }
         } else if(heartPlaying&&!heartStream.Remaining()){heartPlaying=false;Say("Frame low-life heartbeat: stopped");}
+        // The same heart, felt (haptic_heartbeat.h; VR Settings > Interface > Warnings > Felt heartbeat): a
+        // lub-dub in both controllers at the audible beat's level and tempo, so the same life starts both and a wiped
+        // visor quiets both. Its own level, since the sound can be Off (start 0: the default start) or silent (volume
+        // 0). Not in a menu, the settings or a panel, not dead, not with life unknown: it stops at once.
+        {
+            const int start=int(hudSettings.values[settings::HeartbeatStart]);
+            const bool alive=lifeKnown&&vitals.health>0&&vitals.maxHealth>0;
+            const float felt=alive?heartbeat::LifeLevel(vitals.health,vitals.maxHealth,start>0?start:int(haptics::HeartDefaultStart)):0.f;
+            const float feltLevel=hapticHeartLevel.Step(heartHush.On()?0.f:felt,hapticHeartAt>0?interactionInput.time-hapticHeartAt:0,heart.fadeSeconds);
+            hapticHeartAt=interactionInput.time;
+            const bool allowed=hudSettings.values[settings::HapticHeartbeat]>.5f&&alive&&!panelMode&&!spatialMode&&!settingsModel.open&&
+                !bodyCalibration.Active()&&inWorld&&inWorld();
+            if(!alive)hapticHeartLevel.Reset();
+            const bool was=hapticHeart.Beating();
+            const float bpm=heartbeat::Bpm(feltLevel,heart);
+            const auto pulse=hapticHeart.Step(interactionInput.time,feltLevel,bpm,allowed);
+            if(pulse.beat)for(int h=0;h<2;++h)
+                MotionPulse(h,haptics::Category::Alert,pulse.sample.amplitude,XrDuration(pulse.sample.milliseconds)*1000000,pulse.sample.frequency);
+            static ULONGLONG heartToldAt=0;
+            if(hapticHeart.Beating()!=was||(pulse.beat==1&&GetTickCount64()>=heartToldAt)) {
+                char line[200];
+                if(hapticHeart.Beating())snprintf(line,sizeof line,"Frame haptics heartbeat: %s life=%.0f%% level=%.2f bpm=%.0f lub=%.2f/%dms dub=%.2f/%dms",
+                    was?"beating":"started",vitals.maxHealth>0?100*vitals.health/vitals.maxHealth:-1.f,feltLevel,bpm,
+                    haptics::HeartLub(feltLevel).amplitude,haptics::HeartLub(feltLevel).milliseconds,haptics::HeartDub(feltLevel).amplitude,haptics::HeartDub(feltLevel).milliseconds);
+                else snprintf(line,sizeof line,"Frame haptics heartbeat: stopped (%s)",
+                    hudSettings.values[settings::HapticHeartbeat]<=.5f?"Off":!lifeKnown?"life unknown":!alive?"dead":feltLevel<=0?"life recovered or visor wiped":"menu");
+                Say(line);heartToldAt=GetTickCount64()+5000;
+            }
+        }
     }
     // Bounded diagnostics distinguish gesture misses from native refusal.
     static ULONGLONG potionReportAt=0;
@@ -4477,7 +4605,10 @@ void Input() {
     const uint32_t potionCode=motionInput.potion?gamestate::RightThrowingPotionCode():0u;
     const bool potionBottle=potionCode&&bottlePhysics.load()&&potionModels.Radius(potionCode)>0;
     motionOutput=motion.Step(motionInput);motionAt=GetTickCount64();
-    seekerArrowReady.store(motionInput.active&&motionOutput.bowReady&&aimrules::AlwaysHomes(motionInput.bowSkill));
+    // ...or a Paladin plays: Charge goes to the aimed monster whatever the option, however it is cast
+    // (a trigger, a glyph or the punch), so the scan runs for the class that has it.
+    seekerArrowReady.store((motionInput.active&&motionOutput.bowReady&&aimrules::AlwaysHomes(motionInput.bowSkill))||
+                           bindingSnapshot.skillClass==settings::heroclass::Paladin);
     if(motionOutput.tossHeld)tossLanding={};   // a new trap in hand: nothing placed yet
     const auto& tossStage=interactionInput.stage;
     const bool tossWorld=interactionInput.floorKnown&&tossStage.known&&stageWorld.upm>=1&&stageWorld.upm<=12;
@@ -4800,19 +4931,36 @@ void Input() {
             // moment after the last), gone with the yank or the grips let go. The yank then lands there, its way
             // toward it too (MotionCastRay).
             const auto& punchTuning=spellFree[size_t(int(spellmotion::Motion::Punch)-1)].tuning;
-            float landX=0,landY=0;
-            const bool landKnown=(teleportAiming||doneLanding)&&TeleportCell(doneLanding?donePoint:teleportPoint,punchTuning,landX,landY);
+            // The arc (teleport_arc.h): thrown again while the engine follows the arm, kept through the yank; without a
+            // tracked controller or a known floor, the arm's own PointSpot as before.
+            if(teleportAiming&&handAimTracked[0]&&interactionInput.floorKnown&&stageWorld.valid&&stageWorld.upm>=1&&stageWorld.upm<=12&&
+               !(teleportArc.ok&&teleportPoint==teleportArcPoint)) {
+                const float cell=2.f/stageWorld.upm;   // m a cell (toss::Cell)
+                const auto arc=teleportarc::Compute(handAim[0].p,math::Rotate(handAim[0].q,math::Vec{0,0,-1}),interactionInput.floor,
+                    TeleportArcNearCells*cell,punchTuning.pointFar*cell);
+                if(arc.ok){teleportArc=arc;teleportArcPoint=teleportPoint;}
+            }
+            if(!teleportAiming&&!doneLanding)teleportArc={};
+            float landX=0,landY=0;math::Vec arcWay{};
+            const bool arcKnown=(teleportAiming||doneLanding)&&ArcCell(teleportArc,landX,landY,arcWay);
+            const bool landKnown=arcKnown||((teleportAiming||doneLanding)&&TeleportCell(doneLanding?donePoint:teleportPoint,punchTuning,landX,landY));
             if(teleportAiming&&landKnown&&done<0) {
                 // Teleport's own sigil and pillar (vrcam, D2R_DepthFog.fx TeleportSigil): element 5, 2 cells round
                 telegraph::Current().Place(landX,landY,GetTickCount64(),250,5,2.0f,0,0,0,telegraph::TeleportMark);
+                if(arcKnown)ShowTeleportArc(teleportArc);
                 if(!teleportShown) {
-                    const auto spot=spellmotion::PointSpot(teleportPoint,punchTuning);
-                    char line[160];std::snprintf(line,sizeof line,"Frame spell motion: Teleport pointed - its landing shown %.0f cells ahead, %+.0f across",spot.ahead,spot.right);
+                    char line[160];
+                    if(arcKnown)std::snprintf(line,sizeof line,"Frame spell motion: Teleport aimed by the controller - its arc lands %.0f cells away (cell %.1f,%.1f)",
+                        std::hypot(arcWay.x,arcWay.z),landX,landY);
+                    else {
+                        const auto spot=spellmotion::PointSpot(teleportPoint,punchTuning);
+                        std::snprintf(line,sizeof line,"Frame spell motion: Teleport pointed - its landing shown %.0f cells ahead, %+.0f across",spot.ahead,spot.right);
+                    }
                     Say(line);
                 }
                 teleportShown=true;
             }
-            else if(teleportShown){telegraph::Current().ClearSkill(telegraph::TeleportMark);teleportShown=false;}
+            else if(teleportShown){telegraph::Current().ClearSkill(telegraph::TeleportMark);teleportarc::Current().Clear();teleportShown=false;}
             if(done>0) {
                 const auto doneMotion=spellmotion::Motion(done);
                 const bool rapid=spellmotion::Rapid(doneMotion);
@@ -4820,7 +4968,7 @@ void Input() {
                 // and the shapeshifts' 1.5 s, spellmotion::ClassRest). A Blessed Hammer pump leaves them be.
                 if(!rapid)for(size_t k=0;k<spellFree.size();++k)if(int(k)!=done-1)spellFree[k].Reset();
                 const int skill=spellmotion::CastSkillOf(skillOf[done],[&](int id){return interaction::GlyphSkill(quickSnapshot,id).known;});
-                const auto spot=spellmotion::PointSpot(donePoint,punchTuning);
+                const auto spot=arcKnown?spellmotion::Spot{-arcWay.z,arcWay.x}:spellmotion::PointSpot(donePoint,punchTuning);
                 if(doneLanding&&landKnown)doneAim={spot.right,0,-spot.ahead};
                 // A summon on a spot of its own: Decoy and the golems ahead (spellmotion::Engine::LandAt), the
                 // Valkyrie where the right hand points (LandPointed); its way toward it too.
@@ -5235,17 +5383,23 @@ void Input() {
             motionInput.weapon==gameplay::Weapon::Bow&&!motionOutput.bowDrawing&&!motionOutput.block;
         // Weapon heft (weapon_heft.h, #443; VR Settings > Combat > Melee, off by default): the hand travel this
         // hand's weapon needs for a full hit, from its kind, two-handed grip and speed (WSM); 0 = whole.
-        const auto heftNeed=[&](int hand)->float {
-            if(gestureSettings[settings::WeaponHeft]<.5f||claws)return 0;
+        // weightOnly: the weapon's weight itself (0..1), for hit reactions, whatever Weapon heft is set to.
+        const auto heftNeed=[&](int hand,bool weightOnly=false)->float {
+            if((!weightOnly&&gestureSettings[settings::WeaponHeft]<.5f)||claws)return 0;
             const int body=dual?weapons.BodyHand(hand):hand==0?0:-1;   // the inventory arm whose weapon this hand swings
             if(body<0)return 0;
             const uint32_t type=dual?weapons.type[body]:gamestate::WeaponType();
             // TwoHanded() and AttackWsm(0) describe the weapon in hand (when dual wielding, the right arm's);
             // AttackWsm(1) the left arm's, whose two-handed bit the game state does not keep.
             const bool twoHanded=(!dual||body==0)&&(gamestate::TwoHanded()&D2RVR_TWO_HANDED)!=0;
-            return heft::Need(heft::Weight(type,twoHanded,gamestate::AttackWsm(dual?body:0)));
+            const float weight=heft::Weight(type,twoHanded,gamestate::AttackWsm(dual?body:0));
+            return weightOnly?weight:heft::Need(weight);
         };
         sample.heft=heftNeed(0);
+        // Hit reactions (hit_reactions.h; VR Settings > Gameplay > Physics > Struck monsters, both on by default).
+        sample.reactions=uint8_t((gestureSettings[settings::HitStagger]>.5f?hitreact::Stagger:0)|
+                                 (gestureSettings[settings::HitKnockback]>.5f?hitreact::Knockback:0));
+        sample.weight=heftNeed(0,true);
         // Melee-skill contact adapter: each hand's strikes carry its own trigger
         // skill when that is a confirmed strike skill (strike_skills.h). The
         // assignment identity rides the sample, so a rebind drops a queued stroke.
@@ -5263,10 +5417,11 @@ void Input() {
         sample.bowBash=bowBash;
         sample.active=((sample.active&&(dual||claws))||bowBash)&&controls.lt<51&&controls.rt<51;
         sample.heft=bowBash?0.f:heftNeed(1);
+        sample.weight=bowBash?0.f:heftNeed(1,true);
         strike(1);
         if(bowBash)sample.strikeSkill=-1;   // a bow's swing never casts
         offhandPoses.Push(s.sampleStamp,sample);
-        sample.weapons={};sample.claws=false;sample.strikeSkill=-1;sample.bowBash=false;sample.heft=0;
+        sample.weapons={};sample.claws=false;sample.strikeSkill=-1;sample.bowBash=false;sample.heft=0;sample.weight=0;sample.reactions=0;
         sample.hand=motionInput.hand[1];sample.shield=true;sample.active=motionInput.active&&motionOutput.shieldContact;
         sample.skillSlot=shieldSlot;sample.skillOwner=shieldSkill.owner;sample.skillContext=motionInput.skillContext;
         shieldPoses.Push(s.sampleStamp,sample);
@@ -5325,10 +5480,31 @@ void Input() {
                 shield?"shield":"weapon",hand==0?"right":"left",impact.milliseconds,impact.frequency,sent);Say(line);reportAt[hand]=now+1000;
         }
     };
-    for(int hand=0;hand<2;++hand)if(const auto at=meleeImpactAt[hand].exchange(0);at&&motionInput.active&&GetTickCount64()-at<150)
-        impactPulse(hand);
+    // What was struck shapes the tap (haptic_impact.h; VR Settings > Controls > Vibration > Hit feel by target).
+    // Flesh and a block keep the single tap above; the others play a short pattern on the same path, so Melee
+    // hits and Overall vibration scale every step. Off: the single tap for everything.
+    auto surfacePulse=[&](int hand,haptics::Surface surface,uint32_t flags){
+        const bool shield=surface==haptics::Surface::Block||surface==haptics::Surface::Parry;
+        const bool patterns=gestureSettings[settings::HapticSurfaces]>.5f;
+        const bool single=!patterns||surface==haptics::Surface::Flesh||surface==haptics::Surface::Block;
+        const auto pattern=haptics::ImpactPattern(surface,shield?1:hand,gestureSettings[settings::HapticShortMelee]>.5f);
+        if(single)impactPulse(hand,shield);
+        else {hapticSequences.Play(hand,pattern,GetTickCount64());PumpHapticSequences();}
+        static ULONGLONG toldAt[haptics::SurfaceCount]{};const auto now=GetTickCount64();
+        if(int(surface)>=0&&int(surface)<haptics::SurfaceCount&&now>=toldAt[int(surface)]) {
+            char line[220];std::snprintf(line,sizeof line,"Frame haptics impact: surface=%s hand=%s pattern=%s steps=%d length_ms=%d first=%.2f/%dms/%.0fHz monster_flags=0x%x",
+                haptics::SurfaceName(surface),hand==0?"right":"left",single?"single tap":"sequence",single?1:pattern.count,
+                single?pattern.steps[0].sample.milliseconds:pattern.Length(),pattern.steps[0].sample.amplitude,pattern.steps[0].sample.milliseconds,pattern.steps[0].sample.frequency,flags);
+            Say(line);toldAt[int(surface)]=now+1000;
+        }
+    };
+    for(int hand=0;hand<2;++hand)if(const auto at=meleeImpactAt[hand].exchange(0);at&&motionInput.active&&GetTickCount64()-at<150) {
+        const int surface=meleeImpactSurface[hand].exchange(int(haptics::Surface::Flesh));
+        surfacePulse(hand,surface>=0&&surface<haptics::SurfaceCount?haptics::Surface(surface):haptics::Surface::Flesh,meleeImpactFlags[hand].exchange(0));
+    }
     if(const auto at=shieldImpactAt.exchange(0);at&&motionInput.active&&GetTickCount64()-at<150)
-        impactPulse(1,true);
+        surfacePulse(1,shieldImpactSurface.exchange(int(haptics::Surface::Block))==int(haptics::Surface::Parry)?haptics::Surface::Parry:haptics::Surface::Block,0);
+    PumpHapticSequences();
     // A parry swing that missed: a soft, dull buzz on the shield hand, unlike a
     // block's sharp tap. Scaled by the Melee haptic strength setting.
     if(const auto at=parryMissAt.exchange(0);at&&motionInput.active&&GetTickCount64()-at<150)
@@ -6628,7 +6804,7 @@ void EndPair() {
     XrCompositionLayerQuad palette{XR_TYPE_COMPOSITION_LAYER_QUAD},bottle{XR_TYPE_COMPOSITION_LAYER_QUAD},chosen{XR_TYPE_COMPOSITION_LAYER_QUAD};
     std::array<XrCompositionLayerQuad,2> arrow{{{XR_TYPE_COMPOSITION_LAYER_QUAD},{XR_TYPE_COMPOSITION_LAYER_QUAD}}};
     XrCompositionLayerQuad bowLaser{XR_TYPE_COMPOSITION_LAYER_QUAD},bowLaserEnd{XR_TYPE_COMPOSITION_LAYER_QUAD};
-    XrCompositionLayerQuad nock{XR_TYPE_COMPOSITION_LAYER_QUAD},bowHint{XR_TYPE_COMPOSITION_LAYER_QUAD},activeSkill{XR_TYPE_COMPOSITION_LAYER_QUAD},leftActiveSkill{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    XrCompositionLayerQuad nock{XR_TYPE_COMPOSITION_LAYER_QUAD},activeSkill{XR_TYPE_COMPOSITION_LAYER_QUAD},leftActiveSkill{XR_TYPE_COMPOSITION_LAYER_QUAD};
     const bool gameplayVisible=layer&&!panelMode&&motionControls.load()&&motionInput.active&&gameplayChain&&motionOutput.rayValid;
     auto motionQuad=[&](XrCompositionLayerQuad& q,XrPosef pose,float w,float h,XrRect2Di rect,XrSwapchain chain) {
         if(count>=contentLimit||!gameplay::Valid(MotionPose(pose))||!std::isfinite(w)||!std::isfinite(h)||w<=0||h<=0)return;
@@ -6779,7 +6955,6 @@ void EndPair() {
     static bool sewerHintWasShown=false;
     if(sewerHintShown!=sewerHintWasShown){Say(sewerHintShown?"Frame sewer prompt: shown":"Frame sewer prompt: hidden");sewerHintWasShown=sewerHintShown;}
     if(gameplayVisible&&motionOutput.bowReady) {
-        const auto bow=motionInput.hand[1];
         const auto center=motionOutput.bowDrawing?motionInput.hand[0].p:motionOutput.nockPoint;
         // The game's bow mesh supplies the string. Do not draw the teal
         // V-string guide over it, even when its rig cannot follow the hand.
@@ -6796,9 +6971,6 @@ void EndPair() {
             const float size=motionOutput.bowInReach?.045f:.025f;
             motionQuad(nock,XrPose({center,Q(head.orientation)}),size,size,At(panelatlas::Pointer,{{0,32},{64,64}}),pointerChain);
         }
-        const int hint=motionOutput.bowDrawing?(motionOutput.bowCharged?2:1):0;
-        motionQuad(bowHint,XrPose({bow.p+math::Vec{0,-.25f,0},Q(head.orientation)}),.24f,.045f,
-            {{576,768+hint*85},{448,85}},gameplayChain);
     }
     // Bow path laser: the release's own tail and direction, in room space like
     // the arrow guide; resolveBow only yaws and scales it, so it stays straight.
@@ -7427,10 +7599,12 @@ bool ShieldAim(float& x,float& y) {
 void FinishShieldSkill(bool accepted) {
     std::lock_guard lock(mutex);shieldCast={};shieldPulse.Cancel();
     shieldFeedbackAt=GetTickCount64();shieldRefused=!accepted;
-    if(accepted)shieldImpactAt=shieldFeedbackAt;
+    if(accepted){shieldImpactSurface=int(haptics::Surface::Block);shieldImpactAt=shieldFeedbackAt;}
 }
 void MeleeImpact(int hand) {if(hand>=0&&hand<2)meleeImpactAt[hand]=bodyStrikeAt[hand]=GetTickCount64();}
+void ImpactSurface(int hand,int surface,uint32_t flags) {if(hand>=0&&hand<2){meleeImpactSurface[hand]=surface;meleeImpactFlags[hand]=flags;}}
 void ShieldGuardImpact(bool parry,float weight) {
+    shieldImpactSurface=int(parry?haptics::Surface::Parry:haptics::Surface::Block);
     shieldImpactAt=GetTickCount64();
     if(parry){guardParryEvents.fetch_add(1);return;}
     guardBlockWeight.fetch_add(unsigned(std::clamp(std::isfinite(weight)?weight:1.f,0.f,16.f)*1000.f+.5f));
@@ -7735,7 +7909,8 @@ void Shutdown(bool preserveResolution) {
     arcaneController.Reset();arcaneOutput={};arcanePaintKey=~0ull;arcanePaintSession=0;arcanePaintAt=0;arcaneAtlasPending=arcaneImageReady=false;
     glyphStroke={};glyphHand=-1;glyphCast={};glyphPaintKey=glyphShownStroke=0;glyphBeganAt=0;glyphEndedAt=-1;glyphPaintAt=0;glyphLook=glyphtrail::Look::Drawing;glyphPressRt=glyphTrailShown=false;glyphAtlasPending=glyphImageReady=false;
     glyphPress={};glyphRecordAt.store(0);
-    motionLanding={};if(teleportShown){telegraph::Current().ClearSkill(telegraph::TeleportMark);teleportShown=false;}
+    motionLanding={};teleportArc={};teleportarc::Current().Clear();
+    if(teleportShown){telegraph::Current().ClearSkill(telegraph::TeleportMark);teleportShown=false;}
     spellTrigger=0;for(auto& e:spellFree)e.Reset();spellFreeAt=-1;spellGripSince=-1;spellGripCast=false;spellGripsArmed.store(false);spellGate.Reset();
     bowLaserHue=-1;bowLaserAtlasPending=bowLaserImageReady=false;
     noticeWatch={};noticeCards.Clear();noticeCard={};noticePaintRequest=noticeRequestedSequence=noticePaintedSequence=0;noticeAtlasPending=noticeImageReady=false;

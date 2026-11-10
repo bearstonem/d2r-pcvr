@@ -98,7 +98,10 @@ inline bool WantsUnit(int skill){
 // the aimed monster" Off (owner, 2026-11-08: it "is not actually following and hitting monsters it just
 // goes pretty much straight" with the option Off - "make it always home even with that setting off since
 // that's the whole point of this skill"). With no aimed monster it flies as before.
-inline bool AlwaysHomes(int skill){return skill==22;}
+// Charge too (owner, 2026-11-09: "Paladin's charge should probably go to the monster we are targeting if there
+// is one available"; with the option Off it ran where the punch pointed, past the aimed monster). With no
+// aimed monster it charges where it is pointed, as before.
+inline bool AlwaysHomes(int skill){return skill==22||skill==107;}
 // The monster handed to the game for a unit skill answers the game's target
 // queries for this long after the cast (RulesUnit).
 inline constexpr unsigned long long HandOffMs=500;

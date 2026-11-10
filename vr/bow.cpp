@@ -19,6 +19,7 @@
 #include "spells.h"
 #include "melee.h"
 #include "breakables.h"
+#include "spell_impacts.h"
 #include "prop_scan.h"
 #include "melee_weapon.h"
 #include "combat.h"
@@ -221,6 +222,25 @@ int End(size_t slot,Arrow& a,uintptr_t game,uintptr_t unit) {
 }
 // Spells, quiver and item arrows keep their native server missile at the physical
 // contact, so splash, explosions and secondary missiles start at the impact.
+// Why a flight or an aimed monster met a barrier (owner, 2026-11-09: spells do not pass a doorway into the
+// next area): the cell, whether the game had a room loaded there, and every collision bit the cell carries
+// (the flight asks 0x804: wall 0x4, door 0x800). Game thread; logged at most four times a second.
+struct BarrierWhy {int x=0,z=0;bool noRoom=false;uint16_t bits=0;};
+BarrierWhy barrierWhy;uint64_t barrierLogAt=0,assistLogAt=0;
+void NoteBarrier(uintptr_t room,int x,int z) {
+    barrierWhy={x,z,!room,room?reinterpret_cast<uint16_t(*)(uintptr_t,int,int,int,int)>(d2rsig::Addr(MaskRva))(room,x,z,1,0xffff):uint16_t(0)};
+}
+void LogBarrier(const char* what,const Shot& shot,float metres,uint32_t monster=0) {
+    auto& at=monster?assistLogAt:barrierLogAt;const auto now=GetTickCount64();
+    if(now<at)return;
+    at=now+250;
+    char why[96],line[320];
+    if(barrierWhy.noRoom)snprintf(why,sizeof why,"the game has no room loaded there");
+    else snprintf(why,sizeof why,"collision 0x%04x (wall 0x4 %s, door 0x800 %s)",barrierWhy.bits,barrierWhy.bits&0x4?"yes":"no",barrierWhy.bits&0x800?"yes":"no");
+    if(monster)snprintf(line,sizeof line,"Frame flight barrier: %s monster %u for skill %d, %.1f m off: cell %d,%d: %s",what,monster,shot.skill,metres,barrierWhy.x,barrierWhy.z,why);
+    else snprintf(line,sizeof line,"Frame flight barrier: %s, skill %d missile %d, %.1f m from its start, at cell %d,%d: %s",what,shot.skill,shot.missile,metres,barrierWhy.x,barrierWhy.z,why);
+    framevr::logging::Write(line);
+}
 bool MoveSpell(Arrow& a,Vec point) {
     if(a.flight.shot.kind!=Kind::Spell&&!SkillRelease(a.flight.shot)&&!ItemArrow(a.flight.shot))return true;
     const auto grid=GridPoint(a.flight.shot,point)*a.flight.shot.unitsPerMetre;
@@ -291,7 +311,8 @@ const MonsterList& Monsters(uintptr_t game) {
     }
     return list;
 }
-int Collision(uintptr_t game,uintptr_t unit) {
+// One server step of a missile: ours are flown here, the rest stay the game's.
+int Fly(uintptr_t game,uintptr_t unit) {
     if(!serverCount.load(std::memory_order_relaxed))return originalCollision(game,unit);
     uint32_t header[3]{};Arrow a;size_t slot=arrows.size();
     if(!Read(unit,header))return originalCollision(game,unit);
@@ -334,17 +355,19 @@ int Collision(uintptr_t game,uintptr_t unit) {
     // Native missile barriers, never monster occupancy: bodies are tested in
     // 3D below. Closed/unloaded room cells are conservative solid barriers.
     float stop=WallEntry(GridPoint(a.flight.shot,from),GridPoint(a.flight.shot,to),a.flight.shot.unitsPerMetre,[&](int x,int z) {
-        if(x<1||z<1||x>65534||z>65534||!a.room)return true;
+        if(x<1||z<1||x>65534||z>65534||!a.room){NoteBarrier(0,x,z);return true;}
         const auto room=reinterpret_cast<uintptr_t(*)(uintptr_t,int,int)>(d2rsig::Addr(RoomPointRva))(a.room,x,z);
-        if(!room)return true;
+        if(!room){NoteBarrier(0,x,z);return true;}
         a.room=room;
-        return reinterpret_cast<uint16_t(*)(uintptr_t,int,int,int,int)>(d2rsig::Addr(MaskRva))(room,x,z,1,0x804)!=0;
+        if(reinterpret_cast<uint16_t(*)(uintptr_t,int,int,int,int)>(d2rsig::Addr(MaskRva))(room,x,z,1,0x804)==0)return false;
+        NoteBarrier(room,x,z);return true;
     });
     // Until terrain-height queries are available, use the launch floor. Walls
     // extend vertically; this deliberately does not permit shooting over them.
     const float floor=a.flight.shot.player.y+FloorClearance;
     if(from.y<=floor)stop=0;
     else if(to.y<=floor)stop=std::min(stop,(from.y-floor)/(from.y-to.y));
+    impactvr::Flew(a.flight.shot,from,to,stop); // a spell pushes the props and bottles in its way
     struct Touch {float fraction;uintptr_t unit;uint32_t id;};
     std::array<Touch,64> touches{};size_t n=0;
     const bool holy=a.flight.shot.kind==Kind::Spell&&framevr::holybolt::Skill(a.flight.shot.skill);
@@ -383,7 +406,7 @@ int Collision(uintptr_t game,uintptr_t unit) {
     }
     std::sort(touches.begin(),touches.begin()+n,[](const Touch& x,const Touch& y){return x.fraction<y.fraction;});
     breakables::ArrowContact breakableHit{};
-    const bool hasBreakable=!holy&&breakables::ArrowHit(game,from,to,a.flight.shot.unitsPerMetre,a.flight.shot.player.y,stop,breakableHit);
+    const bool hasBreakable=!holy&&impactvr::Containers(a.flight.shot)&&breakables::ArrowHit(game,from,to,a.flight.shot.unitsPerMetre,a.flight.shot.player.y,stop,breakableHit);
     for(size_t i=0;i<n;++i) {
         const auto& t=touches[i];
         if(hasBreakable&&breakableHit.fraction<t.fraction) {
@@ -437,9 +460,19 @@ int Collision(uintptr_t game,uintptr_t unit) {
     }
     a.flight.distance=advance(stop);a.flight.updatedAt=GetTickCount64();
     if(stop<1)a.flight.Contact(from+(to-from)*stop);
-    if(!MoveSpell(a,from+(to-from)*std::max(0.f,stop-(stop<1?.0001f:0.f))))return End(slot,a,game,unit);
-    if(stop<1){++walls;return End(slot,a,game,unit);}
+    if(!MoveSpell(a,from+(to-from)*std::max(0.f,stop-(stop<1?.0001f:0.f)))) {
+        if(stop>=1){barrierWhy={0,0,true,0};LogBarrier("the game would not move the missile on (no room at its next point)",a.flight.shot,a.flight.distance);}
+        else LogBarrier("a flight stopped at a barrier",a.flight.shot,a.flight.distance);
+        return End(slot,a,game,unit);
+    }
+    if(stop<1){++walls;LogBarrier("a flight stopped at a barrier",a.flight.shot,a.flight.distance);return End(slot,a,game,unit);}
     Store(slot,a);return 1;
+}
+// The missile update hook. Every server missile steps through here: the hero's spell missiles break the
+// containers and push the props they pass or burst at (spell_impacts.h), whoever flies them.
+int Collision(uintptr_t game,uintptr_t unit) {
+    impactvr::Step step(game,unit);
+    return step.Done(Fly(game,unit));
 }
 uintptr_t Shoot(uintptr_t game,int missile,uintptr_t player,int skill,int level,int extra,
                 int offsetX,int offsetY,int targetX,int targetY,int ammo) {
@@ -1585,8 +1618,10 @@ void AssistSpell(uintptr_t game,uintptr_t player) {
                             const auto end=shot.origin+candidate.direction*candidate.distance;
                             const float barrier=WallEntry(GridPoint(shot,shot.origin),GridPoint(shot,end),shot.unitsPerMetre,[&](int x,int z) {
                                 room=reinterpret_cast<uintptr_t(*)(uintptr_t,int,int)>(d2rsig::Addr(RoomPointRva))(room,x,z);
-                                return !room||reinterpret_cast<uint16_t(*)(uintptr_t,int,int,int,int)>(d2rsig::Addr(MaskRva))(room,x,z,1,0x804)!=0;
+                                if(room&&reinterpret_cast<uint16_t(*)(uintptr_t,int,int,int,int)>(d2rsig::Addr(MaskRva))(room,x,z,1,0x804)==0)return false;
+                                NoteBarrier(room,x,z);return true;
                             });
+                            if(barrier<1)LogBarrier("aim assist passed over",shot,candidate.distance,h[2]);
                             if(barrier>=1) {
                                 selection.Accept(candidate);selectedClass=h[1];selectedBody=(bottom+top)*.5f;
                             } else ++stats.blocked;

@@ -125,8 +125,8 @@ int main() {
             Check(sharp.milliseconds==10&&sharp.frequency==180,"short pulse opt-in covers both impact types");
         }
         const auto pull=Preview(Category::BowDraw,0);
-        Check(PreviewCount(Category::BowDraw)==1&&pull[0].milliseconds==25&&pull[1].milliseconds==20&&
-            std::fabs(pull[0].amplitude-.36f)<.00001f&&std::fabs(pull[1].amplitude-.175f)<.00001f,"draw test represents a half draw on both hands with gameplay strengths");
+        Check(PreviewCount(Category::BowDraw)==1&&pull[0].milliseconds==30&&pull[1].milliseconds==24&&pull[0].frequency==135&&
+            std::fabs(pull[0].amplitude-.381525f)<.0001f&&std::fabs(pull[1].amplitude-.193137f)<.0001f,"draw test represents a half draw on both hands with gameplay strengths");
         Check(PreviewCount(Category::Alert)==1&&Preview(Category::Alert,0)[1].milliseconds==100&&!Preview(Category::Alert,0)[0].milliseconds,"alert has one preview on its gameplay hand");
         Check(Preview(Category::Spell,0)[1].milliseconds==25&&Preview(Category::Spell,1)[0].milliseconds==25,"spell left/right previews keep their named hands");
         Check(Preview(Category::Interaction,0)[1].milliseconds==45&&Preview(Category::Interaction,1)[0].milliseconds==45,"interaction previews support either hand");

@@ -139,6 +139,15 @@ int main() {
         assert(p.Start(2,12,-1,8,2));assert(p.Get(2,12,-1,8,1.9)==-1);
     }
     {
+        // An alternate-bank (LT) slot holds 180 ms, as Smite: the LT must stand
+        // 50 ms before the game exposes the slot's button (2026-11-09: Guided
+        // Arrow on slot 7 fired about half its releases with 65 ms).
+        weaponskills::Pulse p;assert(p.Start(7,22,-1,1,1));
+        assert(p.Get(7,22,-1,1,1.10)==7&&p.Get(7,22,-1,1,1.17)==7);assert(p.Get(7,22,-1,1,1.19)==-1);
+        weaponskills::Pulse face;assert(face.Start(2,22,-1,1,1));assert(face.Get(2,22,-1,1,1.07)==-1);   // a face slot stays brief
+        weaponskills::Pulse nine;assert(nine.Start(9,22,-1,1,1));assert(nine.Get(9,22,-1,1,1.10)==9);
+    }
+    {
         using namespace skel::bow;
         // A 60 cm authored arm used to stop a shield wrist well short of a
         // real 85 cm reach. Check forward, lateral and raised targets against

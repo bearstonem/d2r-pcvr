@@ -8,12 +8,13 @@
 #include "logging.h"
 #include "../steamvr/world_coordinates.h"
 #include "../steamvr/bow_flight.h"
+#include "../steamvr/haptic_impact.h"
 #include <intrin.h>
 #include <array>
 #include <atomic>
 #include <cstdio>
 #include <cstring>
-namespace framevr {void MeleeImpact(int hand);}
+namespace framevr {void MeleeImpact(int hand);void ImpactSurface(int hand,int surface,uint32_t flags);}
 
 namespace breakables {
 namespace {
@@ -130,7 +131,7 @@ void Apply(uintptr_t game,uintptr_t player,std::span<const Strike> strikes,bool 
         uint32_t after[4]{};
         const auto resolved=melee::ServerUnit(game,2,o.id);
         if(Read(resolved,after)&&after[0]==2&&after[2]==o.id&&after[3]!=0) {
-            ++broken[s.handIndex];framevr::MeleeImpact(s.handIndex);
+            ++broken[s.handIndex];framevr::ImpactSurface(s.handIndex,int(framevr::haptics::Surface::Container),0);framevr::MeleeImpact(s.handIndex);
         } else ++refused;
     }
 }
@@ -174,9 +175,34 @@ bool OperateArrow(uintptr_t game,uintptr_t player,uintptr_t unit,uint32_t id) {
     const auto check=melee::ServerUnit(game,2,id);
     if(Read(check,after)&&after[0]==2&&after[2]==id&&after[3]!=0) {
         ++brokenProjectiles;
-        framevr::MeleeImpact(0);
+        framevr::ImpactSurface(0,int(framevr::haptics::Surface::Container),0);framevr::MeleeImpact(0);
         return true;
     }
+    ++refused;
+    return false;
+}
+size_t Nearby(uintptr_t game,float x,float z,float reach,std::span<Container> out) {
+    if(!ready.load()||out.empty()||!(reach>0))return 0;
+    uintptr_t buckets[128]{};if(!Read(game+0x546*8,buckets))return 0;
+    size_t count=0;unsigned visited=0;
+    for(uintptr_t unit:buckets)for(unsigned chain=0;unit&&chain<256&&visited++<4096&&count<out.size();++chain) {
+        uintptr_t next=0;if(!Read(unit+0x158,next))break;
+        Object o;
+        if(Inspect(game,unit,o)&&std::hypot(2.f*o.x-x,2.f*o.y-z)<=reach)out[count++]={o.id,2.f*o.x,2.f*o.y,o.sizeX,o.sizeY};
+        unit=next;
+    }
+    return count;
+}
+bool OperateMissile(uintptr_t game,uintptr_t player,uint32_t id) {
+    if(!ready.load()||!game||!player||!id)return false;
+    Vec playerPos{};if(!Player(game,player,playerPos))return false; // the local hero, alive, in this game
+    const auto unit=melee::ServerUnit(game,2,id);
+    Object o;if(!Inspect(game,unit,o)||o.id!=id)return false;
+    {Scope scope(game,player,id);
+     reinterpret_cast<int(*)(uintptr_t,uintptr_t,uintptr_t)>(d2rsig::Addr(OperateRva))(game,player,unit);}
+    uint32_t after[4]{};
+    const auto check=melee::ServerUnit(game,2,id);
+    if(Read(check,after)&&after[0]==2&&after[2]==id&&after[3]!=0)return true; // counted by the caller
     ++refused;
     return false;
 }

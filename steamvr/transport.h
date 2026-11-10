@@ -143,7 +143,8 @@ bool HeavensArmed();
 bool TCrossWantsTargets();
 uint32_t HeavensRequest();
 // A bow is ready with Guided Arrow as the bow's skill (aimrules::AlwaysHomes): the target scan runs so a
-// release can hand the game the aimed monster, whatever VR Settings > Gameplay > Targeting says.
+// release can hand the game the aimed monster, whatever VR Settings > Gameplay > Targeting says. Also while a
+// Paladin plays, for Charge.
 bool SeekerArrowReady();
 void HeavensResolved(uint32_t request,uint32_t monster);
 int PointSpellSkill();       // the cast skill when the aim rules place it at a point, else -1
@@ -165,6 +166,9 @@ int TakeShieldTarget(uint32_t& target); // 1 physical target, -1 cancelled cast,
 bool ShieldAim(float& x,float& y);
 void FinishShieldSkill(bool accepted);
 void MeleeImpact(int hand=0); // thread-safe; haptic delivered by XR input update
+// Thread-safe; call before MeleeImpact(hand): what that impact struck (haptics::Surface, haptic_impact.h) and, for a
+// monster, its MonStats flags for the log. Not told: flesh. One impact consumes it.
+void ImpactSurface(int hand,int surface,uint32_t flags=0);
 void ShieldGuardImpact(bool parry=false,float weight=1); // thread-safe; a physical block taps the left controller and strains the guard by weight (the attacker's rank; a parry does not)
 bool GuardBroken(); // thread-safe; guard strain is full (broken) this frame
 void ShieldParryMiss(); // thread-safe; a parry swing that missed buzzes the left controller softly
