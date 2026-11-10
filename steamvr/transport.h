@@ -156,6 +156,9 @@ int TakeShieldTarget(uint32_t& target); // 1 physical target, -1 cancelled cast,
 bool ShieldAim(float& x,float& y);
 void FinishShieldSkill(bool accepted);
 void MeleeImpact(int hand=0); // thread-safe; haptic delivered by XR input update
+// Thread-safe; call before MeleeImpact(hand): what that impact struck (haptics::Surface, haptic_impact.h) and, for a
+// monster, its MonStats flags for the log. Not told: flesh. One impact consumes it.
+void ImpactSurface(int hand,int surface,uint32_t flags=0);
 void ShieldGuardImpact(bool parry=false,float weight=1); // thread-safe; a physical block taps the left controller and strains the guard by weight (the attacker's rank; a parry does not)
 bool GuardBroken(); // thread-safe; guard strain is full (broken) this frame
 void ShieldParryMiss(); // thread-safe; a parry swing that missed buzzes the left controller softly

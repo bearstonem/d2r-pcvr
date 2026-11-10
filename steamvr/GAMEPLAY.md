@@ -713,6 +713,39 @@ Settings are stored under `[haptics]` as `strength`, `melee`, `bow_draw`,
 `bow_release`, `spells`, `interactions` and `alerts`; missing strength keys default
 to 100. `[haptics] short_melee=0` selects the longer tap; `1` selects the short tap.
 
+**Hit feel by target** (in the Short melee taps row as **By target**, `[haptics] hit_patterns`,
+On by default) makes a weapon hit feel like what it struck. Each is a short sequence of
+pulses on the usual vibration path, so **Melee hits** and **Overall vibration** scale every
+step, and the rhythm differs as well as the pitch because some controllers ignore pitch:
+
+| Struck | Feel | Pulses (strength / ms / Hz, at ms after contact) |
+| --- | --- | --- |
+| Flesh (any living monster, demons included) | one long thud | 0.95 / 90 (45 on the left hand) |
+| Bone: skeletons, zombies, mummies (the game's low undead) | three short clicks, each weaker | 0.95 / 25 / 240 at 0, 0.55 / 20 / 240 at 45, 0.35 / 20 / 240 at 85 |
+| Spirit: ghosts and wraiths (flying high undead) | a soft swell, nothing solid | 0.22 / 40 / 60 at 0, 0.40 / 60 / 60 at 40, 0.18 / 50 / 60 at 100 |
+| Container: a pot, urn, barrel or crate that breaks | a crack, then a long low crumble | 1.0 / 35 / 170 at 0, 0.40 / 110 / 70 at 45 |
+| Shield block | one tap | 0.95 / 45 |
+| Parry | two sharp ringing taps | 1.0 / 20 / 250 at 0, 0.60 / 35 / 250 at 50 |
+
+The monster's kind comes from the game's own monster record (the undead and flying flags);
+it names no stone or metal, so none is invented, and walls are not felt because weapon
+contact with a wall is not detected. Short melee taps keeps each rhythm with every step cut
+to 10 ms / 180 Hz. Off gives every hit the single tap. The log's `Frame haptics impact:
+surface=...` line (once a second per surface) names what was struck, the pattern and the
+monster's flags.
+
+**Felt heartbeat** (**Interface > Warnings**, in the Heartbeat starts at row as **Felt**,
+`[haptics] heartbeat`, On by default) beats in both controllers with the low-life heartbeat:
+a lub (0.30 strength for 45 ms at the first step, to 0.80 for 60 ms below 10% life) and a
+softer dub (0.20 / 35 ms to 0.55 / 45 ms) about a third of a beat later, at the sound's own
+tempo (77.5 beats a minute at the first step with the default start, 115 below 10%). It starts
+at **Heartbeat starts at** (60% when that is Off), winds down as the sound does, and wiping
+the visor quiets both. It stops at once in a menu, VR Settings or body calibration and when
+you die. **Low life and mana alerts** and **Overall vibration** scale it; a weaker beat
+never cuts a landed melee tap short. The sound keeps its own clock, so the two share a tempo but
+are not locked beat for beat. The log's `Frame haptics heartbeat: started ...` and `stopped
+(...)` lines mark it, with a `beating` line every 5 seconds.
+
 Click **Apply** to save changed values to `mods/D2R-PCVR/d2rloader/plugins/d2r_pcvr.ini` and
 reload them live. Closing without Apply discards pending edits. The first Apply
 creates `d2r_pcvr.ini.before-vr-menu`; later saves retain that original backup.
@@ -2104,8 +2137,17 @@ release now invokes the native missile immediately through the physical-arrow
 path. Held-bow posing matches the controller sample timestamp to the completed
 attachment pose, avoiding a newer hand position being applied to an older rig.
 
-A pull produces light haptic pulses as draw distance changes, plus nock and
-release pulses. Runtime acceptance is logged; that does not prove the user felt
+A pull produces haptic ticks as draw distance changes, plus nock and release
+pulses. The ticks carry the string's tension: from a slack string to full draw the
+string hand's tick grows from 0.18 strength / 20 ms / 70 Hz to 0.75 / 40 ms / 200 Hz
+(the bow hand's from 0.08 / 18 ms to 0.40 / 30 ms), rising faster near full draw, and
+they come closer together (every 2.2% of draw travel down to 1.2%). Held still from
+half draw, the string hand feels a faint tremor (0.05 to 0.15 strength, 15 ms, every
+260 ms down to 140 ms). The release is a snap by how far the bow was drawn: a 20 ms
+crack in the string hand (0.45 to 0.95) and a 25 ms crack in the bow hand (0.50 to
+1.0) followed by 70 ms of the string settling (0.20 to 0.50). **Bow draw** and **Bow
+and throw release** scale them. `Frame haptics bow: pull ...` and `release snap ...`
+log lines (once a second) report what was sent. Runtime acceptance is logged; that does not prove the user felt
 it. The native arrow is hidden until nocked. Unknown rigs retain their native
 string and limb animation; their string does not yet follow the drawing hand.
 The teal V-string overlay is removed for all bow rigs. The nock marker and

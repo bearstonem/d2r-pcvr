@@ -8,12 +8,13 @@
 #include "logging.h"
 #include "../steamvr/world_coordinates.h"
 #include "../steamvr/bow_flight.h"
+#include "../steamvr/haptic_impact.h"
 #include <intrin.h>
 #include <array>
 #include <atomic>
 #include <cstdio>
 #include <cstring>
-namespace framevr {void MeleeImpact(int hand);}
+namespace framevr {void MeleeImpact(int hand);void ImpactSurface(int hand,int surface,uint32_t flags);}
 
 namespace breakables {
 namespace {
@@ -130,7 +131,7 @@ void Apply(uintptr_t game,uintptr_t player,std::span<const Strike> strikes,bool 
         uint32_t after[4]{};
         const auto resolved=melee::ServerUnit(game,2,o.id);
         if(Read(resolved,after)&&after[0]==2&&after[2]==o.id&&after[3]!=0) {
-            ++broken[s.handIndex];framevr::MeleeImpact(s.handIndex);
+            ++broken[s.handIndex];framevr::ImpactSurface(s.handIndex,int(framevr::haptics::Surface::Container),0);framevr::MeleeImpact(s.handIndex);
         } else ++refused;
     }
 }
@@ -174,7 +175,7 @@ bool OperateArrow(uintptr_t game,uintptr_t player,uintptr_t unit,uint32_t id) {
     const auto check=melee::ServerUnit(game,2,id);
     if(Read(check,after)&&after[0]==2&&after[2]==id&&after[3]!=0) {
         ++brokenProjectiles;
-        framevr::MeleeImpact(0);
+        framevr::ImpactSurface(0,int(framevr::haptics::Surface::Container),0);framevr::MeleeImpact(0);
         return true;
     }
     ++refused;
