@@ -67,9 +67,12 @@ void SetInteractionHidden(unsigned mask){g_interactionHidden=mask&3;}
 
 namespace {
 
+thread_local uint64_t t_guardedReads = 0;   // this thread's guarded reads, for the hook's ten-second line
+
 #pragma optimize("", off)
 bool SafeCopy(void* dst, const void* src, size_t n) noexcept {
 #ifdef D2RVR_NATIVE_OPENXR
+    ++t_guardedReads;
     return framevr::ReadMemory(dst,src,n);
 #else
     __try { memcpy(dst, src, n); return true; } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
@@ -98,6 +101,69 @@ std::atomic<ULONGLONG> g_dumpUntil{0};
 std::set<std::string> g_seen;
 FILE* g_out = nullptr;
 std::atomic<uint64_t> g_calls{0};
+
+#ifdef D2RVR_NATIVE_OPENXR
+// ---- The hook's own cost, for a headset log (no profiler) ----
+// Every pose call's time and guarded reads (natively each read is a system call), summed per
+// thread and handed to the shared totals now and then: one "Frame skeleton hook:" line every ten
+// seconds. An identity look-up is what a skeleton costs when it is not remembered, or is checked
+// again: its model's path read, its rig learned, its entity searched for in the registry.
+namespace hookstats {
+constexpr ULONGLONG ReportEvery = 10000;
+constexpr uint64_t FlushNanos = 50'000'000;   // a thread hands its sums over this often
+std::atomic<uint64_t> g_posed{0}, g_nanos{0}, g_reads{0}, g_longest{0};
+std::atomic<uint64_t> g_identified{0}, g_identifyNanos{0};
+std::atomic<ULONGLONG> g_reported{0};
+struct Local { uint64_t calls = 0, nanos = 0, reads = 0, longest = 0, flushed = 0; };
+thread_local Local t_local;
+
+void Longest(std::atomic<uint64_t>& most, uint64_t nanos) {
+    for (uint64_t was = most.load(std::memory_order_relaxed); nanos > was && !most.compare_exchange_weak(was, nanos, std::memory_order_relaxed);) {}
+}
+struct Identifying {
+    uint64_t started = framevr::hookmetrics::Nanos();
+    ~Identifying() {
+        g_identified.fetch_add(1, std::memory_order_relaxed);
+        g_identifyNanos.fetch_add(framevr::hookmetrics::Nanos() - started, std::memory_order_relaxed);
+    }
+};
+void Report(ULONGLONG now) {
+    ULONGLONG last = g_reported.load(std::memory_order_relaxed);
+    if (now - last < ReportEvery || !g_reported.compare_exchange_strong(last, now)) return;
+    const uint64_t posed = g_posed.exchange(0), nanos = g_nanos.exchange(0), reads = g_reads.exchange(0), longest = g_longest.exchange(0);
+    const uint64_t identified = g_identified.exchange(0), identifyNanos = g_identifyNanos.exchange(0);
+    if (!last || !posed) return;   // the first window has no start
+    const double seconds = double(now - last) / 1000.0;
+    char line[320];
+    std::snprintf(line, sizeof line, "Frame skeleton hook: ten seconds: %.0f poses a second, %.2f ms a second, %.0f guarded reads a second "
+        "(%.1f a pose), longest pose %.2f ms; identity look-ups %llu in %.2f ms", double(posed) / seconds, double(nanos) / 1e6 / seconds,
+        double(reads) / seconds, double(reads) / double(posed), double(longest) / 1e6, static_cast<unsigned long long>(identified),
+        double(identifyNanos) / 1e6);
+    framevr::logging::Write(line);
+}
+// One pose call, from the game's own pose to the hook's return.
+struct Call {
+    uint64_t started = framevr::hookmetrics::Nanos(), reads = t_guardedReads;
+    ~Call() {
+        const uint64_t ended = framevr::hookmetrics::Nanos(), took = ended - started;
+        auto& l = t_local;
+        ++l.calls; l.nanos += took; l.reads += t_guardedReads - reads;
+        if (took > l.longest) l.longest = took;
+        if (ended - l.flushed < FlushNanos) return;
+        g_calls.fetch_add(l.calls, std::memory_order_relaxed);
+        g_posed.fetch_add(l.calls, std::memory_order_relaxed);
+        g_nanos.fetch_add(l.nanos, std::memory_order_relaxed);
+        g_reads.fetch_add(l.reads, std::memory_order_relaxed);
+        Longest(g_longest, l.longest);
+        l = {}; l.flushed = ended;
+        Report(GetTickCount64());
+    }
+};
+}  // namespace hookstats
+#define SKELETON_IDENTIFYING hookstats::Identifying identifying
+#else
+#define SKELETON_IDENTIFYING
+#endif
 
 float g_heroPos[3] = {};   // the world camera's look-at, from vrcam
 float g_eyeGround[2] = {};bool g_eyeGroundOk = false;   // under the eyes (SetEyeGround), same lock
@@ -658,6 +724,7 @@ bool CandidatePosition(uintptr_t self,float position[3]) {
     auto it=g_candidateEntities.find(self);uintptr_t held=0;uint32_t entity=0;
     if(it!=g_candidateEntities.end()&&SkeletonOf(it->second,&held)&&held==self)entity=it->second;
     else {
+        SKELETON_IDENTIFYING;
         if(!EntityOf(self,&entity))return false;
         if(g_candidateEntities.size()>4096)g_candidateEntities.clear();
         g_candidateEntities[self]=entity;
@@ -2992,6 +3059,7 @@ void CaptureCrossbow(uintptr_t self) {
     if(const auto found=rigs.find(key);found!=rigs.end()&&found->second.bones==bones){known=true;crossbow=found->second.cog>=0;}
     ReleaseSRWLockShared(&g_crossbowRigLock);
     if(!known) {
+        SKELETON_IDENTIFYING;
         const CrossbowRig learned=LearnCrossbowRig(bones,count);crossbow=learned.cog>=0;
         AcquireSRWLockExclusive(&g_crossbowRigLock);
         if(rigs.size()>4096)std::erase_if(rigs,[](const auto& entry){return entry.second.cog<0;});
@@ -3096,6 +3164,7 @@ void PoseMotionBow(uintptr_t self) {
     const auto key=std::make_pair(self,skeleton);
     auto it=g_bowRigs.find(key);
     if(it==g_bowRigs.end()||it->second.bones!=bones) {
+        SKELETON_IDENTIFYING;
         MotionBowRig learned;learned.bones=bones;
         uintptr_t object=0,name=0;Get(self,&object);Get(object+8,&name);
         const std::string path=Str(name);
@@ -3198,6 +3267,7 @@ void Arms(uintptr_t self) {
     if (it != g_heroes.end()) { hero = it->second; have = true; }
     ReleaseSRWLockShared(&g_heroLock);
     if (!have) {
+        SKELETON_IDENTIFYING;
         Hero h;
         if (!Learn(self, &h)) h.count = 0;
         AcquireSRWLockExclusive(&g_heroLock);
@@ -3535,6 +3605,7 @@ void Limbs(uintptr_t self) {
     // What the instance is: its model's path, rechecked now and then (an
     // instance's memory can be another model's later), its entity kept.
     if (!known || now - k.at >= (k.kind == limbs::Kind::None ? OtherRecheck : Recheck)) {
+        SKELETON_IDENTIFYING;
         uintptr_t nameObject = 0, namePointer = 0;
         Known next; next.at = now;
         if (Get(self, &nameObject) && Get(nameObject + 8, &namePointer)) {
@@ -3753,6 +3824,7 @@ bool Turn(uintptr_t self) {
     // What the instance is: its model's path, rechecked now and then (an instance's memory can
     // be another model's later), its entity kept.
     if (!known || now - k.at >= (k.kind == limbs::Kind::None ? OtherRecheck : Recheck)) {
+        SKELETON_IDENTIFYING;
         uintptr_t nameObject = 0, namePointer = 0;
         Known next; next.at = now;
         if (Get(self, &nameObject) && Get(nameObject + 8, &namePointer)) {
@@ -4147,7 +4219,11 @@ ComputeFn g_orig = nullptr;
 void __cdecl Hook(uintptr_t self, float a, float b, bool c) {
     { FRAME_PROFILE(SkeletonGame); g_orig(self, a, b, c); }
     FRAME_PROFILE(SkeletonMod);
+#ifdef D2RVR_NATIVE_OPENXR
+    hookstats::Call counted;   // adds to g_calls too, per thread and in batches: one counter shared by every worker was a contended line
+#else
     g_calls++;
+#endif
 #if D2RVR_FIRST_PERSON
     // Off: holding the weapon's own skeleton changed nothing (09:50 log: held every frame, the axe still
     // turned) - the turn came from the body's two_hand_weapon_attach. Kept for the next weapon that needs it.
