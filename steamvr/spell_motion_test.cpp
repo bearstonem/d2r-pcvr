@@ -93,8 +93,8 @@ static void Run() {
         // since 2026-11-03, the Paladin's and the Druid's by card; a name and a cue on every card.
         Check(spellmotion::PageOf(1).count==spellmotion::SorceressCount&&spellmotion::SorceressCount==14&&spellmotion::PageOf(3).count==4&&spellmotion::PageOf(5).count==2,
               "the Sorceress's 14, the Paladin's 4, the Druid's 2");
-        Check(spellmotion::PageOf(0).count==4&&spellmotion::PageOf(4).count==10&&spellmotion::PageOf(2).count==12&&spellmotion::PageOf(6).count==7,
-              "the Amazon's 4, the Barbarian's 10 (Leap Attack and Whirlwind after the table's), the Necromancer's 12 (the table's, the left arm's golem, Bone Wall, Poison Explosion, Raise Skeletal Mage), the Assassin's 7");
+        Check(spellmotion::PageOf(0).count==4&&spellmotion::PageOf(4).count==13&&spellmotion::PageOf(2).count==12&&spellmotion::PageOf(6).count==7,
+              "the Amazon's 4, the Barbarian's 13 (Leap Attack and Whirlwind after the table's, then Find Potion, Grim Ward and Taunt), the Necromancer's 12 (the table's, the left arm's golem, Bone Wall, Poison Explosion, Raise Skeletal Mage), the Assassin's 7");
         for(int c:{7,-1})Check(!spellmotion::HasMotions(c)&&spellmotion::PageOf(c).count==0,"no motions for the Warlock or an unknown class");
         for(int c:{0,2,3,4,5,6}) {   // their cards' motions are the engine's (the Paladin's and the Druid's since 2026-11-08), each watched in the class's order exactly once
             const auto page=spellmotion::PageOf(c);const auto order=spellmotion::OrderOf(c);

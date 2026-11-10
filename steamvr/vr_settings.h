@@ -225,7 +225,7 @@ inline constexpr std::array<Definition,Count> Definitions{{
     // The Amazon's, the Necromancer's, the Barbarian's and the Assassin's (owner 2026-11-04): one bit per card.
     {"Amazon motions off", "The Amazon's motions turned off on the MOTIONS page (one bit each)", L"motions",L"amazon_off",0,0,1023,1},
     {"Necromancer motions off", "The Necromancer's motions turned off on the MOTIONS page (one bit each)", L"motions",L"necromancer_off",0,0,1023,1},
-    {"Barbarian motions off", "The Barbarian's motions turned off on the MOTIONS page (one bit each)", L"motions",L"barbarian_off",0,0,1023,1},
+    {"Barbarian motions off", "The Barbarian's motions turned off on the MOTIONS page (one bit each)", L"motions",L"barbarian_off",0,0,8191,1},
     {"Assassin motions off", "The Assassin's motions turned off on the MOTIONS page (one bit each)", L"motions",L"assassin_off",0,0,1023,1},
     // Each hand its own glyphs (owner 2026-11-05: "expand the glyphs where left and the right hand glyphs can be
     // different sets"): a second Draw glyph button, on the other hand from draw_slot (either key either hand:

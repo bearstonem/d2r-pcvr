@@ -2982,7 +2982,9 @@ there.
   arms pulled well back (30 cm behind the eyes), at the monster that way; Find Item, the right hand
   held out at the corpse a moment, then snatched back to the shoulder; Whirlwind, both arms held
   straight out to the sides (a T) a moment, whirling 10 cells ahead: once for a T, the arms let down
-  before the next.
+  before the next; Find Potion, Find Item's snatch by the left hand; Grim Ward, the right hand held out at the
+  corpse a moment, then driven straight down; Taunt, both hands held out in front a moment, then pulled in
+  to the chest, at the highlighted monster.
 - Necromancer: Bone Armor, both fists crossed on the chest, held; Raise Skeleton, both arms swept up
   fast from the hips past the face, together (no stop); Golem, the right arm swept up fast the same way
   in front of you (the strongest golem learned), standing 4 cells away where the arm heads, and a

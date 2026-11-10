@@ -47,7 +47,7 @@ namespace framevr::spellmotion {
 enum class Motion {None,FlingOut,PushDown,RubSnap,CrossGuard,ArmUp,MatchStrike,ForearmSweep,Shake,Hug,Punch,
     FireWall,Meteor,Blizzard,Hydra,                                                               // Sorceress (2026-11-05)
     InnerSight,SlowMissiles,Decoy,Valkyrie,                                                       // Amazon A1-A4
-    BattleOrders,Shout,BattleCommand,WarCry,Howl,BattleCry,Leap,FindItem,LeapAttack,Whirlwind,    // Barbarian B1-B10
+    BattleOrders,Shout,BattleCommand,WarCry,Howl,BattleCry,Leap,FindItem,LeapAttack,Whirlwind,FindPotion,GrimWard,Taunt,    // Barbarian B1-B10, and three more (2026-11-10)
     BoneArmor,RaiseSkeleton,CorpseExplosion,Golem,AmplifyDamage,LowerResist,PoisonNova,BonePrison,GolemLeft,// Necromancer N1-N8, N4b
     BoneWall,PoisonExplosion,RaiseMage,                                                           // Necromancer N9-N11
     BurstOfSpeed,Fade,CloakOfShadows,Venom,BladeShield,ShadowWarrior,MindBlast,                   // Assassin S1-S7
@@ -74,6 +74,7 @@ inline Motion For(int skill) {
     case 149:return Motion::BattleOrders;case 138:return Motion::Shout;case 155:return Motion::BattleCommand;case 154:return Motion::WarCry;
     case 130:return Motion::Howl;case 146:return Motion::BattleCry;case 132:return Motion::Leap;case 142:return Motion::FindItem;
     case 143:return Motion::LeapAttack;case 151:return Motion::Whirlwind;
+    case 131:return Motion::FindPotion;case 150:return Motion::GrimWard;case 137:return Motion::Taunt;
     case 68:return Motion::BoneArmor;case 70:return Motion::RaiseSkeleton;case 74:return Motion::CorpseExplosion;
     case 75:case 94:return Motion::Golem;   // the right arm's card is Clay Golem's; it casts the strongest learned (CastSkillOf)
     case 85:return Motion::GolemLeft;       // the left arm's is Blood Golem's; it casts the next strongest
@@ -103,7 +104,9 @@ constexpr int DruidSkills[]={223,228};             // Werewolf, Werebear
 constexpr int AmazonSkills[]={8,17,28,32};
 // 143: Leap Attack, after the table's (owner, 2026-11-06: Leap's swing from the arms pulled further back); 151:
 // Whirlwind (owner, 2026-11-06: "get on T-pose ... Which then triggers whirlwind").
-constexpr int BarbarianSkills[]={149,138,155,154,130,146,132,142,143,151};
+// Find Potion, Grim Ward and Taunt (owner, 2026-11-10: "any other skills that we can add ... Ones that make sense"),
+// after the rest: the cards before them keep their on/off bits.
+constexpr int BarbarianSkills[]={149,138,155,154,130,146,132,142,143,151,131,150,137};
 // 85: the left arm's golem, then Bone Wall, Poison Explosion and Raise Skeletal Mage (owner, 2026-11-05), after the table's
 constexpr int NecromancerSkills[]={68,70,74,75,66,91,92,88,85,78,83,80};
 constexpr int AssassinSkills[]={258,267,264,278,277,268,273};
@@ -140,6 +143,7 @@ inline const char* SpellName(int skill) {
     case 8:return "Inner Sight";case 17:return "Slow Missiles";case 28:return "Decoy";case 32:return "Valkyrie";
     case 149:return "Battle Orders";case 138:return "Shout";case 155:return "Battle Command";case 154:return "War Cry";
     case 130:return "Howl";case 146:return "Battle Cry";case 132:return "Leap";case 142:return "Find Item";case 143:return "Leap Attack";case 151:return "Whirlwind";
+    case 131:return "Find Potion";case 150:return "Grim Ward";case 137:return "Taunt";
     case 68:return "Bone Armor";case 70:return "Raise Skeleton";case 74:return "Corpse Explosion";case 75:return "Clay Golem";
     case 85:return "Blood Golem";case 94:return "Fire Golem";case 66:return "Amplify Damage";case 91:return "Lower Resist";
     case 92:return "Poison Nova";case 88:return "Bone Prison";case 78:return "Bone Wall";case 83:return "Poison Explosion";
@@ -728,7 +732,7 @@ inline bool Druid(Motion m){return m==Motion::Werewolf||m==Motion::Werebear;}
 inline bool ClassDone(Engine& e,Motion m) {
     if(m>=Motion::FireWall&&m<=Motion::Hydra)return sorceress::Done(e,m);
     if(m>=Motion::InnerSight&&m<=Motion::Valkyrie)return amazon::Done(e,m);
-    if(m>=Motion::BattleOrders&&m<=Motion::Whirlwind)return barbarian::Done(e,m);
+    if(m>=Motion::BattleOrders&&m<=Motion::Taunt)return barbarian::Done(e,m);
     if(m>=Motion::BoneArmor&&m<=Motion::RaiseMage)return necromancer::Done(e,m);
     if(m>=Motion::BurstOfSpeed&&m<=Motion::MindBlast)return assassin::Done(e,m);
     if(Paladin(m))return paladin::Done(e,m);
@@ -738,7 +742,7 @@ inline bool ClassDone(Engine& e,Motion m) {
 inline const char* ClassCue(Motion m) {
     if(m>=Motion::FireWall&&m<=Motion::Hydra)return sorceress::Cue(m);
     if(m>=Motion::InnerSight&&m<=Motion::Valkyrie)return amazon::Cue(m);
-    if(m>=Motion::BattleOrders&&m<=Motion::Whirlwind)return barbarian::Cue(m);
+    if(m>=Motion::BattleOrders&&m<=Motion::Taunt)return barbarian::Cue(m);
     if(m>=Motion::BoneArmor&&m<=Motion::RaiseMage)return necromancer::Cue(m);
     if(m>=Motion::BurstOfSpeed&&m<=Motion::MindBlast)return assassin::Cue(m);
     if(Paladin(m))return paladin::Cue(m);
