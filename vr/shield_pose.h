@@ -186,6 +186,28 @@ inline bool PlaceAcross(const bow::Mat& bindAttach,const Frame& bind,bow::Vec bi
     if(!Place(bindAttach,bind,bindWrist,bindScale,TurnedOver(now,turn),wrist,scale,result))return false;
     bow::Position(result,bow::Position(mirrored));return bow::Affine(result);
 }
+// The shield wrist's bend stop (skeletons.cpp, StopShieldWrist) as geometry, for the arm the shield is
+// carried across to in left-handed play. The hand bending back (back of the hand up) swings the
+// shield's elbow edge into the arm: that bend eases into where the hand lies straight on the forearm
+// and only approaches it; bending the other way, twisting and side to side stay free.
+//   back    the back of the hand's direction as the controller has the hand now (unit)
+//   rigid   the same with the hand straight on its forearm (unit)
+//   forearm elbow -> wrist (unit)
+// given: where the back of the hand is let go to (back itself when nothing is held). Returns the bend
+// held back, degrees. The same numbers as the left arm's: easing starts 15 degrees short of the stop.
+inline constexpr float kWristStopEaseDeg=15.f;
+inline float WristStop(bow::Vec back,bow::Vec rigid,bow::Vec forearm,bow::Vec& given) {
+    given=back;
+    const float ease=kWristStopEaseDeg/57.2958f;
+    const float asked=std::acos(std::clamp(bow::Dot(back,forearm),-1.f,1.f)),at=std::acos(std::clamp(bow::Dot(rigid,forearm),-1.f,1.f));
+    const float knee=at-ease;
+    if(!std::isfinite(asked+at)||!(asked>knee))return 0;
+    const bow::Vec w=back-forearm*bow::Dot(back,forearm);
+    if(!(bow::Length(w)>=1e-4f))return 0;
+    const float bend=knee+ease*(1-std::exp(-(asked-knee)/ease));
+    given=forearm*std::cos(bend)+bow::Normalized(w)*std::sin(bend);
+    return (asked-bend)*57.2958f;
+}
 // Grip toward the elbow (+) or the hand (-), Out and Up, cm, clamped to the settings' ranges;
 // anything not finite is 0.
 inline bow::Vec Offset(bow::Vec along,bow::Vec out,bow::Vec up,float gripCm,float outCm,float upCm,float unitsPerMetre) {

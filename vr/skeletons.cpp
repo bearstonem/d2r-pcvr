@@ -2658,8 +2658,8 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
         // left arm's, the frame now the right arm's built the same anatomical way, which is its mirror
         // image; shield::PlaceAcross puts the bone where the mirror has it and turns the shield there
         // (in.leftHandedShieldTurn), since a mirrored bone cannot be drawn. The same settings apply
-        // (Shield wrist turn, Shield roll, Grip / Out / Up), each meaning the same direction on this arm.
-        // Not built yet on this arm: the wrist's bend stop (StopShieldWrist).
+        // (Shield wrist turn, Shield roll, Grip / Out / Up), each meaning the same direction on this arm,
+        // and the wrist has the left arm's bend stop (shield::WristStop).
         const int wb=h.weapon[1],sa=h.shieldAttach;
         const int bl=h.lwr[1],bk=h.hand[1],bi=h.ind[1],bp=h.pnk[1],bm=h.mid[1];        // the bind pose's arm: the left
         const int l=h.lwr[0],k=h.hand[0],ki=h.ind[0],kp=h.pnk[0];                      // the arm that carries it now
@@ -2675,6 +2675,21 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
                 const V3 fb=Norm(Sub(Pos(h.bind[bk]),Pos(h.bind[bl]))),ob=Sub(Pos(h.bind[sa]),Pos(h.bind[bl]));
                 const V3 off=Sub(ob,Scale(fb,Dot(ob,fb)));
                 side=Len(off)>.05f*Len(Sub(Pos(h.bind[bk]),Pos(h.bind[bl])))&&Dot(off,RotOnly(back,h.bind[bk]))<0?-1:1;
+            }
+            // The wrist's bend stop, before the shield takes the hand's turn (StopShieldWrist on the left
+            // arm): the back of the right hand, from its knuckles - the mirror image of the left one's, so
+            // the cross product the other way round - eased into where the hand lies straight on the forearm.
+            if(const int km=h.mid[0];km>=0) {
+                const V3 back=RotOnly(Cross(Sub(Pos(h.bind[km]),Pos(h.bind[k])),Sub(Pos(h.bind[ki]),Pos(h.bind[kp]))),InvAffine(h.bind[k]));
+                const Mat rigid=Mul(Mul(h.bind[k],InvAffine(h.bind[l])),newW[l]);
+                const V3 now=Norm(RotOnly(back,newW[k])),stop=Norm(RotOnly(back,rigid)),f=Norm(Sub(Pos(newW[k]),Pos(newW[l])));
+                bow::Vec letGo;
+                seatTrace.heldBack=shield::WristStop(bv(now),bv(stop),bv(f),letGo);
+                if(seatTrace.heldBack>0) {
+                    const auto before=newW;
+                    TurnAboutSelf(newW[k],RotBetween(now,V3{letGo.x,letGo.y,letGo.z}));
+                    std::vector<char> fromK(n,0);fromK[k]=1;Propagate(h,before,newW,fromK,k);   // fingers, the main weapon's bone
+                }
             }
             const float handed=shield::Handed(bv(Pos(h.bind[bl])),bv(Pos(h.bind[bk])),bv(Pos(h.bind[bi])),bv(Pos(h.bind[bp])),bv(Pos(h.bind[bm])),side);
             const shield::Frame bindFrame=shield::ArmFrame(bv(Pos(h.bind[bl])),bv(Pos(h.bind[bk])),bv(Pos(h.bind[bi])),bv(Pos(h.bind[bp])),handed);

@@ -291,6 +291,33 @@ int main() {
         bow::Mat plain;Check(shield::Place(attach,bindFrame,wristL,1,bindFrame,wristL,1,plain),"right-handed placement is untouched");
         for(int i=0;i<16;++i)Check(Near(plain.m[i],attach.m[i]),"Place with the bind frame is the bind pose, as before");
     }
+    {   // the right arm's shield: the wrist's bend stop is the left arm's, mirrored (shield::WristStop)
+        using namespace skel;using bow::Vec;
+        const Vec forearm{0,0,-1};   // elbow -> wrist
+        const auto bent=[&](float degrees,float side){   // the back of the hand, `degrees` off the forearm, leaning to one side
+            const float a=degrees/57.2958f;return bow::Normalized(Vec{side*.2f*std::sin(a),std::sin(a),-std::cos(a)});
+        };
+        const Vec rigid=bent(90,0);   // the hand straight on the forearm: its back square to it
+        Vec given;
+        Check(shield::WristStop(bent(40,0),rigid,forearm,given)==0&&Near(given,bent(40,0)),"bending toward the palm is free");
+        Check(shield::WristStop(bent(74,0),rigid,forearm,given)==0,"and so is everything short of the easing (15 degrees before the stop)");
+        float last=0;
+        for(float asked=76;asked<=170;asked+=2) {
+            const float held=shield::WristStop(bent(asked,0),rigid,forearm,given);
+            const float got=std::acos(std::clamp(bow::Dot(given,forearm),-1.f,1.f))*57.2958f;
+            Check(held>0&&Near(got+held,asked,.02f)&&got<90&&got>=last-1e-3f,"bending back eases toward the stop, never reaches it and never goes back");
+            last=got;
+        }
+        Check(last>89,"a hand bent far back sits just short of straight on the forearm");
+        // the left arm's stop seen in the mirror is the right arm's: the same bend held, the mirror image let go
+        for(const float asked:{60.f,80.f,95.f,140.f})for(const float side:{-1.f,0.f,1.f}) {
+            Vec left,right;const Vec back=bent(asked,side);
+            const float heldLeft=shield::WristStop(back,rigid,forearm,left);
+            const float heldRight=shield::WristStop(Mirror(back),Mirror(rigid),Mirror(forearm),right);
+            Check(Near(heldLeft,heldRight)&&Near(right,Mirror(left)),"the right wrist's stop is the left one's mirror image");
+        }
+        Check(shield::WristStop({0,0,-1},rigid,forearm,given)==0&&shield::WristStop({NAN,0,0},rigid,forearm,given)==0,"along the forearm or not a direction: nothing held");
+    }
     {   // OFF, the body's pose code (skeletons.cpp) is what it was: its left-handed terms are factors of
         // exactly 1 and indices of exactly the old hands. A product by 1.0f is the same bits for every float.
         using namespace skel;
@@ -490,5 +517,5 @@ int main() {
         }
     }
     std::puts("Hand roles: map, every weapon kind mirrored and no fallback, role stability, interface pins, dominant hand, mirrored throws / melee / toss, role slots, lanes, "
-              "mirrored grip and shield placement, the two-handed mirror world passed");
+              "mirrored grip and shield placement, the right wrist's stop, the two-handed mirror world passed");
 }
