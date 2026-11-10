@@ -30,7 +30,8 @@ inline const char* HelpText(int id) {
     switch(id) {
         case Motion:return "Enables tracked weapon swings, bow drawing, throwing and belt interactions. Keep this On to use physical combat. A selected trigger skill does not replace your free weapon swings.";
         case Seated:return "Raises the potion belt for easier reach while seated. Turn this Off to place the belt using Belt drop below eyes. Body calibration still uses your standing measurements.";
-        case Dominant:return "Which hand's grip swaps your weapon set when you reach over either shoulder. This does not swap the game's weapon and shield hands.";
+        case Dominant:return "Which hand's grip swaps your weapon set when you reach over either shoulder. This does not swap the game's weapon and shield hands: Left-handed, below, does, and turns this to Left with it.";
+        case LeftHanded:return "Experimental. On: main weapon in your left hand, shield or second weapon on your right. Triggers, grips, A / B with X / Y and the sticks swap (right stick walks), each hand's saved skills, glyphs and vibration follow, and Dominant hand acts as Left. A bow, crossbow, staff, spear, polearm or two-handed weapon still plays right-handed. The menu laser, the wrist HUD, the leather menu and class motions stay as they are. Held items may look turned.";
         case SmoothTurn:return "On turns continuously with the right stick at Smooth turn speed. Off turns in steps using Snap turn angle. Choose whichever feels more comfortable.";
         case Snap:return "How far each right-stick flick turns you when Smooth turning is Off. Smaller angles give finer steps. Release the stick between snap turns.";
         case TurnSpeed:return "How quickly the right stick rotates your view when Smooth turning is On, in degrees per second. Lower values turn more slowly. This does not affect snap turns.";

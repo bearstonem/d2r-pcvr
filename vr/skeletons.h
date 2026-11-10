@@ -108,6 +108,12 @@ struct Input {
     bool attacking = false;     // a skill button is down: no grip is taken from the animation then
     float weaponAdj[6] = {};
     bool leftShield=false;
+    // Left-handed play (steamvr/hand_role.h, #307), mode 2 and a mirrored weapon kind only: the item on
+    // R_weapon_attach (the main weapon) is held by the LEFT hand, the item on L_weapon_attach (a second
+    // weapon) and the shield by the RIGHT arm. The arms themselves stay on their own controllers.
+    bool leftHanded=false;
+    int leftHandedTurnAxis=0;     // [hands] left_handed_turn_axis: 0 the flat's axis (hand_swap_pose.h), 1..3 the bone's x y z
+    int leftHandedShieldTurn=0;   // [hands] left_handed_shield_turn: 0 along the arm, 1 out, 2 up (shield_pose.h PlaceAcross)
     char shrinkBone[48] = {};   // [debug] shrink_bone: the hero's bone of this name drawn shrunk to a point - what hangs on it vanishes    // mode 2: the weapon in the hand moved x y z (cm) and turned pitch yaw roll (deg), its own axes
 #endif
 };

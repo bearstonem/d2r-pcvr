@@ -1,5 +1,6 @@
 #include "haptic_pulse.h"
 #include "haptic_actions.h"
+#include "hand_role.h"
 #include "xinput_rumble.h"
 #include <cstdio>
 #include <cstdlib>
@@ -73,6 +74,13 @@ void Routing() {
     preview(Category::BowRelease,0);pulses.Cancel();runtime.Verify(4,4);
     preview(Category::BowRelease,1);pulses.Cancel();runtime.Verify(5,4);
     preview(Category::Alert,0);pulses.Cancel();runtime.Verify(5,5);pulses.Stop();
+    {   // Left-handed play (hand_role.h): MotionPulse takes a ROLE and sends to the controller playing it.
+        using framevr::handrole::Map;
+        Check(Runtime::names[actions.Info(Map{}.Physical(0)).action]=="feedback_right"&&Runtime::names[actions.Info(Map{}.Physical(1)).action]=="feedback_left",
+            "right-handed: the main hand's pulse is the right controller's, the off hand's the left's, as before");
+        Check(Runtime::names[actions.Info(Map{true}.Physical(0)).action]=="feedback_left"&&Runtime::names[actions.Info(Map{true}.Physical(1)).action]=="feedback_right",
+            "left-handed: the weapon's pulse buzzes the LEFT controller, the shield's the right");
+    }
     const auto previous=actions.Info(0).action;
     actions.Reset();Check(!actions.Info(0).action&&!actions.Info(1).action&&!actions.Info(-1).action&&!actions.Info(2).action,"shutdown and invalid hands have no output");
     Check(actions.Create(XR_NULL_HANDLE,Runtime::Create)==XR_SUCCESS&&actions.Info(0).action!=previous,"new session replaces old haptic handles");

@@ -521,7 +521,10 @@ struct Input {
     vitals::Location navigationLocation=vitals::Location::Wrist;
     vitals::Location vitalsLocation=vitals::Location::Wrist;
     float vitalsTilt=0;
-    bool criticalAlerts=false,leftCasting=false;
+    bool criticalAlerts=false,leftCasting=false;   // leftCasting, leftTrigger: the wrist HUD's hand (wristHand)
+    // The hand that wears the wrist HUD and map: the left (1). Left-handed, the left hand is the main
+    // hand (0) and the HUD stays on it until the interface is mirrored (hand_role.h).
+    int wristHand=1;
     bool floorKnown=false; float floor=0; // room-space height of the world ground under the player
     Stage stage{};
     Pose head{},hand[2]{};
@@ -598,7 +601,7 @@ inline bool MenuMapWanted(const Input& in,const Output& out,uint64_t now) {
 }
 inline bool NavigationWanted(const Input& in,const Output& out,uint64_t now) {
     return in.active&&in.navigationLocation!=vitals::Location::Off&&out.navigation&&!out.wheel&&!out.settings&&
-        in.tracked[1]&&Fresh(in.snapshot,in.session,now);
+        in.tracked[in.wristHand==0?0:1]&&Fresh(in.snapshot,in.session,now);
 }
 inline bool MapWanted(const Input& in,const Output& out,uint64_t now) {
     return MenuMapWanted(in,out,now)||NavigationWanted(in,out,now);
@@ -774,12 +777,13 @@ public:
         // Passive vitals need the left hand and head only. Combat/interactions
         // still require both hands; a resting/occluded right hand must not hide
         // a correctly presented watch or permit an input through the guard.
-        out.wrist=in.active&&in.session&&in.tracked[1]&&std::isfinite(in.time)&&WristPresented(in.hand[1],in.head);
-        const bool palmAllowed=in.active&&in.tracked[1]&&(vitals::Palm(in.vitalsLocation)||vitals::Palm(in.navigationLocation))&&
-            !in.wheel&&!in.cancel&&!in.leftCasting&&in.leftTrigger<.2f&&in.grip[1]<.6f&&
-            !in.reservedLeft&&bottleHand!=1&&holsterHand!=1&&Fresh(in.snapshot,in.session,in.at);
+        const int wristHand=in.wristHand==0?0:1;
+        out.wrist=in.active&&in.session&&in.tracked[wristHand]&&std::isfinite(in.time)&&WristPresented(in.hand[wristHand],in.head);
+        const bool palmAllowed=in.active&&in.tracked[wristHand]&&(vitals::Palm(in.vitalsLocation)||vitals::Palm(in.navigationLocation))&&
+            !in.wheel&&!in.cancel&&!in.leftCasting&&in.leftTrigger<.2f&&in.grip[wristHand]<.6f&&
+            !in.reservedLeft&&bottleHand!=wristHand&&holsterHand!=wristHand&&Fresh(in.snapshot,in.session,in.at);
         const bool palm=palmReveal.Step(in.session,in.epoch,in.time,palmAllowed,
-            PalmPresented(in.hand[1],in.head),PalmPresented(in.hand[1],in.head,true));
+            PalmPresented(in.hand[wristHand],in.head),PalmPresented(in.hand[wristHand],in.head,true));
         out.palm=palm&&vitals::Palm(in.vitalsLocation);
         out.vitals=out.palm||(out.wrist&&vitals::Wrist(in.vitalsLocation));
         out.navigationPalm=palm&&vitals::Palm(in.navigationLocation);

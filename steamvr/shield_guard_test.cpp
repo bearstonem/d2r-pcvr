@@ -10,6 +10,7 @@
 
 using namespace framevr::guard;
 using framevr::math::Vec;
+static void Check(bool ok,const char* why){if(!ok){std::fprintf(stderr,"FAIL: %s\n",why);std::abort();}}
 
 // Default fixture: shield faces ahead (-Z). The production path has no view
 // argument: these helpers rotate both the held shield and hand for old gestures.
@@ -395,5 +396,30 @@ int main() {
         Pose high=p;high.center.x=0;high.center.y=high.eye.y+.15f+.13f+.04f;high.coverScale=CoverScale(true);
         assert(PositionRejection(high,true,false,t)==Rejection::TooHigh);
     }
-    std::puts("Shield guard: rendered bounds, coverage, calibration, movement, parries, debug placement and expiry passed");
+    {   // Left-handed play (hand_role.h): the shield is on the RIGHT arm, and the guard is told so
+        // (leftShield false). Every hand position mirrored (x -> -x) must judge exactly as the left
+        // shield does: raised, lowered, out of reach, and the parry's diagonal swing, now lower left
+        // to upper right.
+        const Tuning t;
+        const auto mirror=[](Vec v){return Vec{-v.x,v.y,v.z};};
+        const Vec chest{-.12f,-.35f,-.25f},hanging{-.25f,-.75f,-.05f},wide{-.80f,-.30f,-.20f},low{-.10f,-.66f,-.35f},tucked{.05f,-.30f,-.14f};
+        for(const Vec p:{chest,hanging,wide,low,tucked}) {
+            State l,r;uint64_t nl=9000,nr=9000;
+            Hold(l,p,true,nl,40,t);Hold(r,mirror(p),false,nr,40,t);
+            Check(l.raised==r.raised&&l.rejection==r.rejection,"the same guard on the other arm");
+            float fl,ul,sl,fr,ur,sr;Axes(p,true,fl,ul,sl);Axes(mirror(p),false,fr,ur,sr);
+            Check(fl==fr&&ul==ur&&sl==sr,"forward, up and toward the shield's own side read the same");
+            assert(Judge(l,ahead,nl,t)==Judge(r,ahead,nr,t));
+        }
+        // the parry swing: low on the far side up to high on the shield's own side
+        State l,r;uint64_t nl=12000,nr=12000;const Vec from{.18f,-.48f,-.30f},to{-.20f,-.06f,-.32f};
+        Hold(l,from,true,nl,200,t);Hold(r,mirror(from),false,nr,200,t);
+        Move(l,from,to,true,nl,90,t);Move(r,mirror(from),mirror(to),false,nr,90,t);
+        Check(l.snapAt!=0&&(l.snapAt!=0)==(r.snapAt!=0)&&std::fabs(l.swing-r.swing)<1e-5f&&std::fabs(l.swingCos-r.swingCos)<1e-5f,
+            "the right shield's swing, lower left to upper right, arms the parry as the left shield's does");
+        assert(Judge(l,ahead,nl,t)==Judge(r,ahead,nr,t));
+        State wrongWay;uint64_t nw=15000;Hold(wrongWay,from,false,nw,200,t);Move(wrongWay,from,to,false,nw,90,t);
+        Check(wrongWay.snapAt==0,"told it is a right shield, the left shield's diagonal is not its parry");
+    }
+    std::puts("Shield guard: rendered bounds, coverage, calibration, movement, parries, debug placement, expiry and the right-arm shield passed");
 }

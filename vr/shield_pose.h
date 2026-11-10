@@ -162,6 +162,30 @@ inline bool Place(const bow::Mat& bindAttach,const Frame& bind,bow::Vec bindWris
     if(size<.3f||size>3.f)return false;
     result=bow::Multiply(local,Matrix(now,wrist,scale));return bow::Affine(result);
 }
+// Left-handed play (steamvr/hand_role.h, #307): the shield's attach bone carried from the arm it is
+// authored on (the left) to the other one. `now` is the other arm's frame built the same anatomical
+// way - along elbow to wrist, up toward the thumb, out on the shield's side - which makes it the bind
+// frame's MIRROR image (ArmFrame with the opposite handed sign). An item drawn from a mirrored attach
+// matrix is inside out and culled (skeletons.cpp, bothAttach), so the shield is put where the mirror
+// puts its attach point and TURNED there, never mirrored: one of its arm axes is turned over.
+//   turn 0 (along, the default): the face stays outward and the top toward the thumb; what lay toward
+//          the elbow lies toward the hand;
+//   turn 2 (up): the face stays outward, the shield is upside down;
+//   turn 1 (out): the face turns inward - for comparing only.
+// The result keeps the bind attach's own handedness and size.
+inline Frame TurnedOver(Frame f,int turn) {
+    if(turn==1)f.out=f.out*-1;else if(turn==2)f.up=f.up*-1;else f.along=f.along*-1;
+    return f;
+}
+inline bool PlaceAcross(const bow::Mat& bindAttach,const Frame& bind,bow::Vec bindWrist,float bindScale,
+                        const Frame& now,bow::Vec wrist,float scale,int turn,bow::Mat& result) {
+    bow::Mat mirrored;
+    // The attach point: where the mirror image has it (the mirrored frame, as it is).
+    if(!Place(bindAttach,bind,bindWrist,bindScale,now,wrist,scale,mirrored))return false;
+    // Its axes: the same placement in the frame with one axis turned over, a rigid turn of the bind pose.
+    if(!Place(bindAttach,bind,bindWrist,bindScale,TurnedOver(now,turn),wrist,scale,result))return false;
+    bow::Position(result,bow::Position(mirrored));return bow::Affine(result);
+}
 // Grip toward the elbow (+) or the hand (-), Out and Up, cm, clamped to the settings' ranges;
 // anything not finite is 0.
 inline bow::Vec Offset(bow::Vec along,bow::Vec out,bow::Vec up,float gripCm,float outCm,float upCm,float unitsPerMetre) {

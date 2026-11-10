@@ -416,6 +416,21 @@ int main(){
         Check(saved.values[TCrossCalibrate]==enabled&&Int(path,L"interactions",L"t_cross_calibrate")==enabled&&
               Changed(saved.values,current.values)==(ChangeMask{1}<<TCrossCalibrate)&&Int(path,L"custom",L"keep")==12345,"the T cross switch survives reload and touches nothing else");
     }
+    // Left-handed (#307): Off when missing (every existing profile), saved as [interactions] left_handed; the
+    // profile's own Dominant hand is neither read for it nor written by it.
+    Check(vrsettings::Read().values[LeftHanded]==0&&Int(path,L"interactions",L"left_handed")==-999,"a profile without left_handed reads Off: right-handed as before");
+    {
+        const int dominantBefore=Int(path,L"interactions",L"dominant_hand");
+        for(int enabled:{1,0}) {
+            const auto current=vrsettings::Read();
+            model.Open(current);model.Click({Kind::Change,LeftHanded,enabled?1:-1});request=model.Click({Kind::Apply});
+            Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"save Left-handed");
+            const auto saved=vrsettings::Read();
+            Check(saved.values[LeftHanded]==enabled&&Int(path,L"interactions",L"left_handed")==enabled&&
+                  Changed(saved.values,current.values)==(ChangeMask{1}<<LeftHanded)&&Int(path,L"custom",L"keep")==12345&&
+                  Int(path,L"interactions",L"dominant_hand")==dominantBefore,"Left-handed survives reload and touches nothing else, the saved Dominant hand included");
+        }
+    }
     // Richer haptics: both On when missing (the default), saved as [haptics] hit_patterns and heartbeat, touching nothing else.
     for(const auto& [key,name2]:{std::pair<Key,const wchar_t*>{HapticSurfaces,L"hit_patterns"},{HapticHeartbeat,L"heartbeat"}}) {
         Check(vrsettings::Read().values[key]==1&&Int(path,L"haptics",name2)==-999,"a profile without the haptic feel key reads On");

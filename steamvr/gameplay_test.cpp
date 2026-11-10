@@ -1,4 +1,6 @@
 #include "gameplay.h"
+#include "hand_role.h"
+#include <vector>
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
@@ -405,5 +407,52 @@ int main() {
             Check(PaletteCell((col+.5f)/4,.125f+(row+.5f)*.1875f)==row*4+col,"palette hit regions match atlas");
         Check(PaletteCell(1,.5f)==-1&&PaletteCell(.5f,.95f)==-1,"palette margins never select");
     }
-    std::puts("Motion gameplay: gesture, cancellation, input ownership and palette tests passed");
+    {   // Left-handed play (hand_role.h): the engine takes the hands by ROLE. The role layer in front of it
+        // changes nothing right-handed (the setting off), and left-handed it hands the same engine the
+        // other controller for each role: a bow drawn, a javelin thrown and a melee swing, step by step.
+        struct Frame {Pose hand[2];float trigger[2]{},grip[2]{};};   // by PHYSICAL controller, 0 right
+        const auto feed=[](const handrole::Map& map,const Frame& f,Input& in) {
+            for(int role=0;role<2;++role){in.hand[role]=f.hand[map.Physical(role)];in.grip[role]=f.grip[map.Physical(role)];}
+            in.trigger=f.trigger[map.Physical(0)];in.leftTrigger=f.trigger[map.Physical(1)];in.aim=in.hand[0];
+        };
+        const auto same=[](const Output& a,const Output& b) {
+            const auto eq=[](Vec x,Vec y){return x.x==y.x&&x.y==y.y&&x.z==y.z;};
+            return a.attack==b.attack&&a.block==b.block&&a.bowDrawing==b.bowDrawing&&a.bowReady==b.bowReady&&a.bowInReach==b.bowInReach&&
+                a.bowCharged==b.bowCharged&&a.bowPhysical==b.bowPhysical&&a.meleeContact==b.meleeContact&&a.bowRelease==b.bowRelease&&
+                a.javelinRelease==b.javelinRelease&&a.javelinReady==b.javelinReady&&a.shieldContact==b.shieldContact&&a.skill==b.skill&&
+                a.feedback==b.feedback&&a.leftFeedback==b.leftFeedback&&a.leftRelease==b.leftRelease&&a.draw==b.draw&&a.leftDraw==b.leftDraw&&
+                eq(a.rayOrigin,b.rayOrigin)&&eq(a.rayDirection,b.rayDirection)&&eq(a.nockPoint,b.nockPoint)&&eq(a.bowForward,b.bowForward)&&
+                eq(a.releaseDirection,b.releaseDirection)&&eq(a.leftOrigin,b.leftOrigin)&&eq(a.leftDirection,b.leftDirection);
+        };
+        for(const Weapon weapon:{Weapon::Bow,Weapon::Javelin,Weapon::Melee}) {
+            // the script, by physical controller: the right hand acts, the left holds
+            std::vector<Frame> script;Frame f;
+            f.hand[0].p=weapon==Weapon::Bow?Vec{0,1.3f,-.4f}:Vec{.25f,1.25f,-.2f};f.hand[1].p=weapon==Weapon::Bow?Vec{0,1.3f,-.5f}:Vec{-.25f,1.25f,-.4f};
+            for(int i=0;i<3;++i)script.push_back(f);
+            f.trigger[0]=1;script.push_back(f);
+            for(int i=0;i<10;++i){f.hand[0].p.z+=weapon==Weapon::Bow?.04f:-.05f;script.push_back(f);}
+            for(int i=0;i<20&&weapon==Weapon::Bow;++i)script.push_back(f);
+            f.trigger[0]=0;if(weapon!=Weapon::Bow)f.hand[0].p.z-=.05f;script.push_back(f);script.push_back(f);
+            f.trigger[1]=1;for(int i=0;i<6;++i){f.hand[1].p.z-=.05f;script.push_back(f);}
+            f.trigger[1]=0;f.hand[1].p.z-=.05f;script.push_back(f);
+            // (a) as the transport fed the engine before there were roles: right = 0, left = 1
+            // (b) through the role layer, right-handed  (c) left-handed, the two controllers exchanged
+            Engine engines[3];Input in[3];bool acted=false;
+            for(auto& i:in){i.active=true;i.tracked[0]=i.tracked[1]=i.aimTracked=true;i.head.p={0,1.65f,0};i.weapon=weapon;i.equipment=1;i.leftThrow=weapon==Weapon::Javelin;}
+            for(const auto& frame:script) {
+                Frame exchanged;for(int h=0;h<2;++h){exchanged.hand[1-h]=frame.hand[h];exchanged.trigger[1-h]=frame.trigger[h];exchanged.grip[1-h]=frame.grip[h];}
+                for(auto& i:in)i.time+=.02;
+                in[0].hand[0]=frame.hand[0];in[0].hand[1]=frame.hand[1];in[0].grip[0]=frame.grip[0];in[0].grip[1]=frame.grip[1];
+                in[0].trigger=frame.trigger[0];in[0].leftTrigger=frame.trigger[1];in[0].aim=in[0].hand[0];
+                feed(handrole::Map{},frame,in[1]);
+                feed(handrole::Map{true},exchanged,in[2]);
+                const Output before=engines[0].Step(in[0]),off=engines[1].Step(in[1]),left=engines[2].Step(in[2]);
+                Check(same(before,off),"the role layer right-handed (Left-handed off) is exactly the engine as it was");
+                Check(same(before,left),"left-handed, the left controller does everything the right one did, and the right the left's");
+                acted=acted||before.bowRelease||before.javelinRelease||before.leftRelease||before.meleeContact;
+            }
+            Check(acted,"the script really draws, throws or swings");
+        }
+    }
+    std::puts("Motion gameplay: gesture, cancellation, input ownership, palette and left-handed role tests passed");
 }

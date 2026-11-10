@@ -47,6 +47,40 @@ and the [OpenXR controller profiles](https://registry.khronos.org/OpenXR/specs/1
 The saved override is `[interactions] controller_labels`: 0 Automatic, 1 Quest /
 Touch, 2 Index, 3 Frame, 4 Generic. Missing or invalid values use Automatic.
 
+## Left-handed play (experimental)
+
+**VR Settings > Controls > Hands > Left-handed (experimental)** (Off by default; `[interactions] left_handed`)
+mirrors the hands. It is being built in parts, so it has its own switch: **Dominant hand** keeps meaning only
+the hand that swaps weapon sets, and turning Left-handed on makes that the left hand too.
+
+With it On, read every "right" in the tables below as your **left** controller and every "left" as your right:
+
+| What | Left-handed |
+| --- | --- |
+| Main weapon | In your left hand; the left trigger attacks and holds the main trigger skill |
+| Shield or second weapon | On your right arm: guard, parry, Smite and the second weapon's swings and throws |
+| Face buttons | The left controller's two buttons act as A and B, the right controller's as X and Y |
+| Grips | Each hand's grip layer follows the hand |
+| Sticks | Right stick walks, left stick turns (its up / down still zooms the map and shows loot names) |
+| Saved skills and glyphs | Follow the hand's role: what was on the right hand is on the left |
+| Vibration | Goes to the hand that acted |
+| Menu button | Where the controller has it |
+| Weapon swap, monster outline's first hand, loot pick's pointing hand | The left hand |
+
+Not mirrored yet, so they play exactly as right-handed:
+
+- **A bow, crossbow, staff, spear, polearm or a weapon held in both hands.** While one is equipped the whole
+  mode is right-handed again, sticks and buttons included, and returns to left-handed when you put it away.
+  The log says so (`Frame left-handed: ...`).
+- **The interface:** the menus' and VR Settings' laser stays on the right controller (its trigger clicks, its grip
+  grabs; A / B and the sticks are swapped there as everywhere), the wrist HUD and map on the left wrist, the
+  leather menu and the quest log in the left hand.
+- **Class motions** take the hands as they are.
+- Third person and other players see a right-handed hero.
+
+A weapon or shield is turned around in the other hand rather than mirrored, so a one-sided blade or a painted
+shield can look different. The shield's wrist bend stop is not on the right arm yet.
+
 ## Gameplay
 
 With **Motion combat** enabled, each hand has its own saved five-button layout.

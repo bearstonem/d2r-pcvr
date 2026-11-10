@@ -240,7 +240,7 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
             std::snprintf(label,sizeof label,"%s",!set?"No skill":have?skill.name:skill.id==359?"Town Portal":"Another hero's");
             SetTextColor(dc,have&&!follows?RGB(235,218,181):RGB(148,137,117));
             auto previous=SelectObject(dc,skillFont);
-            if(follows){SelectObject(dc,shortcutFont);text("RIGHT HAND'S",{x-63,y+14,x+63,y+30});SelectObject(dc,skillFont);}
+            if(follows){SelectObject(dc,shortcutFont);text(labels.Physical(0)?"LEFT HAND'S":"RIGHT HAND'S",{x-63,y+14,x+63,y+30});SelectObject(dc,skillFont);}
             text(label,follows?RECT{x-63,y+30,x+63,y+68}:RECT{x-63,y+14,x+63,y+52});
             char name[32];std::snprintf(name,sizeof name,"%s",glyphs::Name(shape));
             for(char* c=name;*c;++c)*c=char(std::toupper(static_cast<unsigned char>(*c)));
@@ -392,7 +392,7 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
         frame({20,28,748,681});
         char title[120];std::snprintf(title,sizeof title,"CHOOSE SKILL  /  %s",handWheel?labels.Slot(o.editSlot).c_str():skills::NativeLabel(o.editSlot));
         if(o.glyphEdit>=0) {
-            std::snprintf(title,sizeof title,"CHOOSE SKILL  /  %s HAND  /  %s GLYPH",o.glyphHand?"LEFT":"RIGHT",glyphs::Name(glyphs::Shape(o.glyphEdit)));
+            std::snprintf(title,sizeof title,"CHOOSE SKILL  /  %s HAND  /  %s GLYPH",labels.Physical(o.glyphHand?1:0)?"LEFT":"RIGHT",glyphs::Name(glyphs::Shape(o.glyphEdit)));
             for(char* c=title;*c;++c)*c=char(std::toupper(static_cast<unsigned char>(*c)));
         }
         text(title,{38,47,730,88});
@@ -506,11 +506,11 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
         }
         SetTextColor(dc,RGB(235,218,181));SelectObject(dc,font);
     } else if(o.glyphs&&!o.utility) {
-        text(o.glyphHand?"LEFT HAND":"RIGHT HAND",{290,300,478,334});   // the set shown
+        text(labels.Physical(o.glyphHand?1:0)?"LEFT HAND":"RIGHT HAND",{290,300,478,334});   // the set shown
         SelectObject(dc,shortcutFont);text("GLYPHS",{290,332,478,350});SelectObject(dc,font);
         text("CLOSE",{301,356,467,398});
     } else if(handWheel&&!o.utility) {
-        text(o.wheelHand?"LEFT HAND":"RIGHT HAND",{290,305,478,345});
+        text(labels.Physical(o.wheelHand?1:0)?"LEFT HAND":"RIGHT HAND",{290,305,478,345});
         text("CLOSE",{301,356,467,398});
     } else if(o.editor) {
         text(s.bindingsEditable?"CHOOSE\nA SLOT":"SKILLS\nUNAVAILABLE",{301,301,467,397});
@@ -536,7 +536,7 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
             const auto l=LeftStrikesBounds;
             RECT claw{LONG(l.left*768),LONG(l.top*768),LONG(l.right*768),LONG(l.bottom*768)};
             frame(claw,o.hover==LeftStrikesCell);
-            SelectObject(dc,shortcutFont);text("LEFT HAND STRIKES",{claw.left+6,claw.top+5,claw.right-6,claw.top+22});
+            SelectObject(dc,shortcutFont);text(labels.Physical(1)?"LEFT HAND STRIKES":"RIGHT HAND STRIKES",{claw.left+6,claw.top+5,claw.right-6,claw.top+22});
             SelectObject(dc,skillFont);text(o.leftStrikes==1?"Right trigger skill":"Own trigger skill",{claw.left+6,claw.top+23,claw.right-6,claw.bottom-22});
             SelectObject(dc,shortcutFont);text("Click to toggle",{claw.left+6,claw.bottom-22,claw.right-6,claw.bottom-5});SelectObject(dc,font);
         }
@@ -573,7 +573,7 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
         RECT box{LONG(h.left*768),LONG(h.top*768),LONG(h.right*768),LONG(h.bottom*768)};
         frame(box,o.hover==GlyphHandCell);
         SelectObject(dc,shortcutFont);text("SHAPES OF THE",{box.left+6,box.top+6,box.right-6,box.top+24});
-        SelectObject(dc,skillFont);text(o.glyphHand?"Left hand":"Right hand",{box.left+8,box.top+26,box.right-8,box.top+50});
+        SelectObject(dc,skillFont);text(labels.Physical(o.glyphHand?1:0)?"Left hand":"Right hand",{box.left+8,box.top+26,box.right-8,box.top+50});
         const int draw=o.glyphDraw[size_t(o.glyphHand)];
         SelectObject(dc,shortcutFont);
         text(draw>=0?("Draw: "+labels.Slot(draw)).c_str():"No Draw glyph button",{box.left+6,box.bottom-46,box.right-6,box.bottom-26});

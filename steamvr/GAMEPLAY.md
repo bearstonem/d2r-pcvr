@@ -602,7 +602,7 @@ sets the page's rows back to their defaults, with **Undo reset** for 6 seconds.
 | Gameplay > Physics | Rolling bottles, knockable props, pushable bodies, and monsters' and townsfolk's heads turning to you |
 | Comfort > Moving | Smooth turning with its snap angle or turn speed, and movement speed |
 | Comfort > Body | Seated play, **Height and arm span** (**Calibrate body**, **Set eye height**) with the **T cross to calibrate** switch under it (standing only), and the belt's height and reach |
-| Controls > Hands | Dominant hand, **Stick toggle** and button names |
+| Controls > Hands | Dominant hand, **Left-handed (experimental)**, **Stick toggle** and button names |
 | Controls > Vibration | Overall vibration and separate melee, short melee taps, bow draw, bow/throw release, spell, loot/potion/menu and alert strengths; **Feel it** on a row's card |
 | Interface > Wrist | Life and mana location and tilt, skill cooldowns between the orbs, map and compass location, map view (Isometric, Top-down, Full map or Full top-down), turning the map with you, buffs and companions |
 | Interface > Menus | Menu distance with **Hold menu** beside it (Leather by default: the tabbed menu on a hide in your left hand; Menu only: no hide; Off) and item details delay |

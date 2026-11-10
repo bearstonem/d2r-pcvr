@@ -957,6 +957,21 @@ int main(int argc,char** argv){
             Check(t.Get()[TCrossCalibrate]==0&&t.Click({Kind::Apply}).changed==(ChangeMask{1}<<TCrossCalibrate),"the switch turns it Off, and Apply saves only it");
         }
     }
+    {   // Left-handed (#307, hand_role.h): Off by default, experimental, a row of its own under Dominant hand, saved alone
+        Check(Defaults()[LeftHanded]==0&&std::wstring(Definitions[LeftHanded].section)==L"interactions"&&
+              std::wstring(Definitions[LeftHanded].key)==L"left_handed"&&Definitions[LeftHanded].min==0&&Definitions[LeftHanded].max==1&&
+              HelpText(LeftHanded)[0]!=0&&LeftHanded<ChangeMask::Bits&&LeftHanded==Count-1,
+              "Left-handed: Off by default, [interactions] left_handed Off / On, explained, its own change bit, appended last");
+        const auto* row=content::RowOf(LeftHanded);
+        Check(row&&!row->beside&&row->page==View::Hands&&row->kind==content::RowKind::Toggle&&std::strcmp(row->label,"Left-handed (experimental)")==0&&
+              row->section==content::RowOf(Dominant)->section&&row->classes==content::AllClasses,"a switch of its own on Controls > Hands, every class");
+        Check(std::wstring(Definitions[Dominant].key)==L"dominant_hand"&&Defaults()[Dominant]==0,"Dominant hand keeps its key and default: its saved Left still means the swap hand only");
+        Check(std::string(HelpText(LeftHanded)).find("right-handed")!=std::string::npos&&std::string(row->help).find("right-handed")!=std::string::npos,
+              "both helps say which weapons still play right-handed");
+        for(int c=-1;c<=heroclass::Assassin+1;++c)Check(RowShown(LeftHanded,Defaults(),{c}),"every class, and the title screen, see it");
+        Model t;Snapshot ready;ready.ready=true;ready.values[Dominant]=0;t.Open(ready);layout::Press(t,{Kind::Set,LeftHanded,0,1},0);
+        Check(t.Get()[LeftHanded]==1&&t.Get()[Dominant]==0&&t.Click({Kind::Apply}).changed==(ChangeMask{1}<<LeftHanded),"the switch turns it On, leaves the saved Dominant hand alone, and Apply saves only it");
+    }
     {   // Loot pick (#257): On by default, a switch on Interface, the right half of Loot name size's row, saved alone
         Check(Defaults()[LootPick]==1&&std::wstring(Definitions[LootPick].section)==L"interactions"&&
               std::wstring(Definitions[LootPick].key)==L"loot_pick"&&Definitions[LootPick].max==1&&HelpText(LootPick)[0]!=0&&
