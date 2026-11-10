@@ -143,7 +143,11 @@ public:
         // 65 ms producer pulse can disappear between the game's polls.
         // Allow bank preparation plus two native ticks and XR scheduling.
         // FinishShieldSkill still cancels immediately when Smite executes.
-        const double duration=hold>0?hold:nextId==Smite?.180:.065;
+        // Every alternate-bank (LT) slot needs the same: a bow skill loaded
+        // from slot 7 fired about half its releases at 35 pairs/s on
+        // 2026-11-09 (the LT went down and up again before its button was
+        // ever exposed). Glyph casts already hold LT slots this long.
+        const double duration=hold>0?hold:nextId==Smite||skills::Alternate(nextSlot)?.180:.065;
         slot=nextSlot;id=nextId;owner=nextOwner;context=nextContext;started=now;until=now+duration;return true;
     }
     int Get(int currentSlot,int currentId,int currentOwner,uint64_t currentContext,double now) {
