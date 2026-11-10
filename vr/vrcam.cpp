@@ -137,6 +137,9 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "target_lock.h"
 #include "bow.h"
 #include "loot_beam_scan.h"
+#include "client_combat.h"
+#include "upper_body_wire.h"
+#include "upper_body_skin.h"
 #include "wall_cells.h"
 #include "prop_scan.h"
 #include "crossbow.h"
@@ -8160,6 +8163,7 @@ bool FreshHands(skel::Input* in) {
 
 #ifdef D2RVR_NATIVE_OPENXR
 void BowTick() {
+    clientcombat::Tick(gamestate::LocalPlayer(),GetTickCount64());
     framevr::SetBowWorldEpoch(g_meleeTurnEpoch.load());
     auto gate=framevr::BowGate();
     gate.active=gate.active&&g_enabled.load()&&g_inWorld.load()&&!ThirdPerson()&&!Overhead()&&g_eyeOk.load()&&!gamestate::MenuOpen();
@@ -8321,6 +8325,24 @@ void ShieldGuardTick() {
     const bool handOk=sh&&sh->version==D2RVR_SHARED_VERSION&&sh->headValid&&(sh->handsValid&2u);
     combat::PublishGuard(gamestate::LocalPlayer(),eligible,posed,pose,handOk,true);
 }
+#endif
+
+#ifdef D2RVR_NATIVE_OPENXR
+#include "../steamvr/desktop_mode.h"
+void PublishRemoteBodies(bool on){
+    upperbody::Remote remotes[upperbody::kCapacity];skel::RemoteUpperBody targets[upperbody::kCapacity];
+    const size_t count=on?upperbody::Remotes(remotes,upperbody::kCapacity):0;
+    for(size_t i=0;i<count;++i){
+        const auto&p=remotes[i].pose;auto&t=targets[i];t.unit=remotes[i].unit;
+        memcpy(t.worldPosition,p.worldPosition,sizeof t.worldPosition);t.classId=int(p.classId);
+        memcpy(t.hand,p.hand,sizeof t.hand);memcpy(t.rot,p.rot,sizeof t.rot);
+        t.handsValid=p.tracked;t.userHeadM=p.userHeadM;t.headPitch=p.headPitch;t.headRoll=p.headRoll;
+        t.yawInModel=p.yawInModel;t.worldYaw=p.worldYaw;t.resolved=p.resolved;
+    }
+    skel::SetRemoteUpperBodies(targets,count);
+    if(!on)upperbodyskin::Clear();
+}
+void DesktopTick();
 #endif
 
 void PushArms() {
@@ -8570,6 +8592,28 @@ void PushArms() {
     in.firstPerson = own;
     for (int i = 0; i < 2; ++i) in.formHeight[i] = g_set.formHeight[i].load();
     skel::Set(in);
+#ifdef D2RVR_NATIVE_OPENXR
+    upperbody::Pose pose{};
+    uint32_t unit=0;combat::LocalPlayerId(unit);
+    const int cls=skel::HeroClass();
+    bool tracked=own&&heroPlaced&&sh&&sh->headValid&&in.haveYaw&&cls>=0&&cls<8&&!in.shapeForm;
+    if(tracked){
+        pose.tracked=uint8_t(in.handsValid&3);pose.userHeadM=in.userHeadM;
+        memcpy(pose.hand,in.hand,sizeof pose.hand);memcpy(pose.rot,in.rot,sizeof pose.rot);
+        // Invalid/untracked controller quaternion must not suppress the other hand.
+        for(int h=0;h<2;++h)if(!(pose.tracked&(1u<<h))){memset(pose.hand[h],0,sizeof pose.hand[h]);memset(pose.rot[h],0,sizeof pose.rot[h]);pose.rot[h][3]=1;}
+        pose.headPitch=in.headPitch;pose.headRoll=in.headRoll;pose.yawInModel=in.yawInModel;
+        memcpy(pose.worldPosition,hero,sizeof hero);pose.classId=uint32_t(cls);pose.sampleMs=GetTickCount();
+        if(pose.tracked==3)skel::ReadLocalResolved(&pose.resolved,in.worldEpoch,cls);
+        float model[16];const auto at=g_heroMatrix.load();
+        if(at&&SafeRead(model,reinterpret_cast<void*>(at),sizeof model)){
+            const float x=sinf(in.yawInModel),z=cosf(in.yawInModel);
+            pose.worldYaw=atan2f(x*model[0]+z*model[8],x*model[2]+z*model[10]);
+        }else tracked=false;
+    }
+    upperbody::Tick(on,tracked?&pose:nullptr,unit);
+    PublishRemoteBodies(on);
+#endif
 }
 
 // F10: one second of distinct skeletons into d2r_vr_skeletons.txt (skeletons.cpp).
@@ -11002,6 +11046,12 @@ DWORD WINAPI UpdateThread(void*) {
         }
         const ULONGLONG nowMs = GetTickCount64();
 #ifdef D2RVR_NATIVE_OPENXR
+        if(pcvrdesktop::Enabled()){
+            if(nowMs>=nextState){nextState=nowMs+40;DesktopTick();}
+            continue; // no VR hotkeys, input injection, HUD movement or rendering setup
+        }
+#endif
+#ifdef D2RVR_NATIVE_OPENXR
         framevr::hookmetrics::Scope inputMeasured(framevr::hookmetrics::InputTick,15);
 #endif
         const bool focus = GameFocused();
@@ -11376,6 +11426,44 @@ static bool OtherVrPluginBeside(HMODULE self) {
     return false;
 }
 
+#ifdef D2RVR_NATIVE_OPENXR
+namespace {
+void DesktopTick(){
+    static uint64_t nextRead=0,nextHooks=0;
+    const auto now=GetTickCount64();
+    if(now>=nextRead){nextRead=now+200;gamestate::Tick();}
+    if(now>=nextHooks){
+        nextHooks=now+500;d2rsig::Resolve(g_ctx);
+        // Camera observer stays disabled: it supplies native player position only.
+        if(!g_h.camera)g_h.camera=d2rcam::Install(g_ctx);
+        if(!g_h.skeleton)g_h.skeleton=d2rsig::Hook(RVA_COMPUTE_SELF_WORLD_POSE,kSigComputeSelfWorldPose,sizeof kSigComputeSelfWorldPose,skel::Detour(),skel::OrigSlot());
+        upperbodyskin::Init(g_ctx);
+    }
+    uint32_t unit=0;combat::LocalPlayerId(unit);
+    float pos[3]{};
+    const bool placed=d2rcam::LookAtNow(pos)&&std::isfinite(pos[0]+pos[1]+pos[2]);
+    const bool world=unit&&gamestate::LocalPlayer()&&d2rcam::InWorld()&&placed;
+    g_inWorld.store(world);
+    if(world)skel::SetHeroPos(pos[0],pos[1],pos[2]);
+    upperbody::Tick(world,nullptr,unit);
+    PublishRemoteBodies(world);
+}
+bool StartDesktop(const PluginContext*ctx){
+    Log("PCVR desktop: native camera/input; VR startup skipped; remote VR poses enabled");
+    // Deliberately before LoadSettings/LoadReShade: do not rewrite calibration,
+    // hide the HUD, install controller hooks, or initialize a headset runtime.
+    g_enabled.store(false);g_mouseLookOn.store(false);d2rcam::SetEnabled(false);
+    d2rsig::Resolve(ctx);
+    skel::SetGameBase(g_base);skel::TrackHero(true);skel::Set(skel::Input{});
+    gamestate::Init(ctx);
+    upperbody::Init(ctx,&Log);upperbodyskin::Init(ctx);
+    HANDLE h=CreateThread(nullptr,0,UpdateThread,nullptr,0,&g_updateThreadId);
+    if(!h){Log("PCVR desktop: update thread failed");return false;}
+    CloseHandle(h);return true;
+}
+} // namespace
+#endif
+
 D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
     if (ctx == nullptr) return true;
     g_ctx = ctx;
@@ -11402,6 +11490,7 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
     g_iniPath[n] = 0;
     wcscat_s(g_iniPath, D2RPCVR_SETTINGS_FILE_W);
 #ifdef D2RVR_NATIVE_OPENXR
+    if(pcvrdesktop::Enabled())return StartDesktop(ctx);
     vrsettings::Poll(g_iniPath);
 #endif
     ReloadIfChanged();
@@ -11449,6 +11538,9 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
     companionai::Init(ctx);
     melee::Init(ctx);
     bowvr::Init(ctx);
+    clientcombat::Init(ctx);
+    upperbody::Init(ctx,&Log);
+    upperbodyskin::Init(ctx);
     wallcells::Init(ctx);
     propscan::Init();
     {   // loot beams: [loot] beams (master), rune_min (26 = Vex); the rarities are VR Settings (lootscan)
@@ -11467,6 +11559,9 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
 D2RL_PLUGIN_EXPORT void D2RLoaderUnloadPlugin() noexcept {
     if (g_standDown) return;   // nothing was started
 #ifdef D2RVR_NATIVE_OPENXR
+    upperbody::Shutdown();
+    skel::SetRemoteUpperBodies(nullptr,0);
+    upperbodyskin::Shutdown();
     enemysight::Shutdown();
     companionai::Shutdown();
     framevr::scenedepth::Shutdown();

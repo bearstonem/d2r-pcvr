@@ -78,6 +78,27 @@ target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/native_belt.cpp ${ROOT}/vr/quick_ite
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/breakables.cpp ${ROOT}/vr/offline_difficulty.cpp ${ROOT}/vr/enemy_sight.cpp)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/respec.cpp)   # Reset Skills & Stats (respec_button.h)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/target_lock.cpp)
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/client_combat.cpp
+  ${ROOT}/vr/upper_body_wire.cpp
+  ${ROOT}/vr/upper_body_skin.cpp)
+add_executable(client-combat-test client_combat_test.cpp ${ROOT}/vr/client_combat.cpp)
+target_include_directories(client-combat-test PRIVATE ${D2RL_SDK}/include)
+target_link_libraries(client-combat-test PRIVATE framevr-runtime)
+add_executable(native-client-input-test native_client_input_test.cpp)
+add_executable(upper-body-pose-test upper_body_pose_test.cpp)
+target_compile_options(upper-body-pose-test PRIVATE -UNDEBUG)
+add_test(NAME upper-body-pose-test COMMAND upper-body-pose-test)
+add_executable(upper-body-render-test upper_body_render_test.cpp)
+target_compile_options(upper-body-render-test PRIVATE -UNDEBUG)
+add_test(NAME upper-body-render-test COMMAND upper-body-render-test)
+add_executable(upper-body-skin-test upper_body_skin_test.cpp ${ROOT}/vr/upper_body_skin.cpp)
+target_include_directories(upper-body-skin-test PRIVATE ${D2RL_SDK}/include ${ROOT}/cleanroom/sigscan)
+target_compile_options(upper-body-skin-test PRIVATE -UNDEBUG)
+add_test(NAME upper-body-skin-test COMMAND upper-body-skin-test)
+add_executable(upper-body-wire-test upper_body_wire_test.cpp ${ROOT}/vr/upper_body_wire.cpp)
+target_include_directories(upper-body-wire-test PRIVATE ${D2RL_SDK}/include)
+target_compile_options(upper-body-wire-test PRIVATE -UNDEBUG)
+add_test(NAME upper-body-wire-test COMMAND upper-body-wire-test)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/loot_beam_scan.cpp)   # loot beams: the items on the floor that get one
 add_executable(map-sigs-test map_sigs_test.cpp)   # Map view = Full map: the patterns at their sites
 target_include_directories(map-sigs-test PRIVATE ${ROOT}/cleanroom/sigscan)
@@ -347,6 +368,11 @@ target_include_directories(local-player-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 target_link_libraries(local-player-test PRIVATE framevr-runtime)
 target_link_libraries(window-focus-test PRIVATE user32)
 enable_testing()
+add_executable(desktop-mode-test desktop_mode_test.cpp)
+target_compile_options(desktop-mode-test PRIVATE -UNDEBUG)
+add_test(NAME desktop-mode-vr COMMAND desktop-mode-test)
+add_test(NAME desktop-mode-flat COMMAND desktop-mode-test desktop)
+add_test(NAME desktop-runtime-wiring COMMAND "${PCVR_PYTHON}" "${CMAKE_CURRENT_SOURCE_DIR}/desktop_mode_test.py")
 add_executable(pool-guard-test pool_guard_test.cpp ${ROOT}/cleanroom/pools/pools.cpp)
 target_link_libraries(pool-guard-test PRIVATE framevr-runtime)
 foreach(pool_case IN ITEMS grow off enough foreign free-slot free-call layout broken prev-flag missing waiting)
@@ -375,6 +401,7 @@ set_tests_properties(arcane-sky-test PROPERTIES TIMEOUT 30)
 add_test(NAME light-bounds-test COMMAND light-bounds-test)
 set_tests_properties(light-bounds-test PROPERTIES TIMEOUT 30)
 foreach(test_target IN ITEMS memory-test biome-list-test hook-metrics-test active-keys-test resource-descriptions-test latest-worker-test haptic-pulse-test thread-stats-test
+    client-combat-test native-client-input-test
     gameplay-test weapon-skills-test quick-cast-test hand-controls-test elemental-hands-test elemental-particles-test skill-pad-test interact-press-test sewer-interaction-test notice-card-test mod-layout-test spell-aim-test bow-pose-test crossbow-pose-test body-tracking-test shapeshift-form-test head-shadow-test shield-steady-test body-calibration-test shoulder-swap-test blood-screen-test
     portal-billboard-test shrine-trace-test shrine-placement-test overlay-view-test bone-armor-height-test composition-layers-test projectile-rules-test environment-cutaway-test roof-materials-test game-ceiling-test stereo-prop-physics-test dropped-bottles-test props-test limb-rig-test limb-physics-test leather-menu-test stats-button-test menu-drop-test arcane-decay-test respec-button-test
     combat-rules-test strike-skills-test zeal-light-test skill-usage-test shield-guard-test shapeshift-gesture-test guard-strain-test heartbeat-test run-speed-test logging-test melee-contact-test melee-weapon-test breakables-test offline-difficulty-test enemy-sight-test attack-speed-test world-coordinates-test bow-flight-test bow-laser-test spell-cast-test spell-aim-assist-test hammer-gesture-test charge-gesture-test tactical-chord-test glyph-recognizer-test glyph-trail-test glyph-cast-test spell-motion-test motions-amazon-test motions-barbarian-test motions-necromancer-test motions-assassin-test cross-gesture-test heavens-gesture-test bone-graft-test
