@@ -907,11 +907,6 @@ struct EyeWorld {math::Vec at{};math::Quat turn{0,0,0,1};float nearPlane=0;bool 
 // stick, mouse or recentre turn since is turned out as well as the head's.
 struct LastEye {XrPosef pose{};XrFovf fov{};bool ok=false;math::Quat base{0,0,0,1};EyeWorld world{};};
 std::array<LastEye,2> lastEyes{};
-// The campfire: an eye whose camera was built before its headset frame began (View, stale) was drawn at the
-// frame before's pose. It goes to the headset at that pose, not at the one the frame then began with: sent at
-// the new one, the picture jumped with every turn of the head (the left eye, dev test 2026-11-10).
-struct LateEye {XrPosef pose{};XrFovf fov{};bool late=false;};
-std::array<LateEye,2> lateEyes{};
 std::array<math::Quat,2> viewBase{{{0,0,0,1},{0,0,0,1}}};   // each eye's, as View last built it
 std::array<EyeWorld,2> viewWorld{};   // each eye's this frame
 // While the option is on, each eye's image as shown, kept by Copy (KeepTurn):
@@ -6911,10 +6906,9 @@ void EndPair() {
     const auto drawn=[&](int i){return eyes[i].copied||(turn&&lastEyes[i].ok);};
     if(render&&valid&&!panelMode&&drawn(0)&&drawn(1)&&(eyes[0].copied||eyes[1].copied)) {
         for(int i=0;i<2;++i){
-            const bool late=eyes[i].copied&&lateEyes[i].late&&campfirePointer.load();   // drawn at the frame before's pose
-            if(eyes[i].copied)lastEyes[i]={late?lateEyes[i].pose:views[i].pose,late?lateEyes[i].fov:views[i].fov,true,viewBase[i],viewWorld[i]};
+            if(eyes[i].copied)lastEyes[i]={views[i].pose,views[i].fov,true,viewBase[i],viewWorld[i]};
             // drawn or turned this frame: this frame's pose; else as drawn
-            const bool now=(eyes[i].copied&&!late)||i==turned;
+            const bool now=eyes[i].copied||i==turned;
             pv[i].pose=now?views[i].pose:lastEyes[i].pose;pv[i].fov=now?views[i].fov:lastEyes[i].fov;
             pv[i].subImage.swapchain=eyes[i].chain;pv[i].subImage.imageRect={{0,0},{int32_t(width),int32_t(height)}};
         }
@@ -7963,7 +7957,6 @@ bool View(float out[16],const float hero[3],float eyeHeight,float userEyeHeight,
         const auto& o=(eye<0?head:views[eye&1].pose).orientation;
         if(o.x==0&&o.y==0&&o.z==0&&o.w==0)return false;
     }
-    if(eye>=0)lateEyes[eye&1]={views[eye&1].pose,views[eye&1].fov,!Active()};
     bool recentered=false;   // F11's yaw: the origin is put back under the head (the room follow re-anchors), not turned
     if(std::fabs(recenterYaw-lastRecenter)>.001f){origin=V(head.position);lastRecenter=recenterYaw;recentered=true;}
     const float upm=(scaleHeight>0?scaleHeight:eyeHeight)/std::max(userEyeHeight,.5f);
