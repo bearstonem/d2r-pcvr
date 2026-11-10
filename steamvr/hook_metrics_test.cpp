@@ -1,6 +1,7 @@
 #include "hook_metrics.h"
 #include "generation_cache.h"
 #include "native_lock.h"
+#include "pipeline_set.h"
 #include <cstdlib>
 #include <cstdio>
 #include <mutex>
@@ -47,5 +48,29 @@ int main() {
     for(int t=0;t<8;++t)workers.emplace_back([&]{for(int i=0;i<10000;++i){std::lock_guard lock(mutex);++sum;}});
     for(auto& t:workers)t.join();
     {std::shared_lock lock(mutex);Check(sum==80000,"native callback lock serializes writes and supports shared reads");}
-    std::puts("All-thread counters, capture boundaries, generation invalidation and native lock stress passed");
+    {   // The pipelines a bind callback replaces: every other bind is rejected without a lock.
+        PipelineSet<4> set;
+        Check(!set.MayContain(0)&&!set.MayContain(0x1000),"an empty set rejects every bind, the null pipeline too");
+        set.Add(0);Check(!set.MayContain(0),"the null pipeline is never interesting");
+        set.Add(0x1000);set.Add(0x2000);set.Add(0x1000);
+        Check(set.MayContain(0x1000)&&set.MayContain(0x2000)&&!set.MayContain(0x3000),"created copies are found; other pipelines are not");
+        set.Remove(0x1000);
+        Check(!set.MayContain(0x1000)&&set.MayContain(0x2000),"a destroyed pipeline's handle, used again by the game, is not taken for the copy's original");
+        set.Add(0x3000);set.Remove(0x3000);set.Add(0x1000);
+        Check(set.MayContain(0x1000)&&!set.MayContain(0x3000)&&!set.MayContain(0),"freed slots are used again and hold nothing meanwhile");
+        set.Remove(0x1000);set.Remove(0x2000);
+        Check(!set.MayContain(0x1000)&&!set.MayContain(0x2000),"listed once: one removal takes a handle out");
+        for(uint64_t h=1;h<=4;++h)set.Add(h*0x10);
+        Check(set.MayContain(0x40)&&!set.MayContain(0x50),"a full set still rejects");
+        set.Add(0x50);
+        Check(set.MayContain(0x50)&&set.MayContain(0x9990),"past its size nothing is rejected: the caller's own lookup decides, never a missed copy");
+        PipelineSet<> shared;std::atomic<bool> stop=false;std::atomic<uint64_t> wrong{0};
+        shared.Add(0x7000);
+        std::vector<std::thread> readers;
+        for(int t=0;t<4;++t)readers.emplace_back([&]{while(!stop){if(!shared.MayContain(0x7000)||shared.MayContain(0x7008))++wrong;}});
+        for(uint64_t i=0;i<20000;++i){shared.Add(0x8000+i*16);shared.Remove(0x8000+i*16);}
+        stop=true;for(auto& t:readers)t.join();
+        Check(wrong==0,"recording threads read the set while pipelines are created and destroyed");
+    }
+    std::puts("All-thread counters, capture boundaries, generation invalidation, native lock stress and pipeline set passed");
 }
