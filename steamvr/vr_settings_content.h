@@ -283,7 +283,7 @@ inline constexpr ContentSection SectionTable[]={
     {View::Targeting,"Target selection"},{View::Targeting,"Aiming"},{View::Targeting,"Ground targeting"},
     {View::Shield,"Bash and block"},{View::Shield,"Fit on the arm"},
     {View::Monsters,"Offline difficulty"},{View::Monsters,"Mercenary"},{View::Monsters,"Summons"},
-    {View::Physics,"Props"},
+    {View::Physics,"Props"},{View::Physics,"Monsters and townsfolk"},
     {View::Moving,"Turning"},{View::Moving,"Speed"},
     {View::Body,"Play space"},{View::Body,"Potion belt"},
     {View::Hands,"Hands and buttons"},
@@ -531,6 +531,10 @@ inline constexpr Override Overrides[]={
      .help="Cups, vases, books and stools tumble when your weapon, hand or shield hits them. Just for looks."},
     {.id="interactions.body_physics",.page=View::Physics,.section="Props",.kind=RowKind::Toggle,.label="Pushable bodies",
      .help="Your weapon, shield or fist pushes aside the limbs of monsters and townsfolk it meets, and they spring back. Just for looks. Motion combat in first person."},
+    // Physics: Monsters and townsfolk. Heads turn to you (look_at.h; owner, 2026-11-09), On by default. On this page
+    // beside Pushable bodies, the other drawn-only change to their poses (Monsters already has its three sections).
+    {.id="gameplay.look_at_you",.page=View::Physics,.section="Monsters and townsfolk",.kind=RowKind::Toggle,.label="Heads turn to you",
+     .help="Monsters, mercenaries and townsfolk within about 7 m turn their heads to your real head as you move. Just for looks. First person only."},
     // Moving: Turning
     {.id="turn.smooth",.page=View::Moving,.section="Turning",.kind=RowKind::Toggle,.label="Smooth turning",
      .help="On turns you smoothly with the right stick. Off turns you in steps, which many players find easier on the stomach.",
