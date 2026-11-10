@@ -311,6 +311,15 @@ Known diagnostic lessons:
   `[debug] capture_pair` eye images or a Quest/VDXR session: Steam Frame's
   foveated streaming hides peripheral shading changes. The game is usually
   CPU-limited, so unchanged frame rate does not mean VRS is inactive.
+- `D2R_DepthFog.fx` has three sizes of its technique per eye (`_Lean` 22 passes,
+  `_Mask` 26, the unsuffixed full one 31; `steamvr/effect_passes.h`). The plugin
+  keeps on the smallest that draws what is wanted and logs each change as
+  `Frame effects: optional passes on: ...; N passes per eye (was 31)`. A feature
+  drawn by a left-out pass (HUD shift, toolbar / map / labels in the picture,
+  debug lines, table key, frame stamp) that does not appear: check that line
+  names it. "the installed D2R_DepthFog.fx is older" there means the DLL was
+  installed without its shaders. A new pass or a new reader of the interface
+  mask needs its `Use` bit; `effect-passes-test` fails until it has one.
 - VDXR hands the game to SteamVR while SteamVR is running, leaving a Quest on
   the flat desktop. Close SteamVR first; `Frame OpenXR: runtime` names the
   runtime actually used.
