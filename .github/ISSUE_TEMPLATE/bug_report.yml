@@ -73,7 +73,8 @@ body:
         If the game is elsewhere, open its folder from Steam (right-click Diablo II: Resurrected > Manage > Browse local files)
         or Battle.net (the gear next to Play > Show in Explorer). Developer mode uses `mods\pcvr-dev` in place of `mods\D2R-PCVR`.
         For installation problems, also attach `setup-install.log` and `setup-last.log` from `%LOCALAPPDATA%\Programs\D2R PCVR`
-        (paste that into Win+R to open the folder).
+        (paste that into Win+R to open the folder). If Setup stopped before installing anything, that folder does not exist
+        yet: attach `D2R-PCVR-setup-last.log` from `%TEMP%` instead, and copy the whole message Setup showed.
 
         The `d2r-vr-frame.log` and `d2r-vr-vrcam.log` in the game's main `d2rloader\logs` folder are left over from older
         versions and are no longer updated, so please don't send those. Logs show your Windows username in file paths.

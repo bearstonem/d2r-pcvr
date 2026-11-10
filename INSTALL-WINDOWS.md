@@ -76,6 +76,16 @@ installer's full output. Share the error at the end of those logs when reporting
 a problem; review them for personal paths before posting. Older installers may
 only report an exit code in `setup-last.log` and do not create `setup-install.log`.
 
+A failure message reads **Setup could not finish while** *(the step)*: *(the
+file or folder and what was wrong with it)*, and ends with where the technical
+details were saved. Before anything is installed there is no helper folder yet,
+so those details go to `D2R-PCVR-setup-last.log` in your temporary folder (paste
+`%TEMP%` into Win+R). An older installer that stops after the folder page with
+only **Setup could not finish: 2** was handed a folder it could not read: run
+that Setup from an ordinary folder such as Downloads, not from the top of a
+drive (`D:\`), and enter folders without a backslash at the end - or use the
+current installer, which accepts both.
+
 If Setup reports **Permission denied** for **launcher_icon.png**, fully close
 **D2R VR Launcher** and any image viewer showing that file, then rerun Setup
 with **Update / repair**. Keep Steam and the game closed while Setup runs.
@@ -527,6 +537,17 @@ asks you to update its other components.
    Both game editions share video settings, so keeping them is the default.
 4. Review removal, then choose **Remove the VR mod**. Use **Save & Exit** in D2R
    and **Steam > Exit** when prompted.
+
+**If the game was uninstalled first:** removal still finishes. Steam and
+Battle.net remove the game but leave the mod's own files and its VR shortcuts
+behind. The Windows uninstaller of an EXE installation notices this by itself.
+In the ZIP's guided removal, when the game is not found, answer **No - the game
+was uninstalled or its folder deleted** and confirm the folder it was in (the
+recorded one is offered). Either way the matching VR shortcuts are removed, the
+Steam edition's launch options are restored, and the mod's tracked files left in
+the old game folder are removed when their installation backup is still there;
+without that backup the folder is left untouched and you can delete it
+yourself. Nothing else in that folder, and no character or stash, is deleted.
 
 The wizard restores replaced files and removes files introduced by the mod,
 including files added by upgrades. It removes matching VR library entries
