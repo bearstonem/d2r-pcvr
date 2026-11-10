@@ -835,7 +835,15 @@ uintptr_t g_vtX = 0, g_vtS = 0;             // and their vtables then
 uintptr_t g_cachedSelf = 0;
 uint32_t g_cachedEntity = 0;
 ULONGLONG g_lastStorageLook = 0;
-const char* g_why = "";                     // why the chain does not read (for vrcam's log)
+std::atomic<const char*> g_why{""};         // why the chain does not read (for vrcam's log)
+// g_lock, shared or exclusive. Shared is enough to read the storages and the entities kept
+// (g_xs .. g_cachedEntity, g_candidateEntities.Find): only what replaces them needs it exclusive.
+struct Locked {
+    const bool exclusive;
+    explicit Locked(bool exclusively) : exclusive(exclusively) { if (exclusive) AcquireSRWLockExclusive(&g_lock); else AcquireSRWLockShared(&g_lock); }
+    ~Locked() { if (exclusive) ReleaseSRWLockExclusive(&g_lock); else ReleaseSRWLockShared(&g_lock); }
+    Locked(const Locked&) = delete; Locked& operator=(const Locked&) = delete;
+};
 #ifdef D2RVR_NATIVE_OPENXR
 framevr::AgedCache<uintptr_t,uint32_t> g_candidateEntities{Remembered,RememberedFor,SweepEvery};
 #endif
@@ -903,33 +911,44 @@ bool EntityOf(uintptr_t self, uint32_t* e) {
     return false;
 }
 #ifdef D2RVR_NATIVE_OPENXR
-bool CandidatePosition(uintptr_t self,float position[3]) {
-    AcquireSRWLockExclusive(&g_lock);
-    struct Unlock {~Unlock(){ReleaseSRWLockExclusive(&g_lock);}} unlock;
-    Header x,s;
-    if(!HeaderOf(g_xs,g_vtX,&x)||!HeaderOf(g_ss,g_vtS,&s)) {
-        const auto now=GetTickCount64();
-        if(now-g_lastStorageLook<500)return false;
-        g_lastStorageLook=now;if(!FindStorages()||!HeaderOf(g_xs,&x)||!HeaderOf(g_ss,&s))return false;
+// Where a skeleton instance's entity stands. place, local: its transform as HeroTransform gives
+// the hero's (the component, the entity, its parent) and the component's local matrix - all in
+// the one block read here, for a pose Arms then takes as the hero's (HeroOf).
+// Under the shared lock while the storages are the ones known and the instance's entity is
+// remembered - every pose of the hero after his first; exclusively only to find them again.
+bool CandidatePosition(uintptr_t self,float position[3],HeroXform* place=nullptr,float* local=nullptr) {
+    for(const bool exclusively:{false,true}) {
+        Locked locked(exclusively);
+        Header x,s;
+        if(!HeaderOf(g_xs,g_vtX,&x)||!HeaderOf(g_ss,g_vtS,&s)) {
+            if(!exclusively)continue;
+            const auto now=GetTickCount64();
+            if(now-g_lastStorageLook<500)return false;
+            g_lastStorageLook=now;if(!FindStorages()||!HeaderOf(g_xs,&x)||!HeaderOf(g_ss,&s))return false;
+        }
+        const auto met=GetTickCount64();
+        const uint32_t* kept=std::as_const(g_candidateEntities).Find(self,met);uintptr_t held=0;uint32_t entity=0;
+        if(kept&&SkeletonOf(s,*kept,&held)&&held==self)entity=*kept;
+        else {
+            if(!exclusively)continue;
+            SKELETON_IDENTIFYING;
+            if(!EntityOf(self,&entity))return false;
+            framevr::CacheSweep swept;
+            g_candidateEntities.Put(self,entity,met,&swept);
+            hookstats::Forgot(hookstats::HeroEntities,swept,met);
+        }
+        uint32_t index=0;float t[kTransformSize/4];
+        if(!Dense(x,entity,&index)||!x.components)return false;
+        const auto at=uintptr_t(x.components)+uintptr_t(index)*kTransformSize;
+        if(!Read(t,at,sizeof t))return false;   // the whole component: its parent (+0xC0) and both matrices
+        uint32_t parentEntity=0xFFFFFFFFu;memcpy(&parentEntity,t+48,4);
+        // Child transforms have their composed placement in +0x40.
+        memcpy(position,t+((parentEntity&0xFFFFF)==0xFFFFF?0:16)+12,3*sizeof(float));
+        if(place){place->self=self;place->entity=entity;place->comp=at;place->parent=parentEntity;}
+        if(local)memcpy(local,t,16*sizeof(float));
+        return true;
     }
-    const auto met=GetTickCount64();
-    const uint32_t* kept=g_candidateEntities.Find(self,met);uintptr_t held=0;uint32_t entity=0;
-    if(kept&&SkeletonOf(s,*kept,&held)&&held==self)entity=*kept;
-    else {
-        SKELETON_IDENTIFYING;
-        if(!EntityOf(self,&entity))return false;
-        framevr::CacheSweep swept;
-        g_candidateEntities.Put(self,entity,met,&swept);
-        hookstats::Forgot(hookstats::HeroEntities,swept,met);
-    }
-    uint32_t index=0;float t[kTransformSize/4];
-    if(!Dense(x,entity,&index)||!x.components)return false;
-    const auto at=uintptr_t(x.components)+uintptr_t(index)*kTransformSize;
-    if(!Read(t,at,sizeof t))return false;   // the whole component: its parent (+0xC0) and both matrices
-    uint32_t parentEntity=0xFFFFFFFFu;memcpy(&parentEntity,t+48,4);
-    // Child transforms have their composed placement in +0x40.
-    memcpy(position,t+((parentEntity&0xFFFFF)==0xFFFFF?0:16)+12,3*sizeof(float));
-    return true;
+    return false;
 }
 // A model's placement this frame (model to world): its TransformComponent's
 // local matrix, or the composed one under a parent. No search; another
@@ -1050,6 +1069,26 @@ bool Recheck(Posed& p, ULONGLONG now, ULONGLONG every) {
     return moved;
 }
 }  // namespace known
+
+// The hero's transform for a pose's helpers: what HeroTransform gives them - the instance the
+// hook last took for the hero, when that is this pose's - without its look-up (thirteen guarded
+// reads under the registry's lock, four to six times a hero pose before). Arms resolved it for
+// this very instance before it took the pose for the hero's (ecs::CandidatePosition: the same
+// entity, component and parent, checked the same way, in a look-up Arms makes anyway).
+// local: the component's local matrix, which each helper read for itself: the game sets it before
+// the frame's poses and the hook writes no transform, so each read of it in one pose call gave
+// the same sixteen floats.
+// A pose Arms did not take for the hero's this call asks HeroTransform, as before.
+bool HeroOf(Posed& p, HeroXform* hx, Mat* local = nullptr) {
+    if (p.heroPlaced > 0) {
+        if (g_heroSelf.load() != p.self) return false;   // another instance was taken for the hero meanwhile
+        *hx = p.hero;
+        if (local) memcpy(local->m, p.heroLocal, sizeof local->m);
+        return true;
+    }
+    if (p.heroPlaced < 0 || !HeroTransform(hx) || hx->self != p.self) return false;
+    return !local || SafeCopy(local->m, reinterpret_cast<const void*>(hx->comp), sizeof local->m);
+}
 #endif
 
 bool Learn(uintptr_t self, Hero* h) {
@@ -1713,12 +1752,12 @@ void Fist(const Hero& h, int side, float grip, float closed, float open, const s
 // fist), and measured as drawn the claw folded back into the palm - a stub pointing back,
 // so a forward thrust read as a withdrawal. Both hands are written every pass: one not
 // measured this pass is cleared, never left to an earlier pass.
-void PublishClaws(uintptr_t self, const Hero& h, const Input& in, const std::vector<Mat>& w, float c, float s, float drawScale) {
+void PublishClaws(Posed& posed, const Hero& h, const Input& in, const std::vector<Mat>& w, float c, float s, float drawScale) {
+    const uintptr_t self = posed.self;
     HeroXform hx; Mat model;
     MeleeWeaponPose out[2]{}; bool ok[2]{};
     V3 palmAt{}; int axesFrom = -1;
-    if (in.havePoseStamp && HeroTransform(&hx) && hx.self == self && (hx.parent & 0xFFFFFu) == 0xFFFFFu &&
-        SafeCopy(model.m, reinterpret_cast<const void*>(hx.comp), sizeof model)) {
+    if (in.havePoseStamp && HeroOf(posed, &hx, &model) && (hx.parent & 0xFFFFFu) == 0xFFFFFu) {
         auto toWorld = [&](V3 p) { Mat t{{1,0,0,0, 0,1,0,0, 0,0,1,0, p.x,p.y,p.z,1}}; return Pos(Mul(t, model)); };
         const V3 player = Pos(model);
         for (int side = 0; side < 2; ++side) {
@@ -1776,7 +1815,8 @@ void PublishClaws(uintptr_t self, const Hero& h, const Input& in, const std::vec
     ReleaseSRWLockExclusive(&g_gunBoneLock);
 }
 #endif
-void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) {
+void PoseBody(Posed& posed, const Hero& h, const Input& given, float legHold) {
+    const uintptr_t self = posed.self;
     // A shapeshift form's rig is drawn at a uniform scale (drawScale) about the model's origin (the feet stay on the
     // ground). It is posed in the rig's own units - the camera's eye point taken back
     // by drawScale below - and scaled as it is written.
@@ -1810,8 +1850,9 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
     const bool graft = h.form && in.firstPerson && in.lockUpper && h.bindOk;
     // Left-handed play: the arm (0 right, 1 left) whose hand holds the main weapon, and the shield's arm.
     const int mainArm = in.leftHanded && in.mode == 2 ? 1 : 0, offArm = mainArm ^ 1;
-    uintptr_t world = 0, mats = 0; int32_t n = 0;
-    if (!Get(self + 0x20, &world) || !Get(world, &n) || !Get(world + 4, &mats) || n != h.count) return;
+    const uintptr_t world = posed.worldPose;   // read with the instance's identity (Arms)
+    uintptr_t mats = 0; int32_t n = 0;
+    if (!Get(world, &n) || !Get(world + 4, &mats) || n != h.count) return;
     std::vector<Mat> oldW(n);
     if (!SafeCopy(oldW.data(), (const void*)mats, sizeof(Mat) * n)) return;
     std::vector<Mat> newW = oldW;
@@ -1840,8 +1881,7 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
         float worldScale = 0.0f;
 #ifdef D2RVR_NATIVE_OPENXR
         {HeroXform hx;Mat m;
-         if (HeroTransform(&hx) && hx.self == self && SafeCopy(m.m, reinterpret_cast<const void*>(hx.comp), sizeof m))
-             worldScale = Len({m.m[0], m.m[1], m.m[2]});}
+         if (HeroOf(posed, &hx, &m)) worldScale = Len({m.m[0], m.m[1], m.m[2]});}
 #endif
         if (!h.form) { g_personEye.store(h.eyeY); if (worldScale > 0.0f) g_personWorldScale.store(worldScale); }
         const float units = h.form ? framevr::shapeshift::PersonUnits(g_personWorldScale.load(), worldScale) : 1.0f;
@@ -3113,8 +3153,7 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
         // Keep collision in the world frame of THIS completed pose. Rebuilding
         // it later from the timer's newer camera yaw/eye displaced fast swings.
         HeroXform hx;Mat model;
-        if(HeroTransform(&hx)&&hx.self==self&&(hx.parent&0xFFFFFu)==0xFFFFFu&&
-           SafeCopy(model.m,reinterpret_cast<const void*>(hx.comp),sizeof model)) {
+        if(HeroOf(posed,&hx,&model)&&(hx.parent&0xFFFFFu)==0xFFFFFu) {
             // Contact motion follows the right controller, independently of
             // native inventory slots. A free staff uses its authored attachment.
             const int contactSide=freeStaff?staffSide:0;
@@ -3163,8 +3202,7 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
         const auto weapons=gamestate::MeleeEquipment();
         HeroXform offHx;Mat offModel;
         if(!freeStaff&&h.weapon[1]>=0&&h.weapon[1]<n&&
-           HeroTransform(&offHx)&&offHx.self==self&&
-           (offHx.parent&0xFFFFFu)==0xFFFFFu&&SafeCopy(offModel.m,reinterpret_cast<const void*>(offHx.comp),sizeof offModel)) {
+           HeroOf(posed,&offHx,&offModel)&&(offHx.parent&0xFFFFFu)==0xFFFFFu) {
             const Mat attachment=Held(1);const Mat world=Mul(attachment,offModel);
             const V3 origin=Pos(world),axis=Norm({world.m[4],world.m[5],world.m[6]}),player=Pos(offModel);
             if(Len({world.m[4],world.m[5],world.m[6]})>.001f&&
@@ -3190,8 +3228,7 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
         MeleeWeaponPose shieldPose{};framevr::guard::Pose guardPose{};ULONGLONG at=0;HeroXform hx;Mat model;
         const int shieldBone=h.shieldAttach>=0?h.shieldAttach:h.weapon[1];
         if(shieldFollowed&&in.havePoseStamp&&shieldBone>=0&&
-           HeroTransform(&hx)&&hx.self==self&&(hx.parent&0xFFFFFu)==0xFFFFFu&&
-           SafeCopy(model.m,reinterpret_cast<const void*>(hx.comp),sizeof model)) {
+           HeroOf(posed,&hx,&model)&&(hx.parent&0xFFFFFu)==0xFFFFFu) {
             const Mat world=Mul(newW[shieldBone],model);
             const V3 origin=Pos(world),axis=Norm({world.m[4],world.m[5],world.m[6]}),player=Pos(model);
             if(Len({world.m[4],world.m[5],world.m[6]})>.3f&&
@@ -3343,7 +3380,7 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
         for (Mat& w : newW)
             for (int r = 0; r < 4; ++r) for (int col = 0; col < 3; ++col) w.m[r * 4 + col] *= drawScale;
 #if D2RVR_FIRST_PERSON && defined(D2RVR_NATIVE_OPENXR)
-    if (graft && in.mode == 2) PublishClaws(self, h, in, newW, c, s, drawScale);
+    if (graft && in.mode == 2) PublishClaws(posed, h, in, newW, c, s, drawScale);
 #endif
     const bool written = SafeWrite((void*)mats, newW.data(), sizeof(Mat) * n);
 #ifdef D2RVR_NATIVE_OPENXR
@@ -3540,7 +3577,8 @@ bool CaptureShield(uintptr_t self,const ShieldContext& context,const HeroXform& 
     ReleaseSRWLockExclusive(&g_gunBoneLock);
     return current;
 }
-void RefreshShield(uintptr_t self) {
+void RefreshShield(Posed& posed) {
+    const uintptr_t self=posed.self;
     if(self!=g_heroSelf.load())return;
     ShieldStage(1);
     ShieldContext context;ShieldRenderSource source;
@@ -3551,23 +3589,22 @@ void RefreshShield(uintptr_t self) {
         uintptr_t model=0,skeleton=0,bones=0;int count=0;
         if(Get(source.self+8,&model)&&model==source.model&&Get(model+8,&skeleton)&&skeleton==source.skeleton&&
            Get(skeleton+8,&count)&&count==source.count&&Get(skeleton+0xC,&bones)&&bones==source.bones) {
-            AcquireSRWLockExclusive(&ecs::g_lock);
+            AcquireSRWLockShared(&ecs::g_lock);   // read only
             uintptr_t existing=0,components=0;uint32_t index=0,parent=0;
             const bool owned=ecs::SkeletonOf(source.entity,&existing)&&existing==source.self&&
                 ecs::Dense(ecs::g_xs,source.entity,&index)&&Get(ecs::g_xs+0x38,&components)&&components&&
                 Get(components+uintptr_t(index)*kTransformSize+0xC0,&parent)&&parent==source.parent;
-            ReleaseSRWLockExclusive(&ecs::g_lock);if(owned)return;
+            ReleaseSRWLockShared(&ecs::g_lock);if(owned)return;
         }
     }
     // Static shields may not get another pose callback after equipping. Scan
     // validated skeleton storage only while discovery is pending, once/second.
     static std::atomic<uint64_t> nextLook{0};auto next=nextLook.load();const auto now=GetTickCount64();
     if(now<next||!nextLook.compare_exchange_strong(next,now+1000))return;
-    HeroXform hero;if(!HeroTransform(&hero)||hero.self!=self)return;
+    HeroXform hero;if(!HeroOf(posed,&hero))return;
     std::vector<uint64_t> components;
     {
-        AcquireSRWLockExclusive(&ecs::g_lock);
-        struct Unlock {~Unlock(){ReleaseSRWLockExclusive(&ecs::g_lock);}} unlock;
+        ecs::Locked locked(false);   // read only
         uintptr_t begin=0,end=0,data=0;
         if(!ecs::IsStorage(ecs::g_ss,ecs::g_vtS)||!Get(ecs::g_ss+0x20,&begin)||!Get(ecs::g_ss+0x28,&end)||
            end<begin||(end-begin)/4>32768||!Get(ecs::g_ss+0x38,&data)||!data)return;
@@ -3888,9 +3925,10 @@ void Arms(Posed& posed) {
     // werewolf bites low (its head under a third of its rest height through each attack),
     // and those frames were left to the game: its unscaled beast lunging out ahead of the eyes.
     const int stand=hero.form&&hero.pelvis>=0&&hero.pelvisY>2.0f?hero.pelvis:hero.head;
-    float position[3],head[16];uintptr_t pose=0,matrices=0;
-    if(hero.head<0||size_t(hero.head)>=hero.bind.size()||stand<0||size_t(stand)>=hero.bind.size()||!ecs::CandidatePosition(self,position)||
-       !Get(self+0x20,&pose)||!Get(pose+4,&matrices)||
+    float position[3],head[16];const uintptr_t pose=posed.worldPose;uintptr_t matrices=0;   // the world pose: read with the identity above
+    if(hero.head<0||size_t(hero.head)>=hero.bind.size()||stand<0||size_t(stand)>=hero.bind.size()||
+       !ecs::CandidatePosition(self,position,&posed.hero,posed.heroLocal)||
+       !Get(pose+4,&matrices)||
        !SafeCopy(head,reinterpret_cast<const void*>(matrices+uintptr_t(stand)*64),sizeof head)){++g_neckWhy[WhyNoPosition];return;}
     // Standing at the hero's spot, or under your eyes: stepped away in the room the drawn body stands
     // under you, and past 3 units (about 0.7 m) it was refused and left to the game, the legs back at the
@@ -3943,6 +3981,11 @@ void Arms(Posed& posed) {
     else g_rigPosedAt[0].store(GetTickCount64());
 #endif
     NoteHero(self);
+#ifdef D2RVR_NATIVE_OPENXR
+    // His transform, for this pose's helpers (HeroOf): the look-up above found it. HeroTransform
+    // gives none without the game's base, nor does this.
+    posed.heroPlaced = g_gameBase.load() ? 1 : -1;
+#endif
     {   // room-scale diagnostics: the distinct hero bodies posed
         AcquireSRWLockExclusive(&g_partsLock);
         bool seen=false;for(int i=0;i<g_bodyCount;++i)seen=seen||g_bodies[i].self==self;
@@ -3982,7 +4025,7 @@ void Arms(Posed& posed) {
         }
         ReleaseSRWLockExclusive(&g_formLock);
     }
-    PoseBody(self, hero, in, legHold);
+    PoseBody(posed, hero, in, legHold);
 }
 
 #ifdef D2RVR_NATIVE_OPENXR
@@ -4872,7 +4915,7 @@ void __cdecl Hook(uintptr_t self, float a, float b, bool c) {
 #ifdef D2RVR_NATIVE_OPENXR
     if (const ULONGLONG held = g_crossbowHeldAt.load(std::memory_order_relaxed); held && GetTickCount64() - held <= 100) CaptureCrossbow(self);
     RefreshCrossbow(self);
-    RefreshShield(self);
+    RefreshShield(posed);
     PoseMotionBow(self);
     // Heads turn to you first: a body pushed aside is bent from the pose with its head already turned.
     // The two share the instance's identity, pose buffer header, placement and what it is known as
