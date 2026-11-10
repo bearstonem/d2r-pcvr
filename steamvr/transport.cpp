@@ -3773,7 +3773,8 @@ void Input() {
     // Every character load opens Calibrate body (owner, 2026-11-10), not only the first with nothing stored.
     // Back at the menus there is no hero: the next one in a world is a load. An act change keeps its hero, so
     // it asks nothing. Seated play with a measurement stored is left alone: the prompt asks you to stand.
-    if(calibrationPrompted&&!bodyCalibration.Active()&&!(inWorld&&inWorld())&&!gamestate::LocalPlayer())calibrationPrompted=false;
+    // (a menu scene in stereo counts as the menus: it is "a world" to the transport, with no hero)
+    if(calibrationPrompted&&!bodyCalibration.Active()&&(!(inWorld&&inWorld())||campfirePointer.load())&&!gamestate::LocalPlayer())calibrationPrompted=false;
     if(!calibrationPrompted&&!settingsModel.open&&!panelMode&&!spatialMode&&inWorld&&inWorld()&&gamestate::LocalPlayer()){
         const auto config=vrsettings::Read();
         if(config.ready&&config.result!=settings::Result::Saving){
@@ -7170,7 +7171,7 @@ void EndPair() {
     // The campfire (vrcam SetCampfirePointer): the right hand's pointer, the beam fading out
     // along its aim and a dot where the game's pointer is (what the trigger picks) - there is
     // no body there to show that the hand points at all.
-    if(!bowLaserShown&&campfirePointer.load()&&!campfireMenuHit.load()&&layer&&!panelMode&&!settingsModel.open&&bowLaserImageReady&&handAimTracked[0]) {
+    if(!bowLaserShown&&campfirePointer.load()&&campfirePointerM.load()>0&&!campfireMenuHit.load()&&layer&&!panelMode&&!settingsModel.open&&bowLaserImageReady&&handAimTracked[0]) {
         const auto start=handAim[0].p,direction=math::Normalized(math::Rotate(handAim[0].q,{0,0,-1}));
         const float length=std::clamp(campfirePointerM.load(),.3f,30.f);
         const auto mid=start+direction*(length*.5f),end=start+direction*length;

@@ -866,6 +866,7 @@ void __cdecl ReadItems(const PluginContext* ctx, void* token) noexcept {
     ReadNpcChoicesRect();
 }
 
+std::atomic<bool> g_characterSelect{false};   // CharacterSelectOpen
 std::set<std::string> g_panels;   // open panels, UI thread only
 
 // A panel that takes the controller away from the game. Names as D2R 3.3
@@ -912,6 +913,10 @@ SharedEvents::UiMessageAction __cdecl OnUiMessage(const PluginContext* ctx, cons
         g_autoMap.store(g_panels.count("AutoMap") ? 1 : 0);
         framevr::fullmap::g_panel.store(g_panels.count("AutoMap") != 0);
         g_noticePanel.store(g_panels.count("NotificationPanel") != 0);
+        {   // the character select screen: the main menu with its hero list (not the title screen, not creation)
+            const bool select = g_panels.count("MainMenuPanel") != 0 && g_panels.count("CharacterSelectPanel") != 0;
+            if (g_characterSelect.exchange(select) != select) Log(select ? "gamestate: character select screen up" : "gamestate: character select screen gone");
+        }
         g_upperBandMenu.store(std::any_of(g_panels.begin(),g_panels.end(),
             [](const auto& name){return framevr::panels::UpperBand(name);}));
         g_opaqueMenu.store(std::any_of(g_panels.begin(),g_panels.end(),
@@ -1157,6 +1162,7 @@ bool RespecButtonShown(){return false;}   // the reset engine is in the native O
 #endif
 uint32_t PanelChanges(){return g_panelChanges.load();}
 bool KeyboardShown(){return g_keyboard.load();}
+bool CharacterSelectOpen(){return g_characterSelect.load();}
 uint32_t KeyboardEpoch(){return g_keyboardEpoch.load();}
 bool NpcChoicesOnly(){return g_npcChoices.load();}
 void ReadNpcChoicesRect() {

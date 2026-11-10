@@ -331,6 +331,10 @@ struct Settings {
     std::atomic<float> lightNight{65.0f};
     std::atomic<float> nightBright{0.25f};  // [sky] night_brightness: the sky and the fog at full night, times their day brightness
     std::atomic<bool>  skyAlways{false};    // whatever the biome (testing): caves get a sky too
+    // [campfire] select: the character select screen (the main menu's hero, in the scene of his last act) in stereo
+    // too, the whole flat menu on one board before you. Its own place for the eyes and for the board.
+    std::atomic<bool>  campfireSelect{false};
+    std::atomic<float> selectForward{0.0f}, selectUp{0.0f}, selectEye{6.0f}, selectMenuWidth{2.0f}, selectMenuDistance{1.8f}, selectMenuDrop{0.3f};
     std::atomic<bool>  campfireOn{false};    // [campfire] enabled: character creation's campfire scene in stereo, round you
     std::atomic<float> campfireEye{6.0f};    // [campfire] eye: the eye height the scene's scale is taken from, world units (~0.24 m each)
     std::atomic<float> campfireUp{2.25f};     // [campfire] up: the eyes above the game camera, world units
@@ -1495,6 +1499,18 @@ void LoadSettings() {
         static int told = -1;
         if (int(on) != told) { told = int(on); LogF("vrcam: [campfire] enabled=%d", int(on)); }
         g_set.campfireOn.store(on);
+        {
+            const bool select = IniB(L"campfire", L"select", false);
+            static int toldSelect = -1;
+            if (int(select) != toldSelect) { toldSelect = int(select); LogF("vrcam: [campfire] select=%d", int(select)); }
+            g_set.campfireSelect.store(select);
+            g_set.selectForward.store(std::clamp(IniF(L"campfire", L"select_forward", 0.0f), -200.0f, 200.0f));
+            g_set.selectUp.store(std::clamp(IniF(L"campfire", L"select_up", 0.0f), -40.0f, 40.0f));
+            g_set.selectEye.store(std::clamp(IniF(L"campfire", L"select_eye", 6.0f), 1.0f, 40.0f));
+            g_set.selectMenuWidth.store(std::clamp(IniF(L"campfire", L"select_menu_width", 2.0f), 0.3f, 6.0f));
+            g_set.selectMenuDistance.store(std::clamp(IniF(L"campfire", L"select_menu_distance", 1.8f), 0.4f, 6.0f));
+            g_set.selectMenuDrop.store(std::clamp(IniF(L"campfire", L"select_menu_drop", 0.3f), -1.0f, 1.5f));
+        }
         g_set.campfireEye.store(std::clamp(IniF(L"campfire", L"eye", 6.0f), 1.0f, 40.0f));
         g_set.campfireUp.store(std::clamp(IniF(L"campfire", L"up", 2.25f), -40.0f, 40.0f));
         g_set.campfireForward.store(std::clamp(IniF(L"campfire", L"forward", 3.0f), -200.0f, 200.0f));
@@ -2977,6 +2993,7 @@ void Tick() {
 bool VrViewInner(const d2rcam::WorldView& in, float out[16]);
 extern std::atomic<bool> g_inWorld;
 extern std::atomic<bool> g_campfire;
+extern std::atomic<bool> g_campfireSelect;
 std::atomic<bool> g_campfireArrived{false};   // set as the campfire scene begins: CampfireView faces the fire
 // The campfire's scene drawn round you (CampfireView faced the fire): only then the menu's board
 // is asked for - before it, the scene still loading, the menu's picture is not to be had.
@@ -3005,8 +3022,10 @@ bool CampfireView(const d2rcam::WorldView& in, float out[16]) {
     const float mapNorth = atan2f(-gameFwd.x, -gameFwd.z);
     const float flat = std::hypot(gameFwd.x, gameFwd.z);
     const V3 ahead = flat > 1e-5f ? V3{gameFwd.x/flat, 0.0f, gameFwd.z/flat} : V3{0.0f, 0.0f, -1.0f};
-    const float eyeH = g_set.campfireEye.load();
-    const V3 at = cam + ahead * g_set.campfireForward.load() + V3{0.0f, g_set.campfireUp.load(), 0.0f};
+    const bool select = g_campfireSelect.load();
+    const float eyeH = select ? g_set.selectEye.load() : g_set.campfireEye.load();
+    const V3 at = cam + ahead * (select ? g_set.selectForward.load() : g_set.campfireForward.load()) +
+                  V3{0.0f, select ? g_set.selectUp.load() : g_set.campfireUp.load(), 0.0f};
     const float ground[3] = {at.x, at.y - eyeH, at.z};   // "the hero": the point under the eyes
     // Facing the fire on arrival, whichever way the head was turned (a recentre or a turn
     // from the game no longer carried over: back from a game the scene began behind you).
@@ -3914,8 +3933,9 @@ void CampfirePick() {
     static bool down = false; static int stage = 0; static ULONGLONG at = 0;
 #ifdef D2RVR_NATIVE_OPENXR
     // Each frame, not only on the timer: the transport knows the campfire from its first frame
-    // (its menu board, and never the flat menu panel there).
-    framevr::SetCampfirePointer(g_campfire.load(), g_set.campfirePickDist.load() * UserEyeHeightM() / std::max(1.0f, g_set.campfireEye.load()));
+    // (its menu board, and never the flat menu panel there). The character select screen: no beam to the heroes.
+    const bool select = g_campfireSelect.load();
+    framevr::SetCampfirePointer(g_campfire.load(), select ? 0.0f : g_set.campfirePickDist.load() * UserEyeHeightM() / std::max(1.0f, g_set.campfireEye.load()));
     // The campfire goes by eyes in turns (AFR), outside the eye rendering that switches the light grid's
     // corrected depth scan on for the world (each frame's EndPair switches it off): the scene keeps it on
     // itself. Without it the native scan's rectangular tiles lost their lights - dark screen-aligned blocks
@@ -3923,21 +3943,21 @@ void CampfirePick() {
     framevr::lightbounds::SetScene(g_campfire.load());
     // The laser on the menu's board: the board moves the game's pointer and clicks (transport MenuPointer).
     const bool board = g_campfire.load() && framevr::CampfireMenuHit();
-    const bool held = g_campfire.load() && !board && framevr::RightPickHeld();
+    const bool held = g_campfire.load() && !select && !board && framevr::RightPickHeld();
 #else
-    const bool held = false;
+    const bool held = false, select = false;
 #endif
     float o[3], d[3];
     // Pointing is enough for the game to show which hero is under the pointer (its own hover).
     static bool toldPointer = false;
     POINT where{};
-    if (g_campfire.load() && !board && HandRay(o, d, false, 0) && CampfirePointer(o, d, &where)) {
+    if (g_campfire.load() && !select && !board && HandRay(o, d, false, 0) && CampfirePointer(o, d, &where)) {
         SetCursorPos(where.x, where.y);
         if (!toldPointer) { toldPointer = true; LogF("vrcam: campfire pick - the pointer follows the right hand (%ld, %ld)", where.x, where.y); }
     }
     // The fire's own sound while the scene is up; a click on the fire (not a hero): sparks and a whoosh.
 #ifdef D2RVR_NATIVE_OPENXR
-    framevr::SetCampfireFire(g_campfire.load() && g_campfireShown.load() && g_set.campfireFireSound.load(),
+    framevr::SetCampfireFire(g_campfire.load() && !select && g_campfireShown.load() && g_set.campfireFireSound.load(),
                              g_set.campfireFireVolume.load(), g_set.campfireFireBurst.load());
 #endif
     static bool fireDown = false;
@@ -7413,14 +7433,16 @@ void CampfireTick() {
 #ifdef D2RVR_NATIVE_OPENXR
     // The beam and its dot from the right hand, to where the pointer is put ([campfire]
     // pick_distance, world units, in metres by the scene's scale).
-    framevr::SetCampfirePointer(g_campfire.load(), g_set.campfirePickDist.load() * UserEyeHeightM() / std::max(1.0f, g_set.campfireEye.load()));
+    const bool select = g_campfireSelect.load();
+    framevr::SetCampfirePointer(g_campfire.load(), select ? 0.0f : g_set.campfirePickDist.load() * UserEyeHeightM() / std::max(1.0f, g_set.campfireEye.load()));
     // The menu (name, Create, Back, the checkboxes) on a board in the scene ([campfire] menu_board):
     // the game draws its menu in its 16:9 band at the top of each eye's picture, over the eyes and
     // turning with the head; the native-menu board takes that band's lower strip into the scene.
-    framevr::SetCampfireMenu(g_set.campfireMenuWidth.load(), g_set.campfireMenuDistance.load(), g_set.campfireMenuDrop.load());
+    if (select) framevr::SetCampfireMenu(g_set.selectMenuWidth.load(), g_set.selectMenuDistance.load(), g_set.selectMenuDrop.load());
+    else framevr::SetCampfireMenu(g_set.campfireMenuWidth.load(), g_set.campfireMenuDistance.load(), g_set.campfireMenuDrop.load());
     {   // the caption over the heroes ([campfire] caption...)
         const float rect[4] = { g_set.campfireCaptionRect[0].load(), g_set.campfireCaptionRect[1].load(), g_set.campfireCaptionRect[2].load(), g_set.campfireCaptionRect[3].load() };
-        framevr::SetCampfireCaption(g_campfire.load() && g_set.campfireMenuBoard.load() && g_set.campfireCaption.load(), rect,
+        framevr::SetCampfireCaption(g_campfire.load() && !select && g_set.campfireMenuBoard.load() && g_set.campfireCaption.load(), rect,
             g_set.campfireCaptionWidth.load(), g_set.campfireCaptionDistance.load(), g_set.campfireCaptionRise.load());
     }
     {
@@ -7428,8 +7450,9 @@ void CampfireTick() {
         const float canvas = g_campfireCanvas;
         ReleaseSRWLockShared(&g_campfireGameLock);
         const float band = std::clamp(canvas * 9.0f / 16.0f, 0.1f, 1.0f);   // the band's height, a share of the eye's
-        const bool board = g_campfire.load() && g_set.campfireMenuBoard.load();
-        hud::SetWorkspaceBand(board ? band * g_set.campfireMenuTop.load() : -1.0f, board ? band : 1.0f);
+        const bool board = g_campfire.load() && (select || g_set.campfireMenuBoard.load());
+        // the character select screen: the whole menu band on the board
+        hud::SetWorkspaceBand(board ? (select ? 0.0f : band * g_set.campfireMenuTop.load()) : -1.0f, board ? band : 1.0f);
         hud::SetBoardClear(g_set.campfireBoardClear.load());
     }
 #endif
@@ -9417,6 +9440,9 @@ std::atomic<int> g_skyPalette{-1};   // kPalettes index while the sky shows, els
 std::atomic<bool> g_arcaneSky{false}; // native Arcane backdrop replacement, not added outdoor sky
 std::atomic<int> g_fogAct{0};        // the area's act for the fog colour, caves too; 0 = unknown
 std::atomic<bool> g_underground{false};   // in the world, off the outdoor list: the fog takes [fog] color_caves
+// The scene up is the character select screen's ([campfire] select), not character creation's: g_campfire is set
+// too, for the stereo, the camera and the board; no hero picking, fire, caption or sky of ours there.
+std::atomic<bool> g_campfireSelect{false};
 std::atomic<bool> g_campfire{false};  // [campfire] enabled and its scene up: taken for a world (SkyTick)
 std::atomic<bool> g_inWorld{false};  // a game area is loaded: not the main menu (its own "frontend" biome), not before any
 std::atomic<bool> g_ceilBiome{false};   // the area's biome is on [ceiling] biomes
@@ -10362,7 +10388,7 @@ bool MonsterPosition(uint32_t id,float out[3]) {
 // The campfire under our sky ([campfire] sky, [sky] enabled): its void - over the player, above the
 // scene's band of mountains - gets Act 5's sky, menus or not; fog and the rest stay off there.
 bool CampfireSky() {
-    return g_campfire.load() && g_set.campfireSky.load() && g_set.skyOn.load() && g_enabled.load();
+    return g_campfire.load() && !g_campfireSelect.load() && g_set.campfireSky.load() && g_set.skyOn.load() && g_enabled.load();
 }
 // Act 5's palette (Harrogath's): the campfire is its west gate.
 int CampfireSkyPalette() {
@@ -10387,8 +10413,10 @@ void SkyTick() {
     static uint32_t seenGen = ~0u;
     static std::string biome;
     static int palette = -1;
-    if (const uint32_t gen = g_biomeGen.load(); gen != seenGen) {
-        seenGen = gen;
+    static bool seenSelect = false;   // the character select screen comes and goes under one biome (the title screen has it too)
+    const bool selectUp = g_set.campfireSelect.load() && gamestate::CharacterSelectOpen();
+    if (const uint32_t gen = g_biomeGen.load(); gen != seenGen || selectUp != seenSelect) {
+        seenGen = gen; seenSelect = selectUp;
         AcquireSRWLockShared(&g_biomeLock); biome = g_biome; ReleaseSRWLockShared(&g_biomeLock);
         palette = SkyPaletteFor(biome, g_set.skyAlways.load());
         // Not a world: the main menu (act2_frontend_biome) and the menu scenes of
@@ -10398,8 +10426,12 @@ void SkyTick() {
                            biome.rfind("ui_", 0) != 0;
         // [campfire] enabled: character creation's campfire scene taken for a world, for its
         // stereo and camera only (CampfireView); no act, fog, sky or ceiling of its own.
-        const bool campfire = g_set.campfireOn.load() && biome.rfind("ui_characterselect", 0) == 0;
-        if (campfire) LogF("vrcam: campfire - '%s' in stereo, round you", biome.c_str());
+        // [campfire] select: the character select screen's scene (actN_frontend_biome, the hero's last act) as well,
+        // while the main menu shows its hero list.
+        const bool select = selectUp && biome.find("frontend") != std::string::npos;
+        const bool campfire = select || (g_set.campfireOn.load() && biome.rfind("ui_characterselect", 0) == 0);
+        g_campfireSelect.store(select);
+        if (campfire) LogF("vrcam: campfire - '%s' in stereo, round you%s", biome.c_str(), select ? " (the character select screen)" : "");
         if (campfire && !g_campfire.load()) g_campfireArrived.store(true);
         if (!campfire) g_campfireShown.store(false);
         g_campfire.store(campfire);

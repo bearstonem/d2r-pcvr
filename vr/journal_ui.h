@@ -11,6 +11,7 @@ bool StashButtonsShown(); // VR previous/next stash tabs, stash_buttons.h
 bool StatsButtonShown();  // the tabbed menu alone (not a cube or world panel): its Advanced Stats button, stats_button.h
 bool RespecButtonShown(); // the tabbed menu's Character page alone: Reset Skills & Stats, respec_button.h
 uint32_t PanelChanges();  // counts every panel opened or closed (leather::Back)
+bool CharacterSelectOpen(); // the main menu with its hero list up: the character select screen ([campfire] select)
 bool KeyboardShown();     // character creation with a hero picked: the name box, so the VR keyboard (vr_keyboard.h)
 uint32_t KeyboardEpoch(); // changes each time the name box comes up anew (a closed keyboard comes back)
 bool CloseLeatherMenu();  // queue: close the tabbed menu if only it and its pages are open, the cursor empty
