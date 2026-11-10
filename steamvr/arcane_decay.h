@@ -1,4 +1,5 @@
 #pragma once
+#include "atlas_dirty.h"
 #include "latest_worker.h"
 #include <algorithm>
 #include <array>
@@ -268,7 +269,12 @@ struct PaintJob {
 struct PaintImage {
     uint64_t key = 0;
     std::vector<uint8_t> pixels;
+    atlasdirty::Change change;   // filled by the transport's painter (atlas_dirty.h)
 };
+inline PaintImage Paint(const PaintJob& job) {
+    return PaintImage{PaintKey(job.intensity, job.depletion, job.time),
+                      Compose(job.intensity, job.depletion, job.time)};
+}
 
 // Arcane Decay Painter: runs Compose() asynchronously on a background worker thread.
 // Ensures in-flight requests finish before scheduling new ones, preventing worker starvation.
@@ -278,10 +284,7 @@ class Painter {
 
 public:
     using Work = std::function<PaintImage(const PaintJob&)>;
-    explicit Painter(Work work = [](const PaintJob& job) {
-        return PaintImage{PaintKey(job.intensity, job.depletion, job.time),
-                          Compose(job.intensity, job.depletion, job.time)};
-    }) : worker(std::move(work)) {}
+    explicit Painter(Work work = Paint) : worker(std::move(work)) {}
 
     bool Start() { return worker.Start(); }
     bool Busy() const { return request != 0; }

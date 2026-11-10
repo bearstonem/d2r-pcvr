@@ -14,6 +14,7 @@
 // Everything is drawn as light (summed, then turned to straight alpha), from the stroke, its id and
 // the time alone: the same job paints the same picture.
 // Value-only apart from the worker: steamvr/glyph_trail_test.cpp.
+#include "atlas_dirty.h"
 #include "glyph_recognizer.h"
 #include "latest_worker.h"
 #include <algorithm>
@@ -665,7 +666,7 @@ inline std::vector<uint8_t> Paint(const Job& job) {
     return Shade(coverage, job);
 }
 
-struct Image { uint64_t key = 0, strokeId = 0; std::vector<uint8_t> pixels; };
+struct Image { uint64_t key = 0, strokeId = 0; std::vector<uint8_t> pixels; atlasdirty::Change change; };   // change: filled by the transport's painter (atlas_dirty.h)
 
 // On a worker thread: the latest job only (latest_worker.h), as the other atlas painters. The worker
 // keeps the coverage of the stroke it last painted.
