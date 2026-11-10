@@ -1829,9 +1829,8 @@ std::vector<uint8_t> PaintGameplay() {
     POINT feather[]={{540,975},{520,997},{520,1017},{542,1000}};Polygon(dc,feather,4);
     POINT feather2[]={{548,975},{568,997},{568,1017},{546,1000}};Polygon(dc,feather2,4);
     SelectObject(dc,oldBrush);DeleteObject(arrowhead);
-    label(L"Trigger: nock",{576,768,1024,853});
-    label(L"Pull back",{576,853,1024,938});
-    label(L"Release to shoot",{576,938,1024,1024});
+    // (576,768)-(1024,1024) held the bow's "Trigger: nock / Pull back / Release to
+    // shoot" text under the bow until 2026-11-09, when the owner asked for it gone.
     sewerprompt::Paint(dc,sewerprompt::AtlasX,sewerprompt::AtlasY);
     GdiFlush();
     std::vector<uint8_t> rgba(1024*1024*4);const auto* b=static_cast<const uint8_t*>(bits);
@@ -6656,7 +6655,7 @@ void EndPair() {
     XrCompositionLayerQuad palette{XR_TYPE_COMPOSITION_LAYER_QUAD},bottle{XR_TYPE_COMPOSITION_LAYER_QUAD},chosen{XR_TYPE_COMPOSITION_LAYER_QUAD};
     std::array<XrCompositionLayerQuad,2> arrow{{{XR_TYPE_COMPOSITION_LAYER_QUAD},{XR_TYPE_COMPOSITION_LAYER_QUAD}}};
     XrCompositionLayerQuad bowLaser{XR_TYPE_COMPOSITION_LAYER_QUAD},bowLaserEnd{XR_TYPE_COMPOSITION_LAYER_QUAD};
-    XrCompositionLayerQuad nock{XR_TYPE_COMPOSITION_LAYER_QUAD},bowHint{XR_TYPE_COMPOSITION_LAYER_QUAD},activeSkill{XR_TYPE_COMPOSITION_LAYER_QUAD},leftActiveSkill{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    XrCompositionLayerQuad nock{XR_TYPE_COMPOSITION_LAYER_QUAD},activeSkill{XR_TYPE_COMPOSITION_LAYER_QUAD},leftActiveSkill{XR_TYPE_COMPOSITION_LAYER_QUAD};
     const bool gameplayVisible=layer&&!panelMode&&motionControls.load()&&motionInput.active&&gameplayChain&&motionOutput.rayValid;
     auto motionQuad=[&](XrCompositionLayerQuad& q,XrPosef pose,float w,float h,XrRect2Di rect,XrSwapchain chain) {
         if(count>=contentLimit||!gameplay::Valid(MotionPose(pose))||!std::isfinite(w)||!std::isfinite(h)||w<=0||h<=0)return;
@@ -6807,7 +6806,6 @@ void EndPair() {
     static bool sewerHintWasShown=false;
     if(sewerHintShown!=sewerHintWasShown){Say(sewerHintShown?"Frame sewer prompt: shown":"Frame sewer prompt: hidden");sewerHintWasShown=sewerHintShown;}
     if(gameplayVisible&&motionOutput.bowReady) {
-        const auto bow=motionInput.hand[1];
         const auto center=motionOutput.bowDrawing?motionInput.hand[0].p:motionOutput.nockPoint;
         // The game's bow mesh supplies the string. Do not draw the teal
         // V-string guide over it, even when its rig cannot follow the hand.
@@ -6824,9 +6822,6 @@ void EndPair() {
             const float size=motionOutput.bowInReach?.045f:.025f;
             motionQuad(nock,XrPose({center,Q(head.orientation)}),size,size,At(panelatlas::Pointer,{{0,32},{64,64}}),pointerChain);
         }
-        const int hint=motionOutput.bowDrawing?(motionOutput.bowCharged?2:1):0;
-        motionQuad(bowHint,XrPose({bow.p+math::Vec{0,-.25f,0},Q(head.orientation)}),.24f,.045f,
-            {{576,768+hint*85},{448,85}},gameplayChain);
     }
     // Bow path laser: the release's own tail and direction, in room space like
     // the arrow guide; resolveBow only yaws and scales it, so it stays straight.
