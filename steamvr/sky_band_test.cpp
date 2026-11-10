@@ -130,7 +130,8 @@ SamplerState wrapClamp : register(s0);       // as SkyBand*Smp: AddressU WRAP, A
 RWStructuredBuffer<float4> output : register(u0);
 static float Timer;
 static const float SkyDrift=1, SkyTex=1, SkyNightMix=0;
-static const bool SkyCapOn=false;
+static const bool SkyCapOn=false, SkyPano=false;   // the campfire's panorama: off, as in play
+float3 PanoSky(float3 dir) { return 0; }
 static const float3 SkyZenith=0;
 float3 BandAt(int slot, float4 t, bool night) { return BandNow.SampleLevel(wrapClamp, t.xy, t.w).rgb; }
 float3 CapAt(int slot, float4 t, bool night) { return 0; }

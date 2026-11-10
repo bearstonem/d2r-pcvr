@@ -272,22 +272,26 @@ float3 CapAt(int slot, float4 t, bool night)
     return tex2Dlod(SkyCap6Smp, t).rgb;
 }
 
+// The campfire's panorama ([campfire] panorama): PaintedSky hands over to it while SkyPano is set.
+float3 PanoSky(float3 dir)
+{
+    const float pel = degrees(asin(clamp(dir.y, -1.0, 1.0)));
+    const float pu = (atan2(dir.x, dir.z) / 6.2831853 + SkyPanoYaw / 360.0) * D2R_PANO_WRAPS;
+    const float pv = (SkyPanoHigh - pel) / max(SkyPanoHigh - SkyPanoLow, 1.0);
+    const float3 pc = tex2Dlod(SkyPanoSmp, float4(pu, saturate(pv), 0, 0)).rgb;
+    // over the picture's top: one colour, its top row's average all round (not a per-direction
+    // colour, which pinched into a cone overhead)
+    float3 top = 0.0;
+    [unroll] for (int k = 0; k < 8; ++k) top += tex2Dlod(SkyPanoSmp, float4((k + 0.5) / 8.0, 0.04, 0, 6)).rgb;
+    top /= 8.0;
+    // near the zenith (or the picture's top, if lower) into that one colour: a picture's pole pinches
+    const float edge = min(SkyPanoHigh, 90.0);
+    return lerp(pc, top, smoothstep(edge - 25.0, edge - 3.0, pel));
+}
+
 float3 PaintedSky(float3 dir)
 {
-    if (SkyPano) {
-        const float pel = degrees(asin(clamp(dir.y, -1.0, 1.0)));
-        const float pu = (atan2(dir.x, dir.z) / 6.2831853 + SkyPanoYaw / 360.0) * D2R_PANO_WRAPS;
-        const float pv = (SkyPanoHigh - pel) / max(SkyPanoHigh - SkyPanoLow, 1.0);
-        const float3 pc = tex2Dlod(SkyPanoSmp, float4(pu, saturate(pv), 0, 0)).rgb;
-        // over the picture's top: one colour, its top row's average all round (not a per-direction
-        // colour, which pinched into a cone overhead)
-        float3 top = 0.0;
-        [unroll] for (int k = 0; k < 8; ++k) top += tex2Dlod(SkyPanoSmp, float4((k + 0.5) / 8.0, 0.04, 0, 6)).rgb;
-        top /= 8.0;
-        // near the zenith (or the picture's top, if lower) into that one colour: a picture's pole pinches
-        const float edge = min(SkyPanoHigh, 90.0);
-        return lerp(pc, top, smoothstep(edge - 25.0, edge - 3.0, pel));
-    }
+    if (SkyPano) return PanoSky(dir);
     const float el = degrees(asin(clamp(dir.y, -1.0, 1.0)));
     // once round the circle, drifting slowly so the clouds move; the half (exact in
     // floats) keeps the drift's old speed and puts a twice-laid picture's texels
