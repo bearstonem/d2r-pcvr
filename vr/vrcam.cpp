@@ -66,6 +66,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <shlobj.h>
@@ -10137,9 +10138,36 @@ void Install() {
 // The views of the toolbar's and the map's copies bound to the effect (hud::PictureNow), 0 = none yet.
 uint64_t g_pieceBound[3] = {};   // the toolbar, the map, the labels' layer
 
+// The effect's uniforms by name, looked up once per load of the effect: every frame set some 150 of them, each
+// with a search of ReShade's ~200 by name. A handle lives as long as the technique handles above - ReShade
+// invalidates both at reshade_reloaded_effects (Forget) - and belongs to one runtime. Only found uniforms are kept:
+// one an older .fx lacks, or the effect not compiled yet, is looked for again each time, as before.
+struct UniformNameHash {
+    using is_transparent = void;
+    size_t operator()(std::string_view name) const noexcept { return std::hash<std::string_view>{}(name); }
+};
+std::unordered_map<std::string, reshade::api::effect_uniform_variable, UniformNameHash, std::equal_to<>> g_uniforms;
+reshade::api::effect_runtime* g_uniformsOf = nullptr;
+reshade::api::effect_uniform_variable Uniform(reshade::api::effect_runtime* rt, const char* name) {
+    if (rt != g_uniformsOf) { g_uniforms.clear(); g_uniformsOf = rt; }
+    if (const auto found = g_uniforms.find(std::string_view(name)); found != g_uniforms.end()) return found->second;
+    const reshade::api::effect_uniform_variable u = rt->find_uniform_variable("D2R_DepthFog.fx", name);
+    if (u.handle) g_uniforms.emplace(name, u);
+    return u;
+}
+// Once a frame, before the first uniform is set: one real lookup against the kept handle. Should the effect ever
+// have been rebuilt without the reload event, the handles are dropped here instead of being written through.
+void CheckUniforms(reshade::api::effect_runtime* rt) {
+    if (rt != g_uniformsOf || g_uniforms.empty()) return;
+    const auto kept = g_uniforms.find(std::string_view("OwnDepth"));
+    if (kept == g_uniforms.end()) return;
+    if (rt->find_uniform_variable("D2R_DepthFog.fx", "OwnDepth").handle != kept->second.handle) g_uniforms.clear();
+}
+
 void Forget(reshade::api::effect_runtime*) {
     for (auto& size : g_tech) size[0] = size[1] = {0};
     g_pieceBound[0] = g_pieceBound[1] = g_pieceBound[2] = 0;
+    g_uniforms.clear();
 }
 // Some size of the effect is on for this frame.
 bool EffectOn(reshade::api::effect_runtime* rt) {
@@ -10149,12 +10177,12 @@ bool EffectOn(reshade::api::effect_runtime* rt) {
 }
 
 void SetFloats(reshade::api::effect_runtime* rt, const char* name, const float* v, size_t n) {
-    const reshade::api::effect_uniform_variable u = rt->find_uniform_variable("D2R_DepthFog.fx", name);
+    const reshade::api::effect_uniform_variable u = Uniform(rt, name);
     if (u.handle) rt->set_uniform_value_float(u, v, n);
 }
 void SetFloat(reshade::api::effect_runtime* rt, const char* name, float v) { SetFloats(rt, name, &v, 1); }
 void SetBool(reshade::api::effect_runtime* rt, const char* name, bool v) {
-    const reshade::api::effect_uniform_variable u = rt->find_uniform_variable("D2R_DepthFog.fx", name);
+    const reshade::api::effect_uniform_variable u = Uniform(rt, name);
     if (u.handle) rt->set_uniform_value_bool(u, &v, 1);
 }
 
@@ -10618,6 +10646,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
     FRAME_PROFILE(EffectsSetup);
     pairtime::g_effBegin.store(pairtime::UsNow());
     g_usesDrawn = 0;
+    CheckUniforms(rt);
     {
         float s[2];
         renderscale::Frame(rt, s);
@@ -11014,7 +11043,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
             SetFloat(rt, "CeilWet", wet);
             SetFloat(rt, "CeilBump", detail);
             SetFloat(rt, "CeilContrast", contrast);
-            if (const reshade::api::effect_uniform_variable u = rt->find_uniform_variable("D2R_DepthFog.fx", "CeilSteps"); u.handle) {
+            if (const reshade::api::effect_uniform_variable u = Uniform(rt, "CeilSteps"); u.handle) {
                 const int steps = g_set.ceilSteps.load();
                 rt->set_uniform_value_int(u, &steps, 1);
             }
@@ -11350,7 +11379,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
             for (int e = 0; e < 2; ++e) {
                 const int from = AfrOn() ? e : (eye & 1);
                 v[e] = g_stampHist[from][(g_stampHistAt[from] - g_set.pipelineDepth.load()) & 3];
-                const reshade::api::effect_uniform_variable u = rt->find_uniform_variable("D2R_DepthFog.fx", e ? "FrameStamp1" : "FrameStamp0");
+                const reshade::api::effect_uniform_variable u = Uniform(rt, e ? "FrameStamp1" : "FrameStamp0");
                 if (u.handle) rt->set_uniform_value_uint(u, &v[e], 1);
             }
             flog::Line("R,%u,%d,%u,%u", flog::Pass(), eye & 1, v[0], v[1]);
@@ -11413,8 +11442,10 @@ void TryRegister() {
 #endif
 #ifdef D2RVR_NATIVE_OPENXR
     reshade::register_event<reshade::addon_event::reshade_reloaded_effects>(&d2rvr::D3D12Only<&Forget>::Call);
+    reshade::register_event<reshade::addon_event::destroy_effect_runtime>(&d2rvr::D3D12Only<&Forget>::Call);   // its effects go with it
 #else
     reshade::register_event<reshade::addon_event::reshade_reloaded_effects>(&Forget);
+    reshade::register_event<reshade::addon_event::destroy_effect_runtime>(&Forget);
 #endif
 #ifdef D2RVR_NATIVE_OPENXR
     reshade::register_event<reshade::addon_event::bind_render_targets_and_depth_stencil>(&d2rvr::D3D12Only<&renderscale::OnBind>::Call);
