@@ -2948,7 +2948,7 @@ line, and each gesture given up partway its old line (`spellmotion::DropLine`: `
 `Frame charge:`, `Frame holy shield:`, `Frame heavens:`, `Frame shapeshift:`). Tests: `spell-motion-test`
 (the pages, the gate, every class's cards watched), `motions-paladin-test` and `motions-druid-test` (their
 own engines' tests on the watchers, gated: one grip or none never casts, both do; and the hum rising before
-each cast), `interaction-test` (the Paladin's and the Druid's pages; no box for the Warlock or an unknown
+each cast), `interaction-test` (the Paladin's, the Druid's and the Warlock's pages; no box for an unknown
 class), `interaction-motions-test` (the Paladin's page drawn).
 
 The Amazon's, the Barbarian's, the Necromancer's and the Assassin's motions (owner, 2026-11-04: "also
@@ -3007,6 +3007,18 @@ there.
   until they cross; Venom, the crossed wrists flicked apart fast; Blade Shield, the right hand circled
   in front twice; Shadow Warrior, both hands from the chest pushed together to one side; Mind Blast,
   both hands at the temples, pushed straight forward.
+- Warlock (owner, 2026-11-10: "build the motion controls for the missing classes"; `motions_warlock.h`,
+  `[motions] warlock_off`): twelve of its skills, each on one of the Necromancer's shapes, with that
+  class's detectors, tuning and order (a class watches only its own motions). Summon Goatman, the right
+  arm swept up fast in front, toward its spot; Summon Tainted, the left arm; Summon Defiler, both arms;
+  Hex: Bane, the right fist punched out; Hex: Purge, the left fist; Hex: Siphon, both arms swept up in a
+  wide V; Psychic Ward, both fists crossed on the chest and held; Eldritch Blast, both fists punched out
+  together; Ring of Fire, hands together at the chest, then flung wide; Sigil: Lethargy, the right hand
+  swept across the chest; Sigil: Rancor, both fists pushed down from the chest to the waist; Sigil:
+  Death, both hands apart in front, brought together. Summons and sigils land on a spot (along the arm,
+  at the sweep's middle, or four cells straight ahead for those of both hands). Its other skills stay on
+  their buttons: those that need a monster, a corpse or the demon under the pointer, the bolt, the
+  weapon's attacks, and Blood Boil, Flame Wave, Apocalypse and Abyss. Not yet done in a headset.
 
 A tester's first pass (2026-11-05) changed them: "All motions should be quick and repeatable
 sequences that don't need you to move slow", "Please no floor stuff", Raise Skeleton worked once
