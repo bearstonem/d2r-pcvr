@@ -3562,8 +3562,7 @@ bool CaptureShield(uintptr_t self,const ShieldContext& context,const HeroXform& 
     if(!source.boundCount)return false;
     ShieldStage(128);
     {
-        AcquireSRWLockExclusive(&ecs::g_lock);
-        struct Unlock {~Unlock(){ReleaseSRWLockExclusive(&ecs::g_lock);}} unlock;
+        ecs::Locked locked(false);   // read only
         uint32_t index=0,parent=0;uintptr_t components=0;
         if(!ecs::EntityOf(self,&source.entity)||!ecs::Dense(ecs::g_xs,source.entity,&index)||
            !Get(ecs::g_xs+0x38,&components)||!components||
@@ -3676,7 +3675,7 @@ void CaptureCrossbow(uintptr_t self) {
     HeroXform hero;if(!HeroTransform(&hero)||hero.self!=attach.hero)return;
     g_crossbowStages.fetch_or(8);
     {
-        AcquireSRWLockExclusive(&ecs::g_lock);Unlock ecsUnlock{&ecs::g_lock};
+        ecs::Locked locked(false);   // the registry is only read; the rig written here is under g_crossbowRigLock
         uintptr_t existing=0;
         if(!rig.entityKnown||!ecs::SkeletonOf(rig.entity,&existing)||existing!=self) {
             rig.entityKnown=false;if(rig.lookupAt&&now-rig.lookupAt<500)return;rig.lookupAt=now;
@@ -3722,8 +3721,7 @@ void RefreshCrossbow(uintptr_t hero) {
     if(now<next||!nextLook.compare_exchange_strong(next,now+1000))return;
     std::vector<uint64_t> components;
     {
-        AcquireSRWLockExclusive(&ecs::g_lock);
-        struct Unlock {~Unlock(){ReleaseSRWLockExclusive(&ecs::g_lock);}} unlock;
+        ecs::Locked locked(false);   // read only
         uintptr_t begin=0,end=0,data=0;
         if(!ecs::IsStorage(ecs::g_ss,ecs::g_vtS)||!Get(ecs::g_ss+0x20,&begin)||!Get(ecs::g_ss+0x28,&end)||
            end<begin||(end-begin)/4>32768||!Get(ecs::g_ss+0x38,&data)||!data)return;
@@ -3790,8 +3788,7 @@ void PoseMotionBow(uintptr_t self) {
     if(!HeroTransform(&hero))return;
     bow::Mat itemLocal;
     {
-        AcquireSRWLockExclusive(&ecs::g_lock);
-        struct EcsUnlock {~EcsUnlock(){ReleaseSRWLockExclusive(&ecs::g_lock);}} ecsUnlock;
+        ecs::Locked locked(false);   // the registry is only read; the rig written here is under g_bowRigLock
         uintptr_t existing=0;
         if(!held.entityKnown||!ecs::SkeletonOf(held.entity,&existing)||existing!=self) {
             held.entityKnown=false;
@@ -4695,9 +4692,9 @@ void CrossbowRendered(uint32_t entity,uintptr_t component,uintptr_t matrix) {
        source.generation!=HeroGen()||source.generation!=attach.heroGeneration||source.equipment!=attach.equipment||
        !Get(component+0xC0,&parent)||parent!=source.parent)return;
     {
-        AcquireSRWLockExclusive(&ecs::g_lock);uintptr_t existing=0;
+        AcquireSRWLockShared(&ecs::g_lock);uintptr_t existing=0;   // read only
         const bool owned=ecs::SkeletonOf(entity,&existing)&&existing==source.self;
-        ReleaseSRWLockExclusive(&ecs::g_lock);if(!owned)return;
+        ReleaseSRWLockShared(&ecs::g_lock);if(!owned)return;
     }
     uintptr_t world=0,matrices=0;int count=0;Mat cog,itemWorld;
     if(!Get(source.self+0x20,&world)||!Get(world,&count)||count!=source.count||source.cog<0||source.cog>=count||
@@ -4747,9 +4744,9 @@ void ShieldRendered(uint32_t entity,uintptr_t component,uintptr_t matrix) {
        source.generation!=context.generation||source.generation!=HeroGen()||source.equipment!=context.equipment||source.session!=context.session||
        !Get(component+0xC0,&parent)||parent!=source.parent)return;
     {
-        AcquireSRWLockExclusive(&ecs::g_lock);uintptr_t existing=0;
+        AcquireSRWLockShared(&ecs::g_lock);uintptr_t existing=0;   // read only
         const bool owned=ecs::SkeletonOf(entity,&existing)&&existing==source.self;
-        ReleaseSRWLockExclusive(&ecs::g_lock);if(!owned)return;
+        ReleaseSRWLockShared(&ecs::g_lock);if(!owned)return;
     }
     uintptr_t model=0,world=0,matrices=0;int count=0;Mat itemWorld;
     if(!Get(source.self+8,&model)||model!=source.model||!Get(source.self+0x20,&world)||
@@ -4967,8 +4964,7 @@ std::string WeaponEntityDiag() {
         for (const auto& [s, t] : g_itemSelves) if (now - t < 1000) selves.push_back(s);
         ReleaseSRWLockShared(&g_itemSelfLock);
     }
-    AcquireSRWLockExclusive(&ecs::g_lock);
-    struct Unlock { ~Unlock() { ReleaseSRWLockExclusive(&ecs::g_lock); } } unlock;
+    ecs::Locked locked(false);   // read only
     std::string out;
     int children = 0;
     for (const uintptr_t s : selves) {
@@ -5062,8 +5058,23 @@ bool HeroTransform(HeroXform* out, const char** why) {
     static const char* const kNoHero = "the hero has not been posed in the last 2 s";
     const uintptr_t self = g_heroSelf.load();
     if (!g_gameBase.load() || !self || GetTickCount64() - g_heroSeen.load() > 2000) { if (why) *why = kNoHero; return false; }
-    AcquireSRWLockExclusive(&ecs::g_lock);
-    struct Unlock { ~Unlock() { ReleaseSRWLockExclusive(&ecs::g_lock); } } unlock;
+    {   // Nothing to find: the storages are the ones known and his entity the one kept. Read under
+        // the shared lock - the same checks as below, on each storage's header (ten guarded reads
+        // for thirteen) - so the pose workers reading placements do not wait on this.
+        ecs::Locked locked(false);
+        ecs::Header x, s; uintptr_t held = 0; uint32_t i = 0;
+        if (ecs::g_cachedSelf == self && ecs::HeaderOf(ecs::g_xs, ecs::g_vtX, &x) && ecs::HeaderOf(ecs::g_ss, ecs::g_vtS, &s) &&
+            ecs::SkeletonOf(s, ecs::g_cachedEntity, &held) && held == self && ecs::Dense(x, ecs::g_cachedEntity, &i) && x.components) {
+            out->self = self;
+            out->entity = ecs::g_cachedEntity;
+            out->comp = uintptr_t(x.components) + (uintptr_t)i * kTransformSize;
+            out->parent = 0xFFFFFFFFu;
+            Get(out->comp + 0xC0, &out->parent);
+            return true;
+        }
+    }
+    // The storages or his entity are to be found again (or do not read): exclusively, as it replaces them.
+    ecs::Locked locked(true);
     if (!ecs::IsStorage(ecs::g_xs, ecs::g_vtX) || !ecs::IsStorage(ecs::g_ss, ecs::g_vtS)) {
         // looked for at most twice a second (a failed look reads ~200 pool entries)
         const ULONGLONG now = GetTickCount64();
@@ -5109,8 +5120,17 @@ uintptr_t g_ms = 0, g_vtM = 0;              // the model storage and its vtable 
 ULONGLONG g_modelLook = 0;
 
 bool EntityTransform(uint32_t entity, uintptr_t* comp) {
-    AcquireSRWLockExclusive(&ecs::g_lock);
-    struct Unlock { ~Unlock() { ReleaseSRWLockExclusive(&ecs::g_lock); } } unlock;
+    {   // the storages known: read under the shared lock, whatever the answer
+        ecs::Locked locked(false);
+        ecs::Header x;
+        if (ecs::HeaderOf(ecs::g_xs, ecs::g_vtX, &x) && ecs::IsStorage(ecs::g_ss, ecs::g_vtS)) {
+            uint32_t i = 0;
+            if (!ecs::Dense(x, entity, &i) || !x.components) return false;
+            *comp = uintptr_t(x.components) + (uintptr_t)i * kTransformSize;
+            return true;
+        }
+    }
+    ecs::Locked locked(true);   // to be found again
     if (!ecs::IsStorage(ecs::g_xs, ecs::g_vtX) || !ecs::IsStorage(ecs::g_ss, ecs::g_vtS)) {
         const ULONGLONG now = GetTickCount64();
         if (now - ecs::g_lastStorageLook < 500) return false;
@@ -5125,8 +5145,15 @@ bool EntityTransform(uint32_t entity, uintptr_t* comp) {
 }
 
 uintptr_t EntityModelInstance(uint32_t entity) {
-    AcquireSRWLockExclusive(&ecs::g_lock);
-    struct Unlock { ~Unlock() { ReleaseSRWLockExclusive(&ecs::g_lock); } } unlock;
+    {   // the model storage known: read under the shared lock, whatever the answer
+        ecs::Locked locked(false);
+        ecs::Header m;
+        if (ecs::HeaderOf(g_ms, g_vtM, &m)) {
+            uint32_t i = 0; uintptr_t inst = 0;
+            return ecs::Dense(m, entity, &i) && m.components && Get(uintptr_t(m.components) + (uintptr_t)i * kModelCompSize, &inst) ? inst : 0;
+        }
+    }
+    ecs::Locked locked(true);   // g_ms and g_vtM are found, and replaced, below
     if (!ecs::IsStorage(g_ms, g_vtM)) {
         const ULONGLONG now = GetTickCount64();
         if (now - g_modelLook < 500) return 0;
