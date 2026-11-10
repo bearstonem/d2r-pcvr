@@ -133,6 +133,23 @@ bool HandAimRay(int hand,float origin[3],float direction[3]);
 bool LootHandRay(int hand,float origin[3],float direction[3],uint32_t* gate);
 int CastButtonHand();        // the hand whose button holds a native cast now, -1 none
 bool HandSpellHeld(int hand); // that hand's physical spell button is held
+// Any thread: the right hand's trigger or A, as the controllers read them this frame (the campfire's pick).
+bool RightPickHeld();
+// Any thread: the campfire's pointer from the right hand shown, a dot this far along it (metres) - the game's pointer.
+void SetCampfirePointer(bool on, float metres);
+// The campfire's menu (name, Create, Back, the checkboxes) as a board in the scene: its width,
+// how far ahead of the eyes and how far below them it stands when the scene begins (metres).
+void SetCampfireMenu(float width, float distance, float drop);
+// The campfire's caption: the part of the game's menu band (shares of it: left, top, right, bottom) where the
+// game writes the picked hero's class and words, on a board of its own above the heroes (width, distance
+// ahead and rise over the eyes, metres). on=false: none.
+void SetCampfireCaption(bool on, const float rect[4], float width, float distance, float rise);
+// Any thread: the laser is on the campfire's menu board this frame - the game's pointer is the board's.
+bool CampfireMenuHit();
+// Any thread: the campfire's own sound (campfire_audio.h) on while the scene is up - the fire's roar and
+// crackle at `ambient`, a click's whoosh at `burst` (0..1, times the game's volume); CampfireBurst: a click on the fire.
+void SetCampfireFire(bool on, float ambient, float burst);
+void CampfireBurst();
 // Paladin Fist of the Heavens motion (motions_paladin.h). Armed: the skill is
 // learned, its card on and gestures on (vrcam keeps the monster scan running).
 // Request: a call waiting for its target (its number, 0 none); vrcam answers
@@ -269,7 +286,10 @@ bool SpatialMenu();
 // mapNorth is the unmodified native camera's horizontal heading (map-up).
 // scaleHeight: the eye height the world's scale is taken from (units per metre over
 // userEyeHeight), 0 = eyeHeight; a druid's form stands its eyes apart from it.
+// stale: between headset frames too, from the last poses (the campfire: its camera
+// ticks for the left eye after the pair ended, before the next headset frame begins).
 bool View(float out[16], const float hero[3], float eyeHeight,
-          float userEyeHeight, float bodyHeading, float recenterYaw, int eye, float mapNorth, float scaleHeight = 0);
-bool Projection(float out[16], float nearWorld, int eye);
+          float userEyeHeight, float bodyHeading, float recenterYaw, int eye, float mapNorth, float scaleHeight = 0,
+          bool stale = false);
+bool Projection(float out[16], float nearWorld, int eye, bool stale = false);   // stale: as View
 }

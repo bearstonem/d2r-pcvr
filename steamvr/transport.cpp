@@ -62,6 +62,7 @@
 #include "guard_strain.h"
 #include "guard_strain_paint.h"
 #include "heartbeat.h"
+#include "campfire_audio.h"
 #include "wrist_compass.h"
 #include "panel_atlas.h"
 #include "map_zoom.h"
@@ -133,7 +134,7 @@
 #include "weapon_heft.h"
 #include "hit_reactions.h"
 
-namespace gamestate {uint32_t WeaponType();uint32_t HandsKey();uint32_t WeaponSet();uint32_t WeaponClass();uint32_t TwoHanded();uint64_t LocalPlayer();uint32_t MenuEpoch();int AttackWsm(int hand);}
+namespace gamestate {bool MenuOpen();uint32_t WeaponType();uint32_t HandsKey();uint32_t WeaponSet();uint32_t WeaponClass();uint32_t TwoHanded();uint64_t LocalPlayer();uint32_t MenuEpoch();int AttackWsm(int hand);}
 namespace gamecmd {void RequestPotion(int slot);void CancelPotion();}
 namespace gamestate {void MenuMap(bool wanted);uint32_t QuestNotices();bool NoticePanelOpen();bool NoticeText(int kind,char* out,uint32_t size);}
 namespace gamestate {bool LeftShield();bool RightThrowingPotion();uint32_t RightThrowingPotionCode();framevr::dualwield::Equipment MeleeEquipment();}
@@ -457,6 +458,11 @@ void PlayGuardBreak() {
     breakStream.Reap();
     if(!breakStream.Queue(source->rate,source->channels,std::move(pcm)))Say("Frame guard break: sound did not play");
 }
+// The campfire's own sound (campfire_audio.h): the fire's roar and crackle while the character
+// screen's scene is up, and a whoosh with a flurry of crackles at a click on the fire. Its own
+// stream, kept ~150 ms ahead, a short buffer at a time so the click is heard at once.
+HeartStream fireStream;fireaudio::Synth fireSynth;
+std::atomic<bool> fireOn{false};std::atomic<float> fireAmbient{.5f},fireBurstGain{1.f};std::atomic<uint32_t> fireBursts{0};uint32_t fireBurstsSeen=0;
 XrSwapchain interactionChain=XR_NULL_HANDLE;
 XrSwapchain companionChain=XR_NULL_HANDLE;
 bool companionAtlasPending=false,companionPaintValid=false;
@@ -778,6 +784,15 @@ std::atomic<bool> captureRequested{false};
 bool capturePair=false;
 uint32_t captureEyes=0,captureSerial=0;
 std::recursive_mutex mutex;
+std::atomic<bool> rightPickHeld{false};   // RightPickHeld
+std::atomic<bool> campfirePointer{false};std::atomic<float> campfirePointerM{4.f};   // SetCampfirePointer
+std::atomic<float> campfireMenuWidth{1.1f},campfireMenuDistance{1.0f},campfireMenuDrop{.9f};   // SetCampfireMenu
+std::atomic<bool> campfireCaption{false};std::atomic<float> campfireCaptionRect[4]{{0.f},{0.f},{1.f},{.2f}};   // SetCampfireCaption
+std::atomic<float> campfireCaptionWidth{3.f},campfireCaptionDistance{5.5f},campfireCaptionRise{1.f};
+std::atomic<bool> campfireMenuHit{false};   // the laser on the campfire's menu board (MenuPointer)
+// The board's capture failed at this campfire: the menu stays as the game draws it until the
+// scene is left (never the session-wide fallback below, which would take the in-game boards too).
+std::atomic<bool> campfireBoardFailed{false};
 DeferredWindowFocus windowFocus;
 XrInstance instance=XR_NULL_HANDLE;
 XrSystemId system=XR_NULL_SYSTEM_ID;
@@ -1126,7 +1141,7 @@ float beamLength=0;
 // keeps its own free grab, relative to where you face when it opens.
 panels::Grab panelGrab;
 panels::Offset menuOffset,settingsOffset;
-panels::Placement uiBase{},menuBase{},settingsBase{};
+panels::Placement uiBase{},menuBase{},settingsBase{},captionBase{};
 
 math::Quat Q(XrQuaternionf q) { return {q.x,q.y,q.z,q.w}; }
 math::Vec V(XrVector3f p) { return {p.x,p.y,p.z}; }
@@ -1257,6 +1272,7 @@ void CancelShieldCast() {
     if(shieldCast.issued)shieldCast.cancelled=true;else shieldCast={};
 }
 void ClearInput() {
+    rightPickHeld.store(false);   // the campfire's click let go: the headset off its head no longer reads it
     settingsPointer.Reset();settingsCard.Reset();settingsPressed={};settingsPopoverWatch.Reset();
     controllerRumbleLease.Update(0,false);
     hapticPulses.Cancel();hapticSequences.Clear();hapticHeart.Reset();
@@ -2184,6 +2200,8 @@ panels::Size UiSurfaceSize() {
     if(journalMode)return {uiSize,uiSize*(uiCrop[2]>0?float(uiCrop[3])/uiCrop[2]:1.3f)};
     // On the leather: its 16:9 menu band (the canvas is cropped to that band, CopyUi).
     if(leatherMode){const auto sheet=leather::Measure(leatherArt,leatherMenuWidth.load());return {sheet.menuWidth,sheet.menuHeight};}
+    // The campfire's menu board: the menu's lower strip only (hud's workspace band), its own width.
+    if(campfirePointer.load()&&uiCrop[2]>0&&uiCrop[3]>0){const float w=campfireMenuWidth.load();return {w,w*float(uiCrop[3])/float(uiCrop[2])};}
     return panels::Fit(uiCrop[2]>0?unsigned(uiCrop[2]):0,uiCrop[3]>0?unsigned(uiCrop[3]):0);
 }
 XrPosef UiSurfacePose() {
@@ -2256,8 +2274,15 @@ void MenuPointer(const menus::Pad& controls) {
     // anew (another hero picked, or creation opened again).
     const uint32_t keyboardEpoch=gamestate::KeyboardEpoch();
     if(keyboardClosed&&keyboardEpoch!=keyboardClosedEpoch)keyboardClosed=false;
+    // The campfire's menu board: the keyboard comes up only once the name box itself is pulled on
+    // (the middle of the board's strip, where the game puts the box), not as soon as a hero is
+    // picked - the heroes stay in reach of the laser until the name is wanted.
+    static bool campfireKeyboardOpen=false;
+    if(!campfirePointer.load()||!gamestate::KeyboardShown())campfireKeyboardOpen=false;
+    else if(pressed&&!triggerWasDown&&pointerHit&&hit.u>.36f&&hit.u<.64f){campfireKeyboardOpen=true;keyboardClosed=false;}
     const bool keyboardWas=keyboardShown;
-    keyboardShown=keyboardArtReady&&uiActive&&!journalMode&&!leatherMode&&gamestate::KeyboardShown()&&!keyboardClosed;
+    keyboardShown=keyboardArtReady&&uiActive&&!journalMode&&!leatherMode&&gamestate::KeyboardShown()&&!keyboardClosed&&
+        (!campfirePointer.load()||campfireKeyboardOpen);
     if(keyboardShown!=keyboardWas) {
         keyboardTypist.Reset();keyboardPress.Reset();
         Say(keyboardShown?"Frame panels: VR keyboard shown (the name box is up)":"Frame panels: VR keyboard hidden");
@@ -2381,7 +2406,9 @@ void MenuPointer(const menus::Pad& controls) {
         grip,pointerHit,pressed||mouseDown||rightMouseDown,aim.pose,
         panels::MenuDistance(int(vrsettings::Read().values[settings::MenuDistance]),!spatialMode));
     const bool active=uiActive&&focused&&aimTracked&&laser;
-    if(active)panelinput::OwnPointer();
+    // The campfire: the board owns the game's pointer only while the laser is on it - owned, a
+    // pointer event no menu takes never reaches the scene, and the heroes could not be picked.
+    if(active&&(!campfirePointer.load()||pointerHit))panelinput::OwnPointer();
     if(active&&pointerHit&&!onButton&&!dropOwns) {
         RECT client{};
         if(GetClientRect(gameWindow,&client)) {
@@ -2414,6 +2441,7 @@ void MenuPointer(const menus::Pad& controls) {
     if(drop.check)Say(gamestate::CursorItemHeld()?"Frame panels: the item is still on the cursor after X (the game did not drop it)":
                                                 "Frame panels: the item left the cursor - dropped");
     triggerWasDown=pressed;cancelWasDown=(controls.buttons&menus::B)!=0;
+    campfireMenuHit.store(campfirePointer.load()&&spatialMode&&(pointerHit||keyboardPointer));
 }
 
 // Aim with your eyes: this frame's gaze for vrcam (GazeAimLocal), in the left eye's view.
@@ -3711,6 +3739,7 @@ void Input() {
     };
     physical.lt=padTrigger(1);
     physical.rt=padTrigger(0);
+    rightPickHeld.store(PhysicalFloat(trigger,padHand[0])>.55f||(physical.buttons&menus::A)!=0);   // the campfire's pick: the main hand's trigger
     const auto physicalLeft=PhysicalStick(padHand[1]),physicalRight=PhysicalStick(padHand[0]);
     const auto axis=[](float value){return int16_t(std::clamp(value,-1.f,1.f)*32767.f);};
     physical.lx=axis(physicalLeft.x);physical.ly=axis(physicalLeft.y);
@@ -4302,6 +4331,11 @@ void Input() {
     if(const float hue=hudSettings.values[settings::BowLaser];hue>=0&&hue!=bowLaserHue&&!bowLaserAtlasPending&&atlasUploads.size()<3) {
         if(UploadShared(panelatlas::BowLaser,bowlaser::Paint(hue),&bowLaserAtlasPending))bowLaserHue=hue;
     }
+    // The campfire's pointer draws with the same beam: with the arrow path line Off it had
+    // no atlas yet - an ember's orange then.
+    else if(campfirePointer.load()&&bowLaserHue<0&&!bowLaserAtlasPending&&atlasUploads.size()<3) {
+        if(UploadShared(panelatlas::BowLaser,bowlaser::Paint(.07f),&bowLaserAtlasPending))bowLaserHue=.07f;
+    }
     // Guard strain light (Unleashed shield): blocks strain the guard, light
     // creeps in from the rim; it drains with the shield lowered, or raised with
     // no hit on it for guard_strain_recover_ms.
@@ -4371,6 +4405,19 @@ void Input() {
     // the current one ends, at the loudness and tempo of the 10 % step of life below
     // VR Settings > Interface > Warnings > Heartbeat starts at. Above it, Off, dead or stale vitals:
     // the last beat finishes, then silence.
+    {   // the campfire's sound (SetCampfireFire, CampfireBurst)
+        fireStream.Reap();
+        if(fireOn.load()) {
+            const uint32_t bursts=fireBursts.load();
+            if(bursts!=fireBurstsSeen){fireBurstsSeen=bursts;fireSynth.Burst();}
+            const float gain=combat::GameVolume();
+            for(int k=0;k<4&&fireStream.Remaining()<uint64_t(fireaudio::Rate*.15);++k) {
+                std::vector<int16_t> pcm;
+                fireSynth.Render(pcm,fireaudio::Rate/25,fireAmbient.load()*gain,fireBurstGain.load()*gain);
+                if(!fireStream.Queue(fireaudio::Rate,1,std::move(pcm)))break;
+            }
+        } else if(fireStream.Remaining()==0) fireStream.Stop();
+    }
     {
         heartStream.Reap();breakStream.Reap();   // breakStream: the guard-break bone snap
         heartbeat::Tuning heart;std::shared_ptr<const heartbeat::Pcm> source;const char* sourceName=nullptr;
@@ -5790,11 +5837,16 @@ bool Begin() {
     const bool opaque=spatial&&gamestate::OpaqueMenuOpen()&&!sheet;
     if(opaque!=opaqueMenuMode)Say(opaque?"Frame panels: shared black menu background":"Frame panels: spatial background restored");
     leatherMode=sheet;leatherShown=sheet&&leatherWorld.load();
-    uiworld::ShowWorldBehindMenu(leatherShown.load());   // the game's stencil hole behind its menu, filled
+    // The game's stencil hole behind its menu, filled - on the leather, and at the campfire: its
+    // menu's boxes cut dark holes into the scene there (where the board's strip is drawn by the game).
+    uiworld::ShowWorldBehindMenu(leatherShown.load()||campfirePointer.load());
     spatialMode=spatial;journalMode=book;npcChoicesMode=npc;opaqueMenuMode=opaque;upperBandMenuMode=spatial&&gamestate::UpperBandMenuOpen();uiEye.copied=false;
     mapEye.copied=false;hud::MapFrame();
-    hud::UiFrame(spatialMode,!journalMode,0);
-    const bool panel=wantsPanel&&wantsPanel()&&!spatialMode;
+    // The campfire draws no pair (no BeginEye): this frame begins at the present, after the menu
+    // was drawn and copied - the copy is kept (-1), not dropped as a new pair's would be.
+    hud::UiFrame(spatialMode,!journalMode,campfirePointer.load()?-1:0);
+    // A world with no menu open (the campfire: the board wanted, or not to be had) is never the flat panel.
+    const bool panel=wantsPanel&&wantsPanel()&&!spatialMode&&!campfirePointer.load()&&!(inWorld&&inWorld()&&!gamestate::MenuOpen());
     if(panel!=panelMode){ReleasePanelInput();panelMouse.Suspend();panelMode=panel;menuPlaced=false;Say(panel?"Frame OpenXR: flat menu panel active":"Frame OpenXR: stereo gameplay active");}
     for(auto& e:eyes)e.copied=false;
     for(auto& w:viewWorld)w.ok=false;
@@ -5838,6 +5890,16 @@ bool Begin() {
         if(distancePreset!=previousDistance){workspacePlaced=menuPlaced=false;previousDistance=distancePreset;menuOffset={};}
         if(spatialMode&&!journalMode&&!leatherMode&&panels::CanAnchor(workspacePlaced,render,state==XR_SESSION_STATE_FOCUSED,motionHeadTracked)) {
             uiBase=panels::AtEyeLevel(V(head.position),Q(head.orientation),panels::MenuDistance(distancePreset));
+            if(campfirePointer.load()) {   // the campfire: low before you, between you and the heroes, tilted up to the eyes
+                const float distance=campfireMenuDistance.load(),drop=campfireMenuDrop.load();
+                uiBase=panels::AtEyeLevel(V(head.position),Q(head.orientation),distance);
+                uiBase.position.y-=drop;
+                uiBase.orientation=math::Multiply(uiBase.orientation,panels::Pitch(-std::atan2(drop,distance)));
+                menuOffset={};
+                // The caption's board: further ahead, over the heroes, upright and facing you.
+                captionBase=panels::AtEyeLevel(V(head.position),Q(head.orientation),campfireCaptionDistance.load());
+                captionBase.position.y+=campfireCaptionRise.load();
+            }
             uiPose=Placed(uiBase,menuOffset);
             uiSize=panels::Width;workspacePlaced=true;
         }
@@ -6419,7 +6481,9 @@ bool CopyUi(reshade::api::command_queue* rq) {
     uint32_t w=0,h=0;int32_t crop[4]{};
     auto* src=reinterpret_cast<ID3D12Resource*>(hud::UiTexture(w,h,crop));
     if(!src||!w||!h){
-        if(++uiMissingFrames>12){uiSupported=false;Say("Frame panels: UI capture unavailable; falling back to native menu");}
+        if(campfirePointer.load()) {
+            if(++uiMissingFrames>90&&!campfireBoardFailed.exchange(true))Say("Frame panels: campfire - the menu's picture not captured; it stays as the game draws it here");
+        } else if(++uiMissingFrames>12){uiSupported=false;Say("Frame panels: UI capture unavailable; falling back to native menu");}
         return true;
     }
     uiMissingFrames=0;
@@ -6500,14 +6564,32 @@ void Capture(reshade::api::command_queue* rq,reshade::api::swapchain* swap) {
         if(afrHandle)afr=static_cast<FlatVRAfrEye*>(MapViewOfFile(afrHandle,FILE_MAP_READ,0,0,sizeof(FlatVRAfrEye)));
     }
     const bool stereo=afr&&afr->version==FLATVR_AFR_EYE_VERSION&&afr->enabled&&(!(wantsPanel&&wantsPanel())||SpatialMenu());
-    if(!Begin()||!render||!valid) {if(!stereo)EndPair();return;}
+    // A frame the runtime does not want drawn (the headset taken off: SYNCHRONIZED) still has to
+    // end, or it stays open and no later frame begins - the session never came back to FOCUSED
+    // (the campfire, where no pair ends it: only the menu's board on SteamVR's background).
+    if(!Begin()||!render||!valid) {if(!stereo||!pairDrawing)EndPair();return;}
     const uint32_t eye=stereo?((afr->eye^afr->swap)&1u):0u;
     mirrorMono=stereo&&vrsettings::Read().values[settings::DesktopOneEye]>.5f;
     // The map and menu surfaces are copied once a frame: from the left eye's
     // pass, or by turns from whichever eye this frame draws.
     const bool shared=eye==0||(pairDrawing&&turnFrame);
     if(shared&&!CopyMap(rq)) {mapSupported=false;mapEye.copied=false;Say("Frame menu map: copy unavailable; optional map suspended");}
-    if((shared&&!CopyUi(rq))||!Copy(src,eyes[eye],rq)){failed=true;EndPair();ClearInput();return;}
+    // The campfire: a copy refused this frame (the headset taken off and put back on) is this frame's
+    // loss, not the session's - failed stays off for good, and the scene never came back (only the
+    // menu's board, over SteamVR's own background).
+    const bool uiCopied=!shared||CopyUi(rq);
+    if(!uiCopied&&campfirePointer.load()){
+        uiEye.copied=false;
+        static ULONGLONG told=0;if(GetTickCount64()-told>2000){told=GetTickCount64();Say("Frame panels: campfire - the menu's copy refused this frame; retried on the next");}
+    }
+    if((!uiCopied&&!campfirePointer.load())||!Copy(src,eyes[eye],rq)){
+        if(campfirePointer.load()){
+            static ULONGLONG told=0;if(GetTickCount64()-told>2000){told=GetTickCount64();Say("Frame OpenXR: campfire - an eye's copy refused this frame; retried on the next");}
+            EndPair();return;
+        }
+        Say("Frame OpenXR: an eye's or the menu's copy failed; the headset stays off until the game window is recreated");
+        failed=true;EndPair();ClearInput();return;
+    }
     if(!stereo) {
         PlaceMainMenu();
         EndPair();
@@ -6570,8 +6652,18 @@ void Register(LogFn log,PanelFn panel,PanelFn world,PanelFn toggle) {
     resolution::Register(log);
     registered=true;Say("Frame OpenXR: registered D3D12 capture; awaiting game Present");
 }
-bool SpatialMenu(){return uiSupported.load()&&uiworld::Ready()&&hud::LayerFound()&&inWorld&&inWorld()&&wantsPanel&&wantsPanel();}
+bool SpatialMenu(){return uiSupported.load()&&!(campfirePointer.load()&&campfireBoardFailed.load())&&uiworld::Ready()&&hud::LayerFound()&&inWorld&&inWorld()&&wantsPanel&&wantsPanel();}
 bool Active() {std::lock_guard lock(mutex);return frame&&valid&&render&&!failed&&!panelMode;}
+bool RightPickHeld(){return rightPickHeld.load();}
+void SetCampfirePointer(bool on,float metres){campfirePointer.store(on);campfirePointerM.store(metres);if(!on){campfireMenuHit.store(false);campfireBoardFailed.store(false);}}
+void SetCampfireMenu(float width,float distance,float drop){campfireMenuWidth.store(width);campfireMenuDistance.store(distance);campfireMenuDrop.store(drop);}
+void SetCampfireCaption(bool on,const float rect[4],float width,float distance,float rise){
+    for(int i=0;i<4;++i)campfireCaptionRect[i].store(rect[i]);
+    campfireCaptionWidth.store(width);campfireCaptionDistance.store(distance);campfireCaptionRise.store(rise);campfireCaption.store(on);
+}
+bool CampfireMenuHit(){return campfireMenuHit.load();}
+void SetCampfireFire(bool on,float ambient,float burst){fireAmbient.store(ambient);fireBurstGain.store(burst);fireOn.store(on);}
+void CampfireBurst(){fireBursts.fetch_add(1);}
 bool VrGameplay(uint64_t now) {const auto at=vrGameplayAt.load();return at&&now>=at&&now-at<=1500;}
 void PublishSewerPrompt(const sewerprompt::Target& target) {
     std::lock_guard lock(sewerPromptMutex);sewerPrompt=target;
@@ -7057,6 +7149,19 @@ void EndPair() {
             bowLaserShown=count>before;bowLaserLength=path.length;bowLaserFloor=path.floor;
         }
     }
+    // The campfire (vrcam SetCampfirePointer): the right hand's pointer, the beam fading out
+    // along its aim and a dot where the game's pointer is (what the trigger picks) - there is
+    // no body there to show that the hand points at all.
+    if(!bowLaserShown&&campfirePointer.load()&&!campfireMenuHit.load()&&layer&&!panelMode&&!settingsModel.open&&bowLaserImageReady&&handAimTracked[0]) {
+        const auto start=handAim[0].p,direction=math::Normalized(math::Rotate(handAim[0].q,{0,0,-1}));
+        const float length=std::clamp(campfirePointerM.load(),.3f,30.f);
+        const auto mid=start+direction*(length*.5f),end=start+direction*length;
+        const auto orient=math::BeamOrientation(direction,V(head.position)-mid);
+        using namespace bowlaser;
+        motionQuad(bowLaser,XrPose({mid,orient}),.004f,length,At(panelatlas::BowLaser,XrRect2Di{{0,SteadyY},{AtlasWidth,SteadyHeight}}),sharedChain);
+        const float dot=std::clamp(.012f*length,.03f,.12f);   // the same size to the eye, near or far
+        motionQuad(bowLaserEnd,XrPose({end,Q(head.orientation)}),dot,dot,At(panelatlas::BowLaser,{{0,DotY},{DotSize,DotSize}}),sharedChain);
+    }
     static bool bowLaserWasShown=false;static ULONGLONG bowLaserReportAt=0;
     if(bowLaserShown&&!bowLaserWasShown&&GetTickCount64()>=bowLaserReportAt) {
         char message[96];std::snprintf(message,sizeof message,"Frame bow laser: shown (length %.1f m%s)",bowLaserLength,bowLaserFloor?", floor":"");
@@ -7083,6 +7188,23 @@ void EndPair() {
         }
         motionQuad(book,pose,size.width,height,shown,uiEye.chain);
         book.layerFlags=opaqueMenuMode?0:XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+    }
+    // The campfire's caption (SetCampfireCaption): the picked hero's class and words, which the game writes in
+    // its menu band above the board's strip, on a board of its own over the heroes - from the same copied picture.
+    XrCompositionLayerQuad caption{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    if(book.subImage.swapchain&&campfirePointer.load()&&campfireCaption.load()) {
+        const float bandBottom=float(uiCrop[1]+uiCrop[3]);   // the band runs from the picture's top to the strip's end
+        const float l=std::clamp(campfireCaptionRect[0].load(),0.f,1.f),t=std::clamp(campfireCaptionRect[1].load(),0.f,1.f);
+        const float r=std::clamp(campfireCaptionRect[2].load(),0.f,1.f),b=std::clamp(campfireCaptionRect[3].load(),0.f,1.f);
+        const int x0=uiCrop[0]+int(l*float(uiCrop[2])),x1=uiCrop[0]+int(r*float(uiCrop[2]));
+        const int y0=int(t*bandBottom),y1=int(b*bandBottom);
+        if(x1-x0>=2&&y1-y0>=2) {
+            const float w=campfireCaptionWidth.load(),h=w*float(y1-y0)/float(x1-x0);
+            const auto q=captionBase.orientation;
+            motionQuad(caption,XrPosef{{q.x,q.y,q.z,q.w},{captionBase.position.x,captionBase.position.y,captionBase.position.z}},w,h,
+                {{x0,y0},{x1-x0,y1-y0}},uiEye.chain);
+            caption.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+        }
     }
     // The Advanced Stats button, a hair in front of the menu below its hint row (MenuPointer).
     XrCompositionLayerQuad statsQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
@@ -7157,7 +7279,8 @@ void EndPair() {
         motionQuad(glyphQuad,pose,glyphtrail::Side,glyphtrail::Side,Rect(panelatlas::Glyph),sharedChain);
     }
     XrCompositionLayerQuad laser{XR_TYPE_COMPOSITION_LAYER_QUAD},dot{XR_TYPE_COMPOSITION_LAYER_QUAD};
-    if(layer&&(settingsModel.open||panelMode||spatialMode||(interactionVisible&&interactionOutput.wheel))&&pointerChain&&pointerVisible) {
+    if(layer&&(settingsModel.open||panelMode||spatialMode||(interactionVisible&&interactionOutput.wheel))&&pointerChain&&pointerVisible&&
+       (settingsModel.open||!campfirePointer.load()||pointerHit||keyboardPointer)) {   // the campfire: off the board the ember beam points at the heroes
         // The pointer needs the same finite-pose checks and normalization as
         // every other optional layer: one bad laser must not hide the menu.
         motionQuad(laser,beamPose,.003f,beamLength,At(panelatlas::Pointer,{{0,0},{64,32}}),pointerChain);
@@ -7531,9 +7654,13 @@ bool GameplayRay(float outOrigin[3],float outDirection[3]) {
 // its model).
 bool HandAimRay(int hand,float outOrigin[3],float outDirection[3]) {
     std::lock_guard lock(mutex);
-    if(hand<0||hand>1||!motionControls.load()||!motionInput.active||GetTickCount64()-motionAt>150)return false;
+    // The campfire: the hand's own aim even with the menu's board up (the board takes the motion
+    // layer off; without this the pointer at the heroes fell back to another hand source, off by a hero or three).
+    const bool campfire=campfirePointer.load()&&handAimTracked[hand>=0&&hand<2?hand:0]&&GetTickCount64()-handAimAt<150;
+    if(hand<0||hand>1||!motionControls.load()||(!campfire&&(!motionInput.active||GetTickCount64()-motionAt>150)))return false;
     math::Vec p,d;
-    if(hand==1&&motionInput.weapon==gameplay::Weapon::Bow&&motionInput.tracked[1]){p=motionInput.hand[1].p;d=gameplay::BowForward(motionInput.hand[1]);}
+    if(campfire){p=handAim[hand].p;d=math::Rotate(handAim[hand].q,{0,0,-1});}
+    else if(hand==1&&motionInput.weapon==gameplay::Weapon::Bow&&motionInput.tracked[1]){p=motionInput.hand[1].p;d=gameplay::BowForward(motionInput.hand[1]);}
     else if(handAimTracked[hand]){p=handAim[hand].p;d=math::Rotate(handAim[hand].q,{0,0,-1});}
     else return false;
     const auto undo=math::Conjugate(math::Yaw(math::Heading(Q(head.orientation))));
@@ -7823,8 +7950,13 @@ bool BowPreviewPose(bowflight::Shot& pose,bool& visible) {
     if(!bowflight::Allowed(bowPreviewPose,gate,GetTickCount64()))return false;
     pose=bowPreviewPose;visible=bowPreviewVisible;return true;
 }
-bool View(float out[16],const float hero[3],float eyeHeight,float userEyeHeight,float bodyHeading,float recenterYaw,int eye,float mapNorth,float scaleHeight) {
-    std::lock_guard lock(mutex);if(!Active())return false;
+bool View(float out[16],const float hero[3],float eyeHeight,float userEyeHeight,float bodyHeading,float recenterYaw,int eye,float mapNorth,float scaleHeight,bool stale) {
+    std::lock_guard lock(mutex);
+    if(!Active()) {   // stale: the last poses, while no headset frame is open
+        if(!stale||!valid||!render||failed||panelMode)return false;
+        const auto& o=(eye<0?head:views[eye&1].pose).orientation;
+        if(o.x==0&&o.y==0&&o.z==0&&o.w==0)return false;
+    }
     bool recentered=false;   // F11's yaw: the origin is put back under the head (the room follow re-anchors), not turned
     if(std::fabs(recenterYaw-lastRecenter)>.001f){origin=V(head.position);lastRecenter=recenterYaw;recentered=true;}
     const float upm=(scaleHeight>0?scaleHeight:eyeHeight)/std::max(userEyeHeight,.5f);
@@ -7935,8 +8067,13 @@ bool View(float out[16],const float hero[3],float eyeHeight,float userEyeHeight,
     }
     math::View(position,turn,out);return true;
 }
-bool Projection(float out[16],float nearWorld,int eye) {
-    std::lock_guard lock(mutex);if(!Active())return false;
+bool Projection(float out[16],float nearWorld,int eye,bool stale) {
+    std::lock_guard lock(mutex);
+    if(!Active()) {   // stale: the last field of view, while no headset frame is open
+        if(!stale||!valid||!render||failed||panelMode)return false;
+        const auto& f=views[eye&1].fov;
+        if(f.angleLeft==0&&f.angleRight==0)return false;
+    }
     viewWorld[eye&1].nearPlane=nearWorld;
     const auto& f=views[eye&1].fov;
     math::Projection(f.angleLeft,f.angleRight,f.angleDown,f.angleUp,nearWorld,out);return true;

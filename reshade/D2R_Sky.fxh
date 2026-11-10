@@ -75,6 +75,13 @@ uniform float SkyStars < hidden = true; > = 0.0;
 uniform float SkyBrightness < hidden = true; > = 1.0;
 uniform float SkyTex < hidden = true; > = 0.0;        // 0 = drawn here, 1..6 = painted: act 1-5, act 5 snow
 uniform bool SkyCapOn < hidden = true; > = true;       // the painted sky has its zenith picture
+// One panorama round the viewer instead of the band and cap (the campfire, [campfire] panorama):
+// once round the circle, turned by SkyPanoYaw degrees, its bottom row at SkyPanoLow degrees and its top
+// row at SkyPanoHigh; above that it fades into its own top row, blurred. No drift: mountains stand still.
+uniform bool SkyPano < hidden = true; > = false;
+uniform float SkyPanoYaw < hidden = true; > = 0.0;
+uniform float SkyPanoLow < hidden = true; > = -10.0;
+uniform float SkyPanoHigh < hidden = true; > = 40.0;
 uniform float Timer < source = "timer"; >;
 
 // Painted skies (tools/gen_sky.py, or any picture), one pair per act. vrcam sets
@@ -209,6 +216,15 @@ texture2D SkyBand5Tex < source = D2R_SKY_ACT5; > { Width = 3072; Height = 1024; 
 sampler2D SkyBand5Smp { Texture = SkyBand5Tex; AddressU = WRAP; AddressV = CLAMP; };
 texture2D SkyCap5Tex < source = D2R_SKYCAP_ACT5; > { Width = 1024; Height = 1024; Format = RGBA8; };
 sampler2D SkyCap5Smp { Texture = SkyCap5Tex; AddressU = WRAP; AddressV = WRAP; };
+// How many times the panorama goes round the circle (1: a whole 360-degree equirectangular picture, 2:1).
+#ifndef D2R_PANO_WRAPS
+ #define D2R_PANO_WRAPS 1
+#endif
+#ifndef D2R_SKY_PANO
+ #define D2R_SKY_PANO "D2R_Sky_ours/D2R_Sky_act1.png"
+#endif
+texture2D SkyPanoTex < source = D2R_SKY_PANO; > { Width = 8192; Height = 4096; Format = RGBA8; MipLevels = 14; };
+sampler2D SkyPanoSmp { Texture = SkyPanoTex; AddressU = WRAP; AddressV = CLAMP; };
 texture2D SkyBand6Tex < source = D2R_SKY_SNOW; > { Width = 3072; Height = 1024; Format = RGBA8; };
 sampler2D SkyBand6Smp { Texture = SkyBand6Tex; AddressU = WRAP; AddressV = CLAMP; };
 texture2D SkyCap6Tex < source = D2R_SKYCAP_SNOW; > { Width = 1024; Height = 1024; Format = RGBA8; };
@@ -258,6 +274,20 @@ float3 CapAt(int slot, float4 t, bool night)
 
 float3 PaintedSky(float3 dir)
 {
+    if (SkyPano) {
+        const float pel = degrees(asin(clamp(dir.y, -1.0, 1.0)));
+        const float pu = (atan2(dir.x, dir.z) / 6.2831853 + SkyPanoYaw / 360.0) * D2R_PANO_WRAPS;
+        const float pv = (SkyPanoHigh - pel) / max(SkyPanoHigh - SkyPanoLow, 1.0);
+        const float3 pc = tex2Dlod(SkyPanoSmp, float4(pu, saturate(pv), 0, 0)).rgb;
+        // over the picture's top: one colour, its top row's average all round (not a per-direction
+        // colour, which pinched into a cone overhead)
+        float3 top = 0.0;
+        [unroll] for (int k = 0; k < 8; ++k) top += tex2Dlod(SkyPanoSmp, float4((k + 0.5) / 8.0, 0.04, 0, 6)).rgb;
+        top /= 8.0;
+        // near the zenith (or the picture's top, if lower) into that one colour: a picture's pole pinches
+        const float edge = min(SkyPanoHigh, 90.0);
+        return lerp(pc, top, smoothstep(edge - 25.0, edge - 3.0, pel));
+    }
     const float el = degrees(asin(clamp(dir.y, -1.0, 1.0)));
     // once round the circle, drifting slowly so the clouds move; the half (exact in
     // floats) keeps the drift's old speed and puts a twice-laid picture's texels
