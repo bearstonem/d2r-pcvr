@@ -79,11 +79,16 @@ and buttons as you use them.
 | Class motions | Each motion is its mirror image: one described with the right fist, arm or shoulder is done with the left, toward the other side, and a two-hand motion with the hands exchanged. The MOTIONS page shows them that way round |
 | Words and button names | VR Settings rows and help, the Controller guide's two columns, the wheels and the on-screen prompts name the hand that does each thing now |
 
-Not mirrored, so they play exactly as right-handed:
+| Bow | Held in your right hand; your left hand nocks, draws and releases the string |
+| Crossbow, staff, spear, polearm, two-handed sword, axe or maul | Led by your left hand, the right hand supporting it |
 
-- **A bow, crossbow, staff, spear, polearm or a weapon held in both hands.** While one is equipped the whole
-  mode is right-handed again, sticks and buttons included, and returns to left-handed when you put it away.
-  The log says so (`Frame left-handed: ...`).
+Every weapon kind is mirrored, so equipping or putting away a weapon never moves a stick, a button or a
+trigger. The log names each kind as it is equipped (`Frame left-handed: ...`); should a kind ever be switched
+back to right-handed play, the whole layout would go right-handed with it while it is held, and the log and
+the in-headset words would say so.
+
+Not mirrored:
+
 - Third person and other players see a right-handed hero.
 - Two settings always name your real hands: **Dominant hand**'s Right / Left, and the detected controllers.
 

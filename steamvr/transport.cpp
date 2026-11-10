@@ -3657,6 +3657,16 @@ void UpdateHandRoles() {
             handrole::Name(next.kind),handrole::MirroredSystems,handrole::MirroredKinds);
         Say(line);saidAt=now;
     }
+    // Per equipped kind, at each change of it: mirrored (how it is held), or the fallback. The body's own
+    // line ("Frame left-handed: <kind> MIRRORED - ...", skeletons.cpp) says which wrist it was seated on.
+    if(next.wanted&&(!saidOnce||!said.wanted||next.kind!=said.kind||next.map!=said.map)) {
+        char line[400];
+        if(next.map.left)std::snprintf(line,sizeof line,"Frame left-handed: %s equipped - MIRRORED: %s; sticks and buttons keep their left-handed roles "
+            "(no change on equipping it)",handrole::Name(next.kind),handrole::HeldLeftHanded(next.kind));
+        else std::snprintf(line,sizeof line,"Frame left-handed: %s equipped - FALLBACK: this kind is not mirrored, the whole mode plays right-handed "
+            "until it is put away (sticks and buttons included)",handrole::Name(next.kind));
+        Say(line);
+    }
     said=next;saidOnce=true;
 }
 void Input() {
@@ -5462,7 +5472,11 @@ void Input() {
         sample.skillSlot=shieldSlot;sample.skillOwner=shieldSkill.owner;sample.skillContext=motionInput.skillContext;
         shieldPoses.Push(s.sampleStamp,sample);
     }
-    skel::SetMotionBow(motionInput.active&&motionOutput.bowReady,motionOutput.bowDrawing,motionOutput.draw,s.rightHand,s.leftHand,s.sampleStamp);
+    {   // the string hand and the bow hand as the tracking state has them (physical): the main and the off hand's
+        const bool left=handRoles.map.left;
+        skel::SetMotionBow(motionInput.active&&motionOutput.bowReady,motionOutput.bowDrawing,motionOutput.draw,
+            left?s.leftHand:s.rightHand,left?s.rightHand:s.leftHand,s.sampleStamp);
+    }
     if(!motionInput.active||(!motionOutput.bowReady&&!motionOutput.javelinReady))bowNeedsWorld=bowHasShot=leftNeedsWorld=leftHasShot=false;
     if(motionOutput.bowRelease||motionOutput.javelinRelease) {
         bowPending={};bowPending.origin=motionInput.hand[0].p;bowPending.direction=motionOutput.rayDirection;

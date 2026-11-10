@@ -165,8 +165,8 @@ every "right" below as your left hand, arm, shoulder, wrist, controller, stick, 
 and map on the right, the buttons and sticks exchanged, and every class motion as its mirror image (a motion
 described with the right fist is done with the left, toward the other side). In the headset the words are
 already turned round: VR Settings, the Controller guide, the wheels and the MOTIONS page name the hand that
-does each thing. A bow, crossbow, staff, spear, polearm or two-handed weapon plays right-handed for now, and
-the whole layout with it while it is equipped. Details: [Left-handed play](../CONTROLS.md#left-handed-play-experimental).
+does each thing. Every weapon kind is mirrored too: a bow is held in the right hand and drawn with the left,
+a crossbow, staff, spear, polearm or two-handed weapon is led by the left hand. Details: [Left-handed play](../CONTROLS.md#left-handed-play-experimental).
 
 | Action | Control |
 |---|---|

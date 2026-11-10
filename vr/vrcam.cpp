@@ -455,6 +455,9 @@ struct Settings {
     // Left-handed play (steamvr/hand_role.h, #307), for comparing in the headset; not on the menu:
     std::atomic<int>   leftHandedTurnAxis{0};    // [hands] left_handed_turn_axis: the weapon bone's axis turned over in the other hand (0 the flat's, 1..3 x y z)
     std::atomic<int>   leftHandedShieldTurn{0};  // [hands] left_handed_shield_turn: the shield's arm axis turned over on the right arm (0 along, 1 out, 2 up)
+    // [hands] left_handed_bow_turn_axis, left_handed_crossbow_turn_axis, left_handed_staff_turn_axis (a staff, a spear,
+    // a polearm, two hands on one weapon): the attach bone's axis turned over (0 the item's symmetry axis, 1..3 x y z)
+    std::atomic<int>   leftHandedBowTurn{0}, leftHandedCrossbowTurn{0}, leftHandedStaffTurn{0};
     std::atomic<bool>  bothAttach{true};     // [hands] both_attach: 0 = the other attach bone left alone (for comparing)   // [hands] carry_axis: moving, the game lays a 2H weapon from the right attach bone to the left - the left one put along this axis   // [hands] sword_hilt_axis: the hilt as the sword bone's axis, +-1..3 (x y z); 0 = from the game's grip
     float weaponAdj[D2RVR_TYPE_COUNT][6] = {};
     float weaponLeft[D2RVR_TYPE_COUNT][3] = {};   // (no longer used: one for every two-handed weapon, leftHold)
@@ -1667,6 +1670,9 @@ void LoadSettings() {
     g_set.bothAttach.store(IniB(L"hands", L"both_attach", true));
     g_set.leftHandedTurnAxis.store(std::clamp((int)IniF(L"hands", L"left_handed_turn_axis", 0.0f), 0, 3));
     g_set.leftHandedShieldTurn.store(std::clamp((int)IniF(L"hands", L"left_handed_shield_turn", 0.0f), 0, 2));
+    g_set.leftHandedBowTurn.store(std::clamp((int)IniF(L"hands", L"left_handed_bow_turn_axis", 0.0f), 0, 3));
+    g_set.leftHandedCrossbowTurn.store(std::clamp((int)IniF(L"hands", L"left_handed_crossbow_turn_axis", 0.0f), 0, 3));
+    g_set.leftHandedStaffTurn.store(std::clamp((int)IniF(L"hands", L"left_handed_staff_turn_axis", 0.0f), 0, 3));
     g_set.staffHand.store(IniF(L"hands", L"staff_hand", 0.0f) != 0.0f ? 1 : 0);
     g_set.staffShaftAxis.store(std::clamp((int)IniF(L"hands", L"staff_shaft_axis", -2.0f), -3, 3));
     g_set.spearShaftAxis.store(std::clamp((int)IniF(L"hands", L"spear_shaft_axis", -2.0f), -3, 3));
@@ -3297,7 +3303,7 @@ bool StaffAim() {
     const bool staffNow = (g_set.staffTwoHands.load() || g_set.staffFreeLeft.load()) && HeldType() == D2RVR_TYPE_STAFF;
     if (!(staffNow || XbowLikeStaff()) || !sh || sh->version != D2RVR_SHARED_VERSION) return false;
 #if D2RVR_FIRST_PERSON
-    if (g_set.staffFreeLeft.load() && ArmsMode() == 2) return (sh->handsValid & 1u) && skel::StaffAxis(nullptr);
+    if (g_set.staffFreeLeft.load() && ArmsMode() == 2) return (sh->handsValid & HandBit(0)) && skel::StaffAxis(nullptr);   // the hand that holds it
 #endif
     return (sh->handsValid & 3u) == 3u;
 }
@@ -3435,7 +3441,8 @@ bool HandRay(float* o, float* d,bool forceGround=true,int forHand=-1) {
     const bool arm=(staffByHand&&(forHand>=0||framevr::SpellSelected()))||(castingType==D2RVR_TYPE_UNARMED&&forHand>=0);
     if(g_eyeOk.load()&&(way||(forHand>=0?framevr::HandAimRay(forHand,motionOrigin,motionDirection):framevr::GameplayRay(motionOrigin,motionDirection)))) {
         if(arm&&!way) {
-            const float a[3]={motionOrigin[0]-(left?-.17f:.17f),motionOrigin[1]+.22f,motionOrigin[2]};
+            const bool leftArm=framevr::HandSide(left?1:0)==1;   // the casting hand's own shoulder (left-handed: the main hand's is the left)
+            const float a[3]={motionOrigin[0]-(leftArm?-.17f:.17f),motionOrigin[1]+.22f,motionOrigin[2]};
             const float al=std::sqrt(a[0]*a[0]+a[1]*a[1]+a[2]*a[2]);
             if(al>.15f)for(int i=0;i<3;++i)motionDirection[i]=a[i]/al;
         }
@@ -3477,7 +3484,9 @@ bool HandRay(float* o, float* d,bool forceGround=true,int forHand=-1) {
     if (!f.valid) return false;
     const float* q = HandRotOf(sh, hand);
     const float* p = HandPosOf(sh, hand);
-    float staffDir[3] = {sh->rightHand[0] - sh->leftHand[0], sh->rightHand[1] - sh->leftHand[1], sh->rightHand[2] - sh->leftHand[2]};
+    // from the off hand to the main hand (the right one unless left-handed play has the staff mirrored)
+    const float* mainAt = HandPosOf(sh, 0); const float* offAt = HandPosOf(sh, 1);
+    float staffDir[3] = {mainAt[0] - offAt[0], mainAt[1] - offAt[1], mainAt[2] - offAt[2]};
 #if D2RVR_FIRST_PERSON
     if (staff && g_set.staffFreeLeft.load() && ArmsMode() == 2) skel::StaffAxis(staffDir);
 #endif
@@ -8809,14 +8818,20 @@ void PushArms() {
         const bool rightHolds = in.staff && in.staffFreeLeft;
         for (int side = 0; side < 2; ++side)
             in.handFree[side] = rightHolds ? side == 1 : !(held & (1u << side)) && !ranged && !staffBoth;
-        // Left-handed play (steamvr/hand_role.h): the roles as the input thread has them, for the kinds it
-        // mirrors only - nothing held as a staff, no bow or crossbow, no two hands on one weapon (checked
-        // again here: the two threads read the equipment a frame apart). Each slot's item is in the other
-        // hand, so the free hands are the other way round.
-        in.leftHanded = own && framevr::LeftHandedNow() && !in.staff && !ranged && type != D2RVR_TYPE_CROSSBOW &&
-                        !(gamestate::TwoHanded() & D2RVR_TWO_HANDS_ON);
+        // Left-handed play (steamvr/hand_role.h): the roles as the input thread has them. Each slot's item
+        // is in the other hand, so the free hands are the other way round. A bow, a crossbow, a staff, a
+        // spear, a polearm or two hands on one weapon (phase 3) is posed in the skeleton's mirror world
+        // (vr/hand_swap_pose.h); the kind is read here as the input thread reads it (handrole::KindOf),
+        // and when that kind is not one the roles mirror the body stays right-handed with them.
+        const auto kind = framevr::handrole::KindOf(type, gamestate::TwoHanded());
+        in.leftHanded = own && framevr::LeftHandedNow() && framevr::handrole::Mirrors(kind);
+        in.leftHandedMirror = in.leftHanded && kind != framevr::handrole::Kind::OneHand;
+        in.leftHandedKind = framevr::handrole::Name(kind);
         in.leftHandedTurnAxis = g_set.leftHandedTurnAxis.load();
         in.leftHandedShieldTurn = g_set.leftHandedShieldTurn.load();
+        in.leftHandedItemTurn = kind == framevr::handrole::Kind::Bow ? g_set.leftHandedBowTurn.load()
+                              : kind == framevr::handrole::Kind::Crossbow ? g_set.leftHandedCrossbowTurn.load()
+                              : kind != framevr::handrole::Kind::OneHand ? g_set.leftHandedStaffTurn.load() : 0;
         if (in.leftHanded) std::swap(in.handFree[0], in.handFree[1]);
     }
     {   // staff_free_left: once per staff taken up, what the hook made of it
@@ -8831,12 +8846,13 @@ void PushArms() {
             const int found = skel::GripHand(sc);
             const int wrist = in.staffHandAuto && found >= 0 ? found : in.staffHand;
             const uint32_t type = gamestate::WeaponType();
-            LogF("vrcam: %s%s in the right hand (the game hangs it on the %s wrist%s; attach bones R %.2f L %.2f), hands %.2f model units "
-                 "apart in its grip, shaft %.2f %.2f %.2f; left hand on it %s%s", likeStaff == 2 ? "two-handed " : "",
-                 type < D2RVR_TYPE_COUNT ? kD2RVRWeaponTypeNames[type] : "?", wrist == 0 ? "right" : "left",
+            const bool mirrored = in.leftHandedMirror;   // left-handed play: the left hand holds it, the right one takes it
+            LogF("vrcam: %s%s in the %s hand (the game hangs it on the %s wrist%s; attach bones R %.2f L %.2f), hands %.2f model units "
+                 "apart in its grip, shaft %.2f %.2f %.2f; %s hand on it %s%s", likeStaff == 2 ? "two-handed " : "",
+                 type < D2RVR_TYPE_COUNT ? kD2RVRWeaponTypeNames[type] : "?", mirrored ? "left" : "right", wrist == 0 ? "right" : "left",
                  !in.staffHandAuto ? "" : found >= 0 ? ", read from its attach bones" : ", attach bones did not tell - [hands] spear_hand/sword_hand",
-                 sc[0], sc[1], gap, dir[0], dir[1], dir[2],
-                 in.grip[1] < 0.0f ? "always (bridge sends no grip - older than 0.13)" : "while its grip is held",
+                 sc[0], sc[1], gap, dir[0], dir[1], dir[2], mirrored ? "right" : "left",
+                 in.grip[mirrored ? 0 : 1] < 0.0f ? "always (bridge sends no grip - older than 0.13)" : "while its grip is held",
                  in.leftHilt ? " (on the hilt, does not turn it)" : "");
         }
         told = now;

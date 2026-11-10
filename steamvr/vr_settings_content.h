@@ -596,7 +596,7 @@ inline constexpr Override Overrides[]={
      FRAMEVR_NAMES(WalkNames),.beside=true,.besideLabel="Walk"},
     // Left-handed play (hand_role.h, #307): a row of its own under Dominant hand. [interactions] left_handed.
     {.id="interactions.left_handed",.page=View::Hands,.section="Hands and buttons",.kind=RowKind::Toggle,.label="Left-handed (experimental)",
-     .help="On: weapon in the left hand, shield on the right; buttons, sticks, laser, wrist HUD and class motions mirror. Bows and two-handed weapons stay right-handed."},
+     .help="On: weapon in the left hand, shield on the right; buttons, sticks, laser, wrist HUD and class motions mirror. A bow sits in the right hand, drawn by the left."},
     {.id="gameplay.run_walk_toggle",.page=View::Hands,.section="Hands and buttons",.kind=RowKind::Toggle,.label="Stick toggle",
      .help="On: right stick up switches between walking and the run set in Comfort > Moving (from Walk, the full run). Not with a wheel open or looking at the wrist map."},
     {.id="interactions.controller_labels",.page=View::Hands,.section="Hands and buttons",.kind=RowKind::Choice,.label="Button names",

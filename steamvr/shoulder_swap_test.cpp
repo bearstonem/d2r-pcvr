@@ -34,13 +34,14 @@ int main(){
         Check(!s.Step().swap,"recenter, session or dominant hand change consumes holds");}
     {Sim s;s.Step(10);s.in.time+=1;s.in.grip=1;Check(!s.Step().swap,"frame hitch cannot replay gesture");}
     {   // Left-handed play (hand_role.h): the swap hand is the LEFT hand whatever Dominant hand says, and
-        // stays the left hand when a bow or staff has the roles back to right-handed (it is the gesture that
-        // takes the bow out). The gesture is fed that hand's pose and grip; `dominant` is its role index.
+        // stays the left hand in the same role when the gesture takes out a bow or a staff (phase 3: those
+        // are mirrored too, so the roles no longer move with the weapon). The gesture is fed that hand's
+        // pose and grip; `dominant` is its role index.
         using namespace handrole;
-        for(const uint32_t weapon:{uint32_t(D2RVR_TYPE_SWORD),uint32_t(D2RVR_TYPE_BOW)})for(int saved=0;saved<2;++saved){
+        for(const uint32_t weapon:{uint32_t(D2RVR_TYPE_SWORD),uint32_t(D2RVR_TYPE_BOW),uint32_t(D2RVR_TYPE_STAFF),uint32_t(D2RVR_TYPE_CROSSBOW)})for(int saved=0;saved<2;++saved){
             const auto state=Resolve(true,weapon,0);
             const int physical=Dominant(true,saved),role=state.map.Role(physical);
-            Check(physical==1&&role==(weapon==D2RVR_TYPE_SWORD?0:1),"the left hand: the main hand with a sword, the off hand with a bow");
+            Check(physical==1&&role==0,"the left hand, the main hand with a sword, a bow, a staff or a crossbow alike: swapping never moves the swap hand's role");
             math::Vec hands[2]={{.25f,1.2f,-.3f},{-.23f,1.5f,.14f}};   // physical: the left one is over the left shoulder
             float grips[2]={0,0};
             Sim g;g.in.dominant=role;

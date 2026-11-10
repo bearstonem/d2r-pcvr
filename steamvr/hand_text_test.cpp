@@ -82,7 +82,7 @@ int main() {
     Kept("Monitor shows the left eye only; one extra GPU copy per frame");Kept("Right-click in game menus");
     Kept("choose them on the GLYPHS page (the box at the upper right of the wheel)");
     Kept("keeping its direction left or right");Kept("Stick left or right");
-    Kept("Left-handed (experimental)");Kept("Bows and two-handed weapons stay right-handed.");
+    Kept("Left-handed (experimental)");Kept("the roles of a kind that is not mirrored stay right-handed");
     Kept("upright");Kept("brightness");Kept("copyright");Kept("leftover");Kept("Stand upright and look straight ahead.");
     Reads("Fallen bodies are left alone, your left hand is not.","Fallen bodies are left alone, your right hand is not.");
     // ---- a pad binding's name ----

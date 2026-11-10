@@ -2,6 +2,8 @@
 // swing through the melee engine's own stroke rules. The stagger itself is the game's hit recovery
 // (vr/melee.cpp BowBash); no damage path exists to test.
 #include "bow_bash.h"
+#include "hand_role.h"
+#include "../vr/hand_swap_pose.h"
 #include <cstdio>
 #include <cstdlib>
 using namespace framevr;using namespace framevr::melee;
@@ -66,6 +68,37 @@ int main(){
         Check(!history.Find(1,now.time,found),"a pose sampled before the string was drawn is not a bash any more");
         Check(history.Find(2,now.time,found)&&!found.bowBash,"the current pose is found as it is");
     }
-    std::puts("bow-bash-test: ok");
+    {   // Left-handed play (hand_role.h, phase 3): the bow is in the RIGHT hand, still the OFF hand's lane
+        // (handIndex 1, by role). The mirrored swing is the same stroke, and the bow's capsule does not
+        // care which way its limb axis was turned when the bone was turned over (hand_swap_pose.h).
+        const auto mirror=[](Vec v){return Vec{-v.x,v.y,v.z};};
+        const auto roles=handrole::Resolve(true,D2RVR_TYPE_BOW,0).map;
+        Check(roles.left&&roles.Physical(1)==0,"the off hand's lane (the bow's) is fed by the right controller");
+        Sweep sweeps[2];bool swung[2]{};
+        for(int lh=0;lh<2;++lh) {
+            Sample s;s.active=true;s.epoch=1;s.equipment=5;s.unitsPerMetre=4;s.minWeaponSpeed=12;s.handIndex=1;s.bowBash=true;
+            const Vec start{-.3f,1.1f,-.4f},stride{.26f,0,0};
+            // the limb axis as the skeleton publishes it: the attach bone's +Y; left-handed that bone was turned over
+            // one axis - here even its Y - and the capsule runs both ways from the grip all the same
+            const Vec limbs=lh?Vec{0,-1,0}:Vec{0,1,0};
+            s.hand.p=lh?mirror(start):start;s.blade=bowbash::Blade(s.hand.p,limbs);s.thrustAxis={0,1,0};
+            Engine engine;
+            const auto step=[&](Vec d){s.time+=.02;s.hand.p=s.hand.p+(lh?mirror(d):d);s.blade=bowbash::Blade(s.hand.p,limbs);return engine.Step(s,sweeps[lh]);};
+            for(int i=0;i<8;++i)step({});
+            for(int i=0;i<8&&!swung[lh];++i)swung[lh]=step(stride);
+        }
+        Check(swung[0]&&swung[1]&&Near(sweeps[0].speed,sweeps[1].speed)&&Near(sweeps[0].travel,sweeps[1].travel)&&sweeps[0].thrust==sweeps[1].thrust,
+              "the bow swung by the right hand is the same stroke as the left hand's, mirrored");
+        const melee::Blade a=sweeps[0].after,b=sweeps[1].after;
+        const Vec lowA=a.base.y<a.tip.y?a.base:a.tip,lowB=b.base.y<b.tip.y?b.base:b.tip;
+        Check(Near(lowB.x,-lowA.x)&&Near(lowB.y,lowA.y)&&Near(lowB.z,lowA.z)&&Near(Length(b.tip-b.base),1.1f),"and its capsule the mirror image, limb tip to limb tip");
+        const Body body{{.9f,.3f,-.4f},{.9f,1.5f,-.4f},.3f},mirrored{{-.9f,.3f,-.4f},{-.9f,1.5f,-.4f},.3f};
+        Check(Touches(bowbash::Blade({.2f,1.1f,-.4f},{0,1,0}),bowbash::Blade({.9f,1.1f,-.4f},{0,1,0}),body)==
+              Touches(bowbash::Blade({-.2f,1.1f,-.4f},{0,-1,0}),bowbash::Blade({-.9f,1.1f,-.4f},{0,-1,0}),mirrored),"it hits the mirrored monster the same");
+        // the bone's Y read as a direction is the mirror image's even when Y is the axis turned over
+        skel::bow::Mat bone=skel::bow::Identity();skel::handswap::TurnOver(bone,1);
+        Check(skel::handswap::AsMirrored(bone,1).m[5]==1&&skel::handswap::AsMirrored(bone,-1).m[5]==-1&&skel::handswap::AsMirrored(bone,0).m[5]==-1,"the limb axis published is the mirror image's");
+    }
+    std::puts("bow-bash-test: ok (with the left-handed bow in the right hand)");
     return 0;
 }
