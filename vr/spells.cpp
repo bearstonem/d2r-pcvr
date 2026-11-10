@@ -98,10 +98,15 @@ bool Prepare(Shot& shot,uintptr_t game,uintptr_t player) {
        !Read(row+0x4e,action)||!Read(row+0x66,missile)||!Read(row+0x68,secondary)||!Read(row+0x24,flags)||
        !Read(row+0x231,los)||los!=0||
        !framevr::spellcast::Candidate(character,id,start,action,missile,flags,secondary))return false;
-    if(framevr::spellcast::NativePath(id)) {
+    if(id==38) {
         uintptr_t function=0;
-        if(!Read(d2rsig::Addr(0x238ea00+17*8),function)||function!=d2rsig::Addr(ChargedCastRva))return false;
+        if(!Read(d2rsig::Addr(DoFunctionsRva+17*8),function)||function!=d2rsig::Addr(ChargedCastRva))return false;
         missile=secondary;
+    } else if(id==53) {
+        // Chain Lightning's server function 26 is the game's own and runs unchanged: only its missile's start and
+        // target are moved to the hand as it is made (bowvr::SpellParams, matched by owner, skill and missile).
+        uintptr_t function=0;
+        if(!Read(d2rsig::Addr(DoFunctionsRva+26*8),function)||!function)return false;
     }
     shot.level=reinterpret_cast<int(*)(uintptr_t,uintptr_t,int,int)>(d2rsig::Addr(SkillLevelRva))(player,node,1,0);
     if(id==101&&!bowvr::PrepareHoly(game))return false;
