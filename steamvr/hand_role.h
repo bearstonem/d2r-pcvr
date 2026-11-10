@@ -17,7 +17,7 @@
 // Built in phases. What a phase has not built keeps playing right-handed, whole: never half swapped.
 //   phase 1 (this file's Mirrors): one-handed weapons, a shield, dual wield, throws, potions, bare hands;
 //   phase 2 (Mirrored(System)): the laser and the menus, the wrist HUD and map, the leather menu,
-//           the class motions - each turns on here when it is built;
+//           the class motions, and every text that names a hand (hand_text.h): built, all on;
 //   phase 3 (Mirrors): bows, crossbows, staves, spears, polearms and other two-handed grips.
 namespace framevr::handrole {
 struct Map {
@@ -80,17 +80,27 @@ struct State {
 constexpr State Resolve(bool wanted,uint32_t weaponType,uint32_t twoHanded) {
     State s;s.wanted=wanted;s.kind=KindOf(weaponType,twoHanded);s.map.left=wanted&&Mirrors(s.kind);return s;
 }
-// The systems phase 2 mirrors. Until then each keeps its physical hand whatever the roles are: the
-// menus' and VR Settings' laser on the right controller with its own trigger (click) and grip (grab);
-// the leather menu, the journal and the wrist HUD and map on the left; the class motions take the hands
-// in physical order. The face buttons and sticks are by role everywhere, menus included.
+// The interface and the class motions (phase 2), each with its own switch so one can be put back alone.
+// All are mirrored now: with the main hand on the left,
+//   Laser         the menus' and VR Settings' laser, its click (trigger) and grab (grip), on the left controller;
+//   LeatherMenu   the leather menu and the journal held in the right hand, the reach over the right shoulder;
+//   WristHud      the wrist HUD, the vitals, the wrist map and compass on the right wrist; the pulled-off map
+//                 taken by the left hand's laser and grip;
+//   ClassMotions  every motion as its mirror image: the hands exchanged and left and right reversed
+//                 (spell_motion.h, Input::mirror).
+// A system that returned false here would keep its physical hands whatever the roles (For): the laser on
+// the right controller, the menu and the wrist HUD on the left, the motions right-handed. The face buttons
+// and sticks are by role everywhere, menus included. The text follows the same roles (hand_text.h).
 enum class System { Combat, Buttons, Haptics, SkillSlots, Laser, WristHud, LeatherMenu, ClassMotions };
 constexpr bool Mirrored(System system) {
     switch(system) {
-        case System::Combat:case System::Buttons:case System::Haptics:case System::SkillSlots:return true;
+        case System::Combat:case System::Buttons:case System::Haptics:case System::SkillSlots:
+        case System::Laser:case System::WristHud:case System::LeatherMenu:case System::ClassMotions:return true;
         default:return false;
     }
 }
+// For the log (Frame left-handed:).
+inline constexpr const char* MirroredSystems="class motions, menu laser, leather menu and journal, wrist HUD and map, floating map, labels and text";
 // The map a system uses under a state: the roles, or right-handed while it is not built.
 constexpr Map For(System system,const State& state) {return Mirrored(system)?state.map:Map{};}
 // Dominant hand's behaviours (the shoulder weapon swap's hand, the monster outline's first hand, the

@@ -596,7 +596,7 @@ inline constexpr Override Overrides[]={
      FRAMEVR_NAMES(WalkNames),.beside=true,.besideLabel="Walk"},
     // Left-handed play (hand_role.h, #307): a row of its own under Dominant hand. [interactions] left_handed.
     {.id="interactions.left_handed",.page=View::Hands,.section="Hands and buttons",.kind=RowKind::Toggle,.label="Left-handed (experimental)",
-     .help="On: weapon in the left hand, shield on the right arm; triggers, grips, buttons and sticks swap. Bows, staves and two-handed weapons stay right-handed for now."},
+     .help="On: weapon in the left hand, shield on the right; buttons, sticks, laser, wrist HUD and class motions mirror. Bows and two-handed weapons stay right-handed."},
     {.id="gameplay.run_walk_toggle",.page=View::Hands,.section="Hands and buttons",.kind=RowKind::Toggle,.label="Stick toggle",
      .help="On: right stick up switches between walking and the run set in Comfort > Moving (from Walk, the full run). Not with a wheel open or looking at the wrist map."},
     {.id="interactions.controller_labels",.page=View::Hands,.section="Hands and buttons",.kind=RowKind::Choice,.label="Button names",
@@ -1165,8 +1165,39 @@ inline MenuData BuildMenu(const Override* overrides,size_t overrideCount,const P
     }
     return m;
 }
-inline const MenuData& Menu(){
+// Left-handed play (hand_text.h): a menu's words mirrored, once. Every row but the two about the physical
+// hands themselves (Left-handed, and Dominant hand with its Right / Left choices): its label, help, warnings,
+// the word beside it, its options and their hints, its value names; the presets' names and blurbs.
+constexpr bool PhysicalSides(Key key){return key==LeftHanded||key==Dominant;}
+inline MenuData MirroredMenu(const MenuData& written){
+    MenuData menu=written;
+    for(auto& r:menu.rows){
+        if(PhysicalSides(r.key))continue;
+        r.label=handtext::M(r.label);r.help=handtext::M(r.help);r.warn=handtext::M(r.warn);
+        r.warnWhen.text=handtext::M(r.warnWhen.text);r.besideLabel=handtext::M(r.besideLabel);
+        if(r.options&&r.optionCount){
+            auto& list=menu.optionLists.emplace_back(r.options,r.options+r.optionCount);
+            for(auto& o:list){o.label=handtext::M(o.label);o.hint=handtext::M(o.hint);}
+            r.options=list.data();
+        }
+        if(r.names&&r.nameCount){
+            auto& list=menu.nameLists.emplace_back(r.names,r.names+r.nameCount);
+            for(auto& n:list)n.label=handtext::M(n.label);
+            r.names=list.data();
+        }
+    }
+    for(auto& s:menu.sections)s.title=handtext::M(s.title);
+    for(auto& p:menu.presets){p.name=handtext::M(p.name);p.blurb=handtext::M(p.blurb);}
+    return menu;
+}
+// The menu as written, for a right-handed player, and as shown now.
+inline const MenuData& WrittenMenu(){
     static const MenuData menu=BuildMenu(Overrides,std::size(Overrides),PresetSpecs,std::size(PresetSpecs));
+    return menu;
+}
+inline const MenuData& Menu(){
+    if(!handtext::Left())return WrittenMenu();
+    static const MenuData menu=MirroredMenu(WrittenMenu());
     return menu;
 }
 // Preview and test data only: the real overrides less a few, as if upstream
@@ -1190,7 +1221,15 @@ inline const MenuData& FallbackDemo(){
 
 // ---- lookups (trivial over the tables; the checks below and the tests check the tables) ----
 
-inline const ContentPage& PageOf(View v){return PageTable[size_t(v)];}
+inline const ContentPage& PageOf(View v){
+    if(!handtext::Left())return PageTable[size_t(v)];
+    static const std::vector<ContentPage> mirrored=[]{
+        std::vector<ContentPage> pages(std::begin(PageTable),std::end(PageTable));
+        for(auto& p:pages){p.name=handtext::M(p.name);p.intro=handtext::M(p.intro);}
+        return pages;
+    }();
+    return mirrored[size_t(v)];
+}
 // The row of a key, or nullptr (NotInMenu).
 inline const ContentRow* RowOf(Key key){
     for(const auto& r:Menu().rows)if(r.key==key)return &r;
@@ -1252,14 +1291,26 @@ inline std::string ValueText(const ContentRow& r,float value,const Context& c={}
     if(word&&unit.size()>1&&unit.back()=='s'&&(text=="1"||text=="+1"||text=="-1"))return text+" "+unit.substr(0,unit.size()-1);
     return text+" "+unit;
 }
+// ToolTable as shown now (std::size(ToolTable) entries): its words mirrored while the hands are.
+inline const ContentTool* Tools(){
+    if(!handtext::Left())return ToolTable;
+    static const std::vector<ContentTool> mirrored=[]{
+        std::vector<ContentTool> tools(std::begin(ToolTable),std::end(ToolTable));
+        for(auto& t:tools){t.label=handtext::M(t.label);t.help=handtext::M(t.help);}
+        return tools;
+    }();
+    return mirrored.data();
+}
 inline const ContentTool* ToolOf(Kind kind){
-    for(const auto& t:ToolTable)if(t.kind==kind)return &t;
+    const auto* tools=Tools();
+    for(size_t i=0;i<std::size(ToolTable);++i)if(tools[i].kind==kind)return &tools[i];
     return nullptr;
 }
 // A guide line's control with this player's button names.
 inline std::string GuideControl(const GuideLine& g,const controllers::Labels& labels){
     std::string out;
-    for(const char* p=g.control;*p;){
+    // left-handed: the words first ("Right {R2}" is the left controller's then), then that hand's buttons
+    for(const char* p=handtext::T(g.control);*p;){
         if(p[0]=='{'&&(p[1]=='L'||p[1]=='R')&&p[2]>='1'&&p[2]<='4'&&p[3]=='}'){
             out+=labels.Button(p[1]=='L'?1:0,p[2]-'0');p+=4;
         }else out+=*p++;

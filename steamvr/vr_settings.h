@@ -291,7 +291,7 @@ inline constexpr std::array<Definition,Count> Definitions{{
     // shield on the right arm, the triggers, grips, face buttons and sticks swapped, the skills following the hand's
     // role. Built in phases, so its own switch (experimental, off by default) and not a new meaning for Dominant
     // hand = Left, which players already have set. VR Settings > Controls > Hands, its own row under Dominant hand.
-    {"Left-handed (experimental)", "Weapon in the left hand, shield on the right; buttons and sticks swapped", L"interactions",L"left_handed",0,0,1,1},
+    {"Left-handed (experimental)", "Weapon in the left hand, shield on the right; buttons, menus and motions mirrored", L"interactions",L"left_handed",0,0,1,1},
 }};
 using Values=std::array<float,Count>;
 // The setting holding the skill on glyph shape i (glyph_recognizer.h order): the right hand's (0), or the left's (1).

@@ -1,5 +1,6 @@
 #pragma once
 #include "vr_settings.h"
+#include "hand_text.h"
 #include <iterator>
 
 namespace framevr::settings {
@@ -16,7 +17,11 @@ constexpr int HelpResetPage=HelpPerformance+1,HelpUndoReset=HelpPerformance+2,He
               MaxPresets=8,HelpGroupFirst=HelpPresetFirst+MaxPresets,HelpLast=HelpGroupFirst+MaxRailGroups-1;
 // Close asks before it drops a draft (main's Close discarded it).
 inline constexpr const char* CloseAsksHelp="Back to the game. If some changes are not applied, Close asks first. Right B does the same as Close.";
-inline const char* HelpTitle(int id) {
+// Left-handed play (hand_text.h): the two rows about the physical hands themselves read the same either
+// way - Left-handed's own, and Dominant hand, whose choices Right and Left are the real hands.
+constexpr bool PhysicalSides(int id){return id==LeftHanded||id==Dominant;}
+// As written, for a right-handed player (HelpTitle and HelpText below show them).
+inline const char* WrittenHelpTitle(int id) {
     if(id>=0&&id<Count)return Definitions[id].label;
     switch(id){case HelpApply:return "Apply";case HelpClose:return "Close";
         case HelpRecenter:return "Set eye height";case HelpCalibrate:return "Calibrate body";
@@ -26,12 +31,12 @@ inline const char* HelpTitle(int id) {
         case HelpWhatsNew:return "What's new";case HelpPresets:return "Presets";case HelpDiscard:return "Discard changes";
         case HelpKeepEditing:return "Keep editing";case HelpApplyClose:return "Apply and close";case HelpPending:return "Not applied";default:return "";}
 }
-inline const char* HelpText(int id) {
+inline const char* WrittenHelpText(int id) {
     switch(id) {
         case Motion:return "Enables tracked weapon swings, bow drawing, throwing and belt interactions. Keep this On to use physical combat. A selected trigger skill does not replace your free weapon swings.";
         case Seated:return "Raises the potion belt for easier reach while seated. Turn this Off to place the belt using Belt drop below eyes. Body calibration still uses your standing measurements.";
         case Dominant:return "Which hand's grip swaps your weapon set when you reach over either shoulder. This does not swap the game's weapon and shield hands: Left-handed, below, does, and turns this to Left with it.";
-        case LeftHanded:return "Experimental. On: main weapon in your left hand, shield or second weapon on your right. Triggers, grips, A / B with X / Y and the sticks swap (right stick walks), each hand's saved skills, glyphs and vibration follow, and Dominant hand acts as Left. A bow, crossbow, staff, spear, polearm or two-handed weapon still plays right-handed. The menu laser, the wrist HUD, the leather menu and class motions stay as they are. Held items may look turned.";
+        case LeftHanded:return "Experimental. On: everything mirrors. Weapon in your left hand, shield or second weapon on your right. Triggers, grips, A / B with X / Y and the sticks swap (right stick walks); skills, glyphs and vibration follow. The menu laser moves to your left hand; the wrist HUD, map and held menu to your right. Class motions use the other hand. A bow, crossbow, staff, spear, polearm or two-handed weapon plays right-handed. Held items may look turned.";
         case SmoothTurn:return "On turns continuously with the right stick at Smooth turn speed. Off turns in steps using Snap turn angle. Choose whichever feels more comfortable.";
         case Snap:return "How far each right-stick flick turns you when Smooth turning is Off. Smaller angles give finer steps. Release the stick between snap turns.";
         case TurnSpeed:return "How quickly the right stick rotates your view when Smooth turning is On, in degrees per second. Lower values turn more slowly. This does not affect snap turns.";
@@ -160,4 +165,8 @@ inline const char* HelpText(int id) {
     if(id>=0&&id<Count)return Definitions[id].detail;
     return "";
 }
+// As shown: mirrored while the hands are (hand_text.h).
+inline const char* HelpTitle(int id){return PhysicalSides(id)?WrittenHelpTitle(id):handtext::T(WrittenHelpTitle(id));}
+inline const char* HelpText(int id){return PhysicalSides(id)?WrittenHelpText(id):handtext::T(WrittenHelpText(id));}
+inline const char* CloseAsksText(){return handtext::T(CloseAsksHelp);}
 }

@@ -10,6 +10,7 @@
 #include "vr_settings_ui.h"
 #include "latest_worker.h"
 #include "vr_settings_draw.h"
+#include "hand_text.h"
 #include <windows.h>
 #include <objbase.h>
 #include <wincodec.h>
@@ -350,11 +351,13 @@ static int WorkerCheck(){
 }
 
 int main(int argc,char** argv){
+    // A last argument --left-handed: the same pages and checks with the words mirrored (hand_text.h).
+    if(argc>1&&std::strcmp(argv[argc-1],"--left-handed")==0){framevr::handtext::SetLeft(true);--argc;}
     if(argc>2&&std::strcmp(argv[1],"--draw-sheet")==0)return DrawSheetPreview(argv[2]);
     if(argc>2&&std::strcmp(argv[1],"--pages")==0)return Pages(argv[2]);
     if(argc>1&&std::strcmp(argv[1],"--pages-check")==0)return PagesCheck();
     if(argc>1&&std::strcmp(argv[1],"--fit-check")==0)return FitCheck();
     if(argc>1&&std::strcmp(argv[1],"--worker-check")==0)return WorkerCheck();
-    std::fprintf(stderr,"usage: vr-settings-preview --pages <folder> | --pages-check | --fit-check | --worker-check | --draw-sheet <out.png>\n");
+    std::fprintf(stderr,"usage: vr-settings-preview --pages <folder> | --pages-check | --fit-check | --worker-check | --draw-sheet <out.png>  [--left-handed]\n");
     return 2;
 }

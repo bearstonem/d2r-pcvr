@@ -95,13 +95,20 @@ int main() {
         for(int t=0;t<D2RVR_TYPE_COUNT;++t)for(uint32_t two=0;two<16;++two)
             Check(Resolve(false,uint32_t(t),two).map==Map{},"OFF IS RIGHT-HANDED for every weapon and grip: the identity map");
     }
-    {   // phase 2's systems keep their physical hands whatever the roles are
+    {   // phase 2: the interface and the class motions follow the roles too - every system is mirrored
         const auto on=Resolve(true,D2RVR_TYPE_SWORD,0);
-        for(const System s:{System::Combat,System::Buttons,System::Haptics,System::SkillSlots})Check(For(s,on).left,"built: follows the roles");
-        for(const System s:{System::Laser,System::WristHud,System::LeatherMenu,System::ClassMotions})
-            Check(For(s,on)==Map{}&&For(s,on).Physical(0)==0&&For(s,on).Physical(1)==1,"not built: the laser stays right, the wrist HUD and leather menu left");
-        // the wrist HUD's hand in the engines' (role) arrays: the left hand is the main hand there
-        Check(on.map.Role(For(System::WristHud,on).Physical(1))==0&&Map{}.Role(1)==1,"the left wrist is role 0 left-handed, 1 right-handed");
+        for(const System s:{System::Combat,System::Buttons,System::Haptics,System::SkillSlots,System::Laser,System::WristHud,System::LeatherMenu,System::ClassMotions}) {
+            Check(Mirrored(s)&&For(s,on).left,"built: follows the roles");
+            Check(For(s,on).Physical(0)==1&&For(s,on).Physical(1)==0,"left-handed: side 0 (the laser, the motions' main hand) is the left hand, side 1 (the menu, the wrist HUD) the right");
+            Check(For(s,Resolve(false,D2RVR_TYPE_SWORD,0))==Map{},"OFF: every system right-handed");
+            // a weapon that plays right-handed whole takes every system with it: never half swapped
+            State whole;whole.wanted=true;whole.map=Map{};
+            Check(whole.Fallback()&&For(s,whole)==Map{},"the fallback is right-handed in every system");
+        }
+        // the wrist HUD's hand in the engines' (role) arrays: the off hand, index 1, either way
+        Check(on.map.Role(For(System::WristHud,on).Physical(1))==1&&Map{}.Role(1)==1,"the wrist HUD is on the off hand (role 1): the right wrist left-handed, the left right-handed");
+        Check(on.map.Role(For(System::Laser,on).Physical(0))==0,"the laser is the main hand's (role 0)");
+        Check(MirroredSystems[0],"the systems are named for the log");
     }
     {   // Dominant hand's behaviours: Left-handed turns them left with the one switch, whatever the weapon
         Check(Dominant(false,0)==0&&Dominant(false,1)==1,"off: Dominant hand as saved");

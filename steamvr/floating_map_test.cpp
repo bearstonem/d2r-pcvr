@@ -1322,6 +1322,53 @@ int main() {
             Check(o.held && o.resizing, large ? "150 cm: and Right Grip: both hands size it" : "10 cm: and Right Grip: both hands size it");
         }
     }
+    {   // Left-handed play (hand_role.h, #307): the transport gives the engine the LEFT controller as its laser and
+        // grab hand (index 0) and the right wrist's map (index 1). The engine has no side of its own, so a
+        // left-handed session must be the mirror image of the right-handed one, frame for frame: the same
+        // pulls, holds, pushes, two-hand resizes and put-aways, the copy where a mirror would show it, its
+        // picture still the right way round.
+        const auto mirrorP = [](math::Vec v) { return math::Vec{-v.x, v.y, v.z}; };
+        const auto mirrorQ = [](math::Quat q) { return math::Quat{q.x, -q.y, -q.z, q.w}; };   // the same turn in the mirror x -> -x
+        const auto mirrored = [&](fm::Input in) {
+            in.head = mirrorP(in.head); in.headQ = mirrorQ(in.headQ);
+            for (auto& h : in.hand) h = mirrorP(h);
+            in.aim = mirrorP(in.aim); in.aimQ = mirrorQ(in.aimQ); in.aimLeft = mirrorP(in.aimLeft); in.aimLeftQ = mirrorQ(in.aimLeftQ);
+            in.wristP = mirrorP(in.wristP); in.wristQ = mirrorQ(in.wristQ);
+            return in;
+        };
+        fm::Engine right, left;
+        int frames = 0, heldFrames = 0, resizeFrames = 0, pulls = 0, putAways = 0, shownFrames = 0; bool same = true, placed = true, turned = true;
+        const fm::Pose wrist = HomePose();
+        for (int i = 0; i < 1500; ++i) {
+            const double time = .6 + i * .011; const float s = float(i) * .011f;
+            // the laser hand wanders round the wrist map, then away with it, and comes back; the head turns a little
+            const math::Vec from{.2f + .05f * std::sin(s * 1.3f), 1.2f + .04f * std::sin(s * .9f), -.3f + .05f * std::cos(s * 1.1f)};
+            const math::Vec target = wrist.p + math::Vec{.5f * std::sin(s * .7f) * (i > 250 && i < 1100 ? 1.f : .05f), .25f * std::sin(s * .5f) * (i > 250 && i < 1100 ? 1.f : .05f), 0};
+            auto in = Standing(time); Aim(in, from, target);
+            in.headQ = math::Yaw(.3f * std::sin(s * .4f));
+            in.hand[1] = wrist.p + math::Vec{-.02f, -.05f, .03f}; in.leftFree = true;
+            in.aimLeft = in.hand[1]; in.aimLeftQ = PointFrom(in.hand[1], wrist.p + math::Vec{.3f, .4f, -1}); in.aimLeftTracked = true;
+            in.wristShown = true; in.wristP = wrist.p; in.wristQ = wrist.q; in.wristSize = .24f;
+            in.grip[0] = (i > 20 && i < 900) || (i > 1150 && i < 1400) ? 1.f : 0.f;                       // take it and hold it; later take it again
+            in.grip[1] = (i > 600 && i < 760) ? 1.f : 0.f;                                                     // the other grip: two-hand size
+            if (i > 600 && i < 760) in.hand[1] = in.hand[0] + math::Vec{-.3f - .15f * std::sin(s * 2), 0, 0};
+            in.stickY = (i > 200 && i < 300) ? .8f : (i > 950 && i < 1050) ? -.7f : 0.f;                       // pushed away, pulled in
+            const auto a = right.Step(in, t), b = left.Step(mirrored(in), t);
+            ++frames; heldFrames += a.held; resizeFrames += a.resizing; shownFrames += a.shown;
+            pulls += a.event == fm::Event::Pulled; putAways += a.event == fm::Event::PutAway;
+            same = same && a.want == b.want && a.shown == b.shown && a.held == b.held && a.resizing == b.resizing && a.ownStick == b.ownStick && a.pointed == b.pointed &&
+                   a.pulse == b.pulse && a.aimed == b.aimed && a.atWrist == b.atWrist && a.event == b.event && Near(a.size, b.size, 1e-4f);
+            if (a.shown) {
+                placed = placed && Len(b.p - mirrorP(a.p)) < 1e-3f;
+                turned = turned && QNear(b.q, mirrorQ(a.q), 1e-3f);
+            }
+        }
+        Check(same, "left-handed: the same session in a mirror does the same things on every frame (take, hold, push, resize, put away, buzz)");
+        Check(placed, "left-handed: the copy is where a mirror would show it");
+        Check(turned, "left-handed: and turned the mirrored way, its picture the right way round (never flipped)");
+        Check(heldFrames > 300 && resizeFrames > 20 && pulls >= 1 && shownFrames > 600, "the session really pulled, held and resized a copy");
+        std::printf("floating map, left-handed mirror session: %d frames, %d held, %d resizing, %d pulls, %d put away\n", frames, heldFrames, resizeFrames, pulls, putAways);
+    }
     if (g_fail) { std::printf("floating map: %d failed\n", g_fail); return 1; }
     std::puts("floating map: ok");
     return 0;

@@ -3,7 +3,7 @@
 #include "sewer_prompt.h"
 namespace framevr::sewerprompt {
 // Draw once into two unused legacy skill cells, shared with the preview.
-inline bool Paint(HDC dc,int x=0,int y=0) {
+inline bool Paint(HDC dc,int x=0,int y=0,const wchar_t* button=Shortcut) {
     const int saved=SaveDC(dc);
     auto fill=[&](int l,int t,int r,int b,COLORREF color) {
         RECT rect{x+l,y+t,x+r,y+b};auto brush=CreateSolidBrush(color);
@@ -25,7 +25,7 @@ inline bool Paint(HDC dc,int x=0,int y=0) {
         DrawTextW(dc,value,-1,&bounds,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX);
     };
     text(title,L"ENTER SEWERS",16,65);
-    SetTextColor(dc,RGB(215,205,183));text(shortcut,L"Right A",70,112);
+    SetTextColor(dc,RGB(215,205,183));text(shortcut,button,70,112);
     RestoreDC(dc,saved);DeleteObject(title);DeleteObject(shortcut);return fits;
 }
 }

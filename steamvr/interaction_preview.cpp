@@ -9,6 +9,7 @@
 #include "sewer_prompt_art.h"
 #include "notice_card_art.h"
 #include "skill_usage.h"
+#include "hand_text.h"
 #include <cstdio>
 #include <cstring>
 #include <limits>
@@ -32,6 +33,9 @@ static bool SavePng(const char* path,const std::vector<uint8_t>& rgba,UINT width
 }
 int main(int argc,char** argv) {
     using namespace framevr::interaction;
+    // A last argument --left-handed: the same check with the words as a left-handed player reads them
+    // (hand_text.h): the motions' cues, the skill cards, the hints, the sewer prompt's button.
+    if(argc>2&&!std::strcmp(argv[argc-1],"--left-handed")){framevr::handtext::SetLeft(true);--argc;}
     struct Cleanup {~Cleanup(){icons::Shutdown();}} cleanup;
     if(argc>2&&!std::strcmp(argv[2],"--sewer-prompt-check")) {
         namespace prompt=framevr::sewerprompt;
@@ -41,7 +45,7 @@ int main(int argc,char** argv) {
         HDC dc=CreateCompatibleDC(nullptr);void* bits=nullptr;
         HBITMAP bitmap=CreateDIBSection(dc,&info,DIB_RGB_COLORS,&bits,nullptr,0);
         if(!dc||!bitmap||!bits){if(bitmap)DeleteObject(bitmap);if(dc)DeleteDC(dc);return 120;}
-        const auto old=SelectObject(dc,bitmap);const bool fits=prompt::Paint(dc);
+        const auto old=SelectObject(dc,bitmap);const bool fits=prompt::Paint(dc,0,0,framevr::handtext::Left()?prompt::LeftShortcut:prompt::Shortcut);
         GdiFlush();std::vector<uint8_t> rgba(prompt::Width*prompt::Height*4);
         const auto* bgra=static_cast<const uint8_t*>(bits);
         for(size_t i=0;i<rgba.size();i+=4){rgba[i]=bgra[i+2];rgba[i+1]=bgra[i+1];rgba[i+2]=bgra[i];rgba[i+3]=255;}

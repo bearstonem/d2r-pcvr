@@ -40,6 +40,16 @@ inline Pose UprightBody(Pose head,Quat previousYaw={0,0,0,1}) {
 // OpenXR grip +X points out of the LEFT palm: the back of the wrist is -X.
 // Grip +/-Y is the thumb/knuckle edge, not either face of the wrist.
 // https://registry.khronos.org/OpenXR/specs/1.1/html/xrspec.html#semantic-path-grip-pose
+// Everything below takes a LEFT hand's grip pose. A right hand's grip frame is the left's mirror image,
+// x reversed: +X goes into its palm, so the back of the right wrist is +X and a panel beside it sits on
+// the other side of x. Left-handed play wears the wrist HUD on the right wrist (hand_role.h): AsLeftGrip
+// gives a right hand's pose as these functions take it - a half turn about grip Z, which reverses x and
+// leaves z; it reverses y too, and nothing here has a y part in the grip's frame (WristPanel's and
+// PalmPanel's offsets, the normals, HandFacePanel's fallback along z).
+inline Pose AsLeftGrip(Pose hand,bool rightHand) {
+    if(rightHand)hand.q=math::Multiply(hand.q,{0,0,1,0});
+    return hand;
+}
 inline Vec WristNormal(Pose hand) {return math::Normalized(math::Rotate(hand.q,{-1,0,0}));}
 inline Vec PalmNormal(Pose hand) {return math::Normalized(math::Rotate(hand.q,{1,0,0}));}
 inline Pose HandFacePanel(Pose hand,Pose head,Vec normal,Vec offset) {
@@ -522,12 +532,19 @@ struct Input {
     vitals::Location vitalsLocation=vitals::Location::Wrist;
     float vitalsTilt=0;
     bool criticalAlerts=false,leftCasting=false;   // leftCasting, leftTrigger: the wrist HUD's hand (wristHand)
-    // The hand that wears the wrist HUD and map: the left (1). Left-handed, the left hand is the main
-    // hand (0) and the HUD stays on it until the interface is mirrored (hand_role.h).
+    // The hand that wears the wrist HUD and map: the off hand (1), the left. Left-handed that is the
+    // right hand (hand_role.h): mirrored says the hands here are exchanged (index 0 the physical left,
+    // 1 the physical right), for what depends on the side of the body: the wrist's and the palm's face
+    // (Wrist), the shoulder the menu is reached over (leather::ReachInput::right).
     int wristHand=1;
+    bool mirrored=false;
     bool floorKnown=false; float floor=0; // room-space height of the world ground under the player
     Stage stage{};
     Pose head{},hand[2]{};
+    // A hand index here is the physical right one (index 0 unless mirrored).
+    bool RightHand(int index) const {return (index==0)!=mirrored;}
+    // The wrist HUD's hand as WristPanel, PalmPanel and the Presented tests take it (AsLeftGrip).
+    Pose Wrist() const {const int w=wristHand==0?0:1;return AsLeftGrip(hand[w],RightHand(w));}
     Vec handVelocity[2]{}; bool velocityKnown[2]{}; // runtime-reported room-space m/s at the pose time
     float trigger=0,leftTrigger=0,grip[2]{};
     bool clickToDrink=false;
@@ -778,12 +795,12 @@ public:
         // still require both hands; a resting/occluded right hand must not hide
         // a correctly presented watch or permit an input through the guard.
         const int wristHand=in.wristHand==0?0:1;
-        out.wrist=in.active&&in.session&&in.tracked[wristHand]&&std::isfinite(in.time)&&WristPresented(in.hand[wristHand],in.head);
+        out.wrist=in.active&&in.session&&in.tracked[wristHand]&&std::isfinite(in.time)&&WristPresented(in.Wrist(),in.head);
         const bool palmAllowed=in.active&&in.tracked[wristHand]&&(vitals::Palm(in.vitalsLocation)||vitals::Palm(in.navigationLocation))&&
             !in.wheel&&!in.cancel&&!in.leftCasting&&in.leftTrigger<.2f&&in.grip[wristHand]<.6f&&
             !in.reservedLeft&&bottleHand!=wristHand&&holsterHand!=wristHand&&Fresh(in.snapshot,in.session,in.at);
         const bool palm=palmReveal.Step(in.session,in.epoch,in.time,palmAllowed,
-            PalmPresented(in.hand[wristHand],in.head),PalmPresented(in.hand[wristHand],in.head,true));
+            PalmPresented(in.Wrist(),in.head),PalmPresented(in.Wrist(),in.head,true));
         out.palm=palm&&vitals::Palm(in.vitalsLocation);
         out.vitals=out.palm||(out.wrist&&vitals::Wrist(in.vitalsLocation));
         out.navigationPalm=palm&&vitals::Palm(in.navigationLocation);
@@ -873,9 +890,11 @@ public:
         }
         // The tabbed menu on leather (leather_menu.h): the left hand reaches over the
         // left shoulder and grips. With Dominant hand = Left that is the swap's, so off.
+        // Left-handed (in.mirrored): the right hand over the right shoulder.
         leather::ReachInput sheet;sheet.time=in.time;sheet.session=in.session;sheet.epoch=in.epoch;
         sheet.active=in.active&&in.leatherReach&&dominant==0;sheet.tracked=in.tracked[leather::Hand];
         sheet.head=in.head.p;sheet.hand=in.hand[leather::Hand].p;sheet.heading=body.q;sheet.grip=in.spellGrips?(grips[leather::Hand]?1.f:0.f):in.grip[leather::Hand];
+        sheet.right=in.RightHand(leather::Hand);
         sheet.allowed=!wheel&&!in.quickCast&&!in.cancel&&!rearm&&bottle<0&&holster<0&&pending.action==Action::None;
         const auto reached=leatherReach.Step(sheet);out.block=out.block||reached.block;
         if(reached.open){out.inventory=true;out.feedback=1;out.feedbackHand=leather::Hand;}
