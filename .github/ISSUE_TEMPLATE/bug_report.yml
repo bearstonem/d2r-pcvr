@@ -58,10 +58,13 @@ body:
       value: |
         ### Logs
         Reproduce the problem, close the game, then attach these files, zipped (the frame log can be large).
-        The paths are for Steam's default library:
+        Collect them **before starting the game again**: `d2r-vr-frame.log` holds only the latest session. If you already
+        restarted once, the session with the problem is in `d2r-vr-frame.previous.log`, so send both; after a second
+        restart it is gone and the problem has to be reproduced again. The paths are for Steam's default library:
 
         ```text
         C:\Program Files (x86)\Steam\steamapps\common\Diablo II Resurrected\mods\D2R-PCVR\d2rloader\logs\d2r-vr-frame.log
+        C:\Program Files (x86)\Steam\steamapps\common\Diablo II Resurrected\mods\D2R-PCVR\d2rloader\logs\d2r-vr-frame.previous.log
         C:\Program Files (x86)\Steam\steamapps\common\Diablo II Resurrected\mods\D2R-PCVR\d2rloader\logs\d2r-pcvr-vrcam.log
         C:\Program Files (x86)\Steam\steamapps\common\Diablo II Resurrected\mods\D2R-PCVR\reshade\ReShade.log
         C:\Program Files (x86)\Steam\steamapps\common\Diablo II Resurrected\d2rloader\logs\d2rloader.log

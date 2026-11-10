@@ -775,7 +775,10 @@ no image-resolution/bitrate measurement. `--since`/`--until` accept ISO timestam
 include a UTC offset when analyzing logs away from the capture machine's timezone.
 
 - Runtime log: `mods/D2R-PCVR/d2rloader/logs/d2r-vr-frame.log` in the game folder
-  (`mods/pcvr-dev/d2rloader/logs/d2r-vr-frame.log` for developer mode). A bounded
+  (`mods/pcvr-dev/d2rloader/logs/d2r-vr-frame.log` for developer mode). It holds
+  the current session; each start renames the one before to
+  `d2r-vr-frame.previous.log` (replacing the older one), or appends when that
+  rename fails, and a session's file stops at 64 MB (`log_rotation.h`). A bounded
   queue writes batches on a worker without forced disk flushes. The old SDK log,
   `d2r-pcvr-vrcam.log` (`d2r-vr-vrcam.log` up to 0.3.15), remains for loader/startup messages. Live syscall sampling
   identified repeated main-thread `fsync()` waits on that old file during hitches.

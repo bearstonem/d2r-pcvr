@@ -229,10 +229,12 @@ records historical paths for older release reports.
 
 | File | Purpose |
 | --- | --- |
-| `d2rloader/logs/d2r-vr-frame.log` | Main buffered PCVR runtime/gameplay/render diagnostics |
-| `d2rloader/logs/d2r-vr-vrcam.log` | Plugin/loader startup diagnostics |
+| `d2rloader/logs/d2r-vr-frame.log` | Main buffered PCVR runtime/gameplay/render diagnostics, **this session only** |
+| `d2rloader/logs/d2r-vr-frame.previous.log` | The same for the session before |
+| `d2rloader/logs/d2r-vr-vrcam.log` | Plugin/loader startup diagnostics (the loader's file, rewritten by it each launch) |
 | `d2rloader/logs/d2rloader.log` | Loader failures and native assertions |
-| `d2rloader/logs/pcvr-launch.log` | Explorer handoff, child PID, exit code |
+| `d2rloader/logs/pcvr-launch.log` | Explorer handoff, child PID, exit code, across launches |
+| `d2rloader/logs/pcvr-launch.previous.log` | Older launches, once the launch log passed 1 MB |
 | `ReShade.log` in the game root | Shader loading/compile/runtime information |
 
 Also collect the loader's `d2r-lastresort-crash-report (...)` when produced;
@@ -240,8 +242,24 @@ locate it in the user's actual installation/log folders instead of guessing a
 headset-specific location. ZIP large text logs. Match the report's actual crash
 timestamp/PID to its session; filenames can contain process-start times.
 
-Logs append across sessions. Do not diagnose a recent crash from an older
-session's tail. Legacy upstream plugin identity/version strings can be stale;
+The frame log holds one session (`steamvr/log_rotation.h`). At each start the
+plugin renames the existing `d2r-vr-frame.log` to `d2r-vr-frame.previous.log`,
+replacing the one kept there, and starts an empty file; its second line says
+which happened. So after a crash the evidence is in `d2r-vr-frame.log` until the
+game is started again, in `.previous.log` after one more start, and gone after
+two: collect it before relaunching twice, and ask a reporter how often they
+restarted. When the rename fails (the log open in a program that does not share
+it, a read-only folder) the session appends to the old file instead and says so;
+such a file holds several sessions, as every log did before rotation (a report
+from a release without it is one file of every session; its first start with
+rotation moves that whole file to `.previous.log`). A session's log stops at
+64 MB with a last line saying so; the largest of 306 sessions in a 259 MB
+pre-rotation log was 6 MB, so reaching it means a diagnostic left on or a line
+repeated every frame. The launch log is kept by size instead:
+it appends across launches and moves to `pcvr-launch.previous.log` at 1 MB.
+`d2rloader.log` and the plugin startup log are D2RLoader's own files and are not
+rotated by the mod. Match a line's timestamp to the session before diagnosing a
+recent crash from it. Legacy upstream plugin identity/version strings can be stale;
 use a release package version, verified build hash or deployment receipt.
 Separate verified assertions, reconstructed call paths, hypotheses and owner
 headset observations. A null allocator return does not by itself prove a leak,
