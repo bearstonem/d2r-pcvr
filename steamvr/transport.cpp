@@ -1016,7 +1016,6 @@ leather::Reach leatherStow;
 // handRoles is the input thread's (under mutex); handRolesLeft is the same map for any thread.
 handrole::State handRoles;
 std::atomic<bool> handRolesLeft{false},leftHandedWanted{false};
-std::atomic<int> dominantSetting{0};
 interaction::Config interactionConfig;bool interactionConfigured=false;   // under mutex; dominant is a role there
 int PhysicalHand(int role){return handrole::Map{handRolesLeft.load(std::memory_order_relaxed)}.Physical(role);}
 int RoleHand(int physical){return PhysicalHand(physical);}
@@ -2721,6 +2720,7 @@ void TCrossStep(const settings::Snapshot& config,const menus::Pad& physical,bool
     in.calibrating=bodyCalibration.Active()||calibrationRelease.blocked;
     auto& s=in.pose;s.time=motionInput.time;s.floor=floorSpace;s.headTracked=motionHeadTracked;s.head=V(head.position);s.rotation=Q(head.orientation);
     for(int i=0;i<2;++i){s.handTracked[i]=motionInput.tracked[i];s.hand[i]=motionInput.hand[i].p;}
+    calibration::BodyOrder(s,handRoles.map.left);   // motionInput is in main / off order; the pose is read by body side
     if(in.on&&!in.calibrating&&calibration::TCrossHandsWide(s)){
         for(int i=0;i<2;++i){s.trigger[i]=Float(trigger,i);in.grip[i]=Float(squeeze,i);}
         in.seated=config.values[settings::Seated]>.5f;
@@ -2775,6 +2775,7 @@ void CalibrationInput() {
     sample.headTracked=motionHeadTracked;sample.head=V(head.position);sample.rotation=Q(head.orientation);
     sample.cancel=Bool(secondary,0);
     for(int i=0;i<2;++i){sample.handTracked[i]=motionInput.tracked[i];sample.hand[i]=motionInput.hand[i].p;sample.trigger[i]=Float(trigger,i);}
+    calibration::BodyOrder(sample,handRoles.map.left);
     if(bodyCalibration.Step(sample)){
         const auto request=calibration::SaveRequest(vrsettings::Read(),bodyCalibration.Get());
         calibrationOrigin=V(head.position);
@@ -3632,7 +3633,7 @@ void UpdateHandRoles() {
     // painted again with the controller labels, which change with the same roles.
     if(handtext::Left()!=next.map.left){handtext::SetLeft(next.map.left);++settingsModel.revision;}
     {   // the weapon swap's hand in role order (handrole::Dominant): the engine starts over when it moves
-        const int role=next.map.Role(handrole::Dominant(wanted,dominantSetting.load()));
+        const int role=next.map.Role(handrole::Dominant(wanted));
         if(interactionConfigured&&interactionConfig.dominant!=role) {
             interactionConfig.dominant=role;interactions.Configure(interactionConfig);interactionstate::Cancel();
         }
@@ -3736,9 +3737,18 @@ void Input() {
         if(atlasStagingFree.size()<AtlasStagingKept)atlasStagingFree.push_back(std::move(upload->staging));
         upload=atlasUploads.erase(upload);
     }
-    if(!calibrationPrompted&&!settingsModel.open&&!panelMode&&!spatialMode&&inWorld&&inWorld()){
+    // Every character load opens Calibrate body (owner, 2026-11-10), not only the first with nothing stored.
+    // Back at the menus there is no hero: the next one in a world is a load. An act change keeps its hero, so
+    // it asks nothing. Seated play with a measurement stored is left alone: the prompt asks you to stand.
+    if(calibrationPrompted&&!bodyCalibration.Active()&&!(inWorld&&inWorld())&&!gamestate::LocalPlayer())calibrationPrompted=false;
+    if(!calibrationPrompted&&!settingsModel.open&&!panelMode&&!spatialMode&&inWorld&&inWorld()&&gamestate::LocalPlayer()){
         const auto config=vrsettings::Read();
-        if(config.ready&&config.result!=settings::Result::Saving){calibrationPrompted=true;if(!calibration::Stored(config.values))OpenBodyCalibration();}
+        if(config.ready&&config.result!=settings::Result::Saving){
+            calibrationPrompted=true;
+            const bool stored=calibration::Stored(config.values),seated=config.values[settings::Seated]>.5f;
+            if(!stored||!seated){OpenBodyCalibration();Say(stored?"Frame body calibration: character loaded, prompt opened (Right B keeps the stored measurement)":"Frame body calibration: character loaded with nothing stored, prompt opened");}
+            else Say("Frame body calibration: character loaded, Seated play with a stored measurement: no prompt");
+        }
     }
     TCrossStep(frameConfig,physical,nativeUi);
     const bool gripMenuPressed=leftMenuButton.Update((controls.buttons&menus::LeftStick)!=0,
@@ -7378,13 +7388,13 @@ void ConfigureQuiver(bool enabled,bool preview) {
         Say(enabled?"Frame bow quiver: arrow skills load physical arrows":"Frame bow quiver: disabled; arrow skills use native buttons");
     }
 }
-void ConfigureInteractions(bool seated,float waist,float forward,int dominant,bool leftHanded) {
-    // Left-handed turns Dominant hand's behaviours to the left hand too (handrole::Dominant).
-    dominant=handrole::Dominant(leftHanded,dominant);
+void ConfigureInteractions(bool seated,float waist,float forward,bool leftHanded) {
+    // The swap hand is the main hand: the left one with Left-handed on (handrole::Dominant).
+    const int dominant=handrole::Dominant(leftHanded);
     interaction::Config c;c.seated=seated;c.waistBelowEyes=std::clamp(waist,.30f,.95f);
     c.beltForward=std::clamp(forward,.03f,.5f);c.holsters=false;
     std::lock_guard lock(mutex);
-    leftHandedWanted=leftHanded;dominantSetting=dominant;
+    leftHandedWanted=leftHanded;
     // The engine takes the swap hand as a role (0 main): the same number right-handed. UpdateHandRoles
     // moves it when the roles change.
     c.dominant=handRoles.map.Role(dominant);

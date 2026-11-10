@@ -300,10 +300,6 @@ inline constexpr ContentSection SectionTable[]={
 
 // ---- options and value words (ini order: option i has value min + i) ----
 
-inline constexpr Option DominantOptions[]={
-    {0,"Right","Reach your right hand over a shoulder and grip to swap weapon sets."},
-    {1,"Left","Reach your left hand over a shoulder and grip to swap weapon sets."},
-};
 // Skills go to the aimed monster, spell_lock bits: 1 spells, 2 bow skills.
 inline constexpr Option SpellLockOptions[]={
     {0,"Off","Spells and bow skills fly along your casting hand."},
@@ -586,15 +582,12 @@ inline constexpr Override Overrides[]={
     {.id="interactions.click_to_drink",.page=View::Body,.section="Potion belt",.kind=RowKind::Toggle,.label="Click to drink",
      .help="On: hold a flask and press that hand's trigger to drink. The mouth gesture still works. Off: bring the opening to your mouth and tip to drink."},
     // Hands: Hands and buttons
-    {.id="interactions.dominant_hand",.page=View::Hands,.section="Hands and buttons",.kind=RowKind::Choice,.label="Dominant hand",
-     .help="The hand that swaps weapon sets when you reach over a shoulder and grip. Your weapon and shield hands stay the same: Left-handed, below, swaps those.",
-     FRAMEVR_OPTIONS(DominantOptions)},
     // Walk direction (owner, 2026-11-08: "moving where the controller points versus where you look, that should be a
-    // setting"): the right half of Dominant hand's row. [stick] walk_direction.
+    // setting"): a row of its own since Dominant hand's row went (2026-11-10). [stick] walk_direction.
     {.id="stick.walk_direction",.page=View::Hands,.section="Hands and buttons",.kind=RowKind::Stepper,.label="Walk direction",
      .help="Look: the left stick walks where you look. Controller: where the left controller points, so you can look around while you walk.",
-     FRAMEVR_NAMES(WalkNames),.beside=true,.besideLabel="Walk"},
-    // Left-handed play (hand_role.h, #307): a row of its own under Dominant hand. [interactions] left_handed.
+     FRAMEVR_NAMES(WalkNames)},
+    // Left-handed play (hand_role.h, #307): the one switch for the hands. [interactions] left_handed.
     {.id="interactions.left_handed",.page=View::Hands,.section="Hands and buttons",.kind=RowKind::Toggle,.label="Left-handed (experimental)",
      .help="On: weapon in the left hand, shield on the right; buttons, sticks, laser, wrist HUD and class motions mirror. A bow sits in the right hand, drawn by the left."},
     {.id="gameplay.run_walk_toggle",.page=View::Hands,.section="Hands and buttons",.kind=RowKind::Toggle,.label="Stick toggle",
@@ -812,6 +805,9 @@ inline constexpr Override Overrides[]={
     {.id="interactions.wrist_compass",.page=NotInMenu},
     {.id="render.desktop_one_eye",.page=NotInMenu},
     {.id="gameplay.left_hand_strikes",.page=NotInMenu},
+    // Dominant hand (owner, 2026-11-10: with Left-handed mirroring everything it "doesn't make any sense"): its
+    // row is gone and the key is no longer read; the swap hand is the main hand (handrole::Dominant).
+    {.id="interactions.dominant_hand",.page=NotInMenu},
     // Glyph casting: edited on the wheel (the button picker's "Draw glyph", the GLYPHS page).
     {.id="glyphs.draw_slot",.page=NotInMenu},{.id="glyphs.circle",.page=NotInMenu},{.id="glyphs.triangle",.page=NotInMenu},
     {.id="glyphs.square",.page=NotInMenu},{.id="glyphs.lightning",.page=NotInMenu},{.id="glyphs.spiral",.page=NotInMenu},
@@ -1165,10 +1161,10 @@ inline MenuData BuildMenu(const Override* overrides,size_t overrideCount,const P
     }
     return m;
 }
-// Left-handed play (hand_text.h): a menu's words mirrored, once. Every row but the two about the physical
-// hands themselves (Left-handed, and Dominant hand with its Right / Left choices): its label, help, warnings,
+// Left-handed play (hand_text.h): a menu's words mirrored, once. Every row but the one about the physical
+// hands themselves (Left-handed): its label, help, warnings,
 // the word beside it, its options and their hints, its value names; the presets' names and blurbs.
-constexpr bool PhysicalSides(Key key){return key==LeftHanded||key==Dominant;}
+constexpr bool PhysicalSides(Key key){return key==LeftHanded;}
 inline MenuData MirroredMenu(const MenuData& written){
     MenuData menu=written;
     for(auto& r:menu.rows){

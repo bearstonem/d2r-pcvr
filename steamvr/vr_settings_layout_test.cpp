@@ -80,8 +80,7 @@ static const GoldenRow Golden[]={
     {"interactions.waist_below_eyes",View::Body,1,content::RowKind::Slider,"Belt below eyes",0,0},
     {"interactions.belt_forward",View::Body,1,content::RowKind::Slider,"Belt forward reach",0,0},
     {"interactions.click_to_drink",View::Body,1,content::RowKind::Toggle,"Click to drink",0,0},   // #425
-    {"interactions.dominant_hand",View::Hands,0,content::RowKind::Choice,"Dominant hand",2,0},
-    {"stick.walk_direction",View::Hands,0,content::RowKind::Stepper,"Walk direction",0,2},   // drawn inside Dominant hand's row (2026-11-08)
+    {"stick.walk_direction",View::Hands,0,content::RowKind::Stepper,"Walk direction",0,2},   // a row of its own since Dominant hand's row went (2026-11-10)
     {"interactions.left_handed",View::Hands,0,content::RowKind::Toggle,"Left-handed (experimental)",0,0},   // #307, a row of its own
     {"gameplay.run_walk_toggle",View::Hands,0,content::RowKind::Toggle,"Stick toggle",0,0},   // a row of its own
     {"interactions.controller_labels",View::Hands,0,content::RowKind::Choice,"Button names",5,0},
@@ -239,7 +238,7 @@ int main(int argc,char** argv){
     }
     // ---- the map: no row lost, none left to More, the names and the owner's pairs ----
     {
-        Check(tables.rowCount==113,"113 settings on the menu, each one row");   // + Left-handed (#307)   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424), Click to drink (#425), Skill cooldowns (2026-11-09), + Summon range (#426), T cross to calibrate (#423), Heads turn to you (2026-11-09), Echo (world sound, 2026-11-09), + Monsters stagger, Heavy hits knock back (hit reactions, 2026-11-09), + Hit feel by target, Felt heartbeat (richer haptics)
+        Check(tables.rowCount==112,"112 settings on the menu, each one row");   // - Dominant hand (2026-11-10: Left-handed is the one switch)   // + Left-handed (#307)   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424), Click to drink (#425), Skill cooldowns (2026-11-09), + Summon range (#426), T cross to calibrate (#423), Heads turn to you (2026-11-09), Echo (world sound, 2026-11-09), + Monsters stagger, Heavy hits knock back (hit reactions, 2026-11-09), + Hit feel by target, Felt heartbeat (richer haptics)
         for(size_t i=0;i<tables.rowCount;++i)Check(!tables.rows[i].fallback&&tables.rows[i].page!=View::More,std::string("every setting has its page: ")+tables.rows[i].label);
         Check(content::Menu().report.empty(),"the tidy report is empty");
         struct Want {content::Group group;const char* name;std::vector<const char*> pages;};
@@ -610,7 +609,7 @@ int main(int argc,char** argv){
         auto body=L::Build(m,{},{});CheckLayout(body,"body");
         const L::Element* calibrate=nullptr;for(const auto& e:body.elements)if(e.hit.kind==Kind::Calibrate)calibrate=&e;
         Check(calibrate&&calibrate->Has(L::Enabled),"Calibrate body with no draft");
-        m.Set(Dominant,1);body=L::Build(m,{},{});
+        m.Set(LeftHanded,1);body=L::Build(m,{},{});
         for(const auto& e:body.elements)if(e.hit.kind==Kind::Calibrate)calibrate=&e;
         Check(!calibrate->Has(L::Enabled)&&FindRole(body,L::Role::Label,BodyCalibration)->sub=="Apply or discard first","Calibrate is disabled while Dirty, with the reason");
         L::Press(m,{Kind::Open,int(View::Monsters),-1},0);
@@ -1110,7 +1109,7 @@ int main(int argc,char** argv){
     // left-handed panels pass the same geometry checks: no label, chip, hint or card outgrows its place.
     {
         using framevr::handtext::Mirror;
-        const auto physical=[](int id){return id==LeftHanded||id==Dominant;};
+        const auto physical=[](int id){return id==LeftHanded;};
         int compared=0,changed=0,panels=0;
         std::vector<std::string> sides;
         const auto compare=[&](const L::Layout& written,const L::Layout& shown,const std::string& where,bool physicalCard){
@@ -1120,7 +1119,7 @@ int main(int argc,char** argv){
                 Check(a.role==b.role&&a.key==b.key&&a.help==b.help,where+": the same element "+std::to_string(i));
                 // (the detected controllers are read off the real hands: "Detected: left Touch / right Touch")
                 const bool keep=physical(int(a.key))||physical(a.help)||(physicalCard&&CardPart(a.role))||a.text.rfind("Detected: left ",0)==0||a.sub.rfind("Detected: left ",0)==0||
-                    a.text.rfind("Dominant hand: ",0)==0||a.text.rfind("Left-handed (experimental): ",0)==0;   // those two rows' lines in the list of changes
+                    a.text.rfind("Left-handed (experimental): ",0)==0;   // that row's line in the list of changes
                 // the Guide's controls are the buttons of whichever controller is in that hand (GuideControl, below)
                 const bool buttons=a.role==L::Role::GuideLine||a.text.rfind("Game menus: ",0)==0;
                 if(!buttons)Check(b.text==(keep?a.text:Mirror(a.text)),where+": \""+a.text+"\" reads \""+b.text+"\" left-handed, expected \""+(keep?a.text:Mirror(a.text))+"\"");
@@ -1196,10 +1195,9 @@ int main(int argc,char** argv){
                 const std::string title=WrittenHelpTitle(k),text=WrittenHelpText(k);
                 Check(std::string(HelpTitle(k))==(physical(k)?title:Mirror(title))&&std::string(HelpText(k))==(physical(k)?text:Mirror(text)),std::string("help of ")+title+": mirrored");
             }
-            Check(content::RowOf(LeftHanded)&&content::RowOf(Dominant)&&content::RowOf(Dominant)->optionCount>=2,"both rows are on the menu");
-            Check(std::string(HelpText(LeftHanded))==WrittenHelpText(LeftHanded)&&std::string(content::RowOf(LeftHanded)->label)=="Left-handed (experimental)"&&
-                  std::string(content::RowOf(Dominant)->options[0].label)=="Right"&&std::string(content::RowOf(Dominant)->options[1].label)=="Left",
-                  "Left-handed's own row and Dominant hand's Right / Left read the same: they are the real hands");
+            Check(content::RowOf(LeftHanded)&&!content::RowOf(Dominant),"Left-handed is on the menu; Dominant hand no longer is");
+            Check(std::string(HelpText(LeftHanded))==WrittenHelpText(LeftHanded)&&std::string(content::RowOf(LeftHanded)->label)=="Left-handed (experimental)",
+                  "Left-handed's own row reads the same: it is about the real hands");
             // what the owner asked about, by name
             Check(content::RowOf(HighlightRight)&&content::RowOf(HighlightLeft)&&
                   std::string(content::RowOf(HighlightRight)->label)=="Left hand outline color"&&std::string(content::RowOf(HighlightLeft)->label)=="Right hand outline color",

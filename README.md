@@ -92,11 +92,11 @@ This is a PCVR mod: the game runs on your Windows PC and streams to the headset.
 - A **MAP** tab at the bottom of the spell menu, showing explored areas and native markers.
 - Load supported arrow skills into a physical bow quiver, with the selected
   arrow visible on the string. Selected Paladin Smite works with left-shield contact.
-- Body calibration for your height and arm span, available on first load,
+- Body calibration for your height and arm span, offered each time a character loads,
   through **Left Grip + left secondary → Calibrate body**, and any time you
   stand in a T cross for 2 seconds.
 - Weapon-set swapping: reach your right hand over either shoulder and press
-  its grip. You can change the swap hand in VR Settings > Controls > Hands > Dominant hand.
+  its grip. With VR Settings > Controls > Hands > Left-handed on, it is the left hand.
 - Inventory, skills, conversations and Journal through the game menu:
   **Frame Left A / Quest Left X**.
 
@@ -146,7 +146,7 @@ Quest left X/Y correspond to Index left A/B; right A/B labels are the same.
 | Bow draw | Right trigger near the left-hand bow string; draw and release |
 | Javelin, throwing knife or axe throw | Right trigger on Attack, Throw or nothing; hold the trigger, throw, release |
 | Cancel a physical attack / draw | Open either wheel, then release the held controls |
-| Swap weapon sets I / II | Dominant grip over either shoulder; or wheel → EQUIPMENT |
+| Swap weapon sets I / II | Main hand's grip over either shoulder (right hand; left with Left-handed on); or wheel → EQUIPMENT |
 | Stow / draw weapons | Wheel → EQUIPMENT → Stow / Draw |
 | Grab / drink potion | Grip a belt bottle, bring its opening to the mouth and tip it; release to return unused |
 | Heal your mercenary | Toss a held Health, Rejuvenation, Antidote or Thawing bottle so it lands near its feet; a miss keeps the potion |

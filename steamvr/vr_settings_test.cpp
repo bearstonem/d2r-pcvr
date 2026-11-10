@@ -94,7 +94,7 @@ int main(int argc,char** argv){
             framevr::handtext::Scope left(true);
             for(int id=0;id<=HelpLast;++id)Check(std::string(HelpText(id)).size()<450,"left-handed: every mirrored help text is short enough for its card");
             for(const auto& row:content::Menu().rows)Check(HelpText(row.key)[0]&&HelpTitle(row.key)[0],"left-handed: every row has help");
-            Check(std::string(HelpText(LeftHanded))==WrittenHelpText(LeftHanded)&&std::string(HelpText(Dominant))==WrittenHelpText(Dominant),"the two rows about the real hands read the same");
+            Check(std::string(HelpText(LeftHanded))==WrittenHelpText(LeftHanded),"the row about the real hands reads the same");
             Check(std::string(HelpText(SmoothTurn)).find("left stick")!=std::string::npos&&std::string(WrittenHelpText(SmoothTurn)).find("right stick")!=std::string::npos,"the turn stick is the left one then");
         }
         Check(!framevr::handtext::Left()&&HelpText(SmoothTurn)==WrittenHelpText(SmoothTurn),"OFF: the help as written, the same pointer");
@@ -965,15 +965,15 @@ int main(int argc,char** argv){
             Check(t.Get()[TCrossCalibrate]==0&&t.Click({Kind::Apply}).changed==(ChangeMask{1}<<TCrossCalibrate),"the switch turns it Off, and Apply saves only it");
         }
     }
-    {   // Left-handed (#307, hand_role.h): Off by default, experimental, a row of its own under Dominant hand, saved alone
+    {   // Left-handed (#307, hand_role.h): Off by default, experimental, a row of its own, saved alone
         Check(Defaults()[LeftHanded]==0&&std::wstring(Definitions[LeftHanded].section)==L"interactions"&&
               std::wstring(Definitions[LeftHanded].key)==L"left_handed"&&Definitions[LeftHanded].min==0&&Definitions[LeftHanded].max==1&&
               HelpText(LeftHanded)[0]!=0&&LeftHanded<ChangeMask::Bits&&LeftHanded==Count-1,
               "Left-handed: Off by default, [interactions] left_handed Off / On, explained, its own change bit, appended last");
         const auto* row=content::RowOf(LeftHanded);
         Check(row&&!row->beside&&row->page==View::Hands&&row->kind==content::RowKind::Toggle&&std::strcmp(row->label,"Left-handed (experimental)")==0&&
-              row->section==content::RowOf(Dominant)->section&&row->classes==content::AllClasses,"a switch of its own on Controls > Hands, every class");
-        Check(std::wstring(Definitions[Dominant].key)==L"dominant_hand"&&Defaults()[Dominant]==0,"Dominant hand keeps its key and default: its saved Left still means the swap hand only");
+              row->section==content::RowOf(WalkDirection)->section&&!content::RowOf(WalkDirection)->beside&&row->classes==content::AllClasses,"a switch of its own on Controls > Hands, every class");
+        Check(std::wstring(Definitions[Dominant].key)==L"dominant_hand"&&Defaults()[Dominant]==0&&!content::RowOf(Dominant),"Dominant hand keeps its key so a saved file loads, but has no row: Left-handed is the one switch");
         Check(std::string(HelpText(LeftHanded)).find("bow")!=std::string::npos&&std::string(HelpText(LeftHanded)).find("drawn by the left")!=std::string::npos&&
               std::string(row->help).find("drawn by the left")!=std::string::npos&&std::string(HelpText(LeftHanded)).find("plays right-handed")==std::string::npos,
               "both helps say how a bow is held now that every weapon kind is mirrored; neither promises a right-handed fallback");

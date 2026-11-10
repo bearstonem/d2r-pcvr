@@ -136,11 +136,11 @@ int main() {
         Check(MirroredSystems[0],"the systems are named for the log");
     }
     {   // Dominant hand's behaviours: Left-handed turns them left with the one switch, whatever the weapon
-        Check(Dominant(false,0)==0&&Dominant(false,1)==1,"off: Dominant hand as saved");
-        Check(Dominant(true,0)==1&&Dominant(true,1)==1,"on: the left hand, whatever Dominant hand says");
+        Check(Dominant(false)==0,"off: the right hand");
+        Check(Dominant(true)==1,"on: the left hand");
         const auto sword=Resolve(true,D2RVR_TYPE_SWORD,0),bow=Resolve(true,D2RVR_TYPE_BOW,0);
-        Check(sword.map.Role(Dominant(true,0))==0,"with a sword the swap hand is the main hand (role 0), the left");
-        Check(bow.map.Role(Dominant(true,0))==0&&bow.map.Physical(0)==1&&bow.map==sword.map,"with a bow it is the same LEFT hand in the same role (it draws the string): the swap hand never moves");
+        Check(sword.map.Role(Dominant(true))==0,"with a sword the swap hand is the main hand (role 0), the left");
+        Check(bow.map.Role(Dominant(true))==0&&bow.map.Physical(0)==1&&bow.map==sword.map,"with a bow it is the same LEFT hand in the same role (it draws the string): the swap hand never moves");
         // haptics: a pulse for a role goes to the controller playing it
         Check(sword.map.Physical(0)==1&&sword.map.Physical(1)==0&&bow.map.Physical(0)==1&&bow.map.Physical(1)==0,
             "the main hand's pulse buzzes the left controller, the shield's the right; with a bow the string hand's (nock, draw, release) the left, the bow hand's the right");

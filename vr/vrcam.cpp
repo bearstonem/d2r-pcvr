@@ -989,7 +989,7 @@ void LoadSettings() {
     framevr::ConfigureGameplay(IniB(L"gameplay",L"motion_controls",false));
     framevr::ConfigureQuiver(IniB(L"bow",L"quiver",true),IniB(L"bow",L"quiver_preview",true));
     framevr::ConfigureInteractions(IniB(L"interactions",L"seated",false),IniF(L"interactions",L"waist_below_eyes",.65f),
-        IniF(L"interactions",L"belt_forward",.26f),IniF(L"interactions",L"dominant_hand",0)==1?1:0,
+        IniF(L"interactions",L"belt_forward",.26f),
         IniB(L"interactions",L"left_handed",false));   // Left-handed (experimental): steamvr/hand_role.h
     framevr::ConfigureBottlePhysics(IniB(L"interactions",L"bottle_physics",true));
     framevr::ConfigurePropPhysics(IniB(L"interactions",L"prop_physics",true));
@@ -3324,7 +3324,7 @@ std::atomic<int> lock{0};         // Skills go to the aimed monster: bits 1 spel
 constexpr framevr::settings::Key keys[] = {framevr::settings::TargetHighlight,
                                            framevr::settings::StaffPoint,
                                            framevr::settings::LandingCircles, framevr::settings::AimHighlights,
-                                           framevr::settings::Dominant, framevr::settings::AimFollowsView,
+                                           framevr::settings::AimFollowsView,
                                            framevr::settings::LootPick, framevr::settings::AimWithEyes};
 constexpr int KeyCount = int(std::size(keys));
 void Refresh() {
@@ -3343,10 +3343,10 @@ void Refresh() {
 }
 }
 bool AimOn(framevr::settings::Key key);
-// Dominant hand's hand (the outline's first, the loot pick's pointing hand), as a role: the left hand
-// with Dominant hand = Left or with Left-handed on (handrole::Dominant), whichever role it plays now.
+// The dominant hand (the outline's first, the loot pick's pointing hand), as a role: the left hand
+// with Left-handed on (handrole::Dominant), whichever role it plays now.
 int DominantRole() {
-    return framevr::HandRole(framevr::handrole::Dominant(framevr::LeftHandedWanted(), AimOn(framevr::settings::Dominant) ? 1 : 0));
+    return framevr::HandRole(framevr::handrole::Dominant(framevr::LeftHandedWanted()));
 }
 bool AimOn(framevr::settings::Key key) {
     aimsettings::Refresh();
@@ -5255,7 +5255,7 @@ void TellThread(const char* hook, int slot) {
 int PointingHand() {
     const int hand = DominantRole();
     static int told = -1;
-    if (const int side = framevr::HandSide(hand); side != told) { told = side; LogF("Frame loot aim source: the %s hand points (VR Settings > Controls > Hands > Dominant hand, or Left-handed)", side ? "left" : "right"); }
+    if (const int side = framevr::HandSide(hand); side != told) { told = side; LogF("Frame loot aim source: the %s hand points (VR Settings > Controls > Hands > Left-handed)", side ? "left" : "right"); }
     return hand;
 }
 // "Frame loot aim source:" once a second at most per hand while it keeps pointing with the motion layer off.

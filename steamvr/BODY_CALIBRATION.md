@@ -1,7 +1,8 @@
 # Body calibration and shoulder weapon swapping
 
-On the first offline character load without a saved calibration, the headset
-shows a body calibration prompt. Stand upright, look straight ahead, and stretch
+Every time a character loads into the game, the headset shows a body calibration
+prompt (not on an act change, and not in Seated play once a measurement is saved).
+Right B closes it and keeps the measurement you already have. Stand upright, look straight ahead, and stretch
 both arms out sideways at shoulder height: a T cross. Release both triggers, then hold
 both for about 1.2 seconds while keeping still. Wait for **Saved**, then release
 the triggers to return to gameplay. Right B skips or cancels before saving.
@@ -83,10 +84,10 @@ scale and each character's arm fit change without a restart.
 
 ## Shoulder weapon swap
 
-To switch between native weapon configurations I and II, reach the dominant
+To switch between native weapon configurations I and II, reach your main
 hand over **either shoulder** and press that hand's grip once. Release before
-pressing again. **VR → Dominant hand** selects Right (default) or Left for this
-gesture. Other controller mappings remain as listed in VR Settings > Guide.
+pressing again. The main hand is the right one, or the left with **VR Settings >
+Controls > Hands > Left-handed** on. Other controller mappings remain as listed in VR Settings > Guide.
 The gesture requests the opposite observed native set and waits for confirmation;
 the grip cannot repeat while held. Reaching behind the head without pressing
 grip leaves combat available, including the wind-up for a javelin throw.

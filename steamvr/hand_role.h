@@ -129,9 +129,9 @@ constexpr bool Mirrored(System system) {
 inline constexpr const char* MirroredSystems="class motions, menu laser, leather menu and journal, wrist HUD and map, floating map, labels and text";
 // The map a system uses under a state: the roles, or right-handed while it is not built.
 constexpr Map For(System system,const State& state) {return Mirrored(system)?state.map:Map{};}
-// Dominant hand's behaviours (the shoulder weapon swap's hand, the monster outline's first hand, the
-// loot pick's pointing hand; the left-shoulder reach for the leather menu off): Left-handed turns
-// them all to the left hand with the one switch, whatever Dominant hand says and whatever the weapon
+// The dominant hand's behaviours (the shoulder weapon swap's hand, the monster outline's first hand, the
+// loot pick's pointing hand): the right hand, and with Left-handed on the left, whatever the weapon
 // (the swap hand must not change as the swap changes the weapon). Physical: 0 right, 1 left.
-constexpr int Dominant(bool leftHanded,int dominantSetting) {return leftHanded||dominantSetting==1?1:0;}
+// There was a Dominant hand setting beside Left-handed until 2026-11-10; the one switch does it now.
+constexpr int Dominant(bool leftHanded) {return leftHanded?1:0;}
 }
