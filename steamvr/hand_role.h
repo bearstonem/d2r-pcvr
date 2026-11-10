@@ -18,7 +18,9 @@
 //   phase 1 (this file's Mirrors): one-handed weapons, a shield, dual wield, throws, potions, bare hands;
 //   phase 2 (Mirrored(System)): the laser and the menus, the wrist HUD and map, the leather menu,
 //           the class motions - each turns on here when it is built;
-//   phase 3 (Mirrors): bows, crossbows, staves, spears, polearms and other two-handed grips.
+//   phase 3 (Mirrors): bows, crossbows, staves, spears, polearms and other two-handed grips - built:
+//           the engines take them by role as they are (gameplay.h: the bow is hand[1], the string
+//           hand[0]), and the body poses them in a mirror world (vr/hand_swap_pose.h).
 namespace framevr::handrole {
 struct Map {
     bool left=false;   // the main hand is the physical left one
@@ -60,10 +62,34 @@ constexpr const char* Name(Kind kind) {
         default:return "one-handed";
     }
 }
-// The kinds left-handed play mirrors now. One-handed covers swords, axes, maces, scepters, wands,
-// daggers, claws, orbs, javelins and throwing weapons, bare hands, a shield beside any of them, a
-// weapon in each hand, and a shapeshift form's paws. Phase 3 returns true for the rest.
-constexpr bool Mirrors(Kind kind) {return kind==Kind::OneHand;}
+// The kinds left-handed play mirrors now, one switch per kind. One-handed covers swords, axes, maces,
+// scepters, wands, daggers, claws, orbs, javelins and throwing weapons, bare hands, a shield beside any
+// of them, a weapon in each hand, and a shapeshift form's paws. Since phase 3 every kind is mirrored,
+// so the roles no longer follow the weapon: taking up or putting away a bow or a staff never moves a
+// stick or a button. A kind turned off here falls back whole again (Resolve) and the log says so.
+constexpr bool Mirrors(Kind kind) {
+    switch(kind) {
+        case Kind::OneHand:return true;
+        case Kind::Bow:return false;        // the bow in the right hand, the left draws the string
+        case Kind::Crossbow:return false;   // the stock in the left hand, the right supports it
+        case Kind::Staff:return false;      // the left hand drives it, the right takes the shaft
+        case Kind::Polearm:return false;
+        case Kind::Spear:return false;
+        case Kind::TwoHands:return false;   // a great sword's hilt, an axe's or a maul's haft
+    }
+    return false;
+}
+// How a kind is held left-handed, for the log.
+constexpr const char* HeldLeftHanded(Kind kind) {
+    switch(kind) {
+        case Kind::Bow:return "the bow in the RIGHT hand (off hand: bow bash, the draw's pulse), the LEFT hand draws the string with the main trigger";
+        case Kind::Crossbow:return "the stock in the LEFT hand (main trigger fires), the RIGHT hand supports it with its grip";
+        case Kind::Staff:return "the LEFT hand drives the staff and aims it, the RIGHT hand takes the shaft with its grip";
+        case Kind::Polearm:case Kind::Spear:return "the LEFT hand drives it, the RIGHT hand slides along the shaft with its grip";
+        case Kind::TwoHands:return "the LEFT hand drives it, the RIGHT hand takes the hilt or haft with its grip";
+        default:return "the weapon in the LEFT hand, a shield or second weapon on the RIGHT";
+    }
+}
 inline constexpr const char* MirroredKinds="one-handed weapons, shield, dual wield, throws, potions, bare hands";
 inline constexpr const char* RightHandedKinds="bow, crossbow, staff, spear, polearm, two-handed grips";
 struct State {
@@ -73,9 +99,9 @@ struct State {
     constexpr bool Fallback() const {return wanted&&!map.left;}   // wanted, but this weapon plays right-handed for now
     constexpr bool operator==(const State&) const = default;
 };
-// The whole mode follows the weapon: a kind that is not mirrored yet plays right-handed in every
-// respect (weapon and shield, triggers, grips, face buttons, sticks, haptics), exactly as with the
-// setting off, so nothing is half swapped: a bow drawn by the hand that does not hold the string, or a
+// A kind that is not mirrored (none since phase 3; Mirrors) plays right-handed in every respect
+// (weapon and shield, triggers, grips, face buttons, sticks, haptics), exactly as with the setting
+// off, so nothing is half swapped: a bow drawn by the hand that does not hold the string, or a
 // trigger on the hand without the weapon.
 constexpr State Resolve(bool wanted,uint32_t weaponType,uint32_t twoHanded) {
     State s;s.wanted=wanted;s.kind=KindOf(weaponType,twoHanded);s.map.left=wanted&&Mirrors(s.kind);return s;
