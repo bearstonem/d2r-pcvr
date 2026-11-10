@@ -1,5 +1,49 @@
 # VR performance investigations
 
+## Draw thread: panel uploads and prop physics, November 10
+
+**Not yet measured in a headset.** The changes below passed the native build
+and its tests; none has run in a headset, so the gains are expected, not
+measured. A headset log from the owner's PC showed the game's draw thread as
+the limit: in fights a stereo pair ran 1-2 ms over its slot. Three pieces of
+work on that thread were cut.
+
+**The wrist atlas uploads only what changed.** Any life or mana change
+re-uploaded the whole 1024 x 1024 interaction atlas: 0.80 ms on the draw thread
+each (0.61 ms of it the copy into the upload buffer), 15-34 times in 10 s. The
+painter's thread now compares each atlas with the one it painted before
+(`atlas_dirty.h`) and hands over the 64-texel tiles that differ; the draw thread
+copies those tiles' rectangles alone, and uploads nothing when the picture is
+the same. A swapchain hands out several images in turn, so each image also gets
+what it missed while the others were written: the image shown is always whole.
+The swapchain's image list is read once instead of twice per upload.
+
+**The head-locked overlays do less per repaint.** Blood, Arcane Decay, guard
+strain and the glyph trail get the same changed-tile uploads into the shared
+master, and their pictures arrive in the atlas's channel order, so the draw
+thread never exchanges channels pixel by pixel. An upload no longer has a
+command list of its own: the frame's one list at its end puts the staged
+pictures into the master and copies on to the swapchain image only what that
+image is behind by, where it copied the whole 2048 x 2056 master (16 MB) for any
+picture. Their looks and repaint rates are unchanged: Arcane Decay's picture
+really differs at each 25 Hz repaint, so its 1 MB copy remains.
+
+**Prop physics does not step at rest.** With level props catalogued the Box3D
+world stepped at 120 Hz on the draw thread although every body in it was
+static. Without a bottle, a thrown bottle or a moving prop no step is taken; the
+weapons' bodies are placed where the steps would have left them and the step
+clock keeps its phase, so a prop a weapon reaches is set going and stepped on
+the same frame as before (`dropped_bottles_test.cpp` compares the two). The
+weapon sweep also skips props outside its bounds before the closer test.
+
+**What to read in the next log.** `Frame UI refresh:` every 10 s now gives the
+share of the atlas copied and how many refreshes were unchanged; its `copy`
+should fall well below 0.61 ms. A new `Frame pacing: XR begin, ms a pair:` line
+splits the frame's begin into the runtime's wait, locating the head and eyes,
+and the input step, which holds the panel uploads; compare `input` with and
+without Arcane Decay active (begin rose from 0.31-0.36 to 0.75-1.2 ms a pair
+when it came on).
+
 ## Render thread waits, October 20
 
 **By turns' passes built in the background.** The passes that turn and move
