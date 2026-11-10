@@ -32,6 +32,16 @@
 // this file).
 //
 // Head-local frame (+X right, +Y up from the eyes, forward -Z, the head's yaw only); hand 0 is the right.
+//
+// Left-handed play (hand_role.h, #307; owner, 2026-11-09: "mirror everything ... they're going to just do the
+// things they would have done with their right hand instead with their left hand"): Input::mirror. The
+// transport then gives the LEFT hand as hand 0 and the right as hand 1, and the engine watches the mirror
+// image of what it is given (Mirrored: the world reflected in the upright plane through the head along its
+// heading), so every detector, every class's, sees a right-handed player doing the right-handed motion and
+// needs no left-handed copy: "the right fist" in a detector or a cue is the main hand's, "the left shoulder"
+// the off hand's side. What comes back that has a side (Output::aim, point, spot.right, end) is mirrored
+// again (MirrorSides), so a cast goes where the left-handed player sent it. The cues' words are mirrored
+// where they are shown (hand_text.h).
 // Value-only: steamvr/spell_motion_test.cpp.
 namespace framevr::spellmotion {
 enum class Motion {None,FlingOut,PushDown,RubSnap,CrossGuard,ArmUp,MatchStrike,ForearmSweep,Shake,Hug,Punch,
@@ -311,6 +321,10 @@ struct Input {
     math::Vec head{};math::Quat headRotation{0,0,0,1};
     math::Vec hand[2]{};          // world frame; 0 right, 1 left
     bool tracked[2]{};
+    // Left-handed: hand 0 is the LEFT hand and hand 1 the right (grip, tracked, handVelocity with them), and
+    // the motion watched is the mirror image (Mirrored). Output's per-hand figures keep that order: 0 the
+    // main (left) hand.
+    bool mirror=false;
     float bodyScale=1;            // the player's size against the reference body (BodyScale): hands are divided by it
     // For the Paladin's and the Druid's detectors (motions_paladin.h, motions_druid.h), as their own engines took
     // them: the grips as pulled (a fist), each hand's velocity from the runtime (world, m/s) when it gives one,
@@ -364,6 +378,26 @@ inline Spot SpotAlong(math::Vec way,float farCells,float nearCells,float steepDe
 }
 // Teleport's landing (Output::point): pointFar level, pointNear at pointSteepDeg below. Meteor's: its own.
 inline Spot PointSpot(math::Vec way,const Tuning& t){return SpotAlong(way,t.pointFar,t.pointNear,t.pointSteepDeg);}
+// Left-handed play (Input::mirror): the input a right-handed player's mirror image would give. Everything
+// with a place or a way is reflected in the upright plane through the head that holds its heading - the hands
+// and their velocities, and the head's own turn (its heading and pitch stay, its roll reverses) - so the
+// head-local frame is the same one with left and right exchanged. The hands' order is the caller's (hand 0
+// the main hand).
+inline Input Mirrored(Input in) {
+    const auto yaw=math::Yaw(math::Heading(in.headRotation)),inverse=math::Conjugate(yaw);
+    const auto reflect=[&](math::Vec v){auto l=math::Rotate(inverse,v);l.x=-l.x;return math::Rotate(yaw,l);};
+    for(int h=0;h<2;++h){in.hand[h]=in.head+reflect(in.hand[h]-in.head);in.handVelocity[h]=reflect(in.handVelocity[h]);}
+    // a turn by an angle about an axis, reflected: about the reflected axis, by the angle reversed
+    const auto level=math::Multiply(inverse,in.headRotation);
+    in.headRotation=math::Multiply(yaw,math::Quat{level.x,-level.y,-level.z,level.w});
+    in.mirror=false;
+    return in;
+}
+// And what an Output says with a side, turned back for the player (head-local: x reversed; a spot's right).
+inline void MirrorSides(Output& out) {
+    out.aim.x=-out.aim.x;out.point.x=-out.point.x;out.spot.right=-out.spot.right;
+    for(auto& e:out.end)e.x=-e.x;
+}
 // The hands at one frame, head-local: l[0] the right, l[1] the left; w as given (world frame).
 struct Sample {double t=0;math::Vec l[2]{},w[2]{};};
 class Engine;
@@ -604,9 +638,18 @@ public:
     Tuning tuning;
     void Reset(){const auto keep=tuning;*this=Engine{};tuning=keep;}
     bool Watching()const{return watching;}
-    // The figures of the hold being watched, or of the last one (until the next begins).
+    // The figures of the hold being watched, or of the last one (until the next begins). With Input::mirror
+    // they are the mirror image's, as the detectors saw it (MirrorSides turns a copy back).
     const Output& Stats()const{return stats;}
     Output Step(const Input& in) {
+        if(!in.mirror)return Watch(in);
+        // Left-handed: watch the mirror image, and give back its sides the player's way round.
+        auto out=Watch(std::isfinite(in.time)&&Finite(in.head)?Mirrored(in):in);
+        MirrorSides(out);
+        return out;
+    }
+private:
+    Output Watch(const Input& in) {
         Output out;
         // A reset forgets the hold: a trigger still held must be pressed again.
         if(!std::isfinite(in.time)||!Finite(in.head)){Reset();wasHeld=in.held;return out;}

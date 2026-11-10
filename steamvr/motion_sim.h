@@ -1,5 +1,6 @@
 #pragma once
 #include "spell_motion.h"
+#include "motion_left.h"
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -38,6 +39,6 @@ struct Sim {
         for(int i=1;i<=int(seconds/frame);++i){math::Vec r=Local(0),l=Local(1);f(i*frame,r,l);Place(0,r);Place(1,l);Step();}
     }
     void Hold(float s){for(int i=0;i<int(s/frame);++i)Step();}
-    void Step(){in.time+=frame;out=g.Step(in);if(out.cast){if(!casts)castTime=in.time;++casts;aim=out.aim;land=out.land;spot=out.spot;}}
+    void Step(){in.time+=frame;out=motionleft::Seen(g.Step(motionleft::Played(in)));if(out.cast){if(!casts)castTime=in.time;++casts;aim=out.aim;land=out.land;spot=out.spot;}}
 };
 }

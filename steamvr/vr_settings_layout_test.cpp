@@ -218,7 +218,7 @@ static int Dump(int view,int card){
     return 0;
 }
 int main(int argc,char** argv){
-    if(argc>1)return Dump(std::atoi(argv[1]),argc>2?std::atoi(argv[2]):NoHelp);
+    if(argc>1&&std::string(argv[1])!="--left-handed")return Dump(std::atoi(argv[1]),argc>2?std::atoi(argv[2]):NoHelp);
     const auto& tables=L::ContentTables();
     // ---- every key reachable: one row, or an override keeping it off the menu ----
     {
@@ -1102,6 +1102,160 @@ int main(int argc,char** argv){
         Check(cuts>0,"a fallback label too wide for its row ends in ...");
         L::Press(w,{Kind::Open,int(View::Targeting),-1},0,t);
         for(const auto& e:L::Build(w,{},{},wide,t).elements)if(e.role==L::Role::Label)Check(e.text.size()<3||e.text.compare(e.text.size()-3,3,"...")!=0,"our own labels are never cut");
+    }
+    // ---- left-handed play (hand_text.h, #307): every word the menu shows, mirrored, and still fitting ----
+    // Each panel is built as written (right-handed) and as shown left-handed. Every element's words must be
+    // the written ones through handtext::Mirror - so a text read past the mirror (a new literal, a table
+    // read directly) fails here - except on the two rows about the physical hands themselves. The
+    // left-handed panels pass the same geometry checks: no label, chip, hint or card outgrows its place.
+    {
+        using framevr::handtext::Mirror;
+        const auto physical=[](int id){return id==LeftHanded||id==Dominant;};
+        int compared=0,changed=0,panels=0;
+        std::vector<std::string> sides;
+        const auto compare=[&](const L::Layout& written,const L::Layout& shown,const std::string& where,bool physicalCard){
+            Check(written.elements.size()==shown.elements.size(),where+": the same elements left-handed");
+            for(size_t i=0;i<written.elements.size();++i){
+                const auto& a=written.elements[i];const auto& b=shown.elements[i];
+                Check(a.role==b.role&&a.key==b.key&&a.help==b.help,where+": the same element "+std::to_string(i));
+                // (the detected controllers are read off the real hands: "Detected: left Touch / right Touch")
+                const bool keep=physical(int(a.key))||physical(a.help)||(physicalCard&&CardPart(a.role))||a.text.rfind("Detected: left ",0)==0||a.sub.rfind("Detected: left ",0)==0||
+                    a.text.rfind("Dominant hand: ",0)==0||a.text.rfind("Left-handed (experimental): ",0)==0;   // those two rows' lines in the list of changes
+                // the Guide's controls are the buttons of whichever controller is in that hand (GuideControl, below)
+                const bool buttons=a.role==L::Role::GuideLine||a.text.rfind("Game menus: ",0)==0;
+                if(!buttons)Check(b.text==(keep?a.text:Mirror(a.text)),where+": \""+a.text+"\" reads \""+b.text+"\" left-handed, expected \""+(keep?a.text:Mirror(a.text))+"\"");
+                Check(b.sub==(keep?a.sub:Mirror(a.sub)),where+": \""+a.sub+"\" reads \""+b.sub+"\" left-handed, expected \""+(keep?a.sub:Mirror(a.sub))+"\"");
+                ++compared;
+                if(b.text!=a.text||b.sub!=a.sub){++changed;sides.push_back(b.text!=a.text?b.text:b.sub);}
+            }
+        };
+        const auto both=[&](const Model& m,const L::LayoutInput& in,const std::string& where,bool physicalCard=false){
+            const auto written=L::Build(m,m.context,in);
+            Check(!framevr::handtext::Left(),"right-handed outside the scope");
+            framevr::handtext::Scope left(true);
+            const auto shown=L::Build(m,m.context,in);
+            CheckLayout(shown,where+" left-handed");compare(written,shown,where,physicalCard);++panels;
+            return written;
+        };
+        for(const auto& c:contexts){
+            Model m;m.Open(Ready());m.SetContext(c);
+            for(int view=0;view<int(View::Count);++view){
+                L::Press(m,{Kind::Open,view,-1},0);
+                const std::string where=std::string("left-handed ")+ViewName(View(view))+" class "+std::to_string(c.heroClass);
+                L::LayoutInput in;in.runtimeStatus="Foveated shading available. Eye tracking unavailable on this headset/runtime.";
+                in.performance={true,true,90,11.1f,3.4f,2.6f,4.1f,.9f};
+                const auto written=both(m,in,where);
+                for(const auto& e:written.elements)if(e.role==L::Role::Row||e.role==L::Role::Tab||e.role==L::Role::GroupTab||e.role==L::Role::PresetCard){
+                    L::LayoutInput pointed=in;pointed.card=e.help;pointed.hover=e.hit;
+                    both(m,pointed,where+" card "+std::to_string(e.help),physical(e.help));
+                }
+                for(int id:{HelpApply,HelpClose,HelpRecenter,HelpCalibrate,HelpMonoAudio,HelpPerformance,HelpResetPage,HelpUndoReset,HelpGuide,HelpWhatsNew,HelpPresets,HelpDiscard,HelpKeepEditing,HelpApplyClose,HelpPending}){
+                    if(&c!=&contexts[0]||view>1)break;
+                    L::LayoutInput p=in;p.card=id;both(m,p,where+" help "+std::to_string(id));
+                }
+            }
+        }
+        {   // a draft on every row: the pending list, the change lines, the confirm row ("Right B: Keep editing")
+            Model m;m.Open(Ready());
+            for(int k=0;k<Count;++k){
+                const auto* r=tables.Row(Key(k));
+                if(!r||r->kind==content::RowKind::Button)continue;
+                const auto& d=Definitions[k];
+                L::Press(m,{Kind::Set,k,0,Normalize(Key(k),d.defaultValue==d.min?d.min+d.step*2:d.min)},0);
+            }
+            for(int view=0;view<int(View::Count);++view){
+                L::Press(m,{Kind::Open,view,-1},0);
+                const auto written=both(m,{},std::string("left-handed draft ")+ViewName(View(view)));
+                for(const auto& e:written.elements)if(e.role==L::Role::Row){L::LayoutInput p;p.card=e.help;p.hover=e.hit;both(m,p,std::string("left-handed draft card ")+std::to_string(e.help),physical(e.help));}
+            }
+            L::Press(m,{Kind::Close},0);both(m,{},"left-handed confirm row");
+        }
+        {   // the calibration view, each of its hints ("press B to skip" names the main hand's button)
+            Model m;m.Open(Ready());
+            for(int hint=0;hint<12;++hint){L::LayoutInput in;in.calibration.active=true;in.calibration.progress=.5f;in.calibration.hint=hint;both(m,in,"left-handed calibration hint "+std::to_string(hint));}
+        }
+        // every row's own words, straight from the tables: the menu as shown is the menu as written, mirrored
+        {
+            const auto& written=content::WrittenMenu();
+            framevr::handtext::Scope left(true);
+            const auto& shown=content::Menu();
+            Check(&shown!=&written&&shown.rows.size()==written.rows.size(),"left-handed: a menu of its own, row for row");
+            for(size_t i=0;i<written.rows.size();++i){
+                const auto& a=written.rows[i];const auto& b=shown.rows[i];
+                const bool keep=physical(int(a.key));
+                const auto same=[&](const char* x,const char* y){return (!x&&!y)||(x&&y&&std::string(y)==(keep?std::string(x):Mirror(x)));};
+                Check(a.key==b.key&&same(a.label,b.label)&&same(a.help,b.help)&&same(a.warn,b.warn)&&same(a.besideLabel,b.besideLabel)&&same(a.warnWhen.text,b.warnWhen.text),
+                      std::string("row ")+a.label+": label, help and warnings mirrored");
+                Check(a.optionCount==b.optionCount&&a.nameCount==b.nameCount,std::string("row ")+a.label+": the same choices");
+                for(int o=0;o<a.optionCount;++o)Check(a.options[o].value==b.options[o].value&&same(a.options[o].label,b.options[o].label)&&same(a.options[o].hint,b.options[o].hint),std::string("row ")+a.label+": its options mirrored");
+                for(int n=0;n<a.nameCount;++n)Check(a.names[n].value==b.names[n].value&&same(a.names[n].label,b.names[n].label),std::string("row ")+a.label+": its value names mirrored");
+                Check(std::string_view(b.label).size()<=30,std::string("row ")+b.label+": the mirrored label still fits its length");
+                if(b.help)Check(std::string_view(b.help).size()<=160,std::string("row ")+b.label+": the mirrored help still fits its length");
+            }
+            for(int k=0;k<Count;++k){
+                const std::string title=WrittenHelpTitle(k),text=WrittenHelpText(k);
+                Check(std::string(HelpTitle(k))==(physical(k)?title:Mirror(title))&&std::string(HelpText(k))==(physical(k)?text:Mirror(text)),std::string("help of ")+title+": mirrored");
+            }
+            Check(content::RowOf(LeftHanded)&&content::RowOf(Dominant)&&content::RowOf(Dominant)->optionCount>=2,"both rows are on the menu");
+            Check(std::string(HelpText(LeftHanded))==WrittenHelpText(LeftHanded)&&std::string(content::RowOf(LeftHanded)->label)=="Left-handed (experimental)"&&
+                  std::string(content::RowOf(Dominant)->options[0].label)=="Right"&&std::string(content::RowOf(Dominant)->options[1].label)=="Left",
+                  "Left-handed's own row and Dominant hand's Right / Left read the same: they are the real hands");
+            // what the owner asked about, by name
+            Check(content::RowOf(HighlightRight)&&content::RowOf(HighlightLeft)&&
+                  std::string(content::RowOf(HighlightRight)->label)=="Left hand outline color"&&std::string(content::RowOf(HighlightLeft)->label)=="Right hand outline color",
+                  "the outline colors are named for the hand that has them: the main hand's is the left hand's");
+            for(const Key k:{VitalsLocation,NavigationLocation,WristCompass,WristMap,LeatherMenu})if(const auto* r=content::RowOf(k)){
+                const std::string words=std::string(r->label)+" "+(r->help?r->help:"")+" "+HelpText(k);
+                Check(words.find("left hand")==std::string::npos&&words.find("left wrist")==std::string::npos&&words.find("left shoulder")==std::string::npos&&words.find("Left wrist")==std::string::npos,
+                      std::string("the wrist and menu rows name the right hand, wrist and shoulder: ")+r->label);
+            }
+            Check(std::string(HelpText(BodyCalibration)).find("Left Y cancels")!=std::string::npos||std::string(HelpText(BodyCalibration)).find("Right B")==std::string::npos,"calibration's help names the main hand's button");
+            Check(std::string(CloseAsksText()).find("Left Y does the same as Close")!=std::string::npos,"Close's help: Left Y");
+        }
+        {   // the Controller guide: each column is a hand, its buttons that hand's controller's
+            using framevr::controllers::Labels;using framevr::controllers::Layout;
+            const auto line=[](const char* control){for(const auto& g:content::GuideTable)if(std::string(g.control)==control)return &g;return (const content::GuideLine*)nullptr;};
+            const auto* off=line("{L1} or {L2}");const auto* main=line("{R1} or {R2}");const auto* back=line("Right {R2}");const auto* shift=line("Right Grip");
+            Check(off&&main&&back&&shift,"the guide's lines are there");
+            Labels touch{{Layout::Touch,Layout::Touch}},index{{Layout::Index,Layout::Index}};
+            Check(content::GuideControl(*off,touch)=="X or Y"&&content::GuideControl(*main,touch)=="A or B"&&content::GuideControl(*back,touch)=="Right B"&&content::GuideControl(*shift,touch)=="Right Grip",
+                  "OFF: the guide as it was");
+            framevr::handtext::Scope left(true);
+            touch.leftMain=index.leftMain=true;   // as the layout sets them left-handed
+            Check(content::GuideControl(*off,touch)=="A or B"&&content::GuideControl(*main,touch)=="X or Y","left-handed, Touch: the off hand's skills are on the right controller's A and B, the main hand's on X and Y");
+            Check(content::GuideControl(*back,touch)=="Left Y"&&content::GuideControl(*shift,touch)=="Left Grip","Back is Left Y, Shift the Left Grip");
+            Check(content::GuideControl(*back,index)=="Left B"&&content::GuideControl(*main,index)=="A or B","an Index controller has A and B in each hand: Left B");
+            Model m;m.Open(Ready());Check(m.view==View::Guide,"the panel opens on the guide");
+            L::LayoutInput in;in.detected=Labels{{Layout::Touch,Layout::Touch}};
+            const auto guide=L::Build(m,{},in);CheckLayout(guide,"left-handed guide, Touch");
+            const L::Element* leftHead=nullptr;const L::Element* rightHead=nullptr;const L::Element* walk=nullptr;const L::Element* turn=nullptr;std::string panels;
+            for(const auto& e:guide.elements){
+                if(e.role==L::Role::Section&&e.text=="Left hand")leftHead=&e;
+                if(e.role==L::Role::Section&&e.text=="Right hand")rightHead=&e;
+                if(e.role==L::Role::GuideLine&&e.sub=="Walk")walk=&e;
+                if(e.role==L::Role::GuideLine&&e.sub=="Turn")turn=&e;
+                if(e.text.rfind("Game menus: ",0)==0)panels=e.text;
+            }
+            Check(leftHead&&rightHead&&leftHead->rect.x<rightHead->rect.x,"the Left hand column is still on the left");
+            Check(walk&&turn&&walk->rect.x==rightHead->rect.x&&turn->rect.x==leftHead->rect.x,"Walk is under Right hand now, Turn under Left hand");
+            bool mainSkills=false,offSkills=false;
+            for(const auto& e:guide.elements)if(e.role==L::Role::GuideLine){
+                if(e.text=="X or Y"&&e.sub=="Interact, or your skills"&&e.rect.x==leftHead->rect.x)mainSkills=true;
+                if(e.text=="A or B"&&e.sub=="Your right-hand skills"&&e.rect.x==rightHead->rect.x)offSkills=true;
+            }
+            Check(mainSkills&&offSkills,"each column lists its own controller's buttons: X / Y interact on the left, A / B are the right hand's skills");
+            Check(panels.find("Right Trigger = Ctrl in game menus")!=std::string::npos&&panels.find("Left Grip = Shift; push or pull a menu")!=std::string::npos&&panels.find("Left Y = Back")!=std::string::npos,
+                  "game menus: "+panels);
+        }
+        Check(!framevr::handtext::Left()&&&content::Menu()==&content::WrittenMenu(),"OFF: the menu as written, the same table");
+        Check(changed>=60,"the left-handed sweep saw sided words change ("+std::to_string(changed)+" of "+std::to_string(compared)+" texts)");
+        if(argc>1&&std::string(argv[1])=="--left-handed"){   // every changed text, to read through
+            std::sort(sides.begin(),sides.end());sides.erase(std::unique(sides.begin(),sides.end()),sides.end());
+            for(const auto& s:sides)std::printf("%s\n",s.c_str());
+            framevr::handtext::Scope left(true);
+            for(int k=0;k<Count;++k)if(std::string(HelpText(k))!=WrittenHelpText(k))std::printf("[%s] %s\n",HelpTitle(k),HelpText(k));
+        }
+        std::printf("left-handed: %d panels built and compared, %d texts, %d mirrored\n",panels,compared,changed);
     }
     std::printf("VR settings layout tests passed: %d checks, %d panels built\n",checks,built);
 }

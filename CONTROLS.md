@@ -50,10 +50,16 @@ Touch, 2 Index, 3 Frame, 4 Generic. Missing or invalid values use Automatic.
 ## Left-handed play (experimental)
 
 **VR Settings > Controls > Hands > Left-handed (experimental)** (Off by default; `[interactions] left_handed`)
-mirrors the hands. It is being built in parts, so it has its own switch: **Dominant hand** keeps meaning only
-the hand that swaps weapon sets, and turning Left-handed on makes that the left hand too.
+mirrors everything: you play as a right-handed player would, with the other hand. It has its own switch:
+**Dominant hand** keeps meaning only the hand that swaps weapon sets, and turning Left-handed on makes that
+the left hand too.
 
-With it On, read every "right" in the tables below as your **left** controller and every "left" as your right:
+**How to read this guide left-handed.** Every page is written for a right-handed player. With Left-handed On,
+read every "right" as your **left** (hand, arm, fist, shoulder, wrist, controller, stick, trigger, grip) and
+every "left" as your right. "Right A" and "Right B" are then your left controller's two buttons (X and Y on
+Touch controllers) and "Left X" and "Left Y" your right controller's (A and B). In the headset nothing needs
+translating: VR Settings, the Controller guide, the wheels, the MOTIONS page and the prompts name the hands
+and buttons as you use them.
 
 | What | Left-handed |
 | --- | --- |
@@ -66,17 +72,25 @@ With it On, read every "right" in the tables below as your **left** controller a
 | Vibration | Goes to the hand that acted |
 | Menu button | Where the controller has it |
 | Weapon swap, monster outline's first hand, loot pick's pointing hand | The left hand |
+| Menu laser | Your left controller points at game menus and VR Settings; its trigger clicks, its grip grabs and moves a panel |
+| Inventory on the hide, quest log | Held in your right hand, by the menu's right edge; reach your right hand over your right shoulder and grip to take it out or put it away |
+| Wrist HUD, vitals, map and compass | On your right wrist and right palm; the low life and mana buzz is on the right controller |
+| Floating map | Pulled off the right wrist with the left controller's grip; the left stick pushes, pulls and zooms it; the right grip resizes it |
+| Class motions | Each motion is its mirror image: one described with the right fist, arm or shoulder is done with the left, toward the other side, and a two-hand motion with the hands exchanged. The MOTIONS page shows them that way round |
+| Words and button names | VR Settings rows and help, the Controller guide's two columns, the wheels and the on-screen prompts name the hand that does each thing now |
 
-Not mirrored yet, so they play exactly as right-handed:
+| Bow | Held in your right hand; your left hand nocks, draws and releases the string |
+| Crossbow, staff, spear, polearm, two-handed sword, axe or maul | Led by your left hand, the right hand supporting it |
 
-- **A bow, crossbow, staff, spear, polearm or a weapon held in both hands.** While one is equipped the whole
-  mode is right-handed again, sticks and buttons included, and returns to left-handed when you put it away.
-  The log says so (`Frame left-handed: ...`).
-- **The interface:** the menus' and VR Settings' laser stays on the right controller (its trigger clicks, its grip
-  grabs; A / B and the sticks are swapped there as everywhere), the wrist HUD and map on the left wrist, the
-  leather menu and the quest log in the left hand.
-- **Class motions** take the hands as they are.
+Every weapon kind is mirrored, so equipping or putting away a weapon never moves a stick, a button or a
+trigger. The log names each kind as it is equipped (`Frame left-handed: ...`); should a kind ever be switched
+back to right-handed play, the whole layout would go right-handed with it while it is held, and the log and
+the in-headset words would say so.
+
+Not mirrored:
+
 - Third person and other players see a right-handed hero.
+- Two settings always name your real hands: **Dominant hand**'s Right / Left, and the detected controllers.
 
 A weapon or shield is turned around in the other hand rather than mirrored, so a one-sided blade or a painted
 shield can look different. The shield's wrist bend stop is not on the right arm yet.

@@ -19,7 +19,7 @@ static void LazyInnerSight(Sim& s){s.MoveR({.06f,.04f,-.15f},.35f);s.Hold(.15f);
 static void LazySlowMissiles(Sim& s){s.MoveR({.12f,-.32f,-.18f},.35f);s.MoveR({.15f,-.28f,-.60f},2.f);s.Hold(.6f);}
 static void LazyDecoy(Sim& s){s.Move({.08f,-.38f,-.25f},{-.08f,-.38f,-.25f},.35f);s.Move({.55f,-.36f,-.30f},{.30f,-.36f,-.30f},2.f);}
 static void LazyValkyrie(Sim& s){s.MoveR({.15f,.32f,-.10f},.40f);s.MoveR({.20f,-.22f,-.55f},2.f);}
-int main() {
+static void Run() {
     using Do=void(*)(Sim&);
     const struct {Motion motion;Do perform,lazy;const char* name;} all[]={
         {Motion::InnerSight,InnerSight,LazyInnerSight,"Inner Sight"},{Motion::SlowMissiles,SlowMissiles,LazySlowMissiles,"Slow Missiles"},
@@ -97,6 +97,11 @@ int main() {
      Check(s.casts==0,"Slow Missiles: pushed and drawn straight back, no hold: nothing");}
     {Sim s(Motion::SlowMissiles);s.MoveR({.15f,-.28f,-.60f},1.2f);s.Hold(1.f);
      Check(s.casts==0,"Slow Missiles: the arm raised slowly from the side and held (aiming): nothing");}
-    std::puts("motions-amazon-test: ok");
+}
+// Everything above, right-handed as written, then played by a left-handed player (motion_left.h): the mirror
+// image of every fixture, the left hand as the engine's hand 0, with the same expectations.
+int main() {
+    motionleft::Both(Run);
+    std::puts("motions-amazon-test: ok (right-handed, and every fixture again left-handed as its mirror image)");
     return 0;
 }

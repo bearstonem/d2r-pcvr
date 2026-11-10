@@ -157,7 +157,16 @@ Eye-tracked foveation, centered projection and label fixes are retained.
 
 Both controllers and the headset must be tracked. Their physical positions and
 orientations drive gestures in room space; turning the camera/head alone does
-not generate melee velocity. The layout currently assumes a right-handed player.
+not generate melee velocity. This guide is written for a right-handed player.
+
+**Left-handed.** VR Settings > Controls > Hands > **Left-handed (experimental)** mirrors everything, so read
+every "right" below as your left hand, arm, shoulder, wrist, controller, stick, trigger or grip and every
+"left" as your right: the weapon and the menu laser in the left hand, the shield, the held menu, the wrist HUD
+and map on the right, the buttons and sticks exchanged, and every class motion as its mirror image (a motion
+described with the right fist is done with the left, toward the other side). In the headset the words are
+already turned round: VR Settings, the Controller guide, the wheels and the MOTIONS page name the hand that
+does each thing. Every weapon kind is mirrored too: a bow is held in the right hand and drawn with the left,
+a crossbow, staff, spear, polearm or two-handed weapon is led by the left hand. Details: [Left-handed play](../CONTROLS.md#left-handed-play-experimental).
 
 | Action | Control |
 |---|---|
@@ -494,7 +503,10 @@ waypoints and NPC talk keep the room panel. While the sheet is held, the left
 hand's own weapon or shield is hidden, as with the quest log. With **Dominant
 hand = Left** a left grip over either shoulder swaps weapons, so the shoulder
 reach is off; Left Grip + left stick click and the wheel still open the leather
-(the menu laser stays on the right hand).
+(the menu laser stays on the right hand). With **Left-handed** on it is all the
+other way round: the sheet is held in the right hand by the menu's right edge,
+the right hand reaches over the right shoulder to take it out or put it away,
+and the left controller's laser works on it.
 
 **VR Settings > Interface > Menus > Menu distance** carries **Hold menu** on its right half:
 **Leather** (the default), **Menu only** (the same menu held in your left hand with
@@ -602,7 +614,7 @@ sets the page's rows back to their defaults, with **Undo reset** for 6 seconds.
 | Gameplay > Physics | Rolling bottles, knockable props, pushable bodies, and monsters' and townsfolk's heads turning to you |
 | Comfort > Moving | Smooth turning with its snap angle or turn speed, and movement speed |
 | Comfort > Body | Seated play, **Height and arm span** (**Calibrate body**, **Set eye height**) with the **T cross to calibrate** switch under it (standing only), and the belt's height and reach |
-| Controls > Hands | Dominant hand, **Left-handed (experimental)**, **Stick toggle** and button names |
+| Controls > Hands | Dominant hand, **Left-handed (experimental)** (mirrors the hands, buttons, sticks, menu laser, wrist HUD, held menu, class motions and the words that name them), **Stick toggle** and button names |
 | Controls > Vibration | Overall vibration and separate melee, short melee taps, bow draw, bow/throw release, spell, loot/potion/menu and alert strengths; **Feel it** on a row's card |
 | Interface > Wrist | Life and mana location and tilt, skill cooldowns between the orbs, map and compass location, map view (Isometric, Top-down, Full map or Full top-down), turning the map with you, buffs and companions |
 | Interface > Menus | Menu distance with **Hold menu** beside it (Leather by default: the tabbed menu on a hide in your left hand; Menu only: no hide; Off) and item details delay |

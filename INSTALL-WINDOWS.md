@@ -390,6 +390,12 @@ complete your headset's floor/room setup and reopen calibration.
 
 ## Controls
 
+This table is written for a right-handed player. Left-handed players can turn on
+**VR Settings > Controls > Hands > Left-handed (experimental)**: everything is mirrored, so read "right" as
+your left hand and controller and "left" as your right (see
+[Left-handed play](CONTROLS.md#left-handed-play-experimental)); the in-headset Controller guide then names
+the buttons as you use them.
+
 | Action | Control |
 | --- | --- |
 | Walk / snap turn | Left stick / right stick left-right |

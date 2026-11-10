@@ -114,6 +114,12 @@ struct Input {
     bool leftHanded=false;
     int leftHandedTurnAxis=0;     // [hands] left_handed_turn_axis: 0 the flat's axis (hand_swap_pose.h), 1..3 the bone's x y z
     int leftHandedShieldTurn=0;   // [hands] left_handed_shield_turn: 0 along the arm, 1 out, 2 up (shield_pose.h PlaceAcross)
+    // Phase 3, with leftHanded: a bow, a crossbow, a staff, a spear, a polearm or two hands on one weapon.
+    // Those are posed in the mirror world (hand_swap_pose.h): the bow in the right hand and its string in
+    // the left, the stock or the shaft in the left hand and the right hand supporting it.
+    bool leftHandedMirror=false;
+    int leftHandedItemTurn=0;     // [hands] left_handed_bow_turn_axis / _crossbow_ / _staff_ for the kind held: 0 the item's symmetry axis, 1..3 the bone's x y z
+    const char* leftHandedKind="";   // that kind's name, for the log (a string that outlives the pose)
     char shrinkBone[48] = {};   // [debug] shrink_bone: the hero's bone of this name drawn shrunk to a point - what hangs on it vanishes    // mode 2: the weapon in the hand moved x y z (cm) and turned pitch yaw roll (deg), its own axes
 #endif
 };

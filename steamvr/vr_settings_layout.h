@@ -313,9 +313,11 @@ struct Tables {
 // The tables of a merged menu (content::BuildMenu): the real one, or a test's.
 inline Tables TablesOf(const content::MenuData& m){
     return Tables{m.rows.data(),m.rows.size(),m.sections.data(),m.sections.size(),m.presets.data(),m.presets.size(),
-        content::GuideTable,std::size(content::GuideTable),content::ToolTable,std::size(content::ToolTable)};
+        content::GuideTable,std::size(content::GuideTable),content::Tools(),std::size(content::ToolTable)};
 }
 inline const Tables& ContentTables(){
+    // Left-handed play: the menu with its words mirrored (content::Menu, hand_text.h), a table of its own.
+    if(handtext::Left()){static const Tables mirrored=TablesOf(content::Menu());return mirrored;}
     static const Tables tables=TablesOf(content::Menu());   // Definitions merged with the overrides
     return tables;
 }
@@ -625,7 +627,7 @@ inline const char* HintText(int hint){
         "Keep your head upright and look straight ahead.","Arms straight out to your sides, level with your shoulders. Then release and hold both triggers.",
         "Movement detected. Release both triggers and try again, keeping still.","Saving your measurements...","Saved. Release both triggers to return to the game.",
         "Save failed. Release and hold both triggers to retry, or press B to cancel.","Settings changed elsewhere. Release and hold both triggers to try again."};
-    return hint>=0&&hint<int(std::size(hints))?hints[hint]:hints[0];
+    return handtext::T(hint>=0&&hint<int(std::size(hints))?hints[hint]:hints[0]);   // "press B": the main hand's button
 }
 // ---- control choice (docs/VR_SETTINGS_MENU.md): the control comes from the data ----
 // A named list shows chips when it has at most MaxChips options for this
@@ -1024,25 +1026,29 @@ struct Builder {
         return y;
     }
     int Guide(){
-        const auto labels=controllers::Resolve(hooks::ButtonNames(m.Get()),in.detected);
+        auto labels=controllers::Resolve(hooks::ButtonNames(m.Get()),in.detected);
+        labels.leftMain=handtext::Left();   // left-handed: the main hand's buttons are the left controller's (controllers::Labels)
         std::vector<const content::GuideLine*> left,right;std::string panels;
         for(size_t i=0;i<t.guideCount;++i){
             const auto& g=t.guide[i];
             if(g.column==content::GuideColumn::Left)left.push_back(&g);
             else if(g.column==content::GuideColumn::Right)right.push_back(&g);
-            else panels+=(panels.empty()?"Game menus: ":" \xc2\xb7 ")+content::GuideControl(g,labels)+" = "+g.action;
+            else panels+=(panels.empty()?"Game menus: ":" \xc2\xb7 ")+content::GuideControl(g,labels)+" = "+handtext::T(g.action);
         }
-        const int colW=(ContentW-20)/2,x0=ContentX,x1=ContentX+colW+20;
+        // Left-handed (hand_text.h): the off hand's column is the right hand's, so it goes on the right, and
+        // each column's words and buttons are that hand's.
+        const bool mirrored=handtext::Left();
+        const int colW=(ContentW-20)/2,x0=mirrored?ContentX+colW+20:ContentX,x1=mirrored?ContentX:ContentX+colW+20;
         int y=ViewTop;
-        Add(Role::Section,{x0,y,colW,GuideHeadH},{},NoHelp,0,"Left hand");
-        Add(Role::Section,{x1,y,colW,GuideHeadH},{},NoHelp,0,"Right hand");
+        Add(Role::Section,{x0,y,colW,GuideHeadH},{},NoHelp,0,handtext::T("Left hand"));
+        Add(Role::Section,{x1,y,colW,GuideHeadH},{},NoHelp,0,handtext::T("Right hand"));
         y+=GuideHeadH;
         const size_t n=std::max<size_t>({left.size(),right.size(),1});
         const int panelsH=panels.empty()?0:64,space=RegionEnd()-y-panelsH-CardMin;
         const int pitch=std::min(GuideLineMax,space/int(n));
         for(size_t i=0;i<n;++i){
-            if(i<left.size())Add(Role::GuideLine,{x0,y+int(i)*pitch,colW,pitch-2},{},HelpGuide,0,content::GuideControl(*left[i],labels),left[i]->action);
-            if(i<right.size())Add(Role::GuideLine,{x1,y+int(i)*pitch,colW,pitch-2},{},HelpGuide,0,content::GuideControl(*right[i],labels),right[i]->action);
+            if(i<left.size())Add(Role::GuideLine,{x0,y+int(i)*pitch,colW,pitch-2},{},HelpGuide,0,content::GuideControl(*left[i],labels),handtext::T(left[i]->action));
+            if(i<right.size())Add(Role::GuideLine,{x1,y+int(i)*pitch,colW,pitch-2},{},HelpGuide,0,content::GuideControl(*right[i],labels),handtext::T(right[i]->action));
         }
         y+=int(n)*pitch+4;
         if(!panels.empty()){Add(Role::NotesText,{ContentX+12,y,ContentW-24,panelsH-4},{},HelpGuide,0,panels);y+=panelsH;}   // may wrap to two lines
@@ -1089,7 +1095,7 @@ struct Builder {
     };
     std::string OldNew(Key k,float from,float to)const{
         const auto* r=t.Row(k);
-        if(!r)return std::string(Definitions[k].label)+": "+Printf("%g",double(from))+Arrow+Printf("%g",double(to));
+        if(!r)return std::string(HelpTitle(k))+": "+Printf("%g",double(from))+Arrow+Printf("%g",double(to));
         if(const auto* head=FilterHead(k,t))return std::string(LabelOf(*head,c))+" ("+SwitchWord(*r)+"): "+ValueOf(*r,from,c)+Arrow+ValueOf(*r,to,c);   // Loot beams (Set): On -> Off
         return std::string(LabelOf(*r,c))+": "+ValueOf(*r,from,c)+Arrow+ValueOf(*r,to,c);
     }
@@ -1229,7 +1235,7 @@ struct Builder {
         CardSpec s;s.subject=HelpKeepEditing;s.title="Close without applying?";s.titleFlags=Changed;s.stateFlags=Changed;
         const auto keys=DirtyKeys(m);
         for(Key k:keys)s.lines.push_back({OldNew(k,m.Applied()[k],m.Get()[k])+(KeyVisible(k,m.Get(),c,t)||(t.Row(k)&&t.Row(k)->kind==content::RowKind::Offer)?"":" (hidden)"),0});
-        s.state=Plural(int(keys.size()),"change","changes")+" not applied. Right B: Keep editing.";
+        s.state=Plural(int(keys.size()),"change","changes")+handtext::T(" not applied. Right B: Keep editing.");
         return s;
     }
     CardSpec PresetCardSpec(int index)const{
@@ -1306,7 +1312,7 @@ struct Builder {
         const content::ContentTool* tool=nullptr;
         switch(id){case HelpApply:tool=t.Tool(Kind::Apply);break;case HelpClose:tool=t.Tool(Kind::Close);break;case HelpRecenter:tool=t.Tool(Kind::Recenter);break;
             case HelpCalibrate:tool=t.Tool(Kind::Calibrate);break;case HelpResetPage:tool=t.Tool(Kind::ResetPage);break;case HelpUndoReset:tool=t.Tool(Kind::UndoReset);break;default:break;}
-        s.text=tool&&tool->help?tool->help:id==HelpClose?CloseAsksHelp:HelpText(id);
+        s.text=tool&&tool->help?tool->help:id==HelpClose?CloseAsksText():HelpText(id);
         if(id==HelpCalibrate&&m.Dirty()){s.titleFlags=Locked;s.stateFlags=Locked;s.state="Locked while changes are not applied";}
         if(id==HelpMonoAudio)s.titleFlags=Warn;
         if(id==HelpPerformance){const std::string g=GameVideoLine(in.game);s.state=g.empty()?std::string(GameVideoUnsaved):g;}   // the game's options, whatever the readout shows
@@ -1522,7 +1528,7 @@ struct Builder {
         if(cv.anyTime)Add(Role::CalibTip,{80,672,1120,50},{},NoHelp,0,"You can do the T cross at any time to calibrate: hold it for 2 seconds.");
         if(cv.measured)Add(Role::CalibNote,{80,736,1120,50},{},NoHelp,0,Printf("Standing eye height: %.1f cm     Controller span: %.1f cm",double(cv.eyeHeight*100),double(cv.armSpan*100)));
         else Add(Role::CalibNote,{80,736,1120,50},{},NoHelp,0,"Height sets world scale. Controller span fits your character's arms.");
-        Add(Role::CalibNote,{80,796,1120,50},{},NoHelp,0,"Right B: skip / cancel. Reopen any time: VR Settings > Comfort > Body > Height and arm span.");
+        Add(Role::CalibNote,{80,796,1120,50},{},NoHelp,0,handtext::T("Right B: skip / cancel. Reopen any time: VR Settings > Comfort > Body > Height and arm span."));
         Add(Role::CalibNote,{80,856,1120,50},{},NoHelp,0,"Controls are blocked. The game world remains live.");
     }
     void Flags(){

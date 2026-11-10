@@ -54,7 +54,7 @@ static void TwoHandedChop(Sim& s) {
 }
 static void ShortSwings(Sim& s){for(int i=0;i<3;++i){OverheadChop(s);Slash(s);}}
 
-int main() {
+static void Run() {
     using Do=void(*)(Sim&);
     const struct {Motion motion;Do perform,slow;int skill;bool aimed;const char* name;} all[]={
         {Motion::BattleOrders,BattleOrders,SlowBattleOrders,149,false,"Battle Orders"},{Motion::Shout,Shout,SlowShout,138,false,"Shout"},
@@ -192,6 +192,11 @@ int main() {
         Sim face(Motion::Whirlwind);face.Move({.07f,.05f,-.25f},{-.07f,.05f,-.25f},.35f);face.Hold(.1f);face.Move({.55f,.0f,-.05f},{-.55f,.0f,-.05f},.25f);face.Hold(.6f);
         Check(face.casts==1,"Whirlwind: a T spread from the hands together at the face, held, casts once");
     }
-    std::puts("motions-barbarian-test: ok");
+}
+// Everything above, right-handed as written, then played by a left-handed player (motion_left.h): the mirror
+// image of every fixture, the left hand as the engine's hand 0, with the same expectations.
+int main() {
+    motionleft::Both(Run);
+    std::puts("motions-barbarian-test: ok (right-handed, and every fixture again left-handed as its mirror image)");
     return 0;
 }

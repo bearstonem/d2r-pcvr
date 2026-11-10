@@ -90,6 +90,14 @@ int main(int argc,char** argv){
     {   // Every row has help, short enough for its card.
         for(const auto& row:content::Menu().rows){const Key key=row.key;Check(HelpText(key)[0]&&HelpTitle(key)[0],"every row has help");}
         for(int id=0;id<=HelpLast;++id)Check(std::string(HelpText(id)).size()<450,"every help text is short enough for its card");
+        {   // left-handed (hand_text.h): the mirrored words too ("right" is a letter longer than "left")
+            framevr::handtext::Scope left(true);
+            for(int id=0;id<=HelpLast;++id)Check(std::string(HelpText(id)).size()<450,"left-handed: every mirrored help text is short enough for its card");
+            for(const auto& row:content::Menu().rows)Check(HelpText(row.key)[0]&&HelpTitle(row.key)[0],"left-handed: every row has help");
+            Check(std::string(HelpText(LeftHanded))==WrittenHelpText(LeftHanded)&&std::string(HelpText(Dominant))==WrittenHelpText(Dominant),"the two rows about the real hands read the same");
+            Check(std::string(HelpText(SmoothTurn)).find("left stick")!=std::string::npos&&std::string(WrittenHelpText(SmoothTurn)).find("right stick")!=std::string::npos,"the turn stick is the left one then");
+        }
+        Check(!framevr::handtext::Left()&&HelpText(SmoothTurn)==WrittenHelpText(SmoothTurn),"OFF: the help as written, the same pointer");
     }
     Snapshot s;s.ready=true;
     {Model effects;effects.Open(s);
@@ -966,8 +974,9 @@ int main(int argc,char** argv){
         Check(row&&!row->beside&&row->page==View::Hands&&row->kind==content::RowKind::Toggle&&std::strcmp(row->label,"Left-handed (experimental)")==0&&
               row->section==content::RowOf(Dominant)->section&&row->classes==content::AllClasses,"a switch of its own on Controls > Hands, every class");
         Check(std::wstring(Definitions[Dominant].key)==L"dominant_hand"&&Defaults()[Dominant]==0,"Dominant hand keeps its key and default: its saved Left still means the swap hand only");
-        Check(std::string(HelpText(LeftHanded)).find("right-handed")!=std::string::npos&&std::string(row->help).find("right-handed")!=std::string::npos,
-              "both helps say which weapons still play right-handed");
+        Check(std::string(HelpText(LeftHanded)).find("bow")!=std::string::npos&&std::string(HelpText(LeftHanded)).find("drawn by the left")!=std::string::npos&&
+              std::string(row->help).find("drawn by the left")!=std::string::npos&&std::string(HelpText(LeftHanded)).find("plays right-handed")==std::string::npos,
+              "both helps say how a bow is held now that every weapon kind is mirrored; neither promises a right-handed fallback");
         for(int c=-1;c<=heroclass::Assassin+1;++c)Check(RowShown(LeftHanded,Defaults(),{c}),"every class, and the title screen, see it");
         Model t;Snapshot ready;ready.ready=true;ready.values[Dominant]=0;t.Open(ready);layout::Press(t,{Kind::Set,LeftHanded,0,1},0);
         Check(t.Get()[LeftHanded]==1&&t.Get()[Dominant]==0&&t.Click({Kind::Apply}).changed==(ChangeMask{1}<<LeftHanded),"the switch turns it On, leaves the saved Dominant hand alone, and Apply saves only it");
