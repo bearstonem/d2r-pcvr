@@ -134,7 +134,8 @@ bool HeavensArmed();
 bool TCrossWantsTargets();
 uint32_t HeavensRequest();
 // A bow is ready with Guided Arrow as the bow's skill (aimrules::AlwaysHomes): the target scan runs so a
-// release can hand the game the aimed monster, whatever VR Settings > Gameplay > Targeting says.
+// release can hand the game the aimed monster, whatever VR Settings > Gameplay > Targeting says. Also while a
+// Paladin plays, for Charge.
 bool SeekerArrowReady();
 void HeavensResolved(uint32_t request,uint32_t monster);
 int PointSpellSkill();       // the cast skill when the aim rules place it at a point, else -1

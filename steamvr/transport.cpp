@@ -627,7 +627,7 @@ uint32_t heavensRequest=0,heavensAnswered=0,heavensMonster=0,heavensCasts=0;
 float heavensFrom=0,heavensAt=0;   // the last call's start and stop elevation (degrees), for the log
 ULONGLONG heavensAskedAt=0;
 std::atomic<bool> heavensArmed{false};
-std::atomic<bool> seekerArrowReady{false};   // SeekerArrowReady: a ready bow whose skill is Guided Arrow
+std::atomic<bool> seekerArrowReady{false};   // SeekerArrowReady: a ready bow whose skill is Guided Arrow, or a Paladin (Charge)
 constexpr ULONGLONG HeavensWaitMs=120;
 // A Charge in flight (any cast path): no physical melee contacts until it ends.
 ULONGLONG chargeIssuedAt=0,chargeContactsHeldAt=0;
@@ -4500,7 +4500,10 @@ void Input() {
     const uint32_t potionCode=motionInput.potion?gamestate::RightThrowingPotionCode():0u;
     const bool potionBottle=potionCode&&bottlePhysics.load()&&potionModels.Radius(potionCode)>0;
     motionOutput=motion.Step(motionInput);motionAt=GetTickCount64();
-    seekerArrowReady.store(motionInput.active&&motionOutput.bowReady&&aimrules::AlwaysHomes(motionInput.bowSkill));
+    // ...or a Paladin plays: Charge goes to the aimed monster whatever the option, however it is cast
+    // (a trigger, a glyph or the punch), so the scan runs for the class that has it.
+    seekerArrowReady.store((motionInput.active&&motionOutput.bowReady&&aimrules::AlwaysHomes(motionInput.bowSkill))||
+                           bindingSnapshot.skillClass==settings::heroclass::Paladin);
     if(motionOutput.tossHeld)tossLanding={};   // a new trap in hand: nothing placed yet
     const auto& tossStage=interactionInput.stage;
     const bool tossWorld=interactionInput.floorKnown&&tossStage.known&&stageWorld.upm>=1&&stageWorld.upm<=12;
