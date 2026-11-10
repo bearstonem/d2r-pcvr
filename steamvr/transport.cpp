@@ -309,7 +309,7 @@ int MotionsKey(int skillClass) {
     switch(skillClass) {
     case 0:return settings::MotionsAmazonOff;case 1:return settings::MotionsOff;case 2:return settings::MotionsNecromancerOff;
     case 3:return settings::MotionsPaladinOff;case 4:return settings::MotionsBarbarianOff;case 5:return settings::MotionsDruidOff;
-    case 6:return settings::MotionsAssassinOff;default:return -1;
+    case 6:return settings::MotionsAssassinOff;case 7:return settings::MotionsWarlockOff;default:return -1;
     }
 }
 // The wheel's glyph settings ([glyphs]) are saved here, one save at a time; until it lands the wheel
