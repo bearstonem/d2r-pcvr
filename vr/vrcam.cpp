@@ -10862,7 +10862,9 @@ bool ApplySkyPictures(reshade::api::effect_runtime* rt) {
         }
     }
     {   // the campfire's panorama ([campfire] pano_file), its own slot
-        AcquireSRWLockShared(&g_skyCfgLock); const std::string file = g_campfirePanoFile; ReleaseSRWLockShared(&g_skyCfgLock);
+        // Only while the panorama is on: its picture is not shipped, and a missing source is a ReShade error at
+        // every compile. Off, the slot names a sky that is always installed (the effect's own default).
+        AcquireSRWLockShared(&g_skyCfgLock); const std::string file = g_set.campfirePano.load() ? g_campfirePanoFile : "D2R_Sky_ours/D2R_Sky_act1.png"; ReleaseSRWLockShared(&g_skyCfgLock);
         const std::string want = "\"" + file + "\"";
         char have[1024] = {};
         size_t size = sizeof have;
