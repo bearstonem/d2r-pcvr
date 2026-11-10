@@ -28,6 +28,29 @@ float3 Stamp(float4 pos, float2 uv, uint stamp)
 float3 PS_Stamp(float4 pos : SV_Position, float2 uv : TEXCOORD) : SV_Target { return Stamp(pos, uv, FrameStamp0); }
 float3 PS_StampR(float4 pos : SV_Position, float2 uv : TEXCOORD) : SV_Target { return Stamp(pos, uv, FrameStamp1); }
 
+// The stamp alone, for the Lean and Mask sizes of the effect (steamvr/effect_passes.h): a small triangle over the
+// bottom right corner in place of a pass over the whole picture, so the stamp - on by default in AFR stereo - no
+// longer needs the Full size. It reads nothing and writes only the 48 stamp pixels; off, it writes nothing.
+void VS_StampStrip(in uint id : SV_VertexID, out float4 pos : SV_Position)
+{
+    const float2 px = id == 0 ? float2(BUFFER_WIDTH - 192, BUFFER_HEIGHT) : id == 1 ? float2(BUFFER_WIDTH, BUFFER_HEIGHT) : float2(BUFFER_WIDTH, BUFFER_HEIGHT - 4);
+    pos = float4(px.x / BUFFER_WIDTH * 2.0 - 1.0, 1.0 - px.y / BUFFER_HEIGHT * 2.0, 0.0, 1.0);
+}
+float4 StampStrip(float4 pos, uint stamp)
+{
+    const int x = int(pos.x), y = int(pos.y);
+    const int i = x - (BUFFER_WIDTH - 48);
+    if (!StampOn || y != BUFFER_HEIGHT - 1 || i < 0) discard;
+    const uint sum = (stamp ^ (stamp >> 8) ^ (stamp >> 16) ^ (stamp >> 24)) & 0xFFu;
+    uint bit;
+    if (i < 8) bit = (0xB2u >> uint(i)) & 1u;
+    else if (i < 40) bit = (stamp >> uint(i - 8)) & 1u;
+    else bit = (sum >> uint(i - 40)) & 1u;
+    return bit != 0u ? float4(1.0, 1.0, 1.0, 1.0) : float4(0.0, 0.0, 0.0, 1.0);
+}
+float4 PS_StampStrip(float4 pos : SV_Position) : SV_Target { return StampStrip(pos, FrameStamp0); }
+float4 PS_StampStripR(float4 pos : SV_Position) : SV_Target { return StampStrip(pos, FrameStamp1); }
+
 // The table (vrcam's VR view F5): the game's view from above in a Meta Quest
 // over passthrough. The headset keys by brightness (the bridge's Blend
 // passthrough: what is darker than a threshold, ~0.012, shows the room) -
