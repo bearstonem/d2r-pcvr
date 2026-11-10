@@ -2721,6 +2721,7 @@ void TCrossStep(const settings::Snapshot& config,const menus::Pad& physical,bool
     in.calibrating=bodyCalibration.Active()||calibrationRelease.blocked;
     auto& s=in.pose;s.time=motionInput.time;s.floor=floorSpace;s.headTracked=motionHeadTracked;s.head=V(head.position);s.rotation=Q(head.orientation);
     for(int i=0;i<2;++i){s.handTracked[i]=motionInput.tracked[i];s.hand[i]=motionInput.hand[i].p;}
+    calibration::BodyOrder(s,handRoles.map.left);   // motionInput is in main / off order; the pose is read by body side
     if(in.on&&!in.calibrating&&calibration::TCrossHandsWide(s)){
         for(int i=0;i<2;++i){s.trigger[i]=Float(trigger,i);in.grip[i]=Float(squeeze,i);}
         in.seated=config.values[settings::Seated]>.5f;
@@ -2775,6 +2776,7 @@ void CalibrationInput() {
     sample.headTracked=motionHeadTracked;sample.head=V(head.position);sample.rotation=Q(head.orientation);
     sample.cancel=Bool(secondary,0);
     for(int i=0;i<2;++i){sample.handTracked[i]=motionInput.tracked[i];sample.hand[i]=motionInput.hand[i].p;sample.trigger[i]=Float(trigger,i);}
+    calibration::BodyOrder(sample,handRoles.map.left);
     if(bodyCalibration.Step(sample)){
         const auto request=calibration::SaveRequest(vrsettings::Read(),bodyCalibration.Get());
         calibrationOrigin=V(head.position);

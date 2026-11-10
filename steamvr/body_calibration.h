@@ -21,6 +21,8 @@ inline settings::Request SaveRequest(const settings::Snapshot& s,Measurement m) 
     values[settings::BodyCalibration]=1;
     return {s.values,values,settings::Changed(s.values,values),s.sequence+1};
 }
+// hand[0] is the body's RIGHT hand and hand[1] its LEFT (CheckPose tells the sides apart), whichever
+// hand is the main one: left-handed play fills it through BodyOrder, never in main / off order.
 struct Sample {
     double time=0;
     bool floor=false,headTracked=false,handTracked[2]{},cancel=false;
@@ -28,6 +30,11 @@ struct Sample {
     float trigger[2]{};
 };
 inline float Length(Vec v){return std::sqrt(math::Dot(v,v));}
+// A sample filled in main / off order, put in body order: swapped when the main hand is the left one.
+inline void BodyOrder(Sample& s,bool mainIsLeft){
+    if(!mainIsLeft)return;
+    std::swap(s.hand[0],s.hand[1]);std::swap(s.handTracked[0],s.handTracked[1]);std::swap(s.trigger[0],s.trigger[1]);
+}
 // How CheckPose reads the T cross. The defaults are the capture's own limits;
 // the T cross gesture (body_calibration_gesture.h) starts on them, keeps a
 // wider set while the pose is held, and asks about the floor separately.
