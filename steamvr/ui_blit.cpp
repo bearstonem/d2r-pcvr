@@ -202,7 +202,7 @@ float4 PS(float4 position:SV_Position):SV_Target {
     const bool seen=x.z>=3;
     // the arrow grown with the corner map's zoom, so it stays the same size relative to the
     // map and the game's X; on the full map, as big as the X shows at this span, within limits
-    float arrowR=mapSide*ArrowSize*max(zoom,1.0);
+    float arrowR=mapSide*ArrowSize*max(zoom,0.5);
     if(mapSpan>0)arrowR=seen?clamp(x.w*mapSide/mapSpan*(topDown?TopDownXGain:1)*ArrowOverX,mapSide*ArrowMin,mapSide*ArrowMax):mapSide*ArrowSize;
     float arrow=0;
     float2 heroAt=0;float markerReach=0;
@@ -253,7 +253,7 @@ float4 PS(float4 position:SV_Position):SV_Target {
         const float inner=mapSide-2*min(20.0,mapSide/8.0);
         float scale=inner/float(max(w,h));
         // zoom: the map and the arrow bigger about the hero (map_zoom.h), the frame as it is
-        float2 v=(pixel-mapSide*.5)/max(zoom,1.0);
+        float2 v=(pixel-mapSide*.5)/max(zoom,0.5);
         if(turning)v=float2(v.x*cos(heading)-v.y*sin(heading),v.x*sin(heading)+v.y*cos(heading));
         // top-down to isometric: (x-y, (x+y)/2), sized so the whole slanted map still fits
         if(topDown)v=float2(v.x-v.y,(v.x+v.y)*.5)*((w+2.*h)/(2.*inner))*scale;

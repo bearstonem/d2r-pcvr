@@ -94,14 +94,16 @@ inline int WristTaps(float span,float side){
     const float k=side>0&&span>0?span/side:1.f;
     return std::clamp(int(std::ceil(k-.001f)),1,4);
 }
-// The span for magnify (the map zoom, 1 = the widest view) when the share was drawn at
+// The span for magnify (1 = the original filled crop, 0.5 = wider coverage) when drawn at
 // game zoom `drawn` (0: the game's own, the hook gave none): the fill at the widest zoom,
 // divided by what the share still has to be magnified. Never wider than the whole box
 // seen at every turn (a share drawn closer than wanted, e.g. a frame before the hook).
 inline float Span(uint32_t w,uint32_t h,bool turning,bool topDown,float magnify,float drawn){
     const float fill=WristFill(w,h,turning,topDown);
     if(fill<=0)return 0.f;
-    const float m=std::isfinite(magnify)&&magnify>1?magnify:1.f;
+    // Below 1x reveal the captured sides outside the old fill-to-square crop.
+    // The shader paints backing beyond the capture; never invents map pixels.
+    const float m=std::isfinite(magnify)&&magnify>0?std::max(magnify,.5f):1.f;
     const float d=std::isfinite(drawn)&&drawn>0?drawn:Own;
     const float fw=float(w),fh=float(h);
     const float whole=topDown?(turning?Root2*std::sqrt(fw*fw+4*fh*fh):fw+2*fh):(turning?std::sqrt(fw*fw+fh*fh):std::max(fw,fh));

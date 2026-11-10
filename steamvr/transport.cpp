@@ -3896,7 +3896,7 @@ void Input() {
         mapZoomView=view;
         mapzoom::Input in;in.time=interactionInput.time;in.looking=MinimapLooked();
         in.stick=controls.ry/32767.f;in.x=controls.rx/32767.f;
-        // Map view = Full map: zoomed in from the game's widest view, to 16x; the game is asked
+        // Full map: 0.5x reveals more of the capture; up to 16x zooms in. The game is asked
         // for the zoom that keeps it sharp (wrist_full_map.h). Off: nothing asked, the hooks idle.
         const bool fullMap=MapFullOn();
         fullmap::g_on.store(fullMap,std::memory_order_relaxed);

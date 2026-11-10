@@ -1,5 +1,6 @@
 #include "map_zoom.h"
 #include "wrist_full_map.h"
+#include "vr_settings.h"
 #include <algorithm>
 #include <cmath>
 #include "stick_gestures.h"
@@ -16,6 +17,12 @@ struct Sim {
 // The map's center `degrees` off the head's forward, half a meter away.
 static math::Vec At(float degrees){const float r=degrees*.0174532925f;return {.5f*std::sin(r),1.6f,-.5f*std::cos(r)};}
 int main(){
+    Check(!settings::MapViewFull(0)&&!settings::MapViewTopDown(0),"Isometric retains original corner capture and projection");
+    {
+        Sim s;s.in.looking=true;s.in.stick=-1;s.Step(150);
+        Check(s.out.zoom==.5f,"original wrist minimap reaches 0.5x without changing source");
+        s.g.NewGame();Check(s.g.Zoom()==1,"original default zoom remains 1x");
+    }
     {
         const math::Vec head{0,1.6f,0};const math::Quat q{0,0,0,1};
         Check(mapzoom::Looking(head,q,At(0),false)&&mapzoom::Looking(head,q,At(20),false),"a map ahead is looked at");
@@ -36,8 +43,8 @@ int main(){
         Check(s.out.zooming&&s.out.zoom>2.75f&&s.out.zoom<3,"up zooms in smoothly, 1.5 doublings a second");
         Check(s.starts==1&&s.ticks==7&&s.stops==0,"one start, one light tick per quarter crossed");
         s.Step(50);Check(s.out.zoom==mapzoom::Max&&s.stops==1,"zoom stops at the top with one firm tick");
-        s.in.stick=-1;s.Step(200);Check(s.out.zoom==mapzoom::Min&&s.stops==2&&s.starts==1,"down returns exactly to the whole map");
-        s.in.stick=.6f;s.Step(10);const float z=s.out.zoom;Check(z>1,"part-way stick zooms in");
+        s.in.stick=-1;s.Step(200);Check(s.out.zoom==mapzoom::CornerMin&&s.stops==2&&s.starts==1,"down returns exactly to the whole map");
+        s.in.stick=.6f;s.Step(10);const float z=s.out.zoom;Check(z>mapzoom::CornerMin,"part-way stick zooms in");
         s.in.stick=.2f;Check(s.Step(10).zoom==z&&s.ends==1,"inside the dead zone the zoom holds and the gesture ends");
         Check(s.out.owned,"the stick still belongs to the map while it is looked at");
         s.in.looking=false;s.in.stick=1;Check(!s.Step().owned&&!s.out.turnOwned&&s.out.zoom==z,"looking away gives the stick back");
@@ -72,7 +79,7 @@ int main(){
     }
     {
         Sim s;s.in.looking=true;s.in.stick=-1;s.Step(10);
-        Check(s.out.zoom==1&&s.out.zooming,"down at the whole map stays there");
+        Check(s.out.zoom<1&&s.out.zoom>=mapzoom::CornerMin&&s.out.zooming,"down extends beyond the original whole-map scale");
         s.in.stick=1;s.Step(10);s.in.looking=false;
         Check(s.Step().stopped&&!s.out.zooming,"looking away mid-zoom ends the gesture");
         s.in.looking=true;const float z=s.Step().zoom;s.g.Reset();
@@ -146,6 +153,15 @@ int main(){
         s.in.max=NAN;s.Step();Check(s.out.zoom==mapzoom::Max,"an unreadable ceiling is the corner map's");
     }
     {
+        // Full-map mode can reveal the sides cropped by the former fill-to-square minimum.
+        Sim s;s.in.looking=true;s.in.max=mapzoom::FullMax;s.in.stick=-1;s.Step(100);
+        Check(std::fabs(s.out.zoom-.5f)<1e-6f,"full map zooms out below 1x to 0.5x");
+        Check(s.stops==1,"wide zoom reaches its lower stop once");
+        s.in.stick=0;s.Step(10);Check(s.out.zoom==.5f,"wide zoom stays after releasing the stick");
+        s.in.max=mapzoom::Max;s.Step();Check(s.out.zoom==.5f,"corner mode retains the shared extended minimum");
+        s.g.NewGame();Check(s.g.Zoom()==1,"new game still starts at original 1x");
+    }
+    {
         namespace fm=framevr::fullmap;
         // the box: the layer's width, its 16:9 band from the top
         const auto b=fm::FullBox(2112,2304);
@@ -179,6 +195,16 @@ int main(){
             Check(fm::Span(2112,1188,turning,topDown,1,0)>fill&&fm::Span(2112,1188,turning,topDown,0.f,fm::Base)==fill&&fm::Span(0,0,turning,topDown,1,fm::Base)==0,
                   "no hook: the game's own 0.5 shown wider (never past the box); nonsense: 1x");
         }
+        // Wider sampling reveals real pixels outside the old square/diamond crop.
+        for(bool turning:{false,true})for(bool topDown:{false,true}) {
+            const float old=fm::Span(2112,1188,turning,topDown,1,fm::Base);
+            const float wide=fm::Span(2112,1188,turning,topDown,.5f,fm::Base);
+            Check(wide>old*1.5f&&wide<=old*2.001f,"zoom-out samples more captured map, not the old crop shrunk");
+            Check(fm::Span(2112,1188,turning,topDown,.01f,fm::Base)==wide,"wide span is bounded at 0.5x");
+            Check(fm::Span(2112,1188,turning,topDown,NAN,fm::Base)==old,"invalid zoom retains 1x span");
+        }
+        Check(fm::GameStep(fm::Base*.5f)==fm::Base,"wider crop never requests unsupported engine zoom");
+        Check(mapzoom::NotchOf(.5f)==-2&&mapzoom::NotchOf(.75f)==-1,"wide zoom retains haptic quarter ticks");
         // one full map a frame: the first pass draws it, a later one reuses it unless the frame start is long gone
         Check(fm::DrawForWrist(false,0)&&!fm::DrawForWrist(true,0)&&!fm::DrawForWrist(true,fm::ReuseMs)&&fm::DrawForWrist(true,fm::ReuseMs+1)&&fm::DrawForWrist(false,5000),
               "the frame's first pass draws; a later pass within the frame reuses; no frame start for long: draws");

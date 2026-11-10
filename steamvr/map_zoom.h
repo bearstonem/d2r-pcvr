@@ -16,13 +16,14 @@
 // The zoom is not saved, and each new game starts at 1x: "Restarting should
 // reset the map to default levels in case people forget how to zoom in and out."
 namespace framevr::mapzoom {
-// 1 is the whole native map in the frame, as before: the source is the game's
-// own corner map, so there is nothing further out to zoom to. Pulling down
-// until it stops is the way home.
-constexpr float Min=1,Max=4;
-// Map view = Full map / Full top-down (wrist_full_map.h): 1 is the game's full map at
-// its widest, and the game redraws it closer as you zoom in, so it stays sharp to 16x.
-constexpr float FullMax=16;
+// Keep the original corner source, wrist panel and 1x starting scale.
+// The existing image zoom can now reach 0.5x, without changing capture/layout.
+// This does not add map pixels outside the game's supplied corner image.
+constexpr float Min=1,CornerMin=.5f,Max=4;
+// Full map / Full top-down: below 1x reveal more of the captured full-map rectangle
+// outside the old square/diamond crop, with backing at its edges. The game stays at
+// its supported 0.125 floor; closer zoom still redraws sharply up to 16x.
+constexpr float FullMin=.5f,FullMax=16;
 static_assert(FullMax>=Max);
 constexpr float Doublings=1.5f;   // per second at full stick: 1x to 4x in 1.3 s, to 16x in 2.7 s
 constexpr float Dead=.3f;         // stick travel ignored, either way
@@ -51,10 +52,10 @@ inline bool NewGame(uint64_t& seen,uint64_t session) {
     if(session)seen=session;
     return fresh;
 }
-inline float Clamp(float z,float max=Max){return std::isfinite(z)?std::clamp(z,Min,max):Min;}
+inline float Clamp(float z,float max=Max,float min=Min){return std::isfinite(z)?std::clamp(z,min,max):Min;}
 // A quarter step up to 4x; past it (the full map) a whole step, so the ticks do not buzz.
 inline int NotchOf(float z){
-    z=Clamp(z,FullMax);
+    z=Clamp(z,FullMax,FullMin);
     return z<=Max?int(std::floor((z-Min)/Notch+1e-4f)):int((Max-Min)/Notch)+int(std::floor(z-Max+1e-4f));
 }
 // head: the headset pose; panel: the shown map's center, in the same space.
@@ -114,11 +115,12 @@ public:
         out.started=now&&!zooming;out.stopped=!now&&zooming;zooming=now;
         // a lower ceiling (the full map turned off) brings the zoom back under it at once
         const float top=std::isfinite(in.max)?std::clamp(in.max,Min,FullMax):Max;
-        zoom=Clamp(zoom,top);
+        const float bottom=top>Max?FullMin:CornerMin;
+        zoom=Clamp(zoom,top,bottom);
         if(now&&dt>0) {
             const float before=zoom;
-            zoom=Clamp(zoom*std::exp2(std::copysign((std::fabs(y)-Dead)/(1-Dead),y)*Doublings*float(dt)),top);
-            if(zoom!=before)out.tick=zoom==Min||zoom==top?2:NotchOf(zoom)!=NotchOf(before)?1:0;
+            zoom=Clamp(zoom*std::exp2(std::copysign((std::fabs(y)-Dead)/(1-Dead),y)*Doublings*float(dt)),top,bottom);
+            if(zoom!=before)out.tick=zoom==bottom||zoom==top?2:NotchOf(zoom)!=NotchOf(before)?1:0;
         }
         out.owned=in.looking;out.turnOwned=held;out.zooming=zooming;out.zoom=zoom;
         return out;

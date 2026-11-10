@@ -11,8 +11,10 @@ static void Check(HRESULT hr,const char* what){if(FAILED(hr)){std::fprintf(stder
 static float Half(uint16_t x){const int e=(x>>10)&31,m=x&1023;return (x&0x8000?-1.f:1.f)*std::ldexp(e?1.f+m/1024.f:m/1024.f,e?e-15:-14);}
 int main(int argc,char** argv){try {
     bool blackBackground=false,typeless=false,squareMap=false,portrait=false,undim=false;
+    float mapZoom=1.f;
     for(int i=1;i<argc;++i) {if(!std::strcmp(argv[i],"--typeless"))typeless=true;
         else if(!std::strcmp(argv[i],"--square-map"))squareMap=true;
+        else if(!std::strcmp(argv[i],"--zoom-out")){squareMap=true;mapZoom=.5f;}
         else if(!std::strcmp(argv[i],"--undim"))undim=true;
         else if(!std::strcmp(argv[i],"--portrait"))portrait=true;else blackBackground=true;}
     ComPtr<ID3D12Device> device;Check(D3D12CreateDevice(nullptr,D3D_FEATURE_LEVEL_11_0,IID_PPV_ARGS(&device)),"device");
@@ -68,7 +70,7 @@ int main(int argc,char** argv){try {
     D3D12_RESOURCE_BARRIER barrier{};barrier.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
     barrier.Transition={source.Get(),D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE|D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE};
     commands->ResourceBarrier(1,&barrier);
-    if(!blit.Render(device.Get(),commands.Get(),source.Get(),target.Get(),blackBackground,squareMap,0,0,1.f,1.f,0.f,0.f,0.f,0.f,undim?band:nullptr))throw std::runtime_error("render");
+    if(!blit.Render(device.Get(),commands.Get(),source.Get(),target.Get(),blackBackground,squareMap,0,0,1.f,mapZoom,0.f,0.f,0.f,0.f,undim?band:nullptr))throw std::runtime_error("render");
     barrier.Transition={target.Get(),D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_COPY_SOURCE};commands->ResourceBarrier(1,&barrier);
     from.pResource=target.Get();from.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;from.SubresourceIndex=0;
     to.pResource=readback.Get();to.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;to.PlacedFootprint=outputFootprint;commands->CopyTextureRegion(&to,0,0,0,&from,nullptr);
@@ -91,9 +93,9 @@ int main(int argc,char** argv){try {
             else if(std::max(cx,cy)<20&&std::abs(cx+cy-26)<1.4f){want[0]=.34f;want[1]=.24f;want[2]=.11f;}
             else {
                 // A 4:2 source occupies 24x12 pixels (or 12x24 when tall).
-                const int left=portrait?10:4,top=portrait?4:10;
-                if(int(x)>=left&&int(y)>=top&&x<left+sourceWidth*6&&y<top+sourceHeight*6) {
-                    const float sx=(x+.5f-left)/6-.5f,sy=(y+.5f-top)/6-.5f;
+                const float scale=6*mapZoom,left=16-sourceWidth*scale/2,top=16-sourceHeight*scale/2;
+                if(x+.5f>=left&&y+.5f>=top&&x+.5f<left+sourceWidth*scale&&y+.5f<top+sourceHeight*scale) {
+                    const float sx=(x+.5f-left)/scale-.5f,sy=(y+.5f-top)/scale-.5f;
                     const int ix=int(std::floor(sx)),iy=int(std::floor(sy));
                     const float fx=sx-ix,fy=sy-iy;
                     float native[4]{};

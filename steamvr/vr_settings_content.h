@@ -510,7 +510,7 @@ inline constexpr Override Overrides[]={
      .help="Which left-hand gesture shows the minimap and compass, separately from health and mana.",
      FRAMEVR_OPTIONS(VitalsLocationOptions)},
     {.id="interactions.map_top_down",.page=View::Wrist,.section="Map",.kind=RowKind::Choice,.label="Map view",
-     .help="The minimap or the game's full map, slanted or flat. The gold arrow shows which way you face. Look at the map and push the right stick to zoom.",
+     .help="Look at the wrist map and push the right stick down/up to zoom out/in. Isometric now zooms down to 0.5x within the original wrist panel.",
      FRAMEVR_OPTIONS(MapViewOptions)},
     {.id="interactions.map_rotate",.page=View::Wrist,.section="Map",.kind=RowKind::Toggle,.label="Turn map with you",
      .help="On keeps the way you face at the top of the map. Off keeps north at the top and turns the arrow. Top-down views only."},
