@@ -3638,11 +3638,19 @@ CrossbowRig LearnCrossbowRig(uintptr_t bones,int count) {
 }
 // Read the held crossbow's authored bolt helper through its actual item/root
 // transform. Never apply another player's, inventory preview's or dropped rig.
-void CaptureCrossbow(uintptr_t self) {
+// The instance's model and skeleton are the pose call's own read of them (Identify), its bone
+// count and bones one read (Boned): four reads of its own before, for every skeleton posed
+// while a crossbow is held. And what the shared entry said of a skeleton that is no crossbow
+// is noted by this thread (Noted): no lock, for NotedFor, while the skeleton and its bones -
+// all the entry is checked against - are the ones noted.
+void CaptureCrossbow(Posed& posed) {
+    const uintptr_t self=posed.self;
     const auto now=GetTickCount64();
-    uintptr_t model=0,skeleton=0,bones=0;int count=0;
-    if(!Get(self+8,&model)||!Get(model+8,&skeleton)||!Get(skeleton+8,&count)||count<4||count>64||
-       !Get(skeleton+0xC,&bones)||!bones)return;
+    if(!Identify(posed)||!Boned(posed))return;
+    const uintptr_t skeleton=posed.skeleton,bones=posed.bones;const int count=posed.boneCount;
+    if(count<4||count>64||!bones)return;
+    Noted* const note=posed.note;
+    if(note&&note->notCrossbowAt&&note->crossbowSkeleton==skeleton&&note->crossbowBones==bones&&now-note->notCrossbowAt<NotedFor)return;
     auto& rigs=g_crossbowRigs;
     const auto key=std::make_pair(self,skeleton);
     // A rig met for the first time is learned outside the lock: the other
@@ -3660,7 +3668,10 @@ void CaptureCrossbow(uintptr_t self) {
         ReleaseSRWLockExclusive(&g_crossbowRigLock);
         hookstats::Forgot(hookstats::CrossbowRigs,swept,now);
     }
-    if(!crossbow)return;
+    if(!crossbow) {
+        if(note){note->crossbowSkeleton=skeleton;note->crossbowBones=bones;note->notCrossbowAt=now?now:1;}
+        return;
+    }
     AcquireSRWLockExclusive(&g_crossbowRigLock);struct Unlock {SRWLOCK* lock;~Unlock(){ReleaseSRWLockExclusive(lock);}} unlock{&g_crossbowRigLock};
     CrossbowRig* const kept=rigs.Find(key,now);
     if(!kept||kept->bones!=bones||kept->cog<0)return;   // dropped meanwhile: learned again on its next pose
@@ -3709,7 +3720,7 @@ void RefreshCrossbow(uintptr_t hero) {
     AcquireSRWLockShared(&g_crossbowRigLock);
     g_crossbowRigs.Each([&](const std::pair<uintptr_t,uintptr_t>& key,const CrossbowRig& rig){if(rig.cog>=0)items.push_back(key.first);});
     ReleaseSRWLockShared(&g_crossbowRigLock);
-    for(auto item:items)CaptureCrossbow(item);
+    for(auto item:items){Posed held(item,nullptr);CaptureCrossbow(held);}   // not being posed: no note of it is kept
     AcquireSRWLockShared(&g_gunBoneLock);const auto source=g_crossbowRenderSource;ReleaseSRWLockShared(&g_gunBoneLock);
     if(source.hero==hero&&source.generation==attach.heroGeneration&&source.equipment==attach.equipment&&
        source.seen&&GetTickCount64()-source.seen<=100)return;
@@ -3729,14 +3740,19 @@ void RefreshCrossbow(uintptr_t hero) {
         if(!SafeCopy(components.data(),reinterpret_cast<void*>(data),components.size()*8))return;
     }
     for(size_t i=0;i<components.size();i+=kSkeletonCompSize/8) {
-        CaptureCrossbow(uintptr_t(components[i]));
+        {Posed item(uintptr_t(components[i]),nullptr);CaptureCrossbow(item);}   // not being posed: no note of it is kept
         AcquireSRWLockShared(&g_gunBoneLock);const auto captured=g_crossbowRenderSource;ReleaseSRWLockShared(&g_gunBoneLock);
         if(captured.hero==hero&&captured.generation==attach.heroGeneration&&captured.equipment==attach.equipment&&
            captured.seen&&GetTickCount64()-captured.seen<=100)break;
     }
 }
 
-void PoseMotionBow(uintptr_t self) {
+// As CaptureCrossbow: the pose call's identity, one read for the bone count and bones, and this
+// thread's note of a skeleton the shared entry says is neither the bow nor has an arrow to hide.
+// g_bowRigLock was taken exclusively by every 4-64 bone skeleton's pose while a bow is drawn;
+// now by the bows, and by any other once a second.
+void PoseMotionBow(Posed& p) {
+    const uintptr_t self=p.self;
     if(!g_bowLive.load(std::memory_order_relaxed))return;   // no bow in play: nothing below would match
     GunBoneOut attach;
     AcquireSRWLockShared(&g_gunBoneLock);attach=g_gunBone;ReleaseSRWLockShared(&g_gunBoneLock);
@@ -3747,11 +3763,13 @@ void PoseMotionBow(uintptr_t self) {
     ReleaseSRWLockShared(&g_bowInputLock);
     const auto now=GetTickCount64();
     if(!matched||now-input.at>100||now-attach.at>100)return;
-    uintptr_t model=0,skeleton=0,bones=0;int count=0;
-    if(!Get(self+8,&model)||!Get(model+8,&skeleton)||!Get(skeleton+8,&count)||count<4||count>int(bow::MaxBones)||
-       !Get(skeleton+0xC,&bones)||!bones)return;
+    if(!Identify(p)||!Boned(p))return;
+    const uintptr_t skeleton=p.skeleton,bones=p.bones;const int count=p.boneCount;
+    if(count<4||count>int(bow::MaxBones)||!bones)return;
     // Cache only small item rigs. Hero, corpse and other character rigs
     // fail the count check before a model-name read or ECS lookup.
+    Noted* const note=p.note;
+    if(note&&note->notBowAt&&note->bowSkeleton==skeleton&&note->bowBones==bones&&now-note->notBowAt<NotedFor)return;
     AcquireSRWLockExclusive(&g_bowRigLock);
     struct Unlock {~Unlock(){ReleaseSRWLockExclusive(&g_bowRigLock);}} unlock;
     const auto key=std::make_pair(self,skeleton);
@@ -3783,7 +3801,10 @@ void PoseMotionBow(uintptr_t self) {
         hookstats::Forgot(hookstats::BowRigs,swept,now);
     }
     auto& held=*rig;
-    if(!held.rig.valid&&std::none_of(held.arrows.begin(),held.arrows.end(),[](bool arrow){return arrow;}))return;
+    if(!held.rig.valid&&std::none_of(held.arrows.begin(),held.arrows.end(),[](bool arrow){return arrow;})) {
+        if(note){note->bowSkeleton=skeleton;note->bowBones=bones;note->notBowAt=now?now:1;}
+        return;
+    }
     HeroXform hero;
     if(!HeroTransform(&hero))return;
     bow::Mat itemLocal;
@@ -3804,8 +3825,8 @@ void PoseMotionBow(uintptr_t self) {
         // Full generational entity equality: an NPC's or dropped bow using
         // exactly the same asset must never be posed by our controller.
     }
-    uintptr_t world=0,matrices=0;int worldCount=0;bow::Pose native,posed;
-    if(!Get(self+0x20,&world)||!Get(world,&worldCount)||worldCount!=count||!Get(world+4,&matrices)||!matrices)return;
+    const uintptr_t world=p.worldPose;uintptr_t matrices=0;int worldCount=0;bow::Pose native,posed;
+    if(!Get(world,&worldCount)||worldCount!=count||!Get(world+4,&matrices)||!matrices)return;
     if(!held.rig.valid) {
         // Hide only the local bow's built-in arrow. The independent native
         // projectile mesh (or the tracked guide fallback) supplies its pose.
@@ -4910,10 +4931,10 @@ void __cdecl Hook(uintptr_t self, float a, float b, bool c) {
     Posed posed(self);
     Arms(posed);
 #ifdef D2RVR_NATIVE_OPENXR
-    if (const ULONGLONG held = g_crossbowHeldAt.load(std::memory_order_relaxed); held && GetTickCount64() - held <= 100) CaptureCrossbow(self);
+    if (const ULONGLONG held = g_crossbowHeldAt.load(std::memory_order_relaxed); held && GetTickCount64() - held <= 100) CaptureCrossbow(posed);
     RefreshCrossbow(self);
     RefreshShield(posed);
-    PoseMotionBow(self);
+    PoseMotionBow(posed);
     // Heads turn to you first: a body pushed aside is bent from the pose with its head already turned.
     // The two share the instance's identity, pose buffer header, placement and what it is known as
     // (Posed), and the pose too: Turn leaves the turned pose in posed.held and owes its write
