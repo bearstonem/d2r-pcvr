@@ -111,7 +111,7 @@ AssistStats assistStats[2];
 std::array<Shot,4> pending{};size_t pendingCount=0;
 framevr::CallbackTicket gameCallback,uiCallback;
 uint64_t maintenanceAt=0;
-std::atomic<unsigned> renderCount{0},serverCount{0},clientCount{0},submitted{0},spawned{0},visuals{0},stale{0},refused{0},contacts{0},walls{0},expired{0};
+std::atomic<unsigned> renderCount{0},serverCount{0},clientCount{0},submitted{0},spawned{0},visuals{0},stale{0},refused{0},contacts{0},walls{0},expired{0},skims{0};
 std::atomic<unsigned> lastLatency{0},lastSpeedCm{0};
 std::atomic<unsigned> boundMeshes{0},ignoredEntities{0};
 std::atomic<unsigned> positionMismatch{0};
@@ -241,6 +241,14 @@ void LogBarrier(const char* what,const Shot& shot,float metres,uint32_t monster=
     else snprintf(line,sizeof line,"Frame flight barrier: %s, skill %d missile %d, %.1f m from its start, at cell %d,%d: %s",what,shot.skill,shot.missile,metres,barrierWhy.x,barrierWhy.z,why);
     framevr::logging::Write(line);
 }
+// The floor, not a wall, ended a flight: an arrow or a thrown thing landing, or a spell aimed steeply down.
+void LogFloor(const Shot& shot,float metres) {
+    const auto now=GetTickCount64();
+    if(now<barrierLogAt)return;
+    barrierLogAt=now+250;
+    char line[200];snprintf(line,sizeof line,"Frame flight floor: skill %d missile %d ended on its launch floor %.1f m from its start (no wall)",shot.skill,shot.missile,metres);
+    framevr::logging::Write(line);
+}
 bool MoveSpell(Arrow& a,Vec point) {
     if(a.flight.shot.kind!=Kind::Spell&&!SkillRelease(a.flight.shot)&&!ItemArrow(a.flight.shot))return true;
     const auto grid=GridPoint(a.flight.shot,point)*a.flight.shot.unitsPerMetre;
@@ -365,8 +373,16 @@ int Fly(uintptr_t game,uintptr_t unit) {
     // Until terrain-height queries are available, use the launch floor. Walls
     // extend vertically; this deliberately does not permit shooting over them.
     const float floor=a.flight.shot.player.y+FloorClearance;
-    if(from.y<=floor)stop=0;
-    else if(to.y<=floor)stop=std::min(stop,(from.y-floor)/(from.y-to.y));
+    // floorStop: the floor, not a wall, sets this step's end. skim: a spell meeting it at a shallow angle
+    // goes to the floor this step and runs on along it (bow_flight.h Skims), unless something stops it first.
+    bool floorStop=false,skim=false;float floorAt=1;
+    if(!a.flight.skimming) {
+        if(from.y<=floor){floorStop=stop>0;stop=0;}
+        else if(to.y<=floor) {
+            floorAt=(from.y-floor)/(from.y-to.y);
+            if(floorAt<stop){stop=floorAt;floorStop=true;skim=framevr::bowflight::Skims(a.flight.shot.kind,a.flight.NativePath(),to-from);}
+        }
+    }
     impactvr::Flew(a.flight.shot,from,to,stop); // a spell pushes the props and bottles in its way
     struct Touch {float fraction;uintptr_t unit;uint32_t id;};
     std::array<Touch,64> touches{};size_t n=0;
@@ -459,13 +475,32 @@ int Fly(uintptr_t game,uintptr_t unit) {
         return End(slot,a,game,unit);
     }
     a.flight.distance=advance(stop);a.flight.updatedAt=GetTickCount64();
+    if(skim&&stop==floorAt) {   // nothing nearer stopped it: on along the floor from where it met it
+        const Vec level=framevr::bowflight::Level(to-from);
+        if(MoveSpell(a,from+(to-from)*std::max(0.f,stop-.0001f))&&Length(level)>.5f) {
+            a.flight.Redirect(level);a.flight.skimming=true;++skims;
+            static uint64_t toldAt=0;
+            if(const auto now=GetTickCount64();now>=toldAt) {
+                toldAt=now+1000;
+                char line[200];snprintf(line,sizeof line,"Frame flight floor: skill %d missile %d met its launch floor %.1f m out at %.0f degrees down and runs on along it",
+                    a.flight.shot.skill,a.flight.shot.missile,a.flight.distance,std::asin(std::clamp(-(to.y-from.y)/std::max(Length(to-from),1e-6f),0.f,1.f))*57.2958f);
+                framevr::logging::Write(line);
+            }
+            Store(slot,a);return 1;
+        }
+    }
     if(stop<1)a.flight.Contact(from+(to-from)*stop);
     if(!MoveSpell(a,from+(to-from)*std::max(0.f,stop-(stop<1?.0001f:0.f)))) {
         if(stop>=1){barrierWhy={0,0,true,0};LogBarrier("the game would not move the missile on (no room at its next point)",a.flight.shot,a.flight.distance);}
+        else if(floorStop)LogFloor(a.flight.shot,a.flight.distance);
         else LogBarrier("a flight stopped at a barrier",a.flight.shot,a.flight.distance);
         return End(slot,a,game,unit);
     }
-    if(stop<1){++walls;LogBarrier("a flight stopped at a barrier",a.flight.shot,a.flight.distance);return End(slot,a,game,unit);}
+    if(stop<1) {
+        ++walls;
+        if(floorStop)LogFloor(a.flight.shot,a.flight.distance);else LogBarrier("a flight stopped at a barrier",a.flight.shot,a.flight.distance);
+        return End(slot,a,game,unit);
+    }
     Store(slot,a);return 1;
 }
 // The missile update hook. Every server missile steps through here: the hero's spell missiles break the

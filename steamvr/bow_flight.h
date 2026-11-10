@@ -326,6 +326,23 @@ inline float FlightSpeed(const Shot& shot,int nativeVelocity) {
     return shot.kind==Kind::Spell?std::clamp(nativeVelocity*(50.f/4096.f)/shot.unitsPerMetre,0.f,100.f):Speed(nativeVelocity,shot.draw);
 }
 inline Vec Tip(const Shot& s,float distance) {return s.origin+s.direction*(ProjectileLength(s)+distance);}
+// A hand-cast spell that meets its launch floor at a shallow angle runs on along the floor instead of
+// ending there (owner, 2026-11-09: spells would not reach monsters through a doorway; the log showed
+// Lightning from a hand aimed a little down ending on the floor 3.5 m and 8.6 m out). The game's own
+// missiles have no height and never meet the floor. Steeper than SkimSine (40 degrees down) it still
+// ends where it lands. Arrows, javelins and thrown things land as before.
+inline constexpr float SkimSine=.6428f;
+inline bool Skims(Kind kind,bool nativePath,Vec step) {
+    const float length=std::sqrt(step.x*step.x+step.y*step.y+step.z*step.z);
+    if(kind!=Kind::Spell||nativePath||!Finite(step)||length<1e-6f)return false;
+    const float flat=std::sqrt(step.x*step.x+step.z*step.z);
+    return step.y<0&&-step.y/length<=SkimSine&&flat>1e-6f;
+}
+// The heading a skimming spell keeps: its own, levelled.
+inline Vec Level(Vec d) {
+    const float flat=std::sqrt(d.x*d.x+d.z*d.z);
+    return flat>1e-6f?Vec{d.x/flat,0,d.z/flat}:Vec{};
+}
 struct Flight {
     Shot shot{};
     float distance=0,speed=0;
@@ -337,6 +354,8 @@ struct Flight {
     Vec segmentOrigin{},segmentDirection{};
     float segmentAt=0;
     bool redirected=false;
+    // Running along the launch floor after meeting it at a shallow angle (Skims): the floor no longer stops it.
+    bool skimming=false;
     Vec Direction() const {return redirected?segmentDirection:shot.direction;}
     Vec PointAt(float travelled) const {
         return redirected?segmentOrigin+segmentDirection*(travelled-segmentAt):shot.origin+shot.direction*travelled;

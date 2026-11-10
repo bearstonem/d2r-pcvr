@@ -353,5 +353,28 @@ int main() {
         Vec kept{0,0,-1};
         Check(!LockAimDirection(origin,origin+Vec{.1f,-.2f,0},false,kept)&&kept.z==-1,"too close keeps the direction");
     }
+    {
+        // A spell meeting its launch floor at a shallow angle runs on along it (owner, 2026-11-09).
+        const auto N=[](Vec v){const float l=Length(v);return Vec{v.x/l,v.y/l,v.z/l};};
+        const Vec shallow=N(Vec{0,-.2f,-1}),steep=N(Vec{0,-1,-.5f});
+        Check(Skims(Kind::Spell,false,shallow),"a spell aimed a little down skims the floor");
+        Check(!Skims(Kind::Spell,false,steep),"one aimed steeply down ends where it lands");
+        Check(!Skims(Kind::Spell,false,Vec{0,.2f,-1})&&!Skims(Kind::Spell,false,Vec{0,0,-1}),"rising and level flights never meet the floor this way");
+        Check(!Skims(Kind::Arrow,false,shallow)&&!Skims(Kind::Javelin,false,shallow),"arrows and javelins land");
+        Check(!Skims(Kind::Spell,true,shallow),"a spell on the game's own path is the game's");
+        Check(!Skims(Kind::Spell,false,Vec{0,-1,0})&&!Skims(Kind::Spell,false,Vec{})&&!Skims(Kind::Spell,false,Vec{NAN,-.1f,1}),"straight down, nothing and nonsense do not skim");
+        Check(Skims(Kind::Spell,false,Vec{0,-SkimSine+.01f,-std::sqrt(1-(SkimSine-.01f)*(SkimSine-.01f))})&&
+              !Skims(Kind::Spell,false,Vec{0,-SkimSine-.01f,-std::sqrt(1-(SkimSine+.01f)*(SkimSine+.01f))}),"the line is 40 degrees down");
+        const Vec level=Level(Vec{3,-2,-4});
+        Check(std::fabs(Length(level)-1)<1e-5f&&level.y==0&&std::fabs(level.x-.6f)<1e-5f&&std::fabs(level.z+.8f)<1e-5f,"the skim keeps the heading, levelled");
+        Check(Length(Level(Vec{0,-1,0}))==0,"no heading to keep straight down");
+        // The flight after the redirect: on from the contact, at the floor's height.
+        Flight f;f.shot.kind=Kind::Spell;f.shot.skill=36;f.shot.origin={0,1,0};f.shot.direction=shallow;f.shot.unitsPerMetre=2;f.speed=20;
+        f.distance=1/(-shallow.y);   // where it meets y=0
+        const Vec met=f.PointAt(f.distance);
+        f.Redirect(Level(shallow));f.skimming=true;
+        const Vec later=f.PointAt(f.distance+5);
+        Check(std::fabs(met.y)<1e-4f&&std::fabs(later.y-met.y)<1e-5f&&std::fabs(later.z-(met.z-5))<1e-4f&&std::fabs(later.x-met.x)<1e-5f,"5 m on it is 5 m further along the floor");
+    }
     std::puts("Physical bow: release ownership, cancellation, cave coordinates, swept contacts, walls, speed, visual-axis, mesh-binding, preview recovery and render-pose tests passed");
 }
