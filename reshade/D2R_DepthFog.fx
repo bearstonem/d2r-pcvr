@@ -154,6 +154,7 @@ uniform bool UiMaskOff <
 #include "D2R_Targeting.fxh"
 #include "D2R_Table.fxh"
 #include "D2R_Immunity.fxh"
+#include "D2R_TeleportArc.fxh"
 
 
 void VS_Fullscreen(in uint id : SV_VertexID, out float4 pos : SV_Position, out float2 uv : TEXCOORD)
@@ -193,6 +194,7 @@ technique D2R_DepthFog <
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_DepthFog; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_Outline; }
     pass { VertexShader = VS_Immunity; PixelShader = PS_Immunity; VertexCount = 2592; BlendEnable = true; SrcBlend = ONE; DestBlend = ONE; ColorWriteMask = 7; }
+    pass { VertexShader = VS_TeleportArc; PixelShader = PS_TeleportArc; VertexCount = 90; BlendEnable = true; SrcBlend = ONE; DestBlend = ONE; ColorWriteMask = 7; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_Hud; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_GameHud; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_Phantom; }
@@ -229,6 +231,7 @@ technique D2R_DepthFog_R <
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_DepthFogR; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_OutlineR; }
     pass { VertexShader = VS_ImmunityR; PixelShader = PS_Immunity; VertexCount = 2592; BlendEnable = true; SrcBlend = ONE; DestBlend = ONE; ColorWriteMask = 7; }
+    pass { VertexShader = VS_TeleportArcR; PixelShader = PS_TeleportArc; VertexCount = 90; BlendEnable = true; SrcBlend = ONE; DestBlend = ONE; ColorWriteMask = 7; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_HudR; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_GameHudR; }
     pass { VertexShader = VS_Fullscreen; PixelShader = PS_PhantomR; }

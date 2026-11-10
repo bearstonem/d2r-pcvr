@@ -173,7 +173,7 @@ inline const char* Cue(Motion m) {
     case Motion::ForearmSweep:return "sweep the left hand from the right hand up to the right shoulder";
     case Motion::Shake:return "shake both fists hard, held well apart (not rubbed together)";
     case Motion::Hug:return "hug yourself, each hand on the other shoulder";
-    case Motion::Punch:return "point the right arm where you want to land, then yank the fist back to your shoulder";
+    case Motion::Punch:return "right arm out, aim the controller's arc where you want to land, then yank the fist back";
     default:return m>Motion::Punch&&m<Motion::End?ClassCue(m):"no motion";
     }
 }
