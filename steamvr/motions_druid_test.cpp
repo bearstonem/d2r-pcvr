@@ -1,4 +1,5 @@
 #include "spell_motion.h"
+#include "motion_left.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -48,7 +49,7 @@ struct Sim {
         if(gated)in.active=gate.Step(grips,true).watch;
         spellmotion::Engine* engines[2]{&wolf,&bear};const Motion forms[2]{Motion::Werewolf,Motion::Werebear};
         for(int k=0;k<2;++k) {
-            in.motion=forms[k];out[k]=engines[k]->Step(in);
+            in.motion=forms[k];out[k]=motionleft::Seen(engines[k]->Step(motionleft::Played(in)));
             if(out[k].cast){++casts;last=forms[k];}
             if(out[k].abandoned) {
                 ++drops;lastDrop=out[k].abandoned;
@@ -74,7 +75,7 @@ struct Sim {
         Hold(.1f);
     }
 };
-int main(){
+static void Run() {
     {   // Under the motions' gate (both grips, owner 2026-11-04): free hands, as before, no longer change form.
         Sim none;none.gated=true;none.Werewolf();Check(none.casts==0,"gated, free hands no longer shift");
         Sim wolf;wolf.gated=true;wolf.grips[0]=wolf.grips[1]=1;wolf.Werewolf();Check(wolf.casts==1&&wolf.last==Motion::Werewolf,"gated, both grips held: Werewolf");
@@ -111,7 +112,7 @@ int main(){
      for(int i=1;i<=60;++i){
          r.in.time+=.02;
          for(int k=0;k<2;++k)r.in.hand[k]=h0[k]+math::Rotate(r.yaw,{k?-.004f*i:.004f*i,.004f*i,0});
-         r.in.motion=Motion::Werewolf;r.out[0]=r.wolf.Step(r.in);
+         r.in.motion=Motion::Werewolf;r.out[0]=motionleft::Seen(r.wolf.Step(motionleft::Played(r.in)));
          if(r.out[0].abandoned) {
              reason=true;Check(std::string(spellmotion::druid::Name(int(r.out[0].abandonedFigures[0])))=="fling","the drop names the fling stage");
              char line[200];Check(spellmotion::DropLine(Motion::Werewolf,r.out[0],line,sizeof line)&&
@@ -164,6 +165,11 @@ int main(){
         Check(std::string(spellmotion::CueOf(223))=="cross the arms on the chest, bow, then straighten up flinging them out"&&
               std::string(spellmotion::CueOf(228))=="raise both hands overhead, hold, then slam them down together","the cards' cues as before");
     }
-    std::puts("motions-druid-test: ok");
+}
+// Everything above, right-handed as written, then played by a left-handed player (motion_left.h): the mirror
+// image of every fixture, the left hand as the engine's hand 0, with the same expectations.
+int main() {
+    motionleft::Both(Run);
+    std::puts("motions-druid-test: ok (right-handed, and every fixture again left-handed as its mirror image)");
     return 0;
 }

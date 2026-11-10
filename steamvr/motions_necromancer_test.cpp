@@ -43,7 +43,7 @@ static void SlowPrison(Sim& s){s.Move({.35f,-.30f,-.40f},{-.35f,-.30f,-.40f},.4f
 static void SlowRaise(Sim& s){s.Move({.18f,-.62f,-.15f},{-.18f,-.62f,-.15f},.3f);s.Move({.22f,.18f,-.22f},{-.22f,.18f,-.22f},1.4f);s.Hold(.2f);}
 static void ShortArmor(Sim& s){s.Move({-.10f,-.35f,-.10f},{.10f,-.35f,-.10f},.4f);s.Hold(.2f);s.Move(RestR,RestL,.4f);}
 static void PointBack(Sim& s){Point(s);s.MoveR(RestR,.5f);s.Hold(.3f);}   // held out, then lowered back to rest
-int main() {
+static void Run() {
     using Do=void(*)(Sim&);
     // aimed: it goes straight ahead (the golems' spot, Lower Resist along the left arm), level
     const struct {Motion motion;Do perform;const char* name;bool aimed;} all[]={
@@ -168,6 +168,11 @@ int main() {
             if(g.out.cast)land=g.out.land==spellmotion::Land::Spot&&g.out.spot.ahead==spellmotion::necromancer::tuning.golemAhead&&g.out.spot.right==0;}
         Check(g.casts==1&&land,"Golem: it stands on its spot ahead");
     }
-    std::puts("motions-necromancer-test: ok");
+}
+// Everything above, right-handed as written, then played by a left-handed player (motion_left.h): the mirror
+// image of every fixture, the left hand as the engine's hand 0, with the same expectations.
+int main() {
+    motionleft::Both(Run);
+    std::puts("motions-necromancer-test: ok (right-handed, and every fixture again left-handed as its mirror image)");
     return 0;
 }

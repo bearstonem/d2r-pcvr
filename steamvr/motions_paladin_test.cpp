@@ -1,4 +1,5 @@
 #include "spell_motion.h"
+#include "motion_left.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -47,7 +48,7 @@ struct Sim {
     void Step() {
         in.time+=frame;
         if(gated)in.active=gate.Step(grips,true).watch;
-        out=g.Step(in);
+        out=motionleft::Seen(g.Step(motionleft::Played(in)));
         if(out.cast){++casts;from=out.castFigures[0];to=out.castFigures[1];}
         if(out.abandoned) {
             ++drops;lastDrop=out.abandoned;
@@ -302,7 +303,7 @@ static void HeavensTests() {
         Check(s.casts==0&&s.lastLine.rfind("Frame heavens: call dropped: hand busy, untracked or input inactive (from 4",0)==0,"heavens: stopped mid-sweep, logged");
     }
 }
-int main() {
+static void Run() {
     HammerTests();ChargeTests();CrossTests();HeavensTests();
     {   // The page, the order and the engine's policies for them
         const auto page=spellmotion::PageOf(3);const auto order=spellmotion::OrderOf(3);
@@ -324,6 +325,11 @@ int main() {
               std::string(spellmotion::CueOf(121))=="raise the right arm straight, then bring it down level with the shoulder","the cards' cues as before");
         Check(!spellmotion::WatchesOpening(Motion::FlingOut)&&!spellmotion::Rapid(Motion::Shout),"the other classes': the grips' hold only, and the wait");
     }
-    std::puts("motions-paladin-test: ok");
+}
+// Everything above, right-handed as written, then played by a left-handed player (motion_left.h): the mirror
+// image of every fixture, the left hand as the engine's hand 0, with the same expectations.
+int main() {
+    motionleft::Both(Run);
+    std::puts("motions-paladin-test: ok (right-handed, and every fixture again left-handed as its mirror image)");
     return 0;
 }

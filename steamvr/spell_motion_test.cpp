@@ -1,4 +1,5 @@
 #include "spell_motion.h"
+#include "motion_left.h"
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -39,7 +40,7 @@ struct Sim {
     }
     void Hold(float s){for(int i=0;i<int(s/frame);++i)Step();}
     void Trigger(bool down){in.held=down;Step();}
-    void Step(){in.time+=frame;out=g.Step(in);if(out.cast){++casts;aim=out.aim;landing=out.landing;point=out.point;land=out.land;spot=out.spot;}if(out.began)++began;if(out.dropped){++drops;lastDrop=out.dropped;}}
+    void Step(){in.time+=frame;out=motionleft::Seen(g.Step(motionleft::Played(in)));if(out.cast){++casts;aim=out.aim;landing=out.landing;point=out.point;land=out.land;spot=out.spot;}if(out.began)++began;if(out.dropped){++drops;lastDrop=out.dropped;}}
 };
 // The motions, done well, from the resting pose; the trigger is the caller's.
 static void Nova(Sim& s){s.Move({.08f,-.40f,-.30f},{-.08f,-.40f,-.30f},.35f);s.Move({.62f,-.35f,-.15f},{-.62f,-.35f,-.15f},.25f);}
@@ -64,7 +65,7 @@ static void Meteor(Sim& s){s.MoveR({.15f,.35f,-.05f},.3f);s.MoveR({.18f,-.40f,-.
 static void Blizzard(Sim& s){s.Move({.15f,.30f,-.10f},{-.15f,.30f,-.10f},.3f);s.Move({.20f,-.30f,-.35f},{-.20f,-.30f,-.35f},.25f);s.Hold(.2f);}
 static void Hydra(Sim& s){s.MoveL({-.165f,.12f,-.45f},.3f);s.Hold(.2f);}
 
-int main() {
+static void Run() {
     using Do=void(*)(Sim&);
     const struct {Motion motion;Do perform;int skill;const char* name;} all[]={
         {Motion::FlingOut,Nova,48,"Nova"},{Motion::PushDown,FrostNova,44,"Frost Nova"},{Motion::RubSnap,StaticField,42,"Static Field"},
@@ -358,6 +359,82 @@ int main() {
         step(0,0,.01);step(1,0,.03);step(1,1,.01);step(1,1,.3);Check(!g.solo[0]&&!g.solo[1],"pressed together (the other 30 ms later): no grab");
         step(0,0,.01);step(0,1,.01);step(0,1,.11);Check(g.solo[1],"the left alone grabs too");
     }
-    std::puts("spell-motion-test: ok");
+}
+// Left-handed play written out by hand, with no helper between: what the transport gives the engine for a
+// left-handed player (hand_role.h) - hand 0 is the LEFT hand, hand 1 the right, Input::mirror set - and the
+// one-sided motions done with the other arm, on the other side.
+static void LeftHandedByHand() {
+    const auto leftHanded=[](Sim& s){s.in.mirror=true;s.Place(0,RestL);s.Place(1,RestR);s.Step();s.Trigger(true);};   // hand 0: the left hand, at rest on the left
+    {   // Teleport: the LEFT arm out, pointing ahead and to the left; the fist yanked back casts there
+        Sim s(Motion::Punch);leftHanded(s);
+        s.MoveR({-.34f,-.32f,-.45f},.35f);s.Hold(.25f);   // MoveR moves hand 0: the left hand
+        Check(s.out.aiming&&s.out.point.x<-.1f,"left-handed Teleport: the left arm held out shows its landing, to the LEFT of ahead");
+        Check(spellmotion::PointSpot(s.out.point,s.g.tuning).right<-1&&spellmotion::PointSpot(s.out.point,s.g.tuning).ahead>10,"its spot: ahead and to the left, where the left arm points");
+        s.MoveR({-.33f,-.26f,-.20f},.15f);
+        Check(s.casts==1&&s.landing&&s.point.x<-.1f&&s.aim.x<-.1f&&s.aim.z<0,"the left fist yanked back casts it on that landing, its way to the left");
+    }
+    {   // the right arm doing the right-handed Teleport is nothing to a left-handed player (the off arm up hides it)
+        Sim s(Motion::Punch);leftHanded(s);
+        s.MoveL({.20f,-.32f,-.45f},.35f);s.Hold(.25f);   // MoveL moves hand 1: the right hand
+        Check(!s.out.aiming,"left-handed: the RIGHT arm held out shows no landing");
+        s.MoveL({.19f,-.26f,-.20f},.15f);Check(s.casts==0,"and its yank casts nothing");
+    }
+    {   // and right-handed the left arm still shows and casts nothing: OFF is what it was
+        Sim s(Motion::Punch);s.Trigger(true);
+        s.MoveL({-.34f,-.32f,-.45f},.35f);s.Hold(.25f);Check(!s.out.aiming,"right-handed: the left arm held out shows no landing, as before");
+        s.MoveL({-.33f,-.26f,-.20f},.15f);Check(s.casts==0,"nor casts");
+    }
+    {   // Frozen Armor: "sweep the left hand from the right hand up to the right shoulder" is, left-handed,
+        // the RIGHT hand from the left hand up to the LEFT shoulder
+        Sim s(Motion::ForearmSweep);leftHanded(s);
+        s.Move({-.45f,-.35f,-.35f},{-.32f,-.35f,-.32f},.45f);   // the left arm out on its side, the right hand at the left hand
+        s.MoveL({-.17f,-.24f,.05f},.45f);                      // the right hand up to the left shoulder
+        Check(s.casts==1,"left-handed Frozen Armor: the right hand swept from the left hand up to the left shoulder");
+        Sim wrong(Motion::ForearmSweep);leftHanded(wrong);
+        wrong.Move({.32f,-.35f,-.32f},{.45f,-.35f,-.35f},.45f);wrong.MoveR({.17f,-.24f,.05f},.45f);   // the right-handed sweep, by the same two real hands
+        Check(wrong.casts==0,"the right-handed sweep (left hand up to the right shoulder) is not Frozen Armor left-handed");
+    }
+    {   // Nova: a two-hand motion that is its own mirror image casts either way, its hands simply exchanged
+        Sim s(Motion::FlingOut);leftHanded(s);
+        s.Move({-.08f,-.40f,-.30f},{.08f,-.40f,-.30f},.35f);s.Move({-.62f,-.35f,-.15f},{.62f,-.35f,-.15f},.25f);
+        Check(s.casts==1,"left-handed Nova: the same fling, each hand out on its own side");
+    }
+    {   // Mirrored: the reflection in the upright plane through the head along its heading
+        spellmotion::Input in;in.time=1;in.mirror=true;
+        const float heading=.7f;const auto yaw=math::Yaw(heading);
+        in.head={.3f,1.6f,-.2f};
+        in.headRotation=math::Multiply(yaw,math::Multiply(math::Quat{std::sin(.2f),0,0,std::cos(.2f)},math::Quat{0,0,std::sin(.15f),std::cos(.15f)}));   // pitched and rolled
+        in.hand[0]=in.head+math::Rotate(yaw,{.25f,-.4f,-.3f});in.hand[1]=in.head+math::Rotate(yaw,{-.2f,-.5f,-.1f});
+        in.handVelocity[0]=math::Rotate(yaw,{1,2,3});in.grip[0]=.25f;in.grip[1]=.75f;in.tracked[0]=true;
+        const auto m=spellmotion::Mirrored(in);
+        const auto local=[&](math::Vec v){return math::Rotate(math::Conjugate(yaw),v);};
+        const auto near=[](math::Vec a,math::Vec b){return std::fabs(a.x-b.x)<1e-4f&&std::fabs(a.y-b.y)<1e-4f&&std::fabs(a.z-b.z)<1e-4f;};
+        Check(!m.mirror&&near(m.head,in.head),"Mirrored: the head stays where it is");
+        Check(near(local(m.hand[0]-m.head),{-.25f,-.4f,-.3f})&&near(local(m.hand[1]-m.head),{.2f,-.5f,-.1f}),"each hand across to the other side, the same height and reach; the order kept");
+        Check(near(local(m.handVelocity[0]),{-1,2,3}),"the velocities with them");
+        Check(m.grip[0]==.25f&&m.grip[1]==.75f&&m.tracked[0]&&!m.tracked[1],"grips and tracking are the caller's order");
+        Check(std::fabs(math::Heading(m.headRotation)-math::Heading(in.headRotation))<1e-4f,"the heading is kept, so the head-local frame is the same one");
+        const auto up=math::Rotate(in.headRotation,{0,1,0}),mirroredUp=math::Rotate(m.headRotation,{0,1,0});
+        const auto headingYaw=math::Yaw(math::Heading(in.headRotation));
+        const auto a=math::Rotate(math::Conjugate(headingYaw),up),b=math::Rotate(math::Conjugate(headingYaw),mirroredUp);
+        Check(near(b,{-a.x,a.y,a.z}),"the head's lean reverses: its up reflected");
+        const auto twice=spellmotion::Mirrored(m);
+        Check(near(twice.hand[0],in.hand[0])&&near(twice.hand[1],in.hand[1])&&near(twice.handVelocity[0],in.handVelocity[0])&&
+              std::fabs(math::Dot(math::Rotate(twice.headRotation,{1,0,0}),math::Rotate(in.headRotation,{1,0,0}))-1)<1e-4f,"mirrored twice is the input again");
+        spellmotion::Output out;out.aim={.3f,.1f,-.9f};out.point={-.2f,0,-1};out.spot={7,3};out.end[0]={.4f,0,0};out.end[1]={-.5f,0,0};out.behind[0]=.1f;out.behind[1]=.2f;
+        spellmotion::MirrorSides(out);
+        Check(out.aim.x==-.3f&&out.aim.y==.1f&&out.aim.z==-.9f&&out.point.x==.2f&&out.spot.right==-3&&out.spot.ahead==7&&out.end[0].x==-.4f&&out.end[1].x==.5f&&
+              out.behind[0]==.1f&&out.behind[1]==.2f,"an answer's sides turned back: its way, its landing, its spot's right, where the hands ended; per-hand figures keep the engine's order");
+    }
+    {   // a reset, a bad pose and the hold's own rules are the same mirrored
+        Sim s(Motion::Punch);s.in.mirror=true;s.in.head.x=NAN;s.Step();Check(!s.out.cast&&!s.g.Watching(),"left-handed: a non-finite head is ignored, as right-handed");
+    }
+}
+// Everything above, right-handed as written, then played by a left-handed player (motion_left.h): the mirror
+// image of every fixture, the left hand as the engine's hand 0, with the same expectations.
+int main() {
+    motionleft::Both(Run);
+    LeftHandedByHand();
+    std::puts("spell-motion-test: ok (right-handed, and every fixture again left-handed as its mirror image)");
     return 0;
 }
