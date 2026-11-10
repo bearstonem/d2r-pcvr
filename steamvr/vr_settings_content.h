@@ -243,7 +243,7 @@ inline constexpr ContentPage PageTable[]={
     {View::Warnings,"Warnings",Group::Interface,Icon::Survival,"Warnings when your life or mana runs low.",true},
     {View::Performance,"Performance",Group::Graphics,Icon::Performance,"Image detail and how far you see, with the last second's frame times below.",true},
     {View::Frames,"Frames",Group::Graphics,Icon::Fast,"How each frame is made: the eyes drawn, generated frames and the GPU wait.",true},
-    {View::Environment,"Environment",Group::Graphics,Icon::World,"Extra sights the mod adds to the game world. Far objects: Graphics > Performance.",true},
+    {View::Environment,"Environment",Group::Graphics,Icon::World,"Extra sights and sound the mod adds to the game world. Far objects: Graphics > Performance.",true},
     {View::Guide,"Guide",Group::Header,Icon::Controls,"Each stick opens its hand's wheel. Point the other hand's laser at a wedge to assign a skill.",false},
     {View::WhatsNew,"What's new",Group::Header,Icon::Notes,"Changes in this version of the mod.",false},
     // A safety net: settings no override placed whose owner page is full or unknown
@@ -348,6 +348,12 @@ inline constexpr Option MenuDistanceOptions[]={
     {0,"Near","Menus 55 cm away, the main menu 70 cm."},
     {1,"Medium","Menus 85 cm away, the main menu 1 m."},
     {2,"Far","Menus 1.15 m away, the main menu 1.3 m."},
+};
+// Echo (world_sound.h): the game's own reverb for the place you stand in, as the game mixes it or louder.
+inline constexpr Option EchoOptions[]={
+    {0,"Game's own","The echo as the game mixes it, made for speakers: faint in a headset."},
+    {1,"More","The game's echo twice as loud: caves, crypts and halls ring around you."},
+    {2,"Strong","Four times as loud, and it rings a quarter longer."},
 };
 inline constexpr Option TooltipOptions[]={
     {0,"Instant","Details show as soon as the laser reaches an item."},
@@ -762,6 +768,11 @@ inline constexpr Override Overrides[]={
     {.id="ceiling.torches",.page=View::Environment,.section="Sky and dungeons",.kind=RowKind::Toggle,.label="Dungeon torchlight",
      .help="The game's own torches and braziers light the dungeon around them. Finding them scans game memory every 1.5 s: turn it off if dungeons stutter.",
      .beside=true,.besideLabel="Torches"},
+    // Echo (world_sound.h; owner 2026-11-09): the game's own reverb per place, raised for the headset. With the
+    // dungeons' rows: a third section would leave the page no room for the fallback's "New".
+    {.id="audio.echo",.page=View::Environment,.section="Sky and dungeons",.kind=RowKind::Choice,.label="Echo",
+     .help="How loud the game's own echo of the place is: caves, crypts and the Cathedral ring, the open moor barely. It follows every monster, footstep and voice.",
+     FRAMEVR_OPTIONS(EchoOptions)},
     // Environment: Glow. Spell glow on hands left the page and the settings on 2026-11-04: always on for a
     // Sorceress (the owner; [interactions] elemental_hands is ignored).
     {.id="torch.flame",.page=View::Environment,.section="Glow",.kind=RowKind::Toggle,.label="Torch flame",
@@ -962,7 +973,7 @@ inline View OwnerOf(const wchar_t* section){
     if(s==L"calibration")return View::Body;
     if(s==L"bow")return View::Targeting;
     if(s==L"hud")return View::Menus;
-    if(s==L"sky"||s==L"fog"||s==L"ceiling"||s==L"torch")return View::Environment;
+    if(s==L"sky"||s==L"fog"||s==L"ceiling"||s==L"torch"||s==L"audio")return View::Environment;
     if(s==L"haptics")return View::Vibration;
     if(s==L"render"||s==L"stereo")return View::Performance;
     return View::More;   // gameplay, interactions and any new section

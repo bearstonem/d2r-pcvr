@@ -30,7 +30,7 @@ setting's ini id (`"gameplay.highlight_left_hue"`), never by its `Key`.
    | `calibration` | Body |
    | `bow` | Targeting |
    | `hud` | Menus |
-   | `sky`, `fog`, `ceiling`, `torch` | Environment |
+   | `sky`, `fog`, `ceiling`, `torch`, `audio` | Environment |
    | `haptics` | Vibration |
    | `render`, `stereo` | Performance |
    | `gameplay`, `interactions`, anything else | More |
