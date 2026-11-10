@@ -16,7 +16,7 @@ struct Copy {device* owner=nullptr;pipeline original{},replacement{};};
 NativeMutex mutex;
 std::vector<Copy> copies;
 std::atomic<uint64_t> generation{1};
-std::atomic<bool> active{false},reported{false};
+std::atomic<bool> active{false},scene{false},reported{false};
 thread_local bool ours=false;
 void (*logger)(const char*)=nullptr;
 std::once_flag compileOnce;
@@ -76,7 +76,7 @@ void DeviceDestroyed(device* dev) {
     ours=true;for(auto p:pending)dev->destroy_pipeline(p);ours=false;
 }
 void Bind(command_list* commands,pipeline_stage stages,pipeline original) {
-    if(ours||!active.load(std::memory_order_relaxed)||uint32_t(stages&pipeline_stage::compute_shader)==0)return;
+    if(ours||!(active.load(std::memory_order_relaxed)||scene.load(std::memory_order_relaxed))||uint32_t(stages&pipeline_stage::compute_shader)==0)return;
     static thread_local GenerationCache<Copy> cache;
     Copy found{};const auto version=generation.load(std::memory_order_acquire);auto* dev=commands->get_device();
     if(!cache.Get(original.handle,version,found)) {
@@ -97,4 +97,8 @@ void Register(void (*log)(const char*)) {
     reshade::register_event<reshade::addon_event::bind_pipeline>(&d2rvr::D3D12Only<&Bind>::Call);
 }
 void SetActive(bool on){active.store(on,std::memory_order_relaxed);}
+void SetScene(bool on){
+    if(scene.exchange(on,std::memory_order_relaxed)!=on&&logger)
+        logger(on?"VR light bounds: rectangular-tile correction on for the campfire scene":"VR light bounds: campfire scene left; correction follows the eye rendering again");
+}
 }
