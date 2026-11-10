@@ -413,7 +413,7 @@ the buttons as you use them.
 | Manual attack / selected spell | Right trigger |
 | Bow | Bring the right hand to the bowstring, hold right trigger, draw back, then release |
 | Javelin | In **WEAPON** mode, hold right trigger, make a throwing motion, then release |
-| Swap weapon sets I/II | Reach your right hand over either shoulder and press grip; change the swap hand in VR Settings > Controls > Hands > Dominant hand |
+| Swap weapon sets I/II | Reach your right hand over either shoulder and press grip; with VR Settings > Controls > Hands > Left-handed on, the left hand |
 | Seated weapon swap / stow | Wheel → **EQUIPMENT / BELT** → **Weapon I**, **Weapon II** or **Stow/Draw** |
 | Grab a belt potion | Reach to a bottle and hold grip with either hand |
 | Drink | Keep grip held, bring the bottle opening to your mouth and tip it; release an unused bottle to return it |

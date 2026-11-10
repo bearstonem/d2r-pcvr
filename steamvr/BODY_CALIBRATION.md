@@ -83,10 +83,10 @@ scale and each character's arm fit change without a restart.
 
 ## Shoulder weapon swap
 
-To switch between native weapon configurations I and II, reach the dominant
+To switch between native weapon configurations I and II, reach your main
 hand over **either shoulder** and press that hand's grip once. Release before
-pressing again. **VR → Dominant hand** selects Right (default) or Left for this
-gesture. Other controller mappings remain as listed in VR Settings > Guide.
+pressing again. The main hand is the right one, or the left with **VR Settings >
+Controls > Hands > Left-handed** on. Other controller mappings remain as listed in VR Settings > Guide.
 The gesture requests the opposite observed native set and waits for confirmation;
 the grip cannot repeat while held. Reaching behind the head without pressing
 grip leaves combat available, including the wind-up for a javelin throw.

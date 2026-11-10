@@ -69,7 +69,9 @@ struct Definition {
 inline constexpr std::array<Definition,Count> Definitions{{
     {"Motion combat", "Physical melee, bow and javelin; spell wheel and belt interactions", L"gameplay",L"motion_controls",0,0,1,1},
     {"Seated belt position", "Raises the belt for seated reach", L"interactions",L"seated",0,0,1,1},
-    {"Dominant hand", "Grip over either shoulder switches weapon sets", L"interactions",L"dominant_hand",0,0,1,1},
+    // No longer read and off the menu (2026-11-10): Left-handed is the one switch for the hands, and the
+    // weapon swap's hand is the main hand. The key stays so a saved file loads as it is.
+    {"Dominant hand", "Unused: the main hand swaps weapon sets (Left-handed chooses it)", L"interactions",L"dominant_hand",0,0,1,1},
     {"Snap turn angle", "Degrees per flick; used when smooth turning is off", L"turn",L"snap",30,15,180,15},
     {"Smooth turn speed", "Degrees per second; used when smooth turning is on", L"turn",L"speed",120,10,720,30},
     {"Belt drop below eyes", "Standing mode only; smaller values raise the belt", L"interactions",L"waist_below_eyes",.65f,.30f,.95f,.05f},
@@ -132,7 +134,7 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"Staff aims where your arm points", "Upright: along your arm. Leveled out: from the staff's top", L"gameplay",L"staff_point",0,0,1,1},
     {"Landing circles", "Where and when a ground skill will hit, in its element's color", L"gameplay",L"landing_circles",1,0,1,1},
     {"Ground skills", "The game's own aim, the floor you point at, or the aimed monster", L"gameplay",L"ground_aim",0,0,2,1},
-    {"Monster highlights", "Dominant hand: its monster only. Both hands: each hand's own", L"gameplay",L"aim_highlights",1,0,1,1},
+    {"Monster highlights", "Main hand: its monster only. Both hands: each hand's own", L"gameplay",L"aim_highlights",1,0,1,1},
     {"Right hand color", "The right hand's monster: By range, or one color", L"gameplay",L"highlight_right_hue",45,0,360,15},
     {"Left hand color", "The left hand's monster: By range, or one color", L"gameplay",L"highlight_left_hue",210,0,360,15},
     {"Enemy sight distance", "Offline monster detection range; 100% is game default", L"gameplay",L"enemy_sight_pct",enemysight::DefaultPercent,enemysight::MinPercent,enemysight::MaxPercent,enemysight::StepPercent},
@@ -289,8 +291,7 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"Felt heartbeat", "The low-life heartbeat in both controllers, quicker as life drops", L"haptics",L"heartbeat",1,0,1,1},
     // Left-handed play (hand_role.h, #307; owner 2026-11-09: "mirror everything"): the weapon in the left hand, the
     // shield on the right arm, the triggers, grips, face buttons and sticks swapped, the skills following the hand's
-    // role. Built in phases, so its own switch (experimental, off by default) and not a new meaning for Dominant
-    // hand = Left, which players already have set. VR Settings > Controls > Hands, its own row under Dominant hand.
+    // role. Its own switch (experimental, off by default). VR Settings > Controls > Hands.
     {"Left-handed (experimental)", "Weapon in the left hand, shield on the right; buttons, menus and motions mirrored", L"interactions",L"left_handed",0,0,1,1},
 }};
 using Values=std::array<float,Count>;

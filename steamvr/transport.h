@@ -80,7 +80,7 @@ int GazeAimSupport();
 bool GazeAimLocal(float local[3],uint64_t& at);
 void ConfigureGameplay(bool enabled);
 void ConfigureQuiver(bool enabled,bool preview); // [bow] quiver, quiver_preview
-void ConfigureInteractions(bool seated,float waistBelowEyes,float beltForward,int dominantHand,bool leftHanded=false);
+void ConfigureInteractions(bool seated,float waistBelowEyes,float beltForward,bool leftHanded=false);
 // Left-handed play (hand_role.h, #307; [interactions] left_handed). Every hand index this header takes
 // or gives is a ROLE: 0 the main hand, 1 the off hand - the right and the left hand unless the roles are
 // mirrored now (the setting on and the equipped weapon one of the kinds mirrored so far). HandSide gives

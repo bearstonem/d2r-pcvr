@@ -1016,7 +1016,6 @@ leather::Reach leatherStow;
 // handRoles is the input thread's (under mutex); handRolesLeft is the same map for any thread.
 handrole::State handRoles;
 std::atomic<bool> handRolesLeft{false},leftHandedWanted{false};
-std::atomic<int> dominantSetting{0};
 interaction::Config interactionConfig;bool interactionConfigured=false;   // under mutex; dominant is a role there
 int PhysicalHand(int role){return handrole::Map{handRolesLeft.load(std::memory_order_relaxed)}.Physical(role);}
 int RoleHand(int physical){return PhysicalHand(physical);}
@@ -3634,7 +3633,7 @@ void UpdateHandRoles() {
     // painted again with the controller labels, which change with the same roles.
     if(handtext::Left()!=next.map.left){handtext::SetLeft(next.map.left);++settingsModel.revision;}
     {   // the weapon swap's hand in role order (handrole::Dominant): the engine starts over when it moves
-        const int role=next.map.Role(handrole::Dominant(wanted,dominantSetting.load()));
+        const int role=next.map.Role(handrole::Dominant(wanted));
         if(interactionConfigured&&interactionConfig.dominant!=role) {
             interactionConfig.dominant=role;interactions.Configure(interactionConfig);interactionstate::Cancel();
         }
@@ -7380,13 +7379,13 @@ void ConfigureQuiver(bool enabled,bool preview) {
         Say(enabled?"Frame bow quiver: arrow skills load physical arrows":"Frame bow quiver: disabled; arrow skills use native buttons");
     }
 }
-void ConfigureInteractions(bool seated,float waist,float forward,int dominant,bool leftHanded) {
-    // Left-handed turns Dominant hand's behaviours to the left hand too (handrole::Dominant).
-    dominant=handrole::Dominant(leftHanded,dominant);
+void ConfigureInteractions(bool seated,float waist,float forward,bool leftHanded) {
+    // The swap hand is the main hand: the left one with Left-handed on (handrole::Dominant).
+    const int dominant=handrole::Dominant(leftHanded);
     interaction::Config c;c.seated=seated;c.waistBelowEyes=std::clamp(waist,.30f,.95f);
     c.beltForward=std::clamp(forward,.03f,.5f);c.holsters=false;
     std::lock_guard lock(mutex);
-    leftHandedWanted=leftHanded;dominantSetting=dominant;
+    leftHandedWanted=leftHanded;
     // The engine takes the swap hand as a role (0 main): the same number right-handed. UpdateHandRoles
     // moves it when the roles change.
     c.dominant=handRoles.map.Role(dominant);

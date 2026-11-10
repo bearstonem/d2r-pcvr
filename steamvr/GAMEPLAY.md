@@ -192,7 +192,7 @@ a crossbow, staff, spear, polearm or two-handed weapon is led by the left hand. 
 | Drop the empty bottle | Open your hand after drinking: the bottle falls, bounces and rolls on the floor (visual only); hit it with your weapon or shield to knock it away |
 | Heal the mercenary | Toss a held Health, Rejuvenation, Antidote or Thawing bottle (release mid-swing, at least 1.4 m/s) so it lands within 1.5 m of your mercenary's feet. It shatters on landing (with bottle physics, where it first touches a wall, table, prop or the floor); a miss leaves the potion on the belt |
 | Quick potion | Left Y → **EQUIPMENT / BELT** → trigger a potion wedge; grip on a potion wedge instead grabs it into the right hand |
-| Swap weapon sets | Reach the swap hand over either shoulder and press its grip; right hand by default, selectable in VR Settings > Controls > Hands > Dominant hand. Hip anchors are removed |
+| Swap weapon sets | Reach the swap hand over either shoulder and press its grip; the right hand, or the left with VR Settings > Controls > Hands > Left-handed on. Hip anchors are removed |
 | Seated weapon selection | Utility wheel → **Weapon I** or **Weapon II** |
 | Recalibrate body and eye height | Stand in a **T cross**, nothing pressed and no potion in hand, for 2 seconds: both controllers buzz while you hold it, then the calibration prompt opens ([BODY_CALIBRATION.md](BODY_CALIBRATION.md)). Not in Seated play. Vibration off: the prompt opening is the only cue |
 | Stow/draw | Utility wheel → **Stow weapons** / **Draw weapons**; native equipped stats stay unchanged |
@@ -234,7 +234,7 @@ keep their styling.
 **Choosing which item Interact picks up (native VR).** VR Settings > Interface > Labels >
 Names and bars > **Loot pick**: On (default) or Off. With several items on the
 floor, Interact (right A by default) takes the item you point at rather than the
-game's nearest one. Hold your dominant hand (VR Settings > Controls > Hands > Dominant hand)
+game's nearest one. Hold your main hand (the right; the left with VR Settings > Controls > Hands > Left-handed on)
 out, at least 12 cm from your head measured level, and point at an item: the item nearest
 the spot where the hand's ray meets the floor is chosen, within 1.5 cells of that
 spot and up to 40 cells from the hero. Lowering the arm (6 cm nearer) lets the
@@ -500,10 +500,7 @@ behind the hide is whole (log: `Frame leather: the game's menu stencil stamp
 found ...`). Opening the cube from the inventory
 keeps it on the leather; the stash, merchants, trade, gambling, imbue, hiring,
 waypoints and NPC talk keep the room panel. While the sheet is held, the left
-hand's own weapon or shield is hidden, as with the quest log. With **Dominant
-hand = Left** a left grip over either shoulder swaps weapons, so the shoulder
-reach is off; Left Grip + left stick click and the wheel still open the leather
-(the menu laser stays on the right hand). With **Left-handed** on it is all the
+hand's own weapon or shield is hidden, as with the quest log. With **Left-handed** on it is all the
 other way round: the sheet is held in the right hand by the menu's right edge,
 the right hand reaches over the right shoulder to take it out or put it away,
 and the left controller's laser works on it.
@@ -614,7 +611,7 @@ sets the page's rows back to their defaults, with **Undo reset** for 6 seconds.
 | Gameplay > Physics | Rolling bottles, knockable props, pushable bodies, and monsters' and townsfolk's heads turning to you |
 | Comfort > Moving | Smooth turning with its snap angle or turn speed, and movement speed |
 | Comfort > Body | Seated play, **Height and arm span** (**Calibrate body**, **Set eye height**) with the **T cross to calibrate** switch under it (standing only), and the belt's height and reach |
-| Controls > Hands | Dominant hand, **Left-handed (experimental)** (mirrors the hands, buttons, sticks, menu laser, wrist HUD, held menu, class motions and the words that name them), **Stick toggle** and button names |
+| Controls > Hands | **Walk direction**, **Left-handed (experimental)** (mirrors the hands, buttons, sticks, menu laser, wrist HUD, held menu, class motions and the words that name them), **Stick toggle** and button names |
 | Controls > Vibration | Overall vibration and separate melee, short melee taps, bow draw, bow/throw release, spell, loot/potion/menu and alert strengths; **Feel it** on a row's card |
 | Interface > Wrist | Life and mana location and tilt, skill cooldowns between the orbs, map and compass location, map view (Isometric, Top-down, Full map or Full top-down), turning the map with you, buffs and companions |
 | Interface > Menus | Menu distance with **Hold menu** beside it (Leather by default: the tabbed menu on a hide in your left hand; Menu only: no hide; Off) and item details delay |
