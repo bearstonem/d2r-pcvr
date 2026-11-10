@@ -113,9 +113,9 @@ constexpr int BarbarianSkills[]={149,138,155,154,130,146,132,142,143,151};
 // 85: the left arm's golem, then Bone Wall, Poison Explosion and Raise Skeletal Mage (owner, 2026-11-05), after the table's
 constexpr int NecromancerSkills[]={68,70,74,75,66,91,92,88,85,78,83,80};
 constexpr int AssassinSkills[]={258,267,264,278,277,268,273};
-// The Warlock's (owner, 2026-11-10; class 7, D2R's own), by tree: Demon's summons, Eldritch's hexes, ward and blast,
-// Chaos's ring and sigils (motions_warlock.h).
-constexpr int WarlockSkills[]={373,376,377,385,389,386,387,384,394,393,396,400};
+// The Warlock's (owner, 2026-11-10; class 7, D2R's own): what goes on a spot first - the demons, then the sigils -
+// then what has no target: the hexes, the ward, the blast and the ring (motions_warlock.h).
+constexpr int WarlockSkills[]={373,376,377,393,396,400,385,389,386,387,384,394};
 struct Page {const int* skills=nullptr;int count=0;};
 inline Page PageOf(int skillClass) {
     switch(skillClass) {
