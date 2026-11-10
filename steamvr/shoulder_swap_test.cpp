@@ -38,7 +38,7 @@ int main(){
         // are mirrored too, so the roles no longer move with the weapon). The gesture is fed that hand's
         // pose and grip; `dominant` is its role index.
         using namespace handrole;
-        for(const uint32_t weapon:{uint32_t(D2RVR_TYPE_SWORD),uint32_t(D2RVR_TYPE_BOW)})for(int saved=0;saved<2;++saved){
+        for(const uint32_t weapon:{uint32_t(D2RVR_TYPE_SWORD),uint32_t(D2RVR_TYPE_BOW),uint32_t(D2RVR_TYPE_CROSSBOW)})for(int saved=0;saved<2;++saved){
             const auto state=Resolve(true,weapon,0);
             const int physical=Dominant(true,saved),role=state.map.Role(physical);
             Check(physical==1&&role==0,"the left hand, the main hand with a sword, a bow, a staff or a crossbow alike: swapping never moves the swap hand's role");

@@ -71,7 +71,7 @@ constexpr bool Mirrors(Kind kind) {
     switch(kind) {
         case Kind::OneHand:return true;
         case Kind::Bow:return true;        // the bow in the right hand, the left draws the string
-        case Kind::Crossbow:return false;   // the stock in the left hand, the right supports it
+        case Kind::Crossbow:return true;   // the stock in the left hand, the right supports it
         case Kind::Staff:return false;      // the left hand drives it, the right takes the shaft
         case Kind::Polearm:return false;
         case Kind::Spear:return false;
@@ -90,8 +90,8 @@ constexpr const char* HeldLeftHanded(Kind kind) {
         default:return "the weapon in the LEFT hand, a shield or second weapon on the RIGHT";
     }
 }
-inline constexpr const char* MirroredKinds="one-handed weapons, shield, dual wield, throws, potions, bare hands, bow";
-inline constexpr const char* RightHandedKinds="crossbow, staff, spear, polearm, two-handed grips";
+inline constexpr const char* MirroredKinds="one-handed weapons, shield, dual wield, throws, potions, bare hands, bow, crossbow";
+inline constexpr const char* RightHandedKinds="staff, spear, polearm, two-handed grips";
 struct State {
     bool wanted=false;      // the setting
     Kind kind=Kind::OneHand;

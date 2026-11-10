@@ -92,7 +92,7 @@ int main() {
         }
         // phase 3: the kinds that fell back whole, each with its own switch (Mirrors): mirrored, or the whole
         // mode right-handed while it is equipped - never anything between
-        const struct {uint32_t type;Kind kind;bool mirrored;} later[]={{D2RVR_TYPE_BOW,Kind::Bow,true},{D2RVR_TYPE_CROSSBOW,Kind::Crossbow,false},
+        const struct {uint32_t type;Kind kind;bool mirrored;} later[]={{D2RVR_TYPE_BOW,Kind::Bow,true},{D2RVR_TYPE_CROSSBOW,Kind::Crossbow,true},
             {D2RVR_TYPE_STAFF,Kind::Staff,false},{D2RVR_TYPE_POLEARM,Kind::Polearm,false},{D2RVR_TYPE_SPEAR,Kind::Spear,false}};
         for(const auto& k:later)for(const uint32_t two:{0u,uint32_t(D2RVR_TWO_HANDS_ON)}) {
             const auto s=Resolve(true,k.type,two);
@@ -102,7 +102,7 @@ int main() {
         }
         Check(std::strstr(HeldLeftHanded(Kind::Bow),"RIGHT hand")&&std::strstr(HeldLeftHanded(Kind::Bow),"LEFT hand draws"),"the bow goes to the right hand, the string to the left");
         Check(std::strstr(HeldLeftHanded(Kind::Crossbow),"stock in the LEFT")&&std::strstr(HeldLeftHanded(Kind::Staff),"LEFT hand drives"),"stock and shaft in the left hand");
-        for(const char* kind:{"bow"})Check(std::strstr(MirroredKinds,kind)!=nullptr,"the log's list of mirrored kinds names it");
+        for(const char* kind:{"bow","crossbow"})Check(std::strstr(MirroredKinds,kind)!=nullptr,"the log's list of mirrored kinds names it");
         for(int t=0;t<D2RVR_TYPE_COUNT;++t)for(uint32_t two=0;two<16;++two) {
             const auto off=Resolve(false,uint32_t(t),two);
             Check(off.map==Map{}&&!off.wanted&&!off.Fallback()&&off.map.Physical(0)==0&&off.map.Physical(1)==1&&off.map.Bits(1)==1&&off.map.Bits(2)==2,
