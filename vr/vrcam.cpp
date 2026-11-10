@@ -4442,11 +4442,11 @@ bool NativeSpellAim(float playerX,float playerY,framevr::spellaim::Cast& cast) {
     if(c.skill==132||c.skill==143)leapglide::g_cast.store(GetTickCount64());   // Leap, Leap Attack: the view glides through the take-off
     // Teleport on its shown landing or a thrown trap first; then the aim rules
     // only with this kind of cast's Aim option On; Off, as before them - except
-    // Guided Arrow, handed the aimed monster whatever the option (aimrules::AlwaysHomes).
+    // Guided Arrow and Charge, handed the aimed monster whatever the option (aimrules::AlwaysHomes).
     bool directed=MotionAim(c.skill,playerX,playerY,cast)||TossAim(c.skill,playerX,playerY,cast);
     if(!directed) {
         if(aimtargets::RulesOn(c))directed=NativeSpellAimDecide(playerX,playerY,cast);
-        else if(c.skill>=0&&framevr::aimrules::AlwaysHomes(c.skill)&&HandOffUnit(c)){g_note.by="unit (Guided Arrow always homes)";cast.directed=false;}
+        else if(c.skill>=0&&framevr::aimrules::AlwaysHomes(c.skill)&&HandOffUnit(c)){g_note.by=c.skill==107?"unit (Charge always goes to the aimed monster)":"unit (Guided Arrow always homes)";cast.directed=false;}
         else directed=UpstreamSpellAim(playerX,playerY,cast);
     }
     static ULONGLONG told=0;static int toldSkill=-2;
