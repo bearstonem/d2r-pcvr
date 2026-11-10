@@ -103,6 +103,7 @@ namespace hud { void Register(); void SetHide(int mode); void SetInterfaceScale(
 #include "mat4.h"
 namespace gamecmd { void Init(const D2RL::PluginContext* ctx); void Tick(); }   // the game's key commands from BodyWalk (gamecmd.cpp)
 namespace spatialaudio { void SetLogger(void (*log)(const char*)); void SetViewYaw(float (*yaw)()); void Configure(bool headFollow, bool listenerTurn, float forwardSign, float depthScale); void Poll(); }   // head-relative sound (spatial_audio.cpp)
+namespace worldsound { void SetLogger(void (*log)(const char*)); void Init(const D2RL::PluginContext* ctx, bool soundLog, float echo, bool headset); void Poll(); }   // the game's reverb raised, sounds counted by channel (world_sound.cpp)
 namespace gamestate { bool ToggleMenus(); }
 namespace gamestate { uint32_t MenuEpoch(); }
 namespace gamestate { void Init(const D2RL::PluginContext* ctx); void Tick(); uint32_t WeaponClass(); uint32_t WeaponSet(); uint32_t WeaponType(); uint32_t HandsHeld(); uint32_t TwoHanded(); uint32_t WeaponHand(); uint32_t HandsKey(); bool MenuOpen(); int ObjectLight(uint32_t txt, uint32_t mode, float rgb[3]); uint64_t LocalPlayer(); void SetViewMode(uint32_t mode); bool AutoMapOpen(); bool SetAutoMap(bool open); void PollPlate(); bool PlateRect(int32_t out[4]); }
@@ -150,6 +151,7 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "../steamvr/monster_position.h"
 #include "wall_cells.h"
 #include "prop_scan.h"
+#include "spell_impacts.h"
 #include "crossbow.h"
 #include "memory.h"
 #include "environment_cutaway.h"
@@ -982,6 +984,7 @@ void LoadSettings() {
     framevr::ConfigureBottlePhysics(IniB(L"interactions",L"bottle_physics",true));
     framevr::ConfigurePropPhysics(IniB(L"interactions",L"prop_physics",true));
     framevr::ConfigureBodyPhysics(IniB(L"interactions",L"body_physics",true));
+    impactvr::Configure(IniB(L"interactions",L"spell_impacts",true));   // spells break containers and push props
     g_set.bodyRadius.store(IniF(L"bodies", L"radius", 3.0f));   // clamped 1.5..8 by skel::SetLimbs
     {   // [bodies]: how bodies react (limb_tuning.h), live; DEV > Bodies steps and saves them
         framevr::limbs::Tuning tuning;
@@ -8716,6 +8719,15 @@ void PushArms() {
     // Bodies that give way: in first person with physical melee, the hook
     // posts the monsters and townsfolk within reach of the hero.
     skel::SetLimbs(own && heroPlaced && framevr::BodyPhysics(), hero, std::max(1.f, ScaleHeight()) / UserEyeHeightM(), g_set.bodyRadius.load());
+    {   // Heads turn to you (look_at.h): in first person, monsters and townsfolk look at the player's eyes in the world.
+        // Menus too (not `own`): a townsperson you talk to keeps looking at you while the dialogue is up.
+        static ULONGLONG readAt = 0; static bool wanted = true;   // this timer's thread only
+        if (const ULONGLONG now = GetTickCount64(); !readAt || now - readAt >= 250) {
+            readAt = now; wanted = vrsettings::Read().values[framevr::settings::LookAtYou] > .5f;
+        }
+        const float eye[3] = {g_eyeWorld[0].load(), g_eyeWorld[1].load(), g_eyeWorld[2].load()};
+        skel::SetLookAt(on && !ThirdPerson() && !Overhead() && wanted && g_eyeOk.load(), eye, std::max(1.f, ScaleHeight()) / UserEyeHeightM());
+    }
 #endif
     in.mode = own ? ArmsMode() : 0;
     // From behind the game animates all of him, but he still turns with the
@@ -11724,6 +11736,7 @@ DWORD WINAPI UpdateThread(void*) {
             UpdateFovFromFlatVR();
             HookXInput();
             spatialaudio::Poll();
+            worldsound::Poll();
             ReportXInputUse();
             fx::TryRegister();
             InstallBiomeHook();
@@ -11942,6 +11955,8 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
     spatialaudio::Configure(IniB(L"audio", L"head_follow", true), IniB(L"audio", L"listener_turn", true),
                             IniF(L"audio", L"forward_sign", -1.0f), IniF(L"audio", L"depth_scale", 2.0f));
     spatialaudio::Poll();
+    worldsound::SetLogger(&Log);
+    worldsound::Init(ctx, IniB(L"audio", L"sound_log", true), IniF(L"audio", L"echo", float(framevr::worldsound::EchoDefault)), g_set.platform.load() == 1);
     OpenShared();
     OpenAfrBlock();
     gamestate::Init(ctx);

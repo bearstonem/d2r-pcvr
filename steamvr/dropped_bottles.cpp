@@ -585,6 +585,49 @@ float World::Struck(int slot) {
     if(slot<0||slot>=Colliders)return 0;
     return std::exchange(impl->pushers[slot].struck,0.f);
 }
+World::Pushed World::Push(const spellimpacts::Push& push,double time) {
+    auto& m=*impl;Pushed out;
+    if(!Ready()||!m.Live()||!spellimpacts::Valid(push)||!std::isfinite(time))return out;
+    spellimpacts::Push local=push;local.a=push.a-m.origin;local.b=push.b-m.origin;
+    // The impulse a little above the centre of mass, so the body tips as it goes.
+    auto kick=[&](b3BodyId body,const spellimpacts::Kick& k,float lift)->float {
+        const float mass=b3Body_GetMass(body),size=std::sqrt(math::Dot(k.impulse,k.impulse));
+        const float speed=spellimpacts::KickSpeed(size,mass);
+        if(!(speed>0))return 0;
+        const Vec centre=F(b3Body_GetWorldCenterOfMass(body));
+        b3Body_ApplyLinearImpulse(body,B(k.impulse*(speed*mass/size)),B(centre+Vec{0,lift,0}),true);
+        return speed;
+    };
+    struct Reached {size_t piece;spellimpacts::Kick kick;};
+    std::vector<Reached> reached;
+    for(size_t i=0;i<m.pieces.size();++i) {
+        const auto& p=m.pieces[i];
+        const auto t=b3Body_GetTransform(p.body);const Vec at=F(t.p);const Quat q=F(t.q);
+        const Vec centre=at+math::Rotate(q,p.centre);
+        const auto k=spellimpacts::KickOn(local,centre,std::sqrt(math::Dot(p.half,p.half)));
+        if(!k.hit)continue;
+        // Its bounding ball is in reach: now the box itself.
+        Vec a=local.blast?local.b:local.a,b=local.b;
+        if(local.flat)a.y=b.y=centre.y;
+        if(props::CapsuleTouchesBox(a,b,local.radius,at,q,p.centre,p.half))reached.push_back({i,k});
+    }
+    std::sort(reached.begin(),reached.end(),[](const Reached& x,const Reached& y){return x.kick.distance<y.kick.distance;});
+    unsigned moving=m.MovingCount();
+    for(const auto& r:reached) {
+        auto& p=m.pieces[r.piece];
+        const bool frozen=!p.moving;
+        if(frozen&&moving>=props::MaxMoving)continue;
+        if(frozen){m.Knocked(p,SpellSlot,0,time);++moving;}
+        const float speed=kick(p.body,r.kick,p.half.y*.3f);
+        if(frozen&&!m.knocks.empty())m.knocks.back().speed=speed;
+        ++out.props;
+    }
+    for(unsigned i=0;i<m.count;++i) {
+        const auto k=spellimpacts::KickOn(local,F(b3Body_GetPosition(m.bottles[i].body)),Height*.5f);
+        if(k.hit&&kick(m.bottles[i].body,k,.02f)>0)++out.bottles;
+    }
+    return out;
+}
 unsigned World::Pushers() const {
     unsigned n=0;for(const auto& p:impl->pushers)n+=!B3_IS_NULL(p.body);return n;
 }

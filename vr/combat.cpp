@@ -18,6 +18,7 @@
 #include "logging.h"
 #include "shield_guard.h"
 #include "guard_strain.h"
+#include "../steamvr/hit_reactions.h"
 #include "melee.h"
 #include "projectiles.h"
 #include "native_ui_signatures.h"
@@ -133,6 +134,9 @@ std::atomic<bool> arDamage{false};std::atomic<float> arFloor{0};
 thread_local int swingChance=-1;     // this swing's native to-hit %, -1 = not seen
 thread_local float swingRecovery=1;  // this stroke's recovery factor (melee.cpp)
 thread_local bool swingFirst=true;   // this contact is its stroke's first creature (melee.cpp)
+// Hit reactions (hit_reactions.h): what this swing asks of its monster, what its record took, and that
+// record's result flags as the game set them (-1 = no record seen).
+thread_local uint8_t swingReaction=0,swingReacted=0;thread_local int swingFlags=-1;
 thread_local bool swingClean=false;  // this swing's life write was a riposte's (a clean hit)
 std::atomic<unsigned> scaledHits{0},chanceUnseen{0};
 std::atomic<int> lastChance{-1};std::atomic<float> lastRecovery{1},lastFactor{1};
@@ -947,6 +951,20 @@ uint64_t ApplyDamage(uintptr_t game,uintptr_t attacker,uintptr_t defender,int fl
     bool cleared=quiet&&clearReactions();
     const auto result=originalApplyDamage(game,attacker,defender,flag,damage);
     if(quiet&&clearReactions())cleared=true;
+    // Hit reactions (hit_reactions.h): a physical swing's own landed, ungated hit on its monster asks the
+    // executor for the stagger or the knockback its stroke earned, the same two flags, set where a quiet
+    // contact's are cleared. Never a dying monster's, a missile's, or another unit's record.
+    if(!flag&&!gated&&hitReactions&&damage&&swingReaction&&swingTarget!=NoSwing&&
+       Read(attacker,attackerType)&&attackerType==0&&Read(defender,defenderType)&&defenderType==1) {
+        uint32_t id=0;int dealt=0;uint16_t flags=0;
+        if(Read(defender+8,id)&&id==swingTarget&&Read(damage+0x134,dealt)&&dealt>0&&Read(damage+4,flags)) {
+            using namespace framevr::hitreact;
+            swingFlags=flags;
+            const uint16_t asked=Flags(flags,swingReaction);
+            if(asked==flags||framevr::WriteMemory(reinterpret_cast<void*>(damage+4),&asked,sizeof asked))
+                swingReacted=(flags&FlagDies)?uint8_t(0):(asked&FlagKnockback)?uint8_t(Knockback):(asked&FlagGetHit)?uint8_t(Stagger):uint8_t(0);
+        }
+    }
     // Combat walk (Cal, 2026-11-02): a monster's hit or missile that would have hit
     // (not the would-have-hit gate's miss) dealing damage to the local hero.
     if(damage&&!gated&&Read(attacker,attackerType)&&(attackerType==1||attackerType==3)) {
@@ -1506,6 +1524,9 @@ uint32_t PhysicalSwing(uint32_t target) {
 }
 float SwingRecovery(float factor) {const float was=swingRecovery;swingRecovery=factor;return was;}
 bool SwingFirst(bool first) {const bool was=swingFirst;swingFirst=first;return was;}
+uint8_t SwingReaction(uint8_t reaction) {const auto was=swingReaction;swingReaction=reaction;swingReacted=0;swingFlags=-1;return was;}
+uint8_t SwingReacted(int* flags) {if(flags)*flags=swingFlags;return swingReacted;}
+framevr::strain::Rank MonsterRank(uintptr_t unit){return AttackerRank(unit);}
 void ConfigureArDamage(bool on,float floor) {arDamage=on;arFloor=std::clamp(floor,0.f,1.f);}
 void NoteRiposte(uint32_t monster) {
     if(riposteMs.load()==0)return;   // a riposte is worth having with no bonus: it is a clean hit

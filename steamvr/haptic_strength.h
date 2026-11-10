@@ -33,9 +33,34 @@ inline constexpr Sample SampleFor(Category category,bool shortMelee=false,int ha
     return Samples[int(category)];
 }
 using Pattern=std::array<Sample,2>; // right, left
+// The string's tension: each ratchet tick felt while pulling is stronger, longer
+// and higher the further the bow is drawn (tension rises faster near full draw),
+// and the ticks come closer together (BowTickStep). Right is the string hand.
+inline float BowTension(float draw) {
+    draw=std::isfinite(draw)?std::clamp(draw,0.f,1.f):0;
+    return draw*std::sqrt(draw);
+}
 inline Pattern BowPull(float draw) {
     draw=std::isfinite(draw)?std::clamp(draw,0.f,1.f):0;
-    return {{{.22f+.28f*draw,25},{.1f+.15f*draw,20}}};
+    const float tension=BowTension(draw),hz=70+130*draw;
+    return {{{.18f+.57f*tension,int(std::lround(20+20*draw)),hz},{.08f+.32f*tension,int(std::lround(18+12*draw)),hz}}};
+}
+// Draw travel (0..1) between two ticks: finer as the string tightens.
+inline float BowTickStep(float draw) {
+    draw=std::isfinite(draw)?std::clamp(draw,0.f,1.f):0;
+    return .022f-.010f*draw;
+}
+// A drawn bow held still strains the string hand: from half draw a faint tremor,
+// stronger and quicker toward full draw. Below half draw: nothing (milliseconds 0).
+constexpr float BowHoldFrom=.5f;
+inline Sample BowHold(float draw) {
+    draw=std::isfinite(draw)?std::clamp(draw,0.f,1.f):0;
+    if(draw<BowHoldFrom)return {};
+    return {.05f+.10f*(draw-BowHoldFrom)/(1-BowHoldFrom),15,50};
+}
+inline double BowHoldInterval(float draw) {   // seconds between tremor ticks
+    draw=std::isfinite(draw)?std::clamp(draw,0.f,1.f):0;
+    return .26-.12*std::clamp((draw-BowHoldFrom)/(1-BowHoldFrom),0.f,1.f);
 }
 inline constexpr Pattern Release(bool bow) {return {{{.65f,45},bow?Sample{.65f,35}:Sample{}}};}
 inline constexpr int PreviewCount(Category category) {

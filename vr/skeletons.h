@@ -143,6 +143,10 @@ bool MotionBowAnchored();
 // on, each pose of a monster or townsperson within radiusMetres of centre (the hero,
 // render units; [bodies] radius, 3 m) is posted for the physics and bent by its answer.
 void SetLimbs(bool on, const float centre[3], float unitsPerMetre, float radiusMetres);
+// Heads turn to you (steamvr/look_at.h, [gameplay] look_at_you): while on, each pose of a
+// monster, mercenary, summon or townsperson within about 7 m of eye (the player's eyes in
+// the world, render units) has its neck and head turned to it.
+void SetLookAt(bool on, const float eye[3], float unitsPerMetre);
 #endif
 #if D2RVR_FIRST_PERSON
 // Forget the weapon grip: the next calm pose takes it again (F11).

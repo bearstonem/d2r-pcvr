@@ -467,5 +467,66 @@ int main() {
         world.Advance(11,{});
         assert(std::fabs(First(world).p.y-before)<.05f);
     }
+    // A spell missile's passage (spell_impacts.h) sets the cup in its way going,
+    // along its flight: off the table's edge, to the floor, at rest again.
+    {
+        World world;
+        const props::Support table{false,.75f,9.5f,19.5f,10.5f,20.5f};
+        const Vec player{10,0,19};
+        const auto scan=Scan(player,{Cup(41,{10.4f,.75f,20},table),Cup(42,{9.8f,.75f,20},table)});
+        spellimpacts::Push bolt;bolt.a={10.2f,.8f,20};bolt.b={10.6f,.8f,20};bolt.radius=spellimpacts::BoltRadius;bolt.impulse=spellimpacts::Light;
+        assert(World().Push(bolt,0).props==0);            // no world yet
+        world.Props(scan);
+        double t=Run(world,0,.5,player);
+        std::array<Knock,props::MaxMoving> knocks{};
+        // Over the cups' heads, beside them, or not a push at all: nothing.
+        auto high=bolt;high.a.y=high.b.y=1.8f;
+        auto beside=bolt;beside.a.z=beside.b.z=20.4f;
+        auto broken=bolt;broken.radius=0;
+        for(const auto& miss:{high,beside,broken}){const auto none=world.Push(miss,t);assert(!none.props&&!none.bottles);}
+        assert(world.Knocks(knocks)==0&&world.Frozen()==2);
+        const auto pushed=world.Push(bolt,t);
+        assert(pushed.props==1&&pushed.bottles==0&&world.Frozen()==1);
+        assert(world.Knocks(knocks)==1&&knocks[0].entity==41&&knocks[0].slot==SpellSlot&&knocks[0].speed>1&&knocks[0].speed<=spellimpacts::MaxKickSpeed);
+        bool rested=false;float lowest=10;Vec last{};
+        for(int i=0;i<90*6&&!rested;++i) {
+            t+=1/90.;world.Advance(t,player);
+            for(const auto& m:Moves(world)){assert(m.entity==41&&Finite(m.p));lowest=std::min(lowest,m.p.y);last=m.p;rested=m.resting;}
+        }
+        assert(rested&&lowest<.1f&&last.x>10.5f&&std::fabs(last.z-20)<.6f);
+        t+=1/90.;world.Advance(t,player);
+        assert(Moves(world).empty()&&world.Frozen()==2&&world.Knocks(knocks)==0);
+        // A native missile on the game's flat grid reaches whatever stands on its path, at any height.
+        auto flat=bolt;flat.a={9.6f,1.8f,20};flat.b={10,1.8f,20};flat.flat=true;flat.radius=spellimpacts::FlatRadius;
+        assert(world.Push(flat,t).props==1&&world.Knocks(knocks)==1&&knocks[0].entity==42);
+    }
+    // A burst throws the cups around it outward, the nearer the harder; a
+    // bottle lying there too. No more props move than the limit allows, and a
+    // spell freezes none to make room.
+    {
+        World world;const Vec player{0,0,0};
+        world.Props(Scan(player,{Cup(501,{.4f,0,0}),Cup(502,{-.9f,0,0}),Cup(503,{0,0,3})}));
+        assert(world.Drop(At({0,.2f,.6f})));
+        double t=Run(world,0,3,player);
+        const float bottleZ=First(world).p.z;
+        spellimpacts::Push blast;blast.a=blast.b={0,.3f,0};blast.radius=1.5f;blast.impulse=spellimpacts::Burst;blast.blast=true;
+        const auto pushed=world.Push(blast,t);
+        assert(pushed.props==2&&pushed.bottles==1);
+        std::array<Knock,props::MaxMoving> knocks{};
+        assert(world.Knocks(knocks)==2&&knocks[0].entity==501&&knocks[1].entity==502&&knocks[0].speed>knocks[1].speed); // nearest first
+        t=Run(world,t,.3,player);
+        float x501=0,x502=0;
+        for(const auto& m:Moves(world)){if(m.entity==501)x501=m.p.x;if(m.entity==502)x502=m.p.x;assert(m.entity!=503);}
+        assert(x501>.5f&&x502<-.95f&&First(world).p.z>bottleZ+.1f);
+        World crowd;PropScan many=Scan(player,{});
+        for(unsigned i=0;i<props::MaxMoving+6;++i)many.props[many.count++]=Cup(600+i,{.3f+i*.1f,0,0});
+        crowd.Props(many);
+        blast.radius=3;
+        assert(crowd.Push(blast,0).props==props::MaxMoving&&crowd.Frozen()==6);
+        assert(crowd.Knocks(knocks)==props::MaxMoving&&knocks[0].entity==600);
+        assert(crowd.Push(blast,0).props==props::MaxMoving&&crowd.Frozen()==6); // the moving ones again, no others
+        Run(crowd,0,.2,player);
+        assert(Moves(crowd).size()==props::MaxMoving);
+    }
     std::puts("dropped bottles: ok");
 }
