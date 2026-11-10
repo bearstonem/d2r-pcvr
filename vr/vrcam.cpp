@@ -110,7 +110,7 @@ namespace gamestate { bool ToggleMenus(); }
 namespace gamestate { uint32_t MenuEpoch(); }
 namespace gamestate { void Init(const D2RL::PluginContext* ctx); void Tick(); uint32_t WeaponClass(); uint32_t WeaponSet(); uint32_t WeaponType(); uint32_t HandsHeld(); uint32_t TwoHanded(); uint32_t WeaponHand(); uint32_t HandsKey(); bool MenuOpen(); int ObjectLight(uint32_t txt, uint32_t mode, float rgb[3]); uint64_t LocalPlayer(); void SetViewMode(uint32_t mode); bool AutoMapOpen(); bool SetAutoMap(bool open); void PollPlate(); bool PlateRect(int32_t out[4]); }
 namespace gamestate {bool LeftShield();}
-namespace gamestate {bool OpaqueMenuOpen();}
+namespace gamestate {bool OpaqueMenuOpen();bool CharacterSelectOpen();}
 namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "d2r_vr_state.h"
 
