@@ -36,6 +36,7 @@ static const GoldenRow Golden[]={
     {"gameplay.melee_hit_speed",View::Combat,0,content::RowKind::Stepper,"Swing speed to hit",0,0},
     {"gameplay.melee_thrust_speed",View::Combat,0,content::RowKind::Slider,"Stab speed to hit",0,0},
     {"gameplay.melee_reach_cm",View::Combat,0,content::RowKind::Slider,"Melee reach",0,0},   // Discord, 2026-11-08
+    {"gameplay.held_collisions",View::Combat,0,content::RowKind::Toggle,"Weapons collide",0,0},   // 2026-11-11, drawn inside Melee reach's row
     {"gameplay.weapon_heft",View::Combat,0,content::RowKind::Toggle,"Weapon heft",0,0},   // #443
     {"gameplay.bow_bash",View::Combat,0,content::RowKind::Toggle,"Bow bash",0,0},   // #443, drawn inside Weapon heft's row
     {"gameplay.skill_gestures",View::Combat,1,content::RowKind::Toggle,"Skills on your moves",0,0},
@@ -238,7 +239,7 @@ int main(int argc,char** argv){
     }
     // ---- the map: no row lost, none left to More, the names and the owner's pairs ----
     {
-        Check(tables.rowCount==112,"112 settings on the menu, each one row");   // - Dominant hand (2026-11-10: Left-handed is the one switch)   // + Left-handed (#307)   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424), Click to drink (#425), Skill cooldowns (2026-11-09), + Summon range (#426), T cross to calibrate (#423), Heads turn to you (2026-11-09), Echo (world sound, 2026-11-09), + Monsters stagger, Heavy hits knock back (hit reactions, 2026-11-09), + Hit feel by target, Felt heartbeat (richer haptics)
+        Check(tables.rowCount==113,"113 settings on the menu, each one row");   // + Weapons collide (2026-11-11)   // - Dominant hand (2026-11-10: Left-handed is the one switch)   // + Left-handed (#307)   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424), Click to drink (#425), Skill cooldowns (2026-11-09), + Summon range (#426), T cross to calibrate (#423), Heads turn to you (2026-11-09), Echo (world sound, 2026-11-09), + Monsters stagger, Heavy hits knock back (hit reactions, 2026-11-09), + Hit feel by target, Felt heartbeat (richer haptics)
         for(size_t i=0;i<tables.rowCount;++i)Check(!tables.rows[i].fallback&&tables.rows[i].page!=View::More,std::string("every setting has its page: ")+tables.rows[i].label);
         Check(content::Menu().report.empty(),"the tidy report is empty");
         struct Want {content::Group group;const char* name;std::vector<const char*> pages;};
@@ -262,6 +263,7 @@ int main(int argc,char** argv){
         Check(besideOf(CompanionTactical)==CompanionAi,"Commands beside Smarter mercenary");
         Check(besideOf(LootPick)==LootLabelSize,"Loot pick beside Loot name size");
         Check(besideOf(BowBash)==WeaponHeft,"Bow bash beside Weapon heft (#443: the Combat page's 8th row holds both)");
+        Check(besideOf(HeldCollisions)==MeleeReach,"Weapons collide beside Melee reach (the Combat page is full)");
         Check(L::CountRows(View::Combat,Defaults(),{})==8,"Combat holds 8 rows at the title screen, every class's");
         Check(besideOf(AimWithEyes)==AimFollowsView,"Eyes beside Aim with your view");
         Check(L::FilterOf(LootBeamBrightness).count==4,"Loot beams with its 4 filter switches");

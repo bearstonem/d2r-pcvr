@@ -440,6 +440,11 @@ inline constexpr Override Overrides[]={
     {.id="gameplay.melee_reach_cm",.page=View::Combat,.section="Melee",.kind=RowKind::Slider,.label="Melee reach",
      .help="A weapon or fist that passes this close beside a monster still hits it. Raise it if near misses don't count. Walls still block.",
      .format={.unit="cm"}},
+    // Weapons collide (held_collision.h; owner 2026-11-11): [gameplay] held_collisions, On by default. The Combat page has
+    // no free row (8 at most): it is Melee reach's right half, the other setting about where a weapon meets things.
+    {.id="gameplay.held_collisions",.page=View::Combat,.section="Melee",.kind=RowKind::Toggle,.label="Weapons collide",
+     .help="Your weapon stops at your own shield and slides along it, and two weapons stop at each other. Your hand gives way up to 12 cm.",
+     .beside=true,.besideLabel="Collide"},
     // Weapon heft and Bow bash (#443; Discord #ideas, 2026-11-04): one row, the page's last free one (8 at most).
     // [gameplay] weapon_heft and bow_bash, both Off by default.
     {.id="gameplay.weapon_heft",.page=View::Combat,.section="Melee",.kind=RowKind::Toggle,.label="Weapon heft",
