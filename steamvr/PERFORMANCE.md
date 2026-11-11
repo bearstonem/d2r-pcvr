@@ -1,5 +1,116 @@
 # VR performance investigations
 
+## Draw-thread sampler, November 10
+
+The game is limited by the one thread that draws the eyes: each eye pass keeps
+it busy 6.5-11 ms, and it records only about 2,000 of a pass's 11,000 draws
+itself. The sampler shows what that thread does with the rest of the time. It
+is a diagnostic: off unless asked for, and not for normal play.
+
+**Taking a capture.** In the world, in the headset, with the scene to be
+measured in view, change `[debug] draw_sampler` in the installed `d2r_pcvr.ini`
+to a new number other than 0 (the file is re-read when saved):
+
+```ini
+[debug]
+draw_sampler=1
+draw_sampler_seconds=30
+```
+
+The capture starts with the first eye pass drawn and ends by itself after
+`draw_sampler_seconds` (30; 1-300). `draw_sampler=0` ends a running capture
+early; it still reports. Another capture needs another number (2, 3, ...). Put
+it back to 0 afterwards: a number left there starts a capture at the next
+launch, in the first 30 s in the world (it waits up to 10 minutes for the
+first eye pass). Keep the same scene, view and graphics settings between
+captures that are to be compared, and stand still for the first one.
+
+**Where the report is.** `Frame draw sampler:` lines in `d2r-vr-frame.log`
+(a start line, then about ten lines when it ends), and every table in
+`d2r-vr-draw-sampler.txt` in the same `logs` folder, written anew by each
+capture. The last log line names the file. The file ends with every loaded
+module's base, size and PE link timestamp, which together name one build of a
+binary: the game's `D2R.exe` row is what to check a disassembly against.
+
+**How it works.** A thread of its own ticks about every millisecond, each tick
+up to 25% early or late at random so the samples do not keep step with the
+frame. The mod marks the stretch of `HookDrawGameScreen` and `DrawTurn` in
+which the game draws one eye; outside it nothing is sampled. In it, the
+sampler stops the draw thread, reads its registers and copies the top 64 KB of
+its stack, lets it run again, and only then works out the callers (up to 24
+frames) from the copy. Menus, loading and the flat desktop draw no eye pass: a
+capture started there waits.
+
+**Reading it.** Each sample is where the draw thread was at one instant of an
+eye pass. A row's percentage is its samples over all samples; its
+milliseconds are that share of the measured mean pass time, so the rows of a
+table add up to the pass. With 30,000 samples one sample stands for about
+0.3 us of a pass; a row of a few samples is noise. Addresses are
+`module+0xRVA` of the **start of the function** the sample was in, from the
+module's unwind table, so all samples inside one function count together and
+the RVA can be looked up in a disassembler. `~` after an RVA marks code with no
+unwind row (a leaf function at or after that address). A name after an address
+is the module's export at exactly that address.
+
+1. **Where the thread was**, by whose code the sampled instruction is in: the
+   game, this mod, ReShade, the GPU driver's user-mode DLLs (NVIDIA, AMD,
+   Intel, anything in the driver store), DLSS, D3D12, DXGI, ntdll,
+   kernel32/KERNELBASE, win32u/user32/gdi32, the OpenXR runtime and layers,
+   other modules, and code in no module (hook trampolines). Table 1b is the
+   same by module.
+2. **Waiting or running.** A sample stopped in one of the system's wait calls
+   (`NtWaitForSingleObject`, `NtWaitForMultipleObjects`,
+   `NtWaitForAlertByThreadId`, where SRW locks, critical sections and
+   condition variables park; keyed events; `NtDelayExecution`; the win32u
+   message and GPU waits; `NtYieldExecution`) is waiting. Table 2b lists the
+   calls and 2c who waits: the first caller outside the system's own DLLs and,
+   after `<`, the nearest game function behind it. Table 2d lists the other
+   samples in ntdll and win32u: locks spinning, and system calls that are not
+   waits (a D3DKMT call into the kernel driver counts as running).
+3. **Top 25 functions** by the sampled instruction: self time.
+4. **Top 15 game functions on the stack**: a sample counts once for every
+   `D2R.exe` function it is inside, so these rows overlap and do not add up.
+   This is which game subsystem owns the time, also when the instruction
+   itself is in the driver or in ntdll.
+5. **Graphics calls**: the samples in the driver, D3D12, DXGI, DLSS or
+   ReShade, by the nearest `D2R.exe` function on the stack: the game code
+   making the expensive calls.
+6. **The two eyes** as two totals; the tables also carry a left and a right
+   column. In a pair the right pass is drawn with the frame time held.
+
+**Its cost.** Each sample stops the draw thread for about 20 millionths of a
+second. `draw-sampler-test` on the owner's PC measured 19-21 us a sample, the
+longest 30-73 us, 2.0% of the sampled thread's time at 1,000 samples a second.
+That thread had a shallow stack; the game's is deeper and more of it is
+copied, so expect somewhat more. The report states the capture's own figures:
+the mean and longest stop, and their share of the passes' time. The stops are
+inside the measured pass time, so a profiled pass is that much longer than an
+unprofiled one; do not compare frame rates across a capture. When no capture
+runs the cost is two reads of a flag per eye pass.
+
+**Why it cannot hang the game.** The stopped thread may hold any lock: the
+heap's, the loader's, the log's, the one on the system's unwind tables. While
+it is stopped the sampler makes three system calls on the thread's handle
+(`SuspendThread`, `GetThreadContext`, `ResumeThread`) and reads plain memory
+into buffers allocated before the capture: the flags the thread published
+itself, the stack bounds in its TEB, the stack. It does not allocate, log,
+call the loader, or unwind (`RtlLookupFunctionEntry` takes the unwind-table
+lock, and dispatching an exception would too, so the stack is read only
+within the TEB's bounds, without a guarded read). Unwinding runs after the
+thread is running again, on the copy: the registers that point into the stack
+are moved to point into the copy and `RtlVirtualUnwind` walks that.
+
+**Limits.** Not yet run in the game or a headset: the figures above are from
+the test's own threads. Callers beyond 24 frames or 64 KB of stack are cut
+(the report counts them); a sample cut before any `D2R.exe` frame shows as "no
+game function within the frames kept". Code without unwind rows between the
+sample and its caller (generated code other than a plain trampoline) ends the
+walk early or wrongly. Only the draw thread is sampled: the worker threads
+that record most of a pass's draws need `Frame hook` records or another
+capture. The tables are `steamvr/draw_sampler.h`, the sampling
+`steamvr/draw_sampler_capture.cpp`, the test `draw-sampler-test` (made-up
+samples, then live captures of a busy, a waiting and a lock-taking thread).
+
 ## Render thread waits, October 20
 
 **By turns' passes built in the background.** The passes that turn and move
