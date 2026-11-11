@@ -1,5 +1,205 @@
 # VR performance investigations
 
+## Render task patches, November 10
+
+**On for every install since the headset run below.** There is no setting for
+them in VR Settings and no key in the shipped `d2r_pcvr.ini`. To tell a fault
+from a patch, `[game_patches]` with `transparent_filter=0`,
+`profiler_accounting=0` or `draw_debug_names=0` written into the file by hand
+takes that one out between two frames.
+
+**Measured, November 10** (SteamVR, game 3.4, Both eyes, an Act 2 field fight;
+each patch switched on live, a 30 s capture after each; the scene changed
+between captures, so the totals are approximate):
+
+| an eye pass, ms | none | + transparent_filter | + profiler_accounting | + draw_debug_names |
+| --- | --- | --- | --- | --- |
+| pass | 9.27 | 7.96 | 6.72 | 6.34 |
+| the drain | 5.35 | 4.14 | 3.22 | 2.53 |
+| Depth / Forward Pass run | 2.6 | 2.7 | 1.8 | 1.2 |
+| Late Post Processing run | 3.4 | 0.48 | 0.40 | 0.41 |
+
+No crash as each went in; about six minutes of play with all three, the
+picture as before (the owner). Not tried: interiors, other acts, By turns,
+Virtual Desktop.
+
+**What the third capture showed** (18:44, 30 s in the world, both eyes; the
+first with table 8, the threads inside the render tasks): 2,231 eye passes of
+9.41 ms, of which the drain is 5.56 ms (59%). The chain the drain waits for,
+in ms from its start (left eye): `Collect Draw Calls` 1.19 (+0.12 to +1.31),
+then `Depth Pass` 2.71 and `Forward Pass` 2.68 side by side (+1.35 to +4.06),
+and `Late Post Processing` 3.49 (+2.06 to +5.55; right eye 3.71), which starts
+when `Clutter + Height + Fluid + Friends` ends, not after the Depth or Forward
+Pass, and whose end is the drain's end.
+
+### transparent_filter: flags first in the transparent pass's Ghost filter
+
+- **Found.** 88% of Late Post Processing (3.17 ms a run) is self time in one
+  game function, `0xFDC510`, with no wait, no lock and almost no GPU driver
+  time. It is the "Ghost" mode of the transparent render pass. For each
+  transparency layer (three at most settings) it walks every 0x100-byte draw
+  record of three buckets of draw calls and keeps the few that carry one of
+  the flags `0x21800000`. But before it looks at a record's flags it loads the
+  record's pointer to its per-model constants and reads one number through
+  it, and those constants live in the buffer they are uploaded to the GPU
+  from: mapped upload memory, which is slow to read back. Almost no record
+  has the flags (the draw submit function is not among the task's top
+  functions), so the time goes on reading a number for records that are then
+  skipped. The read costing that much is an inference from the timing and from
+  what the memory is; the sampler has no per-instruction table.
+- **The patch.** The first instruction of the loop (`0xFDC740`, the 7-byte
+  load of that pointer) becomes a jump to 25 bytes of new code in a page
+  allocated near the game: test the record's flags; none set, go where the
+  game's own test sends such a record (`0xFDCAAD`); otherwise do the load and
+  go back to the next instruction, so a record with a flag runs exactly the
+  game's code, its own flag test included. For a record without the flags the
+  skipped instructions wrote only `rax`, `xmm0`, the low byte of `r15` and the
+  flags register; at `0xFDCAAD` `r15` is reloaded from the stack and the others
+  are written again before anything reads them. The number is not summed,
+  compared across records or stored: for a record that has the flags it is
+  handed to the game's per-layer test and chooses which of two sort keys the
+  record gets, and that is all. Same records kept, same order, same picture.
+- **Proven before writing** (`vr/game_patch_signatures.h`): 123 bytes in
+  three stretches: the loop's set-up (the record pointer in `rsi`, the end, the
+  fall into the loop), the loop's first twelve instructions up to its own
+  flag test and jump, and the loop's end with its only way back to the first
+  instruction. Then the whole function's bytes in the running game are
+  searched for any jump that could land inside the replaced instruction. A
+  difference anywhere: no patch, one log line.
+- **Expected.** Late Post Processing 3.6 ms to about 0.45 ms (what is left of
+  it in the capture besides that function). It then ends near +2.5 ms and the
+  drain ends with the Depth and Forward Pass at about +4.06: about 1.5 ms off
+  a 9.4 ms eye pass.
+
+### profiler_accounting: no lock on every draw
+
+- **Found.** In the Depth Pass and the Forward Pass (2.65 and 2.62 ms a run,
+  one job each on a worker) 0.72 ms is inside one game function, `0xF13FC0`,
+  and the system's lock calls under it: exclusive SRW lock acquire and release
+  and the wait they park in. It is the game's built-in GPU profiler counting
+  the draw: once per draw the command list's accounting (`0xF117E0`, its only
+  caller) hands it the list's current profiler scope and the draw's
+  primitives, and it takes the profiler's one lock, adds 1 and the primitives
+  to two counters of that scope's record, and unlocks. Every thread recording
+  draws takes that same lock for every draw, so the passes that run side by
+  side wait for each other; Directional Shadows has 0.66 ms of it too.
+- **Who reads the counts.** The profiler folds them into its result table at
+  the next frame begin; the only lookups into that table found are in the
+  game's developer windows (graphics / drawcall / world art profiling, a stats
+  window) and a stats dump. The game has a dynamic resolution setting; nothing
+  was found that feeds it from these counts, and the profiler's GPU times are
+  not touched by this patch. That search was static and is not a proof.
+- **The patch.** One byte: in `0xF117E0` the 2-byte "list not counted by the
+  profiler -> skip" jump at `0xF11849` becomes an unconditional jump of the
+  same distance, to the function's own end. The function called returns
+  nothing, takes and releases its lock inside itself and writes nothing but
+  the two counters; the caller's own counters (per list and a global table)
+  are before the jump and stay. Scope begin and end, with their GPU
+  timestamps, are other functions and are not touched.
+- **Proven before writing:** 36 bytes from the test to the caller's last
+  byte (the jump, both calls with their distances, the function's end the
+  jump goes to) and the first 33 bytes of `0xF13FC0`.
+- **Expected.** About 0.7 ms off each Depth Pass and Forward Pass run and off
+  Directional Shadows. Those are not the end of the drain today: **alone it
+  does not shorten the pass**. After `transparent_filter` they are, and the
+  drain should end about 0.7 ms earlier.
+
+### draw_debug_names: no formatted name per draw
+
+- **Found.** In the Depth Pass 0.52 ms a run (19.7%) is under the game's
+  debug event begin (`0xF113C0`), nearly all of it in string formatting. The
+  draw submit function (`0x103DCD0`) asks for the game's debug event level and,
+  when it is above 1, formats `Model: %s Mesh: %s Shader: %s` and puts a begin
+  event with that name on the command list before the draw and an end event
+  after it: names for a graphics debugger, for every draw. The level is one
+  int in the game's data (RVA `0x2808A8C`) with one reader and one writer in
+  the game's code; the writer is reached once, from start-up, with a launch
+  option's value. In the captured session it is 2 or more; why is not known.
+- **The patch.** No code is changed. If the level is above 1 (and at most
+  16) it is set to 1. The draw's begin and end both test "above 1", so
+  neither is issued; a pass's own begin and end test "above 0" and are issued
+  as before, so every begin still has its end. The mod does not use the
+  game's debug events (no code of it reads or matches them), and ReShade's
+  add-on interface has no event for them. A level of 0 or 1 is left alone
+  and said so.
+- **Proven before writing:** the reader and the writer (7 bytes each; their
+  distances give the int's place), the draw submit's two tests (14 and 27
+  bytes) and the event begin's and end's own tests (9 bytes each).
+- **Expected.** About 0.5 ms off each Depth Pass run and a like share of the
+  other tasks that draw models (Forward Pass, shadows). As with
+  `profiler_accounting`, **alone it does not shorten the pass**; after
+  `transparent_filter` it does. All three: the drain about 5.56 ms to about
+  2.9 ms of a 9.4 ms eye pass.
+
+### How a patch goes in
+
+- Only between frames: on the draw thread at the top of the mod's hook on the
+  game's draw (`HookDrawGameScreen`), before the frame's first eye pass. The
+  render graph's drain returned in the frame before only when every render
+  task had ended, so no thread is in the code that is changed. Menus and
+  loading screens do not run that hook: a patch goes in with the first frame
+  drawn in the world, and a key changed in the INI takes effect at the next
+  frame (1 puts it in, 0 puts the game's bytes back).
+- The game's version is never asked. A place whose bytes differ is looked at
+  again every 16th frame (code that has not run may not be there yet) and
+  given up after 40 looks with `refused: bytes differ at RVA ...`.
+- A code write is the loader's checked patch, which compares the bytes once
+  more as it writes: the filter's jump is one aligned 8 bytes, the accounting
+  jump 2 bytes of which one changes. The debug event level is a plain write
+  of one int in the game's data.
+- The log (`d2r-vr-frame.log`): `Frame game patches: [game_patches]
+  transparent_filter=1 ...` when the settings are first read; per key
+  `... applied: ...`, `... refused: ...` or `... off`; and `first frame: ...`
+  with each key's state at the first frame drawn. Not in the Status tab's
+  game-code table.
+- `game-patch-plan-test` checks the fingerprint comparison, the jump search,
+  the new code's bytes for given addresses, and that nothing is planned when
+  the new code would be out of a relative jump's reach.
+
+### Verifying with a capture
+
+Stand in the same scene with the same settings, take a `[debug] draw_sampler`
+capture with every key 0, set one key to 1, look for its `applied` line, take
+another capture (another number), and compare:
+
+- `transparent_filter`: table 7, `Late Post Processing` mean run 3.5-3.7 ms to
+  about 0.45, and the drain's time a pass down by about 1.5 ms with the Depth
+  or Forward Pass now the last long task; table 8, `Late Post Processing`:
+  `D2RLoader.exe+0xFDC510` no longer near 88% of it. Samples in the new code
+  itself show as code in no module.
+- `profiler_accounting`: table 8, `Depth Pass` and `Forward Pass`:
+  `D2RLoader.exe+0xF13FC0` gone from the inclusive table (d), ntdll's share
+  (a) down from 28.6% to a few percent, no `NtWaitForAlertByThreadId` row by
+  that function (b); table 7: both tasks' mean run about 0.7 ms shorter.
+- `draw_debug_names`: table 8, `Depth Pass`: `D2RLoader.exe+0xF113C0` (0.52 ms
+  inclusive, table d) and the formatting functions under it gone from the
+  top functions (c); table 7: the run about 0.5 ms shorter.
+
+**Risks, plainly.**
+
+- The analysis was made on a dump of the game's code from 3.3.93787; the
+  running game (3.4.95041) is only known to have the same function starts.
+  The byte comparison at run time is what stands between a different build
+  and a wrong write, and it covers the places named above, not every byte of
+  the functions around them.
+- "No thread is in the changed code between frames" rests on reading the
+  drain's loop, not on an observation in the game. The loader's write is not
+  promised to be atomic; a thread inside the filter's loop during the write
+  could run a half-written jump. The accounting change is one byte and the
+  level one int: those cannot be seen half-written.
+- `transparent_filter`: the new code has no unwind row, so a crash report or a
+  sampler walk from inside it stops there (it makes no call, so nothing else
+  is ever above it on a stack). That the slow part is the read-back, and so
+  the size of the saving, is inferred.
+- `profiler_accounting`: the search for readers of the counts was static.
+  Something not found that used a scope's draw or primitive count would see
+  zeros.
+- `draw_debug_names`: a graphics debugger attached to the game would no
+  longer see per-draw names. If the game wrote the level again later (not
+  found in its code) the names would come back until the key is toggled.
+- Taking a patch out again (key back to 0 while playing) is built the same
+  way but has not been exercised in the game.
+
 ## Draw-thread sampler, November 10
 
 The game is limited by the one thread that draws the eyes: each eye pass keeps
