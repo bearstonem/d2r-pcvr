@@ -228,7 +228,10 @@ captures that are to be compared, and stand still for the first one.
 `draw_sampler_tasks` names the render tasks whose threads are sampled too
 (table 8): parts of the task names of table 7, any case, separated by commas.
 The line above is the default, the chain the drain waits for; `all` is every
-task, `none` or nothing the draw thread only.
+task, `none` or nothing the draw thread only. `draw_sampler_watch` (none) is
+a list of game functions, by the RVA of their start in hex, whose inclusive
+time is printed whatever their rank: table 4 shows only the top 15, table 4b
+the listed ones in the list's order, a function on no sampled stack with 0.
 
 **Where the report is.** `Frame draw sampler:` lines in `d2r-vr-frame.log`
 (a start line, then about ten lines when it ends), and every table in

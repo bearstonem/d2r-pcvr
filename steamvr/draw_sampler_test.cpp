@@ -275,7 +275,17 @@ static void Tables() {
     stats.when = "2026-11-10 12:00:00"; stats.thread = 4242; stats.seconds = 30; stats.periodUs = 1000; stats.ticks = 12; stats.outside = 2;
     stats.passes[0] = stats.passes[1] = 10; stats.passMs[0] = 80; stats.passMs[1] = 60;
     stats.stoppedUsSum = 300; stats.stoppedUsMax = 55;
-    const Report r = Aggregate(modules, samples.data(), samples.size(), stats);
+    // [debug] draw_sampler_watch: C, a function no sample is in, A's other piece (no function's start), B
+    const std::vector<uint32_t> watched = ParseFunctions("0x2000, 7000;0X5000 zz 0x1100 0x2000 12G 0x123456789 0");
+    assert(watched == (std::vector<uint32_t>{0x2000, 0x7000, 0x5000, 0x1100}));
+    assert(ParseFunctions("").empty() && ParseFunctions("none, x, face-off").empty() && ParseFunctions("E39390") == std::vector<uint32_t>{0xE39390});
+    const Report r = Aggregate(modules, samples.data(), samples.size(), stats, watched);
+    assert(Aggregate(modules, samples.data(), samples.size(), stats).functions.empty());
+    assert(r.functions.size() == 4);
+    assert(r.functions[0].label == "D2R.exe+0x2000" && r.functions[0].n[0] == 2 && r.functions[0].n[1] == 1);   // C: under A, under B, behind the driver's wait
+    assert(r.functions[1].total() == 0 && r.functions[1].label.find("+0x7000 (on no sampled stack") == 0);
+    assert(r.functions[2].total() == 0);                                                                         // a piece is counted at its function's start
+    assert(r.functions[3].label == "D2R.exe+0x1100" && r.functions[3].n[0] == 0 && r.functions[3].n[1] == 3);   // B
 
     assert(r.samples[0] == 5 && r.samples[1] == 5 && r.total() == 10 && r.cut == 1);
     assert(Near(r.PassMs(0), 8) && Near(r.PassMs(1), 6) && Near(r.PassMs(2), 7));
@@ -333,6 +343,8 @@ static void Tables() {
 
     // the file: every table, and the modules to match a binary by
     const std::string file = FileText(r, modules);
+    assert(file.find("4b. Watched game functions") != std::string::npos && file.find("+0x7000 (on no sampled stack") != std::string::npos);
+    assert(FileText(Aggregate(modules, samples.data(), samples.size(), stats), modules).find("4b.") == std::string::npos);
     for (const char* part : {"1. Where the thread was", "2. Waiting or running", "2c. Who waits", "3. Top 25 functions", "4. Top 15 game functions",
                              "5. Graphics calls", "6. The two eyes", "0x000140000000  size 0x00200000  time 0x65432100  game", "C:\\Games\\D2R\\D2R.exe",
                              "   30.0    2.100    4.800     0.000        3  game", "D2R.exe+0x1200~", "waiting (stopped in a wait system call)"})

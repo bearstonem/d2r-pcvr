@@ -827,7 +827,7 @@ Report Capture(const Options& options, std::vector<Module>* modulesOut) {
         for (int f = 0; f < taskSamples[i].count; ++f)
             if (const int m = FindModule(modules, taskSamples[i].frames[f]); m >= 0) sampled[size_t(m)] = 1;
     for (size_t m = 0; m < modules.size(); ++m) if (sampled[m]) FillModule(modules[m]);
-    Report report = Aggregate(modules, samples, count, stats);
+    Report report = Aggregate(modules, samples, count, stats, options.functions);
     report.tasks = drawtasks::Summarise(runs, names, options.tasksNote, tasksDropped);
     report.sampling = sampling;
     report.watched = Profiles(modules, taskSamples, taskCount, taskNames, report.tasks);

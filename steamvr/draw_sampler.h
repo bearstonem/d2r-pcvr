@@ -320,6 +320,34 @@ inline bool Watched(const Watch& w, std::string_view name) {
     return false;
 }
 
+// The game functions whose inclusive time is tabulated whatever their rank ([debug] draw_sampler_watch): the
+// RVAs of their starts, in hex with or without 0x, separated by spaces, commas or semicolons. What is no
+// number is left out; at most 64, each once, in the order given.
+inline std::vector<uint32_t> ParseFunctions(std::string_view text) {
+    std::vector<uint32_t> out;
+    const auto gap = [](char c) { return c == 32 || c == 44 || c == 59 || c == 9 || c == 13 || c == 10; };   // space , ; tab and line ends
+    size_t at = 0;
+    while (at < text.size() && out.size() < 64) {
+        while (at < text.size() && gap(text[at])) ++at;
+        size_t end = at;
+        while (end < text.size() && !gap(text[end])) ++end;
+        std::string_view word = text.substr(at, end - at);
+        at = end;
+        if (word.size() > 2 && word[0] == '0' && (word[1] == 'x' || word[1] == 'X')) word.remove_prefix(2);
+        if (word.empty() || word.size() > 8) continue;
+        uint32_t v = 0;
+        bool number = true;
+        for (const char c : word) {
+            const char low = char(c | 0x20);
+            if (c >= '0' && c <= '9') v = (v << 4) | uint32_t(c - '0');
+            else if (low >= 'a' && low <= 'f') v = (v << 4) | uint32_t(low - 'a' + 10);
+            else { number = false; break; }
+        }
+        if (number && v && std::find(out.begin(), out.end(), v) == out.end()) out.push_back(v);
+    }
+    return out;
+}
+
 // What the sampling of the threads inside watched tasks measured.
 struct TaskSampling {
     bool on = false;                  // some task was watched
@@ -374,6 +402,7 @@ struct Report {
     std::vector<Row> waiters;         // waiting samples by who waits
     std::vector<Row> leaves;          // by function of the sampled instruction
     std::vector<Row> inclusive;       // game functions anywhere on the stack
+    std::vector<Row> functions;       // of them, the watched ones (draw_sampler_watch), in the list's order; one never seen has no samples
     std::vector<Row> callers;         // graphics samples by the nearest game function
     std::vector<Row> systemCalls;     // samples in ntdll / win32u by function
     std::vector<Row> hooks;           // samples in this mod or ReShade, by function
@@ -448,7 +477,8 @@ struct Table {
 
 // The tables from the samples. `modules` is sorted by base with the sampled modules' functions (and the
 // system modules' exports) filled.
-inline Report Aggregate(const std::vector<Module>& modules, const Sample* samples, size_t count, const Stats& stats) {
+inline Report Aggregate(const std::vector<Module>& modules, const Sample* samples, size_t count, const Stats& stats,
+                        const std::vector<uint32_t>& functions = {}) {
     using detail::Text;
     Report r;
     r.stats = stats;
@@ -533,6 +563,16 @@ inline Report Aggregate(const std::vector<Module>& modules, const Sample* sample
                 return nearestGame ? nearestGame->label : std::string("(no game function within the frames kept)");
             });
         }
+    }
+    // The watched game functions: their rows of the inclusive table, by the RVA of the function's start.
+    for (const uint32_t rva : functions) {
+        Row row;
+        for (size_t m = 0; m < modules.size() && row.label.empty(); ++m) {
+            if (modules[m].kind != Kind::Game) continue;
+            if (const auto it = inclusive.at.find((uint64_t(m + 1) << 32) | rva); it != inclusive.at.end()) row = inclusive.rows[it->second];
+        }
+        if (row.label.empty()) row.label = Text("+0x%X (on no sampled stack: not run in an eye pass, inlined, or not a function's start)", rva);
+        r.functions.push_back(std::move(row));
     }
     r.kinds = std::move(kinds.rows);   // in Kind's order
     r.modules = mods.Sorted(); r.waits = waits.Sorted(); r.waiters = waiters.Sorted(); r.leaves = leaves.Sorted();
@@ -816,6 +856,12 @@ inline std::string FileText(const Report& r, const std::vector<Module>& modules)
     table("3. Top 25 functions by the sampled instruction (self time)", r.leaves, 25, "none");
     table("4. Top 15 game functions on the stack (inclusive: a sample counts once for every game function it is inside)", r.inclusive, 15,
           "no game function on any sampled stack");
+    if (!r.functions.empty()) {
+        out += "\n4b. Watched game functions on the stack (inclusive, [debug] draw_sampler_watch; in the list's order)\n";
+        out += "      %  ms/pass  left ms  right ms  samples  \n";
+        for (const Row& row : r.functions)
+            out += Text("  %5.1f  %7.3f  %7.3f  %8.3f  %7u  %s\n", 100.0 * r.Share(row), r.Ms(row), r.Ms(row, 0), r.Ms(row, 1), row.total(), row.label.c_str());
+    }
     {
         const Row gfx{"", {r.graphics[0], r.graphics[1]}};
         const std::string title = Text("5. Graphics calls (the sampled instruction in the GPU driver, D3D12, DXGI, DLSS or ReShade: %.1f%%, %.3f ms a pass) "

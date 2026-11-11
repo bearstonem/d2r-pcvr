@@ -1012,7 +1012,7 @@ float GameInterfaceScale() {
 
 void StartMatrixWatch();   // [debug] matrix_writer, below PickHeroMatrix
 #ifdef D2RVR_NATIVE_OPENXR
-void DrawSamplerSetting(unsigned request, float seconds, const wchar_t* tasks);   // [debug] draw_sampler, below StartMatrixWatch
+void DrawSamplerSetting(unsigned request, float seconds, const wchar_t* tasks, const wchar_t* functions);   // [debug] draw_sampler, below StartMatrixWatch
 #endif
 
 void LoadSettings() {
@@ -1684,7 +1684,10 @@ void LoadSettings() {
         wchar_t watch[512];
         const std::string all(framevr::drawsampler::DefaultWatch);
         GetPrivateProfileStringW(L"debug", L"draw_sampler_tasks", std::wstring(all.begin(), all.end()).c_str(), watch, (DWORD)std::size(watch), g_iniPath);
-        DrawSamplerSetting(GetPrivateProfileIntW(L"debug", L"draw_sampler", 0, g_iniPath), IniF(L"debug", L"draw_sampler_seconds", 30.0f), watch);
+        // draw_sampler_watch: RVAs of game functions whose inclusive time is tabulated whatever their rank (none)
+        wchar_t functions[1024] = L"";
+        GetPrivateProfileStringW(L"debug", L"draw_sampler_watch", L"", functions, (DWORD)std::size(functions), g_iniPath);
+        DrawSamplerSetting(GetPrivateProfileIntW(L"debug", L"draw_sampler", 0, g_iniPath), IniF(L"debug", L"draw_sampler_seconds", 30.0f), watch, functions);
     }
 #endif
     g_set.bodywalkPad.store(IniB(L"input", L"bodywalk_pad", true));
@@ -8678,7 +8681,7 @@ void StartMatrixWatch() {
 // samples the threads that run the tasks named by draw_sampler_tasks while they run them. 0 ends
 // a running one early. The value at the game's start counts: left at 1 it captures the first 30 s in the world
 // (it waits up to 10 minutes for the first eye pass, then gives up and says so).
-void DrawSamplerSetting(unsigned request, float seconds, const wchar_t* tasks) {
+void DrawSamplerSetting(unsigned request, float seconds, const wchar_t* tasks, const wchar_t* functions) {
     static unsigned last = 0;
     if (request == last) return;
     last = request;
@@ -8695,6 +8698,11 @@ void DrawSamplerSetting(unsigned request, float seconds, const wchar_t* tasks) {
     // asked for (a session without one never has them); what could not be hooked is said in the report.
     options.tasksNote = rendertasks::Install();
     for (const wchar_t* c = tasks; c && *c; ++c) options.watch += *c >= 0x20 && *c < 0x7F ? char(*c) : '?';   // task names are plain text
+    {   // draw_sampler_watch: the game functions tabulated whatever their rank
+        std::string list;
+        for (const wchar_t* c = functions; c && *c; ++c) list += *c >= 0x20 && *c < 0x7F ? char(*c) : ' ';
+        options.functions = framevr::drawsampler::ParseFunctions(list);
+    }
     {   // beside the frame log: the logs folder next to the plugin's (steamvr/logging.cpp)
         wchar_t path[MAX_PATH];
         const DWORD len = g_self ? GetModuleFileNameW(g_self, path, MAX_PATH) : 0;
@@ -8709,6 +8717,8 @@ void DrawSamplerSetting(unsigned request, float seconds, const wchar_t* tasks) {
              "a diagnostic, it costs the pass a few percent while it runs", request, options.seconds);
         LogF("Frame draw sampler: the threads running these render tasks are sampled too (draw_sampler_tasks): %.180s",
              framevr::drawsampler::ParseWatch(options.watch).Any() ? options.watch.c_str() : "none");
+        if (!options.functions.empty())
+            LogF("Frame draw sampler: %u game functions are tabulated whatever their rank (draw_sampler_watch; table 4b of the report file)", unsigned(options.functions.size()));
     } else
         Log("Frame draw sampler: not started - a capture is already running (set [debug] draw_sampler to another number once it has reported)");
 }
