@@ -954,11 +954,19 @@ def generate(assets, mod_name='D2R-PCVR', surround=True, town_at=TOWN_AT_GATE, t
     return output
 
 
-def prepare(game, mod_name='D2R-PCVR', casclib=None, surround=True, town_at=TOWN_AT_GATE, town_turn=0.0, ground=True,
-            sky_turns=SKY_TURNS, flip_wall=True, cap=False, clutter=False, drop=(), shadows_off=True):
-    """Return a complete payload; the installer's transaction performs writes."""
-    with open_assets(Path(game), casclib) as assets:
-        return generate(assets, mod_name, surround, town_at, town_turn, ground, sky_turns, flip_wall, cap, clutter, drop, shadows_off)
+def prepare(game, mod_name='D2R-PCVR', casclib=None, options=None):
+    """Return a complete payload; the installer's transaction performs writes. options: parsed command-line
+    options (parse()); by default the scene as tuned, TUNED_SCENE. The module's option settings are put back
+    afterwards, so one build does not leak into the next."""
+    if options is None:
+        options = parse([str(game), *TUNED_SCENE])
+    saved = {name: globals()[name] for name in OPTION_GLOBALS}
+    try:
+        kwargs = configure(options)
+        with open_assets(Path(game), casclib) as assets:
+            return generate(assets, mod_name, **kwargs)
+    finally:
+        globals().update(saved)
 
 
 def check_existing(mod, payload):
@@ -984,12 +992,81 @@ def check_existing(mod, payload):
             raise ValueError(f'Existing campfire override left unchanged: {name}')
 
 
-def main():
+# The campfire scene as tuned with the owner (2026-11-08/09; steamvr/campfire_scene.ps1 built it by hand): what the
+# installer builds, so that [campfire] enabled=1 shows players the scene the owner played in. Options as on the
+# command line (main()).
+TUNED_SCENE = (
+    '--light-shadows', '--town-shadows', '--no-wall-flip', '--flip-far-wall', '--far-wall-shift', '-20', '--sky',
+    '--drop', 'ui_skybox_characterSelect_sky', 'terrain_characterCreate02', '--spin',
+    'structure02_01_pcvr_behind:180', 'structure04_01_pcvr_behind:90', 'structure06_01_pcvr_behind:-90',
+    'structure05_01_pcvr_behind:180', '--grow', 'terrain_characterCreate03_01:1.08:-3:0.5', '--copy',
+    '@terrain_characterCreate01_01:-168.9:88.4:0.04:90', '@terrain_characterCreate01_01:-148.9:88.4:0.04:90',
+    'wall_segment_short_53_pcvr_behind:0:10', 'wall_segment_short_53_pcvr_behind:0:20',
+    'wall_segment_short_10_pcvr_behind:10:0', 'wall_segment_short_10_pcvr_behind:45:0',
+    'wall_segment_short_09_pcvr_behind:-10:0', 'wall_segment_short_09_pcvr_behind:-20:0',
+    '@wall_segment_short_81_pcvr_behind:145:108:0', '@wall_segment_short_81_pcvr_behind:145:118:0',
+    '@wall_segment_short_81_pcvr_behind:145:128:0', 'terrain_characterCreate03_01:-27:0',
+    'terrain_characterCreate03_01:-27:37', 'terrain_characterCreate03_01:0:37',
+    'terrain_characterCreate03_01:27:37', 'terrain_characterCreate03_01:27:0', 'boulder03_04:-8:41',
+    'boulder06_09:0:37', 'rock03_10:6:30', 'boulder06_12:3:40', 'expansion_grass_moorland02_01:0:37',
+    'expansion_bush_shad01_07:0:37', 'expansion_grass_moorland01_14:4:30', 'boulder03_01:-29:37',
+    'boulder06_01:-35:45', 'rock03_01:-40:30', 'expansion_bush_shad02_07:-29:37',
+    'expansion_grass_moorland02_07:-20:30', 'expansion_grass_moorland01_05:-15:45',
+    '@ui_skirt_mud_fill_01:-6:48:-0.36:0:0.45', '@ui_skirt_mud_fill_01:-36:30:-0.35:0:0.45',
+    '@ui_skirt_mud_fill_01:8:27:-0.69:0:0.5', '@ui_skirt_mud_fill_01:20:26:-0.68:25:0.5',
+    '@ui_skirt_mud_fill_01:32:27:-0.67:-20:0.5', '@wall_stone_medium_a01_03_pcvr_behind:63:-152:-19:0:0.3',
+    '@wall_stone_medium_a01_03_pcvr_behind:67:-161:-19:40:0.3',
+    '@wall_stone_medium_a01_03_pcvr_behind:57:-158:-19:-30:0.3',
+    '@wall_stone_medium_a01_03_pcvr_behind:73:-150:-19:15:0.3',
+    '@wall_stone_medium_a01_03_pcvr_behind:77:-157:-19:-50:0.3',
+    '@wall_stone_medium_a01_03_pcvr_behind:70:-147:-29:20:0.3',
+    '@wall_stone_medium_a01_03_pcvr_behind:74:-154:-29:-40:0.3',
+    '@wall_stone_medium_a01_03_pcvr_behind:66:-152:-29:70:0.3', '@ui_skirt_mud_fill_01:3:52:-0.36:85:0.5',
+    '@ui_skirt_mud_fill_01:3:63:-0.35:100:0.45', '@boulder03_04:8:34:0', '@rock03_10:21:35:0',
+    '@boulder06_09:-1:52:0', 'wall_stone_large01_02_pcvr_behind:-30:0', 'wall_stone_large01_02_pcvr_behind:-60:0',
+    'wall_stone_large01_02_pcvr_behind:-90:0', 'wall_stone_medium_a01_03_pcvr_behind:-92:0',
+    '@wall_stone_large01_01_pcvr_behind:-20:-183.2:0', '@wall_stone_medium_a01_01_pcvr_behind:-46:-189.2:0',
+    'wall_stone_large01_02_pcvr_behind:-30:-16', 'wall_stone_large01_02_pcvr_behind:-60:-16',
+    'expansion_bush_shad02_07:-25:42', 'expansion_bush_shad01_06:-52:58', 'expansion_bush_shad02_01:-46:72',
+    'expansion_grass_moorland02_06:-34:75', '@ui_skirt_mud_fill_01:45:15:-0.3', '@ui_skirt_mud_fill_01:45:60:0.02',
+    '@ui_skirt_mud_fill_01:28:-17:0.05', '@ui_skirt_mud_fill_01:85:14:0.06',
+    '@firewood_scattered01_01_pcvr_behind:-30:40:0.075:35:1', '@log_stack02_01_pcvr_behind:-50:60:0.075:80:0.8',
+    '@firewood_log01_02:-22:52:0.075:120', '@firewood_log02_02:-52:40:-0.525:60', '@stick01_03:-26:34:0.075:20',
+    '@stick02_03:-35:47:0.075:140', '@stick03_05:-18:44:0.075:250', '@stick01_03:-48:30:0.075:300',
+    '@rock03_01:-15:58:0.075:0', '@rock_small03_03:-28:27:0.075:90', '@rock_small03_03:-40:52:0.075:200',
+    '@boulder06_12:-52:45:0.075:45', '@boulder03_01:-12:36:0.075:160',
+    '@rocks_e01_01_pcvr_behind:-33:62:0.075:30:0.7', '@rock_cluster01_01_pcvr_behind:-52:22:0.075:0',
+    '@expansion_grass_moorland01_20:-24:57:0.075:0', '@expansion_grass_moorland02_03:-20:30:0.075:90',
+    '@expansion_grass_moorland01_20:-50:50:0.075:180', '@expansion_grass_moorland02_03:-14:48:0.075:270',
+    '@expansion_grass_moorland01_20:-22:24:0.075:45', '@expansion_bush_dogwood01_03:-54:36:0.075:0:0.8',
+    '@expansion_bush_dogwood03_07:-20:62:0.075:90:0.8', '@ui_skirt_mud_fill_01:-26:44:-0.55:30:0.3',
+    '@ui_skirt_mud_fill_01:-45:55:-0.5:120:0.35', '@ui_skirt_mud_fill_01:-50:28:-0.47:200:0.4',
+    '@chopping_stump_01_pcvr_behind:-42:46:0.075:0', '@wall_segment_short_81_pcvr_behind:72:-160:0:70:0.7',
+    '@wall_segment_short_81_pcvr_behind:80:-157:0:70:0.7', '@firewood_log01_02:-8:25:0.075:40',
+    '@stick01_03:-14:30:0.075:110', '@stick02_03:-4:22:0.075:200', '@stick03_05:-10:40:0.075:330',
+    '@stick02_03:0:52:0.075:60', '@rock_small03_03:-15:22:0.075:30', '@rock_small03_03:-2:28:0.075:150',
+    '@rock03_01:-16:46:0.075:270', '@boulder03_01:-10:55:0.075:80',
+    '@rocks_e01_01_pcvr_behind:-6:33:0.075:120:0.5', '@expansion_grass_moorland01_20:-12:28:0.075:200',
+    '@expansion_grass_moorland02_03:-1:40:0.075:30', '@expansion_grass_moorland01_20:-16:38:0.075:300',
+    '@expansion_grass_moorland02_03:-7:57:0.075:160', '@expansion_bush_dogwood03_07:-14:50:0.075:200:0.6',
+    '@ui_skirt_mud_fill_01:-9:33:-0.55:300:0.3', '@ui_skirt_mud_fill_01:-3:22:-0.53:60:0.28', '--town-keep',
+    'H5:J9', '--hide', 'wall_corner01_02_pcvr_behind', 'wall_end_l_03_pcvr_behind',
+    'wall_crenelation_14_pcvr_behind', '--pave', '--pave-z0', '-204', '--pave-hole', '@-44:38:-19:57', '--move',
+    'structure02_01_pcvr_behind:0:-0.5:0', 'structure06_1_01:0:-0.5:0', '--lift', '@38.5:-28.2:8:0.4',
+)
+# the module settings configure() sets from the options (prepare() puts them back afterwards)
+OPTION_GLOBALS = ('CAP_FACE', 'COPIES', 'FAR_SHIFT', 'FLIP_FAR', 'FLIP_SIDE', 'GROUND_TURNS', 'GROWS', 'HIDE', 'LIFTS', 'LIGHTS', 'MARKS', 'MOVES', 'PAVE', 'PAVE_AREA', 'PAVE_HOLE', 'PAVE_SKIP', 'PAVE_TILT', 'POINTS', 'SPIN', 'SPOT_SPECULAR', 'TOWN_BIOME', 'TOWN_KEEP', 'TOWN_SHADOWS', 'UI_WALLS', 'UI_WALL_FAR_YAW', 'UI_WALL_LENGTH', 'WALL_FILL')
+
+
+def parse(argv=None):
+    """The command line's options (argv: its words, the game folder first; None = sys.argv)."""
     ap = argparse.ArgumentParser()
     ap.add_argument('game', type=Path)
     ap.add_argument('--casclib', type=Path, default=None)
     ap.add_argument('--mod', default='D2R-PCVR', choices=['D2R-PCVR', 'pcvr-dev'])
     ap.add_argument('--write', action='store_true')
+    ap.add_argument('--tuned', action='store_true', help='the scene as tuned, TUNED_SCENE (what the installer builds);'
+                    ' the scene options below are then ignored')
     ap.add_argument('--replace', action='store_true', help='write over an override made without a receipt')
     ap.add_argument('--no-surround', action='store_true', help='clouds out only, no town behind the player')
     ap.add_argument('--town', nargs=2, type=float, metavar=('X', 'Z'), default=list(TOWN_AT_GATE),
@@ -1038,7 +1115,11 @@ def main():
     ap.add_argument('--clutter', action='store_true', help="the town's grass, snow piles and small props too")
     ap.add_argument('--sky', nargs='*', type=float, default=list(SKY_TURNS), metavar='DEG',
                     help='turns (degrees) of the copies of the sky round the fire; --sky alone: none')
-    args = ap.parse_args()
+    return ap.parse_args(argv)
+
+
+def configure(args):
+    """Set the module's scene settings from parsed options; return generate()'s keyword arguments."""
     global CAP_FACE, POINTS, SPOT_SPECULAR, TOWN_SHADOWS, WALL_FILL, TOWN_KEEP, HIDE, TOWN_BIOME, PAVE
     PAVE = args.pave
     global PAVE_SKIP, PAVE_TILT, MOVES, LIFTS
@@ -1079,9 +1160,15 @@ def main():
     CAP_FACE = -1.0 if args.cap_flip else 1.0
     POINTS = args.spots_as_points
     SPOT_SPECULAR = args.spot_specular
-    payload = prepare(args.game, args.mod, args.casclib, not args.no_surround,
-                      None if args.mirror else tuple(args.town), args.turn, not args.no_ground,
-                      tuple(args.sky), not args.no_wall_flip, args.cap, args.clutter, tuple(args.drop), not args.light_shadows)
+    return dict(surround=not args.no_surround, town_at=None if args.mirror else tuple(args.town), town_turn=args.turn,
+                ground=not args.no_ground, sky_turns=tuple(args.sky), flip_wall=not args.no_wall_flip, cap=args.cap,
+                clutter=args.clutter, drop=tuple(args.drop), shadows_off=not args.light_shadows)
+
+
+def main():
+    args = parse()
+    options = parse([str(args.game), *TUNED_SCENE]) if args.tuned else args
+    payload = prepare(args.game, args.mod, args.casclib, options)
     record = json.loads(payload[RECEIPT])
     print(f'{PRESET}: taking out {record["removed_entities"]}')
     if not args.write:

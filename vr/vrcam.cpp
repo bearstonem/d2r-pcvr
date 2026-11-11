@@ -334,7 +334,7 @@ struct Settings {
     std::atomic<float> lightNight{65.0f};
     std::atomic<float> nightBright{0.25f};  // [sky] night_brightness: the sky and the fog at full night, times their day brightness
     std::atomic<bool>  skyAlways{false};    // whatever the biome (testing): caves get a sky too
-    std::atomic<bool>  campfireOn{false};    // [campfire] enabled: character creation's campfire scene in stereo, round you
+    std::atomic<bool>  campfireOn{true};     // [campfire] enabled (on by default): character creation's campfire scene in stereo, round you
     std::atomic<float> campfireEye{6.0f};    // [campfire] eye: the eye height the scene's scale is taken from, world units (~0.24 m each)
     std::atomic<float> campfireUp{2.25f};     // [campfire] up: the eyes above the game camera, world units
     std::atomic<float> campfireForward{3.0f};// [campfire] forward: the eyes ahead of the game camera, toward the fire, world units
@@ -1511,7 +1511,7 @@ void LoadSettings() {
     g_set.nightBright.store(std::clamp(IniF(L"sky", L"night_brightness", 0.25f), 0.0f, 1.0f));
     g_set.skyAlways.store(IniB(L"sky", L"always", false));
     {   // [campfire]
-        const bool on = IniB(L"campfire", L"enabled", false);
+        const bool on = IniB(L"campfire", L"enabled", true);   // on by default (owner 2026-11-11: "we need to make sure that's enabled by default")
         static int told = -1;
         if (int(on) != told) { told = int(on); LogF("vrcam: [campfire] enabled=%d", int(on)); }
         g_set.campfireOn.store(on);
