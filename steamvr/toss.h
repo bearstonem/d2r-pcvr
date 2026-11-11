@@ -64,6 +64,11 @@ inline constexpr float AimSpeed=.8f;     // m/s: the hand at most this fast
 inline constexpr float AimFarCells=30.f; // the arc's reach (the game's own reach clamps it)
 inline constexpr float SnapCells=2.5f;   // the sigil takes a monster this near its centre (a landing circle's radius)
 inline bool Aims(float ahead,float speed){return std::isfinite(ahead)&&std::isfinite(speed)&&ahead>=AimAhead&&speed<=AimSpeed;}
+// How far the throwing hand is ahead of the head along its heading, in metres (behind: negative). Either
+// hand's: a hand out to the left reads as the same hand out to the right.
+inline float Ahead(math::Vec head,math::Quat headQ,math::Vec hand) {
+    return -math::Rotate(math::Conjugate(math::Yaw(math::Heading(headQ))),hand-head).z;
+}
 // The velocity that carries a throw from p to target (world metres) under the throw's gravity: as fast along
 // the floor as it was thrown (speed, m/s; at least LaunchMinSpeed), in the air LaunchMinTime to LaunchMaxTime.
 inline constexpr float LaunchMinSpeed=4.f,LaunchMinTime=.35f,LaunchMaxTime=1.5f;

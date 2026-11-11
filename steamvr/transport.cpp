@@ -137,7 +137,7 @@
 namespace gamestate {bool MenuOpen();uint32_t WeaponType();uint32_t HandsKey();uint32_t WeaponSet();uint32_t WeaponClass();uint32_t TwoHanded();uint64_t LocalPlayer();uint32_t MenuEpoch();int AttackWsm(int hand);}
 namespace gamecmd {void RequestPotion(int slot);void CancelPotion();}
 namespace gamestate {void MenuMap(bool wanted);uint32_t QuestNotices();bool NoticePanelOpen();bool NoticeText(int kind,char* out,uint32_t size);}
-namespace gamestate {bool LeftShield();bool RightThrowingPotion();uint32_t RightThrowingPotionCode();framevr::dualwield::Equipment MeleeEquipment();}
+namespace gamestate {bool LeftShield();uint32_t PotionHands();uint32_t ThrowingPotionCode(int hand);framevr::dualwield::Equipment MeleeEquipment();}
 namespace combat {float GameVolume();}
 namespace projectiles {int ObservedGait(uint64_t& at,bool* tired);void StickFullRun(bool on);bool CombatWalking(uint64_t now,int* source);}
 
@@ -662,12 +662,16 @@ bool fanNeedsWorld=false;
 // Double Throw (#224): the left hand's own release, beside the right's.
 bowflight::Shot throwLeftPending{},throwLeftReady{};
 bool leftNeedsWorld=false,leftHasShot=false,leftThrowArmed=false;
+// The off trigger throws a potion by hand (weaponskills::RoutePotions), instead of its skill.
+bool offTossArmed=false;
+weaponskills::PotionRoute potionRouteSaid{};uint32_t potionHandsSaid=~0u;
 // A trap or bomb thrown to place (#224): where its arc landed, in grid cells,
 // for its cast's aim (TossTarget).
-struct TossLanding {int skill=-1;float x=0,y=0;uint64_t at=0,session=0;} tossLanding;
+// One per trigger (0 main, 1 off: a throwing potion in either hand).
+struct TossLanding {int skill=-1;float x=0,y=0;uint64_t at=0,session=0;} tossLanding[2];
 // The aimed throw's sigil (toss.h): where the held trap or potion will land, in grid cells, as the hand last
 // aimed it; its speed is measured here when the runtime gives none.
-struct TossSigil {bool on=false,told=false;float x=0,y=0;uint32_t monster=0;math::Vec was{};double wasAt=-1;} tossSigil;
+struct TossSigil {bool on=false,told=false;float x=0,y=0;uint32_t monster=0;math::Vec was{};double wasAt=-1;} tossSigil[2];   // per trigger
 std::atomic<bool> tossAiming{false};
 // A gas or oil potion thrown as a physical bottle (#292): its body in the
 // bottles' world until it first touches anything, where it shatters. The
@@ -2763,7 +2767,7 @@ void TCrossStep(const settings::Snapshot& config,const menus::Pad& physical,bool
         in.menu=nativeUi||settingsModel.open||interactionOutput.wheel||interactionOutput.settings||interactionOutput.inventory;
         in.buttons=physical.buttons&(menus::A|menus::B|menus::X|menus::Y|menus::Start|menus::LeftStick|menus::RightStick);
         in.stick=std::max(std::hypot(float(physical.lx),float(physical.ly)),std::hypot(float(physical.rx),float(physical.ry)))/32767.f;
-        in.holding=interactionOutput.bottleHand>=0||motionOutput.bowDrawing||motionOutput.tossHeld||glyphStroke.Drawing()||
+        in.holding=interactionOutput.bottleHand>=0||motionOutput.bowDrawing||motionOutput.tossHeld||motionOutput.offTossHeld||glyphStroke.Drawing()||
             gameplay::CastingSkill(motionInput,motionOutput,GetTickCount64()-motionAt);
         if(tCrossScan.load()&&s.time>=tCrossHostileAt){
             const auto targets=targetlock::Get();tCrossHostileAt=s.time+.1;
@@ -2892,7 +2896,7 @@ void SettingsPointer(bool grip) {
         if(interaction::Fresh(bindings,gamestate::LocalPlayer(),GetTickCount64()))context.heroClass=bindings.skillClass;
         const auto weapon=gamestate::WeaponType();
         context.bow=weapon==D2RVR_TYPE_BOW;context.staff=weapon==D2RVR_TYPE_STAFF;
-        context.thrown=weapon==D2RVR_TYPE_JAVELIN||weapon==D2RVR_TYPE_THROWING||gamestate::RightThrowingPotion();   // a throwing potion's toss is lifted too
+        context.thrown=weapon==D2RVR_TYPE_JAVELIN||weapon==D2RVR_TYPE_THROWING||gamestate::ThrowingPotionCode(0)||gamestate::ThrowingPotionCode(1);   // a throwing potion's toss is lifted too
         context.eyeTracker=gazeReady&&gazeSpace;   // Aim with your eyes shows only with one
         settingsModel.SetContext(context);settings::layout::SettleView(settingsModel);
     }
@@ -4027,8 +4031,9 @@ void Input() {
     motionInput.trigger=controls.rt/255.f;
     spellTrigger=controls.rt/255.f;   // motions (spell_motion.h) want both triggers free
     for(int h=0;h<2;++h){
-        // Double Throw's left trigger throws the left hand's weapon, not its skill.
-        handInput.trigger[h]=h?(leftThrowArmed?0:controls.lt/255.f):controls.rt/255.f;handInput.grip[h]=motionInput.grip[h];
+        // Double Throw's left trigger throws the left hand's weapon, not its skill; so does the off
+        // trigger that throws a potion by hand.
+        handInput.trigger[h]=h?(leftThrowArmed||offTossArmed?0:controls.lt/255.f):controls.rt/255.f;handInput.grip[h]=motionInput.grip[h];
         handInput.click[h]=(controls.buttons&(h?menus::LeftStick:menus::RightStick))!=0;
         if(h==1&&motionInput.grip[1]>.6f)handInput.click[h]=false;
         handInput.face[h][0]=(controls.buttons&(h?menus::X:menus::A))!=0;
@@ -4684,6 +4689,7 @@ void Input() {
             dualwield::ThrownPair(skel::HeroClass(),gamestate::MeleeEquipment());
         if(leftThrowArmed&&requested==shieldSlot){requested=-1;handOutput.interact=false;}
     }
+    if(offTossArmed&&requested==shieldSlot){requested=-1;handOutput.interact=false;}   // its throw, never a held cast
     // Glyph casting: a hand's Draw glyph button's press draws (below), never a native cast.
     const bool glyphPressed=handOutput.slot>=0&&glyphDrawSlots[size_t(skills::Hand(handOutput.slot))]==handOutput.slot;
     if(glyphPressed){requested=-1;handOutput.interact=false;}
@@ -4701,67 +4707,114 @@ void Input() {
     motionInput.shieldEquipped=gamestate::LeftShield()&&::melee::ShieldReady()&&!shapeForm;
     motionInput.leftThrow=leftThrowArmed&&!shapeForm;motionInput.leftTrigger=controls.lt/255.f;
     motionInput.throwLift=gestureSettings[settings::ThrowLift];
-    // A throwing potion in the right hand, with Attack or Throw on the right
-    // trigger, is tossed the same way: the game's own Throw lands it at the spot.
-    const bool tossReady=!shapeForm&&gestureSettings[settings::SkillGestures]>.5f&&quickFresh&&rightSkill.known&&rightSkill.available;
-    motionInput.potion=tossReady&&gamestate::RightThrowingPotion()&&weaponskills::PotionThrow(rightSkill.id);
+    // A throwing potion in either hand is tossed the same way (weaponskills::RoutePotions): the hand that
+    // holds it makes the throw, armed by its own trigger when that holds a skill that throws it (the main
+    // hand's: Attack or Throw; the off hand's: those while it is the hero's only weapon, else Left Hand
+    // Throw), and the game's own throw lands it at the spot. Hands and triggers in role order.
+    const bool gesturesOn=!shapeForm&&gestureSettings[settings::SkillGestures]>.5f&&quickFresh;
+    const bool tossReady=gesturesOn&&rightSkill.known&&rightSkill.available;
+    const uint32_t potionHands=gamestate::PotionHands();
+    const weaponskills::Held potionHeld[2]={weaponskills::Held(potionHands&0xffu),weaponskills::Held((potionHands>>8)&0xffu)};
+    const int potionSkills[2]={tossReady?rightSkill.id:-1,gesturesOn&&shieldSkill.known&&shieldSkill.available?shieldSkill.id:-1};
+    const auto potionRoute=gesturesOn?weaponskills::RoutePotions(potionHeld,potionSkills):weaponskills::PotionRoute{};
+    motionInput.potion=potionRoute.Hand(0)>=0;motionInput.tossHand=potionRoute.Hand(0)==1?1:0;
     motionInput.toss=tossReady&&(toss::Skill(rightSkill.id)||motionInput.potion);
-    // With Bottle physics and the potion's model cached, it leaves the hand as a
-    // physical bottle; the press waits for it to shatter (StepDroppedBottles).
-    const uint32_t potionCode=motionInput.potion?gamestate::RightThrowingPotionCode():0u;
-    const bool potionBottle=potionCode&&bottlePhysics.load()&&potionModels.Radius(potionCode)>0;
+    motionInput.offToss=potionRoute.Hand(1)>=0&&!leftThrowArmed;motionInput.offTossHand=potionRoute.Hand(1)==0?0:1;
+    motionInput.offSlot=shieldSlot;motionInput.offSkill=shieldSkill.id;motionInput.offOwner=shieldSkill.owner;
+    motionInput.offAim=handAim[1];motionInput.offAimTracked=handAimTracked[1];
+    offTossArmed=motionInput.offToss;
+    if(!(potionRoute==potionRouteSaid)||potionHands!=potionHandsSaid) {
+        // Which path each hand's potion takes, at each change of what the hands hold or of the triggers' skills.
+        const bool any=potionHeld[0]==weaponskills::Held::Potion||potionHeld[1]==weaponskills::Held::Potion;
+        const bool was=potionHandsSaid!=~0u&&((potionHandsSaid&0xffu)==uint32_t(weaponskills::Held::Potion)||((potionHandsSaid>>8)&0xffu)==uint32_t(weaponskills::Held::Potion));
+        if(any||was) {
+            static const char* const kinds[]={"empty","shield","weapon","throwing potion"};
+            char path[2][150];
+            for(int h=0;h<2;++h) {
+                const int t=potionRoute.trigger[h];
+                if(potionHeld[h]!=weaponskills::Held::Potion)std::snprintf(path[h],sizeof path[h],"%s",kinds[int(potionHeld[h])&3]);
+                else if(t>=0)std::snprintf(path[h],sizeof path[h],"throwing potion, HAND THROW armed by %s trigger (skill %d)",t==h?"its own":t?"the off":"the main",potionSkills[t]);
+                else std::snprintf(path[h],sizeof path[h],"throwing potion, NO hand throw: the game's own button (%s; triggers hold skills %d and %d)",
+                    !gesturesOn?"Weapon skill gestures off, a shapeshift form or no fresh skills":h&&weaponskills::Armed(potionHeld[0])?"beside a main hand weapon it needs Left Hand Throw on the off trigger":
+                    "it needs Attack or Throw on a trigger",rightSkill.known?rightSkill.id:-1,shieldSkill.known?shieldSkill.id:-1);
+            }
+            char line[480];std::snprintf(line,sizeof line,"Frame potion hands: main hand (%s controller): %s; off hand (%s controller): %s",
+                handRoles.map.Physical(0)?"left":"right",path[0],handRoles.map.Physical(1)?"left":"right",path[1]);
+            Say(line);
+        }
+        potionRouteSaid=potionRoute;potionHandsSaid=potionHands;
+    }
     motionOutput=motion.Step(motionInput);motionAt=GetTickCount64();
+    if(motionOutput.offPress)castHand=1;   // the off trigger's own press aims from the off hand
+    // A potion that is the hero's only weapon is never swung: the game would throw it.
+    for(int h=0;h<2;++h)if(potionRoute.trigger[h]>=0&&!weaponskills::Armed(potionHeld[1-h]))motionOutput.meleeContact=false;
     // ...or a Paladin plays: Charge goes to the aimed monster whatever the option, however it is cast
     // (a trigger, a glyph or the punch), so the scan runs for the class that has it.
     seekerArrowReady.store((motionInput.active&&motionOutput.bowReady&&aimrules::AlwaysHomes(motionInput.bowSkill))||
                            bindingSnapshot.skillClass==settings::heroclass::Paladin);
-    if(motionOutput.tossHeld)tossLanding={};   // a new trap in hand: nothing placed yet
+    // The two triggers' tosses (0 main: a trap, a bomb or a potion; 1 off: a potion), each from the hand
+    // that holds it. With Bottle physics and the potion's model cached, a potion leaves that hand as a
+    // physical bottle.
+    struct TossChannel {bool held,release;math::Vec origin,velocity;int hand,skill;bool potion;uint32_t code;};
+    const int tossHands[2]={motionInput.tossHand,motionInput.offTossHand};
+    const TossChannel tossChannels[2]={
+        {motionOutput.tossHeld,motionOutput.tossRelease,motionOutput.tossOrigin,motionOutput.tossVelocity,tossHands[0],rightSkill.id,
+            motionInput.potion,motionInput.potion?gamestate::ThrowingPotionCode(tossHands[0]):0u},
+        {motionOutput.offTossHeld,motionOutput.offTossRelease,motionOutput.offTossOrigin,motionOutput.offTossVelocity,tossHands[1],shieldSkill.id,
+            motionInput.offToss,motionInput.offToss?gamestate::ThrowingPotionCode(tossHands[1]):0u}};
+    const bool anyTossHeld=motionOutput.tossHeld||motionOutput.offTossHeld;
     const auto& tossStage=interactionInput.stage;
     const bool tossWorld=interactionInput.floorKnown&&tossStage.known&&stageWorld.upm>=1&&stageWorld.upm<=12;
     const float tossFloor=tossStage.anchor.y+(interactionInput.floor-tossStage.origin.y);
     // With bottle physics, a trap in hand readies the physics world here and
     // its walls, so the throw can be traced through them when it leaves.
-    if(motionOutput.tossHeld&&tossWorld&&bottlePhysics.load()) {
+    if(anyTossHeld&&tossWorld&&bottlePhysics.load()) {
         if(!droppedBottles)droppedBottles=std::make_unique<bottles::World>();
         const auto session=gamestate::LocalPlayer();
         if(droppedBottles->Ready()&&droppedBottles->Prepare(session,tossFloor,stageWorld.upm,tossStage.anchor))
             wallcells::Want({session,tossStage.anchor,tossFloor,stageWorld.upm},GetTickCount64());
     }
-    // The aimed throw (toss.h): while it is held, the hand's pointer throws Teleport's arc, and a sigil shows
-    // where it lands - on the monster there, if one stands under it. The hand aims held out in front and slow.
-    tossAiming.store(motionOutput.tossHeld&&tossWorld);
-    float sigilX=0,sigilY=0;bool sigilKnown=false;
-    if((motionOutput.tossHeld||motionOutput.tossRelease)&&tossWorld) {
-        const auto hand=motionInput.hand[0].p;
-        const double dt=interactionInput.time-tossSigil.wasAt;
-        const float speed=interactionInput.velocityKnown[0]?gameplay::Length(interactionInput.handVelocity[0]):
-            tossSigil.wasAt>=0&&dt>1e-4&&dt<.1?gameplay::Length(hand-tossSigil.was)/float(dt):1e9f;
-        tossSigil.was=hand;tossSigil.wasAt=interactionInput.time;
-        const auto ahead=math::Rotate(math::Conjugate(math::Yaw(math::Heading(interactionInput.head.q))),hand-interactionInput.head.p);
-        if(motionOutput.tossHeld&&handAimTracked[0]&&toss::Aims(-ahead.z,speed)) {
-            const float cell=2.f/stageWorld.upm;
-            const auto arc=teleportarc::Compute(handAim[0].p,math::Rotate(handAim[0].q,math::Vec{0,0,-1}),interactionInput.floor,
-                TeleportArcNearCells*cell,toss::AimFarCells*cell);
-            float x=0,y=0;
-            if(arc.ok&&FloorCell(arc.land,x,y)){tossSigil.on=true;tossSigil.x=x;tossSigil.y=y;}
-        }
-        if(tossSigil.on) {
-            sigilX=tossSigil.x;sigilY=tossSigil.y;sigilKnown=true;
-            float mx=0,my=0;uint32_t id=0;
-            const bool snapped=MonsterNearCell(sigilX,sigilY,toss::SnapCells,mx,my,&id);
-            if(snapped){sigilX=mx;sigilY=my;}
-            telegraph::Current().Place(sigilX,sigilY,GetTickCount64(),250,int(spellaim::ElementOf(rightSkill.id)),2.0f,0,0,0,telegraph::TossMark);
-            if(!tossSigil.told||(snapped?id:0u)!=tossSigil.monster) {
-                char line[200];
-                if(snapped)std::snprintf(line,sizeof line,"Frame toss: skill=%d aimed - its sigil on monster %u (cell %.1f,%.1f)",rightSkill.id,id,sigilX,sigilY);
-                else std::snprintf(line,sizeof line,"Frame toss: skill=%d aimed - its sigil on the floor (cell %.1f,%.1f)",rightSkill.id,sigilX,sigilY);
-                Say(line);
+    tossAiming.store(anyTossHeld&&tossWorld);
+    for(int c=0;c<2;++c) {
+        const auto& channel=tossChannels[c];auto& sigil=tossSigil[c];
+        const int hand=channel.hand,mark=c?telegraph::TossOffMark:telegraph::TossMark;
+        // "[main hand, left controller, off trigger]": the hand that throws, its controller and the trigger that armed it
+        char who[72];std::snprintf(who,sizeof who,"[%s hand, %s controller, %s trigger]",hand?"off":"main",handRoles.map.Physical(hand)?"left":"right",c?"off":"main");
+        if(channel.held)tossLanding[c]={};   // a new trap in hand: nothing placed yet
+        const bool potionBottle=channel.code&&bottlePhysics.load()&&potionModels.Radius(channel.code)>0;
+        // The aimed throw (toss.h): while it is held, the throwing hand's pointer throws Teleport's arc, and a sigil
+        // shows where it lands - on the monster there, if one stands under it. The hand aims held out in front and slow.
+        float sigilX=0,sigilY=0;bool sigilKnown=false;
+        if((channel.held||channel.release)&&tossWorld) {
+            const auto at=motionInput.hand[hand].p;
+            const double dt=interactionInput.time-sigil.wasAt;
+            const float speed=interactionInput.velocityKnown[hand]?gameplay::Length(interactionInput.handVelocity[hand]):
+                sigil.wasAt>=0&&dt>1e-4&&dt<.1?gameplay::Length(at-sigil.was)/float(dt):1e9f;
+            sigil.was=at;sigil.wasAt=interactionInput.time;
+            if(channel.held&&handAimTracked[hand]&&toss::Aims(toss::Ahead(interactionInput.head.p,interactionInput.head.q,at),speed)) {
+                const float cell=2.f/stageWorld.upm;
+                const auto arc=teleportarc::Compute(handAim[hand].p,math::Rotate(handAim[hand].q,math::Vec{0,0,-1}),interactionInput.floor,
+                    TeleportArcNearCells*cell,toss::AimFarCells*cell);
+                float x=0,y=0;
+                if(arc.ok&&FloorCell(arc.land,x,y)){sigil.on=true;sigil.x=x;sigil.y=y;}
             }
-            tossSigil.told=true;tossSigil.monster=snapped?id:0u;
+            if(sigil.on) {
+                sigilX=sigil.x;sigilY=sigil.y;sigilKnown=true;
+                float mx=0,my=0;uint32_t id=0;
+                const bool snapped=MonsterNearCell(sigilX,sigilY,toss::SnapCells,mx,my,&id);
+                if(snapped){sigilX=mx;sigilY=my;}
+                telegraph::Current().Place(sigilX,sigilY,GetTickCount64(),250,int(spellaim::ElementOf(channel.skill)),2.0f,0,0,0,mark);
+                if(!sigil.told||(snapped?id:0u)!=sigil.monster) {
+                    char line[280];
+                    if(snapped)std::snprintf(line,sizeof line,"Frame toss: skill=%d %s aimed - its sigil on monster %u (cell %.1f,%.1f)",channel.skill,who,id,sigilX,sigilY);
+                    else std::snprintf(line,sizeof line,"Frame toss: skill=%d %s aimed - its sigil on the floor (cell %.1f,%.1f)",channel.skill,who,sigilX,sigilY);
+                    Say(line);
+                }
+                sigil.told=true;sigil.monster=snapped?id:0u;
+            }
         }
-    }
-    else if(tossSigil.on||tossSigil.wasAt>=0){if(tossSigil.on)telegraph::Current().ClearSkill(telegraph::TossMark);tossSigil={};}
-    if(motionOutput.tossRelease) {
+        else if(sigil.on||sigil.wasAt>=0){if(sigil.on)telegraph::Current().ClearSkill(mark);sigil={};}
+        if(!channel.release)continue;
         // Where the arc first meets anything in the physics world (a wall, a
         // table, a prop or the floor), else where it reaches the floor under
         // the player at release (world metres). Running carries it along.
@@ -4769,35 +4822,35 @@ void Input() {
         float x=0,y=0;bool landed=false,traced=false,flying=false;
         if(tossWorld) {
             math::Vec hit{};
-            const auto worldP=tossStage.World(motionOutput.tossOrigin);auto worldV=toss::WorldVelocity(tossStage,motionOutput.tossVelocity,carry);
+            const auto worldP=tossStage.World(channel.origin);auto worldV=toss::WorldVelocity(tossStage,channel.velocity,carry);
             // Aimed: sent on the arc that ends on the sigil, as fast as it was thrown; the cast lands there
             // whatever the bottle meets on its way.
             if(sigilKnown&&!toss::Launch(worldP,toss::World(sigilX,sigilY,tossFloor,stageWorld.upm),gameplay::Length(worldV),worldV))sigilKnown=false;
             traced=bottlePhysics.load()&&droppedBottles&&droppedBottles->Trace(worldP,worldV,toss::Radius,interaction::ThrowMaxFlight,hit)&&
                 toss::Cell(hit,tossFloor,stageWorld.upm,x,y);
-            landed=traced||toss::Landing(tossStage,tossFloor,stageWorld.upm,motionOutput.tossOrigin,motionOutput.tossVelocity,x,y,carry);
+            landed=traced||toss::Landing(tossStage,tossFloor,stageWorld.upm,channel.origin,channel.velocity,x,y,carry);
             if(sigilKnown){x=sigilX;y=sigilY;landed=true;}
             // A gas or oil potion leaves the hand as its own bottle (#292), held as
             // the hand held it, tumbling end over end along its throw.
             if(potionBottle&&traced&&droppedBottles&&droppedBottles->Ready()) {
-                const auto held=potions::HeldRotation(motionInput.hand[0].q);
+                const auto held=potions::HeldRotation(motionInput.hand[hand].q);
                 const auto across=math::Cross(worldV,math::Vec{0,1,0});const float spin=gameplay::Length(across);
-                const bottles::Release release{gamestate::LocalPlayer(),interactionInput.time,tossStage.World(potions::Center(motionOutput.tossOrigin,motionInput.hand[0].q)),
+                const bottles::Release release{gamestate::LocalPlayer(),interactionInput.time,tossStage.World(potions::Center(channel.origin,motionInput.hand[hand].q)),
                     worldV,spin>1e-4f?across*(6.f/spin):math::Vec{},math::Multiply(tossStage.base,held),tossFloor,stageWorld.upm,
-                    bottles::Radius(potionModels.Radius(potionCode)),potionCode};
+                    bottles::Radius(potionModels.Radius(channel.code)),channel.code};
                 const uint64_t id=(uint64_t(1)<<62)|++potionFlightSerial;
                 flying=droppedBottles->Toss(release,id);
-                if(flying){potionFlight={id,release.session,potionCode,interactionInput.time};bowvr::ExpectPotion(GetTickCount64());}
+                if(flying){potionFlight={id,release.session,channel.code,interactionInput.time};bowvr::ExpectPotion(GetTickCount64());}
             }
         }
-        if(landed)tossLanding={rightSkill.id,x,y,motionAt,gamestate::LocalPlayer()};
-        char line[240];std::snprintf(line,sizeof line,"Frame toss: skill=%d%s thrown at %.1f m/s (running %.1f m/s), %s %.1f,%.1f",rightSkill.id,
-            flying?" (throwing potion, its bottle flies)":motionInput.potion?" (throwing potion)":"",
-            gameplay::Length(motionOutput.tossVelocity),gameplay::Length(carry),
-            !landed?"no landing (room unknown), cast where you point":sigilKnown?(tossSigil.monster?"on its sigil, the monster under it, at cells":"on its sigil at cells"):
+        if(landed)tossLanding[c]={channel.skill,x,y,motionAt,gamestate::LocalPlayer()};
+        char line[320];std::snprintf(line,sizeof line,"Frame toss: skill=%d %s%s thrown at %.1f m/s (running %.1f m/s), %s %.1f,%.1f",channel.skill,who,
+            flying?" (throwing potion, its bottle flies)":channel.potion?" (throwing potion)":"",
+            gameplay::Length(channel.velocity),gameplay::Length(carry),
+            !landed?"no landing (room unknown), cast where you point":sigilKnown?(sigil.monster?"on its sigil, the monster under it, at cells":"on its sigil at cells"):
             traced?"first hit at cells":"lands on the floor at cells",x,y);
         Say(line);
-        tossSigil={};   // its mark fades where the throw went
+        sigil={};   // its mark fades where the throw went
     }
     motionOutput.shieldContact=motionInput.active&&!motionOutput.block&&!motionInput.quickCast&&motionInput.trigger<.2f&&
         motionInput.shieldEquipped&&gestureSettings[settings::SkillGestures]>.5f&&quickFresh&&shieldSkill.available&&shieldSkill.motion&&shieldSkill.id==weaponskills::Smite;
@@ -7782,9 +7835,12 @@ const interaction::Skill* CastSkillRow() {
 }
 bool TossTarget(int skill,float& x,float& y) {
     std::lock_guard lock(mutex);
-    const auto now=GetTickCount64();const auto& t=tossLanding;
-    if(t.skill<0||now<t.at||now-t.at>700||t.session!=gamestate::LocalPlayer()||(skill>=0&&skill!=t.skill))return false;
-    x=t.x;y=t.y;return true;
+    const auto now=GetTickCount64();const TossLanding* found=nullptr;
+    // either trigger's throw; the later one when both fit
+    for(const auto& t:tossLanding)
+        if(t.skill>=0&&now>=t.at&&now-t.at<=700&&t.session==gamestate::LocalPlayer()&&(skill<0||skill==t.skill)&&(!found||t.at>found->at))found=&t;
+    if(!found)return false;
+    x=found->x;y=found->y;return true;
 }
 bool MotionLanding(int skill,float& x,float& y,int* landed) {
     std::lock_guard lock(mutex);
