@@ -421,5 +421,26 @@ int main() {
         State wrongWay;uint64_t nw=15000;Hold(wrongWay,from,false,nw,200,t);Move(wrongWay,from,to,false,nw,90,t);
         Check(wrongWay.snapAt==0,"told it is a right shield, the left shield's diagonal is not its parry");
     }
-    std::puts("Shield guard: rendered bounds, coverage, calibration, movement, parries, debug placement, expiry and the right-arm shield passed");
+    {   // claws crossed (2026-11-10)
+        using namespace framevr::guard;
+        Pose off;off.center={-.10f,1.25f,-.35f};off.normal={1,0,0};off.eye={0,1.60f,0};off.hand={-.08f,-.30f,-.32f};off.unitsPerMetre=4;off.at=1000;off.epoch=7;
+        Pose guard;float apart=0;
+        const Vec mainHand{.08f,-.30f,-.32f};
+        const bool crossed=Crossed(off,{-.06f,1.30f,-.36f},{.06f,1.30f,-.36f},mainHand,guard,&apart);
+        if(!(crossed&&std::fabs(apart-.12f)<1e-4f&&Valid(guard)&&!Measured(guard)&&std::fabs(guard.normal.z+1)<1e-4f&&std::fabs(guard.center.x)<1e-4f&&
+             std::fabs(guard.hand.x)<1e-4f&&guard.epoch==7&&guard.at==1000)){std::puts("FAIL: claws crossed in front make a guard between them, facing out from the eyes");return 1;}
+        Tuning t;State s;
+        Update(s,guard,true,true,1010,true,t);
+        if(!(s.raised&&Judge(s,{0,0,-1.5f},1020,t)==Verdict::Block)){std::puts("FAIL: crossed claws block an attacker in front");return 1;}
+        if(Judge(s,{0,0,1.5f},1020,t)!=Verdict::Open||Judge(s,{1.5f,0,.2f},1020,t)!=Verdict::Open){std::puts("FAIL: crossed claws do not block from behind or the side");return 1;}
+        Pose wide;
+        if(Crossed(off,{-.30f,1.30f,-.36f},{.30f,1.30f,-.36f},mainHand,wide,&apart)||std::fabs(apart-.60f)>1e-4f||!Valid(wide)){std::puts("FAIL: claws held apart are not crossed (the pose is still given)");return 1;}
+        Pose low;const bool lowCrossed=Crossed(off,{-.06f,.80f,-.30f},{.06f,.80f,-.30f},{.08f,-.80f,-.25f},low);
+        Pose lowOff=off;lowOff.hand={-.08f,-.80f,-.25f};Crossed(lowOff,{-.06f,.80f,-.30f},{.06f,.80f,-.30f},{.08f,-.80f,-.25f},low);
+        State hang;Update(hang,low,true,true,1010,true,t);
+        if(!lowCrossed||hang.raised){std::puts("FAIL: claws together but hanging at the hips are no guard");return 1;}
+        Pose none;
+        if(Crossed(off,{0,1.9f,0},{0,1.9f,.02f},mainHand,none)||Crossed({},{-.06f,1.30f,-.36f},{.06f,1.30f,-.36f},mainHand,none)){std::puts("FAIL: over the head, or with no claw pose, there is none");return 1;}
+    }
+    std::puts("Shield guard: rendered bounds, coverage, calibration, movement, parries, debug placement, expiry, the right-arm shield and crossed claws passed");
 }

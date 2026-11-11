@@ -9090,10 +9090,25 @@ void ShieldContactTick() {
 void ShieldGuardTick() {
     framevr::guard::Pose pose;
     // A shapeshift form draws no shield: the native block roll uses its block chance.
-    const bool eligible=g_enabled.load()&&g_inWorld.load()&&!ThirdPerson()&&!Overhead()&&g_eyeOk.load()&&
-        !gamestate::MenuOpen()&&gamestate::LeftShield()&&!ShapeFormNow();
+    const bool guardable=g_enabled.load()&&g_inWorld.load()&&!ThirdPerson()&&!Overhead()&&g_eyeOk.load()&&
+        !gamestate::MenuOpen()&&!ShapeFormNow();
+    bool eligible=guardable&&gamestate::LeftShield();
     const auto epoch=g_meleeTurnEpoch.load();
-    const bool posed=eligible&&skel::ShieldGuardPose(pose)&&pose.epoch==epoch;
+    bool posed=eligible&&skel::ShieldGuardPose(pose)&&pose.epoch==epoch;
+    // No shield, a claw in each hand: the two crossed in front are the guard (guard::Crossed; owner, 2026-11-10:
+    // "Assassin should be able to block using her claws"). Uncrossed, the game's own roll stands (Weapon Block).
+    bool claws=false;
+    if(guardable&&!gamestate::LeftShield()) {
+        bool crossed=false;float apart=0;
+        claws=skel::ClawGuardPose(pose,crossed,apart)&&pose.epoch==epoch&&crossed;
+        eligible=posed=claws;
+        static bool was=false;static ULONGLONG told=0;
+        if(claws!=was&&GetTickCount64()-told>500) {
+            was=claws;told=GetTickCount64();char line[160];
+            snprintf(line,sizeof line,"Frame guard claws: %s (blades %.0f cm apart)",claws?"crossed - guarding":"apart - the game's own roll",apart*100);
+            framevr::logging::Write(line);
+        }
+    }
     pose.epoch=epoch; // invalidate cached coverage across a snap turn
     // Holy Shield: blocks land on its larger glow, mesh surface or fallback alike.
     // Logged when Holy Shield itself starts or ends, not when a menu or the
@@ -9111,7 +9126,7 @@ void ShieldGuardTick() {
     const D2RVR_Shared* sh=g_shared;
     // The shield is the off hand's: the left arm, or the right one in left-handed play (hand_role.h).
     const bool handOk=sh&&sh->version==D2RVR_SHARED_VERSION&&sh->headValid&&(sh->handsValid&HandBit(1));
-    combat::PublishGuard(gamestate::LocalPlayer(),eligible,posed,pose,handOk,framevr::HandSide(1)==1);
+    combat::PublishGuard(gamestate::LocalPlayer(),eligible,posed,pose,handOk,framevr::HandSide(1)==1,claws);
 }
 #endif
 
