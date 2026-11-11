@@ -9,7 +9,8 @@
 //   physical  0 right, 1 left: the OpenXR hand paths, the shared tracking state, the hero's arm bones,
 //             a controller's palm side, the controller a haptic pulse goes to;
 //   role      0 main, 1 off: the weapon hand and the shield (or second weapon) hand, the main trigger
-//             and its skill slots, A / B and X / Y, the turn stick and the walk stick, the melee lanes.
+//             and its skill slots, A / B and X / Y, the turn stick and the walk stick (unless they stay
+//             right-handed: Sticks), the melee lanes.
 // Right-handed the two are the same number, which is why the engines (gameplay.h, hand_controls.h,
 // interactions.h, melee_contact.h) say "right = 0": they take ROLE order and need no change. The
 // transport feeds them through a Map and sends what comes back (a pulse, a pose) to the physical hand.
@@ -92,19 +93,51 @@ constexpr const char* HeldLeftHanded(Kind kind) {
 }
 inline constexpr const char* MirroredKinds="one-handed weapons, shield, dual wield, throws, potions, bare hands, bow, crossbow, staff, spear, polearm, two-handed grips";
 inline constexpr const char* RightHandedKinds="no weapon kind";
+// The two thumbsticks. Every reader of a stick takes the pad's two (menus::Pad):
+//   walk stick   the pad's left stick: walking, the leather menu's walk, Room follows you's idle stick, the
+//                native menus' left stick and its click; Walk direction: Controller follows its controller;
+//   turn stick   the pad's right stick: smooth and snap turns, up for the Stick toggle's run / walk, held down
+//                for every loot name, the wrist map's and the floating map's zoom, the floating map's push and
+//                pull, the native menus' right stick and its click (held: sort); its gestures buzz its controller.
+// Right-handed the left controller walks and the right one turns. Left-handed the off hand walks and the main
+// hand turns: the right and the left controller. Sticks stay right-handed (VR Settings > Controls > Hands, shown
+// with Left-handed on; [interactions] left_handed_sticks_right; asked for by left-handed players used to walking
+// with the left thumb) keeps them where a right-handed player has them while everything else stays mirrored.
+// A hand's own stick click is the hand's, not the stick's, in every combination (OwnStick): it opens that hand's
+// wheel, and the off hand's grip with its click opens the inventory (without motion controls the click alone
+// is the map).
+struct Sticks {
+    int walk=1,turn=0;   // the physical hand (0 right, 1 left) whose controller has each
+    // The pad stick (0 the right one, turning; 1 the left one, walking) on a physical hand's controller.
+    constexpr int Pad(int physical) const {return physical==walk?1:0;}
+    // The physical hand whose controller has a pad stick.
+    constexpr int Hand(int pad) const {return pad?walk:turn;}
+    constexpr bool operator==(const Sticks&) const = default;
+};
+constexpr Sticks SticksOf(const Map& map,bool keepRight) {return keepRight?Sticks{}:Sticks{map.Physical(1),map.Physical(0)};}
+constexpr const char* Side(int physical) {return physical?"LEFT":"RIGHT";}
 struct State {
     bool wanted=false;      // the setting
+    bool sticksRight=false; // Sticks stay right-handed, the setting (no effect while the roles are right-handed)
     Kind kind=Kind::OneHand;
     Map map{};              // the roles in force: left only when wanted and the kind is mirrored
+    Sticks sticks{};        // the sticks in force (SticksOf)
     constexpr bool Fallback() const {return wanted&&!map.left;}   // wanted, but this weapon plays right-handed for now
+    // The sticks are not where the roles would put them: left-handed with Sticks stay right-handed.
+    constexpr bool SticksKept() const {return map.left&&sticksRight;}
+    // The role (0 main, 1 off) whose controller has a pad stick (0 turn, 1 walk).
+    constexpr int StickRole(int pad) const {return map.Role(sticks.Hand(pad));}
+    // The pad stick (0 the right, 1 the left) on a role's own controller: that hand's stick click.
+    constexpr int OwnStick(int role) const {return sticks.Pad(map.Physical(role));}
     constexpr bool operator==(const State&) const = default;
 };
 // A kind that is not mirrored (none since phase 3; Mirrors) plays right-handed in every respect
 // (weapon and shield, triggers, grips, face buttons, sticks, haptics), exactly as with the setting
 // off, so nothing is half swapped: a bow drawn by the hand that does not hold the string, or a
 // trigger on the hand without the weapon.
-constexpr State Resolve(bool wanted,uint32_t weaponType,uint32_t twoHanded) {
-    State s;s.wanted=wanted;s.kind=KindOf(weaponType,twoHanded);s.map.left=wanted&&Mirrors(s.kind);return s;
+constexpr State Resolve(bool wanted,uint32_t weaponType,uint32_t twoHanded,bool sticksRight=false) {
+    State s;s.wanted=wanted;s.sticksRight=sticksRight;s.kind=KindOf(weaponType,twoHanded);s.map.left=wanted&&Mirrors(s.kind);
+    s.sticks=SticksOf(s.map,sticksRight);return s;
 }
 // The interface and the class motions (phase 2), each with its own switch so one can be put back alone.
 // All are mirrored now: with the main hand on the left,
@@ -116,7 +149,8 @@ constexpr State Resolve(bool wanted,uint32_t weaponType,uint32_t twoHanded) {
 //                 (spell_motion.h, Input::mirror).
 // A system that returned false here would keep its physical hands whatever the roles (For): the laser on
 // the right controller, the menu and the wrist HUD on the left, the motions right-handed. The face buttons
-// and sticks are by role everywhere, menus included. The text follows the same roles (hand_text.h).
+// are by role everywhere, menus included, and so are the sticks unless they stay right-handed (Sticks). The
+// text follows the same roles (hand_text.h).
 enum class System { Combat, Buttons, Haptics, SkillSlots, Laser, WristHud, LeatherMenu, ClassMotions };
 constexpr bool Mirrored(System system) {
     switch(system) {

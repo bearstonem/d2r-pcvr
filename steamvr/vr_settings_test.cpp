@@ -968,8 +968,8 @@ int main(int argc,char** argv){
     {   // Left-handed (#307, hand_role.h): Off by default, experimental, a row of its own, saved alone
         Check(Defaults()[LeftHanded]==0&&std::wstring(Definitions[LeftHanded].section)==L"interactions"&&
               std::wstring(Definitions[LeftHanded].key)==L"left_handed"&&Definitions[LeftHanded].min==0&&Definitions[LeftHanded].max==1&&
-              HelpText(LeftHanded)[0]!=0&&LeftHanded<ChangeMask::Bits&&LeftHanded==Count-1,
-              "Left-handed: Off by default, [interactions] left_handed Off / On, explained, its own change bit, appended last");
+              HelpText(LeftHanded)[0]!=0&&LeftHanded<ChangeMask::Bits&&LeftHanded+1==LeftHandedSticks,
+              "Left-handed: Off by default, [interactions] left_handed Off / On, explained, its own change bit, appended (Sticks stay right-handed after it)");
         const auto* row=content::RowOf(LeftHanded);
         Check(row&&!row->beside&&row->page==View::Hands&&row->kind==content::RowKind::Toggle&&std::strcmp(row->label,"Left-handed (experimental)")==0&&
               row->section==content::RowOf(WalkDirection)->section&&!content::RowOf(WalkDirection)->beside&&row->classes==content::AllClasses,"a switch of its own on Controls > Hands, every class");
@@ -980,6 +980,41 @@ int main(int argc,char** argv){
         for(int c=-1;c<=heroclass::Assassin+1;++c)Check(RowShown(LeftHanded,Defaults(),{c}),"every class, and the title screen, see it");
         Model t;Snapshot ready;ready.ready=true;ready.values[Dominant]=0;t.Open(ready);layout::Press(t,{Kind::Set,LeftHanded,0,1},0);
         Check(t.Get()[LeftHanded]==1&&t.Get()[Dominant]==0&&t.Click({Kind::Apply}).changed==(ChangeMask{1}<<LeftHanded),"the switch turns it On, leaves the saved Dominant hand alone, and Apply saves only it");
+    }
+    {   // Sticks stay right-handed (hand_role.h Sticks): Off by default, a row of its own under Left-handed, shown only
+        // while Left-handed is on (the draft's value too), about the real controllers, saved alone
+        Check(Defaults()[LeftHandedSticks]==0&&std::wstring(Definitions[LeftHandedSticks].section)==L"interactions"&&
+              std::wstring(Definitions[LeftHandedSticks].key)==L"left_handed_sticks_right"&&Definitions[LeftHandedSticks].min==0&&
+              Definitions[LeftHandedSticks].max==1&&Definitions[LeftHandedSticks].step==1&&HelpText(LeftHandedSticks)[0]!=0&&
+              LeftHandedSticks<ChangeMask::Bits&&LeftHandedSticks==Count-1,
+              "Sticks stay right-handed: Off by default, [interactions] left_handed_sticks_right Off / On, explained, its own change bit, appended last");
+        const auto* row=content::RowOf(LeftHandedSticks);const auto* hand=content::RowOf(LeftHanded);
+        Check(row&&hand&&!row->beside&&row->page==View::Hands&&row->kind==content::RowKind::Toggle&&
+              std::strcmp(row->label,"Sticks stay right-handed")==0&&std::strlen(row->label)<=26&&row->section==hand->section&&row->classes==content::AllClasses,
+              "a switch of its own on Controls > Hands, in Left-handed's section, every class, its label within 26 characters");
+        {   // right after Left-handed in the page's rows
+            const auto& rows=content::Menu().rows;size_t at=rows.size(),handAt=rows.size();
+            for(size_t i=0;i<rows.size();++i){if(rows[i].key==LeftHandedSticks)at=i;if(rows[i].key==LeftHanded)handAt=i;}
+            Check(handAt+1==at,"listed right under Left-handed");
+        }
+        Values off=Defaults(),on=Defaults();on[LeftHanded]=1;
+        for(int c=-1;c<=heroclass::Assassin+1;++c)Check(!RowShown(LeftHandedSticks,off,{c})&&RowShown(LeftHandedSticks,on,{c}),"shown only while Left-handed is on, for every class");
+        Values kept=on;kept[LeftHandedSticks]=1;
+        Check(RowShown(LeftHanded,kept,{})&&!RowShown(LeftHandedSticks,Defaults(),{}),"Left-handed itself is always shown; its sticks' row goes with it");
+        const std::string help=HelpText(LeftHandedSticks),rowHelp=row->help;
+        Check(help.find("left stick walks")!=std::string::npos&&help.find("right stick turns")!=std::string::npos&&help.find("wheel")!=std::string::npos&&
+              rowHelp.find("left stick walks")!=std::string::npos&&rowHelp.find("right stick turns")!=std::string::npos&&rowHelp.size()<=160,
+              "both helps say the left stick walks and the right one turns, and where the wheels are");
+        {   // with the words mirrored the row reads as written: it is about the real controllers
+            framevr::handtext::Scope left(true);
+            Check(std::strcmp(content::RowOf(LeftHandedSticks)->help,rowHelp.c_str())==0&&std::string(HelpText(LeftHandedSticks))==help,"left-handed: the row and its help read the same");
+        }
+        Model t;Snapshot ready;ready.ready=true;t.Open(ready);
+        layout::Press(t,{Kind::Set,LeftHanded,0,1},0);layout::Press(t,{Kind::Set,LeftHandedSticks,0,1},0);
+        Check(t.Get()[LeftHanded]==1&&t.Get()[LeftHandedSticks]==1&&RowShown(LeftHandedSticks,t.Get(),{}),"the draft's Left-handed shows the row at once, and its switch turns it On");
+        Check(t.Click({Kind::Apply}).changed==((ChangeMask{1}<<LeftHanded)|(ChangeMask{1}<<LeftHandedSticks)),"Apply saves the two switches, nothing else");
+        Model u;Snapshot saved;saved.ready=true;saved.values[LeftHanded]=1;u.Open(saved);layout::Press(u,{Kind::Set,LeftHandedSticks,0,1},0);
+        Check(u.Click({Kind::Apply}).changed==(ChangeMask{1}<<LeftHandedSticks),"with Left-handed saved, Apply saves only the sticks' switch");
     }
     {   // Loot pick (#257): On by default, a switch on Interface, the right half of Loot name size's row, saved alone
         Check(Defaults()[LootPick]==1&&std::wstring(Definitions[LootPick].section)==L"interactions"&&

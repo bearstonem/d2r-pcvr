@@ -26,7 +26,13 @@
 //   RT <-> LT, RB <-> LB.
 // What says left or right without meaning a hand is kept (Kept): "time left", "left alone", "the left eye",
 // "Right-click", "upper right", "Left-handed" itself. A text about a fixed, physical side (the Left-handed and
-// Dominant hand rows) is simply not passed through.
+// Sticks stay right-handed rows) is simply not passed through.
+//
+// Sticks stay right-handed (hand_role.h, Sticks): the sticks are not mirrored, so neither are their names:
+// "right stick", "left stick" (any case, or "right-stick") are kept as written (Mirror's sticks false). Every
+// text that names a stick by its side means its pushes (walking; turning, the run toggle, loot names, map
+// zoom), which stay on that controller; a hand's own stick click is written "that hand's stick", "Stick
+// click" in a hand's column, never by side, and the walk stick's controller as "that stick's controller".
 //
 // Right-handed, T and S give the text back untouched (the same pointer): nothing changes with the mode off.
 // Value-only apart from the mode flag and T's pool: steamvr/hand_text_test.cpp.
@@ -49,6 +55,11 @@ inline constexpr std::string_view Kept[]={
     "Right-click","right-click","Left-click","left-click",
     "upper right","upper left","lower right","lower left",
     "left or right","right or left","left and right","right and left","Left or right","Left and right",
+};
+// Kept too while the sticks stay right-handed (Mirror's sticks false).
+inline constexpr std::string_view StickNames[]={
+    "right stick","left stick","Right stick","Left stick","RIGHT STICK","LEFT STICK",
+    "right-stick","left-stick","Right-stick","Left-stick",
 };
 struct Pair {std::string_view a,b;};
 // Whole phrases exchanged (either way).
@@ -79,13 +90,17 @@ inline bool AskBefore(std::string_view text,size_t i) {
     return false;
 }
 }
-// The text for a player whose hands are exchanged. Its own inverse for what it changes.
-inline std::string Mirror(std::string_view text) {
+// The text for a player whose hands are exchanged. Its own inverse for what it changes. sticks false: the
+// sticks stay right-handed, so their names are kept (StickNames).
+inline std::string Mirror(std::string_view text,bool sticks=true) {
     using namespace detail;
     std::vector<bool> kept(text.size(),false);
-    for(const auto phrase:Kept)
+    const auto keep=[&](std::string_view phrase){
         for(size_t i=text.find(phrase);i!=std::string_view::npos;i=text.find(phrase,i+1))
             if(WordAt(text,i,phrase))for(size_t k=0;k<phrase.size();++k)kept[i+k]=true;
+    };
+    for(const auto phrase:Kept)keep(phrase);
+    if(!sticks)for(const auto phrase:StickNames)keep(phrase);
     std::string out;out.reserve(text.size()+8);
     size_t i=0;
     while(i<text.size()) {
@@ -120,23 +135,29 @@ inline std::string Mirror(std::string_view text) {
 inline std::atomic<bool>& Mode(){static std::atomic<bool> left{false};return left;}
 inline bool Left(){return Mode().load(std::memory_order_relaxed);}
 inline void SetLeft(bool left){Mode().store(left,std::memory_order_relaxed);}
+// Sticks stay right-handed, in force (hand_role.h State::SticksKept): set with the mode; read only while Left.
+inline std::atomic<bool>& SticksMode(){static std::atomic<bool> kept{false};return kept;}
+inline bool SticksKept(){return Left()&&SticksMode().load(std::memory_order_relaxed);}
+inline void SetSticksKept(bool kept){SticksMode().store(kept,std::memory_order_relaxed);}
 // A text as shown now: itself right-handed, mirrored left-handed.
-inline std::string S(std::string_view text){return Left()?Mirror(text):std::string(text);}
+inline std::string S(std::string_view text){return Left()?Mirror(text,!SticksKept()):std::string(text);}
 // The same for a literal or a table's string, as a pointer that stays good: the text itself right-handed
 // (and whenever mirroring changes nothing), else its mirrored copy, kept for the life of the process.
-// M: the mirrored one whatever the mode (for a table mirrored once, ahead of time).
-inline const char* M(const char* text) {
+// M: the mirrored one whatever the mode (for a table mirrored once, ahead of time); sticks false keeps the
+// sticks' names (Sticks stay right-handed).
+inline const char* M(const char* text,bool sticks=true) {
     if(!text)return text;
     static std::mutex mutex;
-    static std::unordered_map<std::string,std::unique_ptr<std::string>> pool;
+    static std::unordered_map<std::string,std::unique_ptr<std::string>> pools[2];
+    auto& pool=pools[sticks?0:1];
     std::lock_guard lock(mutex);
     const auto found=pool.find(text);
     if(found!=pool.end())return found->second?found->second->c_str():text;
-    auto mirrored=Mirror(text);
+    auto mirrored=Mirror(text,sticks);
     if(mirrored==text){pool.emplace(text,nullptr);return text;}
     return pool.emplace(text,std::make_unique<std::string>(std::move(mirrored))).first->second->c_str();
 }
-inline const char* T(const char* text){return Left()?M(text):text;}
+inline const char* T(const char* text){return Left()?M(text,!SticksKept()):text;}
 // A pad binding's name, nothing but buttons ("B", "LT + X", "LT + RB"): each is the other controller's
 // (A <-> X, B <-> Y, LT <-> RT, LB <-> RB). MirrorPad whatever the mode, Pad as shown now.
 inline std::string MirrorPad(std::string_view name) {
@@ -155,9 +176,9 @@ inline std::string MirrorPad(std::string_view name) {
 inline std::string Pad(std::string_view name){return Left()?MirrorPad(name):std::string(name);}
 // Sets the mode for a scope (tests, previews).
 struct Scope {
-    bool was;
-    explicit Scope(bool left):was(Left()){SetLeft(left);}
-    ~Scope(){SetLeft(was);}
+    bool was,sticksWas;
+    explicit Scope(bool left,bool sticksKept=false):was(Left()),sticksWas(SticksMode().load()){SetLeft(left);SetSticksKept(sticksKept);}
+    ~Scope(){SetLeft(was);SetSticksKept(sticksWas);}
     Scope(const Scope&)=delete;Scope& operator=(const Scope&)=delete;
 };
 }

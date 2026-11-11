@@ -28,7 +28,7 @@ enum class View : uint8_t { Presets, Combat, Targeting, Shield, Monsters, Physic
 constexpr int MaxRailGroups=8;
 enum Key { Motion, Seated, Dominant, Snap, TurnSpeed, Waist, BeltForward,
            Foveation, Sky, Fog, Ceiling, DrawDistance, ObjectDistance,
-           EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, VitalsTilt, HapticStrength, HapticMelee, HapticBowDraw, HapticBowRelease, HapticSpell, HapticInteraction, HapticAlert, HapticShortMelee, BloodVisor, BloodWipe, MeleeThrustSpeed, LootLabelSize, CompanionCounts, StrainVignette, OfflinePlayers, ShieldBashSpeed, DesktopOneEye, MapTopDown, MapRotate, FoveationStrength, StereoRendering, DeferGpuWait, TargetHighlight, HeartbeatStart, SpellLock, StaffPoint, LandingCircles, GroundAim, AimHighlights, HighlightRight, HighlightLeft, EnemySight, BowLaser, ThrowLift, BottlePhysics, PropPhysics, CompanionAi, ShieldGrip, ShieldOut, ShieldUp, ShieldFollow, ShieldRoll, AimFollowsView, CompanionTactical, LeftHandStrikes, TorchFlame, FrameGeneration, FrameGenPreset, FrameGenScale, RunSpeed, RunWalkToggle, BodyPhysics, BigObjectDistance, FogDistance, LeatherMenu, LootBeamUnique, LootBeamSet, LootBeamRare, LootBeamRunes, LootBeamBrightness, CeilingTorches, ArcaneDecay, ArcaneFade, ManaThreshold, ArcaneIntensity, GlyphDraw, GlyphCircle, GlyphTriangle, GlyphSquare, GlyphLightning, GlyphSpiral, GlyphV, GlyphStar, GlyphWave, LootPick, MotionsOff, MotionsPaladinOff, MotionsDruidOff, MotionsAmazonOff, MotionsNecromancerOff, MotionsBarbarianOff, MotionsAssassinOff, MotionsWarlockOff, GlyphDrawSecond, GlyphLeftCircle, GlyphLeftTriangle, GlyphLeftSquare, GlyphLeftLightning, GlyphLeftSpiral, GlyphLeftV, GlyphLeftStar, GlyphLeftWave, SpellHandLight, MeleeReach, WalkDirection, RoomSteps, LightRadiusBoost, WeaponHeft, BowBash, AimWithEyes, MercPotionAssist, ClickToDrink, SkillCooldowns, SummonRangeMultiplier, TCrossCalibrate, LookAtYou, ReverbEcho, HitStagger, HitKnockback, HapticSurfaces, HapticHeartbeat, LeftHanded, Count };
+           EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, VitalsTilt, HapticStrength, HapticMelee, HapticBowDraw, HapticBowRelease, HapticSpell, HapticInteraction, HapticAlert, HapticShortMelee, BloodVisor, BloodWipe, MeleeThrustSpeed, LootLabelSize, CompanionCounts, StrainVignette, OfflinePlayers, ShieldBashSpeed, DesktopOneEye, MapTopDown, MapRotate, FoveationStrength, StereoRendering, DeferGpuWait, TargetHighlight, HeartbeatStart, SpellLock, StaffPoint, LandingCircles, GroundAim, AimHighlights, HighlightRight, HighlightLeft, EnemySight, BowLaser, ThrowLift, BottlePhysics, PropPhysics, CompanionAi, ShieldGrip, ShieldOut, ShieldUp, ShieldFollow, ShieldRoll, AimFollowsView, CompanionTactical, LeftHandStrikes, TorchFlame, FrameGeneration, FrameGenPreset, FrameGenScale, RunSpeed, RunWalkToggle, BodyPhysics, BigObjectDistance, FogDistance, LeatherMenu, LootBeamUnique, LootBeamSet, LootBeamRare, LootBeamRunes, LootBeamBrightness, CeilingTorches, ArcaneDecay, ArcaneFade, ManaThreshold, ArcaneIntensity, GlyphDraw, GlyphCircle, GlyphTriangle, GlyphSquare, GlyphLightning, GlyphSpiral, GlyphV, GlyphStar, GlyphWave, LootPick, MotionsOff, MotionsPaladinOff, MotionsDruidOff, MotionsAmazonOff, MotionsNecromancerOff, MotionsBarbarianOff, MotionsAssassinOff, MotionsWarlockOff, GlyphDrawSecond, GlyphLeftCircle, GlyphLeftTriangle, GlyphLeftSquare, GlyphLeftLightning, GlyphLeftSpiral, GlyphLeftV, GlyphLeftStar, GlyphLeftWave, SpellHandLight, MeleeReach, WalkDirection, RoomSteps, LightRadiusBoost, WeaponHeft, BowBash, AimWithEyes, MercPotionAssist, ClickToDrink, SkillCooldowns, SummonRangeMultiplier, TCrossCalibrate, LookAtYou, ReverbEcho, HitStagger, HitKnockback, HapticSurfaces, HapticHeartbeat, LeftHanded, LeftHandedSticks, Count };
 // One bit per setting, 256 wide: four words, since MSVC has no wider integer.
 // (128 until 2026-11-08, when 126 were in use and more rows were coming.)
 struct ChangeMask {
@@ -246,9 +246,9 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"Spell hand light", "Sorceress: how bright the spells in her hands light the dark around you; Off for none", L"torch",L"spell_hands_pct",40,0,100,10},
     // Padding on every monster's body for weapon and fist contacts (melee_contact.h Reach, vr/melee.cpp); 0 = as measured.
     {"Melee reach", "A weapon or fist this close beside a monster still hits; walls still block", L"gameplay",L"melee_reach_cm",0,0,50,5},
-    // Walk direction (walk_direction.h; owner 2026-11-08): the left stick walks where you look (0) or where the
-    // left controller points (1). Beside Dominant hand.
-    {"Walk direction", "The left stick walks where you look, or where the left controller points", L"stick",L"walk_direction",0,0,1,1},
+    // Walk direction (walk_direction.h; owner 2026-11-08): the walk stick walks where you look (0) or where its own
+    // controller points (1): the left controller, the right one left-handed unless Sticks stay right-handed.
+    {"Walk direction", "The left stick walks where you look, or where that stick's controller points", L"stick",L"walk_direction",0,0,1,1},
     // Room follows you (room_steps.h; Discord, 2026-11-04 and 11-08; owner 2026-11-08: "the room center becomes where
     // we physically move"): the hero's spot follows you in your room. On by default; beside Seated play, which turns it off.
     {"Room follows you", "The hero's spot follows you as you move in your room; Off: it stays where you calibrated", L"gameplay",L"room_steps",1,0,1,1},
@@ -295,6 +295,11 @@ inline constexpr std::array<Definition,Count> Definitions{{
     // shield on the right arm, the triggers, grips, face buttons and sticks swapped, the skills following the hand's
     // role. Its own switch (experimental, off by default). VR Settings > Controls > Hands.
     {"Left-handed (experimental)", "Weapon in the left hand, shield on the right; buttons, menus and motions mirrored", L"interactions",L"left_handed",0,0,1,1},
+    // Sticks stay right-handed (hand_role.h Sticks; left-handed players, 2026-11-11: "keep the game controls, like
+    // movement and rotation, on the actual controllers as if they were right-handed"): with Left-handed on, the left
+    // stick still walks and the right one turns; everything else stays mirrored. Off by default; shown only with
+    // Left-handed on (RowShown), below it on Controls > Hands.
+    {"Sticks stay right-handed", "Left-handed only: the left stick walks and the right stick turns, as right-handed", L"interactions",L"left_handed_sticks_right",0,0,1,1},
 }};
 using Values=std::array<float,Count>;
 // The setting holding the skill on glyph shape i (glyph_recognizer.h order): the right hand's (0), or the left's (1).
@@ -562,6 +567,7 @@ inline bool RowShown(Key key,const Values& v,const Context& c){
         case FogDistance:return v[Fog]>.5f;   // beside Distance fog while the fog is on (main greyed it; RowEnabled)
         case CeilingTorches:return v[Ceiling]>.5f;   // beside Dungeon ceilings while they are on (a greyed half has no room for its lock)
         case RoomSteps:return v[Seated]<.5f;   // beside Seated play while it is off (sitting, there are no steps)
+        case LeftHandedSticks:return v[LeftHanded]>.5f;   // under Left-handed while it is on (right-handed the sticks are already there)
         // NVIDIA's rows follow the NVIDIA mode alone: By turns grays them with Frame generation (RowEnabled).
         case FrameGenPreset:case FrameGenScale:return framegen::Read(v[FrameGeneration],0,0).mode==framegen::Mode::Nvidia;
         default:return true;

@@ -443,6 +443,10 @@ std::vector<PreviewShot> PreviewShots(){
         Snapshot s;s.values[RunSpeed]=-10;s.values[RunWalkToggle]=1;
         Setup x=base(View::Hands,-1,s);x.in.hover={Kind::Set,RunWalkToggle,0,0};x.in.card=RunWalkToggle;add("hands-stick-toggle",x);
     }
+    {   // Sticks stay right-handed, shown under Left-handed while it is on: On and pointed.
+        Snapshot s;s.values[LeftHanded]=1;s.values[LeftHandedSticks]=1;
+        Setup x=base(View::Hands,-1,s);x.in.hover={Kind::Set,LeftHandedSticks,0,0};x.in.card=LeftHandedSticks;add("hands-left-handed-sticks",x);
+    }
     {   // main's number pairs as side halves: Distance fog | Fog distance (shown while the fog is on), its list
         // of steps open; Scenery distance | Big objects, its list open with 300 pointed.
         Snapshot s;s.values[Fog]=1;s.values[FogDistance]=700;

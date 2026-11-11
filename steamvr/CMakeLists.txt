@@ -523,6 +523,10 @@ add_test(NAME vr-settings-worker-paint-test COMMAND vr-settings-preview --worker
 # button name still fits ("right" is a letter longer than "left"), and the wheel's cards and prompt paint.
 add_test(NAME vr-settings-pages-left-handed-test COMMAND vr-settings-preview --pages-check --left-handed)
 add_test(NAME vr-settings-fit-left-handed-test COMMAND vr-settings-preview --fit-check --left-handed)
+# Left-handed with Sticks stay right-handed (hand_role.h Sticks): the sticks' names kept, the Guide's stick lines in
+# the other hand's column.
+add_test(NAME vr-settings-pages-left-handed-sticks-test COMMAND vr-settings-preview --pages-check --left-handed-sticks-right)
+add_test(NAME vr-settings-fit-left-handed-sticks-test COMMAND vr-settings-preview --fit-check --left-handed-sticks-right)
 add_test(NAME interaction-motions-left-handed-test COMMAND interaction-preview "${CMAKE_CURRENT_BINARY_DIR}/motions-preview-left-handed.png" --motions-check --left-handed)
 add_test(NAME skill-card-fit-left-handed-test COMMAND interaction-preview "${CMAKE_CURRENT_BINARY_DIR}/skill-editor-left-handed.png" --editor-check --left-handed)
 add_test(NAME interaction-glyphs-left-handed-test COMMAND interaction-preview "${CMAKE_CURRENT_BINARY_DIR}/glyphs-preview-left-handed.png" --glyphs-check --left-handed)
