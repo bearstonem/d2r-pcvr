@@ -59,9 +59,45 @@ inline bool ThrowingPotion(std::string_view code) {
     while(!code.empty()&&code.back()==' ')code.remove_suffix(1);
     return code=="gps"||code=="ops"||code=="gpm"||code=="opm"||code=="gpl"||code=="opl";
 }
-// The right trigger's skills that throw the potion in hand: Throw, or Attack
+// A trigger's skills that throw the hero's potion: Throw, or Attack
 // (Skills.txt leaves tpot out of Attack, so the game is expected to throw).
 inline bool PotionThrow(int skill){return skill==Attack||skill==Throw;}
+// A throwing potion in either hand (owner, 2026-11-10: "physical throwing of potions only seems to work if
+// they're equipped in the primary hand ... make it so they both work the same way"). Hands in role order
+// (hand_role.h): 0 main, 1 off; a hand holds what its own inventory arm holds (body location 4 main, 5 off).
+// Each potion hand throws its own with one native press of a trigger slot whose skill throws that potion:
+//   the main hand's: Attack or Throw (the game throws the primary weapon);
+//   the off hand's, alone (the main hand empty or a shield: it is the hero's weapon): Attack, Throw or Left
+//     Hand Throw; beside a weapon or another potion in the main hand: Left Hand Throw only (Skills.txt 4, the
+//     native Throw's twin for the other hand), as Attack and Throw would throw the main hand's.
+// The hand's own trigger arms its throw when it holds such a skill; else, for a potion that is the hero's
+// only weapon, the other trigger does when it holds one (the press that threw it natively before): the
+// potion's hand still makes the throw.
+inline constexpr int LeftHandThrow=4;
+enum class Held:uint8_t {None,Shield,Weapon,Potion};
+inline bool Armed(Held held){return held==Held::Weapon||held==Held::Potion;}
+inline bool PotionThrow(int hand,const Held held[2],int skill) {
+    if(hand<0||hand>1||held[hand]!=Held::Potion)return false;
+    if(hand==0)return PotionThrow(skill);
+    return Armed(held[0])?skill==LeftHandThrow:PotionThrow(skill)||skill==LeftHandThrow;
+}
+// trigger[hand]: the trigger (0 main, 1 off) that arms that hand's potion throw, -1 none. A trigger arms
+// one hand only. skill[t]: trigger t's skill, -1 when it is not known, not available or not allowed.
+struct PotionRoute {
+    int trigger[2]{-1,-1};
+    int Hand(int t) const {return trigger[0]==t?0:trigger[1]==t?1:-1;}   // the hand trigger t throws, -1 none
+    bool operator==(const PotionRoute&) const=default;
+};
+inline PotionRoute RoutePotions(const Held held[2],const int skill[2]) {
+    PotionRoute route;
+    for(int hand=0;hand<2;++hand)if(PotionThrow(hand,held,skill[hand]))route.trigger[hand]=hand;
+    // The hero's only weapon, its own trigger holding another skill: the other trigger's Attack or Throw.
+    for(int hand=0;hand<2;++hand) {
+        const int other=1-hand;
+        if(route.trigger[hand]<0&&held[hand]==Held::Potion&&!Armed(held[other])&&route.Hand(other)<0&&PotionThrow(skill[other]))route.trigger[hand]=other;
+    }
+    return route;
+}
 // What a physical release can carry: a bow's arrow skills; a thrown weapon's
 // javelin skills, and the Barbarian's Double Throw (Skills.txt srvdofunc 74,
 // no srvmissile: each throw flies the throwing hand's own weapon).

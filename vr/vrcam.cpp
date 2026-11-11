@@ -10818,7 +10818,8 @@ bool RingWanted() {
     return g_enabled.load() && g_inWorld.load() && !gamestate::MenuOpen() &&
         (((AimOn(framevr::settings::LandingCircles) || tacticalActive) && framevr::telegraph::AnyOn(marks, now)) ||
          framevr::telegraph::SkillOn(marks, framevr::telegraph::TeleportMark, now) ||
-         framevr::telegraph::SkillOn(marks, framevr::telegraph::TossMark, now));   // an aimed throw's sigil too (toss.h)
+         framevr::telegraph::SkillOn(marks, framevr::telegraph::TossMark, now) ||   // an aimed throw's sigil too (toss.h)
+         framevr::telegraph::SkillOn(marks, framevr::telegraph::TossOffMark, now));  // and the off trigger's
 }
 // Loot beams (same pass): while a Rare, Set or Unique item or a high rune lies near the hero.
 bool BeamWanted() {
@@ -11903,7 +11904,7 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
                 // Teleport's sigil (D2R_DepthFog.fx TeleportSigil)
                 const bool teleport = mark.skill == TeleportMark;
                 // an aimed throw's (TossMark): the same sigil in its skill's color, without the pillar
-                const bool sigil = teleport || mark.skill == framevr::telegraph::TossMark;
+                const bool sigil = teleport || framevr::telegraph::TossSigil(mark.skill);
                 const float dir[4] = {mark.dirX, mark.dirY, mark.halfLength * 2.0f, sigil ? 1.0f : 0.0f};
                 if (teleport && draw.on && tele[3] <= 0.0f) { tele[0] = ring[0]; tele[1] = ring[1]; tele[2] = ring[2]; tele[3] = ring[3]; }
                 snprintf(n, sizeof n, "RingDir%d", k); SetFloats(rt, n, dir, 4);

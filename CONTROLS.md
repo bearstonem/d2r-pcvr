@@ -589,8 +589,15 @@ The models are the game's own, cached from your installed game by the
 installer. **Gameplay > Combat > Skills on your moves** Off turns this off.
 
 **Throwing potions.** Equip a stack of gas or oil potions (Rancid, Choking or
-Strangling Gas; Oil, Exploding or Fulminating Potion) in the right hand, with
-Attack or Throw on the right trigger. Press the trigger, throw and let go. With
+Strangling Gas; Oil, Exploding or Fulminating Potion) in either hand, with
+Attack or Throw on that hand's trigger. Press the trigger, throw with the hand
+that holds the potion and let go. While the trigger is held, a sigil on the
+floor shows where the potion will land: hold the hand out in front to move it,
+then wind up and throw. With a potion ready in each hand, each has its own
+sigil. If the potion is your only weapon and only the other hand's trigger has
+Attack or Throw, that trigger arms the throw and the potion's hand still makes
+it. An off hand potion beside a weapon or a second potion in the main hand
+needs Left Hand Throw on the off trigger. With
 **Bottle physics** on, the potion leaves your hand as a real bottle and flies
 until it first touches the floor, a wall, a table or a prop; it shatters there,
 and the game's own cloud or blast starts at that spot, within its reach. Off,

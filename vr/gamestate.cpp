@@ -408,9 +408,9 @@ std::atomic<uint32_t> g_from{0};
 std::atomic<bool> g_leftShield{false};
 std::mutex g_meleeEquipmentMutex;framevr::dualwield::Equipment g_meleeEquipment;
 std::vector<uint32_t> g_shieldTypes;
-std::vector<uint32_t> g_potionTypes;            // ItemTypes tpot: the throwing potions (RightThrowingPotion)
-std::atomic<bool> g_rightPotion{false};
-std::atomic<uint32_t> g_rightPotionCode{0};   // its item code, for the bottle that flies (#292)
+std::vector<uint32_t> g_potionTypes;            // ItemTypes tpot: the throwing potions (PotionHands)
+std::atomic<uint32_t> g_potionHeld{0};        // weaponskills::Held of the main arm (bits 0-7) and the off arm (8-15)
+std::atomic<uint32_t> g_potionCode[2];        // a potion's item code, for the bottle that flies (#292); 0 = none
 std::atomic<uint32_t> g_handsKey{0};          // what is in the two hands, as one number (HandsKey)             // the hand slot the weapon kind came from: 0 right, 1 left              // D2RVR_TWO_HANDED* bits of what is held
 
 constexpr uint32_t Four(const char* s) { return DataTables::MakeFourCC(s[0], s[1], s[2], s[3]); }
@@ -726,6 +726,7 @@ void __cdecl ReadItems(const PluginContext* ctx, void* token) noexcept {
         g_type.store(D2RVR_TYPE_UNKNOWN);
         g_held.store(0);
         g_leftShield=false;
+        g_potionHeld=0;g_potionCode[0]=0;g_potionCode[1]=0;
         {std::lock_guard lock(g_meleeEquipmentMutex);g_meleeEquipment={};}
         g_two.store(0);
         g_set.store(0);
@@ -797,8 +798,26 @@ void __cdecl ReadItems(const PluginContext* ctx, void* token) noexcept {
     // The tracked shield is on the left wrist even when the SDK reports it
     // in body location 4 (observed with the development Paladin).
     g_leftShield=IsShield(code[0])||IsShield(code[1]);
-    g_rightPotion=IsThrowingPotion(code[0]);   // thrown by hand to a spot (transport: motionInput.potion)
-    g_rightPotionCode=g_rightPotion&&code[0].size()>=3?uint32_t(uint8_t(code[0][0]))|uint32_t(uint8_t(code[0][1]))<<8|uint32_t(uint8_t(code[0][2]))<<16|uint32_t(' ')<<24:0u;
+    // Throwing potions, thrown by hand to a spot (transport: weaponskills::RoutePotions): what each arm holds,
+    // body location 4 the main hand's and 5 the off hand's, and the potion's code for the bottle that flies.
+    {
+        uint32_t held=0,changed=0;
+        for(int i=0;i<2;++i) {
+            using framevr::weaponskills::Held;
+            const bool potion=IsThrowingPotion(code[i]);
+            const Held kind=code[i].empty()?Held::None:potion?Held::Potion:IsShield(code[i])?Held::Shield:Held::Weapon;
+            held|=uint32_t(kind)<<(i*8);
+            const uint32_t potionCode=potion&&code[i].size()>=3?uint32_t(uint8_t(code[i][0]))|uint32_t(uint8_t(code[i][1]))<<8|uint32_t(uint8_t(code[i][2]))<<16|uint32_t(' ')<<24:0u;
+            changed|=g_potionCode[i].exchange(potionCode)!=potionCode;
+        }
+        if(g_potionHeld.exchange(held)!=held||changed) {
+            static const char* const names[]={"nothing","a shield","a weapon","a throwing potion"};
+            char b[200];
+            snprintf(b,sizeof b,"gamestate: throwing potions - the main arm (body location 4) holds %s '%s', the off arm (5) %s '%s'",
+                names[held&3u],code[0].c_str(),names[(held>>8)&3u],code[1].c_str());
+            if((held&0xffu)==uint32_t(framevr::weaponskills::Held::Potion)||(held>>8)==uint32_t(framevr::weaponskills::Held::Potion)||changed)Log(b);
+        }
+    }
     const uint32_t handTypes[2]={KindOf(code[0]),KindOf(code[1])};
     {std::lock_guard lock(g_meleeEquipmentMutex);
         if(g_meleeEquipment.id[0]!=id[0]||g_meleeEquipment.id[1]!=id[1])g_meleeEquipment={};
@@ -1090,8 +1109,8 @@ uint32_t WeaponSet() { return g_set.load(); }
 uint32_t WeaponType() { return g_type.load(); }
 uint32_t HandsHeld() { return g_held.load(); }
 bool LeftShield() {return g_leftShield.load();}
-bool RightThrowingPotion() {return g_rightPotion.load();}
-uint32_t RightThrowingPotionCode() {return g_rightPotionCode.load();}
+uint32_t PotionHands() {return g_potionHeld.load();}
+uint32_t ThrowingPotionCode(int hand) {return hand==0||hand==1?g_potionCode[hand].load():0u;}
 uint32_t TwoHanded() { return g_two.load(); }
 uint32_t WeaponHand() { return g_from.load(); }
 uint32_t HandsKey() { return g_handsKey.load(); }
