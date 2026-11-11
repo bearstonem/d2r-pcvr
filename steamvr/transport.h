@@ -20,6 +20,9 @@ void ConfigureSymmetricProjection(bool enabled);
 // the next OpenXR start; the backend and NVIDIA's options reach a loaded layer
 // at once, and Off bypasses it until then.
 void ConfigureFrameGeneration(float mode,float preset,float scale);
+// [render] frame_generation_late_wait (late_wait.h): while OFXR Bridge makes frames on SteamVR, a pair's
+// xrWaitFrame and xrBeginFrame come after its first eye's draw. Off unless set.
+void ConfigureFrameGenerationLateWait(bool enabled);
 // [stereo] turns_from_drawn_eye (1): by turns, the eye not drawn mostly from
 // the drawn eye's picture of this frame (TurnDepth); 0: its own image alone.
 void ConfigureTurnsFromDrawnEye(bool enabled);
@@ -233,6 +236,10 @@ struct FrameTiming {
     double displayPeriodMs=0; // Runtime-predicted application period; may differ from panel refresh.
     double acquireMs[2]{},copySubmitMs[2]{},gpuSceneMs[2]{},gpuEffectsMs[2]{},gpuCopyMs[2]{};
     uint32_t pipelines=0,layers=0;bool gpuValid=false;   // layers: composition layers the last xrEndFrame sent
+    // sinceEndMs: from the last xrEndFrame's return to this frame's xrWaitFrame. lateWait: that wait came after
+    // the first eye's draw (late_wait.h), so waitFrameMs is in the first pass's time, not in the frame's opening;
+    // lateWaitOffMs: the time it gave less the one the poses were found for.
+    double sinceEndMs=0,lateWaitOffMs=0;bool lateWait=false;
 };
 FrameTiming LastTiming();
 // One headset frame as the render thread measured it, for the readout on VR Settings > Graphics > Performance and Frames:

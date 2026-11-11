@@ -1025,6 +1025,8 @@ void LoadSettings() {
     framevr::ConfigureDeferredWait(IniB(L"render",L"defer_gpu_wait",false));
     framevr::ConfigureSymmetricProjection(IniB(L"render",L"symmetric_projection",true));
     framevr::ConfigureFrameGeneration(IniF(L"render",L"frame_generation",0),IniF(L"render",L"frame_generation_preset",1),IniF(L"render",L"frame_generation_scale",2));
+    // A trial, off unless set (steamvr/late_wait.h): with frame generation making frames on SteamVR, the pair's xrWaitFrame after its first eye's draw.
+    framevr::ConfigureFrameGenerationLateWait(IniB(L"render",L"frame_generation_late_wait",true));
     framevr::ConfigureTurnsFromDrawnEye(IniB(L"stereo",L"turns_from_drawn_eye",true));
     framevr::ConfigureTurnsKeepOwn(int(IniF(L"stereo",L"turns_keep_own",3)));
     framevr::ConfigureTurnsKeepNear(IniF(L"stereo",L"turns_keep_gap",48),IniF(L"stereo",L"turns_keep_reach",96));
@@ -7488,6 +7490,11 @@ uintptr_t HookDrawGameScreen(int a) {
 #ifdef D2RVR_NATIVE_OPENXR
     static double sumBegin=0,sumEnd=0,sumWait=0,sumFence=0,sumSubmit=0,sumPeriod=0,sumLocate=0,sumInput=0;
     static uint32_t periodPairs=0;
+    // The runtime's wait where it sits (steamvr/late_wait.h): in the frame's opening (sumWaitBegin), or late, after the first
+    // eye's draw and so inside that pass's time (latePairs); how long after the last xrEndFrame it was called; and, late, how
+    // far the time it gave was from the one the head and hands were found for.
+    static double sumWaitBegin=0,sumSinceEnd=0,sumLateOff=0;
+    static uint32_t latePairs=0;
     // How long each pair took, in three counts a ten-second line: the whole cycle (end to end), the runtime's wait in
     // it, and the rest (the work). A mean under the headset's slot says nothing of the pairs that ran over it.
     static constexpr double cycleEdges[]={15,16,17.5,20,23,26,30},workEdges[]={10,12,14,15,16,17,19},waitEdges[]={1,2,3,4,6,9,12};
@@ -7511,8 +7518,8 @@ uintptr_t HookDrawGameScreen(int a) {
         if(!depth) {
 #ifdef D2RVR_NATIVE_OPENXR
             framevr::profile::SkipPair();
-            sumBegin=sumEnd=sumWait=sumFence=sumSubmit=sumPeriod=sumLocate=sumInput=0;
-            periodPairs=0;
+            sumBegin=sumEnd=sumWait=sumFence=sumSubmit=sumPeriod=sumLocate=sumInput=sumWaitBegin=sumSinceEnd=sumLateOff=0;
+            periodPairs=latePairs=0;
 #endif
             // Menu/loading frames are not consecutive stereo gameplay frames.
             // Exclude time spent in panels from the next world's hitch sample.
@@ -7641,10 +7648,14 @@ uintptr_t HookDrawGameScreen(int a) {
     const double ended=pairtime::UsNow();
 #ifdef D2RVR_NATIVE_OPENXR
     const auto xr=framevr::LastTiming();
-    framevr::NoteFrame(lastEnd>0?(entered-lastEnd)*.001:0,xr.waitFrameMs,(t2-t0)*.001,
-        std::max(0.0,(t0-entered)*.001-xr.waitFrameMs)+(ended-t2)*.001,lastEnd>0?(ended-lastEnd)*.001:0,xr.displayPeriodMs,false);
+    // A late wait is in the passes' time, not in the frame's opening: taken out of where it was.
+    const double waitInBegin=xr.lateWait?0.0:xr.waitFrameMs,waitInDraw=xr.lateWait?xr.waitFrameMs:0.0;
+    framevr::NoteFrame(lastEnd>0?(entered-lastEnd)*.001:0,xr.waitFrameMs,std::max(0.0,(t2-t0)*.001-waitInDraw),
+        std::max(0.0,(t0-entered)*.001-waitInBegin)+(ended-t2)*.001,lastEnd>0?(ended-lastEnd)*.001:0,xr.displayPeriodMs,false);
     sumBegin+=t0-entered;sumEnd+=ended-t2;
     sumWait+=xr.waitFrameMs;sumFence+=xr.waitGpuMs;sumSubmit+=xr.submitMs;sumLocate+=xr.locateMs;sumInput+=xr.inputMs;
+    sumWaitBegin+=waitInBegin;sumSinceEnd+=xr.sinceEndMs;
+    if(xr.lateWait){++latePairs;sumLateOff+=std::fabs(xr.lateWaitOffMs);}
     if(xr.displayPeriodMs>0){sumPeriod+=xr.displayPeriodMs;++periodPairs;}
     framevr::profile::FinishPair(lastEnd>0?(entered-lastEnd)*.001:0,(t0-entered)*.001,
         (t1-t0)*.001,(t2-t1)*.001,(ended-t2)*.001,(c1-c0)*.001,(c2-c1)*.001,xr);
@@ -7693,11 +7704,11 @@ uintptr_t HookDrawGameScreen(int a) {
                  maxPair * 0.001);
 #ifdef D2RVR_NATIVE_OPENXR
             LogF("Frame pacing: runtime predicted %.1f Hz | XR begin %.2f ms (wait %.2f) | XR end %.2f ms (submit %.2f) | GPU fence %.2f ms (pair total)",
-                sumPeriod>0?1000.0*periodPairs/sumPeriod:0,sumBegin*k,sumWait/pairs,sumEnd*k,sumSubmit/pairs,sumFence/pairs);
+                sumPeriod>0?1000.0*periodPairs/sumPeriod:0,sumBegin*k,sumWaitBegin/pairs,sumEnd*k,sumSubmit/pairs,sumFence/pairs);
             // XR begin's own work, apart from the runtime's wait: finding the head and eyes, then the frame's input
             // step (controllers, gestures, the wrist and visor panels' uploads). (A line of its own: LogF keeps 255 characters.)
             LogF("Frame pacing: XR begin, ms a pair: wait %.2f | locate %.2f | input %.2f (controllers, gestures, panel uploads) | rest %.2f",
-                sumWait/pairs,sumLocate/pairs,sumInput/pairs,std::max(0.0,sumBegin*k-(sumWait+sumLocate+sumInput)/pairs));
+                sumWaitBegin/pairs,sumLocate/pairs,sumInput/pairs,std::max(0.0,sumBegin*k-(sumWaitBegin+sumLocate+sumInput)/pairs));
             // (lines of their own: LogF keeps 255 characters)
             LogF("Frame pacing: pairs by cycle, ms: <15 %u | 15-16 %u | 16-17.5 %u | 17.5-20 %u | 20-23 %u | 23-26 %u | 26-30 %u | 30+ %u (a slot %.2f ms)",
                 cycleBins[0],cycleBins[1],cycleBins[2],cycleBins[3],cycleBins[4],cycleBins[5],cycleBins[6],cycleBins[7],periodPairs?sumPeriod/periodPairs:0.0);
@@ -7705,6 +7716,9 @@ uintptr_t HookDrawGameScreen(int a) {
                 workBins[0],workBins[1],workBins[2],workBins[3],workBins[4],workBins[5],workBins[6],workBins[7]);
             LogF("Frame pacing: pairs by the runtime's wait, ms: <1 %u | 1-2 %u | 2-3 %u | 3-4 %u | 4-6 %u | 6-9 %u | 9-12 %u | 12+ %u",
                 waitBins[0],waitBins[1],waitBins[2],waitBins[3],waitBins[4],waitBins[5],waitBins[6],waitBins[7]);
+            // Where that wait sat: in XR begin, or late (the first eye drawn; then it is in 'left' above and not in XR begin).
+            LogF("Frame pacing: the runtime's wait %.2f ms a pair, called %.2f ms after the last xrEndFrame | late (after the first eye's draw) on %u of %u pairs, its time %.2f ms from the poses' (mean)",
+                sumWait/pairs,sumSinceEnd/pairs,latePairs,pairs,latePairs?sumLateOff/latePairs:0.0);
             for(auto* bins:{cycleBins,workBins,waitBins})std::fill(bins,bins+8,0u);
 #endif
             LogF("vrcam: the two passes busy the game's thread %.0f%% of their sampled time (%.2f ms CPU a pair over %u sampled pairs; the rest waits - GPU, fences, locks)",
@@ -7712,8 +7726,8 @@ uintptr_t HookDrawGameScreen(int a) {
         }
         sumGap = 0.0; maxPair = 0.0; sumCpu = 0.0; sumWall = 0.0;
 #ifdef D2RVR_NATIVE_OPENXR
-        sumBegin=sumEnd=sumWait=sumFence=sumSubmit=sumPeriod=sumLocate=sumInput=0;
-        periodPairs=0;
+        sumBegin=sumEnd=sumWait=sumFence=sumSubmit=sumPeriod=sumLocate=sumInput=sumWaitBegin=sumSinceEnd=sumLateOff=0;
+        periodPairs=latePairs=0;
 #endif
         for (int e = 0; e < 2; ++e) sumPass[e] = sumPresent[e] = sumEff[e] = 0.0;
         since = now; pairs = cpuPairs = 0;
