@@ -1,5 +1,6 @@
 // The draw-thread sampler ([debug] draw_sampler): the tables from made-up samples and modules, then the
-// sampler itself on a thread of this test - a busy one, a waiting one, and the report's file and log lines.
+// sampler itself on a thread of this test - a busy one, a waiting one, and the report's file and log lines -
+// and on the threads that run made-up render tasks (the slot table, the watch list, a report per task).
 #include "draw_sampler_capture.h"
 #include "render_task_signatures.h"
 #include <cassert>
@@ -77,6 +78,7 @@ static void Functions() {
     assert(BuildFunctions(table, std::size(table), nullptr, 0).size() == 6);   // no image: every row its own function
 
     Module m;
+    m.kind = Kind::Ntdll;
     m.functions = f;
     m.exports = {{0x2000, "Exported"}, {0xA000, "NtWaitForSingleObject"}, {0xA020, "NtClose"}};
     Place p = Locate(m, 0x1010); assert(p.exact && p.start == 0x1000 && !p.symbol);
@@ -91,6 +93,145 @@ static void Functions() {
     p = Locate(m, 0xA100); assert(!p.exact);                                // too far past any export
     assert(NearestExport(m, 0x1FFF, 0x40) == nullptr && NearestExport(m, 0xA01F, 0x40)->rva == 0xA000 && NearestExport(m, 0xA000, 0)->rva == 0xA000);
     assert(NearestExport(m, 0xA001, 0) == nullptr);
+    // a module that is not the system's: an export names a function at its start, never code after one without an unwind row
+    m.kind = Kind::Mod;
+    p = Locate(m, 0x2010); assert(p.exact && p.start == 0x2000 && p.symbol && !strcmp(p.symbol, "Exported"));
+    p = Locate(m, 0xA014); assert(!p.exact && !p.symbol);
+}
+
+// Which thread is inside which render task (task_slots.h): a thread's slot, runs one inside the other, what a reader sees.
+static void Slots() {
+    using namespace framevr::taskslots;
+    static Table t;
+    assert(!Find(t, 100) && !Claim(t, 0) && !Find(t, 0));
+    Slot* const a = Claim(t, 100);
+    assert(a && Claim(t, 100) == a && Find(t, 100) == a && a->thread.load() == 100);
+    uint32_t twin = 101;
+    while (First(twin) != First(100)) ++twin;   // a thread whose search starts at the same slot: it gets the next
+    Slot* const b = Claim(t, twin);
+    assert(b && b != a && b == &t.slots[(First(100) + 1) % MaxSlots] && Find(t, twin) == b && Find(t, 100) == a);
+
+    View v;
+    assert(Read(*a, v) == Seen::Idle && v.thread == 100 && v.depth == 0);
+    Enter(*a, 0x7000, 0xAAA0, 0x9000, 5, 1);
+    assert(Read(*a, v) == Seen::Task && v.thread == 100 && v.depth == 1 && v.name == 0xAAA0 && v.root == 0x9000 && v.index == 5 && v.eye == 1 && v.teb == 0x7000 && v.run == 1);
+    assert(Read(*b, v) == Seen::Idle);                           // the other thread's slot says nothing of it
+    Enter(*a, 0x7000, 0xBBB0, 0x8000, 6, 0);                     // the task waits and helps: another run inside it, lower on the stack
+    assert(Read(*a, v) == Seen::Task && v.depth == 2 && v.name == 0xBBB0 && v.root == 0x8000 && v.index == 6 && v.eye == 0 && v.run == 2);
+    Leave(*a);
+    assert(Read(*a, v) == Seen::Task && v.depth == 1 && v.name == 0xAAA0 && v.root == 0x9000 && v.run == 1);   // the outer run is the thread's task again
+    Leave(*a);
+    assert(Read(*a, v) == Seen::Idle);
+    Leave(*a);                                                   // one Leave too many changes nothing
+    assert(Read(*a, v) == Seen::Idle && a->depth.load() == 0 && !(a->seq.load() & 1));
+    Enter(*a, 0x7000, 0xCCC0, 0x9000, 7, 0);
+    assert(Read(*a, v) == Seen::Task && v.run == 3 && v.name == 0xCCC0);   // each run has its own number
+    // runs never left (an exception went up through them): a run that begins at or above their frames drops them
+    Enter(*a, 0x7000, 0xDDD0, 0x8000, 8, 0);
+    Enter(*a, 0x7000, 0xEEE0, 0x8800, 9, 0);                     // above the inner run's frame, below the outer's
+    assert(Read(*a, v) == Seen::Task && v.depth == 2 && v.name == 0xEEE0);
+    Enter(*a, 0x7000, 0xFFF0, 0x9500, 10, 0);                    // above both
+    assert(Read(*a, v) == Seen::Task && v.depth == 1 && v.name == 0xFFF0 && v.run == 6);
+    Leave(*a);
+    // deeper than is kept: the innermost is not known, and comes back as the runs end
+    for (int i = 0; i < MaxDepth + 2; ++i) Enter(*a, 0x7000, 0x1000 + uint64_t(i), 0x9000 - 0x100 * uint64_t(i), uint8_t(i), 0);
+    assert(Read(*a, v) == Seen::Deep && v.depth == uint32_t(MaxDepth + 2));
+    Leave(*a); assert(Read(*a, v) == Seen::Deep);
+    Leave(*a); assert(Read(*a, v) == Seen::Task && v.depth == uint32_t(MaxDepth) && v.name == 0x1000 + uint64_t(MaxDepth - 1));
+    for (int i = 0; i < MaxDepth; ++i) Leave(*a);
+    assert(Read(*a, v) == Seen::Idle);
+    // caught while its thread writes it: nothing to go by
+    a->seq.store(a->seq.load() + 1);
+    assert(Read(*a, v) == Seen::Writing);
+    a->seq.store(a->seq.load() + 1);
+    assert(Read(*a, v) == Seen::Idle);
+
+    // a full table: every thread keeps its slot, one more gets none and is counted
+    static Table full;
+    Slot* seen[MaxSlots];
+    for (uint32_t i = 0; i < uint32_t(MaxSlots); ++i) {
+        seen[i] = Claim(full, 1000 + 4 * i);
+        assert(seen[i]);
+        for (uint32_t j = 0; j < i; ++j) assert(seen[j] != seen[i]);
+    }
+    for (uint32_t i = 0; i < uint32_t(MaxSlots); ++i) assert(Claim(full, 1000 + 4 * i) == seen[i] && Find(full, 1000 + 4 * i) == seen[i]);
+    assert(full.overflow.load() == 0 && !Claim(full, 5000) && full.overflow.load() == 1 && !Find(full, 5000));
+
+    // threads claiming at once: each its own slot
+    static Table shared;
+    Slot* got[8] = {};
+    {
+        std::vector<std::thread> threads;
+        for (int i = 0; i < 8; ++i) threads.emplace_back([&got, i] { for (int n = 0; n < 1000; ++n) got[i] = Claim(shared, 7 + 64 * uint32_t(i)); });
+        for (std::thread& th : threads) th.join();
+    }
+    for (int i = 0; i < 8; ++i) { assert(got[i] && got[i]->thread.load() == 7 + 64 * uint32_t(i)); for (int j = 0; j < i; ++j) assert(got[j] != got[i]); }
+
+    // a reader beside the writing thread never takes two states for one
+    static Table live;
+    Slot* const w = Claim(live, 42);
+    std::atomic<bool> done{false};
+    uint64_t whole = 0, inner = 0;
+    std::thread writer([&] {
+        for (uint64_t k = 1; k <= 300000; ++k) {
+            Enter(*w, 0x7000, k, ~k, uint8_t(k), uint8_t(k & 1));
+            const uint64_t in = k | (1ull << 62);
+            Enter(*w, 0x7000, in, ~in, uint8_t(in), uint8_t(k & 1));
+            Leave(*w);
+            Leave(*w);
+        }
+        done.store(true);
+    });
+    while (!done.load()) {
+        View r;
+        if (Read(*w, r) != Seen::Task) continue;
+        ++whole;
+        const bool in = (r.name >> 62) != 0;
+        if (in) ++inner;
+        assert(r.root == ~r.name && r.index == uint8_t(r.name) && r.eye == uint8_t(r.name & 1) && r.teb == 0x7000 && r.thread == 42);
+        assert(r.depth == (in ? 2u : 1u) && r.run == 2 * uint32_t(r.name & 0xFFFFFFFFu) - (in ? 0u : 1u));
+    }
+    writer.join();
+    assert(Read(*w, v) == Seen::Idle && w->runs.load() == 600000);
+    std::printf("Task slots: a reader beside the writing thread saw %llu whole states (%llu of the inner run)\n", (unsigned long long)whole, (unsigned long long)inner);
+
+    // whose turn: at most `most` a tick, round and round
+    {
+        bool eligible[8] = {false, true, false, true, true, false, true, true};   // five threads in watched tasks
+        int cursor = 0, out[8];
+        assert(Pick(eligible, 8, 3, cursor, out) == 3 && out[0] == 1 && out[1] == 3 && out[2] == 4 && cursor == 5);
+        assert(Pick(eligible, 8, 3, cursor, out) == 3 && out[0] == 6 && out[1] == 7 && out[2] == 1 && cursor == 2);   // goes round: the one stopped first again last
+        assert(Pick(eligible, 8, 3, cursor, out) == 3 && out[0] == 3 && out[1] == 4 && out[2] == 6);
+        int turns[8] = {};
+        cursor = 0;
+        for (int tick = 0; tick < 500; ++tick) { const int n = Pick(eligible, 8, 3, cursor, out); for (int i = 0; i < n; ++i) ++turns[out[i]]; }
+        for (int i = 0; i < 8; ++i) assert(eligible[i] ? turns[i] == 300 : turns[i] == 0);   // each of the five gets three ticks in five
+        bool two[8] = {false, false, true, false, false, false, false, true};
+        cursor = 6;
+        assert(Pick(two, 8, 3, cursor, out) == 2 && out[0] == 7 && out[1] == 2 && cursor == 3);   // fewer than may be stopped: all, each once
+        bool none[8] = {};
+        assert(Pick(none, 8, 3, cursor, out) == 0 && cursor == 3 && Pick(two, 0, 3, cursor, out) == 0);
+        cursor = 99;
+        assert(Pick(two, 8, 1, cursor, out) == 1 && out[0] == 2);
+    }
+}
+
+// The watch list ([debug] draw_sampler_tasks).
+static void WatchList() {
+    const Watch w = ParseWatch(DefaultWatch);
+    assert(w.parts.size() == 6 && !w.all && w.Any());
+    for (const char* name : {"Late Post Processing", "Forward Pass", "Depth Pass", "Collect Draw Calls", "Directional Shadows", "Shadow Directional Draw Call Collect"})
+        assert(Watched(w, name));
+    for (const char* name : {"Early Post Processing", "Popcorn CollectDrawCalls", "Release Popcorn Draw Calls", "Transparent Pass", "UI Pass", "Negative Shadows",
+                             "Shadow Omni Draw Call Collect", "task 5 (no name read)", ""})
+        assert(!Watched(w, name));
+    const Watch parts = ParseWatch(" forward ; DEPTH pass,, \"late\" | Shadow\r\n");
+    assert(parts.parts.size() == 4 && parts.parts[0] == "forward" && parts.parts[1] == "depth pass" && parts.parts[2] == "late" && parts.parts[3] == "shadow");
+    assert(Watched(parts, "Forward Pass") && Watched(parts, "Late Post Processing") && Watched(parts, "depth PASS") && !Watched(parts, "Outline Pass"));
+    assert(Watched(parts, "Negative Shadows") && Watched(parts, "VFX shadows") && Watched(parts, "Shadow Omni Draw Call Collect"));   // a part of several names
+    assert(ParseWatch("all").all && ParseWatch("Depth Pass, ALL").all && ParseWatch(" * ").all && ParseWatch("all").Any());
+    assert(Watched(ParseWatch("all"), "task 5 (no name read)") && Watched(ParseWatch("x,all"), ""));
+    for (const char* off : {"", "none", " , ; ", "0", "None"}) assert(!ParseWatch(off).Any() && !Watched(ParseWatch(off), "Depth Pass"));
 }
 
 static std::vector<Module> MadeUpModules() {
@@ -203,6 +344,130 @@ static void Tables() {
     const auto quiet = LogLines(none, "x");
     assert(quiet.size() == 1 && quiet[0].find("no samples in 120.0 s") != std::string::npos);
     assert(FileText(none, modules).find("No samples") != std::string::npos);
+}
+
+// A report per watched render task from the samples of the threads that ran them.
+static void TaskProfiles() {
+    using framevr::drawtasks::TaskReport; using framevr::drawtasks::TaskRow;
+    std::vector<Module> modules = MadeUpModules();
+    Module mod, reshade;
+    mod.base = 0x7FF700000000ull; mod.size = 0x100000; mod.name = "d2rl-pcvr.dll"; mod.kind = Kind::Mod;
+    mod.functions = {{0x1000, 0x1100, 0x1000}, {0x2000, 0x2100, 0x2000}};
+    mod.exports = {{0x2000, "PerDrawCallback"}};
+    reshade.base = 0x7FF600000000ull; reshade.size = 0x100000; reshade.name = "ReShade64.dll"; reshade.kind = Kind::ReShade;
+    reshade.functions = {{0x500, 0x600, 0x500}};
+    modules.push_back(mod); modules.push_back(reshade);
+    SortModules(modules);
+    const uint64_t G = 0x140000000ull, D = 0x7FF800000000ull, K = 0x7FF900000000ull, N = 0x7FFA00000000ull, M = mod.base, R = reshade.base;
+    const auto make = [](int task, int eye, bool onDraw, bool root, std::initializer_list<uint64_t> frames) {
+        Sample s = Make(eye, frames);
+        s.task = uint16_t(task); s.onDraw = onDraw ? 1 : 0; s.root = root ? 1 : 0;
+        return s;
+    };
+    std::vector<Sample> samples = {
+        make(1, 0, false, true, {D + 0x150, G + 0x1150, M + 0x1050}),             // the driver, called by the game's B, called by the hook
+        make(1, 0, false, true, {M + 0x2010, G + 0x1010, M + 0x1050}),            // this mod's callback, called by the game's A
+        make(1, 1, true, true, {R + 0x550, G + 0x1150, M + 0x1050}),              // ReShade, on the draw thread
+        make(1, 1, false, false, {N + 0x9014, K + 0x450, G + 0x2100}),            // waiting, the walk cut short
+        make(2, 0, false, true, {G + 0x1010, M + 0x1050}),
+        make(0, 0, false, true, {G + 0x1010}),                                    // no task: in no report
+        make(9, 0, false, true, {G + 0x1010}),                                    // a task that has no name: in none
+    };
+    samples[3].cut = uint8_t(Cut::NotCode);
+    TaskReport tasks;
+    TaskRow forward;
+    forward.name = "Forward Pass"; forward.runs[0] = forward.runs[1] = 2; forward.ms[0] = 5; forward.ms[1] = 7;
+    tasks.rows.push_back(forward);
+    const std::vector<std::string> names = {"Forward Pass", "Depth Pass", "Never Sampled"};
+    const std::vector<TaskProfile> profiles = Profiles(modules, samples.data(), samples.size(), names, tasks);
+    assert(profiles.size() == 2 && profiles[0].name == "Forward Pass" && profiles[1].name == "Depth Pass");   // most samples first; none: no report
+    const TaskProfile& f = profiles[0];
+    const Report& q = f.report;
+    assert(q.total() == 4 && q.samples[0] == 2 && q.samples[1] == 2 && f.draw == 1 && f.worker == 3);
+    assert(f.Runs() == 4 && Near(f.RunMs(), 3.0) && Near(q.PassMs(0), 2.5) && Near(q.PassMs(1), 3.5) && Near(f.Rate(), 4000.0 / 12.0));
+    assert(Near(q.RootShare(), 0.75) && q.cut == 1 && q.cuts[size_t(Cut::NotCode)] == 1);
+    assert(q.kinds[size_t(Kind::Driver)].total() == 1 && q.kinds[size_t(Kind::Mod)].total() == 1 && q.kinds[size_t(Kind::ReShade)].total() == 1 &&
+           q.kinds[size_t(Kind::Ntdll)].total() == 1 && q.kinds[size_t(Kind::Game)].total() == 0);
+    assert(Near(q.Share(q.kinds[size_t(Kind::Driver)]), 0.25) && Near(q.Ms(q.kinds[size_t(Kind::Driver)]), 0.75));   // a quarter of a 3 ms run
+    assert(q.waiting[1] == 1 && q.waits.size() == 1 && q.waits[0].label == "NtWaitForSingleObject" && Find(q.waiters, "D2R.exe+0x2000"));
+    assert(Find(q.leaves, "d2rl-pcvr.dll+0x2000 PerDrawCallback") && Find(q.leaves, "ReShade64.dll+0x500") && Find(q.leaves, "nvwgf2umx.dll+0x100"));
+    assert(q.inclusive.size() == 3 && Find(q.inclusive, "D2R.exe+0x1100")->total() == 2 && Find(q.inclusive, "D2R.exe+0x1000")->total() == 1);
+    // in this mod and ReShade, by function; and whose code for which game function
+    assert(q.hooks.size() == 2 && Find(q.hooks, "d2rl-pcvr.dll+0x2000 PerDrawCallback")->n[0] == 1 && Find(q.hooks, "ReShade64.dll+0x500")->n[1] == 1);
+    assert(q.foreign.size() == 3 && Find(q.foreign, "GPU driver < D2R.exe+0x1100")->total() == 1 && Find(q.foreign, "this mod < D2R.exe+0x1000")->total() == 1 &&
+           Find(q.foreign, "ReShade < D2R.exe+0x1100")->total() == 1);
+    assert(q.graphics[0] == 1 && q.graphics[1] == 1 && q.callers.size() == 1);   // the graphics-call table is as it was: the mod is no graphics call
+    const TaskProfile& d = profiles[1];
+    assert(d.report.total() == 1 && d.Runs() == 0 && Near(d.RunMs(), 0) && Near(d.Rate(), 0) && d.worker == 1 && Near(d.report.RootShare(), 1.0));
+    assert(Profiles(modules, nullptr, 0, names, tasks).empty() && Profiles(modules, samples.data(), samples.size(), {}, tasks).empty());
+
+    // the eyes: together unless a run, or a tenth of it, differs by more than a tenth
+    assert(EyesDiffer(q) && EyesDiffer(d.report) && !EyesDiffer(Report{}));   // a run 2.5 against 3.5 ms; one eye alone; nothing
+    {
+        Report e;
+        e.kinds.resize(size_t(Kind::Count));
+        e.samples[0] = e.samples[1] = 1000; e.stats.passes[0] = e.stats.passes[1] = 10; e.stats.passMs[0] = e.stats.passMs[1] = 30;
+        e.kinds[size_t(Kind::Game)].n[0] = 600; e.kinds[size_t(Kind::Game)].n[1] = 560;
+        assert(!EyesDiffer(e));                                   // 1.80 against 1.68 ms
+        e.kinds[size_t(Kind::Game)].n[1] = 500;
+        assert(EyesDiffer(e));                                    // 1.80 against 1.50 ms
+        e.kinds[size_t(Kind::Game)].n[1] = 600;
+        e.kinds[size_t(Kind::Driver)].n[0] = 30; e.kinds[size_t(Kind::Driver)].n[1] = 60;
+        assert(!EyesDiffer(e));                                   // a row of a few percent does not count
+        e.waiting[0] = 300; e.waiting[1] = 200;
+        assert(EyesDiffer(e));                                    // waiting does
+        e.waiting[1] = 300; e.stats.passMs[1] = 36;
+        assert(EyesDiffer(e));                                    // a run 3.0 against 3.6 ms
+        e.stats.passMs[1] = 31;
+        assert(!EyesDiffer(e));
+        e.samples[1] = 0;
+        assert(EyesDiffer(e));                                    // one eye alone
+    }
+
+    // the report's text
+    Stats stats;
+    stats.passes[0] = stats.passes[1] = 2; stats.passMs[0] = stats.passMs[1] = 20; stats.thread = 7;
+    const Sample own = Make(0, {G + 0x1010});
+    Report r = Aggregate(modules, &own, 1, stats);
+    assert(FileText(r, modules).find("8. Inside the render tasks") != std::string::npos && FileText(r, modules).find("not asked for: [debug] draw_sampler_tasks") != std::string::npos);
+    for (const std::string& line : LogLines(r, "")) assert(line.find("task threads") == std::string::npos);   // not asked for: nothing of it in the log
+    r.sampling.on = true; r.sampling.watch = "Forward Pass, Depth Pass"; r.sampling.perTick = 3; r.sampling.taken = 4; r.sampling.fromDraw = 1;
+    r.sampling.threads = 17; r.sampling.ticks = 40; r.sampling.capped = 2; r.sampling.moved = 1; r.sampling.stoppedUsSum = 88; r.sampling.stoppedUsMax = 41;
+    std::string all;
+    for (const std::string& line : LogLines(r, "")) { assert(line.rfind("Frame draw sampler: ", 0) == 0 && line.size() <= 255); all += line; all += '\n'; }
+    assert(all.find("task threads: no thread was sampled inside a watched task") != std::string::npos);
+    assert(FileText(r, modules).find("No thread was sampled inside a watched task") != std::string::npos);
+    r.watched = profiles;
+    all.clear();
+    for (const std::string& line : LogLines(r, "")) { assert(line.rfind("Frame draw sampler: ", 0) == 0 && line.size() <= 255); all += line; all += '\n'; }
+    assert(all.find("task threads: 4 samples of workers in the watched tasks, 1 of the draw thread's own (17 threads ran tasks); a stop 22 us "
+                    "(longest 41); 2 ticks had more such threads than the 3 stopped a tick; 1 moved on, 0 not read, 0 dropped\n") != std::string::npos);
+    assert(all.find("task Forward Pass: 4 samples, 333 a second of its run time (25% of them from the draw thread); a run 3.00 ms (left 2.50, right 3.50); "
+                    "75% of the walks reached its call\n") != std::string::npos);
+    assert(all.find("task Forward Pass: whose code, % of a run (ms): ") != std::string::npos && all.find("GPU driver 25.0% (0.75 ms)") != std::string::npos);
+    assert(all.find("task Forward Pass: waiting 25.0% (0.75 ms a run), running 75.0% - waits in: NtWaitForSingleObject 25.0% (0.75 ms) | by D2R.exe+0x2000 25.0% (0.75 ms)\n") != std::string::npos);
+    assert(all.find("task Forward Pass: top functions: ") != std::string::npos);
+    assert(all.find("task Forward Pass: in this mod and ReShade: d2rl-pcvr.dll+0x2000 PerDrawCallback 25.0% (0.75 ms) | ReShade64.dll+0x500 25.0% (0.75 ms)\n") != std::string::npos);
+    assert(all.find("task Depth Pass: 1 samples, 0 a second of its run time") != std::string::npos);
+    const std::string file = FileText(r, modules);
+    for (const char* part : {"8. Inside the render tasks", "watched: Forward Pass, Depth Pass", "2 of 40 ticks with a thread in a watched task had more",
+                             "== Forward Pass ==", "4 samples (1 on the draw thread, 3 on other threads), 333 a second of its run time; 4 runs of 3.000 ms (left 2.500, right 3.500)",
+                             "the walks: 75.0% reached the task's own call; cut short: 0 frame limit, 1 not code", "the eyes differ: shown apart",
+                             "a. by whose code", "b. waiting or running", "c. top 15 functions", "d. top 15 game functions", "e. samples in the GPU driver",
+                             "f. samples in this mod and ReShade", "     25.0    0.750    0.000     1.750        1  ReShade < D2R.exe+0x1100",
+                             "     25.0    0.750    1.250     0.000        1  d2rl-pcvr.dll+0x2000 PerDrawCallback", "== Depth Pass ==",
+                             "its runs are not in table 7", "    100.0    0.000    0.000     0.000        1  D2R.exe+0x1000", "  * 0x7FF700000000"})
+        assert(file.find(part) != std::string::npos);
+    assert(file.find("8. Inside the render tasks") > file.find("7. Render tasks") && file.find("\nModules (base") > file.find("== Depth Pass =="));
+    // the two eyes alike: one set of columns
+    {
+        Report alike = r;
+        TaskProfile& one = alike.watched[0];
+        one.report.stats.passMs[0] = one.report.stats.passMs[1] = 6;
+        assert(!EyesDiffer(one.report));
+        const std::string together = FileText(alike, modules);
+        assert(together.find("        %   ms/run  samples  \n") != std::string::npos && together.find("     25.0    0.750        1  ReShade < D2R.exe+0x1100") != std::string::npos);
+    }
 }
 
 // The walk's choices, without the system's unwinder: a module whose unwind table the system does not have
@@ -437,14 +702,21 @@ __attribute__((noinline)) static uint64_t Outer(uint64_t seed) { const uint64_t 
 // As the hooks on the game's task runner and drain do (vr/render_task_hooks.cpp): the pass's work is one
 // "task" on the drawing thread inside a "drain", and a worker thread runs another task meanwhile.
 static const char kOwnTask[] = "Own Task", kWorkerTask[] = "Worker Task";
+__attribute__((noinline)) static uint64_t OwnTask(uint64_t x) {
+    tasks::Open own = tasks::Armed() ? tasks::Begin() : tasks::Open{};
+    volatile char here = 0;   // in this frame, as in the hook's: the task's frames are below it
+    if (own.on) tasks::Enter(own, 1, (uint64_t)(uintptr_t)kOwnTask, (uintptr_t)&here);
+    x = Outer(x);
+    if (own.on) tasks::End(own, framevr::drawtasks::What::Task, 1, (uint64_t)(uintptr_t)kOwnTask);
+    g_sink = g_sink + x;
+    return x;
+}
 static void Drawer() {
     uint64_t x = 1;
     for (int eye = 0; !g_quit.load(); eye ^= 1) {
         EnterPass(eye);
         const tasks::Open drain = tasks::Armed() ? tasks::Begin() : tasks::Open{};
-        const tasks::Open own = tasks::Armed() ? tasks::Begin() : tasks::Open{};
-        x = Outer(x);
-        if (own.on) tasks::End(own, framevr::drawtasks::What::Task, 1, (uint64_t)(uintptr_t)kOwnTask);
+        x = OwnTask(x);
         if (drain.on) tasks::End(drain, framevr::drawtasks::What::Drain, 0, 0);
         LeavePass();
         g_loops.fetch_add(1);
@@ -460,6 +732,50 @@ static void Worker() {
         tasks::End(open, framevr::drawtasks::What::Task, 2, (uint64_t)(uintptr_t)kWorkerTask);
     }
 }
+
+// Threads that run made-up render tasks as the hook on the game's task runner does (vr/render_task_hooks.cpp):
+// a busy task three functions deep; a task that waits and then helps with another run inside its own.
+static const char kBusyTask[] = "Busy Task", kWaitingTask[] = "Waiting Task", kHelpedTask[] = "Helped Task";
+static std::atomic<bool> g_taskQuit{false};
+static HANDLE g_kick = nullptr;
+__attribute__((noinline)) static uint64_t TaskInner(uint64_t seed) {
+    uint64_t x = seed | 1;
+    for (int i = 0; i < 200000; ++i) { x ^= x << 13; x ^= x >> 7; x ^= x << 17; }
+    return x;
+}
+__attribute__((noinline)) static uint64_t TaskOuter(uint64_t seed) { const uint64_t x = TaskInner(seed + 5); g_sink = g_sink + x; return x ^ seed; }
+__attribute__((noinline)) static uint64_t Helped(uint64_t seed) {
+    uint64_t x = seed | 1;
+    for (int i = 0; i < 200000; ++i) { x ^= x << 13; x ^= x >> 7; x ^= x << 17; }
+    g_sink = g_sink + x;
+    return x;
+}
+__attribute__((noinline)) static uint64_t RunTask(const char* name, uint8_t index, uint64_t (*body)(uint64_t), uint64_t seed) {
+    tasks::Open open = tasks::Armed() ? tasks::Begin() : tasks::Open{};
+    if (!open.on) return 0;
+    volatile char here = 0;   // in this frame, as in the hook's: the task's frames are below it
+    tasks::Enter(open, index, (uint64_t)(uintptr_t)name, (uintptr_t)&here);
+    open.start = tasks::Now();
+    const uint64_t x = body(seed);
+    tasks::End(open, framevr::drawtasks::What::Task, index, (uint64_t)(uintptr_t)name);
+    g_sink = g_sink + x;
+    return x | 1;
+}
+__attribute__((noinline)) static uint64_t WaitThenHelp(uint64_t seed) {
+    WaitForSingleObject(g_kick, 5);   // until the busy worker says so: not in step with the sampler's timer, as a timed wait would be
+    const uint64_t x = RunTask(kHelpedTask, 5, Helped, seed);
+    g_sink = g_sink + x;
+    return x + seed;
+}
+static void BusyWorker() {
+    uint64_t x = 3;
+    for (unsigned n = 0; !g_taskQuit.load(); ++n) {
+        const uint64_t r = RunTask(kBusyTask, 3, TaskOuter, x);
+        if (r) x = r; else Sleep(0);
+        if (n % 4 == 3) SetEvent(g_kick);
+    }
+}
+static void WaitingWorker() { for (uint64_t x = 9; !g_taskQuit.load();) { const uint64_t r = RunTask(kWaitingTask, 4, WaitThenHelp, x); if (r) x = r; else Sleep(0); } }
 
 static std::vector<std::string> g_logged;
 static void Logged(const char* line) { g_logged.push_back(line); }
@@ -655,6 +971,97 @@ static void Native(const char* keepReport, double lockSeconds) {
     for (int i = 0; i < 5000 && Running(); ++i) Sleep(1);
     assert(!Running() && !g_logged.empty() && g_logged[0].find(" samples of thread ") != std::string::npos);
 
+    // 4. the threads inside watched render tasks: two workers, and the drawing thread's own task by its own samples
+    {
+        g_kick = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        assert(g_kick);
+        std::thread busyWorker(BusyWorker), waitingWorker(WaitingWorker);
+        Options watch;
+        watch.seconds = 0.6;
+        watch.watch = "busy task, Waiting, helped, own task";
+        const Report t = Capture(watch, &modules);
+        const TaskSampling& ts = t.sampling;
+        std::printf("Draw sampler, task threads: %u samples of other threads and %u of the drawing thread in watched tasks, %u threads known; a thread stopped %.1f us a sample "
+                    "(longest %.0f us); %u of %u ticks capped; %u moved on, %u not read, %u dropped, %u without callers\n", ts.taken, ts.fromDraw, ts.threads,
+                    ts.taken ? ts.stoppedUsSum / ts.taken : 0.0, ts.stoppedUsMax, ts.capped, ts.ticks, ts.moved, ts.failed, ts.dropped, ts.noStack);
+        assert(ts.on && ts.perTick == 3 && ts.taken >= 200 && ts.fromDraw >= 50 && ts.failed == 0 && ts.dropped == 0 && ts.noStack == 0 && ts.overflow == 0);
+        assert(ts.threads == 3 && ts.capped == 0 && ts.stoppedUsMax < 100000.0);   // the drawing thread and the two workers
+        assert(ts.unchecked == 0);                                                  // each worker's TEB as the system names it, the same as it said itself
+        assert(t.total() >= 50 && t.RootShare() >= 0.9);                            // the draw thread's own tables are as before
+        const auto profile = [&](const char* name) -> const TaskProfile* { for (const TaskProfile& p : t.watched) if (p.name == name) return &p; return nullptr; };
+        const TaskProfile* busyTask = profile(kBusyTask); const TaskProfile* waitingTask = profile(kWaitingTask);
+        const TaskProfile* helped = profile(kHelpedTask); const TaskProfile* own = profile(kOwnTask);
+        assert(busyTask && waitingTask && helped && own && !profile(kWorkerTask) && t.watched.size() == 4);   // "Worker Task" is not on the list
+        const Module& m = modules[size_t(FindModule(modules, (uint64_t)(uintptr_t)&TaskInner))];
+        // a function's row: a loop that calls nothing has no unwind row, and shows as code from the end of the function before it ("~")
+        const auto label = [&](uintptr_t function) {
+            const Place place = Locate(m, uint32_t(function + 8 - m.base));
+            char text[MAX_PATH + 32];
+            snprintf(text, sizeof text, "%s+0x%X%s", exeName, unsigned(place.start), place.exact ? "" : "~");
+            return std::string(text);
+        };
+        for (const TaskProfile* p : {busyTask, waitingTask, helped, own})
+            std::printf("Draw sampler, task %s: %u samples (%u drawing thread, %u others), %.0f a second of its %u runs of %.3f ms; %.1f%% of the walks reached its call; "
+                        "waiting %.0f%%; top %s\n", p->name.c_str(), p->report.total(), p->draw, p->worker, p->Rate(), p->Runs(), p->RunMs(), 100.0 * p->report.RootShare(),
+                        100.0 * (p->report.waiting[0] + p->report.waiting[1]) / p->report.total(), p->report.leaves[0].label.c_str());
+        // the busy task: on a worker, its samples in the loop, its callers up to the function that ran it and no farther
+        {
+            const Report& q = busyTask->report;
+            assert(q.total() >= 100 && busyTask->draw == 0 && busyTask->worker == q.total() && q.samples[0] > 10 && q.samples[1] > 10);
+            assert(busyTask->Runs() > 20 && busyTask->RunMs() > 0.05 && busyTask->Rate() >= 300.0);   // asked a thousand a second
+            assert(q.RootShare() >= 0.9 && q.cut * 10 <= q.total());
+            const Row* leaf = Find(q.leaves, label((uintptr_t)&TaskInner).c_str());
+            assert(leaf && q.Share(*leaf) >= 0.7);
+            for (uintptr_t function : {(uintptr_t)&TaskInner, (uintptr_t)&TaskOuter, (uintptr_t)&RunTask}) {
+                const Row* row = Find(q.inclusive, label(function).c_str());
+                assert(row && q.Share(*row) >= 0.7);
+            }
+            assert(!Find(q.inclusive, label((uintptr_t)&BusyWorker).c_str()) && !Find(q.inclusive, label((uintptr_t)&Helped).c_str()));   // the walk ends at the task's own call
+            assert(q.Share(q.kinds[size_t(Kind::Game)]) >= 0.8 && q.Ms(*leaf) > 0.5 * busyTask->RunMs());
+        }
+        // the waiting task: in a wait, asked for by its own function; the run inside it is the inner task's alone
+        {
+            const Report& q = waitingTask->report;
+            assert(q.total() >= 50 && waitingTask->draw == 0 && q.RootShare() >= 0.9);
+            assert((q.waiting[0] + q.waiting[1]) * 10 >= q.total() * 8 && !q.waits.empty() && q.waits[0].label == "NtWaitForSingleObject");
+            assert(!q.waiters.empty() && q.waiters[0].label == label((uintptr_t)&WaitThenHelp));
+            assert(!Find(q.leaves, label((uintptr_t)&Helped).c_str()) && !Find(q.inclusive, label((uintptr_t)&Helped).c_str()));
+            const Report& h = helped->report;
+            assert(h.total() >= 10 && helped->draw == 0 && h.RootShare() >= 0.9);
+            const Row* leaf = Find(h.leaves, label((uintptr_t)&Helped).c_str());
+            assert(leaf && h.Share(*leaf) >= 0.7);
+            assert(!Find(h.inclusive, label((uintptr_t)&WaitThenHelp).c_str()));   // ends at the inner run's call: the outer task's frames are no part of it
+        }
+        // the drawing thread's own task: from the drawing thread's samples, cut at the task
+        {
+            const Report& q = own->report;
+            assert(q.total() >= 50 && own->worker == 0 && own->draw == q.total() && q.total() == ts.fromDraw && q.RootShare() >= 0.9);
+            const Row* leaf = Find(q.leaves, label((uintptr_t)&Innermost).c_str());
+            assert(leaf && q.Share(*leaf) >= 0.7);
+            const Row* task = Find(q.inclusive, label((uintptr_t)&OwnTask).c_str());
+            assert(task && q.Share(*task) >= 0.7 && !Find(q.inclusive, label((uintptr_t)&Drawer).c_str()));   // up to the function that ran the task, not to the pass
+            assert(Find(t.inclusive, label((uintptr_t)&OwnTask).c_str()));                                       // the draw thread's own table goes on to the pass
+        }
+        g_taskQuit.store(true);
+        busyWorker.join();
+        waitingWorker.join();
+        CloseHandle(g_kick);
+        // their tables in the file and the log
+        const std::string file = FileText(t, modules);
+        assert(file.find("8. Inside the render tasks") != std::string::npos && file.find("== Busy Task ==") != std::string::npos && file.find("== Helped Task ==") != std::string::npos);
+        if (keepReport) {
+            const std::string path = std::string(keepReport) + ".tasks.txt";
+            if (FILE* out = fopen(path.c_str(), "wb")) { fwrite(file.data(), 1, file.size(), out); fclose(out); }
+            for (const std::string& line : LogLines(t, path.c_str())) std::puts(line.c_str());
+        }
+        for (const std::string& line : LogLines(t, "")) assert(line.rfind("Frame draw sampler: ", 0) == 0 && line.size() <= 255);
+        // not asked for: no thread but the drawing one is stopped, and a run says nothing
+        Options plain;
+        plain.seconds = 0.1;
+        const Report off = Capture(plain, &modules);
+        assert(!off.sampling.on && off.sampling.taken == 0 && off.sampling.fromDraw == 0 && off.watched.empty() && off.total() >= 20);
+    }
+
     // the thread that was stopped a few hundred times goes on
     const uint64_t before = g_loops.load();
     for (int i = 0; i < 3000 && g_loops.load() < before + 20; ++i) Sleep(1);
@@ -677,12 +1084,16 @@ int main(int argc, char** argv) {
     Kinds();
     Functions();
     Tables();
+    Slots();
+    WatchList();
+    TaskProfiles();
     WalkChoices();
     Tasks();
     // draw-sampler-test PATH keeps a report there; draw-sampler-test --locks SECONDS runs the lock check that long
     const bool locks = argc > 2 && !strcmp(argv[1], "--locks");
     Native(argc > 1 && !locks ? argv[1] : nullptr, locks ? atof(argv[2]) : 0.3);
-    std::puts("Draw sampler: module kinds, wait calls, function starts from unwind tables, the tables and report text, the walk's "
-              "unwind rows and return addresses, the render task tables, and live captures of a busy, a waiting and a lock-taking "
-              "thread (with and without the system's unwind table) passed");
+    std::puts("Draw sampler: module kinds, wait calls, function starts from unwind tables, the tables and report text, the task slots, "
+              "the watch list, the reports per task, the walk's unwind rows and return addresses, the render task tables, and live "
+              "captures of a busy, a waiting and a lock-taking thread (with and without the system's unwind table) and of two "
+              "threads inside watched render tasks passed");
 }

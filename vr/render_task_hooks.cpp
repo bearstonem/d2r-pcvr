@@ -3,7 +3,8 @@
 // Both hooks are on code the game runs on many threads at once, so they do as little as a hook can. With
 // no capture running: one flag test, then the game's function. During a capture, inside an eye pass: two
 // guarded reads for the task's index and name (before the clock starts), two clock reads and one record
-// in a buffer made before the capture (steamvr/draw_sampler_capture.cpp). No lock, no allocation, no log.
+// in a buffer made before the capture (steamvr/draw_sampler_capture.cpp), and around a task's run the
+// thread's own slot written to say which task it is in (steamvr/task_slots.h). No lock, no allocation, no log.
 // The arguments go to the game's function as they came, and its result comes back as it was.
 #include <windows.h>
 #include <atomic>
@@ -52,6 +53,10 @@ uintptr_t Run(uintptr_t job, uintptr_t b, uintptr_t c, uintptr_t d) {
             !framevr::ReadMemory(&name, reinterpret_cast<const void*>(uintptr_t(pair[1] + pair[0] * SlotSize + NameOffset)), sizeof name))
             name = 0;
     }
+    // "This thread is inside this task", for the sampler (steamvr/task_slots.h): the thread's own slot in a fixed
+    // table, a few stores, and only when the capture watches tasks. `here` marks this frame: the task's are below it.
+    volatile char here = 0;
+    tasks::Enter(open, index, name, reinterpret_cast<uintptr_t>(&here));
     open.start = tasks::Now();   // the reads above are not the task's time
     const uintptr_t result = call(job, b, c, d);
     tasks::End(open, What::Task, index, name);

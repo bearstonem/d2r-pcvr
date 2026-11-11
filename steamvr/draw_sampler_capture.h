@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 #include "draw_sampler.h"
+#include "task_slots.h"
 
 namespace framevr::drawsampler {
 
@@ -35,7 +36,7 @@ inline void LeavePass() noexcept { if (g_live.state.load(std::memory_order_relax
 // seventeen threads at once: no lock, no allocation, no log - a count of the calls in flight, two clock
 // reads and one record in a buffer made before the capture. A call outside an eye pass is not recorded.
 namespace tasks {
-struct Open { int64_t start = 0; uint32_t pass = 0, generation = 0; uint8_t eye = 0; bool on = false; };
+struct Open { int64_t start = 0; uint32_t pass = 0, generation = 0; uint8_t eye = 0; bool on = false; taskslots::Slot* slot = nullptr; };
 extern std::atomic<bool> g_armed;
 // One relaxed load: all a hooked call costs while no capture runs.
 inline bool Armed() noexcept { return g_armed.load(std::memory_order_relaxed); }
@@ -43,6 +44,11 @@ inline bool Armed() noexcept { return g_armed.load(std::memory_order_relaxed); }
 Open Begin() noexcept;
 // The clock now, for a start taken after the hook's own reads.
 int64_t Now() noexcept;
+// A render task's run, after Begin said on and just before the timed call, on the thread that runs it: says
+// "this thread is inside this task" in the thread's slot (task_slots.h) so that the sampler can stop it there.
+// `root` is an address in the caller's own stack frame: the task's frames are all below it. Does nothing
+// unless the capture watches tasks. End takes it back.
+void Enter(Open& open, uint8_t index, uint64_t name, uintptr_t root) noexcept;
 // After the timed call, when Begin said on. `name` = the address of the task's name in the game (0 = none),
 // read when the capture ends.
 void End(const Open& open, drawtasks::What what, uint8_t index, uint64_t name) noexcept;
@@ -56,6 +62,8 @@ struct Options {
     std::wstring reportPath;        // the text file, written anew by each capture; empty = none
     void (*log)(const char*) = nullptr;
     std::string tasksNote;          // why the render tasks or the drain are not timed (the hooks' own words); empty = both are
+    std::string watch;              // the render tasks whose threads are sampled too (ParseWatch); empty = none
+    unsigned perTick = 3;           // such threads stopped at one tick at most, beside the draw thread (1-8)
     // For the tests only. The system's unwind-table lookup is taken to fail for addresses in
     // [blindBase, blindBase + blindSize), as it does for the game's executable; ownRows false walks as the
     // sampler first did, without the module's own table.

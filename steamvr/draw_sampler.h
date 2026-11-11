@@ -11,6 +11,7 @@
 // the system's unwinder.
 #pragma once
 #include <algorithm>
+#include <cmath>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
@@ -255,7 +256,7 @@ inline Place Locate(const Module& m, uint32_t rva) {
         if (const Export* e = NearestExport(m, p.start, 0)) p.symbol = e->name.c_str();
         return p;
     }
-    if (const Export* e = NearestExport(m, rva, 0x40)) {   // a system call stub: 32 bytes, no unwind row
+    if (const Export* e = IsSystem(m.kind) ? NearestExport(m, rva, 0x40) : nullptr) {   // a system call stub: 32 bytes, no unwind row
         p.start = e->rva; p.exact = true; p.symbol = e->name.c_str();
         return p;
     }
@@ -281,8 +282,63 @@ struct Sample {
     uint8_t count;   // frames filled, at least 1
     uint8_t eye;     // 0 left, 1 right
     uint8_t cut;     // a Cut: why the callers end early, 0 = they do not
-    uint8_t root;    // 1 = the walk reached the frame the eye pass was called from
+    uint8_t root;    // 1 = the walk reached the frame the eye pass was called from (a task's sample: the frame its run was called from)
+    uint16_t task;   // a sample of a thread inside a watched render task: the task, 1-based; 0 in the draw thread's own samples
+    uint8_t onDraw;  // that thread was the draw thread
 };
+
+// The render tasks whose threads are sampled ([debug] draw_sampler_tasks): parts of task names, any case,
+// separated by commas or semicolons; "all" (or "*") is every task; nothing, or "none", is none.
+inline constexpr char DefaultWatch[] =
+    "Late Post Processing, Forward Pass, Depth Pass, Collect Draw Calls, Directional Shadows, Shadow Directional Draw Call Collect";
+struct Watch {
+    std::vector<std::string> parts;   // lower case, trimmed
+    bool all = false;
+    bool Any() const { return all || !parts.empty(); }
+};
+inline Watch ParseWatch(std::string_view text) {
+    Watch w;
+    size_t at = 0;
+    while (at <= text.size()) {
+        size_t end = text.find_first_of(",;|", at);
+        if (end == std::string_view::npos) end = text.size();
+        std::string_view part = text.substr(at, end - at);
+        while (!part.empty() && (part.front() == ' ' || part.front() == '\t' || part.front() == '"')) part.remove_prefix(1);
+        while (!part.empty() && (part.back() == ' ' || part.back() == '\t' || part.back() == '"' || part.back() == '\r' || part.back() == '\n')) part.remove_suffix(1);
+        const std::string low = Lower(part);
+        if (low == "all" || low == "*") w.all = true;
+        else if (!low.empty() && low != "none" && low != "0") w.parts.push_back(low);
+        at = end + 1;
+    }
+    return w;
+}
+// Whether a task of this name is watched: the name holds one of the parts.
+inline bool Watched(const Watch& w, std::string_view name) {
+    if (w.all) return true;
+    const std::string low = Lower(name);
+    for (const std::string& part : w.parts) if (low.find(part) != std::string::npos) return true;
+    return false;
+}
+
+// What the sampling of the threads inside watched tasks measured.
+struct TaskSampling {
+    bool on = false;                  // some task was watched
+    std::string watch;                // the list as asked
+    uint32_t perTick = 0;             // threads stopped at one tick at most, the draw thread not counted
+    uint32_t ticks = 0;               // ticks with a thread other than the draw thread inside a watched task
+    uint32_t capped = 0;              // of them, with more such threads than are stopped at a tick: they took turns
+    uint32_t taken = 0;               // samples kept of threads other than the draw thread
+    uint32_t fromDraw = 0;            // samples of the draw thread that were inside a watched task (the same stops as the draw thread's own)
+    uint32_t moved = 0;               // stopped, but that run had ended: not kept
+    uint32_t failed = 0;              // the thread could not be stopped or read
+    uint32_t dropped = 0;             // samples after the buffer was full
+    uint32_t noStack = 0;             // samples whose stack could not be copied (the instruction only)
+    uint32_t threads = 0;             // threads that ran a render task since the first capture
+    uint32_t overflow = 0;            // task runs not published: more threads than the table has slots
+    uint32_t unchecked = 0;           // threads whose TEB the system did not name: their own word for it was taken
+    double stoppedUsSum = 0, stoppedUsMax = 0;   // the stops of threads other than the draw thread
+};
+struct TaskProfile;
 
 // What the capture measured beside the samples.
 struct Stats {
@@ -320,6 +376,10 @@ struct Report {
     std::vector<Row> inclusive;       // game functions anywhere on the stack
     std::vector<Row> callers;         // graphics samples by the nearest game function
     std::vector<Row> systemCalls;     // samples in ntdll / win32u by function
+    std::vector<Row> hooks;           // samples in this mod or ReShade, by function
+    std::vector<Row> foreign;         // samples in graphics code or this mod: whose code < the nearest game function
+    TaskSampling sampling;            // the threads inside watched render tasks...
+    std::vector<TaskProfile> watched; // ... and a report of each such task, most samples first
     uint32_t total() const { return samples[0] + samples[1]; }
     // A pass's mean time, ms: eye 0, 1, or 2 for both.
     double PassMs(int eye) const {
@@ -339,6 +399,29 @@ struct Report {
         return of ? double(n) / of : 0.0;
     }
 };
+// One watched render task: the samples of the threads that ran it, as a report of its own in which a
+// "pass" is one run of the task (stats.passes = its runs, stats.passMs = their time), so a row's ms is
+// its share of a run.
+struct TaskProfile {
+    std::string name;
+    uint32_t draw = 0, worker = 0;    // samples from the draw thread, from other threads
+    Report report;
+    uint32_t Runs() const { return report.stats.passes[0] + report.stats.passes[1]; }
+    double RunMs() const { return report.PassMs(2); }
+    // Samples per second of the task's run time: what the sampling achieved for it.
+    double Rate() const { const double ms = report.stats.passMs[0] + report.stats.passMs[1]; return ms > 0 ? 1000.0 * report.total() / ms : 0.0; }
+};
+// Whether the two eyes are to be shown apart: a run's time, or what a tenth or more of it goes to (whose
+// code; waiting), differs between them by more than 10%. One eye alone sampled counts as differing.
+inline bool EyesDiffer(const Report& r) {
+    if (!r.total()) return false;
+    if (!r.samples[0] || !r.samples[1]) return true;
+    const auto apart = [](double a, double b) { const double most = std::max(a, b); return most > 0 && std::fabs(a - b) > 0.1 * most; };
+    if (apart(r.PassMs(0), r.PassMs(1))) return true;
+    const auto row = [&](const Row& k) { return r.Share(k) >= 0.1 && k.total() >= 100 && apart(r.Ms(k, 0), r.Ms(k, 1)); };
+    for (const Row& k : r.kinds) if (row(k)) return true;
+    return row(Row{"", {r.waiting[0], r.waiting[1]}});
+}
 
 namespace detail {
 inline std::string Text(const char* fmt, ...) {
@@ -397,7 +480,7 @@ inline Report Aggregate(const std::vector<Module>& modules, const Sample* sample
         k.wait = IsSystem(m.kind) && p.symbol && IsWaitName(p.symbol);
         return k;
     };
-    detail::Table kinds, mods, waits, waiters, leaves, inclusive, callers, systemCalls;
+    detail::Table kinds, mods, waits, waiters, leaves, inclusive, callers, systemCalls, hooks, foreign;
     for (int k = 0; k < int(Kind::Count); ++k) { kinds.at[uint64_t(k)] = kinds.rows.size(); kinds.rows.push_back({KindName(Kind(k)), {}}); }
     for (size_t i = 0; i < count; ++i) {
         const Sample& s = samples[i];
@@ -413,6 +496,7 @@ inline Report Aggregate(const std::vector<Module>& modules, const Sample* sample
         });
         leaves.Add(leaf.where.key, eye, [&] { return leaf.label; });
         if (leaf.where.kind == Kind::Ntdll || leaf.where.kind == Kind::Win32) systemCalls.Add(leaf.where.key, eye, [&] { return leaf.label; });
+        if (leaf.where.kind == Kind::Mod || leaf.where.kind == Kind::ReShade) hooks.Add(leaf.where.key, eye, [&] { return leaf.label; });
 
         // every game function on the stack once; the game function nearest the sampled instruction; the
         // first function outside the system's wrappers
@@ -439,6 +523,10 @@ inline Report Aggregate(const std::vector<Module>& modules, const Sample* sample
                 return behind ? waiter->label + " < " + nearestGame->label : waiter->label;
             });
         }
+        if (IsGraphics(leaf.where.kind) || leaf.where.kind == Kind::Mod)
+            foreign.Add((uint64_t(leaf.where.kind) + 1) * 0x9E3779B97F4A7C15ull ^ (nearestGame ? nearestGame->where.key : 0), eye, [&] {
+                return std::string(KindName(leaf.where.kind)) + " < " + (nearestGame ? nearestGame->label : std::string("(no game function within the frames kept)"));
+            });
         if (IsGraphics(leaf.where.kind)) {
             ++r.graphics[eye];
             callers.Add(nearestGame ? nearestGame->where.key : 0, eye, [&] {
@@ -449,7 +537,34 @@ inline Report Aggregate(const std::vector<Module>& modules, const Sample* sample
     r.kinds = std::move(kinds.rows);   // in Kind's order
     r.modules = mods.Sorted(); r.waits = waits.Sorted(); r.waiters = waiters.Sorted(); r.leaves = leaves.Sorted();
     r.inclusive = inclusive.Sorted(); r.callers = callers.Sorted(); r.systemCalls = systemCalls.Sorted();
+    r.hooks = hooks.Sorted(); r.foreign = foreign.Sorted();
     return r;
+}
+
+// A report per watched task from the samples of the threads that ran them (Sample::task, 1-based, into
+// `names`). A task's runs and their time come from the render task records by its name, so that a row's ms
+// is its share of one run. Most samples first.
+inline std::vector<TaskProfile> Profiles(const std::vector<Module>& modules, const Sample* samples, size_t count, const std::vector<std::string>& names,
+                                         const drawtasks::TaskReport& tasks) {
+    std::vector<TaskProfile> out;
+    std::vector<std::vector<Sample>> by(names.size());
+    for (size_t i = 0; i < count; ++i)
+        if (samples[i].count && samples[i].task && samples[i].task <= names.size()) by[samples[i].task - 1].push_back(samples[i]);
+    for (size_t t = 0; t < names.size(); ++t) {
+        if (by[t].empty()) continue;
+        TaskProfile p;
+        p.name = names[t];
+        Stats stats;
+        for (const drawtasks::TaskRow& row : tasks.rows) {
+            if (row.name != p.name) continue;
+            for (int e = 0; e < 2; ++e) { stats.passes[e] = row.runs[e]; stats.passMs[e] = row.ms[e]; }
+        }
+        for (const Sample& s : by[t]) ++(s.onDraw ? p.draw : p.worker);
+        p.report = Aggregate(modules, by[t].data(), by[t].size(), stats);
+        out.push_back(std::move(p));
+    }
+    std::stable_sort(out.begin(), out.end(), [](const TaskProfile& a, const TaskProfile& b) { return a.report.total() > b.report.total(); });
+    return out;
 }
 
 // The report's lines for the frame log: each starts "Frame draw sampler: " and fits the log's 255 characters.
@@ -527,7 +642,112 @@ inline std::vector<std::string> LogLines(const Report& r, const char* filePath) 
         if (!parts.lastItems.empty()) pack(parts.lastTitle, parts.lastItems);
         if (!parts.longItems.empty()) pack(parts.longTitle, parts.longItems);
     }
+    if (r.sampling.on) {
+        const TaskSampling& t = r.sampling;
+        fit(head + Text("task threads: %u samples of workers in the watched tasks, %u of the draw thread's own (%u threads ran tasks); "
+                        "a stop %.0f us (longest %.0f); %u ticks had more such threads than the %u stopped a tick; %u moved on, %u not read, %u dropped",
+                        t.taken, t.fromDraw, t.threads, t.taken ? t.stoppedUsSum / t.taken : 0.0, t.stoppedUsMax, t.capped, t.perTick, t.moved,
+                        t.failed, t.dropped));
+        if (r.watched.empty()) fit(head + "task threads: no thread was sampled inside a watched task (the names are parts of those in table 7): " + t.watch);
+        size_t shown = 0;
+        for (const TaskProfile& p : r.watched) {
+            if (shown++ == 8) break;
+            const Report& q = p.report;
+            const auto items = [&](const std::vector<Row>& table, size_t most) {
+                std::vector<std::string> list;
+                for (size_t i = 0; i < table.size() && list.size() < most; ++i)
+                    if (table[i].total()) list.push_back(Text("%s %.1f%% (%.2f ms)", table[i].label.c_str(), 100.0 * q.Share(table[i]), q.Ms(table[i])));
+                return list;
+            };
+            const std::string task = "task " + p.name + ": ";
+            std::vector<Row> byShare = q.kinds;
+            std::stable_sort(byShare.begin(), byShare.end(), [](const Row& a, const Row& b) { return a.total() > b.total(); });
+            fit(head + task + Text("%u samples, %.0f a second of its run time (%.0f%% of them from the draw thread); a run %.2f ms%s; %.0f%% of the walks reached its call",
+                                   q.total(), p.Rate(), 100.0 * p.draw / q.total(), p.RunMs(),
+                                   EyesDiffer(q) ? Text(" (left %.2f, right %.2f)", q.PassMs(0), q.PassMs(1)).c_str() : "", 100.0 * q.RootShare()));
+            pack(task + "whose code, % of a run (ms):", items(byShare, 6));
+            const Row wait{"", {q.waiting[0], q.waiting[1]}};
+            std::vector<std::string> waits = items(q.waits, 2);
+            for (std::string& who : items(q.waiters, 2)) waits.push_back("by " + who);
+            pack(task + Text("waiting %.1f%% (%.2f ms a run), running %.1f%% - waits in:", 100.0 * q.Share(wait), q.Ms(wait), 100.0 - 100.0 * q.Share(wait)),
+                 waits.empty() ? std::vector<std::string>{"none"} : waits);
+            pack(task + "top functions:", items(q.leaves, 5));
+            if (!q.hooks.empty()) pack(task + "in this mod and ReShade:", items(q.hooks, 4));
+        }
+    }
     if (filePath && *filePath) fit(head + "every table, and the modules to match the RVAs to a binary: " + filePath);
+    return out;
+}
+
+// Table 8 of the file: the threads inside the watched render tasks.
+inline std::string TaskThreadsText(const Report& r) {
+    using detail::Text;
+    const TaskSampling& t = r.sampling;
+    std::string out = "\n8. Inside the render tasks: the threads that ran the watched ones, sampled\n";
+    if (!t.on) {
+        out += "  not asked for: [debug] draw_sampler_tasks names the tasks to watch (parts of the names in table 7, or all)\n";
+        return out;
+    }
+    out += "  At each tick the sampler also stops the threads that are inside a watched task just then - whichever threads those are - the same\n"
+           "  way as the draw thread: registers and a copy of the stack while stopped, the callers worked out afterwards. A task's samples are\n"
+           "  where its threads were during its runs. A row's share is its samples over the task's samples; its ms is that share of the task's\n"
+           "  mean run (table 7). The walk up a stack ends at this mod's hook on the game's task runner, which called the task: the share that\n"
+           "  reached it should be near 100%, or only self time stands. A run inside another on the same thread (table 7: inside) counts for the\n"
+           "  inner task alone, while the outer task's run time still holds it: that task's ms are then too high by the inner run's share.\n"
+           "  Both eyes are shown together unless a run's time, or a tenth of it, differs between them by more than 10%.\n";
+    out += "  watched: " + t.watch + "\n";
+    out += Text("  %u samples of threads other than the draw thread (%u threads have run render tasks), %u of the draw thread inside a watched task\n"
+                "  (those are the draw thread's own stops, counted again here). At most %u threads are stopped at a tick beside the draw thread:\n"
+                "  %u of %u ticks with a thread in a watched task had more, and they took turns - each task's achieved rate is in its head line.\n",
+                t.taken, t.threads, t.fromDraw, t.perTick, t.capped, t.ticks);
+    out += Text("  cost: a thread stopped %.1f us a sample (longest %.0f us). lost: %u stopped after that run had ended (not kept), %u could not be\n"
+                "  stopped or read, %u dropped (buffer full), %u task runs of threads beyond the table's slots; %u samples without callers\n",
+                t.taken ? t.stoppedUsSum / t.taken : 0.0, t.stoppedUsMax, t.moved, t.failed, t.dropped, t.overflow, t.noStack);
+    if (t.unchecked) out += Text("  %u threads' stack bounds were read where the thread itself said, the system not naming the place\n", t.unchecked);
+    if (r.watched.empty()) { out += "\n  No thread was sampled inside a watched task: check the names against table 7.\n"; return out; }
+    for (const TaskProfile& p : r.watched) {
+        const Report& q = p.report;
+        const bool eyes = EyesDiffer(q);
+        out += "\n  == " + p.name + " ==\n";
+        out += Text("  %u samples (%u on the draw thread, %u on other threads), %.0f a second of its run time; %u runs of %.3f ms (left %.3f, right %.3f)%s\n",
+                    q.total(), p.draw, p.worker, p.Rate(), p.Runs(), p.RunMs(), q.PassMs(0), q.PassMs(1),
+                    p.Runs() ? "" : " - its runs are not in table 7, so the ms columns are empty");
+        out += Text("  the walks: %.1f%% reached the task's own call; cut short: %u frame limit, %u not code, %u not after a call, %u stack copy, %u unreadable%s\n",
+                    100.0 * q.RootShare(), q.cuts[size_t(Cut::Limit)], q.cuts[size_t(Cut::NotCode)], q.cuts[size_t(Cut::NoCall)], q.cuts[size_t(Cut::Stack)],
+                    q.cuts[size_t(Cut::Fault)], eyes ? "; the eyes differ: shown apart" : "");
+        const auto table = [&](const char* title, const std::vector<Row>& rows, size_t most, const char* none) {
+            out += "  "; out += title; out += "\n";
+            if (rows.empty()) { out += "    "; out += none; out += "\n"; return; }
+            out += eyes ? "        %   ms/run  left ms  right ms  samples  \n" : "        %   ms/run  samples  \n";
+            const auto line = [&](const Row& row) {
+                if (eyes) out += Text("    %5.1f  %7.3f  %7.3f  %8.3f  %7u  %s\n", 100.0 * q.Share(row), q.Ms(row), q.Ms(row, 0), q.Ms(row, 1), row.total(), row.label.c_str());
+                else out += Text("    %5.1f  %7.3f  %7u  %s\n", 100.0 * q.Share(row), q.Ms(row), row.total(), row.label.c_str());
+            };
+            size_t shown = 0; uint32_t rest[2] = {};
+            for (const Row& row : rows) {
+                if (!row.total()) continue;
+                if (shown >= most) { rest[0] += row.n[0]; rest[1] += row.n[1]; continue; }
+                ++shown;
+                line(row);
+            }
+            if (rest[0] + rest[1]) line(Row{"(the rest)", {rest[0], rest[1]}});
+        };
+        const size_t all = size_t(-1);
+        table("a. by whose code the sampled instruction is", q.kinds, all, "none");
+        {
+            const Row wait{"waiting (stopped in a wait system call)", {q.waiting[0], q.waiting[1]}};
+            const Row run{"running", {q.samples[0] - q.waiting[0], q.samples[1] - q.waiting[1]}};
+            table("b. waiting or running", {wait, run}, all, "none");
+        }
+        table("   waits, by system call", q.waits, 10, "no sample was waiting");
+        table("   who waits: the first caller outside the system's DLLs ( < the nearest game function behind it)", q.waiters, 10, "no sample was waiting");
+        table("c. top 15 functions by the sampled instruction (self time)", q.leaves, 15, "none");
+        table("d. top 15 game functions on the stack (inclusive)", q.inclusive, 15, "no game function on any sampled stack");
+        table("e. samples in the GPU driver, D3D12, DXGI, DLSS, ReShade or this mod: whose code < the nearest game function, top 15", q.foreign, 15,
+              "no sample was in that code");
+        table("f. samples in this mod and ReShade, by function (the RVA is in the DLL's link map; a name is its export there)", q.hooks, 15,
+              "no sample was in this mod or ReShade");
+    }
     return out;
 }
 
@@ -563,7 +783,7 @@ inline std::string FileText(const Report& r, const std::vector<Module>& modules)
            "of the function sampled, from the module's unwind table, so they can be looked up in a disassembler; \"~\" marks code with no\n"
            "unwind row (a leaf function at or after that RVA). A name after an address is the module's export at exactly that address.\n"
            "An address outside a module's executable sections is never a function: it shows as \"(not code)\" and is in no function table.\n";
-    if (!r.total()) { out += "\nNo samples: no eye pass was drawn during the capture.\n"; out += drawtasks::FileText(r.tasks); return out; }
+    if (!r.total()) { out += "\nNo samples: no eye pass was drawn during the capture.\n"; out += drawtasks::FileText(r.tasks); out += TaskThreadsText(r); return out; }
 
     const auto table = [&](const char* title, const std::vector<Row>& rows, size_t most, const char* none) {
         out += "\n"; out += title; out += "\n";
@@ -609,11 +829,14 @@ inline std::string FileText(const Report& r, const std::vector<Module>& modules)
                 r.samples[1] ? double(r.waiting[1]) / r.samples[1] * r.PassMs(1) : 0.0, r.samples[1] ? double(r.graphics[1]) / r.samples[1] * r.PassMs(1) : 0.0);
 
     out += drawtasks::FileText(r.tasks);
+    out += TaskThreadsText(r);
     out += "\nModules (base, size, PE link timestamp: the three name one build of a binary; * = sampled)\n";
     for (size_t i = 0; i < modules.size(); ++i) {
         const Module& m = modules[i];
         bool sampled = false;
         for (const Row& row : r.modules) if (row.label == m.name) { sampled = true; break; }
+        for (const TaskProfile& p : r.watched)
+            for (const Row& row : p.report.modules) if (row.label == m.name) { sampled = true; break; }
         out += Text("  %c 0x%012llX  size 0x%08X  time 0x%08X  %-22s %s\n", sampled ? '*' : ' ', (unsigned long long)m.base, m.size, m.timestamp,
                     KindName(m.kind), m.path.empty() ? m.name.c_str() : m.path.c_str());
     }

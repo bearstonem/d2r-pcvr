@@ -6,7 +6,10 @@
 // memory into buffers allocated before the capture began: the register context, the pass flags the thread
 // published itself, the stack bounds in its TEB and a copy of the top of its stack. No allocation, no
 // log, no C runtime stream, no loader call, no unwinding, and no guarded (__try) read whose fault would
-// itself look up unwind tables. The callers are worked out AFTER the thread runs again (Unwind), on the
+// itself look up unwind tables. A thread inside a watched render task is stopped the same way (TakeTask):
+// what it published is its slot in a fixed table (task_slots.h), read with plain loads. The sampler holds
+// no lock of its own at any time, stops one thread at a time and never its own.
+// The callers are worked out AFTER the thread runs again (Unwind), on the
 // copy of its stack: the registers that point into the stack are moved to point into the copy, and
 // RtlVirtualUnwind then walks the copy while the real stack changes under the running thread.
 //
@@ -47,6 +50,8 @@ struct Record {
 std::atomic<Record*> g_records{nullptr};
 std::atomic<uint32_t> g_capacity{0}, g_count{0}, g_generation{0};
 std::atomic<int32_t> g_inFlight{0};   // calls between Begin and End: the buffer is not freed under them
+std::atomic<bool> g_publish{false};   // the capture watches tasks: a run says which thread it is on
+taskslots::Table g_slots;             // one slot per thread that ever ran a task; static, so a late Leave always has its slot
 
 void Write(drawtasks::What what, int64_t start, int64_t end, uint32_t pass, uint8_t eye, uint8_t index, uint64_t name) noexcept {
     const uint32_t i = g_count.fetch_add(1);
@@ -75,8 +80,16 @@ Open Begin() noexcept {
     o.start = Now();
     return o;
 }
+void Enter(Open& open, uint8_t index, uint64_t name, uintptr_t root) noexcept {
+    if (!g_publish.load(std::memory_order_relaxed)) return;
+    taskslots::Slot* const slot = taskslots::Claim(g_slots, GetCurrentThreadId());
+    if (!slot) return;
+    taskslots::Enter(*slot, (uint64_t)(uintptr_t)NtCurrentTeb(), name, root, index, open.eye);
+    open.slot = slot;
+}
 void End(const Open& open, drawtasks::What what, uint8_t index, uint64_t name) noexcept {
     const int64_t end = Now();
+    if (open.slot) taskslots::Leave(*open.slot);   // whether or not the capture still runs: every Enter has its Leave
     if (g_armed.load() && open.generation == g_generation.load()) Write(what, open.start, end, open.pass, open.eye, index, name);
     g_inFlight.fetch_sub(1);
 }
@@ -186,17 +199,23 @@ constexpr size_t Page = 4096;
 struct Raw {
     CONTEXT ctx;
     uintptr_t stackAt;   // the stack pointer the copy starts at
-    uintptr_t root;      // the pass's mark (Live::rootSp), 0 = none inside the stack
+    uintptr_t root;      // the pass's mark (Live::rootSp), 0 = none inside the stack; a task's thread: the mark of the task's run
+    bool rootOwn;        // the mark is in the frame of the function the walk ends in (a task's), not in one it called (the pass's)
     size_t copied;       // bytes copied, 0 = none
     bool whole;          // the copy reaches the stack's base
-    bool outside;        // stopped, but no longer drawing an eye pass
+    bool outside;        // stopped, but no longer drawing an eye pass (a task's thread: no longer in that run)
     uint8_t eye;
+    // the draw thread only: the render task it was inside, by its own slot
+    bool inTask;
+    uint8_t taskIndex;
+    uint64_t taskName;
+    uintptr_t taskRoot;  // the mark of that run's call, below the pass's
     uint8_t* stack;      // StackCopy + 16 bytes, a no-access page after them
 };
 
 // Stops the thread, reads it, lets it run. See THE RULE above: every line between the two calls counts.
-__attribute__((noinline)) bool Take(HANDLE thread, uint32_t tid, Raw& raw) noexcept {
-    raw.copied = 0; raw.whole = false; raw.outside = false; raw.root = 0;
+__attribute__((noinline)) bool Take(HANDLE thread, uint32_t tid, const taskslots::Slot* slot, Raw& raw) noexcept {
+    raw.copied = 0; raw.whole = false; raw.outside = false; raw.root = 0; raw.rootOwn = false; raw.inTask = false; raw.taskRoot = 0;
     if (SuspendThread(thread) == (DWORD)-1) return false;
     bool ok = false;
     raw.ctx.ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER;
@@ -216,6 +235,45 @@ __attribute__((noinline)) bool Take(HANDLE thread, uint32_t tid, Raw& raw) noexc
                     raw.root = root;
                     if (root - sp + RootSlack < n) n = size_t(root - sp) + RootSlack;
                 }
+                memcpy(raw.stack + (sp & 15), (const void*)sp, n);
+                raw.stackAt = sp; raw.copied = n; raw.whole = sp + n == high;
+                // The render task it is inside, as its slot says (plain loads of a static table): the same stop serves that task's tables.
+                taskslots::View view;
+                if (slot && taskslots::Read(*slot, view) == taskslots::Seen::Task && view.thread == tid && view.root > sp && view.root < sp + n) {
+                    raw.inTask = true; raw.taskName = view.name; raw.taskIndex = view.index; raw.taskRoot = (uintptr_t)view.root;
+                }
+            }
+        } else {
+            raw.outside = true;
+        }
+    }
+    ResumeThread(thread);
+    return ok;
+}
+
+// The same for a thread that said it is inside a render task (its slot): kept only when, stopped, it is still
+// in the run it was picked for - then the slot cannot change until it runs again, and the sample is that
+// task's. `teb` is the thread's TEB as the system named it for this handle (0 = not known: the slot's own
+// word is taken); the stack's bounds are read there. The rule of Take holds here line for line.
+__attribute__((noinline)) bool TakeTask(HANDLE thread, uint32_t tid, const taskslots::Slot& slot, uint32_t run, uintptr_t teb, Raw& raw) noexcept {
+    raw.copied = 0; raw.whole = false; raw.outside = false; raw.root = 0; raw.rootOwn = true; raw.inTask = false; raw.taskRoot = 0;
+    if (SuspendThread(thread) == (DWORD)-1) return false;
+    bool ok = false;
+    raw.ctx.ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER;
+    if (GetThreadContext(thread, &raw.ctx)) {
+        taskslots::View view;
+        const bool same = taskslots::Read(slot, view) == taskslots::Seen::Task && view.thread == tid && view.run == run && view.teb &&
+                          (!teb || view.teb == teb);
+        const uintptr_t sp = raw.ctx.Rsp, root = (uintptr_t)view.root;
+        if (same && root > sp) {   // a mark at or below the stack pointer is of a frame that is gone
+            ok = true;
+            raw.eye = view.eye;
+            const NT_TIB* tib = reinterpret_cast<const NT_TIB*>(uintptr_t(view.teb));
+            const uintptr_t low = (uintptr_t)tib->StackLimit, high = (uintptr_t)tib->StackBase;
+            if (sp >= low && sp < high && !(sp & 7) && root < high) {
+                size_t n = high - sp < StackCopy ? size_t(high - sp) : StackCopy;
+                if (root - sp + RootSlack < n) n = size_t(root - sp) + RootSlack;
+                if (root < sp + n) raw.root = root;   // else the run's call lies beyond what is copied: the walk is cut
                 memcpy(raw.stack + (sp & 15), (const void*)sp, n);
                 raw.stackAt = sp; raw.copied = n; raw.whole = sp + n == high;
             }
@@ -358,9 +416,12 @@ struct Walk {
 // The callers, from the copy of the stack, with the thread running again. Returns the frames kept.
 // `cut` = why the walk ended early (Cut::None: it ended at the thread's first function, or at the root);
 // `root` = it reached the frame the eye pass was called from, and stopped there: what is above is no part of the pass.
-int Unwind(const Raw& raw, Walk& walk, uint64_t* out, Cut& cut, bool& root) noexcept {
+// `taskAt` (the draw thread's samples): the frames kept when the walk left the render task the thread was inside
+// (the last of them is the hook that called the task), -1 when it did not within the frames kept.
+int Unwind(const Raw& raw, Walk& walk, uint64_t* out, Cut& cut, bool& root, int* taskAt = nullptr) noexcept {
     int n = 0;
     cut = Cut::None; root = false;
+    if (taskAt) *taskAt = -1;
     out[n++] = raw.ctx.Rip;
     if (!raw.copied) return n;
     __try {
@@ -392,8 +453,13 @@ int Unwind(const Raw& raw, Walk& walk, uint64_t* out, Cut& cut, bool& root) noex
             }
             if (!walk.Executable(c.Rip)) { cut = Cut::NotCode; break; }
             if (!AfterCall(reinterpret_cast<const uint8_t*>(c.Rip), 7)) { cut = Cut::NoCall; break; }
+            // A task's mark is in the frame of the hook that called the task (the pass's: in a call made from the frame
+            // that called the pass). So the address that lies past a task's mark is the hook's caller, no part of the task.
+            const bool past = raw.root && c.Rsp - (DWORD64)delta > raw.root;
+            if (past && raw.rootOwn) { root = true; break; }
+            if (taskAt && *taskAt < 0 && raw.taskRoot && !more && c.Rsp - (DWORD64)delta > raw.taskRoot) *taskAt = n;
             if (n < MaxFrames) out[n++] = c.Rip; else more = true;
-            if (raw.root && c.Rsp - (DWORD64)delta > raw.root) { root = true; break; }
+            if (past) { root = true; break; }
         }
         if (more && cut == Cut::None) cut = Cut::Limit;
     } __except (EXCEPTION_EXECUTE_HANDLER) { cut = Cut::Fault; }   // the walk read past the copy (the page after it has no access), or a module went away
@@ -418,7 +484,9 @@ __attribute__((noinline)) void FillUnguarded(Module& m, std::vector<Function>& f
         const size_t count = dir->Size / sizeof(RuntimeFn);
         if (const RuntimeFn* table = image.Ptr<RuntimeFn>(dir->VirtualAddress, count)) functions = BuildFunctions(table, count, image.at, image.size);
     }
-    if (!IsSystem(m.kind)) return;
+    // The names: the system's modules (their call stubs have no unwind rows), and this mod's and ReShade's exports,
+    // which name a function when a sample is in one.
+    if (!IsSystem(m.kind) && m.kind != Kind::Mod && m.kind != Kind::ReShade) return;
     const auto* dir = image.Directory(IMAGE_DIRECTORY_ENTRY_EXPORT);
     const auto* ex = dir ? image.Ptr<IMAGE_EXPORT_DIRECTORY>(dir->VirtualAddress) : nullptr;
     if (!ex) return;
@@ -531,6 +599,44 @@ Report Capture(const Options& options, std::vector<Module>* modulesOut) {
     // Everything the sampling needs, before any thread is stopped.
     const size_t capacity = size_t(seconds * 1e6 / periodUs * 1.4) + 4096;
     Sample* samples = static_cast<Sample*>(VirtualAlloc(nullptr, capacity * sizeof(Sample), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+    // The threads inside watched render tasks: their samples, the names of the tasks met, a handle a slot.
+    const Watch watch = ParseWatch(options.watch);
+    const bool watching = watch.Any();
+    const int perTick = options.perTick < 1 ? 1 : options.perTick > 8 ? 8 : int(options.perTick);
+    TaskSampling sampling;
+    sampling.on = watching; sampling.watch = options.watch; sampling.perTick = uint32_t(perTick);
+    const size_t taskCapacity = watching ? std::min<size_t>(capacity * size_t(perTick + 1), size_t(1) << 20) : 0;
+    Sample* taskSamples = taskCapacity ? static_cast<Sample*>(VirtualAlloc(nullptr, taskCapacity * sizeof(Sample), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE)) : nullptr;
+    size_t taskCount = 0;
+    std::vector<std::string> taskNames;                                   // the watched tasks met; Sample::task is 1-based into it
+    struct Met { uint64_t key; uint16_t id; };                            // a task by its name's address (or its index): its id, 0 = not watched
+    std::vector<Met> met;
+    met.reserve(64); taskNames.reserve(64);
+    // Never called while a thread is stopped: it reads the game's memory and allocates.
+    const auto taskId = [&](uint64_t name, uint8_t index) -> uint16_t {
+        const uint64_t key = name ? name : (1ull << 63) | index;
+        for (const Met& m : met) if (m.key == key) return m.id;
+        std::string text = name ? tasks::ReadName(name) : std::string();
+        if (text.empty()) text = drawtasks::detail::Text("task %u (no name read)", unsigned(index));   // as the task tables name it
+        uint16_t id = 0;
+        if (Watched(watch, text)) {
+            const auto it = std::find(taskNames.begin(), taskNames.end(), text);
+            id = uint16_t(it - taskNames.begin() + 1);
+            if (it == taskNames.end()) taskNames.push_back(std::move(text));
+        }
+        met.push_back({key, id});
+        return id;
+    };
+    struct Opened { HANDLE handle = nullptr; uint32_t tid = 0; uintptr_t teb = 0; };
+    Opened opened[taskslots::MaxSlots];
+    // A thread's TEB by its handle, as the system has it: the slot's word is checked against it.
+    using QueryThread = LONG (NTAPI*)(HANDLE, int, void*, ULONG, ULONG*);
+    const QueryThread queryThread = reinterpret_cast<QueryThread>(reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtQueryInformationThread")));
+    const auto tebOf = [&](HANDLE thread) -> uintptr_t {
+        struct { LONG status; void* teb; uintptr_t process, thread, affinity; LONG priority, base; } info{};   // THREAD_BASIC_INFORMATION
+        return queryThread && queryThread(thread, 0, &info, sizeof info, nullptr) >= 0 ? (uintptr_t)info.teb : 0;
+    };
+    int cursor = 0;
     Raw* raw = static_cast<Raw*>(VirtualAlloc(nullptr, sizeof(Raw), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
     const size_t stackBytes = (StackCopy + 16 + Page - 1) / Page * Page;
     uint8_t* stack = static_cast<uint8_t*>(VirtualAlloc(nullptr, stackBytes + Page, MEM_RESERVE, PAGE_NOACCESS));   // the last page stays without access
@@ -550,7 +656,7 @@ Report Capture(const Options& options, std::vector<Module>* modulesOut) {
     std::vector<drawtasks::Run> runs;
     std::vector<std::string> names;
     uint32_t tasksDropped = 0;
-    if (samples && raw && stack) {
+    if (samples && raw && stack && (taskSamples || !watching)) {
         memset(raw, 0, sizeof *raw);
         memset(stack, 0, stackBytes);   // touched: no page of it is first met while a thread is stopped
         raw->stack = stack + (stackBytes - StackCopy - 16);   // the copy ends 0-16 bytes before the no-access page
@@ -559,10 +665,11 @@ Report Capture(const Options& options, std::vector<Module>* modulesOut) {
         g_stop.store(false);
         const int priority = GetThreadPriority(GetCurrentThread());
         SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);   // on time, and never stopped itself holding the thread
+        tasks::g_publish.store(watching);
         tasks::Arm(seconds);
         g_live.armed.store(true);
 
-        HANDLE thread = nullptr; uint32_t opened = 0;
+        HANDLE thread = nullptr; uint32_t drawOpened = 0;
         uint32_t random = 0x9E3779B9u ^ GetCurrentThreadId() ^ uint32_t(now());
         const int64_t armedAt = now();
         int64_t first = 0, last = 0, deadline = 0, due = armedAt;   // due: when the next tick should be, so the timer's lateness does not add up
@@ -593,17 +700,72 @@ Report Capture(const Options& options, std::vector<Module>* modulesOut) {
             }
             last = t;
             ++stats.ticks;
+            const uint32_t self = GetCurrentThreadId();
             const uint32_t tid = g_live.thread.load();
+            // The threads inside watched tasks, the draw thread apart (its own sample, below, serves). Each is stopped,
+            // read and let run before the next: never two at once, and nothing of this thread's is held meanwhile.
+            if (watching) {
+                bool eligible[taskslots::MaxSlots];
+                taskslots::View views[taskslots::MaxSlots];
+                uint16_t ids[taskslots::MaxSlots];
+                int any = 0;
+                for (int i = 0; i < taskslots::MaxSlots; ++i) {
+                    eligible[i] = false;
+                    const taskslots::Slot& slot = tasks::g_slots.slots[i];
+                    if (!slot.thread.load(std::memory_order_relaxed) || taskslots::Read(slot, views[i]) != taskslots::Seen::Task) continue;
+                    if (views[i].thread == self || views[i].thread == tid) continue;   // never itself; the draw thread is stopped once a tick, below
+                    ids[i] = taskId(views[i].name, views[i].index);
+                    if (!ids[i]) continue;
+                    eligible[i] = true; ++any;
+                }
+                int picked[8];
+                const int n = any ? taskslots::Pick(eligible, taskslots::MaxSlots, perTick, cursor, picked) : 0;
+                if (any) { ++sampling.ticks; if (any > perTick) ++sampling.capped; }
+                for (int k = 0; k < n; ++k) {
+                    const int i = picked[k];
+                    const taskslots::View& view = views[i];
+                    Opened& o = opened[size_t(i)];
+                    if (o.tid != view.thread) {
+                        if (o.handle) CloseHandle(o.handle);
+                        o.handle = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_LIMITED_INFORMATION, FALSE, view.thread);
+                        o.tid = o.handle ? view.thread : 0;
+                        o.teb = o.handle ? tebOf(o.handle) : 0;
+                        if (o.handle && !o.teb) ++sampling.unchecked;
+                    }
+                    if (!o.handle) { ++sampling.failed; continue; }
+                    const int64_t before = now();
+                    const bool ok = TakeTask(o.handle, view.thread, tasks::g_slots.slots[i], view.run, o.teb, *raw);
+                    const double stoppedUs = double(now() - before) * usPerTick;
+                    if (!ok) {
+                        if (raw->outside) { ++sampling.moved; continue; }
+                        ++sampling.failed;   // the thread ended (its id may be another thread's by now): opened anew next time
+                        CloseHandle(o.handle); o = Opened{};
+                        continue;
+                    }
+                    sampling.stoppedUsSum += stoppedUs;
+                    if (stoppedUs > sampling.stoppedUsMax) sampling.stoppedUsMax = stoppedUs;
+                    if (taskCount == taskCapacity) { ++sampling.dropped; continue; }
+                    Sample& s = taskSamples[taskCount++];
+                    Cut cut = Cut::None; bool root = false;
+                    const uint32_t frames = walk.frames, own = walk.own;   // those count the draw thread's walks
+                    s.count = uint8_t(Unwind(*raw, walk, s.frames, cut, root));
+                    walk.frames = frames; walk.own = own;
+                    s.eye = raw->eye; s.cut = uint8_t(cut); s.root = root ? 1 : 0; s.task = ids[i]; s.onDraw = 0;
+                    ++sampling.taken;
+                    if (!raw->copied) ++sampling.noStack;
+                }
+            }
             if (!g_live.state.load() || !tid) { ++stats.outside; continue; }
-            if (tid == GetCurrentThreadId()) { ++stats.failed; continue; }   // never itself: nobody would let it run again
-            if (tid != opened) {
+            if (tid == self) { ++stats.failed; continue; }   // never itself: nobody would let it run again
+            if (tid != drawOpened) {
                 if (thread) CloseHandle(thread);
                 thread = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_LIMITED_INFORMATION, FALSE, tid);
-                opened = thread ? tid : 0;
+                drawOpened = thread ? tid : 0;
             }
             if (!thread) { ++stats.failed; continue; }
+            const taskslots::Slot* const drawSlot = watching ? taskslots::Find(tasks::g_slots, tid) : nullptr;
             const int64_t before = now();
-            const bool ok = Take(thread, tid, *raw);
+            const bool ok = Take(thread, tid, drawSlot, *raw);
             const double stoppedUs = double(now() - before) * usPerTick;
             if (!ok) { ++(raw->outside ? stats.outside : stats.failed); continue; }
             stats.stoppedUsSum += stoppedUs;
@@ -611,15 +773,33 @@ Report Capture(const Options& options, std::vector<Module>* modulesOut) {
             if (count == capacity) { ++stats.dropped; continue; }
             Sample& s = samples[count++];
             Cut cut = Cut::None; bool root = false;
-            s.count = uint8_t(Unwind(*raw, walk, s.frames, cut, root));
-            s.eye = raw->eye; s.cut = uint8_t(cut); s.root = root ? 1 : 0;
+            int taskAt = -1;
+            s.count = uint8_t(Unwind(*raw, walk, s.frames, cut, root, &taskAt));
+            s.eye = raw->eye; s.cut = uint8_t(cut); s.root = root ? 1 : 0; s.task = 0; s.onDraw = 0;
             if (!raw->copied) ++stats.noStack;
+            // The draw thread inside a watched task: the same sample, up to that run's call, in the task's tables too.
+            if (raw->inTask) {
+                const uint16_t id = taskId(raw->taskName, raw->taskIndex);
+                if (id && taskCount == taskCapacity) ++sampling.dropped;
+                else if (id) {
+                    Sample& ts = taskSamples[taskCount++];
+                    ts = s;
+                    if (taskAt > 0) { ts.count = uint8_t(taskAt); ts.root = 1; ts.cut = 0; }
+                    else { ts.root = 0; if (!ts.cut) ts.cut = uint8_t(Cut::Limit); }   // the run's call lies beyond the frames kept
+                    ts.task = id; ts.onDraw = 1;
+                    ++sampling.fromDraw;
+                }
+            }
         }
         g_live.armed.store(false);
         for (int i = 0; i < 200 && g_live.state.load(); ++i) Sleep(1);   // a pass being drawn is counted whole
         tasks::Collect(usPerTick, first ? first : armedAt, runs, names, tasksDropped);
+        tasks::g_publish.store(false);
         SetThreadPriority(GetCurrentThread(), priority);
         if (thread) CloseHandle(thread);
+        for (Opened& o : opened) if (o.handle) CloseHandle(o.handle);
+        for (const taskslots::Slot& slot : tasks::g_slots.slots) if (slot.thread.load()) ++sampling.threads;
+        sampling.overflow = tasks::g_slots.overflow.load();
         stats.thread = g_live.thread.load();
         stats.seconds = first ? double(last - first) * usPerTick * 1e-6 : double(now() - armedAt) * usPerTick * 1e-6;
         for (int e = 0; e < 2; ++e) {
@@ -643,9 +823,15 @@ Report Capture(const Options& options, std::vector<Module>* modulesOut) {
     for (size_t i = 0; i < count; ++i)
         for (int f = 0; f < samples[i].count; ++f)
             if (const int m = FindModule(modules, samples[i].frames[f]); m >= 0) sampled[size_t(m)] = 1;
+    for (size_t i = 0; i < taskCount; ++i)
+        for (int f = 0; f < taskSamples[i].count; ++f)
+            if (const int m = FindModule(modules, taskSamples[i].frames[f]); m >= 0) sampled[size_t(m)] = 1;
     for (size_t m = 0; m < modules.size(); ++m) if (sampled[m]) FillModule(modules[m]);
     Report report = Aggregate(modules, samples, count, stats);
     report.tasks = drawtasks::Summarise(runs, names, options.tasksNote, tasksDropped);
+    report.sampling = sampling;
+    report.watched = Profiles(modules, taskSamples, taskCount, taskNames, report.tasks);
+    if (taskSamples) VirtualFree(taskSamples, 0, MEM_RELEASE);
     if (samples) VirtualFree(samples, 0, MEM_RELEASE);
     if (raw) VirtualFree(raw, 0, MEM_RELEASE);
     if (stack) VirtualFree(stack, 0, MEM_RELEASE);
