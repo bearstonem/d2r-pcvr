@@ -1,5 +1,102 @@
 # VR performance investigations
 
+## Render task patches, November 10
+
+**None of this is measured yet, and none has run in a headset.** The patches
+below are off as shipped (`[game_patches]` in `d2r_pcvr.ini`, each key 0) and
+are switched on one by one to be measured with a capture.
+
+**What the third capture showed** (18:44, 30 s in the world, both eyes; the
+first with table 8, the threads inside the render tasks): 2,231 eye passes of
+9.41 ms, of which the drain is 5.56 ms (59%). The chain the drain waits for,
+in ms from its start (left eye): `Collect Draw Calls` 1.19 (+0.12 to +1.31),
+then `Depth Pass` 2.71 and `Forward Pass` 2.68 side by side (+1.35 to +4.06),
+and `Late Post Processing` 3.49 (+2.06 to +5.55; right eye 3.71), which starts
+when `Clutter + Height + Fluid + Friends` ends, not after the Depth or Forward
+Pass, and whose end is the drain's end.
+
+### transparent_filter: flags first in the transparent pass's Ghost filter
+
+- **Found.** 88% of Late Post Processing (3.17 ms a run) is self time in one
+  game function, `0xFDC510`, with no wait, no lock and almost no GPU driver
+  time. It is the "Ghost" mode of the transparent render pass. For each
+  transparency layer (three at most settings) it walks every 0x100-byte draw
+  record of three buckets of draw calls and keeps the few that carry one of
+  the flags `0x21800000`. But before it looks at a record's flags it loads the
+  record's pointer to its per-model constants and reads one number through
+  it, and those constants live in the buffer they are uploaded to the GPU
+  from: mapped upload memory, which is slow to read back. Almost no record
+  has the flags (the draw submit function is not among the task's top
+  functions), so the time goes on reading a number for records that are then
+  skipped. The read costing that much is an inference from the timing and from
+  what the memory is; the sampler has no per-instruction table.
+- **The patch.** The first instruction of the loop (`0xFDC740`, the 7-byte
+  load of that pointer) becomes a jump to 25 bytes of new code in a page
+  allocated near the game: test the record's flags; none set, go where the
+  game's own test sends such a record (`0xFDCAAD`); otherwise do the load and
+  go back to the next instruction, so a record with a flag runs exactly the
+  game's code, its own flag test included. For a record without the flags the
+  skipped instructions wrote only `rax`, `xmm0`, the low byte of `r15` and the
+  flags register; at `0xFDCAAD` `r15` is reloaded from the stack and the others
+  are written again before anything reads them. The number is not summed,
+  compared across records or stored: for a record that has the flags it is
+  handed to the game's per-layer test and chooses which of two sort keys the
+  record gets, and that is all. Same records kept, same order, same picture.
+- **Proven before writing** (`vr/game_patch_signatures.h`): 123 bytes in
+  three stretches: the loop's set-up (the record pointer in `rsi`, the end, the
+  fall into the loop), the loop's first twelve instructions up to its own
+  flag test and jump, and the loop's end with its only way back to the first
+  instruction. Then the whole function's bytes in the running game are
+  searched for any jump that could land inside the replaced instruction. A
+  difference anywhere: no patch, one log line.
+- **Expected.** Late Post Processing 3.6 ms to about 0.45 ms (what is left of
+  it in the capture besides that function). It then ends near +2.5 ms and the
+  drain ends with the Depth and Forward Pass at about +4.06: about 1.5 ms off
+  a 9.4 ms eye pass.
+
+### How a patch goes in
+
+- Only between frames: on the draw thread at the top of the mod's hook on the
+  game's draw (`HookDrawGameScreen`), before the frame's first eye pass. The
+  render graph's drain returned in the frame before only when every render
+  task had ended, so no thread is in the code that is changed. Menus and
+  loading screens do not run that hook: a patch goes in with the first frame
+  drawn in the world, and a key changed in the INI takes effect at the next
+  frame (1 puts it in, 0 puts the game's bytes back).
+- The game's version is never asked. A place whose bytes differ is looked at
+  again every 16th frame (code that has not run may not be there yet) and
+  given up after 40 looks with `refused: bytes differ at RVA ...`.
+- The write is the loader's checked patch, which compares the bytes once more
+  as it writes. The jump is one aligned 8 bytes.
+- The log (`d2r-vr-frame.log`): `Frame game patches: [game_patches]
+  transparent_filter=1 ...` when the settings are first read; per key
+  `... applied: ...`, `... refused: ...` or `... off`; and `first frame: ...`
+  with each key's state at the first frame drawn. Not in the Status tab's
+  game-code table.
+- `game-patch-plan-test` checks the fingerprint comparison, the jump search,
+  the new code's bytes for given addresses, and that nothing is planned when
+  the new code would be out of a relative jump's reach.
+
+### Verifying with a capture
+
+Stand in the same scene with the same settings, take a `[debug] draw_sampler`
+capture with every key 0, set one key to 1, look for its `applied` line, take
+another capture (another number), and compare:
+
+- `transparent_filter`: table 7, `Late Post Processing` mean run 3.5-3.7 ms to
+  about 0.45, and the drain's time a pass down by about 1.5 ms with the Depth
+  or Forward Pass now the last long task; table 8, `Late Post Processing`:
+  `D2RLoader.exe+0xFDC510` no longer near 88% of it. Samples in the new code
+  itself show as code in no module.
+
+**Risks, plainly.** The analysis was made on a dump of the game's code from
+3.3.93787; the running game (3.4.95041) is only known to have the same
+function starts, so the byte comparison at run time is what stands between a
+different build and a wrong write. The new code has no unwind row: a crash
+report or a sampler walk from inside it stops there (it makes no call, so
+nothing else is ever above it on a stack). Taking a patch out again has not
+been exercised in the game.
+
 ## Draw-thread sampler, November 10
 
 The game is limited by the one thread that draws the eyes: each eye pass keeps

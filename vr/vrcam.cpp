@@ -101,6 +101,7 @@ namespace hud { void SetWorkspaceBand(float top, float bottom); void SetBoardCle
 #include "logging.h"
 #include "thread_stats.h"
 #include "draw_sampler_capture.h"   // [debug] draw_sampler: where the draw thread's time goes
+#include "game_patches.h"           // [game_patches]: small changes to the game's render code, between frames
 #include "render_task_hooks.h"      // ... and its render task times: hooks put in by the first capture
 #endif
 #include "sigscan.h"
@@ -1424,6 +1425,11 @@ void LoadSettings() {
     g_set.topAngle.store(std::clamp(IniF(L"stereo", L"top_angle", 3.0f), 0.0f, 20.0f));
     g_set.convergence.store(std::clamp(IniF(L"stereo", L"convergence", 15.0f), 0.0f, 1000.0f));
     g_set.bgFullSpeed.store(IniB(L"render", L"background_full_speed", true));
+    {   // [game_patches]: each off unless asked for; they go in and out between frames (vr/game_patches.h)
+        gamepatches::Wanted patches;
+        patches.transparentFilter = IniB(L"game_patches", L"transparent_filter", false);
+        gamepatches::Configure(patches);
+    }
     g_set.gameHeightFog.store(IniB(L"render", L"game_height_fog", false));
     g_set.solidWalls.store(std::clamp((int)IniF(L"render", L"solid_walls", 1.0f), 0, 2));
     g_set.stampPixels.store(IniB(L"stereo", L"stamp_pixels", true));
@@ -7463,6 +7469,7 @@ uintptr_t HookDrawGameScreen(int a) {
     static uint32_t pairs = 0,cpuPairs=0;
     const double entered=pairtime::UsNow();
     static bool turned = false;   // the last frame went by turns
+    if (!depth) gamepatches::BetweenFrames();   // the frame before is drawn, this one's first pass not begun
 #ifdef D2RVR_NATIVE_OPENXR
     const bool wanted = !depth && PairWanted();
     if (wanted) WarnGpuWait();

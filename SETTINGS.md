@@ -186,3 +186,17 @@ grip, and when you let go.
 
 For finding problems: draw the line the left hand takes, draw the weapon's
 axes, log every frame, find who writes the hero matrix. Leave these off to play.
+
+### Game patches (in `d2r_pcvr.ini` only)
+
+`[game_patches]` has no tab: its keys are set in the file, which is re-read
+when saved. Each is a small change to the game's own render code in memory,
+off (0) as shipped because none has been measured or tried in a headset yet;
+see *Render task patches* in [steamvr/PERFORMANCE.md](steamvr/PERFORMANCE.md).
+A patch is put in between two frames only where the game's code is byte for
+byte what the mod knows; otherwise it is left out and `d2r-vr-frame.log` says
+so in a `Frame game patches:` line.
+
+| Key | 1 = |
+| --- | --- |
+| `transparent_filter` | The transparent pass's "Ghost" filter tests a draw record's flags before it reads the record's constants back from GPU upload memory. Same picture; shortens the Late Post Processing render task. |
