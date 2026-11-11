@@ -1026,7 +1026,7 @@ void LoadSettings() {
     framevr::ConfigureSymmetricProjection(IniB(L"render",L"symmetric_projection",true));
     framevr::ConfigureFrameGeneration(IniF(L"render",L"frame_generation",0),IniF(L"render",L"frame_generation_preset",1),IniF(L"render",L"frame_generation_scale",2));
     // A trial, off unless set (steamvr/late_wait.h): with frame generation making frames on SteamVR, the pair's xrWaitFrame after its first eye's draw.
-    framevr::ConfigureFrameGenerationLateWait(IniB(L"render",L"frame_generation_late_wait",false));
+    framevr::ConfigureFrameGenerationLateWait(IniB(L"render",L"frame_generation_late_wait",true));
     framevr::ConfigureTurnsFromDrawnEye(IniB(L"stereo",L"turns_from_drawn_eye",true));
     framevr::ConfigureTurnsKeepOwn(int(IniF(L"stereo",L"turns_keep_own",3)));
     framevr::ConfigureTurnsKeepNear(IniF(L"stereo",L"turns_keep_gap",48),IniF(L"stereo",L"turns_keep_reach",96));

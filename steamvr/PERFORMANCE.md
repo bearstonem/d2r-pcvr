@@ -2,15 +2,29 @@
 
 ## Frame generation's wait, November 10
 
-**Not tried in a headset.** The change below builds and its tests pass; what it
-does to the frame rate, the head's and the hands' lag is still to be seen. It
-is **off** as shipped: no key in the shipped INI, nothing in VR Settings. To
-try it, write into the installed `d2r_pcvr.ini` (it switches live, both ways):
+**On for every install since the headset run of November 11**: no key in the
+shipped INI, nothing in VR Settings. It acts only while frame generation makes
+frames on SteamVR with Both eyes. `[render] frame_generation_late_wait=0`
+written into the installed `d2r_pcvr.ini` by hand takes it out, live.
 
-```ini
-[render]
-frame_generation_late_wait=1
-```
+**The run** (SteamVR, headset at 120 Hz, OFXR Bridge 0.2.1 NVIDIA Fast, Both
+eyes, a field fight, switched on live after a minute):
+
+| | before | with the late wait |
+| --- | --- | --- |
+| pairs a second | 55.2 | 59.4 to 59.9 |
+| the runtime's wait, ms a pair | 4.41 | 0.01 to 0.05 |
+| the wait called, ms after the last xrEndFrame | 2.05 | 7.0 to 8.8 |
+| pairs with a cycle of 16 to 17.5 ms | 180 of 552 | 501 to 552 of about 598 |
+| xrEndFrame's submit, ms | 0.96 | 2.0 to 4.9 |
+
+Every pair took the late order; no wait or begin failed. It stepped aside and
+came back by itself around menus and a change to By turns and back, with the
+reason in the log. Two things to look at again: 17 switches within two seconds
+around one menu, and one 396 ms pair as frame generation stopped making
+frames. The owner: "everything worked great". Not tried: 90 Hz (where the
+extra pose latency is larger, up to about 9 ms by the reckoning below),
+Virtual Desktop, FidelityFX.
 
 **Measured, November 10** (SteamVR, headset at 120 Hz, Both eyes, a field
 fight, the pacing lines below). With frame generation off the game held

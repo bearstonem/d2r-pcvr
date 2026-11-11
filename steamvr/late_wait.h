@@ -3,8 +3,8 @@
 #include <cmath>
 #include <cstdint>
 
-// Frame generation's wait, taken late ([render] frame_generation_late_wait, off
-// unless set; steamvr/PERFORMANCE.md "Frame generation's wait").
+// Frame generation's wait, taken late ([render] frame_generation_late_wait, on
+// unless set to 0; steamvr/PERFORMANCE.md "Frame generation's wait").
 // While OFXR Bridge 0.2.1 makes frames on SteamVR its presenter thread owns the
 // runtime's frame calls, and the game's xrWaitFrame is answered by the bridge:
 // no sleep to a display slot, then a block until the GPU has finished the
