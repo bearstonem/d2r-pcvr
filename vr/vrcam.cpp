@@ -367,11 +367,11 @@ struct Settings {
     // and a click's whoosh; sparks: a burst of sparks out of the fire at a click on it (the shader's Sparks);
     // fire_x/y/z: where the fire burns in the scene (world units, the preset's rogue_bonfire01); fire_pick_radius.
     std::atomic<bool>  campfireFireSound{true}, campfireSparks{true};
-    std::atomic<float> campfireFireVolume{0.9f}, campfireFireBurst{2.0f}, campfireFireX{1060.67f}, campfireFireY{0.3f},
+    std::atomic<float> campfireFireVolume{0.9f}, campfireFireBurst{2.0f}, campfireFireX{1060.67f}, campfireFireY{-0.2f},
                        campfireFireZ{123.94f}, campfireFirePick{2.5f};
     // fire_logs_radius / fire_logs_height: a ray passing this near the burning logs, from their foot to this
     // high over it, picks the fire too (world units)
-    std::atomic<float> campfireLogsRadius{1.5f}, campfireLogsHeight{1.5f};
+    std::atomic<float> campfireLogsRadius{0.0f}, campfireLogsHeight{1.5f};
     std::atomic<bool>  campfirePano{false};      // [campfire] panorama: one picture round the scene (pano_file), in the void
     std::atomic<float> campfirePanoYaw{0.0f}, campfirePanoLow{-90.0f}, campfirePanoHigh{90.0f}, campfirePanoBright{1.0f};   // [campfire] pano_yaw/low/high/brightness
     std::atomic<float> campfireMenuTop{0.78f};  // [campfire] menu_top: where the strip begins, a share of the game's menu band from its top
@@ -1547,17 +1547,18 @@ void LoadSettings() {
         g_set.campfireFireVolume.store(std::clamp(IniF(L"campfire", L"fire_volume", 0.9f), 0.0f, 4.0f));
         g_set.campfireFireBurst.store(std::clamp(IniF(L"campfire", L"fire_burst_volume", 2.0f), 0.0f, 6.0f));
         g_set.campfireFireX.store(IniF(L"campfire", L"fire_x", 1060.67f));
-        g_set.campfireFireY.store(IniF(L"campfire", L"fire_y", 0.3f));
+        g_set.campfireFireY.store(IniF(L"campfire", L"fire_y", -0.2f));   // owner 2026-11-11: the pick a little lower
         g_set.campfireFireZ.store(IniF(L"campfire", L"fire_z", 123.94f));
         {
             wchar_t buf[96] = {};
-            GetPrivateProfileStringW(L"campfire", L"pick_avoid", L"", buf, 96, g_iniPath);
+            // owner 2026-11-11: the Hardcore box under the fire, 3840 x 2160
+            GetPrivateProfileStringW(L"campfire", L"pick_avoid", L"0.465,0.455,0.53,0.505", buf, 96, g_iniPath);
             float a[4] = {0, 0, 0, 0};
             if (swscanf_s(buf, L"%f,%f,%f,%f", &a[0], &a[1], &a[2], &a[3]) != 4) a[0] = a[1] = a[2] = a[3] = 0;
             for (int i = 0; i < 4; ++i) g_campfireAvoid[i] = a[i];
         }
         g_set.campfireFirePick.store(std::clamp(IniF(L"campfire", L"fire_pick_radius", 2.5f), 0.5f, 30.0f));
-        g_set.campfireLogsRadius.store(std::clamp(IniF(L"campfire", L"fire_logs_radius", 1.5f), 0.0f, 10.0f));
+        g_set.campfireLogsRadius.store(std::clamp(IniF(L"campfire", L"fire_logs_radius", 0.0f), 0.0f, 10.0f));
         g_set.campfireLogsHeight.store(std::clamp(IniF(L"campfire", L"fire_logs_height", 1.5f), 0.0f, 10.0f));
         g_set.campfirePanoYaw.store(std::clamp(IniF(L"campfire", L"pano_yaw", 0.0f), -360.0f, 360.0f));
         g_set.campfirePanoLow.store(std::clamp(IniF(L"campfire", L"pano_low", -90.0f), -90.0f, 89.0f));
