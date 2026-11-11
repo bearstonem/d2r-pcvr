@@ -1,5 +1,112 @@
 # VR performance investigations
 
+## Frame generation's wait, November 10
+
+**Not tried in a headset.** The change below builds and its tests pass; what it
+does to the frame rate, the head's and the hands' lag is still to be seen. It
+is **off** as shipped: no key in the shipped INI, nothing in VR Settings. To
+try it, write into the installed `d2r_pcvr.ini` (it switches live, both ways):
+
+```ini
+[render]
+frame_generation_late_wait=1
+```
+
+**Measured, November 10** (SteamVR, headset at 120 Hz, Both eyes, a field
+fight, the pacing lines below). With frame generation off the game held
+59.5 to 60.0 pairs a second: cycles of 16 to 17.5 ms, the runtime's wait 2 to
+4 ms and shorter as the work grew. With frame generation on (NVIDIA Medium or
+Fast, no difference) it ran 53 to 57: the same 12 to 15 ms of work, but a wait
+of 3 to 6 ms on nearly every pair whatever the work, and cycles spread over 16
+to 20 ms. OFXR Bridge's own log for the same session: the game's `xrWaitFrame`
+3.7 ms on average, 99% of it in the bridge's wait for its synthesis.
+
+**What the bridge does** (release 0.2.1). Once it makes frames on SteamVR, a
+thread of its own makes every frame call to SteamVR, one a headset frame, and
+the game's calls are answered by the bridge. The game's `xrWaitFrame` no longer
+sleeps to a display slot. It returns a time and twice the headset's period, and
+then holds the game until the GPU has finished the bridge's last synthesis.
+That synthesis is on the game's own D3D12 queue, behind both eyes of the pair
+before and the optical flow for them. So the hold is the wait for the GPU that
+`[render] defer_gpu_wait=1` took out of the pair's end, back at the next
+pair's start: the game's thread idles 3 to 6 ms while the GPU finishes, then
+does its 12 to 15 ms of work. What keeps the game from running ahead of the
+headset is elsewhere: the bridge's `xrEndFrame` waits until its thread has
+taken the generated frame of the pair before.
+
+**What the key changes.** The hold ends at a fixed moment, when the GPU is
+done, however early the game asks. So the game asks later. A pair with the
+late wait:
+
+1. `Begin` (`steamvr/transport.cpp`) finds the head, the eyes and the hands at
+   once, for the time this pair's `xrWaitFrame` is expected to give: the last
+   wait's time and one period on (`steamvr/late_wait.h`), a headset frame more
+   for each one the game ran over. The frame's input step runs as before.
+2. The first eye is drawn.
+3. Before the pair's first image is taken (`Capture`, at the first eye's
+   present) come `xrWaitFrame` and `xrBeginFrame` (`SettleFrame`). That is
+   about 8 ms after the last `xrEndFrame`; the synthesis was done about 6 ms
+   after it in the session above. If it is not done yet, the bridge holds the
+   game there for the rest, as it did before at the start.
+4. The second eye, then `xrEndFrame` with the time `xrWaitFrame` gave and the
+   eyes' poses as they were drawn.
+
+The calls keep their order on the one thread: one `xrWaitFrame`, one
+`xrBeginFrame`, one `xrEndFrame`. Only the mod's own work moves in front of
+them, which OpenXR allows (the panels' uploads in the input step take their
+images before the frame begins on such a pair, as the first upload of a session
+always has). The poses' time and the frame's time are the same when the game
+keeps its rate, and a headset frame apart when a pair slips; SteamVR turns the
+picture from the pose it was drawn with to the one at display either way, and
+with the bridge's thread up SteamVR is given that thread's own time, not the
+game's.
+
+It is used only on a pair of both eyes, on SteamVR, while the readout says
+frame generation is active, and while the last wait's period was twice the
+session's shortest: the bridge doubles the period only while its thread is up,
+and that thread stops for every frame without the eyes (a menu) and for every
+change of settings. The sign can be wrong, since SteamVR by itself gives a
+late caller a longer period. Then a wait that does sleep to a display slot
+comes after the first eye for a frame, which costs that frame some lag and
+nothing else. Every other frame, and every frame with the key at 0, waits
+first as before. The order is decided when a frame is opened, so it only
+changes between frames.
+
+**What it should give, and cost.** The wait near zero and 60 pairs a second at
+120 Hz whenever the work fits 16.67 ms. The lag: the head is found as early in
+the pair as before, but what is left of the two headset frames after the work
+is now spent in `xrEndFrame`, after the picture is drawn, where it was spent
+before the head was found. That is about 3 to 4 ms more from head to picture at
+120 Hz with 13 ms of work, and up to about 9 ms at 90 Hz (22.2 ms a pair),
+where the game was not short of time in the first place. SteamVR's reprojection
+covers a turn of the head; the hands and the body's place in the room get the
+whole of it.
+
+**Why not the next frame's wait from a second thread.** That was the first
+plan: `xrWaitFrame` for the next frame on a helper thread while this one is
+drawn. On 0.2.1 it cannot work. With the bridge's thread up, two waits are
+outstanding at every `xrEndFrame`, the bridge no longer takes the frame for the
+newest, and no generated frame is made. Without its thread, the second wait
+goes to SteamVR, and the bridge's own second frame inside the game's
+`xrEndFrame` then waits for a frame nobody can begin: the game hangs. (Later
+releases of the bridge fixed that hang; their other changes stalled SteamVR's
+`xrEndFrame` for seconds here, so the mod stays on 0.2.1.)
+
+**Reading a session.** The log says `Frame generation: late wait on: ...` and
+`... off: <why>` when the order changes (a line a second at most, with the
+number of changes since). In the ten-second lines `XR begin ... (wait ...)`
+counts only a wait made there; `pairs by the runtime's wait` counts the wait
+wherever it was made, and a new line says where:
+
+```text
+Frame pacing: the runtime's wait 0.21 ms a pair, called 8.10 ms after the last xrEndFrame | late (after the first eye's draw) on 598 of 600 pairs, its time 0.02 ms from the poses' (mean)
+```
+
+A late wait is inside the `left` pass's time in `vrcam: a pair, ms`. What
+would show it works: nearly all pairs late, the wait's bins in `<1`, `pairs by
+cycle` in `16-17.5`, 60 pairs a second, `XR end ... (submit ...)` longer by
+what the pair has to spare.
+
 ## One present a pair, November 10
 
 **Measured once, November 10** (SteamVR, headset at 120 Hz, frame generation
