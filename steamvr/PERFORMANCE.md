@@ -1,5 +1,42 @@
 # VR performance investigations
 
+## Draw thread: the bodies' physics on its own thread, November 10
+
+**Gain not yet measured in a headset.** Built and tested natively only.
+
+Evidence, the owner's headset log of 2026-11-10 16:32-16:39: the `input` part
+of `Frame pacing: XR begin, ms a pair` was 0.26-0.30 ms a pair with no ragdoll
+alive, 0.37-0.39 with 1-2, 0.53 with 3 and 0.58-0.84 with 5-6 (`Frame bodies:
+ten seconds: ... ragdolls most=N`). So the bodies that give way cost the draw
+thread roughly 0.3-0.5 ms a pair in a big fight. This is inferred from those
+timings: the step itself was not timed.
+
+The bodies' Box3D world now lives on one worker thread (`limb_worker.h`), which
+makes it, steps it and destroys it. Each frame the draw thread hands over that
+frame's time, player position, weapon capsules and posed bodies, and picks up
+what finished since the frame before. Only the newest frame waits: one handed
+over while the worker is still stepping replaces it, and the fixed 1/120 s
+steps are counted from the frames' own times, so nothing queues and no
+simulated time is lost. The worker gives each batch's answers straight to the
+board the skeleton hook reads, the moment its steps end, so a pose made later
+in the same frame is bent by that frame's steps as before; a pose made in the
+half millisecond before the batch ends uses the frame before's answer. The
+hand's tick and the counters are picked up at the next frame's input, one
+frame later than before. The worker runs at normal priority. Making and
+destroying a Box3D world takes one lock (`physics_worlds.h`): Box3D keeps all
+worlds in one table, and the bottles' world is still made on the draw thread.
+
+The bottle and prop world stays on the draw thread: the same frame reads it
+back many times (a let-go bottle, the thrown potion's pose, props' matrices,
+traces for the throw sigil), and it already skips its step at rest.
+
+**What to read in the next log.** `Frame bodies: worker: ten seconds: N step
+batches, mean X ms, longest Y ms; N frames handed over, N replaced before they
+were stepped` is the cost that left the draw thread. `input` in `Frame pacing`
+with 5-6 ragdolls should be near its no-ragdoll value (0.26-0.30 ms a pair).
+Replaced frames mean the worker did not finish within a frame; a few are
+harmless, many would show as bodies reacting late.
+
 ## Draw thread: panel uploads and prop physics, November 10
 
 **Not yet measured in a headset.** The changes below passed the native build

@@ -81,6 +81,7 @@
 #include "dropped_bottles.h"
 #include "limb_board.h"
 #include "limb_physics.h"
+#include "limb_worker.h"
 #include "../vr/wall_cells.h"
 #include "../vr/prop_scan.h"
 #include "../vr/spell_impacts.h"
@@ -1011,7 +1012,14 @@ std::array<BottleWeaponPose,bottles::Colliders> bottleWeapons{};
 ULONGLONG bottleStruckAt[2]{};
 // Monsters and townsfolk near the player: powered ragdolls in their own
 // physics world, made when a weapon nears them ([interactions] body_physics).
-std::unique_ptr<limbs::World> bodyWorld;
+// The world lives on its own worker thread (limb_worker.h): the frame thread
+// hands over each frame's inputs and picks up what finished; the worker gives
+// the answers straight to the board the skeleton hook reads. It takes no lock
+// of ours, so Shutdown can join it under the transport lock as the painters.
+limbs::Stepper bodyStepper([](const limbs::Reaction* r,unsigned n,uint64_t now){limbs::Shared().React(r,n,now);});
+limbs::StepResults bodyNow;       // the world as last stepped: ragdolls, lifeless
+bool bodyWorkerMissing=false;     // its thread could not be made: said once
+unsigned bodyBatches=0,bodyHanded=0,bodyReplaced=0;uint64_t bodyStepMicros=0,bodyStepLongest=0;   // ten seconds of the worker's steps
 std::atomic<bool> bodyPhysics{true};
 uint64_t bodySession=0;
 ULONGLONG bodyReportAt=0,bodyToldAt=0;
@@ -1323,7 +1331,7 @@ void ClearInput() {
     ++meleeEpoch;motion.Cancel();motionOutput={};motionAt=0;gamecmd::CancelPotion();
     interactions.Reset();interactionOutput={};interactionstate::Cancel();skel::SetInteractionHidden(0);
     potionScene={};if(droppedBottles)droppedBottles->Reset();
-    if(bodyWorld)bodyWorld->Reset();   // the hook eases the bodies' last answers out
+    bodyStepper.Reset();bodyNow={};   // posted to its worker; the hook eases the bodies' last answers out
     elementalState.Reset();elementalScene={};elementalEffects.Reset();
     journalPlacement.LoseTracking();
     meleePoses.Clear();offhandPoses.Clear();CancelShieldCast();
@@ -3671,10 +3679,18 @@ void ReportBodies(ULONGLONG now) {
     const unsigned kept=board.kept.exchange(0),restored=board.restored.exchange(0);
     const unsigned calls=board.calls.exchange(0),outside=board.outside.exchange(0);const uint64_t micros=board.micros.exchange(0);
     const unsigned pushes=std::exchange(bodyPushes,0u),most=std::exchange(bodyMost,0u),strikes=std::exchange(bodyStrikes,0u),slips=std::exchange(bodySlips,0u);
+    const unsigned batches=std::exchange(bodyBatches,0u),handed=std::exchange(bodyHanded,0u),replaced=std::exchange(bodyReplaced,0u);
+    const uint64_t stepMicros=std::exchange(bodyStepMicros,0ull),stepLongest=std::exchange(bodyStepLongest,0ull);
+    if(batches) {
+        // The worker's cost (limb_worker.h): a batch is one frame's fixed steps and everything around them.
+        char steps[224];std::snprintf(steps,sizeof steps,"Frame bodies: worker: ten seconds: %u step batches, mean %.3f ms, longest %.3f ms; %u frames handed over, %u replaced before they were stepped",
+            batches,double(stepMicros)/1000.0/double(batches),double(stepLongest)/1000.0,handed,replaced);
+        Say(steps);
+    }
     if(!posed&&!bent&&!pushes&&!learned&&!calls)return;
     // The skeleton hook's cost: its calls for bodies, those beyond [bodies] radius, its time (owner 2026-11-01).
     char line[480];std::snprintf(line,sizeof line,"Frame bodies: ten seconds: poses posted=%u bent=%u refused=%u models learned=%u, not posed again by the game=%u, put back=%u; ragdolls most=%u now=%u, lifeless now=%u; pushes=%u hits=%u slipped through=%u; hook %u calls, %u beyond the radius, %.2f ms a second",
-        posed,bent,refused,learned,kept,restored,most,bodyWorld?bodyWorld->Simulated():0u,bodyWorld?bodyWorld->Lifeless():0u,pushes,strikes,slips,calls,outside,double(micros)/10000.0);
+        posed,bent,refused,learned,kept,restored,most,bodyNow.simulated,bodyNow.lifeless,pushes,strikes,slips,calls,outside,double(micros)/10000.0);
     Say(line);
 }
 void StepBodies() {
@@ -3685,46 +3701,49 @@ void StepBodies() {
     const auto tuning=limbs::Tuned().Get();
     limbs::Shared().Fade(uint64_t(tuning[limbs::EaseBack]));
     if(!on||!in.session||in.session!=bodySession) {
-        if(bodyWorld)bodyWorld->Reset();
+        bodyStepper.Reset();bodyNow={};   // posted: the worker lets every body go before its next steps
         limbs::Shared().React(nullptr,0,now);
         bodySession=in.session;
     }
-    if(!on||!in.stage.known){limbs::Shared().React(nullptr,0,now);return;}   // menus and loading: back to the game's poses
-    std::array<limbs::Rig,limbs::MaxPosed> posed;
-    const unsigned n=limbs::Shared().Posed(posed.data(),unsigned(posed.size()),now);
-    if(!n&&(!bodyWorld||!bodyWorld->Simulated())){limbs::Shared().React(nullptr,0,now);ReportBodies(now);return;}
-    if(!bodyWorld)bodyWorld=std::make_unique<limbs::World>();
-    if(!bodyWorld->Ready())return;
-    bodyWorld->Tune(tuning);
-    bodyWorld->Bodies(posed.data(),n,in.time);
-    std::array<limbs::Weapon,limbs::Weapons> hands{};
-    const auto held=HeldColliders();
-    for(int i=0;i<limbs::Weapons;++i)hands[size_t(i)]={held[size_t(i)].active,held[size_t(i)].base,held[size_t(i)].tip,held[size_t(i)].radius};
-    bodyWorld->Hands(hands);
-    bodyWorld->Advance(in.time,in.stage.anchor);
-    // A contact the game counted as a hit: an impulse on the struck limb.
-    for(int hand=0;hand<2;++hand)
-        if(const auto at=bodyStrikeAt[hand].exchange(0);at&&now>=at&&now-at<150&&bodyWorld->Strike(hand))++bodyStrikes;
-    bodySlips+=bodyWorld->Slips();
-    bodyMost=std::max(bodyMost,bodyWorld->Simulated());
-    std::array<limbs::Reaction,limbs::MaxBodies> answers;
-    limbs::Shared().React(answers.data(),bodyWorld->Reactions(answers,now),now);
-    // A light tick in the hand that pushed a body; the first push a second is logged.
-    std::array<limbs::Touch,limbs::MaxTouches> touches;
-    for(unsigned i=0,count=bodyWorld->Touches(touches);i<count;++i) {
-        const auto& t=touches[i];const int hand=t.slot?1:0;
-        ++bodyPushes;
-        if(t.speed>1&&now-bottleStruckAt[hand]>=80) {
-            bottleStruckAt[hand]=now;
-            MotionPulse(hand,haptics::Category::Melee,std::clamp(.12f+t.speed*.02f,.12f,.35f),15000000);
-        }
-        if(now-bodyToldAt>=1000) {
-            bodyToldAt=now;
-            static const char* const by[]{"right hand","left hand","shield"};
-            char line[160];std::snprintf(line,sizeof line,"Frame bodies: pushed a %s (%s, %.1f m/s)",limbs::Name(t.kind),by[t.slot%3],t.speed);
-            Say(line);
+    // What the worker finished since the last frame: the hands' ticks, the counters, its time.
+    limbs::StepResults done;
+    if(bodyStepper.Take(done)) {
+        bodyNow=done;
+        bodyStrikes+=done.strikes;bodySlips+=done.slips;bodyMost=std::max(bodyMost,done.most);
+        bodyBatches+=done.batches;bodyReplaced+=done.replaced;bodyStepMicros+=done.micros;bodyStepLongest=std::max(bodyStepLongest,done.longest);
+        // A light tick in the hand that pushed a body; the first push a second is logged.
+        for(unsigned i=0;i<done.touched;++i) {
+            const auto& t=done.touches[i];const int hand=t.slot?1:0;
+            ++bodyPushes;
+            if(t.speed>1&&now-bottleStruckAt[hand]>=80) {
+                bottleStruckAt[hand]=now;
+                MotionPulse(hand,haptics::Category::Melee,std::clamp(.12f+t.speed*.02f,.12f,.35f),15000000);
+            }
+            if(now-bodyToldAt>=1000) {
+                bodyToldAt=now;
+                static const char* const by[]{"right hand","left hand","shield"};
+                char line[160];std::snprintf(line,sizeof line,"Frame bodies: pushed a %s (%s, %.1f m/s)",limbs::Name(t.kind),by[t.slot%3],t.speed);
+                Say(line);
+            }
         }
     }
+    if(!on||!in.stage.known){limbs::Shared().React(nullptr,0,now);return;}   // menus and loading: back to the game's poses; nothing handed over
+    static limbs::StepInput frame;   // 24 rigs: too large for this thread's stack every frame; the frame thread's only
+    frame.count=limbs::Shared().Posed(frame.rigs.data(),unsigned(frame.rigs.size()),now);
+    if(!frame.count&&!bodyStepper.Active()){limbs::Shared().React(nullptr,0,now);ReportBodies(now);return;}
+    if(!bodyStepper.Start()) {
+        if(!std::exchange(bodyWorkerMissing,true))Say("Frame bodies: worker thread unavailable; bodies do not give way");
+        limbs::Shared().React(nullptr,0,now);return;
+    }
+    frame.tuning=tuning;frame.time=in.time;frame.player=in.stage.anchor;frame.now=now;
+    const auto held=HeldColliders();
+    for(int i=0;i<limbs::Weapons;++i)frame.hands[size_t(i)]={held[size_t(i)].active,held[size_t(i)].base,held[size_t(i)].tip,held[size_t(i)].radius};
+    // A contact the game counted as a hit: an impulse on the struck limb, after this frame's steps.
+    for(int hand=0;hand<2;++hand) {
+        const auto at=bodyStrikeAt[hand].exchange(0);
+        frame.strike[size_t(hand)]=at&&now>=at&&now-at<150;
+    }
+    if(bodyStepper.Submit(frame))++bodyHanded;
     ReportBodies(now);
 }
 // Bone Armor's pieces on both forearms, placed from each controller's current
@@ -8233,7 +8252,7 @@ void Shutdown(bool preserveResolution) {
     if(!preserveResolution)hud::NativeSession(false);
     if(!preserveResolution)resolution::Restore();
     windowFocus.Cancel();
-    EndPair();ClearInput();interactionPainter.Stop();bloodPainter.Stop();arcanePainter.Stop();glyphPainter.Stop();strainPainter.Stop();noticePainter.Stop();settingsPainter.Stop();turnCompiler.Stop();interaction::icons::Shutdown();
+    EndPair();ClearInput();interactionPainter.Stop();bloodPainter.Stop();arcanePainter.Stop();glyphPainter.Stop();strainPainter.Stop();noticePainter.Stop();settingsPainter.Stop();turnCompiler.Stop();bodyStepper.Stop();bodyNow={};interaction::icons::Shutdown();
     // Completion is mandatory before destroying our commands/resources, even
     // when ordinary frame submission uses queue ordering without a CPU wait.
     if(fence&&!WaitGpu())failed=true;
