@@ -7441,7 +7441,7 @@ uintptr_t HookDrawGameScreen(int a) {
     static bool told = false, toldWhy = false;
     static double lastEnd = 0.0, sumGap = 0.0, sumPass[2] = {}, sumPresent[2] = {}, sumEff[2] = {}, maxPair = 0.0, sumCpu = 0.0, sumWall = 0.0;
 #ifdef D2RVR_NATIVE_OPENXR
-    static double sumBegin=0,sumEnd=0,sumWait=0,sumFence=0,sumSubmit=0,sumPeriod=0;
+    static double sumBegin=0,sumEnd=0,sumWait=0,sumFence=0,sumSubmit=0,sumPeriod=0,sumLocate=0,sumInput=0;
     static uint32_t periodPairs=0;
 #endif
     static ULONGLONG since = GetTickCount64(), lastHitch = 0;
@@ -7459,7 +7459,7 @@ uintptr_t HookDrawGameScreen(int a) {
         if(!depth) {
 #ifdef D2RVR_NATIVE_OPENXR
             framevr::profile::SkipPair();
-            sumBegin=sumEnd=sumWait=sumFence=sumSubmit=sumPeriod=0;
+            sumBegin=sumEnd=sumWait=sumFence=sumSubmit=sumPeriod=sumLocate=sumInput=0;
             periodPairs=0;
 #endif
             // Menu/loading frames are not consecutive stereo gameplay frames.
@@ -7575,7 +7575,7 @@ uintptr_t HookDrawGameScreen(int a) {
     framevr::NoteFrame(lastEnd>0?(entered-lastEnd)*.001:0,xr.waitFrameMs,(t2-t0)*.001,
         std::max(0.0,(t0-entered)*.001-xr.waitFrameMs)+(ended-t2)*.001,lastEnd>0?(ended-lastEnd)*.001:0,xr.displayPeriodMs,false);
     sumBegin+=t0-entered;sumEnd+=ended-t2;
-    sumWait+=xr.waitFrameMs;sumFence+=xr.waitGpuMs;sumSubmit+=xr.submitMs;
+    sumWait+=xr.waitFrameMs;sumFence+=xr.waitGpuMs;sumSubmit+=xr.submitMs;sumLocate+=xr.locateMs;sumInput+=xr.inputMs;
     if(xr.displayPeriodMs>0){sumPeriod+=xr.displayPeriodMs;++periodPairs;}
     framevr::profile::FinishPair(lastEnd>0?(entered-lastEnd)*.001:0,(t0-entered)*.001,
         (t1-t0)*.001,(t2-t1)*.001,(ended-t2)*.001,(c1-c0)*.001,(c2-c1)*.001,xr);
@@ -7622,13 +7622,17 @@ uintptr_t HookDrawGameScreen(int a) {
 #ifdef D2RVR_NATIVE_OPENXR
             LogF("Frame pacing: runtime predicted %.1f Hz | XR begin %.2f ms (wait %.2f) | XR end %.2f ms (submit %.2f) | GPU fence %.2f ms (pair total)",
                 sumPeriod>0?1000.0*periodPairs/sumPeriod:0,sumBegin*k,sumWait/pairs,sumEnd*k,sumSubmit/pairs,sumFence/pairs);
+            // XR begin's own work, apart from the runtime's wait: finding the head and eyes, then the frame's input
+            // step (controllers, gestures, the wrist and visor panels' uploads). (A line of its own: LogF keeps 255 characters.)
+            LogF("Frame pacing: XR begin, ms a pair: wait %.2f | locate %.2f | input %.2f (controllers, gestures, panel uploads) | rest %.2f",
+                sumWait/pairs,sumLocate/pairs,sumInput/pairs,std::max(0.0,sumBegin*k-(sumWait+sumLocate+sumInput)/pairs));
 #endif
             LogF("vrcam: the two passes busy the game's thread %.0f%% of their sampled time (%.2f ms CPU a pair over %u sampled pairs; the rest waits - GPU, fences, locks)",
                  sumWall > 0.0 ? 100.0 * sumCpu / sumWall : 0.0, cpuPairs?sumCpu*.001/cpuPairs:0,cpuPairs);
         }
         sumGap = 0.0; maxPair = 0.0; sumCpu = 0.0; sumWall = 0.0;
 #ifdef D2RVR_NATIVE_OPENXR
-        sumBegin=sumEnd=sumWait=sumFence=sumSubmit=sumPeriod=0;
+        sumBegin=sumEnd=sumWait=sumFence=sumSubmit=sumPeriod=sumLocate=sumInput=0;
         periodPairs=0;
 #endif
         for (int e = 0; e < 2; ++e) sumPass[e] = sumPresent[e] = sumEff[e] = 0.0;

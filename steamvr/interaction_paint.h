@@ -1,4 +1,5 @@
 #pragma once
+#include "atlas_dirty.h"
 #include "interaction_ui.h"
 namespace framevr::interaction {
 // Do not display/click obsolete skill contents while a new image is pending.
@@ -52,5 +53,6 @@ inline bool CompanionImageCurrent(const PaintContext& painted,const Snapshot& sn
     return painted.fresh&&painted.session==snapshot.session&&(snapshot.companions.known||snapshot.effects.known)&&painted.companions==snapshot.companions&&painted.effects==snapshot.effects;
 }
 struct PaintJob {Snapshot snapshot;Output output;int selection=-1;controllers::Labels labels{};};
-struct PaintedAtlas {std::vector<uint8_t> pixels;double paintMs=0;std::vector<uint8_t> companions;};
+// change: what of pixels differs from the atlas painted before (atlas_dirty.h), found on the painter's thread.
+struct PaintedAtlas {std::vector<uint8_t> pixels;double paintMs=0;std::vector<uint8_t> companions;atlasdirty::Change change;};
 }

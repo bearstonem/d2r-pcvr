@@ -65,6 +65,7 @@
 #include "campfire_audio.h"
 #include "wrist_compass.h"
 #include "panel_atlas.h"
+#include "atlas_dirty.h"
 #include "map_zoom.h"
 #include "floating_map.h"
 #include "wrist_full_map.h"
@@ -237,20 +238,33 @@ gameplay::Output motionOutput;
 interaction::Engine interactions;
 interaction::Input interactionInput;
 interaction::Output interactionOutput;
+// The panels' atlases store B, G, R, A (the eye format; set as a session starts, before any picture is asked for).
+bool Bgra(DXGI_FORMAT f){return f==DXGI_FORMAT_B8G8R8A8_UNORM_SRGB||f==DXGI_FORMAT_B8G8R8A8_UNORM||f==DXGI_FORMAT_B8G8R8A8_TYPELESS;}
+std::atomic<bool> atlasBgra{false};
+// A painter's work finished for its atlas on the painter's own thread (atlas_dirty.h): the picture in the
+// channel order the atlas stores, and which of its tiles changed since the picture before. The draw thread
+// then copies rows as they are, and only the changed ones. The picture type carries `pixels` and `change`.
+template<class Work> auto ForAtlas(Work work,int width,int height) {
+    return [work=std::move(work),differ=std::make_shared<atlasdirty::Differ>(),width,height](const auto& job) {
+        auto image=work(job);
+        image.change=atlasdirty::Finish(image.pixels,width,height,atlasBgra.load(std::memory_order_relaxed),*differ);
+        return image;
+    };
+}
 // Blood on the visor: state on the frame thread, artwork composed in the
 // background, one head-locked quad directly above the world.
 blood::Engine bloodScreen;
 blood::Output bloodOutput;
 struct BloodJob {uint32_t visible=0;std::array<float,blood::Placements> age{},opacity{};};
-struct BloodImage {std::vector<uint8_t> pixels;uint32_t visible=0;};
-LatestWorker<BloodJob,BloodImage> bloodPainter([](const BloodJob& job) {
+struct BloodImage {std::vector<uint8_t> pixels;uint32_t visible=0;atlasdirty::Change change;};
+LatestWorker<BloodJob,BloodImage> bloodPainter(ForAtlas([](const BloodJob& job) {
     // Decoded and placed once, on this thread; read-only afterwards.
     static const auto patches=[]{
         const auto strip=interaction::BloodArt(blood::StripWidth,blood::StripHeight);
         return blood::Prepare(strip.empty()?blood::FallbackStrip():strip);
     }();
     return BloodImage{blood::Compose(patches,job.visible,job.age,job.opacity),job.visible};
-});
+},blood::Size,blood::Size));
 uint64_t bloodPaintKey=~0ull,bloodRequestedKey=~0ull,bloodPaintRequest=0;
 uint32_t bloodShown=0; // splats in the uploaded image
 ULONGLONG bloodPaintAt=0;
@@ -258,7 +272,7 @@ bool bloodAtlasPending=false,bloodImageReady=false;
 // Arcane Decay: subtle spectral peripheral warning when mana is low.
 arcane::Controller arcaneController;
 arcane::Output arcaneOutput;
-arcane::Painter arcanePainter;
+arcane::Painter arcanePainter(ForAtlas(arcane::Paint,arcane::Size,arcane::Size));
 uint64_t arcanePaintKey=~0ull;
 uint64_t arcanePaintSession=0;
 ULONGLONG arcanePaintAt=0;
@@ -268,7 +282,7 @@ bool arcaneAtlasPending=false,arcaneImageReady=false;
 glyphcast::Stroke glyphStroke;
 int glyphHand=-1;   // the hand drawing the stroke (right = 0), latched as it begins: each hand casts its own set
 glyphcast::Cast glyphCast;
-glyphtrail::Painter glyphPainter;
+glyphtrail::Painter glyphPainter(ForAtlas(glyphtrail::Painter::Incremental(),glyphtrail::Size,glyphtrail::Size));
 uint64_t glyphStrokeId=0,glyphPaintKey=0,glyphShownStroke=0;
 double glyphBeganAt=0,glyphEndedAt=-1,glyphPaintAt=0;   // the stroke's start and end (recognised, refused or cancelled; -1 drawing or none)
 bool glyphPressRt=false,glyphTrailShown=false;
@@ -360,7 +374,7 @@ std::atomic<float> strainRecoverSeconds{1.5f};   // [gameplay] guard_strain_reco
 std::atomic<unsigned> guardBlockEvents{0},guardParryEvents{0},guardBlockWeight{0}; // weight in 1/1000ths
 std::atomic<bool> guardBroken{false};   // the game thread's chip check
 std::atomic<ULONGLONG> guardStateAt{0};std::atomic<bool> guardEligible{false},guardRaised{false};
-strain::Painter strainPainter;
+strain::Painter strainPainter(ForAtlas(strain::Paint,strain::Size,strain::Size));
 uint64_t strainPaintKey=~0ull,strainPaintSession=0;
 float strainShownReach[2]={1,1};   // the uploaded image's reach (guard_strain.h): its quad is the visor times this
 ULONGLONG strainPaintAt=0;
@@ -473,13 +487,17 @@ bool compassFrame=false,compassAtlasReady=false;
 // VR Settings, the quest card, the blood visor, the strain light and the bow
 // laser share one swapchain (panelatlas): each its region of sharedMaster, a
 // plain texture their pictures are uploaded into; at the end of a frame in
-// which one of them changed the swapchain gets a copy of the whole of it.
+// which one of them changed the swapchain's next image gets what it is behind
+// by (sharedLag: an image is handed out again only after the others).
 XrSwapchain sharedChain=XR_NULL_HANDLE;
 std::vector<XrSwapchainImageD3D12KHR> sharedImages;
 ComPtr<ID3D12Resource> sharedMaster;
 ComPtr<ID3D12CommandAllocator> sharedAllocator;
 ComPtr<ID3D12GraphicsCommandList> sharedCommands;
 uint64_t sharedFence=0;bool sharedDirty=false;
+atlasdirty::Lag sharedLag;
+// The serial of each painter's picture staged for the master last (atlasdirty::Follows); 0: its next goes up whole.
+struct SharedSeen {uint64_t blood=0,arcane=0,strain=0,glyph=0;} sharedSeen;
 settings::Model settingsModel;
 calibration::Flow bodyCalibration;
 calibration::ReleaseGate calibrationRelease;
@@ -589,11 +607,13 @@ uint64_t interactionPaintKey=~0ull;
 uint64_t interactionRequestedKey=~0ull,interactionPaintRequest=0;
 interaction::PaintContext interactionPaintContext{},interactionRequestedContext{};
 bool interactionPaintValid=false;
-LatestWorker<interaction::PaintJob,interaction::PaintedAtlas> interactionPainter([](const interaction::PaintJob& job) {
+LatestWorker<interaction::PaintJob,interaction::PaintedAtlas> interactionPainter([differ=std::make_shared<atlasdirty::Differ>()](const interaction::PaintJob& job) {
     const auto start=hookmetrics::Nanos();
     auto pixels=interaction::Paint(job.snapshot,job.output,job.selection,job.labels);
     auto companionPixels=wriststatus::Rows(job.snapshot.companions,job.snapshot.effects)?interaction::PaintWristStatus(job.snapshot.companions,job.snapshot.effects):std::vector<uint8_t>{};
-    return interaction::PaintedAtlas{std::move(pixels),double(hookmetrics::Nanos()-start)/1e6,std::move(companionPixels)};
+    // What changed since the atlas painted before, found here: the draw thread uploads that alone (UploadAtlas).
+    auto change=atlasdirty::Finish(pixels,1024,1024,atlasBgra.load(std::memory_order_relaxed),*differ);
+    return interaction::PaintedAtlas{std::move(pixels),double(hookmetrics::Nanos()-start)/1e6,std::move(companionPixels),std::move(change)};
 });
 uint64_t interactionPrefetchSession=0;
 uint32_t interactionPrefetchRevision=~0u;
@@ -608,15 +628,21 @@ struct AtlasStaging {
     ComPtr<ID3D12CommandAllocator> allocator;
     ComPtr<ID3D12GraphicsCommandList> commands;
 };
+// One staged rectangle: where it lies in the upload buffer, and where it goes in the texture.
+struct AtlasCopy {D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};int x=0,y=0;};
+constexpr size_t AtlasMaxRects=8;   // changed tiles in more rectangles than this go up as the one round them all
+// queued: staged for the shared master (copies), its commands still to be recorded by FlushShared; fence follows then.
 struct AtlasUpload {
     AtlasStaging staging;
     uint64_t fence=0;
+    std::array<AtlasCopy,AtlasMaxRects> copies{};size_t count=0;
+    bool queued=false;
 };
 std::vector<AtlasUpload> atlasUploads;
 std::vector<AtlasStaging> atlasStagingFree;   // the GPU is done with these
 constexpr size_t AtlasStagingKept=6;
 // Where an upload's frame-thread time went; UploadAtlas adds to it.
-struct AtlasTiming {double image=0,buffers=0,copy=0,record=0,submit=0;int made=0;} atlasTiming;
+struct AtlasTiming {double image=0,buffers=0,copy=0,record=0,submit=0;int made=0;int64_t texels=0;} atlasTiming;   // texels: copied into upload buffers
 
 melee::PoseHistory meleePoses,offhandPoses;
 melee::PoseHistory shieldPoses;
@@ -1651,15 +1677,36 @@ bool YieldMapSurface(const char* forWhat) {
     char line[160];std::snprintf(line,sizeof line,"Frame menu map: its surface given up for %s (no swapchain left); made again once there is room",forWhat);Say(line);
     return true;
 }
-bool RecordUpload(ID3D12Resource* dest,int x,int y,int w,int h,const std::vector<uint8_t>& pixels,D3D12_RESOURCE_STATES state,AtlasStaging& staging,double& at);
+bool RecordUpload(ID3D12Resource* dest,int x,int y,const uint8_t* pixels,int stride,bool sourceBgra,const atlasdirty::Rect* rects,size_t count,
+                  D3D12_RESOURCE_STATES state,AtlasStaging& staging,double& at);
 // A panel's region of its shared image, or a rect within the panel (panelatlas).
 XrRect2Di Rect(panelatlas::Region r){return {{r.x,r.y},{r.w,r.h}};}
 XrRect2Di At(panelatlas::Region r,XrRect2Di within){return {{r.x+within.offset.x,r.y+within.offset.y},within.extent};}
-bool UploadAtlas(XrSwapchain& chain,DXGI_FORMAT eyeFormat,int atlasWidth,int atlasHeight,const std::vector<uint8_t>& pixels,bool dynamic=false,bool* pending=nullptr) {
+// A panel swapchain's images, listed once (not on every upload), what each is behind by, and the serial of the
+// painter's picture uploaded last (atlas_dirty.h). Forgotten with the session (Shutdown), before a handle can be reused.
+struct AtlasChain {XrSwapchain chain=XR_NULL_HANDLE;std::vector<XrSwapchainImageD3D12KHR> images;atlasdirty::Lag lag;uint64_t seen=0;};
+std::vector<AtlasChain> atlasChains;
+AtlasChain* AtlasImages(XrSwapchain chain,int width,int height) {
+    for(auto& c:atlasChains)if(c.chain==chain)return &c;
+    uint32_t count=0;
+    if(!Check(EnumeratePanelImages(chain,0,&count,nullptr),"count static atlas images")||!count)return nullptr;
+    std::vector<XrSwapchainImageD3D12KHR> images(count,{XR_TYPE_SWAPCHAIN_IMAGE_D3D12_KHR});
+    if(!Check(EnumeratePanelImages(chain,count,&count,reinterpret_cast<XrSwapchainImageBaseHeader*>(images.data())),"get static atlas images")||!count)return nullptr;
+    images.resize(count);
+    atlasChains.push_back({chain,std::move(images),atlasdirty::Lag(count,width,height),0});
+    return &atlasChains.back();
+}
+// change (a dynamic atlas): what of `pixels` differs from the painter's picture before. When that one is the
+// picture uploaded last, only the changed tiles are copied - with what the acquired image missed while the
+// swapchain handed out its other images, so the image shown is always whole - and the same picture again is
+// not uploaded at all. Else, and without a change, all of it.
+bool UploadAtlas(XrSwapchain& chain,DXGI_FORMAT eyeFormat,int atlasWidth,int atlasHeight,const std::vector<uint8_t>& pixels,bool dynamic=false,bool* pending=nullptr,
+                 const atlasdirty::Change* change=nullptr) {
     // A tiny static atlas is independent of ReShade's effect compiler.
     XrSwapchainCreateInfo ci{XR_TYPE_SWAPCHAIN_CREATE_INFO};ci.createFlags=dynamic?0:XR_SWAPCHAIN_CREATE_STATIC_IMAGE_BIT;
     ci.usageFlags=XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT|XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT;
     ci.format=eyeFormat;ci.width=atlasWidth;ci.height=atlasHeight;ci.sampleCount=ci.faceCount=ci.arraySize=ci.mipCount=1;
+    if(pixels.size()!=size_t(atlasWidth)*size_t(atlasHeight)*4)return false;
     if(!chain) {
         XrResult r=pCreateSwapchain(session,&ci,&chain);
         if(r==XR_ERROR_LIMIT_REACHED) {
@@ -1668,10 +1715,12 @@ bool UploadAtlas(XrSwapchain& chain,DXGI_FORMAT eyeFormat,int atlasWidth,int atl
         }
         if(!Check(r,"create atlas")){chain=XR_NULL_HANDLE;return false;}
     }
-    uint32_t count=0;
-    if(!Check(EnumeratePanelImages(chain,0,&count,nullptr),"count static atlas images"))return false;
-    std::vector<XrSwapchainImageD3D12KHR> images(count,{XR_TYPE_SWAPCHAIN_IMAGE_D3D12_KHR});
-    if(!Check(EnumeratePanelImages(chain,count,&count,reinterpret_cast<XrSwapchainImageBaseHeader*>(images.data())),"get static atlas images"))return false;
+    auto* const images=AtlasImages(chain,atlasWidth,atlasHeight);
+    if(!images)return false;
+    const bool partial=dynamic&&change&&atlasdirty::Follows(*change,images->seen,atlasWidth,atlasHeight);
+    images->seen=0;
+    if(partial&&!change->mask.Any()){images->seen=change->serial;return true;}   // the picture shown already
+    if(partial)images->lag.Mark(change->mask);else images->lag.MarkAll();
     double at=Milliseconds();
     const auto stage=[&](double& into){const double t=Milliseconds();into+=t-at;at=t;};
     uint32_t index=0;XrSwapchainImageAcquireInfo ai{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
@@ -1679,10 +1728,18 @@ bool UploadAtlas(XrSwapchain& chain,DXGI_FORMAT eyeFormat,int atlasWidth,int atl
     XrSwapchainImageWaitInfo wi{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};wi.timeout=XR_INFINITE_DURATION;
     if(!Check(pWaitSwapchainImage(chain,&wi),"wait static atlas atlas"))return false;
     stage(atlasTiming.image);
+    if(index>=images->images.size())return false;
+    std::array<atlasdirty::Rect,AtlasMaxRects> rects{};
+    size_t count=atlasdirty::Uploads(images->lag.Of(index),rects.data(),rects.size());
+    if(!count){rects[0]={0,0,atlasWidth,atlasHeight};count=1;}   // an atlas too wide for a mask (atlasdirty::MaxWidth): whole, as it was
     AtlasStaging staging;
-    if(!RecordUpload(images[index].texture,0,0,atlasWidth,atlasHeight,pixels,D3D12_RESOURCE_STATE_RENDER_TARGET,staging,at))return false;
+    if(!RecordUpload(images->images[index].texture,0,0,pixels.data(),atlasWidth*4,change&&change->bgra,rects.data(),count,
+                     D3D12_RESOURCE_STATE_RENDER_TARGET,staging,at))return false;
+    images->lag.Done(index);
+    if(dynamic&&change)images->seen=change->serial;
     if(dynamic) {
-        atlasUploads.push_back({std::move(staging),fenceValue});
+        AtlasUpload upload;upload.staging=std::move(staging);upload.fence=fenceValue;
+        atlasUploads.push_back(std::move(upload));
         if(pending)*pending=true;else interactionAtlasPending=true;
         return true; // Released at EndPair, after the pair's existing GPU fence.
     }
@@ -1691,15 +1748,27 @@ bool UploadAtlas(XrSwapchain& chain,DXGI_FORMAT eyeFormat,int atlasWidth,int atl
     XrSwapchainImageReleaseInfo ri{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
     return Check(pReleaseSwapchainImage(chain,&ri),"release static atlas atlas");
 }
-// `pixels` (RGBA, w x h) into dest at (x, y): a kept upload buffer (the
-// smallest that fits, else a new one, mapped for good), copied on the queue;
-// dest in `state` before and after. The staging is the caller's to keep until
-// the GPU is done with it.
-bool RecordUpload(ID3D12Resource* dest,int x,int y,int w,int h,const std::vector<uint8_t>& pixels,D3D12_RESOURCE_STATES state,AtlasStaging& staging,double& at) {
+// The CPU half of an upload: a picture's rectangles (`rects`, within the picture; `pixels` its first texel, rows
+// `stride` bytes apart, B G R A if sourceBgra) into a kept upload buffer (the smallest that fits, else a new one,
+// mapped for good). copies: where each lies in the buffer, and where it goes in dest - (x, y) plus its place in
+// the picture. A picture in the other channel order than dest's is exchanged here; the painters deliver theirs
+// in the atlas's order (atlasdirty::Finish), so their rows are plain copies.
+bool StageUpload(ID3D12Resource* dest,int x,int y,const uint8_t* pixels,int stride,bool sourceBgra,const atlasdirty::Rect* rects,size_t count,
+                 AtlasStaging& staging,std::array<AtlasCopy,AtlasMaxRects>& copies,double& at) {
     const auto stage=[&](double& into){const double t=Milliseconds();into+=t-at;at=t;};
-    auto desc=dest->GetDesc();desc.Width=UINT64(w);desc.Height=UINT(h);
-    D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};UINT64 bytes=0;
-    device->GetCopyableFootprints(&desc,0,1,0,&footprint,nullptr,nullptr,&bytes);
+    if(!count||count>AtlasMaxRects)return false;
+    auto desc=dest->GetDesc();
+    const bool exchange=sourceBgra!=Bgra(desc.Format);
+    UINT64 bytes=0;
+    for(size_t i=0;i<count;++i) {
+        if(rects[i].w<=0||rects[i].h<=0)return false;
+        desc.Width=UINT64(rects[i].w);desc.Height=UINT(rects[i].h);
+        auto& footprint=copies[i].footprint;
+        device->GetCopyableFootprints(&desc,0,1,bytes,&footprint,nullptr,nullptr,nullptr);
+        copies[i].x=x+rects[i].x;copies[i].y=y+rects[i].y;
+        const UINT64 end=footprint.Offset+UINT64(footprint.Footprint.RowPitch)*UINT64(rects[i].h-1)+UINT64(rects[i].w)*4;
+        bytes=(end+D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT-1)&~UINT64(D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT-1);
+    }
     {
         auto best=atlasStagingFree.end();
         for(auto it=atlasStagingFree.begin();it!=atlasStagingFree.end();++it)
@@ -1720,26 +1789,41 @@ bool RecordUpload(ID3D12Resource* dest,int x,int y,int w,int h,const std::vector
         ++atlasTiming.made;
     }
     stage(atlasTiming.buffers);
-    // Only the footprint's rows are copied, so the rest of the buffer need not be cleared.
-    uint8_t* const data=staging.data;
-    const bool bgra=desc.Format==DXGI_FORMAT_B8G8R8A8_UNORM_SRGB||desc.Format==DXGI_FORMAT_B8G8R8A8_UNORM||desc.Format==DXGI_FORMAT_B8G8R8A8_TYPELESS;
-    for(int row=0;row<h;++row) {
-      if(!bgra) {std::memcpy(data+footprint.Offset+row*footprint.Footprint.RowPitch,pixels.data()+size_t(row)*w*4,size_t(w)*4);continue;}
-      for(int column=0;column<w;++column) {
-        auto* pixel=data+footprint.Offset+row*footprint.Footprint.RowPitch+column*4;
-        const auto* rgba=pixels.data()+(size_t(row)*w+column)*4;
-        pixel[0]=rgba[bgra?2:0];pixel[1]=rgba[1];pixel[2]=rgba[bgra?0:2];pixel[3]=rgba[3];
-      }
+    // Only the footprints' rows are copied, so the rest of the buffer need not be cleared.
+    for(size_t i=0;i<count;++i) {
+        const auto& r=rects[i];const auto& footprint=copies[i].footprint;
+        const uint8_t* from=pixels+size_t(r.y)*size_t(stride)+size_t(r.x)*4;
+        uint8_t* to=staging.data+footprint.Offset;
+        for(int row=0;row<r.h;++row,from+=stride,to+=footprint.Footprint.RowPitch) {
+            if(exchange)atlasdirty::CopySwapped(to,from,size_t(r.w));
+            else std::memcpy(to,from,size_t(r.w)*4);
+        }
+        atlasTiming.texels+=int64_t(r.w)*r.h;
     }
     stage(atlasTiming.copy);
+    return true;
+}
+// The GPU half: the staged rectangles into dest, which is in COPY_DEST.
+void RecordCopies(ID3D12GraphicsCommandList* list,ID3D12Resource* dest,ID3D12Resource* upload,const AtlasCopy* copies,size_t count) {
+    D3D12_TEXTURE_COPY_LOCATION dst{};dst.pResource=dest;dst.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    for(size_t i=0;i<count;++i) {
+        D3D12_TEXTURE_COPY_LOCATION src{};src.pResource=upload;src.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;src.PlacedFootprint=copies[i].footprint;
+        list->CopyTextureRegion(&dst,UINT(copies[i].x),UINT(copies[i].y),0,&src,nullptr);
+    }
+}
+// Both halves at once, on the staging's own list, copied on the queue; dest in `state` before and after. The
+// staging is the caller's to keep until the GPU is done with it.
+bool RecordUpload(ID3D12Resource* dest,int x,int y,const uint8_t* pixels,int stride,bool sourceBgra,const atlasdirty::Rect* rects,size_t count,
+                  D3D12_RESOURCE_STATES state,AtlasStaging& staging,double& at) {
+    const auto stage=[&](double& into){const double t=Milliseconds();into+=t-at;at=t;};
+    std::array<AtlasCopy,AtlasMaxRects> copies{};
+    if(!StageUpload(dest,x,y,pixels,stride,sourceBgra,rects,count,staging,copies,at))return false;
     auto* list=staging.commands.Get();
     if(!Hr(staging.allocator->Reset(),"reset static atlas allocator")||!Hr(list->Reset(staging.allocator.Get(),nullptr),"reset static atlas list"))return false;
     D3D12_RESOURCE_BARRIER barrier{};barrier.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
     barrier.Transition={dest,D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,state,D3D12_RESOURCE_STATE_COPY_DEST};
     if(state!=D3D12_RESOURCE_STATE_COPY_DEST)list->ResourceBarrier(1,&barrier);
-    D3D12_TEXTURE_COPY_LOCATION src{};src.pResource=staging.upload.Get();src.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;src.PlacedFootprint=footprint;
-    D3D12_TEXTURE_COPY_LOCATION dst{};dst.pResource=dest;dst.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-    list->CopyTextureRegion(&dst,UINT(x),UINT(y),0,&src,nullptr);
+    RecordCopies(list,dest,staging.upload.Get(),copies.data(),count);
     std::swap(barrier.Transition.StateBefore,barrier.Transition.StateAfter);
     if(state!=D3D12_RESOURCE_STATE_COPY_DEST)list->ResourceBarrier(1,&barrier);
     if(!Hr(list->Close(),"close static atlas list"))return false;
@@ -1768,7 +1852,7 @@ bool MakeShared() {
     if(XR_FAILED(EnumeratePanelImages(sharedChain,0,&n,nullptr))||!n)return fail("Frame panels: the shared atlas's images unavailable");
     sharedImages.assign(n,{XR_TYPE_SWAPCHAIN_IMAGE_D3D12_KHR});
     if(XR_FAILED(EnumeratePanelImages(sharedChain,n,&n,reinterpret_cast<XrSwapchainImageBaseHeader*>(sharedImages.data()))))return fail("Frame panels: the shared atlas's images unavailable");
-    // The master as the images are (format, size): copied whole into one a frame.
+    // The master as the images are (format, size): what changed is copied into one a frame.
     auto desc=sharedImages[0].texture->GetDesc();desc.Flags=D3D12_RESOURCE_FLAG_NONE;
     D3D12_HEAP_PROPERTIES heap{};heap.Type=D3D12_HEAP_TYPE_DEFAULT;
     if(FAILED(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&desc,D3D12_RESOURCE_STATE_COPY_DEST,nullptr,IID_PPV_ARGS(&sharedMaster)))||
@@ -1776,48 +1860,87 @@ bool MakeShared() {
        FAILED(device->CreateCommandList(0,D3D12_COMMAND_LIST_TYPE_DIRECT,sharedAllocator.Get(),nullptr,IID_PPV_ARGS(&sharedCommands)))||
        FAILED(sharedCommands->Close()))return fail("Frame panels: the shared atlas's master unavailable");
     sharedFence=0;sharedDirty=false;
+    sharedLag=atlasdirty::Lag(sharedImages.size(),panelatlas::SharedWidth,panelatlas::SharedHeight);sharedSeen={};
     char line[200];std::snprintf(line,sizeof line,"Frame panels: one %dx%d image shared by VR Settings, the quest card, the blood visor, the strain light and the bow laser",
         panelatlas::SharedWidth,panelatlas::SharedHeight);Say(line);
     return true;
 }
-// A shared panel's picture into its region of the master; the swapchain gets
-// it at the frame's end (FlushShared), when `pending` is turned into ready.
-bool UploadShared(panelatlas::Region region,const std::vector<uint8_t>& pixels,bool* pending) {
+// A shared panel's picture for its region of the master: staged here (the copy into an upload buffer), and
+// put into the master and on to the swapchain at the frame's end, all on one command list (FlushShared), when
+// `pending` is turned into ready. change and seen (a painter's picture, and the serial of its picture staged
+// last): only the tiles that changed are staged, and the same picture again is not staged at all - the master
+// is one texture, so it holds everything staged before.
+bool UploadShared(panelatlas::Region region,const std::vector<uint8_t>& pixels,bool* pending,const atlasdirty::Change* change=nullptr,uint64_t* seen=nullptr) {
     if(pixels.size()!=size_t(region.w)*region.h*4||!MakeShared())return false;
+    const bool partial=change&&seen&&atlasdirty::Follows(*change,*seen,region.w,region.h);
+    if(seen)*seen=0;
+    if(partial&&!change->mask.Any()){*seen=change->serial;return true;}   // in the master already
+    std::array<atlasdirty::Rect,AtlasMaxRects> rects{};
+    size_t count=1;
+    if(partial)count=atlasdirty::Uploads(change->mask,rects.data(),rects.size());
+    else rects[0]={0,0,region.w,region.h};
     double at=Milliseconds();
-    AtlasStaging staging;
-    if(!RecordUpload(sharedMaster.Get(),region.x,region.y,region.w,region.h,pixels,D3D12_RESOURCE_STATE_COPY_DEST,staging,at))return false;
-    atlasUploads.push_back({std::move(staging),fenceValue});
+    AtlasUpload upload;
+    if(!StageUpload(sharedMaster.Get(),region.x,region.y,pixels.data(),region.w*4,change&&change->bgra,rects.data(),count,upload.staging,upload.copies,at))return false;
+    upload.count=count;upload.queued=true;upload.fence=~0ull;
+    atlasUploads.push_back(std::move(upload));
+    for(size_t i=0;i<count;++i)sharedLag.Mark({region.x+rects[i].x,region.y+rects[i].y,rects[i].w,rects[i].h});
+    if(seen&&change)*seen=change->serial;
     *pending=true;sharedDirty=true;
     return true;
 }
-// This frame's new shared pictures to the swapchain: the whole master into an
-// image, released at once (after the copy, on the session's queue).
+// This frame's new shared pictures to the swapchain, on one command list: the staged pictures into the master,
+// then from the master into the acquired image what that image is behind by - this frame's pictures and those
+// it missed while the swapchain handed out its other images (sharedLag), all of it the first time - and the
+// image released at once (after the copy, on the session's queue). It used to copy the whole master (16 MB)
+// for any picture, after a command list of its own for each.
 bool FlushShared() {
     if(!sharedDirty)return true;
     if(!sharedChain)return false;
     uint32_t index=0;XrSwapchainImageAcquireInfo ai{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
-    if(!Check(pAcquireSwapchainImage(sharedChain,&ai,&index),"acquire shared panel atlas"))return false;
+    if(!Check(pAcquireSwapchainImage(sharedChain,&ai,&index),"acquire shared panel atlas")){sharedSeen={};return false;}
     XrSwapchainImageWaitInfo wi{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};wi.timeout=XR_INFINITE_DURATION;
     XrSwapchainImageReleaseInfo ri{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
-    if(!Check(pWaitSwapchainImage(sharedChain,&wi),"wait shared panel atlas")||!WaitGpuValue(sharedFence)||
-       FAILED(sharedAllocator->Reset())||FAILED(sharedCommands->Reset(sharedAllocator.Get(),nullptr))) {
-        pReleaseSwapchainImage(sharedChain,&ri);return false;
+    if(!Check(pWaitSwapchainImage(sharedChain,&wi),"wait shared panel atlas")||index>=sharedImages.size()||index>=sharedLag.Images()||
+       !WaitGpuValue(sharedFence)||FAILED(sharedAllocator->Reset())||FAILED(sharedCommands->Reset(sharedAllocator.Get(),nullptr))) {
+        pReleaseSwapchainImage(sharedChain,&ri);sharedSeen={};return false;
     }
     auto* image=sharedImages[index].texture;
+    for(const auto& upload:atlasUploads)
+        if(upload.queued)RecordCopies(sharedCommands.Get(),sharedMaster.Get(),upload.staging.upload.Get(),upload.copies.data(),upload.count);
     D3D12_RESOURCE_BARRIER b[2]{};
     for(auto& x:b){x.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;x.Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;}
     b[0].Transition.pResource=sharedMaster.Get();b[0].Transition.StateBefore=D3D12_RESOURCE_STATE_COPY_DEST;b[0].Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_SOURCE;
     b[1].Transition.pResource=image;b[1].Transition.StateBefore=D3D12_RESOURCE_STATE_RENDER_TARGET;b[1].Transition.StateAfter=D3D12_RESOURCE_STATE_COPY_DEST;
     sharedCommands->ResourceBarrier(2,b);
-    sharedCommands->CopyResource(image,sharedMaster.Get());
+    {
+        const auto& behind=sharedLag.Of(index);
+        std::array<atlasdirty::Rect,16> rects{};
+        const bool whole=behind.Full()||!behind.Sized(panelatlas::SharedWidth,panelatlas::SharedHeight);
+        const size_t count=whole?0:behind.Rects(rects.data(),rects.size());
+        if(whole||count>rects.size())sharedCommands->CopyResource(image,sharedMaster.Get());
+        else {
+            D3D12_TEXTURE_COPY_LOCATION to{};to.pResource=image;to.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+            D3D12_TEXTURE_COPY_LOCATION from{};from.pResource=sharedMaster.Get();from.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+            for(size_t i=0;i<count;++i) {
+                const auto& r=rects[i];
+                const D3D12_BOX box{UINT(r.x),UINT(r.y),0,UINT(r.x+r.w),UINT(r.y+r.h),1};
+                sharedCommands->CopyTextureRegion(&to,UINT(r.x),UINT(r.y),0,&from,&box);
+            }
+        }
+    }
     for(auto& x:b)std::swap(x.Transition.StateBefore,x.Transition.StateAfter);
     sharedCommands->ResourceBarrier(2,b);
     bool ok=SUCCEEDED(sharedCommands->Close());
     if(ok){ID3D12CommandList* lists[]={sharedCommands.Get()};queue->ExecuteCommandLists(1,lists);ok=SUCCEEDED(queue->Signal(fence.Get(),++fenceValue));}
-    if(ok)sharedFence=fenceValue;
+    if(ok) {
+        sharedFence=fenceValue;sharedLag.Done(index);
+        for(auto& upload:atlasUploads)if(upload.queued){upload.queued=false;upload.fence=fenceValue;}
+    }
     ok=Check(pReleaseSwapchainImage(sharedChain,&ri),"release shared panel atlas")&&ok;
     if(ok)sharedDirty=false;
+    // Not shown: its panels are hidden until each one's next picture, which then goes up whole (the staged ones stay queued).
+    else sharedSeen={};
     return ok;
 }
 // The pointer: the beam (rows 0-31) and the dot (32-95), 64 wide.
@@ -2134,7 +2257,7 @@ bool Initialize(reshade::api::command_queue* rq,reshade::api::swapchain* swap) {
     fenceEvent=CreateEventW(nullptr,FALSE,FALSE,nullptr);
     if(!fenceEvent) return false;
     if(!SetupStatic(eyeFormat))return false;
-    atlasFormat=eyeFormat;
+    atlasFormat=eyeFormat;atlasBgra.store(Bgra(eyeFormat));
     if(!MakeShared())Say("Frame panels: the shared atlas unavailable; VR Settings, the quest card, blood, the strain light, arcane decay, glyph trails and the bow laser stay hidden");
     potionModels.Initialize(device.Get(),queue.Get(),eyeFormat,width,height,&Say);
     turnFormat=eyeFormat;
@@ -3770,7 +3893,7 @@ void Input() {
     };
     SampleGaze();
     for(auto upload=atlasUploads.begin();upload!=atlasUploads.end();) {
-        if(fence->GetCompletedValue()<upload->fence){++upload;continue;}
+        if(upload->queued||fence->GetCompletedValue()<upload->fence){++upload;continue;}
         if(atlasStagingFree.size()<AtlasStagingKept)atlasStagingFree.push_back(std::move(upload->staging));
         upload=atlasUploads.erase(upload);
     }
@@ -4266,7 +4389,7 @@ void Input() {
         }
         BloodImage painted;
         if(bloodPaintRequest&&!bloodAtlasPending&&atlasUploads.size()<3&&bloodPainter.Take(bloodPaintRequest,painted)) {
-            if(!painted.pixels.empty()&&UploadShared(panelatlas::Blood,painted.pixels,&bloodAtlasPending)) {
+            if(!painted.pixels.empty()&&UploadShared(panelatlas::Blood,painted.pixels,&bloodAtlasPending,&painted.change,&sharedSeen.blood)) {
                 bloodPaintKey=bloodRequestedKey;bloodShown=painted.visible;
             }
             bloodPaintRequest=0;
@@ -4309,7 +4432,7 @@ void Input() {
         if(arcaneOutput.visible) {
             arcane::PaintImage painted;
             if(!arcaneAtlasPending&&atlasUploads.size()<3&&arcanePainter.Take(painted)) {
-                if(!painted.pixels.empty()&&UploadShared(panelatlas::ArcaneDecay,painted.pixels,&arcaneAtlasPending)) {
+                if(!painted.pixels.empty()&&UploadShared(panelatlas::ArcaneDecay,painted.pixels,&arcaneAtlasPending,&painted.change,&sharedSeen.arcane)) {
                     arcanePaintKey=painted.key;
                     static bool uploadedReported=false;
                     if(!uploadedReported) {
@@ -4373,13 +4496,13 @@ void Input() {
         // Consume completed images before scheduling more work. Never replace an
         // in-flight request: at <=25 FPS that discarded every animated result.
         if(in.session!=strainPaintSession||!strainOutput.visible) {
-            strainPainter.Discard();strainPaintKey=~0ull;strainImageReady=false;
+            strainPainter.Discard();strainPaintKey=~0ull;strainImageReady=false;sharedSeen.strain=0;   // its next picture goes up whole, and makes it ready
             strainPaintAt=0;strainPaintSession=in.session;
         }
         if(strainOutput.visible) {
             strain::PaintImage painted;
             if(!strainAtlasPending&&atlasUploads.size()<3&&strainPainter.Take(painted)) {
-                if(!painted.pixels.empty()&&UploadShared(panelatlas::Strain,painted.pixels,&strainAtlasPending)) {
+                if(!painted.pixels.empty()&&UploadShared(panelatlas::Strain,painted.pixels,&strainAtlasPending,&painted.change,&sharedSeen.strain)) {
                     strainPaintKey=painted.key;strainShownReach[0]=painted.reachX;strainShownReach[1]=painted.reachY;
                 }
             }
@@ -5218,7 +5341,7 @@ void Input() {
         if(trail) {
             glyphtrail::Image painted;
             if(!glyphAtlasPending&&atlasUploads.size()<3&&glyphPainter.Take(painted)&&!painted.pixels.empty()&&
-               UploadShared(panelatlas::Glyph,painted.pixels,&glyphAtlasPending)){glyphPaintKey=painted.key;glyphShownStroke=painted.strokeId;}
+               UploadShared(panelatlas::Glyph,painted.pixels,&glyphAtlasPending,&painted.change,&sharedSeen.glyph)){glyphPaintKey=painted.key;glyphShownStroke=painted.strokeId;}
             glyphtrail::Job job;
             job.strokeId=glyphStrokeId;job.look=glyphLook;job.t=float(since);
             uint64_t key=1469598103934665603ull;
@@ -5484,7 +5607,10 @@ void Input() {
             if(key==interactionRequestedKey&&context==interactionRequestedContext&&atlasUploads.size()<2&&!interactionAtlasPending&&
                !companionAtlasPending&&interactionPainter.Take(interactionPaintRequest,painted)) {
                 const auto uploadStart=Milliseconds();atlasTiming={};
-                if(!painted.pixels.empty()&&UploadAtlas(interactionChain,atlasFormat,1024,1024,painted.pixels,true)) {
+                // Only the tiles that changed since the atlas uploaded before (painted.change); none: no upload.
+                double share=0;bool taken=false;
+                if(!painted.pixels.empty()&&UploadAtlas(interactionChain,atlasFormat,1024,1024,painted.pixels,true,nullptr,&painted.change)) {
+                    share=double(atlasTiming.texels)/(1024.0*1024.0);taken=true;
                     interactionPaintKey=key;interactionPaintContext=context;interactionPaintValid=true;
                     companionPaintValid=!painted.companions.empty()&&UploadAtlas(companionChain,atlasFormat,
                         wriststatus::Width,wriststatus::Height,painted.companions,true,&companionAtlasPending);
@@ -5496,20 +5622,23 @@ void Input() {
                 static ULONGLONG reportAt=0;
                 if((profile::Active()||uploadMs>4)&&now>=reportAt) {
                     char message[300];std::snprintf(message,sizeof message,"Frame UI refresh: background paint %.2f ms, frame-thread upload %.2f ms "
-                        "(image wait %.2f, buffers %.2f%s, copy %.2f, commands %.2f, submit %.2f)",
-                        painted.paintMs,uploadMs,t.image,t.buffers,t.made?" new":"",t.copy,t.record,t.submit);Say(message);reportAt=now+1000;
+                        "(image wait %.2f, buffers %.2f%s, copy %.2f, commands %.2f, submit %.2f), %.0f%% of the atlas copied",
+                        painted.paintMs,uploadMs,t.image,t.buffers,t.made?" new":"",t.copy,t.record,t.submit,share*100);Say(message);reportAt=now+1000;
                 }
                 // Every 10 s, all refreshes: the spikes above alone do not show the usual cost.
-                static ULONGLONG summaryFrom=0;static int refreshes=0,made=0;static double sumMs=0,maxMs=0;static AtlasTiming sum{};
+                // "N% of the atlas": the share of its texels copied, a refresh's mean; "unchanged": painted the same as
+                // the atlas shown, so not uploaded.
+                static ULONGLONG summaryFrom=0;static int refreshes=0,made=0,unchanged=0;static double sumMs=0,maxMs=0,sumShare=0;static AtlasTiming sum{};
                 if(!summaryFrom)summaryFrom=now;
-                ++refreshes;sumMs+=uploadMs;maxMs=std::max(maxMs,uploadMs);made+=t.made;
+                ++refreshes;sumMs+=uploadMs;maxMs=std::max(maxMs,uploadMs);made+=t.made;sumShare+=share;
+                unchanged+=taken&&!interactionAtlasPending;
                 sum.image+=t.image;sum.buffers+=t.buffers;sum.copy+=t.copy;sum.record+=t.record;sum.submit+=t.submit;
                 if(now-summaryFrom>=10000) {
                     const double n=1.0/refreshes;char message[300];
-                    std::snprintf(message,sizeof message,"Frame UI refresh: %d in %.0f s, frame-thread upload mean %.2f ms, max %.2f ms | a refresh: "
-                        "image wait %.2f, buffers %.2f (%d new), copy %.2f, commands %.2f, submit %.2f ms",
-                        refreshes,(now-summaryFrom)/1000.0,sumMs*n,maxMs,sum.image*n,sum.buffers*n,made,sum.copy*n,sum.record*n,sum.submit*n);
-                    Say(message);summaryFrom=now;refreshes=made=0;sumMs=maxMs=0;sum={};
+                    std::snprintf(message,sizeof message,"Frame UI refresh: %d in %.0f s (%d unchanged), frame-thread upload mean %.2f ms, max %.2f ms | a refresh: "
+                        "image wait %.2f, buffers %.2f (%d new), copy %.2f (%.0f%% of the atlas), commands %.2f, submit %.2f ms",
+                        refreshes,(now-summaryFrom)/1000.0,unchanged,sumMs*n,maxMs,sum.image*n,sum.buffers*n,made,sum.copy*n,sumShare*n*100,sum.record*n,sum.submit*n);
+                    Say(message);summaryFrom=now;refreshes=made=unchanged=0;sumMs=maxMs=sumShare=0;sum={};
                 }
             }
         }
@@ -8160,8 +8289,8 @@ void Shutdown(bool preserveResolution) {
     settingsPaintRequest=0;settingsRequested={};
     bodyCalibration.Cancel();tCross.Reset();tCrossScan=false;tCrossAnswered=tCrossHostile=false;calibrationRelease={};calibrationPrompted=floorSpace=false;calibrationSession=0;calibrationPaintKey=calibrationRequestedKey=-1;
     if(sharedChain&&pDestroySwapchain)pDestroySwapchain(sharedChain);sharedChain=XR_NULL_HANDLE;
-    sharedImages.clear();sharedMaster.Reset();sharedCommands.Reset();sharedAllocator.Reset();sharedFence=0;sharedDirty=false;
-    atlasUploads.clear();atlasStagingFree.clear();interactionPaintKey=~0ull;interactionPrefetchSession=0;interactionPrefetchRevision=~0u;interactions.Reset();interactionstate::Cancel();
+    sharedImages.clear();sharedMaster.Reset();sharedCommands.Reset();sharedAllocator.Reset();sharedFence=0;sharedDirty=false;sharedLag={};sharedSeen={};
+    atlasUploads.clear();atlasStagingFree.clear();atlasChains.clear();interactionPaintKey=~0ull;interactionPrefetchSession=0;interactionPrefetchRevision=~0u;interactions.Reset();interactionstate::Cancel();
     interactionPaintRequest=0;interactionRequestedKey=~0ull;interactionPaintValid=false;interactionPaintContext={};interactionRequestedContext={};interactionPaintAt=0;
     if(interactionChain&&pDestroySwapchain)pDestroySwapchain(interactionChain);interactionChain=XR_NULL_HANDLE;
     if(companionChain&&pDestroySwapchain)pDestroySwapchain(companionChain);companionChain=XR_NULL_HANDLE;

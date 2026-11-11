@@ -200,8 +200,11 @@ public:
     void Walls(const Patch&);
     // Advance in fixed steps to time. Bottles older than Lifetime, or farther
     // than Range from the player, are removed. Beyond the sampled cells there
-    // are no walls, only the floor.
+    // are no walls, only the floor. With nothing that can move (no bottle, no
+    // thrown one, every prop frozen and no weapon reaching one) no step is taken.
     void Advance(double time,Vec player);
+    uint64_t Steps() const;     // world steps taken so far
+    void StepAtRest(bool);      // tests: step with nothing to move too, as it used to
     // Where the weapons are now. The next Advance moves each one there over
     // the steps it takes, pushing and waking the bottles in its way; a slot
     // without a valid collider is removed. Only while bottles lie in the world.
