@@ -92,6 +92,50 @@ int main() {
         m=Make(entity);m.regions.erase(Packed);
         Check(!DenseIndex(h,entity,Reader(m),&index),"an unreadable packed list is refused");
     }
+    {   // the index kept from last time (the skeleton hook, a body's transform every pose): how many reads
+        Memory m=Make(entity);Header h;ReadHeader(Storage,Reader(m),&h);
+        DenseHint hint;uint32_t index=99;
+        m.reads=0;
+        Check(DenseIndex(h,entity,Reader(m),&index,hint)&&index==2&&m.reads==3,"no hint yet: the walk's three reads");
+        Check(hint.known&&hint.entity==entity&&hint.index==2,"and the index is kept");
+        m.reads=0;index=99;
+        Check(DenseIndex(h,entity,Reader(m),&index,hint)&&index==2&&m.reads==1,"still there: one read, the packed list's");
+        // the storage moved the entity (another was destroyed, the last one took its place)
+        const uint32_t moved[3]{0x111,entity,0x333};m.Put(Packed,moved,sizeof moved);
+        std::vector<uint32_t> slots(256,0xFFFFFFFFu);slots[5]=0xABC00000u|1u;m.Put(Page3,slots.data(),slots.size()*4);
+        m.reads=0;index=99;
+        Check(DenseIndex(h,entity,Reader(m),&index,hint)&&index==1&&m.reads==4,"moved: the hint's read, then the walk");
+        Check(hint.known&&hint.index==1,"and the new index is kept");
+        m.reads=0;index=99;
+        Check(DenseIndex(h,entity,Reader(m),&index,hint)&&index==1&&m.reads==1,"one read again");
+        // another entity asked with this hint: the hint is not its own, no read is spent on it
+        const uint32_t other=0x111;
+        std::vector<uint32_t> first(256,0xFFFFFFFFu);first[0x11]=0;
+        const uint64_t pages[4]{0,Page3+0x1000,0,Page3};m.Put(Pages,pages,sizeof pages);m.Put(Page3+0x1000,first.data(),first.size()*4);
+        m.reads=0;index=99;
+        Check(DenseIndex(h,other,Reader(m),&index,hint)&&index==0&&m.reads==3&&hint.entity==other&&hint.index==0,"a hint for another entity is not tried");
+        // gone: the entity destroyed, its place taken by another; and a recycled id with another version
+        const uint32_t gone[3]{0x444,0x222,0x333};m.Put(Packed,gone,sizeof gone);
+        index=99;
+        Check(!DenseIndex(h,other,Reader(m),&index,hint)&&!hint.known&&index==99,"an entity no longer held is refused, the hint dropped");
+        Check(!DenseStill(h,entity,1,Reader(m))&&DenseStill(h,0x222,1,Reader(m)),"the packed entry says who is there");
+        Check(!DenseStill(h,0x222+0x100000,1,Reader(m)),"another version of the entity is not it");
+        m.reads=0;
+        Check(!DenseStill(h,0x333,3,Reader(m))&&m.reads==0,"an index past the packed list is refused unread");
+        Header bad=h;bad.packedEnd=bad.packedBegin-4;
+        Check(!DenseStill(bad,0x222,1,Reader(m)),"a packed list that ends before it begins is refused");
+        m.regions.erase(Packed);
+        Check(!DenseStill(h,0x222,1,Reader(m)),"an unreadable packed list is refused");
+    }
+    {   // a hinted look-up and the walk agree on every entity of a storage, wherever the hint points
+        Memory m=Make(entity);Header h;ReadHeader(Storage,Reader(m),&h);
+        for(uint32_t at=0;at<4;++at) {
+            DenseHint hint;hint.entity=entity;hint.index=at;hint.known=true;
+            uint32_t walked=99,hinted=98;
+            const bool a=DenseIndex(h,entity,Reader(m),&walked),b=DenseIndex(h,entity,Reader(m),&hinted,hint);
+            Check(a&&b&&walked==hinted,"a wrong hint changes nothing but the reads");
+        }
+    }
     if(failures){std::printf("%d failure(s)\n",failures);return 1;}
     std::printf("ecs-storage-test: ok\n");
     return 0;
