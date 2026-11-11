@@ -369,6 +369,9 @@ struct Settings {
     std::atomic<bool>  campfireFireSound{true}, campfireSparks{true};
     std::atomic<float> campfireFireVolume{0.9f}, campfireFireBurst{2.0f}, campfireFireX{1060.67f}, campfireFireY{0.3f},
                        campfireFireZ{123.94f}, campfireFirePick{2.5f};
+    // fire_logs_radius / fire_logs_height: a ray passing this near the burning logs, from their foot to this
+    // high over it, picks the fire too (world units)
+    std::atomic<float> campfireLogsRadius{1.5f}, campfireLogsHeight{1.5f};
     std::atomic<bool>  campfirePano{false};      // [campfire] panorama: one picture round the scene (pano_file), in the void
     std::atomic<float> campfirePanoYaw{0.0f}, campfirePanoLow{-90.0f}, campfirePanoHigh{90.0f}, campfirePanoBright{1.0f};   // [campfire] pano_yaw/low/high/brightness
     std::atomic<float> campfireMenuTop{0.78f};  // [campfire] menu_top: where the strip begins, a share of the game's menu band from its top
@@ -1554,6 +1557,8 @@ void LoadSettings() {
             for (int i = 0; i < 4; ++i) g_campfireAvoid[i] = a[i];
         }
         g_set.campfireFirePick.store(std::clamp(IniF(L"campfire", L"fire_pick_radius", 2.5f), 0.5f, 30.0f));
+        g_set.campfireLogsRadius.store(std::clamp(IniF(L"campfire", L"fire_logs_radius", 1.5f), 0.0f, 10.0f));
+        g_set.campfireLogsHeight.store(std::clamp(IniF(L"campfire", L"fire_logs_height", 1.5f), 0.0f, 10.0f));
         g_set.campfirePanoYaw.store(std::clamp(IniF(L"campfire", L"pano_yaw", 0.0f), -360.0f, 360.0f));
         g_set.campfirePanoLow.store(std::clamp(IniF(L"campfire", L"pano_low", -90.0f), -90.0f, 89.0f));
         g_set.campfirePanoHigh.store(std::clamp(IniF(L"campfire", L"pano_high", 90.0f), -89.0f, 90.0f));
@@ -3931,15 +3936,27 @@ bool CampfireFireHit(const float o[3], const float d[3]) {
         told = GetTickCount64();
         LogF("vrcam: campfire - a click comes down %.1f units from the fire (radius %.1f)", dist, g_set.campfireFirePick.load());
     }
-    if (dist <= g_set.campfireFirePick.load()) return true;
-    // or straight at the burning logs: the ray passing within 1.5 units of them (their foot to 1.5 over it),
-    // low enough that a ray at a hero standing behind the fire keeps clear (owner 2026-11-09: the wood too)
+    if (dist <= g_set.campfireFirePick.load()) {
+        LogF("vrcam: campfire - fire picked where the ray comes down (%.1f from the fire)", dist);
+        return true;
+    }
+    // or straight at the burning logs: the ray passing within [campfire] fire_logs_radius of them, from their
+    // foot to fire_logs_height over it, low enough that a ray at a hero standing behind the fire keeps clear
+    // (owner 2026-11-09: the wood too; 2026-11-11: the Barbarian's legs took the fire at 1.5 / 1.5)
+    const float R = g_set.campfireLogsRadius.load(), H = g_set.campfireLogsHeight.load();
+    if (!(R > 0.0f)) return false;
     const float dl = std::sqrt(d[0]*d[0] + d[1]*d[1] + d[2]*d[2]);
-    for (int k = 0; k <= 3; ++k) {
-        const float p[3] = {F[0] - o[0], F[1] + 0.5f * float(k) - o[1], F[2] - o[2]};
+    const int steps = std::max(1, int(std::ceil(H / 0.25f)));
+    for (int k = 0; k <= steps; ++k) {
+        const float y = H * float(k) / float(steps);
+        const float p[3] = {F[0] - o[0], F[1] + y - o[1], F[2] - o[2]};
         const float tt = (p[0]*d[0] + p[1]*d[1] + p[2]*d[2]) / dl;
         const float c[3] = {p[0] - d[0] / dl * tt, p[1] - d[1] / dl * tt, p[2] - d[2] / dl * tt};
-        if (tt > 0.0f && std::sqrt(c[0]*c[0] + c[1]*c[1] + c[2]*c[2]) <= 1.5f) return true;
+        const float miss = std::sqrt(c[0]*c[0] + c[1]*c[1] + c[2]*c[2]);
+        if (tt > 0.0f && miss <= R) {
+            LogF("vrcam: campfire - fire picked at the logs (%.2f from them, %.2f over their foot)", miss, y);
+            return true;
+        }
     }
     return false;
 }
