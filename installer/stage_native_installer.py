@@ -24,7 +24,7 @@ SCRIPTS = {'setup_windows.ps1', 'setup_windows.py', 'setup_native.py', 'uninstal
            'steam_assets.py', 'game_assets.py', 'game_install.py', 'casc_assets.py', 'bone_pieces.py',
            'prepare_potions.py', 'potion_assets.py', 'prepare_spell_sprites.py', 'prepare_arcane_sky.py', 'prepare_dev_scenarios.py',
            'prepare_monster_immunity.py', 'prepare_sewer_backdrop.py', 'prepare_kurast_dock.py', 'prepare_props.py', 'prepare_leather.py',
-           'prepare_game_ceiling.py', 'granny_write.py'}
+           'prepare_game_ceiling.py', 'granny_write.py', 'prepare_campfire_sky.py'}
 
 
 def safe_name(name):
