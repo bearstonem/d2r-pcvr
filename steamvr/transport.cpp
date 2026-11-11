@@ -74,6 +74,7 @@
 #include "haptic_pulse.h"
 #include "haptic_actions.h"
 #include "haptic_impact.h"
+#include "held_collision.h"
 #include "haptic_heartbeat.h"
 #include "xinput_rumble.h"
 #include "interaction_icons.h"
@@ -793,6 +794,9 @@ std::atomic<ULONGLONG> meleeImpactAt[2]{},shieldImpactAt{0},parryMissAt{0};
 // What the pending impact struck (haptics::Surface): the weapon hands' next MeleeImpact, and the shield's block or parry.
 std::atomic<int> meleeImpactSurface[2]{},shieldImpactSurface{int(haptics::Surface::Block)};
 std::atomic<uint32_t> meleeImpactFlags[2]{};   // the struck monster's MonStats flags, for the log
+// Held items collide (held_collision.h): a clank waiting for both controllers, and what of each input frame keeps
+// the hands' items from colliding (held::Reason bits), for the game side.
+std::atomic<ULONGLONG> heldClankAt{0},heldBlocksAt{0};std::atomic<float> heldClankStrength{0};std::atomic<uint32_t> heldBlocks{0};
 XrSwapchain gameplayChain=XR_NULL_HANDLE;
 std::mutex sewerPromptMutex;
 sewerprompt::Target sewerPrompt;
@@ -1339,7 +1343,7 @@ void ClearInput() {
     spellHaptics.Clear();
     lootlabels::display.Clear();
     rightStickGestures.Reset();
-    meleeImpactAt[0]=meleeImpactAt[1]=shieldImpactAt=parryMissAt=0;
+    meleeImpactAt[0]=meleeImpactAt[1]=shieldImpactAt=parryMissAt=heldClankAt=0;
     wristHeading.Reset();compassFrame=false;mapZoom.Reset();wristMapLooked=wristMapLookedOnly=false;floatMapWant=floatMapPointed=false;
     panelinput::WorldInput(false);
     gamestate::MenuMap(false);
@@ -4902,6 +4906,17 @@ void Input() {
         potionRouteSaid=potionRoute;potionHandsSaid=potionHands;
     }
     motionOutput=motion.Step(motionInput);motionAt=GetTickCount64();
+    {   // Held items collide: no collisions while the hands are pointers (a menu, the inventory, VR Settings), a wheel or
+        // the leather menu is up, or a hand throws: a potion in it, a trap or bomb held to toss, a thrown weapon armed.
+        // Motion combat Off leaves them colliding: the arms still follow the controllers.
+        uint32_t blocks=0;
+        if(panelMode||spatialMode||settingsOwned||settingsChord||inventoryPressed||menuPressed||interactionOutput.inventory)blocks|=held::Menu;
+        if(!motionHeadTracked)blocks|=held::Untracked;
+        if(interactionOutput.wheel||interactionOutput.settings)blocks|=held::Wheel;
+        if(leatherMode)blocks|=held::Leather;
+        if(interactionOutput.bottleHand>=0||motionOutput.tossHeld||motionOutput.offTossHeld||motionOutput.throwHeld)blocks|=held::Throwing;
+        heldBlocks=blocks;heldBlocksAt=GetTickCount64();
+    }
     if(motionOutput.offPress)castHand=1;   // the off trigger's own press aims from the off hand
     // A potion that is the hero's only weapon is never swung: the game would throw it.
     for(int h=0;h<2;++h)if(potionRoute.trigger[h]>=0&&!weaponskills::Armed(potionHeld[1-h]))motionOutput.meleeContact=false;
@@ -5875,6 +5890,11 @@ void Input() {
     }
     if(const auto at=shieldImpactAt.exchange(0);at&&motionInput.active&&GetTickCount64()-at<150)
         surfacePulse(1,shieldImpactSurface.exchange(int(haptics::Surface::Block))==int(haptics::Surface::Parry)?haptics::Surface::Parry:haptics::Surface::Block,0);
+    // Held items collide: the weapon struck the shield or the other weapon - a metal clank in both hands, by how fast.
+    if(const auto at=heldClankAt.exchange(0);at&&motionInput.active&&GetTickCount64()-at<150) {
+        const auto clank=held::Clank(heldClankStrength.load());
+        for(int hand=0;hand<2;++hand)hapticSequences.Play(hand,clank,GetTickCount64());
+    }
     PumpHapticSequences();
     // A parry swing that missed: a soft, dull buzz on the shield hand, unlike a
     // block's sharp tap. Scaled by the Melee haptic strength setting.
@@ -8137,6 +8157,11 @@ void FinishShieldSkill(bool accepted) {
     if(accepted){shieldImpactSurface=int(haptics::Surface::Block);shieldImpactAt=shieldFeedbackAt;}
 }
 void MeleeImpact(int hand) {if(hand>=0&&hand<2)meleeImpactAt[hand]=bodyStrikeAt[hand]=GetTickCount64();}
+void HeldClank(float strength) {heldClankStrength=std::isfinite(strength)?std::clamp(strength,0.f,1.f):0.f;heldClankAt=GetTickCount64();}
+uint32_t HeldCollisionBlocks() {
+    const auto at=heldBlocksAt.load(),now=GetTickCount64();
+    return at&&now>=at&&now-at<200?heldBlocks.load():uint32_t(held::Menu);   // no recent input frame: no gameplay hands
+}
 void ImpactSurface(int hand,int surface,uint32_t flags) {if(hand>=0&&hand<2){meleeImpactSurface[hand]=surface;meleeImpactFlags[hand]=flags;}}
 void ShieldGuardImpact(bool parry,float weight) {
     shieldImpactSurface=int(parry?haptics::Surface::Parry:haptics::Surface::Block);

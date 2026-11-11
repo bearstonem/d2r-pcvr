@@ -78,11 +78,17 @@ void NoteAttackRolled(uint32_t monster);
 void QueueParrySwing();
 // The block sound at the hero ([gameplay] block_sound). Thread-safe.
 void QueueBlockSound();
+// Held items collide (steamvr/held_collision.h): the weapon met the shield or the other weapon fast - the game's
+// metal sound at the hero ([gameplay] held_collision_sound). Thread-safe.
+void QueueHeldClankSound();
 // A worn item's durability onto its client copy, on the UI thread. Thread-safe.
 void QueueClientDurability(uint32_t itemId,int value);
 // [gameplay] block_sound: sounds.txt row played at the hero on every physical
 // block (default 398 block_weapon_1); 0 is silent. A change plays it once.
 void ConfigureBlockSound(int sound);
+// [gameplay] held_collision_sound: sounds.txt row played at the hero when the weapon strikes the shield or the
+// other weapon (default 398 block_weapon_1, the block's metal clank); 0 is silent.
+void ConfigureHeldClankSound(int sound);
 // [gameplay] parry_sound: sounds.txt row played at the hero on a parry; 0 is
 // silent. Changing it while in game plays the new sound once (audition).
 void ConfigureParrySound(int sound);

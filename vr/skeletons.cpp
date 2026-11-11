@@ -614,8 +614,25 @@ struct ClawGuard {framevr::guard::Pose pose{};bool crossed=false;float apart=0;u
 struct ShieldContext {
     framevr::guard::Pose pose{};V3 player{};uintptr_t hero=0;
     uint32_t generation=0,equipment=0;uint64_t session=0;
+    Mat attach{};   // the shield's attach bone in the world as posed (held items collide: the mesh's box in its frame)
 };
 ShieldContext g_shieldContext{},g_renderedShieldContext{};
+// Held items collide (steamvr/held_collision.h): the shield's rendered mesh as a box in its attach bone's frame
+// (ShieldRendered), for as long as the same hero holds the same things. Under g_gunBoneLock.
+struct HeldPlate {bool ok=false;uint32_t generation=0,equipment=0;framevr::held::Plate plate{};} g_heldPlate;
+// Each item as the controller holding it held it in the last pose (that controller's frame, metres): PoseBody
+// writes it, HeldCollide carries it by this pose's controllers to where it would be drawn with no push.
+struct HeldItems {
+    ULONGLONG at=0;uint32_t generation=0;
+    bool blade[2]{};framevr::math::Vec grip[2]{},along[2]{};   // per arm (0 right, 1 left): a weapon's grip and blade
+    int shield=0,shieldArm=-1;framevr::held::Plate plate{};    // shield: 0 none, 1 drawn but its mesh not measured, 2 the box
+};
+// The solver and what it gave this pose stamp (each stamp is posed more than once: once per eye).
+struct HeldStep {bool primed=false,stamped=false;uint32_t stamp=0;double time=0,clock=0;float push[2][3]{};};
+struct HeldClank {bool waiting=false;float strength=0,speed=0;ULONGLONG at=0;};
+SRWLOCK g_heldLock=SRWLOCK_INIT;
+HeldItems g_heldItems;HeldStep g_heldStep;HeldClank g_heldClank;
+framevr::held::Solver g_heldSolver;
 struct ShieldBound {int bone=-1;framevr::math::Vec low{},high{};};
 struct ShieldRenderSource {
     uintptr_t self=0,model=0,skeleton=0,bones=0,hero=0;
@@ -1537,7 +1554,10 @@ V3 ControllerPoint(const Hero& h, int side, const Input& in, const std::vector<M
     const V3 head = in.haveEye ? V3{in.eyeModel[0], in.eyeModel[1], in.eyeModel[2]} : Pos(newW[h.head]);
     // hero units per metre: the eye (or head) height in the model over the user's
     const float upm = framevr::body::UnitsPerMetre(h.eyeY>0?h.eyeY:head.y, in.userHeadM, in.scale);
-    const float hv[3] = {in.hand[side][0] + in.handOffset[0], in.hand[side][1] + in.handOffset[1], in.hand[side][2] + in.handOffset[2]};
+    float hv[3] = {in.hand[side][0] + in.handOffset[0], in.hand[side][1] + in.handOffset[1], in.hand[side][2] + in.handOffset[2]};
+#ifdef D2RVR_NATIVE_OPENXR
+    for (int i = 0; i < 3; ++i) hv[i] += in.heldPush[side][i];   // Held items collide (HeldCollide): the hand drawn off its controller
+#endif
     return Add(head, Scale(ToModel(hv, c, s), upm));
 }
 
@@ -3256,11 +3276,11 @@ void PoseBody(Posed& posed, const Hero& h, const Input& given, float legHold) {
         AcquireSRWLockExclusive(&g_gunBoneLock);g_clawGuard=clawGuard;ReleaseSRWLockExclusive(&g_gunBoneLock);
         // a grafted form's paws are its weapons: PublishClaws writes the off hand once this pass is drawn
         if(!(graft&&in.mode==2)){AcquireSRWLockExclusive(&g_gunBoneLock);g_offhandPose=offhand;g_offhandAt=offAt;ReleaseSRWLockExclusive(&g_gunBoneLock);}
-        MeleeWeaponPose shieldPose{};framevr::guard::Pose guardPose{};ULONGLONG at=0;HeroXform hx;Mat model;
+        MeleeWeaponPose shieldPose{};framevr::guard::Pose guardPose{};ULONGLONG at=0;HeroXform hx;Mat model,attachWorld{};
         const int shieldBone=h.shieldAttach>=0?h.shieldAttach:h.weapon[1];
         if(shieldFollowed&&in.havePoseStamp&&shieldBone>=0&&
            HeroOf(posed,&hx,&model)&&(hx.parent&0xFFFFFu)==0xFFFFFu) {
-            const Mat world=Mul(newW[shieldBone],model);
+            const Mat world=Mul(newW[shieldBone],model);attachWorld=world;
             const V3 origin=Pos(world),axis=Norm({world.m[4],world.m[5],world.m[6]}),player=Pos(model);
             if(Len({world.m[4],world.m[5],world.m[6]})>.3f&&
                std::isfinite(origin.x+origin.y+origin.z+axis.x+axis.y+axis.z+player.x+player.y+player.z)) {
@@ -3275,8 +3295,54 @@ void PoseBody(Posed& posed, const Hero& h, const Input& given, float legHold) {
             }
         }
         AcquireSRWLockExclusive(&g_gunBoneLock);g_shieldPose=shieldPose;g_shieldAt=at;g_shieldGuardPose=guardPose;
-        g_shieldContext={guardPose,{shieldPose.player[0],shieldPose.player[1],shieldPose.player[2]},self,HeroGen(),gamestate::HandsKey(),gamestate::LocalPlayer()};
+        g_shieldContext={guardPose,{shieldPose.player[0],shieldPose.player[1],shieldPose.player[2]},self,HeroGen(),gamestate::HandsKey(),gamestate::LocalPlayer(),attachWorld};
         ReleaseSRWLockExclusive(&g_gunBoneLock);
+        // Held items collide (HeldCollide): each item as drawn in this pose, in the frame of the controller that holds
+        // it - where its hand was drawn (the hands' offset and this pose's push), turned as that controller is.
+        if(in.mode==2&&!mirrorWorld&&!h.form&&h.head>=0&&in.held.pair!=framevr::held::Pair::None) {
+            namespace hc=framevr::held;
+            HeldItems items;items.at=GetTickCount64();items.generation=HeroGen();
+            auto vec=[](V3 v){return framevr::math::Vec{v.x,v.y,v.z};};
+            auto toHead=[&](V3 p){return vec(back(Scale(Sub(p,head),1.0f/upm)));};   // a model-space point, metres from the eyes
+            auto grip=[&](int arm){
+                hc::Grip g;g.p={in.hand[arm][0]+in.handOffset[0]+in.heldPush[arm][0],in.hand[arm][1]+in.handOffset[1]+in.heldPush[arm][1],
+                                in.hand[arm][2]+in.handOffset[2]+in.heldPush[arm][2]};
+                const float* r=in.rot[arm];const float q=std::sqrt(r[0]*r[0]+r[1]*r[1]+r[2]*r[2]+r[3]*r[3]);
+                if(q>.5f)g.q={r[0]/q,r[1]/q,r[2]/q,r[3]/q};
+                return g;
+            };
+            const unsigned hidden=g_interactionHidden.load();   // stowed for a potion in that hand (drawn shrunk below)
+            // A weapon on attach bone `item` (0 the main one, 1 a second), held by `arm`: its grip and blade (+Y).
+            // The game shrinks an attach bone that holds nothing (its size against the hand, as in its own pose).
+            auto blade=[&](int item,int arm){
+                const int bone=h.weapon[item],own=h.hand[item];
+                if(bone<0||own<0||(hidden&(1u<<item))||!(in.handsValid&(1u<<arm)))return;
+                const Mat relative=Mul(oldW[bone],InvAffine(oldW[own]));
+                if(Len({relative.m[0],relative.m[1],relative.m[2]})<.3f)return;
+                const Mat drawn=Held(item);const auto g=grip(arm);
+                items.blade[arm]=true;
+                items.grip[arm]=hc::PointIn(g,toHead(Pos(drawn)));
+                items.along[arm]=hc::AxisIn(g,vec(back(Norm({drawn.m[4],drawn.m[5],drawn.m[6]}))));
+            };
+            blade(0,mainArm);
+            if(!in.leftShield)blade(1,offArm);
+            if(shieldFollowed&&shieldBone>=0&&(in.handsValid&(1u<<offArm))) {
+                items.shield=1;items.shieldArm=offArm;
+                // The rendered mesh's box (ShieldRendered), in its attach bone's frame: carried by the bone as drawn now.
+                HeldPlate local;
+                AcquireSRWLockShared(&g_gunBoneLock);local=g_heldPlate;ReleaseSRWLockShared(&g_gunBoneLock);
+                if(local.ok&&local.generation==HeroGen()&&local.equipment==gamestate::HandsKey()) {
+                    const Mat& w=newW[shieldBone];
+                    auto point=[&](framevr::math::Vec v){return V3{v.x*w.m[0]+v.y*w.m[4]+v.z*w.m[8]+w.m[12],v.x*w.m[1]+v.y*w.m[5]+v.z*w.m[9]+w.m[13],
+                                                                  v.x*w.m[2]+v.y*w.m[6]+v.z*w.m[10]+w.m[14]};};
+                    auto axis=[&](framevr::math::Vec v){return vec(back(Scale(V3{v.x*w.m[0]+v.y*w.m[4]+v.z*w.m[8],v.x*w.m[1]+v.y*w.m[5]+v.z*w.m[9],
+                                                                               v.x*w.m[2]+v.y*w.m[6]+v.z*w.m[10]},1.0f/upm)));};
+                    const hc::Plate now=hc::Thin({toHead(point(local.plate.center)),axis(local.plate.right),axis(local.plate.up),axis(local.plate.out)});
+                    if(hc::Valid(now)){items.plate=hc::In(grip(offArm),now);items.shield=2;}
+                }
+            }
+            AcquireSRWLockExclusive(&g_heldLock);g_heldItems=items;ReleaseSRWLockExclusive(&g_heldLock);
+        }
     }
 #endif
     // [hands] fist: free hands close and open with the controllers' grips.
@@ -3899,6 +3965,97 @@ void PoseMotionBow(Posed& p) {
 }
 #endif
 
+#ifdef D2RVR_NATIVE_OPENXR
+// ---- Held items collide (steamvr/held_collision.h; VR Settings > Combat > Weapons collide) ----
+// Once per pose stamp, before the arms are posed: the items as the last pose drew them, carried by this pose's
+// controllers to where they would be drawn with no push, are held apart by the solver; its pushes move the drawn
+// hands (ControllerPoint). Everything read off the drawn skeleton afterwards - melee contact, the guard, the props,
+// bottles and bodies - meets the corrected pose. The swing's speed still comes from the real controllers.
+void HeldReport(const framevr::held::Gate& gate,ULONGLONG now) {
+    namespace hc=framevr::held;
+    // What the hands hold, at each change (at most twice a second; the last one is always told).
+    static uint64_t told=~0ull,said=~0ull;static ULONGLONG saidAt=0;
+    const uint32_t lasting=gate.why&(hc::Off|hc::View|hc::Form|hc::Bow|hc::TwoHands|hc::EmptyHand);
+    const uint64_t key=uint64_t(gate.pair)|uint64_t(gate.arm[0])<<4|uint64_t(gate.type[0]&0xff)<<8|uint64_t(gate.type[1]&0xff)<<16|uint64_t(lasting)<<24;
+    if(key!=told)told=key;
+    if(told!=said&&now-saidAt>=500) {
+        said=told;saidAt=now;char line[240];
+        auto name=[](uint32_t t){return t<D2RVR_TYPE_COUNT?kD2RVRWeaponTypeNames[t]:"?";};
+        const char* armName[2]={"right","left"};
+        if(lasting) {
+            char why[160];hc::Reasons(lasting,why,sizeof why);
+            snprintf(line,sizeof line,"Frame held collisions: %s, not colliding (%s)",hc::PairName(gate.pair),why);
+        } else if(gate.pair==hc::Pair::WeaponShield)
+            snprintf(line,sizeof line,"Frame held collisions: weapon-shield - the %s hand's %s yields to the shield on the %s arm",
+                armName[gate.arm[0]&1],name(gate.type[0]),armName[gate.arm[1]&1]);
+        else snprintf(line,sizeof line,"Frame held collisions: weapon-weapon - %s (%s hand) and %s (%s hand) share each push, most to the faster hand",
+                name(gate.type[0]),armName[gate.arm[0]&1],name(gate.type[1]),armName[gate.arm[1]&1]);
+        framevr::logging::Write(line);
+    }
+    // Ten seconds of touches: how many, how deep, how many let through, the clanks, and what kept it off.
+    static ULONGLONG windowAt=0;
+    if(!windowAt)windowAt=now;
+    if(now-windowAt<10000)return;
+    windowAt=now;
+    const hc::Stats s=g_heldSolver.TakeStats();
+    if(!s.contacts[0]&&!s.contacts[1])return;
+    char why[200];hc::Reasons(s.why,why,sizeof why);char line[400];
+    snprintf(line,sizeof line,"Frame held collisions: %u contacts (weapon-shield %u, weapon-weapon %u), deepest %.1f cm, pushes capped %u, "
+        "haptic clanks %u; excluded: %s",s.contacts[0]+s.contacts[1],s.contacts[0],s.contacts[1],s.deepest*100,s.capped,s.clanks,why);
+    framevr::logging::Write(line);
+}
+void HeldCollide(Input& in) {
+    namespace hc=framevr::held;
+    AcquireSRWLockExclusive(&g_heldLock);
+    if(!(in.havePoseStamp&&g_heldStep.stamped&&in.poseStamp==g_heldStep.stamp)) {
+        static LARGE_INTEGER frequency{};if(!frequency.QuadPart)QueryPerformanceFrequency(&frequency);
+        LARGE_INTEGER counter;QueryPerformanceCounter(&counter);
+        const double clock=double(counter.QuadPart)/double(frequency.QuadPart);
+        // The pose's time: its controllers' sample stamp (0.1 ms), else this clock.
+        double time=clock;
+        if(g_heldStep.primed)time=g_heldStep.time+(in.havePoseStamp&&g_heldStep.stamped?double(uint32_t(in.poseStamp-g_heldStep.stamp))*1e-4:
+                                                   std::max(0.0,clock-g_heldStep.clock));
+        hc::Gate gate=in.held;
+        if(in.mode!=2)gate.why|=hc::View;
+        hc::Input step;step.time=time;
+        if(gate.pair!=hc::Pair::None) {
+            const int A=gate.arm[0]&1,B=gate.arm[1]&1;
+            if(!(in.handsValid&(1u<<A))||!(in.handsValid&(1u<<B)))gate.why|=hc::Untracked;
+            const HeldItems& items=g_heldItems;
+            if(!items.at||GetTickCount64()-items.at>150||items.generation!=HeroGen())gate.why|=hc::NotPosed;
+            else {
+                if(!items.blade[A])gate.why|=hc::PutAway;
+                if(gate.pair==hc::Pair::WeaponWeapon){if(!items.blade[B])gate.why|=hc::PutAway;}
+                else if(!items.shield||items.shieldArm!=B)gate.why|=hc::PutAway;
+                else if(items.shield==1)gate.why|=hc::Unmeasured;
+            }
+            if(!gate.why) {
+                // Where each controller is now (and the hands' offset), with no push.
+                auto grip=[&](int arm){
+                    hc::Grip g;g.p={in.hand[arm][0]+in.handOffset[0],in.hand[arm][1]+in.handOffset[1],in.hand[arm][2]+in.handOffset[2]};
+                    const float* r=in.rot[arm];const float n=std::sqrt(r[0]*r[0]+r[1]*r[1]+r[2]*r[2]+r[3]*r[3]);
+                    if(n>.5f)g.q={r[0]/n,r[1]/n,r[2]/n,r[3]/n};
+                    return g;
+                };
+                step.a=hc::Out(grip(A),hc::Blade(items.grip[A],items.along[A],gate.type[0]));
+                if(gate.pair==hc::Pair::WeaponWeapon)step.b=hc::Out(grip(B),hc::Blade(items.grip[B],items.along[B],gate.type[1]));
+                else step.plate=hc::Out(grip(B),items.plate);
+            }
+        }
+        step.gate=gate;
+        const hc::Output out=g_heldSolver.Step(step);
+        g_heldStep.primed=true;g_heldStep.stamped=in.havePoseStamp;g_heldStep.stamp=in.poseStamp;g_heldStep.time=time;g_heldStep.clock=clock;
+        for(int arm=0;arm<2;++arm){g_heldStep.push[arm][0]=out.push[arm].x;g_heldStep.push[arm][1]=out.push[arm].y;g_heldStep.push[arm][2]=out.push[arm].z;}
+        if(out.clank)g_heldClank={true,out.strength,out.speed,GetTickCount64()};
+        HeldReport(gate,GetTickCount64());
+    }
+    // The mirror world of left-handed bows and staves, and the game's own animation, take no push (never a pair there).
+    const bool use=in.mode==2&&!in.leftHandedMirror;
+    for(int arm=0;arm<2;++arm)for(int i=0;i<3;++i)in.heldPush[arm][i]=use?g_heldStep.push[arm][i]:0.f;
+    ReleaseSRWLockExclusive(&g_heldLock);
+}
+#endif
+
 void Arms(Posed& posed) {
     const uintptr_t self = posed.self;
     // The hero is looked for even while nothing is done to him: his SkeletonInstance is what
@@ -4059,6 +4216,8 @@ void Arms(Posed& posed) {
     if (in.mode == 2 || in.followTrackedNeck)
         if (const FreshHandsFn f = g_freshHands.load()) if(!f(&in)){if(why<0&&in.followTrackedNeck)why=WhyNoHands;in.followTrackedNeck=false;}
 #ifdef D2RVR_NATIVE_OPENXR
+    // A person's rig only: a form's paws hold nothing (and its gate says so; the pushes ease out meanwhile).
+    if (!hero.form) HeldCollide(in);
     // Resolve frame availability here, after refreshing this pose's eye/head
     // sample. A timer tick between pairs must not disable just one eye's body.
     if(why<0&&in.followTrackedNeck&&!framevr::Active())why=WhyNoFrame;
@@ -4807,7 +4966,7 @@ void ShieldRendered(uint32_t entity,uintptr_t component,uintptr_t matrix) {
        !Get(world,&count)||count!=source.count||!Get(world+4,&matrices)||!matrices||
        !SafeCopy(&itemWorld,reinterpret_cast<void*>(matrix),sizeof itemWorld))return;
     ShieldStage(2048);
-    framevr::guard::Pose best;float largest=0;
+    framevr::guard::Pose best;float largest=0;Mat bestFinal{};ShieldBound bestBound{};
     for(int i=0;i<source.boundCount;++i) {
         const auto& bound=source.bounds[i];Mat bone;
         if(bound.bone<0||bound.bone>=count||!SafeCopy(&bone,reinterpret_cast<void*>(matrices+uintptr_t(bound.bone)*sizeof(Mat)),sizeof bone))continue;
@@ -4816,14 +4975,29 @@ void ShieldRendered(uint32_t entity,uintptr_t component,uintptr_t matrix) {
             {context.player.x,context.player.y,context.player.z},context.pose,pose))continue;
         const auto area=framevr::math::Cross(pose.halfRight,pose.halfUp);
         const float size=framevr::math::Dot(area,area);
-        if(size>largest){best=pose;largest=size;}
+        if(size>largest){best=pose;largest=size;bestFinal=final;bestBound=bound;}
     }
     if(!largest)return; // hidden/unsupported mesh keeps the attachment fallback
     ShieldStage(4096);
+    // Held items collide: the same mesh as a box, its thickness too, in the frame of the attach bone it hangs on as
+    // that pose drew it - rigid there, so later poses carry it with the bone (skeletons.cpp PoseBody).
+    HeldPlate plate;
+    {
+        framevr::held::Plate world;
+        if(framevr::held::PlateFromBounds(bestFinal.m,bestBound.low,bestBound.high,world)) {
+            const Mat inverse=InvAffine(context.attach);const float* m=inverse.m;
+            auto point=[&](framevr::math::Vec v){return framevr::math::Vec{v.x*m[0]+v.y*m[4]+v.z*m[8]+m[12],v.x*m[1]+v.y*m[5]+v.z*m[9]+m[13],v.x*m[2]+v.y*m[6]+v.z*m[10]+m[14]};};
+            auto axis=[&](framevr::math::Vec v){return framevr::math::Vec{v.x*m[0]+v.y*m[4]+v.z*m[8],v.x*m[1]+v.y*m[5]+v.z*m[9],v.x*m[2]+v.y*m[6]+v.z*m[10]};};
+            plate.plate={point(world.center),axis(world.right),axis(world.up),axis(world.out)};
+            plate.ok=std::fabs(context.attach.m[15]-1)<.001f&&framevr::held::Finite(plate.plate.center)&&framevr::held::Finite(plate.plate.right)&&
+                     framevr::held::Finite(plate.plate.up)&&framevr::held::Finite(plate.plate.out);
+            plate.generation=context.generation;plate.equipment=context.equipment;
+        }
+    }
     AcquireSRWLockExclusive(&g_gunBoneLock);
     const bool current=g_shieldContext.pose.at==context.pose.at&&g_shieldContext.generation==context.generation&&
         g_shieldContext.equipment==context.equipment&&g_shieldEntity.load()==entity;
-    if(current){g_renderedShieldContext=context;g_renderedShieldContext.pose=best;ShieldStage(8192);}
+    if(current){g_renderedShieldContext=context;g_renderedShieldContext.pose=best;ShieldStage(8192);if(plate.ok)g_heldPlate=plate;}
     ReleaseSRWLockExclusive(&g_gunBoneLock);
     static std::atomic<uint32_t> reported{UINT32_MAX};
     if(current&&reported.exchange(context.generation)!=context.generation) {
@@ -4851,6 +5025,12 @@ bool ShieldWeapon(MeleeWeaponPose& out) {
     AcquireSRWLockShared(&g_gunBoneLock);const auto pose=g_shieldPose;const auto at=g_shieldAt;ReleaseSRWLockShared(&g_gunBoneLock);
     if(!at||GetTickCount64()-at>100||pose.heroGeneration!=HeroGen())return false;
     out=pose;return true;
+}
+bool TakeHeldClank(float& strength,float& speed) {
+    AcquireSRWLockExclusive(&g_heldLock);const HeldClank clank=g_heldClank;g_heldClank={};ReleaseSRWLockExclusive(&g_heldLock);
+    const auto now=GetTickCount64();
+    if(!clank.waiting||now<clank.at||now-clank.at>150)return false;
+    strength=clank.strength;speed=clank.speed;return true;
 }
 bool ClawGuardPose(framevr::guard::Pose& out,bool& crossed,float& apart) {
     AcquireSRWLockShared(&g_gunBoneLock);const auto claw=g_clawGuard;ReleaseSRWLockShared(&g_gunBoneLock);
