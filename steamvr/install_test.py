@@ -195,6 +195,15 @@ class InstallationTests(unittest.TestCase):
                 self.assertEqual((mod / 'launcher_icon.png').read_bytes(), (install.ROOT / 'launcher_icon.png').read_bytes())
                 self.assertEqual((mod / 'reshade/ReShade64.dll').read_bytes(), b'fixture reshade')
                 self.assertTrue((mod / 'reshade/ReShade.ini').is_file())
+                # A new install has ReShade's Generic Depth add-on off (VR reads the mod's own depth). The shipped
+                # settings carry no reshade_depth, so ReShade.ini decides and a player's reshade_depth=1 turns it on.
+                effects = configparser.ConfigParser(interpolation=None, strict=False)
+                effects.read(mod / 'reshade/ReShade.ini', encoding='utf-8')
+                self.assertEqual(effects['ADDON']['DisabledAddons'], 'Generic Depth')
+                self.assertEqual(effects['INPUT']['KeyOverlay'], '36,0,0,0')
+                shipped = configparser.ConfigParser(interpolation=None, strict=False, allow_no_value=True)
+                shipped.read(mod_plugins / 'd2r_pcvr.ini', encoding='utf-8')
+                self.assertFalse(shipped.has_option('render', 'reshade_depth'))
                 self.assertTrue((mod / 'reshade/D2R_Frame_ReShade.ini').is_file())
                 self.assertTrue((mod / 'reshade/reshade-shaders/Shaders/D2R_DepthFog.fx').is_file())
                 # the effect and every feature header (the shader is split into D2R_*.fxh files), by pattern

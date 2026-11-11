@@ -816,3 +816,56 @@ one identity, buffer and placement read per pose call. These were built from a
 code review; the gain has not been measured in a headset. The 2026-11-09 16:27
 session before them logged look-at 6-14.6 and bodies 5-8.4 ms a second in
 fights, with a 38-53 ms longest pair in every ten-second window.
+
+### 2026-11-10: fewer guarded reads and less waiting on locks
+
+Built from a count of the reads in the code; **the gain has not been measured in
+a headset**. Compare the `Frame skeleton hook: ten seconds:` line (ms a second,
+guarded reads a pose) of a session before and after, in town and in a fight.
+Every read is still a guarded one; what is posed, when and how is unchanged.
+
+- **A monster or townsperson near you** (head turned, body within reach): 11
+  guarded calls a pose before (13 when the body was also bent), 8 now. The
+  bodies take the pose look-at has read and turned instead of reading the buffer
+  again, and a bend's write is the pose's one write (look-at writes only when
+  nothing was bent). The entity's transform is found at the index it had last
+  time, checked against the storage's packed list (`DenseHint` in
+  `steamvr/ecs_storage.h`: 3 reads for 5).
+- **What a skeleton is** is remembered once for look-at and bodies (they kept
+  one cache each), read with their settings under one shared lock a pose. The
+  model's path is read again only when the instance's name object, model or
+  skeleton pointer changed, not every 250 / 500 ms; the entity is still checked
+  that often.
+- **The hero's pose** asked for the hero's transform 2 to 4 times (13 reads
+  each, under the registry's exclusive lock) and read its matrix each time. It
+  is now taken from the look-up the pose makes anyway.
+- **The registry's lock** is taken shared by everything that only reads it
+  (the hero's transform, the ceiling's entities, the shield and crossbow
+  checks); exclusive only to find the storages or an entity again. A body's
+  placement read no longer waits on them.
+- **A bow drawn, a crossbow held**: every skeleton's pose read 3 to 4 fields of
+  its own and took the bow rigs' lock exclusively. Now 1 read, and no lock for a
+  skeleton this thread noted as not the bow in the last second.
+- **`Frame room parts`** looked every skeleton's entity up for 300 ms after
+  each `Frame room body` line (10 reads a pose, under the exclusive lock). That
+  sampling is in developer builds only; the two lines remain.
+## Draw and bind callbacks, November 10
+
+The add-on's ReShade callbacks run for every draw and every pipeline bind on
+the game's recording threads, about 11,000 of each per eye pass. Three changes
+take work out of them; none changes what is drawn in VR:
+
+- New full installs ship ReShade's Generic Depth add-on off (`[ADDON]
+  DisabledAddons=Generic Depth` in the installed ReShade.ini). It watched every
+  draw call for a depth buffer the VR picture does not read. Updates keep the
+  player's ReShade.ini; `[render] reshade_depth=1` turns it back on.
+- With Lower detail at edges off, the foveation draw, bind, target and viewport
+  callbacks return after one load (`steamvr/foveation_switch.h`). The log then
+  says `Frame foveation: off; draws not counted` instead of counting draws.
+  Switched on while playing, a command list is followed from its next reset.
+- The light-bounds and menu-world bind callbacks compare the bound pipeline
+  with the few they replace (`steamvr/pipeline_set.h`) before the device
+  checks, the cache and any lock.
+
+The gain is an estimate from reading the code, about 0.1 ms a pass on the draw
+thread; it has not been measured, in a headset or otherwise.

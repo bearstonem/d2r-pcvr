@@ -2,6 +2,7 @@
 #include "foveation.h"
 #include "profile.h"
 #include "foveation_math.h"
+#include "foveation_switch.h"
 #include "native_lock.h"
 #include "generation_cache.h"
 #include "resource_descriptions.h"
@@ -24,6 +25,8 @@ void (*logger)(const char*)=nullptr;
 void Say(const char* s){if(logger)logger(s);}
 std::atomic<bool> enabled{true},worldDrawing{false},ready{false},gazeDriven{false};
 std::atomic<bool> additionalRates{false};
+// Off: draws and binds return after one load (foveation_switch.h).
+TrackingSwitch following;
 std::atomic<uint8_t> requestedRate{Rate2x2};
 std::atomic<float> inner{.55f},centerX{.5f},centerY{.5f};
 std::atomic<float> gazeInner{.35f};
@@ -75,6 +78,7 @@ struct State {
     ID3D12Resource* cached=nullptr;
     uint64_t epoch=0;
     uint64_t appliedEpoch=0,pipeline=0,pipelineEpoch=0;
+    uint64_t followed=0;   // TrackingSwitch stamp of its last reset
     bool dirty=true;
 };
 // ReShade's private-data lookup synchronizes internally. A command list records
@@ -212,6 +216,7 @@ void PipelineCreated(device*,pipeline_layout,uint32_t count,const pipeline_subob
 }
 void PipelineDestroyed(device*,pipeline p){std::unique_lock lock(pipelineLock);pipelines.erase(p.handle);++pipelineGeneration;}
 void BindPipeline(command_list* cl,pipeline_stage stages,pipeline p){
+    if(!following.On())return;
     FRAME_PROFILE_SAMPLED(FoveationPipeline);
     if(uint32_t(stages&pipeline_stage::all_graphics)==0)return;
     auto& s=*Get(cl);const auto generation=pipelineGeneration.load(std::memory_order_acquire);
@@ -227,6 +232,7 @@ void BindPipeline(command_list* cl,pipeline_stage stages,pipeline p){
     s.pipeline=p.handle;s.pipelineEpoch=generation;
 }
 void BindTargets(command_list* cl,uint32_t count,const resource_view* rtvs,resource_view dsv){
+    if(!following.On())return;
     FRAME_PROFILE_SAMPLED(FoveationTargets);
     auto& s=*Get(cl);const auto oldW=s.w,oldH=s.h;s.targets=s.world=false;s.w=s.h=0;
     if(ready&&count>0&&count<=8&&rtvs&&rtvs[0].handle&&dsv.handle){
@@ -240,11 +246,13 @@ void BindTargets(command_list* cl,uint32_t count,const resource_view* rtvs,resou
     s.dirty=true;
 }
 bool BeginPass(command_list* cl,uint32_t count,const render_pass_render_target_desc* rts,const render_pass_depth_stencil_desc* ds,render_pass_flags){
+    if(!following.On())return false;
     std::array<resource_view,8> rtvs{};for(uint32_t i=0;i<std::min(count,8u);++i)rtvs[i]=rts[i].view;
     BindTargets(cl,std::min(count,8u),rtvs.data(),ds?ds->view:resource_view{});return false;
 }
-bool EndPass(command_list* cl){auto& s=*Get(cl);s.targets=s.world=false;s.dirty=true;return false;}
+bool EndPass(command_list* cl){if(!following.On())return false;auto& s=*Get(cl);s.targets=s.world=false;s.dirty=true;return false;}
 void Viewports(command_list* cl,uint32_t first,uint32_t count,const viewport* vps){
+    if(!following.On())return;
     auto& s=*Get(cl);const auto old=s.vp;if(first==0&&count==1)s.vp=vps[0];else s.vp={};
     if(std::memcmp(&old,&s.vp,sizeof old)!=0){s.epoch=0;s.dirty=true;}
 }
@@ -272,8 +280,12 @@ void Count(const State& s){
     pending={};
 }
 bool Draw(command_list* cl,uint32_t,uint32_t,uint32_t,uint32_t){
+    if(!following.On())return false;
     FRAME_PROFILE_SAMPLED(FoveationDraw);
     auto& s=*Get(cl);
+    // Reset while nothing was followed: its targets, viewport and pipeline were
+    // missed. Full quality (nothing was applied to it) until its next reset.
+    if(!following.Current(s.followed))return false;
     // Bind callbacks only invalidate. Evaluate and set VRS once immediately
     // before the next draw, not again for every bind and every following draw.
     if(s.dirty||s.appliedEpoch!=maskEpoch.load(std::memory_order_relaxed))Apply(cl,s);
@@ -284,10 +296,12 @@ bool DrawIndexed(command_list* cl,uint32_t,uint32_t,uint32_t,int32_t,uint32_t){r
 bool Indirect(command_list* cl,indirect_command type,resource,uint64_t,uint32_t,uint32_t){
     if(type==indirect_command::draw||type==indirect_command::draw_indexed)return Draw(cl,0,0,0,0);
     // Unknown indirect signatures/mesh pipelines cannot be classified safely.
-    auto& s=*Get(cl);const auto reject=s.reject;s.reject=RejectUnknown;Apply(cl,s);Count(s);s.reject=reject;s.dirty=true;return false;
+    if(!following.On())return false;
+    auto& s=*Get(cl);if(!following.Current(s.followed))return false;
+    const auto reject=s.reject;s.reject=RejectUnknown;Apply(cl,s);Count(s);s.reject=reject;s.dirty=true;return false;
 }
 bool Mesh(command_list* cl,uint32_t,uint32_t,uint32_t){return Indirect(cl,indirect_command::dispatch_mesh,{},0,0,0);}
-void Reset(command_list* cl){auto& s=*Get(cl);s.targets=s.world=s.hasMask=false;s.reject=RejectUnknown;s.w=s.h=0;s.vp={};s.applied=s.cached=nullptr;s.epoch=s.appliedEpoch=s.pipeline=s.pipelineEpoch=0;s.dirty=true;}
+void Reset(command_list* cl){auto& s=*Get(cl);s.targets=s.world=s.hasMask=false;s.reject=RejectUnknown;s.w=s.h=0;s.vp={};s.applied=s.cached=nullptr;s.epoch=s.appliedEpoch=s.pipeline=s.pipelineEpoch=0;s.dirty=true;s.followed=following.Stamp();}
 void Destroy(command_list* cl){
     uint64_t ptr=0;cl->get_private_data(reinterpret_cast<const uint8_t*>(&stateId),&ptr);
     cl->set_private_data(reinterpret_cast<const uint8_t*>(&stateId),0);
@@ -314,6 +328,8 @@ void Register(void (*log)(const char*)) {
 }
 void Configure(bool on,float radius,float gazeRadius,int peripheral){
     const bool changed=enabled.exchange(on)!=on;
+    following.Set(on);
+    if(changed)Say(on?"Frame foveation: on; command lists follow from their next reset":"Frame foveation: off; draw and bind callbacks return early after the lists in flight");
     const float value=std::isfinite(radius)?std::clamp(radius,.35f,.85f):.55f;
     const float gazeValue=std::isfinite(gazeRadius)?std::clamp(gazeRadius,.30f,.65f):.35f;
     const bool gazeChanged=gazeInner.exchange(gazeValue)!=gazeValue;
@@ -333,7 +349,7 @@ void Initialize(ID3D12Device* dev,ID3D12CommandQueue* q,uint32_t w,uint32_t h){
         ready?"available":"unavailable",f.tier,tile,RateName(PeripheralRate()));Say(line);
     Say("Frame foveation: cached command-list state, deferred rate binding, batched draw statistics");
 }
-void BeginEye(int e,float cx,float cy,bool tracked){eye=e;centerX=cx;centerY=cy;gazeDriven=tracked;++maskEpoch;worldDrawing=true;}
+void BeginEye(int e,float cx,float cy,bool tracked){following.EyePass();eye=e;centerX=cx;centerY=cy;gazeDriven=tracked;++maskEpoch;worldDrawing=true;}
 void EndWorld(){if(worldDrawing.exchange(false))++maskEpoch;}
 void Suspend(command_list* cl){auto& s=*Get(cl);s.targets=false;Apply(cl,s);}
 Stats TakeStats(){
@@ -342,5 +358,6 @@ Stats TakeStats(){
     return s;
 }
 bool Available(){return ready.load();}
+bool Counting(){return following.On();}
 void Shutdown(){ready=false;worldDrawing=false;++maskEpoch;std::lock_guard lock(maskLock);masks.clear();gazeBanks.clear();nativeQueue.Reset();nativeDevice.Reset();}
 }

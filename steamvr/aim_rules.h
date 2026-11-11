@@ -84,7 +84,8 @@ inline float FrontOfTarget(int skill){return skill==78?3.f:0.f;}
 // A motion's cast that lands on the highlighted monster when there is one, rather than where the motion
 // pointed (owner, 2026-11-05: "the meteor has to land on a selected target if there's one. You know how we
 // highlight the monster?", then "You need to also do the same thing with Blizzard"): Meteor, Blizzard.
-inline bool MotionOnTarget(int skill){return skill==56||skill==59;}
+// The Warlock's sigils and Abyss the same (owner, 2026-11-10: "or they could land on targeted monsters like sorceress").
+inline bool MotionOnTarget(int skill){return skill==56||skill==59||skill==393||skill==396||skill==400||skill==402;}
 // Skills the game should be handed the monster itself, when there is one: seekers
 // home in on it (Guided Arrow, Bone Spirit), Attract and Taunt need a unit, and
 // the traveling attacks (Charge, Leap Attack, Dragon Flight) fight it. With no
