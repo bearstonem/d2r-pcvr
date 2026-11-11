@@ -4631,7 +4631,9 @@ bool Wanted() {
 }
 void Tick() {
     const bool wanted = Wanted();
-    targetlock::Pump(wanted || framevr::TCrossWantsTargets());   // the outline and locks stay on Wanted()
+    // an aimed throw's sigil takes the monster under it (toss.h): the list is kept fresh while the trap is in hand
+    if (framevr::TossAiming()) targetlock::Pump(true);
+    else targetlock::Pump(wanted || framevr::TCrossWantsTargets());   // the outline and locks stay on Wanted()
     static bool toldLegacy = false;   // once a session: the old single outline color still serves a hand
     if (!toldLegacy && vrsettings::LegacyHighlightUsed()) {
         toldLegacy = true;
@@ -7456,7 +7458,7 @@ uintptr_t HookDrawGameScreen(int a) {
     static bool told = false, toldWhy = false;
     static double lastEnd = 0.0, sumGap = 0.0, sumPass[2] = {}, sumPresent[2] = {}, sumEff[2] = {}, maxPair = 0.0, sumCpu = 0.0, sumWall = 0.0;
 #ifdef D2RVR_NATIVE_OPENXR
-    static double sumBegin=0,sumEnd=0,sumWait=0,sumFence=0,sumSubmit=0,sumPeriod=0;
+    static double sumBegin=0,sumEnd=0,sumWait=0,sumFence=0,sumSubmit=0,sumPeriod=0,sumLocate=0,sumInput=0;
     static uint32_t periodPairs=0;
 #endif
     static ULONGLONG since = GetTickCount64(), lastHitch = 0;
@@ -7474,7 +7476,7 @@ uintptr_t HookDrawGameScreen(int a) {
         if(!depth) {
 #ifdef D2RVR_NATIVE_OPENXR
             framevr::profile::SkipPair();
-            sumBegin=sumEnd=sumWait=sumFence=sumSubmit=sumPeriod=0;
+            sumBegin=sumEnd=sumWait=sumFence=sumSubmit=sumPeriod=sumLocate=sumInput=0;
             periodPairs=0;
 #endif
             // Menu/loading frames are not consecutive stereo gameplay frames.
@@ -7602,7 +7604,7 @@ uintptr_t HookDrawGameScreen(int a) {
     framevr::NoteFrame(lastEnd>0?(entered-lastEnd)*.001:0,xr.waitFrameMs,(t2-t0)*.001,
         std::max(0.0,(t0-entered)*.001-xr.waitFrameMs)+(ended-t2)*.001,lastEnd>0?(ended-lastEnd)*.001:0,xr.displayPeriodMs,false);
     sumBegin+=t0-entered;sumEnd+=ended-t2;
-    sumWait+=xr.waitFrameMs;sumFence+=xr.waitGpuMs;sumSubmit+=xr.submitMs;
+    sumWait+=xr.waitFrameMs;sumFence+=xr.waitGpuMs;sumSubmit+=xr.submitMs;sumLocate+=xr.locateMs;sumInput+=xr.inputMs;
     if(xr.displayPeriodMs>0){sumPeriod+=xr.displayPeriodMs;++periodPairs;}
     framevr::profile::FinishPair(lastEnd>0?(entered-lastEnd)*.001:0,(t0-entered)*.001,
         (t1-t0)*.001,(t2-t1)*.001,(ended-t2)*.001,(c1-c0)*.001,(c2-c1)*.001,xr);
@@ -7649,13 +7651,17 @@ uintptr_t HookDrawGameScreen(int a) {
 #ifdef D2RVR_NATIVE_OPENXR
             LogF("Frame pacing: runtime predicted %.1f Hz | XR begin %.2f ms (wait %.2f) | XR end %.2f ms (submit %.2f) | GPU fence %.2f ms (pair total)",
                 sumPeriod>0?1000.0*periodPairs/sumPeriod:0,sumBegin*k,sumWait/pairs,sumEnd*k,sumSubmit/pairs,sumFence/pairs);
+            // XR begin's own work, apart from the runtime's wait: finding the head and eyes, then the frame's input
+            // step (controllers, gestures, the wrist and visor panels' uploads). (A line of its own: LogF keeps 255 characters.)
+            LogF("Frame pacing: XR begin, ms a pair: wait %.2f | locate %.2f | input %.2f (controllers, gestures, panel uploads) | rest %.2f",
+                sumWait/pairs,sumLocate/pairs,sumInput/pairs,std::max(0.0,sumBegin*k-(sumWait+sumLocate+sumInput)/pairs));
 #endif
             LogF("vrcam: the two passes busy the game's thread %.0f%% of their sampled time (%.2f ms CPU a pair over %u sampled pairs; the rest waits - GPU, fences, locks)",
                  sumWall > 0.0 ? 100.0 * sumCpu / sumWall : 0.0, cpuPairs?sumCpu*.001/cpuPairs:0,cpuPairs);
         }
         sumGap = 0.0; maxPair = 0.0; sumCpu = 0.0; sumWall = 0.0;
 #ifdef D2RVR_NATIVE_OPENXR
-        sumBegin=sumEnd=sumWait=sumFence=sumSubmit=sumPeriod=0;
+        sumBegin=sumEnd=sumWait=sumFence=sumSubmit=sumPeriod=sumLocate=sumInput=0;
         periodPairs=0;
 #endif
         for (int e = 0; e < 2; ++e) sumPass[e] = sumPresent[e] = sumEff[e] = 0.0;
@@ -9162,10 +9168,25 @@ void ShieldContactTick() {
 void ShieldGuardTick() {
     framevr::guard::Pose pose;
     // A shapeshift form draws no shield: the native block roll uses its block chance.
-    const bool eligible=g_enabled.load()&&g_inWorld.load()&&!ThirdPerson()&&!Overhead()&&g_eyeOk.load()&&
-        !gamestate::MenuOpen()&&gamestate::LeftShield()&&!ShapeFormNow();
+    const bool guardable=g_enabled.load()&&g_inWorld.load()&&!ThirdPerson()&&!Overhead()&&g_eyeOk.load()&&
+        !gamestate::MenuOpen()&&!ShapeFormNow();
+    bool eligible=guardable&&gamestate::LeftShield();
     const auto epoch=g_meleeTurnEpoch.load();
-    const bool posed=eligible&&skel::ShieldGuardPose(pose)&&pose.epoch==epoch;
+    bool posed=eligible&&skel::ShieldGuardPose(pose)&&pose.epoch==epoch;
+    // No shield, a claw in each hand: the two crossed in front are the guard (guard::Crossed; owner, 2026-11-10:
+    // "Assassin should be able to block using her claws"). Uncrossed, the game's own roll stands (Weapon Block).
+    bool claws=false;
+    if(guardable&&!gamestate::LeftShield()) {
+        bool crossed=false;float apart=0;
+        claws=skel::ClawGuardPose(pose,crossed,apart)&&pose.epoch==epoch&&crossed;
+        eligible=posed=claws;
+        static bool was=false;static ULONGLONG told=0;
+        if(claws!=was&&GetTickCount64()-told>500) {
+            was=claws;told=GetTickCount64();char line[160];
+            snprintf(line,sizeof line,"Frame guard claws: %s (blades %.0f cm apart)",claws?"crossed - guarding":"apart - the game's own roll",apart*100);
+            framevr::logging::Write(line);
+        }
+    }
     pose.epoch=epoch; // invalidate cached coverage across a snap turn
     // Holy Shield: blocks land on its larger glow, mesh surface or fallback alike.
     // Logged when Holy Shield itself starts or ends, not when a menu or the
@@ -9183,7 +9204,7 @@ void ShieldGuardTick() {
     const D2RVR_Shared* sh=g_shared;
     // The shield is the off hand's: the left arm, or the right one in left-handed play (hand_role.h).
     const bool handOk=sh&&sh->version==D2RVR_SHARED_VERSION&&sh->headValid&&(sh->handsValid&HandBit(1));
-    combat::PublishGuard(gamestate::LocalPlayer(),eligible,posed,pose,handOk,framevr::HandSide(1)==1);
+    combat::PublishGuard(gamestate::LocalPlayer(),eligible,posed,pose,handOk,framevr::HandSide(1)==1,claws);
 }
 #endif
 
@@ -10787,7 +10808,8 @@ bool RingWanted() {
     const auto now = GetTickCount64();
     return g_enabled.load() && g_inWorld.load() && !gamestate::MenuOpen() &&
         (((AimOn(framevr::settings::LandingCircles) || tacticalActive) && framevr::telegraph::AnyOn(marks, now)) ||
-         framevr::telegraph::SkillOn(marks, framevr::telegraph::TeleportMark, now));
+         framevr::telegraph::SkillOn(marks, framevr::telegraph::TeleportMark, now) ||
+         framevr::telegraph::SkillOn(marks, framevr::telegraph::TossMark, now));   // an aimed throw's sigil too (toss.h)
 }
 // Loot beams (same pass): while a Rare, Set or Unique item or a high rune lies near the hero.
 bool BeamWanted() {
@@ -11193,7 +11215,9 @@ void OnReshadePresent(reshade::api::effect_runtime*) {
     if (t - since >= 10e6) {
 #ifdef D2RVR_NATIVE_OPENXR
         const auto f=framevr::foveation::TakeStats();
-        LogF("Frame foveation: %u reduced-shading draws, %u full-quality draws in sample",f.shadedDraws,f.fullDraws);
+        if(framevr::foveation::Counting()||f.shadedDraws||f.fullDraws)
+            LogF("Frame foveation: %u reduced-shading draws, %u full-quality draws in sample",f.shadedDraws,f.fullDraws);
+        else LogF("Frame foveation: off; draws not counted");
         namespace fv=framevr::foveation;
         uint64_t worldDraws=0;for(const auto n:f.world)worldDraws+=n;
         if(worldDraws)
@@ -11869,7 +11893,9 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
                 // a strip: its direction (grid x/y are world x/z) and half-length in world units; 0 = a circle; w 1:
                 // Teleport's sigil (D2R_DepthFog.fx TeleportSigil)
                 const bool teleport = mark.skill == TeleportMark;
-                const float dir[4] = {mark.dirX, mark.dirY, mark.halfLength * 2.0f, teleport ? 1.0f : 0.0f};
+                // an aimed throw's (TossMark): the same sigil in its skill's color, without the pillar
+                const bool sigil = teleport || mark.skill == framevr::telegraph::TossMark;
+                const float dir[4] = {mark.dirX, mark.dirY, mark.halfLength * 2.0f, sigil ? 1.0f : 0.0f};
                 if (teleport && draw.on && tele[3] <= 0.0f) { tele[0] = ring[0]; tele[1] = ring[1]; tele[2] = ring[2]; tele[3] = ring[3]; }
                 snprintf(n, sizeof n, "RingDir%d", k); SetFloats(rt, n, dir, 4);
             }
@@ -12107,7 +12133,7 @@ void TryRegister() {
     // In VR the fog and sky read the mod's own depth (scenedepth); ReShade's,
     // which Generic Depth provides, only outside it.
     if (!vrsettings::ReShadeDepthActive())
-        Log("vrcam: ReShade's Generic Depth add-on is off (d2r_pcvr.ini [render] reshade_depth) - in VR the fog and sky use the mod's own depth; outside VR they have none and stay off");
+        Log("vrcam: ReShade's Generic Depth add-on is off (ReShade.ini [ADDON] DisabledAddons, as new installs ship it; d2r_pcvr.ini [render] reshade_depth=1 turns it on) - in VR the fog and sky use the mod's own depth; outside VR they have none and stay off");
 #else
     // Both read ReShade's depth, which Generic Depth provides (FlatVR's addon
     // only corrects its pick); without it the shader sees no depth and stays off.
@@ -12512,8 +12538,9 @@ bool SaveBodyTuning(int knob, float value) {
 // Generic Depth add-on, written into its ini's [ADDON] DisabledAddons here,
 // before ReShade reads it - it cannot be switched while ReShade runs. In VR the
 // fog and sky read the mod's own depth (scenedepth); the add-on still watches
-// every draw call. Without the key ReShade.ini is left as it is. Returns
-// whether the add-on runs this session.
+// every draw call. Without the key ReShade.ini is left as it is: Setup's new
+// installs write it with the add-on off (steamvr/install.py), updates keep the
+// player's file. Returns whether the add-on runs this session.
 bool SyncReShadeDepth(const std::wstring& ini) {
     namespace addons = framevr::reshadeaddons;
     wchar_t list[1024] = {};
@@ -12727,4 +12754,18 @@ D2RL_PLUGIN_EXPORT void D2RLoaderUnloadPlugin() noexcept {
     framevr::logging::Stop();
 #endif
     g_ctx = nullptr;
+}
+// The monster nearest a cell (transport.h): an aimed throw's sigil takes the monster under it (toss.h).
+namespace framevr {
+bool MonsterNearCell(float x, float y, float within, float& monsterX, float& monsterY, uint32_t* id) {
+    const auto s = targetlock::Get();
+    if (!s.at || GetTickCount64() - s.at > 500) return false;
+    int best = -1; float nearest = within;
+    for (int i = 0; i < s.count; ++i)
+        if (const float d = std::hypot(s.targets[i].x - x, s.targets[i].y - y); d <= nearest) { nearest = d; best = i; }
+    if (best < 0) return false;
+    monsterX = s.targets[best].x; monsterY = s.targets[best].y;
+    if (id) *id = s.targets[best].id;
+    return true;
+}
 }

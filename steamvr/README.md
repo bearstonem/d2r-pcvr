@@ -312,6 +312,12 @@ depth buffer; in VR the fog and sky read the mod's own depth (on the flat menu
 panel and outside VR they need ReShade's). The plugin writes it into
 ReShade.ini's `[ADDON] DisabledAddons` before ReShade loads, so a change
 applies after a restart; without the key ReShade.ini is left as it is.
+A new full install ships ReShade.ini with the add-on off (`DisabledAddons=Generic
+Depth`) and no `reshade_depth` key; an update keeps the player's ReShade.ini, so
+earlier installs keep it on until `reshade_depth=0` is set. With it off, the fog
+and sky outside VR and on the flat menu have no depth and stay off (the effect
+sees ReShade's 1x1 empty texture and returns the picture unchanged);
+`reshade_depth=1` turns it back on.
 
 The choice is stored as `[stereo] rendering` (0 Both, 1 One by turns,
 2 Replay; missing or invalid is One by turns) and applies live. Every 10 seconds the log reports a

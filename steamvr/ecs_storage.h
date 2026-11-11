@@ -48,4 +48,29 @@ template <class Read> bool DenseIndex(const Header& h, uint32_t entity, Read&& r
     *index = value;
     return true;
 }
+// Whether `entity` is still at dense index `index`: one read. The packed list is what the storage
+// holds, each entity once, so the entry there being this entity (its version with it) is the
+// check DenseIndex ends on, without the two sparse reads that lead to it.
+template <class Read> bool DenseStill(const Header& h, uint32_t entity, uint32_t index, Read&& read) {
+    if (h.packedEnd < h.packedBegin || index >= (h.packedEnd - h.packedBegin) / 4) return false;
+    uint32_t back = 0;
+    return read(&back, h.packedBegin + uint64_t(index) * 4, sizeof back) && back == entity;
+}
+// The index an entity was found at last time, kept by whoever looks the same entity up again and
+// again (the skeleton hook: a body's transform, every pose). Only ever a hint: DenseIndex below
+// checks it against the packed list, and walks the sparse pages when it no longer holds (the
+// storage moves its last entity into a freed place).
+struct DenseHint {
+    uint32_t entity = 0, index = 0;
+    bool known = false;
+};
+// DenseIndex with a hint: one read while the entity is where it was, else the hint's read and the
+// walk's three. The index is the one the walk gives either way.
+template <class Read> bool DenseIndex(const Header& h, uint32_t entity, Read&& read, uint32_t* index, DenseHint& hint) {
+    if (hint.known && hint.entity == entity && DenseStill(h, entity, hint.index, read)) { *index = hint.index; return true; }
+    hint.known = false;
+    if (!DenseIndex(h, entity, read, index)) return false;
+    hint.entity = entity; hint.index = *index; hint.known = true;
+    return true;
+}
 }  // namespace framevr::ecsstorage

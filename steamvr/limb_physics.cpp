@@ -1,4 +1,5 @@
 #include "limb_physics.h"
+#include "physics_worlds.h"
 #include <box3d/box3d.h>
 #include <algorithm>
 #include <unordered_map>
@@ -135,9 +136,10 @@ struct World::Impl {
         def.workerCount=1;        // serial: Box3D starts no threads in the game process
         def.contactSpeed=ContactSpeed;
         def.enableSleep=false;
+        std::lock_guard table(physics::WorldTable());   // physics_worlds.h: Box3D's one table of worlds
         world=b3CreateWorld(&def);
     }
-    ~Impl() {if(b3World_IsValid(world))b3DestroyWorld(world);}
+    ~Impl() {std::lock_guard table(physics::WorldTable());if(b3World_IsValid(world))b3DestroyWorld(world);}
     static void Destroy(b3BodyId& id) {if(!B3_IS_NULL(id)&&b3Body_IsValid(id))b3DestroyBody(id);id=b3_nullBodyId;}
     void Drop(Body& b) {   // destroying a body takes its joints with it
         for(int i=0;i<b.rig.count;++i)Destroy(b.limb[size_t(i)]);

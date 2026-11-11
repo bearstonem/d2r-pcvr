@@ -137,17 +137,24 @@ int main(int argc,char** argv) {
         for(const int id:{107,112,117}){auto& k=paladin.catalog[paladin.skillCount++];k.id=id;k.level=8;k.known=k.available=true;std::snprintf(k.name,sizeof k.name,"%s",framevr::spellmotion::SpellName(id));}
         for(int i=0;i<framevr::skills::Count;++i){auto& k=paladin.skills[size_t(i)];k=paladin.catalog[size_t(i%3)];}
         icons::Prefetch(paladin);if(!icons::Wait(10000))return 120;
-        constexpr int width=2304,height=768;std::vector<uint8_t> gallery(width*height*4);
-        for(int tile=0;tile<3;++tile) {
+        // The Warlock's sixteen cards (the one page past fourteen: eight lower rows), two not learned, one off.
+        Snapshot warlock;warlock.activeSet=1;warlock.bindingsEditable=true;warlock.skillClass=7;
+        {const auto page=framevr::spellmotion::PageOf(7);
+         for(int i=0;i<page.count;++i)if(i!=6&&i!=14){auto& k=warlock.catalog[warlock.skillCount++];k.id=page.skills[i];k.level=8;k.known=k.available=true;std::snprintf(k.name,sizeof k.name,"%s",framevr::spellmotion::SpellName(k.id));}}
+        for(int i=0;i<framevr::skills::Count;++i){auto& k=warlock.skills[size_t(i)];k=warlock.catalog[size_t(i%warlock.skillCount)];}
+        icons::Prefetch(warlock);if(!icons::Wait(10000))return 120;
+        constexpr int width=3072,height=768;std::vector<uint8_t> gallery(width*height*4);
+        for(int tile=0;tile<4;++tile) {
             Output o;o.wheel=true;o.wheelHand=0;o.motionsBox=true;o.motionsOff=1<<framevr::spellmotion::Bit(48);
             if(tile==0)o.hover=MotionsCell;
             else if(tile==1){o.motions=true;o.hover=MotionCardCell(2);}
-            else {o.motions=true;o.hover=MotionCardCell(0);o.motionsOff=1<<framevr::spellmotion::Bit(3,112);}
-            const auto pixels=Paint(tile==2?paladin:s,o,-1);if(pixels.size()!=1024*1024*4)return 121;
+            else if(tile==2){o.motions=true;o.hover=MotionCardCell(0);o.motionsOff=1<<framevr::spellmotion::Bit(3,112);}
+            else {o.motions=true;o.hover=MotionCardCell(15);o.motionsOff=1<<framevr::spellmotion::Bit(7,394);}
+            const auto pixels=Paint(tile==3?warlock:tile==2?paladin:s,o,-1);if(pixels.size()!=1024*1024*4)return 121;
             for(int y=0;y<768;++y)std::memcpy(&gallery[(y*width+tile*768)*4],&pixels[y*1024*4],768*4);
         }
         if(!SavePng(argv[1],gallery,width,height))return 122;
-        std::puts("Motions art: the hand wheel's MOTIONS box, the Sorceress's MOTIONS page and the Paladin's rendered");return 0;
+        std::puts("Motions art: the hand wheel's MOTIONS box, the Sorceress's MOTIONS page, the Paladin's and the Warlock's sixteen rendered");return 0;
     }
     if(argc>2&&!std::strcmp(argv[2],"--glyphs-check")) {
         // Glyph casting: the hand wheel with a Draw glyph button and the GLYPHS box, the GLYPHS page, the

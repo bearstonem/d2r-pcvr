@@ -375,6 +375,86 @@ while it holds one of the game's spin locks keeps the others spinning for the
 20 us of the stop, as the draw thread's stops already do. With `all`, more
 threads can be in tasks at once than are stopped at a tick, and each task
 gets fewer samples: its head line says what it got. Not yet run in the game.
+## Draw thread: the bodies' physics on its own thread, November 10
+
+**Gain not yet measured in a headset.** Built and tested natively only.
+
+Evidence, the owner's headset log of 2026-11-10 16:32-16:39: the `input` part
+of `Frame pacing: XR begin, ms a pair` was 0.26-0.30 ms a pair with no ragdoll
+alive, 0.37-0.39 with 1-2, 0.53 with 3 and 0.58-0.84 with 5-6 (`Frame bodies:
+ten seconds: ... ragdolls most=N`). So the bodies that give way cost the draw
+thread roughly 0.3-0.5 ms a pair in a big fight. This is inferred from those
+timings: the step itself was not timed.
+
+The bodies' Box3D world now lives on one worker thread (`limb_worker.h`), which
+makes it, steps it and destroys it. Each frame the draw thread hands over that
+frame's time, player position, weapon capsules and posed bodies, and picks up
+what finished since the frame before. Only the newest frame waits: one handed
+over while the worker is still stepping replaces it, and the fixed 1/120 s
+steps are counted from the frames' own times, so nothing queues and no
+simulated time is lost. The worker gives each batch's answers straight to the
+board the skeleton hook reads, the moment its steps end, so a pose made later
+in the same frame is bent by that frame's steps as before; a pose made in the
+half millisecond before the batch ends uses the frame before's answer. The
+hand's tick and the counters are picked up at the next frame's input, one
+frame later than before. The worker runs at normal priority. Making and
+destroying a Box3D world takes one lock (`physics_worlds.h`): Box3D keeps all
+worlds in one table, and the bottles' world is still made on the draw thread.
+
+The bottle and prop world stays on the draw thread: the same frame reads it
+back many times (a let-go bottle, the thrown potion's pose, props' matrices,
+traces for the throw sigil), and it already skips its step at rest.
+
+**What to read in the next log.** `Frame bodies: worker: ten seconds: N step
+batches, mean X ms, longest Y ms; N frames handed over, N replaced before they
+were stepped` is the cost that left the draw thread. `input` in `Frame pacing`
+with 5-6 ragdolls should be near its no-ragdoll value (0.26-0.30 ms a pair).
+Replaced frames mean the worker did not finish within a frame; a few are
+harmless, many would show as bodies reacting late.
+
+## Draw thread: panel uploads and prop physics, November 10
+
+**Not yet measured in a headset.** The changes below passed the native build
+and its tests; none has run in a headset, so the gains are expected, not
+measured. A headset log from the owner's PC showed the game's draw thread as
+the limit: in fights a stereo pair ran 1-2 ms over its slot. Three pieces of
+work on that thread were cut.
+
+**The wrist atlas uploads only what changed.** Any life or mana change
+re-uploaded the whole 1024 x 1024 interaction atlas: 0.80 ms on the draw thread
+each (0.61 ms of it the copy into the upload buffer), 15-34 times in 10 s. The
+painter's thread now compares each atlas with the one it painted before
+(`atlas_dirty.h`) and hands over the 64-texel tiles that differ; the draw thread
+copies those tiles' rectangles alone, and uploads nothing when the picture is
+the same. A swapchain hands out several images in turn, so each image also gets
+what it missed while the others were written: the image shown is always whole.
+The swapchain's image list is read once instead of twice per upload.
+
+**The head-locked overlays do less per repaint.** Blood, Arcane Decay, guard
+strain and the glyph trail get the same changed-tile uploads into the shared
+master, and their pictures arrive in the atlas's channel order, so the draw
+thread never exchanges channels pixel by pixel. An upload no longer has a
+command list of its own: the frame's one list at its end puts the staged
+pictures into the master and copies on to the swapchain image only what that
+image is behind by, where it copied the whole 2048 x 2056 master (16 MB) for any
+picture. Their looks and repaint rates are unchanged: Arcane Decay's picture
+really differs at each 25 Hz repaint, so its 1 MB copy remains.
+
+**Prop physics does not step at rest.** With level props catalogued the Box3D
+world stepped at 120 Hz on the draw thread although every body in it was
+static. Without a bottle, a thrown bottle or a moving prop no step is taken; the
+weapons' bodies are placed where the steps would have left them and the step
+clock keeps its phase, so a prop a weapon reaches is set going and stepped on
+the same frame as before (`dropped_bottles_test.cpp` compares the two). The
+weapon sweep also skips props outside its bounds before the closer test.
+
+**What to read in the next log.** `Frame UI refresh:` every 10 s now gives the
+share of the atlas copied and how many refreshes were unchanged; its `copy`
+should fall well below 0.61 ms. A new `Frame pacing: XR begin, ms a pair:` line
+splits the frame's begin into the runtime's wait, locating the head and eyes,
+and the input step, which holds the panel uploads; compare `input` with and
+without Arcane Decay active (begin rose from 0.31-0.36 to 0.75-1.2 ms a pair
+when it came on).
 
 ## Render thread waits, October 20
 
@@ -1111,3 +1191,56 @@ one identity, buffer and placement read per pose call. These were built from a
 code review; the gain has not been measured in a headset. The 2026-11-09 16:27
 session before them logged look-at 6-14.6 and bodies 5-8.4 ms a second in
 fights, with a 38-53 ms longest pair in every ten-second window.
+
+### 2026-11-10: fewer guarded reads and less waiting on locks
+
+Built from a count of the reads in the code; **the gain has not been measured in
+a headset**. Compare the `Frame skeleton hook: ten seconds:` line (ms a second,
+guarded reads a pose) of a session before and after, in town and in a fight.
+Every read is still a guarded one; what is posed, when and how is unchanged.
+
+- **A monster or townsperson near you** (head turned, body within reach): 11
+  guarded calls a pose before (13 when the body was also bent), 8 now. The
+  bodies take the pose look-at has read and turned instead of reading the buffer
+  again, and a bend's write is the pose's one write (look-at writes only when
+  nothing was bent). The entity's transform is found at the index it had last
+  time, checked against the storage's packed list (`DenseHint` in
+  `steamvr/ecs_storage.h`: 3 reads for 5).
+- **What a skeleton is** is remembered once for look-at and bodies (they kept
+  one cache each), read with their settings under one shared lock a pose. The
+  model's path is read again only when the instance's name object, model or
+  skeleton pointer changed, not every 250 / 500 ms; the entity is still checked
+  that often.
+- **The hero's pose** asked for the hero's transform 2 to 4 times (13 reads
+  each, under the registry's exclusive lock) and read its matrix each time. It
+  is now taken from the look-up the pose makes anyway.
+- **The registry's lock** is taken shared by everything that only reads it
+  (the hero's transform, the ceiling's entities, the shield and crossbow
+  checks); exclusive only to find the storages or an entity again. A body's
+  placement read no longer waits on them.
+- **A bow drawn, a crossbow held**: every skeleton's pose read 3 to 4 fields of
+  its own and took the bow rigs' lock exclusively. Now 1 read, and no lock for a
+  skeleton this thread noted as not the bow in the last second.
+- **`Frame room parts`** looked every skeleton's entity up for 300 ms after
+  each `Frame room body` line (10 reads a pose, under the exclusive lock). That
+  sampling is in developer builds only; the two lines remain.
+## Draw and bind callbacks, November 10
+
+The add-on's ReShade callbacks run for every draw and every pipeline bind on
+the game's recording threads, about 11,000 of each per eye pass. Three changes
+take work out of them; none changes what is drawn in VR:
+
+- New full installs ship ReShade's Generic Depth add-on off (`[ADDON]
+  DisabledAddons=Generic Depth` in the installed ReShade.ini). It watched every
+  draw call for a depth buffer the VR picture does not read. Updates keep the
+  player's ReShade.ini; `[render] reshade_depth=1` turns it back on.
+- With Lower detail at edges off, the foveation draw, bind, target and viewport
+  callbacks return after one load (`steamvr/foveation_switch.h`). The log then
+  says `Frame foveation: off; draws not counted` instead of counting draws.
+  Switched on while playing, a command list is followed from its next reset.
+- The light-bounds and menu-world bind callbacks compare the bound pipeline
+  with the few they replace (`steamvr/pipeline_set.h`) before the device
+  checks, the cache and any lock.
+
+The gain is an estimate from reading the code, about 0.1 ms a pass on the draw
+thread; it has not been measured, in a headset or otherwise.

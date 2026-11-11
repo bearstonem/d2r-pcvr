@@ -119,8 +119,10 @@ int main(){
             Check(WheelCell(.87f,.77f,-1,page,hand,false,0,false,true)==MotionsCell,"the MOTIONS box shares hit and paint bounds");
             Check(WheelCell(.87f,.77f,-1,page,hand,false,0,false,false)!=MotionsCell,"no box without motion spells");
         }
-        for(int i=0;i<MotionCards;++i){const auto b=MotionCardBounds(i);
-            Check(WheelCell((b.left+b.right)/2,(b.top+b.bottom)/2,-1,MenuPage::Motions,0)==MotionCardCell(i),"each card shares hit and paint bounds");}
+        for(const int count:{4,14,16})for(int i=0;i<MotionCards;++i){const auto b=MotionCardBounds(i,count);   // 16: the Warlock's, eight lower rows
+            const int cell=WheelCell((b.left+b.right)/2,(b.top+b.bottom)/2,-1,MenuPage::Motions,0,false,0,false,false,count);
+            Check(i<count?cell==MotionCardCell(i):(cell<MotionCardCell(0)||cell>=MotionCardCell(MotionCards)),"each card shares hit and paint bounds, and none past the class's last");
+            Check(i>=count||(b.bottom<=.885f&&b.bottom-b.top>=.085f&&(i<2||MotionCardBounds(i-2,count).bottom<b.top)),"the cards stand over the footer, one under another");}
         Check(WheelCell(.5f,.45f,-1,MenuPage::Motions,0)!=8&&WheelCell(.5f,.03f,-1,MenuPage::Motions,0)==-1,"no wheel behind the MOTIONS page");
         Check(WheelCell(.1f,.93f,-1,MenuPage::Motions,0)==9,"its footer: SPELLS goes back");
         Sim s;s.in.wheel=true;s.in.snapshot.skillClass=1;s.Step(3);
@@ -136,7 +138,7 @@ int main(){
         Sim other;other.in.wheel=true;other.Step(3);other.in.hover=MotionsCell;other.in.trigger=1;other.Step();
         Check(!other.out.motionsBox&&!other.out.motions,"another class: no box, no page");
         // The Paladin's and the Druid's own pages (owner, 2026-11-04): a card's bit is the card's.
-        for(int skillClass:{3,5}) {
+        for(int skillClass:{3,5,7}) {
             namespace sm=framevr::spellmotion;
             const auto motions=sm::PageOf(skillClass);
             Sim c;c.in.wheel=true;c.in.snapshot.skillClass=skillClass;c.Step(3);
@@ -146,14 +148,17 @@ int main(){
             c.in.trigger=0;c.Step(3);c.in.hover=MotionCardCell(motions.count-1);c.in.trigger=1;c.Step();
             Check(c.out.request.action==Action::ToggleMotion&&c.out.request.index==motions.count-1,"a card turns its own bit over");
             c.in.trigger=0;c.in.reply={c.out.request.sequence,c.out.request.session,Result::Applied};c.Step();c.in.reply={};
-            c.Step(3);c.in.hover=MotionCardCell(motions.count);c.in.trigger=1;c.Step();
-            Check(c.out.request.action==Action::None&&c.out.feedback==3,"past the class's cards: nothing to turn over");
+            c.Step(3);
+            if(motions.count<MotionCards) {   // the Warlock's sixteen fill the page: no cell past its last card
+                c.in.hover=MotionCardCell(motions.count);c.in.trigger=1;c.Step();
+                Check(c.out.request.action==Action::None&&c.out.feedback==3,"past the class's cards: nothing to turn over");
+            }
             c.in.trigger=0;c.Step(3);c.in.hover=9;c.in.trigger=1;c.Step();
             Check(!c.out.motions&&Page(c.out)==MenuPage::Spells,"SPELLS goes back");
         }
-        for(int skillClass:{7,-1}) {
+        for(int skillClass:{8,-1}) {
             Sim c;c.in.wheel=true;c.in.snapshot.skillClass=skillClass;c.Step(3);c.in.hover=MotionsCell;c.in.trigger=1;c.Step();
-            Check(!c.out.motionsBox&&!c.out.motions,"the Warlock and an unknown class: no motions, no box");
+            Check(!c.out.motionsBox&&!c.out.motions,"an unknown class: no motions, no box");
         }
     }
 

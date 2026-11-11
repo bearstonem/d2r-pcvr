@@ -528,5 +528,67 @@ int main() {
         Run(crowd,0,.2,player);
         assert(Moves(crowd).size()==props::MaxMoving);
     }
+    // Nothing that can move: no world step, with or without a weapon about. A weapon reaching a
+    // frozen prop sets it going on the same frame, at the same speed and along the same path as
+    // when every frame stepped (StepAtRest, how it was before): the weapon's body is where those
+    // steps would have left it, and the step clock keeps its phase.
+    {
+        const props::Support table{false,.75f,9.5f,19.5f,10.5f,20.5f};
+        const Vec player{10,0,19};
+        World rest,always;always.StepAtRest(true);
+        for(World* w:{&rest,&always})w->Props(Scan(player,{Cup(41,{10.4f,.75f,20},table),Cup(42,{9.8f,.75f,20},table)}));
+        double t=Run(rest,0,2,player);Run(always,0,2,player);
+        const auto used=always.Steps();
+        assert(rest.Steps()==0&&used>=230);   // 2 s at 120 Hz, none taken at rest
+        // A blade moving about clear of both cups: still no step, and nothing wakes.
+        std::array<Collider,Colliders> weapons{};
+        std::array<Knock,props::MaxMoving> knocks{};
+        auto blade=[&](float x){return Blade({x,.8f,19.6f},{x,.8f,20.4f});};
+        float x=10.05f;
+        for(int i=0;i<45;++i) {
+            x=10.05f+.1f*float(i%2);weapons[0]=blade(x);
+            t+=1/90.;for(World* w:{&rest,&always}){w->Weapons(weapons);w->Advance(t,player);}
+        }
+        assert(rest.Steps()==0&&rest.Pushers()==1&&rest.Knocks(knocks)==0&&always.Knocks(knocks)==0&&Moves(rest).empty());
+        // Swept along +x at 3 m/s through the near cup.
+        int knockFrame[2]={-1,-1};float knockSpeed[2]={};
+        uint64_t before=0;
+        for(int i=0;i<40;++i) {
+            x+=3/90.f;weapons[0]=blade(x);t+=1/90.;
+            int k=0;
+            for(World* w:{&rest,&always}) {
+                if(w==&rest)before=w->Steps();
+                w->Weapons(weapons);w->Advance(t,player);
+                if(w->Knocks(knocks)==1&&knockFrame[k]<0) {
+                    assert(knocks[0].entity==41&&knocks[0].slot==0);
+                    knockFrame[k]=i;knockSpeed[k]=knocks[0].speed;
+                    // Stepped on the frame it was set going, and drawn moving from it.
+                    if(w==&rest)assert(w->Steps()>before&&Moves(*w).size()==1);
+                }
+                ++k;
+            }
+            const auto a=Moves(rest),b=Moves(always);
+            assert(a.size()==b.size());
+            for(size_t j=0;j<a.size();++j) {
+                const Vec d=a[j].p-b[j].p;
+                assert(a[j].entity==b[j].entity&&std::sqrt(math::Dot(d,d))<.01f);
+            }
+        }
+        assert(knockFrame[0]>=0&&knockFrame[0]==knockFrame[1]&&std::fabs(knockSpeed[0]-knockSpeed[1])<.05f);
+        // It comes to rest: frozen again, and the steps stop again.
+        weapons[0]={};
+        for(World* w:{&rest,&always})w->Weapons(weapons);
+        t=Run(rest,t,8,player);
+        assert(Moves(rest).empty()&&rest.Frozen()==2);
+        const auto settled=rest.Steps();
+        Run(rest,t,1,player);
+        assert(rest.Steps()==settled);
+        // A bottle lying in the world keeps it stepping (it can be pushed).
+        assert(rest.Drop(At({10,.3f,19.5f})));
+        Run(rest,t+1,.5,player);
+        assert(rest.Steps()>settled+30);
+        std::printf("dropped bottles: at rest 0 steps in 2 s (%llu before); knock on frame %d either way\n",
+            static_cast<unsigned long long>(used),knockFrame[0]);
+    }
     std::puts("dropped bottles: ok");
 }

@@ -40,5 +40,23 @@ int main() {
           "a traced landing point maps to the same cells as the arc's");
     Check(toss::Cell({100,1.2f,200},0,2,cx,cy)&&std::fabs(cx-100)<1e-3f,"a point above the floor (a table) maps to the floor's cell under it");
     Check(!toss::Cell({100,0,200},0,0,cx,cy)&&!toss::Cell({NAN,0,200},0,2,cx,cy),"no cell without a scale or a point");
+    {   // the aimed throw (2026-11-10)
+        float bx=0,by=0;const auto w=toss::World(150,260,1.5f,2);
+        Check(toss::Cell(w,1.5f,2,bx,by)&&std::fabs(bx-150)<1e-3f&&std::fabs(by-260)<1e-3f&&std::fabs(w.y-1.5f)<1e-6f,"a cell's floor point maps back to the cell");
+        Check(toss::Aims(.35f,.2f)&&!toss::Aims(.10f,.2f)&&!toss::Aims(-.2f,.1f)&&!toss::Aims(.35f,2.5f)&&!toss::Aims(NAN,.1f),
+              "the hand aims held out in front and slow: not beside or behind the head (the wind-up), not fast (the throw)");
+        for(const math::Vec target:{math::Vec{6,0,0},math::Vec{1,0,-12},math::Vec{-20,.8f,9},math::Vec{.1f,0,.1f}}) {
+            const math::Vec p{0,1.5f,0};math::Vec v{};
+            Check(toss::Launch(p,target,7,v),"a launch for any target");
+            const float along=std::hypot(target.x,target.z),t=along/std::max(std::hypot(v.x,v.z),1e-6f);
+            const float time=along>1e-3f&&std::hypot(v.x,v.z)>1e-3f?t:toss::LaunchMinTime;
+            const auto end=interaction::Ballistic(p,v,time);
+            Check(std::hypot(end.x-target.x,end.z-target.z)<1e-2f&&std::fabs(end.y-target.y)<1e-2f,"its arc ends on the target");
+            Check(time>=toss::LaunchMinTime-1e-3f&&time<=toss::LaunchMaxTime+1e-3f,"in the air between the least and the most");
+        }
+        math::Vec slow{},fast{};
+        Check(toss::Launch({0,1.5f,0},{8,0,0},5,slow)&&toss::Launch({0,1.5f,0},{8,0,0},10,fast)&&fast.x>slow.x&&fast.y<slow.y,"thrown harder, it flies flatter and faster");
+        Check(!toss::Launch({0,1.5f,0},{NAN,0,0},5,slow),"no launch for a bad target");
+    }
     std::puts("toss tests passed");
 }
