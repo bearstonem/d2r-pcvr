@@ -242,7 +242,10 @@ pass; both now make fewer, with the same answers.
 
 The monster's fields come in one read per record (unit, monster data, row)
 instead of one per field; nothing is kept between passes or frames, as
-`docs/monster-bars.md` says. The game's light is read once in a draw of the
+`docs/monster-bars.md` says. Since Monster names (2026-11-11) a unit is
+classified once an eye pass for both of its anchor requests, with every
+choice, and a monster takes one more read (its unit flags, the mercenary
+test): 4 a monster a pass, 1 for a unit that is no monster. The game's light is read once in a draw of the
 game's frame (both passes of a pair) instead of twice in each pass's effects.
 
 Found and left as they are:

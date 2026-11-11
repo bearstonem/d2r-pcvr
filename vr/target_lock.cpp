@@ -8,6 +8,8 @@
 #include "melee.h"
 #include "projectiles.h"
 #include "../steamvr/logging.h"
+#include "d2rcam.h"
+#include "monster_bars.h"
 
 namespace targetlock {
 namespace {
@@ -52,9 +54,15 @@ void __cdecl Refresh(const PluginContext*,void*) noexcept {
     const double ms=frequency.QuadPart?double(ended.QuadPart-began.QuadPart)*1000./double(frequency.QuadPart):0;
     ++cost.scans;cost.sum+=ms;if(ms>cost.most)cost.most=ms;
     if(const auto now=GetTickCount64();now>=cost.toldAt) {
+        // and what Monster names did in those 10 s (d2rcam::TakeMonsterPlates): plates the setting took
+        // away - overhead anchors, the hovered monster's panel - and panels held back for want of a
+        // place in their eye pass. A headset session confirms the setting by these.
+        const auto plates=d2rcam::TakeMonsterPlates();
         if(cost.toldAt&&n>0) {
-            char line[200];std::snprintf(line,sizeof line,"Frame target lock: %u scans in 10 s (every %llu ms with monsters near), %.2f ms each on average, %.2f ms at most, %.1f ms a second",
-                cost.scans,(unsigned long long)NearMs,cost.sum/cost.scans,cost.most,cost.sum/10.);
+            char line[400];std::snprintf(line,sizeof line,"Frame target lock: %u scans in 10 s (every %llu ms with monsters near), %.2f ms each on average, %.2f ms at most, %.1f ms a second; "
+                "monster names %s: hidden by the setting %u overhead anchors and %u panel paints; %u panel paints with no place in their eye pass",
+                cost.scans,(unsigned long long)NearMs,cost.sum/cost.scans,cost.most,cost.sum/10.,
+                d2rcam::monsterbars::NameOf(d2rcam::monsterbars::Names(plates.names)),plates.anchorsHidden,plates.panelsHidden,plates.panelsUnplaced);
             framevr::logging::Write(line);
         }
         cost={};cost.toldAt=now+10000;

@@ -655,10 +655,14 @@ int main(int argc,char** argv){
         Check(request.changed==(1u<<ProjectileAimAssist)&&request.values[ProjectileAimAssist]==1,"assist saves independently");
         assist.Click(hit);Check(assist.Get()[ProjectileAimAssist]==1,"assist cannot change while saving");
         assist.Close();assist.Open(s);Check(assist.Get()[ProjectileAimAssist]==2,"discarding edits restores saved assistance");}
-    Check(s.values[OrdinaryMobBars]==0,"ordinary mob bars are off by default");
-    {Model bars;bars.Open(s);
-        bars.Click(Step(OrdinaryMobBars));auto request=bars.Click({Kind::Apply});
-        Check(request.changed==(1u<<OrdinaryMobBars)&&request.values[OrdinaryMobBars]==1,"toggle saves only mob visibility");}
+    Check(s.values[MonsterNames]==1,"monster names default to Bosses and elites, the Weak monster bars default");
+    Check(Definitions[MonsterNames].min==0&&Definitions[MonsterNames].max==2&&std::wstring_view(Definitions[MonsterNames].section)==L"hud"&&std::wstring_view(Definitions[MonsterNames].key)==L"monster_names","All, Bosses and elites, None in [hud] monster_names");
+    {Model names;names.Open(s);
+        const std::pair<int,float> steps[]={{1,2.f},{1,2.f},{-1,1.f},{-1,0.f},{-1,0.f}};
+        for(auto [delta,choice]:steps){
+            names.Click(Step(MonsterNames,delta));Check(names.Get()[MonsterNames]==choice,"monster names step All, Bosses and elites, None and stop at each end");}
+        auto request=names.Click({Kind::Apply});
+        Check(request.changed==(1u<<MonsterNames)&&request.values[MonsterNames]==0,"the choice saves only monster names");}
     Check(s.values[SmoothTurn]==0&&s.values[Snap]==30,"snap turning remains the default");
     Check(EffectiveSnapAngle(30,-1)==30&&EffectiveSnapAngle(0,-1)==0,"legacy snap and smooth profiles retain their mode");
     Check(EffectiveSnapAngle(45,1)==0&&EffectiveSnapAngle(45,0)==45,"explicit toggle selects camera mode without losing angle");
