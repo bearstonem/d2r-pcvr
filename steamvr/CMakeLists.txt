@@ -1,5 +1,21 @@
 cmake_minimum_required(VERSION 3.28)
 project(d2r_frame LANGUAGES C CXX RC)
+# A build tree can hold empty per-configuration compiler flags in its cache, and
+# keeps them at every later configure: Release then compiles that language with
+# no optimisation and with assertions on. build-frame/windows-native did, for
+# C alone, from 2026-10-10: Box3D and MinHook were built that way in every DLL
+# from that tree. CMake's own flags, worked out again at each configure, go
+# back into such a cache.
+foreach(language C CXX)
+  foreach(configuration DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
+    string(STRIP "${CMAKE_${language}_FLAGS_${configuration}_INIT}" standard)
+    if(standard AND "${CMAKE_${language}_FLAGS_${configuration}}" STREQUAL "")
+      message(STATUS "Build tree without ${language} ${configuration} flags: set to CMake's own, ${standard}")
+      set(CMAKE_${language}_FLAGS_${configuration} "${standard}" CACHE STRING
+        "Flags used by the ${language} compiler during ${configuration} builds." FORCE)
+    endif()
+  endforeach()
+endforeach()
 option(D2RVR_DEV_TOOLS "Include opt-in isolated offline developer tools" ON)
 option(D2RVR_DEVELOPER "Enable developer diagnostics" OFF)
 set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
@@ -224,6 +240,7 @@ add_executable(spell-motion-test spell_motion_test.cpp)
 add_executable(motions-amazon-test motions_amazon_test.cpp)
 add_executable(motions-barbarian-test motions_barbarian_test.cpp)
 add_executable(motions-necromancer-test motions_necromancer_test.cpp)
+add_executable(motions-warlock-test motions_warlock_test.cpp)
 add_executable(motions-assassin-test motions_assassin_test.cpp)   # a glyph readies a spell, its motion casts it
 add_executable(motions-paladin-test motions_paladin_test.cpp)   # Charge, Blessed Hammer, Holy Shield, Fist of the Heavens
 add_executable(motions-druid-test motions_druid_test.cpp)   # Werewolf, Werebear
@@ -441,7 +458,7 @@ foreach(test_target IN ITEMS memory-test biome-list-test hook-metrics-test activ
     spell-impacts-test
     gameplay-test weapon-skills-test quick-cast-test hand-controls-test hand-role-test hand-text-test elemental-hands-test elemental-particles-test skill-pad-test interact-press-test sewer-interaction-test notice-card-test mod-layout-test spell-aim-test bow-pose-test crossbow-pose-test body-tracking-test shapeshift-form-test head-shadow-test head-skip-test shield-steady-test body-calibration-test shoulder-swap-test blood-screen-test
     portal-billboard-test shrine-trace-test shrine-placement-test overlay-view-test bone-armor-height-test composition-layers-test projectile-rules-test environment-cutaway-test roof-materials-test game-ceiling-test stereo-prop-physics-test dropped-bottles-test props-test limb-rig-test aged-cache-test ecs-storage-test look-at-test limb-physics-test leather-menu-test stash-buttons-test stats-button-test menu-drop-test arcane-decay-test respec-button-test vr-keyboard-test
-    combat-rules-test strike-skills-test zeal-light-test skill-usage-test shield-guard-test guard-strain-test heartbeat-test haptic-impact-test haptic-heartbeat-test run-speed-test room-scale-test room-steps-test walk-direction-test logging-test log-rotation-test melee-contact-test bow-bash-test weapon-heft-test hit-reactions-test melee-weapon-test breakables-test offline-difficulty-test enemy-sight-test attack-speed-test world-coordinates-test bow-flight-test bow-laser-test spell-cast-test spell-aim-assist-test tactical-chord-test glyph-recognizer-test glyph-trail-test glyph-cast-test spell-motion-test motions-amazon-test motions-barbarian-test motions-necromancer-test motions-assassin-test motions-paladin-test motions-druid-test bone-graft-test
+    combat-rules-test strike-skills-test zeal-light-test skill-usage-test shield-guard-test guard-strain-test heartbeat-test haptic-impact-test haptic-heartbeat-test run-speed-test room-scale-test room-steps-test walk-direction-test logging-test log-rotation-test melee-contact-test bow-bash-test weapon-heft-test hit-reactions-test melee-weapon-test breakables-test offline-difficulty-test enemy-sight-test attack-speed-test world-coordinates-test bow-flight-test bow-laser-test spell-cast-test spell-aim-assist-test tactical-chord-test glyph-recognizer-test glyph-trail-test glyph-cast-test spell-motion-test motions-amazon-test motions-barbarian-test motions-necromancer-test motions-warlock-test motions-assassin-test motions-paladin-test motions-druid-test bone-graft-test
     interaction-test dev-scenarios-test native-belt-test wrist-hud-test map-zoom-test floating-map-test navigation-info-test companions-test active-effects-test skill-cooldowns-test dropped-item-labels-test stick-gestures-test show-items-command-test native-hud-test render-resolution-test render-pointer-test scene-depth-test game-device-only-test controller-bindings-test journal-test native-panels-test talk-stop-test sheet-walk-test room-stitch-test ceiling-top-test loot-beams-test
     vr-settings-test vr-settings-layout-test vr-settings-pointer-test vr-settings-store-test controller-labels-test math-test deferred-draw-test monster-bars-test loot-aim-test telegraph-test aim-reach-test aim-rules-test teleport-arc-test target-cone-test gaze-test window-focus-test callback-ticket-test local-player-test shield-block-test trigger-melee-test companion-ai-test torch-light-test light-radius-test world-sound-test frame-generation-test turn-capture-test panel-atlas-test far-objects-test)
   # These fixtures use assert for their checks, including in Release builds.

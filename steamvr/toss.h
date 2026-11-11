@@ -48,6 +48,32 @@ inline bool Landing(const interaction::Stage& stage,float floor,float unitsPerMe
     if(t<=0)return false;
     return Cell(interaction::Ballistic(worldP,worldV,float(t)),floor,unitsPerMetre,x,y);
 }
+// The cell's floor point in world metres: Cell's inverse.
+inline math::Vec World(float x,float y,float floor,float unitsPerMetre) {
+    return coordinates::RenderGround({x*2.f/unitsPerMetre,0,y*2.f/unitsPerMetre},floor);
+}
+// The aimed throw (owner, 2026-11-10: "like Sorceress's teleport mechanic, it draws a sigil on the ground,
+// where we can target, and when you toss it ... potions land on that target sigil, if the target sigil goes on
+// top of a monster, then that's used"). While the trap or potion is held (the trigger down), the throwing
+// hand's pointer throws Teleport's arc and a sigil shows where it lands. The hand aims only while it is held
+// out in front of the head and slow: the wind-up and the throw itself leave the sigil where it was. The throw
+// then lands on the sigil, on the monster under it when one stands within SnapCells of it, and the thrown
+// bottle is sent on the arc that ends there (Launch).
+inline constexpr float AimAhead=.20f;    // m ahead of the head, along its heading
+inline constexpr float AimSpeed=.8f;     // m/s: the hand at most this fast
+inline constexpr float AimFarCells=30.f; // the arc's reach (the game's own reach clamps it)
+inline constexpr float SnapCells=2.5f;   // the sigil takes a monster this near its centre (a landing circle's radius)
+inline bool Aims(float ahead,float speed){return std::isfinite(ahead)&&std::isfinite(speed)&&ahead>=AimAhead&&speed<=AimSpeed;}
+// The velocity that carries a throw from p to target (world metres) under the throw's gravity: as fast along
+// the floor as it was thrown (speed, m/s; at least LaunchMinSpeed), in the air LaunchMinTime to LaunchMaxTime.
+inline constexpr float LaunchMinSpeed=4.f,LaunchMinTime=.35f,LaunchMaxTime=1.5f;
+inline bool Launch(math::Vec p,math::Vec target,float speed,math::Vec& v) {
+    const float dx=target.x-p.x,dz=target.z-p.z,along=std::hypot(dx,dz);
+    if(!std::isfinite(along+target.y+p.y+speed))return false;
+    const float t=std::clamp(along/std::max(speed,LaunchMinSpeed),LaunchMinTime,LaunchMaxTime);
+    v={dx/t,(target.y-p.y+.5f*interaction::ThrowGravity*t*t)/t,dz/t};
+    return true;
+}
 // A trap or bomb is about this big in flight, for finding what it hits first.
 inline constexpr float Radius=.06f;
 }

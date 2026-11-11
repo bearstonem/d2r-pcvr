@@ -227,6 +227,9 @@ struct MeleeWeaponPose {
 bool MeleeWeapon(MeleeWeaponPose& out,int hand=0);
 bool ShieldWeapon(MeleeWeaponPose& out);
 bool ShieldGuardPose(framevr::guard::Pose& out);
+// An Assassin's two claws as a guard (guard::Crossed): the pose between them, whether they are crossed, and how
+// far apart the blades are (m). False without a claw in each hand or a fresh pose.
+bool ClawGuardPose(framevr::guard::Pose& out,bool& crossed,float& apart);
 bool CrossbowPose(framevr::crossbow::Pose& out);
 // Called after the game's complete attachment/world transform is evaluated.
 void CrossbowRendered(uint32_t entity,uintptr_t component,uintptr_t matrix);

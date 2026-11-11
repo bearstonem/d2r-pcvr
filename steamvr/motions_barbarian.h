@@ -26,6 +26,13 @@
 // Whirlwind is a T held a moment (owner, 2026-11-06: "Where you basically get on T-pose (Again like all other
 // motion controls with the grip buttons on each hand hold) Which then triggers whirlwind"); it whirls ahead,
 // where you face. Body calibration's own T (#423) is held with nothing pressed, so the two never meet.
+//
+// Find Potion, Grim Ward and Taunt (owner, 2026-11-10: "Does Barbarian have any other skills that we can add as
+// motion gesture controls to it? Ones that make sense"): the three of his casts left that are not a weapon's
+// own swing (those go on a landed strike) or a throw. Find Potion is Find Item's snatch by the other hand;
+// Grim Ward, the right hand held out at the corpse and driven down, a stake planted; Taunt, both hands held
+// out in front and pulled in to the chest, beckoning (the game is handed the highlighted monster:
+// aimrules::WantsUnit). Not yet done by a person: only on the simulated hands of the test.
 namespace framevr::spellmotion::barbarian {
 struct Tuning {
     // The mouth (a fist at it: the controller just in front): |x| <= mouthSide, y in [mouthLow, mouthHigh],
@@ -106,13 +113,22 @@ struct Tuning {
     float pointOut=.30f,pointLow=-.75f,pointHigh=-.05f,pointSide=.45f;
     float snatchTo=.15f,snatchBack=.22f,shoulderMin=-.30f,shoulderMax=.10f,shoulderIn=.08f,shoulderOut=.42f,snatchSpeed=1.0f;
     double snatchWindow=.45;
+    // Grim Ward: the right hand held out at the corpse as for Find Item, resting dwellSeconds, then driven down
+    // stakeDrop or more within stakeWindow s, at stakeSpeed or faster at its fastest, still out in front (drawn
+    // back at most stakeBack: a snatch is Find Item's), falling at least as far as it goes any other way.
+    float stakeDrop=.25f,stakeBack=.12f,stakeSpeed=1.2f;double stakeWindow=.4;
+    // Taunt: both hands held out in front (tauntOut ahead or more, y in [tauntLow, tauntHigh], each within
+    // tauntSide of the middle), resting dwellSeconds, then both pulled in tauntPull or more to within tauntIn
+    // of the eyes' line, within tauntWindow s, each at tauntSpeed or faster at its fastest.
+    float tauntOut=.35f,tauntLow=-.60f,tauntHigh=-.05f,tauntSide=.35f,tauntIn=.20f,tauntPull=.22f,tauntSpeed=1.0f;double tauntWindow=.45;
 };
 inline Tuning tuning;
 // The order they are watched in: the first to complete in a frame casts. Shout before War Cry (both hands
 // at the mouth, not one); Leap before Battle Orders (both arms up, not one); Leap Attack before Leap (its deeper
-// swing passes through Leap's start too).
+// swing passes through Leap's start too); Taunt before the snatches (both hands drawn in, not one); Grim Ward
+// before Find Item (the same hand held out at the corpse).
 constexpr Motion Order[]={Motion::Shout,Motion::WarCry,Motion::LeapAttack,Motion::Leap,Motion::BattleOrders,Motion::BattleCommand,Motion::Howl,
-    Motion::BattleCry,Motion::FindItem,Motion::Whirlwind};
+    Motion::BattleCry,Motion::Taunt,Motion::GrimWard,Motion::FindItem,Motion::FindPotion,Motion::Whirlwind};
 // How to do each, on the MOTIONS page and in the log (what the controllers' positions can tell: no palms or
 // fingers, both grips held).
 inline const char* Cue(Motion m) {
@@ -127,6 +143,9 @@ inline const char* Cue(Motion m) {
     case Motion::LeapAttack:return "pull both arms far back behind you, then swing them up past the head, fast";
     case Motion::Whirlwind:return "hold both arms straight out to the sides, a T, a moment: whirl ahead";
     case Motion::FindItem:return "hold the right hand out at a corpse a moment, then snatch it back to the shoulder";
+    case Motion::FindPotion:return "hold the left hand out at a corpse a moment, then snatch it back to the shoulder";
+    case Motion::GrimWard:return "hold the right hand out at a corpse a moment, then drive the fist straight down";
+    case Motion::Taunt:return "hold both hands out in front a moment, then pull them in to the chest, fast";
     default:return "no motion";
     }
 }
@@ -307,20 +326,54 @@ inline bool Done(Engine& e,Motion m) {
             return std::hypot(a.x-b.x,a.z-b.z)>=t.tApart&&a.x-b.x>=t.tSide&&a.y>=t.tLow&&a.y<=t.tHigh&&b.y>=t.tLow&&b.y<=t.tHigh&&
                 std::fabs(a.y-b.y)<=t.tLevel&&std::hypot(mid.x,mid.z)<=t.tDepth;
         };
+        // One whirl for a T (owner, 2026-11-10: "my mana would run out immediately"): held on, it cast again
+        // every 0.9 s (the rest after a cast, then tHold). The arms leave the T before it counts again - at any
+        // time since the cast, the rest after it too (the history starts over with the cast).
+        if(e.spentPose) {
+            if(std::all_of(h.begin(),h.end(),tee))return false;
+            e.spentPose=false;
+        }
         if(!e.Held(tee(n),n.t,t.tHold))return false;
+        e.spentPose=true;
         e.Aim({0,0,-1});e.LandAt(t.whirlAhead,0);
         return true;
     }
-    case Motion::FindItem: {
-        // the right hand held out at the corpse a moment (its ray aims the cast), then snatched back to the shoulder
-        const bool end=Forward(r)<=t.snatchTo&&Forward(r)>=-.15f&&r.y>=t.shoulderMin&&r.y<=t.shoulderMax&&r.x>=t.shoulderIn&&r.x<=t.shoulderOut;
-        return AfterDwell(h,t.snatchWindow+t.dwellSeconds,t.dwellSeconds,1,[&](const Sample& s) {
-            const auto& p=s.l[0];return Forward(p)>=t.pointOut&&p.y>=t.pointLow&&p.y<=t.pointHigh&&std::fabs(p.x)<=t.pointSide;},[&](int i) {
-            const auto a=h[size_t(i)].l[0];
+    case Motion::FindItem:case Motion::FindPotion: {
+        // the hand held out at the corpse a moment (the right one's ray aims the cast), then snatched back to its
+        // shoulder: Find Item's the right hand, Find Potion's the left (k; side: its own side of the middle)
+        const int k=m==Motion::FindPotion?1:0;const float side=k?-1.f:1.f;
+        const auto& p=n.l[k];
+        const bool end=Forward(p)<=t.snatchTo&&Forward(p)>=-.15f&&p.y>=t.shoulderMin&&p.y<=t.shoulderMax&&side*p.x>=t.shoulderIn&&side*p.x<=t.shoulderOut;
+        return AfterDwell(h,t.snatchWindow+t.dwellSeconds,t.dwellSeconds,1<<k,[&](const Sample& s) {
+            const auto& q=s.l[k];return Forward(q)>=t.pointOut&&q.y>=t.pointLow&&q.y<=t.pointHigh&&std::fabs(q.x)<=t.pointSide;},[&](int i) {
+            const auto a=h[size_t(i)].l[k];
             if(n.t-h[size_t(i)].t>t.snatchWindow)return false;
-            const float back=Forward(a)-Forward(r);
+            const float back=Forward(a)-Forward(p);
             e.Toward(back/std::max(t.snatchBack,Forward(a)-t.snatchTo));
-            return end&&back>=t.snatchBack&&Peak(h,i,1)>=t.snatchSpeed;
+            return end&&back>=t.snatchBack&&Peak(h,i,1<<k)>=t.snatchSpeed;
+        });
+    }
+    case Motion::GrimWard: {
+        // the right hand held out at the corpse a moment, then driven down, still out in front
+        return AfterDwell(h,t.stakeWindow+t.dwellSeconds,t.dwellSeconds,1,[&](const Sample& s) {
+            const auto& q=s.l[0];return Forward(q)>=t.pointOut&&q.y>=t.pointLow&&q.y<=t.pointHigh&&std::fabs(q.x)<=t.pointSide;},[&](int i) {
+            const auto a=h[size_t(i)].l[0];
+            if(n.t-h[size_t(i)].t>t.stakeWindow)return false;
+            const float drop=a.y-r.y,across=std::hypot(r.x-a.x,r.z-a.z);
+            e.Toward(drop/t.stakeDrop);
+            return drop>=t.stakeDrop&&drop>=across&&Forward(a)-Forward(r)<=t.stakeBack&&Peak(h,i,1)>=t.stakeSpeed;
+        });
+    }
+    case Motion::Taunt: {
+        // both hands held out in front a moment, then both pulled in to the chest
+        const auto out=[&](math::Vec q){return Forward(q)>=t.tauntOut&&q.y>=t.tauntLow&&q.y<=t.tauntHigh&&std::fabs(q.x)<=t.tauntSide;};
+        const bool end=Forward(r)<=t.tauntIn&&Forward(l)<=t.tauntIn&&Forward(r)>=-.15f&&Forward(l)>=-.15f;
+        return AfterDwell(h,t.tauntWindow+t.dwellSeconds,t.dwellSeconds,3,[&](const Sample& s){return out(s.l[0])&&out(s.l[1]);},[&](int i) {
+            const auto& a=h[size_t(i)];
+            if(n.t-a.t>t.tauntWindow)return false;
+            const float pull=std::min(Forward(a.l[0])-Forward(r),Forward(a.l[1])-Forward(l));
+            e.Toward(pull/t.tauntPull);
+            return end&&pull>=t.tauntPull&&Peak(h,i,1)>=t.tauntSpeed&&Peak(h,i,2)>=t.tauntSpeed;
         });
     }
     default:return false;

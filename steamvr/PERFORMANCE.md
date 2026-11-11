@@ -768,3 +768,23 @@ Every read is still a guarded one; what is posed, when and how is unchanged.
 - **`Frame room parts`** looked every skeleton's entity up for 300 ms after
   each `Frame room body` line (10 reads a pose, under the exclusive lock). That
   sampling is in developer builds only; the two lines remain.
+## Draw and bind callbacks, November 10
+
+The add-on's ReShade callbacks run for every draw and every pipeline bind on
+the game's recording threads, about 11,000 of each per eye pass. Three changes
+take work out of them; none changes what is drawn in VR:
+
+- New full installs ship ReShade's Generic Depth add-on off (`[ADDON]
+  DisabledAddons=Generic Depth` in the installed ReShade.ini). It watched every
+  draw call for a depth buffer the VR picture does not read. Updates keep the
+  player's ReShade.ini; `[render] reshade_depth=1` turns it back on.
+- With Lower detail at edges off, the foveation draw, bind, target and viewport
+  callbacks return after one load (`steamvr/foveation_switch.h`). The log then
+  says `Frame foveation: off; draws not counted` instead of counting draws.
+  Switched on while playing, a command list is followed from its next reset.
+- The light-bounds and menu-world bind callbacks compare the bound pipeline
+  with the few they replace (`steamvr/pipeline_set.h`) before the device
+  checks, the cache and any lock.
+
+The gain is an estimate from reading the code, about 0.1 ms a pass on the draw
+thread; it has not been measured, in a headset or otherwise.

@@ -18,4 +18,6 @@ bool Available();
 enum Coverage {Covered,TargetMismatch,UnknownPipeline,NoPixelShader,NoDepthTest,Blended,Multisample,ViewportOther,CoverageCount};
 struct Stats {uint32_t shadedDraws=0,fullDraws=0;uint32_t world[CoverageCount]{};};
 Stats TakeStats();
+// False while foveation is off: its draw callbacks return early and count nothing.
+bool Counting();
 }

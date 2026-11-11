@@ -609,6 +609,8 @@ GunBoneOut g_gunBone{};
 #ifdef D2RVR_NATIVE_OPENXR
 MeleeWeaponPose g_shieldPose{},g_offhandPose{};ULONGLONG g_shieldAt=0,g_offhandAt=0;
 framevr::guard::Pose g_shieldGuardPose{};
+// Two claws as a guard (guard::Crossed), under g_gunBoneLock.
+struct ClawGuard {framevr::guard::Pose pose{};bool crossed=false;float apart=0;uint32_t generation=0;} g_clawGuard;
 struct ShieldContext {
     framevr::guard::Pose pose{};V3 player{};uintptr_t hero=0;
     uint32_t generation=0,equipment=0;uint64_t session=0;
@@ -3210,6 +3212,7 @@ void PoseBody(Posed& posed, const Hero& h, const Input& given, float legHold) {
     {
         MeleeWeaponPose offhand{};ULONGLONG offAt=0;
         const auto weapons=gamestate::MeleeEquipment();
+        ClawGuard clawGuard{};
         HeroXform offHx;Mat offModel;
         if(!freeStaff&&h.weapon[1]>=0&&h.weapon[1]<n&&
            HeroOf(posed,&offHx,&offModel)&&(offHx.parent&0xFFFFFu)==0xFFFFFu) {
@@ -3231,8 +3234,26 @@ void PoseBody(Posed& posed, const Hero& h, const Input& given, float legHold) {
                 offhand.tipHead[2] = o1.z + d1.z * 0.56f;
                 offhand.dirHead[0] = d1.x; offhand.dirHead[1] = d1.y; offhand.dirHead[2] = d1.z;
                 offAt=GetTickCount64();
+                // A claw in each hand: the guard between the two blades (guard::Crossed), from this same pose.
+                if(in.haveEye&&offhand.weaponType==D2RVR_TYPE_CLAW&&weapons.Type(0)==D2RVR_TYPE_CLAW&&h.weapon[0]>=0&&h.weapon[0]<n) {
+                    const float modelUpm=framevr::body::UnitsPerMetre(h.eyeY>0?h.eyeY:in.eyeModel[1],in.userHeadM,in.scale);
+                    framevr::guard::Pose claw;
+                    if(framevr::guard::FromAttachment(world.m,offModel.m,{in.eyeModel[0],in.eyeModel[1],in.eyeModel[2]},
+                           {in.hand[offArm][0],in.hand[offArm][1],in.hand[offArm][2]},modelUpm,offAt,in.worldEpoch,claw)) {
+                        const Mat mainWorld=Mul(Held(0),offModel);
+                        const V3 mainOrigin=Pos(mainWorld),mainAxis=Norm({mainWorld.m[4],mainWorld.m[5],mainWorld.m[6]});
+                        const float metres=1/claw.unitsPerMetre,blade=framevr::guard::ClawBlade;
+                        const framevr::math::Vec offBlade{claw.center.x+axis.x*blade,claw.center.y+axis.y*blade,claw.center.z+axis.z*blade};
+                        const framevr::math::Vec mainBlade{(mainOrigin.x-player.x)*metres+mainAxis.x*blade,(mainOrigin.y-player.y)*metres+mainAxis.y*blade,
+                            (mainOrigin.z-player.z)*metres+mainAxis.z*blade};
+                        clawGuard.crossed=framevr::guard::Crossed(claw,offBlade,mainBlade,{in.hand[mainArm][0],in.hand[mainArm][1],in.hand[mainArm][2]},
+                            clawGuard.pose,&clawGuard.apart);
+                        clawGuard.generation=HeroGen();
+                    }
+                }
             }
         }
+        AcquireSRWLockExclusive(&g_gunBoneLock);g_clawGuard=clawGuard;ReleaseSRWLockExclusive(&g_gunBoneLock);
         // a grafted form's paws are its weapons: PublishClaws writes the off hand once this pass is drawn
         if(!(graft&&in.mode==2)){AcquireSRWLockExclusive(&g_gunBoneLock);g_offhandPose=offhand;g_offhandAt=offAt;ReleaseSRWLockExclusive(&g_gunBoneLock);}
         MeleeWeaponPose shieldPose{};framevr::guard::Pose guardPose{};ULONGLONG at=0;HeroXform hx;Mat model;
@@ -4830,6 +4851,12 @@ bool ShieldWeapon(MeleeWeaponPose& out) {
     AcquireSRWLockShared(&g_gunBoneLock);const auto pose=g_shieldPose;const auto at=g_shieldAt;ReleaseSRWLockShared(&g_gunBoneLock);
     if(!at||GetTickCount64()-at>100||pose.heroGeneration!=HeroGen())return false;
     out=pose;return true;
+}
+bool ClawGuardPose(framevr::guard::Pose& out,bool& crossed,float& apart) {
+    AcquireSRWLockShared(&g_gunBoneLock);const auto claw=g_clawGuard;ReleaseSRWLockShared(&g_gunBoneLock);
+    const auto now=GetTickCount64();
+    if(!claw.pose.at||now<claw.pose.at||now-claw.pose.at>100||claw.generation!=HeroGen())return false;
+    out=claw.pose;crossed=claw.crossed;apart=claw.apart;return true;
 }
 bool ShieldGuardPose(framevr::guard::Pose& out) {
     AcquireSRWLockShared(&g_gunBoneLock);auto pose=g_shieldGuardPose;const auto generation=g_shieldPose.heroGeneration;

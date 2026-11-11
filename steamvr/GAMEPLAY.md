@@ -184,8 +184,8 @@ a crossbow, staff, spear, polearm or two-handed weapon is led by the left hand. 
 | Nock bow | Bow equipped: bring right hand to string and hold right trigger; no left grip required |
 | Draw and shoot | Pull string hand back at least 12 cm (28 cm total separation), then release trigger |
 | Throw a javelin, throwing knife or axe | Any javelin, throwing knife or throwing axe equipped in WEAPON mode, right trigger bound to Attack, Throw or nothing: hold right trigger, make a deliberate throwing motion, release to throw along the hand's motion. The game's own Throw fires the weapon's own missile and consumes its quantity; a knife flies point first, an axe tumbles end over end. With a javelin, Poison Javelin, Lightning Bolt, Plague Javelin or Lightning Fury on the right trigger (or loaded from a face button, like the bow quiver) rides the throw: the skill's own mana, damage and effects. A Barbarian with a throwing weapon in each hand and Double Throw on the right trigger (or loaded) throws with both hands: the left trigger throws the left weapon, and each throw is one native Double Throw of that hand's weapon. Trigger-free jabs and swings stay available |
-| Throw a trap or bomb | An Assassin's Fire Blast, Shock Web, Blade Sentinel, sentry or wake on the right trigger: press it and the game's own bomb or trap model appears in the hand; throw and let go, and the native cast lands where the arc meets the floor, within the skill's reach (the throw picks the spot only). With Bottle physics on, the arc is traced through the physics world as you let go, so a wall, a table top or a prop stops it and the cast lands there; running carries the throw either way. A quick press casts where you point; held still for a moment, the native cast holds and repeats as before. Weapon skill gestures Off keeps the trigger native |
-| Throw a gas or oil potion | A stack of throwing potions (Rancid, Choking or Strangling Gas; Oil, Exploding or Fulminating) in the right hand, right trigger bound to Attack or Throw: press it, throw and let go. With Bottle physics on, the potion leaves the hand as its own bottle (the game's model) and flies in the physics world until it first touches the floor, a wall, a table top or a prop; there it shatters. The game's own Throw goes as the bottle leaves the hand, aimed where that flight lands (the same physics world's trace), and its potion flies hidden, so the native gas cloud or blast follows the shatter there, within the game's reach. Off (or without the cached model) the game's own Throw lands the potion where the arc meets the floor; running carries the throw and Thrown weapon lift raises it. A quick press or a still hold throws as before. The potion hand never swings as a melee weapon. Potions in the left hand keep the native button. Weapon skill gestures Off keeps the trigger native |
+| Throw a trap or bomb | An Assassin's Fire Blast, Shock Web, Blade Sentinel, sentry or wake on the right trigger: press it and the game's own bomb or trap model appears in the hand; a sigil in the skill's color shows on the floor where the throwing hand points (Teleport's arc from the controller), following the hand while it is held out in front and slow, and staying put through the wind-up and the throw; over a monster (within 2.5 cells) it sits on the monster. Throw and let go, and the native cast lands on the sigil, on that monster if it has one, within the skill's reach. With no sigil shown (the hand never held out in front, or the floor unknown) the cast lands where the throw's own arc meets the floor, as before (the throw picks the spot only). With Bottle physics on, the arc is traced through the physics world as you let go, so a wall, a table top or a prop stops it and the cast lands there; running carries the throw either way. A quick press casts where you point; held still for a moment, the native cast holds and repeats as before. Weapon skill gestures Off keeps the trigger native |
+| Throw a gas or oil potion | A stack of throwing potions (Rancid, Choking or Strangling Gas; Oil, Exploding or Fulminating) in the right hand, right trigger bound to Attack or Throw: press it, throw and let go. It is aimed by the same sigil as a trap. With Bottle physics on, the potion leaves the hand as its own bottle (the game's model) and flies in the physics world, sent on the arc that ends on the sigil at the speed it was thrown, until it first touches the floor, a wall, a table top or a prop; there it shatters. The game's own Throw goes as the bottle leaves the hand, aimed where that flight lands (the same physics world's trace), and its potion flies hidden, so the native gas cloud or blast follows the shatter there, within the game's reach. Off (or without the cached model) the game's own Throw lands the potion where the arc meets the floor; running carries the throw and Thrown weapon lift raises it. A quick press or a still hold throws as before. The potion hand never swings as a melee weapon. Potions in the left hand keep the native button. Weapon skill gestures Off keeps the trigger native |
 | Cancel active grab/draw | Right B; release inputs before starting again |
 | Physical belt potion | Reach to an original 3D bottle on the front belt and hold **Right Grip** to grab; left-hand grip also works |
 | Drink | Keep grip held, bring the bottle's opening to your mouth and tip nearly horizontal for 0.25 seconds; release to return an unused potion |
@@ -2648,6 +2648,18 @@ without failures. The final free-swing run recorded 58 physical contacts and
 58 native accepted hits with no rejections; the owner reported "works great."
 Arrow/spell live verification remains open.
 
+
+### Blocking with two claws (Unleashed)
+
+An Assassin with a claw in each hand and no shield blocks by crossing the claws in front of her: the two
+blades within 32 cm of each other, up in front of the body, are a raised guard that covers attacks from
+within 60 degrees of where they are held (judged as a shield without a measured mesh is, above). With
+Weapon Block learned, the game's own block roll takes the verdict as for a shield. Without it the game
+rolls no block, so a covered blow's physical damage is cut to nothing at its life write; elemental damage
+and unblockable attacks still land. With the claws apart the game's own roll stands, so the passive loses
+nothing. The block sound, the controller tap and guard strain are the shield's; the claws do not wear.
+The log notes each change (`Frame guard claws:`).
+
 ### Druid shapeshift gestures
 
 A Druid changes form by performing the transformation with both grips held, in
@@ -2948,7 +2960,7 @@ line, and each gesture given up partway its old line (`spellmotion::DropLine`: `
 `Frame charge:`, `Frame holy shield:`, `Frame heavens:`, `Frame shapeshift:`). Tests: `spell-motion-test`
 (the pages, the gate, every class's cards watched), `motions-paladin-test` and `motions-druid-test` (their
 own engines' tests on the watchers, gated: one grip or none never casts, both do; and the hum rising before
-each cast), `interaction-test` (the Paladin's and the Druid's pages; no box for the Warlock or an unknown
+each cast), `interaction-test` (the Paladin's, the Druid's and the Warlock's pages; no box for an unknown
 class), `interaction-motions-test` (the Paladin's page drawn).
 
 The Amazon's, the Barbarian's, the Necromancer's and the Assassin's motions (owner, 2026-11-04: "also
@@ -2981,7 +2993,10 @@ there.
   sides then up past the head, fast (arms only, so seated too); Leap Attack, the same swing from both
   arms pulled well back (30 cm behind the eyes), at the monster that way; Find Item, the right hand
   held out at the corpse a moment, then snatched back to the shoulder; Whirlwind, both arms held
-  straight out to the sides (a T) a moment, whirling 10 cells ahead.
+  straight out to the sides (a T) a moment, whirling 10 cells ahead: once for a T, the arms let down
+  before the next; Find Potion, Find Item's snatch by the left hand; Grim Ward, the right hand held out at the
+  corpse a moment, then driven straight down; Taunt, both hands held out in front a moment, then pulled in
+  to the chest, at the highlighted monster.
 - Necromancer: Bone Armor, both fists crossed on the chest, held; Raise Skeleton, both arms swept up
   fast from the hips past the face, together (no stop); Golem, the right arm swept up fast the same way
   in front of you (the strongest golem learned), standing 4 cells away where the arm heads, and a
@@ -3007,6 +3022,27 @@ there.
   until they cross; Venom, the crossed wrists flicked apart fast; Blade Shield, the right hand circled
   in front twice; Shadow Warrior, both hands from the chest pushed together to one side; Mind Blast,
   both hands at the temples, pushed straight forward.
+- Warlock (owner, 2026-11-10: "build the motion controls for the missing classes"; `motions_warlock.h`,
+  `[motions] warlock_off`): sixteen of its skills, each on a shape another class already has: the
+  Necromancer's twelve and four of the Sorceress's own, with those classes' detectors and tuning (a class
+  watches only its own motions). Which shape follows how the game casts the skill (its `skills.txt`).
+  The demons are summoned on a spot, as golems are: Summon Goatman, the right arm swept up fast in front,
+  toward its spot; Summon Tainted, the left arm; Summon Defiler, both arms (four cells straight ahead).
+  The sigils and Abyss are laid where the pointer is, as Blizzard and Meteor are (owner: "are they
+  supposed to be targeted? Like Sorcerer's Blizzard?", "or they could land on targeted monsters like
+  sorceress"): they land on the highlighted monster when there is one (`aimrules::MotionOnTarget`), else
+  where the main hand points - Sigil: Lethargy, the right fist punched out; Sigil: Rancor, both fists
+  pushed down from the chest to the waist; Abyss, both hands apart in front, brought together - or, for
+  Sigil: Death, where the right hand's sweep across the chest draws it. Flame Wave, both fists punched
+  out, rolls along the main hand's ray. The rest have no target. The hexes go on the Warlock's own
+  weapon: Hex: Bane, the left fist punched out; Hex: Purge, both hands up at the face, held; Hex: Siphon,
+  the left hand swept from the right hand up to the right shoulder. Psychic Ward, both fists crossed on
+  the chest and held; Eldritch Blast, both arms swept up in a wide V; Ring of Fire, hands together at the
+  chest, then flung wide; Apocalypse, the palms rubbed together, then snapped apart; Blood Boil, both
+  fists shaken hard, held apart. Sixteen cards are more than a MOTIONS page's fourteen: its page alone
+  has eight lower rows (`interaction::MotionCardsCompact`), its notes in the two lines over them. Its
+  other skills stay on their buttons: those that need a monster, a corpse or the demon under the
+  pointer, the bolt and the weapon's attacks. Not yet done in a headset.
 
 A tester's first pass (2026-11-05) changed them: "All motions should be quick and repeatable
 sequences that don't need you to move slow", "Please no floor stuff", Raise Skeleton worked once

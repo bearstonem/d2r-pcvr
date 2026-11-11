@@ -480,30 +480,37 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
         text("MOTIONS",{38,34,730,62});
         SelectObject(dc,shortcutFont);SetTextColor(dc,RGB(232,196,119));
         const auto motions=spellmotion::PageOf(s.skillClass);
+        if(MotionCardsCompact(motions.count)) {   // sixteen cards leave no room under them: the notes in two lines here
+            text("Hold both grips and do a skill's motion to cast it. Point at one and press the trigger: on or off.",{38,62,730,80});
+            text(o.result==Result::Pending?"Saving...":o.result==Result::Refused?"Not saved; press it again.":
+                "A motion that is off still casts from a button its skill is on.",{38,79,730,97});
+        } else {
         text(s.skillClass==1?"Hold both grips and do a spell's motion to cast it: no button needed.":
             "Hold both grips and do a skill's motion to cast it: no button needed.",{38,62,730,80});
         text(s.skillClass==1?"Point at a spell and press the trigger to turn its motion on or off.":
             "Point at a skill and press the trigger to turn its motion on or off.",{38,79,730,97});
+        }
         for(int i=0;i<motions.count&&i<MotionCards;++i) {
             const int id=motions.skills[i];
             // a family's card (the golems, the shadows): the one it casts now (spellmotion::Family)
             const int shown=spellmotion::Family(id)?spellmotion::CastSkillOf(id,[&](int k){return GlyphSkill(s,k).known;}):id;
             const auto skill=GlyphSkill(s,shown);
             const bool have=skill.known,on=spellmotion::On(s.skillClass,id,o.motionsOff);
-            const auto b=MotionCardBounds(i);
+            const bool compact=MotionCardsCompact(motions.count);   // sixteen cards (the Warlock's): lower ones, a smaller icon
+            const auto b=MotionCardBounds(i,motions.count);
             const int x=int(768*b.left),y=int(768*b.top),right=int(768*b.right),bottom=int(768*b.bottom);
             frame({x,y,right,bottom},o.hover==MotionCardCell(i));
-            const bool haveIcon=icon(icons::Get("s"+std::to_string(shown)),{x+9,y+9,x+67,y+67},have&&on);
-            if(!haveIcon)fill({x+12,y+12,x+64,y+64},RGB(48,40,28));
+            const bool haveIcon=icon(icons::Get("s"+std::to_string(shown)),compact?RECT{x+7,y+7,x+59,y+59}:RECT{x+9,y+9,x+67,y+67},have&&on);
+            if(!haveIcon)fill(compact?RECT{x+10,y+10,x+56,y+56}:RECT{x+12,y+12,x+64,y+64},RGB(48,40,28));
             SelectObject(dc,font);SetTextColor(dc,have?RGB(235,218,181):RGB(148,137,117));
             char title[96];std::snprintf(title,sizeof title,"%s%s",have?skill.name:spellmotion::SpellName(shown),handtext::T(spellmotion::CardArm(id)));
-            paragraph(title,{x+76,y+5,right-78,y+27});
+            paragraph(title,{x+(compact?68:76),y+(compact?3:5),right-78,y+(compact?25:27)});
             const RECT chip{right-72,y+6,right-9,y+26};
             fill(chip,on?RGB(100,74,29):RGB(48,40,28));
             SelectObject(dc,shortcutFont);SetTextColor(dc,on?RGB(235,218,181):RGB(148,137,117));text(on?"ON":"OFF",chip);
             char cue[160];std::snprintf(cue,sizeof cue,"%s%s",handtext::T(spellmotion::CueOf(id)),have?".":" (no points yet).");   // the mirror image left-handed
             cue[0]=char(std::toupper(static_cast<unsigned char>(cue[0])));
-            SetTextColor(dc,RGB(169,151,118));paragraph(cue,{x+76,y+28,right-8,bottom-2});
+            SetTextColor(dc,RGB(169,151,118));paragraph(cue,{x+(compact?68:76),y+(compact?25:28),right-8,bottom-1});
         }
         SetTextColor(dc,RGB(235,218,181));SelectObject(dc,font);
     } else if(o.glyphs&&!o.utility) {
@@ -621,7 +628,7 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
         text(line,{38,662,730,685});
         SelectObject(dc,prior);
     }
-    if(o.motions&&!o.developer&&!o.editor&&!o.map) {
+    if(o.motions&&!o.developer&&!o.editor&&!o.map&&!MotionCardsCompact(spellmotion::PageOf(s.skillClass).count)) {
         const auto prior=SelectObject(dc,shortcutFont);SetTextColor(dc,RGB(232,196,119));
         text(o.result==Result::Pending?"Saving...":o.result==Result::Refused?"Not saved; press it again.":
             "A motion that is off still casts from a button its skill is on.",{38,639,730,662});

@@ -25,7 +25,8 @@ inline constexpr uint64_t MinFlightMs=250,LateMs=1500,FadeMs=350,ThrowMs=280;
 inline constexpr int MaxMarks=6;              // D2R_DepthFog.fx draws RingPos0..5
 // Previews placed again every frame, each kept in its own one mark (Board::Place): the companion's
 // command and Teleport's landing while its fist is drawn in (spell_motion.h).
-inline constexpr int CompanionMark=-2,TeleportMark=-3;
+// TossMark: where an aimed throw will land (toss.h), drawn as Teleport's sigil in the thrown skill's color.
+inline constexpr int CompanionMark=-2,TeleportMark=-3,TossMark=-4;
 struct Mark {
     float x=0,y=0;            // target cell
     uint64_t cast=0,flight=0; // ms; flight is the expected time to land

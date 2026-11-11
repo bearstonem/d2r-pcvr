@@ -309,7 +309,7 @@ int MotionsKey(int skillClass) {
     switch(skillClass) {
     case 0:return settings::MotionsAmazonOff;case 1:return settings::MotionsOff;case 2:return settings::MotionsNecromancerOff;
     case 3:return settings::MotionsPaladinOff;case 4:return settings::MotionsBarbarianOff;case 5:return settings::MotionsDruidOff;
-    case 6:return settings::MotionsAssassinOff;default:return -1;
+    case 6:return settings::MotionsAssassinOff;case 7:return settings::MotionsWarlockOff;default:return -1;
     }
 }
 // The wheel's glyph settings ([glyphs]) are saved here, one save at a time; until it lands the wheel
@@ -665,6 +665,10 @@ bool leftNeedsWorld=false,leftHasShot=false,leftThrowArmed=false;
 // A trap or bomb thrown to place (#224): where its arc landed, in grid cells,
 // for its cast's aim (TossTarget).
 struct TossLanding {int skill=-1;float x=0,y=0;uint64_t at=0,session=0;} tossLanding;
+// The aimed throw's sigil (toss.h): where the held trap or potion will land, in grid cells, as the hand last
+// aimed it; its speed is measured here when the runtime gives none.
+struct TossSigil {bool on=false,told=false;float x=0,y=0;uint32_t monster=0;math::Vec was{};double wasAt=-1;} tossSigil;
+std::atomic<bool> tossAiming{false};
 // A gas or oil potion thrown as a physical bottle (#292): its body in the
 // bottles' world until it first touches anything, where it shatters. The
 // game's own Throw is pressed as it leaves the hand, aimed where the same
@@ -2528,7 +2532,7 @@ void MotionPointer() {
     const auto mid=ray+direction*(beamLength*.5f);
     beamPose=XrPose({mid,math::BeamOrientation(direction,V(head.position)-mid)});pointerVisible=true;
     if(pointerHit) {
-        motionInput.hover=interaction::WheelCell(hit.u,hit.v,interactionOutput.hover,interactions.Page(),hand,interactionInput.snapshot.developer,interactions.DeveloperPage(),interactionOutput.leftStrikes>=0,interactionOutput.motionsBox);
+        motionInput.hover=interaction::WheelCell(hit.u,hit.v,interactionOutput.hover,interactions.Page(),hand,interactionInput.snapshot.developer,interactions.DeveloperPage(),interactionOutput.leftStrikes>=0,interactionOutput.motionsBox,spellmotion::PageOf(interactionInput.snapshot.skillClass).count);
         dotPose=XrPose({hit.point+math::Rotate(pose.q,{0,0,.003f}),pose.q});
     }
 }
@@ -4723,6 +4727,40 @@ void Input() {
         if(droppedBottles->Ready()&&droppedBottles->Prepare(session,tossFloor,stageWorld.upm,tossStage.anchor))
             wallcells::Want({session,tossStage.anchor,tossFloor,stageWorld.upm},GetTickCount64());
     }
+    // The aimed throw (toss.h): while it is held, the hand's pointer throws Teleport's arc, and a sigil shows
+    // where it lands - on the monster there, if one stands under it. The hand aims held out in front and slow.
+    tossAiming.store(motionOutput.tossHeld&&tossWorld);
+    float sigilX=0,sigilY=0;bool sigilKnown=false;
+    if((motionOutput.tossHeld||motionOutput.tossRelease)&&tossWorld) {
+        const auto hand=motionInput.hand[0].p;
+        const double dt=interactionInput.time-tossSigil.wasAt;
+        const float speed=interactionInput.velocityKnown[0]?gameplay::Length(interactionInput.handVelocity[0]):
+            tossSigil.wasAt>=0&&dt>1e-4&&dt<.1?gameplay::Length(hand-tossSigil.was)/float(dt):1e9f;
+        tossSigil.was=hand;tossSigil.wasAt=interactionInput.time;
+        const auto ahead=math::Rotate(math::Conjugate(math::Yaw(math::Heading(interactionInput.head.q))),hand-interactionInput.head.p);
+        if(motionOutput.tossHeld&&handAimTracked[0]&&toss::Aims(-ahead.z,speed)) {
+            const float cell=2.f/stageWorld.upm;
+            const auto arc=teleportarc::Compute(handAim[0].p,math::Rotate(handAim[0].q,math::Vec{0,0,-1}),interactionInput.floor,
+                TeleportArcNearCells*cell,toss::AimFarCells*cell);
+            float x=0,y=0;
+            if(arc.ok&&FloorCell(arc.land,x,y)){tossSigil.on=true;tossSigil.x=x;tossSigil.y=y;}
+        }
+        if(tossSigil.on) {
+            sigilX=tossSigil.x;sigilY=tossSigil.y;sigilKnown=true;
+            float mx=0,my=0;uint32_t id=0;
+            const bool snapped=MonsterNearCell(sigilX,sigilY,toss::SnapCells,mx,my,&id);
+            if(snapped){sigilX=mx;sigilY=my;}
+            telegraph::Current().Place(sigilX,sigilY,GetTickCount64(),250,int(spellaim::ElementOf(rightSkill.id)),2.0f,0,0,0,telegraph::TossMark);
+            if(!tossSigil.told||(snapped?id:0u)!=tossSigil.monster) {
+                char line[200];
+                if(snapped)std::snprintf(line,sizeof line,"Frame toss: skill=%d aimed - its sigil on monster %u (cell %.1f,%.1f)",rightSkill.id,id,sigilX,sigilY);
+                else std::snprintf(line,sizeof line,"Frame toss: skill=%d aimed - its sigil on the floor (cell %.1f,%.1f)",rightSkill.id,sigilX,sigilY);
+                Say(line);
+            }
+            tossSigil.told=true;tossSigil.monster=snapped?id:0u;
+        }
+    }
+    else if(tossSigil.on||tossSigil.wasAt>=0){if(tossSigil.on)telegraph::Current().ClearSkill(telegraph::TossMark);tossSigil={};}
     if(motionOutput.tossRelease) {
         // Where the arc first meets anything in the physics world (a wall, a
         // table, a prop or the floor), else where it reaches the floor under
@@ -4731,10 +4769,14 @@ void Input() {
         float x=0,y=0;bool landed=false,traced=false,flying=false;
         if(tossWorld) {
             math::Vec hit{};
-            const auto worldP=tossStage.World(motionOutput.tossOrigin),worldV=toss::WorldVelocity(tossStage,motionOutput.tossVelocity,carry);
+            const auto worldP=tossStage.World(motionOutput.tossOrigin);auto worldV=toss::WorldVelocity(tossStage,motionOutput.tossVelocity,carry);
+            // Aimed: sent on the arc that ends on the sigil, as fast as it was thrown; the cast lands there
+            // whatever the bottle meets on its way.
+            if(sigilKnown&&!toss::Launch(worldP,toss::World(sigilX,sigilY,tossFloor,stageWorld.upm),gameplay::Length(worldV),worldV))sigilKnown=false;
             traced=bottlePhysics.load()&&droppedBottles&&droppedBottles->Trace(worldP,worldV,toss::Radius,interaction::ThrowMaxFlight,hit)&&
                 toss::Cell(hit,tossFloor,stageWorld.upm,x,y);
             landed=traced||toss::Landing(tossStage,tossFloor,stageWorld.upm,motionOutput.tossOrigin,motionOutput.tossVelocity,x,y,carry);
+            if(sigilKnown){x=sigilX;y=sigilY;landed=true;}
             // A gas or oil potion leaves the hand as its own bottle (#292), held as
             // the hand held it, tumbling end over end along its throw.
             if(potionBottle&&traced&&droppedBottles&&droppedBottles->Ready()) {
@@ -4752,8 +4794,10 @@ void Input() {
         char line[240];std::snprintf(line,sizeof line,"Frame toss: skill=%d%s thrown at %.1f m/s (running %.1f m/s), %s %.1f,%.1f",rightSkill.id,
             flying?" (throwing potion, its bottle flies)":motionInput.potion?" (throwing potion)":"",
             gameplay::Length(motionOutput.tossVelocity),gameplay::Length(carry),
-            !landed?"no landing (room unknown), cast where you point":traced?"first hit at cells":"lands on the floor at cells",x,y);
+            !landed?"no landing (room unknown), cast where you point":sigilKnown?(tossSigil.monster?"on its sigil, the monster under it, at cells":"on its sigil at cells"):
+            traced?"first hit at cells":"lands on the floor at cells",x,y);
         Say(line);
+        tossSigil={};   // its mark fades where the throw went
     }
     motionOutput.shieldContact=motionInput.active&&!motionOutput.block&&!motionInput.quickCast&&motionInput.trigger<.2f&&
         motionInput.shieldEquipped&&gestureSettings[settings::SkillGestures]>.5f&&quickFresh&&shieldSkill.available&&shieldSkill.motion&&shieldSkill.id==weaponskills::Smite;
@@ -7714,6 +7758,7 @@ bool HandSpellHeld(int hand) {
     return hand>=0&&hand<2&&motionControls.load()&&handOutput.spells[hand]>=0;
 }
 bool HeavensArmed(){return heavensArmed.load();}
+bool TossAiming(){return tossAiming.load();}
 bool SeekerArrowReady(){return seekerArrowReady.load();}
 bool TCrossWantsTargets(){return tCrossScan.load();}
 uint32_t HeavensRequest() {

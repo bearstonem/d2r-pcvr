@@ -78,6 +78,7 @@ std::atomic<uint32_t> guardLateMs{200};
 std::atomic<unsigned> lateParries{0};
 bool guardChecked=false;
 struct GuardShared {framevr::guard::State state;uint64_t session=0,at=0;float upm=1;bool eligible=false;
+    bool claws=false;   // the guard is two claws crossed (guard::Crossed), not a shield
     framevr::guard::Debug debug{};uint32_t debugMonster=UINT32_MAX;
     uint32_t blockMonster=UINT32_MAX;int32_t blockDurability=-1;};   // the last blocked melee hit, for a late parry
 std::mutex guardMutex;GuardShared guard;
@@ -1333,7 +1334,24 @@ int GuardedBlock(uintptr_t game,uintptr_t attacker,uintptr_t defender,int avoid,
             lastIncomingVerdict);
         framevr::logging::Write(line);
     }
-    if(!served)++guardUnserved; // native never reached its block roll (dodged/avoided first, or cannot block)
+    bool claws=false;
+    {std::lock_guard lock(guardMutex);claws=guard.claws&&guard.session==gamestate::LocalPlayer();}
+    if(!served) {
+        ++guardUnserved; // native never reached its block roll (dodged/avoided first, or cannot block)
+        // Crossed claws with no block of the game's to roll (Weapon Block not learned): the blow is turned at its
+        // life write, its physical part cut to nothing, as a chip through a broken guard is cut down. Only a blow
+        // the game calls blockable; one that was dodged writes no life, and the record lapses with its window.
+        if(claws&&g!=Guard::Open&&block&&damageScaleReady.load(std::memory_order_relaxed)) {
+            chipHit={attacker,defender,0.f,reinterpret_cast<GetStatFn>(d2rsig::Addr(GetStatRva))(defender,8,0),GetTickCount64()};++chipHits;
+            framevr::ShieldGuardImpact(false,framevr::strain::RankWeight(rank));
+            melee::QueueBlockSound();
+            static std::atomic<uint64_t> told{0};
+            if(const auto now=GetTickCount64();now-told.load()>1000) {
+                told=now;char line[160];snprintf(line,sizeof line,"Frame guard claws: monster=%u turned by the crossed claws (no native block to roll: its physical damage cut)",monster);
+                framevr::logging::Write(line);
+            }
+        }
+    }
     else if(chip.attacker) {
         // Lands as a chip at its life write; the shield still took it.
         chipHit=chip;++chipHits;
@@ -1360,7 +1378,7 @@ int GuardedBlock(uintptr_t game,uintptr_t attacker,uintptr_t defender,int avoid,
             // The native block's own sound never plays in first person (only the
             // haptics did, 2026-10-16): the game's block sound at the hero.
             melee::QueueBlockSound();
-            WearShield(game,defender);   // the blow met the shield; a parry spares it
+            if(!claws)WearShield(game,defender);   // the blow met the shield; a parry spares it (claws: the left hand's item is a weapon)
             // Act bosses: no late parry either (Parryable gates Judge only; a
             // blocked hit is how a late parry starts - Andariel, 2026-10-20).
             if(g==Guard::Block&&inReach&&Parryable(rank)) {
@@ -1605,7 +1623,7 @@ void ConfirmParry(uint64_t swing) {
     ++guardParries;++earlyParries;framevr::ShieldGuardImpact(true);
 }
 void PublishGuard(uint64_t session,bool eligible,bool posed,const framevr::guard::Pose& pose,
-                  bool handOk,bool leftShield) {
+                  bool handOk,bool leftShield,bool claws) {
     const auto now=GetTickCount64();const auto t=GuardTuning();
     uint64_t lateAfter=0;bool late=false,raised=false,newSwing=false,missed=false;
     uint32_t lateMonster=UINT32_MAX;int32_t lateDurability=-1;   // a late parry to queue (UINT32_MAX = none)
@@ -1634,6 +1652,7 @@ void PublishGuard(uint64_t session,bool eligible,bool posed,const framevr::guard
     }
     // A parry swing whose window ran out unspent: tell the shield hand, once.
     if(eligible&&guardEnabled.load(std::memory_order_relaxed)&&framevr::guard::ParryMissed(guard.state,now,t)){missed=true;++parryMisses;}
+    guard.claws=eligible&&claws;
     guard.session=session;guard.eligible=eligible;guard.upm=std::max(1.f,guard.state.surface.unitsPerMetre);guard.at=now;
     raised=eligible&&guard.state.raised;
     // Trace: where the posed shield sits relative to the body, every 2 s, so a
