@@ -17,6 +17,8 @@
 #include "../steamvr/game_patch_plan.h"
 #include "../steamvr/cull_volume.h"
 
+namespace framevr { void* GameSwapchainNative(); }   // steamvr/transport.h: the window's swap chain below ReShade, or null
+
 namespace gamepatches {
 namespace {
 using namespace abi;
@@ -495,7 +497,148 @@ void RemoveCull() {
     Say("cull_once off: its hook stays in the game's code and passes every call through");
 }
 
-// What the two did, every ten seconds while either is on (draw thread, between frames).
+// --- present_once ----------------------------------------------------------------------------------------------
+// Nothing of the game's code is changed but one hook's jump. The swap chain below ReShade (the one ReShade
+// itself calls: reshade::api::swapchain::get_native) gets a copy of its function table with Present replaced;
+// ReShade's own Present, its effects and every add-on event (the eye's copy to the headset among them) run for
+// both passes as they do, and only the call below them is answered S_OK for a pair's first pass.
+Patch presentOnce{"present_once"};
+std::atomic<bool> presentOn{false};           // applied and wanted
+std::atomic<DWORD> presentThread{0};          // the draw thread, from EyePass
+gamepatch::PresentPair presentPair;           // draw thread only
+Fn4 originalPresentTarget = nullptr;
+bool presentTargetHookIn = false;
+using PresentFn = HRESULT (STDMETHODCALLTYPE*)(void*, UINT, UINT);
+constexpr size_t PresentTableMost = 128;      // entries copied when they can be read; never fewer than the interface has
+uintptr_t presentTable[gamepatch::TableBefore + PresentTableMost] = {};   // the copy the swap chain points at while it is in
+std::atomic<PresentFn> presentOriginal{nullptr};
+std::atomic<uintptr_t> presentChain{0};       // the swap chain whose table is the copy
+uintptr_t presentChainTable = 0;              // its own table, to put back
+std::atomic<uint32_t> presentsHeld{0}, presentsMade{0}, presentWaitsOut{0}, presentWaitsNone{0};
+
+HRESULT STDMETHODCALLTYPE PresentShim(void* chain, UINT interval, UINT flags) {
+    const PresentFn call = presentOriginal.load(std::memory_order_relaxed);
+    // DXGI_PRESENT_TEST (1) presents nothing and ReShade does nothing for it: never the pass's present.
+    if (presentOn.load(std::memory_order_relaxed) && reinterpret_cast<uintptr_t>(chain) == presentChain.load(std::memory_order_relaxed) &&
+        !(flags & 1u) && GetCurrentThreadId() == presentThread.load(std::memory_order_relaxed) &&
+        gamepatch::PresentCalled(presentPair) == gamepatch::Present::Hold) {
+        presentsHeld.fetch_add(1, std::memory_order_relaxed);
+        return S_OK;
+    }
+    presentsMade.fetch_add(1, std::memory_order_relaxed);
+    return call(chain, interval, flags);
+}
+
+// The game's present target of a pass (device, out*, chain). After a held present the game's wait on the swap
+// chain's frame latency handle is left out: the function reads the handle as none and goes on as it does.
+uintptr_t PresentTargetHook(uintptr_t device, uintptr_t out, uintptr_t chain, uintptr_t d) {
+    const Fn4 call = Original(originalPresentTarget);
+    if (!chain || GetCurrentThreadId() != presentThread.load(std::memory_order_relaxed) || gamepatch::PresentWaits(presentPair))
+        return call(device, out, chain, d);
+    auto* const handle = reinterpret_cast<uintptr_t*>(chain + PresentChainLatencyHandle);   // the game reads it next, on this thread
+    const uintptr_t was = *handle;
+    if (!was) { presentWaitsNone.fetch_add(1, std::memory_order_relaxed); return call(device, out, chain, d); }   // the game does not wait at all
+    *handle = 0;
+    const uintptr_t result = call(device, out, chain, d);
+    *handle = was;
+    presentWaitsOut.fetch_add(1, std::memory_order_relaxed);
+    return result;
+}
+
+// The swap chain's own table back, when the chain is still there and still points at the copy.
+void PresentRelease() {
+    const uintptr_t chain = presentChain.exchange(0);
+    uintptr_t now = 0;
+    if (chain && framevr::ReadMemory(&now, reinterpret_cast<const void*>(chain), sizeof now) &&
+        now == reinterpret_cast<uintptr_t>(presentTable + gamepatch::TableBefore))
+        framevr::WriteMemory(reinterpret_cast<void*>(chain), &presentChainTable, sizeof presentChainTable);
+}
+
+bool Runnable(uintptr_t at) {
+    MEMORY_BASIC_INFORMATION mbi{};
+    return at && VirtualQuery(reinterpret_cast<const void*>(at), &mbi, sizeof mbi) && mbi.State == MEM_COMMIT &&
+           (mbi.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) != 0;
+}
+
+// The copy goes on `chain`. False with `why` set when it cannot.
+bool PresentTake(uintptr_t chain, std::string& why) {
+    uintptr_t table = 0;
+    if (!framevr::ReadMemory(&table, reinterpret_cast<const void*>(chain), sizeof table) || table < 0x10000) { why = "the swap chain's function table could not be read"; return false; }
+    if (table == reinterpret_cast<uintptr_t>(presentTable + gamepatch::TableBefore)) {   // still on it (its own could not be put back): as it is
+        if (!presentOriginal.load()) { why = "the swap chain has this mod's table and no Present behind it"; return false; }
+        presentChain.store(chain);
+        return true;
+    }
+    uintptr_t copied[gamepatch::TableBefore + PresentTableMost] = {};
+    size_t slots = 0;
+    for (const size_t tried : {PresentTableMost, size_t(64), gamepatch::SwapChainSlots})   // what follows the table in memory is copied too, and never called
+        if (framevr::ReadMemory(copied, reinterpret_cast<const void*>(table - gamepatch::TableBefore * sizeof(uintptr_t)),
+                                (gamepatch::TableBefore + tried) * sizeof(uintptr_t))) { slots = tried; break; }
+    if (!slots) { why = "the swap chain's function table could not be copied"; return false; }
+    for (size_t i = 0; i < gamepatch::SwapChain3Slots; ++i)   // what ReShade and the game call: all must be code
+        if (!Runnable(copied[gamepatch::TableBefore + i])) { why = "entry " + std::to_string(i) + " of the swap chain's function table is not code"; return false; }
+    uintptr_t original = 0;
+    if (!gamepatch::ShimTable(copied, gamepatch::TableBefore, slots, gamepatch::PresentSlot, reinterpret_cast<uintptr_t>(&PresentShim), presentTable, original)) {
+        why = "the swap chain's Present entry is not usable"; return false;
+    }
+    presentOriginal.store(reinterpret_cast<PresentFn>(original));
+    const uintptr_t ours = reinterpret_cast<uintptr_t>(presentTable + gamepatch::TableBefore);
+    uintptr_t back = 0;
+    if (!framevr::WriteMemory(reinterpret_cast<void*>(chain), &ours, sizeof ours) ||
+        !framevr::ReadMemory(&back, reinterpret_cast<const void*>(chain), sizeof back) || back != ours) { why = "the swap chain's table pointer could not be written"; return false; }
+    presentChainTable = table;
+    presentChain.store(chain);
+    return true;
+}
+
+void ApplyPresent() {
+    uint8_t live[160];
+    uint64_t differs = 0;
+    static_assert(sizeof PresentTargetSig / 2 <= sizeof live && sizeof PresentSig / 2 <= sizeof live);
+    if (!presentTargetHookIn &&
+        (!Holds(PresentRva, PresentSig, live, differs) || !Holds(PresentQueueRva, PresentQueueSig, live, differs) ||
+         !Holds(PresentCallRva, PresentCallSig, live, differs) || !Holds(PresentTargetRva, PresentTargetSig, live, differs)))
+        return NotYet(presentOnce, differs);
+    // The window's swap chain as ReShade calls it; none until the headset's session has started (looked for again).
+    const uintptr_t chain = reinterpret_cast<uintptr_t>(framevr::GameSwapchainNative());
+    if (!chain) return;
+    if (!presentTargetHookIn) {
+        if (!HookIn(PresentTargetRva, PresentTargetSig, PresentTargetHookBytes, &PresentTargetHook, &originalPresentTarget))
+            return Refuse(presentOnce, "the hook at RVA " + Hex(PresentTargetRva) + " was refused");
+        presentTargetHookIn = true;
+    }
+    std::string why;
+    presentPair.hold = false;   // what a held present left owed stays owed
+    if (!PresentTake(chain, why)) return Refuse(presentOnce, why);
+    presentOn.store(true);
+    presentOnce.state = State::Applied;
+    Say("present_once applied: the first eye pass of a pair no longer presents to the desktop window - ReShade and the eye's copy to the headset run "
+        "as they do, the swap chain's Present below them answers without presenting, and the second pass draws into the same back buffer and presents it "
+        "(the swap chain's function table copied with Present replaced; hook at RVA " + Hex(PresentTargetRva) + " leaves out the game's one wait for the "
+        "swap chain that went with that present; 4 stretches of the game's code proven first). Every other draw presents as the game does");
+}
+
+void RemovePresent() {
+    presentOn.store(false);
+    presentPair.hold = false;
+    PresentRelease();
+    presentOnce.state = State::Off;
+    Say("present_once off: every pass presents again; the swap chain has its own function table back, the hook stays in the game's code and passes every call through");
+}
+
+// The window's swap chain is another one (the window was made anew): the copy moves to it. Draw thread, between frames.
+void PresentWatch() {
+    const uintptr_t chain = reinterpret_cast<uintptr_t>(framevr::GameSwapchainNative());
+    if (!chain || chain == presentChain.load(std::memory_order_relaxed)) return;
+    presentPair.hold = false;
+    PresentRelease();
+    std::string why;
+    if (PresentTake(chain, why)) { Say("present_once: the window has a new swap chain; its Present is held for a pair's first pass as before"); return; }
+    presentOn.store(false);
+    Refuse(presentOnce, why);
+}
+
+// What the once-per-pair ones did, every ten seconds while any is on (draw thread, between frames).
 void Tally() {
     static ULONGLONG last = 0;
     const ULONGLONG now = GetTickCount64();
@@ -517,6 +660,13 @@ void Tally() {
                  "(%u outside the volume, %u with no volume from the first pass)", skipped, outside + none, outside, none);
         Say(text);
     }
+    if (presentOn.load(std::memory_order_relaxed)) {
+        const uint32_t held = presentsHeld.exchange(0), made = presentsMade.exchange(0), out = presentWaitsOut.exchange(0), none = presentWaitsNone.exchange(0);
+        char text[320];
+        snprintf(text, sizeof text, "present_once 10 s: %u presents held back (a pair's first pass), %u made; %u of the game's waits for the swap chain "
+                 "left out with them%s", held, made, out, none ? " (the game has no frame latency handle to wait on)" : "");
+        Say(text);
+    }
 }
 
 // --- all of them ----------------------------------------------------------------------------------------------
@@ -528,6 +678,7 @@ const Entry entries[] = {
     {&selection, &ApplySelection, &RemoveSelection},
     {&shadows, &ApplyShadows, &RemoveShadows},
     {&cullOnce, &ApplyCull, &RemoveCull},
+    {&presentOnce, &ApplyPresent, &RemovePresent},
 };
 
 std::atomic<bool> dirty{false};       // the settings changed, or something still waits for the game's code
@@ -547,7 +698,7 @@ std::string Summary() {
 
 void Configure(const Wanted& wanted) {
     const bool want[] = {wanted.transparentFilter, wanted.profilerAccounting, wanted.drawDebugNames,
-                         wanted.selectionWalk, wanted.shadowsOnce, wanted.cullOnce};
+                         wanted.selectionWalk, wanted.shadowsOnce, wanted.cullOnce, wanted.presentOnce};
     static_assert(std::size(want) == std::size(entries), "one wish per patch, in the entries' order");
     bool changed = false;
     for (size_t i = 0; i < std::size(entries); ++i)
@@ -567,10 +718,15 @@ void EyePass(Pass pass) {
     // What a first pass left is for the second of the same pair only. A draw that stands alone in between (it
     // runs the game's own update and cull) clears it in the hooks themselves.
     if (pass == Pass::First) { shadowPair = {}; cullPair = {}; }
+    presentThread.store(GetCurrentThreadId(), std::memory_order_relaxed);
+    gamepatch::PresentPass(presentOn.load(std::memory_order_relaxed), gamepatch::Pass(pass), presentPair);
 }
 
+void KeepPresent() { presentPair.hold = false; }
+
 void BetweenFrames() {
-    if (shadowsOn.load(std::memory_order_relaxed) || cullOn.load(std::memory_order_relaxed)) Tally();
+    if (presentOn.load(std::memory_order_relaxed)) PresentWatch();
+    if (shadowsOn.load(std::memory_order_relaxed) || cullOn.load(std::memory_order_relaxed) || presentOn.load(std::memory_order_relaxed)) Tally();
     if (!dirty.load(std::memory_order_relaxed)) return;
     if (!configured.load()) return;
     const bool look = firstFrame || frames++ % LookEvery == 0;   // what waits for the game's code: not every frame

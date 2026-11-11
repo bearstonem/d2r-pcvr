@@ -2,6 +2,8 @@
 #include <cassert>
 #include <cstdio>
 #include <cstring>
+#include <initializer_list>
+#include <iterator>
 #include "game_patch_plan.h"
 #include "../vr/game_patch_signatures.h"
 
@@ -44,9 +46,11 @@ static void Signatures() {
         {CullJobSig, sizeof CullJobSig / 2}, {CullJobCopySig, sizeof CullJobCopySig / 2}, {CullFrustumCopySig, sizeof CullFrustumCopySig / 2},
         {CullJobTestSig, sizeof CullJobTestSig / 2}, {CullBoxSig, sizeof CullBoxSig / 2}, {CullBoxFrontSig, sizeof CullBoxFrontSig / 2},
         {CullBoxEndSig, sizeof CullBoxEndSig / 2},
+        {PresentSig, sizeof PresentSig / 2}, {PresentQueueSig, sizeof PresentQueueSig / 2}, {PresentCallSig, sizeof PresentCallSig / 2},
+        {PresentTargetSig, sizeof PresentTargetSig / 2},
     };
     for (const auto& s : all) {
-        uint8_t bytes[128];
+        uint8_t bytes[160];
         assert(s.size <= sizeof bytes);
         for (size_t i = 0; i < s.size; ++i) { assert(s.sig[i] <= 0xFF); bytes[i] = uint8_t(s.sig[i]); }
         assert(SigMatches(bytes, s.sig, s.size));
@@ -288,10 +292,98 @@ static void ShadowPasses() {
            ShadowRenderHookBytes <= sizeof ShadowRenderSig / 2 && CullKickHookBytes <= sizeof CullKickSig / 2);
 }
 
+// One present a pair: which Present is held back, and which of the game's waits for the swap chain goes with it.
+static void PresentOnce() {
+    PresentPair pair;
+    // a pair: the first pass's present is held, the wait before the second's target is left out, the second's is made
+    PresentPass(true, Pass::First, pair);
+    assert(PresentWaits(pair));                                   // the first pass's own wait
+    assert(PresentCalled(pair) == Present::Hold && pair.waitOwed);
+    PresentPass(true, Pass::Alone, pair);                         // between the two draws
+    PresentPass(true, Pass::Second, pair);
+    assert(!PresentWaits(pair) && !pair.waitOwed);                // left out, once
+    assert(PresentWaits(pair));
+    assert(PresentCalled(pair) == Present::Make);
+    PresentPass(true, Pass::Alone, pair);
+    assert(PresentCalled(pair) == Present::Make && PresentWaits(pair));
+    // over many pairs: as many waits made as presents made, and every pair presents once
+    int waits = 0, made = 0, held = 0;
+    for (int i = 0; i < 100; ++i) {
+        for (const Pass pass : {Pass::First, Pass::Second}) {
+            PresentPass(true, pass, pair);
+            waits += PresentWaits(pair);
+            (PresentCalled(pair) == Present::Make ? made : held)++;
+            PresentPass(true, Pass::Alone, pair);
+        }
+    }
+    assert(waits == 100 && made == 100 && held == 100);
+    // off, or a draw that stands alone (a menu, an eye by turns, a draw inside a pass): the game's own
+    for (const Pass pass : {Pass::Alone, Pass::First, Pass::Second}) {
+        PresentPass(false, pass, pair);
+        assert(PresentWaits(pair) && PresentCalled(pair) == Present::Make && !pair.waitOwed);
+    }
+    for (const Pass pass : {Pass::Alone, Pass::Second}) {
+        PresentPass(true, pass, pair);
+        assert(PresentWaits(pair) && PresentCalled(pair) == Present::Make && !pair.waitOwed);
+    }
+    // a first pass presents twice (a draw the mod did not see): only one is held
+    PresentPass(true, Pass::First, pair);
+    assert(PresentCalled(pair) == Present::Hold && PresentCalled(pair) == Present::Make);
+    assert(!PresentWaits(pair) && PresentWaits(pair));
+    // a draw inside the first pass (Alone before the present): nothing is held
+    PresentPass(true, Pass::First, pair);
+    PresentPass(true, Pass::Alone, pair);
+    assert(PresentCalled(pair) == Present::Make && PresentWaits(pair));
+    // switched off between a held present and the next wait: the wait is still left out, then all is the game's
+    PresentPass(true, Pass::First, pair);
+    assert(PresentCalled(pair) == Present::Hold);
+    PresentPass(false, Pass::Second, pair);
+    assert(!PresentWaits(pair) && PresentCalled(pair) == Present::Make && PresentWaits(pair));
+    // a first pass with no second (the pair was not finished): the next frame's wait is the one left out
+    PresentPass(true, Pass::First, pair);
+    assert(PresentCalled(pair) == Present::Hold);
+    PresentPass(true, Pass::Alone, pair);
+    PresentPass(true, Pass::First, pair);
+    assert(!PresentWaits(pair) && PresentCalled(pair) == Present::Hold);
+    PresentPass(true, Pass::Second, pair);
+    assert(!PresentWaits(pair) && PresentCalled(pair) == Present::Make);
+
+    // the swap chain's table with Present replaced
+    uintptr_t copied[TableBefore + SwapChainSlots], out[TableBefore + SwapChainSlots] = {}, original = 0;
+    for (size_t i = 0; i < std::size(copied); ++i) copied[i] = 0x7000 + i * 8;
+    const uintptr_t shim = 0x123456;
+    assert(ShimTable(copied, TableBefore, SwapChainSlots, PresentSlot, shim, out, original));
+    assert(original == copied[TableBefore + PresentSlot] && out[TableBefore + PresentSlot] == shim);
+    for (size_t i = 0; i < std::size(copied); ++i) assert(i == TableBefore + PresentSlot || out[i] == copied[i]);
+    assert(!ShimTable(copied, TableBefore, PresentSlot, PresentSlot, shim, out, original));     // a table that ends before the slot
+    assert(!ShimTable(nullptr, TableBefore, SwapChainSlots, PresentSlot, shim, out, original));
+    assert(!ShimTable(copied, TableBefore, SwapChainSlots, PresentSlot, 0, out, original));
+    copied[TableBefore + PresentSlot] = 0;
+    assert(!ShimTable(copied, TableBefore, SwapChainSlots, PresentSlot, shim, out, original));  // an empty entry
+    copied[TableBefore + PresentSlot] = shim;
+    assert(!ShimTable(copied, TableBefore, SwapChainSlots, PresentSlot, shim, out, original));  // already ours
+
+    // the fingerprints against what the hooks rely on
+    using namespace gamepatches::abi;
+    const size_t n = sizeof PresentSig / 2;
+    assert(PresentSig[n - 3] == 0xff && PresentSig[n - 2] == 0x50 && PresentSig[n - 1] == PresentSlot * 8);   // call [rax + 0x40]
+    const size_t call = 21;                                                                             // the call in PresentCallSig
+    uint8_t d[4];
+    for (int i = 0; i < 4; ++i) d[i] = uint8_t(PresentCallSig[call + 1 + i]);
+    assert(PresentCallSig[call] == 0xe8 && PresentCallRva + call + 5 + int64_t(At(d)) == PresentRva);
+    for (int i = 0; i < 4; ++i) d[i] = uint8_t(PresentQueueSig[10 + i]);
+    assert(PresentQueueRva + 14 + int64_t(At(d)) == PresentCallRva);                                    // "no other presenter" goes to the call
+    assert(PresentTargetSig[10] == 0x49 && PresentTargetSig[11] == 0x8b && PresentTargetSig[12] == 0x48 &&
+           PresentTargetSig[13] == PresentChainLatencyHandle);                                          // mov rcx, [r8 + 0x40]
+    assert(PresentTargetSig[20] == 0x48 && PresentTargetSig[21] == 0x85 && PresentTargetSig[22] == 0xc9 && PresentTargetSig[23] == 0x74);   // test rcx, rcx / je
+    assert(PresentTargetHookBytes == 17 && PresentTargetHookBytes <= sizeof PresentTargetSig / 2 && PresentTargetSig[PresentTargetHookBytes] == 0x48);
+}
+
 int main() {
     Signatures();
     SelectionWalk();
     ShadowPasses();
+    PresentOnce();
     Displacements();
     Branches();
     Accounting();
@@ -299,6 +391,6 @@ int main() {
     Filter();
     Levels();
     std::puts("game patch plan: fingerprints, displacements, jumps into a place, the filter's cave and jump, out-of-reach refusal, levels, "
-              "the call that is no longer made and the shadows a second pass keeps passed");
+              "the call that is no longer made, the shadows a second pass keeps and the one present a pair passed");
     return 0;
 }

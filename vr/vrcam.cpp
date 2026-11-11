@@ -1434,6 +1434,7 @@ void LoadSettings() {
         patches.selectionWalk = IniB(L"game_patches", L"selection_walk", true);
         patches.shadowsOnce = IniB(L"game_patches", L"shadows_once", true);
         patches.cullOnce = IniB(L"game_patches", L"cull_once", true);
+        patches.presentOnce = IniB(L"game_patches", L"present_once", false);   // off: to be measured (PERFORMANCE.md "One present a pair")
         gamepatches::Configure(patches);
     }
     g_set.gameHeightFog.store(IniB(L"render", L"game_height_fog", false));
@@ -7565,7 +7566,8 @@ uintptr_t HookDrawGameScreen(int a) {
 #ifdef D2RVR_NATIVE_OPENXR
     framevr::drawsampler::EnterPass(0);
 #endif
-    gamepatches::EyePass(gamepatches::Pass::First);    // [game_patches] shadows_once, cull_once: the first of this frame's two draws
+    gamepatches::EyePass(gamepatches::Pass::First);    // [game_patches] shadows_once, cull_once, present_once: the first of this frame's two draws
+    if (replay) gamepatches::KeepPresent();            // a replayed right eye is not a second draw: this pass's present is the pair's
     const uintptr_t leftR = OrigDrawGameScreen(a);
     gamepatches::EyePass(gamepatches::Pass::Alone);
 #ifdef D2RVR_NATIVE_OPENXR
