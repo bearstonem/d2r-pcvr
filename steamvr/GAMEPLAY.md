@@ -167,6 +167,10 @@ described with the right fist is done with the left, toward the other side). In 
 already turned round: VR Settings, the Controller guide, the wheels and the MOTIONS page name the hand that
 does each thing. Every weapon kind is mirrored too: a bow is held in the right hand and drawn with the left,
 a crossbow, staff, spear, polearm or two-handed weapon is led by the left hand. Details: [Left-handed play](../CONTROLS.md#left-handed-play-experimental).
+With **Sticks stay right-handed** (under Left-handed, shown while it is on) the sticks are not exchanged: read
+"left stick" and "right stick" as written (the left stick walks, the right stick turns, runs / walks, shows
+loot names and zooms the maps), and Walk direction: Controller follows the left controller. A stick's click
+stays with its hand: each hand's wheel opens from its own stick ([Sticks stay right-handed](../CONTROLS.md#sticks-stay-right-handed)).
 
 | Action | Control |
 |---|---|
@@ -611,7 +615,7 @@ sets the page's rows back to their defaults, with **Undo reset** for 6 seconds.
 | Gameplay > Physics | Rolling bottles, knockable props, pushable bodies, and monsters' and townsfolk's heads turning to you |
 | Comfort > Moving | Smooth turning with its snap angle or turn speed, and movement speed |
 | Comfort > Body | Seated play, **Height and arm span** (**Calibrate body**, **Set eye height**) with the **T cross to calibrate** switch under it (standing only), and the belt's height and reach |
-| Controls > Hands | **Walk direction**, **Left-handed (experimental)** (mirrors the hands, buttons, sticks, menu laser, wrist HUD, held menu, class motions and the words that name them), **Stick toggle** and button names |
+| Controls > Hands | **Walk direction**, **Left-handed (experimental)** (mirrors the hands, buttons, sticks, menu laser, wrist HUD, held menu, class motions and the words that name them), **Sticks stay right-handed** under it while it is on (the left stick still walks and the right one turns; Off by default), **Stick toggle** and button names |
 | Controls > Vibration | Overall vibration and separate melee, short melee taps, bow draw, bow/throw release, spell, loot/potion/menu and alert strengths; **Feel it** on a row's card |
 | Interface > Wrist | Life and mana location and tilt, skill cooldowns between the orbs, map and compass location, map view (Isometric, Top-down, Full map or Full top-down), turning the map with you, buffs and companions |
 | Interface > Menus | Menu distance with **Hold menu** beside it (Leather by default: the tabbed menu on a hide in your left hand; Menu only: no hide; Off) and item details delay |
