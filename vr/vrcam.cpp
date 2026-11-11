@@ -4616,7 +4616,9 @@ bool Wanted() {
 }
 void Tick() {
     const bool wanted = Wanted();
-    targetlock::Pump(wanted || framevr::TCrossWantsTargets());   // the outline and locks stay on Wanted()
+    // an aimed throw's sigil takes the monster under it (toss.h): the list is kept fresh while the trap is in hand
+    if (framevr::TossAiming()) targetlock::Pump(true);
+    else targetlock::Pump(wanted || framevr::TCrossWantsTargets());   // the outline and locks stay on Wanted()
     static bool toldLegacy = false;   // once a session: the old single outline color still serves a hand
     if (!toldLegacy && vrsettings::LegacyHighlightUsed()) {
         toldLegacy = true;
@@ -10713,7 +10715,8 @@ bool RingWanted() {
     const auto now = GetTickCount64();
     return g_enabled.load() && g_inWorld.load() && !gamestate::MenuOpen() &&
         (((AimOn(framevr::settings::LandingCircles) || tacticalActive) && framevr::telegraph::AnyOn(marks, now)) ||
-         framevr::telegraph::SkillOn(marks, framevr::telegraph::TeleportMark, now));
+         framevr::telegraph::SkillOn(marks, framevr::telegraph::TeleportMark, now) ||
+         framevr::telegraph::SkillOn(marks, framevr::telegraph::TossMark, now));   // an aimed throw's sigil too (toss.h)
 }
 // Loot beams (same pass): while a Rare, Set or Unique item or a high rune lies near the hero.
 bool BeamWanted() {
@@ -11795,7 +11798,9 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
                 // a strip: its direction (grid x/y are world x/z) and half-length in world units; 0 = a circle; w 1:
                 // Teleport's sigil (D2R_DepthFog.fx TeleportSigil)
                 const bool teleport = mark.skill == TeleportMark;
-                const float dir[4] = {mark.dirX, mark.dirY, mark.halfLength * 2.0f, teleport ? 1.0f : 0.0f};
+                // an aimed throw's (TossMark): the same sigil in its skill's color, without the pillar
+                const bool sigil = teleport || mark.skill == framevr::telegraph::TossMark;
+                const float dir[4] = {mark.dirX, mark.dirY, mark.halfLength * 2.0f, sigil ? 1.0f : 0.0f};
                 if (teleport && draw.on && tele[3] <= 0.0f) { tele[0] = ring[0]; tele[1] = ring[1]; tele[2] = ring[2]; tele[3] = ring[3]; }
                 snprintf(n, sizeof n, "RingDir%d", k); SetFloats(rt, n, dir, 4);
             }
@@ -12653,4 +12658,18 @@ D2RL_PLUGIN_EXPORT void D2RLoaderUnloadPlugin() noexcept {
     framevr::logging::Stop();
 #endif
     g_ctx = nullptr;
+}
+// The monster nearest a cell (transport.h): an aimed throw's sigil takes the monster under it (toss.h).
+namespace framevr {
+bool MonsterNearCell(float x, float y, float within, float& monsterX, float& monsterY, uint32_t* id) {
+    const auto s = targetlock::Get();
+    if (!s.at || GetTickCount64() - s.at > 500) return false;
+    int best = -1; float nearest = within;
+    for (int i = 0; i < s.count; ++i)
+        if (const float d = std::hypot(s.targets[i].x - x, s.targets[i].y - y); d <= nearest) { nearest = d; best = i; }
+    if (best < 0) return false;
+    monsterX = s.targets[best].x; monsterY = s.targets[best].y;
+    if (id) *id = s.targets[best].id;
+    return true;
+}
 }

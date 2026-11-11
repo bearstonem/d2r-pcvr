@@ -170,6 +170,11 @@ int AimRulesSkill();         // the cast skill (any), -1 none; with its game "di
 // A trap or bomb thrown to place (#224): where its arc landed, in grid cells,
 // for that skill's cast (skill -1: any) just after the throw.
 bool TossTarget(int skill,float& x,float& y);
+// A trap or throwing potion is in the hand, its throw aimed by a sigil (toss.h): the monster scan runs for it.
+bool TossAiming();
+// The monster nearest a cell, within `within` cells of it (the game side's scan; false with none or no fresh
+// scan). Defined in vrcam.cpp.
+bool MonsterNearCell(float x,float y,float within,float& monsterX,float& monsterY,uint32_t* id=nullptr);
 // Teleport punched while its landing showed (spell_motion.h Output::landing): that landing, in grid
 // cells, for that skill's cast (skill -1: any) just after the punch.
 bool MotionLanding(int skill,float& x,float& y,int* landed=nullptr);   // landed: the landing's own skill (a query of skill -1 takes any)
