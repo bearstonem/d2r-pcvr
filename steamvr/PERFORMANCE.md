@@ -54,6 +54,39 @@ Pass, and whose end is the drain's end.
   drain ends with the Depth and Forward Pass at about +4.06: about 1.5 ms off
   a 9.4 ms eye pass.
 
+### profiler_accounting: no lock on every draw
+
+- **Found.** In the Depth Pass and the Forward Pass (2.65 and 2.62 ms a run,
+  one job each on a worker) 0.72 ms is inside one game function, `0xF13FC0`,
+  and the system's lock calls under it: exclusive SRW lock acquire and release
+  and the wait they park in. It is the game's built-in GPU profiler counting
+  the draw: once per draw the command list's accounting (`0xF117E0`, its only
+  caller) hands it the list's current profiler scope and the draw's
+  primitives, and it takes the profiler's one lock, adds 1 and the primitives
+  to two counters of that scope's record, and unlocks. Every thread recording
+  draws takes that same lock for every draw, so the passes that run side by
+  side wait for each other; Directional Shadows has 0.66 ms of it too.
+- **Who reads the counts.** The profiler folds them into its result table at
+  the next frame begin; the only lookups into that table found are in the
+  game's developer windows (graphics / drawcall / world art profiling, a stats
+  window) and a stats dump. The game has a dynamic resolution setting; nothing
+  was found that feeds it from these counts, and the profiler's GPU times are
+  not touched by this patch. That search was static and is not a proof.
+- **The patch.** One byte: in `0xF117E0` the 2-byte "list not counted by the
+  profiler -> skip" jump at `0xF11849` becomes an unconditional jump of the
+  same distance, to the function's own end. The function called returns
+  nothing, takes and releases its lock inside itself and writes nothing but
+  the two counters; the caller's own counters (per list and a global table)
+  are before the jump and stay. Scope begin and end, with their GPU
+  timestamps, are other functions and are not touched.
+- **Proven before writing:** 36 bytes from the test to the caller's last
+  byte (the jump, both calls with their distances, the function's end the
+  jump goes to) and the first 33 bytes of `0xF13FC0`.
+- **Expected.** About 0.7 ms off each Depth Pass and Forward Pass run and off
+  Directional Shadows. Those are not the end of the drain today: **alone it
+  does not shorten the pass**. After `transparent_filter` they are, and the
+  drain should end about 0.7 ms earlier.
+
 ### How a patch goes in
 
 - Only between frames: on the draw thread at the top of the mod's hook on the
@@ -88,6 +121,10 @@ another capture (another number), and compare:
   or Forward Pass now the last long task; table 8, `Late Post Processing`:
   `D2RLoader.exe+0xFDC510` no longer near 88% of it. Samples in the new code
   itself show as code in no module.
+- `profiler_accounting`: table 8, `Depth Pass` and `Forward Pass`:
+  `D2RLoader.exe+0xF13FC0` gone from the inclusive table (d), ntdll's share
+  (a) down from 28.6% to a few percent, no `NtWaitForAlertByThreadId` row by
+  that function (b); table 7: both tasks' mean run about 0.7 ms shorter.
 
 **Risks, plainly.** The analysis was made on a dump of the game's code from
 3.3.93787; the running game (3.4.95041) is only known to have the same

@@ -30,6 +30,7 @@ static void Signatures() {
     using namespace gamepatches::abi;
     const struct { const uint16_t* sig; size_t size; } all[] = {
         {FilterHeadSig, sizeof FilterHeadSig / 2}, {FilterLoopSig, sizeof FilterLoopSig / 2}, {FilterSkipSig, sizeof FilterSkipSig / 2},
+        {AccountCallSig, sizeof AccountCallSig / 2}, {AccountSig, sizeof AccountSig / 2},
     };
     for (const auto& s : all) {
         uint8_t bytes[128];
@@ -90,6 +91,21 @@ static void Branches() {
     assert(FilterFunctionRva < FilterHeadRva && FilterSkipRva + sizeof skip < FilterFunctionEnd);
 }
 
+// The profiler accounting call: what the fingerprint itself proves about the jump that is changed.
+static void Accounting() {
+    using namespace gamepatches::abi;
+    uint8_t call[sizeof AccountCallSig / 2];
+    for (size_t i = 0; i < sizeof call; ++i) call[i] = uint8_t(AccountCallSig[i]);
+    assert(call[AccountJumpAt] == 0x74);                                   // je, one byte of distance
+    const uint64_t target = AccountCallRva + AccountJumpAt + 2 + call[AccountJumpAt + 1];
+    assert(target == AccountCallRva + 25);                                 // past both calls ...
+    const uint8_t end[] = {0x48, 0x8B, 0x5C, 0x24, 0x30, 0x48, 0x83, 0xC4, 0x20, 0x5F, 0xC3};   // ... at the function's end: restore, return
+    assert(sizeof call == 25 + sizeof end && !std::memcmp(call + 25, end, sizeof end));
+    assert(call[AccountSecondCallAt] == 0xE8);
+    assert(AccountCallRva + AccountSecondCallAt + 5 + At(call + AccountSecondCallAt + 1) == AccountRva);   // the call skipped is the function proven
+    assert(AccountJumpAlways == 0xEB);                                     // jmp rel8: same length, same distance
+}
+
 static void Filter() {
     // The game at 0x7FF6'0000'0000, the cave 0x10000 below it.
     const uint64_t base = 0x7FF600000000ull, site = base + 0xFDC740, skip = base + 0xFDCAAD, cave = base - 0x10000;
@@ -145,6 +161,7 @@ int main() {
     Signatures();
     Displacements();
     Branches();
+    Accounting();
     Filter();
     Levels();
     std::puts("game patch plan: fingerprints, displacements, jumps into a place, the filter's cave and jump, out-of-reach refusal and levels passed");

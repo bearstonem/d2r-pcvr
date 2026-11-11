@@ -11,6 +11,7 @@ namespace gamepatches {
 
 struct Wanted {
     bool transparentFilter = false;    // [game_patches] transparent_filter
+    bool profilerAccounting = false;   // [game_patches] profiler_accounting
 };
 
 // From the settings, on any thread, as often as they are read. The first call says what is wanted in the log.

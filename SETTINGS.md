@@ -200,3 +200,4 @@ so in a `Frame game patches:` line.
 | Key | 1 = |
 | --- | --- |
 | `transparent_filter` | The transparent pass's "Ghost" filter tests a draw record's flags before it reads the record's constants back from GPU upload memory. Same picture; shortens the Late Post Processing render task. |
+| `profiler_accounting` | A draw is no longer counted by the game's built-in GPU profiler, which took one lock for every draw of every thread. Only the game's own developer profiling windows read the counts. Shortens the Depth, Forward and shadow render tasks. |

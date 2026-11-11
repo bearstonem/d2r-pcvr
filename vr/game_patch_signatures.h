@@ -39,4 +39,25 @@ inline constexpr uint16_t FilterSkipSig[] = {
 // searched for any jump that would land inside the 7-byte load (gamepatch::BranchesInto); one found = no patch.
 inline constexpr uint64_t FilterFunctionRva = 0xfdc510, FilterFunctionEnd = 0xfdcdb3;
 
+// --- profiler_accounting ---------------------------------------------------------------------------------
+// The command list's draw accounting ends with: is the list counted by the GPU profiler (a byte of the list,
+// always 1)? no -> the function's end; yes -> get the profiler, hand it the list's scope index and the
+// draw's primitives. That call takes the profiler's one lock, adds 1 and the primitives to two counters of
+// the scope's record and unlocks: nothing is returned and nothing else is written. The stretch runs from
+// the test to the function's last byte; the patch makes the 2-byte conditional jump at AccountJumpAt
+// unconditional (its distance is kept), so neither call is made.
+inline constexpr uint64_t AccountCallRva = 0xf11845;
+inline constexpr uint16_t AccountCallSig[] = {
+    0x80,0x7f,0x15,0x00,0x74,0x13,0xe8,0x30,0x1f,0x00,0x00,0x8b,0x57,0x18,0x44,0x8b,0xc3,0x48,0x8b,0xc8,0xe8,0x62,0x27,0x00,0x00,
+    0x48,0x8b,0x5c,0x24,0x30,0x48,0x83,0xc4,0x20,0x5f,0xc3};
+inline constexpr uint32_t AccountJumpAt = 4;              // in AccountCallSig: 74 13, je to the function's end
+inline constexpr uint32_t AccountSecondCallAt = 20;       // in AccountCallSig: the call that is no longer made
+inline constexpr uint8_t AccountJumpAlways = 0xeb;        // jmp with the same one-byte distance
+// The function that is no longer called, up to its first branch: "not inside a profiled frame" (a byte of
+// the profiler) leaves at once; it keeps the scope index and the primitives and takes the lock after this.
+inline constexpr uint64_t AccountRva = 0xf13fc0;
+inline constexpr uint16_t AccountSig[] = {
+    0x48,0x89,0x5c,0x24,0x18,0x48,0x89,0x6c,0x24,0x20,0x56,0x48,0x83,0xec,0x30,0x80,0xb9,0xbc,0x03,0x00,0x00,0x00,0x41,0x8b,0xe8,
+    0x48,0x63,0xf2,0x48,0x8b,0xd9,0x74,0x6e};
+
 }  // namespace gamepatches::abi

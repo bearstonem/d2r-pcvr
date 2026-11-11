@@ -156,10 +156,36 @@ void RemoveFilter() {
     }
 }
 
+// --- profiler_accounting ---------------------------------------------------------------------------------------
+Patch account{"profiler_accounting"};
+
+void ApplyAccount() {
+    uint8_t call[sizeof AccountCallSig / 2], body[sizeof AccountSig / 2];
+    uint64_t differs = 0;
+    if (!Holds(AccountCallRva, AccountCallSig, call, differs) || !Holds(AccountRva, AccountSig, body, differs)) return NotYet(account, differs);
+    const uint8_t was[2] = {call[AccountJumpAt], call[AccountJumpAt + 1]}, now[2] = {AccountJumpAlways, call[AccountJumpAt + 1]};
+    if (!d2rsig::Patch(AccountCallRva + AccountJumpAt, was, sizeof was, now, sizeof now)) return Refuse(account, "the loader refused the write at RVA " + Hex(AccountCallRva + AccountJumpAt));
+    account.state = State::Applied;
+    Say("profiler_accounting applied: a draw no longer takes the game's GPU profiler lock to be counted (the jump at RVA " + Hex(AccountCallRva + AccountJumpAt) +
+        " is taken always; " + std::to_string(sizeof call + sizeof body) + " bytes of the game's code proven first). The game's own profiling windows would show no draws or primitives per scope");
+}
+
+void RemoveAccount() {
+    const uint8_t now[2] = {AccountJumpAlways, uint8_t(AccountCallSig[AccountJumpAt + 1])}, was[2] = {uint8_t(AccountCallSig[AccountJumpAt]), uint8_t(AccountCallSig[AccountJumpAt + 1])};
+    if (d2rsig::Patch(AccountCallRva + AccountJumpAt, now, sizeof now, was, sizeof was)) {
+        account.state = State::Off;
+        Say("profiler_accounting taken out: the game's own bytes are back at RVA " + Hex(AccountCallRva + AccountJumpAt));
+    } else {
+        account.state = State::Refused;
+        Say("profiler_accounting could NOT be taken out: the loader refused the write at RVA " + Hex(AccountCallRva + AccountJumpAt) + "; it stays in until the game is closed");
+    }
+}
+
 // --- all of them ----------------------------------------------------------------------------------------------
 struct Entry { Patch* patch; void (*apply)(); void (*remove)(); };
 const Entry entries[] = {
     {&filter, &ApplyFilter, &RemoveFilter},
+    {&account, &ApplyAccount, &RemoveAccount},
 };
 
 std::atomic<bool> dirty{false};       // the settings changed, or something still waits for the game's code
@@ -178,7 +204,7 @@ std::string Summary() {
 }  // namespace
 
 void Configure(const Wanted& wanted) {
-    const bool want[] = {wanted.transparentFilter};
+    const bool want[] = {wanted.transparentFilter, wanted.profilerAccounting};
     bool changed = false;
     for (size_t i = 0; i < std::size(entries); ++i)
         if (entries[i].patch->wanted.exchange(want[i]) != want[i]) changed = true;
