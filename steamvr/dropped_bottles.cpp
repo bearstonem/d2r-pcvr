@@ -1,4 +1,5 @@
 #include "dropped_bottles.h"
+#include "physics_worlds.h"
 #include <box3d/box3d.h>
 #include <algorithm>
 #include <span>
@@ -84,9 +85,10 @@ struct World::Impl {
         def.gravity={0,-9.81f,0};
         def.workerCount=1; // serial: Box3D starts no threads in the game process
         def.contactSpeed=ContactSpeed;
+        std::lock_guard table(physics::WorldTable());   // physics_worlds.h: Box3D's one table of worlds
         world=b3CreateWorld(&def);
     }
-    ~Impl() {if(b3World_IsValid(world))b3DestroyWorld(world);}
+    ~Impl() {std::lock_guard table(physics::WorldTable());if(b3World_IsValid(world))b3DestroyWorld(world);}
     static void Destroy(b3BodyId& id) {if(!B3_IS_NULL(id)&&b3Body_IsValid(id))b3DestroyBody(id);id=b3_nullBodyId;}
     bool Live() const {return !B3_IS_NULL(ground);}
     unsigned MovingCount() const {return unsigned(std::count_if(pieces.begin(),pieces.end(),[](const Piece& p){return p.moving;}));}
