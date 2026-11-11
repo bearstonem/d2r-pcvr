@@ -1430,10 +1430,10 @@ void LoadSettings() {
         patches.transparentFilter = IniB(L"game_patches", L"transparent_filter", true);
         patches.profilerAccounting = IniB(L"game_patches", L"profiler_accounting", true);
         patches.drawDebugNames = IniB(L"game_patches", L"draw_debug_names", true);
-        // Being measured, off unless written by hand (steamvr/PERFORMANCE.md "Once per pair")
-        patches.selectionWalk = IniB(L"game_patches", L"selection_walk", false);
-        patches.shadowsOnce = IniB(L"game_patches", L"shadows_once", false);
-        patches.cullOnce = IniB(L"game_patches", L"cull_once", false);
+        // On like the three above since the November 10 headset run (steamvr/PERFORMANCE.md "Once per pair")
+        patches.selectionWalk = IniB(L"game_patches", L"selection_walk", true);
+        patches.shadowsOnce = IniB(L"game_patches", L"shadows_once", true);
+        patches.cullOnce = IniB(L"game_patches", L"cull_once", true);
         gamepatches::Configure(patches);
     }
     g_set.gameHeightFog.store(IniB(L"render", L"game_height_fog", false));

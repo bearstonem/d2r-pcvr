@@ -2,8 +2,8 @@
 // [game_patches]: small changes to the game's own render code, each on for every install (no setting
 // in VR Settings or the shipped d2r_pcvr.ini; [game_patches] <name>=0 written there by hand takes one out, to tell
 // a fault from a patch) (steamvr/PERFORMANCE.md "Render task patches"; the bytes each one needs are in
-// game_patch_signatures.h, what it writes in steamvr/game_patch_plan.h). Three more are being measured and
-// are off unless their key is written by hand (PERFORMANCE.md "Once per pair"): selection_walk is a patch like
+// game_patch_signatures.h, what it writes in steamvr/game_patch_plan.h). Three more, on for every install
+// in the same way (PERFORMANCE.md "Once per pair"): selection_walk is a patch like
 // the others; shadows_once and cull_once are hooks that act in the second eye pass of a pair (EyePass below).
 //
 // A patch goes in, and comes out, only in BetweenFrames: on the thread that draws, before a frame's first eye
@@ -16,10 +16,10 @@ struct Wanted {
     bool transparentFilter = true;    // [game_patches] transparent_filter
     bool profilerAccounting = true;   // [game_patches] profiler_accounting
     bool drawDebugNames = true;       // [game_patches] draw_debug_names
-    // Being measured: off unless the key is written by hand (steamvr/PERFORMANCE.md "Once per pair").
-    bool selectionWalk = false;       // [game_patches] selection_walk
-    bool shadowsOnce = false;         // [game_patches] shadows_once
-    bool cullOnce = false;            // [game_patches] cull_once
+    // On for every install since the November 10 headset run (steamvr/PERFORMANCE.md "Once per pair").
+    bool selectionWalk = true;       // [game_patches] selection_walk
+    bool shadowsOnce = true;         // [game_patches] shadows_once
+    bool cullOnce = true;            // [game_patches] cull_once
 };
 
 // From the settings, on any thread, as often as they are read. The first call says what is wanted in the log.

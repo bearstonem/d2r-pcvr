@@ -2,19 +2,34 @@
 
 ## Once per pair, November 10
 
-**Not measured and not tried in a headset.** Three more switches in
-`[game_patches]`, each off unless its key is written into the installed
-`d2r_pcvr.ini` by hand (`=1`; `=0` or no key takes it out again at the next
-frame). No key in the shipped INI, nothing in VR Settings. They were built
-from the disassembly of the 3.3.93787 code and have not run in the game:
-switch them on one at a time and look for the log lines below.
+**On for every install since the headset run below**, like the three patches
+of the next section: no key in the shipped INI, nothing in VR Settings. They go
+in at the first frame drawn in the world. To tell a fault from one of them,
+`[game_patches]` with `selection_walk=0`, `shadows_once=0` or `cull_once=0`
+written into the installed `d2r_pcvr.ini` by hand takes it out at the next
+frame (the hooks of the two "once" switches stay in and pass every call
+through).
 
-```ini
-[game_patches]
-selection_walk=1
-shadows_once=1
-cull_once=1
-```
+**Measured, November 10** (SteamVR, headset at 120 Hz so the runtime asks for
+60 pairs a second, Both eyes, a field fight; each switched on live with a 30 s
+capture after it; the scene changed between captures):
+
+| second eye pass, ms | before | after |
+| --- | --- | --- |
+| `selection_walk`: the walk (`0xFB1780`) | 0.055 | 0.001 |
+| `shadows_once`: Shadow Directional Draw Call Collect | 0.94 | 0.01 |
+| `shadows_once`: Directional Shadows | 0.97 | 0.05 |
+| `shadows_once`: Negative Shadows | 0.20 | 0.06 |
+| `cull_once`: the cull kick (`0xD9B4D0`) | 0.23 | 0.004 |
+
+Every second pass kept the first's shadows and, after the first pair, left its
+cull out: no pass fell back in about five minutes. On the clock the second eye
+pass is about 0.9 ms shorter than the first (6.06 against 6.99 ms; 0.4 ms
+apart before), so about half a millisecond a pair: the pass still waits for
+its Depth and Forward tasks. One 278 ms pair was logged as the four shadow
+hooks went in during a fight; at the first frame in the world that falls in
+the load. The owner saw the picture as before. Not tried: interiors, other
+acts, a camera without a look-at point, switching them off again in play.
 
 The mod draws one game frame twice, an eye a time. A capture taken with the
 three patches of the next section in (capture 7 there) shows work in each
