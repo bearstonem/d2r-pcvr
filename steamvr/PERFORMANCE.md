@@ -735,3 +735,24 @@ one identity, buffer and placement read per pose call. These were built from a
 code review; the gain has not been measured in a headset. The 2026-11-09 16:27
 session before them logged look-at 6-14.6 and bodies 5-8.4 ms a second in
 fights, with a 38-53 ms longest pair in every ten-second window.
+
+## Draw and bind callbacks, November 10
+
+The add-on's ReShade callbacks run for every draw and every pipeline bind on
+the game's recording threads, about 11,000 of each per eye pass. Three changes
+take work out of them; none changes what is drawn in VR:
+
+- New full installs ship ReShade's Generic Depth add-on off (`[ADDON]
+  DisabledAddons=Generic Depth` in the installed ReShade.ini). It watched every
+  draw call for a depth buffer the VR picture does not read. Updates keep the
+  player's ReShade.ini; `[render] reshade_depth=1` turns it back on.
+- With Lower detail at edges off, the foveation draw, bind, target and viewport
+  callbacks return after one load (`steamvr/foveation_switch.h`). The log then
+  says `Frame foveation: off; draws not counted` instead of counting draws.
+  Switched on while playing, a command list is followed from its next reset.
+- The light-bounds and menu-world bind callbacks compare the bound pipeline
+  with the few they replace (`steamvr/pipeline_set.h`) before the device
+  checks, the cache and any lock.
+
+The gain is an estimate from reading the code, about 0.1 ms a pass on the draw
+thread; it has not been measured, in a headset or otherwise.

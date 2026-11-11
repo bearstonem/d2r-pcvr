@@ -1,12 +1,14 @@
 #include "ui_world.h"
 #include "native_lock.h"
 #include "generation_cache.h"
+#include "pipeline_set.h"
 #include "hook_metrics.h"
 #include <windows.h>
 #include <d3dcompiler.h>
 #include <reshade.hpp>
 #include <atomic>
 #include <mutex>
+#include <shared_mutex>
 #include <unordered_map>
 #include <vector>
 
@@ -16,6 +18,9 @@ using namespace reshade::api;
 NativeMutex mutex;
 std::atomic<uint64_t> generation{1};
 std::unordered_map<uint64_t,pipeline> copies;
+// The originals in `copies` and `stampCopies`, kept with them under `mutex`: every other bind
+// leaves Bind on this lock-free test.
+PipelineSet<> replaced;
 std::atomic<bool> active{false},ready{false};
 // The game's stencil stamp of its opaque menu panels (pixel shader 04cb598f143321d4, found
 // with Ctrl+F10 traces on 2026-10-28): one depth-only draw writes the panel's rectangle into
@@ -68,7 +73,7 @@ void CopyStamp(device* device,pipeline_layout layout,uint32_t count,const pipeli
     pipeline replacement{};ours=true;
     const bool ok=device->create_pipeline(layout,count,description.data(),&replacement);ours=false;
     if(!ok){if(logger)logger("Frame leather: the stencil-free copy of the menu's stamp could not be made; the world stays black behind the menu");return;}
-    {std::lock_guard lock(mutex);stampCopies.emplace(original.handle,replacement);++generation;}
+    {std::lock_guard lock(mutex);stampCopies.emplace(original.handle,replacement);replaced.Add(original.handle);++generation;}
     static std::atomic<bool> told{false};
     if(!told.exchange(true)&&logger)logger("Frame leather: the game's menu stencil stamp found; lifted while the leather is out");
 }
@@ -91,7 +96,7 @@ void Created(device* device,pipeline_layout layout,uint32_t count,const pipeline
         pipeline replacement{};ours=true;
         const bool ok=device->create_pipeline(layout,count,description.data(),&replacement);ours=false;
         if(!ok){if(logger)logger("Frame panels: verified compositor pipeline creation failed; retaining flat menu fallback");return;}
-        {std::lock_guard lock(mutex);copies.emplace(original.handle,replacement);++generation;}
+        {std::lock_guard lock(mutex);copies.emplace(original.handle,replacement);replaced.Add(original.handle);++generation;}
         if(!ready.exchange(true)&&logger)logger("Frame panels: verified SDR world-only composite ready for both eyes");
         return;
     }
@@ -100,26 +105,29 @@ void Destroyed(device* device,pipeline original) {
     if(ours)return;
     pipeline replacement{};
     {std::lock_guard lock(mutex);
-        if(auto stamp=stampCopies.find(original.handle);stamp!=stampCopies.end()){replacement=stamp->second;stampCopies.erase(stamp);++generation;}
+        if(auto stamp=stampCopies.find(original.handle);stamp!=stampCopies.end()){replacement=stamp->second;stampCopies.erase(stamp);replaced.Remove(original.handle);++generation;}
         else {auto it=copies.find(original.handle);if(it==copies.end())return;
-            replacement=it->second;copies.erase(it);ready.store(!copies.empty());++generation;}}
+            replacement=it->second;copies.erase(it);replaced.Remove(original.handle);ready.store(!copies.empty());++generation;}}
     ours=true;device->destroy_pipeline(replacement);ours=false;
 }
 void Bind(command_list* commands,pipeline_stage stages,pipeline original) {
-    hookmetrics::Scope measured(hookmetrics::UiWorldBind);
+    // ReShade passes every bind with pipeline_stage::all, so the stages reject nothing: the modes
+    // and the handle do, before the metric, the cache and any lock.
     const bool world=active.load(std::memory_order_relaxed),stamp=behindMenu.load(std::memory_order_relaxed);
-    if(ours||!(world||stamp)||uint32_t(stages&pipeline_stage::all_graphics)==0)return;
+    if(!(world||stamp)||!replaced.MayContain(original.handle))return;
+    hookmetrics::Scope measured(hookmetrics::UiWorldBind);
+    if(ours||uint32_t(stages&pipeline_stage::all_graphics)==0)return;
     pipeline replacement{};
     static thread_local GenerationCache<pipeline> cache;
     const auto version=generation.load(std::memory_order_acquire);
     if(!cache.Get(original.handle,version,replacement)) {
-        std::lock_guard lock(mutex);
+        std::shared_lock lock(mutex);
         if(auto it=copies.find(original.handle);it!=copies.end())replacement=it->second;
         else if(auto s=stampCopies.find(original.handle);s!=stampCopies.end())replacement=s->second;
         cache.Put(original.handle,version,replacement);
     }
     if(replacement.handle) {   // each copy only in its own mode
-        std::lock_guard lock(mutex);
+        std::shared_lock lock(mutex);
         const bool isStamp=stampCopies.count(original.handle)!=0;
         if(isStamp?!stamp:!world)return;
     }
