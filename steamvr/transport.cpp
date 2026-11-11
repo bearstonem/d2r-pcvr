@@ -309,7 +309,7 @@ int MotionsKey(int skillClass) {
     switch(skillClass) {
     case 0:return settings::MotionsAmazonOff;case 1:return settings::MotionsOff;case 2:return settings::MotionsNecromancerOff;
     case 3:return settings::MotionsPaladinOff;case 4:return settings::MotionsBarbarianOff;case 5:return settings::MotionsDruidOff;
-    case 6:return settings::MotionsAssassinOff;default:return -1;
+    case 6:return settings::MotionsAssassinOff;case 7:return settings::MotionsWarlockOff;default:return -1;
     }
 }
 // The wheel's glyph settings ([glyphs]) are saved here, one save at a time; until it lands the wheel
@@ -2528,7 +2528,7 @@ void MotionPointer() {
     const auto mid=ray+direction*(beamLength*.5f);
     beamPose=XrPose({mid,math::BeamOrientation(direction,V(head.position)-mid)});pointerVisible=true;
     if(pointerHit) {
-        motionInput.hover=interaction::WheelCell(hit.u,hit.v,interactionOutput.hover,interactions.Page(),hand,interactionInput.snapshot.developer,interactions.DeveloperPage(),interactionOutput.leftStrikes>=0,interactionOutput.motionsBox);
+        motionInput.hover=interaction::WheelCell(hit.u,hit.v,interactionOutput.hover,interactions.Page(),hand,interactionInput.snapshot.developer,interactions.DeveloperPage(),interactionOutput.leftStrikes>=0,interactionOutput.motionsBox,spellmotion::PageOf(interactionInput.snapshot.skillClass).count);
         dotPose=XrPose({hit.point+math::Rotate(pose.q,{0,0,.003f}),pose.q});
     }
 }

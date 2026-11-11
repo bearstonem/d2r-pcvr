@@ -28,7 +28,7 @@
 // multiple agents implement the motions", the table at claude.ai/artifact/MLr2xB4qEMTf8pzaTRKQ9T, codes
 // A1-A4, B1-B8, N1-N8 with N6 Lower Resist, S1-S7) take the Sorceress's engine and gate: one watcher per
 // motion, each class's detectors in its own header (motions_amazon.h, motions_barbarian.h,
-// motions_necromancer.h, motions_assassin.h, motions_paladin.h, motions_druid.h; ClassDone at the end of
+// motions_necromancer.h, motions_assassin.h, motions_paladin.h, motions_druid.h, motions_warlock.h; ClassDone at the end of
 // this file).
 //
 // Head-local frame (+X right, +Y up from the eyes, forward -Z, the head's yaw only); hand 0 is the right.
@@ -53,10 +53,13 @@ enum class Motion {None,FlingOut,PushDown,RubSnap,CrossGuard,ArmUp,MatchStrike,F
     BurstOfSpeed,Fade,CloakOfShadows,Venom,BladeShield,ShadowWarrior,MindBlast,                   // Assassin S1-S7
     Charge,BlessedHammer,HolyShield,FistOfHeavens,                                                // Paladin (2026-11-08)
     Werewolf,Werebear,                                                                            // Druid (2026-11-08)
+    SummonGoatman,SummonTainted,SummonDefiler,PsychicWard,RingOfFire,EldritchBlast,               // Warlock (2026-11-10)
+    HexBane,HexPurge,HexSiphon,SigilLethargy,SigilRancor,SigilDeath,
+    Abyss,FlameWave,Apocalypse,BloodBoil,
     End};
 constexpr int SorceressCount=int(Motion::Hydra);   // the Sorceress's, 1..SorceressCount ([motions] off: her bits)
 constexpr int MotionCount=int(Motion::End)-1;      // every class's, 1..MotionCount (a watcher each)
-constexpr int MaxCards=14;                         // a MOTIONS page's cards (interaction::MotionCards), one bit each
+constexpr int MaxCards=16;                         // a MOTIONS page's cards (interaction::MotionCards), one bit each
 inline Motion For(int skill) {
     switch(skill) {
     case 48:return Motion::FlingOut;      // Nova
@@ -84,6 +87,11 @@ inline Motion For(int skill) {
     case 277:return Motion::BladeShield;case 268:case 279:return Motion::ShadowWarrior;case 273:return Motion::MindBlast;
     case 107:return Motion::Charge;case 112:return Motion::BlessedHammer;case 117:return Motion::HolyShield;case 121:return Motion::FistOfHeavens;
     case 223:return Motion::Werewolf;case 228:return Motion::Werebear;
+    case 373:return Motion::SummonGoatman;case 376:return Motion::SummonTainted;case 377:return Motion::SummonDefiler;
+    case 387:return Motion::PsychicWard;case 394:return Motion::RingOfFire;case 384:return Motion::EldritchBlast;
+    case 385:return Motion::HexBane;case 389:return Motion::HexPurge;case 386:return Motion::HexSiphon;
+    case 393:return Motion::SigilLethargy;case 396:return Motion::SigilRancor;case 400:return Motion::SigilDeath;
+    case 402:return Motion::Abyss;case 398:return Motion::FlameWave;case 401:return Motion::Apocalypse;case 380:return Motion::BloodBoil;
     default:return Motion::None;
     }
 }
@@ -97,7 +105,7 @@ inline bool On(int skill,int off){const int b=Bit(skill);return b>=0&&!((off>>b)
 // Every class's MOTIONS page (owner, 2026-11-04: "Both grips, like Sorceress" for the Paladin's and the
 // Druid's gestures as well): its skills in card order, each turned off by a bit of the class's own
 // setting. The Sorceress's bit is her motion's number - 1 ([motions] off, as saved since 2026-11-03);
-// another class's is its card's. skillClass as the game's: 1 Sorceress, 3 Paladin, 5 Druid.
+// another class's is its card's. skillClass as the game's: 1 Sorceress, 3 Paladin, 5 Druid, 7 Warlock.
 constexpr int PaladinSkills[]={107,112,117,121};   // Charge, Blessed Hammer, Holy Shield, Fist of the Heavens
 constexpr int DruidSkills[]={223,228};             // Werewolf, Werebear
 // The table's order (owner, 2026-11-04): A1-A4, B1-B8, N1-N8 (N4 the golems' card, N6 Lower Resist), S1-S7.
@@ -110,6 +118,10 @@ constexpr int BarbarianSkills[]={149,138,155,154,130,146,132,142,143,151,131,150
 // 85: the left arm's golem, then Bone Wall, Poison Explosion and Raise Skeletal Mage (owner, 2026-11-05), after the table's
 constexpr int NecromancerSkills[]={68,70,74,75,66,91,92,88,85,78,83,80};
 constexpr int AssassinSkills[]={258,267,264,278,277,268,273};
+// The Warlock's (owner, 2026-11-10; class 7, D2R's own): what goes on a spot first - the demons, then the sigils -
+// Abyss and Flame Wave - then what has no target: the hexes, the ward, the blast, the ring, Apocalypse and Blood Boil
+// (motions_warlock.h). Sixteen: the one page with more than fourteen cards (interaction::MotionCardBounds).
+constexpr int WarlockSkills[]={373,376,377,393,396,400,402,398,385,389,386,387,384,394,401,380};
 struct Page {const int* skills=nullptr;int count=0;};
 inline Page PageOf(int skillClass) {
     switch(skillClass) {
@@ -120,6 +132,7 @@ inline Page PageOf(int skillClass) {
     case 4:return {BarbarianSkills,int(std::size(BarbarianSkills))};
     case 5:return {DruidSkills,int(std::size(DruidSkills))};
     case 6:return {AssassinSkills,int(std::size(AssassinSkills))};
+    case 7:return {WarlockSkills,int(std::size(WarlockSkills))};
     default:return {};
     }
 }
@@ -150,6 +163,10 @@ inline const char* SpellName(int skill) {
     case 80:return "Raise Skeletal Mage";
     case 258:return "Burst of Speed";case 267:return "Fade";case 264:return "Cloak of Shadows";case 278:return "Venom";
     case 277:return "Blade Shield";case 268:return "Shadow Warrior";case 279:return "Shadow Master";case 273:return "Mind Blast";
+    case 373:return "Summon Goatman";case 376:return "Summon Tainted";case 377:return "Summon Defiler";case 387:return "Psychic Ward";
+    case 394:return "Ring of Fire";case 384:return "Eldritch Blast";case 385:return "Hex: Bane";case 389:return "Hex: Purge";
+    case 386:return "Hex: Siphon";case 393:return "Sigil: Lethargy";case 396:return "Sigil: Rancor";case 400:return "Sigil: Death";
+    case 402:return "Abyss";case 398:return "Flame Wave";case 401:return "Apocalypse";case 380:return "Blood Boil";
     default:return "";
     }
 }
@@ -469,6 +486,9 @@ public:
     void CastFigures(float a,float b){castFigures[0]=a;castFigures[1]=b;}
     // The cast this frame leaves the history and scratch as they are (Blessed Hammer: the other fist's pump goes on).
     void KeepAfterCast(){keep=true;}
+    // One of the Engine's own motions (the Sorceress's first ten) watched as another class's shape (the Warlock's:
+    // motions_warlock.h), on this watcher's own state.
+    bool Own(Motion m){return m>Motion::None&&m<=Motion::Punch&&Done(m);}
     // The motion's first part is done and its second this fraction of the way (0..1) to its end
     // (Output::progress: Begun to 1). Several reports in a frame keep the most.
     void Toward(float fraction) {
@@ -726,7 +746,9 @@ private:
 #include "motions_assassin.h"
 #include "motions_paladin.h"
 #include "motions_druid.h"
+#include "motions_warlock.h"
 namespace framevr::spellmotion {
+inline bool Warlock(Motion m){return m>=Motion::SummonGoatman&&m<=Motion::BloodBoil;}
 inline bool Paladin(Motion m){return m>=Motion::Charge&&m<=Motion::FistOfHeavens;}
 inline bool Druid(Motion m){return m==Motion::Werewolf||m==Motion::Werebear;}
 inline bool ClassDone(Engine& e,Motion m) {
@@ -737,6 +759,7 @@ inline bool ClassDone(Engine& e,Motion m) {
     if(m>=Motion::BurstOfSpeed&&m<=Motion::MindBlast)return assassin::Done(e,m);
     if(Paladin(m))return paladin::Done(e,m);
     if(Druid(m))return druid::Done(e,m);
+    if(Warlock(m))return warlock::Done(e,m);
     return false;
 }
 inline const char* ClassCue(Motion m) {
@@ -747,6 +770,7 @@ inline const char* ClassCue(Motion m) {
     if(m>=Motion::BurstOfSpeed&&m<=Motion::MindBlast)return assassin::Cue(m);
     if(Paladin(m))return paladin::Cue(m);
     if(Druid(m))return druid::Cue(m);
+    if(Warlock(m))return warlock::Cue(m);
     return "no motion";
 }
 inline float ClassRest(Motion m){return Paladin(m)?paladin::Rest(m):Druid(m)?druid::Rest(m):-1.f;}
@@ -785,6 +809,7 @@ inline Watched OrderOf(int skillClass) {
     case 4:return {barbarian::Order,int(std::size(barbarian::Order))};
     case 5:return {druid::Order,int(std::size(druid::Order))};
     case 6:return {assassin::Order,int(std::size(assassin::Order))};
+    case 7:return {warlock::Order,int(std::size(warlock::Order))};
     default:return {};
     }
 }
