@@ -1429,6 +1429,7 @@ void LoadSettings() {
         gamepatches::Wanted patches;
         patches.transparentFilter = IniB(L"game_patches", L"transparent_filter", false);
         patches.profilerAccounting = IniB(L"game_patches", L"profiler_accounting", false);
+        patches.drawDebugNames = IniB(L"game_patches", L"draw_debug_names", false);
         gamepatches::Configure(patches);
     }
     g_set.gameHeightFog.store(IniB(L"render", L"game_height_fog", false));

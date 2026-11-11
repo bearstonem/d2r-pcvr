@@ -31,6 +31,8 @@ static void Signatures() {
     const struct { const uint16_t* sig; size_t size; } all[] = {
         {FilterHeadSig, sizeof FilterHeadSig / 2}, {FilterLoopSig, sizeof FilterLoopSig / 2}, {FilterSkipSig, sizeof FilterSkipSig / 2},
         {AccountCallSig, sizeof AccountCallSig / 2}, {AccountSig, sizeof AccountSig / 2},
+        {LevelGetSig, sizeof LevelGetSig / 2}, {LevelSetSig, sizeof LevelSetSig / 2}, {DrawNameBeginSig, sizeof DrawNameBeginSig / 2},
+        {DrawNameEndSig, sizeof DrawNameEndSig / 2}, {EventBeginSig, sizeof EventBeginSig / 2}, {EventEndSig, sizeof EventEndSig / 2},
     };
     for (const auto& s : all) {
         uint8_t bytes[128];
@@ -106,6 +108,30 @@ static void Accounting() {
     assert(AccountJumpAlways == 0xEB);                                     // jmp rel8: same length, same distance
 }
 
+// The debug event level: the fingerprints' own distances lead to the one int and to its reader.
+static void DebugNames() {
+    using namespace gamepatches::abi;
+    const auto bytes = [](const uint16_t* sig, size_t n, uint8_t* out) { for (size_t i = 0; i < n; ++i) out[i] = uint8_t(sig[i]); };
+    uint8_t get[7], set[7], begin[14], end[27], eventBegin[9], eventEnd[9];
+    bytes(LevelGetSig, 7, get); bytes(LevelSetSig, 7, set); bytes(DrawNameBeginSig, 14, begin); bytes(DrawNameEndSig, 27, end);
+    bytes(EventBeginSig, 9, eventBegin); bytes(EventEndSig, 9, eventEnd);
+    // mov eax, [rip + d] ; ret   and   mov [rip + d], ecx ; ret: both at the level's int
+    assert(get[0] == 0x8B && get[1] == 0x05 && get[6] == 0xC3 && LevelGetRva + 6 + At(get + 2) == LevelRva);
+    assert(set[0] == 0x89 && set[1] == 0x0D && set[6] == 0xC3 && LevelSetRva + 6 + At(set + 2) == LevelRva);
+    // the four tests call that reader ...
+    assert(DrawNameBeginRva + 5 + At(begin + 1) == LevelGetRva && DrawNameEndRva + 5 + At(end + 1) == LevelGetRva);
+    assert(EventBeginRva + 5 + At(eventBegin + 1) == LevelGetRva && EventEndRva + 5 + At(eventEnd + 1) == LevelGetRva);
+    // ... a draw's name on both sides against 1 (cmp eax, 1 ; jle), an event's begin and end against 0 (test eax, eax ; jle)
+    const uint8_t above1[] = {0x83, 0xF8, 0x01}, above0[] = {0x85, 0xC0};
+    assert(!std::memcmp(begin + 5, above1, 3) && begin[8] == 0x0F && begin[9] == 0x8E);
+    assert(!std::memcmp(end + 5, above1, 3) && end[8] == 0x7E);
+    assert(!std::memcmp(eventBegin + 5, above0, 2) && eventBegin[7] == 0x7E && !std::memcmp(eventEnd + 5, above0, 2) && eventEnd[7] == 0x7E);
+    // the draw's end event is the event end proven (its test is 9 bytes into that function)
+    assert(end[13] == 0xE8 && DrawNameEndRva + 18 + At(end + 14) == EventEndRva - 9);
+    // so the level written keeps the passes' events and drops the draws' names
+    assert(LevelWithoutDrawNames > 0 && !(LevelWithoutDrawNames > 1));
+}
+
 static void Filter() {
     // The game at 0x7FF6'0000'0000, the cave 0x10000 below it.
     const uint64_t base = 0x7FF600000000ull, site = base + 0xFDC740, skip = base + 0xFDCAAD, cave = base - 0x10000;
@@ -162,6 +188,7 @@ int main() {
     Displacements();
     Branches();
     Accounting();
+    DebugNames();
     Filter();
     Levels();
     std::puts("game patch plan: fingerprints, displacements, jumps into a place, the filter's cave and jump, out-of-reach refusal and levels passed");

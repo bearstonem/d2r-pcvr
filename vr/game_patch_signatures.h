@@ -60,4 +60,29 @@ inline constexpr uint16_t AccountSig[] = {
     0x48,0x89,0x5c,0x24,0x18,0x48,0x89,0x6c,0x24,0x20,0x56,0x48,0x83,0xec,0x30,0x80,0xb9,0xbc,0x03,0x00,0x00,0x00,0x41,0x8b,0xe8,
     0x48,0x63,0xf2,0x48,0x8b,0xd9,0x74,0x6e};
 
+// --- draw_debug_names --------------------------------------------------------------------------------------
+// The game's debug event level: one int in its data. Above 0 a pass's begin and end put a named event on the
+// command list; above 1 the draw submit also formats "Model: ... Mesh: ... Shader: ..." for every draw and
+// puts a begin and an end event around it. Nothing is patched in code here: the int is lowered to 1.
+inline constexpr uint64_t LevelRva = 0x2808a8c;
+// Its only reader and its only writer in the game's code, one instruction and a return each: their
+// distances prove where the int is. The writer is reached once, from the game's start-up.
+inline constexpr uint64_t LevelGetRva = 0xf13770;
+inline constexpr uint16_t LevelGetSig[] = {0x8b,0x05,0x16,0x53,0x8f,0x01,0xc3};
+inline constexpr uint64_t LevelSetRva = 0xf142b0;
+inline constexpr uint16_t LevelSetSig[] = {0x89,0x0d,0xd6,0x47,0x8f,0x01,0xc3};
+// The draw submit's two tests, before and after the draw: get the level, "not above 1" skips the name's
+// begin, and later the name's end. Both sides test the same number, so at 1 neither is issued.
+inline constexpr uint64_t DrawNameBeginRva = 0x103de6a;
+inline constexpr uint16_t DrawNameBeginSig[] = {0xe8,0x01,0x59,0xed,0xff,0x83,0xf8,0x01,0x0f,0x8e,0x83,0x00,0x00,0x00};
+inline constexpr uint64_t DrawNameEndRva = 0x103df82;
+inline constexpr uint16_t DrawNameEndSig[] = {
+    0xe8,0xe9,0x57,0xed,0xff,0x83,0xf8,0x01,0x7e,0x08,0x48,0x8b,0x0e,0xe8,0xdc,0x34,0xed,0xff,0x48,0x83,0xc4,0x50,0x41,0x5c,0x5f,0x5e,0xc3};
+// The event begin and end themselves: get the level, "not above 0" does nothing. At 1 the passes' own
+// events are issued as before, begin and end alike.
+inline constexpr uint64_t EventBeginRva = 0xf113d5;
+inline constexpr uint16_t EventBeginSig[] = {0xe8,0x96,0x23,0x00,0x00,0x85,0xc0,0x7e,0x3d};
+inline constexpr uint64_t EventEndRva = 0xf11479;
+inline constexpr uint16_t EventEndSig[] = {0xe8,0xf2,0x22,0x00,0x00,0x85,0xc0,0x7e,0x14};
+
 }  // namespace gamepatches::abi

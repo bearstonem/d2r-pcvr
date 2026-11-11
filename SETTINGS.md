@@ -201,3 +201,4 @@ so in a `Frame game patches:` line.
 | --- | --- |
 | `transparent_filter` | The transparent pass's "Ghost" filter tests a draw record's flags before it reads the record's constants back from GPU upload memory. Same picture; shortens the Late Post Processing render task. |
 | `profiler_accounting` | A draw is no longer counted by the game's built-in GPU profiler, which took one lock for every draw of every thread. Only the game's own developer profiling windows read the counts. Shortens the Depth, Forward and shadow render tasks. |
+| `draw_debug_names` | The game no longer formats a "Model / Mesh / Shader" debug name for every draw: its debug event level, when above 1, is set to 1 (the passes keep their own events). Shortens every render task that draws models. |

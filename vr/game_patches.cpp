@@ -181,11 +181,62 @@ void RemoveAccount() {
     }
 }
 
+// --- draw_debug_names ------------------------------------------------------------------------------------------
+Patch names{"draw_debug_names"};
+int32_t levelWas = 0;          // the game's level before it was lowered
+bool levelWritten = false;
+
+void ApplyNames() {
+    uint8_t get[sizeof LevelGetSig / 2], set[sizeof LevelSetSig / 2], begin[sizeof DrawNameBeginSig / 2], end[sizeof DrawNameEndSig / 2],
+        eventBegin[sizeof EventBeginSig / 2], eventEnd[sizeof EventEndSig / 2];
+    uint64_t differs = 0;
+    if (!Holds(LevelGetRva, LevelGetSig, get, differs) || !Holds(LevelSetRva, LevelSetSig, set, differs) ||
+        !Holds(DrawNameBeginRva, DrawNameBeginSig, begin, differs) || !Holds(DrawNameEndRva, DrawNameEndSig, end, differs) ||
+        !Holds(EventBeginRva, EventBeginSig, eventBegin, differs) || !Holds(EventEndRva, EventEndSig, eventEnd, differs)) return NotYet(names, differs);
+    const uintptr_t at = d2rsig::Addr(LevelRva);
+    int32_t level = 0;
+    if (!at || !framevr::ReadMemory(&level, reinterpret_cast<const void*>(at), sizeof level)) return NotYet(names, LevelRva);
+    switch (gamepatch::LevelDecision(level)) {
+    case gamepatch::Level::Refuse:
+        return Refuse(names, "the number at RVA " + Hex(LevelRva) + " is " + std::to_string(level) + ", not a debug event level");
+    case gamepatch::Level::Leave:
+        names.state = State::Applied;
+        levelWritten = false;
+        Say("draw_debug_names applied: nothing to change, the game's debug event level is " + std::to_string(level) + " - it does not name its draws");
+        return;
+    case gamepatch::Level::Lower: break;
+    }
+    const int32_t lowered = gamepatch::LevelWithoutDrawNames;
+    int32_t back = 0;
+    if (!framevr::WriteMemory(reinterpret_cast<void*>(at), &lowered, sizeof lowered) ||
+        !framevr::ReadMemory(&back, reinterpret_cast<const void*>(at), sizeof back) || back != lowered)
+        return Refuse(names, "the debug event level at RVA " + Hex(LevelRva) + " could not be written");
+    levelWas = level;
+    levelWritten = true;
+    names.state = State::Applied;
+    Say("draw_debug_names applied: the game's debug event level " + std::to_string(level) + " -> " + std::to_string(lowered) +
+        " (the int at RVA " + Hex(LevelRva) + "): a draw is no longer given a formatted name and its own debug event, the passes keep theirs");
+}
+
+void RemoveNames() {
+    names.state = State::Off;
+    if (!levelWritten) { Say("draw_debug_names off: nothing had been changed"); return; }
+    levelWritten = false;
+    const uintptr_t at = d2rsig::Addr(LevelRva);
+    int32_t level = 0;
+    if (at && framevr::ReadMemory(&level, reinterpret_cast<const void*>(at), sizeof level) && level == gamepatch::LevelWithoutDrawNames &&
+        framevr::WriteMemory(reinterpret_cast<void*>(at), &levelWas, sizeof levelWas))
+        Say("draw_debug_names taken out: the game's debug event level is " + std::to_string(levelWas) + " again");
+    else
+        Say("draw_debug_names off: the game's debug event level is no longer what this mod wrote (" + std::to_string(level) + "); left as it is");
+}
+
 // --- all of them ----------------------------------------------------------------------------------------------
 struct Entry { Patch* patch; void (*apply)(); void (*remove)(); };
 const Entry entries[] = {
     {&filter, &ApplyFilter, &RemoveFilter},
     {&account, &ApplyAccount, &RemoveAccount},
+    {&names, &ApplyNames, &RemoveNames},
 };
 
 std::atomic<bool> dirty{false};       // the settings changed, or something still waits for the game's code
@@ -204,7 +255,7 @@ std::string Summary() {
 }  // namespace
 
 void Configure(const Wanted& wanted) {
-    const bool want[] = {wanted.transparentFilter, wanted.profilerAccounting};
+    const bool want[] = {wanted.transparentFilter, wanted.profilerAccounting, wanted.drawDebugNames};
     bool changed = false;
     for (size_t i = 0; i < std::size(entries); ++i)
         if (entries[i].patch->wanted.exchange(want[i]) != want[i]) changed = true;

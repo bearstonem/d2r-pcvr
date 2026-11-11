@@ -87,6 +87,33 @@ Pass, and whose end is the drain's end.
   does not shorten the pass**. After `transparent_filter` they are, and the
   drain should end about 0.7 ms earlier.
 
+### draw_debug_names: no formatted name per draw
+
+- **Found.** In the Depth Pass 0.52 ms a run (19.7%) is under the game's
+  debug event begin (`0xF113C0`), nearly all of it in string formatting. The
+  draw submit function (`0x103DCD0`) asks for the game's debug event level and,
+  when it is above 1, formats `Model: %s Mesh: %s Shader: %s` and puts a begin
+  event with that name on the command list before the draw and an end event
+  after it: names for a graphics debugger, for every draw. The level is one
+  int in the game's data (RVA `0x2808A8C`) with one reader and one writer in
+  the game's code; the writer is reached once, from start-up, with a launch
+  option's value. In the captured session it is 2 or more; why is not known.
+- **The patch.** No code is changed. If the level is above 1 (and at most
+  16) it is set to 1. The draw's begin and end both test "above 1", so
+  neither is issued; a pass's own begin and end test "above 0" and are issued
+  as before, so every begin still has its end. The mod does not use the
+  game's debug events (no code of it reads or matches them), and ReShade's
+  add-on interface has no event for them. A level of 0 or 1 is left alone
+  and said so.
+- **Proven before writing:** the reader and the writer (7 bytes each; their
+  distances give the int's place), the draw submit's two tests (14 and 27
+  bytes) and the event begin's and end's own tests (9 bytes each).
+- **Expected.** About 0.5 ms off each Depth Pass run and a like share of the
+  other tasks that draw models (Forward Pass, shadows). As with
+  `profiler_accounting`, **alone it does not shorten the pass**; after
+  `transparent_filter` it does. All three: the drain about 5.56 ms to about
+  2.9 ms of a 9.4 ms eye pass.
+
 ### How a patch goes in
 
 - Only between frames: on the draw thread at the top of the mod's hook on the
@@ -99,8 +126,10 @@ Pass, and whose end is the drain's end.
 - The game's version is never asked. A place whose bytes differ is looked at
   again every 16th frame (code that has not run may not be there yet) and
   given up after 40 looks with `refused: bytes differ at RVA ...`.
-- The write is the loader's checked patch, which compares the bytes once more
-  as it writes. The jump is one aligned 8 bytes.
+- A code write is the loader's checked patch, which compares the bytes once
+  more as it writes: the filter's jump is one aligned 8 bytes, the accounting
+  jump 2 bytes of which one changes. The debug event level is a plain write
+  of one int in the game's data.
 - The log (`d2r-vr-frame.log`): `Frame game patches: [game_patches]
   transparent_filter=1 ...` when the settings are first read; per key
   `... applied: ...`, `... refused: ...` or `... off`; and `first frame: ...`
@@ -125,14 +154,34 @@ another capture (another number), and compare:
   `D2RLoader.exe+0xF13FC0` gone from the inclusive table (d), ntdll's share
   (a) down from 28.6% to a few percent, no `NtWaitForAlertByThreadId` row by
   that function (b); table 7: both tasks' mean run about 0.7 ms shorter.
+- `draw_debug_names`: table 8, `Depth Pass`: `D2RLoader.exe+0xF113C0` (0.52 ms
+  inclusive, table d) and the formatting functions under it gone from the
+  top functions (c); table 7: the run about 0.5 ms shorter.
 
-**Risks, plainly.** The analysis was made on a dump of the game's code from
-3.3.93787; the running game (3.4.95041) is only known to have the same
-function starts, so the byte comparison at run time is what stands between a
-different build and a wrong write. The new code has no unwind row: a crash
-report or a sampler walk from inside it stops there (it makes no call, so
-nothing else is ever above it on a stack). Taking a patch out again has not
-been exercised in the game.
+**Risks, plainly.**
+
+- The analysis was made on a dump of the game's code from 3.3.93787; the
+  running game (3.4.95041) is only known to have the same function starts.
+  The byte comparison at run time is what stands between a different build
+  and a wrong write, and it covers the places named above, not every byte of
+  the functions around them.
+- "No thread is in the changed code between frames" rests on reading the
+  drain's loop, not on an observation in the game. The loader's write is not
+  promised to be atomic; a thread inside the filter's loop during the write
+  could run a half-written jump. The accounting change is one byte and the
+  level one int: those cannot be seen half-written.
+- `transparent_filter`: the new code has no unwind row, so a crash report or a
+  sampler walk from inside it stops there (it makes no call, so nothing else
+  is ever above it on a stack). That the slow part is the read-back, and so
+  the size of the saving, is inferred.
+- `profiler_accounting`: the search for readers of the counts was static.
+  Something not found that used a scope's draw or primitive count would see
+  zeros.
+- `draw_debug_names`: a graphics debugger attached to the game would no
+  longer see per-draw names. If the game wrote the level again later (not
+  found in its code) the names would come back until the key is toggled.
+- Taking a patch out again (key back to 0 while playing) is built the same
+  way but has not been exercised in the game.
 
 ## Draw-thread sampler, November 10
 
