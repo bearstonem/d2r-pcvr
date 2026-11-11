@@ -33,6 +33,17 @@ static void Signatures() {
         {AccountCallSig, sizeof AccountCallSig / 2}, {AccountSig, sizeof AccountSig / 2},
         {LevelGetSig, sizeof LevelGetSig / 2}, {LevelSetSig, sizeof LevelSetSig / 2}, {DrawNameBeginSig, sizeof DrawNameBeginSig / 2},
         {DrawNameEndSig, sizeof DrawNameEndSig / 2}, {EventBeginSig, sizeof EventBeginSig / 2}, {EventEndSig, sizeof EventEndSig / 2},
+        {SelectionCallSig, sizeof SelectionCallSig / 2},
+        {ShadowUpdateSig, sizeof ShadowUpdateSig / 2}, {ShadowSpotCallSig, sizeof ShadowSpotCallSig / 2}, {ShadowSpotSig, sizeof ShadowSpotSig / 2},
+        {ShadowFitCentreSig, sizeof ShadowFitCentreSig / 2}, {ShadowFitExtentSig, sizeof ShadowFitExtentSig / 2},
+        {ShadowCollectSig, sizeof ShadowCollectSig / 2}, {ShadowBucketsSig, sizeof ShadowBucketsSig / 2}, {ShadowBucketLookupSig, sizeof ShadowBucketLookupSig / 2},
+        {ShadowRenderSig, sizeof ShadowRenderSig / 2}, {ShadowRenderPassSig, sizeof ShadowRenderPassSig / 2}, {ShadowRenderEndSig, sizeof ShadowRenderEndSig / 2},
+        {ShadowRenderSunCallSig, sizeof ShadowRenderSunCallSig / 2}, {ShadowRenderNegativeCallSig, sizeof ShadowRenderNegativeCallSig / 2},
+        {ShadowKickCallSig, sizeof ShadowKickCallSig / 2}, {ShadowWaitSig, sizeof ShadowWaitSig / 2},
+        {CullKickSig, sizeof CullKickSig / 2}, {CullKickCallSig, sizeof CullKickCallSig / 2}, {CullWaitSig, sizeof CullWaitSig / 2},
+        {CullJobSig, sizeof CullJobSig / 2}, {CullJobCopySig, sizeof CullJobCopySig / 2}, {CullFrustumCopySig, sizeof CullFrustumCopySig / 2},
+        {CullJobTestSig, sizeof CullJobTestSig / 2}, {CullBoxSig, sizeof CullBoxSig / 2}, {CullBoxFrontSig, sizeof CullBoxFrontSig / 2},
+        {CullBoxEndSig, sizeof CullBoxEndSig / 2},
     };
     for (const auto& s : all) {
         uint8_t bytes[128];
@@ -183,14 +194,111 @@ static void Levels() {
     assert(LevelWithoutDrawNames == 1);
 }
 
+// selection_walk: the call's five bytes become one instruction that does nothing; anything but a call is refused.
+static void SelectionWalk() {
+    using namespace gamepatches::abi;
+    uint8_t live[sizeof SelectionCallSig / 2];
+    for (size_t i = 0; i < sizeof live; ++i) live[i] = uint8_t(SelectionCallSig[i]);
+    assert(SelectionCallAt + CallBytes <= sizeof live);
+    assert(live[SelectionCallAt] == 0xE8);
+    // the call goes to the walk, 0xFA8EE0, and what follows it is the test of the window's byte through r15
+    const uint64_t next = SelectionCallRva + SelectionCallAt + CallBytes;
+    assert(next + int64_t(At(live + SelectionCallAt + 1)) == 0xfa8ee0);
+    assert(live[SelectionCallAt + 5] == 0x41 && live[SelectionCallAt + 6] == 0x80 && live[SelectionCallAt + 7] == 0x3F && live[SelectionCallAt + 8] == 0x00);
+    assert(SelectionCallRva >= SelectionFunctionRva && next < SelectionFunctionEnd);
+    const CallNop plan = PlanCallNop(live + SelectionCallAt);
+    const uint8_t nop[] = {0x0F, 0x1F, 0x44, 0x00, 0x00};
+    assert(plan.ok && !std::memcmp(plan.bytes, nop, sizeof nop) && sizeof plan.bytes == CallBytes);
+    assert(!PlanCallNop(live).ok);           // not a call
+    assert(!PlanCallNop(nullptr).ok);
+    const uint8_t jump[] = {0xE9, 0, 0, 0, 0};
+    assert(!PlanCallNop(jump).ok);
+    // The stretch holds no jump into the middle of the call. Read as jumps, the call's own distance (76 FF) is
+    // one that lands in the call: its bytes are left out of the search, and a jump before or after is still found.
+    assert(BranchesInto(live, sizeof live, SelectionCallRva, SelectionCallRva + SelectionCallAt + 1, SelectionCallRva + SelectionCallAt + 4) == 1);
+    assert(BranchesIntoInstruction(live, sizeof live, SelectionCallRva, SelectionCallAt, CallBytes) == 0);
+    uint8_t jumps[sizeof live];
+    std::memcpy(jumps, live, sizeof live);
+    jumps[0] = 0xEB; jumps[1] = uint8_t(SelectionCallAt + 2 - 2);          // jmp to the call's third byte, from the stretch's start
+    assert(BranchesIntoInstruction(jumps, sizeof jumps, SelectionCallRva, SelectionCallAt, CallBytes) == 1);
+    jumps[1] = uint8_t(SelectionCallAt - 2);                                // to the call's first byte: that is no jump into its middle
+    assert(BranchesIntoInstruction(jumps, sizeof jumps, SelectionCallRva, SelectionCallAt, CallBytes) == 0);
+    std::memcpy(jumps, live, sizeof live);
+    jumps[sizeof live - 2] = 0xEB; jumps[sizeof live - 1] = uint8_t(-int(sizeof live - SelectionCallAt - 1));   // back to the call's second byte, from the stretch's end
+    assert(BranchesIntoInstruction(jumps, sizeof jumps, SelectionCallRva, SelectionCallAt, CallBytes) == 1);
+    assert(BranchesIntoInstruction(live, sizeof live, SelectionCallRva, sizeof live, CallBytes) == 0);      // an instruction past the code: nothing to find
+    assert(BranchesIntoInstruction(nullptr, sizeof live, SelectionCallRva, SelectionCallAt, CallBytes) == 0);
+}
+
+// Once per pair: what a second eye pass may keep of the first's shadows.
+static void ShadowPasses() {
+    ShadowPair pair;
+    const uint64_t passes = 0x1000, other = 0x2000;
+    // a pair: the first fits, the second keeps
+    assert(ShadowUpdate(true, Pass::First, passes, true, pair) == Shadow::Fit && pair.fitted && pair.passes == passes);
+    assert(ShadowUpdate(true, Pass::Second, passes, true, pair) == Shadow::Keep);
+    // ... once: a second update of the same pass fits (nothing is left)
+    assert(!pair.fitted && ShadowUpdate(true, Pass::Second, passes, true, pair) == Shadow::Fit);
+    // off, or a draw that stands alone: always the game's own, and nothing is left for a later pass
+    pair = {true, passes};
+    assert(ShadowUpdate(false, Pass::Second, passes, true, pair) == Shadow::Fit && !pair.fitted);
+    pair = {true, passes};
+    assert(ShadowUpdate(true, Pass::Alone, passes, true, pair) == Shadow::Fit && !pair.fitted);
+    assert(ShadowUpdate(true, Pass::Second, passes, true, pair) == Shadow::Fit);
+    // a second pass with no first seen (the first was not drawn, or drew no world)
+    pair = {};
+    assert(ShadowUpdate(true, Pass::Second, passes, true, pair) == Shadow::Fit);
+    // a first pass whose fit went by the visible set (no look-at point): the second fits its own
+    assert(ShadowUpdate(true, Pass::First, passes, false, pair) == Shadow::Fit && !pair.fitted);
+    assert(ShadowUpdate(true, Pass::Second, passes, true, pair) == Shadow::Fit);
+    // the look-at point gone in the second pass, or another object
+    assert(ShadowUpdate(true, Pass::First, passes, true, pair) == Shadow::Fit);
+    assert(ShadowUpdate(true, Pass::Second, passes, false, pair) == Shadow::Fit);
+    assert(ShadowUpdate(true, Pass::First, passes, true, pair) == Shadow::Fit);
+    assert(ShadowUpdate(true, Pass::Second, other, true, pair) == Shadow::Fit);
+    assert(ShadowUpdate(true, Pass::First, 0, true, pair) == Shadow::Fit && !pair.fitted);
+    // a first pass drawn again (a new pair) replaces what the one before left
+    assert(ShadowUpdate(true, Pass::First, other, true, pair) == Shadow::Fit);
+    assert(ShadowUpdate(true, Pass::First, passes, true, pair) == Shadow::Fit);
+    assert(ShadowUpdate(true, Pass::Second, passes, true, pair) == Shadow::Keep);
+    // the offsets the hooks use, against the fingerprints that prove them
+    using namespace gamepatches::abi;
+    assert(ShadowSpotCallSig[8] == 0x70 && ShadowSpotCallSig[9] == 0x05 && ShadowSpotOffset == 0x570);          // lea rcx, [rbx + 0x570]
+    assert(ShadowRenderNegativeCallSig[31] == 0x90 && ShadowRenderNegativeCallSig[32] == 0x02 && ShadowViewSize == 0x290);   // lea rcx, [r13 + 0x290]
+    assert(ShadowFitCentreSig[10] == 0x28 && ShadowFitCentreSig[11] == 0x01 && CameraHasLookAt == 0x128);
+    assert(ShadowBucketsSig[58] == 0x08 && ShadowBucketsSig[62] == 0x08 && ShadowBucketCount == 8);            // mov [rdi + 8], rax / mov [rbx + 8], rax
+    // where the stretches' own displacements go: the two bucket names, the lookup, the spot lights' update, the two kicks
+    const auto to = [](uint64_t rva, const uint16_t* sig, size_t at, size_t size) {
+        uint8_t d[4];
+        for (int i = 0; i < 4; ++i) d[i] = uint8_t(sig[at + size - 4 + i]);
+        return rva + at + size + int64_t(At(d));
+    };
+    assert(to(ShadowBucketsRva, ShadowBucketsSig, 0, 7) == ShadowBucketNameRva[0]);
+    assert(to(ShadowBucketsRva, ShadowBucketsSig, 24, 7) == ShadowBucketNameRva[1]);
+    assert(to(ShadowBucketsRva, ShadowBucketsSig, 19, 5) == ShadowBucketLookupRva && to(ShadowBucketsRva, ShadowBucketsSig, 37, 5) == ShadowBucketLookupRva);
+    assert(to(ShadowSpotCallRva, ShadowSpotCallSig, 18, 5) == ShadowSpotRva);
+    assert(to(ShadowKickCallRva, ShadowKickCallSig, 75, 5) == ShadowKickRva);
+    assert(to(CullKickCallRva, CullKickCallSig, 67, 5) == CullKickRva);
+    assert(to(ShadowRenderSunCallRva, ShadowRenderSunCallSig, 54, 5) == ShadowRenderRva);
+    assert(to(ShadowRenderNegativeCallRva, ShadowRenderNegativeCallSig, 58, 5) == ShadowRenderRva);
+    assert(to(CullJobTestRva, CullJobTestSig, 26, 5) == CullBoxRva);
+    assert(to(CullJobCopyRva, CullJobCopySig, 71, 5) == CullFrustumCopyRva);
+    // the hooks sit on whole instructions inside their fingerprints
+    assert(ShadowUpdateHookBytes <= sizeof ShadowUpdateSig / 2 && ShadowCollectHookBytes <= sizeof ShadowCollectSig / 2 &&
+           ShadowRenderHookBytes <= sizeof ShadowRenderSig / 2 && CullKickHookBytes <= sizeof CullKickSig / 2);
+}
+
 int main() {
     Signatures();
+    SelectionWalk();
+    ShadowPasses();
     Displacements();
     Branches();
     Accounting();
     DebugNames();
     Filter();
     Levels();
-    std::puts("game patch plan: fingerprints, displacements, jumps into a place, the filter's cave and jump, out-of-reach refusal and levels passed");
+    std::puts("game patch plan: fingerprints, displacements, jumps into a place, the filter's cave and jump, out-of-reach refusal, levels, "
+              "the call that is no longer made and the shadows a second pass keeps passed");
     return 0;
 }

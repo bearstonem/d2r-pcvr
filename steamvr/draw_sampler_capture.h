@@ -64,6 +64,7 @@ struct Options {
     std::string tasksNote;          // why the render tasks or the drain are not timed (the hooks' own words); empty = both are
     std::string watch;              // the render tasks whose threads are sampled too (ParseWatch); empty = none
     unsigned perTick = 3;           // such threads stopped at one tick at most, beside the draw thread (1-8)
+    std::vector<uint32_t> functions;   // game functions whose inclusive time is tabulated whatever their rank (ParseFunctions); empty = none
     // For the tests only. The system's unwind-table lookup is taken to fail for addresses in
     // [blindBase, blindBase + blindSize), as it does for the game's executable; ownRows false walks as the
     // sampler first did, without the module's own table.
