@@ -1430,6 +1430,10 @@ void LoadSettings() {
         patches.transparentFilter = IniB(L"game_patches", L"transparent_filter", true);
         patches.profilerAccounting = IniB(L"game_patches", L"profiler_accounting", true);
         patches.drawDebugNames = IniB(L"game_patches", L"draw_debug_names", true);
+        // Being measured, off unless written by hand (steamvr/PERFORMANCE.md "Once per pair")
+        patches.selectionWalk = IniB(L"game_patches", L"selection_walk", false);
+        patches.shadowsOnce = IniB(L"game_patches", L"shadows_once", false);
+        patches.cullOnce = IniB(L"game_patches", L"cull_once", false);
         gamepatches::Configure(patches);
     }
     g_set.gameHeightFog.store(IniB(L"render", L"game_height_fog", false));
@@ -7485,6 +7489,7 @@ uintptr_t HookDrawGameScreen(int a) {
     const bool turn = false;
 #endif
     if (depth || !PairWanted() || turn) {
+        gamepatches::EyePass(gamepatches::Pass::Alone);   // not a pair's pass (or a draw inside one: the rest of that pass runs as the game does)
         if(!depth) {
 #ifdef D2RVR_NATIVE_OPENXR
             framevr::profile::SkipPair();
@@ -7560,7 +7565,9 @@ uintptr_t HookDrawGameScreen(int a) {
 #ifdef D2RVR_NATIVE_OPENXR
     framevr::drawsampler::EnterPass(0);
 #endif
+    gamepatches::EyePass(gamepatches::Pass::First);    // [game_patches] shadows_once, cull_once: the first of this frame's two draws
     const uintptr_t leftR = OrigDrawGameScreen(a);
+    gamepatches::EyePass(gamepatches::Pass::Alone);
 #ifdef D2RVR_NATIVE_OPENXR
     framevr::drawsampler::LeavePass();
 #endif
@@ -7595,7 +7602,9 @@ uintptr_t HookDrawGameScreen(int a) {
 #ifdef D2RVR_NATIVE_OPENXR
     if (!replayed) framevr::drawsampler::EnterPass(1);
 #endif
+    if (!replayed) gamepatches::EyePass(gamepatches::Pass::Second);   // the same game frame drawn again: what the first left may be kept
     const uintptr_t r = replayed ? leftR : OrigDrawGameScreen(a);
+    gamepatches::EyePass(gamepatches::Pass::Alone);
 #ifdef D2RVR_NATIVE_OPENXR
     framevr::drawsampler::LeavePass();
 #endif

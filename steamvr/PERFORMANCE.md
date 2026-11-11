@@ -1,5 +1,186 @@
 # VR performance investigations
 
+## Once per pair, November 10
+
+**Not measured and not tried in a headset.** Three more switches in
+`[game_patches]`, each off unless its key is written into the installed
+`d2r_pcvr.ini` by hand (`=1`; `=0` or no key takes it out again at the next
+frame). No key in the shipped INI, nothing in VR Settings. They were built
+from the disassembly of the 3.3.93787 code and have not run in the game:
+switch them on one at a time and look for the log lines below.
+
+```ini
+[game_patches]
+selection_walk=1
+shadows_once=1
+cull_once=1
+```
+
+The mod draws one game frame twice, an eye a time. A capture taken with the
+three patches of the next section in (capture 7 there) shows work in each
+pass that does not depend on the eye. `shadows_once` and `cull_once`
+do that work in the first pass and keep it for the second; `selection_walk`
+removes work that does nothing in either. The two "once" switches act only
+in the second pass of a pair drawn from one game frame. By turns, menus,
+loading screens, the flat game, a pass drawn inside another and a pair whose
+first pass was not seen all run as the game does: `HookDrawGameScreen` tells
+`vr/game_patches.cpp` which draw begins (`EyePass`: first, second, alone) and
+the hooks pass every call through when it is not a pair's second.
+
+### selection_walk: the debug selection tool's walk
+
+At the end of the renderer's shadow update (`0xFB1780`, every eye pass) the
+game builds a view of every drawable entity that is not culled and walks it
+(`0xFA8EE0`). Per entity the walk looks the entity up and asks whether it is
+in the selection tool's hash set (`0xFB0280`), which answers no at once
+because the set is empty: only the tool's own marquee, part of the game's
+debug interface, fills it. The patch writes a five-byte no-operation over the
+call at RVA `0xFB1843`.
+
+Verified in the code: nothing the walk returns is read (the registers it may
+change are loaded anew before their next use, and the byte tested after the
+call is read through a register the walk keeps); the walk writes nothing for
+an entity that is not in the set; the only other references to the tool's
+object are its constructor and the code that fills the set. Inferred: that
+the set is always empty in play (no caller of the code that fills it was
+found). 42 bytes are compared first,
+and the function is searched for a jump into the middle of the call.
+
+Expected: 0.08-0.12 ms a pass (the walk was 0.08 ms of self time in capture 7
+plus its share of the entity lookup). It acts in every draw, By turns too.
+
+Log: `Frame game patches: selection_walk applied: the debug selection tool no
+longer walks every drawn entity ...`, or `refused: ...`, or `taken out: ...`.
+
+### shadows_once: the sun's shadow map from the first eye
+
+Each pass the game fits the sun's shadow view and the "negative light's" view
+to the camera (`ShadowRenderPasses::Update`, `0xF4DA80`), culls the shadow
+casters with jobs (`0xD9BC00`), collects their draw calls in one render task
+(`0xF49760`) and draws them into the two slices of one shadow map in two more
+(`DirectLightShadows::Render`, `0xF4BBB0`, called by the "Directional Shadows"
+and "Negative Shadows" tasks). In capture 7 that was 0.9 + 0.8 + 0.2 ms of task
+time a pass and one render of the map on the GPU.
+
+In a pair's second pass, with the switch on:
+
+- `Update` is not run; only its last step is, the spot lights' update
+  (`0xF50420`), with the arguments the game gives it. The two views keep the
+  first pass's matrices, so the second eye is shaded with the same shadow
+  matrices as the first and with the map those matrices were drawn for.
+- The casters' cull is not kicked. The job list stays empty and the game's
+  own test of the list (`0xE252DA`) leaves the wait out.
+- The collect looks up its two draw-call buckets and empties them, as the
+  game does first, and gathers nothing.
+- `Render` returns at once for the two views: the slices are not cleared and
+  not drawn, so they keep what the first pass drew. The two tasks still move
+  the map between its written and read states themselves; no state change is
+  left out.
+
+Verified in the code: the fit does not ask the eye. With the camera's look-at
+point set (it is, in the world) its centre is that point and its extent comes
+from rays through the screen's corners, which the mod already answers from
+the game's own camera (`cleanroom/camera/d2rcam.cpp`, "the shadow fit keeps
+the game's own camera"); it reads the visible set's bounds only without a
+look-at point. So the map the second eye would have fitted is the first's
+map, to within what the game's camera moved between the passes (nothing: the
+second pass gets no frame time), and there is no strip at the second eye's
+edge that the first's map does not cover. A pair whose camera has no look-at
+point in either pass is fitted and drawn per eye as before. The shadow
+constants of a pass are built from the views and that pass's camera
+(`0xF4DEB0`), so they follow the eye. The map is one texture made once with
+the renderer, with two slices; the only code that begins a pass on a slice
+is `Render` and the particles' shadow pass (`0xF4D050`). `Render`'s debug event, profiler
+scope and pass begin and end inside it.
+
+Inferred, to look for in the headset:
+
+- Shadows that differ between the eyes or swim when the head turns: the
+  second eye would be using matrices that do not match the map.
+- Missing or flickering shadows in the right eye only (the map lost between
+  the passes), in particular the hero's own, a torch's and those under
+  monsters; the dark patches of the negative light (under units).
+- Particle shadows (`NegativeLightVFX`) are still drawn in both passes, into
+  a slice that now keeps the first pass's: where a particle moved between the
+  passes its shadow is the two together.
+- The mod's head and helm handling counts shadow gathers per pass
+  (`Frame head skip:`); its tally for the right eye drops to nothing. The
+  hero's shadow should still have its head.
+
+Sixteen stretches of the game's code are compared before the four hooks go
+in. A hook that is refused leaves the others passing every call through.
+
+Expected: about 1.8 ms of thread time and one shadow-map render a pair. On
+the clock less, because the tasks are not on the chain the drain waits for:
+0.2-0.4 ms a pair, most of it the cull that is not kicked.
+
+Log: `Frame game patches: shadows_once applied: ...`, then every ten seconds
+while on `shadows_once 10 s: N second passes kept the first's shadows (left
+out: N caster culls, N collects, 2N shadow draws), M fitted and drew their
+own`. N near the pairs drawn and M near 0 is the patch at work.
+
+### cull_once: one cull for both eyes
+
+Each pass the game culls every entity's box against the camera with jobs
+(`0xD9B4D0` kicks them, `0xD9C9B0` waits for them in the shadow update and
+writes the result as a "culled" tag on each entity, where it stays until the
+next cull). The kick's third argument, 0x40 bytes, is the camera's view times
+its projection, row-major with row vectors (`0xF74CE0`). A job does one thing
+with it: per entity, the eight corners of the box times the matrix, dropped
+when w < 0 at all eight, kept when each of x, y, z against -w and w has a
+corner on its inner side (`0xF74420`). Nothing else of the camera is asked.
+
+With the switch on, the first pass of a pair culls with a matrix whose
+pyramid holds both eyes' pyramids (`steamvr/cull_volume.h`): its axis between
+the eyes', each side as wide as the widest of either plus 1.7 degrees, its
+apex behind both, no near plane. The second eye's matrix is not known in the
+first pass; it is worked out from the first eye's matrix and the two eyes'
+relation in the pair before, which does not change as the head moves. In the
+second pass the kick sees the real matrix. If that eye's pyramid (its apex and
+four edges) is inside the volume the first pass used, the kick is left out:
+the job list stays empty, the game's own test of the list (`0xE38ADC`) leaves
+the wait out, and the second eye draws the set the first culled. If it is not
+inside (the eyes' distance or field of view changed, or there was no pair
+before), the second pass culls as the game does.
+
+So a box either eye would have kept for a point it can see is kept; that is
+checked for many random heads in `cull-volume-test`. What is new: the first
+eye collects a few more draws (what only the other eye sees, and what is
+nearer than the near plane), all clipped by the GPU as anything off-screen
+is. An entity made between the two passes has no tag and is drawn. Twelve
+stretches of the game's code are compared before the hook goes in.
+
+Inferred, to look for in the headset: objects that pop at the outer edge of
+the right eye's picture while the head turns; anything of the mod's that
+drew per eye by the culled tag (none was found). A camera without a look-at
+point is culled per eye, because the shadow fit then reads the visible set's
+bounds, which a pass that does not cull does not have.
+
+Expected: 0.3-0.4 ms a pair on the draw thread (the kick's 0.17 ms and the
+wait's 0.07 ms of self time in capture 7, plus what they call).
+
+Log: `Frame game patches: cull_once applied: ...`, then every ten seconds
+while on `cull_once 10 s: N second passes not culled (inside the first's
+volume), M culled their own (A outside the volume, B with no volume from the
+first pass)`. A stays 0 unless the eyes' relation changes from pair to pair.
+
+### Measuring them
+
+`[debug] draw_sampler_watch` lists game functions, by the RVA of their start,
+whose inclusive time on the draw thread is printed whatever their rank
+(table 4b of the report file, left and right eye apart). For these three:
+
+```ini
+[debug]
+draw_sampler_watch=0xFB1780 0xF4DA80 0xD9BC00 0xD9B4D0 0xD9C9B0 0xE38840 0xE37D20 0xF4CC50 0xF4BBB0
+```
+
+Take a capture with the three keys 0, one with each key set to 1 in turn,
+and compare the right eye's column. With `shadows_once`, table 7 should
+show `Shadow Directional Draw Call Collect` and `Directional Shadows` near
+0 ms in the right eye and unchanged in the left; with `cull_once`,
+`0xD9C9B0` should leave the right eye's column.
+
 ## Render task patches, November 10
 
 **On for every install since the headset run below.** There is no setting for

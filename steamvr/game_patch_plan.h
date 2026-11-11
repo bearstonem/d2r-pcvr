@@ -113,4 +113,53 @@ inline Level LevelDecision(int32_t found) noexcept {
     return Level::Refuse;
 }
 
+// A relative call that is no longer made: its five bytes become one five-byte no-operation, so the code
+// after it is reached as it was, with nothing called.
+inline constexpr size_t CallBytes = 5;
+
+// How many jumps in `code` (at address `at`) would land inside the instruction that is `own` bytes into it
+// and `ownSize` long, past its first byte. As BranchesInto, but the instruction's own bytes are not read as
+// jumps: a call's distance can look like one that lands in the call itself.
+inline size_t BranchesIntoInstruction(const uint8_t* code, size_t size, uint64_t at, size_t own, size_t ownSize) noexcept {
+    if (!code || !ownSize || own > size || ownSize > size - own) return 0;
+    const uint64_t lo = at + own + 1, hi = at + own + ownSize - 1;
+    if (ownSize < 2) return 0;
+    return BranchesInto(code, own, at, lo, hi) + BranchesInto(code + own + ownSize, size - own - ownSize, at + own + ownSize, lo, hi);
+}
+struct CallNop {
+    bool ok = false;                      // false: the first byte is not a relative call - nothing may be written
+    uint8_t bytes[CallBytes] = {};
+};
+inline CallNop PlanCallNop(const uint8_t* live) noexcept {
+    CallNop plan;
+    if (!live || live[0] != 0xE8) return plan;
+    const uint8_t nop[CallBytes] = {0x0F, 0x1F, 0x44, 0x00, 0x00};   // nop dword ptr [rax + rax]
+    std::memcpy(plan.bytes, nop, sizeof nop);
+    plan.ok = true;
+    return plan;
+}
+
+// Once per pair (shadows_once, cull_once). The mod draws one game frame twice, an eye a time: what does not
+// depend on the eye can be done in the first pass and kept for the second. Alone is every other draw (a
+// menu, a loading screen, an eye by turns, a pass drawn inside another): the game runs as it is.
+enum class Pass : uint8_t { Alone, First, Second };
+
+// What the first pass of a pair left for the second.
+struct ShadowPair {
+    bool fitted = false;      // the first pass fitted the two views, by the camera's look-at point
+    uint64_t passes = 0;      // the shadow passes object it fitted
+};
+// The shadow update of a pass: Fit = the game's own update (and, in a first pass, `pair` says what it left);
+// Keep = a second pass that keeps the first's views, shadow map and culled casters.
+enum class Shadow : uint8_t { Fit, Keep };
+inline Shadow ShadowUpdate(bool on, Pass pass, uint64_t passes, bool lookAt, ShadowPair& pair) noexcept {
+    if (!on || pass == Pass::Alone || !passes) { pair = {}; return Shadow::Fit; }
+    if (pass == Pass::First) { pair.fitted = lookAt; pair.passes = passes; return Shadow::Fit; }
+    // Second: only what the first pass of this same pair fitted, for the same object, with the fit still by
+    // the look-at point (a fit by the visible set would be this eye's own).
+    const bool keep = pair.fitted && pair.passes == passes && lookAt;
+    pair = {};
+    return keep ? Shadow::Keep : Shadow::Fit;
+}
+
 }  // namespace gamepatch

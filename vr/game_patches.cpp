@@ -1,4 +1,5 @@
-// [game_patches]: see game_patches.h. Everything here but Configure runs on the draw thread, between frames.
+// [game_patches]: see game_patches.h. Everything here but Configure and the hooks of the once-per-pair patches
+// runs on the draw thread, between frames; those hooks run inside an eye pass and say which thread each is on.
 #include <windows.h>
 #include <algorithm>
 #include <atomic>
@@ -12,7 +13,9 @@
 #include "sigscan.h"
 #include "memory.h"
 #include "logging.h"
+#include "d2rcam.h"
 #include "../steamvr/game_patch_plan.h"
+#include "../steamvr/cull_volume.h"
 
 namespace gamepatches {
 namespace {
@@ -231,12 +234,300 @@ void RemoveNames() {
         Say("draw_debug_names off: the game's debug event level is no longer what this mod wrote (" + std::to_string(level) + "); left as it is");
 }
 
+// --- selection_walk --------------------------------------------------------------------------------------------
+Patch selection{"selection_walk"};
+uint8_t selectionWas[gamepatch::CallBytes] = {}, selectionNow[gamepatch::CallBytes] = {};
+
+void ApplySelection() {
+    uint8_t live[sizeof SelectionCallSig / 2];
+    uint64_t differs = 0;
+    if (!Holds(SelectionCallRva, SelectionCallSig, live, differs)) return NotYet(selection, differs);
+    // Nothing in the function may jump into the middle of the call.
+    const uint64_t callRva = SelectionCallRva + SelectionCallAt;
+    const uintptr_t function = d2rsig::Addr(SelectionFunctionRva), site = d2rsig::Addr(callRva);
+    std::vector<uint8_t> body(size_t(SelectionFunctionEnd - SelectionFunctionRva));
+    if (!function || !site || !framevr::ReadMemory(body.data(), reinterpret_cast<const void*>(function), body.size())) return NotYet(selection, SelectionFunctionRva);
+    if (gamepatch::BranchesIntoInstruction(body.data(), body.size(), function, size_t(site - function), gamepatch::CallBytes))
+        return Refuse(selection, "a jump in the game's function at RVA " + Hex(SelectionFunctionRva) + " may land inside the call at RVA " + Hex(callRva));
+    const gamepatch::CallNop plan = gamepatch::PlanCallNop(live + SelectionCallAt);
+    if (!plan.ok) return Refuse(selection, "no call at RVA " + Hex(callRva));
+    std::memcpy(selectionWas, live + SelectionCallAt, sizeof selectionWas);
+    std::memcpy(selectionNow, plan.bytes, sizeof selectionNow);
+    if (!d2rsig::Patch(callRva, selectionWas, sizeof selectionWas, selectionNow, sizeof selectionNow)) return Refuse(selection, "the loader refused the write at RVA " + Hex(callRva));
+    selection.state = State::Applied;
+    Say("selection_walk applied: the debug selection tool no longer walks every drawn entity in each eye pass (the call at RVA " + Hex(callRva) +
+        " is five bytes that do nothing; " + std::to_string(sizeof live) + " bytes of the game's code proven first). The game's own selection marquee would mark nothing");
+}
+
+void RemoveSelection() {
+    const uint64_t callRva = SelectionCallRva + SelectionCallAt;
+    if (d2rsig::Patch(callRva, selectionNow, sizeof selectionNow, selectionWas, sizeof selectionWas)) {
+        selection.state = State::Off;
+        Say("selection_walk taken out: the game's own bytes are back at RVA " + Hex(callRva));
+    } else {
+        selection.state = State::Refused;
+        Say("selection_walk could NOT be taken out: the loader refused the write at RVA " + Hex(callRva) + "; it stays in until the game is closed");
+    }
+}
+
+// --- once per pair: which pass, and the hooks ---------------------------------------------------------------------
+// The pass is written on the draw thread between a pair's draws (EyePass) and read by hooks during one. The
+// two cull kicks and the shadow update run on the draw thread; the shadow collect and the two shadow draws
+// are render tasks on any thread, and read only `shadowsKept` and `keptPasses`, which the update hook wrote
+// before the pass's tasks were started and nothing writes again until the pass has ended.
+std::atomic<uint8_t> passNow{uint8_t(gamepatch::Pass::Alone)};
+static_assert(uint8_t(Pass::Alone) == uint8_t(gamepatch::Pass::Alone) && uint8_t(Pass::First) == uint8_t(gamepatch::Pass::First) &&
+              uint8_t(Pass::Second) == uint8_t(gamepatch::Pass::Second), "the two Pass enums are one");
+
+using Fn4 = uintptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t);
+using Fn5 = uintptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
+using Fn6 = uintptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
+
+// The loader switches its detour on just before it publishes the way back to the game's function; a call
+// that arrives in between waits for it (as vr/render_task_hooks.cpp does).
+template <class Fn>
+inline Fn Original(Fn& published) noexcept {
+    auto& slot = reinterpret_cast<Fn const volatile&>(published);
+    Fn call = slot;
+    for (unsigned i = 0; !call; ++i) {
+        if (i < 4096) YieldProcessor(); else SwitchToThread();
+        call = slot;
+    }
+    return call;
+}
+
+// A hook over the first `bytes` of a function whose fingerprint was proven just before. It stays for the
+// life of the game: a patch that is off makes its hooks pass every call through.
+template <size_t N, class Fn>
+bool HookIn(uint64_t rva, const uint16_t (&sig)[N], uint32_t bytes, Fn detour, Fn* original) {
+    uint8_t expected[N];
+    for (size_t i = 0; i < N; ++i) expected[i] = uint8_t(sig[i]);
+    return bytes <= N && d2rsig::Hook(rva, expected, bytes, reinterpret_cast<void*>(detour), reinterpret_cast<void**>(original));
+}
+
+// --- shadows_once ----------------------------------------------------------------------------------------------
+Patch shadows{"shadows_once"};
+std::atomic<bool> shadowsOn{false};           // applied and wanted
+std::atomic<bool> shadowsKept{false};         // this pass keeps the first pass's views, shadow map and culled casters
+std::atomic<uintptr_t> keptPasses{0};         // the shadow passes object that is so
+gamepatch::ShadowPair shadowPair;             // draw thread only
+Fn6 originalShadowUpdate = nullptr;
+Fn4 originalShadowCollect = nullptr, originalShadowKick = nullptr;
+Fn5 originalShadowRender = nullptr;
+Fn4 shadowSpot = nullptr;                     // the game's spot light update
+Fn4 shadowBucket = nullptr;                   // the game's bucket lookup: (Frame*, name*) -> bucket*
+uintptr_t shadowBucketName[2] = {};
+bool shadowHooksIn = false;
+std::atomic<uint32_t> shadowsKeptPasses{0}, shadowsOwnPasses{0}, shadowCollectsOut{0}, shadowDrawsOut{0}, shadowKicksOut{0};
+
+uintptr_t ShadowUpdateHook(uintptr_t passes, uintptr_t settings, uintptr_t context, uintptr_t registry, uintptr_t camera, uintptr_t bounds) {
+    const Fn6 call = Original(originalShadowUpdate);
+    const bool on = shadowsOn.load(std::memory_order_relaxed);
+    const auto pass = gamepatch::Pass(passNow.load(std::memory_order_relaxed));
+    // The camera's "look-at point set" byte: the game's fit reads the same byte of the same object next.
+    const bool lookAt = on && pass != gamepatch::Pass::Alone && camera && *reinterpret_cast<const uint8_t*>(camera + CameraHasLookAt) != 0;
+    if (gamepatch::ShadowUpdate(on, pass, passes, lookAt, shadowPair) == gamepatch::Shadow::Keep) {
+        // The two views stay as the first pass fitted them; the spot lights are this pass's own.
+        shadowSpot(passes + ShadowSpotOffset, settings, context, camera);
+        keptPasses.store(passes, std::memory_order_relaxed);
+        shadowsKept.store(true, std::memory_order_release);
+        shadowsKeptPasses.fetch_add(1, std::memory_order_relaxed);
+        return 0;
+    }
+    if (on && pass == gamepatch::Pass::Second) shadowsOwnPasses.fetch_add(1, std::memory_order_relaxed);
+    return call(passes, settings, context, registry, camera, bounds);
+}
+
+uintptr_t ShadowKickHook(uintptr_t registry, uintptr_t list, uintptr_t matrix, uintptr_t d) {
+    const Fn4 call = Original(originalShadowKick);
+    if (!shadowsKept.load(std::memory_order_acquire)) return call(registry, list, matrix, d);
+    shadowKicksOut.fetch_add(1, std::memory_order_relaxed);   // the list stays empty: the game's own test leaves the wait out
+    return 0;
+}
+
+uintptr_t ShadowCollectHook(uintptr_t passes, uintptr_t settings, uintptr_t frame, uintptr_t d) {
+    const Fn4 call = Original(originalShadowCollect);
+    if (!shadowsKept.load(std::memory_order_acquire) || passes != keptPasses.load(std::memory_order_relaxed) || !frame) return call(passes, settings, frame, d);
+    // What the game does first, and all it does when both views are off: the two buckets, emptied.
+    for (const uintptr_t name : shadowBucketName)
+        if (const uintptr_t bucket = shadowBucket(frame, name, 0, 0)) *reinterpret_cast<uint64_t*>(bucket + ShadowBucketCount) = 0;
+    shadowCollectsOut.fetch_add(1, std::memory_order_relaxed);
+    return 0;
+}
+
+uintptr_t ShadowRenderHook(uintptr_t view, uintptr_t frame, uintptr_t camera, uintptr_t flag, uintptr_t bucket) {
+    const Fn5 call = Original(originalShadowRender);
+    if (shadowsKept.load(std::memory_order_acquire)) {
+        const uintptr_t passes = keptPasses.load(std::memory_order_relaxed);
+        if (view == passes || view == passes + ShadowViewSize) {   // the slice keeps what the first pass drew
+            shadowDrawsOut.fetch_add(1, std::memory_order_relaxed);
+            return 0;
+        }
+    }
+    return call(view, frame, camera, flag, bucket);
+}
+
+void ApplyShadows() {
+    if (!shadowHooksIn) {
+        uint8_t live[128];
+        uint64_t differs = 0;
+        static_assert(sizeof ShadowBucketsSig / 2 <= sizeof live && sizeof ShadowKickCallSig / 2 <= sizeof live && sizeof ShadowRenderNegativeCallSig / 2 <= sizeof live);
+        if (!Holds(ShadowUpdateRva, ShadowUpdateSig, live, differs) || !Holds(ShadowSpotCallRva, ShadowSpotCallSig, live, differs) ||
+            !Holds(ShadowSpotRva, ShadowSpotSig, live, differs) || !Holds(ShadowFitCentreRva, ShadowFitCentreSig, live, differs) ||
+            !Holds(ShadowFitExtentRva, ShadowFitExtentSig, live, differs) || !Holds(ShadowCollectRva, ShadowCollectSig, live, differs) ||
+            !Holds(ShadowBucketsRva, ShadowBucketsSig, live, differs) || !Holds(ShadowBucketLookupRva, ShadowBucketLookupSig, live, differs) ||
+            !Holds(ShadowRenderRva, ShadowRenderSig, live, differs) || !Holds(ShadowRenderPassRva, ShadowRenderPassSig, live, differs) ||
+            !Holds(ShadowRenderEndRva, ShadowRenderEndSig, live, differs) || !Holds(ShadowRenderSunCallRva, ShadowRenderSunCallSig, live, differs) ||
+            !Holds(ShadowRenderNegativeCallRva, ShadowRenderNegativeCallSig, live, differs) || !Holds(ShadowKickRva, CullKickSig, live, differs) ||
+            !Holds(ShadowKickCallRva, ShadowKickCallSig, live, differs) || !Holds(ShadowWaitRva, ShadowWaitSig, live, differs))
+            return NotYet(shadows, differs);
+        shadowSpot = reinterpret_cast<Fn4>(d2rsig::Addr(ShadowSpotRva));
+        shadowBucket = reinterpret_cast<Fn4>(d2rsig::Addr(ShadowBucketLookupRva));
+        for (int i = 0; i < 2; ++i) shadowBucketName[i] = d2rsig::Addr(ShadowBucketNameRva[i]);
+        if (!shadowSpot || !shadowBucket || !shadowBucketName[0] || !shadowBucketName[1]) return NotYet(shadows, ShadowSpotRva);
+        // Four hooks, each over whole instructions of a proven prologue. One refused leaves the others in, passing
+        // every call through: nothing is kept for a second pass unless all four are in.
+        if (!originalShadowUpdate && !HookIn(ShadowUpdateRva, ShadowUpdateSig, ShadowUpdateHookBytes, &ShadowUpdateHook, &originalShadowUpdate))
+            return Refuse(shadows, "the hook at RVA " + Hex(ShadowUpdateRva) + " was refused");
+        if (!originalShadowKick && !HookIn(ShadowKickRva, CullKickSig, CullKickHookBytes, &ShadowKickHook, &originalShadowKick))
+            return Refuse(shadows, "the hook at RVA " + Hex(ShadowKickRva) + " was refused");
+        if (!originalShadowCollect && !HookIn(ShadowCollectRva, ShadowCollectSig, ShadowCollectHookBytes, &ShadowCollectHook, &originalShadowCollect))
+            return Refuse(shadows, "the hook at RVA " + Hex(ShadowCollectRva) + " was refused");
+        if (!originalShadowRender && !HookIn(ShadowRenderRva, ShadowRenderSig, ShadowRenderHookBytes, &ShadowRenderHook, &originalShadowRender))
+            return Refuse(shadows, "the hook at RVA " + Hex(ShadowRenderRva) + " was refused");
+        shadowHooksIn = true;
+    }
+    shadowPair = {};
+    shadowsOn.store(true);
+    shadows.state = State::Applied;
+    Say("shadows_once applied: the second eye pass of a pair keeps the first's sun and negative-light shadow views, shadow map and culled casters "
+        "(hooks at RVA " + Hex(ShadowUpdateRva) + " the fit, " + Hex(ShadowKickRva) + " the casters' cull, " + Hex(ShadowCollectRva) + " the collect, " +
+        Hex(ShadowRenderRva) + " the draw; 16 stretches of the game's code proven first). Every other draw, and a pair whose camera has no look-at point, runs as the game does");
+}
+
+void RemoveShadows() {
+    shadowsOn.store(false);
+    shadows.state = State::Off;
+    Say("shadows_once off: its four hooks stay in the game's code and pass every call through");
+}
+
+// --- cull_once -------------------------------------------------------------------------------------------------
+Patch cullOnce{"cull_once"};
+std::atomic<bool> cullOn{false};
+Fn4 originalCullKick = nullptr;
+bool cullHookIn = false;
+constexpr double CullMargin = 0.03;           // each side of the volume wider by this tangent (1.7 degrees), the apex set back by this share
+struct CullPair {                             // draw thread only
+    bool first = false;                       // the first pass's own matrix is in `left`
+    bool combined = false;                    // the first pass culled with `volume`
+    float left[16] = {}, volume[16] = {};
+} cullPair;
+bool cullRelationOk = false;                  // the second eye's matrix in terms of the first's, from the pair before
+double cullRelation[16] = {};
+std::atomic<uint32_t> cullSkipped{0}, cullOutside{0}, cullNoVolume{0};
+
+uintptr_t CullKickHook(uintptr_t registry, uintptr_t list, uintptr_t matrix, uintptr_t d) {
+    const Fn4 call = Original(originalCullKick);
+    const auto pass = gamepatch::Pass(passNow.load(std::memory_order_relaxed));
+    if (!cullOn.load(std::memory_order_relaxed) || pass == gamepatch::Pass::Alone || !matrix) { cullPair = {}; return call(registry, list, matrix, d); }
+    float own[16], point[3];
+    std::memcpy(own, reinterpret_cast<const void*>(matrix), sizeof own);
+    // Without a look-at point the game's shadow fit goes by the visible set's bounds, which a pass that does
+    // not cull does not have: such a camera is culled per eye, as the game does.
+    const bool lookAt = d2rcam::LookAtNow(point);
+    if (pass == gamepatch::Pass::First) {
+        cullPair = {};
+        cullPair.first = true;
+        std::memcpy(cullPair.left, own, sizeof own);
+        if (lookAt && cullRelationOk) {
+            float other[16];
+            alignas(16) float both[16];
+            cullvolume::Apply(own, cullRelation, other);
+            const cullvolume::Pyramid mine = cullvolume::Decompose(own);
+            if (cullvolume::Combine(mine, cullvolume::Decompose(other), CullMargin, both) && cullvolume::Contains(both, mine)) {
+                std::memcpy(cullPair.volume, both, sizeof both);
+                cullPair.combined = true;
+                return call(registry, list, reinterpret_cast<uintptr_t>(both), d);   // the kick copies it into its jobs
+            }
+        }
+        return call(registry, list, matrix, d);
+    }
+    // Second: left out only when this eye's own pyramid is inside the volume the first pass culled with.
+    const CullPair pair = cullPair;
+    cullPair = {};
+    cullRelationOk = pair.first && cullvolume::Relation(pair.left, own, cullRelation);
+    if (pair.combined && lookAt && cullvolume::Contains(pair.volume, cullvolume::Decompose(own))) {
+        cullSkipped.fetch_add(1, std::memory_order_relaxed);   // the list stays empty: the game's own test leaves the wait out
+        return 0;
+    }
+    (pair.combined ? cullOutside : cullNoVolume).fetch_add(1, std::memory_order_relaxed);
+    return call(registry, list, matrix, d);
+}
+
+void ApplyCull() {
+    if (!cullHookIn) {
+        uint8_t live[128];
+        uint64_t differs = 0;
+        static_assert(sizeof CullJobSig / 2 <= sizeof live && sizeof CullKickCallSig / 2 <= sizeof live);
+        if (!Holds(CullKickRva, CullKickSig, live, differs) || !Holds(CullKickCallRva, CullKickCallSig, live, differs) ||
+            !Holds(CullWaitRva, CullWaitSig, live, differs) || !Holds(CullJobRva, CullJobSig, live, differs) ||
+            !Holds(CullJobCopyRva, CullJobCopySig, live, differs) || !Holds(CullFrustumCopyRva, CullFrustumCopySig, live, differs) ||
+            !Holds(CullJobTestRva, CullJobTestSig, live, differs) || !Holds(CullBoxRva, CullBoxSig, live, differs) ||
+            !Holds(CullBoxFrontRva, CullBoxFrontSig, live, differs) || !Holds(CullBoxEndRva, CullBoxEndSig, live, differs) ||
+            !Holds(ShadowFitCentreRva, ShadowFitCentreSig, live, differs) || !Holds(ShadowFitExtentRva, ShadowFitExtentSig, live, differs))
+            return NotYet(cullOnce, differs);
+        if (!HookIn(CullKickRva, CullKickSig, CullKickHookBytes, &CullKickHook, &originalCullKick))
+            return Refuse(cullOnce, "the hook at RVA " + Hex(CullKickRva) + " was refused");
+        cullHookIn = true;
+    }
+    cullPair = {};
+    cullRelationOk = false;
+    cullOn.store(true);
+    cullOnce.state = State::Applied;
+    Say("cull_once applied: the first eye pass of a pair culls with one volume that holds both eyes' views, and the second, when its own view is "
+        "inside that volume, does not cull again (hook at RVA " + Hex(CullKickRva) + "; 12 stretches of the game's code proven first). The first pair "
+        "after this line, every other draw, and a second eye outside the volume are culled as the game does");
+}
+
+void RemoveCull() {
+    cullOn.store(false);
+    cullOnce.state = State::Off;
+    Say("cull_once off: its hook stays in the game's code and passes every call through");
+}
+
+// What the two did, every ten seconds while either is on (draw thread, between frames).
+void Tally() {
+    static ULONGLONG last = 0;
+    const ULONGLONG now = GetTickCount64();
+    if (!last) { last = now; return; }
+    if (now - last < 10000) return;
+    last = now;
+    if (shadowsOn.load(std::memory_order_relaxed)) {
+        const uint32_t kept = shadowsKeptPasses.exchange(0), own = shadowsOwnPasses.exchange(0), kicks = shadowKicksOut.exchange(0),
+                       collects = shadowCollectsOut.exchange(0), draws = shadowDrawsOut.exchange(0);
+        char text[320];
+        snprintf(text, sizeof text, "shadows_once 10 s: %u second passes kept the first's shadows (left out: %u caster culls, %u collects, %u shadow draws), "
+                 "%u fitted and drew their own (no first pass of the pair seen, or a camera without a look-at point)", kept, kicks, collects, draws, own);
+        Say(text);
+    }
+    if (cullOn.load(std::memory_order_relaxed)) {
+        const uint32_t skipped = cullSkipped.exchange(0), outside = cullOutside.exchange(0), none = cullNoVolume.exchange(0);
+        char text[320];
+        snprintf(text, sizeof text, "cull_once 10 s: %u second passes not culled (inside the first's volume), %u culled their own "
+                 "(%u outside the volume, %u with no volume from the first pass)", skipped, outside + none, outside, none);
+        Say(text);
+    }
+}
+
 // --- all of them ----------------------------------------------------------------------------------------------
 struct Entry { Patch* patch; void (*apply)(); void (*remove)(); };
 const Entry entries[] = {
     {&filter, &ApplyFilter, &RemoveFilter},
     {&account, &ApplyAccount, &RemoveAccount},
     {&names, &ApplyNames, &RemoveNames},
+    {&selection, &ApplySelection, &RemoveSelection},
+    {&shadows, &ApplyShadows, &RemoveShadows},
+    {&cullOnce, &ApplyCull, &RemoveCull},
 };
 
 std::atomic<bool> dirty{false};       // the settings changed, or something still waits for the game's code
@@ -255,7 +546,9 @@ std::string Summary() {
 }  // namespace
 
 void Configure(const Wanted& wanted) {
-    const bool want[] = {wanted.transparentFilter, wanted.profilerAccounting, wanted.drawDebugNames};
+    const bool want[] = {wanted.transparentFilter, wanted.profilerAccounting, wanted.drawDebugNames,
+                         wanted.selectionWalk, wanted.shadowsOnce, wanted.cullOnce};
+    static_assert(std::size(want) == std::size(entries), "one wish per patch, in the entries' order");
     bool changed = false;
     for (size_t i = 0; i < std::size(entries); ++i)
         if (entries[i].patch->wanted.exchange(want[i]) != want[i]) changed = true;
@@ -268,7 +561,16 @@ void Configure(const Wanted& wanted) {
     if (changed) dirty.store(true);
 }
 
+void EyePass(Pass pass) {
+    passNow.store(uint8_t(pass), std::memory_order_relaxed);
+    shadowsKept.store(false, std::memory_order_release);   // each pass decides anew, in its shadow update
+    // What a first pass left is for the second of the same pair only. A draw that stands alone in between (it
+    // runs the game's own update and cull) clears it in the hooks themselves.
+    if (pass == Pass::First) { shadowPair = {}; cullPair = {}; }
+}
+
 void BetweenFrames() {
+    if (shadowsOn.load(std::memory_order_relaxed) || cullOn.load(std::memory_order_relaxed)) Tally();
     if (!dirty.load(std::memory_order_relaxed)) return;
     if (!configured.load()) return;
     const bool look = firstFrame || frames++ % LookEvery == 0;   // what waits for the game's code: not every frame
