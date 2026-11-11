@@ -93,7 +93,9 @@ Not mirrored:
 - Two things always name your real hands: the **Left-handed** row itself, and the detected controllers.
 
 A weapon or shield is turned around in the other hand rather than mirrored, so a one-sided blade or a painted
-shield can look different. The shield's wrist bend stop is not on the right arm yet.
+shield can look different. Otherwise each sits in your left fist or on your right forearm exactly as the
+right-handed one sits in the right fist or on the left forearm, and swings, blocks and pushes things where it
+is drawn. The shield's wrist bend stop works on the right arm as it does on the left.
 
 ## Gameplay
 
