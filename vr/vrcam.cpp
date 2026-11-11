@@ -7488,6 +7488,11 @@ uintptr_t HookDrawGameScreen(int a) {
 #ifdef D2RVR_NATIVE_OPENXR
     static double sumBegin=0,sumEnd=0,sumWait=0,sumFence=0,sumSubmit=0,sumPeriod=0,sumLocate=0,sumInput=0;
     static uint32_t periodPairs=0;
+    // How long each pair took, in three counts a ten-second line: the whole cycle (end to end), the runtime's wait in
+    // it, and the rest (the work). A mean under the headset's slot says nothing of the pairs that ran over it.
+    static constexpr double cycleEdges[]={15,16,17.5,20,23,26,30},workEdges[]={10,12,14,15,16,17,19},waitEdges[]={1,2,3,4,6,9,12};
+    static uint32_t cycleBins[8]={},workBins[8]={},waitBins[8]={};
+    const auto binOf=[](const double* edges,double ms){int i=0;while(i<7&&ms>=edges[i])++i;return i;};
 #endif
     static ULONGLONG since = GetTickCount64(), lastHitch = 0;
     static uint32_t pairs = 0,cpuPairs=0;
@@ -7648,6 +7653,9 @@ uintptr_t HookDrawGameScreen(int a) {
         const double cycle=ended-lastEnd;
         maxPair=std::max(maxPair,cycle);
 #ifdef D2RVR_NATIVE_OPENXR
+        ++cycleBins[binOf(cycleEdges,cycle*.001)];
+        ++workBins[binOf(workEdges,cycle*.001-xr.waitFrameMs)];
+        ++waitBins[binOf(waitEdges,xr.waitFrameMs)];
         if(cycle>80000&&GetTickCount64()-lastHitch>1000) {
             lastHitch=GetTickCount64();
             LogF("Frame hitch: cycle %.1f ms; game gap %.1f; XR begin %.1f (wait %.1f); left %.1f; right %.1f; XR end %.1f (GPU fence %.1f, submit %.1f, layers %u); pipelines %u max %.1f ms",
@@ -7690,6 +7698,14 @@ uintptr_t HookDrawGameScreen(int a) {
             // step (controllers, gestures, the wrist and visor panels' uploads). (A line of its own: LogF keeps 255 characters.)
             LogF("Frame pacing: XR begin, ms a pair: wait %.2f | locate %.2f | input %.2f (controllers, gestures, panel uploads) | rest %.2f",
                 sumWait/pairs,sumLocate/pairs,sumInput/pairs,std::max(0.0,sumBegin*k-(sumWait+sumLocate+sumInput)/pairs));
+            // (lines of their own: LogF keeps 255 characters)
+            LogF("Frame pacing: pairs by cycle, ms: <15 %u | 15-16 %u | 16-17.5 %u | 17.5-20 %u | 20-23 %u | 23-26 %u | 26-30 %u | 30+ %u (a slot %.2f ms)",
+                cycleBins[0],cycleBins[1],cycleBins[2],cycleBins[3],cycleBins[4],cycleBins[5],cycleBins[6],cycleBins[7],periodPairs?sumPeriod/periodPairs:0.0);
+            LogF("Frame pacing: pairs by work (cycle less the runtime's wait), ms: <10 %u | 10-12 %u | 12-14 %u | 14-15 %u | 15-16 %u | 16-17 %u | 17-19 %u | 19+ %u",
+                workBins[0],workBins[1],workBins[2],workBins[3],workBins[4],workBins[5],workBins[6],workBins[7]);
+            LogF("Frame pacing: pairs by the runtime's wait, ms: <1 %u | 1-2 %u | 2-3 %u | 3-4 %u | 4-6 %u | 6-9 %u | 9-12 %u | 12+ %u",
+                waitBins[0],waitBins[1],waitBins[2],waitBins[3],waitBins[4],waitBins[5],waitBins[6],waitBins[7]);
+            for(auto* bins:{cycleBins,workBins,waitBins})std::fill(bins,bins+8,0u);
 #endif
             LogF("vrcam: the two passes busy the game's thread %.0f%% of their sampled time (%.2f ms CPU a pair over %u sampled pairs; the rest waits - GPU, fences, locks)",
                  sumWall > 0.0 ? 100.0 * sumCpu / sumWall : 0.0, cpuPairs?sumCpu*.001/cpuPairs:0,cpuPairs);
