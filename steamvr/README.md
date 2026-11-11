@@ -661,6 +661,16 @@ for its readback and would hide that optimization. Two timestamp submissions
 and scope measurements add diagnostic overhead. Do not compare a profiled
 run against an unprofiled run as if all timing changes were optimizations.
 
+To see where the thread that draws the eyes spends an eye pass (the game, the
+GPU driver, D3D12, ReShade, this mod, waiting), change `[debug] draw_sampler`
+to a new number other than 0 while in the world. The draw-thread sampler runs
+for `draw_sampler_seconds` (30), reports as `Frame draw sampler:` lines and in
+`d2r-vr-draw-sampler.txt` beside the frame log, and costs the passes a few
+percent while it runs. It also times the game's render tasks and samples the
+threads that run the ones named by `draw_sampler_tasks`;
+[PERFORMANCE.md](PERFORMANCE.md#draw-thread-sampler-november-10)
+explains the tables. Set it back to 0 afterwards.
+
 The October 10 development performance build adds generation-invalidated
 per-thread pipeline lookup caches, Windows SRW locks for VRS/UI callbacks,
 local guarded memory copies, per-instance portal batch classification, sparse

@@ -100,6 +100,8 @@ namespace hud { void SetWorkspaceBand(float top, float bottom); void SetBoardCle
 #include "foveation_math.h"
 #include "logging.h"
 #include "thread_stats.h"
+#include "draw_sampler_capture.h"   // [debug] draw_sampler: where the draw thread's time goes
+#include "render_task_hooks.h"      // ... and its render task times: hooks put in by the first capture
 #endif
 #include "sigscan.h"
 #include "mat4.h"
@@ -1008,6 +1010,9 @@ float GameInterfaceScale() {
 }
 
 void StartMatrixWatch();   // [debug] matrix_writer, below PickHeroMatrix
+#ifdef D2RVR_NATIVE_OPENXR
+void DrawSamplerSetting(unsigned request, float seconds, const wchar_t* tasks);   // [debug] draw_sampler, below StartMatrixWatch
+#endif
 
 void LoadSettings() {
     #ifdef D2RVR_NATIVE_OPENXR
@@ -1664,6 +1669,16 @@ void LoadSettings() {
         if (now && !was) StartMatrixWatch();
         was = now;
     }
+#ifdef D2RVR_NATIVE_OPENXR
+    // [debug] draw_sampler: a new number other than 0 = one capture of where the draw thread's time goes
+    {
+        // draw_sampler_tasks: the render tasks whose threads are sampled too (parts of their names; all; none)
+        wchar_t watch[512];
+        const std::string all(framevr::drawsampler::DefaultWatch);
+        GetPrivateProfileStringW(L"debug", L"draw_sampler_tasks", std::wstring(all.begin(), all.end()).c_str(), watch, (DWORD)std::size(watch), g_iniPath);
+        DrawSamplerSetting(GetPrivateProfileIntW(L"debug", L"draw_sampler", 0, g_iniPath), IniF(L"debug", L"draw_sampler_seconds", 30.0f), watch);
+    }
+#endif
     g_set.bodywalkPad.store(IniB(L"input", L"bodywalk_pad", true));
     g_set.aAttackOnly.store(IniB(L"input", L"a_attack_only", false));
     g_set.flatKeyMove.store(IniB(L"input", L"flat_keyboard_move", true));
@@ -7372,7 +7387,9 @@ uintptr_t DrawTurn(int a, bool continued) {
     SetEye(eye);
     framevr::BeginEye(eye);
     d2rcam::Refresh();
+    framevr::drawsampler::EnterPass(eye);
     const uintptr_t r = OrigDrawGameScreen(a);
+    framevr::drawsampler::LeavePass();
     const double t1 = pairtime::UsNow();
     framevr::EndPair();
     const double ended = pairtime::UsNow();
@@ -7528,7 +7545,13 @@ uintptr_t HookDrawGameScreen(int a) {
     if (replay) stereoreplay::BeginLeft();
 #endif
     d2rcam::Refresh();
+#ifdef D2RVR_NATIVE_OPENXR
+    framevr::drawsampler::EnterPass(0);
+#endif
     const uintptr_t leftR = OrigDrawGameScreen(a);
+#ifdef D2RVR_NATIVE_OPENXR
+    framevr::drawsampler::LeavePass();
+#endif
     const double t1 = pairtime::UsNow();
 #ifdef D2RVR_NATIVE_OPENXR
     const double c1 = measureCpu?pairtime::CpuUs():0;
@@ -7557,7 +7580,13 @@ uintptr_t HookDrawGameScreen(int a) {
 #else
     const bool replayed = false;
 #endif
+#ifdef D2RVR_NATIVE_OPENXR
+    if (!replayed) framevr::drawsampler::EnterPass(1);
+#endif
     const uintptr_t r = replayed ? leftR : OrigDrawGameScreen(a);
+#ifdef D2RVR_NATIVE_OPENXR
+    framevr::drawsampler::LeavePass();
+#endif
     *dt = keep; *rawDt = keepRaw;
     const double t2 = pairtime::UsNow();
     sumPass[1] += t2 - t1;
@@ -8630,6 +8659,51 @@ void StartMatrixWatch() {
     if (ww::Start(at + 0x20, at + 0x30, 3000, path, MatrixWatchTag, Log))
         LogF("vrcam: matrix_writer - watching the hero matrix %p for 3 s (flags: 100 = in a pair, 1 = right eye)", (void*)at);
 }
+
+#ifdef D2RVR_NATIVE_OPENXR
+// [debug] draw_sampler - where the draw thread's time goes in an eye pass (steamvr/draw_sampler_capture.h,
+// steamvr/PERFORMANCE.md). A number other than 0 and other than the one last seen starts one capture of
+// draw_sampler_seconds (30, 1-300) from the first eye pass drawn; it ends by itself and reports as
+// "Frame draw sampler:" lines and in d2r-vr-draw-sampler.txt beside the frame log. The same capture times
+// the game's render tasks and the drain the draw thread waits for them in (vr/render_task_hooks.cpp), and
+// samples the threads that run the tasks named by draw_sampler_tasks while they run them. 0 ends
+// a running one early. The value at the game's start counts: left at 1 it captures the first 30 s in the world
+// (it waits up to 10 minutes for the first eye pass, then gives up and says so).
+void DrawSamplerSetting(unsigned request, float seconds, const wchar_t* tasks) {
+    static unsigned last = 0;
+    if (request == last) return;
+    last = request;
+    if (!request) {
+        if (framevr::drawsampler::Running()) { framevr::drawsampler::Stop(); Log("Frame draw sampler: ended early ([debug] draw_sampler=0); its report follows"); }
+        return;
+    }
+    framevr::drawsampler::Options options;
+    options.seconds = std::clamp(seconds, 1.0f, 300.0f);
+    options.waitSeconds = 600;   // set before the world is entered: it waits this long for the first eye pass
+    options.mod = g_self;
+    options.log = Log;
+    // The render tasks' times: the hooks on the game's task runner and drain go in with the first capture
+    // asked for (a session without one never has them); what could not be hooked is said in the report.
+    options.tasksNote = rendertasks::Install();
+    for (const wchar_t* c = tasks; c && *c; ++c) options.watch += *c >= 0x20 && *c < 0x7F ? char(*c) : '?';   // task names are plain text
+    {   // beside the frame log: the logs folder next to the plugin's (steamvr/logging.cpp)
+        wchar_t path[MAX_PATH];
+        const DWORD len = g_self ? GetModuleFileNameW(g_self, path, MAX_PATH) : 0;
+        std::wstring p(path, len < MAX_PATH ? len : 0);
+        const auto last1 = p.find_last_of(L"\\/");
+        if (last1 != p.npos) p.resize(last1);
+        const auto parent = p.find_last_of(L"\\/");
+        if (last1 != p.npos && parent != p.npos) { p.resize(parent + 1); options.reportPath = p + L"logs\\d2r-vr-draw-sampler.txt"; }
+    }
+    if (framevr::drawsampler::Start(options)) {
+        LogF("Frame draw sampler: started ([debug] draw_sampler=%u) - %.0f s from the first eye pass drawn, about 1000 samples a second of the draw thread; "
+             "a diagnostic, it costs the pass a few percent while it runs", request, options.seconds);
+        LogF("Frame draw sampler: the threads running these render tasks are sampled too (draw_sampler_tasks): %.180s",
+             framevr::drawsampler::ParseWatch(options.watch).Any() ? options.watch.c_str() : "none");
+    } else
+        Log("Frame draw sampler: not started - a capture is already running (set [debug] draw_sampler to another number once it has reported)");
+}
+#endif
 
 // Camera forward and eye point in the hero's model space, from model matrix m.
 bool YawFromMatrix(const float* m, float* out, float* eyeModel, bool* eyeOk, float rows[3][3]) {

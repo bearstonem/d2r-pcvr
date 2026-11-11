@@ -170,6 +170,11 @@ add_executable(haptic-pulse-test haptic_pulse_test.cpp)
 target_include_directories(haptic-pulse-test PRIVATE ${OPENXR_SDK}/include)
 target_link_libraries(haptic-pulse-test PRIVATE framevr-runtime)
 add_executable(thread-stats-test thread_stats_test.cpp)
+# [debug] draw_sampler: where the draw thread's time goes in an eye pass (draw_sampler.h the tables, draw_sampler_capture.cpp the sampling)
+target_sources(d2rl-pcvr PRIVATE draw_sampler_capture.cpp ${ROOT}/vr/render_task_hooks.cpp)   # render_task_hooks: the game's render tasks and drain, timed during a capture
+add_executable(draw-sampler-test draw_sampler_test.cpp draw_sampler_capture.cpp)   # the tables from made-up samples and task records; live captures of a busy, a waiting and a lock-taking thread
+target_include_directories(draw-sampler-test PRIVATE ${ROOT}/vr)   # the render task fingerprints
+target_link_libraries(draw-sampler-test PRIVATE framevr-runtime)
 target_link_libraries(thread-stats-test PRIVATE framevr-runtime)
 add_executable(dlss-depth-test dlss_depth_test.cpp)
 target_link_libraries(dlss-depth-test PRIVATE d3d11 framevr-runtime)
@@ -457,7 +462,7 @@ add_test(NAME body-calibration-gesture-test COMMAND body-calibration-gesture-tes
 set_tests_properties(body-calibration-gesture-test PROPERTIES TIMEOUT 30)
 add_test(NAME light-bounds-test COMMAND light-bounds-test)
 set_tests_properties(light-bounds-test PROPERTIES TIMEOUT 30)
-foreach(test_target IN ITEMS memory-test biome-list-test hook-metrics-test active-keys-test resource-descriptions-test latest-worker-test haptic-pulse-test thread-stats-test
+foreach(test_target IN ITEMS memory-test biome-list-test hook-metrics-test active-keys-test resource-descriptions-test latest-worker-test haptic-pulse-test thread-stats-test draw-sampler-test
     spell-impacts-test
     gameplay-test weapon-skills-test quick-cast-test hand-controls-test hand-role-test hand-text-test elemental-hands-test elemental-particles-test skill-pad-test interact-press-test sewer-interaction-test notice-card-test mod-layout-test spell-aim-test bow-pose-test crossbow-pose-test body-tracking-test shapeshift-form-test head-shadow-test head-skip-test shield-steady-test body-calibration-test shoulder-swap-test blood-screen-test
     portal-billboard-test shrine-trace-test shrine-placement-test overlay-view-test bone-armor-height-test composition-layers-test projectile-rules-test environment-cutaway-test roof-materials-test game-ceiling-test stereo-prop-physics-test dropped-bottles-test props-test limb-rig-test aged-cache-test ecs-storage-test look-at-test limb-physics-test limb-worker-test leather-menu-test stash-buttons-test stats-button-test menu-drop-test arcane-decay-test respec-button-test vr-keyboard-test
@@ -473,6 +478,7 @@ foreach(test_target IN ITEMS memory-test biome-list-test hook-metrics-test activ
   add_test(NAME ${test_target} COMMAND ${test_target})
 endforeach()
 set_tests_properties(window-focus-test PROPERTIES TIMEOUT 10)
+set_tests_properties(draw-sampler-test PROPERTIES TIMEOUT 60)
 add_test(NAME elemental-hands-render-test COMMAND elemental-hands-render-test)
 set_tests_properties(elemental-hands-render-test PROPERTIES TIMEOUT 45)
 set_tests_properties(dev-scenarios-test PROPERTIES TIMEOUT 10)

@@ -1,5 +1,380 @@
 # VR performance investigations
 
+## Draw-thread sampler, November 10
+
+The game is limited by the one thread that draws the eyes: each eye pass keeps
+it busy 6.5-11 ms, and it records only about 2,000 of a pass's 11,000 draws
+itself. The sampler shows what that thread does with the rest of the time. It
+is a diagnostic: off unless asked for, and not for normal play.
+
+**Taking a capture.** In the world, in the headset, with the scene to be
+measured in view, change `[debug] draw_sampler` in the installed `d2r_pcvr.ini`
+to a new number other than 0 (the file is re-read when saved):
+
+```ini
+[debug]
+draw_sampler=1
+draw_sampler_seconds=30
+draw_sampler_tasks=Late Post Processing, Forward Pass, Depth Pass, Collect Draw Calls, Directional Shadows, Shadow Directional Draw Call Collect
+```
+
+The capture starts with the first eye pass drawn and ends by itself after
+`draw_sampler_seconds` (30; 1-300). `draw_sampler=0` ends a running capture
+early; it still reports. Another capture needs another number (2, 3, ...). Put
+it back to 0 afterwards: a number left there starts a capture at the next
+launch, in the first 30 s in the world (it waits up to 10 minutes for the
+first eye pass). Keep the same scene, view and graphics settings between
+captures that are to be compared, and stand still for the first one.
+`draw_sampler_tasks` names the render tasks whose threads are sampled too
+(table 8): parts of the task names of table 7, any case, separated by commas.
+The line above is the default, the chain the drain waits for; `all` is every
+task, `none` or nothing the draw thread only.
+
+**Where the report is.** `Frame draw sampler:` lines in `d2r-vr-frame.log`
+(a start line, then about ten lines when it ends), and every table in
+`d2r-vr-draw-sampler.txt` in the same `logs` folder, written anew by each
+capture. The last log line names the file. The file ends with every loaded
+module's base, size and PE link timestamp, which together name one build of a
+binary: the game's `D2R.exe` row is what to check a disassembly against.
+
+**How it works.** A thread of its own ticks about every millisecond, each tick
+up to 25% early or late at random so the samples do not keep step with the
+frame. The mod marks the stretch of `HookDrawGameScreen` and `DrawTurn` in
+which the game draws one eye; outside it nothing is sampled. In it, the
+sampler stops the draw thread, reads its registers and copies its stack from
+the stack pointer up to the mod's own call of the eye pass (at most 256 KB),
+lets it run again, and only then works out the callers from the copy: up to
+32 frames are kept, and the walk goes on to the pass's call to know that it
+got there. Menus, loading and the flat desktop draw no eye pass: a capture
+started there waits. The same capture times the game's render tasks (table 7,
+below) and samples the threads that run the watched ones (table 8, "Inside
+the render tasks" below).
+
+**Reading it.** Each sample is where the draw thread was at one instant of an
+eye pass. A row's percentage is its samples over all samples; its
+milliseconds are that share of the measured mean pass time, so the rows of a
+table add up to the pass. With 30,000 samples one sample stands for about
+0.3 us of a pass; a row of a few samples is noise. Addresses are
+`module+0xRVA` of the **start of the function** the sample was in, from the
+module's unwind table, so all samples inside one function count together and
+the RVA can be looked up in a disassembler. `~` after an RVA marks code with no
+unwind row (a leaf function at or after that address). A name after an address
+is the module's export at exactly that address.
+
+1. **Where the thread was**, by whose code the sampled instruction is in: the
+   game, this mod, ReShade, the GPU driver's user-mode DLLs (NVIDIA, AMD,
+   Intel, anything in the driver store), DLSS, D3D12, DXGI, ntdll,
+   kernel32/KERNELBASE, win32u/user32/gdi32, the OpenXR runtime and layers,
+   other modules, and code in no module (hook trampolines). Table 1b is the
+   same by module.
+2. **Waiting or running.** A sample stopped in one of the system's wait calls
+   (`NtWaitForSingleObject`, `NtWaitForMultipleObjects`,
+   `NtWaitForAlertByThreadId`, where SRW locks, critical sections and
+   condition variables park; keyed events; `NtDelayExecution`; the win32u
+   message and GPU waits; `NtYieldExecution`) is waiting. Table 2b lists the
+   calls and 2c who waits: the first caller outside the system's own DLLs and,
+   after `<`, the nearest game function behind it. Table 2d lists the other
+   samples in ntdll and win32u: locks spinning, and system calls that are not
+   waits (a D3DKMT call into the kernel driver counts as running).
+3. **Top 25 functions** by the sampled instruction: self time.
+4. **Top 15 game functions on the stack**: a sample counts once for every
+   `D2R.exe` function it is inside, so these rows overlap and do not add up.
+   This is which game subsystem owns the time, also when the instruction
+   itself is in the driver or in ntdll.
+5. **Graphics calls**: the samples in the driver, D3D12, DXGI, DLSS or
+   ReShade, by the nearest `D2R.exe` function on the stack: the game code
+   making the expensive calls.
+6. **The two eyes** as two totals; the tables also carry a left and a right
+   column. In a pair the right pass is drawn with the frame time held.
+7. **Render tasks**: what the draw thread's drain waits for. See "Render
+   tasks" below.
+8. **Inside the render tasks**: for each watched task, where the threads that
+   ran it were. See "Inside the render tasks" below.
+
+**Check the walk first.** The head of the file and one log line say what
+share of the samples' walks up the stack **reached the eye pass's own call**
+in this mod (`HookDrawGameScreen` or `DrawTurn`). Every sample is taken inside
+that call, so a sound capture is near 100%. Much less means the callers are
+wrong or missing: then only self time (tables 1 to 3) stands, and tables 2c, 4
+and 5 do not. Beside it: how many walks were cut short and why (the 32-frame
+limit; a "return address" that is not in executable memory; one that no call
+instruction ends at; the walk left the stack copy; unreadable memory), how
+many frames were unwound with a module's own unwind table because the system
+had none, and how many caller addresses were no code. An address outside a
+module's executable sections is never shown as a function: as a caller it is
+left out of every table and counted; as the sampled instruction it is a row
+"(not code by the module's sections: the page)".
+
+**Its cost.** Each sample stops a thread for about 20 millionths of a
+second. `draw-sampler-test` on the owner's PC measured 19-21 us a sample, the
+longest 30-73 us, 2.0% of the sampled thread's time at 1,000 samples a second.
+That thread had a shallow stack; the game's is deeper and more of it is
+copied, so expect somewhat more. The report states the capture's own figures:
+the mean and longest stop, and their share of the passes' time. The stops are
+inside the measured pass time, so a profiled pass is that much longer than an
+unprofiled one; do not compare frame rates across a capture. A thread inside
+a watched task is stopped as often and as briefly, so that task runs about 2%
+longer too, and the sampler's own thread works that much more. When no capture
+runs the cost is two reads of a flag per eye pass and one per render task.
+
+**Why it cannot hang the game.** The stopped thread may hold any lock: the
+heap's, the loader's, the log's, the one on the system's unwind tables. While
+it is stopped the sampler makes three system calls on the thread's handle
+(`SuspendThread`, `GetThreadContext`, `ResumeThread`) and reads plain memory
+into buffers allocated before the capture: the flags the thread published
+itself, the stack bounds in its TEB, the stack. It does not allocate, log,
+call the loader, or unwind (`RtlLookupFunctionEntry` takes the unwind-table
+lock, and dispatching an exception would too, so the stack is read only
+within the TEB's bounds, without a guarded read). Unwinding runs after the
+thread is running again, on the copy: the registers that point into the stack
+are moved to point into the copy and `RtlVirtualUnwind` walks that. The
+threads inside watched tasks are stopped by the same rule, one at a time, and
+the sampler never holds a lock of its own nor stops its own thread.
+
+**Limits.** Callers beyond 32 frames or 256 KB of stack are cut (the report
+counts them); a sample cut before any `D2R.exe` frame shows as "no game
+function within the frames kept". A sample taken inside a hook's trampoline,
+or code without unwind rows between the sample and its caller, ends the walk
+there: counted as cut short, no longer continued wrongly. The sampling of the
+threads inside watched tasks has not run in the game yet: its figures are from
+the test's own threads. The tables are `steamvr/draw_sampler.h` and
+`steamvr/draw_tasks.h`, the table of which thread is in which task
+`steamvr/task_slots.h`, the sampling `steamvr/draw_sampler_capture.cpp`, the
+hooks `vr/render_task_hooks.cpp`, the test `draw-sampler-test` (made-up
+samples and task records, the slot table, the watch list, then live captures
+of a busy, a waiting and a lock-taking thread, with and without the system's
+unwind table, and of two threads inside watched tasks).
+
+### First capture, November 10, 17:16
+
+30 s in the world, both eyes: 20,913 samples in 2,202 eye passes of 9.48 ms
+(left 9.59, right 9.36). The sampler stopped the thread 21.5 us a sample
+(longest 296 us), 2.2% of the passes' time; nothing froze.
+
+- **Whose code** (self time, a pass): the game 70.2% (6.65 ms), the GPU driver
+  10.4% (0.98), ntdll 10.0% (0.94), win32u 3.6% (0.34, mostly the D3DKMT
+  submit calls), D3D12 2.0%, ReShade 1.3% (0.12), this mod 1.2% (0.11).
+- **Waiting** only 1.8% (0.17 ms): by the system's account the thread runs.
+- **One cluster is 28% of the pass**: four game functions at `+0x9E9D40`
+  (11.2%), `+0x9E9EC0` (7.5%), `+0x9E8E70` (5.5%) and `+0x9E9770` (4.0%), 2.67
+  ms a pass. Read in the game's code they are the job system's "help while
+  waiting" path: get the job system, make one attempt to take a job
+  (`0x9E9EC0`), which looks through the queue's priority lists under its spin
+  lock (`0x9E9D40`) and, when it finds one it may take, runs and frees it
+  (`0x9E9770`). The loop around them that matters here is the render graph's
+  drain (`0xF1BD50`, 4.2% self, 0.40 ms): after the pass's render tasks are
+  started it loops, without sleeping, until all of them are done.
+- So about **3 ms of a 9.5 ms pass the draw thread is not computing: it spins
+  while worker threads finish the pass's render tasks**. Each pass registers
+  23 of them (`Renderer::PrepareGraph`, `0xE25970`): Initial Setup, UI Pass,
+  Collect Draw Calls, the light buffer, the shadow collects and passes,
+  terrain, Popcorn (particles), Depth Pass, Forward Pass, the post processing
+  and transparent passes and others. A task that is ready runs as one job.
+  What lengthens the slowest chain of tasks lengthens the pass, the mod's own
+  work inside a task included (the per-draw callbacks, the gather hook, the
+  skeleton hook).
+- `+0xF13FC0`, where the thread does wait (0.135 ms a pass): the game's GPU
+  profiler counts every draw call under one lock, taken by every thread that
+  records draws.
+- The two eyes cost the same: nothing is cheaper in the right pass today.
+
+**What was wrong with its caller tables.** Table 4 could not be right: a
+function whose only callee had 11.2% self time showed 4.1% inclusive, no game
+function was on nearly every stack, and its top row, 28%, was
+`D2RLoader.exe+0x1CAF505~` - no function, but the label for anything past the
+last row of the unwind table. The cause: to walk up a stack the unwinder needs
+each function's unwind row, and asks the system for it
+(`RtlLookupFunctionEntry`). The system keeps the table a module had when it
+was loaded. The game's executable is loaded packed: on disk its exception
+directory is a 3-row table for the unpacking stub, and its real table of
+150,572 rows appears in memory later, with the header changed to point at it.
+The system never looks again (checked on this Windows: after a module's header
+is edited in memory the lookup still answers from the table captured at
+load). So for every address in the game the system answered "no row". The
+sampler took that for a leaf function and read the top of the stack as the
+return address, then the next slot, and so on: the "callers" were whatever
+the stack held, among them pointers into the game's data (the job system's
+object, vtables), all labelled `+0x1CAF505~`. Frames in system DLLs, the
+driver and this mod unwound correctly, which is why the wait tables looked
+sound. From that capture: **self time, the system-call tables and "who waits"
+stand; tables 4 and 5 and every `<` caller through game code do not** (the
+9.1% "inclusive" of the game's allocator free is one such ghost).
+
+**The walk now.** For an address the system has no row for, the sampler looks
+in that module's own unwind table as it is in memory (the one it already read
+function starts from) and hands that row and the module's base to
+`RtlVirtualUnwind`, which follows chained rows itself. Only an address with no
+row in either table is a leaf. Every unwound return address must lie in
+executable memory (the module's executable sections, or memory executable
+now) and directly after a call instruction; if not, the walk stops and the
+sample counts as cut short. The walk ends at the pass's own call. Nothing
+changed in what happens while the thread is stopped, except one more plain
+read (the mark of the pass's call) so that less stack is copied.
+`draw-sampler-test` proves it on a live thread: with the system's lookup
+withheld for the executable, as in the game, all walks reach the pass's call
+through the module's own table (and through ntdll's and KERNELBASE's when
+withheld for every module); with the table withheld too, as the first sampler
+walked, none do and the report says so.
+
+### Render tasks
+
+While a capture runs the mod also times every render task, the drain and the
+pass. Two hooks go in when the first capture of a session is asked for, never
+before: on the game's task runner (`0xF18BC0`, which runs one task as one job;
+its only caller is the job's functor) and on the drain (`0xF1BD50`). Each is
+put in only where the game's bytes are the known ones: the runner's first 39
+bytes, which are also the proof of what the hook reads (the task's index and
+the graph, a task slot of 0x2A0 bytes), two places in the task registration
+for the name pointer at slot + 0x238, and the drain's first 23 bytes. On any
+difference - another game build, code not yet run - that hook is left out,
+the frame log says which (`Frame draw sampler: ...`), and the report says
+what is missing: without the runner no task times, without the name proof
+tasks are numbered instead of named, without the drain offsets count from the
+pass's start. The fingerprints are `vr/render_task_signatures.h`; they are
+not in the game-code table of the Status tab, so a build that lacks them
+shows nothing there.
+
+With no capture running a hooked call costs one flag test. In a capture,
+inside an eye pass, it reads the task's index and name pointer (two guarded
+reads, before the clock starts), reads the clock before and after the game's
+function, and writes one record into a buffer made before the capture: no
+lock, no allocation, no log, on whichever of the game's threads runs the job.
+The arguments are passed on untouched and the result is returned as it was.
+
+**Reading table 7** (per eye) and the `render tasks` log lines:
+
+- The head: passes counted, **the drain's time a pass** and its share of the
+  pass, when the last task ends, and how the drain divides into the draw
+  thread running tasks itself and having none (spinning, or helping with
+  jobs that are not render tasks).
+- A row per task name: **runs a pass**; its **mean and longest run**; the
+  share of runs **on the draw thread** (the rest on workers); runs begun
+  **inside** another task's run on the same thread (that task was waiting and
+  helped, so its own time includes them); mean **start and end**, in ms from
+  the drain's start (a task started before the drain has a negative start);
+  **last**: in what share of passes it was the last task to end; and **idle
+  by then**: in those passes, how long the draw thread had been without a task
+  of its own when that task ended.
+- The task that ends last is the end of the critical chain; the drain cannot
+  end before it. Follow the chain back through the rows: the task before it
+  is the one that ends where it starts. "Idle by then" is what shortening
+  that chain could give back to the pass, at most.
+- A long task on a worker that is never last is not the limit. A task on the
+  draw thread delays the pass only by its own time.
+
+**Limits.** A task belongs to the pass in which it starts. Passes cut by the
+capture's start or end are left out and counted. A capture set in the INI
+before the game starts asks for the hooks before the game has run that code:
+it gets samples and no task times; start captures in the world. The hooks stay
+in until the game exits. They ran in the game in the second capture, below.
+
+### Second capture, November 10, 18:10
+
+The same scene with the fixed walk and the render task hooks, both run in the
+game for the first time: 21,657 samples in 2,092 eye passes of 10.34 ms; the
+thread stopped 20.4 us a sample, 2.0% of the passes' time. 93.4% of the walks
+reached the eye pass's own call (1,428 ended at an address that is not code,
+23 at the frame limit), and 198,895 of 258,993 frames were unwound by the
+game's own table: the caller tables stand now. Every task was named; the drain
+was timed in every pass.
+
+- **The drain is 6.2 ms of the 10.3 ms pass** (60%): the draw thread ran tasks
+  itself for 2.5 ms of it and had none for 3.7 ms. On the stacks, the drain
+  (`0xF1BD50`) is on 59.6% of the samples and the job system's help attempt
+  (`0x9E9EC0`) on 49.2%.
+- **The chain the drain waits for**, mostly on worker threads, in ms from the
+  drain's start (left eye; the right is the same within 0.2 ms):
+  1. `Collect Draw Calls`, 1.2 ms (+0.13 to +1.33; longest 2.8-4.5), one
+     serial job, 99% on a worker. Beside it `Shadow Directional Draw Call
+     Collect`, 1.1 ms.
+  2. `Depth Pass` 2.85 ms and `Forward Pass` 2.83 ms side by side (+1.38 to
+     +4.2), one job each, always on workers.
+  3. `Late Post Processing`, 3.8-3.9 ms (+2.44 to +6.2), 93% on a worker: it
+     starts before the Forward Pass ends and its end is the drain's end
+     (`Release Popcorn Draw Calls`, 5 us, follows it and is the last task in
+     99.7% of passes).
+- Off the chain, but long: `Directional Shadows` 2.1 ms (62% on the draw
+  thread), `Clutter + Height + Fluid + Friends` 1.1 ms, `Transparent Pass`
+  1.0 ms.
+- Waiting is still only 1.7% of the draw thread's samples: it spins.
+
+So the pass is as long as Collect Draw Calls, then the Depth or Forward Pass,
+then Late Post Processing, and what happens inside those links decides it.
+That capture could not say: it sampled the draw thread only, and those tasks
+ran on workers. Table 8 is for that.
+
+### Inside the render tasks
+
+During a capture the sampler also stops **whichever thread is running a
+watched render task** and takes the same kind of sample of it.
+
+**Which thread is in which task.** The hook on the task runner already
+brackets every task's run on the thread that runs it. Around the run it now
+also writes that into the thread's own slot of a fixed table
+(`steamvr/task_slots.h`): 64 slots, one per thread that ever ran a task. A
+thread finds its slot by its id and claims an empty one with one atomic
+compare-exchange; slots are never given back. A slot holds the thread's TEB
+and a stack of up to four open runs (task name, index, eye, a run number, and
+an address in the hook's stack frame), because a task that waits helps with
+other jobs, another render task among them: the inner run is then the
+thread's task, and the outer one again when it ends. Only the slot's own
+thread writes it, with its sequence number odd while it does, so a reader
+never takes two states for one. It is stores into memory that is there from
+the start: no allocation, no lock, no log, and only while a capture watches
+tasks.
+
+**The sampling.** At each tick, before the draw thread's own sample, the
+sampler reads the 64 slots, keeps the threads whose innermost run is a watched
+task, and stops at most three of them, one after the other, starting after
+the last one stopped at the tick before - so when more than three threads are
+in watched tasks they take turns. A thread's handle is opened once and kept;
+the system is asked once where that thread's TEB is, and the slot's word must
+agree. Stopped, the thread's registers are read, then its slot: only if it
+still names the run the thread was picked for is the sample kept (the slot
+cannot change while its thread is stopped), otherwise it is dropped and
+counted as "moved on". Then the stack is copied from the stack pointer to the
+hook's frame, within the bounds in the TEB, and the thread runs again. The
+draw thread is not stopped a second time: its own sample notes the task its
+slot names, and the frames up to that task's call are that task's sample too.
+The walk up a task's stack ends at the hook's own frame in this mod.
+
+**Reading table 8.** After the head (what was watched, samples, how many ticks
+had more threads than could be stopped, the stops' cost, what was lost) each
+task that got samples has:
+
+- a head line: **samples**, how many from the draw thread and from other
+  threads, the **achieved rate** in samples per second of the task's run time
+  (about 1,000 when every tick could take it; less when tasks took turns),
+  its runs and mean run time from table 7, and the share of walks that
+  **reached the task's own call** - near 100%, or only self time stands for
+  that task;
+- **a.** whose code the sampled instruction was in, as % of the task and ms of
+  a run;
+- **b.** waiting or running, the wait calls, and who waits (the first caller
+  outside the system's DLLs, then the nearest game function);
+- **c.** the top 15 functions by self time (module + RVA of the function's
+  start);
+- **d.** the top 15 game functions on the stack, inclusive;
+- **e.** the samples in the GPU driver, D3D12, DXGI, DLSS, ReShade or this
+  mod, as `whose code < the nearest game function`: which game code the
+  outside work is done for;
+- **f.** the samples in this mod and ReShade by function. The RVA is the
+  function's start in the DLL: look it up in the mod's link map to name the
+  callback. A name after it is the DLL's export at that address.
+
+A row's ms is its share of the task's samples times the task's mean run. The
+eyes are shown together; when a run's time, or what a tenth or more of it
+goes to, differs between them by more than 10%, the tables carry a left and a
+right column instead. The log has four or five `task <name>:` lines per task:
+the head, whose code, waiting, the top functions, and this mod's and
+ReShade's.
+
+**Limits.** Samples inside a run nested in another count for the inner task
+only, while the outer task's run time still includes it. A thread stopped
+while it holds one of the game's spin locks keeps the others spinning for the
+20 us of the stop, as the draw thread's stops already do. With `all`, more
+threads can be in tasks at once than are stopped at a tick, and each task
+gets fewer samples: its head line says what it got. Not yet run in the game.
 ## Draw thread: the bodies' physics on its own thread, November 10
 
 **Gain not yet measured in a headset.** Built and tested natively only.
