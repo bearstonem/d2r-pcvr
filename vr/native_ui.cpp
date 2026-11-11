@@ -111,6 +111,16 @@ const char* SkillKey(int id,char key[80]) {
     if(id==370)return "d2r:SkillNameCubeLoot";
     if(id==371)return "d2r:SkillnameMetamorphosisBear";
     if(id==372)return "d2r:SkillnameMetamorphosisWolf";
+    // The Warlock's (373-402, D2R's own class): its names have keys of their own, not skillname<N> (skilldesc's
+    // "str name"). The tables' way (FromTables) found none of them: "Skill 373" on the MOTIONS page (owner, 2026-11-10).
+    if(id>=373&&id<=402) {
+        static const char* const warlock[]={"SummonGoatmanName","DemonicMasteryName","DeathMarkName","SummonTaintedName","SummonDefilerName",
+            "BloodOathName","EngorgeName","BloodBoilName","ConsumeName","BindDemonName","LevitateName","EldritchBlastName","BaneHexName",
+            "SiphonHexName","PsychicWardName","EchoingStrikeName","PurgeHexName","BladeWarpName","CleaveName","MirroredBladesName",
+            "LethargySigilName","RingOfFireName","MiasmaBoltName","RancorSigilName","EnhancedEntropyName","FlameWaveName","MiasmaChainName",
+            "DeathSigilName","ApocalypseName","AbyssName"};
+        std::snprintf(key,80,"d2r:%s",warlock[id-373]);return key;
+    }
     if(id>372)return nullptr; // table/localization adapter needed; no fabricated name
     std::snprintf(key,80,"d2r:skillname%d",id+(id>=221&&id<=280?1:0));return key;
 }
@@ -228,6 +238,15 @@ std::string Name(int id) {
     if(id>=0&&id<=511) {   // to the end of the class trees, the Warlock's included
         auto found=FirstKnown(id,{"d2r:skillname%d","d2r:Skillname%d","d2r:skillsname%d","d2r:SkillName%d"},id>=221&&id<=280?1:0);
         if(!found.empty())return names.emplace(id,found).first->second;
+    }
+    if(id>=373&&id<=402) {   // the Warlock's, should its key and the tables both fail: its English name, never "Skill 373"
+        static const char* const warlock[]={"Summon Goatman","Demonic Mastery","Death Mark","Summon Tainted","Summon Defiler","Blood Oath",
+            "Engorge","Blood Boil","Consume","Bind Demon","Levitation Mastery","Eldritch Blast","Hex: Bane","Hex: Siphon","Psychic Ward",
+            "Echoing Strike","Hex: Purge","Blade Warp","Cleave","Mirrored Blades","Sigil: Lethargy","Ring of Fire","Miasma Bolt",
+            "Sigil: Rancor","Enhanced Entropy","Flame Wave","Miasma Chain","Sigil: Death","Apocalypse","Abyss"};
+        char line[120];std::snprintf(line,sizeof line,"Frame skill names: skill %d named from the built-in list (no key or table name)",id);
+        framevr::logging::Write(line);
+        return names.emplace(id,warlock[id-373]).first->second;
     }
     std::snprintf(text,sizeof text,"Skill %d",id);return text;
 }
