@@ -2,12 +2,19 @@
 
 ## One present a pair, November 10
 
-**Nothing here is measured and nothing has been seen in a headset or on the
-desktop window.** It is built from the game's code (the 3.3.93787 dump),
-ReShade 6.8.0's source and this mod's own; the build passes its tests and has
-never run in the game. `present_once` is therefore **off**: no key in the
-shipped INI, nothing in VR Settings. To try it, write into the installed
-`d2r_pcvr.ini`:
+**Measured once, November 10** (SteamVR, headset at 120 Hz, frame generation
+on, Both eyes, a field fight; switched on live, a 30 s capture before and
+after): the left eye's present (`0x109F4C0` inclusive) 0.73 ms to 0.51 ms, the
+right eye's unchanged at 0.72; the log's `Present` for the left pass about
+0.50 to 0.32 ms. About 0.2 ms a pair. Every ten-second line had N = M = K
+(217, 512, 529), no stall, the picture and the desktop window as before (the
+owner). The fewer guarded reads below are too small to see in a capture.
+
+`present_once` stays **off** as shipped all the same: it changes the window's
+swap chain's function table, which other software (overlays, capture tools)
+also reaches for, and it has run on one PC in one session for 0.2 ms a pair.
+No key in the shipped INI, nothing in VR Settings. To switch it on, write into
+the installed `d2r_pcvr.ini`:
 
 ```ini
 [game_patches]
