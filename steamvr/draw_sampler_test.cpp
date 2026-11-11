@@ -1,6 +1,7 @@
 // The draw-thread sampler ([debug] draw_sampler): the tables from made-up samples and modules, then the
 // sampler itself on a thread of this test - a busy one, a waiting one, and the report's file and log lines.
 #include "draw_sampler_capture.h"
+#include "render_task_signatures.h"
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -204,6 +205,207 @@ static void Tables() {
     assert(FileText(none, modules).find("No samples") != std::string::npos);
 }
 
+// The walk's choices, without the system's unwinder: a module whose unwind table the system does not have
+// (the game's executable: unpacked in memory after it was loaded) gets its rows from its own table, an
+// address with no row there is a leaf, and a data address is never a function.
+static void WalkChoices() {
+    // the module's table as it lies in its image: three functions, and a row in the indirect form
+    alignas(4) static uint8_t image[0x1000] = {};
+    const RuntimeFn rows[] = {{0x1000, 0x1100, 0x900}, {0x1100, 0x1200, 0x900}, {0x2000, 0x2400, 0x900}, {0x3000, 0x3010, 0x800 | 1}};
+    const RuntimeFn real{0x3000, 0x3010, 0x900};
+    memcpy(image + 0x400, rows, sizeof rows);
+    memcpy(image + 0x800, &real, sizeof real);
+    WalkModule game;
+    game.base = 0x140000000ull; game.size = 0x10000; game.image = image;
+    game.table = reinterpret_cast<const RuntimeFn*>(image + 0x400); game.rows = 4;
+    game.code = {{0x1000, 0x4000}};
+    const std::vector<WalkModule> loaded = {game};
+    assert(FindWalkModule(loaded, game.base + 0x1050) == &loaded[0] && FindWalkModule(loaded, game.base + 0x10000) == nullptr && FindWalkModule(loaded, 0x1000) == nullptr);
+
+    assert(FindRuntimeFn(game.table, 4, 0x1000) == game.table && FindRuntimeFn(game.table, 4, 0x10FF) == game.table);
+    assert(FindRuntimeFn(game.table, 4, 0x1100) == game.table + 1 && FindRuntimeFn(game.table, 4, 0x23FF) == game.table + 2);
+    assert(!FindRuntimeFn(game.table, 4, 0x0FFF) && !FindRuntimeFn(game.table, 4, 0x1200) && !FindRuntimeFn(game.table, 4, 0x2400) && !FindRuntimeFn(game.table, 4, 0x9000));
+    assert(!FindRuntimeFn(game.table, 0, 0x1000));
+
+    int asked = 0;
+    const auto none = [&](uint64_t, uint64_t&) -> const RuntimeFn* { ++asked; return nullptr; };   // the system has no table for this module
+    RowChoice c = ChooseRow(&game, game.base + 0x1050, none);
+    assert(asked == 1 && c.from == RowFrom::Module && c.row == game.table && c.base == game.base);   // the module's own row, with its base
+    c = ChooseRow(&game, game.base + 0x2200, none);
+    assert(c.from == RowFrom::Module && c.row == game.table + 2);
+    c = ChooseRow(&game, game.base + 0x3008, none);
+    assert(c.from == RowFrom::Module && c.row == reinterpret_cast<const RuntimeFn*>(image + 0x800));   // the indirect form: the row it stands for
+    c = ChooseRow(&game, game.base + 0x1800, none);
+    assert(c.from == RowFrom::None && !c.row);                                                    // code with no row: a true leaf
+    c = ChooseRow(&game, game.base + 0x5000, none);
+    assert(c.from == RowFrom::None && !c.row);                                                    // data: no row either
+    c = ChooseRow(nullptr, 0x12345678, none);
+    assert(c.from == RowFrom::None);                                                              // in no module
+    c = ChooseRow(&game, game.base + 0x20000, none);
+    assert(c.from == RowFrom::None);                                                              // past the module
+    const RuntimeFn theirs{0x1000, 0x1100, 0x900};
+    c = ChooseRow(&game, game.base + 0x1050, [&](uint64_t, uint64_t& base) -> const RuntimeFn* { base = 0x7FF000000000ull; return &theirs; });
+    assert(c.from == RowFrom::System && c.row == &theirs && c.base == 0x7FF000000000ull);         // the system's row wins when it has one
+    WalkModule bare = game; bare.table = nullptr; bare.rows = 0;
+    assert(ChooseRow(&bare, game.base + 0x1050, none).from == RowFrom::None);
+    const RuntimeFn outside{0x3000, 0x3010, 0xFFF0 | 1};
+    assert(DirectRuntimeFn(&outside, image, sizeof image) == nullptr && DirectRuntimeFn(&real, image, sizeof image) == &real && !DirectRuntimeFn(nullptr, image, 1));
+
+    assert(InCode(game.code, 0x1000) && InCode(game.code, 0x3FFF) && !InCode(game.code, 0x4000) && !InCode(game.code, 0x0FFF) && !InCode({}, 0x1000));
+
+    // a return address follows a call instruction
+    const auto after = [](std::initializer_list<uint8_t> bytes) {
+        uint8_t b[16] = {0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90};
+        size_t n = 8;
+        for (uint8_t v : bytes) b[n++] = v;
+        return AfterCall(b + n, n);
+    };
+    assert(after({0xE8, 0x10, 0x20, 0x30, 0x40}));               // call rel32
+    assert(after({0xFF, 0xD0}) && after({0x41, 0xFF, 0xD4}));    // call rax, call r12
+    assert(after({0xFF, 0x10}) && after({0xFF, 0x50, 0x08}));    // call [rax], call [rax+8]
+    assert(after({0xFF, 0x15, 1, 2, 3, 4}));                     // call [rip+disp]
+    assert(after({0xFF, 0x90, 1, 2, 3, 4}));                     // call [rax+disp32]
+    assert(after({0xFF, 0x14, 0xC8}) && after({0xFF, 0x54, 0x24, 0x20}) && after({0xFF, 0x94, 0xC8, 1, 2, 3, 4}));   // with an index
+    assert(after({0xFF, 0x14, 0x25, 1, 2, 3, 4}));               // call [disp32]
+    assert(!after({0xFF, 0xE0}) && !after({0xFF, 0x25, 1, 2, 3, 4}));   // jumps
+    assert(!after({0x48, 0x89, 0x5C, 0x24, 0x08}) && !after({0, 0, 0, 0, 0, 0, 0, 0}) && !after({0xC3}));
+    const uint8_t two[] = {0xFF, 0xD0};
+    assert(AfterCall(two + 2, 2) && !AfterCall(two + 2, 1) && !AfterCall(two + 2, 0));
+
+    // In the tables: a data address on a stack is no function - not in the game functions, not "past the last row".
+    std::vector<Module> modules(1);
+    modules[0].base = game.base; modules[0].size = 0x10000; modules[0].name = "D2R.exe"; modules[0].kind = Kind::Game;
+    modules[0].functions = {{0x1000, 0x1100, 0x1000}, {0x1100, 0x1200, 0x1100}, {0x2000, 0x2400, 0x2000}};
+    modules[0].code = {{0x1000, 0x4000}}; modules[0].sections = true;
+    assert(IsCode(modules[0], 0x2400) && IsCode(modules[0], 0x3FFF) && !IsCode(modules[0], 0x5000) && !IsCode(modules[0], 0x0800));
+    const uint64_t G = game.base;
+    std::vector<Sample> samples = {
+        Make(0, {G + 0x1010, G + 0x5000, G + 0x2100}),   // a pointer into .data between two real callers
+        Make(1, {G + 0x1010, G + 0x9000}),               // a pointer far past the last unwind row
+        Make(0, {G + 0x1010, G + 0x2500}),               // code past the last row: a leaf function there
+        Make(1, {G + 0x1150, G + 0x2100}),
+    };
+    samples[0].root = samples[2].root = samples[3].root = 1;
+    samples[1].cut = uint8_t(Cut::NotCode);
+    Stats stats;
+    stats.passes[0] = stats.passes[1] = 1; stats.passMs[0] = stats.passMs[1] = 8;
+    stats.framesWalked = 9; stats.framesOwnRow = 7;
+    const Report r = Aggregate(modules, samples.data(), samples.size(), stats);
+    assert(r.notCode == 2 && r.cut == 1 && r.cuts[size_t(Cut::NotCode)] == 1 && r.cuts[size_t(Cut::Limit)] == 0);
+    assert(r.root[0] == 2 && r.root[1] == 1 && Near(r.RootShare(), 0.75) && Near(r.RootShare(0), 1.0) && Near(r.RootShare(1), 0.5));
+    assert(r.inclusive.size() == 4);
+    assert(Find(r.inclusive, "D2R.exe+0x1000")->total() == 3 && Find(r.inclusive, "D2R.exe+0x2000")->total() == 2 && Find(r.inclusive, "D2R.exe+0x1100")->total() == 1);
+    assert(Find(r.inclusive, "D2R.exe+0x2400~")->total() == 1);   // the leaf in code
+    for (const std::vector<Row>* table : {&r.inclusive, &r.leaves, &r.callers, &r.waiters})
+        for (const Row& row : *table) assert(row.label.find("not code") == std::string::npos && row.label.find("0x5000") == std::string::npos && row.label.find("0x9000") == std::string::npos);
+    assert(r.leaves.size() == 2);   // the two functions sampled: no row for a data address
+    // the sampled instruction itself outside the code sections did run (code a loader put there): a row by its page that says so
+    const Sample odd = Make(0, {G + 0x5000});
+    const Report o = Aggregate(modules, &odd, 1, stats);
+    assert(o.leaves.size() == 1 && o.leaves[0].label == "D2R.exe+0x5000 (not code by the module's sections: the page)" && o.inclusive.empty() && o.notCode == 0);
+
+    std::string all;
+    for (const std::string& line : LogLines(r, "")) { assert(line.size() <= 255); all += line; all += '\n'; }
+    assert(all.find("the walks up the stack: 75.0% of the samples reached the eye pass's own call (left 100.0%, right 50.0%)") != std::string::npos);
+    assert(all.find("not to be trusted; 7 of 9 frames by a module's own table\n") != std::string::npos);
+    assert(all.find("Frame draw sampler: walks cut short: 0 frame limit, 1 not code, 0 not after a call, 0 stack copy, 0 unreadable\n") != std::string::npos);
+    const std::string file = FileText(r, modules);
+    assert(file.find("the walks up the stack: 75.0% of the samples reached the eye pass's own call in this mod (left 100.0%, right 50.0%)") != std::string::npos);
+    assert(file.find("7 of 9 frames were unwound with a module's own unwind table") != std::string::npos && file.find("2 caller addresses were no code") != std::string::npos);
+}
+
+// The render tasks' tables from made-up records.
+static void Tasks() {
+    using namespace framevr::drawtasks;
+    const std::vector<std::string> names = {"Collect Draw Calls", "Forward Pass", "UI Pass", "Depth Pass", ""};
+    const auto run = [](What what, uint32_t pass, int eye, double start, double end, uint32_t thread, bool onDraw, int name, uint8_t index = 0) {
+        Run r;
+        r.what = what; r.pass = pass; r.eye = uint8_t(eye); r.start = start; r.end = end; r.thread = thread; r.onDraw = onDraw; r.name = name; r.index = index;
+        return r;
+    };
+    const std::vector<Run> runs = {
+        // pass 1, left: the drain 4-9; a worker's task begun before it; one of the draw thread's own with another inside; the last ends at 8.8
+        run(What::Task, 1, 0, 3.5, 6.0, 7, false, 0),
+        run(What::Drain, 1, 0, 4.0, 9.0, 1, true, -1),
+        run(What::Task, 1, 0, 4.2, 5.0, 1, true, 2),
+        run(What::Task, 1, 0, 4.4, 4.6, 1, true, 3),
+        run(What::Task, 1, 0, 6.0, 8.8, 8, false, 1),
+        run(What::Pass, 1, 0, 0.0, 10.0, 1, true, -1),
+        // pass 2, right: the draw thread's own task ends last
+        run(What::Pass, 2, 1, 20.0, 29.0, 1, true, -1),
+        run(What::Drain, 2, 1, 23.0, 28.0, 1, true, -1),
+        run(What::Task, 2, 1, 23.1, 25.1, 7, false, 0),
+        run(What::Task, 2, 1, 25.1, 26.0, 8, false, 1),
+        run(What::Task, 2, 1, 26.5, 27.9, 1, true, 2),
+        // pass 3: no window (the capture's edge): left out
+        run(What::Task, 3, 0, 30.0, 31.0, 7, false, 0),
+        // pass 4, left: the drain not timed - from the pass's start; a task with no name, one whose name did not read
+        run(What::Pass, 4, 0, 40.0, 45.0, 1, true, -1),
+        run(What::Task, 4, 0, 40.5, 42.0, 7, false, -1, 5),
+        run(What::Task, 4, 0, 40.6, 41.0, 8, false, 4, 6),
+        // pass 5: a window with no task: not a pass of tasks
+        run(What::Pass, 5, 1, 50.0, 51.0, 1, true, -1),
+    };
+    const TaskReport r = Summarise(runs, names, "", 3);
+    assert(r.Any() && r.Drained() && r.dropped == 3 && r.orphans == 1);
+    const EyeTasks& left = r.eye[0]; const EyeTasks& right = r.eye[1];
+    assert(left.passes == 2 && left.drained == 1 && left.tasks == 6 && right.passes == 1 && right.drained == 1 && right.tasks == 3);
+    assert(Near(left.passMs, 15) && Near(left.drainMs, 5) && Near(left.drainLongest, 5) && Near(right.drainMs, 5));
+    assert(Near(left.lastEndMs, 4.8 + 2.0) && Near(left.lastEndLongest, 4.8) && Near(right.lastEndMs, 4.9));
+    assert(Near(left.ownMs, 0.8) && Near(right.ownMs, 1.4));   // the task inside another on the draw thread is not counted twice
+    const auto find = [&](const char* name) -> const TaskRow* { for (const TaskRow& t : r.rows) if (t.name == name) return &t; return nullptr; };
+    const TaskRow* collect = find("Collect Draw Calls"); const TaskRow* forward = find("Forward Pass"); const TaskRow* ui = find("UI Pass"); const TaskRow* depth = find("Depth Pass");
+    assert(collect && forward && ui && depth && r.rows.size() == 6);
+    assert(collect->runs[0] == 1 && collect->runs[1] == 1 && Near(collect->ms[0], 2.5) && Near(collect->longest[0], 2.5) && Near(collect->ms[1], 2.0));
+    assert(Near(collect->startAt[0], -0.5) && Near(collect->endAt[0], 2.0) && Near(collect->startAt[1], 0.1) && collect->onDraw[0] == 0 && collect->Last() == 0);
+    assert(forward->last[0] == 1 && forward->last[1] == 0 && Near(forward->idleByThen[0], 3.8) && Near(forward->endAt[0], 4.8) && forward->onDraw[0] == 0);
+    assert(ui->runs[0] == 1 && ui->onDraw[0] == 1 && ui->inside[0] == 0 && ui->last[1] == 1 && Near(ui->idleByThen[1], 0.0) && Near(ui->endAt[1], 4.9));
+    assert(depth->runs[0] == 1 && depth->inside[0] == 1 && depth->onDraw[0] == 1 && depth->runs[1] == 0);
+    const TaskRow* five = find("task 5 (no name read)"); const TaskRow* six = find("task 6 (no name read)");
+    assert(five && six && five->last[0] == 1 && Near(five->startAt[0], 0.5) && Near(five->endAt[0], 2.0) && Near(five->idleByThen[0], 2.0));
+    assert(r.rows[0].Last() == 1 && r.rows[3].Last() == 0);   // the tasks ending last come first
+    assert(r.rows[0].name == "UI Pass" || r.rows[0].name == "Forward Pass");
+
+    const LogParts parts = LogText(r);
+    assert(parts.lines.size() == 2);
+    assert(parts.lines[0] == "render tasks: 3.0 a pass in 3 passes; the drain (the draw thread waiting for them) 5.00 ms a pass (left 5.00, right 5.00; longest 5.00), 52.6% of a pass");
+    assert(parts.lines[1] == "render tasks: the last one ends 3.90 ms into the drain; the draw thread ran tasks itself for 1.10 ms of the drain and had none for 3.90 ms");
+    for (const std::string& line : parts.lines) assert(line.size() <= 220);
+    assert(parts.lastItems.size() == 3 && parts.longItems.size() == 6);
+    bool said = false;
+    for (const std::string& item : parts.lastItems) said |= item == "Forward Pass 33% (ends +3.90 ms, runs 1.85 ms, idle 3.80 ms)";
+    assert(said);
+    assert(parts.longItems[0] == "Collect Draw Calls 1.50 ms (-0.20 to +2.05, a worker)");
+    bool own = false;
+    for (const std::string& item : parts.longItems) own |= item.find("UI Pass") == 0 && item.find("the draw thread") != std::string::npos;
+    assert(own);
+    const std::string file = FileText(r);
+    for (const char* part : {"7. Render tasks", "left eye: 2 passes of 7.500 ms, 3.0 task runs a pass", "the drain: 5.000 ms a pass (longest 5.000), 50.0% of the pass",
+                             "the draw thread ran tasks itself for 0.800 ms", "(the drain was timed in 1 of the 2 passes", "right eye: 1 passes of 9.000 ms",
+                             "3 records lost to a full buffer, 1 task runs of passes cut", "Forward Pass", "task 5 (no name read)"})
+        assert(file.find(part) != std::string::npos);
+
+    // no drain timed at all, and a note from the hooks
+    std::vector<Run> bare;
+    for (const Run& one : runs) if (one.what != What::Drain) bare.push_back(one);
+    const TaskReport n = Summarise(bare, names, "the render graph's drain is not hooked");
+    assert(n.Any() && !n.Drained() && n.eye[0].drained == 0 && Near(n.eye[0].lastEndMs, 8.8 + 2.0));
+    const LogParts quiet = LogText(n);
+    assert(quiet.lines.size() == 2 && quiet.lines[0].find("the drain itself was not timed") != std::string::npos && quiet.lines[1] == "render tasks: the render graph's drain is not hooked");
+    assert(FileText(n).find("the drain was not timed: offsets are from the pass's start") != std::string::npos);
+    // nothing recorded
+    const TaskReport empty = Summarise({}, {}, "the game's render task runner is not where and what this mod knows");
+    assert(!empty.Any() && LogText(empty).lines.size() == 1 && LogText(empty).lines[0].find("none timed - the game's render task runner") != std::string::npos);
+    assert(FileText(Summarise({}, {})).find("none timed: no eye pass with its tasks") != std::string::npos);
+
+    // the fingerprints agree with the layout the hook reads by
+    using namespace rendertasks::abi;
+    const uint32_t slot = uint32_t(SlotSize), name = uint32_t(NameOffset);
+    assert(sizeof RunSig == 39 && RunHookBytes == 16 && !memcmp(RunSig + 25, &slot, 4) && RunSig[38] == 8);   // imul by the slot size; the graph at +8
+    assert(!memcmp(SlotSig + 3, &slot, 4) && !memcmp(NameSig + 11, &name, 4));
+    assert(sizeof DrainSig == 23 && DrainHookBytes == 18 && DrainHookBytes <= sizeof DrainSig && RunHookBytes <= sizeof RunSig && MaxTasks == 32);
+}
+
 // The thread the sampler stops: three functions deep in this executable, in "eye passes" - busy, waiting, or
 // in and out of the locks a stopped thread must never be waited on for (the heap's, the loader's, the unwind
 // tables', the C runtime's stream lock).
@@ -232,13 +434,30 @@ __attribute__((noinline)) static uint64_t Innermost(uint64_t seed) {
 }
 __attribute__((noinline)) static uint64_t Middle(uint64_t seed) { const uint64_t x = Innermost(seed + 3); g_sink = g_sink + x; return x ^ seed; }
 __attribute__((noinline)) static uint64_t Outer(uint64_t seed) { const uint64_t x = Middle(seed * 7); g_sink = g_sink + x; return x + seed; }
+// As the hooks on the game's task runner and drain do (vr/render_task_hooks.cpp): the pass's work is one
+// "task" on the drawing thread inside a "drain", and a worker thread runs another task meanwhile.
+static const char kOwnTask[] = "Own Task", kWorkerTask[] = "Worker Task";
 static void Drawer() {
     uint64_t x = 1;
     for (int eye = 0; !g_quit.load(); eye ^= 1) {
         EnterPass(eye);
+        const tasks::Open drain = tasks::Armed() ? tasks::Begin() : tasks::Open{};
+        const tasks::Open own = tasks::Armed() ? tasks::Begin() : tasks::Open{};
         x = Outer(x);
+        if (own.on) tasks::End(own, framevr::drawtasks::What::Task, 1, (uint64_t)(uintptr_t)kOwnTask);
+        if (drain.on) tasks::End(drain, framevr::drawtasks::What::Drain, 0, 0);
         LeavePass();
         g_loops.fetch_add(1);
+    }
+}
+static void Worker() {
+    while (!g_quit.load()) {
+        const tasks::Open open = tasks::Armed() ? tasks::Begin() : tasks::Open{};
+        if (!open.on) { Sleep(0); continue; }
+        uint64_t x = 88172645463325252ull;
+        for (int i = 0; i < 200000; ++i) { x ^= x << 13; x ^= x >> 7; x ^= x << 17; }
+        g_sink = g_sink + x;
+        tasks::End(open, framevr::drawtasks::What::Task, 2, (uint64_t)(uintptr_t)kWorkerTask);
     }
 }
 
@@ -276,7 +495,9 @@ static void Native(const char* keepReport, double lockSeconds) {
     assert(g_never);
     EnterPass(0); LeavePass();   // no capture: nothing is marked
     assert(g_live.state.load() == 0 && g_live.thread.load() == 0);
+    assert(!tasks::Armed() && !tasks::Begin().on);   // no capture: a hooked call records nothing
     std::thread drawer(Drawer);
+    std::thread worker(Worker);
 
     // 1. a busy thread: the samples are in this executable, three functions deep
     Options options;
@@ -308,6 +529,51 @@ static void Native(const char* keepReport, double lockSeconds) {
     assert(busy.Share(Row{"", {busy.waiting[0], busy.waiting[1]}}) < 0.2);
     assert(s.stoppedUsMax < 100000.0);
     assert(!g_live.armed.load());
+    // the walks end at the frame the pass was called from, and say so
+    std::printf("Draw sampler, busy thread: %.1f%% of the walks reached the pass's call; %u of %u frames by a module's own table; cut %u\n",
+                100.0 * busy.RootShare(), s.framesOwnRow, s.framesWalked, busy.cut);
+    assert(busy.RootShare() >= 0.9 && busy.RootShare(0) >= 0.8 && busy.RootShare(1) >= 0.8 && s.framesWalked >= busy.total() && s.framesOwnRow == 0);
+    // the render tasks recorded meanwhile: the drawing thread's own inside its drain, the worker's beside it
+    {
+        const auto& t = busy.tasks;
+        const auto find = [&](const char* name) -> const framevr::drawtasks::TaskRow* { for (const auto& row : t.rows) if (row.name == name) return &row; return nullptr; };
+        const auto* own = find(kOwnTask); const auto* other = find(kWorkerTask);
+        std::printf("Draw sampler, tasks: %u + %u passes, drained %u + %u, %u + %u task runs, %u dropped, %u outside a recorded pass\n", t.eye[0].passes, t.eye[1].passes,
+                    t.eye[0].drained, t.eye[1].drained, t.eye[0].tasks, t.eye[1].tasks, t.dropped, t.orphans);
+        assert(t.Any() && t.Drained() && t.dropped == 0 && t.note.empty());
+        for (int e = 0; e < 2; ++e) {
+            assert(t.eye[e].passes > 5 && t.eye[e].drained == t.eye[e].passes && t.eye[e].passes <= s.passes[e]);
+            assert(t.eye[e].drainMs > 0 && t.eye[e].drainMs <= t.eye[e].passMs && t.eye[e].ownMs > 0 && t.eye[e].ownMs <= t.eye[e].drainMs + 1e-9);
+            assert(own && own->runs[e] == t.eye[e].passes && own->onDraw[e] == own->runs[e] && own->inside[e] == 0);   // once a pass, on the drawing thread
+            assert(other && other->runs[e] > 0 && other->onDraw[e] == 0);
+        }
+        assert(own->Last() + other->Last() == t.eye[0].passes + t.eye[1].passes);
+    }
+
+    // 1b. the game's case: the system has no unwind table for the executable (here: it is not asked). With the
+    // module's own table the callers are the same; without it, as the sampler first walked, they are lost.
+    {
+        const Module& m = modules[size_t(FindModule(modules, (uint64_t)(uintptr_t)&Innermost))];
+        options.blindBase = m.base; options.blindSize = m.size;
+        const Report blind = Capture(options, &modules);
+        char outer[MAX_PATH + 32];
+        snprintf(outer, sizeof outer, "%s+0x%X", exeName, unsigned((uintptr_t)&Outer - modules[size_t(FindModule(modules, (uint64_t)(uintptr_t)&Outer))].base));
+        const Row* row = Find(blind.inclusive, outer);
+        std::printf("Draw sampler, no system table for the executable: %.1f%% of the walks reached the pass's call, %u of %u frames by its own table, "
+                    "the outer function on %.1f%% of the stacks\n", 100.0 * blind.RootShare(), blind.stats.framesOwnRow, blind.stats.framesWalked,
+                    row ? 100.0 * blind.Share(*row) : 0.0);
+        assert(blind.total() >= 50 && blind.RootShare() >= 0.9 && blind.stats.framesOwnRow >= blind.total());
+        assert(row && blind.Share(*row) >= 0.7);
+        options.ownRows = false;
+        const Report old = Capture(options, &modules);
+        const Row* lost = Find(old.inclusive, outer);
+        std::printf("Draw sampler, the same without the module's own table: %.1f%% reached the pass's call, the outer function on %.1f%% of the stacks, "
+                    "%u of %u walks cut short (%u not code, %u not after a call, %u stack)\n", 100.0 * old.RootShare(), lost ? 100.0 * old.Share(*lost) : 0.0,
+                    old.cut, old.total(), old.cuts[size_t(Cut::NotCode)], old.cuts[size_t(Cut::NoCall)], old.cuts[size_t(Cut::Stack)]);
+        assert(old.total() >= 50 && old.stats.framesOwnRow == 0 && old.cut * 10 >= old.total() * 7);
+        assert(old.RootShare() <= 0.3 && (!lost || old.Share(*lost) <= 0.3));   // the report's own check shows the broken walk
+        options.blindBase = options.blindSize = 0; options.ownRows = true;
+    }
 
     // 2. the same thread waiting: the samples are in a wait system call, asked for by this executable
     g_waitMode.store(true);
@@ -324,6 +590,15 @@ static void Native(const char* keepReport, double lockSeconds) {
         char label[MAX_PATH + 32];
         snprintf(label, sizeof label, "%s+0x%X", exeName, unsigned((uintptr_t)&Innermost - m.base));
         assert(!waiting.waiters.empty() && waiting.waiters[0].label == label);   // through the stub and KERNELBASE to the caller
+        assert(waiting.RootShare() >= 0.9 && waiting.cut * 10 <= waiting.total());   // and on to the pass's call: the system's return addresses pass the checks
+        // the same with no table from the system for any module: every frame by the modules' own tables (ntdll's, KERNELBASE's, this executable's)
+        options.blindBase = 0; options.blindSize = ~0ull;
+        const Report own = Capture(options, &modules);
+        options.blindSize = 0;
+        std::printf("Draw sampler, waiting thread, every module by its own table: %.1f%% of the walks reached the pass's call, %u of %u frames, cut %u, asked by %s\n",
+                    100.0 * own.RootShare(), own.stats.framesOwnRow, own.stats.framesWalked, own.cut, own.waiters.empty() ? "?" : own.waiters[0].label.c_str());
+        assert(own.total() >= 50 && own.RootShare() >= 0.9 && own.stats.framesOwnRow * 10 >= own.stats.framesWalked * 7);
+        assert(!own.waiters.empty() && own.waiters[0].label == label);
     }
     g_waitMode.store(false);
 
@@ -340,6 +615,10 @@ static void Native(const char* keepReport, double lockSeconds) {
                 locks.total(), locks.stats.seconds, locks.stats.failed, locks.total() ? locks.stats.stoppedUsSum / locks.total() : 0.0, locks.stats.stoppedUsMax);
     assert(locks.total() >= 50 && locks.stats.failed == 0);
     assert(locks.inclusive.size() >= 3 && locks.Share(locks.inclusive[0]) >= 0.7);
+    std::printf("Draw sampler, thread taking locks: %.1f%% of the walks reached the pass's call; cut %u (%u frame limit, %u not code, %u not after a call, %u stack, %u unreadable)\n",
+                100.0 * locks.RootShare(), locks.cut, locks.cuts[size_t(Cut::Limit)], locks.cuts[size_t(Cut::NotCode)], locks.cuts[size_t(Cut::NoCall)],
+                locks.cuts[size_t(Cut::Stack)], locks.cuts[size_t(Cut::Fault)]);
+    assert(locks.RootShare() >= 0.9);   // through the heap, the loader, the C runtime and the system's stubs
 
     // 3. as the mod runs it: a thread of its own, the file and the log lines
     wchar_t dir[MAX_PATH]; GetTempPathW(MAX_PATH, dir);
@@ -382,6 +661,7 @@ static void Native(const char* keepReport, double lockSeconds) {
     assert(g_loops.load() >= before + 20);
     g_quit.store(true);
     drawer.join();
+    worker.join();
     assert(g_live.state.load() == 0);
 
     // no eye pass drawn: given up, said so
@@ -393,12 +673,16 @@ static void Native(const char* keepReport, double lockSeconds) {
 }
 
 int main(int argc, char** argv) {
+    setvbuf(stdout, nullptr, _IONBF, 0);   // a failed check ends the run at once: what was printed before it is kept
     Kinds();
     Functions();
     Tables();
+    WalkChoices();
+    Tasks();
     // draw-sampler-test PATH keeps a report there; draw-sampler-test --locks SECONDS runs the lock check that long
     const bool locks = argc > 2 && !strcmp(argv[1], "--locks");
     Native(argc > 1 && !locks ? argv[1] : nullptr, locks ? atof(argv[2]) : 0.3);
-    std::puts("Draw sampler: module kinds, wait calls, function starts from unwind tables, the tables and report text, "
-              "and live captures of a busy, a waiting and a lock-taking thread passed");
+    std::puts("Draw sampler: module kinds, wait calls, function starts from unwind tables, the tables and report text, the walk's "
+              "unwind rows and return addresses, the render task tables, and live captures of a busy, a waiting and a lock-taking "
+              "thread (with and without the system's unwind table) passed");
 }

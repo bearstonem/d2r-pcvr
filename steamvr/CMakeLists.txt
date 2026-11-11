@@ -155,8 +155,9 @@ target_include_directories(haptic-pulse-test PRIVATE ${OPENXR_SDK}/include)
 target_link_libraries(haptic-pulse-test PRIVATE framevr-runtime)
 add_executable(thread-stats-test thread_stats_test.cpp)
 # [debug] draw_sampler: where the draw thread's time goes in an eye pass (draw_sampler.h the tables, draw_sampler_capture.cpp the sampling)
-target_sources(d2rl-pcvr PRIVATE draw_sampler_capture.cpp)
-add_executable(draw-sampler-test draw_sampler_test.cpp draw_sampler_capture.cpp)   # the tables from made-up samples; live captures of a busy, a waiting and a lock-taking thread
+target_sources(d2rl-pcvr PRIVATE draw_sampler_capture.cpp ${ROOT}/vr/render_task_hooks.cpp)   # render_task_hooks: the game's render tasks and drain, timed during a capture
+add_executable(draw-sampler-test draw_sampler_test.cpp draw_sampler_capture.cpp)   # the tables from made-up samples and task records; live captures of a busy, a waiting and a lock-taking thread
+target_include_directories(draw-sampler-test PRIVATE ${ROOT}/vr)   # the render task fingerprints
 target_link_libraries(draw-sampler-test PRIVATE framevr-runtime)
 target_link_libraries(thread-stats-test PRIVATE framevr-runtime)
 add_executable(dlss-depth-test dlss_depth_test.cpp)

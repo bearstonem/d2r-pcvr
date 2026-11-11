@@ -101,6 +101,7 @@ namespace hud { void SetWorkspaceBand(float top, float bottom); void SetBoardCle
 #include "logging.h"
 #include "thread_stats.h"
 #include "draw_sampler_capture.h"   // [debug] draw_sampler: where the draw thread's time goes
+#include "render_task_hooks.h"      // ... and its render task times: hooks put in by the first capture
 #endif
 #include "sigscan.h"
 #include "mat4.h"
@@ -8651,8 +8652,9 @@ void StartMatrixWatch() {
 // [debug] draw_sampler - where the draw thread's time goes in an eye pass (steamvr/draw_sampler_capture.h,
 // steamvr/PERFORMANCE.md). A number other than 0 and other than the one last seen starts one capture of
 // draw_sampler_seconds (30, 1-300) from the first eye pass drawn; it ends by itself and reports as
-// "Frame draw sampler:" lines and in d2r-vr-draw-sampler.txt beside the frame log. 0 ends a running one
-// early. The value at the game's start counts: left at 1 it captures the first 30 s in the world
+// "Frame draw sampler:" lines and in d2r-vr-draw-sampler.txt beside the frame log. The same capture times
+// the game's render tasks and the drain the draw thread waits for them in (vr/render_task_hooks.cpp). 0 ends
+// a running one early. The value at the game's start counts: left at 1 it captures the first 30 s in the world
 // (it waits up to 10 minutes for the first eye pass, then gives up and says so).
 void DrawSamplerSetting(unsigned request, float seconds) {
     static unsigned last = 0;
@@ -8667,6 +8669,9 @@ void DrawSamplerSetting(unsigned request, float seconds) {
     options.waitSeconds = 600;   // set before the world is entered: it waits this long for the first eye pass
     options.mod = g_self;
     options.log = Log;
+    // The render tasks' times: the hooks on the game's task runner and drain go in with the first capture
+    // asked for (a session without one never has them); what could not be hooked is said in the report.
+    options.tasksNote = rendertasks::Install();
     {   // beside the frame log: the logs folder next to the plugin's (steamvr/logging.cpp)
         wchar_t path[MAX_PATH];
         const DWORD len = g_self ? GetModuleFileNameW(g_self, path, MAX_PATH) : 0;

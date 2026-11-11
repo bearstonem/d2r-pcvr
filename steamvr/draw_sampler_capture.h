@@ -19,6 +19,8 @@ struct Live {
     std::atomic<void*> teb{nullptr};       // that thread's TEB: its stack's bounds
     std::atomic<uint32_t> passes[2]{};     // passes finished, per eye
     std::atomic<int64_t> passTicks[2]{};   // their time, QueryPerformanceCounter ticks
+    std::atomic<uintptr_t> rootSp{0};      // an address in the stack frame of the marking call: the pass's frames are all below it
+    std::atomic<uint32_t> sequence{0};     // counts the passes marked: the pass a render task's run belongs to
     int64_t entered = 0;                   // the drawing thread's own
 };
 extern Live g_live;
@@ -28,6 +30,24 @@ void LeavePassArmed() noexcept;
 inline void EnterPass(int eye) noexcept { if (g_live.armed.load(std::memory_order_relaxed)) EnterPassArmed(eye); }
 inline void LeavePass() noexcept { if (g_live.state.load(std::memory_order_relaxed)) LeavePassArmed(); }
 
+// The render tasks of a pass (draw_tasks.h): the hooks on the game's task runner and on the graph's drain
+// (vr/render_task_hooks.cpp) time each call with these while a capture runs. Begin and End run on some
+// seventeen threads at once: no lock, no allocation, no log - a count of the calls in flight, two clock
+// reads and one record in a buffer made before the capture. A call outside an eye pass is not recorded.
+namespace tasks {
+struct Open { int64_t start = 0; uint32_t pass = 0, generation = 0; uint8_t eye = 0; bool on = false; };
+extern std::atomic<bool> g_armed;
+// One relaxed load: all a hooked call costs while no capture runs.
+inline bool Armed() noexcept { return g_armed.load(std::memory_order_relaxed); }
+// Before the timed call; `on` false = nothing to record (End must still not be called then).
+Open Begin() noexcept;
+// The clock now, for a start taken after the hook's own reads.
+int64_t Now() noexcept;
+// After the timed call, when Begin said on. `name` = the address of the task's name in the game (0 = none),
+// read when the capture ends.
+void End(const Open& open, drawtasks::What what, uint8_t index, uint64_t name) noexcept;
+}  // namespace tasks
+
 struct Options {
     double seconds = 30;            // of sampling, from the first eye pass seen
     unsigned periodUs = 1000;       // between samples, +-25% at random so the samples do not keep step with the frame
@@ -35,6 +55,12 @@ struct Options {
     HMODULE mod = nullptr;          // this mod's own module, for the report's "this mod" row
     std::wstring reportPath;        // the text file, written anew by each capture; empty = none
     void (*log)(const char*) = nullptr;
+    std::string tasksNote;          // why the render tasks or the drain are not timed (the hooks' own words); empty = both are
+    // For the tests only. The system's unwind-table lookup is taken to fail for addresses in
+    // [blindBase, blindBase + blindSize), as it does for the game's executable; ownRows false walks as the
+    // sampler first did, without the module's own table.
+    uint64_t blindBase = 0, blindSize = 0;
+    bool ownRows = true;
 };
 
 // One capture on a thread of its own: it ends by itself and reports to `log` and `reportPath`.
