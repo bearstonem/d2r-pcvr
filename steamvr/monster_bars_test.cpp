@@ -17,7 +17,7 @@ struct Fixture {
     bool Hide(bool stereo=true,bool show=false,bool above=true){
         return d2rcam::monsterbars::Hide(stereo,show,above,unit,[&](uintptr_t at,auto& value){
             ++reads;
-            if(at==fail||at<base||at-base+sizeof value>bytes.size())return false;
+            if((fail>=at&&fail<at+sizeof value)||at<base||at-base+sizeof value>bytes.size())return false;   // a read fails as a whole
             std::memcpy(&value,bytes.data()+at-base,sizeof value);return true;
         });
     }
@@ -29,6 +29,9 @@ int main(){
     normal.reads=0;
     assert(!normal.Hide(false)&&!normal.Hide(true,true)&&!normal.Hide(true,false,false));
     assert(normal.reads==0); // No unit reads outside VR, when enabled or for ground anchors.
+    assert(normal.Hide()&&normal.reads==3); // One guarded read per record: the unit, its monster data, its row.
+    {Fixture f;f.Put(Fixture::unit,uint32_t(2));assert(!f.Hide()&&f.reads==1);} // No monster: the unit's record only.
+    {Fixture f;f.Put(Fixture::data+0x1a,uint8_t(1));assert(!f.Hide()&&f.reads==2);} // A champion: its row is not read.
     for(unsigned bit=0;bit<8;++bit){
         Fixture elite;elite.Put(Fixture::data+0x1a,uint8_t(1u<<bit));assert(!elite.Hide());
     }

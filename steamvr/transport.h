@@ -254,6 +254,9 @@ void BeginEye(int eye);
 int StereoRendering();
 // [render] defer_gpu_wait: frames end without waiting for the GPU.
 bool GpuWaitDeferred();
+// The game window's swap chain as ReShade itself calls it (the IDXGISwapChain3 below ReShade's own), while
+// a headset session is up; null otherwise. Any thread. [game_patches] present_once (vr/game_patches.cpp).
+void* GameSwapchainNative();
 // Replay: no capture waits for a pair of two passes.
 bool ReplayReady();
 // After BeginPair(...,true): the frame begun is a stereo one the replay can

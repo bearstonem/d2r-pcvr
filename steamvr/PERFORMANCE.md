@@ -1,5 +1,152 @@
 # VR performance investigations
 
+## One present a pair, November 10
+
+**Measured once, November 10** (SteamVR, headset at 120 Hz, frame generation
+on, Both eyes, a field fight; switched on live, a 30 s capture before and
+after): the left eye's present (`0x109F4C0` inclusive) 0.73 ms to 0.51 ms, the
+right eye's unchanged at 0.72; the log's `Present` for the left pass about
+0.50 to 0.32 ms. About 0.2 ms a pair. Every ten-second line had N = M = K
+(217, 512, 529), no stall, the picture and the desktop window as before (the
+owner). The fewer guarded reads below are too small to see in a capture.
+
+`present_once` stays **off** as shipped all the same: it changes the window's
+swap chain's function table, which other software (overlays, capture tools)
+also reaches for, and it has run on one PC in one session for 0.2 ms a pair.
+No key in the shipped INI, nothing in VR Settings. To switch it on, write into
+the installed `d2r_pcvr.ini`:
+
+```ini
+[game_patches]
+present_once=1
+```
+
+It goes in between frames and comes out the same way when the key is set back
+to 0; the log says `Frame game patches: present_once applied` (or `refused`
+with the reason, or `off`), and every ten seconds while it is on
+`present_once 10 s: N presents held back (a pair's first pass), M made; K of
+the game's waits for the swap chain left out with them`. In play N, M and K
+should be equal, one each a pair.
+
+**Why.** At 120 Hz a pair is about 16.9 ms of work against a 16.67 ms slot
+(game 2.1, left pass 7.0, right 6.2, XR end 1.2, XR begin 0.4 without its
+wait), so the runtime gives 44 to 51 pairs a second instead of 60. Each eye
+pass ends with the game presenting its picture to the desktop window. The
+headset never sees that present: the eye's picture is copied to the headset's
+swapchain before it, inside ReShade's present handling. Only one of the two
+is of use to the window.
+
+**What a present does here, and what each part is needed for.** The game's
+present (`0x109F4C0`) is only `IDXGISwapChain::Present` on the swap chain
+ReShade gave the game:
+
+| step | who needs it each eye | with `present_once` |
+| --- | --- | --- |
+| ReShade's `present` event, its effects on the back buffer, its `reshade_present` and `finish_present` events | the mod: the fog, sky and HUD effects are the eye's picture, and the eye is copied to the headset at `reshade_present` (`Capture` in `steamvr/transport.cpp`) | unchanged, both passes |
+| The copy itself: on the game's own render queue, executed at once, with its own fence | the headset | unchanged; it is on the queue before the second pass's first command, so the second pass drawing over the same buffer cannot overtake it |
+| The swap chain's real `Present` below ReShade: the window's picture, the flip to the next back buffer, the driver's and the system's present work | the desktop window, once a pair | first pass: answered `S_OK` without presenting; second pass: made |
+| The back buffer's number after it | the game asks the swap chain for it after every present (`0x10FAE65`) and takes its present target by it; ReShade asks for it at every present | not advanced by a held present: game, ReShade and the swap chain all name the same buffer, and the second pass draws into it |
+| The game's wait on the swap chain's frame latency handle, up to a second, before each pass's present target (`0x10F9470`) | DXGI signals it once for each frame presented | the wait that follows a held present is left out, so waits and presents stay one to one |
+
+The render queue's flush, the copy and compute queue flushes and the game's
+own fence ring (three entries, counted by the game, not by the back buffer)
+are before or after the present, not in it, and are untouched.
+
+**How.** No byte of the game's present is changed. ReShade calls the swap
+chain below it through that object's function table; `present_once` gives
+that one object a copy of its table with `Present` replaced
+(`vr/game_patches.cpp`). The replacement answers `S_OK` for the one Present
+that the draw thread makes in a pair's first pass and calls the real one
+every other time. One hook goes into the game, on the function that hands
+out a pass's present target: after a held present it has the game read "no
+frame latency handle" for that one call. Four stretches of the game's code
+are proven first, as for the other patches: the present itself, the test
+that the queue has no other presenter, the call followed by the question to
+the swap chain for its current buffer, and the whole present-target
+function. A game whose bytes differ gets no patch. Switched off, the swap
+chain has its own table back and the hook passes every call through.
+
+**When it does nothing.** By turns, menus, loading screens, the campfire, the
+flat game, a draw inside a pass, and any Present that is not the draw
+thread's in a first pass: all present as the game does. Frame generation
+(OFXR Bridge) works on the headset's swapchains, below OpenXR, and does not
+see the window's presents; the pair is drawn and copied as without it. That
+is read from this mod's side only: the bridge's own code was not read, so
+try it with frame generation on before trusting it there.
+
+**What it changes on the desktop.** The window gets one picture a pair
+instead of two. With the one-eye mirror on (the default) it is the left eye
+as before, since the right pass copies it back before the present; with the
+mirror off the window showed the eyes in turn and now shows the eye drawn
+second only. Overlays that draw at the real Present (Steam's) are drawn once
+a pair.
+
+**Not known.**
+
+- How much it saves. A pass's log line "Present" (0.5 to 0.6 ms) runs from
+  ReShade's present event to the pass's end and holds the mod's copy and the
+  rest of the game's frame as well. The capture puts 0.45 ms a pass of
+  graphics calls under `0x109F4C0`, ReShade's effects included; what is
+  surely the real present is small (DXGI 0.016 ms, the present's system call
+  0.034 ms). The saving is somewhere between 0.05 and 0.45 ms a pair. Measure
+  it: a capture with the key 0 and one with 1, table 5's `0x109F4C0` row and
+  table 4's, left eye against right; and the log's "a pair, ms" line, left
+  Present against right.
+- Whether the swap chain below ReShade is DXGI's own object when an overlay
+  or another add-on wraps it. Any object with a function table works the
+  same way; a table whose first forty entries are not all code is refused.
+- The frame latency handle's exact behaviour is DXGI's and is taken from its
+  documentation: signalled once a presented frame. The ten-second line shows
+  whether the game has one at all.
+
+**Look for** in the headset: nothing should differ; a stutter once a second
+or a frozen picture would mean the wait is not paired as read (switch the
+key off; the pair's log line "longest" shows it). On the desktop window: a
+steady picture of one eye, no black or stale frames, the Steam overlay still
+opening. In the log: equal counts in the ten-second line, and `Frame hitch`
+lines no more often than before.
+
+### Fewer guarded reads on the draw thread
+
+**Counted in the code, not measured.** Capture 11 has the draw thread 0.067 ms
+a pass in `NtReadVirtualMemory`: the mod's guarded reads
+(`steamvr/memory.h`), a system call each. Two places make them in every eye
+pass; both now make fewer, with the same answers.
+
+| reads | before | now |
+| --- | --- | --- |
+| Weak monster bars hidden (the default): each label anchor of an ordinary monster, each pass (`monsterbars::Hide`) | 7 | 3 |
+| the same for a champion or unique / a unit that is no monster | 4 / 1 | 2 / 1 |
+| The game's day and night for the sky, outdoors (`env::Now`), a pair | 12 | 3 |
+
+The monster's fields come in one read per record (unit, monster data, row)
+instead of one per field; nothing is kept between passes or frames, as
+`docs/monster-bars.md` says. The game's light is read once in a draw of the
+game's frame (both passes of a pair) instead of twice in each pass's effects.
+
+Found and left as they are:
+
+- The health panels' draw order reads two fields of each deferred panel a
+  pass (`DrawPanelManager`); the visible byte changes per eye.
+- The depth hook on the frame constants reads four things a call
+  (`vr/dlss_depth.cpp`); the buffers are new each pass.
+- While a sampler capture runs, the render-task hook reads one or two fields
+  for every task the draw thread runs itself: part of a capture's own cost,
+  not of play.
+- `GetAsyncKeyState` and `GetCursorPos` in a pass (0.012 and 0.011 ms) are
+  not this mod's: its own calls are on its timer thread or behind switches
+  that are off in VR. The game or ReShade makes them; not traced further.
+- XR begin (0.4 ms without the wait) is finding the head and eyes and the
+  frame's input step, once a pair already. XR end's "submit" (about 1.0 ms)
+  is `xrEndFrame` itself plus the mod's bookkeeping after it; the layers are
+  built on the stack before it. Nothing clearly avoidable was found in the
+  mod's part; the settings snapshot is copied under a lock some ten times a
+  pair and `BeginEye` works out per eye what is fixed for the pair, both
+  small.
+- `[render] defer_gpu_wait` is 0 by default in `steamvr/vr_settings.h`: a
+  pair then waits for the GPU in XR end ("GPU fence" in the pacing line).
+  Check what the measured sessions had before reading XR end's time.
+
 ## Once per pair, November 10
 
 **On for every install since the headset run below**, like the three patches

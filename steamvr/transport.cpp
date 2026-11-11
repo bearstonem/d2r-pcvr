@@ -859,6 +859,7 @@ uint32_t width=0,height=0;
 resolution::Size recommendedResolution{},maximumResolution{};
 DXGI_FORMAT format=DXGI_FORMAT_UNKNOWN;
 reshade::api::swapchain* gameSwapchain=nullptr;
+std::atomic<void*> gameSwapchainNative{nullptr};   // GameSwapchainNative: set and cleared with gameSwapchain
 ComPtr<ID3D12Device> device;
 ComPtr<ID3D12CommandQueue> queue;
 ComPtr<ID3D12Fence> fence;
@@ -2276,7 +2277,7 @@ bool Initialize(reshade::api::command_queue* rq,reshade::api::swapchain* swap) {
     elementalRenderer.Initialize(device.Get(),queue.Get(),eyeFormat,width,height,&Say);
     if(!tracking.Open(D2RVR_SHARED_NAME)||!pad.Open(BW_PAD_MIRROR_NAME)||!actions.Open(D2RVR_ACTIONS_NAME)) return false;
     tracking.data->version=D2RVR_SHARED_VERSION;pad.data->version=BW_PAD_MIRROR_VERSION;actions.data->version=D2RVR_ACTIONS_VERSION;
-    gameSwapchain=swap;
+    gameSwapchain=swap;gameSwapchainNative.store(reinterpret_cast<void*>(swap->get_native()));
     char b[160];std::snprintf(b,sizeof b,"Frame OpenXR: D3D12 session ready, eyes %ux%u format %d (game format %d)",width,height,int(eyeFormat),int(format));Say(b);
     // Only for a session that started: a failed one is shut down at once, and
     // that would wait here for the warm-up.
@@ -6894,6 +6895,7 @@ void DestroySwap(reshade::api::swapchain* swap,bool resize) {
 } // namespace
 
 void CaptureEffects(reshade::api::effect_runtime* rt){AfterEffects(rt);}
+void* GameSwapchainNative(){return gameSwapchainNative.load(std::memory_order_relaxed);}
 bool HandleWindowFocusMessage(void* window,uint32_t message,uint64_t token,int64_t deadline) {
     return windowFocus.Handle(static_cast<HWND>(window),message,WPARAM(token),LPARAM(deadline));
 }
@@ -8411,7 +8413,7 @@ void Shutdown(bool preserveResolution) {
     gpuProfile={};
     foveation::Shutdown();
     tracking.Close();pad.Close();actions.Close();
-    if(afr)UnmapViewOfFile(afr);if(afrHandle)CloseHandle(afrHandle);afr=nullptr;afrHandle=nullptr;gameSwapchain=nullptr;
+    if(afr)UnmapViewOfFile(afr);if(afrHandle)CloseHandle(afrHandle);afr=nullptr;afrHandle=nullptr;gameSwapchain=nullptr;gameSwapchainNative.store(nullptr);
     if(loader)FreeLibrary(loader);loader=nullptr;
 }
 } // namespace framevr

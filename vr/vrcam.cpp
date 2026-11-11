@@ -1434,6 +1434,7 @@ void LoadSettings() {
         patches.selectionWalk = IniB(L"game_patches", L"selection_walk", true);
         patches.shadowsOnce = IniB(L"game_patches", L"shadows_once", true);
         patches.cullOnce = IniB(L"game_patches", L"cull_once", true);
+        patches.presentOnce = IniB(L"game_patches", L"present_once", false);   // off: to be measured (PERFORMANCE.md "One present a pair")
         gamepatches::Configure(patches);
     }
     g_set.gameHeightFog.store(IniB(L"render", L"game_height_fog", false));
@@ -7468,8 +7469,20 @@ void CampfireTick() {
     }
 #endif
 }
+// One call of the game's draw from the main loop (a pair's two passes, or one): the game's state does not
+// step inside it, so what is read from the game with guarded reads can be read once for all of it
+// (env::Now). The serial names the call; g_inGameDraw is false outside one (menus that never draw the
+// game screen, other threads' reads between frames), where nothing is kept.
+std::atomic<uint32_t> g_gameDrawSerial{0};
+std::atomic<bool> g_inGameDraw{false};
+struct GameDrawSpan {
+    const bool outer;
+    explicit GameDrawSpan(bool o) : outer(o) { if (outer) { g_gameDrawSerial.fetch_add(1); g_inGameDraw.store(true); } }
+    ~GameDrawSpan() { if (outer) g_inGameDraw.store(false); }
+};
 uintptr_t HookDrawGameScreen(int a) {
     static thread_local int depth = 0;
+    const GameDrawSpan span(depth == 0);
     static bool told = false, toldWhy = false;
     static double lastEnd = 0.0, sumGap = 0.0, sumPass[2] = {}, sumPresent[2] = {}, sumEff[2] = {}, maxPair = 0.0, sumCpu = 0.0, sumWall = 0.0;
 #ifdef D2RVR_NATIVE_OPENXR
@@ -7565,7 +7578,8 @@ uintptr_t HookDrawGameScreen(int a) {
 #ifdef D2RVR_NATIVE_OPENXR
     framevr::drawsampler::EnterPass(0);
 #endif
-    gamepatches::EyePass(gamepatches::Pass::First);    // [game_patches] shadows_once, cull_once: the first of this frame's two draws
+    gamepatches::EyePass(gamepatches::Pass::First);    // [game_patches] shadows_once, cull_once, present_once: the first of this frame's two draws
+    if (replay) gamepatches::KeepPresent();            // a replayed right eye is not a second draw: this pass's present is the pair's
     const uintptr_t leftR = OrigDrawGameScreen(a);
     gamepatches::EyePass(gamepatches::Pass::Alone);
 #ifdef D2RVR_NATIVE_OPENXR
@@ -9626,7 +9640,23 @@ void Find() {
 }
 
 // The light now (0..255) and the period (0..5); false in menus, between games or not found.
+bool Read(int* light, int* period);
 bool Now(int* light, int* period) {
+    // Asked twice in each eye pass's effects (the sky's mix and its brightness): three guarded reads each
+    // time. Inside one draw of the game's frame the first answer on this thread stands for the rest.
+    struct Kept { uint32_t serial = 0; bool has = false, ok = false; int light = 0, period = 0; };
+    static thread_local Kept kept;
+    const bool inDraw = g_inGameDraw.load(std::memory_order_relaxed);
+    const uint32_t serial = g_gameDrawSerial.load(std::memory_order_relaxed);
+    if (inDraw && kept.has && kept.serial == serial) {
+        if (kept.ok) { *light = kept.light; *period = kept.period; }
+        return kept.ok;
+    }
+    const bool ok = Read(light, period);
+    kept = {serial, inDraw, ok, ok ? *light : 0, ok ? *period : 0};
+    return ok;
+}
+bool Read(int* light, int* period) {
     const uintptr_t slot = g_slot.load();
     uintptr_t obj = 0, e = 0;
     int32_t v[4];

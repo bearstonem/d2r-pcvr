@@ -162,4 +162,47 @@ inline Shadow ShadowUpdate(bool on, Pass pass, uint64_t passes, bool lookAt, Sha
     return keep ? Shadow::Keep : Shadow::Fit;
 }
 
+// One present a pair (present_once). Each eye pass ends in the game's Present of the desktop window's swap
+// chain; the headset's picture is copied out before it, in ReShade's present handling. The first pass's
+// Present is held back: it returns as if made, the swap chain's back buffer stays the current one, and the
+// second pass draws into it and presents it. The game waits on the swap chain's frame latency handle before
+// each pass's present target, once for each present: the wait that follows a held present is left out too.
+struct PresentPair {
+    bool hold = false;        // the next Present on the draw thread is the first pass's: held back
+    bool waitOwed = false;    // a present was held back: the game's next wait for the swap chain is left out
+};
+// Before each draw of the game's frame. Only a pair's first pass has its present held; what a held present
+// left owed stays owed until the game's next wait, whatever pass that is in and whether the patch is still on.
+inline void PresentPass(bool on, Pass pass, PresentPair& pair) noexcept { pair.hold = on && pass == Pass::First; }
+enum class Present : uint8_t { Make, Hold };
+// The swap chain's Present was called. At most one is held for each first pass.
+inline Present PresentCalled(PresentPair& pair) noexcept {
+    if (!pair.hold) return Present::Make;
+    pair.hold = false;
+    pair.waitOwed = true;
+    return Present::Hold;
+}
+// The game is about to wait for the swap chain. False: this wait is left out (once for each held present).
+inline bool PresentWaits(PresentPair& pair) noexcept {
+    if (!pair.waitOwed) return true;
+    pair.waitOwed = false;
+    return false;
+}
+
+// The swap chain's function table with one entry replaced. `copied` holds `before` entries from in front of
+// the table (what a compiler keeps there) and then `slots` entries of the table itself; `out` gets the same
+// with entry `slot` of the table = `shim`, and `original` what was there. False when the table is too short
+// for the slot or the entry is empty: nothing may be installed then.
+inline constexpr size_t PresentSlot = 8;          // IDXGISwapChain::Present
+inline constexpr size_t SwapChain3Slots = 40;     // IDXGISwapChain3's table (ReShade holds the swap chain as that): each entry must be code
+inline constexpr size_t SwapChainSlots = 41;      // IDXGISwapChain4's table: the least that is copied
+inline constexpr size_t TableBefore = 2;
+inline bool ShimTable(const uintptr_t* copied, size_t before, size_t slots, size_t slot, uintptr_t shim, uintptr_t* out, uintptr_t& original) noexcept {
+    if (!copied || !out || !shim || slot >= slots || !copied[before + slot] || copied[before + slot] == shim) return false;
+    for (size_t i = 0; i < before + slots; ++i) out[i] = copied[i];
+    original = copied[before + slot];
+    out[before + slot] = shim;
+    return true;
+}
+
 }  // namespace gamepatch

@@ -5,6 +5,7 @@
 // game_patch_signatures.h, what it writes in steamvr/game_patch_plan.h). Three more, on for every install
 // in the same way (PERFORMANCE.md "Once per pair"): selection_walk is a patch like
 // the others; shadows_once and cull_once are hooks that act in the second eye pass of a pair (EyePass below).
+// present_once (off unless written by hand; PERFORMANCE.md "One present a pair") holds back the first pass's desktop Present.
 //
 // A patch goes in, and comes out, only in BetweenFrames: on the thread that draws, before a frame's first eye
 // pass, when the game's render tasks of the frame before have all ended and no thread is in the code that
@@ -20,6 +21,8 @@ struct Wanted {
     bool selectionWalk = true;       // [game_patches] selection_walk
     bool shadowsOnce = true;         // [game_patches] shadows_once
     bool cullOnce = true;            // [game_patches] cull_once
+    // Off unless the key is written by hand: not measured and not seen in a headset yet (PERFORMANCE.md "One present a pair").
+    bool presentOnce = false;        // [game_patches] present_once
 };
 
 // From the settings, on any thread, as often as they are read. The first call says what is wanted in the log.
@@ -36,5 +39,7 @@ void BetweenFrames();
 // is safe: the rest of that draw runs as the game does.
 enum class Pass : unsigned char { Alone, First, Second };
 void EyePass(Pass pass);
+// After EyePass(First), before its draw: this first pass presents after all (no second draw follows it).
+void KeepPresent();
 
 }  // namespace gamepatches
