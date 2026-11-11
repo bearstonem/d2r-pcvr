@@ -2,9 +2,26 @@
 
 ## Render task patches, November 10
 
-**None of this is measured yet, and none has run in a headset.** The patches
-below are off as shipped (`[game_patches]` in `d2r_pcvr.ini`, each key 0) and
-are switched on one by one to be measured with a capture.
+**On for every install since the headset run below.** There is no setting for
+them in VR Settings and no key in the shipped `d2r_pcvr.ini`. To tell a fault
+from a patch, `[game_patches]` with `transparent_filter=0`,
+`profiler_accounting=0` or `draw_debug_names=0` written into the file by hand
+takes that one out between two frames.
+
+**Measured, November 10** (SteamVR, game 3.4, Both eyes, an Act 2 field fight;
+each patch switched on live, a 30 s capture after each; the scene changed
+between captures, so the totals are approximate):
+
+| an eye pass, ms | none | + transparent_filter | + profiler_accounting | + draw_debug_names |
+| --- | --- | --- | --- | --- |
+| pass | 9.27 | 7.96 | 6.72 | 6.34 |
+| the drain | 5.35 | 4.14 | 3.22 | 2.53 |
+| Depth / Forward Pass run | 2.6 | 2.7 | 1.8 | 1.2 |
+| Late Post Processing run | 3.4 | 0.48 | 0.40 | 0.41 |
+
+No crash as each went in; about six minutes of play with all three, the
+picture as before (the owner). Not tried: interiors, other acts, By turns,
+Virtual Desktop.
 
 **What the third capture showed** (18:44, 30 s in the world, both eyes; the
 first with table 8, the threads inside the render tasks): 2,231 eye passes of

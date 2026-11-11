@@ -1425,11 +1425,11 @@ void LoadSettings() {
     g_set.topAngle.store(std::clamp(IniF(L"stereo", L"top_angle", 3.0f), 0.0f, 20.0f));
     g_set.convergence.store(std::clamp(IniF(L"stereo", L"convergence", 15.0f), 0.0f, 1000.0f));
     g_set.bgFullSpeed.store(IniB(L"render", L"background_full_speed", true));
-    {   // [game_patches]: each off unless asked for; they go in and out between frames (vr/game_patches.h)
+    {   // [game_patches]: each on unless a hand-written key says 0; they go in and out between frames (vr/game_patches.h)
         gamepatches::Wanted patches;
-        patches.transparentFilter = IniB(L"game_patches", L"transparent_filter", false);
-        patches.profilerAccounting = IniB(L"game_patches", L"profiler_accounting", false);
-        patches.drawDebugNames = IniB(L"game_patches", L"draw_debug_names", false);
+        patches.transparentFilter = IniB(L"game_patches", L"transparent_filter", true);
+        patches.profilerAccounting = IniB(L"game_patches", L"profiler_accounting", true);
+        patches.drawDebugNames = IniB(L"game_patches", L"draw_debug_names", true);
         gamepatches::Configure(patches);
     }
     g_set.gameHeightFog.store(IniB(L"render", L"game_height_fog", false));
