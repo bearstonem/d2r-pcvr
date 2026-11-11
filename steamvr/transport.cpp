@@ -96,6 +96,7 @@
 #include "body_calibration_gesture.h"
 #include "vr_settings_pointer.h"
 #include "frame_generation.h"
+#include "late_wait.h"
 #include "../vr/settings_menu.h"
 #include "journal.h"
 #include "leather_menu.h"
@@ -191,6 +192,7 @@ bool frameGenRetry=false;
 // VDXR: its own halving under the bridge, from the predicted rate (framegen::HalvingWatch).
 framegen::HalvingWatch frameGenHalving;
 std::atomic<bool> runtimeVdxr{false};
+std::atomic<bool> runtimeSteamVr{false};   // the runtime names itself SteamVR (the late wait, late_wait.h)
 // OFXR Bridge takes over every color swapchain whose images are listed
 // through it: three more runtime swapchains and an optical flow pipeline
 // each. With this mod's panels (menus, map, VR Settings, notices, blood,
@@ -209,6 +211,8 @@ FrameTiming timing,lastTiming;
 std::atomic<uint32_t> pipelineCreates{0};
 std::atomic<double> maxPipelineMs{0};
 std::atomic<bool> deferredWait{false};
+// [render] frame_generation_late_wait (late_wait.h): the frame's xrWaitFrame after the first eye's draw.
+std::atomic<bool> lateWaitWanted{false};
 std::atomic<bool> symmetricProjection{true};
 std::atomic<bool> turnsFromDrawnEye{true};
 std::atomic<int> turnsKeepOwn{3};   // ConfigureTurnsKeepOwn: 0 off, 1 near things only, 2 everywhere, 3 the game's effects, 4 near things and effects
@@ -836,6 +840,15 @@ XrSpace space=XR_NULL_HANDLE, headSpace=XR_NULL_HANDLE;
 XrSessionState state=XR_SESSION_STATE_UNKNOWN;
 bool running=false, frame=false, valid=false, render=false, registered=false, failed=false, pairDrawing=false;
 XrFrameState frameState{XR_TYPE_FRAME_STATE};
+// The late wait (late_wait.h). waitOwed: the frame is open for the mod (frame), its head and hands found for
+// frameState's time, but xrWaitFrame and xrBeginFrame are still to come (SettleFrame). frameDisplayTime is the
+// time xrWaitFrame gave, which xrEndFrame is sent; frameState's is the one the poses were found for (the same
+// unless the wait came late). lastEndAtMs: when the last xrEndFrame returned.
+latewait::Tracker lateWait;
+bool waitOwed=false,lateWaitOn=false;
+XrTime frameDisplayTime=0;
+double lastEndAtMs=0,lateWaitToldAt=0;
+uint32_t lateWaitSwitches=0;
 std::array<XrView,2> views{{{XR_TYPE_VIEW},{XR_TYPE_VIEW}}};
 XrPosef head{};
 math::Vec origin{};
@@ -1596,6 +1609,7 @@ bool LoadFunctions() {
     XrInstanceProperties props{XR_TYPE_INSTANCE_PROPERTIES};pGetInstanceProperties(instance,&props);
     char b[192];std::snprintf(b,sizeof b,"Frame OpenXR: runtime %s",props.runtimeName);Say(b);
     runtimeVdxr.store(std::strstr(props.runtimeName,"VirtualDesktop")!=nullptr);
+    runtimeSteamVr.store(std::strstr(props.runtimeName,"SteamVR")!=nullptr);
     XrSystemGetInfo si{XR_TYPE_SYSTEM_GET_INFO};si.formFactor=XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
     if(!Check(pGetSystem(instance,&si,&system),"get headset system"))return false;
     XrSystemProperties limits{XR_TYPE_SYSTEM_PROPERTIES};
@@ -6044,17 +6058,69 @@ void ReplayRight() {
     views[1].pose.orientation=views[0].pose.orientation;
     views[1].pose.position={at.x,at.y,at.z};
 }
-bool Begin() {
+// Whether this frame's xrWaitFrame comes late (late_wait.h), and the line when that changes. Called with no
+// frame open, so the two orders only ever change between frames.
+latewait::Plan LateWaitPlan(bool pair,double now) {
+    latewait::Ask ask;ask.wanted=lateWaitWanted.load();ask.pair=pair&&!turnFrame&&!replayPair&&StereoRendering()==0;
+    ask.steamVr=runtimeSteamVr.load();ask.nowMs=now;
+    if(ask.wanted){std::lock_guard lock(frameGenMutex);ask.generating=frameGenRead&&frameGenReadout.state==framegen::State::Active;}
+    const auto plan=lateWait.Decide(ask);
+    if(plan.Late()!=lateWaitOn) {
+        lateWaitOn=plan.Late();++lateWaitSwitches;
+        if(!lateWaitToldAt||now-lateWaitToldAt>=1000) {   // menus switch it both ways: a line a second at most
+            char line[300];
+            std::snprintf(line,sizeof line,"Frame generation: late wait %s: %s (period %.2f ms, the session's shortest %.2f ms; %u switches since the last line)",
+                lateWaitOn?"on":"off",latewait::Reason(plan.why),double(lateWait.period)*1e-6,double(lateWait.shortest)*1e-6,lateWaitSwitches);
+            Say(line);lateWaitToldAt=now;lateWaitSwitches=0;
+        }
+    }
+    return plan;
+}
+// The frame's xrWaitFrame and xrBeginFrame where Begin left them for later: before the pair's first image is
+// taken (Capture, Acquire), at the latest before the frame ends (EndPair). False: they failed and no frame is
+// open - nothing was taken, and the next Begin waits first, as after a wait that failed there.
+bool SettleFrame() {
+    if(!waitOwed)return frame;
+    waitOwed=false;
+    XrFrameWaitInfo wi{XR_TYPE_FRAME_WAIT_INFO};XrFrameState waited{XR_TYPE_FRAME_STATE};
+    const double waitStart=Milliseconds();
+    timing.sinceEndMs=lastEndAtMs>0?waitStart-lastEndAtMs:0;
+    const auto result=pWaitFrame(session,&wi,&waited);timing.waitFrameMs=Milliseconds()-waitStart;
+    XrFrameBeginInfo bi{XR_TYPE_FRAME_BEGIN_INFO};
+    if(!Check(result,"wait frame")||!Check(pBeginFrame(session,&bi),"begin frame")) {
+        lateWait.Failed();lastTiming=timing;frame=false;return false;
+    }
+    lateWait.Waited(waited.predictedDisplayTime,waited.predictedDisplayPeriod,waited.shouldRender);
+    // The poses stay as found (frameState's time); the frame is ended with the time the wait gave.
+    frameDisplayTime=waited.predictedDisplayTime;
+    timing.displayPeriodMs=double(waited.predictedDisplayPeriod)*1e-6;
+    timing.lateWaitOffMs=double(waited.predictedDisplayTime-frameState.predictedDisplayTime)*1e-6;
+    if(!waited.shouldRender)render=false;   // drawn for nothing: the frame ends without the eyes
+    return true;
+}
+bool Begin(bool pair=false) {
     if(!session||frame) return frame;
     ++frameSerial;
     Events();if(!running)return false;
-    XrFrameWaitInfo wi{XR_TYPE_FRAME_WAIT_INFO};frameState={XR_TYPE_FRAME_STATE};
     timing={};const double waitStart=Milliseconds();
-    const auto waited=pWaitFrame(session,&wi,&frameState);timing.waitFrameMs=Milliseconds()-waitStart;
-    if(!Check(waited,"wait frame"))return false;
-    timing.displayPeriodMs=double(frameState.predictedDisplayPeriod)*1e-6;
-    XrFrameBeginInfo bi{XR_TYPE_FRAME_BEGIN_INFO};
-    if(!Check(pBeginFrame(session,&bi),"begin frame"))return false;
+    // The late wait (late_wait.h): the head and hands for the time this frame's wait should give; the wait
+    // itself comes with SettleFrame. Else, and always with the key off, the wait first.
+    if(const auto plan=LateWaitPlan(pair,waitStart);plan.Late()) {
+        frameState={XR_TYPE_FRAME_STATE};frameState.predictedDisplayTime=plan.time;frameState.predictedDisplayPeriod=plan.period;
+        frameState.shouldRender=XR_TRUE;frameDisplayTime=plan.time;
+        waitOwed=true;timing.lateWait=true;timing.displayPeriodMs=double(plan.period)*1e-6;
+    } else {
+        XrFrameWaitInfo wi{XR_TYPE_FRAME_WAIT_INFO};frameState={XR_TYPE_FRAME_STATE};
+        timing.sinceEndMs=lastEndAtMs>0?waitStart-lastEndAtMs:0;
+        const auto waited=pWaitFrame(session,&wi,&frameState);timing.waitFrameMs=Milliseconds()-waitStart;
+        if(!Check(waited,"wait frame")){lateWait.Failed();return false;}
+        timing.displayPeriodMs=double(frameState.predictedDisplayPeriod)*1e-6;
+        XrFrameBeginInfo bi{XR_TYPE_FRAME_BEGIN_INFO};
+        if(!Check(pBeginFrame(session,&bi),"begin frame")){lateWait.Failed();return false;}
+        lateWait.Waited(frameState.predictedDisplayTime,frameState.predictedDisplayPeriod,frameState.shouldRender);
+        frameDisplayTime=frameState.predictedDisplayTime;
+    }
+    lateWait.Posed(waitStart);
     frame=true;render=frameState.shouldRender;valid=false;motionHeadTracked=false;compassFrame=false;
     bowRenderTime=GetTickCount64();
     const bool loaded=inWorld&&inWorld();
@@ -6161,6 +6227,7 @@ bool Begin() {
 }
 bool Acquire(Eye& e) {
     if(e.acquired)return true;
+    if(waitOwed&&!SettleFrame())return false;   // an eye's, the menu's or the map's image: inside the frame, as ever
     XrSwapchainImageAcquireInfo ai{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
     if(!Check(pAcquireSwapchainImage(e.chain,&ai,&e.index),"acquire eye"))return false;
     e.acquired=true;
@@ -6818,7 +6885,9 @@ void Capture(reshade::api::command_queue* rq,reshade::api::swapchain* swap) {
     // A frame the runtime does not want drawn (the headset taken off: SYNCHRONIZED) still has to
     // end, or it stays open and no later frame begins - the session never came back to FOCUSED
     // (the campfire, where no pair ends it: only the menu's board on SteamVR's background).
-    if(!Begin()||!render||!valid) {if(!stereo||!pairDrawing)EndPair();return;}
+    // A late wait (late_wait.h) comes here, the first eye drawn: before the pair's first copy. One that failed
+    // leaves no frame open, as a wait that failed in Begin.
+    if(!Begin()||(waitOwed&&!SettleFrame())||!render||!valid) {if(!stereo||!pairDrawing)EndPair();return;}
     const uint32_t eye=stereo?((afr->eye^afr->swap)&1u):0u;
     mirrorMono=stereo&&vrsettings::Read().values[settings::DesktopOneEye]>.5f;
     // The map and menu surfaces are copied once a frame: from the left eye's
@@ -6937,6 +7006,10 @@ void ConfigureDeferredWait(bool on) {
     if(deferredWait.exchange(on)!=on)Say(on?"Frame OpenXR: GPU wait deferred until copy allocator reuse":"Frame OpenXR: conservative GPU wait before image release");
 }
 void ConfigureSymmetricProjection(bool on) {symmetricProjection.store(on);}
+void ConfigureFrameGenerationLateWait(bool on) {
+    if(lateWaitWanted.exchange(on)!=on)Say(on?"Frame generation: late wait wanted ([render] frame_generation_late_wait=1); used while OFXR Bridge makes frames on SteamVR"
+                                             :"Frame generation: late wait not wanted ([render] frame_generation_late_wait=0)");
+}
 void ConfigureFrameGeneration(float mode,float preset,float scale) {
     const auto o=framegen::Read(mode,preset,scale);
     const int packed=int(o.mode)*100+o.preset*10+o.scale;
@@ -7097,7 +7170,7 @@ void BeginPair(bool byTurns,bool replay) {
         if(frame)EndPair();
         const int mode=StereoRendering();
         turnFrame=byTurns;replayPair=replay&&!byTurns;
-        keepTurns=byTurns||mode==1;keepDepth=mode==1;Begin();pairDrawing=true;
+        keepTurns=byTurns||mode==1;keepDepth=mode==1;Begin(true);pairDrawing=true;
         if(replayPair&&!(frame&&valid&&render&&!panelMode))replayPair=false;
         gpuProfile.started=gpuProfile.effects=gpuProfile.resolved=0;
         // The profile and stereo captures take both eyes from two passes.
@@ -7123,6 +7196,9 @@ void EndPair() {
     foveation::EndWorld();
     d2rcam::SetStereoUiEye(-1);
     std::lock_guard lock(mutex);pairDrawing=false;const bool turn=turnFrame;turnFrame=false;replayPair=false;if(!frame||!session)return;
+    // A late wait still owed (no eye was copied, so nothing took an image): the frame is begun to be ended,
+    // each xrEndFrame with its own xrWaitFrame and xrBeginFrame.
+    if(waitOwed&&!SettleFrame())return;
     d2rcam::TraceStereoLabels(-1);
     if(capturePair){Say(captureEyes==3?"Frame capture: both eye screenshots requested":"Frame capture: incomplete pair; do not use for stereo comparison");capturePair=false;}
     // By turns: the eye not drawn, turned to this frame's head.
@@ -7184,7 +7260,7 @@ void EndPair() {
         quad.space=space;quad.eyeVisibility=XR_EYE_VISIBILITY_BOTH;quad.pose=menuPose;quad.size={size.width,size.height};
         quad.subImage.swapchain=eyes[0].chain;quad.subImage.imageRect={{0,0},{int32_t(width),int32_t(height)}};layer=reinterpret_cast<const XrCompositionLayerBaseHeader*>(&quad);
     }
-    XrFrameEndInfo ei{XR_TYPE_FRAME_END_INFO};ei.displayTime=frameState.predictedDisplayTime;ei.environmentBlendMode=XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+    XrFrameEndInfo ei{XR_TYPE_FRAME_END_INFO};ei.displayTime=frameDisplayTime;ei.environmentBlendMode=XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
     std::array<const XrCompositionLayerBaseHeader*,32> layers{};uint32_t count=0;
     // The shared panels' pictures uploaded this frame, all in one copy (panelatlas).
     if(sharedDirty) {
@@ -7665,6 +7741,7 @@ void EndPair() {
     }
     ei.layerCount=count;ei.layers=count?layers.data():nullptr;
     const double start=Milliseconds();const auto submitted=pEndFrame(session,&ei);Check(submitted,"end frame");
+    lastEndAtMs=Milliseconds();
     if(XR_SUCCEEDED(submitted)) {
         static uint32_t remade=0,most=0,standInsMost=0;static ULONGLONG reportAt=0;
         for(uint32_t j=0;j<count;++j) {
@@ -8407,6 +8484,7 @@ void Shutdown(bool preserveResolution) {
     session=XR_NULL_HANDLE;instance=XR_NULL_HANDLE;actionSet=XR_NULL_HANDLE;headSpace=space=XR_NULL_HANDLE;
     hapticActions.Reset();
     running=frame=valid=render=haveOrigin=menuPlaced=panelMode=false;state=XR_SESSION_STATE_UNKNOWN;gameWindow=nullptr;
+    waitOwed=lateWaitOn=false;lateWait.Reset();frameDisplayTime=0;lastEndAtMs=0;   // a new session's periods and times are its own
     worldWasLoaded=worldCalibrationPending=worldRecenter=false;
     if(fenceEvent)CloseHandle(fenceEvent);fenceEvent=nullptr;
     fence.Reset();queue.Reset();device.Reset();fenceValue=0;
