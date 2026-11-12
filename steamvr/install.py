@@ -622,7 +622,11 @@ def main():
         payload.update({mod_identity.MOD_DIR / name: data for name, data in ceilings.items()})
         print('Prepared the dungeon ceilings the game draws, from your installed game.')
     try:
-        campfire = prepare_campfire_sky.prepare(game, casclib=args.casclib)
+        try:   # the scene as tuned (Harrogath round the fire, its road, rocks and firewood); failing that, the plain one
+            campfire = prepare_campfire_sky.prepare(game, casclib=args.casclib)
+        except (ValueError, KeyError, IndexError) as error:
+            print(f'The tuned character creation scene could not be built ({error}); building the plain one.')
+            campfire = prepare_campfire_sky.prepare(game, casclib=args.casclib, options=prepare_campfire_sky.parse([str(game)]))
         prepare_campfire_sky.check_existing(game / mod_identity.MOD_DIR, campfire)
     except (OSError, ValueError, KeyError, IndexError) as error:
         print(f'Character creation clouds fix unavailable; existing preset retained: {error}')

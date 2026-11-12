@@ -129,6 +129,42 @@ class CampfireSkyTest(unittest.TestCase):
         again, more = campfire.with_sky_round(result, (180.0,))
         self.assertEqual(more, 1)   # the scene's own sky is the one copied, never a copy
 
+    def test_the_installer_builds_the_tuned_scene(self):
+        # v0.3.33 shipped the scene off and the installer built only the plain one (11 changes against the tuned
+        # scene's 130 on the owner's game): prepare() now builds TUNED_SCENE unless told otherwise
+        seen = {}
+        class Opened:
+            def __enter__(self): return 'assets'
+            def __exit__(self, *a): return False
+        def generate(assets, mod_name, **kwargs):
+            seen.update(kwargs, mod=mod_name, copies=campfire.COPIES, pave=campfire.PAVE, hide=campfire.HIDE)
+            return {'built': b''}
+        real = campfire.open_assets, campfire.generate
+        campfire.open_assets, campfire.generate = (lambda game, casclib: Opened()), generate
+        try:
+            self.assertEqual(campfire.prepare('game'), {'built': b''})
+        finally:
+            campfire.open_assets, campfire.generate = real
+        self.assertEqual(seen['mod'], 'D2R-PCVR')
+        self.assertTrue(seen['pave'] and len(seen['copies']) > 50 and seen['hide'], 'the tuned scene: paved, its copies, its hidden pieces')
+        self.assertEqual((seen['sky_turns'], seen['flip_wall'], seen['shadows_off']), ((), False, False))
+        self.assertEqual((campfire.COPIES, campfire.PAVE, campfire.HIDE), ((), False, ()), 'the module settings are put back')
+
+    def test_one_list_of_tuned_options(self):
+        script = (Path(__file__).with_name('campfire_scene.ps1')).read_text(encoding='utf-8')
+        self.assertIn('--tuned', script)
+        self.assertNotIn('--copy', script, 'the script takes TUNED_SCENE, not a second copy of it')
+        options = campfire.parse(['game', '--tuned'])
+        self.assertTrue(options.tuned)
+
+    def test_the_scene_is_on_by_default(self):
+        root = Path(__file__).resolve().parent.parent
+        ini = (root / 'd2r_pcvr.ini').read_text(encoding='utf-8')
+        section = ini[ini.index('\n[campfire]'):]
+        section = section[:section.index('\n[', 2)]
+        self.assertIn('\nenabled=1\n', section.replace('\r\n', '\n'))
+        self.assertIn('IniB(L"campfire", L"enabled", true)', (root / 'vr/vrcam.cpp').read_text(encoding='utf-8'))
+
 
 if __name__ == '__main__':
     unittest.main()
