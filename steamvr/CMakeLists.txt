@@ -348,6 +348,7 @@ target_link_libraries(interaction-test PRIVATE framevr-runtime)
 
 add_executable(journal-test journal_test.cpp)
 add_executable(native-panels-test native_panels_test.cpp)
+add_executable(cinema-screen-test cinema_screen_test.cpp)
 add_executable(dropped-bottles-test dropped_bottles_test.cpp dropped_bottles.cpp)
 target_link_libraries(dropped-bottles-test PRIVATE box3d framevr-runtime)
 add_executable(props-test props_test.cpp)
@@ -466,6 +467,8 @@ add_test(NAME hero-light-test COMMAND hero-light-test "${ROOT}/reshade/D2R_Depth
 set_tests_properties(hero-light-test PROPERTIES TIMEOUT 30)
 add_test(NAME body-calibration-gesture-test COMMAND body-calibration-gesture-test "${ROOT}/steamvr/transport.cpp" "${ROOT}/vr/vrcam.cpp")
 set_tests_properties(body-calibration-gesture-test PROPERTIES TIMEOUT 30)
+add_test(NAME cinema-screen-test COMMAND cinema-screen-test "${ROOT}/steamvr/transport.cpp" "${ROOT}/vr/vrcam.cpp" "${ROOT}/vr/gamestate.cpp")
+set_tests_properties(cinema-screen-test PROPERTIES TIMEOUT 30)
 add_test(NAME light-bounds-test COMMAND light-bounds-test)
 set_tests_properties(light-bounds-test PROPERTIES TIMEOUT 30)
 foreach(test_target IN ITEMS memory-test biome-list-test hook-metrics-test active-keys-test resource-descriptions-test latest-worker-test haptic-pulse-test thread-stats-test draw-sampler-test game-patch-plan-test cull-volume-test

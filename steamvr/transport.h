@@ -154,6 +154,9 @@ bool CampfireMenuHit();
 // Any thread: the campfire's own sound (campfire_audio.h) on while the scene is up - the fire's roar and
 // crackle at `ambient`, a click's whoosh at `burst` (0..1, times the game's volume); CampfireBurst: a click on the fire.
 void SetCampfireFire(bool on, float ambient, float burst);
+// Any thread: the cinema screen's place ([cinema] distance, width; metres, cinema::Clamped) - while a cinematic
+// plays (gamestate::CinemaPlaying), the game's frame goes on it: a screen this far ahead at eye height, this wide.
+void SetCinemaScreen(float distance, float width);
 void CampfireBurst();
 // Paladin Fist of the Heavens motion (motions_paladin.h). Armed: the skill is
 // learned, its card on and gestures on (vrcam keeps the monster scan running).

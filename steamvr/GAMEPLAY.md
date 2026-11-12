@@ -444,6 +444,31 @@ clicks follow the moved panel. Every in-game and main/title menu reopens at
 that distance until the game is restarted or **VR Settings > Interface > Menus > Menu
 distance** is changed. The handheld quest log keeps its left-grip placement.
 
+### Cinematics on a screen in the world
+
+The game's cinematics (the logos and the intro, the act videos, the ending, and
+the main menu's Cinematics) play on a flat screen in the world: placed straight
+ahead at eye height as one starts, 3 m away and 3 m wide (about 53 degrees
+across), with the film's own 16:9 shape, black around it, and still while you
+look round. Both eyes see the same picture on it, so it stands at its distance
+like a real screen. The game's sound plays as it does on the desktop. F11 places
+the screen in front of you again. Hold the game's skip button (or press it, as
+the game asks) on the controllers to skip; the laser shows only while pointed at
+the screen, and grabbing does not move it.
+
+D2R draws a cinematic as an interface widget in its full-screen box (the 16:9
+band at the top of a square VR picture) and draws no world meanwhile: in a game
+the headset used to show no picture at all while one played (the picture went
+to one eye's slot and the other never came). The mod tells a cinematic from the
+game's own interface messages: `MoviePlayerMessage` `Play` starts one;
+`Cinematics` `MovieComplete` or `Close`, `MoviePlayerMessage` `Cancel` or
+`PlayLooped` (the title screen's loop, a menu), a movie panel closed, every
+panel unloaded or a front-end navigation ends it. In a game, the world drawn
+again for 0.75 s (2 s after the start) also ends one whose end message was
+missed, and nothing lasts past 12 minutes. No game build or code bytes are
+assumed. `[cinema] enabled=0` in `d2r_pcvr.ini` leaves cinematics as they were;
+`distance` and `width` (metres) set the screen. Logs: `Frame cinema:`.
+
 ### The menu on leather
 
 Reach your **left hand over your left shoulder** and grip (as if pulling a
