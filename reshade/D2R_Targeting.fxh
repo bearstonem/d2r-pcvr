@@ -374,14 +374,93 @@ float3 Sparks(float3 c, float2 uv, int eye, float ok, float3 p)
     }
     return c + glow;
 }
+// The campfire's snow (vrcam: [campfire] snow, rolled each time the scene begins): flakes falling all round
+// the player, carried by an uneven wind. The flakes hang in a 3D grid of cells fixed in the world (relative to
+// the hero, so the same for both eyes and in depth), one at a random place in some cells; the grid slides with
+// the wind, each column of cells falls at its own speed, each flake sways in its own way. The pixel's ray is
+// walked through six bands of distance (1.5 to 160 world units), each with its own cell size (bigger far off,
+// so the flakes are as thick on the screen far and near), and hidden by whatever stands nearer (the depth).
+uniform bool SnowOn < hidden = true; > = false;
+uniform float SnowTime < hidden = true; > = 0.0;
+uniform float SnowDensity < hidden = true; > = 0.25;   // share of the cells that hold a flake
+// The snow beginning or ending as the scene goes on (vrcam: [campfire] snow_turn): seconds since it began to fall
+// or stopped, -1 when neither. Either way it goes from the top: beginning, the first flakes come down from
+// SNOW_TOP over the hero; ending, the last ones fall on and the sky above them is empty.
+uniform float SnowStart < hidden = true; > = -1.0;
+uniform float SnowStop < hidden = true; > = -1.0;
+#define SNOW_TOP 40.0
+uniform float SnowSeed < hidden = true; > = 0.0;
+float SnowHash(float2 q) { return frac(sin(dot(q, float2(127.1, 311.7)) + SnowSeed * 17.31) * 43758.5453); }
+float SnowHash3(float3 q) { return frac(sin(dot(q, float3(127.1, 311.7, 74.7)) + SnowSeed * 17.31) * 43758.5453); }
+// The wind's push so far (world units): a slow drift with gusts that come and go, never repeating to the eye.
+float3 SnowWind(float T)
+{
+    // gusts four times as long as before (owner 2026-11-12: a turn every 5-6 s, not every 1-1.5 s) and stronger
+    return 1.6 * float3(0.7 * T + 13.2 * sin(T * 0.0475) + 6.6 * sin(T * 0.1175 + 1.3) + 3.0 * sin(T * 0.2825 + 0.4),
+                        0.0,
+                        0.25 * T + 9.6 * sin(T * 0.0325 + 2.1) + 5.4 * sin(T * 0.1025 + 0.7) + 2.4 * sin(T * 0.2425 + 2.9));
+}
+static const float SnowBandFrom[7] = {1.5, 6.0, 15.0, 30.0, 55.0, 95.0, 160.0};   // the bands of distance
+static const float SnowBandCell[6] = {0.8, 1.4, 2.4, 4.0, 6.5, 10.0};             // and their cells' side
+static const float SnowBandMore[6] = {1.0, 1.0, 2.0, 2.0, 2.0, 2.0};               // from the heroes out (~15): twice the flakes
+float3 Snow(float3 c, float2 uv, int eye, float ok, float3 p)
+{
+    const float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    const float4 sp = eye == 0 ? SkyProj0 : SkyProj1;
+    const float3 v = float3((ndc.x + sp.z) / sp.x, (ndc.y + sp.w) / sp.y, -1.0);
+    const float3 off = eye == 0 ? v.x * CamRight0 + v.y * CamUp0 + v.z * CamBack0
+                                : v.x * CamRight1 + v.y * CamUp1 + v.z * CamBack1;
+    const float3 e = eye == 0 ? OutlineEye0 : OutlineEye1;
+    const float3 dir = normalize(off);
+    const float scene = ok > 0.0 ? length(p - e) : 1e9;
+    const float T = SnowTime;
+    const float3 W = SnowWind(T);
+    float cover = 0.0;
+    [loop] for (int b = 0; b < 6; ++b) {
+        const float cs = SnowBandCell[b];
+        const float tEnd = min(SnowBandFrom[b + 1], scene);
+        [loop] for (float t = SnowBandFrom[b]; t < tEnd; t += cs * 0.6) {
+            const float3 P = e + dir * t;
+            // the flakes' frame: carried by the wind, gusts reaching places a little apart at different times
+            float3 Q = P - W - float3(1.8 * sin(P.z * 0.031 + T * 0.0925), 0.0, 1.8 * sin(P.x * 0.027 + T * 0.0725));
+            const float2 colCell = floor(Q.xz / cs) + float(b) * 57.0;
+            const float fall = 3.0 * (0.55 + 0.9 * SnowHash(colCell));   // world units a second, ~0.4-1.0 m
+            const float lift = T * fall + SnowHash(colCell + 4.7) * 40.0 * cs;
+            Q.y += lift;
+            const float3 cell = floor(Q / cs);
+            const float3 key = cell + float(b) * 91.0;
+            const float h = SnowHash3(key);
+            if (h > SnowDensity * SnowBandMore[b]) continue;
+            // the flake's place in its cell, and its own sway and bob
+            const float amp = 0.05 + 0.13 * SnowHash3(key + 13.7);
+            const float freq = 0.17 + 0.47 * SnowHash3(key + 17.9);   // a flake's own sway, slow too
+            const float ph = SnowHash3(key + 21.3) * 6.2831853;
+            const float3 at = float3(0.3 + 0.4 * SnowHash3(key + 5.3) + amp * sin(T * freq + ph),
+                                     0.3 + 0.4 * SnowHash3(key + 9.1) + 0.06 * sin(T * freq * 0.7 + ph * 1.9),
+                                     0.3 + 0.4 * SnowHash3(key + 11.9) + amp * cos(T * freq * 0.83 + ph));
+            // back to the world: where the ray passes nearest it
+            const float3 F = (cell + at) * cs + (P - Q);
+            if (SnowStart >= 0.0 && F.y < SNOW_TOP - fall * SnowStart) continue;   // not come down this far yet
+            if (SnowStop >= 0.0 && F.y > SNOW_TOP - fall * SnowStop) continue;     // the sky over the last ones
+            const float s = dot(F - e, dir);
+            if (s <= 0.0 || s > scene) continue;   // behind the eye, or behind something
+            const float d = length(F - e - dir * s);
+            const float size = max(0.0175 + 0.001 * s, 0.00175 * s) * (0.1 + 0.9 * SnowHash3(key + 27.1));   // 10% to 100%
+            const float fadeIn = saturate((s - 0.6) / 1.5);   // the nearest flakes fainter: not a blot over the eye
+            cover = max(cover, smoothstep(size, size * 0.35, d) * (0.6 + 0.4 * SnowHash3(key + 2.7)) * fadeIn);
+        }
+    }
+    return lerp(c, float3(0.8, 0.83, 0.9), cover * 0.85);
+}
 float3 Outline(float2 uv, int eye)
 {
     float3 c = tex2D(FogColorSmp, uv).rgb;
-    if (!OutlineOn && !RingOn && !BeamOn && !TeleOn && !SparkOn) return c;
+    if (!OutlineOn && !RingOn && !BeamOn && !TeleOn && !SparkOn && !SnowOn) return c;
     float ok;
     const float3 p = OutlineWorld(uv, eye, ok);
     if (BeamOn) c = Beams(c, uv, eye, p, ok);   // over the sky as well
     if (SparkOn) c = Sparks(c, uv, eye, ok, p);   // over the sky as well
+    if (SnowOn) c = Snow(c, uv, eye, ok, p);   // over the sky as well
     if (TeleOn) c = TelePillar(c, uv, eye, p, ok);
     if (ok <= 0.0) return c;
     if (RingOn) {
