@@ -1,9 +1,76 @@
 #include "controller_labels.h"
+#include "controller_profiles.h"
 #include "interaction_paint.h"
+#include <algorithm>
 #include <cassert>
 #include <cstdio>
+#include <iterator>
+#include <set>
+#include <string>
+#include <utility>
 using namespace framevr;
+// controller_profiles.h: every path suggested for a profile must be one that profile defines. A runtime
+// refuses a profile's whole suggestion over one path it does not have, and the controller's vibration
+// goes with it. The lists are the OpenXR 1.0 interaction profiles' (paths with their components); the
+// Steam Frame's is the set its runtime accepts.
+static void SuggestedBindings() {
+    using namespace controllers;
+    using Set=std::set<std::string>;
+    auto both=[](const Set& inputs){
+        Set out{"/user/hand/right/output/haptic","/user/hand/left/output/haptic"};
+        for(const auto& s:inputs){out.insert("/user/hand/right/input/"+s);out.insert("/user/hand/left/input/"+s);}
+        return out;
+    };
+    auto only=[](Set out,const char* hand,const Set& inputs){for(const auto& s:inputs)out.insert(std::string("/user/hand/")+hand+"/input/"+s);return out;};
+    const Set index=both({"system/click","system/touch","a/click","a/touch","b/click","b/touch","squeeze/value","squeeze/force",
+        "trigger/click","trigger/value","trigger/touch","thumbstick","thumbstick/x","thumbstick/y","thumbstick/click","thumbstick/touch",
+        "trackpad","trackpad/x","trackpad/y","trackpad/force","trackpad/touch","grip/pose","aim/pose"});
+    const Set touch=only(only(both({"squeeze/value","trigger/value","trigger/touch","thumbstick","thumbstick/x","thumbstick/y",
+        "thumbstick/click","thumbstick/touch","thumbrest/touch","grip/pose","aim/pose"}),
+        "left",{"x/click","x/touch","y/click","y/touch","menu/click"}),"right",{"a/click","a/touch","b/click","b/touch","system/click"});
+    const Set wmr=both({"menu/click","squeeze/click","trigger/value","thumbstick","thumbstick/x","thumbstick/y","thumbstick/click",
+        "trackpad","trackpad/x","trackpad/y","trackpad/click","trackpad/touch","grip/pose","aim/pose"});
+    const Set frame=only(only(both({"grip/pose","thumbstick","thumbstick/click","trigger/value","aim/pose","squeeze/value"}),
+        "right",{"a/click","b/click","menu/click"}),"left",{"dpad_down/click","dpad_up/click","view/click"});
+    const std::pair<const char*,const Set*> known[]={{"/interaction_profiles/valve/index_controller",&index},
+        {"/interaction_profiles/oculus/touch_controller",&touch},{"/interaction_profiles/microsoft/motion_controller",&wmr},{FrameProfile,&frame}};
+    assert(std::size(Profiles)==std::size(known));
+    for(size_t p=0;p<std::size(known);++p) {
+        assert(std::string_view(Profiles[p])==known[p].first);
+        const auto list=Suggestions(Profiles[p]);
+        Set seen;int outputs[2]{};
+        for(const auto& s:list) {
+            assert(known[p].second->count(s.path));   // a path this profile defines
+            assert(seen.insert(s.path).second);       // suggested once
+            assert(s.hand==0||s.hand==1);
+            assert(s.path.starts_with(s.hand?"/user/hand/left/":"/user/hand/right/"));
+            const bool output=s.path.find("/output/")!=std::string::npos;
+            assert(output==(s.action==Bind::Haptic));
+            if(output)++outputs[s.hand];
+            // Boolean actions take clicks; the float trigger and grip take values (the Index's grip its force).
+            if(s.action==Bind::StickClick||s.action==Bind::Primary||s.action==Bind::Secondary||s.action==Bind::Menu)assert(s.path.ends_with("/click"));
+            if(s.action==Bind::Trigger)assert(s.path.ends_with("trigger/value"));
+            if(s.action==Bind::Squeeze)assert(s.path.ends_with("squeeze/value")||s.path.ends_with("squeeze/force"));
+        }
+        assert(outputs[0]==1&&outputs[1]==1);   // both hands' vibration, in every profile
+        for(int hand=0;hand<2;++hand)for(const auto action:{Bind::Haptic,Bind::Grip,Bind::Stick,Bind::StickClick,Bind::Trigger,Bind::Aim})
+            assert(std::count_if(list.begin(),list.end(),[&](const Suggestion& s){return s.hand==hand&&s.action==action;})==1);
+    }
+    // The lists as the transport built them before they moved to controller_profiles.h.
+    auto paths=[](std::string_view profile){Set out;for(const auto& s:Suggestions(profile))out.insert(s.path);return out;};
+    const auto r=[](const char* s){return std::string("/user/hand/right/input/")+s;};
+    const auto l=[](const char* s){return std::string("/user/hand/left/input/")+s;};
+    Set common{"/user/hand/right/output/haptic","/user/hand/left/output/haptic"};
+    for(const char* s:{"grip/pose","thumbstick","thumbstick/click","trigger/value","aim/pose"}){common.insert(r(s));common.insert(l(s));}
+    auto with=[](Set set,std::initializer_list<std::string> more){set.insert(more.begin(),more.end());return set;};
+    assert(paths("/interaction_profiles/valve/index_controller")==with(common,{r("squeeze/force"),l("squeeze/force"),r("a/click"),r("b/click"),l("a/click"),l("b/click")}));
+    assert(paths("/interaction_profiles/oculus/touch_controller")==with(common,{r("squeeze/value"),l("squeeze/value"),r("a/click"),r("b/click"),l("x/click"),l("y/click"),l("menu/click")}));
+    assert(paths("/interaction_profiles/microsoft/motion_controller")==with(common,{r("menu/click"),l("menu/click")}));
+    assert(paths(FrameProfile)==with(common,{r("squeeze/value"),l("squeeze/value"),r("a/click"),r("b/click"),l("dpad_down/click"),l("dpad_up/click"),r("menu/click"),l("view/click")}));
+    assert(Suggestions("/interaction_profiles/valve/index_controller").size()==18&&Suggestions(FrameProfile).size()==20);
+}
 int main(){
+    SuggestedBindings();
     using namespace controllers;
     assert(Detect("/interaction_profiles/oculus/touch_controller")==Layout::Touch);
     assert(Detect("/interaction_profiles/meta/touch_controller_plus")==Layout::Touch);
@@ -48,5 +115,5 @@ int main(){
         assert(!(left==quest)&&interaction::Context(s,o,true,left)!=interaction::Context(s,o,true,quest));   // the wheel repaints
         assert(!Labels{}.leftMain&&Labels{}.Physical(0)==0&&Labels{}.Physical(1)==1);   // off: as before
     }
-    puts("Controller detection, per-hand labels, overrides, bindings, atlas invalidation and left-handed names passed");
+    puts("Controller detection, per-hand labels, overrides, bindings, every profile's suggested paths and both vibration outputs, atlas invalidation and left-handed names passed");
 }
