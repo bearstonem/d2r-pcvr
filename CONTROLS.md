@@ -177,6 +177,10 @@ Interact latches the target present when you press A. Pressing at empty space
 does not wait for an item to come into range. Release and press again for each
 new target. A release during an inventory/NPC menu rearms interaction; holding
 the button through a menu or game-session change cannot reuse the old target.
+Both grips held are for the class motions only: while you hold them, and for
+0.4 seconds after you let go, a skill on A only casts (the game does not turn its
+press into a pick-up, a door or a talk), so a motion whose skill sits on A casts
+that skill even next to loot. A button holding Interact still interacts.
 
 **VR Settings > Interface > Labels > Loot pick** (On by default): with several items on
 the floor, Interact takes the one you point at, not the nearest. Hold your

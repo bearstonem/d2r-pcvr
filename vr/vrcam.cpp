@@ -5495,13 +5495,24 @@ void ApplyActions(XINPUT_STATE* s) {
     uint8_t* flag = (uint8_t*)d2rsig::Addr(RVA_INTERACT_ON_ATTACK);
     uint8_t now = 0;
     if (!flag || !SafeRead(&now, flag, 1) || now > 1) return;
-    const bool separate = g_set.aAttackOnly.load() || (held & D2RVR_ACT_ATTACK);
-    if (original < 0) { if (!separate && !interact) return; original = now; }
-    const uint8_t want = interact ? 1 : separate ? 0 : (uint8_t)original;
+#ifdef D2RVR_NATIVE_OPENXR
+    // Both grips held for the class motions (or let go under 0.4 s ago): a motion cast through the A slot is
+    // that skill, never a pick-up of the loot beside the hero (InteractOnA).
+    const bool gestureGrips = framevr::SpellGripsHeld();
+#else
+    const bool gestureGrips = false;
+#endif
+    const int rule = framevr::interaction::InteractOnA(interact, g_set.aAttackOnly.load(), (held & D2RVR_ACT_ATTACK) != 0, gestureGrips);
+    if (original < 0) { if (rule < 0) return; original = now; }
+    const uint8_t want = rule < 0 ? (uint8_t)original : (uint8_t)rule;
     if (now != want) {
         *flag = want;
         static uint8_t told = 2;
-        if (want != told) { told = want; LogF("vrcam: pad A %s", want ? "picks up / interacts on a target" : "only attacks"); }
+        if (want != told) {
+            told = want;
+            LogF("vrcam: pad A %s%s", want ? "picks up / interacts on a target" : "only attacks",
+                 !want && gestureGrips ? " (both grips held for the motions: a cast on A picks nothing up)" : "");
+        }
     }
 }
 
@@ -5821,7 +5832,8 @@ uintptr_t HandItem() {
 uintptr_t Selected() {
     bool between = false;
     if (!On(&between)) return 0;
-    // Both grips held for the motions (or a moment after): a motion's cast press is no pick-up.
+    // Both grips held for the motions (or a moment after): a motion's cast press is no pick-up. This alone
+    // left the game's own nearest item to Interact; ApplyActions keeps A from turning into Interact then.
     if (framevr::SpellGripsHeld()) return 0;
     TellThread("the Interact skill's target", 0);
     const uintptr_t handed = Handed(g_pick.load(), false);

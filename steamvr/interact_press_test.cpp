@@ -47,5 +47,20 @@ int main(){
     assert(!fallback.Poll(true,0,false,true,2,2).down);
     fallback.Poll(false,0,false,true,2,2);
     assert(fallback.Poll(true,0,false,true,2,2).down);
-    std::puts("One-target interaction, menu release, context cancellation and fallback tests passed");
+    // Pad A's interact-on-attack (InteractOnA): 1 on, 0 off, -1 the game's own value.
+    using framevr::interaction::InteractOnA;
+    assert(InteractOnA(false,false,false,false)==-1);   // nothing held: the game's own (A next to loot picks it up)
+    assert(InteractOnA(true,false,false,false)==1);     // the Interact action
+    assert(InteractOnA(false,true,false,false)==0);     // [input] a_attack_only
+    assert(InteractOnA(false,false,true,false)==0);     // the Attack action
+    // Both grips held for the class motions (owner, 2026-11-11: "Holding both grip buttons next to loot should
+    // not trigger a loot pickup"): a motion cast through the A slot (Nova on the Sorceress's A) only casts.
+    assert(InteractOnA(false,false,false,true)==0);
+    assert(InteractOnA(false,true,true,true)==0);
+    // Let go (the 0.4 s after included in gestureGrips): back to the game's own value.
+    assert(InteractOnA(false,false,false,false)==-1);
+    // The Interact action wins: it presses A only onto a target, and no motion casts while it is held.
+    assert(InteractOnA(true,false,false,true)==1);
+    assert(InteractOnA(true,true,true,true)==1);
+    std::puts("One-target interaction, menu release, context cancellation, fallback and pad A interact tests passed");
 }
