@@ -24,12 +24,23 @@ using math::Quat;
 // game thread around a point. Bit x of rows[z] is cell (x0+x, z0+z): a wall,
 // closed door or unloaded room, by the same missile-barrier mask as arrows.
 inline constexpr int PatchCells=32;
+// The collision bits a cell carries (vr/wall_cells.cpp reads them all): 0x4 a wall, 0x800 a closed door - the
+// barrier arrows and bottles stop at - and 0x400 an object's footprint (a barrel, an urn, a chest), which has no
+// height of its own. Walls seen in logs: 0x5, 0x7, 0x15 (2026-11-09..12 flight barrier lines).
+inline constexpr uint16_t BarrierBits=0x804,ObjectBit=0x400,DoorBit=0x800;
 struct Patch {
     uint64_t session=0,serial=0;
+    uint64_t at=0;   // GetTickCount64 when sampled
     int x0=0,z0=0;
     std::array<uint32_t,PatchCells> rows{};
+    // Of the cells in rows, by the same bits: an object's footprint (ObjectBit, not a closed door), a closed door, and
+    // no room loaded there or off the map (a doorway into the next area). Held items stop only at the walls among
+    // them (Wall, held_world.h); bottles at every one.
+    std::array<uint32_t,PatchCells> objects{},doors{},unknown{};
     bool Covers(int x,int z) const {return x>=x0&&z>=z0&&x<x0+PatchCells&&z<z0+PatchCells;}
     bool Blocked(int x,int z) const {return Covers(x,z)&&((rows[z-z0]>>(x-x0))&1u);}
+    bool Bit(const std::array<uint32_t,PatchCells>& of,int x,int z) const {return Covers(x,z)&&((of[z-z0]>>(x-x0))&1u);}
+    bool Wall(int x,int z) const {return Blocked(x,z)&&!Bit(objects,x,z)&&!Bit(unknown,x,z);}
 };
 // Cells lie on the unsheared grid plane. As for arrows, only the floor's
 // shear is removed: walls stand vertically in rendered space above that floor.

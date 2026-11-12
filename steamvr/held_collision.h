@@ -65,11 +65,13 @@ enum Reason : uint32_t {
     PutAway=1u<<11,    // an item not drawn (stowed for a potion, or hidden by the game)
     Unmeasured=1u<<12, // the shield's mesh not measured yet: its face is not known
     NotPosed=1u<<13,   // no recent pose of the items to carry
+    WorldOff=1u<<14,   // held items meeting the world (held_world.h): VR Settings > Physics > Weapons hit walls is off
+    NoFrame=1u<<15,    // held_world.h: the hero's place in the world not known this pose
 };
-constexpr int ReasonCount=14;
+constexpr int ReasonCount=16;
 inline const char* ReasonName(int bit) {
     static const char* const names[ReasonCount]={"setting off","view","menu","wheel","leather menu","druid form","bow",
-        "two hands","throwing","empty hand","untracked","put away","shield unmeasured","not posed"};
+        "two hands","throwing","empty hand","untracked","put away","shield unmeasured","not posed","walls setting off","no world frame"};
     return bit>=0&&bit<ReasonCount?names[bit]:"?";
 }
 // The reasons, comma separated ("none" for none).
@@ -103,6 +105,7 @@ inline float BladeLength(uint32_t type) {
 }
 struct Holding {
     bool setting=true;      // VR Settings > Combat > Weapons collide ([gameplay] held_collisions)
+    bool world=true;        // VR Settings > Physics > Weapons hit walls ([gameplay] held_world_collisions; held_world.h)
     bool firstPerson=false; // first person, the arms on the controllers
     bool menu=false,wheel=false,leather=false,form=false,throwing=false;
     bool twoHands=false;    // the weapon in both hands, or the support hand on a shaft

@@ -197,8 +197,9 @@ bool ShieldAim(float& x,float& y);
 void FinishShieldSkill(bool accepted);
 void MeleeImpact(int hand=0); // thread-safe; haptic delivered by XR input update
 // Held items collide (held_collision.h): the weapon struck the shield or the other weapon - a clank of this strength
-// (0..1) in both controllers on the next input frame. Thread-safe.
-void HeldClank(float strength);
+// (0..1) in both controllers on the next input frame; or an item struck a wall or the floor (held_world.h) - in that
+// one: arms, bit 0 the right controller, bit 1 the left (physical, not roles). Thread-safe.
+void HeldClank(float strength,unsigned arms=3);
 // Held items collide: what of the last input frame keeps the hands' items from colliding (held::Reason bits: Menu
 // while the hands are pointers or no frame ran lately, Wheel, Leather, Throwing). Thread-safe.
 uint32_t HeldCollisionBlocks();

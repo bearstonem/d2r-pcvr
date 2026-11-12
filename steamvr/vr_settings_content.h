@@ -554,6 +554,10 @@ inline constexpr Override Overrides[]={
      .help="Cups, vases, books and stools tumble when your weapon, hand or shield hits them. Just for looks."},
     {.id="interactions.body_physics",.page=View::Physics,.section="Props",.kind=RowKind::Toggle,.label="Pushable bodies",
      .help="Your weapon, shield or fist pushes aside the limbs of monsters and townsfolk it meets, and they spring back. Just for looks. Motion combat in first person."},
+    // Weapons hit walls (held_world.h; owner 2026-11-12): [gameplay] held_world_collisions, On by default. On Physics with
+    // the other things your weapons meet (Combat, beside Weapons collide, has no free row).
+    {.id="gameplay.held_world_collisions",.page=View::Physics,.section="Props",.kind=RowKind::Toggle,.label="Weapons hit walls",
+     .help="Your weapons and shield stop at walls, closed doors and the floor, and slide along them. Your hand gives way up to 60 cm."},
     // Physics: Monsters and townsfolk. Heads turn to you (look_at.h; owner, 2026-11-09), On by default. On this page
     // beside Pushable bodies, the other drawn-only change to their poses (Monsters already has its three sections).
     {.id="gameplay.look_at_you",.page=View::Physics,.section="Monsters and townsfolk",.kind=RowKind::Toggle,.label="Heads turn to you",
