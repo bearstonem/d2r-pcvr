@@ -972,8 +972,8 @@ int main(int argc,char** argv){
     {   // Left-handed (#307, hand_role.h): Off by default, experimental, a row of its own, saved alone
         Check(Defaults()[LeftHanded]==0&&std::wstring(Definitions[LeftHanded].section)==L"interactions"&&
               std::wstring(Definitions[LeftHanded].key)==L"left_handed"&&Definitions[LeftHanded].min==0&&Definitions[LeftHanded].max==1&&
-              HelpText(LeftHanded)[0]!=0&&LeftHanded<ChangeMask::Bits&&LeftHanded+1==LeftHandedSticks,
-              "Left-handed: Off by default, [interactions] left_handed Off / On, explained, its own change bit, appended (Sticks stay right-handed after it)");
+              HelpText(LeftHanded)[0]!=0&&LeftHanded<ChangeMask::Bits&&LeftHanded+1==HeldCollisions,
+              "Left-handed: Off by default, [interactions] left_handed Off / On, explained, its own change bit, appended after the haptics (Weapons collide after it)");
         const auto* row=content::RowOf(LeftHanded);
         Check(row&&!row->beside&&row->page==View::Hands&&row->kind==content::RowKind::Toggle&&std::strcmp(row->label,"Left-handed (experimental)")==0&&
               row->section==content::RowOf(WalkDirection)->section&&!content::RowOf(WalkDirection)->beside&&row->classes==content::AllClasses,"a switch of its own on Controls > Hands, every class");
@@ -985,13 +985,47 @@ int main(int argc,char** argv){
         Model t;Snapshot ready;ready.ready=true;ready.values[Dominant]=0;t.Open(ready);layout::Press(t,{Kind::Set,LeftHanded,0,1},0);
         Check(t.Get()[LeftHanded]==1&&t.Get()[Dominant]==0&&t.Click({Kind::Apply}).changed==(ChangeMask{1}<<LeftHanded),"the switch turns it On, leaves the saved Dominant hand alone, and Apply saves only it");
     }
+    {   // Weapons collide (held_collision.h, 2026-11-11): On by default, Melee reach's right half on Combat, saved alone
+        Check(Defaults()[HeldCollisions]==1&&std::wstring(Definitions[HeldCollisions].section)==L"gameplay"&&
+              std::wstring(Definitions[HeldCollisions].key)==L"held_collisions"&&Definitions[HeldCollisions].min==0&&Definitions[HeldCollisions].max==1&&
+              HelpText(HeldCollisions)[0]!=0&&HeldCollisions<ChangeMask::Bits&&HeldCollisions+1==HeldWorldCollisions,
+              "Weapons collide: On by default, [gameplay] held_collisions Off / On, explained, its own change bit, appended (Weapons hit walls after it)");
+        const auto* row=content::RowOf(HeldCollisions);
+        Check(row&&row->beside&&row->page==View::Combat&&row->kind==content::RowKind::Toggle&&std::strcmp(row->label,"Weapons collide")==0&&
+              row->section==content::RowOf(MeleeReach)->section&&row->classes==content::AllClasses,"Melee reach's right half on Combat > Melee, every class");
+        Check(std::string(HelpText(HeldCollisions)).find("60 cm")!=std::string::npos&&std::string(row->help).find("60 cm")!=std::string::npos,
+              "both helps say how far the hand gives way");
+        for(int c=-1;c<=heroclass::Assassin+1;++c)Check(RowShown(HeldCollisions,Defaults(),{c}),"every class sees it");
+        Model t;Snapshot ready;ready.ready=true;t.Open(ready);layout::Press(t,{Kind::Set,HeldCollisions,0,0},0);
+        Check(t.Get()[HeldCollisions]==0&&t.Click({Kind::Apply}).changed==(ChangeMask{1}<<HeldCollisions),"the switch turns it Off, and Apply saves only it");
+    }
+    {   // Weapons hit walls (held_world.h, 2026-11-12): On by default, its own row on Physics > Props, every class, saved alone
+        Check(Defaults()[HeldWorldCollisions]==1&&std::wstring(Definitions[HeldWorldCollisions].section)==L"gameplay"&&
+              std::wstring(Definitions[HeldWorldCollisions].key)==L"held_world_collisions"&&Definitions[HeldWorldCollisions].min==0&&
+              Definitions[HeldWorldCollisions].max==1&&Definitions[HeldWorldCollisions].step==1&&HelpText(HeldWorldCollisions)[0]!=0&&
+              HeldWorldCollisions<ChangeMask::Bits&&HeldWorldCollisions+1==LeftHandedSticks,
+              "Weapons hit walls: On by default, [gameplay] held_world_collisions Off / On, explained, its own change bit, after Weapons collide");
+        const auto* row=content::RowOf(HeldWorldCollisions);
+        Check(row&&!row->beside&&row->page==View::Physics&&row->kind==content::RowKind::Toggle&&std::strcmp(row->label,"Weapons hit walls")==0&&
+              row->section==content::RowOf(BodyPhysics)->section&&row->classes==content::AllClasses,"its own row on Physics > Props, with the other things weapons meet");
+        const std::string help=HelpText(HeldWorldCollisions),rowHelp=row->help;
+        Check(help.find("60 cm")!=std::string::npos&&rowHelp.find("60 cm")!=std::string::npos&&rowHelp.size()<=160,
+              "both helps say how far the hand gives way (held::Cap), the row's within a card");
+        Check(help.find("walls")!=std::string::npos&&help.find("floor")!=std::string::npos&&help.find("barrels")!=std::string::npos,
+              "the long help names what stops a weapon, and what still breaks");
+        for(int c=-1;c<=heroclass::Assassin+1;++c)Check(RowShown(HeldWorldCollisions,Defaults(),{c}),"every class sees it");
+        Check(Normalize(HeldWorldCollisions,NAN)==1&&Normalize(HeldWorldCollisions,0)==0,"a malformed value reads On, the default");
+        Model t;Snapshot ready;ready.ready=true;t.Open(ready);layout::Press(t,{Kind::Set,HeldWorldCollisions,0,0},0);
+        Check(t.Get()[HeldWorldCollisions]==0&&t.Get()[HeldCollisions]==1&&t.Click({Kind::Apply}).changed==(ChangeMask{1}<<HeldWorldCollisions),
+              "the switch turns it Off, leaves Weapons collide on, and Apply saves only it");
+    }
     {   // Sticks stay right-handed (hand_role.h Sticks): Off by default, a row of its own under Left-handed, shown only
         // while Left-handed is on (the draft's value too), about the real controllers, saved alone
         Check(Defaults()[LeftHandedSticks]==0&&std::wstring(Definitions[LeftHandedSticks].section)==L"interactions"&&
               std::wstring(Definitions[LeftHandedSticks].key)==L"left_handed_sticks_right"&&Definitions[LeftHandedSticks].min==0&&
               Definitions[LeftHandedSticks].max==1&&Definitions[LeftHandedSticks].step==1&&HelpText(LeftHandedSticks)[0]!=0&&
-              LeftHandedSticks<ChangeMask::Bits&&LeftHandedSticks==Count-1,
-              "Sticks stay right-handed: Off by default, [interactions] left_handed_sticks_right Off / On, explained, its own change bit, appended last");
+              LeftHandedSticks<ChangeMask::Bits&&LeftHandedSticks+1==PropHeft,
+              "Sticks stay right-handed: Off by default, [interactions] left_handed_sticks_right Off / On, explained, its own change bit, appended (Props have weight after it)");
         const auto* row=content::RowOf(LeftHandedSticks);const auto* hand=content::RowOf(LeftHanded);
         Check(row&&hand&&!row->beside&&row->page==View::Hands&&row->kind==content::RowKind::Toggle&&
               std::strcmp(row->label,"Sticks stay right-handed")==0&&std::strlen(row->label)<=26&&row->section==hand->section&&row->classes==content::AllClasses,
@@ -1019,6 +1053,25 @@ int main(int argc,char** argv){
         Check(t.Click({Kind::Apply}).changed==((ChangeMask{1}<<LeftHanded)|(ChangeMask{1}<<LeftHandedSticks)),"Apply saves the two switches, nothing else");
         Model u;Snapshot saved;saved.ready=true;saved.values[LeftHanded]=1;u.Open(saved);layout::Press(u,{Kind::Set,LeftHandedSticks,0,1},0);
         Check(u.Click({Kind::Apply}).changed==(ChangeMask{1}<<LeftHandedSticks),"with Left-handed saved, Apply saves only the sticks' switch");
+    }
+    {   // Props have weight (prop_heft.h): On by default, a switch under Knock over small props, shown while it is on, saved alone
+        Check(Defaults()[PropHeft]==1&&std::wstring(Definitions[PropHeft].section)==L"interactions"&&
+              std::wstring(Definitions[PropHeft].key)==L"prop_heft"&&Definitions[PropHeft].min==0&&Definitions[PropHeft].max==1&&
+              Definitions[PropHeft].step==1&&HelpText(PropHeft)[0]!=0&&PropHeft<ChangeMask::Bits&&PropHeft==Count-1,
+              "Props have weight: On by default, [interactions] prop_heft Off / On, explained, its own change bit, appended last");
+        const auto* row=content::RowOf(PropHeft);const auto* props=content::RowOf(PropPhysics);
+        Check(row&&props&&!row->beside&&row->page==View::Physics&&row->kind==content::RowKind::Toggle&&std::strcmp(row->label,"Props have weight")==0&&
+              row->section==props->section&&row->classes==content::AllClasses&&std::strlen(row->help)<=160,
+              "a switch of its own on Gameplay > Physics, in Knock over small props' section, every class");
+        {
+            const auto& rows=content::Menu().rows;size_t at=rows.size(),propsAt=rows.size();
+            for(size_t i=0;i<rows.size();++i){if(rows[i].key==PropHeft)at=i;if(rows[i].key==PropPhysics)propsAt=i;}
+            Check(propsAt+1==at,"listed right under Knock over small props");
+        }
+        Values on=Defaults(),off=Defaults();off[PropPhysics]=0;
+        for(int c=-1;c<=heroclass::Assassin+1;++c)Check(RowShown(PropHeft,on,{c})&&!RowShown(PropHeft,off,{c}),"shown while props are knocked about, for every class");
+        Model t;Snapshot ready;ready.ready=true;ready.values=Defaults();t.Open(ready);layout::Press(t,{Kind::Set,PropHeft,0,0},0);
+        Check(t.Get()[PropHeft]==0&&t.Click({Kind::Apply}).changed==(ChangeMask{1}<<PropHeft),"the switch turns it Off, and Apply saves only it");
     }
     {   // Loot pick (#257): On by default, a switch on Interface, the right half of Loot name size's row, saved alone
         Check(Defaults()[LootPick]==1&&std::wstring(Definitions[LootPick].section)==L"interactions"&&

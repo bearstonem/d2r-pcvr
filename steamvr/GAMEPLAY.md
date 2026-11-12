@@ -961,6 +961,20 @@ visual. VR Settings > Gameplay > Physics > Knock over small props (`[interaction
 props](../docs/KNOCKABLE_PROPS.md). The log notes each weapon knock (`Frame
 props: knocked a cup ...`) and a summary every ten seconds.
 
+**Props have weight.** Each knockable prop weighs what its kind and size say
+(a cup 0.2 kg, a chair 10, a barrel or a sack of grain 50-60), and your weapon
+strikes with its own weight: 0.9 kg for a fist or dagger to 5 kg for a great
+maul, and up to three times that in a full, fast swing. A cup flies off a
+tap. A barrel stays put for a tap, rocks or slides a few centimetres from a
+full sword swing, and falls over from a maul. A heavy prop stops the weapon's
+body in the physics, which then slips through it; the drawn weapon follows
+your hand as before. The hand feels a light tick from light things and a
+hard knock and a low thud from heavy ones. A rolling bottle bounces off a
+heavy prop without moving it. VR Settings > Gameplay > Physics > Props have
+weight (`[interactions] prop_heft`, on by default) turns it off: every prop is
+then pushed aside at the weapon's speed, as before. See
+[weight](../docs/KNOCKABLE_PROPS.md#weight).
+
 **Spells reach objects.** Your own spell missiles break the pots, urns,
 baskets and barrels they pass, as arrows do, and push the small props and
 dropped bottles in their way: along a bolt's flight, outward from a Fire
@@ -1061,6 +1075,7 @@ hip_width=0.28
 holsters=1
 bottle_physics=1
 prop_physics=1
+prop_heft=1
 spell_impacts=1
 body_physics=1
 leather_menu=1
@@ -1792,6 +1807,151 @@ included yet.
   upright, which checks the capsule's axis in a headset.
 - Drawing the string, a held trigger, a menu or the wheel ends the bash lane;
   a stroke sampled just before drawing is dropped.
+
+### Weapons collide
+
+**VR Settings > Gameplay > Combat > Weapons collide** (`[gameplay]
+held_collisions`, 1 by default; the right half of Melee reach's row) keeps the
+player's own held items from passing through each other (owner, 2026-11-11). A
+sword swung across the body stops at the shield on the other arm and slides along
+its face; two weapons, one in each hand, stop at each other. Your real hands cannot
+be stopped, so the **drawn** pose gives way: the hand that yields is drawn off its
+controller by the smallest push that separates the two items, and eased back to
+the controller when they part. Pure logic and its fixtures: `held_collision.h`,
+`held_collision_test.cpp`; the skeleton hook (`vr/skeletons.cpp`, HeldCollide)
+applies it.
+
+- **Shapes.** A weapon is a capsule from its grip along its attachment's +Y, the
+  melee contact's lengths (28 cm daggers, claws and orbs, 38 cm wands, 65 cm the
+  rest) and a 3 cm radius (a blade's half width; the melee capsule is padded for
+  reach, this one is not). The shield is the box of its rendered mesh, the same
+  bounds the physical guard measures, held in its attach bone's frame so later
+  poses carry it; its half thickness is kept between 1 and 4 cm. Until the mesh has
+  been measured the shield does not collide (`shield unmeasured` in the log).
+- **Who yields.** Weapon against shield: the weapon's hand, all of it. Two weapons:
+  the push is split between both hands, most (up to 85%) to the hand that moved
+  faster into the touch; two hands meeting evenly split evenly.
+- **The push.** Each item is carried from the last drawn pose by its controller to
+  where it would be drawn now, so the push is worked out from the real hands and
+  never feeds on itself. The weapon is kept out of the shield's face it lay off
+  just before it touched, and a fast swing that went through within one frame is
+  followed in 2 cm steps, so it is stopped at the face it came from, not pushed
+  on through. Weapon against weapon, the blades rest a blade's width apart.
+- **The cap.** A push never exceeds 60 cm (`held::Cap`; 12 cm, then 40 cm, until the owner's
+  2026-11-12 headset sessions). Deeper than that the two pass through
+  each other: the hand eases back and nothing pushes until they are clear, so an
+  item is never held far from its hand. With the hand pulled back, the push eases
+  out with a 33 ms time constant (95% gone in 0.1 s), not a snap.
+- **Clank.** A first touch closing at 0.5 m/s or more clanks in both controllers:
+  a sharp tap and a short ring, stronger up to 3 m/s, on the Melee hits strength.
+  A resting touch is silent; one clank at most every 0.12 s. At 1 m/s or more the
+  game also plays `[gameplay] held_collision_sound` at the hero (default 398,
+  block_weapon_1, the block's metal clank; 0 is silent) through the same path as the
+  block sound.
+- **What hits.** Melee contact, the shield guard and Smite, the Assassin's claw
+  guard, the dropped bottles and small props, and the pushable bodies all read the
+  drawn skeleton, so they all meet the corrected pose: what you see is what hits.
+  The real controllers still give a swing its speed (stroke detection, Weapon heft
+  travel), and the guard reads the real shield hand for its height and parry swing
+  (the shield's hand never yields to a weapon). A fist (no weapon) is left out.
+- **Left out.** A bow or crossbow (the hands meet to draw and nock), two-handed
+  grips (a staff, spear or polearm, a two-handed sword in both hands, a crossbow
+  held as a staff, the support hand on a shaft), a throw armed or a trap or bomb
+  held to toss, a potion in a hand, an empty or fist hand, a Druid form, an item put
+  away, an untracked controller, menus, the inventory, VR Settings, a hand's wheel
+  and the leather menu. Left-handed play swaps the arms: the left hand's weapon
+  yields to the shield on the right arm. An Assassin's two claws collide like any
+  weapons; crossed, they rest a blade's width apart, well within the claw guard's
+  32 cm, so the crossed-claws block still works (a fixture checks it with
+  `guard::Crossed`).
+- **Log.** `Frame held collisions: on|off (VR Settings > Combat > Weapons
+  collide)` when the setting changes; `Frame held collisions: weapon-shield - the
+  right hand's sword yields to the shield on the left arm` (or `weapon-weapon
+  ...`, or `none, not colliding (<reasons>)`) when what the hands hold changes; and
+  every ten seconds with touches, `Frame held collisions: N contacts
+  (weapon-shield A, weapon-weapon B), deepest X cm, pushes capped C, haptic clanks
+  H; excluded: <reasons>`.
+
+### Weapons hit walls
+
+**VR Settings > Gameplay > Physics > Props > Weapons hit walls** (`[gameplay]
+held_world_collisions`, 1 by default) stops the player's held weapons and shield
+at the level as Weapons collide stops them at each other (owner, 2026-11-12). A
+sword pushed into a wall stops at its face and slides along it; scraped on the
+floor it rides on it; a shield pressed to a wall stays at the wall. The **drawn**
+hand gives way, as at your own shield, and eases back once clear. Pure logic and
+its fixtures: `held_world.h`, `held_world_test.cpp`; the skeleton hook
+(`vr/skeletons.cpp`, HeldCollide) applies it after the item-against-item push, and
+the game thread samples the walls (`vr/wall_cells.cpp`).
+
+- **The world.** Two things the pose thread can have cheaply. The *floor*: the
+  ground the hero stands on (his model's origin), flat around him - the drawn floor
+  the arms hang over. Stairs and slopes within reach are not followed. The *walls*:
+  the game's own collision cells around the hero, the missile-barrier bits (0x804)
+  physical arrows and dropped bottles already stop at, each 2 world units (about
+  46 cm) square. They have no height: each stands from 50 cm under the floor to 6 m
+  above it, on the floor's shear as the bottles place them. Every wall runs along the
+  cell grid, so a wall's face is one plane. **Left out:** a cell carrying an
+  object's footprint (bit 0x400: barrels, urns, chests - no 6 m pillar over a
+  barrel, and a swing still meets the barrel and breaks it) and a cell with no room
+  loaded (a doorway into the next area). A closed door (0x800) stays: the blade
+  stops at it. Monsters, small props and bodies are not world: they are still
+  struck, knocked and pushed by the drawn items.
+- **Items.** A one-handed weapon in either hand (the capsule Weapons collide uses)
+  and the shield (its measured or guessed box). A lone weapon with the other hand
+  empty counts too; so do two weapons and a shield alone.
+- **The push.** Worked out in the world, where walls stand still: each item where
+  its controller holds it now (the other item's push in it), against the cells
+  under it. A cell pushes only through its sides whose neighbour is open, so the
+  cells of one wall are one face: a blade slides along them without catching at
+  their seams, an inner corner pushes out of both walls, and nothing is pushed out
+  through the far side of a wall. A new touch keeps the face the item lay off just
+  before it touched, followed in 2 cm steps, so a fast swing that went past the
+  middle of a wall in one frame is held at the face it came from. The floor pushes
+  only up.
+- **The cap.** The hand gives way at most `held::Cap` (60 cm), the same as at the
+  shield; the item-against-item and world pushes together never draw a hand
+  farther than that from its controller. Deeper than that the item goes into the
+  wall: nothing pushes until it is clear of every cell and the floor, and the push
+  eases out with the same 33 ms time constant (95% gone in 0.1 s).
+- **Walking into a wall** with a sword ahead: the hand is held back as the hero
+  closes on the wall, then the sword goes into the wall (the cap) and the hand eases
+  back onto the controller while the hero stands there. Stepping away frees it; it
+  is never held behind you.
+- **Clank.** A surface first met at 0.5 m/s or more clanks in the hand whose item
+  struck, scaled to 3 m/s, at most every 0.12 s for that hand; the game's
+  `[gameplay] held_collision_sound` plays from 1 m/s. Sliding along a wall or the
+  floor is silent; one wall met across several cells is one touch.
+- **What hits.** Melee contact, the breakables, the props, bottles and bodies all
+  read the drawn skeleton: a blade held at a wall reaches what is on your side of
+  it. The real controllers still give a swing its speed.
+- **Left out.** As Weapons collide: bows, staves, spears, polearms and two-handed
+  grips, throws (and a potion or trap in a hand), Druid forms, menus, wheels, the
+  leather menu, an untracked controller, an item put away, a shield with no box
+  yet, and anything but first person.
+- **Limits.** Cells are about 46 cm: a wall's face can sit a few centimetres in
+  front of or behind the drawn wall, by how the level's art covers its cells. A low
+  wall or fence that blocks arrows stops a blade above it too. The floor is flat at
+  the hero's feet.
+- **Cost.** The game thread samples 32 x 32 cells around the hero (the bottles'
+  sampler, its own stream so neither recentres the other) at most every 0.5 s
+  while a held item meets the world, sooner after the hero moves 6 cells; one
+  native room lookup and one collision read a cell. `Frame dropped bottles: wall
+  samples=N (held items H) ... X us on the game thread (Y us a sample)` measures it
+  every ten seconds. The pose thread gathers the floor and the cells under the
+  items and steps the solver once per pose stamp: about 2 us a step in the fixture
+  (a sword striking a corridor's end wall and a shield), and the hook's whole held
+  step is logged below.
+- **Log.** `Frame held world: on|off (VR Settings > Physics > Weapons hit walls)`
+  when the setting changes; `Frame held world: the right sword and left shield
+  stop at walls, closed doors and the floor` (or `..., not meeting walls or the
+  floor (<reasons>)`) when what the hands hold changes; and every ten seconds while
+  an item is held, `Frame held world: N contacts (walls W, doors D, floor F),
+  deepest X cm, pushes capped C, haptic clanks H; ten seconds: S steps, A acting
+  (B with no wall sample), nearest wall / door / floor; wall sample N ms old;
+  around the hands: N wall cells (doors, inside a wall), left out N object
+  footprints, N with no room, N outside the sample; hook X us a pose stamp
+  (slowest Y us, N stamps); excluded: <reasons>`.
 
 ### Physical shield blocking, parry and riposte (Unleashed)
 

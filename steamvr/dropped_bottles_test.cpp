@@ -158,10 +158,10 @@ int main() {
         assert(world.Pushers()==1);
         assert(std::hypot(First(world).p.x-rest.p.x,First(world).p.z-rest.p.z)<.01f); // placed, not swept from nowhere
         float struck=0;
-        for(int i=0;i<30;++i){x+=4/90.f;weapons[0]=blade(x);world.Weapons(weapons);t+=1/90.;world.Advance(t,start);struck=std::max(struck,world.Struck(0));}
+        for(int i=0;i<30;++i){x+=4/90.f;weapons[0]=blade(x);world.Weapons(weapons);t+=1/90.;world.Advance(t,start);struck=std::max(struck,world.Struck(0).speed);}
         assert(First(world).p.x>rest.p.x+.15f); // pushed ahead of the blade
         assert(struck>1);                    // a hit worth a haptic tick
-        assert(world.Struck(0)==0);          // reported once
+        assert(world.Struck(0).speed==0);    // reported once
         // Put away: the weapon leaves the world.
         weapons[0]={};world.Weapons(weapons);t+=1/90.;world.Advance(t,start);
         assert(world.Pushers()==0);
@@ -178,7 +178,7 @@ int main() {
         weapons[1]=post(rest.p.x+2);world.Weapons(weapons);t+=1/90.;world.Advance(t,start);
         t=Run(world,t,.5,start);
         assert(std::hypot(First(world).p.x-rest.p.x,First(world).p.z-rest.p.z)<.01f);
-        assert(world.Struck(1)==0);
+        assert(world.Struck(1).speed==0);
         // A weapon whose pose stops arriving stays put rather than coasting on.
         weapons[1]=post(rest.p.x+2.05f);world.Weapons(weapons);t+=1/90.;world.Advance(t,start);
         weapons[1]=post(rest.p.x+2.15f);world.Weapons(weapons);t+=1/90.;world.Advance(t,start);
@@ -210,7 +210,7 @@ int main() {
         float x=10.2f,struck=0;unsigned knocked=0;
         for(int i=0;i<30;++i) {
             x+=3/90.f;weapons[0]=blade(x);world.Weapons(weapons);t+=1/90.;world.Advance(t,player);
-            struck=std::max(struck,world.Struck(0));
+            struck=std::max(struck,world.Struck(0).speed);
             const unsigned k=world.Knocks(knocks);
             for(unsigned j=0;j<k;++j){assert(knocks[j].entity==41&&knocks[j].slot==0&&knocks[j].kind==3);++knocked;}
         }
@@ -314,7 +314,7 @@ int main() {
         World world;const Vec player{0,0,0};
         PropScan many=Scan(player,{});
         for(unsigned i=0;i<props::MaxMoving;++i)many.props[many.count++]=Cup(300+i,{float(i)*.5f,0,0});
-        many.props[many.count++]=Cup(399,{0,0,3});
+        many.props[many.count++]=Cup(399,{0,0,-3});   // behind the row: its cups fly off along +z
         world.Props(many);
         std::array<Collider,Colliders> weapons{};double t=0;
         std::array<Knock,props::MaxMoving> knocks{};
@@ -324,8 +324,8 @@ int main() {
             weapons[0]=Blade({x-.2f,.05f,z},{x+.2f,.05f,z});world.Weapons(weapons);t+=1/90.;world.Advance(t,player);world.Knocks(knocks);
         }
         assert(Moves(world).size()>=props::MaxMoving-2);
-        weapons[0]=Blade({-.2f,.05f,2.7f},{.2f,.05f,2.7f});world.Weapons(weapons);t+=1/90.;world.Advance(t,player);
-        weapons[0]=Blade({-.2f,.05f,3.f},{.2f,.05f,3.f});world.Weapons(weapons);t+=1/90.;world.Advance(t,player);
+        weapons[0]=Blade({-.2f,.05f,-2.7f},{.2f,.05f,-2.7f});world.Weapons(weapons);t+=1/90.;world.Advance(t,player);
+        weapons[0]=Blade({-.2f,.05f,-3.f},{.2f,.05f,-3.f});world.Weapons(weapons);t+=1/90.;world.Advance(t,player);
         bool last=false;
         for(unsigned i=0,n=world.Knocks(knocks);i<n;++i)last|=knocks[i].entity==399;
         assert(last);
@@ -505,7 +505,9 @@ int main() {
     // spell freezes none to make room.
     {
         World world;const Vec player{0,0,0};
-        world.Props(Scan(player,{Cup(501,{.4f,0,0}),Cup(502,{-.9f,0,0}),Cup(503,{0,0,3})}));
+        // Half a kilo each (a jug): a burst kicks neither to MaxKickSpeed, so the nearer one goes faster.
+        Prop near=Cup(501,{.4f,0,0}),far=Cup(502,{-.9f,0,0});near.mass=far.mass=.5f;
+        world.Props(Scan(player,{near,far,Cup(503,{0,0,3})}));
         assert(world.Drop(At({0,.2f,.6f})));
         double t=Run(world,0,3,player);
         const float bottleZ=First(world).p.z;
