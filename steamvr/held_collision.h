@@ -22,7 +22,10 @@
 namespace framevr::held {
 using math::Vec;using math::Quat;
 
-constexpr float Cap=.12f;              // m: the most an item is drawn off its hand; past it the two pass through
+// m: the most an item is drawn off its hand; past it the two pass through. 12 cm until the owner, 2026-11-12, with the
+// Paladin's mace on the shield: "they were still able to go pass through them if you push" (nearly every contact
+// reached 12 cm and went through): 40 cm, a forearm, is through only when meant.
+constexpr float Cap=.40f;
 constexpr float EaseSeconds=.033f;     // the push eases back with this time constant: 95% back in 0.1 s
 constexpr float Slop=.002f;            // m: a touch ends only this far apart, so a resting touch does not flutter
 constexpr float BladeRadius=.03f;      // m: a blade's half width (melee's own capsule is padded for reach)
