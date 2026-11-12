@@ -1235,7 +1235,8 @@ XrPosef PanelPose(panels::Placement p) {
 struct FlatSurface {panels::Size size;XrRect2Di rect;cinema::Crop band;};
 FlatSurface FlatPanel() {
     if(cinemaMode) {
-        const auto band=cinema::MovieBand(width,height);
+        const auto window=resolution::WindowClient();   // the movie is drawn at the window's own size, top left
+        const auto band=cinema::MovieBand(width,height,window.w,window.h);
         const auto screen=cinema::ScreenSize(band,cinemaWidth.load());
         return {{screen.width,screen.height},{{int32_t(band.x),int32_t(band.y)},{int32_t(band.w),int32_t(band.h)}},band};
     }
