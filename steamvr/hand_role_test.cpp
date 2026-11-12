@@ -4,6 +4,7 @@
 #include "hand_role.h"
 #include "gameplay.h"
 #include "hand_controls.h"
+#include "stick_gestures.h"
 #include "melee_contact.h"
 #include "../vr/shield_pose.h"
 #include "../vr/hand_swap_pose.h"
@@ -15,6 +16,7 @@
 #include <vector>
 using namespace framevr;
 static void Check(bool b,const char* label){if(!b){std::fprintf(stderr,"FAIL: %s\n",label);std::exit(1);}}
+static void Check(bool b,const std::string& label){Check(b,label.c_str());}
 static bool Near(float a,float b,float e=1e-4f){return std::fabs(a-b)<=e;}
 static bool Near(math::Vec a,math::Vec b,float e=1e-4f){return Near(a.x,b.x,e)&&Near(a.y,b.y,e)&&Near(a.z,b.z,e);}
 
@@ -54,6 +56,18 @@ static void Feed(const handrole::Map& map,const Controllers& c,skills::HandInput
         for(int b=0;b<2;++b)in.face[role][b]=c.face[hand][b];
     }
 }
+// The sticks (hand_role.h Sticks) as transport.cpp's Input() puts them on the pad: its left stick (walking) and
+// right stick (turning), pushes and clicks, from the controllers handrole::State::sticks names; and a hand's
+// own stick click, the pad's click on that hand's controller (State::OwnStick).
+struct StickControllers {float x[2]{},y[2]{};bool click[2]{};};   // by PHYSICAL hand (0 right, 1 left)
+struct PadSticks {float lx=0,ly=0,rx=0,ry=0;bool ls=false,rs=false;};
+static PadSticks Place(const handrole::State& s,const StickControllers& c) {
+    PadSticks p;
+    p.lx=c.x[s.sticks.walk];p.ly=c.y[s.sticks.walk];p.ls=c.click[s.sticks.walk];
+    p.rx=c.x[s.sticks.turn];p.ry=c.y[s.sticks.turn];p.rs=c.click[s.sticks.turn];
+    return p;
+}
+static bool OwnClick(const handrole::State& s,const PadSticks& p,int role){return s.OwnStick(role)?p.ls:p.rs;}
 struct Play {
     handrole::Map map;gameplay::Engine engine;gameplay::Input in;gameplay::Output out;
     explicit Play(handrole::Map m,gameplay::Weapon weapon):map(m) {
@@ -75,6 +89,68 @@ int main() {
         for(const Map m:{right,left})for(int h=0;h<2;++h)Check(m.Role(m.Physical(h))==h&&m.Physical(m.Role(h))==h,"role and back");
         int pair[2]={7,9};right.Order(pair);Check(pair[0]==7,"right-handed order is the physical one");
         left.Order(pair);Check(pair[0]==9&&pair[1]==7,"left-handed order swaps");left.Order(pair);Check(pair[0]==7,"and swaps back");
+    }
+    {   // the sticks (Sticks; VR Settings > Controls > Hands > Sticks stay right-handed): which physical stick walks and
+        // which turns, with what goes with each, right-handed, left-handed, and left-handed with the sticks kept.
+        // Physical: 0 right, 1 left. Pad stick: 0 the right one (turning), 1 the left one (walking).
+        constexpr auto right=Resolve(false,D2RVR_TYPE_SWORD,0),left=Resolve(true,D2RVR_TYPE_SWORD,0),kept=Resolve(true,D2RVR_TYPE_SWORD,0,true);
+        constexpr auto rightKept=Resolve(false,D2RVR_TYPE_SWORD,0,true);
+        static_assert(right.sticks.walk==1&&right.sticks.turn==0&&!right.SticksKept(),"right-handed: the left controller walks, the right one turns");
+        static_assert(left.sticks.walk==0&&left.sticks.turn==1&&!left.SticksKept(),"left-handed: the off hand (right) walks, the main hand (left) turns");
+        static_assert(kept.map.left&&kept.sticks.walk==1&&kept.sticks.turn==0&&kept.SticksKept(),"left-handed, sticks kept: the left walks, the right turns");
+        static_assert(rightKept.sticks==right.sticks&&!rightKept.SticksKept()&&rightKept.map==right.map,"the setting does nothing with Left-handed off");
+        static_assert(Sticks{}==right.sticks&&SticksOf(Map{},false)==Sticks{}&&SticksOf(Map{true},true)==Sticks{}&&SticksOf(Map{true},false)==left.sticks);
+        static_assert(right.sticks.Pad(1)==1&&right.sticks.Pad(0)==0&&left.sticks.Pad(1)==0&&left.sticks.Pad(0)==1&&kept.sticks.Pad(1)==1&&kept.sticks.Pad(0)==0,
+            "the pad stick on each physical controller");
+        static_assert(right.StickRole(0)==0&&left.StickRole(0)==0&&kept.StickRole(0)==1,"the turn stick's hand: main, main, off");
+        static_assert(right.StickRole(1)==1&&left.StickRole(1)==1&&kept.StickRole(1)==0,"the walk stick's hand: off, off, main");
+        static_assert(right.OwnStick(0)==0&&right.OwnStick(1)==1&&left.OwnStick(0)==0&&left.OwnStick(1)==1&&kept.OwnStick(0)==1&&kept.OwnStick(1)==0,
+            "a hand's own click: the main hand's is the pad's right stick click, unless the sticks are kept left-handed");
+        // equipping any kind never moves a stick: every kind is mirrored, so the sticks are the setting's alone
+        for(const uint32_t type:{uint32_t(D2RVR_TYPE_BOW),uint32_t(D2RVR_TYPE_CROSSBOW),uint32_t(D2RVR_TYPE_STAFF),uint32_t(D2RVR_TYPE_UNARMED)}) {
+            Check(Resolve(true,type,0,true).sticks==kept.sticks&&Resolve(true,type,0).sticks==left.sticks&&Resolve(false,type,0,true).sticks==right.sticks,
+                "the sticks do not move with the weapon");
+        }
+        Check(!(kept==left)&&kept.map==left.map,"the sticks alone tell the two left-handed states apart: a change of them is a change of state");
+        // What each physical controller's stick does, the engines fed as transport.cpp feeds them.
+        struct Case {const char* name;handrole::State s;int walks,turns;};
+        const Case cases[]={{"right-handed",right,1,0},{"left-handed",left,0,1},{"left-handed, sticks right-handed",kept,1,0}};
+        for(const auto& k:cases) {
+            const std::string name=k.name;
+            for(int hand=0;hand<2;++hand) {
+                StickControllers c;c.y[hand]=1;c.x[hand]=.2f;   // pushed ahead
+                const auto p=Place(k.s,c);
+                Check(hand==k.walks?(p.ly==1&&p.lx==.2f&&p.ry==0):(p.ry==1&&p.rx==.2f&&p.ly==0),name+": a push walks on the walk stick's controller, else is the turn stick's");
+            }
+            {   // held down: the loot names, on the turn stick only; the walk stick held down walks back
+                stickgestures::Gestures turn;turn.Step(true,0,0);
+                StickControllers c;c.y[k.turns]=-1;const auto p=Place(k.s,c);
+                Check(turn.Step(true,p.rx,p.ry).showLoot&&p.ly==0,name+": the turn stick's controller held down shows the loot names");
+                stickgestures::Gestures other;other.Step(true,0,0);
+                StickControllers w;w.y[k.walks]=-1;const auto q=Place(k.s,w);
+                Check(!other.Step(true,q.rx,q.ry).showLoot&&q.ly==-1,name+": the walk stick's controller held down walks back, no loot names");
+                stickgestures::Gestures up;up.Step(true,0,0);
+                StickControllers u;u.y[k.turns]=1;const auto r=Place(k.s,u);
+                Check(up.Step(true,r.rx,r.ry).toggleRun,name+": the turn stick's controller pushed up is the Stick toggle's run / walk");
+                // turning: the pad's right stick sideways is the turn (vrcam), from the turn stick's controller
+                StickControllers t;t.x[k.turns]=1;Check(Place(k.s,t).rx==1&&Place(k.s,t).lx==0,name+": sideways on the turn stick's controller turns");
+            }
+            // the gestures' buzz and Walk direction: Controller's aim: the controller with that stick
+            Check(k.s.map.Physical(k.s.StickRole(0))==k.turns&&k.s.map.Physical(k.s.StickRole(1))==k.walks,
+                name+": the turn stick's gestures buzz its own controller; Walk direction: Controller aims with the walk stick's");
+            for(int hand=0;hand<2;++hand) {   // a stick's click
+                StickControllers c;c.click[hand]=true;const auto p=Place(k.s,c);
+                // the game's menus: the pad's left stick click is the walk stick's controller's, the right the turn stick's
+                Check(p.ls==(hand==k.walks)&&p.rs==(hand==k.turns),name+": the native menus' stick clicks are the sticks'");
+                // a hand's own click opens that hand's wheel: the wheel opens on the hand clicked, in every combination
+                skills::HandControls wheels;skills::HandInput in;in.active=true;in.context=1;in.time=1;wheels.Step(in);
+                for(int role=0;role<2;++role)in.click[role]=OwnClick(k.s,p,role);
+                in.time+=.02;const int wheel=wheels.Step(in).wheel;
+                Check(wheel>=0&&k.s.map.Physical(wheel)==hand,name+": a stick's click opens the wheel of the hand that clicked");
+                // the off hand's grip + click menu (and its reserved belt hand): the off hand's own click
+                Check(OwnClick(k.s,p,1)==(hand==k.s.map.Physical(1))&&OwnClick(k.s,p,0)==(hand==k.s.map.Physical(0)),name+": the grip + click menu is the off hand's own stick");
+            }
+        }
     }
     {   // what is mirrored now, per weapon kind; everything else plays right-handed whole
         const uint32_t oneHanded[]={D2RVR_TYPE_UNKNOWN,D2RVR_TYPE_UNARMED,D2RVR_TYPE_SWORD,D2RVR_TYPE_AXE,D2RVR_TYPE_MACE,D2RVR_TYPE_SCEPTER,

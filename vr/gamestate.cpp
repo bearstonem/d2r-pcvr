@@ -50,6 +50,7 @@
 #include "../steamvr/wrist_full_map.h"
 #include "../steamvr/attack_speed.h"
 #include "../steamvr/dual_wield.h"
+#include "../steamvr/cinema_screen.h"
 #include <mutex>
 #ifdef D2RVR_NATIVE_OPENXR
 #include "logging.h"
@@ -903,6 +904,47 @@ bool Has(const char* s, const char* part) {
     return false;
 }
 
+// The game's cinematics (steamvr/cinema_screen.h): the tracker under its lock - messages on the UI
+// thread, world draws on the draw thread, the cap on vrcam's timer; g_cinema the answer for all.
+std::mutex g_cinemaLock;
+framevr::cinema::Tracker g_cinemaTracker;
+std::atomic<bool> g_cinema{false},g_cinemaOn{true};
+void TellCinema(const framevr::cinema::Change& c,const char* target,const char* command) {
+    if(!c.changed)return;
+    char b[300];
+    if(c.playing)snprintf(b,sizeof b,"Frame cinema: a cinematic plays ('%s' '%s') - %s",target,command,
+        g_cinemaOn.load()?"on the cinema screen":"left as it was ([cinema] enabled=0)");
+    else if(c.why==framevr::cinema::Why::Message)snprintf(b,sizeof b,"Frame cinema: the cinematic is over ('%s' '%s')",target,command);
+    else snprintf(b,sizeof b,"Frame cinema: the cinematic is over - %s",framevr::cinema::Reason(c.why));
+    Log(b);
+}
+// Where the game lays its movie panels out (their own units, the interface's canvas), once a
+// cinematic starts: the cinema screen shows the canvas band, and this line says whether the movie
+// fills it. Widget calls on this UI thread, as OnUiMessage runs.
+void TellMoviePanels() {
+    if(!g_widgets||!g_widgets->findPanel||!g_widgets->getWidgetRect)return;
+    for(const char* name:{"InGameMoviePlayerPanel","MoviePlayerPanel","LogoMenuPanel"}) {
+        Widgets::WidgetHandle panel=0,movie=0;Widgets::Rect root{},child{};
+        if(g_widgets->findPanel(g_ctx,name,&panel)!=Widgets::Result::Success||
+           g_widgets->getWidgetRect(g_ctx,panel,&root)!=Widgets::Result::Success)continue;
+        const bool found=g_widgets->findWidget&&g_widgets->findWidget(g_ctx,panel,"MoviePlayer",&movie)==Widgets::Result::Success&&
+            g_widgets->getWidgetRect(g_ctx,movie,&child)==Widgets::Result::Success;
+        char b[240];
+        if(found)snprintf(b,sizeof b,"Frame cinema: %s at %d,%d %dx%d, its MoviePlayer at %d,%d %dx%d",name,root.x,root.y,root.width,root.height,
+                          child.x,child.y,child.width,child.height);
+        else snprintf(b,sizeof b,"Frame cinema: %s at %d,%d %dx%d (no MoviePlayer widget by that name)",name,root.x,root.y,root.width,root.height);
+        Log(b);
+    }
+}
+void CinemaMessage(const char* target,const char* command,const char* text) {
+    const auto signal=framevr::cinema::Classify(target,command,text);
+    if(signal==framevr::cinema::Signal::None)return;
+    framevr::cinema::Change c;
+    {std::lock_guard lock(g_cinemaLock);c=g_cinemaTracker.Message(signal,GetTickCount64());g_cinema.store(g_cinemaTracker.Playing());}
+    TellCinema(c,target,command);
+    if(c.changed&&c.playing)TellMoviePanels();
+}
+
 void TellSheetRects(const char* opened);   // below
 SharedEvents::UiMessageAction __cdecl OnUiMessage(const PluginContext* ctx, const SharedEvents::UiMessageEvent* e, void*) noexcept {
     if (!e) return SharedEvents::UiMessageAction::Continue;
@@ -918,6 +960,7 @@ SharedEvents::UiMessageAction __cdecl OnUiMessage(const PluginContext* ctx, cons
         Log(b);
     }
     g_nameBox.Message(target, command, text);
+    CinemaMessage(target, command, text);
     if (g_keyboard.exchange(g_nameBox.Shown()) != g_nameBox.Shown())
         Log(g_nameBox.Shown() ? "gamestate: name box up (a hero picked) - VR keyboard shown" : "gamestate: name box gone - VR keyboard hidden");
     g_keyboardEpoch.store(g_nameBox.Epoch());
@@ -1122,6 +1165,26 @@ void SetMeleeOrder(uint32_t right,uint32_t left) {
 int AttackWeapon(int hand) { return hand==1?g_offAttackWeapon.load():g_attackWeapon.load(); }
 int AttackWsm(int hand) { return hand==1?g_offAttackWsm.load():g_attackWsm.load(); }
 bool MenuOpen() { return g_menu.load() != 0; }
+// A cinematic plays and goes on the cinema screen ([cinema] enabled): steamvr/cinema_screen.h.
+bool CinemaPlaying() { return g_cinemaOn.load() && g_cinema.load(); }
+void SetCinemaEnabled(bool on) {
+    if (g_cinemaOn.exchange(on) != on) Log(on ? "Frame cinema: [cinema] enabled=1 - cinematics on a screen in the world"
+                                              : "Frame cinema: [cinema] enabled=0 - cinematics left as they were");
+}
+// DrawGameScreen ran (vrcam's hook, the draw thread): a cinematic whose end was missed ends.
+void CinemaWorldDrawn(uint64_t now) {
+    if (!g_cinema.load()) return;
+    framevr::cinema::Change c;
+    {std::lock_guard lock(g_cinemaLock);c=g_cinemaTracker.WorldDrawn(now);g_cinema.store(g_cinemaTracker.Playing());}
+    TellCinema(c, "", "");
+}
+// vrcam's timer: the cap.
+void CinemaTick(uint64_t now) {
+    if (!g_cinema.load()) return;
+    framevr::cinema::Change c;
+    {std::lock_guard lock(g_cinemaLock);c=g_cinemaTracker.Tick(now);g_cinema.store(g_cinemaTracker.Playing());}
+    TellCinema(c, "", "");
+}
 uint32_t MenuEpoch() { return g_menuEpoch.load(); }
 uint64_t LocalPlayer() { return g_player.load(); }
 int32_t LeftDurability() { return g_leftDurability.load(); }

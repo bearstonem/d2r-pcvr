@@ -423,6 +423,7 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
             else icon(icons::Get("s"+std::to_string(skill.id)),{x+9,y+10,x+79,y+80});
             text(skill.name,{x+85,y+7,right-8,y+60});
             char detail[64];if(draw)std::snprintf(detail,sizeof detail,"Hold, draw, let go");
+            else if(commander::IsCommanderSkill(skill.id))std::snprintf(detail,sizeof detail,"Squad order");
             else if(skill.owner==-1)std::snprintf(detail,sizeof detail,"Level %d",skill.level);
             else std::snprintf(detail,sizeof detail,"Item-granted skill");
             SelectObject(dc,shortcutFont);SetTextColor(dc,RGB(169,151,118));
@@ -453,10 +454,16 @@ std::vector<uint8_t> Paint(const Snapshot& s,const Output& o,int selection,const
             std::string details;
             if(o.glyphEdit>=0) {   // a glyph's skill (glyph_cast.h)
                 text("CAST BY A GLYPH",{box.left+10,box.top+38,box.right-10,box.top+56});
-                details=std::string("Hold your ")+(o.glyphHand?"left":"right")+" hand's Draw glyph button and draw the "+glyphs::Name(glyphs::Shape(o.glyphEdit))+
-                    " in the air; let go and it casts this skill, with its own mana, cast speed and effect. "
-                    "The glyph glows in the skill's colour where you drew it and fades."+
-                    (o.glyphHand?" Cleared, the left hand's shape casts the right hand's skill.":"");
+                if(commander::IsCommanderSkill(skill.id)) {
+                    details=std::string("Hold your ")+(o.glyphHand?"left":"right")+" hand's Draw glyph button and draw the "+glyphs::Name(glyphs::Shape(o.glyphEdit))+
+                        " in the air; let go to issue this squad order immediately (no mana cost).\n"+
+                        skillusage::Details(skill.id,0);
+                } else {
+                    details=std::string("Hold your ")+(o.glyphHand?"left":"right")+" hand's Draw glyph button and draw the "+glyphs::Name(glyphs::Shape(o.glyphEdit))+
+                        " in the air; let go and it casts this skill, with its own mana, cast speed and effect. "
+                        "The glyph glows in the skill's colour where you drew it and fades."+
+                        (o.glyphHand?" Cleared, the left hand's shape casts the right hand's skill.":"");
+                }
             } else if(skill.id==GlyphDrawId) {
                 text(trigger?"ON THIS TRIGGER":"ON THIS BUTTON",{box.left+10,box.top+38,box.right-10,box.top+56});
                 details="Hold it and draw a shape in the air: circle, triangle, square, lightning bolt, spiral, V, star or wave. "

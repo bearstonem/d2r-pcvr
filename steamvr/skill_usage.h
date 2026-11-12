@@ -2,6 +2,7 @@
 #include <string>
 #include "skill_slots.h"
 #include "strike_skills.h"
+#include "summon_commander.h"
 #include "toss.h"
 #include "weapon_skills.h"
 
@@ -46,6 +47,25 @@ inline Place Where(int slot) {
 }
 inline const char* Line(int skill,int slot) {
     if(slot<0||slot>=skills::Count)return "";
+    if(commander::IsCommanderSkill(skill)) {
+        switch(skill) {
+            case commander::SkillPhalanxDef:
+                return "Commands your army into a solid shield wall ahead. Warriors hold the frontline while mages fire from behind, leaving the center clear for your spells.";
+            case commander::SkillRingDef:
+                return "Forms a protective circle around you. Skeletons form a defensive perimeter in all directions while mages shelter safely within.";
+            case commander::SkillMarchBal:
+                return "Orders an advancing escort formation. Your minions march ahead in two coordinated columns, keeping your path and sightlines clear.";
+            case commander::SkillWedgeAgg:
+                return "Deploys an aggressive assault wedge. Your heavy summons lead the charge at the tip to pierce enemy lines and push deep into rooms.";
+            case commander::SkillHoldGround:
+                return "Orders your army to hold position at the targeted location, guarding doorways, choke points, or chests without following you.";
+            case commander::SkillRegroup:
+                return "Recalls your entire army back to your side immediately, breaking any hold order and reforming around you.";
+            case commander::SkillFallOut:
+                return "Dismisses tactical formations. Your summons break ranks and roam freely, fighting and following at their own will.";
+            default:break;
+        }
+    }
     const auto at=Where(slot);
     switch(Classify(skill)) {
         case Kind::None:return "";
@@ -102,6 +122,38 @@ inline const char* Line(int skill,int slot) {
 // The picker's card: the same, in full, with what the gesture adds.
 inline std::string Details(int skill,int slot) {
     if(slot<0||slot>=skills::Count)return {};
+    if(commander::IsCommanderSkill(skill)) {
+        switch(skill) {
+            case commander::SkillPhalanxDef:
+                return "Orders your summoned army into a fortified Phalanx Wall ahead of you.\n\n"
+                       "Skeleton Warriors form a tight frontal shield with heavy summons guarding the flanks, while Skeleton Mages provide artillery from the rear. "
+                       "The center remains wide open so you can freely cast spells, curses, and bone projectiles without your minions blocking your view. "
+                       "In this defensive stance, your minions hold their line and will not break ranks to chase distant enemies.";
+            case commander::SkillRingDef:
+                return "Deploys your summons into a 360-degree Protective Ring encircling you.\n\n"
+                       "Your warriors, Golem, and revives create an impenetrable outer wall facing outwards in all directions, guarding you against ambushes from behind. "
+                       "Skeleton Mages form a sheltered inner circle with generous space around you, firing safe from harm.";
+            case commander::SkillMarchBal:
+                return "Arranges your army into a balanced marching escort formation.\n\n"
+                       "Your minions march ahead in two coordinated columns, naturally adapting as you navigate doorways, dungeons, and narrow corridors. "
+                       "The middle lane stays open for easy movement, and your troops actively guard your blind spots as you explore.";
+            case commander::SkillWedgeAgg:
+                return "Commands your army into an aggressive Spearhead Assault formation.\n\n"
+                       "Your Golem leads the vanguard at the apex of a sharp V-wedge, flanked by warrior chevrons and revives on the wings. "
+                       "Troops will aggressively push into rooms, charge into enemy mobs, and crush resistant defenses.";
+            case commander::SkillHoldGround:
+                return "Orders your army to hold their ground at the targeted position.\n\n"
+                       "Aim at the ground and activate this order to lock your formation firmly in place. Your summons will defend that exact choke point, doorway, or room entrance, "
+                       "standing guard and fighting nearby monsters without following you when you step away.";
+            case commander::SkillRegroup:
+                return "Instantly recalls your entire army back to your side.\n\n"
+                       "Cancels any hold ground orders or target locks, summoning all skeletons, mages, golems, and revives to quickly rally around you in an escort formation.";
+            case commander::SkillFallOut:
+                return "Orders your army to break ranks and stand at ease.\n\n"
+                       "Releases your summons from formation constraints, allowing them to roam freely, wander, and fight independently as classic minions until you issue a new formation command.";
+            default:break;
+        }
+    }
     const auto at=Where(slot);
     const char* refused=" Without mana, outside its form or with the wrong weapon, the swing is a basic attack.";
     switch(Classify(skill)) {

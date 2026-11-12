@@ -9,7 +9,7 @@
 // here reads native memory or XR state.
 //
 // Every blocked hit strains the guard, weighted by the attacker's rank
-// (RankWeight). Strain shows as a soft black shadow at the rim of the view that
+// (RankWeight) and eased by the player's Defense (DefenseShare). Strain shows as a soft black shadow at the rim of the view that
 // creeps inward; each block sends one pulse in from
 // the edge. Full strain breaks the guard: the light swells toward the centre
 // and breathes slowly. The shield still meets every hit, but while the guard is
@@ -30,6 +30,19 @@ namespace framevr::strain {
 enum class Rank : uint8_t { Normal, Minion, Champion, Unique, PrimeEvil };
 inline float RankWeight(Rank r) {
     switch(r){case Rank::Minion:return 1.25f;case Rank::Champion:return 2.f;case Rank::Unique:return 2.5f;case Rank::PrimeEvil:return 4.f;default:return 1.f;}
+}
+// The player's Defense eases the strain (owner, 2026-11-12: "If you have defense rating high, then obviously
+// you shouldn't be impacted by that feature as much, you know, you shouldn't get the vignette as much").
+// chance: the blocked attack's native to-hit chance against the player - its attack rating against the
+// player's Defense, by level, as the game clamps it (5..95); the same chance that scales an unblocked hit's
+// damage in Unleashed (combat_rules.h DefenseFactor). -1 (not known) = 1. A block brings this share of its
+// strain: all of it at 95 (the most a monster can have: the tuning above, 10 normal blocks), `floor` of it at
+// none. floor: [gameplay] guard_strain_defense_floor (25 %; 100 = Defense ignored). At 25 %, 10 normal blocks
+// break the guard at 95, 16 at 50, 25 at 20, 35 at 5.
+inline float DefenseShare(int chance,float floor) {
+    if(chance<0)return 1.f;
+    const float f=std::isfinite(floor)?std::clamp(floor,0.f,1.f):1.f;
+    return f+(1-f)*std::clamp(float(chance),0.f,95.f)/95.f;
 }
 inline const char* RankName(Rank r) {
     switch(r){case Rank::Minion:return "minion";case Rank::Champion:return "champion";case Rank::Unique:return "unique";case Rank::PrimeEvil:return "prime_evil";default:return "normal";}

@@ -125,6 +125,7 @@ using HitRecoveryFn=int(*)(uintptr_t game,const uintptr_t* event);
 std::atomic<bool> parryReady{false};std::atomic<unsigned> parried{0},parryRefused{0},parryRepaired{0},deflected{0};
 std::atomic<int> parrySound{236}; // item_platearmor: Archon Plate's equip sound (HD redirect)
 std::atomic<int> blockSound{398};  // block_weapon_1; [gameplay] block_sound
+std::atomic<int> heldClankSound{398};  // block_weapon_1 again: the weapon struck the shield or the other weapon; [gameplay] held_collision_sound
 // 34E5F0(unit, mode) is the unit animation-mode setter, the only writer of
 // unit+0xC seen while probing. Hooked with the parry to time monster attack starts.
 constexpr uint64_t SetModeRva=0x34e5f0;
@@ -1324,6 +1325,7 @@ int SetMode(uintptr_t unit,int mode) {
 void __cdecl ParrySound(const D2RL::PluginContext*,void*) noexcept {bowvr::PlayHeroSound(parrySound.load());}
 // One sound for every block, so the player learns it: [gameplay] block_sound.
 void __cdecl BlockSound(const D2RL::PluginContext*,void*) noexcept {bowvr::PlayHeroSound(blockSound.load());}
+void __cdecl HeldClankSound(const D2RL::PluginContext*,void*) noexcept {bowvr::PlayHeroSound(heldClankSound.load());}
 void QueueParrySound() {
     if(parrySound.load()>0&&context&&threads&&threads->runOnUiThread)threads->runOnUiThread(context,&ParrySound,nullptr);
 }
@@ -1348,6 +1350,9 @@ void __cdecl Parry(const D2RL::PluginContext*,void* token) noexcept {
 }
 void QueueBlockSound() {
     if(blockSound.load()>0&&context&&threads&&threads->runOnUiThread)threads->runOnUiThread(context,&BlockSound,nullptr);
+}
+void QueueHeldClankSound() {
+    if(heldClankSound.load()>0&&context&&threads&&threads->runOnUiThread)threads->runOnUiThread(context,&HeldClankSound,nullptr);
 }
 void __cdecl ClientDurability(const D2RL::PluginContext*,void* token) noexcept {
     const auto packed=reinterpret_cast<uintptr_t>(token);
@@ -1815,6 +1820,7 @@ void ConfigureBlockSound(int sound) {
     if(loaded&&previous!=sound)QueueBlockSound(); // audition a change live
     loaded=true;
 }
+void ConfigureHeldClankSound(int sound) {heldClankSound=sound;}
 void ConfigureParrySound(int sound) {
     static bool loaded=false; // settings thread only
     const int previous=parrySound.exchange(sound);

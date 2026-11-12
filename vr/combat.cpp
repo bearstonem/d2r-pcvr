@@ -451,6 +451,9 @@ std::atomic<unsigned> defenseScaled{0},defenseUnseen{0};std::atomic<int> lastDef
 constexpr uint64_t BlockRateRva=0x347da0;
 using BlockRateFn=int(*)(uintptr_t);
 std::atomic<bool> chipEnabled{false};std::atomic<float> chipScale{1};
+// [gameplay] guard_strain_defense_floor: the player's Defense eases each block's guard strain (guard_strain.h
+// DefenseShare, by the blocked attack's to-hit chance); this share is left at no chance (1 = Defense ignored).
+std::atomic<float> strainDefenseFloor{.25f};
 std::atomic<unsigned> chipHits{0},chipLanded{0};std::atomic<int> lastChipRate{-1};
 struct ChipHit {uintptr_t attacker=0,defender=0;float factor=1;int mana=-1;uint64_t at=0;};
 thread_local ChipHit chipHit;
@@ -1333,6 +1336,12 @@ uint64_t NativeCallerRva(uintptr_t caller) {
 int GuardedBlock(uintptr_t game,uintptr_t attacker,uintptr_t defender,int avoid,int block,Guard g,uint32_t monster,bool inReach,uint64_t parryAt,framevr::strain::Rank rank,uintptr_t caller) {
     int32_t durability=ServerShieldDurability(defender);   // before this block wears the shield
     if(durability<0)durability=gamestate::LeftDurability();
+    // The guard strain this blow brings if the shield takes it: the attacker's rank, eased by the player's Defense -
+    // the native to-hit chance its hit check (just run, before this block roll) had against it (guard_strain.h).
+    int strainChance=-1;
+    if(incomingHit.attacker&&incomingHit.defender==defender&&GetTickCount64()-incomingHit.at<=IncomingWindowMs&&
+       (incomingHit.attacker==attacker||incomingHit.missile))strainChance=incomingHit.chance;
+    const float strainWeight=framevr::strain::RankWeight(rank)*framevr::strain::DefenseShare(strainChance,strainDefenseFloor.load(std::memory_order_relaxed));
     // A broken guard leaks: the block becomes a chip (see chipEnabled).
     ChipHit chip{};
     if(g==Guard::Block&&chipEnabled.load(std::memory_order_relaxed)&&damageScaleReady.load(std::memory_order_relaxed)&&framevr::GuardBroken()) {
@@ -1355,10 +1364,10 @@ int GuardedBlock(uintptr_t game,uintptr_t attacker,uintptr_t defender,int avoid,
     }
     if(guardTrace.load(std::memory_order_relaxed)) {
         const auto rva=NativeCallerRva(caller);
-        char line[320];snprintf(line,sizeof line,
-            "Frame guard native: monster=%u rank=%s verdict=%s block_flag=%d avoid_flag=%d result=%d roll_served=%d durability=%d caller=0x%llx would_hit=%d",
+        char line[384];snprintf(line,sizeof line,
+            "Frame guard native: monster=%u rank=%s verdict=%s block_flag=%d avoid_flag=%d result=%d roll_served=%d durability=%d caller=0x%llx would_hit=%d strain=%.2f (chance to hit %d%%)",
             monster,framevr::strain::RankName(rank),g==Guard::Parry?"PARRY":g==Guard::Block?"BLOCK":"OPEN",block,avoid,result,int(served),durability,(unsigned long long)rva,
-            lastIncomingVerdict);
+            lastIncomingVerdict,strainWeight,strainChance);
         framevr::logging::Write(line);
     }
     bool claws=false;
@@ -1370,7 +1379,7 @@ int GuardedBlock(uintptr_t game,uintptr_t attacker,uintptr_t defender,int avoid,
         // the game calls blockable; one that was dodged writes no life, and the record lapses with its window.
         if(claws&&g!=Guard::Open&&block&&damageScaleReady.load(std::memory_order_relaxed)) {
             chipHit={attacker,defender,0.f,reinterpret_cast<GetStatFn>(d2rsig::Addr(GetStatRva))(defender,8,0),GetTickCount64()};++chipHits;
-            framevr::ShieldGuardImpact(false,framevr::strain::RankWeight(rank));
+            framevr::ShieldGuardImpact(false,strainWeight);
             melee::QueueBlockSound();
             static std::atomic<uint64_t> told{0};
             if(const auto now=GetTickCount64();now-told.load()>1000) {
@@ -1382,7 +1391,7 @@ int GuardedBlock(uintptr_t game,uintptr_t attacker,uintptr_t defender,int avoid,
     else if(chip.attacker) {
         // Lands as a chip at its life write; the shield still took it.
         chipHit=chip;++chipHits;
-        framevr::ShieldGuardImpact(false,framevr::strain::RankWeight(rank));
+        framevr::ShieldGuardImpact(false,strainWeight);
         melee::QueueBlockSound();
         if(shieldWearShare.load(std::memory_order_relaxed)>0)chipWear={attacker,defender,GetTickCount64()};   // its struck wear goes to the shield
     }
@@ -1399,7 +1408,7 @@ int GuardedBlock(uintptr_t game,uintptr_t attacker,uintptr_t defender,int avoid,
         // pending parry unless the native shield roll actually took place.
         if(g==Guard::Parry){std::lock_guard lock(guardMutex);framevr::guard::SpendParry(guard.state,parryAt);}
         const bool parried=g==Guard::Parry&&melee::QueueParry(monster,durability);
-        framevr::ShieldGuardImpact(parried,framevr::strain::RankWeight(rank));   // a block strains the guard by the attacker's rank; a parry does not
+        framevr::ShieldGuardImpact(parried,strainWeight);   // a block strains the guard by the attacker's rank, eased by Defense; a parry does not
         if(parried)++guardParries;
         else {
             // The native block's own sound never plays in first person (only the
@@ -1551,6 +1560,7 @@ void ConfigureLateParry(uint32_t ms) {guardLateMs=std::min<uint32_t>(ms,400);}  
 void ConfigureEnemiesAlwaysHit(bool on) {enemiesAlwaysHit=on;}
 void ConfigureShieldWear(int share) {shieldWearShare=std::clamp(share,0,100);}
 void ConfigureGuardChip(bool on,float scale) {chipEnabled=on;chipScale=std::clamp(std::isfinite(scale)?scale:1.f,0.f,4.f);}
+void ConfigureGuardStrainDefense(float floor) {strainDefenseFloor=std::clamp(std::isfinite(floor)?floor:.25f,0.f,1.f);}
 float GameVolume() {
     static std::mutex m;static ULONGLONG checkAt=0;static FILETIME seen{};static float volume=-1;
     std::lock_guard lock(m);

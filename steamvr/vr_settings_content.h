@@ -216,12 +216,22 @@ struct ContentTool {
 // three columns. Button names follow the Button names setting at paint time:
 // GuideControl replaces {R1}-{R4} / {L1}-{L4} with controllers::Labels::Button
 // (hand 0 right / 1 left; 1 primary face, 2 secondary, 3 and 4 the same with Grip).
+// Left is the off hand's column, Right the main hand's. A stick's push (stick) stays on its controller with
+// Sticks stay right-handed (hand_role.h Sticks), so left-handed it is listed in the other hand's column then;
+// a stick's click is the hand's and stays in its column.
 enum class GuideColumn : uint8_t { Left, Right, Panels };
 struct GuideLine {
     const char* control;
     const char* action;
     GuideColumn column=GuideColumn::Right;
+    bool stick=false;
 };
+// The column a line is listed in: its own, or the other hand's for a stick's push whose stick stays where a
+// right-handed player has it while the hands are mirrored.
+constexpr GuideColumn ColumnOf(const GuideLine& g,bool sticksKept){
+    if(!g.stick||!sticksKept||g.column==GuideColumn::Panels)return g.column;
+    return g.column==GuideColumn::Left?GuideColumn::Right:GuideColumn::Left;
+}
 
 // ---- pages ----
 
@@ -351,6 +361,12 @@ inline constexpr Option EchoOptions[]={
     {1,"More","The game's echo twice as loud: caves, crypts and halls ring around you."},
     {2,"Strong","Four times as loud, and it rings a quarter longer."},
 };
+// Monster names (d2rcam::monsterbars::Names): whose plates the game draws over monsters.
+inline constexpr Option MonsterNamesOptions[]={
+    {0,"All","Every monster shows its name and health when it is your target."},
+    {1,"Bosses, elites","Only bosses, champions, uniques and their minions show theirs. The default."},
+    {2,"None","No monster names or health over monsters, bosses included."},
+};
 inline constexpr Option TooltipOptions[]={
     {0,"Instant","Details show as soon as the laser reaches an item."},
     {1,"Short","Details show after the laser rests on an item for 0.3 s."},
@@ -440,6 +456,11 @@ inline constexpr Override Overrides[]={
     {.id="gameplay.melee_reach_cm",.page=View::Combat,.section="Melee",.kind=RowKind::Slider,.label="Melee reach",
      .help="A weapon or fist that passes this close beside a monster still hits it. Raise it if near misses don't count. Walls still block.",
      .format={.unit="cm"}},
+    // Weapons collide (held_collision.h; owner 2026-11-11): [gameplay] held_collisions, On by default. The Combat page has
+    // no free row (8 at most): it is Melee reach's right half, the other setting about where a weapon meets things.
+    {.id="gameplay.held_collisions",.page=View::Combat,.section="Melee",.kind=RowKind::Toggle,.label="Weapons collide",
+     .help="Your weapon stops at your own shield and slides along it, and two weapons stop at each other. Your hand gives way up to 60 cm.",
+     .beside=true,.besideLabel="Collide"},
     // Weapon heft and Bow bash (#443; Discord #ideas, 2026-11-04): one row, the page's last free one (8 at most).
     // [gameplay] weapon_heft and bow_bash, both Off by default.
     {.id="gameplay.weapon_heft",.page=View::Combat,.section="Melee",.kind=RowKind::Toggle,.label="Weapon heft",
@@ -490,7 +511,7 @@ inline constexpr Override Overrides[]={
      .help="How fast your shield hand must move to bash, Smite included. Move at least 12 cm in one stroke; twisting the wrist never bashes.",
      .format={.unit="m/s",.decimals=2}},
     {.id="gameplay.guard_strain_vignette",.page=View::Shield,.section="Bash and block",.kind=RowKind::Toggle,.label="Guard strain shadow",
-     .help="Blocking many hits in a row darkens the edge of your view, faster for rarer attackers. Off hides the shadow; strain still builds."},
+     .help="Blocking many hits in a row darkens the edge of your view: faster for rarer attackers, slower with higher Defense. Off hides the shadow; strain still builds."},
     // Shield: Fit on the arm
     {.id="gameplay.shield_grip_cm",.page=View::Shield,.section="Fit on the arm",.kind=RowKind::Slider,.label="Shield along forearm",
      .help="Slides the shield toward your elbow (+) so your hand reaches its strap, or toward your hand (-). About 3 cm suits a buckler.",
@@ -522,7 +543,7 @@ inline constexpr Override Overrides[]={
      .beside=true,.besideLabel="Commands"},
     // Mercenary potion assistance, independent of class and outline settings (#424, RobinHeggelund).
     {.id="gameplay.merc_potion_assist",.page=View::Monsters,.section="Mercenary",.kind=RowKind::Toggle,.label="Merc potion throw autoaim",
-     .help="On: thrown potions feed your living mercenary wherever they land. Off: land within 1.5 m of its feet; misses keep the potion. Slow releases return it."},
+     .help="On: thrown potions feed your living mercenary wherever they land. Off: land within 4 m of its feet; misses keep the potion. Slow releases return it."},
     // Monsters: Summons (#426, RobinHeggelund)
     {.id="gameplay.summon_range_multiplier",.page=View::Monsters,.section="Summons",.kind=RowKind::Slider,.label="Summon range",
      .help="Multiplies summon target search and owner-follow ranges together. Mercenaries and attack reach stay native. Apply, then restart the game.",.warn="Requires restart",.format={.unit="x",.decimals=2}},
@@ -531,8 +552,15 @@ inline constexpr Override Overrides[]={
      .help="Empty bottles drop and roll. Potions thrown at your mercenary break where they hit; thrown traps and gas or oil potions stop at walls."},
     {.id="interactions.prop_physics",.page=View::Physics,.section="Props",.kind=RowKind::Toggle,.label="Knock over small props",
      .help="Cups, vases, books and stools tumble when your weapon, hand or shield hits them. Just for looks."},
+    // [interactions] prop_heft (prop_heft.h), On by default; shown while Knock over small props is on (RowShown).
+    {.id="interactions.prop_heft",.page=View::Physics,.section="Props",.kind=RowKind::Toggle,.label="Props have weight",
+     .help="A cup flies off a tap; a barrel or sack takes a full swing and barely shifts, and your hand feels the thud. Off: all fly alike."},
     {.id="interactions.body_physics",.page=View::Physics,.section="Props",.kind=RowKind::Toggle,.label="Pushable bodies",
      .help="Your weapon, shield or fist pushes aside the limbs of monsters and townsfolk it meets, and they spring back. Just for looks. Motion combat in first person."},
+    // Weapons hit walls (held_world.h; owner 2026-11-12): [gameplay] held_world_collisions, On by default. On Physics with
+    // the other things your weapons meet (Combat, beside Weapons collide, has no free row).
+    {.id="gameplay.held_world_collisions",.page=View::Physics,.section="Props",.kind=RowKind::Toggle,.label="Weapons hit walls",
+     .help="Your weapons and shield stop at walls, closed doors and the floor, and slide along them. Your hand gives way up to 60 cm."},
     // Physics: Monsters and townsfolk. Heads turn to you (look_at.h; owner, 2026-11-09), On by default. On this page
     // beside Pushable bodies, the other drawn-only change to their poses (Monsters already has its three sections).
     {.id="gameplay.look_at_you",.page=View::Physics,.section="Monsters and townsfolk",.kind=RowKind::Toggle,.label="Heads turn to you",
@@ -585,11 +613,15 @@ inline constexpr Override Overrides[]={
     // Walk direction (owner, 2026-11-08: "moving where the controller points versus where you look, that should be a
     // setting"): a row of its own since Dominant hand's row went (2026-11-10). [stick] walk_direction.
     {.id="stick.walk_direction",.page=View::Hands,.section="Hands and buttons",.kind=RowKind::Stepper,.label="Walk direction",
-     .help="Look: the left stick walks where you look. Controller: where the left controller points, so you can look around while you walk.",
+     .help="Look: the left stick walks where you look. Controller: where that stick's controller points, so you can look around while you walk.",
      FRAMEVR_NAMES(WalkNames)},
     // Left-handed play (hand_role.h, #307): the one switch for the hands. [interactions] left_handed.
     {.id="interactions.left_handed",.page=View::Hands,.section="Hands and buttons",.kind=RowKind::Toggle,.label="Left-handed (experimental)",
      .help="On: weapon in the left hand, shield on the right; buttons, sticks, laser, wrist HUD and class motions mirror. A bow sits in the right hand, drawn by the left."},
+    // Sticks stay right-handed (hand_role.h Sticks): a row of its own under Left-handed, shown while it is on
+    // (RowShown). About the real controllers, so never mirrored (PhysicalSides). [interactions] left_handed_sticks_right.
+    {.id="interactions.left_handed_sticks_right",.page=View::Hands,.section="Hands and buttons",.kind=RowKind::Toggle,.label="Sticks stay right-handed",
+     .help="On: the left stick walks and the right stick turns, as for a right-handed player. All else stays left-handed; each stick's click still opens its hand's wheel."},
     {.id="gameplay.run_walk_toggle",.page=View::Hands,.section="Hands and buttons",.kind=RowKind::Toggle,.label="Stick toggle",
      .help="On: right stick up switches between walking and the run set in Comfort > Moving (from Walk, the full run). Not with a wheel open or looking at the wrist map."},
     {.id="interactions.controller_labels",.page=View::Hands,.section="Hands and buttons",.kind=RowKind::Choice,.label="Button names",
@@ -664,8 +696,11 @@ inline constexpr Override Overrides[]={
     {.id="interactions.loot_pick",.page=View::Labels,.section="Names and bars",.kind=RowKind::Toggle,.label="Loot pick",
      .help="Hold your arm out and point at an item: A picks up that one, not the nearest, and its name shows. Too far away, A takes nothing.",
      .beside=true},
-    {.id="hud.ordinary_mob_bars",.page=View::Labels,.section="Names and bars",.kind=RowKind::Toggle,.label="Weak monster bars",
-     .help="Names and health bars over ordinary monsters. Bosses and elites always show theirs. Off keeps the view clear."},
+    // Monster names (owner 2026-11-11): All / Bosses and elites (the default) / None; it replaced the
+    // Weak monster bars toggle, whose [hud] ordinary_mob_bars is still read when monster_names is missing.
+    {.id="hud.monster_names",.page=View::Labels,.section="Names and bars",.kind=RowKind::Choice,.label="Monster names",
+     .help="Which monsters show their name and health when they are your target. NPC, mercenary, player and item names always show.",
+     FRAMEVR_OPTIONS(MonsterNamesOptions)},
     // Labels: Loot beams
     // Loot beams (vr/loot_beam_scan.cpp): one row - its brightness slider, then a Filter button
     // opening a card of four switches (owner 2026-10-31: "one line item that says loot beams and
@@ -839,7 +874,7 @@ inline constexpr PresetSetting ComfortValues[]={
 inline constexpr PresetSetting ClassicValues[]={
     {"gameplay.motion_controls",1},
     {"gameplay.projectile_aim_assist",0},{"gameplay.spell_lock",0},{"gameplay.planar_spell_aim",0},{"gameplay.ground_aim",0},{"gameplay.target_outline_pct",0},
-    {"hud.tooltip_timing",2},{"hud.labels_size",45},{"hud.ordinary_mob_bars",1},
+    {"hud.tooltip_timing",2},{"hud.labels_size",45},{"hud.monster_names",0},
     {"gameplay.offline_players",0},{"gameplay.enemy_sight_pct",100},
     {"hud.blood_visor",0},{"gameplay.low_life_heart_start",0},
     {"sky.enabled",0},{"fog.enabled",0},{"ceiling.enabled",0},{"interactions.bottle_physics",0},{"interactions.prop_physics",0},
@@ -898,7 +933,7 @@ inline constexpr ContentTool ToolTable[]={
 // ---- the Controller guide (main's Controls page, vr_settings_ui.cpp) ----
 
 inline constexpr GuideLine GuideTable[]={
-    {"Stick","Walk",GuideColumn::Left},
+    {"Stick","Walk",GuideColumn::Left,true},
     {"{L1} or {L2}","Your left-hand skills",GuideColumn::Left},
     {"{L3} or {L4}","More left-hand skills",GuideColumn::Left},
     {"Trigger","Left-hand skill",GuideColumn::Left},
@@ -906,11 +941,11 @@ inline constexpr GuideLine GuideTable[]={
     {"Grip + stick click","Inventory, character and skills",GuideColumn::Left},
     {"Grip near the belt","Grab a potion",GuideColumn::Left},
     {"Grip + right trigger","Right-click in game menus",GuideColumn::Left},
-    {"Stick left or right","Turn",GuideColumn::Right},
+    {"Stick left or right","Turn",GuideColumn::Right,true},
     {"Stick click","Open or close the right wheel",GuideColumn::Right},
     {"Trigger","Right-hand skill, or grab a bow string",GuideColumn::Right},
-    {"Stick up","Run or walk",GuideColumn::Right},
-    {"Hold stick down","Show all loot names",GuideColumn::Right},
+    {"Stick up","Run or walk",GuideColumn::Right,true},
+    {"Hold stick down","Show all loot names",GuideColumn::Right,true},
     {"{R1} or {R2}","Interact, or your skills",GuideColumn::Right},
     {"{R3} or {R4}","More right-hand skills",GuideColumn::Right},
     {"Main-hand grip at a shoulder","Swap weapon sets",GuideColumn::Right},
@@ -1161,29 +1196,31 @@ inline MenuData BuildMenu(const Override* overrides,size_t overrideCount,const P
     }
     return m;
 }
-// Left-handed play (hand_text.h): a menu's words mirrored, once. Every row but the one about the physical
-// hands themselves (Left-handed): its label, help, warnings,
+// Left-handed play (hand_text.h): a menu's words mirrored, once. Every row but the ones about the physical
+// hands themselves (Left-handed, Sticks stay right-handed): its label, help, warnings,
 // the word beside it, its options and their hints, its value names; the presets' names and blurbs.
-constexpr bool PhysicalSides(Key key){return key==LeftHanded;}
-inline MenuData MirroredMenu(const MenuData& written){
+// sticks false: Sticks stay right-handed, the sticks' names kept (handtext::Mirror).
+constexpr bool PhysicalSides(Key key){return key==LeftHanded||key==LeftHandedSticks;}
+inline MenuData MirroredMenu(const MenuData& written,bool sticks=true){
     MenuData menu=written;
+    const auto M=[sticks](const char* text){return handtext::M(text,sticks);};
     for(auto& r:menu.rows){
         if(PhysicalSides(r.key))continue;
-        r.label=handtext::M(r.label);r.help=handtext::M(r.help);r.warn=handtext::M(r.warn);
-        r.warnWhen.text=handtext::M(r.warnWhen.text);r.besideLabel=handtext::M(r.besideLabel);
+        r.label=M(r.label);r.help=M(r.help);r.warn=M(r.warn);
+        r.warnWhen.text=M(r.warnWhen.text);r.besideLabel=M(r.besideLabel);
         if(r.options&&r.optionCount){
             auto& list=menu.optionLists.emplace_back(r.options,r.options+r.optionCount);
-            for(auto& o:list){o.label=handtext::M(o.label);o.hint=handtext::M(o.hint);}
+            for(auto& o:list){o.label=M(o.label);o.hint=M(o.hint);}
             r.options=list.data();
         }
         if(r.names&&r.nameCount){
             auto& list=menu.nameLists.emplace_back(r.names,r.names+r.nameCount);
-            for(auto& n:list)n.label=handtext::M(n.label);
+            for(auto& n:list)n.label=M(n.label);
             r.names=list.data();
         }
     }
-    for(auto& s:menu.sections)s.title=handtext::M(s.title);
-    for(auto& p:menu.presets){p.name=handtext::M(p.name);p.blurb=handtext::M(p.blurb);}
+    for(auto& s:menu.sections)s.title=M(s.title);
+    for(auto& p:menu.presets){p.name=M(p.name);p.blurb=M(p.blurb);}
     return menu;
 }
 // The menu as written, for a right-handed player, and as shown now.
@@ -1193,6 +1230,7 @@ inline const MenuData& WrittenMenu(){
 }
 inline const MenuData& Menu(){
     if(!handtext::Left())return WrittenMenu();
+    if(handtext::SticksKept()){static const MenuData kept=MirroredMenu(WrittenMenu(),false);return kept;}
     static const MenuData menu=MirroredMenu(WrittenMenu());
     return menu;
 }
@@ -1219,11 +1257,13 @@ inline const MenuData& FallbackDemo(){
 
 inline const ContentPage& PageOf(View v){
     if(!handtext::Left())return PageTable[size_t(v)];
-    static const std::vector<ContentPage> mirrored=[]{
+    const auto mirror=[](bool sticks){
         std::vector<ContentPage> pages(std::begin(PageTable),std::end(PageTable));
-        for(auto& p:pages){p.name=handtext::M(p.name);p.intro=handtext::M(p.intro);}
+        for(auto& p:pages){p.name=handtext::M(p.name,sticks);p.intro=handtext::M(p.intro,sticks);}
         return pages;
-    }();
+    };
+    if(handtext::SticksKept()){static const std::vector<ContentPage> kept=mirror(false);return kept[size_t(v)];}
+    static const std::vector<ContentPage> mirrored=mirror(true);
     return mirrored[size_t(v)];
 }
 // The row of a key, or nullptr (NotInMenu).
@@ -1290,11 +1330,13 @@ inline std::string ValueText(const ContentRow& r,float value,const Context& c={}
 // ToolTable as shown now (std::size(ToolTable) entries): its words mirrored while the hands are.
 inline const ContentTool* Tools(){
     if(!handtext::Left())return ToolTable;
-    static const std::vector<ContentTool> mirrored=[]{
+    const auto mirror=[](bool sticks){
         std::vector<ContentTool> tools(std::begin(ToolTable),std::end(ToolTable));
-        for(auto& t:tools){t.label=handtext::M(t.label);t.help=handtext::M(t.help);}
+        for(auto& t:tools){t.label=handtext::M(t.label,sticks);t.help=handtext::M(t.help,sticks);}
         return tools;
-    }();
+    };
+    if(handtext::SticksKept()){static const std::vector<ContentTool> kept=mirror(false);return kept.data();}
+    static const std::vector<ContentTool> mirrored=mirror(true);
     return mirrored.data();
 }
 inline const ContentTool* ToolOf(Kind kind){

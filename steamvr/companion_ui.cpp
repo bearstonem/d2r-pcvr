@@ -59,6 +59,24 @@ std::vector<uint8_t> PaintCompanions(const companions::Roster& roster) {
         RECT name{x+4,y+98,x+cell-4,y+132};DrawTextA(dc,d.name,-1,&name,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS|DT_NOPREFIX);
         ++index;
     }
+    if(roster.commanderBadge&&(roster.relevant&ArmyTypeMask)!=0) {
+        HFONT badgeFont=CreateFontW(15,0,0,0,FW_BOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,ANTIALIASED_QUALITY,DEFAULT_PITCH,L"Georgia");
+        const auto prev=SelectObject(dc,badgeFont);
+        char badgeText[48]{};
+        if(roster.freeRoam) {
+            std::snprintf(badgeText,sizeof badgeText,"FREE ROAM");
+        } else {
+            const char* stanceTag=roster.anchorActive?"HOLD":roster.stance==0?"DEF":roster.stance==2?"AGG":"BAL";
+            const char* formTag=roster.formation==1?"RING 360":roster.formation==2?"WEDGE":roster.formation==3?"COLUMN":"PHALANX";
+            std::snprintf(badgeText,sizeof badgeText,"%s \xB7 %s",stanceTag,formTag);
+        }
+        RECT pill{Width-184,2,Width-6,20};
+        fill(pill,roster.freeRoam?RGB(36,34,30):roster.stance==0?RGB(24,48,62):roster.stance==2?RGB(64,28,24):RGB(46,38,24));
+        SetTextColor(dc,roster.freeRoam?RGB(205,195,175):roster.stance==0?RGB(165,228,250):roster.stance==2?RGB(250,185,155):RGB(235,212,155));
+        DrawTextA(dc,badgeText,-1,&pill,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX);
+        SelectObject(dc,prev);DeleteObject(badgeFont);
+    }
     GdiFlush();const auto* src=static_cast<const uint8_t*>(bits);
     for(int i=0;i<Width*UsedHeight(roster);++i) {
         rgba[i*4]=src[i*4+2];rgba[i*4+1]=src[i*4+1];rgba[i*4+2]=src[i*4];rgba[i*4+3]=255;

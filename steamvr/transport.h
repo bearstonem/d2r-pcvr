@@ -95,6 +95,7 @@ int HandSide(int role);
 int HandRole(int physical);
 void ConfigureBottlePhysics(bool on); // [interactions] bottle_physics: emptied bottles fall into the world
 void ConfigurePropPhysics(bool on);   // [interactions] prop_physics: weapons knock the level's small props about
+void ConfigurePropHeft(bool on);      // [interactions] prop_heft: props weigh what they are; weapons strike with their own mass
 void ConfigureBodyPhysics(bool on);   // [interactions] body_physics: weapons push monsters' and townsfolk's limbs aside
 bool BodyPhysics();                   // on, with physical melee
 // [interactions] leather_menu (VR Settings > Interface > Menus, beside Menu distance), leather_menu_width (m), leather_tilt (degrees),
@@ -120,7 +121,8 @@ bool DirectedSpellActive(); // fresh native assignment, actually casting (wheel 
 bool SpellGripsArmed();   // both grips cast a learned motion spell (spell_motion.h): the left grip takes the staff only alone
 // Both grips held for the motions now, or let go under 0.4 s ago (a motion's cast still pressing): vrcam's Loot
 // pick hands the game no item then, or the cast's press picked up the item pointed at (owner, 2026-11-05: "when
-// you use both grip buttons near loot, it tries to pick them up").
+// you use both grip buttons near loot, it tries to pick them up"), and pad A only casts (interaction::InteractOnA):
+// a motion cast through the A slot picked up the loot beside the hero (owner, 2026-11-11).
 bool SpellGripsHeld();
 bool BowSkillActive();   // a bow or crossbow skill is being cast from a button (bow ready)
 int GroundSpellSkill();   // a ground skill (spellaim::GroundTarget) being cast that lands where it is aimed: its id, or -1
@@ -153,6 +155,9 @@ bool CampfireMenuHit();
 // Any thread: the campfire's own sound (campfire_audio.h) on while the scene is up - the fire's roar and
 // crackle at `ambient`, a click's whoosh at `burst` (0..1, times the game's volume); CampfireBurst: a click on the fire.
 void SetCampfireFire(bool on, float ambient, float burst);
+// Any thread: the cinema screen's place ([cinema] distance, width; metres, cinema::Clamped) - while a cinematic
+// plays (gamestate::CinemaPlaying), the game's frame goes on it: a screen this far ahead at eye height, this wide.
+void SetCinemaScreen(float distance, float width);
 void CampfireBurst();
 // Paladin Fist of the Heavens motion (motions_paladin.h). Armed: the skill is
 // learned, its card on and gestures on (vrcam keeps the monster scan running).
@@ -192,6 +197,13 @@ int TakeShieldTarget(uint32_t& target); // 1 physical target, -1 cancelled cast,
 bool ShieldAim(float& x,float& y);
 void FinishShieldSkill(bool accepted);
 void MeleeImpact(int hand=0); // thread-safe; haptic delivered by XR input update
+// Held items collide (held_collision.h): the weapon struck the shield or the other weapon - a clank of this strength
+// (0..1) in both controllers on the next input frame; or an item struck a wall or the floor (held_world.h) - in that
+// one: arms, bit 0 the right controller, bit 1 the left (physical, not roles). Thread-safe.
+void HeldClank(float strength,unsigned arms=3);
+// Held items collide: what of the last input frame keeps the hands' items from colliding (held::Reason bits: Menu
+// while the hands are pointers or no frame ran lately, Wheel, Leather, Throwing). Thread-safe.
+uint32_t HeldCollisionBlocks();
 // Thread-safe; call before MeleeImpact(hand): what that impact struck (haptics::Surface, haptic_impact.h) and, for a
 // monster, its MonStats flags for the log. Not told: flesh. One impact consumes it.
 void ImpactSurface(int hand,int surface,uint32_t flags=0);
