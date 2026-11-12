@@ -190,7 +190,7 @@ a crossbow, staff, spear, polearm or two-handed weapon is led by the left hand. 
 | Physical belt potion | Reach to an original 3D bottle on the front belt and hold **Right Grip** to grab; left-hand grip also works |
 | Drink | Keep grip held, bring the bottle's opening to your mouth and tip nearly horizontal for 0.25 seconds; release to return an unused potion |
 | Drop the empty bottle | Open your hand after drinking: the bottle falls, bounces and rolls on the floor (visual only); hit it with your weapon or shield to knock it away |
-| Heal the mercenary | Toss a held Health, Rejuvenation, Antidote or Thawing bottle (release mid-swing, at least 1.4 m/s) so it lands within 1.5 m of your mercenary's feet. It shatters on landing (with bottle physics, where it first touches a wall, table, prop or the floor); a miss leaves the potion on the belt |
+| Heal the mercenary | Toss a held Health, Rejuvenation, Antidote or Thawing bottle (release mid-swing, at least 1.4 m/s) so it lands within 4 m of your mercenary's feet (it walks on while the bottle flies). It shatters on landing (with bottle physics, where it first touches a wall, table, prop or the floor); a miss leaves the potion on the belt |
 | Quick potion | Left Y → **EQUIPMENT / BELT** → trigger a potion wedge; grip on a potion wedge instead grabs it into the right hand |
 | Swap weapon sets | Reach the swap hand over either shoulder and press its grip; the right hand, or the left with VR Settings > Controls > Hands > Left-handed on. Hip anchors are removed |
 | Seated weapon selection | Utility wheel → **Weapon I** or **Weapon II** |
@@ -872,7 +872,7 @@ cannot take it at that moment (another floor while props are still moving),
 it flies the arc above; with bottle physics off, it always does.
 
 The landing point is checked on the game thread against the live, non-hostile
-hireling. Within 1.5 m of its feet, the UI thread presses the column's native
+hireling. Within 4 m of its feet (`MercThrowReach`; 1.5 m until 2026-11-12), the UI thread presses the column's native
 belt key while the belt's own "give to mercenary?" query (the check Shift+belt
 uses) answers yes for that one press only, so the native mercenary use, voice
 line and rules apply. It is confirmed by the item leaving the belt. If that
