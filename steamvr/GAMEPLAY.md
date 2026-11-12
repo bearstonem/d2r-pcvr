@@ -961,6 +961,20 @@ visual. VR Settings > Gameplay > Physics > Knock over small props (`[interaction
 props](../docs/KNOCKABLE_PROPS.md). The log notes each weapon knock (`Frame
 props: knocked a cup ...`) and a summary every ten seconds.
 
+**Props have weight.** Each knockable prop weighs what its kind and size say
+(a cup 0.2 kg, a chair 10, a barrel or a sack of grain 50-60), and your weapon
+strikes with its own weight: 0.9 kg for a fist or dagger to 5 kg for a great
+maul, and up to three times that in a full, fast swing. A cup flies off a
+tap. A barrel stays put for a tap, rocks or slides a few centimetres from a
+full sword swing, and falls over from a maul. A heavy prop stops the weapon's
+body in the physics, which then slips through it; the drawn weapon follows
+your hand as before. The hand feels a light tick from light things and a
+hard knock and a low thud from heavy ones. A rolling bottle bounces off a
+heavy prop without moving it. VR Settings > Gameplay > Physics > Props have
+weight (`[interactions] prop_heft`, on by default) turns it off: every prop is
+then pushed aside at the weapon's speed, as before. See
+[weight](../docs/KNOCKABLE_PROPS.md#weight).
+
 **Spells reach objects.** Your own spell missiles break the pots, urns,
 baskets and barrels they pass, as arrows do, and push the small props and
 dropped bottles in their way: along a bolt's flight, outward from a Fire
@@ -1061,6 +1075,7 @@ hip_width=0.28
 holsters=1
 bottle_physics=1
 prop_physics=1
+prop_heft=1
 spell_impacts=1
 body_physics=1
 leather_menu=1

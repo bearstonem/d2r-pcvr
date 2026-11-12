@@ -66,6 +66,7 @@ static const GoldenRow Golden[]={
     {"gameplay.summon_range_multiplier",View::Monsters,2,content::RowKind::Slider,"Summon range",0,0},   // #426
     {"interactions.bottle_physics",View::Physics,0,content::RowKind::Toggle,"Roll and break bottles",0,0},
     {"interactions.prop_physics",View::Physics,0,content::RowKind::Toggle,"Knock over small props",0,0},
+    {"interactions.prop_heft",View::Physics,0,content::RowKind::Toggle,"Props have weight",0,0},   // prop_heft.h, 2026-11-12
     {"interactions.body_physics",View::Physics,0,content::RowKind::Toggle,"Pushable bodies",0,0},   // main's #361
     {"gameplay.held_world_collisions",View::Physics,0,content::RowKind::Toggle,"Weapons hit walls",0,0},   // 2026-11-12
     {"gameplay.look_at_you",View::Physics,1,content::RowKind::Toggle,"Heads turn to you",0,0},   // Monsters and townsfolk (2026-11-09)
@@ -241,7 +242,7 @@ int main(int argc,char** argv){
     }
     // ---- the map: no row lost, none left to More, the names and the owner's pairs ----
     {
-        Check(tables.rowCount==115,"115 settings on the menu, each one row");   // + Weapons hit walls (2026-11-12)   // + Sticks stay right-handed (2026-11-11)   // + Weapons collide (2026-11-11)   // - Dominant hand (2026-11-10: Left-handed is the one switch)   // + Left-handed (#307)   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424), Click to drink (#425), Skill cooldowns (2026-11-09), + Summon range (#426), T cross to calibrate (#423), Heads turn to you (2026-11-09), Echo (world sound, 2026-11-09), + Monsters stagger, Heavy hits knock back (hit reactions, 2026-11-09), + Hit feel by target, Felt heartbeat (richer haptics)
+        Check(tables.rowCount==116,"116 settings on the menu, each one row");   // + Props have weight (2026-11-12)   // + Weapons hit walls (2026-11-12)   // + Sticks stay right-handed (2026-11-11)   // + Weapons collide (2026-11-11)   // - Dominant hand (2026-11-10: Left-handed is the one switch)   // + Left-handed (#307)   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424), Click to drink (#425), Skill cooldowns (2026-11-09), + Summon range (#426), T cross to calibrate (#423), Heads turn to you (2026-11-09), Echo (world sound, 2026-11-09), + Monsters stagger, Heavy hits knock back (hit reactions, 2026-11-09), + Hit feel by target, Felt heartbeat (richer haptics)
         for(size_t i=0;i<tables.rowCount;++i)Check(!tables.rows[i].fallback&&tables.rows[i].page!=View::More,std::string("every setting has its page: ")+tables.rows[i].label);
         Check(content::Menu().report.empty(),"the tidy report is empty");
         struct Want {content::Group group;const char* name;std::vector<const char*> pages;};
