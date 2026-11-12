@@ -231,7 +231,22 @@ int main() {
         for(int i=0;i<400;++i)Step(wide,far,.05f,limits);
         Check(wide.yaw<=limits.turnMost+1e-5f&&wide.tilt>=-limits.tiltMost-1e-5f,"the most a head is ever turned");
     }
+    {   // bodies the game has stopped posing: a corpse is left alone
+        Posing p;
+        Check(!p.Moving(1000),"never seen posed: not moving");
+        p.Changed(1000);p.Changed(1040);
+        Check(!p.Moving(1050),"two changes are not yet a moving body");
+        p.Changed(1080);
+        Check(p.Moving(1100)&&p.Moving(1000+StillAfter),"three inside StillAfter: moving, its head turns");
+        Check(!p.Moving(1000+StillAfter+1),"the third newest change older than StillAfter: still, as a corpse");
+        for(unsigned long long t=1080;t<=5000;t+=40)p.Changed(t);
+        Check(p.Moving(5000),"posed again and again: moving");
+        Check(!p.Moving(5000+StillAfter+50),"the death played out, the game posing it no more: still");
+        p.Changed(9000);
+        Check(!p.Moving(9010),"one change - its limbs put back after a push - does not wake it");
+        Check(!p.Moving(500),"a clock read from before the changes: not moving");
+    }
     if(failures){std::printf("look-at-test: %d failed\n",failures);return 1;}
-    std::puts("Look at you: head names, the neck's root, bind axes, turn and tilt limits, range, fallen bodies, mirrored worlds and the ease passed");
+    std::puts("Look at you: head names, the neck's root, bind axes, turn and tilt limits, range, fallen bodies, mirrored worlds, the ease and still bodies passed");
     return 0;
 }
