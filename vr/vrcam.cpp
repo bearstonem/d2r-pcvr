@@ -12378,6 +12378,12 @@ DWORD WINAPI UpdateThread(void*) {
         }
         const ULONGLONG nowMs = GetTickCount64();
 #ifdef D2RVR_NATIVE_OPENXR
+
+        // Target reporting stays active on desktop hosts too.
+        // Keep this before any desktop-mode early continue when branches combine.
+        {uint32_t unit=0;combat::LocalPlayerId(unit);
+         targetlock::TickNetwork(gamestate::LocalPlayer(),unit);}
+
         if(pcvrdesktop::Enabled()){
             if(nowMs>=nextState){nextState=nowMs+40;DesktopTick();}
             continue; // no VR hotkeys, input injection, HUD movement or rendering setup
@@ -12784,6 +12790,7 @@ void DesktopTick(){
     if(now>=nextRead){nextRead=now+200;gamestate::Tick();}
     if(now>=nextHooks){
         nextHooks=now+500;d2rsig::Resolve(g_ctx);
+        melee::InstallTargetReader();
         // Camera observer stays disabled: it supplies native player position only.
         if(!g_h.camera)g_h.camera=d2rcam::Install(g_ctx);
         if(!g_h.skeleton)g_h.skeleton=d2rsig::Hook(RVA_COMPUTE_SELF_WORLD_POSE,kSigComputeSelfWorldPose,sizeof kSigComputeSelfWorldPose,skel::Detour(),skel::OrigSlot());
@@ -12806,6 +12813,7 @@ bool StartDesktop(const PluginContext*ctx){
     d2rsig::Resolve(ctx);
     skel::SetGameBase(g_base);skel::TrackHero(true);skel::Set(skel::Input{});
     gamestate::Init(ctx);
+    melee::InstallTargetReader();
     upperbody::Init(ctx,&Log);upperbodyskin::Init(ctx);
     HANDLE h=CreateThread(nullptr,0,UpdateThread,nullptr,0,&g_updateThreadId);
     if(!h){Log("PCVR desktop: update thread failed");return false;}
@@ -12891,6 +12899,7 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
     companionai::Init(ctx);
     if(!summonrange::Init(ctx)){D2RLoaderUnloadPlugin();g_standDown=true;return false;}
     melee::Init(ctx);
+    melee::InstallTargetReader();
     bowvr::Init(ctx);
     clientcombat::Init(ctx);
     upperbody::Init(ctx,&Log);
@@ -12917,6 +12926,9 @@ D2RL_PLUGIN_EXPORT void D2RLoaderUnloadPlugin() noexcept {
     upperbody::Shutdown();
     skel::SetRemoteUpperBodies(nullptr,0);
     upperbodyskin::Shutdown();
+
+    targetlock::Stop();
+
     enemysight::Shutdown();
     companionai::Shutdown();
     summonrange::Shutdown();
