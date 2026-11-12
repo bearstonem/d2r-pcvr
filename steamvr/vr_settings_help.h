@@ -120,7 +120,7 @@ inline const char* WrittenHelpText(int id) {
         case ArcaneFade:return "Smoothly fades the spectral arcane vignette in and out with delta-time exponential smoothing rather than jumping instantly when mana changes.";
         case ManaThreshold:return "Mana percentage below which Arcane Decay activates (5% to 90%, default 50%). Uses a 3 percentage point hysteresis to prevent flickering.";
         case ArcaneIntensity:return "Maximum opacity and brightness scaling of the spectral vignette, mist, and filaments (0% to 100%, default 100%).";
-        case MercPotionAssist:return "On: thrown potions feed your living mercenary wherever they land. Off: land within 1.5 m of its feet; misses keep the potion. Slow releases return it.";
+        case MercPotionAssist:return "On: thrown potions feed your living mercenary wherever they land. Off: land within 4 m of its feet; misses keep the potion. Slow releases return it.";
         case HapticSurfaces:return "On: a weapon hit feels like what it struck. Flesh is one long thud; skeletons, zombies and mummies three short clicks; ghosts and wraiths a soft shiver; a pot, urn or barrel a crack and a crumble; a parry two sharp ringing taps; a block one tap. Melee hits sets the strength. Off: every hit is the same single tap.";
         case HapticHeartbeat:return "On: both controllers beat like a heart, lub-dub, when life is low. It begins at Heartbeat starts at, beside it (60% when that is Off), and beats faster and harder with every 10% of life lost. It stops in menus and when you die. Low life and mana alerts sets its strength.";
         case ClickToDrink:return "On: hold a flask and press that hand's trigger to drink. The mouth gesture still works. Off: bring the opening to your mouth and tip to drink.";

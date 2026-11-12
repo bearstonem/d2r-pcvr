@@ -522,7 +522,7 @@ inline constexpr Override Overrides[]={
      .beside=true,.besideLabel="Commands"},
     // Mercenary potion assistance, independent of class and outline settings (#424, RobinHeggelund).
     {.id="gameplay.merc_potion_assist",.page=View::Monsters,.section="Mercenary",.kind=RowKind::Toggle,.label="Merc potion throw autoaim",
-     .help="On: thrown potions feed your living mercenary wherever they land. Off: land within 1.5 m of its feet; misses keep the potion. Slow releases return it."},
+     .help="On: thrown potions feed your living mercenary wherever they land. Off: land within 4 m of its feet; misses keep the potion. Slow releases return it."},
     // Monsters: Summons (#426, RobinHeggelund)
     {.id="gameplay.summon_range_multiplier",.page=View::Monsters,.section="Summons",.kind=RowKind::Slider,.label="Summon range",
      .help="Multiplies summon target search and owner-follow ranges together. Mercenaries and attack reach stay native. Apply, then restart the game.",.warn="Requires restart",.format={.unit="x",.decimals=2}},

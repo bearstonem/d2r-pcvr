@@ -199,10 +199,14 @@ inline Vec Spin(Quat from,Quat to,float dt) {
 inline bool Throwable(Potion type) {
     return type==Potion::Health||type==Potion::Rejuvenation||type==Potion::Antidote||type==Potion::Thawing;
 }
+// How far from the mercenary's feet a thrown bottle may land and still feed it (m, flat). It was 1.5 m until the
+// owner, 2026-11-12: "Increase the radius at the base of the mercenary ... By a lot. So that we don't miss as
+// they move" - the mercenary walks on while the bottle is in the air, and only these bottles are ever thrown.
+inline constexpr float MercThrowReach=4.f;
 // A negative distance means there is no live hireling. Assistance only
 // removes the landing-distance requirement; native potion-use rules remain.
 inline bool MercThrowAccepted(float distance,bool mercPotionAutoaimEnabled) {
-    return std::isfinite(distance)&&distance>=0&&(mercPotionAutoaimEnabled||distance<=1.5f);
+    return std::isfinite(distance)&&distance>=0&&(mercPotionAutoaimEnabled||distance<=MercThrowReach);
 }
 inline double LandingTime(Vec p,Vec v,float floor) {
     const double drop=double(p.y)-floor;
