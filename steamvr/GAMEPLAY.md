@@ -167,6 +167,10 @@ described with the right fist is done with the left, toward the other side). In 
 already turned round: VR Settings, the Controller guide, the wheels and the MOTIONS page name the hand that
 does each thing. Every weapon kind is mirrored too: a bow is held in the right hand and drawn with the left,
 a crossbow, staff, spear, polearm or two-handed weapon is led by the left hand. Details: [Left-handed play](../CONTROLS.md#left-handed-play-experimental).
+With **Sticks stay right-handed** (under Left-handed, shown while it is on) the sticks are not exchanged: read
+"left stick" and "right stick" as written (the left stick walks, the right stick turns, runs / walks, shows
+loot names and zooms the maps), and Walk direction: Controller follows the left controller. A stick's click
+stays with its hand: each hand's wheel opens from its own stick ([Sticks stay right-handed](../CONTROLS.md#sticks-stay-right-handed)).
 
 | Action | Control |
 |---|---|
@@ -190,7 +194,7 @@ a crossbow, staff, spear, polearm or two-handed weapon is led by the left hand. 
 | Physical belt potion | Reach to an original 3D bottle on the front belt and hold **Right Grip** to grab; left-hand grip also works |
 | Drink | Keep grip held, bring the bottle's opening to your mouth and tip nearly horizontal for 0.25 seconds; release to return an unused potion |
 | Drop the empty bottle | Open your hand after drinking: the bottle falls, bounces and rolls on the floor (visual only); hit it with your weapon or shield to knock it away |
-| Heal the mercenary | Toss a held Health, Rejuvenation, Antidote or Thawing bottle (release mid-swing, at least 1.4 m/s) so it lands within 1.5 m of your mercenary's feet. It shatters on landing (with bottle physics, where it first touches a wall, table, prop or the floor); a miss leaves the potion on the belt |
+| Heal the mercenary | Toss a held Health, Rejuvenation, Antidote or Thawing bottle (release mid-swing, at least 1.4 m/s) so it lands within 4 m of your mercenary's feet (it walks on while the bottle flies). It shatters on landing (with bottle physics, where it first touches a wall, table, prop or the floor); a miss leaves the potion on the belt |
 | Quick potion | Left Y → **EQUIPMENT / BELT** → trigger a potion wedge; grip on a potion wedge instead grabs it into the right hand |
 | Swap weapon sets | Reach the swap hand over either shoulder and press its grip; the right hand, or the left with VR Settings > Controls > Hands > Left-handed on. Hip anchors are removed |
 | Seated weapon selection | Utility wheel → **Weapon I** or **Weapon II** |
@@ -444,6 +448,31 @@ clicks follow the moved panel. Every in-game and main/title menu reopens at
 that distance until the game is restarted or **VR Settings > Interface > Menus > Menu
 distance** is changed. The handheld quest log keeps its left-grip placement.
 
+### Cinematics on a screen in the world
+
+The game's cinematics (the logos and the intro, the act videos, the ending, and
+the main menu's Cinematics) play on a flat screen in the world: placed straight
+ahead at eye height as one starts, 3 m away and 3 m wide (about 53 degrees
+across), with the film's own 16:9 shape, black around it, and still while you
+look round. Both eyes see the same picture on it, so it stands at its distance
+like a real screen. The game's sound plays as it does on the desktop. F11 places
+the screen in front of you again. Hold the game's skip button (or press it, as
+the game asks) on the controllers to skip; the laser shows only while pointed at
+the screen, and grabbing does not move it.
+
+D2R draws a cinematic as an interface widget in its full-screen box (the 16:9
+band at the top of a square VR picture) and draws no world meanwhile: in a game
+the headset used to show no picture at all while one played (the picture went
+to one eye's slot and the other never came). The mod tells a cinematic from the
+game's own interface messages: `MoviePlayerMessage` `Play` starts one;
+`Cinematics` `MovieComplete` or `Close`, `MoviePlayerMessage` `Cancel` or
+`PlayLooped` (the title screen's loop, a menu), a movie panel closed, every
+panel unloaded or a front-end navigation ends it. In a game, the world drawn
+again for 0.75 s (2 s after the start) also ends one whose end message was
+missed, and nothing lasts past 12 minutes. No game build or code bytes are
+assumed. `[cinema] enabled=0` in `d2r_pcvr.ini` leaves cinematics as they were;
+`distance` and `width` (metres) set the screen. Logs: `Frame cinema:`.
+
 ### The menu on leather
 
 Reach your **left hand over your left shoulder** and grip (as if pulling a
@@ -611,7 +640,7 @@ sets the page's rows back to their defaults, with **Undo reset** for 6 seconds.
 | Gameplay > Physics | Rolling bottles, knockable props, pushable bodies, and monsters' and townsfolk's heads turning to you |
 | Comfort > Moving | Smooth turning with its snap angle or turn speed, and movement speed |
 | Comfort > Body | Seated play, **Height and arm span** (**Calibrate body**, **Set eye height**) with the **T cross to calibrate** switch under it (standing only), and the belt's height and reach |
-| Controls > Hands | **Walk direction**, **Left-handed (experimental)** (mirrors the hands, buttons, sticks, menu laser, wrist HUD, held menu, class motions and the words that name them), **Stick toggle** and button names |
+| Controls > Hands | **Walk direction**, **Left-handed (experimental)** (mirrors the hands, buttons, sticks, menu laser, wrist HUD, held menu, class motions and the words that name them), **Sticks stay right-handed** under it while it is on (the left stick still walks and the right one turns; Off by default), **Stick toggle** and button names |
 | Controls > Vibration | Overall vibration and separate melee, short melee taps, bow draw, bow/throw release, spell, loot/potion/menu and alert strengths; **Feel it** on a row's card |
 | Interface > Wrist | Life and mana location and tilt, skill cooldowns between the orbs, map and compass location, map view (Isometric, Top-down, Full map or Full top-down), turning the map with you, buffs and companions |
 | Interface > Menus | Menu distance with **Hold menu** beside it (Leather by default: the tabbed menu on a hide in your left hand; Menu only: no hide; Off) and item details delay |
@@ -872,7 +901,7 @@ cannot take it at that moment (another floor while props are still moving),
 it flies the arc above; with bottle physics off, it always does.
 
 The landing point is checked on the game thread against the live, non-hostile
-hireling. Within 1.5 m of its feet, the UI thread presses the column's native
+hireling. Within 4 m of its feet (`MercThrowReach`; 1.5 m until 2026-11-12), the UI thread presses the column's native
 belt key while the belt's own "give to mercenary?" query (the check Shift+belt
 uses) answers yes for that one press only, so the native mercenary use, voice
 line and rules apply. It is confirmed by the item leaving the belt. If that
@@ -1901,7 +1930,15 @@ instead of a random one. Classic keeps the native roll.
   `riposte_volume` (100).
 - **Guard strain light**: every blocked hit (not a parry) strains the guard by
   `guard_strain_per_block` % (10), weighted by the attacker's rank: about 10
-  normal-monster blocks in a row reach full strain. There is no buildup speed
+  normal-monster blocks in a row reach full strain. Your Defense eases it: each
+  block strains by the attacker's native chance to hit you (its attack rating
+  against your Defense, by level, 5..95 %; the chance that also scales an
+  unblocked hit's damage), all of it at 95 % and never under
+  `guard_strain_defense_floor` % (25; 100 = Defense ignored) of it - at 25 %, a
+  normal monster with a 50 % chance to hit breaks the guard in 16 blocks, one
+  with 20 % in 25, 5 % in 35 (owner, 2026-11-12: "If you have defense rating
+  high ... you shouldn't get the vignette as much"). `[debug] guard_trace` logs
+  each block's strain and chance. There is no buildup speed
   setting (`guard_strain_speed` is no longer read). Strain shows as a soft black
   vignette at the rim of the view, drawn denser by `guard_strain_dark_density` (2.5)
   so it hides more over D2's dark scenes, beneath the blood on the visor, creeping
@@ -3049,8 +3086,10 @@ there.
   pushed straight out (chest to eye level) and stopped there a moment, like "halt!"; Decoy, both hands
   from the chest pushed together to one side; Valkyrie, the right fist raised high, then brought down
   to point at the floor where she lands.
-- Barbarian: Battle Orders, the right fist at the mouth a moment, then thrust straight up; War Cry,
-  the same, thrust forward and down; Shout, both fists at the mouth, pushed out forward together;
+- Barbarian: Battle Orders, the right fist brought to the mouth, then thrust straight up; War Cry,
+  the same, thrust forward and down; Shout, both fists brought to the mouth, pushed out forward
+  together (the three need no stop at the mouth: up to it and straight out, or swept past it and on
+  out, within half a second, casts; owner, 2026-11-11: "It should be pretty much immediate");
   Battle Command, the right fist beaten on the chest twice; Howl, both arms flung wide from the chest;
   Battle Cry, both fists at the shoulders pulled hard to the hips; Leap, both arms swung down by the
   sides then up past the head, fast (arms only, so seated too); Leap Attack, the same swing from both

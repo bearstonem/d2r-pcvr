@@ -83,6 +83,7 @@ static const GoldenRow Golden[]={
     {"interactions.click_to_drink",View::Body,1,content::RowKind::Toggle,"Click to drink",0,0},   // #425
     {"stick.walk_direction",View::Hands,0,content::RowKind::Stepper,"Walk direction",0,2},   // a row of its own since Dominant hand's row went (2026-11-10)
     {"interactions.left_handed",View::Hands,0,content::RowKind::Toggle,"Left-handed (experimental)",0,0},   // #307, a row of its own
+    {"interactions.left_handed_sticks_right",View::Hands,0,content::RowKind::Toggle,"Sticks stay right-handed",0,0},   // under it, shown while it is on
     {"gameplay.run_walk_toggle",View::Hands,0,content::RowKind::Toggle,"Stick toggle",0,0},   // a row of its own
     {"interactions.controller_labels",View::Hands,0,content::RowKind::Choice,"Button names",5,0},
     {"haptics.strength",View::Vibration,0,content::RowKind::Slider,"Overall vibration",0,1},
@@ -106,7 +107,7 @@ static const GoldenRow Golden[]={
     {"hud.tooltip_timing",View::Menus,0,content::RowKind::Choice,"Item details delay",3,0},
     {"hud.labels_size",View::Labels,0,content::RowKind::Slider,"Loot name size",0,0},
     {"interactions.loot_pick",View::Labels,0,content::RowKind::Toggle,"Loot pick",0,0},   // #257: Loot pick, Off / On
-    {"hud.ordinary_mob_bars",View::Labels,0,content::RowKind::Toggle,"Weak monster bars",0,0},
+    {"hud.monster_names",View::Labels,0,content::RowKind::Choice,"Monster names",3,0},   // All / Bosses and elites / None (2026-11-11; the Weak monster bars toggle before)
     {"loot.beams_brightness",View::Labels,1,content::RowKind::Filter,"Loot beams",0,0},   // loot beams: one row, its brightness slider
     {"loot.beams_unique",View::Labels,1,content::RowKind::Toggle,"Unique",0,0},           // (2026-11-01) and a Filter button whose
     {"loot.beams_set",View::Labels,1,content::RowKind::Toggle,"Set",0,0},                 // card holds Unique, Set, Rare and Runes
@@ -239,7 +240,7 @@ int main(int argc,char** argv){
     }
     // ---- the map: no row lost, none left to More, the names and the owner's pairs ----
     {
-        Check(tables.rowCount==113,"113 settings on the menu, each one row");   // + Weapons collide (2026-11-11)   // - Dominant hand (2026-11-10: Left-handed is the one switch)   // + Left-handed (#307)   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424), Click to drink (#425), Skill cooldowns (2026-11-09), + Summon range (#426), T cross to calibrate (#423), Heads turn to you (2026-11-09), Echo (world sound, 2026-11-09), + Monsters stagger, Heavy hits knock back (hit reactions, 2026-11-09), + Hit feel by target, Felt heartbeat (richer haptics)
+        Check(tables.rowCount==114,"114 settings on the menu, each one row");   // + Sticks stay right-handed (2026-11-11)   // + Weapons collide (2026-11-11)   // - Dominant hand (2026-11-10: Left-handed is the one switch)   // + Left-handed (#307)   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424), Click to drink (#425), Skill cooldowns (2026-11-09), + Summon range (#426), T cross to calibrate (#423), Heads turn to you (2026-11-09), Echo (world sound, 2026-11-09), + Monsters stagger, Heavy hits knock back (hit reactions, 2026-11-09), + Hit feel by target, Felt heartbeat (richer haptics)
         for(size_t i=0;i<tables.rowCount;++i)Check(!tables.rows[i].fallback&&tables.rows[i].page!=View::More,std::string("every setting has its page: ")+tables.rows[i].label);
         Check(content::Menu().report.empty(),"the tidy report is empty");
         struct Want {content::Group group;const char* name;std::vector<const char*> pages;};
@@ -1111,31 +1112,43 @@ int main(int argc,char** argv){
     // left-handed panels pass the same geometry checks: no label, chip, hint or card outgrows its place.
     {
         using framevr::handtext::Mirror;
-        const auto physical=[](int id){return id==LeftHanded;};
+        const auto physical=[](int id){return id==LeftHanded||id==LeftHandedSticks;};
         int compared=0,changed=0,panels=0;
         std::vector<std::string> sides;
-        const auto compare=[&](const L::Layout& written,const L::Layout& shown,const std::string& where,bool physicalCard){
+        // sticks false: Sticks stay right-handed (hand_role.h Sticks), the sticks' names kept (handtext::Mirror)
+        const auto compare=[&](const L::Layout& written,const L::Layout& shown,const std::string& where,bool physicalCard,bool sticks){
             Check(written.elements.size()==shown.elements.size(),where+": the same elements left-handed");
+            // Sticks stay right-handed moves the Guide's stick lines to the other hand's column (content::ColumnOf), so
+            // the lines come in another order there: the same actions, mirrored, in any order (each place: below)
+            std::vector<std::string> guideWritten,guideShown;
             for(size_t i=0;i<written.elements.size();++i){
                 const auto& a=written.elements[i];const auto& b=shown.elements[i];
                 Check(a.role==b.role&&a.key==b.key&&a.help==b.help,where+": the same element "+std::to_string(i));
+                if(!sticks&&a.role==L::Role::GuideLine){guideWritten.push_back(Mirror(a.sub,false));guideShown.push_back(b.sub);++compared;continue;}
+                if(!sticks&&a.role==L::Role::CardText&&a.text!=b.text){   // the Guide's columns change length there: its card may fit a sentence more or less
+                    const std::string want=physicalCard?a.text:Mirror(a.text,false);
+                    Check(want.rfind(b.text,0)==0||b.text.rfind(want,0)==0,where+": the card reads \""+b.text+"\", a cut of \""+want+"\" or more of it");
+                    ++compared;continue;
+                }
                 // (the detected controllers are read off the real hands: "Detected: left Touch / right Touch")
                 const bool keep=physical(int(a.key))||physical(a.help)||(physicalCard&&CardPart(a.role))||a.text.rfind("Detected: left ",0)==0||a.sub.rfind("Detected: left ",0)==0||
                     a.text.rfind("Left-handed (experimental): ",0)==0;   // that row's line in the list of changes
                 // the Guide's controls are the buttons of whichever controller is in that hand (GuideControl, below)
                 const bool buttons=a.role==L::Role::GuideLine||a.text.rfind("Game menus: ",0)==0;
-                if(!buttons)Check(b.text==(keep?a.text:Mirror(a.text)),where+": \""+a.text+"\" reads \""+b.text+"\" left-handed, expected \""+(keep?a.text:Mirror(a.text))+"\"");
-                Check(b.sub==(keep?a.sub:Mirror(a.sub)),where+": \""+a.sub+"\" reads \""+b.sub+"\" left-handed, expected \""+(keep?a.sub:Mirror(a.sub))+"\"");
+                if(!buttons)Check(b.text==(keep?a.text:Mirror(a.text,sticks)),where+": \""+a.text+"\" reads \""+b.text+"\" left-handed, expected \""+(keep?a.text:Mirror(a.text,sticks))+"\"");
+                Check(b.sub==(keep?a.sub:Mirror(a.sub,sticks)),where+": \""+a.sub+"\" reads \""+b.sub+"\" left-handed, expected \""+(keep?a.sub:Mirror(a.sub,sticks))+"\"");
                 ++compared;
                 if(b.text!=a.text||b.sub!=a.sub){++changed;sides.push_back(b.text!=a.text?b.text:b.sub);}
             }
+            std::sort(guideWritten.begin(),guideWritten.end());std::sort(guideShown.begin(),guideShown.end());
+            Check(guideWritten==guideShown,where+": the Guide's actions, mirrored, the same lines");
         };
-        const auto both=[&](const Model& m,const L::LayoutInput& in,const std::string& where,bool physicalCard=false){
+        const auto both=[&](const Model& m,const L::LayoutInput& in,const std::string& where,bool physicalCard=false,bool sticks=true){
             const auto written=L::Build(m,m.context,in);
             Check(!framevr::handtext::Left(),"right-handed outside the scope");
-            framevr::handtext::Scope left(true);
+            framevr::handtext::Scope left(true,!sticks);
             const auto shown=L::Build(m,m.context,in);
-            CheckLayout(shown,where+" left-handed");compare(written,shown,where,physicalCard);++panels;
+            CheckLayout(shown,where+(sticks?" left-handed":" left-handed, sticks right-handed"));compare(written,shown,where,physicalCard,sticks);++panels;
             return written;
         };
         for(const auto& c:contexts){
@@ -1164,12 +1177,15 @@ int main(int argc,char** argv){
                 const auto& d=Definitions[k];
                 L::Press(m,{Kind::Set,k,0,Normalize(Key(k),d.defaultValue==d.min?d.min+d.step*2:d.min)},0);
             }
-            for(int view=0;view<int(View::Count);++view){
+            Check(m.Get()[LeftHanded]>.5f,"the draft has Left-handed on, so Sticks stay right-handed is shown");
+            for(const bool sticks:{true,false})for(int view=0;view<int(View::Count);++view){
                 L::Press(m,{Kind::Open,view,-1},0);
-                const auto written=both(m,{},std::string("left-handed draft ")+ViewName(View(view)));
-                for(const auto& e:written.elements)if(e.role==L::Role::Row){L::LayoutInput p;p.card=e.help;p.hover=e.hit;both(m,p,std::string("left-handed draft card ")+std::to_string(e.help),physical(e.help));}
+                const std::string mode=sticks?"left-handed draft ":"left-handed, sticks right-handed, draft ";
+                const auto written=both(m,{},mode+ViewName(View(view)),false,sticks);
+                for(const auto& e:written.elements)if(e.role==L::Role::Row){L::LayoutInput p;p.card=e.help;p.hover=e.hit;both(m,p,mode+"card "+std::to_string(e.help),physical(e.help),sticks);}
+                if(View(view)==View::Hands)Check(FindRole(written,L::Role::Row,LeftHandedSticks)!=nullptr,"Sticks stay right-handed is a row on Hands with Left-handed on");
             }
-            L::Press(m,{Kind::Close},0);both(m,{},"left-handed confirm row");
+            L::Press(m,{Kind::Close},0);both(m,{},"left-handed confirm row");both(m,{},"left-handed, sticks right-handed, confirm row",false,false);
         }
         {   // the calibration view, each of its hints ("press B to skip" names the main hand's button)
             Model m;m.Open(Ready());
@@ -1246,6 +1262,55 @@ int main(int argc,char** argv){
             Check(mainSkills&&offSkills,"each column lists its own controller's buttons: X / Y interact on the left, A / B are the right hand's skills");
             Check(panels.find("Right Trigger = Ctrl in game menus")!=std::string::npos&&panels.find("Left Grip = Shift; push or pull a menu")!=std::string::npos&&panels.find("Left Y = Back")!=std::string::npos,
                   "game menus: "+panels);
+        }
+        {   // Sticks stay right-handed (hand_role.h Sticks): mirrored, the sticks' names kept; the Guide lists each
+            // stick's pushes under the hand whose controller has it, each hand's stick click under that hand
+            const auto& written=content::WrittenMenu();
+            const auto* mirroredMenu=[]{framevr::handtext::Scope left(true);return &content::Menu();}();
+            framevr::handtext::Scope left(true,true);
+            Check(framevr::handtext::SticksKept(),"the scope sets the sticks' mode");
+            {framevr::handtext::Scope right(false,true);Check(!framevr::handtext::SticksKept()&&&content::Menu()==&written,"the sticks' mode is read only left-handed");}
+            const auto& shown=content::Menu();
+            Check(&shown!=&written&&&shown!=mirroredMenu&&shown.rows.size()==written.rows.size(),"sticks right-handed: a menu of its own, row for row");
+            for(size_t i=0;i<written.rows.size();++i){
+                const auto& a=written.rows[i];const auto& b=shown.rows[i];
+                const bool keep=physical(int(a.key));
+                const auto same=[&](const char* x,const char* y){return (!x&&!y)||(x&&y&&std::string(y)==(keep?std::string(x):Mirror(x,false)));};
+                Check(same(a.label,b.label)&&same(a.help,b.help)&&same(a.warn,b.warn)&&same(a.besideLabel,b.besideLabel),std::string("sticks right-handed, row ")+a.label+": mirrored, the sticks' names kept");
+            }
+            for(int k=0;k<Count;++k){
+                const std::string text=WrittenHelpText(k);
+                Check(std::string(HelpText(k))==(physical(k)?text:Mirror(text,false)),std::string("sticks right-handed, help of ")+WrittenHelpTitle(k));
+            }
+            const auto rowHelp=[](Key k){const auto* r=content::RowOf(k);return std::string(r&&r->help?r->help:"");};
+            Check(rowHelp(SmoothTurn).find("right stick")!=std::string::npos&&std::string(HelpText(Snap)).find("right-stick")!=std::string::npos&&
+                  rowHelp(RunWalkToggle).find("right stick up")!=std::string::npos&&rowHelp(LootLabelSize).find("right stick down")!=std::string::npos,
+                  "turning, the run toggle and loot names: the right stick, as written");
+            Check(rowHelp(WalkDirection).find("the left stick walks")!=std::string::npos&&rowHelp(WalkDirection).find("that stick's controller")!=std::string::npos&&
+                  std::string(HelpText(RoomSteps)).find("the left stick")!=std::string::npos,"walking: the left stick and its own controller, as written");
+            Check(std::string(HelpText(BodyCalibration)).find("Left Y")!=std::string::npos||std::string(HelpText(BodyCalibration)).find("Right B")==std::string::npos,
+                  "the buttons stay mirrored: calibration's help names the main hand's button");
+            Check(std::string(framevr::handtext::T("Right hand: the right stick turns"))=="Left hand: the right stick turns","T: the hand mirrored, the stick kept");
+            {Model h;h.Open(Ready());Check(h.Get()[LeftHanded]==0&&!RowShown(LeftHandedSticks,h.Get(),{}),"right-handed (saved), the row is left out");}
+            using framevr::controllers::Labels;using framevr::controllers::Layout;
+            Model m;m.Open(Ready());Check(m.view==View::Guide,"the panel opens on the guide");
+            L::LayoutInput in;in.detected=Labels{{Layout::Touch,Layout::Touch}};
+            const auto guide=L::Build(m,{},in);CheckLayout(guide,"left-handed guide, sticks right-handed, Touch");
+            const L::Element* leftHead=nullptr;const L::Element* rightHead=nullptr;
+            for(const auto& e:guide.elements){
+                if(e.role==L::Role::Section&&e.text=="Left hand")leftHead=&e;
+                if(e.role==L::Role::Section&&e.text=="Right hand")rightHead=&e;
+            }
+            Check(leftHead&&rightHead&&leftHead->rect.x<rightHead->rect.x,"the Left hand column is on the left");
+            const auto under=[&](const char* action)->int{   // -1 not listed, 0 under Left hand, 1 under Right hand
+                for(const auto& e:guide.elements)if(e.role==L::Role::GuideLine&&e.sub==action)return e.rect.x==leftHead->rect.x?0:e.rect.x==rightHead->rect.x?1:2;
+                return -1;
+            };
+            Check(under("Walk")==0,"Walk is under Left hand: the left controller walks");
+            Check(under("Turn")==1&&under("Run or walk")==1&&under("Show all loot names")==1,"Turn, run / walk and loot names are under Right hand: the right controller turns");
+            Check(under("Open or close the left wheel")==0&&under("Open or close the right wheel")==1&&under("Inventory, character and skills")==1,
+                  "each hand's stick click stays with its hand: the left wheel under Left hand, the right wheel and the grip + click inventory under Right hand");
+            Check(under("Interact, or your skills")==0&&under("Your right-hand skills")==1,"the buttons stay mirrored: interact on the left controller");
         }
         Check(!framevr::handtext::Left()&&&content::Menu()==&content::WrittenMenu(),"OFF: the menu as written, the same table");
         Check(changed>=60,"the left-handed sweep saw sided words change ("+std::to_string(changed)+" of "+std::to_string(compared)+" texts)");

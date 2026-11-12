@@ -317,6 +317,8 @@ inline Tables TablesOf(const content::MenuData& m){
 }
 inline const Tables& ContentTables(){
     // Left-handed play: the menu with its words mirrored (content::Menu, hand_text.h), a table of its own.
+    // Sticks stay right-handed: a table of its own too, the sticks' names kept (handtext::SticksKept).
+    if(handtext::SticksKept()){static const Tables kept=TablesOf(content::Menu());return kept;}
     if(handtext::Left()){static const Tables mirrored=TablesOf(content::Menu());return mirrored;}
     static const Tables tables=TablesOf(content::Menu());   // Definitions merged with the overrides
     return tables;
@@ -1029,10 +1031,13 @@ struct Builder {
         auto labels=controllers::Resolve(hooks::ButtonNames(m.Get()),in.detected);
         labels.leftMain=handtext::Left();   // left-handed: the main hand's buttons are the left controller's (controllers::Labels)
         std::vector<const content::GuideLine*> left,right;std::string panels;
+        // Sticks stay right-handed: a stick's push is listed under the hand whose controller has it (ColumnOf).
+        const bool sticksKept=handtext::SticksKept();
         for(size_t i=0;i<t.guideCount;++i){
             const auto& g=t.guide[i];
-            if(g.column==content::GuideColumn::Left)left.push_back(&g);
-            else if(g.column==content::GuideColumn::Right)right.push_back(&g);
+            const auto column=content::ColumnOf(g,sticksKept);
+            if(column==content::GuideColumn::Left)left.push_back(&g);
+            else if(column==content::GuideColumn::Right)right.push_back(&g);
             else panels+=(panels.empty()?"Game menus: ":" \xc2\xb7 ")+content::GuideControl(g,labels)+" = "+handtext::T(g.action);
         }
         // Left-handed (hand_text.h): the off hand's column is the right hand's, so it goes on the right, and

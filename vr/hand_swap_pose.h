@@ -85,6 +85,46 @@ template<class M> inline bow::Mat ToBow(const M& m){bow::Mat b;std::memcpy(&b,&m
 template<class M> inline void FromBow(const bow::Mat& b,M& m){std::memcpy(&m,&b,sizeof b);}
 // a * X: every axis and the origin with x -> -x.
 inline bow::Mat MirrorX(bow::Mat a){for(int r=0;r<4;++r)a.m[r*4]=-a.m[r*4];return a;}
+
+// Phase 1 (above): an item seated on the other wrist stays its own wrist's child in the rig - R_weapon_attach
+// hangs under the RIGHT wrist while it holds the main weapon in the LEFT hand. So whatever turns a wrist after
+// the items are seated carries that wrist's attach bone with it (skeletons.cpp Propagate re-derives a bone's
+// children from their relation to it): the right wrist's bend stop under a shield turned the main weapon
+// about the right wrist, out of the left hand by the stop's angle (2026-11-11, owner: "the weapon and shield
+// ... seem to be rotated or a little bit off" left-handed). A Seat is where an item sits on the wrist holding
+// it, taken once it is seated, adjusted and turned; Reseat puts it back there once the wrists are final.
+struct Seat {int bone=-1,wrist=-1;bow::Mat local{},boneAt{},wristAt{};};
+template<class M> inline Seat SeatOn(int bone,int wrist,const std::vector<M>& w) {
+    Seat seat;bow::Mat inverse;
+    if(bone<0||wrist<0||bone>=int(w.size())||wrist>=int(w.size())||bone==wrist)return seat;
+    const bow::Mat b=ToBow(w[bone]),k=ToBow(w[wrist]);
+    if(!bow::Affine(b)||!bow::Inverse(k,inverse))return seat;
+    seat.local=bow::Multiply(b,inverse);seat.boneAt=b;seat.wristAt=k;
+    seat.bone=bone;seat.wrist=wrist;
+    return seat;
+}
+// The item where its seat has it on that wrist now, and every bone under it carried along (each keeping its
+// relation to its parent). parents: parents before children. Nothing is touched, bit for bit, while neither
+// the item nor the wrist has moved since it was seated; true when it was put back.
+template<class M> inline bool Reseat(const Seat& seat,const std::vector<int>& parents,std::vector<M>& w) {
+    const int n=int(w.size());
+    if(seat.bone<0||seat.wrist<0||seat.bone>=n||seat.wrist>=n||int(parents.size())!=n)return false;
+    const bow::Mat b=ToBow(w[seat.bone]),k=ToBow(w[seat.wrist]);
+    if(std::memcmp(&b,&seat.boneAt,sizeof b)==0&&std::memcmp(&k,&seat.wristAt,sizeof k)==0)return false;
+    const bow::Mat put=bow::Multiply(seat.local,k);
+    if(!bow::Affine(put))return false;
+    const std::vector<M> before=w;
+    std::vector<char> moved(n,0);
+    FromBow(put,w[seat.bone]);moved[seat.bone]=1;
+    for(int i=seat.bone+1;i<n;++i) {
+        const int p=parents[i];
+        if(p<0||!moved[p])continue;
+        bow::Mat inverse;
+        if(!bow::Inverse(ToBow(before[p]),inverse))continue;
+        FromBow(bow::Multiply(bow::Multiply(ToBow(before[i]),inverse),ToBow(w[p])),w[i]);moved[i]=1;
+    }
+    return true;
+}
 // A controller's turn (quaternion x y z w) and a point or direction, reflected. The reflected left
 // controller is a right controller: its grip axes keep OpenXR's convention (x to the user's right in
 // a natural hold), which is what X R X gives.

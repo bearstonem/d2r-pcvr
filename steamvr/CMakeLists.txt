@@ -190,6 +190,7 @@ target_link_libraries(weapon-skills-test PRIVATE minhook)
 add_executable(quick-cast-test quick_cast_test.cpp)
 add_executable(hand-controls-test hand_controls_test.cpp)
 add_executable(hand-role-test hand_role_test.cpp)   # left-handed play (#307): roles, fallback kinds, mirrored engines, grip and shield placement
+add_executable(hand-swap-mirror-test hand_swap_mirror_test.cpp)   # left-handed play (#307): every weapon kind and the shield posed as the mirror image of right-handed
 add_executable(hand-text-test hand_text_test.cpp)   # left-handed play (#307): the words mirrored (hand_text.h) - sides, buttons, kept phrases, every motion cue and skill usage text
 add_executable(elemental-hands-test elemental_hands_test.cpp)
 add_executable(elemental-particles-test elemental_particles_test.cpp)
@@ -349,6 +350,7 @@ target_link_libraries(interaction-test PRIVATE framevr-runtime)
 
 add_executable(journal-test journal_test.cpp)
 add_executable(native-panels-test native_panels_test.cpp)
+add_executable(cinema-screen-test cinema_screen_test.cpp)
 add_executable(dropped-bottles-test dropped_bottles_test.cpp dropped_bottles.cpp)
 target_link_libraries(dropped-bottles-test PRIVATE box3d framevr-runtime)
 add_executable(props-test props_test.cpp)
@@ -467,11 +469,13 @@ add_test(NAME hero-light-test COMMAND hero-light-test "${ROOT}/reshade/D2R_Depth
 set_tests_properties(hero-light-test PROPERTIES TIMEOUT 30)
 add_test(NAME body-calibration-gesture-test COMMAND body-calibration-gesture-test "${ROOT}/steamvr/transport.cpp" "${ROOT}/vr/vrcam.cpp")
 set_tests_properties(body-calibration-gesture-test PROPERTIES TIMEOUT 30)
+add_test(NAME cinema-screen-test COMMAND cinema-screen-test "${ROOT}/steamvr/transport.cpp" "${ROOT}/vr/vrcam.cpp" "${ROOT}/vr/gamestate.cpp")
+set_tests_properties(cinema-screen-test PROPERTIES TIMEOUT 30)
 add_test(NAME light-bounds-test COMMAND light-bounds-test)
 set_tests_properties(light-bounds-test PROPERTIES TIMEOUT 30)
 foreach(test_target IN ITEMS memory-test biome-list-test hook-metrics-test active-keys-test resource-descriptions-test latest-worker-test haptic-pulse-test thread-stats-test draw-sampler-test game-patch-plan-test cull-volume-test
     spell-impacts-test
-    gameplay-test weapon-skills-test quick-cast-test hand-controls-test hand-role-test hand-text-test elemental-hands-test elemental-particles-test skill-pad-test interact-press-test sewer-interaction-test notice-card-test mod-layout-test spell-aim-test bow-pose-test crossbow-pose-test body-tracking-test shapeshift-form-test head-shadow-test head-skip-test shield-steady-test body-calibration-test shoulder-swap-test blood-screen-test
+    gameplay-test weapon-skills-test quick-cast-test hand-controls-test hand-role-test hand-swap-mirror-test hand-text-test elemental-hands-test elemental-particles-test skill-pad-test interact-press-test sewer-interaction-test notice-card-test mod-layout-test spell-aim-test bow-pose-test crossbow-pose-test body-tracking-test shapeshift-form-test head-shadow-test head-skip-test shield-steady-test body-calibration-test shoulder-swap-test blood-screen-test
     portal-billboard-test shrine-trace-test shrine-placement-test overlay-view-test bone-armor-height-test composition-layers-test projectile-rules-test environment-cutaway-test roof-materials-test game-ceiling-test stereo-prop-physics-test dropped-bottles-test props-test limb-rig-test aged-cache-test ecs-storage-test look-at-test limb-physics-test limb-worker-test leather-menu-test stash-buttons-test stats-button-test menu-drop-test arcane-decay-test respec-button-test vr-keyboard-test
     combat-rules-test strike-skills-test zeal-light-test skill-usage-test shield-guard-test guard-strain-test heartbeat-test haptic-impact-test haptic-heartbeat-test run-speed-test room-scale-test room-steps-test walk-direction-test logging-test log-rotation-test melee-contact-test bow-bash-test weapon-heft-test hit-reactions-test held-collision-test melee-weapon-test breakables-test offline-difficulty-test enemy-sight-test attack-speed-test world-coordinates-test bow-flight-test bow-laser-test spell-cast-test spell-aim-assist-test tactical-chord-test glyph-recognizer-test glyph-trail-test glyph-cast-test spell-motion-test motions-amazon-test motions-barbarian-test motions-necromancer-test motions-warlock-test motions-assassin-test motions-paladin-test motions-druid-test bone-graft-test
     interaction-test dev-scenarios-test native-belt-test wrist-hud-test map-zoom-test floating-map-test navigation-info-test companions-test active-effects-test skill-cooldowns-test dropped-item-labels-test stick-gestures-test show-items-command-test native-hud-test render-resolution-test render-pointer-test scene-depth-test game-device-only-test controller-bindings-test journal-test native-panels-test talk-stop-test sheet-walk-test room-stitch-test ceiling-top-test loot-beams-test
@@ -524,6 +528,10 @@ add_test(NAME vr-settings-worker-paint-test COMMAND vr-settings-preview --worker
 # button name still fits ("right" is a letter longer than "left"), and the wheel's cards and prompt paint.
 add_test(NAME vr-settings-pages-left-handed-test COMMAND vr-settings-preview --pages-check --left-handed)
 add_test(NAME vr-settings-fit-left-handed-test COMMAND vr-settings-preview --fit-check --left-handed)
+# Left-handed with Sticks stay right-handed (hand_role.h Sticks): the sticks' names kept, the Guide's stick lines in
+# the other hand's column.
+add_test(NAME vr-settings-pages-left-handed-sticks-test COMMAND vr-settings-preview --pages-check --left-handed-sticks-right)
+add_test(NAME vr-settings-fit-left-handed-sticks-test COMMAND vr-settings-preview --fit-check --left-handed-sticks-right)
 add_test(NAME interaction-motions-left-handed-test COMMAND interaction-preview "${CMAKE_CURRENT_BINARY_DIR}/motions-preview-left-handed.png" --motions-check --left-handed)
 add_test(NAME skill-card-fit-left-handed-test COMMAND interaction-preview "${CMAKE_CURRENT_BINARY_DIR}/skill-editor-left-handed.png" --editor-check --left-handed)
 add_test(NAME interaction-glyphs-left-handed-test COMMAND interaction-preview "${CMAKE_CURRENT_BINARY_DIR}/glyphs-preview-left-handed.png" --glyphs-check --left-handed)

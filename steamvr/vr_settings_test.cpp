@@ -655,10 +655,14 @@ int main(int argc,char** argv){
         Check(request.changed==(1u<<ProjectileAimAssist)&&request.values[ProjectileAimAssist]==1,"assist saves independently");
         assist.Click(hit);Check(assist.Get()[ProjectileAimAssist]==1,"assist cannot change while saving");
         assist.Close();assist.Open(s);Check(assist.Get()[ProjectileAimAssist]==2,"discarding edits restores saved assistance");}
-    Check(s.values[OrdinaryMobBars]==0,"ordinary mob bars are off by default");
-    {Model bars;bars.Open(s);
-        bars.Click(Step(OrdinaryMobBars));auto request=bars.Click({Kind::Apply});
-        Check(request.changed==(1u<<OrdinaryMobBars)&&request.values[OrdinaryMobBars]==1,"toggle saves only mob visibility");}
+    Check(s.values[MonsterNames]==1,"monster names default to Bosses and elites, the Weak monster bars default");
+    Check(Definitions[MonsterNames].min==0&&Definitions[MonsterNames].max==2&&std::wstring_view(Definitions[MonsterNames].section)==L"hud"&&std::wstring_view(Definitions[MonsterNames].key)==L"monster_names","All, Bosses and elites, None in [hud] monster_names");
+    {Model names;names.Open(s);
+        const std::pair<int,float> steps[]={{1,2.f},{1,2.f},{-1,1.f},{-1,0.f},{-1,0.f}};
+        for(auto [delta,choice]:steps){
+            names.Click(Step(MonsterNames,delta));Check(names.Get()[MonsterNames]==choice,"monster names step All, Bosses and elites, None and stop at each end");}
+        auto request=names.Click({Kind::Apply});
+        Check(request.changed==(1u<<MonsterNames)&&request.values[MonsterNames]==0,"the choice saves only monster names");}
     Check(s.values[SmoothTurn]==0&&s.values[Snap]==30,"snap turning remains the default");
     Check(EffectiveSnapAngle(30,-1)==30&&EffectiveSnapAngle(0,-1)==0,"legacy snap and smooth profiles retain their mode");
     Check(EffectiveSnapAngle(45,1)==0&&EffectiveSnapAngle(45,0)==45,"explicit toggle selects camera mode without losing angle");
@@ -969,7 +973,7 @@ int main(int argc,char** argv){
         Check(Defaults()[LeftHanded]==0&&std::wstring(Definitions[LeftHanded].section)==L"interactions"&&
               std::wstring(Definitions[LeftHanded].key)==L"left_handed"&&Definitions[LeftHanded].min==0&&Definitions[LeftHanded].max==1&&
               HelpText(LeftHanded)[0]!=0&&LeftHanded<ChangeMask::Bits&&LeftHanded+1==HeldCollisions,
-              "Left-handed: Off by default, [interactions] left_handed Off / On, explained, its own change bit, appended after the haptics");
+              "Left-handed: Off by default, [interactions] left_handed Off / On, explained, its own change bit, appended after the haptics (Weapons collide after it)");
         const auto* row=content::RowOf(LeftHanded);
         Check(row&&!row->beside&&row->page==View::Hands&&row->kind==content::RowKind::Toggle&&std::strcmp(row->label,"Left-handed (experimental)")==0&&
               row->section==content::RowOf(WalkDirection)->section&&!content::RowOf(WalkDirection)->beside&&row->classes==content::AllClasses,"a switch of its own on Controls > Hands, every class");
@@ -984,8 +988,8 @@ int main(int argc,char** argv){
     {   // Weapons collide (held_collision.h, 2026-11-11): On by default, Melee reach's right half on Combat, saved alone
         Check(Defaults()[HeldCollisions]==1&&std::wstring(Definitions[HeldCollisions].section)==L"gameplay"&&
               std::wstring(Definitions[HeldCollisions].key)==L"held_collisions"&&Definitions[HeldCollisions].min==0&&Definitions[HeldCollisions].max==1&&
-              HelpText(HeldCollisions)[0]!=0&&HeldCollisions<ChangeMask::Bits&&HeldCollisions==Count-1,
-              "Weapons collide: On by default, [gameplay] held_collisions Off / On, explained, its own change bit, appended last");
+              HelpText(HeldCollisions)[0]!=0&&HeldCollisions<ChangeMask::Bits&&HeldCollisions+1==LeftHandedSticks,
+              "Weapons collide: On by default, [gameplay] held_collisions Off / On, explained, its own change bit, appended (Sticks stay right-handed after it)");
         const auto* row=content::RowOf(HeldCollisions);
         Check(row&&row->beside&&row->page==View::Combat&&row->kind==content::RowKind::Toggle&&std::strcmp(row->label,"Weapons collide")==0&&
               row->section==content::RowOf(MeleeReach)->section&&row->classes==content::AllClasses,"Melee reach's right half on Combat > Melee, every class");
@@ -994,6 +998,41 @@ int main(int argc,char** argv){
         for(int c=-1;c<=heroclass::Assassin+1;++c)Check(RowShown(HeldCollisions,Defaults(),{c}),"every class sees it");
         Model t;Snapshot ready;ready.ready=true;t.Open(ready);layout::Press(t,{Kind::Set,HeldCollisions,0,0},0);
         Check(t.Get()[HeldCollisions]==0&&t.Click({Kind::Apply}).changed==(ChangeMask{1}<<HeldCollisions),"the switch turns it Off, and Apply saves only it");
+    }
+    {   // Sticks stay right-handed (hand_role.h Sticks): Off by default, a row of its own under Left-handed, shown only
+        // while Left-handed is on (the draft's value too), about the real controllers, saved alone
+        Check(Defaults()[LeftHandedSticks]==0&&std::wstring(Definitions[LeftHandedSticks].section)==L"interactions"&&
+              std::wstring(Definitions[LeftHandedSticks].key)==L"left_handed_sticks_right"&&Definitions[LeftHandedSticks].min==0&&
+              Definitions[LeftHandedSticks].max==1&&Definitions[LeftHandedSticks].step==1&&HelpText(LeftHandedSticks)[0]!=0&&
+              LeftHandedSticks<ChangeMask::Bits&&LeftHandedSticks==Count-1,
+              "Sticks stay right-handed: Off by default, [interactions] left_handed_sticks_right Off / On, explained, its own change bit, appended last");
+        const auto* row=content::RowOf(LeftHandedSticks);const auto* hand=content::RowOf(LeftHanded);
+        Check(row&&hand&&!row->beside&&row->page==View::Hands&&row->kind==content::RowKind::Toggle&&
+              std::strcmp(row->label,"Sticks stay right-handed")==0&&std::strlen(row->label)<=26&&row->section==hand->section&&row->classes==content::AllClasses,
+              "a switch of its own on Controls > Hands, in Left-handed's section, every class, its label within 26 characters");
+        {   // right after Left-handed in the page's rows
+            const auto& rows=content::Menu().rows;size_t at=rows.size(),handAt=rows.size();
+            for(size_t i=0;i<rows.size();++i){if(rows[i].key==LeftHandedSticks)at=i;if(rows[i].key==LeftHanded)handAt=i;}
+            Check(handAt+1==at,"listed right under Left-handed");
+        }
+        Values off=Defaults(),on=Defaults();on[LeftHanded]=1;
+        for(int c=-1;c<=heroclass::Assassin+1;++c)Check(!RowShown(LeftHandedSticks,off,{c})&&RowShown(LeftHandedSticks,on,{c}),"shown only while Left-handed is on, for every class");
+        Values kept=on;kept[LeftHandedSticks]=1;
+        Check(RowShown(LeftHanded,kept,{})&&!RowShown(LeftHandedSticks,Defaults(),{}),"Left-handed itself is always shown; its sticks' row goes with it");
+        const std::string help=HelpText(LeftHandedSticks),rowHelp=row->help;
+        Check(help.find("left stick walks")!=std::string::npos&&help.find("right stick turns")!=std::string::npos&&help.find("wheel")!=std::string::npos&&
+              rowHelp.find("left stick walks")!=std::string::npos&&rowHelp.find("right stick turns")!=std::string::npos&&rowHelp.size()<=160,
+              "both helps say the left stick walks and the right one turns, and where the wheels are");
+        {   // with the words mirrored the row reads as written: it is about the real controllers
+            framevr::handtext::Scope left(true);
+            Check(std::strcmp(content::RowOf(LeftHandedSticks)->help,rowHelp.c_str())==0&&std::string(HelpText(LeftHandedSticks))==help,"left-handed: the row and its help read the same");
+        }
+        Model t;Snapshot ready;ready.ready=true;t.Open(ready);
+        layout::Press(t,{Kind::Set,LeftHanded,0,1},0);layout::Press(t,{Kind::Set,LeftHandedSticks,0,1},0);
+        Check(t.Get()[LeftHanded]==1&&t.Get()[LeftHandedSticks]==1&&RowShown(LeftHandedSticks,t.Get(),{}),"the draft's Left-handed shows the row at once, and its switch turns it On");
+        Check(t.Click({Kind::Apply}).changed==((ChangeMask{1}<<LeftHanded)|(ChangeMask{1}<<LeftHandedSticks)),"Apply saves the two switches, nothing else");
+        Model u;Snapshot saved;saved.ready=true;saved.values[LeftHanded]=1;u.Open(saved);layout::Press(u,{Kind::Set,LeftHandedSticks,0,1},0);
+        Check(u.Click({Kind::Apply}).changed==(ChangeMask{1}<<LeftHandedSticks),"with Left-handed saved, Apply saves only the sticks' switch");
     }
     {   // Loot pick (#257): On by default, a switch on Interface, the right half of Loot name size's row, saved alone
         Check(Defaults()[LootPick]==1&&std::wstring(Definitions[LootPick].section)==L"interactions"&&

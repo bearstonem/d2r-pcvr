@@ -28,7 +28,7 @@ enum class View : uint8_t { Presets, Combat, Targeting, Shield, Monsters, Physic
 constexpr int MaxRailGroups=8;
 enum Key { Motion, Seated, Dominant, Snap, TurnSpeed, Waist, BeltForward,
            Foveation, Sky, Fog, Ceiling, DrawDistance, ObjectDistance,
-           EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, VitalsTilt, HapticStrength, HapticMelee, HapticBowDraw, HapticBowRelease, HapticSpell, HapticInteraction, HapticAlert, HapticShortMelee, BloodVisor, BloodWipe, MeleeThrustSpeed, LootLabelSize, CompanionCounts, StrainVignette, OfflinePlayers, ShieldBashSpeed, DesktopOneEye, MapTopDown, MapRotate, FoveationStrength, StereoRendering, DeferGpuWait, TargetHighlight, HeartbeatStart, SpellLock, StaffPoint, LandingCircles, GroundAim, AimHighlights, HighlightRight, HighlightLeft, EnemySight, BowLaser, ThrowLift, BottlePhysics, PropPhysics, CompanionAi, ShieldGrip, ShieldOut, ShieldUp, ShieldFollow, ShieldRoll, AimFollowsView, CompanionTactical, LeftHandStrikes, TorchFlame, FrameGeneration, FrameGenPreset, FrameGenScale, RunSpeed, RunWalkToggle, BodyPhysics, BigObjectDistance, FogDistance, LeatherMenu, LootBeamUnique, LootBeamSet, LootBeamRare, LootBeamRunes, LootBeamBrightness, CeilingTorches, ArcaneDecay, ArcaneFade, ManaThreshold, ArcaneIntensity, GlyphDraw, GlyphCircle, GlyphTriangle, GlyphSquare, GlyphLightning, GlyphSpiral, GlyphV, GlyphStar, GlyphWave, LootPick, MotionsOff, MotionsPaladinOff, MotionsDruidOff, MotionsAmazonOff, MotionsNecromancerOff, MotionsBarbarianOff, MotionsAssassinOff, MotionsWarlockOff, GlyphDrawSecond, GlyphLeftCircle, GlyphLeftTriangle, GlyphLeftSquare, GlyphLeftLightning, GlyphLeftSpiral, GlyphLeftV, GlyphLeftStar, GlyphLeftWave, SpellHandLight, MeleeReach, WalkDirection, RoomSteps, LightRadiusBoost, WeaponHeft, BowBash, AimWithEyes, MercPotionAssist, ClickToDrink, SkillCooldowns, SummonRangeMultiplier, TCrossCalibrate, LookAtYou, ReverbEcho, HitStagger, HitKnockback, HapticSurfaces, HapticHeartbeat, LeftHanded, HeldCollisions, Count };
+           EyeHeight, ArmSpan, BodyCalibration, SkillGestures, WristMap, WristCompass, ControllerLabels, WeaponSkillIndicators, PlanarSpellAim, VitalsLocation, CriticalAlerts, RenderResolution, NavigationLocation, SmoothTurn, OrdinaryMobBars, MenuDistance, TooltipTiming, ProjectileAimAssist, MeleeHitSpeed, VitalsTilt, HapticStrength, HapticMelee, HapticBowDraw, HapticBowRelease, HapticSpell, HapticInteraction, HapticAlert, HapticShortMelee, BloodVisor, BloodWipe, MeleeThrustSpeed, LootLabelSize, CompanionCounts, StrainVignette, OfflinePlayers, ShieldBashSpeed, DesktopOneEye, MapTopDown, MapRotate, FoveationStrength, StereoRendering, DeferGpuWait, TargetHighlight, HeartbeatStart, SpellLock, StaffPoint, LandingCircles, GroundAim, AimHighlights, HighlightRight, HighlightLeft, EnemySight, BowLaser, ThrowLift, BottlePhysics, PropPhysics, CompanionAi, ShieldGrip, ShieldOut, ShieldUp, ShieldFollow, ShieldRoll, AimFollowsView, CompanionTactical, LeftHandStrikes, TorchFlame, FrameGeneration, FrameGenPreset, FrameGenScale, RunSpeed, RunWalkToggle, BodyPhysics, BigObjectDistance, FogDistance, LeatherMenu, LootBeamUnique, LootBeamSet, LootBeamRare, LootBeamRunes, LootBeamBrightness, CeilingTorches, ArcaneDecay, ArcaneFade, ManaThreshold, ArcaneIntensity, GlyphDraw, GlyphCircle, GlyphTriangle, GlyphSquare, GlyphLightning, GlyphSpiral, GlyphV, GlyphStar, GlyphWave, LootPick, MotionsOff, MotionsPaladinOff, MotionsDruidOff, MotionsAmazonOff, MotionsNecromancerOff, MotionsBarbarianOff, MotionsAssassinOff, MotionsWarlockOff, GlyphDrawSecond, GlyphLeftCircle, GlyphLeftTriangle, GlyphLeftSquare, GlyphLeftLightning, GlyphLeftSpiral, GlyphLeftV, GlyphLeftStar, GlyphLeftWave, SpellHandLight, MeleeReach, WalkDirection, RoomSteps, LightRadiusBoost, WeaponHeft, BowBash, AimWithEyes, MercPotionAssist, ClickToDrink, SkillCooldowns, SummonRangeMultiplier, TCrossCalibrate, LookAtYou, ReverbEcho, HitStagger, HitKnockback, HapticSurfaces, HapticHeartbeat, LeftHanded, HeldCollisions, LeftHandedSticks, Count };
 // One bit per setting, 256 wide: four words, since MSVC has no wider integer.
 // (128 until 2026-11-08, when 126 were in use and more rows were coming.)
 struct ChangeMask {
@@ -99,7 +99,8 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"VR render resolution", "Independent of monitor; higher values cost GPU time", L"render",L"vr_resolution",1,0,6,1},
     {"Minimap & Compass", "Wrist / Palm / Either / Off; independent of health and mana", L"interactions",L"navigation_location",0,0,3,1},
     {"Smooth turning", "Continuous right-stick turning; Off uses snap turning", L"turn",L"smooth",0,0,1,1},
-    {"Ordinary mob bars", "Weak mobs' health and names; bosses and elites stay visible", L"hud",L"ordinary_mob_bars",0,0,1,1},
+    // Monster names (MonsterNames, below; d2rcam::monsterbars::Names): 0 All, 1 Bosses and elites, 2 None.
+    {"Monster names", "Names and health over monsters: all, bosses and elites, or none", L"hud",L"monster_names",1,0,2,1},
     {"Menu distance", "Eye-level inventory, merchant and main menus", L"hud",L"menu_distance",1,0,2,1},
     {"Item tooltip timing", "Laser hover: Instant, Short (300 ms), or Original timing", L"hud",L"tooltip_timing",0,0,2,1},
     {"Projectile aim assist", "Hand spells: Light assists launch; Strong adds gentle homing", L"gameplay",L"projectile_aim_assist",2,0,2,1},
@@ -118,7 +119,7 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"Melee thrust speed", "Forward stabs along the blade; independent of swing speed", L"gameplay",L"melee_thrust_speed",2,.75f,10,.25f},
     {"Loot label size", "Dropped-item names; 45% is the original size", L"hud",L"labels_size",45,20,150,5},
     {"Companions & effects", "Companion counts and current buffs, auras and harmful effects", L"interactions",L"companion_counts",1,0,1,1},
-    {"Guard strain vignette", "Blocks darken the rim of the view; the rarer the attacker, the faster", L"gameplay",L"guard_strain_vignette",1,0,1,1},
+    {"Guard strain vignette", "Blocks darken the rim of the view; faster for rarer attackers, slower with more Defense", L"gameplay",L"guard_strain_vignette",1,0,1,1},
     {"Offline difficulty", "Players 1-8 scaling for newly spawned monsters", L"gameplay",L"offline_players",0,0,8,1},
     {"Shield bash speed", "Hand speed for bash / Smite; wrist twisting never attacks", L"gameplay",L"shield_bash_speed",2,.75f,10,.25f},
     {"Desktop shows one eye", "Monitor shows the left eye only; one extra GPU copy per frame", L"render",L"desktop_one_eye",1,0,1,1},
@@ -246,9 +247,9 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"Spell hand light", "Sorceress: how bright the spells in her hands light the dark around you; Off for none", L"torch",L"spell_hands_pct",40,0,100,10},
     // Padding on every monster's body for weapon and fist contacts (melee_contact.h Reach, vr/melee.cpp); 0 = as measured.
     {"Melee reach", "A weapon or fist this close beside a monster still hits; walls still block", L"gameplay",L"melee_reach_cm",0,0,50,5},
-    // Walk direction (walk_direction.h; owner 2026-11-08): the left stick walks where you look (0) or where the
-    // left controller points (1). Beside Dominant hand.
-    {"Walk direction", "The left stick walks where you look, or where the left controller points", L"stick",L"walk_direction",0,0,1,1},
+    // Walk direction (walk_direction.h; owner 2026-11-08): the walk stick walks where you look (0) or where its own
+    // controller points (1): the left controller, the right one left-handed unless Sticks stay right-handed.
+    {"Walk direction", "The left stick walks where you look, or where that stick's controller points", L"stick",L"walk_direction",0,0,1,1},
     // Room follows you (room_steps.h; Discord, 2026-11-04 and 11-08; owner 2026-11-08: "the room center becomes where
     // we physically move"): the hero's spot follows you in your room. On by default; beside Seated play, which turns it off.
     {"Room follows you", "The hero's spot follows you as you move in your room; Off: it stays where you calibrated", L"gameplay",L"room_steps",1,0,1,1},
@@ -299,6 +300,11 @@ inline constexpr std::array<Definition,Count> Definitions{{
     // each other"): the weapon stops at your own shield and slides along it, two weapons stop at each other; the drawn
     // hand gives way, up to 12 cm. VR Settings > Combat, beside Melee reach. On by default.
     {"Weapons collide", "Your weapon stops at your own shield, and two weapons stop at each other", L"gameplay",L"held_collisions",1,0,1,1},
+    // Sticks stay right-handed (hand_role.h Sticks; left-handed players, 2026-11-11: "keep the game controls, like
+    // movement and rotation, on the actual controllers as if they were right-handed"): with Left-handed on, the left
+    // stick still walks and the right one turns; everything else stays mirrored. Off by default; shown only with
+    // Left-handed on (RowShown), below it on Controls > Hands.
+    {"Sticks stay right-handed", "Left-handed only: the left stick walks and the right stick turns, as right-handed", L"interactions",L"left_handed_sticks_right",0,0,1,1},
 }};
 using Values=std::array<float,Count>;
 // The setting holding the skill on glyph shape i (glyph_recognizer.h order): the right hand's (0), or the left's (1).
@@ -317,6 +323,11 @@ inline float LegacyHighlight(Key key,float byRange,float hue){
     if(key==HighlightRight&&std::isfinite(hue)&&hue>=0){const float snapped=std::round(hue/15)*15;return snapped<=0?360.f:std::min(snapped,360.f);}
     return Definitions[key].defaultValue;
 }
+// Monster names (VR Settings > Interface > Labels; owner 2026-11-11: "If it is turned off in settings you
+// should not show monster names at all ... or just turn everything off") took the slot of the Weak monster
+// bars toggle (2026-10-13), so the keys keep their order. Without [hud] monster_names the older
+// [hud] ordinary_mob_bars is read: 1 All, 0 Bosses and elites (monsterbars::FromIni). Never rewritten.
+inline constexpr Key MonsterNames=OrdinaryMobBars;
 inline int HapticCategory(Key key){return key>=HapticMelee&&key<=HapticAlert?key-HapticMelee:-1;}
 inline haptics::Sample HapticSample(const Values& values,haptics::Category category,int hand=0){return haptics::SampleFor(category,values[HapticShortMelee]>.5f,hand);}
 inline haptics::Strengths HapticLevels(const Values& values){
@@ -566,6 +577,7 @@ inline bool RowShown(Key key,const Values& v,const Context& c){
         case FogDistance:return v[Fog]>.5f;   // beside Distance fog while the fog is on (main greyed it; RowEnabled)
         case CeilingTorches:return v[Ceiling]>.5f;   // beside Dungeon ceilings while they are on (a greyed half has no room for its lock)
         case RoomSteps:return v[Seated]<.5f;   // beside Seated play while it is off (sitting, there are no steps)
+        case LeftHandedSticks:return v[LeftHanded]>.5f;   // under Left-handed while it is on (right-handed the sticks are already there)
         // NVIDIA's rows follow the NVIDIA mode alone: By turns grays them with Frame generation (RowEnabled).
         case FrameGenPreset:case FrameGenScale:return framegen::Read(v[FrameGeneration],0,0).mode==framegen::Mode::Nvidia;
         default:return true;

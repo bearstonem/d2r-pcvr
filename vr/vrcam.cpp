@@ -95,6 +95,7 @@ namespace hud { void SetWorkspaceBand(float top, float bottom); void SetBoardCle
                 bool PictureNow(int i, float box[4], uint64_t* srv); void SetPictureBarMoved(bool moved); void SetPictureBarOffset(float x, float y); void SetPictureMapMoved(bool moved); void SetPictureMapOffset(float x, float y);
                 void SetLabels(bool on); bool LabelsNow(float keepBar[4], float keepMap[4], uint64_t* srv); void SetUiMask(bool on); bool UiMaskNow(); }
 #include "d2rcam.h"
+#include "monster_bars.h"
 #ifdef D2RVR_NATIVE_OPENXR
 #include "foveation.h"
 #include "foveation_math.h"
@@ -118,6 +119,7 @@ namespace gamestate {bool LeftShield();}
 namespace gamestate {framevr::dualwield::Equipment MeleeEquipment();}   // the two hands' weapons (held items collide)
 #endif
 namespace gamestate {bool OpaqueMenuOpen();}
+namespace gamestate {bool CinemaPlaying();void SetCinemaEnabled(bool on);void CinemaWorldDrawn(uint64_t now);void CinemaTick(uint64_t now);}
 namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "d2r_vr_state.h"
 
@@ -185,6 +187,7 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "../steamvr/sheet_walk.h"
 #include "../steamvr/room_stitch.h"
 #include "../steamvr/ceiling_top.h"
+#include "../steamvr/cinema_screen.h"
 namespace gamestate {uint32_t TalkOpens();}   // NPC conversations opened (talk_stop.h)
 
 #pragma intrinsic(_ReturnAddress)
@@ -338,7 +341,7 @@ struct Settings {
     std::atomic<float> lightNight{65.0f};
     std::atomic<float> nightBright{0.25f};  // [sky] night_brightness: the sky and the fog at full night, times their day brightness
     std::atomic<bool>  skyAlways{false};    // whatever the biome (testing): caves get a sky too
-    std::atomic<bool>  campfireOn{false};    // [campfire] enabled: character creation's campfire scene in stereo, round you
+    std::atomic<bool>  campfireOn{true};     // [campfire] enabled (on by default): character creation's campfire scene in stereo, round you
     std::atomic<float> campfireEye{6.0f};    // [campfire] eye: the eye height the scene's scale is taken from, world units (~0.24 m each)
     std::atomic<float> campfireUp{2.25f};     // [campfire] up: the eyes above the game camera, world units
     std::atomic<float> campfireForward{3.0f};// [campfire] forward: the eyes ahead of the game camera, toward the fire, world units
@@ -371,8 +374,16 @@ struct Settings {
     // and a click's whoosh; sparks: a burst of sparks out of the fire at a click on it (the shader's Sparks);
     // fire_x/y/z: where the fire burns in the scene (world units, the preset's rogue_bonfire01); fire_pick_radius.
     std::atomic<bool>  campfireFireSound{true}, campfireSparks{true};
-    std::atomic<float> campfireFireVolume{0.9f}, campfireFireBurst{2.0f}, campfireFireX{1060.67f}, campfireFireY{0.3f},
+    std::atomic<float> campfireFireVolume{0.9f}, campfireFireBurst{2.0f}, campfireFireX{1060.67f}, campfireFireY{-0.2f},
                        campfireFireZ{123.94f}, campfireFirePick{2.5f};
+    // fire_logs_radius / fire_logs_height: a ray passing this near the burning logs, from their foot to this
+    // high over it, picks the fire too (world units)
+    std::atomic<float> campfireLogsRadius{0.0f}, campfireLogsHeight{1.5f};
+    // snow / snow_chance / snow_density: snow falling round the scene (the shader's Snow), rolled each time the
+    // scene begins: it snows with this chance; the share of the flakes' cells that hold one
+    std::atomic<bool>  campfireSnow{true};
+    std::atomic<float> campfireSnowChance{0.3f}, campfireSnowDensity{0.25f};
+    std::atomic<float> campfireSnowTurn{40.0f};   // snow_turn: after this many seconds in the scene the snow begins or ends (0: never)
     std::atomic<bool>  campfirePano{false};      // [campfire] panorama: one picture round the scene (pano_file), in the void
     std::atomic<float> campfirePanoYaw{0.0f}, campfirePanoLow{-90.0f}, campfirePanoHigh{90.0f}, campfirePanoBright{1.0f};   // [campfire] pano_yaw/low/high/brightness
     std::atomic<float> campfireMenuTop{0.78f};  // [campfire] menu_top: where the strip begins, a share of the game's menu band from its top
@@ -1100,6 +1111,9 @@ void LoadSettings() {
     // Unleashed (on by default): a broken guard leaks a chip of each blocked hit.
     combat::ConfigureGuardChip(!classicMelee&&IniB(L"gameplay",L"guard_break_chip",true),
                                IniF(L"gameplay",L"guard_break_chip_scale",1));
+    // Unleashed: higher Defense, less guard strain per block (guard_strain.h DefenseShare); the share left at
+    // no chance to hit, % (25; 100 = Defense ignored).
+    combat::ConfigureGuardStrainDefense(IniF(L"gameplay",L"guard_strain_defense_floor",25)/100.f);
     // Unleashed swing damage (applied live): attack rating and attack speed scale
     // a physical swing instead of deciding whether it lands. [gameplay] ar_damage
     // (1): damage x the native to-hit chance; ar_damage_floor (% kept at zero
@@ -1203,7 +1217,9 @@ void LoadSettings() {
         framevr::foveation::Configure(IniB(L"render",L"fixed_foveation",true),preset.fixedRadius,preset.gazeRadius,preset.peripheralRate);
     }
     d2rcam::SetStereoLabels(IniB(L"hud",L"stereo_labels",true));
-    d2rcam::SetOrdinaryMobBars(IniB(L"hud",L"ordinary_mob_bars",false));
+    // Monster names (VR Settings > Interface > Labels): [hud] monster_names, else the older
+    // ordinary_mob_bars (1 All, 0 Bosses and elites). Read as saved, never rewritten.
+    d2rcam::SetMonsterNames(int(d2rcam::monsterbars::FromIni(IniF(L"hud",L"monster_names",-1),IniF(L"hud",L"ordinary_mob_bars",-1))));
     d2rcam::SetMonsterDrawOrder(IniB(L"hud",L"monster_draw_order",true));
     // Remote debugging can request the same one-shot capture without stealing
     // keyboard focus from SteamVR. Change the positive counter while running.
@@ -1516,7 +1532,7 @@ void LoadSettings() {
     g_set.nightBright.store(std::clamp(IniF(L"sky", L"night_brightness", 0.25f), 0.0f, 1.0f));
     g_set.skyAlways.store(IniB(L"sky", L"always", false));
     {   // [campfire]
-        const bool on = IniB(L"campfire", L"enabled", false);
+        const bool on = IniB(L"campfire", L"enabled", true);   // on by default (owner 2026-11-11: "we need to make sure that's enabled by default")
         static int told = -1;
         if (int(on) != told) { told = int(on); LogF("vrcam: [campfire] enabled=%d", int(on)); }
         g_set.campfireOn.store(on);
@@ -1546,19 +1562,26 @@ void LoadSettings() {
         g_set.campfirePano.store(IniB(L"campfire", L"panorama", false));
         g_set.campfireFireSound.store(IniB(L"campfire", L"fire_sound", true));
         g_set.campfireSparks.store(IniB(L"campfire", L"sparks", true));
+        g_set.campfireSnow.store(IniB(L"campfire", L"snow", true));
+        g_set.campfireSnowChance.store(std::clamp(IniF(L"campfire", L"snow_chance", 0.3f), 0.0f, 1.0f));
+        g_set.campfireSnowDensity.store(std::clamp(IniF(L"campfire", L"snow_density", 0.25f), 0.0f, 1.0f));
+        g_set.campfireSnowTurn.store(std::clamp(IniF(L"campfire", L"snow_turn", 40.0f), 0.0f, 3600.0f));
         g_set.campfireFireVolume.store(std::clamp(IniF(L"campfire", L"fire_volume", 0.9f), 0.0f, 4.0f));
         g_set.campfireFireBurst.store(std::clamp(IniF(L"campfire", L"fire_burst_volume", 2.0f), 0.0f, 6.0f));
         g_set.campfireFireX.store(IniF(L"campfire", L"fire_x", 1060.67f));
-        g_set.campfireFireY.store(IniF(L"campfire", L"fire_y", 0.3f));
+        g_set.campfireFireY.store(IniF(L"campfire", L"fire_y", -0.2f));   // owner 2026-11-11: the pick a little lower
         g_set.campfireFireZ.store(IniF(L"campfire", L"fire_z", 123.94f));
         {
             wchar_t buf[96] = {};
-            GetPrivateProfileStringW(L"campfire", L"pick_avoid", L"", buf, 96, g_iniPath);
+            // owner 2026-11-11: the Hardcore box under the fire, 3840 x 2160
+            GetPrivateProfileStringW(L"campfire", L"pick_avoid", L"0.465,0.455,0.53,0.505", buf, 96, g_iniPath);
             float a[4] = {0, 0, 0, 0};
             if (swscanf_s(buf, L"%f,%f,%f,%f", &a[0], &a[1], &a[2], &a[3]) != 4) a[0] = a[1] = a[2] = a[3] = 0;
             for (int i = 0; i < 4; ++i) g_campfireAvoid[i] = a[i];
         }
         g_set.campfireFirePick.store(std::clamp(IniF(L"campfire", L"fire_pick_radius", 2.5f), 0.5f, 30.0f));
+        g_set.campfireLogsRadius.store(std::clamp(IniF(L"campfire", L"fire_logs_radius", 0.0f), 0.0f, 10.0f));
+        g_set.campfireLogsHeight.store(std::clamp(IniF(L"campfire", L"fire_logs_height", 1.5f), 0.0f, 10.0f));
         g_set.campfirePanoYaw.store(std::clamp(IniF(L"campfire", L"pano_yaw", 0.0f), -360.0f, 360.0f));
         g_set.campfirePanoLow.store(std::clamp(IniF(L"campfire", L"pano_low", -90.0f), -90.0f, 89.0f));
         g_set.campfirePanoHigh.store(std::clamp(IniF(L"campfire", L"pano_high", 90.0f), -89.0f, 90.0f));
@@ -1576,6 +1599,13 @@ void LoadSettings() {
         g_set.campfireCaptionWidth.store(std::clamp(IniF(L"campfire", L"caption_width", 3.0f), 0.2f, 20.0f));
         g_set.campfireCaptionDistance.store(std::clamp(IniF(L"campfire", L"caption_distance", 6.5f), 0.5f, 30.0f));
         g_set.campfireCaptionRise.store(std::clamp(IniF(L"campfire", L"caption_rise", 2.0f), -3.0f, 10.0f));
+    }
+    {   // [cinema]: the game's cinematics on a screen in the world (steamvr/cinema_screen.h)
+        gamestate::SetCinemaEnabled(IniB(L"cinema", L"enabled", true));
+#ifdef D2RVR_NATIVE_OPENXR
+        const auto screen = framevr::cinema::Clamped(IniF(L"cinema", L"distance", 3.0f), IniF(L"cinema", L"width", 3.0f));
+        framevr::SetCinemaScreen(screen.distance, screen.width);
+#endif
     }
     g_set.skyHidePanels.store(IniB(L"sky", L"hide_with_panels", true));
     {   // as the By turns switches: only a change of the ini's own value overrides DEV's
@@ -2491,6 +2521,9 @@ bool TopStereoOn() { return !g_enabled.load() && g_set.topStereo.load() && g_set
 bool AfrOn() { return g_set.afr.load() && g_inWorld.load() && (g_enabled.load() || TopStereoOn())
 #ifdef D2RVR_NATIVE_OPENXR
     && (!gamestate::MenuOpen()||framevr::SpatialMenu())
+    // A cinematic (steamvr/cinema_screen.h): the game draws no world, the movie goes on a screen
+    // in the world as one picture - no eyes flipped, no pairs.
+    && !gamestate::CinemaPlaying()
 #endif
     ; }
 // From above and behind: the toolbar moved nearer or farther - only real stereo has a depth to move it in.
@@ -3936,15 +3969,27 @@ bool CampfireFireHit(const float o[3], const float d[3]) {
         told = GetTickCount64();
         LogF("vrcam: campfire - a click comes down %.1f units from the fire (radius %.1f)", dist, g_set.campfireFirePick.load());
     }
-    if (dist <= g_set.campfireFirePick.load()) return true;
-    // or straight at the burning logs: the ray passing within 1.5 units of them (their foot to 1.5 over it),
-    // low enough that a ray at a hero standing behind the fire keeps clear (owner 2026-11-09: the wood too)
+    if (dist <= g_set.campfireFirePick.load()) {
+        LogF("vrcam: campfire - fire picked where the ray comes down (%.1f from the fire)", dist);
+        return true;
+    }
+    // or straight at the burning logs: the ray passing within [campfire] fire_logs_radius of them, from their
+    // foot to fire_logs_height over it, low enough that a ray at a hero standing behind the fire keeps clear
+    // (owner 2026-11-09: the wood too; 2026-11-11: the Barbarian's legs took the fire at 1.5 / 1.5)
+    const float R = g_set.campfireLogsRadius.load(), H = g_set.campfireLogsHeight.load();
+    if (!(R > 0.0f)) return false;
     const float dl = std::sqrt(d[0]*d[0] + d[1]*d[1] + d[2]*d[2]);
-    for (int k = 0; k <= 3; ++k) {
-        const float p[3] = {F[0] - o[0], F[1] + 0.5f * float(k) - o[1], F[2] - o[2]};
+    const int steps = std::max(1, int(std::ceil(H / 0.25f)));
+    for (int k = 0; k <= steps; ++k) {
+        const float y = H * float(k) / float(steps);
+        const float p[3] = {F[0] - o[0], F[1] + y - o[1], F[2] - o[2]};
         const float tt = (p[0]*d[0] + p[1]*d[1] + p[2]*d[2]) / dl;
         const float c[3] = {p[0] - d[0] / dl * tt, p[1] - d[1] / dl * tt, p[2] - d[2] / dl * tt};
-        if (tt > 0.0f && std::sqrt(c[0]*c[0] + c[1]*c[1] + c[2]*c[2]) <= 1.5f) return true;
+        const float miss = std::sqrt(c[0]*c[0] + c[1]*c[1] + c[2]*c[2]);
+        if (tt > 0.0f && miss <= R) {
+            LogF("vrcam: campfire - fire picked at the logs (%.2f from them, %.2f over their foot)", miss, y);
+            return true;
+        }
     }
     return false;
 }
@@ -5500,13 +5545,24 @@ void ApplyActions(XINPUT_STATE* s) {
     uint8_t* flag = (uint8_t*)d2rsig::Addr(RVA_INTERACT_ON_ATTACK);
     uint8_t now = 0;
     if (!flag || !SafeRead(&now, flag, 1) || now > 1) return;
-    const bool separate = g_set.aAttackOnly.load() || (held & D2RVR_ACT_ATTACK);
-    if (original < 0) { if (!separate && !interact) return; original = now; }
-    const uint8_t want = interact ? 1 : separate ? 0 : (uint8_t)original;
+#ifdef D2RVR_NATIVE_OPENXR
+    // Both grips held for the class motions (or let go under 0.4 s ago): a motion cast through the A slot is
+    // that skill, never a pick-up of the loot beside the hero (InteractOnA).
+    const bool gestureGrips = framevr::SpellGripsHeld();
+#else
+    const bool gestureGrips = false;
+#endif
+    const int rule = framevr::interaction::InteractOnA(interact, g_set.aAttackOnly.load(), (held & D2RVR_ACT_ATTACK) != 0, gestureGrips);
+    if (original < 0) { if (rule < 0) return; original = now; }
+    const uint8_t want = rule < 0 ? (uint8_t)original : (uint8_t)rule;
     if (now != want) {
         *flag = want;
         static uint8_t told = 2;
-        if (want != told) { told = want; LogF("vrcam: pad A %s", want ? "picks up / interacts on a target" : "only attacks"); }
+        if (want != told) {
+            told = want;
+            LogF("vrcam: pad A %s%s", want ? "picks up / interacts on a target" : "only attacks",
+                 !want && gestureGrips ? " (both grips held for the motions: a cast on A picks nothing up)" : "");
+        }
     }
 }
 
@@ -5826,7 +5882,8 @@ uintptr_t HandItem() {
 uintptr_t Selected() {
     bool between = false;
     if (!On(&between)) return 0;
-    // Both grips held for the motions (or a moment after): a motion's cast press is no pick-up.
+    // Both grips held for the motions (or a moment after): a motion's cast press is no pick-up. This alone
+    // left the game's own nearest item to Interact; ApplyActions keeps A from turning into Interact then.
     if (framevr::SpellGripsHeld()) return 0;
     TellThread("the Interact skill's target", 0);
     const uintptr_t handed = Handed(g_pick.load(), false);
@@ -7511,6 +7568,7 @@ uintptr_t HookDrawGameScreen(int a) {
     const double entered=pairtime::UsNow();
     static bool turned = false;   // the last frame went by turns
     if (!depth) gamepatches::BetweenFrames();   // the frame before is drawn, this one's first pass not begun
+    if (!depth) gamestate::CinemaWorldDrawn(GetTickCount64());   // no world is drawn while a cinematic plays
 #ifdef D2RVR_NATIVE_OPENXR
     const bool wanted = !depth && PairWanted();
     if (wanted) WarnGpuWait();
@@ -10604,6 +10662,8 @@ int CampfireSkyPalette() {
 bool WorldMenuBlocksEffects() {
 #ifdef D2RVR_NATIVE_OPENXR
     // The leather keeps the world round it (leather_world), so its effects too.
+    // A cinematic: no sky, fog or ceiling over the movie (the game draws no world under it).
+    if(gamestate::CinemaPlaying())return true;
     return framevr::panels::BlockWorldEffects(gamestate::MenuOpen(),framevr::SpatialMenu(),gamestate::OpaqueMenuOpen()&&!framevr::LeatherMenuWorld());
 #else
     return gamestate::MenuOpen();
@@ -12138,6 +12198,47 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
             SetFloat(rt, "SparkSeed", float(at % 997));
         }
     }
+    {   // The campfire's snow (Snow): rolled as the scene begins ([campfire] snow_chance); after [campfire] snow_turn
+        // seconds in the scene it turns once - begins if it was not falling, ends if it was - from the top either way.
+        static bool was = false, snowing = false, turned = false;
+        static ULONGLONG since = 0, turnAt = 0;
+        const bool scene = g_campfire.load();
+        const ULONGLONG nowSnow = GetTickCount64();
+        if (scene && !was) {
+            since = nowSnow; turned = false; turnAt = 0;
+            const float roll = float((since * 2654435761ull >> 7) % 10000) / 10000.0f;
+            snowing = g_set.campfireSnow.load() && roll < g_set.campfireSnowChance.load();
+            LogF("vrcam: campfire - snow %s (roll %.2f, chance %.2f)", snowing ? "falls" : "not this time", roll, g_set.campfireSnowChance.load());
+        }
+        was = scene;
+        const float turnS = g_set.campfireSnowTurn.load();
+        if (scene && !turned && g_set.campfireSnow.load() && turnS > 0.0f && nowSnow - since > ULONGLONG(turnS * 1000.0f)) {
+            turned = true; turnAt = nowSnow;
+            LogF("vrcam: campfire - after %.0f s the snow %s, from the top", turnS, snowing ? "ends" : "begins");
+        }
+        const float sinceTurn = turned ? float(nowSnow - turnAt) * 0.001f : -1.0f;
+        const bool falling = turned ? (!snowing || sinceTurn < 40.0f) : snowing;   // ending: the last flakes down in ~30 s
+        SkyView sv[2];
+        AcquireSRWLockShared(&g_skyLock); sv[0] = g_skyView[0]; sv[1] = g_skyView[1]; ReleaseSRWLockShared(&g_skyLock);
+        const bool on = scene && falling && g_set.campfireSnow.load() && sv[0].proj_ok && sv[0].axes_ok;
+        SetBool(rt, "SnowOn", on);
+        if (on) {
+            for (int e = 0; e < 2; ++e) {
+                const SkyView& s = sv[e].axes_ok && sv[e].proj_ok ? sv[e] : sv[0];
+                char n[16];
+                snprintf(n, sizeof n, "OutlineEye%d", e); SetFloats(rt, n, s.eyeRel, 3);
+                snprintf(n, sizeof n, "SkyProj%d", e); SetFloats(rt, n, s.proj, 4);
+                snprintf(n, sizeof n, "CamRight%d", e); SetFloats(rt, n, s.axes, 3);
+                snprintf(n, sizeof n, "CamUp%d", e); SetFloats(rt, n, s.axes + 3, 3);
+                snprintf(n, sizeof n, "CamBack%d", e); SetFloats(rt, n, s.axes + 6, 3);
+            }
+            SetFloat(rt, "SnowTime", float((GetTickCount64() - since) % 600000) * 0.001f);
+            SetFloat(rt, "SnowDensity", g_set.campfireSnowDensity.load());
+            SetFloat(rt, "SnowSeed", float(since % 997));
+            SetFloat(rt, "SnowStart", turned && !snowing ? sinceTurn : -1.0f);
+            SetFloat(rt, "SnowStop", turned && snowing ? sinceTurn : -1.0f);
+        }
+    }
 #ifdef D2RVR_NATIVE_OPENXR
     {
         framevr::guard::Debug state;framevr::guard::DebugDraw draw;
@@ -12262,7 +12363,7 @@ void TryRegister() {
     dlssmv::SetLogger(&Log);
     hud::Register();       // the interface's own layer: [hud] hide
 #ifdef D2RVR_NATIVE_OPENXR
-    framevr::Register(&Log, +[](){return gamestate::MenuOpen()||!g_inWorld.load()||(g_campfire.load()&&g_campfireShown.load()&&g_set.campfireMenuBoard.load());}, +[](){return g_inWorld.load();}, &gamestate::ToggleMenus);
+    framevr::Register(&Log, +[](){return gamestate::MenuOpen()||!g_inWorld.load()||(g_campfire.load()&&g_campfireShown.load()&&g_set.campfireMenuBoard.load())||gamestate::CinemaPlaying();}, +[](){return g_inWorld.load();}, &gamestate::ToggleMenus);
 #endif
     g_registered = true;
     Log("vrcam: joined ReShade - the fog and the sky follow d2r_pcvr.ini [fog] [sky]");
@@ -12494,6 +12595,7 @@ DWORD WINAPI UpdateThread(void*) {
 #endif
         FloorPointerTick();   // F3: the mouse pointer on the game's ground, as the head moves
         CrosshairDepthTick();   // F2's crosshair: nearer as the camera looks down
+        gamestate::CinemaTick(nowMs);   // a cinematic longer than any is over (cinema_screen.h)
         AfrQuietWhenOff();
         if (nowMs >= nextState) {   // what the hero holds, 5 times a second
             nextState = nowMs + 200;
@@ -12513,7 +12615,8 @@ DWORD WINAPI UpdateThread(void*) {
             }
             // the interface is hidden in a game area, whatever the view, with no panel open;
             // the main menu and panels (inventory, trade...) keep all of it
-            hud::SetMenuOpen(gamestate::MenuOpen() || !g_inWorld.load());
+            // (a cinematic too: the movie is drawn in the interface - no toolbar strip cleared out of it)
+            hud::SetMenuOpen(gamestate::MenuOpen() || !g_inWorld.load() || gamestate::CinemaPlaying());
             // The mouse pointer in the headset: in menus, at a trader, from above and
             // from behind it is wanted (it aims there, or picks items); in first person
             // it aims otherwise and the pointer only gets in the way.

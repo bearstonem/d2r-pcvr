@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include "settings_menu.h"
 #include "../steamvr/body_calibration.h"
+#include "../cleanroom/camera/monster_bars.h"
 namespace vrsettings {
 namespace {
 using namespace framevr::settings;
@@ -39,6 +40,9 @@ Values Load(const wchar_t* path){
         if(HighlightKey(Key(i))&&fallback!=d.defaultValue&&Value(path,d.section,d.key,-1)<0)legacy=true;   // no own key: the old color counted
     }
     legacyHighlight.store(legacy);
+    // Monster names: [hud] monster_names, else the older ordinary_mob_bars, as the plugin reads them.
+    v[MonsterNames]=raw[MonsterNames]=float(int(d2rcam::monsterbars::FromIni(
+        Value(path,L"hud",L"monster_names",-1),Value(path,L"hud",L"ordinary_mob_bars",-1))));
     v[SmoothTurn]=SmoothTurning(raw[Snap],Value(path,L"turn",L"smooth",-1))?1.f:0.f;
     v[Snap]=SnapDegrees(raw[Snap]);
     // A malformed/future record must prompt again, not silently become valid
@@ -68,6 +72,8 @@ Result Save(const wchar_t* path,const Request& r){
         // Materialize the mode before replacing legacy snap=0. Changing the
         // stored angle must not implicitly switch a smooth profile to snap.
         else if(i==Snap)ok=write(d.section,d.key,r.values[i])&&write(L"turn",L"smooth",(r.changed&(ChangeMask{1}<<SmoothTurn))?r.values[SmoothTurn]:current[SmoothTurn]);
+        // Monster names, and the older key beside it for a build from before it (1 only for All).
+        else if(i==MonsterNames)ok=write(d.section,d.key,r.values[i])&&write(L"hud",L"ordinary_mob_bars",r.values[i]==0?1.f:0.f);
         else ok=write(d.section,d.key,r.values[i]);
     }
     WritePrivateProfileStringW(nullptr,nullptr,nullptr,temp.c_str());

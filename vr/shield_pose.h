@@ -173,18 +173,30 @@ inline bool Place(const bow::Mat& bindAttach,const Frame& bind,bow::Vec bindWris
 //   turn 2 (up): the face stays outward, the shield is upside down;
 //   turn 1 (out): the face turns inward - for comparing only.
 // The result keeps the bind attach's own handedness and size.
+// mirror (optional): the turn taking the placed bone's axes back to the mirror image's - mirror image =
+// mirror * placed, rows mixed, the origin kept - for what reads the shield's axes as directions (its
+// contact capsule), as hand_swap_pose.h AsMirrored is for a weapon. It depends on the bind pose and the
+// turn only, so it holds for the placed bone after it is moved and steadied as well.
 inline Frame TurnedOver(Frame f,int turn) {
     if(turn==1)f.out=f.out*-1;else if(turn==2)f.up=f.up*-1;else f.along=f.along*-1;
     return f;
 }
 inline bool PlaceAcross(const bow::Mat& bindAttach,const Frame& bind,bow::Vec bindWrist,float bindScale,
-                        const Frame& now,bow::Vec wrist,float scale,int turn,bow::Mat& result) {
+                        const Frame& now,bow::Vec wrist,float scale,int turn,bow::Mat& result,bow::Mat* mirror=nullptr) {
     bow::Mat mirrored;
     // The attach point: where the mirror image has it (the mirrored frame, as it is).
     if(!Place(bindAttach,bind,bindWrist,bindScale,now,wrist,scale,mirrored))return false;
     // Its axes: the same placement in the frame with one axis turned over, a rigid turn of the bind pose.
     if(!Place(bindAttach,bind,bindWrist,bindScale,TurnedOver(now,turn),wrist,scale,result))return false;
-    bow::Position(result,bow::Position(mirrored));return bow::Affine(result);
+    bow::Position(result,bow::Position(mirrored));
+    if(mirror) {
+        bow::Mat placedTurn=result,mirroredTurn=mirrored,inverse;
+        bow::Position(placedTurn,{0,0,0});bow::Position(mirroredTurn,{0,0,0});
+        if(!bow::Inverse(placedTurn,inverse))return false;
+        *mirror=bow::Multiply(mirroredTurn,inverse);
+        if(!bow::Affine(*mirror))return false;
+    }
+    return bow::Affine(result);
 }
 // The shield wrist's bend stop (skeletons.cpp, StopShieldWrist) as geometry, for the arm the shield is
 // carried across to in left-handed play. The hand bending back (back of the hand up) swings the
