@@ -9621,15 +9621,19 @@ void PushArms() {
     {   // Held items collide (held_collision.h; VR Settings > Combat > Weapons collide): the pair the hands hold and
         // what keeps it from colliding now. The input thread adds menus, wheels and throws (HeldCollisionBlocks);
         // the skeleton hook what it cannot pose (a hand untracked, an item put away, a shield not yet measured).
-        static bool setting = true; static int told = -1; static ULONGLONG readAt = 0;   // this timer's thread only
+        // Weapons hit walls (held_world.h; VR Settings > Physics): the same items against the walls and the floor.
+        static bool setting = true, world = true; static int told = -1, toldWorld = -1; static ULONGLONG readAt = 0;   // this timer's thread only
         if (const ULONGLONG now = GetTickCount64(); !readAt || now - readAt > 200) {
-            readAt = now; setting = vrsettings::Read().values[framevr::settings::HeldCollisions] > .5f;
+            readAt = now;
+            const auto values = vrsettings::Read().values;
+            setting = values[framevr::settings::HeldCollisions] > .5f; world = values[framevr::settings::HeldWorldCollisions] > .5f;
             if (int(setting) != told) { told = int(setting); LogF("Frame held collisions: %s (VR Settings > Combat > Weapons collide)", setting ? "on" : "off"); }
+            if (int(world) != toldWorld) { toldWorld = int(world); LogF("Frame held world: %s (VR Settings > Physics > Weapons hit walls)", world ? "on" : "off"); }
         }
         namespace hc = framevr::held;
         const uint32_t blocks = framevr::HeldCollisionBlocks();
         hc::Holding h;
-        h.setting = setting;
+        h.setting = setting; h.world = world;
         h.firstPerson = own && in.mode == 2;
         h.menu = gamestate::MenuOpen() || (blocks & hc::Menu);
         h.wheel = (blocks & hc::Wheel) != 0; h.leather = (blocks & hc::Leather) != 0; h.throwing = (blocks & hc::Throwing) != 0;
@@ -9648,17 +9652,20 @@ void PushArms() {
         }
         in.held = hc::Decide(h);
         in.held.why |= blocks & hc::Untracked;   // the headset lost the head: no gameplay hands this frame
+        in.heldWorld = hc::DecideWorld(h);
+        in.heldWorld.why |= blocks & hc::Untracked;
     }
 #endif
     skel::Set(in);
 }
 #ifdef D2RVR_NATIVE_OPENXR
-// Held items collide: a first touch that clanked, from the skeleton hook - a clank in both controllers (the input
-// thread plays it) and, met fast enough, the game's metal sound at the hero ([gameplay] held_collision_sound).
+// Held items collide: a first touch that clanked, from the skeleton hook - a clank in both controllers, or in the one
+// whose item struck a wall or the floor (the input thread plays it), and, met fast enough, the game's metal sound at
+// the hero ([gameplay] held_collision_sound).
 void HeldClankTick() {
-    float strength = 0, speed = 0;
-    if (!skel::TakeHeldClank(strength, speed)) return;
-    framevr::HeldClank(strength);
+    float strength = 0, speed = 0; unsigned arms = 0;
+    if (!skel::TakeHeldClank(strength, speed, arms)) return;
+    framevr::HeldClank(strength, arms);
     if (speed >= framevr::held::SoundSpeed) melee::QueueHeldClankSound();
 }
 #endif

@@ -801,6 +801,7 @@ std::atomic<uint32_t> meleeImpactFlags[2]{};   // the struck monster's MonStats 
 // Held items collide (held_collision.h): a clank waiting for both controllers, and what of each input frame keeps
 // the hands' items from colliding (held::Reason bits), for the game side.
 std::atomic<ULONGLONG> heldClankAt{0},heldBlocksAt{0};std::atomic<float> heldClankStrength{0};std::atomic<uint32_t> heldBlocks{0};
+std::atomic<unsigned> heldClankArms{3};   // the controllers it is felt in: bit 0 the right, bit 1 the left (physical)
 XrSwapchain gameplayChain=XR_NULL_HANDLE;
 std::mutex sewerPromptMutex;
 sewerprompt::Target sewerPrompt;
@@ -5936,8 +5937,10 @@ void Input() {
         surfacePulse(1,shieldImpactSurface.exchange(int(haptics::Surface::Block))==int(haptics::Surface::Parry)?haptics::Surface::Parry:haptics::Surface::Block,0);
     // Held items collide: the weapon struck the shield or the other weapon - a metal clank in both hands, by how fast.
     if(const auto at=heldClankAt.exchange(0);at&&motionInput.active&&GetTickCount64()-at<150) {
-        const auto clank=held::Clank(heldClankStrength.load());
-        for(int hand=0;hand<2;++hand)hapticSequences.Play(hand,clank,GetTickCount64());
+        // Both hands when the two items met; the one whose item struck a wall or the floor (held_world.h). The arms are
+        // the physical controllers; the sequences play by role.
+        const auto clank=held::Clank(heldClankStrength.load());const unsigned arms=heldClankArms.load();
+        for(int physical=0;physical<2;++physical)if(arms&(1u<<physical))hapticSequences.Play(handRoles.map.Role(physical),clank,GetTickCount64());
     }
     PumpHapticSequences();
     // A parry swing that missed: a soft, dull buzz on the shield hand, unlike a
@@ -8225,7 +8228,9 @@ void FinishShieldSkill(bool accepted) {
     if(accepted){shieldImpactSurface=int(haptics::Surface::Block);shieldImpactAt=shieldFeedbackAt;}
 }
 void MeleeImpact(int hand) {if(hand>=0&&hand<2)meleeImpactAt[hand]=bodyStrikeAt[hand]=GetTickCount64();}
-void HeldClank(float strength) {heldClankStrength=std::isfinite(strength)?std::clamp(strength,0.f,1.f):0.f;heldClankAt=GetTickCount64();}
+void HeldClank(float strength,unsigned arms) {
+    heldClankStrength=std::isfinite(strength)?std::clamp(strength,0.f,1.f):0.f;heldClankArms=arms&3u?arms&3u:3u;heldClankAt=GetTickCount64();
+}
 uint32_t HeldCollisionBlocks() {
     const auto at=heldBlocksAt.load(),now=GetTickCount64();
     return at&&now>=at&&now-at<200?heldBlocks.load():uint32_t(held::Menu);   // no recent input frame: no gameplay hands

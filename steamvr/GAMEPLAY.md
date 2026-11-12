@@ -1851,6 +1851,87 @@ applies it.
   (weapon-shield A, weapon-weapon B), deepest X cm, pushes capped C, haptic clanks
   H; excluded: <reasons>`.
 
+### Weapons hit walls
+
+**VR Settings > Gameplay > Physics > Props > Weapons hit walls** (`[gameplay]
+held_world_collisions`, 1 by default) stops the player's held weapons and shield
+at the level as Weapons collide stops them at each other (owner, 2026-11-12). A
+sword pushed into a wall stops at its face and slides along it; scraped on the
+floor it rides on it; a shield pressed to a wall stays at the wall. The **drawn**
+hand gives way, as at your own shield, and eases back once clear. Pure logic and
+its fixtures: `held_world.h`, `held_world_test.cpp`; the skeleton hook
+(`vr/skeletons.cpp`, HeldCollide) applies it after the item-against-item push, and
+the game thread samples the walls (`vr/wall_cells.cpp`).
+
+- **The world.** Two things the pose thread can have cheaply. The *floor*: the
+  ground the hero stands on (his model's origin), flat around him - the drawn floor
+  the arms hang over. Stairs and slopes within reach are not followed. The *walls*:
+  the game's own collision cells around the hero, the missile-barrier bits (0x804)
+  physical arrows and dropped bottles already stop at, each 2 world units (about
+  46 cm) square. They have no height: each stands from 50 cm under the floor to 6 m
+  above it, on the floor's shear as the bottles place them. Every wall runs along the
+  cell grid, so a wall's face is one plane. **Left out:** a cell carrying an
+  object's footprint (bit 0x400: barrels, urns, chests - no 6 m pillar over a
+  barrel, and a swing still meets the barrel and breaks it) and a cell with no room
+  loaded (a doorway into the next area). A closed door (0x800) stays: the blade
+  stops at it. Monsters, small props and bodies are not world: they are still
+  struck, knocked and pushed by the drawn items.
+- **Items.** A one-handed weapon in either hand (the capsule Weapons collide uses)
+  and the shield (its measured or guessed box). A lone weapon with the other hand
+  empty counts too; so do two weapons and a shield alone.
+- **The push.** Worked out in the world, where walls stand still: each item where
+  its controller holds it now (the other item's push in it), against the cells
+  under it. A cell pushes only through its sides whose neighbour is open, so the
+  cells of one wall are one face: a blade slides along them without catching at
+  their seams, an inner corner pushes out of both walls, and nothing is pushed out
+  through the far side of a wall. A new touch keeps the face the item lay off just
+  before it touched, followed in 2 cm steps, so a fast swing that went past the
+  middle of a wall in one frame is held at the face it came from. The floor pushes
+  only up.
+- **The cap.** The hand gives way at most `held::Cap` (60 cm), the same as at the
+  shield; the item-against-item and world pushes together never draw a hand
+  farther than that from its controller. Deeper than that the item goes into the
+  wall: nothing pushes until it is clear of every cell and the floor, and the push
+  eases out with the same 33 ms time constant (95% gone in 0.1 s).
+- **Walking into a wall** with a sword ahead: the hand is held back as the hero
+  closes on the wall, then the sword goes into the wall (the cap) and the hand eases
+  back onto the controller while the hero stands there. Stepping away frees it; it
+  is never held behind you.
+- **Clank.** A surface first met at 0.5 m/s or more clanks in the hand whose item
+  struck, scaled to 3 m/s, at most every 0.12 s for that hand; the game's
+  `[gameplay] held_collision_sound` plays from 1 m/s. Sliding along a wall or the
+  floor is silent; one wall met across several cells is one touch.
+- **What hits.** Melee contact, the breakables, the props, bottles and bodies all
+  read the drawn skeleton: a blade held at a wall reaches what is on your side of
+  it. The real controllers still give a swing its speed.
+- **Left out.** As Weapons collide: bows, staves, spears, polearms and two-handed
+  grips, throws (and a potion or trap in a hand), Druid forms, menus, wheels, the
+  leather menu, an untracked controller, an item put away, a shield with no box
+  yet, and anything but first person.
+- **Limits.** Cells are about 46 cm: a wall's face can sit a few centimetres in
+  front of or behind the drawn wall, by how the level's art covers its cells. A low
+  wall or fence that blocks arrows stops a blade above it too. The floor is flat at
+  the hero's feet.
+- **Cost.** The game thread samples 32 x 32 cells around the hero (the bottles'
+  sampler, its own stream so neither recentres the other) at most every 0.5 s
+  while a held item meets the world, sooner after the hero moves 6 cells; one
+  native room lookup and one collision read a cell. `Frame dropped bottles: wall
+  samples=N (held items H) ... X us on the game thread (Y us a sample)` measures it
+  every ten seconds. The pose thread gathers the floor and the cells under the
+  items and steps the solver once per pose stamp: about 2 us a step in the fixture
+  (a sword striking a corridor's end wall and a shield), and the hook's whole held
+  step is logged below.
+- **Log.** `Frame held world: on|off (VR Settings > Physics > Weapons hit walls)`
+  when the setting changes; `Frame held world: the right sword and left shield
+  stop at walls, closed doors and the floor` (or `..., not meeting walls or the
+  floor (<reasons>)`) when what the hands hold changes; and every ten seconds while
+  an item is held, `Frame held world: N contacts (walls W, doors D, floor F),
+  deepest X cm, pushes capped C, haptic clanks H; ten seconds: S steps, A acting
+  (B with no wall sample), nearest wall / door / floor; wall sample N ms old;
+  around the hands: N wall cells (doors, inside a wall), left out N object
+  footprints, N with no room, N outside the sample; hook X us a pose stamp
+  (slowest Y us, N stamps); excluded: <reasons>`.
+
 ### Physical shield blocking, parry and riposte (Unleashed)
 
 With **Unleashed** melee rules and a shield on, blocking is decided by where the
