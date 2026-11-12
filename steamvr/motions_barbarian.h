@@ -8,8 +8,13 @@
 //
 // The warcries are the owner's 10-23 call: a hand to the mouth, then a thrust, the thrust's direction
 // telling them apart (Battle Orders up, War Cry forward and down, Shout both hands forward). The hand
-// rests at the mouth a moment first (dwellSeconds, still): a sword's wind-up passes the face without
-// stopping, so a swing never starts a warcry. Battle Command counts two beats on the chest (scratch).
+// rested at the mouth a moment first (0.15 s, still) until the owner, 2026-11-11: "Should not have a
+// requirement for holding our hands up to our face for any period of time It should be pretty much
+// immediate We bring it up and push it out". Now passing the mouth is enough (mouthSeconds 0: one frame
+// there), the hand swept up to it and straight on out too; what keeps a swing from being one is the
+// thrust's own shape (its way, reach, travel and speed within thrustWindow of the mouth, the other hand's
+// place), and the overhead chop, slash and two-handed chop in the test cast none. Battle Command counts
+// two beats on the chest (scratch).
 // Leap goes to a spot ahead, the way the arms swung (Engine::Aim); Find Item's corpse is where the right
 // hand points, so it leaves the aim to the hand's own ray. The controllers' palms and fingers are not
 // known, and both grips are held throughout: every motion is the hands' positions only.
@@ -38,7 +43,8 @@ struct Tuning {
     // The mouth (a fist at it: the controller just in front): |x| <= mouthSide, y in [mouthLow, mouthHigh],
     // forward in [mouthNear, mouthFar] (m from the eyes). Two hands at it (Shout) at most shoutApart apart.
     float mouthSide=.15f,mouthLow=-.28f,mouthHigh=.02f,mouthNear=.04f,mouthFar=.32f,shoutSide=.18f,shoutApart=.28f;
-    double dwellSeconds=.15;  // a hand resting at the mouth (or the floor) this long first,
+    double mouthSeconds=0;    // the warcries' hand(s) at the mouth this long first: none, one frame there (it was .15)
+    double dwellSeconds=.15;  // a hand resting out at the corpse (Find Item, Find Potion, Grim Ward) or both out in front (Taunt) this long first,
     float dwellStill=.08f;    // m: moving less than this over it
     double thrustWindow=.5;   // s from leaving the mouth to the thrust's end,
     float thrustSpeed=1.0f;   // m/s: the thrust's hand at least this fast at its fastest (a push, not a drift)
@@ -133,10 +139,10 @@ constexpr Motion Order[]={Motion::Shout,Motion::WarCry,Motion::LeapAttack,Motion
 // fingers, both grips held).
 inline const char* Cue(Motion m) {
     switch(m) {
-    case Motion::BattleOrders:return "right fist to the mouth a moment, then thrust it straight up over the head";
-    case Motion::Shout:return "both fists to the mouth a moment, then push them out forward together";
+    case Motion::BattleOrders:return "right fist to the mouth, then thrust it straight up over the head";
+    case Motion::Shout:return "both fists to the mouth, then push them out forward together";
     case Motion::BattleCommand:return "beat the right fist on the chest twice";
-    case Motion::WarCry:return "right fist to the mouth a moment, then thrust it forward and down at the ground ahead";
+    case Motion::WarCry:return "right fist to the mouth, then thrust it forward and down at the ground ahead";
     case Motion::Howl:return "hands together at the chest or face, then fling both arms out wide";
     case Motion::BattleCry:return "both fists up by the shoulders, pulled down hard to the hips";
     case Motion::Leap:return "swing both arms down by your sides, then up past the head, fast, as for a jump";
@@ -200,7 +206,8 @@ inline bool Swing(Engine& e,float behind,double window,math::Vec& way) {
 }
 // The samples, newest first, that end a dwell: `seconds` of samples (back from it) all in the zone and the
 // hands in `mask` (bit 0 the right, bit 1 the left) within dwellStill of where they are at its end; at most
-// `within` s old. For each, until one returns true, `then(i)`.
+// `within` s old (seconds 0: every sample in the zone, passing through it or not). For each, until one returns
+// true, `then(i)`.
 template<class Zone,class Then> bool AfterDwell(const std::vector<Sample>& h,double within,double seconds,int mask,Zone zone,Then then) {
     if(h.empty())return false;
     const double now=h.back().t;
@@ -230,7 +237,7 @@ inline bool Done(Engine& e,Motion m) {
     switch(m) {
     case Motion::BattleOrders: {
         const bool end=r.y>=t.ordersAbove&&std::fabs(r.x)<=.35f&&Forward(r)>=-.25f&&Forward(r)<=.45f&&l.y<=t.otherBelow;
-        return AfterDwell(h,t.thrustWindow+t.dwellSeconds,t.dwellSeconds,1,[&](const Sample& s){return AtMouth(s.l[0],t.mouthSide);},[&](int i) {
+        return AfterDwell(h,t.thrustWindow+t.mouthSeconds,t.mouthSeconds,1,[&](const Sample& s){return AtMouth(s.l[0],t.mouthSide);},[&](int i) {
             const auto a=h[size_t(i)].l[0];
             if(n.t-h[size_t(i)].t>t.thrustWindow)return false;
             const float rise=r.y-a.y,across=std::hypot(r.x-a.x,r.z-a.z);
@@ -240,7 +247,7 @@ inline bool Done(Engine& e,Motion m) {
     }
     case Motion::WarCry: {
         const bool end=Forward(r)>=t.cryReach&&r.y>=-.85f;
-        return AfterDwell(h,t.thrustWindow+t.dwellSeconds,t.dwellSeconds,1,
+        return AfterDwell(h,t.thrustWindow+t.mouthSeconds,t.mouthSeconds,1,
             [&](const Sample& s){return AtMouth(s.l[0],t.mouthSide)&&Len(s.l[1]-math::Vec{0,-.12f,-.16f})>=t.otherAway;},[&](int i) {
             const auto a=h[size_t(i)].l[0];
             if(n.t-h[size_t(i)].t>t.thrustWindow)return false;
@@ -252,7 +259,7 @@ inline bool Done(Engine& e,Motion m) {
     }
     case Motion::Shout: {
         const bool end=Forward(r)>=t.cryReach&&Forward(l)>=t.cryReach&&Len(r-l)<=t.shoutEndApart;
-        return AfterDwell(h,t.thrustWindow+t.dwellSeconds,t.dwellSeconds,3,
+        return AfterDwell(h,t.thrustWindow+t.mouthSeconds,t.mouthSeconds,3,
             [&](const Sample& s){return AtMouth(s.l[0],t.shoutSide)&&AtMouth(s.l[1],t.shoutSide)&&Len(s.l[0]-s.l[1])<=t.shoutApart;},[&](int i) {
             const auto& a=h[size_t(i)];
             if(n.t-a.t>t.thrustWindow)return false;

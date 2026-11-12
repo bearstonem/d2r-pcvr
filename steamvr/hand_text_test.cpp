@@ -58,7 +58,7 @@ int main() {
     Reads("right arm out, aim the controller's arc where you want to land, then yank the fist back",
           "left arm out, aim the controller's arc where you want to land, then yank the fist back");
     Reads("sweep the left hand from the right hand up to the right shoulder","sweep the right hand from the left hand up to the left shoulder");
-    Reads("right fist to the mouth a moment, then thrust it straight up over the head","left fist to the mouth a moment, then thrust it straight up over the head");
+    Reads("right fist to the mouth, then thrust it straight up over the head","left fist to the mouth, then thrust it straight up over the head");
     Reads("draw the right fist in, then punch it straight out at a monster","draw the left fist in, then punch it straight out at a monster");
     // ---- buttons ----
     Reads("Hold both triggers when asked; Right B cancels.","Hold both triggers when asked; Left Y cancels.");
