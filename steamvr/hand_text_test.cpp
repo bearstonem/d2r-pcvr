@@ -108,6 +108,44 @@ int main() {
         Check(!handtext::Left()&&handtext::T(written)==written,"and off again after the scope");
         Check(std::string(handtext::M(written))=="Left hand: point & trigger","M mirrors with the mode off too (a table mirrored ahead of time)");
     }
+    // ---- Sticks stay right-handed (hand_role.h Sticks): the hands mirrored, the sticks' names kept ----
+    {
+        const auto keeps=[](const char* written,const char* shown){
+            const auto got=Mirror(written,false);
+            Check(got==shown,std::string("sticks kept: \"")+written+"\" reads \""+shown+"\", not \""+got+"\"");
+            Check(Mirror(got,false)==written,std::string("sticks kept, and back: \"")+written+"\"");
+        };
+        keeps("On turns you smoothly with the right stick.","On turns you smoothly with the right stick.");
+        keeps("How far each right-stick flick turns you","How far each right-stick flick turns you");
+        keeps("Hold the right stick down to show every nearby name.","Hold the right stick down to show every nearby name.");
+        keeps("Look: the left stick walks where you look. Controller: where that stick's controller points",
+              "Look: the left stick walks where you look. Controller: where that stick's controller points");
+        keeps("Right stick up switches between walking and running","Right stick up switches between walking and running");
+        // the hands, buttons and controllers around them still change sides
+        keeps("Point the right controller at the map and push the right stick up to zoom","Point the left controller at the map and push the right stick up to zoom");
+        keeps("Right hand: the left stick walks; Right B cancels","Left hand: the left stick walks; Left Y cancels");
+        keeps("Left Grip + left stick click","Right Grip + left stick click");   // no in-headset text names a hand's own click by side
+        Check(Mirror("Zoom: right stick up / down.")=="Zoom: left stick up / down.","with the sticks mirrored, as before");
+        const char* turn="On turns you smoothly with the right stick.";const char* hand="Right hand: point & trigger";
+        Check(!handtext::SticksKept(),"not until told");
+        {
+            handtext::Scope kept(true,true);
+            Check(handtext::Left()&&handtext::SticksKept(),"the scope sets both");
+            Check(handtext::T(turn)==turn&&std::string(handtext::T(hand))=="Left hand: point & trigger"&&handtext::S("the right stick")=="the right stick",
+                  "T and S: the stick as written, the hand mirrored");
+            Check(handtext::T(hand)==handtext::T(hand)&&handtext::Pad("LT + B")=="RT + Y","the same pointer each time; the buttons still mirrored");
+        }
+        {
+            handtext::Scope plain(true);
+            Check(!handtext::SticksKept()&&std::string(handtext::T(turn))=="On turns you smoothly with the left stick.","left-handed alone: the sticks mirrored");
+        }
+        {
+            handtext::Scope off(false,true);
+            Check(!handtext::SticksKept()&&handtext::T(turn)==turn&&handtext::T(hand)==hand,"right-handed the sticks' mode changes nothing");
+        }
+        Check(!handtext::Left()&&!handtext::SticksKept(),"and off again after the scopes");
+        Check(std::string(handtext::M(turn))=="On turns you smoothly with the left stick."&&handtext::M(turn,false)==turn,"M: the two mirrors, whatever the mode");
+    }
     // ---- every motion's cue, every class's: no hand, arm, fist or shoulder keeps its side ----
     int cues=0,sided=0;
     for(int m=1;m<=spellmotion::MotionCount;++m) {

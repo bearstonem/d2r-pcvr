@@ -17,9 +17,9 @@ constexpr int HelpResetPage=HelpPerformance+1,HelpUndoReset=HelpPerformance+2,He
               MaxPresets=8,HelpGroupFirst=HelpPresetFirst+MaxPresets,HelpLast=HelpGroupFirst+MaxRailGroups-1;
 // Close asks before it drops a draft (main's Close discarded it).
 inline constexpr const char* CloseAsksHelp="Back to the game. If some changes are not applied, Close asks first. Right B does the same as Close.";
-// Left-handed play (hand_text.h): the row about the physical hands themselves, Left-handed's own, reads
-// the same either way.
-constexpr bool PhysicalSides(int id){return id==LeftHanded;}
+// Left-handed play (hand_text.h): the rows about the physical hands themselves, Left-handed's own and Sticks
+// stay right-handed's, read the same either way.
+constexpr bool PhysicalSides(int id){return id==LeftHanded||id==LeftHandedSticks;}
 // As written, for a right-handed player (HelpTitle and HelpText below show them).
 inline const char* WrittenHelpTitle(int id) {
     if(id>=0&&id<Count)return Definitions[id].label;
@@ -131,7 +131,8 @@ inline const char* WrittenHelpText(int id) {
         case HitStagger:return "On (the default): a long, committed stroke of your weapon, fist or claw that lands makes the monster flinch, even when the damage alone would not. It is that hit's own reaction: no extra damage. A quick flick, a swing between attack cycles or a hit that would have missed draws none. The same monster flinches at most every 1.2 seconds, and act bosses never do. Off: monsters flinch only when the game says so.";
         case HitKnockback:return "On (the default): a full stroke of a heavy weapon - two-handed swords, axes and mauls, spears, polearms and staves - shoves the monster back, away from you, as an item with Knockback does. The same monster at most every 2.5 seconds; act bosses, uniques and champions stand their ground. Off: only Knockback items and skills push monsters.";
         case BowBash:return "Off (the default). On: swing the bow in your left hand into a monster, string not drawn and both triggers released, and it staggers, so you can step back and draw. It deals no damage and spends no arrow. One bash every 1.5 s, the same monster every 3 s; act bosses never stagger. Your bow hand feels each contact.";
-        case WalkDirection:return "Look (the default): pushing the left stick ahead walks where you are looking. Controller: it walks where the left controller points, so you can look around while you walk. Either way the stick's sides walk sideways from that direction.";
+        case WalkDirection:return "Look (the default): pushing the left stick ahead walks where you are looking. Controller: it walks where that stick's own controller points, so you can look around while you walk. Either way the stick's sides walk sideways from that direction.";
+        case LeftHandedSticks:return "Left-handed only. On: the sticks stay where a right-handed player has them. The left stick walks (Walk direction: Controller follows the left controller). The right stick turns, switches run / walk, shows loot names and zooms the maps. Everything else stays left-handed. A stick's click still opens its own hand's wheel, and the right grip with the right stick's click opens the inventory.";
         case RoomSteps:return "On (the default): as you move in your room, your hero's spot in the game follows you, so monsters, your mercenary and spells meet you where you stand and your legs stay under you. The game's own walk moves it, so walls stop it, and your view never moves on its own. A grip or trigger, the bow, casting, swinging, the left stick and menus pause it. Off: it stays where you calibrated.";
         case SpellHandLight:return "How brightly the spells in a Sorceress's hands light the dark around you. Lower it if the light dazzles; Off and they only glow.";
         case ReverbEcho:return "The game gives every place its own echo: a cave rings for seconds, the Cathedral longer, the open moor barely. It follows monsters, footsteps, blows and voices, but is mixed faint, for speakers. More doubles its loudness and Strong doubles it again and lets it ring a quarter longer. Game's own leaves the game's mix. Music and menu sounds never echo.";

@@ -233,7 +233,9 @@ skills::HandControls handControls;
 skills::HandOutput handOutput;
 gameplay::Pose handAim[2]{};
 bool handAimTracked[2]{};
-walkdir::Pointing leftPointing;   // Walk direction (walk_direction.h): the left controller's heading, kept while it points down
+// Walk direction (walk_direction.h): the walk stick's controller's heading, kept while it points down; the
+// left controller, the right one left-handed unless the sticks stay right-handed (hand_role.h Sticks).
+walkdir::Pointing walkPointing;
 int walkDirectionSaid=-1;
 int castHand=0;
 controllers::Labels detectedControllers{},controllerLabels{};
@@ -1100,6 +1102,13 @@ int RoleHand(int physical){return PhysicalHand(physical);}
 // hand's role index for this file's arrays.
 int UiHand(int side,handrole::System system=handrole::System::Laser){return handrole::For(system,handRoles).Physical(side);}
 int UiRole(int side,handrole::System system=handrole::System::Laser){return handRoles.map.Role(UiHand(side,system));}
+// The sticks (hand_role.h Sticks): the pad's left stick walks and its right stick turns, wherever they are.
+// A hand's own stick click (its wheel, the off hand's grip + click menu) is the pad's click bit on that hand's
+// controller: the right stick's on the main hand's and the left's on the off hand's, unless the sticks stay
+// right-handed while the hands are mirrored.
+uint16_t OwnStickClick(int role){return handRoles.OwnStick(role)?menus::LeftStick:menus::RightStick;}
+// The role whose controller has the turn stick: its gestures (the run toggle, loot names, the map zoom) buzz it.
+int TurnStickRole(){return handRoles.StickRole(0);}
 // The weapon swap's hand (Dominant hand; left-handed, the main hand) is the one that holds the leather
 // menu: its shoulder reach is the swap's then, so the menu has none, out or away. Right-handed: Dominant
 // hand = Left.
@@ -3835,21 +3844,25 @@ void BoneGraftTick(bool show) {
 // Left-handed play (hand_role.h): this frame's roles, from the setting and the equipped weapon. A weapon
 // kind that is not mirrored yet plays right-handed whole. A change of roles (the setting saved, or such
 // a weapon taken up or put away) moves every hand index at once: the engines start over as after a
-// tracking loss, and a held trigger, grip, button or stick must be let go before it acts again.
-void UpdateHandRoles() {
+// tracking loss, and a held trigger, grip, button or stick must be let go before it acts again. So does a
+// change of the sticks alone (Sticks stay right-handed, sticksRight: hand_role.h Sticks).
+void UpdateHandRoles(bool sticksRight) {
     const bool wanted=leftHandedWanted.load();
     // No weapon read yet (a loading screen, the title): the kind it last was, so the roles do not flip twice.
     const uint32_t type=gamestate::WeaponType();
     static uint32_t lastType=D2RVR_TYPE_UNARMED,lastTwo=0;
     if(type!=D2RVR_TYPE_UNKNOWN){lastType=type;lastTwo=gamestate::TwoHanded();}
-    const auto next=handrole::Resolve(wanted,lastType,lastTwo);
-    const bool rolesChanged=next.map!=handRoles.map;
+    const auto next=handrole::Resolve(wanted,lastType,lastTwo,sticksRight);
+    const bool rolesChanged=next.map!=handRoles.map||next.sticks!=handRoles.sticks;
     static handrole::State said;static bool saidOnce=false;static ULONGLONG saidAt=0;
     const auto now=GetTickCount64();
     handRoles=next;handRolesLeft.store(next.map.left,std::memory_order_relaxed);
     // The words follow the roles (hand_text.h): VR Settings is laid out again; the wheel's pictures are
-    // painted again with the controller labels, which change with the same roles.
-    if(handtext::Left()!=next.map.left){handtext::SetLeft(next.map.left);++settingsModel.revision;}
+    // painted again with the controller labels, which change with the same roles. The sticks' names stay
+    // as written while the sticks stay right-handed.
+    if(handtext::Left()!=next.map.left||handtext::SticksKept()!=next.SticksKept()){
+        handtext::SetSticksKept(next.SticksKept());handtext::SetLeft(next.map.left);++settingsModel.revision;
+    }
     {   // the weapon swap's hand in role order (handrole::Dominant): the engine starts over when it moves
         const int role=next.map.Role(handrole::Dominant(wanted));
         if(interactionConfigured&&interactionConfig.dominant!=role) {
@@ -3860,27 +3873,32 @@ void UpdateHandRoles() {
         ++meleeEpoch;motion.Cancel();motionOutput={};motionAt=0;handControls.Suspend();menuControls.Suspend();
         interactions.Reset();interactionOutput={};interactionstate::Cancel();skel::SetInteractionHidden(0);
         meleePoses.Clear();offhandPoses.Clear();CancelShieldCast();rightStickGestures.Reset();hapticPulses.Cancel();
-        elementalState.Reset();leftMenuButton={};
+        elementalState.Reset();leftMenuButton={};walkPointing={};
     }
-    // "Frame left-handed:" at each change of the setting, of the roles or of the weapon's kind while on,
-    // and at most once a minute otherwise while on.
+    // "Frame left-handed:" at each change of the setting, of the roles, of the sticks or of the weapon's kind
+    // while on, and at most once a minute otherwise while on. Each names the controllers with the walk stick
+    // and the turn stick, and whether Sticks stay right-handed keeps them there.
     const bool changed=!saidOnce||!(next==said);
     if((changed&&(next.wanted||said.wanted||!saidOnce))||(next.wanted&&now-saidAt>=60000)) {
-        char line[480];
-        if(!next.wanted)std::snprintf(line,sizeof line,"Frame left-handed: off - right-handed play (VR Settings > Controls > Hands > Left-handed (experimental); mirrors %s when on)",handrole::MirroredKinds);
-        else if(next.map.left)std::snprintf(line,sizeof line,"Frame left-handed: on - main hand LEFT (weapon, main trigger and its skills, A / B, turn stick, "
-            "the menus' laser), off hand RIGHT (shield or second weapon, X / Y, walk stick, the leather menu, the wrist HUD and map); mirrored now: %s; "
-            "systems mirrored: %s; still right-handed: %s",handrole::MirroredKinds,handrole::MirroredSystems,handrole::RightHandedKinds);
+        char sticks[200];
+        std::snprintf(sticks,sizeof sticks,"sticks: walk stick on the %s controller, turn stick on the %s controller (Sticks stay right-handed %s%s)",
+            handrole::Side(next.sticks.walk),handrole::Side(next.sticks.turn),next.sticksRight?"on":"off",
+            next.sticksRight&&!next.SticksKept()?", nothing to keep while the hands are right-handed":"");
+        char line[896];
+        if(!next.wanted)std::snprintf(line,sizeof line,"Frame left-handed: off - right-handed play (VR Settings > Controls > Hands > Left-handed (experimental); mirrors %s when on); %s",handrole::MirroredKinds,sticks);
+        else if(next.map.left)std::snprintf(line,sizeof line,"Frame left-handed: on - main hand LEFT (weapon, main trigger and its skills, A / B, its stick's click and wheel, "
+            "the menus' laser), off hand RIGHT (shield or second weapon, X / Y, its stick's click and wheel, the leather menu, the wrist HUD and map); %s; "
+            "mirrored now: %s; systems mirrored: %s; still right-handed: %s",sticks,handrole::MirroredKinds,handrole::MirroredSystems,handrole::RightHandedKinds);
         else std::snprintf(line,sizeof line,"Frame left-handed: on, but a %s is equipped - it plays RIGHT-handed whole for now (weapon, triggers, grips, "
-            "buttons and sticks, and with them the %s, as with the setting off); mirrored now: %s; left-handed again when it is put away",
-            handrole::Name(next.kind),handrole::MirroredSystems,handrole::MirroredKinds);
+            "buttons and sticks, and with them the %s, as with the setting off); %s; mirrored now: %s; left-handed again when it is put away",
+            handrole::Name(next.kind),handrole::MirroredSystems,sticks,handrole::MirroredKinds);
         Say(line);saidAt=now;
     }
     // Per equipped kind, at each change of it: mirrored (how it is held), or the fallback. The body's own
     // line ("Frame left-handed: <kind> MIRRORED - ...", skeletons.cpp) says which wrist it was seated on.
     if(next.wanted&&(!saidOnce||!said.wanted||next.kind!=said.kind||next.map!=said.map)) {
         char line[400];
-        if(next.map.left)std::snprintf(line,sizeof line,"Frame left-handed: %s equipped - MIRRORED: %s; sticks and buttons keep their left-handed roles "
+        if(next.map.left)std::snprintf(line,sizeof line,"Frame left-handed: %s equipped - MIRRORED: %s; sticks and buttons stay where they were "
             "(no change on equipping it)",handrole::Name(next.kind),handrole::HeldLeftHanded(next.kind));
         else std::snprintf(line,sizeof line,"Frame left-handed: %s equipped - FALLBACK: this kind is not mirrored, the whole mode plays right-handed "
             "until it is put away (sticks and buttons included)",handrole::Name(next.kind));
@@ -3899,23 +3917,26 @@ void Input() {
     XrActionsSyncInfo si{XR_TYPE_ACTIONS_SYNC_INFO};si.countActiveActionSets=1;si.activeActionSets=&active;
     if(pSyncActions(session,&si)!=XR_SUCCESS) {gazeStability.Reset();ClearInput();return;}
     controllerRumbleLease.Update(GetTickCount64(),motionControls.load());
-    UpdateHandRoles();
+    UpdateHandRoles(frameConfig.values[settings::LeftHandedSticks]>.5f);
     UpdateControllerLabels();
     const bool nativeUi=panelMode||spatialMode;
     const uint32_t inputEpoch=gamestate::MenuEpoch();
     // The pad, by role: A / B, RT, RB and the right stick are the main hand's, X / Y, LT, LB and the left
     // stick the off hand's (right-handed: the right and the left controller), in the world and in the
     // menus alike, so a button means the same everywhere. The menu button is either controller's.
+    // The sticks, pushes and clicks, are on the controllers handRoles.sticks says: by role, or with Sticks
+    // stay right-handed the left stick on the left controller and the right one on the right (hand_role.h).
     const auto& padMap=handRoles.map;
     const int padHand[2]={padMap.Physical(0),padMap.Physical(1)};
+    const auto& sticks=handRoles.sticks;
     menus::Pad physical;
     if(PhysicalBool(primary,padHand[0]))physical.buttons|=menus::A;
     if(PhysicalBool(secondary,padHand[0]))physical.buttons|=menus::B;
     if(PhysicalBool(primary,padHand[1]))physical.buttons|=menus::X;
     if(PhysicalBool(secondary,padHand[1]))physical.buttons|=menus::Y;
     if(PhysicalBool(menu,0)||PhysicalBool(menu,1))physical.buttons|=menus::Start;
-    if(PhysicalBool(stickClick,padHand[1]))physical.buttons|=menus::LeftStick;
-    if(PhysicalBool(stickClick,padHand[0]))physical.buttons|=menus::RightStick;
+    if(PhysicalBool(stickClick,sticks.walk))physical.buttons|=menus::LeftStick;
+    if(PhysicalBool(stickClick,sticks.turn))physical.buttons|=menus::RightStick;
     if(PhysicalFloat(squeeze,padHand[1])>.6f)physical.buttons|=menus::LeftBumper;
     if(PhysicalFloat(squeeze,padHand[0])>.6f)physical.buttons|=menus::RightBumper;
     // A hand armed or latched on a mercenary command (tactical_chord.h): its trigger is the command's,
@@ -3930,7 +3951,7 @@ void Input() {
     physical.lt=padTrigger(1);
     physical.rt=padTrigger(0);
     rightPickHeld.store(PhysicalFloat(trigger,padHand[0])>.55f||(physical.buttons&menus::A)!=0);   // the campfire's pick: the main hand's trigger
-    const auto physicalLeft=PhysicalStick(padHand[1]),physicalRight=PhysicalStick(padHand[0]);
+    const auto physicalLeft=PhysicalStick(sticks.walk),physicalRight=PhysicalStick(sticks.turn);
     const auto axis=[](float value){return int16_t(std::clamp(value,-1.f,1.f)*32767.f);};
     physical.lx=axis(physicalLeft.x);physical.ly=axis(physicalLeft.y);
     physical.rx=axis(physicalRight.x);physical.ry=axis(physicalRight.y);
@@ -3970,11 +3991,13 @@ void Input() {
         }
     }
     TCrossStep(frameConfig,physical,nativeUi);
-    const bool gripMenuPressed=leftMenuButton.Update((controls.buttons&menus::LeftStick)!=0,
+    // The off hand's grip and its own stick's click, one controller (OwnStickClick: the walk stick's click
+    // unless the sticks stay right-handed while the hands are mirrored, then the turn stick's).
+    const bool gripMenuPressed=leftMenuButton.Update((controls.buttons&OwnStickClick(1))!=0,
         (controls.buttons&menus::LeftBumper)?1.f:0.f);
     // Keep the entire modified click out of wheels and native sort/map actions,
     // including when the grip is released before the stick.
-    if(leftMenuButton.Consumed())controls.buttons&=~menus::LeftStick;
+    if(leftMenuButton.Consumed())controls.buttons&=~OwnStickClick(1);
     const bool dualBindings=motionControls.load()&&gameplayChain;
     const bool inventoryPressed=(inventoryButton.Update((controls.buttons&menus::X)!=0)&&!dualBindings)||gripMenuPressed;
     const bool menuPressed=menuButton.Update((controls.buttons&menus::Start)!=0);
@@ -4203,8 +4226,8 @@ void Input() {
     wasForPointed=forPointed;
     lootlabels::display.Refresh(lootSession,lootNow,lootWorld,lootHeld||forPointed);
     if(lootHeld!=wasLootHeld) {
-        Say(lootHeld?"Frame loot labels: Show Items (Alt) held (right stick down)":"Frame loot labels: normal drop/hover behavior");
-        if(lootHeld)MotionPulse(0,haptics::Category::Interaction,.45f,45000000);
+        Say(lootHeld?"Frame loot labels: Show Items (Alt) held (turn stick down)":"Frame loot labels: normal drop/hover behavior");
+        if(lootHeld)MotionPulse(TurnStickRole(),haptics::Category::Interaction,.45f,45000000);   // the hand that holds the stick down
     }
     motionInput.trigger=controls.rt/255.f;
     spellTrigger=controls.rt/255.f;   // motions (spell_motion.h) want both triggers free
@@ -4212,7 +4235,7 @@ void Input() {
         // Double Throw's left trigger throws the left hand's weapon, not its skill; so does the off
         // trigger that throws a potion by hand.
         handInput.trigger[h]=h?(leftThrowArmed||offTossArmed?0:controls.lt/255.f):controls.rt/255.f;handInput.grip[h]=motionInput.grip[h];
-        handInput.click[h]=(controls.buttons&(h?menus::LeftStick:menus::RightStick))!=0;
+        handInput.click[h]=(controls.buttons&OwnStickClick(h))!=0;   // that hand's own stick opens its wheel
         if(h==1&&motionInput.grip[1]>.6f)handInput.click[h]=false;
         handInput.face[h][0]=(controls.buttons&(h?menus::X:menus::A))!=0;
         handInput.face[h][1]=(controls.buttons&(h?menus::Y:menus::B))!=0;
@@ -4248,7 +4271,7 @@ void Input() {
     interactionInput.mirrored=handRoles.map.left;   // this file's hand indices are roles: 0 is the physical left then
     // Right stick up switches running / walking only with the Stick toggle on
     // (below, off by default). The push is owned either way, so it never snap-turns.
-    interactionInput.reservedLeft=(controls.buttons&menus::LeftStick)!=0;interactionInput.trigger=handOutput.wheel==0?controls.lt/255.f:controls.rt/255.f;interactionInput.hover=motionInput.hover;
+    interactionInput.reservedLeft=(controls.buttons&OwnStickClick(1))!=0;interactionInput.trigger=handOutput.wheel==0?controls.lt/255.f:controls.rt/255.f;interactionInput.hover=motionInput.hover;
     const auto hudSettings=vrsettings::Read();
     interactionInput.clickToDrink=hudSettings.values[settings::ClickToDrink]>.5f;
     // Drinking owns the raw pull even if a previously armed mercenary chord
@@ -4285,7 +4308,7 @@ void Input() {
         projectiles::StickFullRun(stickToggle.FullRun());
         if(stickToggles&&rightStick.toggleRun) {
             Say(movementWalks?"Frame right stick: up - walk (Stick toggle)":"Frame right stick: up - run (Stick toggle)");
-            MotionPulse(0,haptics::Category::Interaction,.45f,45000000);
+            MotionPulse(TurnStickRole(),haptics::Category::Interaction,.45f,45000000);
         }
         {   // The combat walk (Cal, 2026-11-02): walk while fighting, then Movement speed again.
             int source=0;const auto now=GetTickCount64();
@@ -4710,7 +4733,7 @@ void Input() {
         fullmap::g_wanted.store(fullMap?fullmap::Base*zoom.zoom:0.f,std::memory_order_relaxed);
         if(zoom.owned)controls.ry=0;
         if(zoom.turnOwned)controls.rx=0;
-        if(zoom.tick)MotionPulse(0,haptics::Category::Interaction,zoom.tick==2?.35f:.15f,zoom.tick==2?30000000:12000000);
+        if(zoom.tick)MotionPulse(TurnStickRole(),haptics::Category::Interaction,zoom.tick==2?.35f:.15f,zoom.tick==2?30000000:12000000);
         // One line a gesture: a start at most every half second, and its stop.
         const uint64_t tick=GetTickCount64();
         if(zoom.started&&tick>=mapZoomLogAt){
@@ -5926,16 +5949,23 @@ void Input() {
             reportAt=GetTickCount64()+5000;
         }
     }
-    // Walk direction (walk_direction.h; VR Settings > Controls > Hands, beside Dominant hand): the left stick walks where you look,
-    // or turned here by the left controller's heading against the head's, where it points.
+    // Walk direction (walk_direction.h; VR Settings > Controls > Hands): the walk stick (the pad's left stick) walks
+    // where you look, or turned here by its own controller's heading against the head's, where it points: the left
+    // controller, the right one left-handed unless the sticks stay right-handed (hand_role.h Sticks).
     int16_t walkLx=controls.lx,walkLy=controls.ly;
     {
         const int mode=vrsettings::Read().values[settings::WalkDirection]>.5f?walkdir::Controller:walkdir::Look;
-        if(mode!=walkDirectionSaid){walkDirectionSaid=mode;Say(mode==walkdir::Controller?"Frame walk direction: the left stick walks where the left controller points":"Frame walk direction: the left stick walks where you look");}
-        const bool pointing=leftPointing.Update(handAim[1].q,handAimTracked[1]);
+        const int walkRole=handRoles.StickRole(1);
+        if(mode*2+handRoles.sticks.walk!=walkDirectionSaid){
+            walkDirectionSaid=mode*2+handRoles.sticks.walk;char line[160];
+            if(mode==walkdir::Controller)std::snprintf(line,sizeof line,"Frame walk direction: the walk stick (%s controller) walks where that controller points",handrole::Side(handRoles.sticks.walk));
+            else std::snprintf(line,sizeof line,"Frame walk direction: the walk stick (%s controller) walks where you look",handrole::Side(handRoles.sticks.walk));
+            Say(line);
+        }
+        const bool pointing=walkPointing.Update(handAim[walkRole].q,handAimTracked[walkRole]);
         if(mode==walkdir::Controller&&pointing&&motionHeadTracked&&(controls.lx||controls.ly)) {
             float x=controls.lx/32767.f,y=controls.ly/32767.f;
-            walkdir::ToView(x,y,leftPointing.heading,math::Heading(Q(head.orientation)));
+            walkdir::ToView(x,y,walkPointing.heading,math::Heading(Q(head.orientation)));
             walkLx=int16_t(std::clamp(x,-1.f,1.f)*32767);walkLy=int16_t(std::clamp(y,-1.f,1.f)*32767);
         }
     }
