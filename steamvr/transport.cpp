@@ -1204,7 +1204,7 @@ bool menuPlaced=false;
 // A cinematic plays (gamestate::CinemaPlaying, cinema_screen.h): the flat panel is the cinema screen -
 // [cinema] distance ahead at eye height, [cinema] width wide, showing only the frame's movie band.
 bool cinemaMode=false;
-std::atomic<float> cinemaDistance{3.f},cinemaWidth{3.f};   // SetCinemaScreen
+std::atomic<float> cinemaDistance{5.f},cinemaWidth{6.f};   // SetCinemaScreen (cinema_screen.h Screen)
 bool panelMode=false,pointerVisible=false,pointerHit=false,mouseDown=false,triggerWasDown=false,cancelWasDown=false;
 HWND gameWindow=nullptr;
 WORD heldKeyScan=0;

@@ -1598,7 +1598,7 @@ void LoadSettings() {
     {   // [cinema]: the game's cinematics on a screen in the world (steamvr/cinema_screen.h)
         gamestate::SetCinemaEnabled(IniB(L"cinema", L"enabled", true));
 #ifdef D2RVR_NATIVE_OPENXR
-        const auto screen = framevr::cinema::Clamped(IniF(L"cinema", L"distance", 3.0f), IniF(L"cinema", L"width", 3.0f));
+        const auto screen = framevr::cinema::Clamped(IniF(L"cinema", L"distance", 5.0f), IniF(L"cinema", L"width", 6.0f));
         framevr::SetCinemaScreen(screen.distance, screen.width);
 #endif
     }

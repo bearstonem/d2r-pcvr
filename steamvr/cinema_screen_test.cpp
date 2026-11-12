@@ -142,15 +142,16 @@ int main(int argc,char** argv){
     }
     {   // The screen: the band's shape at the width asked for, comfortably ahead.
         const cinema::Screen d;
-        Check(Near(d.distance,3)&&Near(d.width,3),"3 m wide, 3 m ahead by default");
+        Check(Near(d.distance,5)&&Near(d.width,6),"6 m wide, 5 m ahead by default");
         const double across=2*std::atan(d.width*.5/d.distance)*57.29578;
-        Check(across>45&&across<60,"about 53 degrees across: the whole film in view without turning");
+        Check(across>55&&across<70,"about 62 degrees across: the whole film in view, not close to the face");
         auto s=cinema::ScreenSize(cinema::MovieBand(3072,3072),3);
         Check(Near(s.width,3)&&Near(s.height,1.6875),"a 16:9 film, 3 x 1.69 m - not stretched to the square frame");
         s=cinema::ScreenSize(cinema::MovieBand(3840,1600),3.2f);Check(Near(s.height,3.2*1600/3840.),"other shapes kept");
         s=cinema::ScreenSize({},2);Check(Near(s.width,2)&&Near(s.height,1.125),"no frame yet: 16:9");
-        auto c=cinema::Clamped(0,100);Check(Near(c.distance,1)&&Near(c.width,12),"limits");
-        c=cinema::Clamped(NAN,INFINITY);Check(Near(c.distance,3)&&Near(c.width,3),"a broken value: the default");
+        auto c=cinema::Clamped(0,100);Check(Near(c.distance,1)&&Near(c.width,48),"limits");
+        c=cinema::Clamped(NAN,INFINITY);Check(Near(c.distance,5)&&Near(c.width,6),"a broken value: the default");
+        c=cinema::Clamped(100,6);Check(Near(c.distance,20),"20 m at most");
         c=cinema::Clamped(4,3.5f);Check(Near(c.distance,4)&&Near(c.width,3.5),"in range: as written");
         // World-locked: placed once from the head; the head moving later moves nothing.
         const auto placed=panels::AtEyeLevel({.2f,1.65f,.1f},math::Yaw(.6f),d.distance);
