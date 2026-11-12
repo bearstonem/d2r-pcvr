@@ -645,7 +645,8 @@ ShieldRenderSource g_shieldRenderSource;
 std::atomic<uint32_t> g_shieldEntity{UINT32_MAX};
 // Cumulative milestones collected while the developer overlay is enabled.
 std::atomic<unsigned> g_shieldStages{0};
-void ShieldStage(unsigned bit){if(devscenarios::DebugDraws())g_shieldStages.fetch_or(bit,std::memory_order_relaxed);}
+std::atomic<unsigned> g_shieldStagesSeen{0};   // the same, always, for the held-collision report (taken every ten seconds)
+void ShieldStage(unsigned bit){g_shieldStagesSeen.fetch_or(bit,std::memory_order_relaxed);if(devscenarios::DebugDraws())g_shieldStages.fetch_or(bit,std::memory_order_relaxed);}
 struct CrossbowGeometry {Mat boltToAttach{};uintptr_t hero=0;uint32_t generation=0,key=0;ULONGLONG at=0;};
 CrossbowGeometry g_crossbowGeometry;
 framevr::crossbow::Pose g_crossbowPose;
@@ -3376,6 +3377,16 @@ void PoseBody(Posed& posed, const Hero& h, const Input& given, float legHold) {
                     const hc::Plate now=hc::Thin({toHead(point(local.plate.center)),axis(local.plate.right),axis(local.plate.up),axis(local.plate.out)});
                     if(hc::Valid(now)){items.plate=hc::In(grip(offArm),now);items.shield=2;}
                 }
+                // The mesh not measured (2026-11-12: on the owner's Paladin it never was, in any session, and the mace
+                // passed through): a shield-sized box on the attach bone, in its XY plane - the plane the guard's own
+                // attachment fallback takes as the shield's face (shield_guard.h FromAttachment). shield=3 in the log.
+                if(items.shield==1) {
+                    const Mat& w=newW[shieldBone];
+                    const V3 x=Norm({w.m[0],w.m[1],w.m[2]}),y=Norm({w.m[4],w.m[5],w.m[6]}),z=Norm(Cross(x,y));
+                    const hc::Plate guess=hc::Thin({toHead(Pos(w)),vec(back(Scale(x,hc::GuessHalfRight))),vec(back(Scale(y,hc::GuessHalfUp))),
+                                                    vec(back(Scale(z,hc::MaxHalfThickness*.5f)))});
+                    if(hc::Valid(guess)){items.plate=hc::In(grip(offArm),guess);items.shield=3;}
+                }
             }
             AcquireSRWLockExclusive(&g_heldLock);g_heldItems=items;ReleaseSRWLockExclusive(&g_heldLock);
         }
@@ -4044,10 +4055,10 @@ void HeldReport(const framevr::held::Gate& gate,ULONGLONG now) {
     if(s.nearest<1e8f)snprintf(nearest,sizeof nearest,"%.1f cm",s.nearest*100);else snprintf(nearest,sizeof nearest,"never measured");
     snprintf(line,sizeof line,"Frame held collisions: %u contacts (weapon-shield %u, weapon-weapon %u), deepest %.1f cm, pushes capped %u, "
         "haptic clanks %u; ten seconds: %u steps, %u acting, %u with no usable shape, nearest %s; items %llu ms old: blade right=%d left=%d "
-        "(length %.2f m), shield=%d on arm %d (box %.1f x %.1f x %.1f cm half); excluded: %s",
+        "(length %.2f m), shield=%d on arm %d (box %.1f x %.1f x %.1f cm half; 2 measured, 3 guessed), shield mesh capture reached 0x%x of 0x3fff; excluded: %s",
         s.contacts[0]+s.contacts[1],s.contacts[0],s.contacts[1],s.deepest*100,s.capped,s.clanks,s.steps,s.acting,s.badShapes,nearest,
         items.at?(unsigned long long)(now-items.at):0ull,int(items.blade[0]),int(items.blade[1]),bladeLength,items.shield,items.shieldArm,
-        hc::Length(items.plate.right)*100,hc::Length(items.plate.up)*100,hc::Length(items.plate.out)*100,why);
+        hc::Length(items.plate.right)*100,hc::Length(items.plate.up)*100,hc::Length(items.plate.out)*100,g_shieldStagesSeen.exchange(0),why);
     framevr::logging::Write(line);
 }
 void HeldCollide(Input& in) {

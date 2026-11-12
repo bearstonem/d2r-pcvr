@@ -27,6 +27,9 @@ constexpr float EaseSeconds=.033f;     // the push eases back with this time con
 constexpr float Slop=.002f;            // m: a touch ends only this far apart, so a resting touch does not flutter
 constexpr float BladeRadius=.03f;      // m: a blade's half width (melee's own capsule is padded for reach)
 constexpr float MinHalfThickness=.01f,MaxHalfThickness=.04f;   // m: a shield's box, its boss and curve within
+// m: the box taken for a shield whose rendered mesh was not measured, about its attach bone in the bone's XY plane
+// (a 34 x 44 cm shield; D2's run from a buckler's ~30 cm to a tower shield's ~70 cm)
+constexpr float GuessHalfRight=.17f,GuessHalfUp=.22f;
 constexpr float ClankSpeed=.5f;        // m/s closing at first touch: slower is a resting touch and stays silent
 constexpr float FullClankSpeed=3.f;    // m/s: the strongest clank
 constexpr float SoundSpeed=1.f;        // m/s: the game's metal sound too (it has one loudness)
