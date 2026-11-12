@@ -114,6 +114,7 @@ namespace gamestate { uint32_t MenuEpoch(); }
 namespace gamestate { void Init(const D2RL::PluginContext* ctx); void Tick(); uint32_t WeaponClass(); uint32_t WeaponSet(); uint32_t WeaponType(); uint32_t HandsHeld(); uint32_t TwoHanded(); uint32_t WeaponHand(); uint32_t HandsKey(); bool MenuOpen(); int ObjectLight(uint32_t txt, uint32_t mode, float rgb[3]); uint64_t LocalPlayer(); void SetViewMode(uint32_t mode); bool AutoMapOpen(); bool SetAutoMap(bool open); void PollPlate(); bool PlateRect(int32_t out[4]); }
 namespace gamestate {bool LeftShield();}
 namespace gamestate {bool OpaqueMenuOpen();}
+namespace gamestate {bool CinemaPlaying();void SetCinemaEnabled(bool on);void CinemaWorldDrawn(uint64_t now);void CinemaTick(uint64_t now);}
 namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "d2r_vr_state.h"
 
@@ -181,6 +182,7 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "../steamvr/sheet_walk.h"
 #include "../steamvr/room_stitch.h"
 #include "../steamvr/ceiling_top.h"
+#include "../steamvr/cinema_screen.h"
 namespace gamestate {uint32_t TalkOpens();}   // NPC conversations opened (talk_stop.h)
 
 #pragma intrinsic(_ReturnAddress)
@@ -1587,6 +1589,13 @@ void LoadSettings() {
         g_set.campfireCaptionDistance.store(std::clamp(IniF(L"campfire", L"caption_distance", 6.5f), 0.5f, 30.0f));
         g_set.campfireCaptionRise.store(std::clamp(IniF(L"campfire", L"caption_rise", 2.0f), -3.0f, 10.0f));
     }
+    {   // [cinema]: the game's cinematics on a screen in the world (steamvr/cinema_screen.h)
+        gamestate::SetCinemaEnabled(IniB(L"cinema", L"enabled", true));
+#ifdef D2RVR_NATIVE_OPENXR
+        const auto screen = framevr::cinema::Clamped(IniF(L"cinema", L"distance", 3.0f), IniF(L"cinema", L"width", 3.0f));
+        framevr::SetCinemaScreen(screen.distance, screen.width);
+#endif
+    }
     g_set.skyHidePanels.store(IniB(L"sky", L"hide_with_panels", true));
     {   // as the By turns switches: only a change of the ini's own value overrides DEV's
         static int read = -1;
@@ -2501,6 +2510,9 @@ bool TopStereoOn() { return !g_enabled.load() && g_set.topStereo.load() && g_set
 bool AfrOn() { return g_set.afr.load() && g_inWorld.load() && (g_enabled.load() || TopStereoOn())
 #ifdef D2RVR_NATIVE_OPENXR
     && (!gamestate::MenuOpen()||framevr::SpatialMenu())
+    // A cinematic (steamvr/cinema_screen.h): the game draws no world, the movie goes on a screen
+    // in the world as one picture - no eyes flipped, no pairs.
+    && !gamestate::CinemaPlaying()
 #endif
     ; }
 // From above and behind: the toolbar moved nearer or farther - only real stereo has a depth to move it in.
@@ -7533,6 +7545,7 @@ uintptr_t HookDrawGameScreen(int a) {
     const double entered=pairtime::UsNow();
     static bool turned = false;   // the last frame went by turns
     if (!depth) gamepatches::BetweenFrames();   // the frame before is drawn, this one's first pass not begun
+    if (!depth) gamestate::CinemaWorldDrawn(GetTickCount64());   // no world is drawn while a cinematic plays
 #ifdef D2RVR_NATIVE_OPENXR
     const bool wanted = !depth && PairWanted();
     if (wanted) WarnGpuWait();
@@ -10583,6 +10596,8 @@ int CampfireSkyPalette() {
 bool WorldMenuBlocksEffects() {
 #ifdef D2RVR_NATIVE_OPENXR
     // The leather keeps the world round it (leather_world), so its effects too.
+    // A cinematic: no sky, fog or ceiling over the movie (the game draws no world under it).
+    if(gamestate::CinemaPlaying())return true;
     return framevr::panels::BlockWorldEffects(gamestate::MenuOpen(),framevr::SpatialMenu(),gamestate::OpaqueMenuOpen()&&!framevr::LeatherMenuWorld());
 #else
     return gamestate::MenuOpen();
@@ -12282,7 +12297,7 @@ void TryRegister() {
     dlssmv::SetLogger(&Log);
     hud::Register();       // the interface's own layer: [hud] hide
 #ifdef D2RVR_NATIVE_OPENXR
-    framevr::Register(&Log, +[](){return gamestate::MenuOpen()||!g_inWorld.load()||(g_campfire.load()&&g_campfireShown.load()&&g_set.campfireMenuBoard.load());}, +[](){return g_inWorld.load();}, &gamestate::ToggleMenus);
+    framevr::Register(&Log, +[](){return gamestate::MenuOpen()||!g_inWorld.load()||(g_campfire.load()&&g_campfireShown.load()&&g_set.campfireMenuBoard.load())||gamestate::CinemaPlaying();}, +[](){return g_inWorld.load();}, &gamestate::ToggleMenus);
 #endif
     g_registered = true;
     Log("vrcam: joined ReShade - the fog and the sky follow d2r_pcvr.ini [fog] [sky]");
@@ -12513,6 +12528,7 @@ DWORD WINAPI UpdateThread(void*) {
 #endif
         FloorPointerTick();   // F3: the mouse pointer on the game's ground, as the head moves
         CrosshairDepthTick();   // F2's crosshair: nearer as the camera looks down
+        gamestate::CinemaTick(nowMs);   // a cinematic longer than any is over (cinema_screen.h)
         AfrQuietWhenOff();
         if (nowMs >= nextState) {   // what the hero holds, 5 times a second
             nextState = nowMs + 200;
@@ -12532,7 +12548,8 @@ DWORD WINAPI UpdateThread(void*) {
             }
             // the interface is hidden in a game area, whatever the view, with no panel open;
             // the main menu and panels (inventory, trade...) keep all of it
-            hud::SetMenuOpen(gamestate::MenuOpen() || !g_inWorld.load());
+            // (a cinematic too: the movie is drawn in the interface - no toolbar strip cleared out of it)
+            hud::SetMenuOpen(gamestate::MenuOpen() || !g_inWorld.load() || gamestate::CinemaPlaying());
             // The mouse pointer in the headset: in menus, at a trader, from above and
             // from behind it is wanted (it aims there, or picks items); in first person
             // it aims otherwise and the pointer only gets in the way.

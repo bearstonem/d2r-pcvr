@@ -106,6 +106,7 @@
 #include "stash_buttons.h"
 #include "vr_keyboard.h"
 #include "native_panels.h"
+#include "cinema_screen.h"
 #include "npc_dialogue.h"
 #include "native_hud.h"
 #include "light_bounds.h"
@@ -137,6 +138,7 @@
 #include "weapon_heft.h"
 #include "hit_reactions.h"
 
+namespace gamestate {bool CinemaPlaying();}
 namespace gamestate {bool MenuOpen();uint32_t WeaponType();uint32_t HandsKey();uint32_t WeaponSet();uint32_t WeaponClass();uint32_t TwoHanded();uint64_t LocalPlayer();uint32_t MenuEpoch();int AttackWsm(int hand);}
 namespace gamecmd {void RequestPotion(int slot);void CancelPotion();}
 namespace gamestate {void MenuMap(bool wanted);uint32_t QuestNotices();bool NoticePanelOpen();bool NoticeText(int kind,char* out,uint32_t size);}
@@ -1183,6 +1185,10 @@ math::Vec handVelocity[2]{};bool handVelocityKnown[2]{};
 XrSpace aimSpace=XR_NULL_HANDLE,leftAimSpace=XR_NULL_HANDLE;
 XrPosef menuPose{};
 bool menuPlaced=false;
+// A cinematic plays (gamestate::CinemaPlaying, cinema_screen.h): the flat panel is the cinema screen -
+// [cinema] distance ahead at eye height, [cinema] width wide, showing only the frame's movie band.
+bool cinemaMode=false;
+std::atomic<float> cinemaDistance{3.f},cinemaWidth{3.f};   // SetCinemaScreen
 bool panelMode=false,pointerVisible=false,pointerHit=false,mouseDown=false,triggerWasDown=false,cancelWasDown=false;
 HWND gameWindow=nullptr;
 WORD heldKeyScan=0;
@@ -1207,6 +1213,17 @@ math::Quat Q(XrQuaternionf q) { return {q.x,q.y,q.z,q.w}; }
 math::Vec V(XrVector3f p) { return {p.x,p.y,p.z}; }
 XrPosef PanelPose(panels::Placement p) {
     return {{p.orientation.x,p.orientation.y,p.orientation.z,p.orientation.w},{p.position.x,p.position.y,p.position.z}};
+}
+// The flat panel's size in metres and the part of the frame it shows: the whole frame fitted as the
+// menus have it, or, while a cinematic plays, the movie's band on the cinema screen.
+struct FlatSurface {panels::Size size;XrRect2Di rect;cinema::Crop band;};
+FlatSurface FlatPanel() {
+    if(cinemaMode) {
+        const auto band=cinema::MovieBand(width,height);
+        const auto screen=cinema::ScreenSize(band,cinemaWidth.load());
+        return {{screen.width,screen.height},{{int32_t(band.x),int32_t(band.y)},{int32_t(band.w),int32_t(band.h)}},band};
+    }
+    return {panels::Fit(width,height,panelWidth),{{0,0},{int32_t(width),int32_t(height)}},{0,0,width,height}};
 }
 XrPosef Placed(panels::Placement base,panels::Offset offset) {
     return PanelPose(panels::Apply(base,panels::Limit(base,offset,V(head.position))));
@@ -2404,7 +2421,8 @@ void MenuPointer(const menus::Pad& controls) {
     const bool spatialReady=spatialMode&&SurfacePlaced()&&uiCrop[2]>0;
     const bool uiActive=(panelMode&&menuPlaced)||spatialReady;
     const auto surfacePose=spatialMode?UiSurfacePose():menuPose;
-    const auto surface=spatialMode?UiSurfaceSize():panels::Fit(width,height,panelWidth);
+    const auto flat=FlatPanel();
+    const auto surface=spatialMode?UiSurfaceSize():flat.size;
     const bool pressed=controls.rt>140;
     bool focused=gameWindow&&GetForegroundWindow()==gameWindow;
     if(uiActive&&menus::Busy(controls)&&!focused)focused=FocusGameForUi();
@@ -2424,6 +2442,8 @@ void MenuPointer(const menus::Pad& controls) {
             const auto point=hit.point+math::Rotate(Q(surfacePose.orientation),{0,0,.006f});
             dotPose=surfacePose;dotPose.position={point.x,point.y,point.z};
         }
+        // The cinema screen: no beam across the film unless it is pointed at it.
+        if(cinemaMode&&!spatialMode&&!pointerHit)pointerVisible=false;
     }
     // The VR keyboard for character creation's name box (vr_keyboard.h): its own board hinged under
     // the menu, out of the game's picture. The laser hits the board itself; on it (keys or the gaps
@@ -2559,7 +2579,7 @@ void MenuPointer(const menus::Pad& controls) {
     const bool laser=!menuNavigation.Native();
     if(!laser){panelinput::UseController();pointerVisible=pointerHit=keyboardPointer=false;}
     // The handheld journal has its own left-grip placement; the leather is strapped to the left hand.
-    const bool grip=aimTracked&&laser&&!journalMode&&!leatherMode&&(controls.buttons&menus::RightBumper);
+    const bool grip=aimTracked&&laser&&!journalMode&&!leatherMode&&!(cinemaMode&&!spatialMode)&&(controls.buttons&menus::RightBumper);   // the cinema screen stays put
     const bool grabbing=GrabPanel(spatialMode?uiPose:menuPose,spatialMode?uiBase:menuBase,menuOffset,
         grip,pointerHit,pressed||mouseDown||rightMouseDown,aim.pose,
         panels::MenuDistance(int(vrsettings::Read().values[settings::MenuDistance]),!spatialMode));
@@ -2571,6 +2591,7 @@ void MenuPointer(const menus::Pad& controls) {
         RECT client{};
         if(GetClientRect(gameWindow,&client)) {
             math::Vec native{hit.u,hit.v,0};
+            if(!spatialMode&&cinemaMode)cinema::ToFrame(hit.u,hit.v,flat.band,width,height,native.x,native.y);   // the band's point in the frame
             if(spatialMode&&!journal::Pixel({uiCrop[0],uiCrop[1],uiCrop[2],uiCrop[3]},hit.u,hit.v,uiWidth,uiHeight,native))pointerHit=false;
             POINT pixel{LONG(native.x*(client.right-1)),LONG(native.y*(client.bottom-1))};
             if(pointerHit&&ClientToScreen(gameWindow,&pixel))pointerHit=SetCursorPos(pixel.x,pixel.y)!=FALSE;
@@ -6012,6 +6033,16 @@ void Input() {
 }
 void PlaceMainMenu() {
     if(!panels::CanAnchor(menuPlaced,render&&valid,state==XR_SESSION_STATE_FOCUSED,motionHeadTracked))return;
+    if(cinemaMode) {   // straight ahead at eye height, upright, never moved by a grab's offset
+        const float distance=cinemaDistance.load();
+        menuBase=panels::AtEyeLevel(V(head.position),Q(head.orientation),distance);
+        menuPose=PanelPose(menuBase);menuPlaced=true;   // not Placed: its grab limits (1.5 m) would pull the screen in
+        const auto flat=FlatPanel();
+        char b[240];std::snprintf(b,sizeof b,"Frame cinema: screen placed %.1f m ahead at eye height %.3f m, %.2f x %.2f m, showing the frame's %ux%u band of %ux%u",
+            distance,head.position.y,flat.size.width,flat.size.height,flat.band.w,flat.band.h,width,height);
+        Say(b);
+        return;
+    }
     menuBase=panels::AtEyeLevel(V(head.position),Q(head.orientation),
         panels::MenuDistance(int(vrsettings::Read().values[settings::MenuDistance]),true));
     menuPose=Placed(menuBase,menuOffset);menuPlaced=true;
@@ -6127,7 +6158,9 @@ bool Begin(bool pair=false) {
     if(loaded&&!worldWasLoaded)worldCalibrationPending=true;
     if(!loaded)worldCalibrationPending=worldRecenter=false;
     worldWasLoaded=loaded;
-    const bool spatial=SpatialMenu();
+    // A cinematic: the world is not drawn (cinema_screen.h) - its frame on the cinema screen, never the spatial menus.
+    const bool cinema=gamestate::CinemaPlaying();
+    const bool spatial=!cinema&&SpatialMenu();
     const bool book=spatial&&gamestate::JournalOnly();
     const bool npc=spatial&&gamestate::NpcChoicesOnly();
     // The tabbed menu (any page) and a cube opened from it: on the leather in the left hand.
@@ -6163,8 +6196,12 @@ bool Begin(bool pair=false) {
     // was drawn and copied - the copy is kept (-1), not dropped as a new pair's would be.
     hud::UiFrame(spatialMode,!journalMode,campfirePointer.load()?-1:0);
     // A world with no menu open (the campfire: the board wanted, or not to be had) is never the flat panel.
-    const bool panel=wantsPanel&&wantsPanel()&&!spatialMode&&!campfirePointer.load()&&!(inWorld&&inWorld()&&!gamestate::MenuOpen());
+    const bool panel=cinema||(wantsPanel&&wantsPanel()&&!spatialMode&&!campfirePointer.load()&&!(inWorld&&inWorld()&&!gamestate::MenuOpen()));
     if(panel!=panelMode){ReleasePanelInput();panelMouse.Suspend();panelMode=panel;menuPlaced=false;Say(panel?"Frame OpenXR: flat menu panel active":"Frame OpenXR: stereo gameplay active");}
+    if(cinema!=cinemaMode) {   // placed anew: the cinema screen in front, then the menu where it belongs
+        ReleasePanelInput();panelMouse.Suspend();cinemaMode=cinema;menuPlaced=false;
+        Say(cinema?"Frame cinema: the flat panel is the cinema screen":"Frame cinema: the cinema screen taken down");
+    }
     for(auto& e:eyes)e.copied=false;
     for(auto& w:viewWorld)w.ok=false;
     XrViewLocateInfo li{XR_TYPE_VIEW_LOCATE_INFO};li.viewConfigurationType=XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;li.displayTime=frameState.predictedDisplayTime;li.space=space;
@@ -6982,7 +7019,7 @@ void Register(LogFn log,PanelFn panel,PanelFn world,PanelFn toggle) {
     resolution::Register(log);
     registered=true;Say("Frame OpenXR: registered D3D12 capture; awaiting game Present");
 }
-bool SpatialMenu(){return uiSupported.load()&&!(campfirePointer.load()&&campfireBoardFailed.load())&&uiworld::Ready()&&hud::LayerFound()&&inWorld&&inWorld()&&wantsPanel&&wantsPanel();}
+bool SpatialMenu(){return !gamestate::CinemaPlaying()&&uiSupported.load()&&!(campfirePointer.load()&&campfireBoardFailed.load())&&uiworld::Ready()&&hud::LayerFound()&&inWorld&&inWorld()&&wantsPanel&&wantsPanel();}
 bool Active() {std::lock_guard lock(mutex);return frame&&valid&&render&&!failed&&!panelMode;}
 bool RightPickHeld(){return rightPickHeld.load();}
 // The campfire draws no pair, so nothing opened the headset's frame before an eye's camera was built: the first
@@ -6990,6 +7027,7 @@ bool RightPickHeld(){return rightPickHeld.load();}
 // (owner, 2026-11-10). The camera opens the frame itself (vrcam CampfireView), as BeginPair does in play.
 void OpenCampfireFrame(){std::lock_guard lock(mutex);if(session&&running&&!failed&&!panelMode&&!frame)Begin();}
 void SetCampfirePointer(bool on,float metres){campfirePointer.store(on);campfirePointerM.store(metres);if(!on){campfireMenuHit.store(false);campfireBoardFailed.store(false);}}
+void SetCinemaScreen(float distance,float width){const auto screen=cinema::Clamped(distance,width);cinemaDistance.store(screen.distance);cinemaWidth.store(screen.width);}
 void SetCampfireMenu(float width,float distance,float drop){campfireMenuWidth.store(width);campfireMenuDistance.store(distance);campfireMenuDrop.store(drop);}
 void SetCampfireCaption(bool on,const float rect[4],float width,float distance,float rise){
     for(int i=0;i<4;++i)campfireCaptionRect[i].store(rect[i]);
@@ -7256,9 +7294,9 @@ void EndPair() {
         projection.space=space;projection.viewCount=2;projection.views=pv.data();layer=reinterpret_cast<const XrCompositionLayerBaseHeader*>(&projection);menuPlaced=false;
     } else lastEyes={};
     if(!layer&&render&&valid&&eyes[0].copied&&menuPlaced) {
-        const auto size=panels::Fit(width,height,panelWidth);
-        quad.space=space;quad.eyeVisibility=XR_EYE_VISIBILITY_BOTH;quad.pose=menuPose;quad.size={size.width,size.height};
-        quad.subImage.swapchain=eyes[0].chain;quad.subImage.imageRect={{0,0},{int32_t(width),int32_t(height)}};layer=reinterpret_cast<const XrCompositionLayerBaseHeader*>(&quad);
+        const auto flat=FlatPanel();   // the menu's whole frame, or the cinema screen's movie band
+        quad.space=space;quad.eyeVisibility=XR_EYE_VISIBILITY_BOTH;quad.pose=menuPose;quad.size={flat.size.width,flat.size.height};
+        quad.subImage.swapchain=eyes[0].chain;quad.subImage.imageRect=flat.rect;layer=reinterpret_cast<const XrCompositionLayerBaseHeader*>(&quad);
     }
     XrFrameEndInfo ei{XR_TYPE_FRAME_END_INFO};ei.displayTime=frameDisplayTime;ei.environmentBlendMode=XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
     std::array<const XrCompositionLayerBaseHeader*,32> layers{};uint32_t count=0;
@@ -7591,7 +7629,7 @@ void EndPair() {
     XrCompositionLayerQuad keyboardQuad{XR_TYPE_COMPOSITION_LAYER_QUAD},keyboardLitQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
     if(layer&&keyboardShown&&staticChain&&!settingsModel.open&&!bodyCalibration.Active()&&
        (spatialMode?book.subImage.swapchain!=XR_NULL_HANDLE:menuPlaced)) {
-        const auto size=spatialMode?UiSurfaceSize():panels::Fit(width,height,panelWidth);
+        const auto size=spatialMode?UiSurfaceSize():FlatPanel().size;
         const auto at=spatialMode?UiSurfacePose():menuPose;
         const auto board=keyboard::Place(V(at.position),Q(at.orientation),size.width,size.height);
         const bool capitals=keyboardTypist.Shifted();
