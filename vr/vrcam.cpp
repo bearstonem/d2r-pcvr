@@ -4159,6 +4159,9 @@ AttackTargetFn OrigAttackTarget = nullptr;
 std::atomic<bool> g_aHeld{false};            // A is down (and no menu), from the pad
 std::atomic<float> g_walkTheta{0.0f};        // the hero's walking direction in the world, atan2(dz, dx)
 std::atomic<bool> g_walkSteady{false};
+std::atomic<float> g_modelForwardX{0.0f};      // hero's body/torso forward vector in world X (grid X)
+std::atomic<float> g_modelForwardY{-1.0f};     // hero's body/torso forward vector in world Z (grid Y)
+std::atomic<bool> g_modelForwardValid{false};  // true once hero's body/model matrix is sampled
 struct Calib { double c1 = 0, s1 = 0, c2 = 0, s2 = 0; int n = 0; float angle = 0; int mirror = 0; bool ok = false; };
 SRWLOCK g_calLock = SRWLOCK_INIT;
 Calib g_cal;
@@ -9094,6 +9097,12 @@ bool CameraYawInModel(float* out, float* eyeModel, bool* eyeOk) {
     if (!ok && !held) return false;
     float rows[3][3];
     if (!YawFromMatrix(m, out, eyeModel, eyeOk, rows)) return false;
+    const float modelLen = std::hypot(rows[2][0], rows[2][2]);
+    if (modelLen > 1e-4f && std::isfinite(rows[2][0]) && std::isfinite(rows[2][2])) {
+        g_modelForwardX.store(rows[2][0] / modelLen, std::memory_order_relaxed);
+        g_modelForwardY.store(rows[2][2] / modelLen, std::memory_order_relaxed);
+        g_modelForwardValid.store(true, std::memory_order_relaxed);
+    }
     AcquireSRWLockShared(&g_stickLock); const StickFrame f = g_stickFrame; ReleaseSRWLockShared(&g_stickLock);
     // Facing diagnostics, four times a second while on: the camera's yaw, the
     // model matrix's facing in the world, the yaw handed to the body, and the
@@ -12645,10 +12654,15 @@ DWORD WINAPI UpdateThread(void*) {
             enemysight::Tick();
             enemysight::Report();
             float compFx = 0.0f, compFy = -1.0f;
-            AcquireSRWLockShared(&g_skyLock);
-            const auto& compView = g_skyView[g_eye.load() & 1];
-            if (compView.axes_ok) { compFx = -compView.axes[6]; compFy = -compView.axes[8]; }
-            ReleaseSRWLockShared(&g_skyLock);
+            if (g_modelForwardValid.load(std::memory_order_relaxed)) {
+                compFx = g_modelForwardX.load(std::memory_order_relaxed);
+                compFy = g_modelForwardY.load(std::memory_order_relaxed);
+            } else {
+                AcquireSRWLockShared(&g_skyLock);
+                const auto& compView = g_skyView[g_eye.load() & 1];
+                if (compView.axes_ok) { compFx = -compView.axes[6]; compFy = -compView.axes[8]; }
+                ReleaseSRWLockShared(&g_skyLock);
+            }
             companionai::Install();
             companionai::Tick(compFx, compFy);
             companionai::Report();

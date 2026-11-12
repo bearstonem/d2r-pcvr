@@ -4894,6 +4894,38 @@ void Input() {
     // Glyph casting: a hand's Draw glyph button's press draws (below), never a native cast.
     const bool glyphPressed=handOutput.slot>=0&&glyphDrawSlots[size_t(skills::Hand(handOutput.slot))]==handOutput.slot;
     if(glyphPressed){requested=-1;handOutput.interact=false;}
+    const auto resolveHandSubtile=[&](int h,float& outX,float& outY) {
+        outX=0.f;outY=0.f;
+        const auto& tossStage=interactionInput.stage;
+        const bool tossWorld=interactionInput.floorKnown&&tossStage.known&&stageWorld.upm>=1.f&&stageWorld.upm<=12.f;
+        if(h>=0&&h<2&&handAimTracked[h]&&tossWorld) {
+            const float tossFloor=tossStage.anchor.y+(interactionInput.floor-tossStage.origin.y);
+            const auto laserP=tossStage.World(handAim[h].p);
+            const auto laserV=math::Rotate(tossStage.base,math::Rotate(handAim[h].q,{0,0,-1}));
+            if(laserV.y<-1e-4f&&laserP.y>tossFloor) {
+                const float t=(tossFloor-laserP.y)/laserV.y;
+                if(toss::Cell(laserP+laserV*t,tossFloor,stageWorld.upm,outX,outY))return;
+            }
+        }
+        (void)::companionai::GetPlayerWorldSubtilePos(outX,outY);
+    };
+    {
+        static int commanderSlotWas=-1;
+        const int curSlot=handOutput.wheel<0&&!handInput.occupied?handOutput.slot:-1;
+        const int cmdSkill=(curSlot>=0&&curSlot<skills::Count&&quickFresh&&quickSnapshot.skills[curSlot].known)?quickSnapshot.skills[curSlot].id:-1;
+        if(commander::IsCommanderSkill(cmdSkill)) {
+            requested=-1;handOutput.interact=false;
+            if(curSlot!=commanderSlotWas&&quickSnapshot.skills[curSlot].available) {
+                float aimX=0.f,aimY=0.f;resolveHandSubtile(handOutput.hand,aimX,aimY);
+                const bool ok=::companionai::ExecuteCommanderSkill(cmdSkill,aimX,aimY);
+                MotionPulse(handOutput.hand,ok?haptics::Category::Spell:haptics::Category::Interaction,ok?.45f:.25f,40000000);
+                char line[180];std::snprintf(line,sizeof line,"Frame commander skill: button slot=%d hand=%d -> %s (skill %d, %s)",
+                    curSlot,handOutput.hand,commander::CommanderSkillName(cmdSkill),cmdSkill,ok?"executed":"unavailable");
+                Say(line);
+            }
+        }
+        commanderSlotWas=curSlot;
+    }
     const bool requestedKnown=requested>=0&&quickFresh&&quickSnapshot.skills[requested].known&&quickSnapshot.skills[requested].available;
     handOutput.interact=requestedKnown&&quickSnapshot.skills[requested].id==357&&!(crossbowAttack&&requested==skills::TriggerSlot(0));
     const bool quick=requested>=0&&requested!=skills::TriggerSlot(0);
@@ -5243,7 +5275,8 @@ void Input() {
                 cooling?cooling:glyphCast.Busy()?"the last glyph is still casting":nullptr;
             if(refused&&refused==cooling)cooldownTicks.Refused(skill,hand,GetTickCount64());   // a tick on the drawing hand once it is ready
             glyphcast::Plan plan;
-            if(!refused) {
+            const bool isCmdSkill=commander::IsCommanderSkill(skill);
+            if(!refused&&!isCmdSkill) {
                 std::array<glyphcast::Slot,skills::Count> slots{};
                 for(int i=0;i<skills::Count;++i){const auto& k=quickSnapshot.skills[i];slots[size_t(i)]={k.id,k.owner,k.known,k.available};}
                 const bool record=quickSnapshot.glyphRecord>=0;
@@ -5260,6 +5293,13 @@ void Input() {
                     recognised?"the ":"not recognised, nearest the ",glyphs::Name(recognised?r.shape:r.nearest),
                     refused,r.score,r.second,r.corners,stroke.seconds,plane);
                 MotionPulse(hand,haptics::Category::Interaction,.25f,100000000);
+            } else if(isCmdSkill) {
+                float aimX=0.f,aimY=0.f;resolveHandSubtile(hand,aimX,aimY);
+                (void)::companionai::ExecuteCommanderSkill(skill,aimX,aimY);
+                glyphLook=glyphtrail::ElementLook(skill);
+                std::snprintf(line,sizeof line,"Frame glyph: the %s -> %s (commander skill %d) executed directly (score %.2f, next %.2f, corners %d, %.1f s)",
+                    glyphs::Name(r.shape),known.name,skill,r.score,r.second,r.corners,stroke.seconds);
+                MotionPulse(hand,haptics::Category::Spell,.6f,60000000);
             } else {
                 glyphCast.Begin(plan,skill,-1,now);glyphLook=glyphtrail::ElementLook(skill);
                 glyphPress={};glyphPress.skill=known;
