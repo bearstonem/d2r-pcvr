@@ -73,6 +73,8 @@
 #include "latest_worker.h"
 #include "haptic_pulse.h"
 #include "haptic_actions.h"
+#include "haptic_frequency.h"
+#include "controller_profiles.h"
 #include "haptic_impact.h"
 #include "haptic_heartbeat.h"
 #include "xinput_rumble.h"
@@ -164,6 +166,7 @@ constexpr float kRadToDeg=57.295779513f;
 #define DECLARE(name) PFN_xr##name p##name=nullptr;
 XR_FUNCTIONS(DECLARE)
 #undef DECLARE
+PFN_xrEnumerateBoundSourcesForAction pEnumerateBoundSourcesForAction=nullptr;   // optional (LogHapticOutputs)
 PFN_xrGetInstanceProcAddr getProc=nullptr;
 HMODULE loader=nullptr;
 bool wineOpenXR=false;
@@ -240,6 +243,10 @@ int walkDirectionSaid=-1;
 int castHand=0;
 controllers::Labels detectedControllers{},controllerLabels{};
 bool controllerProfilesDirty=true,frameControllerExtension=false;
+// Each physical hand's controller as the runtime reports it (controllers::Layout), for the frequency a
+// pulse is sent at (haptic_frequency.h); and the profiles last reported in the log (LogHapticOutputs).
+std::atomic<int> hapticLayouts[2]{};
+std::array<std::string,2> hapticProfilesSaid{};
 interaction::Skill shieldSkill;
 constexpr int shieldSlot=skills::TriggerSlot(1);
 gameplay::Input motionInput;
@@ -1632,8 +1639,12 @@ bool LoadFunctions() {
 #define LOAD(name) if(!Check(getProc(instance,"xr" #name,reinterpret_cast<PFN_xrVoidFunction*>(&p##name)),"load " #name)) return false;
     XR_FUNCTIONS(LOAD)
 #undef LOAD
+    // Only the log's haptic binding report uses it (LogHapticOutputs): a runtime without it still starts.
+    if(XR_FAILED(getProc(instance,"xrEnumerateBoundSourcesForAction",reinterpret_cast<PFN_xrVoidFunction*>(&pEnumerateBoundSourcesForAction))))
+        pEnumerateBoundSourcesForAction=nullptr;
     XrInstanceProperties props{XR_TYPE_INSTANCE_PROPERTIES};pGetInstanceProperties(instance,&props);
-    char b[192];std::snprintf(b,sizeof b,"Frame OpenXR: runtime %s",props.runtimeName);Say(b);
+    char b[192];std::snprintf(b,sizeof b,"Frame OpenXR: runtime %s version %u.%u.%u",props.runtimeName,
+        unsigned(XR_VERSION_MAJOR(props.runtimeVersion)),unsigned(XR_VERSION_MINOR(props.runtimeVersion)),unsigned(XR_VERSION_PATCH(props.runtimeVersion)));Say(b);
     runtimeVdxr.store(std::strstr(props.runtimeName,"VirtualDesktop")!=nullptr);
     runtimeSteamVr.store(std::strstr(props.runtimeName,"SteamVR")!=nullptr);
     XrSystemGetInfo si{XR_TYPE_SYSTEM_GET_INFO};si.formFactor=XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
@@ -1667,26 +1678,27 @@ bool SetupActions() {
        !MakeAction(primary,"primary",XR_ACTION_TYPE_BOOLEAN_INPUT) || !MakeAction(secondary,"secondary",XR_ACTION_TYPE_BOOLEAN_INPUT) ||
        !MakeAction(stickClick,"stick_click",XR_ACTION_TYPE_BOOLEAN_INPUT) || !MakeAction(menu,"menu",XR_ACTION_TYPE_BOOLEAN_INPUT)) return false;
     Say("Frame haptics: separate feedback_right and feedback_left actions; apply and timed stop use each hand's own output");
-    for(const auto* profile:{"/interaction_profiles/valve/index_controller","/interaction_profiles/oculus/touch_controller","/interaction_profiles/microsoft/motion_controller",controllers::FrameProfile}) {
-        const bool frameController=std::string_view(profile)==controllers::FrameProfile;
-        if(frameController&&!frameControllerExtension)continue;
-        const bool index=std::strstr(profile,"index"), touch=std::strstr(profile,"touch");
-        const auto layout=controllers::Detect(profile);
+    // The paths per profile, both hands' vibration outputs included, come from controller_profiles.h,
+    // where controller_labels_test checks each against the profile's own list.
+    for(const auto* profile:controllers::Profiles) {
+        if(std::string_view(profile)==controllers::FrameProfile&&!frameControllerExtension)continue;
         std::vector<XrActionSuggestedBinding> bindings;
-        if(!Check(hapticActions.Bind(instance,pStringToPath,bindings),"bind hand haptics"))return false;
-        for(int i=0;i<2;++i) {
-            const std::string base=i==0?"/user/hand/right/input/":"/user/hand/left/input/";
-            auto bind=[&](XrAction a,const char* suffix){bindings.push_back({a,Path((base+suffix).c_str())});};
-            bind(gripPose,"grip/pose");bind(stick,"thumbstick");bind(stickClick,"thumbstick/click");bind(trigger,"trigger/value");
-            bind(aimPose,"aim/pose");
-            // Motion controllers expose squeeze/click (boolean), so omit our float grip there.
-            if(index||touch||frameController) bind(squeeze,index?"squeeze/force":"squeeze/value");
-            if(index||touch||frameController) {
-                bind(primary,controllers::FacePath(layout,i,false));
-                bind(secondary,controllers::FacePath(layout,i,true));
+        for(const auto& s:controllers::Suggestions(profile)) {
+            using controllers::Bind;
+            XrAction action=XR_NULL_HANDLE;
+            switch(s.action) {
+                case Bind::Haptic:action=hapticActions.Info(s.hand).action;break;
+                case Bind::Grip:action=gripPose;break;
+                case Bind::Stick:action=stick;break;
+                case Bind::StickClick:action=stickClick;break;
+                case Bind::Trigger:action=trigger;break;
+                case Bind::Aim:action=aimPose;break;
+                case Bind::Squeeze:action=squeeze;break;
+                case Bind::Primary:action=primary;break;
+                case Bind::Secondary:action=secondary;break;
+                case Bind::Menu:action=menu;break;
             }
-            if(frameController)bind(menu,i==1?"view/click":"menu/click");
-            else if((touch&&i==1)||(!index&&!touch)) bind(menu,"menu/click");
+            bindings.push_back({action,Path(s.path.c_str())});
         }
         XrInteractionProfileSuggestedBinding suggestion{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
         suggestion.interactionProfile=Path(profile);suggestion.countSuggestedBindings=uint32_t(bindings.size());suggestion.suggestedBindings=bindings.data();
@@ -2324,17 +2336,45 @@ bool Initialize(reshade::api::command_queue* rq,reshade::api::swapchain* swap) {
     if(turnCompiler.Start())turnCompiler.Submit({device,turnFormat});   // else the first turned eye builds it all
     return true;
 }
+// Each hand's vibration as the runtime has it, logged when the controllers' profiles change: the
+// profile, the output its action is bound to (xrEnumerateBoundSourcesForAction) and the frequency a
+// pulse with none of its own goes at. "bound to nothing" is a runtime, or a binding edited for the
+// game in SteamVR, without a vibration output for that hand.
+void LogHapticOutputs(const std::array<std::string,2>& profiles) {
+    for(int hand=0;hand<2;++hand) {
+        std::string bound;XrResult result=XR_ERROR_FUNCTION_UNSUPPORTED;
+        if(pEnumerateBoundSourcesForAction) {
+            XrBoundSourcesForActionEnumerateInfo info{XR_TYPE_BOUND_SOURCES_FOR_ACTION_ENUMERATE_INFO};info.action=hapticActions.Info(hand).action;
+            uint32_t count=0;result=pEnumerateBoundSourcesForAction(session,&info,0,&count,nullptr);
+            std::vector<XrPath> sources(count);
+            if(XR_SUCCEEDED(result)&&count)result=pEnumerateBoundSourcesForAction(session,&info,count,&count,sources.data());
+            if(XR_SUCCEEDED(result))for(uint32_t i=0;i<count&&i<sources.size();++i) {
+                char path[XR_MAX_PATH_LENGTH]{};uint32_t size=0;
+                if(XR_SUCCEEDED(pPathToString(instance,sources[i],sizeof path,&size,path))){if(!bound.empty())bound+=", ";bound+=path;}
+            }
+        }
+        if(XR_FAILED(result))bound="unknown (result "+std::to_string(int(result))+")";
+        else if(bound.empty())bound="nothing";
+        const auto layout=controllers::Detect(profiles[hand]);
+        const float hz=haptics::OutputFrequency(XR_FREQUENCY_UNSPECIFIED,layout);
+        const std::string rate=hz>0?std::to_string(int(hz))+" Hz":"the runtime's choice";
+        char line[512];std::snprintf(line,sizeof line,"Frame haptics: %s controller %s (%s); vibration bound to %s; a pulse with no frequency of its own goes at %s",
+            hand==0?"right":"left",controllers::Name(layout),profiles[hand].empty()?"no profile":profiles[hand].c_str(),bound.c_str(),rate.c_str());
+        Say(line);
+    }
+}
 void UpdateControllerLabels() {
     if(controllerProfilesDirty){
         bool retry=false;
         controllers::Labels detected;
+        std::array<std::string,2> profiles{};
         for(int hand=0;hand<2;++hand){
             XrInteractionProfileState current{XR_TYPE_INTERACTION_PROFILE_STATE};
             char path[XR_MAX_PATH_LENGTH]{};uint32_t size=0;
             if(XR_FAILED(pGetCurrentInteractionProfile(session,hands[hand],&current))){retry=true;continue;}
             if(current.interactionProfile!=XR_NULL_PATH){
                 if(XR_FAILED(pPathToString(instance,current.interactionProfile,sizeof path,&size,path))){retry=true;continue;}
-                detected.hands[hand]=controllers::Detect(path);
+                detected.hands[hand]=controllers::Detect(path);profiles[hand]=path;
             }
         }
         if(detectedControllers!=detected){
@@ -2342,6 +2382,8 @@ void UpdateControllerLabels() {
             char line[120];std::snprintf(line,sizeof line,"Frame controllers: right=%s left=%s",
                 controllers::Name(detected.hands[0]),controllers::Name(detected.hands[1]));Say(line);
         }
+        for(int hand=0;hand<2;++hand)hapticLayouts[hand].store(int(detectedControllers.hands[hand]));
+        if(!retry&&(!profiles[0].empty()||!profiles[1].empty())&&profiles!=hapticProfilesSaid){hapticProfilesSaid=profiles;LogHapticOutputs(profiles);}
         controllerProfilesDirty=retry;
     }
     controllerLabels=controllers::Resolve(controllers::Choice(int(vrsettings::Read().values[settings::ControllerLabels])),detectedControllers);
@@ -2733,7 +2775,8 @@ bool MotionPulse(int hand,haptics::Category category,float strength,XrDuration d
         }
     }))return false;
     XrHapticVibration vibration{XR_TYPE_HAPTIC_VIBRATION};
-    vibration.duration=duration;vibration.frequency=frequency;
+    // An Index plays nothing at the unspecified 0 Hz; it gets one it plays (haptic_frequency.h).
+    vibration.duration=duration;vibration.frequency=haptics::OutputFrequency(frequency,controllers::Layout(hapticLayouts[hand].load()));
     XrResult result=XR_SUCCESS;
     const bool applied=hapticPulses.Pulse(hand,category,std::chrono::nanoseconds(duration),strength,[&](float amplitude){
         vibration.amplitude=amplitude;
@@ -2742,7 +2785,7 @@ bool MotionPulse(int hand,haptics::Category category,float strength,XrDuration d
     if(preview) {
         char message[192];std::snprintf(message,sizeof message,
             "Frame haptics test: hand=%d category=%d amplitude=%.3f duration_ms=%lld frequency=%.0f sent=%d result=%d",
-            hand,int(category),vibration.amplitude,static_cast<long long>(duration/1000000),frequency,applied,int(result));
+            hand,int(category),vibration.amplitude,static_cast<long long>(duration/1000000),vibration.frequency,applied,int(result));
         Say(message);
     }
     static bool reported[2]{};static ULONGLONG errorAt=0;
@@ -8577,6 +8620,7 @@ void Shutdown(bool preserveResolution) {
     gazeAction=XR_NULL_HANDLE;gazeReady=gazeValid=gazeExtension=gazeSupported=false;gazeStability.Reset();
     gazeAimSupport.store(-1);PublishGazeAim(false,{0,0,-1});
     detectedControllers={};controllerLabels={};controllerProfilesDirty=true;frameControllerExtension=false;
+    for(auto& layout:hapticLayouts)layout.store(0);hapticProfilesSaid={};
     for(auto& e:eyes){if(e.chain&&pDestroySwapchain)pDestroySwapchain(e.chain);e={};}
     mirrorSupported=mirrorMono=false;
     turnFrame=keepTurns=keepDepth=false;lastEyes={};viewBase={{{0,0,0,1},{0,0,0,1}}};viewWorld={};turnDepths={};turnCounts={};turnImages={};turnKept={};turnImagesFailed=turnWarpTried=false;turnWarp={};

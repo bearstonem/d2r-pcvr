@@ -340,7 +340,18 @@ Known diagnostic lessons:
   mask needs its `Use` bit; `effect-passes-test` fails until it has one.
 - VDXR hands the game to SteamVR while SteamVR is running, leaving a Quest on
   the flat desktop. Close SteamVR first; `Frame OpenXR: runtime` names the
-  runtime actually used.
+  runtime actually used, and its version.
+- No vibration on one kind of controller: read the two `Frame haptics: right/left
+  controller ...` lines written when the profiles are known. They give the
+  profile, what the runtime bound each hand's vibration to ("nothing" means no
+  output, e.g. a SteamVR binding edited for the game) and the frequency a pulse
+  without one of its own is sent at. Most pulses (hits, blocks, menus, spells)
+  have none; OpenXR's 0 there is passed to Valve Index controllers, which play
+  nothing at 0 Hz, so an Index gets 170 Hz (`haptic_frequency.h`; not yet
+  confirmed on an Index). The Feel it buttons in VR Settings > Controls >
+  Vibration log `Frame haptics test: ... frequency=... sent=... result=...`;
+  Bow draw and the Bow release test carry their own frequencies, Melee hits and
+  Spell casts none. `sent=1 result=0` means only that the runtime took it.
 - Melee settings are motion speed in m/s, not acceleration. Classic/Unleashed
   are game-rule choices; they do not remove the physical motion threshold.
 - The shield follows the final posed left wrist. Arm IK used to clamp that

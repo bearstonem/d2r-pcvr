@@ -1,13 +1,13 @@
 #pragma once
 #include <array>
 #include <cstdio>
-#include <vector>
 #include <openxr/openxr.h>
 
 namespace framevr::haptics {
 // Keep output routing independent of shared input/subaction ordering. Each
-// action has exactly one suggested output, including on SteamVR. Both apply
-// and timed stop use Info(), so one hand's timeout cannot stop the other.
+// action has exactly one suggested output in every profile, including on SteamVR
+// (controller_profiles.h, Bind::Haptic). Both apply and timed stop use Info(),
+// so one hand's timeout cannot stop the other.
 class Actions {
     std::array<XrAction,2> actions{}; // right, left (transport wire order)
 public:
@@ -20,15 +20,6 @@ public:
             // No subaction filter: the action itself selects the only output.
             const auto result=create(set,&ci,&actions[hand]);
             if(XR_FAILED(result))return result;
-        }
-        return XR_SUCCESS;
-    }
-    XrResult Bind(XrInstance instance,PFN_xrStringToPath path,std::vector<XrActionSuggestedBinding>& bindings) const {
-        for(int hand=0;hand<2;++hand) {
-            XrPath output=XR_NULL_PATH;
-            const auto result=path(instance,hand==0?"/user/hand/right/output/haptic":"/user/hand/left/output/haptic",&output);
-            if(XR_FAILED(result))return result;
-            bindings.push_back({actions[hand],output});
         }
         return XR_SUCCESS;
     }
