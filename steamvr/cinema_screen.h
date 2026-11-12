@@ -106,12 +106,13 @@ inline Crop MovieBand(uint32_t width,uint32_t height) {
     const auto band=resolution::UiCanvas({width,height});
     return {0,0,band.w,band.h};
 }
-// [cinema] distance and width (metres): a screen ahead at eye height, about 53 degrees across by
-// default - most of the view, none of it at the edges of the lenses.
-struct Screen { float distance=3.f,width=3.f; };
+// [cinema] distance and width (metres): a screen ahead at eye height, 12 m wide at 3 m by default - about
+// 127 degrees across, past the edges of the view, a front-row seat (owner, 2026-11-12: "Make the cinema
+// screen four times as large": it was 3 m, about 53 degrees). Width up to 48 m.
+struct Screen { float distance=3.f,width=12.f; };
 inline Screen Clamped(float distance,float width) {
     const auto keep=[](float v,float fallback,float lo,float hi){return std::isfinite(v)?std::clamp(v,lo,hi):fallback;};
-    return {keep(distance,3.f,1.f,10.f),keep(width,3.f,.5f,12.f)};
+    return {keep(distance,3.f,1.f,10.f),keep(width,12.f,.5f,48.f)};
 }
 struct Size { float width=0,height=0; };
 // The screen's size in metres: the band's own shape at the width asked for.
