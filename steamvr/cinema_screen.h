@@ -100,9 +100,16 @@ private:
     uint64_t since=0,worldFrom=0,worldLast=0;
 };
 
-// The part of the frame the movie is in: the interface's full-screen box.
+// The part of the frame the movie is in. The movie player asks the engine for the window's size and is
+// given the real one (VR_RESOLUTION.md: movies keep their original dimensions), so it draws at the
+// window's own size in the frame's top left corner - not across the interface's full-screen box: with a
+// 1920x1080 window and a 3072x3072 frame the film filled only the top left 1920x1080 of the 3072x1728
+// box, the upper left of the screen (owner 2026-11-12: "the video only plays on the upper left
+// quadrant of it"). windowWidth/windowHeight: the game window's client size (resolution::WindowClient),
+// 0 = not known: the interface's box, as before.
 struct Crop { uint32_t x=0,y=0,w=0,h=0; };
-inline Crop MovieBand(uint32_t width,uint32_t height) {
+inline Crop MovieBand(uint32_t width,uint32_t height,uint32_t windowWidth=0,uint32_t windowHeight=0) {
+    if(width&&height&&windowWidth&&windowHeight)return {0,0,std::min(windowWidth,width),std::min(windowHeight,height)};
     const auto band=resolution::UiCanvas({width,height});
     return {0,0,band.w,band.h};
 }

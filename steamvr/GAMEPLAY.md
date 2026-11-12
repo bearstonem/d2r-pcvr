@@ -460,8 +460,12 @@ the screen in front of you again. Hold the game's skip button (or press it, as
 the game asks) on the controllers to skip; the laser shows only while pointed at
 the screen, and grabbing does not move it.
 
-D2R draws a cinematic as an interface widget in its full-screen box (the 16:9
-band at the top of a square VR picture) and draws no world meanwhile: in a game
+D2R draws a cinematic as an interface widget and draws no world meanwhile. The
+movie player is given the game window's real size (movies keep their original
+dimensions, `VR_RESOLUTION.md`), so the film lies at the window's own size in the
+top left of the larger VR picture - a 1920x1080 window: its top left 1920x1080 of
+3072x3072 - and the screen shows exactly that part (it showed the interface's
+16:9 box at first, with the film in its upper left; owner 2026-11-12). Meanwhile: in a game
 the headset used to show no picture at all while one played (the picture went
 to one eye's slot and the other never came). The mod tells a cinematic from the
 game's own interface messages: `MoviePlayerMessage` `Play` starts one;

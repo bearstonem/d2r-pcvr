@@ -127,6 +127,18 @@ int main(int argc,char** argv){
         band=cinema::MovieBand(3840,1600);Check(band.w==3840&&band.h==1600,"wider than 16:9: all of it (the movie keeps its shape in it)");
         const auto canvas=resolution::UiCanvas({4096,4096});
         band=cinema::MovieBand(4096,4096);Check(band.w==canvas.w&&band.h==canvas.h,"the same box the game's interface is given");
+        // The movie at the window's own size, top left (owner 2026-11-12: it played in the upper left of the screen):
+        // a 1920x1080 window under a 3072x3072 frame - the session's log - is the top left 1920x1080.
+        band=cinema::MovieBand(3072,3072,1920,1080);
+        Check(band.x==0&&band.y==0&&band.w==1920&&band.h==1080,"the window's size, top left: the whole film on the screen");
+        band=cinema::MovieBand(3072,3072,2560,1600);Check(band.w==2560&&band.h==1600,"a 16:10 window: its own shape (the film letterboxed in it)");
+        band=cinema::MovieBand(2560,1440,3840,2160);Check(band.w==2560&&band.h==1440,"a window larger than the frame: the frame");
+        band=cinema::MovieBand(3072,3072,0,1080);Check(band.w==3072&&band.h==1728,"no window size: the interface's box, as before");
+        band=cinema::MovieBand(1920,1080,1920,1080);Check(band.w==1920&&band.h==1080,"VR resolution off (frame = window): all of it");
+        const auto screen=cinema::ScreenSize(cinema::MovieBand(3072,3072,1920,1080),3);
+        Check(Near(screen.width,3)&&Near(screen.height,1.6875),"a 16:9 window: a 16:9 screen");
+        float fx=0,fy=0;cinema::ToFrame(1,1,cinema::MovieBand(3072,3072,1920,1080),3072,3072,fx,fy);
+        Check(Near(fx,1920/3072.)&&Near(fy,1080/3072.),"the laser's far corner is the film's, in the frame");
     }
     {   // The screen: the band's shape at the width asked for, comfortably ahead.
         const cinema::Screen d;
@@ -175,6 +187,7 @@ int main(int argc,char** argv){
         Has(transport,"transport.cpp","const bool panel=cinema||(","in a game too, the flat panel");
         Has(transport,"transport.cpp","bool SpatialMenu(){return !gamestate::CinemaPlaying()&&","vrcam's stereo checks agree");
         Has(transport,"transport.cpp","quad.subImage.imageRect=flat.rect;","the quad shows the movie band only");
+        Has(transport,"transport.cpp","cinema::MovieBand(width,height,window.w,window.h)","the movie at the window's own size, top left");
         Has(transport,"transport.cpp","menuPose=PanelPose(menuBase);menuPlaced=true;","placed once, world-locked, at its own distance (not the menus' grab limits)");
     }
     std::puts("cinema-screen-test: ok");
