@@ -457,6 +457,16 @@ int main(){
                   Changed(saved.values,current.values)==(ChangeMask{1}<<key)&&Int(path,L"custom",L"keep")==12345,"a haptic feel switch survives reload and touches nothing else");
         }
     }
+    // Weapons collide (held_collision.h): On when missing (the default), saved as [gameplay] held_collisions, touching nothing else.
+    Check(vrsettings::Read().values[HeldCollisions]==1&&Int(path,L"gameplay",L"held_collisions")==-999,"a profile without held_collisions reads On");
+    for(int enabled:{0,1}) {
+        const auto current=vrsettings::Read();
+        model.Open(current);model.Click({Kind::Change,HeldCollisions,enabled?1:-1});request=model.Click({Kind::Apply});
+        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"save Weapons collide");
+        const auto saved=vrsettings::Read();
+        Check(saved.values[HeldCollisions]==enabled&&Int(path,L"gameplay",L"held_collisions")==enabled&&
+              Changed(saved.values,current.values)==(ChangeMask{1}<<HeldCollisions)&&Int(path,L"custom",L"keep")==12345,"Weapons collide survives reload and touches nothing else");
+    }
     // Loot pick (#257): On when missing (the default), On and Off saved as [interactions] loot_pick; only 0 reads Off.
     Check(vrsettings::Read().values[LootPick]==1&&Int(path,L"interactions",L"loot_pick")==-999,"a profile without loot_pick reads On");
     for(int enabled:{0,1}) {

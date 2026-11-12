@@ -114,6 +114,10 @@ namespace gamestate { bool ToggleMenus(); }
 namespace gamestate { uint32_t MenuEpoch(); }
 namespace gamestate { void Init(const D2RL::PluginContext* ctx); void Tick(); uint32_t WeaponClass(); uint32_t WeaponSet(); uint32_t WeaponType(); uint32_t HandsHeld(); uint32_t TwoHanded(); uint32_t WeaponHand(); uint32_t HandsKey(); bool MenuOpen(); int ObjectLight(uint32_t txt, uint32_t mode, float rgb[3]); uint64_t LocalPlayer(); void SetViewMode(uint32_t mode); bool AutoMapOpen(); bool SetAutoMap(bool open); void PollPlate(); bool PlateRect(int32_t out[4]); }
 namespace gamestate {bool LeftShield();}
+#ifdef D2RVR_NATIVE_OPENXR
+#include "dual_wield.h"
+namespace gamestate {framevr::dualwield::Equipment MeleeEquipment();}   // the two hands' weapons (held items collide)
+#endif
 namespace gamestate {bool OpaqueMenuOpen();}
 namespace gamestate {bool CinemaPlaying();void SetCinemaEnabled(bool on);void CinemaWorldDrawn(uint64_t now);void CinemaTick(uint64_t now);}
 namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
@@ -1089,6 +1093,7 @@ void LoadSettings() {
     // The perfect parry window is fixed at 450 ms with no lead (no longer a setting).
     melee::ConfigureParrySound((int)IniF(L"gameplay",L"parry_sound",236));
     melee::ConfigureBlockSound((int)IniF(L"gameplay",L"block_sound",398));
+    melee::ConfigureHeldClankSound((int)IniF(L"gameplay",L"held_collision_sound",398));   // weapons collide: their metal clank
     // % of physical blocks and chips that give the shield the game's own 10% wear roll:
     // 22 = its native share of struck wear (2.2% a contact). Parries never.
     combat::ConfigureShieldWear(int(IniF(L"gameplay",L"shield_block_wear",22)));
@@ -9621,8 +9626,51 @@ void PushArms() {
     in.shapeForm = on ? ShapeFormNow() : 0;
     in.firstPerson = own;
     for (int i = 0; i < 2; ++i) in.formHeight[i] = g_set.formHeight[i].load();
+#ifdef D2RVR_NATIVE_OPENXR
+    {   // Held items collide (held_collision.h; VR Settings > Combat > Weapons collide): the pair the hands hold and
+        // what keeps it from colliding now. The input thread adds menus, wheels and throws (HeldCollisionBlocks);
+        // the skeleton hook what it cannot pose (a hand untracked, an item put away, a shield not yet measured).
+        static bool setting = true; static int told = -1; static ULONGLONG readAt = 0;   // this timer's thread only
+        if (const ULONGLONG now = GetTickCount64(); !readAt || now - readAt > 200) {
+            readAt = now; setting = vrsettings::Read().values[framevr::settings::HeldCollisions] > .5f;
+            if (int(setting) != told) { told = int(setting); LogF("Frame held collisions: %s (VR Settings > Combat > Weapons collide)", setting ? "on" : "off"); }
+        }
+        namespace hc = framevr::held;
+        const uint32_t blocks = framevr::HeldCollisionBlocks();
+        hc::Holding h;
+        h.setting = setting;
+        h.firstPerson = own && in.mode == 2;
+        h.menu = gamestate::MenuOpen() || (blocks & hc::Menu);
+        h.wheel = (blocks & hc::Wheel) != 0; h.leather = (blocks & hc::Leather) != 0; h.throwing = (blocks & hc::Throwing) != 0;
+        h.form = in.shapeForm != 0;
+        h.twoHands = (gamestate::TwoHanded() & D2RVR_TWO_HANDS_ON) || in.staff || in.bothAttach || in.leftHilt || in.gunStock;
+        h.shield = in.leftShield;
+        h.leftHanded = in.leftHanded;
+        // The main hand's kind (what melee contact swings on the right attachment: beside a shield the game's weapon
+        // kind), and a second weapon's: the drawn attachments' order once known (dualwield::Equipment::Type), else
+        // the body slots'.
+        const auto weapons = gamestate::MeleeEquipment();
+        if (in.leftShield) h.main = gamestate::WeaponType();
+        else {
+            h.main = weapons.Type(0) ? weapons.Type(0) : weapons.type[0] ? weapons.type[0] : gamestate::WeaponType();
+            h.off = weapons.Type(1) ? weapons.Type(1) : weapons.type[1];
+        }
+        in.held = hc::Decide(h);
+        in.held.why |= blocks & hc::Untracked;   // the headset lost the head: no gameplay hands this frame
+    }
+#endif
     skel::Set(in);
 }
+#ifdef D2RVR_NATIVE_OPENXR
+// Held items collide: a first touch that clanked, from the skeleton hook - a clank in both controllers (the input
+// thread plays it) and, met fast enough, the game's metal sound at the hero ([gameplay] held_collision_sound).
+void HeldClankTick() {
+    float strength = 0, speed = 0;
+    if (!skel::TakeHeldClank(strength, speed)) return;
+    framevr::HeldClank(strength);
+    if (speed >= framevr::held::SoundSpeed) melee::QueueHeldClankSound();
+}
+#endif
 
 // F10: one second of distinct skeletons into d2r_vr_skeletons.txt (skeletons.cpp).
 void StartProbe();
@@ -12503,6 +12551,7 @@ DWORD WINAPI UpdateThread(void*) {
         TurnTick();
         PushArms();
 #ifdef D2RVR_NATIVE_OPENXR
+        HeldClankTick();
         MeleeContactTick();
         ShieldContactTick();
         ShieldGuardTick();

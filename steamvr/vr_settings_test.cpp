@@ -972,8 +972,8 @@ int main(int argc,char** argv){
     {   // Left-handed (#307, hand_role.h): Off by default, experimental, a row of its own, saved alone
         Check(Defaults()[LeftHanded]==0&&std::wstring(Definitions[LeftHanded].section)==L"interactions"&&
               std::wstring(Definitions[LeftHanded].key)==L"left_handed"&&Definitions[LeftHanded].min==0&&Definitions[LeftHanded].max==1&&
-              HelpText(LeftHanded)[0]!=0&&LeftHanded<ChangeMask::Bits&&LeftHanded+1==LeftHandedSticks,
-              "Left-handed: Off by default, [interactions] left_handed Off / On, explained, its own change bit, appended (Sticks stay right-handed after it)");
+              HelpText(LeftHanded)[0]!=0&&LeftHanded<ChangeMask::Bits&&LeftHanded+1==HeldCollisions,
+              "Left-handed: Off by default, [interactions] left_handed Off / On, explained, its own change bit, appended after the haptics (Weapons collide after it)");
         const auto* row=content::RowOf(LeftHanded);
         Check(row&&!row->beside&&row->page==View::Hands&&row->kind==content::RowKind::Toggle&&std::strcmp(row->label,"Left-handed (experimental)")==0&&
               row->section==content::RowOf(WalkDirection)->section&&!content::RowOf(WalkDirection)->beside&&row->classes==content::AllClasses,"a switch of its own on Controls > Hands, every class");
@@ -984,6 +984,20 @@ int main(int argc,char** argv){
         for(int c=-1;c<=heroclass::Assassin+1;++c)Check(RowShown(LeftHanded,Defaults(),{c}),"every class, and the title screen, see it");
         Model t;Snapshot ready;ready.ready=true;ready.values[Dominant]=0;t.Open(ready);layout::Press(t,{Kind::Set,LeftHanded,0,1},0);
         Check(t.Get()[LeftHanded]==1&&t.Get()[Dominant]==0&&t.Click({Kind::Apply}).changed==(ChangeMask{1}<<LeftHanded),"the switch turns it On, leaves the saved Dominant hand alone, and Apply saves only it");
+    }
+    {   // Weapons collide (held_collision.h, 2026-11-11): On by default, Melee reach's right half on Combat, saved alone
+        Check(Defaults()[HeldCollisions]==1&&std::wstring(Definitions[HeldCollisions].section)==L"gameplay"&&
+              std::wstring(Definitions[HeldCollisions].key)==L"held_collisions"&&Definitions[HeldCollisions].min==0&&Definitions[HeldCollisions].max==1&&
+              HelpText(HeldCollisions)[0]!=0&&HeldCollisions<ChangeMask::Bits&&HeldCollisions+1==LeftHandedSticks,
+              "Weapons collide: On by default, [gameplay] held_collisions Off / On, explained, its own change bit, appended (Sticks stay right-handed after it)");
+        const auto* row=content::RowOf(HeldCollisions);
+        Check(row&&row->beside&&row->page==View::Combat&&row->kind==content::RowKind::Toggle&&std::strcmp(row->label,"Weapons collide")==0&&
+              row->section==content::RowOf(MeleeReach)->section&&row->classes==content::AllClasses,"Melee reach's right half on Combat > Melee, every class");
+        Check(std::string(HelpText(HeldCollisions)).find("12 cm")!=std::string::npos&&std::string(row->help).find("12 cm")!=std::string::npos,
+              "both helps say how far the hand gives way");
+        for(int c=-1;c<=heroclass::Assassin+1;++c)Check(RowShown(HeldCollisions,Defaults(),{c}),"every class sees it");
+        Model t;Snapshot ready;ready.ready=true;t.Open(ready);layout::Press(t,{Kind::Set,HeldCollisions,0,0},0);
+        Check(t.Get()[HeldCollisions]==0&&t.Click({Kind::Apply}).changed==(ChangeMask{1}<<HeldCollisions),"the switch turns it Off, and Apply saves only it");
     }
     {   // Sticks stay right-handed (hand_role.h Sticks): Off by default, a row of its own under Left-handed, shown only
         // while Left-handed is on (the draft's value too), about the real controllers, saved alone

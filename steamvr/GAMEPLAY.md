@@ -1793,6 +1793,70 @@ included yet.
 - Drawing the string, a held trigger, a menu or the wheel ends the bash lane;
   a stroke sampled just before drawing is dropped.
 
+### Weapons collide
+
+**VR Settings > Gameplay > Combat > Weapons collide** (`[gameplay]
+held_collisions`, 1 by default; the right half of Melee reach's row) keeps the
+player's own held items from passing through each other (owner, 2026-11-11). A
+sword swung across the body stops at the shield on the other arm and slides along
+its face; two weapons, one in each hand, stop at each other. Your real hands cannot
+be stopped, so the **drawn** pose gives way: the hand that yields is drawn off its
+controller by the smallest push that separates the two items, and eased back to
+the controller when they part. Pure logic and its fixtures: `held_collision.h`,
+`held_collision_test.cpp`; the skeleton hook (`vr/skeletons.cpp`, HeldCollide)
+applies it.
+
+- **Shapes.** A weapon is a capsule from its grip along its attachment's +Y, the
+  melee contact's lengths (28 cm daggers, claws and orbs, 38 cm wands, 65 cm the
+  rest) and a 3 cm radius (a blade's half width; the melee capsule is padded for
+  reach, this one is not). The shield is the box of its rendered mesh, the same
+  bounds the physical guard measures, held in its attach bone's frame so later
+  poses carry it; its half thickness is kept between 1 and 4 cm. Until the mesh has
+  been measured the shield does not collide (`shield unmeasured` in the log).
+- **Who yields.** Weapon against shield: the weapon's hand, all of it. Two weapons:
+  the push is split between both hands, most (up to 85%) to the hand that moved
+  faster into the touch; two hands meeting evenly split evenly.
+- **The push.** Each item is carried from the last drawn pose by its controller to
+  where it would be drawn now, so the push is worked out from the real hands and
+  never feeds on itself. The weapon is kept out of the shield's face it lay off
+  just before it touched, and a fast swing that went through within one frame is
+  followed in 2 cm steps, so it is stopped at the face it came from, not pushed
+  on through. Weapon against weapon, the blades rest a blade's width apart.
+- **The cap.** A push never exceeds 60 cm (`held::Cap`; 12 cm, then 40 cm, until the owner's
+  2026-11-12 headset sessions). Deeper than that the two pass through
+  each other: the hand eases back and nothing pushes until they are clear, so an
+  item is never held far from its hand. With the hand pulled back, the push eases
+  out with a 33 ms time constant (95% gone in 0.1 s), not a snap.
+- **Clank.** A first touch closing at 0.5 m/s or more clanks in both controllers:
+  a sharp tap and a short ring, stronger up to 3 m/s, on the Melee hits strength.
+  A resting touch is silent; one clank at most every 0.12 s. At 1 m/s or more the
+  game also plays `[gameplay] held_collision_sound` at the hero (default 398,
+  block_weapon_1, the block's metal clank; 0 is silent) through the same path as the
+  block sound.
+- **What hits.** Melee contact, the shield guard and Smite, the Assassin's claw
+  guard, the dropped bottles and small props, and the pushable bodies all read the
+  drawn skeleton, so they all meet the corrected pose: what you see is what hits.
+  The real controllers still give a swing its speed (stroke detection, Weapon heft
+  travel), and the guard reads the real shield hand for its height and parry swing
+  (the shield's hand never yields to a weapon). A fist (no weapon) is left out.
+- **Left out.** A bow or crossbow (the hands meet to draw and nock), two-handed
+  grips (a staff, spear or polearm, a two-handed sword in both hands, a crossbow
+  held as a staff, the support hand on a shaft), a throw armed or a trap or bomb
+  held to toss, a potion in a hand, an empty or fist hand, a Druid form, an item put
+  away, an untracked controller, menus, the inventory, VR Settings, a hand's wheel
+  and the leather menu. Left-handed play swaps the arms: the left hand's weapon
+  yields to the shield on the right arm. An Assassin's two claws collide like any
+  weapons; crossed, they rest a blade's width apart, well within the claw guard's
+  32 cm, so the crossed-claws block still works (a fixture checks it with
+  `guard::Crossed`).
+- **Log.** `Frame held collisions: on|off (VR Settings > Combat > Weapons
+  collide)` when the setting changes; `Frame held collisions: weapon-shield - the
+  right hand's sword yields to the shield on the left arm` (or `weapon-weapon
+  ...`, or `none, not colliding (<reasons>)`) when what the hands hold changes; and
+  every ten seconds with touches, `Frame held collisions: N contacts
+  (weapon-shield A, weapon-weapon B), deepest X cm, pushes capped C, haptic clanks
+  H; excluded: <reasons>`.
+
 ### Physical shield blocking, parry and riposte (Unleashed)
 
 With **Unleashed** melee rules and a shield on, blocking is decided by where the

@@ -196,6 +196,12 @@ int TakeShieldTarget(uint32_t& target); // 1 physical target, -1 cancelled cast,
 bool ShieldAim(float& x,float& y);
 void FinishShieldSkill(bool accepted);
 void MeleeImpact(int hand=0); // thread-safe; haptic delivered by XR input update
+// Held items collide (held_collision.h): the weapon struck the shield or the other weapon - a clank of this strength
+// (0..1) in both controllers on the next input frame. Thread-safe.
+void HeldClank(float strength);
+// Held items collide: what of the last input frame keeps the hands' items from colliding (held::Reason bits: Menu
+// while the hands are pointers or no frame ran lately, Wheel, Leather, Throwing). Thread-safe.
+uint32_t HeldCollisionBlocks();
 // Thread-safe; call before MeleeImpact(hand): what that impact struck (haptics::Surface, haptic_impact.h) and, for a
 // monster, its MonStats flags for the log. Not told: flesh. One impact consumes it.
 void ImpactSurface(int hand,int surface,uint32_t flags=0);

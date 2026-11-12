@@ -6,6 +6,7 @@
 #include "d2r_vr_build.h"
 #ifdef D2RVR_NATIVE_OPENXR
 #include "../steamvr/crossbow_pose.h"
+#include "../steamvr/held_collision.h"
 #include "../steamvr/shield_guard.h"
 #endif
 
@@ -122,6 +123,13 @@ struct Input {
     const char* leftHandedKind="";   // that kind's name, for the log (a string that outlives the pose)
     char shrinkBone[48] = {};   // [debug] shrink_bone: the hero's bone of this name drawn shrunk to a point - what hangs on it vanishes    // mode 2: the weapon in the hand moved x y z (cm) and turned pitch yaw roll (deg), its own axes
 #endif
+#ifdef D2RVR_NATIVE_OPENXR
+    // Held items collide (steamvr/held_collision.h; VR Settings > Combat > Weapons collide): the pair the hands hold
+    // and why it may not act now (vrcam), and this pose's pushes - each drawn hand moved off its controller, metres
+    // in the hands' frame, [0] right (skeletons.cpp HeldCollide, once per pose stamp; ControllerPoint adds them).
+    framevr::held::Gate held{};
+    float heldPush[2][3] = {};
+#endif
 };
 
 // The hero classes as the game's model folders name them (data/hd/character/player/<name>/).
@@ -234,6 +242,9 @@ bool CrossbowPose(framevr::crossbow::Pose& out);
 // Called after the game's complete attachment/world transform is evaluated.
 void CrossbowRendered(uint32_t entity,uintptr_t component,uintptr_t matrix);
 void ShieldRendered(uint32_t entity,uintptr_t component,uintptr_t matrix);
+// Held items collide: the last first touch that clanked, once - its strength 0..1 and the closing speed (m/s).
+// False when none waits or it is older than 150 ms. Any thread.
+bool TakeHeldClank(float& strength,float& speed);
 #endif
 #endif
 // Where the game's own pose points the hero, in model space (deg, atan2 of each bone's z row):
