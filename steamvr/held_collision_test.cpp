@@ -141,14 +141,14 @@ int main(){
         Check(out.touching&&Near(out.push[0],{0,0,.10f},.001f),"pushed back out the front, not on through");
         Check(solver.TakeStats().contacts[0]==1,"counted once");
     }
-    {   // The cap: held deeper than Cap (40 cm), they pass through; the push eases back and the next touch is afresh.
+    {   // The cap: held deeper than Cap (60 cm), they pass through; the push eases back and the next touch is afresh.
         Solver solver;Input in;in.gate=ShieldGate();in.plate=Shield();
         double time=0;Output out;
         auto step=[&](Capsule sword){time+=Tick;in.time=time;in.a=sword;out=solver.Step(in);return out;};
         float z=-.33f;step(Sword(z));
         while(z>-.34f-Cap+.01f){z-=.01f;step(Sword(z));}
         Check(out.touching&&out.push[0].z>Cap-.03f&&out.push[0].z<=Cap+.0001f,"just under the cap deep: still held");
-        Check(Cap>=.39f,"pushed 30 cm in: still held (the cap is 40 cm)");
+        Check(Cap>=.59f,"pushed 50 cm in: still held (the cap is 60 cm)");
         z-=.02f;step(Sword(z));
         Check(!out.touching&&solver.State()==Solver::Phase::Passing&&out.push[0].z<Cap,"past the cap: let through, easing");
         Check(solver.TakeStats().capped==1,"counted as capped");
