@@ -42,9 +42,14 @@
 #include "window_focus.h"
 #include "panel_input_mode.h"
 #include "gameplay.h"
+#include "native_client_input.h"
+#include "../vr/client_combat.h"
 #include "walk_direction.h"
 #include "room_scale.h"
 #include "room_steps.h"
+#include "client_hit_feedback.h"
+#include "../vr/target_reports.h"
+#include "../vr/combat.h"
 #include "strike_skills.h"
 #include "bow_laser.h"
 #include "hand_controls.h"
@@ -4214,6 +4219,7 @@ void Input() {
     }
     handAimAt=GetTickCount64();
     const auto bindingSnapshot=interactionstate::Read();
+    const bool nativeClient=clientcombat::NativeOnly(gamestate::LocalPlayer());
     {   // Floating map: before the right stick's gestures, the map zoom and the hands' skills read the grips and the stick
         floatMapWant=floatMapPointed=false;
         const bool gameplay=motionInput.active&&!interactionOutput.wheel&&!interactionOutput.settings&&
@@ -4238,6 +4244,7 @@ void Input() {
     uint64_t bindingLayout=0;
     for(const auto& skill:bindingSnapshot.skills)bindingLayout=(bindingLayout^uint32_t(skill.id+2)^uint32_t(skill.owner)^
         (uint64_t(skill.known)<<40)^(uint64_t(skill.available)<<41)^(uint64_t(skill.motion)<<42)^(uint64_t(skill.physical)<<43))*1099511628211ull;
+    bindingContext^=uint64_t(nativeClient)<<63; // a route change requires fresh input
     skills::HandInput handInput;handInput.time=motionInput.time;handInput.context=bindingContext;
     handInput.layout=bindingLayout;
     // A crossbow in the hands: the right trigger fires it as Attack, whatever skill its slot holds
@@ -4258,7 +4265,7 @@ void Input() {
             crossbowTriggerMode=mode;crossbowTriggerSkill=triggerSkill.id;
         }
     }
-    if(bowvr::SpellReady()&&interaction::Fresh(bindingSnapshot,gamestate::LocalPlayer(),GetTickCount64()))
+    if(!nativeClient&&bowvr::SpellReady()&&interaction::Fresh(bindingSnapshot,gamestate::LocalPlayer(),GetTickCount64()))
         for(int i=0;i<skills::Count;++i)if(bindingSnapshot.skills[i].physical&&bindingSnapshot.skills[i].available)
             handInput.independentSlots|=1u<<i;
     // Glyph casting: each hand's Draw glyph button ([glyphs] draw_slot and second_draw_slot, one a hand,
@@ -5187,7 +5194,7 @@ void Input() {
     }
     {
         crossbow::Pose pose;
-        const bool ready=motionControls.load()&&motionInput.weapon==gameplay::Weapon::Crossbow&&bowvr::MotionReady()&&
+        const bool ready=!nativeClient&&motionControls.load()&&motionInput.weapon==gameplay::Weapon::Crossbow&&bowvr::MotionReady()&&
             skel::CrossbowPose(pose)&&crossbow::Fresh(pose,motionAt,gamestate::LocalPlayer(),motionInput.equipment,bowWorldEpoch);
         const int slot=motionOutput.skill;
         const bool known=slot>=0&&slot<skills::Count&&quickFresh&&quickSnapshot.skills[slot].known&&quickSnapshot.skills[slot].available;
@@ -5633,6 +5640,62 @@ void Input() {
             char line[128];std::snprintf(line,sizeof line,"Frame charge: melee contacts held %llu ms during the charge%s",
                 (unsigned long long)(motionAt-chargeContactsHeldAt),since>=4000&&rushing?" (4 s cap reached)":"");Say(line);
             chargeContactsHeldAt=0;chargeIssuedAt=0;
+        }
+    }
+    // A joining loader client has no authoritative game thread. Translate
+    // gestures to the same native pad/skill inputs as ordinary casts instead.
+    // No new packets, local damage or server pointers cross this boundary.
+    {
+        static nativeclient::Router router;
+        static clienthit::Gate clientHit;
+        if(!nativeClient){router.Reset();clientHit.Clear();}
+        else {
+        nativeclient::Context c;c.native=nativeClient;c.session=quickFresh?gamestate::LocalPlayer():0;
+        // Motions own both hands before a cast starts, including the release
+        // frame. Cancel pending client melee pulses, not just active glyph casts.
+        c.actionOwned=motionWatch||glyphStroke.Drawing()||glyphCast.Busy()||glyphPressRt;
+        const auto binding=[&](int slot) {
+            nativeclient::Binding b;
+            if(slot>=0&&slot<skills::Count&&quickFresh) {
+                const auto& s=quickSnapshot.skills[slot];
+                if(s.known&&s.available)b={slot,s.id,s.owner};
+            }
+            return b;
+        };
+        const auto find=[&](int id,int owner=-1) {
+            for(int slot=0;slot<skills::Count;++slot) {
+                const auto b=binding(slot);
+                if(b.slot>=0&&b.id==id&&(owner<0||b.owner==owner))return b;
+            }
+            return nativeclient::Binding{};
+        };
+        c.basic=find(weaponskills::Attack);
+        if(quiverArrow.Active())c.bow=find(quiverArrow.skill,quiverArrow.owner);
+        c.throwing=quiverArrow.Active()?find(quiverArrow.skill,quiverArrow.owner):binding(skills::TriggerSlot(0));
+        if(c.throwing.id!=weaponskills::Throw&&c.throwing.id!=weaponskills::DoubleThrow&&!weaponskills::JavelinSkill(c.throwing.id))
+            c.throwing=find(weaponskills::Throw);
+        c.offhand=InShapeForm()||dualwield::Eligible(skel::HeroClass(),gamestate::MeleeEquipment());
+        c.swingSpeed=gestureSettings[settings::MeleeHitSpeed];c.shieldSpeed=gestureSettings[settings::ShieldBashSpeed];
+        if(gestureSettings[settings::SkillGestures]>.5f) {
+            for(int h=0;h<2;++h) {
+                const int trigger=strikeskills::StrikeTrigger(h,strikeskills::LeftChoice(gestureSettings[settings::LeftHandStrikes]));
+                const int slot=skills::TriggerSlot(trigger<0?h:trigger);
+                const auto b=binding(slot);
+                if(trigger>=0&&b.slot>=0&&quickSnapshot.skills[slot].strike)c.melee[h]=b;
+            }
+            if(shieldSkill.id==weaponskills::Smite)c.shield=binding(shieldSlot);
+        }
+        const int hand=router.Step(motionInput,motionOutput,c);
+        const auto hitNow=GetTickCount64();
+        if(!c.session||!motionInput.active||!motionInput.tracked[0]||!motionInput.tracked[1]||c.actionOwned||motionInput.palette||motionInput.cancel||motionInput.quickCast||(hand<0&&(motionOutput.skill>=0||motionOutput.attack)))
+            clientHit.Clear();
+        else if(hand>=0&&router.MeleePulse())clientHit.Arm(c.session,hand,hitNow);
+        uint32_t hitUnit=0;::combat::LocalPlayerId(hitUnit);
+        if(targetreports::TakeMeleeHit(c.session,hitUnit,hitNow)){
+            const int hitHand=clientHit.Confirm(c.session,hitNow);
+            if(hitHand>=0){ImpactSurface(hitHand,0,0);MeleeImpact(hitHand);}
+        }
+        if(hand>=0)castHand=hand;
         }
     }
     if(motionOutput.nativeBowRelease&&motionInput.bowSkill==weaponskills::Strafe)volleyRequestedAt=motionAt;

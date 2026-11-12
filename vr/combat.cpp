@@ -11,6 +11,7 @@
 #include <cstring>
 #include <mutex>
 #include "combat.h"
+#include "../steamvr/client_hit_feedback.h"
 #include "../steamvr/shield_debug.h"
 #include "combat_rules.h"
 #include "sigscan.h"
@@ -109,6 +110,10 @@ constexpr uint64_t ApplyDamageRva=0x44ce80,LifeWriteReturn=0x44d098,LifeWriteAt=
 constexpr uint8_t ApplyDamageSig[]={0x40,0x55,0x53,0x56,0x57,0x41,0x56,0x41,0x57,0x48,0x8d,0xac,0x24,0xe8,0xfe,0xff,0xff};
 constexpr uint8_t LifeWriteSig[]={0x41,0x8d,0x51,0x06,0xe8,0x78,0xac,0xea,0xff,0x8b,0x9f,0x24,0x01,0x00,0x00};
 using ApplyDamageFn=uint64_t(*)(uintptr_t,uintptr_t,uintptr_t,int,uintptr_t);
+using ClientHitFn=void(*)(uint32_t,uint32_t);
+std::atomic<ClientHitFn> clientHitObserver{nullptr};
+std::atomic<bool> fullDamageRules{false};
+thread_local framevr::clienthit::LifeLoss* observedLife=nullptr;
 ApplyDamageFn originalApplyDamage=nullptr;bool applyDamageIn=false;std::atomic<bool> damageScaleReady{false};
 // This game thread is inside a physical swing's native attack on this monster
 // (melee.cpp), and inside its damage application with this record.
@@ -777,7 +782,18 @@ uint64_t MissileThorns(uintptr_t game,uintptr_t attacker,uintptr_t defender,uint
     if(MissGated(attacker,defender)){++missThorns;return 0;}
     return originalMissileThorns(game,attacker,defender,record);
 }
+void SetStatObserved(uintptr_t unit,int stat,int value,int layer,uintptr_t caller){
+ auto*const scope=observedLife;
+ const bool watch=scope&&scope->target==unit&&stat==6&&layer==0&&caller==d2rsig::Addr(LifeWriteReturn);
+ const auto get=reinterpret_cast<GetStatFn>(d2rsig::Addr(GetStatRva));
+ const int before=watch?get(unit,6,0):0;
+ originalSetStat(unit,stat,value,layer);
+ if(watch)scope->Write(unit,stat,layer,true,before,get(unit,6,0));
+}
 void SetStat(uintptr_t unit,int stat,int value,int layer) {
+    if(!fullDamageRules.load()){
+        SetStatObserved(unit,stat,value,layer,reinterpret_cast<uintptr_t>(_ReturnAddress()));return;
+    }
     // Life Tap's heal inside a player's struck events (Trigger): refused on a gated stroke.
     if(stat==6&&layer==0&&tapScope.striker&&unit==tapScope.striker) {
         const int before=reinterpret_cast<GetStatFn>(d2rsig::Addr(GetStatRva))(unit,6,0);
@@ -898,7 +914,7 @@ void SetStat(uintptr_t unit,int stat,int value,int layer) {
             }
         }
     }
-    originalSetStat(unit,stat,value,layer);
+    SetStatObserved(unit,stat,value,layer,reinterpret_cast<uintptr_t>(_ReturnAddress()));
 }
 uint64_t HitChance(uintptr_t game,uintptr_t attacker,uintptr_t defender,int chance,int roll) {
     // Only the hit check of the physical swing running on this thread.
@@ -994,6 +1010,17 @@ struct RollContext {uintptr_t attacker=0;bool missile=false;};
 thread_local RollContext roll;
 thread_local Seed acceptedRoll;
 void IncomingRoll(uintptr_t attacker,uintptr_t defender,bool hit);
+uint64_t ObservedDamage(uintptr_t game,uintptr_t attacker,uintptr_t defender,int flag,uintptr_t damage){
+ framevr::clienthit::LifeLoss life{defender};
+ const auto previous=observedLife;observedLife=&life;
+ struct RestoreLife{framevr::clienthit::LifeLoss*previous;~RestoreLife(){observedLife=previous;}} restore{previous};
+ return framevr::clienthit::Observe(attacker,defender,flag,damage,
+  [](uintptr_t address,void*out,size_t n){return framevr::ReadMemory(out,reinterpret_cast<const void*>(address),n);},
+  [&]{return fullDamageRules.load()?ApplyDamage(game,attacker,defender,flag,damage):originalApplyDamage(game,attacker,defender,flag,damage);},
+  [&]{return life.lost;},
+  [](uint32_t player,uint32_t target){if(const auto fn=clientHitObserver.load())fn(player,target);});
+}
+
 int Hit(uintptr_t attacker,uintptr_t defender,int accuracy,int missile) {
     const auto saved=roll;const bool savedMelee=meleeHit;
     roll={};
@@ -1702,6 +1729,18 @@ bool ReadGuardDebug(framevr::guard::Debug& out) {
        now<guard.state.seenAt||now-guard.state.seenAt>GuardTuning().staleMs)return false;
     out=guard.debug;out.pose=guard.state.surface;out.raised=guard.state.raised;return framevr::guard::Valid(out.pose);
 }
+void SetHitObserver(void(*fn)(uint32_t,uint32_t)){clientHitObserver=fn;}
+void InstallFeedbackObserver(){
+ if(applyDamageIn)return;
+ // Desktop hosts install pass-through damage/life-write observers only.
+ // No roll/input overrides or changes to the stat values are enabled.
+ if(!d2rsig::Check(LifeWriteAt,LifeWriteSig,sizeof LifeWriteSig)||!d2rsig::Check(GetStatRva,GetStatSig,sizeof GetStatSig))return;
+ if(!setStatIn)setStatIn=d2rsig::Hook(SetStatRva,SetStatSig,sizeof SetStatSig,reinterpret_cast<void*>(&SetStat),reinterpret_cast<void**>(&originalSetStat));
+ if(!setStatIn)return;
+ applyDamageIn=d2rsig::Hook(ApplyDamageRva,ApplyDamageSig,sizeof ApplyDamageSig,
+  reinterpret_cast<void*>(&ObservedDamage),reinterpret_cast<void**>(&originalApplyDamage));
+ if(applyDamageIn)framevr::logging::Write("Frame client melee feedback: native damage observer ready");
+}
 void Install() {
     if(!enabled.load()||ready.load())return;
     if(!rollChecked)rollChecked=d2rsig::Check(0x44bd65,RollSig,sizeof RollSig);
@@ -1716,8 +1755,9 @@ void Install() {
     if(!setStatIn&&d2rsig::Check(GetStatRva,GetStatSig,sizeof GetStatSig))
         setStatIn=d2rsig::Hook(SetStatRva,SetStatSig,sizeof SetStatSig,reinterpret_cast<void*>(&SetStat),reinterpret_cast<void**>(&originalSetStat));
     if(setStatIn&&!applyDamageIn&&d2rsig::Check(LifeWriteAt,LifeWriteSig,sizeof LifeWriteSig))
-        applyDamageIn=d2rsig::Hook(ApplyDamageRva,ApplyDamageSig,sizeof ApplyDamageSig,reinterpret_cast<void*>(&ApplyDamage),reinterpret_cast<void**>(&originalApplyDamage));
-    if(applyDamageIn&&!damageScaleReady.exchange(true))
+        applyDamageIn=d2rsig::Hook(ApplyDamageRva,ApplyDamageSig,sizeof ApplyDamageSig,reinterpret_cast<void*>(&ObservedDamage),reinterpret_cast<void**>(&originalApplyDamage));
+    if(setStatIn&&applyDamageIn)fullDamageRules=true;
+    if(setStatIn&&applyDamageIn&&!damageScaleReady.exchange(true))
         framevr::logging::Write("Frame riposte: damage application verified; riposte damage ready");
     // Unleashed attack-rating damage: the native to-hit chance, read where
     // HitSuccessful hands it to 427EA0. Without it swings keep full damage.

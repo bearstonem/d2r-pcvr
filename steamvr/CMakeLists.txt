@@ -99,6 +99,27 @@ target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/breakables.cpp ${ROOT}/vr/offline_di
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/spell_impacts.cpp)   # spells break containers and push props (spell_impacts.h)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/respec.cpp)   # Reset Skills & Stats (respec_button.h)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/target_lock.cpp ${ROOT}/vr/summon_range.cpp)
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/client_combat.cpp
+  ${ROOT}/vr/upper_body_wire.cpp
+  ${ROOT}/vr/upper_body_skin.cpp)
+add_executable(client-combat-test client_combat_test.cpp ${ROOT}/vr/client_combat.cpp)
+target_include_directories(client-combat-test PRIVATE ${D2RL_SDK}/include)
+target_link_libraries(client-combat-test PRIVATE framevr-runtime)
+add_executable(native-client-input-test native_client_input_test.cpp)
+add_executable(upper-body-pose-test upper_body_pose_test.cpp)
+target_compile_options(upper-body-pose-test PRIVATE -UNDEBUG)
+add_test(NAME upper-body-pose-test COMMAND upper-body-pose-test)
+add_executable(upper-body-render-test upper_body_render_test.cpp)
+target_compile_options(upper-body-render-test PRIVATE -UNDEBUG)
+add_test(NAME upper-body-render-test COMMAND upper-body-render-test)
+add_executable(upper-body-skin-test upper_body_skin_test.cpp ${ROOT}/vr/upper_body_skin.cpp)
+target_include_directories(upper-body-skin-test PRIVATE ${D2RL_SDK}/include ${ROOT}/cleanroom/sigscan)
+target_compile_options(upper-body-skin-test PRIVATE -UNDEBUG)
+add_test(NAME upper-body-skin-test COMMAND upper-body-skin-test)
+add_executable(upper-body-wire-test upper_body_wire_test.cpp ${ROOT}/vr/upper_body_wire.cpp)
+target_include_directories(upper-body-wire-test PRIVATE ${D2RL_SDK}/include)
+target_compile_options(upper-body-wire-test PRIVATE -UNDEBUG)
+add_test(NAME upper-body-wire-test COMMAND upper-body-wire-test)
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/loot_beam_scan.cpp)   # loot beams: the items on the floor that get one
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/monster_immunity.cpp)
 add_executable(monster-immunity-test monster_immunity_test.cpp)
@@ -440,6 +461,11 @@ target_include_directories(local-player-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 target_link_libraries(local-player-test PRIVATE framevr-runtime)
 target_link_libraries(window-focus-test PRIVATE user32)
 enable_testing()
+add_executable(desktop-mode-test desktop_mode_test.cpp)
+target_compile_options(desktop-mode-test PRIVATE -UNDEBUG)
+add_test(NAME desktop-mode-vr COMMAND desktop-mode-test)
+add_test(NAME desktop-mode-flat COMMAND desktop-mode-test desktop)
+add_test(NAME desktop-runtime-wiring COMMAND "${PCVR_PYTHON}" "${CMAKE_CURRENT_SOURCE_DIR}/desktop_mode_test.py")
 add_executable(pool-guard-test pool_guard_test.cpp ${ROOT}/cleanroom/pools/pools.cpp)
 target_link_libraries(pool-guard-test PRIVATE framevr-runtime)
 foreach(pool_case IN ITEMS grow off enough foreign free-slot free-call layout broken prev-flag missing waiting)
@@ -477,7 +503,7 @@ add_test(NAME cinema-screen-test COMMAND cinema-screen-test "${ROOT}/steamvr/tra
 set_tests_properties(cinema-screen-test PROPERTIES TIMEOUT 30)
 add_test(NAME light-bounds-test COMMAND light-bounds-test)
 set_tests_properties(light-bounds-test PROPERTIES TIMEOUT 30)
-foreach(test_target IN ITEMS memory-test biome-list-test hook-metrics-test active-keys-test resource-descriptions-test latest-worker-test haptic-pulse-test thread-stats-test draw-sampler-test game-patch-plan-test cull-volume-test
+foreach(test_target IN ITEMS client-combat-test native-client-input-test memory-test biome-list-test hook-metrics-test active-keys-test resource-descriptions-test latest-worker-test haptic-pulse-test thread-stats-test draw-sampler-test game-patch-plan-test cull-volume-test
     spell-impacts-test
     gameplay-test weapon-skills-test quick-cast-test hand-controls-test hand-role-test hand-swap-mirror-test hand-text-test elemental-hands-test elemental-particles-test skill-pad-test interact-press-test sewer-interaction-test notice-card-test mod-layout-test spell-aim-test bow-pose-test crossbow-pose-test body-tracking-test shapeshift-form-test head-shadow-test head-skip-test shield-steady-test body-calibration-test shoulder-swap-test blood-screen-test
     portal-billboard-test shrine-trace-test shrine-placement-test overlay-view-test bone-armor-height-test composition-layers-test projectile-rules-test environment-cutaway-test roof-materials-test game-ceiling-test stereo-prop-physics-test dropped-bottles-test props-test prop-heft-test limb-rig-test aged-cache-test ecs-storage-test look-at-test limb-physics-test limb-worker-test leather-menu-test stash-buttons-test stats-button-test menu-drop-test arcane-decay-test respec-button-test vr-keyboard-test
@@ -566,3 +592,20 @@ target_compile_options(quick-items-test PRIVATE -UNDEBUG)
 
 add_test(NAME monster-immunity-shader-test COMMAND monster-immunity-shader-test "${ROOT}/reshade/D2R_Immunity.fxh")
 set_tests_properties(monster-immunity-shader-test PROPERTIES TIMEOUT 30)
+# Host-assisted joining-client target acquisition; separate from pose/health wire.
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/target_reports.cpp)
+add_executable(server-target-scan-test server_target_scan_test.cpp)
+target_link_libraries(server-target-scan-test PRIVATE framevr-runtime)
+add_executable(target-reports-test target_reports_test.cpp ${ROOT}/vr/target_reports.cpp)
+target_include_directories(target-reports-test PRIVATE ${D2RL_SDK}/include)
+target_link_libraries(target-reports-test PRIVATE framevr-runtime)
+foreach(TARGET_TEST server-target-scan-test target-reports-test)
+  target_compile_options(${TARGET_TEST} PRIVATE -UNDEBUG)
+  add_test(NAME ${TARGET_TEST} COMMAND ${TARGET_TEST})
+endforeach()
+add_test(NAME client-target-wiring-test COMMAND "${PCVR_PYTHON}" "${CMAKE_CURRENT_SOURCE_DIR}/client_target_wiring_test.py")
+
+add_executable(client-hit-feedback-test client_hit_feedback_test.cpp)
+target_link_libraries(client-hit-feedback-test PRIVATE framevr-runtime)
+target_compile_options(client-hit-feedback-test PRIVATE -UNDEBUG)
+add_test(NAME client-hit-feedback-test COMMAND client-hit-feedback-test)

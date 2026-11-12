@@ -18,6 +18,8 @@ BATTLENET_OPTION = '--battlenet-game='
 EXPERIMENTAL_OPTION = '--experimental-battlenet'
 DESKTOP_REQUEST = '--frame-desktop-request='
 DEV_OPTION = '--frame-dev'
+DESKTOP_OPTION = '--frame-desktop'
+DESKTOP_ENV = 'D2R_PCVR_DESKTOP'
 
 
 def battlenet_game(arguments):
@@ -29,15 +31,18 @@ def battlenet_game(arguments):
 
 def prepare(arguments):
     vr = '--frame-vr' in arguments
+    desktop = DESKTOP_OPTION in arguments
+    if vr and desktop:
+        raise SystemExit('--frame-vr and --frame-desktop are mutually exclusive.')
     developer = DEV_OPTION in arguments
     if developer and not vr:
         raise SystemExit('--frame-dev requires --frame-vr and an offline test character.')
     game = battlenet_game(arguments)
     if game is not None:
         from game_install import validate_game
-        if not vr:
-            raise SystemExit('Battle.net preview shortcuts require --frame-vr')
-        if any(arg not in ('--frame-vr', VDXR_OPTION, EXPERIMENTAL_OPTION, DEV_OPTION)
+        if not vr and not desktop:
+            raise SystemExit('Battle.net preview shortcuts require --frame-vr or --frame-desktop')
+        if any(arg not in ('--frame-vr', DESKTOP_OPTION, VDXR_OPTION, EXPERIMENTAL_OPTION, DEV_OPTION)
                and not arg.startswith((BATTLENET_OPTION, RUNTIME_OPTION)) for arg in arguments):
             raise SystemExit('Unexpected argument in Battle.net preview shortcut')
         try:
@@ -53,11 +58,11 @@ def prepare(arguments):
             stage(game, experimental_battlenet=EXPERIMENTAL_OPTION in arguments)
         return [str(loader), '-mod', MOD if developer else MOD_NAME], str(game)
     command = [arg for arg in arguments
-               if arg not in ('--frame-vr', VDXR_OPTION, DEV_OPTION) and not arg.startswith(RUNTIME_OPTION)]
+               if arg not in ('--frame-vr', DESKTOP_OPTION, VDXR_OPTION, DEV_OPTION) and not arg.startswith(RUNTIME_OPTION)]
     cwd = None
     if not command:
         raise SystemExit('Expected the Steam launch command containing D2R.exe')
-    if vr:
+    if vr or desktop:
         found = False
         for index, arg in enumerate(command):
             if ntpath.basename(arg).lower() == 'd2r.exe':
@@ -91,7 +96,7 @@ def vdxr_manifest():
 
 def launch_environment(arguments):
     """Allow a per-game runtime choice without changing other PCVR apps."""
-    if '--frame-vr' not in arguments:
+    if '--frame-vr' not in arguments and DESKTOP_OPTION not in arguments:
         return None
     runtimes = [arg[len(RUNTIME_OPTION):] for arg in arguments
                 if arg.startswith(RUNTIME_OPTION)]
@@ -100,6 +105,9 @@ def launch_environment(arguments):
     # The explicit launch flag overrides the normal SteamVR launch-option
     # manifest. Stock Play ignores it, and a missing VDXR install fails closed.
     environment = os.environ.copy()
+    environment.pop(DESKTOP_ENV, None)
+    if DESKTOP_OPTION in arguments:
+        environment[DESKTOP_ENV] = '1'
     # Overlay UI settings and this routing hint alone do not stop Steam's early
     # injection. The desktop handoff below also starts a clean launcher chain.
     for key in list(environment):
@@ -118,6 +126,8 @@ def launch_environment(arguments):
             if key.lower() in ('steamappid', 'steamgameid'):
                 del environment[key]
         environment['SteamAppId'] = environment['SteamGameId'] = '2536520'
+    if DESKTOP_OPTION in arguments:
+        return environment
     if VDXR_OPTION in arguments:
         runtime = vdxr_manifest()
     elif runtimes:
@@ -177,11 +187,11 @@ def desktop_child(request_path):
     try:
         request = json.loads(request_path.read_text(encoding='utf-8'))
         arguments = request['arguments']
-        if '--frame-vr' not in arguments or battlenet_game(arguments) is not None:
-            raise ValueError('Desktop launch handoff requires the Steam VR edition.')
+        if not ('--frame-vr' in arguments or DESKTOP_OPTION in arguments) or battlenet_game(arguments) is not None:
+            raise ValueError('Desktop launch handoff requires a Steam mod launch.')
         command, cwd = prepare(arguments)
         environment = launch_environment(arguments)
-        if request.get('runtime'):
+        if '--frame-vr' in arguments and request.get('runtime'):
             environment['XR_RUNTIME_JSON'] = request['runtime']
         publish_status(status_path, state='running', pid=os.getpid())
         # This helper belongs to Explorer, not Steam's injected launcher chain.
@@ -294,7 +304,7 @@ def main(arguments):
         return desktop_child(Path(requests[0][len(DESKTOP_REQUEST):]))
     command, cwd = prepare(arguments)
     environment = launch_environment(arguments)
-    if os.name == 'nt' and '--frame-vr' in arguments and battlenet_game(arguments) is None:
+    if os.name == 'nt' and ('--frame-vr' in arguments or DESKTOP_OPTION in arguments) and battlenet_game(arguments) is None:
         return launch_from_desktop(arguments, cwd, environment)
     return subprocess.run(command, cwd=cwd, env=environment).returncode
 

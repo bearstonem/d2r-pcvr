@@ -1,9 +1,14 @@
 #pragma once
 #include "../steamvr/melee_contact.h"
+#include "target_lock.h"
 namespace D2RL {struct PluginContext;}
 namespace melee {
 void Init(const D2RL::PluginContext* context);
 void Install();
+// Read-only lookup observer, including desktop hosts; no VR combat hooks.
+void InstallTargetReader();
+// Game-thread only; validates server player, area, enemies and line of sight.
+bool PlayerTargets(uint32_t playerId,targetlock::Snapshot& out);
 void Submit(const framevr::melee::Sample& sample);
 void Cancel();
 void CancelShield();
