@@ -1053,6 +1053,7 @@ void LoadSettings() {
         IniB(L"interactions",L"left_handed",false));   // Left-handed (experimental): steamvr/hand_role.h
     framevr::ConfigureBottlePhysics(IniB(L"interactions",L"bottle_physics",true));
     framevr::ConfigurePropPhysics(IniB(L"interactions",L"prop_physics",true));
+    framevr::ConfigurePropHeft(IniB(L"interactions",L"prop_heft",true));   // steamvr/prop_heft.h
     framevr::ConfigureBodyPhysics(IniB(L"interactions",L"body_physics",true));
     impactvr::Configure(IniB(L"interactions",L"spell_impacts",true));   // spells break containers and push props
     g_set.bodyRadius.store(IniF(L"bodies", L"radius", 3.0f));   // clamped 1.5..8 by skel::SetLimbs

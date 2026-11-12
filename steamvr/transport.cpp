@@ -79,6 +79,7 @@
 #include "interaction_icons.h"
 #include "potion_models.h"
 #include "dropped_bottles.h"
+#include "prop_heft.h"
 #include "limb_board.h"
 #include "limb_physics.h"
 #include "limb_worker.h"
@@ -1029,6 +1030,11 @@ uint64_t droppedSession=0;
 interaction::Carry playerCarry; // the player's world velocity, for throws and let-go bottles
 // The level's small props share that world ([interactions] prop_physics).
 std::atomic<bool> propPhysics{true};
+// Props' weight (prop_heft.h; [interactions] prop_heft), and each hand's weapon heft (weapon_heft.h
+// Weight, 0..1) as the melee samples last had it: its striking mass and strength.
+std::atomic<bool> propHeft{true};
+std::array<float,2> propWeaponWeight{};
+unsigned propSlips=0;ULONGLONG propSlipsAt=0;
 bool propsWanted=false;
 uint64_t propPoseSerial=0;
 // The weapons that push them, posed on the vrcam update thread.
@@ -3186,6 +3192,9 @@ bottles::Prop Metres(const props::Seen& s,float upm) {
     p.p=at.p*(1/upm);p.q=at.q;p.scale=at.scale;
     const auto scaled=[&](math::Vec v){return math::Vec{v.x*at.scale.x/upm,v.y*at.scale.y/upm,v.z*at.scale.z/upm};};
     p.bounds={scaled(s.local.lo),scaled(s.local.hi)};
+    // Its weight by its kind and size (prop_heft.h): a cup 0.2 kg, a chair 10, a barrel 50.
+    const math::Vec size=p.bounds.hi-p.bounds.lo;
+    p.mass=propheft::Mass(propscan::KindName(s.kind),s.material,s.shape,{std::fabs(size.x),std::fabs(size.y),std::fabs(size.z)});
     p.support=s.support;
     p.support.y/=upm;p.support.x0/=upm;p.support.z0/=upm;p.support.x1/=upm;p.support.z1/=upm;
     p.unitsPerMetre=upm;
@@ -3562,13 +3571,19 @@ std::array<bottles::Collider,bottles::Colliders> HeldColliders() {
             if(w.valid&&now>=w.at&&now-w.at<=100)weapons[i]={true,w.blade.base,w.blade.tip,w.blade.radius};
         }
     }
+    // Their weight (prop_heft.h): each hand's weapon by its heft, the shield braced on the forearm.
+    for(int h=0;h<2;++h)if(weapons[size_t(h)].active) {
+        weapons[size_t(h)].mass=propheft::StrikingMass(propWeaponWeight[size_t(h)]);
+        weapons[size_t(h)].strength=propheft::PushStrength(propWeaponWeight[size_t(h)]);
+    }
+    if(weapons[2].active){weapons[2].mass=propheft::ShieldMass;weapons[2].strength=propheft::ShieldPush;}
     // A hand without a weapon capsule (empty, or the off hand without dual
     // wielding or a shield) still pushes, as a fist at the controller.
     for(int h=0;h<2&&motionControls.load();++h) {
         if(weapons[size_t(h)].active||!in.tracked[h]||out.bottleHand==h)continue;
         const auto p=in.stage.World(in.hand[h].p);
         const auto forward=math::Rotate(in.stage.base,math::Rotate(in.hand[h].q,{0,0,-1}));
-        weapons[size_t(h)]={true,p-forward*.03f,p+forward*.08f,.045f};
+        weapons[size_t(h)]={true,p-forward*.03f,p+forward*.08f,.045f,propheft::StrikingMass(0),propheft::PushStrength(0)};
     }
     return weapons;
 }
@@ -3665,6 +3680,7 @@ void StepDroppedBottles() {
     if(droppedBottles&&wallcells::Latest(patch))droppedBottles->Walls(patch);
     PushSpells(droppedBottles&&world&&!droppedBottles->Idle()?droppedBottles.get():nullptr,in.time,floor,upm);
     if(!droppedBottles||droppedBottles->Idle()||!in.stage.known)return; // menus and loading hold them still
+    droppedBottles->Heft(propHeft.load());
     droppedBottles->Weapons(HeldColliders());
     droppedBottles->Advance(in.time,in.stage.anchor);
     // Draw a thrown potion where this frame's steps left it.
@@ -3687,14 +3703,21 @@ void StepDroppedBottles() {
             potionFlight={};
         }
     }
-    // A light tick in the hand whose weapon struck a bottle or a prop.
+    // The hand whose weapon struck a bottle or a prop feels it (prop_heft.h Thud): a light thing a
+    // tick, a heavy one a knock and a low thud, as hard as the share of the swing it took. With
+    // weight off, the light tick for everything, as before.
     for(int slot=0;slot<bottles::Colliders;++slot) {
-        const float speed=droppedBottles->Struck(slot);const int hand=slot?1:0;const auto now=GetTickCount64();
-        if(speed>1&&now-bottleStruckAt[hand]>=80) {
+        const auto strike=droppedBottles->Struck(slot);const int hand=slot?1:0;const auto now=GetTickCount64();
+        if(strike.speed>1&&now-bottleStruckAt[hand]>=80) {
             bottleStruckAt[hand]=now;
-            MotionPulse(hand,haptics::Category::Melee,std::clamp(.12f+speed*.02f,.12f,.35f),15000000);
+            const bool shortTaps=vrsettings::Read().values[settings::HapticShortMelee]>.5f;
+            const auto thud=propheft::Thud(strike.speed,strike.mass,strike.weapon,shortTaps);
+            if(thud.count==1)MotionPulse(hand,haptics::Category::Melee,thud.steps[0].sample.amplitude,
+                XrDuration(thud.steps[0].sample.milliseconds)*1000000,thud.steps[0].sample.frequency>0?thud.steps[0].sample.frequency:XR_FREQUENCY_UNSPECIFIED);
+            else if(thud.count>1){hapticSequences.Play(hand,thud,now);PumpHapticSequences();}
         }
     }
+    propSlips+=droppedBottles->Slips();
     // Moving props: their matrices for the renderer's next transform pass.
     std::array<bottles::Moved,props::MaxMoving> moved{};
     if(const unsigned n=droppedBottles->Moving(moved)) {
@@ -3713,10 +3736,15 @@ void StepDroppedBottles() {
         if(knocks[i].slot==bottles::SpellSlot)continue;   // a spell's: PushSpells logged it
         if(knocks[i].slot<0){++chained;continue;}
         char line[160];++struck;
-        std::snprintf(line,sizeof line,"Frame props: knocked a %s (%s, %.1f m/s)",propscan::KindName(knocks[i].kind),by[knocks[i].slot%3],knocks[i].speed);
+        std::snprintf(line,sizeof line,"Frame props: knocked a %s (%s, %.1f m/s, %.1f kg)",propscan::KindName(knocks[i].kind),by[knocks[i].slot%3],knocks[i].speed,knocks[i].mass);
         Say(line);
     }
     if(struck||chained)propscan::CountKnocks(struck,chained);
+    // Weapons left behind by something too heavy to move, and slipped through it: every ten seconds that had some.
+    if(propSlips&&GetTickCount64()-propSlipsAt>=10000) {
+        char line[120];std::snprintf(line,sizeof line,"Frame props: ten seconds: %u weapon slips through heavy props",propSlips);
+        Say(line);propSlips=0;propSlipsAt=GetTickCount64();
+    }
     bottles::WallRequest want;
     if(droppedBottles->WallsWanted(want))wallcells::Want(want,in.at);
 }
@@ -5811,6 +5839,7 @@ void Input() {
         sample.reactions=uint8_t((gestureSettings[settings::HitStagger]>.5f?hitreact::Stagger:0)|
                                  (gestureSettings[settings::HitKnockback]>.5f?hitreact::Knockback:0));
         sample.weight=heftNeed(0,true);
+        propWeaponWeight[0]=sample.weight;   // the props' world: this hand's striking mass (prop_heft.h)
         // Melee-skill contact adapter: each hand's strikes carry its own trigger
         // skill when that is a confirmed strike skill (strike_skills.h). The
         // assignment identity rides the sample, so a rebind drops a queued stroke.
@@ -5829,6 +5858,7 @@ void Input() {
         sample.active=((sample.active&&(dual||claws))||bowBash)&&controls.lt<51&&controls.rt<51;
         sample.heft=bowBash?0.f:heftNeed(1);
         sample.weight=bowBash?0.f:heftNeed(1,true);
+        propWeaponWeight[1]=sample.weight;
         strike(1);
         if(bowBash)sample.strikeSkill=-1;   // a bow's swing never casts
         offhandPoses.Push(s.sampleStamp,sample);
@@ -7946,6 +7976,7 @@ void ConfigureLeatherMenu(bool on,float menuWidth,float tilt,bool world,bool bac
 }
 bool LeatherMenuWorld(){return leatherShown.load();}
 void ConfigurePropPhysics(bool on){propPhysics=on;propscan::Configure(on);}
+void ConfigurePropHeft(bool on){propHeft=on;}
 void ConfigureBodyPhysics(bool on){bodyPhysics=on;}
 bool BodyPhysics(){return bodyPhysics.load()&&motionControls.load();}
 void BottleWeapon(int slot,const melee::Blade* blade) {

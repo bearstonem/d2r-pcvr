@@ -547,6 +547,9 @@ inline constexpr Override Overrides[]={
      .help="Empty bottles drop and roll. Potions thrown at your mercenary break where they hit; thrown traps and gas or oil potions stop at walls."},
     {.id="interactions.prop_physics",.page=View::Physics,.section="Props",.kind=RowKind::Toggle,.label="Knock over small props",
      .help="Cups, vases, books and stools tumble when your weapon, hand or shield hits them. Just for looks."},
+    // [interactions] prop_heft (prop_heft.h), On by default; shown while Knock over small props is on (RowShown).
+    {.id="interactions.prop_heft",.page=View::Physics,.section="Props",.kind=RowKind::Toggle,.label="Props have weight",
+     .help="A cup flies off a tap; a barrel or sack takes a full swing and barely shifts, and your hand feels the thud. Off: all fly alike."},
     {.id="interactions.body_physics",.page=View::Physics,.section="Props",.kind=RowKind::Toggle,.label="Pushable bodies",
      .help="Your weapon, shield or fist pushes aside the limbs of monsters and townsfolk it meets, and they spring back. Just for looks. Motion combat in first person."},
     // Physics: Monsters and townsfolk. Heads turn to you (look_at.h; owner, 2026-11-09), On by default. On this page

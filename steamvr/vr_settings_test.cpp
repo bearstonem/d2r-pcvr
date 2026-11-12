@@ -990,8 +990,8 @@ int main(int argc,char** argv){
         Check(Defaults()[LeftHandedSticks]==0&&std::wstring(Definitions[LeftHandedSticks].section)==L"interactions"&&
               std::wstring(Definitions[LeftHandedSticks].key)==L"left_handed_sticks_right"&&Definitions[LeftHandedSticks].min==0&&
               Definitions[LeftHandedSticks].max==1&&Definitions[LeftHandedSticks].step==1&&HelpText(LeftHandedSticks)[0]!=0&&
-              LeftHandedSticks<ChangeMask::Bits&&LeftHandedSticks==Count-1,
-              "Sticks stay right-handed: Off by default, [interactions] left_handed_sticks_right Off / On, explained, its own change bit, appended last");
+              LeftHandedSticks<ChangeMask::Bits&&LeftHandedSticks+1==PropHeft,
+              "Sticks stay right-handed: Off by default, [interactions] left_handed_sticks_right Off / On, explained, its own change bit, appended (Props have weight after it)");
         const auto* row=content::RowOf(LeftHandedSticks);const auto* hand=content::RowOf(LeftHanded);
         Check(row&&hand&&!row->beside&&row->page==View::Hands&&row->kind==content::RowKind::Toggle&&
               std::strcmp(row->label,"Sticks stay right-handed")==0&&std::strlen(row->label)<=26&&row->section==hand->section&&row->classes==content::AllClasses,
@@ -1019,6 +1019,25 @@ int main(int argc,char** argv){
         Check(t.Click({Kind::Apply}).changed==((ChangeMask{1}<<LeftHanded)|(ChangeMask{1}<<LeftHandedSticks)),"Apply saves the two switches, nothing else");
         Model u;Snapshot saved;saved.ready=true;saved.values[LeftHanded]=1;u.Open(saved);layout::Press(u,{Kind::Set,LeftHandedSticks,0,1},0);
         Check(u.Click({Kind::Apply}).changed==(ChangeMask{1}<<LeftHandedSticks),"with Left-handed saved, Apply saves only the sticks' switch");
+    }
+    {   // Props have weight (prop_heft.h): On by default, a switch under Knock over small props, shown while it is on, saved alone
+        Check(Defaults()[PropHeft]==1&&std::wstring(Definitions[PropHeft].section)==L"interactions"&&
+              std::wstring(Definitions[PropHeft].key)==L"prop_heft"&&Definitions[PropHeft].min==0&&Definitions[PropHeft].max==1&&
+              Definitions[PropHeft].step==1&&HelpText(PropHeft)[0]!=0&&PropHeft<ChangeMask::Bits&&PropHeft==Count-1,
+              "Props have weight: On by default, [interactions] prop_heft Off / On, explained, its own change bit, appended last");
+        const auto* row=content::RowOf(PropHeft);const auto* props=content::RowOf(PropPhysics);
+        Check(row&&props&&!row->beside&&row->page==View::Physics&&row->kind==content::RowKind::Toggle&&std::strcmp(row->label,"Props have weight")==0&&
+              row->section==props->section&&row->classes==content::AllClasses&&std::strlen(row->help)<=160,
+              "a switch of its own on Gameplay > Physics, in Knock over small props' section, every class");
+        {
+            const auto& rows=content::Menu().rows;size_t at=rows.size(),propsAt=rows.size();
+            for(size_t i=0;i<rows.size();++i){if(rows[i].key==PropHeft)at=i;if(rows[i].key==PropPhysics)propsAt=i;}
+            Check(propsAt+1==at,"listed right under Knock over small props");
+        }
+        Values on=Defaults(),off=Defaults();off[PropPhysics]=0;
+        for(int c=-1;c<=heroclass::Assassin+1;++c)Check(RowShown(PropHeft,on,{c})&&!RowShown(PropHeft,off,{c}),"shown while props are knocked about, for every class");
+        Model t;Snapshot ready;ready.ready=true;ready.values=Defaults();t.Open(ready);layout::Press(t,{Kind::Set,PropHeft,0,0},0);
+        Check(t.Get()[PropHeft]==0&&t.Click({Kind::Apply}).changed==(ChangeMask{1}<<PropHeft),"the switch turns it Off, and Apply saves only it");
     }
     {   // Loot pick (#257): On by default, a switch on Interface, the right half of Loot name size's row, saved alone
         Check(Defaults()[LootPick]==1&&std::wstring(Definitions[LootPick].section)==L"interactions"&&

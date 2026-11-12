@@ -95,6 +95,7 @@ int HandSide(int role);
 int HandRole(int physical);
 void ConfigureBottlePhysics(bool on); // [interactions] bottle_physics: emptied bottles fall into the world
 void ConfigurePropPhysics(bool on);   // [interactions] prop_physics: weapons knock the level's small props about
+void ConfigurePropHeft(bool on);      // [interactions] prop_heft: props weigh what they are; weapons strike with their own mass
 void ConfigureBodyPhysics(bool on);   // [interactions] body_physics: weapons push monsters' and townsfolk's limbs aside
 bool BodyPhysics();                   // on, with physical melee
 // [interactions] leather_menu (VR Settings > Interface > Menus, beside Menu distance), leather_menu_width (m), leather_tilt (degrees),

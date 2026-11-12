@@ -1,5 +1,20 @@
 # VR performance investigations
 
+## Draw thread: props with weight, November 12
+
+**Measured in the test only; not yet in a headset.** Props with weight
+(`prop_heft.h`, [knockable props](../docs/KNOCKABLE_PROPS.md#weight)) give
+each weapon a dynamic body and a motor joint in the bottle and prop world on
+the draw thread, where it was one kinematic body. The world still takes no
+step at rest: the weapons are placed, not stepped, until a bottle or a prop
+moves. Stepping, `prop-heft-test` ran twelve cups moving and three weapons
+sweeping them for two seconds at 90 frames a second: 45.5 us a frame with
+weight off and 44.9 us with it on (237 and 238 steps of 1/120 s), the same
+within noise. Per frame, each weapon touching nothing reads its contacts
+once (`b3Body_GetContactData`, one entry) and may set its mass data, and after
+the frame's steps what the blades touch is listed (8 entries each) for freezing. No
+allocation beyond the `pressed` list, which keeps its capacity.
+
 ## Frame generation's wait, November 10
 
 **On for every install since the headset run of November 11**: no key in the
