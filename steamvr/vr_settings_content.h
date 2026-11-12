@@ -490,7 +490,7 @@ inline constexpr Override Overrides[]={
      .help="How fast your shield hand must move to bash, Smite included. Move at least 12 cm in one stroke; twisting the wrist never bashes.",
      .format={.unit="m/s",.decimals=2}},
     {.id="gameplay.guard_strain_vignette",.page=View::Shield,.section="Bash and block",.kind=RowKind::Toggle,.label="Guard strain shadow",
-     .help="Blocking many hits in a row darkens the edge of your view, faster for rarer attackers. Off hides the shadow; strain still builds."},
+     .help="Blocking many hits in a row darkens the edge of your view: faster for rarer attackers, slower with higher Defense. Off hides the shadow; strain still builds."},
     // Shield: Fit on the arm
     {.id="gameplay.shield_grip_cm",.page=View::Shield,.section="Fit on the arm",.kind=RowKind::Slider,.label="Shield along forearm",
      .help="Slides the shield toward your elbow (+) so your hand reaches its strap, or toward your hand (-). About 3 cm suits a buckler.",

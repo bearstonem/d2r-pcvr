@@ -1103,6 +1103,9 @@ void LoadSettings() {
     // Unleashed (on by default): a broken guard leaks a chip of each blocked hit.
     combat::ConfigureGuardChip(!classicMelee&&IniB(L"gameplay",L"guard_break_chip",true),
                                IniF(L"gameplay",L"guard_break_chip_scale",1));
+    // Unleashed: higher Defense, less guard strain per block (guard_strain.h DefenseShare); the share left at
+    // no chance to hit, % (25; 100 = Defense ignored).
+    combat::ConfigureGuardStrainDefense(IniF(L"gameplay",L"guard_strain_defense_floor",25)/100.f);
     // Unleashed swing damage (applied live): attack rating and attack speed scale
     // a physical swing instead of deciding whether it lands. [gameplay] ar_damage
     // (1): damage x the native to-hit chance; ar_damage_floor (% kept at zero
