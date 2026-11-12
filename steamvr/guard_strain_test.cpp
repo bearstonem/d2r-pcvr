@@ -207,6 +207,19 @@ int main() {
         };
         Check(blocksToBreak(Rank::Normal)==10&&blocksToBreak(Rank::Minion)==8&&blocksToBreak(Rank::Champion)==5&&
               blocksToBreak(Rank::Unique)==4&&blocksToBreak(Rank::PrimeEvil)==3,"blocks to break: 10/8/5/4/3 by rank");
+        // Defense eases it (DefenseShare): the attack's to-hit chance against the player's Defense, 25 % floor.
+        const auto blocksAt=[](int chance,float floor) {
+            Run r;int n=0;
+            for(;n<80;){strain::Input in;r.time+=1/90.;in.time=r.time;in.session=7;in.enabled=in.eligible=in.raised=true;
+                in.blocks=1;in.weight=strain::RankWeight(Rank::Normal)*strain::DefenseShare(chance,floor);++n;if(r.engine.Step(in,r.tuning).broken)break;r.Hold(true,.2);}
+            return n;
+        };
+        Check(blocksAt(95,.25f)==10&&blocksAt(-1,.25f)==10&&blocksAt(50,1.f)==10,"Defense: no change at the most a monster can have, unknown, or the floor at 100 %");
+        Check(blocksAt(50,.25f)==16&&blocksAt(20,.25f)==25&&blocksAt(5,.25f)==35,"Defense: higher Defense (a lower chance to hit) takes more blocks to break the guard");
+        Check(blocksAt(90,.25f)<=blocksAt(50,.25f)&&blocksAt(50,.25f)<=blocksAt(20,.25f)&&blocksAt(20,.25f)<=blocksAt(5,.25f),"Defense: the more of it, the slower");
+        Check(std::fabs(strain::DefenseShare(0,.25f)-.25f)<1e-6f&&std::fabs(strain::DefenseShare(100,.25f)-1)<1e-6f&&
+              std::fabs(strain::DefenseShare(40,NAN)-1)<1e-6f&&std::fabs(strain::DefenseShare(40,-1)-40/95.f)<1e-6f&&std::fabs(strain::DefenseShare(40,3)-1)<1e-6f,
+              "DefenseShare: floor at no chance, whole at 95 and over, a bad floor ignored or clamped");
         // A block's weight can land a step before its count (two atomics): it still strains, once.
         Run r;strain::Input in;r.time+=1/90.;in.time=r.time;in.session=7;in.enabled=in.eligible=in.raised=true;in.weight=2;
         const float early=r.engine.Step(in,r.tuning).strain;

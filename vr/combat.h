@@ -30,6 +30,9 @@ void ConfigureEnemiesAlwaysHit(bool on);
 // guard_break_chip_scale (1): through a broken guard a block lands as a chip,
 // its life damage x (1 - chance to block) x scale.
 void ConfigureGuardChip(bool on,float scale);
+// [gameplay] guard_strain_defense_floor (25 %): each block's guard strain x the blocked attack's to-hit chance
+// against the player's Defense (95 % = all of it), never under this share (guard_strain.h DefenseShare); 100 = ignored.
+void ConfigureGuardStrainDefense(float floor);
 // [gameplay] shield_block_wear (22): % of physical blocks and chips that give the
 // shield the game's own 10% when-struck wear roll (22 = its native share, 2.2%);
 // nothing else wears for them. A parry wears nothing.

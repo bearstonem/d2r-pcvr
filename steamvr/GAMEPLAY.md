@@ -1838,7 +1838,15 @@ instead of a random one. Classic keeps the native roll.
   `riposte_volume` (100).
 - **Guard strain light**: every blocked hit (not a parry) strains the guard by
   `guard_strain_per_block` % (10), weighted by the attacker's rank: about 10
-  normal-monster blocks in a row reach full strain. There is no buildup speed
+  normal-monster blocks in a row reach full strain. Your Defense eases it: each
+  block strains by the attacker's native chance to hit you (its attack rating
+  against your Defense, by level, 5..95 %; the chance that also scales an
+  unblocked hit's damage), all of it at 95 % and never under
+  `guard_strain_defense_floor` % (25; 100 = Defense ignored) of it - at 25 %, a
+  normal monster with a 50 % chance to hit breaks the guard in 16 blocks, one
+  with 20 % in 25, 5 % in 35 (owner, 2026-11-12: "If you have defense rating
+  high ... you shouldn't get the vignette as much"). `[debug] guard_trace` logs
+  each block's strain and chance. There is no buildup speed
   setting (`guard_strain_speed` is no longer read). Strain shows as a soft black
   vignette at the rim of the view, drawn denser by `guard_strain_dark_density` (2.5)
   so it hides more over D2's dark scenes, beneath the blood on the visor, creeping
