@@ -254,7 +254,7 @@ not count. Each hit is still one game attack, and the weapon never lags your han
 reach's row) keeps your own items from passing through each other: the weapon
 stops at the shield on your other arm and slides along its face, and two weapons,
 one in each hand, stop at each other. Your real hand cannot be stopped, so the
-hero's hand gives way instead, at most 12 cm, and eases back to your controller in
+hero's hand gives way instead, at most 60 cm, and eases back to your controller in
 about 0.1 s once they part; push further and they pass through. A strike clanks in
 both controllers (Melee hits strength), and a fast one plays the game's block
 clank. Bows, two-handed grips, throws, Druid forms and menus are left alone; an

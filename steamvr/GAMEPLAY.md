@@ -1817,7 +1817,8 @@ applies it.
   just before it touched, and a fast swing that went through within one frame is
   followed in 2 cm steps, so it is stopped at the face it came from, not pushed
   on through. Weapon against weapon, the blades rest a blade's width apart.
-- **The cap.** A push never exceeds 12 cm. Deeper than that the two pass through
+- **The cap.** A push never exceeds 60 cm (`held::Cap`; 12 cm, then 40 cm, until the owner's
+  2026-11-12 headset sessions). Deeper than that the two pass through
   each other: the hand eases back and nothing pushes until they are clear, so an
   item is never held far from its hand. With the hand pulled back, the push eases
   out with a 33 ms time constant (95% gone in 0.1 s), not a snap.
