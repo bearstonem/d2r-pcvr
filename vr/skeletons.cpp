@@ -1420,6 +1420,18 @@ void AimChain(const Hero& h, int u, int l, int k, V3 E, V3 T, const std::vector<
 
 // Quaternions, x y z w (the wrist's own maths, with the turns it is made of, is in held_pose.h).
 struct Q4 { float x, y, z, w; };
+// Remote players' head pose (PoseRemoteUpper, #519) still composes its pitch and roll with these. main dropped
+// them with the left-handed grips' rework (30b10542); they are restored here exactly as they were in v0.3.33.
+Q4 QMul(Q4 a, Q4 b) {
+    return {a.w*b.x + a.x*b.w + a.y*b.z - a.z*b.y,
+            a.w*b.y - a.x*b.z + a.y*b.w + a.z*b.x,
+            a.w*b.z + a.x*b.y - a.y*b.x + a.z*b.w,
+            a.w*b.w - a.x*b.x - a.y*b.y - a.z*b.z};
+}
+Q4 QAxis(float ax, float ay, float az, float deg) {
+    const float h = deg * 0.00872664626f, s = sinf(h);
+    return {ax * s, ay * s, az * s, cosf(h)};
+}
 V3 QRot(Q4 q, V3 v) {   // q v q*
     const V3 u = {q.x, q.y, q.z};
     const V3 t = Scale(Cross(u, v), 2.0f);
