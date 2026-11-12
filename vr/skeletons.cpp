@@ -4368,7 +4368,8 @@ void Limbs(Posed& posed) {
 // head turned to the player's eyes before it is drawn (and before bodies::Limbs bends it).
 // Which skeleton is whose comes from the model's path and the renderer's registry, as for the
 // bodies above; the head from its bones' names and bind matrices (lookat::Learn). No unit of
-// the game's is read, so a dying body is told only by its pose: one fallen over is left alone.
+// the game's is read, so a dying body is told only by its pose: one fallen over is left alone,
+// and so is one the game has stopped posing (lookat::Posing: a corpse, its death played out).
 namespace looks {
 namespace lookat = framevr::lookat;
 namespace limbs = framevr::limbs;
@@ -4396,7 +4397,9 @@ struct Head {
     std::vector<float> game;
     float left[16] = {};
     bool mine = false;
+    lookat::Posing posing;   // when the game was last seen to pose it again: a corpse it poses no more
     std::atomic<limbs::Kind> kind{limbs::Kind::None};
+    std::atomic<bool> still{false};   // posing.Moving said no at the last look (for the report)
     std::atomic<ULONGLONG> seen{0}, turned{0};
     std::chrono::steady_clock::time_point at{};
     bool timed = false;
@@ -4492,16 +4495,18 @@ void Report(ULONGLONG now) {
     const unsigned turns = g_turns.exchange(0), learned = g_learned.exchange(0), headless = g_headless.exchange(0), refused = g_refused.exchange(0);
     const float widest = g_widest.exchange(0), nearest = g_nearest.exchange(1e9f);
     const uint64_t micros = g_micros.exchange(0);
-    if (!turns && !learned && !headless && !refused) return;
-    unsigned monsters = 0, townsfolk = 0;
+    unsigned monsters = 0, townsfolk = 0, still = 0;
     AcquireSRWLockShared(&g_headLock);
-    for (const auto& [self, h] : g_heads)
+    for (const auto& [self, h] : g_heads) {
         if (const ULONGLONG turned = h->turned.load(std::memory_order_relaxed); turned && now - turned < 1000) ++(h->kind.load(std::memory_order_relaxed) == limbs::Kind::Townsfolk ? townsfolk : monsters);
+        if (const ULONGLONG seen = h->seen.load(std::memory_order_relaxed); now >= seen && now - seen < 1000 && h->still.load(std::memory_order_relaxed)) ++still;
+    }
     ReleaseSRWLockShared(&g_headLock);
-    char line[320];
+    if (!turns && !learned && !headless && !refused && !still) return;
+    char line[380];
     std::snprintf(line, sizeof line, "Frame look-at: ten seconds: head turns=%u, turned now: monsters=%u townsfolk=%u; widest %.0f deg, nearest %.1f m; "
-        "heads learned=%u, models without a head=%u, refused=%u; hook %.2f ms a second", turns, monsters, townsfolk, widest * 57.29578f,
-        nearest < 1e8f ? nearest : 0.f, learned, headless, refused, double(micros) / double(ReportEvery));
+        "still now (the game posing them no more: corpses)=%u; heads learned=%u, models without a head=%u, refused=%u; hook %.2f ms a second",
+        turns, monsters, townsfolk, widest * 57.29578f, nearest < 1e8f ? nearest : 0.f, still, learned, headless, refused, double(micros) / double(ReportEvery));
     framevr::logging::Write(line);
 }
 
@@ -4553,7 +4558,7 @@ bool Turn(Posed& posed, Turned& turned) {
     const int head = shape->rig.head;
     const auto clock = std::chrono::steady_clock::now();
     // The game's own pose: what the buffer holds, unless its head is still the one left here.
-    lookat::Eased eased; float seconds = 0; bool posedAgain = true;
+    lookat::Eased eased; float seconds = 0; bool posedAgain = true, moving = false;
     if (ULONGLONG pruned = g_pruned.load(std::memory_order_relaxed); now > pruned && now - pruned > 2000 && g_pruned.compare_exchange_strong(pruned, now)) {
         AcquireSRWLockExclusive(&g_headLock);
         for (auto it = g_heads.begin(); it != g_heads.end();) {   // one seen by a thread whose clock read is later than this one's is not old
@@ -4569,7 +4574,16 @@ bool Turn(Posed& posed, Turned& turned) {
         if (h.mine && h.game.size() == size_t(count) * 16 && !memcmp(h.left, pose.data() + size_t(head) * 16, 64)) {
             std::copy(h.game.begin(), h.game.end(), pose.begin());
             posedAgain = false;
-        } else { h.game.assign(pose.begin(), pose.begin() + size_t(count) * 16); h.mine = false; }
+        } else {
+            // Posed by the game again when the buffer is not the pose it held before - unless the
+            // bodies' bend is in it, which is ours. The game's pose put back after a bend is one
+            // change, which Posing does not count as moving.
+            const bool changed = h.game.size() != size_t(count) * 16 || memcmp(h.game.data(), pose.data(), size_t(count) * 64) != 0;
+            if (changed && !bodies::Bent(self)) h.posing.Changed(now);
+            h.game.assign(pose.begin(), pose.begin() + size_t(count) * 16); h.mine = false;
+        }
+        moving = h.posing.Moving(now);
+        h.still.store(!moving, std::memory_order_relaxed);
         // A head not seen for a while starts from the animation's, not from where it was left.
         const ULONGLONG seen = h.seen.load(std::memory_order_relaxed);
         if (h.timed && now - seen <= 500) seconds = std::chrono::duration<float>(clock - h.at).count(); else h.eased = {};
@@ -4578,7 +4592,8 @@ bool Turn(Posed& posed, Turned& turned) {
     }
     ReleaseSRWLockExclusive(&h.lock);
     lookat::Aim aim;
-    if (!lookat::Want(shape->rig, pose.data(), count, placement, {eye[0], eye[1], eye[2]}, upm, g_limits, aim)) aim = {};
+    // A body the game poses no more (a corpse): its head eases back to the game's pose and stays.
+    if (!moving || !lookat::Want(shape->rig, pose.data(), count, placement, {eye[0], eye[1], eye[2]}, upm, g_limits, aim)) aim = {};
     lookat::Step(eased, aim, seconds, g_limits);
     const bool tried = !lookat::Still(eased);   // a refused Apply leaves a pose that is not to be used
     const bool turn = tried &&
