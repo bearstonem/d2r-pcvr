@@ -993,7 +993,7 @@ int main(int argc,char** argv){
         const auto* row=content::RowOf(HeldCollisions);
         Check(row&&row->beside&&row->page==View::Combat&&row->kind==content::RowKind::Toggle&&std::strcmp(row->label,"Weapons collide")==0&&
               row->section==content::RowOf(MeleeReach)->section&&row->classes==content::AllClasses,"Melee reach's right half on Combat > Melee, every class");
-        Check(std::string(HelpText(HeldCollisions)).find("12 cm")!=std::string::npos&&std::string(row->help).find("12 cm")!=std::string::npos,
+        Check(std::string(HelpText(HeldCollisions)).find("60 cm")!=std::string::npos&&std::string(row->help).find("60 cm")!=std::string::npos,
               "both helps say how far the hand gives way");
         for(int c=-1;c<=heroclass::Assassin+1;++c)Check(RowShown(HeldCollisions,Defaults(),{c}),"every class sees it");
         Model t;Snapshot ready;ready.ready=true;t.Open(ready);layout::Press(t,{Kind::Set,HeldCollisions,0,0},0);
