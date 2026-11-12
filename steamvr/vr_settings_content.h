@@ -351,6 +351,12 @@ inline constexpr Option EchoOptions[]={
     {1,"More","The game's echo twice as loud: caves, crypts and halls ring around you."},
     {2,"Strong","Four times as loud, and it rings a quarter longer."},
 };
+// Monster names (d2rcam::monsterbars::Names): whose plates the game draws over monsters.
+inline constexpr Option MonsterNamesOptions[]={
+    {0,"All","Every monster shows its name and health when it is your target."},
+    {1,"Bosses, elites","Only bosses, champions, uniques and their minions show theirs. The default."},
+    {2,"None","No monster names or health over monsters, bosses included."},
+};
 inline constexpr Option TooltipOptions[]={
     {0,"Instant","Details show as soon as the laser reaches an item."},
     {1,"Short","Details show after the laser rests on an item for 0.3 s."},
@@ -664,8 +670,11 @@ inline constexpr Override Overrides[]={
     {.id="interactions.loot_pick",.page=View::Labels,.section="Names and bars",.kind=RowKind::Toggle,.label="Loot pick",
      .help="Hold your arm out and point at an item: A picks up that one, not the nearest, and its name shows. Too far away, A takes nothing.",
      .beside=true},
-    {.id="hud.ordinary_mob_bars",.page=View::Labels,.section="Names and bars",.kind=RowKind::Toggle,.label="Weak monster bars",
-     .help="Names and health bars over ordinary monsters. Bosses and elites always show theirs. Off keeps the view clear."},
+    // Monster names (owner 2026-11-11): All / Bosses and elites (the default) / None; it replaced the
+    // Weak monster bars toggle, whose [hud] ordinary_mob_bars is still read when monster_names is missing.
+    {.id="hud.monster_names",.page=View::Labels,.section="Names and bars",.kind=RowKind::Choice,.label="Monster names",
+     .help="Which monsters show their name and health when they are your target. NPC, mercenary, player and item names always show.",
+     FRAMEVR_OPTIONS(MonsterNamesOptions)},
     // Labels: Loot beams
     // Loot beams (vr/loot_beam_scan.cpp): one row - its brightness slider, then a Filter button
     // opening a card of four switches (owner 2026-10-31: "one line item that says loot beams and
@@ -839,7 +848,7 @@ inline constexpr PresetSetting ComfortValues[]={
 inline constexpr PresetSetting ClassicValues[]={
     {"gameplay.motion_controls",1},
     {"gameplay.projectile_aim_assist",0},{"gameplay.spell_lock",0},{"gameplay.planar_spell_aim",0},{"gameplay.ground_aim",0},{"gameplay.target_outline_pct",0},
-    {"hud.tooltip_timing",2},{"hud.labels_size",45},{"hud.ordinary_mob_bars",1},
+    {"hud.tooltip_timing",2},{"hud.labels_size",45},{"hud.monster_names",0},
     {"gameplay.offline_players",0},{"gameplay.enemy_sight_pct",100},
     {"hud.blood_visor",0},{"gameplay.low_life_heart_start",0},
     {"sky.enabled",0},{"fog.enabled",0},{"ceiling.enabled",0},{"interactions.bottle_physics",0},{"interactions.prop_physics",0},

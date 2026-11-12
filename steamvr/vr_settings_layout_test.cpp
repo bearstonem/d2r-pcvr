@@ -105,7 +105,7 @@ static const GoldenRow Golden[]={
     {"hud.tooltip_timing",View::Menus,0,content::RowKind::Choice,"Item details delay",3,0},
     {"hud.labels_size",View::Labels,0,content::RowKind::Slider,"Loot name size",0,0},
     {"interactions.loot_pick",View::Labels,0,content::RowKind::Toggle,"Loot pick",0,0},   // #257: Loot pick, Off / On
-    {"hud.ordinary_mob_bars",View::Labels,0,content::RowKind::Toggle,"Weak monster bars",0,0},
+    {"hud.monster_names",View::Labels,0,content::RowKind::Choice,"Monster names",3,0},   // All / Bosses and elites / None (2026-11-11; the Weak monster bars toggle before)
     {"loot.beams_brightness",View::Labels,1,content::RowKind::Filter,"Loot beams",0,0},   // loot beams: one row, its brightness slider
     {"loot.beams_unique",View::Labels,1,content::RowKind::Toggle,"Unique",0,0},           // (2026-11-01) and a Filter button whose
     {"loot.beams_set",View::Labels,1,content::RowKind::Toggle,"Set",0,0},                 // card holds Unique, Set, Rare and Runes

@@ -48,8 +48,14 @@ void SetCallbacks(ViewFn view, ProjFn proj);
 // Native stereo labels: project the game's original unit anchors with the
 // current scene matrices, bypassing inline reconstruction of a flat frustum.
 void SetStereoLabels(bool on);
-// Show ordinary monsters' health/name plates in native VR (default false).
-void SetOrdinaryMobBars(bool show);
+// VR Settings > Interface > Labels > Monster names in native VR
+// (monsterbars::Names: 0 All, 1 Bosses and elites, 2 None). Logs each change.
+void SetMonsterNames(int names);
+// What Monster names did since the last call (the ten-second target-lock line):
+// overhead anchors it took away, hovered-monster panels it held back, and
+// panels held back because the eye pass gave them no place.
+struct MonsterPlates {int names=1;uint32_t anchorsHidden=0,panelsHidden=0,panelsUnplaced=0;};
+MonsterPlates TakeMonsterPlates();
 // Trial: paint the monster health panel after current-eye tooltip updates.
 void SetMonsterDrawOrder(bool on);
 // Main rendering thread only; -1 outside paired gameplay.

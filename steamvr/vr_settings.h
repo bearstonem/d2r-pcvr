@@ -99,7 +99,8 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"VR render resolution", "Independent of monitor; higher values cost GPU time", L"render",L"vr_resolution",1,0,6,1},
     {"Minimap & Compass", "Wrist / Palm / Either / Off; independent of health and mana", L"interactions",L"navigation_location",0,0,3,1},
     {"Smooth turning", "Continuous right-stick turning; Off uses snap turning", L"turn",L"smooth",0,0,1,1},
-    {"Ordinary mob bars", "Weak mobs' health and names; bosses and elites stay visible", L"hud",L"ordinary_mob_bars",0,0,1,1},
+    // Monster names (MonsterNames, below; d2rcam::monsterbars::Names): 0 All, 1 Bosses and elites, 2 None.
+    {"Monster names", "Names and health over monsters: all, bosses and elites, or none", L"hud",L"monster_names",1,0,2,1},
     {"Menu distance", "Eye-level inventory, merchant and main menus", L"hud",L"menu_distance",1,0,2,1},
     {"Item tooltip timing", "Laser hover: Instant, Short (300 ms), or Original timing", L"hud",L"tooltip_timing",0,0,2,1},
     {"Projectile aim assist", "Hand spells: Light assists launch; Strong adds gentle homing", L"gameplay",L"projectile_aim_assist",2,0,2,1},
@@ -313,6 +314,11 @@ inline float LegacyHighlight(Key key,float byRange,float hue){
     if(key==HighlightRight&&std::isfinite(hue)&&hue>=0){const float snapped=std::round(hue/15)*15;return snapped<=0?360.f:std::min(snapped,360.f);}
     return Definitions[key].defaultValue;
 }
+// Monster names (VR Settings > Interface > Labels; owner 2026-11-11: "If it is turned off in settings you
+// should not show monster names at all ... or just turn everything off") took the slot of the Weak monster
+// bars toggle (2026-10-13), so the keys keep their order. Without [hud] monster_names the older
+// [hud] ordinary_mob_bars is read: 1 All, 0 Bosses and elites (monsterbars::FromIni). Never rewritten.
+inline constexpr Key MonsterNames=OrdinaryMobBars;
 inline int HapticCategory(Key key){return key>=HapticMelee&&key<=HapticAlert?key-HapticMelee:-1;}
 inline haptics::Sample HapticSample(const Values& values,haptics::Category category,int hand=0){return haptics::SampleFor(category,values[HapticShortMelee]>.5f,hand);}
 inline haptics::Strengths HapticLevels(const Values& values){

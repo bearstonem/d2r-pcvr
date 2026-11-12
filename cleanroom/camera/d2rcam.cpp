@@ -76,7 +76,15 @@ ReleaseCameraFn o_releaseCamera = nullptr;
 WorldToScreenFn o_worldToScreen = nullptr;
 UnitToScreenFn o_unitToScreen = nullptr;
 std::atomic<bool> g_stereoLabels{false};
-std::atomic<bool> g_showOrdinaryMobBars{false};
+// VR Settings > Interface > Labels > Monster names (monsterbars::Names); -1 until the ini is first read.
+std::atomic<int> g_monsterNames{-1};
+// Ten seconds of it (TakeMonsterPlates): overhead anchors and panel paints the
+// setting took away, and panel paints with no anchor of this eye pass.
+std::atomic<uint32_t> g_anchorsHidden{0},g_panelsHidden{0},g_panelsUnplaced{0};
+monsterbars::Names MonsterNamesNow() {
+    const int n=g_monsterNames.load(std::memory_order_relaxed);
+    return n<0?monsterbars::DefaultNames:monsterbars::Names(n);
+}
 thread_local uint32_t t_labelProjection=0;
 std::atomic<int> g_traceLabelEye{-1};
 std::atomic<uint32_t> g_traceLabelCount{0};
@@ -90,6 +98,20 @@ WidgetDrawFn g_drawPanelManager=nullptr,g_drawMonsterHealth=nullptr;
 bool g_monsterDrawHooks=false;
 thread_local int t_stereoUiEye=-1;
 thread_local DeferredDraws* t_deferredHealth=nullptr;
+// The hovered monster's panel in this eye pass (monsterbars::PanelGate), and the
+// last unit's Kind within the pass: the game asks for each monster's anchor twice
+// in a row. Nothing is kept from one eye pass to the next.
+thread_local monsterbars::PanelGate t_panelGate;
+thread_local uint32_t t_uiPass=0;
+struct KindSeen {uintptr_t unit=0;uint32_t pass=0;monsterbars::Kind kind=monsterbars::Kind::Other;};
+thread_local KindSeen t_kindSeen;
+bool StereoUiPass();
+// The hovered monster's panel may be painted in this pass (outside native stereo, always).
+bool PanelAllowed() {return !StereoUiPass()||t_panelGate.Paint();}
+// A visible panel left unpainted, counted by why.
+void CountPanelSkipped() {
+    (t_panelGate.verdict==monsterbars::PanelGate::Verdict::Hidden?g_panelsHidden:g_panelsUnplaced).fetch_add(1,std::memory_order_relaxed);
+}
 #endif
 
 std::atomic<bool>   g_cameraHooks { false };
@@ -137,6 +159,13 @@ std::atomic<uint32_t> g_frameIndex { 0 };
 const Frame& Current() {
 	return g_frames[g_frameIndex.load(std::memory_order_acquire) & 3];
 }
+#ifdef D2RVR_NATIVE_OPENXR
+// An eye pass of native stereo gameplay with our matrices in the camera.
+bool StereoUiPass() {
+    const Frame& f=Current();
+    return t_stereoUiEye>=0&&f.ourView&&f.ourProj;
+}
+#endif
 
 void Publish(const Frame& f) {
 	const uint32_t next = g_frameIndex.load(std::memory_order_relaxed) + 1;
@@ -553,6 +582,13 @@ void __fastcall HookReleaseCamera(void* cam) {
 #ifdef D2RVR_NATIVE_OPENXR
 void __fastcall DrawMonsterHealth(void* widget) {
     if(t_deferredHealth&&t_deferredHealth->Add(reinterpret_cast<uintptr_t>(widget)))return;
+    // Painted where the game paints it (the draw-order trial off, or no room
+    // left to defer): the verdict so far in this pass (monsterbars::PanelGate).
+    if(!PanelAllowed()) {
+        uint8_t visible=0;
+        if(framevr::ReadMemory(&visible,static_cast<uint8_t*>(widget)+0x51,sizeof visible)&&visible)CountPanelSkipped();
+        return;
+    }
     g_drawMonsterHealth(widget);
 }
 void __fastcall DrawPanelManager(void* widget) {
@@ -568,12 +604,15 @@ void __fastcall DrawPanelManager(void* widget) {
     t_deferredHealth=nullptr;
     // Native root draw is only a child traversal, inside the caller's UI pass.
     // Tooltips have now updated the same widgets for this eye. Paint each once,
-    // preserving native text, health, visibility and the loader's root wrapper.
+    // preserving native text, health, visibility and the loader's root wrapper -
+    // unless Monster names hides its monster, or this pass gave it no place
+    // (monsterbars::PanelGate: it would stand where another eye or frame left it).
     pending.Flush([](uintptr_t address) {
         uintptr_t vtable=0;uint8_t visible=0;
         if(framevr::ReadMemory(&vtable,reinterpret_cast<void*>(address),sizeof vtable)&&
            vtable==g_base+MonsterHealthVtable&&
            framevr::ReadMemory(&visible,reinterpret_cast<void*>(address+0x51),sizeof visible)&&visible) {
+            if(!PanelAllowed()){CountPanelSkipped();return;}
             if(g_traceLabelEye.load(std::memory_order_relaxed)>=0) {
                 char line[120];std::snprintf(line,sizeof line,
                     "Frame label paint: eye %d health panel %p after current-eye tooltip updates",t_stereoUiEye,reinterpret_cast<void*>(address));
@@ -605,20 +644,38 @@ bool InstallMonsterDrawOrder() {
 }
 #endif
 
+bool UnitAnchor(void* context,void* unit,float* out,uint8_t above,uintptr_t caller);
 bool __fastcall HookUnitToScreen(void* context,void* unit,float* out,uint8_t above) {
 #ifdef D2RVR_NATIVE_OPENXR
-    const Frame& frame=Current();
-    if(monsterbars::Hide(t_stereoUiEye>=0&&frame.ourView&&frame.ourProj,
-        g_showOrdinaryMobBars.load(std::memory_order_relaxed),above!=0,
-        reinterpret_cast<uintptr_t>(unit),[](uintptr_t address,auto& value) {
-            return framevr::ReadMemory(&value,reinterpret_cast<void*>(address),sizeof value);
-        })) {
-        // Supply culled coordinates as well for callers that use the anchor
-        // even when native visibility is false (as the world projection does).
-        if(out){out[0]=-1000000.f;out[1]=-1000000.f;}
-        return false;
+    // The overhead anchor: the game's target routine asks for it for each unit
+    // it shows a plate for (the hovered unit, the controller's targets), and a
+    // monster's health panel takes its info with it (monsterbars::PanelGate).
+    // Monster names takes the anchor of a monster it hides away, so the game
+    // draws no name for it; the panel is held back where it is painted.
+    if(above&&StereoUiPass()) {
+        const uintptr_t address=reinterpret_cast<uintptr_t>(unit);
+        auto& seen=t_kindSeen;
+        if(seen.unit!=address||seen.pass!=t_uiPass)
+            seen={address,t_uiPass,monsterbars::Classify(address,[](uintptr_t at,auto& value) {
+                return framevr::ReadMemory(&value,reinterpret_cast<void*>(at),sizeof value);
+            })};
+        if(monsterbars::Hidden(MonsterNamesNow(),seen.kind)) {
+            g_anchorsHidden.fetch_add(1,std::memory_order_relaxed);
+            t_panelGate.Anchor(seen.kind,true,false);
+            // Supply culled coordinates as well for callers that use the anchor
+            // even when native visibility is false (as the world projection does).
+            if(out){out[0]=-1000000.f;out[1]=-1000000.f;}
+            return false;
+        }
+        const bool shown=UnitAnchor(context,unit,out,above,reinterpret_cast<uintptr_t>(_ReturnAddress()));
+        t_panelGate.Anchor(seen.kind,false,shown);
+        return shown;
     }
 #endif
+    return UnitAnchor(context,unit,out,above,reinterpret_cast<uintptr_t>(_ReturnAddress()));
+}
+// The game's own anchor, projected with this eye's matrices.
+bool UnitAnchor(void* context,void* unit,float* out,uint8_t above,uintptr_t caller) {
     LabelAnchor anchor;anchor.previous=t_labelAnchor;t_labelAnchor=&anchor;
     ++t_labelProjection;
     const bool shown=Orig(o_unitToScreen)(context,unit,out,above);
@@ -629,8 +686,10 @@ bool __fastcall HookUnitToScreen(void* context,void* unit,float* out,uint8_t abo
     const int traceEye=g_traceLabelEye.load(std::memory_order_relaxed);
     if(traceEye>=0&&out&&g_traceLabelCount.fetch_add(1)<32) {
         char line[600];std::snprintf(line,sizeof line,"Frame label trace: eye %d caller %llx unit %p above %u shown %d anchors %u head %.3f %.3f %.3f base %.3f %.3f %.3f nativeXY %.2f %.2f viewport %.0f %.0f camera %d override %d %d",
-            traceEye,(unsigned long long)(reinterpret_cast<uintptr_t>(_ReturnAddress())-g_base),unit,unsigned(above),shown,anchor.count,anchor.first[0],anchor.first[1],anchor.first[2],anchor.last[0],anchor.last[1],anchor.last[2],out[0],out[1],f.cam?At<float>(f.cam,camf::ViewportW):0,f.cam?At<float>(f.cam,camf::ViewportH):0,anchor.cam==f.cam,f.ourView,f.ourProj);framevr::logging::Write(line);
+            traceEye,(unsigned long long)(caller-g_base),unit,unsigned(above),shown,anchor.count,anchor.first[0],anchor.first[1],anchor.first[2],anchor.last[0],anchor.last[1],anchor.last[2],out[0],out[1],f.cam?At<float>(f.cam,camf::ViewportW):0,f.cam?At<float>(f.cam,camf::ViewportH):0,anchor.cam==f.cam,f.ourView,f.ourProj);framevr::logging::Write(line);
     }
+#else
+    (void)caller;
 #endif
     if(shown&&out&&above&&anchor.count>=2&&g_stereoLabels.load()&&anchor.cam==f.cam&&f.ourView&&f.ourProj){
         // Native code combines projected foot X with projected head Y. Those
@@ -728,7 +787,10 @@ bool Install(const D2RL::PluginContext* ctx) {
 	d2rsig::Resolve(ctx);
 	const bool cameraOk = InstallCamera();
 #ifdef D2RVR_NATIVE_OPENXR
-    if(cameraOk&&g_monsterDrawOrder.load()&&!InstallMonsterDrawOrder())
+    // The same two draw slots hold back the hovered monster's panel for Monster
+    // names, so they go in for either ([hud] monster_draw_order=0 alone keeps
+    // the native paint order: DrawPanelManager passes straight through).
+    if(cameraOk&&(g_monsterDrawOrder.load()||MonsterNamesNow()!=monsterbars::Names::All)&&!InstallMonsterDrawOrder())
         framevr::logging::Write("Frame labels: draw-order signature checks failed; keeping native paint order");
 #endif
     // Keep the unit-label hook available for live toggles, including when
@@ -755,11 +817,27 @@ bool Install(const D2RL::PluginContext* ctx) {
 
 void SetEnabled(bool on) { g_enabled.store(on); }
 void SetStereoLabels(bool on){g_stereoLabels.store(on);}
-void SetOrdinaryMobBars(bool show){g_showOrdinaryMobBars.store(show);}
+void SetMonsterNames(int names){
+    names=names<0?int(monsterbars::DefaultNames):names>2?2:names;
+    if(g_monsterNames.exchange(names)==names)return;
+    char line[96];std::snprintf(line,sizeof line,"Frame labels: monster names %s",monsterbars::NameOf(monsterbars::Names(names)));
+#ifdef D2RVR_NATIVE_OPENXR
+    framevr::logging::Write(line);
+#else
+    if(g_ctx)g_ctx->LogInfo(line);
+#endif
+}
+MonsterPlates TakeMonsterPlates(){
+    MonsterPlates p;
+    p.names=int(MonsterNamesNow());
+    p.anchorsHidden=g_anchorsHidden.exchange(0);p.panelsHidden=g_panelsHidden.exchange(0);p.panelsUnplaced=g_panelsUnplaced.exchange(0);
+    return p;
+}
 void SetMonsterDrawOrder(bool on){g_monsterDrawOrder.store(on);}
 void SetStereoUiEye(int eye){
 #ifdef D2RVR_NATIVE_OPENXR
     t_stereoUiEye=eye;
+    t_panelGate.BeginPass();++t_uiPass;   // each eye pass starts with no monster seen
 #else
     (void)eye;
 #endif

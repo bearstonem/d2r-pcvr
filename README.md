@@ -160,9 +160,10 @@ Selection clicks do not cast. Release buttons and triggers after closing before
 using them in combat. Menu, tracking, equipment and assignment changes also
 require a fresh press. Only one wheel is open at a time.
 
-Ordinary monsters' health and name bars are hidden by default in VR. To show
-them, open **VR Settings > Interface > Labels**, turn **Weak monster bars** On, then **Apply**.
-Bosses, champions, uniques and their minions keep their bars with either setting.
+Monster name and health plates in VR: **VR Settings > Interface > Labels > Monster
+names**, then **Apply**. **Bosses, elites** (the default) shows only bosses, champions,
+uniques and their minions; **All** shows every monster's; **None** shows none. NPC,
+mercenary and item names show with every choice ([docs/monster-bars.md](docs/monster-bars.md)).
 
 ### Hand skill layouts
 

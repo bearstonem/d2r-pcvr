@@ -95,6 +95,7 @@ namespace hud { void SetWorkspaceBand(float top, float bottom); void SetBoardCle
                 bool PictureNow(int i, float box[4], uint64_t* srv); void SetPictureBarMoved(bool moved); void SetPictureBarOffset(float x, float y); void SetPictureMapMoved(bool moved); void SetPictureMapOffset(float x, float y);
                 void SetLabels(bool on); bool LabelsNow(float keepBar[4], float keepMap[4], uint64_t* srv); void SetUiMask(bool on); bool UiMaskNow(); }
 #include "d2rcam.h"
+#include "monster_bars.h"
 #ifdef D2RVR_NATIVE_OPENXR
 #include "foveation.h"
 #include "foveation_math.h"
@@ -1211,7 +1212,9 @@ void LoadSettings() {
         framevr::foveation::Configure(IniB(L"render",L"fixed_foveation",true),preset.fixedRadius,preset.gazeRadius,preset.peripheralRate);
     }
     d2rcam::SetStereoLabels(IniB(L"hud",L"stereo_labels",true));
-    d2rcam::SetOrdinaryMobBars(IniB(L"hud",L"ordinary_mob_bars",false));
+    // Monster names (VR Settings > Interface > Labels): [hud] monster_names, else the older
+    // ordinary_mob_bars (1 All, 0 Bosses and elites). Read as saved, never rewritten.
+    d2rcam::SetMonsterNames(int(d2rcam::monsterbars::FromIni(IniF(L"hud",L"monster_names",-1),IniF(L"hud",L"ordinary_mob_bars",-1))));
     d2rcam::SetMonsterDrawOrder(IniB(L"hud",L"monster_draw_order",true));
     // Remote debugging can request the same one-shot capture without stealing
     // keyboard focus from SteamVR. Change the positive counter while running.
