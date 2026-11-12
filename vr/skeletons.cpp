@@ -4034,10 +4034,20 @@ void HeldReport(const framevr::held::Gate& gate,ULONGLONG now) {
     if(now-windowAt<10000)return;
     windowAt=now;
     const hc::Stats s=g_heldSolver.TakeStats();
-    if(!s.contacts[0]&&!s.contacts[1])return;
-    char why[200];hc::Reasons(s.why,why,sizeof why);char line[400];
+    // Told while a pair is held too, touching or not (owner 2026-11-12: a Paladin's mace "just passes through" the
+    // shield, and nothing was logged): what kept them apart is the question.
+    if(!s.contacts[0]&&!s.contacts[1]&&gate.pair==hc::Pair::None)return;
+    char why[200];hc::Reasons(s.why,why,sizeof why);char line[640];
+    const HeldItems& items=g_heldItems;   // HeldCollide holds g_heldLock
+    const float bladeLength=hc::BladeLength(gate.type[0]);   // the first item's (the one that yields)
+    char nearest[32];
+    if(s.nearest<1e8f)snprintf(nearest,sizeof nearest,"%.1f cm",s.nearest*100);else snprintf(nearest,sizeof nearest,"never measured");
     snprintf(line,sizeof line,"Frame held collisions: %u contacts (weapon-shield %u, weapon-weapon %u), deepest %.1f cm, pushes capped %u, "
-        "haptic clanks %u; excluded: %s",s.contacts[0]+s.contacts[1],s.contacts[0],s.contacts[1],s.deepest*100,s.capped,s.clanks,why);
+        "haptic clanks %u; ten seconds: %u steps, %u acting, %u with no usable shape, nearest %s; items %llu ms old: blade right=%d left=%d "
+        "(length %.2f m), shield=%d on arm %d (box %.1f x %.1f x %.1f cm half); excluded: %s",
+        s.contacts[0]+s.contacts[1],s.contacts[0],s.contacts[1],s.deepest*100,s.capped,s.clanks,s.steps,s.acting,s.badShapes,nearest,
+        items.at?(unsigned long long)(now-items.at):0ull,int(items.blade[0]),int(items.blade[1]),bladeLength,items.shield,items.shieldArm,
+        hc::Length(items.plate.right)*100,hc::Length(items.plate.up)*100,hc::Length(items.plate.out)*100,why);
     framevr::logging::Write(line);
 }
 void HeldCollide(Input& in) {

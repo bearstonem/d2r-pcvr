@@ -305,9 +305,26 @@ struct Output {
 struct Stats {
     unsigned contacts[2]{};   // first touches: weapon-shield, weapon-weapon
     unsigned capped=0,clanks=0,steps=0,acting=0;
+    unsigned badShapes=0;     // steps a pair would have acted on but a blade or the box was not a usable shape
     float deepest=0;          // the deepest raw overlap pushed apart, metres
+    float nearest=1e9f;       // the closest the two came while acting, metres (<= 0: touching), 1e9 = never acting
     uint32_t why=0;           // every reason that kept a held pair from acting
 };
+// How far apart a blade and a box are along the axis that parts them most (the box's faces and the blade's crossings
+// with them, the blade's radius taken off): <= 0 when no axis parts them, i.e. touching. For the log.
+inline float Gap(const Capsule& c,const Plate& p) {
+    const Vec along=math::Normalized(c.b-c.a);
+    float best=-1e9f;
+    for(int k=0;k<6;++k) {
+        Vec axis=k<3?Face(p,k):math::Cross(along,Face(p,k-3));
+        const float n=Length(axis);
+        if(n<1e-3f)continue;
+        axis=axis*(1/n);
+        const Span a=Project(c,axis),b=Project(p,axis);
+        best=std::max(best,std::max(b.low-a.high,a.low-b.high));
+    }
+    return best;
+}
 class Solver {
 public:
     enum class Phase {Idle,Touching,Passing};
@@ -325,6 +342,13 @@ public:
         const bool same=pair==g.pair&&arm[0]==g.arm[0]&&arm[1]==g.arm[1];
         // Not acting, a new pair, a long gap, or the first pose after a pause: nothing collides; the pose is remembered
         // so the next one has a way to follow.
+        if(g.Acts()&&!shapes)++stats.badShapes;
+        if(g.Acts()&&shapes) {   // how close they came (the log): blade to box, or blade to blade
+            float gap=1e9f;
+            if(g.pair==Pair::WeaponShield)gap=Gap(in.a,in.plate);
+            else {const Closest c=Segments(in.a.a,in.a.b,in.b.a,in.b.b);gap=c.distance-in.a.radius-in.b.radius;}
+            if(std::isfinite(gap))stats.nearest=std::min(stats.nearest,gap);
+        }
         if(!g.Acts()||!shapes||fresh||!same||!havePrevious) {
             phase=Phase::Idle;havePrevious=false;pair=g.pair;arm[0]=g.arm[0];arm[1]=g.arm[1];
             if(g.Acts()&&shapes)Remember(in);
