@@ -35,6 +35,8 @@
 #include <vector>
 
 #include "skeletons.h"
+#include "upper_body_skin.h"
+#include "upper_body_render.h"
 #include "../steamvr/body_tracking.h"
 #include "../steamvr/dual_wield.h"
 #include "../steamvr/crossbow_pose.h"
@@ -68,10 +70,20 @@ namespace skel {
 std::atomic<unsigned> g_interactionHidden{0};
 void SetInteractionHidden(unsigned mask){g_interactionHidden=mask&3;}
 
-
 namespace {
 
 thread_local uint64_t t_guardedReads = 0;   // this thread's guarded reads, for the hook's ten-second line
+
+SRWLOCK g_remoteLock = SRWLOCK_INIT;
+std::vector<RemoteUpperBody> g_remoteBodies;
+ULONGLONG g_remoteAt=0;
+#ifdef D2RVR_NATIVE_OPENXR
+SRWLOCK g_resolvedLock=SRWLOCK_INIT;
+upperbody::Resolved g_resolved{};
+uint64_t g_resolvedSession=0,g_resolvedAt=0;
+uint32_t g_resolvedEpoch=0,g_resolvedHands=0,g_resolvedGeneration=0;
+int g_resolvedClass=-1;
+#endif
 
 #pragma optimize("", off)
 bool SafeCopy(void* dst, const void* src, size_t n) noexcept {
@@ -924,6 +936,7 @@ bool EntityOf(uintptr_t self, uint32_t* e) {
     return false;
 }
 #ifdef D2RVR_NATIVE_OPENXR
+
 // Where a skeleton instance's entity stands. place, local: its transform as HeroTransform gives
 // the hero's (the component, the entity, its parent) and the component's local matrix - all in
 // the one block read here, for a pose Arms then takes as the hero's (HeroOf).
@@ -962,6 +975,7 @@ bool CandidatePosition(uintptr_t self,float position[3],HeroXform* place=nullptr
         return true;
     }
     return false;
+
 }
 // A model's placement this frame (model to world): its TransformComponent's
 // local matrix, or the composed one under a parent. No search; another
@@ -3448,6 +3462,22 @@ void PoseBody(Posed& posed, const Hero& h, const Input& given, float legHold) {
 #endif
     const bool written = SafeWrite((void*)mats, newW.data(), sizeof(Mat) * n);
 #ifdef D2RVR_NATIVE_OPENXR
+    // Send the final local two-handed grip, not a second approximation from raw
+    // controllers. This includes authored left-wrist staff mounts and bothAttach.
+    upperbody::Resolved solved{};
+    if(written&&!h.form&&in.mode==2&&in.haveEye&&in.haveYaw&&
+       (in.staff||in.bothAttach)&&!in.leftShield&&(in.handsValid&3)==3){
+        const int bones[4]={h.hand[0],h.hand[1],h.weapon[0],h.weapon[1]};
+        const float upm=h.eyeY/std::max(.5f,in.userHeadM);
+        for(int i=0;i<4;++i)if(bones[i]>=0&&bones[i]<n&&
+           upperbodyrender::PackFrame(newW[bones[i]].m,in.eyeModel,upm,in.yawInModel,solved.frame[i]))solved.mask|=uint8_t(1u<<i);
+        if(solved.mask!=15)solved={};
+    }
+    const auto solvedSession=gamestate::LocalPlayer();const auto solvedHands=gamestate::HandsKey();
+    AcquireSRWLockExclusive(&g_resolvedLock);
+    g_resolved=solved;g_resolvedSession=solvedSession;g_resolvedHands=solvedHands;
+    g_resolvedEpoch=in.worldEpoch;g_resolvedClass=h.cls;g_resolvedGeneration=HeroGen();g_resolvedAt=GetTickCount64();
+    ReleaseSRWLockExclusive(&g_resolvedLock);
     if(written&&in.followTrackedNeck&&h.spine>=0&&h.head>=0) {
         static std::atomic<uint64_t> nextReport{0};auto before=nextReport.load();const auto now=GetTickCount64();
         if(now>=before&&nextReport.compare_exchange_strong(before,now+5000)) {
@@ -3932,8 +3962,130 @@ void PoseMotionBow(Posed& p) {
 }
 #endif
 
+#ifdef D2RVR_NATIVE_OPENXR
+// Remote-only visual path: no local hero, weapon or damage cache writes.
+// Arm/wrist mathematics reuse this module's existing helpers; reference design:
+// diablo2-vr-port-main PoseRemoteHero (MPL-2.0).
+bool PoseRemoteUpper(uintptr_t self,const Hero&h,const float*local) {
+    if(h.form||!h.bindOk||h.head<0||h.spine<0||h.cls<0||self==g_heroSelf.load())return false;
+    std::vector<RemoteUpperBody> targets;
+    AcquireSRWLockShared(&g_remoteLock);
+    if(GetTickCount64()-g_remoteAt<=500)targets=g_remoteBodies;
+    ReleaseSRWLockShared(&g_remoteLock);
+    if(targets.empty())return false;
+    float pos[3];Mat model;
+    if(!ecs::CandidatePosition(self,pos,nullptr,model.m))return false;
+    std::vector<upperbodyrender::Candidate> candidates;
+    for(const auto&r:targets)candidates.push_back({r.unit,r.classId,{r.worldPosition[0],r.worldPosition[1],r.worldPosition[2]}});
+    int match=upperbodyrender::Match(candidates.data(),candidates.size(),h.cls,pos,local);
+    if(match<0)return false;
+    const auto&r=targets[match];
+    uintptr_t world=0,mats=0,previous=0;int n=0;
+    if(!Get(self+0x20,&world)||!Get(world,&n)||n!=h.count||!Get(world+4,&mats)||!mats)return true;
+    std::vector<Mat> oldW(n);if(!SafeCopy(oldW.data(),reinterpret_cast<void*>(mats),sizeof(Mat)*n))return true;
+    // Reject corpses and hidden duplicate rigs rather than animating them upright.
+    if(oldW[h.head].m[13]<h.bind[h.head].m[13]*.35f)return true;
+    std::vector<Mat> newW=oldW;
+    V3 heading=RotOnly({sinf(r.worldYaw),0,cosf(r.worldYaw)},InvAffine(model));
+    float yaw=atan2f(heading.x,heading.z),c=cosf(yaw),s=sinf(yaw);
+    Mat turn{{c,0,-s,0, 0,1,0,0, s,0,c,0, 0,0,0,1}};
+    const V3 pivot=Pos(oldW[h.spine]),bindPivot=Pos(h.bind[h.spine]);
+    for(int i=0;i<n;++i)if(h.upper[i]){
+        newW[i]=Mul(h.bind[i],turn);
+        const V3 at=Add(pivot,RotOnly(Sub(Pos(h.bind[i]),bindPivot),turn));
+        newW[i].m[12]=at.x;newW[i].m[13]=at.y;newW[i].m[14]=at.z;
+    }
+    // Keep native hand-local grip and weapon offsets on the tracked wrists.
+    for(int side=0;side<2;++side)if(h.hand[side]>=0){
+        std::vector<char> descendants(n,0);descendants[h.hand[side]]=1;
+        Propagate(h,oldW,newW,descendants,h.hand[side]);
+    }
+    const auto baseW=newW;
+    Input in{};in.wrist=true;in.userHeadM=r.userHeadM;
+    memcpy(in.rot,r.rot,sizeof in.rot);
+    const float upm=h.eyeY/std::max(.5f,r.userHeadM);
+    const V3 eye=Add(Pos(newW[h.head]),RotOnly(Sub(h.eyeBind,Pos(h.bind[h.head])),turn));
+    for(int side=0;side<2;++side){
+        int u=h.upr[side],l=h.lwr[side],k=h.hand[side];
+        if(!(r.handsValid&(1u<<side))||u<0||l<0||k<0)continue;
+        V3 target=Add(eye,Scale(ToModel(r.hand[side],c,s),upm));
+        Wrist wrist=PlanWrist(h,side,baseW,in,c,s);
+        if(wrist.ok)target=Sub(target,Scale(wrist.point,.5f*wrist.reach));
+        V3 shoulder=Pos(newW[u]);float l1=Len(Sub(Pos(newW[l]),shoulder)),l2=Len(Sub(Pos(newW[k]),Pos(newW[l])));
+        if(l1<1e-4f||l2<1e-4f)continue;
+        V3 pole=RotOnly({side==0?-.5f:.5f,-1,-.3f},turn);
+        V3 elbow=Elbow(shoulder,l1,l2,target,pole);
+        AimChain(h,u,l,k,elbow,target,baseW,newW);
+        if(wrist.ok){ApplyWrist(newW[k],wrist);std::vector<char> descendants(n,0);descendants[k]=1;Propagate(h,baseW,newW,descendants,k);}
+    }
+    // Apply both final wrists and their actual authored weapon-slot frames as
+    // one snapshot. In particular a sorceress staff can mount on the LEFT bone
+    // while the local solver places it in the RIGHT controller's grip.
+    if((r.handsValid&3)==3&&r.resolved.mask==15&&upperbody::Valid(r.resolved)){
+        const float eyePoint[3]={eye.x,eye.y,eye.z};Mat solved[4];bool ready=true;
+        const int bones[4]={h.hand[0],h.hand[1],h.weapon[0],h.weapon[1]};
+        for(int i=0;i<4;++i)ready=ready&&bones[i]>=0&&bones[i]<n&&
+            upperbodyrender::UnpackFrame(r.resolved.frame[i],eyePoint,upm,yaw,solved[i].m);
+        if(ready){
+            for(int side=0;side<2;++side){
+                const int u=h.upr[side],l=h.lwr[side],k=h.hand[side];
+                if(u<0||l<0||k<0)continue;
+                const auto beforeReach=newW;
+                Reach(h,side,Pos(solved[side]),true,c,s,beforeReach,newW,false,true);
+                const auto beforeHand=newW;newW[k]=solved[side];
+                std::vector<char> moved(n,0);moved[k]=1;Propagate(h,beforeHand,newW,moved,k);
+            }
+            for(int side=0;side<2;++side){
+                const int wb=h.weapon[side];const auto beforeWeapon=newW;
+                newW[wb]=solved[side+2];std::vector<char> moved(n,0);moved[wb]=1;
+                Propagate(h,beforeWeapon,newW,moved,wb);
+            }
+        }
+    }
+    // Head's authored axes follow headset pitch/roll and world-facing yaw.
+    Wrist head{};head.ok=true;head.det=1;
+    const Mat inv=InvAffine(h.bind[h.head]);
+    head.pLocal=Norm(RotOnly({0,0,1},inv));head.kLocal=Norm(RotOnly({0,1,0},inv));
+    Q4 q=QMul(QAxis(1,0,0,r.headPitch*57.2957795f),QAxis(0,0,1,r.headRoll*57.2957795f));
+    V3 forward=QRot(q,{0,0,-1}),up=QRot(q,{0,1,0});
+    float f[3]={forward.x,forward.y,forward.z},v[3]={up.x,up.y,up.z};
+    head.point=ToModel(f,c,s);head.along=ToModel(v,c,s);
+    auto beforeHead=newW;ApplyWrist(newW[h.head],head);
+    std::vector<char> descendants(n,0);descendants[h.head]=1;Propagate(h,beforeHead,newW,descendants,h.head);
+    // Special attachments not parented under the wrist follow its delta too.
+    for(int attach:{h.shieldAttach,h.twoHand})if(attach>=0){
+        int side=attach==h.shieldAttach?1:0;
+        if(attach==h.twoHand&&h.hand[0]>=0&&h.hand[1]>=0&&Len(Sub(Pos(oldW[attach]),Pos(oldW[h.hand[1]])))<Len(Sub(Pos(oldW[attach]),Pos(oldW[h.hand[0]]))))side=1;
+        int k=h.hand[side];if(k<0||!(r.handsValid&(1u<<side)))continue;
+        auto before=newW;newW[attach]=Mul(Mul(oldW[attach],InvAffine(oldW[k])),newW[k]);
+        std::vector<char> moved(n,0);moved[attach]=1;Propagate(h,before,newW,moved,attach);
+    }
+    // Keep the native stride, but not its movement-direction yaw. Walking
+    // backwards must not turn the pelvis/feet away from the VR-facing torso.
+    Mat legsTurn{};legsTurn.m[0]=legsTurn.m[5]=legsTurn.m[10]=legsTurn.m[15]=1;
+    if(h.pelvis>=0){
+        Mat bind=h.bind[h.pelvis],animated=oldW[h.pelvis];
+        bind.m[12]=bind.m[13]=bind.m[14]=animated.m[12]=animated.m[13]=animated.m[14]=0;
+        const Mat delta=Mul(InvAffine(bind),animated);
+        const V3 p=Pos(oldW[h.pelvis]);const float pivot[3]={p.x,p.y,p.z};
+        upperbodyrender::FacingCorrection(atan2f(delta.m[8],delta.m[10]),yaw,pivot,legsTurn.m);
+    }
+    for(int i=0;i<n;++i){
+        // A rigid yaw correction preserves stride articulation and foot height.
+        if(!h.upper[i]&&i!=h.twoHand&&i!=h.shieldAttach&&i!=h.weapon[0]&&i!=h.weapon[1])newW[i]=Mul(oldW[i],legsTurn);
+        for(float x:newW[i].m)if(!std::isfinite(x))return true;
+    }
+    if(SafeWrite(reinterpret_cast<void*>(mats),newW.data(),sizeof(Mat)*n)){
+        Get(self+0x28,&previous);
+        upperbodyskin::Publish(world,previous,newW[0].m,n,h.skel,self);
+    }
+    return true;
+}
+#endif
+
 void Arms(Posed& posed) {
     const uintptr_t self = posed.self;
+
     // The hero is looked for even while nothing is done to him: his SkeletonInstance is what
     // vrcam's facing is found from (HeroTransform), and that is needed before the body can turn.
     if (!g_inActive.load(std::memory_order_relaxed) && !g_trackHero.load()) return;
@@ -3966,6 +4118,7 @@ void Arms(Posed& posed) {
         if (!rig) { note.skeleton = skel; note.forgot = forgot; note.notHeroAt = met ? met : 1; }
         else note.notHeroAt = 0;
     }
+
     if (!rig) {
 #ifdef D2RVR_DEVELOPER
         if (GetTickCount64() < g_partsUntil.load()) {   // room-scale diagnostics: a skeleton not taken as a body, at the hero?
@@ -3993,6 +4146,12 @@ void Arms(Posed& posed) {
     memcpy(eyeGround,g_eyeGround,sizeof eyeGround);eyeGroundOk=g_eyeGroundOk; ReleaseSRWLockShared(&g_inLock);
     const bool active = InputActive(in);
     if (!active && !g_trackHero.load()) return;   // Set changed it since the look above
+
+    if (hero.count <= 0) return;
+#ifdef D2RVR_NATIVE_OPENXR
+    if(PoseRemoteUpper(self,hero,playerPosition))return;
+#endif
+
     // A shapeshift form's rig (an enemy model) is the hero's only while the player is in that form -
     // or, as the game swaps the models, once the rig the state sample still names is no longer
     // drawn: the sample trails the swap, and the form's first frames were the game's own beast.
@@ -4987,6 +5146,28 @@ std::string WeaponItemDiag() {
 #endif
 void WeaponDiag(float out[14]) { for (int i = 0; i < 14; ++i) out[i] = g_diag[i].load(); }
 void PoseYaws(float out[3]) { for (int i = 0; i < 3; ++i) out[i] = g_poseYaw[i].load(); }
+
+#ifdef D2RVR_NATIVE_OPENXR
+bool ReadLocalResolved(upperbody::Resolved*out,uint32_t worldEpoch,int classId){
+    if(!out)return false;*out={};
+    const auto session=gamestate::LocalPlayer();const auto hands=gamestate::HandsKey();
+    const auto generation=HeroGen();const auto now=GetTickCount64();
+    AcquireSRWLockShared(&g_resolvedLock);
+    const bool valid=session&&g_resolvedSession==session&&g_resolvedHands==hands&&
+        g_resolvedEpoch==worldEpoch&&g_resolvedClass==classId&&g_resolvedGeneration==generation&&
+        now-g_resolvedAt<=150&&g_resolved.mask==15;
+    if(valid)*out=g_resolved;
+    ReleaseSRWLockShared(&g_resolvedLock);return valid;
+}
+#endif
+void SetRemoteUpperBodies(const RemoteUpperBody* snapshots, size_t count) {
+    std::vector<RemoteUpperBody> fresh;
+    if (snapshots && count) {
+        count = std::min<size_t>(count, 16);
+        fresh.assign(snapshots, snapshots + count);
+    }
+    AcquireSRWLockExclusive(&g_remoteLock); g_remoteBodies.swap(fresh); g_remoteAt=GetTickCount64(); ReleaseSRWLockExclusive(&g_remoteLock);
+}
 
 void Set(const Input& in) {
     AcquireSRWLockExclusive(&g_inLock);

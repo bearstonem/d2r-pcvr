@@ -5,6 +5,8 @@ namespace framevr::guard {struct Pose;struct Debug;}
 
 namespace combat {
 void Configure(bool enabled);
+void InstallFeedbackObserver();
+void SetHitObserver(void(*fn)(uint32_t,uint32_t));
 // Calling thread only: true restores native hit/block/dodge rolls until reset.
 // Returns the previous value so the caller can restore it.
 bool NativeRolls(bool on);

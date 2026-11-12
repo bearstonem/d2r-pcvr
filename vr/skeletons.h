@@ -2,8 +2,10 @@
 #pragma once
 
 #include <cstdint>
+#include <cstddef>
 #include <string>
 #include "d2r_vr_build.h"
+#include "upper_body_pose.h"
 #ifdef D2RVR_NATIVE_OPENXR
 #include "../steamvr/crossbow_pose.h"
 #include "../steamvr/shield_guard.h"
@@ -145,6 +147,23 @@ std::string WeaponEntityDiag();
 #endif
 
 void Set(const Input& in);
+// Fresh remote hero snapshot. worldPosition is in game renderer units;
+// ECS entity ids are deliberately not exposed as game unit ids.
+struct RemoteUpperBody {
+    upperbody::Resolved resolved{};
+    uint64_t unit = 0;
+    float worldPosition[3] = {};
+    int classId = -1;
+    float hand[2][3] = {};       // head-relative metres, x right/y up/z back
+    float rot[2][4] = {};        // x,y,z,w
+    uint32_t handsValid = 0;
+    float userHeadM = 1.7f, headPitch = 0, headRoll = 0, yawInModel = 0, worldYaw = 0;
+};
+void SetRemoteUpperBodies(const RemoteUpperBody* snapshots, size_t count);
+#ifdef D2RVR_NATIVE_OPENXR
+bool ReadLocalResolved(upperbody::Resolved* out, uint32_t worldEpoch, int classId);
+#endif
+
 #ifdef D2RVR_NATIVE_OPENXR
 // Copied from the render/input thread; skeleton workers never call OpenXR or
 // take the transport mutex. Invalid/stale input restores native animation.

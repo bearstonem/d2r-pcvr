@@ -17,6 +17,8 @@
 #include "spells.h"
 #include "interactionstate.h"
 #include "melee.h"
+#include "../steamvr/server_target_scan.h"
+#include <D2RLPlugin/reimplementation_exports.h>
 #include "melee_weapon.h"
 #include "breakables.h"
 #include "wall_cells.h"
@@ -68,6 +70,8 @@ const D2RL::PluginContext* context=nullptr;const D2RL::ThreadService* threads=nu
 std::atomic<bool> ready{false};bool targetIn=false,lookupIn=false,rangeIn=false,flagsIn=false;
 struct Server {uintptr_t game=0;uint64_t session=0;uint32_t player=0;};
 std::mutex serverMutex;Server server;
+std::atomic<bool> targetReaderReady{false};
+D2RL::Reimplementations::GetLevelIdFromUnitFn targetLevel=nullptr;
 // skill: a melee-skill strike cast (strike_skills.h) is running for this contact:
 // every native target read and the first hit check of the invocation belong to it.
 struct Contact {uintptr_t game=0,attacker=0,defender=0;bool accepted=false,smite=false,resolved=false,skill=false;};
@@ -1722,6 +1726,41 @@ bool HirelingOverlay(uint32_t unitId,int overlay) {
     reinterpret_cast<void(*)(uintptr_t,int,int)>(d2rsig::Addr(SetOverlayRva))(unit,overlay,0);
     return true;
 }
+void InstallTargetReader() {
+    if(targetReaderReady.load())return;
+    if(!d2rsig::Check(RelationRva,RelationSig,sizeof RelationSig)||
+       !d2rsig::Check(LineRva,LineSig,sizeof LineSig)||
+       !d2rsig::Check(0x4925fe,HashSig,sizeof HashSig))return;
+    const auto core=GetModuleHandleW(L"D2RCore.dll");
+    targetLevel=core?reinterpret_cast<D2RL::Reimplementations::GetLevelIdFromUnitFn>(
+        GetProcAddress(core,MAKEINTRESOURCEA(D2RL::Reimplementations::GetLevelIdFromUnitInfo.ordinal))):nullptr;
+    if(!targetLevel)return;
+    // Lookup is strictly pass-through; ObserveServer only copies identity.
+    // Share its trampoline with melee, but do not enable combat on desktop.
+    if(!lookupIn)lookupIn=d2rsig::Hook(LookupRva,LookupSig,sizeof LookupSig,
+        reinterpret_cast<void*>(&Lookup),reinterpret_cast<void**>(&originalLookup));
+    if(lookupIn){targetReaderReady=true;framevr::logging::Write("PCVR targets: read-only host lookup observer ready");}
+}
+bool PlayerTargets(uint32_t playerId,targetlock::Snapshot& out) {
+    out={};
+    if(!targetReaderReady.load()||!originalLookup||!targetLevel||!playerId)return false;
+    Server local;{std::lock_guard lock(serverMutex);local=server;}
+    uint32_t own=0;uintptr_t back=0;uint32_t header[3]{};
+    if(!local.game||!local.session||local.session!=gamestate::LocalPlayer()||
+       !combat::LocalPlayerId(own)||own!=local.player)return false;
+    const auto self=originalLookup(local.game,0,own);
+    if(!self||!Read(self,header)||header[0]!=0||header[2]!=own||!Read(self+0xd8,back)||back!=local.game)return false;
+    out.count=framevr::servertarget::Scan(local.game,playerId,out.targets,framevr::targetcone::MaxTargets,
+        framevr::aimreach::CornerCells+4,out.heroX,out.heroY,
+        [](uintptr_t a,void* b,size_t n){return framevr::ReadMemory(b,reinterpret_cast<const void*>(a),n);},
+        [](uintptr_t g,int t,uint32_t id){return originalLookup(g,t,id);},
+        [](uintptr_t g,uintptr_t viewer,uintptr_t monster){return reinterpret_cast<int(*)(uintptr_t,uintptr_t,uintptr_t)>(d2rsig::Addr(RelationRva))(g,viewer,monster);},
+        [](uintptr_t viewer,uintptr_t monster,int mask){return reinterpret_cast<int(*)(uintptr_t,uintptr_t,int)>(d2rsig::Addr(LineRva))(viewer,monster,mask);},
+        [](uintptr_t unit){return targetLevel(reinterpret_cast<const void*>(unit));});
+    if(out.count<0){out={};return false;}
+    out.at=GetTickCount64();return true;
+}
+
 void Install() {
     meleeweapon::Install();
     breakables::Install();
