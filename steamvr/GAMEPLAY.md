@@ -452,9 +452,9 @@ distance** is changed. The handheld quest log keeps its left-grip placement.
 
 The game's cinematics (the logos and the intro, the act videos, the ending, and
 the main menu's Cinematics) play on a flat screen in the world: placed straight
-ahead at eye height as one starts, 3 m away and 12 m wide (about 127 degrees
-across, past the edges of the view: a front-row seat; it was 3 m, about 53
-degrees, until the owner's 2026-11-12 "four times as large"), with the film's own 16:9 shape, black around it, and still while you
+ahead at eye height as one starts, 5 m away and 6 m wide (about 62 degrees
+across, the whole film in view; the owner tried 12 m at 3 m on 2026-11-12 and
+found it too big and too close), with the film's own 16:9 shape, black around it, and still while you
 look round. Both eyes see the same picture on it, so it stands at its distance
 like a real screen. The game's sound plays as it does on the desktop. F11 places
 the screen in front of you again. Hold the game's skip button (or press it, as
