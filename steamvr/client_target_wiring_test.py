@@ -9,7 +9,7 @@ class ClientTargetWiring(unittest.TestCase):
         desktop = text[text.index('bool StartDesktop('):text.index('} // namespace', text.index('bool StartDesktop('))]
         self.assertIn('melee::InstallTargetReader();', desktop)
         self.assertNotIn('melee::Install();', desktop)
-        tick = text[text.index('// Health has its own lifecycle'):text.index('if(pcvrdesktop::Enabled()){')]
+        tick = text[text.index('// Target reporting stays active'):text.index('if(pcvrdesktop::Enabled()){')]
         self.assertIn('targetlock::TickNetwork(', tick)
         self.assertIn('targetlock::Stop();', text)
 
