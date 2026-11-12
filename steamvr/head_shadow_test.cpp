@@ -1,8 +1,9 @@
 // Head shadow (steamvr/head_shadow.h): the pose and eye handshake (when the head is kept, the eye's near clip, the
-// hold), the state line, the cut by head pitch, the head bones' reach.
+// hold), the near's ease from pass to pass, the state line, the cut by head pitch, the head bones' reach.
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <limits>
 #include "head_shadow.h"
 
@@ -57,12 +58,103 @@ int main() {
         Check(h.Pose(false, 1001 + hs::CutLiveMs) == hs::Why::NoCut, "past it: shrunk");
         Check(h.Pose(false, 990) == hs::Why::Kept, "a pose thread that read the clock just before the eye's stamp: the cut counts as live");
     }
-    {   // the pitch moves the cut down: the eye's own lower cut wins over the hold (the hold only covers a missing raise)
+    {   // the pitch moves the cut down: the eye's own lower cut wins over the hold (the hold only covers a missing raise),
+        // reached at most 15 % a pass (a cut a few passes deeper only hides more); at the cut all the way
         hs::Handshake h;
         h.Eye(base, true, hs::UpCm, upm, 1000);
         h.Pose(false, 1005);
-        const auto e = h.Eye(base, true, hs::DownCm, upm, 1016);
-        Check(e.atCut && !e.held && Near(e.nearZ, std::max(base, hs::RaisedNear(base, hs::DownCm, upm))), "looking down: the down cut, not the held up cut");
+        const float down = std::max(base, hs::RaisedNear(base, hs::DownCm, upm));
+        float last = hs::RaisedNear(base, hs::UpCm, upm);
+        bool atCut = true, neverHeld = true, smooth = true, reached = false;
+        for (uint64_t t = 1016; t < 1400; t += 11) {
+            const auto e = h.Eye(base, true, hs::DownCm, upm, t);
+            h.Pose(false, t + 5);
+            atCut = atCut && e.atCut; neverHeld = neverHeld && !e.held;
+            smooth = smooth && e.nearZ <= last && e.nearZ >= last / hs::NearEase::StepRatio * .9999f;
+            reached = reached || Near(e.nearZ, down);
+            last = e.nearZ;
+        }
+        Check(atCut && neverHeld && smooth && reached, "looking down: down to the down cut, 15 % a pass at most, never the held up cut");
+    }
+    for (int eyeFirst = 0; eyeFirst < 2; ++eyeFirst) {   // the cut live, then a shapeshift begun: whichever thread sees it
+        // first (the other three passes later), a kept head never meets a pass short of the cut, and the near then eases
+        // back down to [camera] near
+        hs::Handshake h;
+        uint64_t t = 1000;
+        for (int i = 0; i < 20; ++i, t += 11) { h.Eye(base, true, hs::LevelCm, upm, t); h.Pose(false, t + 5); }
+        uint64_t lastKept = t - 11 + 5;
+        float last = cutNear;
+        bool safe = true, shrunk = false, released = false, smooth = true;
+        for (int i = 0; i < 80; ++i, t += 11) {
+            const bool eyeSees = eyeFirst || i >= 3, poseSees = !eyeFirst || i >= 3;
+            const auto e = h.Eye(base, !eyeSees, hs::LevelCm, upm, t);
+            if (t <= lastKept + hs::CutLiveMs) safe = safe && e.nearZ >= cutNear * .9999f;
+            smooth = smooth && e.nearZ >= last / hs::NearEase::StepRatio * .9999f;
+            last = e.nearZ;
+            const hs::Why w = h.Pose(poseSees, t + 5);
+            if (w == hs::Why::Kept) lastKept = t + 5;
+            shrunk = shrunk || w == hs::Why::Form;
+            released = released || Near(e.nearZ, base);
+        }
+        Check(safe, eyeFirst ? "a form begun, the eye first: the cut held while poses still kept the head"
+                             : "a form begun, the pose first: the cut held for the last kept pose");
+        Check(shrunk && released && smooth, "then the form's shrink, and the near down to [camera] near 15 % a pass");
+    }
+    for (const float configured : {.05f, .2f}) {   // the cut switched on (a form ended, F4): the near eases up to the cut
+        // 15 % a pass; the pose keeps the head only once it is there, so no kept head is drawn short of the cut.
+        // .2: [camera] near as installed; .05: the least VrProjInner takes, ten times short of the cut
+        hs::Handshake h;
+        const float cut = hs::RaisedNear(configured, hs::LevelCm, upm);
+        uint64_t t = 1000;
+        for (int i = 0; i < 5; ++i, t += 11) { h.Eye(configured, false, hs::LevelCm, upm, t); h.Pose(true, t + 5); }
+        float last = configured;
+        int shortPasses = 0;
+        bool kept = false, keptShort = false, smooth = true;
+        for (int i = 0; i < 40; ++i, t += 11) {
+            const auto e = h.Eye(configured, true, hs::LevelCm, upm, t);
+            smooth = smooth && e.nearZ <= last * hs::NearEase::StepRatio * 1.0001f;
+            keptShort = keptShort || (kept && e.nearZ < cut * .9999f);
+            if (!e.atCut) ++shortPasses;
+            last = e.nearZ;
+            kept = h.Pose(false, t + 5) == hs::Why::Kept;
+        }
+        const int expected = int(std::ceil(std::log(cut / configured) / std::log(hs::NearEase::StepRatio)));
+        Check(smooth && std::abs(shortPasses - expected) <= 1, "switched on: up to the cut 15 % a pass");
+        Check(kept && !keptShort, "the head kept only once the near stands at the cut");
+    }
+    for (const float configured : {.05f, .2f}) {   // a head pitching at 300 deg/s, 90 passes a second (3.3 deg a pass), up
+        // and back down: the cut moves less than the ease's step a pass, so nothing is eased and no pass jumps
+        hs::Handshake h;
+        hs::NearWatch watch;
+        uint64_t t = 1000;
+        bool eased = false, atCut = true;
+        int jumps = 0;
+        for (int dir = 1; dir >= -1; dir -= 2)
+            for (float p = -90.f * dir; p * dir <= 90; p += dir * 300.f / 90.f, t += 11) {
+                const auto e = h.Eye(configured, true, hs::PitchCut(p), upm, t);
+                h.Pose(false, t + 5);
+                eased = eased || e.eased; atCut = atCut && e.atCut;
+                jumps += watch.Pass(e.nearZ, t) ? 1 : 0;
+            }
+        Check(!eased && atCut && jumps == 0, "pitch alone: never eased, always at the cut, no jump");
+    }
+    {   // NearEase: 15 % a pass either way, up at once when free; the first pass and one after a gap take what they want
+        hs::NearEase e;
+        Check(Near(e.Step(.05f, 1000, false), .05f), "the first pass: as wanted");
+        Check(Near(e.Step(.526f, 1011, false), .05f * hs::NearEase::StepRatio), "up 15 % a pass");
+        Check(Near(e.Step(.526f, 1022, true), .526f), "up at once when free (a kept head needs the cut)");
+        Check(Near(e.Step(.05f, 1033, true), .526f / hs::NearEase::StepRatio), "down 15 % a pass, free or not");
+        Check(Near(e.Step(.05f, 1033 + hs::NearEase::GapMs + 1, false), .05f), "after a gap (a load, a menu): as wanted");
+        Check(std::isnan(e.Step(nan, 2000, false)) && Near(e.Step(.3f, 2011, false), .3f), "a bad near passes through and starts afresh");
+    }
+    {   // NearWatch: a jump past the ease's step between two passes; a gap is no jump
+        hs::NearWatch w;
+        Check(!w.Pass(.05f, 1000) && !w.Pass(.055f, 1011) && w.jumps == 0, "small steps: no jump");
+        Check(w.Pass(.526f, 1022) && w.jumps == 1 && Near(w.from, .055f) && Near(w.to, .526f), "the near up ten times at once: a jump, with its two nears");
+        Check(w.Pass(.2f, 1033) && w.jumps == 2 && Near(w.from, .055f), "a smaller jump after it: counted, the largest kept");
+        Check(!w.Pass(.05f, 1033 + hs::NearEase::GapMs + 1), "after a gap: not a jump");
+        w.Take();
+        Check(w.jumps == 0 && w.from == 0 && w.to == 0, "taken: counted afresh");
     }
     {   // [camera] near past the cut: kept, and still counts as the cut
         hs::Handshake h;
@@ -88,7 +180,9 @@ int main() {
         Check(hs::CutLiveMs >= 100 && hs::CutLiveMs <= 1000, "the hold spans several frames and stays short");
     }
     {   // The tuned values: level, up and down, and the span
-        Check(hs::LevelCm == 11 && hs::UpCm == 13 && hs::DownCm == 3, "the headset-tuned cuts: 11 cm level, 13 up, 3 down");
+        Check(hs::LevelCm == 11 && hs::UpCm == 22 && hs::DownCm == 3, "the headset-tuned cuts: 11 cm level, 22 up (13 showed the helm from inside), 3 down");
+        Check(hs::CleanCut(26, hs::UpCm) == 26 && hs::CleanCut(99, hs::UpCm) == hs::MaxCutCm && hs::CleanCut(-4, hs::UpCm) == 0 &&
+              hs::CleanCut(nan, hs::UpCm) == hs::UpCm && hs::CleanCut(inf, hs::UpCm) == hs::UpCm, "an ini cut: kept within 0..40 cm, a non-number the default");
         Check(hs::PitchSpanDeg > 0 && hs::PitchSpanDeg < 90, "the span is a real head pitch, short of straight up");
         Check(hs::PitchCut(0) == hs::LevelCm && hs::PitchCut(90) == hs::UpCm && hs::PitchCut(-90) == hs::DownCm, "the defaults: level, straight up, straight down");
     }

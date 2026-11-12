@@ -148,6 +148,8 @@ constexpr const char* CartouchePath="M170 4.5L176.5 15.5H163.5Z M166.5 11.5Q170 
 constexpr const char* SigilOuter="M3 28a25 25 0 1 0 50 0a25 25 0 1 0 -50 0z M28 9.5L44 37.5H12Z";
 constexpr const char* SigilThin="M8.5 28a19.5 19.5 0 1 0 39 0a19.5 19.5 0 1 0 -39 0z";
 constexpr const char* SigilMid="M19.5 29Q28 21.5 36.5 29Q28 36.5 19.5 29Z M28 1V5 M28 51V55 M1 28H5 M51 28H55 M8.9 8.9L11.8 11.8 M47.1 8.9L44.2 11.8 M8.9 47.1L11.8 44.2 M47.1 47.1L44.2 44.2";
+// A person in a T cross, our own drawing, one closed outline in a 100 x 100 box: over the head, down the right arm, leg and foot, then the left.
+constexpr const char* TCrossPath="M46.6 14.8A7.3 7.3 0 1 1 53.4 14.8V18.5C54 20.5 56.5 21.8 60 22.2L93 24C96.5 24.2 98.5 25.2 98.5 26.8C98.5 28.4 96.5 29.4 93 29.4L64 30.2C62.2 30.3 61.5 31.4 61.4 33L60.4 49C60.3 52 60.8 54.5 60.8 58L59.8 92.5L63.2 95.8C64 97 63.2 98 61.6 98L54.5 98C53.2 98 52.7 97.2 52.6 96L51.2 62C51.1 60.5 50.6 60 50 60C49.4 60 48.9 60.5 48.8 62L47.4 96C47.3 97.2 46.8 98 45.5 98L38.4 98C36.8 98 36 97 36.8 95.8L40.2 92.5L39.2 58C39.2 54.5 39.7 52 39.6 49L38.6 33C38.5 31.4 37.8 30.3 36 30.2L7 29.4C3.5 29.4 1.5 28.4 1.5 26.8C1.5 25.2 3.5 24.2 7 24L40 22.2C43.5 21.8 46 20.5 46.6 18.5Z";
 
 // A small SVG path-data reader (M L H V C S Q T A Z, absolute and relative)
 // that feeds a Direct2D geometry sink.
@@ -281,7 +283,8 @@ struct TextStyleSpec { const wchar_t* family; DWRITE_FONT_WEIGHT weight; float e
 constexpr TextStyleSpec StyleSpecs[]={
     {L"Cinzel",DWRITE_FONT_WEIGHT_BOLD,.06f},{L"Cinzel",DWRITE_FONT_WEIGHT_BOLD,.10f},{L"Cinzel",DWRITE_FONT_WEIGHT_BOLD,.02f},
     {L"Alegreya Sans",DWRITE_FONT_WEIGHT_MEDIUM,0},{L"Alegreya Sans",DWRITE_FONT_WEIGHT_MEDIUM,0},{L"Alegreya Sans",DWRITE_FONT_WEIGHT_MEDIUM,0},
-    {L"Alegreya Sans",DWRITE_FONT_WEIGHT_MEDIUM,0},{L"Alegreya Sans",DWRITE_FONT_WEIGHT_MEDIUM,0},{L"Alegreya Sans",DWRITE_FONT_WEIGHT_BOLD,0}};
+    {L"Alegreya Sans",DWRITE_FONT_WEIGHT_MEDIUM,0},{L"Alegreya Sans",DWRITE_FONT_WEIGHT_MEDIUM,0},{L"Alegreya Sans",DWRITE_FONT_WEIGHT_BOLD,0},
+    {L"Cinzel",DWRITE_FONT_WEIGHT_BOLD,.02f}};
 static_assert(sizeof StyleSpecs/sizeof StyleSpecs[0]==size_t(TextStyle::Count),"one spec per text style");
 D2D1_RECT_F R(RectF r){return {r.x,r.y,r.x+r.w,r.y+r.h};}
 }
@@ -317,7 +320,7 @@ struct Painter::Impl {
     Com<ID2D1Bitmap> background;
     struct IconGeometry { const IconLayer* layer; Com<ID2D1PathGeometry> geometry; };
     std::vector<IconGeometry> icons[size_t(Icon::Count)];
-    Com<ID2D1PathGeometry> cartouche,sigilOuter,sigilThin,sigilMid;
+    Com<ID2D1PathGeometry> cartouche,sigilOuter,sigilThin,sigilMid,tCross;
     std::unordered_map<std::string,Com<IDWriteTextLayout>> layouts;
     std::string titleKey;std::vector<Com<ID2D1Geometry>> titleRuns;   // the page title's glyph outlines
     bool ok=false,drawing=false;
@@ -389,8 +392,8 @@ struct Painter::Impl {
                 icons[i].push_back({&layer,std::move(g)});
             }
         }
-        cartouche=Svg(CartouchePath,false);sigilOuter=Svg(SigilOuter,false);sigilThin=Svg(SigilThin,false);sigilMid=Svg(SigilMid,false);
-        if(!cartouche||!sigilOuter||!sigilThin||!sigilMid){error="ornament path failed";return false;}
+        cartouche=Svg(CartouchePath,false);sigilOuter=Svg(SigilOuter,false);sigilThin=Svg(SigilThin,false);sigilMid=Svg(SigilMid,false);tCross=Svg(TCrossPath,true);
+        if(!cartouche||!sigilOuter||!sigilThin||!sigilMid||!tCross){error="ornament path failed";return false;}
         return true;
     }
     bool CreateTarget(){
@@ -729,7 +732,7 @@ Painter::~Painter(){
     auto& i=*impl;
     i.layouts.clear();i.shades.clear();i.titleRuns.clear();
     for(auto& list:i.icons)list.clear();
-    i.cartouche.Reset();i.sigilOuter.Reset();i.sigilThin.Reset();i.sigilMid.Reset();
+    i.cartouche.Reset();i.sigilOuter.Reset();i.sigilThin.Reset();i.sigilMid.Reset();i.tCross.Reset();
     i.background.Reset();i.crimson.Reset();i.bronzeFill.Reset();i.plate.Reset();
     i.roundJoin.Reset();i.roundCap.Reset();i.dashed.Reset();i.squareCap.Reset();
     i.layer.Reset();i.stoneBrush.Reset();i.stone.Reset();i.solid.Reset();i.rt.Reset();i.target.Reset();i.wic.Reset();i.d2d.Reset();
@@ -869,8 +872,8 @@ void Painter::Socket(RectF r,std::string_view utf8,ControlState s,Icon icon){
     i.Plate(d,s.chosen,off,s.pressed&&!off);
     const uint32_t color=off?(s.chosen?LockedSelText:Rgb(Color::Dim)):Rgb(Color::Text);
     const TextStyle style=s.chosen&&!off?TextStyle::Strong:TextStyle::Value;
-    const Icon lead=s.locked&&s.chosen?Icon::Padlock:icon;
     const RectF box{d.left,d.top,d.right-d.left,d.bottom-d.top-2};
+    const Icon lead=s.locked&&s.chosen?(utf8.empty()||ChipPadlockFits(i.Width(utf8,style),box.w)?Icon::Padlock:Icon::None):icon;
     if(lead!=Icon::None){
         const float is=lead==Icon::Padlock?24.f:32.f,gap=lead==Icon::Padlock?6.f:10.f,tw=utf8.empty()?0:i.Width(utf8,style);
         const float total=is+(utf8.empty()?0:gap+tw);float x=box.x+(box.w-total)/2;
@@ -1003,7 +1006,16 @@ void Painter::Button(RectF r,std::string_view utf8,Icon icon,ControlState s,Plat
     i.Finish(d,r,s);
 }
 void Painter::IconAt(Icon icon,RectF r,Color c,float alpha){auto& i=*impl;if(i.drawing)i.DrawIcon(icon,r,Rgb(c),alpha);}
-void Painter::Tab(RectF r,Icon icon,std::string_view name,ControlState s){
+void Painter::TCrossFigure(RectF r,Color c){
+    auto& i=*impl;if(!i.drawing)return;
+    D2D1_MATRIX_3X2_F old;i.rt->GetTransform(&old);
+    const float s=std::min(r.w,r.h)/100.f;
+    i.rt->SetTransform(D2D1::Matrix3x2F::Scale(s,s)*D2D1::Matrix3x2F::Translation(r.x+(r.w-100*s)/2,r.y+(r.h-100*s)/2)**D2D1::Matrix3x2F::ReinterpretBaseType(&old));
+    i.rt->FillGeometry(i.tCross,i.Solid(Rgb(c),.14f));
+    i.rt->DrawGeometry(i.tCross,i.Solid(Rgb(c)),1.5f,i.roundJoin);
+    i.rt->SetTransform(old);
+}
+void Painter::Tab(RectF r,Icon icon,std::string_view name,ControlState s,int level){
     auto& i=*impl;if(!i.drawing)return;
     D2D1_RECT_F d=R(r);
     if(s.chosen){
@@ -1017,13 +1029,43 @@ void Painter::Tab(RectF r,Icon icon,std::string_view name,ControlState s){
         i.rt->FillRectangle({d.right-8,d.top,d.right,d.bottom},i.Token(Color::Slab));
     }
     if(s.pressed)i.rt->FillRectangle({d.left,d.top,d.right,d.top+6},i.Solid(0,.55f));
+    // A page under its group: the tree line from the 12 px gap above down through the row, ending in a diamond at the last page.
+    const float in=level>0?22.f:0.f,is=level>0?36.f:40.f;
+    if(level>0){
+        const float x=d.left+21,cy=(d.top+d.bottom)/2;
+        i.rt->FillRectangle({x-1,d.top-12,x+1,level==2?cy:d.bottom},i.Token(Color::Bronze));
+        if(level==2)i.FillPolygon({{x,cy-5},{x+5,cy},{x,cy+5},{x-5,cy}},i.Token(Color::Bronze));
+    }
     const bool off=s.disabled||s.locked;
     const uint32_t iconColor=off?Rgb(Color::EdgeOff):s.chosen?Rgb(Color::Gold):s.pointed?Rgb(Color::Quiet):TabIcon;
-    i.DrawIcon(icon,{d.left+16,d.top+(r.h-40)/2,40,40},iconColor);
-    if(s.changed)i.DrawIcon(Icon::Changed,{d.left+40,d.top+6,28,28},Rgb(Color::Changed));
+    i.DrawIcon(icon,{d.left+16+in,d.top+(r.h-is)/2,is,is},iconColor);
+    if(s.changed)i.DrawIcon(Icon::Changed,{d.left+40+in,d.top+6,28,28},Rgb(Color::Changed));
     const uint32_t color=off?Rgb(Color::Dim):s.chosen?Rgb(Color::GoldHi):s.pointed?Rgb(Color::Text):Rgb(Color::Quiet);
-    i.DrawText(name,s.chosen?TextStyle::Strong:TextStyle::Label,{d.left+70,d.top,d.right-d.left-76,r.h},color,Align::Leading,false,34);
+    const TextStyle style=s.chosen?TextStyle::Strong:TextStyle::Label;
+    const float room=d.right-d.left-76-in;
+    float size=level>0?32.f:34.f;   // a page under its group: one size down the column, close to the group's 28 px
+    if(level>0)while(size>30&&i.Width(name,style,size)>room)--size;   // a longer name steps down, to 30 px at most (1.1 deg)
+    i.DrawText(name,style,{d.left+70+in,d.top,room,r.h},color,Align::Leading,false,size);
     if(s.pointed)i.Ring(d,off);
+}
+void Painter::GroupTab(RectF r,Icon icon,std::string_view name,ControlState s){
+    auto& i=*impl;if(!i.drawing)return;
+    D2D1_RECT_F d=R(r);
+    if(s.pointed){
+        auto slab=D2D1::RoundedRect(d,8,8);i.rt->FillRoundedRectangle(slab,i.Token(Color::Slab));
+        i.rt->FillRectangle({d.right-8,d.top,d.right,d.bottom},i.Token(Color::Slab));
+    }else if(s.chosen){   // open: the slab fading out to the right
+        auto open=i.Linear({d.left,0},{d.right,0},{{0,Hex(Rgb(Color::Slab),.75f)},{1,Hex(Rgb(Color::Slab),0)}});
+        i.rt->FillRectangle(d,open);
+    }
+    if(s.chosen)i.rt->FillRectangle({d.left,d.bottom-2,d.right,d.bottom},i.Token(Color::FrameA));   // a dark rule over its pages
+    if(s.pressed)i.rt->FillRectangle({d.left,d.top,d.right,d.top+6},i.Solid(0,.55f));
+    i.DrawIcon(icon,{d.left+16,d.top+(r.h-40)/2,40,40},s.chosen?Rgb(Color::Gold):s.pointed?Rgb(Color::Quiet):Rgb(Color::Bronze));
+    if(s.changed)i.DrawIcon(Icon::Changed,{d.left+30,d.top+6,22,22},Rgb(Color::Changed));   // on the icon's corner, clear of the name
+    const uint32_t color=s.chosen?Rgb(Color::GoldHi):s.pointed?Rgb(Color::Text):Rgb(Color::Section);
+    i.DrawText(name,TextStyle::Group,{d.left+62,d.top,d.right-d.left-108,r.h},color,Align::Leading,false);
+    i.DrawIcon(s.chosen?Icon::ChevronDown:Icon::Chevron,{d.right-40,d.top+(r.h-28)/2,28,28},s.chosen?Rgb(Color::Gold):TabIcon);
+    if(s.pointed)i.Ring(d,false);
 }
 void Painter::PageTitle(RectF r,Icon icon,std::string_view title){
     auto& i=*impl;if(!i.drawing)return;
@@ -1157,14 +1199,18 @@ void Painter::Dot(RectF r,float hue,ControlState s){
 // ---- the component sheet (vr-settings-preview --draw-sheet) ----
 namespace {
 constexpr const char* Deg="\xc2\xb0";
-// The rail as on every shot: Presets, then the 11 pages; `current` is chosen.
+// The rail as on Gameplay's pages: Presets, the groups, Gameplay open with its pages;
+// `current` (an Item's view number here, not a View) is chosen.
 void SheetRail(Painter& p,int current,int changed=-1,int pointed=-1){
-    static const std::pair<Icon,const char*> tabs[]={{Icon::Presets,"Presets"},{Icon::Body,"Body"},{Icon::Combat,"Combat"},{Icon::Aim,"Aim"},
-        {Icon::Targets,"Targets"},{Icon::Shield,"Shield"},{Icon::Wrist,"Wrist"},{Icon::Interface,"Interface"},{Icon::Survival,"Survival"},
-        {Icon::World,"World"},{Icon::Haptics,"Vibration"},{Icon::Performance,"Performance"}};
-    for(int k=0;k<12;++k){
-        ControlState s;s.chosen=k==current;s.changed=k==changed;s.pointed=k==pointed;
-        p.Tab({22,30.f+78*k,254,66},tabs[k].first,tabs[k].second,s);
+    struct Item {Icon icon;const char* name;int view,level;};   // level -1: a group row; view -1: none
+    static const Item items[]={{Icon::Presets,"Presets",0,0},{Icon::Combat,"Gameplay",-1,-1},
+        {Icon::Combat,"Combat",2,1},{Icon::Aim,"Targeting",3,1},{Icon::Shield,"Shield",5,1},{Icon::Survival,"Monsters",4,1},{Icon::World,"Physics",6,2},
+        {Icon::Comfort,"Comfort",-1,-1},{Icon::Controls,"Controls",-1,-1},{Icon::Interface,"Interface",-1,-1},{Icon::Performance,"Graphics",-1,-1}};
+    for(int k=0;k<int(std::size(items));++k){
+        const auto& it=items[k];
+        ControlState s;s.chosen=it.view>=0&&it.view==current;s.changed=it.view>=0&&it.view==changed;s.pointed=it.view>=0&&it.view==pointed;
+        if(it.level<0){s.chosen=k==1;s.changed=k==1&&changed>=2&&changed<=6;p.GroupTab({22,30.f+78*k,254,66},it.icon,it.name,s);}
+        else p.Tab({22,30.f+78*k,254,66},it.icon,it.name,s,it.level);
     }
 }
 void SheetBand(Painter& p,Icon icon,const char* title,int open=-1,int pointed=-1){
@@ -1185,7 +1231,7 @@ void SheetFooter(Painter& p,int changes,bool pointClose=false){
 }
 // pages/04-aim.png
 void SheetAim(Painter& p){
-    p.Panel();SheetRail(p,3);SheetBand(p,Icon::Aim,"Aim");
+    p.Panel();SheetRail(p,3);SheetBand(p,Icon::Aim,"Targeting");
     p.SectionHeading({348,76,880,30},"Spells and skills");
     const float L=328,Wd=920;
     // row 1: a cycler (Skills go to the aimed monster)
@@ -1313,7 +1359,7 @@ void SheetIcons(Painter& p){
     // labels: plain + changed, warn sub, locked sub, comfort sub
     ControlState ch;ch.changed=true;ControlState lk;lk.locked=true;
     p.Row({330,ty+70,600,80},true);p.Label({350,ty+70,580,80},"Shield roll","",ch);
-    p.Row({330,ty+150,600,84},false);p.Label({350,ty+150,580,84},"Spell glow on hands","May show through walls and weapons",{},Icon::Warning,Color::Warn);
+    p.Row({330,ty+150,600,84},false);p.Label({350,ty+150,580,84},"Frame generation","Experimental: on reloads VR",{},Icon::Warning,Color::Warn);
     p.Row({330,ty+234,600,84},false);p.Label({350,ty+234,580,84},"Aim with your view","Needs Monster outline (Targets) or 2 more",lk);
     p.Pill({950,ty+90,280,44},"Recommended: On",Color::Quiet);p.Pill({950,ty+150,140,44},"PR only",Color::Magic);
     p.Pill({950,ty+210,280,50},"Mono audio is on",Color::Changed,Icon::Warning);
@@ -1351,7 +1397,7 @@ Sheet DrawSheet(int repaints){
         for(int y=0;y<CanvasHeight;++y)
             std::memcpy(sheet.rgba.data()+(size_t(oy+y)*sheet.width+ox)*4,rgba.data()+size_t(y)*CanvasWidth*4,size_t(CanvasWidth)*4);
     }
-    // a full menu repaint: the Aim page, background cached, text layouts warm
+    // a full menu repaint: the Targeting page, background cached, text layouts warm
     const auto loop=Clock::now();
     for(int k=0;k<repaints;++k){p.Begin();SheetAim(p);if(p.End().empty()){sheet.error=p.Error();return sheet;}}
     sheet.repaintMs=repaints>0?std::chrono::duration<double,std::milli>(Clock::now()-loop).count()/repaints:0;

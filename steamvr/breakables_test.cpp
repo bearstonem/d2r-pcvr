@@ -12,7 +12,7 @@ std::array<uint8_t,0x168> row{};
 uintptr_t objectData=0;
 bool signatures=false,hookOk=false,wall=false,live=true,allowedNow=true,accept=true,kill=false,removeOther=false,weaponOk=true;
 unsigned checks=0,installs=0,operations=0,kicks=0,lineCalls=0;
-int pulses[2]{};
+int pulses[2]{},surfaces[2]{};   // taps, and how many were told they struck a container
 uint64_t failGuard=0;
 uintptr_t G(){return reinterpret_cast<uintptr_t>(game.data());}
 uintptr_t P(){return reinterpret_cast<uintptr_t>(player.data());}
@@ -60,7 +60,7 @@ void Reset(uint8_t operation=3) {
     Put(G(),0x546*8,O());
     row[0xe8]=row[0x85]=1;row[0x15e]=operation;
     Put(reinterpret_cast<uintptr_t>(row.data()),0x90,1);Put(reinterpret_cast<uintptr_t>(row.data()),0x94,1);
-    wall=kill=removeOther=false;live=allowedNow=accept=weaponOk=true;operations=kicks=lineCalls=0;pulses[0]=pulses[1]=0;attempted={};
+    wall=kill=removeOther=false;live=allowedNow=accept=weaponOk=true;operations=kicks=lineCalls=0;pulses[0]=pulses[1]=surfaces[0]=surfaces[1]=0;attempted={};
 }
 void Swing(const Strike& r){Apply(G(),P(),{&r,1},&Allowed);}
 }
@@ -78,7 +78,8 @@ uintptr_t Addr(uint64_t rva) {
 }
 }
 namespace framevr::logging {void Write(const char*){}}
-namespace framevr {void MeleeImpact(int hand){assert(hand==0||hand==1);++pulses[hand];}}
+namespace framevr {void MeleeImpact(int hand){assert(hand==0||hand==1);++pulses[hand];}
+void ImpactSurface(int hand,int surface,uint32_t){assert(hand==0||hand==1);assert(surface==int(haptics::Surface::Container));++surfaces[hand];}}
 namespace melee {
 bool LocalServer(uintptr_t& g,uintptr_t& p){g=G();p=P();return live;}
 uintptr_t ServerUnit(uintptr_t g,int type,uint32_t id){assert(g==G()&&type==2);return id==41?O():id==42?Q():0;}
@@ -98,6 +99,7 @@ int main() {
 
     for(uint8_t op:{3,5,7}) {
         Reset(op);Swing(r);assert(operations==1&&pulses[0]==1&&pulses[1]==0&&kicks==0);
+        assert(surfaces[0]==1&&surfaces[1]==0);   // each tap is told it struck a container (haptic_impact.h)
         Swing(r);assert(operations==1); // already broken / continuing blade contact
     }
     for(uint8_t op:{0,1,2,4,8,15,19,23,25,49,53,68,255}) {
@@ -123,7 +125,7 @@ int main() {
     Swing(r);assert(!operations);r=StrikeAt(); // swinging above a pot does not smash it
     Reset();accept=false;Swing(r);Swing(r);assert(operations==1&&!pulses[0]); // refusal once per stroke
     r.sweep.stroke++;Swing(r);assert(operations==2);r=StrikeAt();
-    Reset();auto left=StrikeAt(1);Swing(left);assert(operations==1&&pulses[1]==1&&!pulses[0]);
+    Reset();auto left=StrikeAt(1);Swing(left);assert(operations==1&&pulses[1]==1&&!pulses[0]&&surfaces[1]==1&&!surfaces[0]);
     Reset();weaponOk=false;Swing(left);assert(!operations);
     Reset();Strike both[]={r,left};Apply(G(),P(),both,&Allowed);assert(operations==1); // no double loot
     Reset();Put(O(),0x158,Q());Swing(r);assert(operations==2&&pulses[0]==2); // one sweep may smash both pots
@@ -140,4 +142,38 @@ int main() {
      std::thread thread([&]{assert(kick()==7);});thread.join();assert(kicks==4);}
     assert(kick()==7&&kicks==5&&!physical.player);
     assert(StartMode(G(),P(),123,8,2,41,3,4)==7&&kicks==6); // ordinary hooked calls forward all arguments
+
+    // Arrow flight tests against breakable containers
+    Reset();
+    ArrowContact contact{};
+    assert(ArrowHit(G(),{48.f,.5f,50.f},{52.f,.5f,50.f},4.f,0.f,1.f,contact));
+    assert(contact.unit==O()&&contact.id==41&&contact.fraction>.5f&&contact.fraction<.6f);
+    assert(!ArrowHit(G(),{48.f,.5f,50.f},{52.f,.5f,50.f},4.f,0.f,.5f,contact)); // stop fraction occludes
+    assert(!ArrowHit(G(),{48.f,3.f,50.f},{52.f,3.f,50.f},4.f,0.f,1.f,contact)); // arrow too high
+    assert(!ArrowHit(G(),{48.f,.5f,55.f},{52.f,.5f,55.f},4.f,0.f,1.f,contact)); // arrow off to the side
+    Reset(0);assert(!ArrowHit(G(),{48.f,.5f,50.f},{52.f,.5f,50.f},4.f,0.f,1.f,contact));
+    Reset(5);assert(ArrowHit(G(),{48.f,.5f,50.f},{52.f,.5f,50.f},4.f,0.f,1.f,contact));
+    assert(OperateArrow(G(),P(),contact.unit,contact.id));
+    assert(operations==1&&kicks==0&&pulses[0]==1);
+    assert(!ArrowHit(G(),{48.f,.5f,50.f},{52.f,.5f,50.f},4.f,0.f,1.f,contact)); // already broken
+    Reset(3);accept=false;
+    assert(ArrowHit(G(),{48.f,.5f,50.f},{52.f,.5f,50.f},4.f,0.f,1.f,contact));
+    assert(!OperateArrow(G(),P(),contact.unit,contact.id));
+
+    // The hero's spell missiles (vr/spell_impacts.cpp): the containers near a point on the grid plane, and one broken
+    // as a weapon breaks it, with no kick and no pulse in a hand.
+    Reset(5);Put(O(),0x158,Q());
+    std::array<Container,4> seen{};
+    assert(Nearby(G(),200,200,10,seen)==2);
+    assert(seen[0].id==41&&seen[0].x==202&&seen[0].z==200&&seen[0].sizeX==1&&seen[0].sizeY==1&&seen[1].id==42);
+    assert(Nearby(G(),200,200,1,seen)==0&&Nearby(G(),200,200,0,seen)==0&&Nearby(G(),200,200,10,{})==0);
+    assert(Nearby(G(),200,200,10,std::span(seen).first(1))==1);
+    assert(OperateMissile(G(),P(),41)&&operations==1&&kicks==0&&!pulses[0]&&!pulses[1]);
+    assert(Nearby(G(),200,200,10,seen)==1&&seen[0].id==42);            // the broken one is no longer listed
+    assert(!OperateMissile(G(),P(),41)&&operations==1);                // nor operated twice
+    assert(!OperateMissile(G(),P(),7)&&!OperateMissile(G(),P(),0)&&!OperateMissile(G(),0,42)&&operations==1);
+    live=false;assert(!OperateMissile(G(),P(),42)&&operations==1);live=true; // not the local hero's game
+    Put(P(),0xc,uint32_t(17));assert(!OperateMissile(G(),P(),42)&&operations==1); // a dead hero breaks nothing
+    Put(P(),0xc,uint32_t(1));accept=false;assert(!OperateMissile(G(),P(),42)&&operations==2); // the game refused
+    Reset(0);assert(Nearby(G(),200,200,10,seen)==0&&!OperateMissile(G(),P(),41)&&!operations); // not a container
 }

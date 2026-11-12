@@ -88,11 +88,12 @@ void ConfigureBlockSound(int sound);
 void ConfigureParrySound(int sound);
 // Owning game thread only. The live, non-hostile hireling nearest a thrown
 // bottle's landing point (world metres, with the rendered player and scale of
-// that frame); true when it landed at the hireling's feet. distance<0: none.
-bool NearHireling(framevr::math::Vec world,framevr::math::Vec player,float unitsPerMetre,float& distance,uint32_t& classId);
+// that frame); true at its feet, or at any distance when mercenary potion autoaim is enabled. distance<0: none.
+bool NearHireling(framevr::math::Vec world,framevr::math::Vec player,float unitsPerMetre,float& distance,uint32_t& classId,bool mercPotionAutoaimEnabled=false);
 // Owning game thread only. The local hireling's life, max life, class and
-// unit id; hint is the last known id (direct lookup). False when none is alive.
-bool HirelingVitals(uint32_t hint,float& health,float& maxHealth,uint32_t& classId,uint32_t& unitId);
+// unit id; hint is the last known id (direct lookup). False when none is alive,
+// with why (if given) saying what stopped it, or null for a walk not due yet.
+bool HirelingVitals(uint32_t hint,float& health,float& maxHealth,uint32_t& classId,uint32_t& unitId,const char** why=nullptr);
 // Owning game thread only, on that exact hireling. Native cosmetic effects
 // synced to the client like the game's own: a state (colour tint) and a
 // one-shot overlay. Setting needs a live hireling; clearing a state also

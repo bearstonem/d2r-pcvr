@@ -1,5 +1,1131 @@
 # VR performance investigations
 
+## Frame generation's wait, November 10
+
+**On for every install since the headset run of November 11**: no key in the
+shipped INI, nothing in VR Settings. It acts only while frame generation makes
+frames on SteamVR with Both eyes. `[render] frame_generation_late_wait=0`
+written into the installed `d2r_pcvr.ini` by hand takes it out, live.
+
+**The run** (SteamVR, headset at 120 Hz, OFXR Bridge 0.2.1 NVIDIA Fast, Both
+eyes, a field fight, switched on live after a minute):
+
+| | before | with the late wait |
+| --- | --- | --- |
+| pairs a second | 55.2 | 59.4 to 59.9 |
+| the runtime's wait, ms a pair | 4.41 | 0.01 to 0.05 |
+| the wait called, ms after the last xrEndFrame | 2.05 | 7.0 to 8.8 |
+| pairs with a cycle of 16 to 17.5 ms | 180 of 552 | 501 to 552 of about 598 |
+| xrEndFrame's submit, ms | 0.96 | 2.0 to 4.9 |
+
+Every pair took the late order; no wait or begin failed. It stepped aside and
+came back by itself around menus and a change to By turns and back, with the
+reason in the log. Two things to look at again: 17 switches within two seconds
+around one menu, and one 396 ms pair as frame generation stopped making
+frames. The owner: "everything worked great". Not tried: 90 Hz (where the
+extra pose latency is larger, up to about 9 ms by the reckoning below),
+Virtual Desktop, FidelityFX.
+
+**Measured, November 10** (SteamVR, headset at 120 Hz, Both eyes, a field
+fight, the pacing lines below). With frame generation off the game held
+59.5 to 60.0 pairs a second: cycles of 16 to 17.5 ms, the runtime's wait 2 to
+4 ms and shorter as the work grew. With frame generation on (NVIDIA Medium or
+Fast, no difference) it ran 53 to 57: the same 12 to 15 ms of work, but a wait
+of 3 to 6 ms on nearly every pair whatever the work, and cycles spread over 16
+to 20 ms. OFXR Bridge's own log for the same session: the game's `xrWaitFrame`
+3.7 ms on average, 99% of it in the bridge's wait for its synthesis.
+
+**What the bridge does** (release 0.2.1). Once it makes frames on SteamVR, a
+thread of its own makes every frame call to SteamVR, one a headset frame, and
+the game's calls are answered by the bridge. The game's `xrWaitFrame` no longer
+sleeps to a display slot. It returns a time and twice the headset's period, and
+then holds the game until the GPU has finished the bridge's last synthesis.
+That synthesis is on the game's own D3D12 queue, behind both eyes of the pair
+before and the optical flow for them. So the hold is the wait for the GPU that
+`[render] defer_gpu_wait=1` took out of the pair's end, back at the next
+pair's start: the game's thread idles 3 to 6 ms while the GPU finishes, then
+does its 12 to 15 ms of work. What keeps the game from running ahead of the
+headset is elsewhere: the bridge's `xrEndFrame` waits until its thread has
+taken the generated frame of the pair before.
+
+**What the key changes.** The hold ends at a fixed moment, when the GPU is
+done, however early the game asks. So the game asks later. A pair with the
+late wait:
+
+1. `Begin` (`steamvr/transport.cpp`) finds the head, the eyes and the hands at
+   once, for the time this pair's `xrWaitFrame` is expected to give: the last
+   wait's time and one period on (`steamvr/late_wait.h`), a headset frame more
+   for each one the game ran over. The frame's input step runs as before.
+2. The first eye is drawn.
+3. Before the pair's first image is taken (`Capture`, at the first eye's
+   present) come `xrWaitFrame` and `xrBeginFrame` (`SettleFrame`). That is
+   about 8 ms after the last `xrEndFrame`; the synthesis was done about 6 ms
+   after it in the session above. If it is not done yet, the bridge holds the
+   game there for the rest, as it did before at the start.
+4. The second eye, then `xrEndFrame` with the time `xrWaitFrame` gave and the
+   eyes' poses as they were drawn.
+
+The calls keep their order on the one thread: one `xrWaitFrame`, one
+`xrBeginFrame`, one `xrEndFrame`. Only the mod's own work moves in front of
+them, which OpenXR allows (the panels' uploads in the input step take their
+images before the frame begins on such a pair, as the first upload of a session
+always has). The poses' time and the frame's time are the same when the game
+keeps its rate, and a headset frame apart when a pair slips; SteamVR turns the
+picture from the pose it was drawn with to the one at display either way, and
+with the bridge's thread up SteamVR is given that thread's own time, not the
+game's.
+
+It is used only on a pair of both eyes, on SteamVR, while the readout says
+frame generation is active, and while the last wait's period was twice the
+session's shortest: the bridge doubles the period only while its thread is up,
+and that thread stops for every frame without the eyes (a menu) and for every
+change of settings. The sign can be wrong, since SteamVR by itself gives a
+late caller a longer period. Then a wait that does sleep to a display slot
+comes after the first eye for a frame, which costs that frame some lag and
+nothing else. Every other frame, and every frame with the key at 0, waits
+first as before. The order is decided when a frame is opened, so it only
+changes between frames.
+
+**What it should give, and cost.** The wait near zero and 60 pairs a second at
+120 Hz whenever the work fits 16.67 ms. The lag: the head is found as early in
+the pair as before, but what is left of the two headset frames after the work
+is now spent in `xrEndFrame`, after the picture is drawn, where it was spent
+before the head was found. That is about 3 to 4 ms more from head to picture at
+120 Hz with 13 ms of work, and up to about 9 ms at 90 Hz (22.2 ms a pair),
+where the game was not short of time in the first place. SteamVR's reprojection
+covers a turn of the head; the hands and the body's place in the room get the
+whole of it.
+
+**Why not the next frame's wait from a second thread.** That was the first
+plan: `xrWaitFrame` for the next frame on a helper thread while this one is
+drawn. On 0.2.1 it cannot work. With the bridge's thread up, two waits are
+outstanding at every `xrEndFrame`, the bridge no longer takes the frame for the
+newest, and no generated frame is made. Without its thread, the second wait
+goes to SteamVR, and the bridge's own second frame inside the game's
+`xrEndFrame` then waits for a frame nobody can begin: the game hangs. (Later
+releases of the bridge fixed that hang; their other changes stalled SteamVR's
+`xrEndFrame` for seconds here, so the mod stays on 0.2.1.)
+
+**Reading a session.** The log says `Frame generation: late wait on: ...` and
+`... off: <why>` when the order changes (a line a second at most, with the
+number of changes since). In the ten-second lines `XR begin ... (wait ...)`
+counts only a wait made there; `pairs by the runtime's wait` counts the wait
+wherever it was made, and a new line says where:
+
+```text
+Frame pacing: the runtime's wait 0.21 ms a pair, called 8.10 ms after the last xrEndFrame | late (after the first eye's draw) on 598 of 600 pairs, its time 0.02 ms from the poses' (mean)
+```
+
+A late wait is inside the `left` pass's time in `vrcam: a pair, ms`. What
+would show it works: nearly all pairs late, the wait's bins in `<1`, `pairs by
+cycle` in `16-17.5`, 60 pairs a second, `XR end ... (submit ...)` longer by
+what the pair has to spare.
+
+## One present a pair, November 10
+
+**Measured once, November 10** (SteamVR, headset at 120 Hz, frame generation
+on, Both eyes, a field fight; switched on live, a 30 s capture before and
+after): the left eye's present (`0x109F4C0` inclusive) 0.73 ms to 0.51 ms, the
+right eye's unchanged at 0.72; the log's `Present` for the left pass about
+0.50 to 0.32 ms. About 0.2 ms a pair. Every ten-second line had N = M = K
+(217, 512, 529), no stall, the picture and the desktop window as before (the
+owner). The fewer guarded reads below are too small to see in a capture.
+
+`present_once` stays **off** as shipped all the same: it changes the window's
+swap chain's function table, which other software (overlays, capture tools)
+also reaches for, and it has run on one PC in one session for 0.2 ms a pair.
+No key in the shipped INI, nothing in VR Settings. To switch it on, write into
+the installed `d2r_pcvr.ini`:
+
+```ini
+[game_patches]
+present_once=1
+```
+
+It goes in between frames and comes out the same way when the key is set back
+to 0; the log says `Frame game patches: present_once applied` (or `refused`
+with the reason, or `off`), and every ten seconds while it is on
+`present_once 10 s: N presents held back (a pair's first pass), M made; K of
+the game's waits for the swap chain left out with them`. In play N, M and K
+should be equal, one each a pair.
+
+**Why.** At 120 Hz a pair is about 16.9 ms of work against a 16.67 ms slot
+(game 2.1, left pass 7.0, right 6.2, XR end 1.2, XR begin 0.4 without its
+wait), so the runtime gives 44 to 51 pairs a second instead of 60. Each eye
+pass ends with the game presenting its picture to the desktop window. The
+headset never sees that present: the eye's picture is copied to the headset's
+swapchain before it, inside ReShade's present handling. Only one of the two
+is of use to the window.
+
+**What a present does here, and what each part is needed for.** The game's
+present (`0x109F4C0`) is only `IDXGISwapChain::Present` on the swap chain
+ReShade gave the game:
+
+| step | who needs it each eye | with `present_once` |
+| --- | --- | --- |
+| ReShade's `present` event, its effects on the back buffer, its `reshade_present` and `finish_present` events | the mod: the fog, sky and HUD effects are the eye's picture, and the eye is copied to the headset at `reshade_present` (`Capture` in `steamvr/transport.cpp`) | unchanged, both passes |
+| The copy itself: on the game's own render queue, executed at once, with its own fence | the headset | unchanged; it is on the queue before the second pass's first command, so the second pass drawing over the same buffer cannot overtake it |
+| The swap chain's real `Present` below ReShade: the window's picture, the flip to the next back buffer, the driver's and the system's present work | the desktop window, once a pair | first pass: answered `S_OK` without presenting; second pass: made |
+| The back buffer's number after it | the game asks the swap chain for it after every present (`0x10FAE65`) and takes its present target by it; ReShade asks for it at every present | not advanced by a held present: game, ReShade and the swap chain all name the same buffer, and the second pass draws into it |
+| The game's wait on the swap chain's frame latency handle, up to a second, before each pass's present target (`0x10F9470`) | DXGI signals it once for each frame presented | the wait that follows a held present is left out, so waits and presents stay one to one |
+
+The render queue's flush, the copy and compute queue flushes and the game's
+own fence ring (three entries, counted by the game, not by the back buffer)
+are before or after the present, not in it, and are untouched.
+
+**How.** No byte of the game's present is changed. ReShade calls the swap
+chain below it through that object's function table; `present_once` gives
+that one object a copy of its table with `Present` replaced
+(`vr/game_patches.cpp`). The replacement answers `S_OK` for the one Present
+that the draw thread makes in a pair's first pass and calls the real one
+every other time. One hook goes into the game, on the function that hands
+out a pass's present target: after a held present it has the game read "no
+frame latency handle" for that one call. Four stretches of the game's code
+are proven first, as for the other patches: the present itself, the test
+that the queue has no other presenter, the call followed by the question to
+the swap chain for its current buffer, and the whole present-target
+function. A game whose bytes differ gets no patch. Switched off, the swap
+chain has its own table back and the hook passes every call through.
+
+**When it does nothing.** By turns, menus, loading screens, the campfire, the
+flat game, a draw inside a pass, and any Present that is not the draw
+thread's in a first pass: all present as the game does. Frame generation
+(OFXR Bridge) works on the headset's swapchains, below OpenXR, and does not
+see the window's presents; the pair is drawn and copied as without it. That
+is read from this mod's side only: the bridge's own code was not read, so
+try it with frame generation on before trusting it there.
+
+**What it changes on the desktop.** The window gets one picture a pair
+instead of two. With the one-eye mirror on (the default) it is the left eye
+as before, since the right pass copies it back before the present; with the
+mirror off the window showed the eyes in turn and now shows the eye drawn
+second only. Overlays that draw at the real Present (Steam's) are drawn once
+a pair.
+
+**Not known.**
+
+- How much it saves. A pass's log line "Present" (0.5 to 0.6 ms) runs from
+  ReShade's present event to the pass's end and holds the mod's copy and the
+  rest of the game's frame as well. The capture puts 0.45 ms a pass of
+  graphics calls under `0x109F4C0`, ReShade's effects included; what is
+  surely the real present is small (DXGI 0.016 ms, the present's system call
+  0.034 ms). The saving is somewhere between 0.05 and 0.45 ms a pair. Measure
+  it: a capture with the key 0 and one with 1, table 5's `0x109F4C0` row and
+  table 4's, left eye against right; and the log's "a pair, ms" line, left
+  Present against right.
+- Whether the swap chain below ReShade is DXGI's own object when an overlay
+  or another add-on wraps it. Any object with a function table works the
+  same way; a table whose first forty entries are not all code is refused.
+- The frame latency handle's exact behaviour is DXGI's and is taken from its
+  documentation: signalled once a presented frame. The ten-second line shows
+  whether the game has one at all.
+
+**Look for** in the headset: nothing should differ; a stutter once a second
+or a frozen picture would mean the wait is not paired as read (switch the
+key off; the pair's log line "longest" shows it). On the desktop window: a
+steady picture of one eye, no black or stale frames, the Steam overlay still
+opening. In the log: equal counts in the ten-second line, and `Frame hitch`
+lines no more often than before.
+
+### Fewer guarded reads on the draw thread
+
+**Counted in the code, not measured.** Capture 11 has the draw thread 0.067 ms
+a pass in `NtReadVirtualMemory`: the mod's guarded reads
+(`steamvr/memory.h`), a system call each. Two places make them in every eye
+pass; both now make fewer, with the same answers.
+
+| reads | before | now |
+| --- | --- | --- |
+| Weak monster bars hidden (the default): each label anchor of an ordinary monster, each pass (`monsterbars::Hide`) | 7 | 3 |
+| the same for a champion or unique / a unit that is no monster | 4 / 1 | 2 / 1 |
+| The game's day and night for the sky, outdoors (`env::Now`), a pair | 12 | 3 |
+
+The monster's fields come in one read per record (unit, monster data, row)
+instead of one per field; nothing is kept between passes or frames, as
+`docs/monster-bars.md` says. Since Monster names (2026-11-11) a unit is
+classified once an eye pass for both of its anchor requests, with every
+choice, and a monster takes one more read (its unit flags, the mercenary
+test): 4 a monster a pass, 1 for a unit that is no monster. The game's light is read once in a draw of the
+game's frame (both passes of a pair) instead of twice in each pass's effects.
+
+Found and left as they are:
+
+- The health panels' draw order reads two fields of each deferred panel a
+  pass (`DrawPanelManager`); the visible byte changes per eye.
+- The depth hook on the frame constants reads four things a call
+  (`vr/dlss_depth.cpp`); the buffers are new each pass.
+- While a sampler capture runs, the render-task hook reads one or two fields
+  for every task the draw thread runs itself: part of a capture's own cost,
+  not of play.
+- `GetAsyncKeyState` and `GetCursorPos` in a pass (0.012 and 0.011 ms) are
+  not this mod's: its own calls are on its timer thread or behind switches
+  that are off in VR. The game or ReShade makes them; not traced further.
+- XR begin (0.4 ms without the wait) is finding the head and eyes and the
+  frame's input step, once a pair already. XR end's "submit" (about 1.0 ms)
+  is `xrEndFrame` itself plus the mod's bookkeeping after it; the layers are
+  built on the stack before it. Nothing clearly avoidable was found in the
+  mod's part; the settings snapshot is copied under a lock some ten times a
+  pair and `BeginEye` works out per eye what is fixed for the pair, both
+  small.
+- `[render] defer_gpu_wait` is 0 by default in `steamvr/vr_settings.h`: a
+  pair then waits for the GPU in XR end ("GPU fence" in the pacing line).
+  Check what the measured sessions had before reading XR end's time.
+
+## Once per pair, November 10
+
+**On for every install since the headset run below**, like the three patches
+of the next section: no key in the shipped INI, nothing in VR Settings. They go
+in at the first frame drawn in the world. To tell a fault from one of them,
+`[game_patches]` with `selection_walk=0`, `shadows_once=0` or `cull_once=0`
+written into the installed `d2r_pcvr.ini` by hand takes it out at the next
+frame (the hooks of the two "once" switches stay in and pass every call
+through).
+
+**Measured, November 10** (SteamVR, headset at 120 Hz so the runtime asks for
+60 pairs a second, Both eyes, a field fight; each switched on live with a 30 s
+capture after it; the scene changed between captures):
+
+| second eye pass, ms | before | after |
+| --- | --- | --- |
+| `selection_walk`: the walk (`0xFB1780`) | 0.055 | 0.001 |
+| `shadows_once`: Shadow Directional Draw Call Collect | 0.94 | 0.01 |
+| `shadows_once`: Directional Shadows | 0.97 | 0.05 |
+| `shadows_once`: Negative Shadows | 0.20 | 0.06 |
+| `cull_once`: the cull kick (`0xD9B4D0`) | 0.23 | 0.004 |
+
+Every second pass kept the first's shadows and, after the first pair, left its
+cull out: no pass fell back in about five minutes. On the clock the second eye
+pass is about 0.9 ms shorter than the first (6.06 against 6.99 ms; 0.4 ms
+apart before), so about half a millisecond a pair: the pass still waits for
+its Depth and Forward tasks. One 278 ms pair was logged as the four shadow
+hooks went in during a fight; at the first frame in the world that falls in
+the load. The owner saw the picture as before. Not tried: interiors, other
+acts, a camera without a look-at point, switching them off again in play.
+
+The mod draws one game frame twice, an eye a time. A capture taken with the
+three patches of the next section in (capture 7 there) shows work in each
+pass that does not depend on the eye. `shadows_once` and `cull_once`
+do that work in the first pass and keep it for the second; `selection_walk`
+removes work that does nothing in either. The two "once" switches act only
+in the second pass of a pair drawn from one game frame. By turns, menus,
+loading screens, the flat game, a pass drawn inside another and a pair whose
+first pass was not seen all run as the game does: `HookDrawGameScreen` tells
+`vr/game_patches.cpp` which draw begins (`EyePass`: first, second, alone) and
+the hooks pass every call through when it is not a pair's second.
+
+### selection_walk: the debug selection tool's walk
+
+At the end of the renderer's shadow update (`0xFB1780`, every eye pass) the
+game builds a view of every drawable entity that is not culled and walks it
+(`0xFA8EE0`). Per entity the walk looks the entity up and asks whether it is
+in the selection tool's hash set (`0xFB0280`), which answers no at once
+because the set is empty: only the tool's own marquee, part of the game's
+debug interface, fills it. The patch writes a five-byte no-operation over the
+call at RVA `0xFB1843`.
+
+Verified in the code: nothing the walk returns is read (the registers it may
+change are loaded anew before their next use, and the byte tested after the
+call is read through a register the walk keeps); the walk writes nothing for
+an entity that is not in the set; the only other references to the tool's
+object are its constructor and the code that fills the set. Inferred: that
+the set is always empty in play (no caller of the code that fills it was
+found). 42 bytes are compared first,
+and the function is searched for a jump into the middle of the call.
+
+Expected: 0.08-0.12 ms a pass (the walk was 0.08 ms of self time in capture 7
+plus its share of the entity lookup). It acts in every draw, By turns too.
+
+Log: `Frame game patches: selection_walk applied: the debug selection tool no
+longer walks every drawn entity ...`, or `refused: ...`, or `taken out: ...`.
+
+### shadows_once: the sun's shadow map from the first eye
+
+Each pass the game fits the sun's shadow view and the "negative light's" view
+to the camera (`ShadowRenderPasses::Update`, `0xF4DA80`), culls the shadow
+casters with jobs (`0xD9BC00`), collects their draw calls in one render task
+(`0xF49760`) and draws them into the two slices of one shadow map in two more
+(`DirectLightShadows::Render`, `0xF4BBB0`, called by the "Directional Shadows"
+and "Negative Shadows" tasks). In capture 7 that was 0.9 + 0.8 + 0.2 ms of task
+time a pass and one render of the map on the GPU.
+
+In a pair's second pass, with the switch on:
+
+- `Update` is not run; only its last step is, the spot lights' update
+  (`0xF50420`), with the arguments the game gives it. The two views keep the
+  first pass's matrices, so the second eye is shaded with the same shadow
+  matrices as the first and with the map those matrices were drawn for.
+- The casters' cull is not kicked. The job list stays empty and the game's
+  own test of the list (`0xE252DA`) leaves the wait out.
+- The collect looks up its two draw-call buckets and empties them, as the
+  game does first, and gathers nothing.
+- `Render` returns at once for the two views: the slices are not cleared and
+  not drawn, so they keep what the first pass drew. The two tasks still move
+  the map between its written and read states themselves; no state change is
+  left out.
+
+Verified in the code: the fit does not ask the eye. With the camera's look-at
+point set (it is, in the world) its centre is that point and its extent comes
+from rays through the screen's corners, which the mod already answers from
+the game's own camera (`cleanroom/camera/d2rcam.cpp`, "the shadow fit keeps
+the game's own camera"); it reads the visible set's bounds only without a
+look-at point. So the map the second eye would have fitted is the first's
+map, to within what the game's camera moved between the passes (nothing: the
+second pass gets no frame time), and there is no strip at the second eye's
+edge that the first's map does not cover. A pair whose camera has no look-at
+point in either pass is fitted and drawn per eye as before. The shadow
+constants of a pass are built from the views and that pass's camera
+(`0xF4DEB0`), so they follow the eye. The map is one texture made once with
+the renderer, with two slices; the only code that begins a pass on a slice
+is `Render` and the particles' shadow pass (`0xF4D050`). `Render`'s debug event, profiler
+scope and pass begin and end inside it.
+
+Inferred, to look for in the headset:
+
+- Shadows that differ between the eyes or swim when the head turns: the
+  second eye would be using matrices that do not match the map.
+- Missing or flickering shadows in the right eye only (the map lost between
+  the passes), in particular the hero's own, a torch's and those under
+  monsters; the dark patches of the negative light (under units).
+- Particle shadows (`NegativeLightVFX`) are still drawn in both passes, into
+  a slice that now keeps the first pass's: where a particle moved between the
+  passes its shadow is the two together.
+- The mod's head and helm handling counts shadow gathers per pass
+  (`Frame head skip:`); its tally for the right eye drops to nothing. The
+  hero's shadow should still have its head.
+
+Sixteen stretches of the game's code are compared before the four hooks go
+in. A hook that is refused leaves the others passing every call through.
+
+Expected: about 1.8 ms of thread time and one shadow-map render a pair. On
+the clock less, because the tasks are not on the chain the drain waits for:
+0.2-0.4 ms a pair, most of it the cull that is not kicked.
+
+Log: `Frame game patches: shadows_once applied: ...`, then every ten seconds
+while on `shadows_once 10 s: N second passes kept the first's shadows (left
+out: N caster culls, N collects, 2N shadow draws), M fitted and drew their
+own`. N near the pairs drawn and M near 0 is the patch at work.
+
+### cull_once: one cull for both eyes
+
+Each pass the game culls every entity's box against the camera with jobs
+(`0xD9B4D0` kicks them, `0xD9C9B0` waits for them in the shadow update and
+writes the result as a "culled" tag on each entity, where it stays until the
+next cull). The kick's third argument, 0x40 bytes, is the camera's view times
+its projection, row-major with row vectors (`0xF74CE0`). A job does one thing
+with it: per entity, the eight corners of the box times the matrix, dropped
+when w < 0 at all eight, kept when each of x, y, z against -w and w has a
+corner on its inner side (`0xF74420`). Nothing else of the camera is asked.
+
+With the switch on, the first pass of a pair culls with a matrix whose
+pyramid holds both eyes' pyramids (`steamvr/cull_volume.h`): its axis between
+the eyes', each side as wide as the widest of either plus 1.7 degrees, its
+apex behind both, no near plane. The second eye's matrix is not known in the
+first pass; it is worked out from the first eye's matrix and the two eyes'
+relation in the pair before, which does not change as the head moves. In the
+second pass the kick sees the real matrix. If that eye's pyramid (its apex and
+four edges) is inside the volume the first pass used, the kick is left out:
+the job list stays empty, the game's own test of the list (`0xE38ADC`) leaves
+the wait out, and the second eye draws the set the first culled. If it is not
+inside (the eyes' distance or field of view changed, or there was no pair
+before), the second pass culls as the game does.
+
+So a box either eye would have kept for a point it can see is kept; that is
+checked for many random heads in `cull-volume-test`. What is new: the first
+eye collects a few more draws (what only the other eye sees, and what is
+nearer than the near plane), all clipped by the GPU as anything off-screen
+is. An entity made between the two passes has no tag and is drawn. Twelve
+stretches of the game's code are compared before the hook goes in.
+
+Inferred, to look for in the headset: objects that pop at the outer edge of
+the right eye's picture while the head turns; anything of the mod's that
+drew per eye by the culled tag (none was found). A camera without a look-at
+point is culled per eye, because the shadow fit then reads the visible set's
+bounds, which a pass that does not cull does not have.
+
+Expected: 0.3-0.4 ms a pair on the draw thread (the kick's 0.17 ms and the
+wait's 0.07 ms of self time in capture 7, plus what they call).
+
+Log: `Frame game patches: cull_once applied: ...`, then every ten seconds
+while on `cull_once 10 s: N second passes not culled (inside the first's
+volume), M culled their own (A outside the volume, B with no volume from the
+first pass)`. A stays 0 unless the eyes' relation changes from pair to pair.
+
+### Measuring them
+
+`[debug] draw_sampler_watch` lists game functions, by the RVA of their start,
+whose inclusive time on the draw thread is printed whatever their rank
+(table 4b of the report file, left and right eye apart). For these three:
+
+```ini
+[debug]
+draw_sampler_watch=0xFB1780 0xF4DA80 0xD9BC00 0xD9B4D0 0xD9C9B0 0xE38840 0xE37D20 0xF4CC50 0xF4BBB0
+```
+
+Take a capture with the three keys 0, one with each key set to 1 in turn,
+and compare the right eye's column. With `shadows_once`, table 7 should
+show `Shadow Directional Draw Call Collect` and `Directional Shadows` near
+0 ms in the right eye and unchanged in the left; with `cull_once`,
+`0xD9C9B0` should leave the right eye's column.
+
+## Render task patches, November 10
+
+**On for every install since the headset run below.** There is no setting for
+them in VR Settings and no key in the shipped `d2r_pcvr.ini`. To tell a fault
+from a patch, `[game_patches]` with `transparent_filter=0`,
+`profiler_accounting=0` or `draw_debug_names=0` written into the file by hand
+takes that one out between two frames.
+
+**Measured, November 10** (SteamVR, game 3.4, Both eyes, an Act 2 field fight;
+each patch switched on live, a 30 s capture after each; the scene changed
+between captures, so the totals are approximate):
+
+| an eye pass, ms | none | + transparent_filter | + profiler_accounting | + draw_debug_names |
+| --- | --- | --- | --- | --- |
+| pass | 9.27 | 7.96 | 6.72 | 6.34 |
+| the drain | 5.35 | 4.14 | 3.22 | 2.53 |
+| Depth / Forward Pass run | 2.6 | 2.7 | 1.8 | 1.2 |
+| Late Post Processing run | 3.4 | 0.48 | 0.40 | 0.41 |
+
+No crash as each went in; about six minutes of play with all three, the
+picture as before (the owner). Not tried: interiors, other acts, By turns,
+Virtual Desktop.
+
+**What the third capture showed** (18:44, 30 s in the world, both eyes; the
+first with table 8, the threads inside the render tasks): 2,231 eye passes of
+9.41 ms, of which the drain is 5.56 ms (59%). The chain the drain waits for,
+in ms from its start (left eye): `Collect Draw Calls` 1.19 (+0.12 to +1.31),
+then `Depth Pass` 2.71 and `Forward Pass` 2.68 side by side (+1.35 to +4.06),
+and `Late Post Processing` 3.49 (+2.06 to +5.55; right eye 3.71), which starts
+when `Clutter + Height + Fluid + Friends` ends, not after the Depth or Forward
+Pass, and whose end is the drain's end.
+
+### transparent_filter: flags first in the transparent pass's Ghost filter
+
+- **Found.** 88% of Late Post Processing (3.17 ms a run) is self time in one
+  game function, `0xFDC510`, with no wait, no lock and almost no GPU driver
+  time. It is the "Ghost" mode of the transparent render pass. For each
+  transparency layer (three at most settings) it walks every 0x100-byte draw
+  record of three buckets of draw calls and keeps the few that carry one of
+  the flags `0x21800000`. But before it looks at a record's flags it loads the
+  record's pointer to its per-model constants and reads one number through
+  it, and those constants live in the buffer they are uploaded to the GPU
+  from: mapped upload memory, which is slow to read back. Almost no record
+  has the flags (the draw submit function is not among the task's top
+  functions), so the time goes on reading a number for records that are then
+  skipped. The read costing that much is an inference from the timing and from
+  what the memory is; the sampler has no per-instruction table.
+- **The patch.** The first instruction of the loop (`0xFDC740`, the 7-byte
+  load of that pointer) becomes a jump to 25 bytes of new code in a page
+  allocated near the game: test the record's flags; none set, go where the
+  game's own test sends such a record (`0xFDCAAD`); otherwise do the load and
+  go back to the next instruction, so a record with a flag runs exactly the
+  game's code, its own flag test included. For a record without the flags the
+  skipped instructions wrote only `rax`, `xmm0`, the low byte of `r15` and the
+  flags register; at `0xFDCAAD` `r15` is reloaded from the stack and the others
+  are written again before anything reads them. The number is not summed,
+  compared across records or stored: for a record that has the flags it is
+  handed to the game's per-layer test and chooses which of two sort keys the
+  record gets, and that is all. Same records kept, same order, same picture.
+- **Proven before writing** (`vr/game_patch_signatures.h`): 123 bytes in
+  three stretches: the loop's set-up (the record pointer in `rsi`, the end, the
+  fall into the loop), the loop's first twelve instructions up to its own
+  flag test and jump, and the loop's end with its only way back to the first
+  instruction. Then the whole function's bytes in the running game are
+  searched for any jump that could land inside the replaced instruction. A
+  difference anywhere: no patch, one log line.
+- **Expected.** Late Post Processing 3.6 ms to about 0.45 ms (what is left of
+  it in the capture besides that function). It then ends near +2.5 ms and the
+  drain ends with the Depth and Forward Pass at about +4.06: about 1.5 ms off
+  a 9.4 ms eye pass.
+
+### profiler_accounting: no lock on every draw
+
+- **Found.** In the Depth Pass and the Forward Pass (2.65 and 2.62 ms a run,
+  one job each on a worker) 0.72 ms is inside one game function, `0xF13FC0`,
+  and the system's lock calls under it: exclusive SRW lock acquire and release
+  and the wait they park in. It is the game's built-in GPU profiler counting
+  the draw: once per draw the command list's accounting (`0xF117E0`, its only
+  caller) hands it the list's current profiler scope and the draw's
+  primitives, and it takes the profiler's one lock, adds 1 and the primitives
+  to two counters of that scope's record, and unlocks. Every thread recording
+  draws takes that same lock for every draw, so the passes that run side by
+  side wait for each other; Directional Shadows has 0.66 ms of it too.
+- **Who reads the counts.** The profiler folds them into its result table at
+  the next frame begin; the only lookups into that table found are in the
+  game's developer windows (graphics / drawcall / world art profiling, a stats
+  window) and a stats dump. The game has a dynamic resolution setting; nothing
+  was found that feeds it from these counts, and the profiler's GPU times are
+  not touched by this patch. That search was static and is not a proof.
+- **The patch.** One byte: in `0xF117E0` the 2-byte "list not counted by the
+  profiler -> skip" jump at `0xF11849` becomes an unconditional jump of the
+  same distance, to the function's own end. The function called returns
+  nothing, takes and releases its lock inside itself and writes nothing but
+  the two counters; the caller's own counters (per list and a global table)
+  are before the jump and stay. Scope begin and end, with their GPU
+  timestamps, are other functions and are not touched.
+- **Proven before writing:** 36 bytes from the test to the caller's last
+  byte (the jump, both calls with their distances, the function's end the
+  jump goes to) and the first 33 bytes of `0xF13FC0`.
+- **Expected.** About 0.7 ms off each Depth Pass and Forward Pass run and off
+  Directional Shadows. Those are not the end of the drain today: **alone it
+  does not shorten the pass**. After `transparent_filter` they are, and the
+  drain should end about 0.7 ms earlier.
+
+### draw_debug_names: no formatted name per draw
+
+- **Found.** In the Depth Pass 0.52 ms a run (19.7%) is under the game's
+  debug event begin (`0xF113C0`), nearly all of it in string formatting. The
+  draw submit function (`0x103DCD0`) asks for the game's debug event level and,
+  when it is above 1, formats `Model: %s Mesh: %s Shader: %s` and puts a begin
+  event with that name on the command list before the draw and an end event
+  after it: names for a graphics debugger, for every draw. The level is one
+  int in the game's data (RVA `0x2808A8C`) with one reader and one writer in
+  the game's code; the writer is reached once, from start-up, with a launch
+  option's value. In the captured session it is 2 or more; why is not known.
+- **The patch.** No code is changed. If the level is above 1 (and at most
+  16) it is set to 1. The draw's begin and end both test "above 1", so
+  neither is issued; a pass's own begin and end test "above 0" and are issued
+  as before, so every begin still has its end. The mod does not use the
+  game's debug events (no code of it reads or matches them), and ReShade's
+  add-on interface has no event for them. A level of 0 or 1 is left alone
+  and said so.
+- **Proven before writing:** the reader and the writer (7 bytes each; their
+  distances give the int's place), the draw submit's two tests (14 and 27
+  bytes) and the event begin's and end's own tests (9 bytes each).
+- **Expected.** About 0.5 ms off each Depth Pass run and a like share of the
+  other tasks that draw models (Forward Pass, shadows). As with
+  `profiler_accounting`, **alone it does not shorten the pass**; after
+  `transparent_filter` it does. All three: the drain about 5.56 ms to about
+  2.9 ms of a 9.4 ms eye pass.
+
+### How a patch goes in
+
+- Only between frames: on the draw thread at the top of the mod's hook on the
+  game's draw (`HookDrawGameScreen`), before the frame's first eye pass. The
+  render graph's drain returned in the frame before only when every render
+  task had ended, so no thread is in the code that is changed. Menus and
+  loading screens do not run that hook: a patch goes in with the first frame
+  drawn in the world, and a key changed in the INI takes effect at the next
+  frame (1 puts it in, 0 puts the game's bytes back).
+- The game's version is never asked. A place whose bytes differ is looked at
+  again every 16th frame (code that has not run may not be there yet) and
+  given up after 40 looks with `refused: bytes differ at RVA ...`.
+- A code write is the loader's checked patch, which compares the bytes once
+  more as it writes: the filter's jump is one aligned 8 bytes, the accounting
+  jump 2 bytes of which one changes. The debug event level is a plain write
+  of one int in the game's data.
+- The log (`d2r-vr-frame.log`): `Frame game patches: [game_patches]
+  transparent_filter=1 ...` when the settings are first read; per key
+  `... applied: ...`, `... refused: ...` or `... off`; and `first frame: ...`
+  with each key's state at the first frame drawn. Not in the Status tab's
+  game-code table.
+- `game-patch-plan-test` checks the fingerprint comparison, the jump search,
+  the new code's bytes for given addresses, and that nothing is planned when
+  the new code would be out of a relative jump's reach.
+
+### Verifying with a capture
+
+Stand in the same scene with the same settings, take a `[debug] draw_sampler`
+capture with every key 0, set one key to 1, look for its `applied` line, take
+another capture (another number), and compare:
+
+- `transparent_filter`: table 7, `Late Post Processing` mean run 3.5-3.7 ms to
+  about 0.45, and the drain's time a pass down by about 1.5 ms with the Depth
+  or Forward Pass now the last long task; table 8, `Late Post Processing`:
+  `D2RLoader.exe+0xFDC510` no longer near 88% of it. Samples in the new code
+  itself show as code in no module.
+- `profiler_accounting`: table 8, `Depth Pass` and `Forward Pass`:
+  `D2RLoader.exe+0xF13FC0` gone from the inclusive table (d), ntdll's share
+  (a) down from 28.6% to a few percent, no `NtWaitForAlertByThreadId` row by
+  that function (b); table 7: both tasks' mean run about 0.7 ms shorter.
+- `draw_debug_names`: table 8, `Depth Pass`: `D2RLoader.exe+0xF113C0` (0.52 ms
+  inclusive, table d) and the formatting functions under it gone from the
+  top functions (c); table 7: the run about 0.5 ms shorter.
+
+**Risks, plainly.**
+
+- The analysis was made on a dump of the game's code from 3.3.93787; the
+  running game (3.4.95041) is only known to have the same function starts.
+  The byte comparison at run time is what stands between a different build
+  and a wrong write, and it covers the places named above, not every byte of
+  the functions around them.
+- "No thread is in the changed code between frames" rests on reading the
+  drain's loop, not on an observation in the game. The loader's write is not
+  promised to be atomic; a thread inside the filter's loop during the write
+  could run a half-written jump. The accounting change is one byte and the
+  level one int: those cannot be seen half-written.
+- `transparent_filter`: the new code has no unwind row, so a crash report or a
+  sampler walk from inside it stops there (it makes no call, so nothing else
+  is ever above it on a stack). That the slow part is the read-back, and so
+  the size of the saving, is inferred.
+- `profiler_accounting`: the search for readers of the counts was static.
+  Something not found that used a scope's draw or primitive count would see
+  zeros.
+- `draw_debug_names`: a graphics debugger attached to the game would no
+  longer see per-draw names. If the game wrote the level again later (not
+  found in its code) the names would come back until the key is toggled.
+- Taking a patch out again (key back to 0 while playing) is built the same
+  way but has not been exercised in the game.
+
+## Draw-thread sampler, November 10
+
+The game is limited by the one thread that draws the eyes: each eye pass keeps
+it busy 6.5-11 ms, and it records only about 2,000 of a pass's 11,000 draws
+itself. The sampler shows what that thread does with the rest of the time. It
+is a diagnostic: off unless asked for, and not for normal play.
+
+**Taking a capture.** In the world, in the headset, with the scene to be
+measured in view, change `[debug] draw_sampler` in the installed `d2r_pcvr.ini`
+to a new number other than 0 (the file is re-read when saved):
+
+```ini
+[debug]
+draw_sampler=1
+draw_sampler_seconds=30
+draw_sampler_tasks=Late Post Processing, Forward Pass, Depth Pass, Collect Draw Calls, Directional Shadows, Shadow Directional Draw Call Collect
+```
+
+The capture starts with the first eye pass drawn and ends by itself after
+`draw_sampler_seconds` (30; 1-300). `draw_sampler=0` ends a running capture
+early; it still reports. Another capture needs another number (2, 3, ...). Put
+it back to 0 afterwards: a number left there starts a capture at the next
+launch, in the first 30 s in the world (it waits up to 10 minutes for the
+first eye pass). Keep the same scene, view and graphics settings between
+captures that are to be compared, and stand still for the first one.
+`draw_sampler_tasks` names the render tasks whose threads are sampled too
+(table 8): parts of the task names of table 7, any case, separated by commas.
+The line above is the default, the chain the drain waits for; `all` is every
+task, `none` or nothing the draw thread only. `draw_sampler_watch` (none) is
+a list of game functions, by the RVA of their start in hex, whose inclusive
+time is printed whatever their rank: table 4 shows only the top 15, table 4b
+the listed ones in the list's order, a function on no sampled stack with 0.
+
+**Where the report is.** `Frame draw sampler:` lines in `d2r-vr-frame.log`
+(a start line, then about ten lines when it ends), and every table in
+`d2r-vr-draw-sampler.txt` in the same `logs` folder, written anew by each
+capture. The last log line names the file. The file ends with every loaded
+module's base, size and PE link timestamp, which together name one build of a
+binary: the game's `D2R.exe` row is what to check a disassembly against.
+
+**How it works.** A thread of its own ticks about every millisecond, each tick
+up to 25% early or late at random so the samples do not keep step with the
+frame. The mod marks the stretch of `HookDrawGameScreen` and `DrawTurn` in
+which the game draws one eye; outside it nothing is sampled. In it, the
+sampler stops the draw thread, reads its registers and copies its stack from
+the stack pointer up to the mod's own call of the eye pass (at most 256 KB),
+lets it run again, and only then works out the callers from the copy: up to
+32 frames are kept, and the walk goes on to the pass's call to know that it
+got there. Menus, loading and the flat desktop draw no eye pass: a capture
+started there waits. The same capture times the game's render tasks (table 7,
+below) and samples the threads that run the watched ones (table 8, "Inside
+the render tasks" below).
+
+**Reading it.** Each sample is where the draw thread was at one instant of an
+eye pass. A row's percentage is its samples over all samples; its
+milliseconds are that share of the measured mean pass time, so the rows of a
+table add up to the pass. With 30,000 samples one sample stands for about
+0.3 us of a pass; a row of a few samples is noise. Addresses are
+`module+0xRVA` of the **start of the function** the sample was in, from the
+module's unwind table, so all samples inside one function count together and
+the RVA can be looked up in a disassembler. `~` after an RVA marks code with no
+unwind row (a leaf function at or after that address). A name after an address
+is the module's export at exactly that address.
+
+1. **Where the thread was**, by whose code the sampled instruction is in: the
+   game, this mod, ReShade, the GPU driver's user-mode DLLs (NVIDIA, AMD,
+   Intel, anything in the driver store), DLSS, D3D12, DXGI, ntdll,
+   kernel32/KERNELBASE, win32u/user32/gdi32, the OpenXR runtime and layers,
+   other modules, and code in no module (hook trampolines). Table 1b is the
+   same by module.
+2. **Waiting or running.** A sample stopped in one of the system's wait calls
+   (`NtWaitForSingleObject`, `NtWaitForMultipleObjects`,
+   `NtWaitForAlertByThreadId`, where SRW locks, critical sections and
+   condition variables park; keyed events; `NtDelayExecution`; the win32u
+   message and GPU waits; `NtYieldExecution`) is waiting. Table 2b lists the
+   calls and 2c who waits: the first caller outside the system's own DLLs and,
+   after `<`, the nearest game function behind it. Table 2d lists the other
+   samples in ntdll and win32u: locks spinning, and system calls that are not
+   waits (a D3DKMT call into the kernel driver counts as running).
+3. **Top 25 functions** by the sampled instruction: self time.
+4. **Top 15 game functions on the stack**: a sample counts once for every
+   `D2R.exe` function it is inside, so these rows overlap and do not add up.
+   This is which game subsystem owns the time, also when the instruction
+   itself is in the driver or in ntdll.
+5. **Graphics calls**: the samples in the driver, D3D12, DXGI, DLSS or
+   ReShade, by the nearest `D2R.exe` function on the stack: the game code
+   making the expensive calls.
+6. **The two eyes** as two totals; the tables also carry a left and a right
+   column. In a pair the right pass is drawn with the frame time held.
+7. **Render tasks**: what the draw thread's drain waits for. See "Render
+   tasks" below.
+8. **Inside the render tasks**: for each watched task, where the threads that
+   ran it were. See "Inside the render tasks" below.
+
+**Check the walk first.** The head of the file and one log line say what
+share of the samples' walks up the stack **reached the eye pass's own call**
+in this mod (`HookDrawGameScreen` or `DrawTurn`). Every sample is taken inside
+that call, so a sound capture is near 100%. Much less means the callers are
+wrong or missing: then only self time (tables 1 to 3) stands, and tables 2c, 4
+and 5 do not. Beside it: how many walks were cut short and why (the 32-frame
+limit; a "return address" that is not in executable memory; one that no call
+instruction ends at; the walk left the stack copy; unreadable memory), how
+many frames were unwound with a module's own unwind table because the system
+had none, and how many caller addresses were no code. An address outside a
+module's executable sections is never shown as a function: as a caller it is
+left out of every table and counted; as the sampled instruction it is a row
+"(not code by the module's sections: the page)".
+
+**Its cost.** Each sample stops a thread for about 20 millionths of a
+second. `draw-sampler-test` on the owner's PC measured 19-21 us a sample, the
+longest 30-73 us, 2.0% of the sampled thread's time at 1,000 samples a second.
+That thread had a shallow stack; the game's is deeper and more of it is
+copied, so expect somewhat more. The report states the capture's own figures:
+the mean and longest stop, and their share of the passes' time. The stops are
+inside the measured pass time, so a profiled pass is that much longer than an
+unprofiled one; do not compare frame rates across a capture. A thread inside
+a watched task is stopped as often and as briefly, so that task runs about 2%
+longer too, and the sampler's own thread works that much more. When no capture
+runs the cost is two reads of a flag per eye pass and one per render task.
+
+**Why it cannot hang the game.** The stopped thread may hold any lock: the
+heap's, the loader's, the log's, the one on the system's unwind tables. While
+it is stopped the sampler makes three system calls on the thread's handle
+(`SuspendThread`, `GetThreadContext`, `ResumeThread`) and reads plain memory
+into buffers allocated before the capture: the flags the thread published
+itself, the stack bounds in its TEB, the stack. It does not allocate, log,
+call the loader, or unwind (`RtlLookupFunctionEntry` takes the unwind-table
+lock, and dispatching an exception would too, so the stack is read only
+within the TEB's bounds, without a guarded read). Unwinding runs after the
+thread is running again, on the copy: the registers that point into the stack
+are moved to point into the copy and `RtlVirtualUnwind` walks that. The
+threads inside watched tasks are stopped by the same rule, one at a time, and
+the sampler never holds a lock of its own nor stops its own thread.
+
+**Limits.** Callers beyond 32 frames or 256 KB of stack are cut (the report
+counts them); a sample cut before any `D2R.exe` frame shows as "no game
+function within the frames kept". A sample taken inside a hook's trampoline,
+or code without unwind rows between the sample and its caller, ends the walk
+there: counted as cut short, no longer continued wrongly. The sampling of the
+threads inside watched tasks has not run in the game yet: its figures are from
+the test's own threads. The tables are `steamvr/draw_sampler.h` and
+`steamvr/draw_tasks.h`, the table of which thread is in which task
+`steamvr/task_slots.h`, the sampling `steamvr/draw_sampler_capture.cpp`, the
+hooks `vr/render_task_hooks.cpp`, the test `draw-sampler-test` (made-up
+samples and task records, the slot table, the watch list, then live captures
+of a busy, a waiting and a lock-taking thread, with and without the system's
+unwind table, and of two threads inside watched tasks).
+
+### First capture, November 10, 17:16
+
+30 s in the world, both eyes: 20,913 samples in 2,202 eye passes of 9.48 ms
+(left 9.59, right 9.36). The sampler stopped the thread 21.5 us a sample
+(longest 296 us), 2.2% of the passes' time; nothing froze.
+
+- **Whose code** (self time, a pass): the game 70.2% (6.65 ms), the GPU driver
+  10.4% (0.98), ntdll 10.0% (0.94), win32u 3.6% (0.34, mostly the D3DKMT
+  submit calls), D3D12 2.0%, ReShade 1.3% (0.12), this mod 1.2% (0.11).
+- **Waiting** only 1.8% (0.17 ms): by the system's account the thread runs.
+- **One cluster is 28% of the pass**: four game functions at `+0x9E9D40`
+  (11.2%), `+0x9E9EC0` (7.5%), `+0x9E8E70` (5.5%) and `+0x9E9770` (4.0%), 2.67
+  ms a pass. Read in the game's code they are the job system's "help while
+  waiting" path: get the job system, make one attempt to take a job
+  (`0x9E9EC0`), which looks through the queue's priority lists under its spin
+  lock (`0x9E9D40`) and, when it finds one it may take, runs and frees it
+  (`0x9E9770`). The loop around them that matters here is the render graph's
+  drain (`0xF1BD50`, 4.2% self, 0.40 ms): after the pass's render tasks are
+  started it loops, without sleeping, until all of them are done.
+- So about **3 ms of a 9.5 ms pass the draw thread is not computing: it spins
+  while worker threads finish the pass's render tasks**. Each pass registers
+  23 of them (`Renderer::PrepareGraph`, `0xE25970`): Initial Setup, UI Pass,
+  Collect Draw Calls, the light buffer, the shadow collects and passes,
+  terrain, Popcorn (particles), Depth Pass, Forward Pass, the post processing
+  and transparent passes and others. A task that is ready runs as one job.
+  What lengthens the slowest chain of tasks lengthens the pass, the mod's own
+  work inside a task included (the per-draw callbacks, the gather hook, the
+  skeleton hook).
+- `+0xF13FC0`, where the thread does wait (0.135 ms a pass): the game's GPU
+  profiler counts every draw call under one lock, taken by every thread that
+  records draws.
+- The two eyes cost the same: nothing is cheaper in the right pass today.
+
+**What was wrong with its caller tables.** Table 4 could not be right: a
+function whose only callee had 11.2% self time showed 4.1% inclusive, no game
+function was on nearly every stack, and its top row, 28%, was
+`D2RLoader.exe+0x1CAF505~` - no function, but the label for anything past the
+last row of the unwind table. The cause: to walk up a stack the unwinder needs
+each function's unwind row, and asks the system for it
+(`RtlLookupFunctionEntry`). The system keeps the table a module had when it
+was loaded. The game's executable is loaded packed: on disk its exception
+directory is a 3-row table for the unpacking stub, and its real table of
+150,572 rows appears in memory later, with the header changed to point at it.
+The system never looks again (checked on this Windows: after a module's header
+is edited in memory the lookup still answers from the table captured at
+load). So for every address in the game the system answered "no row". The
+sampler took that for a leaf function and read the top of the stack as the
+return address, then the next slot, and so on: the "callers" were whatever
+the stack held, among them pointers into the game's data (the job system's
+object, vtables), all labelled `+0x1CAF505~`. Frames in system DLLs, the
+driver and this mod unwound correctly, which is why the wait tables looked
+sound. From that capture: **self time, the system-call tables and "who waits"
+stand; tables 4 and 5 and every `<` caller through game code do not** (the
+9.1% "inclusive" of the game's allocator free is one such ghost).
+
+**The walk now.** For an address the system has no row for, the sampler looks
+in that module's own unwind table as it is in memory (the one it already read
+function starts from) and hands that row and the module's base to
+`RtlVirtualUnwind`, which follows chained rows itself. Only an address with no
+row in either table is a leaf. Every unwound return address must lie in
+executable memory (the module's executable sections, or memory executable
+now) and directly after a call instruction; if not, the walk stops and the
+sample counts as cut short. The walk ends at the pass's own call. Nothing
+changed in what happens while the thread is stopped, except one more plain
+read (the mark of the pass's call) so that less stack is copied.
+`draw-sampler-test` proves it on a live thread: with the system's lookup
+withheld for the executable, as in the game, all walks reach the pass's call
+through the module's own table (and through ntdll's and KERNELBASE's when
+withheld for every module); with the table withheld too, as the first sampler
+walked, none do and the report says so.
+
+### Render tasks
+
+While a capture runs the mod also times every render task, the drain and the
+pass. Two hooks go in when the first capture of a session is asked for, never
+before: on the game's task runner (`0xF18BC0`, which runs one task as one job;
+its only caller is the job's functor) and on the drain (`0xF1BD50`). Each is
+put in only where the game's bytes are the known ones: the runner's first 39
+bytes, which are also the proof of what the hook reads (the task's index and
+the graph, a task slot of 0x2A0 bytes), two places in the task registration
+for the name pointer at slot + 0x238, and the drain's first 23 bytes. On any
+difference - another game build, code not yet run - that hook is left out,
+the frame log says which (`Frame draw sampler: ...`), and the report says
+what is missing: without the runner no task times, without the name proof
+tasks are numbered instead of named, without the drain offsets count from the
+pass's start. The fingerprints are `vr/render_task_signatures.h`; they are
+not in the game-code table of the Status tab, so a build that lacks them
+shows nothing there.
+
+With no capture running a hooked call costs one flag test. In a capture,
+inside an eye pass, it reads the task's index and name pointer (two guarded
+reads, before the clock starts), reads the clock before and after the game's
+function, and writes one record into a buffer made before the capture: no
+lock, no allocation, no log, on whichever of the game's threads runs the job.
+The arguments are passed on untouched and the result is returned as it was.
+
+**Reading table 7** (per eye) and the `render tasks` log lines:
+
+- The head: passes counted, **the drain's time a pass** and its share of the
+  pass, when the last task ends, and how the drain divides into the draw
+  thread running tasks itself and having none (spinning, or helping with
+  jobs that are not render tasks).
+- A row per task name: **runs a pass**; its **mean and longest run**; the
+  share of runs **on the draw thread** (the rest on workers); runs begun
+  **inside** another task's run on the same thread (that task was waiting and
+  helped, so its own time includes them); mean **start and end**, in ms from
+  the drain's start (a task started before the drain has a negative start);
+  **last**: in what share of passes it was the last task to end; and **idle
+  by then**: in those passes, how long the draw thread had been without a task
+  of its own when that task ended.
+- The task that ends last is the end of the critical chain; the drain cannot
+  end before it. Follow the chain back through the rows: the task before it
+  is the one that ends where it starts. "Idle by then" is what shortening
+  that chain could give back to the pass, at most.
+- A long task on a worker that is never last is not the limit. A task on the
+  draw thread delays the pass only by its own time.
+
+**Limits.** A task belongs to the pass in which it starts. Passes cut by the
+capture's start or end are left out and counted. A capture set in the INI
+before the game starts asks for the hooks before the game has run that code:
+it gets samples and no task times; start captures in the world. The hooks stay
+in until the game exits. They ran in the game in the second capture, below.
+
+### Second capture, November 10, 18:10
+
+The same scene with the fixed walk and the render task hooks, both run in the
+game for the first time: 21,657 samples in 2,092 eye passes of 10.34 ms; the
+thread stopped 20.4 us a sample, 2.0% of the passes' time. 93.4% of the walks
+reached the eye pass's own call (1,428 ended at an address that is not code,
+23 at the frame limit), and 198,895 of 258,993 frames were unwound by the
+game's own table: the caller tables stand now. Every task was named; the drain
+was timed in every pass.
+
+- **The drain is 6.2 ms of the 10.3 ms pass** (60%): the draw thread ran tasks
+  itself for 2.5 ms of it and had none for 3.7 ms. On the stacks, the drain
+  (`0xF1BD50`) is on 59.6% of the samples and the job system's help attempt
+  (`0x9E9EC0`) on 49.2%.
+- **The chain the drain waits for**, mostly on worker threads, in ms from the
+  drain's start (left eye; the right is the same within 0.2 ms):
+  1. `Collect Draw Calls`, 1.2 ms (+0.13 to +1.33; longest 2.8-4.5), one
+     serial job, 99% on a worker. Beside it `Shadow Directional Draw Call
+     Collect`, 1.1 ms.
+  2. `Depth Pass` 2.85 ms and `Forward Pass` 2.83 ms side by side (+1.38 to
+     +4.2), one job each, always on workers.
+  3. `Late Post Processing`, 3.8-3.9 ms (+2.44 to +6.2), 93% on a worker: it
+     starts before the Forward Pass ends and its end is the drain's end
+     (`Release Popcorn Draw Calls`, 5 us, follows it and is the last task in
+     99.7% of passes).
+- Off the chain, but long: `Directional Shadows` 2.1 ms (62% on the draw
+  thread), `Clutter + Height + Fluid + Friends` 1.1 ms, `Transparent Pass`
+  1.0 ms.
+- Waiting is still only 1.7% of the draw thread's samples: it spins.
+
+So the pass is as long as Collect Draw Calls, then the Depth or Forward Pass,
+then Late Post Processing, and what happens inside those links decides it.
+That capture could not say: it sampled the draw thread only, and those tasks
+ran on workers. Table 8 is for that.
+
+### Inside the render tasks
+
+During a capture the sampler also stops **whichever thread is running a
+watched render task** and takes the same kind of sample of it.
+
+**Which thread is in which task.** The hook on the task runner already
+brackets every task's run on the thread that runs it. Around the run it now
+also writes that into the thread's own slot of a fixed table
+(`steamvr/task_slots.h`): 64 slots, one per thread that ever ran a task. A
+thread finds its slot by its id and claims an empty one with one atomic
+compare-exchange; slots are never given back. A slot holds the thread's TEB
+and a stack of up to four open runs (task name, index, eye, a run number, and
+an address in the hook's stack frame), because a task that waits helps with
+other jobs, another render task among them: the inner run is then the
+thread's task, and the outer one again when it ends. Only the slot's own
+thread writes it, with its sequence number odd while it does, so a reader
+never takes two states for one. It is stores into memory that is there from
+the start: no allocation, no lock, no log, and only while a capture watches
+tasks.
+
+**The sampling.** At each tick, before the draw thread's own sample, the
+sampler reads the 64 slots, keeps the threads whose innermost run is a watched
+task, and stops at most three of them, one after the other, starting after
+the last one stopped at the tick before - so when more than three threads are
+in watched tasks they take turns. A thread's handle is opened once and kept;
+the system is asked once where that thread's TEB is, and the slot's word must
+agree. Stopped, the thread's registers are read, then its slot: only if it
+still names the run the thread was picked for is the sample kept (the slot
+cannot change while its thread is stopped), otherwise it is dropped and
+counted as "moved on". Then the stack is copied from the stack pointer to the
+hook's frame, within the bounds in the TEB, and the thread runs again. The
+draw thread is not stopped a second time: its own sample notes the task its
+slot names, and the frames up to that task's call are that task's sample too.
+The walk up a task's stack ends at the hook's own frame in this mod.
+
+**Reading table 8.** After the head (what was watched, samples, how many ticks
+had more threads than could be stopped, the stops' cost, what was lost) each
+task that got samples has:
+
+- a head line: **samples**, how many from the draw thread and from other
+  threads, the **achieved rate** in samples per second of the task's run time
+  (about 1,000 when every tick could take it; less when tasks took turns),
+  its runs and mean run time from table 7, and the share of walks that
+  **reached the task's own call** - near 100%, or only self time stands for
+  that task;
+- **a.** whose code the sampled instruction was in, as % of the task and ms of
+  a run;
+- **b.** waiting or running, the wait calls, and who waits (the first caller
+  outside the system's DLLs, then the nearest game function);
+- **c.** the top 15 functions by self time (module + RVA of the function's
+  start);
+- **d.** the top 15 game functions on the stack, inclusive;
+- **e.** the samples in the GPU driver, D3D12, DXGI, DLSS, ReShade or this
+  mod, as `whose code < the nearest game function`: which game code the
+  outside work is done for;
+- **f.** the samples in this mod and ReShade by function. The RVA is the
+  function's start in the DLL: look it up in the mod's link map to name the
+  callback. A name after it is the DLL's export at that address.
+
+A row's ms is its share of the task's samples times the task's mean run. The
+eyes are shown together; when a run's time, or what a tenth or more of it
+goes to, differs between them by more than 10%, the tables carry a left and a
+right column instead. The log has four or five `task <name>:` lines per task:
+the head, whose code, waiting, the top functions, and this mod's and
+ReShade's.
+
+**Limits.** Samples inside a run nested in another count for the inner task
+only, while the outer task's run time still includes it. A thread stopped
+while it holds one of the game's spin locks keeps the others spinning for the
+20 us of the stop, as the draw thread's stops already do. With `all`, more
+threads can be in tasks at once than are stopped at a tick, and each task
+gets fewer samples: its head line says what it got. Not yet run in the game.
+## Draw thread: the bodies' physics on its own thread, November 10
+
+**Gain not yet measured in a headset.** Built and tested natively only.
+
+Evidence, the owner's headset log of 2026-11-10 16:32-16:39: the `input` part
+of `Frame pacing: XR begin, ms a pair` was 0.26-0.30 ms a pair with no ragdoll
+alive, 0.37-0.39 with 1-2, 0.53 with 3 and 0.58-0.84 with 5-6 (`Frame bodies:
+ten seconds: ... ragdolls most=N`). So the bodies that give way cost the draw
+thread roughly 0.3-0.5 ms a pair in a big fight. This is inferred from those
+timings: the step itself was not timed.
+
+The bodies' Box3D world now lives on one worker thread (`limb_worker.h`), which
+makes it, steps it and destroys it. Each frame the draw thread hands over that
+frame's time, player position, weapon capsules and posed bodies, and picks up
+what finished since the frame before. Only the newest frame waits: one handed
+over while the worker is still stepping replaces it, and the fixed 1/120 s
+steps are counted from the frames' own times, so nothing queues and no
+simulated time is lost. The worker gives each batch's answers straight to the
+board the skeleton hook reads, the moment its steps end, so a pose made later
+in the same frame is bent by that frame's steps as before; a pose made in the
+half millisecond before the batch ends uses the frame before's answer. The
+hand's tick and the counters are picked up at the next frame's input, one
+frame later than before. The worker runs at normal priority. Making and
+destroying a Box3D world takes one lock (`physics_worlds.h`): Box3D keeps all
+worlds in one table, and the bottles' world is still made on the draw thread.
+
+The bottle and prop world stays on the draw thread: the same frame reads it
+back many times (a let-go bottle, the thrown potion's pose, props' matrices,
+traces for the throw sigil), and it already skips its step at rest.
+
+**What to read in the next log.** `Frame bodies: worker: ten seconds: N step
+batches, mean X ms, longest Y ms; N frames handed over, N replaced before they
+were stepped` is the cost that left the draw thread. `input` in `Frame pacing`
+with 5-6 ragdolls should be near its no-ragdoll value (0.26-0.30 ms a pair).
+Replaced frames mean the worker did not finish within a frame; a few are
+harmless, many would show as bodies reacting late.
+
+## Draw thread: panel uploads and prop physics, November 10
+
+**Not yet measured in a headset.** The changes below passed the native build
+and its tests; none has run in a headset, so the gains are expected, not
+measured. A headset log from the owner's PC showed the game's draw thread as
+the limit: in fights a stereo pair ran 1-2 ms over its slot. Three pieces of
+work on that thread were cut.
+
+**The wrist atlas uploads only what changed.** Any life or mana change
+re-uploaded the whole 1024 x 1024 interaction atlas: 0.80 ms on the draw thread
+each (0.61 ms of it the copy into the upload buffer), 15-34 times in 10 s. The
+painter's thread now compares each atlas with the one it painted before
+(`atlas_dirty.h`) and hands over the 64-texel tiles that differ; the draw thread
+copies those tiles' rectangles alone, and uploads nothing when the picture is
+the same. A swapchain hands out several images in turn, so each image also gets
+what it missed while the others were written: the image shown is always whole.
+The swapchain's image list is read once instead of twice per upload.
+
+**The head-locked overlays do less per repaint.** Blood, Arcane Decay, guard
+strain and the glyph trail get the same changed-tile uploads into the shared
+master, and their pictures arrive in the atlas's channel order, so the draw
+thread never exchanges channels pixel by pixel. An upload no longer has a
+command list of its own: the frame's one list at its end puts the staged
+pictures into the master and copies on to the swapchain image only what that
+image is behind by, where it copied the whole 2048 x 2056 master (16 MB) for any
+picture. Their looks and repaint rates are unchanged: Arcane Decay's picture
+really differs at each 25 Hz repaint, so its 1 MB copy remains.
+
+**Prop physics does not step at rest.** With level props catalogued the Box3D
+world stepped at 120 Hz on the draw thread although every body in it was
+static. Without a bottle, a thrown bottle or a moving prop no step is taken; the
+weapons' bodies are placed where the steps would have left them and the step
+clock keeps its phase, so a prop a weapon reaches is set going and stepped on
+the same frame as before (`dropped_bottles_test.cpp` compares the two). The
+weapon sweep also skips props outside its bounds before the closer test.
+
+**What to read in the next log.** `Frame UI refresh:` every 10 s now gives the
+share of the atlas copied and how many refreshes were unchanged; its `copy`
+should fall well below 0.61 ms. A new `Frame pacing: XR begin, ms a pair:` line
+splits the frame's begin into the runtime's wait, locating the head and eyes,
+and the input step, which holds the panel uploads; compare `input` with and
+without Arcane Decay active (begin rose from 0.31-0.36 to 0.75-1.2 ms a pair
+when it came on).
+
 ## Render thread waits, October 20
 
 **By turns' passes built in the background.** The passes that turn and move
@@ -27,7 +1153,7 @@ The frame loop was left as it is.
 
 ## Replay removed, October 20
 
-Replay left Stereo rendering (now VR Settings > Performance > Eyes drawn per frame). Walks on the owner's PC
+Replay left Stereo rendering (now VR Settings > Graphics > Performance > Eyes drawn per frame). Walks on the owner's PC
 (RTX 5090, Ryzen 9 5950X, 3072 square per eye, 90 Hz headset):
 
 - The game set its biome at every line of its 80-unit map grid, so the
@@ -54,7 +1180,7 @@ nothing: each eye's pass took 8-11 ms of CPU at every size. The game's drawing
 thread was busy 46-74% of a core, and the frame waited 2.5-8.5 ms for the
 headset because it had missed the 11.1 ms frame. The owner then stepped through
 the settings in Rogue Encampment, standing at one spot facing one way, and
-watched VR Settings' Performance page. The same timings are in the log's 10-second
+watched the readout on VR Settings > Graphics > Performance. The same timings are in the log's 10-second
 lines. The run used By turns, a 90 Hz headset and an RTX 5090 with a Ryzen 9
 5950X:
 
@@ -147,7 +1273,7 @@ left draw 6.86, right draw 6.95 and OpenXR submission 1.95 ms. That is over the
 11.1 ms budget at 90 Hz, so the runtime paced the game at about 44 pairs/s.
 These are one session's 10-second averages, not a controlled benchmark.
 
-VR Settings > Performance > **Eyes drawn per frame: One by turns** (`[stereo] rendering` 1)
+VR Settings > Graphics > Performance > **Eyes drawn per frame: One by turns** (`[stereo] rendering` 1)
 draws one eye per game frame and resubmits the other eye's last image at its
 own pose, following upstream's "Native OpenXR - eyes by turns" mode. It removes
 the second CPU draw from every headset frame without replaying command lists,
@@ -710,3 +1836,81 @@ pipeline creations, measured room discovery and extra VR tiling were zero.
 The remaining game-update cost is unresolved; native room/model activation
 or loading is a follow-up hypothesis, not a demonstrated diagnosis. The
 asynchronous atlas change does not address these larger stalls.
+
+## Skeleton hook cost in the log
+
+The pose hook (`vr/skeletons.cpp`) runs for every skeleton, every pose, on the
+game's worker threads. Its cost can be read from a headset log without a
+profiler:
+
+- `Frame skeleton hook: ten seconds:` poses a second, ms a second across every
+  helper, guarded reads a second and per pose (each read is a system call),
+  the longest single pose, and the identity look-ups (model path read, rig
+  learned, entity searched for) with their total time.
+- `Frame skeleton hook: forgot N of M remembered skeletons at once` when a
+  cache sweep drops 256 or more entries, or any to make room; one second later
+  `in the 1.0 s after forgetting ...` gives the look-ups and the longest pose
+  that followed. Compare their times with the `longest` field of
+  `vrcam: a pair, ms:`.
+- `Frame look-at:` and `Frame bodies:` keep their own `ms a second`; both are
+  included in the hook total.
+
+The remembered skeletons are aged (`steamvr/aged_cache.h`), a registry storage
+is read as one block (`steamvr/ecs_storage.h`), and look-at and bodies share
+one identity, buffer and placement read per pose call. These were built from a
+code review; the gain has not been measured in a headset. The 2026-11-09 16:27
+session before them logged look-at 6-14.6 and bodies 5-8.4 ms a second in
+fights, with a 38-53 ms longest pair in every ten-second window.
+
+### 2026-11-10: fewer guarded reads and less waiting on locks
+
+Built from a count of the reads in the code; **the gain has not been measured in
+a headset**. Compare the `Frame skeleton hook: ten seconds:` line (ms a second,
+guarded reads a pose) of a session before and after, in town and in a fight.
+Every read is still a guarded one; what is posed, when and how is unchanged.
+
+- **A monster or townsperson near you** (head turned, body within reach): 11
+  guarded calls a pose before (13 when the body was also bent), 8 now. The
+  bodies take the pose look-at has read and turned instead of reading the buffer
+  again, and a bend's write is the pose's one write (look-at writes only when
+  nothing was bent). The entity's transform is found at the index it had last
+  time, checked against the storage's packed list (`DenseHint` in
+  `steamvr/ecs_storage.h`: 3 reads for 5).
+- **What a skeleton is** is remembered once for look-at and bodies (they kept
+  one cache each), read with their settings under one shared lock a pose. The
+  model's path is read again only when the instance's name object, model or
+  skeleton pointer changed, not every 250 / 500 ms; the entity is still checked
+  that often.
+- **The hero's pose** asked for the hero's transform 2 to 4 times (13 reads
+  each, under the registry's exclusive lock) and read its matrix each time. It
+  is now taken from the look-up the pose makes anyway.
+- **The registry's lock** is taken shared by everything that only reads it
+  (the hero's transform, the ceiling's entities, the shield and crossbow
+  checks); exclusive only to find the storages or an entity again. A body's
+  placement read no longer waits on them.
+- **A bow drawn, a crossbow held**: every skeleton's pose read 3 to 4 fields of
+  its own and took the bow rigs' lock exclusively. Now 1 read, and no lock for a
+  skeleton this thread noted as not the bow in the last second.
+- **`Frame room parts`** looked every skeleton's entity up for 300 ms after
+  each `Frame room body` line (10 reads a pose, under the exclusive lock). That
+  sampling is in developer builds only; the two lines remain.
+## Draw and bind callbacks, November 10
+
+The add-on's ReShade callbacks run for every draw and every pipeline bind on
+the game's recording threads, about 11,000 of each per eye pass. Three changes
+take work out of them; none changes what is drawn in VR:
+
+- New full installs ship ReShade's Generic Depth add-on off (`[ADDON]
+  DisabledAddons=Generic Depth` in the installed ReShade.ini). It watched every
+  draw call for a depth buffer the VR picture does not read. Updates keep the
+  player's ReShade.ini; `[render] reshade_depth=1` turns it back on.
+- With Lower detail at edges off, the foveation draw, bind, target and viewport
+  callbacks return after one load (`steamvr/foveation_switch.h`). The log then
+  says `Frame foveation: off; draws not counted` instead of counting draws.
+  Switched on while playing, a command list is followed from its next reset.
+- The light-bounds and menu-world bind callbacks compare the bound pipeline
+  with the few they replace (`steamvr/pipeline_set.h`) before the device
+  checks, the cache and any lock.
+
+The gain is an estimate from reading the code, about 0.1 ms a pass on the draw
+thread; it has not been measured, in a headset or otherwise.

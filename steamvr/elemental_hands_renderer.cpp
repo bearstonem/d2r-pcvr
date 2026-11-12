@@ -1,6 +1,7 @@
 #include "elemental_hands_renderer.h"
 #include "dxgi_views.h"
 #include "spell_sprites.h"
+#include <algorithm>
 #include <windows.h>
 #include <d3dcompiler.h>
 #include <wrl/client.h>
@@ -100,156 +101,135 @@ float4 PS(Pixel i):SV_Target {
     return float4(color,alpha);
 }
 )";
-// A few small sprites per hand with the spells' own effect textures, from the
-// installed game (spell_sprites.h), shaded through their own colour ramps.
-constexpr unsigned SpritesPerHand=8;
-constexpr char SpriteSource[]=R"(
-cbuffer HandScene:register(b0) {
+// The particles (elemental_particles.h) with the game's effect textures (spell_sprites.h), one quad each,
+// drawn in one pass per eye. Each kind's material follows the game's: a mask or flipbook frame, distorted
+// for flames, its brightness turned to colour through the spell's own gradient. Premultiplied: a particle
+// with blend 0 adds light (flames, sparks, arcs, glows), 1 covers what is behind (smoke, mist).
+constexpr char ParticleSource[]=R"(
+cbuffer View:register(b0) {
     row_major float4x4 projection;
-    float4 rotation;
-    float4 translation; // w = hand index
-    float4 options;     // time, look, opacity, cast pulse
-    float4 up;          // room up in eye space; w = encode sRGB
+    float4 inverse;    // the eye's rotation, conjugated: the room into the eye
+    float4 position;   // the eye in the room; w = encode sRGB
+    float4 options;    // time
 };
+struct Particle {float3 p;float size;float3 v;float life;float aspect,rotation,intensity,blend;uint kind,frame;float seed,stretch;};
+StructuredBuffer<Particle> particles:register(t21);   // after the textures' t0..t20
 Texture2D<float> firePlate:register(t0);
 Texture2D<float> fireballPlate:register(t1);
 Texture2D<float> softFlame:register(t2);
 Texture2D<float4> flameRamp:register(t3);
 Texture2D<float> flash:register(t4);
-Texture2D<float> glow:register(t5);
+Texture2D<float> glowCard:register(t5);
 Texture2D<float4> lightningRamp:register(t6);
 Texture2D<float> glint:register(t7);
 Texture2D<float4> iceRamp:register(t8);
 Texture2D<float4> frozenOrb:register(t9);
 Texture2D<float4> frostRamp:register(t10);
+Texture2D<float> fireFlipbook:register(t11);
+Texture2D<float> smoke:register(t12);
+Texture2D<float> wisp:register(t13);
+Texture2D<float> arcs:register(t14);
+Texture2D<float> bolts:register(t15);
+Texture2D<float4> flakes:register(t16);
+Texture2D<float4> iceCaustic:register(t17);
+Texture2D<float> glowDot:register(t18);
+Texture2D<float> star:register(t19);
+Texture2D<float2> distortion:register(t20);
 SamplerState tiled:register(s0);
 SamplerState edge:register(s1);
 static const float Tau=6.2831853;
-float hash(float n){return frac(sin(n*127.1+311.7)*43758.5453);}
-float3 rotate(float3 p){return p+2*cross(rotation.xyz,cross(rotation.xyz,p)+rotation.w*p);}
-// A point on a ring around the hand/emitter, centred on grip (bare hand) or on origin (torch).
-float3 around(float angle,float radius,float height){return rotate(float3(cos(angle)*radius,height,sin(angle)*radius+((options.y>4.5)?0.0:-.03)))+translation.xyz;}
-// Modes: 0 flame core, 1 ember or wisp, 2 glow, 3 lightning flash, 4 ice glint,
-// 5 frozen orb. data: x ramp or texture choice, y intensity, z texture spin.
-struct Pixel {float4 position:SV_Position;float2 uv:TEXCOORD0;float4 data:TEXCOORD1;nointerpolation uint mode:TEXCOORD2;};
-Pixel VS(uint vertex:SV_VertexID,uint sprite:SV_InstanceID) {
+// The kinds (elemental_hands.h Kind).
+static const uint Flame=0,Ember=1,Glow=2,Smoke=3,Arc=4,Bolt=5,Spark=6,Mist=7,Flake=8,Chunk=9,Orb=10,Flare=11,Core=12,Plasma=13;
+float3 rotate(float4 q,float3 p){return p+2*cross(q.xyz,cross(q.xyz,p)+q.w*p);}
+struct Pixel {float4 position:SV_Position;float2 uv:TEXCOORD0;nointerpolation uint index:TEXCOORD1;};
+Pixel VS(uint vertex:SV_VertexID,uint instance:SV_InstanceID) {
     const float2 corners[6]={float2(-1,-1),float2(-1,1),float2(1,1),float2(-1,-1),float2(1,1),float2(1,-1)};
-    const float2 corner=corners[vertex];
-    const float t=options.x,look=options.y,pulse=options.w,seed=sprite*7.31+translation.w*53;
-    Pixel o;o.uv=corner*float2(.5,-.5)+.5;o.data=float4(0,1+pulse,0,0);o.mode=1;
-    float3 p=around(0,0,0);float2 size=0;
-    if(look>4.5) { // Torch flame & rising embers
-        const float3 viewDir=dot(translation.xyz,translation.xyz)>1e-4?normalize(translation.xyz):float3(0,0,-1);
-        const float3 sDir=cross(viewDir,up.xyz);
-        const float3 h1=dot(sDir,sDir)>1e-6?normalize(sDir):float3(1,0,0);
-        const float3 h2=cross(up.xyz,h1);
-
-        if(sprite==0) { // Core roaring flame pillar rooted right on the club head
-            o.mode=0;o.data.x=0;o.data.z=t*1.20;
-            o.data.y=1.45+pulse*.4;
-            size=float2(.070,.125);
-            p=translation.xyz+up.xyz*(size.y*.45);
-        } else if(sprite==1) { // 3D swirling flame tongue (front/right)
-            o.mode=0;o.data.x=1;o.data.z=t*1.55+seed;
-            o.data.y=1.20+pulse*.3;
-            size=float2(.060,.110);
-            const float a=t*3.2+seed;
-            p=translation.xyz+up.xyz*(size.y*.50)+(h1*cos(a)+h2*sin(a))*.010;
-        } else if(sprite==2) { // 3D counter-swirling flame tongue (back/left)
-            o.mode=0;o.data.x=0;o.data.z=-t*1.10+seed;
-            o.data.y=1.15+pulse*.3;
-            size=float2(.056,.105);
-            const float a=-t*2.8+seed+3.14159;
-            p=translation.xyz+up.xyz*(size.y*.50)+(h1*cos(a)+h2*sin(a))*.010;
-        } else if(sprite==3) { // Leaping high flame tip
-            o.mode=0;o.data.x=1;o.data.z=t*2.20+seed;
-            o.data.y=(1.0+pulse*.3)*(.85+.15*sin(t*11.0+seed));
-            size=float2(.042,.085);
-            const float a=t*4.5+seed;
-            p=translation.xyz+up.xyz*(.060+sin(t*10.0+seed)*.010)+(h1*cos(a)+h2*sin(a))*.006;
-        } else if(sprite==4) { // Bright combustion core right at the head
-            o.mode=1;
-            o.data.y=(1.10+pulse*.4)*(.92+.08*sin(t*7.0+seed));
-            size=float2(.080,.085);
-            p=translation.xyz+up.xyz*(size.y*.15);
-        } else { // Rising embers & fiery sparks
-            const float phase=frac(t*.75+hash(seed));
-            const float a=hash(seed+1.0)*Tau+phase*3.0;
-            const float r=(.006+.020*hash(seed+2.0))*(1.0+phase*.8);
-            size=float2(1,1)*.011*(1.0-phase*.6);
-            p=translation.xyz+up.xyz*(.01+phase*.26)+(h1*cos(a)+h2*sin(a))*r;
-            o.mode=1;
-            o.data.y=(1.0-phase*.75)*2.5;
-        }
-    } else if(look<.5||look<1.5&&sprite>3) { // Fire Bolt, and Fireball's embers
-        if(sprite==0){o.mode=0;p+=up.xyz*.008;size=float2(.018,.026);}
-        else {
-            const float phase=frac(t*.55+hash(seed));
-            p=around(hash(seed+1)*Tau,.012*hash(seed+2),0)+up.xyz*(.005+phase*.06);
-            size=.0045*(1-phase*.6);o.data.y*=1-phase;
-        }
-    } else if(look<1.5) { // Fireball
-        if(sprite==0){o.mode=0;o.data.x=1;o.data.z=t*.9;size=.022;}
-        else {p=around(t*1.4+sprite*Tau/3,.046,sin(t*2.1+sprite)*.008);size=.009;o.data.y*=.8;}
-    } else if(look<2.5) { // Charged Bolt
-        if(sprite==0){o.mode=2;o.data.x=1;size=.02;o.data.y*=.65;}
-        else if(sprite<7) {
-            const float tick=floor(t*13+hash(seed)*5);
-            p=around(t*(sprite%2?2.4:-1.9)+sprite*1.05+hash(tick+seed)*.6,.035+.012*hash(seed+tick*.3),(hash(seed+tick)-.5)*.05);
-            size=.017*(.55+.6*hash(tick*3.1+seed))*step(.3,hash(tick*1.7+seed));
-            o.mode=3;o.data.y*=1.25;o.data.z=hash(tick*5.3+seed)*Tau;
-        }
-    } else { // Ice Bolt, Ice Blast
-        const bool blast=look>3.5;
-        if(sprite==0) {
-            if(blast){o.mode=5;o.data.z=t*.6;size=.021;}
-            else {o.mode=2;o.data.x=2;size=.02;o.data.y*=.55;}
-        } else if(sprite<(blast?5u:6u)) {
-            const float count=blast?4:5,twinkle=.55+.45*sin(t*4.5+hash(seed)*Tau);
-            p=around(t*.7+sprite*Tau/count,blast?.045:.042,sin(t*1.3+sprite*1.7)*.012);
-            size=.014*twinkle;o.mode=4;o.data.x=blast?1:0;o.data.y*=.7+.5*twinkle;o.data.z=t*.4+sprite;
-        }
-    }
-    size*=1+.35*pulse;
-    if(size.x<=0){o.position=float4(0,0,-1,1);return o;} // unused or dark this tick: clipped
-    // Face the eye, upright to the room.
-    const float3 view=normalize(p),side=cross(view,up.xyz);
-    const float3 right=dot(side,side)>1e-6?normalize(side):float3(1,0,0),upward=cross(right,view);
-    p+=right*corner.x*size.x+upward*corner.y*size.y;
+    const float2 c=corners[vertex];
+    const Particle q=particles[instance];
+    Pixel o;o.uv=c*float2(.5,-.5)+.5;o.index=instance;
+    const float3 centre=rotate(inverse,q.p-position.xyz);
+    const float3 view=dot(centre,centre)>1e-8?normalize(centre):float3(0,0,-1);
+    const float3 roomUp=rotate(inverse,float3(0,1,0));
+    float halfHeight=q.size,halfWidth=q.size*q.aspect;
+    float3 up=roomUp-view*dot(roomUp,view);
+    bool turned=true;
+    if(q.kind==Arc||q.kind==Bolt) {   // along its axis
+        const float3 axis=rotate(inverse,q.v);up=axis-view*dot(axis,view);turned=false;
+    } else if(q.stretch>0) {          // along its velocity
+        const float3 velocity=rotate(inverse,q.v);
+        const float3 along=velocity-view*dot(velocity,view);
+        if(dot(along,along)>1e-8){up=along;halfHeight=q.size+length(along)*q.stretch*.5;turned=false;}
+    } else if(q.kind==Flame)turned=false;   // upright in the room
+    up=dot(up,up)>1e-8?normalize(up):float3(0,1,0);
+    float3 right=normalize(cross(view,up));up=cross(right,view);
+    if(turned){const float s=sin(q.rotation),k=cos(q.rotation);const float3 r=right*k+up*s;up=up*k-right*s;right=r;}
+    const float3 p=centre+right*c.x*halfWidth+up*c.y*halfHeight;
     o.position=mul(float4(p,1),projection);
     return o;
 }
 float3 srgb(float3 c){return lerp(12.92*c,1.055*pow(max(c,0),1/2.4)-.055,step(.0031308,c));}
 float2 spin(float2 uv,float angle){const float s=sin(angle),c=cos(angle);uv-=.5;return float2(c*uv.x-s*uv.y,s*uv.x+c*uv.y)+.5;}
+// A frame of an atlas of cols x rows, row by row from the top left; the quad's uv inset a little so a
+// neighbouring frame never bleeds in.
+float2 cell(float2 uv,uint frame,uint cols,uint rows){uv=clamp(uv,.01,.99);return (float2(frame%cols,(frame/cols)%rows)+uv)/float2(cols,rows);}
+float3 ramp(uint which,float v) {
+    const float2 at=float2(saturate(v),.5);
+    return which==0?flameRamp.Sample(edge,at).rgb:which==1?lightningRamp.Sample(edge,at).rgb:which==2?iceRamp.Sample(edge,at).rgb:frostRamp.Sample(edge,at).rgb;
+}
 float4 PS(Pixel i):SV_Target {
-    const float t=options.x;
-    float v;float3 color;
-    if(i.mode==0) {
-        const float shape=softFlame.Sample(edge,i.uv)*lerp(.6,1,i.uv.y);
-        const float plate=i.data.x<.5?firePlate.Sample(tiled,i.uv*float2(.55,.45)+float2(0,t*.55)):
-            fireballPlate.Sample(tiled,spin(i.uv,i.data.z)*.6+float2(t*.05,0));
-        v=saturate(shape*(.2+1.15*plate))*i.data.y;
-        color=flameRamp.Sample(edge,float2(saturate(v),.5)).rgb;
-    } else if(i.mode==1) {
-        v=softFlame.Sample(edge,i.uv)*i.data.y;
-        color=flameRamp.Sample(edge,float2(saturate(v*.9+.1),.5)).rgb;
-    } else if(i.mode==2) {
-        v=glow.Sample(edge,i.uv)*i.data.y;
-        color=i.data.x<1.5?lightningRamp.Sample(edge,float2(saturate(v),.5)).rgb:iceRamp.Sample(edge,float2(saturate(v*.7),.5)).rgb;
-    } else if(i.mode==3) {
-        v=flash.Sample(edge,spin(i.uv,i.data.z))*i.data.y;
-        color=lightningRamp.Sample(edge,float2(saturate(v),.5)).rgb;
-    } else if(i.mode==4) {
-        v=glint.Sample(edge,spin(i.uv,i.data.z))*i.data.y;
-        color=i.data.x<.5?iceRamp.Sample(edge,float2(saturate(v*.8),.5)).rgb:frostRamp.Sample(edge,float2(saturate(v),.5)).rgb;
-    } else {
-        const float shards=frozenOrb.Sample(tiled,spin(i.uv,i.data.z)).r;
-        v=saturate(glow.Sample(edge,i.uv)*(.35+.9*shards))*i.data.y;
-        color=frostRamp.Sample(edge,float2(saturate(v),.5)).rgb;
+    const Particle q=particles[i.index];
+    const float t=options.x,life=q.life;
+    const float fade=saturate(life*8)*saturate((1-life)*2.5);   // in quickly, out over the last part
+    const float2 uv=i.uv;
+    float v=0,alpha=0;float3 color=0;
+    if(q.kind==Flame) {   // the game's fire flipbook, its 64 frames over the flame's life, licked by Fire Bolt's distortion
+        const float2 d=distortion.Sample(tiled,uv*.55+float2(q.seed,-t*.8)).xy*2-1;
+        const float2 at=uv+d*.035*(1-uv.y);
+        const float f=min(q.frame+life*57,63.0),f0=floor(f);
+        const float a=fireFlipbook.Sample(edge,cell(at,uint(f0),8,8)),b=fireFlipbook.Sample(edge,cell(at,uint(min(f0+1,63.0)),8,8));
+        v=lerp(a,b,f-f0)*q.intensity*fade;
+        color=ramp(0,v*1.1);alpha=saturate(v*1.6);
+    } else if(q.kind==Ember||q.kind==Spark) {
+        v=glowDot.Sample(edge,uv)*q.intensity*fade;
+        color=ramp(q.kind==Ember?0:1,.55+.45*saturate(v));alpha=saturate(v);
+    } else if(q.kind==Glow) {
+        v=glowDot.Sample(edge,uv)*q.intensity*fade;
+        color=ramp(q.frame,v*.85);alpha=saturate(v);
+    } else if(q.kind==Smoke) {   // dark, warm while young
+        v=smoke.Sample(edge,cell(uv,q.frame,2,2));
+        alpha=saturate(v*q.intensity*fade*.30);
+        color=lerp(float3(.05,.045,.04),float3(.30,.12,.04),saturate(1-life*2.5));
+    } else if(q.kind==Arc||q.kind==Bolt) {   // the arcs lie across their frames: turned along the axis
+        v=(q.kind==Arc?arcs.Sample(edge,cell(uv.yx,q.frame,4,2)):bolts.Sample(edge,cell(uv,q.frame,4,2)))*q.intensity*fade;
+        color=ramp(1,v);alpha=saturate(v*1.2);
+    } else if(q.kind==Mist) {
+        v=wisp.Sample(edge,cell(uv,q.frame,2,2));
+        alpha=saturate(v*q.intensity*fade*.40);
+        color=ramp(3,.25+.45*v)*.95;
+    } else if(q.kind==Flake||q.kind==Chunk) {   // snowflakes in the left column, ice chunks in the right
+        const float twinkle=.7+.3*sin(t*9+q.seed*7);
+        v=flakes.Sample(edge,cell(uv,q.frame*2+(q.kind==Chunk?1:0),2,4)).a*q.intensity*fade*twinkle;
+        color=ramp(q.kind==Flake?2:3,.45+.55*saturate(v));alpha=saturate(v);
+    } else if(q.kind==Orb) {   // the Frozen Orb's shards turning, an ice shimmer over them
+        const float shards=frozenOrb.Sample(tiled,spin(uv,q.rotation)).r;
+        const float3 caustic=iceCaustic.Sample(tiled,uv*.8+float2(t*.05,t*.03)).rgb;
+        v=saturate(glowCard.Sample(edge,uv)*(.35+.9*shards+.35*dot(caustic,1.0/3)))*q.intensity;
+        color=ramp(3,v);alpha=saturate(v*1.3);
+    } else if(q.kind==Flare) {
+        v=star.Sample(edge,uv)*q.intensity*fade;
+        color=ramp(q.frame,.5+.5*saturate(v));alpha=saturate(v);
+    } else if(q.kind==Core) {   // the fireball's plate turning, licked by the distortion, round
+        const float2 d=distortion.Sample(tiled,uv*.7+float2(t*.3,-t*.5)).xy*2-1;
+        const float plate=fireballPlate.Sample(tiled,spin(uv,q.rotation)*.6+float2(t*.05,0)+d*.06);
+        v=saturate(glowCard.Sample(edge,uv)*(.25+1.2*plate))*q.intensity;
+        color=ramp(0,v);alpha=saturate(v*1.4);
+    } else {   // Plasma: Charged Bolt's own flash, two layers turning against each other
+        const float a=flash.Sample(edge,spin(uv,q.rotation)),b=flash.Sample(edge,spin(uv,1.3-q.rotation*1.7));
+        v=(a*.7+b*.5)*q.intensity;
+        color=ramp(1,.35+.5*saturate(v));alpha=saturate(v);
     }
-    const float alpha=saturate(v*1.4)*options.z;
-    if(up.w>.5)color=srgb(color);
-    return float4(color*alpha,alpha*.55); // premultiplied: partly additive glow
+    if(position.w>.5)color=srgb(color);
+    return float4(color*alpha,alpha*q.blend);
 }
 )";
 std::filesystem::path Directory() {
@@ -330,11 +310,16 @@ void UploadSprites(ID3D12Device* device,ID3D12CommandQueue* queue,const std::vec
     Require(wait==WAIT_OBJECT_0,"sprite upload timeout");
 }
 }
+// The particles' upload ring: each Render takes the next of RingSlots, so a pass still on the GPU (the
+// other eye's, a frame or two before) is never written over.
+constexpr unsigned RingSlots=16;
+constexpr size_t SlotBytes=MaxDrawn*sizeof(Particle);
 struct Renderer::Impl {
     ComPtr<ID3D12Device> device;
     ComPtr<ID3D12RootSignature> root,spriteRoot;
     ComPtr<ID3D12PipelineState> pipeline,spritePipeline;
     ComPtr<ID3D12DescriptorHeap> rtv,srv;
+    ComPtr<ID3D12Resource> ring;uint8_t* mapped=nullptr;unsigned next=0;
     Textures textures;
     uint32_t width=0,height=0,stride=0;
     DXGI_FORMAT format=DXGI_FORMAT_UNKNOWN;
@@ -399,27 +384,35 @@ bool Renderer::Initialize(ID3D12Device* device,ID3D12CommandQueue* queue,DXGI_FO
             Require(queue!=nullptr,"no upload queue");
             const auto textures=sprites::Parse(ReadCache((directory.empty()?Directory():directory)/L"sprites.ssp"));
             ComPtr<ID3DBlob> spriteVs,spritePs;
-            shader(SpriteSource,sizeof SpriteSource,"VS","vs_5_0",spriteVs);shader(SpriteSource,sizeof SpriteSource,"PS","ps_5_0",spritePs);
+            shader(ParticleSource,sizeof ParticleSource,"VS","vs_5_0",spriteVs);shader(ParticleSource,sizeof ParticleSource,"PS","ps_5_0",spritePs);
+            D3D12_ROOT_PARAMETER particles[3]{};
+            particles[0].ParameterType=D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;particles[0].Constants={0,0,28};
+            particles[0].ShaderVisibility=D3D12_SHADER_VISIBILITY_ALL;
+            particles[1].ParameterType=D3D12_ROOT_PARAMETER_TYPE_SRV;particles[1].Descriptor={sprites::Count,0};   // t21, after the textures
+            particles[1].ShaderVisibility=D3D12_SHADER_VISIBILITY_ALL;
             D3D12_DESCRIPTOR_RANGE range{D3D12_DESCRIPTOR_RANGE_TYPE_SRV,sprites::Count,0,0,0};
-            parameters[1].ParameterType=D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;parameters[1].DescriptorTable={1,&range};
-            parameters[1].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
+            particles[2].ParameterType=D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;particles[2].DescriptorTable={1,&range};
+            particles[2].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
             D3D12_STATIC_SAMPLER_DESC samplers[2]{};
             for(unsigned i=0;i<2;++i) {
                 auto& s=samplers[i];s.Filter=D3D12_FILTER_MIN_MAG_MIP_LINEAR;s.ShaderRegister=i;s.MaxLOD=D3D12_FLOAT32_MAX;
                 s.AddressU=s.AddressV=s.AddressW=i?D3D12_TEXTURE_ADDRESS_MODE_CLAMP:D3D12_TEXTURE_ADDRESS_MODE_WRAP;
                 s.ComparisonFunc=D3D12_COMPARISON_FUNC_ALWAYS;s.ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
             }
-            rootSignature({2,parameters,2,samplers,D3D12_ROOT_SIGNATURE_FLAG_NONE},p->spriteRoot);
+            rootSignature({3,particles,2,samplers,D3D12_ROOT_SIGNATURE_FLAG_NONE},p->spriteRoot);
             pipeline(p->spriteRoot.Get(),spriteVs,spritePs,true,p->spritePipeline);
+            p->ring=UploadBuffer(device,RingSlots*SlotBytes);
+            D3D12_RANGE none{0,0};void* mapped=nullptr;Check(p->ring->Map(0,&none,&mapped),"particle ring map failed");
+            p->mapped=static_cast<uint8_t*>(mapped);
             UploadSprites(device,queue,textures,p->srv,p->textures);
         } catch(const std::exception& e) {
-            unavailable=e.what();p->spritePipeline.Reset();p->spriteRoot.Reset();p->srv.Reset();p->textures={};
+            unavailable=e.what();p->spritePipeline.Reset();p->spriteRoot.Reset();p->srv.Reset();p->textures={};p->ring.Reset();p->mapped=nullptr;
         }
         impl=std::move(p);
         if(log) {
             const std::string message=unavailable.empty()?
-                "Frame elemental hands: the spells' own effect textures from your game are ready (prototype overlay)":
-                "Frame elemental hands: spell textures unavailable ("+unavailable+"); procedural aura ready (prototype overlay)";
+                "Frame elemental hands: particle effects ready, with "+std::to_string(sprites::Count)+" of your game's effect textures":
+                "Frame elemental hands: spell textures unavailable ("+unavailable+"); procedural aura ready";
             log(message.c_str());
         }
         return true;
@@ -443,14 +436,36 @@ bool Renderer::Render(ID3D12GraphicsCommandList* list,ID3D12Resource* target,uns
     const D3D12_VIEWPORT viewport{0,0,float(p.width),float(p.height),0,1};
     const D3D12_RECT scissor{0,0,LONG(p.width),LONG(p.height)};
     list->RSSetViewports(1,&viewport);list->RSSetScissorRects(1,&scissor);
-    const bool textured=p.spritePipeline!=nullptr;
-    if(textured) {
+    if(p.spritePipeline) {   // the particles (elemental_particles.h), both hands in one draw
+        const unsigned count=std::min(scene.count,MaxDrawn);
+        if(!count||!p.mapped)return false;
+        // Those that cover what is behind first, the farthest first; then those that add light (any order).
+        struct Order {float key;unsigned index;};
+        std::array<Order,MaxDrawn> order;
+        for(unsigned i=0;i<count;++i) {
+            const auto& q=scene.drawn[i];const auto d=q.p-view.p;
+            order[i]={q.blend>.5f?-math::Dot(d,d):1e9f,i};
+        }
+        std::sort(order.begin(),order.begin()+count,[](const Order& a,const Order& b){return a.key<b.key;});
+        const unsigned slot=p.next++%RingSlots;
+        auto* out=reinterpret_cast<Particle*>(p.mapped+slot*SlotBytes);
+        for(unsigned i=0;i<count;++i)out[i]=scene.drawn[order[i].index];
+        float constants[28]{};math::Projection(fov.left,fov.right,fov.down,fov.up,.02f,constants);
+        const auto inverse=math::Conjugate(view.q);
+        constants[16]=inverse.x;constants[17]=inverse.y;constants[18]=inverse.z;constants[19]=inverse.w;
+        constants[20]=view.p.x;constants[21]=view.p.y;constants[22]=view.p.z;constants[23]=p.encode?1:0;
+        constants[24]=scene.time;
         list->SetGraphicsRootSignature(p.spriteRoot.Get());list->SetPipelineState(p.spritePipeline.Get());
         ID3D12DescriptorHeap* heaps[]={p.srv.Get()};list->SetDescriptorHeaps(1,heaps);
-        list->SetGraphicsRootDescriptorTable(1,p.srv->GetGPUDescriptorHandleForHeapStart());
-    } else {
-        list->SetGraphicsRootSignature(p.root.Get());list->SetPipelineState(p.pipeline.Get());
+        list->SetGraphicsRoot32BitConstants(0,28,constants,0);
+        list->SetGraphicsRootShaderResourceView(1,p.ring->GetGPUVirtualAddress()+slot*SlotBytes);
+        list->SetGraphicsRootDescriptorTable(2,p.srv->GetGPUDescriptorHandleForHeapStart());
+        list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        list->DrawInstanced(6,count,0,0);
+        return true;
     }
+    // Without the game's textures: the original procedural aura, per hand.
+    list->SetGraphicsRootSignature(p.root.Get());list->SetPipelineState(p.pipeline.Get());
     list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     const auto inverse=math::Conjugate(view.q);
     const auto up=math::Rotate(inverse,{0,1,0});
@@ -464,10 +479,10 @@ bool Renderer::Render(ID3D12GraphicsCommandList* list,ID3D12Resource* target,uns
         const auto translation=math::Rotate(inverse,hand.pose.p-view.p);
         constants[16]=rotation.x;constants[17]=rotation.y;constants[18]=rotation.z;constants[19]=rotation.w;
         constants[20]=translation.x;constants[21]=translation.y;constants[22]=translation.z;constants[23]=float(h);
-        constants[24]=scene.time;constants[25]=textured?float(SpellLook(hand.skill,hand.element)):float(hand.element);
+        constants[24]=scene.time;constants[25]=float(hand.element);
         constants[26]=std::clamp(hand.opacity,0.f,1.f);constants[27]=std::clamp(hand.pulse,0.f,1.f);
         constants[28]=up.x;constants[29]=up.y;constants[30]=up.z;constants[31]=p.encode?1:0;
-        list->SetGraphicsRoot32BitConstants(0,32,constants,0);list->DrawInstanced(6,textured?SpritesPerHand:32,0,0);drawn=true;
+        list->SetGraphicsRoot32BitConstants(0,32,constants,0);list->DrawInstanced(6,32,0,0);drawn=true;
     }
     return drawn;
 }

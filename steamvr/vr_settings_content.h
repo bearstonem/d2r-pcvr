@@ -23,8 +23,8 @@
 //   spelling, one vocabulary across pages.
 // - Every help sentence is true of the code (vr_settings_help.h holds the long
 //   form); where a draft said more than the code does, the code wins.
-// - Presets leave out StereoRendering, DeferGpuWait, ElementalHands,
-//   CompanionAi and the calibration keys (the owner's calls).
+// - Presets leave out StereoRendering, DeferGpuWait, CompanionAi and the
+//   calibration keys (the owner's calls).
 // The checks at the end of this file enforce these at compile time.
 #include "vr_settings.h"
 #include "vr_settings_draw.h"
@@ -40,9 +40,10 @@
 namespace framevr::settings::content {
 using draw::Icon;
 
-// Rail groups: a thin divider between groups. Tools: Presets heads the rail;
-// Header: Guide and What's new, opened from the page band.
-enum class Group : uint8_t { Tools, You, Fight, Info, World, Device, Header };
+// Rail groups: Gameplay to Graphics each have a rail row (GroupTable) that opens to
+// their pages. Tools: Presets heads the rail on its own row; Header: Guide,
+// What's new and More, opened from the page band.
+enum class Group : uint8_t { Tools, Gameplay, Comfort, Controls, Interface, Graphics, Header };
 
 // How a row is controlled.
 enum class RowKind : uint8_t {
@@ -127,6 +128,7 @@ struct Override {
     bool instead=false;              // shows only when the previous override's row does not (RowShown: snap / smooth turn speed)
     const char* besideLabel=nullptr; // beside: the word before its value in the box ("Big:" -> "Big: 600"); nullptr: the label; "": the value alone
     bool inFilter=false;             // a toggle that is one switch in the previous Filter row's card, no row of its own; its label is its word there (Loot beams: Unique, Set, Rare, Runes)
+    View alsoOn=View::Count;         // the same live row drawn on this later page too, at its top with no section: one setting, one ini key, one Row(key)
 };
 
 // One row of the menu as the layout reads it: a Definitions entry merged with
@@ -153,7 +155,10 @@ struct ContentRow {
     bool beside=false;          // a toggle or a number on the previous row's right half (Override::beside), no row of its own
     const char* besideLabel=nullptr;   // the word before its value there (Override::besideLabel)
     bool inFilter=false;        // one switch in the previous Filter row's card, no row of its own (Override::inFilter)
+    View alsoOn=View::Count;    // the second page that draws this row (Override::alsoOn)
 };
+// Whether a page draws this row: its own, or the one it is also on.
+constexpr bool OnPage(const ContentRow& r,View v){return r.page==v||r.alsoOn==v;}
 
 // A section: 2-5 rows that share an object, titled in sentence case.
 struct ContentSection {
@@ -211,59 +216,100 @@ struct ContentTool {
 // three columns. Button names follow the Button names setting at paint time:
 // GuideControl replaces {R1}-{R4} / {L1}-{L4} with controllers::Labels::Button
 // (hand 0 right / 1 left; 1 primary face, 2 secondary, 3 and 4 the same with Grip).
+// Left is the off hand's column, Right the main hand's. A stick's push (stick) stays on its controller with
+// Sticks stay right-handed (hand_role.h Sticks), so left-handed it is listed in the other hand's column then;
+// a stick's click is the hand's and stays in its column.
 enum class GuideColumn : uint8_t { Left, Right, Panels };
 struct GuideLine {
     const char* control;
     const char* action;
     GuideColumn column=GuideColumn::Right;
+    bool stick=false;
 };
+// The column a line is listed in: its own, or the other hand's for a stick's push whose stick stays where a
+// right-handed player has it while the hands are mirrored.
+constexpr GuideColumn ColumnOf(const GuideLine& g,bool sticksKept){
+    if(!g.stick||!sticksKept||g.column==GuideColumn::Panels)return g.column;
+    return g.column==GuideColumn::Left?GuideColumn::Right:GuideColumn::Left;
+}
 
 // ---- pages ----
 
 inline constexpr ContentPage PageTable[]={
     {View::Presets,"Presets",Group::Tools,Icon::Presets,"Each preset sets only the rows it lists. Point at one to see what it changes.",false},
-    {View::Body,"Body",Group::You,Icon::Body,"Fit the mod to your hands, turning and play space.",true},
-    {View::Combat,"Combat",Group::Fight,Icon::Combat,"How your real swings, stabs and throws hit.",true},
-    {View::Aim,"Aim",Group::Fight,Icon::Aim,"Where your spells and skills go. Rows for other classes stay hidden.",true},
-    {View::Targets,"Targets",Group::Fight,Icon::Targets,"What you see of your aim. Nothing here changes where a skill goes.",true},
-    {View::Shield,"Shield",Group::Fight,Icon::Shield,"Bash, block and seat a shield on your arm.",true},
-    {View::Wrist,"Wrist",Group::Info,Icon::Wrist,"What your left hand shows when you look at it.",true},
-    {View::Interface,"Interface",Group::Info,Icon::Interface,"Game menus, button names and labels.",true},
-    {View::Survival,"Survival",Group::World,Icon::Survival,"Warnings when you are hurt, and how tough offline monsters are.",true},
-    {View::World,"World",Group::World,Icon::World,"Extra sights and moving things the mod adds to the game world.",true},
-    {View::Vibration,"Vibration",Group::Device,Icon::Haptics,"Controller vibration. Feel it uses the strength shown here, before you apply.",true},
-    {View::Performance,"Performance",Group::Device,Icon::Performance,"Everything that changes the frame rate, with the last second's frame times below.",true},
+    {View::Combat,"Combat",Group::Gameplay,Icon::Combat,"How your real swings, stabs and throws hit.",true},
+    {View::Targeting,"Targeting",Group::Gameplay,Icon::Aim,"Which monster or spot your spells and skills go to. Rows for other classes stay hidden.",true},
+    {View::Shield,"Shield",Group::Gameplay,Icon::Shield,"Bash, block and seat a shield on your arm.",true},
+    {View::Monsters,"Monsters",Group::Gameplay,Icon::Survival,"How tough offline monsters are, your mercenary and your summons. Outline and health bars: Interface.",true},
+    {View::Physics,"Physics",Group::Gameplay,Icon::World,"Things your hands and weapons can knock, roll and push.",true},
+    {View::Moving,"Moving",Group::Comfort,Icon::Fast,"Turning and how fast you move.",true},
+    {View::Body,"Body",Group::Comfort,Icon::Body,"Your height, arm span, play space and potion belt.",true},
+    {View::Hands,"Hands",Group::Controls,Icon::Controls,"Your hands and controllers: which hand does what, and whose button names.",true},
+    {View::Vibration,"Vibration",Group::Controls,Icon::Haptics,"Controller vibration. Feel it uses the strength shown here, before you apply.",true},
+    {View::Wrist,"Wrist",Group::Interface,Icon::Wrist,"What your left hand shows when you look at it.",true},
+    {View::Menus,"Menus",Group::Interface,Icon::Interface,"How game menus open, and how soon item details show.",true},
+    {View::Labels,"Labels",Group::Interface,Icon::Notes,"Names, health bars and loot beams in the world.",true},
+    {View::Outlines,"Outlines",Group::Interface,Icon::Targets,"Outline the monster you aim at. Turn it on to pick colors.",true},
+    {View::Warnings,"Warnings",Group::Interface,Icon::Survival,"Warnings when your life or mana runs low.",true},
+    {View::Performance,"Performance",Group::Graphics,Icon::Performance,"Image detail and how far you see, with the last second's frame times below.",true},
+    {View::Frames,"Frames",Group::Graphics,Icon::Fast,"How each frame is made: the eyes drawn, generated frames and the GPU wait.",true},
+    {View::Environment,"Environment",Group::Graphics,Icon::World,"Extra sights and sound the mod adds to the game world. Far objects: Graphics > Performance.",true},
     {View::Guide,"Guide",Group::Header,Icon::Controls,"Each stick opens its hand's wheel. Point the other hand's laser at a wedge to assign a skill.",false},
     {View::WhatsNew,"What's new",Group::Header,Icon::Notes,"Changes in this version of the mod.",false},
-    // Settings without a page: NVIDIA's flow quality and scale (Performance is full;
-    // only while NVIDIA is chosen), and, as a safety net, settings no override placed whose
-    // owner page is full or unknown (Fallback). Not meant as a home for settings.
-    {View::More,"More",Group::Header,Icon::Info,"NVIDIA's flow settings, and any setting not yet given a page.",true},
+    // A safety net: settings no override placed whose owner page is full or unknown
+    // (Fallback). Not meant as a home for settings.
+    {View::More,"More",Group::Header,Icon::Info,"Any setting not yet given a page.",true},
 };
 static_assert(std::size(PageTable)==size_t(View::Count),"one page per view, in View order");
+
+// The rail under Presets: a row per group, in this order; the open group's
+// pages hang under its row in PageTable order. A new page joins a group by its
+// PageTable line alone.
+struct ContentGroup {
+    Group id;
+    const char* name;           // the group row's Cinzel word: it must fit the row's 162 px (vr-settings-fit-test measures it)
+    Icon icon;
+};
+inline constexpr ContentGroup GroupTable[]={
+    {Group::Gameplay,"Gameplay",Icon::Combat},
+    {Group::Comfort,"Comfort",Icon::Comfort},
+    {Group::Controls,"Controls",Icon::Controls},
+    {Group::Interface,"Interface",Icon::Interface},
+    {Group::Graphics,"Graphics",Icon::Performance},
+};
+// The rail's rows at most (the layout's 78 px pitch from y 29 down to the frame):
+// Presets, every group row and the largest group's pages.
+constexpr int MaxRailRows=12,MaxGroupPages=6;
+// A rail group's entry, or nullptr (Tools and Header have no row).
+constexpr const ContentGroup* GroupOf(Group g){
+    for(const auto& r:GroupTable)if(r.id==g)return &r;
+    return nullptr;
+}
 
 // Every settings page's sections, in page order; a row's `section` counts
 // within its page.
 inline constexpr ContentSection SectionTable[]={
-    {View::Body,"Hands and moving"},{View::Body,"Potion belt"},{View::Body,"Measurements"},
     {View::Combat,"Melee"},{View::Combat,"Skills and throws"},
-    {View::Aim,"Spells and skills"},{View::Aim,"Ground skills"},
-    {View::Targets,"Monster outline"},{View::Targets,"Bow"},
+    {View::Targeting,"Target selection"},{View::Targeting,"Aiming"},{View::Targeting,"Ground targeting"},
     {View::Shield,"Bash and block"},{View::Shield,"Fit on the arm"},
-    {View::Wrist,"Life and mana"},{View::Wrist,"Map"},
-    {View::Interface,"Game menus"},{View::Interface,"Labels and bars"},{View::Interface,"Mana Warning"},
-    {View::Survival,"Low life"},{View::Survival,"Offline monsters"},
-    {View::World,"Sky and dungeons"},{View::World,"Things that move and glow"},
+    {View::Monsters,"Offline difficulty"},{View::Monsters,"Mercenary"},{View::Monsters,"Summons"},
+    {View::Physics,"Props"},{View::Physics,"Monsters and townsfolk"},{View::Physics,"Struck monsters"},
+    {View::Moving,"Turning"},{View::Moving,"Speed"},
+    {View::Body,"Play space"},{View::Body,"Potion belt"},
+    {View::Hands,"Hands and buttons"},
     {View::Vibration,"Strength"},
+    {View::Wrist,"Life and mana"},{View::Wrist,"Map"},
+    {View::Menus,"Game menus"},
+    {View::Labels,"Names and bars"},{View::Labels,"Loot beams"},
+    {View::Outlines,"Monster outline"},
+    {View::Warnings,"Low life"},{View::Warnings,"Low mana"},
     {View::Performance,"Image"},{View::Performance,"Draw distance"},
+    {View::Frames,"Frame generation"},
+    {View::Environment,"Sky and dungeons"},{View::Environment,"Glow"},
 };
 
 // ---- options and value words (ini order: option i has value min + i) ----
 
-inline constexpr Option DominantOptions[]={
-    {0,"Right","Reach your right hand over a shoulder and grip to swap weapon sets."},
-    {1,"Left","Reach your left hand over a shoulder and grip to swap weapon sets."},
-};
 // Skills go to the aimed monster, spell_lock bits: 1 spells, 2 bow skills.
 inline constexpr Option SpellLockOptions[]={
     {0,"Off","Spells and bow skills fly along your casting hand."},
@@ -309,6 +355,18 @@ inline constexpr Option MenuDistanceOptions[]={
     {1,"Medium","Menus 85 cm away, the main menu 1 m."},
     {2,"Far","Menus 1.15 m away, the main menu 1.3 m."},
 };
+// Echo (world_sound.h): the game's own reverb for the place you stand in, as the game mixes it or louder.
+inline constexpr Option EchoOptions[]={
+    {0,"Game's own","The echo as the game mixes it, made for speakers: faint in a headset."},
+    {1,"More","The game's echo twice as loud: caves, crypts and halls ring around you."},
+    {2,"Strong","Four times as loud, and it rings a quarter longer."},
+};
+// Monster names (d2rcam::monsterbars::Names): whose plates the game draws over monsters.
+inline constexpr Option MonsterNamesOptions[]={
+    {0,"All","Every monster shows its name and health when it is your target."},
+    {1,"Bosses, elites","Only bosses, champions, uniques and their minions show theirs. The default."},
+    {2,"None","No monster names or health over monsters, bosses included."},
+};
 inline constexpr Option TooltipOptions[]={
     {0,"Instant","Details show as soon as the laser reaches an item."},
     {1,"Short","Details show after the laser rests on an item for 0.3 s."},
@@ -349,7 +407,7 @@ inline constexpr Option FoveationStrengthOptions[]={
 inline constexpr Option FrameGenOptions[]={
     {0,"Off","No generated frames: the headset shows the frames the game draws."},
     {1,"FidelityFX","AMD FidelityFX optical flow on any graphics card. Dark areas can smear as you turn your head."},
-    {2,"NVIDIA","The optical flow of RTX and GTX 1660 cards (not GTX 1650 or 10-series). Its quality and scale show under More."},
+    {2,"NVIDIA","The optical flow of RTX and GTX 1660 cards (not GTX 1650 or 10-series). Its quality and scale show below."},
 };
 inline constexpr Option FrameGenPresetOptions[]={
     {0,"Slow","The most careful search for motion, and the most graphics card time."},
@@ -363,6 +421,7 @@ inline constexpr Option FrameGenScaleOptions[]={
 };
 
 inline constexpr ValueName OffAtZero[]={{0,"Off"}};
+inline constexpr ValueName WalkNames[]={{0,"Look"},{1,"Controller"}};   // walk_direction.h: where you look, or where the left controller points
 inline constexpr ValueName LeatherNames[]={{0,"Off"},{1,"Leather"},{2,"Menu only"}};   // leather::Style; owner 2026-10-29: "Hold Menu > Off/Leather/Menu Only"
 inline constexpr ValueName ByRangeAtZero[]={{0,"By range"}};
 inline constexpr ValueName LaserOffName[]={{LaserOff,"Off"}};
@@ -382,40 +441,6 @@ inline constexpr const char* DegreesPerSecond="\xc2\xb0/s";
 // ---- rows, page by page, section by section (layout::RowsOf keeps this order) ----
 
 inline constexpr Override Overrides[]={
-    // Body: Hands and turning
-    {.id="interactions.dominant_hand",.page=View::Body,.section="Hands and moving",.kind=RowKind::Choice,.label="Dominant hand",
-     .help="The hand that swaps weapon sets when you reach over a shoulder and grip. Your weapon and shield hands in the game stay the same.",
-     FRAMEVR_OPTIONS(DominantOptions)},
-    {.id="turn.smooth",.page=View::Body,.section="Hands and moving",.kind=RowKind::Toggle,.label="Smooth turning",
-     .help="On turns you smoothly with the right stick. Off turns you in steps, which many players find easier on the stomach.",
-     .warnWhen={.5f,"Can cause motion sickness"}},
-    {.id="turn.snap",.page=View::Body,.section="Hands and moving",.kind=RowKind::Stepper,.label="Snap turn angle",
-     .help="How far each flick of the right stick turns you. Smaller angles give finer steps.",
-     .format={.unit=Degrees}},
-    {.id="turn.speed",.page=View::Body,.section="Hands and moving",.kind=RowKind::Slider,.label="Smooth turn speed",
-     .help="How fast the right stick turns you, in degrees per second. Lower is gentler.",
-     .format={.unit=DegreesPerSecond},.warnWhen={150,"Fast turns are harder on the stomach"},.instead=true},
-    // Movement speed and its Stick toggle (main's #339, #346): one row, as main pairs them
-    // (PairOf); the toggle is its right half (.beside), so Body keeps 8 rows.
-    {.id="gameplay.run_speed_pct",.page=View::Body,.section="Hands and moving",.kind=RowKind::Slider,.label="Movement speed",
-     .help="Walk, or run from Base run (your class's run, no speed bonus) up to Full run (default: your gear's and skills' speed). Movement skills keep their own speed.",
-     FRAMEVR_NAMES(RunSpeedNames)},
-    {.id="gameplay.run_walk_toggle",.page=View::Body,.section="Hands and moving",.kind=RowKind::Toggle,.label="Stick toggle",
-     .help="On: right stick up switches between walking and Movement speed's run (from Walk, the full run). Not with a wheel open or while you look at the wrist map.",
-     .beside=true},
-    // Body: Potion belt
-    {.id="interactions.seated",.page=View::Body,.section="Potion belt",.kind=RowKind::Toggle,.label="Seated play",
-     .help="Raises the potion belt so you can reach it sitting down. Your body measurements still come from standing."},
-    {.id="interactions.waist_below_eyes",.page=View::Body,.section="Potion belt",.kind=RowKind::Slider,.label="Belt below eyes",
-     .help="How far below your eyes the potion belt sits when standing. Lower numbers raise the belt.",
-     .format={.unit="cm",.iniScale=.01f}},
-    {.id="interactions.belt_forward",.page=View::Body,.section="Potion belt",.kind=RowKind::Slider,.label="Belt forward reach",
-     .help="How far in front of your body the belt sits. Raise it if the belt is too close; lower it if you reach too far.",
-     .format={.unit="cm",.iniScale=.01f,.decimals=1}},
-    // Body: Measurements
-    {.id="calibration.version",.page=View::Body,.section="Measurements",.kind=RowKind::Button,.label="Height and arm span",
-     .help="Stand straight, then hold your arms out in a T. Measures your eye height and arm span so the world and your arms fit you."},
-
     // Combat: Melee
     {.id="gameplay.motion_controls",.page=View::Combat,.section="Melee",.kind=RowKind::Toggle,.label="Motion combat",
      .help="Swing weapons, draw bows, throw and use the belt with your hands. Keep this On: it is what makes the mod play in VR.",
@@ -426,6 +451,18 @@ inline constexpr Override Overrides[]={
     {.id="gameplay.melee_thrust_speed",.page=View::Combat,.section="Melee",.kind=RowKind::Slider,.label="Stab speed to hit",
      .help="How fast a forward stab along the blade must move to strike. Pull back before you stab again.",
      .format={.unit="m/s",.decimals=2}},
+    // Melee reach (Discord, 2026-11-08: hits "not registering because my body is desynchronized just slightly ...
+    // needlessly tight"): [gameplay] melee_reach_cm pads each monster's body for weapon and fist contacts. 0 by default.
+    {.id="gameplay.melee_reach_cm",.page=View::Combat,.section="Melee",.kind=RowKind::Slider,.label="Melee reach",
+     .help="A weapon or fist that passes this close beside a monster still hits it. Raise it if near misses don't count. Walls still block.",
+     .format={.unit="cm"}},
+    // Weapon heft and Bow bash (#443; Discord #ideas, 2026-11-04): one row, the page's last free one (8 at most).
+    // [gameplay] weapon_heft and bow_bash, both Off by default.
+    {.id="gameplay.weapon_heft",.page=View::Combat,.section="Melee",.kind=RowKind::Toggle,.label="Weapon heft",
+     .help="Heavy weapons need a long stroke of your arm for a full hit; a quick flick lands lighter. Daggers, claws and fists still hit fully with a flick."},
+    {.id="gameplay.bow_bash",.page=View::Combat,.section="Melee",.kind=RowKind::Toggle,.label="Bow bash",
+     .help="Swing your bow, string not drawn, into a monster to stagger it while you step back and aim. No damage; every 1.5 s at most, never act bosses.",
+     .beside=true,.besideLabel="Bow bash"},
     // Combat: Skills and throws
     {.id="gameplay.skill_gestures",.page=View::Combat,.section="Skills and throws",.kind=RowKind::Toggle,.label="Skills on your moves",
      .help="A trigger skill powers your real move: melee skills on a landed strike, Smite on a bash, arrow skills on a release. Off, every swing is plain."},
@@ -434,53 +471,42 @@ inline constexpr Override Overrides[]={
     {.id="gameplay.throw_lift_deg",.page=View::Combat,.section="Skills and throws",.kind=RowKind::Stepper,.label="Thrown weapon lift",
      .help="Your hand dips as you let go. This lifts javelins, knives, axes and thrown potions above that path. Minus lowers them; Off follows your hand.",
      .format={.unit=Degrees,.sign=true},FRAMEVR_NAMES(OffAtZero),.classes=Amazon|Barbarian|Assassin|WithThrown},
-
-    // Aim: Spells and skills (Aim with your view sits here: it is not a ground skill)
-    {.id="gameplay.spell_lock",.page=View::Aim,.section="Spells and skills",.kind=RowKind::Choice,.label="Skills go to the aimed monster",
+    // Targeting: Target selection
+    {.id="gameplay.spell_lock",.page=View::Targeting,.section="Target selection",.kind=RowKind::Choice,.label="Skills go to the aimed monster",
      .help="Casts go to the monster your hand points at, else the other hand's, else the one you look at, and stay on it until you let go.",
      FRAMEVR_OPTIONS(SpellLockOptions),.wraps=true},
-    {.id="gameplay.projectile_aim_assist",.page=View::Aim,.section="Spells and skills",.kind=RowKind::Choice,.label="Spell aim assist",
+    {.id="gameplay.projectile_aim_assist",.page=View::Targeting,.section="Target selection",.kind=RowKind::Choice,.label="Spell aim assist",
      .help="Helps supported hand spells find their monster. Bows and crossbows are always aimed by you alone.",
      FRAMEVR_OPTIONS(AimAssistOptions)},
-    {.id="gameplay.planar_spell_aim",.page=View::Aim,.section="Spells and skills",.kind=RowKind::Toggle,.label="Keep spell shots level",
+    // Targeting: Aiming
+    {.id="gameplay.planar_spell_aim",.page=View::Targeting,.section="Aiming",.kind=RowKind::Toggle,.label="Keep spell shots level",
      .help="On keeps straight spell shots level with the ground. Off lets you aim them up or down."},
-    {.id="gameplay.staff_point",.page=View::Aim,.section="Spells and skills",.kind=RowKind::Toggle,.label="Aim staff along arm",
+    {.id="gameplay.staff_point",.page=View::Targeting,.section="Aiming",.kind=RowKind::Toggle,.label="Aim staff along arm",
      .help="An upright staff casts along your arm, from shoulder through hand. Held out flat like a wand, it casts from its tip as before.",
      .classes=Sorceress|Druid|WithStaff},
-    {.id="gameplay.aim_follows_view",.page=View::Aim,.section="Spells and skills",.kind=RowKind::Toggle,.label="Aim with your view",
+    {.id="gameplay.aim_follows_view",.page=View::Targeting,.section="Aiming",.kind=RowKind::Toggle,.label="Aim with your view",
      .help="Only monsters in front of your face can be aimed at. A hand held out and pointing still picks its own monster."},
-    // Aim: Ground skills
-    {.id="gameplay.ground_aim",.page=View::Aim,.section="Ground skills",.kind=RowKind::Choice,.label="Ground skill aim",
-     .help="Where skills like Blizzard, Meteor, Fire Wall, traps and Bone Wall land.",
-     FRAMEVR_OPTIONS(GroundAimOptions),.classes=Sorceress|Assassin|Druid|Necromancer},
-    {.id="gameplay.landing_circles",.page=View::Aim,.section="Ground skills",.kind=RowKind::Toggle,.label="Landing circles",
-     .help="A circle on the floor in the skill's color shows where it will land. It fills up until the skill hits.",
-     .classes=Sorceress|Assassin|Druid|Necromancer},
-
-    // Targets: Monster outline (left before right)
-    {.id="gameplay.target_outline_pct",.page=View::Targets,.section="Monster outline",.kind=RowKind::Slider,.label="Monster outline",
-     .help="Outlines the monster you aim at, as strongly as the percentage. A hand held out picks its monster; otherwise the one you look at.",
-     .format={.unit="%"},FRAMEVR_NAMES(OffAtZero)},
-    {.id="gameplay.aim_highlights",.page=View::Targets,.section="Monster outline",.kind=RowKind::Choice,.label="Outlines shown",
-     .help="Outline only your dominant hand's monster, or one for each hand.",
-     FRAMEVR_OPTIONS(HighlightsOptions)},
-    {.id="gameplay.highlight_left_hue",.page=View::Targets,.section="Monster outline",.kind=RowKind::Swatch,.label="Left hand outline color",
-     .help="The left hand's outline color. By range: red near, orange mid, yellow far. Pick a color unlike the monsters' own.",
-     .format={.hueNames=true},FRAMEVR_NAMES(ByRangeAtZero)},
-    {.id="gameplay.highlight_right_hue",.page=View::Targets,.section="Monster outline",.kind=RowKind::Swatch,.label="Right hand outline color",
-     .help="The right hand's outline color. By range: red near, orange mid, yellow far. Pick a color unlike the monsters' own.",
-     .format={.hueNames=true},FRAMEVR_NAMES(ByRangeAtZero)},
-    // Targets: Bow
-    {.id="bow.path_laser_hue",.page=View::Targets,.section="Bow",.kind=RowKind::Swatch,.label="Arrow path line",
+    // Aim with your eyes (gaze_aim.h; owner 2026-11-08): the right half of Aim with your view's row, shown only on a
+    // headset that shares eye tracking (RowShown: Context::eyeTracker).
+    {.id="gameplay.aim_with_eyes",.page=View::Targeting,.section="Aiming",.kind=RowKind::Toggle,.label="Aim with your eyes",
+     .help="The monster you look at is aimed at by where your eyes look, not your head. A blink keeps it; if tracking is lost, your head aims.",
+     .beside=true,.besideLabel="Eyes"},
+    {.id="bow.path_laser_hue",.page=View::Targeting,.section="Aiming",.kind=RowKind::Swatch,.label="Arrow path line",
      .help="At full draw, a faint line shows the arrow's flight, up to 15 m, through walls. Not for crossbows, Multiple Shot, Guided Arrow or Strafe.",
      .format={.hueNames=true},FRAMEVR_NAMES(LaserOffName),.classes=Amazon|WithBow,.wraps=true},
-
+    // Targeting: Ground targeting
+    {.id="gameplay.ground_aim",.page=View::Targeting,.section="Ground targeting",.kind=RowKind::Choice,.label="Ground skill aim",
+     .help="Where skills like Blizzard, Meteor, Fire Wall, traps and Bone Wall land.",
+     FRAMEVR_OPTIONS(GroundAimOptions),.classes=Sorceress|Assassin|Druid|Necromancer},
+    {.id="gameplay.landing_circles",.page=View::Targeting,.section="Ground targeting",.kind=RowKind::Toggle,.label="Landing circles",
+     .help="A circle on the floor in the skill's color shows where it will land. It fills up until the skill hits.",
+     .classes=Sorceress|Assassin|Druid|Necromancer},
     // Shield: Bash and block
     {.id="gameplay.shield_bash_speed",.page=View::Shield,.section="Bash and block",.kind=RowKind::Slider,.label="Bash speed to hit",
      .help="How fast your shield hand must move to bash, Smite included. Move at least 12 cm in one stroke; twisting the wrist never bashes.",
      .format={.unit="m/s",.decimals=2}},
     {.id="gameplay.guard_strain_vignette",.page=View::Shield,.section="Bash and block",.kind=RowKind::Toggle,.label="Guard strain shadow",
-     .help="Blocking many hits in a row darkens the edge of your view, faster for rarer attackers. Off hides the shadow; strain still builds."},
+     .help="Blocking many hits in a row darkens the edge of your view: faster for rarer attackers, slower with higher Defense. Off hides the shadow; strain still builds."},
     // Shield: Fit on the arm
     {.id="gameplay.shield_grip_cm",.page=View::Shield,.section="Fit on the arm",.kind=RowKind::Slider,.label="Shield along forearm",
      .help="Slides the shield toward your elbow (+) so your hand reaches its strap, or toward your hand (-). About 3 cm suits a buckler.",
@@ -497,135 +523,99 @@ inline constexpr Override Overrides[]={
     {.id="gameplay.shield_roll_deg",.page=View::Shield,.section="Fit on the arm",.kind=RowKind::Slider,.label="Shield roll",
      .help="Turns the shield around your forearm; + turns it toward your little finger. +90\xc2\xb0 suits a controller held palm down.",
      .format={.unit=Degrees,.sign=true}},
-
-    // Wrist: Life and mana
-    {.id="interactions.vitals_location",.page=View::Wrist,.section="Life and mana",.kind=RowKind::Choice,.label="Life and mana",
-     .help="Which left-hand gesture shows your health and mana.",
-     FRAMEVR_OPTIONS(VitalsLocationOptions)},
-    {.id="interactions.vitals_tilt",.page=View::Wrist,.section="Life and mana",.kind=RowKind::Slider,.label="Life and mana tilt",
-     .help="Tilts the health and mana display on your hand; + tips its top toward you. The minimap keeps its own angle.",
-     .format={.unit=Degrees,.sign=true}},
-    // Wrist: Map
-    {.id="interactions.navigation_location",.page=View::Wrist,.section="Map",.kind=RowKind::Choice,.label="Map and compass",
-     .help="Which left-hand gesture shows the minimap and compass, separately from health and mana.",
-     FRAMEVR_OPTIONS(VitalsLocationOptions)},
-    {.id="interactions.map_top_down",.page=View::Wrist,.section="Map",.kind=RowKind::Choice,.label="Map view",
-     .help="The minimap or the game's full map, slanted or flat. The gold arrow shows which way you face. Look at the map and push the right stick to zoom.",
-     FRAMEVR_OPTIONS(MapViewOptions)},
-    {.id="interactions.map_rotate",.page=View::Wrist,.section="Map",.kind=RowKind::Toggle,.label="Turn map with you",
-     .help="On keeps the way you face at the top of the map. Off keeps north at the top and turns the arrow. Top-down views only."},
-    {.id="interactions.companion_counts",.page=View::Wrist,.section="Map",.kind=RowKind::Toggle,.label="Buffs and companions",
-     .help="Under the minimap: your companion counts, and the buffs, auras and harmful effects on you. Follows the minimap's gesture."},
-
-    // Interface: Game menus
-    {.id="hud.menu_distance",.page=View::Interface,.section="Game menus",.kind=RowKind::Choice,.label="Menu distance",
-     .help="How far away merchants, the stash and the main menu open, and the inventory with Hold menu Off. Point at one, hold Right Grip and push or pull it.",
-     FRAMEVR_OPTIONS(MenuDistanceOptions)},
-    // The leather menu (main's #360): its right half, as main pairs them (PairOf). Off / On / Menu only
-    // (owner 2026-10-29: the menu held without the hide), a stepper so it still fits beside.
-    {.id="interactions.leather_menu",.page=View::Interface,.section="Game menus",.kind=RowKind::Stepper,.label="Hold menu",
-     .help="Leather: the inventory and other tabs on a hide in your left hand; reach over your left shoulder and grip. Menu only: no hide. Off: in front of you.",
-     FRAMEVR_NAMES(LeatherNames),.beside=true,.besideLabel=""},   // the value alone: "Hold: Menu only" squeezed Menu distance's label
-    {.id="hud.tooltip_timing",.page=View::Interface,.section="Game menus",.kind=RowKind::Choice,.label="Item details delay",
-     .help="How soon an item's details pop up when you point the laser at it in a menu.",
-     FRAMEVR_OPTIONS(TooltipOptions)},
-    {.id="interactions.controller_labels",.page=View::Interface,.section="Game menus",.kind=RowKind::Choice,.label="Button names",
-     .help="Which controller's button names appear in help and menus. Only the names change, not what the buttons do.",
-     FRAMEVR_OPTIONS(ButtonNamesOptions)},
-    // Interface: Labels and bars
-    {.id="hud.labels_size",.page=View::Interface,.section="Labels and bars",.kind=RowKind::Slider,.label="Loot name size",
-     .help="Size of item names on the ground; 45% is the game's size. Hold the right stick down to show every nearby name.",
-     .format={.unit="%"}},
-    // Loot pick (#257; loot_aim.h): which dropped item A takes, On by default. Off: the game's nearest. The right
-    // half of Loot name size's row: Interface holds 8 rows (Arcane Decay, main's #395, took the last).
-    {.id="interactions.loot_pick",.page=View::Interface,.section="Labels and bars",.kind=RowKind::Toggle,.label="Loot pick",
-     .help="Hold your arm out and point at an item: A picks up that one, not the nearest, and its name shows. Too far away, A takes nothing.",
-     .beside=true},
-    {.id="hud.ordinary_mob_bars",.page=View::Interface,.section="Labels and bars",.kind=RowKind::Toggle,.label="Weak monster bars",
-     .help="Names and health bars over ordinary monsters. Bosses and elites always show theirs. Off keeps the view clear."},
-    // Loot beams (vr/loot_beam_scan.cpp): one row - its brightness slider, then a Filter button
-    // opening a card of four switches (owner 2026-10-31: "one line item that says loot beams and
-    // then the button says filter", a sub-menu "selecting on or off for each type of beam";
-    // 2026-11-01: a slider on that row "so players can decrease the current vibrancy").
-    {.id="loot.beams_brightness",.page=View::Interface,.section="Labels and bars",.kind=RowKind::Filter,.label="Loot beams",
-     .help="Pillars of light over unique, set and rare items and runes Vex and up. The slider sets their brightness; Filter chooses which.",
-     .format={.unit="%"}},
-    {.id="loot.beams_unique",.page=View::Interface,.section="Labels and bars",.kind=RowKind::Toggle,.label="Unique",
-     .help="A gold beam over unique items lying near you, until you pick them up.",.inFilter=true},
-    {.id="loot.beams_set",.page=View::Interface,.section="Labels and bars",.kind=RowKind::Toggle,.label="Set",
-     .help="A green beam over set items lying near you, until you pick them up.",.inFilter=true},
-    {.id="loot.beams_rare",.page=View::Interface,.section="Labels and bars",.kind=RowKind::Toggle,.label="Rare",
-     .help="A yellow beam over rare items lying near you. Rares drop often: Off lights only the rarer finds.",.inFilter=true},
-    {.id="loot.beams_runes",.page=View::Interface,.section="Labels and bars",.kind=RowKind::Toggle,.label="Runes",
-     .help="An orange beam over high runes lying near you, Vex and up.",.inFilter=true},
-
-    // Interface: Mana Warning
-    {.id="hud.arcane_decay",.page=View::Interface,.section="Mana Warning",.kind=RowKind::Toggle,.label="Arcane Decay",
-     .help="A subtle spectral vignette when mana is low, warning of magical depletion without obscuring your view."},
-    {.id="hud.arcane_fade",.page=View::Interface,.section="Mana Warning",.kind=RowKind::Toggle,.label="Fade animation",
-     .help="Smoothly fade the arcane vignette in and out as mana changes.",
-     .beside=true,.besideLabel="Fade"},
-    {.id="hud.mana_threshold_pct",.page=View::Interface,.section="Mana Warning",.kind=RowKind::Slider,.label="Starts below",
-     .help="Mana percentage below which the arcane decay warning begins to appear.",
-     .format={.unit="%"}},
-    {.id="hud.arcane_intensity_pct",.page=View::Interface,.section="Mana Warning",.kind=RowKind::Slider,.label="Effect intensity",
-     .help="Overall brightness and opacity scale of the arcane warning effect.",
-     .format={.unit="%"},.beside=true,.besideLabel="Strength"},   // beside Mana threshold: Interface holds 8 rows
-
-    // Survival: Low life
-    {.id="interactions.critical_alerts",.page=View::Survival,.section="Low life",.kind=RowKind::Toggle,.label="Low life and mana alert",
-     .help="A brief warning and a buzz when health or mana runs low. Set the buzz under Vibration > Low life and mana alerts."},
-    {.id="gameplay.low_life_heart_start",.page=View::Survival,.section="Low life",.kind=RowKind::Stepper,.label="Heartbeat starts at",
-     .help="The life level where a heartbeat starts. It grows louder and faster with every 10% you lose. Off silences it.",
-     .format={.unit="%"},FRAMEVR_NAMES(OffAtZero)},
-    {.id="hud.blood_visor",.page=View::Survival,.section="Low life",.kind=RowKind::Toggle,.label="Blood on visor",
-     .help="Blood splashes the edges of your view as life drops below 60%, 40% and 20%. Healing back up fades it."},
-    {.id="hud.blood_wipe",.page=View::Survival,.section="Low life",.kind=RowKind::Toggle,.label="Wipe blood by hand",
-     .help="Wave a hand side to side in front of your face, trigger released, to wipe the blood away. It does not heal you."},
-    // Survival: Offline monsters
-    {.id="gameplay.offline_players",.page=View::Survival,.section="Offline monsters",.kind=RowKind::Stepper,.label="Offline difficulty",
-     .help="Monsters as tough as in a game of this many players, with more experience and loot. Applies to monsters that spawn after Apply.",
+    // Monsters: Offline difficulty
+    {.id="gameplay.offline_players",.page=View::Monsters,.section="Offline difficulty",.kind=RowKind::Stepper,.label="Offline difficulty",
+     .help="Offline monsters scale for this many players, with more experience and loot.",
      .format={.unit="players"},FRAMEVR_NAMES(OfflinePlayersNames)},
-    {.id="gameplay.enemy_sight_pct",.page=View::Survival,.section="Offline monsters",.kind=RowKind::Slider,.label="Monster sight range",
+    {.id="gameplay.enemy_sight_pct",.page=View::Monsters,.section="Offline difficulty",.kind=RowKind::Slider,.label="Monster sight range",
      .help="How far away monsters notice you offline. 100% is the game's range; 300% is three times as far.",
      .format={.unit="%"}},
-    {.id="gameplay.companion_ai",.page=View::Survival,.section="Offline monsters",.kind=RowKind::Toggle,.label="Smarter mercenary",
+    // Monsters: Mercenary
+    {.id="gameplay.companion_ai",.page=View::Monsters,.section="Mercenary",.kind=RowKind::Toggle,.label="Smarter mercenary",
      .help="Your mercenary keeps close in fights, spots monsters as far as they spot you, and is moved behind you if it gets stuck."},
-    {.id="gameplay.companion_tactical_commands",.page=View::Survival,.section="Offline monsters",.kind=RowKind::Toggle,.label="Tactical commands",
+    {.id="gameplay.companion_tactical_commands",.page=View::Monsters,.section="Mercenary",.kind=RowKind::Toggle,.label="Tactical commands",
      .help="Point at your mercenary, hold Grip and pull Trigger, aim and let go: hold ground, prioritize monsters, or regroup.",
      .beside=true,.besideLabel="Commands"},
-
-    // World: Sky and dungeons
-    {.id="sky.enabled",.page=View::World,.section="Sky and dungeons",.kind=RowKind::Toggle,.label="Outdoor sky",
-     .help="Adds a sky above outdoor areas. It does not show more of the map."},
-    {.id="fog.enabled",.page=View::World,.section="Sky and dungeons",.kind=RowKind::Toggle,.label="Distance fog",
-     .help="Adds haze to distant outdoor scenery. Off makes far things sharper."},
-    // Fog distance (main's #366): the right half of Distance fog's row, as main pairs them (PairOf);
-    // shown while the fog is on (RowShown). A number beside a row opens the list of its steps.
-    {.id="fog.end",.page=View::World,.section="Sky and dungeons",.kind=RowKind::Slider,.label="Fog distance",
-     .help="Where the fog is complete; farther shows more of the distance. With Big objects on, set it past their distance to see them. The fog still starts near you.",
-     .beside=true,.besideLabel="Ends at"},
-    {.id="ceiling.enabled",.page=View::World,.section="Sky and dungeons",.kind=RowKind::Toggle,.label="Dungeon ceilings",
-     .help="Covers the open black space above you in supported dungeons. Building roofs are the game's own."},
-    // Dungeon torchlight (owner 2026-11-01): the game's own lights ([ceiling] torches), the right half of
-    // Dungeon ceilings' row - they are gathered only under it (RowEnabled), and Performance holds 8 rows already.
-    {.id="ceiling.torches",.page=View::World,.section="Sky and dungeons",.kind=RowKind::Toggle,.label="Dungeon torchlight",
-     .help="The game's own torches and braziers light the dungeon around them. Finding them scans game memory every 1.5 s: turn it off if dungeons stutter.",
-     .beside=true,.besideLabel="Torches"},
-    // World: Things that move and glow
-    {.id="interactions.bottle_physics",.page=View::World,.section="Things that move and glow",.kind=RowKind::Toggle,.label="Roll and break bottles",
+    // Mercenary potion assistance, independent of class and outline settings (#424, RobinHeggelund).
+    {.id="gameplay.merc_potion_assist",.page=View::Monsters,.section="Mercenary",.kind=RowKind::Toggle,.label="Merc potion throw autoaim",
+     .help="On: thrown potions feed your living mercenary wherever they land. Off: land within 4 m of its feet; misses keep the potion. Slow releases return it."},
+    // Monsters: Summons (#426, RobinHeggelund)
+    {.id="gameplay.summon_range_multiplier",.page=View::Monsters,.section="Summons",.kind=RowKind::Slider,.label="Summon range",
+     .help="Multiplies summon target search and owner-follow ranges together. Mercenaries and attack reach stay native. Apply, then restart the game.",.warn="Requires restart",.format={.unit="x",.decimals=2}},
+    // Physics: Props
+    {.id="interactions.bottle_physics",.page=View::Physics,.section="Props",.kind=RowKind::Toggle,.label="Roll and break bottles",
      .help="Empty bottles drop and roll. Potions thrown at your mercenary break where they hit; thrown traps and gas or oil potions stop at walls."},
-    {.id="interactions.prop_physics",.page=View::World,.section="Things that move and glow",.kind=RowKind::Toggle,.label="Knock over small props",
+    {.id="interactions.prop_physics",.page=View::Physics,.section="Props",.kind=RowKind::Toggle,.label="Knock over small props",
      .help="Cups, vases, books and stools tumble when your weapon, hand or shield hits them. Just for looks."},
-    {.id="interactions.body_physics",.page=View::World,.section="Things that move and glow",.kind=RowKind::Toggle,.label="Pushable bodies",
+    {.id="interactions.body_physics",.page=View::Physics,.section="Props",.kind=RowKind::Toggle,.label="Pushable bodies",
      .help="Your weapon, shield or fist pushes aside the limbs of monsters and townsfolk it meets, and they spring back. Just for looks. Motion combat in first person."},
-    {.id="interactions.elemental_hands",.page=View::World,.section="Things that move and glow",.kind=RowKind::Toggle,.label="Spell glow on hands",
-     .help="A Sorceress's hands show flames, sparks or frost from their trigger spell, and flare as it casts.",
-     .warn="May show through walls and weapons",.classes=Sorceress},
-    {.id="torch.flame",.page=View::World,.section="Things that move and glow",.kind=RowKind::Toggle,.label="Torch flame",
-     .help="A one-handed club with fire damage is a torch that lights the dark around you. This shows or hides its flame; the light stays either way."},
-
-    // Vibration: Strength (Feel it: haptics::PreviewLabel names each test)
+    // Physics: Monsters and townsfolk. Heads turn to you (look_at.h; owner, 2026-11-09), On by default. On this page
+    // beside Pushable bodies, the other drawn-only change to their poses (Monsters already has its three sections).
+    {.id="gameplay.look_at_you",.page=View::Physics,.section="Monsters and townsfolk",.kind=RowKind::Toggle,.label="Heads turn to you",
+     .help="Monsters, mercenaries and townsfolk within about 7 m turn their heads to your real head as you move. Just for looks. First person only."},
+    // Physics: Struck monsters (hit_reactions.h; [gameplay] hit_stagger and hit_knockback, both On by default)
+    {.id="gameplay.hit_stagger",.page=View::Physics,.section="Struck monsters",.kind=RowKind::Toggle,.label="Monsters stagger",
+     .help="A long, committed stroke that lands makes the monster flinch, whatever the damage. Each monster at most every 1.2 s; act bosses never."},
+    {.id="gameplay.hit_knockback",.page=View::Physics,.section="Struck monsters",.kind=RowKind::Toggle,.label="Heavy hits knock back",
+     .help="A full stroke of a two-handed weapon, spear, polearm or staff shoves the monster back. Each at most every 2.5 s; never bosses, uniques or champions."},
+    // Moving: Turning
+    {.id="turn.smooth",.page=View::Moving,.section="Turning",.kind=RowKind::Toggle,.label="Smooth turning",
+     .help="On turns you smoothly with the right stick. Off turns you in steps, which many players find easier on the stomach.",
+     .warnWhen={.5f,"Can cause motion sickness"}},
+    {.id="turn.snap",.page=View::Moving,.section="Turning",.kind=RowKind::Stepper,.label="Snap turn angle",
+     .help="How far each flick of the right stick turns you. Smaller angles give finer steps.",
+     .format={.unit=Degrees}},
+    {.id="turn.speed",.page=View::Moving,.section="Turning",.kind=RowKind::Slider,.label="Smooth turn speed",
+     .help="How fast the right stick turns you, in degrees per second. Lower is gentler.",
+     .format={.unit=DegreesPerSecond},.warnWhen={150,"Fast turns are harder on the stomach"},.instead=true},
+    // Moving: Speed
+    // Movement speed (main's #339). Its Stick toggle (#346) is on Hands: it changes what the stick does.
+    {.id="gameplay.run_speed_pct",.page=View::Moving,.section="Speed",.kind=RowKind::Slider,.label="Movement speed",
+     .help="Walk, or run from Base run (your class's run, no speed bonus) up to Full run (default: your gear's and skills' speed). Movement skills keep their own speed.",
+     FRAMEVR_NAMES(RunSpeedNames)},
+    // Body: Play space
+    {.id="interactions.seated",.page=View::Body,.section="Play space",.kind=RowKind::Toggle,.label="Seated play",
+     .help="Raises the potion belt so you can reach it sitting down. Your body measurements still come from standing."},
+    // Room follows you (room_steps.h; Discord, 2026-11-04: "my character's feet stay anchored near the calibration
+    // point while my body follows the headset"): the right half of Seated play's row, shown while it is off (RowShown).
+    {.id="gameplay.room_steps",.page=View::Body,.section="Play space",.kind=RowKind::Toggle,.label="Room follows you",
+     .help="Your hero's spot follows you as you move in your room, so monsters attack where you stand. Walls stop it. Off: it stays where you calibrated.",
+     .beside=true,.besideLabel="Follow"},
+    {.id="calibration.version",.page=View::Body,.section="Play space",.kind=RowKind::Button,.label="Height and arm span",
+     .help="Stand straight, then hold your arms out in a T. Measures your eye height and arm span so the world and your arms fit you."},
+    // T cross to calibrate (#423, beadlebytes): its own row under Height and arm span, the calibration it opens
+    // (Room follows you has Seated play's right half). It does nothing seated, and is left out then.
+    {.id="interactions.t_cross_calibrate",.page=View::Body,.section="Play space",.kind=RowKind::Toggle,.label="T cross to calibrate",
+     .help="Hold a T cross for 2 seconds, nothing pressed: the controllers buzz while you hold it, then Calibrate body opens. No menu needed. Off in Seated play."},
+    // Body: Potion belt
+    {.id="interactions.waist_below_eyes",.page=View::Body,.section="Potion belt",.kind=RowKind::Slider,.label="Belt below eyes",
+     .help="How far below your eyes the potion belt sits when standing. Lower numbers raise the belt.",
+     .format={.unit="cm",.iniScale=.01f}},
+    {.id="interactions.belt_forward",.page=View::Body,.section="Potion belt",.kind=RowKind::Slider,.label="Belt forward reach",
+     .help="How far in front of your body the belt sits. Raise it if the belt is too close; lower it if you reach too far.",
+     .format={.unit="cm",.iniScale=.01f,.decimals=1}},
+    // Potion drinking by trigger, beside the mouth gesture (#425, RobinHeggelund).
+    {.id="interactions.click_to_drink",.page=View::Body,.section="Potion belt",.kind=RowKind::Toggle,.label="Click to drink",
+     .help="On: hold a flask and press that hand's trigger to drink. The mouth gesture still works. Off: bring the opening to your mouth and tip to drink."},
+    // Hands: Hands and buttons
+    // Walk direction (owner, 2026-11-08: "moving where the controller points versus where you look, that should be a
+    // setting"): a row of its own since Dominant hand's row went (2026-11-10). [stick] walk_direction.
+    {.id="stick.walk_direction",.page=View::Hands,.section="Hands and buttons",.kind=RowKind::Stepper,.label="Walk direction",
+     .help="Look: the left stick walks where you look. Controller: where that stick's controller points, so you can look around while you walk.",
+     FRAMEVR_NAMES(WalkNames)},
+    // Left-handed play (hand_role.h, #307): the one switch for the hands. [interactions] left_handed.
+    {.id="interactions.left_handed",.page=View::Hands,.section="Hands and buttons",.kind=RowKind::Toggle,.label="Left-handed (experimental)",
+     .help="On: weapon in the left hand, shield on the right; buttons, sticks, laser, wrist HUD and class motions mirror. A bow sits in the right hand, drawn by the left."},
+    // Sticks stay right-handed (hand_role.h Sticks): a row of its own under Left-handed, shown while it is on
+    // (RowShown). About the real controllers, so never mirrored (PhysicalSides). [interactions] left_handed_sticks_right.
+    {.id="interactions.left_handed_sticks_right",.page=View::Hands,.section="Hands and buttons",.kind=RowKind::Toggle,.label="Sticks stay right-handed",
+     .help="On: the left stick walks and the right stick turns, as for a right-handed player. All else stays left-handed; each stick's click still opens its hand's wheel."},
+    {.id="gameplay.run_walk_toggle",.page=View::Hands,.section="Hands and buttons",.kind=RowKind::Toggle,.label="Stick toggle",
+     .help="On: right stick up switches between walking and the run set in Comfort > Moving (from Walk, the full run). Not with a wheel open or looking at the wrist map."},
+    {.id="interactions.controller_labels",.page=View::Hands,.section="Hands and buttons",.kind=RowKind::Choice,.label="Button names",
+     .help="Which controller's button names appear in help and menus. Only the names change, not what the buttons do.",
+     FRAMEVR_OPTIONS(ButtonNamesOptions)},
+    // Vibration: Strength
     {.id="haptics.strength",.page=View::Vibration,.section="Strength",.kind=RowKind::Slider,.label="Overall vibration",
      .help="Scales every kind of vibration below on both controllers. 100% is normal; Off stops all vibration.",
      .format={.unit="%"},FRAMEVR_NAMES(OffAtZero)},
@@ -634,6 +624,10 @@ inline constexpr Override Overrides[]={
      .format={.unit="%"},FRAMEVR_NAMES(OffAtZero)},
     {.id="haptics.short_melee",.page=View::Vibration,.section="Strength",.kind=RowKind::Toggle,.label="Short melee taps",
      .help="On uses very short, sharp taps for hits. Some controllers barely feel them: leave it Off if hits feel weak."},
+    // Richer haptics: what a strike feels like by what it struck (haptic_impact.h), in Short melee taps' row: the page's 8 rows are taken.
+    {.id="haptics.hit_patterns",.page=View::Vibration,.section="Strength",.kind=RowKind::Toggle,.label="Hit feel by target",
+     .help="A hit feels like what you struck: a thud for flesh, clicks for bone, a shiver for spirits, a crack and crumble for pots, a ring for a parry. Off: one tap.",
+     .beside=true,.besideLabel="By target"},
     {.id="haptics.bow_draw",.page=View::Vibration,.section="Strength",.kind=RowKind::Slider,.label="Bow draw",
      .help="Nocking an arrow, pulling the string and reaching full draw.",
      .format={.unit="%"},FRAMEVR_NAMES(OffAtZero)},
@@ -647,13 +641,113 @@ inline constexpr Override Overrides[]={
      .help="Picking up loot, handling potions, holsters and pressing menu buttons.",
      .format={.unit="%"},FRAMEVR_NAMES(OffAtZero)},
     {.id="haptics.alerts",.page=View::Vibration,.section="Strength",.kind=RowKind::Slider,.label="Low life and mana alerts",
-     .help="The low health and mana buzz on the left controller. Feel it works anyway; real alerts also need Survival > Low life and mana alert On.",
+     .help="The low health and mana buzz on the left controller. Feel it works anyway; real alerts also need Interface > Warnings > Low life and mana alert On.",
      .format={.unit="%"},FRAMEVR_NAMES(OffAtZero)},
-
+    // Wrist: Life and mana
+    {.id="interactions.vitals_location",.page=View::Wrist,.section="Life and mana",.kind=RowKind::Choice,.label="Life and mana",
+     .help="Which left-hand gesture shows your health and mana.",
+     FRAMEVR_OPTIONS(VitalsLocationOptions)},
+    {.id="interactions.vitals_tilt",.page=View::Wrist,.section="Life and mana",.kind=RowKind::Slider,.label="Life and mana tilt",
+     .help="Tilts the health and mana display on your hand; + tips its top toward you. The minimap keeps its own angle.",
+     .format={.unit=Degrees,.sign=true}},
+    {.id="interactions.skill_cooldowns",.page=View::Wrist,.section="Life and mana",.kind=RowKind::Toggle,.label="Skill cooldowns",
+     .help="Dimmed icons of up to three recharging skills between the orbs, filling back with color. A glyph or motion cast of one is refused; a tick says it is ready."},
+    // Wrist: Map
+    {.id="interactions.navigation_location",.page=View::Wrist,.section="Map",.kind=RowKind::Choice,.label="Map and compass",
+     .help="Which left-hand gesture shows the minimap and compass, separately from health and mana.",
+     FRAMEVR_OPTIONS(VitalsLocationOptions)},
+    {.id="interactions.map_top_down",.page=View::Wrist,.section="Map",.kind=RowKind::Choice,.label="Map view",
+     .help="The minimap or the game's full map, slanted or flat. The gold arrow shows which way you face. Look at the map and push the right stick to zoom.",
+     FRAMEVR_OPTIONS(MapViewOptions)},
+    {.id="interactions.map_rotate",.page=View::Wrist,.section="Map",.kind=RowKind::Toggle,.label="Turn map with you",
+     .help="On keeps the way you face at the top of the map. Off keeps north at the top and turns the arrow. Top-down views only."},
+    {.id="interactions.companion_counts",.page=View::Wrist,.section="Map",.kind=RowKind::Toggle,.label="Buffs and companions",
+     .help="Under the minimap: your companion counts, and the buffs, auras and harmful effects on you. Follows the minimap's gesture."},
+    // Menus: Game menus
+    {.id="hud.menu_distance",.page=View::Menus,.section="Game menus",.kind=RowKind::Choice,.label="Menu distance",
+     .help="How far away merchants, the stash and the main menu open, and the inventory with Hold menu Off. Point at one, hold Right Grip and push or pull it.",
+     FRAMEVR_OPTIONS(MenuDistanceOptions)},
+    // The leather menu (main's #360): its right half, as main pairs them (PairOf). Off / On / Menu only
+    // (owner 2026-10-29: the menu held without the hide), a stepper so it still fits beside.
+    {.id="interactions.leather_menu",.page=View::Menus,.section="Game menus",.kind=RowKind::Stepper,.label="Hold menu",
+     .help="Leather: the inventory and other tabs on a hide in your left hand; reach over your left shoulder and grip. Menu only: no hide. Off: in front of you.",
+     FRAMEVR_NAMES(LeatherNames),.beside=true,.besideLabel=""},   // the value alone: "Hold: Menu only" squeezed Menu distance's label
+    {.id="hud.tooltip_timing",.page=View::Menus,.section="Game menus",.kind=RowKind::Choice,.label="Item details delay",
+     .help="How soon an item's details pop up when you point the laser at it in a menu.",
+     FRAMEVR_OPTIONS(TooltipOptions)},
+    // Labels: Names and bars
+    {.id="hud.labels_size",.page=View::Labels,.section="Names and bars",.kind=RowKind::Slider,.label="Loot name size",
+     .help="Size of item names on the ground; 45% is the game's size. Hold the right stick down to show every nearby name.",
+     .format={.unit="%"}},
+    // Loot pick (#257; loot_aim.h): which dropped item A takes, On by default. Off: the game's nearest. The right
+    // half of Loot name size's row.
+    {.id="interactions.loot_pick",.page=View::Labels,.section="Names and bars",.kind=RowKind::Toggle,.label="Loot pick",
+     .help="Hold your arm out and point at an item: A picks up that one, not the nearest, and its name shows. Too far away, A takes nothing.",
+     .beside=true},
+    // Monster names (owner 2026-11-11): All / Bosses and elites (the default) / None; it replaced the
+    // Weak monster bars toggle, whose [hud] ordinary_mob_bars is still read when monster_names is missing.
+    {.id="hud.monster_names",.page=View::Labels,.section="Names and bars",.kind=RowKind::Choice,.label="Monster names",
+     .help="Which monsters show their name and health when they are your target. NPC, mercenary, player and item names always show.",
+     FRAMEVR_OPTIONS(MonsterNamesOptions)},
+    // Labels: Loot beams
+    // Loot beams (vr/loot_beam_scan.cpp): one row - its brightness slider, then a Filter button
+    // opening a card of four switches (owner 2026-10-31: "one line item that says loot beams and
+    // then the button says filter", a sub-menu "selecting on or off for each type of beam";
+    // 2026-11-01: a slider on that row "so players can decrease the current vibrancy").
+    {.id="loot.beams_brightness",.page=View::Labels,.section="Loot beams",.kind=RowKind::Filter,.label="Loot beams",
+     .help="Pillars of light over unique, set and rare items and runes Vex and up. The slider sets their brightness; Filter chooses which.",
+     .format={.unit="%"}},
+    {.id="loot.beams_unique",.page=View::Labels,.section="Loot beams",.kind=RowKind::Toggle,.label="Unique",
+     .help="A gold beam over unique items lying near you, until you pick them up.",.inFilter=true},
+    {.id="loot.beams_set",.page=View::Labels,.section="Loot beams",.kind=RowKind::Toggle,.label="Set",
+     .help="A green beam over set items lying near you, until you pick them up.",.inFilter=true},
+    {.id="loot.beams_rare",.page=View::Labels,.section="Loot beams",.kind=RowKind::Toggle,.label="Rare",
+     .help="A yellow beam over rare items lying near you. Rares drop often: Off lights only the rarer finds.",.inFilter=true},
+    {.id="loot.beams_runes",.page=View::Labels,.section="Loot beams",.kind=RowKind::Toggle,.label="Runes",
+     .help="An orange beam over high runes lying near you, Vex and up.",.inFilter=true},
+    // Outlines: Monster outline
+    {.id="gameplay.target_outline_pct",.page=View::Outlines,.section="Monster outline",.kind=RowKind::Slider,.label="Monster outline",
+     .help="Outlines the monster you aim at, as strongly as the percentage. A hand held out picks its monster; otherwise the one you look at.",
+     .format={.unit="%"},FRAMEVR_NAMES(OffAtZero)},
+    {.id="gameplay.aim_highlights",.page=View::Outlines,.section="Monster outline",.kind=RowKind::Choice,.label="Outlines shown",
+     .help="Outline only your dominant hand's monster, or one for each hand.",
+     FRAMEVR_OPTIONS(HighlightsOptions)},
+    {.id="gameplay.highlight_left_hue",.page=View::Outlines,.section="Monster outline",.kind=RowKind::Swatch,.label="Left hand outline color",
+     .help="The left hand's outline color. By range: red near, orange mid, yellow far. Pick a color unlike the monsters' own.",
+     .format={.hueNames=true},FRAMEVR_NAMES(ByRangeAtZero)},
+    {.id="gameplay.highlight_right_hue",.page=View::Outlines,.section="Monster outline",.kind=RowKind::Swatch,.label="Right hand outline color",
+     .help="The right hand's outline color. By range: red near, orange mid, yellow far. Pick a color unlike the monsters' own.",
+     .format={.hueNames=true},FRAMEVR_NAMES(ByRangeAtZero)},
+    // Warnings: Low life
+    {.id="interactions.critical_alerts",.page=View::Warnings,.section="Low life",.kind=RowKind::Toggle,.label="Low life and mana alert",
+     .help="A brief warning and a buzz when health or mana runs low. Set the buzz under Controls > Vibration > Low life and mana alerts."},
+    {.id="gameplay.low_life_heart_start",.page=View::Warnings,.section="Low life",.kind=RowKind::Stepper,.label="Heartbeat starts at",
+     .help="The life level where a heartbeat starts. It grows louder and faster with every 10% you lose. Off silences it.",
+     .format={.unit="%"},FRAMEVR_NAMES(OffAtZero)},
+    // Richer haptics: the same heart felt in both controllers (haptic_heartbeat.h), in the heartbeat's own row.
+    {.id="haptics.heartbeat",.page=View::Warnings,.section="Low life",.kind=RowKind::Toggle,.label="Felt heartbeat",
+     .help="Both controllers beat like a heart while the heartbeat sounds, faster and harder as life drops. Vibration > Low life and mana alerts sets its strength.",
+     .beside=true,.besideLabel="Felt"},
+    {.id="hud.blood_visor",.page=View::Warnings,.section="Low life",.kind=RowKind::Toggle,.label="Blood on visor",
+     .help="Blood splashes the edges of your view as life drops below 60%, 40% and 20%. Healing back up fades it."},
+    {.id="hud.blood_wipe",.page=View::Warnings,.section="Low life",.kind=RowKind::Toggle,.label="Wipe blood by hand",
+     .help="Wave a hand side to side in front of your face, trigger released, to wipe the blood away. It does not heal you."},
+    // Warnings: Low mana
+    {.id="hud.arcane_decay",.page=View::Warnings,.section="Low mana",.kind=RowKind::Toggle,.label="Arcane Decay",
+     .help="A subtle spectral vignette when mana is low, warning of magical depletion without obscuring your view."},
+    {.id="hud.arcane_fade",.page=View::Warnings,.section="Low mana",.kind=RowKind::Toggle,.label="Fade animation",
+     .help="Smoothly fade the arcane vignette in and out as mana changes.",
+     .beside=true,.besideLabel="Fade"},
+    {.id="hud.mana_threshold_pct",.page=View::Warnings,.section="Low mana",.kind=RowKind::Slider,.label="Starts below",
+     .help="Mana percentage below which the arcane decay warning begins to appear.",
+     .format={.unit="%"}},
+    {.id="hud.arcane_intensity_pct",.page=View::Warnings,.section="Low mana",.kind=RowKind::Slider,.label="Effect intensity",
+     .help="Overall brightness and opacity scale of the arcane warning effect.",
+     .format={.unit="%"},.beside=true,.besideLabel="Strength"},   // beside Starts below
     // Performance: Image
     {.id="stereo.rendering",.page=View::Performance,.section="Image",.kind=RowKind::Choice,.label="Eyes drawn per frame",
      .help="The biggest speed setting: drawing one eye a frame can nearly double the frame rate. Menus and views other than first person draw both eyes.",
-     FRAMEVR_OPTIONS(StereoOptions),.warnWhen={.5f,"Fast monsters can look doubled"}},
+     FRAMEVR_OPTIONS(StereoOptions),.warnWhen={.5f,"Fast monsters can look doubled"},.alsoOn=View::Frames},   // Frames' rows depend on it
     {.id="render.vr_resolution",.page=View::Performance,.section="Image",.kind=RowKind::Choice,.label="Render resolution",
      .help="The image size for each eye. Higher is sharper but costs graphics card time. DLSS is in the game's own Options.",
      FRAMEVR_OPTIONS(ResolutionOptions)},
@@ -663,34 +757,68 @@ inline constexpr Override Overrides[]={
     {.id="render.foveation_strength",.page=View::Performance,.section="Image",.kind=RowKind::Choice,.label="Edge detail reduction",
      .help="How much detail the edges lose. Stronger saves more time but is easier to notice.",
      FRAMEVR_OPTIONS(FoveationStrengthOptions)},
-    // Frame generation (main's #313, OFXR Bridge): how the image is made, so in Image. Its
-    // NVIDIA quality and scale have words but no page: Performance shows 8 rows at most,
-    // so they show on More while NVIDIA is chosen (main pairs them on one row; here
-    // .beside pairs only a toggle). Its status: the row's sub line and card (hooks).
-    // By turns hides it, its status and the NVIDIA rows (main's RowShown, #343).
-    {.id="render.frame_generation",.page=View::Performance,.section="Image",.label="Frame generation",
-     .help="Experimental (OFXR Bridge by tig3rmast3r): makes every other frame. Needs Both eyes; on: a moment of black. With Virtual Desktop, set its SSW to Disabled.",
-     .warn="Experimental: on reloads VR",FRAMEVR_OPTIONS(FrameGenOptions)},
-    // Performance: Draw distance (and the Defer GPU wait offer, shown in the readout)
+    // Performance: Draw distance
     {.id="render.rings",.page=View::Performance,.section="Draw distance",.kind=RowKind::Stepper,.label="Terrain distance",
      .help="How many rings of map tiles stay drawn around you. Lower it first if big outdoor areas run slowly.",
      .format={.unit="rings"}},
     {.id="render.model_radius",.page=View::Performance,.section="Draw distance",.kind=RowKind::Slider,.label="Scenery distance",
      .help="How far away buildings and props stay visible; Big objects reach farther. Lower helps busy areas such as Act III."},
-    // Big objects (main's #366): the right half of Scenery distance's row, as main pairs them (PairOf),
-    // so Performance keeps 8 rows. Off, then 300 - 1000 (farobjects::Normalize).
+    // Big objects (main's #366): the right half of Scenery distance's row, as main pairs them (PairOf). Off, then 300 - 1000 (farobjects::Normalize).
     {.id="render.big_radius",.page=View::Performance,.section="Draw distance",.kind=RowKind::Slider,.label="Big objects",
      .help="Trees, houses and walls stay drawn past Scenery distance: the bigger, the farther, out to this. Needs Terrain distance 3 or more. Costs frames in forests.",
      FRAMEVR_NAMES(OffAtZero),.beside=true,.besideLabel="Big:"},
-    {.id="render.defer_gpu_wait",.page=View::Performance,.section="Draw distance",.kind=RowKind::Offer,.label="Defer GPU wait",
-     .help="Starts the next frame while the graphics card finishes the last; without it, about half the frame rate. Once on, the menu cannot turn it off.",
-     .warn=DeferWarning,.recommended=1},
-    {.id="render.frame_generation_preset",.label="NVIDIA flow quality",
+    // Frames: Frame generation (main's #313, OFXR Bridge). Eyes drawn per frame is drawn above it
+    // (.alsoOn): it runs with Both eyes only, so By turns grays these rows, and PageReason says why.
+    // NVIDIA's quality and scale show while NVIDIA is chosen. Its status: the row's sub line and card
+    // (hooks). Defer GPU wait is drawn as a button in the readout of both Graphics pages (Page()).
+    {.id="render.frame_generation",.page=View::Frames,.section="Frame generation",.label="Frame generation",
+     .help="Experimental (OFXR Bridge by tig3rmast3r): makes every other frame. Needs Both above; on: a moment of black. With Virtual Desktop, set its SSW to Disabled.",
+     .warn="Experimental: on reloads VR",FRAMEVR_OPTIONS(FrameGenOptions)},
+    {.id="render.frame_generation_preset",.page=View::Frames,.section="Frame generation",.label="NVIDIA flow quality",
      .help="How carefully NVIDIA's optical flow looks for the motion between two frames. Medium is the suggested start. Changes apply while you play.",
      FRAMEVR_OPTIONS(FrameGenPresetOptions)},
-    {.id="render.frame_generation_scale",.label="NVIDIA flow scale",
+    {.id="render.frame_generation_scale",.page=View::Frames,.section="Frame generation",.label="NVIDIA flow scale",
      .help="The size NVIDIA's optical flow works at. 50% is the suggested start; 100% usually costs more than it gains. Changes apply while you play.",
      FRAMEVR_OPTIONS(FrameGenScaleOptions)},
+    {.id="render.defer_gpu_wait",.page=View::Frames,.section="Frame generation",.kind=RowKind::Offer,.label="Defer GPU wait",
+     .help="Starts the next frame while the graphics card finishes the last; without it, about half the frame rate. Once on, the menu cannot turn it off.",
+     .warn=DeferWarning,.recommended=1},
+    // Environment: Sky and dungeons
+    {.id="sky.enabled",.page=View::Environment,.section="Sky and dungeons",.kind=RowKind::Toggle,.label="Outdoor sky",
+     .help="Adds a sky above outdoor areas. It does not show more of the map."},
+    {.id="fog.enabled",.page=View::Environment,.section="Sky and dungeons",.kind=RowKind::Toggle,.label="Distance fog",
+     .help="Adds haze to distant outdoor scenery. Off makes far things sharper."},
+    // Fog distance (main's #366): the right half of Distance fog's row, as main pairs them (PairOf);
+    // shown while the fog is on (RowShown). A number beside a row opens the list of its steps.
+    {.id="fog.end",.page=View::Environment,.section="Sky and dungeons",.kind=RowKind::Slider,.label="Fog distance",
+     .help="Where the fog is complete; farther shows more of the distance. With Big objects on, set it past their distance to see them. The fog still starts near you.",
+     .beside=true,.besideLabel="Ends at"},
+    {.id="ceiling.enabled",.page=View::Environment,.section="Sky and dungeons",.kind=RowKind::Toggle,.label="Dungeon ceilings",
+     .help="Covers the open black space above you in supported dungeons. Building roofs are the game's own."},
+    // Dungeon torchlight (owner 2026-11-01): the game's own lights ([ceiling] torches), the right half of
+    // Dungeon ceilings' row - they are gathered only under it (RowEnabled).
+    {.id="ceiling.torches",.page=View::Environment,.section="Sky and dungeons",.kind=RowKind::Toggle,.label="Dungeon torchlight",
+     .help="The game's own torches and braziers light the dungeon around them. Finding them scans game memory every 1.5 s: turn it off if dungeons stutter.",
+     .beside=true,.besideLabel="Torches"},
+    // Echo (world_sound.h; owner 2026-11-09): the game's own reverb per place, raised for the headset. With the
+    // dungeons' rows: a third section would leave the page no room for the fallback's "New".
+    {.id="audio.echo",.page=View::Environment,.section="Sky and dungeons",.kind=RowKind::Choice,.label="Echo",
+     .help="How loud the game's own echo of the place is: caves, crypts and the Cathedral ring, the open moor barely. It follows every monster, footstep and voice.",
+     FRAMEVR_OPTIONS(EchoOptions)},
+    // Environment: Glow. Spell glow on hands left the page and the settings on 2026-11-04: always on for a
+    // Sorceress (the owner; [interactions] elemental_hands is ignored).
+    {.id="torch.flame",.page=View::Environment,.section="Glow",.kind=RowKind::Toggle,.label="Torch flame",
+     .help="A one-handed club with fire damage is a torch that lights the dark around you. This shows or hides its flame; the light stays either way."},
+    // Spell hand light (owner, 2026-11-06: "too bright ... it makes the surrounding area even darker looking in
+    // contrast ... at least make it adjustable"): [torch] spell_hands_pct, 40% by default (it was full).
+    {.id="torch.spell_hands_pct",.page=View::Environment,.section="Glow",.kind=RowKind::Slider,.label="Spell hand light",
+     .help="How brightly the spells in a Sorceress's hands light the dark around you. Lower it if the light dazzles; Off and they only glow.",
+     .format={.unit="%"},FRAMEVR_NAMES(OffAtZero),.classes=Sorceress},
+    // Light Radius boost (#440: "if it did it could even be buffed a bit for the sake of VR"): [light]
+    // radius_boost_pct, how much each Light Radius point widens the mod's dungeon light (light_radius.h).
+    {.id="light.radius_boost_pct",.page=View::Environment,.section="Glow",.kind=RowKind::Slider,.label="Light Radius boost",
+     .help="How much +Light Radius items and skills widen your light in dungeons. 100% is about the game's own amount; more is easier to see in VR.",
+     .format={.unit="%"}},
     // Settings with an ini key but no row: set by Calibrate body, legacy, the
     // ini only on main ([render] desktop_one_eye), or the skill wheel's Left
     // claw strikes box ([gameplay] left_hand_strikes).
@@ -700,17 +828,27 @@ inline constexpr Override Overrides[]={
     {.id="interactions.wrist_compass",.page=NotInMenu},
     {.id="render.desktop_one_eye",.page=NotInMenu},
     {.id="gameplay.left_hand_strikes",.page=NotInMenu},
+    // Dominant hand (owner, 2026-11-10: with Left-handed mirroring everything it "doesn't make any sense"): its
+    // row is gone and the key is no longer read; the swap hand is the main hand (handrole::Dominant).
+    {.id="interactions.dominant_hand",.page=NotInMenu},
     // Glyph casting: edited on the wheel (the button picker's "Draw glyph", the GLYPHS page).
     {.id="glyphs.draw_slot",.page=NotInMenu},{.id="glyphs.circle",.page=NotInMenu},{.id="glyphs.triangle",.page=NotInMenu},
     {.id="glyphs.square",.page=NotInMenu},{.id="glyphs.lightning",.page=NotInMenu},{.id="glyphs.spiral",.page=NotInMenu},
     {.id="glyphs.v",.page=NotInMenu},{.id="glyphs.star",.page=NotInMenu},{.id="glyphs.wave",.page=NotInMenu},
+    {.id="glyphs.second_draw_slot",.page=NotInMenu},{.id="glyphs.left_circle",.page=NotInMenu},{.id="glyphs.left_triangle",.page=NotInMenu},
+    {.id="glyphs.left_square",.page=NotInMenu},{.id="glyphs.left_lightning",.page=NotInMenu},{.id="glyphs.left_spiral",.page=NotInMenu},
+    {.id="glyphs.left_v",.page=NotInMenu},{.id="glyphs.left_star",.page=NotInMenu},{.id="glyphs.left_wave",.page=NotInMenu},
+    // Motions: edited on the wheel's MOTIONS page.
+    {.id="motions.off",.page=NotInMenu},{.id="motions.paladin_off",.page=NotInMenu},{.id="motions.druid_off",.page=NotInMenu},
+    {.id="motions.amazon_off",.page=NotInMenu},{.id="motions.necromancer_off",.page=NotInMenu},
+    {.id="motions.barbarian_off",.page=NotInMenu},{.id="motions.assassin_off",.page=NotInMenu},{.id="motions.warlock_off",.page=NotInMenu},
 };
 #undef FRAMEVR_OPTIONS
 #undef FRAMEVR_NAMES
 
 // ---- presets (ini ids and units; only the settings listed change) ----
 // Left out of the presets: StereoRendering (Comfort, Smooth frames), DeferGpuWait
-// (Smooth frames), ElementalHands and CompanionAi (Classic, Full VR), and the
+// (Smooth frames), CompanionAi (Classic, Full VR), and the
 // PR-only LootPick / MenuPointer.
 
 inline constexpr PresetSetting ComfortValues[]={
@@ -724,7 +862,7 @@ inline constexpr PresetSetting ComfortValues[]={
 inline constexpr PresetSetting ClassicValues[]={
     {"gameplay.motion_controls",1},
     {"gameplay.projectile_aim_assist",0},{"gameplay.spell_lock",0},{"gameplay.planar_spell_aim",0},{"gameplay.ground_aim",0},{"gameplay.target_outline_pct",0},
-    {"hud.tooltip_timing",2},{"hud.labels_size",45},{"hud.ordinary_mob_bars",1},
+    {"hud.tooltip_timing",2},{"hud.labels_size",45},{"hud.monster_names",0},
     {"gameplay.offline_players",0},{"gameplay.enemy_sight_pct",100},
     {"hud.blood_visor",0},{"gameplay.low_life_heart_start",0},
     {"sky.enabled",0},{"fog.enabled",0},{"ceiling.enabled",0},{"interactions.bottle_physics",0},{"interactions.prop_physics",0},
@@ -765,7 +903,7 @@ inline constexpr ContentTool ToolTable[]={
     {Kind::Apply,"Apply","Saves and uses your changes. Until you press it, changes are only a draft. Your other settings and calibration stay as they are."},
     {Kind::Close,"Close","Back to the game. If some changes are not applied, Close asks first."},
     {Kind::Recenter,"Set eye height","Sets your eye height for where you stand or sit now. Your body measurements stay saved."},
-    {Kind::Calibrate,"Calibrate body","Measures your standing eye height and arm span in a T-pose. Apply or discard changes first. Hold both triggers when asked; Right B cancels."},
+    {Kind::Calibrate,"Calibrate body","Measures your standing eye height and arm span in a T cross. Apply or discard changes first. Hold both triggers when asked; Right B cancels."},
     {Kind::ResetPage,"Reset page","Sets every row you can see on this page back to its default. Nothing is saved until you press Apply."},
     {Kind::UndoReset,"Undo reset","Puts back the values this page had before you pressed Reset page. It goes away after 6 seconds."},
     // The confirm row; the layout may print the count ("Discard 3 changes").
@@ -783,7 +921,7 @@ inline constexpr ContentTool ToolTable[]={
 // ---- the Controller guide (main's Controls page, vr_settings_ui.cpp) ----
 
 inline constexpr GuideLine GuideTable[]={
-    {"Stick","Walk",GuideColumn::Left},
+    {"Stick","Walk",GuideColumn::Left,true},
     {"{L1} or {L2}","Your left-hand skills",GuideColumn::Left},
     {"{L3} or {L4}","More left-hand skills",GuideColumn::Left},
     {"Trigger","Left-hand skill",GuideColumn::Left},
@@ -791,11 +929,11 @@ inline constexpr GuideLine GuideTable[]={
     {"Grip + stick click","Inventory, character and skills",GuideColumn::Left},
     {"Grip near the belt","Grab a potion",GuideColumn::Left},
     {"Grip + right trigger","Right-click in game menus",GuideColumn::Left},
-    {"Stick left or right","Turn",GuideColumn::Right},
+    {"Stick left or right","Turn",GuideColumn::Right,true},
     {"Stick click","Open or close the right wheel",GuideColumn::Right},
     {"Trigger","Right-hand skill, or grab a bow string",GuideColumn::Right},
-    {"Stick up","Run or walk",GuideColumn::Right},
-    {"Hold stick down","Show all loot names",GuideColumn::Right},
+    {"Stick up","Run or walk",GuideColumn::Right,true},
+    {"Hold stick down","Show all loot names",GuideColumn::Right,true},
     {"{R1} or {R2}","Interact, or your skills",GuideColumn::Right},
     {"{R3} or {R4}","More right-hand skills",GuideColumn::Right},
     {"Main-hand grip at a shoulder","Swap weapon sets",GuideColumn::Right},
@@ -811,7 +949,7 @@ inline constexpr GuideLine GuideTable[]={
 // Under Offline difficulty: the card leads with the note; without the
 // offline scaling adapter, main's notice instead (row and card), and the row
 // stays editable as on main.
-inline constexpr const char* OfflineNote="Difficulty affects new monsters only; existing monsters keep their stats. To apply it throughout the game, Save and Exit, then start a new game with the same character.";
+inline constexpr const char* OfflineNote="Only new monsters change. Save and Exit, then rejoin with the same character to refresh them all.";
 inline constexpr const char* OfflineUnavailable="Offline scaling adapter unavailable. Game difficulty remains unchanged.";
 inline constexpr const char* OfflineUnavailableShort="Offline scaling adapter unavailable";
 // Under Button names: the controllers the headset reports.
@@ -866,10 +1004,11 @@ inline constexpr const char* NewSection="New";   // the fallback rows' section, 
 // The owner page of an ini section (docs/VR_SETTINGS_MENU.md); any other: More.
 inline View OwnerOf(const wchar_t* section){
     const std::wstring_view s=section;
-    if(s==L"turn"||s==L"calibration")return View::Body;
-    if(s==L"bow")return View::Targets;
-    if(s==L"hud")return View::Interface;
-    if(s==L"sky"||s==L"fog"||s==L"ceiling"||s==L"torch")return View::World;
+    if(s==L"turn")return View::Moving;
+    if(s==L"calibration")return View::Body;
+    if(s==L"bow")return View::Targeting;
+    if(s==L"hud")return View::Menus;
+    if(s==L"sky"||s==L"fog"||s==L"ceiling"||s==L"torch"||s==L"audio")return View::Environment;
     if(s==L"haptics")return View::Vibration;
     if(s==L"render"||s==L"stereo")return View::Performance;
     return View::More;   // gameplay, interactions and any new section
@@ -958,7 +1097,7 @@ inline MenuData BuildMenu(const Override* overrides,size_t overrideCount,const P
         r.label=o.label?o.label:d.label;r.warn=o.warn;
         r.help=o.help?o.help:HelpText(k)[0]?HelpText(k):d.detail;   // no words of ours: upstream's long help, else its detail
         r.classes=o.classes;r.wraps=o.wraps;r.warnWhen=o.warnWhen;r.beside=o.beside&&(r.kind==RowKind::Toggle||r.kind==RowKind::Slider||r.kind==RowKind::Stepper);r.besideLabel=o.besideLabel;
-        r.inFilter=o.inFilter&&r.kind==RowKind::Toggle;
+        r.inFilter=o.inFilter&&r.kind==RowKind::Toggle;r.alsoOn=o.alsoOn;
         r.recommended=o.recommended==o.recommended&&o.recommended>=d.min&&o.recommended<=d.max?o.recommended:std::numeric_limits<float>::quiet_NaN();
         // Value words in range only.
         if(o.nameCount){
@@ -1020,7 +1159,7 @@ inline MenuData BuildMenu(const Override* overrides,size_t overrideCount,const P
     for(int k=0;k<Count;++k){
         if(placed[size_t(k)])continue;
         View page=OwnerOf(Definitions[size_t(k)].section);
-        int rows=0;for(const auto& r:m.rows)if(r.page==page&&!r.beside&&!r.inFilter)++rows;   // a side half or a filter switch takes no row
+        int rows=0;for(const auto& r:m.rows)if(OnPage(r,page)&&!r.beside&&!r.inFilter)++rows;   // a side half or a filter switch takes no row
         if(page!=View::More&&(rows>=MaxPageRows||(sectionIndex(page,NewSection)<0&&sectionCount(page)>=MaxPageSections)))page=View::More;
         if(sectionIndex(page,NewSection)<0)m.sections.push_back({page,NewSection});
         const Override none{.id=nullptr};
@@ -1045,8 +1184,42 @@ inline MenuData BuildMenu(const Override* overrides,size_t overrideCount,const P
     }
     return m;
 }
-inline const MenuData& Menu(){
+// Left-handed play (hand_text.h): a menu's words mirrored, once. Every row but the ones about the physical
+// hands themselves (Left-handed, Sticks stay right-handed): its label, help, warnings,
+// the word beside it, its options and their hints, its value names; the presets' names and blurbs.
+// sticks false: Sticks stay right-handed, the sticks' names kept (handtext::Mirror).
+constexpr bool PhysicalSides(Key key){return key==LeftHanded||key==LeftHandedSticks;}
+inline MenuData MirroredMenu(const MenuData& written,bool sticks=true){
+    MenuData menu=written;
+    const auto M=[sticks](const char* text){return handtext::M(text,sticks);};
+    for(auto& r:menu.rows){
+        if(PhysicalSides(r.key))continue;
+        r.label=M(r.label);r.help=M(r.help);r.warn=M(r.warn);
+        r.warnWhen.text=M(r.warnWhen.text);r.besideLabel=M(r.besideLabel);
+        if(r.options&&r.optionCount){
+            auto& list=menu.optionLists.emplace_back(r.options,r.options+r.optionCount);
+            for(auto& o:list){o.label=M(o.label);o.hint=M(o.hint);}
+            r.options=list.data();
+        }
+        if(r.names&&r.nameCount){
+            auto& list=menu.nameLists.emplace_back(r.names,r.names+r.nameCount);
+            for(auto& n:list)n.label=M(n.label);
+            r.names=list.data();
+        }
+    }
+    for(auto& s:menu.sections)s.title=M(s.title);
+    for(auto& p:menu.presets){p.name=M(p.name);p.blurb=M(p.blurb);}
+    return menu;
+}
+// The menu as written, for a right-handed player, and as shown now.
+inline const MenuData& WrittenMenu(){
     static const MenuData menu=BuildMenu(Overrides,std::size(Overrides),PresetSpecs,std::size(PresetSpecs));
+    return menu;
+}
+inline const MenuData& Menu(){
+    if(!handtext::Left())return WrittenMenu();
+    if(handtext::SticksKept()){static const MenuData kept=MirroredMenu(WrittenMenu(),false);return kept;}
+    static const MenuData menu=MirroredMenu(WrittenMenu());
     return menu;
 }
 // Preview and test data only: the real overrides less a few, as if upstream
@@ -1070,7 +1243,17 @@ inline const MenuData& FallbackDemo(){
 
 // ---- lookups (trivial over the tables; the checks below and the tests check the tables) ----
 
-inline const ContentPage& PageOf(View v){return PageTable[size_t(v)];}
+inline const ContentPage& PageOf(View v){
+    if(!handtext::Left())return PageTable[size_t(v)];
+    const auto mirror=[](bool sticks){
+        std::vector<ContentPage> pages(std::begin(PageTable),std::end(PageTable));
+        for(auto& p:pages){p.name=handtext::M(p.name,sticks);p.intro=handtext::M(p.intro,sticks);}
+        return pages;
+    };
+    if(handtext::SticksKept()){static const std::vector<ContentPage> kept=mirror(false);return kept[size_t(v)];}
+    static const std::vector<ContentPage> mirrored=mirror(true);
+    return mirrored[size_t(v)];
+}
 // The row of a key, or nullptr (NotInMenu).
 inline const ContentRow* RowOf(Key key){
     for(const auto& r:Menu().rows)if(r.key==key)return &r;
@@ -1132,14 +1315,28 @@ inline std::string ValueText(const ContentRow& r,float value,const Context& c={}
     if(word&&unit.size()>1&&unit.back()=='s'&&(text=="1"||text=="+1"||text=="-1"))return text+" "+unit.substr(0,unit.size()-1);
     return text+" "+unit;
 }
+// ToolTable as shown now (std::size(ToolTable) entries): its words mirrored while the hands are.
+inline const ContentTool* Tools(){
+    if(!handtext::Left())return ToolTable;
+    const auto mirror=[](bool sticks){
+        std::vector<ContentTool> tools(std::begin(ToolTable),std::end(ToolTable));
+        for(auto& t:tools){t.label=handtext::M(t.label,sticks);t.help=handtext::M(t.help,sticks);}
+        return tools;
+    };
+    if(handtext::SticksKept()){static const std::vector<ContentTool> kept=mirror(false);return kept.data();}
+    static const std::vector<ContentTool> mirrored=mirror(true);
+    return mirrored.data();
+}
 inline const ContentTool* ToolOf(Kind kind){
-    for(const auto& t:ToolTable)if(t.kind==kind)return &t;
+    const auto* tools=Tools();
+    for(size_t i=0;i<std::size(ToolTable);++i)if(tools[i].kind==kind)return &tools[i];
     return nullptr;
 }
 // A guide line's control with this player's button names.
 inline std::string GuideControl(const GuideLine& g,const controllers::Labels& labels){
     std::string out;
-    for(const char* p=g.control;*p;){
+    // left-handed: the words first ("Right {R2}" is the left controller's then), then that hand's buttons
+    for(const char* p=handtext::T(g.control);*p;){
         if(p[0]=='{'&&(p[1]=='L'||p[1]=='R')&&p[2]>='1'&&p[2]<='4'&&p[3]=='}'){
             out+=labels.Button(p[1]=='L'?1:0,p[2]-'0');p+=4;
         }else out+=*p++;
@@ -1229,16 +1426,19 @@ constexpr bool OrderOk(){
             if(n<1||n>6)return false;
         }
     }
+    // A row on a second page is a whole row, and its own page comes first: table order then draws it at
+    // the top of the second page (RowsOf).
+    for(const auto& r:Overrides)if(r.alsoOn!=View::Count&&(r.alsoOn<=r.page||r.beside||r.instead||r.inFilter||r.kind==RowKind::Offer||!IsSettingsPage(r.alsoOn)))return false;
     for(const auto& p:PageTable){
-        int rows=0;for(const auto& r:Overrides)if(r.page==p.id&&!r.beside&&!r.instead&&!r.inFilter)++rows;   // the slabs that can show at once
-        if(rows>8||SectionCount(p.id)>3)return false;
+        int rows=0;for(const auto& r:Overrides)if((r.page==p.id||r.alsoOn==p.id)&&!r.beside&&!r.instead&&!r.inFilter)++rows;   // the slabs that can show at once
+        if(rows>MaxPageRows||SectionCount(p.id)>MaxPageSections)return false;
     }
     for(size_t i=1;i<std::size(SectionTable);++i)if(SectionTable[i-1].page>SectionTable[i].page)return false;
     return true;
 }
 // Presets: each id once, never the owner's excluded settings.
 constexpr bool PresetsOk(){
-    constexpr const char* excluded[]={"stereo.rendering","render.defer_gpu_wait","interactions.elemental_hands","gameplay.companion_ai",
+    constexpr const char* excluded[]={"stereo.rendering","render.defer_gpu_wait","gameplay.companion_ai",
                                       "calibration.eye_height_m","calibration.arm_span_m","calibration.version"};
     for(const auto& p:PresetSpecs)for(int i=0;i<p.count;++i){
         for(const char* x:excluded)if(SameText(p.values[i].id,x))return false;
@@ -1246,7 +1446,41 @@ constexpr bool PresetsOk(){
     }
     return true;
 }
+// The rail: each group once, in the order of its pages, which follow one
+// another in View order (so its pages hang under it in rail order); every page
+// but Presets and the band's in a group with 1 or more settings pages; the
+// groups fit MaxRailGroups and the rows fit the rail. A name's width needs the font: vr-settings-fit-test.
+constexpr bool GroupsOk(){
+    if(size_t(Group::Header)>=size_t(MaxRailGroups))return false;   // Model::groupPage and the help ids hold every group
+    size_t most=0;int last=-1;
+    for(size_t i=0;i<std::size(GroupTable);++i){
+        const auto& g=GroupTable[i];
+        if(g.id==Group::Tools||g.id==Group::Header||!Length(g.name))return false;   // its width: vr-settings-fit-test
+        for(size_t j=0;j<i;++j)if(GroupTable[j].id==g.id)return false;
+        int first=-1,end=-1;size_t pages=0;
+        for(const auto& p:PageTable)if(p.group==g.id){
+            if(!p.settings||(end>=0&&int(p.id)!=end))return false;   // settings pages, one run
+            if(first<0)first=int(p.id);
+            end=int(p.id)+1;++pages;
+        }
+        if(!pages||pages>size_t(MaxGroupPages)||first<last)return false;
+        last=first;most=std::max(most,pages);
+    }
+    for(const auto& p:PageTable)if(p.group!=Group::Header&&p.group!=Group::Tools&&!GroupOf(p.group))return false;
+    for(const auto& p:PageTable)if(p.group==Group::Tools&&p.id!=View::Presets)return false;
+    return 1+std::size(GroupTable)+most<=size_t(MaxRailRows);
+}
+// Every settings page holds at least 3 settings, a side half or a filter switch included (More is only a safety net).
+constexpr bool PagesFilled(){
+    for(const auto& p:PageTable)if(p.settings&&p.id!=View::More){
+        int n=0;for(const auto& r:Overrides)if(r.page==p.id)++n;
+        if(n<3)return false;
+    }
+    return true;
+}
 static_assert(TextsFit(),"labels <= 26 (30), help and hints <= 160, warn <= 56, option names <= 14");
+static_assert(GroupsOk(),"rail groups: each once, its pages in one run of settings pages in rail order, at most 6 pages, Presets + groups + the largest group <= 12 rows");
+static_assert(PagesFilled(),"every settings page but More holds at least 3 settings");
 static_assert(IdsUnique(),"one override per ini id");
 static_assert(PlacesKnown(),"a placed override names a settings page and one of its section titles");
 static_assert(OrderOk(),"overrides in page and section order; at most 8 rows and 3 sections a page; filter switches follow their Filter row");

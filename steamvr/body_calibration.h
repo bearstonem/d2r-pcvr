@@ -21,6 +21,8 @@ inline settings::Request SaveRequest(const settings::Snapshot& s,Measurement m) 
     values[settings::BodyCalibration]=1;
     return {s.values,values,settings::Changed(s.values,values),s.sequence+1};
 }
+// hand[0] is the body's RIGHT hand and hand[1] its LEFT (CheckPose tells the sides apart), whichever
+// hand is the main one: left-handed play fills it through BodyOrder, never in main / off order.
 struct Sample {
     double time=0;
     bool floor=false,headTracked=false,handTracked[2]{},cancel=false;
@@ -28,24 +30,36 @@ struct Sample {
     float trigger[2]{};
 };
 inline float Length(Vec v){return std::sqrt(math::Dot(v,v));}
-inline Hint CheckPose(const Sample& s) {
+// A sample filled in main / off order, put in body order: swapped when the main hand is the left one.
+inline void BodyOrder(Sample& s,bool mainIsLeft){
+    if(!mainIsLeft)return;
+    std::swap(s.hand[0],s.hand[1]);std::swap(s.handTracked[0],s.handTracked[1]);std::swap(s.trigger[0],s.trigger[1]);
+}
+// How CheckPose reads the T cross. The defaults are the capture's own limits;
+// the T cross gesture (body_calibration_gesture.h) starts on them, keeps a
+// wider set while the pose is held, and asks about the floor separately.
+struct PoseLimits {
+    float upright=.96f,side=.35f,center=.18f,level=.09f,forward=.22f,dropLow=.10f,dropHigh=.50f,spanSlack=1;
+    bool floor=true;
+};
+inline Hint CheckPose(const Sample& s,const PoseLimits& limits={}) {
     if(!s.headTracked||!s.handTracked[0]||!s.handTracked[1]||!body::Finite(s.head)||
        !body::Finite(s.hand[0])||!body::Finite(s.hand[1]))return Hint::Tracking;
-    if(!s.floor)return Hint::Floor;
+    if(limits.floor&&!s.floor)return Hint::Floor;
     if(!ValidEyeHeight(s.head.y))return Hint::Height;
     const auto q=s.rotation;
     const float q2=q.x*q.x+q.y*q.y+q.z*q.z+q.w*q.w;
-    if(!std::isfinite(q2)||std::fabs(q2-1)>.05f||math::Rotate(q,{0,1,0}).y<.96f)return Hint::Upright;
+    if(!std::isfinite(q2)||std::fabs(q2-1)>.05f||math::Rotate(q,{0,1,0}).y<limits.upright)return Hint::Upright;
     const auto undo=math::Conjugate(math::Yaw(math::Heading(q)));
     const auto r=math::Rotate(undo,s.hand[0]-s.head),l=math::Rotate(undo,s.hand[1]-s.head);
     const float span=Length(s.hand[0]-s.hand[1]),drop=-(r.y+l.y)*.5f;
     // A resting/bent arm makes the controller span short even with a correct
     // stage floor. Only a missing floor space gets the playspace hint.
-    if(!Valid({s.head.y,span}))return Hint::Arms;
+    if(!Valid({s.head.y,span})&&!Valid({s.head.y,span*limits.spanSlack}))return Hint::Arms;
     // Opposite sides, level shoulders and little forward reach. Grip centres
     // measure arm reach, not fingertip-to-fingertip anatomical wingspan.
-    if(r.x<.35f||l.x>-.35f||std::fabs(r.x+l.x)>.18f||std::fabs(r.y-l.y)>.09f||
-       std::fabs(r.z)>.22f||std::fabs(l.z)>.22f||drop<.10f||drop>.50f)return Hint::Arms;
+    if(r.x<limits.side||l.x>-limits.side||std::fabs(r.x+l.x)>limits.center||std::fabs(r.y-l.y)>limits.level||
+       std::fabs(r.z)>limits.forward||std::fabs(l.z)>limits.forward||drop<limits.dropLow||drop>limits.dropHigh)return Hint::Arms;
     return Hint::Pose;
 }
 class Flow {

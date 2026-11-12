@@ -23,7 +23,7 @@ inline bool Follow(const bow::Mat& bindWrist,const bow::Mat& bindShield,
     if(scale<.3f||scale>3.f)return false;
     result=bow::Multiply(local,trackedWrist);return bow::Affine(result);
 }
-// VR Settings > Shield. 2026-10-21: the shield is placed in the ARM's own
+// VR Settings > Gameplay > Shield. 2026-10-21: the shield is placed in the ARM's own
 // frame, built from joint positions only - never from a bone's axes, which each
 // class's bind pose lays differently (on the Paladin "Up" moved the shield
 // sideways off the arm; on the Assassin it moved it up):
@@ -100,7 +100,7 @@ inline bool TurnBetween(const Frame& a,const Frame& b,bow::Vec& axis,float& angl
     if(s<1e-6f){axis={1,0,0};angle=0;return true;}
     axis=q*(1/s);angle=2*std::atan2(s,w);return true;
 }
-// VR Settings > Shield > Shield wrist turn ([gameplay] shield_follow_pct): t=0 strapped to the forearm (the
+// VR Settings > Gameplay > Shield > Shield wrist turn ([gameplay] shield_follow_pct): t=0 strapped to the forearm (the
 // wrist's bend ignored), 1 the hand's own turn - a slerp, so every share in
 // between turns smoothly and the same way for every class and shield.
 inline Frame Blend(const Frame& strapped,const Frame& wrist,float t) {
@@ -126,14 +126,14 @@ inline Frame Roll(Frame f,float deg) {
     const bow::Vec out=f.out*c-f.up*s,up=f.up*c+f.out*s;
     f.out=out;f.up=up;return f;
 }
-// VR Settings > Shield > Shield roll ([gameplay] shield_roll_deg): -180..+180 in 5-degree steps,
+// VR Settings > Gameplay > Shield > Shield roll ([gameplay] shield_roll_deg): -180..+180 in 5-degree steps,
 // 0 (the attach's own facing) when it is not a number.
 constexpr float kRollStepDeg=5;
 inline float RollSetting(float deg) {
     if(!std::isfinite(deg))return 0;
     return std::round(std::clamp(deg,-kRollMaxDeg,kRollMaxDeg)/kRollStepDeg)*kRollStepDeg+0.f;
 }
-// VR Settings > Shield > Shield wrist turn ([gameplay] shield_follow_pct):
+// VR Settings > Gameplay > Shield > Shield wrist turn ([gameplay] shield_follow_pct):
 // 0 strapped to the forearm .. 100 turns with the wrist, in 10% steps; 50 when it
 // is not a number.
 constexpr float kFollowDefaultPct=50,kFollowStepPct=10;
@@ -161,6 +161,64 @@ inline bool Place(const bow::Mat& bindAttach,const Frame& bind,bow::Vec bindWris
     const float size=bow::Length({local.m[0],local.m[1],local.m[2]});
     if(size<.3f||size>3.f)return false;
     result=bow::Multiply(local,Matrix(now,wrist,scale));return bow::Affine(result);
+}
+// Left-handed play (steamvr/hand_role.h, #307): the shield's attach bone carried from the arm it is
+// authored on (the left) to the other one. `now` is the other arm's frame built the same anatomical
+// way - along elbow to wrist, up toward the thumb, out on the shield's side - which makes it the bind
+// frame's MIRROR image (ArmFrame with the opposite handed sign). An item drawn from a mirrored attach
+// matrix is inside out and culled (skeletons.cpp, bothAttach), so the shield is put where the mirror
+// puts its attach point and TURNED there, never mirrored: one of its arm axes is turned over.
+//   turn 0 (along, the default): the face stays outward and the top toward the thumb; what lay toward
+//          the elbow lies toward the hand;
+//   turn 2 (up): the face stays outward, the shield is upside down;
+//   turn 1 (out): the face turns inward - for comparing only.
+// The result keeps the bind attach's own handedness and size.
+// mirror (optional): the turn taking the placed bone's axes back to the mirror image's - mirror image =
+// mirror * placed, rows mixed, the origin kept - for what reads the shield's axes as directions (its
+// contact capsule), as hand_swap_pose.h AsMirrored is for a weapon. It depends on the bind pose and the
+// turn only, so it holds for the placed bone after it is moved and steadied as well.
+inline Frame TurnedOver(Frame f,int turn) {
+    if(turn==1)f.out=f.out*-1;else if(turn==2)f.up=f.up*-1;else f.along=f.along*-1;
+    return f;
+}
+inline bool PlaceAcross(const bow::Mat& bindAttach,const Frame& bind,bow::Vec bindWrist,float bindScale,
+                        const Frame& now,bow::Vec wrist,float scale,int turn,bow::Mat& result,bow::Mat* mirror=nullptr) {
+    bow::Mat mirrored;
+    // The attach point: where the mirror image has it (the mirrored frame, as it is).
+    if(!Place(bindAttach,bind,bindWrist,bindScale,now,wrist,scale,mirrored))return false;
+    // Its axes: the same placement in the frame with one axis turned over, a rigid turn of the bind pose.
+    if(!Place(bindAttach,bind,bindWrist,bindScale,TurnedOver(now,turn),wrist,scale,result))return false;
+    bow::Position(result,bow::Position(mirrored));
+    if(mirror) {
+        bow::Mat placedTurn=result,mirroredTurn=mirrored,inverse;
+        bow::Position(placedTurn,{0,0,0});bow::Position(mirroredTurn,{0,0,0});
+        if(!bow::Inverse(placedTurn,inverse))return false;
+        *mirror=bow::Multiply(mirroredTurn,inverse);
+        if(!bow::Affine(*mirror))return false;
+    }
+    return bow::Affine(result);
+}
+// The shield wrist's bend stop (skeletons.cpp, StopShieldWrist) as geometry, for the arm the shield is
+// carried across to in left-handed play. The hand bending back (back of the hand up) swings the
+// shield's elbow edge into the arm: that bend eases into where the hand lies straight on the forearm
+// and only approaches it; bending the other way, twisting and side to side stay free.
+//   back    the back of the hand's direction as the controller has the hand now (unit)
+//   rigid   the same with the hand straight on its forearm (unit)
+//   forearm elbow -> wrist (unit)
+// given: where the back of the hand is let go to (back itself when nothing is held). Returns the bend
+// held back, degrees. The same numbers as the left arm's: easing starts 15 degrees short of the stop.
+inline constexpr float kWristStopEaseDeg=15.f;
+inline float WristStop(bow::Vec back,bow::Vec rigid,bow::Vec forearm,bow::Vec& given) {
+    given=back;
+    const float ease=kWristStopEaseDeg/57.2958f;
+    const float asked=std::acos(std::clamp(bow::Dot(back,forearm),-1.f,1.f)),at=std::acos(std::clamp(bow::Dot(rigid,forearm),-1.f,1.f));
+    const float knee=at-ease;
+    if(!std::isfinite(asked+at)||!(asked>knee))return 0;
+    const bow::Vec w=back-forearm*bow::Dot(back,forearm);
+    if(!(bow::Length(w)>=1e-4f))return 0;
+    const float bend=knee+ease*(1-std::exp(-(asked-knee)/ease));
+    given=forearm*std::cos(bend)+bow::Normalized(w)*std::sin(bend);
+    return (asked-bend)*57.2958f;
 }
 // Grip toward the elbow (+) or the hand (-), Out and Up, cm, clamped to the settings' ranges;
 // anything not finite is 0.

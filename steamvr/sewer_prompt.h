@@ -5,6 +5,11 @@
 
 namespace framevr::sewerprompt {
 constexpr int AtlasX=512,AtlasY=384,Width=512,Height=128;
+// Left-handed play (hand_role.h): the same prompt naming the main hand's button there, "Left X", drawn at
+// 7/8 size into the atlas's free corner (the bow's old text, gone 2026-11-09). The panel is the same size.
+constexpr int LeftAtlasX=576,LeftAtlasY=768,LeftWidth=448,LeftHeight=112;
+inline constexpr const wchar_t* Shortcut=L"Right A";
+inline constexpr const wchar_t* LeftShortcut=L"Left X";
 constexpr float PanelWidth=.38f,PanelHeight=.095f;
 // Value-only UI -> XR message. No native unit or path pointer crosses threads.
 struct Target {uint64_t session=0,at=0;int level=0;uint32_t id=0;float x=0,y=0;};

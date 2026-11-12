@@ -73,7 +73,7 @@ Instead of fabricating a foreign item, D2R-PCVR qualifies **native one-handed wo
 * The apparent flame vector is:
   $$\mathbf{V}_{\text{flame}} = \text{Normalize}\left((0, 1, 0) - \mathbf{v}_{\text{hand}} \cdot k_{\text{drag}}\right)$$
   ensuring the flame trails behind rapid weapon swings before rising upright when still.
-* **VR Settings > World > Torch flame** (`[torch] flame`, On by default) shows or hides the flame drawn on the club's head; the torch's light stays either way.
+* **VR Settings > Graphics > Environment > Torch flame** (`[torch] flame`, On by default) shows or hides the flame drawn on the club's head; the torch's light stays either way.
 
 ### Pillar 3: Multi-Harmonic Organic Sinusoidal Flicker
 * Static light radii look sterile in VR. Natural flame turbulence is simulated by summing non-harmonic prime-frequency sine waves:
@@ -132,3 +132,18 @@ Instead of fabricating a foreign item, D2R-PCVR qualifies **native one-handed wo
   * When the torch is equipped in the left-hand slot (off-hand, e.g. tested on a dual-wielding Barbarian), the character's 3D weapon mesh in VR remains attached to the right hand, while the flame emitter/particles float disconnected in empty space at the coordinates where the right-hand club head would be located. Pending investigation into off-hand weapon bone mapping and dual-wielding attachment indexing in `skel::MeleeWeapon`.
 * **Dropped Item Extinguishment (Ground Item Limitation):**
   * Dropping an active torch club onto the ground extinguishes the flame and dynamic lighting. Dropped ground items exist as native static 2D/3D loot props and do not currently sustain an active light emitter or particle volume while resting on the floor.
+
+---
+
+## 7. The Hero's Light Radius (#440)
+
+A player reported that Light Radius did not widen the light in VR. The mod never changes the game's own light round the hero, and that stays so. Instead, the hero's Light Radius widens the mod's own dungeon light:
+
+* **The stat:** ItemStatCost 89 (`item_lightradius`, items and skills) is read with the life and mana on the UI thread (`vr/native_ui.cpp`). The log prints it on every change as `hero Light Radius (stat 89) N`.
+* **The scale** (`steamvr/light_radius.h`): `1 + (stat - radius_base) x radius_boost_pct/100 / radius_points`, kept between 0.5 and 2.5. The defaults are base 0, 10 points and a 150% boost: +1 gives 1.15, +3 gives 1.45, -2 gives 0.7.
+* **The vault's light:** where the shader draws the dungeon ceiling, its light over the hero (`CeilLightRadius`) reaches that many times farther.
+* **The hero light** (`reshade/D2R_Lights.fxh` `HeroLight`): a modest light at the hero's shoulder, in dungeons where the vault is not drawn (the game's ceiling, or none). It works in first person only, and its reach is `[light] hero_reach` times the scale.
+  * It gives no light within 4 units of the eyes and reaches full strength from 8: a full-strength hand light once lit the hero's own face.
+  * The effect now runs in every dungeon for it.
+* **Settings:** `[light]` in `d2r_pcvr.ini`. The boost is VR Settings > Graphics > Environment > Light Radius boost.
+* **Not known yet:** whether stat 89 holds a base of its own with no gear. If the log shows a value other than 0 with no Light Radius gear, set `radius_base` to that value.

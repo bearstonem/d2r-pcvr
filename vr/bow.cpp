@@ -18,6 +18,8 @@
 #include "native_ui_signatures.h"
 #include "spells.h"
 #include "melee.h"
+#include "breakables.h"
+#include "spell_impacts.h"
 #include "prop_scan.h"
 #include "melee_weapon.h"
 #include "combat.h"
@@ -131,10 +133,19 @@ thread_local uint64_t previewCreatingSession=0;
 thread_local uint32_t previewCreatingMissile=0;
 thread_local const Flight* finishingImpact=nullptr;
 thread_local uint64_t creatingImpact=0;
+// Multiple Shot from a draw (FanVolley): the armed release and its fan. The
+// client's own flat fan is watched until the server's is adopted, then retired.
+FanVolley fan; // mutex
+struct FanClient {uintptr_t unit=0;uint32_t id=0;};
+std::array<FanClient,FanVolley::Most> fanClients{}; // mutex
+std::atomic<bool> fanArmed{false};
+std::atomic<unsigned> fanWatched{0};
+thread_local bool creatingFanVisual=false; // UI: our visual of an adopted fan arrow
 int MissileSound(int sound,uintptr_t unit,int a,int b,bool c) {
     // The nocked model is not a fired projectile. Suppress only its creation
     // scope's travel sound; genuine releases and other game audio pass through.
-    if(previewCreatingSession)return 0;
+    // An adopted fan arrow's visual: the game's own fan already sounded.
+    if(previewCreatingSession||creatingFanVisual)return 0;
     return originalMissileSound(sound,unit,a,b,c);
 }
 template<class T> bool Read(uintptr_t p,T& out) {
@@ -209,10 +220,29 @@ int End(size_t slot,Arrow& a,uintptr_t game,uintptr_t unit) {
     reinterpret_cast<int(*)(uintptr_t,uintptr_t,uintptr_t,int)>(d2rsig::Addr(HitRva))(game,unit,0,1);
     return 2;
 }
-// Spells and quiver arrows keep their native server missile at the physical
+// Spells, quiver and item arrows keep their native server missile at the physical
 // contact, so splash, explosions and secondary missiles start at the impact.
+// Why a flight or an aimed monster met a barrier (owner, 2026-11-09: spells do not pass a doorway into the
+// next area): the cell, whether the game had a room loaded there, and every collision bit the cell carries
+// (the flight asks 0x804: wall 0x4, door 0x800). Game thread; logged at most four times a second.
+struct BarrierWhy {int x=0,z=0;bool noRoom=false;uint16_t bits=0;};
+BarrierWhy barrierWhy;uint64_t barrierLogAt=0,assistLogAt=0;
+void NoteBarrier(uintptr_t room,int x,int z) {
+    barrierWhy={x,z,!room,room?reinterpret_cast<uint16_t(*)(uintptr_t,int,int,int,int)>(d2rsig::Addr(MaskRva))(room,x,z,1,0xffff):uint16_t(0)};
+}
+void LogBarrier(const char* what,const Shot& shot,float metres,uint32_t monster=0) {
+    auto& at=monster?assistLogAt:barrierLogAt;const auto now=GetTickCount64();
+    if(now<at)return;
+    at=now+250;
+    char why[96],line[320];
+    if(barrierWhy.noRoom)snprintf(why,sizeof why,"the game has no room loaded there");
+    else snprintf(why,sizeof why,"collision 0x%04x (wall 0x4 %s, door 0x800 %s)",barrierWhy.bits,barrierWhy.bits&0x4?"yes":"no",barrierWhy.bits&0x800?"yes":"no");
+    if(monster)snprintf(line,sizeof line,"Frame flight barrier: %s monster %u for skill %d, %.1f m off: cell %d,%d: %s",what,monster,shot.skill,metres,barrierWhy.x,barrierWhy.z,why);
+    else snprintf(line,sizeof line,"Frame flight barrier: %s, skill %d missile %d, %.1f m from its start, at cell %d,%d: %s",what,shot.skill,shot.missile,metres,barrierWhy.x,barrierWhy.z,why);
+    framevr::logging::Write(line);
+}
 bool MoveSpell(Arrow& a,Vec point) {
-    if(a.flight.shot.kind!=Kind::Spell&&!SkillRelease(a.flight.shot))return true;
+    if(a.flight.shot.kind!=Kind::Spell&&!SkillRelease(a.flight.shot)&&!ItemArrow(a.flight.shot))return true;
     const auto grid=GridPoint(a.flight.shot,point)*a.flight.shot.unitsPerMetre;
     const int x=int(grid.x*.5f),y=int(grid.z*.5f);
     const auto room=reinterpret_cast<uintptr_t(*)(uintptr_t,int,int)>(d2rsig::Addr(RoomPointRva))(a.room,x,y);
@@ -252,7 +282,37 @@ void Guide(Arrow& a,uintptr_t game,uintptr_t player) {
     }
     if(!a.homing.active)++assistStats[a.flight.shot.hand].lost;
 }
-int Collision(uintptr_t game,uintptr_t unit) {
+// The live monsters, walked once per server tick and shared by every flight
+// stepping in it: a Multiple Shot fan steps 20-odd arrows a tick, and each
+// walk reads every monster's header, link and position. Game thread only.
+// Only ids and positions are trusted from it; a unit is re-found by id before
+// any native call, and the hit itself re-reads the monster's mode.
+struct MonsterList {
+    struct Unit {uintptr_t unit=0;uint32_t classId=0,id=0;Vec position{};};
+    uintptr_t game=0;uint32_t tick=0;bool cached=false,ok=false;
+    size_t count=0;
+    std::array<Unit,4096> units{};
+};
+MonsterList monsterList;
+const MonsterList& Monsters(uintptr_t game) {
+    auto& list=monsterList;uint32_t tick=0;
+    const bool timed=Read(game+0x170,tick);
+    if(timed&&list.cached&&list.game==game&&list.tick==tick)return list;
+    list.game=game;list.tick=tick;list.cached=timed;list.count=0;
+    uintptr_t buckets[128]{};unsigned visited=0;
+    list.ok=Read(game+0x4c6*8,buckets);
+    if(!list.ok)return list;
+    for(auto target:buckets)for(unsigned chain=0;target&&chain<256&&visited++<4096;++chain) {
+        uintptr_t next=0;uint32_t h[4]{};Vec position{};
+        if(!Read(target+0x158,next)||!Read(target,h))break;
+        if(h[0]==1&&h[3]!=0&&h[3]!=12&&list.count<list.units.size()&&Position(target,position))
+            list.units[list.count++]={target,h[1],h[2],position};
+        target=next;
+    }
+    return list;
+}
+// One server step of a missile: ours are flown here, the rest stay the game's.
+int Fly(uintptr_t game,uintptr_t unit) {
     if(!serverCount.load(std::memory_order_relaxed))return originalCollision(game,unit);
     uint32_t header[3]{};Arrow a;size_t slot=arrows.size();
     if(!Read(unit,header))return originalCollision(game,unit);
@@ -295,17 +355,19 @@ int Collision(uintptr_t game,uintptr_t unit) {
     // Native missile barriers, never monster occupancy: bodies are tested in
     // 3D below. Closed/unloaded room cells are conservative solid barriers.
     float stop=WallEntry(GridPoint(a.flight.shot,from),GridPoint(a.flight.shot,to),a.flight.shot.unitsPerMetre,[&](int x,int z) {
-        if(x<1||z<1||x>65534||z>65534||!a.room)return true;
+        if(x<1||z<1||x>65534||z>65534||!a.room){NoteBarrier(0,x,z);return true;}
         const auto room=reinterpret_cast<uintptr_t(*)(uintptr_t,int,int)>(d2rsig::Addr(RoomPointRva))(a.room,x,z);
-        if(!room)return true;
+        if(!room){NoteBarrier(0,x,z);return true;}
         a.room=room;
-        return reinterpret_cast<uint16_t(*)(uintptr_t,int,int,int,int)>(d2rsig::Addr(MaskRva))(room,x,z,1,0x804)!=0;
+        if(reinterpret_cast<uint16_t(*)(uintptr_t,int,int,int,int)>(d2rsig::Addr(MaskRva))(room,x,z,1,0x804)==0)return false;
+        NoteBarrier(room,x,z);return true;
     });
     // Until terrain-height queries are available, use the launch floor. Walls
     // extend vertically; this deliberately does not permit shooting over them.
     const float floor=a.flight.shot.player.y+FloorClearance;
     if(from.y<=floor)stop=0;
     else if(to.y<=floor)stop=std::min(stop,(from.y-floor)/(from.y-to.y));
+    impactvr::Flew(a.flight.shot,from,to,stop); // a spell pushes the props and bottles in its way
     struct Touch {float fraction;uintptr_t unit;uint32_t id;};
     std::array<Touch,64> touches{};size_t n=0;
     const bool holy=a.flight.shot.kind==Kind::Spell&&framevr::holybolt::Skill(a.flight.shot.skill);
@@ -319,35 +381,45 @@ int Collision(uintptr_t game,uintptr_t unit) {
         if(allowed)++holyAllowed;else ++holyRejected;
         return allowed;
     };
-    uintptr_t buckets[128]{};unsigned visited=0;
-    if(!Read(game+0x4c6*8,buckets))return End(slot,a,game,unit);
-    for(auto target:buckets)for(unsigned chain=0;target&&chain<256&&visited++<4096;++chain) {
-        uintptr_t next=0;uint32_t h[4]{};
-        if(!Read(target+0x158,next)||!Read(target,h))break;
-        if(h[0]==1&&h[3]!=0&&h[3]!=12&&!a.flight.Seen(h[2])) {
-            Vec bottom{},top{};float radius=0,fraction=0;
-            Vec position{};
-            // The largest capsule radius below is <2m. Reject distant units
-            // before any monster-table lookup or detailed intersection work.
-            const bool positioned=Position(target,position);
-            const auto ground=RenderGround(a.flight.shot,position);
-            const bool nearby=positioned&&ground.x>=std::min(from.x,to.x)-2&&
-                ground.x<=std::max(from.x,to.x)+2&&ground.z>=std::min(from.z,to.z)-2&&ground.z<=std::max(from.z,to.z)+2;
-            if(nearby&&Body(target,h[1],a.flight.shot,bottom,top,radius)&&CapsuleEntry(from,to,bottom,top,radius,fraction)&&
-               fraction<stop&&canTouch(target)) {
-                const Touch touch{fraction,target,h[2]};
-                if(n<touches.size())touches[n++]=touch;
-                else {
-                    auto worst=std::max_element(touches.begin(),touches.end(),[](const Touch& x,const Touch& y){return x.fraction<y.fraction;});
-                    if(fraction<worst->fraction)*worst=touch;
-                }
+    const auto& monsters=Monsters(game);
+    if(!monsters.ok)return End(slot,a,game,unit);
+    for(size_t m=0;m<monsters.count;++m) {
+        const auto& c=monsters.units[m];
+        if(a.flight.Seen(c.id))continue;
+        Vec bottom{},top{};float radius=0,fraction=0;
+        // The largest capsule radius below is <2m. Reject distant units
+        // before any monster-table lookup or detailed intersection work.
+        const auto ground=RenderGround(a.flight.shot,c.position);
+        const bool nearby=ground.x>=std::min(from.x,to.x)-2&&
+            ground.x<=std::max(from.x,to.x)+2&&ground.z>=std::min(from.z,to.z)-2&&ground.z<=std::max(from.z,to.z)+2;
+        // The tick's list is shared by every flight: re-find the unit by id
+        // before reading its body or asking the game about it.
+        if(nearby&&melee::ServerUnit(game,1,c.id)==c.unit&&Body(c.unit,c.classId,a.flight.shot,bottom,top,radius)&&
+           CapsuleEntry(from,to,bottom,top,radius,fraction)&&fraction<stop&&canTouch(c.unit)) {
+            const Touch touch{fraction,c.unit,c.id};
+            if(n<touches.size())touches[n++]=touch;
+            else {
+                auto worst=std::max_element(touches.begin(),touches.end(),[](const Touch& x,const Touch& y){return x.fraction<y.fraction;});
+                if(fraction<worst->fraction)*worst=touch;
             }
         }
-        target=next;
     }
     std::sort(touches.begin(),touches.begin()+n,[](const Touch& x,const Touch& y){return x.fraction<y.fraction;});
+    breakables::ArrowContact breakableHit{};
+    const bool hasBreakable=!holy&&impactvr::Containers(a.flight.shot)&&breakables::ArrowHit(game,from,to,a.flight.shot.unitsPerMetre,a.flight.shot.player.y,stop,breakableHit);
     for(size_t i=0;i<n;++i) {
         const auto& t=touches[i];
+        if(hasBreakable&&breakableHit.fraction<t.fraction) {
+            const auto contactPoint=from+(to-from)*breakableHit.fraction;
+            a.flight.distance=advance(breakableHit.fraction);
+            a.flight.alive=false;
+            a.flight.Contact(contactPoint);
+            a.flight.updatedAt=GetTickCount64();
+            MoveSpell(a,contactPoint);
+            breakables::OperateArrow(game,player,breakableHit.unit,breakableHit.id);
+            Store(slot,a);
+            return End(slot,a,game,unit);
+        }
         uint32_t mode=0;
         // A preceding hit/proc can kill or remove another candidate.
         if(melee::ServerUnit(game,1,t.id)!=t.unit||!Read(t.unit+0xc,mode)||mode==0||mode==12)continue;
@@ -375,11 +447,32 @@ int Collision(uintptr_t game,uintptr_t unit) {
             a.flight.updatedAt=GetTickCount64();Store(slot,a);return 2;
         }
     }
+    if(hasBreakable) {
+        const auto contactPoint=from+(to-from)*breakableHit.fraction;
+        a.flight.distance=advance(breakableHit.fraction);
+        a.flight.alive=false;
+        a.flight.Contact(contactPoint);
+        a.flight.updatedAt=GetTickCount64();
+        MoveSpell(a,contactPoint);
+        breakables::OperateArrow(game,player,breakableHit.unit,breakableHit.id);
+        Store(slot,a);
+        return End(slot,a,game,unit);
+    }
     a.flight.distance=advance(stop);a.flight.updatedAt=GetTickCount64();
     if(stop<1)a.flight.Contact(from+(to-from)*stop);
-    if(!MoveSpell(a,from+(to-from)*std::max(0.f,stop-(stop<1?.0001f:0.f))))return End(slot,a,game,unit);
-    if(stop<1){++walls;return End(slot,a,game,unit);}
+    if(!MoveSpell(a,from+(to-from)*std::max(0.f,stop-(stop<1?.0001f:0.f)))) {
+        if(stop>=1){barrierWhy={0,0,true,0};LogBarrier("the game would not move the missile on (no room at its next point)",a.flight.shot,a.flight.distance);}
+        else LogBarrier("a flight stopped at a barrier",a.flight.shot,a.flight.distance);
+        return End(slot,a,game,unit);
+    }
+    if(stop<1){++walls;LogBarrier("a flight stopped at a barrier",a.flight.shot,a.flight.distance);return End(slot,a,game,unit);}
     Store(slot,a);return 1;
+}
+// The missile update hook. Every server missile steps through here: the hero's spell missiles break the
+// containers and push the props they pass or burst at (spell_impacts.h), whoever flies them.
+int Collision(uintptr_t game,uintptr_t unit) {
+    impactvr::Step step(game,unit);
+    return step.Done(Fly(game,unit));
 }
 uintptr_t Shoot(uintptr_t game,int missile,uintptr_t player,int skill,int level,int extra,
                 int offsetX,int offsetY,int targetX,int targetY,int ammo) {
@@ -407,6 +500,29 @@ uintptr_t Shoot(uintptr_t game,int missile,uintptr_t player,int skill,int level,
 void ThrowWeapon(uintptr_t game,uintptr_t player,int hand) {
     if(hand==1)spellvr::ThrowLeft(game,player);
     else reinterpret_cast<int(*)(uintptr_t,uintptr_t,int,int)>(d2rsig::Addr(ThrowRva))(game,player,2,1);
+}
+// Game thread only. Why a basic bow or crossbow release was refused before the
+// native attack (#432), at most one line a second.
+void ReportRefusedMissile(Kind kind,bool held,int native) {
+    static uint64_t at=0;const auto now=GetTickCount64();
+    if(at&&now>=at&&now-at<1000)return;
+    at=now;
+    const bool crossbow=kind==Kind::Crossbow;
+    char line[224];snprintf(line,sizeof line,"Frame physical projectiles: %s release refused: weapon held=%d, its basic attack names missile %d "
+        "(flies %d, or an item's magic 27 / explosive 41)",crossbow?"crossbow":"bow",int(held),native,crossbow?31:0);
+    framevr::logging::Write(line);
+}
+// Game thread only. Once per character and item missile: a basic release
+// flies the item's missile (Fires Magic Arrows / Explosive Arrows or Bolts).
+void ReportItemMissile(const Shot& shot,int level) {
+    static uint64_t session=0;static int told=-1;
+    const int key=int(shot.kind)*1000+shot.missile;
+    if(session==shot.session&&told==key)return;
+    session=shot.session;told=key;
+    const bool crossbow=shot.kind==Kind::Crossbow;
+    char line[208];snprintf(line,sizeof line,"Frame physical projectiles: %s basic attack fires item missile %d (%s) level %d; the hand release flies it",
+        crossbow?"crossbow":"bow",shot.missile,shot.missile==27?"Fires Magic Arrows":crossbow?"Fires Explosive Bolts":"Fires Explosive Arrows",level);
+    framevr::logging::Write(line);
 }
 void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
     std::array<Shot,4> batch;size_t n=0;
@@ -465,11 +581,23 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
             shot.skill=shot.owner=-1;shot.level=0;doubleThrow=false;++quiverRefused;
         }
         if(javelin&&shot.hand!=0&&(shot.hand!=1||!thrown||!spellvr::ThrowReady())){++refused;++throwRefused;continue;}
-        if(!spell&&(javelin?gamestate::WeaponType()!=D2RVR_TYPE_JAVELIN&&gamestate::WeaponType()!=D2RVR_TYPE_THROWING:crossbow?
-           (gamestate::WeaponType()!=D2RVR_TYPE_CROSSBOW||
-            reinterpret_cast<int(*)(uintptr_t,int*)>(d2rsig::Addr(MissileTypeRva))(player,&level)!=31):
-           (!reinterpret_cast<int(*)(uintptr_t)>(d2rsig::Addr(IsBowRva))(player)||
-            reinterpret_cast<int(*)(uintptr_t,int*)>(d2rsig::Addr(MissileTypeRva))(player,&level)!=0))) {++refused;continue;}
+        if(javelin&&gamestate::WeaponType()!=D2RVR_TYPE_JAVELIN&&gamestate::WeaponType()!=D2RVR_TYPE_THROWING){++refused;continue;}
+        // The basic attack's own missile for the bow or crossbow in hand: the
+        // arrow or bolt, or an item's (#432) that the native attack below
+        // names to Shoot. A basic release flies it; a quiver arrow keeps its
+        // skill's missile and falls back to it.
+        int item=-1;
+        if(!spell&&!javelin) {
+            const bool held=crossbow?gamestate::WeaponType()==D2RVR_TYPE_CROSSBOW:
+                reinterpret_cast<int(*)(uintptr_t)>(d2rsig::Addr(IsBowRva))(player)!=0;
+            const int native=held?reinterpret_cast<int(*)(uintptr_t,int*)>(d2rsig::Addr(MissileTypeRva))(player,&level):-1;
+            item=BasicLaunchMissile(shot.kind,native);
+            if(item==RefusedMissile){++refused;ReportRefusedMissile(shot.kind,held,native);continue;}
+            if(!quiverArrow) {
+                shot.missile=item;
+                if(ItemArrow(shot))ReportItemMissile(shot,level);
+            }
+        }
         Launch next;next.shot=shot;next.game=game;next.player=player;
         const unsigned required=spell?framevr::spellcast::LaunchCapacity(shot.skill):1;
         {
@@ -512,7 +640,8 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                 // Refused (usually mana): the native warning plays, and the
                 // drawn arrow flies as a basic attack instead of a dud.
                 ++quiverFallbacks;
-                launch.shot.skill=launch.shot.owner=launch.shot.missile=-1;launch.shot.level=0;
+                launch.shot.skill=launch.shot.owner=-1;launch.shot.level=0;
+                launch.shot.missile=item;   // the bow's own basic missile: an item's, else none
                 // ... and a javelin as a basic throw of the weapon in hand.
                 if(javelin)reinterpret_cast<int(*)(uintptr_t,uintptr_t,int,int)>(d2rsig::Addr(ThrowRva))(game,player,2,1);
                 else reinterpret_cast<int(*)(uintptr_t,uintptr_t,int,int)>(d2rsig::Addr(AttackRva))(game,player,0,1);
@@ -522,6 +651,7 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
             ThrowWeapon(game,player,shot.hand);
         } else reinterpret_cast<int(*)(uintptr_t,uintptr_t,int,int)>(d2rsig::Addr(AttackRva))(game,player,0,1);
         if(!launch.created)++refused;
+        else projectiles::CombatWalk(3);   // combat walk: a cast, shot or throw that left the hand
         if(crossbow)crossbowCadence.Landed(shot.session,fireAt,launch.created?crossbowCycle:100);
         if(crossbow&&launch.created){++crossbowFired;crossbowCycleMs=crossbowCycle;}
         {
@@ -652,8 +782,9 @@ void __cdecl Present(const D2RL::PluginContext*,void* token) noexcept {
         VisualParams(visualShot,spell?0:a.flight.distance,hero,params);
         const auto saved=creatingVisual;const auto savedSession=visualSession,savedSequence=visualSequence;
         creatingVisual=int(i);visualSession=a.flight.shot.session;visualSequence=a.flight.shot.sequence;
+        const bool savedFan=creatingFanVisual;creatingFanVisual=FanArrow(a.flight.shot);
         const auto client=projectiles::CreateVisual(reinterpret_cast<uintptr_t>(params.data()));
-        creatingVisual=saved;visualSession=savedSession;visualSequence=savedSequence;
+        creatingVisual=saved;visualSession=savedSession;visualSequence=savedSequence;creatingFanVisual=savedFan;
         uint32_t header[3]{};
         const bool readable=client&&Read(client,header);
         const bool validClient=CreatedClient(readable,header,MissileId(a.flight.shot),true)==ClientUse::Keep;
@@ -872,7 +1003,7 @@ void ClientTick(uintptr_t unit,float dt) {
         }
         for(size_t i=0;!retirement&&i<usedSlots.load(std::memory_order_relaxed);++i)if(arrows[i].client==unit&&arrows[i].clientId==header[2]) {
             slot=i;alive=arrows[i].flight.alive&&arrows[i].flight.shot.session==current.session&&enabled.load();
-            spellEnd=!alive&&(arrows[i].flight.shot.kind==Kind::Spell||SkillRelease(arrows[i].flight.shot))&&
+            spellEnd=!alive&&(arrows[i].flight.shot.kind==Kind::Spell||SkillRelease(arrows[i].flight.shot)||ItemArrow(arrows[i].flight.shot))&&
                 arrows[i].flight.shot.session==current.session&&enabled.load();
             if(spellEnd)ended=arrows[i].flight;
             if(!alive){arrows[i].client=0;arrows[i].visualBinding.Clear();Recount();}break;
@@ -881,6 +1012,7 @@ void ClientTick(uintptr_t unit,float dt) {
     if(retirement) {
         originalClientKill(unit); // the same native phase that retires fired arrows
         {std::lock_guard lock(mutex);clientRetirements.Finish(retirement);Recount();}
+        if(FanMissile(int(header[1])))return; // the client's flat fan, counted in its volley line
         char line[144];snprintf(line,sizeof line,"Frame bow preview: client-tick retirement finished missile=%u id=%u",header[1],header[2]);
         framevr::logging::Write(line);
         return;
@@ -889,7 +1021,7 @@ void ClientTick(uintptr_t unit,float dt) {
     if(slot==arrows.size()){originalClientTick(unit,dt);return;}
     if(!alive) {
         const auto saved=finishingImpact;
-        finishingImpact=spellEnd&&SkillArrow(ended.shot)?&ended:nullptr;
+        finishingImpact=spellEnd&&OwnMissile(ended.shot)?&ended:nullptr;
         const bool finished=spellEnd&&spellvr::FinishVisual(unit,ended);
         finishingImpact=saved;
         if(!finished)originalClientKill(unit);
@@ -901,7 +1033,7 @@ void ClientKill(uintptr_t unit) {
     if(timedCount.load(std::memory_order_relaxed))ForgetTimed(unit);   // ended natively (level change, unload)
     if(stagedCount.load(std::memory_order_relaxed))ForgetStaged(unit,true);
     if(!clientCount.load(std::memory_order_relaxed)&&!previewClient.load(std::memory_order_relaxed)&&
-       !impactClients.load(std::memory_order_relaxed)){originalClientKill(unit);return;}
+       !impactClients.load(std::memory_order_relaxed)&&!fanWatched.load(std::memory_order_relaxed)){originalClientKill(unit);return;}
     uint64_t retirement=0;
     {
         std::lock_guard lock(mutex);
@@ -912,6 +1044,7 @@ void ClientKill(uintptr_t unit) {
         uint32_t header[3]{};
         if(Read(unit,header))retirement=clientRetirements.Begin(unit,header);
         for(auto& a:UsedArrows())if(a.client==unit){a.client=0;a.visualBinding.Clear();}
+        if(fanWatched.load(std::memory_order_relaxed))for(auto& f:fanClients)if(f.unit==unit){f={};fanWatched.fetch_sub(1);}
         impactVisuals.Forget(unit);
         Recount();
     }
@@ -985,7 +1118,7 @@ uintptr_t Transform(uintptr_t out,uint32_t entity,uintptr_t component) {
                 if(a.flight.shot.kind==Kind::Spell||(SkillJavelin(a.flight.shot)&&ParticleJavelin(a.flight.shot.missile))) {
                     if(!Read(out,a.rendered))continue;
                     SpellMatrix(a.flight,at,a.rendered.data());
-                } else if(SkillArrow(a.flight.shot))QuiverMatrix(a.flight,at,a.rendered.data());
+                } else if(OwnMissile(a.flight.shot))QuiverMatrix(a.flight,at,a.rendered.data());
                 else ArrowMatrix(a.flight,at,a.rendered.data());
                 if(a.previous[15]!=1)a.previous=a.rendered;
                 a.renderAt=at;
@@ -1041,7 +1174,10 @@ bool PreviewReady() {
 }
 bool MotionReady(){return enabled.load()&&ready.load();}
 bool DirectCrossbow(){return launch.slot>=0&&launch.shot.kind==Kind::Crossbow;}
-uint32_t QuiverLaunchMissile(){return launch.slot>=0&&SkillRelease(launch.shot)?MissileId(launch.shot):0;}
+// A bow's item arrow is its basic arrow: it shares the arrow speed. Bolts keep theirs.
+uint32_t QuiverLaunchMissile(){
+    return launch.slot>=0&&(SkillRelease(launch.shot)||(ItemArrow(launch.shot)&&launch.shot.kind==Kind::Arrow))?MissileId(launch.shot):0;
+}
 void SetCrossbowCycle(uint64_t session,uint32_t equipment,uint32_t milliseconds) {
     std::lock_guard lock(mutex);crossbowRate={session,GetTickCount64(),equipment,milliseconds};
 }
@@ -1329,6 +1465,80 @@ void CrossbowClient(uintptr_t unit,const Shot& shot) {
         if(!a.client||a.client==unit){a.client=unit;a.clientId=h[2];++visuals;Recount();}return;
     }
 }
+// One line per drawn Multiple Shot: its fan adopted, or none in time.
+static void ReportFan(const FanVolley& v,FanVolley::Outcome outcome) {
+    char line[320];
+    if(outcome==FanVolley::Outcome::Adopted)
+        snprintf(line,sizeof line,"Frame bow volley: %u fan arrows adopted, pitch %.1f deg, spread %.1f deg (%.1f to %.1f from the release), "
+            "%llu ms after the release; the client's flat fan retired %u of %u, refused %u",v.adopted,v.PitchDegrees(),v.right-v.left,v.left,v.right,
+            static_cast<unsigned long long>(v.adoptedAt-v.armedAt),v.retired,v.watched,v.refused);
+    else snprintf(line,sizeof line,"Frame bow volley: no fan within %llu ms of the release (pitch %.1f deg; refused %u, client arrows seen %u); the game's fan stays flat",
+            static_cast<unsigned long long>(FanVolley::Window),v.PitchDegrees(),v.refused,v.watched);
+    framevr::logging::Write(line);
+}
+void ArmFan(const Shot& release) {
+    FanVolley done;auto outcome=FanVolley::Outcome::None;
+    {
+        std::lock_guard lock(mutex);
+        if(fan.armedAt&&!fan.reported){done=fan;outcome=fan.adopted?FanVolley::Outcome::Adopted:FanVolley::Outcome::Missed;}
+        // An earlier fan's unretired client arrows: the game's, as they were.
+        fan.Arm(release,GetTickCount64());fanClients={};fanWatched=0;fanArmed=true;
+    }
+    if(outcome!=FanVolley::Outcome::None)ReportFan(done,outcome);
+}
+// Game thread, from the server's missile creation: a local multipleshotarrow
+// of the armed release joins the physical flight with that release's pose.
+void AdoptFan(uintptr_t game,uintptr_t params,uintptr_t unit) {
+    if(!fanArmed.load(std::memory_order_relaxed)||!unit||!enabled.load()||!ready.load())return;
+    uint32_t h[3]{},tick=0;uintptr_t owner=0,path=0,localGame=0,player=0;int velocity=0,target[2]{};
+    if(!Read(unit,h)||h[0]!=3||!FanMissile(int(h[1]))||!Read(params+8,owner)||!melee::LocalServer(localGame,player)||
+       localGame!=game||owner!=player||!Read(params+0x2c,target)||!Read(unit+0x38,path)||!Read(path+0xa0,velocity)||
+       !Read(game+0x170,tick))return;
+    Vec start{},hero{};
+    if(!Position(unit,start)||!Position(player,hero))return;
+    const auto room=reinterpret_cast<uintptr_t(*)(uintptr_t)>(d2rsig::Addr(RoomRva))(unit);
+    const uint64_t now=GetTickCount64(),session=gamestate::LocalPlayer();
+    // The game's heading for this arrow: from where it starts to its target cell.
+    const Vec heading{2.f*target[0]-start.x,0,2.f*target[1]-start.z};
+    std::lock_guard lock(mutex);
+    if(current.session!=session)return;
+    const auto heroAt=RenderGround(fan.pose,hero);
+    if(!fan.Accepts(session,tick,now,heroAt)) {
+        if(fan.Fresh(session,now)&&!fan.reported)++fan.refused;
+        return;
+    }
+    Arrow a;a.game=game;a.server=unit;a.serverId=h[2];a.room=room;
+    a.flight.shot=fan.pose;
+    a.flight.speed=FlightSpeed(fan.pose,velocity);
+    size_t free=arrows.size();
+    for(size_t i=0;i<arrows.size();++i)if(!arrows[i].flight.alive&&!arrows[i].client&&!arrows[i].creating&&!arrows[i].reserved){free=i;break;}
+    if(!room||a.flight.speed<=0||free==arrows.size()){++fan.refused;return;}
+    const bool first=!fan.adopted;
+    a.flight.shot=fan.Adopt(tick,heading,heroAt,now);
+    a.flight.alive=true;a.flight.updatedAt=now;
+    arrows[free]=a;usedSlots.store(std::max(usedSlots.load(),free+1));
+    ++spawned;
+    if(first) {
+        // The server's fan flies the release now: the client's flat one goes.
+        for(auto& f:fanClients)if(f.unit){clientRetirements.Request(f.unit,f.id,213,now);++fan.retired;f={};}
+        fanWatched=0;
+    }
+    Recount();
+    lastLatency=unsigned(now-fan.pose.at);lastSpeedCm=unsigned(a.flight.speed*100);
+}
+// UI thread, from the client's missile creation: a local multipleshotarrow the
+// game made itself (not our visual) while a drawn Multiple Shot is armed.
+void WatchFan(uintptr_t unit) {
+    if(!fanArmed.load(std::memory_order_relaxed)||creatingVisual>=0||previewCreatingSession||!unit)return;
+    uint32_t h[3]{};
+    if(!Read(unit,h)||h[0]!=3||!FanMissile(int(h[1])))return;
+    const uint64_t now=GetTickCount64(),session=gamestate::LocalPlayer();
+    std::lock_guard lock(mutex);
+    if(!fan.Watch(session,now))return;
+    if(fan.adopted){clientRetirements.Request(unit,h[2],h[1],now);++fan.retired;}
+    else for(auto& f:fanClients)if(!f.unit){f={unit,h[2]};++fanWatched;break;}
+    Recount();
+}
 // The spell lock (vrcam BowTick) aimed this cast 1 m above the locked
 // monster's floor; aim it at the middle of the same body capsule the flight
 // hits (Body), from the same origin. Not found: the 1 m aim stays.
@@ -1408,8 +1618,10 @@ void AssistSpell(uintptr_t game,uintptr_t player) {
                             const auto end=shot.origin+candidate.direction*candidate.distance;
                             const float barrier=WallEntry(GridPoint(shot,shot.origin),GridPoint(shot,end),shot.unitsPerMetre,[&](int x,int z) {
                                 room=reinterpret_cast<uintptr_t(*)(uintptr_t,int,int)>(d2rsig::Addr(RoomPointRva))(room,x,z);
-                                return !room||reinterpret_cast<uint16_t(*)(uintptr_t,int,int,int,int)>(d2rsig::Addr(MaskRva))(room,x,z,1,0x804)!=0;
+                                if(room&&reinterpret_cast<uint16_t(*)(uintptr_t,int,int,int,int)>(d2rsig::Addr(MaskRva))(room,x,z,1,0x804)==0)return false;
+                                NoteBarrier(room,x,z);return true;
                             });
+                            if(barrier<1)LogBarrier("aim assist passed over",shot,candidate.distance,h[2]);
                             if(barrier>=1) {
                                 selection.Accept(candidate);selectedClass=h[1];selectedBody=(bottom+top)*.5f;
                             } else ++stats.blocked;
@@ -1497,7 +1709,7 @@ bool Visual(uint32_t entity,uintptr_t unit,bool hasReleasePoint,bool isRoot) {
             (creatingVisual==int(i)&&a.flight.shot.session==visualSession&&a.flight.shot.sequence==visualSequence)||
             (crossbow&&a.flight.shot.kind==Kind::Crossbow&&a.flight.shot.session==crossbow->session&&a.flight.shot.sequence==crossbow->sequence))) {
             const bool wasBound=a.visualBinding.Bound();
-            const bool rooted=a.flight.shot.kind==Kind::Spell||SkillArrow(a.flight.shot)||(SkillJavelin(a.flight.shot)&&ParticleJavelin(a.flight.shot.missile));
+            const bool rooted=a.flight.shot.kind==Kind::Spell||OwnMissile(a.flight.shot)||(SkillJavelin(a.flight.shot)&&ParticleJavelin(a.flight.shot.missile));
             const bool bound=rooted?a.visualBinding.BindRoot(entity,isRoot):a.visualBinding.Bind(entity,hasReleasePoint);
             // Descendant release components still need removal even though
             // only the root owns the spell transform.
@@ -1540,7 +1752,7 @@ bool OwnsVisual(uintptr_t unit) {
        (preview.active&&previewCreatingSession==current.session&&previewCreatingMissile==h[1])))return true;
     for(size_t i=0;i<usedSlots.load(std::memory_order_relaxed);++i) {
         const auto& a=arrows[i];
-        if((a.flight.shot.kind==Kind::Spell||SkillRelease(a.flight.shot))&&a.flight.shot.sequence&&a.flight.shot.session==current.session&&
+        if((a.flight.shot.kind==Kind::Spell||SkillRelease(a.flight.shot)||ItemArrow(a.flight.shot)||FanArrow(a.flight.shot))&&a.flight.shot.sequence&&a.flight.shot.session==current.session&&
            h[1]==MissileId(a.flight.shot)&&((a.client==unit&&a.clientId==h[2])||
            (creatingVisual==int(i)&&a.flight.shot.sequence==visualSequence&&a.flight.shot.session==visualSession)))return true;
     }
@@ -1591,6 +1803,15 @@ void Report() {
         framevr::logging::Write(line);
     }
     crossbowvr::Report();
+    if(fanArmed.load(std::memory_order_relaxed)) {
+        FanVolley done;auto outcome=FanVolley::Outcome::None;
+        {
+            std::lock_guard lock(mutex);
+            outcome=fan.Report(GetTickCount64());
+            if(outcome!=FanVolley::Outcome::None){done=fan;fanArmed=false;}
+        }
+        if(outcome!=FanVolley::Outcome::None)ReportFan(done,outcome);
+    }
     if(const auto count=crossbowFired.exchange(0)) {
         char line[128];snprintf(line,sizeof line,"Frame crossbow free fire: native shots=%u, last cycle=%u ms",count,crossbowCycleMs.load());
         framevr::logging::Write(line);

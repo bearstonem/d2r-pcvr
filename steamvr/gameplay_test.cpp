@@ -1,4 +1,6 @@
 #include "gameplay.h"
+#include "hand_role.h"
+#include <vector>
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
@@ -26,6 +28,34 @@ struct Sim {
 };
 int main() {
     {
+        Sim s;s.Nock();
+        Check(GripsReleased(s.in)&&!CanRecenter(s.in,s.out),"nocked arrow blocks recentering without a support grip");
+        s.Move({0,1.3f,0},10);s.Step(550);
+        Check(s.out.bowCharged&&!CanRecenter(s.in,s.out),"held draw survives an automatic recenter interval");
+        s.in.trigger=0;s.Step();
+        Check(s.out.bowRelease&&!CanRecenter(s.in,s.out),"release frame keeps the arrow request intact");
+        Check(CanRecenter(s.in,s.Step()),"completed release permits recentering again");
+        s.Nock();s.in.cancel=true;s.Step();
+        Check(!s.out.bowRelease&&CanRecenter(s.in,s.out),"cancelled draw permits recentering without shooting");
+        s.out.nativeBowRelease=true;
+        Check(!CanRecenter(s.in,s.out),"native bow release also blocks recentering");
+        s.out={};s.in.grip[1]=.6f;
+        Check(!CanRecenter(s.in,s.out),"support grip still blocks recentering");
+    }
+    {
+        Input in;
+        Check(GripsReleased(in),"released grips permit recentering");
+        for(int hand=0;hand<2;++hand) {
+            for(float grip:{1.f,.6f,.4f,-1.f,std::numeric_limits<float>::quiet_NaN()}) {
+                in.grip[hand]=grip;
+                Check(!GripsReleased(in),"held, latched or unknown grip defers recentering");
+            }
+            in.grip[hand]=.39f;
+            Check(GripsReleased(in),"support-grip release permits recentering again");
+            in.grip[hand]=0;
+        }
+    }
+    {
         Sim s;s.in.weapon=Weapon::Crossbow;s.Step(2);s.in.trigger=1;s.Step();
         Check(s.out.attack,"crossbow trigger requests a basic attack");
         auto native=s.out;
@@ -42,6 +72,48 @@ int main() {
         Check(RouteCrossbow(s.in,s.out,true,true,true,0)&&s.out.skill<0,"assigned basic Attack uses independent fire");
         s.in.trigger=0;s.Step();Check(!RouteCrossbow(s.in,s.out,true,true,true,0),"trigger release ends physical firing");
         s.in.trigger=1;s.in.palette=true;s.Step();Check(!RouteCrossbow(s.in,s.out,true,true,true,0),"wheel blocks crossbow firing");
+    }
+    {
+        // A crossbow's right trigger is Attack over the slot's skill (owner, 2026-11-08);
+        // the slot's binding is never written, so taking the crossbow off restores it.
+        constexpr int fireBolt=36,multipleShot=12,interact=357;
+        Check(CrossbowAttack(true,Weapon::Crossbow,true,fireBolt,true),"a crossbow fires over a spell on the right trigger");
+        Check(CrossbowAttack(true,Weapon::Crossbow,true,fireBolt,false),"and over one the hero lacks");
+        Check(CrossbowAttack(true,Weapon::Crossbow,true,interact,true),"and over Interact");
+        Check(!CrossbowAttack(true,Weapon::Crossbow,true,-1,false)&&!CrossbowAttack(true,Weapon::Crossbow,true,weaponskills::Attack,true),
+              "an empty slot or Attack already attacks");
+        for(int bow:{6,7,11,12,16,21,22,26,27,31})
+            Check(!CrossbowAttack(true,Weapon::Crossbow,true,bow,true),"a bow skill the hero has stays on a crossbow's trigger");
+        Check(CrossbowAttack(true,Weapon::Crossbow,true,multipleShot,false),"a bow skill the hero lacks gives way to Attack");
+        Check(!CrossbowAttack(false,Weapon::Crossbow,true,fireBolt,true),"motion controls off keep the slot");
+        Check(!CrossbowAttack(true,Weapon::Crossbow,false,fireBolt,true),"an unknown slot is left as it is (already Attack)");
+        for(auto weapon:{Weapon::Unknown,Weapon::Melee,Weapon::Bow,Weapon::Other,Weapon::Javelin})
+            Check(!CrossbowAttack(true,weapon,true,fireBolt,true),"only a crossbow overrides the slot");
+        Check(TriggerSelection(true,fireBolt,false)==skills::TriggerSlot(0)&&TriggerSelection(true,fireBolt,true)<0&&
+              TriggerSelection(true,-1,false)<0&&TriggerSelection(false,fireBolt,false)<0,"the trigger's selection follows the override");
+        // The transport's routing, frame by frame: Fire Bolt on the right trigger, a crossbow on and off.
+        for(int skill:{fireBolt,multipleShot}) {
+            Sim s;s.in.handBindings=true;
+            const auto route=[&](Weapon weapon,uint32_t equipment) {
+                s.in.trigger=0;s.in.weapon=weapon;s.in.equipment=equipment;
+                const int selection=TriggerSelection(true,skill,CrossbowAttack(true,weapon,true,skill,true));
+                if(s.engine.Selection()!=selection)s.engine.Select(selection);
+                s.Step(2);s.in.trigger=1;return s.Step();
+            };
+            Check(route(Weapon::Melee,1).skill==skills::TriggerSlot(0),"before the crossbow the trigger casts the slot's skill");
+            auto out=route(Weapon::Crossbow,2);
+            if(skill==fireBolt) {
+                Check(out.attack&&out.skill<0,"with a crossbow the trigger is Attack, not Fire Bolt");
+                auto native=out;
+                Check(!RouteCrossbow(s.in,native,true,false,false,-1)&&native.attack,"an unready crossbow keeps the native Attack");
+                Check(RouteCrossbow(s.in,out,true,true,false,-1)&&!out.attack&&out.skill<0,"a ready crossbow fires its physical bolt");
+            } else {
+                Check(!out.attack&&out.skill==skills::TriggerSlot(0),"Multiple Shot stays on a crossbow's trigger");
+                Check(!RouteCrossbow(s.in,out,true,true,true,skill)&&out.skill==skills::TriggerSlot(0),"and fires natively from the crossbow");
+            }
+            out=route(Weapon::Melee,3);
+            Check(!out.attack&&out.skill==skills::TriggerSlot(0),"the crossbow off, the trigger casts the slot's skill again");
+        }
     }
     for(bool quick:{false,true})for(int slot=0;slot<skills::Count;++slot) {
         Sim s;s.engine.Select(slot);s.Step(2);
@@ -335,5 +407,75 @@ int main() {
             Check(PaletteCell((col+.5f)/4,.125f+(row+.5f)*.1875f)==row*4+col,"palette hit regions match atlas");
         Check(PaletteCell(1,.5f)==-1&&PaletteCell(.5f,.95f)==-1,"palette margins never select");
     }
-    std::puts("Motion gameplay: gesture, cancellation, input ownership and palette tests passed");
+    {   // Left-handed play (hand_role.h): the engine takes the hands by ROLE. The role layer in front of it
+        // changes nothing right-handed (the setting off), and left-handed it hands the same engine the
+        // other controller for each role: a bow drawn, a javelin thrown and a melee swing, step by step.
+        struct Frame {Pose hand[2];float trigger[2]{},grip[2]{};};   // by PHYSICAL controller, 0 right
+        const auto feed=[](const handrole::Map& map,const Frame& f,Input& in) {
+            for(int role=0;role<2;++role){in.hand[role]=f.hand[map.Physical(role)];in.grip[role]=f.grip[map.Physical(role)];}
+            in.trigger=f.trigger[map.Physical(0)];in.leftTrigger=f.trigger[map.Physical(1)];in.aim=in.hand[0];
+        };
+        const auto same=[](const Output& a,const Output& b) {
+            const auto eq=[](Vec x,Vec y){return x.x==y.x&&x.y==y.y&&x.z==y.z;};
+            return a.attack==b.attack&&a.block==b.block&&a.bowDrawing==b.bowDrawing&&a.bowReady==b.bowReady&&a.bowInReach==b.bowInReach&&
+                a.bowCharged==b.bowCharged&&a.bowPhysical==b.bowPhysical&&a.meleeContact==b.meleeContact&&a.bowRelease==b.bowRelease&&
+                a.javelinRelease==b.javelinRelease&&a.javelinReady==b.javelinReady&&a.shieldContact==b.shieldContact&&a.skill==b.skill&&
+                a.feedback==b.feedback&&a.leftFeedback==b.leftFeedback&&a.leftRelease==b.leftRelease&&a.draw==b.draw&&a.leftDraw==b.leftDraw&&
+                eq(a.rayOrigin,b.rayOrigin)&&eq(a.rayDirection,b.rayDirection)&&eq(a.nockPoint,b.nockPoint)&&eq(a.bowForward,b.bowForward)&&
+                eq(a.releaseDirection,b.releaseDirection)&&eq(a.leftOrigin,b.leftOrigin)&&eq(a.leftDirection,b.leftDirection);
+        };
+        // (phase 3: a crossbow - the main trigger attacks - and a staff, Weapon::Melee with a trigger skill or Other)
+        for(const Weapon weapon:{Weapon::Bow,Weapon::Javelin,Weapon::Melee,Weapon::Crossbow,Weapon::Other}) {
+            // the script, by physical controller: the right hand acts, the left holds
+            std::vector<Frame> script;Frame f;
+            f.hand[0].p=weapon==Weapon::Bow?Vec{0,1.3f,-.4f}:Vec{.25f,1.25f,-.2f};f.hand[1].p=weapon==Weapon::Bow?Vec{0,1.3f,-.5f}:Vec{-.25f,1.25f,-.4f};
+            for(int i=0;i<3;++i)script.push_back(f);
+            f.trigger[0]=1;script.push_back(f);
+            for(int i=0;i<10;++i){f.hand[0].p.z+=weapon==Weapon::Bow?.04f:-.05f;script.push_back(f);}
+            for(int i=0;i<20&&weapon==Weapon::Bow;++i)script.push_back(f);
+            f.trigger[0]=0;if(weapon!=Weapon::Bow)f.hand[0].p.z-=.05f;script.push_back(f);script.push_back(f);
+            f.trigger[1]=1;for(int i=0;i<6;++i){f.hand[1].p.z-=.05f;script.push_back(f);}
+            f.trigger[1]=0;f.hand[1].p.z-=.05f;script.push_back(f);
+            // (a) as the transport fed the engine before there were roles: right = 0, left = 1
+            // (b) through the role layer, right-handed  (c) left-handed, the two controllers exchanged
+            Engine engines[3];Input in[3];bool acted=false;
+            for(auto& i:in){i.active=true;i.tracked[0]=i.tracked[1]=i.aimTracked=true;i.head.p={0,1.65f,0};i.weapon=weapon;i.equipment=1;i.leftThrow=weapon==Weapon::Javelin;}
+            for(const auto& frame:script) {
+                Frame exchanged;for(int h=0;h<2;++h){exchanged.hand[1-h]=frame.hand[h];exchanged.trigger[1-h]=frame.trigger[h];exchanged.grip[1-h]=frame.grip[h];}
+                for(auto& i:in)i.time+=.02;
+                in[0].hand[0]=frame.hand[0];in[0].hand[1]=frame.hand[1];in[0].grip[0]=frame.grip[0];in[0].grip[1]=frame.grip[1];
+                in[0].trigger=frame.trigger[0];in[0].leftTrigger=frame.trigger[1];in[0].aim=in[0].hand[0];
+                feed(handrole::Map{},frame,in[1]);
+                feed(handrole::Map{true},exchanged,in[2]);
+                const Output before=engines[0].Step(in[0]),off=engines[1].Step(in[1]),left=engines[2].Step(in[2]);
+                Check(same(before,off),"the role layer right-handed (Left-handed off) is exactly the engine as it was");
+                Check(same(before,left),"left-handed, the left controller does everything the right one did, and the right the left's");
+                acted=acted||before.bowRelease||before.javelinRelease||before.leftRelease||before.meleeContact||before.attack;
+                // a crossbow's shot: the main trigger's attack is taken for the physical bolt whichever controller is the main hand
+                if(weapon==Weapon::Crossbow) {
+                    Output routed[3]={before,off,left};bool took[3];
+                    for(int i=0;i<3;++i)took[i]=RouteCrossbow(in[i],routed[i],true,true,false,-1);
+                    Check(took[0]==took[1]&&took[0]==took[2]&&took[0]==before.attack&&same(routed[0],routed[2]),"the crossbow fires from the main hand's trigger, left-handed the left one");
+                    Output offHand=left;Check(!RouteCrossbow(in[2],offHand,false,true,false,-1),"never from the support hand's");
+                }
+            }
+            Check(acted,"the script really draws, throws, swings or shoots");
+        }
+        // The bow, hand by hand: left-handed the bow is the RIGHT controller's and the string the LEFT one's.
+        {
+            Engine engine;Input in;in.active=in.tracked[0]=in.tracked[1]=in.aimTracked=true;in.head.p={0,1.65f,0};in.weapon=Weapon::Bow;in.equipment=1;
+            Frame f;f.hand[0].p={.05f,1.3f,-.5f};f.hand[1].p={.05f,1.3f,-.4f};   // physical: the right hand holds the bow out, the left is at its string
+            const handrole::Map lh{true};
+            const auto step=[&](){in.time+=.02;feed(lh,f,in);return engine.Step(in);};
+            step();step();
+            auto o=step();Check(o.bowReady&&o.bowInReach&&o.rayOrigin.x==f.hand[0].p.x&&o.rayOrigin.z==f.hand[0].p.z,"the bow is the right controller's: its nock point is behind the right hand");
+            f.trigger[0]=1;Check(!step().bowDrawing,"the bow hand's own trigger does not grab the string");f.trigger[0]=0;step();
+            f.trigger[1]=1;Check(step().bowDrawing,"the LEFT trigger grabs the string");
+            for(int i=0;i<25;++i){f.hand[1].p.z+=.02f;o=step();Check(o.bowDrawing&&!o.attack,"the left hand draws");}
+            Check(o.bowCharged&&o.draw>.9f,"a full draw by the left hand");
+            f.trigger[1]=0;o=step();
+            Check(o.bowRelease&&o.feedback==2&&o.releaseDirection.z<-.99f&&o.rayOrigin.z==f.hand[0].p.z,"let go by the left hand: the arrow flies from the right hand's bow, along string hand -> bow hand");
+        }
+    }
+    std::puts("Motion gameplay: gesture, cancellation, input ownership, palette and left-handed role tests (bow, crossbow, staff, throws, melee) passed");
 }

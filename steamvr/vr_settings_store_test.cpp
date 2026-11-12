@@ -14,14 +14,14 @@ int main(){
     Check(WritePrivateProfileStringW(L"custom",L"keep",L"12345",name),"write unrelated key");
     Check(WritePrivateProfileStringW(L"render",L"rings",L"6",name),"write existing setting");
     vrsettings::Poll(name);auto before=vrsettings::Read();
-    Check(before.values[ElementalHands]==0,"missing elemental setting defaults off");
+    Check(before.values[HapticShortMelee]==0,"a missing toggle takes its default (Off)");
     for(int enabled:{1,0}) {
-        Model effects;effects.Open(vrsettings::Read());effects.Click({Kind::Change,ElementalHands,1});
+        Model effects;effects.Open(vrsettings::Read());effects.Click({Kind::Change,HapticShortMelee,1});
         auto request=effects.Click({Kind::Apply});auto malformed=request;malformed.changed|=ChangeMask{1}<<(ChangeMask::Bits-1);
         Check(!vrsettings::Submit(malformed),"unsupported high change bits rejected");
-        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"elemental setting saves through its own mask bit");
-        Check(vrsettings::Read().values[ElementalHands]==enabled&&Int(path,L"interactions",L"elemental_hands")==enabled&&
-            Int(path,L"custom",L"keep")==12345,"elemental opt-in/out round trips and preserves unrelated keys");
+        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"a toggle saves through its own mask bit");
+        Check(vrsettings::Read().values[HapticShortMelee]==enabled&&Int(path,L"haptics",L"short_melee")==enabled&&
+            Int(path,L"custom",L"keep")==12345,"its on/off round trips and preserves unrelated keys");
     }
     Check(before.values[MapTopDown]==0&&before.values[MapRotate]==0,"missing map preferences retain the existing view");
     Check(WritePrivateProfileStringW(L"interactions",L"map_top_down",L"1",name)&&
@@ -208,7 +208,7 @@ int main(){
         Check(saved.values[ProjectileAimAssist]==choice&&Int(path,L"gameplay",L"projectile_aim_assist")==choice,"aim assist survives profile reload");
         Check(saved.values[PlanarSpellAim]==0&&Int(path,L"custom",L"keep")==12345,"assistance preserves free aim and unrelated configuration");
     }
-    Check(before.values[OrdinaryMobBars]==0,"legacy profile defaults to hidden ordinary bars");
+    Check(before.values[MonsterNames]==1,"a profile with neither monster key: Bosses and elites, as Weak monster bars Off");
     Check(before.values[SmoothTurn]==0&&before.values[Snap]==30,"missing turn settings default to snap turning");
     Check(before.values[WristMap]==1,"legacy INI without wrist_map defaults on");
     Check(before.values[WristCompass]==1,"legacy INI without wrist_compass defaults on");
@@ -246,16 +246,30 @@ int main(){
     Check(WritePrivateProfileStringW(L"gameplay",L"highlight_right_hue",L"300",name),"save a right hand color");
     vrsettings::Poll(name);
     Check(vrsettings::Read().values[HighlightRight]==300,"a saved hand color wins over the old one");
+    // Monster names: the older Weak monster bars key is read while monster_names is missing, and only read.
+    {
+        const auto names=[&]{vrsettings::Poll(name);return vrsettings::Read().values[MonsterNames];};
+        Check(WritePrivateProfileStringW(L"hud",L"ordinary_mob_bars",L"1",name),"write Weak monster bars On");
+        Check(names()==0&&Int(path,L"hud",L"monster_names")==-999,"Weak monster bars On reads as All; nothing is written");
+        Check(WritePrivateProfileStringW(L"hud",L"ordinary_mob_bars",L"0",name),"write Weak monster bars Off");
+        Check(names()==1&&Int(path,L"hud",L"monster_names")==-999,"Weak monster bars Off reads as Bosses and elites");
+        Check(WritePrivateProfileStringW(L"hud",L"ordinary_mob_bars",L"1",name)&&WritePrivateProfileStringW(L"hud",L"monster_names",L"2",name),"both keys saved");
+        Check(names()==2&&Int(path,L"hud",L"ordinary_mob_bars")==1,"monster_names wins over the older key, which stays as saved");
+        Check(WritePrivateProfileStringW(L"hud",L"monster_names",L"0",name)&&names()==0,"monster_names 0: All");
+        Check(WritePrivateProfileStringW(L"hud",L"monster_names",L"x",name)&&names()==0,"an unreadable monster_names falls back to the older key");
+        Check(WritePrivateProfileStringW(L"hud",L"monster_names",nullptr,name)&&WritePrivateProfileStringW(L"hud",L"ordinary_mob_bars",nullptr,name),"remove both monster keys");
+        Check(names()==1,"neither key: Bosses and elites");
+    }
     Check(WritePrivateProfileStringW(L"gameplay",L"highlight_right_hue",nullptr,name)&&WritePrivateProfileStringW(L"gameplay",L"target_outline_hue",nullptr,name)&&
           WritePrivateProfileStringW(L"gameplay",L"target_outline_by_range",nullptr,name),"remove the outline colors");
     vrsettings::Poll(name);before=vrsettings::Read();
     Model model;model.Open(before);model.Click({Kind::Change,Foveation,1});model.Click({Kind::Change,Motion,1});
-    model.Click({Kind::Change,OrdinaryMobBars,1});
+    model.Click({Kind::Change,MonsterNames,1});
     auto request=model.Click({Kind::Apply});
     Check(vrsettings::Submit(request)&&!vrsettings::Submit(request),"one queued transaction at a time");
     Check(vrsettings::Read().result==Result::Saving&&vrsettings::Poll(name),"write transaction succeeds");
     auto saved=vrsettings::Read();Check(saved.result==Result::Saved&&saved.values[Foveation]==2&&saved.values[Motion]==1,"saved values round trip");
-    Check(saved.values[OrdinaryMobBars]==1&&Int(path,L"hud",L"ordinary_mob_bars")==1,"show ordinary bars round trips");
+    Check(saved.values[MonsterNames]==2&&Int(path,L"hud",L"monster_names")==2&&Int(path,L"hud",L"ordinary_mob_bars")==0,"None round trips; the older key beside it says Off for older builds");
     Check(saved.values[RenderResolution]==1,"profiles without the key use the headset's own resolution");
     for(int choice=2;choice<framevr::resolution::ChoiceCount;++choice){
         model.Open(vrsettings::Read());model.Click({Kind::Change,RenderResolution,1});request=model.Click({Kind::Apply});
@@ -342,12 +356,12 @@ int main(){
             saved.values[VitalsLocation]==3&&saved.values[CriticalAlerts]==0,"navigation location survives reload independently of vitals");
     }
     model.Open(saved);model.Click({Kind::Change,Foveation,-1});model.Click({Kind::Change,Foveation,-1});
-    model.Click({Kind::Change,OrdinaryMobBars,-1});
+    model.Click({Kind::Change,MonsterNames,-1});model.Click({Kind::Change,MonsterNames,-1});
     request=model.Click({Kind::Apply});
     Check(WritePrivateProfileStringW(L"custom",L"later",L"42",name),"simulate unrelated external edit");
     Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"merge unrelated external edit");
     Check(Int(path,L"render",L"fixed_foveation")==0&&Int(path,L"render",L"eye_tracked_foveation")==0,"Off writes both keys");
-    Check(vrsettings::Read().values[OrdinaryMobBars]==0&&Int(path,L"hud",L"ordinary_mob_bars")==0,"hide ordinary bars round trips");
+    Check(vrsettings::Read().values[MonsterNames]==0&&Int(path,L"hud",L"monster_names")==0&&Int(path,L"hud",L"ordinary_mob_bars")==1,"All round trips, and writes the older key On");
     Check(Int(path,L"custom",L"later")==42&&Int(backup,L"custom",L"later")==-999,"backup is not overwritten on subsequent saves");
     model.Open(vrsettings::Read());model.Click({Kind::Change,DrawDistance,-1});request=model.Click({Kind::Apply});
     Check(WritePrivateProfileStringW(L"render",L"rings",L"2",name),"simulate same-key external edit");
@@ -406,6 +420,43 @@ int main(){
         Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"save companion count preference");
         Check(vrsettings::Read().values[CompanionCounts]==enabled&&Int(path,L"interactions",L"companion_counts")==enabled&&Int(path,L"custom",L"keep")==12345,"companion preference survives reload without touching other settings");
     }
+    // The T cross: On when missing (the default), saved as [interactions] t_cross_calibrate, touching nothing else.
+    Check(vrsettings::Read().values[TCrossCalibrate]==1&&Int(path,L"interactions",L"t_cross_calibrate")==-999,"a profile without the key reads On");
+    for(int enabled:{0,1}) {
+        const auto current=vrsettings::Read();
+        model.Open(current);model.Click({Kind::Change,TCrossCalibrate,enabled?1:-1});request=model.Click({Kind::Apply});
+        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"save the T cross switch");
+        const auto saved=vrsettings::Read();
+        Check(saved.values[TCrossCalibrate]==enabled&&Int(path,L"interactions",L"t_cross_calibrate")==enabled&&
+              Changed(saved.values,current.values)==(ChangeMask{1}<<TCrossCalibrate)&&Int(path,L"custom",L"keep")==12345,"the T cross switch survives reload and touches nothing else");
+    }
+    // Left-handed (#307): Off when missing (every existing profile), saved as [interactions] left_handed; the
+    // profile's own Dominant hand is neither read for it nor written by it.
+    Check(vrsettings::Read().values[LeftHanded]==0&&Int(path,L"interactions",L"left_handed")==-999,"a profile without left_handed reads Off: right-handed as before");
+    {
+        const int dominantBefore=Int(path,L"interactions",L"dominant_hand");
+        for(int enabled:{1,0}) {
+            const auto current=vrsettings::Read();
+            model.Open(current);model.Click({Kind::Change,LeftHanded,enabled?1:-1});request=model.Click({Kind::Apply});
+            Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"save Left-handed");
+            const auto saved=vrsettings::Read();
+            Check(saved.values[LeftHanded]==enabled&&Int(path,L"interactions",L"left_handed")==enabled&&
+                  Changed(saved.values,current.values)==(ChangeMask{1}<<LeftHanded)&&Int(path,L"custom",L"keep")==12345&&
+                  Int(path,L"interactions",L"dominant_hand")==dominantBefore,"Left-handed survives reload and touches nothing else, the saved Dominant hand included");
+        }
+    }
+    // Richer haptics: both On when missing (the default), saved as [haptics] hit_patterns and heartbeat, touching nothing else.
+    for(const auto& [key,name2]:{std::pair<Key,const wchar_t*>{HapticSurfaces,L"hit_patterns"},{HapticHeartbeat,L"heartbeat"}}) {
+        Check(vrsettings::Read().values[key]==1&&Int(path,L"haptics",name2)==-999,"a profile without the haptic feel key reads On");
+        for(int enabled:{0,1}) {
+            const auto current=vrsettings::Read();
+            model.Open(current);model.Click({Kind::Change,key,enabled?1:-1});request=model.Click({Kind::Apply});
+            Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"save a haptic feel switch");
+            const auto saved=vrsettings::Read();
+            Check(saved.values[key]==enabled&&Int(path,L"haptics",name2)==enabled&&
+                  Changed(saved.values,current.values)==(ChangeMask{1}<<key)&&Int(path,L"custom",L"keep")==12345,"a haptic feel switch survives reload and touches nothing else");
+        }
+    }
     // Loot pick (#257): On when missing (the default), On and Off saved as [interactions] loot_pick; only 0 reads Off.
     Check(vrsettings::Read().values[LootPick]==1&&Int(path,L"interactions",L"loot_pick")==-999,"a profile without loot_pick reads On");
     for(int enabled:{0,1}) {
@@ -422,6 +473,56 @@ int main(){
     vrsettings::Poll(name);Check(vrsettings::Read().values[LootPick]==1,"an unknown loot_pick reads On, the default");
     Check(WritePrivateProfileStringW(L"interactions",L"loot_pick",nullptr,name),"remove the loot pick");
     vrsettings::Poll(name);
+    // Glyph casting, each hand its own set (owner 2026-11-05): a profile saved with the one set, its Draw glyph
+    // button on the left hand, reads as it did (circle ... wave the right hand's, every left shape -1: the right
+    // hand's); the wheel's saves write one key each and nothing rewrites the rest.
+    Check(WritePrivateProfileStringW(L"glyphs",L"draw_slot",L"6",name)&&WritePrivateProfileStringW(L"glyphs",L"circle",L"40",name)&&
+          WritePrivateProfileStringW(L"glyphs",L"star",L"58",name),"write a one-set glyph profile");
+    vrsettings::Poll(name);
+    {
+        const auto saved=vrsettings::Read();
+        Check(saved.values[GlyphDraw]==6&&saved.values[GlyphDrawSecond]==-1&&saved.values[GlyphKey(0)]==40&&saved.values[GlyphKey(6)]==58&&saved.values[GlyphKey(1)]==-1,
+              "the one set and its Draw glyph button read as saved");
+        bool none=true;for(int i=0;i<8;++i)none=none&&saved.values[GlyphKey(i,1)]==-1;
+        Check(none,"no left keys: every left shape the right hand's");
+        const Key keys[]={GlyphKey(0,1),GlyphDrawSecond,GlyphKey(0,1)};const float wanted[]={54,1,-1};
+        for(int i=0;i<3;++i) {   // the left circle's own skill, the right hand's Draw glyph button, the left circle cleared
+            const auto current=vrsettings::Read();auto values=current.values;values[keys[i]]=wanted[i];
+            const Request request{current.values,values,Changed(current.values,values),current.sequence+1};
+            Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"save one glyph key as the wheel does");
+            const auto after=vrsettings::Read();
+            Check(after.values[keys[i]]==wanted[i]&&Changed(after.values,current.values)==(ChangeMask{1}<<keys[i]),"it survives reload, alone");
+        }
+        auto text=[&](const wchar_t* key){wchar_t t[32]{};GetPrivateProfileStringW(L"glyphs",key,L"(none)",t,32,path.c_str());return std::wstring(t);};
+        Check(text(L"left_circle")==L"-1"&&Int(path,L"glyphs",L"second_draw_slot")==1&&Int(path,L"glyphs",L"draw_slot")==6&&
+              Int(path,L"glyphs",L"circle")==40&&Int(path,L"glyphs",L"star")==58,"the saved set and button untouched");
+        Check(text(L"left_star")==L"(none)"&&text(L"triangle")==L"(none)"&&Int(path,L"custom",L"keep")==12345,"no other key written");
+    }
+    Check(vrsettings::Read().values[MercPotionAssist]==0,"missing merc potion assist retains old landing behavior");
+    for(int choice:{1,0}) {
+        model.Open(vrsettings::Read());model.Click({Kind::Change,MercPotionAssist,choice?1:-1});request=model.Click({Kind::Apply});
+        Check(request.changed==(ChangeMask{1}<<MercPotionAssist),"merc assist transaction isolates toggle");
+        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"merc assist preference saves");
+        Check(vrsettings::Read().values[MercPotionAssist]==choice&&Int(path,L"gameplay",L"merc_potion_assist")==choice,
+              "merc assist on and off survive reload");
+    }
+    Check(vrsettings::Read().values[ClickToDrink]==0,"missing click to drink preserves gesture-only drinking");
+    for(int choice:{1,0}) {
+        model.Open(vrsettings::Read());model.Click({Kind::Change,ClickToDrink,choice?1:-1});request=model.Click({Kind::Apply});
+        Check(request.changed==(ChangeMask{1}<<ClickToDrink),"click to drink transaction isolates toggle");
+        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"click to drink preference saves");
+        Check(vrsettings::Read().values[ClickToDrink]==choice&&Int(path,L"interactions",L"click_to_drink")==choice&&
+              Int(path,L"custom",L"keep")==12345,"click to drink on and off survive reload preserving unrelated settings");
+    }
+    Check(vrsettings::Read().values[SummonRangeMultiplier]==1,"missing summon multiplier preserves native ranges");
+    for(float multiplier:{1.25f,5.f,1.f}) {
+        const auto before=vrsettings::Read();
+        model.Open(before);model.Set(SummonRangeMultiplier,multiplier);request=model.Click({Kind::Apply});
+        Check(request.changed==(ChangeMask{1}<<SummonRangeMultiplier),"one setting controls both summon ranges");
+        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"shared summon preference saves");
+        Check(vrsettings::Read().values[SummonRangeMultiplier]==multiplier&&Int(path,L"custom",L"keep")==12345,
+              "shared fractional multiplier survives reload and preserves other settings");
+    }
     model.Open(vrsettings::Read());model.Click({Kind::Change,Motion,-1});request=model.Click({Kind::Apply});
     Check(DeleteFileW(name)&&vrsettings::Submit(request)&&!vrsettings::Poll(name),"missing file fails safely");
     Check(!vrsettings::Read().ready&&vrsettings::Read().result==Result::Failed,"failure status published");

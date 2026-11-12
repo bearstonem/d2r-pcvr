@@ -2,11 +2,13 @@
 #include "light_bounds_shader.h"
 #include "native_lock.h"
 #include "generation_cache.h"
+#include "pipeline_set.h"
 #include "../vr/game_device_only.h"
 #include <windows.h>
 #include <d3dcompiler.h>
 #include <atomic>
 #include <mutex>
+#include <shared_mutex>
 #include <vector>
 
 namespace framevr::lightbounds {
@@ -15,8 +17,10 @@ using namespace reshade::api;
 struct Copy {device* owner=nullptr;pipeline original{},replacement{};};
 NativeMutex mutex;
 std::vector<Copy> copies;
+// The originals in `copies` (one compute pipeline in practice), kept with it under `mutex`.
+PipelineSet<> replaced;
 std::atomic<uint64_t> generation{1};
-std::atomic<bool> active{false},reported{false};
+std::atomic<bool> active{false},scene{false},reported{false};
 thread_local bool ours=false;
 void (*logger)(const char*)=nullptr;
 std::once_flag compileOnce;
@@ -50,7 +54,7 @@ void Created(device* dev,pipeline_layout layout,uint32_t count,const pipeline_su
         pipeline replacement{};ours=true;
         const bool ok=dev->create_pipeline(layout,count,description.data(),&replacement);ours=false;
         if(!ok){if(logger)logger("VR light bounds: replacement pipeline failed; retaining native lighting");return;}
-        {std::lock_guard lock(mutex);copies.push_back({dev,original,replacement});++generation;}
+        {std::lock_guard lock(mutex);copies.push_back({dev,original,replacement});replaced.Add(original.handle);++generation;}
         if(logger)logger("VR light bounds: verified native depth-reduction shader matched; rectangular-tile correction ready");
         return;
     }
@@ -60,7 +64,7 @@ void Destroyed(device* dev,pipeline original) {
     pipeline replacement{};
     {std::lock_guard lock(mutex);
         for(auto it=copies.begin();it!=copies.end();++it)if(it->owner==dev&&it->original.handle==original.handle) {
-            replacement=it->replacement;copies.erase(it);++generation;break;
+            replacement=it->replacement;copies.erase(it);replaced.Remove(original.handle);++generation;break;
         }
     }
     if(replacement.handle){ours=true;dev->destroy_pipeline(replacement);ours=false;}
@@ -69,18 +73,18 @@ void DeviceDestroyed(device* dev) {
     std::vector<pipeline> pending;
     {std::lock_guard lock(mutex);
         for(auto it=copies.begin();it!=copies.end();) {
-            if(it->owner==dev){pending.push_back(it->replacement);it=copies.erase(it);}else ++it;
+            if(it->owner==dev){pending.push_back(it->replacement);replaced.Remove(it->original.handle);it=copies.erase(it);}else ++it;
         }
         ++generation;
     }
     ours=true;for(auto p:pending)dev->destroy_pipeline(p);ours=false;
 }
 void Bind(command_list* commands,pipeline_stage stages,pipeline original) {
-    if(ours||!active.load(std::memory_order_relaxed)||uint32_t(stages&pipeline_stage::compute_shader)==0)return;
+    if(ours||!(active.load(std::memory_order_relaxed)||scene.load(std::memory_order_relaxed))||uint32_t(stages&pipeline_stage::compute_shader)==0)return;
     static thread_local GenerationCache<Copy> cache;
     Copy found{};const auto version=generation.load(std::memory_order_acquire);auto* dev=commands->get_device();
     if(!cache.Get(original.handle,version,found)) {
-        std::lock_guard lock(mutex);
+        std::shared_lock lock(mutex);
         for(const auto& entry:copies)if(entry.owner==dev&&entry.original.handle==original.handle){found=entry;break;}
         cache.Put(original.handle,version,found);
     }
@@ -88,13 +92,23 @@ void Bind(command_list* commands,pipeline_stage stages,pipeline original) {
     ours=true;commands->bind_pipeline(stages,found.replacement);ours=false;
     if(!reported.exchange(true)&&logger)logger("VR light bounds: rectangular-tile depth correction active during native VR eye rendering");
 }
+// ReShade passes every bind, on every recording thread, with pipeline_stage::all. All but the one
+// replaced pipeline leave here, before the device checks (virtual calls) and the cache.
+void BindAny(command_list* commands,pipeline_stage stages,pipeline original) {
+    if(!(active.load(std::memory_order_relaxed)||scene.load(std::memory_order_relaxed))||!replaced.MayContain(original.handle))return;
+    d2rvr::D3D12Only<&Bind>::Call(commands,stages,original);
+}
 }
 void Register(void (*log)(const char*)) {
     logger=log;
     reshade::register_event<reshade::addon_event::init_pipeline>(&d2rvr::D3D12Only<&Created>::Call);
     reshade::register_event<reshade::addon_event::destroy_pipeline>(&d2rvr::D3D12Only<&Destroyed>::Call);
     reshade::register_event<reshade::addon_event::destroy_device>(&d2rvr::D3D12Only<&DeviceDestroyed>::Call);
-    reshade::register_event<reshade::addon_event::bind_pipeline>(&d2rvr::D3D12Only<&Bind>::Call);
+    reshade::register_event<reshade::addon_event::bind_pipeline>(&BindAny);
 }
 void SetActive(bool on){active.store(on,std::memory_order_relaxed);}
+void SetScene(bool on){
+    if(scene.exchange(on,std::memory_order_relaxed)!=on&&logger)
+        logger(on?"VR light bounds: rectangular-tile correction on for the campfire scene":"VR light bounds: campfire scene left; correction follows the eye rendering again");
+}
 }

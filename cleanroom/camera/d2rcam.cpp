@@ -35,6 +35,7 @@
 #include <atomic>
 #include <cstring>
 #include <cstdio>
+#include <cmath>
 #ifdef D2RVR_NATIVE_OPENXR
 #include "../../steamvr/logging.h"
 #include "../../steamvr/memory.h"
@@ -75,7 +76,15 @@ ReleaseCameraFn o_releaseCamera = nullptr;
 WorldToScreenFn o_worldToScreen = nullptr;
 UnitToScreenFn o_unitToScreen = nullptr;
 std::atomic<bool> g_stereoLabels{false};
-std::atomic<bool> g_showOrdinaryMobBars{false};
+// VR Settings > Interface > Labels > Monster names (monsterbars::Names); -1 until the ini is first read.
+std::atomic<int> g_monsterNames{-1};
+// Ten seconds of it (TakeMonsterPlates): overhead anchors and panel paints the
+// setting took away, and panel paints with no anchor of this eye pass.
+std::atomic<uint32_t> g_anchorsHidden{0},g_panelsHidden{0},g_panelsUnplaced{0};
+monsterbars::Names MonsterNamesNow() {
+    const int n=g_monsterNames.load(std::memory_order_relaxed);
+    return n<0?monsterbars::DefaultNames:monsterbars::Names(n);
+}
 thread_local uint32_t t_labelProjection=0;
 std::atomic<int> g_traceLabelEye{-1};
 std::atomic<uint32_t> g_traceLabelCount{0};
@@ -89,6 +98,20 @@ WidgetDrawFn g_drawPanelManager=nullptr,g_drawMonsterHealth=nullptr;
 bool g_monsterDrawHooks=false;
 thread_local int t_stereoUiEye=-1;
 thread_local DeferredDraws* t_deferredHealth=nullptr;
+// The hovered monster's panel in this eye pass (monsterbars::PanelGate), and the
+// last unit's Kind within the pass: the game asks for each monster's anchor twice
+// in a row. Nothing is kept from one eye pass to the next.
+thread_local monsterbars::PanelGate t_panelGate;
+thread_local uint32_t t_uiPass=0;
+struct KindSeen {uintptr_t unit=0;uint32_t pass=0;monsterbars::Kind kind=monsterbars::Kind::Other;};
+thread_local KindSeen t_kindSeen;
+bool StereoUiPass();
+// The hovered monster's panel may be painted in this pass (outside native stereo, always).
+bool PanelAllowed() {return !StereoUiPass()||t_panelGate.Paint();}
+// A visible panel left unpainted, counted by why.
+void CountPanelSkipped() {
+    (t_panelGate.verdict==monsterbars::PanelGate::Verdict::Hidden?g_panelsHidden:g_panelsUnplaced).fetch_add(1,std::memory_order_relaxed);
+}
 #endif
 
 std::atomic<bool>   g_cameraHooks { false };
@@ -98,6 +121,22 @@ std::atomic<ProjFn> g_projFn { nullptr };
 std::atomic<FrameFn> g_frameFn { nullptr };
 std::atomic<RayFn>  g_rayFn { nullptr };
 std::atomic<ULONGLONG> g_lastSync { 0 };
+std::atomic<bool> g_useActive { false };   // SetUseActiveCamera
+// SetMirrorGameCamera: while a menu scene's own camera is driven (the campfire), the game camera
+// object takes the same pose for the frame - parts of the scene (its sky, its clouds) may be drawn
+// from that camera, and they stood still on the screen as the head turned. The game's own pose
+// goes back for its tick (HandBackPoseForTick), as for the driven camera.
+std::atomic<bool> g_mirrorGame { false };
+// SetSyncActiveFields (testing, 2026-11-07): the driven scene camera's own fov and aspect fields set
+// from our projection too, for whatever the engine still works out from the fields (the campfire's
+// lighting showed right-angled dark rows fixed to the eyes). Put back when it stops.
+std::atomic<bool> g_syncFields { false };
+struct Fields { void* cam = nullptr; float fov = 0, w = 0, h = 0, wroteFov = 0, wroteW = 0; bool wrote = false; };
+Fields g_fields;
+void RestoreFields();
+struct Mirror { void* cam = nullptr; float pos[3] {}, quat[4] {}, wrotePos[3] {}, wroteQuat[4] {}; bool wrote = false; };
+Mirror g_mirror;
+std::atomic<float> g_pickTurn { 0.0f };      // SetActivePickTurn, radians about the world's up
 
 // ---- Per-frame snapshot ----------------------------------------------------
 // Written only by the frame sync (game main thread), read by the hooks and
@@ -120,6 +159,13 @@ std::atomic<uint32_t> g_frameIndex { 0 };
 const Frame& Current() {
 	return g_frames[g_frameIndex.load(std::memory_order_acquire) & 3];
 }
+#ifdef D2RVR_NATIVE_OPENXR
+// An eye pass of native stereo gameplay with our matrices in the camera.
+bool StereoUiPass() {
+    const Frame& f=Current();
+    return t_stereoUiEye>=0&&f.ourView&&f.ourProj;
+}
+#endif
 
 void Publish(const Frame& f) {
 	const uint32_t next = g_frameIndex.load(std::memory_order_relaxed) + 1;
@@ -135,6 +181,8 @@ struct Tracked {
 	float writtenQuat[4]  = {};
 	float gamePos[3]      = {};
 	float gameQuat[4]     = {};
+	bool  turnedForTick   = false;   // SetActivePickTurn: the game's quaternion turned for its tick
+	float tickQuat[4]     = {};
 };
 Tracked g_t;
 
@@ -149,6 +197,14 @@ T& At(void* base, size_t offset) {
 
 float* Fp(void* cam, size_t offset) {
 	return reinterpret_cast<float*>(static_cast<uint8_t*>(cam) + offset);
+}
+
+void RestoreFields() {
+	Fields& f = g_fields;
+	if (!f.wrote || f.cam == nullptr) { f = Fields {}; return; }
+	if (At<float>(f.cam, camf::FovDeg) == f.wroteFov) At<float>(f.cam, camf::FovDeg) = f.fov;
+	if (At<float>(f.cam, camf::AspectW) == f.wroteW) At<float>(f.cam, camf::AspectW) = f.w;
+	f = Fields {};
 }
 
 // The loader writes the trampoline pointer itself (raw overload below), but a
@@ -210,6 +266,7 @@ void PublishNone() {
 }
 
 void Apply(void* cam, const WorldView& in, bool hadView, bool hadProj);
+void RestoreMirror();
 
 // The frame sync, run right after the game's camera follow.
 void SyncFrame() {
@@ -217,6 +274,10 @@ void SyncFrame() {
 	void* renderer = g_getRenderer();
 	void* cam      = g_getGameCamera(renderer);
 	void* active   = cam != nullptr ? g_getActiveCamera(renderer) : nullptr;
+	// A menu scene's own camera (the campfire): driven in place of the game camera when asked.
+	if (g_useActive.load(std::memory_order_relaxed) && active != nullptr) {
+		cam = active;
+	}
 	// What the lazy rebuilds were told last frame; when we stop overriding, the
 	// matrices are marked dirty only after the new frame is published, so a
 	// rebuild in between cannot put our old matrices back.
@@ -248,7 +309,9 @@ void SyncFrame() {
 	if (!g_t.wrotePose || !Same(pos, g_t.writtenPos, 3)) {
 		std::memcpy(g_t.gamePos, pos, sizeof(g_t.gamePos));
 	}
-	if (!g_t.wrotePose || !Same(quat, g_t.writtenQuat, 4)) {
+	const bool turned = g_t.turnedForTick && Same(quat, g_t.tickQuat, 4);   // still our turn for the tick: not the game's
+	g_t.turnedForTick = false;
+	if (!turned && (!g_t.wrotePose || !Same(quat, g_t.writtenQuat, 4))) {
 		std::memcpy(g_t.gameQuat, quat, sizeof(g_t.gameQuat));
 	}
 
@@ -267,6 +330,26 @@ void SyncFrame() {
 		frameFn();
 	}
 	Apply(cam, in, hadView, hadProj);
+	{	// the campfire's game camera: our pose for the frame (SetMirrorGameCamera)
+		void* game = g_getGameCamera(renderer);
+		if (g_mirrorGame.load(std::memory_order_relaxed) && g_useActive.load(std::memory_order_relaxed) &&
+		    game != nullptr && game != cam && g_t.wrotePose) {
+			Mirror& m = g_mirror;
+			if (m.cam != game) { m = Mirror {}; m.cam = game; }
+			if (!m.wrote) {
+				std::memcpy(m.pos, Fp(game, camf::Pos), sizeof(m.pos));
+				std::memcpy(m.quat, Fp(game, camf::Quat), sizeof(m.quat));
+			}
+			std::memcpy(Fp(game, camf::Pos), g_t.writtenPos, sizeof(g_t.writtenPos));
+			std::memcpy(Fp(game, camf::Quat), g_t.writtenQuat, sizeof(g_t.writtenQuat));
+			std::memcpy(m.wrotePos, g_t.writtenPos, sizeof(m.wrotePos));
+			std::memcpy(m.wroteQuat, g_t.writtenQuat, sizeof(m.wroteQuat));
+			At<uint8_t>(game, camf::ViewDirty) = 1;
+			m.wrote = true;
+		} else {
+			RestoreMirror();
+		}
+	}
 }
 
 // 3. Runs the callbacks on `in` and puts their matrices into the camera.
@@ -321,6 +404,19 @@ void Apply(void* cam, const WorldView& in, bool hadView, bool hadProj) {
 		}
 		std::memcpy(Fp(cam, camf::Proj), proj, sizeof(proj));
 		std::memcpy(f.proj, proj, sizeof(proj));
+		if (g_syncFields.load(std::memory_order_relaxed) && g_useActive.load(std::memory_order_relaxed) &&
+		    proj[0] > 0.01f && proj[5] > 0.01f) {
+			Fields& fd = g_fields;
+			if (fd.cam != cam) { RestoreFields(); fd.cam = cam; }
+			if (!fd.wrote) { fd.fov = At<float>(cam, camf::FovDeg); fd.w = At<float>(cam, camf::AspectW); fd.h = At<float>(cam, camf::AspectH); }
+			const float fov = 2.0f * std::atan(1.0f / proj[5]) * 180.0f / 3.14159265358979f;
+			const float w = fd.h * proj[5] / proj[0];
+			At<float>(cam, camf::FovDeg) = fov;
+			At<float>(cam, camf::AspectW) = w;
+			fd.wroteFov = fov; fd.wroteW = w; fd.wrote = true;
+		} else if (g_fields.wrote) {
+			RestoreFields();
+		}
 	} else {
 		std::memcpy(f.proj, in.gameProj, sizeof(f.proj));
 	}
@@ -335,7 +431,16 @@ void Apply(void* cam, const WorldView& in, bool hadView, bool hadProj) {
 // The follow derives next frame's camera offset from the camera's own
 // quaternion (0x7BC3C0 reads +0x12C), so it must run on the game's pose or it
 // would chase ours. Hand the game its pose for the duration of its tick.
+void RestoreMirror() {
+	Mirror& m = g_mirror;
+	if (!m.wrote || m.cam == nullptr) return;
+	if (Same(Fp(m.cam, camf::Pos), m.wrotePos, 3)) std::memcpy(Fp(m.cam, camf::Pos), m.pos, sizeof(m.pos));
+	if (Same(Fp(m.cam, camf::Quat), m.wroteQuat, 4)) std::memcpy(Fp(m.cam, camf::Quat), m.quat, sizeof(m.quat));
+	At<uint8_t>(m.cam, camf::ViewDirty) = 1;
+	m.wrote = false;
+}
 void HandBackPoseForTick() {
+	RestoreMirror();
 	void* cam = g_t.cam;
 	if (cam == nullptr || !g_t.wrotePose) {
 		return;
@@ -345,6 +450,18 @@ void HandBackPoseForTick() {
 	}
 	if (Same(Fp(cam, camf::Quat), g_t.writtenQuat, 4)) {
 		std::memcpy(Fp(cam, camf::Quat), g_t.gameQuat, sizeof(g_t.gameQuat));
+		// SetActivePickTurn: a menu scene's camera turned about the world's up for the tick, toward what
+		// the hand points at - the character screen finds the hero under the pointer on this camera's
+		// picture, which the pointer cannot leave: the heroes at its ends were out of reach.
+		const float a = g_pickTurn.load(std::memory_order_relaxed);
+		if (g_useActive.load(std::memory_order_relaxed) && a != 0.0f) {
+			const float s = std::sin(0.5f * a), c = std::cos(0.5f * a);   // (0, s, 0, c) * q
+			const float* q = g_t.gameQuat;
+			const float t[4] = { c * q[0] + s * q[2], c * q[1] + s * q[3], c * q[2] - s * q[0], c * q[3] - s * q[1] };
+			std::memcpy(Fp(cam, camf::Quat), t, sizeof(t));
+			std::memcpy(g_t.tickQuat, t, sizeof(t));
+			g_t.turnedForTick = true;
+		}
 	}
 	At<uint8_t>(cam, camf::ViewDirty) = 1;   // a GetView in between rebuilds, and the hook keeps ours
 	g_t.wrotePose = false;
@@ -386,6 +503,28 @@ const float* __fastcall HookGetProjection(void* cam) {
 	return result;
 }
 
+// Diagnostics while a menu scene's camera is driven (the campfire's pick): who asks for a ray
+// from which camera, at which pixel, and what it got - a few lines a second.
+void TraceScreenToRay(void* cam, const float* px, const float* origin, const float* dir, const char* how, uintptr_t ret) {
+#ifdef D2RVR_NATIVE_OPENXR
+	if (!g_useActive.load(std::memory_order_relaxed) || px == nullptr) return;
+	static ULONGLONG second = 0; static int lines = 0;
+	const ULONGLONG now = GetTickCount64();
+	if (now - second >= 1000) { second = now; lines = 0; }
+	if (++lines > 4) return;
+	const Frame& f = Current();
+	char line[300];
+	std::snprintf(line, sizeof line, "campfire ray: %s, cam %s (%p), px %.1f %.1f of %.0fx%.0f, fov %.1f aspect %.0fx%.0f, from %.2f %.2f %.2f along %.3f %.3f %.3f, caller +0x%llx",
+	              how, cam == f.cam ? "driven" : "OTHER", cam, px[0], px[1],
+	              cam ? At<float>(cam, camf::ViewportW) : 0.0f, cam ? At<float>(cam, camf::ViewportH) : 0.0f,
+	              cam ? At<float>(cam, camf::FovDeg) : 0.0f, cam ? At<float>(cam, camf::AspectW) : 0.0f, cam ? At<float>(cam, camf::AspectH) : 0.0f,
+	              origin[0], origin[1], origin[2], dir[0], dir[1], dir[2], (unsigned long long)ret);
+	framevr::logging::Write(line);
+#else
+	(void)cam; (void)px; (void)origin; (void)dir; (void)how; (void)ret;
+#endif
+}
+
 void __fastcall HookScreenToRay(void* cam, const float* px, float* origin, float* dir) {
 	const ScreenToRayFn original = Orig(o_screenToRay);
 	if (original == nullptr) {   // never expected; leave a harmless ray
@@ -394,9 +533,11 @@ void __fastcall HookScreenToRay(void* cam, const float* px, float* origin, float
 		dir[1] = -1.0f;
 		return;
 	}
+	const uintptr_t caller = reinterpret_cast<uintptr_t>(_ReturnAddress()) - g_base;
 	const Frame& f = Current();
 	if (cam == nullptr || cam != f.cam || !(f.ourView || f.ourProj) || px == nullptr) {
 		original(cam, px, origin, dir);
+		TraceScreenToRay(cam, px, origin, dir, "game's own", caller);
 		return;
 	}
 	const uintptr_t ret = reinterpret_cast<uintptr_t>(_ReturnAddress()) - g_base;
@@ -410,13 +551,17 @@ void __fastcall HookScreenToRay(void* cam, const float* px, float* origin, float
 		return;
 	}
 	if (const RayFn rayFn = g_rayFn.load(std::memory_order_relaxed); rayFn != nullptr && rayFn(origin, dir)) {
+		TraceScreenToRay(cam, px, origin, dir, "hand's", caller);
 		return;
 	}
 	const float vpW = At<float>(cam, camf::ViewportW);
 	const float vpH = At<float>(cam, camf::ViewportH);
 	if (!m4::RayThrough(f.invView, f.proj, vpW, vpH, px[0], px[1], origin, dir)) {
 		original(cam, px, origin, dir);
+		TraceScreenToRay(cam, px, origin, dir, "game's own (ours failed)", caller);
+		return;
 	}
+	TraceScreenToRay(cam, px, origin, dir, "ours", caller);
 }
 
 void __fastcall HookReleaseCamera(void* cam) {
@@ -437,6 +582,13 @@ void __fastcall HookReleaseCamera(void* cam) {
 #ifdef D2RVR_NATIVE_OPENXR
 void __fastcall DrawMonsterHealth(void* widget) {
     if(t_deferredHealth&&t_deferredHealth->Add(reinterpret_cast<uintptr_t>(widget)))return;
+    // Painted where the game paints it (the draw-order trial off, or no room
+    // left to defer): the verdict so far in this pass (monsterbars::PanelGate).
+    if(!PanelAllowed()) {
+        uint8_t visible=0;
+        if(framevr::ReadMemory(&visible,static_cast<uint8_t*>(widget)+0x51,sizeof visible)&&visible)CountPanelSkipped();
+        return;
+    }
     g_drawMonsterHealth(widget);
 }
 void __fastcall DrawPanelManager(void* widget) {
@@ -452,12 +604,15 @@ void __fastcall DrawPanelManager(void* widget) {
     t_deferredHealth=nullptr;
     // Native root draw is only a child traversal, inside the caller's UI pass.
     // Tooltips have now updated the same widgets for this eye. Paint each once,
-    // preserving native text, health, visibility and the loader's root wrapper.
+    // preserving native text, health, visibility and the loader's root wrapper -
+    // unless Monster names hides its monster, or this pass gave it no place
+    // (monsterbars::PanelGate: it would stand where another eye or frame left it).
     pending.Flush([](uintptr_t address) {
         uintptr_t vtable=0;uint8_t visible=0;
         if(framevr::ReadMemory(&vtable,reinterpret_cast<void*>(address),sizeof vtable)&&
            vtable==g_base+MonsterHealthVtable&&
            framevr::ReadMemory(&visible,reinterpret_cast<void*>(address+0x51),sizeof visible)&&visible) {
+            if(!PanelAllowed()){CountPanelSkipped();return;}
             if(g_traceLabelEye.load(std::memory_order_relaxed)>=0) {
                 char line[120];std::snprintf(line,sizeof line,
                     "Frame label paint: eye %d health panel %p after current-eye tooltip updates",t_stereoUiEye,reinterpret_cast<void*>(address));
@@ -489,20 +644,38 @@ bool InstallMonsterDrawOrder() {
 }
 #endif
 
+bool UnitAnchor(void* context,void* unit,float* out,uint8_t above,uintptr_t caller);
 bool __fastcall HookUnitToScreen(void* context,void* unit,float* out,uint8_t above) {
 #ifdef D2RVR_NATIVE_OPENXR
-    const Frame& frame=Current();
-    if(monsterbars::Hide(t_stereoUiEye>=0&&frame.ourView&&frame.ourProj,
-        g_showOrdinaryMobBars.load(std::memory_order_relaxed),above!=0,
-        reinterpret_cast<uintptr_t>(unit),[](uintptr_t address,auto& value) {
-            return framevr::ReadMemory(&value,reinterpret_cast<void*>(address),sizeof value);
-        })) {
-        // Supply culled coordinates as well for callers that use the anchor
-        // even when native visibility is false (as the world projection does).
-        if(out){out[0]=-1000000.f;out[1]=-1000000.f;}
-        return false;
+    // The overhead anchor: the game's target routine asks for it for each unit
+    // it shows a plate for (the hovered unit, the controller's targets), and a
+    // monster's health panel takes its info with it (monsterbars::PanelGate).
+    // Monster names takes the anchor of a monster it hides away, so the game
+    // draws no name for it; the panel is held back where it is painted.
+    if(above&&StereoUiPass()) {
+        const uintptr_t address=reinterpret_cast<uintptr_t>(unit);
+        auto& seen=t_kindSeen;
+        if(seen.unit!=address||seen.pass!=t_uiPass)
+            seen={address,t_uiPass,monsterbars::Classify(address,[](uintptr_t at,auto& value) {
+                return framevr::ReadMemory(&value,reinterpret_cast<void*>(at),sizeof value);
+            })};
+        if(monsterbars::Hidden(MonsterNamesNow(),seen.kind)) {
+            g_anchorsHidden.fetch_add(1,std::memory_order_relaxed);
+            t_panelGate.Anchor(seen.kind,true,false);
+            // Supply culled coordinates as well for callers that use the anchor
+            // even when native visibility is false (as the world projection does).
+            if(out){out[0]=-1000000.f;out[1]=-1000000.f;}
+            return false;
+        }
+        const bool shown=UnitAnchor(context,unit,out,above,reinterpret_cast<uintptr_t>(_ReturnAddress()));
+        t_panelGate.Anchor(seen.kind,false,shown);
+        return shown;
     }
 #endif
+    return UnitAnchor(context,unit,out,above,reinterpret_cast<uintptr_t>(_ReturnAddress()));
+}
+// The game's own anchor, projected with this eye's matrices.
+bool UnitAnchor(void* context,void* unit,float* out,uint8_t above,uintptr_t caller) {
     LabelAnchor anchor;anchor.previous=t_labelAnchor;t_labelAnchor=&anchor;
     ++t_labelProjection;
     const bool shown=Orig(o_unitToScreen)(context,unit,out,above);
@@ -513,8 +686,10 @@ bool __fastcall HookUnitToScreen(void* context,void* unit,float* out,uint8_t abo
     const int traceEye=g_traceLabelEye.load(std::memory_order_relaxed);
     if(traceEye>=0&&out&&g_traceLabelCount.fetch_add(1)<32) {
         char line[600];std::snprintf(line,sizeof line,"Frame label trace: eye %d caller %llx unit %p above %u shown %d anchors %u head %.3f %.3f %.3f base %.3f %.3f %.3f nativeXY %.2f %.2f viewport %.0f %.0f camera %d override %d %d",
-            traceEye,(unsigned long long)(reinterpret_cast<uintptr_t>(_ReturnAddress())-g_base),unit,unsigned(above),shown,anchor.count,anchor.first[0],anchor.first[1],anchor.first[2],anchor.last[0],anchor.last[1],anchor.last[2],out[0],out[1],f.cam?At<float>(f.cam,camf::ViewportW):0,f.cam?At<float>(f.cam,camf::ViewportH):0,anchor.cam==f.cam,f.ourView,f.ourProj);framevr::logging::Write(line);
+            traceEye,(unsigned long long)(caller-g_base),unit,unsigned(above),shown,anchor.count,anchor.first[0],anchor.first[1],anchor.first[2],anchor.last[0],anchor.last[1],anchor.last[2],out[0],out[1],f.cam?At<float>(f.cam,camf::ViewportW):0,f.cam?At<float>(f.cam,camf::ViewportH):0,anchor.cam==f.cam,f.ourView,f.ourProj);framevr::logging::Write(line);
     }
+#else
+    (void)caller;
 #endif
     if(shown&&out&&above&&anchor.count>=2&&g_stereoLabels.load()&&anchor.cam==f.cam&&f.ourView&&f.ourProj){
         // Native code combines projected foot X with projected head Y. Those
@@ -612,7 +787,10 @@ bool Install(const D2RL::PluginContext* ctx) {
 	d2rsig::Resolve(ctx);
 	const bool cameraOk = InstallCamera();
 #ifdef D2RVR_NATIVE_OPENXR
-    if(cameraOk&&g_monsterDrawOrder.load()&&!InstallMonsterDrawOrder())
+    // The same two draw slots hold back the hovered monster's panel for Monster
+    // names, so they go in for either ([hud] monster_draw_order=0 alone keeps
+    // the native paint order: DrawPanelManager passes straight through).
+    if(cameraOk&&(g_monsterDrawOrder.load()||MonsterNamesNow()!=monsterbars::Names::All)&&!InstallMonsterDrawOrder())
         framevr::logging::Write("Frame labels: draw-order signature checks failed; keeping native paint order");
 #endif
     // Keep the unit-label hook available for live toggles, including when
@@ -639,11 +817,27 @@ bool Install(const D2RL::PluginContext* ctx) {
 
 void SetEnabled(bool on) { g_enabled.store(on); }
 void SetStereoLabels(bool on){g_stereoLabels.store(on);}
-void SetOrdinaryMobBars(bool show){g_showOrdinaryMobBars.store(show);}
+void SetMonsterNames(int names){
+    names=names<0?int(monsterbars::DefaultNames):names>2?2:names;
+    if(g_monsterNames.exchange(names)==names)return;
+    char line[96];std::snprintf(line,sizeof line,"Frame labels: monster names %s",monsterbars::NameOf(monsterbars::Names(names)));
+#ifdef D2RVR_NATIVE_OPENXR
+    framevr::logging::Write(line);
+#else
+    if(g_ctx)g_ctx->LogInfo(line);
+#endif
+}
+MonsterPlates TakeMonsterPlates(){
+    MonsterPlates p;
+    p.names=int(MonsterNamesNow());
+    p.anchorsHidden=g_anchorsHidden.exchange(0);p.panelsHidden=g_panelsHidden.exchange(0);p.panelsUnplaced=g_panelsUnplaced.exchange(0);
+    return p;
+}
 void SetMonsterDrawOrder(bool on){g_monsterDrawOrder.store(on);}
 void SetStereoUiEye(int eye){
 #ifdef D2RVR_NATIVE_OPENXR
     t_stereoUiEye=eye;
+    t_panelGate.BeginPass();++t_uiPass;   // each eye pass starts with no monster seen
 #else
     (void)eye;
 #endif
@@ -680,6 +874,11 @@ bool LookAtNow(float out[3]) {
 	std::memcpy(out, Fp(cam, camf::LookAt), 3 * sizeof(float));
 	return true;
 }
+
+void SetUseActiveCamera(bool on) { g_useActive.store(on, std::memory_order_relaxed); }
+void SetMirrorGameCamera(bool on) { g_mirrorGame.store(on, std::memory_order_relaxed); }
+void SetSyncActiveFields(bool on) { g_syncFields.store(on, std::memory_order_relaxed); }
+void SetActivePickTurn(float radians) { g_pickTurn.store(radians, std::memory_order_relaxed); }
 
 bool InWorld() {
 	if (!g_cameraHooks.load() || Current().cam == nullptr) {

@@ -942,6 +942,24 @@ void EnsureServerMoveInstalled() noexcept {
     }
 }
 
+// Owning game thread. Why a tick did not reach the mercenary, logged when it changes and every minute while
+// it lasts (a hero with no mercenary says so for the whole game), and once when it is found: from 2026-11-03 every grip + trigger on the mercenary logged
+// "mercenary not found" with nothing to say which step failed. why null and no unit: a walk not due yet.
+void NoteTick(const char* why, uint32_t unitId = 0, uint32_t classId = 0) noexcept {
+    static const char* last = nullptr;
+    static uint64_t toldAt = 0;
+    if (!why && !unitId) return;
+    const char* key = unitId ? "found" : why;
+    const uint64_t now = GetTickCount64();
+    if (key == last && (unitId || now - toldAt < 60000)) return;
+    last = key;
+    toldAt = now;
+    char line[200];
+    if (unitId) std::snprintf(line, sizeof line, "Frame companion AI: the mercenary found (unit %u, class %u)", unitId, classId);
+    else std::snprintf(line, sizeof line, "Frame companion AI: no mercenary this tick - %s", why);
+    framevr::logging::Write(line);
+}
+
 void StepSummonArmyServer(
     uintptr_t game,
     uintptr_t player,
@@ -1201,6 +1219,7 @@ void __cdecl CompanionGameThreadTick(const PluginContext*, void*) noexcept {
     EnsureServerMoveInstalled();
     uintptr_t game = 0, player = 0;
     if (!melee::LocalServer(game, player)) {
+        NoteTick("no local server");
         g_activeSummonCount.store(0, std::memory_order_relaxed);
         InvalidateTacticalContextOnMissingUnit(0);
         return;
@@ -1208,12 +1227,16 @@ void __cdecl CompanionGameThreadTick(const PluginContext*, void*) noexcept {
 
     // 1. Local player position and room
     float px = 0.0f, py = 0.0f;
-    if (!ReadPosition(player, px, py)) return;
+    if (!ReadPosition(player, px, py)) {
+        NoteTick("the hero's position unread");
+        return;
+    }
     g_lastPlayerPosX.store(px, std::memory_order_relaxed);
     g_lastPlayerPosY.store(py, std::memory_order_relaxed);
 
     uintptr_t playerPath = 0, playerRoom = 0;
     if (!Read(player + 0x38, playerPath) || !Read(playerPath + 0x20, playerRoom) || playerRoom < 0x10000) {
+        NoteTick("the hero's room unread");
         g_lastPlayerRoom.store(0, std::memory_order_relaxed);
         g_activeSummonCount.store(0, std::memory_order_relaxed);
         InvalidateTacticalContextOnMissingUnit(0);
@@ -1227,7 +1250,12 @@ void __cdecl CompanionGameThreadTick(const PluginContext*, void*) noexcept {
     // 2. Query hireling vitals
     float health = 0.0f, maxHealth = 0.0f;
     uint32_t classId = 0, unitId = 0;
-    if (!melee::HirelingVitals(g_lastHirelingId.load(), health, maxHealth, classId, unitId) || !unitId) {
+    const char* why = nullptr;
+    if (!melee::HirelingVitals(g_lastHirelingId.load(), health, maxHealth, classId, unitId, &why) || !unitId) {
+        NoteTick(why);
+        // Not alive by that id: forget it. Kept, the last game's id (the Paladin's mercenary, unit 1) named a
+        // town NPC of the next game, whose moves and combat target the hooks then took for the mercenary's.
+        if (why) g_lastHirelingId.store(0, std::memory_order_relaxed);
         g_watchdog.Reset();
         InvalidateTacticalContextOnMissingUnit(playerRoom);
         return;
@@ -1239,19 +1267,25 @@ void __cdecl CompanionGameThreadTick(const PluginContext*, void*) noexcept {
 
     uintptr_t hireling = melee::ServerUnit(game, 1, unitId);
     if (!hireling) {
+        NoteTick("its server unit not found");
         InvalidateTacticalContextOnMissingUnit(playerRoom);
         return;
     }
 
     uint32_t header[4]{};
     if (!Read(hireling, header) || header[0] != 1 || header[2] != unitId) {
+        NoteTick("its server unit not the hireling");
         InvalidateTacticalContextOnMissingUnit(playerRoom);
         return;
     }
     const uint32_t animMode = header[3]; // 2 = MONMODE_WALK
 
     float cx = 0.0f, cy = 0.0f;
-    if (!ReadPosition(hireling, cx, cy)) return;
+    if (!ReadPosition(hireling, cx, cy)) {
+        NoteTick("its position unread");
+        return;
+    }
+    NoteTick(nullptr, unitId, classId);
     g_lastHirelingPosX.store(cx, std::memory_order_relaxed);
     g_lastHirelingPosY.store(cy, std::memory_order_relaxed);
 
@@ -1946,7 +1980,15 @@ void Tick(float forwardX, float forwardY) {
         }
     }
 
-    if (!g_enabled.load() || !mode || mode() != 0) {
+    const int clientMode = mode ? mode() : -1;
+    if (!g_enabled.load() || clientMode != 0) {
+        static int toldMode = 0;
+        if (g_enabled.load() && clientMode != toldMode) {
+            toldMode = clientMode;
+            char line[120];
+            std::snprintf(line, sizeof line, "Frame companion AI: idle while the game's mode is %d (0 is offline play)", clientMode);
+            framevr::logging::Write(line);
+        }
         g_watchdogResetRequested.store(true, std::memory_order_relaxed);
         return;
     }

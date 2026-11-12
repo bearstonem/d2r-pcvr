@@ -128,6 +128,23 @@ int main(){
         b=leather::Band(3072,3072);Check(b.x==0&&b.y==0&&b.w==3072&&b.h==1728,"the cube from the inventory: the same upper band (2026-10-29 capture)");
         b=leather::Band(0,100);Check(b.w==0&&b.h==0,"no canvas, no band");
     }
+    // Below the band, down to the canvas's foot: a tooltip running past the band shows on.
+    {
+        const float bandHeight=.57f*9/16;
+        auto f=leather::WithFoot(leather::Band(3072,3072),3072,bandHeight);
+        Check(f.rect.x==0&&f.rect.y==0&&f.rect.w==3072&&f.rect.h==3072,"square canvas: the band and all below it");
+        Check(Near(f.height,bandHeight*3072/1728)&&Near(f.drop,(f.height-bandHeight)*.5f),"the same metres per pixel, centre lowered by half the foot");
+        Check(Near(f.height*.5f-f.drop,bandHeight*.5f),"the band's top stays where it was");
+        f=leather::WithFoot(leather::Band(2560,2560),2560,.3f);
+        Check(f.rect.h==2560&&Near(f.height,.3f*2560/1440),"a 2560 canvas too");
+        f=leather::WithFoot(leather::Band(1920,1080),1080,bandHeight);
+        Check(f.rect.h==1080&&Near(f.height,bandHeight)&&f.drop==0,"16:9: nothing below");
+        f=leather::WithFoot(leather::Band(2560,1080),1080,bandHeight);
+        Check(f.rect.x==320&&f.rect.h==1080&&f.drop==0,"wide: nothing below");
+        f=leather::WithFoot({0,0,0,0},3072,bandHeight);Check(f.rect.h==0&&f.drop==0,"no band: nothing");
+        f=leather::WithFoot(leather::Band(3072,3072),3072,NAN);Check(f.rect.h==1728&&f.drop==0,"a bad height: the band alone");
+        f=leather::WithFoot(leather::Band(3072,3072),1000,bandHeight);Check(f.rect.h==1728&&f.drop==0,"a canvas shorter than the band: the band alone");
+    }
 
     // The strap: the fist at the middle of the menu's left edge, the face as the quest log's.
     for(const auto& art:{hide,stand})for(float yaw:{-2.f,0.f,1.f})for(float tilt:{0.f,30.f}) {
@@ -227,5 +244,48 @@ int main(){
         const auto* c=at(w/2,h/2);Check(c[0]>c[1]&&c[1]>c[2]&&c[0]>40,"brown");
         Check(leather::PaintPlaceholder(0,5).empty(),"no size, no pixels");
     }
+    // Left-handed play (hand_role.h): the menu held in the RIGHT hand - the mirror image of all of the above,
+    // with the menu itself still reading left to right.
+    {
+        const auto mirrorP=[](math::Vec v){return math::Vec{-v.x,v.y,v.z};};
+        const auto mirrorQ=[](math::Quat q){return math::Quat{q.x,-q.y,-q.z,q.w};};   // the same turn in the mirror x -> -x
+        for(const auto& art:{hide,stand})for(float yaw:{-2.f,0.f,1.f})for(float tilt:{0.f,30.f})for(float inset:{0.f,leather::MenuArtInset*.57f}) {
+            const auto grip=math::Multiply(math::Yaw(yaw),leather::AboutX(.6f));
+            const math::Vec hand{-.3f,1.1f,-.4f};
+            const auto s=leather::Measure(art,.57f);
+            const auto left=leather::Strap(hand,grip,art,.57f,tilt,inset);
+            const auto right=leather::Strap(mirrorP(hand),mirrorQ(grip),art,.57f,tilt,inset,true);
+            Check(Near(right.menu.p,mirrorP(left.menu.p),1e-5f),"right hand: the menu's centre is the left hand's in a mirror");
+            const auto face=math::Rotate(right.menu.q,{0,0,1}),across=math::Rotate(right.menu.q,{1,0,0}),up=math::Rotate(right.menu.q,{0,1,0});
+            Check(Near(face,mirrorP(math::Rotate(left.menu.q,{0,0,1})),1e-5f)&&Near(up,mirrorP(math::Rotate(left.menu.q,{0,1,0})),1e-5f),"it faces and stands the mirrored way");
+            const auto leftAcross=math::Rotate(left.menu.q,{1,0,0});
+            Check(Near(across,math::Vec{leftAcross.x,-leftAcross.y,-leftAcross.z},1e-5f),"and still reads left to right: the picture itself is never mirrored");
+            const auto edge=right.menu.p+across*(s.menuWidth*.5f-inset)-face*(leather::Raise+leather::Lift);
+            Check(Near(edge,mirrorP(hand)-across*leather::Gap,1e-5f),"the right fist holds the menu's RIGHT edge (the art's with Menu only), Gap short of it");
+            Check(Near(right.menu.p,right.sheet.p+math::Rotate(right.sheet.q,s.menuCentre)+face*leather::Lift,1e-5f),"the menu on its spot of the leather, as in the left hand");
+            Check(Near(leather::Strap(hand,grip,art,.57f,tilt,inset,false).menu.p,left.menu.p,1e-7f),"OFF: the left hand's strap is what it was");
+        }
+        const float w=.57f;const auto hud=leather::HudPlaces(w),mirrored=leather::HudPlaces(w,true);
+        Check(Near(mirrored.map.x,w*.5f)&&Near(mirrored.map.x,-hud.map.x)&&Near(mirrored.map.y,hud.map.y)&&Near(mirrored.map.z,hud.map.z),"the held map over the right fist: the band's right edge");
+        Check(mirrored.map.x-mirrored.mapSize*.5f>w*.5f-leather::MenuArtInset*w,"clear of the art there too");
+        Check(Near(mirrored.vitals,hud.vitals)&&Near(mirrored.vitalsWidth,hud.vitalsWidth),"life / mana stay centred above the menu");
+        leather::Holder h;h.Step({.3f,1,0},{0,0,0,1},true,hide,.57f,0,0,true);
+        Check(h.Placed()&&Near(h.Get().menu.p,leather::Strap({.3f,1,0},{0,0,0,1},hide,.57f,0,0,true).menu.p)&&h.Get().menu.p.x<.3f,"the holder straps it to the right hand, the menu to its left");
+        // the reach: the right hand over the right shoulder, the left shoulder's volume mirrored
+        const math::Vec head{.4f,1.7f,-.2f};
+        for(float yaw:{-1.f,0.f,2.f})for(float x=-.6f;x<=.6f;x+=.04f)for(float y=-.5f;y<=.3f;y+=.06f)for(float z=-.1f;z<=.5f;z+=.04f) {
+            const auto heading=math::Yaw(yaw);
+            const math::Vec local{x,y,z};
+            Check(leather::OverRightShoulder(head+math::Rotate(heading,local),head,heading)==leather::OverLeftShoulder(head+math::Rotate(heading,mirrorP(local)),head,heading),
+                  "over the right shoulder is over the left shoulder in a mirror");
+        }
+        Check(!leather::OverRightShoulder({NAN,0,0},head,{0,0,0,1})&&!leather::OverRightShoulder({0,0,0},{NAN,0,0},{0,0,0,1}),"a nonfinite hand or head is nowhere");
+        Sim s;s.in.right=true;s.in.hand={.23f,1.5f,.14f};s.Step(10);s.in.grip=1;
+        Check(s.Step().open,"left-handed: the right hand behind the right shoulder and a fresh grip opens it (and puts it away)");
+        Sim wrong;wrong.in.right=true;wrong.Step(10);wrong.in.grip=1;   // the fixture's hand: behind the LEFT shoulder
+        Check(!wrong.Step().open&&!wrong.out.inReach,"not over the left shoulder then");
+        Sim asBefore;asBefore.Step(10);asBefore.in.grip=1;Check(asBefore.Step().open,"OFF: the left shoulder, as before");
+    }
+    std::puts("Leather menu: left-handed, the mirror image in the right hand (strap, held HUD, shoulder reach)");
     std::puts("Leather menu: tabbed menu and cube on the sheet, world panels in the room, Right B fallback (unanswered presses, pages only, drags), premultiplied hide, 16:9 band, stand-in and cached hide layouts, cache file, strap at the menu edge and tilt, held/lost hand, left-shoulder grip with fresh-press/dwell/tracking guards, stand-in hide passed");
 }

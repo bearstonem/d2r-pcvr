@@ -48,8 +48,14 @@ void SetCallbacks(ViewFn view, ProjFn proj);
 // Native stereo labels: project the game's original unit anchors with the
 // current scene matrices, bypassing inline reconstruction of a flat frustum.
 void SetStereoLabels(bool on);
-// Show ordinary monsters' health/name plates in native VR (default false).
-void SetOrdinaryMobBars(bool show);
+// VR Settings > Interface > Labels > Monster names in native VR
+// (monsterbars::Names: 0 All, 1 Bosses and elites, 2 None). Logs each change.
+void SetMonsterNames(int names);
+// What Monster names did since the last call (the ten-second target-lock line):
+// overhead anchors it took away, hovered-monster panels it held back, and
+// panels held back because the eye pass gave them no place.
+struct MonsterPlates {int names=1;uint32_t anchorsHidden=0,panelsHidden=0,panelsUnplaced=0;};
+MonsterPlates TakeMonsterPlates();
 // Trial: paint the monster health panel after current-eye tooltip updates.
 void SetMonsterDrawOrder(bool on);
 // Main rendering thread only; -1 outside paired gameplay.
@@ -64,6 +70,17 @@ bool LabelCapturePending();
 // the view/projection callbacks, while a game is running (enabled or not).
 using FrameFn = void (*)();
 void SetFrameCallback(FrameFn frame);
+// Drive the renderer's active camera when it is not the game camera (a menu scene's own: the
+// character screen's campfire).
+void SetUseActiveCamera(bool on);
+// The campfire: the game camera object takes the driven camera's pose for each frame (its sky and clouds).
+void SetMirrorGameCamera(bool on);
+void SetSyncActiveFields(bool on);   // testing: the driven camera's fov/aspect fields from our projection
+// While it is driven, the game's own pose for its tick turned this much about the world's up
+// (radians, + from its forward toward its left... as a yaw about +y): the character screen finds
+// the hero under the pointer on that camera's picture (no ray), so it is turned toward where the
+// hand points; the game's pose is kept untouched otherwise. 0 = the game's.
+void SetActivePickTurn(float radians);
 
 // Runs the view/projection callbacks again on this frame's game camera and puts
 // the result in, as the frame sync does. For drawing one game frame twice (a

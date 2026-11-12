@@ -28,6 +28,30 @@ int main() {
     Check(Scaled(0,193,0)==0&&Scaled(-5,193,0)==-5,"a stop (0) or anything not a run velocity passes through");
     Check(Scaled(2856,193,-40)==2220&&Scaled(2856,193,400)==2856,"out-of-range sliders clamp");
     Check(Scaled(2856,0,0)==2856&&Scaled(2856,-10,0)==2856,"an unreadable stat 67 keeps the game's speed");
+    // The combat walk (Cal, 2026-11-02): walk from a hit, strike, cast or shot until the window passes.
+    Check(CombatWalkDefaultMs==500&&NormalizeCombatWalkMs(500)==500&&NormalizeCombatWalkMs(-5)==0&&NormalizeCombatWalkMs(1e9f)==CombatWalkMaxMs&&
+          NormalizeCombatWalkMs(std::numeric_limits<float>::quiet_NaN())==CombatWalkDefaultMs,"combat_walk_ms: 500 by default, 0 = off, clamped");
+    Check(!CombatWalking(0,5000,500),"no event yet: Movement speed");
+    Check(CombatWalking(5000,5000,500)&&CombatWalking(5000,5499,500)&&!CombatWalking(5000,5500,500),"walk for the window after the last event");
+    Check(!CombatWalking(5000,5100,0),"0 turns it off");
+    Check(!CombatWalking(5000,4900,500),"an event stamped after now (another thread) is not counted early");
+    {   // A fight through GaitSync: running, struck -> walk; the window ends -> run again, one toggle a second at most.
+        GaitSync g;const uint64_t s=7;uint64_t t=10000;
+        Check(!g.Step(s,2,t,1.f,false,true,t),"running, Movement speed runs: nothing to send");
+        uint64_t hit=t+100;
+        Check(g.Step(s,2,hit,1.f,CombatWalking(hit,hit,500),true,hit),"struck: the toggle goes to walk");
+        g.Sent(true,hit);
+        Check(!g.Step(s,1,hit+200,1.f,CombatWalking(hit,hit+200,500),true,hit+200),"still in the window: nothing more");
+        const uint64_t after=hit+600;   // window over, but within the toggle's 1 s cooldown
+        Check(!g.Step(s,1,after,1.f,CombatWalking(hit,after,500),true,after),"window over inside the cooldown: waits");
+        const uint64_t later=hit+GaitSync::CooldownMs;
+        Check(g.Step(s,1,later,1.f,CombatWalking(hit,later,500),true,later),"a second after the walk began: back to run");
+        g.Sent(false,later);
+        const uint64_t again=later+300;   // another strike inside the next cooldown
+        Check(!g.Step(s,2,again,1.f,CombatWalking(again,again,500),true,again),"a new event within a second of the last toggle waits for the cooldown");
+        const uint64_t swing=later+950,open=later+GaitSync::CooldownMs;   // the fight goes on: another strike just before the cooldown ends
+        Check(g.Step(s,2,open,1.f,CombatWalking(swing,open,500),true,open),"then walks: a fight that keeps going stays on walk");
+    }
     {   // Gait sync: the game's run / walk toggle follows the slider without reading a run's start as "set to walk"
         using G=GaitSync;G g;const uint64_t S=7;uint64_t t=10000;
         Check(!g.Step(S,0,0,0,true,true,t)&&g.state==G::Unknown,"a new character: toggle unknown, nothing sent");

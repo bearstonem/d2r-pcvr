@@ -399,16 +399,15 @@ class NativeSetupTests(unittest.TestCase):
                         selected = native.validate_choices({**values, 'headset': 'Quest 3', 'connections': 'steamvr,vdxr'}, app)
                         self.assertEqual(selected['connections'], ['steamvr', 'vdxr'])
 
-    def test_rejects_wrong_game_build_and_missing_battlenet_payload_before_writes(self):
+    def test_rejects_missing_battlenet_payload_but_no_game_build_before_writes(self):
         with tempfile.TemporaryDirectory() as directory:
             app, game, client, saves, profile, values = self.fixture(Path(directory), 'battlenet')
             with patch.object(setup, 'verify_release', return_value={'sha256': {}}):
                 with self.assertRaisesRegex(ValueError, 'does not include Battle.net'):
                     native.validate_choices(values, app)
-            self.put(game / 'D2R.exe', b'new unsupported version')
+            self.put(game / 'D2R.exe', b'a game build this release never saw')
             with patch.object(setup, 'verify_release', return_value={'sha256': {'bin/CascLib.dll': 'fixture'}}):
-                with self.assertRaisesRegex(ValueError, 'does not match'):
-                    native.validate_choices(values, app)
+                self.assertEqual(native.validate_choices(values, app)['version'], 'unknown')
             self.assertEqual(list(app.iterdir()), [])
 
     def test_utf8_and_utf16_choices_preserve_unicode_and_spaces(self):
@@ -514,6 +513,181 @@ class NativeSetupTests(unittest.TestCase):
             self.assertEqual((saves / 'Character.d2s').read_bytes(), b'current character')
             self.assertEqual((saves / 'Settings.json').read_bytes(), b'{"Anti Aliasing": 2}')
             self.assertEqual(native.managed_state(app)['installations'], [])
+
+    def test_removal_finishes_when_a_game_was_uninstalled_first(self):
+        # #328: Steam or Battle.net removed the game (D2R.exe, its archives); the mod's own files, its receipt and its
+        # Steam shortcuts were left, and removal stopped at "no longer matches its installation".
+        for left in ('files', 'nothing', 'no backup'):
+            with self.subTest(left=left), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                app, game, client, saves, profile, values = self.fixture(root)
+                other = root / 'battlenet'   # a second managed copy that is still installed
+                self.put(other / 'D2R.exe', b'still installed')
+                self.put(other / '.build.info')
+                entries = []
+                for target, store in ((game, 'steam'), (other, 'battlenet')):
+                    snapshot = self.snapshot(app / f'setup-backups/game/{store}', target, saves)
+                    self.put(target / uninstall.PLUGIN, b'mod')
+                    install.write_record(target, {'game': str(target), 'snapshots': [str(snapshot)]})
+                    entries.append({'game': str(target), 'store': store, 'steam': str(client), 'saves': str(saves),
+                                    'receipt': install.read_record(target)})
+                own = self.put(game / 'screenshots/mine.png', b'the player\'s own file')
+                options = setup.launch_options(app / '.runtime/python/python.exe', app / 'steamvr/launch_windows.py', None)
+                self.put(profile / 'config/localconfig.vdf', steam.set_launch_options(LOCAL, options).encode())
+                data = steam.encode_binary({'shortcuts': {'0': {'appname': 'Unrelated', 'Exe': 'other.exe'}}})
+                data = steam.update_shortcuts(data, client, game, ['steamvr', 'vdxr'])
+                data = steam.update_shortcuts(data, client, other, ['vdxr'], store='battlenet',
+                                             python=app / '.runtime/python/python.exe', wrapper=app / 'steamvr/launch_windows.py')
+                self.put(profile / 'config/shortcuts.vdf', data)
+                native.atomic_json(app / native.STATE, {'installations': entries})
+                (game / 'D2R.exe').unlink()
+                (game / 'Data/.build.config').unlink()
+                if left == 'nothing':
+                    shutil.rmtree(game)
+                if left == 'no backup':
+                    shutil.rmtree(app / 'setup-backups/game/steam')
+                with patch.object(setup, 'require_closed'), contextlib.redirect_stdout(io.StringIO()) as output:
+                    _, notes = native.removal_plan(app)   # the uninstaller's check before anything is removed
+                    self.assertEqual(len(notes), 1)
+                    native.remove_managed(app)
+                    native.remove_managed(app)  # Safe to rerun after removal.
+                text = output.getvalue()
+                self.assertIn('no longer', text)
+                self.assertIn('The VR mod and its matching Steam shortcuts were removed.', text)
+                remaining = steam.decode_binary((profile / 'config/shortcuts.vdf').read_bytes())['shortcuts']
+                self.assertEqual([item['appname'] for item in remaining.values()], ['Unrelated'])
+                launch = steam.text_value(steam.parse_text((profile / 'config/localconfig.vdf').read_text(encoding='utf-8')),
+                    'UserLocalConfigStore', 'Software', 'Valve', 'Steam', 'apps', steam.APP_ID, 'LaunchOptions')
+                self.assertFalse(steam.is_vr_launch_options(launch))   # a reinstalled game starts without the helper
+                self.assertFalse((other / uninstall.PLUGIN).exists())  # the installed copy is restored as ever
+                self.assertEqual((other / 'D2R.exe').read_bytes(), b'still installed')
+                self.assertEqual((saves / 'Character.d2s').read_bytes(), b'current character')
+                self.assertEqual((saves / 'Settings.json').read_bytes(), b'{"Anti Aliasing": 2}')
+                self.assertEqual(native.managed_state(app)['installations'], [])
+                if left == 'nothing':
+                    self.assertFalse(game.exists())
+                else:
+                    self.assertEqual(own.read_bytes(), b'the player\'s own file')
+                    self.assertEqual((game / uninstall.PLUGIN).exists(), left == 'no backup')
+                    self.assertEqual('were not touched' in text, left == 'no backup')
+
+    def test_a_different_edition_in_the_recorded_folder_still_stops_removal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app, game, client, saves, profile, values = self.fixture(Path(directory))
+            snapshot = self.snapshot(app / 'setup-backups/game/steam', game, saves)
+            self.put(game / uninstall.PLUGIN, b'mod')
+            install.write_record(game, {'game': str(game), 'snapshots': [str(snapshot)]})
+            native.atomic_json(app / native.STATE, {'installations': [
+                {'game': str(game), 'store': 'battlenet', 'steam': str(client), 'saves': str(saves)}]})
+            with patch.object(setup, 'require_closed'):
+                with self.assertRaisesRegex(ValueError, 'now holds a steam installation'):
+                    native.remove_managed(app)
+            self.assertTrue((game / uninstall.PLUGIN).exists())
+
+    def test_unreadable_options_are_explained_not_reported_as_a_bare_status(self):
+        # #321, "Setup could not finish: 2": argparse's exit status, shown in place of its message. These are the
+        # options the helper received when the wizard quoted a folder ending in a backslash ("E:\" swallows the rest).
+        garbled = ['setup_native.py', '--probe', 'C:\\T\\probe.ini', '--source-root',
+                   'E:" --steam C:\\Steam --managed-root C:\\Users\\User\\AppData\\Local\\Programs\\D2R',
+                   'PCVR --game G:\\Diablo', 'II', 'Resurrected']
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / 'setup-last.log'
+            with patch.object(sys, 'argv', garbled), patch.object(setup, 'verify_release') as verify, \
+                    patch.object(native, 'detail_logs', return_value=[Path(directory) / 'missing/setup-last.log', log]), \
+                    contextlib.redirect_stderr(io.StringIO()) as output:
+                self.assertEqual(native.run(), 1)
+            verify.assert_not_called()
+            lines = output.getvalue().strip().splitlines()
+            last = lines[-1]   # the wizard shows the last line it receives
+            self.assertTrue(last.startswith('Setup could not finish while reading the options the wizard passed: '))
+            self.assertIn('unrecognized arguments', last)
+            self.assertIn('backslash', last)
+            self.assertIn(f'Technical details were saved in {log}.', last)
+            self.assertNotRegex(last, r'could not finish: \d+$')
+            detail = log.read_text(encoding='utf-8')
+            self.assertIn('Setup helper failed while reading the options the wizard passed', detail)
+            self.assertIn('SystemExit', detail)
+            self.assertIn('G:\\\\Diablo', detail)   # the options as received, for the bug report
+            self.assertFalse((Path(directory) / 'missing').exists())   # a log folder is never made
+
+    def test_folder_ending_in_a_backslash_reaches_the_helper_whole(self):
+        # The wizard's Q() doubles backslashes at the end of a folder; this is the same rule, through a real command line.
+        script = (native.ROOT / 'installer/D2R_PCVR_Setup.iss').read_text(encoding='utf-8-sig')
+        quote = script[script.index('function Q(const Value: String): String;'):script.index('function IsSecurityBlock')]
+        self.assertIn("while (I > 0) and (Value[I] = '\\') do begin", quote)
+        self.assertIn("Result := '\"' + Value + Tail + '\"';", quote)
+        self.assertEqual(native.folder_argument('D:"'), Path('D:\\'))          # what the old quoting made of "D:\"
+        self.assertEqual(native.folder_argument('G:\\Diablo II Resurrected'), Path('G:\\Diablo II Resurrected'))
+        if sys.platform != 'win32':
+            return
+        import subprocess
+        def q(value):
+            return '"' + value + '\\' * (len(value) - len(value.rstrip('\\'))) + '"'
+        folders = ['E:\\', 'C:\\Steam\\', 'C:\\Users\\User\\AppData\\Local\\Programs\\D2R PCVR', 'G:\\Diablo II Resurrected\\\\']
+        show = '-c "import json, sys; print(json.dumps(sys.argv[1:]))"'
+        line = f'"{sys.executable}" {show} --source-root {q(folders[0])} --steam {q(folders[1])} --managed-root {q(folders[2])} --game {q(folders[3])}'
+        received = json.loads(subprocess.run(line, capture_output=True, text=True, check=True).stdout)
+        self.assertEqual(received, ['--source-root', folders[0], '--steam', folders[1], '--managed-root', folders[2], '--game', folders[3]])
+        # ... and without the doubling, the same folders arrive as other options: what #321's players ran into.
+        naive = f'"{sys.executable}" {show} --source-root "{folders[0]}" --steam "C:\\Steam" --game "G:\\Diablo II Resurrected"'
+        broken = json.loads(subprocess.run(naive, capture_output=True, text=True, check=True).stdout)
+        self.assertNotIn('--steam', broken)
+
+    def test_failures_name_the_step_and_the_file_in_plain_words(self):
+        settings = 'C:\\Users\\P\\Saved Games\\Diablo II Resurrected\\Settings.json'
+        missing = native.failure_message(FileNotFoundError(2, 'No such file or directory', settings), 'checking the folders and choices you selected')
+        self.assertEqual(missing.split(': ', 1)[0], 'Setup could not finish while checking the folders and choices you selected')
+        self.assertIn(settings + ' was not found', missing)
+        blocked = native.failure_message(PermissionError(13, 'Permission denied', 'G:\\Game\\D2RLoader.exe'), 'installing the mod')
+        self.assertIn('Windows did not allow G:\\Game\\D2RLoader.exe to be read or changed', blocked)
+        self.assertIn('Protection History', blocked)
+        in_use = PermissionError(13, 'The process cannot access the file', 'C:\\Steam\\userdata\\1\\config\\shortcuts.vdf')
+        in_use.winerror = 32
+        self.assertIn('shortcuts.vdf is open in another program', native.failure_message(in_use, 'adding the Steam shortcuts'))
+        self.assertIn("missing its entry 'installed'", native.failure_message(KeyError('installed'), 'preserving backups'))
+        # A bare status or an empty message is never all the player sees.
+        for error in (SystemExit(2), ValueError(''), ValueError('2')):
+            text = native.failure_message(error, 'installing the mod')
+            self.assertNotRegex(text, r': \d*$')
+            self.assertIn('gave no reason', text)
+        # Messages written for players, and the marker the wizard looks for, pass through unchanged.
+        security = '[PCVR_SECURITY_BLOCK] Windows Security removed d2rl-pcvr.dll.'
+        self.assertTrue(native.failure_message(ValueError(security), 'installing the mod').endswith(security))
+
+    def test_a_failing_step_reports_its_folder_and_keeps_the_exception_in_the_log(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            game, managed = root / 'Game', root / 'helper'
+            managed.mkdir()
+            vdf = str(root / 'Steam/userdata/123/config/localconfig.vdf')
+            argv = ['setup_native.py', '--probe', str(root / 'probe.ini'), '--steam', str(root / 'Steam'),
+                    '--managed-root', str(managed), '--game', str(game)]
+            with patch.object(sys, 'argv', argv), patch.object(setup, 'verify_release'), patch.object(native.os, 'name', 'nt'), \
+                    patch.object(native, 'write_probe', side_effect=FileNotFoundError(2, 'No such file or directory', vdf)), \
+                    contextlib.redirect_stderr(io.StringIO()) as output:
+                self.assertEqual(native.run(), 1)
+            last = output.getvalue().strip().splitlines()[-1]
+            self.assertIn(f'while reading the game folder {game} and the Steam folder {root / "Steam"}: ', last)
+            self.assertIn(vdf + ' was not found', last)
+            self.assertIn(str(managed / 'setup-last.log'), last)
+            detail = (managed / 'setup-last.log').read_text(encoding='utf-8')
+            self.assertIn('FileNotFoundError: [Errno 2] No such file or directory', detail)
+            self.assertIn('Traceback', detail)
+            # The detail log is the helper folder's once it exists, else the user's temporary folder; never the wizard's own.
+            self.assertEqual(native.detail_logs(argv[1:])[0], managed / 'setup-last.log')
+            self.assertEqual(native.detail_logs(['--install', 'choices.ini'])[0], native.ROOT / 'setup-last.log')
+            self.assertEqual(native.detail_logs(['--probe', 'probe.ini'])[0].name, 'D2R-PCVR-setup-last.log')
+
+    def test_damaged_settings_and_records_are_reported_by_their_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app, game, client, saves, profile, values = self.fixture(Path(directory))
+            (saves / 'Settings.json').write_bytes(b'{"Anti Aliasing": ')
+            with patch.object(setup, 'verify_release', return_value={'sha256': {}}):
+                with self.assertRaisesRegex(ValueError, 'settings file could not be read: .*Settings\\.json is damaged'):
+                    native.validate_choices(values, app)
+            (app / native.STATE).write_text('not json')
+            with self.assertRaisesRegex(ValueError, 'managed-installations\\.json is damaged'):
+                native.managed_state(app)
 
     def test_running_process_blocks_removal_without_any_mutation(self):
         with tempfile.TemporaryDirectory() as directory:

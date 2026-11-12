@@ -73,7 +73,7 @@ the game's Master x Combat volume; `[gameplay] riposte_sound_file` replaces it.
 ## Low-life heartbeat
 
 `guard-heartbeat.wav` (16-bit PCM, 48 kHz stereo, 0.50 s) is one lub-dub played
-while life is low, below VR Settings > Survival > Heartbeat starts at (60 % by default). It is the third beat of "Heartbeat" by
+while life is low, below VR Settings > Interface > Warnings > Heartbeat starts at (60 % by default). It is the third beat of "Heartbeat" by
 SoundReality on Pixabay (item 549797), supplied by the contributor (ChuckRibbits)
 as an MP3: decoded at its own 48 kHz, cut from 20 ms before the lub to 0.50 s with a
 5 ms fade in and a 60 ms fade out, and peak-normalised to -1 dBFS. It is embedded by

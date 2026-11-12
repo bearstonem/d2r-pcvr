@@ -101,6 +101,8 @@ void Calibration(Painter& p,const Layout& l){
                 break;}
             case Role::CalibProgress:p.Bar(r,e.fill,-1,{});break;
             case Role::CalibNote:p.TextFit(e.text,TextStyle::Value,r,Color::Quiet,Align::Center,true);break;
+            case Role::CalibFigure:p.TCrossFigure(r,Color::Gold);break;
+            case Role::CalibTip:p.TextFit(e.text,TextStyle::Strong,r,Color::Gold,Align::Center,true);break;
             default:break;
         }
     }
@@ -114,7 +116,8 @@ void Draw(Painter& p,const Layout& l,bool monoAudio){
     for(size_t i=0;i<l.elements.size();++i){
         const Element& e=l.elements[i];const RectF r=F(e.rect);const ControlState s=StateOf(e);
         switch(e.role){
-            case Role::Tab:p.Tab(r,e.icon,e.text,s);break;
+            case Role::Tab:p.Tab(r,e.icon,e.text,s,e.option);break;
+            case Role::GroupTab:p.GroupTab(r,e.icon,e.text,s);break;
             case Role::GroupLine:p.Fill(r,Color::CarveLight,.35f);break;
             case Role::PageTitle:{
                 p.PageTitle(r,e.icon,e.text);
@@ -199,7 +202,7 @@ void Draw(Painter& p,const Layout& l,bool monoAudio){
                 break;
             case Role::ReadoutBox:p.ReadoutBox(r);break;
             case Role::Readout:p.TextFit(e.text,e.option==1?TextStyle::Small:TextStyle::Readout,r,e.Has(Warn)?Color::Warn:e.Has(Selected)?Color::Magic:Color::Quiet);break;
-            case Role::Intro:p.TextFit(e.text,TextStyle::Value,r,Color::Quiet);break;
+            case Role::Intro:case Role::Reason:p.TextFit(e.text,TextStyle::Value,r,Color::Quiet);break;
             // The popover: the panel dimmed 40% (a fixed overlay), a card with the row's label, its options as chips, the hint.
             case Role::PopoverDim:p.Fill(r,Color::Ink,.4f);break;
             case Role::Popover:p.Fill(r,Color::Stone);p.Card(r);p.Outline(r,Color::Bronze,2.f);break;   // opaque: nothing shows through
@@ -255,7 +258,11 @@ std::vector<std::string> FitProblems(const layout::Layout& l){
     for(size_t i=0;i<l.elements.size();++i){
         const Element& e=l.elements[i];const RectF r=F(e.rect);
         switch(e.role){
-            case Role::Tab:line(e,e.text,TextStyle::Label,r.w-76,"tab name");break;   // Painter::Tab draws at 34 px; Label is 36
+            case Role::Tab:   // Painter::Tab draws at 34 px (Label is 36); a page under its group 22 px further in at 32 px, down to 30 px
+                if(e.option>0){if(p.Measure(e.text,TextStyle::Strong,1e6f,false,0,30).width>r.w-98+.5f)fail(e,"tab name under its group",e.text);}
+                else line(e,e.text,TextStyle::Label,r.w-76,"tab name");
+                break;
+            case Role::GroupTab:line(e,e.text,TextStyle::Group,r.w-108,"group name");break;   // Painter::GroupTab: icon before, chevron after
             case Role::Section:line(e,e.text,TextStyle::Section,r.w,"section heading");break;
             case Role::Label:{
                 if(e.text.empty()){line(e,e.sub,TextStyle::Small,r.w-16,"preset tag");break;}
@@ -290,6 +297,7 @@ std::vector<std::string> FitProblems(const layout::Layout& l){
                 else shrinks(e,e.text,TextStyle::Readout,r,false,"readout");
                 break;
             case Role::Intro:shrinks(e,e.text,TextStyle::Value,r,false,"intro");break;
+            case Role::Reason:shrinks(e,e.text,TextStyle::Value,r,false,"reason");break;
             case Role::PopoverTitle:shrinks(e,e.text,TextStyle::CardTitle,r,false,"popover title");break;
             case Role::PopoverOption:line(e,e.text,e.Has(Selected)?TextStyle::Strong:TextStyle::Value,r.w-16,"popover option");break;
             case Role::PopoverHint:shrinks(e,e.text,TextStyle::Help,r,true,"popover hint");break;
@@ -333,7 +341,7 @@ std::vector<PreviewShot> PreviewShots(){
         Setup x;s.ready=true;s.offlineDifficultyAvailable=true;
         x.m.Open(s);x.m.SetNotesPages(ReleaseNotesPages());x.m.SetContext({heroClass,heroClass==heroclass::Amazon,heroClass==heroclass::Sorceress,false});x.m.view=v;
         x.in.nowMs=now;x.in.detected=touch;
-        x.in.runtimeStatus=v==View::Performance?"VR source: 2560 x 2560 per eye":"Foveated shading available. Eye tracking unavailable on this headset/runtime.";   // as transport.cpp
+        x.in.runtimeStatus=layout::HasReadout(v)?"VR source: 2560 x 2560 per eye":"Foveated shading available. Eye tracking unavailable on this headset/runtime.";   // as transport.cpp
         return x;
     };
     auto add=[&](const std::string& name,const Setup& x,const layout::Tables* tables=nullptr){
@@ -342,17 +350,17 @@ std::vector<PreviewShot> PreviewShots(){
         const auto t=Now();const PagePicture warm=PaintPage(x.m,x.in,tables);shot.warmMs=Ms(t,Now());
         shots.push_back(std::move(shot));
     };
-    static constexpr const char* names[]={"presets","body","combat","aim","targets","shield","wrist","interface","survival","world","vibration","performance","guide","whats-new","more"};
+    static constexpr const char* names[]={"presets","combat","targeting","shield","monsters","physics","moving","body","hands","vibration","wrist","menus","labels","outlines","warnings","performance","frames","environment","guide","whats-new","more"};
     static_assert(std::size(names)==size_t(View::Count));
     // Every view with no character (class tags shown).
     for(int v=0;v<int(View::Count);++v){
         Setup x=base(View(v),-1);
-        if(View(v)==View::Performance)x.in.performance={true,true,90,11.1f,3.4f,2.6f,4.1f,.9f};
+        if(layout::HasReadout(View(v)))x.in.performance={true,true,90,11.1f,3.4f,2.6f,4.1f,.9f};
         add(names[v],x);
     }
     // A few classes on the pages that change with the character.
     const std::pair<int,const char*> classes[]={{heroclass::Amazon,"amazon"},{heroclass::Sorceress,"sorceress"},{heroclass::Paladin,"paladin"},{heroclass::Barbarian,"barbarian"}};
-    for(const auto& [hero,cls]:classes)for(View v:{View::Aim,View::Targets,View::Combat,View::Shield,View::Presets})add(std::string(names[int(v)])+"-"+cls,base(v,hero));
+    for(const auto& [hero,cls]:classes)for(View v:{View::Targeting,View::Outlines,View::Combat,View::Shield,View::Presets})add(std::string(names[int(v)])+"-"+cls,base(v,hero));
     // States.
     {Snapshot s;s.values[ShieldRoll]=90;Setup x=base(View::Shield,-1,s);x.m.Set(ShieldRoll,45);
      x.in.hover={Kind::Change,ShieldRoll,1};x.in.card=ShieldRoll;add("shield-dirty",x);
@@ -360,18 +368,30 @@ std::vector<PreviewShot> PreviewShots(){
      Setup z=base(View::Shield,-1,s);z.m.Set(ShieldRoll,45);z.m.undoResetUntil=now+3000;z.m.undoResetAt=now-3000;add("shield-undoreset",z);}
     {Setup x=base(View::Body,-1);x.m.Set(Seated,1);x.m.result=Result::Failed;add("body-save-failed",x);
      Setup y=base(View::Body,-1);y.m.result=Result::Saved;y.in.hover={Kind::Calibrate};y.in.card=HelpCalibrate;add("body-saved-calibrate",y);}
-    {Setup x=base(View::Aim,heroclass::Sorceress);x.in.monoAudio=true;x.in.hover={Kind::Set,ProjectileAimAssist,0,1};x.in.card=ProjectileAimAssist;add("aim-mono-pointed",x);
-     Setup y=base(View::Aim,-1);y.m.ready=false;add("aim-unavailable",y);}
+    {Setup x=base(View::Targeting,heroclass::Sorceress);x.in.monoAudio=true;x.in.hover={Kind::Set,ProjectileAimAssist,0,1};x.in.card=ProjectileAimAssist;add("targeting-mono-pointed",x);
+     Setup y=base(View::Targeting,-1);y.m.ready=false;add("targeting-unavailable",y);}
+    // A headset with eye tracking, the outline on: Eyes (Aim with your eyes) beside Aim with your view, its card open.
+    {Snapshot s;s.values[TargetHighlight]=60;Setup x=base(View::Targeting,-1,s);Context c=x.m.context;c.eyeTracker=true;x.m.SetContext(c);
+     x.in.card=AimWithEyes;add("targeting-eyes",x);}
     {Snapshot s;s.values[DeferGpuWait]=0;Setup x=base(View::Performance,-1,s);x.in.game={true,true};
      x.in.performance={true,true,52,11.1f,1.0f,7.0f,9.4f,1.5f};add("performance-warnings",x);}
     {Setup x=base(View::Presets,-1);x.in.hover={Kind::Preset,0};x.in.card=HelpPresetFirst;add("presets-pointed",x);}
     // World with Dungeon ceilings on: Torchlight beside them, its card open (owner 2026-11-01).
-    {Snapshot s;s.values[Ceiling]=1;Setup x=base(View::World,-1,s);x.in.card=CeilingTorches;add("world-torchlight",x);}
+    {Snapshot s;s.values[Ceiling]=1;Setup x=base(View::Environment,-1,s);x.in.card=CeilingTorches;add("environment-torchlight",x);}
     // Vibration: a Feel it per test (Weapon / Shield), at the default and changed (with Undo and Default).
     {Setup x=base(View::Vibration,-1);x.in.card=HapticMelee;add("vibration-feel-it",x);
      Setup y=base(View::Vibration,-1);y.m.Set(HapticMelee,60);y.in.card=HapticMelee;y.in.hover={Kind::TestHaptics,int(haptics::Category::Melee),2};add("vibration-feel-it-changed",y);}
     // Presets off (content::PresetsReady): the rail's tab grayed out, its card saying they come later.
     {Setup x=base(View::Body,-1);x.in.hover={Kind::Open,int(View::Presets),-1};x.in.card=HelpTabFirst+int(View::Presets);add("presets-grayed",x);}
+    // The rail's groups: each open on its first page, its row pointed with its card; then Gameplay closed with a change
+    // on its last page (Shield), pointed from Wrist.
+    for(const auto& g:content::GroupTable){
+        Setup x=base(layout::GroupPage(Model{},g.id),-1);x.in.hover={Kind::OpenGroup,int(g.id),-1};x.in.card=HelpGroupFirst+int(g.id);
+        std::string name=g.name;for(auto& ch:name)ch=char(std::tolower(static_cast<unsigned char>(ch)));
+        add("rail-"+name,x);
+    }
+    {Setup x=base(View::Wrist,-1);x.m.Set(ShieldRoll,90);x.m.groupPage[size_t(content::Group::Gameplay)]=View::Shield;
+     x.in.hover={Kind::OpenGroup,int(content::Group::Gameplay),-1};x.in.card=HelpGroupFirst+int(content::Group::Gameplay);add("rail-gameplay-closed-changed",x);}
     {   // A long release (30 lines, three pages): the middle page with Next pointed, and the last page.
         static std::array<std::string,30> text;static std::array<const char*,30> lines;
         for(size_t i=0;i<text.size();++i){text[i]="Release line "+std::to_string(i+1)+": a change in this version, one line long";lines[i]=text[i].c_str();}
@@ -383,47 +403,61 @@ std::vector<PreviewShot> PreviewShots(){
     {   // Popovers: a named list too long for chips, open over its page (options armed, one pointed).
         Setup x=base(View::Performance,-1);x.m.popoverKey=RenderResolution;x.m.popoverAt=now-1000;
         x.in.hover={Kind::Set,RenderResolution,0,3};x.in.card=RenderResolution;add("popover-list",x);
-        Setup a=base(View::Aim,heroclass::Amazon);a.m.popoverKey=SpellLock;a.m.popoverAt=now-1000;a.in.card=SpellLock;add("popover-aim-amazon",a);
+        Setup a=base(View::Targeting,heroclass::Amazon);a.m.popoverKey=SpellLock;a.m.popoverAt=now-1000;a.in.card=SpellLock;add("popover-targeting-amazon",a);
         Setup y=base(View::Performance,-1);y.in.hover={Kind::Popover,RenderResolution};y.in.card=RenderResolution;add("popover-face-pointed",y);
         // The color grid: a hand's outline color (Azure pointed), and the arrow path line's.
         Snapshot s;s.values[TargetHighlight]=60;s.values[HighlightRight]=45;
-        Setup g=base(View::Targets,-1,s);g.m.popoverKey=HighlightRight;g.m.popoverAt=now-1000;g.in.hover={Kind::Set,HighlightRight,0,210};g.in.card=HighlightRight;add("color-grid",g);
-        Setup l=base(View::Targets,heroclass::Amazon,s);l.m.popoverKey=BowLaser;l.m.popoverAt=now-1000;l.in.card=BowLaser;add("color-grid-arrow-path",l);
-        Setup b=base(View::Targets,-1,s);b.m.popoverKey=HighlightLeft;b.m.popoverAt=now-1000;b.in.hover={Kind::Set,HighlightLeft,0,0};b.in.card=HighlightLeft;add("color-grid-by-range",b);
+        Setup g=base(View::Outlines,-1,s);g.m.popoverKey=HighlightRight;g.m.popoverAt=now-1000;g.in.hover={Kind::Set,HighlightRight,0,210};g.in.card=HighlightRight;add("color-grid",g);
+        Setup l=base(View::Targeting,heroclass::Amazon,s);l.m.popoverKey=BowLaser;l.m.popoverAt=now-1000;l.in.card=BowLaser;add("color-grid-arrow-path",l);
+        Setup b=base(View::Outlines,-1,s);b.m.popoverKey=HighlightLeft;b.m.popoverAt=now-1000;b.in.hover={Kind::Set,HighlightLeft,0,0};b.in.card=HighlightLeft;add("color-grid-by-range",b);
     }
     {   // Loot beams: one row, its slider (70%) and Filter button, and its card of four switches open (Rare Off, Set pointed).
         Snapshot s;s.values[LootBeamRare]=0;
         s.values[LootBeamBrightness]=70;
-        Setup row=base(View::Interface,-1,s);row.in.hover={Kind::Popover,LootBeamBrightness};row.in.card=LootBeamBrightness;add("interface-loot-beams",row);
-        Setup card=base(View::Interface,-1,s);card.m.popoverKey=LootBeamBrightness;card.m.popoverAt=now-1000;
+        Setup row=base(View::Labels,-1,s);row.in.hover={Kind::Popover,LootBeamBrightness};row.in.card=LootBeamBrightness;add("labels-loot-beams",row);
+        Setup card=base(View::Labels,-1,s);card.m.popoverKey=LootBeamBrightness;card.m.popoverAt=now-1000;
         card.in.hover={Kind::Set,LootBeamSet,0,0};card.in.card=LootBeamBrightness;add("loot-beams-filter",card);
     }
-    {   // Frame generation (main's #313): its row on Performance; NVIDIA's quality and scale on More while NVIDIA is chosen.
-        // Active needs Both eyes (By turns hides the row, #343); the readout shows main's note, not the numbers (#342).
+    {   // Frame generation (main's #313): its row on Frames; NVIDIA's quality and scale under it while NVIDIA is chosen.
+        // Active needs Both eyes (By turns grays the rows); the readout shows main's note, not the numbers (#342).
         Snapshot s;s.values[FrameGeneration]=2;s.values[StereoRendering]=0;
-        Setup p=base(View::Performance,-1,s);p.in.performance={true,true,90,11.1f,3.4f,2.6f,4.1f,.9f};
-        p.in.frameGen={framegen::State::Active,1,1,2,1,1,0,0,0};p.in.card=FrameGeneration;add("performance-frame-generation",p);
+        Setup p=base(View::Frames,-1,s);p.in.performance={true,true,90,11.1f,3.4f,2.6f,4.1f,.9f};
+        p.in.frameGen={framegen::State::Active,1,1,2,1,1,0,0,0};p.in.card=FrameGeneration;add("frames-generation-active",p);
         // ... under the Defer GPU wait offer and a game video warning (the taller box).
         Snapshot d=s;d.values[DeferGpuWait]=0;
-        Setup q=base(View::Performance,-1,d);q.in.game={true,true};q.in.performance=p.in.performance;q.in.frameGen=p.in.frameGen;
-        add("performance-frame-generation-defer",q);
-        add("more-frame-generation-nvidia",base(View::More,-1,s));
+        Setup q=base(View::Frames,-1,d);q.in.game={true,true};q.in.performance=p.in.performance;q.in.frameGen=p.in.frameGen;
+        add("frames-generation-active-defer",q);
+        // The Frames page in each state of Eyes drawn per frame, with the frame times.
+        const auto frames=[&](float stereo,float mode,const char* name){
+            Snapshot e;e.values[StereoRendering]=stereo;e.values[FrameGeneration]=mode;e.values[DeferGpuWait]=1;
+            Setup f=base(View::Frames,-1,e);f.in.performance=p.in.performance;add(name,f);
+        };
+        frames(1,0,"frames-by-turns");
+        frames(1,2,"frames-by-turns-nvidia");
+        frames(0,0,"frames-both-eyes");
+        frames(0,2,"frames-both-eyes-nvidia");
+        // A press on a gray row: its card says it is locked.
+        {Snapshot e;e.values[StereoRendering]=1;e.values[DeferGpuWait]=1;Setup f=base(View::Frames,-1,e);f.in.card=FrameGeneration;add("frames-by-turns-card",f);}
     }
-    {   // Movement speed | Stick toggle on one row (main's PairOf): Walk, toggle On and pointed.
+    {   // Stick toggle, a row of its own on Hands: On and pointed.
         Snapshot s;s.values[RunSpeed]=-10;s.values[RunWalkToggle]=1;
-        Setup x=base(View::Body,-1,s);x.in.hover={Kind::Set,RunWalkToggle,0,0};x.in.card=RunWalkToggle;add("body-movement-pair",x);
+        Setup x=base(View::Hands,-1,s);x.in.hover={Kind::Set,RunWalkToggle,0,0};x.in.card=RunWalkToggle;add("hands-stick-toggle",x);
+    }
+    {   // Sticks stay right-handed, shown under Left-handed while it is on: On and pointed.
+        Snapshot s;s.values[LeftHanded]=1;s.values[LeftHandedSticks]=1;
+        Setup x=base(View::Hands,-1,s);x.in.hover={Kind::Set,LeftHandedSticks,0,0};x.in.card=LeftHandedSticks;add("hands-left-handed-sticks",x);
     }
     {   // main's number pairs as side halves: Distance fog | Fog distance (shown while the fog is on), its list
         // of steps open; Scenery distance | Big objects, its list open with 300 pointed.
         Snapshot s;s.values[Fog]=1;s.values[FogDistance]=700;
-        Setup x=base(View::World,-1,s);x.in.card=FogDistance;add("world-fog-distance",x);
-        Setup y=base(View::World,-1,s);y.m.popoverKey=FogDistance;y.m.popoverAt=now-1000;y.in.card=FogDistance;add("world-fog-distance-list",y);
+        Setup x=base(View::Environment,-1,s);x.in.card=FogDistance;add("environment-fog-distance",x);
+        Setup y=base(View::Environment,-1,s);y.m.popoverKey=FogDistance;y.m.popoverAt=now-1000;y.in.card=FogDistance;add("environment-fog-distance-list",y);
         Setup z=base(View::Performance,-1);z.m.popoverKey=BigObjectDistance;z.m.popoverAt=now-1000;
         z.in.hover={Kind::Set,BigObjectDistance,0,300};z.in.card=BigObjectDistance;add("performance-big-objects-list",z);
     }
     {   // The fallback (content::FallbackDemo): settings with no override, on their owner page's New section or on More.
         static const layout::Tables demo=layout::TablesOf(content::FallbackDemo());
-        add("fallback-world",base(View::World,-1),&demo);
+        add("fallback-environment",base(View::Environment,-1),&demo);
         add("fallback-performance",base(View::Performance,-1),&demo);
         Setup more=base(View::More,-1);add("fallback-more",more,&demo);
         more.m.morePage=1;more.in.card=MapTopDown;add("fallback-more-2",more,&demo);
@@ -431,14 +465,17 @@ std::vector<PreviewShot> PreviewShots(){
     }
     {Snapshot s;s.values[Motion]=0;add("combat-recommended",base(View::Combat,-1,s));}   // Motion combat Off: the "Recommended: On" tag
     {Snapshot s;s.values[TargetHighlight]=60;s.values[HighlightRight]=0;s.values[HighlightLeft]=210;s.values[BowLaser]=45;
-     Setup x=base(View::Targets,-1,s);x.in.card=HighlightRight;add("targets-colors",x);}                    // swatches: By range, a hue, the arrow path line
-    {Setup x=base(View::Survival,-1);x.m.offlineDifficultyAvailable=false;x.in.card=OfflinePlayers;add("survival-no-adapter",x);}
+     Setup x=base(View::Outlines,-1,s);x.in.card=HighlightRight;add("outlines-colors",x);}                    // swatches: By range, a hue, the arrow path line
+    {Snapshot s;s.values[TargetHighlight]=60;add("outlines-on",base(View::Outlines,-1,s));}   // Monster outline On: its other rows show
+    {Setup x=base(View::Monsters,-1);x.m.offlineDifficultyAvailable=false;x.in.card=OfflinePlayers;add("monsters-no-adapter",x);}
     {Snapshot s;s.values[ShieldRoll]=90;Setup x=base(View::Shield,-1,s);x.in.hover={Kind::Change,ShieldRoll,0};x.in.pressed=x.in.hover;x.in.card=ShieldRoll;add("shield-drag",x);}
-    {Setup x=base(View::Interface,-1);x.m.Set(MenuDistance,0);x.m.Set(TooltipTiming,0);x.in.card=HelpPending;add("interface-pending",x);}
+    {Setup x=base(View::Menus,-1);x.m.Set(MenuDistance,0);x.m.Set(TooltipTiming,0);x.in.card=HelpPending;add("menus-pending",x);}
     {Setup x=base(View::Body,-1);calibration::Flow f;f.Begin();f.phase=calibration::Phase::Hold;f.hint=calibration::Hint::Arms;f.progress=.55f;
      x.in.calibration=CalibrationOf(f);add("calibration",x);
      x.in.calibration.hint=int(calibration::Hint::Saved);x.in.calibration.progress=1;x.in.calibration.measured=true;
-     x.in.calibration.eyeHeight=1.68f;x.in.calibration.armSpan=1.52f;add("calibration-saved",x);}
+     x.in.calibration.eyeHeight=1.68f;x.in.calibration.armSpan=1.52f;add("calibration-saved",x);
+     x.in.calibration=CalibrationOf(f);x.in.calibration.hint=int(calibration::Hint::Floor);x.in.calibration.progress=0;x.in.calibration.anyTime=false;add("calibration-floor",x);
+     x.in.calibration.hint=int(calibration::Hint::Pose);add("calibration-no-t-cross",x);}
     return shots;
 }
 }

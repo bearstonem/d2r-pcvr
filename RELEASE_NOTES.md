@@ -1,216 +1,153 @@
-# D2R VR Unleashed v0.3.31 - Windows preview
+# D2R VR Unleashed v0.3.33 - Windows preview
 
-This update lets you cast by drawing glyphs in the air, adds Paladin gestures,
-loot beams and a pick-up that takes the item you point at, gives your mercenary
-tactical commands, and makes Unleashed melee fairer.
+This update makes the game draw each eye about a third faster, lets frame
+generation run without holding the game back, adds room-scale play and a
+left-handed mode, and brings a large batch of community features.
+
+## Performance
+
+- **The game's own drawing, about a third faster:** six changes to the game's
+  render code, made in memory while it runs, take wasted work out of every eye
+  pass: a slow read on every transparent draw, a profiler lock taken by every
+  draw, a debug name written for every draw, and a debug pass over every visible
+  object. Sun shadows and the visibility check are now done once a frame, not
+  once per eye. In one heavy fight on the test PC an eye pass went from 9.3 ms
+  to about 6.3 ms, and the frame rate from 36-38 to the 45 the headset asked
+  for. Each change checks the game's code first and stays out if it differs.
+  There is no setting.
+- **Frame generation no longer holds the game back:** with frame generation on,
+  the bridge made the game wait for the graphics card at the start of every
+  frame. The mod now asks for the frame's timing just before it draws, when
+  that wait is already over. On the test PC at 120 Hz this went from 55 real
+  frames a second to 60. Both eyes on SteamVR only.
+- **Both eyes may now be the better choice:** with the faster drawing, Both
+  eyes held 60 real frames per eye at 120 Hz on the test PC, where By turns gave
+  each eye 36 to 45. Try **VR Settings > Graphics > Performance > Eyes drawn per
+  frame**. By turns remains the default.
+- **Less work in the mod itself:** ragdoll physics runs on its own thread, wrist
+  and panel pictures are uploaded only where they changed, the skeleton hook
+  reads far less, idle effect passes are skipped, and new full installs switch
+  off a ReShade add-on the VR picture never used.
 
 ## Gameplay and combat
 
-- **Glyph casting:** Put **Draw glyph** on a hand button: open a hand's wheel,
-  select a button and pick **Draw glyph**, last under **General / Items**. Then
-  give shapes their skills on the wheel's new **GLYPHS** page (the box at the
-  upper right): circle, triangle, square, lightning bolt, spiral, V, star and
-  wave. Hold the button, draw the shape in the air in front of you and let go:
-  the skill on that shape is cast with its own mana, cast rate and effect. It is
-  meant for buffs, auras and other skills that need no target. The glyph hangs
-  where you drew it in its skill's element: flames and embers, ice shards that
-  crack, crackling lightning, dripping poison, rising holy light, a crimson curse,
-  shadow, spinning steel and more. Then it leaves in its own way.
-- **Paladin gestures - contributed by ChuckRibbits:** Make the sign of the cross
-  (forehead, chest, one shoulder, the other) with either hand to cast **Holy
-  Shield**. For **Fist of the Heavens**, make a fist with your arm straight and
-  raised, then bring it down to stop about level with your shoulder. The bolt
-  falls on the monster your arm points at. Both need the skill on one of your
-  buttons. Werewolf and Werebear now carry the wheel's GESTURE tag, and skills
-  that lock onto a monster (Charge, Leap Attack and others) now find it reliably.
-- **Mercenary tactical commands - contributed by Mcklem:** Point at your
-  mercenary, or the ground at its feet, hold **Grip** and pull **Trigger**, aim
-  and let go:
-  - at the ground, it walks there and holds;
-  - at a monster, it focuses it;
-  - on the mercenary itself, it holds its place, or regroups if it was holding.
-
-  Grip first or both at once both work, the trigger casts nothing while you do,
-  and a monster nearer your aim keeps the trigger an attack. The mercenary also
-  fights from the spot you send it to, and when badly hurt falls back beside you,
-  ready for a thrown potion.
-  **VR Settings > Survival > Tactical commands** turns the commands off.
-- **A fairer Unleashed attack cycle - contributed by ChuckRibbits:**
-  - Swings between beats never delay your next full hit; dual wielders share one
-    cycle.
-  - Dual wield swings at native D2R speed, and strike skills from either blade
-    swing the primary weapon.
-  - Life Tap, monster flinches, Thorns, Iron Maiden, weapon wear and poison now
-    follow the stroke: in-between strokes no longer heal you through Life Tap or
-    stun-lock monsters.
-- **Loot pick, on by default - contributed by beadlebytes:** With several items
-  on the floor, hold your dominant hand out and point at one: **A** picks it up
-  instead of the item nearest your feet. Its name shows with a thin rim in its
-  rarity color within reach, or red when too far, where A takes nothing and
-  doesn't walk there. Pointing at no item, doors, chests and NPCs work as before.
-  The switch is on **VR Settings > Interface**, beside Loot name size.
+- **Room-scale:** turns pivot at your head, your body stays under you anywhere
+  in your room, and with **Body > Room follows you** (on) the hero's spot follows
+  you as you walk about.
+- **Left-handed (experimental):** **Hands > Left-handed** mirrors every weapon
+  kind, the shield, the class motions, the interface and the controls.
+- **Aim with your eyes:** on headsets with eye tracking, **Targeting > Aim with
+  your eyes** picks the monster you look at. Target picks also follow monsters
+  sooner.
+- **Hit reactions:** a committed stroke staggers a monster and a heavy one
+  knocks it back. **Combat > Melee reach** lets near misses beside a monster
+  still hit.
+- **More motions:** sixteen Warlock skills, and the Barbarian's Find Potion,
+  Grim Ward and Taunt. Whirlwind now whirls once for each T you hold.
+- **Assassin:** cross your claws to block. Throwing potions in the off hand are
+  thrown by hand too, and aimed trap and potion throws show a sigil where they
+  will land.
+- **Sorceress:** Lightning and Chain Lightning leave the casting hand. Teleport
+  is aimed with the controller along an arc that lands on its sigil.
+- **Bows and crossbows:** a face button loads Multiple Shot, Guided Arrow and
+  Strafe into the draw, Multiple Shot's fan follows your up and down aim, Guided
+  Arrow always homes on the aimed monster, skill arrows fly at arrow speed, and
+  the right trigger is Attack while a crossbow is equipped. **Bow bash** and
+  **Weapon heft** are new and off by default.
+- **Spells and arrows break things:** spells break containers and push props
+  and bottles. Arrows and bolts break barrels, urns and other breakables -
+  contributed by **Mcklem**.
+- **Charge** goes to the aimed monster whatever the aim options.
+- **Monster immunity indicators - contributed by RobinHeggelund:** immune
+  monsters show what they are immune to.
+- **Summon range - contributed by RobinHeggelund:** **Monsters > Summon range**
+  widens how far summons attack and follow.
+- **Mercenary potion throw autoaim and Click to drink - contributed by
+  RobinHeggelund:** both optional, under **Monsters > Mercenary** and **Body >
+  Potion belt**.
 
 ## Controls and interface
 
-- **Loot beams - contributed by ChuckRibbits:** Colored pillars of light rise over
-  unique (gold), set (green) and rare (yellow) items and runes Vex and up
-  (orange) lying near you; walls and hills hide them. **VR Settings > Interface >
-  Loot beams** sets their brightness, and its **Filter** chooses which kinds.
-- **The held menu - contributed by ChuckRibbits:** While you hold the tabbed
-  menu, the right stick turns you, and pulling the trigger off the menu drops
-  the item you picked up. Life, mana and XP show above the menu. Reach back over
-  your left shoulder and grip to put it away.
-- **Reset Skills & Stats - contributed by ChuckRibbits:** A button on the tabbed
-  menu's Character page, in offline games, resets every stat and skill point
-  with the game's own reset. It is free and unlimited, asks for confirmation
-  and needs one free inventory square.
-- **Talking to NPCs - contributed by ChuckRibbits:** Pressing A on an NPC while
-  walking stops you first, so the conversation opens with you standing.
-- **Arcane Decay - contributed by Mcklem:** A spectral blue vignette grows at the
-  edge of your view as your mana runs low. **VR Settings > Interface > Mana
-  Warning** turns it on or off, sets the mana level it starts below (50%) and
-  its strength, and fades it in and out.
+- **VR Settings regrouped - contributed by beadlebytes:** the menu is grouped by
+  what players look for, and it now has room for 256 settings.
+- **Floating map - contributed by beadlebytes:** pull the full map off your
+  wrist and put it back there.
+- **T cross to calibrate - contributed by beadlebytes:** hold your arms out in a
+  T to calibrate height and arm span.
+- **Position-only recenter - contributed by DevilInLaw:** F13 recenters your
+  position without turning you.
+- **VR keyboard for character names - contributed by Kudlatytrue.**
+- **Campfire character creation in 3D - contributed by Kudlatytrue:** the
+  character creation scene is drawn in stereo around you.
+- **Shared stash tab buttons - contributed by RobinHeggelund.**
+- **Walk direction:** **Hands > Walk direction** walks where you look or where
+  the left controller points.
+- **Wrist skill cooldowns:** recharging skills show between the orbs.
+- **Leather menu:** tooltips that run past the menu's foot are shown, and the
+  hero stops as soon as the stick is let go.
 
 ## Visuals and stability
 
-- **Save and Exit crash - contributed by ChuckRibbits:** Save and Exit could
-  crash the game from the held menu. The menu no longer shows the minimap beside
-  it, which caused the crash.
-- **Your shadow has a head - contributed by beadlebytes:** In first person your
-  shadow now keeps its head and helm; the eye views hide the head instead.
-- **Dungeon torchlight:** **Torches**, beside Dungeon ceilings in **VR Settings >
-  Performance**, lets the game's own torches and braziers light the dungeon
-  around them. It is off by default because finding them costs CPU.
-- **Pushable bodies cost less:** Only bodies within 3 meters are pushed. With
-  frame generation on, turning Pushable bodies off no longer gains 10-15 frames
-  a second.
+- **Heads turn to you:** monsters and townsfolk look at your real head.
+- **Richer haptics and sound:** hit feel by target, a ramping bowstring, a felt
+  heartbeat at low life, and the game's own echo raised for the headset.
+- **Dungeon rooms at different heights join up - contributed by ChuckRibbits.**
+- **Your own helm** is left out of your view and kept in your shadow, and the
+  black flicker from the head's shadow is gone.
+- **Fog** is measured from your eye, **Light Radius** widens the dungeon light,
+  and the sky is one band once round the circle.
+- **SteamVR menu flicker:** layers keep their place when the menu is hidden.
+- **Setup:** it no longer refuses game builds that are not on a list, and
+  downloads retry through Windows when a certificate is rejected.
 
 ## Updating
 
-Download **D2R-PCVR-Setup-0.3.31.exe** for graphical installation, or
+Download **D2R-PCVR-Setup-0.3.33.exe** for graphical installation, or
 **d2r-pcvr-windows.zip** for portable setup. Existing users should choose
 **Update / repair and keep calibration and video settings**.
 
-New settings start at their defaults on an update too: Loot pick, Loot beams,
-Arcane Decay and Tactical commands are on, and Dungeon torchlight is off.
-Mercenary commands now take Grip + Trigger; the open-palm hold is gone.
-
-Updating from v0.3.28 or earlier: v0.3.29's new defaults come with a full
-install: Terrain distance 6 rings, Big objects 600, Fog distance 600 and a
-gentler fog. **Update / repair keeps your saved values**, so set them in VR
-Settings > Performance and World to try them.
-
-Close the game and fully exit Steam before updating. Closing D2R VR Launcher
-also avoids file locks. Update / repair preserves settings, calibration and saves.
-A full install applies recommended defaults and resets calibration.
-
-On native Windows, Setup downloads OFXR Bridge for frame generation, so keep the
-internet connection on. If that download fails, everything else still installs
-and frame generation reports that it is not installed. Frame generation also
-needs the Microsoft Visual C++ x64 runtime.
-
-The Windows installer includes **D2R VR Launcher 0.3.5**, installing or updating
-it when needed while preserving newer versions. Direct Steam shortcuts and
-portable setup remain available; Authentic is a separate optional mod.
-
-### First-time setup and using the launcher
-
-1. Install and start the original Diablo II: Resurrected through Steam or
-   Battle.net once. Complete its account prompts, create or select an offline
-   character, then fully exit the game.
-2. Download **D2R-PCVR-Setup-0.3.31.exe** from the assets below. Fully exit
-   Steam using **Steam > Exit**, then run Setup and choose **Full install with
-   recommended settings**. Follow the wizard to select your game copy, headset
-   and connection; the shared launcher is included.
-3. After Setup finishes, reopen Steam and reconnect your headset.
-4. Open **Start > D2R VR Launcher**, confirm the **Game folder** and select
-   **D2R VR Unleashed**.
-5. Choose **SteamVR** for Steam Frame or Quest through Steam Link/SteamVR.
-   Choose **Virtual Desktop (VDXR)** for Quest through Virtual Desktop, with its
-   Quest app and Windows Streamer running and SteamVR closed. The runtime choice
-   applies to this launch without changing your Windows-wide OpenXR setting.
-6. Click **Play**, select a **local offline character** and complete body
-   calibration when prompted.
-
-### Current log location
-
-For support, reproduce the problem, close the game and send these logs from
-your game folder. In Steam's default library that is
-`C:\Program Files (x86)\Steam\steamapps\common\Diablo II Resurrected`:
-
-```text
-mods\D2R-PCVR\d2rloader\logs\d2r-vr-frame.log
-mods\D2R-PCVR\d2rloader\logs\d2r-pcvr-vrcam.log
-mods\D2R-PCVR\reshade\ReShade.log
-d2rloader\logs\d2rloader.log
-```
-
-The `d2r-vr-frame.log` and `d2r-vr-vrcam.log` in the game's main
-`d2rloader\logs` folder are left over from older versions and are no longer
-updated. Developer mode uses `mods\pcvr-dev` in place of `mods\D2R-PCVR`.
-Installer failures are recorded separately in
-`%LOCALAPPDATA%\Programs\D2R PCVR\setup-install.log`.
+An update keeps your saved settings, so changed defaults reach new full
+installs only. The performance changes need no setting and apply after either
+kind of install.
 
 ## Verification and known issues
 
-The release build passed **174 native checks**. **263 of 269 Python checks**
-passed on Windows: the 5 session checks need Linux's `/proc`, and 1
-symbolic-link check was skipped because this Windows session cannot create
-symbolic links. The in-headset What's new pages and the Interface page of VR
-Settings were rendered and checked for fit.
+Automated: the native Windows build and its 230 tests pass, with the release
+notes, identity and installer staging checks.
 
-Every change was tested in a headset with offline characters before it was
-merged, by the owner or its contributor:
-- **Glyph casting** on a Paladin: auras cast through the button they sat on and
-  through the hidden right-trigger slot, and the elemental trails.
-- **Mercenary commands:** moves, holds and a monster focus started by Grip +
-  Trigger, with no skill cast at the mercenary.
-- **Loot pick:** the pointed items were picked up, and items past reach showed
-  a red rim.
-- **Paladin gestures:** Holy Shield and Fist of the Heavens.
-- **Unleashed and other contributions:** the attack cycle, dual wield, loot beams,
-  Reset Skills & Stats, the held menu, NPC talk, the shadow's head and Arcane
-  Decay.
-- **Dungeon torchlight and the pushable-bodies radius:** the radius cut the
-  bodies' cost from 17-61 ms to under 5 ms each second.
+Headset: the performance changes and the frame generation change were measured
+and played on one PC (NVIDIA GPU, SteamVR, Both eyes, at 90 and 120 Hz) in
+Act 2 field fights, with a profiler capture before and after each change. The
+picture was as before, transparent effects and shadows included.
 
-No new headset session is claimed for the version and release-notes update
-itself.
+Not tested: the performance changes in dungeons and other acts, Virtual
+Desktop, other GPU vendors, the frame generation change at 90 Hz and with
+FidelityFX, and the off hand potion throw. Battle.net remains experimental.
 
-Known issues:
-- **Glyph casting:** the shapes are shared by all your characters, so a shape
-  whose skill your hero lacks casts nothing. The Warlock's glyphs take their
-  look from the skill's tree. A shape's skill uses the game's right-trigger
-  slot when it is on none of your buttons, replacing what a plain controller
-  layout had there.
-- **Virtual Desktop freezes:** the game freezes for about a tenth of a second
-  every so often under Virtual Desktop, with or without frame generation. This is
-  being investigated.
-- **Stuns in Unleashed:** a stun now only knocks you back. You can move again as
-  soon as the knockback ends, even while the stun is still shown.
 - **Frame generation is experimental.** It uses a pre-release bridge. Expect
-  artifacts around moving monsters and during fast head turns. Frame counters
-  count only the frames the game draws, and a menu stops the generated frames
-  while it is open.
-- **Throwing potions:** the burst follows the game's short throw animation, and
-  only right-hand potions are thrown by hand for now.
+  artifacts around moving monsters and during fast head turns. With it on, head
+  and hand positions are taken a few milliseconds earlier than before. A menu
+  stops the generated frames while it is open, and there can be a short stutter
+  as it opens.
+- **A game update can switch the performance changes off.** Each one compares
+  the game's code with what it knows and stays out when it differs; the log
+  says so in a `Frame game patches:` line.
+- **Left-handed** is experimental.
 - **By turns:** it still renders each eye on alternate frames. Small bits of
-  texture can still flicker along some edges, and transparent effects and wispy
-  hair without useful depth may keep artifacts.
-- **Sorceress elemental hands:** they are drawn over the picture, so they can show
-  through your weapon or a wall.
-- **Not retested:** the latest rendering changes have not been retested on other
-  GPU vendors. Battle.net remains experimental.
+  texture can flicker along some edges.
+- **Virtual Desktop freezes:** the game freezes for about a tenth of a second
+  every so often under Virtual Desktop. This is being investigated.
 
 ## Special thanks
 
-Thanks to **ChuckRibbits** for the Paladin's Holy Shield and Fist of the
-Heavens, loot beams, the fixed Unleashed attack cycle and native dual wield,
-Reset Skills & Stats, the held menu, NPC talk and the Save and Exit fix. Thanks
-to **beadlebytes** for Loot pick and the shadow's head. Thanks to **Mcklem** for
-the mercenary's tactical commands and AI, and for Arcane Decay. Thanks to
-**tig3rmast3r** for OFXR Bridge, and to everyone testing, reporting bugs and
-helping improve the mod!
+Thanks to **RobinHeggelund** for the immunity indicators, summon range,
+mercenary potion autoaim, click to drink and the stash tab buttons; to
+**beadlebytes** for the regrouped VR Settings, the floating map, T cross
+calibration and the per-feature ReShade files; to **Kudlatytrue** for the VR
+keyboard and the 3D campfire; to **ChuckRibbits** for the dungeon room heights;
+to **Mcklem** for arrows that break things; to **DevilInLaw** for position-only
+recenter; to **tig3rmast3r** for OFXR Bridge; and to everyone testing,
+reporting bugs and helping improve the mod!
 
 D2R VR Unleashed is a mod by **monkeylashes**, with contributions from the
 community. From v0.3.29 its source is under the Mozilla Public License 2.0;
@@ -218,34 +155,59 @@ releases up to 0.3.28 stay available under the MIT license.
 
 ## Downloads and links
 
-- [Windows installer, portable ZIP and checksums](https://github.com/bearstonem/d2r-pcvr/releases/tag/v0.3.31-windows-preview)
-- [Installation instructions](https://github.com/bearstonem/d2r-pcvr/blob/v0.3.31-windows-preview/INSTALL-WINDOWS.md)
-- [Controls](https://github.com/bearstonem/d2r-pcvr/blob/v0.3.31-windows-preview/CONTROLS.md)
-- [Full source comparison](https://github.com/bearstonem/d2r-pcvr/compare/v0.3.30-windows-preview...v0.3.31-windows-preview)
+- [Windows installer, portable ZIP and checksums](https://github.com/bearstonem/d2r-pcvr/releases/tag/v0.3.33-windows-preview)
+- [Installation instructions](https://github.com/bearstonem/d2r-pcvr/blob/v0.3.33-windows-preview/INSTALL-WINDOWS.md)
+- [Controls](https://github.com/bearstonem/d2r-pcvr/blob/v0.3.33-windows-preview/CONTROLS.md)
+- [Full source comparison](https://github.com/bearstonem/d2r-pcvr/compare/v0.3.32-windows-preview...v0.3.33-windows-preview)
 - [Project on GitHub](https://github.com/bearstonem/d2r-pcvr)
 - [Discord](https://discord.gg/DmbFfJAnnm)
 - [Support](https://ko-fi.com/bearstonem)
 
 <!-- PCVR_IN_HEADSET_NOTES
-release: v0.3.31-windows-preview
-credits: ChuckRibbits; beadlebytes; Mcklem; tig3rmast3r (OFXR Bridge); Sergious.
-- Glyph casting: hold Draw glyph, draw a shape in the air and let go to cast its skill.
-- Wheel > GLYPHS: give eight shapes a buff or aura; put Draw glyph on a hand button.
-- Glyphs glow in their element: flames, ice, lightning, holy light, curses, shadow, steel.
-- Paladin: the sign of the cross casts Holy Shield.
-- Paladin: raise a straight arm with a fist and bring it down for Fist of the Heavens.
-- Mercenary: point at it, hold Grip, pull Trigger, aim and let go to move it or focus a foe.
-- Loot pick (on): hold your arm out and point at an item; A picks that one, not the nearest.
-- Loot beams: colored pillars over unique, set and rare items and high runes.
-- Interface > Loot beams sets their brightness; Filter chooses which kinds.
-- Unleashed: extra swings never delay your next full hit; dual wield shares one cycle.
-- Dual wield swings at native speed; in-between strokes no longer stun-lock or heal.
-- Character page: Reset Skills & Stats, free and unlimited offline, with a confirmation.
-- Held menu: turn with the stick, drop items off the menu, put it away over your shoulder.
-- Arcane Decay: a blue vignette at the edge of your view when mana runs low.
-- A on an NPC while walking stops you, so the conversation opens with you standing.
-- Your shadow keeps its head in first person.
-- Performance > Torches: the game's torches light dungeons (off by default, costs CPU).
-- Pushable bodies only push bodies within 3 m: no fps loss with frame generation.
-- Fixed: Save and Exit no longer crashes from the held menu.
+release: v0.3.33-windows-preview
+credits: RobinHeggelund, beadlebytes, Kudlatytrue, ChuckRibbits, Mcklem, DevilInLaw, tig3rmast3r.
+- PERFORMANCE: the game draws each eye about a third faster. No setting; it is always on.
+- Four wasted steps are taken out of every draw: a slow read, a lock, a debug name, a debug pass.
+- Sun shadows and the visibility check are done once a frame, not once per eye.
+- Frame generation no longer holds the game back: 60 real frames at 120 Hz on the test PC.
+- Both eyes may now beat By turns: Graphics > Performance > Eyes drawn per frame.
+- Ragdoll physics runs on its own thread; wrist and panel pictures upload only what changed.
+- ROOM-SCALE: turns pivot at your head and your body stays under you anywhere in your room.
+- Body > Room follows you (on): the hero's spot follows you as you walk your room.
+- Hands > Walk direction: walk where you look or where the left controller points.
+- Hands > Left-handed (experimental): weapons, shield, motions, interface and controls mirrored.
+- Targeting > Aim with your eyes: eye-tracked targeting on headsets that support it.
+- Position-only recenter on F13 - by DevilInLaw.
+- COMBAT: a committed stroke staggers a monster; a heavy one knocks it back.
+- Combat > Melee reach: near misses beside a monster still hit.
+- Warlock: sixteen skills cast by motion.
+- Barbarian: Find Potion, Grim Ward and Taunt by motion; Whirlwind whirls once per T.
+- Assassin: cross your claws to block; off-hand throwing potions are thrown by hand.
+- Aimed trap and potion throws show a sigil where they will land.
+- Sorceress: Lightning and Chain Lightning leave the casting hand.
+- Teleport: aim with the controller along an arc that lands on the sigil.
+- Bow: a face button loads Multiple Shot, Guided Arrow and Strafe into the draw.
+- Multiple Shot's fan follows your up and down aim; Guided Arrow always homes.
+- Crossbow: the right trigger is Attack. Bow bash and Weapon heft are new, off by default.
+- Spells break containers and push props and bottles.
+- Arrows and bolts break barrels and urns - by Mcklem.
+- Monster immunity indicators - by RobinHeggelund.
+- Monsters > Summon range: summons attack and follow farther - by RobinHeggelund.
+- Mercenary potion throw autoaim (optional) - by RobinHeggelund.
+- Body > Click to drink potions (optional) - by RobinHeggelund.
+- Shared stash tab buttons - by RobinHeggelund.
+- INTERFACE: VR Settings regrouped by what you look for - by beadlebytes.
+- Floating map: pull the full map off your wrist and put it back - by beadlebytes.
+- Hold your arms in a T to calibrate height and arm span - by beadlebytes.
+- VR keyboard for character names - by Kudlatytrue.
+- Campfire character creation in 3D - by Kudlatytrue.
+- Wrist: recharging skills show between the orbs.
+- WORLD: monsters and townsfolk turn their heads to your real head.
+- Haptics: hit feel by target, a ramping bowstring, a felt heartbeat at low life.
+- Sound: the game's own echo raised for the headset.
+- Dungeon rooms at different heights join up - by ChuckRibbits.
+- Your own helm is left out of your view and kept in your shadow.
+- Fog is measured from your eye; Light Radius widens the dungeon light.
+- Fixed: SteamVR menu flicker when the menu is hidden.
+- Setup no longer refuses game builds that are not on a list.
 PCVR_IN_HEADSET_NOTES -->

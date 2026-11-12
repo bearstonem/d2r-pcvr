@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include "../steamvr/guard_strain.h"
 namespace framevr::guard {struct Pose;struct Debug;}
 
 namespace combat {
@@ -29,6 +30,9 @@ void ConfigureEnemiesAlwaysHit(bool on);
 // guard_break_chip_scale (1): through a broken guard a block lands as a chip,
 // its life damage x (1 - chance to block) x scale.
 void ConfigureGuardChip(bool on,float scale);
+// [gameplay] guard_strain_defense_floor (25 %): each block's guard strain x the blocked attack's to-hit chance
+// against the player's Defense (95 % = all of it), never under this share (guard_strain.h DefenseShare); 100 = ignored.
+void ConfigureGuardStrainDefense(float floor);
 // [gameplay] shield_block_wear (22): % of physical blocks and chips that give the
 // shield the game's own 10% when-struck wear roll (22 = its native share, 2.2%);
 // nothing else wears for them. A parry wears nothing.
@@ -45,6 +49,13 @@ float SwingRecovery(float factor);
 // Whether that swing's contact is its stroke's first creature (the weapon wears with it
 // only; Unleashed). Returns the previous value, to restore after the attack.
 bool SwingFirst(bool first);
+// Hit reactions (hit_reactions.h), game thread (melee.cpp), around one physical swing's native attack:
+// the reaction (Wanted bits, one of Stagger / Knockback, 0 none) that swing's own landed hit asks of its
+// monster. Returns the previous value. SwingReacted: what the hit's record took since (a stagger the
+// game chose by itself counts; 0 for a miss, a quiet contact or a killing blow); flags, if given,
+// receives the record's result flags as the game set them, -1 when no record was seen.
+uint8_t SwingReaction(uint8_t reaction);
+uint8_t SwingReacted(int* flags=nullptr);
 // Unleashed: attack rating scales physical swing damage - the native 5..95 to-hit
 // chance, read where HitSuccessful passes it on - instead of deciding a miss.
 // floor: the share of damage kept at zero chance (0 = the raw chance).
@@ -85,6 +96,11 @@ void ConfigureButtonRules(bool unleashed);
 bool ParryArmed();
 uint64_t EarlyParry(uintptr_t monster,uintptr_t player,uint64_t attackAt,uint64_t opensAt,const char* trigger);
 void ConfirmParry(uint64_t swing);
+// One of the five act bosses (MonStats primeevil, as the parry gate reads it): never parried or bow-bashed.
+// Game thread, a server monster unit; unreadable is false.
+bool ActBoss(uintptr_t unit);
+// Its rank (guard_strain.h): normal, minion, champion, unique or act boss. Game thread.
+framevr::strain::Rank MonsterRank(uintptr_t unit);
 // A riposte is a clean hit: no attack-rating or recovery penalty.
 // [gameplay] riposte_bonus (% extra damage on top, default 0), riposte_ms, riposte_sound_file (empty:
 // the built-in sound; else a WAV, next to the ini unless a full path).
@@ -92,8 +108,9 @@ void ConfirmParry(uint64_t swing);
 void ConfigureRiposte(float bonus,uint32_t windowMs,float volume,const wchar_t* soundFile);
 // UI thread: one completed shield pose, including its calibrated scale and
 // timestamp. Latest tracking can invalidate it; coverage never follows gaze.
+// claws: the guard is an Assassin's two claws crossed (guard::Crossed), not a shield.
 void PublishGuard(uint64_t session,bool eligible,bool posed,const framevr::guard::Pose& pose,
-                  bool handOk,bool leftShield);
+                  bool handOk,bool leftShield,bool claws=false);
 bool ReadGuardDebug(framevr::guard::Debug& out);
 void Install();
 void Report();

@@ -14,6 +14,7 @@
 // Everything is drawn as light (summed, then turned to straight alpha), from the stroke, its id and
 // the time alone: the same job paints the same picture.
 // Value-only apart from the worker: steamvr/glyph_trail_test.cpp.
+#include "atlas_dirty.h"
 #include "glyph_recognizer.h"
 #include "latest_worker.h"
 #include <algorithm>
@@ -62,8 +63,9 @@ inline Colour ElementColour(int skill) {
     // Poison: Poison / Plague Javelin; Poison Dagger, Poison Explosion, Poison Nova; Poison Creeper; Venom
     case 15: case 25: case 73: case 83: case 92: case 222: case 278: return Poison;
     // Magic: Magic Arrow, Inner Sight, Slow Missiles, Decoy, Valkyrie; Telekinesis, Teleport, Energy
-    // Shield; Meditation, Conviction; Psychic Hammer
-    case 6: case 8: case 17: case 28: case 32: case 43: case 54: case 58: case 120: case 123: case 253: return Magic;
+    // Shield; Meditation, Conviction; Psychic Hammer; Town Portal (the scroll, the tome, the shortcut)
+    case 6: case 8: case 17: case 28: case 32: case 43: case 54: case 58: case 120: case 123: case 253:
+    case 219: case 220: case 359: return Magic;
     // Warcries and battle: Might, Thorns; Howl, Find Potion, Taunt, Shout, Find Item, Battle Cry, Battle
     // Orders, Grim Ward, War Cry, Battle Command
     case 98: case 103: case 130: case 131: case 137: case 138: case 142: case 146: case 149: case 150: case 154: case 155: return War;
@@ -670,7 +672,7 @@ inline std::vector<uint8_t> Paint(const Job& job) {
     return Shade(coverage, job);
 }
 
-struct Image { uint64_t key = 0, strokeId = 0; std::vector<uint8_t> pixels; };
+struct Image { uint64_t key = 0, strokeId = 0; std::vector<uint8_t> pixels; atlasdirty::Change change; };   // change: filled by the transport's painter (atlas_dirty.h)
 
 // On a worker thread: the latest job only (latest_worker.h), as the other atlas painters. The worker
 // keeps the coverage of the stroke it last painted.

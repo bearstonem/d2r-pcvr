@@ -7,6 +7,8 @@ import io
 import json
 import os
 from pathlib import Path
+import ssl
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -20,6 +22,23 @@ import uninstall_windows as uninstall
 
 
 class InstallationTests(unittest.TestCase):
+    def test_shader_files_are_found_by_pattern_and_missing_ones_stop_the_install(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'reshade').mkdir()
+            with self.assertRaises(SystemExit) as stop:   # no effect at all
+                install.reshade_shader_files(root)
+            self.assertIn('D2R_DepthFog.fx is missing', str(stop.exception))
+            (root / 'reshade/D2R_DepthFog.fx').write_text('// effect\n#include "D2R_Fog.fxh"\n#include "D2R_Sky.fxh"\n', encoding='utf-8')
+            (root / 'reshade/D2R_Fog.fxh').write_text('// header\n', encoding='utf-8')
+            with self.assertRaises(SystemExit) as stop:   # a header the effect includes is not in the source
+                install.reshade_shader_files(root)
+            self.assertIn('D2R_Sky.fxh', str(stop.exception))
+            (root / 'reshade/D2R_Sky.fxh').write_text('// header\n', encoding='utf-8')
+            (root / 'reshade/D2R_Other.txt').write_text('not a shader\n', encoding='utf-8')
+            self.assertEqual(install.reshade_shader_files(root), ['D2R_DepthFog.fx', 'D2R_Fog.fxh', 'D2R_Sky.fxh'])
+        self.assertEqual(install.reshade_shader_files(install.ROOT), sorted(p.name for pat in ('D2R_*.fx', 'D2R_*.fxh') for p in (install.ROOT / 'reshade').glob(pat)))
+
     def test_install_restore_keeps_progress_and_stock_executable(self):
         self.install_round_trip('steam')
 
@@ -176,8 +195,20 @@ class InstallationTests(unittest.TestCase):
                 self.assertEqual((mod / 'launcher_icon.png').read_bytes(), (install.ROOT / 'launcher_icon.png').read_bytes())
                 self.assertEqual((mod / 'reshade/ReShade64.dll').read_bytes(), b'fixture reshade')
                 self.assertTrue((mod / 'reshade/ReShade.ini').is_file())
+                # A new install has ReShade's Generic Depth add-on off (VR reads the mod's own depth). The shipped
+                # settings carry no reshade_depth, so ReShade.ini decides and a player's reshade_depth=1 turns it on.
+                effects = configparser.ConfigParser(interpolation=None, strict=False)
+                effects.read(mod / 'reshade/ReShade.ini', encoding='utf-8')
+                self.assertEqual(effects['ADDON']['DisabledAddons'], 'Generic Depth')
+                self.assertEqual(effects['INPUT']['KeyOverlay'], '36,0,0,0')
+                shipped = configparser.ConfigParser(interpolation=None, strict=False, allow_no_value=True)
+                shipped.read(mod_plugins / 'd2r_pcvr.ini', encoding='utf-8')
+                self.assertFalse(shipped.has_option('render', 'reshade_depth'))
                 self.assertTrue((mod / 'reshade/D2R_Frame_ReShade.ini').is_file())
                 self.assertTrue((mod / 'reshade/reshade-shaders/Shaders/D2R_DepthFog.fx').is_file())
+                # the effect and every feature header (the shader is split into D2R_*.fxh files), by pattern
+                for shader in sorted(p.name for pattern in ('D2R_*.fx', 'D2R_*.fxh') for p in (install.ROOT / 'reshade').glob(pattern)):
+                    self.assertEqual((mod / 'reshade/reshade-shaders/Shaders' / shader).read_bytes(), (install.ROOT / 'reshade' / shader).read_bytes())
                 self.assertEqual((mod_plugins / 'openxr_loader.dll').read_bytes(), b'fixture xr loader')
                 self.assertEqual((mod_plugins / 'd2rl-pcvr.dll').read_bytes(), b'fixture plugin')
                 ofxr_dir = mod_plugins / 'ofxr'
@@ -720,7 +751,7 @@ class RenameMigrationTests(unittest.TestCase):
 
 
 class FrameGenerationTests(unittest.TestCase):
-    """OFXR Bridge (VR Settings > Performance > Frame generation): optional, pinned,
+    """OFXR Bridge (VR Settings > Graphics > Frames > Frame generation): optional, pinned,
     and only its layer, licenses and our manifest reach the game folder."""
 
     @staticmethod
@@ -857,6 +888,73 @@ class DependencyDownloadTests(unittest.TestCase):
                 with self.assertRaisesRegex(SystemExit, 'Checksum mismatch'):
                     install.download_verified(self.url, target, self.digest)
             self.assertEqual(target.read_bytes(), b'old, unverified cache')
+
+    @staticmethod
+    def untrusted_certificate():
+        # What urlopen raises when this PC's Windows store lacks the site's root.
+        reason = ssl.SSLCertVerificationError(1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed')
+        reason.verify_message = 'unable to get local issuer certificate'
+        return install.urllib.error.URLError(reason)
+
+    @staticmethod
+    def windows_curl(content=None, code=0, stderr=''):
+        def run(command, **options):
+            if content is not None:
+                Path(command[command.index('--output') + 1]).write_bytes(content)
+            return subprocess.CompletedProcess(command, code, '', stderr)
+        return run
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows certificate fallback')
+    def test_untrusted_certificate_retries_through_windows_with_the_same_pin(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / 'fixture.zip'
+            with patch.object(install.urllib.request, 'urlopen', side_effect=self.untrusted_certificate()), \
+                    patch.object(install.subprocess, 'run', side_effect=self.windows_curl(self.payload)) as run, \
+                    contextlib.redirect_stdout(io.StringIO()) as output:
+                install.download_verified(self.url, target, self.digest)
+            self.assertEqual(target.read_bytes(), self.payload)
+            self.assertIn('unable to get local issuer certificate', output.getvalue())
+            command = run.call_args.args[0]
+            self.assertEqual(Path(command[0]).name.lower(), 'curl.exe')
+            self.assertEqual(Path(command[0]).parent.name.lower(), 'system32')
+            self.assertEqual(command[-1], self.url)
+            # Windows still verifies the certificate.
+            self.assertFalse({'-k', '--insecure', '--ssl-no-revoke'} & set(command))
+            # Other bytes from the Windows path are refused like any download.
+            target.unlink()
+            with patch.object(install.urllib.request, 'urlopen', side_effect=self.untrusted_certificate()), \
+                    patch.object(install.subprocess, 'run', side_effect=self.windows_curl(b'other bytes')), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaisesRegex(SystemExit, 'Checksum mismatch'):
+                    install.download_verified(self.url, target, self.digest)
+            self.assertFalse(target.exists())
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows certificate fallback')
+    def test_failed_windows_retry_reports_both_reasons(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / 'fixture.zip'
+            failure = self.windows_curl(code=60, stderr='curl: (60) schannel: SEC_E_UNTRUSTED_ROOT\n'
+                                        'More details here: https://curl.se/docs/sslcerts.html\n')
+            with patch.object(install.urllib.request, 'urlopen', side_effect=self.untrusted_certificate()), \
+                    patch.object(install.subprocess, 'run', side_effect=failure), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaises(OSError) as caught:
+                    install.download_verified(self.url, target, self.digest)
+            message = str(caught.exception)
+            self.assertIn('unable to get local issuer certificate', message)
+            self.assertIn('SEC_E_UNTRUSTED_ROOT', message)
+            self.assertNotIn('\n', message)
+            self.assertFalse(target.exists())
+
+    def test_other_network_errors_do_not_retry(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / 'fixture.zip'
+            with patch.object(install.urllib.request, 'urlopen', side_effect=install.urllib.error.URLError('offline')), \
+                    patch.object(install.subprocess, 'run') as run, \
+                    contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaisesRegex(install.urllib.error.URLError, 'offline'):
+                    install.download_verified(self.url, target, self.digest)
+            run.assert_not_called()
 
     def test_valid_download_replaces_invalid_cache(self):
         with tempfile.TemporaryDirectory() as temporary:

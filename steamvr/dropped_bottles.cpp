@@ -1,4 +1,5 @@
 #include "dropped_bottles.h"
+#include "physics_worlds.h"
 #include <box3d/box3d.h>
 #include <algorithm>
 #include <span>
@@ -77,14 +78,17 @@ struct World::Impl {
     struct Flying {b3BodyId body=b3_nullBodyId;b3ShapeId shape=b3_nullShapeId;uint64_t id=0;bool landed=false;double born=0;Vec p0{},p1{};Quat q0{0,0,0,1},q1{0,0,0,1};};
     Flying toss{};
     Vec player{};
+    uint64_t stepped=0;      // world steps taken, for the tests
+    bool stepAtRest=false;   // the tests' comparison: step with nothing to move, as before 2026-11-10
     Impl() {
         auto def=b3DefaultWorldDef();
         def.gravity={0,-9.81f,0};
         def.workerCount=1; // serial: Box3D starts no threads in the game process
         def.contactSpeed=ContactSpeed;
+        std::lock_guard table(physics::WorldTable());   // physics_worlds.h: Box3D's one table of worlds
         world=b3CreateWorld(&def);
     }
-    ~Impl() {if(b3World_IsValid(world))b3DestroyWorld(world);}
+    ~Impl() {std::lock_guard table(physics::WorldTable());if(b3World_IsValid(world))b3DestroyWorld(world);}
     static void Destroy(b3BodyId& id) {if(!B3_IS_NULL(id)&&b3Body_IsValid(id))b3DestroyBody(id);id=b3_nullBodyId;}
     bool Live() const {return !B3_IS_NULL(ground);}
     unsigned MovingCount() const {return unsigned(std::count_if(pieces.begin(),pieces.end(),[](const Piece& p){return p.moving;}));}
@@ -109,7 +113,9 @@ struct World::Impl {
     }
     // Before this call's steps: each weapon heads for its pose over time
     // seconds. A new or resized one, or a warp, is placed without sweeping.
-    void Drive(float time) {
+    // Without steps to take it there (Resting) it is placed at its pose at
+    // once, where those steps would have left it: the next Wake sweeps from it.
+    void Drive(float time,bool stepping=true) {
         for(auto& p:pushers) {
             if(!Valid(p.target)){Destroy(p.body);p.shape=b3_nullShapeId;continue;}
             float length=0;const auto target=Target(p.target,length);
@@ -128,7 +134,7 @@ struct World::Impl {
             const Vec base=F(now.p),tip=base+math::Rotate(F(now.q),{0,length,0});
             const Vec toBase=F(target.p)-base,toTip=(F(target.p)+math::Rotate(F(target.q),{0,length,0}))-tip;
             const float moved=std::sqrt(std::max(math::Dot(toBase,toBase),math::Dot(toTip,toTip)));
-            if(moved>ColliderJump||moved>ColliderMaxSpeed*time) {
+            if(!stepping||moved>ColliderJump||moved>ColliderMaxSpeed*time) {
                 b3Body_SetTransform(p.body,target.p,target.q);
                 b3Body_SetLinearVelocity(p.body,{0,0,0});b3Body_SetAngularVelocity(p.body,{0,0,0});
             } else b3Body_SetTargetTransform(p.body,target,time,true);
@@ -179,6 +185,10 @@ struct World::Impl {
     }
     Vec Position(const Bottle& b,float alpha) const {return origin+b.p0+(b.p1-b.p0)*alpha;}
     bool Busy() const {return count||!pieces.empty()||!B3_IS_NULL(toss.body);}
+    // Nothing a step could move: no bottle, no thrown one and every prop
+    // frozen (static bodies). Asked after Wake, so a prop a weapon reaches this
+    // frame is already moving and is stepped this frame.
+    bool Resting() const {return !count&&B3_IS_NULL(toss.body)&&!MovingCount();}
     // The world for a release here, restarted for another floor, game or
     // scale unless props are moving (they would stop in the air).
     bool Prepare(const Release& r) {
@@ -328,6 +338,13 @@ struct World::Impl {
             sweeps[n++]={a0,b0,a1,b1,std::clamp(p.target.radius,MinColliderRadius,MaxColliderRadius)+WakeMargin,
                          time>0?std::min(moved,ColliderJump)/time:0,i};
         }
+        // Each sweep's bounds, by its reach: a frozen prop wholly outside them is not looked at closer.
+        std::array<props::Box,Colliders> swept{};
+        for(unsigned s=0;s<n;++s) {
+            const auto& w=sweeps[s];Vec lo=w.a0,hi=w.a0;
+            for(const Vec v:{w.b0,w.a1,w.b1}){lo={std::min(lo.x,v.x),std::min(lo.y,v.y),std::min(lo.z,v.z)};hi={std::max(hi.x,v.x),std::max(hi.y,v.y),std::max(hi.z,v.z)};}
+            const float reach=w.r+.001f;swept[s]={lo-Vec{reach,reach,reach},hi+Vec{reach,reach,reach}};
+        }
         std::vector<props::Box> movers;
         auto mover=[&](b3BodyId body) {
             const Vec v=F(b3Body_GetLinearVelocity(body));const float speed=std::sqrt(math::Dot(v,v));
@@ -338,15 +355,20 @@ struct World::Impl {
         for(unsigned i=0;i<count;++i)mover(bottles[i].body);
         if(!B3_IS_NULL(toss.body))mover(toss.body);
         for(const auto& p:pieces)if(p.moving)mover(p.body);
+        if(!n&&movers.empty())return;   // no weapon and nothing moving fast: nothing wakes
         for(auto& p:pieces) {
             if(p.moving)continue;
-            const auto t=b3Body_GetTransform(p.body);const Vec at=F(t.p);const Quat q=F(t.q);
             int slot=-1;float speed=0;
-            for(unsigned s=0;s<n&&slot<0;++s)for(int k=0;k<WakeSamples;++k) {
+            bool placed=false;Vec at{};Quat q{0,0,0,1};
+            for(unsigned s=0;s<n&&slot<0;++s) {
+              if(!props::Overlap(swept[s],p.reach))continue;
+              if(!placed){const auto t=b3Body_GetTransform(p.body);at=F(t.p);q=F(t.q);placed=true;}
+              for(int k=0;k<WakeSamples;++k) {
                 const float f=float(k)/(WakeSamples-1);
                 if(props::CapsuleTouchesBox(Lerp(sweeps[s].a0,sweeps[s].a1,f),Lerp(sweeps[s].b0,sweeps[s].b1,f),sweeps[s].r,at,q,p.centre,p.half)) {
                     slot=sweeps[s].slot;speed=sweeps[s].speed;break;
                 }
+              }
             }
             const bool bumped=slot<0&&moving<props::MaxMoving&&
                 std::any_of(movers.begin(),movers.end(),[&](const props::Box& b){return props::Overlap(b,p.reach);});
@@ -511,13 +533,22 @@ void World::Advance(double time,Vec player) {
     m.accumulator+=dt;
     int planned=0;
     for(double left=m.accumulator;left>=Step&&planned<MaxSteps;left-=Step)++planned;
-    if(planned){m.Wake(float(planned*Step),time);m.Drive(float(planned*Step));}
+    // Nothing to move (every prop frozen, no bottle): no world step. It ran at 120 Hz on the
+    // draw thread for static bodies alone. The weapons are placed where the steps would have
+    // taken them and the clock keeps its phase, so a prop Wake sets going is stepped at once.
+    bool rest=false;
+    if(planned) {
+        m.Wake(float(planned*Step),time);
+        rest=m.Resting()&&!m.stepAtRest;
+        m.Drive(float(planned*Step),!rest);
+        if(rest){m.accumulator=planned==MaxSteps?0:m.accumulator-planned*Step;}
+    }
     int steps=0;
-    while(m.accumulator>=Step&&steps<MaxSteps) {
+    while(!rest&&m.accumulator>=Step&&steps<MaxSteps) {
         for(unsigned i=0;i<m.count;++i){m.bottles[i].p0=m.bottles[i].p1;m.bottles[i].q0=m.bottles[i].q1;}
         for(auto& p:m.pieces)if(p.moving){p.p0=p.p1;p.q0=p.q1;}
         if(!B3_IS_NULL(m.toss.body)){m.toss.p0=m.toss.p1;m.toss.q0=m.toss.q1;}
-        b3World_Step(m.world,float(Step),4);
+        b3World_Step(m.world,float(Step),4);++m.stepped;
         m.Hits();m.Landing();
         for(unsigned i=0;i<m.count;++i) {
             const auto t=b3Body_GetTransform(m.bottles[i].body);
@@ -585,10 +616,55 @@ float World::Struck(int slot) {
     if(slot<0||slot>=Colliders)return 0;
     return std::exchange(impl->pushers[slot].struck,0.f);
 }
+World::Pushed World::Push(const spellimpacts::Push& push,double time) {
+    auto& m=*impl;Pushed out;
+    if(!Ready()||!m.Live()||!spellimpacts::Valid(push)||!std::isfinite(time))return out;
+    spellimpacts::Push local=push;local.a=push.a-m.origin;local.b=push.b-m.origin;
+    // The impulse a little above the centre of mass, so the body tips as it goes.
+    auto kick=[&](b3BodyId body,const spellimpacts::Kick& k,float lift)->float {
+        const float mass=b3Body_GetMass(body),size=std::sqrt(math::Dot(k.impulse,k.impulse));
+        const float speed=spellimpacts::KickSpeed(size,mass);
+        if(!(speed>0))return 0;
+        const Vec centre=F(b3Body_GetWorldCenterOfMass(body));
+        b3Body_ApplyLinearImpulse(body,B(k.impulse*(speed*mass/size)),B(centre+Vec{0,lift,0}),true);
+        return speed;
+    };
+    struct Reached {size_t piece;spellimpacts::Kick kick;};
+    std::vector<Reached> reached;
+    for(size_t i=0;i<m.pieces.size();++i) {
+        const auto& p=m.pieces[i];
+        const auto t=b3Body_GetTransform(p.body);const Vec at=F(t.p);const Quat q=F(t.q);
+        const Vec centre=at+math::Rotate(q,p.centre);
+        const auto k=spellimpacts::KickOn(local,centre,std::sqrt(math::Dot(p.half,p.half)));
+        if(!k.hit)continue;
+        // Its bounding ball is in reach: now the box itself.
+        Vec a=local.blast?local.b:local.a,b=local.b;
+        if(local.flat)a.y=b.y=centre.y;
+        if(props::CapsuleTouchesBox(a,b,local.radius,at,q,p.centre,p.half))reached.push_back({i,k});
+    }
+    std::sort(reached.begin(),reached.end(),[](const Reached& x,const Reached& y){return x.kick.distance<y.kick.distance;});
+    unsigned moving=m.MovingCount();
+    for(const auto& r:reached) {
+        auto& p=m.pieces[r.piece];
+        const bool frozen=!p.moving;
+        if(frozen&&moving>=props::MaxMoving)continue;
+        if(frozen){m.Knocked(p,SpellSlot,0,time);++moving;}
+        const float speed=kick(p.body,r.kick,p.half.y*.3f);
+        if(frozen&&!m.knocks.empty())m.knocks.back().speed=speed;
+        ++out.props;
+    }
+    for(unsigned i=0;i<m.count;++i) {
+        const auto k=spellimpacts::KickOn(local,F(b3Body_GetPosition(m.bottles[i].body)),Height*.5f);
+        if(k.hit&&kick(m.bottles[i].body,k,.02f)>0)++out.bottles;
+    }
+    return out;
+}
 unsigned World::Pushers() const {
     unsigned n=0;for(const auto& p:impl->pushers)n+=!B3_IS_NULL(p.body);return n;
 }
 unsigned World::Count() const {return impl->count;}
+uint64_t World::Steps() const {return impl->stepped;}
+void World::StepAtRest(bool on) {impl->stepAtRest=on;}
 unsigned World::Frozen() const {
     return unsigned(std::count_if(impl->pieces.begin(),impl->pieces.end(),[](const Impl::Piece& p){return !p.moving;}));
 }

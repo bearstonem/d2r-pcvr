@@ -9,10 +9,12 @@
 #include "wrist_hud.h"
 #include "hand_vitals.h"
 #include "dev_scenarios.h"
+#include "spell_motion.h"
 #include "navigation_info.h"
 #include "companions.h"
 #include "summon_commander.h"
 #include "active_effects.h"
+#include "skill_cooldowns.h"
 #include "torch_light.h"
 #include "map_zoom.h"
 #include <array>
@@ -39,6 +41,16 @@ inline Pose UprightBody(Pose head,Quat previousYaw={0,0,0,1}) {
 // OpenXR grip +X points out of the LEFT palm: the back of the wrist is -X.
 // Grip +/-Y is the thumb/knuckle edge, not either face of the wrist.
 // https://registry.khronos.org/OpenXR/specs/1.1/html/xrspec.html#semantic-path-grip-pose
+// Everything below takes a LEFT hand's grip pose. A right hand's grip frame is the left's mirror image,
+// x reversed: +X goes into its palm, so the back of the right wrist is +X and a panel beside it sits on
+// the other side of x. Left-handed play wears the wrist HUD on the right wrist (hand_role.h): AsLeftGrip
+// gives a right hand's pose as these functions take it - a half turn about grip Z, which reverses x and
+// leaves z; it reverses y too, and nothing here has a y part in the grip's frame (WristPanel's and
+// PalmPanel's offsets, the normals, HandFacePanel's fallback along z).
+inline Pose AsLeftGrip(Pose hand,bool rightHand) {
+    if(rightHand)hand.q=math::Multiply(hand.q,{0,0,1,0});
+    return hand;
+}
 inline Vec WristNormal(Pose hand) {return math::Normalized(math::Rotate(hand.q,{-1,0,0}));}
 inline Vec PalmNormal(Pose hand) {return math::Normalized(math::Rotate(hand.q,{1,0,0}));}
 inline Pose HandFacePanel(Pose hand,Pose head,Vec normal,Vec offset) {
@@ -188,6 +200,15 @@ inline Vec Spin(Quat from,Quat to,float dt) {
 inline bool Throwable(Potion type) {
     return type==Potion::Health||type==Potion::Rejuvenation||type==Potion::Antidote||type==Potion::Thawing;
 }
+// How far from the mercenary's feet a thrown bottle may land and still feed it (m, flat). It was 1.5 m until the
+// owner, 2026-11-12: "Increase the radius at the base of the mercenary ... By a lot. So that we don't miss as
+// they move" - the mercenary walks on while the bottle is in the air, and only these bottles are ever thrown.
+inline constexpr float MercThrowReach=4.f;
+// A negative distance means there is no live hireling. Assistance only
+// removes the landing-distance requirement; native potion-use rules remain.
+inline bool MercThrowAccepted(float distance,bool mercPotionAutoaimEnabled) {
+    return std::isfinite(distance)&&distance>=0&&(mercPotionAutoaimEnabled||distance<=MercThrowReach);
+}
 inline double LandingTime(Vec p,Vec v,float floor) {
     const double drop=double(p.y)-floor;
     if(!std::isfinite(drop)||drop<=0||!std::isfinite(v.y))return -1;
@@ -278,6 +299,9 @@ struct Snapshot {
     // Bone Armor's absorb pool and its maximum (ItemStatCost 132 / 133, 8.8 fixed
     // point; developer capture 2026-10-26): the forearm grafts (bone_graft.h).
     int boneArmor=0,boneArmorMax=0;
+    // The hero's Light Radius (ItemStatCost 89, item_lightradius; #440): how far the mod's own dungeon
+    // light reaches (light_radius.h). Known with the vitals.
+    int lightRadius=0;bool lightRadiusKnown=false;
     wrist::Experience experience;
     navigation::Location location;
     bool actionKnown=false;
@@ -285,6 +309,7 @@ struct Snapshot {
     Mercenary merc;
     companions::Roster companions;
     effects::Status effects;
+    cooldowns::Board cooldowns;   // the skills the server's use check blocks for a delay (skill_cooldowns.h)
 };
 inline bool HasSummonArmy(const Snapshot& s) {
     if((s.companions.relevant&companions::ArmyTypeMask)!=0)return true;
@@ -329,15 +354,16 @@ struct SkillCue {
     int slot=-1,id=-1,owner=-1;
     bool known=false,available=false,temporary=false,expanded=false,busy=false,motionUnavailable=false;
     bool gesture=false;
+    bool strike=false;   // with gesture: Cast On Strike (a landed swing or shield bash casts it), not a body gesture
     char name[64]{},hint[64]{};
     bool operator==(const SkillCue&) const=default;
 };
 inline bool Fresh(const Snapshot& s,uint64_t session,uint64_t now) {
     return session&&s.session==session&&now>=s.at&&now-s.at<=650;
 }
-// BindGlyph / BindGlyphDraw: glyph casting's wheel settings (index: the shape / the hand slot), answered
-// by the transport, which saves them; no game command.
-enum class Action { None, Potion, Equip, Quest, Map, Character, Skills, BindSkill, Developer, FeedMerc, BindItem, UseItem, RunWalk, BindGlyph, BindGlyphDraw };
+// BindGlyph / BindGlyphDraw: glyph casting's wheel settings (index: the shape, the left hand's 8 on
+// (GlyphIndex) / the hand slot), answered by the transport, which saves them; no game command.
+enum class Action { None, Potion, Equip, Quest, Map, Character, Skills, BindSkill, Developer, FeedMerc, BindItem, UseItem, BindGlyph, BindGlyphDraw, ToggleMotion };
 enum class Result { None, Pending, Applied, Refused, Cancelled, Dispatched, KitRefused, DebugUpdated, TurnsUpdated, SharpUpdated, FillUpdated, RimsUpdated, SkyRimsUpdated, BodiesUpdated };
 struct Request {
     Action action=Action::None;
@@ -377,12 +403,12 @@ inline bool PotionGone(const Snapshot& s,const Request& r) {
 // clockwise from the upper-right segment; center is weapon mode.
 constexpr float Pi=3.14159265358979323846f;
 constexpr float WheelPhase=Pi/8;
-enum class MenuPage { Spells, Equipment, Map, EditSlots, EditSkills, Developer, EditItems, Glyphs };
+enum class MenuPage { Spells, Equipment, Map, EditSlots, EditSkills, Developer, EditItems, Glyphs, Motions };
 struct MenuBounds {
     float left,top,right,bottom;
     bool Contains(float u,float v) const {return u>left&&u<right&&v>top&&v<bottom;}
 };
-constexpr int QuickUseCell=210,LeftStrikesCell=212;   // 211 was RUN / WALK, 213 the movement slider (now VR Settings > Body > Movement speed)
+constexpr int QuickUseCell=210,LeftStrikesCell=212;   // 211 was RUN / WALK, 213 the movement slider (now VR Settings > Comfort > Moving > Movement speed)
 constexpr double QuickEditHold=.65;
 constexpr MenuBounds QuickUseBounds{.025f,.025f,.255f,.18f};
 // Glyph casting (glyph_cast.h): the GLYPHS box, upper right on the Spells and Equipment pages and on the
@@ -390,7 +416,37 @@ constexpr MenuBounds QuickUseBounds{.025f,.025f,.255f,.18f};
 constexpr int GlyphsCell=214,GlyphDrawId=9000;
 constexpr MenuBounds GlyphsBounds{.745f,.025f,.975f,.18f};
 constexpr int GlyphShapes=8;
-// Druid: the left claw's strike skill, [gameplay] left_hand_strikes. Lower left,
+// Each hand its own glyphs (owner, 2026-11-05: "left and the right hand glyphs can be different sets. That way
+// doubling the amount of glyphs we can draw and assign spells to"): the skill on each shape per hand (right = 0),
+// as [glyphs] has them, -1 none. A left shape with none of its own casts the right hand's (the one set saved
+// before), so a Draw glyph button already on the left keeps working. The GLYPHS page shows one hand's set,
+// the wheel's own first; its hand box (upper left, where QUICK USE is on the Spells page) shows the other's.
+using GlyphSets=std::array<std::array<int,GlyphShapes>,2>;
+constexpr GlyphSets NoGlyphs{{{-1,-1,-1,-1,-1,-1,-1,-1},{-1,-1,-1,-1,-1,-1,-1,-1}}};
+inline int GlyphCasts(const GlyphSets& sets,int hand,int shape) {
+    if(shape<0||shape>=GlyphShapes)return -1;
+    return hand==1&&sets[1][size_t(shape)]>=0?sets[1][size_t(shape)]:sets[0][size_t(shape)];
+}
+inline bool GlyphFollows(const GlyphSets& sets,int hand,int shape){return hand==1&&shape>=0&&shape<GlyphShapes&&sets[1][size_t(shape)]<0&&sets[0][size_t(shape)]>=0;}
+constexpr int GlyphIndex(int hand,int shape){return (hand==1?GlyphShapes:0)+shape;}   // BindGlyph's index: the left hand's shapes 8 on
+constexpr int GlyphHandCell=215;
+constexpr MenuBounds GlyphHandBounds{.025f,.025f,.255f,.18f};
+// Motions (spell_motion.h): the MOTIONS box, lower right on the Spells and Equipment pages of a hero with
+// motions (the left claw box's mirror: the Sorceress, the Paladin, the Druid), and the MOTIONS page's
+// cards, one per motion skill of the class (spellmotion::PageOf), two columns of seven: pressed, a card
+// turns its motion on or off.
+constexpr int MotionsCell=216;
+constexpr MenuBounds MotionsBounds{.765f,.72f,.975f,.82f};
+constexpr int MotionCards=16;   // the Warlock's 16 (2026-11-10; ten, the Necromancer's 12, then the Sorceress's 14)
+constexpr int MotionCardCell(int card){return 240+card;}
+// A page of up to fourteen cards has seven rows; the Warlock's sixteen take eight lower ones in the same space.
+inline bool MotionCardsCompact(int count){return count>14;}
+inline MenuBounds MotionCardBounds(int card,int count=14){
+    const bool compact=MotionCardsCompact(count);
+    const float x=.05f+(card%2)*.46f,y=.125f+(card/2)*(compact?.0945f:.107f);
+    return {x,y,x+.44f,y+(compact?.087f:.099f)};
+}
+// Druid or dual wield: the left claw's or blade's strike skill, [gameplay] left_hand_strikes. Lower left,
 // above the ACTIVE line (y 637) and clear of the hand wheel's 216-degree label.
 constexpr MenuBounds LeftStrikesBounds{.025f,.72f,.235f,.82f};
 inline bool QuickControls(MenuPage page){return page==MenuPage::Spells||page==MenuPage::Equipment;}
@@ -434,14 +490,20 @@ inline MenuBounds FooterBounds(int index,MenuPage page,bool developer=false) {
 inline int FooterCell(int index,MenuPage page) {
     constexpr int tabs[]={9,12,10,11,13};return Editing(page)?9+index:tabs[index];
 }
-inline int WheelCell(float u,float v,int previous=-1,MenuPage page=MenuPage::Spells,int hand=-1,bool developer=false,int devPage=0,bool leftStrikes=false) {
+inline int WheelCell(float u,float v,int previous=-1,MenuPage page=MenuPage::Spells,int hand=-1,bool developer=false,int devPage=0,bool leftStrikes=false,bool motions=false,int motionCount=14) {
     if(!std::isfinite(u)||!std::isfinite(v)||u<0||u>1||v<0||v>1)return -1;
     for(int i=0;i<FooterCount(page,developer);++i)if(FooterBounds(i,page,developer).Contains(u,v))return FooterCell(i,page);
     if(QuickControls(page)) {
         if(QuickUseBounds.Contains(u,v))return QuickUseCell;
         if(leftStrikes&&LeftStrikesBounds.Contains(u,v))return LeftStrikesCell;
+        if(motions&&MotionsBounds.Contains(u,v))return MotionsCell;
+    }
+    if(page==MenuPage::Motions) {   // the cards alone: no wheel behind the page
+        for(int i=0;i<MotionCards&&i<motionCount;++i)if(MotionCardBounds(i,motionCount).Contains(u,v))return MotionCardCell(i);
+        return -1;
     }
     if((QuickControls(page)||page==MenuPage::Glyphs)&&GlyphsBounds.Contains(u,v))return GlyphsCell;
+    if(page==MenuPage::Glyphs&&GlyphHandBounds.Contains(u,v))return GlyphHandCell;
     if(page==MenuPage::Map)return -1; // no invisible spells behind the map
     if(page==MenuPage::Developer) {
         if(developer&&devPage>=0&&devPage<dev::PageCount) {
@@ -489,17 +551,29 @@ struct Input {
     uint64_t session=0,epoch=0,at=0; // at shares the native snapshot's monotonic clock
     bool active=false,tracked[2]{},wheel=false,cancel=false,reservedLeft=false,spell=false,quickCast=false;
     bool leatherReach=false; // [interactions] leather_menu: the left hand over the left shoulder opens the tabbed menu (leather_menu.h)
-    bool gaitToggle=false;   // the game's run / walk toggle is the other way than the hero should go (Movement speed's WALK or a run stop, or the stick's switch): send it
-    int leftStrikes=-1;   // Druid: [gameplay] left_hand_strikes for the wheel's box (0 own trigger, 1 same as right); -1 hides it
+    int leftStrikes=-1;   // Druid or dual wield: [gameplay] left_hand_strikes for the wheel's box (0 own trigger, 1 same as right); -1 hides it
     vitals::Location navigationLocation=vitals::Location::Wrist;
     vitals::Location vitalsLocation=vitals::Location::Wrist;
     float vitalsTilt=0;
-    bool criticalAlerts=false,leftCasting=false;
+    bool criticalAlerts=false,leftCasting=false;   // leftCasting, leftTrigger: the wrist HUD's hand (wristHand)
+    // The hand that wears the wrist HUD and map: the off hand (1), the left. Left-handed that is the
+    // right hand (hand_role.h): mirrored says the hands here are exchanged (index 0 the physical left,
+    // 1 the physical right), for what depends on the side of the body: the wrist's and the palm's face
+    // (Wrist), the shoulder the menu is reached over (leather::ReachInput::right).
+    int wristHand=1;
+    bool mirrored=false;
     bool floorKnown=false; float floor=0; // room-space height of the world ground under the player
     Stage stage{};
     Pose head{},hand[2]{};
+    // A hand index here is the physical right one (index 0 unless mirrored).
+    bool RightHand(int index) const {return (index==0)!=mirrored;}
+    // The wrist HUD's hand as WristPanel, PalmPanel and the Presented tests take it (AsLeftGrip).
+    Pose Wrist() const {const int w=wristHand==0?0:1;return AsLeftGrip(hand[w],RightHand(w));}
     Vec handVelocity[2]{}; bool velocityKnown[2]{}; // runtime-reported room-space m/s at the pose time
     float trigger=0,leftTrigger=0,grip[2]{};
+    bool clickToDrink=false;
+    float bottleTrigger[2]{}; // raw right/left triggers, independent of wheel pointer mapping
+    bool spellGrips=false;   // both grips cast motions (spell_motion.h): a grip grabs only alone (SoloGrips)
     int hover=-1,wheelHand=-1;
     Snapshot snapshot{};
     Reply reply{};
@@ -508,9 +582,11 @@ struct Input {
     bool physicsThrows=false;
     struct Tossed {uint64_t id=0;bool landed=false;Vec p{};Quat q{0,0,0,1};} tossed{};
     Vec carry{}; // the player's own world velocity (Carry), zero when unknown
-    // Glyph casting's settings as they stand ([glyphs]): each shape's skill (-1 none) and the slot that draws.
-    std::array<int,GlyphShapes> glyphSkills{-1,-1,-1,-1,-1,-1,-1,-1};
-    int glyphDraw=-1;
+    // Glyph casting's settings as they stand ([glyphs]): each hand's skill on each shape (-1 none; the left's:
+    // the right hand's) and each hand's slot that draws (-1 none).
+    GlyphSets glyphSkills=NoGlyphs;
+    std::array<int,2> glyphDraw{-1,-1};
+    int motionsOff=0;   // the hero's class's motions turned off ([motions] off for the Sorceress; spellmotion::Bit)
 };
 struct Output {
     bool developer=false;
@@ -545,21 +621,28 @@ struct Output {
     std::array<int,skillcategories::Count> editCategoryCounts{};
     std::array<Skill,8> editOptions{};
     std::array<QuickItem,8> itemOptions{};
-    // Glyph casting: the GLYPHS page is open; the shape whose skill the picker is choosing (-1 none);
-    // the settings as Input gave them, for the painter.
+    // Glyph casting: the GLYPHS page is open; the hand whose set it shows (right = 0); the shape whose skill
+    // the picker is choosing (-1 none); the settings as Input gave them, for the painter.
     bool glyphs=false;
-    int glyphEdit=-1,glyphDraw=-1;
-    std::array<int,GlyphShapes> glyphSkills{-1,-1,-1,-1,-1,-1,-1,-1};
+    int glyphHand=0,glyphEdit=-1;
+    std::array<int,2> glyphDraw{-1,-1};
+    GlyphSets glyphSkills=NoGlyphs;
+    // Motions: the MOTIONS page is open; the box shows (the hero's class has motions: spellmotion::PageOf);
+    // the motions turned off, as Input gave them.
+    bool motions=false,motionsBox=false;
+    int motionsOff=0;
+    // Skill cooldowns: the wrist's icons between the orbs (skill_cooldowns.h Tracker), set by the transport.
+    cooldowns::Icons cooldowns{};
 };
 inline MenuPage Page(const Output& out) {
-    return out.developer?MenuPage::Developer:out.editor==3?MenuPage::EditItems:out.editor==2?MenuPage::EditSkills:out.editor?MenuPage::EditSlots:out.map?MenuPage::Map:out.glyphs?MenuPage::Glyphs:out.utility?MenuPage::Equipment:MenuPage::Spells;
+    return out.developer?MenuPage::Developer:out.editor==3?MenuPage::EditItems:out.editor==2?MenuPage::EditSkills:out.editor?MenuPage::EditSlots:out.map?MenuPage::Map:out.motions?MenuPage::Motions:out.glyphs?MenuPage::Glyphs:out.utility?MenuPage::Equipment:MenuPage::Spells;
 }
 inline bool MenuMapWanted(const Input& in,const Output& out,uint64_t now) {
     return in.active&&out.wheel&&out.map&&!out.editor&&Fresh(in.snapshot,in.session,now);
 }
 inline bool NavigationWanted(const Input& in,const Output& out,uint64_t now) {
     return in.active&&in.navigationLocation!=vitals::Location::Off&&out.navigation&&!out.wheel&&!out.settings&&
-        in.tracked[1]&&Fresh(in.snapshot,in.session,now);
+        in.tracked[in.wristHand==0?0:1]&&Fresh(in.snapshot,in.session,now);
 }
 inline bool MapWanted(const Input& in,const Output& out,uint64_t now) {
     return MenuMapWanted(in,out,now)||NavigationWanted(in,out,now);
@@ -571,8 +654,11 @@ class Engine {
     uint64_t session=0,epoch=0,sequence=0;
     double lastTime=0,drinkStart=0,pendingAt=0,resultAt=0,criticalUntil=0,criticalAgain=0;
     bool primed=false,triggerWas=false,gripWas[2]{},wheelLatch=false,utility=false,map=false,rearm=true,stowed=false;
+    bool bottleTriggerWas[2]{};
     bool glyphs=false;   // the GLYPHS page
+    bool motions=false;  // the MOTIONS page
     int glyphEdit=-1;    // the shape the skill picker chooses for, -1 none
+    int glyphHand=0;     // the hand whose set the GLYPHS page shows (right = 0): the wheel's own when opened
     bool spent=false,consumed=false;
     Owner owner[2]{Owner::Combat,Owner::Combat};
     int bottle=-1,bottleHand=-1,holster=-1,holsterHand=-1,pendingHand=0;
@@ -594,6 +680,7 @@ class Engine {
     }
     shoulder::Gesture shoulderSwap;
     leather::Reach leatherReach;
+    spellmotion::SoloGrips soloGrips;
     vitals::PalmReveal palmReveal;
     std::array<Skill,128> choices{};
     std::array<int,128> choiceIndices{};
@@ -605,14 +692,14 @@ class Engine {
     // Each wheel hand keeps its own page (Spells / Equipment / Map / Developer and its page) and
     // tree filter, for this game: slot = wheelHand+1 (0: the combined wheel). pageHand is the slot
     // loaded into the fields above; a closed wheel (wheelHand -1) changes nothing.
-    struct HandMenu {bool utility=false,map=false,developer=false;int devPage=0,filter=skillcategories::All,filterClass=-1;bool glyphs=false;};
+    struct HandMenu {bool utility=false,map=false,developer=false;int devPage=0,filter=skillcategories::All,filterClass=-1;bool glyphs=false,motions=false;int glyphHand=0;};
     std::array<HandMenu,3> handMenus{};
     int pageHand=-2;
     uint64_t joined=0;   // the last non-zero session (mapzoom::NewGame: a new one is a new game)
-    void StoreHand(){if(pageHand>=0&&pageHand<int(handMenus.size()))handMenus[pageHand]={utility,map,developer,devPage,filter,filterClass,glyphs};}
+    void StoreHand(){if(pageHand>=0&&pageHand<int(handMenus.size()))handMenus[pageHand]={utility,map,developer,devPage,filter,filterClass,glyphs,motions,glyphHand};}
     void LoadHand(int slot){
         pageHand=std::clamp(slot,0,int(handMenus.size())-1);const auto& h=handMenus[pageHand];
-        utility=h.utility;map=h.map;developer=h.developer;devPage=h.devPage;filter=h.filter;filterClass=h.filterClass;glyphs=h.glyphs;
+        utility=h.utility;map=h.map;developer=h.developer;devPage=h.devPage;filter=h.filter;filterClass=h.filterClass;glyphs=h.glyphs;motions=h.motions;glyphHand=h.glyphHand;
     }
     const Skill& Choice(int index)const{return choices[choiceIndices[index]];}
     void FilterSkills(int category) {
@@ -641,12 +728,13 @@ class Engine {
         FilterSkills(keep?filter:skillcategories::All);editor=2;
     }
     // The GLYPHS page's picker: the character's own skills that need no target (buffs, auras, armors,
-    // warcries, summons), not Interact or Town Portal; the tree filter as the button picker's.
+    // warcries, summons) and Town Portal (359: opens at your feet, from a scroll or the tome), not
+    // Interact; the tree filter as the button picker's.
     void OpenGlyphSkills(const Snapshot& s) {
         choices={};allCount=0;editClass=s.skillClass;
         for(unsigned i=0;i<s.skillCount&&i<s.catalog.size();++i) {
             const auto& k=s.catalog[i];
-            if(k.id<0||k.id==357||k.id==359||k.owner!=-1||k.directed||allCount>=int(choices.size()))continue;
+            if(k.id<0||k.id==357||k.owner!=-1||(k.directed&&k.id!=359)||allCount>=int(choices.size()))continue;
             choices[size_t(allCount++)]=k;
         }
         if(HasSummonArmy(s)) {
@@ -730,7 +818,7 @@ public:
     // Each hand's page (Map, Equipment, Developer and its page) and tree filter are kept through a close,
     // a tracking or frame hiccup and character select; only a new game (Step) starts them over. Editors close.
     void Reset() {quickPressed=false;primed=false;rearm=true;wheelLatch=true;Drop();flight={};pending={};result=Result::None;criticalUntil=criticalAgain=0;editor=0;editSlot=-1;glyphEdit=-1;shoulderSwap.Reset();leatherReach.Reset();}
-    MenuPage Page() const {return developer?MenuPage::Developer:editor==3?MenuPage::EditItems:editor==2?MenuPage::EditSkills:editor?MenuPage::EditSlots:map?MenuPage::Map:glyphs?MenuPage::Glyphs:utility?MenuPage::Equipment:MenuPage::Spells;}
+    MenuPage Page() const {return developer?MenuPage::Developer:editor==3?MenuPage::EditItems:editor==2?MenuPage::EditSkills:editor?MenuPage::EditSlots:map?MenuPage::Map:motions?MenuPage::Motions:glyphs?MenuPage::Glyphs:utility?MenuPage::Equipment:MenuPage::Spells;}
     int DeveloperPage() const {return devPage;}
     int TreeFilter() const {return filter;}        // the open hand's kept skill tree (All when none)
     int TreeFilterClass() const {return filterClass;}
@@ -740,18 +828,23 @@ public:
         // Passive vitals need the left hand and head only. Combat/interactions
         // still require both hands; a resting/occluded right hand must not hide
         // a correctly presented watch or permit an input through the guard.
-        out.wrist=in.active&&in.session&&in.tracked[1]&&std::isfinite(in.time)&&WristPresented(in.hand[1],in.head);
-        const bool palmAllowed=in.active&&in.tracked[1]&&(vitals::Palm(in.vitalsLocation)||vitals::Palm(in.navigationLocation))&&
-            !in.wheel&&!in.cancel&&!in.leftCasting&&in.leftTrigger<.2f&&in.grip[1]<.6f&&
-            !in.reservedLeft&&bottleHand!=1&&holsterHand!=1&&Fresh(in.snapshot,in.session,in.at);
+        const int wristHand=in.wristHand==0?0:1;
+        out.wrist=in.active&&in.session&&in.tracked[wristHand]&&std::isfinite(in.time)&&WristPresented(in.Wrist(),in.head);
+        const bool palmAllowed=in.active&&in.tracked[wristHand]&&(vitals::Palm(in.vitalsLocation)||vitals::Palm(in.navigationLocation))&&
+            !in.wheel&&!in.cancel&&!in.leftCasting&&in.leftTrigger<.2f&&in.grip[wristHand]<.6f&&
+            !in.reservedLeft&&bottleHand!=wristHand&&holsterHand!=wristHand&&Fresh(in.snapshot,in.session,in.at);
         const bool palm=palmReveal.Step(in.session,in.epoch,in.time,palmAllowed,
-            PalmPresented(in.hand[1],in.head),PalmPresented(in.hand[1],in.head,true));
+            PalmPresented(in.Wrist(),in.head),PalmPresented(in.Wrist(),in.head,true));
         out.palm=palm&&vitals::Palm(in.vitalsLocation);
         out.vitals=out.palm||(out.wrist&&vitals::Wrist(in.vitalsLocation));
         out.navigationPalm=palm&&vitals::Palm(in.navigationLocation);
         out.navigation=out.navigationPalm||(out.wrist&&vitals::Wrist(in.navigationLocation));
         const bool trigger=in.trigger>(triggerWas?.2f:.55f);
-        const bool grips[2]={in.grip[0]>.6f,in.grip[1]>.6f};
+        const bool bottleTriggers[2]={in.bottleTrigger[0]>(bottleTriggerWas[0]?.2f:.55f),
+                                      in.bottleTrigger[1]>(bottleTriggerWas[1]?.2f:.55f)};
+        // Both grips cast spells: a grip grabs (a bottle, a holster, a shoulder) only alone.
+        if(in.spellGrips)soloGrips.Step(in.time,in.grip);else soloGrips.Reset();
+        const bool grips[2]={in.spellGrips?soloGrips.solo[0]:in.grip[0]>.6f,in.spellGrips?soloGrips.solo[1]:in.grip[1]>.6f};
         const uint64_t now=in.at;
         const bool fresh=Fresh(in.snapshot,in.session,now);
         const double dt=in.time-lastTime;
@@ -764,6 +857,7 @@ public:
             if(mapzoom::NewGame(joined,in.session)){handMenus={};const int slot=pageHand;pageHand=-2;LoadHand(slot<0?0:slot);}
             session=in.session;epoch=in.epoch;lastTime=in.time;
             triggerWas=trigger;gripWas[0]=grips[0];gripWas[1]=grips[1];
+            for(int h=0;h<2;++h)bottleTriggerWas[h]=bottleTriggers[h];
             body=Valid(in.head)?UprightBody(in.head,body.q):Pose{};out.block=true;out.stowed=stowed;out.cancelPending=true;return out;
         }
         lastTime=in.time;
@@ -773,13 +867,15 @@ public:
         // transport) is not a hand, so a close and reopen on the same hand keeps everything.
         if(in.wheel&&in.wheelHand+1!=pageHand){StoreHand();LoadHand(in.wheelHand+1);}
         const bool triggerEdge=trigger&&!triggerWas&&!handChanged;
+        const bool bottleClicks[2]={bottleTriggers[0]&&!bottleTriggerWas[0],bottleTriggers[1]&&!bottleTriggerWas[1]};
+        for(int h=0;h<2;++h)bottleTriggerWas[h]=bottleTriggers[h];
         const bool edges[2]={grips[0]&&!gripWas[0],grips[1]&&!gripWas[1]};
         triggerWas=trigger;gripWas[0]=grips[0];gripWas[1]=grips[1];
         // A plain close keeps the page for the next open (Map and Developer too); the editors close.
         if(!in.wheel){quickPressed=false;wheelLatch=false;editor=0;editSlot=-1;glyphEdit=-1;}
         if(!in.snapshot.developer)developer=false;
-        if(!trigger&&!grips[0]&&!grips[1])rearm=false;
-        if(in.cancel) {quickPressed=false;Drop();flight={};rearm=true;wheelLatch=true;pending={};out.cancelPending=true;editor=0;map=developer=glyphs=false;devPage=0;editSlot=-1;glyphEdit=-1;}   // the cancel input, as before (transport has sent none since the per-hand wheels)
+        if(!trigger&&!grips[0]&&!grips[1]&&(!in.clickToDrink||(!bottleTriggers[0]&&!bottleTriggers[1])))rearm=false;
+        if(in.cancel) {quickPressed=false;Drop();flight={};rearm=true;wheelLatch=true;pending={};out.cancelPending=true;editor=0;map=developer=glyphs=motions=false;devPage=0;editSlot=-1;glyphEdit=-1;}   // the cancel input, as before (transport has sent none since the per-hand wheels)
         if(pending.action!=Action::None) {
             if(in.reply.sequence==pending.sequence&&in.reply.session==session&&in.reply.result!=Result::Pending) {
                 result=in.reply.result;resultAt=in.time;out.feedback=(result==Result::Applied||result==Result::Dispatched||result==Result::DebugUpdated||result==Result::TurnsUpdated||result==Result::SharpUpdated||result==Result::FillUpdated||result==Result::RimsUpdated||result==Result::SkyRimsUpdated||result==Result::BodiesUpdated)?2:3;
@@ -819,7 +915,7 @@ public:
         const int dominant=config.dominant==1?1:0;
         shoulder::Input reach;reach.time=in.time;reach.session=in.session;reach.epoch=in.epoch;reach.dominant=dominant;
         reach.active=in.active;reach.tracked=in.tracked[dominant];reach.head=in.head.p;reach.hand=in.hand[dominant].p;reach.heading=body.q;
-        reach.grip=in.grip[dominant];
+        reach.grip=in.spellGrips?(grips[dominant]?1.f:0.f):in.grip[dominant];
         reach.allowed=!wheel&&!in.quickCast&&!in.cancel&&!rearm&&bottle<0&&holster<0&&pending.action==Action::None&&
             fresh&&in.snapshot.equipmentKnown&&(in.snapshot.activeSet==1||in.snapshot.activeSet==2);
         const auto shoulder=shoulderSwap.Step(reach);out.block=out.block||shoulder.block;
@@ -828,15 +924,14 @@ public:
         }
         // The tabbed menu on leather (leather_menu.h): the left hand reaches over the
         // left shoulder and grips. With Dominant hand = Left that is the swap's, so off.
+        // Left-handed (in.mirrored): the right hand over the right shoulder.
         leather::ReachInput sheet;sheet.time=in.time;sheet.session=in.session;sheet.epoch=in.epoch;
         sheet.active=in.active&&in.leatherReach&&dominant==0;sheet.tracked=in.tracked[leather::Hand];
-        sheet.head=in.head.p;sheet.hand=in.hand[leather::Hand].p;sheet.heading=body.q;sheet.grip=in.grip[leather::Hand];
+        sheet.head=in.head.p;sheet.hand=in.hand[leather::Hand].p;sheet.heading=body.q;sheet.grip=in.spellGrips?(grips[leather::Hand]?1.f:0.f):in.grip[leather::Hand];
+        sheet.right=in.RightHand(leather::Hand);
         sheet.allowed=!wheel&&!in.quickCast&&!in.cancel&&!rearm&&bottle<0&&holster<0&&pending.action==Action::None;
         const auto reached=leatherReach.Step(sheet);out.block=out.block||reached.block;
         if(reached.open){out.inventory=true;out.feedback=1;out.feedbackHand=leather::Hand;}
-        // VR Settings > Movement speed: WALK walks, every other stop runs. When the game's
-        // toggle is the other way, its own run / walk command (no tick).
-        if(in.gaitToggle&&fresh&&request(Action::RunWalk,0))pendingHand=0;
         if(wheel) {
             out.wheel=true;out.utility=utility;out.map=map;out.glyphs=glyphs;out.hover=in.hover;out.block=true;out.leftStrikes=in.leftStrikes;
             owner[0]=owner[1]=Owner::Wheel;
@@ -871,9 +966,23 @@ public:
                     if(in.leftStrikes>=0){out.toggleLeftStrikes=true;out.feedback=1;}else out.feedback=3;
                     out.feedbackHand=in.wheelHand>=0?1-in.wheelHand:0;rearm=true;
                 } else if(!editor&&in.hover==GlyphsCell&&(QuickControls(Page())||glyphs)) {
-                    // Glyph casting's page, and back.
-                    glyphs=!glyphs;utility=map=developer=false;out.utility=out.map=false;out.glyphs=glyphs;glyphEdit=-1;
+                    // Glyph casting's page, and back; it opens on the wheel's own hand's set.
+                    glyphs=!glyphs;utility=map=developer=motions=false;out.utility=out.map=false;out.glyphs=glyphs;glyphEdit=-1;
+                    if(glyphs)glyphHand=in.wheelHand==1?1:0;
                     out.feedback=1;out.feedbackHand=in.wheelHand>=0?1-in.wheelHand:0;rearm=true;
+                } else if(glyphs&&!editor&&in.hover==GlyphHandCell) {
+                    // The hand box: the other hand's set (each hand draws its own).
+                    glyphHand=1-glyphHand;out.feedback=1;out.feedbackHand=in.wheelHand>=0?1-in.wheelHand:0;rearm=true;
+                } else if(!editor&&in.hover==MotionsCell&&QuickControls(Page())&&spellmotion::HasMotions(in.snapshot.skillClass)) {
+                    // The MOTIONS page (back: SPELLS, the first footer tab).
+                    motions=true;glyphs=utility=map=developer=false;out.utility=out.map=false;glyphEdit=-1;
+                    out.feedback=1;out.feedbackHand=in.wheelHand>=0?1-in.wheelHand:0;rearm=true;
+                } else if(motions&&!editor&&in.hover>=MotionCardCell(0)&&in.hover<MotionCardCell(MotionCards)) {
+                    // A card: its motion on or off (a local setting, saved by the transport).
+                    const auto page=spellmotion::PageOf(in.snapshot.skillClass);const int card=in.hover-MotionCardCell(0);
+                    const int bit=card<page.count?spellmotion::Bit(in.snapshot.skillClass,page.skills[card]):-1;
+                    if(bit>=0&&request(Action::ToggleMotion,bit))pendingHand=in.wheelHand>=0?1-in.wheelHand:0;else out.feedback=3;
+                    rearm=true;
                 } else if(editor==3) {
                     if(in.hover==11){editor=0;editSlot=-1;}
                     else if(in.hover==9)editPage=std::max(0,editPage-1);
@@ -886,7 +995,7 @@ public:
                     }
                     rearm=true;
                 } else if(!editor&&in.hover==13&&fresh&&in.snapshot.developer) {
-                    developer=!developer;devPage=std::clamp(devPage,0,dev::PageCount-1);utility=map=glyphs=false;out.utility=out.map=false;rearm=true;   // its last page
+                    developer=!developer;devPage=std::clamp(devPage,0,dev::PageCount-1);utility=map=glyphs=motions=false;out.utility=out.map=false;rearm=true;   // its last page
                 } else if(developer&&in.hover>=DeveloperPageCell(0)&&in.hover<DeveloperPageCell(dev::PageCount)) {
                     if(fresh)devPage=in.hover-DeveloperPageCell(0);
                     out.hover=-1;rearm=true;
@@ -906,8 +1015,8 @@ public:
                     else if(in.hover==10)editPage=std::min(std::max(0,(choiceCount-1)/8),editPage+1);
                     else if(in.hover==8||(in.hover>=0&&in.hover<8&&editPage*8+in.hover<choiceCount)) {
                         const auto skill=in.hover==8?Skill{}:Choice(editPage*8+in.hover);
-                        if(glyphEdit>=0) {   // the GLYPHS page: that shape's skill (CLEAR: none)
-                            if(fresh&&request(Action::BindGlyph,glyphEdit)){pending.skill=skill.id;pending.skillOwner=skill.owner;out.request=pending;}
+                        if(glyphEdit>=0) {   // the GLYPHS page: that shape's skill for the hand shown (CLEAR: none; the left's: the right hand's)
+                            if(fresh&&request(Action::BindGlyph,GlyphIndex(glyphHand,glyphEdit))){pending.skill=skill.id;pending.skillOwner=skill.owner;out.request=pending;}
                             else out.feedback=3;
                         } else if(skill.id==GlyphDrawId) {   // this button draws glyphs; the transport clears its game skill
                             if(fresh&&in.snapshot.bindingsEditable&&request(Action::BindGlyphDraw,editSlot)) {
@@ -929,21 +1038,21 @@ public:
                         OpenSkills(in.snapshot);
                     } else out.feedback=3;
                     rearm=true;
-                } else if(in.wheelHand>=0&&in.hover==11){developer=glyphs=false;out.inventory=true;out.wheel=false;wheelLatch=true;rearm=true;}
+                } else if(in.wheelHand>=0&&in.hover==11){developer=glyphs=motions=false;out.inventory=true;out.wheel=false;wheelLatch=true;rearm=true;}
                 else if(glyphs&&!map&&in.hover>=0&&in.hover<GlyphShapes) {
                     // A shape on the GLYPHS page: choose its skill.
                     if(fresh&&(in.snapshot.skillCount||HasSummonArmy(in.snapshot))){glyphEdit=in.hover;editSlot=-1;editPage=0;OpenGlyphSkills(in.snapshot);}
                     else out.feedback=3;
                     rearm=true;
                 }
-                else if(in.wheelHand>=0&&!utility&&!map&&!glyphs&&in.hover>=0&&in.hover<5&&fresh&&in.snapshot.bindingsEditable){
+                else if(in.wheelHand>=0&&!utility&&!map&&!glyphs&&!motions&&in.hover>=0&&in.hover<5&&fresh&&in.snapshot.bindingsEditable){
                     editSlot=skills::HandSlot(in.wheelHand,in.hover);editPage=0;editBank=in.snapshot.bindingBank;previousBinding=in.snapshot.skills[editSlot];
                     OpenSkills(in.snapshot,true);rearm=true;
                 }
-                else if(in.hover==11){developer=glyphs=false;editor=1;editBank=in.snapshot.bindingBank;editSlot=-1;map=false;out.map=false;utility=false;out.utility=false;rearm=true;}
+                else if(in.hover==11){developer=glyphs=motions=false;editor=1;editBank=in.snapshot.bindingBank;editSlot=-1;map=false;out.map=false;utility=false;out.utility=false;rearm=true;}
                 else if(in.hover==10){out.settings=true;out.wheel=false;wheelLatch=true;rearm=true;}
-                else if(in.hover==12){developer=glyphs=false;map=true;out.map=true;utility=false;out.utility=false;rearm=true;}
-                else if(in.hover==9){utility=(map||developer||glyphs)?false:!utility;developer=glyphs=false;out.utility=utility;map=false;out.map=false;rearm=true;}
+                else if(in.hover==12){developer=glyphs=motions=false;map=true;out.map=true;utility=false;out.utility=false;rearm=true;}
+                else if(in.hover==9){utility=(map||developer||glyphs||motions)?false:!utility;developer=glyphs=motions=false;out.utility=utility;map=false;out.map=false;rearm=true;}
                 else if(!map&&in.hover==8) {if(in.wheelHand<0)out.select=-1;stowed=false;wheelLatch=true;out.wheel=false;rearm=true;out.feedback=1;}
                 else if(!map&&in.hover>=0&&in.hover<8&&(in.wheelHand<0||utility)&&(!utility||in.hover!=2)) {
                     if(!utility) {
@@ -1026,7 +1135,11 @@ public:
             else if(!grips[bottleHand]||(!spent&&(!fresh||!SameBelt(in.snapshot,held)))) {if(!grips[bottleHand])Discard(in,out);Drop();rearm=true;}
             else {
                 out.bottle=bottle;out.bottleHand=bottleHand;out.bottleItem=held.item;out.bottleEmpty=consumed;owner[bottleHand]=Owner::Bottle;
-                if(!spent&&potions::AtMouth(in.hand[bottleHand].p,in.hand[bottleHand].q,in.head.p,in.head.q,drinkStart!=0)) {
+                const bool clickToDrinkRequested=in.clickToDrink&&bottleClicks[bottleHand]&&!edges[bottleHand];
+                if(!spent&&clickToDrinkRequested) {
+                    if(request(Action::Potion,bottle,held.item,held.revision)){spent=true;pendingHand=bottleHand;}
+                    drinkStart=0;
+                } else if(!spent&&potions::AtMouth(in.hand[bottleHand].p,in.hand[bottleHand].q,in.head.p,in.head.q,drinkStart!=0)) {
                     if(!drinkStart)drinkStart=in.time;
                     if(in.time-drinkStart>=.25&&request(Action::Potion,bottle,held.item,held.revision)){spent=true;pendingHand=bottleHand;}
                 } else drinkStart=0;
@@ -1062,7 +1175,8 @@ public:
         out.editor=editor;out.editSlot=editSlot;out.editPage=editPage;out.editPages=std::max(1,(choiceCount+7)/8);
         if(editor==3)for(int i=0;i<8&&editPage*8+i<choiceCount;++i){out.itemOptions[i]=itemChoices[editPage*8+i];++out.editCount;}
         out.editCategory=editCategory;out.editClass=editClass;out.editCategoryCounts=categoryCounts;
-        out.glyphs=out.wheel&&glyphs;out.glyphEdit=glyphEdit;out.glyphDraw=in.glyphDraw;out.glyphSkills=in.glyphSkills;   // the page as the clicks left it
+        out.glyphs=out.wheel&&glyphs;out.glyphHand=glyphHand;out.glyphEdit=glyphEdit;out.glyphDraw=in.glyphDraw;out.glyphSkills=in.glyphSkills;   // the page as the clicks left it
+        out.motions=out.wheel&&motions;out.motionsBox=spellmotion::HasMotions(in.snapshot.skillClass);out.motionsOff=in.motionsOff;
         if(editor==2)for(int i=0;i<8&&editPage*8+i<choiceCount;++i){out.editOptions[i]=Choice(editPage*8+i);++out.editCount;}
         out.block=out.block||rearm||stowed||pending.action!=Action::None;
         for(int h=0;h<2;++h)out.owner[h]=rearm?Owner::Rearm:owner[h];

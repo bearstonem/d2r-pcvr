@@ -11,8 +11,11 @@ and licensed third-party components. The installer reads the required
 item/skill icons and potion models from your own installed game and keeps
 them in local caches. Do not redistribute those caches or your game files.
 
-This preview accepts your **Steam copy of Diablo II: Resurrected
-3.3.94995** (or 3.3.93787) or **Battle.net copy of D2R 3.3.93847** (experimental).
+This preview accepts your **Steam copy of Diablo II: Resurrected** or
+**Battle.net copy of D2R** (experimental).
+Setup does not refuse a newer game version: the mod checks the game code it
+hooks each time it starts, and if that code changed, it leaves the feature
+off and says so in its log.
 Use a **local offline character**. For Battle.net, see
 [Battle.net preview packages](#battlenet-preview-packages).
 The game runs on your PC and streams to the headset.
@@ -72,6 +75,16 @@ If setup fails, keep `setup-backups`. The helper folder contains
 installer's full output. Share the error at the end of those logs when reporting
 a problem; review them for personal paths before posting. Older installers may
 only report an exit code in `setup-last.log` and do not create `setup-install.log`.
+
+A failure message reads **Setup could not finish while** *(the step)*: *(the
+file or folder and what was wrong with it)*, and ends with where the technical
+details were saved. Before anything is installed there is no helper folder yet,
+so those details go to `D2R-PCVR-setup-last.log` in your temporary folder (paste
+`%TEMP%` into Win+R). An older installer that stops after the folder page with
+only **Setup could not finish: 2** was handed a folder it could not read: run
+that Setup from an ordinary folder such as Downloads, not from the top of a
+drive (`D:\`), and enter folders without a backslash at the end - or use the
+current installer, which accepts both.
 
 If Setup reports **Permission denied** for **launcher_icon.png**, fully close
 **D2R VR Launcher** and any image viewer showing that file, then rerun Setup
@@ -191,7 +204,7 @@ configuration; keep them private and do not share them with the mod ZIP.
 
 The v0.3.7 ZIP includes **bin/CascLib.dll** and offers both editions in
 **Install-Windows.cmd**. For Battle.net, it requires
-your **purchased Battle.net copy of D2R 3.3.93847** on Windows. Use a local
+your **purchased Battle.net copy of D2R** on Windows. Use a local
 offline character. SteamVR and Virtual Desktop (VDXR) launch options are
 available. Battle.net has been tried with SteamVR; Battle.net with VDXR has not
 yet been confirmed. Battle.net support is still experimental.
@@ -377,6 +390,14 @@ complete your headset's floor/room setup and reopen calibration.
 
 ## Controls
 
+This table is written for a right-handed player. Left-handed players can turn on
+**VR Settings > Controls > Hands > Left-handed (experimental)**: everything is mirrored, so read "right" as
+your left hand and controller and "left" as your right (see
+[Left-handed play](CONTROLS.md#left-handed-play-experimental)); the in-headset Controller guide then names
+the buttons as you use them. Used to walking with the left stick? **Sticks stay right-handed**, under it, keeps
+the left stick walking and the right stick turning while the rest stays left-handed
+([details](CONTROLS.md#sticks-stay-right-handed)).
+
 | Action | Control |
 | --- | --- |
 | Walk / snap turn | Left stick / right stick left-right |
@@ -394,7 +415,7 @@ complete your headset's floor/room setup and reopen calibration.
 | Manual attack / selected spell | Right trigger |
 | Bow | Bring the right hand to the bowstring, hold right trigger, draw back, then release |
 | Javelin | In **WEAPON** mode, hold right trigger, make a throwing motion, then release |
-| Swap weapon sets I/II | Reach your right hand over either shoulder and press grip; change the swap hand in VR Settings > Body > Dominant hand |
+| Swap weapon sets I/II | Reach your right hand over either shoulder and press grip; with VR Settings > Controls > Hands > Left-handed on, the left hand |
 | Seated weapon swap / stow | Wheel → **EQUIPMENT / BELT** → **Weapon I**, **Weapon II** or **Stow/Draw** |
 | Grab a belt potion | Reach to a bottle and hold grip with either hand |
 | Drink | Keep grip held, bring the bottle opening to your mouth and tip it; release an unused bottle to return it |
@@ -524,6 +545,17 @@ asks you to update its other components.
    Both game editions share video settings, so keeping them is the default.
 4. Review removal, then choose **Remove the VR mod**. Use **Save & Exit** in D2R
    and **Steam > Exit** when prompted.
+
+**If the game was uninstalled first:** removal still finishes. Steam and
+Battle.net remove the game but leave the mod's own files and its VR shortcuts
+behind. The Windows uninstaller of an EXE installation notices this by itself.
+In the ZIP's guided removal, when the game is not found, answer **No - the game
+was uninstalled or its folder deleted** and confirm the folder it was in (the
+recorded one is offered). Either way the matching VR shortcuts are removed, the
+Steam edition's launch options are restored, and the mod's tracked files left in
+the old game folder are removed when their installation backup is still there;
+without that backup the folder is left untouched and you can delete it
+yourself. Nothing else in that folder, and no character or stash, is deleted.
 
 The wizard restores replaced files and removes files introduced by the mod,
 including files added by upgrades. It removes matching VR library entries

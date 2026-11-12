@@ -14,6 +14,12 @@ int main(){
     for(float yaw:{-2.f,0.f,2.f}){auto turned=s;turned.rotation=math::Yaw(yaw);
         for(int i=0;i<2;++i)turned.hand[i]=s.head+math::Rotate(turned.rotation,s.hand[i]-s.head);
         Check(CheckPose(turned)==Hint::Pose,"pose works at arbitrary room yaw");}
+    {   // Left-handed play hands the sample over in main / off order: read so, a T cross is crossed arms.
+        auto roles=s;std::swap(roles.hand[0],roles.hand[1]);roles.handTracked[0]=false;roles.trigger[1]=1;
+        roles.handTracked[0]=true;Check(CheckPose(roles)==Hint::Arms,"hands in main / off order are not a T cross as they are");
+        BodyOrder(roles,true);Check(CheckPose(roles)==Hint::Pose&&roles.trigger[0]==1&&roles.trigger[1]==0,"left-handed: put in body order, the same T cross is the pose");
+        auto same=s;BodyOrder(same,false);Check(same.hand[0].x==s.hand[0].x,"right-handed: nothing moves");
+    }
     auto bad=s;bad.floor=false;Check(CheckPose(bad)==Hint::Floor,"LOCAL space cannot invent a floor");
     bad=s;bad.handTracked[1]=false;Check(CheckPose(bad)==Hint::Tracking,"one untracked controller rejected");
     bad=s;bad.hand[0].x=NAN;Check(CheckPose(bad)==Hint::Tracking,"nonfinite tracking rejected");

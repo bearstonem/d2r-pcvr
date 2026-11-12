@@ -15,7 +15,9 @@
 #include "bow.h"
 #include "companions.h"
 #include "companion_ai.h"
+#include "settings_menu.h"
 #include "active_effects.h"
+#include "skill_cooldowns.h"
 #include "../steamvr/shapeshift_form.h"
 #include "combat.h"
 namespace gamestate {uint32_t WeaponSet();uint64_t LocalPlayer();bool MenuOpen();}
@@ -31,15 +33,19 @@ const ItemService* items=nullptr;
 const ThreadService* threads=nullptr;
 std::mutex mutex;
 Snapshot snapshot;
+// The hero's Light Radius as last read (LightRadius): kept through captures that could not read it.
+uint64_t lightSession=0;int lightValue=0;
 Reply reply;
 framevr::interaction::Request queued,waiting;
-bool tossHit=false; // FeedMerc: the game thread found the hireling at the landing point
+bool tossHit=false; // FeedMerc: the game thread accepted the landing for a live hireling
 // Hireling vitals: sampled on the game thread every MercPeriod ms, copied into
 // each snapshot while younger than MercMaxAge.
 constexpr uint64_t MercPeriod=200,MercMaxAge=1000;
 Mercenary merc;uint64_t mercAt=0,mercAskedAt=0,mercSession=0;bool mercAsking=false,mercWasLow=false;
 framevr::companions::Roster companions;
 framevr::effects::Status effects;
+// Wrist skill cooldowns (skill_cooldowns.h): the skills the server's use check blocks for a delay, sampled with the merc.
+framevr::cooldowns::Board cooldowns;
 // Native cosmetic cues (states.txt / overlay.txt rows): the hurt merc is tinted
 // with state "red"; a confirmed thrown potion plays overlay "healing" on it.
 constexpr int HurtTintState=91,HealOverlay=26;
@@ -52,6 +58,8 @@ bool scheduled=false;
 // Glyph casting's park (Park): its own slot.
 struct Parking {uint64_t session=0;int skill=-1,owner=-1;} parking;
 bool parkScheduled=false;
+// The run / walk toggle (ToggleRunWalk): its own slot.
+uint64_t toggleSession=0;bool toggleScheduled=false;
 std::array<int,framevr::skills::Count> commanderSlotSkills[2]{}; // bank 0 (set I) and bank 16 (set II)
 template<class T>const T* Service(const PluginContext* c) {const T* p=nullptr;return c->QueryService(&p)==ServiceQueryResult::Success?p:nullptr;}
 Item Copy(const Items::ItemInfo& i, uint32_t fireDamage = 0) {
@@ -101,7 +109,7 @@ Snapshot Collect() {
     nativeui::Capture(s);
     quickitems::Capture(s);
     devscenarios::Capture(s);
-    {std::lock_guard lock(mutex);if(mercSession==s.session&&s.at>=mercAt&&s.at-mercAt<=MercMaxAge){s.merc=merc;s.companions=companions;s.effects=effects;}}
+    {std::lock_guard lock(mutex);if(mercSession==s.session&&s.at>=mercAt&&s.at-mercAt<=MercMaxAge){s.merc=merc;s.companions=companions;s.effects=effects;s.cooldowns=cooldowns;}}
     if(s.companions.known) {
         for(unsigned i=0;i<s.skillCount&&i<s.catalog.size();++i)
             if(s.catalog[i].known&&s.catalog[i].available)
@@ -134,6 +142,7 @@ void __cdecl SampleMerc(const PluginContext*,void* token) noexcept {
     Mercenary m;
     const auto roster=companionstate::Sample(session);
     const auto active=effectstate::Sample(session);
+    const auto blocked=cooldownstate::Sample(session);
     m.known=session==gamestate::LocalPlayer()&&melee::HirelingVitals(hint,m.health,m.maxHealth,m.classId,m.unitId);
     hint=m.known?m.unitId:0;
     const bool low=MercLow(m);
@@ -141,7 +150,7 @@ void __cdecl SampleMerc(const PluginContext*,void* token) noexcept {
     // when another unit is the hireling (resurrected/rehired).
     if(const auto tinted=tintedUnit.load();tinted&&(!low||tinted!=m.unitId)){melee::HirelingState(tinted,HurtTintState,false);tintedUnit=0;}
     if(low&&!tintedUnit.load()&&melee::HirelingState(m.unitId,HurtTintState,true))tintedUnit=m.unitId;
-    {std::lock_guard lock(mutex);merc=m;companions=roster;effects=active;mercAt=GetTickCount64();mercSession=session;mercAsking=false;
+    {std::lock_guard lock(mutex);merc=m;companions=roster;effects=active;cooldowns=blocked;mercAt=GetTickCount64();mercSession=session;mercAsking=false;
      if(low==mercWasLow)return;mercWasLow=low;}
     char line[180];std::snprintf(line,sizeof line,"Frame merc: %s (class=%u life %.0f/%.0f, red tint %s)",
         low?"low health":"health recovered",m.classId,m.health,m.maxHealth,tintedUnit.load()?"on":"off");
@@ -154,7 +163,7 @@ void __cdecl ClearTint(const PluginContext*,void*) noexcept {
         melee::HirelingState(tinted,HurtTintState,false);
         framevr::logging::Write("Frame merc: VR gameplay inactive - red tint cleared");
     }
-    std::lock_guard lock(mutex);mercAsking=false;mercWasLow=false;companions={};effects={};
+    std::lock_guard lock(mutex);mercAsking=false;mercWasLow=false;companions={};effects={};cooldowns={};
 }
 void Publish(Snapshot s) {
     std::lock_guard lock(mutex);
@@ -164,7 +173,8 @@ void Publish(Snapshot s) {
                  s.catalog!=snapshot.catalog||s.skillCount!=snapshot.skillCount||s.bindingBank!=snapshot.bindingBank||s.bindingsEditable!=snapshot.bindingsEditable||
                  s.vitalsKnown!=snapshot.vitalsKnown||int(s.health)!=int(snapshot.health)||int(s.mana)!=int(snapshot.mana)||
                  s.maxHealth!=snapshot.maxHealth||s.maxMana!=snapshot.maxMana||s.experience!=snapshot.experience||s.location!=snapshot.location||
-                 s.actionKnown!=snapshot.actionKnown||s.actionMode!=snapshot.actionMode||s.companions!=snapshot.companions||s.effects!=snapshot.effects||s.quick!=snapshot.quick;
+                 s.actionKnown!=snapshot.actionKnown||s.actionMode!=snapshot.actionMode||s.companions!=snapshot.companions||s.effects!=snapshot.effects||s.quick!=snapshot.quick||
+                 !s.cooldowns.SameSkills(snapshot.cooldowns);   // the skills, not each sample's timing
     for(int i=0;i<4;++i) {
         auto& b=s.belt[i];const auto& before=snapshot.belt[i];
         const bool change=s.session!=snapshot.session||b.items!=before.items||b.known!=before.known||b.count!=before.count;
@@ -172,6 +182,7 @@ void Publish(Snapshot s) {
     }
     if(changed)++s.revision;
     snapshot=s;
+    if(s.lightRadiusKnown){lightSession=s.session;lightValue=s.lightRadius;}
     if(waiting.action!=Action::None) {
         Result result=Result::Pending;
         if(waiting.session!=s.session)result=Result::Cancelled;
@@ -201,7 +212,7 @@ void __cdecl Apply(const PluginContext*,void*) noexcept {
     {std::lock_guard lock(mutex);scheduled=false;r=queued;queued={};epoch=cancelEpoch;hit=tossHit;tossHit=false;}
     if(r.action==Action::None)return;
     if(r.action==Action::FeedMerc) {
-        // Every landing shatters; only a landing at the hireling's feet feeds.
+        // Every landing shatters; the game thread applies the landing policy.
         if(!bowvr::PlayHeroSound(GlassBreak))
             framevr::logging::Write("Frame potion toss: native glass sound unavailable");
         if(!hit){std::lock_guard lock(mutex);reply={r.sequence,r.session,Result::Refused};return;}
@@ -237,11 +248,10 @@ void __cdecl Apply(const PluginContext*,void*) noexcept {
         Publish(Collect()); // refresh wheel and any duplicates cleared by D2R
         return;
     }
-    if(r.action==Action::BindItem||r.action==Action::UseItem||r.action==Action::RunWalk) {
+    if(r.action==Action::BindItem||r.action==Action::UseItem) {
         {std::lock_guard lock(mutex);valid=valid&&epoch==cancelEpoch;}
         // Native item use may open/pump UI. Never hold the snapshot lock here.
-        const bool accepted=valid&&(r.action==Action::RunWalk?gamecmd::ExecuteUiCommand(0x23):
-            r.action==Action::BindItem?quickitems::Assign(r,s):quickitems::Use(r,s));
+        const bool accepted=valid&&(r.action==Action::BindItem?quickitems::Assign(r,s):quickitems::Use(r,s));
         {std::lock_guard lock(mutex);if(epoch==cancelEpoch)
             reply={r.sequence,r.session,accepted?(r.action==Action::UseItem?Result::Dispatched:Result::Applied):Result::Refused};}
         Publish(Collect());return;
@@ -267,6 +277,13 @@ void __cdecl Apply(const PluginContext*,void*) noexcept {
     } else reply={r.sequence,r.session,accepted?Result::Applied:Result::Refused};
     framevr::logging::Write(accepted?"Frame interactions: native action accepted; item/set changes require confirmation":"Frame interactions: stale or refused native action discarded");
 }
+void __cdecl ApplyRunWalk(const PluginContext*,void*) noexcept {
+    uint64_t session=0;
+    {std::lock_guard lock(mutex);session=toggleSession;toggleSession=0;toggleScheduled=false;}
+    if(!session)return;
+    const auto s=Read();
+    if(framevr::interaction::Fresh(s,session,GetTickCount64())&&!gamestate::MenuOpen())gamecmd::ExecuteUiCommand(0x23);
+}
 void __cdecl ApplyPark(const PluginContext*,void*) noexcept {
     Parking p;
     {std::lock_guard lock(mutex);p=parking;parking={};parkScheduled=false;}
@@ -274,20 +291,20 @@ void __cdecl ApplyPark(const PluginContext*,void*) noexcept {
     const auto s=Read();
     if(!gamestate::MenuOpen()&&nativeui::Park(p.skill,p.owner,s,p.session))Publish(Collect());   // the cast reads the record back at once
 }
-// Game thread: did the thrown bottle land at the local hireling's feet? Every
-// landing continues to the UI thread, which plays the shatter; only a hit then
-// uses the belt item on the mercenary. A miss leaves the belt untouched.
+// Game thread: check the live hireling and the optional landing assistance.
+// Every landing continues to the UI thread for shatter and native belt use.
 void __cdecl AimAtHireling(const PluginContext*,void*) noexcept {
     framevr::interaction::Request r;
     {std::lock_guard lock(mutex);r=queued;if(r.action!=Action::FeedMerc){scheduled=false;return;}} // cancelled
     float distance=-1;uint32_t classId=0;
+    const bool mercPotionAutoaimEnabled=vrsettings::Read().values[framevr::settings::MercPotionAssist]>.5f;
     const bool hit=r.session==gamestate::LocalPlayer()&&
-        melee::NearHireling(r.world,r.player,r.unitsPerMetre,distance,classId);
+        melee::NearHireling(r.world,r.player,r.unitsPerMetre,distance,classId,mercPotionAutoaimEnabled);
     char line[220];
     if(distance<0)std::snprintf(line,sizeof line,"Frame potion toss: no live hireling nearby (nearest friendly class=%u; column=%d type=%s)",
         classId,r.index+1,PotionName(PotionType(r.item.code)));
     else std::snprintf(line,sizeof line,"Frame potion toss: landed %.2f m from the mercenary (class=%u) - %s (column=%d type=%s)",
-        distance,classId,hit?"at its feet":"miss",r.index+1,PotionName(PotionType(r.item.code)));
+        distance,classId,hit?(MercThrowAccepted(distance,false)?"at its feet":"assisted miss"):"miss",r.index+1,PotionName(PotionType(r.item.code)));
     framevr::logging::Write(line);
     {std::lock_guard lock(mutex);tossHit=hit;}
     if(threads->runOnUiThread(context,&Apply,nullptr)==D2RL::Threads::Result::Success)return;
@@ -323,6 +340,12 @@ int CurrentLevel(uint64_t session,uint64_t now) {
     std::lock_guard lock(mutex);
     return framevr::interaction::Fresh(snapshot,session,now)?snapshot.location.level:0;
 }
+bool LightRadius(uint64_t session,int& value) {
+    std::lock_guard lock(mutex);
+    if(!session||lightSession!=session)return false;
+    value=lightValue;
+    return true;
+}
 int ShapeForm(uint64_t session,uint64_t now) {
     // The rig the game draws as the hero, while one is drawn: the state sample trails the swap
     // and goes stale after a load (a shield druid lost every block in that window - the guard
@@ -353,6 +376,12 @@ void Request(const framevr::interaction::Request& r) {
     }
 }
 void Cancel(){devscenarios::Cancel();std::lock_guard lock(mutex);++cancelEpoch;queued={};waiting={};reply={};}
+bool ToggleRunWalk(uint64_t session) {
+    if(!threads||!threads->runOnUiThread||!session)return false;
+    {std::lock_guard lock(mutex);if(toggleScheduled)return false;toggleSession=session;toggleScheduled=true;}
+    if(threads->runOnUiThread(context,&ApplyRunWalk,nullptr)==D2RL::Threads::Result::Success)return true;
+    std::lock_guard lock(mutex);toggleSession=0;toggleScheduled=false;return false;
+}
 bool Park(uint64_t session,int skill,int owner) {
     if(!threads||!threads->runOnUiThread||skill<0)return false;
     {std::lock_guard lock(mutex);if(parkScheduled)return false;parking={session,skill,owner};parkScheduled=true;}

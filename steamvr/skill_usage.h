@@ -18,25 +18,26 @@
 namespace framevr::skillusage {
 inline constexpr size_t LineLength=180,DetailsLength=900;
 inline constexpr int Interact=357;   // the catalog's Interact / pick up entry (native_ui)
-enum class Kind {None,Interact,Attack,Throw,Strike,Sequence,Smite,Bow,Quiver,Javelin,DoubleThrow,Toss,Pump,Punch,Cross,Call,Shape,Native};
+enum class Kind {None,Interact,Attack,Throw,Strike,Sequence,Dual,Smite,Bow,Quiver,Javelin,DoubleThrow,Toss,Pump,Punch,Cross,Call,Shape,Native};
 inline Kind Classify(int skill) {
     namespace ws=weaponskills;namespace st=strikeskills;
     if(skill<0)return Kind::None;
     if(skill==Interact)return Kind::Interact;
     if(skill==ws::Attack)return Kind::Attack;
     if(skill==ws::Throw)return Kind::Throw;
+    if(st::DualStrike(skill))return Kind::Dual;
     if(st::Known(skill))return st::MultiHit(skill)?Kind::Sequence:Kind::Strike;
     if(skill==ws::Smite)return Kind::Smite;
     if(ws::Bow(skill))return ws::QuiverSkill(skill)?Kind::Quiver:Kind::Bow;
     if(ws::JavelinSkill(skill))return Kind::Javelin;
     if(skill==ws::DoubleThrow)return Kind::DoubleThrow;
     if(toss::Skill(skill))return Kind::Toss;
-    // Paladin body gestures (hammer_gesture.h, charge_gesture.h): from any slot.
+    // The Paladin's and the Druid's body gestures (motions_paladin.h, motions_druid.h): from any slot.
     if(skill==ws::BlessedHammer)return Kind::Pump;
     if(skill==ws::Charge)return Kind::Punch;
-    if(skill==ws::HolyShield)return Kind::Cross;            // cross_gesture.h
-    if(skill==ws::FistOfHeavens)return Kind::Call;          // heavens_gesture.h
-    if(skill==ws::Werewolf||skill==ws::Werebear)return Kind::Shape;   // shapeshift_gesture.h
+    if(skill==ws::HolyShield)return Kind::Cross;
+    if(skill==ws::FistOfHeavens)return Kind::Call;
+    if(skill==ws::Werewolf||skill==ws::Werebear)return Kind::Shape;
     return Kind::Native;
 }
 struct Place {bool trigger=false,right=false,left=false;};
@@ -74,20 +75,23 @@ inline const char* Line(int skill,int slot) {
             if(!at.right)break;
             return "Gesture: throw by hand. A javelin or throwing weapon flies along your throw; a gas or oil potion flies as a bottle and bursts where it shatters.";
         case Kind::Strike:
-            if(!at.trigger)return "Press to cast it, aimed by this hand. On a trigger it is a gesture: a swing that lands casts it.";
-            return at.left?"Gesture with a second weapon or claw: a full-cycle swing of the left hand that lands casts it; quicker swings stay weaker basic attacks.":
-                           "Gesture: a full-cycle swing that lands casts it on what you hit; quicker swings stay weaker basic attacks. Holding the trigger still casts it.";
+            if(!at.trigger)return "Press to cast it, aimed by this hand. On a trigger it is Cast On Strike: a swing that lands casts it.";
+            return at.left?"Cast On Strike with a second weapon or claw: a full-cycle swing of the left hand that lands casts it; quicker swings stay weaker basic attacks.":
+                           "Cast On Strike: a full-cycle swing that lands casts it on what you hit; quicker swings stay weaker basic attacks. Holding the trigger still casts it.";
         case Kind::Sequence:
-            if(!at.trigger)return "Press to cast it, aimed by this hand. On a trigger it is a gesture: a swing that lands casts it; its other hits land by themselves.";
-            if(at.left)return "Gesture with a second weapon or claw: a full-cycle swing of the left hand that lands casts it, as on the right trigger.";
-            return "Gesture: a full-cycle swing that lands casts it; its other hits then land by themselves. Swings while it runs stay basic attacks.";
+            if(!at.trigger)return "Press to cast it, aimed by this hand. On a trigger it is Cast On Strike: a swing that lands casts it; its other hits land by themselves.";
+            if(at.left)return "Cast On Strike with a second weapon or claw: a full-cycle swing of the left hand that lands casts it, as on the right trigger.";
+            return "Cast On Strike: a full-cycle swing that lands casts it; its other hits then land by themselves. Swings while it runs stay basic attacks.";
+        case Kind::Dual:
+            if(!at.trigger)return "Press to cast it, aimed by this hand. On a trigger with two weapons it is Cast On Strike: swing one blade, then the other.";
+            return "Cast On Strike with two weapons: a full-cycle swing that lands casts it with that blade; your other blade's next hit is its second swing.";
         case Kind::Smite:
-            return at.left?"Gesture with a shield: bash or thrust the shield into a monster to cast it. Without a shield, press to cast.":
+            return at.left?"Cast On Strike with a shield: bash or thrust the shield into a monster to cast it. Without a shield, press to cast.":
                            "Press to cast it at what this hand points at. On the left trigger with a shield, a shield bash casts it.";
         case Kind::Bow:case Kind::Quiver:
             if(at.trigger)return "Gesture with a bow: draw the string and release to fire it. Without a bow, press to cast.";
             return Classify(skill)==Kind::Quiver?"With a bow: loads it into every following arrow; press again for basic arrows. Without a bow, press to cast.":
-                                                 "Press to cast it natively. On a trigger with a bow, draw the string and release to fire it.";
+                                                 "With a bow: loads it, so every following draw and release fires it; press again for basic arrows. Without a bow, press to cast.";
         case Kind::Javelin:
             return at.right?"Gesture with a javelin: arms your throw; throw by hand and let go to cast it. Without a javelin, press to cast.":
                    at.left?"Press to cast it, aimed by this hand. With a javelin, the right trigger or a face button carries it on your throws.":
@@ -100,17 +104,17 @@ inline const char* Line(int skill,int slot) {
             return at.right?"Gesture: press to hold the trap or bomb, throw it and let go; it lands where the arc meets the floor. A quick press casts where you point.":
                             "Press to cast it, aimed by this hand. On the right trigger you can throw it to place it.";
         case Kind::Pump:
-            return "Gesture: hold the grip and punch either fist up past your head to cast it, one hammer a punch. Pressing still casts it.";
+            return "Gesture: hold both grips and punch either fist up past your head to cast it, one hammer a punch. Pressing still casts it.";
         case Kind::Punch:
-            return "Gesture: hold the grip on your weapon hand and punch it straight out at a monster to charge it. Pressing still casts it.";
+            return "Gesture: hold both grips and punch your weapon hand straight out at a monster to charge it. Pressing still casts it.";
         case Kind::Cross:
-            return "Gesture: make the sign of the cross with either hand: forehead, chest, then one shoulder and the other. Pressing still casts it.";
+            return "Gesture: hold both grips and make the sign of the cross with either hand: forehead, chest, then one shoulder and the other. Pressing still casts it.";
         case Kind::Call:
-            return "Gesture: weapon arm straight and fist held, raise it 45 degrees, then bring it down to stop level with your shoulder at a monster. Pressing still casts it.";
+            return "Gesture: hold both grips, weapon arm straight, raise it 45 degrees, then bring it down to stop level with your shoulder at a monster. Pressing still casts it.";
         case Kind::Shape:
             return skill==weaponskills::Werewolf?
-                "Gesture: cross your arms over your chest, bow, then wrench upright flinging both arms up and out. Again to change back. Pressing still casts it.":
-                "Gesture: hold both hands above your head a moment, then slam them down together. Again to change back. Pressing still casts it.";
+                "Gesture: hold both grips, cross your arms over your chest, bow, then wrench upright flinging both arms up and out. Again to change back.":
+                "Gesture: hold both grips, raise both hands above your head a moment, then slam them down together. Again to change back.";
         case Kind::Native:break;
     }
     return at.trigger?"Press the trigger to cast it, aimed by this hand.":"Press the button to cast it, aimed by this hand.";
@@ -174,16 +178,16 @@ inline std::string Details(int skill,int slot) {
                    "with Bottle physics on the potion leaves your hand as a real bottle, and the game's own cloud or blast starts where it "
                    "shatters on the floor, a wall, a table or a prop, within the game's reach. A quick press or a still hold throws as the game does.";
         case Kind::Strike: {
-            if(!at.trigger)return "Press to cast it natively, aimed by this hand. On a trigger it becomes a gesture: a swing that lands casts it on the monster you hit, with the skill's own mana, damage and effects.";
-            std::string text=at.left?"Gesture, with a second weapon of a dual-wield pair or the other claw in a form. ":"Gesture with a melee weapon or claws. ";
+            if(!at.trigger)return "Press to cast it natively, aimed by this hand. On a trigger it becomes Cast On Strike: a swing that lands casts it on the monster you hit, with the skill's own mana, damage and effects.";
+            std::string text=at.left?"Cast On Strike, with a second weapon of a dual-wield pair or the other claw in a form. ":"Cast On Strike with a melee weapon or claws. ";
             text+="A full-cycle swing that lands casts it on the monster you hit, with the skill's own mana, damage and effects. Quicker swings stay basic attacks, with less damage and no on-hit effects.";
             text+=refused;
             if(at.right)text+=" Holding the trigger still casts it natively.";
             return text;
         }
         case Kind::Sequence: {
-            if(!at.trigger)return "Press to cast it natively, aimed by this hand. On a trigger it becomes a gesture: a swing that lands casts it on the monster you hit, and its other hits land by themselves.";
-            std::string text=at.left?"Gesture, with a second weapon or the other claw, as on the right trigger. ":"Gesture with a melee weapon or claws. ";
+            if(!at.trigger)return "Press to cast it natively, aimed by this hand. On a trigger it becomes Cast On Strike: a swing that lands casts it on the monster you hit, and its other hits land by themselves.";
+            std::string text=at.left?"Cast On Strike, with a second weapon or the other claw, as on the right trigger. ":"Cast On Strike with a melee weapon or claws. ";
             text+="A full-cycle swing that lands casts it on the monster you hit: its mana once and hit 1. Its other hits then land by themselves "
                   "at the skill's own pace, moving on to monsters nearby within reach, while you keep moving. Swings while it runs, and quicker "
                   "swings, stay basic attacks, with less damage and no on-hit effects.";
@@ -191,8 +195,19 @@ inline std::string Details(int skill,int slot) {
             if(at.right)text+=" Holding the trigger still casts it natively.";
             return text;
         }
+        case Kind::Dual: {
+            if(!at.trigger)return "Press to cast it natively, aimed by this hand. On a trigger with a weapon in each hand it becomes Cast On Strike: one cast is one swing of each blade.";
+            std::string text="Cast On Strike with a weapon in each hand: one cast is one swing of each blade. A full-cycle swing that lands casts it "
+                             "on the monster you hit, with that blade's weapon: its mana once and its first swing. Your other blade's next hit, "
+                             "before the cast's beat ends, is its second swing, with that weapon, on whatever it strikes. No second hit in time: "
+                             "it is lost. The beat while it is armed is the skill's own cast, timed on your right-hand weapon; Frenzy's charges "
+                             "speed it up. Quicker swings stay basic attacks, with less damage and no on-hit effects.";
+            text+=refused;
+            if(at.right)text+=" Holding the trigger still casts it natively.";
+            return text;
+        }
         case Kind::Smite:
-            return at.left?"Gesture with a shield: swing or thrust the shield through a monster to cast Smite on it, with its stun and damage; keep the right trigger released. "
+            return at.left?"Cast On Strike with a shield: swing or thrust the shield through a monster to cast Smite on it, with its stun and damage; keep the right trigger released. "
                            "Without a shield, the left trigger casts it at what you point at.":
                            "Press to cast it at what this hand points at. On the left trigger with a shield equipped, swinging or thrusting the shield into a monster casts it.";
         case Kind::Bow:case Kind::Quiver:
@@ -200,7 +215,8 @@ inline std::string Details(int skill,int slot) {
             return Classify(skill)==Kind::Quiver?
                 "With a bow: loads it into every following arrow, which flies its physical path with the skill's mana, damage and effects. Press again for basic arrows, "
                 "or another arrow skill's button to swap. Without a bow, press to cast it.":
-                "Press to cast it natively. On a trigger with a bow, drawing the string and releasing it fires the skill.";
+                "With a bow: loads it, so every following draw and release fires it as the game does - Multiple Shot's fan, Guided Arrow's homing, Strafe's volley. "
+                "Press again for basic arrows, or another arrow skill's button to swap. Without a bow, press to cast it.";
         case Kind::Javelin:
             return at.right?"Gesture with a javelin: the trigger arms your throw; throw by hand and let go to cast it along the throw, with its own mana and effects, using up a javelin. "
                             "Without a javelin, press to cast it.":
@@ -216,36 +232,46 @@ inline std::string Details(int skill,int slot) {
                             "within the skill's reach. A quick press casts where you point; holding the trigger still casts natively.":
                             "Press to cast it natively, aimed by this hand. On the right trigger you can throw it by hand to place it where it lands.";
         case Kind::Pump:
-            return "Gesture with either hand, from any slot: make a fist (hold the grip, trigger free) below your head and punch it straight up past "
+            return "Gesture with either hand, from any slot or none (the MOTIONS page): hold both grips, triggers free, a fist below your head, and punch it straight up past "
                    "your head. Each punch casts one hammer, with the skill's own mana and spiral; punching faster than your cast rate does nothing more. "
                    "Bring the fist back down to punch again: a fist held up high never repeats. Pressing this slot still casts it natively.";
         case Kind::Punch:
-            return "Gesture with the weapon hand, from any slot: make a fist (hold the grip, trigger free) drawn back near your body and punch it "
+            return "Gesture with the weapon hand, from any slot or none (the MOTIONS page): hold both grips, triggers free, the fist drawn back near your body, and punch it "
                    "straight out, extending the arm. You charge the monster the hand points at, or the spot, with the skill's own mana and hit. "
                    "Draw the fist back in to punch again. A monster already within weapon reach also takes the thrust. Pressing this slot still casts it natively.";
         case Kind::Cross:
-            return "Gesture with either hand, from any slot, trigger free: make the sign of the cross. Touch your forehead, then your chest, then one "
+            return "Gesture with either hand, from any slot or none (the MOTIONS page), both grips held and triggers free: make the sign of the cross. Touch your forehead, then your chest, then one "
                    "shoulder and the other (left then right, or right then left), pausing briefly at each; a swing through the same places never counts. "
                    "It casts Holy Shield with its own mana, duration and glow. Pressing this slot still casts it natively.";
         case Kind::Call:
-            return "Gesture with the weapon hand, from any slot: make a fist (hold the grip, trigger free), hold the arm straight out raised about "
+            return "Gesture with the weapon hand, from any slot or none (the MOTIONS page): hold both grips, triggers free, the arm straight out raised about "
                    "45 degrees (the fist a little above your forehead), then bring the straight arm down to stop level with your shoulder. The bolt "
                    "falls on the monster your arm points at; with none there, on the game's own pick. A chop that carries on down or bends the elbow "
                    "never calls it. Mana, cast rate and the bolt stay native. Pressing this slot still casts it natively.";
         case Kind::Shape:
             return std::string(skill==weaponskills::Werewolf?
-                "Gesture, from any slot: cross both arms over your chest (each hand on the opposite side), bow forward over them, then wrench upright "
+                "Gesture, from any slot or none (the MOTIONS page), both grips held: cross both arms over your chest (each hand on the opposite side), bow forward over them, then wrench upright "
                 "while flinging both arms up and out.":
-                "Gesture, from any slot: raise both hands above your head, hold them there a moment, then slam them down together to waist height or lower.")+
-                " Performing it again in form changes you back. The skill's own mana and transformation stay native; hands must be free (trigger "
-                "released, nothing held). Pressing this slot still casts it natively.";
+                "Gesture, from any slot or none (the MOTIONS page), both grips held: raise both hands above your head, hold them there a moment, then slam them down together to waist height or lower.")+
+                " Performing it again in form changes you back. The skill's own mana and transformation stay native; triggers released, nothing "
+                "held. Pressing this slot still casts it natively.";
         case Kind::Native:break;
     }
     return std::string(at.trigger?"Press the trigger":"Press the button")+" to cast it natively, aimed by this hand: at the monster you point at, or where you point.";
 }
-// A gesture from this slot with the right equipment.
+// A gesture from this slot with the right equipment: a body motion that casts it (the sign of
+// the cross, a shapeshift, a hammer punch), a bow draw or a throw.
 inline bool Gesture(int skill,int slot) {
     const char* text=Line(skill,slot);
     return text[0]=='G'&&text[1]=='e'&&text[2]=='s';
 }
+// Cast On Strike from this slot (Cal, 2026-11-03: "a better identifier" than Gesture for the
+// melee strike skills, Fury/Zeal, Double Swing/Frenzy and the shield's Smite): a landed swing
+// or shield bash casts it. Like a gesture it needs a trigger slot.
+inline bool CastOnStrike(int skill,int slot) {
+    const char* text=Line(skill,slot);
+    return std::string(text).rfind("Cast On Strike",0)==0;
+}
+// Either: the slot's skill is cast by a motion, not by pressing.
+inline bool ByMotion(int skill,int slot) {return Gesture(skill,slot)||CastOnStrike(skill,slot);}
 }

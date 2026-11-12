@@ -18,7 +18,9 @@
 #include "logging.h"
 #include "shield_guard.h"
 #include "guard_strain.h"
+#include "../steamvr/hit_reactions.h"
 #include "melee.h"
+#include "projectiles.h"
 #include "native_ui_signatures.h"
 #include "../steamvr/transport.h"
 
@@ -76,6 +78,7 @@ std::atomic<uint32_t> guardLateMs{200};
 std::atomic<unsigned> lateParries{0};
 bool guardChecked=false;
 struct GuardShared {framevr::guard::State state;uint64_t session=0,at=0;float upm=1;bool eligible=false;
+    bool claws=false;   // the guard is two claws crossed (guard::Crossed), not a shield
     framevr::guard::Debug debug{};uint32_t debugMonster=UINT32_MAX;
     uint32_t blockMonster=UINT32_MAX;int32_t blockDurability=-1;};   // the last blocked melee hit, for a late parry
 std::mutex guardMutex;GuardShared guard;
@@ -132,6 +135,9 @@ std::atomic<bool> arDamage{false};std::atomic<float> arFloor{0};
 thread_local int swingChance=-1;     // this swing's native to-hit %, -1 = not seen
 thread_local float swingRecovery=1;  // this stroke's recovery factor (melee.cpp)
 thread_local bool swingFirst=true;   // this contact is its stroke's first creature (melee.cpp)
+// Hit reactions (hit_reactions.h): what this swing asks of its monster, what its record took, and that
+// record's result flags as the game set them (-1 = no record seen).
+thread_local uint8_t swingReaction=0,swingReacted=0;thread_local int swingFlags=-1;
 thread_local bool swingClean=false;  // this swing's life write was a riposte's (a clean hit)
 std::atomic<unsigned> scaledHits{0},chanceUnseen{0};
 std::atomic<int> lastChance{-1};std::atomic<float> lastRecovery{1},lastFactor{1};
@@ -440,6 +446,9 @@ std::atomic<unsigned> defenseScaled{0},defenseUnseen{0};std::atomic<int> lastDef
 constexpr uint64_t BlockRateRva=0x347da0;
 using BlockRateFn=int(*)(uintptr_t);
 std::atomic<bool> chipEnabled{false};std::atomic<float> chipScale{1};
+// [gameplay] guard_strain_defense_floor: the player's Defense eases each block's guard strain (guard_strain.h
+// DefenseShare, by the blocked attack's to-hit chance); this share is left at no chance (1 = Defense ignored).
+std::atomic<float> strainDefenseFloor{.25f};
 std::atomic<unsigned> chipHits{0},chipLanded{0};std::atomic<int> lastChipRate{-1};
 struct ChipHit {uintptr_t attacker=0,defender=0;float factor=1;int mana=-1;uint64_t at=0;};
 thread_local ChipHit chipHit;
@@ -946,6 +955,26 @@ uint64_t ApplyDamage(uintptr_t game,uintptr_t attacker,uintptr_t defender,int fl
     bool cleared=quiet&&clearReactions();
     const auto result=originalApplyDamage(game,attacker,defender,flag,damage);
     if(quiet&&clearReactions())cleared=true;
+    // Hit reactions (hit_reactions.h): a physical swing's own landed, ungated hit on its monster asks the
+    // executor for the stagger or the knockback its stroke earned, the same two flags, set where a quiet
+    // contact's are cleared. Never a dying monster's, a missile's, or another unit's record.
+    if(!flag&&!gated&&hitReactions&&damage&&swingReaction&&swingTarget!=NoSwing&&
+       Read(attacker,attackerType)&&attackerType==0&&Read(defender,defenderType)&&defenderType==1) {
+        uint32_t id=0;int dealt=0;uint16_t flags=0;
+        if(Read(defender+8,id)&&id==swingTarget&&Read(damage+0x134,dealt)&&dealt>0&&Read(damage+4,flags)) {
+            using namespace framevr::hitreact;
+            swingFlags=flags;
+            const uint16_t asked=Flags(flags,swingReaction);
+            if(asked==flags||framevr::WriteMemory(reinterpret_cast<void*>(damage+4),&asked,sizeof asked))
+                swingReacted=(flags&FlagDies)?uint8_t(0):(asked&FlagKnockback)?uint8_t(Knockback):(asked&FlagGetHit)?uint8_t(Stagger):uint8_t(0);
+        }
+    }
+    // Combat walk (Cal, 2026-11-02): a monster's hit or missile that would have hit
+    // (not the would-have-hit gate's miss) dealing damage to the local hero.
+    if(damage&&!gated&&Read(attacker,attackerType)&&(attackerType==1||attackerType==3)) {
+        uint32_t hero[3]{},id=0;int dealt=0;
+        if(Read(defender,hero)&&hero[0]==0&&LocalPlayerId(id)&&hero[2]==id&&Read(damage+0x134,dealt)&&dealt>0)projectiles::CombatWalk(1);
+    }
     if(cleared)++quietHits;
     tapScope=savedTap;damageFlag=savedFlag;
     damageRecord=saved;damageAttacker=savedAttacker;return result;
@@ -1280,6 +1309,12 @@ uint64_t NativeCallerRva(uintptr_t caller) {
 int GuardedBlock(uintptr_t game,uintptr_t attacker,uintptr_t defender,int avoid,int block,Guard g,uint32_t monster,bool inReach,uint64_t parryAt,framevr::strain::Rank rank,uintptr_t caller) {
     int32_t durability=ServerShieldDurability(defender);   // before this block wears the shield
     if(durability<0)durability=gamestate::LeftDurability();
+    // The guard strain this blow brings if the shield takes it: the attacker's rank, eased by the player's Defense -
+    // the native to-hit chance its hit check (just run, before this block roll) had against it (guard_strain.h).
+    int strainChance=-1;
+    if(incomingHit.attacker&&incomingHit.defender==defender&&GetTickCount64()-incomingHit.at<=IncomingWindowMs&&
+       (incomingHit.attacker==attacker||incomingHit.missile))strainChance=incomingHit.chance;
+    const float strainWeight=framevr::strain::RankWeight(rank)*framevr::strain::DefenseShare(strainChance,strainDefenseFloor.load(std::memory_order_relaxed));
     // A broken guard leaks: the block becomes a chip (see chipEnabled).
     ChipHit chip{};
     if(g==Guard::Block&&chipEnabled.load(std::memory_order_relaxed)&&damageScaleReady.load(std::memory_order_relaxed)&&framevr::GuardBroken()) {
@@ -1302,17 +1337,34 @@ int GuardedBlock(uintptr_t game,uintptr_t attacker,uintptr_t defender,int avoid,
     }
     if(guardTrace.load(std::memory_order_relaxed)) {
         const auto rva=NativeCallerRva(caller);
-        char line[320];snprintf(line,sizeof line,
-            "Frame guard native: monster=%u rank=%s verdict=%s block_flag=%d avoid_flag=%d result=%d roll_served=%d durability=%d caller=0x%llx would_hit=%d",
+        char line[384];snprintf(line,sizeof line,
+            "Frame guard native: monster=%u rank=%s verdict=%s block_flag=%d avoid_flag=%d result=%d roll_served=%d durability=%d caller=0x%llx would_hit=%d strain=%.2f (chance to hit %d%%)",
             monster,framevr::strain::RankName(rank),g==Guard::Parry?"PARRY":g==Guard::Block?"BLOCK":"OPEN",block,avoid,result,int(served),durability,(unsigned long long)rva,
-            lastIncomingVerdict);
+            lastIncomingVerdict,strainWeight,strainChance);
         framevr::logging::Write(line);
     }
-    if(!served)++guardUnserved; // native never reached its block roll (dodged/avoided first, or cannot block)
+    bool claws=false;
+    {std::lock_guard lock(guardMutex);claws=guard.claws&&guard.session==gamestate::LocalPlayer();}
+    if(!served) {
+        ++guardUnserved; // native never reached its block roll (dodged/avoided first, or cannot block)
+        // Crossed claws with no block of the game's to roll (Weapon Block not learned): the blow is turned at its
+        // life write, its physical part cut to nothing, as a chip through a broken guard is cut down. Only a blow
+        // the game calls blockable; one that was dodged writes no life, and the record lapses with its window.
+        if(claws&&g!=Guard::Open&&block&&damageScaleReady.load(std::memory_order_relaxed)) {
+            chipHit={attacker,defender,0.f,reinterpret_cast<GetStatFn>(d2rsig::Addr(GetStatRva))(defender,8,0),GetTickCount64()};++chipHits;
+            framevr::ShieldGuardImpact(false,strainWeight);
+            melee::QueueBlockSound();
+            static std::atomic<uint64_t> told{0};
+            if(const auto now=GetTickCount64();now-told.load()>1000) {
+                told=now;char line[160];snprintf(line,sizeof line,"Frame guard claws: monster=%u turned by the crossed claws (no native block to roll: its physical damage cut)",monster);
+                framevr::logging::Write(line);
+            }
+        }
+    }
     else if(chip.attacker) {
         // Lands as a chip at its life write; the shield still took it.
         chipHit=chip;++chipHits;
-        framevr::ShieldGuardImpact(false,framevr::strain::RankWeight(rank));
+        framevr::ShieldGuardImpact(false,strainWeight);
         melee::QueueBlockSound();
         if(shieldWearShare.load(std::memory_order_relaxed)>0)chipWear={attacker,defender,GetTickCount64()};   // its struck wear goes to the shield
     }
@@ -1329,13 +1381,13 @@ int GuardedBlock(uintptr_t game,uintptr_t attacker,uintptr_t defender,int avoid,
         // pending parry unless the native shield roll actually took place.
         if(g==Guard::Parry){std::lock_guard lock(guardMutex);framevr::guard::SpendParry(guard.state,parryAt);}
         const bool parried=g==Guard::Parry&&melee::QueueParry(monster,durability);
-        framevr::ShieldGuardImpact(parried,framevr::strain::RankWeight(rank));   // a block strains the guard by the attacker's rank; a parry does not
+        framevr::ShieldGuardImpact(parried,strainWeight);   // a block strains the guard by the attacker's rank, eased by Defense; a parry does not
         if(parried)++guardParries;
         else {
             // The native block's own sound never plays in first person (only the
             // haptics did, 2026-10-16): the game's block sound at the hero.
             melee::QueueBlockSound();
-            WearShield(game,defender);   // the blow met the shield; a parry spares it
+            if(!claws)WearShield(game,defender);   // the blow met the shield; a parry spares it (claws: the left hand's item is a weapon)
             // Act bosses: no late parry either (Parryable gates Judge only; a
             // blocked hit is how a late parry starts - Andariel, 2026-10-20).
             if(g==Guard::Block&&inReach&&Parryable(rank)) {
@@ -1459,6 +1511,7 @@ bool LocalPlayerUnit(uintptr_t& unit) {
        !Read(player.unit,header)||header[0]!=0||header[2]!=player.id)return false;
     unit=player.unit;return true;
 }
+bool ActBoss(uintptr_t unit){return AttackerRank(unit)==framevr::strain::Rank::PrimeEvil;}
 bool UnitStat(uintptr_t unit,int stat,int& value) {
     if(unit<0x10000||!d2rsig::Check(GetStatRva,GetStatSig,sizeof GetStatSig))return false;
     value=reinterpret_cast<GetStatFn>(d2rsig::Addr(GetStatRva))(unit,stat,0);return true;
@@ -1480,6 +1533,7 @@ void ConfigureLateParry(uint32_t ms) {guardLateMs=std::min<uint32_t>(ms,400);}  
 void ConfigureEnemiesAlwaysHit(bool on) {enemiesAlwaysHit=on;}
 void ConfigureShieldWear(int share) {shieldWearShare=std::clamp(share,0,100);}
 void ConfigureGuardChip(bool on,float scale) {chipEnabled=on;chipScale=std::clamp(std::isfinite(scale)?scale:1.f,0.f,4.f);}
+void ConfigureGuardStrainDefense(float floor) {strainDefenseFloor=std::clamp(std::isfinite(floor)?floor:.25f,0.f,1.f);}
 float GameVolume() {
     static std::mutex m;static ULONGLONG checkAt=0;static FILETIME seen{};static float volume=-1;
     std::lock_guard lock(m);
@@ -1498,6 +1552,9 @@ uint32_t PhysicalSwing(uint32_t target) {
 }
 float SwingRecovery(float factor) {const float was=swingRecovery;swingRecovery=factor;return was;}
 bool SwingFirst(bool first) {const bool was=swingFirst;swingFirst=first;return was;}
+uint8_t SwingReaction(uint8_t reaction) {const auto was=swingReaction;swingReaction=reaction;swingReacted=0;swingFlags=-1;return was;}
+uint8_t SwingReacted(int* flags) {if(flags)*flags=swingFlags;return swingReacted;}
+framevr::strain::Rank MonsterRank(uintptr_t unit){return AttackerRank(unit);}
 void ConfigureArDamage(bool on,float floor) {arDamage=on;arFloor=std::clamp(floor,0.f,1.f);}
 void NoteRiposte(uint32_t monster) {
     if(riposteMs.load()==0)return;   // a riposte is worth having with no bonus: it is a clean hit
@@ -1576,7 +1633,7 @@ void ConfirmParry(uint64_t swing) {
     ++guardParries;++earlyParries;framevr::ShieldGuardImpact(true);
 }
 void PublishGuard(uint64_t session,bool eligible,bool posed,const framevr::guard::Pose& pose,
-                  bool handOk,bool leftShield) {
+                  bool handOk,bool leftShield,bool claws) {
     const auto now=GetTickCount64();const auto t=GuardTuning();
     uint64_t lateAfter=0;bool late=false,raised=false,newSwing=false,missed=false;
     uint32_t lateMonster=UINT32_MAX;int32_t lateDurability=-1;   // a late parry to queue (UINT32_MAX = none)
@@ -1605,6 +1662,7 @@ void PublishGuard(uint64_t session,bool eligible,bool posed,const framevr::guard
     }
     // A parry swing whose window ran out unspent: tell the shield hand, once.
     if(eligible&&guardEnabled.load(std::memory_order_relaxed)&&framevr::guard::ParryMissed(guard.state,now,t)){missed=true;++parryMisses;}
+    guard.claws=eligible&&claws;
     guard.session=session;guard.eligible=eligible;guard.upm=std::max(1.f,guard.state.surface.unitsPerMetre);guard.at=now;
     raised=eligible&&guard.state.raised;
     // Trace: where the posed shield sits relative to the body, every 2 s, so a

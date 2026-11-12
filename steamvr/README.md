@@ -38,7 +38,7 @@ FlatVR are not required by this build.
   rendered VR coordinates for the player guard and enemy contact volumes. Captured
   cave regressions and teleport/miss checks pass. The owner reports "it all works"
   after the offline retest; logs confirm native cave contacts and normal exit.
-- First-load and settings-menu T-pose calibration save standing eye height and
+- First-load and settings-menu T cross calibration save standing eye height and
   controller span, fitting per-rig arm proportions with physical controller
   scale. Dominant-hand grip over either shoulder requests the opposite native
   weapon set; hip anchors are removed. See [BODY_CALIBRATION.md](BODY_CALIBRATION.md).
@@ -129,11 +129,11 @@ a third scene for the monitor. Desktop presentation still has overhead;
 suppressing it safely is an open performance task. Do not minimize the game as
 a workaround: background/focus handling also affects input and frame pacing.
 
-VR Settings > Performance > **Eyes drawn per frame** (Both or One by turns) chooses how the two eyes of each
+VR Settings > Graphics > Performance > **Eyes drawn per frame** (Both or One by turns) chooses how the two eyes of each
 headset frame are drawn:
 
-- **Both eyes** draws the left eye, then the right with the game time held.
-- **By turns**, the default, draws one eye per game frame, alternating. The headset gets that
+- **Both** draws the left eye, then the right with the game time held.
+- **One by turns**, the default, draws one eye per game frame, alternating. The headset gets that
   eye fresh and the other eye's last image turned on the GPU from the pose it
   was drawn at to the current one, head, stick and mouse turns included, and
   moved with the scene depth it was drawn with: a grid over its image, each
@@ -235,15 +235,15 @@ installer sets it for new installs, and an upgrade keeps the existing value.
 With the conservative wait each frame takes the CPU's time plus the GPU's,
 and at 90 Hz SteamVR then paces the game at half (By turns at 3128 square:
 43-46 frames/s, against 86-88 with the wait deferred). While the wait is not
-deferred, the Performance page shows a warning and a **Defer GPU wait** button that
+deferred, Graphics > Performance and Graphics > Frames show a warning and a **Defer GPU wait** button that
 turns it on (Apply saves it; it applies live), and the console says so once.
-The Performance page also warns while the game's Vertical Sync is on or its
+The same readout also warns while the game's Vertical Sync is on or its
 anti-aliasing is anything but FXAA (the game's Options > Video). It reads the
 mod's own game settings, `Saved Games\Diablo II Resurrected\mods\<mod>\Settings.json`,
 which the game keeps apart from the unmodded game's
 `Saved Games\Diablo II Resurrected\Settings.json`.
 
-The Performance page holds every setting that changes the frame rate, and under them
+Graphics > Performance and Graphics > Frames hold the settings that change the frame rate, and under them
 the last second's frames as the render thread measured them: frames per
 second, the game's drawing (one eye by turns, both with Both eyes), its update,
 the mod's own work and the wait for the headset. It says whether the CPU's part
@@ -252,7 +252,7 @@ refresh. Drawing grows with what is in view, the draw distances and the game's
 shadows, and hardly with resolution. The game's own graphics options are shown
 as it last saved them; change those in its Options > Video.
 
-VR Settings > Performance > **Frame generation** (experimental, Off by default) runs
+VR Settings > Graphics > Frames > **Frame generation** (experimental, Off by default) runs
 [OFXR Bridge](https://github.com/tig3rmast3r/OFXR-Bridge) by tig3rmast3r
 (LGPL-3.0-or-later), an OpenXR API layer that adds a frame made by optical flow
 between two the game draws. On native Windows, Setup downloads its pinned
@@ -265,17 +265,17 @@ nothing is registered: while the setting is on, the mod adds that folder to
 restart; Off while it is loaded asks it to step aside at once. FidelityFX runs
 on any graphics card; NVIDIA uses the optical flow hardware of RTX and GTX 1660
 cards, with its quality (Slow, Medium, Fast) and scale (100%, 75%, 50%) as
-**NVIDIA flow quality** and **NVIDIA flow scale** on the **More** page while NVIDIA is
-chosen (Performance shows 8 rows), sent to the loaded layer live through its
+**NVIDIA flow quality** and **NVIDIA flow scale** under it while NVIDIA is
+chosen, sent to the loaded layer live through its
 control API. The Frame generation row ("Now: active") and its help card, and the log,
 say whether it is off, waiting for a restart, active, bypassed or failed. While it runs it doubles the frame time the game
 is given, so the game draws every other headset frame (45 of 90) and the
-bridge makes the rest: Both eyes then shows each eye half its frames for real,
-By turns only a quarter (22 a second, where By turns alone ran 83-89 frames on
-the owner's PC). So it runs with Both eyes only: by turns the loaded bridge is
-asked to step aside, and Both eyes brings it back, both live. VR Settings
-shows its rows and the Performance page's line about it with Both eyes only: chosen
-By turns, they go at once, before Apply. The bridge takes over every color swapchain whose images are listed
+bridge makes the rest: Both then shows each eye half its frames for real,
+One by turns only a quarter (22 a second, where One by turns alone ran 83-89 frames on
+the owner's PC). So it runs with Both only: on One by turns the loaded bridge is
+asked to step aside, and Both brings it back, both live. On VR Settings > Graphics > Frames
+its rows gray at once on One by turns, before Apply, with a line above them saying why.
+Eyes drawn per frame sits on top of that page too, the same setting as on Performance. The bridge takes over every color swapchain whose images are listed
 through it (three more swapchains and an optical flow pipeline each); with the
 mod's panels SteamVR ran out of swapchains, and menus fell back to the flat
 panel. While it is loaded the mod lists the panels' images through the
@@ -297,7 +297,7 @@ If the loader does not list the layer (a game run
 as administrator ignores `XR_API_LAYER_PATH`) or the instance fails with it,
 the game starts without it; Proton's WineOpenXR has no API layers. The
 generated frames come from color alone, so moving things and head turns can
-show artifacts. While frame generation is active the Perf page shows no frame
+show artifacts. While frame generation is active the readout shows no frame
 rate: with a menu open the bridge stops generating (Both eyes ran 30 pairs a
 second at 90 Hz with VR Settings up, 45 at 45 Hz doubled in play), so its
 numbers would be the menu's. It points to fpsVR or SteamVR's performance graph
@@ -312,9 +312,15 @@ depth buffer; in VR the fog and sky read the mod's own depth (on the flat menu
 panel and outside VR they need ReShade's). The plugin writes it into
 ReShade.ini's `[ADDON] DisabledAddons` before ReShade loads, so a change
 applies after a restart; without the key ReShade.ini is left as it is.
+A new full install ships ReShade.ini with the add-on off (`DisabledAddons=Generic
+Depth`) and no `reshade_depth` key; an update keeps the player's ReShade.ini, so
+earlier installs keep it on until `reshade_depth=0` is set. With it off, the fog
+and sky outside VR and on the flat menu have no depth and stay off (the effect
+sees ReShade's 1x1 empty texture and returns the picture unchanged);
+`reshade_depth=1` turns it back on.
 
-The choice is stored as `[stereo] rendering` (0 Both eyes, 1 By turns,
-2 Replay; missing or invalid is By turns) and applies live. Every 10 seconds the log reports a
+The choice is stored as `[stereo] rendering` (0 Both, 1 One by turns,
+2 Replay; missing or invalid is One by turns) and applies live. Every 10 seconds the log reports a
 `vrcam: eyes by turns` line with frames per second, the time spent in each part
 of a frame, how many other eyes were moved with depth or only turned, and how
 many frames went as pairs while moving.
@@ -343,7 +349,7 @@ Hold **left grip**, then **click the left stick** to open or close the native
 inventory/character/skills menu. This works even when the runtime reserves the
 controller's menu button. A plain stick click still toggles that hand's wheel
 with motion controls enabled. Release the stick before another menu toggle.
-Reset eye height using **VR Settings > Body > Height and arm span > Set eye height**. F11 also resets height
+Reset eye height using **VR Settings > Comfort > Body > Height and arm span > Set eye height**. F11 also resets height
 as part of its full camera recenter, including horizontal position and facing.
 
 Each saved-game load calibrates from the current headset position at the first
@@ -386,7 +392,7 @@ reduced and foveation had no visible or GPU effect. Unsupported devices/command
 lists fall back to full quality. Immutable masks are uploaded once per viewport;
 routine draws do not upload or wait for them.
 
-VR Settings > Performance > **Edge detail reduction** (available when **Lower detail at edges**
+VR Settings > Graphics > Performance > **Edge detail reduction** (available when **Lower detail at edges**
 is Fixed or Eye tracked) chooses how much detail is reduced:
 
 | Strength | Fixed protected radius | Gaze protected radius | Periphery |
@@ -655,6 +661,16 @@ for its readback and would hide that optimization. Two timestamp submissions
 and scope measurements add diagnostic overhead. Do not compare a profiled
 run against an unprofiled run as if all timing changes were optimizations.
 
+To see where the thread that draws the eyes spends an eye pass (the game, the
+GPU driver, D3D12, ReShade, this mod, waiting), change `[debug] draw_sampler`
+to a new number other than 0 while in the world. The draw-thread sampler runs
+for `draw_sampler_seconds` (30), reports as `Frame draw sampler:` lines and in
+`d2r-vr-draw-sampler.txt` beside the frame log, and costs the passes a few
+percent while it runs. It also times the game's render tasks and samples the
+threads that run the ones named by `draw_sampler_tasks`;
+[PERFORMANCE.md](PERFORMANCE.md#draw-thread-sampler-november-10)
+explains the tables. Set it back to 0 afterwards.
+
 The October 10 development performance build adds generation-invalidated
 per-thread pipeline lookup caches, Windows SRW locks for VRS/UI callbacks,
 local guarded memory copies, per-instance portal batch classification, sparse
@@ -742,7 +758,7 @@ Set 0 to restore runtime-recommended projections. See the
 [OpenXR projection-view contract](https://registry.khronos.org/OpenXR/specs/1.0/man/html/XrCompositionLayerProjectionView.html).
 
 `[render] defer_gpu_wait=1` is set by the installer; a missing key means 0, and
-VR Settings > Performance offers it while it is off (see Eyes drawn per frame above). Image
+VR Settings > Graphics > Performance and Frames offer it while it is off (see Eyes drawn per frame above). Image
 copies and state restoration are submitted on the D3D12 queue bound to OpenXR;
 completion is checked before each eye's copy allocator is reused and before
 shutdown, instead of blocking the CPU before every image release. Set it to 0
@@ -775,7 +791,10 @@ no image-resolution/bitrate measurement. `--since`/`--until` accept ISO timestam
 include a UTC offset when analyzing logs away from the capture machine's timezone.
 
 - Runtime log: `mods/D2R-PCVR/d2rloader/logs/d2r-vr-frame.log` in the game folder
-  (`mods/pcvr-dev/d2rloader/logs/d2r-vr-frame.log` for developer mode). A bounded
+  (`mods/pcvr-dev/d2rloader/logs/d2r-vr-frame.log` for developer mode). It holds
+  the current session; each start renames the one before to
+  `d2r-vr-frame.previous.log` (replacing the older one), or appends when that
+  rename fails, and a session's file stops at 64 MB (`log_rotation.h`). A bounded
   queue writes batches on a worker without forced disk flushes. The old SDK log,
   `d2r-pcvr-vrcam.log` (`d2r-vr-vrcam.log` up to 0.3.15), remains for loader/startup messages. Live syscall sampling
   identified repeated main-thread `fsync()` waits on that old file during hitches.

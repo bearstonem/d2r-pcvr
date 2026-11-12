@@ -120,6 +120,60 @@ def restore_plan(game, chain, restore_video=False):
     return updates
 
 
+def game_gone(game):
+    """The game was uninstalled, or its folder deleted, before the mod (#328).
+
+    Steam and Battle.net remove D2R.exe with the game and leave what they did
+    not install, so the folder may still hold the mod's own files."""
+    return not (Path(game) / 'D2R.exe').is_file()
+
+
+def leftover_plan(game, record, roots):
+    """Edits and a note for the mod's files left where a game used to be.
+
+    Only files the installation backups list are touched, exactly as for an
+    installed game. Without a usable backup nothing in the folder is changed:
+    there is no game left to protect, so that does not stop the removal."""
+    game = Path(game)
+    if not game.is_dir():
+        return {}, f'The game folder {game} no longer exists; there was nothing of the mod left to remove there.'
+    try:
+        left = (game / install.RECORD).is_file() or mod_identity.survey(game, roots).ours
+        if not left:
+            return {}, f'The game is no longer installed in {game}, and none of the mod\'s files are left there.'
+        chain = snapshots(game, record, roots)
+        updates = restore_plan(game, chain, restore_video=False)
+    except (OSError, ValueError, KeyError) as error:
+        return {}, (f'The game is no longer installed in {game}. The mod files left in that folder were not '
+                    f'touched, because their installation backup could not be used ({error}). '
+                    'You can delete that folder yourself; no game is left in it.')
+    return updates, (f'The game is no longer installed in {game}. The mod files left in that folder are removed; '
+                     'anything else in it is kept.')
+
+
+def former_game_folder(root, store):
+    """The folder a removed game was in, from this helper's own records."""
+    try:
+        result = json.loads((root / 'setup-result.json').read_text(encoding='utf-8'))
+        if result.get('store', store) == store and isinstance(result.get('game'), str) and result['game']:
+            return Path(result['game'])
+    except (OSError, ValueError, AttributeError):
+        pass
+    return None
+
+
+def ask_former_game(default):
+    print('\nEnter the folder the game was installed in when the mod was added, even if it no longer exists.')
+    while True:
+        answer = input('Former D2R game folder' + (f' [{default}]' if default else '') + ': ').strip().strip('"')
+        if not answer and default is not None:
+            return Path(default).resolve()
+        path = Path(os.path.expandvars(answer)).expanduser() if answer else None
+        if path is not None and path.is_absolute():
+            return path.resolve()
+        print('Enter the full path, for example C:\\Program Files (x86)\\Diablo II Resurrected.')
+
+
 def apply_updates(updates, backups, require_closed):
     """Back up and stage all edits, checking for races and rolling back failures."""
     require_closed()
@@ -194,17 +248,39 @@ def main():
     steam = setup.folder('Steam installation folder', setup.steam_location(), 'steam.exe')
     default = (setup.app_folder(setup.libraries(steam), steam_config.APP_ID) if store == 'steam'
                else setup.battlenet_location())
-    game = setup.folder('D2R game folder to remove the mod from', default, 'D2R.exe').resolve()
-    detected, _ = storage_config(game)
-    if detected != store:
-        raise ValueError(f'This is a {detected} installation, but {store} was selected.')
-    record = install.read_record(game)
     roots = [ROOT / 'setup-backups/game', ROOT / 'build-frame/backups']
+    # The game was not found where its launcher installs it: it may be in a folder of the player's own, or it
+    # may have been uninstalled before the mod (#328) - the folder prompt below would then never be satisfied.
+    gone = default is None and setup.choose('The game was not found automatically. Is it still installed?', [
+        'Yes - I will select its folder',
+        'No - the game was uninstalled or its folder deleted; remove what is left of the mod']) == 1
+    if gone:
+        game = ask_former_game(former_game_folder(ROOT, store))
+        gone = game_gone(game)
+        if not gone:
+            print(f'D2R.exe is still in {game}: removing the mod from that installed game.')
+    else:
+        game = setup.folder('D2R game folder to remove the mod from', default, 'D2R.exe').resolve()
+    updates = {}
     found = mod_identity.survey(game, roots)
-    installed = found.ours or (game / install.RECORD).is_file()
+    note = ''
+    if gone:
+        try:
+            record = install.read_record(game) if game.is_dir() else {}
+        except (OSError, ValueError, KeyError):
+            record = {}  # An unreadable receipt: the shortcuts are still found by the game's path.
+        leftovers, note = leftover_plan(game, record, roots)
+        updates.update(leftovers)
+        print('\n' + note)
+        installed = False
+    else:
+        detected, _ = storage_config(game)
+        if detected != store:
+            raise ValueError(f'This is a {detected} installation, but {store} was selected.')
+        record = install.read_record(game)
+        installed = found.ours or (game / install.RECORD).is_file()
     if found.other == mod_identity.OTHER_MOD:
         print('D2R VR (another VR mod) is also installed here; its d2rl-vrcam.dll and d2r_vr.ini are kept.')
-    updates = {}
     if installed:
         while True:
             try:
@@ -220,7 +296,7 @@ def main():
             'Keep current video settings (shared by Steam and Battle.net)',
             'Restore video settings from before the first mod install']) == 1
         updates.update(restore_plan(game, chain, restore_video))
-    else:
+    elif not gone:
         print('No installed mod found. Setup will check for remaining VR shortcuts.')
     accounts = setup.profiles(steam)
 
@@ -242,7 +318,11 @@ def main():
     # Steam flushes its profile on exit. Build edits from those final bytes.
     updates.update(steam_updates())
     backup = apply_updates(updates, ROOT / 'setup-backups', setup.require_closed)
-    print('\nRemoval complete. Use the original Steam or Battle.net Play button for desktop play.')
+    if gone:
+        print('\nRemoval complete. Matching VR shortcuts were removed from local Steam accounts.')
+        print(note)
+    else:
+        print('\nRemoval complete. Use the original Steam or Battle.net Play button for desktop play.')
     if backup is not None:
         print(f'Files changed during removal were backed up in: {backup}')
     else:

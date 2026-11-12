@@ -14,7 +14,26 @@
 // The cut follows head pitch: level, it is LevelCm; it eases (smoothstep) toward UpCm looking up and DownCm looking down
 // and reaches them at PitchSpanDeg. The parts of the head and helm in front of the eyes fall inside it; the three values
 // were tuned in the headset (a Paladin, helm on and off) so nothing of the head shows at any pitch, and looking down the
-// small cut keeps the top of the chest.
+// small cut keeps the top of the chest. Looking up, 13 cm was short for a tester (2026-11-05, the Den of Evil: "when I
+// look up, a warped image in a circle begins to appear in my vision ... Gets bigger the more you lift your head"): the
+// hero's head stays upright while yours tips back, so looking up sees through its crown and the helm on it. Up is 22 cm
+// now. [arms] head_cut_level, head_cut_up and head_cut_down (ini only) set the three (CleanCut), read live.
+//
+// Open: helms that reach past the cut (#429, the dev Druid's Totemic Mask; on Discord "the teeth hover in front of your
+// face" with a wolf head). A Druid pelt is an animal's head worn over the hero's, its snout and teeth past 11 cm looking
+// level. A deeper cut would also cut what you bring to your face (the bow's nock at the cheek, a potion at the mouth, a
+// warcry's fist), and shrinking the head while a pelt is worn (tried 2026-11-08) was refused by the owner: it reads as
+// the head just removed. Pending: the head and helm left out of the eye views' draws only, kept in the shadow pass.
+//
+// The cut moves the near from [camera] near (0.2 world units as installed, about 4 cm) to the cut, 2.6 times level and 5
+// looking up, when it switches on or off (a shapeshift, F4). Readers a pass behind see the other pass's near: the depth
+// fog's one NearPlane uniform, which ReShade rewrites at each present before the GPU has run the last pass's effects
+// (vrcam g_tech). That far off, depth turns into distances 2.6-5 times too far or near, and a cave's fog (dark) or
+// ceiling covers that pass for a frame - a black flash (on Discord: "black flickering at times"). So the eye's near moves
+// at most StepRatio from one pass to the next (NearEase): down always (a cut kept a few passes longer only hides more),
+// up too unless a kept head needs the cut at once (a pose kept it within CutLiveMs). The pitch moves the cut less than
+// that a pass (8 % at 200 deg/s and 90 passes a second, 13 % at 300). The pose only keeps the head once the near has
+// reached the cut (atCut), so easing up delays keeping the head (17 passes at most from 0.05), never the cut it needs.
 //
 // Order between the pose thread and the render thread (Handshake): a pose keeps the head only while the eye's cut is live
 // (raised within CutLiveMs), and the eye holds the last cut for CutLiveMs after the last pose that kept the head. So a pose
@@ -23,6 +42,7 @@
 // shapeshift form keeps the old shrink, and the eye does not cut there.
 //
 // This header is pure (no game, no Windows): steamvr/head_shadow_test.cpp. The game side is vr/head_shadow.cpp.
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstddef>
@@ -31,7 +51,7 @@
 namespace framevr::headshadow {
 
 constexpr float LevelCm = 11.f;        // the cut looking level, cm at the player's scale
-constexpr float UpCm = 13.f;           // looking up (the end value, reached at PitchSpanDeg)
+constexpr float UpCm = 22.f;           // looking up (the end value, reached at PitchSpanDeg); 13 until 2026-11-05
 constexpr float DownCm = 3.f;          // looking down
 constexpr float PitchSpanDeg = 60.f;   // about as far as a head turns up or down from level
 constexpr uint64_t CutLiveMs = 250;    // the cut counts as live this long after it was last raised, and is held this long
@@ -71,6 +91,10 @@ inline float PitchCut(float pitchDeg, float levelCm = LevelCm, float upCm = UpCm
     return w >= 1 ? end : level + (end - level) * w;
 }
 
+// A cut from the ini, cm: within 0..MaxCutCm, or the default when it is not a number.
+constexpr float MaxCutCm = 40.f;
+inline float CleanCut(float cm, float fallback) { return std::isfinite(cm) ? std::clamp(cm, 0.f, MaxCutCm) : fallback; }
+
 // The eye's near clip in world units: never nearer than the configured one, at least cutCm at the player's scale.
 // unitsPerMetre: world units per metre of the player (vrcam ScaleHeight / UserEyeHeightM). 0 or a bad scale: unchanged.
 inline float RaisedNear(float nearZ, float cutCm, float unitsPerMetre) {
@@ -79,12 +103,34 @@ inline float RaisedNear(float nearZ, float cutCm, float unitsPerMetre) {
     return std::isfinite(cut) && cut > nearZ ? cut : nearZ;
 }
 
+// The eye's near from one pass to the next (the render thread's own; see the top). Up to StepRatio either way, up at
+// once when upFree; the first pass, or one after a gap of over GapMs (a load, a menu), takes what it wants.
+struct NearEase {
+    static constexpr float StepRatio = 1.15f;   // a pass's near within 15 % of the last's
+    static constexpr uint64_t GapMs = 250;
+    float last = 0;        // the near the last pass drew with (0: none)
+    uint64_t lastAt = 0;   // its ms
+    float Step(float want, uint64_t now, bool upFree) {
+        if (!(want > 0) || !std::isfinite(want)) { last = 0; lastAt = 0; return want; }
+        float out = want;
+        const bool fresh = last > 0 && lastAt != 0 && (now <= lastAt || now - lastAt <= GapMs);
+        if (fresh) {
+            if (want < last / StepRatio) out = last / StepRatio;
+            else if (!upFree && want > last * StepRatio) out = last * StepRatio;
+        }
+        last = out;
+        lastAt = now;
+        return out;
+    }
+};
+
 // The two threads' meeting point. Pose: the skeleton hook's thread, each hero pose that would shrink the head with
-// head_shadow on. Eye: the render thread, each first-person eye projection while the head may be kept or Holding.
+// head_shadow on. Eye: the render thread, each first-person eye projection (vrcam VrProjInner).
 struct Handshake {
     std::atomic<uint64_t> cutAt{0};   // ms the eye's near last stood at the cut (0: never)
     std::atomic<uint64_t> keptAt{0};  // ms a pose last kept the head (0: never)
     std::atomic<float> heldNear{0};   // the last cut's near (world units), held while Holding
+    NearEase ease;                    // the render thread's only
     // form: a shapeshift form's rig. Kept: skip the shrink this pose (stamped before the pose is written).
     Why Pose(bool form, uint64_t now) {
         if (form) return Why::Form;
@@ -94,21 +140,27 @@ struct Handshake {
     }
     // A pose kept the head within CutLiveMs: the eye must keep the cut even with the head no longer to be kept.
     bool Holding(uint64_t now) const { return Live(keptAt.load(std::memory_order_acquire), now); }
-    struct Near { float nearZ; bool atCut, held; };
+    // nearZ: the near drawn with. atCut: it is at least this pitch's cut (the pose may keep the head); held: the hold
+    // supplied it; eased: NearEase moved it off what the pass wanted.
+    struct Near { float nearZ; bool atCut, held, eased; };
     // on: the head may be kept (head_shadow, hide_head, full body, no form). cutCm: the cut at this pitch.
     Near Eye(float nearZ, bool on, float cutCm, float unitsPerMetre, uint64_t now) {
-        Near r{nearZ, false, false};
-        if (on && cutCm > 0 && unitsPerMetre > 0 && std::isfinite(unitsPerMetre)) {
-            r.nearZ = RaisedNear(nearZ, cutCm, unitsPerMetre);   // at least the cut ([camera] near may already be past it)
+        Near r{nearZ, false, false, false};
+        const bool cutting = on && cutCm > 0 && unitsPerMetre > 0 && std::isfinite(unitsPerMetre);
+        float want = cutting ? RaisedNear(nearZ, cutCm, unitsPerMetre) : nearZ;   // ([camera] near may already be past it)
+        // The hold: a pose kept the head within CutLiveMs and this pass does not cut (switched off, a form begun, or no
+        // scale this pass): keep the last cut until the shrunk head is back.
+        const bool holding = Holding(now);
+        if (!cutting && holding) {
+            const float last = heldNear.load(std::memory_order_relaxed);
+            if (last > want) { want = last; r.held = true; }
+        }
+        r.nearZ = ease.Step(want, now, holding);
+        r.eased = r.nearZ != want;
+        if (cutting && r.nearZ >= want) {   // at the cut, not still easing up to it
             r.atCut = true;
             heldNear.store(r.nearZ, std::memory_order_relaxed);
             cutAt.store(now, std::memory_order_release);
-        }
-        // The hold: a pose kept the head within CutLiveMs (switched off, a form begun, or no scale this pass): keep the
-        // last cut until the shrunk head is back.
-        if (Holding(now)) {
-            const float last = heldNear.load(std::memory_order_relaxed);
-            if (last > r.nearZ) { r.nearZ = last; r.held = true; }
         }
         return r;
     }
@@ -129,6 +181,28 @@ struct StateLine {
         told = seen; any = true;
         return true;
     }
+};
+
+// The near from pass to pass, for the log: a jump past NearEase::StepRatio (a pass after a gap, or up at once for a
+// kept head) puts a reader a pass behind off by as much. Passes over NearEase::GapMs apart are not a jump.
+struct NearWatch {
+    float last = 0;
+    uint64_t lastAt = 0;
+    int jumps = 0;            // since the last Take
+    float from = 0, to = 0;   // the largest of them
+    bool Pass(float nearZ, uint64_t now) {
+        const float was = last;
+        const bool fresh = was > 0 && lastAt != 0 && (now <= lastAt || now - lastAt <= NearEase::GapMs);
+        last = nearZ; lastAt = now;
+        if (!fresh || !(nearZ > 0) || !std::isfinite(nearZ) || !std::isfinite(was)) return false;
+        const float ratio = nearZ > was ? nearZ / was : was / nearZ;
+        if (!(ratio > NearEase::StepRatio * 1.0001f)) return false;
+        const float largest = from > 0 && to > 0 ? std::max(from / to, to / from) : 0;
+        if (ratio > largest) { from = was; to = nearZ; }
+        ++jumps;
+        return true;
+    }
+    void Take() { jumps = 0; from = to = 0; }
 };
 
 // How far the head's bones reach from the eye, for the debug summary: the nearest and farthest bone flagged in inNeck
@@ -155,14 +229,16 @@ inline Reach HeadReach(const float* bones, const char* inNeck, int count, const 
 
 // The game side (vr/head_shadow.cpp). Not used by the pure test.
 namespace headshadow {
-// [debug] head_shadow: the 10 s summary line (off by default).
+// [debug] head_shadow: the once-a-second summary line (off by default).
 void SetTrace(bool on);
+// [arms] head_cut_level, head_cut_up, head_cut_down: the cuts in cm (CleanCut'ed), for every eye pass from now.
+void SetCuts(float levelCm, float upCm, float downCm);
 // PoseBody, just before the head shrink, only when it would shrink the head with head_shadow on in full body. form: a
 // shapeshift form's rig. bones .. unitsPerCm: the pose, for the debug summary's reach only. Returns the new hide: false
 // when the head stays whole this pose.
 bool HideHead(bool form, const float* bones, const char* inNeck, int count, const float* eye, float unitsPerCm);
-// VrProjInner, each first-person eye projection, when on or Holding(). on: the head may be kept. Returns the near clip
-// to draw with.
+// VrProjInner, every first-person eye projection, the head kept or not (the ease and the hold run on each). on: the
+// head may be kept (full body, head_shadow, hide_head, no form). Returns the near clip to draw with.
 float EyeNear(float nearZ, bool on, float unitsPerMetre, float pitchDeg);
 bool Holding();
 }  // namespace headshadow

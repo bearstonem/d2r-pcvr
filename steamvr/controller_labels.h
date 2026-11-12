@@ -43,20 +43,26 @@ inline const char* FacePath(Layout layout,int hand,bool secondary) {
     return secondary?"b/click":"a/click";
 }
 struct Labels {
-    std::array<Layout,2> hands{}; // Right, left (same order as XR actions).
+    std::array<Layout,2> hands{}; // Right, left (same order as XR actions): physical.
+    // Left-handed play (hand_role.h): the main hand (slots 0-3 and 8; hand 0 below) is the left controller,
+    // the off hand the right one, so a slot is named by the controller and the button that cast it.
+    bool leftMain=false;
     bool operator==(const Labels&) const=default;
+    int Physical(int hand)const {return leftMain?1-hand:hand;}
+    // hand: 0 the main hand, 1 the off hand (the right and the left unless leftMain).
     std::string Button(int hand,int button)const {
         if(hand<0||hand>1||button<0||button>4)return "";
         if(button==0)return "Trigger";
-        const auto face=Face(hands[hand],hand,button==2||button==4);
-        if(hands[hand]==Layout::Motion)return face;
+        const int side=Physical(hand);
+        const auto face=Face(hands[side],side,button==2||button==4);
+        if(hands[side]==Layout::Motion)return face;
         return std::string(button>=3?"Grip + ":"")+face;
     }
     std::string Slot(int slot)const {
         if(slot<0||slot>=skills::Count)return "";
         const int hand=skills::Hand(slot);
         for(int button=0;button<5;++button)if(skills::HandSlot(hand,button)==slot)
-            return std::string(hand?"Left ":"Right ")+Button(hand,button);
+            return std::string(Physical(hand)?"Left ":"Right ")+Button(hand,button);
         return "";
     }
 };

@@ -104,6 +104,7 @@ void Prefetch(const Snapshot& s) {
     if(s.equipmentKnown)for(const auto& set:s.sets)for(const auto& item:set)Get(item);
     for(const auto& belt:s.belt)if(belt.known&&belt.count)Get(belt.Next());
     for(const auto& d:effects::Definitions)if(d.skill>=0&&s.effects.Has(d.state))Get("s"+std::to_string(d.skill));
+    for(int i=0;i<s.cooldowns.count&&i<cooldowns::MaxSampled;++i)Get("s"+std::to_string(s.cooldowns.list[size_t(i)].skill));
     if(HasSummonArmy(s))for(int id=commander::SkillPhalanxDef;id<=commander::SkillFallOut;++id)Get("s"+std::to_string(id));
     Get("journal");
 }
