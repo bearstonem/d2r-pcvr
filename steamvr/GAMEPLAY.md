@@ -2986,8 +2986,10 @@ there.
   pushed straight out (chest to eye level) and stopped there a moment, like "halt!"; Decoy, both hands
   from the chest pushed together to one side; Valkyrie, the right fist raised high, then brought down
   to point at the floor where she lands.
-- Barbarian: Battle Orders, the right fist at the mouth a moment, then thrust straight up; War Cry,
-  the same, thrust forward and down; Shout, both fists at the mouth, pushed out forward together;
+- Barbarian: Battle Orders, the right fist brought to the mouth, then thrust straight up; War Cry,
+  the same, thrust forward and down; Shout, both fists brought to the mouth, pushed out forward
+  together (the three need no stop at the mouth: up to it and straight out, or swept past it and on
+  out, within half a second, casts; owner, 2026-11-11: "It should be pretty much immediate");
   Battle Command, the right fist beaten on the chest twice; Howl, both arms flung wide from the chest;
   Battle Cry, both fists at the shoulders pulled hard to the hips; Leap, both arms swung down by the
   sides then up past the head, fast (arms only, so seated too); Leap Attack, the same swing from both
