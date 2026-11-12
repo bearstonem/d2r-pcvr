@@ -120,7 +120,8 @@ bool DirectedSpellActive(); // fresh native assignment, actually casting (wheel 
 bool SpellGripsArmed();   // both grips cast a learned motion spell (spell_motion.h): the left grip takes the staff only alone
 // Both grips held for the motions now, or let go under 0.4 s ago (a motion's cast still pressing): vrcam's Loot
 // pick hands the game no item then, or the cast's press picked up the item pointed at (owner, 2026-11-05: "when
-// you use both grip buttons near loot, it tries to pick them up").
+// you use both grip buttons near loot, it tries to pick them up"), and pad A only casts (interaction::InteractOnA):
+// a motion cast through the A slot picked up the loot beside the hero (owner, 2026-11-11).
 bool SpellGripsHeld();
 bool BowSkillActive();   // a bow or crossbow skill is being cast from a button (bow ready)
 int GroundSpellSkill();   // a ground skill (spellaim::GroundTarget) being cast that lands where it is aimed: its id, or -1
