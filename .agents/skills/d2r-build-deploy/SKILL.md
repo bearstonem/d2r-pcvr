@@ -102,7 +102,7 @@ Building stages `d2rl-pcvr.dll` in `build-frame/`; it does **not** install it in
    ```powershell
    .\deps\python\python.exe steamvr/prepare_dev_scenarios.py --game "<GAME_DIR>" --plugin build-frame/windows-native/d2rl-pcvr.dll
    ```
-   *(Add `--experimental-battlenet` when targeting an opted-in Battle.net `3.3.93847` install; use `build-frame/windows-developer/d2rl-pcvr.dll` when staging a `-Developer` build.)*
+   *(Add `--experimental-battlenet` when targeting an opted-in Battle.net install; use `build-frame/windows-developer/d2rl-pcvr.dll` when staging a `-Developer` build.)*
    [`steamvr/prepare_dev_scenarios.py`](../../../steamvr/prepare_dev_scenarios.py) enforces `require_game_closed()` and `validate_game()`, creates a hash-named backup (`d2rl-pcvr.dll.before-dev-<sha256>`), performs an atomic temp-file swap (`os.replace`), and verifies the installed bytes.
 
 3. **Route C — Tracked Full Mod Installation (`steamvr/install.py`, for initial setup or full package install):**
@@ -110,7 +110,7 @@ Building stages `d2rl-pcvr.dll` in `build-frame/`; it does **not** install it in
    ```powershell
    .\deps\python\python.exe steamvr/install.py --game "<GAME_DIR>" --plugin build-frame/windows-native/d2rl-pcvr.dll --openxr-loader "<PATH_TO_OPENXR_LOADER_DLL>" --deps deps/vrdeps --preserve-settings
    ```
-   *(On native Windows, `--openxr-loader` is mandatory; for Battle.net `3.3.93847`, `--experimental-battlenet` and `--casclib <PATH_TO_CASCLIB_DLL>` are also required, and pinned runtime archives must be present in `--deps` or fetched with `--download-deps` when authorized.)*
+   *(On native Windows, `--openxr-loader` is mandatory; for Battle.net, `--experimental-battlenet` and `--casclib <PATH_TO_CASCLIB_DLL>` are also required, and pinned runtime archives must be present in `--deps` or fetched with `--download-deps` when authorized.)*
 
 4. **When to Stop and Report (No Improvisation):**
    - If `D2R.exe` or `D2RLoader.exe` is running: do **not** terminate the user's game process. Leave the built DLL staged in `build-frame/` and ask the user to close the game first.

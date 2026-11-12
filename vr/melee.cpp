@@ -37,6 +37,10 @@
 #include "../steamvr/world_coordinates.h"
 #include "../steamvr/attack_speed.h"
 #include "../steamvr/strike_skills.h"
+#include "../steamvr/bow_bash.h"
+#include "../steamvr/weapon_heft.h"
+#include "../steamvr/hit_reactions.h"
+#include "../steamvr/haptic_impact.h"
 namespace gamestate {uint64_t LocalPlayer();bool MenuOpen();uint32_t HandsKey();uint32_t WeaponSet();
     int32_t LeftDurability();bool RestoreLeftDurability(const D2RL::PluginContext*,int32_t);}
 namespace melee {
@@ -261,7 +265,8 @@ bool Allowed(const Request& r) {
     int why=-1;
     if(!now.active||r.session!=inputSession||r.session!=gamestate::LocalPlayer())why=StaleInactive;
     else if(r.sample.epoch!=now.epoch)why=StaleEpoch;
-    else if(r.sample.equipment!=now.equipment||r.sample.claws!=now.claws||r.sample.minWeaponSpeed!=now.minWeaponSpeed||r.sample.minShieldBashSpeed!=now.minShieldBashSpeed||r.sample.weapons.id[0]!=now.weapons.id[0]||r.sample.weapons.id[1]!=now.weapons.id[1])why=StaleEquipment;
+    else if(r.sample.equipment!=now.equipment||r.sample.claws!=now.claws||r.sample.minWeaponSpeed!=now.minWeaponSpeed||r.sample.minShieldBashSpeed!=now.minShieldBashSpeed||r.sample.weapons.id[0]!=now.weapons.id[0]||r.sample.weapons.id[1]!=now.weapons.id[1]||
+            r.sample.bowBash!=now.bowBash)why=StaleEquipment;   // a bow bash swung, then the string drawn: dropped
     else if(r.sample.skillSlot!=now.skillSlot||r.sample.skillOwner!=now.skillOwner||r.sample.skillContext!=now.skillContext||r.sample.strikeSkill!=now.strikeSkill)why=StaleSkill;
     else if(age>150)why=StaleAge;
     else if(gamestate::MenuOpen())why=StaleMenu;
@@ -829,14 +834,22 @@ void TraceRefusal(int kind,const Request& r,uint32_t target) {
 // sinceFull/full: the fixed cycle (combat_rules.h FixedCycle): ms since the latest full-cycle
 // attack and whether this stroke was one (-1: not decided here, e.g. Classic or a later creature).
 void TraceHit(const Request& r,uint32_t target,const char* outcome,uint64_t since,uint32_t cycle,bool onHit,const char* skill="basic",
-              uint64_t sinceFull=UINT64_MAX,int full=-1) {
+              uint64_t sinceFull=UINT64_MAX,int full=-1,float heft=1) {
     if(!trace.load())return;
-    char line[380];snprintf(line,sizeof line,"Frame melee trace: hand=%s stroke=%llu target=%u %s since_last_landed=%lld ms since_full=%lld ms full=%d cycle=%u ms %s=%.1f m/s onhit=%d would_hit=%d strike=%d %s",
+    char line[440];snprintf(line,sizeof line,"Frame melee trace: hand=%s stroke=%llu target=%u %s since_last_landed=%lld ms since_full=%lld ms full=%d cycle=%u ms %s=%.1f m/s onhit=%d would_hit=%d strike=%d %s heft=%.2f (hand %.2f of %.2f m)",
         r.sample.handIndex?"left":"right",(unsigned long long)r.sweep.stroke,target,outcome,since==UINT64_MAX?-1LL:(long long)since,
         sinceFull==UINT64_MAX?-1LL:(long long)sinceFull,full,cycle,r.sweep.thrust?"thrust":"swing",r.sweep.speed,int(onHit),
-        combat::LastSwingWouldHit(),r.sample.strikeSkill,skill);
+        combat::LastSwingWouldHit(),r.sample.strikeSkill,skill,heft,r.sweep.travel,r.sample.heft);
     framevr::logging::Write(line);
 }
+// Weapon heft (weapon_heft.h), game thread: contacts it judged, those it lightened, their summed share
+// (x1000) and the lightest, and the latest need; reported and cleared twice a second (Report).
+std::atomic<unsigned> heftContacts{0},heftLighter{0},heftShareSum{0},heftLowest{1000},heftNeedMm{0};
+// Hit reactions (hit_reactions.h), game thread only: each monster's latest stagger and knockback, and when
+// a refused one was last logged.
+framevr::hitreact::Board reactBoard;uint64_t reactQuietLogAt=0;
+// Bow bash (bow_bash.h), game thread only: landed bashes, and each stroke's monsters already judged.
+framevr::bowbash::Board bashBoard;HitSet bashJudged;
 // Dual wield (Cal, 2026-10-30): a stroke's native cycle. Native D2 merges the swinging
 // weapon's stat lists into the hero before it times the attack (D2MOO
 // UNITS_UpdateAttackAnimRateAndVelocity), so item IAS and attackrate are read here under
@@ -907,8 +920,55 @@ uint32_t DualCycle(uintptr_t player,const framevr::dualwield::Equipment& weapons
 }
 // Every weapon contact with a hostile creature feels struck: one tap per
 // stroke and creature, whether native then lands, misses or refuses it.
+// Hit reactions: the animation modes this monster has (MonStats2 row +0xF0, one bit per mode, as the game's
+// hit recovery handler reads it: bit 3 GetHit, bit 13 knockback); 0 when unreadable.
+uint32_t ModeMask(uintptr_t unit,uint32_t classId) {
+    uint8_t bank=0;uint32_t mask=0;
+    if(!Read(unit+0x1bd,bank)||bank>3||classId>4095)return 0;
+    const auto row=reinterpret_cast<uintptr_t(*)(uint8_t,int)>(d2rsig::Addr(StatsRva))(bank,int(classId));
+    return Read(row+0xf0,mask)?mask:0;
+}
+// What it is made of shapes the tap (haptic_impact.h MonsterSurface): the monster's MonStats flags, read as
+// MonsterFlags below reads them. Unread: 0, flesh.
+void FeelSurface(int hand,uint32_t target) {
+    uintptr_t game=0,self=0,data=0,stats=0;uint32_t flags=0;
+    if(LocalServer(game,self))
+        if(const auto unit=ServerUnit(game,1,target);!unit||!Read(unit+0x10,data)||data<0x10000||!Read(data,stats)||stats<0x10000||!Read(stats+0x3c,flags))flags=0;
+    framevr::ImpactSurface(hand,int(framevr::haptics::MonsterSurface(flags)),flags);
+}
 void Feel(const Request& r,uint32_t target) {
-    if(hands[r.sample.handIndex].felt.Insert(r.session,r.sweep.stroke,target))framevr::MeleeImpact(r.sample.handIndex);
+    if(hands[r.sample.handIndex].felt.Insert(r.session,r.sweep.stroke,target)){FeelSurface(r.sample.handIndex,target);framevr::MeleeImpact(r.sample.handIndex);}
+}
+// Bow bash (bow_bash.h, #443): a stroke of the bow, its string not drawn, touched this hostile monster
+// with nothing in between. Once per stroke and monster: a tap in the bow hand, then the stagger - the
+// game's own hit recovery, as a parry gives (Parry above: a mode change, no damage, no attack, no arrow,
+// experience or loot) - or why not, one log line either way. Game thread (Apply).
+void BowBash(const Request& r,uintptr_t game,uintptr_t unit,uint32_t classId,uint32_t id) {
+    if(!bashJudged.Insert(r.session,r.sweep.stroke,id))return;
+    framevr::MeleeImpact(r.sample.handIndex);
+    using framevr::bowbash::Verdict;
+    const auto now=GetTickCount64();
+    uint32_t mode=0;Read(unit+0xc,mode);   // 3: GetHit, already recovering
+    auto verdict=bashBoard.Judge(r.session,id,now,combat::ActBoss(unit),mode==3);
+    const uint64_t wait=verdict==Verdict::TooSoon?bashBoard.Wait(r.session,now):verdict==Verdict::SameMonster?bashBoard.WaitFor(r.session,id,now):0;
+    if(verdict==Verdict::Stagger) {
+        // 445E60 refuses dying monsters and those with no GetHit mode in MonStats2 (Griswold and the like).
+        const uintptr_t event[2]{0,unit};
+        if(parryReady.load()&&reinterpret_cast<HitRecoveryFn>(d2rsig::Addr(HitRecoveryRva))(game,event))bashBoard.Landed(r.session,id,now);
+        else verdict=Verdict::Refused;
+    }
+    // The bow's limb axis against straight up (world y): near 1 for a bow held upright (bow_bash.h Blade).
+    const auto limbs=r.sweep.after.tip-r.sweep.after.base;const float span=Length(limbs);
+    const float up=span>1e-4f?std::fabs(limbs.y)/span:0.f;
+    char line[300],left[40]="";
+    if(wait)snprintf(left,sizeof left," (%llu ms left)",(unsigned long long)wait);
+    if(verdict==Verdict::Stagger)
+        snprintf(line,sizeof line,"Frame bow bash: staggered monster %u (class %u, mode %u) swing=%.1f m/s bow_up=%.2f; no damage; next bash in %llu ms, this monster in %llu ms",
+            id,classId,mode,r.sweep.speed,up,(unsigned long long)framevr::bowbash::CooldownMs,(unsigned long long)framevr::bowbash::SameMonsterMs);
+    else
+        snprintf(line,sizeof line,"Frame bow bash: refused monster %u (class %u, mode %u) swing=%.1f m/s bow_up=%.2f: %s%s%s",id,classId,mode,r.sweep.speed,up,
+            framevr::bowbash::Reason(verdict),verdict==Verdict::Refused&&!parryReady.load()?" (native hit recovery not verified)":"",left);
+    framevr::logging::Write(line);
 }
 void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
     std::array<Request,24> batch;size_t n=0;
@@ -961,10 +1021,14 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                             continue;
                         }
                         if(!BodyFor(unit,header[1],r.sample.unitsPerMetre,r.sample.player.y,body)){++bodyMissing;continue;}
-                        if(!Touches(r.sweep.before,r.sweep.after,body))continue;
+                        // Melee reach pads the body for weapons and fists (not the shield); native
+                        // line collision below still refuses a hit through a wall.
+                        if(!Touches(r.sweep.before,r.sweep.after,framevr::melee::Reach(body,r.sample.reach,r.sample.shield)))continue;
                         ++intersections;
                         if(!reinterpret_cast<int(*)(uintptr_t,uintptr_t,uintptr_t)>(d2rsig::Addr(RelationRva))(local.game,player,unit))continue;
                         if(reinterpret_cast<int(*)(uintptr_t,uintptr_t,int)>(d2rsig::Addr(LineRva))(player,unit,0x804)!=0){++walls;continue;}
+                        // A bow's swing (bow_bash.h): the stagger alone; no native attack, recovery or cleave state.
+                        if(r.sample.bowBash){BowBash(r,local.game,unit,header[1],header[2]);continue;}
                         if(r.sample.shield) {
                             if(!smiteReady.load()||shieldHits.Contains(r.session,r.sweep.stroke,UINT32_MAX))continue;
                             if(framevr::RequestShieldSkill(r.sample,header[2],pos*.5f)) {
@@ -1065,7 +1129,29 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                             if(state.cleaveSession!=r.session||state.cleaveStroke!=r.sweep.stroke){state.cleaveSession=r.session;state.cleaveStroke=r.sweep.stroke;state.cleaveLanded=0;}
                             cleave=combat::CleaveFactor(state.cleaveLanded,step,cleaveFloor.load(std::memory_order_relaxed));cleaveTracked=true;
                         }
-                        const float swingRecoverySaved=combat::SwingRecovery(recovery*cleave);
+                        // Weapon heft (weapon_heft.h, Unleashed): a heavy weapon meeting the monster before the hand
+                        // travelled the stroke it needs lands lighter, measured at this contact. Still one native attack.
+                        float heft=1;
+                        if(r.sample.heft>0&&!attackSpeed.load()) {
+                            heft=framevr::heft::Factor(r.sweep.travel,r.sample.heft);
+                            ++heftContacts;heftShareSum+=unsigned(heft*1000+.5f);heftNeedMm=unsigned(r.sample.heft*1000+.5f);
+                            if(heft<1){++heftLighter;if(const unsigned v=unsigned(heft*1000+.5f);v<heftLowest.load())heftLowest=v;}
+                        }
+                        const float swingRecoverySaved=combat::SwingRecovery(recovery*cleave*heft);
+                        // Hit reactions (hit_reactions.h, Unleashed): what this stroke's force asks of this monster.
+                        // Its own native hit carries it (combat.cpp ApplyDamage); a quiet or missed contact carries none.
+                        uint8_t reaction=0;float force=0;uint32_t modes=0;auto rank=framevr::strain::Rank::Normal;
+                        if(r.sample.reactions&&!attackSpeed.load()) {
+                            using namespace framevr::hitreact;
+                            rank=combat::MonsterRank(unit);modes=ModeMask(unit,header[1]);
+                            force=Force(r.sweep.travel,r.sample.weight,recovery*cleave*heft);
+                            // A monster with no knockback animation only staggers; one with no GetHit never reacts.
+                            uint8_t wanted=r.sample.reactions;
+                            if(!(modes&(1u<<13)))wanted&=uint8_t(~Knockback);
+                            if(!(modes&(1u<<3)))wanted=0;
+                            reaction=reactBoard.Judge(r.session,header[2],GetTickCount64(),force,wanted,rank);
+                        }
+                        const uint8_t reactionSaved=combat::SwingReaction(reaction);
                         const bool swingFirstSaved=combat::SwingFirst(attackSpeed.load()||strokeStart);   // weapon wear: the stroke's first creature only
                         // Unleashed on-hit gate (Cal, 2026-10-21): on-hit effects only on a full-cycle
                         // stroke's first landed contact; a riposte has earned them. Classic: native.
@@ -1136,6 +1222,22 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                                 onHit==combat::OnHit::Allowed,strike==StrikeOutcome::Cast?strikeSkill:-1,VoiceRoll());
                             if(voice){QueueHeroSound(voice);++formVoices;}
                         }
+                        {
+                            int flags=-1;const uint8_t reacted=combat::SwingReacted(&flags);
+                            combat::SwingReaction(reactionSaved);
+                            const auto now=GetTickCount64();
+                            if(reacted)reactBoard.Landed(r.session,header[2],now,reacted);
+                            if(reaction&&(reacted||now>=reactQuietLogAt)) {
+                                if(!reacted)reactQuietLogAt=now+1000;
+                                char line[300];snprintf(line,sizeof line,
+                                    "Frame hit reaction: monster %u (class %u, %s) %s; asked %s, force=%.2f (hand travel %.2f m, weapon weight %.2f), record flags=%s0x%x, modes=0x%x",
+                                    header[2],header[1],framevr::strain::RankName(rank),
+                                    reacted&framevr::hitreact::Knockback?"knocked back":reacted?"staggered":flags<0?"no reaction: the hit missed or was kept quiet":
+                                    (flags&framevr::hitreact::FlagDies)?"no reaction: it died":"no reaction: the record was not changed",
+                                    reaction&framevr::hitreact::Knockback?"knockback":"stagger",force,r.sweep.travel,r.sample.weight,flags<0?"-":"",flags<0?0u:unsigned(flags),modes);
+                                framevr::logging::Write(line);
+                            }
+                        }
                         combat::GateOnHit(onHitSaved);
                         if(contact.resolved&&!attackSpeed.load())
                             ++onHitWhy[riposte?OnHitRiposte:onHit==combat::OnHit::CleaveFollowUp?OnHitCleave:
@@ -1163,7 +1265,7 @@ void __cdecl Apply(const D2RL::PluginContext*,void* token) noexcept {
                             else snprintf(tag,sizeof tag,"%s",strike==StrikeOutcome::Cast?"cast":strike==StrikeOutcome::StartRefused?"cast_start_refused":
                                           strikeSkill<0?"basic":"basic_strike");
                             TraceHit(r,header[2],contact.accepted?"LANDED":contact.resolved?"MISSED (roll)":"native rejected",since,cycle,effects,tag,
-                                     sinceFull,!attackSpeed.load()&&strokeStart?int(strokeFull):-1);
+                                     sinceFull,!attackSpeed.load()&&strokeStart?int(strokeFull):-1,heft);
                         }
                         contact=saved;
                         if(!dual&&!claws)break; // Both blades (or claws) may strike this creature in the same batch.
@@ -1339,7 +1441,6 @@ uintptr_t ServerUnit(uintptr_t game,int type,uint32_t id) {
 // Thrown potions. Vanilla hireling.txt classes: roguehire, act2hire, act3hire,
 // act5hire1/2. Offline, the only live, non-hostile one is the player's own.
 constexpr uint32_t HirelingClasses[]={271,338,359,560,561};
-constexpr float HirelingFeetRadius=1.5f; // metres from the hireling's ground position
 bool IsHireling(uint32_t classId) {
     return std::find(std::begin(HirelingClasses),std::end(HirelingClasses),classId)!=std::end(HirelingClasses);
 }
@@ -1361,7 +1462,7 @@ template<class F> bool EachFriendly(uintptr_t game,uintptr_t self,F f) {
     }
     return true;
 }
-bool NearHireling(Vec world,Vec player,float upm,float& distance,uint32_t& classId) {
+bool NearHireling(Vec world,Vec player,float upm,float& distance,uint32_t& classId,bool mercPotionAutoaimEnabled) {
     distance=-1;classId=0;
     uintptr_t game=0,self=0;uint32_t mode=0;Vec selfPos{};
     if(!LocalServer(game,self)||!Read(self+0xc,mode)||mode==0||mode==17||!Position(self,selfPos)||
@@ -1375,7 +1476,7 @@ bool NearHireling(Vec world,Vec player,float upm,float& distance,uint32_t& class
         else if(friendly<0||d<friendly){friendly=d;friendlyClass=id;}
     }))return false;
     if(distance<0)classId=friendlyClass; // log the nearest friendly class when no hireling class matched
-    return distance>=0&&distance<=HirelingFeetRadius;
+    return framevr::interaction::MercThrowAccepted(distance,mercPotionAutoaimEnabled);
 }
 // 3.3.93787 native unit effects, the same calls monster AI uses on itself:
 // STATES_ToggleState(unit,state,on) and UNITS_SetOverlay(unit,overlay,0).
@@ -1818,6 +1919,13 @@ void Report() {
 #else
         (void)gh;(void)bl;(void)kb;(void)ke;
 #endif
+    }
+    // Weapon heft: how much of a full hit the heavy weapons' contacts landed (each bash logs its own line).
+    if(const auto hc=heftContacts.exchange(0);hc) {
+        const auto lighter=heftLighter.exchange(0),sum=heftShareSum.exchange(0),lowest=heftLowest.exchange(1000);
+        char line[240];snprintf(line,sizeof line,"Frame weapon heft: contacts=%u full=%u lighter=%u mean share=%.2f lowest=%.2f; this weapon needs %.2f m of hand travel",
+            hc,hc-std::min(hc,lighter),lighter,sum/1000.f/float(hc),lowest/1000.f,heftNeedMm.load()/1000.f);
+        framevr::logging::Write(line);
     }
     const auto ss=shieldSweeps.exchange(0),sr=shieldRequests.exchange(0),sa=shieldAccepted.exchange(0),sf=shieldRejected.exchange(0);
     if(ss||sr||sa||sf) {

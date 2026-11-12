@@ -13,6 +13,7 @@
 #include "navigation_info.h"
 #include "companions.h"
 #include "active_effects.h"
+#include "skill_cooldowns.h"
 #include "torch_light.h"
 #include "map_zoom.h"
 #include <array>
@@ -39,6 +40,16 @@ inline Pose UprightBody(Pose head,Quat previousYaw={0,0,0,1}) {
 // OpenXR grip +X points out of the LEFT palm: the back of the wrist is -X.
 // Grip +/-Y is the thumb/knuckle edge, not either face of the wrist.
 // https://registry.khronos.org/OpenXR/specs/1.1/html/xrspec.html#semantic-path-grip-pose
+// Everything below takes a LEFT hand's grip pose. A right hand's grip frame is the left's mirror image,
+// x reversed: +X goes into its palm, so the back of the right wrist is +X and a panel beside it sits on
+// the other side of x. Left-handed play wears the wrist HUD on the right wrist (hand_role.h): AsLeftGrip
+// gives a right hand's pose as these functions take it - a half turn about grip Z, which reverses x and
+// leaves z; it reverses y too, and nothing here has a y part in the grip's frame (WristPanel's and
+// PalmPanel's offsets, the normals, HandFacePanel's fallback along z).
+inline Pose AsLeftGrip(Pose hand,bool rightHand) {
+    if(rightHand)hand.q=math::Multiply(hand.q,{0,0,1,0});
+    return hand;
+}
 inline Vec WristNormal(Pose hand) {return math::Normalized(math::Rotate(hand.q,{-1,0,0}));}
 inline Vec PalmNormal(Pose hand) {return math::Normalized(math::Rotate(hand.q,{1,0,0}));}
 inline Pose HandFacePanel(Pose hand,Pose head,Vec normal,Vec offset) {
@@ -188,6 +199,11 @@ inline Vec Spin(Quat from,Quat to,float dt) {
 inline bool Throwable(Potion type) {
     return type==Potion::Health||type==Potion::Rejuvenation||type==Potion::Antidote||type==Potion::Thawing;
 }
+// A negative distance means there is no live hireling. Assistance only
+// removes the landing-distance requirement; native potion-use rules remain.
+inline bool MercThrowAccepted(float distance,bool mercPotionAutoaimEnabled) {
+    return std::isfinite(distance)&&distance>=0&&(mercPotionAutoaimEnabled||distance<=1.5f);
+}
 inline double LandingTime(Vec p,Vec v,float floor) {
     const double drop=double(p.y)-floor;
     if(!std::isfinite(drop)||drop<=0||!std::isfinite(v.y))return -1;
@@ -278,6 +294,9 @@ struct Snapshot {
     // Bone Armor's absorb pool and its maximum (ItemStatCost 132 / 133, 8.8 fixed
     // point; developer capture 2026-10-26): the forearm grafts (bone_graft.h).
     int boneArmor=0,boneArmorMax=0;
+    // The hero's Light Radius (ItemStatCost 89, item_lightradius; #440): how far the mod's own dungeon
+    // light reaches (light_radius.h). Known with the vitals.
+    int lightRadius=0;bool lightRadiusKnown=false;
     wrist::Experience experience;
     navigation::Location location;
     bool actionKnown=false;
@@ -285,6 +304,7 @@ struct Snapshot {
     Mercenary merc;
     companions::Roster companions;
     effects::Status effects;
+    cooldowns::Board cooldowns;   // the skills the server's use check blocks for a delay (skill_cooldowns.h)
 };
 // A glyph shape's skill as the hero has it (the catalog's own entry); an id the hero lacks is kept, unknown.
 inline Skill GlyphSkill(const Snapshot& s,int id) {
@@ -367,7 +387,7 @@ struct MenuBounds {
     float left,top,right,bottom;
     bool Contains(float u,float v) const {return u>left&&u<right&&v>top&&v<bottom;}
 };
-constexpr int QuickUseCell=210,LeftStrikesCell=212;   // 211 was RUN / WALK, 213 the movement slider (now VR Settings > Body > Movement speed)
+constexpr int QuickUseCell=210,LeftStrikesCell=212;   // 211 was RUN / WALK, 213 the movement slider (now VR Settings > Comfort > Moving > Movement speed)
 constexpr double QuickEditHold=.65;
 constexpr MenuBounds QuickUseBounds{.025f,.025f,.255f,.18f};
 // Glyph casting (glyph_cast.h): the GLYPHS box, upper right on the Spells and Equipment pages and on the
@@ -396,11 +416,14 @@ constexpr MenuBounds GlyphHandBounds{.025f,.025f,.255f,.18f};
 // turns its motion on or off.
 constexpr int MotionsCell=216;
 constexpr MenuBounds MotionsBounds{.765f,.72f,.975f,.82f};
-constexpr int MotionCards=14;   // the Sorceress's 14 (2026-11-05; ten, then the Necromancer's 12)
+constexpr int MotionCards=16;   // the Warlock's 16 (2026-11-10; ten, the Necromancer's 12, then the Sorceress's 14)
 constexpr int MotionCardCell(int card){return 240+card;}
-inline MenuBounds MotionCardBounds(int card){
-    const float x=.05f+(card%2)*.46f,y=.125f+(card/2)*.107f;
-    return {x,y,x+.44f,y+.099f};
+// A page of up to fourteen cards has seven rows; the Warlock's sixteen take eight lower ones in the same space.
+inline bool MotionCardsCompact(int count){return count>14;}
+inline MenuBounds MotionCardBounds(int card,int count=14){
+    const bool compact=MotionCardsCompact(count);
+    const float x=.05f+(card%2)*.46f,y=.125f+(card/2)*(compact?.0945f:.107f);
+    return {x,y,x+.44f,y+(compact?.087f:.099f)};
 }
 // Druid or dual wield: the left claw's or blade's strike skill, [gameplay] left_hand_strikes. Lower left,
 // above the ACTIVE line (y 637) and clear of the hand wheel's 216-degree label.
@@ -446,7 +469,7 @@ inline MenuBounds FooterBounds(int index,MenuPage page,bool developer=false) {
 inline int FooterCell(int index,MenuPage page) {
     constexpr int tabs[]={9,12,10,11,13};return Editing(page)?9+index:tabs[index];
 }
-inline int WheelCell(float u,float v,int previous=-1,MenuPage page=MenuPage::Spells,int hand=-1,bool developer=false,int devPage=0,bool leftStrikes=false,bool motions=false) {
+inline int WheelCell(float u,float v,int previous=-1,MenuPage page=MenuPage::Spells,int hand=-1,bool developer=false,int devPage=0,bool leftStrikes=false,bool motions=false,int motionCount=14) {
     if(!std::isfinite(u)||!std::isfinite(v)||u<0||u>1||v<0||v>1)return -1;
     for(int i=0;i<FooterCount(page,developer);++i)if(FooterBounds(i,page,developer).Contains(u,v))return FooterCell(i,page);
     if(QuickControls(page)) {
@@ -455,7 +478,7 @@ inline int WheelCell(float u,float v,int previous=-1,MenuPage page=MenuPage::Spe
         if(motions&&MotionsBounds.Contains(u,v))return MotionsCell;
     }
     if(page==MenuPage::Motions) {   // the cards alone: no wheel behind the page
-        for(int i=0;i<MotionCards;++i)if(MotionCardBounds(i).Contains(u,v))return MotionCardCell(i);
+        for(int i=0;i<MotionCards&&i<motionCount;++i)if(MotionCardBounds(i,motionCount).Contains(u,v))return MotionCardCell(i);
         return -1;
     }
     if((QuickControls(page)||page==MenuPage::Glyphs)&&GlyphsBounds.Contains(u,v))return GlyphsCell;
@@ -511,12 +534,24 @@ struct Input {
     vitals::Location navigationLocation=vitals::Location::Wrist;
     vitals::Location vitalsLocation=vitals::Location::Wrist;
     float vitalsTilt=0;
-    bool criticalAlerts=false,leftCasting=false;
+    bool criticalAlerts=false,leftCasting=false;   // leftCasting, leftTrigger: the wrist HUD's hand (wristHand)
+    // The hand that wears the wrist HUD and map: the off hand (1), the left. Left-handed that is the
+    // right hand (hand_role.h): mirrored says the hands here are exchanged (index 0 the physical left,
+    // 1 the physical right), for what depends on the side of the body: the wrist's and the palm's face
+    // (Wrist), the shoulder the menu is reached over (leather::ReachInput::right).
+    int wristHand=1;
+    bool mirrored=false;
     bool floorKnown=false; float floor=0; // room-space height of the world ground under the player
     Stage stage{};
     Pose head{},hand[2]{};
+    // A hand index here is the physical right one (index 0 unless mirrored).
+    bool RightHand(int index) const {return (index==0)!=mirrored;}
+    // The wrist HUD's hand as WristPanel, PalmPanel and the Presented tests take it (AsLeftGrip).
+    Pose Wrist() const {const int w=wristHand==0?0:1;return AsLeftGrip(hand[w],RightHand(w));}
     Vec handVelocity[2]{}; bool velocityKnown[2]{}; // runtime-reported room-space m/s at the pose time
     float trigger=0,leftTrigger=0,grip[2]{};
+    bool clickToDrink=false;
+    float bottleTrigger[2]{}; // raw right/left triggers, independent of wheel pointer mapping
     bool spellGrips=false;   // both grips cast motions (spell_motion.h): a grip grabs only alone (SoloGrips)
     int hover=-1,wheelHand=-1;
     Snapshot snapshot{};
@@ -575,6 +610,8 @@ struct Output {
     // the motions turned off, as Input gave them.
     bool motions=false,motionsBox=false;
     int motionsOff=0;
+    // Skill cooldowns: the wrist's icons between the orbs (skill_cooldowns.h Tracker), set by the transport.
+    cooldowns::Icons cooldowns{};
 };
 inline MenuPage Page(const Output& out) {
     return out.developer?MenuPage::Developer:out.editor==3?MenuPage::EditItems:out.editor==2?MenuPage::EditSkills:out.editor?MenuPage::EditSlots:out.map?MenuPage::Map:out.motions?MenuPage::Motions:out.glyphs?MenuPage::Glyphs:out.utility?MenuPage::Equipment:MenuPage::Spells;
@@ -584,7 +621,7 @@ inline bool MenuMapWanted(const Input& in,const Output& out,uint64_t now) {
 }
 inline bool NavigationWanted(const Input& in,const Output& out,uint64_t now) {
     return in.active&&in.navigationLocation!=vitals::Location::Off&&out.navigation&&!out.wheel&&!out.settings&&
-        in.tracked[1]&&Fresh(in.snapshot,in.session,now);
+        in.tracked[in.wristHand==0?0:1]&&Fresh(in.snapshot,in.session,now);
 }
 inline bool MapWanted(const Input& in,const Output& out,uint64_t now) {
     return MenuMapWanted(in,out,now)||NavigationWanted(in,out,now);
@@ -596,6 +633,7 @@ class Engine {
     uint64_t session=0,epoch=0,sequence=0;
     double lastTime=0,drinkStart=0,pendingAt=0,resultAt=0,criticalUntil=0,criticalAgain=0;
     bool primed=false,triggerWas=false,gripWas[2]{},wheelLatch=false,utility=false,map=false,rearm=true,stowed=false;
+    bool bottleTriggerWas[2]{};
     bool glyphs=false;   // the GLYPHS page
     bool motions=false;  // the MOTIONS page
     int glyphEdit=-1;    // the shape the skill picker chooses for, -1 none
@@ -759,17 +797,20 @@ public:
         // Passive vitals need the left hand and head only. Combat/interactions
         // still require both hands; a resting/occluded right hand must not hide
         // a correctly presented watch or permit an input through the guard.
-        out.wrist=in.active&&in.session&&in.tracked[1]&&std::isfinite(in.time)&&WristPresented(in.hand[1],in.head);
-        const bool palmAllowed=in.active&&in.tracked[1]&&(vitals::Palm(in.vitalsLocation)||vitals::Palm(in.navigationLocation))&&
-            !in.wheel&&!in.cancel&&!in.leftCasting&&in.leftTrigger<.2f&&in.grip[1]<.6f&&
-            !in.reservedLeft&&bottleHand!=1&&holsterHand!=1&&Fresh(in.snapshot,in.session,in.at);
+        const int wristHand=in.wristHand==0?0:1;
+        out.wrist=in.active&&in.session&&in.tracked[wristHand]&&std::isfinite(in.time)&&WristPresented(in.Wrist(),in.head);
+        const bool palmAllowed=in.active&&in.tracked[wristHand]&&(vitals::Palm(in.vitalsLocation)||vitals::Palm(in.navigationLocation))&&
+            !in.wheel&&!in.cancel&&!in.leftCasting&&in.leftTrigger<.2f&&in.grip[wristHand]<.6f&&
+            !in.reservedLeft&&bottleHand!=wristHand&&holsterHand!=wristHand&&Fresh(in.snapshot,in.session,in.at);
         const bool palm=palmReveal.Step(in.session,in.epoch,in.time,palmAllowed,
-            PalmPresented(in.hand[1],in.head),PalmPresented(in.hand[1],in.head,true));
+            PalmPresented(in.Wrist(),in.head),PalmPresented(in.Wrist(),in.head,true));
         out.palm=palm&&vitals::Palm(in.vitalsLocation);
         out.vitals=out.palm||(out.wrist&&vitals::Wrist(in.vitalsLocation));
         out.navigationPalm=palm&&vitals::Palm(in.navigationLocation);
         out.navigation=out.navigationPalm||(out.wrist&&vitals::Wrist(in.navigationLocation));
         const bool trigger=in.trigger>(triggerWas?.2f:.55f);
+        const bool bottleTriggers[2]={in.bottleTrigger[0]>(bottleTriggerWas[0]?.2f:.55f),
+                                      in.bottleTrigger[1]>(bottleTriggerWas[1]?.2f:.55f)};
         // Both grips cast spells: a grip grabs (a bottle, a holster, a shoulder) only alone.
         if(in.spellGrips)soloGrips.Step(in.time,in.grip);else soloGrips.Reset();
         const bool grips[2]={in.spellGrips?soloGrips.solo[0]:in.grip[0]>.6f,in.spellGrips?soloGrips.solo[1]:in.grip[1]>.6f};
@@ -785,6 +826,7 @@ public:
             if(mapzoom::NewGame(joined,in.session)){handMenus={};const int slot=pageHand;pageHand=-2;LoadHand(slot<0?0:slot);}
             session=in.session;epoch=in.epoch;lastTime=in.time;
             triggerWas=trigger;gripWas[0]=grips[0];gripWas[1]=grips[1];
+            for(int h=0;h<2;++h)bottleTriggerWas[h]=bottleTriggers[h];
             body=Valid(in.head)?UprightBody(in.head,body.q):Pose{};out.block=true;out.stowed=stowed;out.cancelPending=true;return out;
         }
         lastTime=in.time;
@@ -794,12 +836,14 @@ public:
         // transport) is not a hand, so a close and reopen on the same hand keeps everything.
         if(in.wheel&&in.wheelHand+1!=pageHand){StoreHand();LoadHand(in.wheelHand+1);}
         const bool triggerEdge=trigger&&!triggerWas&&!handChanged;
+        const bool bottleClicks[2]={bottleTriggers[0]&&!bottleTriggerWas[0],bottleTriggers[1]&&!bottleTriggerWas[1]};
+        for(int h=0;h<2;++h)bottleTriggerWas[h]=bottleTriggers[h];
         const bool edges[2]={grips[0]&&!gripWas[0],grips[1]&&!gripWas[1]};
         triggerWas=trigger;gripWas[0]=grips[0];gripWas[1]=grips[1];
         // A plain close keeps the page for the next open (Map and Developer too); the editors close.
         if(!in.wheel){quickPressed=false;wheelLatch=false;editor=0;editSlot=-1;glyphEdit=-1;}
         if(!in.snapshot.developer)developer=false;
-        if(!trigger&&!grips[0]&&!grips[1])rearm=false;
+        if(!trigger&&!grips[0]&&!grips[1]&&(!in.clickToDrink||(!bottleTriggers[0]&&!bottleTriggers[1])))rearm=false;
         if(in.cancel) {quickPressed=false;Drop();flight={};rearm=true;wheelLatch=true;pending={};out.cancelPending=true;editor=0;map=developer=glyphs=motions=false;devPage=0;editSlot=-1;glyphEdit=-1;}   // the cancel input, as before (transport has sent none since the per-hand wheels)
         if(pending.action!=Action::None) {
             if(in.reply.sequence==pending.sequence&&in.reply.session==session&&in.reply.result!=Result::Pending) {
@@ -849,9 +893,11 @@ public:
         }
         // The tabbed menu on leather (leather_menu.h): the left hand reaches over the
         // left shoulder and grips. With Dominant hand = Left that is the swap's, so off.
+        // Left-handed (in.mirrored): the right hand over the right shoulder.
         leather::ReachInput sheet;sheet.time=in.time;sheet.session=in.session;sheet.epoch=in.epoch;
         sheet.active=in.active&&in.leatherReach&&dominant==0;sheet.tracked=in.tracked[leather::Hand];
         sheet.head=in.head.p;sheet.hand=in.hand[leather::Hand].p;sheet.heading=body.q;sheet.grip=in.spellGrips?(grips[leather::Hand]?1.f:0.f):in.grip[leather::Hand];
+        sheet.right=in.RightHand(leather::Hand);
         sheet.allowed=!wheel&&!in.quickCast&&!in.cancel&&!rearm&&bottle<0&&holster<0&&pending.action==Action::None;
         const auto reached=leatherReach.Step(sheet);out.block=out.block||reached.block;
         if(reached.open){out.inventory=true;out.feedback=1;out.feedbackHand=leather::Hand;}
@@ -1058,7 +1104,11 @@ public:
             else if(!grips[bottleHand]||(!spent&&(!fresh||!SameBelt(in.snapshot,held)))) {if(!grips[bottleHand])Discard(in,out);Drop();rearm=true;}
             else {
                 out.bottle=bottle;out.bottleHand=bottleHand;out.bottleItem=held.item;out.bottleEmpty=consumed;owner[bottleHand]=Owner::Bottle;
-                if(!spent&&potions::AtMouth(in.hand[bottleHand].p,in.hand[bottleHand].q,in.head.p,in.head.q,drinkStart!=0)) {
+                const bool clickToDrinkRequested=in.clickToDrink&&bottleClicks[bottleHand]&&!edges[bottleHand];
+                if(!spent&&clickToDrinkRequested) {
+                    if(request(Action::Potion,bottle,held.item,held.revision)){spent=true;pendingHand=bottleHand;}
+                    drinkStart=0;
+                } else if(!spent&&potions::AtMouth(in.hand[bottleHand].p,in.hand[bottleHand].q,in.head.p,in.head.q,drinkStart!=0)) {
                     if(!drinkStart)drinkStart=in.time;
                     if(in.time-drinkStart>=.25&&request(Action::Potion,bottle,held.item,held.revision)){spent=true;pendingHand=bottleHand;}
                 } else drinkStart=0;

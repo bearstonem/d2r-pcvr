@@ -47,10 +47,28 @@ int main() {
     assert(ScaledVelocity(24<<8,2)==48<<8);
     assert(ScaledVelocity(12<<8,2)==24<<8);
     assert(ScaledVelocity(0,2)==0);
+    // The bow skills' own arrows take the arrow speed however they are cast (owner, 2026-11-08):
+    // Multiple Shot 213, Guided Arrow 86, Strafe 682 and the single-arrow skills; bolts and spells do not.
+    for(uint32_t m:{12u,27u,28u,40u,41u,85u,86u,87u,213u,682u})assert(BowSkillArrow(m));
+    for(uint32_t m:{0u,31u,214u,683u,42u,88u,89u,55u,58u,59u,83u,196u})assert(!BowSkillArrow(m));
     assert(ScaledVelocity(-1,2)==-1);
     assert(ScaledVelocity(6000,1)==6000);
     assert(ScaledVelocity(6000,std::numeric_limits<float>::quiet_NaN())==6000);
     assert(ScaledVelocity(6000,4)==6000);
     assert(ScaledVelocity(INT32_MAX,2)==INT32_MAX);
+    assert(ScaledVelocity(14<<8,5,5)==70<<8);
+    assert(ScaledVelocity(7<<8,3,5)==21<<8); // retain native slowing
+    assert(ScaledVelocity(6000,6,5)==6000);
+    constexpr uintptr_t params=0x100,mageOwner=0x200;
+    put(params+8,mageOwner);put(mageOwner,uint32_t(1));put(mageOwner+4,uint32_t(364));
+    for(uint32_t id=208;id<=211;++id){put(params+0x20,id);assert(MageMissile(params,read)==id);}
+    put(params+0x20,uint32_t(207));assert(MageMissile(params,read)==UINT32_MAX);
+    put(params+0x20,uint32_t(212));assert(MageMissile(params,read)==UINT32_MAX);
+    put(params+0x20,uint32_t(208));
+    put(mageOwner+4,uint32_t(359));assert(MageMissile(params,read)==UINT32_MAX); // merc
+    put(mageOwner+4,uint32_t(274));assert(MageMissile(params,read)==UINT32_MAX); // hostile mage
+    put(mageOwner+4,uint32_t(364));put(mageOwner,uint32_t(0));assert(MageMissile(params,read)==UINT32_MAX);
+    put(params+8,uintptr_t(0));assert(MageMissile(params,read)==UINT32_MAX);
+    put(params+8,uintptr_t(0x2000));assert(MageMissile(params,read)==UINT32_MAX);
     puts("Projectile ownership/velocity tests passed");
 }

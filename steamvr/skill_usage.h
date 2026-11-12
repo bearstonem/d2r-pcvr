@@ -31,12 +31,12 @@ inline Kind Classify(int skill) {
     if(ws::JavelinSkill(skill))return Kind::Javelin;
     if(skill==ws::DoubleThrow)return Kind::DoubleThrow;
     if(toss::Skill(skill))return Kind::Toss;
-    // Paladin body gestures (hammer_gesture.h, charge_gesture.h): from any slot.
+    // The Paladin's and the Druid's body gestures (motions_paladin.h, motions_druid.h): from any slot.
     if(skill==ws::BlessedHammer)return Kind::Pump;
     if(skill==ws::Charge)return Kind::Punch;
-    if(skill==ws::HolyShield)return Kind::Cross;            // cross_gesture.h
-    if(skill==ws::FistOfHeavens)return Kind::Call;          // heavens_gesture.h
-    if(skill==ws::Werewolf||skill==ws::Werebear)return Kind::Shape;   // shapeshift_gesture.h
+    if(skill==ws::HolyShield)return Kind::Cross;
+    if(skill==ws::FistOfHeavens)return Kind::Call;
+    if(skill==ws::Werewolf||skill==ws::Werebear)return Kind::Shape;
     return Kind::Native;
 }
 struct Place {bool trigger=false,right=false,left=false;};
@@ -71,7 +71,7 @@ inline const char* Line(int skill,int slot) {
         case Kind::Bow:case Kind::Quiver:
             if(at.trigger)return "Gesture with a bow: draw the string and release to fire it. Without a bow, press to cast.";
             return Classify(skill)==Kind::Quiver?"With a bow: loads it into every following arrow; press again for basic arrows. Without a bow, press to cast.":
-                                                 "Press to cast it natively. On a trigger with a bow, draw the string and release to fire it.";
+                                                 "With a bow: loads it, so every following draw and release fires it; press again for basic arrows. Without a bow, press to cast.";
         case Kind::Javelin:
             return at.right?"Gesture with a javelin: arms your throw; throw by hand and let go to cast it. Without a javelin, press to cast.":
                    at.left?"Press to cast it, aimed by this hand. With a javelin, the right trigger or a face button carries it on your throws.":
@@ -163,7 +163,8 @@ inline std::string Details(int skill,int slot) {
             return Classify(skill)==Kind::Quiver?
                 "With a bow: loads it into every following arrow, which flies its physical path with the skill's mana, damage and effects. Press again for basic arrows, "
                 "or another arrow skill's button to swap. Without a bow, press to cast it.":
-                "Press to cast it natively. On a trigger with a bow, drawing the string and releasing it fires the skill.";
+                "With a bow: loads it, so every following draw and release fires it as the game does - Multiple Shot's fan, Guided Arrow's homing, Strafe's volley. "
+                "Press again for basic arrows, or another arrow skill's button to swap. Without a bow, press to cast it.";
         case Kind::Javelin:
             return at.right?"Gesture with a javelin: the trigger arms your throw; throw by hand and let go to cast it along the throw, with its own mana and effects, using up a javelin. "
                             "Without a javelin, press to cast it.":

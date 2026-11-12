@@ -121,6 +121,9 @@ struct Rig {
         }
         valid=true;return true;
     }
+    // The direction across the bow's plane (its limbs and its string lie in it), in the cog's frame:
+    // across that plane a bow is its own mirror image. For left-handed play (hand_swap_pose.h).
+    Vec AcrossPlane() const {return valid?Normalized(Cross(Normalized(Position(rest[7])-Position(rest[6])),back)):Vec{};}
     bool DrawAt(const Mat& cog,Vec nock,Vec direction,bool arrowVisible,Pose& out) const {
         if(!valid||!std::isfinite(Length(nock))||!std::isfinite(Length(direction))||Length(direction)<.01f||!Affine(cog))return false;
         Mat inverse;if(!Inverse(cog,inverse))return false;

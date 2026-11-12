@@ -84,7 +84,9 @@ Open either hand's wheel and choose **DEV**. Its tabs are grouped by purpose:
   hand and throw), **By turns rims**, **Sky over rims** and a **Loot beam test**
   kit (a unique ring, a set amulet, a rare ring, a magic amulet, a white dagger
   and the runes Vex, Gul, Ohm, Lo and Sur: drop them to see each beam, or none;
-  see GAMEPLAY.md, Loot beams) (all on this page as Equipment is full).
+  see GAMEPLAY.md, Loot beams) and an **Item-fired bows** kit (Witherstring, Raven
+  Claw and Demon Machine, whose basic attacks fire magic or exploding arrows and
+  bolts, with arrows and bolts; #432) (all on this page as Equipment is full).
 - **Equipment:** starter primary/alternate gear, class unique primary/alternate
   gear, crossbow + bolts, bow + arrows, a small shield, **Render debug draws**,
   **By turns own picture**, **By turns filter**, **By turns ghosts**, a **Throwing kit** and a **Potion kit** (four Super
@@ -239,7 +241,7 @@ no saved setting.
 ## Pushable bodies
 
 **DEV > Bodies** tunes how monsters and townsfolk react to your weapon
-(VR Settings > World > Pushable bodies). Each button shows a value; each
+(VR Settings > Gameplay > Physics > Pushable bodies). Each button shows a value; each
 press steps it to the next and saves it as `[bodies] <key>` in the dev
 INI, so it stays across restarts. Bodies being pushed let go when a value
 changes; push one again to feel it. **Bodies: defaults** puts every value
@@ -264,7 +266,7 @@ owner's, tuned in the headset.
 
 | Page | Destinations |
 | --- | --- |
-| Act I - II | Rogue Encampment, Blood Moor, Tristram, Cathedral, Andariel's chamber, Lut Gholein, Arcane Sanctuary, Tyrael, Duriel |
+| Act I - II | Rogue Encampment, Blood Moor, Tristram, Cathedral, Andariel's chamber, Lut Gholein, Arcane Sanctuary, Tal Rasha's Tomb (level 66), Tyrael, Duriel |
 | Act III | Kurast Bazaar, Upper Kurast, Kurast Sewers, Travincal, Mephisto's chamber, Spider Forest, Flayer Jungle |
 | Act IV - V | River of Flame, Chaos Sanctuary, Harrogath, Bloody Foothills, Crystalline Passage, Arreat Summit, Throne of Destruction, Worldstone Chamber |
 

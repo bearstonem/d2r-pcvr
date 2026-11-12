@@ -54,7 +54,7 @@ static void ClawJabs(Sim& s){
 static void TrapThrow(Sim& s){s.MoveR({.30f,-.25f,.25f},.35f);s.MoveR({.25f,.10f,-.55f},.2f);s.MoveR(RestR,.4f);}
 static bool Zero(math::Vec v){return v.x==0&&v.y==0&&v.z==0;}
 
-int main() {
+static void Run() {
     using Do=void(*)(Sim&);
     const struct {Motion motion;Do perform;int skill;const char* name;} all[]={
         {Motion::BurstOfSpeed,BurstOfSpeed,258,"Burst of Speed"},{Motion::Fade,Fade,267,"Fade"},
@@ -104,6 +104,11 @@ int main() {
         Sim push(Motion::ShadowWarrior);push.Move({.15f,-.33f,-.22f},{-.15f,-.32f,-.20f},.35f);push.Hold(.1f);push.Move({.40f,-.40f,-.30f},{-.04f,-.37f,-.24f},.3f);push.Hold(.2f);
         Check(push.casts==1,"Shadow Warrior: pushed right, the left hand 4 cm short of the middle, casts");
     }
-    std::puts("motions-assassin-test: ok");
+}
+// Everything above, right-handed as written, then played by a left-handed player (motion_left.h): the mirror
+// image of every fixture, the left hand as the engine's hand 0, with the same expectations.
+int main() {
+    motionleft::Both(Run);
+    std::puts("motions-assassin-test: ok (right-handed, and every fixture again left-handed as its mirror image)");
     return 0;
 }

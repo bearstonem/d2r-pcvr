@@ -406,6 +406,43 @@ int main(){
         Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"save companion count preference");
         Check(vrsettings::Read().values[CompanionCounts]==enabled&&Int(path,L"interactions",L"companion_counts")==enabled&&Int(path,L"custom",L"keep")==12345,"companion preference survives reload without touching other settings");
     }
+    // The T cross: On when missing (the default), saved as [interactions] t_cross_calibrate, touching nothing else.
+    Check(vrsettings::Read().values[TCrossCalibrate]==1&&Int(path,L"interactions",L"t_cross_calibrate")==-999,"a profile without the key reads On");
+    for(int enabled:{0,1}) {
+        const auto current=vrsettings::Read();
+        model.Open(current);model.Click({Kind::Change,TCrossCalibrate,enabled?1:-1});request=model.Click({Kind::Apply});
+        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"save the T cross switch");
+        const auto saved=vrsettings::Read();
+        Check(saved.values[TCrossCalibrate]==enabled&&Int(path,L"interactions",L"t_cross_calibrate")==enabled&&
+              Changed(saved.values,current.values)==(ChangeMask{1}<<TCrossCalibrate)&&Int(path,L"custom",L"keep")==12345,"the T cross switch survives reload and touches nothing else");
+    }
+    // Left-handed (#307): Off when missing (every existing profile), saved as [interactions] left_handed; the
+    // profile's own Dominant hand is neither read for it nor written by it.
+    Check(vrsettings::Read().values[LeftHanded]==0&&Int(path,L"interactions",L"left_handed")==-999,"a profile without left_handed reads Off: right-handed as before");
+    {
+        const int dominantBefore=Int(path,L"interactions",L"dominant_hand");
+        for(int enabled:{1,0}) {
+            const auto current=vrsettings::Read();
+            model.Open(current);model.Click({Kind::Change,LeftHanded,enabled?1:-1});request=model.Click({Kind::Apply});
+            Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"save Left-handed");
+            const auto saved=vrsettings::Read();
+            Check(saved.values[LeftHanded]==enabled&&Int(path,L"interactions",L"left_handed")==enabled&&
+                  Changed(saved.values,current.values)==(ChangeMask{1}<<LeftHanded)&&Int(path,L"custom",L"keep")==12345&&
+                  Int(path,L"interactions",L"dominant_hand")==dominantBefore,"Left-handed survives reload and touches nothing else, the saved Dominant hand included");
+        }
+    }
+    // Richer haptics: both On when missing (the default), saved as [haptics] hit_patterns and heartbeat, touching nothing else.
+    for(const auto& [key,name2]:{std::pair<Key,const wchar_t*>{HapticSurfaces,L"hit_patterns"},{HapticHeartbeat,L"heartbeat"}}) {
+        Check(vrsettings::Read().values[key]==1&&Int(path,L"haptics",name2)==-999,"a profile without the haptic feel key reads On");
+        for(int enabled:{0,1}) {
+            const auto current=vrsettings::Read();
+            model.Open(current);model.Click({Kind::Change,key,enabled?1:-1});request=model.Click({Kind::Apply});
+            Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"save a haptic feel switch");
+            const auto saved=vrsettings::Read();
+            Check(saved.values[key]==enabled&&Int(path,L"haptics",name2)==enabled&&
+                  Changed(saved.values,current.values)==(ChangeMask{1}<<key)&&Int(path,L"custom",L"keep")==12345,"a haptic feel switch survives reload and touches nothing else");
+        }
+    }
     // Loot pick (#257): On when missing (the default), On and Off saved as [interactions] loot_pick; only 0 reads Off.
     Check(vrsettings::Read().values[LootPick]==1&&Int(path,L"interactions",L"loot_pick")==-999,"a profile without loot_pick reads On");
     for(int enabled:{0,1}) {
@@ -446,6 +483,31 @@ int main(){
         Check(text(L"left_circle")==L"-1"&&Int(path,L"glyphs",L"second_draw_slot")==1&&Int(path,L"glyphs",L"draw_slot")==6&&
               Int(path,L"glyphs",L"circle")==40&&Int(path,L"glyphs",L"star")==58,"the saved set and button untouched");
         Check(text(L"left_star")==L"(none)"&&text(L"triangle")==L"(none)"&&Int(path,L"custom",L"keep")==12345,"no other key written");
+    }
+    Check(vrsettings::Read().values[MercPotionAssist]==0,"missing merc potion assist retains old landing behavior");
+    for(int choice:{1,0}) {
+        model.Open(vrsettings::Read());model.Click({Kind::Change,MercPotionAssist,choice?1:-1});request=model.Click({Kind::Apply});
+        Check(request.changed==(ChangeMask{1}<<MercPotionAssist),"merc assist transaction isolates toggle");
+        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"merc assist preference saves");
+        Check(vrsettings::Read().values[MercPotionAssist]==choice&&Int(path,L"gameplay",L"merc_potion_assist")==choice,
+              "merc assist on and off survive reload");
+    }
+    Check(vrsettings::Read().values[ClickToDrink]==0,"missing click to drink preserves gesture-only drinking");
+    for(int choice:{1,0}) {
+        model.Open(vrsettings::Read());model.Click({Kind::Change,ClickToDrink,choice?1:-1});request=model.Click({Kind::Apply});
+        Check(request.changed==(ChangeMask{1}<<ClickToDrink),"click to drink transaction isolates toggle");
+        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"click to drink preference saves");
+        Check(vrsettings::Read().values[ClickToDrink]==choice&&Int(path,L"interactions",L"click_to_drink")==choice&&
+              Int(path,L"custom",L"keep")==12345,"click to drink on and off survive reload preserving unrelated settings");
+    }
+    Check(vrsettings::Read().values[SummonRangeMultiplier]==1,"missing summon multiplier preserves native ranges");
+    for(float multiplier:{1.25f,5.f,1.f}) {
+        const auto before=vrsettings::Read();
+        model.Open(before);model.Set(SummonRangeMultiplier,multiplier);request=model.Click({Kind::Apply});
+        Check(request.changed==(ChangeMask{1}<<SummonRangeMultiplier),"one setting controls both summon ranges");
+        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"shared summon preference saves");
+        Check(vrsettings::Read().values[SummonRangeMultiplier]==multiplier&&Int(path,L"custom",L"keep")==12345,
+              "shared fractional multiplier survives reload and preserves other settings");
     }
     model.Open(vrsettings::Read());model.Click({Kind::Change,Motion,-1});request=model.Click({Kind::Apply});
     Check(DeleteFileW(name)&&vrsettings::Submit(request)&&!vrsettings::Poll(name),"missing file fails safely");

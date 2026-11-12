@@ -48,7 +48,7 @@ build; the current configuration uses fixed foveation and disables eye tracking.
 4. Launch through `steam://run/2536520//--frame-vr/`, accept Steam's extra argument
    prompt if present, and select the offline character. Verify stereo rendering
    and both tracked hands before testing combat.
-5. Open settings with Left Grip + Y and recalibrate upright in a T-pose. Saved
+5. Open settings with Left Grip + Y and recalibrate upright in a T cross. Saved
    Steam Frame calibration is shared, so it will not automatically prompt again.
    Check floor/height, controller reach, settings laser and A/B/X/Y input, then
    torso/shield visibility, belt grabbing/drinking and wrist HP/mana.

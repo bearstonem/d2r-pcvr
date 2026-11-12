@@ -91,7 +91,14 @@ int main() {
     assert(!spellcast::Candidate(1,47,1,0,56,0));
     assert(!spellcast::Candidate(1,47,0,8,56,0));
     assert(!spellcast::Candidate(1,47,0,0,56,2));
-    assert(!spellcast::Supported(219)&&!spellcast::Supported(53)&&!spellcast::Supported(64));
+    assert(!spellcast::Supported(219)&&!spellcast::Supported(64));
+    // From the hand (owner, 2026-11-09): Lightning flies as Fire Bolt; Chain Lightning keeps its server function 26
+    // and its native leaps, only its start and heading moved to the hand (one missile a cast, as Fire Bolt's).
+    assert(spellcast::Supported(49)&&spellcast::Candidate(1,49,0,0,57,0)&&!spellcast::NativePath(49)&&spellcast::LaunchCapacity(49)==1);
+    assert(spellcast::Supported(53)&&spellcast::NativePath(53)&&spellcast::LaunchCapacity(53)==1);
+    assert(spellcast::Candidate(1,53,0,26,60,0));
+    assert(!spellcast::Candidate(1,53,0,0,60,0)&&!spellcast::Candidate(1,53,0,26,-1,0)&&!spellcast::Candidate(1,53,0,17,-1,0,56));
+    assert(!spellcast::Candidate(0,53,0,26,60,0)&&!spellcast::Candidate(1,53,1,26,60,0)&&!spellcast::Candidate(1,53,0,26,60,2));
     assert(spellcast::Candidate(2,84,0,0,192,0xc0020400u));
     for(unsigned character:{0u,1u,3u,4u,5u,6u})assert(!spellcast::Candidate(character,84,0,0,192,0xc0020400u));
     assert(!spellcast::Candidate(2,84,0,0,58,0)&&!spellcast::Candidate(2,84,0,8,192,0));

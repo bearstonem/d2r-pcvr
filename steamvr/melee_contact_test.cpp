@@ -1,5 +1,6 @@
 #include "melee_contact.h"
 #include "melee_hand_state.h"
+#include "hand_role.h"
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
@@ -13,6 +14,21 @@ struct Sim {
     bool Move(Vec d){sample.hand.p=sample.hand.p+d;sample.blade.base=sample.blade.base+d;sample.blade.tip=sample.blade.tip+d;return Step();}
 };
 int main(){
+    {   // Melee reach (VR Settings > Combat, 2026-11-08): a blade sweeping past 10 cm beside a body
+        // (0.44 m off its axis: 0.30 body + 0.04 blade + 0.10 gap) touches only with enough reach.
+        const Body body{{0,.3f,0},{0,1.5f,0},.3f};
+        const auto pass=[](float x){return std::pair{Blade{{x,1.f,-.5f},{x,1.6f,-.5f}},Blade{{x,1.f,.5f},{x,1.6f,.5f}}};};
+        const auto [before,after]=pass(.44f);
+        Check(!Touches(before,after,body)&&!Touches(before,after,Reach(body,0,false)),"no reach: a near miss misses");
+        Check(!Touches(before,after,Reach(body,.05f,false)),"5 cm of reach is short of a 10 cm miss");
+        Check(Touches(before,after,Reach(body,.15f,false)),"15 cm of reach takes a 10 cm miss");
+        Check(!Touches(before,after,Reach(body,.15f,true)),"the shield keeps the body as measured");
+        Check(Reach(body,-1,false).radius==body.radius&&Reach(body,std::numeric_limits<float>::quiet_NaN(),false).radius==body.radius,
+              "a negative or invalid reach pads nothing");
+        Check(Reach(body,2,false).radius==body.radius+.5f,"reach stops at half a metre");
+        const auto [farBefore,farAfter]=pass(.9f);const auto [nearBefore,nearAfter]=pass(.84f);
+        Check(!Touches(farBefore,farAfter,Reach(body,2,false))&&Touches(nearBefore,nearAfter,Reach(body,2,false)),"the clamp holds in a sweep");
+    }
     {
         Sim right,left;left.sample.handIndex=1;left.Step(8);
         Check(Lane(right.sample)==0&&Lane(left.sample)==2,"weapons use separate pose engines");
@@ -429,5 +445,27 @@ int main(){
     HitSet hits;Check(hits.Insert(1,1,0),"unit zero is valid");Check(!hits.Insert(1,1,0),"one damage request per target per stroke");
     Check(hits.Insert(1,1,9),"same stroke can strike another actual contact");Check(hits.Insert(1,2,0),"next stroke can hit same creature");
     Check(hits.Insert(2,1,0),"new session clears old identities");
+    {   // Left-handed play (hand_role.h): the lanes are ROLES (0 the main hand's weapon, 2 the off hand's,
+        // 1 the shield). The transport fills each from its role's controller, so a swing made by the left
+        // controller left-handed is the main weapon's stroke, sample for sample what the right one's is
+        // right-handed, and the shield's lane reads the right arm.
+        const handrole::Map maps[2]={handrole::Map{},handrole::Map{true}};
+        bool struck[2]{};Sweep sweeps[2];
+        for(int lh=0;lh<2;++lh) {
+            Sim s;
+            Pose controller[2];   // by physical hand: the swinging one starts where the fixture's hand is, the other rests
+            const int swinging=maps[lh].Physical(0);
+            controller[swinging]=s.sample.hand;controller[1-swinging].p={.4f,1,-.2f};
+            for(int i=0;i<6;++i) {
+                controller[swinging].p=controller[swinging].p+Vec{0,0,-.12f};
+                const Vec d=controller[maps[lh].Physical(0)].p-s.sample.hand.p;   // lane 0 follows role 0's controller
+                struck[lh]=s.Move(d)||struck[lh];sweeps[lh]=s.sweep;
+            }
+            Sample off=s.sample;off.handIndex=1;off.hand=controller[maps[lh].Physical(1)];
+            Sample shield=off;shield.shield=true;
+            Check(Lane(s.sample)==0&&Lane(off)==2&&Lane(shield)==1&&off.hand.p.x==.4f,"main, off and shield lanes whichever controller plays the role");
+        }
+        Check(struck[0]==struck[1]&&sweeps[0].stroke==sweeps[1].stroke&&sweeps[0].speed==sweeps[1].speed&&sweeps[0].travel==sweeps[1].travel,"the same stroke from either controller in the main role");
+    }
     std::puts("Melee contact: swept geometry, stroke energy, cancellation and per-target deduplication passed");
 }

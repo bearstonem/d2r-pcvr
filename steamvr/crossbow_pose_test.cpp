@@ -1,5 +1,8 @@
 #include <windows.h>
 #include "../vr/crossbow.h"
+#include "../vr/hand_swap_pose.h"
+#include "gameplay.h"
+#include "hand_role.h"
 #include "../shared/d2r_vr_state.h"
 #include <cassert>
 #include <cstdio>
@@ -131,6 +134,22 @@ int main() {
         assert(Near(Position(visual)+Vector(visual,{0,0,BoltTip}),muzzle+line.direction*8));
         const Mat frozen=visual;p.muzzle.x+=30;ArrowMatrix(flight,100,visual.m);
         assert(std::memcmp(&frozen,&visual,sizeof visual)==0);
+        {
+            // #432: Fires Explosive Bolts (Demon Machine) makes the basic
+            // attack name explodingarrow 41, not bolt 31. The physical bolt
+            // flies it, drawn as the exploding arrow's model at bolt length.
+            assert(BasicLaunchMissile(Kind::Crossbow,31)==-1&&BasicLaunchMissile(Kind::Crossbow,41)==41);
+            assert(BasicLaunchMissile(Kind::Crossbow,0)==RefusedMissile&&BasicLaunchMissile(Kind::Crossbow,-1)==RefusedMissile);
+            Flight item;item.shot=launch.flight;item.shot.missile=41;item.updatedAt=100;item.speed=20;item.alive=true;
+            assert(ItemArrow(item.shot)&&OwnMissile(item.shot)&&!SkillRelease(item.shot)&&MissileId(item.shot)==41);
+            assert(Valid(item.shot)&&Allowed(item.shot,{true,7,3,100,42,false},100));
+            assert(ProjectileLength(item.shot)==launch.flight.boltLength);
+            Flight plain=flight;plain.distance=0;
+            Mat model,bolt;ArrowMatrix(item,100,model.m);ArrowMatrix(plain,100,bolt.m);
+            assert(Near(Position(model)+Vector(model,{0,0,1}),muzzle)); // the arrow model's tip at the muzzle
+            assert(Near(Position(model)+Vector(model,{0,0,-.98391676f}),Position(bolt)+Vector(bolt,{0,0,-BoltTip}))); // its tail at the bolt's
+            assert(!Near(Position(model)+Vector(model,{0,0,BoltTip}),muzzle)); // negative control: not placed as the bolt mesh
+        }
         float t=0;const Vec start=Tip(launch.flight,0),target=start+line.direction;
         assert(CapsuleEntry(start,start+line.direction*2,target,target,.1f,t)&&t<1);
         assert(Fresh(p,150,7,42,3)&&!Fresh(p,201,7,42,3)&&!Fresh(p,99,7,42,3));
@@ -190,5 +209,57 @@ int main() {
     crossbowvr::EndClient();assert(!crossbowvr::Creating());
     assert(crossbowvr::Prepare(ptr,adjusted,launch,true));crossbowvr::ServerDone(launch,true);
     crossbowvr::Gate(true,++session,equipment,3);assert(!crossbowvr::Prepare(ptr,adjusted,launch));
-    puts("Crossbow physical flight, free aiming, tracked support wrist and native request pairing passed");
+    {   // Left-handed play (hand_role.h, phase 3): the stock in the LEFT hand, the right hand supporting it.
+        // The body poses it in the mirror world (vr/hand_swap_pose.h): the attach bone comes back as the
+        // right-handed one's mirror image with its side axis turned over, and the bolt's line, captured
+        // against the bone AS DRAWN, must be the mirror image's line inside the mirror world.
+        using namespace skel;
+        const auto mirror=[](Vec v){return Vec{-v.x,v.y,v.z};};
+        Mat attach=bow::Rotation({0,0,1},{-.4f,.2f,1});Position(attach,{-.3f,1.2f,-.5f});   // the bone, right-handed, model space
+        const int side=0;   // the crossbow's side axis in this bone (skeletons.cpp: the third axis of its gun frame)
+        // left-handed, as drawn: the reflection of that bone, its side axis turned over
+        Mat drawn=handswap::MirrorX(attach);assert(handswap::MatchHandedness(drawn,attach,side));
+        assert(handswap::Det(drawn)*handswap::Det(attach)>0);
+        // the mirror world's bone is the right-handed one; there the captured bolt goes on it as drawn (that axis turned)
+        Mat asDrawn=attach;handswap::TurnOver(asDrawn,side);
+        {const Mat reflected=handswap::MirrorX(drawn);for(int i=0;i<16;++i)assert(std::fabs(asDrawn.m[i]-reflected.m[i])<1e-5f);}
+        for(const bool symmetric:{true,false}) {
+            // the bolt helper in the attach bone's frame: in the crossbow's middle plane, or (a rig that is not) off it
+            Mat bolt=bow::Rotation({0,0,1},symmetric?Vec{0,.1f,1}:Vec{.2f,.1f,1});Position(bolt,{symmetric?0:.05f,.11f,.6f});
+            Line rightLine;assert(FromBolt(Multiply(bolt,attach),rightLine));
+            // the rendered crossbow hangs on the drawn bone; its bolt against that bone is what is captured
+            Mat boltWorld,captured;
+            assert(RenderedGeometry(bolt,drawn,drawn,boltWorld,captured));
+            Line leftLine;assert(FromBolt(boltWorld,leftLine));
+            // a crossbow that is its own mirror image across its side axis shoots along the mirror image's line
+            if(symmetric)assert(Near(leftLine.center,mirror(rightLine.center))&&Near(leftLine.direction,mirror(rightLine.direction)));
+            // and whatever the rig, the line the mirror world works with is the real line's reflection
+            Line there;assert(FromBolt(Multiply(captured,asDrawn),there));
+            assert(Near(there.center,mirror(leftLine.center))&&Near(there.direction,mirror(leftLine.direction))&&Near(there.up,mirror(leftLine.up)));
+            // so the support hand, found right-handed in the mirror world, is the real right hand's place under the real stock
+            const Vec leftPalm=Position(drawn)+Vec{0,-.02f,.01f};    // the driving (left) hand, real
+            const Vec realSupport=mirror(Support(there,mirror(leftPalm),.25f,1.f));
+            const float along=skel::bow::Dot(realSupport-leftLine.center,leftLine.direction);
+            const Vec off=realSupport-(leftLine.center+leftLine.direction*along);
+            assert(std::fabs(skel::bow::Length(off)-SupportDrop)<.002f&&along<-.05f);   // under the real bolt line, behind the muzzle
+        }
+        const Vec support{.1f,1.1f,-.2f};
+        // the latch is the support hand's own grip, whichever controller that is
+        const framevr::handrole::Map roles=framevr::handrole::Resolve(true,D2RVR_TYPE_CROSSBOW,D2RVR_TWO_HANDS_ON).map;
+        assert(roles.left&&roles.Physical(0)==1&&roles.Physical(1)==0);   // main: left (the trigger that fires), off: right (the support grip)
+        float grip[2]={1,0};   // physical: the right grip squeezed
+        SupportGrip latch;
+        assert(!latch.Step(42,10,true,0,true));                            // armed by a release
+        assert(latch.Step(42,10,true,grip[roles.Physical(1)],true));       // the right hand's grip takes the stock
+        assert(!latch.Step(42,10,true,grip[roles.Physical(0)],true));      // the left (driving) hand's grip is not the support's
+        // the trigger: the mod's Attack on the main trigger, by role
+        using framevr::gameplay::CrossbowAttack;using framevr::gameplay::TriggerSelection;using framevr::gameplay::Weapon;
+        assert(CrossbowAttack(true,Weapon::Crossbow,true,36,true)&&TriggerSelection(true,36,true)==-1);   // slot 0 is the main hand's: the left trigger attacks
+        // a support palm placed under the stock keeps its tracked turn (SupportHand), mirrored like the rest
+        Mat palm=bow::Rotation({0,0,1},{1,.5f,.2f});Position(palm,{.2f,1,-.3f});
+        const Mat placed=SupportHand(palm,{.01f,.02f,.03f},support);
+        Mat mirroredPalm=handswap::MirrorX(palm);const Mat mirroredPlaced=SupportHand(mirroredPalm,{.01f,.02f,.03f},mirror(support));
+        assert(Near(Position(mirroredPlaced),mirror(Position(placed))));
+    }
+    puts("Crossbow physical flight, free aiming, tracked support wrist, native request pairing and the left-handed stock passed");
 }

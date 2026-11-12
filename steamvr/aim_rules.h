@@ -57,7 +57,7 @@ inline bool Placed(Use use){return use==Use::Ground||use==Use::Curse||use==Use::
 inline bool TakesTarget(Use use){return use==Use::Heading||use==Use::Ground||use==Use::Curse||use==Use::Attack||use==Use::CorpseAtTarget;}
 // A landing circle shows where it will hit.
 inline bool Circle(Use use){return use==Use::Ground;}
-// VR Settings > Aim: Spells and Bow skills go to the aimed monster, and Ground
+// VR Settings > Gameplay > Targeting: Spells and Bow skills go to the aimed monster, and Ground
 // skill aim (0 the game's own aim, 1 where you point, 2 the aimed monster).
 struct Switches {bool spells=false,bowSkills=false;int ground=0;};
 // Any option On: the rules can aim some cast. All Off, nothing of them runs:
@@ -84,7 +84,8 @@ inline float FrontOfTarget(int skill){return skill==78?3.f:0.f;}
 // A motion's cast that lands on the highlighted monster when there is one, rather than where the motion
 // pointed (owner, 2026-11-05: "the meteor has to land on a selected target if there's one. You know how we
 // highlight the monster?", then "You need to also do the same thing with Blizzard"): Meteor, Blizzard.
-inline bool MotionOnTarget(int skill){return skill==56||skill==59;}
+// The Warlock's sigils and Abyss the same (owner, 2026-11-10: "or they could land on targeted monsters like sorceress").
+inline bool MotionOnTarget(int skill){return skill==56||skill==59||skill==393||skill==396||skill==400||skill==402;}
 // Skills the game should be handed the monster itself, when there is one: seekers
 // home in on it (Guided Arrow, Bone Spirit), Attract and Taunt need a unit, and
 // the traveling attacks (Charge, Leap Attack, Dragon Flight) fight it. With no
@@ -94,6 +95,14 @@ inline bool MotionOnTarget(int skill){return skill==56||skill==59;}
 inline bool WantsUnit(int skill){
     switch(skill){case 22: case 93: case 86: case 137: case 107: case 143: case 275: return true;default: return false;}
 }
+// Guided Arrow is handed the aimed monster even with VR Settings > Gameplay > Targeting > "Skills go to
+// the aimed monster" Off (owner, 2026-11-08: it "is not actually following and hitting monsters it just
+// goes pretty much straight" with the option Off - "make it always home even with that setting off since
+// that's the whole point of this skill"). With no aimed monster it flies as before.
+// Charge too (owner, 2026-11-09: "Paladin's charge should probably go to the monster we are targeting if there
+// is one available"; with the option Off it ran where the punch pointed, past the aimed monster). With no
+// aimed monster it charges where it is pointed, as before.
+inline bool AlwaysHomes(int skill){return skill==22||skill==107;}
 // The monster handed to the game for a unit skill answers the game's target
 // queries for this long after the cast (RulesUnit).
 inline constexpr unsigned long long HandOffMs=500;
@@ -114,7 +123,7 @@ inline Order For(int buttonHand,bool bowSkill) {
     if(bowSkill||buttonHand==1)return {{Left,Right,Eyes}};
     return {{Right,Left,Eyes}};
 }
-// VR Settings > Aim > Aim with your view (Off by default): a raised hand aims
+// VR Settings > Gameplay > Targeting > Aim with your view (Off by default): a raised hand aims
 // alone. While the first hand of a cast's order is held out and pointing, the
 // cast tries that hand's monster only: with none it goes where the hand points,
 // never to the other hand's or the eyes' monster. A lowered hand, or the row
@@ -128,7 +137,7 @@ inline int Tries(bool followsView,bool firstPointing,Use use,bool otherOutlined)
     if(!(followsView&&firstPointing))return 3;
     return use==Use::Attack&&otherOutlined?2:1;
 }
-// Is the other hand's monster outlined (VR Settings > Targets > Outlines shown):
+// Is the other hand's monster outlined (VR Settings > Interface > Outlines > Outlines shown):
 // with the outline On, Both hands outlines each hand's; Dominant hand only that
 // hand's (dominant: 0 right, 1 left).
 inline bool OtherOutlined(bool outline,bool bothHands,int dominant,Source other){return outline&&(bothHands||int(other)==dominant);}

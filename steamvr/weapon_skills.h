@@ -5,7 +5,8 @@
 #include <string_view>
 
 namespace framevr::weaponskills {
-inline constexpr int Attack=0,Throw=2,Smite=97,Charge=107,BlessedHammer=112,HolyShield=117,FistOfHeavens=121,Strafe=26,DoubleThrow=140,Werewolf=223,Werebear=228;
+inline constexpr int Attack=0,Throw=2,Smite=97,Charge=107,BlessedHammer=112,HolyShield=117,FistOfHeavens=121,Strafe=26,DoubleThrow=140,Werewolf=223,Werebear=228,
+                     MultipleShot=12,GuidedArrow=22;
 enum class Action { Native, Arrow, Volley, Shield };
 inline Action Classify(int skill) {
     switch(skill) {
@@ -58,15 +59,58 @@ inline bool ThrowingPotion(std::string_view code) {
     while(!code.empty()&&code.back()==' ')code.remove_suffix(1);
     return code=="gps"||code=="ops"||code=="gpm"||code=="opm"||code=="gpl"||code=="opl";
 }
-// The right trigger's skills that throw the potion in hand: Throw, or Attack
+// A trigger's skills that throw the hero's potion: Throw, or Attack
 // (Skills.txt leaves tpot out of Attack, so the game is expected to throw).
 inline bool PotionThrow(int skill){return skill==Attack||skill==Throw;}
+// A throwing potion in either hand (owner, 2026-11-10: "physical throwing of potions only seems to work if
+// they're equipped in the primary hand ... make it so they both work the same way"). Hands in role order
+// (hand_role.h): 0 main, 1 off; a hand holds what its own inventory arm holds (body location 4 main, 5 off).
+// Each potion hand throws its own with one native press of a trigger slot whose skill throws that potion:
+//   the main hand's: Attack or Throw (the game throws the primary weapon);
+//   the off hand's, alone (the main hand empty or a shield: it is the hero's weapon): Attack, Throw or Left
+//     Hand Throw; beside a weapon or another potion in the main hand: Left Hand Throw only (Skills.txt 4, the
+//     native Throw's twin for the other hand), as Attack and Throw would throw the main hand's.
+// The hand's own trigger arms its throw when it holds such a skill; else, for a potion that is the hero's
+// only weapon, the other trigger does when it holds one (the press that threw it natively before): the
+// potion's hand still makes the throw.
+inline constexpr int LeftHandThrow=4;
+enum class Held:uint8_t {None,Shield,Weapon,Potion};
+inline bool Armed(Held held){return held==Held::Weapon||held==Held::Potion;}
+inline bool PotionThrow(int hand,const Held held[2],int skill) {
+    if(hand<0||hand>1||held[hand]!=Held::Potion)return false;
+    if(hand==0)return PotionThrow(skill);
+    return Armed(held[0])?skill==LeftHandThrow:PotionThrow(skill)||skill==LeftHandThrow;
+}
+// trigger[hand]: the trigger (0 main, 1 off) that arms that hand's potion throw, -1 none. A trigger arms
+// one hand only. skill[t]: trigger t's skill, -1 when it is not known, not available or not allowed.
+struct PotionRoute {
+    int trigger[2]{-1,-1};
+    int Hand(int t) const {return trigger[0]==t?0:trigger[1]==t?1:-1;}   // the hand trigger t throws, -1 none
+    bool operator==(const PotionRoute&) const=default;
+};
+inline PotionRoute RoutePotions(const Held held[2],const int skill[2]) {
+    PotionRoute route;
+    for(int hand=0;hand<2;++hand)if(PotionThrow(hand,held,skill[hand]))route.trigger[hand]=hand;
+    // The hero's only weapon, its own trigger holding another skill: the other trigger's Attack or Throw.
+    for(int hand=0;hand<2;++hand) {
+        const int other=1-hand;
+        if(route.trigger[hand]<0&&held[hand]==Held::Potion&&!Armed(held[other])&&route.Hand(other)<0&&PotionThrow(skill[other]))route.trigger[hand]=other;
+    }
+    return route;
+}
 // What a physical release can carry: a bow's arrow skills; a thrown weapon's
 // javelin skills, and the Barbarian's Double Throw (Skills.txt srvdofunc 74,
 // no srvmissile: each throw flies the throwing hand's own weapon).
 inline bool Loadable(int skill,int missile,bool javelin) {
     return javelin?(JavelinSkill(skill)&&JavelinMissile(missile))||skill==DoubleThrow:QuiverSkill(skill)&&QuiverMissile(missile);
 }
+// The bow skills with their own server functions - Multiple Shot's fan, Guided
+// Arrow's homing, Strafe's volley - load from a face button too (#364: "when i
+// swapped that to multishot, its only fire on button press"). They never ride
+// the physical arrow: each following draw and release presses their button
+// natively, as the left trigger's bow skill does, so the game keeps the fan,
+// the homing and the volley.
+inline bool NativeLoad(int skill) {return skill==MultipleShot||skill==GuidedArrow||skill==Strafe;}
 // Bow quiver: pressing a face button assigned to a quiver skill loads that
 // skill into every following nocked arrow instead of casting it. Pressing the
 // loaded skill's button again returns to basic arrows; another skill swaps.
@@ -80,13 +124,15 @@ struct Loaded {
 class Quiver {
     uint64_t session=0;
     Loaded loaded{};
+    int from=-1;      // the face slot that loaded it (a native load presses it at each release)
     int held=-1;      // slot of the current press; release rearms it
     bool owned=false; // that press toggled the quiver and never casts
 public:
     enum class Change {None,Loaded,Unloaded};
     struct Result {bool consumed=false;Change change=Change::None;};
     const Loaded& Current() const {return loaded;}
-    void Clear(){loaded={};held=-1;owned=false;}
+    int Slot() const {return loaded.Active()?from:-1;}
+    void Clear(){loaded={};from=-1;held=-1;owned=false;}
     // slot: the face button currently held (-1 for none); its native assignment
     // follows. eligible: a bow (or, javelin, a thrown weapon) is ready and the
     // feature is enabled. A press keeps its first owner until released: a stale
@@ -96,11 +142,11 @@ public:
         Result out;
         if(slot<0){held=-1;owned=false;return out;}
         if(slot==held){out.consumed=owned;return out;}
-        held=slot;owned=eligible&&Loadable(skill,missile,javelin);
+        held=slot;owned=eligible&&(Loadable(skill,missile,javelin)||(!javelin&&NativeLoad(skill)));
         if(!owned)return out;
         out.consumed=true;
-        if(loaded.skill==skill&&loaded.owner==owner){loaded={};out.change=Change::Unloaded;}
-        else {loaded={skill,owner,missile};out.change=Change::Loaded;}
+        if(loaded.skill==skill&&loaded.owner==owner){loaded={};from=-1;out.change=Change::Unloaded;}
+        else {loaded={skill,owner,missile};from=slot;out.change=Change::Loaded;}
         return out;
     }
 };
@@ -133,7 +179,11 @@ public:
         // 65 ms producer pulse can disappear between the game's polls.
         // Allow bank preparation plus two native ticks and XR scheduling.
         // FinishShieldSkill still cancels immediately when Smite executes.
-        const double duration=hold>0?hold:nextId==Smite?.180:.065;
+        // Every alternate-bank (LT) slot needs the same: a bow skill loaded
+        // from slot 7 fired about half its releases at 35 pairs/s on
+        // 2026-11-09 (the LT went down and up again before its button was
+        // ever exposed). Glyph casts already hold LT slots this long.
+        const double duration=hold>0?hold:nextId==Smite||skills::Alternate(nextSlot)?.180:.065;
         slot=nextSlot;id=nextId;owner=nextOwner;context=nextContext;started=now;until=now+duration;return true;
     }
     int Get(int currentSlot,int currentId,int currentOwner,uint64_t currentContext,double now) {

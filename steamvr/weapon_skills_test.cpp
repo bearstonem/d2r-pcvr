@@ -97,6 +97,20 @@ int main() {
         s.in.quickCast=true;s.Step();assert(s.out.skill==-1);s.in.quickCast=false;s.Step();assert(s.out.skill==-1);
     }
     {
+        // A drawn Multiple Shot names its skill and the string's 3D line, so
+        // the game's fan can take the release's pitch (bow_flight.h FanVolley).
+        Sim s;s.Select(12);s.in.hand[1].p.y+=.25f;s.Step();s.Draw();
+        const auto line=math::Normalized(s.in.hand[1].p-s.in.hand[0].p);
+        assert(s.out.nativeBowSkill==-1);
+        s.in.trigger=0;s.Step();
+        assert(s.out.nativeBowRelease&&s.out.nativeBowSkill==12&&!s.out.bowRelease);
+        assert(std::fabs(s.out.releaseDirection.x-line.x)<1e-4f&&std::fabs(s.out.releaseDirection.y-line.y)<1e-4f&&
+               std::fabs(s.out.releaseDirection.z-line.z)<1e-4f&&s.out.releaseDirection.y>.3f);
+        s.Step();assert(!s.out.nativeBowRelease&&s.out.nativeBowSkill==-1); // the release step only
+        Sim basic;basic.Draw();basic.in.trigger=0;basic.Step();
+        assert(basic.out.bowRelease&&basic.out.nativeBowSkill==-1&&std::fabs(basic.out.releaseDirection.z+1)<1e-4f); // a basic arrow's line too
+    }
+    {
         Sim s;s.in.weapon=gameplay::Weapon::Melee;s.Step(2);s.Select(weaponskills::Smite);
         s.in.shieldEquipped=true;s.Step();assert(s.out.shieldContact&&s.out.meleeContact&&s.out.skill==-1);
         s.in.trigger=1;s.Step();assert(!s.out.shieldContact&&!s.out.meleeContact&&s.out.skill==2);
@@ -123,6 +137,15 @@ int main() {
         weaponskills::Pulse p;assert(p.Start(2,12,-1,7,1));assert(p.Get(2,12,-1,7,1.02)==2);
         assert(!p.Start(2,12,-1,7,1.03));assert(p.Get(2,12,-1,8,1.04)==-1);
         assert(p.Start(2,12,-1,8,2));assert(p.Get(2,12,-1,8,1.9)==-1);
+    }
+    {
+        // An alternate-bank (LT) slot holds 180 ms, as Smite: the LT must stand
+        // 50 ms before the game exposes the slot's button (2026-11-09: Guided
+        // Arrow on slot 7 fired about half its releases with 65 ms).
+        weaponskills::Pulse p;assert(p.Start(7,22,-1,1,1));
+        assert(p.Get(7,22,-1,1,1.10)==7&&p.Get(7,22,-1,1,1.17)==7);assert(p.Get(7,22,-1,1,1.19)==-1);
+        weaponskills::Pulse face;assert(face.Start(2,22,-1,1,1));assert(face.Get(2,22,-1,1,1.07)==-1);   // a face slot stays brief
+        weaponskills::Pulse nine;assert(nine.Start(9,22,-1,1,1));assert(nine.Get(9,22,-1,1,1.10)==9);
     }
     {
         using namespace skel::bow;

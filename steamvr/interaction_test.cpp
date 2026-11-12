@@ -89,7 +89,7 @@ int main(){
         Check(c!=Context(s.in.snapshot,s.out,true),"count changes invalidate paint and old click eligibility");
         for(auto page:{MenuPage::Spells,MenuPage::Equipment}) {
             Check(WheelCell(.1f,.1f,-1,page,1)==QuickUseCell,"quick slot shares hit and paint bounds");
-            // The RUN / WALK box's corner (now VR Settings > Body > Movement speed) holds the GLYPHS box (glyph casting).
+            // The RUN / WALK box's corner (now VR Settings > Comfort > Moving > Movement speed) holds the GLYPHS box (glyph casting).
             Check(WheelCell(.85f,.14f,-1,page,1)==GlyphsCell,"no RUN / WALK box or movement slider on the wheel; the GLYPHS box in its corner");
         }
         for(auto page:{MenuPage::Map,MenuPage::Developer,MenuPage::EditSlots,MenuPage::EditSkills,MenuPage::EditItems})
@@ -119,8 +119,10 @@ int main(){
             Check(WheelCell(.87f,.77f,-1,page,hand,false,0,false,true)==MotionsCell,"the MOTIONS box shares hit and paint bounds");
             Check(WheelCell(.87f,.77f,-1,page,hand,false,0,false,false)!=MotionsCell,"no box without motion spells");
         }
-        for(int i=0;i<MotionCards;++i){const auto b=MotionCardBounds(i);
-            Check(WheelCell((b.left+b.right)/2,(b.top+b.bottom)/2,-1,MenuPage::Motions,0)==MotionCardCell(i),"each card shares hit and paint bounds");}
+        for(const int count:{4,14,16})for(int i=0;i<MotionCards;++i){const auto b=MotionCardBounds(i,count);   // 16: the Warlock's, eight lower rows
+            const int cell=WheelCell((b.left+b.right)/2,(b.top+b.bottom)/2,-1,MenuPage::Motions,0,false,0,false,false,count);
+            Check(i<count?cell==MotionCardCell(i):(cell<MotionCardCell(0)||cell>=MotionCardCell(MotionCards)),"each card shares hit and paint bounds, and none past the class's last");
+            Check(i>=count||(b.bottom<=.885f&&b.bottom-b.top>=.085f&&(i<2||MotionCardBounds(i-2,count).bottom<b.top)),"the cards stand over the footer, one under another");}
         Check(WheelCell(.5f,.45f,-1,MenuPage::Motions,0)!=8&&WheelCell(.5f,.03f,-1,MenuPage::Motions,0)==-1,"no wheel behind the MOTIONS page");
         Check(WheelCell(.1f,.93f,-1,MenuPage::Motions,0)==9,"its footer: SPELLS goes back");
         Sim s;s.in.wheel=true;s.in.snapshot.skillClass=1;s.Step(3);
@@ -136,7 +138,7 @@ int main(){
         Sim other;other.in.wheel=true;other.Step(3);other.in.hover=MotionsCell;other.in.trigger=1;other.Step();
         Check(!other.out.motionsBox&&!other.out.motions,"another class: no box, no page");
         // The Paladin's and the Druid's own pages (owner, 2026-11-04): a card's bit is the card's.
-        for(int skillClass:{3,5}) {
+        for(int skillClass:{3,5,7}) {
             namespace sm=framevr::spellmotion;
             const auto motions=sm::PageOf(skillClass);
             Sim c;c.in.wheel=true;c.in.snapshot.skillClass=skillClass;c.Step(3);
@@ -146,14 +148,17 @@ int main(){
             c.in.trigger=0;c.Step(3);c.in.hover=MotionCardCell(motions.count-1);c.in.trigger=1;c.Step();
             Check(c.out.request.action==Action::ToggleMotion&&c.out.request.index==motions.count-1,"a card turns its own bit over");
             c.in.trigger=0;c.in.reply={c.out.request.sequence,c.out.request.session,Result::Applied};c.Step();c.in.reply={};
-            c.Step(3);c.in.hover=MotionCardCell(motions.count);c.in.trigger=1;c.Step();
-            Check(c.out.request.action==Action::None&&c.out.feedback==3,"past the class's cards: nothing to turn over");
+            c.Step(3);
+            if(motions.count<MotionCards) {   // the Warlock's sixteen fill the page: no cell past its last card
+                c.in.hover=MotionCardCell(motions.count);c.in.trigger=1;c.Step();
+                Check(c.out.request.action==Action::None&&c.out.feedback==3,"past the class's cards: nothing to turn over");
+            }
             c.in.trigger=0;c.Step(3);c.in.hover=9;c.in.trigger=1;c.Step();
             Check(!c.out.motions&&Page(c.out)==MenuPage::Spells,"SPELLS goes back");
         }
-        for(int skillClass:{7,-1}) {
+        for(int skillClass:{8,-1}) {
             Sim c;c.in.wheel=true;c.in.snapshot.skillClass=skillClass;c.Step(3);c.in.hover=MotionsCell;c.in.trigger=1;c.Step();
-            Check(!c.out.motionsBox&&!c.out.motions,"the Warlock and an unknown class: no motions, no box");
+            Check(!c.out.motionsBox&&!c.out.motions,"an unknown class: no motions, no box");
         }
     }
 
@@ -760,8 +765,49 @@ int main(){
         s.in.trigger=0;s.in.wheel=false;Check(s.Step().block,"swap blocks until confirmed");
         s.in.reply={r.sequence,10,Result::Applied};Check(s.Step().result==Result::Applied,"confirmed swap feedback");
     }
-    {
-        Sim s;s.in.hand[0].p=s.out.belt[0].p;s.Step();s.in.grip[0]=1;
+    // Optional trigger drinking uses the holding hand and the exact grabbed item.
+    for(int hand=0;hand<2;++hand)for(bool enabled:{false,true}) {
+        Sim s;s.in.clickToDrink=enabled;s.in.hand[hand].p=s.out.belt[0].p;s.Step();s.in.grip[hand]=1;
+        Check(s.Step().bottle==0,"either hand grabs flask without consuming");
+        s.in.bottleTrigger[1-hand]=1;
+        Check(s.Step().request.action==Action::None,"other hand trigger cannot drink flask");
+        s.in.bottleTrigger[hand]=1;auto o=s.Step();
+        Check((o.request.action==Action::Potion)==enabled,"trigger drinking is opt-in");
+        if(enabled) {
+            const auto r=o.request;
+            Check(r.item.handle==42&&r.index==0&&r.revision==4&&o.block&&!o.bottleEmpty,"click requests exact potion and waits for confirmation");
+            s.in.reply={r.sequence,10,Result::Applied};s.Step();
+            Check(s.out.bottleEmpty&&s.out.feedbackHand==hand,"confirmed click empties flask with feedback on holding hand");
+            for(int i=0;i<30;++i)Check(s.Step().request.action==Action::None,"held trigger drinks once per grab");
+            s.in.bottleTrigger[hand]=0;s.Step();s.in.bottleTrigger[hand]=1;
+            Check(s.Step().request.action==Action::None,"second click cannot drink empty flask");
+            s.in.grip[hand]=0;s.Step();s.Step();
+            Check(s.out.block,"held drinking trigger stays blocked after dropping flask");
+            s.in.bottleTrigger[0]=s.in.bottleTrigger[1]=0;s.Step();
+            Check(!s.out.block,"release rearms combat after click drinking");
+        }
+    }
+    for(int hand=0;hand<2;++hand) {
+        Sim s;s.in.clickToDrink=true;s.in.bottleTrigger[hand]=1;s.Step();
+        s.in.hand[hand].p=s.out.belt[0].p;s.Step();s.in.grip[hand]=1;s.Step();
+        Check(s.Step(4).request.action==Action::None,"trigger held before grabbing cannot drink");
+        s.in.bottleTrigger[hand]=0;s.Step();s.in.bottleTrigger[hand]=1;
+        const auto r=s.Step().request;Check(r.action==Action::Potion,"fresh click after grab can drink");
+        s.in.reply={r.sequence,10,Result::Refused};s.Step();
+        s.in.bottleTrigger[hand]=0;s.Step();s.in.bottleTrigger[hand]=1;
+        Check(s.Step().request.action==Action::None&&!s.out.bottleEmpty,"refused click never retries within the grab");
+    }
+    for(int change=0;change<4;++change) {
+        Sim s;s.in.clickToDrink=true;s.in.hand[0].p=s.out.belt[0].p;s.Step();s.in.grip[0]=1;s.Step();
+        if(change==0)++s.in.snapshot.belt[0].revision;
+        if(change==1)s.in.snapshot.belt[0].items[0].handle++;
+        if(change==2)s.in.tracked[0]=false;
+        if(change==3)++s.in.session;
+        s.in.bottleTrigger[0]=1;
+        Check(s.Step().request.action==Action::None,"changed item/session or lost tracking cancels click drinking");
+    }
+    for(bool enabled:{false,true}) {
+        Sim s;s.in.clickToDrink=enabled;s.in.hand[0].p=s.out.belt[0].p;s.Step();s.in.grip[0]=1;
         Check(s.Step().bottle==0&&s.out.request.action==Action::None,"physical bottle grab is non-consuming");
         s.in.hand[0].q=math::Multiply({0,0,-.70710678f,.70710678f},{.70710678f,0,0,.70710678f});
         // Neck touches the mouth with the right hand outside the face.
@@ -1124,5 +1170,80 @@ int main(){
         const Vec world{15.f,.4f,-37.f};const auto back=st.World(st.Room(world));
         Check(std::fabs(back.x-world.x)<1e-4f&&std::fabs(back.y-world.y)<1e-4f&&std::fabs(back.z-world.z)<1e-4f,"stage room/world mapping is invertible");
     }
-    std::puts("Interaction ownership, wheel, holster, item identity and confirmation tests passed");
+    for(bool mercPotionAutoaimEnabled:{false,true}) {
+        Check(MercThrowAccepted(0,mercPotionAutoaimEnabled)&&MercThrowAccepted(1.5f,mercPotionAutoaimEnabled),"landing at the merc feeds with either policy");
+        Check(MercThrowAccepted(1.51f,mercPotionAutoaimEnabled)==mercPotionAutoaimEnabled&&MercThrowAccepted(100,mercPotionAutoaimEnabled)==mercPotionAutoaimEnabled,
+              "ground, wall and distant misses feed only with assistance");
+        Check(!MercThrowAccepted(-1,mercPotionAutoaimEnabled)&&!MercThrowAccepted(NAN,mercPotionAutoaimEnabled)&&!MercThrowAccepted(INFINITY,mercPotionAutoaimEnabled),
+              "assistance cannot feed an absent, dead or invalid hireling");
+    }
+    {   // Left-handed play (hand_role.h): the engine's hands are roles, and the wrist HUD is the off hand's
+        // (index 1) either way: the left wrist right-handed, the RIGHT wrist left-handed (Input::mirrored),
+        // where everything is the mirror image - the watch face on the back of that wrist, the panel beside
+        // it on the other side, the palm's face, the shoulder the menu is reached over.
+        const auto mirrorP=[](Vec v){return Vec{-v.x,v.y,v.z};};
+        const auto mirrorQ=[](Quat q){return Quat{q.x,-q.y,-q.z,q.w};};   // the same turn seen in the mirror x -> -x
+        const math::Quat rolled{0,0,-.70710678f,.70710678f};
+        Sim right;right.in.hand[1].p={-.18f,1.35f,-.24f};right.in.hand[1].q=rolled;
+        Check(right.in.wristHand==1&&!right.in.mirrored&&right.Step().wrist,"right-handed: the left wrist, index 1, as before");
+        Check(right.in.RightHand(0)&&!right.in.RightHand(1)&&right.in.Wrist().q.z==rolled.z&&right.in.Wrist().q.w==rolled.w,"right-handed: the wrist's pose as the controller gives it");
+        Sim left;left.in.mirrored=true;   // index 0 the left controller (the main hand), index 1 the right
+        left.in.hand[0].p={-.25f,1.3f,-.4f};left.in.hand[1].p=mirrorP(right.in.hand[1].p);left.in.hand[1].q=mirrorQ(rolled);
+        Check(!left.in.RightHand(0)&&left.in.RightHand(1),"left-handed: index 1 is the right hand");
+        Check(left.Step().wrist,"left-handed: the RIGHT wrist turned like a watch shows the HUD");
+        left.in.tracked[0]=false;Check(left.Step().wrist,"the left hand's tracking does not matter to it");
+        left.in.tracked[0]=true;left.in.tracked[1]=false;Check(!left.Step().wrist,"the right hand's does");
+        left.in.tracked[1]=true;
+        {   // the panels are the mirror image of the left wrist's: place, facing, and the text upright (never mirrored)
+            const auto a=WristPanel(right.in.Wrist(),right.in.head),b=WristPanel(left.in.Wrist(),left.in.head);
+            const auto near=[](Vec u,Vec v){return std::fabs(u.x-v.x)<1e-4f&&std::fabs(u.y-v.y)<1e-4f&&std::fabs(u.z-v.z)<1e-4f;};
+            Check(near(b.p,mirrorP(a.p)),"the wrist panel sits where the left wrist's would in a mirror");
+            Check(near(math::Rotate(b.q,{0,0,1}),mirrorP(math::Rotate(a.q,{0,0,1}))),"and faces the mirrored way: out of the back of the right wrist");
+            Check(math::Dot(math::Rotate(b.q,{0,0,1}),math::Normalized(left.in.head.p-b.p))>.55f,"toward the eyes");
+            const auto ax=math::Rotate(a.q,{1,0,0}),bx=math::Rotate(b.q,{1,0,0});
+            Check(near(bx,Vec{ax.x,-ax.y,-ax.z}),"its text runs left to right for the reader, as on the left wrist (a picture is never mirrored)");
+            const auto pa=PalmPanel(right.in.Wrist(),right.in.head),pb=PalmPanel(left.in.Wrist(),left.in.head);
+            Check(near(pb.p,mirrorP(pa.p))&&near(math::Rotate(pb.q,{0,0,1}),mirrorP(math::Rotate(pa.q,{0,0,1}))),"the palm panel likewise: out of the right palm");
+            for(const bool palm:{false,true})for(const bool vitals:{false,true}) {
+                const auto ma=NavigationMapPanel(right.in.Wrist(),right.in.head,palm,vitals),mb=NavigationMapPanel(left.in.Wrist(),left.in.head,palm,vitals);
+                const auto ca=NavigationCompassPanel(right.in.Wrist(),right.in.head,palm,vitals),cb=NavigationCompassPanel(left.in.Wrist(),left.in.head,palm,vitals);
+                Check(near(mb.p,mirrorP(ma.p))&&near(cb.p,mirrorP(ca.p)),"the wrist map and the compass with it");
+            }
+        }
+        {   // the right wrist as the LEFT one's code would read it shows the palm side: the mirror is needed
+            Sim unmirrored;unmirrored.in.hand[1].p=mirrorP(right.in.hand[1].p);unmirrored.in.hand[1].q=mirrorQ(rolled);
+            Check(!unmirrored.Step().wrist,"without the mirror a right hand turned like a watch is read as its palm side: nothing");
+            Sim other;other.in.mirrored=true;other.in.hand[0].p={-.18f,1.35f,-.24f};other.in.hand[0].q=rolled;other.in.hand[1].p={.25f,1.3f,-.4f};
+            Check(!other.Step().wrist,"left-handed the LEFT wrist turned like a watch shows nothing: the HUD is not on that wrist");
+        }
+        {   // the palm reveal: the right palm raised to the eyes is the left palm's mirror image
+            Pose found{};bool have=false;
+            for(int i=0;i<400&&!have;++i) {   // a left palm (+X) turned up toward the eyes, found by trying rolls and pitches
+                const float roll=(i%20)*.157f,pitch=(i/20)*.157f-1.57f;
+                const Quat q=math::Multiply(Quat{std::sin(pitch*.5f),0,0,std::cos(pitch*.5f)},Quat{0,0,std::sin(roll*.5f),std::cos(roll*.5f)});
+                const Pose p{{-.12f,1.25f,-.30f},q};
+                if(PalmPresented(p,right.in.head)){found=p;have=true;}
+            }
+            Check(have,"the fixture: a left palm raised toward the eyes");
+            const Pose rightPalm{mirrorP(found.p),mirrorQ(found.q)};
+            Check(!PalmPresented(rightPalm,right.in.head)&&PalmPresented(AsLeftGrip(rightPalm,true),right.in.head),"the right palm raised the same way is its mirror image, read through AsLeftGrip");
+        }
+        {   // the leather menu's reach: the right hand over the RIGHT shoulder; the left shoulder is no longer its
+            Sim reach;Config c;c.dominant=0;reach.e.Configure(c);reach.in.mirrored=true;reach.in.leatherReach=true;reach.Step(4);
+            reach.in.hand[1].p=reach.in.head.p+Vec{.23f,-.2f,.14f};reach.Step(10);reach.in.grip[1]=1;
+            const auto o=reach.Step();
+            Check(o.inventory&&o.block&&o.feedbackHand==1&&o.request.action==Action::None,"left-handed: the right hand over the right shoulder opens the menu");
+            Sim wrongSide;wrongSide.e.Configure(c);wrongSide.in.mirrored=true;wrongSide.in.leatherReach=true;wrongSide.Step(4);
+            wrongSide.in.hand[1].p=wrongSide.in.head.p+Vec{-.23f,-.2f,.14f};wrongSide.Step(10);wrongSide.in.grip[1]=1;
+            Check(!wrongSide.Step().inventory,"and not over the left shoulder");
+            Sim rightHanded;rightHanded.e.Configure(c);rightHanded.in.leatherReach=true;rightHanded.Step(4);
+            rightHanded.in.hand[1].p=rightHanded.in.head.p+Vec{.23f,-.2f,.14f};rightHanded.Step(10);rightHanded.in.grip[1]=1;
+            Check(!rightHanded.Step().inventory,"right-handed the left hand over the RIGHT shoulder opens nothing, as before");
+        }
+        // the weapon swap's hand is a role too: the left hand over a shoulder, the main hand left-handed
+        Sim swap;Config c;c.dominant=0;swap.e.Configure(c);swap.Step(4);
+        swap.in.hand[0].p=swap.in.head.p+Vec{-.23f,-.2f,.14f};swap.Step(10);swap.in.grip[0]=1;
+        Check(swap.Step().request.action==Action::Equip&&swap.out.feedbackHand==0,"left-handed the main (left) hand's grip over the left shoulder swaps weapon sets");
+    }
+    std::puts("Interaction ownership, wheel, holster, item identity, confirmation and left-handed wrist / palm / menu reach / swap hand tests passed");
 }

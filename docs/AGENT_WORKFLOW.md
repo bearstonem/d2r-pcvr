@@ -210,8 +210,10 @@ The existing owner test character is not permission to alter normal saves.
   goes to his platform; Duriel uses the native entrance. Neither kills the boss
   nor completes the quest.
 - Crossbow + bolts supplies Leadcrow and 250 bolts for any class; Blood Moor
-  supplies an outdoor test destination. Compare existing versus explicit Attack
-  on Right Trigger. Hold the right stick down to show loot labels.
+  supplies an outdoor test destination. The right trigger fires the crossbow
+  whatever its slot holds (a bow skill excepted); no binding change is needed or
+  made. Check the `Frame crossbow:` right trigger lines on equip and removal.
+  Hold the right stick down to show loot labels.
 - Do not hold developer status locks across native dispatch or item operations.
   Those calls can pump rendering/UI; an earlier travel hang came from that lock.
 
@@ -227,10 +229,12 @@ records historical paths for older release reports.
 
 | File | Purpose |
 | --- | --- |
-| `d2rloader/logs/d2r-vr-frame.log` | Main buffered PCVR runtime/gameplay/render diagnostics |
-| `d2rloader/logs/d2r-vr-vrcam.log` | Plugin/loader startup diagnostics |
+| `d2rloader/logs/d2r-vr-frame.log` | Main buffered PCVR runtime/gameplay/render diagnostics, **this session only** |
+| `d2rloader/logs/d2r-vr-frame.previous.log` | The same for the session before |
+| `d2rloader/logs/d2r-vr-vrcam.log` | Plugin/loader startup diagnostics (the loader's file, rewritten by it each launch) |
 | `d2rloader/logs/d2rloader.log` | Loader failures and native assertions |
-| `d2rloader/logs/pcvr-launch.log` | Explorer handoff, child PID, exit code |
+| `d2rloader/logs/pcvr-launch.log` | Explorer handoff, child PID, exit code, across launches |
+| `d2rloader/logs/pcvr-launch.previous.log` | Older launches, once the launch log passed 1 MB |
 | `ReShade.log` in the game root | Shader loading/compile/runtime information |
 
 Also collect the loader's `d2r-lastresort-crash-report (...)` when produced;
@@ -238,8 +242,24 @@ locate it in the user's actual installation/log folders instead of guessing a
 headset-specific location. ZIP large text logs. Match the report's actual crash
 timestamp/PID to its session; filenames can contain process-start times.
 
-Logs append across sessions. Do not diagnose a recent crash from an older
-session's tail. Legacy upstream plugin identity/version strings can be stale;
+The frame log holds one session (`steamvr/log_rotation.h`). At each start the
+plugin renames the existing `d2r-vr-frame.log` to `d2r-vr-frame.previous.log`,
+replacing the one kept there, and starts an empty file; its second line says
+which happened. So after a crash the evidence is in `d2r-vr-frame.log` until the
+game is started again, in `.previous.log` after one more start, and gone after
+two: collect it before relaunching twice, and ask a reporter how often they
+restarted. When the rename fails (the log open in a program that does not share
+it, a read-only folder) the session appends to the old file instead and says so;
+such a file holds several sessions, as every log did before rotation (a report
+from a release without it is one file of every session; its first start with
+rotation moves that whole file to `.previous.log`). A session's log stops at
+64 MB with a last line saying so; the largest of 306 sessions in a 259 MB
+pre-rotation log was 6 MB, so reaching it means a diagnostic left on or a line
+repeated every frame. The launch log is kept by size instead:
+it appends across launches and moves to `pcvr-launch.previous.log` at 1 MB.
+`d2rloader.log` and the plugin startup log are D2RLoader's own files and are not
+rotated by the mod. Match a line's timestamp to the session before diagnosing a
+recent crash from it. Legacy upstream plugin identity/version strings can be stale;
 use a release package version, verified build hash or deployment receipt.
 Separate verified assertions, reconstructed call paths, hypotheses and owner
 headset observations. A null allocator return does not by itself prove a leak,
@@ -249,7 +269,7 @@ Known diagnostic lessons:
 
 - Loot label size comes from `[hud] labels_size` in `d2r_pcvr.ini` (formerly
   `d2r_vr.ini`) for native
-  first-person VR; VR Settings > Interface > Loot name size edits the same key.
+  first-person VR; VR Settings > Interface > Labels > Loot name size edits the same key.
   Default 45%, range 20-150%, five-point steps; explicit saved sizes are kept.
   The 150% enlargement bypassed this saved value. Changing that override to
   100% did not restore the earlier appearance; remove the override and respect
@@ -309,6 +329,15 @@ Known diagnostic lessons:
   `[debug] capture_pair` eye images or a Quest/VDXR session: Steam Frame's
   foveated streaming hides peripheral shading changes. The game is usually
   CPU-limited, so unchanged frame rate does not mean VRS is inactive.
+- `D2R_DepthFog.fx` has three sizes of its technique per eye (`_Lean` 22 passes,
+  `_Mask` 26, the unsuffixed full one 31; `steamvr/effect_passes.h`). The plugin
+  keeps on the smallest that draws what is wanted and logs each change as
+  `Frame effects: optional passes on: ...; N passes per eye (was 31)`. A feature
+  drawn by a left-out pass (HUD shift, toolbar / map / labels in the picture,
+  debug lines, table key, frame stamp) that does not appear: check that line
+  names it. "the installed D2R_DepthFog.fx is older" there means the DLL was
+  installed without its shaders. A new pass or a new reader of the interface
+  mask needs its `Use` bit; `effect-passes-test` fails until it has one.
 - VDXR hands the game to SteamVR while SteamVR is running, leaving a Quest on
   the flat desktop. Close SteamVR first; `Frame OpenXR: runtime` names the
   runtime actually used.

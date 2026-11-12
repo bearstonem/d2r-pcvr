@@ -16,15 +16,15 @@ ROOT_FILES = {
     'steamvr/DEVELOPMENT_SCENARIOS.md',
     'Install-BattleNet-Preview.cmd', 'Uninstall-Windows.cmd', 'THIRD_PARTY.md', 'LICENSE', 'NOTICE', 'd2r_pcvr.ini',
     'vrmod-manifest.json', 'launcher_icon.png',
-    'reshade/D2R_DepthFog.fx', 'third_party/minhook/LICENSE.txt', 'external/reshade/LICENSE.md',
+    'third_party/minhook/LICENSE.txt', 'external/reshade/LICENSE.md',
     'bin/d2rl-pcvr.dll', 'bin/openxr_loader.dll', 'bin/CascLib.dll', 'steamvr/vendor/bitknit.py',
 }
 SCRIPTS = {'setup_windows.ps1', 'setup_windows.py', 'setup_native.py', 'uninstall_windows.py', 'hdr_check.py',
            'steam_config.py', 'install.py', 'mod_identity.py', 'launch_windows.py', 'prepare_icons.py',
            'steam_assets.py', 'game_assets.py', 'game_install.py', 'casc_assets.py', 'bone_pieces.py',
            'prepare_potions.py', 'potion_assets.py', 'prepare_spell_sprites.py', 'prepare_arcane_sky.py', 'prepare_dev_scenarios.py',
-           'prepare_sewer_backdrop.py', 'prepare_kurast_dock.py', 'prepare_props.py', 'prepare_leather.py',
-           'prepare_game_ceiling.py', 'granny_write.py'}
+           'prepare_monster_immunity.py', 'prepare_sewer_backdrop.py', 'prepare_kurast_dock.py', 'prepare_props.py', 'prepare_leather.py',
+           'prepare_game_ceiling.py', 'granny_write.py', 'prepare_campfire_sky.py'}
 
 
 def safe_name(name):
@@ -37,6 +37,8 @@ def safe_name(name):
 def allowed(name, source):
     path = safe_name(name)
     return (name in ROOT_FILES or name in {'steamvr/' + item for item in SCRIPTS}
+            or (len(path.parts) == 2 and path.parts[0] == 'reshade' and re.fullmatch(r'D2R_\w+\.fxh?', path.name) is not None
+                and (source / name).is_file())   # the effect and every feature header, by pattern
             or (len(path.parts) == 3 and path.parts[:2] in (('steamvr', 'licenses'), ('reshade', 'sky'))
                 and path.suffix == ('.txt' if path.parts[0] == 'steamvr' else '.png')
                 and (source / name).is_file()))

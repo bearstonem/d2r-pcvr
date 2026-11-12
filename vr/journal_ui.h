@@ -7,9 +7,12 @@ bool UpperBandMenuOpen();
 bool LeatherMenuOpen();   // the tabbed menu (or a cube from it) with no world-opened panel: leather_menu.h
 bool CursorItemHeld();    // an item on the game's cursor, read in the last 600 ms (a drop outside the menu)
 uint64_t CursorItemReadAt();   // when CursorItemHeld's value was read (GetTickCount64)
+bool StashButtonsShown(); // VR previous/next stash tabs, stash_buttons.h
 bool StatsButtonShown();  // the tabbed menu alone (not a cube or world panel): its Advanced Stats button, stats_button.h
 bool RespecButtonShown(); // the tabbed menu's Character page alone: Reset Skills & Stats, respec_button.h
 uint32_t PanelChanges();  // counts every panel opened or closed (leather::Back)
+bool KeyboardShown();     // character creation with a hero picked: the name box, so the VR keyboard (vr_keyboard.h)
+uint32_t KeyboardEpoch(); // changes each time the name box comes up anew (a closed keyboard comes back)
 bool CloseLeatherMenu();  // queue: close the tabbed menu if only it and its pages are open, the cursor empty
 bool StowLeatherMenu();   // queue: the held menu put away over the left shoulder (any page or dialog; not with an item on the cursor)
 bool NpcChoicesOnly();

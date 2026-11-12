@@ -47,11 +47,21 @@ struct Input {
     float grip[2]{}, trigger=0;
     // Double Throw (#224): the left trigger arms the left hand's own throw.
     bool leftThrow=false; float leftTrigger=0;
-    float throwLift=0; // degrees above the hand's path (VR Settings > Combat > Thrown weapon lift)
+    float throwLift=0; // degrees above the hand's path (VR Settings > Gameplay > Combat > Thrown weapon lift)
     // The right trigger's skill is a trap or bomb thrown to place (toss::Skill, #224),
     // or Attack or Throw with a throwing potion in the right hand (potion): tossed
     // the same way, and never swung.
     bool toss=false,potion=false;
+    // The hand that makes the right trigger's toss (role order): 0, or 1 for a throwing potion in the off
+    // hand that this trigger throws (weaponskills::RoutePotions).
+    int tossHand=0;
+    // The off trigger's own toss, a throwing potion (weaponskills::RoutePotions): leftTrigger arms it, the
+    // hand offTossHand makes the throw, and the release is one native press of offSlot (its skill and owner
+    // as the snapshot has them), aimed from offAim when nothing was thrown.
+    bool offToss=false;
+    int offTossHand=1,offSlot=-1,offSkill=-1,offOwner=-1;
+    bool offAimTracked=false;
+    Pose offAim{};
     Weapon weapon=Weapon::Unknown;
     MeleeStyle meleeStyle=MeleeStyle::OneHand;
     uint32_t equipment=0;
@@ -66,12 +76,20 @@ struct Input {
     uint64_t skillContext=0;
     bool selectedAvailable=false,shieldEquipped=false;
 };
+inline bool GripsReleased(const Input& in) {
+    for(float grip:in.grip)if(!std::isfinite(grip)||grip<0||grip>=.4f)return false;
+    return true;
+}
 struct Output {
     bool attack=false, block=false, palette=false, bowDrawing=false, rayValid=false;
     bool bowReady=false, bowInReach=false, bowCharged=false;
     bool bowPhysical=false; // a release now is a physical arrow, not a native bow skill
     bool meleeContact=false,bowRelease=false,javelinRelease=false,javelinReady=false;
     bool nativeBowRelease=false,shieldContact=false;
+    // A release this step: the string's line (3D, string hand to bow hand), and
+    // for a native bow skill release the skill it pressed (else -1).
+    Vec releaseDirection{};
+    int nativeBowSkill=-1;
     float meleeSpeed=0;
     int skill=-1, potion=-1, bottle=-1; // potion is a one-shot request, not proof of consumption
     bool swap=false;
@@ -87,7 +105,13 @@ struct Output {
     // step from tossOrigin at tossVelocity (room metres, m/s).
     bool tossHeld=false,tossRelease=false;
     Vec tossOrigin{},tossVelocity{};
+    // The off trigger's toss (Input::offToss), the same way; offPress: this step's skill is its native press.
+    bool offTossHeld=false,offTossRelease=false,offPress=false;
+    Vec offTossOrigin{},offTossVelocity{};
 };
+inline bool CanRecenter(const Input& in,const Output& out) {
+    return GripsReleased(in)&&!out.bowDrawing&&!out.bowRelease&&!out.nativeBowRelease;
+}
 inline Vec BowForward(Pose hand) {
     // Match the existing bow grip convention: knuckles point through the bow,
     // with controller forward as a fallback when the knuckles point vertically.
@@ -114,6 +138,24 @@ inline bool RouteCrossbow(const Input& in,Output& out,bool rightHand,bool ready,
     if(!ready||!rightHand||!in.active||in.weapon!=Weapon::Crossbow||out.block||!out.rayValid||
        !(out.attack||(out.skill>=0&&skillAvailable&&skillId==0)))return false;
     out.attack=false;out.skill=-1;return true;
+}
+// A crossbow fires with the right trigger (owner, 2026-11-08: "when we equip a
+// crossbow ... the primary on that hand is set to attack", and when it comes
+// off, "restore back whatever was on the primary"). A runtime override, never
+// a binding write: the game saves skill assignments in the character, so the
+// slot keeps its skill (the wheel still shows it), taking the crossbow off is
+// the restore, and a crash cannot leave a changed binding behind. True when
+// the slot's skill gives way to Attack. An empty slot or Attack already
+// attacks; a bow skill the hero has (Multiple Shot, Strafe, Guided Arrow, the
+// elemental arrows) stays, as the game fires it from a crossbow natively.
+inline bool CrossbowAttack(bool motionControls,Weapon weapon,bool known,int skill,bool available) {
+    if(!motionControls||weapon!=Weapon::Crossbow||!known||skill<0||skill==weaponskills::Attack)return false;
+    return !(available&&weaponskills::Bow(skill));
+}
+// The right trigger's selection (Engine::Select): its slot, else none, which
+// presses Attack - an empty or unknown slot, or a crossbow's (CrossbowAttack).
+inline int TriggerSelection(bool known,int skill,bool crossbowAttack) {
+    return known&&skill>=0&&!crossbowAttack?skills::TriggerSlot(0):-1;
 }
 // Raises a direction by degrees (negative lowers it), keeping its heading;
 // never past straight up or down. A throw's hand path dips as it is let go.
@@ -167,8 +209,10 @@ class Engine {
     uint32_t equipment=0;
     Weapon weapon=Weapon::Unknown;
     float nockGap=0;
-    HandThrow throwing,leftThrowing,tossing;
+    HandThrow throwing,leftThrowing,tossing,offTossing;
     bool tossNative=false; // a still hold: the native cast holds as before
+    bool offTossNative=false;
+    weaponskills::Pulse offPulse;
     bool leftTriggerWas=false;
     int drawSkill=-1,drawOwner=-1;
     uint64_t drawContext=0;
@@ -198,7 +242,7 @@ public:
             Cancel();primed=true;previousTime=in.time;previousHand=in.hand[0].p;previousRotation=in.hand[0].q;previousLeft=in.hand[1].p;
             if(changed&&!in.handBindings&&(in.weapon==Weapon::Bow||in.weapon==Weapon::Melee||in.weapon==Weapon::Javelin))selection=-1;
             weapon=in.weapon;equipment=in.equipment;triggerWas=trigger;gripWas=grip;
-            leftTriggerWas=in.leftThrow&&in.leftTrigger>.55f;
+            leftTriggerWas=(in.leftThrow||in.offToss)&&in.leftTrigger>.55f;
             out.block=true;return out;
         }
         const Vec handDelta=in.hand[0].p-previousHand,leftDelta=in.hand[1].p-previousLeft;
@@ -206,7 +250,7 @@ public:
         const bool triggerEdge=trigger&&!triggerWas, gripEdge=grip&&!gripWas;
         const bool released=!trigger&&triggerWas;
         triggerWas=trigger;gripWas=grip;
-        const bool leftTrigger=in.leftThrow&&in.leftTrigger>(leftTriggerWas?.20f:.55f);
+        const bool leftTrigger=(in.leftThrow||in.offToss)&&in.leftTrigger>(leftTriggerWas?.20f:.55f);
         const bool leftEdge=leftTrigger&&!leftTriggerWas,leftReleased=!leftTrigger&&leftTriggerWas;
         leftTriggerWas=leftTrigger;
         if(!trigger)blockedTrigger=false;
@@ -215,7 +259,7 @@ public:
         out.rayOrigin=in.aim.p;out.rayDirection=math::Rotate(in.aim.q,{0,0,-1});out.rayValid=true;
 
         if(in.palette) {
-            drawing=nativeBowTrigger=tossNative=false;throwing=leftThrowing=tossing={};skillPulse.Cancel();pulseUntil=0;blockedTrigger=true;
+            drawing=nativeBowTrigger=tossNative=offTossNative=false;throwing=leftThrowing=tossing=offTossing={};skillPulse.Cancel();offPulse.Cancel();pulseUntil=0;blockedTrigger=true;
             if(bottle<0&&triggerEdge) {
                 if(in.hover>=0&&in.hover<8) {selection=in.hover;out.feedback=1;}
                 else if(in.hover==8) {selection=-1;out.feedback=1;}
@@ -226,7 +270,7 @@ public:
             }
         }
         if(bottle>=0) {
-            blockedTrigger=true;drawing=nativeBowTrigger=tossNative=false;throwing=leftThrowing=tossing={};skillPulse.Cancel();pulseUntil=0;
+            blockedTrigger=true;drawing=nativeBowTrigger=tossNative=offTossNative=false;throwing=leftThrowing=tossing=offTossing={};skillPulse.Cancel();offPulse.Cancel();pulseUntil=0;
             if(!grip) {bottle=-1;bottleSpent=false;drinkStart=0;}
             else {
                 out.bottle=bottle;
@@ -242,11 +286,36 @@ public:
         }
         if(in.palette) {out.block=true;return out;}
         if(in.quickCast) {
-            drawing=nativeBowTrigger=tossNative=false;throwing=leftThrowing=tossing={};skillPulse.Cancel();bowWasCharged=false;pulseUntil=shotAimUntil=0;blockedTrigger=true;
+            drawing=nativeBowTrigger=tossNative=offTossNative=false;throwing=leftThrowing=tossing=offTossing={};skillPulse.Cancel();offPulse.Cancel();bowWasCharged=false;pulseUntil=shotAimUntil=0;blockedTrigger=true;
             if(in.quickSkill>=0&&in.quickSkill<skills::Count)out.skill=in.quickSkill;
             return out; // preserve selected trigger skill; no melee or bow release
         }
         if(blockedTrigger) {out.block=true;return out;}
+
+        // The off trigger's toss (a throwing potion, Input::offToss): the main trigger's recognizer, release
+        // and one native press, for the other trigger. Its press gives way to the main trigger's own pulse
+        // (mainPulse) and takes the step from a held skill or a plain attack, which resume after it.
+        const auto offToss=[&](bool mainPulse) {
+            if(!in.offToss||in.leftThrow||in.offSlot<0||in.offSlot>=skills::Count){offTossing={};offTossNative=false;offPulse.Cancel();return;}
+            const int hand=in.offTossHand==0?0:1;
+            if(leftEdge){offTossing.Arm(in.hand[hand].p,in.time);offTossNative=false;offPulse.Cancel();out.leftFeedback=1;}
+            const bool armed=offTossing.armed;
+            Vec direction{};float draw=0;
+            if(offTossing.Step(in.hand[hand].p,hand?leftDelta:handDelta,dt,in.time,leftReleased,direction,draw)) {
+                out.offTossRelease=true;out.leftFeedback=2;out.offTossOrigin=in.hand[hand].p;
+                out.offTossVelocity=Lift(math::Normalized(offTossing.peak),in.throwLift)*std::min(Length(offTossing.peak),TossMaxSpeed);
+                offPulse.Start(in.offSlot,in.offSkill,in.offOwner,in.skillContext,in.time);
+            } else if(armed&&leftReleased&&offTossing.travel<TossStill) {
+                offPulse.Start(in.offSlot,in.offSkill,in.offOwner,in.skillContext,in.time);
+            }
+            if(leftTrigger&&offTossing.armed&&in.time-offTossing.at>=TossHold&&offTossing.travel<TossStill){offTossNative=true;offTossing={};}
+            if(!leftTrigger)offTossNative=false;
+            out.offTossHeld=offTossing.armed;
+            const int press=offTossNative?in.offSlot:offPulse.Get(in.offSlot,in.offSkill,in.offOwner,in.skillContext,in.time);
+            if(press<0||mainPulse)return;
+            out.skill=press;out.attack=false;out.offPress=true;
+            if(in.offAimTracked&&Valid(in.offAim)){out.rayOrigin=in.offAim.p;out.rayDirection=math::Rotate(in.offAim.q,{0,0,-1});}
+        };
 
         const int bowSlot=in.handBindings?in.bowSlot:selection;
         const int bowSkill=in.handBindings?in.bowSkill:in.selectedSkill,bowOwner=in.handBindings?in.bowOwner:in.selectedOwner;
@@ -277,6 +346,7 @@ public:
                 }
             } else leftThrowing={};
             out.meleeContact=!trigger&&!out.javelinRelease;
+            offToss(false);
             return out; // only the release spends ammunition; never hold A
         }
 
@@ -285,11 +355,12 @@ public:
         // still it casts natively as before, repeating; thrown, it goes where
         // its arc lands. The release makes one native press.
         if(in.toss&&selection>=0&&in.weapon!=Weapon::Bow&&in.weapon!=Weapon::Crossbow) {
-            if(triggerEdge){tossing.Arm(in.hand[0].p,in.time);tossNative=false;skillPulse.Cancel();out.feedback=1;}
+            const int hand=in.tossHand==1?1:0;   // the hand that holds it
+            if(triggerEdge){tossing.Arm(in.hand[hand].p,in.time);tossNative=false;skillPulse.Cancel();out.feedback=1;}
             const bool armed=tossing.armed;
             Vec direction{};float draw=0;
-            if(tossing.Step(in.hand[0].p,handDelta,dt,in.time,released,direction,draw)) {
-                out.tossRelease=true;out.feedback=2;out.tossOrigin=in.hand[0].p;
+            if(tossing.Step(in.hand[hand].p,hand?leftDelta:handDelta,dt,in.time,released,direction,draw)) {
+                out.tossRelease=true;out.feedback=2;out.tossOrigin=in.hand[hand].p;
                 out.tossVelocity=Lift(math::Normalized(tossing.peak),in.throwLift)*std::min(Length(tossing.peak),TossMaxSpeed);
                 skillPulse.Start(selection,in.selectedSkill,in.selectedOwner,in.skillContext,in.time);
             } else if(armed&&released&&tossing.travel<TossStill) {
@@ -298,9 +369,11 @@ public:
             if(trigger&&tossing.armed&&in.time-tossing.at>=TossHold&&tossing.travel<TossStill){tossNative=true;tossing={};}
             if(!trigger)tossNative=false;
             out.tossHeld=tossing.armed;
+            bool pulsing=false;
             if(tossNative)out.skill=selection;
-            else if(const int pulsed=skillPulse.Get(selection,in.selectedSkill,in.selectedOwner,in.skillContext,in.time);pulsed>=0)out.skill=pulsed;
+            else if(const int pulsed=skillPulse.Get(selection,in.selectedSkill,in.selectedOwner,in.skillContext,in.time);pulsed>=0){out.skill=pulsed;pulsing=true;}
             out.meleeContact=!trigger&&!out.tossHeld&&!in.potion;   // the game never attacks with a throwing potion
+            offToss(pulsing);
             return out;
         }
 
@@ -345,9 +418,10 @@ public:
             if(drawing&&released) {
                 if(out.bowCharged&&math::Dot(math::Normalized(line),out.bowForward)>.15f) {
                     shotOrigin=in.hand[1].p;shotDirection=math::Normalized(line);
-                    pulseUntil=in.time+.065;out.feedback=2;
+                    pulseUntil=in.time+.065;out.feedback=2;out.releaseDirection=shotDirection;
                     if(skillBow) {
                         out.nativeBowRelease=skillPulse.Start(bowSlot,bowSkill,bowOwner,in.skillContext,in.time);
+                        if(out.nativeBowRelease)out.nativeBowSkill=bowSkill;
                     } else out.bowRelease=true;
                     shotAimUntil=in.time+.4;
                 }
@@ -372,6 +446,7 @@ public:
         out.shieldContact=in.shieldEquipped&&selection>=0&&in.selectedAvailable&&in.selectedSkill==weaponskills::Smite&&!trigger;
         out.attack=trigger&&selection<0; // explicit button fallback only
         if(trigger&&selection>=0)out.skill=selection;
+        offToss(false);
         return out;
     }
 };

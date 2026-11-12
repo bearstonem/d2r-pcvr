@@ -59,6 +59,29 @@ inline bool FromAttachment(const float* world,const float* model,Vec eyeModel,Ve
     if(!Valid(p))return false;
     out=p;return true;
 }
+// Claws crossed (owner, 2026-11-10: "Assassin should be able to block using her claws"). With a claw in each
+// hand and no shield, the two blades held together in front of the body are the guard: its surface sits
+// between them, facing out from the eyes, and is judged as a shield's attachment-only fallback is (raised by
+// where the hands are, covering attacks from within 60 degrees of where the claws are held). offhand: the off
+// hand's claw, as FromAttachment gave it; the blades' middles as centers are (metres from the player's
+// origin); mainHand as Pose::hand. False, with out left empty or uncrossed, unless the blades are within
+// ClawsTogether of each other.
+constexpr float ClawsTogether=.32f,ClawBlade=.14f;   // m: the blades' middles apart at most; a blade's middle from its grip
+inline bool Crossed(const Pose& offhand,Vec offBlade,Vec mainBlade,Vec mainHand,Pose& out,float* apart=nullptr) {
+    out={};if(apart)*apart=0;
+    if(!Valid(offhand)||!Finite(offBlade)||!Finite(mainBlade)||!Finite(mainHand))return false;
+    const Vec between=offBlade-mainBlade;
+    const float gap=std::sqrt(math::Dot(between,between));
+    if(apart)*apart=gap;
+    Pose p=offhand;
+    p.center=(offBlade+mainBlade)*.5f;p.hand=(offhand.hand+mainHand)*.5f;p.halfRight=p.halfUp={};p.coverScale=1;
+    const Vec ahead{p.center.x-p.eye.x,0,p.center.z-p.eye.z};
+    const float reach=std::hypot(ahead.x,ahead.z);
+    if(!(reach>.05f))return false;   // over the head or against the chest: no side it faces
+    p.normal=ahead*(1/reach);
+    if(!Valid(p))return false;
+    out=p;return gap<=ClawsTogether;
+}
 struct Tuning {
     // Block: the shield hand up in front of the chest. Measured from the head in
     // its turn only (the view, without pitch or roll): metres, x right, y up,

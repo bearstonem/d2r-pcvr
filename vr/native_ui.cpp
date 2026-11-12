@@ -25,6 +25,7 @@
 #include "spells.h"
 #include "bow.h"
 #include "../steamvr/attack_speed.h"
+#include "../steamvr/light_radius.h"
 namespace gamestate {framevr::dualwield::Equipment MeleeEquipment();void SetMeleeOrder(uint32_t,uint32_t);uint32_t DataBank();bool MenuOpen();int AttackWeapon(int hand=0);int AttackWsm(int hand=0);uint32_t HandsKey();uint32_t WeaponSet();}
 namespace melee {void SetAttackCycle(uint64_t session,uint32_t milliseconds,int hand=0);void SetDualSpeed(uint64_t session,int classId,const int weaponClass[2],const int wsm[2]);}
 namespace interactionstate {int ShapeForm(uint64_t session,uint64_t now);}
@@ -110,6 +111,16 @@ const char* SkillKey(int id,char key[80]) {
     if(id==370)return "d2r:SkillNameCubeLoot";
     if(id==371)return "d2r:SkillnameMetamorphosisBear";
     if(id==372)return "d2r:SkillnameMetamorphosisWolf";
+    // The Warlock's (373-402, D2R's own class): its names have keys of their own, not skillname<N> (skilldesc's
+    // "str name"). The tables' way (FromTables) found none of them: "Skill 373" on the MOTIONS page (owner, 2026-11-10).
+    if(id>=373&&id<=402) {
+        static const char* const warlock[]={"SummonGoatmanName","DemonicMasteryName","DeathMarkName","SummonTaintedName","SummonDefilerName",
+            "BloodOathName","EngorgeName","BloodBoilName","ConsumeName","BindDemonName","LevitateName","EldritchBlastName","BaneHexName",
+            "SiphonHexName","PsychicWardName","EchoingStrikeName","PurgeHexName","BladeWarpName","CleaveName","MirroredBladesName",
+            "LethargySigilName","RingOfFireName","MiasmaBoltName","RancorSigilName","EnhancedEntropyName","FlameWaveName","MiasmaChainName",
+            "DeathSigilName","ApocalypseName","AbyssName"};
+        std::snprintf(key,80,"d2r:%s",warlock[id-373]);return key;
+    }
     if(id>372)return nullptr; // table/localization adapter needed; no fabricated name
     std::snprintf(key,80,"d2r:skillname%d",id+(id>=221&&id<=280?1:0));return key;
 }
@@ -228,6 +239,15 @@ std::string Name(int id) {
         auto found=FirstKnown(id,{"d2r:skillname%d","d2r:Skillname%d","d2r:skillsname%d","d2r:SkillName%d"},id>=221&&id<=280?1:0);
         if(!found.empty())return names.emplace(id,found).first->second;
     }
+    if(id>=373&&id<=402) {   // the Warlock's, should its key and the tables both fail: its English name, never "Skill 373"
+        static const char* const warlock[]={"Summon Goatman","Demonic Mastery","Death Mark","Summon Tainted","Summon Defiler","Blood Oath",
+            "Engorge","Blood Boil","Consume","Bind Demon","Levitation Mastery","Eldritch Blast","Hex: Bane","Hex: Siphon","Psychic Ward",
+            "Echoing Strike","Hex: Purge","Blade Warp","Cleave","Mirrored Blades","Sigil: Lethargy","Ring of Fire","Miasma Bolt",
+            "Sigil: Rancor","Enhanced Entropy","Flame Wave","Miasma Chain","Sigil: Death","Apocalypse","Abyss"};
+        char line[120];std::snprintf(line,sizeof line,"Frame skill names: skill %d named from the built-in list (no key or table name)",id);
+        framevr::logging::Write(line);
+        return names.emplace(id,warlock[id-373]).first->second;
+    }
     std::snprintf(text,sizeof text,"Skill %d",id);return text;
 }
 }
@@ -305,6 +325,8 @@ void Capture(framevr::interaction::Snapshot& s) {
     reason=s.vitalsKnown?0:6;
     // Bone Armor's pool (132) and maximum (133): the forearm grafts (steamvr/bone_graft.h).
     s.boneArmor=stat(player,132,0);s.boneArmorMax=stat(player,133,0);
+    // Light Radius (89, items and skills): the reach of the mod's dungeon light round the hero (light_radius.h, #440).
+    s.lightRadius=stat(player,framevr::lightradius::Stat,0);s.lightRadiusKnown=s.vitalsKnown;
     // ItemStatCost IDs verified against this game's own table: level=12,
     // experience=13. Experience rows contain one unsigned threshold per class
     // followed by ExpRatio; row 0 is MaxLvl, row 1 starts character level 1.

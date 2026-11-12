@@ -13,7 +13,10 @@
 // it instead of the shared black background (owner, 2026-10-27). The menu
 // laser is the right hand's, so the sheet is always in the left.
 namespace framevr::leather {
-constexpr int Hand=1;   // the left hand (index 1 in every hand array)
+// The off hand (index 1 in every hand array): the left. Left-handed play (hand_role.h) holds the menu in
+// the right hand, the laser being the left's: the callers say so (rightHand, ReachInput::right) and the
+// menu is strapped, its HUD placed and its shoulder reached the other way round.
+constexpr int Hand=1;
 
 // The panels that put the menu on the leather: the tabbed menu, any page of
 // it, and the cube opened from its inventory. The panels the world opens
@@ -128,7 +131,7 @@ inline void Premultiply(std::vector<uint8_t>& rgba) {
     }
 }
 
-// [interactions] leather_menu (VR Settings > Interface, beside Menu distance):
+// [interactions] leather_menu (VR Settings > Interface > Menus, beside Menu distance):
 // 0 Off, the tabbed menu in front of you against black; 1 On, on the hide in the
 // left hand; 2 Menu only, the same menu held in the left hand with no hide
 // (owner 2026-10-29: "in case players dont like the hide"). A value that is
@@ -165,9 +168,10 @@ inline Size Measure(const Art& art,float menuWidth) {
 
 // The menu's 16:9 band of the UI canvas: the canvas's full width at the top of
 // a taller canvas (the native "upper widescreen band", native_panels.h
-// UpperBand); the full height in the middle of a wider canvas. The sheet shows
-// only this band, so nothing the game draws outside it (a dimmed backdrop, the
-// lower canvas) leaves the leather. The Horadric Cube opened from the inventory
+// UpperBand); the full height in the middle of a wider canvas. The sheet's laser,
+// placement and dim removal (ui_blit Undim) work on this band; the canvas beside a
+// wide band never shows, and below a tall one only what the game draws past the
+// band's foot does (WithFoot). The Horadric Cube opened from the inventory
 // is laid out in the same band as the tabbed menu (owner's capture 2026-10-29:
 // cube and inventory at x 384-2687, y 80-1489 of 3072x3072, as the tabbed menu),
 // though the game closes UISwitcher for it, so the band never follows
@@ -182,6 +186,26 @@ inline Rect Band(int width,int height) {
     const int w=int(int64_t(height)*16/9);
     return {(width-w)/2,0,w,height};
 }
+// The canvas below the band, shown under the menu (a player's video, 2026-11-08: a
+// skill's synergies cut off). The game lays its tooltips out on the whole canvas, so on
+// a tall one the tooltip of a skill or item low on the menu runs on past the band's
+// foot, where the sheet ended it. The menu's quad goes on down to the canvas's foot
+// instead; the band stays where it was, the same size, so the laser, the hide, the
+// HUD and the buttons beside the menu keep it (UiSurfaceSize). Below the band the
+// canvas is clear once the game's dim is out (ui_blit Undim): only what runs past
+// the band shows there. A 16:9 or wider canvas has nothing below its band.
+// rect: the canvas shown; height: the quad's, metres; drop: its centre below the band's.
+struct Foot {Rect rect{};float height=0,drop=0;};
+inline Foot WithFoot(Rect band,int canvasHeight,float bandHeight) {
+    Foot out{band,bandHeight,0};
+    if(band.w<=0||band.h<=0||!std::isfinite(bandHeight)||bandHeight<=0)return out;
+    const int64_t below=int64_t(canvasHeight)-band.y-band.h;
+    if(below<=0)return out;
+    out.rect.h=band.h+int(below);
+    out.height=bandHeight*float(out.rect.h)/float(band.h);
+    out.drop=(out.height-bandHeight)*.5f;
+    return out;
+}
 
 // The gameplay HUD held with the menu (owner 2026-10-29, a tester: "With inventory open
 // you no longer get to see hp/mana/map"; Cal chose "on the hide, beside the menu", then
@@ -193,10 +217,10 @@ inline Rect Band(int width,int height) {
 // Menu-local metres from the menu's centre, x right, y up, HudLift in front of the menu.
 constexpr float HudMap=.10f,HudVitalsWidth=.14f,HudVitalsHeight=HudVitalsWidth*.5f,HudAbove=.04f,HudGap=.01f,HudLift=.004f;
 struct Hud {math::Vec map{},vitals{};float mapSize=HudMap,vitalsWidth=HudVitalsWidth,vitalsHeight=HudVitalsHeight;};
-inline Hud HudPlaces(float menuWidth) {
+inline Hud HudPlaces(float menuWidth,bool rightHand=false) {
     const float w=NormalizeMenuWidth(menuWidth),top=w*9.f/32.f;
     Hud h;
-    h.map={-w*.5f,top+HudAbove-HudMap*.5f,HudLift};
+    h.map={rightHand?w*.5f:-w*.5f,top+HudAbove-HudMap*.5f,HudLift};   // over the fist: the edge it holds
     h.vitals={0,top+HudGap+HudVitalsHeight*.5f,HudLift};
     return h;
 }
@@ -212,13 +236,17 @@ struct Placement {math::Vec p{};math::Quat q{0,0,0,1};};
 struct Strapped {Placement sheet{},menu{};};
 constexpr float Gap=.01f,Raise=.025f,Lift=.003f;
 inline math::Quat AboutX(float radians){return {std::sin(radians*.5f),0,0,std::cos(radians*.5f)};}
-inline Strapped Strap(math::Vec hand,math::Quat grip,const Art& art,float menuWidth,float tilt,float inset=0) {
+// rightHand (left-handed play): the mirror image - the fist holds the middle of the menu's RIGHT edge and
+// the menu reaches to its left. A right hand's grip frame is the left's with x reversed, so the sheet's turn
+// from the grip is the same and only the way across changes.
+inline Strapped Strap(math::Vec hand,math::Quat grip,const Art& art,float menuWidth,float tilt,float inset=0,bool rightHand=false) {
     const auto size=Measure(art,menuWidth);
     const float back=NormalizeTilt(tilt)*3.14159265f/180;
     Strapped out;
     out.sheet.q=out.menu.q=math::Multiply(grip,AboutX(-1.57079633f+back));
     inset=std::isfinite(inset)?std::clamp(inset,0.f,size.menuWidth*.5f):0;
-    const auto centre=hand+math::Rotate(out.sheet.q,{size.menuWidth*.5f-inset+Gap,0,Raise});
+    const float across=size.menuWidth*.5f-inset+Gap;
+    const auto centre=hand+math::Rotate(out.sheet.q,{rightHand?-across:across,0,Raise});
     out.sheet.p=centre-math::Rotate(out.sheet.q,size.menuCentre);
     out.menu.p=centre+math::Rotate(out.menu.q,{0,0,Lift});
     return out;
@@ -232,12 +260,12 @@ public:
     void Open(){placed=false;pose={};}
     bool Placed() const{return placed;}
     Strapped Get() const{return pose;}
-    void Step(math::Vec hand,math::Quat grip,bool tracked,const Art& art,float menuWidth,float tilt,float inset=0) {
+    void Step(math::Vec hand,math::Quat grip,bool tracked,const Art& art,float menuWidth,float tilt,float inset=0,bool rightHand=false) {
         const bool finite=std::isfinite(hand.x)&&std::isfinite(hand.y)&&std::isfinite(hand.z)&&
             std::isfinite(grip.x)&&std::isfinite(grip.y)&&std::isfinite(grip.z)&&std::isfinite(grip.w);
         const float length=finite?std::sqrt(grip.x*grip.x+grip.y*grip.y+grip.z*grip.z+grip.w*grip.w):0;
         if(!tracked||length<.5f)return;
-        pose=Strap(hand,{grip.x/length,grip.y/length,grip.z/length,grip.w/length},art,menuWidth,tilt,inset);placed=true;
+        pose=Strap(hand,{grip.x/length,grip.y/length,grip.z/length,grip.w/length},art,menuWidth,tilt,inset,rightHand);placed=true;
     }
 };
 
@@ -251,12 +279,23 @@ inline bool OverLeftShoulder(math::Vec hand,math::Vec head,math::Quat heading) {
     const auto p=math::Rotate(math::Conjugate(heading),hand-head);
     return p.x<=-.10f&&p.x>=-.48f&&p.y>=-.38f&&p.y<=.16f&&p.z>=.025f&&p.z<=.38f;
 }
+// The same volume over the right shoulder, for the right hand (left-handed play): its mirror image.
+inline bool OverRightShoulder(math::Vec hand,math::Vec head,math::Quat heading) {
+    if(!std::isfinite(hand.x)||!std::isfinite(hand.y)||!std::isfinite(hand.z)||
+       !std::isfinite(head.x)||!std::isfinite(head.y)||!std::isfinite(head.z))return false;
+    auto p=math::Rotate(math::Conjugate(heading),hand-head);p.x=-p.x;
+    return OverLeftShoulder(p,{0,0,0},{0,0,0,1});
+}
+inline bool OverMenuShoulder(math::Vec hand,math::Vec head,math::Quat heading,bool right) {
+    return right?OverRightShoulder(hand,head,heading):OverLeftShoulder(hand,head,heading);
+}
 struct ReachInput {
     double time=0;
     uint64_t session=0,epoch=0;
     bool active=false,tracked=false,allowed=false;
     math::Vec head{},hand{};math::Quat heading{0,0,0,1};
     float grip=0;
+    bool right=false;   // the right hand over the right shoulder (left-handed play)
 };
 struct ReachOutput {bool open=false,block=false,inReach=false;};
 // A fresh grip press with the hand behind the shoulder for at least 0.12 s.
@@ -274,11 +313,11 @@ public:
         const bool valid=in.active&&in.tracked&&in.session&&std::isfinite(in.time)&&in.time>0;
         if(!valid||!primed||session!=in.session||epoch!=in.epoch||in.time<=previous||in.time-previous>.15) {
             Reset();primed=valid;session=in.session;epoch=in.epoch;previous=in.time;
-            gripWas=down;consumed=down;out.block=down&&valid&&OverLeftShoulder(in.hand,in.head,in.heading);return out;
+            gripWas=down;consumed=down;out.block=down&&valid&&OverMenuShoulder(in.hand,in.head,in.heading,in.right);return out;
         }
         previous=in.time;const bool edge=down&&!gripWas;gripWas=down;
         if(!down)consumed=false;
-        out.inReach=OverLeftShoulder(in.hand,in.head,in.heading);
+        out.inReach=OverMenuShoulder(in.hand,in.head,in.heading,in.right);
         if(!out.inReach)nearSince=0;else if(!nearSince)nearSince=in.time;
         out.block=(consumed&&out.inReach)||(down&&out.inReach&&in.allowed);
         if(out.inReach&&in.allowed&&edge&&in.time-nearSince>=.12){consumed=true;out.open=out.block=true;}

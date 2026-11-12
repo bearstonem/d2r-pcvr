@@ -37,5 +37,16 @@ int main(){
     assert(interaction::Context(s,o,true,quest)!=interaction::Context(s,o,true,frame));
     auto changed=detected;changed.hands[0]=Layout::Generic;
     assert(interaction::Context(s,o,true,changed)!=interaction::Context(s,o,true,detected));
-    puts("Controller detection, per-hand labels, overrides, bindings and atlas invalidation passed");
+    {   // Left-handed play (hand_role.h): the main hand's slots are cast from the LEFT controller, so they
+        // are named by its buttons, and the off hand's by the right controller's.
+        auto left=quest;left.leftMain=true;
+        assert(left.Slot(0)=="Left Trigger"&&left.Slot(8)=="Left X"&&left.Slot(1)=="Left Y"&&left.Slot(2)=="Left Grip + X"&&left.Slot(3)=="Left Grip + Y");
+        assert(left.Slot(4)=="Right Trigger"&&left.Slot(5)=="Right A"&&left.Slot(6)=="Right B"&&left.Slot(7)=="Right Grip + A"&&left.Slot(9)=="Right Grip + B");
+        assert(left.Button(0,1)=="X"&&left.Button(1,1)=="A"&&quest.Button(0,1)=="A"&&quest.Button(1,1)=="X");
+        auto mixed=automatic;mixed.leftMain=true;   // right Touch, left Index: each hand keeps its own controller's names
+        assert(mixed.Slot(8)=="Left A"&&mixed.Slot(5)=="Right A"&&mixed.Slot(6)=="Right B");
+        assert(!(left==quest)&&interaction::Context(s,o,true,left)!=interaction::Context(s,o,true,quest));   // the wheel repaints
+        assert(!Labels{}.leftMain&&Labels{}.Physical(0)==0&&Labels{}.Physical(1)==1);   // off: as before
+    }
+    puts("Controller detection, per-hand labels, overrides, bindings, atlas invalidation and left-handed names passed");
 }

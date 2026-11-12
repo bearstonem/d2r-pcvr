@@ -32,8 +32,29 @@ template<class Read> bool VisualRoot(uintptr_t definition,uintptr_t storage,uint
 inline bool SamePlayer(uint32_t localType,uint32_t localId,uint32_t ownerType,uint32_t ownerId) {
     return localType==0&&ownerType==0&&localId!=UINT32_MAX&&localId==ownerId;
 }
-inline int ScaledVelocity(int native,float multiplier) {
-    if(native<=0||!std::isfinite(multiplier)||multiplier<1.f||multiplier>3.f)return native;
+// The Amazon's bow skills' own arrows (Missiles.txt rows, D2R 3.3's own table): Fire Arrow 12, Magic
+// Arrow 27, Ice Arrow 28, Cold Arrow 40, Exploding Arrow 41, Immolation Arrow 85, Guided Arrow 86,
+// Freezing Arrow 87, Multiple Shot's multipleshotarrow 213 and Strafe's strafearrow 682 (Skills.txt
+// srvmissilea). The owner, 2026-11-08: Guided Arrow and Multiple Shot "are moving very slowly like the
+// base game arrows ... it should apply to all her skills as well, they should all move like that" - so
+// the hero's own arrows of these skills take the arrow speed setting however they are cast, as basic
+// arrows do. Bolts (31, multipleshotbolt 214, strafebolt 683) keep the game's speed, as the basic bolt.
+inline bool BowSkillArrow(uint32_t missile) {
+    switch(missile) {
+        case 12:case 27:case 28:case 40:case 41:case 85:case 86:case 87:case 213:case 682:return true;
+        default:return false;
+    }
+}
+// necromage1..4, emitted by the dedicated summoned necromage monster row.
+// Check both fields so enemy elemental bolts and mercenaries cannot match.
+template<class Read> uint32_t MageMissile(uintptr_t params,Read read) {
+    uint32_t missile=~0u,header[2]{};uintptr_t owner=0;
+    if(!read(params+0x20,missile)||missile<208||missile>211||
+       !read(params+8,owner)||!owner||!read(owner,header)||header[0]!=1||header[1]!=364)return ~0u;
+    return missile;
+}
+inline int ScaledVelocity(int native,float multiplier,float maximum=3.f) {
+    if(native<=0||!std::isfinite(multiplier)||multiplier<1.f||multiplier>maximum)return native;
     const double value=double(native)*multiplier;
     return value<=std::numeric_limits<int>::max()?int(std::lround(value)):native;
 }

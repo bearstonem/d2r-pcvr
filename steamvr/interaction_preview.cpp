@@ -9,6 +9,7 @@
 #include "sewer_prompt_art.h"
 #include "notice_card_art.h"
 #include "skill_usage.h"
+#include "hand_text.h"
 #include <cstdio>
 #include <cstring>
 #include <limits>
@@ -32,6 +33,9 @@ static bool SavePng(const char* path,const std::vector<uint8_t>& rgba,UINT width
 }
 int main(int argc,char** argv) {
     using namespace framevr::interaction;
+    // A last argument --left-handed: the same check with the words as a left-handed player reads them
+    // (hand_text.h): the motions' cues, the skill cards, the hints, the sewer prompt's button.
+    if(argc>2&&!std::strcmp(argv[argc-1],"--left-handed")){framevr::handtext::SetLeft(true);--argc;}
     struct Cleanup {~Cleanup(){icons::Shutdown();}} cleanup;
     if(argc>2&&!std::strcmp(argv[2],"--sewer-prompt-check")) {
         namespace prompt=framevr::sewerprompt;
@@ -41,7 +45,7 @@ int main(int argc,char** argv) {
         HDC dc=CreateCompatibleDC(nullptr);void* bits=nullptr;
         HBITMAP bitmap=CreateDIBSection(dc,&info,DIB_RGB_COLORS,&bits,nullptr,0);
         if(!dc||!bitmap||!bits){if(bitmap)DeleteObject(bitmap);if(dc)DeleteDC(dc);return 120;}
-        const auto old=SelectObject(dc,bitmap);const bool fits=prompt::Paint(dc);
+        const auto old=SelectObject(dc,bitmap);const bool fits=prompt::Paint(dc,0,0,framevr::handtext::Left()?prompt::LeftShortcut:prompt::Shortcut);
         GdiFlush();std::vector<uint8_t> rgba(prompt::Width*prompt::Height*4);
         const auto* bgra=static_cast<const uint8_t*>(bits);
         for(size_t i=0;i<rgba.size();i+=4){rgba[i]=bgra[i+2];rgba[i+1]=bgra[i+1];rgba[i+2]=bgra[i];rgba[i+3]=255;}
@@ -133,17 +137,24 @@ int main(int argc,char** argv) {
         for(const int id:{107,112,117}){auto& k=paladin.catalog[paladin.skillCount++];k.id=id;k.level=8;k.known=k.available=true;std::snprintf(k.name,sizeof k.name,"%s",framevr::spellmotion::SpellName(id));}
         for(int i=0;i<framevr::skills::Count;++i){auto& k=paladin.skills[size_t(i)];k=paladin.catalog[size_t(i%3)];}
         icons::Prefetch(paladin);if(!icons::Wait(10000))return 120;
-        constexpr int width=2304,height=768;std::vector<uint8_t> gallery(width*height*4);
-        for(int tile=0;tile<3;++tile) {
+        // The Warlock's sixteen cards (the one page past fourteen: eight lower rows), two not learned, one off.
+        Snapshot warlock;warlock.activeSet=1;warlock.bindingsEditable=true;warlock.skillClass=7;
+        {const auto page=framevr::spellmotion::PageOf(7);
+         for(int i=0;i<page.count;++i)if(i!=6&&i!=14){auto& k=warlock.catalog[warlock.skillCount++];k.id=page.skills[i];k.level=8;k.known=k.available=true;std::snprintf(k.name,sizeof k.name,"%s",framevr::spellmotion::SpellName(k.id));}}
+        for(int i=0;i<framevr::skills::Count;++i){auto& k=warlock.skills[size_t(i)];k=warlock.catalog[size_t(i%warlock.skillCount)];}
+        icons::Prefetch(warlock);if(!icons::Wait(10000))return 120;
+        constexpr int width=3072,height=768;std::vector<uint8_t> gallery(width*height*4);
+        for(int tile=0;tile<4;++tile) {
             Output o;o.wheel=true;o.wheelHand=0;o.motionsBox=true;o.motionsOff=1<<framevr::spellmotion::Bit(48);
             if(tile==0)o.hover=MotionsCell;
             else if(tile==1){o.motions=true;o.hover=MotionCardCell(2);}
-            else {o.motions=true;o.hover=MotionCardCell(0);o.motionsOff=1<<framevr::spellmotion::Bit(3,112);}
-            const auto pixels=Paint(tile==2?paladin:s,o,-1);if(pixels.size()!=1024*1024*4)return 121;
+            else if(tile==2){o.motions=true;o.hover=MotionCardCell(0);o.motionsOff=1<<framevr::spellmotion::Bit(3,112);}
+            else {o.motions=true;o.hover=MotionCardCell(15);o.motionsOff=1<<framevr::spellmotion::Bit(7,394);}
+            const auto pixels=Paint(tile==3?warlock:tile==2?paladin:s,o,-1);if(pixels.size()!=1024*1024*4)return 121;
             for(int y=0;y<768;++y)std::memcpy(&gallery[(y*width+tile*768)*4],&pixels[y*1024*4],768*4);
         }
         if(!SavePng(argv[1],gallery,width,height))return 122;
-        std::puts("Motions art: the hand wheel's MOTIONS box, the Sorceress's MOTIONS page and the Paladin's rendered");return 0;
+        std::puts("Motions art: the hand wheel's MOTIONS box, the Sorceress's MOTIONS page, the Paladin's and the Warlock's sixteen rendered");return 0;
     }
     if(argc>2&&!std::strcmp(argv[2],"--glyphs-check")) {
         // Glyph casting: the hand wheel with a Draw glyph button and the GLYPHS box, the GLYPHS page, the
@@ -174,6 +185,50 @@ int main(int argc,char** argv) {
         }
         if(!SavePng(argv[1],gallery,width,height))return 112;
         std::puts("Glyph casting art: hand wheel, GLYPHS page, Draw glyph card, a shape's picker, the left hand's set and a left shape's picker rendered");return 0;
+    }
+    if(argc>2&&!std::strcmp(argv[2],"--cooldowns-check")) {
+        // Wrist skill cooldowns (skill_cooldowns.h): one, two and three icons between the orbs at different sweeps, and
+        // a skill with no cached icon (its element's color). Each changes only its own disc, opaque, in the notch; the
+        // recharged share is brighter than the share still to run. The gallery: the wrist art of each, top to bottom.
+        using namespace framevr;
+        if(argc>3){wchar_t path[32768]{};MultiByteToWideChar(CP_UTF8,0,argv[3],-1,path,32768);icons::Directory(path);}
+        Snapshot s;s.session=1;s.vitalsKnown=true;s.health=310;s.maxHealth=420;s.mana=95;s.maxMana=260;
+        for(const int id:{64,59,56}){auto& k=s.catalog[s.skillCount++];k.id=id;k.known=k.available=true;}
+        icons::Prefetch(s);if(!icons::Wait(10000))return 130;
+        const auto plain=Paint(s,Output{},-1);if(plain.size()!=1024*1024*4)return 131;
+        constexpr int tiles=4,w=512,h=256;
+        const cooldowns::Icons states[tiles]={{{{-1,0},{64,24},{-1,0}}},{{{59,18},{64,9},{-1,0}}},{{{59,12},{64,3},{56,20}}},{{{-1,0},{9999,16},{-1,0}}}};
+        std::vector<uint8_t> gallery(size_t(w)*h*tiles*4);
+        for(int tile=0;tile<tiles;++tile) {
+            Output o;o.cooldowns=states[tile];
+            const auto pixels=Paint(s,o,-1);if(pixels.size()!=plain.size())return 132;
+            const auto inDisc=[&](int x,int y){
+                for(int p=0;p<cooldowns::MaxShown;++p)if(o.cooldowns[size_t(p)].skill>=0&&
+                    std::hypot(x+.5f-512-cooldowns::WristIcon[p].x,y+.5f-768-cooldowns::WristIcon[p].y)<=cooldowns::IconRadius+.01f)return true;
+                return false;
+            };
+            for(int y=0;y<1024;++y)for(int x=0;x<1024;++x) {
+                const size_t i=(size_t(y)*1024+x)*4;
+                if(std::memcmp(&pixels[i],&plain[i],4)&&!inDisc(x,y))return 133;   // nothing changes outside the discs
+            }
+            for(int p=0;p<cooldowns::MaxShown;++p) {
+                if(o.cooldowns[size_t(p)].skill<0)continue;
+                const int cx=512+int(cooldowns::WristIcon[p].x),cy=768+int(cooldowns::WristIcon[p].y),r=int(cooldowns::IconRadius);
+                const auto* centre=&pixels[(size_t(cy)*1024+cx)*4];
+                const auto* ring=&pixels[(size_t(cy)*1024+cx+r-1)*4];
+                if(centre[3]!=255||ring[3]!=255||ring[0]!=122||ring[1]!=94||ring[2]!=51)return 134;   // opaque, in its bronze ring
+            }
+            if(tile==3) {   // no icon cached: the element's color; 1/3 recharged, so 60 degrees is in color and 240 is not
+                const float cx=512+cooldowns::WristIcon[1].x,cy=768+cooldowns::WristIcon[1].y,at=cooldowns::IconRadius*.6f;
+                const auto lum=[&](float degrees){
+                    const float a=degrees*3.14159265f/180;const int x=int(cx+std::sin(a)*at),y=int(cy-std::cos(a)*at);
+                    const auto* q=&pixels[(size_t(y)*1024+x)*4];return q[0]+q[1]+q[2];};
+                if(lum(60)<=lum(240)*2)return 135;
+            }
+            for(int y=0;y<h;++y)std::memcpy(&gallery[(size_t(tile)*h+y)*w*4],&pixels[((size_t(y)+768)*1024+512)*4],size_t(w)*4);
+        }
+        if(!SavePng(argv[1],gallery,w,h*tiles))return 136;
+        std::puts("Skill cooldowns art: one to three icons between the orbs, each in its own disc, the sweep, and a skill without a cached icon");return 0;
     }
     if(argc>2&&!std::strcmp(argv[2],"--effects-check")) {
         using namespace framevr;

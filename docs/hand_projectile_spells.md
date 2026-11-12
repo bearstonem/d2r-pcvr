@@ -1,7 +1,7 @@
 # Hand-origin projectile spells
 
-Experimental support for Fire Bolt, Fireball, Ice Bolt, Ice Blast and Charged Bolt on the
-Sorceress, Bone Spear on the Necromancer, and Holy Bolt on the Paladin, using the existing per-hand skill wheels. Assign either hand's
+Experimental support for Fire Bolt, Fireball, Ice Bolt, Ice Blast, Lightning, Charged Bolt and
+Chain Lightning on the Sorceress, Bone Spear on the Necromancer, and Holy Bolt on the Paladin, using the existing per-hand skill wheels. Assign either hand's
 trigger or face-button shortcut. Hold it to repeat; both hands can cast their
 own assigned projectile at the same time, with separate aim and cast timing.
 Walking and turning remain available during these casts.
@@ -20,7 +20,7 @@ native piercing result is preserved, with each enemy contacted at most once.
 The owned visual definition's four-unit height and three-unit backward offset
 are canceled so the visible spear starts at the casting hand.
 
-In **VR Settings > Aim**, **Keep spell shots level** defaults to **Off** when
+In **VR Settings > Gameplay > Targeting**, **Keep spell shots level** defaults to **Off** when
 no preference is saved. Keep it **Off** for full up/down aiming of
 Fire Bolt, Fireball, Ice Bolt, Ice Blast, Bone Spear and Holy Bolt. The change applies to new casts from
 both hands without restarting; projectiles already in flight keep their original
@@ -29,7 +29,7 @@ The saved preference is `[gameplay] planar_spell_aim=1` (or `0` for free aim).
 
 ## Optional projectile aim assist
 
-In **VR Settings > Aim**, choose **Spell aim assist**: **Off**,
+In **VR Settings > Gameplay > Targeting**, choose **Spell aim assist**: **Off**,
 **Light** or **Strong** (the default for missing preferences), then press **Apply**. The saved setting
 is `[gameplay] projectile_aim_assist=0`, `1`, or `2`, respectively. This applies
 to the supported Sorceress hand spells, Necromancer Bone Spear and Paladin Holy Bolt, independently for each
@@ -119,6 +119,14 @@ through the game's ground grid. Space for the complete
 24-bolt maximum is reserved before dispatch, and mana/cadence apply once per
 volley. Each bolt has a separate visual identity. No straight-shot replacement
 or second damage calculation runs for these bolts.
+
+Chain Lightning (owner, 2026-11-09: out of the arm she points, "similar to how things like firebolt
+work") goes the same way: its own server function (26) runs unchanged, and only its missile's start
+and heading are moved to the casting hand as the game makes it, matched by owner, skill and missile.
+Its leaps from monster to monster are the game's, made on its hits after the cast. Lightning flies
+as Fire Bolt does, from the hand along its aim. Both are checked against the game's own skill rows
+first (Lightning a single straight missile, Chain Lightning server function 26 with its missile);
+a row that differs casts natively, from the hero.
 
 Menus, wheels, equipment/assignment changes, tracking loss, world transitions
 and released buttons cancel pending requests. A hand's latest pose replaces

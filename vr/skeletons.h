@@ -22,10 +22,10 @@ struct Input {
     bool legsUnder = false;     // with lockUpper: pelvis and legs kept under that body - no lunge ahead, no hip turn
     bool wrist = false;         // mode 2: the hands turn with the controllers, not only follow the forearm
     bool forearmTwist = false;  // the forearm takes a share of the wrist's twist about its own axis (sleeves, bracers)
-    float shieldGripCm = 0.0f;  // VR Settings > Shield > Shield along forearm: the shield moved up the forearm toward the elbow, so the hand reaches its grip
+    float shieldGripCm = 0.0f;  // VR Settings > Gameplay > Shield > Shield along forearm: the shield moved up the forearm toward the elbow, so the hand reaches its grip
     float shieldOutCm = 0.0f, shieldUpCm = 0.0f;  // and out from the arm, and toward the thumb (cm, scaled by the model's forearm)
-    float shieldFollowPct = 100.0f;  // VR Settings > Shield > Shield wrist turn: 0 strapped to the forearm, 100 turns with the wrist
-    float shieldRollDeg = 0.0f;      // VR Settings > Shield > Shield roll: the shield turned about the forearm, + toward the little finger
+    float shieldFollowPct = 100.0f;  // VR Settings > Gameplay > Shield > Shield wrist turn: 0 strapped to the forearm, 100 turns with the wrist
+    float shieldRollDeg = 0.0f;      // VR Settings > Gameplay > Shield > Shield roll: the shield turned about the forearm, + toward the little finger
     bool shieldTrace = false;   // [debug] shield_trace: log the held shield's pose chain (5 Hz, and at once on a jump)
     float wristDeg[3] = {};     // pitch, yaw, roll on top, in the controller's own axes (mirrored for the left)
     float scale = 1.0f;         // arm reach on top of the hero/user height ratio
@@ -110,6 +110,18 @@ struct Input {
     bool attacking = false;     // a skill button is down: no grip is taken from the animation then
     float weaponAdj[6] = {};
     bool leftShield=false;
+    // Left-handed play (steamvr/hand_role.h, #307), mode 2 and a mirrored weapon kind only: the item on
+    // R_weapon_attach (the main weapon) is held by the LEFT hand, the item on L_weapon_attach (a second
+    // weapon) and the shield by the RIGHT arm. The arms themselves stay on their own controllers.
+    bool leftHanded=false;
+    int leftHandedTurnAxis=0;     // [hands] left_handed_turn_axis: 0 the flat's axis (hand_swap_pose.h), 1..3 the bone's x y z
+    int leftHandedShieldTurn=0;   // [hands] left_handed_shield_turn: 0 along the arm, 1 out, 2 up (shield_pose.h PlaceAcross)
+    // Phase 3, with leftHanded: a bow, a crossbow, a staff, a spear, a polearm or two hands on one weapon.
+    // Those are posed in the mirror world (hand_swap_pose.h): the bow in the right hand and its string in
+    // the left, the stock or the shaft in the left hand and the right hand supporting it.
+    bool leftHandedMirror=false;
+    int leftHandedItemTurn=0;     // [hands] left_handed_bow_turn_axis / _crossbow_ / _staff_ for the kind held: 0 the item's symmetry axis, 1..3 the bone's x y z
+    const char* leftHandedKind="";   // that kind's name, for the log (a string that outlives the pose)
     char shrinkBone[48] = {};   // [debug] shrink_bone: the hero's bone of this name drawn shrunk to a point - what hangs on it vanishes    // mode 2: the weapon in the hand moved x y z (cm) and turned pitch yaw roll (deg), its own axes
 #endif
 };
@@ -162,6 +174,10 @@ bool MotionBowAnchored();
 // on, each pose of a monster or townsperson within radiusMetres of centre (the hero,
 // render units; [bodies] radius, 3 m) is posted for the physics and bent by its answer.
 void SetLimbs(bool on, const float centre[3], float unitsPerMetre, float radiusMetres);
+// Heads turn to you (steamvr/look_at.h, [gameplay] look_at_you): while on, each pose of a
+// monster, mercenary, summon or townsperson within about 7 m of eye (the player's eyes in
+// the world, render units) has its neck and head turned to it.
+void SetLookAt(bool on, const float eye[3], float unitsPerMetre);
 #endif
 #if D2RVR_FIRST_PERSON
 // Forget the weapon grip: the next calm pose takes it again (F11).
@@ -230,6 +246,9 @@ struct MeleeWeaponPose {
 bool MeleeWeapon(MeleeWeaponPose& out,int hand=0);
 bool ShieldWeapon(MeleeWeaponPose& out);
 bool ShieldGuardPose(framevr::guard::Pose& out);
+// An Assassin's two claws as a guard (guard::Crossed): the pose between them, whether they are crossed, and how
+// far apart the blades are (m). False without a claw in each hand or a fresh pose.
+bool ClawGuardPose(framevr::guard::Pose& out,bool& crossed,float& apart);
 bool CrossbowPose(framevr::crossbow::Pose& out);
 // Called after the game's complete attachment/world transform is evaluated.
 void CrossbowRendered(uint32_t entity,uintptr_t component,uintptr_t matrix);
@@ -241,6 +260,9 @@ void ShieldRendered(uint32_t entity,uintptr_t component,uintptr_t matrix);
 void PoseYaws(float out[3]);
 bool Dump(const wchar_t* outPath);
 void SetHeroPos(float x, float y, float z);
+// Room-scale: the point on the ground under the camera's eyes (world units), where the drawn body
+// stands when you have stepped away from the hero's spot; valid false when there is none.
+void SetEyeGround(float x, float z, bool valid);
 
 // The hero's TransformComponent in the renderer's ECS (skeletons.cpp, docs/doll_binding.md):
 // from the SkeletonInstance the hook identifies as the hero, through its entity, with no memory

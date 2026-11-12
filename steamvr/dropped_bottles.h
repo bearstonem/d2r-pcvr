@@ -1,6 +1,7 @@
 #pragma once
 #include "frame_math.h"
 #include "props.h"
+#include "spell_impacts.h"
 #include "world_coordinates.h"
 #include <algorithm>
 #include <array>
@@ -153,6 +154,7 @@ struct Moved {
 };
 // A prop a weapon or a moving body set going, for the log and the hand.
 struct Knock {uint32_t entity=0;uint16_t kind=0;int slot=-1;float speed=0;};
+inline constexpr int SpellSlot=-2; // Knock::slot of a prop a spell missile set going (World::Push)
 inline constexpr double PropMoveLimit=12;  // seconds a prop may move before it is frozen where it is
 inline constexpr float PropRestSpeed=.03f; // m/s, and turning under 0.3 rad/s ...
 inline constexpr double PropRestTime=.6;   // ... this long: at rest
@@ -198,14 +200,25 @@ public:
     void Walls(const Patch&);
     // Advance in fixed steps to time. Bottles older than Lifetime, or farther
     // than Range from the player, are removed. Beyond the sampled cells there
-    // are no walls, only the floor.
+    // are no walls, only the floor. With nothing that can move (no bottle, no
+    // thrown one, every prop frozen and no weapon reaching one) no step is taken.
     void Advance(double time,Vec player);
+    uint64_t Steps() const;     // world steps taken so far
+    void StepAtRest(bool);      // tests: step with nothing to move too, as it used to
     // Where the weapons are now. The next Advance moves each one there over
     // the steps it takes, pushing and waking the bottles in its way; a slot
     // without a valid collider is removed. Only while bottles lie in the world.
     void Weapons(const std::array<Collider,Colliders>&);
     // The fastest a weapon struck a bottle since the last call (m/s), cleared.
     float Struck(int slot);
+    // A spell missile's step or burst (spell_impacts.h), in world metres,
+    // before the next Advance. Frozen props in its way are set going, the
+    // nearest first, while fewer than the limit move (a spell never freezes
+    // another prop to make room); they, the props already moving and the
+    // bottles lying in the world take its impulse. A thrown bottle in flight
+    // is left alone. Returns what it pushed.
+    struct Pushed {unsigned props=0,bottles=0;};
+    Pushed Push(const spellimpacts::Push&,double time);
     // The level props near the player. New ones are added frozen where the
     // game has them; frozen ones no longer listed (out of reach) are removed;
     // moving ones stay until they rest. Lost entities are removed at once.

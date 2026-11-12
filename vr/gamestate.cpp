@@ -40,6 +40,8 @@
 #include "../steamvr/leather_menu.h"
 #include "../steamvr/stats_button.h"
 #include "../steamvr/respec_button.h"
+#include "../steamvr/stash_buttons.h"
+#include "../steamvr/vr_keyboard.h"
 #include "respec.h"
 #include "../steamvr/notice_card.h"
 #include "../steamvr/weapon_skills.h"
@@ -207,11 +209,11 @@ void MaintainNotice(const PluginContext* ctx) {
 }
 // The aura icon at the top left (native_hud.h AuraIconHider): active auras
 // show on the wrist, so it is hidden in every VR session, menus included,
-// while VR Settings > Wrist > Buffs and companions is On.
+// while VR Settings > Interface > Wrist > Buffs and companions is On.
 framevr::nativehud::AuraIconHider g_auraIcon;
 framevr::nativehud::AuraIconLog g_auraLog;
 void AuraLine(const char* line){if(g_auraLog.Allow())framevr::logging::Write(line);}   // detail lines, capped
-// HUD > Companions & effects, re-read at most every 250 ms (an Apply takes
+// Interface > Wrist > Buffs and companions, re-read at most every 250 ms (an Apply takes
 // effect within that); UI steps in between take no settings lock.
 bool WristEffectsOn(uint64_t now) {
     static uint64_t readAt=0;static bool on=true;
@@ -328,12 +330,18 @@ std::atomic<bool> g_journalOnly{false};
 std::atomic<bool> g_opaqueMenu{false};
 std::atomic<bool> g_upperBandMenu{false};
 std::atomic<bool> g_leatherMenu{false};
+std::atomic<bool> g_stashButtons{false};
 std::atomic<bool> g_statsButton{false};   // the tabbed menu alone: its Advanced Stats button (stats_button.h)
 // An item on the game's cursor (the laser picked it up in a menu), read with the hands
 // every 200 ms; when it was read (CursorItemHeld wants it recent).
 std::atomic<bool> g_cursorItem{false};
 std::atomic<uint64_t> g_cursorItemAt{0};
 std::atomic<bool> g_respecButton{false};  // its Character page alone: Reset Skills & Stats (respec_button.h)
+// Character creation with a hero picked: the name box is up, so the VR keyboard (vr_keyboard.h)
+// shows; the epoch changes each time it comes up anew. The box is read on the UI message thread.
+framevr::keyboard::NameBox g_nameBox;
+std::atomic<bool> g_keyboard{false};
+std::atomic<uint32_t> g_keyboardEpoch{0};
 std::atomic<uint32_t> g_panelChanges{0};   // every panel opened or closed (leather::Back)
 std::atomic<bool> g_npcChoices{false};
 std::atomic<uint32_t> g_questNotices{0};   // quest updates while the notification panel is hidden
@@ -400,9 +408,9 @@ std::atomic<uint32_t> g_from{0};
 std::atomic<bool> g_leftShield{false};
 std::mutex g_meleeEquipmentMutex;framevr::dualwield::Equipment g_meleeEquipment;
 std::vector<uint32_t> g_shieldTypes;
-std::vector<uint32_t> g_potionTypes;            // ItemTypes tpot: the throwing potions (RightThrowingPotion)
-std::atomic<bool> g_rightPotion{false};
-std::atomic<uint32_t> g_rightPotionCode{0};   // its item code, for the bottle that flies (#292)
+std::vector<uint32_t> g_potionTypes;            // ItemTypes tpot: the throwing potions (PotionHands)
+std::atomic<uint32_t> g_potionHeld{0};        // weaponskills::Held of the main arm (bits 0-7) and the off arm (8-15)
+std::atomic<uint32_t> g_potionCode[2];        // a potion's item code, for the bottle that flies (#292); 0 = none
 std::atomic<uint32_t> g_handsKey{0};          // what is in the two hands, as one number (HandsKey)             // the hand slot the weapon kind came from: 0 right, 1 left              // D2RVR_TWO_HANDED* bits of what is held
 
 constexpr uint32_t Four(const char* s) { return DataTables::MakeFourCC(s[0], s[1], s[2], s[3]); }
@@ -718,6 +726,7 @@ void __cdecl ReadItems(const PluginContext* ctx, void* token) noexcept {
         g_type.store(D2RVR_TYPE_UNKNOWN);
         g_held.store(0);
         g_leftShield=false;
+        g_potionHeld=0;g_potionCode[0]=0;g_potionCode[1]=0;
         {std::lock_guard lock(g_meleeEquipmentMutex);g_meleeEquipment={};}
         g_two.store(0);
         g_set.store(0);
@@ -789,8 +798,26 @@ void __cdecl ReadItems(const PluginContext* ctx, void* token) noexcept {
     // The tracked shield is on the left wrist even when the SDK reports it
     // in body location 4 (observed with the development Paladin).
     g_leftShield=IsShield(code[0])||IsShield(code[1]);
-    g_rightPotion=IsThrowingPotion(code[0]);   // thrown by hand to a spot (transport: motionInput.potion)
-    g_rightPotionCode=g_rightPotion&&code[0].size()>=3?uint32_t(uint8_t(code[0][0]))|uint32_t(uint8_t(code[0][1]))<<8|uint32_t(uint8_t(code[0][2]))<<16|uint32_t(' ')<<24:0u;
+    // Throwing potions, thrown by hand to a spot (transport: weaponskills::RoutePotions): what each arm holds,
+    // body location 4 the main hand's and 5 the off hand's, and the potion's code for the bottle that flies.
+    {
+        uint32_t held=0,changed=0;
+        for(int i=0;i<2;++i) {
+            using framevr::weaponskills::Held;
+            const bool potion=IsThrowingPotion(code[i]);
+            const Held kind=code[i].empty()?Held::None:potion?Held::Potion:IsShield(code[i])?Held::Shield:Held::Weapon;
+            held|=uint32_t(kind)<<(i*8);
+            const uint32_t potionCode=potion&&code[i].size()>=3?uint32_t(uint8_t(code[i][0]))|uint32_t(uint8_t(code[i][1]))<<8|uint32_t(uint8_t(code[i][2]))<<16|uint32_t(' ')<<24:0u;
+            changed|=g_potionCode[i].exchange(potionCode)!=potionCode;
+        }
+        if(g_potionHeld.exchange(held)!=held||changed) {
+            static const char* const names[]={"nothing","a shield","a weapon","a throwing potion"};
+            char b[200];
+            snprintf(b,sizeof b,"gamestate: throwing potions - the main arm (body location 4) holds %s '%s', the off arm (5) %s '%s'",
+                names[held&3u],code[0].c_str(),names[(held>>8)&3u],code[1].c_str());
+            if((held&0xffu)==uint32_t(framevr::weaponskills::Held::Potion)||(held>>8)==uint32_t(framevr::weaponskills::Held::Potion)||changed)Log(b);
+        }
+    }
     const uint32_t handTypes[2]={KindOf(code[0]),KindOf(code[1])};
     {std::lock_guard lock(g_meleeEquipmentMutex);
         if(g_meleeEquipment.id[0]!=id[0]||g_meleeEquipment.id[1]!=id[1])g_meleeEquipment={};
@@ -890,6 +917,10 @@ SharedEvents::UiMessageAction __cdecl OnUiMessage(const PluginContext* ctx, cons
         snprintf(b, sizeof b, "gamestate: ui message '%s' '%s' text '%.80s'", target, command, text);
         Log(b);
     }
+    g_nameBox.Message(target, command, text);
+    if (g_keyboard.exchange(g_nameBox.Shown()) != g_nameBox.Shown())
+        Log(g_nameBox.Shown() ? "gamestate: name box up (a hero picked) - VR keyboard shown" : "gamestate: name box gone - VR keyboard hidden");
+    g_keyboardEpoch.store(g_nameBox.Epoch());
     if (strcmp(target, "PanelManager") == 0) {
         const bool before = g_menu.load() != 0;
         if (!strcmp(command, "OpenPanel") || !strcmp(command, "OpenExclusivePanel")) { if (*text) g_panels.insert(text); }
@@ -906,6 +937,7 @@ SharedEvents::UiMessageAction __cdecl OnUiMessage(const PluginContext* ctx, cons
             [](const auto& name){return framevr::panels::OpaqueBackground(name);}));
         g_leatherMenu.store(framevr::leather::OnSheet(g_panels));
         g_statsButton.store(framevr::statsbutton::Shown(g_panels));
+        g_stashButtons.store(framevr::stashbuttons::Shown(g_panels));
         g_respecButton.store(framevr::respecbutton::Shown(g_panels));
         bool menu = false;
         for (const std::string& n : g_panels) if (IsMenuPanel(n)) { menu = true; break; }
@@ -1077,8 +1109,8 @@ uint32_t WeaponSet() { return g_set.load(); }
 uint32_t WeaponType() { return g_type.load(); }
 uint32_t HandsHeld() { return g_held.load(); }
 bool LeftShield() {return g_leftShield.load();}
-bool RightThrowingPotion() {return g_rightPotion.load();}
-uint32_t RightThrowingPotionCode() {return g_rightPotionCode.load();}
+uint32_t PotionHands() {return g_potionHeld.load();}
+uint32_t ThrowingPotionCode(int hand) {return hand==0||hand==1?g_potionCode[hand].load():0u;}
 uint32_t TwoHanded() { return g_two.load(); }
 uint32_t WeaponHand() { return g_from.load(); }
 uint32_t HandsKey() { return g_handsKey.load(); }
@@ -1133,6 +1165,7 @@ bool JournalOnly(){return g_journalOnly.load();}
 bool OpaqueMenuOpen(){return g_opaqueMenu.load();}
 bool UpperBandMenuOpen(){return g_upperBandMenu.load();}
 bool LeatherMenuOpen(){return g_leatherMenu.load();}
+bool StashButtonsShown(){return g_stashButtons.load();}
 bool StatsButtonShown(){return g_statsButton.load();}
 bool CursorItemHeld(){return g_cursorItem.load()&&GetTickCount64()-g_cursorItemAt.load()<600;}
 uint64_t CursorItemReadAt(){return g_cursorItemAt.load();}
@@ -1142,6 +1175,8 @@ bool RespecButtonShown(){return g_respecButton.load()&&respec::Available();}
 bool RespecButtonShown(){return false;}   // the reset engine is in the native OpenXR build only
 #endif
 uint32_t PanelChanges(){return g_panelChanges.load();}
+bool KeyboardShown(){return g_keyboard.load();}
+uint32_t KeyboardEpoch(){return g_keyboardEpoch.load();}
 bool NpcChoicesOnly(){return g_npcChoices.load();}
 void ReadNpcChoicesRect() {
     if(!g_npcChoices.load()||!g_widgets||!g_widgets->getWidgetRect||!g_widgets->findPanel)return;

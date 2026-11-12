@@ -148,6 +148,48 @@ class DesktopLaunchTests(unittest.TestCase):
                 self.assertEqual(json.loads((root / 'status.json').read_text()), {'state': 'finished', 'result': result})
                 self.assertIn(f'code=0x{result:08x}', (root / 'd2rloader/logs/pcvr-launch.log').read_text())
 
+    def test_launch_log_is_kept_by_size_with_one_previous_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            log = root / 'd2rloader/logs/pcvr-launch.log'
+            previous = root / 'd2rloader/logs/pcvr-launch.previous.log'
+            self.assertEqual(launch.previous_log(log), previous)
+            # Below the limit every launch appends to the one file: the history of earlier launches stays.
+            launch.launch_log(str(root), 'first launch')
+            launch.launch_log(str(root), 'second launch')
+            self.assertEqual([line.split(' ', 2)[2] for line in log.read_text().splitlines()], ['first launch', 'second launch'])
+            self.assertFalse(previous.exists())
+            # At the limit the file is put aside whole, in place of the one kept before, and a new one starts.
+            previous.write_text('an older kept log\n')
+            log.write_text('x' * (launch.LAUNCH_LOG_LIMIT - 1) + '\n')
+            full = log.read_bytes()
+            launch.launch_log(str(root), 'after the limit')
+            self.assertEqual(previous.read_bytes(), full)
+            self.assertEqual([line.split(' ', 2)[2] for line in log.read_text().splitlines()], ['after the limit'])
+            self.assertEqual(sorted(path.name for path in log.parent.iterdir()), ['pcvr-launch.log', 'pcvr-launch.previous.log'])
+
+    def test_launch_log_that_cannot_be_put_aside_is_appended_to(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            log = root / 'd2rloader/logs/pcvr-launch.log'
+            log.parent.mkdir(parents=True)
+            log.write_text('x' * launch.LAUNCH_LOG_LIMIT + '\n')
+            full = log.read_text()
+            # The rename fails (the file open in an editor, a read-only folder): nothing is lost, the launch goes on.
+            with patch.object(launch.os, 'replace', side_effect=PermissionError('fixture: in use')) as replace:
+                self.assertFalse(launch.rotate_launch_log(log))
+                launch.launch_log(str(root), 'still logged')
+            self.assertEqual(replace.call_count, 2)
+            text = log.read_text()
+            self.assertTrue(text.startswith(full) and text.rstrip().endswith('still logged'))
+            self.assertFalse(launch.previous_log(log).exists())
+            # A log that cannot be written at all never stops a launch either, and what was logged is still there.
+            with patch.object(launch.os, 'replace', side_effect=PermissionError('fixture: in use')), \
+                    patch.object(Path, 'open', side_effect=PermissionError('fixture: read-only')):
+                launch.launch_log(str(root), 'not written')
+            self.assertEqual(log.read_text(), text)
+            launch.launch_log(None, 'no game folder yet')
+
     def test_child_start_error_is_reported_without_retry(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

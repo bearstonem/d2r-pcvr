@@ -1,4 +1,5 @@
 #pragma once
+#include "atlas_dirty.h"
 #include "interaction_ui.h"
 namespace framevr::interaction {
 // Do not display/click obsolete skill contents while a new image is pending.
@@ -28,6 +29,7 @@ struct PaintContext {
     navigation::Location location;
     companions::Roster companions;
     effects::Status effects;
+    cooldowns::Icons cooldowns{};
     bool operator==(const PaintContext&) const=default;
 };
 inline PaintContext Context(const Snapshot& s,const Output& o,bool fresh,const controllers::Labels& labels={}) {
@@ -36,7 +38,7 @@ inline PaintContext Context(const Snapshot& s,const Output& o,bool fresh,const c
     c.category=o.editCategory;c.skillClass=o.editClass;c.categoryCounts=o.editCategoryCounts;
     c.page=o.editPage;c.count=o.editCount;c.bank=s.bindingBank;c.utility=o.utility;c.map=o.map;c.fresh=fresh;
     c.editable=s.bindingsEditable;c.equipmentKnown=s.equipmentKnown;c.beltKnown=s.beltKnown;
-    c.quick=s.quick;c.itemOptions=o.itemOptions;c.skills=s.skills;c.options=o.editOptions;c.sets=s.sets;c.belt=s.belt;c.cue=o.cue;c.leftCue=o.leftCue;c.location=s.location;c.companions=s.companions;c.effects=s.effects;c.leftStrikes=o.leftStrikes;
+    c.quick=s.quick;c.itemOptions=o.itemOptions;c.skills=s.skills;c.options=o.editOptions;c.sets=s.sets;c.belt=s.belt;c.cue=o.cue;c.leftCue=o.leftCue;c.location=s.location;c.companions=s.companions;c.effects=s.effects;c.leftStrikes=o.leftStrikes;c.cooldowns=o.cooldowns;
     c.glyphs=o.glyphs;c.glyphHand=o.glyphHand;c.glyphEdit=o.glyphEdit;c.glyphDraw=o.glyphDraw;
     for(int i=0;i<GlyphShapes;++i){c.glyphSkills[size_t(i)]=GlyphSkill(s,GlyphCasts(o.glyphSkills,o.glyphHand,i));c.glyphFollows|=unsigned(GlyphFollows(o.glyphSkills,o.glyphHand,i))<<i;}
     c.motions=o.motions;c.motionsBox=o.motionsBox;c.motionsOff=o.motionsOff;
@@ -51,5 +53,6 @@ inline bool CompanionImageCurrent(const PaintContext& painted,const Snapshot& sn
     return painted.fresh&&painted.session==snapshot.session&&(snapshot.companions.known||snapshot.effects.known)&&painted.companions==snapshot.companions&&painted.effects==snapshot.effects;
 }
 struct PaintJob {Snapshot snapshot;Output output;int selection=-1;controllers::Labels labels{};};
-struct PaintedAtlas {std::vector<uint8_t> pixels;double paintMs=0;std::vector<uint8_t> companions;};
+// change: what of pixels differs from the atlas painted before (atlas_dirty.h), found on the painter's thread.
+struct PaintedAtlas {std::vector<uint8_t> pixels;double paintMs=0;std::vector<uint8_t> companions;atlasdirty::Change change;};
 }

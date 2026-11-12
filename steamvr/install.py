@@ -10,7 +10,9 @@ import json
 import os
 from pathlib import Path
 from pathlib import PurePosixPath
+import re
 import shutil
+import ssl
 import subprocess
 import tempfile
 import urllib.request
@@ -21,10 +23,12 @@ from bone_pieces import CODES as BONE_CODES
 from prepare_spell_sprites import prepare as prepare_spell_sprites, FILE as SPELL_SPRITES
 from prepare_props import prepare as prepare_props, FILES as PROP_FILES
 from prepare_leather import prepare as prepare_leather, FILES as LEATHER_FILES
+import prepare_monster_immunity
 import prepare_arcane_sky
 import prepare_sewer_backdrop
 import prepare_kurast_dock
 import prepare_game_ceiling
+import prepare_campfire_sky
 from game_install import validate_game
 import mod_identity
 
@@ -44,7 +48,7 @@ SDK_VERSION = '10.0.26100.9169'
 SDK_HASH = '475269434dcd808a67853773272f972c3229c0e10c3ddc821290e70cc0f6904d'
 COMPILER_HASH = '3bd6d7acfe8a0a84acd166fba1a537ce68bd21c8edce2bd9bb863cfa034136d4'
 # OFXR Bridge by tig3rmast3r (LGPL-3.0-or-later), the experimental frame
-# generation layer behind VR Settings > Performance > Frame generation. Fetched like
+# generation layer behind VR Settings > Graphics > Frames > Frame generation. Fetched like
 # D2RLoader and ReShade, never attached to our releases, and optional: without
 # it the rest installs. Only its layer and licenses are installed, with a
 # manifest and settings written here: no tray app and no registry entry, as
@@ -206,6 +210,39 @@ def dependency_checksum_error(source, expected, actual):
         'No game files changed.')
 
 
+USER_AGENT = 'D2R-PCVR-installer/0.1'
+
+
+def windows_download(url, max_bytes, python_error):
+    """Download through Windows' own curl after Python rejected the certificate.
+
+    Windows installs many trusted roots only when a Windows connection first
+    needs them (GitHub's release downloads need ISRG Root X1), while Python
+    only reads the roots already installed. Windows' check also fetches a
+    missing root, so later downloads work in Python too. The certificate is
+    still verified, and the caller still requires the pinned SHA-256.
+    """
+    curl = Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32/curl.exe'
+    reason = f'certificate not trusted by Python ({python_error.verify_message})'
+    if not curl.is_file():
+        raise OSError(f'{reason}; Windows curl not found to retry')
+    print(f'{reason}; retrying through Windows')
+    with tempfile.TemporaryDirectory(prefix='d2r-pcvr-download-') as temporary:
+        target = Path(temporary) / 'download'
+        # Give up after 60 s without progress, as urlopen's timeout does.
+        result = subprocess.run(
+            [str(curl), '--fail', '--location', '--silent', '--show-error', '--connect-timeout', '60',
+             '--speed-limit', '1', '--speed-time', '60', '--max-filesize', str(max_bytes),
+             '--user-agent', USER_AGENT, '--output', str(target), url],
+            capture_output=True, text=True, errors='replace', creationflags=0x08000000)
+        if result.returncode or not target.is_file():
+            # One line: curl's first names the error, the rest are advice.
+            detail = result.stderr.strip().split('\n')[0].strip() or f'curl exit code {result.returncode}'
+            raise OSError(f'{reason}; the Windows download failed too: {detail}')
+        with target.open('rb') as downloaded:
+            return downloaded.read(max_bytes + 1)
+
+
 def download_verified(url, path, digest, max_bytes=100 * 1024 * 1024):
     expected = (digest,) if isinstance(digest, str) else tuple(digest)
     cached = read_dependency(path, missing_ok=True)
@@ -213,9 +250,14 @@ def download_verified(url, path, digest, max_bytes=100 * 1024 * 1024):
         print(f'Using verified cached dependency: {path.name}')
         return
     print(f'Downloading {url}')
-    request = urllib.request.Request(url, headers={'User-Agent': 'D2R-PCVR-installer/0.1'})
-    with urllib.request.urlopen(request, timeout=60) as response:
-        data = response.read(max_bytes + 1)
+    request = urllib.request.Request(url, headers={'User-Agent': USER_AGENT})
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            data = response.read(max_bytes + 1)
+    except urllib.error.URLError as error:
+        if os.name != 'nt' or not isinstance(error.reason, ssl.SSLCertVerificationError):
+            raise
+        data = windows_download(url, max_bytes, error.reason)
     received = hashlib.sha256(data).hexdigest()
     if received not in expected:
         raise dependency_checksum_error(url, expected, received)
@@ -294,6 +336,17 @@ def default_saves(game):
 LOADER_CONFIG = Path('d2rloader/config/d2rloader.toml')
 
 
+def reshade_shader_files(root):
+    "The shader files to install: reshade/D2R_*.fx and D2R_*.fxh by pattern (a new header is never left out). Stops if the effect, or a header it includes, is missing."
+    shaders = sorted(p.name for pattern in ('D2R_*.fx', 'D2R_*.fxh') for p in (root / 'reshade').glob(pattern))
+    if 'D2R_DepthFog.fx' not in shaders:
+        raise SystemExit('reshade/D2R_DepthFog.fx is missing from the source')
+    wanted = set(re.findall(r'^\s*#\s*include\s+"(D2R_[^"]+)"', (root / 'reshade/D2R_DepthFog.fx').read_text(encoding='utf-8'), re.M))
+    if wanted - set(shaders):
+        raise SystemExit('reshade/D2R_DepthFog.fx includes ' + ', '.join(sorted(wanted - set(shaders))) + ', which are missing from the source')
+    return shaders
+
+
 def migrate_reshade_paths(content, game):
     """Retain user values/comments and rebase paths when moving ReShade's base.
 
@@ -340,7 +393,7 @@ def main():
     ap.add_argument('--backup-dir', type=Path, default=ROOT / 'build-frame/backups')
     ap.add_argument('--download-deps', action='store_true', help='Fetch pinned D2RLoader, ReShade and (Windows) OFXR Bridge from their official sites')
     ap.add_argument('--store', choices=['auto', 'steam', 'battlenet'], default='auto')
-    ap.add_argument('--experimental-battlenet', action='store_true', help='Enable Battle.net 3.3.93847 for local offline compatibility testing')
+    ap.add_argument('--experimental-battlenet', action='store_true', help='Enable Battle.net for local offline compatibility testing')
     ap.add_argument('--casclib', type=Path, default=ROOT / 'bin/CascLib.dll', help='Pinned Unicode x64 CascLib 3.0 for Battle.net asset reading')
     ap.add_argument('--preserve-settings', action='store_true', help='Keep existing calibration, mod/ReShade configuration and video settings when upgrading')
     ap.add_argument('--restore', type=Path, help='Restore the installation snapshot made by this script')
@@ -475,7 +528,7 @@ def main():
     frame_generation = frame_generation_files(ofxr)
     if frame_generation:
         payload.update(frame_generation)
-        print('Prepared OFXR Bridge 0.2.1 for VR Settings > Performance > Frame generation (experimental, off by default).')
+        print('Prepared OFXR Bridge 0.2.1 for VR Settings > Graphics > Frames > Frame generation (experimental, off by default).')
     # The launcher's descriptor of this mod (the D2R VR Launcher lists mods\*\vrmod-manifest.json). It is journaled like
     # every other file, so a restore or removal takes it away with the mod.
     payload[mod_identity.MOD_DIR / 'vrmod-manifest.json'] = (ROOT / 'vrmod-manifest.json').read_bytes()
@@ -530,6 +583,13 @@ def main():
                 payload[mod_identity.PLUGIN.parent / 'd2r_vr_spell_sprites' / safe_relative(name)] = (Path(temporary) / name).read_bytes()
             print(f"Prepared {result['textures']} spell effect textures from your installed game.")
     try:
+        immunity = prepare_monster_immunity.prepare(game, casclib=args.casclib)
+    except (OSError, ValueError, KeyError, IndexError) as error:
+        print(f'Feral Rage artwork unavailable; monster immunities use a procedural glow: {error}')
+    else:
+        payload.update({mod_identity.MOD_DIR / name: data for name, data in immunity.items()})
+        print('Prepared Feral Rage glow for monster immunity indicators.')
+    try:
         arcane = prepare_arcane_sky.prepare(game, casclib=args.casclib)
         prepare_arcane_sky.check_existing(game / mod_identity.MOD_DIR, arcane)
     except (OSError, ValueError, KeyError, IndexError) as error:
@@ -561,6 +621,14 @@ def main():
     else:
         payload.update({mod_identity.MOD_DIR / name: data for name, data in ceilings.items()})
         print('Prepared the dungeon ceilings the game draws, from your installed game.')
+    try:
+        campfire = prepare_campfire_sky.prepare(game, casclib=args.casclib)
+        prepare_campfire_sky.check_existing(game / mod_identity.MOD_DIR, campfire)
+    except (OSError, ValueError, KeyError, IndexError) as error:
+        print(f'Character creation clouds fix unavailable; existing preset retained: {error}')
+    else:
+        payload.update({mod_identity.MOD_DIR / name: data for name, data in campfire.items()})
+        print('Prepared character creation preset (removed screen-fixed clouds) from your installed game.')
     require_game_closed()
     check_launcher_icon(game, payload[mod_identity.MOD_DIR / 'launcher_icon.png'])
     snapshot = args.backup_dir / datetime.now().strftime('%Y%m%d-%H%M%S-%f')
@@ -691,11 +759,16 @@ def main():
     put_config(mod_identity.SETTINGS, out.getvalue().encode())
     put(mod_identity.MODINFO, mod_identity.modinfo_bytes())
     # ReShade's paths are relative to its base, the mod's reshade\ folder (the plugin sets it).
-    put_config(mod_identity.RESHADE_DIR / 'ReShade.ini', b'[GENERAL]\nEffectSearchPaths=.\\reshade-shaders\\Shaders\nTextureSearchPaths=.\\reshade-shaders\\Textures\nPresetPath=.\\D2R_Frame_ReShade.ini\n[INPUT]\nKeyOverlay=36,0,0,0\n')
+    # ReShade's Generic Depth add-on watches every draw call to find a depth buffer; in VR the fog and
+    # sky read the mod's own depth, so a new install has it off. An update keeps the player's ReShade.ini,
+    # and d2r_pcvr.ini [render] reshade_depth=1 turns it back on (the plugin edits this list at each start).
+    put_config(mod_identity.RESHADE_DIR / 'ReShade.ini', b'[GENERAL]\nEffectSearchPaths=.\\reshade-shaders\\Shaders\nTextureSearchPaths=.\\reshade-shaders\\Textures\nPresetPath=.\\D2R_Frame_ReShade.ini\n[INPUT]\nKeyOverlay=36,0,0,0\n[ADDON]\nDisabledAddons=Generic Depth\n')
     put_config(mod_identity.RESHADE_DIR / 'D2R_Frame_ReShade.ini', b'Techniques=D2R_DepthFog@D2R_DepthFog.fx\n')
     if frame_generation:
         put_config(OFXR_SETTINGS, OFXR_DEFAULT_SETTINGS)
-    put(mod_identity.RESHADE_DIR / 'reshade-shaders/Shaders/D2R_DepthFog.fx', (ROOT / 'reshade/D2R_DepthFog.fx').read_bytes())
+    # the effect and its feature headers (reshade\D2R_*.fx and D2R_*.fxh), by pattern so a new header is never left out; the effect itself and every header it includes must be there
+    for shader in reshade_shader_files(ROOT):
+        put(mod_identity.RESHADE_DIR / 'reshade-shaders/Shaders' / shader, (ROOT / 'reshade' / shader).read_bytes())
     for texture in (ROOT / 'reshade/sky').glob('*.png'):
         put(mod_identity.RESHADE_DIR / 'D2R_Sky_ours' / texture.name, texture.read_bytes())
         put(mod_identity.RESHADE_DIR / 'reshade-shaders/Textures/D2R_Sky_ours' / texture.name, texture.read_bytes())

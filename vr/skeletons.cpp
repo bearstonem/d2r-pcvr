@@ -44,6 +44,8 @@
 #include "../steamvr/guarded_text.h"
 #include "../steamvr/shapeshift_form.h"
 #include "../steamvr/head_shadow.h"
+#include "../steamvr/aged_cache.h"
+#include "../steamvr/ecs_storage.h"
 #include "sigscan.h"
 #include <chrono>
 #include <memory>
@@ -54,10 +56,12 @@
 #include "hero_selection.h"
 #include "bow_pose.h"
 #include "shield_pose.h"
+#include "hand_swap_pose.h"
 #include "shield_steady.h"
 #include "dev_scenarios.h"
 #include "../steamvr/shield_surface.h"
 #include "../steamvr/limb_board.h"
+#include "../steamvr/look_at.h"
 namespace gamestate {framevr::dualwield::Equipment MeleeEquipment();uint64_t LocalPlayer();uint32_t HandsKey();uint32_t WeaponSet();}
 #endif
 
@@ -65,8 +69,9 @@ namespace skel {
 std::atomic<unsigned> g_interactionHidden{0};
 void SetInteractionHidden(unsigned mask){g_interactionHidden=mask&3;}
 
-
 namespace {
+
+thread_local uint64_t t_guardedReads = 0;   // this thread's guarded reads, for the hook's ten-second line
 
 SRWLOCK g_remoteLock = SRWLOCK_INIT;
 std::vector<RemoteUpperBody> g_remoteBodies;
@@ -82,6 +87,7 @@ int g_resolvedClass=-1;
 #pragma optimize("", off)
 bool SafeCopy(void* dst, const void* src, size_t n) noexcept {
 #ifdef D2RVR_NATIVE_OPENXR
+    ++t_guardedReads;
     return framevr::ReadMemory(dst,src,n);
 #else
     __try { memcpy(dst, src, n); return true; } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
@@ -111,7 +117,245 @@ std::set<std::string> g_seen;
 FILE* g_out = nullptr;
 std::atomic<uint64_t> g_calls{0};
 
+// What is remembered of each skeleton instance met (steamvr/aged_cache.h): at most Remembered
+// entries a cache, one not looked up for RememberedFor forgotten at a sweep (a freed instance is
+// not posed again), and at the limit the half looked up longest ago - never everything at once.
+// The hero's rigs are kept longer: learning one checks its bind pose against the pose of that
+// moment, and a druid's own rig is not posed while he is in a form.
+constexpr size_t Remembered = 4096;
+constexpr uint64_t RememberedFor = 30000, HeroRigsFor = 600000, SweepEvery = 2000;
+namespace hookstats {
+enum Cache { HeroRigs, HeroEntities, BowRigs, CrossbowRigs, BodyKinds, CacheCount };
+}
+
+#ifdef D2RVR_NATIVE_OPENXR
+// ---- The hook's own cost, for a headset log (no profiler) ----
+// Every pose call's time and guarded reads (natively each read is a system call), summed per
+// thread and handed to the shared totals now and then: one "Frame skeleton hook:" line every ten
+// seconds. An identity look-up is what a skeleton costs when it is not remembered, or is checked
+// again: its model's path read, its rig learned, its entity searched for in the registry.
+namespace hookstats {
+constexpr ULONGLONG ReportEvery = 10000;
+constexpr uint64_t FlushNanos = 50'000'000;   // a thread hands its sums over this often
+std::atomic<uint64_t> g_posed{0}, g_nanos{0}, g_reads{0}, g_longest{0};
+std::atomic<uint64_t> g_identified{0}, g_identifyNanos{0};   // never reset: Report and Tell take differences
+std::atomic<uint64_t> g_identifiedTold{0}, g_identifyNanosTold{0};
+std::atomic<ULONGLONG> g_reported{0};
+struct Local { uint64_t calls = 0, nanos = 0, reads = 0, longest = 0, flushed = 0; };
+thread_local Local t_local;
+
+void Longest(std::atomic<uint64_t>& most, uint64_t nanos) {
+    for (uint64_t was = most.load(std::memory_order_relaxed); nanos > was && !most.compare_exchange_weak(was, nanos, std::memory_order_relaxed);) {}
+}
+struct Identifying {
+    uint64_t started = framevr::hookmetrics::Nanos();
+    ~Identifying() {
+        g_identified.fetch_add(1, std::memory_order_relaxed);
+        g_identifyNanos.fetch_add(framevr::hookmetrics::Nanos() - started, std::memory_order_relaxed);
+    }
+};
+void Report(ULONGLONG now) {
+    ULONGLONG last = g_reported.load(std::memory_order_relaxed);
+    if (now - last < ReportEvery || !g_reported.compare_exchange_strong(last, now)) return;
+    const uint64_t posed = g_posed.exchange(0), nanos = g_nanos.exchange(0), reads = g_reads.exchange(0), longest = g_longest.exchange(0);
+    const uint64_t identifiedNow = g_identified.load(), identifyNanosNow = g_identifyNanos.load();
+    const uint64_t identified = identifiedNow - g_identifiedTold.exchange(identifiedNow), identifyNanos = identifyNanosNow - g_identifyNanosTold.exchange(identifyNanosNow);
+    if (!last || !posed) return;   // the first window has no start
+    const double seconds = double(now - last) / 1000.0;
+    char line[320];
+    std::snprintf(line, sizeof line, "Frame skeleton hook: ten seconds: %.0f poses a second, %.2f ms a second, %.0f guarded reads a second "
+        "(%.1f a pose), longest pose %.2f ms; identity look-ups %llu in %.2f ms", double(posed) / seconds, double(nanos) / 1e6 / seconds,
+        double(reads) / seconds, double(reads) / double(posed), double(longest) / 1e6, static_cast<unsigned long long>(identified),
+        double(identifyNanos) / 1e6);
+    framevr::logging::Write(line);
+}
+// A cache forgot many entries at once (a sweep's aged ones, or its older half to make room): a
+// line then, and one a second later with what identifying skeletons again cost meanwhile - to
+// set beside vrcam's "a pair ... longest" hitch lines. Called under the cache's lock: no logging
+// here, Tell writes from a pose call's end.
+constexpr size_t ForgotAtOnce = 256;
+constexpr ULONGLONG ForgotWatch = 1000;
+constexpr const char* CacheNames[CacheCount] = {"hero rigs", "hero entities", "bow rigs", "crossbow rigs", "bodies and heads"};
+struct Forgotten { ULONGLONG at = 0; size_t dropped[CacheCount] = {}, held = 0, crowded = 0; uint64_t identified = 0, identifyNanos = 0; };
+SRWLOCK g_forgotLock = SRWLOCK_INIT;
+Forgotten g_forgotten;                 // g_forgotLock
+std::atomic<int> g_forgotStage{0};     // 0 nothing; 1 to be told; 2 told, the second after being measured
+std::atomic<uint64_t> g_longestAfter{0};
+void Forgot(Cache cache, const framevr::CacheSweep& swept, ULONGLONG now) {
+    if (swept.Dropped() < ForgotAtOnce && !swept.crowded) return;
+    AcquireSRWLockExclusive(&g_forgotLock);
+    if (!g_forgotStage.load(std::memory_order_relaxed)) {
+        g_forgotten = {};
+        g_forgotten.at = now;
+        g_forgotten.identified = g_identified.load(); g_forgotten.identifyNanos = g_identifyNanos.load();
+        g_longestAfter.store(0, std::memory_order_relaxed);
+        g_forgotStage.store(1, std::memory_order_relaxed);
+    }
+    g_forgotten.dropped[cache] += swept.Dropped(); g_forgotten.held += swept.held; g_forgotten.crowded += swept.crowded;
+    ReleaseSRWLockExclusive(&g_forgotLock);
+}
+void Tell(ULONGLONG now) {
+    if (!g_forgotStage.load(std::memory_order_relaxed)) return;
+    char line[400]; bool write = false;
+    AcquireSRWLockExclusive(&g_forgotLock);
+    const Forgotten& f = g_forgotten;
+    size_t all = 0; for (const size_t n : f.dropped) all += n;
+    if (const int stage = g_forgotStage.load(std::memory_order_relaxed); stage == 1) {
+        int k = std::snprintf(line, sizeof line, "Frame skeleton hook: forgot %zu of %zu remembered skeletons at once (%zu to make room, the rest not posed lately):",
+                              all, f.held, f.crowded);
+        for (int i = 0; i < CacheCount && k < int(sizeof line) - 40; ++i)
+            if (f.dropped[i]) k += std::snprintf(line + k, sizeof line - size_t(k), " %s %zu", CacheNames[i], f.dropped[i]);
+        g_forgotStage.store(2, std::memory_order_relaxed);
+        write = true;
+    } else if (stage == 2 && now - f.at >= ForgotWatch) {
+        std::snprintf(line, sizeof line, "Frame skeleton hook: in the %.1f s after forgetting %zu skeletons: identity look-ups %llu in %.2f ms, longest pose %.2f ms",
+                      double(now - f.at) / 1000.0, all, static_cast<unsigned long long>(g_identified.load() - f.identified),
+                      double(g_identifyNanos.load() - f.identifyNanos) / 1e6, double(g_longestAfter.load()) / 1e6);
+        g_forgotStage.store(0, std::memory_order_relaxed);
+        write = true;
+    }
+    ReleaseSRWLockExclusive(&g_forgotLock);
+    if (write) framevr::logging::Write(line);
+}
+// One pose call, from the game's own pose to the hook's return.
+struct Call {
+    uint64_t started = framevr::hookmetrics::Nanos(), reads = t_guardedReads;
+    ~Call() {
+        const uint64_t ended = framevr::hookmetrics::Nanos(), took = ended - started;
+        auto& l = t_local;
+        ++l.calls; l.nanos += took; l.reads += t_guardedReads - reads;
+        if (took > l.longest) l.longest = took;
+        if (ended - l.flushed < FlushNanos) return;
+        g_calls.fetch_add(l.calls, std::memory_order_relaxed);
+        g_posed.fetch_add(l.calls, std::memory_order_relaxed);
+        g_nanos.fetch_add(l.nanos, std::memory_order_relaxed);
+        g_reads.fetch_add(l.reads, std::memory_order_relaxed);
+        Longest(g_longest, l.longest);
+        if (g_forgotStage.load(std::memory_order_relaxed)) Longest(g_longestAfter, l.longest);
+        l = {}; l.flushed = ended;
+        const ULONGLONG now = GetTickCount64();
+        Tell(now);
+        Report(now);
+    }
+};
+}  // namespace hookstats
+#define SKELETON_IDENTIFYING hookstats::Identifying identifying
+#else
+#define SKELETON_IDENTIFYING
+namespace hookstats { inline void Forgot(Cache, const framevr::CacheSweep&, ULONGLONG) {} }
+#endif
+
+// ---- One pose call: what its helpers read of the skeleton instance, read once ----
+// An instance's first 0x28 bytes hold its name object (+0), its model (+8) and its world pose
+// (+0x20): one guarded read, and the model's skeleton (model +8) a second. Each helper read
+// these field by field for itself before.
+struct Noted;
+#ifdef D2RVR_NATIVE_OPENXR
+// What a skeleton instance is, for look-at and bodies both (the "known" namespace below): its
+// kind (players, items and props are Kind::None), its entity, and its model's path as a key
+// (every monster of a kind shares its head and limbs).
+//   pathKind: what the path alone says; kind is None too while no entity holds the instance.
+//   at: when the instance was last checked to be this.
+//   farUntil: found beyond reach, not looked at again before then - look-at's reach, and bodies'.
+//   nameObject, modelObject, skeleton: the instance's own pointers when its path was read. While
+//   they are these the path is not read again.
+enum KnownUse { ForHeads, ForBodies, KnownUses };
+struct KnownBody {
+    framevr::limbs::Kind kind = framevr::limbs::Kind::None, pathKind = framevr::limbs::Kind::None;
+    uint32_t entity = 0; uint64_t model = 0; ULONGLONG at = 0; ULONGLONG farUntil[KnownUses] = {}; bool form = false;
+    uintptr_t nameObject = 0, modelObject = 0, skeleton = 0;
+};
+#endif
+struct Posed {
+    uintptr_t self = 0;
+    Noted* note = nullptr;   // this thread's note of the instance (below); none for an instance that is not being posed
+    int identity = 0;   // 0 not read yet, 1 read, -1 does not read
+    uintptr_t nameObject = 0, model = 0, worldPose = 0, skeleton = 0;
+    // The skeleton's bone count and bones (skeleton +8, +0xC, packed): one read (Boned).
+    int boned = 0;
+    int boneCount = 0; uintptr_t bones = 0;
+    // The pose buffer (world pose: the bone count, then its matrices, packed): one read, for
+    // look-at and bodies both.
+    int buffer = 0;
+    uintptr_t matrices = 0; int count = 0;
+    // The entity's placement, for look-at and bodies both (ecs::Placement).
+    int placed = 0;
+    uint32_t placedEntity = 0; float placement[16] = {};
+#ifdef D2RVR_NATIVE_OPENXR
+    // What look-at and bodies are set to, and what the instance is known as: one look under one
+    // shared lock a pose call (known::Shared).
+    int shared = 0;
+    bool headsOn = false, bodiesOn = false, known = false;
+    float eye[3] = {}, headsUpm = 0, centre[3] = {}, bodiesUpm = 0, radius = 0;
+    KnownBody body;
+    // The pose itself, once look-at has read it: what the buffer holds - or, while `owed`, what it
+    // is to hold: the head turned, not yet written (looks::Turn, bodies::Limbs, looks::Finish).
+    // Bodies bends from this and its write is then the only one; else Finish writes it.
+    const float* held = nullptr;
+    bool owed = false;
+    // The hero's transform, when Arms took this pose for the hero's (HeroOf): what HeroTransform
+    // gave each of its callers in this pose, from the look-up Arms had already made.
+    int heroPlaced = 0;
+    HeroXform hero; float heroLocal[16] = {};
+#endif
+    explicit Posed(uintptr_t instance);
+    Posed(uintptr_t instance, Noted* noted) : self(instance), note(noted) {}
+};
+// A skeleton's bone count and its bones, in one guarded read of the two packed fields.
+bool Boned(Posed& p) {
+    if (!p.boned) {
+        p.boned = -1;
+        unsigned char raw[12];
+        if (p.skeleton > 0x10000 && SafeCopy(raw, (const void*)(p.skeleton + 8), sizeof raw)) {
+            memcpy(&p.boneCount, raw, 4); memcpy(&p.bones, raw + 4, 8);
+            p.boned = 1;
+        }
+    }
+    return p.boned > 0;
+}
+bool Identify(Posed& p) {
+    if (!p.identity) {
+        p.identity = -1;
+        uint64_t head[5];
+        if (p.self > 0x10000 && SafeCopy(head, (const void*)p.self, sizeof head)) {
+            p.nameObject = uintptr_t(head[0]); p.model = uintptr_t(head[1]); p.worldPose = uintptr_t(head[4]);
+            if (Get(p.model + 8, &p.skeleton)) p.identity = 1;
+        }
+    }
+    return p.identity > 0;
+}
+// What this thread last found of a skeleton instance, by its address: one look-up a pose, no
+// lock. A note is only as good as what it was taken from, so each carries what it is checked
+// against (below), and a slot is simply overwritten by another instance with the same hash.
+struct Noted {
+    uintptr_t self = 0;
+    // Not the hero's rig (Arms): for this skeleton, while no hero rig was forgotten since
+    // (g_heroesForgot), and for NotedFor - then the shared entry is looked up, and stamped, again.
+    uintptr_t skeleton = 0; uint32_t forgot = 0; ULONGLONG notHeroAt = 0;
+    // Look-at and bodies leave this instance alone until then: what their shared entries said
+    // when last looked up (not a body, re-checked after OtherRecheck; or beyond reach, farUntil).
+    // Those entries do not change before then, so the look-up would say the same.
+    ULONGLONG headsUntil = 0, bodiesUntil = 0;
+    bool bodiesFar = false;   // bodies counts a far body's pose in its ten-second line
+    // Where its entity's transform was found last time (ecs::Placement): checked against the
+    // storage's packed list before it is used, so one read where the walk took three.
+    framevr::ecsstorage::DenseHint placedAt;
+    // Not the held bow, not a crossbow (PoseMotionBow, CaptureCrossbow): what the shared entry
+    // for this skeleton and these bones said, for NotedFor - then it is looked up, and stamped, again.
+    uintptr_t bowSkeleton = 0, bowBones = 0, crossbowSkeleton = 0, crossbowBones = 0;
+    ULONGLONG notBowAt = 0, notCrossbowAt = 0;
+};
+constexpr ULONGLONG NotedFor = 1000;
+thread_local std::array<Noted, 1024> t_noted{};
+Noted& NoteOf(uintptr_t self) {
+    Noted& note = t_noted[size_t(((uint64_t(self) >> 4) * 0x9E3779B97F4A7C15ull) >> 54)];
+    if (note.self != self) { note = {}; note.self = self; }
+    return note;
+}
+Posed::Posed(uintptr_t instance) : self(instance), note(&NoteOf(instance)) {}
+
 float g_heroPos[3] = {};   // the world camera's look-at, from vrcam
+float g_eyeGround[2] = {};bool g_eyeGroundOk = false;   // under the eyes (SetEyeGround), same lock
 
 // The hero's world placement is applied at draw time, not in the pose. Look for
 // it near the SkeletonInstance: in it, in what it points at, and one more hop -
@@ -320,6 +564,9 @@ struct Hero {
     // what the body above the pelvis is held in instead of the animation.
     std::vector<Mat> bind;
     std::vector<char> inHand;   // under a hand (fingers, weapon): keeps the animation's grip
+    // Left-handed play's mirror world (hand_swap_pose.h): each bone's twin across the body and how it
+    // is carried there. ok only with a bind pose that read as one.
+    handswap::MirrorRig mirror;
     // The fingers of each hand, for the fist: chains of bones from the wrist
     // out (a metacarpal first where the rig has one - it is not bent).
     struct Finger { std::vector<int> bones; int firstBend = 0; bool thumb = false; };
@@ -357,6 +604,9 @@ uintptr_t g_diagSkel = 0;
 std::atomic<float> g_eyeY{0.0f}, g_lift{0.0f}, g_rawLift{0.0f};
 #if D2RVR_FIRST_PERSON
 std::atomic<int> g_gunAxis{0};   // GunAxis
+// Left-handed play: the L_weapon_attach axis across the held bow's plane, read off the bow's own rig
+// (PoseMotionBow): (hero generation << 2) | axis + 1, 0 = not known. The bow's bone is turned over it.
+std::atomic<uint32_t> g_bowPlaneAxis{0};
 struct GunBoneOut { float o[3], ax[3][3]; ULONGLONG at; Mat leftToHead; uintptr_t hero;
 #ifdef D2RVR_NATIVE_OPENXR
     MeleeWeaponPose melee{};bool haveMelee=false;
@@ -371,6 +621,8 @@ GunBoneOut g_gunBone{};
 #ifdef D2RVR_NATIVE_OPENXR
 MeleeWeaponPose g_shieldPose{},g_offhandPose{};ULONGLONG g_shieldAt=0,g_offhandAt=0;
 framevr::guard::Pose g_shieldGuardPose{};
+// Two claws as a guard (guard::Crossed), under g_gunBoneLock.
+struct ClawGuard {framevr::guard::Pose pose{};bool crossed=false;float apart=0;uint32_t generation=0;} g_clawGuard;
 struct ShieldContext {
     framevr::guard::Pose pose{};V3 player{};uintptr_t hero=0;
     uint32_t generation=0,equipment=0;uint64_t session=0;
@@ -430,6 +682,78 @@ std::atomic<ULONGLONG> g_formPosedAt{0};   // a form rig was the hero then: the 
 // When each rig was last posed as the hero: [0] a person's (the druid's own), [1] the
 // werewolf's, [2] the werebear's - the one the state sample names, while the game swaps them.
 std::atomic<ULONGLONG> g_rigPosedAt[3] = {};
+// The skeleton file a SkeletonInstance was made from (its file name only), for the log.
+void SkeletonFile(uintptr_t self,char* out,size_t size) {
+    uintptr_t nameObject=0,namePointer=0;
+    std::string s=Get(self,&nameObject)&&nameObject&&Get(nameObject+8,&namePointer)&&namePointer?Str(namePointer):std::string();
+    const auto slash=s.find_last_of('/');if(slash!=std::string::npos)s=s.substr(slash+1);
+    std::snprintf(out,size,"%s",s.empty()?"?":s.c_str());
+}
+// Room-scale (2026-11-08): the body moved under the tracked neck (first person), for the log - players
+// reported their legs left behind when they stepped. Per pose: asked for, done, refused as too far.
+std::atomic<unsigned> g_neckPoses{0},g_neckApplied{0},g_neckFar{0};
+std::atomic<float> g_neckFarthest{0};   // the largest move this window, in eye heights
+// Why the hero's pose had no body under the neck, by the hook's exits (Arms), per pose.
+enum NeckWhy {WhyNoPosition,WhyNotStanding,WhyInactive,WhyNotAsked,WhyNoFacing,WhyNoEye,WhyNoHands,WhyNoFrame,WhyNoBind,WhyCount};
+std::atomic<unsigned> g_neckWhy[WhyCount]{};
+std::atomic<float> g_neckApart{1e9f};
+// Room-scale, 2026-11-08 (legs "stretched and still attached to the center"): where the posed body's lowest bone
+// and pelvis end up against the ground under the eyes (eye heights, the window's largest), the hero bodies posed
+// (distinct skeleton instances), and skeletons standing at the hero that are not posed as a body (the legs' own
+// model piece?) - sampled for a moment every 5 s, in developer builds only: for that moment every skeleton the
+// game poses has its entity looked up (ecs::CandidatePosition, ten guarded reads each), and every 5 s a player
+// stood away from the room's centre that was a burst of them on the pose workers.
+std::atomic<float> g_feetFromEye{-1},g_pelvisFromEye{-1};
+SRWLOCK g_partsLock=SRWLOCK_INIT;
+struct PartSeen {uintptr_t self=0;int bones=0;float atHero=0,atEye=0;char name[56]{};};
+std::array<PartSeen,8> g_parts{};int g_partCount=0;
+std::array<PartSeen,8> g_bodies{};int g_bodyCount=0;
+#ifdef D2RVR_DEVELOPER
+std::atomic<uint64_t> g_partsUntil{0};
+#endif
+void NotePart(std::array<PartSeen,8>& list,int& count,const PartSeen& p) {
+    for(int i=0;i<count;++i)if(list[i].self==p.self)return;
+    if(count<int(list.size()))list[count++]=p;
+}   // the nearest a refused rig stood to the hero point (the hero's own, stepped away), world units
+void ReportNeckFollow() {
+    static std::atomic<uint64_t> nextAt{0};
+    auto before=nextAt.load();const auto now=GetTickCount64();
+    if(now<before||!nextAt.compare_exchange_strong(before,now+5000))return;
+    const unsigned poses=g_neckPoses.exchange(0),applied=g_neckApplied.exchange(0),tooFar=g_neckFar.exchange(0);
+    const float farthest=g_neckFarthest.exchange(0),apart=g_neckApart.exchange(1e9f);
+    unsigned why[WhyCount],missed=0;for(int i=0;i<WhyCount;++i)missed+=why[i]=g_neckWhy[i].exchange(0);
+    missed-=why[WhyNotStanding]+why[WhyNoPosition];   // other rigs (not the local hero) leave by these too: shown, not counted as the hero's
+    if(!missed&&apart>12.f&&(!poses||(!tooFar&&farthest<.1f&&applied==poses)))return;   // standing at the room's centre: nothing to say
+    char line[420];std::snprintf(line,sizeof line,"Frame room body: last 5 s the body stood under your neck in %u of %u poses "
+        "(farthest %.2f eye heights from where the game poses it), %u refused as over 3 eye heights; hero poses without it: "
+        "inactive %u, not asked %u, no facing %u, no eye %u, no hands %u, no frame %u, no bind %u; rigs not standing at the hero's spot %u "
+        "(the nearest %.2f units from the hero point)",
+        applied,poses,farthest,tooFar,why[WhyInactive],why[WhyNotAsked],why[WhyNoFacing],why[WhyNoEye],why[WhyNoHands],why[WhyNoFrame],
+        why[WhyNoBind],why[WhyNotStanding]+why[WhyNoPosition],apart<1e8f?apart:-1.f);
+    framevr::logging::Write(line);
+    {   // the parts: where the posed body's feet went, and what else stands at the hero
+        const float feet=g_feetFromEye.exchange(-1),pelvis=g_pelvisFromEye.exchange(-1);
+        char parts[1400];int k=std::snprintf(parts,sizeof parts,"Frame room parts: lowest bone %.2f and pelvis %.2f eye heights from under your eyes; ",feet,pelvis);
+        AcquireSRWLockExclusive(&g_partsLock);
+        k+=std::snprintf(parts+k,sizeof parts-k,"hero bodies posed %d:",g_bodyCount);
+        for(int i=0;i<g_bodyCount&&k<int(sizeof parts)-80;++i)k+=std::snprintf(parts+k,sizeof parts-k," [%s]",g_bodies[i].name);
+#ifdef D2RVR_DEVELOPER
+        k+=std::snprintf(parts+k,sizeof parts-k,"; not posed, standing at the hero:");
+        for(int i=0;i<g_partCount&&k<int(sizeof parts)-100;++i)
+            k+=std::snprintf(parts+k,sizeof parts-k," [%s, %d bones, %.2f units from the hero's spot, %.2f from under your eyes]",
+                             g_parts[i].name,g_parts[i].bones,g_parts[i].atHero,g_parts[i].atEye);
+        if(!g_partCount&&k<int(sizeof parts)-8)std::snprintf(parts+k,sizeof parts-k," none");
+#else
+        if(k<int(sizeof parts)-80)std::snprintf(parts+k,sizeof parts-k,"; what else stands at the hero is sampled in developer builds only");
+#endif
+        g_partCount=g_bodyCount=0;
+        ReleaseSRWLockExclusive(&g_partsLock);
+#ifdef D2RVR_DEVELOPER
+        g_partsUntil.store(GetTickCount64()+300);   // the next sample: a moment of every skeleton the game poses
+#endif
+        framevr::logging::Write(parts);
+    }
+}
 #ifdef D2RVR_DEVELOPER
 // Form rig frames, for the log: taken before the state sample caught up with the swap;
 // left to the game (not standing, another rig taken); grafted without the neck anchor.
@@ -452,7 +776,10 @@ void ReportFormFrames() {
 SRWLOCK g_heroLock = SRWLOCK_INIT;
 // Per SkeletonInstance, keyed with its skeleton too: an instance address the
 // game frees and reuses for another model must not keep the old verdict.
-std::map<std::pair<uintptr_t, uintptr_t>, Hero> g_heroes;   // count == 0: not the hero
+// A hero's rig is handed out by pointer and never changed once learned: every pose of his took
+// a copy of its eight vectors (the bind matrices among them) before. Null: not the hero.
+framevr::AgedCache<std::pair<uintptr_t, uintptr_t>, std::shared_ptr<const Hero>, framevr::PairHash> g_heroes{Remembered, HeroRigsFor, SweepEvery};
+std::atomic<uint32_t> g_heroesForgot{0};   // bumped under g_heroLock whenever entries were forgotten: the threads' notes are void then
 
 #if D2RVR_FIRST_PERSON
 // The grip: what the hands hold, relative to the hands, taken from the game's
@@ -480,6 +807,10 @@ Grip g_grip;
 
 SRWLOCK g_inLock = SRWLOCK_INIT;
 Input g_in;
+// Whether anything is done to the hero's pose at all (Arms), kept beside g_in by Set: every
+// skeleton's pose asks, and copied the whole Input under the lock to find out.
+bool InputActive(const Input& in) { return !(in.mode == 0 && !in.hideHead && !in.lockUpper && !(in.bodyTurn > 0 && in.haveYaw)); }
+std::atomic<bool> g_inActive{InputActive(Input{})};
 std::atomic<FreshFn> g_fresh{nullptr};
 std::atomic<FreshHandsFn> g_freshHands{nullptr};
 
@@ -528,15 +859,28 @@ uintptr_t g_vtX = 0, g_vtS = 0;             // and their vtables then
 uintptr_t g_cachedSelf = 0;
 uint32_t g_cachedEntity = 0;
 ULONGLONG g_lastStorageLook = 0;
-const char* g_why = "";                     // why the chain does not read (for vrcam's log)
+std::atomic<const char*> g_why{""};         // why the chain does not read (for vrcam's log)
+// g_lock, shared or exclusive. Shared is enough to read the storages and the entities kept
+// (g_xs .. g_cachedEntity, g_candidateEntities.Find): only what replaces them needs it exclusive.
+struct Locked {
+    const bool exclusive;
+    explicit Locked(bool exclusively) : exclusive(exclusively) { if (exclusive) AcquireSRWLockExclusive(&g_lock); else AcquireSRWLockShared(&g_lock); }
+    ~Locked() { if (exclusive) ReleaseSRWLockExclusive(&g_lock); else ReleaseSRWLockShared(&g_lock); }
+    Locked(const Locked&) = delete; Locked& operator=(const Locked&) = delete;
+};
 #ifdef D2RVR_NATIVE_OPENXR
-std::map<uintptr_t,uint32_t> g_candidateEntities;
+framevr::AgedCache<uintptr_t,uint32_t> g_candidateEntities{Remembered,RememberedFor,SweepEvery};
 #endif
 
 bool IsStorage(uintptr_t st, uintptr_t vtWas) {
     uintptr_t vt = 0;
     return st && vtWas && Get(st, &vt) && vt == vtWas;
 }
+// A storage's header in one guarded read (steamvr/ecs_storage.h), not a read a field.
+using Header = framevr::ecsstorage::Header;
+bool Read(void* out, uint64_t at, size_t size) { return at > 0x10000 && SafeCopy(out, (const void*)uintptr_t(at), size); }
+bool HeaderOf(uintptr_t st, Header* h) { return framevr::ecsstorage::ReadHeader(st, Read, h); }
+bool HeaderOf(uintptr_t st, uintptr_t vtWas, Header* h) { return st && vtWas && HeaderOf(st, h) && h->vtable == vtWas; }   // IsStorage, with the header
 
 bool FindStorages() {
     const uintptr_t reg = d2rsig::Addr(RVA_ECS_REGISTRY);
@@ -556,30 +900,25 @@ bool FindStorages() {
     if (!Get(xs, &vx) || !Get(ss, &vs) || !vx || !vs || vx == vs) { g_why = "the registry's storages do not read"; return false; }
     g_xs = xs; g_ss = ss; g_vtX = vx; g_vtS = vs;
 #ifdef D2RVR_NATIVE_OPENXR
-    g_candidateEntities.clear();
+    g_candidateEntities.Clear();
 #endif
     return true;
 }
 
 // The dense index of entity e in storage st, checked against the packed list.
+bool Dense(const Header& h, uint32_t e, uint32_t* idx) { return framevr::ecsstorage::DenseIndex(h, e, Read, idx); }
 bool Dense(uintptr_t st, uint32_t e, uint32_t* idx) {
-    uintptr_t sb = 0, se = 0, pb = 0, pe = 0, page = 0;
-    if (!Get(st + 0x08, &sb) || !Get(st + 0x10, &se) || se < sb) return false;
-    const uint64_t pi = (e >> 8) & 0xFFF;
-    if (pi >= (se - sb) / 8 || !Get(sb + pi * 8, &page) || !page) return false;
-    uint32_t v = 0;
-    if (!Get(page + (e & 0xFF) * 4, &v)) return false;
-    v &= 0xFFFFF;
-    if (v == 0xFFFFF || !Get(st + 0x20, &pb) || !Get(st + 0x28, &pe) || pe < pb || v >= (pe - pb) / 4) return false;
-    uint32_t back = 0;
-    if (!Get(pb + (uintptr_t)v * 4, &back) || back != e) return false;
-    *idx = v;
-    return true;
+    Header h;
+    return HeaderOf(st, &h) && Dense(h, e, idx);
 }
 
+bool SkeletonOf(const Header& s, uint32_t e, uintptr_t* self) {
+    uint32_t i = 0;
+    return Dense(s, e, &i) && s.components && Get(uintptr_t(s.components) + (uintptr_t)i * kSkeletonCompSize, self);
+}
 bool SkeletonOf(uint32_t e, uintptr_t* self) {
-    uint32_t i = 0; uintptr_t cb = 0;
-    return Dense(g_ss, e, &i) && Get(g_ss + 0x38, &cb) && cb && Get(cb + (uintptr_t)i * kSkeletonCompSize, self);
+    Header s;
+    return HeaderOf(g_ss, &s) && SkeletonOf(s, e, self);
 }
 
 // The entity whose SkeletonComponent holds `self`: one pass over the storage (only for a new instance).
@@ -596,39 +935,58 @@ bool EntityOf(uintptr_t self, uint32_t* e) {
     return false;
 }
 #ifdef D2RVR_NATIVE_OPENXR
-bool CandidatePosition(uintptr_t self,float position[3],float* transform=nullptr) {
-    AcquireSRWLockExclusive(&g_lock);
-    struct Unlock {~Unlock(){ReleaseSRWLockExclusive(&g_lock);}} unlock;
-    if(!IsStorage(g_xs,g_vtX)||!IsStorage(g_ss,g_vtS)) {
-        const auto now=GetTickCount64();
-        if(now-g_lastStorageLook<500)return false;
-        g_lastStorageLook=now;if(!FindStorages())return false;
+
+// Where a skeleton instance's entity stands. place, local: its transform as HeroTransform gives
+// the hero's (the component, the entity, its parent) and the component's local matrix - all in
+// the one block read here, for a pose Arms then takes as the hero's (HeroOf).
+// Under the shared lock while the storages are the ones known and the instance's entity is
+// remembered - every pose of the hero after his first; exclusively only to find them again.
+bool CandidatePosition(uintptr_t self,float position[3],HeroXform* place=nullptr,float* local=nullptr) {
+    for(const bool exclusively:{false,true}) {
+        Locked locked(exclusively);
+        Header x,s;
+        if(!HeaderOf(g_xs,g_vtX,&x)||!HeaderOf(g_ss,g_vtS,&s)) {
+            if(!exclusively)continue;
+            const auto now=GetTickCount64();
+            if(now-g_lastStorageLook<500)return false;
+            g_lastStorageLook=now;if(!FindStorages()||!HeaderOf(g_xs,&x)||!HeaderOf(g_ss,&s))return false;
+        }
+        const auto met=GetTickCount64();
+        const uint32_t* kept=std::as_const(g_candidateEntities).Find(self,met);uintptr_t held=0;uint32_t entity=0;
+        if(kept&&SkeletonOf(s,*kept,&held)&&held==self)entity=*kept;
+        else {
+            if(!exclusively)continue;
+            SKELETON_IDENTIFYING;
+            if(!EntityOf(self,&entity))return false;
+            framevr::CacheSweep swept;
+            g_candidateEntities.Put(self,entity,met,&swept);
+            hookstats::Forgot(hookstats::HeroEntities,swept,met);
+        }
+        uint32_t index=0;float t[kTransformSize/4];
+        if(!Dense(x,entity,&index)||!x.components)return false;
+        const auto at=uintptr_t(x.components)+uintptr_t(index)*kTransformSize;
+        if(!Read(t,at,sizeof t))return false;   // the whole component: its parent (+0xC0) and both matrices
+        uint32_t parentEntity=0xFFFFFFFFu;memcpy(&parentEntity,t+48,4);
+        // Child transforms have their composed placement in +0x40.
+        memcpy(position,t+((parentEntity&0xFFFFF)==0xFFFFF?0:16)+12,3*sizeof(float));
+        if(place){place->self=self;place->entity=entity;place->comp=at;place->parent=parentEntity;}
+        if(local)memcpy(local,t,16*sizeof(float));
+        return true;
     }
-    auto it=g_candidateEntities.find(self);uintptr_t held=0;uint32_t entity=0;
-    if(it!=g_candidateEntities.end()&&SkeletonOf(it->second,&held)&&held==self)entity=it->second;
-    else {
-        if(!EntityOf(self,&entity))return false;
-        if(g_candidateEntities.size()>4096)g_candidateEntities.clear();
-        g_candidateEntities[self]=entity;
-    }
-    uint32_t index=0;uintptr_t components=0;
-    if(!Dense(g_xs,entity,&index)||!Get(g_xs+0x38,&components)||!components)return false;
-    const auto at=components+uintptr_t(index)*kTransformSize;
-    uint32_t parentEntity=0xFFFFFFFFu;if(!Get(at+0xC0,&parentEntity))return false;
-    // Child transforms have their composed placement in +0x40.
-    const uintptr_t matrix=at+((parentEntity&0xFFFFF)==0xFFFFF?0:0x40);
-    if(transform&&!SafeCopy(transform,reinterpret_cast<const void*>(matrix),16*sizeof(float)))return false;
-    return SafeCopy(position,reinterpret_cast<const void*>(matrix+12*sizeof(float)),3*sizeof(float));
+    return false;
+
 }
 // A model's placement this frame (model to world): its TransformComponent's
 // local matrix, or the composed one under a parent. No search; another
 // thread looks the storages up again when they move.
-bool Placement(uint32_t entity,float out[16]) {
+// hint: where the entity was found last time. Three guarded reads while it is still there (the
+// header, the packed list's entry, the component), five when it is looked up afresh.
+bool Placement(uint32_t entity,float out[16],framevr::ecsstorage::DenseHint& hint) {
     AcquireSRWLockShared(&g_lock);
     struct Unlock {~Unlock(){ReleaseSRWLockShared(&g_lock);}} unlock;
-    uint32_t index=0;uintptr_t components=0;float t[kTransformSize/4];
-    if(!IsStorage(g_xs,g_vtX)||!Dense(g_xs,entity,&index)||!Get(g_xs+0x38,&components)||!components||
-       !SafeCopy(t,reinterpret_cast<const void*>(components+uintptr_t(index)*kTransformSize),sizeof t))return false;
+    uint32_t index=0;float t[kTransformSize/4];Header x;
+    if(!HeaderOf(g_xs,g_vtX,&x)||!framevr::ecsstorage::DenseIndex(x,entity,Read,&index,hint)||!x.components||
+       !SafeCopy(t,reinterpret_cast<const void*>(uintptr_t(x.components)+uintptr_t(index)*kTransformSize),sizeof t))return false;
     uint32_t parent=0;memcpy(&parent,t+48,4);
     memcpy(out,t+((parent&0xFFFFF)==0xFFFFF?0:16),16*sizeof(float));
     for(int i=0;i<16;++i)if(!std::isfinite(out[i]))return false;
@@ -639,13 +997,125 @@ bool Placement(uint32_t entity,float out[16]) {
 bool Owner(uintptr_t self,uint32_t known,uint32_t* entity) {
     AcquireSRWLockShared(&g_lock);
     struct Unlock {~Unlock(){ReleaseSRWLockShared(&g_lock);}} unlock;
-    if(!IsStorage(g_xs,g_vtX)||!IsStorage(g_ss,g_vtS))return false;
+    Header s;
+    if(!IsStorage(g_xs,g_vtX)||!HeaderOf(g_ss,g_vtS,&s))return false;
     uintptr_t held=0;
-    if(known&&SkeletonOf(known,&held)&&held==self){*entity=known;return true;}
+    if(known&&SkeletonOf(s,known,&held)&&held==self){*entity=known;return true;}
     return EntityOf(self,entity);
 }
 #endif
 }  // namespace ecs
+#ifdef D2RVR_NATIVE_OPENXR
+// The entity's placement, read once a pose call. Look-at and bodies each read it before, some
+// microseconds apart; the hook writes no transform, so the second read gave what the first did.
+bool PlacementOf(Posed& p,uint32_t entity,float out[16]) {
+    if(!p.placed||p.placedEntity!=entity) {
+        framevr::ecsstorage::DenseHint none;   // an instance with no note is looked up afresh
+        p.placedEntity=entity;p.placed=ecs::Placement(entity,p.placement,p.note?p.note->placedAt:none)?1:-1;
+    }
+    if(p.placed<0)return false;
+    memcpy(out,p.placement,sizeof p.placement);
+    return true;
+}
+
+// ---- What each skeleton instance is, and what look-at and bodies are set to ----
+// Both ask the same of every pose (a monster or a townsperson? which entity? which model?). Each
+// kept its own answer under its own lock and read the model's path for itself, every 500 and
+// every 250 ms. One entry an instance now, under one lock with the two features' settings: a
+// pose call takes all of it in one shared look (Shared), and the path is read once for both -
+// and not again while the instance's name object, model and skeleton are the ones it was read
+// with (Recheck). The entity is still checked as often as before.
+namespace known {
+namespace limbs = framevr::limbs;
+constexpr ULONGLONG OtherRecheck = 2000;   // ms between checks of an instance that is no body
+constexpr size_t MaxKnown = 4096;
+SRWLOCK g_lock = SRWLOCK_INIT;
+bool g_headsOn = false, g_bodiesOn = false;          // SetLookAt, SetLimbs
+float g_eye[3] = {}, g_headsUpm = 0, g_centre[3] = {}, g_bodiesUpm = 0, g_radius = 3.0f;
+framevr::AgedCache<uintptr_t, KnownBody> g_known{MaxKnown, RememberedFor, SweepEvery};
+
+uint64_t PathKey(const std::string& path) {
+    uint64_t h = 1469598103934665603ull;
+    for (const unsigned char c : path) { h ^= c; h *= 1099511628211ull; }
+    return h;
+}
+// The settings, and the instance's entry if it has one: once a pose call, for look-at and bodies both.
+void Shared(Posed& p, ULONGLONG now) {
+    if (p.shared) return;
+    p.shared = 1;
+    AcquireSRWLockShared(&g_lock);
+    p.headsOn = g_headsOn; p.bodiesOn = g_bodiesOn;
+    memcpy(p.eye, g_eye, sizeof p.eye); p.headsUpm = g_headsUpm;
+    memcpy(p.centre, g_centre, sizeof p.centre); p.bodiesUpm = g_bodiesUpm; p.radius = g_radius;
+    if (p.headsOn || p.bodiesOn) if (const KnownBody* found = std::as_const(g_known).Find(p.self, now)) { p.body = *found; p.known = true; }
+    ReleaseSRWLockShared(&g_lock);
+}
+// Found beyond `use`'s reach: not looked at again by it for `wait` ms.
+void Far(const Posed& p, KnownUse use, ULONGLONG now, ULONGLONG wait) {
+    AcquireSRWLockExclusive(&g_lock);
+    if (KnownBody* found = g_known.Find(p.self, now); found && found->entity == p.body.entity) found->farUntil[use] = now + wait;
+    ReleaseSRWLockExclusive(&g_lock);
+}
+// What the instance is, checked when it is not known or was last checked `every` ms ago (a
+// body; OtherRecheck for what is none): the entity that holds it, and its model's path - read
+// only when the instance's name object, model or skeleton is not the one the path was read
+// with (an instance's memory can be another model's later, and that changes them). An instance
+// whose identity does not read is checked by its path every time, as before.
+// True when its entity is another than before: a placement read for that one is void.
+bool Recheck(Posed& p, ULONGLONG now, ULONGLONG every) {
+    const KnownBody& k = p.body;   // all zero when not known
+    if (p.known && now - k.at < (k.kind == limbs::Kind::None ? OtherRecheck : every)) return false;
+    SKELETON_IDENTIFYING;
+    KnownBody next; next.at = now;
+    const bool read = Identify(p);
+    if (read && p.known && k.nameObject && k.nameObject == p.nameObject && k.modelObject == p.model && k.skeleton == p.skeleton) {
+        next.pathKind = k.pathKind; next.form = k.form; next.model = k.model;
+        next.nameObject = k.nameObject; next.modelObject = k.modelObject; next.skeleton = k.skeleton;
+    } else {
+        uintptr_t nameObject = read ? p.nameObject : 0, namePointer = 0;
+        if ((read || Get(p.self, &nameObject)) && Get(nameObject + 8, &namePointer)) {
+            const std::string path = Str(namePointer);
+            next.pathKind = limbs::KindOf(path);
+            next.form = framevr::shapeshift::FromModel(path) != 0;
+            next.model = PathKey(path);
+            if (read) { next.nameObject = p.nameObject; next.modelObject = p.model; next.skeleton = p.skeleton; }
+        }
+    }
+    next.kind = next.pathKind;
+    if (next.kind != limbs::Kind::None && !ecs::Owner(p.self, p.known ? k.entity : 0, &next.entity)) next.kind = limbs::Kind::None;
+    const bool moved = next.entity != k.entity;
+    // Each use's "far until" outlives the other's check, as it did in a cache of its own.
+    if (p.known) for (int use = 0; use < KnownUses; ++use) next.farUntil[use] = k.farUntil[use];
+    p.body = next; p.known = true;
+    framevr::CacheSweep swept;
+    AcquireSRWLockExclusive(&g_lock);
+    g_known.Put(p.self, next, now, &swept);
+    ReleaseSRWLockExclusive(&g_lock);
+    hookstats::Forgot(hookstats::BodyKinds, swept, now);
+    return moved;
+}
+}  // namespace known
+
+// The hero's transform for a pose's helpers: what HeroTransform gives them - the instance the
+// hook last took for the hero, when that is this pose's - without its look-up (thirteen guarded
+// reads under the registry's lock, four to six times a hero pose before). Arms resolved it for
+// this very instance before it took the pose for the hero's (ecs::CandidatePosition: the same
+// entity, component and parent, checked the same way, in a look-up Arms makes anyway).
+// local: the component's local matrix, which each helper read for itself: the game sets it before
+// the frame's poses and the hook writes no transform, so each read of it in one pose call gave
+// the same sixteen floats.
+// A pose Arms did not take for the hero's this call asks HeroTransform, as before.
+bool HeroOf(Posed& p, HeroXform* hx, Mat* local = nullptr) {
+    if (p.heroPlaced > 0) {
+        if (g_heroSelf.load() != p.self) return false;   // another instance was taken for the hero meanwhile
+        *hx = p.hero;
+        if (local) memcpy(local->m, p.heroLocal, sizeof local->m);
+        return true;
+    }
+    if (p.heroPlaced < 0 || !HeroTransform(hx) || hx->self != p.self) return false;
+    return !local || SafeCopy(local->m, reinterpret_cast<const void*>(hx->comp), sizeof local->m);
+}
+#endif
 
 bool Learn(uintptr_t self, Hero* h) {
     uintptr_t modelInst = 0, skel = 0, nameObj = 0, nameP = 0;
@@ -810,6 +1280,7 @@ bool Learn(uintptr_t self, Hero* h) {
     else ok = false;
     h->bindOk = ok;
     if (!form) g_lockState.store(ok ? 1 : -1);   // a monster on a form's rig must not touch the hero's state
+    if (ok && !form) h->mirror = handswap::LearnMirror(names, h->parent, h->bind, h->inHand, h->upr, h->lwr, h->hand, h->weapon);
 
     // Standing heights from the bind pose (the animation's would bob with the
     // stride). Eyes 5.65 (sorceress) .. 7.04 (druid) in the F10 dumps; a rig
@@ -1307,12 +1778,12 @@ void Fist(const Hero& h, int side, float grip, float closed, float open, const s
 // fist), and measured as drawn the claw folded back into the palm - a stub pointing back,
 // so a forward thrust read as a withdrawal. Both hands are written every pass: one not
 // measured this pass is cleared, never left to an earlier pass.
-void PublishClaws(uintptr_t self, const Hero& h, const Input& in, const std::vector<Mat>& w, float c, float s, float drawScale) {
+void PublishClaws(Posed& posed, const Hero& h, const Input& in, const std::vector<Mat>& w, float c, float s, float drawScale) {
+    const uintptr_t self = posed.self;
     HeroXform hx; Mat model;
     MeleeWeaponPose out[2]{}; bool ok[2]{};
     V3 palmAt{}; int axesFrom = -1;
-    if (in.havePoseStamp && HeroTransform(&hx) && hx.self == self && (hx.parent & 0xFFFFFu) == 0xFFFFFu &&
-        SafeCopy(model.m, reinterpret_cast<const void*>(hx.comp), sizeof model)) {
+    if (in.havePoseStamp && HeroOf(posed, &hx, &model) && (hx.parent & 0xFFFFFu) == 0xFFFFFu) {
         auto toWorld = [&](V3 p) { Mat t{{1,0,0,0, 0,1,0,0, 0,0,1,0, p.x,p.y,p.z,1}}; return Pos(Mul(t, model)); };
         const V3 player = Pos(model);
         for (int side = 0; side < 2; ++side) {
@@ -1330,7 +1801,8 @@ void PublishClaws(uintptr_t self, const Hero& h, const Input& in, const std::vec
             const float length = Len(Sub(b, a)), radius = 0.5f * Len(Sub(toWorld(rest(h.ind[side])), toWorld(rest(h.pnk[side]))));
             if (!(length > 0.01f) || !(radius > 0.005f) || !std::isfinite(length + radius + a.x + a.y + a.z + player.x + player.y + player.z)) continue;
             const V3 axis = Scale(Sub(b, a), 1.0f / length);
-            auto& p = out[side];
+            const int lane = in.leftHanded ? side ^ 1 : side;   // the lanes are roles: 0 the main hand's paw (hand_role.h)
+            auto& p = out[lane];
             p.origin[0] = a.x; p.origin[1] = a.y; p.origin[2] = a.z;
             p.axis[0] = axis.x; p.axis[1] = axis.y; p.axis[2] = axis.z;
             p.castingAxis[0] = axis.x; p.castingAxis[1] = axis.y; p.castingAxis[2] = axis.z;
@@ -1343,8 +1815,8 @@ void PublishClaws(uintptr_t self, const Hero& h, const Input& in, const std::vec
             const framevr::math::Quat grip{in.rot[side][0], in.rot[side][1], in.rot[side][2], in.rot[side][3]};
             const auto g = framevr::math::Rotate(framevr::math::Conjugate(grip), {headAxis.x, headAxis.y, headAxis.z});
             p.gripAxis[0] = g.x; p.gripAxis[1] = g.y; p.gripAxis[2] = g.z;
-            ok[side] = true;
-            if (side == 0) { palmAt = palm; axesFrom = h.hand[0]; }
+            ok[lane] = true;
+            if (lane == 0) { palmAt = palm; axesFrom = h.hand[side]; }
         }
     }
     const ULONGLONG at = GetTickCount64();
@@ -1369,7 +1841,8 @@ void PublishClaws(uintptr_t self, const Hero& h, const Input& in, const std::vec
     ReleaseSRWLockExclusive(&g_gunBoneLock);
 }
 #endif
-void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) {
+void PoseBody(Posed& posed, const Hero& h, const Input& given, float legHold) {
+    const uintptr_t self = posed.self;
     // A shapeshift form's rig is drawn at a uniform scale (drawScale) about the model's origin (the feet stay on the
     // ground). It is posed in the rig's own units - the camera's eye point taken back
     // by drawScale below - and scaled as it is written.
@@ -1380,13 +1853,32 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
         in.weaponType = 0;
         in.handFree[0] = in.handFree[1] = true;
         in.leftShield = false;
+        in.leftHandedMirror = false;   // paws: phase 1's lanes only
+    }
+    // Left-handed play, phase 3: the mirror world needs the arms on the controllers and every bone's twin.
+    // Without them (a bind pose that did not read) the body is drawn right-handed, whole, and says so.
+    if (in.leftHandedMirror && !(in.leftHanded && in.mode == 2 && h.bindOk && h.mirror.ok)) {
+        if (in.leftHanded && in.mode == 2) {
+            std::swap(in.handFree[0], in.handFree[1]);
+            in.leftHanded = false;
+            static std::atomic<uintptr_t> told{0};
+            if (told.exchange(h.skel) != h.skel) {
+                char line[220]; snprintf(line, sizeof line, "Frame left-handed: %s DRAWN right-handed - this rig's bind pose gave no twin for every arm bone "
+                    "(bind %d, twins %d); the controls stay left-handed (class %d)", in.leftHandedKind, int(h.bindOk), int(h.mirror.ok), h.cls);
+                framevr::logging::Write(line);
+            }
+        }
+        in.leftHandedMirror = false;
     }
 #endif
     // grafted under the player in their own view only; elsewhere (third person, a flat
     // menu) the form is the game's, unscaled
     const bool graft = h.form && in.firstPerson && in.lockUpper && h.bindOk;
-    uintptr_t world = 0, mats = 0; int32_t n = 0;
-    if (!Get(self + 0x20, &world) || !Get(world, &n) || !Get(world + 4, &mats) || n != h.count) return;
+    // Left-handed play: the arm (0 right, 1 left) whose hand holds the main weapon, and the shield's arm.
+    const int mainArm = in.leftHanded && in.mode == 2 ? 1 : 0, offArm = mainArm ^ 1;
+    const uintptr_t world = posed.worldPose;   // read with the instance's identity (Arms)
+    uintptr_t mats = 0; int32_t n = 0;
+    if (!Get(world, &n) || !Get(world + 4, &mats) || n != h.count) return;
     std::vector<Mat> oldW(n);
     if (!SafeCopy(oldW.data(), (const void*)mats, sizeof(Mat) * n)) return;
     std::vector<Mat> newW = oldW;
@@ -1396,7 +1888,7 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
         for (int i = 0; i < 3; ++i)
             if (ids[i] >= 0 && ids[i] < n) g_poseYaw[i].store(atan2f(oldW[ids[i]].m[8], oldW[ids[i]].m[10]) * 57.2957795f);
     }
-    const float c = cosf(in.yawInModel), s = sinf(in.yawInModel);
+    float c = cosf(in.yawInModel), s = sinf(in.yawInModel);   // (s is negated inside left-handed play's mirror world, below)
 
     // The hips above where they stand: a jump. The stride bobs them a little,
     // so up to jumpFrom nothing follows, and from there to twice that it eases
@@ -1415,8 +1907,7 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
         float worldScale = 0.0f;
 #ifdef D2RVR_NATIVE_OPENXR
         {HeroXform hx;Mat m;
-         if (HeroTransform(&hx) && hx.self == self && SafeCopy(m.m, reinterpret_cast<const void*>(hx.comp), sizeof m))
-             worldScale = Len({m.m[0], m.m[1], m.m[2]});}
+         if (HeroOf(posed, &hx, &m)) worldScale = Len({m.m[0], m.m[1], m.m[2]});}
 #endif
         if (!h.form) { g_personEye.store(h.eyeY); if (worldScale > 0.0f) g_personWorldScale.store(worldScale); }
         const float units = h.form ? framevr::shapeshift::PersonUnits(g_personWorldScale.load(), worldScale) : 1.0f;
@@ -1538,6 +2029,8 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
         for (int i = 0; i < n; ++i) if (in.bodyTurn == 2 || h.upper[i]) newW[i] = Mul(newW[i], T);
     }
 #if D2RVR_FIRST_PERSON
+    if(in.followTrackedNeck)++g_neckPoses;
+    if(in.followTrackedNeck&&!(in.haveEye&&in.haveYaw&&h.bindOk&&h.head>=0&&h.eyeY>0))++g_neckWhy[WhyNoBind];
     if(in.followTrackedNeck&&in.haveEye&&in.haveYaw&&h.bindOk&&h.head>=0&&h.eyeY>0) {
         const int neck=h.neck>=0?h.neck:h.head;
         const V3 bindNeck=Pos(h.bind[neck]);
@@ -1552,8 +2045,13 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
             {toEye.x,toEye.y,toEye.z},
             in.yawInModel,in.headPitch,in.headRoll);
         const V3 shift{target.x-current.x,target.y-current.y,target.z-current.z};
+        if(framevr::body::Finite(target)) {
+            const float eyes=Len(shift)/h.eyeY;
+            for(float was=g_neckFarthest.load();eyes>was&&!g_neckFarthest.compare_exchange_weak(was,eyes);){}
+            if(!(eyes<3.f))++g_neckFar;
+        }
         if(framevr::body::Finite(target)&&Len(shift)<h.eyeY*3.f) {
-            trackedNeckApplied = true;
+            trackedNeckApplied = true;++g_neckApplied;
             const auto before=newW;
             const bool legs=h.leg[0][2]>=0&&h.leg[1][2]>=0;
             for(int i=0;i<n;++i) {
@@ -1561,6 +2059,13 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
                 // Unknown leg chains keep the feet's authored height while
                 // the upper body still follows the tracked neck.
                 if(legs||h.upper[i]||h.inNeck[i])newW[i].m[13]+=shift.y;
+            }
+            {   // room-scale diagnostics: the lowest bone and the pelvis against the ground under the eyes
+                int low=-1;for(int i=0;i<n;++i)if(!h.inNeck[i]&&(low<0||newW[i].m[13]<newW[low].m[13]))low=i;
+                const auto from=[&](int b){return b<0?-1.f:std::hypot(newW[b].m[12]-in.eyeModel[0],newW[b].m[14]-in.eyeModel[2])/h.eyeY;};
+                const float f=from(low),pl=from(h.pelvis);
+                for(float was=g_feetFromEye.load();f>was&&!g_feetFromEye.compare_exchange_weak(was,f);){}
+                for(float was=g_pelvisFromEye.load();pl>was&&!g_pelvisFromEye.compare_exchange_weak(was,pl);){}
             }
             if(legs)for(int side=0;side<2;++side) {
                 const int hip=h.leg[side][0],knee=h.leg[side][1],foot=h.leg[side][2];
@@ -1579,6 +2084,7 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
             }
         }
     }
+    ReportNeckFollow();
 #ifdef D2RVR_DEVELOPER
     if(graft&&!trackedNeckApplied)++g_formLoose;   // drawn at its rest place, not under the eyes
 #endif
@@ -1605,7 +2111,7 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
         }
     }
     // The animation after the turn and proportion fit: the IK's local offsets.
-    const std::vector<Mat> baseW = newW;
+    std::vector<Mat> baseW = newW;   // (the mirror world's while left-handed play is in it, below)
 
     // Model space: y up, faces +z, its left is +x. The two arms' subtrees are
     // disjoint, and each pass re-derives only its own side.
@@ -1622,7 +2128,7 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
             const Wrist wr = PlanWrist(h, side, baseW, in, c, s);
             // The grip point is the middle of the palm; the wrist bone is half a hand behind it.
             if (wr.ok) T = Sub(T, Scale(wr.point, 0.5f * wr.reach));
-            Reach(h, side, T, turn, c, s, baseW, newW, side==1&&in.leftShield, graft);
+            Reach(h, side, T, turn, c, s, baseW, newW, side==offArm&&in.leftShield, graft);
             if (wr.ok) {
                 ApplyWrist(newW[k], wr);
                 std::vector<char> fromK(n, 0); fromK[k] = 1;
@@ -1641,6 +2147,31 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
         }
     }
 
+    // Left-handed play, phase 3 (hand_swap_pose.h, MIRROR WORLD): from here to the end of the staff's
+    // block the weapon code runs as written - right hand holds, left hand supports - on the reflection
+    // of this scene: the arms as just posed carried to their twins, the controllers and the eye with
+    // x -> -x and the hands exchanged, the body's turn the other way. The animation (oldW, the grip) is
+    // right-handed already and is used as it is. Nothing in between knows; three lines there read
+    // mirrorX or itemTurn (what they publish or read is of the real world). Off: none of this runs.
+    const bool mirrorWorld = in.leftHandedMirror && in.leftHanded && in.mode == 2;
+    Input realIn;
+    std::vector<Mat> realW, realBase, enteredW;
+    float mirrorX = 1.0f;         // -1 in the mirror world: a head-frame x published from there
+    int itemTurn[2] = {-1, -1};   // an attach bone's axis to turn over, when its code knows it (a crossbow's side axis)
+    if (mirrorWorld) {
+        realIn = in; realW = newW; realBase = baseW;
+        handswap::EnterMirror(h.mirror, h.parent, realW, newW);
+        handswap::EnterMirror(h.mirror, h.parent, realBase, baseW);
+        enteredW = newW;
+        std::swap(in.hand[0], in.hand[1]); std::swap(in.rot[0], in.rot[1]); std::swap(in.grip[0], in.grip[1]);
+        std::swap(in.handFree[0], in.handFree[1]);
+        for (int side = 0; side < 2; ++side) { handswap::MirrorPoint(in.hand[side]); handswap::MirrorQuat(in.rot[side]); }
+        in.handsValid = (in.handsValid & ~3u) | ((in.handsValid & 1u) << 1) | ((in.handsValid >> 1) & 1u);
+        handswap::MirrorPoint(in.handOffset); handswap::MirrorPoint(in.eyeModel);
+        in.yawInModel = -in.yawInModel; s = -s;
+        in.leftHanded = false;
+        mirrorX = -1.0f;
+    }
     // The grip, taken once per weapon while not attacking (see Grip).
     Grip grip;
     AcquireSRWLockShared(&g_gripLock); grip = g_grip; ReleaseSRWLockShared(&g_gripLock);
@@ -1698,20 +2229,48 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
     const bool freeStaff = in.staff && in.staffFreeLeft && in.mode == 2 && in.holdGrip && grip.ok && (in.handsValid & 1u) &&
                            h.head >= 0 && h.weapon[staffSide] >= 0;
     // Held weapons sit in that grip, not in this frame's animation (a bow keeps the animation: it draws).
+    // Left-handed (in.leftHanded): each attach bone goes to the OTHER wrist, in the mirror image of its own
+    // grip (handswap::MirrorGrip). That matrix has the wrong handedness to be drawn; it is put right below,
+    // after Weapon Adjust has moved and turned it (the adjustment is then mirrored with it).
+    bool swapped[2] = {false, false};
+    int swapAxis[2] = {0, 0};
+    // An attach bone's own axis that was turned over (-1 none), phase 1's below or phase 3's on the way
+    // out of the mirror world: what reads the bone's axes as directions (a blade's line, a staff's
+    // casting end, the carry line) reads the mirror image's (Held, below).
+    int turnedAxis[2] = {-1, -1};
     if (in.mode == 2 && in.holdGrip && grip.ok) {
         for (int side = 0; side < 2; ++side) {
-            const int wb = h.weapon[side], k = h.hand[side];
-            if (wb < 0 || k < 0) continue;
+            const int wb = h.weapon[side], own = h.hand[side], k = in.leftHanded ? h.hand[side ^ 1] : own;
+            if (wb < 0 || k < 0 || own < 0) continue;
             // The game hides what leaves the hand (a thrown weapon, a potion)
             // by shrinking its attach bone: that stays the game's.
-            const Mat anim = Mul(oldW[wb], InvAffine(oldW[k]));
+            const Mat anim = Mul(oldW[wb], InvAffine(oldW[own]));
             g_attachSize[side].store(Len({anim.m[0], anim.m[1], anim.m[2]}));
             // bothAttach: the holding hand's bone is the weapon's whatever the game does with it -
             // it shrinks it away while it moves the weapon to the other wrist (a great axe while
             // walking): copied shrunk to the other one, the axe vanished (2026-10-06).
             const bool holder = in.bothAttach && side == (freeStaff ? staffSide : in.weaponSide ? 1 : 0);
-            if (Len({anim.m[0], anim.m[1], anim.m[2]}) < 0.3f && !holder) newW[wb] = Mul(anim, newW[k]);
-            else newW[wb] = freeStaff && side == staffSide ? Mul(InvAffine(grip.inStaff[0]), newW[h.hand[0]]) : Mul(grip.attach[side], newW[k]);
+            Mat seat = grip.attach[side];
+            if (in.leftHanded) {
+                bow::Mat attach, bindOwn, bindOther, mirrored;
+                memcpy(&attach, &grip.attach[side], sizeof attach);
+                memcpy(&bindOwn, &h.bind[own], sizeof bindOwn); memcpy(&bindOther, &h.bind[k], sizeof bindOther);
+                if (h.bindOk && handswap::MirrorGrip(attach, bindOwn, bindOther, mirrored)) {
+                    memcpy(&seat, &mirrored, sizeof seat);
+                    // the axis to turn over: the weapon's flat, from the holding palm in the bind pose
+                    V3 normal{0, 0, 0};
+                    if (const int i = h.ind[side], p = h.pnk[side], m = h.mid[side]; i >= 0 && p >= 0 && m >= 0)
+                        normal = Cross(Sub(Pos(h.bind[i]), Pos(h.bind[p])), Sub(Pos(h.bind[m]), Pos(h.bind[own])));
+                    const bow::Mat attachBind = bow::Multiply(attach, bindOwn);
+                    swapAxis[side] = handswap::TurnAxis(in.leftHandedTurnAxis, handswap::FlatAxis(attachBind, {normal.x, normal.y, normal.z}));
+                } else {
+                    seat = grip.attach[side ^ 1];   // no bind pose: the other wrist's own attach bone, as the game holds it
+                    swapAxis[side] = handswap::TurnAxis(in.leftHandedTurnAxis, 0);
+                }
+                swapped[side] = true;
+            }
+            if (Len({anim.m[0], anim.m[1], anim.m[2]}) < 0.3f && !holder) { newW[wb] = Mul(anim, newW[k]); swapped[side] = false; }
+            else newW[wb] = freeStaff && side == staffSide ? Mul(InvAffine(grip.inStaff[0]), newW[h.hand[0]]) : Mul(seat, newW[k]);
             std::vector<char> fromWeapon(n, 0);
             fromWeapon[wb] = 1;
             Propagate(h, oldW, newW, fromWeapon, wb);
@@ -1753,6 +2312,7 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
         for (int i = 0; i < 3; ++i) len[i] = Len(row[i]);
         const float det = Dot(row[0], Cross(row[1], row[2])) < 0.0f ? -1.0f : 1.0f;   // the bone's handedness kept
         const int up = (ai + 1) % 3, third = (ai + 2) % 3;
+        if (mirrorWorld) itemTurn[staffSide] = third;   // a crossbow is its own mirror image across its side axis
         row[ai] = Scale(gunF, sign);
         row[up] = gunU;
         row[third] = Scale(Cross(row[(third + 1) % 3], row[(third + 2) % 3]), det);
@@ -1804,7 +2364,7 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
             };
             const Mat local = Mul(Mul(turn(0, a[3]), turn(1, a[4])), turn(2, a[5]));
             for (int side = 0; side < 2; ++side) {
-                const int wb = h.weapon[side], holder = freeStaff && side == staffSide ? 0 : side;
+                const int wb = h.weapon[side], holder = freeStaff && side == staffSide ? 0 : in.leftHanded ? side ^ 1 : side;
                 if (wb < 0 || !(in.handsValid & (1u << holder))) continue;
                 if(side==1&&in.leftShield)continue;
                 if (gun && side == staffSide) continue;   // the crossbow's [weapon_crossbow] is the controller's (above)
@@ -1819,6 +2379,32 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
                 fromWeapon[wb] = 1;
                 Propagate(h, oldW, newW, fromWeapon, wb);
             }
+        }
+    }
+
+    // Left-handed: the bones seated at the other wrist are mirror images so far. Each gets the handedness
+    // the game animates it with (an item on a bone of the wrong one is inside out and culled) by one of
+    // its own axes turned over: the item is turned in the hand, not mirrored.
+    for (int side = 0; side < 2; ++side) if (swapped[side]) {
+        const int wb = h.weapon[side];
+        bow::Mat seated, like;
+        memcpy(&seated, &newW[wb], sizeof seated); memcpy(&like, h.bindOk ? &h.bind[wb] : &oldW[wb], sizeof like);
+        const bool turned = handswap::MatchHandedness(seated, like, swapAxis[side]);
+        if (turned) {
+            memcpy(&newW[wb], &seated, sizeof seated);
+            turnedAxis[side] = swapAxis[side];
+            std::vector<char> fromWeapon(n, 0);
+            fromWeapon[wb] = 1;
+            Propagate(h, oldW, newW, fromWeapon, wb);
+        }
+        static int told[2] = {-1, -1};   // once per bone and outcome
+        if (const int now = (turned ? 1 : 0) | (swapAxis[side] << 1) | ((h.cls + 1) << 4); now != told[side]) {
+            told[side] = now;
+            char line[200]; snprintf(line, sizeof line, "Frame left-handed: %s seated on the %s wrist, mirrored grip%s (class %d)",
+                side == 0 ? "R_weapon_attach (main weapon)" : "L_weapon_attach (off hand)", side == 0 ? "left" : "right",
+                turned ? (swapAxis[side] == 2 ? ", its z axis turned over" : swapAxis[side] == 1 ? ", its y axis turned over" : ", its x axis turned over")
+                       : ", already of the bone's handedness - nothing turned", h.cls);
+            framevr::logging::Write(line);
         }
     }
 
@@ -1862,7 +2448,10 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
             AcquireSRWLockShared(&g_gunBoneLock);geometry=g_crossbowGeometry;ReleaseSRWLockShared(&g_gunBoneLock);
             if(geometry.hero==self&&geometry.generation==HeroGen()&&geometry.key==uint32_t(in.weaponType)&&
                geometry.at&&GetTickCount64()-geometry.at<=100) {
-                const Mat bolt=Mul(geometry.boltToAttach,staff);framevr::crossbow::Mat model;memcpy(&model,&bolt,sizeof model);
+                // (left-handed: the bolt was captured against the bone as drawn, its side axis turned over)
+                Mat drawn=staff;
+                if(mirrorWorld){const int t=handswap::ItemTurnAxis(in.leftHandedItemTurn,itemTurn[staffSide]);for(int k=0;k<3;++k)drawn.m[t*4+k]=-drawn.m[t*4+k];}
+                const Mat bolt=Mul(geometry.boltToAttach,drawn);framevr::crossbow::Mat model;memcpy(&model,&bolt,sizeof model);
                 framevr::crossbow::Line line;
                 if(framevr::crossbow::FromBolt(model,line)) {
                     const float headY=in.haveEye?in.eyeModel[1]:Pos(newW[h.head]).y;
@@ -2048,7 +2637,7 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
             const V3 d = Scale(axis, -1.0f);
             const V3 m = {d.x * c - d.z * s, d.y, d.x * s + d.z * c};
             AcquireSRWLockExclusive(&g_staffLock);
-            g_staff.dir[0] = -m.x; g_staff.dir[1] = m.y; g_staff.dir[2] = -m.z;
+            g_staff.dir[0] = -m.x * mirrorX; g_staff.dir[1] = m.y; g_staff.dir[2] = -m.z;
             g_staff.gap = gap;
             g_staff.at = GetTickCount64();
             ReleaseSRWLockExclusive(&g_staffLock);
@@ -2066,7 +2655,7 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
                 auto back = [&](V3 p) {
                     const V3 d = Scale(Sub(p, head), 1.0f / upm);
                     const V3 m = {d.x * c - d.z * s, d.y, d.x * s + d.z * c};
-                    return V3{-m.x, m.y, -m.z};
+                    return V3{-m.x * mirrorX, m.y, -m.z};
                 };
                 const V3 A = back(Add(origin, Scale(axis, lo))), B = back(Add(origin, Scale(axis, hi)));
                 GrabLineOut g{{A.x, A.y, A.z}, {B.x, B.y, B.z}, GetTickCount64()};
@@ -2129,6 +2718,79 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
             }
         }
     }
+
+    // Left-handed play, phase 3: out of the mirror world. What the code above posed there comes back
+    // reflected - the arms it moved carried to their twins, the weapon hand's fingers onto the left
+    // hand - and each attach bone, a mirror image as it comes back, gets the handedness the game
+    // animates it with by one of its own axes turned over (an item on a mirrored bone is inside out and
+    // culled): the axis the item is its own mirror image across, so it looks mirrored, not turned.
+    if (mirrorWorld) {
+        std::vector<Mat> mirrored;
+        mirrored.swap(newW); newW.swap(realW);
+        handswap::LeaveMirror(h.mirror, h.parent, enteredW, mirrored, newW);
+        baseW.swap(realBase);
+        in = realIn; s = -s; mirrorX = 1.0f;
+        for (int side = 0; side < 2; ++side) {
+            const int wb = h.weapon[side];
+            if (wb < 0) continue;
+            // Held in the right fist of the mirror world whichever wrist the game hangs it on (freeStaff),
+            // else on its own wrist: the item in that hand's frame, and that hand's palm in the bind pose.
+            const bool inFist = freeStaff && side == staffSide;
+            const int holder = inFist ? 0 : side;
+            int chosen = itemTurn[side];
+            bool fromRig = false;
+            if (chosen < 0 && !inFist && side == 1 && !strcmp(in.leftHandedKind, "bow"))
+                if (const uint32_t known = g_bowPlaneAxis.load(std::memory_order_relaxed); (known & 3u) && (known >> 2) == (HeroGen() & 0x3FFFFFFFu)) {
+                    chosen = int(known & 3u) - 1; fromRig = true;   // across the bow's own plane, as its rig has it
+                }
+            if (chosen < 0) {
+                chosen = 0;
+                const int k = h.hand[holder], i = h.ind[holder], p = h.pnk[holder], m = h.mid[holder];
+                if (grip.ok && k >= 0 && i >= 0 && p >= 0 && m >= 0) {
+                    const Mat rel = inFist ? InvAffine(grip.inStaff[0]) : grip.attach[side];
+                    const V3 normal = Cross(Sub(Pos(h.bind[i]), Pos(h.bind[p])), Sub(Pos(h.bind[m]), Pos(h.bind[k])));
+                    // a shaft's own axis never: turned over, the weapon would point backwards
+                    chosen = handswap::SymmetryAxis(handswap::ToBow(Mul(rel, h.bind[k])), {normal.x, normal.y, normal.z}, inFist && !gun ? abs(castingAxis) - 1 : -1);
+                }
+            }
+            chosen = handswap::ItemTurnAxis(in.leftHandedItemTurn, chosen);
+            bow::Mat seated = handswap::ToBow(newW[wb]);
+            const bool turned = handswap::MatchHandedness(seated, handswap::ToBow(h.bind[wb]), chosen);
+            if (turned) {
+                handswap::FromBow(seated, newW[wb]);
+                turnedAxis[side] = chosen;
+                std::vector<char> fromWeapon(n, 0);
+                fromWeapon[wb] = 1;
+                Propagate(h, oldW, newW, fromWeapon, wb);
+            }
+            static int told[2] = {-1, -1};   // once per bone, kind and outcome
+            const int shown = Len({newW[wb].m[0], newW[wb].m[1], newW[wb].m[2]}) >= 0.3f ? 1 : 0;   // the game shrinks the bone that holds nothing
+            if (const int now = int((uint32_t(turned ? 1 : 0) | uint32_t(chosen << 1) | uint32_t(shown << 3) | (inFist ? 16u : 0u) | (gun ? 32u : 0u) | (fromRig ? 0x8000u : 0u) | (uint32_t(h.cls + 1) << 6)) ^
+                                    (uint32_t(in.weaponType) * 2654435761u)) & 0x7FFFFFFF; now != told[side]) {
+                told[side] = now;
+                const char* wrist = inFist ? "left" : side == 0 ? "left" : "right";   // the mirror world's right fist is the left hand
+                const char* why = in.leftHandedItemTurn >= 1 && in.leftHandedItemTurn <= 3 ? "set by [hands] left_handed_*_turn_axis"
+                                : fromRig ? "across the bow's plane, from its rig" : itemTurn[side] >= 0 ? "the crossbow's side axis"
+                                : "nearest the holding palm's normal";
+                char line[400]; snprintf(line, sizeof line, "Frame left-handed: %s MIRRORED - %s %s on the %s wrist%s%s%s; mirror image of the right-handed pose%s (%s) "
+                    "(class %d, wrists' bind joints %.3f model units from mirror images)", in.leftHandedKind,
+                    side == 0 ? "R_weapon_attach" : "L_weapon_attach", shown ? "seated" : "(holds nothing now)", wrist,
+                    inFist ? (gun ? ", the stock in the LEFT controller's frame, the right hand supports it with its grip"
+                                  : ", the LEFT hand drives it, the right hand takes the shaft with its grip") : "",
+                    !inFist && side == 1 && !strcmp(in.leftHandedKind, "bow") ? " (the bow: held by the RIGHT hand, the left draws the string)" : "",
+                    in.bothAttach && !inFist ? " (both hands on it)" : "",
+                    turned ? (chosen == 2 ? ", its z axis turned over" : chosen == 1 ? ", its y axis turned over" : ", its x axis turned over")
+                           : ", already of the bone's handedness - nothing turned", why, h.cls, h.mirror.asymmetry);
+                framevr::logging::Write(line);
+            }
+        }
+    }
+    // An attach bone as its mirror image has it (turnedAxis): for directions read off its axes.
+    auto Held = [&](int side) {
+        Mat m = newW[h.weapon[side]];
+        if (const int t = turnedAxis[side]; t >= 0) for (int k = 0; k < 3; ++k) m.m[t * 4 + k] = -m.m[t * 4 + k];
+        return m;
+    };
 
     // Forearm twist: the hand alone turned with the controller, so a turned
     // wrist left the sleeve, bracer and shield facing the old way. The forearm
@@ -2194,7 +2856,96 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
     // the forearm. The bind relationship follows the final tracked wrist.
     bool shieldFollowed=false;
     struct {int bone=-1,side=1;float heldBack=0,bend=-1;shield::Frame frame;} seatTrace;   // for [debug] shield_trace
-    if(in.mode==2&&in.leftShield&&(in.handsValid&2u)&&h.bindOk&&h.weapon[1]>=0&&h.hand[1]>=0) {
+    if(in.mode==2&&in.leftHanded&&in.leftShield&&(in.handsValid&1u)&&h.bindOk&&h.weapon[1]>=0&&h.hand[0]>=0&&h.hand[1]>=0) {
+        // Left-handed play: the shield on the RIGHT forearm. Its bones (L_weapon_attach under the left
+        // wrist, shield_attach under the left forearm) are authored on the left arm, so each is carried
+        // across in the arms' own frames (joint positions only, as right-handed): the bind frame is the
+        // left arm's, the frame now the right arm's built the same anatomical way, which is its mirror
+        // image; shield::PlaceAcross puts the bone where the mirror has it and turns the shield there
+        // (in.leftHandedShieldTurn), since a mirrored bone cannot be drawn. The same settings apply
+        // (Shield wrist turn, Shield roll, Grip / Out / Up), each meaning the same direction on this arm,
+        // and the wrist has the left arm's bend stop (shield::WristStop).
+        const int wb=h.weapon[1],sa=h.shieldAttach;
+        const int bl=h.lwr[1],bk=h.hand[1],bi=h.ind[1],bp=h.pnk[1],bm=h.mid[1];        // the bind pose's arm: the left
+        const int l=h.lwr[0],k=h.hand[0],ki=h.ind[0],kp=h.pnk[0];                      // the arm that carries it now
+        const Mat animated=Mul(oldW[wb],InvAffine(oldW[bk]));
+        const bool joints=bl>=0&&bi>=0&&bp>=0&&bm>=0&&l>=0&&ki>=0&&kp>=0;
+        bool placedAny=false;
+        if(Len({animated.m[0],animated.m[1],animated.m[2]})>=.3f&&joints) {
+            auto bv=[](V3 v){return bow::Vec{v.x,v.y,v.z};};
+            // the shield's side of the forearm, from the bind pose (as StopShieldWrist decides it)
+            int side=1;
+            if(sa>=0) {
+                const V3 back=RotOnly(Cross(Sub(Pos(h.bind[bi]),Pos(h.bind[bp])),Sub(Pos(h.bind[bm]),Pos(h.bind[bk]))),InvAffine(h.bind[bk]));
+                const V3 fb=Norm(Sub(Pos(h.bind[bk]),Pos(h.bind[bl]))),ob=Sub(Pos(h.bind[sa]),Pos(h.bind[bl]));
+                const V3 off=Sub(ob,Scale(fb,Dot(ob,fb)));
+                side=Len(off)>.05f*Len(Sub(Pos(h.bind[bk]),Pos(h.bind[bl])))&&Dot(off,RotOnly(back,h.bind[bk]))<0?-1:1;
+            }
+            // The wrist's bend stop, before the shield takes the hand's turn (StopShieldWrist on the left
+            // arm): the back of the right hand, from its knuckles - the mirror image of the left one's, so
+            // the cross product the other way round - eased into where the hand lies straight on the forearm.
+            if(const int km=h.mid[0];km>=0) {
+                const V3 back=RotOnly(Cross(Sub(Pos(h.bind[km]),Pos(h.bind[k])),Sub(Pos(h.bind[ki]),Pos(h.bind[kp]))),InvAffine(h.bind[k]));
+                const Mat rigid=Mul(Mul(h.bind[k],InvAffine(h.bind[l])),newW[l]);
+                const V3 now=Norm(RotOnly(back,newW[k])),stop=Norm(RotOnly(back,rigid)),f=Norm(Sub(Pos(newW[k]),Pos(newW[l])));
+                bow::Vec letGo;
+                seatTrace.heldBack=shield::WristStop(bv(now),bv(stop),bv(f),letGo);
+                if(seatTrace.heldBack>0) {
+                    const auto before=newW;
+                    TurnAboutSelf(newW[k],RotBetween(now,V3{letGo.x,letGo.y,letGo.z}));
+                    std::vector<char> fromK(n,0);fromK[k]=1;Propagate(h,before,newW,fromK,k);   // fingers, the main weapon's bone
+                }
+            }
+            const float handed=shield::Handed(bv(Pos(h.bind[bl])),bv(Pos(h.bind[bk])),bv(Pos(h.bind[bi])),bv(Pos(h.bind[bp])),bv(Pos(h.bind[bm])),side);
+            const shield::Frame bindFrame=shield::ArmFrame(bv(Pos(h.bind[bl])),bv(Pos(h.bind[bk])),bv(Pos(h.bind[bi])),bv(Pos(h.bind[bp])),handed);
+            // the right arm, the mirror's way: the opposite turn from Cross(up, along) to out
+            const shield::Frame bindOther=shield::ArmFrame(bv(Pos(h.bind[l])),bv(Pos(h.bind[k])),bv(Pos(h.bind[ki])),bv(Pos(h.bind[kp])),-handed);
+            bow::Mat wristBind,wristNow;
+            memcpy(&wristBind,&h.bind[k],sizeof wristBind);memcpy(&wristNow,&newW[k],sizeof wristNow);
+            const shield::Frame wristFrame=shield::Carry(bindOther,wristBind,wristNow);
+            const shield::Frame strapped=shield::ArmFrame(bv(Pos(newW[l])),bv(Pos(newW[k])),bv(Pos(newW[ki])),bv(Pos(newW[kp])),-handed);
+            const shield::Frame frame=shield::Roll(shield::Blend(strapped,wristFrame,in.shieldFollowPct/shield::kFollowMaxPct),in.shieldRollDeg);
+            const V3 bindRow{h.bind[bk].m[0],h.bind[bk].m[1],h.bind[bk].m[2]},handRow{newW[k].m[0],newW[k].m[1],newW[k].m[2]};
+            auto across=[&](int bone,const shield::Frame& now) {
+                bow::Mat bind,result;memcpy(&bind,&h.bind[bone],sizeof bind);
+                if(!shield::PlaceAcross(bind,bindFrame,bv(Pos(h.bind[bk])),Len(bindRow),now,bv(Pos(newW[k])),Len(handRow),in.leftHandedShieldTurn,result))return false;
+                const auto before=newW;memcpy(&newW[bone],&result,sizeof result);
+                std::vector<char> moved(n,0);moved[bone]=1;Propagate(h,before,newW,moved,bone);
+                return true;
+            };
+            if(bindFrame.ok&&frame.ok&&across(wb,wristFrame.ok?wristFrame:frame)) {
+                placedAny=shieldFollowed=true;
+                if(sa>=0&&sa!=wb&&across(sa,frame)) {
+                    const auto beforeAttach=newW;
+                    const float units=Len(Sub(Pos(newW[k]),Pos(newW[l])));   // this model's forearm, ~0.26 m on an adult
+                    const bow::Vec move=shield::Offset(frame.along,frame.out,frame.up,in.shieldGripCm,in.shieldOutCm,in.shieldUpCm,units/0.26f);
+                    newW[sa].m[12]+=move.x;newW[sa].m[13]+=move.y;newW[sa].m[14]+=move.z;
+                    {   // steadied as on the left arm (shield_steady.h), its own filter
+                        static steady::Filter steadied;static LARGE_INTEGER last{};
+                        static LARGE_INTEGER freq{};if(!freq.QuadPart)QueryPerformanceFrequency(&freq);
+                        LARGE_INTEGER now;QueryPerformanceCounter(&now);
+                        const float dt=last.QuadPart?float(double(now.QuadPart-last.QuadPart)/double(freq.QuadPart)):0.f;
+                        last=now;
+                        bow::Mat m;memcpy(&m,&newW[sa],sizeof m);
+                        steadied.Apply(m,dt,std::max(1e-4f,units)/26.f,steady::Shield);
+                        memcpy(&newW[sa],&m,sizeof m);
+                    }
+                    seatTrace.bone=sa;seatTrace.side=side;seatTrace.frame=frame;
+                    std::vector<char> movedAttach(n,0);movedAttach[sa]=1;Propagate(h,beforeAttach,newW,movedAttach,sa);
+                }
+            }
+        }
+        static int told=-1;   // once per outcome and class
+        if(const int now=(placedAny?1:0)|(joints?2:0)|(in.leftHandedShieldTurn<<2)|((h.cls+1)<<5);now!=told) {
+            told=now;
+            char line[220];snprintf(line,sizeof line,"Frame left-handed: shield %s (class %d%s)",
+                placedAny?(in.leftHandedShieldTurn==2?"on the right forearm, turned over its up axis":in.leftHandedShieldTurn==1?"on the right forearm, turned over its out axis":
+                           "on the right forearm, face out, turned end for end along the arm"):"NOT placed on the right forearm - it stays where the game animates it",
+                h.cls,joints?"":"; the rig has no knuckle joints to build the arm's frame from");
+            framevr::logging::Write(line);
+        }
+    }
+    if(in.mode==2&&!in.leftHanded&&in.leftShield&&(in.handsValid&2u)&&h.bindOk&&h.weapon[1]>=0&&h.hand[1]>=0) {
         const int wb=h.weapon[1],hand=h.hand[1];
         int side=1;const float heldBack=StopShieldWrist(h,newW,&side);   // before the shield takes the hand's turn
         bow::Mat wristBind,shieldBind,wristNow,result;
@@ -2210,7 +2961,7 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
             // The visible shield hangs on shield_attach, a FOREARM child. It is
             // placed in the arm's own frame (shield::ArmFrame - joint positions,
             // never a bone's axes, so every slider means the same direction on
-            // every class): VR Settings > Shield > Shield wrist turn blends it from
+            // every class): VR Settings > Gameplay > Shield > Shield wrist turn blends it from
             // strapped to the forearm (0%, the wrist's bend ignored) to turning
             // with the hand (100%, the original wrist attach), then the resting
             // roll (Shield roll) turns it about the forearm, and
@@ -2351,7 +3102,8 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
     // the game hangs the weapon on in this animation, it stays in the holding hand.
     if (in.bothAttach && in.mode == 2 && in.holdGrip && grip.ok) {
         const int hs = freeStaff ? staffSide : in.weaponSide ? 1 : 0, from = h.weapon[hs], to = h.weapon[hs ^ 1];
-        if (from >= 0 && to >= 0 && h.bindOk && (in.handsValid & (1u << (freeStaff ? 0 : hs)))) {
+        // (the arm that holds it: the right one for a free staff, else its slot's - the other, left-handed)
+        if (from >= 0 && to >= 0 && h.bindOk && (in.handsValid & (1u << (freeStaff ? mainArm : in.leftHanded ? hs ^ 1 : hs)))) {
             // Running, the game puts a two-handed weapon in the LEFT hand (it said so, 2026-10-06: "standing
             // it is in the hand, running he takes it with the left"); the item follows L_weapon_attach then.
             // The same world matrix on it made the axe vanish, bind(to) bind(from)^-1 turned it 72 deg: the
@@ -2367,7 +3119,7 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
                 const float headY = in.haveEye ? in.eyeModel[1] : Pos(newW[h.head >= 0 ? h.head : 0]).y;
                 const float upm = framevr::body::UnitsPerMetre(h.eyeY>0?h.eyeY:headY, in.userHeadM, in.scale);
                 const int ax = std::clamp(abs(in.carryAxis), 1, 3) - 1;
-                const float sg = in.carryAxis < 0 ? -1.0f : 1.0f;
+                const float sg = (in.carryAxis < 0 ? -1.0f : 1.0f) * (turnedAxis[hs] == ax ? -1.0f : 1.0f);   // (an axis turned over left-handed: the mirror image's way)
                 const V3 dir = Norm(V3{newW[from].m[ax * 4], newW[from].m[ax * 4 + 1], newW[from].m[ax * 4 + 2]});
                 const float k = sg * in.carryM * upm;
                 newW[to].m[12] += dir.x * k; newW[to].m[13] += dir.y * k; newW[to].m[14] += dir.z * k;
@@ -2427,16 +3179,16 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
         // Keep collision in the world frame of THIS completed pose. Rebuilding
         // it later from the timer's newer camera yaw/eye displaced fast swings.
         HeroXform hx;Mat model;
-        if(HeroTransform(&hx)&&hx.self==self&&(hx.parent&0xFFFFFu)==0xFFFFFu&&
-           SafeCopy(model.m,reinterpret_cast<const void*>(hx.comp),sizeof model)) {
+        if(HeroOf(posed,&hx,&model)&&(hx.parent&0xFFFFFu)==0xFFFFFu) {
             // Contact motion follows the right controller, independently of
             // native inventory slots. A free staff uses its authored attachment.
             const int contactSide=freeStaff?staffSide:0;
             const int contactBone=h.weapon[contactSide];
-            const Mat attachment=contactBone>=0?newW[contactBone]:Mat{};
+            const Mat attachment=contactBone>=0?Held(contactSide):Mat{};   // its axes as directions (left-handed: the mirror image's)
             const Mat world=Mul(attachment,model);
             if(gun) {
-                g.crossbow=true;g.crossbowWorld=world;g.weaponKey=in.weaponType;g.heroGeneration=HeroGen();g.crossbowUpm=upm;
+                // the bone as drawn: the rendered crossbow is measured against it (CrossbowRendered)
+                g.crossbow=true;g.crossbowWorld=contactBone>=0?Mul(newW[contactBone],model):world;g.weaponKey=in.weaponType;g.heroGeneration=HeroGen();g.crossbowUpm=upm;
                 g.session=gamestate::LocalPlayer();g.equipment=gamestate::HandsKey()^(gamestate::WeaponSet()<<30);g.worldEpoch=in.worldEpoch;
             }
             const V3 origin=Pos(world),axis=Norm({world.m[4],world.m[5],world.m[6]}),player=Pos(model);
@@ -2445,7 +3197,8 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
             const auto equipment=gamestate::MeleeEquipment();
             if(framevr::dualwield::Eligible(h.cls,equipment))g.melee.weaponType=equipment.Type(0);
             const V3 headAxis=back(Norm({attachment.m[4],attachment.m[5],attachment.m[6]}));
-            const framevr::math::Quat grip{in.rot[0][0],in.rot[0][1],in.rot[0][2],in.rot[0][3]};
+            const float* holdRot=in.rot[mainArm];   // the controller of the hand that holds it (a free staff's too)
+            const framevr::math::Quat grip{holdRot[0],holdRot[1],holdRot[2],holdRot[3]};
             const auto gripAxis=framevr::math::Rotate(framevr::math::Conjugate(grip),{headAxis.x,headAxis.y,headAxis.z});
             g.melee.gripAxis[0]=gripAxis.x;g.melee.gripAxis[1]=gripAxis.y;g.melee.gripAxis[2]=gripAxis.z;
             const int row=abs(castingAxis)-1;
@@ -2473,11 +3226,11 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
     {
         MeleeWeaponPose offhand{};ULONGLONG offAt=0;
         const auto weapons=gamestate::MeleeEquipment();
+        ClawGuard clawGuard{};
         HeroXform offHx;Mat offModel;
         if(!freeStaff&&h.weapon[1]>=0&&h.weapon[1]<n&&
-           HeroTransform(&offHx)&&offHx.self==self&&
-           (offHx.parent&0xFFFFFu)==0xFFFFFu&&SafeCopy(offModel.m,reinterpret_cast<const void*>(offHx.comp),sizeof offModel)) {
-            const Mat& attachment=newW[h.weapon[1]];const Mat world=Mul(attachment,offModel);
+           HeroOf(posed,&offHx,&offModel)&&(offHx.parent&0xFFFFFu)==0xFFFFFu) {
+            const Mat attachment=Held(1);const Mat world=Mul(attachment,offModel);
             const V3 origin=Pos(world),axis=Norm({world.m[4],world.m[5],world.m[6]}),player=Pos(offModel);
             if(Len({world.m[4],world.m[5],world.m[6]})>.001f&&
                std::isfinite(origin.x+origin.y+origin.z+axis.x+axis.y+axis.z+player.x+player.y+player.z)) {
@@ -2485,7 +3238,7 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
                 offhand.weaponType=weapons.Type(1);
                 const V3 d=Norm({attachment.m[4],attachment.m[5],attachment.m[6]});
                 const V3 headAxis={-(d.x*c-d.z*s),d.y,-(d.x*s+d.z*c)};
-                const framevr::math::Quat grip{in.rot[1][0],in.rot[1][1],in.rot[1][2],in.rot[1][3]};
+                const framevr::math::Quat grip{in.rot[offArm][0],in.rot[offArm][1],in.rot[offArm][2],in.rot[offArm][3]};
                 const auto axisInGrip=framevr::math::Rotate(framevr::math::Conjugate(grip),{headAxis.x,headAxis.y,headAxis.z});
                 offhand.gripAxis[0]=axisInGrip.x;offhand.gripAxis[1]=axisInGrip.y;offhand.gripAxis[2]=axisInGrip.z;
                 const V3 o1 = back(Scale(Sub(Pos(attachment), head), 1.0f / upm));
@@ -2495,15 +3248,32 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
                 offhand.tipHead[2] = o1.z + d1.z * 0.56f;
                 offhand.dirHead[0] = d1.x; offhand.dirHead[1] = d1.y; offhand.dirHead[2] = d1.z;
                 offAt=GetTickCount64();
+                // A claw in each hand: the guard between the two blades (guard::Crossed), from this same pose.
+                if(in.haveEye&&offhand.weaponType==D2RVR_TYPE_CLAW&&weapons.Type(0)==D2RVR_TYPE_CLAW&&h.weapon[0]>=0&&h.weapon[0]<n) {
+                    const float modelUpm=framevr::body::UnitsPerMetre(h.eyeY>0?h.eyeY:in.eyeModel[1],in.userHeadM,in.scale);
+                    framevr::guard::Pose claw;
+                    if(framevr::guard::FromAttachment(world.m,offModel.m,{in.eyeModel[0],in.eyeModel[1],in.eyeModel[2]},
+                           {in.hand[offArm][0],in.hand[offArm][1],in.hand[offArm][2]},modelUpm,offAt,in.worldEpoch,claw)) {
+                        const Mat mainWorld=Mul(Held(0),offModel);
+                        const V3 mainOrigin=Pos(mainWorld),mainAxis=Norm({mainWorld.m[4],mainWorld.m[5],mainWorld.m[6]});
+                        const float metres=1/claw.unitsPerMetre,blade=framevr::guard::ClawBlade;
+                        const framevr::math::Vec offBlade{claw.center.x+axis.x*blade,claw.center.y+axis.y*blade,claw.center.z+axis.z*blade};
+                        const framevr::math::Vec mainBlade{(mainOrigin.x-player.x)*metres+mainAxis.x*blade,(mainOrigin.y-player.y)*metres+mainAxis.y*blade,
+                            (mainOrigin.z-player.z)*metres+mainAxis.z*blade};
+                        clawGuard.crossed=framevr::guard::Crossed(claw,offBlade,mainBlade,{in.hand[mainArm][0],in.hand[mainArm][1],in.hand[mainArm][2]},
+                            clawGuard.pose,&clawGuard.apart);
+                        clawGuard.generation=HeroGen();
+                    }
+                }
             }
         }
+        AcquireSRWLockExclusive(&g_gunBoneLock);g_clawGuard=clawGuard;ReleaseSRWLockExclusive(&g_gunBoneLock);
         // a grafted form's paws are its weapons: PublishClaws writes the off hand once this pass is drawn
         if(!(graft&&in.mode==2)){AcquireSRWLockExclusive(&g_gunBoneLock);g_offhandPose=offhand;g_offhandAt=offAt;ReleaseSRWLockExclusive(&g_gunBoneLock);}
         MeleeWeaponPose shieldPose{};framevr::guard::Pose guardPose{};ULONGLONG at=0;HeroXform hx;Mat model;
         const int shieldBone=h.shieldAttach>=0?h.shieldAttach:h.weapon[1];
         if(shieldFollowed&&in.havePoseStamp&&shieldBone>=0&&
-           HeroTransform(&hx)&&hx.self==self&&(hx.parent&0xFFFFFu)==0xFFFFFu&&
-           SafeCopy(model.m,reinterpret_cast<const void*>(hx.comp),sizeof model)) {
+           HeroOf(posed,&hx,&model)&&(hx.parent&0xFFFFFu)==0xFFFFFu) {
             const Mat world=Mul(newW[shieldBone],model);
             const V3 origin=Pos(world),axis=Norm({world.m[4],world.m[5],world.m[6]}),player=Pos(model);
             if(Len({world.m[4],world.m[5],world.m[6]})>.3f&&
@@ -2514,7 +3284,7 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
                     const float modelUpm=framevr::body::UnitsPerMetre(h.eyeY>0?h.eyeY:in.eyeModel[1],in.userHeadM,in.scale);
                     framevr::guard::FromAttachment(world.m,model.m,
                         {in.eyeModel[0],in.eyeModel[1],in.eyeModel[2]},
-                        {in.hand[1][0],in.hand[1][1],in.hand[1][2]},modelUpm,at,in.worldEpoch,guardPose);
+                        {in.hand[offArm][0],in.hand[offArm][1],in.hand[offArm][2]},modelUpm,at,in.worldEpoch,guardPose);
                 }
             }
         }
@@ -2527,7 +3297,7 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
     if (h.cls >= 0 && !h.form) g_heroClass.store(h.cls);   // a form's rig is not the hero's class
     if (in.fist && in.mode == 2)
         for (int side = 0; side < 2; ++side)
-            if (in.handFree[side] && (in.handsValid & (1u << side)) && in.grip[side] >= 0.0f && !(side == 1 && leftOnStaff))   // on a shaft: the game's grip, not our fist (it wraps better, 2026-10-06)
+            if (in.handFree[side] && (in.handsValid & (1u << side)) && in.grip[side] >= 0.0f && !(side == offArm && leftOnStaff))   // on a shaft: the game's grip, not our fist (it wraps better, 2026-10-06)
                 Fist(h, side, in.grip[side], in.fistClose[h.cls >= 0 ? h.cls : 3], in.fistOpen[h.cls >= 0 ? h.cls : 3], oldW, newW);
 
     // Presentation-only stow/grab. Native equipment and its stats stay intact.
@@ -2655,7 +3425,7 @@ void PoseBody(uintptr_t self, const Hero& h, const Input& given, float legHold) 
         for (Mat& w : newW)
             for (int r = 0; r < 4; ++r) for (int col = 0; col < 3; ++col) w.m[r * 4 + col] *= drawScale;
 #if D2RVR_FIRST_PERSON && defined(D2RVR_NATIVE_OPENXR)
-    if (graft && in.mode == 2) PublishClaws(self, h, in, newW, c, s, drawScale);
+    if (graft && in.mode == 2) PublishClaws(posed, h, in, newW, c, s, drawScale);
 #endif
     const bool written = SafeWrite((void*)mats, newW.data(), sizeof(Mat) * n);
 #ifdef D2RVR_NATIVE_OPENXR
@@ -2791,6 +3561,7 @@ void HoldWeaponItem(uintptr_t self) {
 struct MotionBowInput {bool active=false,drawing=false;float draw=0;ULONGLONG at=0;bool anchors=false;bow::Vec stringHand{},bowHand{};uint32_t stamp=0;};
 SRWLOCK g_bowInputLock=SRWLOCK_INIT,g_bowRigLock=SRWLOCK_INIT;
 MotionBowInput g_motionBow;
+std::atomic<bool> g_bowLive{false};   // g_motionBow.active, read without the lock: every skeleton's pose asks (PoseMotionBow)
 std::array<MotionBowInput,16> g_bowHistory{};size_t g_bowHistoryNext=0;
 std::atomic<ULONGLONG> g_bowPosedAt{0};
 std::atomic<ULONGLONG> g_bowAnchoredAt{0};
@@ -2803,10 +3574,10 @@ struct MotionBowRig {
     bool entityKnown=false;
     ULONGLONG lookupAt=0;
 };
-std::map<std::pair<uintptr_t,uintptr_t>,MotionBowRig> g_bowRigs;
+framevr::AgedCache<std::pair<uintptr_t,uintptr_t>,MotionBowRig,framevr::PairHash> g_bowRigs{Remembered,RememberedFor,SweepEvery};
 struct CrossbowRig {uintptr_t bones=0;int cog=-1;Mat relative{};uint32_t entity=0;bool entityKnown=false;ULONGLONG lookupAt=0;};
 SRWLOCK g_crossbowRigLock=SRWLOCK_INIT;
-std::map<std::pair<uintptr_t,uintptr_t>,CrossbowRig> g_crossbowRigs;
+framevr::AgedCache<std::pair<uintptr_t,uintptr_t>,CrossbowRig,framevr::PairHash> g_crossbowRigs{Remembered,RememberedFor,SweepEvery};
 
 // The packed Granny model layout is shared with the skeleton reader above:
 // model MeshBindings +0x54 (count/pointer), mesh BoneBindings +0x30,
@@ -2852,8 +3623,7 @@ bool CaptureShield(uintptr_t self,const ShieldContext& context,const HeroXform& 
     if(!source.boundCount)return false;
     ShieldStage(128);
     {
-        AcquireSRWLockExclusive(&ecs::g_lock);
-        struct Unlock {~Unlock(){ReleaseSRWLockExclusive(&ecs::g_lock);}} unlock;
+        ecs::Locked locked(false);   // read only
         uint32_t index=0,parent=0;uintptr_t components=0;
         if(!ecs::EntityOf(self,&source.entity)||!ecs::Dense(ecs::g_xs,source.entity,&index)||
            !Get(ecs::g_xs+0x38,&components)||!components||
@@ -2867,7 +3637,8 @@ bool CaptureShield(uintptr_t self,const ShieldContext& context,const HeroXform& 
     ReleaseSRWLockExclusive(&g_gunBoneLock);
     return current;
 }
-void RefreshShield(uintptr_t self) {
+void RefreshShield(Posed& posed) {
+    const uintptr_t self=posed.self;
     if(self!=g_heroSelf.load())return;
     ShieldStage(1);
     ShieldContext context;ShieldRenderSource source;
@@ -2878,23 +3649,22 @@ void RefreshShield(uintptr_t self) {
         uintptr_t model=0,skeleton=0,bones=0;int count=0;
         if(Get(source.self+8,&model)&&model==source.model&&Get(model+8,&skeleton)&&skeleton==source.skeleton&&
            Get(skeleton+8,&count)&&count==source.count&&Get(skeleton+0xC,&bones)&&bones==source.bones) {
-            AcquireSRWLockExclusive(&ecs::g_lock);
+            AcquireSRWLockShared(&ecs::g_lock);   // read only
             uintptr_t existing=0,components=0;uint32_t index=0,parent=0;
             const bool owned=ecs::SkeletonOf(source.entity,&existing)&&existing==source.self&&
                 ecs::Dense(ecs::g_xs,source.entity,&index)&&Get(ecs::g_xs+0x38,&components)&&components&&
                 Get(components+uintptr_t(index)*kTransformSize+0xC0,&parent)&&parent==source.parent;
-            ReleaseSRWLockExclusive(&ecs::g_lock);if(owned)return;
+            ReleaseSRWLockShared(&ecs::g_lock);if(owned)return;
         }
     }
     // Static shields may not get another pose callback after equipping. Scan
     // validated skeleton storage only while discovery is pending, once/second.
     static std::atomic<uint64_t> nextLook{0};auto next=nextLook.load();const auto now=GetTickCount64();
     if(now<next||!nextLook.compare_exchange_strong(next,now+1000))return;
-    HeroXform hero;if(!HeroTransform(&hero)||hero.self!=self)return;
+    HeroXform hero;if(!HeroOf(posed,&hero))return;
     std::vector<uint64_t> components;
     {
-        AcquireSRWLockExclusive(&ecs::g_lock);
-        struct Unlock {~Unlock(){ReleaseSRWLockExclusive(&ecs::g_lock);}} unlock;
+        ecs::Locked locked(false);   // read only
         uintptr_t begin=0,end=0,data=0;
         if(!ecs::IsStorage(ecs::g_ss,ecs::g_vtS)||!Get(ecs::g_ss+0x20,&begin)||!Get(ecs::g_ss+0x28,&end)||
            end<begin||(end-begin)/4>32768||!Get(ecs::g_ss+0x38,&data)||!data)return;
@@ -2929,32 +3699,44 @@ CrossbowRig LearnCrossbowRig(uintptr_t bones,int count) {
 }
 // Read the held crossbow's authored bolt helper through its actual item/root
 // transform. Never apply another player's, inventory preview's or dropped rig.
-void CaptureCrossbow(uintptr_t self) {
+// The instance's model and skeleton are the pose call's own read of them (Identify), its bone
+// count and bones one read (Boned): four reads of its own before, for every skeleton posed
+// while a crossbow is held. And what the shared entry said of a skeleton that is no crossbow
+// is noted by this thread (Noted): no lock, for NotedFor, while the skeleton and its bones -
+// all the entry is checked against - are the ones noted.
+void CaptureCrossbow(Posed& posed) {
+    const uintptr_t self=posed.self;
     const auto now=GetTickCount64();
-    uintptr_t model=0,skeleton=0,bones=0;int count=0;
-    if(!Get(self+8,&model)||!Get(model+8,&skeleton)||!Get(skeleton+8,&count)||count<4||count>64||
-       !Get(skeleton+0xC,&bones)||!bones)return;
+    if(!Identify(posed)||!Boned(posed))return;
+    const uintptr_t skeleton=posed.skeleton,bones=posed.bones;const int count=posed.boneCount;
+    if(count<4||count>64||!bones)return;
+    Noted* const note=posed.note;
+    if(note&&note->notCrossbowAt&&note->crossbowSkeleton==skeleton&&note->crossbowBones==bones&&now-note->notCrossbowAt<NotedFor)return;
     auto& rigs=g_crossbowRigs;
     const auto key=std::make_pair(self,skeleton);
     // A rig met for the first time is learned outside the lock: the other
     // render workers keep posing meanwhile. Most rigs are not crossbows.
     bool known=false,crossbow=false;
     AcquireSRWLockShared(&g_crossbowRigLock);
-    if(const auto found=rigs.find(key);found!=rigs.end()&&found->second.bones==bones){known=true;crossbow=found->second.cog>=0;}
+    if(const CrossbowRig* found=std::as_const(rigs).Find(key,now);found&&found->bones==bones){known=true;crossbow=found->cog>=0;}
     ReleaseSRWLockShared(&g_crossbowRigLock);
     if(!known) {
+        SKELETON_IDENTIFYING;
         const CrossbowRig learned=LearnCrossbowRig(bones,count);crossbow=learned.cog>=0;
+        framevr::CacheSweep swept;
         AcquireSRWLockExclusive(&g_crossbowRigLock);
-        if(rigs.size()>4096)std::erase_if(rigs,[](const auto& entry){return entry.second.cog<0;});
-        if(rigs.size()>4096)rigs.clear();
-        if(const auto found=rigs.find(key);found==rigs.end()||found->second.bones!=bones)rigs.insert_or_assign(key,learned);
+        if(const CrossbowRig* found=rigs.Find(key,now);!found||found->bones!=bones)rigs.Put(key,learned,now,&swept);
         ReleaseSRWLockExclusive(&g_crossbowRigLock);
+        hookstats::Forgot(hookstats::CrossbowRigs,swept,now);
     }
-    if(!crossbow)return;
+    if(!crossbow) {
+        if(note){note->crossbowSkeleton=skeleton;note->crossbowBones=bones;note->notCrossbowAt=now?now:1;}
+        return;
+    }
     AcquireSRWLockExclusive(&g_crossbowRigLock);struct Unlock {SRWLOCK* lock;~Unlock(){ReleaseSRWLockExclusive(lock);}} unlock{&g_crossbowRigLock};
-    const auto it=rigs.find(key);
-    if(it==rigs.end()||it->second.bones!=bones||it->second.cog<0)return;   // dropped meanwhile: learned again on its next pose
-    auto& rig=it->second;
+    CrossbowRig* const kept=rigs.Find(key,now);
+    if(!kept||kept->bones!=bones||kept->cog<0)return;   // dropped meanwhile: learned again on its next pose
+    auto& rig=*kept;
     g_crossbowStages.fetch_or(2);
     // Learn the item even if its skeleton is evaluated before the hero. Static
     // item poses need not be evaluated again after the hero becomes available.
@@ -2965,7 +3747,7 @@ void CaptureCrossbow(uintptr_t self) {
     HeroXform hero;if(!HeroTransform(&hero)||hero.self!=attach.hero)return;
     g_crossbowStages.fetch_or(8);
     {
-        AcquireSRWLockExclusive(&ecs::g_lock);Unlock ecsUnlock{&ecs::g_lock};
+        ecs::Locked locked(false);   // the registry is only read; the rig written here is under g_crossbowRigLock
         uintptr_t existing=0;
         if(!rig.entityKnown||!ecs::SkeletonOf(rig.entity,&existing)||existing!=self) {
             rig.entityKnown=false;if(rig.lookupAt&&now-rig.lookupAt<500)return;rig.lookupAt=now;
@@ -2997,9 +3779,9 @@ void RefreshCrossbow(uintptr_t hero) {
     if(!attach.crossbow)return;
     std::vector<uintptr_t> items;
     AcquireSRWLockShared(&g_crossbowRigLock);
-    for(const auto& [key,rig]:g_crossbowRigs)if(rig.cog>=0)items.push_back(key.first);
+    g_crossbowRigs.Each([&](const std::pair<uintptr_t,uintptr_t>& key,const CrossbowRig& rig){if(rig.cog>=0)items.push_back(key.first);});
     ReleaseSRWLockShared(&g_crossbowRigLock);
-    for(auto item:items)CaptureCrossbow(item);
+    for(auto item:items){Posed held(item,nullptr);CaptureCrossbow(held);}   // not being posed: no note of it is kept
     AcquireSRWLockShared(&g_gunBoneLock);const auto source=g_crossbowRenderSource;ReleaseSRWLockShared(&g_gunBoneLock);
     if(source.hero==hero&&source.generation==attach.heroGeneration&&source.equipment==attach.equipment&&
        source.seen&&GetTickCount64()-source.seen<=100)return;
@@ -3011,8 +3793,7 @@ void RefreshCrossbow(uintptr_t hero) {
     if(now<next||!nextLook.compare_exchange_strong(next,now+1000))return;
     std::vector<uint64_t> components;
     {
-        AcquireSRWLockExclusive(&ecs::g_lock);
-        struct Unlock {~Unlock(){ReleaseSRWLockExclusive(&ecs::g_lock);}} unlock;
+        ecs::Locked locked(false);   // read only
         uintptr_t begin=0,end=0,data=0;
         if(!ecs::IsStorage(ecs::g_ss,ecs::g_vtS)||!Get(ecs::g_ss+0x20,&begin)||!Get(ecs::g_ss+0x28,&end)||
            end<begin||(end-begin)/4>32768||!Get(ecs::g_ss+0x38,&data)||!data)return;
@@ -3020,14 +3801,20 @@ void RefreshCrossbow(uintptr_t hero) {
         if(!SafeCopy(components.data(),reinterpret_cast<void*>(data),components.size()*8))return;
     }
     for(size_t i=0;i<components.size();i+=kSkeletonCompSize/8) {
-        CaptureCrossbow(uintptr_t(components[i]));
+        {Posed item(uintptr_t(components[i]),nullptr);CaptureCrossbow(item);}   // not being posed: no note of it is kept
         AcquireSRWLockShared(&g_gunBoneLock);const auto captured=g_crossbowRenderSource;ReleaseSRWLockShared(&g_gunBoneLock);
         if(captured.hero==hero&&captured.generation==attach.heroGeneration&&captured.equipment==attach.equipment&&
            captured.seen&&GetTickCount64()-captured.seen<=100)break;
     }
 }
 
-void PoseMotionBow(uintptr_t self) {
+// As CaptureCrossbow: the pose call's identity, one read for the bone count and bones, and this
+// thread's note of a skeleton the shared entry says is neither the bow nor has an arrow to hide.
+// g_bowRigLock was taken exclusively by every 4-64 bone skeleton's pose while a bow is drawn;
+// now by the bows, and by any other once a second.
+void PoseMotionBow(Posed& p) {
+    const uintptr_t self=p.self;
+    if(!g_bowLive.load(std::memory_order_relaxed))return;   // no bow in play: nothing below would match
     GunBoneOut attach;
     AcquireSRWLockShared(&g_gunBoneLock);attach=g_gunBone;ReleaseSRWLockShared(&g_gunBoneLock);
     MotionBowInput input;bool matched=false;
@@ -3037,16 +3824,19 @@ void PoseMotionBow(uintptr_t self) {
     ReleaseSRWLockShared(&g_bowInputLock);
     const auto now=GetTickCount64();
     if(!matched||now-input.at>100||now-attach.at>100)return;
-    uintptr_t model=0,skeleton=0,bones=0;int count=0;
-    if(!Get(self+8,&model)||!Get(model+8,&skeleton)||!Get(skeleton+8,&count)||count<4||count>int(bow::MaxBones)||
-       !Get(skeleton+0xC,&bones)||!bones)return;
+    if(!Identify(p)||!Boned(p))return;
+    const uintptr_t skeleton=p.skeleton,bones=p.bones;const int count=p.boneCount;
+    if(count<4||count>int(bow::MaxBones)||!bones)return;
     // Cache only small item rigs. Hero, corpse and other character rigs
     // fail the count check before a model-name read or ECS lookup.
+    Noted* const note=p.note;
+    if(note&&note->notBowAt&&note->bowSkeleton==skeleton&&note->bowBones==bones&&now-note->notBowAt<NotedFor)return;
     AcquireSRWLockExclusive(&g_bowRigLock);
     struct Unlock {~Unlock(){ReleaseSRWLockExclusive(&g_bowRigLock);}} unlock;
     const auto key=std::make_pair(self,skeleton);
-    auto it=g_bowRigs.find(key);
-    if(it==g_bowRigs.end()||it->second.bones!=bones) {
+    MotionBowRig* rig=g_bowRigs.Find(key,now);
+    if(!rig||rig->bones!=bones) {
+        SKELETON_IDENTIFYING;
         MotionBowRig learned;learned.bones=bones;
         uintptr_t object=0,name=0;Get(self,&object);Get(object+8,&name);
         const std::string path=Str(name);
@@ -3067,17 +3857,20 @@ void PoseMotionBow(uintptr_t self) {
                   SafeCopy(&inverse,reinterpret_cast<const void*>(at+0x50),sizeof inverse)&&bow::Inverse(inverse,bind[i]);
         }
         if(valid)learned.rig.Learn(bind);
-        if(g_bowRigs.size()>4096)g_bowRigs.clear();
-        it=g_bowRigs.insert_or_assign(key,learned).first;
+        framevr::CacheSweep swept;
+        rig=&g_bowRigs.Put(key,learned,now,&swept);
+        hookstats::Forgot(hookstats::BowRigs,swept,now);
     }
-    auto& held=it->second;
-    if(!held.rig.valid&&std::none_of(held.arrows.begin(),held.arrows.end(),[](bool arrow){return arrow;}))return;
+    auto& held=*rig;
+    if(!held.rig.valid&&std::none_of(held.arrows.begin(),held.arrows.end(),[](bool arrow){return arrow;})) {
+        if(note){note->bowSkeleton=skeleton;note->bowBones=bones;note->notBowAt=now?now:1;}
+        return;
+    }
     HeroXform hero;
     if(!HeroTransform(&hero))return;
     bow::Mat itemLocal;
     {
-        AcquireSRWLockExclusive(&ecs::g_lock);
-        struct EcsUnlock {~EcsUnlock(){ReleaseSRWLockExclusive(&ecs::g_lock);}} ecsUnlock;
+        ecs::Locked locked(false);   // the registry is only read; the rig written here is under g_bowRigLock
         uintptr_t existing=0;
         if(!held.entityKnown||!ecs::SkeletonOf(held.entity,&existing)||existing!=self) {
             held.entityKnown=false;
@@ -3093,8 +3886,8 @@ void PoseMotionBow(uintptr_t self) {
         // Full generational entity equality: an NPC's or dropped bow using
         // exactly the same asset must never be posed by our controller.
     }
-    uintptr_t world=0,matrices=0;int worldCount=0;bow::Pose native,posed;
-    if(!Get(self+0x20,&world)||!Get(world,&worldCount)||worldCount!=count||!Get(world+4,&matrices)||!matrices)return;
+    const uintptr_t world=p.worldPose;uintptr_t matrices=0;int worldCount=0;bow::Pose native,posed;
+    if(!Get(world,&worldCount)||worldCount!=count||!Get(world+4,&matrices)||!matrices)return;
     if(!held.rig.valid) {
         // Hide only the local bow's built-in arrow. The independent native
         // projectile mesh (or the tracked guide fallback) supplies its pose.
@@ -3107,6 +3900,11 @@ void PoseMotionBow(uintptr_t self) {
         return;
     }
     if(!SafeCopy(native.data(),reinterpret_cast<const void*>(matrices),sizeof native))return;
+    {   // Left-handed play (hand_swap_pose.h): which of the attach bone's axes runs across this bow's plane
+        float alignment=0;
+        const int axis=handswap::NearestAxis(bow::Multiply(native[bow::Cog],itemLocal),held.rig.AcrossPlane(),&alignment);
+        g_bowPlaneAxis.store(axis>=0&&alignment>=.9f?((HeroGen()&0x3FFFFFFFu)<<2)|uint32_t(axis+1):0u,std::memory_order_relaxed);
+    }
     bool posedAtHands=false;
     if(input.drawing&&input.anchors) {
         bow::Mat toHead,headToCog;
@@ -3143,7 +3941,7 @@ bool PoseRemoteUpper(uintptr_t self,const Hero&h,const float*local) {
     ReleaseSRWLockShared(&g_remoteLock);
     if(targets.empty())return false;
     float pos[3];Mat model;
-    if(!ecs::CandidatePosition(self,pos,model.m))return false;
+    if(!ecs::CandidatePosition(self,pos,nullptr,model.m))return false;
     std::vector<upperbodyrender::Candidate> candidates;
     for(const auto&r:targets)candidates.push_back({r.unit,r.classId,{r.worldPosition[0],r.worldPosition[1],r.worldPosition[2]}});
     int match=upperbodyrender::Match(candidates.data(),candidates.size(),h.cls,pos,local);
@@ -3252,35 +4050,75 @@ bool PoseRemoteUpper(uintptr_t self,const Hero&h,const float*local) {
 }
 #endif
 
-void Arms(uintptr_t self) {
-    Input in;
-    float playerPosition[3];
-    AcquireSRWLockShared(&g_inLock); in = g_in;memcpy(playerPosition,g_heroPos,sizeof playerPosition); ReleaseSRWLockShared(&g_inLock);
+void Arms(Posed& posed) {
+    const uintptr_t self = posed.self;
+
     // The hero is looked for even while nothing is done to him: his SkeletonInstance is what
     // vrcam's facing is found from (HeroTransform), and that is needed before the body can turn.
-    const bool active = !(in.mode == 0 && !in.hideHead && !in.lockUpper && !(in.bodyTurn > 0 && in.haveYaw));
-    if (!active && !g_trackHero.load()) return;
-    uintptr_t modelInst = 0, skel = 0;
-    if (!Get(self + 0x08, &modelInst) || !Get(modelInst + 0x08, &skel)) return;
+    if (!g_inActive.load(std::memory_order_relaxed) && !g_trackHero.load()) return;
+    if (!Identify(posed)) return;
+    const uintptr_t skel = posed.skeleton;
     const auto key = std::make_pair(self, skel);
-    Hero hero; bool have = false;
-    AcquireSRWLockShared(&g_heroLock);
-    auto it = g_heroes.find(key);
-    if (it != g_heroes.end()) { hero = it->second; have = true; }
-    ReleaseSRWLockShared(&g_heroLock);
-    if (!have) {
-        Hero h;
-        if (!Learn(self, &h)) h.count = 0;
-        AcquireSRWLockExclusive(&g_heroLock);
-        if (g_heroes.size() > 4096) g_heroes.clear();
-        g_heroes[key] = h;
-        ReleaseSRWLockExclusive(&g_heroLock);
-        hero = h;
+    const ULONGLONG met = GetTickCount64();
+    // Nearly every skeleton is not the hero's: this thread's note of that, no lock. The note is
+    // for this skeleton (an instance address the game reuses for another model has another), and
+    // void once any hero rig was forgotten - what it was taken from may be gone.
+    Noted& note = *posed.note;
+    const uint32_t forgot = g_heroesForgot.load(std::memory_order_acquire);
+    std::shared_ptr<const Hero> rig;
+    if (!(note.notHeroAt && note.skeleton == skel && note.forgot == forgot && met - note.notHeroAt < NotedFor)) {
+        bool have = false;
+        AcquireSRWLockShared(&g_heroLock);
+        if (const auto* found = std::as_const(g_heroes).Find(key, met)) { rig = *found; have = true; }
+        ReleaseSRWLockShared(&g_heroLock);
+        if (!have) {
+            SKELETON_IDENTIFYING;
+            auto learned = std::make_shared<Hero>();
+            if (Learn(self, learned.get()) && learned->count > 0) rig = std::move(learned);
+            framevr::CacheSweep swept;
+            AcquireSRWLockExclusive(&g_heroLock);
+            g_heroes.Put(key, rig, met, &swept);
+            if (swept.Dropped()) g_heroesForgot.fetch_add(1, std::memory_order_release);
+            ReleaseSRWLockExclusive(&g_heroLock);
+            hookstats::Forgot(hookstats::HeroRigs, swept, met);
+        }
+        if (!rig) { note.skeleton = skel; note.forgot = forgot; note.notHeroAt = met ? met : 1; }
+        else note.notHeroAt = 0;
     }
+
+    if (!rig) {
+#ifdef D2RVR_DEVELOPER
+        if (GetTickCount64() < g_partsUntil.load()) {   // room-scale diagnostics: a skeleton not taken as a body, at the hero?
+            float playerPosition[3],eyeGround[2];bool eyeGroundOk;
+            AcquireSRWLockShared(&g_inLock);memcpy(playerPosition,g_heroPos,sizeof playerPosition);
+            memcpy(eyeGround,g_eyeGround,sizeof eyeGround);eyeGroundOk=g_eyeGroundOk;ReleaseSRWLockShared(&g_inLock);
+            float position[3];uintptr_t world=0;int32_t bones=0;
+            if (ecs::CandidatePosition(self, position) && Get(self + 0x20, &world) && Get(world, &bones)) {
+                const float atHero=std::hypot(position[0]-playerPosition[0],position[2]-playerPosition[2]);
+                const float atEye=eyeGroundOk?std::hypot(position[0]-eyeGround[0],position[2]-eyeGround[1]):-1.f;
+                if (atHero < 3.f || (atEye >= 0 && atEye < 3.f)) {
+                    PartSeen seen{self,bones,atHero,atEye};SkeletonFile(self,seen.name,sizeof seen.name);
+                    AcquireSRWLockExclusive(&g_partsLock);NotePart(g_parts,g_partCount,seen);ReleaseSRWLockExclusive(&g_partsLock);
+                }
+            }
+        }
+#endif
+        return;
+    }
+    // A hero's rig (a player model, or a form's): only now is the input copied.
+    const Hero& hero = *rig;
+    Input in;
+    float playerPosition[3],eyeGround[2];bool eyeGroundOk;
+    AcquireSRWLockShared(&g_inLock); in = g_in;memcpy(playerPosition,g_heroPos,sizeof playerPosition);
+    memcpy(eyeGround,g_eyeGround,sizeof eyeGround);eyeGroundOk=g_eyeGroundOk; ReleaseSRWLockShared(&g_inLock);
+    const bool active = InputActive(in);
+    if (!active && !g_trackHero.load()) return;   // Set changed it since the look above
+
     if (hero.count <= 0) return;
 #ifdef D2RVR_NATIVE_OPENXR
     if(PoseRemoteUpper(self,hero,playerPosition))return;
 #endif
+
     // A shapeshift form's rig (an enemy model) is the hero's only while the player is in that form -
     // or, as the game swaps the models, once the rig the state sample still names is no longer
     // drawn: the sample trails the swap, and the form's first frames were the game's own beast.
@@ -3297,11 +4135,20 @@ void Arms(uintptr_t self) {
     // werewolf bites low (its head under a third of its rest height through each attack),
     // and those frames were left to the game: its unscaled beast lunging out ahead of the eyes.
     const int stand=hero.form&&hero.pelvis>=0&&hero.pelvisY>2.0f?hero.pelvis:hero.head;
-    float position[3],head[16];uintptr_t pose=0,matrices=0;
-    if(hero.head<0||size_t(hero.head)>=hero.bind.size()||stand<0||size_t(stand)>=hero.bind.size()||!ecs::CandidatePosition(self,position)||
-       !Get(self+0x20,&pose)||!Get(pose+4,&matrices)||
-       !SafeCopy(head,reinterpret_cast<const void*>(matrices+uintptr_t(stand)*64),sizeof head))return;
-    if(!framevr::LocalStandingBody(position[0],position[2],playerPosition[0],playerPosition[2],head[13],hero.bind[stand].m[13])) {
+    float position[3],head[16];const uintptr_t pose=posed.worldPose;uintptr_t matrices=0;   // the world pose: read with the identity above
+    if(hero.head<0||size_t(hero.head)>=hero.bind.size()||stand<0||size_t(stand)>=hero.bind.size()||
+       !ecs::CandidatePosition(self,position,&posed.hero,posed.heroLocal)||
+       !Get(pose+4,&matrices)||
+       !SafeCopy(head,reinterpret_cast<const void*>(matrices+uintptr_t(stand)*64),sizeof head)){++g_neckWhy[WhyNoPosition];return;}
+    // Standing at the hero's spot, or under your eyes: stepped away in the room the drawn body stands
+    // under you, and past 3 units (about 0.7 m) it was refused and left to the game, the legs back at the
+    // room's centre (owner, 2026-11-08: "my legs are staying attached to the center of the room").
+    if(!framevr::LocalStandingBodyInRoom(position[0],position[2],playerPosition[0],playerPosition[2],eyeGroundOk,eyeGround[0],eyeGround[1],
+                                         head[13],hero.bind[stand].m[13])) {
+        ++g_neckWhy[WhyNotStanding];
+        const float apart=std::hypot(position[0]-playerPosition[0],position[2]-playerPosition[2]);
+        for(float was=g_neckApart.load();apart<was&&!g_neckApart.compare_exchange_weak(was,apart);){}
+        ReportNeckFollow();
 #ifdef D2RVR_DEVELOPER
         if(hero.form&&std::hypot(position[0]-playerPosition[0],position[2]-playerPosition[2])<=2.0f)++g_formUnstanding;
 #endif
@@ -3309,7 +4156,8 @@ void Arms(uintptr_t self) {
     }
     // and standing where the player does, not merely near: a summon can share the rig
     if(hero.form) {
-        const float apart=std::hypot(position[0]-playerPosition[0],position[2]-playerPosition[2]);
+        float apart=std::hypot(position[0]-playerPosition[0],position[2]-playerPosition[2]);
+        if(eyeGroundOk)apart=std::min(apart,std::hypot(position[0]-eyeGround[0],position[2]-eyeGround[1]));   // room-scale, as above
 #ifdef D2RVR_DEVELOPER
         static std::atomic<uint64_t> toldAt{0};
         if(apart>2.0f&&GetTickCount64()-toldAt.load()>5000) {
@@ -3343,24 +4191,39 @@ void Arms(uintptr_t self) {
     else g_rigPosedAt[0].store(GetTickCount64());
 #endif
     NoteHero(self);
-    if (!active) return;
+#ifdef D2RVR_NATIVE_OPENXR
+    // His transform, for this pose's helpers (HeroOf): the look-up above found it. HeroTransform
+    // gives none without the game's base, nor does this.
+    posed.heroPlaced = g_gameBase.load() ? 1 : -1;
+#endif
+    {   // room-scale diagnostics: the distinct hero bodies posed
+        AcquireSRWLockExclusive(&g_partsLock);
+        bool seen=false;for(int i=0;i<g_bodyCount;++i)seen=seen||g_bodies[i].self==self;
+        ReleaseSRWLockExclusive(&g_partsLock);
+        if(!seen){PartSeen body{self,hero.count};SkeletonFile(self,body.name,sizeof body.name);
+                  AcquireSRWLockExclusive(&g_partsLock);NotePart(g_bodies,g_bodyCount,body);ReleaseSRWLockExclusive(&g_partsLock);}
+    }
+    if (!active) {++g_neckWhy[WhyInactive];ReportNeckFollow();return;}
+    int why=in.followTrackedNeck?-1:WhyNotAsked;   // the first reason the body is not put under the neck this pose
     // The facing of this very frame, not of the last 10 ms tick - the hero only.
     if (in.haveYaw) if (const FreshFn f = g_fresh.load()) {
         float yaw = 0.0f, eye[3] = {}; bool eyeOk = false;
         if (f(&yaw, eye, &eyeOk)) {
             in.yawInModel = yaw;
             if (eyeOk) { memcpy(in.eyeModel, eye, sizeof eye); in.haveEye = true; }
-            else in.followTrackedNeck=false;
+            else {if(why<0&&in.followTrackedNeck)why=WhyNoEye;in.followTrackedNeck=false;}
         }
-        else in.followTrackedNeck=false;
+        else {if(why<0&&in.followTrackedNeck)why=WhyNoFacing;in.followTrackedNeck=false;}
     }
     if (in.mode == 2 || in.followTrackedNeck)
-        if (const FreshHandsFn f = g_freshHands.load()) if(!f(&in))in.followTrackedNeck=false;
+        if (const FreshHandsFn f = g_freshHands.load()) if(!f(&in)){if(why<0&&in.followTrackedNeck)why=WhyNoHands;in.followTrackedNeck=false;}
 #ifdef D2RVR_NATIVE_OPENXR
     // Resolve frame availability here, after refreshing this pose's eye/head
     // sample. A timer tick between pairs must not disable just one eye's body.
+    if(why<0&&in.followTrackedNeck&&!framevr::Active())why=WhyNoFrame;
     in.followTrackedNeck = in.followTrackedNeck && framevr::Active();
 #endif
+    if(why>=0)++g_neckWhy[why];
     // A form standing still: its legs and tail are held (the idle sways). Once per pair.
     float legHold = 1.0f;
     if (hero.form) {
@@ -3372,7 +4235,7 @@ void Arms(uintptr_t self) {
         }
         ReleaseSRWLockExclusive(&g_formLock);
     }
-    PoseBody(self, hero, in, legHold);
+    PoseBody(posed, hero, in, legHold);
 }
 
 #ifdef D2RVR_NATIVE_OPENXR
@@ -3389,16 +4252,11 @@ namespace limbs = framevr::limbs;
 // 3 m: the hand's reach and the longest weapon, with a body's limbs out to the side.
 constexpr float DefaultRadius = 3.0f, MinRadius = 1.5f, MaxRadius = 8.0f;
 constexpr ULONGLONG Recheck = 250;     // ms between checks that an instance is still its entity's
-constexpr ULONGLONG OtherRecheck = 2000;
-constexpr size_t MaxKnown = 4096, MaxModels = 256;
-SRWLOCK g_lock = SRWLOCK_INIT;
-std::atomic<bool> g_live{false};       // g_on, read without the lock: most poses stop here
-bool g_on = false;
-float g_centre[3] = {}, g_upm = 0, g_radius = DefaultRadius;
-// Every skeleton met: what it is (players, items and props are Kind::None),
-// and its model's path as a key (every monster of a kind shares its limbs).
-// farUntil: a body found beyond the radius is not looked at again before then (FarFor).
-struct Known { limbs::Kind kind = limbs::Kind::None; uint32_t entity = 0; uint64_t model = 0; ULONGLONG at = 0; ULONGLONG farUntil = 0; bool form = false; };
+constexpr size_t MaxModels = 256;
+SRWLOCK g_lock = SRWLOCK_INIT;         // the models learned (g_models, g_unusable)
+std::atomic<bool> g_live{false};       // known::g_bodiesOn, read without the lock: most poses stop here
+// Every skeleton met, what it is: known::g_known, shared with look-at (KnownBody).
+// Its farUntil: a body found beyond the radius is not looked at again before then (FarFor).
 // How long a body found beyond the radius is left alone: the time it and the player, closing at
 // ClosingSpeed, would need to bring it inside the radius; at most MaxFarFor. Each look costs about
 // fifteen guarded reads, and natively each is a system call (framevr::ReadMemory): ~1 us apiece,
@@ -3409,12 +4267,6 @@ ULONGLONG FarFor(float awayMetres, float radiusMetres) {
     const float gap = awayMetres - radiusMetres;
     return gap > 0 && std::isfinite(gap) ? std::min(MaxFarFor, ULONGLONG(gap / ClosingSpeed * 1000.0f)) : 0;
 }
-uint64_t PathKey(const std::string& path) {
-    uint64_t h = 1469598103934665603ull;
-    for (const unsigned char c : path) { h ^= c; h *= 1099511628211ull; }
-    return h;
-}
-std::unordered_map<uintptr_t, Known> g_known;
 // Each model's limbs, learned once from its bones and meshes; never moved once made.
 // Kept by the model's path: the game makes a model and skeleton for each monster.
 struct Model {
@@ -3428,11 +4280,27 @@ std::set<uint64_t> g_unusable;
 thread_local std::array<float, limbs::MaxBones * 16> t_pose, t_raw;
 // Each instance's own pose from the game, kept across frames (limbs::GamePose): a body the
 // game does not pose again (a corpse) still holds the pose bent for it last frame.
-struct Kept { limbs::GamePose pose; ULONGLONG seen = 0; };
+// g_keptLock guards the map only; a pose is taken, hashed and written back under its own
+// instance's lock (the one lock for all of them made every worker wait on a 13 KB copy).
+struct Kept { SRWLOCK lock = SRWLOCK_INIT; limbs::GamePose pose; std::atomic<ULONGLONG> seen{0}; };
 SRWLOCK g_keptLock = SRWLOCK_INIT;
-std::unordered_map<uintptr_t, Kept> g_kept;
-ULONGLONG g_keptPruned = 0;
+std::unordered_map<uintptr_t, std::shared_ptr<Kept>> g_kept;
+std::atomic<ULONGLONG> g_keptPruned{0};
 constexpr ULONGLONG KeptFor = 5000;   // ms an instance's kept pose outlives its last sight
+std::shared_ptr<Kept> KeptOf(uintptr_t self, bool make) {
+    std::shared_ptr<Kept> kept;
+    AcquireSRWLockShared(&g_keptLock);
+    if (const auto it = g_kept.find(self); it != g_kept.end()) kept = it->second;
+    ReleaseSRWLockShared(&g_keptLock);
+    if (!kept && make) {
+        AcquireSRWLockExclusive(&g_keptLock);
+        auto& slot = g_kept[self];
+        if (!slot) slot = std::make_shared<Kept>();
+        kept = slot;
+        ReleaseSRWLockExclusive(&g_keptLock);
+    }
+    return kept;
+}
 
 // A model's limbs from its skeleton's bones: every mesh's per-bone boxes when
 // the model has meshes; else (the game's characters load their skeleton from
@@ -3503,46 +4371,76 @@ const Model* ModelOf(uintptr_t self, uint64_t key, uintptr_t model, uintptr_t sk
 }
 
 // A body bent here earlier and not bent this frame: its buffer goes back to the game's pose
-// (a corpse is not posed again by the game, so it would keep the bend). raw: the buffer as
-// read this frame when haveRaw, else room to read it into.
+// (a corpse is not posed again by the game, so it would keep the bend). The buffer as it is
+// now is posed.held when look-at or Limbs has read it (with look-at's turn, should that not be
+// written yet: the hash is of what the buffer is to hold), else it is read here.
 bool Bent(uintptr_t self) {
-    bool bent = false;
-    AcquireSRWLockShared(&g_keptLock);
-    if (const auto it = g_kept.find(self); it != g_kept.end()) bent = it->second.pose.written != 0;
-    ReleaseSRWLockShared(&g_keptLock);
+    const auto kept = KeptOf(self, false);
+    if (!kept) return false;
+    AcquireSRWLockShared(&kept->lock);
+    const bool bent = kept->pose.written != 0;
+    ReleaseSRWLockShared(&kept->lock);
     return bent;
 }
-void PutBack(uintptr_t self, uintptr_t matrices, int count, float* raw, bool haveRaw) {
-    if (!Bent(self) || (!haveRaw && !SafeCopy(raw, reinterpret_cast<const void*>(matrices), size_t(count) * 64))) return;
-    AcquireSRWLockExclusive(&g_keptLock);
-    if (const auto it = g_kept.find(self); it != g_kept.end())
-        if (const float* game = it->second.pose.Restore(raw, count))
-            if (SafeWrite(reinterpret_cast<void*>(matrices), game, size_t(count) * 64)) ++limbs::Shared().restored;
-    ReleaseSRWLockExclusive(&g_keptLock);
+void PutBack(Posed& posed, uintptr_t matrices, int count) {
+    const uintptr_t self = posed.self;
+    if (!Bent(self)) return;
+    const float* raw = posed.held;
+    if (!raw) {
+        if (!SafeCopy(t_raw.data(), reinterpret_cast<const void*>(matrices), size_t(count) * 64)) return;
+        raw = t_raw.data();
+    }
+    const auto kept = KeptOf(self, false);
+    if (!kept) return;
+    AcquireSRWLockExclusive(&kept->lock);
+    if (const float* game = kept->pose.Restore(raw, count))
+        if (SafeWrite(reinterpret_cast<void*>(matrices), game, size_t(count) * 64)) {
+            ++limbs::Shared().restored;
+            // Written over look-at's turn: that write is not owed any more, and the head left in
+            // the buffer is this pose's (looks::Finish).
+            if (posed.owed) { std::copy(game, game + size_t(count) * 16, t_pose.begin()); posed.held = t_pose.data(); posed.owed = false; }
+        }
+    ReleaseSRWLockExclusive(&kept->lock);
 }
-// A skeleton instance's model, skeleton and pose buffer: false when they do not read.
-bool Buffer(uintptr_t self, uintptr_t& model, uintptr_t& skeleton, uintptr_t& matrices, int& count) {
-    uintptr_t worldPose = 0;
-    return Get(self + 0x08, &model) && Get(model + 0x08, &skeleton) && Get(self + 0x20, &worldPose) && Get(worldPose, &count) &&
-           count >= 2 && count <= limbs::MaxBones && Get(worldPose + 4, &matrices) && matrices;
+// A skeleton instance's model, skeleton and pose buffer: false when they do not read. Read once
+// a pose call (the identity's two reads, shared with Arms, and one for the buffer's header).
+bool Buffer(Posed& p, uintptr_t& model, uintptr_t& skeleton, uintptr_t& matrices, int& count) {
+    if (!p.buffer) {
+        p.buffer = -1;
+        unsigned char head[12];
+        if (Identify(p) && p.worldPose > 0x10000 && SafeCopy(head, reinterpret_cast<const void*>(p.worldPose), sizeof head)) {
+            memcpy(&p.count, head, 4); memcpy(&p.matrices, head + 4, 8);
+            if (p.count >= 2 && p.count <= limbs::MaxBones && p.matrices) p.buffer = 1;
+        }
+    }
+    if (p.buffer < 0) return false;
+    model = p.model; skeleton = p.skeleton; matrices = p.matrices; count = p.count;
+    return true;
 }
 float Away(const float placement[16], const float centre[3]) {
     const float dx = placement[12] - centre[0], dz = placement[14] - centre[2];
     return std::sqrt(dx * dx + dz * dz);
 }
 
-void Limbs(uintptr_t self) {
+void Limbs(Posed& posed) {
+    const uintptr_t self = posed.self;
     if (!g_live.load(std::memory_order_relaxed)) return;
-    bool on = false; float centre[3]; float upm = 0, radius = DefaultRadius;
-    Known k; bool known = false;
     const ULONGLONG now = GetTickCount64();
-    AcquireSRWLockShared(&g_lock);
-    on = g_on; memcpy(centre, g_centre, sizeof centre); upm = g_upm; radius = g_radius;
-    if (on) if (const auto it = g_known.find(self); it != g_known.end()) { k = it->second; known = true; }
-    ReleaseSRWLockShared(&g_lock);
-    if (!on || self == g_heroSelf.load(std::memory_order_relaxed)) return;
-    if (known && k.kind == limbs::Kind::None && now - k.at < OtherRecheck) return;   // not a body (an item, a prop, a player)
-    if (known && k.kind != limbs::Kind::None && now < k.farUntil) { auto& b = limbs::Shared(); ++b.calls; ++b.outside; return; }   // far a moment ago (FarFor)
+    // Left alone until then, by this thread's note of what the look-up below last said.
+    Noted& note = *posed.note;
+    if (now < note.bodiesUntil) {
+        if (note.bodiesFar && self != g_heroSelf.load(std::memory_order_relaxed)) { auto& b = limbs::Shared(); ++b.calls; ++b.outside; }
+        return;
+    }
+    known::Shared(posed, now);   // the settings and what the instance is: look-at's look, when it took one
+    const float* const centre = posed.centre; const float upm = posed.bodiesUpm, radius = posed.radius;
+    const KnownBody& k = posed.body;
+    if (!posed.bodiesOn || self == g_heroSelf.load(std::memory_order_relaxed)) return;
+    if (posed.known && k.kind == limbs::Kind::None && now - k.at < known::OtherRecheck) { note.bodiesUntil = k.at + known::OtherRecheck; note.bodiesFar = false; return; }   // not a body (an item, a prop, a player)
+    if (posed.known && k.kind != limbs::Kind::None && now < k.farUntil[ForBodies]) {   // far a moment ago (FarFor)
+        note.bodiesUntil = k.farUntil[ForBodies]; note.bodiesFar = true;
+        auto& b = limbs::Shared(); ++b.calls; ++b.outside; return;
+    }
     // This hook's own cost, in the ten-second "Frame bodies:" line.
     auto& board = limbs::Shared();
     struct Timed {
@@ -3556,69 +4454,54 @@ void Limbs(uintptr_t self) {
     // read: in a town most bodies are, and each would cost a look-up of its model and entity.
     float placement[16];
     bool placed = false;
-    if (known && k.kind != limbs::Kind::None && k.entity && ecs::Placement(k.entity, placement)) {
+    if (posed.known && k.kind != limbs::Kind::None && k.entity && PlacementOf(posed, k.entity, placement)) {
         placed = true;
         if (const float away = Away(placement, centre); !(away <= reach)) {
             ++board.outside;
             // Left alone for a while; its pose read only when it was bent here (a body pushed, then left).
-            if (const ULONGLONG wait = FarFor(away / upm, radius)) {
-                AcquireSRWLockExclusive(&g_lock);
-                if (const auto it = g_known.find(self); it != g_known.end() && it->second.entity == k.entity) it->second.farUntil = now + wait;
-                ReleaseSRWLockExclusive(&g_lock);
-            }
+            if (const ULONGLONG wait = FarFor(away / upm, radius)) known::Far(posed, ForBodies, now, wait);
             if (Bent(self)) {
                 uintptr_t model = 0, skeleton = 0, matrices = 0; int count = 0;
-                if (Buffer(self, model, skeleton, matrices, count)) PutBack(self, matrices, count, t_raw.data(), false);
+                if (Buffer(posed, model, skeleton, matrices, count)) PutBack(posed, matrices, count);
             }
             return;
         }
     }
-    // What the instance is: its model's path, rechecked now and then (an
-    // instance's memory can be another model's later), its entity kept.
-    if (!known || now - k.at >= (k.kind == limbs::Kind::None ? OtherRecheck : Recheck)) {
-        uintptr_t nameObject = 0, namePointer = 0;
-        Known next; next.at = now;
-        if (Get(self, &nameObject) && Get(nameObject + 8, &namePointer)) {
-            const std::string path = Str(namePointer);
-            next.kind = limbs::KindOf(path);
-            next.form = framevr::shapeshift::FromModel(path) != 0;
-            next.model = PathKey(path);
-        }
-        if (next.kind != limbs::Kind::None && !ecs::Owner(self, known ? k.entity : 0, &next.entity)) next.kind = limbs::Kind::None;
-        if (next.entity != k.entity) placed = false;
-        k = next;
-        AcquireSRWLockExclusive(&g_lock);
-        if (g_known.size() >= MaxKnown) g_known.clear();
-        g_known[self] = k;
-        ReleaseSRWLockExclusive(&g_lock);
-    }
+    // What the instance is, rechecked now and then (known::Recheck), its entity kept.
+    if (known::Recheck(posed, now, Recheck)) placed = false;
     if (k.kind == limbs::Kind::None) return;
     uintptr_t model = 0, skeleton = 0, matrices = 0; int count = 0;
-    if (!Buffer(self, model, skeleton, matrices, count)) return;
-    if (now - g_keptPruned > 2000) {
+    if (!Buffer(posed, model, skeleton, matrices, count)) return;
+    if (ULONGLONG pruned = g_keptPruned.load(std::memory_order_relaxed); now > pruned && now - pruned > 2000 && g_keptPruned.compare_exchange_strong(pruned, now)) {
         AcquireSRWLockExclusive(&g_keptLock);
-        g_keptPruned = now;
-        for (auto it = g_kept.begin(); it != g_kept.end();) it = now - it->second.seen > KeptFor ? g_kept.erase(it) : std::next(it);
+        for (auto it = g_kept.begin(); it != g_kept.end();) {   // one seen by a thread whose clock read is later than this one's is not old
+            const ULONGLONG seen = it->second->seen.load(std::memory_order_relaxed);
+            it = now > seen && now - seen > KeptFor ? g_kept.erase(it) : std::next(it);
+        }
         ReleaseSRWLockExclusive(&g_keptLock);
     }
-    auto& raw = t_raw;
-    bool haveRaw = false;
     // Not bent this frame: a bent pose the game has not posed over goes back to the game's.
-    auto putBack = [&] { PutBack(self, matrices, count, raw.data(), haveRaw); };
-    if (!placed && !ecs::Placement(k.entity, placement)) { putBack(); return; }
+    auto putBack = [&] { PutBack(posed, matrices, count); };
+    if (!placed && !PlacementOf(posed, k.entity, placement)) { putBack(); return; }
     const float away = Away(placement, centre);
     // Out of reach; or a druid's own form, drawn with a wolf's or bear's model where the player stands.
     if (!(away <= reach)) { ++board.outside; putBack(); return; }
     if (k.form && away < 0.3f * upm) { putBack(); return; }
-    if (!SafeCopy(raw.data(), reinterpret_cast<const void*>(matrices), size_t(count) * 64)) return;
-    haveRaw = true;
+    // The buffer as it is now - with the head turned, when look-at turned it: that is what was
+    // bent, kept as "the game's pose" and hashed when Limbs read the buffer after look-at's write,
+    // and it is the same floats. Look-at has read the buffer (posed.held) or it is read here.
+    if (!posed.held) {
+        if (!SafeCopy(t_raw.data(), reinterpret_cast<const void*>(matrices), size_t(count) * 64)) return;
+        posed.held = t_raw.data();
+    }
+    const float* const raw = posed.held;
     // The game's own pose: what the buffer holds, unless it is the pose bent here last frame.
     auto& pose = t_pose;
-    AcquireSRWLockExclusive(&g_keptLock);
-    auto& kept = g_kept[self];
-    kept.seen = now;
-    const bool posedAgain = kept.pose.Take(raw.data(), count, pose.data());
-    ReleaseSRWLockExclusive(&g_keptLock);
+    const auto kept = KeptOf(self, true);
+    AcquireSRWLockExclusive(&kept->lock);
+    kept->seen.store(now, std::memory_order_relaxed);
+    const bool posedAgain = kept->pose.Take(raw, count, pose.data());
+    ReleaseSRWLockExclusive(&kept->lock);
     if (!posedAgain) ++board.kept;
     const Model* shape = ModelOf(self, k.model, model, skeleton, count, pose.data());
     if (!shape) { putBack(); return; }
@@ -3631,12 +4514,286 @@ void Limbs(uintptr_t self) {
     if (!board.Answer(k.entity, rig.layout, now, answer)) { putBack(); return; }
     if (!limbs::Apply(shape->layout, shape->parents.data(), pose.data(), count, placement, upm, answer)) { ++board.refused; putBack(); return; }
     if (!SafeWrite(reinterpret_cast<void*>(matrices), pose.data(), size_t(count) * 64)) return;
+    posed.held = pose.data(); posed.owed = false;   // the one write: look-at's turn is in it
     ++board.bent;
-    AcquireSRWLockExclusive(&g_keptLock);
-    if (const auto it = g_kept.find(self); it != g_kept.end()) it->second.pose.Wrote(pose.data(), count);
-    ReleaseSRWLockExclusive(&g_keptLock);
+    AcquireSRWLockExclusive(&kept->lock);
+    kept->pose.Wrote(pose.data(), count);
+    ReleaseSRWLockExclusive(&kept->lock);
 }
 }  // namespace bodies
+
+// ---- Heads turn to you (steamvr/look_at.h, [gameplay] look_at_you) ----
+// Every pose of a monster, mercenary, summon or townsperson near the player has its neck and
+// head turned to the player's eyes before it is drawn (and before bodies::Limbs bends it).
+// Which skeleton is whose comes from the model's path and the renderer's registry, as for the
+// bodies above; the head from its bones' names and bind matrices (lookat::Learn). No unit of
+// the game's is read, so a dying body is told only by its pose: one fallen over is left alone.
+namespace looks {
+namespace lookat = framevr::lookat;
+namespace limbs = framevr::limbs;
+static_assert(lookat::MaxBones == limbs::MaxBones, "one pose buffer size");
+constexpr ULONGLONG Recheck = 500, KeptFor = 5000, ReportEvery = 10000;
+constexpr size_t MaxModels = 256;
+constexpr float Margin = 1.5f;   // metres past the range a body is still looked at, so its head eases back
+constexpr lookat::Limits g_limits{};
+SRWLOCK g_lock = SRWLOCK_INIT;     // the models learned (g_models, g_unusable)
+std::atomic<bool> g_live{false};   // known::g_headsOn, read without the lock: most poses stop here
+// What each skeleton met is: known::g_known, shared with the bodies (KnownBody).
+// Each model's head, learned once from its skeleton; kept by the model's path, never moved once made.
+struct Model { uint64_t key = 0; int bones = 0; std::array<int16_t, lookat::MaxBones> parents{}; lookat::Rig rig; };
+std::vector<std::unique_ptr<Model>> g_models;
+std::set<uint64_t> g_unusable;
+// Each instance's head: how far it is turned, the game's pose it was turned from, and the head's
+// matrix as the buffer was left (a pose the game has not posed over still holds it: turned again
+// from the game's own pose, never from the turned one).
+// g_headLock guards the map only. A head's own fields are under its lock: the game's pose (13 KB
+// for a large rig) was copied under the one lock for every head, which made the workers queue.
+// kind, seen and turned are read by the report and the pruning without it.
+struct Head {
+    SRWLOCK lock = SRWLOCK_INIT;
+    lookat::Eased eased;
+    std::vector<float> game;
+    float left[16] = {};
+    bool mine = false;
+    std::atomic<limbs::Kind> kind{limbs::Kind::None};
+    std::atomic<ULONGLONG> seen{0}, turned{0};
+    std::chrono::steady_clock::time_point at{};
+    bool timed = false;
+};
+SRWLOCK g_headLock = SRWLOCK_INIT;
+std::unordered_map<uintptr_t, std::shared_ptr<Head>> g_heads;
+std::atomic<ULONGLONG> g_pruned{0};
+std::shared_ptr<Head> HeadOf(uintptr_t self, bool make) {
+    std::shared_ptr<Head> head;
+    AcquireSRWLockShared(&g_headLock);
+    if (const auto it = g_heads.find(self); it != g_heads.end()) head = it->second;
+    ReleaseSRWLockShared(&g_headLock);
+    if (!head && make) {
+        AcquireSRWLockExclusive(&g_headLock);
+        auto& slot = g_heads[self];
+        if (!slot) slot = std::make_shared<Head>();
+        head = slot;
+        ReleaseSRWLockExclusive(&g_headLock);
+    }
+    return head;
+}
+std::atomic<ULONGLONG> g_reported{0};
+std::atomic<unsigned> g_turns{0}, g_learned{0}, g_headless{0}, g_refused{0};
+std::atomic<uint64_t> g_micros{0};   // this hook's own cost for bodies not known to be far, since the last report
+std::atomic<float> g_widest{0}, g_nearest{1e9f};
+thread_local std::array<float, lookat::MaxBones * 16> t_pose;
+// A head turned in t_pose and not yet written (Turn), for Finish: kept by the hook's call.
+struct Turned {
+    std::shared_ptr<Head> head;
+    lookat::Eased eased; lookat::Aim aim;
+    int bone = -1;            // the head's bone
+    bool posedAgain = true;   // the buffer held the game's own pose, not the head left here
+    ULONGLONG now = 0;
+};
+
+bool Learn(uintptr_t skeleton, int count, Model& out, std::string* told) {
+    uintptr_t bones = 0; int n = 0;
+    if (!Get(skeleton + 8, &n) || n != count || !Get(skeleton + 0xC, &bones) || !bones) { *told = "left as the game poses it (the skeleton does not read)"; return false; }
+    std::vector<unsigned char> raw(size_t(n) * 0xA4);
+    if (!SafeCopy(raw.data(), reinterpret_cast<const void*>(bones), raw.size())) { *told = "left as the game poses it (its bones do not read)"; return false; }
+    std::vector<std::string> names(static_cast<size_t>(n));
+    std::vector<std::array<float, 16>> inverse(static_cast<size_t>(n));
+    std::vector<lookat::Bone> list(static_cast<size_t>(n));
+    for (int i = 0; i < n; ++i) {
+        const unsigned char* b = raw.data() + size_t(i) * 0xA4;
+        uint64_t name = 0; int32_t parent = -1;
+        memcpy(&name, b, 8); memcpy(&parent, b + 8, 4); memcpy(inverse[size_t(i)].data(), b + 0x50, 64);   // granny_bone: Name, ParentIndex, LocalTransform, InverseWorld4x4
+        names[size_t(i)] = Str(uintptr_t(name));
+        out.parents[size_t(i)] = int16_t(parent < 0 ? -1 : std::min(parent, n));
+        list[size_t(i)] = {names[size_t(i)], parent < 0 ? -1 : parent, inverse[size_t(i)].data()};
+    }
+    const lookat::Refusal refused = lookat::Learn(list.data(), n, out.rig);
+    out.bones = n;
+    if (refused != lookat::Refusal::None) { *told = std::string("left as the game poses it (") + lookat::Name(refused) + ")"; return false; }
+    *told = "head " + names[size_t(out.rig.head)] + (out.rig.root != out.rig.head ? ", neck from " + names[size_t(out.rig.root)] : std::string(", no neck")) +
+            ", turns against " + (out.rig.body >= 0 ? names[size_t(out.rig.body)] : std::string("the model")) + " (" + std::to_string(n) + " bones)";
+    return true;
+}
+const Model* ModelOf(uintptr_t self, uint64_t key, uintptr_t skeleton, int count) {
+    const uint64_t unusableKey = key ^ (uint64_t(count) << 48);
+    AcquireSRWLockShared(&g_lock);
+    const Model* found = nullptr;
+    for (const auto& m : g_models) if (m->key == key && m->bones == count) { found = m.get(); break; }
+    const bool unusable = g_unusable.count(unusableKey) > 0;
+    ReleaseSRWLockShared(&g_lock);
+    if (found || unusable) return found;
+    auto learned = std::make_unique<Model>();
+    std::string told;
+    const bool ok = Learn(skeleton, count, *learned, &told);
+    learned->key = key;
+    uintptr_t nameObject = 0, namePointer = 0; Get(self, &nameObject); Get(nameObject + 8, &namePointer);
+    const Model* result = nullptr;
+    bool fresh = false;
+    AcquireSRWLockExclusive(&g_lock);
+    for (const auto& m : g_models) if (m->key == key && m->bones == count) result = m.get();   // another thread learned it meanwhile
+    if (!result) {
+        if (ok && g_models.size() < MaxModels) { g_models.push_back(std::move(learned)); result = g_models.back().get(); fresh = true; }
+        else if (!ok) fresh = g_unusable.insert(unusableKey).second;
+    }
+    ReleaseSRWLockExclusive(&g_lock);
+    if (fresh) {
+        if (ok) ++g_learned; else ++g_headless;
+        char line[512];
+        std::snprintf(line, sizeof line, "Frame look-at: %s - %s", Str(namePointer).c_str(), told.c_str());
+        framevr::logging::Write(line);
+    }
+    return result;
+}
+// Every ten seconds a head was turned in: the session's proof that this ran.
+void Report(ULONGLONG now) {
+    ULONGLONG last = g_reported.load(std::memory_order_relaxed);
+    if (now - last < ReportEvery || !g_reported.compare_exchange_strong(last, now)) return;
+    const unsigned turns = g_turns.exchange(0), learned = g_learned.exchange(0), headless = g_headless.exchange(0), refused = g_refused.exchange(0);
+    const float widest = g_widest.exchange(0), nearest = g_nearest.exchange(1e9f);
+    const uint64_t micros = g_micros.exchange(0);
+    if (!turns && !learned && !headless && !refused) return;
+    unsigned monsters = 0, townsfolk = 0;
+    AcquireSRWLockShared(&g_headLock);
+    for (const auto& [self, h] : g_heads)
+        if (const ULONGLONG turned = h->turned.load(std::memory_order_relaxed); turned && now - turned < 1000) ++(h->kind.load(std::memory_order_relaxed) == limbs::Kind::Townsfolk ? townsfolk : monsters);
+    ReleaseSRWLockShared(&g_headLock);
+    char line[320];
+    std::snprintf(line, sizeof line, "Frame look-at: ten seconds: head turns=%u, turned now: monsters=%u townsfolk=%u; widest %.0f deg, nearest %.1f m; "
+        "heads learned=%u, models without a head=%u, refused=%u; hook %.2f ms a second", turns, monsters, townsfolk, widest * 57.29578f,
+        nearest < 1e8f ? nearest : 0.f, learned, headless, refused, double(micros) / double(ReportEvery));
+    framevr::logging::Write(line);
+}
+
+// True when this pose's head was turned: in t_pose, which posed.held then is, the write owed
+// (posed.owed). bodies::Limbs bends from that pose, and when it bends, its write is the one
+// write of this pose; Finish makes the write otherwise, and notes the head as it was left.
+// False: nothing is owed, and posed.held is the buffer as it is when the pose was read here.
+bool Turn(Posed& posed, Turned& turned) {
+    const uintptr_t self = posed.self;
+    if (!g_live.load(std::memory_order_relaxed)) return false;
+    const ULONGLONG now = GetTickCount64();
+    // Left alone until then, by this thread's note of what the look-up below last said.
+    Noted& note = *posed.note;
+    if (now < note.headsUntil) return false;
+    known::Shared(posed, now);   // the settings and what the instance is, for the bodies too
+    const float* const eye = posed.eye; const float upm = posed.headsUpm;
+    const KnownBody& k = posed.body;
+    if (!posed.headsOn || self == g_heroSelf.load(std::memory_order_relaxed)) return false;
+    if (posed.known && k.kind == limbs::Kind::None && now - k.at < known::OtherRecheck) { note.headsUntil = k.at + known::OtherRecheck; return false; }   // an item, a prop, a player
+    if (posed.known && k.kind != limbs::Kind::None && now < k.farUntil[ForHeads]) { note.headsUntil = k.farUntil[ForHeads]; return false; }           // far a moment ago
+    Report(now);
+    struct Timed {
+        std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
+        ~Timed() { g_micros += uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - started).count()); }
+    } timed;
+    const float reachMetres = g_limits.range + Margin, reach = reachMetres * upm;
+    float placement[16];
+    bool placed = false;
+    auto leave = [&](float away) {
+        if (const ULONGLONG wait = bodies::FarFor(away / upm, reachMetres)) known::Far(posed, ForHeads, now, wait);
+    };
+    if (posed.known && k.kind != limbs::Kind::None && k.entity && PlacementOf(posed, k.entity, placement)) {
+        placed = true;
+        if (const float away = bodies::Away(placement, eye); !(away <= reach)) { leave(away); return false; }
+    }
+    // What the instance is, rechecked now and then (known::Recheck), its entity kept.
+    if (known::Recheck(posed, now, Recheck)) placed = false;
+    if (k.kind == limbs::Kind::None) return false;
+    uintptr_t model = 0, skeleton = 0, matrices = 0; int count = 0;
+    if (!bodies::Buffer(posed, model, skeleton, matrices, count)) return false;
+    if (!placed && !PlacementOf(posed, k.entity, placement)) return false;
+    const float away = bodies::Away(placement, eye);
+    if (!(away <= reach)) { leave(away); return false; }
+    if (k.form && away < 0.5f * upm) return false;   // a druid's own form, drawn where the player stands
+    const Model* shape = ModelOf(self, k.model, skeleton, count);
+    if (!shape) return false;
+    auto& pose = t_pose;
+    if (!SafeCopy(pose.data(), reinterpret_cast<const void*>(matrices), size_t(count) * 64)) return false;
+    const int head = shape->rig.head;
+    const auto clock = std::chrono::steady_clock::now();
+    // The game's own pose: what the buffer holds, unless its head is still the one left here.
+    lookat::Eased eased; float seconds = 0; bool posedAgain = true;
+    if (ULONGLONG pruned = g_pruned.load(std::memory_order_relaxed); now > pruned && now - pruned > 2000 && g_pruned.compare_exchange_strong(pruned, now)) {
+        AcquireSRWLockExclusive(&g_headLock);
+        for (auto it = g_heads.begin(); it != g_heads.end();) {   // one seen by a thread whose clock read is later than this one's is not old
+            const ULONGLONG seen = it->second->seen.load(std::memory_order_relaxed);
+            it = now > seen && now - seen > KeptFor ? g_heads.erase(it) : std::next(it);
+        }
+        ReleaseSRWLockExclusive(&g_headLock);
+    }
+    const std::shared_ptr<Head> held = HeadOf(self, true);
+    Head& h = *held;
+    AcquireSRWLockExclusive(&h.lock);
+    {
+        if (h.mine && h.game.size() == size_t(count) * 16 && !memcmp(h.left, pose.data() + size_t(head) * 16, 64)) {
+            std::copy(h.game.begin(), h.game.end(), pose.begin());
+            posedAgain = false;
+        } else { h.game.assign(pose.begin(), pose.begin() + size_t(count) * 16); h.mine = false; }
+        // A head not seen for a while starts from the animation's, not from where it was left.
+        const ULONGLONG seen = h.seen.load(std::memory_order_relaxed);
+        if (h.timed && now - seen <= 500) seconds = std::chrono::duration<float>(clock - h.at).count(); else h.eased = {};
+        h.at = clock; h.timed = true; h.seen.store(now, std::memory_order_relaxed); h.kind.store(k.kind, std::memory_order_relaxed);
+        eased = h.eased;
+    }
+    ReleaseSRWLockExclusive(&h.lock);
+    lookat::Aim aim;
+    if (!lookat::Want(shape->rig, pose.data(), count, placement, {eye[0], eye[1], eye[2]}, upm, g_limits, aim)) aim = {};
+    lookat::Step(eased, aim, seconds, g_limits);
+    const bool tried = !lookat::Still(eased);   // a refused Apply leaves a pose that is not to be used
+    const bool turn = tried &&
+        lookat::Apply(shape->rig, shape->parents.data(), pose.data(), count, placement, eased, g_limits);
+    if (!turn && tried) { ++g_refused; eased = {}; }
+    if (turn) {
+        posed.held = pose.data(); posed.owed = true;
+        turned.head = held; turned.eased = eased; turned.aim = aim; turned.bone = head; turned.posedAgain = posedAgain; turned.now = now;
+        return true;
+    }
+    const size_t floats = size_t(count) * 16;
+    AcquireSRWLockExclusive(&h.lock);
+    {
+        h.eased = eased;
+        bool holds = h.game.size() == floats;   // the buffer holds the game's pose, as h.game has it
+        if (!posedAgain && holds) {
+            // Not turned any more, and the buffer still holds the turn: back to the game's pose.
+            if (SafeWrite(reinterpret_cast<void*>(matrices), h.game.data(), floats * 4)) h.mine = false; else holds = false;
+        }
+        // For bodies::Limbs, which read the buffer again here: the pose as the buffer has it.
+        if (holds) {
+            if (tried) std::copy(h.game.begin(), h.game.end(), pose.begin());
+            posed.held = pose.data();
+        }
+    }
+    ReleaseSRWLockExclusive(&h.lock);
+    return false;
+}
+// After bodies::Limbs: the turned pose is in the buffer with what Limbs wrote, or is written now.
+// What Turn did once its own write was made, with the head as the buffer was left - the bent one
+// when Limbs wrote (read back from the buffer before; it is the pose that was written).
+void Finish(Posed& posed, Turned& turned) {
+    const auto started = std::chrono::steady_clock::now();
+    Head& h = *turned.head;
+    const size_t floats = size_t(posed.count) * 16;
+    bool wrote = true;
+    if (posed.owed) { wrote = SafeWrite(reinterpret_cast<void*>(posed.matrices), t_pose.data(), floats * 4); posed.owed = false; }
+    AcquireSRWLockExclusive(&h.lock);
+    {
+        h.eased = turned.eased;
+        if (wrote) { memcpy(h.left, posed.held + size_t(turned.bone) * 16, 64); h.mine = true; h.turned.store(turned.now, std::memory_order_relaxed); }
+        else if (!turned.posedAgain && h.game.size() == floats) {
+            // Not written, and the buffer still holds the turn left here before: back to the game's pose.
+            if (SafeWrite(reinterpret_cast<void*>(posed.matrices), h.game.data(), floats * 4)) h.mine = false;
+        }
+    }
+    ReleaseSRWLockExclusive(&h.lock);
+    if (wrote) {
+        ++g_turns;
+        const float size = std::max(std::fabs(turned.eased.yaw), std::fabs(turned.eased.tilt));
+        if (size > g_widest.load(std::memory_order_relaxed)) g_widest.store(size, std::memory_order_relaxed);
+        if (turned.aim.weight > 0 && turned.aim.metres < g_nearest.load(std::memory_order_relaxed)) g_nearest.store(turned.aim.metres, std::memory_order_relaxed);
+    }
+    g_micros += uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - started).count());
+}
+}  // namespace looks
 #endif
 
 }  // namespace
@@ -3644,14 +4801,22 @@ void Limbs(uintptr_t self) {
 #ifdef D2RVR_NATIVE_OPENXR
 void SetLimbs(bool on, const float centre[3], float unitsPerMetre, float radiusMetres) {
     on = on && centre && std::isfinite(centre[0] + centre[1] + centre[2]) && unitsPerMetre >= 1 && unitsPerMetre <= 12;
-    AcquireSRWLockExclusive(&bodies::g_lock);
-    bodies::g_on = on;
+    AcquireSRWLockExclusive(&known::g_lock);
+    known::g_bodiesOn = on;
     if (on) {
-        memcpy(bodies::g_centre, centre, sizeof bodies::g_centre); bodies::g_upm = unitsPerMetre;
-        bodies::g_radius = std::isfinite(radiusMetres) ? std::clamp(radiusMetres, bodies::MinRadius, bodies::MaxRadius) : bodies::DefaultRadius;
+        memcpy(known::g_centre, centre, sizeof known::g_centre); known::g_bodiesUpm = unitsPerMetre;
+        known::g_radius = std::isfinite(radiusMetres) ? std::clamp(radiusMetres, bodies::MinRadius, bodies::MaxRadius) : bodies::DefaultRadius;
     }
-    ReleaseSRWLockExclusive(&bodies::g_lock);
+    ReleaseSRWLockExclusive(&known::g_lock);
     bodies::g_live.store(on, std::memory_order_relaxed);
+}
+void SetLookAt(bool on, const float eye[3], float unitsPerMetre) {
+    on = on && eye && std::isfinite(eye[0] + eye[1] + eye[2]) && unitsPerMetre >= 1 && unitsPerMetre <= 12;
+    AcquireSRWLockExclusive(&known::g_lock);
+    known::g_headsOn = on;
+    if (on) { memcpy(known::g_eye, eye, sizeof known::g_eye); known::g_headsUpm = unitsPerMetre; }
+    ReleaseSRWLockExclusive(&known::g_lock);
+    looks::g_live.store(on, std::memory_order_relaxed);
 }
 void SetMotionBow(bool active,bool drawing,float draw,const float* stringHand,const float* bowHand,uint32_t stamp) {
     active=active&&std::isfinite(draw);
@@ -3664,6 +4829,7 @@ void SetMotionBow(bool active,bool drawing,float draw,const float* stringHand,co
     }
     if(!active){g_bowPosedAt.store(0);g_bowHistory={};g_bowHistoryNext=0;}
     else {g_bowHistory[g_bowHistoryNext]=g_motionBow;g_bowHistoryNext=(g_bowHistoryNext+1)%g_bowHistory.size();}
+    g_bowLive.store(active,std::memory_order_relaxed);
     ReleaseSRWLockExclusive(&g_bowInputLock);
 }
 bool MotionBowPosed() {
@@ -3739,9 +4905,9 @@ void CrossbowRendered(uint32_t entity,uintptr_t component,uintptr_t matrix) {
        source.generation!=HeroGen()||source.generation!=attach.heroGeneration||source.equipment!=attach.equipment||
        !Get(component+0xC0,&parent)||parent!=source.parent)return;
     {
-        AcquireSRWLockExclusive(&ecs::g_lock);uintptr_t existing=0;
+        AcquireSRWLockShared(&ecs::g_lock);uintptr_t existing=0;   // read only
         const bool owned=ecs::SkeletonOf(entity,&existing)&&existing==source.self;
-        ReleaseSRWLockExclusive(&ecs::g_lock);if(!owned)return;
+        ReleaseSRWLockShared(&ecs::g_lock);if(!owned)return;
     }
     uintptr_t world=0,matrices=0;int count=0;Mat cog,itemWorld;
     if(!Get(source.self+0x20,&world)||!Get(world,&count)||count!=source.count||source.cog<0||source.cog>=count||
@@ -3791,9 +4957,9 @@ void ShieldRendered(uint32_t entity,uintptr_t component,uintptr_t matrix) {
        source.generation!=context.generation||source.generation!=HeroGen()||source.equipment!=context.equipment||source.session!=context.session||
        !Get(component+0xC0,&parent)||parent!=source.parent)return;
     {
-        AcquireSRWLockExclusive(&ecs::g_lock);uintptr_t existing=0;
+        AcquireSRWLockShared(&ecs::g_lock);uintptr_t existing=0;   // read only
         const bool owned=ecs::SkeletonOf(entity,&existing)&&existing==source.self;
-        ReleaseSRWLockExclusive(&ecs::g_lock);if(!owned)return;
+        ReleaseSRWLockShared(&ecs::g_lock);if(!owned)return;
     }
     uintptr_t model=0,world=0,matrices=0;int count=0;Mat itemWorld;
     if(!Get(source.self+8,&model)||model!=source.model||!Get(source.self+0x20,&world)||
@@ -3844,6 +5010,12 @@ bool ShieldWeapon(MeleeWeaponPose& out) {
     AcquireSRWLockShared(&g_gunBoneLock);const auto pose=g_shieldPose;const auto at=g_shieldAt;ReleaseSRWLockShared(&g_gunBoneLock);
     if(!at||GetTickCount64()-at>100||pose.heroGeneration!=HeroGen())return false;
     out=pose;return true;
+}
+bool ClawGuardPose(framevr::guard::Pose& out,bool& crossed,float& apart) {
+    AcquireSRWLockShared(&g_gunBoneLock);const auto claw=g_clawGuard;ReleaseSRWLockShared(&g_gunBoneLock);
+    const auto now=GetTickCount64();
+    if(!claw.pose.at||now<claw.pose.at||now-claw.pose.at>100||claw.generation!=HeroGen())return false;
+    out=claw.pose;crossed=claw.crossed;apart=claw.apart;return true;
 }
 bool ShieldGuardPose(framevr::guard::Pose& out) {
     AcquireSRWLockShared(&g_gunBoneLock);auto pose=g_shieldGuardPose;const auto generation=g_shieldPose.heroGeneration;
@@ -3952,6 +5124,7 @@ void SetRemoteUpperBodies(const RemoteUpperBody* snapshots, size_t count) {
 void Set(const Input& in) {
     AcquireSRWLockExclusive(&g_inLock);
     g_in = in;
+    g_inActive.store(InputActive(in), std::memory_order_relaxed);
     ReleaseSRWLockExclusive(&g_inLock);
 }
 
@@ -3961,7 +5134,11 @@ ComputeFn g_orig = nullptr;
 void __cdecl Hook(uintptr_t self, float a, float b, bool c) {
     { FRAME_PROFILE(SkeletonGame); g_orig(self, a, b, c); }
     FRAME_PROFILE(SkeletonMod);
+#ifdef D2RVR_NATIVE_OPENXR
+    hookstats::Call counted;   // adds to g_calls too, per thread and in batches: one counter shared by every worker was a contended line
+#else
     g_calls++;
+#endif
 #if D2RVR_FIRST_PERSON
     // Off: holding the weapon's own skeleton changed nothing (09:50 log: held every frame, the axe still
     // turned) - the turn came from the body's two_hand_weapon_attach. Kept for the next weapon that needs it.
@@ -3971,13 +5148,24 @@ void __cdecl Hook(uintptr_t self, float a, float b, bool c) {
     constexpr bool kHoldWeaponSkeleton = false;
     if (kHoldWeaponSkeleton) HoldWeaponItem(self);
 #endif
-    Arms(self);
+    Posed posed(self);
+    Arms(posed);
 #ifdef D2RVR_NATIVE_OPENXR
-    if (const ULONGLONG held = g_crossbowHeldAt.load(std::memory_order_relaxed); held && GetTickCount64() - held <= 100) CaptureCrossbow(self);
+    if (const ULONGLONG held = g_crossbowHeldAt.load(std::memory_order_relaxed); held && GetTickCount64() - held <= 100) CaptureCrossbow(posed);
     RefreshCrossbow(self);
-    RefreshShield(self);
-    PoseMotionBow(self);
-    bodies::Limbs(self);
+    RefreshShield(posed);
+    PoseMotionBow(posed);
+    // Heads turn to you first: a body pushed aside is bent from the pose with its head already turned.
+    // The two share the instance's identity, pose buffer header, placement and what it is known as
+    // (Posed), and the pose too: Turn leaves the turned pose in posed.held and owes its write
+    // (posed.owed); Limbs takes that pose where it read the buffer after Turn's write before - the
+    // same floats - so what it bends, keeps as "the game's pose" and hashes is the turned pose,
+    // and a bend's write (or the game's pose put back) is the pose's one write. Finish writes the
+    // turned pose when Limbs wrote nothing, and notes the head as the buffer was left either way.
+    looks::Turned turned;
+    const bool looked = looks::Turn(posed, turned);
+    bodies::Limbs(posed);
+    if (looked) looks::Finish(posed, turned);
 #endif
     if (GetTickCount64() < g_dumpUntil.load()) {
         AcquireSRWLockExclusive(&g_lock);
@@ -4017,8 +5205,7 @@ std::string WeaponEntityDiag() {
         for (const auto& [s, t] : g_itemSelves) if (now - t < 1000) selves.push_back(s);
         ReleaseSRWLockShared(&g_itemSelfLock);
     }
-    AcquireSRWLockExclusive(&ecs::g_lock);
-    struct Unlock { ~Unlock() { ReleaseSRWLockExclusive(&ecs::g_lock); } } unlock;
+    ecs::Locked locked(false);   // read only
     std::string out;
     int children = 0;
     for (const uintptr_t s : selves) {
@@ -4112,8 +5299,23 @@ bool HeroTransform(HeroXform* out, const char** why) {
     static const char* const kNoHero = "the hero has not been posed in the last 2 s";
     const uintptr_t self = g_heroSelf.load();
     if (!g_gameBase.load() || !self || GetTickCount64() - g_heroSeen.load() > 2000) { if (why) *why = kNoHero; return false; }
-    AcquireSRWLockExclusive(&ecs::g_lock);
-    struct Unlock { ~Unlock() { ReleaseSRWLockExclusive(&ecs::g_lock); } } unlock;
+    {   // Nothing to find: the storages are the ones known and his entity the one kept. Read under
+        // the shared lock - the same checks as below, on each storage's header (ten guarded reads
+        // for thirteen) - so the pose workers reading placements do not wait on this.
+        ecs::Locked locked(false);
+        ecs::Header x, s; uintptr_t held = 0; uint32_t i = 0;
+        if (ecs::g_cachedSelf == self && ecs::HeaderOf(ecs::g_xs, ecs::g_vtX, &x) && ecs::HeaderOf(ecs::g_ss, ecs::g_vtS, &s) &&
+            ecs::SkeletonOf(s, ecs::g_cachedEntity, &held) && held == self && ecs::Dense(x, ecs::g_cachedEntity, &i) && x.components) {
+            out->self = self;
+            out->entity = ecs::g_cachedEntity;
+            out->comp = uintptr_t(x.components) + (uintptr_t)i * kTransformSize;
+            out->parent = 0xFFFFFFFFu;
+            Get(out->comp + 0xC0, &out->parent);
+            return true;
+        }
+    }
+    // The storages or his entity are to be found again (or do not read): exclusively, as it replaces them.
+    ecs::Locked locked(true);
     if (!ecs::IsStorage(ecs::g_xs, ecs::g_vtX) || !ecs::IsStorage(ecs::g_ss, ecs::g_vtS)) {
         // looked for at most twice a second (a failed look reads ~200 pool entries)
         const ULONGLONG now = GetTickCount64();
@@ -4159,8 +5361,17 @@ uintptr_t g_ms = 0, g_vtM = 0;              // the model storage and its vtable 
 ULONGLONG g_modelLook = 0;
 
 bool EntityTransform(uint32_t entity, uintptr_t* comp) {
-    AcquireSRWLockExclusive(&ecs::g_lock);
-    struct Unlock { ~Unlock() { ReleaseSRWLockExclusive(&ecs::g_lock); } } unlock;
+    {   // the storages known: read under the shared lock, whatever the answer
+        ecs::Locked locked(false);
+        ecs::Header x;
+        if (ecs::HeaderOf(ecs::g_xs, ecs::g_vtX, &x) && ecs::IsStorage(ecs::g_ss, ecs::g_vtS)) {
+            uint32_t i = 0;
+            if (!ecs::Dense(x, entity, &i) || !x.components) return false;
+            *comp = uintptr_t(x.components) + (uintptr_t)i * kTransformSize;
+            return true;
+        }
+    }
+    ecs::Locked locked(true);   // to be found again
     if (!ecs::IsStorage(ecs::g_xs, ecs::g_vtX) || !ecs::IsStorage(ecs::g_ss, ecs::g_vtS)) {
         const ULONGLONG now = GetTickCount64();
         if (now - ecs::g_lastStorageLook < 500) return false;
@@ -4175,8 +5386,15 @@ bool EntityTransform(uint32_t entity, uintptr_t* comp) {
 }
 
 uintptr_t EntityModelInstance(uint32_t entity) {
-    AcquireSRWLockExclusive(&ecs::g_lock);
-    struct Unlock { ~Unlock() { ReleaseSRWLockExclusive(&ecs::g_lock); } } unlock;
+    {   // the model storage known: read under the shared lock, whatever the answer
+        ecs::Locked locked(false);
+        ecs::Header m;
+        if (ecs::HeaderOf(g_ms, g_vtM, &m)) {
+            uint32_t i = 0; uintptr_t inst = 0;
+            return ecs::Dense(m, entity, &i) && m.components && Get(uintptr_t(m.components) + (uintptr_t)i * kModelCompSize, &inst) ? inst : 0;
+        }
+    }
+    ecs::Locked locked(true);   // g_ms and g_vtM are found, and replaced, below
     if (!ecs::IsStorage(g_ms, g_vtM)) {
         const ULONGLONG now = GetTickCount64();
         if (now - g_modelLook < 500) return 0;
@@ -4196,6 +5414,9 @@ uintptr_t EntityModelInstance(uint32_t entity) {
 void SetFresh(FreshFn fn) { g_fresh.store(fn); }
 void SetFreshHands(FreshHandsFn fn) { g_freshHands.store(fn); }
 
+void SetEyeGround(float x, float z, bool valid) {
+    AcquireSRWLockExclusive(&g_inLock);g_eyeGround[0]=x;g_eyeGround[1]=z;g_eyeGroundOk=valid;ReleaseSRWLockExclusive(&g_inLock);
+}
 void SetHeroPos(float x, float y, float z) {
     AcquireSRWLockExclusive(&g_inLock);g_heroPos[0]=x;g_heroPos[1]=y;g_heroPos[2]=z;ReleaseSRWLockExclusive(&g_inLock);
 }

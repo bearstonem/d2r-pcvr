@@ -4,7 +4,7 @@ D2R PCVR is an independently developed mod that adds VR support and motion
 interactions on top of the original Diablo II: Resurrected. It is not a
 standalone game. You must purchase and install your own legitimate copy of
 the game; this Windows preview supports the Steam edition and experimental
-Battle.net installations on the documented game builds.
+Battle.net installations.
 
 No Blizzard game executables, models, textures, audio or other game assets
 are distributed in this repository, graphical installer or release ZIP. Required native artwork
@@ -20,7 +20,8 @@ native OpenXR preview does not distribute them or use them as runtime dependenci
 The original user reference, `emmericp/D2R-3D`, is a separate checkout.
 
 The private scene-depth channel and D3D12 event filter in
-`steamvr/scene_depth.*`, `vr/game_device_only.h` and `reshade/D2R_DepthFog.fx`
+`steamvr/scene_depth.*`, `vr/game_device_only.h`, `reshade/D2R_DepthFog.fx`
+and the feature headers `reshade/D2R_*.fxh` (the code of that effect, split one file per feature)
 adapt further work from `natpoh/diablo2-vr-port` at
 `4b6284c0766c089139693a504333b9a19201cdd2` (MIT, copyright 2026 BodyWalkVR).
 The native OpenXR adaptation uses current-eye color/depth bindings, tracked
@@ -92,7 +93,7 @@ licensed under LGPL-3.0-or-later; it statically links AMD FidelityFX Optical Flo
 layer DLL with its `LICENSE`, `THIRD_PARTY.md` and `licenses/` in
 `mods/D2R-PCVR/d2rloader/plugins/ofxr`, plus a layer manifest and settings file
 that Setup writes; its tray program is not installed. The mod loads the layer
-only while VR Settings > Performance > Frame generation is on. It is not bundled in the
+only while VR Settings > Graphics > Frames > Frame generation is on. It is not bundled in the
 release ZIP, and its archive checksum is pinned in `steamvr/install.py`. If the
 download fails, frame generation is unavailable and the rest of the mod installs.
 

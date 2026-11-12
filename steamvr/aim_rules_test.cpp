@@ -20,6 +20,8 @@ int main() {
           "Meteor's and Blizzard's motions go to the highlighted monster; Teleport, Fire Wall, Hydra and the golems where the motion put them");
     Check(WantsUnit(22)&&WantsUnit(93)&&WantsUnit(107)&&!WantsUnit(36)&&!WantsUnit(54)&&!WantsUnit(66),"seekers and Charge get the monster; bolts, Teleport and curses do not");
     Check(!WantsUnit(121)&&!WantsUnit(106),"Fist of the Heavens and Zeal stay with the game's own pick");
+    Check(AlwaysHomes(107)&&WantsUnit(107)&&!AlwaysHomes(143)&&!AlwaysHomes(275),"Charge goes to the aimed monster whatever the Aim options (owner, 2026-11-09); Leap Attack and Dragon Flight follow them");
+    Check(AlwaysHomes(22)&&WantsUnit(22)&&!AlwaysHomes(93)&&!AlwaysHomes(12)&&!AlwaysHomes(-1),"Guided Arrow homes on the aimed monster whatever the Aim options (owner, 2026-11-08); Bone Spirit and Multiple Shot follow them");
     Check(HandOffLive(22,1000,1500)&&!HandOffLive(22,1000,1501)&&!HandOffLive(-1,1000,1000),"a hand-off answers for 500 ms, and none is never live");
     Check(DropOnRelease(0,0)&&DropOnRelease(1,1)&&!DropOnRelease(0,1)&&!DropOnRelease(-1,0)&&!DropOnRelease(-1,1),
           "letting go drops only that button's own hand-off; one cast with the button up waits out its 500 ms");

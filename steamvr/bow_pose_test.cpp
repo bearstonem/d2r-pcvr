@@ -1,5 +1,7 @@
 #include "../vr/bow_pose.h"
+#include "../vr/hand_swap_pose.h"
 #include "gameplay.h"
+#include "hand_role.h"
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
@@ -86,5 +88,56 @@ int main() {
     Check(Near(Position(posed[8]),Position(bind[8])),"release resets live pose on same sample");
     for(int i=0;i<8;++i) {in.aim.q=framevr::math::Yaw(float(i));auto o=step();Check(Near(o.rayDirection,released.rayDirection),"release aim stays frozen after hands turn");}
     in.cancel=true;Check(!step().bowRelease,"cancel never emits another release");
-    std::puts("Bow pose: geometry, draw/release timeline, placement, visibility and invalid-input tests passed");
+    {   // Left-handed play (hand_role.h, phase 3): the bow in the RIGHT hand, the string drawn by the LEFT.
+        // The bow's attach bone is the right-handed one's mirror image with the axis across the bow's
+        // plane turned over (hand_swap_pose.h), which for a bow is the bow itself: the string still
+        // behind the grip, toward the player. The same solver then follows the left hand exactly.
+        using namespace skel;
+        Mat attach=Rotation({0,0,1},{.3f,.2f,1});   // the bow as a right-handed player holds it (on the left hand)
+        for(int i=0;i<3;++i)attach.m[i]*=1.3f;for(int i=4;i<7;++i)attach.m[i]*=1.3f;for(int i=8;i<11;++i)attach.m[i]*=1.3f;
+        Position(attach,{-.25f,1.35f,-.55f});
+        const Vec localNock={.05f,.1f,-1.6f};   // where the string hand is, in the bow's own frame: a little off its plane
+        const Vec stringHand=Vector(attach,localNock)+Position(attach),bowHand=Position(attach);
+        const auto mirror=[](Vec v){return Vec{-v.x,v.y,v.z};};
+        // SyntheticBow: limbs along y, the string behind at -z, so its plane's normal is the bone's x
+        Mat palm=Identity();Check(handswap::SymmetryAxis(palm,{1,.1f,.1f})==0,"a bow's fist: the palm's normal is across the bow's plane");
+        {   // better, the bow's own rig says which of its attach bone's axes that is, however the item hangs on the bone
+            Check(Near(rig.AcrossPlane(),{1,0,0})||Near(rig.AcrossPlane(),{-1,0,0}),"the synthetic bow's plane is its y z: limbs and string");
+            float alignment=0;
+            Check(handswap::NearestAxis(Identity(),rig.AcrossPlane(),&alignment)==0&&alignment>.999f,"hung straight on the bone: the bone's x");
+            Mat hung=Rotation({1,0,0},{0,0,1});for(int i=0;i<12;++i)hung.m[i]*=.8f;Position(hung,{.1f,.2f,.3f});   // the item turned and scaled on its bone
+            Check(handswap::NearestAxis(hung,rig.AcrossPlane(),&alignment)==2&&alignment>.999f,"turned on the bone: the bone's z, whatever the item's scale and place");
+            Mat turned=hung;handswap::TurnOver(turned,2);Check(handswap::NearestAxis(turned,rig.AcrossPlane())==2,"the same axis once the bone is turned over it");
+            Check(handswap::NearestAxis(Rotation({1,0,0},{1,1,1}),rig.AcrossPlane(),&alignment)>=0&&alignment<.9f,"askew: an answer too poor to use");
+            Check(handswap::NearestAxis(Identity(),Rig{}.AcrossPlane(),&alignment)==-1&&alignment==0,"no rig: no answer, the palm decides");
+        }
+        Mat left=handswap::MirrorX(attach);
+        Check(handswap::MatchHandedness(left,attach,0)&&handswap::Det(left)*handswap::Det(attach)>0,"the mirrored bow is turned over its plane, never drawn mirrored");
+        Check(Near(Position(left),mirror(Position(attach)))&&Near(Vector(left,{0,0,-1}),mirror(Vector(attach,{0,0,-1})))&&Near(Vector(left,{0,1,0}),mirror(Vector(attach,{0,1,0}))),
+            "it is where the mirror has it: in the right hand's place, string toward the player, upper limb up");
+        Mat undo,undoLeft;Check(Inverse(attach,undo)&&Inverse(left,undoLeft),"both placements invert");
+        const Vec leftString=mirror(stringHand),rightBow=mirror(bowHand);   // the LEFT hand at the string, the RIGHT hand on the bow
+        Pose a,b;
+        Check(rig.DrawAt(Identity(),Vector(undo,stringHand)+Position(undo),Vector(undo,bowHand-stringHand),true,a),"right-handed draw solves");
+        Check(rig.DrawAt(Identity(),Vector(undoLeft,leftString)+Position(undoLeft),Vector(undoLeft,rightBow-leftString),true,b),"left-handed draw solves");
+        Check(Near(Vector(left,Position(b[String]))+Position(left),leftString),"the string follows the LEFT hand exactly");
+        const Vec arrowRight=Normalized(Vector(attach,Vector(a[Arrow],{0,0,1}))),arrowLeft=Normalized(Vector(left,Vector(b[Arrow],{0,0,1})));
+        Check(Dot(arrowLeft,Normalized(rightBow-leftString))>.9999f&&Near(arrowLeft,mirror(arrowRight)),"the nocked arrow lies from the left hand to the bow in the right: the right-handed arrow's mirror image");
+        // limb for limb the mirror image: the bow bends the same, its off-plane lean the other way
+        for(int i=Cog+1;i<Count;++i) {
+            const Vec was=Position(a[i]),is=Position(b[i]);
+            Check(Near(is,{-was.x,was.y,was.z}),"every bone of the drawn bow is the right-handed one's, mirrored across the bow's plane");
+        }
+        // and the recognizer by role: the left controller's trigger draws, the right controller holds the bow
+        framevr::gameplay::Pose controller[2];controller[0].p={.05f,1.3f,-.5f};controller[1].p={.05f,1.3f,-.4f};   // physical: right, left
+        const framevr::handrole::Map roles=framevr::handrole::Resolve(true,D2RVR_TYPE_BOW,0).map;
+        Check(roles.left&&roles.Physical(1)==0&&roles.Physical(0)==1,"with a bow the off hand (the bow's) is the right controller, the main hand (the string's) the left");
+        Engine lefty;Input li;li.active=li.tracked[0]=li.tracked[1]=li.aimTracked=true;li.weapon=Weapon::Bow;li.head.p={0,1.7f,0};
+        float trigger[2]{};
+        const auto pull=[&](){li.time+=.02;for(int role=0;role<2;++role)li.hand[role]=controller[roles.Physical(role)];li.trigger=trigger[roles.Physical(0)];li.aim=li.hand[0];return lefty.Step(li);};
+        pull();pull();trigger[1]=1;Check(pull().bowDrawing,"the left trigger nocks");
+        framevr::gameplay::Output o;for(int i=0;i<20;++i){controller[1].p.z+=.02f;o=pull();Check(o.bowDrawing&&rig.Draw(Identity(),o.draw,o.bowDrawing,b),"the left hand's pull bends the bow");}
+        trigger[1]=0;o=pull();Check(o.bowRelease&&!o.bowDrawing&&o.releaseDirection.z<-.99f,"and its release looses the arrow from the right hand's bow");
+    }
+    std::puts("Bow pose: geometry, draw/release timeline, placement, visibility, invalid-input and left-handed (bow right, string left) tests passed");
 }

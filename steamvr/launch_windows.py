@@ -140,12 +140,35 @@ def launch_environment(arguments):
     return environment
 
 
+# pcvr-launch.log holds a few lines a launch and is useful across many launches,
+# so it is kept by size, not by session: once it passes this, it is renamed to
+# pcvr-launch.previous.log (replacing the one kept there) and a new one starts.
+LAUNCH_LOG_LIMIT = 1024 * 1024
+
+
+def previous_log(path):
+    """Where a full log is kept: pcvr-launch.log -> pcvr-launch.previous.log."""
+    return path.with_name(path.stem + '.previous' + path.suffix)
+
+
+def rotate_launch_log(path, limit=LAUNCH_LOG_LIMIT):
+    """Put a full log aside. Any failure leaves it in place to be appended to."""
+    try:
+        if path.is_file() and path.stat().st_size >= limit:
+            os.replace(path, previous_log(path))
+            return True
+    except OSError:
+        pass  # Open in an editor, or a read-only folder: keep appending.
+    return False
+
+
 def launch_log(cwd, message):
     if cwd is None:
         return
     try:
         path = Path(cwd) / 'd2rloader/logs/pcvr-launch.log'
         path.parent.mkdir(parents=True, exist_ok=True)
+        rotate_launch_log(path)
         with path.open('a', encoding='utf-8') as output:
             output.write(time.strftime('%Y-%m-%d %H:%M:%S ') + message + '\n')
     except OSError:
