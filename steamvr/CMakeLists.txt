@@ -591,3 +591,8 @@ foreach(TARGET_TEST server-target-scan-test target-reports-test)
   add_test(NAME ${TARGET_TEST} COMMAND ${TARGET_TEST})
 endforeach()
 add_test(NAME client-target-wiring-test COMMAND "${PCVR_PYTHON}" "${CMAKE_CURRENT_SOURCE_DIR}/client_target_wiring_test.py")
+
+add_executable(client-hit-feedback-test client_hit_feedback_test.cpp)
+target_link_libraries(client-hit-feedback-test PRIVATE framevr-runtime)
+target_compile_options(client-hit-feedback-test PRIVATE -UNDEBUG)
+add_test(NAME client-hit-feedback-test COMMAND client-hit-feedback-test)

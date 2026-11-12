@@ -50,6 +50,20 @@ int main(){
  targetreports::Tick(7,100,false);assert(!targetreports::Get(7,100,GetTickCount64()).at);
  Sleep(120);request();auto r=host.back();reg.hostMessage(&ctx,55,9,r.id,r.b.data(),uint32_t(r.b.size()),nullptr);
  targetreports::Tick(8,100,false);before=samples;run();assert(samples==before);
+ // Only a host-observed hit is relayed, and each event is consumed once.
+ targetreports::Tick(7,100,false);Sleep(120);request();serve();clients.clear();
+ targetreports::NoteMeleeHit(999,42); // wrong attacker does not create our feedback
+ targetreports::NoteMeleeHit(100,42);
+ // Complete current response before the next request.
+ targetreports::Tick(7,100,false);Sleep(120);request();serve();
+ assert(clients.front().id==3);auto hitPacket=clients.front();receive(hitPacket);
+ assert(targetreports::TakeMeleeHit(7,100,GetTickCount64()));
+ receive(hitPacket);assert(!targetreports::TakeMeleeHit(7,100,GetTickCount64()));
+ for(auto&packet:clients)receive(packet);
+ clients.clear();Sleep(120);request();serve();for(auto&packet:clients)receive(packet);
+ assert(!targetreports::TakeMeleeHit(7,100,GetTickCount64()));
+ targetreports::Tick(8,100,false);assert(!targetreports::TakeMeleeHit(8,100,GetTickCount64()));
+ before=samples;
  // A desktop host with local targeting off must still serve its peer.
  targetreports::Tick(7,100,false);Sleep(120);
  reg.hostMessage(&ctx,55,9,r.id,r.b.data(),uint32_t(r.b.size()),nullptr);assert(jobs.size()==1);

@@ -12790,7 +12790,7 @@ void DesktopTick(){
     if(now>=nextRead){nextRead=now+200;gamestate::Tick();}
     if(now>=nextHooks){
         nextHooks=now+500;d2rsig::Resolve(g_ctx);
-        melee::InstallTargetReader();
+        melee::InstallTargetReader();combat::InstallFeedbackObserver();
         // Camera observer stays disabled: it supplies native player position only.
         if(!g_h.camera)g_h.camera=d2rcam::Install(g_ctx);
         if(!g_h.skeleton)g_h.skeleton=d2rsig::Hook(RVA_COMPUTE_SELF_WORLD_POSE,kSigComputeSelfWorldPose,sizeof kSigComputeSelfWorldPose,skel::Detour(),skel::OrigSlot());
@@ -12813,7 +12813,7 @@ bool StartDesktop(const PluginContext*ctx){
     d2rsig::Resolve(ctx);
     skel::SetGameBase(g_base);skel::TrackHero(true);skel::Set(skel::Input{});
     gamestate::Init(ctx);
-    melee::InstallTargetReader();
+    melee::InstallTargetReader();combat::InstallFeedbackObserver();
     upperbody::Init(ctx,&Log);upperbodyskin::Init(ctx);
     HANDLE h=CreateThread(nullptr,0,UpdateThread,nullptr,0,&g_updateThreadId);
     if(!h){Log("PCVR desktop: update thread failed");return false;}
@@ -12899,7 +12899,7 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
     companionai::Init(ctx);
     if(!summonrange::Init(ctx)){D2RLoaderUnloadPlugin();g_standDown=true;return false;}
     melee::Init(ctx);
-    melee::InstallTargetReader();
+    melee::InstallTargetReader();combat::InstallFeedbackObserver();
     bowvr::Init(ctx);
     clientcombat::Init(ctx);
     upperbody::Init(ctx,&Log);

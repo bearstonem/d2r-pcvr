@@ -47,6 +47,9 @@
 #include "walk_direction.h"
 #include "room_scale.h"
 #include "room_steps.h"
+#include "client_hit_feedback.h"
+#include "../vr/target_reports.h"
+#include "../vr/combat.h"
 #include "strike_skills.h"
 #include "bow_laser.h"
 #include "hand_controls.h"
@@ -5472,7 +5475,8 @@ void Input() {
     // No new packets, local damage or server pointers cross this boundary.
     {
         static nativeclient::Router router;
-        if(!nativeClient)router.Reset();
+        static clienthit::Gate clientHit;
+        if(!nativeClient){router.Reset();clientHit.Clear();}
         else {
         nativeclient::Context c;c.native=nativeClient;c.session=quickFresh?gamestate::LocalPlayer():0;
         // Motions own both hands before a cast starts, including the release
@@ -5510,6 +5514,15 @@ void Input() {
             if(shieldSkill.id==weaponskills::Smite)c.shield=binding(shieldSlot);
         }
         const int hand=router.Step(motionInput,motionOutput,c);
+        const auto hitNow=GetTickCount64();
+        if(!c.session||!motionInput.active||!motionInput.tracked[0]||!motionInput.tracked[1]||c.actionOwned||motionInput.palette||motionInput.cancel||motionInput.quickCast||(hand<0&&(motionOutput.skill>=0||motionOutput.attack)))
+            clientHit.Clear();
+        else if(hand>=0&&router.MeleePulse())clientHit.Arm(c.session,hand,hitNow);
+        uint32_t hitUnit=0;::combat::LocalPlayerId(hitUnit);
+        if(targetreports::TakeMeleeHit(c.session,hitUnit,hitNow)){
+            const int hitHand=clientHit.Confirm(c.session,hitNow);
+            if(hitHand>=0){ImpactSurface(hitHand,0,0);MeleeImpact(hitHand);}
+        }
         if(hand>=0)castHand=hand;
         }
     }

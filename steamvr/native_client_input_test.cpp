@@ -22,10 +22,10 @@ struct Sim {
 int main(){
     {Sim s;s.c.basic={};s.Nock();s.in.trigger=0;s.Step();Check(!s.out.attack&&s.out.skill<0,"gesture must not synthesize raw A: A may be Interact or another spell");}
     {Sim s;s.Nock();s.in.trigger=0;s.Step();Check(s.out.skill==1&&!s.out.attack&&!s.out.bowRelease,"client bow uses bound native Attack");
-     Check(s.hand==1&&s.out.rayDirection.z<-.99f,"bow release aim retained");s.Step(12);Check(!s.out.attack&&s.out.skill<0,"bow pulse expires");}
+     Check(s.hand==1&&s.out.rayDirection.z<-.99f,"bow release aim retained");Check(!s.router.MeleePulse(),"bow cannot arm melee feedback");s.Step(12);Check(!s.out.attack&&s.out.skill<0,"bow pulse expires");}
     {Sim s;s.c.native=false;s.Nock();s.in.trigger=0;s.Step();Check(!s.out.attack&&s.out.bowRelease,"host bow remains direct");}
     {Sim s;s.c.bow={2,7,-1};s.Nock();s.in.trigger=0;s.Step();Check(s.out.skill==2&&!s.out.attack&&!s.out.bowRelease,"loaded arrow uses native skill");}
-    {Sim s;s.Swing();Check(s.out.skill==1&&!s.out.attack&&!s.out.meleeContact,"client swing uses bound native Attack");
+    {Sim s;s.Swing();Check(s.out.skill==1&&!s.out.attack&&!s.out.meleeContact,"client swing uses bound native Attack");Check(s.router.MeleePulse(),"physical swing arms feedback");
      for(int i=0;i<18;++i){s.Swing();if(i>9)Check(!s.out.attack&&s.out.skill<0,"continuous swing cannot repeat");}
      s.Step(15);s.Swing();Check(s.out.skill==1,"slow rearm permits next swing");}
     {Sim s;s.c.melee[0]={2,144,-1};s.Swing();Check(s.out.skill==2&&!s.out.attack,"strike skill retained");}

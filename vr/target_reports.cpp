@@ -9,18 +9,19 @@
 #include <mutex>
 namespace targetreports { namespace {
 namespace nw=D2RL::Network;
-constexpr uint32_t Version=1,PerChunk=14,MaxTargets=framevr::targetcone::MaxTargets;
+constexpr uint32_t Version=2,PerChunk=14,MaxTargets=framevr::targetcone::MaxTargets;
 constexpr uint64_t Fresh=500;
 static_assert(32+PerChunk*13<=nw::MaxPayloadSize);
 struct Request{uint32_t version=Version,unit=0;uint64_t token=0;};
 static_assert(sizeof(Request)==16);
-struct Peer{nw::PeerHandle id=0;uint64_t ticket=0,at=0;Request request{};targetlock::Snapshot result{};};
+struct Peer{nw::PeerHandle id=0;uint64_t ticket=0,at=0;Request request{};targetlock::Snapshot result{};uint64_t hit=0,hitAt=0;uint32_t target=0;};
 std::mutex mutex;
 const D2RL::PluginContext*ctx=nullptr;
 const D2RL::NetworkService*net=nullptr;
 const D2RL::ThreadService*threads=nullptr;
 SampleFn sample=nullptr;nw::ChannelHandle channel=0;
 bool dead=true;uint64_t session=0,serial=0,pending=0,pendingAt=0,uiTicket=0,nextSend=0,nextConnect=0;
+uint64_t lastHit=0,impactAt=0;
 uint32_t unit=0,received=0;targetlock::Snapshot published{},assembling{};
 std::array<Peer,8>peers{};
 uint64_t Ticket(){if(!++serial)++serial;return serial;}
@@ -30,13 +31,18 @@ bool Valid(const targetlock::Snapshot&s){
   for(int j=0;j<i;++j)if(s.targets[j].id==t.id)return false;}
  return true;
 }
-void ClearClient(){pending=uiTicket=0;published={};assembling={};received=0;nextSend=nextConnect=0;}
+void ClearClient(){impactAt=0;pending=uiTicket=0;published={};assembling={};received=0;nextSend=nextConnect=0;}
 Peer* Find(uint64_t ticket){for(auto&p:peers)if(p.ticket==ticket&&ticket)return &p;return nullptr;}
 template<class T>void Put(uint8_t*b,size_t off,const T&v){std::memcpy(b+off,&v,sizeof v);}
 template<class T>T Read(const uint8_t*b,size_t off){T v;std::memcpy(&v,b+off,sizeof v);return v;}
 void __cdecl SendResult(const D2RL::PluginContext*,void*data)noexcept{
  const auto ticket=uint64_t(uintptr_t(data));Peer copy;
  {std::lock_guard lock(mutex);auto*p=Find(ticket);if(dead||!p||GetTickCount64()-p->at>Fresh)return;copy=*p;p->ticket=0;}
+ if(copy.hit&&GetTickCount64()-copy.hitAt<=Fresh){
+  uint8_t event[32]{};Put(event,0,Version);Put(event,4,copy.request.unit);Put(event,8,copy.request.token);
+  Put(event,16,copy.hit);Put(event,24,copy.target);
+  net->sendToClient(ctx,channel,copy.id,3,event,sizeof event);
+ }
  const uint32_t count=uint32_t(copy.result.count),chunks=std::max(1u,(count+PerChunk-1)/PerChunk);
  for(uint32_t c=0;c<chunks;++c){
   uint8_t bytes[nw::MaxPayloadSize]{};const uint32_t offset=c*PerChunk,n=std::min(PerChunk,count-offset);
@@ -68,11 +74,19 @@ void __cdecl Host(const D2RL::PluginContext*,nw::ChannelHandle ch,nw::PeerHandle
   if(slot&&now-slot->at<100)return;
   if(slot&&slot->ticket&&now-slot->at<=Fresh)return;
   if(!slot)for(auto&p:peers)if(!p.id||now-p.at>2000){slot=&p;break;}
-  if(!slot)return;ticket=Ticket();*slot={};slot->id=peer;slot->ticket=ticket;slot->at=now;slot->request=request;
+  if(!slot)return;ticket=Ticket();if(slot->id!=peer||slot->request.unit!=request.unit)*slot={};slot->id=peer;slot->ticket=ticket;slot->at=now;slot->request=request;
  }
  if(threads->runOnGameThread(ctx,SamplePeer,reinterpret_cast<void*>(uintptr_t(ticket)))!=D2RL::Threads::Result::Success){std::lock_guard lock(mutex);if(auto*p=Find(ticket))p->ticket=0;}
 }
 void __cdecl Client(const D2RL::PluginContext*,nw::ChannelHandle ch,uint16_t id,const void*data,uint32_t size,void*)noexcept{
+ if(id==3){
+  if(!data||size!=32)return;const auto*b=static_cast<const uint8_t*>(data);
+  const auto now=GetTickCount64();std::lock_guard lock(mutex);
+  const auto seq=Read<uint64_t>(b,16);
+  if(dead||ch!=channel||Read<uint32_t>(b,0)!=Version||Read<uint32_t>(b,4)!=unit||!session||
+     !pending||Read<uint64_t>(b,8)!=pending||now-pendingAt>Fresh||!seq||seq<=lastHit||!Read<uint32_t>(b,24))return;
+  lastHit=seq;impactAt=now;return;
+ }
  if(id!=2||!data||size<32||size>nw::MaxPayloadSize)return;
  auto*b=static_cast<const uint8_t*>(data);
  const auto v=Read<uint32_t>(b,0),u=Read<uint32_t>(b,4),count=Read<uint32_t>(b,16),offset=Read<uint32_t>(b,20);
@@ -112,8 +126,8 @@ bool Init(const D2RL::PluginContext*c,SampleFn fn){
  if(c->QueryService(&n)!=D2RL::ServiceQueryResult::Success||!D2RL::HasNetworkServiceField(n,D2RL::NetworkServiceRequiredSize)||
     !n->registerChannel||!n->unregisterChannel||!n->connectToHost||!n->sendToHost||!n->sendToClient||!n->getPeerPlayer||
     c->QueryService(&t)!=D2RL::ServiceQueryResult::Success||!D2RL::HasThreadServiceField(t,D2RL::ThreadServiceRequiredSize)||!t->runOnGameThread||!t->runOnUiThread)return false;
- {std::lock_guard lock(mutex);ctx=c;net=n;threads=t;sample=fn;dead=false;session=0;unit=0;peers={};ClearClient();}
- nw::ChannelRegistration r{};r.structSize=sizeof r;r.localChannelId=0x5452;r.compatibilityToken=0x5043565254470001ull;
+ {std::lock_guard lock(mutex);ctx=c;net=n;threads=t;sample=fn;dead=false;session=0;unit=0;peers={};lastHit=0;ClearClient();}
+ nw::ChannelRegistration r{};r.structSize=sizeof r;r.localChannelId=0x5452;r.compatibilityToken=0x5043565254470002ull;
  r.hostMessage=Host;r.clientMessage=Client;r.connectionState=Connection;nw::ChannelHandle h=0;
  const auto result=n->registerChannel(c,&r,&h);{std::lock_guard lock(mutex);channel=h;dead=result!=nw::Result::Success;}
  c->LogInfo(result==nw::Result::Success?"PCVR targets: host-assisted target channel ready":"PCVR targets: channel unavailable");
@@ -122,7 +136,7 @@ bool Init(const D2RL::PluginContext*c,SampleFn fn){
 void Tick(uint64_t s,uint32_t u,bool wanted){
  uint64_t ticket=0;const auto now=GetTickCount64();
  {std::lock_guard lock(mutex);if(dead)return;
-  if(s!=session||u!=unit){session=s;unit=u;peers={};ClearClient();}
+  if(s!=session||u!=unit){session=s;unit=u;peers={};lastHit=0;ClearClient();}
   if(!s||!u||!wanted){ClearClient();return;}
   if(pending&&now-pendingAt>Fresh){pending=uiTicket=0;received=0;assembling={};}
   if(pending||now<nextSend)return;
@@ -132,6 +146,15 @@ void Tick(uint64_t s,uint32_t u,bool wanted){
 }
 targetlock::Snapshot Get(uint64_t s,uint32_t u,uint64_t now){std::lock_guard lock(mutex);
  return !dead&&s&&s==session&&u==unit&&published.at&&now>=published.at&&now-published.at<=Fresh?published:targetlock::Snapshot{};
+}
+void NoteMeleeHit(uint32_t attacker,uint32_t target){
+ if(!attacker||!target)return;std::lock_guard lock(mutex);if(dead||!session)return;
+ const auto now=GetTickCount64();
+ for(auto&p:peers)if(p.id&&p.request.unit==attacker&&now-p.at<=2000){p.hit=Ticket();p.hitAt=now;p.target=target;}
+}
+bool TakeMeleeHit(uint64_t s,uint32_t u,uint64_t now){
+ std::lock_guard lock(mutex);const auto at=impactAt;impactAt=0;
+ return !dead&&s&&s==session&&u==unit&&at&&now>=at&&now-at<=Fresh;
 }
 void Stop(){const D2RL::NetworkService*n;const D2RL::PluginContext*c;nw::ChannelHandle h;
  {std::lock_guard lock(mutex);dead=true;ClearClient();peers={};session=0;unit=0;n=net;c=ctx;h=channel;channel=0;}

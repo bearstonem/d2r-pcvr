@@ -14,7 +14,7 @@ struct Context {
     float swingSpeed=1.6f,shieldSpeed=1.6f;
 };
 class Router {
-    bool primed=false;
+    bool primed=false,meleePulse=false;
     uint64_t session=0,assignment=0;
     uint32_t equipment=0;
     double at=0,until=0;
@@ -25,6 +25,7 @@ class Router {
     int pulseSlot=-1,pulseHand=0;
     math::Vec origin{},direction{};
 public:
+    bool MeleePulse()const{return meleePulse&&until>at;}
     void Reset(){*this=Router{};}
     // Returns the aiming hand for a synthesized action, -1 otherwise.
     int Step(const gameplay::Input& in,gameplay::Output& out,const Context& c) {
@@ -56,11 +57,11 @@ public:
         previousHead=in.head.p;at=in.time;
         // Explicit native casts/interaction own the action; never double up.
         if(in.quickCast||out.skill>=0||out.attack){until=0;armed[0]=armed[1]=false;return -1;}
-        auto start=[&](Binding b,int h,math::Vec o,math::Vec d){
+        auto start=[&](Binding b,int h,math::Vec o,math::Vec d,bool melee=false){
             if(in.time<until)return;
             if(b.slot<0)b=c.basic;
             if(b.slot<0||b.slot>=skills::Count||b.id<0)return;
-            pulseSlot=b.slot;pulseHand=h;origin=o;direction=d;
+            meleePulse=melee;pulseSlot=b.slot;pulseHand=h;origin=o;direction=d;
             // Alternate-bank input needs 50 ms preparation at the consumer.
             until=in.time+(b.slot>=0?.180:.100);
         };
@@ -75,7 +76,7 @@ public:
             if(speed[h]<threshold*.4f)armed[h]=true;
             if(armed[h]&&speed[h]>=threshold&&in.time>=next[h]&&in.time>=until){
                 armed[h]=false;next[h]=in.time+.25;
-                start(bash?c.shield:c.melee[h],h,in.hand[h].p,math::Rotate(in.hand[h].q,{0,0,-1}));
+                start(bash?c.shield:c.melee[h],h,in.hand[h].p,math::Rotate(in.hand[h].q,{0,0,-1}),true);
             }
         }
         if(in.time>=until)return -1;

@@ -78,6 +78,7 @@ void __cdecl Refresh(const PluginContext*,void*) noexcept {
 void Init(const PluginContext* ctx) {
     context=ctx;
     targetreports::Init(ctx, &SamplePlayer);
+    combat::SetHitObserver(&targetreports::NoteMeleeHit);
     if(ctx&&ctx->QueryService(&threads)!=ServiceQueryResult::Success)threads=nullptr;
 }
 void Pump(bool wanted) {
@@ -96,9 +97,9 @@ void Pump(bool wanted) {
     if(threads->runOnGameThread(context,&Refresh,nullptr)!=Threads::Result::Success)scheduled=false;
 }
 void TickNetwork(uint64_t session,uint32_t unit){
-    targetreports::Tick(session,unit,networkWanted.load()&&clientcombat::NativeOnly(session));
+    targetreports::Tick(session,unit,clientcombat::NativeOnly(session));
 }
-void Stop(){targetreports::Stop();networkWanted=false;std::lock_guard lock(mutex);latest={};}
+void Stop(){combat::SetHitObserver(nullptr);targetreports::Stop();networkWanted=false;std::lock_guard lock(mutex);latest={};}
 Snapshot Get(){
     const auto session=gamestate::LocalPlayer();
     if(clientcombat::NativeOnly(session)){
