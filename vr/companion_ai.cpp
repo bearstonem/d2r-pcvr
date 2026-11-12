@@ -306,7 +306,12 @@ void InvalidateTacticalContextOnMissingUnit(uintptr_t playerRoom) noexcept {
     }
 }
 
-bool DispatchServerMoveToCoord(uintptr_t game, uintptr_t unit, framevr::companionai::Vec2 compPos, int targetX, int targetY) noexcept {
+// walk: a summon of the army. ServerMoveToCoord asks for mode 15 (run), which the game turns into a walk only for
+// a hireling; the Necromancer's skeletons, skeleton mages and every golem have no run animation (monstats2 mRN
+// empty, mWL 1: necroskeleton, necromage, clay/blood/iron/fire golem), so run-moved they slid across the floor in
+// their standing pose (owner 2026-11-12: "they're just sliding around"). They are sent walking (mode 2), the way
+// the game moves them itself.
+bool DispatchServerMoveToCoord(uintptr_t game, uintptr_t unit, framevr::companionai::Vec2 compPos, int targetX, int targetY, bool walk = false) noexcept {
     if (!game || !unit) return false;
     if (!serverMoveToCoordFn && !originalServerMoveUnit) return false;
 
@@ -316,6 +321,10 @@ bool DispatchServerMoveToCoord(uintptr_t game, uintptr_t unit, framevr::companio
     } scope;
 
     const auto invokeMove = [&](int x, int y) noexcept -> int {
+        if (walk && originalServerMoveUnit) {
+            const int r = originalServerMoveUnit(game, unit, 0, 2, x, y, 1, 0);   // MONMODE_WALK
+            if (r != 0) return r;
+        }
         if (serverMoveToCoordFn) {
             const int r = serverMoveToCoordFn(game, unit, x, y);
             if (r != 0) return r;
@@ -1086,7 +1095,7 @@ void StepSummonArmyServer(
                 const int targetX = int(std::round(plyrPos.x + std::cos(angle) * dist));
                 const int targetY = int(std::round(plyrPos.y + std::sin(angle) * dist));
                 if (walkablePred(targetX, targetY)) {
-                    (void)DispatchServerMoveToCoord(game, unitPtrs[i], samples[i].pos, targetX, targetY);
+                    (void)DispatchServerMoveToCoord(game, unitPtrs[i], samples[i].pos, targetX, targetY, true);   // walking: no summon runs
                 }
             }
             framevr::logging::Write("Frame summon commander: dispatched fall-out dispersal wake-up to army");
@@ -1186,8 +1195,8 @@ void StepSummonArmyServer(
             claimedTiles[claimedCount++] = { tx, ty };
         }
 
-        // Always walk/run naturally to the formation slot via DispatchServerMoveToCoord (no teleportation!).
-        bool moved = DispatchServerMoveToCoord(game, uPtr, uPos, tx, ty);
+        // Walk to the formation slot via DispatchServerMoveToCoord (no teleportation, no run: summons have no run animation).
+        bool moved = DispatchServerMoveToCoord(game, uPtr, uPos, tx, ty, true);
         if (moved) {
             ++dispatchedNow;
             g_summonFormationMoves.fetch_add(1, std::memory_order_relaxed);
@@ -1207,6 +1216,22 @@ void StepSummonArmyServer(
             centerPos.x, centerPos.y,
             dispatchedNow, emitted);
         framevr::logging::Write(line);
+    }
+    // Every 5 s while the army is being moved: what the game has them doing (their mode as sampled this tick),
+    // so a log tells walking summons from ones that slide (standing or 'running' with no run animation).
+    static uint64_t s_modesToldAt = 0;
+    static size_t s_movesSinceTold = 0;
+    s_movesSinceTold += dispatchedNow;
+    if (s_movesSinceTold && nowMs - s_modesToldAt >= 5000) {
+        unsigned standing = 0, walking = 0, running = 0, other = 0;
+        for (size_t i = 0; i < validCount; ++i)
+            ++(samples[i].animMode == 1 ? standing : samples[i].animMode == 2 ? walking : samples[i].animMode == 15 ? running : other);
+        char modes[200];
+        std::snprintf(modes, sizeof modes, "Frame summon commander: modes of %zu: walking=%u standing=%u running=%u other=%u; moves sent in the last %.1f s=%zu (summons walk: no run)",
+            validCount, walking, standing, running, other, s_modesToldAt ? double(nowMs - s_modesToldAt) / 1000.0 : 0.0, s_movesSinceTold);
+        framevr::logging::Write(modes);
+        s_modesToldAt = nowMs;
+        s_movesSinceTold = 0;
     }
 }
 
