@@ -8,14 +8,14 @@ texture; `ice-texture.png` is the same 512×512 base image.
 Geometry adapted from **PK Icicles**, FacadeGaikan / PlanetKiller, CC0:
 https://opengameart.org/content/pk-icicles
 The geometry has been isolated, resized, rotated, positioned and mirrored for
-the forearm graft. The frost texture was generated with OpenAI image generation
+the forearm icicles. The frost texture was generated with OpenAI image generation
 and subsequently tinted; it contains no extracted game imagery.
 
 The installer journals the three runtime files beside the potion models.
-If any piece is missing or invalid, the renderer disables the ice graft and
+If any piece is missing or invalid, the renderer disables the icicles and
 leaves the native effect visible. These assets do not replace Bone Armor.
 
-The graft follows native Frozen Armor (state 10), Shiver Armor (88), and
+The icicles follow native Frozen Armor (state 10), Shiver Armor (88), and
 Chilling Armor (20), rather than an estimated timer. `[render]` options:
 `frozen_armor_graft=0` disables it; `frozen_armor_hide_native=0` retains the native
 overlay. Existing Bone Armor placement settings determine forearm attachment.

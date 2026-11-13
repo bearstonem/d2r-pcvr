@@ -3907,7 +3907,7 @@ void BoneGraftTick(bool show) {
         if(armorGraftSource==armorgraft::Source::Frozen)
             Say("Frame ice armor: native state inactive/unavailable or source changed; grafts cleared");
         if(selected.source==armorgraft::Source::Frozen)
-            Say("Frame ice armor: native Frozen/Shiver/Chilling Armor active; three ice grafts per forearm; native overlay hidden while grafts are active");
+            Say("Frame ice armor: native Frozen/Shiver/Chilling Armor active; three icicles per forearm; native overlay hidden while grafts are active");
         // Preserve Bone Armor's final depletion animation when no Frozen graft
         // was involved. Reset only when switching into/out of the ice armor
         // or changing the owning session.
