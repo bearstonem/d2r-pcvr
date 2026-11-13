@@ -1459,6 +1459,7 @@ void LoadSettings() {
         patches.shadowsOnce = IniB(L"game_patches", L"shadows_once", true);
         patches.cullOnce = IniB(L"game_patches", L"cull_once", true);
         patches.presentOnce = IniB(L"game_patches", L"present_once", false);   // off: to be measured (PERFORMANCE.md "One present a pair")
+        patches.effectListenerGuard = IniB(L"game_patches", L"effect_listener_guard", true);   // a crash guard, not a render change (game_patches.h)
         gamepatches::Configure(patches);
     }
     g_set.gameHeightFog.store(IniB(L"render", L"game_height_fog", false));

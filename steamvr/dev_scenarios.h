@@ -48,8 +48,20 @@ inline constexpr int TalRashaTombChoice=LootBeamsChoice+1;
 // missile - Witherstring (Fires Magic Arrows), Raven Claw (Fires Explosive Arrows), Demon Machine (a
 // crossbow, Fires Explosive Bolts) - with arrows and bolts (ItemBowUniques below).
 inline constexpr int ItemBowsChoice=TalRashaTombChoice+1;
+// The Frozen Tundra crash (2026-11-12; two reports from a player, the game's effect-ended listener): the player
+// took the Glacial Trail waypoint (level 115, an ice cave with the game-drawn ceiling), walked out into the Frozen
+// Tundra (level 117; the ceiling put away there) and fought with Bone Spear. Both levels, and a step that goes to
+// one and then the other by turns, a press a step (TundraReproStep), each step logged.
+inline constexpr int GlacialTrailChoice=ItemBowsChoice+1,FrozenTundraChoice=ItemBowsChoice+2,TundraReproChoice=ItemBowsChoice+3;
+inline constexpr int TundraReproSteps=10;
+struct ReproStep {int step;const char* command;const char* place;};
+// The press'th press (0 first): steps 1 to TundraReproSteps and round again, odd ones to the ice cave.
+inline ReproStep TundraReproStep(unsigned press){
+    const int step=int(press%TundraReproSteps)+1;
+    return step%2?ReproStep{step,"goto 115","Glacial Trail"}:ReproStep{step,"goto 117","Frozen Tundra"};
+}
 inline constexpr int PageSize=14;
-inline constexpr std::array<Choice,ItemBowsChoice+1> Choices{{
+inline constexpr std::array<Choice,TundraReproChoice+1> Choices{{
     {"Level 90", "All class skills rank 20 / test attributes", nullptr},
     {"Primary gear", "Class-specific unique equipment", nullptr},
     {"Alternate gear", "Equipment for the other class abilities", nullptr},
@@ -120,6 +132,10 @@ inline constexpr std::array<Choice,ItemBowsChoice+1> Choices{{
     // Its stairs and ledges are where dungeon rooms stood a step apart over void (room stitch).
     {"Tal Rasha's Tomb", "Act II / stairs, ledges, joined rooms", "goto 66"},
     {"Item-fired bows", "Witherstring, Raven Claw, Demon Machine / arrows, bolts", nullptr},
+    {"Glacial Trail", "Act V / ice cave; walk out to the Frozen Tundra", "goto 115"},
+    {"Frozen Tundra", "Act V / Tundra crash repro: fight (Bone Spear)", "goto 117"},
+    // Its destination is the step's (TundraReproStep), not a fixed command.
+    {"Tundra repro step", "Glacial Trail and Frozen Tundra by turns", nullptr},
 }};
 static_assert(limbs::Knobs==10,"one BODIES choice per knob");
 // Stable action IDs are independent of their presentation order.
@@ -138,7 +154,7 @@ inline constexpr std::array<std::array<int,PageSize>,PageCount> Pages{{
     {{StarterPrimaryChoice,StarterAlternateChoice,1,2,CrossbowChoice,BowChoice,SmallShieldChoice,DebugDrawsChoice,TurnsKeepOwnChoice,ThrowingChoice,PotionsChoice,TurnsSharpChoice,TurnsFillChoice,TorchChoice}},
     {{4,11,14,15,16,5,3,TalRashaTombChoice,8,9,-1,-1,-1,-1}},
     {{17,UpperKurastChoice,KurastSewersChoice,18,19,26,27,-1,-1,-1,-1,-1,-1,-1}},
-    {{6,7,20,21,22,23,24,25,-1,-1,-1,-1,-1,-1}},
+    {{6,7,20,21,22,23,24,25,GlacialTrailChoice,FrozenTundraChoice,TundraReproChoice,-1,-1,-1}},
     {{BodyKnobChoice,BodyKnobChoice+1,BodyKnobChoice+2,BodyKnobChoice+3,BodyKnobChoice+4,BodyKnobChoice+5,BodyKnobChoice+6,
       BodyKnobChoice+7,BodyKnobChoice+8,BodyKnobChoice+9,BodyResetChoice,-1,-1,-1}}
 }};
