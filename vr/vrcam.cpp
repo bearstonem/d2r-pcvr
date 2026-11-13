@@ -1459,6 +1459,7 @@ void LoadSettings() {
         patches.shadowsOnce = IniB(L"game_patches", L"shadows_once", true);
         patches.cullOnce = IniB(L"game_patches", L"cull_once", true);
         patches.presentOnce = IniB(L"game_patches", L"present_once", false);   // off: to be measured (PERFORMANCE.md "One present a pair")
+        patches.effectListenerGuard = IniB(L"game_patches", L"effect_listener_guard", true);   // a crash guard, not a render change (game_patches.h)
         gamepatches::Configure(patches);
     }
     g_set.gameHeightFog.store(IniB(L"render", L"game_height_fog", false));
@@ -2108,6 +2109,10 @@ constexpr float kRiseFrom = 0.3f;              // world units of matrix rise tak
 std::atomic<float> g_unitRise{0.0f};           // the hero's model matrix above the look-at at the last pose
 std::atomic<ULONGLONG> g_unitRiseAt{0};
 std::atomic<float> g_viewRise{0.0f};           // the rise the last view rebuild lifted the camera by
+// Room follows you holds still while the game carries the hero (transport HeroCarried, room_steps.h Pause::Carried):
+// from a Leap's cast through its take-off crouch (~0.2 s; a Leap that never takes off lapses too), then for a moment
+// past each pose with his model in the air (2026-11-12: only rises in this session's log were Leaps).
+constexpr uint32_t kCarriedTakeOffMs = 600, kCarriedAirMs = 150;
 float FollowedRise(float rise) {
     if (ThirdPerson() || Overhead() || !g_set.followJump.load() || !(rise > kRiseFrom)) return 0.0f;   // the board stays put
     const float t = std::clamp((rise - kRiseFrom) / kRiseFrom, 0.0f, 1.0f);
@@ -4937,7 +4942,10 @@ bool HandOffUnit(const aimtargets::Cast& c) {
 bool NativeSpellAim(float playerX,float playerY,framevr::spellaim::Cast& cast) {
     g_note={};
     const auto c=aimtargets::Now();
-    if(c.skill==132||c.skill==143)leapglide::g_cast.store(GetTickCount64());   // Leap, Leap Attack: the view glides through the take-off
+    if(c.skill==132||c.skill==143) {   // Leap, Leap Attack: the view glides through the take-off; the room's follow holds
+        leapglide::g_cast.store(GetTickCount64());
+        framevr::HeroCarried(kCarriedTakeOffMs);
+    }
     // Teleport on its shown landing or a thrown trap first; then the aim rules
     // only with this kind of cast's Aim option On; Off, as before them - except
     // Guided Arrow and Charge, handed the aimed monster whatever the option (aimrules::AlwaysHomes).
@@ -8969,6 +8977,9 @@ void HeroMatrixNow(uintptr_t at, float* m) {
     if (off < 2.0f) {
         const float rise = m[13] - look[1];
         g_unitRise.store(std::isfinite(rise) ? rise : 0.0f); g_unitRiseAt.store(GetTickCount64());
+#ifdef D2RVR_NATIVE_OPENXR
+        if (rise > kRiseFrom) framevr::HeroCarried(kCarriedAirMs);   // in the air: Leap's flight
+#endif
         m[12] = look[0]; m[13] = look[1] + FollowedRise(rise); m[14] = look[2];
     }
 }

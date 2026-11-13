@@ -111,6 +111,12 @@ constexpr SummonRole ClassifySummonRole(uint8_t petType, uint16_t classId = 0) n
     }
 }
 
+// The game's monster modes in which a summon is in a fight: hit (3), attacks (4, 5), block (6), cast (7),
+// skills (8..11), knock-back (13) and sequence attacks (14). Standing is 1, walking 2, running 15.
+constexpr bool IsFightMode(uint8_t mode) noexcept {
+    return (mode >= 3 && mode <= 11) || mode == 13 || mode == 14;
+}
+
 constexpr float GetStanceLeashRadius(ArmyStance stance, SummonRole role, bool inCombat = true) noexcept {
     if (role == SummonRole::RangedArtillery) {
         // Mages attack from range (up to 20 sub-tiles) but never chase into melee in Defensive/Balanced
@@ -653,6 +659,16 @@ struct SummonArmyCoordinator {
     static constexpr float UnstuckDistThreshold    = 28.0f; // sub-tiles before stuck timer starts
     static constexpr uint64_t UnstuckTimeoutMs     = 8000;  // 8s stuck behind wall -> relocate to slot
     static constexpr uint64_t CongestionTimeoutMs  = 3500;  // 3.5s unable to reach slot due to minion traffic -> settle to slot
+    // Fighting in formation (owner 2026-11-12: in a formation the summons "seem to not be attacking any monsters").
+    // Step used to walk every summon more than the deadband (1.4-1.8 sub-tiles) from its spot back to it every
+    // 300 ms, fight or not, and the walk order replaces whatever it was doing, a swing included: the game's AI took
+    // it a step toward a monster, the next tick took it back. Now a summon within its stance's fight range of its
+    // spot (GetStanceLeashRadius, the same range the native-move and target gates allow) is left to the game's AI
+    // while it fights, and for FightLingerMs after (the pauses between swings), and while it walks during a fight
+    // (maybe at a monster). Idle summons still go back to their spots, and a new order sends everyone to their
+    // spots first: until it arrives, or FormingMs after the order.
+    static constexpr uint64_t FightLingerMs        = 1500;
+    static constexpr uint64_t FormingMs            = 4000;
 
     struct TrackedUnit {
         uint32_t   unitId             = 0;
@@ -665,6 +681,8 @@ struct SummonArmyCoordinator {
         Vec2       slotPos{};
         uint64_t   farSinceMs         = 0;
         uint64_t   stuckSinceMs       = 0;
+        uint64_t   lastFightMs        = 0;     // last Step that saw it in a fight mode (IsFightMode)
+        bool       formed             = false; // reached its spot since the last order
     };
 
     ArmyStance    activeStance            = ArmyStance::Balanced;
@@ -683,6 +701,9 @@ struct SummonArmyCoordinator {
     std::array<TrackedUnit, MaxArmyUnits> tracked{};
     size_t trackedCount = 0;
     size_t rrCursor     = 0;
+    uint64_t orderedAtMs        = 0;     // the Step after the last order: its FormingMs window starts here
+    bool     orderStampPending  = false; // an order since the last Step
+    size_t   leftToFightLastStep = 0;    // summons Step left to the game's AI to fight (for the log)
 
     void Reset() noexcept {
         anchorActive = false;
@@ -696,6 +717,15 @@ struct SummonArmyCoordinator {
         headingFilter.Reset();
         trackedCount = 0;
         rrCursor = 0;
+        orderedAtMs = 0;
+        orderStampPending = false;
+        leftToFightLastStep = 0;
+    }
+
+    // An order: every summon goes to its (new) spot first, then may fight from there.
+    void MarkNewOrder() noexcept {
+        orderStampPending = true;
+        for (size_t i = 0; i < trackedCount; ++i) tracked[i].formed = false;
     }
 
     void SetStanceAndFormation(ArmyStance stance, ArmyFormation formation) noexcept {
@@ -709,6 +739,7 @@ struct SummonArmyCoordinator {
             tracked[i].lastMoveDispatchMs = 0;
             tracked[i].stuckSinceMs = 0;
         }
+        MarkNewOrder();
     }
 
     void AnchorAt(Vec2 pos) noexcept {
@@ -722,6 +753,7 @@ struct SummonArmyCoordinator {
             tracked[i].lastMoveDispatchMs = 0;
             tracked[i].stuckSinceMs = 0;
         }
+        MarkNewOrder();
     }
 
     void ClearAnchor() noexcept {
@@ -733,7 +765,31 @@ struct SummonArmyCoordinator {
                 tracked[i].lastMoveDispatchMs = 0;
                 tracked[i].stuckSinceMs = 0;
             }
+            MarkNewOrder();
         }
+    }
+
+    // How far from its spot a summon may be while it fights: the stance's leash, as the gates below use it
+    // (Hold Ground holds to the Defensive one; a focused monster gets the Aggressive one).
+    float FightRange(SummonRole role) const noexcept {
+        if (priorityTargetId != 0) return GetStanceLeashRadius(ArmyStance::Aggressive, role, true);
+        return GetStanceLeashRadius(anchorActive ? ArmyStance::Defensive : activeStance, role, true);
+    }
+
+    static bool FoughtLately(const TrackedUnit& tu, uint64_t nowMs) noexcept {
+        return tu.lastFightMs != 0 && nowMs >= tu.lastFightMs && nowMs - tu.lastFightMs < FightLingerMs;
+    }
+
+    bool Forming(const TrackedUnit& tu, uint64_t nowMs) const noexcept {
+        return !tu.formed && orderedAtMs != 0 && nowMs >= orderedAtMs && nowMs - orderedAtMs < FormingMs;
+    }
+
+    // Whether Step leaves a summon that is off its spot to the game's AI instead of walking it back.
+    bool LeftToFight(const TrackedUnit& tu, uint8_t animMode, float distToSlot, uint64_t nowMs) const noexcept {
+        if (distToSlot > FightRange(tu.role)) return false;   // strayed past its leash: back to the spot
+        if (Forming(tu, nowMs)) return false;                 // a new order: to the spot first
+        if (FoughtLately(tu, nowMs)) return true;             // fighting, or between swings
+        return (inCombat || priorityTargetId != 0) && animMode == 2;   // walking in a fight: maybe at a monster
     }
 
     void SetPriorityTarget(uint32_t targetId, Vec2 targetPos) noexcept {
@@ -920,7 +976,8 @@ struct SummonArmyCoordinator {
             // 2. Traffic congestion check: unit has an assigned slot, is NOT in slot, and has been
             // blocked/stuck trying to reach it for >= CongestionTimeoutMs (3.5s) while out of combat
             const bool hasSlot = (tracked[i].slotPos.x != 0.0f || tracked[i].slotPos.y != 0.0f);
-            if (hasSlot && !tracked[i].inSlot && !inCombat && !freeRoam) {
+            // (not a summon in a fight: by an anchor away from the hero inCombat, which counts hostiles near the hero, can be false)
+            if (hasSlot && !tracked[i].inSlot && !inCombat && !freeRoam && !FoughtLately(tracked[i], nowMs)) {
                 if (tracked[i].stuckSinceMs == 0) {
                     tracked[i].stuckSinceMs = nowMs;
                     return false;
@@ -974,6 +1031,7 @@ struct SummonArmyCoordinator {
                     tracked[i].lastMoveDispatchMs = 0;
                     tracked[i].stuckSinceMs = 0;
                 }
+                MarkNewOrder();
                 return true;
             case SkillFallOut:
                 freeRoam = true;
@@ -1001,10 +1059,15 @@ struct SummonArmyCoordinator {
         std::span<ArmyMoveOrder> outMoves,
         std::span<FormationSlot> outSlots = {}) noexcept
     {
+        leftToFightLastStep = 0;
         if (units.empty() || freeRoam) {
             trackedCount = 0;
             rrCursor = 0;
             return 0;
+        }
+        if (orderStampPending) {
+            orderStampPending = false;
+            orderedAtMs = nowMs ? nowMs : 1;
         }
 
         const size_t n = std::min(units.size(), MaxArmyUnits);
@@ -1050,6 +1113,8 @@ struct SummonArmyCoordinator {
                     nextTracked[i].lastTargetY = tracked[oldIdx].lastTargetY;
                     nextTracked[i].farSinceMs = tracked[oldIdx].farSinceMs;
                     nextTracked[i].stuckSinceMs = tracked[oldIdx].stuckSinceMs;
+                    nextTracked[i].lastFightMs = tracked[oldIdx].lastFightMs;
+                    nextTracked[i].formed = tracked[oldIdx].formed;
                     const uint8_t prevSlot = tracked[oldIdx].slotIndex;
                     if (prevSlot < slotCount && !slotTaken[prevSlot] && slots[prevSlot].role == unitRoles[i]) {
                         const float dist = std::hypot(units[i].pos.x - slots[prevSlot].worldPos.x,
@@ -1064,6 +1129,7 @@ struct SummonArmyCoordinator {
                     break;
                 }
             }
+            if (IsFightMode(units[i].animMode)) nextTracked[i].lastFightMs = nowMs;
         }
 
         // 4. Greedily assign remaining unassigned units to nearest free slot of matching role
@@ -1112,6 +1178,7 @@ struct SummonArmyCoordinator {
 
             if (dist <= ArrivalTolerance) {
                 nextTracked[i].inSlot = true;
+                nextTracked[i].formed = true;
                 nextTracked[i].stuckSinceMs = 0;
                 continue;
             }
@@ -1119,6 +1186,10 @@ struct SummonArmyCoordinator {
                 continue;
             }
             nextTracked[i].inSlot = false;
+            if (LeftToFight(nextTracked[i], units[i].animMode, dist, nowMs)) {
+                ++leftToFightLastStep;
+                continue;
+            }
 
             // Determine desired facing direction for this slot:
             // Phalanx, Wedge, and Column face forward along heading (backs visible to player);

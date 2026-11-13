@@ -1357,21 +1357,41 @@ about 4 m/s, so the push ends early by the distance he will coast (closing speed
 x 50 ms, at most 15 cm) and otherwise inside 7 cm; the origin keeps following for
 300 ms while he stops on the game's grid. Pushed 0.6 s while he walks under 3 cm
 is a wall: the push stops until you step 15 cm elsewhere. A jump of more than
-0.75 m in one view (teleport, waypoint, Leap) is never followed: the view is
-built twice a pair, back to back, so speed per wall-clock time misjudged walking.
-The hero's position is never written.
+0.75 m in one view (teleport, waypoint, another area) is never followed, and
+leaves the wall behind: the view is built twice a pair, back to back, so speed
+per wall-clock time misjudged walking. The hero's position is never written.
+
+The origin follows only what pays your step off (`Chase::Follow`): a move that
+leaves you no farther from the hero is taken whole, any other only by its part
+toward you, never past you. A Leap is no jump by distance (25 cells, about
+10 m, in 0.75 s is 0.1-0.25 m a head view), and before 2026-11-12 a Leap, a
+Whirlwind or a Charge while the follow was on was followed as a walk: the
+origin flew with the hero, the camera stayed where he took off, and only a
+reload put it back (a player: "a sort of broken 3rd person view ... I ended up
+outside the walls while my actual character was inside"). The game moving the
+hero now moves the camera with him.
 
 Paused, with no push and no origin follow: a grip or trigger held, the bow
-drawn, a native cast, a hand moving faster than 1.2 m/s (a swing, for 0.4 s),
-the real left stick, a menu, wheel, the held menu or VR Settings, and Seated
-play. A head moving faster than 1.5 m/s (a lunge) starts nothing. A hero moving
-more than 0.75 m in one view (a teleport, waypoint or Leap) is not followed. F11, Calibrate
-body and a world load re-anchor it where your head is.
+drawn, a native cast, a Leap or Leap Attack from its cast through its take-off
+(600 ms) and while the hero's model is in the air (150 ms past each such pose),
+a hand moving faster than 1.2 m/s (a swing, for 0.4 s), the real left stick, a
+menu, wheel, the held menu or VR Settings, and Seated play. A head moving faster
+than 1.5 m/s (a lunge) starts nothing. F11, Calibrate body and a world load
+re-anchor it where your head is.
+
+A watchdog keeps the view on the hero whatever else goes wrong: standing 1.5 m
+or more from his spot for 1.5 s (through any pause but a menu), with no walk of
+his closing on it faster than 0.3 m/s, the room is put back under you, as F11
+does: the camera returns to the hero. Room follows you keeps you within a step
+of him, so a gap that size is a view come off him, not a step owed.
 
 Log lines: `Frame room steps: on`, `walking after your step, N m from the hero`,
 `stopped N m from the hero (caught up | blocked | <pause>)`, `paused (<why>)`
-(at most every 2 s while a step is owed), a one-second summary while it works,
-and `the hero moved N m in N ms ... the origin stays` for a jump.
+(at most every 2 s while a step is owed), a one-second summary while it works
+(with the metres the hero moved away from you, not followed),
+`the hero moved N m in N ms ... the origin stays` for a jump, and `the view had
+come off the hero - you stood N m from his spot for N s (<why>); the room is put
+back under you` for the watchdog.
 
 ## What is physical and what is still native
 

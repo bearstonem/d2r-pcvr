@@ -295,4 +295,39 @@ inline constexpr uint16_t PresentTargetSig[] = {
 inline constexpr uint32_t PresentTargetHookBytes = 17;    // five whole instructions, no branch and no address in them
 inline constexpr uint64_t PresentChainLatencyHandle = 0x40;   // of the chain: the handle the function waits on, 0 = none
 
+// --- effect_listener_guard ----------------------------------------------------------------------------------
+// Not a render change: a guard against a crash in the game's own effect code (two crash reports from a player
+// in the Frozen Tundra, 2026-11-08 and 11-11, D2R 3.4.95041: an access violation writing address 0x20 at
+// RVA 0xA4696A, every return address of the two stacks the same). When a PopcornFX effect ends (EndedCallerRva,
+// and RVA 0xA4CAF6 likewise) the game tells each listener on the effect's list - {handle, function} pairs at
+// effect + 0x10, the list's lock at effect + 0x20 - one at a time (EndedTellRva: rcx the handle, rdx the address
+// of the ending effect's pointer). The game's own effect handles listen with the function at EndedRva: it reads
+// the effect the handle holds at handle + 0x10 with no check, takes that effect's list lock (a lock at + 0x20 of
+// it: address 0x20 when the handle holds none), takes itself off the list and lets the effect go. A handle that
+// holds no effect any more but is still on an ending effect's list is the crash. The game's other listener there
+// (EndedSiblingRva) tests the same pointer first and does nothing without one; the guard does the same for this
+// one, and only that: a handle that holds an effect is called as the game calls it.
+//
+// The function's first 49 bytes: the handle's effect read (+ 0x10), the lock guard called on effect + 0x20, the
+// list's count read, and lea r9,[rip-0x31] - the function's own address, which it looks for on the list.
+inline constexpr uint64_t EndedRva = 0xf6a030, EndedEnd = 0xf6a147;
+inline constexpr uint16_t EndedSig[] = {
+    0x48,0x89,0x5c,0x24,0x10,0x57,0x48,0x83,0xec,0x20,0x48,0x8b,0x79,0x10,0x48,0x8b,0xd9,0x48,0x8d,0x4c,0x24,0x30,0x48,0x8d,0x57,0x20,0xe8,0x01,
+    0xc9,0xad,0xff,0x8b,0x57,0x18,0x85,0xd2,0x74,0x41,0x48,0x8b,0x4f,0x10,0x4c,0x8d,0x0d,0xcf,0xff,0xff,0xff};
+inline constexpr uint32_t EndedHookBytes = 14;    // four whole instructions, no branch and no address in them
+inline constexpr uint32_t EndedSelfAt = 42;       // in EndedSig: lea r9,[rip-0x31], the function's own address
+inline constexpr uint64_t EndedEffectAt = 0x10;   // of the handle: the effect it holds, 0 = none
+// The game's other effect-ended listener: rcx = [rcx + 0x10]; none -> return; else on to the effect.
+inline constexpr uint64_t EndedSiblingRva = 0xf6a020;
+inline constexpr uint16_t EndedSiblingSig[] = {0x48,0x8b,0x49,0x10,0x48,0x85,0xc9,0x0f,0x85,0x63,0xee,0xad,0xff,0xc3};
+// The tell, one listener at a time: rdx = r13 (the address of the ending effect's pointer), rcx = the handle,
+// call the function.
+inline constexpr uint64_t EndedTellRva = 0xa4737a;
+inline constexpr uint16_t EndedTellSig[] = {0x49,0x8b,0xd5,0x48,0x8b,0x4d,0x38,0xff,0x55,0x40};
+// The caller on both crash reports' stacks: the effect's pointer kept at rsp + 0x28 (one reference more), the
+// list at effect + 0x10, and the tell called with that list and the pointer's address.
+inline constexpr uint64_t EndedCallerRva = 0xa4b3aa;
+inline constexpr uint16_t EndedCallerSig[] = {
+    0x48,0x89,0x7c,0x24,0x28,0x48,0x8d,0x4f,0x10,0x48,0x85,0xff,0x74,0x04,0xf0,0xff,0x47,0x08,0x48,0x8d,0x54,0x24,0x28,0xe8,0x2a,0xbd,0xff,0xff};
+
 }  // namespace gamepatches::abi

@@ -1151,11 +1151,13 @@ void StepSummonArmyServer(
 
     std::array<framevr::commander::ArmyMoveOrder, framevr::commander::MaxMovesPerTick> moves{};
     size_t emitted = 0;
+    size_t leftToFight = 0;
     {
         AcquireSRWLockExclusive(&g_tacticalLock);
         emitted = g_summonCoordinator.Step(
             std::span(samples.data(), validCount),
             plyrPos, fx, fy, nowMs, moves);
+        leftToFight = g_summonCoordinator.leftToFightLastStep;
         ReleaseSRWLockExclusive(&g_tacticalLock);
     }
 
@@ -1226,9 +1228,10 @@ void StepSummonArmyServer(
         unsigned standing = 0, walking = 0, running = 0, other = 0;
         for (size_t i = 0; i < validCount; ++i)
             ++(samples[i].animMode == 1 ? standing : samples[i].animMode == 2 ? walking : samples[i].animMode == 15 ? running : other);
-        char modes[200];
-        std::snprintf(modes, sizeof modes, "Frame summon commander: modes of %zu: walking=%u standing=%u running=%u other=%u; moves sent in the last %.1f s=%zu (summons walk: no run)",
-            validCount, walking, standing, running, other, s_modesToldAt ? double(nowMs - s_modesToldAt) / 1000.0 : 0.0, s_movesSinceTold);
+        char modes[260];
+        std::snprintf(modes, sizeof modes, "Frame summon commander: modes of %zu: walking=%u standing=%u running=%u other=%u; moves sent in the last %.1f s=%zu (summons walk: no run); off their spots left to fight now=%zu, hostiles near=%d",
+            validCount, walking, standing, running, other, s_modesToldAt ? double(nowMs - s_modesToldAt) / 1000.0 : 0.0, s_movesSinceTold,
+            leftToFight, hostilesNear ? 1 : 0);
         framevr::logging::Write(modes);
         s_modesToldAt = nowMs;
         s_movesSinceTold = 0;
