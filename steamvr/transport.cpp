@@ -3918,6 +3918,7 @@ void BoneGraftTick(bool show) {
         armorGraftSource=selected.source;armorGraftSession=snap.session;
     }
     bonegraft::Settings settings;{std::lock_guard lock(boneGraftMutex);settings=boneGraftSettings;}
+    if(selected.source==armorgraft::Source::Frozen)settings=armorgraft::IciclePlacement(settings);
     const double now=motionInput.time;const float dt=float(now-boneGraftTime);boneGraftTime=now;
     if(!ready){boneGraftLayers.Reset();for(auto& f:boneFalling)f.live=false;return;}
     bool placed[2][bonegraft::Pieces]{};bonegraft::Piece piece[2][bonegraft::Pieces]{};
@@ -3940,8 +3941,10 @@ void BoneGraftTick(bool show) {
         if(placed[side][i]){boneLastPiece[side][i]=piece[side][i];boneLastShown[side][i]=bonegraft::Shown(i,layers);}
         if(placed[side][i]&&bonegraft::Shown(i,layers)) {
             const auto& p=piece[side][i];
-            if(selected.source==armorgraft::Source::Frozen)
-                potions::AddIce(potionScene,p.pose,i,p.length*1.15f,p.width*1.12f,p.armA,p.armB,p.armR,side==1);
+            if(selected.source==armorgraft::Source::Frozen) {
+                const auto ice=armorgraft::IciclePiece(p,settings.out,i,PhysicalHand(side)==1);
+                potions::AddIce(potionScene,ice.pose,i,ice.length*1.15f,ice.width*1.12f,ice.armA,ice.armB,ice.armR,side==1);
+            }
             else potions::AddBone(potionScene,p.pose,i,p.length,p.width,p.armA,p.armB,p.armR);
         }
     }

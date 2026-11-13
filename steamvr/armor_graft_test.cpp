@@ -4,6 +4,29 @@
 using namespace framevr;
 void Check(bool ok,const char* why){if(!ok){std::fprintf(stderr,"FAIL: %s\n",why);std::exit(1);}}
 int main(){
+    bonegraft::Piece original;original.pose={{0,0,.05f},{0,0,0,1}};original.length=.4f;original.width=.2f;original.armR=.04f;
+    const auto ice=armorgraft::IciclePiece(original,.05f);
+    Check(std::fabs(ice.pose.p.z-.045f)<1e-6f,"center ice moves 5 mm outward from the 4 cm attachment");
+    Check(std::fabs(ice.length-.441f)<1e-6f&&std::fabs(ice.width-.2205f)<1e-6f,"ice length and width grow by another 5 percent (10.25 percent total)");
+    Check(ice.pose.q.w==original.pose.q.w&&ice.armR==original.armR&&original.pose.p.z==.05f,"angles, occlusion and original Bone Armor remain unchanged");
+
+    Check(std::fabs(ice.pose.p.y-.024f)<1e-6f,"all ice pieces move 24 mm toward the elbow");
+    const bonegraft::Settings bone{};const auto placement=armorgraft::IciclePlacement(bone);
+    Check(placement.spread==75.f&&bone.spread==40.f,"ice-only outer spread is 75 degrees; Bone Armor unchanged");
+    const bonegraft::Forearm arm{{0,0,0},{0,.4f,0},{0,0,-1}};
+    for(bool left:{false,true}) {
+        bonegraft::Piece middle;Check(bonegraft::Place(arm,{{0,0,0},{0,0,0,1}},placement,1,middle,left),"center placement");
+        for(int side:{0,2}) {
+            bonegraft::Piece outer;Check(bonegraft::Place(arm,{{0,0,0},{0,0,0,1}},placement,side,outer,left),"outer placement");
+            const auto adjusted=armorgraft::IciclePiece(outer,placement.out,side,left);
+            const auto ownOut=math::Rotate(outer.pose.q,{0,0,1});
+            const auto radial=adjusted.pose.p-math::Vec{0,.224f,0}-ownOut*.020f;
+            Check(std::fabs(math::Dot(radial,radial)-.04f*.04f)<1e-6f,"closer outer placement preserves 4 cm radius");
+            Check(std::fabs(std::fabs(radial.x)-.04f*std::sin(40.f*3.14159265f/180.f))<1e-6f,"outer attachment moves sideways toward center");
+            const auto a=math::Rotate(middle.pose.q,{0,0,1}),b=math::Rotate(outer.pose.q,{0,0,1});
+            Check(std::fabs(math::Dot(a,b)-std::cos(75.f*3.14159265f/180.f))<1e-5f,"outer axes are 75 degrees from center on either arm");
+        }
+    }
     interaction::Snapshot s;s.session=7;s.at=5000;s.effectsAt=5000;
     s.skillClass=1;s.actionKnown=true;s.actionMode=1;
     auto select=[&](bool bone=true,bool frozen=true,bool models=true,uint64_t session=7,uint64_t now=5000){
@@ -12,8 +35,8 @@ int main(){
     s.effects.known=true;s.effects.Set(10);
     Check(select().source==armorgraft::Source::Frozen&&select().layers==3,"active Sorceress Frozen Armor has three pieces per arm");
     Check(select().layers==3&&select().layers==3,"repeated active samples keep all pieces; no invented timer");
-    Check(select(false).layers==3,"Frozen preview independent of Necromancer graft toggle");
-    Check(select(true,false).layers==0,"Frozen toggle disables preview");
+    Check(select(false).layers==3,"Ice armor independent of Necromancer graft toggle");
+    Check(select(true,false).layers==0,"Ice armor toggle disables icicles");
     Check(select(true,true,false).layers==0,"missing models hides preview");
     Check(select(true,true,true,8).layers==0,"another session cannot use old armor");
     Check(select(true,true,true,7,5651).layers==0,"stale UI snapshot hides preview");
@@ -43,5 +66,5 @@ int main(){
     Check(select(true,false).source==armorgraft::Source::Bone&&select(true,false).layers==2,"Necromancer path does not depend on Frozen state/timestamp/toggle");
     s.boneArmor=1;Check(select().layers==1,"last native Bone Armor layer preserved");
     s.boneArmor=0;Check(select().layers==0,"depleted Bone Armor has no pieces");
-    std::puts("Armor graft preview: all checks passed.");
+    std::puts("Ice armor: all checks passed.");
 }
