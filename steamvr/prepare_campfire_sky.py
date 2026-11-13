@@ -1000,6 +1000,10 @@ TUNED_SCENE = (
     '--drop', 'ui_skybox_characterSelect_sky', 'terrain_characterCreate02', '--spin',
     'structure02_01_pcvr_behind:180', 'structure04_01_pcvr_behind:90', 'structure06_01_pcvr_behind:-90',
     'structure05_01_pcvr_behind:180', '--grow', 'terrain_characterCreate03_01:1.08:-3:0.5', '--copy',
+    # the game's wind gusts along the wall left of the gate too (owner 2026-11-12: two turned like the one
+    # right of it, the far one turned a quarter and three quarters behind the wall)
+    '@FX_UICharacterCreate_gusts_30x30_01:-56.9:13.5:0:180', '@FX_UICharacterCreate_gusts_30x30_01:-56.9:53.5:0:180',
+    '@FX_UICharacterCreate_gusts_30x30_01:-79.4:93.5:0:270',
     '@terrain_characterCreate01_01:-168.9:88.4:0.04:90', '@terrain_characterCreate01_01:-148.9:88.4:0.04:90',
     'wall_segment_short_53_pcvr_behind:0:10', 'wall_segment_short_53_pcvr_behind:0:20',
     'wall_segment_short_10_pcvr_behind:10:0', 'wall_segment_short_10_pcvr_behind:45:0',
