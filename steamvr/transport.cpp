@@ -878,8 +878,12 @@ math::Quat turnBase{0,0,0,1};bool turnBaseKnown=false;double roomSaidAt=0;
 roomsteps::Chase roomChase;
 roomsteps::Output roomOut;
 math::Vec roomHero{};bool roomHeroKnown=false;double roomHeroAt=0;
-struct RoomStepStats {double from=0,pauseSaid=0;float walked=0,followed=0;unsigned pushed=0,jumps=0;bool on=false,walking=false;
+// walked: the hero's moves while followed; followed: what the origin took of them (Follow); away: the rest, the game
+// carrying him elsewhere (Leap, Whirlwind, Charge), which the camera went along with.
+struct RoomStepStats {double from=0,pauseSaid=0;float walked=0,followed=0,away=0;unsigned pushed=0,jumps=0;bool on=false,walking=false;
                       roomsteps::Pause pause=roomsteps::Pause::Off;} roomStats;
+// HeroCarried (vrcam): until when, GetTickCount64 ms, the game carries the hero itself (Leap's take-off and flight).
+std::atomic<uint64_t> heroCarriedUntil{0};
 GripStickButton leftMenuButton;
 stickgestures::Gestures rightStickGestures;   // right stick up: run / walk (the Stick toggle); down: loot labels
 MenuTriggerGate menuTriggerGate;
@@ -6119,8 +6123,15 @@ void Input() {
         in.trigger=motionInput.trigger>.3f||motionInput.leftTrigger>.3f;
         in.bow=motionOutput.bowDrawing;
         in.cast=NativeSkillCasting();
+        in.carried=GetTickCount64()<heroCarriedUntil.load();
         roomOut=roomChase.Step(in);
         auto& st=roomStats;
+        if(roomOut.recentre) {   // the watchdog (room_steps.h FarMetres): the chase moved its anchor; the origin goes with it
+            origin=origin+roomOut.shift;
+            char line[240];std::snprintf(line,sizeof line,"Frame room steps: the view had come off the hero - you stood %.2f m from his spot for %.1f s (%s); the room is put back under you",
+                roomOut.apart,roomOut.heldFor,roomOut.blocked?"blocked: he could not come closer":roomsteps::PauseName(roomOut.pause));
+            Say(line);
+        }
         if(in.on!=st.on){st.on=in.on;Say(in.on?"Frame room steps: on - the hero's spot follows you in your room":"Frame room steps: off");}
         if(roomOut.push!=st.walking) {
             st.walking=roomOut.push;char line[200];
@@ -6137,12 +6148,12 @@ void Input() {
         if(roomOut.push)++st.pushed;
         if(st.from<=0)st.from=in.time;
         if(in.time-st.from>=1) {
-            if(st.pushed||st.followed>0||st.jumps) {
-                char line[240];std::snprintf(line,sizeof line,"Frame room steps: last %.1f s: pushed %u frames, the hero walked %.2f m, the origin followed %.2f m, jumps %u; now %.2f m from the hero, pause %s",
-                    in.time-st.from,st.pushed,st.walked,st.followed,st.jumps,roomOut.offset,roomsteps::PauseName(roomOut.pause));
+            if(st.pushed||st.followed>0||st.away>0||st.jumps) {
+                char line[300];std::snprintf(line,sizeof line,"Frame room steps: last %.1f s: pushed %u frames, the hero walked %.2f m, the origin followed %.2f m (%.2f m he moved away from you not followed), jumps %u; now %.2f m from the hero, pause %s",
+                    in.time-st.from,st.pushed,st.walked,st.followed,st.away,st.jumps,roomOut.offset,roomsteps::PauseName(roomOut.pause));
                 Say(line);
             }
-            st.from=in.time;st.pushed=st.jumps=0;st.walked=st.followed=0;
+            st.from=in.time;st.pushed=st.jumps=0;st.walked=st.followed=st.away=0;
         }
     }
     ++s.counter;
@@ -6323,7 +6334,7 @@ bool Begin(bool pair=false) {
     bowRenderTime=GetTickCount64();
     const bool loaded=inWorld&&inWorld();
     if(loaded&&!worldWasLoaded)worldCalibrationPending=true;
-    if(!loaded)worldCalibrationPending=worldRecenter=false;
+    if(!loaded){worldCalibrationPending=worldRecenter=false;heroCarriedUntil=0;}   // no Leap is carried out of a game
     worldWasLoaded=loaded;
     // A cinematic: the world is not drawn (cinema_screen.h) - its frame on the cinema screen, never the spatial menus.
     const bool cinema=gamestate::CinemaPlaying();
@@ -8136,6 +8147,10 @@ bool CrossbowAiming() {
     if(slot<0||slot>=skills::Count||!interaction::Fresh(interactionInput.snapshot,gamestate::LocalPlayer(),GetTickCount64()))return false;
     const auto& skill=interactionInput.snapshot.skills[slot];return skill.known&&skill.available&&skill.id==0;
 }
+void HeroCarried(uint32_t milliseconds) {
+    const uint64_t until=GetTickCount64()+milliseconds;
+    for(uint64_t was=heroCarriedUntil.load();was<until&&!heroCarriedUntil.compare_exchange_weak(was,until);){}
+}
 bool NativeSkillCasting() {
     std::lock_guard lock(mutex);
     return motionControls.load()&&(gameplay::CastingSkill(motionInput,motionOutput,GetTickCount64()-motionAt)||RecordCastRow());
@@ -8538,19 +8553,25 @@ bool View(float out[16],const float hero[3],float eyeHeight,float userEyeHeight,
         }
     }
     if(eye<0) {   // Room follows you (room_steps.h): while the hero walks after your step, the origin follows him,
-                  // so the camera stays at the real head. A jump (teleport, waypoint, Leap) is not followed.
+                  // so the camera stays at the real head. A jump (teleport, waypoint, another area) is not followed,
+                  // and the game carrying him elsewhere (Leap's flight, Whirlwind) only as far as it pays your step off
+                  // (Follow): followed whole, the origin flew off with him and the camera stayed behind until a reload.
         const math::Vec now{hero[0],hero[1],hero[2]};const double at=Milliseconds()/1000.0;
-        if(roomHeroKnown&&roomOut.follow&&at>roomHeroAt&&at-roomHeroAt<.25) {
+        if(roomHeroKnown&&at>roomHeroAt&&at-roomHeroAt<.25) {
             const math::Vec moved{now.x-roomHero.x,0,now.z-roomHero.z};
             const float metres=std::sqrt(moved.x*moved.x+moved.z*moved.z)/upm;
             if(metres>roomsteps::MaxHeroStep) {
-                ++roomStats.jumps;
-                char line[200];std::snprintf(line,sizeof line,"Frame room steps: the hero moved %.2f m in %.0f ms (a teleport, waypoint or leap): the origin stays",metres,(at-roomHeroAt)*1000);
-                Say(line);
-            } else if(metres>0) {
-                const auto shift=roomsteps::Shift(moved,base,upm);
-                origin=origin+shift;roomChase.Shifted(shift);
-                roomStats.walked+=metres;roomStats.followed+=std::sqrt(shift.x*shift.x+shift.z*shift.z);
+                roomChase.Jumped();
+                if(roomOut.follow) {
+                    ++roomStats.jumps;
+                    char line[200];std::snprintf(line,sizeof line,"Frame room steps: the hero moved %.2f m in %.0f ms (a teleport, waypoint or another area): the origin stays",metres,(at-roomHeroAt)*1000);
+                    Say(line);
+                }
+            } else if(roomOut.follow&&metres>0) {
+                const auto shift=roomChase.Follow(roomsteps::Shift(moved,base,upm));
+                origin=origin+shift;roomChase.Shifted(shift,metres);
+                const float followed=std::sqrt(shift.x*shift.x+shift.z*shift.z);
+                roomStats.walked+=metres;roomStats.followed+=followed;roomStats.away+=std::max(0.f,metres-followed);
             }
         }
         roomHero=now;roomHeroKnown=true;roomHeroAt=at;
