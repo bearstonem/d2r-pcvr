@@ -54,8 +54,11 @@ uintptr_t                  g_base = 0;
 
 SimTickFn     o_simTick     = nullptr;
 FindRoomsFn   o_findRooms   = nullptr;
-EnsureTiledFn g_ensureTiled = nullptr;
-PushBackFn    g_pushBack    = nullptr;
+std::atomic<EnsureTiledFn> g_ensureTiled{nullptr};
+std::atomic<PushBackFn> g_pushBack{nullptr};
+std::atomic<uint64_t> g_nextBindingsTry{0};
+std::atomic<int> g_expansion{0},g_furthestRoom{0},g_tileAttempts{0};
+std::atomic<uint64_t> g_lastExpansionMs{0};
 
 std::atomic<bool> g_installed { false };
 std::atomic<int>  g_radius { 1 };
@@ -65,10 +68,10 @@ std::atomic<int>  g_loaded { 0 };
 // Model visibility: the game's setter and getter, and how long the forced
 // re-sort after a change lasts (the next ticks pick the new radius up even if
 // the hero stands still).
-SetRadiusFn            g_setModelRadius = nullptr;
-GetRadiusFn            g_getModelRadius = nullptr;
+std::atomic<SetRadiusFn> g_setModelRadius{nullptr};
+std::atomic<GetRadiusFn> g_getModelRadius{nullptr};
 std::atomic<uint64_t>  g_recalcUntil { 0 };
-bool                   g_recalcOk = false;
+std::atomic<bool> g_recalcOk{false};
 
 // Big objects drawn farther: the game's test, hooked once the setting is first on.
 InRangeFn              o_inRange = nullptr;
@@ -126,21 +129,28 @@ bool ListContains(void* list, void* room) {
 // Walks the DRLG room graph from the hero's room out to `radius` rings, tiles a
 // bounded number of missing rooms and appends every tiled room to the list.
 void LoadAndAdd(void* centreRoom, void* list, int radius) {
-	if (g_ensureTiled == nullptr || g_pushBack == nullptr) {
+    g_lastExpansionMs.store(GetTickCount64());g_furthestRoom.store(0);
+    const auto ensure=g_ensureTiled.load();const auto append=g_pushBack.load();
+	if (ensure == nullptr || append == nullptr) {
+        g_expansion.store(1);
 		return;
 	}
 	const uintptr_t versionAt = d2rsig::Addr(GameVersionByte);
 	if (versionAt == 0) {
+        g_expansion.store(2);
 		return;
 	}
 	const uint8_t version = *reinterpret_cast<const uint8_t*>(versionAt);
 	if (version > 3) {   // classic / LoD / RotW; anything else means the address is wrong
+        g_expansion.store(3);
 		return;
 	}
 	void* centre = At<void*>(centreRoom, room::Drlg);
 	if (centre == nullptr) {
+        g_expansion.store(4);
 		return;
 	}
+    g_expansion.store(5);
 
 	// Levels the game itself chose to show (its own filter already ran).
 	void*  levels[16];
@@ -179,12 +189,14 @@ void LoadAndAdd(void* centreRoom, void* list, int radius) {
 			void* room = At<void*>(node.room, drlgroom::Room);
 			// Rings 1-2 are the game's own (tiled by it, lazily for ring 2).
 			if (room == nullptr && node.depth >= 3 && budget > 0) {
-				room = g_ensureTiled(version, node.room);
+                g_tileAttempts.fetch_add(1);
+				room = ensure(version, node.room);
 				--budget;
-				g_loaded.fetch_add(1, std::memory_order_relaxed);
+				if(room)g_loaded.fetch_add(1, std::memory_order_relaxed);
 			}
+            if(room)g_furthestRoom.store(std::max(g_furthestRoom.load(),node.depth));
 			if (room != nullptr && !ListContains(list, room)) {
-				g_pushBack(list, &room);
+				append(list, &room);
 			}
 		}
 		if (node.depth >= radius) {
@@ -314,16 +326,33 @@ bool HookInRangeIn() {
 }   // namespace
 
 bool Install(const D2RL::PluginContext* ctx) {
-	if (g_installed.load()) {
-		return true;
-	}
 	if (ctx == nullptr || ctx->exeBase == 0) {
 		return false;
 	}
 	g_ctx  = ctx;
 	g_base = ctx->exeBase;
 	d2rsig::Resolve(ctx);
+	Refresh();
+    if(g_installed.load())return true;
+    // FindRooms first: it does nothing until SimulationTick raises the flag.
+    if (o_findRooms == nullptr) {
+        if (!Check(FindRooms) || !d2rsig::Hook(FindRooms.rva, FindRooms.bytes, FindRooms.size, reinterpret_cast<void*>(&HookFindRooms), reinterpret_cast<void**>(&o_findRooms))) {
+            o_findRooms = nullptr;return false;
+        }
+    }
+    if (o_simTick == nullptr) {
+        if (!Check(LevelSimTick) || !d2rsig::Hook(LevelSimTick.rva, LevelSimTick.bytes, LevelSimTick.size, reinterpret_cast<void*>(&HookSimTick), reinterpret_cast<void**>(&o_simTick))) {
+            o_simTick = nullptr;return false;
+        }
+    }
+    g_installed.store(true);
+    return true;
+}
 
+void Refresh(){
+    if(!g_ctx)return;
+    const uint64_t now=GetTickCount64();auto next=g_nextBindingsTry.load();
+    if(now<next||!g_nextBindingsTry.compare_exchange_strong(next,now+500))return;
 	if (g_ensureTiled == nullptr && Check(EnsureRoomTiled)) {
 		g_ensureTiled = reinterpret_cast<EnsureTiledFn>(d2rsig::Addr(EnsureRoomTiled.rva));
 	}
@@ -337,22 +366,6 @@ bool Install(const D2RL::PluginContext* ctx) {
 	if (!g_recalcOk) {
 		g_recalcOk = Check(ModelRecalcCheck) && d2rsig::Addr(ModelRecalcEveryFrame) != 0;
 	}
-	// FindRooms first: it does nothing until SimulationTick raises the flag.
-	if (o_findRooms == nullptr) {
-		if (!Check(FindRooms) || !d2rsig::Hook(FindRooms.rva, FindRooms.bytes, FindRooms.size, reinterpret_cast<void*>(&HookFindRooms), reinterpret_cast<void**>(&o_findRooms))) {
-			o_findRooms = nullptr;
-			return false;
-		}
-	}
-	if (o_simTick == nullptr) {
-		if (!Check(LevelSimTick) || !d2rsig::Hook(LevelSimTick.rva, LevelSimTick.bytes, LevelSimTick.size, reinterpret_cast<void*>(&HookSimTick), reinterpret_cast<void**>(&o_simTick))) {
-			o_simTick = nullptr;
-			return false;
-		}
-	}
-	// Radius 3+ needs the two called functions; without them it behaves as 2.
-	g_installed.store(true);
-	return true;
 }
 
 bool Installed() { return g_installed.load(); }
@@ -370,10 +383,11 @@ void SetRadius(int rooms) {
 int Radius() { return g_radius.load(); }
 
 bool SetModelRadius(float units) {
-	if (g_setModelRadius == nullptr) {
+    const auto setter=g_setModelRadius.load();
+	if (setter == nullptr) {
 		return false;
 	}
-	g_setModelRadius(units < 10.0f ? 10.0f : (units > 10000.0f ? 10000.0f : units));
+	setter(units < 10.0f ? 10.0f : (units > 10000.0f ? 10000.0f : units));
 	if (g_recalcOk) {   // re-sort now, not when the hero next walks out of the elastic range
 		*reinterpret_cast<volatile uint8_t*>(d2rsig::Addr(ModelRecalcEveryFrame)) = 1;
 		g_recalcUntil.store(GetTickCount64() + 500, std::memory_order_relaxed);
@@ -381,7 +395,16 @@ bool SetModelRadius(float units) {
 	return true;
 }
 
-float ModelRadius() { return g_getModelRadius != nullptr ? g_getModelRadius() : -1.0f; }
+float ModelRadius() { const auto getter=g_getModelRadius.load();return getter ? getter() : -1.0f; }
+
+RuntimeStatus ReadStatus(){
+    RuntimeStatus s;s.hooks=Installed();s.tiler=g_ensureTiled.load()!=nullptr;
+    s.append=g_pushBack.load()!=nullptr;s.modelRadius=g_setModelRadius.load()!=nullptr&&g_getModelRadius.load()!=nullptr;
+    s.recalculate=g_recalcOk.load();s.rings=Radius();s.expansion=g_expansion.load();
+    s.furthestRoom=g_furthestRoom.load();s.roomsAdded=g_added.load();s.roomsLoaded=g_loaded.load();
+    s.tileAttempts=g_tileAttempts.load();const float actual=ModelRadius();
+    s.activeModelRadius=std::isfinite(actual)?actual:-1;s.lastExpansionMs=g_lastExpansionMs.load();return s;
+}
 
 bool SetBigRadius(float units) {
 	const float big = farobjects::Normalize(units);
