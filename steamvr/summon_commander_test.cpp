@@ -405,6 +405,135 @@ void TestStanceGatekeeperAndArmyWatchdog() {
     assert(std::fabs(relocPos.x - warriorSlot.x) < 1e-4f && std::fabs(relocPos.y - warriorSlot.y) < 1e-4f);
 }
 
+// Owner 2026-11-12: in a formation the summons "seem to not be attacking any monsters". Step walked every summon
+// off its spot back to it every 300 ms, a swing included; now one fighting within its stance's leash is left to fight.
+void TestFormationLeavesFightersToFight() {
+    SummonArmyCoordinator coord;
+    const Vec2 playerPos{ 400.0f, 400.0f };
+    // One of each role, so each has the one spot of its role and the spots don't trade.
+    std::vector<ArmyUnitSample> army = {
+        { 101, 289, 3, 1, { 400.0f, 394.0f } }, // Golem (Anchor)
+        { 201, 363, 4, 1, { 397.0f, 395.0f } }, // Skeleton Warrior (Melee)
+        { 301, 364, 5, 1, { 397.0f, 402.0f } }, // Skeleton Mage (Ranged)
+    };
+    std::array<ArmyMoveOrder, MaxMovesPerTick> moves{};
+    size_t emitted = 0;
+    const auto movedUnit = [&](uint32_t id) {
+        for (size_t m = 0; m < emitted; ++m) if (moves[m].unitId == id) return true;
+        return false;
+    };
+    const auto step = [&](uint64_t t) { emitted = coord.Step(army, playerPos, 0.0f, -1.0f, t, moves); };
+    const auto settle = [&](uint64_t t) {   // everyone on its spot (formed), standing
+        step(t);
+        for (size_t i = 0; i < army.size(); ++i) { army[i].pos = coord.tracked[i].slotPos; army[i].animMode = 1; }
+        step(t + 100);
+        for (size_t i = 0; i < army.size(); ++i) assert(coord.tracked[i].inSlot && coord.tracked[i].formed);
+    };
+    const auto offSpot = [&](size_t i, float d, uint8_t mode) {   // d sub-tiles off its spot (away from the hero)
+        const Vec2 s = coord.tracked[i].slotPos;
+        const float dx = s.x - playerPos.x, dy = s.y - playerPos.y, len = std::hypot(dx, dy);
+        army[i].pos = { s.x + dx / len * d, s.y + dy / len * d };
+        army[i].animMode = mode;
+    };
+
+    assert(IsFightMode(4) && IsFightMode(7) && IsFightMode(3) && IsFightMode(14));
+    assert(!IsFightMode(1) && !IsFightMode(2) && !IsFightMode(15) && !IsFightMode(0) && !IsFightMode(12));
+
+    // Protective Ring (Defensive: fight range 7.5 for warriors, 3.5 for mages).
+    assert(coord.ApplyCommanderSkill(SkillRingDef, playerPos));
+    settle(1000);
+    coord.inCombat = true;
+
+    // 1. The bug: a warrior swinging (A1) 4 sub-tiles off its spot is left alone (it used to be walked back).
+    offSpot(1, 4.0f, 4);
+    step(6000);
+    assert(!movedUnit(201));
+    assert(coord.leftToFightLastStep == 1);
+    assert(!coord.tracked[1].inSlot);
+
+    // 2. Between swings (standing again within FightLingerMs): still left alone.
+    army[1].animMode = 1;
+    step(6000 + SummonArmyCoordinator::FightLingerMs - 100);
+    assert(!movedUnit(201));
+
+    // 3. Walking during a fight (maybe at a monster): left alone.
+    army[1].animMode = 2;
+    step(9000);
+    assert(!movedUnit(201));
+
+    // 4. Idle (standing well past the linger) during a fight: back to its spot.
+    army[1].animMode = 1;
+    step(9500);
+    assert(movedUnit(201));
+
+    // 5. Past its stance's leash (7.5 Defensive), even mid-swing: back to its spot.
+    offSpot(1, 10.0f, 4);
+    step(12000);
+    assert(movedUnit(201));
+
+    // 6. A mage casting within 3.5 of its spot stays; one 6 off it goes back.
+    offSpot(2, 3.0f, 7);
+    step(15000);
+    assert(!movedUnit(301));
+    offSpot(2, 6.0f, 7);
+    step(15400);
+    assert(movedUnit(301));
+
+    // 7. No fight: an idle warrior off its spot goes back (the formation re-forms).
+    coord.inCombat = false;
+    settle(20000);
+    offSpot(1, 4.0f, 1);
+    step(24000);
+    assert(movedUnit(201));
+    // ...and one walking off it with no fight near is walked back too.
+    offSpot(1, 4.0f, 2);
+    step(26000);
+    assert(movedUnit(201));
+
+    // 8. Spearhead Assault (Aggressive, fight range 32 in a fight): a new order sends everyone to the spots first...
+    coord.inCombat = true;
+    assert(coord.ApplyCommanderSkill(SkillWedgeAgg, playerPos));
+    step(30000);   // stamps the order
+    assert(coord.orderedAtMs == 30000);
+    offSpot(1, 4.0f, 4);
+    step(30500);
+    assert(coord.Forming(coord.tracked[1], 30500));
+    assert(movedUnit(201));   // mid-swing, but the order comes first
+    // ...then, FormingMs after the order, it may fight far out: 20 sub-tiles off its spot.
+    offSpot(1, 20.0f, 4);
+    step(30000 + SummonArmyCoordinator::FormingMs + 100);
+    assert(!movedUnit(201));
+    // Arriving ends the forming window early: after an order, a warrior that reached its spot may fight at once.
+    assert(coord.ApplyCommanderSkill(SkillWedgeAgg, playerPos));
+    settle(40000);
+    offSpot(1, 20.0f, 4);
+    step(40500);
+    assert(!coord.Forming(coord.tracked[1], 40500));
+    assert(!movedUnit(201));
+
+    // 9. Hold Ground away from the hero (no hostiles near the hero, so inCombat is false): a summon swinging near
+    // the held spot is still left to fight, within the Defensive leash, and the congestion watchdog leaves it be.
+    coord.inCombat = false;
+    assert(coord.ApplyCommanderSkill(SkillHoldGround, { 440.0f, 400.0f }));
+    settle(50000);
+    offSpot(1, 0.0f, 4);
+    army[1].pos = { coord.tracked[1].slotPos.x + 5.0f, coord.tracked[1].slotPos.y };
+    step(55000);
+    assert(!movedUnit(201));
+    Vec2 reloc{};
+    assert(!coord.CheckArmyUnstuck(201, army[1].pos, playerPos, 55100, reloc));
+    assert(!coord.CheckArmyUnstuck(201, army[1].pos, playerPos, 55100 + SummonArmyCoordinator::FightLingerMs - 200, reloc));
+    assert(coord.tracked[1].stuckSinceMs == 0);
+
+    // 10. A focused monster widens the range to the Aggressive one; Fall Out leaves everything to the game.
+    coord.SetPriorityTarget(999, { 480.0f, 400.0f });
+    assert(coord.FightRange(SummonRole::FrontlineMelee) == GetStanceLeashRadius(ArmyStance::Aggressive, SummonRole::FrontlineMelee, true));
+    coord.ClearPriorityTarget();
+    assert(coord.ApplyCommanderSkill(SkillFallOut, playerPos));
+    step(60000);
+    assert(emitted == 0);
+}
+
 void TestCommanderUiAndGlyphIntegration() {
     using namespace framevr;
     // 1. Category routing: Summoning tab for Necromancer (3) and Druid (1), General (4) for others
@@ -531,6 +660,7 @@ int main() {
     TestCoordinatorAntiSwapAndStaggeredBudget();
     TestCorridorCompressionAndWalkableSpiral();
     TestStanceGatekeeperAndArmyWatchdog();
+    TestFormationLeavesFightersToFight();
     TestCommanderUiAndGlyphIntegration();
     TestApproachFromRearOrientationWaypoint();
     TestFormationMinimumSeparation();
