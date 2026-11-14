@@ -16,11 +16,14 @@ def description(name, y):
         'type': 'TextBoxWidget', 'name': name,
         'fields': {
             'priority': 10,
-            'rect': {'x': -500, 'y': y, 'width': 1000},
+            'rect': {'x': -450, 'y': y, 'width': 900, 'height': 120},
+            'truncateWithEllipsis': False,
             'style': {
                 'pointSize': '$SmallFontSize',
-                'alignment': {'h': 'center'},
-                'options': {'pipeCharacterBehavior': 'handle'},
+                'alignment': {'h': 'center', 'v': 'top'},
+                'options': {'pipeCharacterBehavior': 'handle',
+                            'newlineHandling': 'standard', 'lineWrap': True},
+                'spacing': {'leading': 0.95},
             },
         },
     }
@@ -45,8 +48,10 @@ def payload():
                      'type': 'TextBoxWidget', 'name': 'Name',
                      'fields': {'style': {'pointSize': '$SmallFontSize'}},
                  }]},
-                description('Unique', 30),
-                description('Additional', 100),
+                # Start close to the bar; leave three small-font lines before
+                # the game's type/immunity text so wrapped affixes do not overlap.
+                description('Unique', 0),
+                description('Additional', 124),
             ],
         }],
     }
