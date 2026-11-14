@@ -2,7 +2,7 @@
 
 Extend offline enemy and object availability beyond the game's native nearby rooms. A new **VR Settings > Graphics > Performance > Draw distance > Enemy activation distance** slider selects **Native (0)** or **1–8 room rings**. Press **Apply** to update coverage in-game, including while standing still, without restarting.
 
-- Base: Upstream main at `9975da7` (v0.3.33).
+- Base: Latest release **v0.3.35**, upstream main at `1217d77`.
 - Settings: `[render] subscription_rings` controls enemy/object activation and ongoing client delivery. Terrain and scenery distances remain independent.
 - Swapchains: None added.
 - Logging: Reports subscription readiness, coverage changes and runtime status.
@@ -50,12 +50,15 @@ These are example results; performance depends on the area, room layout and syst
 
 ## Validation
 
-- Windows Release build succeeded. The subscription slider passed all 233 native CTests, including corrected menu checks on rerun.
+- Windows Release build succeeded against v0.3.35; all 241 native CTests passed in 80.46 seconds.
 - Six Python integration tests passed for subscription controls and shared-memory status readback.
+- Launch-wrapper tests passed (15 tests); developer-staging tests passed (5 tests, with 1 skipped).
 - The updated defaults passed the settings model, menu layout and persistence tests.
 - Coverage tests exercise stationary changes through **8 → 3 → Native → 8**, every intermediate ring value, reference cleanup and repeated transitions.
 - Menu previews were checked visually; fit checks passed for both hand layouts.
 - `git diff --check` passed.
+
+The in-game checklist and FPS example record earlier feature testing. The v0.3.35 integration still needs a separate headset test.
 
 In-game checks:
 

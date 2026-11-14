@@ -1,5 +1,9 @@
 #include "haptic_pulse.h"
 #include "haptic_actions.h"
+#include "haptic_frequency.h"
+#include "haptic_impact.h"
+#include "haptic_heartbeat.h"
+#include "controller_profiles.h"
 #include "hand_role.h"
 #include "xinput_rumble.h"
 #include <cstdio>
@@ -50,8 +54,20 @@ void Routing() {
     Check(actions.Create(XR_NULL_HANDLE,Runtime::Create)==XR_SUCCESS,"create per-hand outputs");
     Check(actions.Info(0).action!=actions.Info(1).action,"hands use distinct action handles");
     Check(Runtime::names[actions.Info(0).action]=="feedback_right"&&Runtime::names[actions.Info(1).action]=="feedback_left","stable named outputs replace shared feedback binding");
+    // The outputs the transport suggests (controller_profiles.h): in every profile each hand's action
+    // resolves to that hand's own output, and nothing else.
     std::vector<XrActionSuggestedBinding> bindings;
-    Check(actions.Bind(XR_NULL_HANDLE,Runtime::Path,bindings)==XR_SUCCESS&&bindings.size()==2,"bind both outputs");
+    for(const auto* profile:framevr::controllers::Profiles) {
+        std::vector<XrActionSuggestedBinding> outputs;
+        for(const auto& s:framevr::controllers::Suggestions(profile))if(s.action==framevr::controllers::Bind::Haptic) {
+            XrPath path=XR_NULL_PATH;
+            Check(Runtime::Path(XR_NULL_HANDLE,s.path.c_str(),&path)==XR_SUCCESS,"suggested output is a hand's haptic path");
+            outputs.push_back({actions.Info(s.hand).action,path});
+        }
+        Check(outputs.size()==2&&outputs[0].action==actions.Info(0).action&&outputs[0].binding==91&&
+            outputs[1].action==actions.Info(1).action&&outputs[1].binding==47,"bind both outputs, each to its own hand, in every profile");
+        if(bindings.empty())bindings=outputs;
+    }
     Runtime runtime;
     for(const auto& binding:bindings)runtime.bound[binding.action].push_back(binding.binding);
     Pulses pulses;
@@ -213,5 +229,31 @@ int main() {
         casts.Publish(-1,1,1600);casts.Publish(2,1,1600);casts.Publish(0,0,1600);
         Check(!casts.Take(0,1,1601,true)&&!casts.Take(2,1,1601,true),"invalid hand or session never produces feedback");
     }
-    std::puts("Haptics: native gamepad rumble isolation, per-hand output bindings, master/categories, runtime amplitude, mute/cancel, preview isolation, cast events, expiry and lifecycle passed");
+    {   // haptic_frequency.h: a pulse with no frequency of its own (OpenXR's 0) goes to an Index at IndexHz;
+        // a set frequency, and every other controller, stay as they were.
+        using framevr::controllers::Layout;
+        Check(XR_FREQUENCY_UNSPECIFIED==0&&OutputFrequency(XR_FREQUENCY_UNSPECIFIED,Layout::Index)==IndexHz&&IndexHz>0,"an Index gets a frequency it plays");
+        for(const auto layout:{Layout::Touch,Layout::Frame,Layout::Motion,Layout::Generic})
+            Check(OutputFrequency(XR_FREQUENCY_UNSPECIFIED,layout)==XR_FREQUENCY_UNSPECIFIED,"other controllers keep the runtime's choice");
+        Check(OutputFrequency(180,Layout::Index)==180&&OutputFrequency(55,Layout::Touch)==55&&OutputFrequency(250,Layout::Frame)==250,"a set frequency is sent as it is");
+        Check(OutputFrequency(NAN,Layout::Index)==IndexHz&&OutputFrequency(-5,Layout::Index)==IndexHz&&OutputFrequency(NAN,Layout::Touch)==0&&OutputFrequency(INFINITY,Layout::Touch)==0,
+            "a broken frequency counts as none");
+        // Every pulse the mod plays reaches an Index at a frequency inside the range Valve's driver contract
+        // clamps to (1e6/65535 .. 1e6/300 Hz), so none of them is dropped as 0 Hz.
+        auto plays=[](const Sample& s){const float hz=OutputFrequency(s.frequency,Layout::Index);return s.milliseconds<=0||(hz>=1e6f/65535&&hz<=1e6f/300);};
+        for(int c=0;c<CategoryCount;++c)for(int h=0;h<2;++h)for(const bool shortMelee:{false,true})
+            Check(plays(SampleFor(Category(c),shortMelee,h)),"category pulses play on an Index");
+        for(int s=0;s<SurfaceCount;++s)for(int h=0;h<2;++h)for(const bool shortMelee:{false,true}) {
+            const auto pattern=ImpactPattern(Surface(s),h,shortMelee);
+            for(int i=0;i<pattern.count;++i)Check(plays(pattern.steps[i].sample),"hit, block and parry patterns play on an Index");
+        }
+        for(const float draw:{0.f,.5f,1.f}) {
+            for(int h=0;h<2;++h){const auto snap=BowSnap(draw,h);for(int i=0;i<snap.count;++i)Check(plays(snap.steps[i].sample),"bow snap plays on an Index");}
+            for(const auto& s:BowPull(draw))Check(plays(s),"bow pull plays on an Index");
+            Check(plays(BowHold(draw))&&plays(HeartLub(draw))&&plays(HeartDub(draw)),"bow tremor and heartbeat play on an Index");
+        }
+        for(const bool bow:{false,true})for(const auto& s:Release(bow))Check(plays(s),"release plays on an Index");
+        Check(plays({.3f,70,60})&&plays({.45f,45}),"the parry-miss buzz and the transport's interaction taps play on an Index");
+    }
+    std::puts("Haptics: native gamepad rumble isolation, per-hand output bindings in every profile, master/categories, runtime amplitude, Index frequency, mute/cancel, preview isolation, cast events, expiry and lifecycle passed");
 }

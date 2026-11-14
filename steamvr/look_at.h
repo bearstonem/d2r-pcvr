@@ -262,4 +262,19 @@ inline bool Apply(const Rig& rig,const int16_t* parents,float* pose,int count,co
     const Vec after=About({0,1,0},e.yaw*share,ahead);
     return turn(rig.head,e.yaw*(1-share),e.tilt*(1-share),after);
 }
+
+// ---- Bodies the game has stopped posing ----
+// A corpse is not posed again once its death has played out (nor is a body frozen solid, or any
+// while the game is paused), and the game's pose is all this side has of a body: one whose pose has
+// not changed for StillAfter is left alone, whatever way up it lies (owner 2026-11-11: "dead NPCs
+// still try to track the player with their heads" - corpses fallen sitting, kneeling or in a heap
+// kept their bodies upright enough for Want). A body the game animates is posed again many times a
+// second, so three changes inside StillAfter count as moving: one change alone - the limbs put back
+// after a push (bodies::PutBack) - does not wake a corpse.
+inline constexpr unsigned long long StillAfter=600;   // milliseconds
+struct Posing {
+    unsigned long long at[3]={};   // the last three times the game's pose was seen to change, newest first
+    void Changed(unsigned long long now){at[2]=at[1];at[1]=at[0];at[0]=now;}
+    bool Moving(unsigned long long now) const {return at[2]!=0&&now>=at[2]&&now-at[2]<=StillAfter;}
+};
 }  // namespace framevr::lookat

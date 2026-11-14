@@ -11,14 +11,15 @@ using motionsim::RestR;
 using motionsim::RestL;
 
 // The Barbarian's motions (motions_barbarian.h), done well from the resting pose. Head-local points
-// (+X right, +Y up from the eyes, -Z forward); hands {right, left}.
-static void BattleOrders(Sim& s){s.MoveR({.03f,-.12f,-.18f},.35f);s.Hold(.2f);s.MoveR({.08f,.30f,-.10f},.25f);}
-static void Shout(Sim& s){s.Move({.07f,-.12f,-.18f},{-.07f,-.12f,-.18f},.4f);s.Hold(.2f);s.Move({.10f,-.15f,-.58f},{-.10f,-.15f,-.58f},.25f);}
+// (+X right, +Y up from the eyes, -Z forward); hands {right, left}. The warcries go to the mouth and straight
+// on out, no stop there (owner, 2026-11-11: "We bring it up and push it out").
+static void BattleOrders(Sim& s){s.MoveR({.03f,-.12f,-.18f},.25f);s.MoveR({.08f,.30f,-.10f},.25f);}
+static void Shout(Sim& s){s.Move({.07f,-.12f,-.18f},{-.07f,-.12f,-.18f},.25f);s.Move({.10f,-.15f,-.58f},{-.10f,-.15f,-.58f},.25f);}
 static void BattleCommand(Sim& s) {
     s.MoveR({.02f,-.42f,-.42f},.3f);
     for(int i=0;i<2;++i){s.MoveR({.02f,-.42f,-.10f},.14f);s.Hold(.05f);s.MoveR({.02f,-.42f,-.40f},.18f);}
 }
-static void WarCry(Sim& s){s.MoveR({.03f,-.12f,-.18f},.35f);s.Hold(.2f);s.MoveR({.10f,-.35f,-.62f},.25f);}
+static void WarCry(Sim& s){s.MoveR({.03f,-.12f,-.18f},.25f);s.MoveR({.10f,-.35f,-.62f},.25f);}
 static void Howl(Sim& s){s.Move({.08f,-.40f,-.20f},{-.08f,-.40f,-.20f},.35f);s.Move({.62f,-.35f,-.15f},{-.62f,-.35f,-.15f},.3f);}
 static void BattleCry(Sim& s){s.Move({.22f,-.18f,-.05f},{-.22f,-.18f,-.05f},.4f);s.Hold(.1f);s.Move({.24f,-.82f,-.05f},{-.24f,-.82f,-.05f},.3f);}
 static void Leap(Sim& s){s.Move({.22f,-.65f,.22f},{-.22f,-.65f,.22f},.4f);s.Move({.22f,.30f,-.15f},{-.22f,.30f,-.15f},.35f);}
@@ -32,13 +33,13 @@ static void Taunt(Sim& s){s.Move({.15f,-.38f,-.50f},{-.15f,-.38f,-.50f},.35f);s.
 static void SlowFindPotion(Sim& s){s.MoveL({-.20f,-.45f,-.45f},.35f);s.Hold(.25f);s.MoveL({-.17f,-.18f,-.05f},1.f);}
 static void SlowGrimWard(Sim& s){s.MoveR({.20f,-.28f,-.45f},.35f);s.Hold(.25f);s.MoveR({.20f,-.66f,-.45f},1.f);}
 static void SlowTaunt(Sim& s){s.Move({.15f,-.38f,-.50f},{-.15f,-.38f,-.50f},.35f);s.Hold(.25f);s.Move({.12f,-.42f,-.12f},{-.12f,-.42f,-.12f},1.f);}
-static void SlowBattleOrders(Sim& s){s.MoveR({.03f,-.12f,-.18f},.35f);s.Hold(.2f);s.MoveR({.08f,.30f,-.10f},1.2f);}
-static void SlowShout(Sim& s){s.Move({.07f,-.12f,-.18f},{-.07f,-.12f,-.18f},.4f);s.Hold(.2f);s.Move({.10f,-.15f,-.58f},{-.10f,-.15f,-.58f},1.2f);}
+static void SlowBattleOrders(Sim& s){s.MoveR({.03f,-.12f,-.18f},.6f);s.MoveR({.08f,.30f,-.10f},1.2f);}
+static void SlowShout(Sim& s){s.Move({.07f,-.12f,-.18f},{-.07f,-.12f,-.18f},.6f);s.Move({.10f,-.15f,-.58f},{-.10f,-.15f,-.58f},1.2f);}
 static void SlowBattleCommand(Sim& s) {
     s.MoveR({.02f,-.42f,-.42f},.3f);
     for(int i=0;i<2;++i){s.MoveR({.02f,-.42f,-.10f},1.1f);s.Hold(.05f);s.MoveR({.02f,-.42f,-.40f},.5f);}
 }
-static void SlowWarCry(Sim& s){s.MoveR({.03f,-.12f,-.18f},.35f);s.Hold(.2f);s.MoveR({.10f,-.35f,-.62f},1.2f);}
+static void SlowWarCry(Sim& s){s.MoveR({.03f,-.12f,-.18f},.6f);s.MoveR({.10f,-.35f,-.62f},1.2f);}
 static void SlowHowl(Sim& s){s.Move({.08f,-.40f,-.20f},{-.08f,-.40f,-.20f},.35f);s.Move({.62f,-.35f,-.15f},{-.62f,-.35f,-.15f},1.5f);}
 static void SlowBattleCry(Sim& s){s.Move({.22f,-.18f,-.05f},{-.22f,-.18f,-.05f},.4f);s.Hold(.1f);s.Move({.24f,-.82f,-.05f},{-.24f,-.82f,-.05f},1.5f);}
 static void SlowLeap(Sim& s){s.Move({.22f,-.65f,.22f},{-.22f,-.65f,.22f},.6f);s.Move({.22f,.30f,-.15f},{-.22f,.30f,-.15f},1.5f);}
@@ -113,11 +114,40 @@ static void Run() {
         Sim lean(Motion::BattleCommand);lean.MoveR({.02f,-.42f,-.10f},.6f);lean.Hold(1.f);
         Check(lean.casts==0,"Battle Command: a fist laid on the chest is no beat");
     }
-    {   // the warcries' wind-up: a fist swung past the mouth without stopping starts none
+    {   // the warcries at once (owner, 2026-11-11: "Should not have a requirement for holding our hands up to our face for any
+        // period of time It should be pretty much immediate We bring it up and push it out"): until then the fist rested at
+        // the mouth 0.15 s first, and none of these cast
         for(const auto m:{Motion::BattleOrders,Motion::WarCry}) {
             Sim s(m);s.MoveR({.03f,-.12f,-.18f},.18f);s.MoveR(m==Motion::WarCry?math::Vec{.10f,-.35f,-.62f}:math::Vec{.08f,.30f,-.10f},.2f);s.Hold(.3f);
-            Check(s.casts==0,"a fist swung through the mouth, no rest there: no warcry");
+            Check(s.casts==1,"a fist brought to the mouth and thrust on at once, no rest there: its warcry");
         }
+        Sim quick(Motion::Shout);quick.Move({.07f,-.12f,-.18f},{-.07f,-.12f,-.18f},.2f);quick.Move({.10f,-.15f,-.58f},{-.10f,-.15f,-.58f},.2f);quick.Hold(.3f);
+        Check(quick.casts==1,"Shout: both fists up to the mouth and pushed straight out, no rest there, casts");
+        // both fists swept up from the chest past the mouth and on out ahead, never stopping (a curve through the mouth)
+        Sim sweep(Motion::Shout);sweep.Move({.07f,-.40f,-.10f},{-.07f,-.40f,-.10f},.35f);
+        sweep.Drive(.3f,[](float t,math::Vec& r,math::Vec& l) {
+            const float u=std::min(t/.3f,1.f),a=(1-u)*(1-u),b=2*u*(1-u),c=u*u;
+            r=math::Vec{.07f,-.40f,-.10f}*a+math::Vec{.055f,.075f,.02f}*b+math::Vec{.10f,-.15f,-.58f}*c;
+            l={-r.x,r.y,r.z};
+        });
+        sweep.Hold(.3f);
+        Check(sweep.casts==1,"Shout: both fists swept up past the mouth and on out ahead, never stopping, casts");
+        Sim rest(Motion::Shout);rest.Move({.07f,-.12f,-.18f},{-.07f,-.12f,-.18f},.4f);rest.Hold(.3f);rest.Move({.10f,-.15f,-.58f},{-.10f,-.15f,-.58f},.25f);rest.Hold(.3f);
+        Check(rest.casts==1,"Shout: a rest at the mouth first still casts");
+        // still not a warcry: a drift, a push that never came to the mouth, a mouth left too long ago
+        Sim drift(Motion::Shout);drift.Move({.07f,-.12f,-.18f},{-.07f,-.12f,-.18f},.6f);drift.Move({.10f,-.15f,-.58f},{-.10f,-.15f,-.58f},1.f);drift.Hold(.3f);
+        Check(drift.casts==0,"Shout: the fists drifted to the mouth and out, slowly, is none");
+        Sim chest(Motion::Shout);chest.Move({.07f,-.42f,-.15f},{-.07f,-.42f,-.15f},.3f);chest.Move({.10f,-.40f,-.58f},{-.10f,-.40f,-.58f},.2f);chest.Hold(.3f);
+        Check(chest.casts==0,"Shout: both fists pushed out from the chest, not the mouth, is none");
+        Sim sides(Motion::Shout);sides.Move({.30f,-.12f,-.15f},{-.30f,-.12f,-.15f},.3f);sides.Move({.10f,-.15f,-.58f},{-.10f,-.15f,-.58f},.2f);sides.Hold(.3f);
+        Check(sides.casts==0,"Shout: both fists pushed in and out from by the shoulders, not the mouth, is none");
+        Sim late(Motion::Shout);late.Move({.07f,-.12f,-.18f},{-.07f,-.12f,-.18f},.25f);late.Move({.08f,-.40f,-.15f},{-.08f,-.40f,-.15f},.3f);
+        late.Hold(.5f);late.Move({.10f,-.40f,-.58f},{-.10f,-.40f,-.58f},.2f);late.Hold(.3f);
+        Check(late.casts==0,"Shout: to the mouth, let down to the chest, then pushed out (the mouth long left) is none");
+        Sim low(Motion::WarCry);low.MoveR({.20f,-.40f,-.10f},.3f);low.MoveR({.10f,-.35f,-.62f},.2f);low.Hold(.3f);
+        Check(low.casts==0,"War Cry: a fist thrust forward from the chest, never at the mouth, is none");
+        Sim beside(Motion::BattleOrders);beside.MoveR({.30f,.30f,-.10f},.3f);beside.Hold(.3f);
+        Check(beside.casts==0,"Battle Orders: a fist raised up beside the head, not past the mouth, is none");
         Sim both(Motion::BattleOrders);both.Move({.03f,-.12f,-.18f},RestL,.35f);both.Hold(.2f);both.Move({.08f,.30f,-.10f},{-.2f,.25f,-.1f},.25f);
         Check(both.casts==0,"Battle Orders: both hands up is no Battle Orders");
     }

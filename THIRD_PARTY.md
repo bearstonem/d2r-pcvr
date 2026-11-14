@@ -118,6 +118,9 @@ and extracts `c/Redist/D3D/x64/d3dcompiler_47.dll` for mod-local shader compilat
 Neither the SDK package nor its compiler is bundled in this repository or release.
 Microsoft's [Windows SDK license](https://aka.ms/WinSDKLicenseURL) applies.
 
+The campfire's mountain panorama `reshade/sky/D2R_Campfire_Pano.png` was generated
+with ChatGPT by contributor Kudlatytrue and is free to use with this mod.
+
 The visor blood splatters in `steamvr/assets/blood-splatters.png` are eight
 transparent images supplied by contributor ChuckRibbits, who states they are free,
 openly licensed vector splatters; their original download source was not

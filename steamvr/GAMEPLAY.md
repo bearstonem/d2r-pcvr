@@ -167,6 +167,10 @@ described with the right fist is done with the left, toward the other side). In 
 already turned round: VR Settings, the Controller guide, the wheels and the MOTIONS page name the hand that
 does each thing. Every weapon kind is mirrored too: a bow is held in the right hand and drawn with the left,
 a crossbow, staff, spear, polearm or two-handed weapon is led by the left hand. Details: [Left-handed play](../CONTROLS.md#left-handed-play-experimental).
+With **Sticks stay right-handed** (under Left-handed, shown while it is on) the sticks are not exchanged: read
+"left stick" and "right stick" as written (the left stick walks, the right stick turns, runs / walks, shows
+loot names and zooms the maps), and Walk direction: Controller follows the left controller. A stick's click
+stays with its hand: each hand's wheel opens from its own stick ([Sticks stay right-handed](../CONTROLS.md#sticks-stay-right-handed)).
 
 | Action | Control |
 |---|---|
@@ -190,7 +194,7 @@ a crossbow, staff, spear, polearm or two-handed weapon is led by the left hand. 
 | Physical belt potion | Reach to an original 3D bottle on the front belt and hold **Right Grip** to grab; left-hand grip also works |
 | Drink | Keep grip held, bring the bottle's opening to your mouth and tip nearly horizontal for 0.25 seconds; release to return an unused potion |
 | Drop the empty bottle | Open your hand after drinking: the bottle falls, bounces and rolls on the floor (visual only); hit it with your weapon or shield to knock it away |
-| Heal the mercenary | Toss a held Health, Rejuvenation, Antidote or Thawing bottle (release mid-swing, at least 1.4 m/s) so it lands within 1.5 m of your mercenary's feet. It shatters on landing (with bottle physics, where it first touches a wall, table, prop or the floor); a miss leaves the potion on the belt |
+| Heal the mercenary | Toss a held Health, Rejuvenation, Antidote or Thawing bottle (release mid-swing, at least 1.4 m/s) so it lands within 4 m of your mercenary's feet (it walks on while the bottle flies). It shatters on landing (with bottle physics, where it first touches a wall, table, prop or the floor); a miss leaves the potion on the belt |
 | Quick potion | Left Y → **EQUIPMENT / BELT** → trigger a potion wedge; grip on a potion wedge instead grabs it into the right hand |
 | Swap weapon sets | Reach the swap hand over either shoulder and press its grip; the right hand, or the left with VR Settings > Controls > Hands > Left-handed on. Hip anchors are removed |
 | Seated weapon selection | Utility wheel → **Weapon I** or **Weapon II** |
@@ -444,6 +448,36 @@ clicks follow the moved panel. Every in-game and main/title menu reopens at
 that distance until the game is restarted or **VR Settings > Interface > Menus > Menu
 distance** is changed. The handheld quest log keeps its left-grip placement.
 
+### Cinematics on a screen in the world
+
+The game's cinematics (the logos and the intro, the act videos, the ending, and
+the main menu's Cinematics) play on a flat screen in the world: placed straight
+ahead at eye height as one starts, 5 m away and 6 m wide (about 62 degrees
+across, the whole film in view; the owner tried 12 m at 3 m on 2026-11-12 and
+found it too big and too close), with the film's own 16:9 shape, black around it, and still while you
+look round. Both eyes see the same picture on it, so it stands at its distance
+like a real screen. The game's sound plays as it does on the desktop. F11 places
+the screen in front of you again. Hold the game's skip button (or press it, as
+the game asks) on the controllers to skip; the laser shows only while pointed at
+the screen, and grabbing does not move it.
+
+D2R draws a cinematic as an interface widget and draws no world meanwhile. The
+movie player is given the game window's real size (movies keep their original
+dimensions, `VR_RESOLUTION.md`), so the film lies at the window's own size in the
+top left of the larger VR picture - a 1920x1080 window: its top left 1920x1080 of
+3072x3072 - and the screen shows exactly that part (it showed the interface's
+16:9 box at first, with the film in its upper left; owner 2026-11-12). Meanwhile: in a game
+the headset used to show no picture at all while one played (the picture went
+to one eye's slot and the other never came). The mod tells a cinematic from the
+game's own interface messages: `MoviePlayerMessage` `Play` starts one;
+`Cinematics` `MovieComplete` or `Close`, `MoviePlayerMessage` `Cancel` or
+`PlayLooped` (the title screen's loop, a menu), a movie panel closed, every
+panel unloaded or a front-end navigation ends it. In a game, the world drawn
+again for 0.75 s (2 s after the start) also ends one whose end message was
+missed, and nothing lasts past 12 minutes. No game build or code bytes are
+assumed. `[cinema] enabled=0` in `d2r_pcvr.ini` leaves cinematics as they were;
+`distance` and `width` (metres) set the screen. Logs: `Frame cinema:`.
+
 ### The menu on leather
 
 Reach your **left hand over your left shoulder** and grip (as if pulling a
@@ -611,7 +645,7 @@ sets the page's rows back to their defaults, with **Undo reset** for 6 seconds.
 | Gameplay > Physics | Rolling bottles, knockable props, pushable bodies, and monsters' and townsfolk's heads turning to you |
 | Comfort > Moving | Smooth turning with its snap angle or turn speed, and movement speed |
 | Comfort > Body | Seated play, **Height and arm span** (**Calibrate body**, **Set eye height**) with the **T cross to calibrate** switch under it (standing only), and the belt's height and reach |
-| Controls > Hands | **Walk direction**, **Left-handed (experimental)** (mirrors the hands, buttons, sticks, menu laser, wrist HUD, held menu, class motions and the words that name them), **Stick toggle** and button names |
+| Controls > Hands | **Walk direction**, **Left-handed (experimental)** (mirrors the hands, buttons, sticks, menu laser, wrist HUD, held menu, class motions and the words that name them), **Sticks stay right-handed** under it while it is on (the left stick still walks and the right one turns; Off by default), **Stick toggle** and button names |
 | Controls > Vibration | Overall vibration and separate melee, short melee taps, bow draw, bow/throw release, spell, loot/potion/menu and alert strengths; **Feel it** on a row's card |
 | Interface > Wrist | Life and mana location and tilt, skill cooldowns between the orbs, map and compass location, map view (Isometric, Top-down, Full map or Full top-down), turning the map with you, buffs and companions |
 | Interface > Menus | Menu distance with **Hold menu** beside it (Leather by default: the tabbed menu on a hide in your left hand; Menu only: no hide; Off) and item details delay |
@@ -872,7 +906,7 @@ cannot take it at that moment (another floor while props are still moving),
 it flies the arc above; with bottle physics off, it always does.
 
 The landing point is checked on the game thread against the live, non-hostile
-hireling. Within 1.5 m of its feet, the UI thread presses the column's native
+hireling. Within 4 m of its feet (`MercThrowReach`; 1.5 m until 2026-11-12), the UI thread presses the column's native
 belt key while the belt's own "give to mercenary?" query (the check Shift+belt
 uses) answers yes for that one press only, so the native mercenary use, voice
 line and rules apply. It is confirmed by the item leaving the belt. If that
@@ -926,6 +960,20 @@ once; a new weapon hit then freezes the one moving longest. This is purely
 visual. VR Settings > Gameplay > Physics > Knock over small props (`[interactions] prop_physics`) turns it off; see [knockable
 props](../docs/KNOCKABLE_PROPS.md). The log notes each weapon knock (`Frame
 props: knocked a cup ...`) and a summary every ten seconds.
+
+**Props have weight.** Each knockable prop weighs what its kind and size say
+(a cup 0.2 kg, a chair 10, a barrel or a sack of grain 50-60), and your weapon
+strikes with its own weight: 0.9 kg for a fist or dagger to 5 kg for a great
+maul, and up to three times that in a full, fast swing. A cup flies off a
+tap. A barrel stays put for a tap, rocks or slides a few centimetres from a
+full sword swing, and falls over from a maul. A heavy prop stops the weapon's
+body in the physics, which then slips through it; the drawn weapon follows
+your hand as before. The hand feels a light tick from light things and a
+hard knock and a low thud from heavy ones. A rolling bottle bounces off a
+heavy prop without moving it. VR Settings > Gameplay > Physics > Props have
+weight (`[interactions] prop_heft`, on by default) turns it off: every prop is
+then pushed aside at the weapon's speed, as before. See
+[weight](../docs/KNOCKABLE_PROPS.md#weight).
 
 **Spells reach objects.** Your own spell missiles break the pots, urns,
 baskets and barrels they pass, as arrows do, and push the small props and
@@ -1027,6 +1075,7 @@ hip_width=0.28
 holsters=1
 bottle_physics=1
 prop_physics=1
+prop_heft=1
 spell_impacts=1
 body_physics=1
 leather_menu=1
@@ -1308,21 +1357,41 @@ about 4 m/s, so the push ends early by the distance he will coast (closing speed
 x 50 ms, at most 15 cm) and otherwise inside 7 cm; the origin keeps following for
 300 ms while he stops on the game's grid. Pushed 0.6 s while he walks under 3 cm
 is a wall: the push stops until you step 15 cm elsewhere. A jump of more than
-0.75 m in one view (teleport, waypoint, Leap) is never followed: the view is
-built twice a pair, back to back, so speed per wall-clock time misjudged walking.
-The hero's position is never written.
+0.75 m in one view (teleport, waypoint, another area) is never followed, and
+leaves the wall behind: the view is built twice a pair, back to back, so speed
+per wall-clock time misjudged walking. The hero's position is never written.
+
+The origin follows only what pays your step off (`Chase::Follow`): a move that
+leaves you no farther from the hero is taken whole, any other only by its part
+toward you, never past you. A Leap is no jump by distance (25 cells, about
+10 m, in 0.75 s is 0.1-0.25 m a head view), and before 2026-11-12 a Leap, a
+Whirlwind or a Charge while the follow was on was followed as a walk: the
+origin flew with the hero, the camera stayed where he took off, and only a
+reload put it back (a player: "a sort of broken 3rd person view ... I ended up
+outside the walls while my actual character was inside"). The game moving the
+hero now moves the camera with him.
 
 Paused, with no push and no origin follow: a grip or trigger held, the bow
-drawn, a native cast, a hand moving faster than 1.2 m/s (a swing, for 0.4 s),
-the real left stick, a menu, wheel, the held menu or VR Settings, and Seated
-play. A head moving faster than 1.5 m/s (a lunge) starts nothing. A hero moving
-more than 0.75 m in one view (a teleport, waypoint or Leap) is not followed. F11, Calibrate
-body and a world load re-anchor it where your head is.
+drawn, a native cast, a Leap or Leap Attack from its cast through its take-off
+(600 ms) and while the hero's model is in the air (150 ms past each such pose),
+a hand moving faster than 1.2 m/s (a swing, for 0.4 s), the real left stick, a
+menu, wheel, the held menu or VR Settings, and Seated play. A head moving faster
+than 1.5 m/s (a lunge) starts nothing. F11, Calibrate body and a world load
+re-anchor it where your head is.
+
+A watchdog keeps the view on the hero whatever else goes wrong: standing 1.5 m
+or more from his spot for 1.5 s (through any pause but a menu), with no walk of
+his closing on it faster than 0.3 m/s, the room is put back under you, as F11
+does: the camera returns to the hero. Room follows you keeps you within a step
+of him, so a gap that size is a view come off him, not a step owed.
 
 Log lines: `Frame room steps: on`, `walking after your step, N m from the hero`,
 `stopped N m from the hero (caught up | blocked | <pause>)`, `paused (<why>)`
-(at most every 2 s while a step is owed), a one-second summary while it works,
-and `the hero moved N m in N ms ... the origin stays` for a jump.
+(at most every 2 s while a step is owed), a one-second summary while it works
+(with the metres the hero moved away from you, not followed),
+`the hero moved N m in N ms ... the origin stays` for a jump, and `the view had
+come off the hero - you stood N m from his spot for N s (<why>); the room is put
+back under you` for the watchdog.
 
 ## What is physical and what is still native
 
@@ -1759,6 +1828,151 @@ included yet.
 - Drawing the string, a held trigger, a menu or the wheel ends the bash lane;
   a stroke sampled just before drawing is dropped.
 
+### Weapons collide
+
+**VR Settings > Gameplay > Combat > Weapons collide** (`[gameplay]
+held_collisions`, 1 by default; the right half of Melee reach's row) keeps the
+player's own held items from passing through each other (owner, 2026-11-11). A
+sword swung across the body stops at the shield on the other arm and slides along
+its face; two weapons, one in each hand, stop at each other. Your real hands cannot
+be stopped, so the **drawn** pose gives way: the hand that yields is drawn off its
+controller by the smallest push that separates the two items, and eased back to
+the controller when they part. Pure logic and its fixtures: `held_collision.h`,
+`held_collision_test.cpp`; the skeleton hook (`vr/skeletons.cpp`, HeldCollide)
+applies it.
+
+- **Shapes.** A weapon is a capsule from its grip along its attachment's +Y, the
+  melee contact's lengths (28 cm daggers, claws and orbs, 38 cm wands, 65 cm the
+  rest) and a 3 cm radius (a blade's half width; the melee capsule is padded for
+  reach, this one is not). The shield is the box of its rendered mesh, the same
+  bounds the physical guard measures, held in its attach bone's frame so later
+  poses carry it; its half thickness is kept between 1 and 4 cm. Until the mesh has
+  been measured the shield does not collide (`shield unmeasured` in the log).
+- **Who yields.** Weapon against shield: the weapon's hand, all of it. Two weapons:
+  the push is split between both hands, most (up to 85%) to the hand that moved
+  faster into the touch; two hands meeting evenly split evenly.
+- **The push.** Each item is carried from the last drawn pose by its controller to
+  where it would be drawn now, so the push is worked out from the real hands and
+  never feeds on itself. The weapon is kept out of the shield's face it lay off
+  just before it touched, and a fast swing that went through within one frame is
+  followed in 2 cm steps, so it is stopped at the face it came from, not pushed
+  on through. Weapon against weapon, the blades rest a blade's width apart.
+- **The cap.** A push never exceeds 60 cm (`held::Cap`; 12 cm, then 40 cm, until the owner's
+  2026-11-12 headset sessions). Deeper than that the two pass through
+  each other: the hand eases back and nothing pushes until they are clear, so an
+  item is never held far from its hand. With the hand pulled back, the push eases
+  out with a 33 ms time constant (95% gone in 0.1 s), not a snap.
+- **Clank.** A first touch closing at 0.5 m/s or more clanks in both controllers:
+  a sharp tap and a short ring, stronger up to 3 m/s, on the Melee hits strength.
+  A resting touch is silent; one clank at most every 0.12 s. At 1 m/s or more the
+  game also plays `[gameplay] held_collision_sound` at the hero (default 398,
+  block_weapon_1, the block's metal clank; 0 is silent) through the same path as the
+  block sound.
+- **What hits.** Melee contact, the shield guard and Smite, the Assassin's claw
+  guard, the dropped bottles and small props, and the pushable bodies all read the
+  drawn skeleton, so they all meet the corrected pose: what you see is what hits.
+  The real controllers still give a swing its speed (stroke detection, Weapon heft
+  travel), and the guard reads the real shield hand for its height and parry swing
+  (the shield's hand never yields to a weapon). A fist (no weapon) is left out.
+- **Left out.** A bow or crossbow (the hands meet to draw and nock), two-handed
+  grips (a staff, spear or polearm, a two-handed sword in both hands, a crossbow
+  held as a staff, the support hand on a shaft), a throw armed or a trap or bomb
+  held to toss, a potion in a hand, an empty or fist hand, a Druid form, an item put
+  away, an untracked controller, menus, the inventory, VR Settings, a hand's wheel
+  and the leather menu. Left-handed play swaps the arms: the left hand's weapon
+  yields to the shield on the right arm. An Assassin's two claws collide like any
+  weapons; crossed, they rest a blade's width apart, well within the claw guard's
+  32 cm, so the crossed-claws block still works (a fixture checks it with
+  `guard::Crossed`).
+- **Log.** `Frame held collisions: on|off (VR Settings > Combat > Weapons
+  collide)` when the setting changes; `Frame held collisions: weapon-shield - the
+  right hand's sword yields to the shield on the left arm` (or `weapon-weapon
+  ...`, or `none, not colliding (<reasons>)`) when what the hands hold changes; and
+  every ten seconds with touches, `Frame held collisions: N contacts
+  (weapon-shield A, weapon-weapon B), deepest X cm, pushes capped C, haptic clanks
+  H; excluded: <reasons>`.
+
+### Weapons hit walls
+
+**VR Settings > Gameplay > Physics > Props > Weapons hit walls** (`[gameplay]
+held_world_collisions`, 1 by default) stops the player's held weapons and shield
+at the level as Weapons collide stops them at each other (owner, 2026-11-12). A
+sword pushed into a wall stops at its face and slides along it; scraped on the
+floor it rides on it; a shield pressed to a wall stays at the wall. The **drawn**
+hand gives way, as at your own shield, and eases back once clear. Pure logic and
+its fixtures: `held_world.h`, `held_world_test.cpp`; the skeleton hook
+(`vr/skeletons.cpp`, HeldCollide) applies it after the item-against-item push, and
+the game thread samples the walls (`vr/wall_cells.cpp`).
+
+- **The world.** Two things the pose thread can have cheaply. The *floor*: the
+  ground the hero stands on (his model's origin), flat around him - the drawn floor
+  the arms hang over. Stairs and slopes within reach are not followed. The *walls*:
+  the game's own collision cells around the hero, the missile-barrier bits (0x804)
+  physical arrows and dropped bottles already stop at, each 2 world units (about
+  46 cm) square. They have no height: each stands from 50 cm under the floor to 6 m
+  above it, on the floor's shear as the bottles place them. Every wall runs along the
+  cell grid, so a wall's face is one plane. **Left out:** a cell carrying an
+  object's footprint (bit 0x400: barrels, urns, chests - no 6 m pillar over a
+  barrel, and a swing still meets the barrel and breaks it) and a cell with no room
+  loaded (a doorway into the next area). A closed door (0x800) stays: the blade
+  stops at it. Monsters, small props and bodies are not world: they are still
+  struck, knocked and pushed by the drawn items.
+- **Items.** A one-handed weapon in either hand (the capsule Weapons collide uses)
+  and the shield (its measured or guessed box). A lone weapon with the other hand
+  empty counts too; so do two weapons and a shield alone.
+- **The push.** Worked out in the world, where walls stand still: each item where
+  its controller holds it now (the other item's push in it), against the cells
+  under it. A cell pushes only through its sides whose neighbour is open, so the
+  cells of one wall are one face: a blade slides along them without catching at
+  their seams, an inner corner pushes out of both walls, and nothing is pushed out
+  through the far side of a wall. A new touch keeps the face the item lay off just
+  before it touched, followed in 2 cm steps, so a fast swing that went past the
+  middle of a wall in one frame is held at the face it came from. The floor pushes
+  only up.
+- **The cap.** The hand gives way at most `held::Cap` (60 cm), the same as at the
+  shield; the item-against-item and world pushes together never draw a hand
+  farther than that from its controller. Deeper than that the item goes into the
+  wall: nothing pushes until it is clear of every cell and the floor, and the push
+  eases out with the same 33 ms time constant (95% gone in 0.1 s).
+- **Walking into a wall** with a sword ahead: the hand is held back as the hero
+  closes on the wall, then the sword goes into the wall (the cap) and the hand eases
+  back onto the controller while the hero stands there. Stepping away frees it; it
+  is never held behind you.
+- **Clank.** A surface first met at 0.5 m/s or more clanks in the hand whose item
+  struck, scaled to 3 m/s, at most every 0.12 s for that hand; the game's
+  `[gameplay] held_collision_sound` plays from 1 m/s. Sliding along a wall or the
+  floor is silent; one wall met across several cells is one touch.
+- **What hits.** Melee contact, the breakables, the props, bottles and bodies all
+  read the drawn skeleton: a blade held at a wall reaches what is on your side of
+  it. The real controllers still give a swing its speed.
+- **Left out.** As Weapons collide: bows, staves, spears, polearms and two-handed
+  grips, throws (and a potion or trap in a hand), Druid forms, menus, wheels, the
+  leather menu, an untracked controller, an item put away, a shield with no box
+  yet, and anything but first person.
+- **Limits.** Cells are about 46 cm: a wall's face can sit a few centimetres in
+  front of or behind the drawn wall, by how the level's art covers its cells. A low
+  wall or fence that blocks arrows stops a blade above it too. The floor is flat at
+  the hero's feet.
+- **Cost.** The game thread samples 32 x 32 cells around the hero (the bottles'
+  sampler, its own stream so neither recentres the other) at most every 0.5 s
+  while a held item meets the world, sooner after the hero moves 6 cells; one
+  native room lookup and one collision read a cell. `Frame dropped bottles: wall
+  samples=N (held items H) ... X us on the game thread (Y us a sample)` measures it
+  every ten seconds. The pose thread gathers the floor and the cells under the
+  items and steps the solver once per pose stamp: about 2 us a step in the fixture
+  (a sword striking a corridor's end wall and a shield), and the hook's whole held
+  step is logged below.
+- **Log.** `Frame held world: on|off (VR Settings > Physics > Weapons hit walls)`
+  when the setting changes; `Frame held world: the right sword and left shield
+  stop at walls, closed doors and the floor` (or `..., not meeting walls or the
+  floor (<reasons>)`) when what the hands hold changes; and every ten seconds while
+  an item is held, `Frame held world: N contacts (walls W, doors D, floor F),
+  deepest X cm, pushes capped C, haptic clanks H; ten seconds: S steps, A acting
+  (B with no wall sample), nearest wall / door / floor; wall sample N ms old;
+  around the hands: N wall cells (doors, inside a wall), left out N object
+  footprints, N with no room, N outside the sample; hook X us a pose stamp
+  (slowest Y us, N stamps); excluded: <reasons>`.
+
 ### Physical shield blocking, parry and riposte (Unleashed)
 
 With **Unleashed** melee rules and a shield on, blocking is decided by where the
@@ -1838,7 +2052,15 @@ instead of a random one. Classic keeps the native roll.
   `riposte_volume` (100).
 - **Guard strain light**: every blocked hit (not a parry) strains the guard by
   `guard_strain_per_block` % (10), weighted by the attacker's rank: about 10
-  normal-monster blocks in a row reach full strain. There is no buildup speed
+  normal-monster blocks in a row reach full strain. Your Defense eases it: each
+  block strains by the attacker's native chance to hit you (its attack rating
+  against your Defense, by level, 5..95 %; the chance that also scales an
+  unblocked hit's damage), all of it at 95 % and never under
+  `guard_strain_defense_floor` % (25; 100 = Defense ignored) of it - at 25 %, a
+  normal monster with a 50 % chance to hit breaks the guard in 16 blocks, one
+  with 20 % in 25, 5 % in 35 (owner, 2026-11-12: "If you have defense rating
+  high ... you shouldn't get the vignette as much"). `[debug] guard_trace` logs
+  each block's strain and chance. There is no buildup speed
   setting (`guard_strain_speed` is no longer read). Strain shows as a soft black
   vignette at the rim of the view, drawn denser by `guard_strain_dark_density` (2.5)
   so it hides more over D2's dark scenes, beneath the blood on the visor, creeping
@@ -2986,8 +3208,10 @@ there.
   pushed straight out (chest to eye level) and stopped there a moment, like "halt!"; Decoy, both hands
   from the chest pushed together to one side; Valkyrie, the right fist raised high, then brought down
   to point at the floor where she lands.
-- Barbarian: Battle Orders, the right fist at the mouth a moment, then thrust straight up; War Cry,
-  the same, thrust forward and down; Shout, both fists at the mouth, pushed out forward together;
+- Barbarian: Battle Orders, the right fist brought to the mouth, then thrust straight up; War Cry,
+  the same, thrust forward and down; Shout, both fists brought to the mouth, pushed out forward
+  together (the three need no stop at the mouth: up to it and straight out, or swept past it and on
+  out, within half a second, casts; owner, 2026-11-11: "It should be pretty much immediate");
   Battle Command, the right fist beaten on the chest twice; Howl, both arms flung wide from the chest;
   Battle Cry, both fists at the shoulders pulled hard to the hips; Leap, both arms swung down by the
   sides then up past the head, fast (arms only, so seated too); Leap Attack, the same swing from both

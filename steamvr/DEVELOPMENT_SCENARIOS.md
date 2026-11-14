@@ -94,7 +94,8 @@ Open either hand's wheel and choose **DEV**. Its tabs are grouped by purpose:
   items in the inventory: put them in the belt to toss at the mercenary).
 - **Act I - II:** towns, combat areas and inspection destinations.
 - **Act III:** Kurast regions, sewer entrances, jungle areas and bosses.
-- **Act IV - V:** later-act combat areas and filming locations.
+- **Act IV - V:** later-act combat areas and filming locations, and the
+  Frozen Tundra crash repro (below).
 
 Preparation applies exact values to the current class. Skill ranks are capped
 at 20 and at `character level - required level + 1`; locked skills are explicitly
@@ -268,13 +269,28 @@ owner's, tuned in the headset.
 | --- | --- |
 | Act I - II | Rogue Encampment, Blood Moor, Tristram, Cathedral, Andariel's chamber, Lut Gholein, Arcane Sanctuary, Tal Rasha's Tomb (level 66), Tyrael, Duriel |
 | Act III | Kurast Bazaar, Upper Kurast, Kurast Sewers, Travincal, Mephisto's chamber, Spider Forest, Flayer Jungle |
-| Act IV - V | River of Flame, Chaos Sanctuary, Harrogath, Bloody Foothills, Crystalline Passage, Arreat Summit, Throne of Destruction, Worldstone Chamber |
+| Act IV - V | River of Flame, Chaos Sanctuary, Harrogath, Bloody Foothills, Crystalline Passage, Arreat Summit, Throne of Destruction, Worldstone Chamber, Glacial Trail (level 115), Frozen Tundra (level 117), Tundra repro step |
 
 Travel uses native area entrances; bosses depend on the test character's save.
 It does not deliberately finish quests, change difficulty, reset bosses or
 respawn enemies. Arcane Sanctuary does not teleport directly to the Summoner.
 Tyrael targets his platform in level 73 at `(22578,15594)`; Duriel targets that
 level's native arena entrance. Prepare and equip before dangerous destinations.
+
+For the Frozen Tundra crash report (two crashes of a player there, the game's
+effect-ended listener; `effect_listener_guard` in `PERFORMANCE.md`), do what
+the player did: **Act IV - V > Glacial Trail**, walk through the ice cave
+(the game-drawn ceiling is over it) to its exit into the Frozen Tundra, and
+fight a crowd there with a Necromancer's Bone Spear. Keep the default
+`[render]` settings (`rings=6`, `model_radius=210`, `big_radius=600`) and
+`[ceiling] game_ceiling=1`: the player had them. **Frozen Tundra** goes
+straight there. **Tundra repro step** goes to the Glacial Trail and the Frozen
+Tundra by turns, one per press, for the ice cave's ceiling put away and the
+area's loading again and again; each press logs `Frame development: tundra
+repro step N of 10 - ...` and the count goes round after ten. A refused or
+stale press is not a step. To tell a crash the guard would have had, look for
+`effect_listener_guard 10 s: N effect-ended calls skipped`; with
+`[game_patches] effect_listener_guard=0` the game's own code runs and may crash.
 
 For the Kurast sewer entrance report, choose **Act III > Kurast Sewers** and
 use its stairs to return outside. Inspect the stairwell and try selecting it

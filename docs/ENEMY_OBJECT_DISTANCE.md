@@ -7,10 +7,11 @@ subscriptions, and native ongoing unit update/removal passes over the same
 retained room set.
 
 The implementation was extracted from the owner-tested combined distance
-experiment onto upstream main `9975da7` (release 0.3.33). It includes the
+experiment onto upstream main `9975da7` (release 0.3.33), then updated to
+release **v0.3.35** (`1217d77`). It includes the
 draw-distance binding retry fix and independent read-only runtime diagnostics.
 Grass placement shaders, candidate-capacity experiments, foliage controls,
-settings-menu changes and desktop transport overrides are outside this branch.
+unrelated settings-menu changes and desktop transport overrides are outside this branch.
 
 ## Settings
 

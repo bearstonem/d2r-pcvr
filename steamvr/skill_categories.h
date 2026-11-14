@@ -25,6 +25,7 @@ constexpr const char* Name(int cls,int category){
 }
 constexpr int Category(int cls,int id,int owner=-1){
     if(owner!=-1||!ValidClass(cls))return General;
+    if(id>=3901&&id<=3907)return cls==2?3:cls==5?1:General;
     const auto& c=Classes[cls];
     return id>=c.first&&id<c.first+int(std::string_view(c.pages).size())?c.pages[id-c.first]-'0':General;
 }

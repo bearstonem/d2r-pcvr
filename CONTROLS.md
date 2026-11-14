@@ -67,7 +67,7 @@ and buttons as you use them.
 | Shield or second weapon | On your right arm: guard, parry, Smite and the second weapon's swings and throws |
 | Face buttons | The left controller's two buttons act as A and B, the right controller's as X and Y |
 | Grips | Each hand's grip layer follows the hand |
-| Sticks | Right stick walks, left stick turns (its up / down still zooms the map and shows loot names) |
+| Sticks | Right stick walks, left stick turns (its up / down still zooms the map and shows loot names); with **Sticks stay right-handed** the left stick walks and the right one turns, as [below](#sticks-stay-right-handed) |
 | Saved skills and glyphs | Follow the hand's role: what was on the right hand is on the left |
 | Vibration | Goes to the hand that acted |
 | Menu button | Where the controller has it |
@@ -75,7 +75,7 @@ and buttons as you use them.
 | Menu laser | Your left controller points at game menus and VR Settings; its trigger clicks, its grip grabs and moves a panel |
 | Inventory on the hide, quest log | Held in your right hand, by the menu's right edge; reach your right hand over your right shoulder and grip to take it out or put it away |
 | Wrist HUD, vitals, map and compass | On your right wrist and right palm; the low life and mana buzz is on the right controller |
-| Floating map | Pulled off the right wrist with the left controller's grip; the left stick pushes, pulls and zooms it; the right grip resizes it |
+| Floating map | Pulled off the right wrist with the left controller's grip; the left stick (the right stick with Sticks stay right-handed) pushes, pulls and zooms it; the right grip resizes it |
 | Class motions | Each motion is its mirror image: one described with the right fist, arm or shoulder is done with the left, toward the other side, and a two-hand motion with the hands exchanged. The MOTIONS page shows them that way round |
 | Words and button names | VR Settings rows and help, the Controller guide's two columns, the wheels and the on-screen prompts name the hand that does each thing now |
 
@@ -93,7 +93,36 @@ Not mirrored:
 - Two things always name your real hands: the **Left-handed** row itself, and the detected controllers.
 
 A weapon or shield is turned around in the other hand rather than mirrored, so a one-sided blade or a painted
-shield can look different. The shield's wrist bend stop is not on the right arm yet.
+shield can look different. Otherwise each sits in your left fist or on your right forearm exactly as the
+right-handed one sits in the right fist or on the left forearm, and swings, blocks and pushes things where it
+is drawn. The shield's wrist bend stop works on the right arm as it does on the left.
+
+### Sticks stay right-handed
+
+**VR Settings > Controls > Hands > Sticks stay right-handed** (under Left-handed, shown only while it is on; Off
+by default; `[interactions] left_handed_sticks_right`) is for left-handed players used to walking with the left
+thumb and turning with the right: the two sticks stay where a right-handed player has them, with everything each
+stick does, while everything else (weapon, triggers, face buttons, grips, menu laser, wrist HUD, held menu, class
+motions) stays left-handed. It does nothing with Left-handed off.
+
+| What | Right-handed | Left-handed | Left-handed + Sticks stay right-handed |
+| --- | --- | --- | --- |
+| Walk; the held menu's walk; the stick that pauses Room follows you | Left stick | Right stick | Left stick |
+| **Walk direction: Controller** walks where this controller points | Left | Right | Left |
+| Turn, smooth or snap | Right stick | Left stick | Right stick |
+| Up: run / walk (**Stick toggle**); held down: all loot names | Right stick | Left stick | Right stick |
+| Zoom the wrist map or wheel map; push, pull and zoom a floating map | Right stick | Left stick | Right stick (the floating map is still grabbed and pointed at with the left controller) |
+| The buzz of a stick's run / walk, loot names or zoom tick | Right controller | Left controller | Right controller |
+| In game menus: the left / right stick and its click (hold the right stick's click to sort) | Left / right controller | Right / left controller | Left / right controller |
+| Open or close a hand's wheel | Click that hand's stick | Click that hand's stick | Click that hand's stick |
+| Inventory by grip + stick click | Left Grip + left stick click | Right Grip + right stick click | Right Grip + right stick click |
+
+A stick's click stays with its hand: each hand's wheel opens from that hand's own stick, and the inventory
+shortcut is the off hand's grip with its own stick's click, as with Left-handed alone. In the headset the
+Controller guide lists Walk under your left hand and Turn, run / walk and loot names under your right hand,
+and the rows that name a stick (Smooth turning, Snap turn angle, Smooth turn speed, Stick toggle, Walk direction,
+Room follows you, Loot name size, Map view) and the wheel's map tab say left stick and right stick as written. The log's `Frame left-handed:` line names the controllers
+with the walk stick and the turn stick.
 
 ## Gameplay
 
@@ -158,7 +187,7 @@ Quest left X/Y correspond to Index left A/B; right A/B labels are the same.
 | Wrist health / mana / XP | Look at the back of the left wrist |
 | Wipe blood off the visor | Scrub either hand side to side in front of your face, trigger released. About six strokes clear a full visor. **Interface > Warnings > Wipe blood by hand** turns this off |
 | Recenter / stereo capture | PC F11 / F8 |
-| Walk where the controller points | **VR Settings > Controls > Hands > Walk direction**: **Look** (default) walks where you look; **Controller** walks where the left controller points |
+| Walk where the controller points | **VR Settings > Controls > Hands > Walk direction**: **Look** (default) walks where you look; **Controller** walks where the walk stick's own controller points: the left one (the right one with Left-handed on, unless [Sticks stay right-handed](#sticks-stay-right-handed)) |
 | Room-scale | **VR Settings > Comfort > Body > Room follows you** (beside Seated play; On by default): as you move in your room your hero's spot follows you, so monsters attack where you stand. Grips, triggers, swings, casting, the left stick and menus pause it |
 | Recenter position, keep view direction | PC F13 (native OpenXR, gameplay only) |
 
@@ -177,6 +206,10 @@ Interact latches the target present when you press A. Pressing at empty space
 does not wait for an item to come into range. Release and press again for each
 new target. A release during an inventory/NPC menu rearms interaction; holding
 the button through a menu or game-session change cannot reuse the old target.
+Both grips held are for the class motions only: while you hold them, and for
+0.4 seconds after you let go, a skill on A only casts (the game does not turn its
+press into a pick-up, a door or a talk), so a motion whose skill sits on A casts
+that skill even next to loot. A button holding Interact still interacts.
 
 **VR Settings > Interface > Labels > Loot pick** (On by default): with several items on
 the floor, Interact takes the one you point at, not the nearest. Hold your
@@ -217,6 +250,15 @@ about 40 cm of hand travel, a two-handed sword 32, a crystal sword 16 and a long
 sword 12; faster weapons need less. Daggers, claws, wands, orbs, thrown weapons and
 fists hit fully with a flick. Turning the wrist or drifting the hand slowly does
 not count. Each hit is still one game attack, and the weapon never lags your hand.
+**Gameplay > Combat > Weapons collide** (On by default; the right half of Melee
+reach's row) keeps your own items from passing through each other: the weapon
+stops at the shield on your other arm and slides along its face, and two weapons,
+one in each hand, stop at each other. Your real hand cannot be stopped, so the
+hero's hand gives way instead, at most 60 cm, and eases back to your controller in
+about 0.1 s once they part; push further and they pass through. A strike clanks in
+both controllers (Melee hits strength), and a fast one plays the game's block
+clank. Bows, two-handed grips, throws, Druid forms and menus are left alone; an
+Assassin's crossed claws rest against each other and still block.
 **Gameplay > Physics > Struck monsters** (both On by default) makes monsters answer
 your strokes. **Monsters stagger:** a long, committed stroke that lands on the beat
 makes the monster flinch, whatever the damage. **Heavy hits knock back:** a full

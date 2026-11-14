@@ -208,7 +208,7 @@ int main(){
         Check(saved.values[ProjectileAimAssist]==choice&&Int(path,L"gameplay",L"projectile_aim_assist")==choice,"aim assist survives profile reload");
         Check(saved.values[PlanarSpellAim]==0&&Int(path,L"custom",L"keep")==12345,"assistance preserves free aim and unrelated configuration");
     }
-    Check(before.values[OrdinaryMobBars]==0,"legacy profile defaults to hidden ordinary bars");
+    Check(before.values[MonsterNames]==1,"a profile with neither monster key: Bosses and elites, as Weak monster bars Off");
     Check(before.values[SmoothTurn]==0&&before.values[Snap]==30,"missing turn settings default to snap turning");
     Check(before.values[WristMap]==1,"legacy INI without wrist_map defaults on");
     Check(before.values[WristCompass]==1,"legacy INI without wrist_compass defaults on");
@@ -246,16 +246,30 @@ int main(){
     Check(WritePrivateProfileStringW(L"gameplay",L"highlight_right_hue",L"300",name),"save a right hand color");
     vrsettings::Poll(name);
     Check(vrsettings::Read().values[HighlightRight]==300,"a saved hand color wins over the old one");
+    // Monster names: the older Weak monster bars key is read while monster_names is missing, and only read.
+    {
+        const auto names=[&]{vrsettings::Poll(name);return vrsettings::Read().values[MonsterNames];};
+        Check(WritePrivateProfileStringW(L"hud",L"ordinary_mob_bars",L"1",name),"write Weak monster bars On");
+        Check(names()==0&&Int(path,L"hud",L"monster_names")==-999,"Weak monster bars On reads as All; nothing is written");
+        Check(WritePrivateProfileStringW(L"hud",L"ordinary_mob_bars",L"0",name),"write Weak monster bars Off");
+        Check(names()==1&&Int(path,L"hud",L"monster_names")==-999,"Weak monster bars Off reads as Bosses and elites");
+        Check(WritePrivateProfileStringW(L"hud",L"ordinary_mob_bars",L"1",name)&&WritePrivateProfileStringW(L"hud",L"monster_names",L"2",name),"both keys saved");
+        Check(names()==2&&Int(path,L"hud",L"ordinary_mob_bars")==1,"monster_names wins over the older key, which stays as saved");
+        Check(WritePrivateProfileStringW(L"hud",L"monster_names",L"0",name)&&names()==0,"monster_names 0: All");
+        Check(WritePrivateProfileStringW(L"hud",L"monster_names",L"x",name)&&names()==0,"an unreadable monster_names falls back to the older key");
+        Check(WritePrivateProfileStringW(L"hud",L"monster_names",nullptr,name)&&WritePrivateProfileStringW(L"hud",L"ordinary_mob_bars",nullptr,name),"remove both monster keys");
+        Check(names()==1,"neither key: Bosses and elites");
+    }
     Check(WritePrivateProfileStringW(L"gameplay",L"highlight_right_hue",nullptr,name)&&WritePrivateProfileStringW(L"gameplay",L"target_outline_hue",nullptr,name)&&
           WritePrivateProfileStringW(L"gameplay",L"target_outline_by_range",nullptr,name),"remove the outline colors");
     vrsettings::Poll(name);before=vrsettings::Read();
     Model model;model.Open(before);model.Click({Kind::Change,Foveation,1});model.Click({Kind::Change,Motion,1});
-    model.Click({Kind::Change,OrdinaryMobBars,1});
+    model.Click({Kind::Change,MonsterNames,1});
     auto request=model.Click({Kind::Apply});
     Check(vrsettings::Submit(request)&&!vrsettings::Submit(request),"one queued transaction at a time");
     Check(vrsettings::Read().result==Result::Saving&&vrsettings::Poll(name),"write transaction succeeds");
     auto saved=vrsettings::Read();Check(saved.result==Result::Saved&&saved.values[Foveation]==2&&saved.values[Motion]==1,"saved values round trip");
-    Check(saved.values[OrdinaryMobBars]==1&&Int(path,L"hud",L"ordinary_mob_bars")==1,"show ordinary bars round trips");
+    Check(saved.values[MonsterNames]==2&&Int(path,L"hud",L"monster_names")==2&&Int(path,L"hud",L"ordinary_mob_bars")==0,"None round trips; the older key beside it says Off for older builds");
     Check(saved.values[RenderResolution]==1,"profiles without the key use the headset's own resolution");
     for(int choice=2;choice<framevr::resolution::ChoiceCount;++choice){
         model.Open(vrsettings::Read());model.Click({Kind::Change,RenderResolution,1});request=model.Click({Kind::Apply});
@@ -342,12 +356,12 @@ int main(){
             saved.values[VitalsLocation]==3&&saved.values[CriticalAlerts]==0,"navigation location survives reload independently of vitals");
     }
     model.Open(saved);model.Click({Kind::Change,Foveation,-1});model.Click({Kind::Change,Foveation,-1});
-    model.Click({Kind::Change,OrdinaryMobBars,-1});
+    model.Click({Kind::Change,MonsterNames,-1});model.Click({Kind::Change,MonsterNames,-1});
     request=model.Click({Kind::Apply});
     Check(WritePrivateProfileStringW(L"custom",L"later",L"42",name),"simulate unrelated external edit");
     Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"merge unrelated external edit");
     Check(Int(path,L"render",L"fixed_foveation")==0&&Int(path,L"render",L"eye_tracked_foveation")==0,"Off writes both keys");
-    Check(vrsettings::Read().values[OrdinaryMobBars]==0&&Int(path,L"hud",L"ordinary_mob_bars")==0,"hide ordinary bars round trips");
+    Check(vrsettings::Read().values[MonsterNames]==0&&Int(path,L"hud",L"monster_names")==0&&Int(path,L"hud",L"ordinary_mob_bars")==1,"All round trips, and writes the older key On");
     Check(Int(path,L"custom",L"later")==42&&Int(backup,L"custom",L"later")==-999,"backup is not overwritten on subsequent saves");
     model.Open(vrsettings::Read());model.Click({Kind::Change,DrawDistance,-1});request=model.Click({Kind::Apply});
     Check(WritePrivateProfileStringW(L"render",L"rings",L"2",name),"simulate same-key external edit");
@@ -452,6 +466,26 @@ int main(){
             Check(saved.values[key]==enabled&&Int(path,L"haptics",name2)==enabled&&
                   Changed(saved.values,current.values)==(ChangeMask{1}<<key)&&Int(path,L"custom",L"keep")==12345,"a haptic feel switch survives reload and touches nothing else");
         }
+    }
+    // Weapons collide (held_collision.h): On when missing (the default), saved as [gameplay] held_collisions, touching nothing else.
+    Check(vrsettings::Read().values[HeldCollisions]==1&&Int(path,L"gameplay",L"held_collisions")==-999,"a profile without held_collisions reads On");
+    for(int enabled:{0,1}) {
+        const auto current=vrsettings::Read();
+        model.Open(current);model.Click({Kind::Change,HeldCollisions,enabled?1:-1});request=model.Click({Kind::Apply});
+        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"save Weapons collide");
+        const auto saved=vrsettings::Read();
+        Check(saved.values[HeldCollisions]==enabled&&Int(path,L"gameplay",L"held_collisions")==enabled&&
+              Changed(saved.values,current.values)==(ChangeMask{1}<<HeldCollisions)&&Int(path,L"custom",L"keep")==12345,"Weapons collide survives reload and touches nothing else");
+    }
+    // Weapons hit walls (held_world.h): On when missing (the default), saved as [gameplay] held_world_collisions, touching nothing else.
+    Check(vrsettings::Read().values[HeldWorldCollisions]==1&&Int(path,L"gameplay",L"held_world_collisions")==-999,"a profile without held_world_collisions reads On");
+    for(int enabled:{0,1}) {
+        const auto current=vrsettings::Read();
+        model.Open(current);model.Click({Kind::Change,HeldWorldCollisions,enabled?1:-1});request=model.Click({Kind::Apply});
+        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"save Weapons hit walls");
+        const auto saved=vrsettings::Read();
+        Check(saved.values[HeldWorldCollisions]==enabled&&Int(path,L"gameplay",L"held_world_collisions")==enabled&&
+              Changed(saved.values,current.values)==(ChangeMask{1}<<HeldWorldCollisions)&&Int(path,L"custom",L"keep")==12345,"Weapons hit walls survives reload and touches nothing else");
     }
     // Loot pick (#257): On when missing (the default), On and Off saved as [interactions] loot_pick; only 0 reads Off.
     Check(vrsettings::Read().values[LootPick]==1&&Int(path,L"interactions",L"loot_pick")==-999,"a profile without loot_pick reads On");

@@ -2,6 +2,7 @@
 #include <cstdint>
 namespace gamestate {
 bool JournalOnly();
+bool CinemaPlaying();     // a cinematic plays, for the cinema screen ([cinema] enabled): steamvr/cinema_screen.h
 bool OpaqueMenuOpen();
 bool UpperBandMenuOpen();
 bool LeatherMenuOpen();   // the tabbed menu (or a cube from it) with no world-opened panel: leather_menu.h

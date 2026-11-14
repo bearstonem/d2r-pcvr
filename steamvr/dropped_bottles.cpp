@@ -1,5 +1,6 @@
 #include "dropped_bottles.h"
 #include "physics_worlds.h"
+#include "prop_heft.h"
 #include <box3d/box3d.h>
 #include <algorithm>
 #include <span>
@@ -26,8 +27,27 @@ constexpr float FloorHalf=40; // the ground box around the physics origin, metre
 constexpr int Sides=24,MaxSteps=8;
 constexpr float WeaponFriction=.4f;
 // Weapons and fists are their own collision category: a bottle leaving the
-// hand ignores them for FreshTime, a thrown one always.
-constexpr uint64_t PusherBit=0x2;
+// hand ignores them for FreshTime, a thrown one always. The floor, walls,
+// surfaces and frozen props are scenery; bottles, the thrown one and props
+// set going are movers. A weapon with weight meets only movers: a frozen
+// prop it reaches is set going first (Wake), and it never drags on a floor.
+constexpr uint64_t SceneryBit=0x1,PusherBit=0x2,MoverBit=0x4;
+b3Filter Category(uint64_t bits,uint64_t mask=B3_DEFAULT_MASK_BITS) {auto f=b3DefaultFilter();f.categoryBits=bits;f.maskBits=mask;return f;}
+// A weapon with weight (prop_heft.h): a body of its striking mass, held to a
+// kinematic hand where the controller has it by a joint of its push
+// strength, as the monster bodies' weapons are (limb_physics.cpp). Free of
+// everything it goes with its hand; against a prop the joint pushes on with
+// at most that strength. Caught too far behind its hand, it slips: it jumps
+// back to the hand and passes through everything for a moment.
+constexpr float HandHertz=30,HandDamping=1,HandTorqueShare=.2f;
+constexpr float SlipDistance=.2f,SlipTurn=.6f; // metres, radians behind its hand
+constexpr double SlipTime=.25;                 // seconds it passes through after slipping
+constexpr float MinStrikeMass=.3f,MaxStrikeMass=10,MaxStrength=2000;
+float CapsuleVolume(float length,float radius) {return 3.14159265f*radius*radius*(length+radius*4/3);}
+float Angle(Quat q) {
+    const float n=std::sqrt(q.x*q.x+q.y*q.y+q.z*q.z+q.w*q.w);
+    return n>1e-6f?2*std::acos(std::min(1.f,std::fabs(q.w)/n)):0.f;
+}
 // Level props: twelve-sided round ones; surfaces under them 2 cm thick.
 constexpr int PropSides=12,WakeSamples=6;
 constexpr float MinHalf=.008f,SurfaceHalf=.01f,SurfaceFriction=.6f,SurfaceBounce=.1f,RestTurn=.3f;
@@ -56,13 +76,28 @@ struct World::Impl {
     bool havePatch=false;
     std::array<Rect,MaxRects> rects{};
     unsigned rectCount=0;
-    // Weapons are kinematic capsules along local +Y, driven to each new pose.
-    struct Pusher {b3BodyId body=b3_nullBodyId;b3ShapeId shape=b3_nullShapeId;float length=0,radius=0,struck=0;Collider target{};};
+    // Weapons are capsules along local +Y. The hand is kinematic, driven to
+    // each new pose. With weight off it carries the capsule itself; with
+    // weight on the capsule is the blade's, a dynamic body jointed to it.
+    struct Pusher {
+        b3BodyId hand=b3_nullBodyId,blade=b3_nullBodyId;
+        b3ShapeId shape=b3_nullShapeId;
+        float length=0,radius=0,mass=0,strength=0; // mass 0: no blade
+        b3MassData base{};float committed=1;        // the blade's own mass data, and how much of the body is behind it now
+        Strike struck{};
+        bool passing=false;double passUntil=0;     // slipped: passing through until then
+        Collider target{};
+    };
     std::array<Pusher,Colliders> pushers{};
+    bool heft=true;
+    unsigned slips=0;
+    std::vector<b3BodyId> pressed; // props a blade is pushing on after the last step
     // Level props: static while frozen, dynamic while moving. The box is the
     // shape's extent in the body's frame (the model's origin and axes).
     struct Piece {
         b3BodyId body=b3_nullBodyId;
+        b3ShapeId shape=b3_nullShapeId;
+        float mass=0;       // kg with weight on (prop_heft.h)
         Prop prop{};
         Vec centre{},half{};
         props::Box reach{}; // frozen: the shape's bounds in physics space
@@ -97,9 +132,12 @@ struct World::Impl {
         for(unsigned k=i+1;k<count;++k)bottles[k-1]=bottles[k];
         bottles[--count]={};
     }
+    // A weapon's bodies go (its joint with them).
+    static void Drop(Pusher& p) {Destroy(p.blade);Destroy(p.hand);p.shape=b3_nullShapeId;p.mass=p.strength=0;p.passing=false;}
     void Clear() {
         while(count)Remove(count-1);
-        for(auto& p:pushers){Destroy(p.body);p.shape=b3_nullShapeId;}
+        for(auto& p:pushers)Drop(p);
+        pressed.clear();
         for(auto& p:pieces)Destroy(p.body);
         for(auto& s:surfaces)Destroy(s.body);
         Destroy(toss.body);toss={};
@@ -111,47 +149,150 @@ struct World::Impl {
         const b3Quat q=length>1e-4f?b3ComputeQuatBetweenUnitVectors({0,1,0},B(d*(1/length))):b3Quat{{0,0,0},1};
         b3WorldTransform t{};t.p=B(c.base-origin);t.q=q;return t;
     }
+    // A weapon's bodies: the hand where its pose is and, with weight, the
+    // blade of that mass on it.
+    void Make(Pusher& p,const b3WorldTransform& t,float length,float radius,float mass,float strength) {
+        Drop(p);
+        auto def=b3DefaultBodyDef();def.type=b3_kinematicBody;def.position=t.p;def.rotation=t.q;
+        p.hand=b3CreateBody(world,&def);
+        if(B3_IS_NULL(p.hand))return;
+        auto shape=b3DefaultShapeDef();shape.enableHitEvents=true;shape.baseMaterial.friction=WeaponFriction;
+        shape.filter.categoryBits=PusherBit;
+        const float extent=std::max(length,.001f);
+        const b3Capsule capsule{{0,0,0},{0,extent,0},radius};
+        if(mass>0) {
+            auto blade=b3DefaultBodyDef();blade.type=b3_dynamicBody;blade.position=t.p;blade.rotation=t.q;
+            blade.gravityScale=0;blade.isBullet=true;blade.enableSleep=false;
+            p.blade=b3CreateBody(world,&blade);
+            if(B3_IS_NULL(p.blade)){Drop(p);return;}
+            shape.filter.maskBits=MoverBit;
+            shape.density=mass/CapsuleVolume(extent,radius);
+            p.shape=b3CreateCapsuleShape(p.blade,&shape,&capsule);
+            auto motor=b3DefaultMotorJointDef();
+            motor.base.bodyIdA=p.hand;motor.base.bodyIdB=p.blade;
+            motor.base.localFrameA=b3Transform_identity;motor.base.localFrameB=b3Transform_identity;
+            const float torque=strength*HandTorqueShare;
+            motor.linearHertz=HandHertz;motor.linearDampingRatio=HandDamping;motor.maxSpringForce=strength;
+            motor.angularHertz=HandHertz;motor.angularDampingRatio=HandDamping;motor.maxSpringTorque=torque;
+            motor.maxVelocityForce=strength;motor.maxVelocityTorque=torque;
+            b3CreateMotorJoint(world,&motor);
+        } else p.shape=b3CreateCapsuleShape(p.hand,&shape,&capsule);
+        if(B3_IS_NULL(p.shape)){Drop(p);return;}
+        p.length=length;p.radius=radius;p.mass=mass;p.strength=strength;p.passing=false;
+        p.committed=1;if(!B3_IS_NULL(p.blade))p.base=b3Body_GetMassData(p.blade);
+    }
+    // A committed swing strikes with more of the body behind the weapon (prop_heft.h Committed).
+    static void Commit(Pusher& p,float speed) {
+        const float c=propheft::Committed(speed);
+        if(B3_IS_NULL(p.blade)||std::fabs(c-p.committed)<.02f)return;
+        p.committed=c;
+        b3Body_SetMassData(p.blade,{p.base.mass*c,p.base.center,b3MulSM(c,p.base.inertia)});
+    }
+    // A weapon's hand and blade where its pose is, still.
+    static void Place(Pusher& p,const b3WorldTransform& t) {
+        for(const auto id:{p.hand,p.blade})if(!B3_IS_NULL(id)) {
+            b3Body_SetTransform(id,t.p,t.q);
+            b3Body_SetLinearVelocity(id,{0,0,0});b3Body_SetAngularVelocity(id,{0,0,0});
+        }
+    }
+    static bool Touching(b3BodyId body) {b3ContactData contact{};return b3Body_GetContactData(body,&contact,1)>0;}
     // Before this call's steps: each weapon heads for its pose over time
     // seconds. A new or resized one, or a warp, is placed without sweeping.
     // Without steps to take it there (Resting) it is placed at its pose at
     // once, where those steps would have left it: the next Wake sweeps from it.
+    // A blade touching nothing goes with its hand, as the hand alone did;
+    // touching something, its joint carries it on, as strong as it is.
     void Drive(float time,bool stepping=true) {
         for(auto& p:pushers) {
-            if(!Valid(p.target)){Destroy(p.body);p.shape=b3_nullShapeId;continue;}
+            if(!Valid(p.target)){Drop(p);continue;}
             float length=0;const auto target=Target(p.target,length);
             const float radius=std::clamp(p.target.radius,MinColliderRadius,MaxColliderRadius);
-            if(B3_IS_NULL(p.body)||!b3Body_IsValid(p.body)||std::fabs(length-p.length)>.01f||std::fabs(radius-p.radius)>.005f) {
-                Destroy(p.body);
-                auto def=b3DefaultBodyDef();def.type=b3_kinematicBody;def.position=target.p;def.rotation=target.q;
-                p.body=b3CreateBody(world,&def);
-                auto shape=b3DefaultShapeDef();shape.enableHitEvents=true;shape.baseMaterial.friction=WeaponFriction;
-                shape.filter.categoryBits=PusherBit;
-                const b3Capsule capsule{{0,0,0},{0,std::max(length,.001f),0},radius};
-                p.shape=b3CreateCapsuleShape(p.body,&shape,&capsule);
-                p.length=length;p.radius=radius;continue;
+            const float mass=!heft?0.f:std::clamp(p.target.mass>0?p.target.mass:propheft::LightestStrike,MinStrikeMass,MaxStrikeMass);
+            const float strength=!heft?0.f:std::clamp(p.target.strength>0?p.target.strength:propheft::WeakestPush,1.f,MaxStrength);
+            if(B3_IS_NULL(p.hand)||!b3Body_IsValid(p.hand)||std::fabs(length-p.length)>.01f||std::fabs(radius-p.radius)>.005f||
+               std::fabs(mass-p.mass)>.05f||std::fabs(strength-p.strength)>5) {
+                Make(p,target,length,radius,mass,strength);continue;
             }
-            const auto now=b3Body_GetTransform(p.body);
+            const auto now=b3Body_GetTransform(p.hand);
             const Vec base=F(now.p),tip=base+math::Rotate(F(now.q),{0,length,0});
             const Vec toBase=F(target.p)-base,toTip=(F(target.p)+math::Rotate(F(target.q),{0,length,0}))-tip;
             const float moved=std::sqrt(std::max(math::Dot(toBase,toBase),math::Dot(toTip,toTip)));
-            if(!stepping||moved>ColliderJump||moved>ColliderMaxSpeed*time) {
-                b3Body_SetTransform(p.body,target.p,target.q);
-                b3Body_SetLinearVelocity(p.body,{0,0,0});b3Body_SetAngularVelocity(p.body,{0,0,0});
-            } else b3Body_SetTargetTransform(p.body,target,time,true);
+            const Vec middle=(toBase+toTip)*.5f;   // the blade's centre: its swing speed
+            const float speed=time>0?std::sqrt(math::Dot(middle,middle))/time:0.f;
+            const bool warp=moved>ColliderJump||moved>ColliderMaxSpeed*time;
+            if(!stepping||warp) {
+                Place(p,target);
+                if(!warp)Commit(p,speed);   // ready for the frame a prop is reached
+            } else {
+                b3Body_SetTargetTransform(p.hand,target,time,true);
+                if(!B3_IS_NULL(p.blade)&&!Touching(p.blade)) {   // the hand's motion at the blade's centre
+                    b3Body_SetLinearVelocity(p.blade,b3Body_GetWorldPointVelocity(p.hand,b3Body_GetWorldCenterOfMass(p.blade)));
+                    b3Body_SetAngularVelocity(p.blade,b3Body_GetAngularVelocity(p.hand));
+                    Commit(p,speed);
+                }
+            }
         }
     }
-    // A weapon stops where it is until its next pose: never coast on.
-    void Halt() {
-        for(auto& p:pushers)if(!B3_IS_NULL(p.body)&&b3Body_IsValid(p.body)) {
-            b3Body_SetLinearVelocity(p.body,{0,0,0});b3Body_SetAngularVelocity(p.body,{0,0,0});
+    // A hand stops where it is until its next pose: never coast on. A blade
+    // keeps what it has; one caught too far behind its hand jumps back to it
+    // and passes through everything for SlipTime, then meets movers again.
+    void Halt(double time) {
+        for(auto& p:pushers)if(!B3_IS_NULL(p.hand)&&b3Body_IsValid(p.hand)) {
+            b3Body_SetLinearVelocity(p.hand,{0,0,0});b3Body_SetAngularVelocity(p.hand,{0,0,0});
         }
+        Slip(time);
+    }
+    void Slip(double time) {
+        for(auto& p:pushers) {
+            if(B3_IS_NULL(p.blade)||!b3Body_IsValid(p.blade))continue;
+            const auto h=b3Body_GetTransform(p.hand),w=b3Body_GetTransform(p.blade);
+            const Vec hb=F(h.p),wb=F(w.p),ht=hb+math::Rotate(F(h.q),{0,p.length,0}),wt=wb+math::Rotate(F(w.q),{0,p.length,0});
+            const Vec db=hb-wb,dt=ht-wt;
+            const bool behind=std::max(math::Dot(db,db),math::Dot(dt,dt))>SlipDistance*SlipDistance||
+                              Angle(math::Multiply(math::Conjugate(F(h.q)),F(w.q)))>SlipTurn;
+            if(!p.passing&&behind) {
+                b3Body_SetTransform(p.blade,h.p,h.q);b3Body_SetLinearVelocity(p.blade,{0,0,0});b3Body_SetAngularVelocity(p.blade,{0,0,0});
+                b3Shape_SetFilter(p.shape,Category(PusherBit,0),true);
+                p.passing=true;p.passUntil=time+SlipTime;++slips;
+            } else if(p.passing&&time>=p.passUntil) {
+                b3Shape_SetFilter(p.shape,Category(PusherBit,MoverBit),true);
+                p.passing=false;
+            }
+        }
+    }
+    // The props each blade pushes on now: not frozen while it does.
+    void Pressing() {
+        pressed.clear();
+        for(const auto& p:pushers) {
+            if(B3_IS_NULL(p.blade)||p.passing||!b3Body_IsValid(p.blade))continue;
+            std::array<b3ContactData,8> touching{};
+            const int n=b3Body_GetContactData(p.blade,touching.data(),int(touching.size()));
+            for(int i=0;i<n;++i) {
+                const auto other=B3_ID_EQUALS(touching[size_t(i)].shapeIdA,p.shape)?touching[size_t(i)].shapeIdB:touching[size_t(i)].shapeIdA;
+                pressed.push_back(b3Shape_GetBody(other));
+            }
+        }
+    }
+    bool Pressed(b3BodyId body) const {
+        return std::any_of(pressed.begin(),pressed.end(),[&](b3BodyId b){return B3_ID_EQUALS(b,body);});
+    }
+    // The hardest strike a weapon felt: by what the hand would feel of it.
+    static void Note(Pusher& p,float speed,float mass) {
+        if(!(speed>0))return;
+        const float weapon=p.mass*p.committed;
+        if(propheft::Felt(speed,mass,weapon)>propheft::Felt(p.struck.speed,p.struck.mass,p.struck.weapon))p.struck={speed,mass,weapon};
     }
     void Hits() {
         const auto events=b3World_GetContactEvents(world);
         for(int i=0;i<events.hitCount;++i) {
             const auto& e=events.hitEvents[i];
-            for(auto& p:pushers)if(!B3_IS_NULL(p.shape)&&(B3_ID_EQUALS(e.shapeIdA,p.shape)||B3_ID_EQUALS(e.shapeIdB,p.shape)))
-                p.struck=std::max(p.struck,e.approachSpeed);
+            for(auto& p:pushers) {
+                if(B3_IS_NULL(p.shape))continue;
+                const bool a=B3_ID_EQUALS(e.shapeIdA,p.shape),b=B3_ID_EQUALS(e.shapeIdB,p.shape);
+                if(!a&&!b)continue;
+                const auto body=b3Shape_GetBody(a?e.shapeIdB:e.shapeIdA);
+                Note(p,e.approachSpeed,b3Body_GetType(body)==b3_dynamicBody?b3Body_GetMass(body):0.f);
+            }
         }
     }
     void Restart(uint64_t s,float f,float u,Vec around) {
@@ -162,6 +303,7 @@ struct World::Impl {
         ground=b3CreateBody(world,&def);
         auto box=b3MakeBoxHull(FloorHalf,.5f,FloorHalf);
         auto shape=b3DefaultShapeDef();shape.baseMaterial.friction=FloorFriction;shape.baseMaterial.restitution=FloorBounce;
+        shape.filter=Category(SceneryBit);
         b3CreateHullShape(ground,&shape,&box.base);
         BuildWalls();
     }
@@ -175,6 +317,7 @@ struct World::Impl {
         auto def=b3DefaultBodyDef();
         walls=b3CreateBody(world,&def);
         auto shape=b3DefaultShapeDef();shape.baseMaterial.friction=WallFriction;shape.baseMaterial.restitution=WallBounce;
+        shape.filter=Category(SceneryBit);
         const float hy=(WallHeight+.5f)*.5f; // from half a metre below the floor
         for(unsigned i=0;i<n;++i) {
             const auto& r=rects[i];
@@ -215,7 +358,7 @@ struct World::Impl {
         if(!hull){b3DestroyBody(body);return b3_nullBodyId;}
         auto shape=b3DefaultShapeDef();shape.density=Density;
         shape.baseMaterial.friction=GlassFriction;shape.baseMaterial.restitution=GlassBounce;shape.baseMaterial.rollingResistance=GlassRolling;
-        shape.filter.maskBits=~PusherBit;shape.enableContactEvents=events;
+        shape.filter=Category(MoverBit,~PusherBit);shape.enableContactEvents=events;
         made=b3CreateHullShape(body,&shape,hull); // the world keeps its own copy
         b3DestroyHull(hull);
         if(B3_IS_NULL(made)){b3DestroyBody(body);return b3_nullBodyId;}
@@ -234,6 +377,12 @@ struct World::Impl {
         if(touched){Destroy(toss.body);toss.shape=b3_nullShapeId;toss.landed=true;toss.p0=toss.p1;toss.q0=toss.q1;}
     }
     // ---- Level props ----
+    // Its shape's density: with weight, what makes its body weigh its mass;
+    // without, its material's, as before.
+    float PieceDensity(const Piece& p) const {
+        if(!heft)return props::Properties[unsigned(p.prop.material)].density;
+        return p.mass/std::max(propheft::ShapeVolume(p.prop.shape,p.half),1e-9f);
+    }
     // The frozen shape's bounds in physics space, for waking it.
     props::Box Reach(const Piece& p) const {
         const props::Placement at{F(b3Body_GetTransform(p.body).p),F(b3Body_GetRotation(p.body)),{1,1,1}};
@@ -252,7 +401,11 @@ struct World::Impl {
         piece.body=b3CreateBody(world,&def);
         if(B3_IS_NULL(piece.body))return false;
         const auto& m=props::Properties[unsigned(prop.material)];
-        auto shape=b3DefaultShapeDef();shape.density=m.density;
+        const Vec size=prop.bounds.hi-prop.bounds.lo;
+        piece.mass=prop.mass>0&&std::isfinite(prop.mass)?std::clamp(prop.mass,propheft::LeastMass,propheft::MostMass):
+                   propheft::Mass({},prop.material,prop.shape,size);
+        auto shape=b3DefaultShapeDef();shape.density=PieceDensity(piece);
+        shape.filter=Category(SceneryBit);
         shape.baseMaterial.friction=m.friction;shape.baseMaterial.restitution=m.bounce;shape.baseMaterial.rollingResistance=m.rolling;
         const Vec c=piece.centre,e=piece.half;
         b3ShapeId made=b3_nullShapeId;
@@ -275,6 +428,7 @@ struct World::Impl {
             }
         }
         if(B3_IS_NULL(made)){Destroy(piece.body);return false;}
+        piece.shape=made;
         piece.p0=piece.p1=prop.p-origin;piece.q0=piece.q1=prop.q;
         piece.reach=Reach(piece);
         pieces.push_back(piece);
@@ -301,6 +455,7 @@ struct World::Impl {
             def.position=B(centre);
             s.body=b3CreateBody(world,&def);
             auto shape=b3DefaultShapeDef();shape.baseMaterial.friction=SurfaceFriction;shape.baseMaterial.restitution=SurfaceBounce;
+            shape.filter=Category(SceneryBit);
             auto box=b3MakeBoxHull((w.x1-w.x0)*.5f,SurfaceHalf,(w.z1-w.z0)*.5f);
             b3CreateHullShape(s.body,&shape,&box.base);
             next.push_back(s);
@@ -310,10 +465,11 @@ struct World::Impl {
     }
     void Knocked(Piece& p,int slot,float speed,double time) {
         b3Body_SetType(p.body,b3_dynamicBody);
+        b3Shape_SetFilter(p.shape,Category(MoverBit),true);   // weapons with weight meet it now
         b3Body_SetAwake(p.body,true);
         p.moving=true;p.rested=false;p.since=time;p.still=0;
         const auto t=b3Body_GetTransform(p.body);p.anchor=F(t.p);p.turned=F(t.q);p.anchoredAt=time;
-        knocks.push_back({p.prop.entity,p.prop.kind,slot,speed});
+        knocks.push_back({p.prop.entity,p.prop.kind,slot,speed,b3Body_GetMass(p.body)});
     }
     // Before the steps: a weapon about to pass within reach of a frozen prop,
     // or a fast body about to reach one, sets it going. With as many moving
@@ -328,8 +484,8 @@ struct World::Impl {
             if(!Valid(p.target))continue;
             const Vec a1=p.target.base-origin,b1=p.target.tip-origin;
             Vec a0=a1,b0=b1;
-            if(!B3_IS_NULL(p.body)&&b3Body_IsValid(p.body)) {
-                const auto now=b3Body_GetTransform(p.body);
+            if(!B3_IS_NULL(p.hand)&&b3Body_IsValid(p.hand)) {   // the hand: where the weapon is drawn
+                const auto now=b3Body_GetTransform(p.hand);
                 a0=F(now.p);b0=a0+math::Rotate(F(now.q),{0,p.length,0});
             }
             const Vec da=a1-a0,db=b1-b0;
@@ -345,12 +501,13 @@ struct World::Impl {
             for(const Vec v:{w.b0,w.a1,w.b1}){lo={std::min(lo.x,v.x),std::min(lo.y,v.y),std::min(lo.z,v.z)};hi={std::max(hi.x,v.x),std::max(hi.y,v.y),std::max(hi.z,v.z)};}
             const float reach=w.r+.001f;swept[s]={lo-Vec{reach,reach,reach},hi+Vec{reach,reach,reach}};
         }
-        std::vector<props::Box> movers;
+        struct Mover {props::Box box;float mass,speed;};
+        std::vector<Mover> movers;
         auto mover=[&](b3BodyId body) {
             const Vec v=F(b3Body_GetLinearVelocity(body));const float speed=std::sqrt(math::Dot(v,v));
             if(!b3Body_IsAwake(body)||speed<WakeMoverSpeed)return;
             const auto box=b3Body_ComputeAABB(body);const float grow=speed*time+WakeMargin;
-            movers.push_back({F(box.lowerBound)-Vec{grow,grow,grow},F(box.upperBound)+Vec{grow,grow,grow}});
+            movers.push_back({{F(box.lowerBound)-Vec{grow,grow,grow},F(box.upperBound)+Vec{grow,grow,grow}},b3Body_GetMass(body),speed});
         };
         for(unsigned i=0;i<count;++i)mover(bottles[i].body);
         if(!B3_IS_NULL(toss.body))mover(toss.body);
@@ -370,8 +527,10 @@ struct World::Impl {
                 }
               }
             }
+            // With weight, only something with momentum enough to shift it: a cup leaves a barrel frozen.
             const bool bumped=slot<0&&moving<props::MaxMoving&&
-                std::any_of(movers.begin(),movers.end(),[&](const props::Box& b){return props::Overlap(b,p.reach);});
+                std::any_of(movers.begin(),movers.end(),[&](const Mover& m){
+                    return props::Overlap(m.box,p.reach)&&(!heft||propheft::Bumps(m.mass,m.speed,p.mass));});
             if(slot<0&&!bumped)continue;
             if(moving>=props::MaxMoving) {
                 Piece* oldest=nullptr;
@@ -380,11 +539,12 @@ struct World::Impl {
                 Freeze(*oldest);--moving;
             }
             Knocked(p,slot,speed,now);++moving;
-            if(slot>=0)pushers[slot].struck=std::max(pushers[slot].struck,speed);
+            if(slot>=0)Note(pushers[slot],speed,b3Body_GetMass(p.body));
         }
     }
     void Freeze(Piece& p) {
         b3Body_SetType(p.body,b3_staticBody);
+        b3Shape_SetFilter(p.shape,Category(SceneryBit),true);
         const auto t=b3Body_GetTransform(p.body);
         p.p0=p.p1=F(t.p);p.q0=p.q1=F(t.q);
         p.moving=false;p.rested=true;p.reach=Reach(p);
@@ -416,7 +576,9 @@ struct World::Impl {
                 settled=math::Dot(d,d)<PropDrift*PropDrift&&2*std::acos(std::min(1.f,dot))<PropDriftTurn;
                 p.anchor=at;p.turned=q;p.anchoredAt=now;
             }
-            if(!b3Body_IsAwake(p.body)||p.still>=PropRestTime||settled||now-p.since>PropMoveLimit||away)Freeze(p);
+            // One a blade pushes on is not at rest, however slowly it gives way (a barrel tipping).
+            const bool resting=!Pressed(p.body)&&(p.still>=PropRestTime||settled);
+            if(!b3Body_IsAwake(p.body)||resting||now-p.since>PropMoveLimit||away)Freeze(p);
         }
     }
 };
@@ -558,10 +720,11 @@ void World::Advance(double time,Vec player) {
         m.accumulator-=Step;++steps;
     }
     if(steps==MaxSteps)m.accumulator=0;
-    if(steps){m.Halt();m.Settle(time,steps*Step);}
+    if(steps){m.Halt(time);m.Pressing();m.Settle(time,steps*Step);}
+    else m.Slip(time);   // a slipped blade meets things again in time, stepped or not
     // Out of the hand long enough: weapons and fists push it again.
     for(unsigned i=0;i<m.count;++i)if(!m.bottles[i].armed&&time-m.bottles[i].born>=FreshTime) {
-        b3Shape_SetFilter(m.bottles[i].shape,b3DefaultFilter(),true);m.bottles[i].armed=true;
+        b3Shape_SetFilter(m.bottles[i].shape,Category(MoverBit),true);m.bottles[i].armed=true;
     }
     for(unsigned i=m.count;i-->0;) {
         const auto& b=m.bottles[i];
@@ -612,9 +775,24 @@ bool World::WallsWanted(WallRequest& out) const {
 void World::Weapons(const std::array<Collider,Colliders>& colliders) {
     for(int i=0;i<Colliders;++i)impl->pushers[i].target=colliders[i];
 }
-float World::Struck(int slot) {
-    if(slot<0||slot>=Colliders)return 0;
-    return std::exchange(impl->pushers[slot].struck,0.f);
+Strike World::Struck(int slot) {
+    if(slot<0||slot>=Colliders)return {};
+    return std::exchange(impl->pushers[slot].struck,Strike{});
+}
+void World::Heft(bool on) {
+    auto& m=*impl;
+    if(m.heft==on)return;
+    m.heft=on;
+    for(auto& p:m.pushers)Impl::Drop(p);   // made again next Advance, with or without a blade
+    m.pressed.clear();
+    for(auto& p:m.pieces)if(!B3_IS_NULL(p.shape))b3Shape_SetDensity(p.shape,m.PieceDensity(p),true);
+}
+bool World::Heft() const {return impl->heft;}
+unsigned World::Slips() {return std::exchange(impl->slips,0u);}
+float World::Mass(uint32_t entity) const {
+    for(const auto& p:impl->pieces)if(p.prop.entity==entity)
+        return p.moving?b3Body_GetMass(p.body):impl->PieceDensity(p)*propheft::ShapeVolume(p.prop.shape,p.half);
+    return 0;
 }
 World::Pushed World::Push(const spellimpacts::Push& push,double time) {
     auto& m=*impl;Pushed out;
@@ -648,6 +826,8 @@ World::Pushed World::Push(const spellimpacts::Push& push,double time) {
         auto& p=m.pieces[r.piece];
         const bool frozen=!p.moving;
         if(frozen&&moving>=props::MaxMoving)continue;
+        // With weight, a kick too small to shift it leaves it frozen (an Inferno flame on a barrel).
+        if(frozen&&m.heft&&spellimpacts::KickSpeed(std::sqrt(math::Dot(r.kick.impulse,r.kick.impulse)),p.mass)<propheft::KickWake)continue;
         if(frozen){m.Knocked(p,SpellSlot,0,time);++moving;}
         const float speed=kick(p.body,r.kick,p.half.y*.3f);
         if(frozen&&!m.knocks.empty())m.knocks.back().speed=speed;
@@ -660,7 +840,7 @@ World::Pushed World::Push(const spellimpacts::Push& push,double time) {
     return out;
 }
 unsigned World::Pushers() const {
-    unsigned n=0;for(const auto& p:impl->pushers)n+=!B3_IS_NULL(p.body);return n;
+    unsigned n=0;for(const auto& p:impl->pushers)n+=!B3_IS_NULL(p.hand);return n;
 }
 unsigned World::Count() const {return impl->count;}
 uint64_t World::Steps() const {return impl->stepped;}
@@ -671,5 +851,5 @@ unsigned World::Frozen() const {
 unsigned World::Supports() const {return unsigned(impl->surfaces.size());}
 bool World::Idle() const {return !impl->Live()||!impl->Busy();}
 unsigned World::Shapes() const {return impl->rectCount;}
-void World::Reset() {auto& m=*impl;m.Clear();m.session=0;m.havePatch=false;m.patch={};for(auto& p:m.pushers)p={};}
+void World::Reset() {auto& m=*impl;m.Clear();m.session=0;m.havePatch=false;m.patch={};for(auto& p:m.pushers)p={};m.slips=0;}
 }
