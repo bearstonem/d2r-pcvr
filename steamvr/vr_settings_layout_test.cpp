@@ -135,6 +135,7 @@ static const GoldenRow Golden[]={
     {"render.rings",View::Performance,1,content::RowKind::Stepper,"Terrain distance",0,0},
     {"render.model_radius",View::Performance,1,content::RowKind::Slider,"Scenery distance",0,0},
     {"render.big_radius",View::Performance,1,content::RowKind::Slider,"Big objects",0,1},   // main's #366, drawn inside Scenery distance's row
+    {"render.subscription_rings",View::Performance,1,content::RowKind::Slider,"Enemy activation distance",0,1},
     {"render.frame_generation",View::Frames,0,content::RowKind::Choice,"Frame generation",3,0},   // main's #313
     {"render.frame_generation_preset",View::Frames,0,content::RowKind::Choice,"NVIDIA flow quality",3,0},
     {"render.frame_generation_scale",View::Frames,0,content::RowKind::Choice,"NVIDIA flow scale",3,0},
@@ -223,6 +224,16 @@ static int Dump(int view,int card){
 int main(int argc,char** argv){
     if(argc>1&&std::string(argv[1])!="--left-handed")return Dump(std::atoi(argv[1]),argc>2?std::atoi(argv[2]):NoHelp);
     const auto& tables=L::ContentTables();
+    {
+        const auto* row=content::RowOf(SubscriptionRings);
+        Check(row&&row->kind==content::RowKind::Slider&&row->page==View::Performance,"subscription distance is a Performance slider");
+        Check(content::ValueText(*row,0)=="Native"&&content::ValueText(*row,3)=="3 rings","subscription slider names native and ring values");
+        Model m;m.Open(Ready());L::Press(m,{Kind::Open,int(View::Performance),-1},0);
+        const auto layout=L::Build(m,{},{});
+        Check(FindRole(layout,L::Role::StepMinus,SubscriptionRings)&&FindRole(layout,L::Role::StepPlus,SubscriptionRings),"subscription row has both step controls");
+        L::Press(m,{Kind::Change,SubscriptionRings,-1},0);
+        Check(m.Get()[SubscriptionRings]==4&&m.Dirty(),"subscription ring changes remain a draft until Apply");
+    }
     // ---- every key reachable: one row, or an override keeping it off the menu ----
     {
         for(int k=0;k<Count;++k){
@@ -242,7 +253,7 @@ int main(int argc,char** argv){
     }
     // ---- the map: no row lost, none left to More, the names and the owner's pairs ----
     {
-        Check(tables.rowCount==116,"116 settings on the menu, each one row");   // + Props have weight (2026-11-12)   // + Weapons hit walls (2026-11-12)   // + Sticks stay right-handed (2026-11-11)   // + Weapons collide (2026-11-11)   // - Dominant hand (2026-11-10: Left-handed is the one switch)   // + Left-handed (#307)   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424), Click to drink (#425), Skill cooldowns (2026-11-09), + Summon range (#426), T cross to calibrate (#423), Heads turn to you (2026-11-09), Echo (world sound, 2026-11-09), + Monsters stagger, Heavy hits knock back (hit reactions, 2026-11-09), + Hit feel by target, Felt heartbeat (richer haptics)
+        Check(tables.rowCount==117,"117 settings on the menu, each one row");   // + Props have weight (2026-11-12)   // + Weapons hit walls (2026-11-12)   // + Sticks stay right-handed (2026-11-11)   // + Weapons collide (2026-11-11)   // - Dominant hand (2026-11-10: Left-handed is the one switch)   // + Left-handed (#307)   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424), Click to drink (#425), Skill cooldowns (2026-11-09), + Summon range (#426), T cross to calibrate (#423), Heads turn to you (2026-11-09), Echo (world sound, 2026-11-09), + Monsters stagger, Heavy hits knock back (hit reactions, 2026-11-09), + Hit feel by target, Felt heartbeat (richer haptics)
         for(size_t i=0;i<tables.rowCount;++i)Check(!tables.rows[i].fallback&&tables.rows[i].page!=View::More,std::string("every setting has its page: ")+tables.rows[i].label);
         Check(content::Menu().report.empty(),"the tidy report is empty");
         struct Want {content::Group group;const char* name;std::vector<const char*> pages;};

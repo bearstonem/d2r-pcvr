@@ -67,6 +67,17 @@ add_library(d2rl-pcvr SHARED ${ROOT}/vr/vrcam.cpp ${ROOT}/vr/dlss_mv.cpp ${ROOT}
 # RC compilers do not reliably report included headers to Ninja. A version
 # bump must rebuild Windows VERSIONINFO even in an existing developer tree.
 set_property(SOURCE ${ROOT}/vr/vrcam.rc APPEND PROPERTY OBJECT_DEPENDS ${ROOT}/vr/pcvr_identity.h)
+# Native enemy/object room availability and ongoing unit delivery.
+target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/room_subscription.cpp)
+add_executable(room-subscription-test room_subscription_test.cpp)
+target_compile_options(room-subscription-test PRIVATE -UNDEBUG)
+add_test(NAME room-subscription-test COMMAND room-subscription-test)
+add_executable(drawdist-runtime-test drawdist_runtime_test.cpp)
+target_include_directories(drawdist-runtime-test PRIVATE ${D2RL_SDK}/include)
+target_link_libraries(drawdist-runtime-test PRIVATE framevr-runtime)
+add_executable(render-distance-status-test render_distance_status_test.cpp)
+target_link_libraries(render-distance-status-test PRIVATE framevr-runtime)
+
 add_dependencies(d2rl-pcvr release-notes-generated)
 target_include_directories(d2rl-pcvr PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_sources(d2rl-pcvr PRIVATE ${ROOT}/vr/dev_scenarios.cpp)
@@ -483,7 +494,7 @@ foreach(test_target IN ITEMS memory-test biome-list-test hook-metrics-test activ
     portal-billboard-test shrine-trace-test shrine-placement-test overlay-view-test bone-armor-height-test composition-layers-test projectile-rules-test environment-cutaway-test roof-materials-test game-ceiling-test stereo-prop-physics-test dropped-bottles-test props-test prop-heft-test limb-rig-test aged-cache-test ecs-storage-test look-at-test limb-physics-test limb-worker-test leather-menu-test stash-buttons-test stats-button-test menu-drop-test arcane-decay-test respec-button-test vr-keyboard-test
     combat-rules-test strike-skills-test zeal-light-test skill-usage-test shield-guard-test guard-strain-test heartbeat-test haptic-impact-test haptic-heartbeat-test run-speed-test room-scale-test room-steps-test walk-direction-test logging-test log-rotation-test melee-contact-test bow-bash-test weapon-heft-test hit-reactions-test held-collision-test held-world-test melee-weapon-test breakables-test offline-difficulty-test enemy-sight-test attack-speed-test world-coordinates-test bow-flight-test bow-laser-test spell-cast-test spell-aim-assist-test tactical-chord-test glyph-recognizer-test glyph-trail-test glyph-cast-test spell-motion-test motions-amazon-test motions-barbarian-test motions-necromancer-test motions-warlock-test motions-assassin-test motions-paladin-test motions-druid-test bone-graft-test
     interaction-test dev-scenarios-test native-belt-test wrist-hud-test map-zoom-test floating-map-test navigation-info-test companions-test summon-commander-test active-effects-test skill-cooldowns-test dropped-item-labels-test stick-gestures-test show-items-command-test native-hud-test render-resolution-test render-pointer-test scene-depth-test game-device-only-test controller-bindings-test journal-test native-panels-test talk-stop-test sheet-walk-test room-stitch-test ceiling-top-test loot-beams-test
-    vr-settings-test vr-settings-layout-test vr-settings-pointer-test vr-settings-store-test controller-labels-test math-test deferred-draw-test monster-bars-test loot-aim-test telegraph-test aim-reach-test aim-rules-test teleport-arc-test target-cone-test gaze-test window-focus-test callback-ticket-test local-player-test shield-block-test trigger-melee-test companion-ai-test torch-light-test light-radius-test world-sound-test frame-generation-test late-wait-test turn-capture-test panel-atlas-test atlas-dirty-test far-objects-test)
+    vr-settings-test vr-settings-layout-test vr-settings-pointer-test vr-settings-store-test controller-labels-test math-test deferred-draw-test monster-bars-test loot-aim-test telegraph-test aim-reach-test aim-rules-test teleport-arc-test target-cone-test gaze-test window-focus-test callback-ticket-test local-player-test shield-block-test trigger-melee-test companion-ai-test torch-light-test light-radius-test world-sound-test frame-generation-test late-wait-test turn-capture-test panel-atlas-test atlas-dirty-test far-objects-test drawdist-runtime-test render-distance-status-test)
   # These fixtures use assert for their checks, including in Release builds.
   if(MSVC)
     target_compile_options(${test_target} PRIVATE /UNDEBUG)

@@ -129,7 +129,7 @@ int main(int argc,char** argv){
         Check(Defaults()[BigObjectDistance]==600&&std::wstring(Definitions[BigObjectDistance].section)==L"render"&&
               std::wstring(Definitions[BigObjectDistance].key)==L"big_radius"&&HelpText(BigObjectDistance)[0]!=0,"big objects: [render] big_radius, 600 by default, explained");
         Check(Normalize(BigObjectDistance,250)==300&&Normalize(BigObjectDistance,-1)==0&&Normalize(BigObjectDistance,4000)==1000,"big objects: Off or 300 - 1000");
-        Check(Defaults()[DrawDistance]==6,"terrain draw distance: 6 rings as shipped (main's #366)");
+        Check(Defaults()[DrawDistance]==4,"terrain draw distance: 4 rings as shipped");
         {
             Model big;big.Open(s);
             layout::Press(big,Step(BigObjectDistance),0);
@@ -155,8 +155,8 @@ int main(int argc,char** argv){
             Check(big.Get()[BigObjectDistance]==300&&big.popoverKey<0,"a pick sets it and closes the list");
         }
         // Fog distance (main's #366): [fog] end, 100 - 1200, under Distance fog, locked while the fog is off.
-        Check(Defaults()[FogDistance]==600&&std::wstring(Definitions[FogDistance].section)==L"fog"&&
-              std::wstring(Definitions[FogDistance].key)==L"end"&&HelpText(FogDistance)[0]!=0,"the fog's distance: [fog] end, 600 as shipped, explained");
+        Check(Defaults()[FogDistance]==400&&std::wstring(Definitions[FogDistance].section)==L"fog"&&
+              std::wstring(Definitions[FogDistance].key)==L"end"&&HelpText(FogDistance)[0]!=0,"the fog's distance: [fog] end, 400 as shipped, explained");
         Check(Normalize(FogDistance,50)==100&&Normalize(FogDistance,5000)==1200,"the fog's distance: 100 - 1200");
         {
             Values on=Defaults();on[Fog]=1;Values off=on;off[Fog]=0;
@@ -164,17 +164,17 @@ int main(int argc,char** argv){
             Snapshot fogged=s;fogged.values[Fog]=1;
             Model fog;fog.Open(fogged);
             layout::Press(fog,Step(FogDistance),0);layout::Press(fog,Step(FogDistance),0);
-            Check(fog.Get()[FogDistance]==700&&fog.Get()[Fog]==1,"600, 650, 700 - the fog stays on");
+            Check(fog.Get()[FogDistance]==500&&fog.Get()[Fog]==1,"400, 450, 500 - the fog stays on");
             layout::Press(fog,{Kind::Set,Fog,0,0},0);
-            Check(fog.Get()[Fog]==0&&fog.Get()[FogDistance]==700,"the fog's switch turns it off, the distance kept");
+            Check(fog.Get()[Fog]==0&&fog.Get()[FogDistance]==500,"the fog's switch turns it off, the distance kept");
             layout::Press(fog,Step(FogDistance),0);
-            Check(fog.Get()[FogDistance]==700,"no change to the distance while the fog is off");
+            Check(fog.Get()[FogDistance]==500,"no change to the distance while the fog is off");
             Check(layout::KeyVisible(FogDistance,on,{})&&!layout::KeyVisible(FogDistance,off,{}),"its box shows beside Distance fog while the fog is on");
             Model list;list.Open(fogged);layout::Press(list,{Kind::Open,int(View::Environment),-1},0);layout::Press(list,{Kind::Popover,FogDistance},0);
             int listed=0;for(const auto& e:layout::Build(list,list.context,{}).elements)listed+=e.role==layout::Role::PopoverOption&&e.key==FogDistance;
             const auto built=layout::Build(list,list.context,{});   // Find points into it: kept for the check
             const auto* box=layout::Find(built,{Kind::Popover,FogDistance});
-            Check(listed==23&&box&&box->text=="Ends at 600","Fog distance: Ends at 600, a list of 100 - 1200 in 50s");
+            Check(listed==23&&box&&box->text=="Ends at 400","Fog distance: Ends at 400, a list of 100 - 1200 in 50s");
         }
         Model strength;strength.Open(s);
         Check(strength.Get()[Foveation]==1&&strength.Get()[FoveationStrength]==1,"fixed foveation at Medium strength by default");
@@ -746,7 +746,7 @@ int main(int argc,char** argv){
         layout::Press(chooser,{Kind::Set,ControllerLabels,0,3},0);Check(chooser.Get()[ControllerLabels]==2,"cannot edit while saving");
         chooser.Close();chooser.Open(s);Check(chooser.Get()[ControllerLabels]==0,"reopen discards unsaved choice");
     }
-    Check(s.values[DrawDistance]==6&&s.values[ObjectDistance]==210,"distance fallbacks match release configuration: 6 rings, objects 210");
+    Check(s.values[DrawDistance]==4&&s.values[ObjectDistance]==210,"distance fallbacks match release configuration: 4 rings, objects 210");
     {Model distance;distance.Open(s);
         distance.Click({Kind::Change,ObjectDistance,-1});
         Check(distance.Get()[ObjectDistance]==160,"object distance steps by 50, never jumping to the minimum");
@@ -1057,7 +1057,7 @@ int main(int argc,char** argv){
     {   // Props have weight (prop_heft.h): On by default, a switch under Knock over small props, shown while it is on, saved alone
         Check(Defaults()[PropHeft]==1&&std::wstring(Definitions[PropHeft].section)==L"interactions"&&
               std::wstring(Definitions[PropHeft].key)==L"prop_heft"&&Definitions[PropHeft].min==0&&Definitions[PropHeft].max==1&&
-              Definitions[PropHeft].step==1&&HelpText(PropHeft)[0]!=0&&PropHeft<ChangeMask::Bits&&PropHeft==Count-1,
+              Definitions[PropHeft].step==1&&HelpText(PropHeft)[0]!=0&&PropHeft<ChangeMask::Bits&&PropHeft==SubscriptionRings-1,
               "Props have weight: On by default, [interactions] prop_heft Off / On, explained, its own change bit, appended last");
         const auto* row=content::RowOf(PropHeft);const auto* props=content::RowOf(PropPhysics);
         Check(row&&props&&!row->beside&&row->page==View::Physics&&row->kind==content::RowKind::Toggle&&std::strcmp(row->label,"Props have weight")==0&&
