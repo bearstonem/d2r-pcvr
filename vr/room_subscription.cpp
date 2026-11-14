@@ -166,7 +166,7 @@ void Transition(Address client,Address nextRoom){
     const bool owned=owner==client&&Read(client+0x2b0,game)&&game==ownerGame;
     if(!local&&!owned){call(client,nextRoom);return;}
     if(owner&&(!owned)){call(client,nextRoom);return;}
-    const unsigned rings=local&&nextRoom&&requested.load()==8?8:0;
+    const unsigned rings=local&&nextRoom?unsigned(NormalizeRings(requested.load())):0;
     if(!owner&&!rings){call(client,nextRoom);return;}
     if(owned)version=ownerVersion;
     Adapter api{version};Lists lists;lists.oldRoom=oldRoom;lists.newRoom=nextRoom;
@@ -217,7 +217,7 @@ void __cdecl Refresh(const D2RL::PluginContext*,void* data) noexcept {
         }
     }
     if(!client||(owner&&(owner!=client||ownerGame!=game)))return;
-    const unsigned rings=requested.load()==8?8:0;
+    const unsigned rings=unsigned(NormalizeRings(requested.load()));
     if((!owner&&!rings)||(owner&&appliedRings==rings))return;
     Adapter api{version,game};
     std::vector<Address> before;
@@ -294,9 +294,9 @@ bool Guards(){
 }
 
 void Poll(const D2RL::PluginContext* ctx,const wchar_t* ini,bool vr){
-    // This experiment defaults to eight. An explicit zero restores the native
+    // This experiment defaults to five. An explicit zero restores the native
     // subscription set automatically on the game thread; renderer rings are separate.
-    const int choice=vr&&GetPrivateProfileIntW(L"render",L"subscription_rings",8,ini)==8?8:0;
+    const int choice=vr?NormalizeRings(static_cast<int>(GetPrivateProfileIntW(L"render",L"subscription_rings",5,ini))):0;
     requested=choice;
     if(ready.load(std::memory_order_acquire)){QueueRefresh(ctx);return;}
     if(!choice)return;
@@ -311,7 +311,7 @@ void Poll(const D2RL::PluginContext* ctx,const wchar_t* ini,bool vr){
     if(!removeHook)removeHook=d2rsig::Hook(abi::Remove,abi::RemoveSig,sizeof abi::RemoveSig,reinterpret_cast<void*>(&Remove),reinterpret_cast<void**>(&originalRemove));
     if(nearHook&&cleanupHook&&transitionHook&&updateHook&&removeHook){
         ready.store(true,std::memory_order_release);
-        framevr::logging::Write("Frame subscriptions: exact 95032 guards ready; eight-ring offline server activation/client subscription experiment; automatic initialization and expanded native unit update/removal passes enabled");
+        framevr::logging::Write("Frame subscriptions: exact 95032 guards ready; adjustable offline server activation/client subscriptions (0-8 rings); automatic initialization and expanded native unit update/removal passes enabled");
         QueueRefresh(ctx);
     }
 }

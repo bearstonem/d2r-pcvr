@@ -216,7 +216,7 @@ int main(){
     Check(before.ready&&before.values[DrawDistance]==6&&before.values[Foveation]==1&&before.values[ObjectDistance]==210,"explicit distance retained; missing object distance uses shipped default");
     Check(WritePrivateProfileStringW(L"render",L"rings",nullptr,name),"remove terrain distance in isolated legacy profile");
     vrsettings::Poll(name);before=vrsettings::Read();
-    Check(before.values[DrawDistance]==6&&before.values[ObjectDistance]==210,"missing draw distances take the shipped defaults: 6 rings, objects 210");
+    Check(before.values[DrawDistance]==4&&before.values[ObjectDistance]==210,"missing draw distances take the shipped defaults: 4 rings, objects 210");
     Check(WritePrivateProfileStringW(L"render",L"rings",L"6",name),"restore explicit terrain distance");
     vrsettings::Poll(name);before=vrsettings::Read();
     // Old separate switches migrate only until an explicit combined choice exists.
@@ -415,6 +415,16 @@ int main(){
         const auto saved=vrsettings::Read();
         Check(saved.values[TCrossCalibrate]==enabled&&Int(path,L"interactions",L"t_cross_calibrate")==enabled&&
               Changed(saved.values,current.values)==(ChangeMask{1}<<TCrossCalibrate)&&Int(path,L"custom",L"keep")==12345,"the T cross switch survives reload and touches nothing else");
+    }
+    Check(vrsettings::Read().values[SubscriptionRings]==5,"missing subscription setting uses five-ring default");
+    for(int rings:{3,0,8,1,7}) {
+        const auto current=vrsettings::Read();
+        model.Open(current);model.Set(SubscriptionRings,float(rings));request=model.Click({Kind::Apply});
+        Check(vrsettings::Submit(request)&&vrsettings::Poll(name),"apply subscription rings");
+        const auto saved=vrsettings::Read();
+        Check(saved.values[SubscriptionRings]==rings&&Int(path,L"render",L"subscription_rings")==rings&&
+              Changed(saved.values,current.values)==(ChangeMask{1}<<SubscriptionRings)&&
+              Int(path,L"custom",L"keep")==12345,"subscription slider persists only its own setting");
     }
     // Left-handed (#307): Off when missing (every existing profile), saved as [interactions] left_handed; the
     // profile's own Dominant hand is neither read for it nor written by it.

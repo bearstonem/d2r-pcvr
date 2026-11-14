@@ -323,7 +323,7 @@ struct Settings {
     std::atomic<bool>  afrSwap{false};      // the presented frame is the other eye: swap the halves
     std::atomic<bool>  fogOn{false};        // D2R_DepthFog.fx driven from here through ReShade
     std::atomic<float> fogStart{150.0f};    // world units from the eye
-    std::atomic<float> fogEnd{600.0f};
+    std::atomic<float> fogEnd{framevr::settings::Definitions[framevr::settings::FogDistance].defaultValue};
     std::atomic<float> fogCaveStart{150.0f};   // [fog] caves_start / caves_end: the same, in caves and dungeons (every area off [sky] outdoor)
     std::atomic<float> fogCaveEnd{600.0f};
     std::atomic<float> fogCaveStrength{1.0f};  // [fog] caves_strength: how much the full fog covers in caves, 0..1

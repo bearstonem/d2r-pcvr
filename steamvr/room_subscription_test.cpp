@@ -42,6 +42,34 @@ struct World {
     }
 };
 int main(){
+    assert(NormalizeRings(-1)==0&&NormalizeRings(9)==8);
+    // Slider changes while stationary must remove memberships before releasing
+    // references, keep native neighbors, and deliver updates from the new set.
+    {
+        World slider;Coverage current;const auto centre=World::Id(0,0)+10000;
+        slider.NearRooms(centre,current.rooms);
+        slider.subscribed.insert(current.rooms.begin(),current.rooms.end());
+        for(int rings:{8,3,0,8,1,2,4,5,6,7,8,0}){
+            assert(NormalizeRings(rings)==rings);
+            auto next=current.Prepare(slider,centre,rings);
+            const auto expected=rings?unsigned((2*rings+1)*(2*rings+1)):9u;
+            assert(next.valid&&next.rooms.size()==expected&&next.depth==unsigned(rings));
+            SynchronizeRooms(slider,1,current.rooms,next.rooms);
+            // Native neighbors retain their own refs independently of our pins.
+            auto memberships=slider.subscribed;
+            if(!rings)slider.subscribed.clear();
+            current.Commit(slider,std::move(next));slider.subscribed=memberships;
+            assert(slider.subscribed.size()==expected);
+            assert(Contains(current.rooms,World::Id(0,0)+10000));
+            assert(Contains(current.rooms,World::Id(7,7)+10000)==(rings>=7));
+            for(auto [node,count]:slider.refs)
+                assert(count==int(std::any_of(current.pins.begin(),current.pins.end(),[&](Pin p){return p.drlg==node;})));
+            auto same=current.Prepare(slider,centre,rings);
+            assert(same.valid&&same.acquired.empty());
+        }
+        assert(current.pins.empty());
+        for(auto [node,count]:slider.refs)assert(count==0);
+    }
     World api;Coverage owned;const auto centre=World::Id(0,0)+10000;
     std::vector<Address> baseline;api.NearRooms(centre,baseline);
     api.subscribed.insert(baseline.begin(),baseline.end());

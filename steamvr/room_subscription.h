@@ -5,6 +5,7 @@
 
 namespace framevr::roomsubscription {
 inline constexpr unsigned MaxRooms=512,MaxNeighbors=64,ExperimentRings=8;
+inline constexpr int NormalizeRings(int rings){return std::clamp(rings,0,int(ExperimentRings));}
 using Address=uintptr_t;
 struct Node {Address drlg=0;unsigned depth=0;};
 struct Pin {Address drlg=0,room=0;unsigned depth=0;};

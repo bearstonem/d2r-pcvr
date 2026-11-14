@@ -26,7 +26,7 @@ class SubscriptionControlTests(unittest.TestCase):
                               creationflags=subprocess.CREATE_NO_WINDOW)
 
     def test_toggle_updates_only_render_subscription_preference(self):
-        for rings in (0, 8):
+        for rings in (8, 3, 0, 1, 2, 4, 5, 6, 7, 8):
             result = self.run_control(rings)
             self.assertEqual(result.returncode, 0, result.stderr)
             text = self.ini.read_text()
@@ -40,7 +40,8 @@ class SubscriptionControlTests(unittest.TestCase):
             self.assertEqual(set(settings.sections()), {'render', 'unrelated'})
 
     def test_invalid_depth_preserves_profile(self):
-        self.assertNotEqual(self.run_control(4).returncode, 0)
+        for rings in (-1, 9):
+            self.assertNotEqual(self.run_control(rings).returncode, 0)
         self.assertEqual(self.ini.read_bytes(), self.original.encode('ascii'))
 
     def test_missing_profile_is_not_created(self):

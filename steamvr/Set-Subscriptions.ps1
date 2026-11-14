@@ -1,5 +1,5 @@
 param(
-    [ValidateSet(0,8)][int]$Rings = 8,
+    [ValidateRange(0,8)][int]$Rings = 8,
     [Parameter(Mandatory=$true)][string]$Ini
 )
 $ErrorActionPreference = 'Stop'

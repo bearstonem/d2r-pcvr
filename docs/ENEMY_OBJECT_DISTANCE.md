@@ -14,7 +14,7 @@ settings-menu changes and desktop transport overrides are outside this branch.
 
 ## Settings
 
-`[render] subscription_rings` defaults to `8`; `0` restores native server/client
+`[render] subscription_rings` defaults to `5`; `0` restores native server/client
 coverage. The exact 3.4.95032 guards and verified offline local client/server
 association must pass before any expansion takes effect. Coverage initializes
 automatically on the authoritative game thread when the local character is
@@ -26,15 +26,22 @@ The existing terrain/object distance controls retain their upstream meanings:
 | --- | --- |
 | `rings` | Renderer room coverage (1–8); existing Terrain draw distance control |
 | `model_radius` | Distance at which models stay active; existing Object draw distance control |
-| `subscription_rings` | Server activation and client unit delivery (0 or 8) |
+| `subscription_rings` | Server activation and client unit delivery (0–8 rings; 0 keeps native coverage) |
 
 The owner-tested distance configuration used `rings=8`, `model_radius=3260`,
-and `subscription_rings=8`. Existing upstream renderer defaults are preserved;
+and `subscription_rings=8`. Shipped defaults are terrain rings 4, fog distance 400 and subscription rings 5;
 renderer coverage and model radius can still shorten the visible range.
 
 The previous experiment stored the subscription key in `[foliage]`. This
 standalone feature reads it only from `[render]`. Move an explicit old value
-there if needed; the default remains eight. The feature does not edit the INI.
+there if needed; the default is five. Subscriptions leave renderer settings
+unchanged.
+
+In **VR Settings > Graphics > Performance > Draw distance**, the **Enemy
+activation distance** slider selects **Native** (0) or **1–8 rings**. Press
+**Apply** to save it and update coverage while stationary, without restarting.
+Reducing the value removes extra memberships before releasing retained rooms.
+The default is five; terrain and scenery distances remain independent.
 
 Changing subscriptions using an explicit profile path:
 

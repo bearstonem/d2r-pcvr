@@ -404,6 +404,7 @@ inline constexpr Option FrameGenScaleOptions[]={
     {2,"50%","Half size: OFXR's suggested balance."},
 };
 
+inline constexpr ValueName NativeAtZero[]={{0,"Native"}};
 inline constexpr ValueName OffAtZero[]={{0,"Off"}};
 inline constexpr ValueName WalkNames[]={{0,"Look"},{1,"Controller"}};   // walk_direction.h: where you look, or where the left controller points
 inline constexpr ValueName LeatherNames[]={{0,"Off"},{1,"Leather"},{2,"Menu only"}};   // leather::Style; owner 2026-10-29: "Hold Menu > Off/Leather/Menu Only"
@@ -744,6 +745,9 @@ inline constexpr Override Overrides[]={
     {.id="render.big_radius",.page=View::Performance,.section="Draw distance",.kind=RowKind::Slider,.label="Big objects",
      .help="Trees, houses and walls stay drawn past Scenery distance: the bigger, the farther, out to this. Needs Terrain distance 3 or more. Costs frames in forests.",
      FRAMEVR_NAMES(OffAtZero),.beside=true,.besideLabel="Big:"},
+    {.id="render.subscription_rings",.page=View::Performance,.section="Draw distance",.kind=RowKind::Slider,.label="Enemy activation distance",
+     .help="Room rings for offline enemies and objects. Native keeps the game's coverage. Apply updates while standing still; draw distances still limit visibility.",
+     .format={.unit="rings"},FRAMEVR_NAMES(NativeAtZero)},
     // Frames: Frame generation (main's #313, OFXR Bridge). Eyes drawn per frame is drawn above it
     // (.alsoOn): it runs with Both eyes only, so By turns grays these rows, and PageReason says why.
     // NVIDIA's quality and scale show while NVIDIA is chosen. Its status: the row's sub line and card
