@@ -133,6 +133,7 @@ float4 PS(Out v):SV_Target {
     if(occA.w>0){float d=length(v.view);float t=Capsule(v.view/d,occA.xyz,occB.xyz,occA.w);if(t>0&&t<d-.002)discard;}
     float3 n=normalize(v.n),eye=normalize(-v.view);
     float3 base=albedo.Sample(texSampler,v.uv).rgb;
+    if(options.w>0)base=dot(base,float3(.2126,.7152,.0722))*.65+.12;
     if(options.x>0)base=lerp(base,dot(base,float3(.2126,.7152,.0722))*.28,v.glass>.5?.85:.2);
     float diffuse=saturate(dot(n,light.xyz));
     float3 c=base*(.38+.62*diffuse)+pow(saturate(dot(n,normalize(light.xyz+eye))),32)*lerp(.12,.38,v.glass);
@@ -243,6 +244,7 @@ bool Models::Render(ID3D12GraphicsCommandList* list,ID3D12Resource* target,unsig
         constants[23]=item.scale>0&&item.scale<=4?item.scale:0;   // the shader's size multiplier (0 = 1)
         constants[24]=light.x;constants[25]=light.y;constants[26]=light.z;
         constants[28]=item.empty?1:0;constants[29]=item.highlight?1:0;constants[30]=p.encode?1:0;
+        constants[31]=item.suggested?1:0;
         if(item.occR>0) {   // the forearm capsule in view space (the shader hides pixels behind it)
             const auto a=math::Rotate(inverse,item.occA-view.p),b=math::Rotate(inverse,item.occB-view.p);
             constants[32]=a.x;constants[33]=a.y;constants[34]=a.z;constants[35]=item.occR;

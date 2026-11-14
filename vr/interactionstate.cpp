@@ -108,6 +108,7 @@ Snapshot Collect() {
     for(auto& b:s.belt)b.known=s.beltKnown;
     nativeui::Capture(s);
     quickitems::Capture(s);
+    {std::lock_guard lock(mutex);SuggestBelt(s,snapshot);}
     devscenarios::Capture(s);
     {std::lock_guard lock(mutex);if(mercSession==s.session&&s.at>=mercAt&&s.at-mercAt<=MercMaxAge){s.merc=merc;s.companions=companions;s.effects=effects;s.cooldowns=cooldowns;}}
     if(s.companions.known) {
@@ -177,7 +178,7 @@ void Publish(Snapshot s) {
                  !s.cooldowns.SameSkills(snapshot.cooldowns);   // the skills, not each sample's timing
     for(int i=0;i<4;++i) {
         auto& b=s.belt[i];const auto& before=snapshot.belt[i];
-        const bool change=s.session!=snapshot.session||b.items!=before.items||b.known!=before.known||b.count!=before.count;
+        const bool change=s.session!=snapshot.session||b.items!=before.items||b.known!=before.known||b.count!=before.count||b.suggested!=before.suggested;
         b.revision=before.revision+(change?1:0);changed|=change;
     }
     if(changed)++s.revision;
@@ -259,7 +260,7 @@ void __cdecl Apply(const PluginContext*,void*) noexcept {
     uint32_t command=0;
     switch(r.action) {
         case Action::Potion:{auto current=r;current.at=now;valid=valid&&SameBelt(s,current);command=0x17+r.index;break;}
-        case Action::FeedMerc:{auto current=r;current.at=now;valid=valid&&SameBelt(s,current);command=0x17+r.index;break;}
+        case Action::FeedMerc:{auto current=r;current.at=now;valid=valid&&SameBelt(s,current)&&!s.belt[r.index].suggested;command=0x17+r.index;break;}
         case Action::Equip:valid=valid&&s.equipmentKnown&&(r.index==1||r.index==2);command=0x2c;break;
         case Action::Quest:command=0x04;break;
         case Action::Map:command=0x0b;break;
@@ -270,7 +271,7 @@ void __cdecl Apply(const PluginContext*,void*) noexcept {
     std::lock_guard lock(mutex);
     if(epoch!=cancelEpoch)valid=false;
     const bool already=r.action==Action::Equip&&s.equipmentKnown&&s.activeSet==uint32_t(r.index);
-    const bool accepted=valid&&(already||(r.action==Action::Potion?nativebelt::Drink(r.index,r.session):
+    const bool accepted=valid&&(already||(r.action==Action::Potion?(s.belt[r.index].suggested?quickitems::UsePotion(r,s):nativebelt::Drink(r.index,r.session)):
         r.action==Action::FeedMerc?nativebelt::FeedMerc(r.index,r.session):gamecmd::ExecuteUiCommand(command)));
     if(accepted&&(r.action==Action::Potion||r.action==Action::FeedMerc||r.action==Action::Equip)&&!already) {
         waiting=r;issuedAt=now;reply={r.sequence,r.session,Result::Pending};

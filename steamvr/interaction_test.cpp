@@ -1246,5 +1246,25 @@ int main(){
         swap.in.hand[0].p=swap.in.head.p+Vec{-.23f,-.2f,.14f};swap.Step(10);swap.in.grip[0]=1;
         Check(swap.Step().request.action==Action::Equip&&swap.out.feedbackHand==0,"left-handed the main (left) hand's grip over the left shoulder swaps weapon sets");
     }
+    {
+        Snapshot previous{},current{};previous.session=current.session=42;
+        previous.belt[0].preferred=Potion::Mana;
+        current.beltKnown=current.quick.known=current.belt[0].known=true;
+        current.quick.count=1;current.quick.items[0].item={123,7,Code('m','p','3')};
+        current.quick.items[0].quantity=1;
+        SuggestBelt(current,previous);
+        Check(current.belt[0].suggested&&current.belt[0].Next().handle==123,"empty column suggests its previous potion type from inventory");
+        Request drink{};drink.item=current.belt[0].Next();drink.session=42;drink.inventoryPotion=true;
+        current.belt[0]={};
+        Check(!PotionGone(current,drink),"inventory suggestion is not consumed just because the belt is empty");
+        current.quick={};
+        Check(!PotionGone(current,drink),"unknown inventory cannot confirm consumption");
+        current.quick.known=true;
+        Check(PotionGone(current,drink),"known inventory removal confirms the suggested potion");
+        Check(framevr::potions::GrabDistance({0,.09f,0},{},{0,0,0,1})<.001f,"the neck is inside the bottle grab volume");
+        Check(framevr::potions::GrabDistance({0,-.09f,0},{},{0,0,0,1})<.001f,"the base is inside the bottle grab volume");
+        Check(framevr::potions::GrabDistance({.2f,0,0},{},{0,0,0,1})>.11f,"distant hands cannot grab the bottle");
+    }
     std::puts("Interaction ownership, wheel, holster, item identity, confirmation and left-handed wrist / palm / menu reach / swap hand tests passed");
 }
+

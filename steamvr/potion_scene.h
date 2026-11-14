@@ -7,7 +7,7 @@ namespace framevr::potions {
 // capsule (room space) that hides the model's pixels behind it (occR 0: none).
 // width: the size across the model's X and Z (0 = scale).
 struct Instance {interaction::Pose pose;uint32_t code=0;bool empty=false,highlight=false;float scale=0;
-    math::Vec occA{},occB{};float occR=0;float width=0;};
+    math::Vec occA{},occB{};float occR=0;float width=0;bool suggested=false;};
 // Four belt bottles, one held, one thrown, the arrow, a trap, a throwing potion
 // in flight, the emptied ones let go of; Bone Armor's forearm grafts (three per
 // arm) and up to six knocked off and falling (bone_graft.h).
@@ -53,6 +53,7 @@ inline Scene MakeScene(const interaction::Input& in,const interaction::Output& o
         const auto& b=in.snapshot.belt[i];
         if(i==out.bottle||(out.flying&&i==out.flightColumn)||!b.known||!b.count||!b.Next().handle||!interaction::Valid(out.belt[i]))continue;
         s.items[s.count++]={out.belt[i],b.Next().code,false,i==out.nearBelt};
+        s.items[s.count-1].suggested=b.suggested;
     }
     if(out.bottleHand>=0&&out.bottleHand<2&&out.bottleItem.handle) {
         auto p=in.hand[out.bottleHand];p.p=Center(p.p,p.q);p.q=HeldRotation(p.q);

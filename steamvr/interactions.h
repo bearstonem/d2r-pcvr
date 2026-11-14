@@ -233,6 +233,8 @@ struct Belt {
     uint8_t count=0;
     bool known=false;
     Item Next() const {return items[0];}
+    bool suggested=false;
+    Potion preferred=Potion::Unknown;
     bool operator==(const Belt&) const = default;
 };
 struct Skill {
@@ -376,6 +378,7 @@ struct Request {
     // diagnostics). The transport adds the rendered player and scale.
     Vec point{},world{},player{};
     float unitsPerMetre=0;
+    bool inventoryPotion=false;
 };
 inline bool CanBind(const Snapshot& s,const Request& r,uint64_t now) {
     if(!Fresh(s,r.session,now)||!s.bindingsEditable||r.index<0||r.index>=skills::Count||
@@ -388,6 +391,22 @@ inline bool CanBind(const Snapshot& s,const Request& r,uint64_t now) {
     return false;
 }
 struct Reply {uint64_t sequence=0,session=0;Result result=Result::None;};
+inline void SuggestBelt(Snapshot& s,const Snapshot& previous) {
+    constexpr Potion defaults[]{Potion::Health,Potion::Mana,Potion::Rejuvenation,Potion::Unknown};
+    for(unsigned column=0;column<s.belt.size();++column) {
+        auto& b=s.belt[column];
+        b.preferred=s.session&&s.session==previous.session?previous.belt[column].preferred:defaults[column];
+        if(!b.known)continue;
+        if(b.Next().handle){b.preferred=PotionType(b.Next().code);continue;}
+        if(b.count||!s.quick.known||b.preferred==Potion::Unknown)continue;
+        for(unsigned i=0;i<s.quick.count;++i) {
+            const auto& candidate=s.quick.items[i];
+            if(candidate.quantity>0&&candidate.item.handle&&PotionType(candidate.item.code)==b.preferred) {
+                b.items[0]=candidate.item;b.count=1;b.suggested=true;break;
+            }
+        }
+    }
+}
 inline bool SameBelt(const Snapshot& s,const Request& r) {
     if(!Fresh(s,r.session,r.at)||r.index<0||r.index>=4)return false;
     const auto& b=s.belt[r.index];
@@ -396,6 +415,10 @@ inline bool SameBelt(const Snapshot& s,const Request& r) {
 inline bool PotionGone(const Snapshot& s,const Request& r) {
     if(s.session!=r.session||!s.beltKnown)return false;
     for(const auto& b:s.belt)for(const auto& item:b.items)if(item.handle==r.item.handle)return false;
+    if(r.inventoryPotion) {
+        if(!s.quick.known)return false;
+        for(unsigned i=0;i<s.quick.count;++i)if(s.quick.items[i].item.handle==r.item.handle)return false;
+    }
     return r.item.handle!=0;
 }
 
@@ -794,7 +817,7 @@ class Engine {
     bool Throw(const Input& in,bool fresh,Vec slot,Output& out) {
         Vec throwVelocity{};
         if(spent||!in.floorKnown||!in.stage.known||!fresh||!SameBelt(in.snapshot,held)||!Throwable(PotionType(held.item.code))||
-           !PeakVelocity(in.time,throwVelocity))return false;
+           in.snapshot.belt[held.index].suggested||!PeakVelocity(in.time,throwVelocity))return false;
         const auto& hand=in.hand[bottleHand];
         const Vec p=potions::Center(hand.p,hand.q);
         if(math::Dot(p-slot,p-slot)<ThrowClearOfBelt*ThrowClearOfBelt)return false;
@@ -900,6 +923,7 @@ public:
         auto request=[&](Action a,int index,Item item={},uint32_t revision=0) {
             if(pending.action!=Action::None)return false;
             pending={a,++sequence,session,now,index,item,revision};pendingAt=in.time;pendingHand=0;
+            pending.inventoryPotion=a==Action::Potion&&index>=0&&index<4&&in.snapshot.belt[index].suggested;
             out.request=pending;result=Result::Pending;return true;
         };
         // Follow even with lowered hands or a held bottle: proximity must not
@@ -1081,13 +1105,13 @@ public:
             }
         } else {quickPressed=false;if(bottle<0&&holster<0)owner[0]=owner[1]=Owner::Combat;}
         if(!wheel&&!in.quickCast&&!rearm&&bottle<0&&holster<0&&!flight.active&&pending.action==Action::None&&fresh) {
-            float nearestHand=.095f;
+            float nearestHand=.11f;
             for(int h=0;h<2;++h) {
                 if(h==1&&in.reservedLeft)continue;
-                int nearest=-1;float reach=.095f;
+                int nearest=-1;float reach=.11f;
                 for(int i=0;i<4;++i) {
                     const auto& b=in.snapshot.belt[i];
-                    const float d=distance(in.hand[h].p,out.belt[i].p);
+                    const float d=potions::GrabDistance(in.hand[h].p,out.belt[i].p,out.belt[i].q);
                     if(b.known&&b.count&&b.Next().handle&&d<reach){nearest=i;reach=d;}
                 }
                 if(nearest>=0) {

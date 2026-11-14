@@ -145,6 +145,15 @@ bool Use(const Request& r,const Snapshot& s) {
     reinterpret_cast<void(*)(uintptr_t,int)>(d2rsig::Addr(abi::UseRva))(unit,3);
     framevr::logging::Write("Frame quick use: native inventory action dispatched once");return true;
 }
+bool UsePotion(const Request& r,const Snapshot& s) {
+    if(r.action!=Action::Potion||PotionType(r.item.code)==Potion::Unknown)return false;
+    auto inventoryRequest=r;inventoryRequest.index=int(r.item.code);
+    Items::ItemInfo info{};ClientItems client;
+    if(!Validate(inventoryRequest,s,info)||Quantity(info)<=0||!client.Load(r.session))return false;
+    const auto unit=client.Find(info);if(!unit)return false;
+    reinterpret_cast<void(*)(uintptr_t,int)>(d2rsig::Addr(abi::UseRva))(unit,3);
+    return true;
+}
 const char* UseResultName(UseResult c) {
     switch(c) {
         case UseResult::Used:return "used";
