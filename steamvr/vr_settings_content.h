@@ -677,7 +677,7 @@ inline constexpr Override Overrides[]={
     {.id="interactions.companion_counts",.page=View::Wrist,.section="Map",.kind=RowKind::Toggle,.label="Buffs and companions",
      .help="Under the minimap: your companion counts, and the buffs, auras and harmful effects on you. Follows the minimap's gesture."},
     {.id="interactions.floating_map_background_pct",.page=View::Wrist,.section="Map",.kind=RowKind::Slider,.label="Floating map background",
-     .help="The pulled-off map's dark backing: 0% shows the world through it, 100% is solid. Walls, the arrow, markers and names stay solid.",
+     .help="The floating map's background: 0% shows the world through it, 100% is solid. Walls, the arrow, markers and names stay solid, as does the wrist map.",
      .format={.unit="%"},FRAMEVR_NAMES(MapBackgroundNames)},
     // Menus: Game menus
     {.id="hud.menu_distance",.page=View::Menus,.section="Game menus",.kind=RowKind::Choice,.label="Menu distance",

@@ -318,7 +318,7 @@ inline constexpr std::array<Definition,Count> Definitions{{
     // ... keep the foreground map parts though solid"): the pulled-off copy's dark backing, 0% see-through to 100%
     // solid; its walls, markers, labels, arrow and gold frame stay solid. The wrist map keeps its own solid picture.
     // 100% by default, as before. VR Settings > Interface > Wrist > Map, under Buffs and companions.
-    {"Floating map background", "The pulled-off map's dark backing: 0% see-through, 100% solid", L"interactions",L"floating_map_background_pct",100,0,100,10},
+    {"Floating map background", "The floating map's background: 0% see-through, 100% solid",L"interactions",L"floating_map_background_pct",100,0,100,10},
 }};
 using Values=std::array<float,Count>;
 // The setting holding the skill on glyph shape i (glyph_recognizer.h order): the right hand's (0), or the left's (1).

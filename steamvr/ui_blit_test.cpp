@@ -80,6 +80,17 @@ int main(int argc,char** argv){try {
     barrier.Transition={target.Get(),D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_COPY_SOURCE};commands->ResourceBarrier(1,&barrier);
     from.pResource=target.Get();from.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;from.SubresourceIndex=0;
     to.pResource=readback.Get();to.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;to.PlacedFootprint=outputFootprint;commands->CopyTextureRegion(&to,0,0,0,&from,nullptr);
+    // --see-through: the wrist's square as the slider at 100% (upstream's one solid square) draws it, by a blit of its own,
+    // to compare bit for bit with the top square drawn beside the see-through copy
+    framevr::UiBlit wristBlit;ComPtr<ID3D12Resource> wristTarget,wristReadback;
+    if(seeThrough) {
+        if(!wristBlit.Initialize(device.Get(),nullptr))throw std::runtime_error("wrist blit");
+        hp.Type=D3D12_HEAP_TYPE_DEFAULT;Check(device->CreateCommittedResource(&hp,D3D12_HEAP_FLAG_NONE,&tex,D3D12_RESOURCE_STATE_RENDER_TARGET,nullptr,IID_PPV_ARGS(&wristTarget)),"wrist target");
+        hp.Type=D3D12_HEAP_TYPE_READBACK;Check(device->CreateCommittedResource(&hp,D3D12_HEAP_FLAG_NONE,&buffer,D3D12_RESOURCE_STATE_COPY_DEST,nullptr,IID_PPV_ARGS(&wristReadback)),"wrist readback");
+        if(!wristBlit.Render(device.Get(),commands.Get(),source.Get(),wristTarget.Get(),false,true))throw std::runtime_error("wrist render");
+        barrier.Transition={wristTarget.Get(),D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_COPY_SOURCE};commands->ResourceBarrier(1,&barrier);
+        from.pResource=wristTarget.Get();to.pResource=wristReadback.Get();commands->CopyTextureRegion(&to,0,0,0,&from,nullptr);
+    }
     Check(commands->Close(),"close");ID3D12CommandList* lists[]={commands.Get()};queue->ExecuteCommandLists(1,lists);
     ComPtr<ID3D12Fence> fence;Check(device->CreateFence(0,D3D12_FENCE_FLAG_NONE,IID_PPV_ARGS(&fence)),"fence");Check(queue->Signal(fence.Get(),1),"signal");
     HANDLE event=CreateEventW(nullptr,FALSE,FALSE,nullptr);Check(fence->SetEventOnCompletion(1,event),"completion");
@@ -168,10 +179,18 @@ int main(int argc,char** argv){try {
             if(got<low[c]-tolerance||got>high[c]+tolerance){correct=false;std::printf("pixel %u,%u lane %d = %f expected %f to %f\n",x,y,c,got,low[c],high[c]);}
         }
     }
+    if(seeThrough) {   // the wrist's square (and the row under it) bit for bit as the one solid square at 100% draws it
+        void* wrist=nullptr;Check(wristReadback->Map(0,&range,&wrist),"map wrist readback");
+        for(UINT y=0;y<=32;++y)if(std::memcmp(static_cast<char*>(data)+y*outputFootprint.Footprint.RowPitch,static_cast<char*>(wrist)+y*outputFootprint.Footprint.RowPitch,32*8)) {
+            correct=false;std::printf("row %u of the wrist's square differs from the solid square alone\n",y);
+        }
+        wristReadback->Unmap(0,&empty);
+    }
     readback->Unmap(0,&empty);if(!correct)throw std::runtime_error("converted pixels differ");
     if(seeThrough&&back<1&&(!opaqueFore||!clearBacking))throw std::runtime_error("the see-through copy had no fully drawn or no backing pixel to test");
     if(seeThrough){std::printf("Native UI GPU conversion passed: the floating map's backing at %.0f%%; %s; the solid square unchanged\n",back*100,
-        back<1?"what the game drew lit stays opaque, the backing and the frame's dark bands at that alpha":"no see-through copy drawn");return 0;}
+        back<1?"what the game drew lit stays opaque, the backing and the frame's dark bands at that alpha":"no see-through copy drawn");
+        std::puts("the wrist's square identical, bit for bit, to the one solid square drawn alone");return 0;}
     std::puts(undim?"Native UI GPU conversion passed: the menu's backdrop taken out, what is drawn over it unchanged":
               blackBackground?"Native UI GPU conversion passed: opaque black backing, unchanged artwork colors":"Native UI GPU conversion passed: orientation, SDR color, translucent edges, inverse alpha and clamping");return 0;
 }catch(const std::exception& e){std::fprintf(stderr,"%s\n",e.what());return 1;}}
