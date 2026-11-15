@@ -74,6 +74,10 @@ LANE_ACT = {2: 120.0, 4: 150.0}  # Act 2's own scene lies within about 120 of it
 SIDES = {2: (-85.0, 200.0), 4: (-190.0, 190.0)}
 # Pieces with a sound of their own (Act 2's palms: wind in the leaves) are copied without it.
 SOUND_OK = {2}
+# Pieces that see-through-when-behind (WallTransparencyComponent: the gate's pillars, chains and skull arch) are copied
+# without it (Act 4, 2026-11-15 02:24: "a little heap floats in the air" - the rubble that lies on the gate's pillars
+# came round, the pillars did not).
+WALLS_OK = {4}
 
 # A forest behind and beside you (owner 2026-11-13: "chcemy osiągnąć las", leafy trees first, closer
 # together the farther off): rings round the camera, each (radius, trees), within FOREST_ARC degrees of
@@ -403,7 +407,11 @@ def fill_round(preset, act, ids):
         t, m = transform(e), model_of(e)
         if not t or not m or COPY in str(e.get('name', '')) or str(e.get('name', '')).startswith('pcvr_'):
             continue
-        if not plain_model(e) and not (act in SOUND_OK and plain_model(e, sound=True)):
+        kinds = {c.get('type') for c in e.get('components', [])}
+        if not plain_model(e) and not (act in SOUND_OK and plain_model(e, sound=True)) and not (
+                act in WALLS_OK and 'ModelDefinitionComponent' in kinds and kinds <= {
+                    'TransformDefinitionComponent', 'ModelDefinitionComponent', 'ModelPlatformTierComponent',
+                    'WallTransparencyComponent'}):
             continue
         base = m.rsplit('/', 1)[-1]
         if any(n in base for n in NOT) or not any(k in m if '/' in k else k in base for k in KEEP_ACT.get(act, KEEP)):
@@ -434,7 +442,8 @@ def fill_round(preset, act, ids):
                 continue
             k = FAR / r if (r > FAR and any(f in m for f in FAR_KINDS)) else 1.0
             x = copy.deepcopy(e)
-            x['components'] = [c for c in x['components'] if c.get('type') != 'AudioEmitterComponent']
+            x['components'] = [c for c in x['components'] if c.get('type') not in ('AudioEmitterComponent',
+                                                                                   'WallTransparencyComponent')]
             x['name'] = f'{e.get("name", "entity")}{COPY}{int(turn)}'
             new = (int(e.get('id', 0)) * 2654435761 + 0x9E3779B9 * n) & 0xFFFFFFFF
             while new in ids or new == 0:
@@ -1410,7 +1419,7 @@ LAVA_FALLS = {}
 # (a slab, a topless pillar, a brazier, rubble, a lava pool) stands on the menu's own ground's high part, which does not
 # come round with it - each copy of these this much lower, onto the lava. {act: (entity names, drop)}
 DROP_COPIES = {4: (('hell_brazier02_01', 'ui_wall_destroyed02_01', 'rubble_pile02_04', 'lava04_off_02',
-                    'ui_pillar01_blank_topless_01'), 10.5)}
+                    'ui_pillar01_blank_topless_01', 'pillar05_05', 'gate_chain_single01_03', 'gate_chain_single01_04'), 10.5)}
 # The guardians (owner 2026-11-15 02:12: "the statues of armoured knights by the River of Flame's forge, that turn their
 # heads after you - one on each of the three small bone islands round me, facing me"): the Hellforge's statue01 (its
 # body, and its head as the game sets it, apart), at the middle of each turned copy of the hero's own island (its bones
