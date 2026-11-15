@@ -920,6 +920,11 @@ bool MapFullOn(){return settings::MapViewFull(vrsettings::Read().values[settings
 bool MapTurnOn(){return vrsettings::Read().values[settings::MapRotate]>.5f;}
 bool mapSupported=false;
 constexpr uint32_t mapSide=512;
+// The floating map's see-through copy (VR Settings > Interface > Wrist > Floating map background below 100%, a copy
+// out): a second square on the map's surface, panelatlas::Gap rows under the first, so no swapchain more and the
+// wrist's own picture stays solid. mapSeeThrough: this frame's copy (mapEye.copied) has it.
+constexpr uint32_t mapSeeThroughTop=mapSide+panelatlas::Gap,mapHeight=mapSeeThroughTop+mapSide;
+bool mapSeeThrough=false;
 // The map's surface is made the first time a map shows. With OFXR Bridge
 // loaded that failed in every session it was tried (frame log, 2026-10-23 to
 // 25): one failure suspended the map for the session, the minimap gone from
@@ -6949,7 +6954,7 @@ bool CopyMap(reshade::api::command_queue* rq) {
         };
         // The UI panel's usage, which OFXR Bridge has always let through.
         XrSwapchainCreateInfo c{XR_TYPE_SWAPCHAIN_CREATE_INFO};c.usageFlags=XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT|XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT;
-        c.format=DXGI_FORMAT_R16G16B16A16_FLOAT;c.width=c.height=mapSide;c.sampleCount=c.faceCount=c.arraySize=c.mipCount=1;
+        c.format=DXGI_FORMAT_R16G16B16A16_FLOAT;c.width=mapSide;c.height=mapHeight;c.sampleCount=c.faceCount=c.arraySize=c.mipCount=1;
         if(const XrResult r=pCreateSwapchain(session,&c,&e.chain);XR_FAILED(r)) {
             e.chain=XR_NULL_HANDLE;
             if(r!=XR_ERROR_LIMIT_REACHED)return failed("creating its swapchain",long(r));
@@ -7000,14 +7005,30 @@ bool CopyMap(reshade::api::command_queue* rq) {
             Say(line);
         }
     }
+    // Floating map background below 100% while a copy is out: its see-through copy under the solid one, the same pass
+    // again (the hero's marker found once); at 100% or with no copy out, the one solid square as before.
+    const float back=vrsettings::Read().values[settings::FloatingMapBackground]*.01f;
+    const bool seeThrough=floatMapWant&&back<1.f;
+    {   // a line when the value or the copy's picture changes (at most one a 2 s)
+        static int toldPercent=-1;static bool toldOn=false;static ULONGLONG toldAt=0;
+        const int percent=int(std::lround(back*100));
+        if((percent!=toldPercent||seeThrough!=toldOn)&&GetTickCount64()>=toldAt) {
+            toldPercent=percent;toldOn=seeThrough;toldAt=GetTickCount64()+2000;
+            char line[200];std::snprintf(line,sizeof line,"Frame floatmap background: %d%%; %s",percent,
+                seeThrough?"the floating copy draws its own see-through square (the wrist's stays solid)":
+                back<1.f?"no floating copy out: one solid square":"solid: the floating copy shows the wrist's square, as before");
+            Say(line);
+        }
+    }
     if(!mapBlit.Render(device.Get(),e.commands.Get(),src,e.images[e.index].texture,true,true,flags,float(wristHeading.bearing),1.f,
-                       fullMap?1.f:std::min(mapZoom.Zoom(),mapzoom::Max),span,search.reach,search.right,search.down)) {
+                       fullMap?1.f:std::min(mapZoom.Zoom(),mapzoom::Max),span,search.reach,search.right,search.down,nullptr,
+                       seeThrough?mapSeeThroughTop:0,back)) {
         e.commands->Close();return false;
     }
     if(FAILED(e.commands->Close()))return false;
     ID3D12CommandList* lists[]={e.commands.Get()};queue->ExecuteCommandLists(1,lists);
     if(FAILED(queue->Signal(fence.Get(),++fenceValue)))return false;
-    e.copyFence=fenceValue;e.copied=true;return true;
+    e.copyFence=fenceValue;e.copied=true;mapSeeThrough=seeThrough;return true;
 }
 bool CopyUi(reshade::api::command_queue* rq) {
     if(!spatialMode||uiEye.copied)return true;
@@ -7925,7 +7946,7 @@ void EndPair() {
     struct FloatMapDraw {decltype(motionQuad)* quad;XrCompositionLayerQuad* layer;};FloatMapDraw floatMapDraw{&motionQuad,&floatMapQuad};
     floatmap::DrawFrame({interactionVisible&&!interactionOutput.wheel,mapEye.copied,GetTickCount64(),&floatMapDraw,
         +[](void* c,math::Vec p,math::Quat q,float side){const auto& d=*static_cast<FloatMapDraw*>(c);
-            (*d.quad)(*d.layer,XrPose({p,q}),side,side,{{0,0},{int32_t(mapSide),int32_t(mapSide)}},mapEye.chain);},&Say});
+            (*d.quad)(*d.layer,XrPose({p,q}),side,side,{{0,mapSeeThrough?int32_t(mapSeeThroughTop):0},{int32_t(mapSide),int32_t(mapSide)}},mapEye.chain);},&Say});
     if(count&&layers[count-1]==reinterpret_cast<const XrCompositionLayerBaseHeader*>(&floatMapQuad)&&floatMapAnchor)
         for(uint32_t i=0;i+1<count;++i)if(layers[i]==floatMapAnchor){std::rotate(layers.data()+i+1,layers.data()+count-1,layers.data()+count);break;}
     XrCompositionLayerQuad winePadding{XR_TYPE_COMPOSITION_LAYER_QUAD};

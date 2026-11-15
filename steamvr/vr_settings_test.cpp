@@ -1057,8 +1057,8 @@ int main(int argc,char** argv){
     {   // Props have weight (prop_heft.h): On by default, a switch under Knock over small props, shown while it is on, saved alone
         Check(Defaults()[PropHeft]==1&&std::wstring(Definitions[PropHeft].section)==L"interactions"&&
               std::wstring(Definitions[PropHeft].key)==L"prop_heft"&&Definitions[PropHeft].min==0&&Definitions[PropHeft].max==1&&
-              Definitions[PropHeft].step==1&&HelpText(PropHeft)[0]!=0&&PropHeft<ChangeMask::Bits&&PropHeft==Count-1,
-              "Props have weight: On by default, [interactions] prop_heft Off / On, explained, its own change bit, appended last");
+              Definitions[PropHeft].step==1&&HelpText(PropHeft)[0]!=0&&PropHeft<ChangeMask::Bits&&PropHeft+1==FloatingMapBackground,
+              "Props have weight: On by default, [interactions] prop_heft Off / On, explained, its own change bit, appended (Floating map background after it)");
         const auto* row=content::RowOf(PropHeft);const auto* props=content::RowOf(PropPhysics);
         Check(row&&props&&!row->beside&&row->page==View::Physics&&row->kind==content::RowKind::Toggle&&std::strcmp(row->label,"Props have weight")==0&&
               row->section==props->section&&row->classes==content::AllClasses&&std::strlen(row->help)<=160,
@@ -1072,6 +1072,28 @@ int main(int argc,char** argv){
         for(int c=-1;c<=heroclass::Assassin+1;++c)Check(RowShown(PropHeft,on,{c})&&!RowShown(PropHeft,off,{c}),"shown while props are knocked about, for every class");
         Model t;Snapshot ready;ready.ready=true;ready.values=Defaults();t.Open(ready);layout::Press(t,{Kind::Set,PropHeft,0,0},0);
         Check(t.Get()[PropHeft]==0&&t.Click({Kind::Apply}).changed==(ChangeMask{1}<<PropHeft),"the switch turns it Off, and Apply saves only it");
+    }
+    {   // Floating map background (ui_blit.cpp's see-through copy): 100% by default (solid, as before), 0 to 100 in 10s,
+        // a slider on Interface > Wrist > Map under Buffs and companions, every class, its ends named, saved alone
+        const auto& d=Definitions[FloatingMapBackground];
+        Check(Defaults()[FloatingMapBackground]==100&&std::wstring(d.section)==L"interactions"&&std::wstring(d.key)==L"floating_map_background_pct"&&
+              d.min==0&&d.max==100&&d.step==10&&HelpText(FloatingMapBackground)[0]!=0&&FloatingMapBackground<ChangeMask::Bits&&FloatingMapBackground==Count-1,
+              "Floating map background: 100% by default, [interactions] floating_map_background_pct 0 to 100 in 10s, explained, its own change bit, appended last");
+        const auto* row=content::RowOf(FloatingMapBackground);const auto* companions=content::RowOf(CompanionCounts);
+        Check(row&&companions&&!row->beside&&row->page==View::Wrist&&row->kind==content::RowKind::Slider&&std::strcmp(row->label,"Floating map background")==0&&
+              row->section==companions->section&&row->classes==content::AllClasses&&std::strlen(row->help)<=160,
+              "a slider of its own on Interface > Wrist, in the Map section, every class");
+        {
+            const auto& rows=content::Menu().rows;size_t at=rows.size(),companionsAt=rows.size();
+            for(size_t i=0;i<rows.size();++i){if(rows[i].key==FloatingMapBackground)at=i;if(rows[i].key==CompanionCounts)companionsAt=i;}
+            Check(companionsAt+1==at,"listed right under Buffs and companions");
+        }
+        for(int c=-1;c<=heroclass::Assassin+1;++c)Check(RowShown(FloatingMapBackground,Defaults(),{c}),"shown for every class");
+        for(const float pct:{0.f,50.f,100.f}) {   // the full range, a real Off (100: solid) and see-through (0)
+            Model t;Snapshot ready;ready.ready=true;ready.values=Defaults();t.Open(ready);layout::Press(t,{Kind::Set,FloatingMapBackground,0,pct},0);
+            Check(t.Get()[FloatingMapBackground]==pct,"the slider takes 0, 50 and 100%");
+            if(pct<100)Check(t.Click({Kind::Apply}).changed==(ChangeMask{1}<<FloatingMapBackground),"Apply saves only it");
+        }
     }
     {   // Loot pick (#257): On by default, a switch on Interface, the right half of Loot name size's row, saved alone
         Check(Defaults()[LootPick]==1&&std::wstring(Definitions[LootPick].section)==L"interactions"&&

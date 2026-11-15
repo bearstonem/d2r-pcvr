@@ -1,6 +1,7 @@
 #include "ui_blit.h"
 #include "dxgi_views.h"
 #include <d3dcompiler.h>
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <climits>
@@ -19,7 +20,10 @@ bool UiBlit::Initialize(ID3D12Device* device,void (*log)(const char*)) {
     constexpr char shader[]=R"(
 Texture2D<float4> nativeUi : register(t0);
 SamplerState mapSampler : register(s0);
-cbuffer Options : register(b0) {uint blackBackground;uint mapSide;uint mapFlags;float bearing;float wallAlpha;float zoom;float mapSpan;float xReach;float2 xShift;int4 undim;};
+cbuffer Options : register(b0) {uint blackBackground;uint mapSide;uint mapFlags;float bearing;float wallAlpha;float zoom;float mapSpan;float xReach;float2 xShift;uint mapTop;float backAlpha;int4 undim;};
+// mapTop, backAlpha (square map): the map's square starts mapTop rows down the target; its dark
+// backing, margins and the frame's dark bands at backAlpha (1 solid, as before; below 1 the floating
+// map's see-through copy). The walls, markers, labels, the arrow and the frame's gold stay solid.
 // xReach, xShift (the full map, xReach > 0; wrist_full_map.h XSearchAt): the X's search square,
 // xReach source pixels each way from the source's center moved by xShift, where the game draws
 // the hero's X on its full map at the game zoom the share was drawn at; sized to that X, so other
@@ -184,6 +188,14 @@ float4 Finish(float4 c,bool clearBack) {
     if(clearBack)return float4(linearRgb,opacity*lit*wallAlpha);
     float3 rgb=opacity>0?linearRgb*opacity:0;
     if(mapSide)rgb+=.006*(1-opacity);
+    // the see-through copy (backAlpha < 1): what the game drew lit (fore, its coverage) over the
+    // rest of this solid pixel, the backing, at backAlpha; out unassociated, as the quad composes it.
+    // backAlpha 0: only the lit coverage, as the clear background; 1: the solid pixel below.
+    if(mapSide&&backAlpha<1) {
+        const float fore=opacity*lit,a=fore+backAlpha*(1-fore);
+        const float3 premultiplied=linearRgb*fore+backAlpha*(rgb-linearRgb*fore);
+        return a>0?float4(premultiplied/a,a*wallAlpha):0;
+    }
     // the square map: solid, its black backing too
     return float4(rgb,mapSide?wallAlpha:blackBackground?1:opacity);
 }
@@ -191,6 +203,7 @@ float4 VS(uint id:SV_VertexID):SV_Position {
     return float4(id==2?3:-1,id==1?-3:1,0,1);
 }
 float4 PS(float4 position:SV_Position):SV_Target {
+    position.y-=mapTop;   // the square's own pixels (0 but for the see-through copy)
     float2 pixel=position.xy;
     float2 mapSize=1;
     const bool clearBack=mapSide&&(mapFlags&2);
@@ -217,10 +230,11 @@ float4 PS(float4 position:SV_Position):SV_Target {
         // A narrow aged-bronze bevel and inset corner cuts. The entire native
         // map fits inside the frame, including markers at its outer edges.
         float2 corner=min(pixel,float(mapSide)-pixel)/bevel;
-        if(edge<1)return float4(.012,.009,.006,1);
+        // the gold line and corner cuts solid; the dark bands round it at backAlpha (the backing)
+        if(edge<1)return float4(.012,.009,.006,backAlpha);
         if(edge<3)return float4(.24,.16,.065,1);
-        if(edge<5)return float4(.055,.033,.015,1);
-        if(edge<7)return float4(.012,.009,.006,1);
+        if(edge<5)return float4(.055,.033,.015,backAlpha);
+        if(edge<7)return float4(.012,.009,.006,backAlpha);
         if(max(corner.x,corner.y)<20&&abs(corner.x+corner.y-26)<1.4)
             return float4(.34,.24,.11,1);
         uint w,h;nativeUi.GetDimensions(w,h);
@@ -260,12 +274,12 @@ float4 PS(float4 position:SV_Position):SV_Target {
         heroAt=x.z>=3?x.xy:float2(w,h)*.5;
         markerReach=x.z>=3&&(mapFlags&1)?max(w,h)*MarkerRadius*1.6:0;
         pixel=v/scale+heroAt;
-        if(any(pixel<0)||pixel.x>=w||pixel.y>=h)return clearBack?0:float4(.006,.006,.006,1);
+        if(any(pixel<0)||pixel.x>=w||pixel.y>=h)return clearBack?0:float4(.006,.006,.006,backAlpha);
     }
     float4 c=mapSide?nativeUi.SampleLevel(mapSampler,pixel/mapSize,0):nativeUi.Load(int3(uint2(pixel),0));
     if(!mapSide&&undim.z>0&&undim.w>0)c=Undim(c);
     // with the arrow, the game's X itself painted over (the backing shows)
-    if(markerReach>0&&distance(pixel,heroAt)<markerReach&&IsMarker(c))return float4(.006,.006,.006,wallAlpha);
+    if(markerReach>0&&distance(pixel,heroAt)<markerReach&&IsMarker(c))return float4(.006,.006,.006,wallAlpha*backAlpha);
     return Finish(c,clearBack);
 }
 )";
@@ -282,7 +296,7 @@ float4 PS(float4 position:SV_Position):SV_Target {
     D3D12_ROOT_PARAMETER parameters[2]{};auto& parameter=parameters[0];parameter.ParameterType=D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
     parameter.DescriptorTable={1,&range};parameter.ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
     parameters[1].ParameterType=D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-    // Options: its 10 values, 2 of padding (undim starts a register), undim's 4
+    // Options: its 12 values (undim starts a register), undim's 4
     parameters[1].Constants={0,0,16};parameters[1].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
     D3D12_ROOT_SIGNATURE_DESC desc{};desc.NumParameters=2;desc.pParameters=parameters;
     D3D12_STATIC_SAMPLER_DESC sampler{};sampler.Filter=D3D12_FILTER_MIN_MAG_LINEAR_MIP_POINT;
@@ -314,11 +328,12 @@ float4 PS(float4 position:SV_Position):SV_Target {
     if(log)log("Frame panels: GPU native UI alpha conversion ready; original artwork retained");
     return true;
 }
-bool UiBlit::Render(ID3D12Device* device,ID3D12GraphicsCommandList* list,ID3D12Resource* source,ID3D12Resource* target,bool blackBackground,bool squareMap,uint32_t mapFlags,float bearing,float wallAlpha,float zoom,float mapSpan,float xReach,float xShiftRight,float xShiftDown,const int32_t* undimBand) {
+bool UiBlit::Render(ID3D12Device* device,ID3D12GraphicsCommandList* list,ID3D12Resource* source,ID3D12Resource* target,bool blackBackground,bool squareMap,uint32_t mapFlags,float bearing,float wallAlpha,float zoom,float mapSpan,float xReach,float xShiftRight,float xShiftDown,const int32_t* undimBand,
+                    uint32_t seeThroughTop,float backAlpha) {
     if(!pipeline||!source||!target)return false;
     const auto s=source->GetDesc(),t=target->GetDesc();
     if(!RenderTargetCompatible(s.Format,DXGI_FORMAT_R16G16B16A16_FLOAT)||
-       (squareMap?(t.Width!=t.Height||t.Width<32):(s.Width!=t.Width||s.Height!=t.Height))||
+       (squareMap?(t.Height<t.Width||t.Width<32):(s.Width!=t.Width||s.Height!=t.Height))||
        !RenderTargetCompatible(t.Format,DXGI_FORMAT_R16G16B16A16_FLOAT)||
        s.SampleDesc.Count!=1||t.SampleDesc.Count!=1)return false;
     D3D12_SHADER_RESOURCE_VIEW_DESC srv{};srv.Format=DXGI_FORMAT_R16G16B16A16_FLOAT;srv.ViewDimension=D3D12_SRV_DIMENSION_TEXTURE2D;
@@ -385,8 +400,20 @@ bool UiBlit::Render(ID3D12Device* device,ID3D12GraphicsCommandList* list,ID3D12R
     D3D12_RENDER_TARGET_VIEW_DESC rtvDesc{};rtvDesc.Format=DXGI_FORMAT_R16G16B16A16_FLOAT;rtvDesc.ViewDimension=D3D12_RTV_DIMENSION_TEXTURE2D;
     device->CreateRenderTargetView(target,&rtvDesc,targetHeap->GetCPUDescriptorHandleForHeapStart());
     auto rtv=targetHeap->GetCPUDescriptorHandleForHeapStart();list->OMSetRenderTargets(1,&rtv,FALSE,nullptr);
-    const D3D12_VIEWPORT vp{0,0,float(t.Width),float(t.Height),0,1};const D3D12_RECT rect{0,0,LONG(t.Width),LONG(t.Height)};
-    list->RSSetViewports(1,&vp);list->RSSetScissorRects(1,&rect);
+    // Rows y0 to y1 of the target. The square map's copies each draw one row past the edges they
+    // face, their frame's outer ring, so a quad filtering half a texel past its square never meets
+    // the other copy (or nothing drawn).
+    auto rows=[&](UINT y0,UINT y1) {
+        const D3D12_VIEWPORT vp{0,float(y0),float(t.Width),float(y1-y0),0,1};const D3D12_RECT rect{0,LONG(y0),LONG(t.Width),LONG(y1)};
+        list->RSSetViewports(1,&vp);list->RSSetScissorRects(1,&rect);
+    };
+    rows(0,squareMap?std::min<UINT>(t.Height,UINT(t.Width)+1):t.Height);
+    // the see-through copy (square map): only with a backing below 1, below the first with a row between them
+    backAlpha=std::isnan(backAlpha)?1.f:std::min(std::max(backAlpha,0.f),1.f);   // NaN: solid
+    if(!squareMap||backAlpha>=1.f||seeThroughTop<UINT(t.Width)+2||uint64_t(seeThroughTop)+t.Width>t.Height)seeThroughTop=0;
+    list->SetGraphicsRoot32BitConstant(1,0,10);   // mapTop: the first copy at the top
+    const float solid=1.f;UINT backBits=0;std::memcpy(&backBits,&solid,sizeof backBits);
+    list->SetGraphicsRoot32BitConstant(1,backBits,11);
     list->SetPipelineState(pipeline.Get());
     list->SetGraphicsRoot32BitConstant(1,blackBackground?1:0,0);
     list->SetGraphicsRoot32BitConstant(1,squareMap?UINT(t.Width):0,1);
@@ -401,6 +428,12 @@ bool UiBlit::Render(ID3D12Device* device,ID3D12GraphicsCommandList* list,ID3D12R
     UINT spanBits=0;std::memcpy(&spanBits,&mapSpan,sizeof spanBits);
     list->SetGraphicsRoot32BitConstant(1,spanBits,6);
     list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);list->DrawInstanced(3,1,0,0);
+    if(seeThroughTop) {   // the same map again, the hero's marker as found above, its backing at backAlpha
+        rows(seeThroughTop-1,std::min<UINT>(t.Height,seeThroughTop+UINT(t.Width)+1));
+        std::memcpy(&backBits,&backAlpha,sizeof backBits);
+        list->SetGraphicsRoot32BitConstant(1,seeThroughTop,10);list->SetGraphicsRoot32BitConstant(1,backBits,11);
+        list->DrawInstanced(3,1,0,0);
+    }
     if(findHero) {
         barrier(hero.Get(),D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_RENDER_TARGET);
         for(const auto& t:heroTiles)barrier(t.Get(),D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_RENDER_TARGET);

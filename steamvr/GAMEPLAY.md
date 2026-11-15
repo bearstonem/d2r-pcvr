@@ -310,7 +310,9 @@ to 3 m) or pulls it in, and does not turn you while you hold it. Let go and it s
 face you. Point at it and squeeze Right Grip to move it again. Both grips within a quarter second, either order,
 with either hand pointing at it, size it: spread your hands to grow it, bring them together to shrink it (10 to
 150 cm); it moves with your hands, keeping its place between them. Bring it back to the raised wrist map (a light
-buzz) and let go to put it away. It shows while you look within about 30 degrees of it. While a copy is out, a
+buzz) and let go to put it away. It shows while you look within about 30 degrees of it. **VR Settings > Interface >
+Wrist > Floating map background** (100%, solid, by default) lets the world show through its dark backing: at 0%
+only the walls, the gold arrow, markers, names and a thin gold frame show, all still solid. The wrist map stays solid. While a copy is out, a
 light buzz tells you when your aim is on a map you can take, and pointing anywhere on the floating map and pushing
 the right stick up / down zooms it (the wrist map zooms as before, by looking at it; both show the same picture).
 Every place you can point at on the floating map grows and shrinks with it: the zoom area is the map itself, and
