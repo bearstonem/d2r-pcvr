@@ -94,7 +94,7 @@
 <script>
 const DATA = /*DATA*/null;
 const KEY = 'd2r_vr_scene_editor_act2_' + DATA.version;
-const COL = {'posągi i ruiny':'#ffd84a','budowle':'#e8c07a','miasto (karty)':'#c890ff','skały':'#ff8c3a','palmy':'#3fbf5f','rośliny i piasek':'#8fa046','kamienie bruku':'#f0f0f0','rzeczy':'#b98d5e','teren':'#6b6250','podłoga':'#c9b48a','dodane':'#ff5fa0'};
+const COL = {'posągi i ruiny':'#ffd84a','budowle':'#e8c07a','miasto (karty)':'#c890ff','skały':'#ff8c3a','palmy':'#3fbf5f','rośliny i piasek':'#8fa046','kamienie bruku':'#f0f0f0','rzeczy':'#b98d5e','teren':'#6b6250','podłoga':'#c9b48a','pomosty':'#d98a3a','dodane':'#ff5fa0'};
 const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
 let view = {cx:0, cy:-60, s:2.2};            // world (right, ahead) at the canvas middle; pixels per unit
 let items = [], road = [], half = DATA.half, sel = null, drag = null, undo = [];
@@ -180,8 +180,8 @@ function draw() {
     ctx.beginPath(); ctx.moveTo(...c0); ctx.lineTo(...c1); ctx.strokeStyle = '#0008'; ctx.lineWidth = 1*D; ctx.stroke();
   }
   // road
-  const line = catmull(road, 24);
-  [[-half, '#cfd8e8'], [half, '#cfd8e8']].forEach(([o, c]) => { const l = offset(line, o); ctx.beginPath(); l.forEach((p,k) => { const s = toScr(...p); k ? ctx.lineTo(...s) : ctx.moveTo(...s); }); ctx.strokeStyle = c; ctx.setLineDash([3*D,3*D]); ctx.lineWidth = 2*D; ctx.stroke(); ctx.setLineDash([]); });
+  const line = road.length > 1 ? catmull(road, 24) : [];
+  if (line.length) [[-half, '#cfd8e8'], [half, '#cfd8e8']].forEach(([o, c]) => { const l = offset(line, o); ctx.beginPath(); l.forEach((p,k) => { const s = toScr(...p); k ? ctx.lineTo(...s) : ctx.moveTo(...s); }); ctx.strokeStyle = c; ctx.setLineDash([3*D,3*D]); ctx.lineWidth = 2*D; ctx.stroke(); ctx.setLineDash([]); });
   ctx.beginPath(); line.forEach((p,k) => { const s = toScr(...p); k ? ctx.lineTo(...s) : ctx.moveTo(...s); }); ctx.strokeStyle = '#3d8bff'; ctx.lineWidth = 3*D; ctx.stroke();
   road.forEach((p,k) => { const [x,y] = toScr(...p); ctx.beginPath(); ctx.arc(x,y,6*D,0,7); ctx.fillStyle = (sel && sel.road === k) ? '#fff' : '#3d8bff'; ctx.fill(); });
   // you

@@ -11,9 +11,11 @@ steamvr/podglad_modeli.py): a 3D preview of the selected / chosen piece and true
 bounds. The page then holds game data - keep it out of git (it is generated next to the template only on the owner's PC).
 """
 import argparse
+import base64
 import importlib.util
 import json
 import math
+import struct
 import sys
 from pathlib import Path
 
@@ -47,13 +49,47 @@ ADD_FOLDERS = ('data/hd/env/model/act2/ruin/act2_ruin_statues/', 'data/hd/env/mo
                # large sand to lay as floor (Lut Gholein's sand skirts and piles)
                'data/hd/env/model/global/prop/act2/town/act2_town_sandskirts/',
                'data/hd/env/model/global/prop/act2/town/act2_town_sand_piles/')
+# Act 3 (2026-11-14, Kurast Docks behind you): the docks town's own folders, the jungle's plants, the menu's Act 3 pieces
+ADD_FOLDERS_ACT = {3: ('data/hd/env/model/act3/docktown/', 'data/hd/env/model/global/prop/act3/docktown/',
+                       'data/hd/env/model/global/prop/act3/jungle/', 'data/hd/env/model/act3/jungle/act3_jungle_riverbanks/',
+                       'data/hd/env/foliage/act3/model/', 'data/hd/env/foliage/global/model/act3_',
+                       'data/hd/env/model/ui/ui_act3_vignette/', 'data/hd/env/model/ui/ui_groundplane/')}
+CUTS = {2: [-115, 211], 3: [-220, 220]}
 UI_GROUNDS = 'data/hd/env/model/ui/'   # + every act's vignette ground (ui_actN_vignette*/...terrain...)
 ADD_STATUES = ('act2_statue0', )   # data/hd/env/model/global/prop/objects/statues/act2_statue0N
 PREVIEW_VERTS, PREVIEW_TEX = 6000, 128
 
 
+def floor_plates():
+    """Our floor plates (steamvr/prepare_frontend_floor.py): {model path, lower case: (maps, half size)} - not its
+    grounds (a game model's shape, put in the menu model's place by the scene script, not by the editor)."""
+    f = HERE.parent.parent / 'steamvr' / 'frontend_floors.json'
+    try:
+        return {v['model'].lower(): (v['maps'], float(v['half'])) for v in json.loads(f.read_text(encoding='utf-8')).values()
+                if 'maps' in v and 'half' in v and not v.get('ground')}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return {}
+
+
+FLOORS = floor_plates()
+
+
 def cat(m):
+    if m.lower() in FLOORS:
+        return 'podłoga'
     s = m.rsplit('/', 1)[-1]
+    if 'water' in s and ('ui_act3_vignette' in m or 'scum' in m):
+        return 'teren'
+    if any(k in m for k in ('docktown_docks/', 'dock_pieces/', 'meshif_dock', 'ui_act3_vignette/dock', 'ui_act3_vignette/broken_dock',
+                            'ui_act3_vignette/plank', 'ui_act3_vignette/stairs')):
+        return 'pomosty'
+    if 'act3' in m and any(k in m for k in ('_huts', 'hut_pieces', 'walls_', 'pillars', 'meshif_hut', '_gate', 'stone_wall', 'pyramid')):
+        return 'budowle'
+    if 'act3' in m and any(k in m for k in ('ivy', 'roots', 'fern', 'weeds', 'cinchona', 'vines', 'epiphyte', 'elephant', 'banyan',
+                                            'cypress', 'treeline', 'sapling', 'clover', 'grass', 'bushes', 'leaves', 'cluster')):
+        return 'rośliny i piasek'
+    if 'act3' in m and any(k in m for k in ('rocks', 'rubble', 'mound', 'boulder')):
+        return 'skały'
     if any(k in m for k in ('ruin_statues', 'arcane_statues', 'objects/statues', 'ruin_tablets', 'ruin_columns',
                             'ruin_pillars', 'stone_fences', 'wagon_destroyed')):
         return 'posągi i ruiny'
@@ -99,8 +135,9 @@ def main():
         from game_assets import open_assets
         with open_assets(a.game, a.casclib) as assets:
             raw = assets.read(pfs.PRESET)
-            sources = {t[0]: assets.read(t[0]) for t in pfs.TILES.values()}
-        built, _ = pfs.prepare(raw, sources=sources, edits_files={act: HERE / '__no_edits__' for act in pfs.ACTS})
+            sources = {w: assets.read(w) for w in pfs.source_presets()}
+            built, _ = pfs.prepare(raw, sources=sources, edits_files={act: HERE / '__no_edits__' for act in pfs.ACTS},
+                                   assets=assets)
         b = json.loads(built)
         print("the act built afresh from the game's archives, without the owner's changes")
     else:
@@ -134,10 +171,13 @@ def main():
         tw = json.loads(a.transw2.read_text(encoding='utf-8'))
         models |= {c['filename'] for e in tw['entities'] for c in e['components']
                    if c.get('type') == 'ModelDefinitionComponent' and 'terrain' not in c['filename']}
-    bc = 'data/hd/env/model/act2/bigcliff/'
-    models |= {f'{bc}act2_bigcliff_cliffs/{k}.model' for k in ['border01', 'border02'] + [f'cliff0{i}' for i in range(1, 9)]}
-    models |= {f'{bc}act2_bigcliff_cliff_edges/cliff_edge0{i}.model' for i in range(1, 6)}
-    models |= {f'{bc}act2_bigcliff_boulders/boulder0{i}.model' for i in range(1, 5)}
+    if a.act == 2:
+        bc = 'data/hd/env/model/act2/bigcliff/'
+        models |= {f'{bc}act2_bigcliff_cliffs/{k}.model' for k in ['border01', 'border02'] + [f'cliff0{i}' for i in range(1, 9)]}
+        models |= {f'{bc}act2_bigcliff_cliff_edges/cliff_edge0{i}.model' for i in range(1, 6)}
+        models |= {f'{bc}act2_bigcliff_boulders/boulder0{i}.model' for i in range(1, 5)}
+    models |= {v for v in FLOORS}   # our floor plates, in every act's list
+    folders = ADD_FOLDERS_ACT.get(a.act, ADD_FOLDERS)
     geo, assets_models = None, set()
     if a.game:
         sys.path.insert(0, str(HERE.parent.parent / 'steamvr'))
@@ -149,18 +189,36 @@ def main():
             names = {n.lower(): n for n in assets.files}
             albs = [n for n in names if n.endswith('_alb.texture')]
             for n in names:
-                if n.endswith('.model') and (n.startswith(ADD_FOLDERS) or
+                if n.endswith('.model') and '_lod' not in n.rsplit('/', 1)[-1] or n.endswith('_lod0.model'):
+                    pass
+                else:
+                    continue
+                if n.endswith('.model') and (n.startswith(folders) or
                                              (n.startswith(UI_GROUNDS) and 'terrain' in n.rsplit('/', 1)[-1]) or
-                                             ('objects/statues/' in n and n.rsplit('/', 1)[-1].startswith(ADD_STATUES))):
+                                             (a.act == 2 and 'objects/statues/' in n and n.rsplit('/', 1)[-1].startswith(ADD_STATUES))):
                     assets_models.add(podglad_modeli.strip_lod(n))
             models |= assets_models
             want = {m.lower() for m in models} | {i['model'].lower() for i in items}
-            want = {m for m in want if m.rsplit('/', 1)[-1] not in ('terrain.model', 'act5_frontend_terrain.model')}
+            want = {m for m in want if m.rsplit('/', 1)[-1] not in ('terrain.model', 'act5_frontend_terrain.model')
+                    and m not in FLOORS}
             print(f'{len(want)} models to read for the preview...', flush=True)
             report = []
             geo_models, textures = podglad_modeli.extract(assets, names, albs, sorted(want), report,
                                                           max_verts=PREVIEW_VERTS, tex_size=PREVIEW_TEX,
                                                           log=lambda t: print(t, flush=True))
+            for m, (maps, h) in FLOORS.items():   # a plate: two triangles, its terrain picture once a 40
+                try:
+                    w_, h_, rgba = podglad_modeli.decode_texture(assets.read(names[f'{maps}_alb.texture'.lower()]), PREVIEW_TEX)
+                    textures.append('data:image/png;base64,' + base64.b64encode(podglad_modeli.png(w_, h_, rgba)).decode())
+                    t = len(textures) - 1
+                except Exception:   # noqa: BLE001
+                    t = None
+                r = h / 40.0
+                v = [(-h, 0, -h, 0, 1, 0, 0, r), (h, 0, -h, 0, 1, 0, 2 * r, r), (h, 0, h, 0, 1, 0, 2 * r, -r), (-h, 0, h, 0, 1, 0, 0, -r)]
+                vb = base64.b64encode(struct.pack(f'<{len(v) * 8}f', *[x for p in v for x in p])).decode()
+                ib = base64.b64encode(struct.pack('<12I', 0, 1, 2, 0, 2, 3, 0, 2, 1, 0, 3, 2)).decode()
+                geo_models[m] = {'parts': [{'v': vb, 'i': ib, 't': t, 'mesh': 'plate', 'mat': maps.rsplit('/', 1)[-1]}],
+                                 'lo': [-h, 0.0, -h], 'hi': [h, 0.05, h], 'lod': 'plate', 'from': [], 'tex': [maps.rsplit('/', 1)[-1]]}
             geo = {'models': geo_models, 'textures': textures}
             (a.out.with_suffix('.txt')).write_text('\n'.join(report) + '\n', encoding='utf-8')
     models = sorted(models, key=lambda m: (cat(m), m.rsplit('/', 1)[-1]))
@@ -172,8 +230,15 @@ def main():
     data = dict(act=a.act, version=a.version, camera=[cx, cz], items=items, models=models,
                 cats={m: cat(m) for m in models}, geo=geo, preload=preload,
                 road=[list(p) for p in pfs.ROAD_PATH.get(a.act, ())], half=half,
-                cuts=[-115, 211])
-    page = (HERE / 'edytor_template.html').read_text(encoding='utf-8').replace('/*DATA*/null', json.dumps(data, ensure_ascii=False))
+                cuts=CUTS.get(a.act, [-115, 211]))
+    page = (HERE / 'edytor_template.html').read_text(encoding='utf-8')
+    if a.act != 2:   # the page's own words and keys for this act
+        n = a.act
+        for o, w in (('Akt 2', f'Akt {n}'), ('akt2', f'akt{n}'), ('scene_editor_act2_', f'scene_editor_act{n}_'),
+                     ('frontend_edits_act2', f'frontend_edits_act{n}'), ("'pcvr_ed_2_'", f"'pcvr_ed_{n}_'"),
+                     (r' --version v19 --transw2 extracted\act2\town__transw2.json', f' --act {n} --version {a.version or "v1"}')):
+            page = page.replace(o, w)
+    page = page.replace('/*DATA*/null', json.dumps(data, ensure_ascii=False))
     a.out.write_text(page, encoding='utf-8')
     print(f'{len(items)} pieces, {len(models)} models -> {a.out}')
 

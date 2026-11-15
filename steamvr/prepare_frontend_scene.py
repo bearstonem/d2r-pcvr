@@ -40,7 +40,7 @@ CAMERAS = {
     4: (30.0, 4.0, -789.0),
     5: (34.0, 4.0, -1258.5),
 }
-ACTS = (1, 2)                    # the acts filled round (one by one, as each is tuned)
+ACTS = (1, 2, 3, 4)              # the acts filled round (one by one, as each is tuned)
 REACH = 700.0                    # an act's own pieces: within this of its camera
 LANE = 180.0                     # ... and within this of its camera's z (the vignettes lie along z)
 TURNS = (90.0, 180.0, 270.0)     # degrees about the camera's vertical
@@ -59,11 +59,19 @@ KEEP = GROUND + ('grass', 'weeds', 'bush', 'fern', 'tree', 'ivy', 'branch', 'bou
 FAR_KINDS = ()
 # Each act's own: what of its pieces is copied round (Act 2, Lut Gholein's outskirts, owner 2026-11-14: "Pelne 3D
 # dla scen: Akt 2" - the desert's own plants, palms, sand mounds and rocks; its walls, gate and camp stay its own).
-KEEP_ACT = {2: GROUND + ('grass', 'bush', 'palm', 'mound', 'sand_pile', 'rock_')}
-LANE_ACT = {2: 120.0}            # Act 2's own scene lies within about 120 of its camera's z
+KEEP_ACT = {2: GROUND + ('grass', 'bush', 'palm', 'mound', 'sand_pile', 'rock_'),
+            # Act 4, the River of Flame (owner 2026-11-15, "Pelne 3D dla scen: Akt 4"): its rock islands and ridges,
+            # skulls, bones, rubble, spikes, the ruined gate's pillars and walls, the lava pools - all round you
+            4: GROUND + ('ui_act4_vignette/rocks/', 'act4_lava_islands/', 'act4_lava_skull_piles/', 'act4_mesa_skeleton_piles/',
+                         'act4_mesa_rubbles_props/', 'act4_lava_crystals/', 'act4_diab_rubble/', 'act4_mesa_props/',
+                         'act4_mesa_pillars/', 'act4_mesa_rubble/', 'act4_lava_lava_kits/', 'ui_act4_vignette/architecture/',
+                         'act4_diab_cliffs/', 'act4_lava_floor_tiles/', 'act4_lava_props/', 'act4_mesa_gates/')}
+LANE_ACT = {2: 120.0, 4: 150.0}  # Act 2's own scene lies within about 120 of its camera's z
 # Copies only between these (right of the camera, -left .. right): Act 1's forest begins about 137 to Act 2's
 # left (its cut_right 285 shows Act 1 to 88 to Act 2's left), Act 3's scene about 300 to its right.
-SIDES = {2: (-85.0, 200.0)}
+# Act 4 (2026-11-15): Act 3 shows to 237 right of itself (its cut), i.e. to 239 left of Act 4 (476 apart); Act 5 is
+# 469.5 to the right (the cuts meet at 234). The copies' places kept well inside, their models reach out further.
+SIDES = {2: (-85.0, 200.0), 4: (-190.0, 190.0)}
 # Pieces with a sound of their own (Act 2's palms: wind in the leaves) are copied without it.
 SOUND_OK = {2}
 
@@ -322,6 +330,8 @@ HIDE = (   # (act1_depth_fade01 tried out 2026-11-13: not the dark half-round; a
                          # now ours: [frontend] pano_2, a burning yellow noon like this card's)
         # and all the other acts' cards (2026-11-14 00:45): Acts 3 and 4's glowed in Act 1's trees from afar too.
         # Every act stands under its own sky of ours now ([frontend] acts), cut off from its neighbours by the mod.
+        # (Act 3's own back for a look 2026-11-14 19:11; out again 19:57 - Act 3's sky is now ours: [frontend] pano_3,
+        # D2R_Front_act3.png, an overcast dusk like this card's)
         'act3_sky_01', 'act4_sky_01', 'act5_sky_01',
         'ui_skybox_act3_depth_fade01_01', 'ui_skybox_act5_depth_fade01_01',
         # Act 2: wooden posts hanging in the air right of the city (owner 2026-11-14, screen 1) - they stood on a
@@ -385,7 +395,7 @@ def without_clouds(preset):
 
 
 def fill_round(preset, act, ids):
-    if act in TILES:   # behind it the game's own strips instead (TILES)
+    if act in TILES or act in TOWN:   # behind it the game's own strips / town instead (TILES, TOWN)
         return 0, 0
     cx, cy, cz = CAMERAS[act]
     sources = []
@@ -508,13 +518,48 @@ def tree(name, ident, model, x, y, z, yaw, scale):
          'terrainBlendEnableYUpBlend': False, 'terrainBlendMode': 1}]}
 
 
+def floors():
+    """Our floor plates (prepare_frontend_floor.py): {model path, lower case: its terrain maps without _ALB.texture}."""
+    f = Path(__file__).resolve().parent / 'frontend_floors.json'
+    try:
+        return {v['model'].lower(): v['maps'] for v in json.loads(f.read_text(encoding='utf-8')).values() if 'maps' in v}
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}
+
+
+def floor_names():
+    """Our floor plates by name: {'act3_stone': its model path, ...} (frontend_floors.json; none before it is made)."""
+    f = Path(__file__).resolve().parent / 'frontend_floors.json'
+    try:
+        return {k: v['model'] for k, v in json.loads(f.read_text(encoding='utf-8')).items()}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return {}
+
+
+def ground_pavers(name):
+    """A ground of ours' flat stones (prepare_frontend_floor.GROUNDS): [[x, y, z, yaw, scale, model], ...] in its space."""
+    f = Path(__file__).resolve().parent / 'frontend_floors.json'
+    try:
+        return list(json.loads(f.read_text(encoding='utf-8'))[name].get('pavers', ()))
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return []
+
+
 def depend(preset, models):
     deps = preset.setdefault('dependencies', {}).setdefault('models', [])
     have = {str(d.get('path', '')).lower() for d in deps if isinstance(d, dict)}
+    plates = floors()
     for m in models:
         if m.lower() not in have:
             deps.append({'path': m})
             have.add(m.lower())
+        if m.lower() in plates:   # a floor plate of ours: the game's terrain maps it names
+            tex = preset['dependencies'].setdefault('textures', [])
+            th = {str(d.get('path', '')).lower() for d in tex if isinstance(d, dict)}
+            for w in ('ALB', 'NRM', 'ORM'):
+                t = f'{plates[m.lower()]}_{w}.texture'
+                if t.lower() not in th:
+                    tex.append({'path': t})
 
 
 def field(act, x, z):
@@ -1130,6 +1175,375 @@ def lights(preset, act, ids):
     return len(added)
 
 
+# Act 3 (owner 2026-11-14 17:02, "Pelne 3D dla scen: Akt 3"): behind you a piece of Kurast Docks itself - the town's
+# preset laid round the camera as if you stood on its pier (the map's F8, looking to G7: the pier on the town's
+# left that runs from Meshif's ship to Cain) - everything of the town behind you, and the pier you stand on, which
+# the menu's own broken dock lacks. Town (x, z) -> the camera's frame: ahead = at_z - z, right = x - at_x.
+#   (the town's preset, where you stand in it (x, z), its y to ours, the menu's own scene ahead (right from, to,
+#    ahead from, to) where none of the town goes, how far round, the sides)
+# 19:11 the whole town round you (owner: "a lot is missing - huts and walkways right and left, the heads in the water
+# before us"), but where the menu's own scene stands ahead of you.
+TOWN = {3: ('data/hd/env/preset/act3/docktown/docktown3.json', (265.8, 268.7), 0.7, (-75.0, 75.0, 12.0, 250.0), 420.0,
+            (-245.0, 245.0))}
+# 19:15 "level everything to our pier - it was a bit crooked, no straight line from its start before me to its end
+# behind me": the town's pier (x 265.8, straight along its z) laid on the menu's own: dock01_02 (yaw 80, its deck
+# 10 wide, 20 long - the town's dock01 too) runs 10 degrees to the right of straight ahead, its middle through right
+# -4.0 at the camera (its edges lined up with the town's dock03_13); the town's y + 0.7 puts its dock03 / dock02 (-4.2) at the menu's dock01 (-3.47). The town's own
+# pier pieces ahead of 12 (dock01_05, dock04_mirror_03) lay over the menu's and stay out (the zone above).
+#   (right of the pier's middle at the camera, its turn to the right in degrees)
+TOWN_ALIGN = {3: (-4.0, 10.0)}
+# always, also in the menu's own scene: the stone heads in the water before you
+TOWN_ALWAYS = ('stone_head',)
+# What floats (boats, the ship, scum, the heads, grass in the water) goes down to the menu's water: the town's water
+# is at about -3.22 (its scum), the menu's 2.9 lower (-6.11) - 19:11 "the water's levels are uneven". All else (the
+# piers, the huts, walls and plants on the shore) stays with the walking level.
+TOWN_WATERLINE = {3: -3.22}
+TOWN_FLOATING = ('scum', 'act3_docktown_boats', 'bobbing_misc', 'grass_clump_water', 'stone_head', 'act2_town_ship',
+                 'lily')
+TOWN_PIER = ('act3_docktown_docks/', 'act3_docktown_dock_pieces/')
+TOWN_KEEP = ('TransformDefinitionComponent', 'ModelDefinitionComponent', 'ModelPlatformTierComponent',
+             'PrefabPlacementDefinitionComponent')
+# whole pieces left behind: what moves on a skeleton or cloth (banners, curtains, the hanging frog, corpses), and the
+# canoe the town's preset leaves flying 50 up (prepare_kurast_dock.py)
+TOWN_SKIP_KINDS = ('SkeletonDefinitionComponent', 'PhysicsClothDefinitionComponent', 'PhysicsPartialRagdollDefinitionComponent')
+TOWN_SKIP_IDS = (3418903870,)
+# How far to the right the town and its water go: (its pieces, its water's edge), from the camera. Act 4 stands 476 to
+# the right of Act 3 (its left cut 237): what lay past 239 showed in Act 4 (owner 2026-11-15 01:48: the town from 200 on
+# out - the far right of the docks, the water cut at 239, its last tiles narrowed to end there).
+TOWN_RIGHT_MAX = {3: (200.0, 239.0)}
+# Water under all of it: the menu's own water (its y), again and again behind you, side by side.
+TOWN_WATER = {3: 'water01_01'}
+# ... at this height (owner 2026-11-14 22:08: "the water is now at its right level, -3, and it must stay"; the menu's
+# own lies at -6.11) - all of it, the menu's own tile too; what floats goes with it (TOWN_FLOATING)
+TOWN_WATER_Y = {3: -3.0}
+# Our floor plates laid in the town (prepare_frontend_floor.py: FLOORS, SHAPES): (plate, right, ahead, y, yaw, scale).
+# Act 3's stone under the crossing behind you (G8-G9), where the town's pavers lie (y 0.4 - 0.7), turned with the town
+# (80, as its piers) and cut to its land (a cross).
+TOWN_PLATES = {3: (('act3_stone', -15.0, -70.0, 0.35, 80.0, 1.0),)}
+# The menu's own models that become a ground of ours (prepare_frontend_floor.py: GROUNDS) - the same place, its stones
+# laid on it: {act: ((entity name, ground name), ...)}. Act 3: its ground terrain_act3 as mud and flat stones, without
+# the arms that stood over the water at the sides (the game draws no copy of a game model, cut or whole - 2026-11-14).
+GROUND_SWAP = {3: (('terrain_act3_01', 'act3_ground'),)}
+WATER_EXTENT = {}   # model -> (min x, min z, max x, max z) in its own space, measured from the game (--game) - or a guess
+WATER_GUESS = (-0.83 * 128, -128.0, 0.42 * 128, 128.0)
+
+
+def measure(assets, model):
+    """A model's true extent (min xyz, max xyz) from the player's archives (podglad_modeli's reader), or None."""
+    try:
+        import potion_assets
+        import podglad_modeli
+        potion_assets.LIMIT = 256 * 1024 * 1024
+        names = {n.lower(): n for n in assets.files}
+        stem = model.lower()[:-len('.model')]
+        for f in [f'{stem}_lod{k}.model' for k in range(6)] + [model.lower()]:
+            if f not in names:
+                continue
+            try:
+                meshes = podglad_modeli.Big(assets.read(names[f])).all_meshes()
+            except Exception:   # noqa: BLE001 - the next lod
+                continue
+            pts = [v[:3] for _, _, data in meshes for v in data]
+            if pts:
+                return [min(p[k] for p in pts) for k in range(3)], [max(p[k] for p in pts) for k in range(3)]
+    except Exception:   # noqa: BLE001
+        pass
+    return None
+
+
+def town(preset, act, ids, sources):
+    """TOWN: the town's own pieces behind you, turned so that its way along the pier is your way ahead; water under."""
+    if act not in TOWN:
+        return 0
+    import random
+    name_, (ax, az), dy, (z_r0, z_r1, z_a0, z_a1), reach, (lo, hi) = TOWN[act]
+    src = json.loads(sources[name_])
+    rnd = random.Random(9700 + act)
+    cx, cy, cz = CAMERAS[act]
+    r0, phi = TOWN_ALIGN.get(act, (0.0, 0.0))
+    yaw = math.pi / 2 - math.radians(phi)   # a quarter turn (the town's -z is our -x), less the pier's own turn
+    turn = (0.0, math.sin(yaw / 2), 0.0, math.cos(yaw / 2))
+    cf, sf = math.cos(math.radians(phi)), math.sin(math.radians(phi))
+    added, models, particles = [], set(), set()
+    water = next((e for e in preset['entities'] if e.get('name') == TOWN_WATER.get(act)), None)
+    if water and act in TOWN_WATER_Y:
+        transform(water)['position']['y'] = TOWN_WATER_Y[act]
+    for e in src.get('entities', []):
+        comps = e.get('components', [])
+        kinds = {c.get('type') for c in comps}
+        if int(e.get('id', 0)) in TOWN_SKIP_IDS or kinds & set(TOWN_SKIP_KINDS) or 'TerrainDefinitionComponent' in kinds:
+            continue
+        if not ({'ModelDefinitionComponent', 'PrefabPlacementDefinitionComponent'} & kinds):
+            continue
+        tr = transform(e)
+        if not tr:
+            continue
+        p = tr['position']
+        ahead, right = az - float(p['z']), float(p['x']) - ax
+        m = model_of(e) or str(next((c.get('prefab', '') for c in comps
+                                     if c.get('type') == 'PrefabPlacementDefinitionComponent'), '')).lower()
+        always = any(k in m for k in TOWN_ALWAYS)
+        if not always and z_r0 <= right <= z_r1 and z_a0 <= ahead <= z_a1:
+            continue   # the menu's own scene
+        if math.hypot(ahead, right) > reach or not lo <= right <= hi:
+            continue
+        if float(p.get('y', 0.0)) > 30.0:
+            continue   # (anything else left up in the air)
+        n = copy.deepcopy(e)
+        n['components'] = [c for c in n['components'] if c.get('type') in TOWN_KEEP]
+        name = f'pcvr_town_{act}_{e.get("name", "e")}'
+        n['name'], n['id'] = name, new_id(rnd, ids)
+        for c in n['components']:
+            c['name'] = f'{name}_{c.get("type", "c")}'
+            if c.get('type') == 'ModelDefinitionComponent':
+                models.add(c['filename'])
+        t = transform(n)
+        y = float(p.get('y', 0.0)) + dy
+        wl = TOWN_WATERLINE.get(act)
+        if wl is not None and water and any(k in m for k in TOWN_FLOATING):
+            y += float(transform(water)['position']['y']) - (wl + dy)
+        a2, r2 = ahead * cf - right * sf, ahead * sf + right * cf + r0   # on the menu's pier
+        if r2 > TOWN_RIGHT_MAX.get(act, (1e9, 1e9))[0]:
+            continue
+        t['position'] = {'x': cx - a2, 'y': y, 'z': cz - r2}
+        q = t.get('orientation') or {'x': 0.0, 'y': 0.0, 'z': 0.0, 'w': 1.0}
+        qx, qy, qz, qw = qmul(turn, tuple(float(q.get(k, 0.0)) for k in 'xyzw'))
+        t['orientation'] = {'x': qx, 'y': qy, 'z': qz, 'w': qw}
+        added.append(n)
+    # the water: the menu's own, tiled round you over all of it (the same height: one level)
+    nw = 0
+    if water:
+        wm = model_of(water)
+        x0, z0, x1, z1 = WATER_EXTENT.get(wm, WATER_GUESS)
+        wt = transform(water)
+        # level (19:36 "is the water tilted to look right from the isometric camera? make it level"): the menu's
+        # own is turned 5 degrees about z (0, 0, -0.044, 0.999) - each copy of it a step in the water
+        wt['orientation'] = {'x': 0.0, 'y': 0.0, 'z': 0.0, 'w': 1.0}
+        wp = wt['position']
+        sc = float((wt.get('scale') or {}).get('x', 1.0))
+        sx, sz = (x1 - x0) * sc, (z1 - z0) * sc
+        ni, nj = int((reach + 80.0) / max(sx, 1.0)) + 2, int((max(-lo, hi) + 80.0) / max(sz, 1.0)) + 2
+        for i in range(-ni, ni + 1):
+            for j in range(-nj, nj + 1):
+                if i == 0 and j == 0:
+                    continue
+                x, z = float(wp['x']) + i * sx, float(wp['z']) + j * sz
+                # the tile's middle, in our frame
+                mx, mz = x + (x0 + x1) / 2 * sc, z + (z0 + z1) / 2 * sc
+                ahead, right = cx - mx, cz - mz
+                if math.hypot(max(abs(ahead) - sx / 2, 0.0), 0.0) > reach or right + sz / 2 < lo or right - sz / 2 > hi:
+                    continue
+                edge = TOWN_RIGHT_MAX.get(act, (1e9, 1e9))[1]
+                if right - sz / 2 >= edge:
+                    continue
+                f = 1.0
+                if right + sz / 2 > edge:   # the last tile narrowed to end at the edge
+                    f = (edge - (right - sz / 2)) / sz
+                    z = cz - edge - z0 * sc * f
+                w = copy.deepcopy(water)
+                name = f'pcvr_townwater_{act}_{i}_{j}'
+                w['name'], w['id'] = name, new_id(rnd, ids)
+                for c in w['components']:
+                    c['name'] = f'{name}_{c.get("type", "c")}'
+                transform(w)['position'] = {'x': x, 'y': float(wp['y']), 'z': z}
+                if f != 1.0:
+                    ws = dict(transform(w).get('scale') or {'x': 1.0, 'y': 1.0, 'z': 1.0})
+                    ws['z'] = sc * f
+                    transform(w)['scale'] = ws
+                added.append(w)
+                nw += 1
+    plates = floor_names()
+    for ename, cname in GROUND_SWAP.get(act, ()):
+        if cname not in plates:
+            continue
+        for e in list(preset['entities']):
+            if e.get('name') == ename:
+                for c in e.get('components', []):
+                    if c.get('type') == 'ModelDefinitionComponent':
+                        c['filename'] = plates[cname]
+                        models.add(plates[cname])
+                at_ = transform(e)['position']
+                for k, (x, y, z, yaw, sc, model) in enumerate(ground_pavers(cname)):
+                    added.append(tree(f'pcvr_paver_{act}_{k}', new_id(rnd, ids), model, at_['x'] + x, at_['y'] + y,
+                                      at_['z'] + z, math.radians(yaw), (sc, sc, sc)))
+                    models.add(model)
+    for k, (plate, r, ah, y, yaw, sc) in enumerate(TOWN_PLATES.get(act, ())):
+        if plate in plates:
+            added.append(tree(f'pcvr_floor_{act}_{k}', new_id(rnd, ids), plates[plate], cx - ah, y, cz - r,
+                              math.radians(yaw), (sc, sc, sc)))
+            models.add(plates[plate])
+    preset['entities'].extend(added)
+    depend(preset, sorted(models))
+    # the town's textures for the folders of what came over (its models name them; the menu lists its own)
+    folders = {m.rsplit('/', 2)[-2] for m in models}
+    tex = [d for d in src.get('dependencies', {}).get('textures', []) if isinstance(d, dict) and
+           any(f'/{f}/' in str(d.get('path', '')).lower() or f'/{f}_' in str(d.get('path', '')).lower() for f in folders)]
+    deps = preset.setdefault('dependencies', {}).setdefault('textures', [])
+    have = {str(d.get('path', '')).lower() for d in deps if isinstance(d, dict)}
+    for d in tex:
+        if str(d['path']).lower() not in have:
+            deps.append({'path': d['path']})
+            have.add(str(d['path']).lower())
+    TOWN_REPORT[act] = f'{len(added) - nw} town pieces, {nw} water tiles ({sx:.0f} x {sz:.0f})' if water else \
+        f'{len(added)} town pieces, no water'
+    return len(added)
+
+
+TOWN_REPORT = {}
+
+# Act 4 (owner 2026-11-15): the River of Flame round you - the menu's own lava (its river tile, expansion_lavaE2) laid
+# again and again round the camera, side by side, all level at its height (the menu's own is tipped 0.75 degrees for
+# the flat camera); the rock islands and ridges come round with fill_round (KEEP_ACT). (entity, how far round, sides)
+# The sides are hard edges (Act 3's chat, 2026-11-15 01:57: "Act 4's lava in Act 3" - the 200 tiles reached ~380 to the
+# left, into Act 3 by its temple): a tile across one is narrowed to end on it, as Act 3's water (TOWN_RIGHT_MAX).
+# Left: Act 3's right edge, 239 to our left; right: halfway to Act 5 (234).
+LAVA = {4: ('expansion_lavae2_01', 420.0, (-239.0, 234.0))}
+LAVA_EXTENT = {}   # model -> (min x, min z, max x, max z), measured from the game (--game); else LAVA_GUESS
+LAVA_GUESS = (0.0, 0.0, 200.0, 200.0)
+# A lava fall to try (owner 2026-11-15: "a river of lava turned 90 degrees, standing upright by a rock?"): the same lava
+# tile, small and stood on end, at your left over the lava - one tipped about its x, one about its z (which way its
+# lava runs is the tile's own; the one that runs down stays). (name, ahead, right, width, height, about)
+# (02:07: out - the game paints the lava from above, by where it lies, so on end it is only streaks: "a graphic effect,
+# not what I have under my feet". Kept for a later try with a lava of our own.)
+LAVA_FALLS = {}
+# Turned copies brought down (owner 2026-11-15 02:07: "it flies - put it down"): the ruin on the high rock ahead-left
+# (a slab, a topless pillar, a brazier, rubble, a lava pool) stands on the menu's own ground's high part, which does not
+# come round with it - each copy of these this much lower, onto the lava. {act: (entity names, drop)}
+DROP_COPIES = {4: (('hell_brazier02_01', 'ui_wall_destroyed02_01', 'rubble_pile02_04', 'lava04_off_02',
+                    'ui_pillar01_blank_topless_01'), 10.5)}
+# The guardians (owner 2026-11-15 02:12: "the statues of armoured knights by the River of Flame's forge, that turn their
+# heads after you - one on each of the three small bone islands round me, facing me"): the Hellforge's statue01 (its
+# body, and its head as the game sets it, apart), at the middle of each turned copy of the hero's own island (its bones
+# about 15 ahead of the camera, turned a quarter, a half, three quarters round), its face (the model's +x) to you.
+#   {act: ((right, ahead) of each, y, size)}
+STATUES = {4: (((-15.0, 0.0), (0.0, -15.0), (15.0, 0.0)), 0.8, 1.0)}
+STATUE_MODELS = ('data/hd/env/model/act4/diab/act4_diab_props/statue01.model',
+                 'data/hd/env/model/act4/diab/act4_diab_props/statue01_head_neutral.model')
+STATUE_TEXTURES = tuple(f'data/hd/env/texture/act4/diab/act4_diab_props_statue01_{p}_{m}.texture'
+                        for p in 'ab' for m in ('alb', 'nrm', 'orm'))
+
+
+def lava(preset, act, ids):
+    """LAVA: the menu's own lava tile round you, level; LAVA_FALLS: the same stood on end."""
+    if act not in LAVA:
+        return 0
+    import random
+    rnd = random.Random(9800 + act)
+    name_, reach, (lo, hi) = LAVA[act]
+    src = next((e for e in preset['entities'] if str(e.get('name', '')).lower() == name_), None)
+    if not src:
+        return 0
+    cx, cy, cz = CAMERAS[act]
+    t0 = transform(src)
+    p0 = t0['position']
+    q0 = t0.get('orientation') or {'x': 0.0, 'y': 0.0, 'z': 0.0, 'w': 1.0}
+    # level: only its turn about the vertical kept (the menu's own too)
+    yaw0 = 2.0 * math.atan2(float(q0.get('y', 0.0)), float(q0.get('w', 1.0)))
+    t0['orientation'] = {'x': 0.0, 'y': math.sin(yaw0 / 2), 'z': 0.0, 'w': math.cos(yaw0 / 2)}
+    x0, z0, x1, z1 = LAVA_EXTENT.get(model_of(src), LAVA_GUESS)
+    w, d = x1 - x0, z1 - z0
+    c, s_ = math.cos(yaw0), math.sin(yaw0)
+    ex, ez = (c * w, -s_ * w), (s_ * d, c * d)   # the tile's own x and z edges, in the world (yaw: x -> (c, 0, -s))
+    added = []
+    ux, uz = (c, -s_), (s_, c)   # the tile's own x and z, in the world's (x, z)
+    # which of its axes runs across (along the world's z, our right) - the one a side cuts
+    across_x = abs(ux[1]) >= abs(uz[1])
+    n = int(reach / max(min(w, d), 1.0)) + 2
+    narrowed = 0
+    for i in range(-n, n + 1):
+        for j in range(-n, n + 1):
+            if i == 0 and j == 0:
+                continue
+            px, pz = float(p0['x']) + i * ex[0] + j * ez[0], float(p0['z']) + i * ex[1] + j * ez[1]
+            # its corners, in our frame (ahead = cx - x, right = cz - z)
+            cs = [(px + (x0 + a * w) * ux[0] + (z0 + b * d) * uz[0], pz + (x0 + a * w) * ux[1] + (z0 + b * d) * uz[1])
+                  for a in (0.0, 1.0) for b in (0.0, 1.0)]
+            aheads, rights = [cx - x for x, _ in cs], [cz - z for _, z in cs]
+            r_lo, r_hi = min(rights), max(rights)
+            near = math.hypot(max(min(aheads), 0.0, -max(aheads)), max(r_lo, 0.0, -r_hi))
+            if near > reach or r_hi <= lo or r_lo >= hi:
+                continue
+            f0, f1 = 0.0, 1.0   # the share of its across-axis kept, from its own low edge
+            u, lo0, span = (ux, x0, w) if across_x else (uz, z0, d)
+            if r_lo < lo or r_hi > hi:
+                # right along that axis: from its low edge (share 0) to its high edge (share 1)
+                r0 = cz - (pz + lo0 * u[1])
+                r1 = r0 - span * u[1]
+                ta, tb = (lo - r0) / (r1 - r0), (hi - r0) / (r1 - r0)
+                f0, f1 = max(0.0, min(ta, tb)), min(1.0, max(ta, tb))
+                if f1 - f0 < 0.02:
+                    continue
+                narrowed += 1
+            e = copy.deepcopy(src)
+            name = f'pcvr_lava_{act}_{i}_{j}'
+            e['name'], e['id'] = name, new_id(rnd, ids)
+            for comp in e['components']:
+                comp['name'] = f'{name}_{comp.get("type", "c")}'
+            t_ = transform(e)
+            if f0 > 0.0 or f1 < 1.0:
+                k = f1 - f0
+                # the narrowed tile's low edge (lo0 * k from its new origin) on the kept part's (lo0 + f0 * span)
+                shift = lo0 + f0 * span - lo0 * k
+                px, pz = px + shift * u[0], pz + shift * u[1]
+                sc = dict(t_.get('scale') or {'x': 1.0, 'y': 1.0, 'z': 1.0})
+                key = 'x' if across_x else 'z'
+                sc[key] = float(sc.get(key, 1.0)) * k
+                t_['scale'] = sc
+            t_['position'] = {'x': px, 'y': float(p0['y']), 'z': pz}
+            added.append(e)
+    tiles_ = len(added)
+    for name, ahead, right, width, height, about in LAVA_FALLS.get(act, ()):
+        e = copy.deepcopy(src)
+        e['name'], e['id'] = name, new_id(rnd, ids)
+        for comp in e['components']:
+            comp['name'] = f'{name}_{comp.get("type", "c")}'
+        t = transform(e)
+        fx, fz = cx - ahead, cz - right
+        vx, vz = cx - fx, cz - fz   # toward the camera
+        if about == 'x':
+            # tipped about its own x: its z hangs down from the origin, its face (+y) to its z; width along its x
+            th = math.atan2(vx, vz)   # its z -> (sin th, 0, cos th) toward you
+            q = qmul((0.0, math.sin(th / 2), 0.0, math.cos(th / 2)), tilt_q(90.0, 0.0))
+            sx, sz = width / w, height / d
+            ax_, az_ = math.cos(th), -math.sin(th)   # its x (the width) in the world
+            pos = (fx - ax_ * width / 2, float(p0['y']) + height, fz - az_ * width / 2)
+        else:
+            # tipped about its own z: its x stands up from the origin, its face (+y) to its -x; width along its z
+            th = math.atan2(vz, -vx)   # its -x -> (-cos th, 0, sin th) toward you
+            q = qmul((0.0, math.sin(th / 2), 0.0, math.cos(th / 2)), tilt_q(0.0, 90.0))
+            sx, sz = height / w, width / d
+            ax_, az_ = math.sin(th), math.cos(th)   # its z (the width) in the world
+            pos = (fx - ax_ * width / 2, float(p0['y']), fz - az_ * width / 2)
+        t['position'] = {'x': pos[0], 'y': pos[1], 'z': pos[2]}
+        t['orientation'] = {'x': q[0], 'y': q[1], 'z': q[2], 'w': q[3]}
+        t['scale'] = {'x': sx, 'y': 1.0, 'z': sz}
+        added.append(e)
+    preset['entities'].extend(added)
+    spots, sy, ssc = STATUES.get(act, ((), 0.0, 1.0))
+    for k, (right, ahead) in enumerate(spots):
+        # its +x to the camera (02:20: with its -x there all three stood with their backs to you)
+        th = math.atan2(right, -ahead) + math.pi
+        for m in STATUE_MODELS:
+            nm = f'pcvr_guardian_{act}_{k}_{m.rsplit("/", 1)[-1][:-len(".model")]}'
+            added.append(tree(nm, new_id(rnd, ids), m, cx - ahead, sy, cz - right, th, (ssc, ssc, ssc)))
+    if spots:
+        preset['entities'].extend(added[-len(spots) * len(STATUE_MODELS):])
+        depend(preset, STATUE_MODELS)
+        tex = preset.setdefault('dependencies', {}).setdefault('textures', [])
+        have = {str(d.get('path', '')).lower() for d in tex if isinstance(d, dict)}
+        tex.extend({'path': t} for t in STATUE_TEXTURES if t not in have)
+    names, drop = DROP_COPIES.get(act, ((), 0.0))
+    dropped = 0
+    for e in preset['entities']:
+        nm = str(e.get('name', ''))
+        if COPY in nm and nm.split(COPY, 1)[0] in names:
+            transform(e)['position']['y'] = float(transform(e)['position']['y']) - drop
+            dropped += 1
+    TOWN_REPORT[act] = (f'{len(spots)} guardians, {dropped} copies brought down {drop}, ' f'{tiles_} lava tiles ({w:.0f} x {d:.0f}; {narrowed} narrowed to the sides {lo:.0f} / {hi:.0f}), '
+                        f'{len(added) - tiles_ - len(spots) * len(STATUE_MODELS)} lava falls to try')
+    return len(added)
+
+
 def hide(preset):
     keep = [e for e in preset['entities'] if e.get('name') not in HIDE]
     out = len(preset['entities']) - len(keep)
@@ -1139,7 +1553,7 @@ def hide(preset):
 
 # The owner's own edits from the scene editor (tools/scene_editor, 2026-11-14): per act, a file of moves, turns,
 # sizes, heights, removals, additions and the road's points, applied over what this script lays.
-EDITS_FILES = {2: Path(__file__).resolve().parent / 'frontend_edits_act2.json'}
+EDITS_FILES = {a: Path(__file__).resolve().parent / f'frontend_edits_act{a}.json' for a in (2, 3, 4)}
 
 
 def load_edits(act, override=None):
@@ -1205,10 +1619,22 @@ def apply_edits(preset, act, edits, ids):
     return n
 
 
-def prepare(preset_bytes, acts=ACTS, sources=None, edits_files=None):
+def prepare(preset_bytes, acts=ACTS, sources=None, edits_files=None, assets=None):
     preset = json.loads(preset_bytes)
     if not isinstance(preset, dict) or not isinstance(preset.get('entities'), list):
         raise ValueError('The main menu preset has no entity list; left as it is')
+    if assets is not None:   # the true size of the water we lay (TOWN_WATER)
+        for e in preset['entities']:
+            if e.get('name') in TOWN_WATER.values():
+                b = measure(assets, model_of(e))
+                if b:
+                    WATER_EXTENT[model_of(e)] = (b[0][0], b[0][2], b[1][0], b[1][2])
+            if str(e.get('name', '')).lower() in [v[0] for v in LAVA.values()]:   # and of the lava (LAVA)
+                b = measure(assets, model_of(e))
+                if b:
+                    LAVA_EXTENT[model_of(e)] = (b[0][0], b[0][2], b[1][0], b[1][2])
+                    print(f'lava tile {model_of(e)}: x {b[0][0]:.1f}..{b[1][0]:.1f}, y {b[0][1]:.2f}..{b[1][1]:.2f}, '
+                          f'z {b[0][2]:.1f}..{b[1][2]:.1f}')
     clouds = without_clouds(preset)
     ids = {int(e.get('id', 0)) for e in preset['entities']}
     report = [f'clouds out: {clouds}, hidden: {hide(preset)}']
@@ -1231,7 +1657,10 @@ def prepare(preset_bytes, acts=ACTS, sources=None, edits_files=None):
         walled = walls(preset, act, ids)
         roads = road(preset, act, ids)
         scattered = scatter(preset, act, ids)
-        tiled = tiles(preset, act, ids, sources or {}) + towers(preset, act, ids)
+        tiled = tiles(preset, act, ids, sources or {}) + towers(preset, act, ids) + town(preset, act, ids, sources or {}) + \
+            lava(preset, act, ids)
+        if act in TOWN_REPORT:
+            report.append(f'act {act}: {TOWN_REPORT[act]}')
         edited = apply_edits(preset, act, ed, ids)
         if edited:
             report.append(f'act {act}: {edited} of the owner\'s edits applied')
@@ -1239,6 +1668,11 @@ def prepare(preset_bytes, acts=ACTS, sources=None, edits_files=None):
                       f'({out} trees out of {", ".join(CLEAR.get(act, ()))}), {dark} Dark Wood trees, {thick} in thickets, {thinned} thinned out, {finished} more out, {ivy} ivy out, {grasses} grass, {walled} wall pieces, {roads} road pieces, {scattered} scattered, {tiled} from game strips, '
                       f'{lights(preset, act, ids)} lights')
     return (json.dumps(preset, ensure_ascii=False, separators=(',', ':')) + '\n').encode('utf-8'), report
+
+
+def source_presets():
+    """The game's presets the scene is built from besides the menu's own (TILES, TOWN)."""
+    return sorted({t[0] for t in TILES.values()} | {t[0] for t in TOWN.values()})
 
 
 def main():
@@ -1252,13 +1686,16 @@ def main():
     ap.add_argument('--edits', type=Path, help='the scene editor\'s file of changes for Act 2 (default: frontend_edits_act2.json here, if any)')
     ap.add_argument('--tiles-from', type=Path, help='(development) a folder with the TILES presets, as dump_act2_presets.py writes them')
     args = ap.parse_args()
-    wanted = {t[0] for t in TILES.values()}
+    wanted = source_presets()
     sources = {}
     if args.from_json:
         raw = args.from_json.read_bytes()
         for w in wanted:
-            f = (args.tiles_from or Path('.')) / w.split('/preset/act2/', 1)[-1].replace('/', '__')
+            f = (args.tiles_from or Path('.')) / w.split('/preset/', 1)[-1].split('/', 1)[-1].replace('/', '__')
+            if not f.exists():   # (Act 3's town: extracted/act3, beside Act 2's strips in extracted/act2)
+                f = f.parent.parent / w.split('/preset/', 1)[-1].split('/', 1)[0] / f.name
             sources[w] = f.read_bytes()
+        data, report = prepare(raw, sources=sources, edits_files={2: args.edits} if args.edits else None)
     else:
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         from game_assets import open_assets
@@ -1266,7 +1703,7 @@ def main():
             raw = assets.read(PRESET)
             for w in wanted:
                 sources[w] = assets.read(w)
-    data, report = prepare(raw, sources=sources, edits_files={2: args.edits} if args.edits else None)
+            data, report = prepare(raw, sources=sources, edits_files={2: args.edits} if args.edits else None, assets=assets)
     print('\n'.join(report))
     target = args.out or (args.game / 'mods' / args.mod / f'{args.mod}.mpq' / PRESET if args.game else None)
     if target and (args.write or args.out):

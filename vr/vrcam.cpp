@@ -391,6 +391,12 @@ struct Settings {
     // menu_top: the share of the menu band from its top where the board begins (0: the whole menu).
     std::atomic<bool>  frontendOn{false};
     std::atomic<float> frontendEye{6.0f}, frontendUp{0.0f}, frontendForward{0.0f}, frontendMenuTop{0.0f};
+    // [frontend] right_N / up_N / forward_N (N = 1..5): one act's head moved from the game's camera besides eye / up /
+    // forward (world units). Act 3: 4 to the left, over the middle of its pier - the Kurast Docks pier behind
+    // (prepare_frontend_scene.py TOWN_ALIGN) lies along the menu's own, whose middle passes 4 left of the camera
+    // (owner 2026-11-14: "I stand with one foot in the air").
+    std::atomic<float> frontendRightN[6]{0.0f, 0.0f, 0.0f, -4.0f, 0.0f, 0.0f};
+    std::atomic<float> frontendUpN[6]{}, frontendForwardN[6]{};
     // [frontend] menu_width / menu_distance / menu_drop: the main menu's board, as [campfire]'s (metres): half as
     // big again as the campfire's and a little higher (owner 2026-11-13)
     std::atomic<float> frontendMenuWidth{1.65f}, frontendMenuDistance{1.0f}, frontendMenuDrop{0.65f};
@@ -832,6 +838,10 @@ SRWLOCK g_skyCfgLock = SRWLOCK_INIT;
 std::string g_campfirePanoFile = "D2R_Sky_ours/D2R_Campfire_Pano.png";   // [campfire] pano_file (under g_skyCfgLock)
 std::string g_frontPanoFile;   // [frontend] pano_file_N of the act that has the picture slot (under g_skyCfgLock), "" none
 int g_frontPanoAct = 0;        // ... and that act (under g_skyCfgLock)
+// [frontend] each act's own picture, "" none (under g_skyCfgLock): the one slot follows the act on show (2026-11-14:
+// Act 3 has its own too - changing acts in the menu reloads the effect once)
+std::string g_frontPanoFiles[6];
+extern std::atomic<int> g_frontAct;   // (below: the act on show)
 SkyAct g_skyAct[7];
 // [fog] color_caves: one colour for every area off the outdoor list - caves,
 // dungeons, crypts, towers. Empty = the act's own colour, as before.
@@ -1708,7 +1718,7 @@ void LoadSettings() {
                 for (int n = 1; n <= 5; ++n) {
                     wchar_t key[32], def[96], buf[MAX_PATH];
                     swprintf_s(key, L"pano_%d", n);
-                    const bool on = IniB(L"frontend", key, n == 2);
+                    const bool on = IniB(L"frontend", key, n >= 2 && n <= 4);   // Acts 3 (2026-11-14) and 4 (2026-11-15) too
                     swprintf_s(key, L"pano_file_%d", n);
                     swprintf_s(def, L"D2R_Sky_ours/D2R_Front_act%d.png", n);
                     GetPrivateProfileStringW(L"frontend", key, def, buf, MAX_PATH, g_iniPath);
@@ -1718,6 +1728,10 @@ void LoadSettings() {
                     const bool ok = on && !f.empty() && SkyFileExists(f);
                     for (wchar_t& c : f) if (c == L'\\') c = L'/';
                     if (ok && !owner) { owner = n; file = Utf8(f.c_str()); }
+                    {
+                        const std::string mine = ok ? Utf8(f.c_str()) : std::string();
+                        AcquireSRWLockExclusive(&g_skyCfgLock); g_frontPanoFiles[n] = mine; ReleaseSRWLockExclusive(&g_skyCfgLock);
+                    }
                     g_set.frontendPano[n].store(ok);
                     swprintf_s(key, L"pano_brightness_%d", n);
                     g_set.frontendPanoBright[n].store(std::clamp(IniF(L"frontend", key, 1.0f), 0.0f, 8.0f));
@@ -1729,6 +1743,11 @@ void LoadSettings() {
                     g_set.frontendPanoLow[n].store(std::clamp(IniF(L"frontend", key, -10.0f), -90.0f, 89.0f));
                     swprintf_s(key, L"pano_high_%d", n);
                     g_set.frontendPanoHigh[n].store(std::clamp(IniF(L"frontend", key, 90.0f), -89.0f, 90.0f));
+                }
+                {   // the act on show, if it has its own
+                    const int now = std::clamp(g_frontAct.load(), 0, 5);
+                    AcquireSRWLockShared(&g_skyCfgLock); const std::string mine = now ? g_frontPanoFiles[now] : std::string(); ReleaseSRWLockShared(&g_skyCfgLock);
+                    if (!mine.empty()) { owner = now; file = mine; }
                 }
                 AcquireSRWLockExclusive(&g_skyCfgLock);
                 const bool changed = file != g_frontPanoFile;
@@ -1745,6 +1764,16 @@ void LoadSettings() {
                     swprintf_s(l, L"cut_left_%d", n);
                     g_set.frontendCutRightN[n].store(std::clamp(IniF(L"frontend", r, kRight[n]), 0.0f, 100000.0f));
                     g_set.frontendCutLeftN[n].store(std::clamp(IniF(L"frontend", l, kLeft[n]), 0.0f, 100000.0f));
+                }
+                static const float kSide[6] = {0.0f, 0.0f, 0.0f, -4.0f, 0.0f, 0.0f};
+                for (int n = 1; n <= 5; ++n) {
+                    wchar_t k[16];
+                    swprintf_s(k, L"right_%d", n);
+                    g_set.frontendRightN[n].store(std::clamp(IniF(L"frontend", k, kSide[n]), -200.0f, 200.0f));
+                    swprintf_s(k, L"up_%d", n);
+                    g_set.frontendUpN[n].store(std::clamp(IniF(L"frontend", k, 0.0f), -200.0f, 200.0f));
+                    swprintf_s(k, L"forward_%d", n);
+                    g_set.frontendForwardN[n].store(std::clamp(IniF(L"frontend", k, 0.0f), -400.0f, 400.0f));
                 }
             }
         }
@@ -3295,8 +3324,14 @@ bool CampfireView(const d2rcam::WorldView& in, float out[16]) {
     const V3 ahead = flat > 1e-5f ? V3{gameFwd.x/flat, 0.0f, gameFwd.z/flat} : V3{0.0f, 0.0f, -1.0f};
     const bool front = g_frontend3d.load();
     const float eyeH = front ? g_set.frontendEye.load() : g_set.campfireEye.load();
-    const V3 at = cam + ahead * (front ? g_set.frontendForward.load() : g_set.campfireForward.load())
-                + V3{0.0f, front ? g_set.frontendUp.load() : g_set.campfireUp.load(), 0.0f};
+    V3 at = cam + ahead * (front ? g_set.frontendForward.load() : g_set.campfireForward.load())
+          + V3{0.0f, front ? g_set.frontendUp.load() : g_set.campfireUp.load(), 0.0f};
+    if (front) {   // [frontend] right_N / up_N / forward_N: this act's own (its act as last told; the camera stays put)
+        const int n = std::clamp(g_frontAct.load(), 0, 5);
+        const V3 right = {-ahead.z, 0.0f, ahead.x};
+        at = at + ahead * g_set.frontendForwardN[n].load() + right * g_set.frontendRightN[n].load()
+                + V3{0.0f, g_set.frontendUpN[n].load(), 0.0f};
+    }
     {   // [frontend]: where the game's camera stands (the act's vignette), told when it moves on
         static float toldCam[3] = {1e9f, 1e9f, 1e9f};
         if (front) {
@@ -12716,7 +12751,14 @@ void OnBeginEffects(reshade::api::effect_runtime* rt, reshade::api::command_list
     const bool pano = CampfireSky() && !g_frontend3d.load() && g_set.campfirePano.load();
     // [frontend] pano_N: the act scene's own sky picture, if this act has the slot
     const int frontPanoAct = FrontendActReady() ? g_frontAct.load() : 0;
-    AcquireSRWLockShared(&g_skyCfgLock); const int slotAct = g_frontPanoAct; ReleaseSRWLockShared(&g_skyCfgLock);
+    AcquireSRWLockShared(&g_skyCfgLock); int slotAct = g_frontPanoAct; ReleaseSRWLockShared(&g_skyCfgLock);
+    if (frontPanoAct >= 1 && frontPanoAct != slotAct && g_set.frontendPano[frontPanoAct].load()) {   // the slot to this act
+        AcquireSRWLockExclusive(&g_skyCfgLock);
+        const std::string file = g_frontPanoFiles[frontPanoAct];
+        if (!file.empty()) { g_frontPanoFile = file; g_frontPanoAct = slotAct = frontPanoAct; }
+        ReleaseSRWLockExclusive(&g_skyCfgLock);
+        if (!file.empty()) { LogF("vrcam: [frontend] act %d's sky picture: %s", frontPanoAct, file.c_str()); g_skyCfgGen.fetch_add(1); }
+    }
     const bool frontPano = CampfireSky() && g_frontend3d.load() && frontPanoAct >= 1 && frontPanoAct == slotAct &&
                            g_set.frontendPano[frontPanoAct].load();
     SetBool(rt, "SkyPano", pano || frontPano);
