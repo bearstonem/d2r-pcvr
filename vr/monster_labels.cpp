@@ -51,8 +51,9 @@ void OnUpdate(uintptr_t panel,uintptr_t event,uintptr_t group,bool attached) {
         std::memcpy(&second,info.data()+0x28,sizeof second);
         if(Text(first,abilities)&&Text(second,additional)&&!abilities.empty()&&!additional.empty()) {
             // Preserve native localization and embedded color/immune markers.
-            // One newline flows directly after the last wrapped ability line.
-            const std::string combined=abilities+'\n'+additional;
+            // Fixed one-line clearance keeps taller immunity glyphs below
+            // the final wrapped ability line, independent of line count.
+            const std::string combined=abilities+"\n\n"+additional;
             const uintptr_t joined=reinterpret_cast<uintptr_t>(combined.c_str());
             const uintptr_t empty=reinterpret_cast<uintptr_t>("");
             const uintptr_t copy=reinterpret_cast<uintptr_t>(info.data());

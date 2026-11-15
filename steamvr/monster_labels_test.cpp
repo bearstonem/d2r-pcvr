@@ -39,9 +39,9 @@ int main() {
         hook(1,reinterpret_cast<uintptr_t>(message.data()),2,true);
         assert(calls==before+1&&message==beforeMessage&&data==beforeData);
     };
-    run("Extra Strong", "Immune to Cold");assert(first=="Extra Strong\nImmune to Cold"&&second.empty());
+    run("Extra Strong", "Immune to Cold");assert(first=="Extra Strong\n\nImmune to Cold"&&second.empty());
     run("Extra Strong\nCold Enchanted", "Demon |cFF0000Immune to Fire");
-    assert(first=="Extra Strong\nCold Enchanted\nDemon |cFF0000Immune to Fire"&&second.empty());
+    assert(first=="Extra Strong\nCold Enchanted\n\nDemon |cFF0000Immune to Fire"&&second.empty());
     run("", "Undead");assert(first.empty()&&second=="Undead");
     run("Cursed", "");assert(first=="Cursed"&&second.empty());
     run("", "");assert(first.empty()&&second.empty());
