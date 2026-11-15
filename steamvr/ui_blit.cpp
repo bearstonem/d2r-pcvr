@@ -20,10 +20,12 @@ bool UiBlit::Initialize(ID3D12Device* device,void (*log)(const char*)) {
     constexpr char shader[]=R"(
 Texture2D<float4> nativeUi : register(t0);
 SamplerState mapSampler : register(s0);
-cbuffer Options : register(b0) {uint blackBackground;uint mapSide;uint mapFlags;float bearing;float wallAlpha;float zoom;float mapSpan;float xReach;float2 xShift;uint mapTop;float backAlpha;int4 undim;};
-// mapTop, backAlpha (square map): the map's square starts mapTop rows down the target; its dark
-// backing, margins and the frame's dark bands at backAlpha (1 solid, as before; below 1 the floating
-// map's see-through copy). The walls, markers, labels, the arrow and the frame's gold stay solid.
+cbuffer Options : register(b0) {uint blackBackground;uint mapSide;uint mapFlags;float bearing;float wallAlpha;float zoom;float mapSpan;float xReach;float2 xShift;uint mapTop;float backAlpha;int4 undim;float frameAlpha;};
+// mapTop, backAlpha, frameAlpha (square map): the map's square starts mapTop rows down the target;
+// its dark backing, margins and the frame's dark bands at backAlpha (1 solid, as before; below 1
+// the floating map's see-through copy); the walls, markers, labels, the arrow and the frame's gold
+// stay solid. Its frame (the bevel and the corner cuts) at frameAlpha over the map beneath it (1
+// shown, as before; 0 hidden: the floating copy while it is not pointed at).
 // xReach, xShift (the full map, xReach > 0; wrist_full_map.h XSearchAt): the X's search square,
 // xReach source pixels each way from the source's center moved by xShift, where the game draws
 // the hero's X on its full map at the game zoom the share was drawn at; sized to that X, so other
@@ -202,8 +204,24 @@ float4 Finish(float4 c,bool clearBack) {
 float4 VS(uint id:SV_VertexID):SV_Position {
     return float4(id==2?3:-1,id==1?-3:1,0,1);
 }
-float4 PS(float4 position:SV_Position):SV_Target {
-    position.y-=mapTop;   // the square's own pixels (0 but for the see-through copy)
+// The square map's frame at a pixel of its square: true, and its colour, on the bevel and the
+// corner cuts. A narrow aged-bronze bevel and inset corner cuts; the gold line and the cuts solid,
+// the dark bands round the line at backAlpha (the backing).
+bool Frame(float2 pixel,out float4 c) {
+    const float bevel=min(1.0,mapSide/128.0);
+    const float edge=min(min(pixel.x,pixel.y),min(mapSide-pixel.x,mapSide-pixel.y))/bevel;
+    const float2 corner=min(pixel,float(mapSide)-pixel)/bevel;
+    c=0;
+    if(edge<1)c=float4(.012,.009,.006,backAlpha);
+    else if(edge<3)c=float4(.24,.16,.065,1);
+    else if(edge<5)c=float4(.055,.033,.015,backAlpha);
+    else if(edge<7)c=float4(.012,.009,.006,backAlpha);
+    else if(max(corner.x,corner.y)<20&&abs(corner.x+corner.y-26)<1.4)c=float4(.34,.24,.11,1);
+    else return false;
+    return true;
+}
+// A pixel of the square map (its own pixels: mapTop taken off) without its frame, or of a menu.
+float4 Square(float4 position) {
     float2 pixel=position.xy;
     float2 mapSize=1;
     const bool clearBack=mapSide&&(mapFlags&2);
@@ -224,19 +242,8 @@ float4 PS(float4 position:SV_Position):SV_Target {
     if(arrow>.5)return float4(.006,.006,.006,1);   // its dark rim
     if(mapSide) {
         // Fit the entire corner map in a square without stretching, clipping
-        // exits or reading it back to the CPU. Empty margins stay dark.
-        float bevel=min(1.0,mapSide/128.0);
-        float edge=min(min(pixel.x,pixel.y),min(mapSide-pixel.x,mapSide-pixel.y))/bevel;
-        // A narrow aged-bronze bevel and inset corner cuts. The entire native
-        // map fits inside the frame, including markers at its outer edges.
-        float2 corner=min(pixel,float(mapSide)-pixel)/bevel;
-        // the gold line and corner cuts solid; the dark bands round it at backAlpha (the backing)
-        if(edge<1)return float4(.012,.009,.006,backAlpha);
-        if(edge<3)return float4(.24,.16,.065,1);
-        if(edge<5)return float4(.055,.033,.015,backAlpha);
-        if(edge<7)return float4(.012,.009,.006,backAlpha);
-        if(max(corner.x,corner.y)<20&&abs(corner.x+corner.y-26)<1.4)
-            return float4(.34,.24,.11,1);
+        // exits or reading it back to the CPU. Empty margins stay dark. The
+        // entire native map fits inside the frame (PS), markers at its outer edges too.
         uint w,h;nativeUi.GetDimensions(w,h);
         mapSize=float2(w,h);
         if(mapSpan>0) {
@@ -282,6 +289,18 @@ float4 PS(float4 position:SV_Position):SV_Target {
     if(markerReach>0&&distance(pixel,heroAt)<markerReach&&IsMarker(c))return float4(.006,.006,.006,wallAlpha*backAlpha);
     return Finish(c,clearBack);
 }
+float4 PS(float4 position:SV_Position):SV_Target {
+    position.y-=mapTop;   // the square's own pixels (0 but for the floating copy's own square)
+    // The frame first (the arrow, at the centre, never reaches it): shown (frameAlpha 1), as ever;
+    // fading, over the map beneath it (premultiplied, out unassociated); hidden, the map alone.
+    float4 frame=0;
+    const bool inFrame=mapSide&&Frame(position.xy,frame);
+    if(inFrame&&frameAlpha>=1)return frame;
+    const float4 m=Square(position);
+    if(!inFrame||frameAlpha<=0)return m;
+    const float a=lerp(m.a,frame.a,frameAlpha);
+    return a>0?float4((m.rgb*m.a*(1-frameAlpha)+frame.rgb*frame.a*frameAlpha)/a,a):0;
+}
 )";
     ComPtr<ID3DBlob> vs,ps,findPs,tilesPs,errors,signature;
     const auto v=compile(shader,sizeof(shader)-1,"native-ui",nullptr,nullptr,"VS","vs_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&vs,&errors);
@@ -296,8 +315,8 @@ float4 PS(float4 position:SV_Position):SV_Target {
     D3D12_ROOT_PARAMETER parameters[2]{};auto& parameter=parameters[0];parameter.ParameterType=D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
     parameter.DescriptorTable={1,&range};parameter.ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
     parameters[1].ParameterType=D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-    // Options: its 12 values (undim starts a register), undim's 4
-    parameters[1].Constants={0,0,16};parameters[1].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
+    // Options: its 12 values (undim starts a register), undim's 4, frameAlpha
+    parameters[1].Constants={0,0,17};parameters[1].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
     D3D12_ROOT_SIGNATURE_DESC desc{};desc.NumParameters=2;desc.pParameters=parameters;
     D3D12_STATIC_SAMPLER_DESC sampler{};sampler.Filter=D3D12_FILTER_MIN_MAG_LINEAR_MIP_POINT;
     sampler.AddressU=sampler.AddressV=sampler.AddressW=D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
@@ -329,7 +348,7 @@ float4 PS(float4 position:SV_Position):SV_Target {
     return true;
 }
 bool UiBlit::Render(ID3D12Device* device,ID3D12GraphicsCommandList* list,ID3D12Resource* source,ID3D12Resource* target,bool blackBackground,bool squareMap,uint32_t mapFlags,float bearing,float wallAlpha,float zoom,float mapSpan,float xReach,float xShiftRight,float xShiftDown,const int32_t* undimBand,
-                    uint32_t seeThroughTop,float backAlpha) {
+                    uint32_t copyTop,float backAlpha,float frameAlpha) {
     if(!pipeline||!source||!target)return false;
     const auto s=source->GetDesc(),t=target->GetDesc();
     if(!RenderTargetCompatible(s.Format,DXGI_FORMAT_R16G16B16A16_FLOAT)||
@@ -400,20 +419,22 @@ bool UiBlit::Render(ID3D12Device* device,ID3D12GraphicsCommandList* list,ID3D12R
     D3D12_RENDER_TARGET_VIEW_DESC rtvDesc{};rtvDesc.Format=DXGI_FORMAT_R16G16B16A16_FLOAT;rtvDesc.ViewDimension=D3D12_RTV_DIMENSION_TEXTURE2D;
     device->CreateRenderTargetView(target,&rtvDesc,targetHeap->GetCPUDescriptorHandleForHeapStart());
     auto rtv=targetHeap->GetCPUDescriptorHandleForHeapStart();list->OMSetRenderTargets(1,&rtv,FALSE,nullptr);
-    // Rows y0 to y1 of the target. The square map's copies each draw one row past the edges they
-    // face, their frame's outer ring, so a quad filtering half a texel past its square never meets
-    // the other copy (or nothing drawn).
+    // Rows y0 to y1 of the target. The square map's copies each draw one row past the edge facing
+    // the other (their outer ring, or the map beneath a hidden frame), so a quad filtering half a
+    // texel past its square never meets the other copy (or nothing drawn).
     auto rows=[&](UINT y0,UINT y1) {
         const D3D12_VIEWPORT vp{0,float(y0),float(t.Width),float(y1-y0),0,1};const D3D12_RECT rect{0,LONG(y0),LONG(t.Width),LONG(y1)};
         list->RSSetViewports(1,&vp);list->RSSetScissorRects(1,&rect);
     };
     rows(0,squareMap?std::min<UINT>(t.Height,UINT(t.Width)+1):t.Height);
-    // the see-through copy (square map): only with a backing below 1, below the first with a row between them
+    // the floating copy's own square (square map): only when it differs from the first (a backing or a frame below 1),
+    // below the first with a row between them
     backAlpha=std::isnan(backAlpha)?1.f:std::min(std::max(backAlpha,0.f),1.f);   // NaN: solid
-    if(!squareMap||backAlpha>=1.f||seeThroughTop<UINT(t.Width)+2||uint64_t(seeThroughTop)+t.Width>t.Height)seeThroughTop=0;
-    list->SetGraphicsRoot32BitConstant(1,0,10);   // mapTop: the first copy at the top
-    const float solid=1.f;UINT backBits=0;std::memcpy(&backBits,&solid,sizeof backBits);
-    list->SetGraphicsRoot32BitConstant(1,backBits,11);
+    frameAlpha=std::isnan(frameAlpha)?1.f:std::min(std::max(frameAlpha,0.f),1.f);   // NaN: shown
+    if(!squareMap||(backAlpha>=1.f&&frameAlpha>=1.f)||copyTop<UINT(t.Width)+2||uint64_t(copyTop)+t.Width>t.Height)copyTop=0;
+    // the first square: at the top, solid, its frame shown
+    const float one=1.f;UINT oneBits=0;std::memcpy(&oneBits,&one,sizeof oneBits);
+    list->SetGraphicsRoot32BitConstant(1,0,10);list->SetGraphicsRoot32BitConstant(1,oneBits,11);list->SetGraphicsRoot32BitConstant(1,oneBits,16);
     list->SetPipelineState(pipeline.Get());
     list->SetGraphicsRoot32BitConstant(1,blackBackground?1:0,0);
     list->SetGraphicsRoot32BitConstant(1,squareMap?UINT(t.Width):0,1);
@@ -428,10 +449,10 @@ bool UiBlit::Render(ID3D12Device* device,ID3D12GraphicsCommandList* list,ID3D12R
     UINT spanBits=0;std::memcpy(&spanBits,&mapSpan,sizeof spanBits);
     list->SetGraphicsRoot32BitConstant(1,spanBits,6);
     list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);list->DrawInstanced(3,1,0,0);
-    if(seeThroughTop) {   // the same map again, the hero's marker as found above, its backing at backAlpha
-        rows(seeThroughTop-1,std::min<UINT>(t.Height,seeThroughTop+UINT(t.Width)+1));
-        std::memcpy(&backBits,&backAlpha,sizeof backBits);
-        list->SetGraphicsRoot32BitConstant(1,seeThroughTop,10);list->SetGraphicsRoot32BitConstant(1,backBits,11);
+    if(copyTop) {   // the same map again, the hero's marker as found above, its backing at backAlpha, its frame at frameAlpha
+        rows(copyTop-1,std::min<UINT>(t.Height,copyTop+UINT(t.Width)+1));
+        UINT backBits=0,frameBits=0;std::memcpy(&backBits,&backAlpha,sizeof backBits);std::memcpy(&frameBits,&frameAlpha,sizeof frameBits);
+        list->SetGraphicsRoot32BitConstant(1,copyTop,10);list->SetGraphicsRoot32BitConstant(1,backBits,11);list->SetGraphicsRoot32BitConstant(1,frameBits,16);
         list->DrawInstanced(3,1,0,0);
     }
     if(findHero) {

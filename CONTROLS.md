@@ -873,7 +873,7 @@ with either hand pointing at it, size it: spread your hands to grow it, bring th
 150 cm); it moves with your hands, keeping its place between them. Bring it back to the raised wrist map (a light
 buzz) and let go to put it away. It shows while you look within about 30 degrees of it. **VR Settings > Interface >
 Wrist > Floating map background** (100%, solid, by default) lets the world show through the floating map's background: at 0%
-only the walls, the gold arrow, markers, names and a thin gold frame show, all still solid. The wrist map stays solid. While a copy is out, a
+only the walls, the gold arrow, markers and names show, all still solid. Its border shows only while you point at it (or hold it). The wrist map stays solid and framed. While a copy is out, a
 light buzz tells you when your aim is on a map you can take, and pointing anywhere on the floating map and pushing
 the right stick up / down zooms it (the wrist map zooms as before, by looking at it; both show the same picture).
 Every place you can point at on the floating map grows and shrinks with it: the zoom area is the map itself, and

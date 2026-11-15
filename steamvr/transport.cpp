@@ -920,11 +920,12 @@ bool MapFullOn(){return settings::MapViewFull(vrsettings::Read().values[settings
 bool MapTurnOn(){return vrsettings::Read().values[settings::MapRotate]>.5f;}
 bool mapSupported=false;
 constexpr uint32_t mapSide=512;
-// The floating map's see-through copy (VR Settings > Interface > Wrist > Floating map background below 100%, a copy
-// out): a second square on the map's surface, panelatlas::Gap rows under the first, so no swapchain more and the
-// wrist's own picture stays solid. mapSeeThrough: this frame's copy (mapEye.copied) has it.
-constexpr uint32_t mapSeeThroughTop=mapSide+panelatlas::Gap,mapHeight=mapSeeThroughTop+mapSide;
-bool mapSeeThrough=false;
+// The floating map's own square (a copy out, its picture not the wrist's: VR Settings > Interface > Wrist > Floating map
+// background below 100%, or its frame not fully shown, floating_map.h FrameStep): a second square on the map's surface,
+// panelatlas::Gap rows under the first, so no swapchain more and the wrist's own picture stays solid and framed.
+// mapCopyOwn: this frame's copy (mapEye.copied) has it.
+constexpr uint32_t mapCopyTop=mapSide+panelatlas::Gap,mapHeight=mapCopyTop+mapSide;
+bool mapCopyOwn=false;
 // The map's surface is made the first time a map shows. With OFXR Bridge
 // loaded that failed in every session it was tried (frame log, 2026-10-23 to
 // 25): one failure suspended the map for the session, the minimap gone from
@@ -949,6 +950,7 @@ math::Vec wristMapCenter{},menuMapCenter{};
 // points at a map with a copy out, so the stick zooms it as a look would; both false each frame before its step.
 // floatMapWrist / floatMapWristMs: the wrist map quad as last drawn, where a copy is pulled from and put away at.
 bool floatMapWant=false,floatMapPointed=false;
+float floatMapFrame=0;   // the copy's frame, 0 hidden .. 1 shown (floating_map.h Output::frame)
 bool wristMapLookedOnly=false;   // wristMapLooked from the look alone (its hold to LookOut), before floatMapPointed is ORed in
 interaction::Pose floatMapWrist{};uint64_t floatMapWristMs=0;
 mapzoom::View mapZoomView=mapzoom::View::None;   // the map the stick zoomed last frame, for the log
@@ -1394,7 +1396,7 @@ void ClearInput() {
     lootlabels::display.Clear();
     rightStickGestures.Reset();
     meleeImpactAt[0]=meleeImpactAt[1]=shieldImpactAt=parryMissAt=heldClankAt=0;
-    wristHeading.Reset();compassFrame=false;mapZoom.Reset();wristMapLooked=wristMapLookedOnly=false;floatMapWant=floatMapPointed=false;
+    wristHeading.Reset();compassFrame=false;mapZoom.Reset();wristMapLooked=wristMapLookedOnly=false;floatMapWant=floatMapPointed=false;floatMapFrame=0;
     panelinput::WorldInput(false);
     gamestate::MenuMap(false);
     menuControls.Suspend();menuNavigation.Reset();nativeMenuPad={};laserClick={};panelinput::UseController();
@@ -4224,7 +4226,7 @@ void Input() {
     handAimAt=GetTickCount64();
     const auto bindingSnapshot=interactionstate::Read();
     {   // Floating map: before the right stick's gestures, the map zoom and the hands' skills read the grips and the stick
-        floatMapWant=floatMapPointed=false;
+        floatMapWant=floatMapPointed=false;floatMapFrame=0;
         const bool gameplay=motionInput.active&&!interactionOutput.wheel&&!interactionOutput.settings&&
             interaction::Fresh(bindingSnapshot,gamestate::LocalPlayer(),GetTickCount64());
         // The map is the wrist HUD's (handrole::System::WristHud): R is the hand whose laser and grip take
@@ -4239,7 +4241,7 @@ void Input() {
             {motionInput.hand[R].p,motionInput.hand[L].p},{motionInput.tracked[R],motionInput.tracked[L]},motionInput.hand[R].q,
             handAim[R].p,handAim[R].q,handAimTracked[R],handAim[L].p,handAim[L].q,handAimTracked[L],
             floatMapWrist.p,floatMapWrist.q,floatMapWristMs,interaction::WristMapSize,
-            motionInput.grip[R],motionInput.grip[L],controls.rx,controls.ry,floatMapWant,floatMapPointed,
+            motionInput.grip[R],motionInput.grip[L],controls.rx,controls.ry,floatMapWant,floatMapPointed,floatMapFrame,
             +[](int h,float s){MotionPulse(UiRole(h,handrole::System::WristHud),haptics::Category::Interaction,s,25000000);},&Say};
         floatmap::StepFrame(f);
     }
@@ -7005,30 +7007,34 @@ bool CopyMap(reshade::api::command_queue* rq) {
             Say(line);
         }
     }
-    // Floating map background below 100% while a copy is out: its see-through copy under the solid one, the same pass
-    // again (the hero's marker found once); at 100% or with no copy out, the one solid square as before.
+    // A floating copy out whose picture is not the wrist's (Floating map background below 100%, or its frame not fully
+    // shown: it shows only while pointed at): its own square under the solid one, the same pass again (the hero's marker
+    // found once). No copy out, or a solid copy pointed at: the one solid square as before.
     const float back=vrsettings::Read().values[settings::FloatingMapBackground]*.01f;
-    const bool seeThrough=floatMapWant&&back<1.f;
-    {   // a line when the value or the copy's picture changes (at most one a 2 s)
-        static int toldPercent=-1;static bool toldOn=false;static ULONGLONG toldAt=0;
+    const float frame=std::clamp(floatMapFrame,0.f,1.f);
+    const bool own=floatMapWant&&(back<1.f||frame<1.f);
+    {   // a line when the value changes (at most one a 2 s), and the first time a run draws the copy's own square
+        static int toldPercent=-1;static ULONGLONG toldAt=0;static bool toldOwn=false;
         const int percent=int(std::lround(back*100));
-        if((percent!=toldPercent||seeThrough!=toldOn)&&GetTickCount64()>=toldAt) {
-            toldPercent=percent;toldOn=seeThrough;toldAt=GetTickCount64()+2000;
-            char line[200];std::snprintf(line,sizeof line,"Frame floatmap background: %d%%; %s",percent,
-                seeThrough?"the floating copy draws its own see-through square (the wrist's stays solid)":
-                back<1.f?"no floating copy out: one solid square":"solid: the floating copy shows the wrist's square, as before");
+        if((percent!=toldPercent&&GetTickCount64()>=toldAt)||(own&&!toldOwn)) {
+            if(percent!=toldPercent)toldAt=GetTickCount64()+2000;
+            toldPercent=percent;toldOwn=toldOwn||own;
+            char line[220];
+            if(own)std::snprintf(line,sizeof line,"Frame floatmap background: %d%%; the floating copy draws its own square (its frame %.0f%%, shown only while pointed at); the wrist's stays solid and framed",
+                                 percent,double(frame*100));
+            else std::snprintf(line,sizeof line,"Frame floatmap background: %d%%; a floating copy draws its own square, its frame shown only while pointed at (none drawn now)",percent);
             Say(line);
         }
     }
     if(!mapBlit.Render(device.Get(),e.commands.Get(),src,e.images[e.index].texture,true,true,flags,float(wristHeading.bearing),1.f,
                        fullMap?1.f:std::min(mapZoom.Zoom(),mapzoom::Max),span,search.reach,search.right,search.down,nullptr,
-                       seeThrough?mapSeeThroughTop:0,back)) {
+                       own?mapCopyTop:0,back,frame)) {
         e.commands->Close();return false;
     }
     if(FAILED(e.commands->Close()))return false;
     ID3D12CommandList* lists[]={e.commands.Get()};queue->ExecuteCommandLists(1,lists);
     if(FAILED(queue->Signal(fence.Get(),++fenceValue)))return false;
-    e.copyFence=fenceValue;e.copied=true;mapSeeThrough=seeThrough;return true;
+    e.copyFence=fenceValue;e.copied=true;mapCopyOwn=own;return true;
 }
 bool CopyUi(reshade::api::command_queue* rq) {
     if(!spatialMode||uiEye.copied)return true;
@@ -7946,7 +7952,7 @@ void EndPair() {
     struct FloatMapDraw {decltype(motionQuad)* quad;XrCompositionLayerQuad* layer;};FloatMapDraw floatMapDraw{&motionQuad,&floatMapQuad};
     floatmap::DrawFrame({interactionVisible&&!interactionOutput.wheel,mapEye.copied,GetTickCount64(),&floatMapDraw,
         +[](void* c,math::Vec p,math::Quat q,float side){const auto& d=*static_cast<FloatMapDraw*>(c);
-            (*d.quad)(*d.layer,XrPose({p,q}),side,side,{{0,mapSeeThrough?int32_t(mapSeeThroughTop):0},{int32_t(mapSide),int32_t(mapSide)}},mapEye.chain);},&Say});
+            (*d.quad)(*d.layer,XrPose({p,q}),side,side,{{0,mapCopyOwn?int32_t(mapCopyTop):0},{int32_t(mapSide),int32_t(mapSide)}},mapEye.chain);},&Say});
     if(count&&layers[count-1]==reinterpret_cast<const XrCompositionLayerBaseHeader*>(&floatMapQuad)&&floatMapAnchor)
         for(uint32_t i=0;i+1<count;++i)if(layers[i]==floatMapAnchor){std::rotate(layers.data()+i+1,layers.data()+count-1,layers.data()+count);break;}
     XrCompositionLayerQuad winePadding{XR_TYPE_COMPOSITION_LAYER_QUAD};

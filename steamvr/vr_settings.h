@@ -316,7 +316,8 @@ inline constexpr std::array<Definition,Count> Definitions{{
     {"Props have weight", "A barrel takes a full swing to move; a cup flies off a tap", L"interactions",L"prop_heft",1,0,1,1},
     // Floating map background (Jeff, 2026-11-15: "make the background transparent ... a slider for how transparent
     // ... keep the foreground map parts though solid"): the pulled-off copy's dark backing, 0% see-through to 100%
-    // solid; its walls, markers, labels, arrow and gold frame stay solid. The wrist map keeps its own solid picture.
+    // solid; its walls, markers, labels and arrow stay solid (its frame shows only while pointed at: floating_map.h
+    // FrameStep). The wrist map keeps its own solid, framed picture.
     // 100% by default, as before. VR Settings > Interface > Wrist > Map, under Buffs and companions.
     {"Floating map background", "The floating map's background: 0% see-through, 100% solid",L"interactions",L"floating_map_background_pct",100,0,100,10},
 }};
