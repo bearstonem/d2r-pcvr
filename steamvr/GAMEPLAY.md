@@ -844,8 +844,10 @@ picker title names the chosen native binding. The native controller UI can also
 assign these slots. Names come from the game; unreadable assignments show Unknown. A known
 unassigned slot is disabled. A lit slot indicates a present assignment, not a
 promise that mana, charges or cooldown permit casting. Native spell icons come
-from the local game cache; charge/cooldown counts remain pending. Slots run
-clockwise from the upper-right segment. Equipment icons follow the live weapon
+from the local game cache, except Kick: its game icon is an empty plate, so it
+uses new art embedded in the mod (`assets/kick-icon.png`). Charge/cooldown
+counts remain pending. Slots run clockwise from the upper-right segment.
+Equipment icons follow the live weapon
 sets and next potion in each belt column, including potion tiers. Empty slots
 show no item icon. The generated stone-and-bronze frame supplies background and
 selection highlights; native icons keep their original art. Selecting closes
