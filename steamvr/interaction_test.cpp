@@ -966,6 +966,14 @@ int main(){
             for(int i=0,after=-1;i<110&&after<10;++i){auto o=s.Step();if(o.request.action==Action::FeedMerc){++requests;request=o.request;}if(requests)++after;}
         };
         {
+            Sim s;s.in.snapshot.belt[0].suggested=true;
+            const auto o=toss(s,{0,1.f,-3.f});
+            Check(o.flying,"inventory-suggested potion can be thrown for the mercenary");
+            int requests=0;Request request;land(s,requests,request);
+            Check(requests==1&&request.action==Action::FeedMerc&&request.inventoryPotion&&request.item.handle==42,
+                "suggested potion landing preserves inventory source and exact item, once");
+        }
+        {
             Sim s;const auto belt=s.out.belt[0].p;const auto o=toss(s,{0,1.f,-3.f});
             Check(o.flying&&o.bottle<0&&o.flightItem.handle==42&&o.flightColumn==0&&o.request.action==Action::None,
                 "a fast release launches the exact bottle without a native request");

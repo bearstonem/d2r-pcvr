@@ -817,7 +817,7 @@ class Engine {
     bool Throw(const Input& in,bool fresh,Vec slot,Output& out) {
         Vec throwVelocity{};
         if(spent||!in.floorKnown||!in.stage.known||!fresh||!SameBelt(in.snapshot,held)||!Throwable(PotionType(held.item.code))||
-           in.snapshot.belt[held.index].suggested||!PeakVelocity(in.time,throwVelocity))return false;
+           !PeakVelocity(in.time,throwVelocity))return false;
         const auto& hand=in.hand[bottleHand];
         const Vec p=potions::Center(hand.p,hand.q);
         if(math::Dot(p-slot,p-slot)<ThrowClearOfBelt*ThrowClearOfBelt)return false;
@@ -923,7 +923,7 @@ public:
         auto request=[&](Action a,int index,Item item={},uint32_t revision=0) {
             if(pending.action!=Action::None)return false;
             pending={a,++sequence,session,now,index,item,revision};pendingAt=in.time;pendingHand=0;
-            pending.inventoryPotion=a==Action::Potion&&index>=0&&index<4&&in.snapshot.belt[index].suggested;
+            pending.inventoryPotion=(a==Action::Potion||a==Action::FeedMerc)&&index>=0&&index<4&&in.snapshot.belt[index].suggested;
             out.request=pending;result=Result::Pending;return true;
         };
         // Follow even with lowered hands or a held bottle: proximity must not

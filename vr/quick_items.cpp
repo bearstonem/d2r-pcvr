@@ -146,12 +146,19 @@ bool Use(const Request& r,const Snapshot& s) {
     framevr::logging::Write("Frame quick use: native inventory action dispatched once");return true;
 }
 bool UsePotion(const Request& r,const Snapshot& s) {
-    if(r.action!=Action::Potion||PotionType(r.item.code)==Potion::Unknown)return false;
+    const bool merc=r.action==Action::FeedMerc;
+    if((r.action!=Action::Potion&&!merc)||PotionType(r.item.code)==Potion::Unknown)return false;
+    if(merc&&(!r.inventoryPotion||!Throwable(PotionType(r.item.code))||!s.merc.known||s.merc.health<=0||
+       !d2rsig::Check(abi::FeedMercRva,abi::FeedMercSig,sizeof abi::FeedMercSig)||
+       !d2rsig::Check(abi::FeedMercTargetRva,abi::FeedMercTargetSig,sizeof abi::FeedMercTargetSig)))return false;
     auto inventoryRequest=r;inventoryRequest.index=int(r.item.code);
     Items::ItemInfo info{};ClientItems client;
     if(!Validate(inventoryRequest,s,info)||Quantity(info)<=0||!client.Load(r.session))return false;
     const auto unit=client.Find(info);if(!unit)return false;
-    reinterpret_cast<void(*)(uintptr_t,int)>(d2rsig::Addr(abi::UseRva))(unit,3);
+    if(merc) {
+        reinterpret_cast<void(*)(uintptr_t)>(d2rsig::Addr(abi::FeedMercRva))(unit);
+        framevr::logging::Write("Frame potion toss: native inventory mercenary use dispatched once");
+    } else reinterpret_cast<void(*)(uintptr_t,int)>(d2rsig::Addr(abi::UseRva))(unit,3);
     return true;
 }
 const char* UseResultName(UseResult c) {
