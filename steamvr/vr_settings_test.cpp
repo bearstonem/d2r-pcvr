@@ -1057,8 +1057,8 @@ int main(int argc,char** argv){
     {   // Props have weight (prop_heft.h): On by default, a switch under Knock over small props, shown while it is on, saved alone
         Check(Defaults()[PropHeft]==1&&std::wstring(Definitions[PropHeft].section)==L"interactions"&&
               std::wstring(Definitions[PropHeft].key)==L"prop_heft"&&Definitions[PropHeft].min==0&&Definitions[PropHeft].max==1&&
-              Definitions[PropHeft].step==1&&HelpText(PropHeft)[0]!=0&&PropHeft<ChangeMask::Bits&&PropHeft==Count-1,
-              "Props have weight: On by default, [interactions] prop_heft Off / On, explained, its own change bit, appended last");
+              Definitions[PropHeft].step==1&&HelpText(PropHeft)[0]!=0&&PropHeft<ChangeMask::Bits&&PropHeft+1==MapGrabHint,
+              "Props have weight: On by default, [interactions] prop_heft Off / On, explained, its own change bit, appended (Map grab hint after it)");
         const auto* row=content::RowOf(PropHeft);const auto* props=content::RowOf(PropPhysics);
         Check(row&&props&&!row->beside&&row->page==View::Physics&&row->kind==content::RowKind::Toggle&&std::strcmp(row->label,"Props have weight")==0&&
               row->section==props->section&&row->classes==content::AllClasses&&std::strlen(row->help)<=160,
@@ -1072,6 +1072,24 @@ int main(int argc,char** argv){
         for(int c=-1;c<=heroclass::Assassin+1;++c)Check(RowShown(PropHeft,on,{c})&&!RowShown(PropHeft,off,{c}),"shown while props are knocked about, for every class");
         Model t;Snapshot ready;ready.ready=true;ready.values=Defaults();t.Open(ready);layout::Press(t,{Kind::Set,PropHeft,0,0},0);
         Check(t.Get()[PropHeft]==0&&t.Click({Kind::Apply}).changed==(ChangeMask{1}<<PropHeft),"the switch turns it Off, and Apply saves only it");
+    }
+    {   // Map grab hint (grab_hint.h): On by default, a switch on Interface > Wrist > Map under Buffs and companions, every class, saved alone
+        Check(Defaults()[MapGrabHint]==1&&std::wstring(Definitions[MapGrabHint].section)==L"interactions"&&
+              std::wstring(Definitions[MapGrabHint].key)==L"map_grab_hint"&&Definitions[MapGrabHint].min==0&&Definitions[MapGrabHint].max==1&&
+              Definitions[MapGrabHint].step==1&&HelpText(MapGrabHint)[0]!=0&&MapGrabHint<ChangeMask::Bits&&MapGrabHint==Count-1,
+              "Map grab hint: On by default, [interactions] map_grab_hint Off / On, explained, its own change bit, appended last");
+        const auto* row=content::RowOf(MapGrabHint);const auto* companions=content::RowOf(CompanionCounts);
+        Check(row&&companions&&!row->beside&&row->page==View::Wrist&&row->kind==content::RowKind::Toggle&&std::strcmp(row->label,"Map grab hint")==0&&
+              row->section==companions->section&&row->classes==content::AllClasses&&std::strlen(row->help)<=160,
+              "a switch of its own on Interface > Wrist, in the Map section, every class");
+        {
+            const auto& rows=content::Menu().rows;size_t at=rows.size(),companionsAt=rows.size();
+            for(size_t i=0;i<rows.size();++i){if(rows[i].key==MapGrabHint)at=i;if(rows[i].key==CompanionCounts)companionsAt=i;}
+            Check(companionsAt+1==at,"listed right under Buffs and companions");
+        }
+        for(int c=-1;c<=heroclass::Assassin+1;++c)Check(RowShown(MapGrabHint,Defaults(),{c}),"shown for every class");
+        Model t;Snapshot ready;ready.ready=true;ready.values=Defaults();t.Open(ready);layout::Press(t,{Kind::Set,MapGrabHint,0,0},0);
+        Check(t.Get()[MapGrabHint]==0&&t.Click({Kind::Apply}).changed==(ChangeMask{1}<<MapGrabHint),"the switch turns it Off, and Apply saves only it");
     }
     {   // Loot pick (#257): On by default, a switch on Interface, the right half of Loot name size's row, saved alone
         Check(Defaults()[LootPick]==1&&std::wstring(Definitions[LootPick].section)==L"interactions"&&

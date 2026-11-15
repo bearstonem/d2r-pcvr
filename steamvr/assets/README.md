@@ -62,6 +62,22 @@ Run `interaction-preview.exe <output.png> --hands-check` to preview both hand
 layouts. Runtime hover masks use the same five-sector `WheelCell` geometry as
 the laser hit testing.
 
+## Floating map grab hint
+
+`grab-hint.png` is original transparent artwork made with the built-in OpenAI image tool on
+2026-11-14: a silver controller and hand on a small rusted plate, in eight frames of 96 px
+side by side (768 x 96): idle, the side grip squeezed, the controller sliding right, back.
+Game art was never an input. The images it was made from were all made by the same tool for
+this project: earlier key poses of the controller, and a blank plate edited out of a generated
+army formation menu icon. No screenshot, extracted game artwork or third-party image was used.
+The exact prompts, the plate's included, and how the frames were assembled are in
+[`grab-hint-prompt.txt`](grab-hint-prompt.txt).
+
+It is embedded by `interaction_assets.rc` and decoded once a session with WIC at its own
+768 x 96, then painted premultiplied into the static image's `panelatlas::GrabHint` region
+with the hint's glows (`grab_hint.h`), once as drawn and once mirrored for left-handed play.
+A missing picture leaves the sign out; the glow still shows.
+
 ## Riposte sound
 
 `riposte-impact.wav` (16-bit PCM, 48 kHz stereo, 1.08 s) is the impact played when
