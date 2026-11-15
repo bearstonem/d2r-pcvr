@@ -11,12 +11,12 @@ from pathlib import Path
 RELATIVE_PATH = Path('data/global/ui/layouts/controller/pc/hudmonsterhealthhd.json')
 
 
-def description(name, y):
+def description(name, y, height=120):
     return {
         'type': 'TextBoxWidget', 'name': name,
         'fields': {
             'priority': 10,
-            'rect': {'x': -450, 'y': y, 'width': 900, 'height': 120},
+            'rect': {'x': -450, 'y': y, 'width': 900, 'height': height},
             'truncateWithEllipsis': False,
             'style': {
                 'pointSize': '$SmallFontSize',
@@ -48,9 +48,10 @@ def payload():
                      'type': 'TextBoxWidget', 'name': 'Name',
                      'fields': {'style': {'pointSize': '$SmallFontSize'}},
                  }]},
-                # Start close to the bar; leave three small-font lines before
-                # the game's type/immunity text so wrapped affixes do not overlap.
-                description('Unique', 0),
+                # Keep these native labels directly under TargetAttached.
+                # The StackWidget/fitToText candidate hid them in-game.
+                {'type': 'Widget', 'name': 'PCVRCompactDescriptions'},
+                description('Unique', 0, 240),
                 description('Additional', 124),
             ],
         }],
