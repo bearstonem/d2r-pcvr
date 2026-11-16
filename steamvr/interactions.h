@@ -309,6 +309,7 @@ struct Snapshot {
     Mercenary merc;
     companions::Roster companions;
     effects::Status effects;
+    uint64_t effectsAt=0; // original game-thread sample time
     cooldowns::Board cooldowns;   // the skills the server's use check blocks for a delay (skill_cooldowns.h)
 };
 inline bool HasSummonArmy(const Snapshot& s) {

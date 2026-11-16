@@ -148,6 +148,13 @@ static const GoldenRow Golden[]={
     {"torch.flame",View::Environment,1,content::RowKind::Toggle,"Torch flame",0,0},
     {"torch.spell_hands_pct",View::Environment,1,content::RowKind::Slider,"Spell hand light",0,1},   // a Sorceress's (2026-11-06)
     {"light.radius_boost_pct",View::Environment,1,content::RowKind::Slider,"Light Radius boost",0,0},   // #440
+    {"render.ice_armor_visual",View::Effects,0,content::RowKind::Choice,"Ice Armor",3,0},
+    {"render.cyclone_armor_visual",View::Effects,0,content::RowKind::Choice,"Cyclone Armor",2,0},
+    {"render.bone_armor_visual",View::Effects,0,content::RowKind::Choice,"Bone Armor",2,0},
+    {"render.player_aura_visual",View::Effects,1,content::RowKind::Choice,"Your auras",2,0},
+    {"render.summon_aura_visual",View::Effects,1,content::RowKind::Choice,"Friendly auras",2,0},
+    {"render.player_shout_visual",View::Effects,2,content::RowKind::Choice,"Your shout buffs",2,0},
+    {"render.summon_shout_visual",View::Effects,2,content::RowKind::Choice,"Friendly shout buffs",2,0},
 };
 
 static bool PopoverLayer(L::Role r){return r==L::Role::PopoverDim||r==L::Role::Popover||r==L::Role::PopoverTitle||r==L::Role::PopoverOption||r==L::Role::PopoverHint||r==L::Role::ColorDot||r==L::Role::PopoverLabel||r==L::Role::PopoverSwitch;}
@@ -242,7 +249,7 @@ int main(int argc,char** argv){
     }
     // ---- the map: no row lost, none left to More, the names and the owner's pairs ----
     {
-        Check(tables.rowCount==116,"116 settings on the menu, each one row");   // + Props have weight (2026-11-12)   // + Weapons hit walls (2026-11-12)   // + Sticks stay right-handed (2026-11-11)   // + Weapons collide (2026-11-11)   // - Dominant hand (2026-11-10: Left-handed is the one switch)   // + Left-handed (#307)   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424), Click to drink (#425), Skill cooldowns (2026-11-09), + Summon range (#426), T cross to calibrate (#423), Heads turn to you (2026-11-09), Echo (world sound, 2026-11-09), + Monsters stagger, Heavy hits knock back (hit reactions, 2026-11-09), + Hit feel by target, Felt heartbeat (richer haptics)
+        Check(tables.rowCount==123,"123 settings on the menu, including seven Effects rows");   // + Props have weight (2026-11-12)   // + Weapons hit walls (2026-11-12)   // + Sticks stay right-handed (2026-11-11)   // + Weapons collide (2026-11-11)   // - Dominant hand (2026-11-10: Left-handed is the one switch)   // + Left-handed (#307)   // 94 in #419, + Melee reach, Walk direction, Room follows you (2026-11-08), Light Radius boost (#440), + Weapon heft, Bow bash (#443), + Aim with your eyes (2026-11-08), Merc potion throw autoaim (#424), Click to drink (#425), Skill cooldowns (2026-11-09), + Summon range (#426), T cross to calibrate (#423), Heads turn to you (2026-11-09), Echo (world sound, 2026-11-09), + Monsters stagger, Heavy hits knock back (hit reactions, 2026-11-09), + Hit feel by target, Felt heartbeat (richer haptics)
         for(size_t i=0;i<tables.rowCount;++i)Check(!tables.rows[i].fallback&&tables.rows[i].page!=View::More,std::string("every setting has its page: ")+tables.rows[i].label);
         Check(content::Menu().report.empty(),"the tidy report is empty");
         struct Want {content::Group group;const char* name;std::vector<const char*> pages;};
@@ -251,7 +258,7 @@ int main(int argc,char** argv){
             {content::Group::Comfort,"Comfort",{"Moving","Body"}},
             {content::Group::Controls,"Controls",{"Hands","Vibration"}},
             {content::Group::Interface,"Interface",{"Wrist","Menus","Labels","Outlines","Warnings"}},
-            {content::Group::Graphics,"Graphics",{"Performance","Frames","Environment"}}};
+            {content::Group::Graphics,"Graphics",{"Performance","Frames","Environment","Effects"}}};
         Check(std::size(content::GroupTable)==rail.size(),"five groups");
         for(size_t g=0;g<rail.size()&&g<std::size(content::GroupTable);++g){
             Check(content::GroupTable[g].id==rail[g].group&&std::string(content::GroupTable[g].name)==rail[g].name,std::string("group in order: ")+rail[g].name);
@@ -275,7 +282,7 @@ int main(int argc,char** argv){
     }
     // ---- golden: the merged rows equal the table they replaced ----
     {
-        Check(tables.rowCount==std::size(Golden),"as many rows as before");
+        Check(tables.rowCount==std::size(Golden),"every original and Effects row accounted for");
         for(size_t i=0;i<std::size(Golden)&&i<tables.rowCount;++i){
             const auto& g=Golden[i];const auto& r=tables.rows[i];
             const std::string where=std::string("golden row ")+g.id;
@@ -791,6 +798,11 @@ int main(int argc,char** argv){
                 for(int i=0;i<rows.count;++i){
                     const auto* r=tables.Row(rows.keys[size_t(i)]);
                     {const auto control=L::ControlOf(*r,x.Get(),c);if(control!=L::Control::Popover&&control!=L::Control::Color)continue;}
+                    if(!L::Editable(x,Key(r->key))) {
+                        L::Press(x,{Kind::Popover,r->key},0);
+                        Check(L::Build(x,c,{}).popover.w==0,"unavailable effect controls cannot open a choice popup");
+                        continue;
+                    }
                     L::Press(x,{Kind::Popover,r->key},0);
                     L::LayoutInput pin;pin.nowMs=1000;
                     const auto pl=L::Build(x,c,pin);CheckLayout(pl,std::string("popover ")+r->label+" "+ViewName(View(view)));++built;

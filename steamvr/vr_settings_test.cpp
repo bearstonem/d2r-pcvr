@@ -1057,8 +1057,8 @@ int main(int argc,char** argv){
     {   // Props have weight (prop_heft.h): On by default, a switch under Knock over small props, shown while it is on, saved alone
         Check(Defaults()[PropHeft]==1&&std::wstring(Definitions[PropHeft].section)==L"interactions"&&
               std::wstring(Definitions[PropHeft].key)==L"prop_heft"&&Definitions[PropHeft].min==0&&Definitions[PropHeft].max==1&&
-              Definitions[PropHeft].step==1&&HelpText(PropHeft)[0]!=0&&PropHeft<ChangeMask::Bits&&PropHeft==Count-1,
-              "Props have weight: On by default, [interactions] prop_heft Off / On, explained, its own change bit, appended last");
+              Definitions[PropHeft].step==1&&HelpText(PropHeft)[0]!=0&&PropHeft<ChangeMask::Bits&&PropHeft==PlayerAuraVisual-1,
+              "Props have weight: On by default, [interactions] prop_heft Off / On, explained, its own change bit, legacy key order preserved");
         const auto* row=content::RowOf(PropHeft);const auto* props=content::RowOf(PropPhysics);
         Check(row&&props&&!row->beside&&row->page==View::Physics&&row->kind==content::RowKind::Toggle&&std::strcmp(row->label,"Props have weight")==0&&
               row->section==props->section&&row->classes==content::AllClasses&&std::strlen(row->help)<=160,
@@ -1128,6 +1128,16 @@ int main(int argc,char** argv){
         Check(m.Get()[SummonRangeMultiplier]==1.25f,"presets preserve summon range");
         Check(Normalize(SummonRangeMultiplier,NAN)==1&&Normalize(SummonRangeMultiplier,0)==1&&Normalize(SummonRangeMultiplier,6)==5,
               "shared multiplier normalizes invalid and out-of-range choices");
+    }
+    {
+        const auto defaults=Defaults();
+        Check(defaults[IceArmorVisual]==2&&defaults[CycloneArmorVisual]==1&&defaults[BoneArmorVisual]==1,"effect defaults retain ice, wind and bones");
+        for(int mode:{0,1,2})Check(Normalize(IceArmorVisual,float(mode))==mode,"three ice visual modes remain distinct");
+        for(auto key:{PlayerAuraVisual,SummonAuraVisual,PlayerShoutVisual,SummonShoutVisual}) {
+            Check(RowEnabled(defaults,key)&&Normalize(key,0)==0&&defaults[key]==1,"aura controls default visible and allow explicit Off");
+        }
+        int rows=0;for(const auto& row:content::Menu().rows)if(row.page==View::Effects)++rows;
+        Check(rows==7,"Effects contains three armor, two aura and two shout controls");
     }
     PrintReport();
     std::puts("VR settings draft, persistence requests, conflicts, row rules and input-gating tests passed");

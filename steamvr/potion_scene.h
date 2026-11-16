@@ -2,12 +2,13 @@
 #include "potion_pose.h"
 #include "interactions.h"
 #include "dropped_bottles.h"
+#include "ice_shard_model.h"
 namespace framevr::potions {
 // scale: the model's size multiplier (0 = as cached, 1). occA/occB/occR: a
 // capsule (room space) that hides the model's pixels behind it (occR 0: none).
 // width: the size across the model's X and Z (0 = scale).
 struct Instance {interaction::Pose pose;uint32_t code=0;bool empty=false,highlight=false;float scale=0;
-    math::Vec occA{},occB{};float occR=0;float width=0;};
+    math::Vec occA{},occB{};float occR=0;float width=0;bool mirrorX=false;};
 // Four belt bottles, one held, one thrown, the arrow, a trap, a throwing potion
 // in flight, the emptied ones let go of; Bone Armor's forearm grafts (three per
 // arm) and up to six knocked off and falling (bone_graft.h).
@@ -23,6 +24,10 @@ inline bool AddBone(Scene& s,interaction::Pose pose,int piece,float length,float
     const bool arm=std::isfinite(armA.x+armA.y+armA.z+armB.x+armB.y+armB.z+armR)&&armR>0&&armR<.2f;
     if(!(std::isfinite(width)&&width>0&&width<1.f))width=0;
     s.items[s.count++]={pose,BoneCode(piece),false,false,length,armA,armB,arm?armR:0,width};return true;
+}
+inline bool AddIce(Scene& s,interaction::Pose pose,int piece,float length,float width=0,math::Vec armA={},math::Vec armB={},float armR=0,bool left=false) {
+    if(!AddBone(s,pose,piece,length,width,armA,armB,armR))return false;
+    s.items[s.count-1].code=ice::Code(piece);s.items[s.count-1].mirrorX=left;return true;
 }
 // The game's arrow (the cache's arw.pvr), along its pose's +Y, placed by its middle.
 inline constexpr uint32_t ArrowCode=interaction::Code('a','r','w');

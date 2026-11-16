@@ -233,6 +233,7 @@ void ConfigureHeartbeat(float volume,float bpmMin,float bpmMax,float fadeSeconds
 // where a piece's middle sits (0 the wrist .. 1 the elbow) and its thickness
 // (x its length). Bad values: the defaults.
 void ConfigureBoneGraft(bool on,float size,float out,float spread,float along,float width);
+void ConfigureFrozenArmorGraft(bool on);
 // [gameplay] guard_break_volume (x the game's Master x Combat volume, 0 = off) and an
 // optional 16-bit PCM WAV (empty: the built-in bone snap) played once as the guard breaks.
 void ConfigureGuardBreakSound(float volume,const wchar_t* file);
@@ -298,6 +299,7 @@ bool TurnReady();
 bool TurnDepthWanted();
 // Both eyes' last images have their depth and place kept: walking can go by turns.
 bool TurnDepthReady();
+bool IceArmorDepthWanted(); // Lease from a live Sorceress ice armor graft.
 // How the eyes not drawn went since the last call: moved with depth, or turned only.
 // By turns, the eye not drawn: its own image moved with its depth, or turned
 // only; and of those, how many had the drawn eye's picture laid over them.

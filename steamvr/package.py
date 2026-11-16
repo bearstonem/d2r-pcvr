@@ -54,6 +54,7 @@ def main():
               'steamvr/prepare_arcane_sky.py', 'steamvr/prepare_monster_immunity.py', 'steamvr/prepare_sewer_backdrop.py', 'steamvr/prepare_kurast_dock.py',
               'steamvr/prepare_game_ceiling.py', 'steamvr/granny_write.py', 'steamvr/prepare_campfire_sky.py',
               'steamvr/prepare_props.py', 'steamvr/prepare_leather.py']
+    paths += ['steamvr/assets/ice-armor/' + name for name in ('ic1.pvr', 'ic2.pvr', 'ic3.pvr', 'README.md')]
     files = {path: ROOT / path for path in paths}
     # every shader file: D2R_DepthFog.fx and each D2R_*.fxh it includes, by pattern, so a new header is never left out
     for folder, pattern in [('reshade', 'D2R_*.fx'), ('reshade', 'D2R_*.fxh'), ('reshade/sky', '*.png'), ('steamvr/licenses', '*.txt')]:

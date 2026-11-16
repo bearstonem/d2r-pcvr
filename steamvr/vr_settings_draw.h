@@ -126,6 +126,7 @@ enum class Icon : uint8_t {
     // controls and states
     Plus, Minus, Chevron, ChevronLeft, ChevronUp, ChevronDown, Check, Close, Reset, Undo, Default, Feel,
     Padlock, Warning, Info, Changed, Star, StarOutline, Search, SoundOn, SoundOff,
+    Effects,
     Count
 };
 

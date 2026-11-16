@@ -137,7 +137,7 @@ constexpr const char* IconKeys[]={"",
     "presets","body","combat","aim","targets","shield","wrist","interface","survival","world","haptics","performance","controls","notes",
     "comfort","classic","fullvr","fast",
     "plus","minus","chevron","chevronLeft","chevronUp","chevronDown","check","close","reset","undo","default","feel",
-    "padlock","warning","info","changed","star","starOutline","search","soundOn","soundOff"};
+    "padlock","warning","info","changed","star","starOutline","search","soundOn","soundOff","effects"};
 static_assert(sizeof IconKeys/sizeof IconKeys[0]==size_t(Icon::Count),"one icons-v2 key per Icon");
 // Ornaments (original art): the cartouche in the top frame
 // (340 x 22) and the band's sigil (56 x 56).

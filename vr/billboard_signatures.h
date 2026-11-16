@@ -1,6 +1,12 @@
 #pragma once
 #include <cstdint>
 namespace billboards::signatures {
+// Registered as effect.isRenderingEnabled_pCtxI; bool32 output, args+8 context.
+inline constexpr uint64_t RenderEnabledRva=0xbf6850;
+inline constexpr uint8_t RenderEnabledSig[]={0x48,0x83,0xec,0x38,0x4c,0x8b,0x42,0x08,0x49,0x8b,0x40,0x10,0x4c,0x8b,0x50,0x48};
+inline constexpr uint64_t RenderEnabledInstanceRva=0xbf6860,RenderEnabledIndicesRva=0xbf6884;
+inline constexpr uint8_t RenderEnabledInstanceSig[]={0x41,0x8b,0x40,0x28};
+inline constexpr uint8_t RenderEnabledIndicesSig[]={0x41,0x0f,0x10,0x40,0x18};
 // D2R 3.3.93787, checked against native unwind entries, shared strided batch
 // layout, and the view-position loads in both rotated and unrotated paths.
 inline constexpr uint64_t ScreenRva=0x173c9b0;

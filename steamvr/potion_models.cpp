@@ -20,7 +20,7 @@ constexpr unsigned Count=15;   // the potions, all required; then the extras, ea
 constexpr const char* Extras[]={"arw","tfb","tsw","tbs","tst","twk","gps","gpm","gpl","ops","opm","opl","bn1","bn2","bn3"};
 constexpr float ExtraExtent[]={.45f,.1f,.1f,.1f,.1f,.1f,.2f,.2f,.2f,.2f,.2f,.2f,.75f,.75f,.75f};
 constexpr unsigned ExtraCount=15,TossExtras=5,FirstBone=12;
-struct Vertex {float p[3],n[3],uv[2],glass;};
+using Vertex=ice::Vertex;
 struct Asset {std::vector<Vertex> vertices;std::vector<uint32_t> indices;unsigned w,h,format;std::vector<std::vector<uint8_t>> mips;};
 void Require(bool condition,const char* error){if(!condition)throw std::runtime_error(error);}
 void Check(HRESULT hr,const char* error){Require(SUCCEEDED(hr),error);}
@@ -69,12 +69,12 @@ ComPtr<ID3D12Resource> Buffer(ID3D12Device* device,const void* bytes,size_t size
 struct Models::Impl {
     ComPtr<ID3D12Device> device;
     ComPtr<ID3D12RootSignature> root;
-    ComPtr<ID3D12PipelineState> pipeline;
+    ComPtr<ID3D12PipelineState> pipeline,icePipeline;
     ComPtr<ID3D12DescriptorHeap> srv,rtv,dsv;
     ComPtr<ID3D12Resource> depth[2];
     struct Mesh {ComPtr<ID3D12Resource> vertices,indices,texture;D3D12_VERTEX_BUFFER_VIEW vb{};D3D12_INDEX_BUFFER_VIEW ib{};uint32_t code=0,count=0;float radius=0;};
-    Mesh meshes[Count+ExtraCount];unsigned meshCount=Count;   // the extras loaded follow the potions
-    bool arrow=false;unsigned tosses=0,bones=0;
+    Mesh meshes[Count+ExtraCount+ice::Count];unsigned meshCount=Count;
+    bool arrow=false;unsigned tosses=0,bones=0,ice=0;
     uint32_t width=0,height=0,srvStride=0,rtvStride=0,dsvStride=0;
     DXGI_FORMAT format=DXGI_FORMAT_UNKNOWN;bool encode=false;
 };
@@ -84,6 +84,7 @@ bool Models::Ready() const {return impl!=nullptr;}
 bool Models::HasArrow() const {return impl&&impl->arrow;}
 unsigned Models::Tosses() const {return impl?impl->tosses:0;}
 unsigned Models::Bones() const {return impl?impl->bones:0;}
+unsigned Models::IcePieces() const {return impl?impl->ice:0;}
 float Models::Radius(uint32_t code) const {
     if(!impl)return 0;
     code=(code&0xffffff)|(uint32_t(' ')<<24);
@@ -107,6 +108,18 @@ bool Models::Initialize(ID3D12Device* device,ID3D12CommandQueue* queue,DXGI_FORM
             try{assets.push_back(Load(folder/(std::string(Extras[i])+".pvr"),ExtraExtent[i]));codes.push_back(code(Extras[i]));if(!i)p->arrow=true;else if(i<=TossExtras)++p->tosses;else if(i>=FirstBone)++p->bones;}
             catch(const std::exception& e){if(!i)arrowNote=e.what();}
         }
+        // Authored ice assets are optional; never substitute Necromancer bones.
+        const auto firstIce=assets.size();
+        try {
+            for(unsigned i=0;i<ice::Count;++i){
+                assets.push_back(Load(folder/("ic"+std::to_string(i+1)+".pvr"),.75f));
+                codes.push_back(ice::Code(int(i)));
+            }
+            p->ice=ice::Count;
+        } catch(const std::exception& e){
+            assets.resize(firstIce);codes.resize(firstIce);
+            if(log)log(e.what());
+        }
         p->meshCount=unsigned(assets.size());
         struct Lib {HMODULE h=LoadLibraryW(L"d3dcompiler_47.dll");~Lib(){if(h)FreeLibrary(h);}} compiler;
         auto compile=compiler.h?reinterpret_cast<decltype(&D3DCompile)>(GetProcAddress(compiler.h,"D3DCompile")):nullptr;
@@ -114,12 +127,12 @@ bool Models::Initialize(ID3D12Device* device,ID3D12CommandQueue* queue,DXGI_FORM
         auto serialize=d12?reinterpret_cast<decltype(&D3D12SerializeRootSignature)>(GetProcAddress(d12,"D3D12SerializeRootSignature")):nullptr;
         Require(compile&&serialize,"potion shader compiler unavailable");
         constexpr char source[]=R"(
-cbuffer Scene:register(b0) {row_major float4x4 projection;float4 rotation;float4 translation;float4 light;float4 options;float4 occA;float4 occB;};
-Texture2D<float4> albedo:register(t0);SamplerState texSampler:register(s0);
+cbuffer Scene:register(b0) {row_major float4x4 projection;float4 rotation;float4 translation;float4 light;float4 options;float4 occA;float4 occB;float4 depthRotation;float4 depthTranslation;float4 depthFov;float4 depthOptions;};
+Texture2D<float4> albedo:register(t0);Texture2D<float> sceneDepth:register(t1);SamplerState texSampler:register(s0);
 float3 Rotate(float3 v){return v+2*cross(rotation.xyz,cross(rotation.xyz,v)+rotation.w*v);}
 struct In {float3 p:POSITION;float3 n:NORMAL;float2 uv:TEXCOORD0;float glass:TEXCOORD1;};
 struct Out {float4 p:SV_Position;float3 view:TEXCOORD0;float3 n:TEXCOORD1;float2 uv:TEXCOORD2;float glass:TEXCOORD3;};
-Out VS(In v){Out o;float s=translation.w>0?translation.w:1,w=occB.w>0?occB.w:s;o.view=Rotate(v.p*float3(w,s,w))+translation.xyz;float3 m=v.n/float3(w,s,w);v.n=m*rsqrt(max(dot(m,m),1e-12));o.p=mul(float4(o.view,1),projection);o.n=Rotate(v.n);o.uv=v.uv;o.glass=v.glass;return o;}
+Out VS(In v){Out o;if(light.w<0){v.p.x=-v.p.x;v.n.x=-v.n.x;}float s=translation.w>0?translation.w:1,w=occB.w>0?occB.w:s;o.view=Rotate(v.p*float3(w,s,w))+translation.xyz;float3 m=v.n/float3(w,s,w);v.n=m*rsqrt(max(dot(m,m),1e-12));o.p=mul(float4(o.view,1),projection);o.n=Rotate(v.n);o.uv=v.uv;o.glass=v.glass;return o;}
 // The first hit of a ray from the eye (view space origin) with a capsule, -1 for none.
 float Capsule(float3 rd,float3 pa,float3 pb,float r){
     float3 ba=pb-pa,oa=-pa;float baba=dot(ba,ba),bard=dot(ba,rd),baoa=dot(ba,oa),rdoa=dot(rd,oa),oaoa=dot(oa,oa);
@@ -129,26 +142,52 @@ float Capsule(float3 rd,float3 pa,float3 pb,float r){
     return -1;
 }
 float4 PS(Out v):SV_Target {
+    if(options.w>0&&depthOptions.z>0){
+        float3 p=v.view+2*cross(depthRotation.xyz,cross(depthRotation.xyz,v.view)+depthRotation.w*v.view)+depthTranslation.xyz;
+        float z=-p.z;
+        if(z>0){
+            float2 uv=float2((p.x/z-depthFov.x)/(depthFov.y-depthFov.x),(depthFov.w-p.y/z)/(depthFov.w-depthFov.z));
+            if(all(uv>=0)&&all(uv<=1)){
+                uint w,h;sceneDepth.GetDimensions(w,h);
+                uint2 xy=min(uint2(uv*depthOptions.xy*float2(w,h)),uint2(w-1,h-1));
+                float d=sceneDepth.Load(int3(xy,0));
+                // Reverse-Z: zero is sky/no surface. Use the native near plane,
+                // not this renderer's 2 cm plane; tolerate 1 cm of pose/jitter.
+                if(d>0&&d<=1&&depthOptions.z/d+depthOptions.w<z)discard;
+            }
+        }
+    }
     // A piece behind its forearm (occA/occB: wrist, elbow; occA.w the radius) is not drawn there.
     if(occA.w>0){float d=length(v.view);float t=Capsule(v.view/d,occA.xyz,occB.xyz,occA.w);if(t>0&&t<d-.002)discard;}
     float3 n=normalize(v.n),eye=normalize(-v.view);
-    float3 base=albedo.Sample(texSampler,v.uv).rgb;
+    float4 texel=albedo.Sample(texSampler,v.uv);float3 base=texel.rgb;
     if(options.x>0)base=lerp(base,dot(base,float3(.2126,.7152,.0722))*.28,v.glass>.5?.85:.2);
     float diffuse=saturate(dot(n,light.xyz));
     float3 c=base*(.38+.62*diffuse)+pow(saturate(dot(n,normalize(light.xyz+eye))),32)*lerp(.12,.38,v.glass);
     c+=options.y*float3(.14,.08,.02)*pow(1-saturate(dot(n,eye)),2);
+    float iceAlpha=texel.a;
+    if(options.w>0){
+        // Convex crystals: keep the visible facets only, avoiding accumulated
+        // alpha from rear faces and preserving clear interiors.
+        if(dot(n,eye)<=0)discard;
+        float rim=pow(1-saturate(dot(n,eye)),3);
+        c=base*(.62+.30*abs(dot(n,light.xyz)))+float3(.12,.16,.18)*rim;
+        c+=float3(.18,.20,.22)*pow(saturate(dot(n,normalize(light.xyz+eye))),48);
+        iceAlpha=saturate(texel.a*(.75+rim*.65));
+    }
     if(options.z>0)c=lerp(1.055*pow(max(c,0),1/2.4)-.055,c*12.92,c<=.0031308);
-    return float4(c,1);
+    return float4(c,options.w>0?iceAlpha:1);
 })";
         ComPtr<ID3DBlob> vs,ps,errors,signature;
         Check(compile(source,sizeof(source)-1,"potion-models",nullptr,nullptr,"VS","vs_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&vs,&errors),"potion vertex shader failed");
         Check(compile(source,sizeof(source)-1,"potion-models",nullptr,nullptr,"PS","ps_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&ps,&errors),"potion pixel shader failed");
-        D3D12_DESCRIPTOR_RANGE range{D3D12_DESCRIPTOR_RANGE_TYPE_SRV,1,0,0,0};
-        D3D12_ROOT_PARAMETER params[2]{};params[0].ParameterType=D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;params[0].Constants={0,0,40};params[0].ShaderVisibility=D3D12_SHADER_VISIBILITY_ALL;
+        D3D12_DESCRIPTOR_RANGE range{D3D12_DESCRIPTOR_RANGE_TYPE_SRV,1,0,0,0},depthRange{D3D12_DESCRIPTOR_RANGE_TYPE_SRV,1,1,0,0};
+        D3D12_ROOT_PARAMETER params[3]{};params[0].ParameterType=D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;params[0].Constants={0,0,56};params[0].ShaderVisibility=D3D12_SHADER_VISIBILITY_ALL;
         params[1].ParameterType=D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;params[1].DescriptorTable={1,&range};params[1].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
+        params[2].ParameterType=D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;params[2].DescriptorTable={1,&depthRange};params[2].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
         D3D12_STATIC_SAMPLER_DESC sampler{};sampler.Filter=D3D12_FILTER_ANISOTROPIC;sampler.MaxAnisotropy=4;sampler.AddressU=sampler.AddressV=sampler.AddressW=D3D12_TEXTURE_ADDRESS_MODE_WRAP;
         sampler.MaxLOD=D3D12_FLOAT32_MAX;sampler.ComparisonFunc=D3D12_COMPARISON_FUNC_ALWAYS;sampler.ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
-        D3D12_ROOT_SIGNATURE_DESC root{2,params,1,&sampler,D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT};
+        D3D12_ROOT_SIGNATURE_DESC root{3,params,1,&sampler,D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT};
         Check(serialize(&root,D3D_ROOT_SIGNATURE_VERSION_1,&signature,&errors),"potion root serialization failed");
         Check(device->CreateRootSignature(0,signature->GetBufferPointer(),signature->GetBufferSize(),IID_PPV_ARGS(&p->root)),"potion root creation failed");
         const D3D12_INPUT_ELEMENT_DESC elements[]={{"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,0,D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,0},
@@ -161,7 +200,14 @@ float4 PS(Out v):SV_Target {
         state.DepthStencilState.DepthEnable=TRUE;state.DepthStencilState.DepthWriteMask=D3D12_DEPTH_WRITE_MASK_ALL;state.DepthStencilState.DepthFunc=D3D12_COMPARISON_FUNC_GREATER_EQUAL;
         state.PrimitiveTopologyType=D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;state.NumRenderTargets=1;state.RTVFormats[0]=format;state.DSVFormat=DXGI_FORMAT_D32_FLOAT;state.SampleDesc.Count=1;
         Check(device->CreateGraphicsPipelineState(&state,IID_PPV_ARGS(&p->pipeline)),"potion pipeline creation failed");
-        D3D12_DESCRIPTOR_HEAP_DESC heap{};heap.Type=D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;heap.NumDescriptors=Count+ExtraCount;heap.Flags=D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+        // Ice alone blends after opaque items and does not write depth/target alpha.
+        auto& blend=state.BlendState.RenderTarget[0];blend.BlendEnable=TRUE;
+        blend.SrcBlend=D3D12_BLEND_SRC_ALPHA;blend.DestBlend=D3D12_BLEND_INV_SRC_ALPHA;blend.BlendOp=D3D12_BLEND_OP_ADD;
+        blend.SrcBlendAlpha=D3D12_BLEND_ZERO;blend.DestBlendAlpha=D3D12_BLEND_ONE;blend.BlendOpAlpha=D3D12_BLEND_OP_ADD;
+        blend.RenderTargetWriteMask=D3D12_COLOR_WRITE_ENABLE_RED|D3D12_COLOR_WRITE_ENABLE_GREEN|D3D12_COLOR_WRITE_ENABLE_BLUE;
+        state.DepthStencilState.DepthWriteMask=D3D12_DEPTH_WRITE_MASK_ZERO;
+        Check(device->CreateGraphicsPipelineState(&state,IID_PPV_ARGS(&p->icePipeline)),"ice plate pipeline creation failed");
+        D3D12_DESCRIPTOR_HEAP_DESC heap{};heap.Type=D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;heap.NumDescriptors=Count+ExtraCount+ice::Count+2;heap.Flags=D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
         Check(device->CreateDescriptorHeap(&heap,IID_PPV_ARGS(&p->srv)),"potion texture descriptors failed");p->srvStride=device->GetDescriptorHandleIncrementSize(heap.Type);
         heap.NumDescriptors=2;heap.Flags=D3D12_DESCRIPTOR_HEAP_FLAG_NONE;heap.Type=D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
         Check(device->CreateDescriptorHeap(&heap,IID_PPV_ARGS(&p->rtv)),"potion target descriptors failed");p->rtvStride=device->GetDescriptorHandleIncrementSize(heap.Type);
@@ -216,12 +262,13 @@ float4 PS(Out v):SV_Target {
             text+=HasArrow()?"; the game's arrow model ready for the bow":"; arrow model unavailable ("+arrowNote+"), the bow keeps its draw guide";
             text+="; "+std::to_string(Tosses())+" of 5 thrown trap models";
             text+="; "+std::to_string(Bones())+" of 3 Bone Armor pieces";
+            text+="; 3 original translucent blue ice plates ready";
             log(text.c_str());
         }
         return true;
     } catch(const std::exception& e) {if(log){std::string text="Frame potions: ";text+=e.what();text+="; retaining icon fallback";log(text.c_str());}return false;}
 }
-bool Models::Render(ID3D12GraphicsCommandList* list,ID3D12Resource* target,unsigned eye,interaction::Pose view,math::Fov f,const Scene& scene) {
+bool Models::Render(ID3D12GraphicsCommandList* list,ID3D12Resource* target,unsigned eye,interaction::Pose view,math::Fov f,const Scene& scene,const SceneDepth& depth) {
     if(!impl||eye>1||!scene.count||scene.count>scene.items.size()||!interaction::Valid(view))return false;
     auto& p=*impl;const auto desc=target->GetDesc();
     if(desc.Width!=p.width||desc.Height!=p.height||desc.SampleDesc.Count!=1||!RenderTargetCompatible(desc.Format,p.format))return false;
@@ -232,10 +279,26 @@ bool Models::Render(ID3D12GraphicsCommandList* list,ID3D12Resource* target,unsig
     const D3D12_VIEWPORT vp{0,0,float(p.width),float(p.height),0,1};const D3D12_RECT rect{0,0,LONG(p.width),LONG(p.height)};
     list->RSSetViewports(1,&vp);list->RSSetScissorRects(1,&rect);list->SetGraphicsRootSignature(p.root.Get());list->SetPipelineState(p.pipeline.Get());
     ID3D12DescriptorHeap* heaps[]={p.srv.Get()};list->SetDescriptorHeaps(1,heaps);list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    for(unsigned i=0;i<scene.count;++i) {
-        const auto& item=scene.items[i];if(!interaction::Valid(item.pose))continue;
-        const auto code=(item.code&0xffffff)|(uint32_t(' ')<<24);unsigned mesh=0;while(mesh<p.meshCount&&p.meshes[mesh].code!=code)++mesh;if(mesh==p.meshCount)continue;
-        auto& m=p.meshes[mesh];float constants[40]{};math::Projection(f.left,f.right,f.down,f.up,.02f,constants);
+    // One depth descriptor per eye, updated only after the caller's copy fence.
+    const bool depthFormat=depth.format==DXGI_FORMAT_R32_FLOAT||depth.format==DXGI_FORMAT_R16_UNORM||
+        depth.format==DXGI_FORMAT_R24_UNORM_X8_TYPELESS||depth.format==DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS;
+    bool useDepth=depth.resource&&depthFormat&&interaction::Valid(depth.view)&&
+        std::isfinite(depth.nearMetres)&&depth.nearMetres>0&&depth.nearMetres<1&&
+        std::isfinite(depth.scale[0]+depth.scale[1])&&depth.scale[0]>0&&depth.scale[0]<=1&&depth.scale[1]>0&&depth.scale[1]<=1&&
+        std::isfinite(depth.fov.left+depth.fov.right+depth.fov.down+depth.fov.up)&&
+        depth.fov.left<depth.fov.right&&depth.fov.down<depth.fov.up;
+    if(useDepth){const auto d=depth.resource->GetDesc();useDepth=d.Dimension==D3D12_RESOURCE_DIMENSION_TEXTURE2D&&d.SampleDesc.Count==1&&d.DepthOrArraySize==1;}
+    auto depthCpu=p.srv->GetCPUDescriptorHandleForHeapStart();depthCpu.ptr+=(Count+ExtraCount+ice::Count+eye)*p.srvStride;
+    D3D12_SHADER_RESOURCE_VIEW_DESC depthView{};depthView.Format=useDepth?depth.format:DXGI_FORMAT_R32_FLOAT;
+    depthView.ViewDimension=D3D12_SRV_DIMENSION_TEXTURE2D;depthView.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;depthView.Texture2D.MipLevels=1;
+    p.device->CreateShaderResourceView(useDepth?depth.resource:nullptr,&depthView,depthCpu);
+    auto depthGpu=p.srv->GetGPUDescriptorHandleForHeapStart();depthGpu.ptr+=(Count+ExtraCount+ice::Count+eye)*p.srvStride;
+    list->SetGraphicsRootDescriptorTable(2,depthGpu);
+    auto draw=[&](unsigned i) {
+        const auto& item=scene.items[i];if(!interaction::Valid(item.pose))return;
+        const auto code=(item.code&0xffffff)|(uint32_t(' ')<<24);unsigned mesh=0;while(mesh<p.meshCount&&p.meshes[mesh].code!=code)++mesh;if(mesh==p.meshCount)return;
+        const bool icy=ice::IsCode(code);list->SetPipelineState(icy?p.icePipeline.Get():p.pipeline.Get());
+        auto& m=p.meshes[mesh];float constants[56]{};math::Projection(f.left,f.right,f.down,f.up,.02f,constants);
         const auto inverse=math::Conjugate(view.q),rotation=math::Multiply(inverse,item.pose.q);
         const auto translation=math::Rotate(inverse,item.pose.p-view.p),light=math::Rotate(inverse,math::Normalized({-.4f,.8f,.3f}));
         constants[16]=rotation.x;constants[17]=rotation.y;constants[18]=rotation.z;constants[19]=rotation.w;
@@ -243,15 +306,31 @@ bool Models::Render(ID3D12GraphicsCommandList* list,ID3D12Resource* target,unsig
         constants[23]=item.scale>0&&item.scale<=4?item.scale:0;   // the shader's size multiplier (0 = 1)
         constants[24]=light.x;constants[25]=light.y;constants[26]=light.z;
         constants[28]=item.empty?1:0;constants[29]=item.highlight?1:0;constants[30]=p.encode?1:0;
+        constants[31]=icy?1:0;constants[27]=icy&&item.mirrorX?-1:0;
+        if(icy&&useDepth){
+            const auto inverseDepth=math::Conjugate(depth.view.q);
+            const auto dq=math::Multiply(inverseDepth,view.q);const auto dt=math::Rotate(inverseDepth,view.p-depth.view.p);
+            constants[40]=dq.x;constants[41]=dq.y;constants[42]=dq.z;constants[43]=dq.w;
+            constants[44]=dt.x;constants[45]=dt.y;constants[46]=dt.z;
+            constants[48]=std::tan(depth.fov.left);constants[49]=std::tan(depth.fov.right);
+            constants[50]=std::tan(depth.fov.down);constants[51]=std::tan(depth.fov.up);
+            constants[52]=depth.scale[0];constants[53]=depth.scale[1];constants[54]=depth.nearMetres;constants[55]=.01f;
+        }
         if(item.occR>0) {   // the forearm capsule in view space (the shader hides pixels behind it)
             const auto a=math::Rotate(inverse,item.occA-view.p),b=math::Rotate(inverse,item.occB-view.p);
             constants[32]=a.x;constants[33]=a.y;constants[34]=a.z;constants[35]=item.occR;
             constants[36]=b.x;constants[37]=b.y;constants[38]=b.z;
         }
         constants[39]=item.width>0&&item.width<=4?item.width:0;   // the size across X and Z (0 = the scale)
-        list->SetGraphicsRoot32BitConstants(0,40,constants,0);auto srv=p.srv->GetGPUDescriptorHandleForHeapStart();srv.ptr+=mesh*p.srvStride;list->SetGraphicsRootDescriptorTable(1,srv);
+        list->SetGraphicsRoot32BitConstants(0,56,constants,0);auto srv=p.srv->GetGPUDescriptorHandleForHeapStart();srv.ptr+=mesh*p.srvStride;list->SetGraphicsRootDescriptorTable(1,srv);
         list->IASetVertexBuffers(0,1,&m.vb);list->IASetIndexBuffer(&m.ib);list->DrawIndexedInstanced(m.count,1,0,0,0);
-    }
+    };
+    std::array<unsigned,9+bottles::MaxBottles+BoneItems> transparent{};unsigned n=0;
+    for(unsigned i=0;i<scene.count;++i)if(ice::IsCode(scene.items[i].code))transparent[n++]=i;else draw(i);
+    const auto inverse=math::Conjugate(view.q);
+    std::sort(transparent.begin(),transparent.begin()+n,[&](unsigned a,unsigned b){
+        return math::Rotate(inverse,scene.items[a].pose.p-view.p).z<math::Rotate(inverse,scene.items[b].pose.p-view.p).z;});
+    for(unsigned i=0;i<n;++i)draw(transparent[i]);
     return true;
 }
 }
