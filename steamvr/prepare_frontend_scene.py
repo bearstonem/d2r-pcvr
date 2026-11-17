@@ -55,7 +55,7 @@ GROUND = ('ui_groundplane/terrain_act', 'ui_act2_vignette/ui_act2_vignette_terra
 NOT = ('terrain_act1_path', '_sky.', 'campfire', 'bonfire', 'wall', 'top_cap', 'fence', 'stoneware')
 # ... but these of an act's own do come round (Act 4, 2026-11-15 09:23, "the heap still hangs in the air": the gate's
 # pillar, its skull and the rubble on top stand on the ruined wall ui_wall_destroyed01 - 'wall', so it stayed behind)
-NOT_OK = {4: ('ui_wall_destroyed01',)}
+NOT_OK = {}   # (2026-11-17: Act 4's ui_wall_destroyed01 brought round floated - "a piece of island with a turret"; out again)
 # Pieces of an act's own not copied round, by entity name (Act 4, 2026-11-15 10:12, a screenshot: "a heap of small round
 # things at my eye height, a little left, on the land past the guardian's island" - the skull pile that lies 7.2 up,
 # on the menu's own high ground, which does not come round with it)

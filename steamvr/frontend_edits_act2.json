@@ -1,6 +1,6 @@
 {
  "act": 2,
- "base": "v19",
+ "base": "v20",
  "moved": {
   "act2_tree_palm02_43": {
    "right": 16.32,
@@ -70,11 +70,15 @@
    "ahead": 10.01
   },
   "trim_straight03_08": {
-   "y": 0.68
+   "y": 0.6
   },
   "grass_small01_01": {
    "right": 8.47,
    "ahead": 31.15
+  },
+  "sand_pile01_05": {
+   "right": 9.61,
+   "ahead": 25.39
   },
   "grass_small01_02": {
    "right": 11.17,
@@ -411,7 +415,7 @@
   {
    "name": "pcvr_ed_2_mwgajr0819",
    "model": "data/hd/env/model/act2/bigcliff/act2_bigcliff_cliffs/cliff01.model",
-   "right": 187.54,
+   "right": 147.54,
    "ahead": 136.54,
    "y": 0.8,
    "yaw": -70,
@@ -420,7 +424,7 @@
   {
    "name": "pcvr_ed_2_mwgakb7c20",
    "model": "data/hd/env/model/act2/bigcliff/act2_bigcliff_cliffs/cliff02.model",
-   "right": 195.72,
+   "right": 155.72,
    "ahead": 119.02,
    "y": 1.83,
    "yaw": 290,
@@ -429,7 +433,7 @@
   {
    "name": "pcvr_ed_2_mwgakj7221",
    "model": "data/hd/env/model/act2/bigcliff/act2_bigcliff_cliffs/cliff03.model",
-   "right": 201.59,
+   "right": 161.59,
    "ahead": 99.17,
    "y": 0.88,
    "yaw": 290,
@@ -438,7 +442,7 @@
   {
    "name": "pcvr_ed_2_mwgaksgh22",
    "model": "data/hd/env/model/act2/bigcliff/act2_bigcliff_cliffs/cliff04.model",
-   "right": 206.48,
+   "right": 166.48,
    "ahead": 84.41,
    "y": 0.81,
    "yaw": 290,
@@ -511,7 +515,7 @@
   {
    "name": "pcvr_ed_2_mwgbt0cw35",
    "model": "data/hd/env/model/act2/bigcliff/act2_bigcliff_cliffs/cliff04.model",
-   "right": 214.94,
+   "right": 174.94,
    "ahead": 68.56,
    "y": 0.81,
    "yaw": 290,
@@ -520,7 +524,7 @@
   {
    "name": "pcvr_ed_2_mwgbt39o36",
    "model": "data/hd/env/model/act2/bigcliff/act2_bigcliff_cliffs/cliff04.model",
-   "right": 220.32,
+   "right": 180.32,
    "ahead": 53.33,
    "y": 0.81,
    "yaw": 290,
@@ -529,7 +533,7 @@
   {
    "name": "pcvr_ed_2_mwgbt5zs37",
    "model": "data/hd/env/model/act2/bigcliff/act2_bigcliff_cliffs/cliff04.model",
-   "right": 225.09,
+   "right": 185.09,
    "ahead": 39.94,
    "y": 0.81,
    "yaw": 290,
@@ -538,7 +542,7 @@
   {
    "name": "pcvr_ed_2_mwgbt82z38",
    "model": "data/hd/env/model/act2/bigcliff/act2_bigcliff_cliffs/cliff04.model",
-   "right": 230.47,
+   "right": 190.47,
    "ahead": 27.17,
    "y": 0.81,
    "yaw": 290,
@@ -547,7 +551,7 @@
   {
    "name": "pcvr_ed_2_mwgbtavm39",
    "model": "data/hd/env/model/act2/bigcliff/act2_bigcliff_cliffs/cliff04.model",
-   "right": 235.85,
+   "right": 195.85,
    "ahead": 15.01,
    "y": 0.81,
    "yaw": 290,
@@ -556,7 +560,7 @@
   {
    "name": "pcvr_ed_2_mwgbtdd240",
    "model": "data/hd/env/model/act2/bigcliff/act2_bigcliff_cliffs/cliff04.model",
-   "right": 241.23,
+   "right": 201.23,
    "ahead": 1.01,
    "y": 0.81,
    "yaw": 290,
@@ -565,7 +569,7 @@
   {
    "name": "pcvr_ed_2_mwgbtfaw41",
    "model": "data/hd/env/model/act2/bigcliff/act2_bigcliff_cliffs/cliff04.model",
-   "right": 247.23,
+   "right": 207.23,
    "ahead": -13.61,
    "y": 0.81,
    "yaw": 290,
@@ -574,7 +578,7 @@
   {
    "name": "pcvr_ed_2_mwgbtih342",
    "model": "data/hd/env/model/act2/bigcliff/act2_bigcliff_cliffs/cliff04.model",
-   "right": 252.61,
+   "right": 212.61,
    "ahead": -28.23,
    "y": 0.81,
    "yaw": 290,
@@ -593,18 +597,18 @@
   {
    "name": "pcvr_ed_2_mwgf36kk1",
    "model": "data/hd/env/model/ui/ui_groundplane/act2_groundplane.model",
-   "right": 174.23,
+   "right": 146.23,
    "ahead": 72.33,
-   "y": 0.24,
+   "y": 0.237,
    "yaw": 20,
    "scale": 0.5
   },
   {
    "name": "pcvr_ed_2_mwgf3zbm2",
    "model": "data/hd/env/model/ui/ui_groundplane/act2_groundplane.model",
-   "right": 208.43,
+   "right": 130.43,
    "ahead": -59.34,
-   "y": 0.24,
+   "y": 0.234,
    "yaw": 20,
    "scale": 0.6
   },
@@ -638,7 +642,7 @@
   {
    "name": "pcvr_ed_2_mwgfaohr6",
    "model": "data/hd/env/model/act2/bigcliff/act2_bigcliff_cliffs/cliff04.model",
-   "right": 257.84,
+   "right": 217.84,
    "ahead": -41.34,
    "y": 0.81,
    "yaw": 280,
@@ -647,7 +651,7 @@
   {
    "name": "pcvr_ed_2_mwgfarw77",
    "model": "data/hd/env/model/act2/bigcliff/act2_bigcliff_cliffs/cliff04.model",
-   "right": 260.9,
+   "right": 220.9,
    "ahead": -73.72,
    "y": 0.81,
    "yaw": 270,
@@ -656,7 +660,7 @@
   {
    "name": "pcvr_ed_2_mwgfatw78",
    "model": "data/hd/env/model/act2/bigcliff/act2_bigcliff_cliffs/cliff04.model",
-   "right": 260.65,
+   "right": 220.65,
    "ahead": -57.37,
    "y": 0.81,
    "yaw": 275,
@@ -665,7 +669,7 @@
   {
    "name": "pcvr_ed_2_mwgfazcl9",
    "model": "data/hd/env/model/act2/bigcliff/act2_bigcliff_cliffs/cliff04.model",
-   "right": 260.84,
+   "right": 220.84,
    "ahead": -85.93,
    "y": 0.81,
    "yaw": 260,
@@ -1142,7 +1146,7 @@
   {
    "name": "pcvr_ed_2_mwghsfop14",
    "model": "data/hd/env/model/ui/ui_act2_vignette/mound01_low.model",
-   "right": 182.64,
+   "right": 142.64,
    "ahead": 109.17,
    "y": 0.63,
    "yaw": 290,
@@ -1151,7 +1155,7 @@
   {
    "name": "pcvr_ed_2_mwghso3r15",
    "model": "data/hd/env/model/ui/ui_act2_vignette/mound01_low.model",
-   "right": 198.88,
+   "right": 158.88,
    "ahead": 65.77,
    "y": 0.63,
    "yaw": 290,
@@ -1160,7 +1164,7 @@
   {
    "name": "pcvr_ed_2_mwghsq8c16",
    "model": "data/hd/env/model/ui/ui_act2_vignette/mound01_low.model",
-   "right": 216.01,
+   "right": 176.01,
    "ahead": 20.59,
    "y": 0.63,
    "yaw": 290,
@@ -1169,7 +1173,7 @@
   {
    "name": "pcvr_ed_2_mwghss2417",
    "model": "data/hd/env/model/ui/ui_act2_vignette/mound01_low.model",
-   "right": 230.91,
+   "right": 190.91,
    "ahead": -24.14,
    "y": 0.63,
    "yaw": 290,
@@ -1178,7 +1182,7 @@
   {
    "name": "pcvr_ed_2_mwghstr318",
    "model": "data/hd/env/model/ui/ui_act2_vignette/mound01_low.model",
-   "right": 245.81,
+   "right": 205.81,
    "ahead": -67.09,
    "y": 0.63,
    "yaw": 275,
@@ -1187,19 +1191,19 @@
   {
    "name": "pcvr_ed_2_mwgip5kc21",
    "model": "data/hd/env/model/global/prop/act2/town/act2_town_sandskirts/dune_circular_large01.model",
-   "right": 0.7,
-   "ahead": -3.55,
-   "y": 0.1,
+   "right": 1.42,
+   "ahead": -3.29,
+   "y": 0,
    "yaw": 0,
    "scale": 1
   },
   {
    "name": "pcvr_ed_2_mwgipfmj22",
    "model": "data/hd/env/model/global/prop/act2/town/act2_town_sandskirts/dune_circular_large01.model",
-   "right": 12.91,
-   "ahead": 2.27,
+   "right": 12.45,
+   "ahead": 0.13,
    "y": 0.02,
-   "yaw": 15,
+   "yaw": -10,
    "scale": 1
   },
   {
@@ -1878,15 +1882,6 @@
    "scale": 1.3
   },
   {
-   "name": "pcvr_fill_2_085",
-   "model": "data/hd/env/model/global/prop/act2/town/act2_town_sand_piles/sand_pile03.model",
-   "right": 187.1,
-   "ahead": 13.71,
-   "y": 0.2,
-   "yaw": 185.9,
-   "scale": 1.2
-  },
-  {
    "name": "pcvr_fill_2_086",
    "model": "data/hd/env/model/global/prop/act2/outdoors/act2_outdoors_rocks/rock_small05.model",
    "right": -16.03,
@@ -2400,15 +2395,6 @@
    "scale": 1.09
   },
   {
-   "name": "pcvr_fill_2_150",
-   "model": "data/hd/env/model/act2/outdoors/act2_outdoors_mounds/mound05.model",
-   "right": 204.95,
-   "ahead": -23.54,
-   "y": 0.15,
-   "yaw": 3.3,
-   "scale": 0.65
-  },
-  {
    "name": "pcvr_fill_2_151",
    "model": "data/hd/env/model/global/prop/act2/town/act2_town_sand_piles/sand_pile03.model",
    "right": -83.55,
@@ -2596,15 +2582,6 @@
    "y": 0.83,
    "yaw": 316.7,
    "scale": 1.38
-  },
-  {
-   "name": "pcvr_fill_2_175",
-   "model": "data/hd/env/model/global/prop/act2/town/act2_town_sand_piles/sand_pile03.model",
-   "right": 207.41,
-   "ahead": 28.28,
-   "y": 0.2,
-   "yaw": 69.6,
-   "scale": 0.8
   },
   {
    "name": "pcvr_fill_2_176",
@@ -3471,15 +3448,6 @@
    "scale": 1.11
   },
   {
-   "name": "pcvr_fill_2_283",
-   "model": "data/hd/env/foliage/global/model/act2_smallcacti/act2_cacti_small01.model",
-   "right": 196.83,
-   "ahead": -13.86,
-   "y": 0.2,
-   "yaw": 249.8,
-   "scale": 0.93
-  },
-  {
    "name": "pcvr_fill_2_284",
    "model": "data/hd/env/model/ui/ui_act2_vignette/sand_pile01.model",
    "right": 187.54,
@@ -3649,15 +3617,6 @@
    "y": 0.15,
    "yaw": 172.5,
    "scale": 0.66
-  },
-  {
-   "name": "pcvr_fill_2_304",
-   "model": "data/hd/env/model/act2/outdoors/act2_outdoors_mounds/mound04.model",
-   "right": 205.47,
-   "ahead": 144.59,
-   "y": 0.2,
-   "yaw": 83.2,
-   "scale": 0.74
   },
   {
    "name": "pcvr_fill_2_305",
@@ -4614,15 +4573,6 @@
    "scale": 0.93
   },
   {
-   "name": "pcvr_fill_2_438",
-   "model": "data/hd/env/model/global/prop/act2/outdoors/act2_outdoors_rocks/rock_set05.model",
-   "right": 200.35,
-   "ahead": -15.1,
-   "y": 0.2,
-   "yaw": 118.8,
-   "scale": 1.18
-  },
-  {
    "name": "pcvr_fill_2_439",
    "model": "data/hd/env/model/act2/outdoors/act2_outdoors_mounds/mound03.model",
    "right": 168.61,
@@ -4972,15 +4922,6 @@
    "y": 0.2,
    "yaw": 195.7,
    "scale": 1.11
-  },
-  {
-   "name": "pcvr_fill_2_485",
-   "model": "data/hd/env/model/global/prop/act2/outdoors/act2_outdoors_rocks/rock_small02.model",
-   "right": 205.97,
-   "ahead": -113.2,
-   "y": 0.2,
-   "yaw": 66.8,
-   "scale": 0.87
   },
   {
    "name": "pcvr_fill_2_486",
@@ -6270,15 +6211,6 @@
    "scale": 0.92
   },
   {
-   "name": "pcvr_fill_2_645",
-   "model": "data/hd/env/model/global/prop/act2/town/act2_town_sand_piles/sand_pile05.model",
-   "right": 203.6,
-   "ahead": 96.72,
-   "y": 0.15,
-   "yaw": 301.1,
-   "scale": 0.96
-  },
-  {
    "name": "pcvr_fill_2_647",
    "model": "data/hd/env/model/act2/outdoors/act2_outdoors_mounds/mound05.model",
    "right": 163.7,
@@ -6376,15 +6308,6 @@
    "y": 0.2,
    "yaw": 119.3,
    "scale": 1.17
-  },
-  {
-   "name": "pcvr_fill_2_659",
-   "model": "data/hd/env/foliage/global/model/act2_smallcacti/act2_cacti_small01.model",
-   "right": 206.64,
-   "ahead": -19.38,
-   "y": 0.2,
-   "yaw": 89.1,
-   "scale": 0.82
   },
   {
    "name": "pcvr_fill_2_660",
@@ -6675,15 +6598,6 @@
    "scale": 0.91
   },
   {
-   "name": "pcvr_fill_2_694",
-   "model": "data/hd/env/model/global/prop/act2/outdoors/act2_outdoors_rocks/rock_small06.model",
-   "right": 189.87,
-   "ahead": 133.87,
-   "y": 0.2,
-   "yaw": 145.6,
-   "scale": 0.86
-  },
-  {
    "name": "pcvr_fill_2_695",
    "model": "data/hd/env/model/global/prop/act2/outdoors/act2_outdoors_rocks/rock_set06.model",
    "right": 133.24,
@@ -6774,14 +6688,6 @@
   [
    216.9,
    -132.2
-  ],
-  [
-   235.5,
-   -137
-  ],
-  [
-   259,
-   -141.1
   ]
  ],
  "road_half": null
