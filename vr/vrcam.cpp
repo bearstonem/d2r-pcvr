@@ -159,6 +159,8 @@ namespace gamestate {bool RunOnUi(D2RL::Threads::Callback callback);}
 #include "bow.h"
 #include "loot_beam_scan.h"
 #include "monster_immunity.h"
+#include "collection_scan.h"
+#include "collection_pages.h"
 #include "monster_position_signatures.h"
 #include "../steamvr/monster_position.h"
 #include "wall_cells.h"
@@ -13494,6 +13496,8 @@ D2RL_PLUGIN_EXPORT bool D2RLoaderLoadPlugin(const PluginContext* ctx) noexcept {
     OpenAfrBlock();
     gamestate::Init(ctx);
     gamecmd::Init(ctx);
+    framevr::collection::Init(ctx);        // collection tabs: the read-only catalog report (`collection scan`)
+    framevr::collection::InitPages(ctx);   // collection tabs: the custom-page probe (`collectionpages ...`)
 #ifdef D2RVR_NATIVE_OPENXR
     enemysight::Init(ctx);
     companionai::Init(ctx);
@@ -13524,6 +13528,8 @@ D2RL_PLUGIN_EXPORT void D2RLoaderUnloadPlugin() noexcept {
     summonrange::Shutdown();
     framevr::scenedepth::Shutdown();
 #endif
+    framevr::collection::ShutdownPages();
+    framevr::collection::Shutdown();
     g_enabled.store(false);
     d2rcam::SetEnabled(false);
 #ifdef D2RVR_NATIVE_OPENXR
